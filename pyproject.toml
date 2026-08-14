@@ -106,6 +106,39 @@ python_version = "3.11"
 strict = true
 files = ["src/nyshporka"]
 
+# 🔴 `strict` діє на ВЕСЬ новий код. Модулі нижче переїхали з дослідницького
+# репо разом із типовим боргом, і послаблення для них ЯВНЕ й пойменоване — з
+# числом помилок на момент переїзду.
+#
+# Чому не загальне послаблення: тоді борг стає невидимим і росте далі. Чому не
+# «полагодити одразу»: переїзд і виправлення в одному кроці не можна звірити —
+# золотий зріз не відрізнить «перенесли» від «змінили поведінку».
+#
+# Правило: модуль виходить із цього списку, коли його чистять; повертатись сюди
+# не можна. Новий модуль сюди не додається ніколи.
+[[tool.mypy.overrides]]
+module = [
+  "nyshporka.storage.reindex",    # 34
+  "nyshporka.storage.tree_graph", # 14
+  "nyshporka.core.profile",       # 12
+  "nyshporka.storage.files",      # 5
+  "nyshporka.matching.review",    # 2
+  "nyshporka.core.workspace",     # 1
+  "nyshporka.models.candidate",   # 1
+  "nyshporka.models.region",      # 1
+]
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+disallow_any_generics = false
+disallow_untyped_calls = false
+warn_return_any = false
+disable_error_code = ["attr-defined", "arg-type", "assignment", "unused-ignore"]
+
+# Пакети без анотацій, на які ми не впливаємо.
+[[tool.mypy.overrides]]
+module = ["frontmatter.*", "unidecode.*", "yaml.*"]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
