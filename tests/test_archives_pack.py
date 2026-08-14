@@ -152,6 +152,29 @@ def test_every_fond_belongs_to_a_known_repository(pk):
     assert not unknown, f"фонди посилаються на невідомі архіви: {unknown}"
 
 
+def test_pack_file_is_tracked_by_git():
+    """🔴 Дані пакета мусять бути В РЕПОЗИТОРІЇ, а не лише на диску.
+
+    Спіймано на коміті, який вийшов на три файли замість чотирьох: правило
+    `data/` у `.gitignore`, задумане для робочого простору дослідника, git
+    застосовує на будь-якій глибині — і з'їло `archives/data/archives.yaml`.
+
+    Локально й у тестах усе працювало б: файл лежить на диску. Зламалось би
+    рівно в користувача, який поставив пакет із релізу, і рівно на першому
+    запуску. Тому перевіряється саме `git ls-files`, а не `Path.exists()`.
+    """
+    import subprocess
+
+    root = P.BUILTIN.resolve().parents[4]
+    rel = P.BUILTIN.resolve().relative_to(root).as_posix()
+    res = subprocess.run(["git", "ls-files", "--error-unmatch", rel],
+                         cwd=root, capture_output=True, text=True)
+    assert res.returncode == 0, (
+        f"{rel} не відстежується git — пакет поїде в реліз без свого ж паку. "
+        f"Перевір `.gitignore`: шаблони даних мають бути прив'язані до кореня."
+    )
+
+
 def test_opys_in_key_fonds_explain_themselves(pk):
     """Прапорець, що змінює ключ справи, мусить нести підставу.
 

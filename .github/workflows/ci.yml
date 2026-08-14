@@ -82,3 +82,17 @@ jobs:
           /tmp/clean/bin/pip install .
           /tmp/clean/bin/nysh version
           /tmp/clean/bin/nysh info
+      # 🔴 Дані пакета мусять доїхати ВСЕРЕДИНІ колеса, а не лише лежати в репо.
+      # Правило `data/` у .gitignore одного разу вже з'їло `archives.yaml`:
+      # локально й у тестах усе працює (файл на диску), ламається рівно в
+      # користувача. Перевіряється саме ВСТАНОВЛЕНА копія, поза деревом коду.
+      - name: дані пакета доїхали в колесо
+        run: |
+          cd /tmp
+          /tmp/clean/bin/python -c "
+          from nyshporka.archives import active
+          p = active()
+          assert p.repo_label('DAHMO') == 'ДАХмО', p.repositories
+          assert p.opys_in_key('ANRM', '211')
+          print('пак прочитано зі встановленого пакета:', len(p.fonds), 'фондів')
+          "
