@@ -80,7 +80,11 @@ gedcom = ["ged4py>=0.5"]
 # а не властивість збірки.
 htr = ["torch>=2.2", "torchvision>=0.20", "timm>=1.0"]
 ocr = ["paddleocr>=3.5"]
-all = ["nyshporka[app,archives,gedcom,htr]"]
+# Агентна поверхня. В extras, а не в ядрі: працювати з агентом НЕ обов'язково —
+# без нього застосунок повний, і змушувати кожного ставити транспорт MCP заради
+# можливості, якою скористається меншість, немає підстав.
+agent = ["mcp>=1.2", "anyio>=4.0"]
+all = ["nyshporka[app,archives,gedcom,htr,agent]"]
 
 [project.urls]
 Homepage = "https://github.com/SERGIUSH-UA/nyshporka"
@@ -159,8 +163,16 @@ disable_error_code = ["attr-defined", "arg-type", "assignment", "unused-ignore"]
 
 # Пакети без анотацій, на які ми не впливаємо.
 [[tool.mypy.overrides]]
-module = ["frontmatter.*", "unidecode.*", "yaml.*", "pypdfium2.*", "fitz.*"]
+module = ["frontmatter.*", "unidecode.*", "yaml.*", "pypdfium2.*", "fitz.*",
+          "mcp.*", "anyio.*"]
 ignore_missing_imports = true
+
+# Транспорт MCP живе в extras і в dev-оточенні не стоїть; його декоратори
+# нетипізовані. Функції всередині `serve()` — тонкі обгортки над уже
+# перевіреними `tool_definitions()` і `call_tool()`, які типізуються повністю.
+[[tool.mypy.overrides]]
+module = ["nyshporka.mcp.server"]
+disallow_untyped_decorators = false
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

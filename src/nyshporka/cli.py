@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import platform
 import sys
+from pathlib import Path
+from typing import Any
 
 import typer
 from rich.console import Console
@@ -89,6 +91,107 @@ def look(path: str = typer.Argument(..., help="тека зі сканами, PDF
     m = LocalSource().manifest(str(shape.path))
     if m.bytes_estimate:
         console.print(f"  [dim]обсяг: {m.bytes_estimate / 1024 / 1024:.0f} МБ[/dim]")
+
+
+@app.command("ops")
+def ops_list(agent_only: bool = typer.Option(False, "--agent",
+                                             help="лише те, що бачить агент")) -> None:
+    """Перелік операцій — те саме, що доступне агентові й браузеру."""
+    from nyshporka import ops as O
+
+    for op in (O.for_agent() if agent_only else O.all_ops()):
+        marks = "".join(("✎" if op.mutates else " ", "⏳" if op.long else " ",
+                         "🤖" if op.agent else " "))
+        console.print(f"  {marks} [bold]{op.name:<18}[/bold] {op.summary}")
+
+
+@app.command("op")
+def op_run(
+    name: str = typer.Argument(..., help="ім'я операції, напр. workspace.info"),
+    args: str = typer.Option("{}", "--args", help="аргументи як JSON"),
+    as_json: bool = typer.Option(True, "--json/--human", help="формат виводу"),
+) -> None:
+    """Виконати операцію напряму.
+
+    🔴 Це і є те, що робить командний рядок повним: КОЖНА операція доступна тут
+    без окремої команди. Дружні команди (`look`, `sources`) — лише зручні
+    обгортки над тими самими операціями, тож відстати від агента CLI не може.
+    """
+    import json as _json
+
+    from nyshporka import ops as O
+
+    try:
+        payload = _json.loads(args)
+    except ValueError as exc:
+        console.print(f"[red]--args не є JSON:[/red] {exc}")
+        raise typer.Exit(code=2) from None
+
+    env = O.call(name, payload)
+    if as_json:
+        console.print_json(data=env.as_dict())
+    else:
+        note = env.as_agent_text()
+        if note:
+            console.print(note)
+        console.print_json(data=env.data)
+    raise typer.Exit(code=0 if env.ok else 1)
+
+
+mcp_app = typer.Typer(help="Агентна поверхня (Claude Code, Codex).",
+                      no_args_is_help=True)
+app.add_typer(mcp_app, name="mcp")
+
+
+@mcp_app.command("serve")
+def mcp_serve() -> None:
+    """Підняти MCP-сервер по stdio (так його запускає агент)."""
+    from nyshporka.mcp import serve
+
+    raise typer.Exit(code=serve())
+
+
+@mcp_app.command("tools")
+def mcp_tools() -> None:
+    """Що саме бачить агент."""
+    from nyshporka.mcp import tool_definitions
+
+    defs = tool_definitions()
+    for d in defs:
+        console.print(f"  [bold]{d['name']:<22}[/bold] {d['description']}")
+    console.print(f"\n[dim]усього {len(defs)}[/dim]")
+
+
+@mcp_app.command("install")
+def mcp_install(
+    target: str = typer.Option(".mcp.json", help="куди дописати конфіг"),
+    show: bool = typer.Option(False, "--show", help="лише показати, не писати"),
+) -> None:
+    """Прописати сервер у `.mcp.json` проєкту."""
+    import json as _json
+
+    from nyshporka.mcp import mcp_config
+
+    cfg = mcp_config()
+    if show:
+        console.print_json(data=cfg)
+        return
+    path = Path(target)
+    existing: dict[str, Any] = {}
+    if path.is_file():
+        try:
+            existing = _json.loads(path.read_text(encoding="utf-8"))
+        except ValueError:
+            console.print(f"[yellow]![/yellow] {path} не є JSON — не чіпаю його")
+            raise typer.Exit(code=1) from None
+    # Дописуємо, а не заміщаємо: у файлі можуть бути чужі сервери, і затерти їх
+    # означало б зламати налаштування, які людина робила руками.
+    servers = dict(existing.get("mcpServers") or {})
+    servers.update(cfg["mcpServers"])
+    existing["mcpServers"] = servers
+    path.write_text(_json.dumps(existing, ensure_ascii=False, indent=2) + "\n",
+                    encoding="utf-8")
+    console.print(f"✓ {path}: додано сервер «nyshporka»")
 
 
 def main() -> None:
