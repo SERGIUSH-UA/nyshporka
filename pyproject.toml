@@ -46,6 +46,11 @@ dependencies = [
   "pillow>=10.4",
   "jinja2>=3.1",
   "httpx>=0.27",
+  # Замок простору мусить відрізняти живого писаря від номера, який ОС уже
+  # віддала іншому процесу. Без psutil лишається лише биття серця: покинутий
+  # замок протухне, але «живий» чужий PID виглядатиме нашим. 500 КБ за
+  # гарантію «один писар» — вигідний обмін.
+  "psutil>=6.0",
 ]
 
 [project.optional-dependencies]
@@ -84,6 +89,8 @@ dev = [
   "pytest>=8.3",
   "ruff>=0.8",
   "mypy>=1.13",
+  "pytest-asyncio>=1.4.0",
+  "types-psutil>=7.2.2.20260518",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -153,3 +160,6 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+# Черга завдань асинхронна за побудовою (усі мутації під одним `asyncio.Lock`),
+# тож її тести — корутини. `auto` позбавляє потреби мітити кожну.
+asyncio_mode = "auto"
