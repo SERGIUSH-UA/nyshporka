@@ -100,6 +100,12 @@ dev = [
   "mypy>=1.13",
   "pytest-asyncio>=1.4.0",
   "types-psutil>=7.2.2.20260518",
+  # 🔴 Лише щоб раннер узагалі імпортувався в тестах. Він їде в середовищі
+  # рушіїв, але його чиста логіка — рятувальний відбір — вирішує, які рядки
+  # перечитає другий рушій, а які не перечитає НІХТО. Без numpy ця логіка не
+  # покривається в CI взагалі, бо модуль не завантажується. Torch і kraken сюди
+  # НЕ додаються: вони потрібні лише всередині функцій.
+  "numpy>=1.26",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -120,6 +126,17 @@ extend-exclude = ["src/nyshporka/htr/patches"]
 # роботу заради лінту — вірний спосіб дістати конфлікт на рівному місці.
 # Прибрати цей виняток, коли файл усталиться.
 "src/nyshporka/fonds/registry.py" = ["SIM102"]
+# 🔴 Раннер і його сусід переїхали зі своїм боргом, і жодне з цих зауважень не
+# правиться в коміті переїзду — інакше золотий зріз не відрізнить «перенесли»
+# від «змінили поведінку», а тут ціна такої плутанини це декод справи.
+#   B905 `zip()` без `strict=` — не стиль: `strict=True` почав би КИДАТИ там,
+#        де зараз мовчки обрізає по коротшому. Це зміна поведінки на рядках
+#        сторінки, і робити її треба окремо, зі своїм замірoм.
+#   E741 змінна `l` — у гарді, який уже одного разу приховав знахідку
+#        (`clan-scan-l-guard-blind-to-own-truth`); перейменування в тому ж
+#        коміті сплутало б причетність.
+"src/nyshporka/htr/runner.py" = ["B905", "E741"]
+"src/nyshporka/htr/pysar_lines_infer.py" = ["B905"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "SIM", "RUF"]
@@ -181,6 +198,14 @@ module = [
   "nyshporka.pagestore.query",    # 6
   "nyshporka.pagestore.store",    # 5
   "nyshporka.cases.geo",          # 3
+  # HTR-раннер. Найбільший борг у списку, і причина не лише в розмірі: половина
+  # помилок — це `import-not-found` на `torch`, `kraken`, `strhub` і на патчі,
+  # що вантажаться ЗА ШЛЯХОМ. Вони й не мають тут резолвитись: ці залежності
+  # живуть в іншому інтерпретаторі — середовищі рушіїв, — і ставити їх у
+  # dev-оточення заради перевірки типів означало б тягнути 3 ГБ. Друга половина
+  # — справжній борг раннера, що приїхав із дослідницького репо.
+  "nyshporka.htr.runner",         # 109
+  "nyshporka.htr.pysar_lines_infer",  # 5
 ]
 disallow_untyped_defs = false
 disallow_incomplete_defs = false
@@ -200,6 +225,18 @@ disable_error_code = ["attr-defined", "arg-type", "assignment", "unused-ignore",
 [[tool.mypy.overrides]]
 module = ["frontmatter.*", "unidecode.*", "yaml.*", "pypdfium2.*", "fitz.*",
           "mcp.*", "anyio.*"]
+ignore_missing_imports = true
+
+# 🔴 Світ СЕРЕДОВИЩА РУШІЇВ. Ці модулі не «забули поставити» — їх тут не буде
+# ніколи: вони живуть в окремому venv із піном `kraken==7.0.2` під патчі, і
+# тягнути 3 ГБ у dev-оточення заради перевірки типів немає підстав. Патчі
+# (`gpu_sato`, `fast_geom`, `seg_ceiling`) і сусід `pysar_lines_infer` до того ж
+# вантажаться ЗА ШЛЯХОМ ФАЙЛА, а не імпортом пакета — інакше раннер знав би про
+# пакет, якого в його інтерпретаторі немає.
+[[tool.mypy.overrides]]
+module = ["torch.*", "torchvision.*", "kraken.*", "strhub.*", "timm.*",
+          "skimage.*", "scipy.*", "shapely.*",
+          "gpu_sato", "fast_geom", "seg_ceiling", "pysar_lines_infer"]
 ignore_missing_imports = true
 
 # Транспорт MCP живе в extras і в dev-оточенні не стоїть; його декоратори
