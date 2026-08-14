@@ -76,10 +76,29 @@ def test_allow_is_pointwise_not_blanket():
 def test_this_repository_is_clean():
     """Найважливіша перевірка: сам репозиторій не містить приватних даних."""
     findings = []
-    for rel, text in scan.iter_worktree():
-        findings += scan.scan_text(rel, text)
+    for rel, text, where in scan.iter_worktree():
+        findings += scan.scan_text(rel, text, where)
     assert not findings, "\n".join(
         f"{f.path}:{f.line_no} [{f.rule.id}] {f.excerpt}" for f in findings[:20])
+
+
+def test_history_mode_still_applies_the_allowlist():
+    """🔴 Ворота, які завжди червоні, вимикають — і тоді вони не ловлять нічого.
+
+    Перша редакція `--history` віддавала шлях як `tests/foo.py @26d20e22`, щоб у
+    виводі було видно коміт. Через приліплений sha жоден виняток не збігався, і
+    режим сипав 27 «знахідками» у власних тестах. Тобто джоб CI, який мав би
+    стерегти найдорожчу помилку, стояв би червоним із першого дня.
+    """
+    hits = scan.scan_text("tests/test_scan_private.py",
+                          'приклад: I0175 і "Долищинский"',
+                          where="tests/test_scan_private.py @deadbeef")
+    assert hits == [], "виняток перестав діяти, щойно до шляху додали коміт"
+
+    # А підпис при цьому мусить лишатись інформативним для НЕдозволеного файлу.
+    hits = scan.scan_text("src/nyshporka/foo.py", "I0175",
+                          where="src/nyshporka/foo.py @deadbeef")
+    assert hits and hits[0].path.endswith("@deadbeef")
 
 
 def test_every_rule_has_a_sample_in_this_file():

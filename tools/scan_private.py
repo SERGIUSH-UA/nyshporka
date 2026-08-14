@@ -125,8 +125,18 @@ class Finding:
     excerpt: str
 
 
-def scan_text(rel: str, text: str) -> list[Finding]:
+def scan_text(rel: str, text: str, where: str | None = None) -> list[Finding]:
+    """`rel` — шлях ДЛЯ ЗВІРКИ з винятками, `where` — підпис для показу.
+
+    🔴 Ці дві речі мусять бути розділені, і це не педантизм. Перша редакція
+    режиму `--history` віддавала шлях у вигляді `tests/foo.py @26d20e22`, щоб у
+    виводі було видно коміт, — і через приліплений sha жоден виняток не
+    збігався. Ворота при цьому не мовчали, а навпаки: сипали 27 «знахідками» у
+    власних тестах, тобто в CI стояли б вічно червоними. Ворота, які завжди
+    червоні, вимикають — і тоді вони не ловлять уже нічого.
+    """
     out: list[Finding] = []
+    label = where or rel
     for i, line in enumerate(text.splitlines(), 1):
         for rule in RULES:
             if _allowed(rel, rule.id):
@@ -137,7 +147,7 @@ def scan_text(rel: str, text: str) -> list[Finding]:
                 if len(frag) > 120:
                     lo = max(0, m.start() - 50)
                     frag = ("…" if lo else "") + line[lo:lo + 120].strip() + "…"
-                out.append(Finding(rel, i, rule, frag))
+                out.append(Finding(label, i, rule, frag))
     return out
 
 
@@ -149,43 +159,47 @@ def _git(*args: str) -> str:
     return res.stdout
 
 
-def iter_worktree() -> list[tuple[str, str]]:
-    out = []
+#: (шлях для звірки з винятками, текст, підпис для показу)
+Item = tuple[str, str, str]
+
+
+def iter_worktree() -> list[Item]:
+    out: list[Item] = []
     for p in ROOT.rglob("*"):
         if not p.is_file() or any(part in SKIP_DIRS for part in p.parts):
             continue
         if p.suffix.lower() not in TEXT_SUFFIXES or p.stat().st_size > MAX_BYTES:
             continue
         rel = p.relative_to(ROOT).as_posix()
-        out.append((rel, p.read_text(encoding="utf-8", errors="replace")))
+        out.append((rel, p.read_text(encoding="utf-8", errors="replace"), rel))
     return out
 
 
-def iter_staged() -> list[tuple[str, str]]:
+def iter_staged() -> list[Item]:
     """Вміст, який ЗАРАЗ у індексі — саме він потрапить у коміт.
 
     Читаємо з `git show :file`, а не з диска: інакше перевірка дивилась би на
     робоче дерево, тоді як закомітиться індекс, і `git add -p` пройшов би повз.
     """
     names = [n for n in _git("diff", "--cached", "--name-only", "-z").split("\0") if n]
-    out = []
+    out: list[Item] = []
     for rel in names:
         if Path(rel).suffix.lower() not in TEXT_SUFFIXES:
             continue
         try:
-            out.append((rel, _git("show", f":{rel}")))
+            out.append((rel, _git("show", f":{rel}"), rel))
         except RuntimeError:
             continue  # видалений файл
     return out
 
 
-def iter_history() -> list[tuple[str, str]]:
+def iter_history() -> list[Item]:
     """Усі версії всіх текстових файлів в історії.
 
     Дорого, але потрібно рівно один раз — перед першим `git push`. Після нього
     прибрати знахідку означає переписати опубліковану історію.
     """
-    out: list[tuple[str, str]] = []
+    out: list[Item] = []
     seen: set[str] = set()
     lines = _git("rev-list", "--objects", "--all").splitlines()
     for line in lines:
@@ -200,7 +214,9 @@ def iter_history() -> list[tuple[str, str]]:
         if size > MAX_BYTES:
             continue
         try:
-            out.append((f"{name} @{sha[:8]}", _git("cat-file", "-p", sha)))
+            # Шлях для звірки — чистий; коміт-об'єкт іде лише в підпис. Змішавши
+            # їх, ми зробили б винятки недієвими саме тут (див. `scan_text`).
+            out.append((name, _git("cat-file", "-p", sha), f"{name} @{sha[:8]}"))
         except RuntimeError:
             continue
     return out
@@ -231,8 +247,8 @@ def main() -> int:
         return 2
 
     findings: list[Finding] = []
-    for rel, text in items:
-        findings += scan_text(rel, text)
+    for rel, text, where in items:
+        findings += scan_text(rel, text, where)
 
     if not findings:
         print(f"✅ приватних даних не знайдено ({what}: {len(items)} файлів, "
