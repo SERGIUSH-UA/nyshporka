@@ -60,9 +60,7 @@ def info() -> None:
 @app.command()
 def sources() -> None:
     """Звідки можна брати матеріал — і що кожне джерело вміє."""
-    from nyshporka.sources import load
-
-    reg = load()
+    reg = _sources_registry()
     for src in reg.all():
         caps = ", ".join(sorted(src.caps)) or "—"
         console.print(f"  [bold]{src.id:<10}[/bold] {src.label}")
@@ -91,6 +89,153 @@ def look(path: str = typer.Argument(..., help="тека зі сканами, PDF
     m = LocalSource().manifest(str(shape.path))
     if m.bytes_estimate:
         console.print(f"  [dim]обсяг: {m.bytes_estimate / 1024 / 1024:.0f} МБ[/dim]")
+
+
+def _sources_registry() -> Any:
+    from nyshporka.core.workspace import WorkspaceError, workspace
+    from nyshporka.sources import load
+
+    try:
+        return load(workspace().root)
+    except WorkspaceError:
+        return load(None)
+
+
+def _pick(source_id: str) -> Any:
+    reg = _sources_registry()
+    src = reg.get(source_id)
+    if src is None:
+        console.print(f"[red]немає джерела «{source_id}»[/red] — є: "
+                      + ", ".join(s.id for s in reg.all()))
+        raise typer.Exit(code=2)
+    return src
+
+
+@app.command()
+def find(q: str = typer.Argument(..., help="село, прізвище чи слово із заголовка"),
+         source: str = typer.Option("", "--source", help="лише це джерело"),
+         limit: int = typer.Option(20, "--limit")) -> None:
+    """Де взагалі є щось про моє село — пошук по каталогах джерел."""
+    from nyshporka import ops as O
+
+    env = O.call("catalog.search", {"q": q, "source": source, "limit": limit})
+    if not env.ok:
+        console.print(f"[red]{env.error}[/red]")
+        raise typer.Exit(code=1)
+    hits = env.data.get("hits") or []
+    for h in hits:
+        head = " · ".join(x for x in (h.get("shifra"), h.get("years")) if x)
+        console.print(f"  [bold]{h['source']}[/bold]  {h['title']}")
+        console.print(f"  {'':<{len(h['source'])}}  [dim]{head}[/dim]")
+        console.print(f"  {'':<{len(h['source'])}}  [dim]{h['ref']}[/dim]")
+    cov = env.data.get("coverage") or {}
+    # 🔴 Знаменник друкується ЗАВЖДИ, і найважливіший він саме тоді, коли
+    # знахідок нуль: без нього «нічого не знайшлось» читається як «цього не
+    # існує», хоча дивились в одному каталозі з трьох.
+    console.print(f"\n[dim]знайдено {len(hits)} · шукали в: "
+                  f"{', '.join(cov.get('searched') or []) or '—'}[/dim]")
+    for u in cov.get("unavailable") or []:
+        console.print(f"[yellow]⚠ {u['source']}[/yellow] [dim]{u['why']}[/dim]")
+
+
+@app.command()
+def browse(source: str = typer.Argument(..., help="id джерела (`nysh sources`)"),
+           ref: str = typer.Argument("", help="вузол; порожньо = верхній рівень")) -> None:
+    """Що лежить у фонді, описі, теці дзеркала."""
+    from nyshporka.sources.base import SourceError
+
+    src = _pick(source)
+    try:
+        nodes = src.browse(ref or None)
+    except SourceError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1) from None
+    for n in nodes:
+        frames = f"{n.frames:>7} кадрів" if n.frames else " " * 14
+        mark = "📄" if n.kind == "case" else "📁"
+        console.print(f"  {mark} {frames}  {n.label}")
+        console.print(f"     [dim]{n.ref}[/dim]")
+    console.print(f"\n[dim]{len(nodes)} вузлів[/dim]")
+
+
+@app.command()
+def get(source: str = typer.Argument(..., help="id джерела"),
+        ref: str = typer.Argument(..., help="адреса справи чи плівки"),
+        out: Path = typer.Option(..., "--out", help="куди складати кадри"),
+        frames: str = typer.Option("", "--frames",
+                                   help="діапазон кадрів «12-80»; порожньо = всі")) -> None:
+    """Завантажити справу або плівку.
+
+    Спершу друкується МАНІФЕСТ і лише потім починається качання: справа буває
+    на кілька гігабайтів, і питання «скільки це» мусить мати відповідь ДО, а не
+    після — перервана закачка лишає теку в невизначеному стані.
+    """
+    from nyshporka.sources.base import SourceError
+
+    src = _pick(source)
+    rng: tuple[int, int] | None = None
+    if frames:
+        try:
+            a, _, b = frames.partition("-")
+            rng = (int(a), int(b or a))
+        except ValueError:
+            console.print("[red]--frames очікує «12-80»[/red]")
+            raise typer.Exit(code=2) from None
+    try:
+        man = src.manifest(ref)
+    except SourceError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1) from None
+    console.print(f"[bold]{man.title or ref}[/bold] — кадрів {man.frames}"
+                  + (f", беремо {rng[0]}-{rng[1]}" if rng else ""))
+    for s in man.sheets[:12]:
+        console.print(f"  [dim]Л.{s.frm}-{s.to}  {s.label[:80]}[/dim]")
+    if len(man.sheets) > 12:
+        console.print(f"  [dim]…ще {len(man.sheets) - 12} записів покажчика[/dim]")
+
+    state = {"last": -1}
+
+    def progress(done: int = 0, total: int = 0, **_: Any) -> None:
+        pct = int(done * 100 / total) if total else 0
+        if pct != state["last"]:
+            state["last"] = pct
+            console.print(f"  [dim]{done}/{total} ({pct}%)[/dim]", end="\r")
+
+    res = src.fetch(ref, out, frames=rng, on_progress=progress)
+    console.print(f"\n✓ {res.frames} кадрів ({res.bytes / 1024 / 1024:.0f} МБ), "
+                  f"пропущено {res.skipped} → {res.dest}")
+    for e in res.errors[:5]:
+        console.print(f"[yellow]⚠ {e}[/yellow]")
+    if res.errors:
+        raise typer.Exit(code=1)
+
+
+@app.command()
+def crawl(source: str = typer.Argument("archium", help="id джерела"),
+          groups: str = typer.Option("", "--groups",
+                                     help="групи фондів через кому; порожньо = давні акти"),
+          fresh: bool = typer.Option(False, "--fresh",
+                                     help="почати наново, а не продовжити")) -> None:
+    """Зібрати каталог справ, по якому потім працює `nysh find`.
+
+    🔴 Потрібне не всім джерелам, а тим, чий сайт не індексує заголовків справ.
+    Для ARCHIUM без цього кроку пошук неможливий у принципі — і саме тому він
+    відмовляється відповідати нулем.
+    """
+    src = _pick(source)
+    if not hasattr(src, "crawl"):
+        console.print(f"[yellow]джерело «{source}» не потребує обходу — "
+                      f"його каталог доступний одразу[/yellow]")
+        raise typer.Exit(code=0)
+
+    def progress(done: int = 0, total: int = 0, note: str = "", **_: Any) -> None:
+        console.print(f"  [dim]{done}/{total} фондів · {note}[/dim]", end="\r")
+
+    stats = src.crawl(tuple(g.strip() for g in groups.split(",") if g.strip()) or None,
+                      on_progress=progress, resume=not fresh)
+    console.print(f"\n✓ фондів {stats['fonds']} (пропущено готових "
+                  f"{stats['skipped']}) · описів {stats['inventories']} · "
+                  f"справ {stats['cases']}")
 
 
 @app.command("ops")

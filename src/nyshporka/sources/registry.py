@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from nyshporka.sources.base import Capability, Source, supports
 from nyshporka.sources.local import LocalSource
@@ -37,8 +38,18 @@ class Registry:
         return [s for s in self.all() if supports(s, cap)]
 
 
-def _builtin() -> list[Source]:
-    return [LocalSource()]
+def _builtin(workspace: Path | None = None) -> list[Source]:
+    """Вбудовані джерела. Мережеві потребують простору — для кешів і каталогів.
+
+    🔴 Простір передається, а не резолвиться всередині джерела. Джерело, яке
+    саме шукає простір, стає другим резолвером поруч із головним — і вони
+    розходяться тихо: каталог кладеться в один корінь, а шукається в іншому,
+    після чого пошук чесно віддає нуль.
+    """
+    from nyshporka.sources.archium import ArchiumSource
+    from nyshporka.sources.fsfilm import FilmMirrorSource
+
+    return [LocalSource(), ArchiumSource(workspace), FilmMirrorSource(workspace)]
 
 
 def _from_entry_points() -> tuple[list[Source], list[tuple[str, str]]]:
@@ -64,7 +75,7 @@ def _from_entry_points() -> tuple[list[Source], list[tuple[str, str]]]:
     return out, broken
 
 
-def load() -> Registry:
+def load(workspace: Path | None = None) -> Registry:
     """Зібрати реєстр. Вбудовані джерела не перекриваються плагінами.
 
     Плагін із тим самим `id` відкидається, а не заміщає вбудоване: інакше
@@ -72,7 +83,7 @@ def load() -> Registry:
     користувач кладе свої скани.
     """
     reg = Registry()
-    for src in _builtin():
+    for src in _builtin(workspace):
         reg.sources[src.id] = src
     plugins, broken = _from_entry_points()
     reg.broken.extend(broken)

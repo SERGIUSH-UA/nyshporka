@@ -1,0 +1,72 @@
+<script>
+const IMAGE_PROXY_URL = 'https://img.fsfiles.ru';
+const GENODB_BASE_URL = 'https://geno-dbase.ru';
+const VIRTUAL_ROOT_ID = 'ROOT';
+const ROOT_NAME = 'Главная';
+const NIZHNY_NOVGOROD_ARCHIVE_ID = '/media/mihailo/Russian_Empire/Nignii_Novgorod/';
+const YANDEX_PUBLIC_KEY = 'https://disk.yandex.ru/d/9mNw5MieG2PObw';
+const KARELIA_ARCHIVE_ID = '/media/mihailo/Russian_Empire/Karelia/';
+const TULA_ARCHIVE_ID = '/media/mihailo/Russian_Empire/Tula/';
+const PSKOV_ARCHIVE_ID = '/media/mihailo/Russian_Empire/Pskov/';
+const TOBOLSK_ARCHIVE_ID = '/media/mihailo/Russian_Empire/Tobolsk/';
+const UDMURTIA_ARCHIVE_ID = '/media/mihailo/Russian_Empire_2/Udmurtia/';
+const KARELIA_SPECIAL_FOLDER_ID = '/media/mihailo/Russian_Empire/Karelia/Karelia/';
+const DONETSK_ARCHIVE_ID = '/media/mihailo/Russian_Empire_2/Donetsk/';
+const DONETSK_SPECIAL_FOLDER_2_ID = '/media/mihailo/Russian_Empire_2/Donetsk/Doneck2/';
+const DONETSK_SPECIAL_FOLDER_4_ID = '/media/mihailo/Russian_Empire_2/Donetsk/Doneck4/';
+const TOMSK_ARCHIVE_ID = '/media/mihailo/Russian_Empire/Tomsk/';
+const KAZAN_ARCHIVE_ID = '/media/mihailo/Russian_Empire/Kazan/';
+const BELARUS_ARCHIVE_ID = '/media/mihailo/Russian_Empire_2/Belarus/';
+const CHERNIGOV_ARCHIVE_ID = '/media/mihailo/Russian_Empire_2/Chernigov/';
+const DNEPROPETROVSK_ARCHIVE_ID = '/media/mihailo/Russian_Empire_2/Dnepropetrovsk/';
+const GEORGIA_ARCHIVE_ID = '/media/mihailo/Russian_Empire_2/Georgia/';
+const KHARKOV_ARCHIVE_ID = '/media/mihailo/Russian_Empire_2/Harkov/';
+const KHERSON_ARCHIVE_ID = '/media/mihailo/Russian_Empire_2/Herson/';
+const LITHUANIA_ARCHIVE_ID = '/media/mihailo/Russian_Empire_2/Litva/';
+const MOLDOVA_ARCHIVE_ID = '/media/mihailo/Russian_Empire_2/Moldova/';
+const NIKOLAEV_ARCHIVE_ID = '/media/mihailo/Russian_Empire_2/Nikolaev/';
+const ODESSA_ARCHIVE_ID = '/media/mihailo/Russian_Empire_2/Odessa/';
+const SUMY_ARCHIVE_ID = '/media/mihailo/Russian_Empire_2/Summi/';
+const ZAPORIZHZHIA_ARCHIVE_ID = '/media/mihailo/Russian_Empire_2/Zaporogie/';
+const FOLDER_ICON_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><path fill="currentColor" d="M0 4c0-1.1.9-2 2-2h7l2 2h7a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2V4z"/></svg>';
+const IMAGE_ICON_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 384 384"><path fill="currentColor" d="M384 341q0 18-12.5 30.5T341 384H43q-18 0-30.5-12.5T0 341V43q0-18 12.5-30.5T43 0h298q18 0 30.5 12.5T384 43v298zM117 224l-74 96h298l-96-128l-74 96z"/></svg>';
+const GENERIC_FILE_ICON_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path fill="currentColor" d="M13,9H18.5L13,3.5V9M6,2H14L20,8V20A2,2 0 0,1 18,22H6C4.89,22 4,21.1 4,20V4C4,2.89 4.89,2 6,2M15,18H6V16H15V18M18,14H6V12H18V14Z"/></svg>';
+const SVG_BIRTH = '<svg viewBox="0 0 36 36"><path fill="#FFDC5D" d="M36 18.5c0-1.639-.97-3.004-2.273-3.385C32.367 7.658 25.85 2 18 2C10.15 2 3.633 7.658 2.273 15.115C.97 15.496 0 16.861 0 18.5c0 1.736 1.087 3.168 2.51 3.442C4.269 28.868 10.527 34 18 34c7.473 0 13.731-5.132 15.49-12.058C34.912 21.668 36 20.236 36 18.5z"/><path fill="#662214" d="M18 25c-3 0-4-1-4 1s2 4 4 4s4-2 4-4s-1-1-4-1z"/><circle cx="22.5" cy="18.5" r="2.5" fill="#662214"/><circle cx="13.5" cy="18.5" r="2.5" fill="#662214"/><path fill="#FFF" d="M18 26h2v1s0 1-1 1s-1-1-1-1v-1z"/><path fill="#EF9645" d="M17.982 11h-.031a4.362 4.362 0 0 1-3.135-1.304a3.739 3.739 0 0 1-1.076-2.847a.992.992 0 0 1 1.057-.935c.551.033.972.508.939 1.06c-.029.495.155.983.503 1.336a2.425 2.425 0 0 0 1.725.729c.653-.036 1.27-.247 1.735-.705a3.312 3.312 0 0 0 .032-4.677a4.391 4.391 0 0 0-6.202-.042a.999.999 0 1 1-1.404-1.424a6.394 6.394 0 0 1 9.03.062a5.29 5.29 0 0 1-.052 7.486c-.836.826-1.945 1.261-3.121 1.261z"/></svg>';
+const SVG_MARRIAGE = '<svg viewBox="0 0 32 32"><path fill="#000000" d="m26 7l-.3-.3c-1.7-1.9-4.2-2.5-4.2-2.5c-3-.9-7.7 1.1-11.898 5.198C6.102 12.7 4 16.7 4 19.7c0 .403.102.801.102 1.2c.199 2 1.5 4.101 2.597 5.101c1.403 1.398 3.2 2.102 5.2 2.102c3.3 0 7.203-1.903 10.8-5.301C28.301 17.3 29.7 10.8 26 7zM10 21.7c0-1.302 1.398-4 4.398-7c2.903-2.9 5.903-3.7 7.301-4c-.699 1.902-2.199 4.198-4.398 6.402c-2.102 2-4.5 3.597-6.602 4.398c-.199.102-.5.102-.699.2zm1-109c3.3-3.3 6.8-4.902 9-4.902c.7 0 1.3.204 1.7.602c.402.398.6 1.2.5 2.102c-1.2.097-5.302.796-9.2 4.699c-2.5 2.5-5.102 6.097-4.898 8.597c-.602 0-1.204-.199-1.5-.5a1.872 1.872 0 0 1-.5-.898S6 20 6 19.7c.102-2.5 2-6 5-8.9zm10.3 10.5c-4.8 4.802-10.3 6.098-13.198 3.302a4.293 4.293 0 0 1-.602-.704c.2.102.5.102.8.102c.9 0 2-.2 3.098-.602c2.403-.898 5-2.597 7.301-4.898c3.5-3.5 5.5-7.5 5.5-10.398l.102.097l.3.2c2.797 2.902 1.399 8.3-3.3 12.902z"/></svg>';
+const SVG_DEATH = '<svg viewBox="0 0 32 32" fill="#000000"><g fill="#000000"><path d="M15 7a1 1 0 1 1 2 0v1h2a1 1 0 1 1 0 2h-2v2h5a1 1 0 1 1 0 2h-5v6.31L19.928 22a1 1 0 1 1-1 1.732L17 22.619V25a1 1 0 1 1-2 0v-3.536l-2.134-1.232a1 1 0 0 1 1-1.732l1.134.655V14h-5a1 1 0 1 1 0-2h5v-2h-2a1 1 0 1 1 0-2h2V7Z"/><path d="M6 1a5 5 0 0 0-5 5v20a5 5 0 0 0 5 5h20a5 5 0 0 0 5-5V6a5 5 0 0 0-5-5H6ZM3 6a3 3 0 0 1 3-3h20a3 3 0 0 1 3 3v20a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3V6Z"/></g></svg>';
+const USER_FOLDER_PREFIX = 'USER_YANDEX_';
+const FAVORITES_KEY = 'fsviewer_favorites';
+const ANNOTATIONS_KEY = 'fsviewer_annotations';
+const BOOKMARKS_KEY = 'fsviewer_folder_bookmarks';
+const AUTH_API_BASE = '/api';
+const GENODB_SOURCES = [
+        { name: 'Астрахань', id: '/media/mihailo/Russian_Empire/Astrahan/', url: 'https://media.githubusercontent.com/media/Kudinov1982/fsviewer/main/genodb_structure_astrahan_optimized.json.gz', compressed: true, slug: 'astrahan' },
+        { name: 'Донецк', id: '/media/mihailo/Russian_Empire_2/Donetsk/', url: 'https://raw.githubusercontent.com/Kudinov1982/fsviewer/main/genodb_structure_donetsk_optimized.json.gz', compressed: true, slug: 'donetsk' },
+        { name: 'Запорожье', id: ZAPORIZHZHIA_ARCHIVE_ID, url: 'https://raw.githubusercontent.com/Kudinov1982/fsviewer/main/genodb_structure_zaporogie_optimized.json.gz', compressed: true, slug: 'zaporozhye' },
+        { name: 'Казань', id: KAZAN_ARCHIVE_ID, url: 'https://media.githubusercontent.com/media/Kudinov1982/fsviewer/main/genodb_structure_kazan_optimized.json.gz', compressed: true, slug: 'kazan' },
+        { name: 'Карелия', id: KARELIA_ARCHIVE_ID, url: 'https://media.githubusercontent.com/media/Kudinov1982/fsviewer/main/genodb_structure_karelia_optimized.json.gz', compressed: true, slug: 'karelia' },
+        { name: 'Крым', id: '/media/mihailo/Russian_Empire/Tavria/', url: 'https://raw.githubusercontent.com/Kudinov1982/fsviewer/main/genodb_structure_crimea_optimized.json.gz', compressed: true, slug: 'crimea' },
+        { name: 'Нижний Новгород', id: NIZHNY_NOVGOROD_ARCHIVE_ID, url: 'https://raw.githubusercontent.com/Kudinov1982/fsviewer/main/genodb_structure_nizhny_novgorod_enriched.json.gz', compressed: true, slug: 'nizhny-novgorod' },
+        { name: 'Псков', id: PSKOV_ARCHIVE_ID, url: 'https://raw.githubusercontent.com/Kudinov1982/fsviewer/main/genodb_structure_pskov_enriched.json.gz', compressed: true, slug: 'pskov' },
+        { name: 'Самара', id: '/media/mihailo/Russian_Empire/Samara/', url: 'https://media.githubusercontent.com/media/Kudinov1982/fsviewer/main/genodb_structure_samara_optimized.json.gz', compressed: true, slug: 'samara' },
+        { name: 'Сызрань', id: '/media/mihailo/Russian_Empire/Sizran/', url: 'https://media.githubusercontent.com/media/Kudinov1982/fsviewer/main/genodb_structure_syzran_optimized.json.gz', compressed: true, slug: 'syzran' },
+        { name: 'Тверь', id: '/media/mihailo/Russian_Empire/Tver/', url: 'https://media.githubusercontent.com/media/Kudinov1982/fsviewer/main/genodb_structure_tver_optimized.json.gz', compressed: true, slug: 'tver' },
+        { name: 'Тобольск', id: TOBOLSK_ARCHIVE_ID, url: 'https://raw.githubusercontent.com/Kudinov1982/fsviewer/main/genodb_structure_tobolsk_enriched.json.gz', compressed: true, slug: 'tobolsk' },
+        { name: 'Тольятти', id: '/media/mihailo/Russian_Empire/Toliatti/', url: 'https://media.githubusercontent.com/media/Kudinov1982/fsviewer/main/genodb_structure_tolyatti_optimized.json.gz', compressed: true, slug: 'tolyatti' },
+        { name: 'Томск', id: TOMSK_ARCHIVE_ID, url: 'https://raw.githubusercontent.com/Kudinov1982/fsviewer/main/genodb_structure_tomsk_UPDATED.json.gz', compressed: true, slug: 'tomsk' },
+        { name: 'Тула', id: TULA_ARCHIVE_ID, url: 'https://raw.githubusercontent.com/Kudinov1982/fsviewer/main/genodb_structure_tula_enriched.json.gz', compressed: true, slug: 'tula' },
+        { name: 'Удмуртия', id: UDMURTIA_ARCHIVE_ID, url: 'https://raw.githubusercontent.com/Kudinov1982/fsviewer/main/genodb_structure_udmurtia_enriched.json.gz', compressed: true, slug: 'udmurtia' },
+        { name: 'Ульяновск', id: '/media/mihailo/Russian_Empire/Ulianovsk/', url: 'https://media.githubusercontent.com/media/Kudinov1982/fsviewer/main/genodb_structure_ulyanovsk_optimized.json.gz', compressed: true, slug: 'ulyanovsk' },
+        { name: 'Беларусь', id: BELARUS_ARCHIVE_ID, url: 'https://raw.githubusercontent.com/Kudinov1982/fsviewer/main/genodb_structure_belarus_optimized.json.gz', compressed: true, slug: 'belarus' },
+        { name: 'Днепропетровск', id: DNEPROPETROVSK_ARCHIVE_ID, url: 'https://raw.githubusercontent.com/Kudinov1982/fsviewer/main/genodb_structure_dnepropetrovsk_optimized.json.gz', compressed: true, slug: 'dnepropetrovsk' },
+        { name: 'Николаев', id: NIKOLAEV_ARCHIVE_ID, url: 'https://raw.githubusercontent.com/Kudinov1982/fsviewer/main/genodb_structure_nikolaev_optimized.json.gz', compressed: true, slug: 'nikolaev' },
+        { name: 'Одесса', id: ODESSA_ARCHIVE_ID, url: 'https://raw.githubusercontent.com/Kudinov1982/fsviewer/main/genodb_structure_odessa_optimized.json.gz', compressed: true, slug: 'odessa' },
+        { name: 'Харьков', id: KHARKOV_ARCHIVE_ID, url: 'https://raw.githubusercontent.com/Kudinov1982/fsviewer/main/genodb_structure_harkov_optimized.json.gz', compressed: true, slug: 'kharkov' },
+        { name: 'Херсон', id: KHERSON_ARCHIVE_ID, url: 'https://raw.githubusercontent.com/Kudinov1982/fsviewer/main/genodb_structure_herson_optimized.json.gz', compressed: true, slug: 'kherson' },
+        { name: 'Чернигов', id: CHERNIGOV_ARCHIVE_ID, url: 'https://raw.githubusercontent.com/Kudinov1982/fsviewer/main/genodb_structure_chernigov_optimized.json.gz', compressed: true, slug: 'chernigov' },
+        { name: 'Сумы', id: SUMY_ARCHIVE_ID, url: 'https://raw.githubusercontent.com/Kudinov1982/fsviewer/main/genodb_structure_sumy_optimized.json.gz', compressed: true, slug: 'sumy' },
+        { name: 'Грузия', id: GEORGIA_ARCHIVE_ID, url: 'https://raw.githubusercontent.com/Kudinov1982/fsviewer/main/genodb_structure_georgia_optimized.json.gz', compressed: true, slug: 'georgia' },
+        { name: 'Латвия', id: LITHUANIA_ARCHIVE_ID, url: 'https://raw.githubusercontent.com/Kudinov1982/fsviewer/main/genodb_structure_litva_optimized.json.gz', compressed: true, slug: 'lithuania' },
+        { name: 'Молдова', id: MOLDOVA_ARCHIVE_ID, url: 'https://raw.githubusercontent.com/Kudinov1982/fsviewer/main/genodb_structure_moldova_optimized.json.gz', compressed: true, slug: 'moldova' }
+    ];
+</script>

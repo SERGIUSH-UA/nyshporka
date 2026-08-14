@@ -10,12 +10,16 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, Field
 
 from nyshporka.core.envelope import Envelope, fail, ok
 from nyshporka.core.ops import NoArgs, op
+
+if TYPE_CHECKING:
+    from nyshporka.sources.base import Source
+    from nyshporka.sources.registry import Registry
 
 
 # ── простір ──────────────────────────────────────────────────────────────────
@@ -44,11 +48,34 @@ def workspace_info(_: NoArgs) -> Envelope:
 
 
 # ── джерела ──────────────────────────────────────────────────────────────────
-@op("sources.list", summary="Звідки можна брати матеріал")
-def sources_list(_: NoArgs) -> Envelope:
+def _registry() -> Registry:
+    """Реєстр джерел, прив'язаний до простору (там кеші й зібрані каталоги)."""
+    from nyshporka.core.workspace import WorkspaceError, workspace
     from nyshporka.sources import load
 
-    reg = load()
+    try:
+        root = workspace().root
+    except WorkspaceError:
+        # Без простору мережеві джерела працюють обмежено (кешу немає), але
+        # реєстр мусить збиратись: інакше `sources.list` мовчав би про них.
+        root = None
+    return load(root)
+
+
+def _source(source_id: str) -> Source:
+    from nyshporka.sources.base import SourceError
+
+    reg = _registry()
+    src = reg.get(source_id)
+    if src is None:
+        known = ", ".join(s.id for s in reg.all())
+        raise SourceError(f"джерела {source_id!r} немає. Є: {known}")
+    return src
+
+
+@op("sources.list", summary="Звідки можна брати матеріал")
+def sources_list(_: NoArgs) -> Envelope:
+    reg = _registry()
     env = ok({"sources": [{"id": s.id, "label": s.label, "caps": sorted(s.caps)}
                           for s in reg.all()]})
     for name, why in reg.broken:
@@ -86,6 +113,105 @@ def material_look(a: LookArgs) -> Envelope:
     m = LocalSource().manifest(str(shape.path))
     data["frames"] = m.frames
     data["bytes"] = m.bytes_estimate
+    return env
+
+
+class CatalogSearchArgs(BaseModel):
+    q: str = Field(description="назва села, прізвище чи слово із заголовка справи")
+    source: str = Field(default="", description="одне джерело; порожньо = усі, що вміють шукати")
+    limit: int = Field(default=30, ge=1, le=200)
+
+
+@op("catalog.search", summary="Де взагалі є щось про моє село",
+    args=CatalogSearchArgs, mutates=False)
+def catalog_search(a: CatalogSearchArgs) -> Envelope:
+    """Пошук по каталогах джерел.
+
+    🔴 Нуль тут ЗАВЖДИ зі знаменником. Джерело, яке не може шукати (каталог не
+    зібрано, дерево не завантажене), не додає нуль до суми — воно потрапляє в
+    `unavailable` з причиною й готовою командою. Інакше «0 знахідок у трьох
+    архівах» означало б «дивились у трьох», хоча дивились в одному, і напрям
+    пошуку закрився б висновком, якого ніхто не робив.
+    """
+    from nyshporka.sources.base import SourceError, supports
+
+    reg = _registry()
+    picked = [reg.get(a.source)] if a.source else reg.with_cap("search")
+    if a.source and picked[0] is None:
+        return fail(f"джерела {a.source!r} немає")
+    hits: list[dict[str, object]] = []
+    searched: list[str] = []
+    unavailable: list[dict[str, str]] = []
+    for src in picked:
+        if src is None or not supports(src, "search"):
+            continue
+        try:
+            found = src.search(a.q, limit=a.limit)
+        except SourceError as exc:
+            unavailable.append({"source": src.id, "why": str(exc)})
+            continue
+        except Exception as exc:  # мережа, розмітка, побитий кеш
+            unavailable.append({"source": src.id, "why": f"{type(exc).__name__}: {exc}"})
+            continue
+        searched.append(src.id)
+        hits.extend({"source": h.source, "ref": h.ref, "title": h.title,
+                     "years": h.years, "place": h.place, "shifra": h.shifra,
+                     "frames": h.frames, "acquirable": h.acquirable, "note": h.note}
+                    for h in found)
+    env = ok({"q": a.q, "hits": hits[:a.limit],
+              "coverage": {"searched": searched, "unavailable": unavailable}})
+    for u in unavailable:
+        env.warn("source_unavailable", f"{u['source']}: {u['why']}")
+    if not searched:
+        env.warn("no_denominator",
+                 "жодне джерело не змогло шукати — цей нуль НІЧОГО не означає")
+    return env
+
+
+class BrowseArgs(BaseModel):
+    source: str = Field(description="id джерела (`sources.list`)")
+    ref: str = Field(default="", description="вузол; порожньо = верхній рівень")
+
+
+@op("catalog.browse", summary="Що лежить у фонді, описі, теці", args=BrowseArgs,
+    mutates=False)
+def catalog_browse(a: BrowseArgs) -> Envelope:
+    from nyshporka.sources.base import SourceError
+
+    try:
+        src = _source(a.source)
+        nodes = src.browse(a.ref or None)
+    except SourceError as exc:
+        return fail(str(exc))
+    return ok({"source": a.source, "ref": a.ref,
+               "nodes": [{"ref": n.ref, "label": n.label, "kind": n.kind,
+                          "frames": n.frames, "size": n.size} for n in nodes]})
+
+
+class ManifestArgs(BaseModel):
+    source: str = Field(description="id джерела")
+    ref: str = Field(description="адреса справи чи плівки в цьому джерелі")
+
+
+@op("catalog.manifest", summary="Що саме принесе завантаження — ДО того, як почалось",
+    args=ManifestArgs, mutates=False)
+def catalog_manifest(a: ManifestArgs) -> Envelope:
+    from nyshporka.sources.base import SourceError
+
+    try:
+        m = _source(a.source).manifest(a.ref)
+    except SourceError as exc:
+        return fail(str(exc))
+    env = ok({"source": m.source, "ref": m.ref, "title": m.title,
+              "frames": m.frames, "bytes_estimate": m.bytes_estimate,
+              "sheets": [{"from": s.frm, "to": s.to, "label": s.label}
+                         for s in m.sheets],
+              "meta": {k: v for k, v in m.meta.items() if k != "files"}})
+    if not m.sheets and m.meta.get("meta_rows"):
+        # Підписи теки є, а поаркушевого покажчика немає — і це різні речі.
+        env.warn("no_sheet_index",
+                 "покажчика аркушів у цій плівці немає, лише підпис теки — "
+                 "яке село на якому кадрі, звідси не видно")
     return env
 
 
