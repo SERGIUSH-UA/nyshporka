@@ -1,0 +1,84 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # 🔒 Ворота проти приватних даних ідуть ОКРЕМИМ і ПЕРШИМ джобом.
+  # Разом із тестами вони губились би у виводі, а це єдина перевірка, ціна
+  # пропуску якої незворотна: опубліковану історію git уже не «прибрати».
+  private-data:
+    name: приватні дані
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # історія цілком — саме її і перевіряємо
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: робоче дерево
+        run: python tools/scan_private.py
+      - name: уся історія
+        run: python tools/scan_private.py --history
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  test:
+    name: py${{ matrix.python }} · ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # 🔴 Три версії, а не одна: 3.12-only API (напр. `os.listdrives`)
+        # проходить непоміченим на машині розробника й падає в користувача.
+        python: ["3.11", "3.12", "3.13"]
+        os: [ubuntu-latest]
+        include:
+          # Windows — основна платформа аудиторії (архівні скани, junction'и),
+          # тож вона перевіряється хоча б на одній версії.
+          - python: "3.12"
+            os: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: встановити
+        run: uv sync --group dev
+      - name: ruff
+        run: uv run ruff check .
+      - name: mypy
+        run: uv run mypy
+      - name: pytest
+        run: uv run pytest
+
+  installable:
+    name: ставиться з нуля
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      # Приймач кроку «скелет»: чисте середовище, установка з коліс, робочий
+      # консольний скрипт. Не `import`, а саме запуск — пакет, у якому імпорт
+      # проходить, але `nysh` не стартує, для користувача не існує.
+      - name: pip install у чистий venv
+        run: |
+          python -m venv /tmp/clean
+          /tmp/clean/bin/pip install --upgrade pip
+          /tmp/clean/bin/pip install .
+          /tmp/clean/bin/nysh version
+          /tmp/clean/bin/nysh info

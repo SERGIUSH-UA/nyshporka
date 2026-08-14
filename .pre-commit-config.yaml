@@ -1,0 +1,37 @@
+# Ворота ще до коміту. CI ловить те саме, але вже після того, як дані потрапили
+# в локальну історію — а видалити їх звідти означає переписати гілку.
+#
+#     pip install pre-commit && pre-commit install
+repos:
+  - repo: local
+    hooks:
+      - id: scan-private
+        name: 🔒 приватні дані дослідження
+        entry: python tools/scan_private.py --staged
+        language: system
+        pass_filenames: false
+        always_run: true
+        # Перевіряється ІНДЕКС, а не робоче дерево: закомітиться саме він, тож
+        # `git add -p` частини файлу інакше пройшов би повз перевірку.
+
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.21.2
+    hooks:
+      - id: gitleaks
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.8.4
+    hooks:
+      - id: ruff
+        args: [--fix]
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: check-yaml
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: [--maxkb=1024]
