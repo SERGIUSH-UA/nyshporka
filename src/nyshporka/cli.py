@@ -55,6 +55,42 @@ def info() -> None:
         console.print(f"  {label:8s} {mark}")
 
 
+@app.command()
+def sources() -> None:
+    """Звідки можна брати матеріал — і що кожне джерело вміє."""
+    from nyshporka.sources import load
+
+    reg = load()
+    for src in reg.all():
+        caps = ", ".join(sorted(src.caps)) or "—"
+        console.print(f"  [bold]{src.id:<10}[/bold] {src.label}")
+        console.print(f"  {'':<10} [dim]уміє: {caps}[/dim]")
+    # 🔴 Зламані плагіни називаються поіменно: «мого архіву немає в списку»
+    # інакше не має пояснення, і людина шукатиме причину в своїх налаштуваннях.
+    for name, why in reg.broken:
+        console.print(f"  [red]✗ {name}[/red] [dim]{why}[/dim]")
+
+
+@app.command()
+def look(path: str = typer.Argument(..., help="тека зі сканами, PDF або тека з PDF")) -> None:
+    """Що це за матеріал: скільки кадрів, чи це одна справа, чи багато."""
+    from nyshporka.sources.local import LocalSource, inspect
+
+    shape = inspect(path)
+    mark = "[green]✓[/green]" if shape.usable else "[yellow]![/yellow]"
+    console.print(f"{mark} {shape.explain()}")
+    if shape.kind == "cases":
+        for node in shape.cases:
+            console.print(f"    [dim]{node.frames:>6} кадрів[/dim]  {node.label}")
+        console.print("\n[dim]Оберіть одну зі справ вище або поставте всі в чергу.[/dim]")
+        raise typer.Exit(code=1)
+    if not shape.usable:
+        raise typer.Exit(code=1)
+    m = LocalSource().manifest(str(shape.path))
+    if m.bytes_estimate:
+        console.print(f"  [dim]обсяг: {m.bytes_estimate / 1024 / 1024:.0f} МБ[/dim]")
+
+
 def main() -> None:
     app()
 

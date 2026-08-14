@@ -51,6 +51,11 @@ dependencies = [
   # замок протухне, але «живий» чужий PID виглядатиме нашим. 500 КБ за
   # гарантію «один писар» — вигідний обмін.
   "psutil>=6.0",
+  # PDF — рівноправний вхід поряд із текою JPEG: архіви масово віддають справу
+  # одним файлом. Читач у ЯДРІ, а не в extras, бо інакше найчастіший сценарій
+  # («ось PDF з сайту архіву») мовчки не знав би навіть числа сторінок.
+  # pypdfium2, а не PyMuPDF: ~3 МБ проти ~20 і дозвільна ліцензія (BSD/Apache).
+  "pypdfium2>=4.30",
 ]
 
 [project.optional-dependencies]
@@ -154,7 +159,7 @@ disable_error_code = ["attr-defined", "arg-type", "assignment", "unused-ignore"]
 
 # Пакети без анотацій, на які ми не впливаємо.
 [[tool.mypy.overrides]]
-module = ["frontmatter.*", "unidecode.*", "yaml.*"]
+module = ["frontmatter.*", "unidecode.*", "yaml.*", "pypdfium2.*", "fitz.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

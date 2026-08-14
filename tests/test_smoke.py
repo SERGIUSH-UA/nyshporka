@@ -66,6 +66,40 @@ def test_console_script_runs_as_subprocess():
     assert __version__ in res.stdout
 
 
+def test_sources_command_lists_the_local_source():
+    res = runner.invoke(app, ["sources"])
+    assert res.exit_code == 0
+    assert "local" in res.stdout and "manifest" in res.stdout
+
+
+def test_look_reports_a_folder_of_scans(tmp_path):
+    for i in range(3):
+        (tmp_path / f"{i:04d}.jpg").write_bytes(b"x" * 10)
+    res = runner.invoke(app, ["look", str(tmp_path)])
+    assert res.exit_code == 0
+    assert "3 кадр" in res.stdout
+
+
+def test_look_exits_nonzero_on_a_folder_of_cases(tmp_path):
+    """🔴 Ненульовий код — щоб скрипт не поїхав далі з «порожньою справою».
+
+    Людина побачить перелік і обере; але автоматика мусить спинитись, інакше
+    прогін піде на нуль сторінок і завершиться «успішно».
+    """
+    (tmp_path / "22").mkdir()
+    (tmp_path / "22" / "0001.jpg").write_bytes(b"x")
+    res = runner.invoke(app, ["look", str(tmp_path)])
+    assert res.exit_code == 1
+    assert "не одна справа" in res.stdout
+
+
+def test_look_on_missing_path_is_a_message_not_a_traceback(tmp_path):
+    res = runner.invoke(app, ["look", str(tmp_path / "нема")])
+    assert res.exit_code == 1
+    assert "traceback" not in res.stdout.lower()
+    assert "нічого немає" in res.stdout
+
+
 def test_core_layer_imports_without_heavy_deps():
     """🔴 `core` не має тягнути ні FastAPI, ні torch.
 
