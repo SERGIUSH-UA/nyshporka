@@ -94,9 +94,20 @@ def test_envelope_survives_the_wire(client: TestClient) -> None:
     r = client.post("/api/op/catalog.search", json={"q": "будь-що"})
     body = r.json()
     assert body["v"] == 1
-    # Простір порожній: жодне джерело шукати не може, і це мусить бути сказано.
     assert body["ok"] is True
-    assert any(w["code"] == "no_denominator" for w in body.get("warnings", []))
+
+    # 🔴 Перевіряється ІНВАРІАНТ, а не конкретний код попередження: відповідь
+    # не приходить без знаменника. Або сказано, ЧИМ шукали (`basis`), або
+    # сказано, ЧОМУ не шукали. Раніше тут стояв `no_denominator` — і тест
+    # почервонів, щойно в пакет доїхав вкладений зріз каталогу: шукати стало
+    # де, тобто змінилась причина, а не правило.
+    cov = body["data"]["coverage"]
+    warns = body.get("warnings", [])
+    assert cov["basis"] or cov["unavailable"] or warns, "відповідь без знаменника"
+    if cov["searched"]:
+        assert cov["basis"], "шукали, але не сказали чим саме"
+    for u in cov["unavailable"]:
+        assert u["why"], "джерело мовчки випало з пошуку"
 
 
 def test_jobs_are_cursored(client: TestClient) -> None:

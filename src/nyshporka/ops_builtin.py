@@ -10,7 +10,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -142,6 +142,8 @@ def catalog_search(a: CatalogSearchArgs) -> Envelope:
     hits: list[dict[str, object]] = []
     searched: list[str] = []
     unavailable: list[dict[str, str]] = []
+    #: На чому саме шукали — вкладений зріз чи зібраний обходом, і від якої дати.
+    basis: list[dict[str, Any]] = []
     for src in picked:
         if src is None or not supports(src, "search"):
             continue
@@ -154,12 +156,31 @@ def catalog_search(a: CatalogSearchArgs) -> Envelope:
             unavailable.append({"source": src.id, "why": f"{type(exc).__name__}: {exc}"})
             continue
         searched.append(src.id)
+        # 🔴 Чим саме шукали — частина знаменника. Вкладений зріз каталогу
+        # СТАРІЄ: «не знайшлось» у ньому означає «не було на дату зрізу», а не
+        # «не існує», і без дати ці два висновки не відрізнити.
+        note = getattr(src, "catalog_source", None)
+        if callable(note):
+            kind, meta = note()
+            if kind == "bundled":
+                basis.append({"source": src.id, "kind": "вкладений зріз",
+                              "taken": str(meta.get("taken") or ""),
+                              "rows": meta.get("rows")})
+            elif kind == "workspace":
+                basis.append({"source": src.id, "kind": "зібраний обходом"})
         hits.extend({"source": h.source, "ref": h.ref, "title": h.title,
                      "years": h.years, "place": h.place, "shifra": h.shifra,
                      "frames": h.frames, "acquirable": h.acquirable, "note": h.note}
                     for h in found)
     env = ok({"q": a.q, "hits": hits[:a.limit],
-              "coverage": {"searched": searched, "unavailable": unavailable}})
+              "coverage": {"searched": searched, "unavailable": unavailable,
+                           "basis": basis}})
+    for b in basis:
+        if b.get("kind") == "вкладений зріз" and b.get("taken"):
+            env.warn("stale_catalog",
+                     f"{b['source']}: шукали у ВКЛАДЕНОМУ зрізі каталогу від "
+                     f"{b['taken']} ({b.get('rows') or '?'} справ). Архів відтоді міг "
+                     f"додати описи — свіжий зріз: `nysh crawl {b['source']}`")
     for u in unavailable:
         env.warn("source_unavailable", f"{u['source']}: {u['why']}")
     if not searched:

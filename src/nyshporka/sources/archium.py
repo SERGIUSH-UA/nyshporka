@@ -30,7 +30,10 @@ import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 from nyshporka.sources.base import (
     FetchResult,
@@ -221,42 +224,92 @@ class ArchiumSource:
     def catalog_path(self) -> Path | None:
         return (self.workspace / self.CATALOG_REL) if self.workspace else None
 
-    def search(self, q: str, *, limit: int = 30) -> list[Hit]:
-        """Пошук по ЗІБРАНОМУ каталогу справ.
+    @staticmethod
+    def bundled_catalog() -> tuple[Path, Path] | None:
+        """(стиснений TSV, сайдкар) зрізу, що їде разом із пакетом.
 
-        🔴 Порожній результат від невідсутнього каталогу — не негативний
-        результат. Сайт не індексує заголовки справ, тож без обходу шукати
-        просто нема де, і мовчазний нуль тут читався б як «у цьому архіві
-        такого немає» — висновок, який закриває напрям і коштує місяців.
+        🔴 Саме він робить застосунок корисним ДО першого завантаження. Аудиторія
+        «не знаю, де шукати» не має ні сканів, ні відеокарти — і без готового
+        зрізу мусила б спершу години обходити чужий сайт, щоб дізнатись, чи
+        існує потрібна справа взагалі.
         """
+        d = Path(__file__).resolve().parent.parent / "archives" / "data"
+        blob = d / "dahmo_archium_cases.tsv.gz"
+        meta = d / "dahmo_archium_cases.json"
+        return (blob, meta) if blob.is_file() else None
+
+    def catalog_source(self) -> tuple[str, dict[str, Any]]:
+        """Звідки братимемо рядки: `workspace` (свіжіший) чи `bundled`.
+
+        Пріоритет у зібраного на місці — він новіший за побудовою. Зріз у
+        пакеті лишається запасним і НІКОЛИ не перекриває власний обхід.
+        """
+        import json
+
         path = self.catalog_path
-        if path is None or not path.is_file():
+        if path is not None and path.is_file():
+            return "workspace", {"path": str(path)}
+        got = self.bundled_catalog()
+        if got is None:
+            return "none", {}
+        blob, meta_path = got
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            meta = {}
+        return "bundled", {"path": str(blob), "taken": meta.get("taken", ""),
+                           "rows": meta.get("rows"), "source": meta.get("source", "")}
+
+    def _catalog_rows(self) -> Iterator[dict[str, str]]:
+        kind, info = self.catalog_source()
+        if kind == "workspace":
+            with Path(info["path"]).open(encoding="utf-8", newline="") as fh:
+                yield from csv.DictReader(fh, delimiter="\t")
+        elif kind == "bundled":
+            import gzip
+
+            with gzip.open(info["path"], "rt", encoding="utf-8", newline="") as fh:
+                yield from csv.DictReader(fh, delimiter="\t")
+
+    def search(self, q: str, *, limit: int = 30) -> list[Hit]:
+        """Пошук по каталогу справ: зібраному на місці або вкладеному в пакет.
+
+        🔴 Порожній результат тут не є негативним результатом двічі. По-перше,
+        сайт не індексує заголовки справ, тож без каталогу шукати просто нема
+        де. По-друге, вкладений зріз СТАРІЄ: архів додає описи, і «не
+        знайшлось» у ньому означає «не було на дату зрізу». Обидві межі
+        називаються у примітці кожної знахідки й у відмові.
+        """
+        kind, info = self.catalog_source()
+        if kind == "none":
             raise SourceError(
-                "каталог справ ще не зібрано, тож шукати нема де — і нуль тут "
-                "нічого не означав би: вбудований пошук сайту індексує лише "
-                "назви фондів і описів, а не заголовки справ. "
+                "каталог справ недоступний: ні зібраного обходом, ні вкладеного "
+                "в пакет. Нуль тут нічого не означав би — вбудований пошук сайту "
+                "індексує лише назви фондів і описів, а не заголовки справ. "
                 "Зібрати: `nysh crawl archium`.")
         needle = _norm(q)
         if not needle:
             return []
+        note_tail = ""
+        if kind == "bundled" and info.get("taken"):
+            note_tail = f" · зріз каталогу від {info['taken']}"
         out: list[Hit] = []
-        with path.open(encoding="utf-8", newline="") as fh:
-            for row in csv.DictReader(fh, delimiter="\t"):
-                hay = _norm(f"{row.get('description', '')} {row.get('case_no', '')}")
-                if needle not in hay:
-                    continue
-                out.append(Hit(
-                    source=self.id,
-                    ref=f"file:{row.get('file_id', '')}",
-                    title=(row.get("description") or "")[:200],
-                    years=row.get("date") or "",
-                    shifra=f"ф.{row.get('fond_no', '')} {row.get('inv_label', '')} "
-                           f"{row.get('case_no', '')}".strip(),
-                    frames=int(row["sheets"]) if (row.get("sheets") or "").isdigit() else None,
-                    acquirable=True,
-                    note=(row.get("fond_title") or "")[:120]))
-                if len(out) >= limit:
-                    break
+        for row in self._catalog_rows():
+            hay = _norm(f"{row.get('description', '')} {row.get('case_no', '')}")
+            if needle not in hay:
+                continue
+            out.append(Hit(
+                source=self.id,
+                ref=f"file:{row.get('file_id', '')}",
+                title=(row.get("description") or "")[:200],
+                years=row.get("date") or "",
+                shifra=f"ф.{row.get('fond_no', '')} {row.get('inv_label', '')} "
+                       f"{row.get('case_no', '')}".strip(),
+                frames=int(row["sheets"]) if (row.get("sheets") or "").isdigit() else None,
+                acquirable=True,
+                note=((row.get("fond_title") or "")[:110] + note_tail).strip()))
+            if len(out) >= limit:
+                break
         return out
 
     # ── дерево ───────────────────────────────────────────────────────────────
@@ -389,12 +442,8 @@ class ArchiumSource:
     # ── справа ───────────────────────────────────────────────────────────────
 
     def _title(self, file_id: str) -> str:
-        path = self.catalog_path
-        if path is None or not path.is_file():
-            return ""
-        with path.open(encoding="utf-8", newline="") as fh:
-            for row in csv.DictReader(fh, delimiter="\t"):
-                if row.get("file_id") == file_id:
+        for row in self._catalog_rows():
+            if row.get("file_id") == file_id:
                     return " · ".join(x for x in (
                         f"ф.{row.get('fond_no', '')} {row.get('inv_label', '')} "
                         f"{row.get('case_no', '')}".strip(),

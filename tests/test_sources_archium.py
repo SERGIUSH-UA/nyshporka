@@ -11,6 +11,7 @@
 """
 from __future__ import annotations
 
+import csv
 import json
 import re
 from pathlib import Path
@@ -88,14 +89,21 @@ def test_image_url_pads_the_id_into_a_shard(viewer_html: str) -> None:
     assert A.image_url(5) .endswith("/static/files/000/000005.jpg")
 
 
-def test_search_without_catalog_refuses_instead_of_returning_zero(tmp_path: Path) -> None:
+def test_search_without_any_catalog_refuses_instead_of_returning_zero(
+        tmp_path: Path, monkeypatch) -> None:
     """🔴 Головне в цьому джерелі.
 
     Вбудований пошук сайту індексує лише назви фондів і описів — не заголовки
-    справ. Тому без зібраного каталогу шукати нема де, і мовчазний нуль читався
-    б як «у цьому архіві такого немає»: висновок, що закриває напрям пошуку й
-    коштує місяців. Ціна правильної поведінки — одне речення у відповіді.
+    справ. Тому без каталогу шукати нема де, і мовчазний нуль читався б як «у
+    цьому архіві такого немає»: висновок, що закриває напрям пошуку й коштує
+    місяців. Ціна правильної поведінки — одне речення у відповіді.
+
+    ⚠ У звичайній установці ця гілка недосяжна: зріз каталогу їде разом із
+    пакетом. Але вона мусить лишатись робочою — пакет ставлять і врізаним, і з
+    підміненими даними, а мовчазний нуль звідти нічим не відрізнявся б від
+    чесного.
     """
+    monkeypatch.setattr(A.ArchiumSource, "bundled_catalog", staticmethod(lambda: None))
     src = A.ArchiumSource(workspace=tmp_path)
     with pytest.raises(SourceError, match="каталог"):
         src.search("Борсуківці")
@@ -254,3 +262,49 @@ def test_manifest_title_comes_from_the_catalog(tmp_path: Path,
     assert man.frames == 47
     assert "ф.18 Опис 1 Справа 1" in man.title
     assert "Авратин" in man.title
+
+
+# ── вкладений зріз каталогу ──────────────────────────────────────────────────
+def test_bundled_snapshot_makes_search_work_on_day_one(tmp_path: Path) -> None:
+    """🔴 Це те, заради чого зріз узагалі їде в пакеті.
+
+    Аудиторія «не знаю, де шукати» не має ні сканів, ні відеокарти. Без
+    готового зрізу вона мусила б спершу години обходити чужий сайт — щоб лише
+    дізнатись, чи потрібна справа існує.
+    """
+    src = A.ArchiumSource(workspace=tmp_path)      # простір ПОРОЖНІЙ
+    kind, meta = src.catalog_source()
+    assert kind == "bundled", "зріз не доїхав у пакет"
+    assert meta["taken"], "зріз без дати — «не знайшлось» не має сенсу"
+    assert (meta["rows"] or 0) > 8000
+
+    hits = src.search("Борсуківці", limit=3)
+    assert hits, "у зрізі немає села, яке в ньому точно є"
+    assert hits[0].shifra.startswith("ф.")
+    assert meta["taken"] in hits[0].note, "дата зрізу не доїхала до знахідки"
+
+
+def test_own_crawl_wins_over_the_bundled_snapshot(tmp_path: Path) -> None:
+    """Зібраний на місці новіший ЗА ПОБУДОВОЮ — вкладений його не перекриває."""
+    cat = tmp_path / A.ArchiumSource.CATALOG_REL
+    cat.parent.mkdir(parents=True)
+    cat.write_text("file_id\tdescription\n1\tсвіжа справа\n", encoding="utf-8")
+    src = A.ArchiumSource(workspace=tmp_path)
+    assert src.catalog_source()[0] == "workspace"
+    assert [h.ref for h in src.search("свіжа")] == ["file:1"]
+
+
+def test_snapshot_has_no_test_rows_of_the_archive() -> None:
+    """Службові рядки самого архіву («Справа 0», «Опис Test») у зріз не йдуть.
+
+    Справами вони не є й у пошуку лише шумлять — а шум у каталозі коштує
+    дорожче за його відсутність: за ним ідуть замовляти справу.
+    """
+    import gzip
+
+    got = A.ArchiumSource.bundled_catalog()
+    assert got is not None
+    with gzip.open(got[0], "rt", encoding="utf-8", newline="") as fh:
+        rows = list(csv.DictReader(fh, delimiter="\t"))
+    assert not [r for r in rows if r["case_no"].strip() == "Справа 0"]
+    assert not [r for r in rows if "test" in (r["inv_label"] or "").lower()]

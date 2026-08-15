@@ -132,10 +132,17 @@ def find(q: str = typer.Argument(..., help="село, прізвище чи сл
     # 🔴 Знаменник друкується ЗАВЖДИ, і найважливіший він саме тоді, коли
     # знахідок нуль: без нього «нічого не знайшлось» читається як «цього не
     # існує», хоча дивились в одному каталозі з трьох.
+    basis = "; ".join(
+        f"{b['source']}: {b['kind']}" + (f" від {b['taken']}" if b.get("taken") else "")
+        for b in (cov.get("basis") or []))
     console.print(f"\n[dim]знайдено {len(hits)} · шукали в: "
-                  f"{', '.join(cov.get('searched') or []) or '—'}[/dim]")
-    for u in cov.get("unavailable") or []:
-        console.print(f"[yellow]⚠ {u['source']}[/yellow] [dim]{u['why']}[/dim]")
+                  f"{', '.join(cov.get('searched') or []) or '—'}"
+                  + (f" ({basis})" if basis else "") + "[/dim]")
+    # 🔴 ВСІ попередження конверта, а не лише про недоступні джерела. Саме тут
+    # їде різниця між «не знайшлось» і «не знайшлось у зрізі піврічної давнини»,
+    # і показувати її вибірково — те саме, що не показувати.
+    for w in env.warnings:
+        console.print(f"[yellow]⚠[/yellow] [dim]{w.text}[/dim]")
 
 
 @app.command()
