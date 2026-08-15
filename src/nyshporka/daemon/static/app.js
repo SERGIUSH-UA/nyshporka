@@ -45,6 +45,11 @@ const STRINGS = {
     'search.where.records': 'в учасниках записів',
     'search.run': 'Знайти',
     'search.coverage': 'шукали по',
+    'nav.read': 'Читання',
+    'read.dir': 'Тека зі сканами (пласка)', 'read.plan': 'Що робитимемо',
+    'read.go': 'Читати', 'read.frames': 'кадрів', 'read.script': 'письмо',
+    'read.model': 'модель', 'read.voice': 'другий голос',
+    'read.started': 'Поставлено в чергу',
     'nav.export': 'Експорт',
     'export.case': 'Справа', 'export.what': 'Що вивантажити',
     'export.records': 'розібрані записи', 'export.pages': 'прізвища зі сторінок',
@@ -83,6 +88,11 @@ const STRINGS = {
     'search.where.records': 'in record participants',
     'search.run': 'Search',
     'search.coverage': 'searched across',
+    'nav.read': 'Reading',
+    'read.dir': 'Folder with scans (flat)', 'read.plan': 'What we will do',
+    'read.go': 'Read', 'read.frames': 'frames', 'read.script': 'script',
+    'read.model': 'model', 'read.voice': 'second voice',
+    'read.started': 'Queued',
     'nav.export': 'Export',
     'export.case': 'Case', 'export.what': 'What to export',
     'export.records': 'parsed records', 'export.pages': 'surnames from pages',
@@ -145,6 +155,9 @@ const SCREENS = {};
 
 /** Остання вивантажена таблиця — щоб CSV збирався без повторного запиту. */
 let LAST_EXPORT = null;
+
+/** Остання тека, для якої рахували план читання. */
+let LAST_READ = null;
 
 SCREENS.home = async () => {
   const env = await callOp('workspace.info', {});
@@ -212,6 +225,21 @@ SCREENS.search = async () => {
         <option value="records">${t('search.where.records')}</option>
       </select>
       <button type="submit">${t('search.run')}</button>
+    </form>
+    <div id="hits"></div>`);
+};
+
+SCREENS.read = async () => {
+  setView(`
+    <h2>${t('nav.read')}</h2>
+    <form class="row" data-act="read.plan">
+      <input name="case_dir" placeholder="${t('read.dir')}" autofocus>
+      <select name="script">
+        <option value="">${t('read.script')}: авто</option>
+        <option value="cyrillic">кирилиця</option>
+        <option value="latin">латинка</option>
+      </select>
+      <button type="submit">${t('read.plan')}</button>
     </form>
     <div id="hits"></div>`);
 };
@@ -304,6 +332,35 @@ const ACTIONS = {
       ${cov.runs !== undefined
         ? `<p class="muted">${t('search.coverage')}: ${cov.runs} прогонів, ${cov.pages} ${t('common.pages')}</p>`
         : ''}`;
+  },
+
+  // 🔴 Спершу ПЛАН, і лише окремою кнопкою — старт. Справа читається годинами;
+  // дізнатись «модель не та» або «кадрів не 20, а 3000» після запуску означає
+  // втратити ніч.
+  'read.plan': async (ev) => {
+    ev.preventDefault();
+    const fd = new FormData(ev.target);
+    LAST_READ = { case_dir: fd.get('case_dir'), script: fd.get('script') };
+    el('hits').innerHTML = `<p class="muted">${t('common.loading')}</p>`;
+    const env = await callOp('read.plan', LAST_READ);
+    if (!env.ok) return failure(env);
+    const p = env.data.plan || {};
+    el('hits').innerHTML = `
+      <table><tbody>
+        <tr><td>${t('read.frames')}</td><td class="num">${esc(p.frames)}</td></tr>
+        <tr><td>${t('read.script')}</td><td>${esc(p.script)}</td></tr>
+        <tr><td>${t('read.model')}</td><td class="mono">${esc(p.model)}</td></tr>
+        ${p.voice ? `<tr><td>${t('read.voice')}</td><td class="mono">${esc(p.voice)}</td></tr>` : ''}
+        <tr><td>→</td><td class="mono">${esc(p.out_dir)}</td></tr>
+      </tbody></table>
+      <button data-act="read.go">${t('read.go')}</button>`;
+  },
+
+  'read.go': async () => {
+    if (!LAST_READ) return;
+    const env = await callOp('read.start', LAST_READ);
+    if (!env.ok) return alert(env.error);
+    show('jobs');
   },
 
   'export.run': async (ev) => {

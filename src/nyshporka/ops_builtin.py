@@ -366,6 +366,60 @@ class AcquireArgs(BaseModel):
     frames: str = Field(default="", description="діапазон «12-80»; порожньо = всі")
 
 
+class ReadArgs(BaseModel):
+    case_dir: str = Field(description="тека зі сканами (ПЛАСКА, без підтек)")
+    out_dir: str = Field(default="", description="куди класти текст; порожньо = у простір")
+    script: Literal["", "latin", "cyrillic"] = Field(
+        default="", description="письмо; порожньо = вгадати з імені теки")
+    second_voice: bool = Field(
+        default=True,
+        description="читати ще й другим рушієм — він помиляється ІНАКШЕ")
+    case_key: str = Field(default="", description="шифра справи у мету прогону")
+
+
+@op("read.plan", summary="Чим і як читатимемо цю справу — ДО запуску",
+    args=ReadArgs, mutates=False)
+def read_plan(a: ReadArgs) -> Envelope:
+    """Скільки кадрів, яке письмо, яка модель, куди ляже текст.
+
+    🔴 Окрема операція, а не крок усередині запуску. Справа читається годинами;
+    дізнатись «модель не та» або «кадрів не двадцять, а три тисячі» після
+    старту означає втратити ніч. Той самий поділ, що `manifest` перед `fetch`.
+    """
+    from nyshporka.htr.run import ReadError, plan
+
+    try:
+        p = plan(a.case_dir, out_dir=a.out_dir, script=a.script,
+                 second_voice=a.second_voice)
+    except ReadError as exc:
+        return fail(str(exc))
+    env = ok({"plan": p.as_dict()})
+    if not a.script:
+        # Здогад про письмо слабкий за побудовою — з імені теки нічого не
+        # видно. Мовчазний здогад тут дав би тихе сміття.
+        env.warn("script_guessed",
+                 f"письмо «{p.script}» ВГАДАНО з імені теки. Помилка тут дає "
+                 f"не збій, а осмислене на вигляд сміття — звірте перші "
+                 f"сторінки або вкажіть письмо явно")
+    if p.voice is None and p.script == "cyrillic":
+        env.warn("single_voice",
+                 "другого голосу немає — читатиме один рушій. Другий помиляється "
+                 "ІНАКШЕ й витягує те, де перший підставив правдоподібне слово")
+    return env
+
+
+@op("read.start", summary="Прочитати справу рукописним рушієм", args=ReadArgs,
+    mutates=True, long=True)
+def read_start(a: ReadArgs) -> Envelope:
+    """Ставить читання в чергу; саму роботу веде застосунок.
+
+    Викликана поза застосунком, операція чесно каже, що черги немає, — замість
+    того щоб тихо нічого не зробити.
+    """
+    return fail("читання веде застосунок — підніміть його командою "
+                "`nysh serve` або запустіть `nysh read <тека>`")
+
+
 @op("acquire.start", summary="Завантажити справу або плівку", args=AcquireArgs,
     mutates=True, long=True)
 def acquire_start(a: AcquireArgs) -> Envelope:

@@ -290,6 +290,69 @@ def doctor(
     raise typer.Exit(code=1 if bad else 0)
 
 
+@app.command()
+def read(
+    case_dir: str = typer.Argument(..., help="ПЛАСКА тека зі сканами справи"),
+    out: str = typer.Option("", "--out", help="куди класти текст"),
+    script: str = typer.Option("", "--script", help="latin | cyrillic"),
+    one_voice: bool = typer.Option(False, "--one-voice",
+                                   help="без другого рушія (швидше, але сліпіше)"),
+    case_key: str = typer.Option("", "--case-key", help="шифра справи у мету"),
+    dry: bool = typer.Option(False, "--dry-run", help="лише показати план"),
+) -> None:
+    """Прочитати справу рукописним рушієм.
+
+    🔴 Читає ПРЯМО тут, а не через застосунок — і це свідомо. Прогін ставлять
+    на ніч, часто по ssh, і вимагати для цього піднятого браузера означало б
+    зробити найдовшу роботу найкрихкішою.
+    """
+    import subprocess
+
+    from nyshporka.core.progress import split
+    from nyshporka.htr.run import ReadError
+    from nyshporka.htr.run import plan as make_plan
+
+    try:
+        p = make_plan(case_dir, out_dir=out, script=script,
+                      second_voice=not one_voice)
+    except ReadError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1) from None
+
+    console.print(f"[bold]{p.case_dir.name}[/bold] — {p.frames} кадрів · "
+                  f"письмо {p.script} · {p.model.name}"
+                  + (f" + {p.voice.name}" if p.voice else ""))
+    console.print(f"  [dim]{p.out_dir}[/dim]")
+    if dry:
+        console.print("  [dim]" + " ".join(p.command(case_key=case_key)) + "[/dim]")
+        return
+
+    p.out_dir.mkdir(parents=True, exist_ok=True)
+    proc = subprocess.Popen(p.command(case_key=case_key), stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT, text=True,
+                            encoding="utf-8", errors="replace", bufsize=1)
+    assert proc.stdout is not None
+    for line in proc.stdout:
+        ev, human = split(line.rstrip())
+        if ev is not None and ev.n:
+            console.print(f"  [dim]{ev.i}/{ev.n} ({ev.pct:.0f}%) {ev.item}[/dim]",
+                          end="\r")
+        elif human:
+            console.print(f"  [dim]{human}[/dim]")
+    rc = proc.wait()
+
+    # 🔴 Приймач повноти — ДИСК, а не код повернення: при шардингу тиха втрата
+    # сторінок дає rc=0 і порожній перелік збоїв.
+    from nyshporka.htr.run import count_frames
+
+    pages = len(list(p.out_dir.glob("*.txt")))
+    missing = max(0, count_frames(p.case_dir) - pages)
+    console.print(f"\n{'✅' if rc == 0 and not missing else '🔴'} "
+                  f"сторінок з текстом: {pages} з {p.frames}"
+                  + (f" · БЕЗ ТЕКСТУ: {missing}" if missing else ""))
+    raise typer.Exit(code=0 if rc == 0 and not missing else 1)
+
+
 htr_app = typer.Typer(help="Рушії читання рукопису.", no_args_is_help=True)
 app.add_typer(htr_app, name="htr")
 

@@ -46,9 +46,11 @@ def _parse_frames(spec: str) -> tuple[int, int] | None:
 async def start(bus: JobBus, ws: Workspace, op_name: str,
                 payload: dict[str, Any]) -> JobRecord:
     """Поставити довгу операцію в чергу й запустити виконавця."""
-    if op_name != "acquire.start":
-        raise ValueError(f"довга операція «{op_name}» не має виконавця")
-    return await _start_acquire(bus, ws, payload)
+    if op_name == "acquire.start":
+        return await _start_acquire(bus, ws, payload)
+    if op_name == "read.start":
+        return await _start_read(bus, ws, payload)
+    raise ValueError(f"довга операція «{op_name}» не має виконавця")
 
 
 async def _start_acquire(bus: JobBus, ws: Workspace,
@@ -124,6 +126,83 @@ async def _run_acquire(bus: JobBus, src: Any, job: JobRecord, dest: Path,
         progress=Progress(i=total, n=total, done=res.frames,
                           skipped=res.skipped, failed=len(res.errors),
                           basis="кадр"))
+
+
+async def _start_read(bus: JobBus, ws: Workspace,
+                      payload: dict[str, Any]) -> JobRecord:
+    """Поставити читання справи. План рахується ДО черги.
+
+    Так «чим будемо читати і скільки це кадрів» відомо до старту, а не через
+    годину — і завдання, приречене впасти на відсутній моделі, у чергу взагалі
+    не потрапляє.
+    """
+    from nyshporka.htr import run as R
+
+    plan = R.plan(payload.get("case_dir") or "",
+                  out_dir=payload.get("out_dir") or "",
+                  script=str(payload.get("script") or ""),
+                  second_voice=bool(payload.get("second_voice", True)))
+    job, created = await bus.enqueue(
+        "read",
+        title=f"{plan.case_dir.name}: {plan.frames} кадрів, {plan.model.name}",
+        cfg={**plan.as_dict(), "case_key": payload.get("case_key") or ""},
+        # Ключ — тека виходу: повторний запит на ту саму справу має віддати те
+        # саме завдання, а не другий прогін, що б'ється з першим за карту.
+        idempotency_key=f"read:{plan.out_dir}",
+    )
+    if created:
+        _keep(asyncio.create_task(_run_read(bus, job, plan,
+                                            str(payload.get("case_key") or ""))))
+    return job
+
+
+async def _run_read(bus: JobBus, job: JobRecord, plan: Any,
+                    case_key: str) -> None:
+    """Вести підпроцес раннера, переливаючи його канал прогресу в чергу."""
+    from nyshporka.core.jobs import JobState, Progress
+    from nyshporka.core.progress import split
+
+    await bus.update(job.id, state=JobState.RUNNING)
+    cmd = plan.command(progress_json=True, case_key=case_key)
+    proc = await asyncio.create_subprocess_exec(
+        *cmd, stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.STDOUT)
+    # 🔴 Хвіст ЛЮДСЬКОГО виводу зберігається окремо. Коли прогін падає, у
+    # завданні лишається код повернення — а причина написана саме там, звичайним
+    # рядком, і без нього діагностика починається з повторного прогону.
+    tail: list[str] = []
+    assert proc.stdout is not None
+    while True:
+        raw = await proc.stdout.readline()
+        if not raw:
+            break
+        line = raw.decode("utf-8", "replace").rstrip()
+        ev, human = split(line)
+        if ev is not None:
+            await bus.update(job.id, progress=Progress(
+                i=ev.i, n=ev.n, done=ev.done, skipped=ev.skipped,
+                failed=ev.failed, basis="сторінка"))
+        elif human:
+            tail.append(human)
+            del tail[:-40]
+    rc = await proc.wait()
+
+    # 🔴 Приймач повноти — ДИСК, а не код повернення. При шардингу тиха втрата
+    # сторінок дає rc=0 і порожній перелік збоїв; єдине, що це ловить, — число
+    # готових текстів проти числа кадрів.
+    from nyshporka.htr import run as R
+
+    done_pages = len(list(Path(plan.out_dir).glob("*.txt")))
+    missing = max(0, R.count_frames(Path(plan.case_dir)) - done_pages)
+    ok = rc == 0 and missing == 0
+    await bus.update(
+        job.id,
+        state=JobState.DONE if ok else JobState.ERROR,
+        error=("" if ok else
+               (f"код {rc}" if rc else "") +
+               (f"; без тексту лишилось {missing} сторінок" if missing else "")),
+        result={"out_dir": str(plan.out_dir), "pages": done_pages,
+                "missing": missing, "rc": rc, "tail": tail[-12:]})
 
 
 def _safe(ref: str) -> str:

@@ -108,7 +108,11 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
-PROGRESS_PREFIX = "@@PROGRESS@@ "  # дзеркало nyshporka/core/progress.py
+#: Дзеркало `nyshporka/core/progress.py`. Дублювати доводиться: раннер їде під
+#: інтерпретатором середовища рушіїв, де пакета немає. Рівність двох описів
+#: доводить `tests/test_progress_mirror.py`, а не домовленість.
+PROGRESS_PREFIX = "@@PROGRESS@@ "
+PROGRESS_SCHEMA = 1
 
 #: Патчі гарячих функцій kraken (`gpu_sato`, `fast_geom`, `seg_ceiling`) лежать
 #: у підтеці поруч і вантажаться ЗА ШЛЯХОМ, а не імпортом пакета: раннер їде під
@@ -209,9 +213,22 @@ def model_script(model: str, engine: str) -> str:
 
 
 def emit(enabled: bool, phase: str, **kw) -> None:
+    """Подія прогресу в машинний канал.
+
+    🔴 `"v"` ОБОВ'ЯЗКОВЕ. Читач (`nyshporka.core.progress.parse`) відкидає
+    подію з чужою версією схеми — і правильно робить: поле, що змінило сенс,
+    гірше за відсутнє. Але доти, доки раннер версії не слав, читач відкидав
+    КОЖНУ його подію: прогрес завмирав на нулі, а вотчдог за десять хвилин
+    тиші вбивав ЖИВИЙ прогін. Зовні це виглядало як «завис».
+
+    Ось чому дзеркало протоколу тут дозволене, а розходження — ні: раннер їде
+    в середовищі рушіїв і читача імпортувати не може, тож рівність двох
+    описів доводить тест (`test_progress_mirror`), а не домовленість.
+    """
     if enabled:
-        print(PROGRESS_PREFIX + json.dumps({"phase": phase, **kw}, ensure_ascii=False),
-              flush=True)
+        print(PROGRESS_PREFIX + json.dumps(
+            {"v": PROGRESS_SCHEMA, "phase": phase, **kw}, ensure_ascii=False),
+            flush=True)
 
 
 # ── підняття контрасту (вицвіле чорнило) ─────────────────────────────────────

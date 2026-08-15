@@ -152,11 +152,35 @@ def _torch() -> Check:
                  f"{name} · CUDA {torch.version.cuda} · sm_{cap} · {vram:.1f} ГБ")
 
 
+#: Змінна середовища для тих, хто тримає рушії деінде.
+ENV_ENGINE_VENV = "NYSHPORKA_HTR_VENV"
+
+#: Імена, під якими середовище рушіїв уже могло бути зібране. Перше — наше;
+#: решта — те, що реально трапляється на машинах, де конвеєр збирали руками.
+_ENGINE_VENV_NAMES = (".venv_htr", ".venv_kraken")
+
+
 def engine_venv() -> Path:
-    """Тека середовища рушіїв — у просторі, поруч із даними."""
+    """Тека середовища рушіїв.
+
+    🔴 Шукається СЕРЕД наявних, а не назначається одна. Збірка цього середовища
+    коштує кількох гігабайтів і довгого встановлення; вимагати другої копії
+    лише тому, що тека зветься інакше, — це змусити людину або ставити те саме
+    вдруге, або відмовитись від застосунку. Тому: спершу змінна середовища,
+    далі відома тека, яка справді існує, і лише як дефолт — наша назва.
+    """
+    import os
+
     from nyshporka.core.workspace import workspace
 
-    return workspace().root / ".venv_htr"
+    override = os.environ.get(ENV_ENGINE_VENV)
+    if override:
+        return Path(override)
+    root = workspace().root
+    for name in _ENGINE_VENV_NAMES:
+        if (root / name).is_dir():
+            return root / name
+    return root / _ENGINE_VENV_NAMES[0]
 
 
 def _engines() -> Check:
