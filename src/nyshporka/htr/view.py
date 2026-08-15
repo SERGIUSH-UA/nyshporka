@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
 Region = Literal["line", "page"]
@@ -72,6 +73,84 @@ def _open_rotated(src: Path, orient: int) -> Any:
     return im
 
 
+#: Останні відрендерені сторінки: (run, page) → PNG.
+#: 🔴 Кеш тут не оптимізація «про всяк випадок». Гортач кличуть ПОРЯДКОВО —
+#: людина клацає рядок за рядком однієї сторінки, — а рендер сторінки з PDF на
+#: 1200 аркушів коштує близько шести секунд. Без кешу перегляд двадцяти рядків
+#: перетворюється на дві хвилини очікування, і ним просто не користуються.
+#: Розмір навмисно малий: сторінка важить мегабайти.
+_RENDER_CACHE: dict[tuple[str, str], bytes] = {}
+_RENDER_CACHE_MAX = 4
+
+
+def _cached_render(run: str, page: str,
+                   make: Callable[[], bytes]) -> bytes:
+    key = (run, page)
+    hit = _RENDER_CACHE.get(key)
+    if hit is not None:
+        return hit
+    png: bytes = make()
+    if len(_RENDER_CACHE) >= _RENDER_CACHE_MAX:
+        _RENDER_CACHE.pop(next(iter(_RENDER_CACHE)))
+    _RENDER_CACHE[key] = png
+    return png
+
+
+def _page_image(run: str, page: str) -> Any:
+    """Зображення сторінки: готовий скан або рендер зі справи-PDF.
+
+    🔴 Другий шлях не «про всяк випадок». Хмарний прогін розгортає PDF у кадри
+    на орендованому боксі; на диску лишається текст, а кадрів немає ніде. Без
+    рендера на вимогу гортач сліпий саме на найбільших справах — тих, які
+    взагалі мають сенс читати машиною.
+    """
+    from PIL import Image
+
+    from nyshporka import htr_store as S
+    from nyshporka.htr import pdfpage as P
+
+    got = S.resolve_scan(run, page)
+    if got is not None:
+        src, orient = got
+        return _open_rotated(src, orient)
+
+    meta = S.load_meta(run) or {}
+    frames = list(meta.get("pages") or {})
+    orient = int((meta.get("pages") or {}).get(page, {}).get("orient") or 0)
+    for case_dir in _case_dirs(run, meta):
+        def make(d: Path = case_dir) -> bytes:
+            return P.render(d, frames, page)
+
+        try:
+            png = _cached_render(run, page, make)
+        except P.PdfPageError:
+            continue                      # інша тека — інша спроба
+        except Exception:
+            continue
+        with Image.open(io.BytesIO(png)) as raw:
+            im = raw.convert("RGB")
+        return im.rotate(-orient, expand=True) if orient else im
+
+    raise ViewError(
+        f"сторінку «{page}» показати нічим: готового скану немає, а зі справи "
+        f"її не відтворити (немає PDF, або кількість сторінок не сходиться з "
+        f"числом кадрів прогону). Показати не той аркуш гірше, ніж не показати.")
+
+
+def _case_dirs(run: str, meta: dict[str, Any]) -> list[Path]:
+    """Теки, де може лежати матеріал справи — з мети й з реєстру."""
+    from nyshporka import htr_store as S
+
+    out: list[Path] = []
+    base = S.under_raw(meta.get("case_dir") or "")
+    if base is not None and base.is_dir():
+        out.append(base)
+    for d in S._case_dirs_via_registry(run):
+        if d not in out:
+            out.append(d)
+    return out
+
+
 def shot(run: str, page: str, *, line: int | None = None,
          region: Region = "line", pad: int = DEFAULT_PAD,
          annotate: bool = True) -> Shot:
@@ -83,13 +162,7 @@ def shot(run: str, page: str, *, line: int | None = None,
 
     from nyshporka import htr_store as S
 
-    got = S.resolve_scan(run, page)
-    if got is None:
-        raise ViewError(
-            f"скан сторінки «{page}» не знайдено. Прогін тримає лише текст; "
-            f"саме зображення береться з теки справи, і вона могла переїхати.")
-    src, orient = got
-    im = _open_rotated(src, orient)
+    im = _page_image(run, page)
 
     geo = S.page_lines(run, page) or {}
     boxes = geo.get("boxes") or []
