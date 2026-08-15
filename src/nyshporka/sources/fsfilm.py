@@ -30,6 +30,7 @@ Referer, тобто на відміну від самого FamilySearch не т
 """
 from __future__ import annotations
 
+import csv
 import gzip
 import io
 import json
@@ -317,13 +318,11 @@ class FilmMirrorSource:
         if not needle:
             return []
         slugs = regions or [p.name[:-len(".json.gz")]
-                            for p in sorted(self.cache_dir.glob("*.json.gz"))]
+                            for p in sorted(self.cache_dir.glob("*.json.gz"))
+                            if p.is_file() and p.stat().st_size]
         if not slugs:
-            raise SourceError(
-                "жодного дерева регіону ще не завантажено, тож покажчик порожній "
-                "і нуль тут нічого не означав би. Спершу подивіться регіон — "
-                "`nysh browse fsfilm` покаже перелік, а `nysh browse fsfilm "
-                "<регіон>` заодно принесе його дерево.")
+            # Дерев немає — але покажчик є, він їде разом із пакетом.
+            return self._search_bundled(needle, limit)
         out: list[Hit] = []
         for slug in slugs:
             try:
@@ -351,6 +350,77 @@ class FilmMirrorSource:
                             note=f"плівка {film}, регіон {slug}"))
                         if len(out) >= limit:
                             return out
+        return out
+
+    # ── вкладений покажчик ───────────────────────────────────────────────────
+    @staticmethod
+    def bundled_index() -> tuple[Path, Path] | None:
+        """(стиснений TSV, сайдкар) поаркушевого покажчика в пакеті."""
+        d = Path(__file__).resolve().parent.parent / "archives" / "data"
+        blob = d / "fsfilm_sheet_index.tsv.gz"
+        meta = d / "fsfilm_sheet_index.json"
+        return (blob, meta) if blob.is_file() else None
+
+    def catalog_source(self) -> tuple[str, dict[str, Any]]:
+        """Звідки береться покажчик: `workspace` (дерева регіонів) чи `bundled`.
+
+        Ім'я спільне з ARCHIUM навмисно: «на чому шукали» — питання до БУДЬ-ЯКОГО
+        джерела з каталогом, і відповідь на нього збирає один код у `catalog.search`.
+        Два різні імені означали б, що знаменник для одного джерела показують, а
+        для другого мовчки ні.
+        """
+        if any(p.is_file() and p.stat().st_size
+               for p in self.cache_dir.glob("*.json.gz")):
+            return "workspace", {}
+        got = self.bundled_index()
+        if got is None:
+            return "none", {}
+        try:
+            meta = json.loads(got[1].read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            meta = {}
+        return "bundled", {"taken": meta.get("taken", ""),
+                           "rows": meta.get("rows"),
+                           "regions": list(meta.get("regions") or {}),
+                           "places": meta.get("places")}
+
+    def _search_bundled(self, needle: str, limit: int) -> list[Hit]:
+        """Пошук по вкладеному покажчику — без жодного завантаження.
+
+        🔴 Саме він робить відповідь «де метрики мого села» доступною одразу
+        після встановлення. Дерево одного регіону важить від мегабайта до
+        чотирнадцяти; тягнути їх усі заради одного запиту не можна, а без них
+        покажчика не було б узагалі.
+        """
+        got = self.bundled_index()
+        if got is None:
+            raise SourceError(
+                "покажчика немає ні в кеші, ні в пакеті — нуль тут нічого не "
+                "означав би. Подивіться регіон: `nysh browse fsfilm`.")
+        _, info = self.catalog_source()
+        taken = info.get("taken") or ""
+        out: list[Hit] = []
+        with gzip.open(got[0], "rt", encoding="utf-8", newline="") as fh:
+            for row in csv.DictReader(fh, delimiter="\t"):
+                if needle not in _fold(row["name"]):
+                    continue
+                lo, hi = row["start"], row["end"]
+                # `listy` у зрізі немає — він відновлюється дослівно, і місця
+                # в файлі не займає.
+                listy = f"Л. {lo}-{hi} - {row['name']}"
+                out.append(Hit(
+                    source=self.id,
+                    ref=f"{row['region']}/{row['path']}",
+                    title=f"{row['name']} · {listy}",
+                    years=row.get("soder") or "",
+                    place=row["name"],
+                    shifra=row.get("delo") or "",
+                    frames=int(row["frames"]) if (row.get("frames") or "").isdigit() else None,
+                    acquirable=True,
+                    note=f"плівка {row['film']}, регіон {row['region']}"
+                         + (f" · покажчик від {taken}" if taken else "")))
+                if len(out) >= limit:
+                    break
         return out
 
     def manifest(self, ref: str) -> Manifest:

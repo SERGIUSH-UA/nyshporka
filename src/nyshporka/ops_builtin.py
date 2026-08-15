@@ -165,9 +165,10 @@ def catalog_search(a: CatalogSearchArgs) -> Envelope:
             if kind == "bundled":
                 basis.append({"source": src.id, "kind": "вкладений зріз",
                               "taken": str(meta.get("taken") or ""),
-                              "rows": meta.get("rows")})
+                              "rows": meta.get("rows"),
+                              "regions": meta.get("regions") or None})
             elif kind == "workspace":
-                basis.append({"source": src.id, "kind": "зібраний обходом"})
+                basis.append({"source": src.id, "kind": "зібраний на місці"})
         hits.extend({"source": h.source, "ref": h.ref, "title": h.title,
                      "years": h.years, "place": h.place, "shifra": h.shifra,
                      "frames": h.frames, "acquirable": h.acquirable, "note": h.note}
@@ -176,11 +177,18 @@ def catalog_search(a: CatalogSearchArgs) -> Envelope:
               "coverage": {"searched": searched, "unavailable": unavailable,
                            "basis": basis}})
     for b in basis:
-        if b.get("kind") == "вкладений зріз" and b.get("taken"):
-            env.warn("stale_catalog",
-                     f"{b['source']}: шукали у ВКЛАДЕНОМУ зрізі каталогу від "
-                     f"{b['taken']} ({b.get('rows') or '?'} справ). Архів відтоді міг "
-                     f"додати описи — свіжий зріз: `nysh crawl {b['source']}`")
+        if b.get("kind") != "вкладений зріз" or not b.get("taken"):
+            continue
+        where = ""
+        if b.get("regions"):
+            # 🔴 Покажчик плівок є НЕ ВСЮДИ: у більшості регіонів дзеркала
+            # `folder_meta` це голий підпис теки. Не сказати, які регіони він
+            # накриває, означало б видати «нема в покажчику» за «нема на плівках».
+            where = f", накриває лише: {', '.join(b['regions'])}"
+        env.warn("stale_catalog",
+                 f"{b['source']}: шукали у ВКЛАДЕНОМУ зрізі від {b['taken']} "
+                 f"({b.get('rows') or '?'} записів{where}). Відтоді могло "
+                 f"додатись — свіже збирається на місці")
     for u in unavailable:
         env.warn("source_unavailable", f"{u['source']}: {u['why']}")
     if not searched:

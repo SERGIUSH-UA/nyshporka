@@ -162,11 +162,18 @@ def test_search_is_insensitive_to_yo(src: FilmMirrorSource) -> None:
     assert src.search("Оргеев", regions=["moldova"])
 
 
-def test_search_without_any_tree_refuses(tmp_path: Path) -> None:
-    """Нуль по порожньому кешу означав би «немає», а насправді ми не дивились."""
+def test_search_without_tree_and_without_bundle_refuses(tmp_path: Path,
+                                                        monkeypatch) -> None:
+    """Нуль по порожньому кешу означав би «немає», а насправді ми не дивились.
+
+    ⚠ У звичайній установці ця гілка недосяжна: покажчик їде в пакеті. Але вона
+    мусить лишатись робочою — пакет ставлять і врізаним, і з підміненими
+    даними, а мовчазний нуль звідти нічим не відрізнявся б від чесного.
+    """
+    monkeypatch.setattr(FilmMirrorSource, "bundled_index", staticmethod(lambda: None))
     s = FilmMirrorSource(cache_dir=tmp_path / "empty")
     (tmp_path / "empty").mkdir()
-    with pytest.raises(SourceError, match="дерева регіону"):
+    with pytest.raises(SourceError, match="покажчика немає"):
         s.search("Резина")
 
 
@@ -213,3 +220,64 @@ def test_zero_length_cache_is_treated_as_missing(src: FilmMirrorSource) -> None:
     with pytest.raises(Exception, match=r"(?i)example\.invalid|resolve|connect|name"):
         src.tree("moldova")
     assert not blob.exists(), "порожній блоб мусив бути прибраний"
+
+
+# ── вкладений покажчик ───────────────────────────────────────────────────────
+def test_bundled_sheet_index_answers_where_without_any_download(tmp_path: Path) -> None:
+    """🔴 «Де метрики мого села» — одразу після встановлення.
+
+    Дерево одного регіону важить від мегабайта до чотирнадцяти; тягнути їх усі
+    заради одного запиту не можна, а без них покажчика не було б узагалі.
+    """
+    empty = tmp_path / "порожній"
+    empty.mkdir()
+    s = FilmMirrorSource(cache_dir=empty)
+    kind, info = s.catalog_source()
+    assert kind == "bundled", "покажчик не доїхав у пакет"
+    assert info["taken"], "зріз без дати — «не знайшлось» не має сенсу"
+    assert (info["rows"] or 0) > 50_000
+
+    hits = s.search("Резина", limit=3)
+    assert hits
+    h = hits[0]
+    assert h.place == "Резина"
+    assert h.shifra.startswith("Ф. 211")
+    assert "Л." in h.title, "діапазон аркушів не відновлено"
+    assert h.ref.startswith("moldova/")
+    assert info["taken"] in h.note
+
+
+def test_bundled_index_names_the_regions_it_covers(tmp_path: Path) -> None:
+    """🔴 Покажчик є НЕ ВСЮДИ, і мовчати про це не можна.
+
+    У більшості регіонів дзеркала `folder_meta` — це голий підпис теки. Не
+    назвати покриття означало б видати «нема в покажчику» за «нема на плівках».
+    """
+    empty = tmp_path / "порожній"
+    empty.mkdir()
+    _, info = FilmMirrorSource(cache_dir=empty).catalog_source()
+    assert info["regions"], "зріз не каже, які регіони накриває"
+    assert "moldova" in info["regions"]
+
+
+def test_cached_trees_win_over_the_bundled_snapshot(src: FilmMirrorSource) -> None:
+    """Дерево в кеші новіше за побудовою — вкладений зріз його не перекриває."""
+    assert src.catalog_source()[0] == "workspace"
+
+
+def test_bundled_index_holds_only_real_sheet_ranges() -> None:
+    """Підпис теки без «Л.» у зріз не потрапляє.
+
+    Інакше покажчик показував би відповідь там, де її немає, — а за нею йдуть
+    качати плівку на гігабайт.
+    """
+    import csv
+    import gzip
+
+    got = FilmMirrorSource.bundled_index()
+    assert got is not None
+    with gzip.open(got[0], "rt", encoding="utf-8", newline="") as fh:
+        rows = list(csv.DictReader(fh, delimiter="\t"))
+    assert rows
+    assert all(r["start"].isdigit() for r in rows), "запис без діапазону"
+    assert all(r["name"].strip() for r in rows), "запис без назви місця"
