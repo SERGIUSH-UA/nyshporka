@@ -105,8 +105,16 @@ def test_core_layer_imports_without_heavy_deps():
 
     Ярусність тут не естетика: щойно ядро почне імпортувати важке, `nysh`
     стартуватиме секундами, а «подивитись каталог справ» вимагатиме 3 ГБ.
-    """
-    import nyshporka.core  # noqa: F401
 
-    assert "fastapi" not in sys.modules
-    assert "torch" not in sys.modules
+    Окремий процес — див. пояснення в `test_cold_core`: читання `sys.modules`
+    спільного процесу перевіряло порядок тестів, а не ярусність коду.
+    """
+    import subprocess
+
+    res = subprocess.run(
+        [sys.executable, "-c",
+         "import nyshporka.core, sys;"
+         " print([h for h in ('fastapi', 'torch') if h in sys.modules])"],
+        capture_output=True, text=True, encoding="utf-8")
+    assert res.returncode == 0, res.stderr
+    assert res.stdout.strip().endswith("[]"), res.stdout

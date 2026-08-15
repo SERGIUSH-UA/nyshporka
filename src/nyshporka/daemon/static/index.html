@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Нишпорка</title>
+<link rel="icon" href="/favicon.ico" type="image/svg+xml">
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<!--
+  🔴 Токен вшивається сюди сервером і живе в `data-token`. Не cookie: cookie
+  браузер шле сам, і тоді будь-яка чужа вкладка змогла б мутувати простір через
+  localhost. Тут заголовок ставить лише наш код.
+-->
+<body data-token="{{TOKEN}}">
+<header>
+  <span class="brand">Нишпорка</span>
+  <nav>
+    <button data-act="nav" data-arg="home"    data-i18n="nav.home">Дослідження</button>
+    <button data-act="nav" data-arg="sources" data-i18n="nav.sources">Джерела</button>
+    <button data-act="nav" data-arg="cases"   data-i18n="nav.cases">Мої справи</button>
+    <button data-act="nav" data-arg="search"  data-i18n="nav.search">Пошук</button>
+    <button data-act="nav" data-arg="export"  data-i18n="nav.export">Експорт</button>
+    <button data-act="nav" data-arg="jobs"    data-i18n="nav.jobs">Роботи</button><sup id="jobcount"></sup>
+  </nav>
+  <button class="lang" data-act="lang.toggle" title="uk / en">🌐</button>
+</header>
+<main id="view"></main>
+<script type="module" src="/static/app.js"></script>
+</body>
+</html>

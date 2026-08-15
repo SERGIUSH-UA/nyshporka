@@ -215,6 +215,170 @@ def catalog_manifest(a: ManifestArgs) -> Envelope:
     return env
 
 
+# ── мої справи ───────────────────────────────────────────────────────────────
+class CasesArgs(BaseModel):
+    q: str = Field(default="", description="підрядок: шифра, назва, місце")
+    repo: str = ""
+    htr: str = Field(default="", description="none | partial | pysar | diak | both")
+    year: str = Field(default="", description="рік або діапазон «1840-1860»")
+    place: str = ""
+    limit: int = Field(default=60, ge=1, le=500)
+
+
+@op("cases.list", summary="Мої справи: що є, що прочитано, що прошукано",
+    args=CasesArgs, mutates=False)
+def cases_list(a: CasesArgs) -> Envelope:
+    """Реєстр справ із застереженням про свіжість.
+
+    🔴 Застереження — не косметика. Реєстр це зріз п'яти сховищ, і будь-який
+    прогін робить його старим за хвилини. Застарілий зріз небезпечніший за
+    відсутній: він виглядає як відповідь («декоду немає») там, де декод зробили
+    годину тому, — і саме по ньому вирішують, що гнати далі.
+    """
+    from nyshporka.cases import db
+
+    try:
+        rows = db.query_rows(q=a.q, repo=a.repo, htr=a.htr, year=a.year,
+                             place=a.place, limit=a.limit)
+    except Exception as exc:
+        return fail(f"реєстр справ недоступний ({type(exc).__name__}: {exc}) — "
+                    f"зберіть його командою `nysh cases build`")
+    env = ok({"cases": rows, "shown": len(rows)})
+    try:
+        st = db.staleness()
+    except Exception:
+        st = {}
+    if st.get("stale"):
+        env.stale_because(st.get("reasons") or [], fix="nysh cases build")
+    return env
+
+
+# ── пошук по прочитаному ─────────────────────────────────────────────────────
+class SearchArgs(BaseModel):
+    q: str = Field(description="прізвище або слово")
+    where: Literal["decode", "pages", "records"] = Field(
+        default="decode",
+        description="decode — тексти прогонів; pages — виписані прізвища; "
+                    "records — учасники розібраних записів")
+    case: str = Field(default="", description="обмежити однією справою")
+    thresh: int = Field(default=80, ge=50, le=100)
+    limit: int = Field(default=100, ge=1, le=500)
+
+
+@op("search.run", summary="Знайти прізвище в тому, що вже прочитано",
+    args=SearchArgs, mutates=False)
+def search_run(a: SearchArgs) -> Envelope:
+    """🔴 Нуль ЗАВЖДИ зі знаменником.
+
+    Порожній результат від пошуку по декоду означає «в цих N прогонах не
+    знайшлось», а не «цього немає»: декодовано завжди меншу частину того, що є
+    на диску. Тому у відповіді йде `coverage` — по скількох прогонах і скількох
+    сторінках шукали. Без цього числа нуль читається як вирок.
+    """
+    if a.where == "decode":
+        from nyshporka import htr_store
+
+        res = htr_store.search(a.q, name=a.case or None, thresh=a.thresh,
+                               limit=a.limit)
+        runs = htr_store.list_cases()
+        pages = sum(int(c.get("pages") or 0) for c in runs)
+        env = ok({"hits": res.get("hits") or [],
+                  "coverage": {"runs": res.get("cases") or len(runs),
+                               "pages": pages, "thresh": a.thresh}})
+        if res.get("error"):
+            env.warn("bad_query", str(res["error"]))
+        if not (res.get("hits") or []):
+            env.warn("zero_with_denominator",
+                     f"не знайшлось у {res.get('cases') or len(runs)} прогонах "
+                     f"({pages} сторінок). Це НЕ означає, що запису немає — "
+                     f"означає, що його немає в прочитаному.")
+        return env
+
+    from nyshporka.pagestore import query
+
+    if a.where == "pages":
+        res = query.grep_surnames(a.q, thresh=a.thresh, case_key=a.case or None,
+                                  limit=a.limit)
+    else:
+        res = query.grep_records(a.q, thresh=a.thresh, case_key=a.case or None,
+                                 limit=a.limit)
+    return ok(res)
+
+
+# ── експорт ──────────────────────────────────────────────────────────────────
+class ExportArgs(BaseModel):
+    case: str = Field(description="справа у будь-якому форматі")
+    what: Literal["pages", "records"] = "records"
+
+
+@op("export.case", summary="Викласти прочитане зі справи таблицею", args=ExportArgs,
+    mutates=False)
+def export_case(a: ExportArgs) -> Envelope:
+    """Прочитане зі справи — у плаский вигляд, придатний до таблиці.
+
+    🔴 Кожен рядок несе СКАН, а не лише текст. Виписка без посилання на аркуш —
+    це переказ: перевірити його можна тільки перечитавши всю справу, тобто
+    ніяк. Саме тому тут немає режиму «лише імена».
+    """
+    from nyshporka.pagestore import store
+
+    try:
+        ref = store.resolve_case(a.case)
+    except ValueError as exc:
+        return fail(str(exc))
+    cf = store.load_case(ref)
+    if cf is None:
+        return fail(f"по справі {ref.shifra} ще нічого не занесено")
+
+    if a.what == "pages":
+        rows = [{"scan": n.scan, "type": n.page_type, "status": n.status,
+                 "sheet": n.sheet, "surnames": "; ".join(n.surnames),
+                 "places": "; ".join(n.places),
+                 "years": "; ".join(str(y) for y in n.years),
+                 "method": n.method, "comment": n.comment}
+                for n in cf.pages.values()]
+    else:
+        rows = []
+        for rec in cf.records:
+            for p in rec.persons:
+                rows.append({
+                    "rid": rec.rid, "type": rec.rtype,
+                    "date": rec.date.value if rec.date else "",
+                    "scans": "; ".join(rec.scans), "sheet": rec.sheet,
+                    "row": rec.row, "role": p.role, "name": p.name,
+                    "surname": p.surname or "", "patronymic": p.patronymic or "",
+                    "sex": p.sex or "", "estate": p.estate or "",
+                    "age": p.age or "", "place": p.place or ""})
+    env = ok({"case": ref.key, "shifra": ref.shifra, "what": a.what,
+              "columns": list(rows[0]) if rows else [], "rows": rows})
+    if not rows:
+        env.warn("empty_export",
+                 f"у справі {ref.shifra} немає нічого типу «{a.what}» — "
+                 f"це стан обліку, а не властивість справи")
+    return env
+
+
+# ── завантаження як довга робота ─────────────────────────────────────────────
+class AcquireArgs(BaseModel):
+    source: str = Field(description="id джерела")
+    ref: str = Field(description="адреса справи чи плівки")
+    dest: str = Field(default="", description="куди класти; порожньо = у простір")
+    frames: str = Field(default="", description="діапазон «12-80»; порожньо = всі")
+
+
+@op("acquire.start", summary="Завантажити справу або плівку", args=AcquireArgs,
+    mutates=True, long=True)
+def acquire_start(a: AcquireArgs) -> Envelope:
+    """Ставить у чергу; сама робота йде у застосунку.
+
+    🔴 Синхронно цього робити не можна навіть у CLI-подібному вигляді: справа
+    буває на кілька гігабайтів, тобто на годину. Відповідь мусить бути
+    посиланням на завдання, а не очікуванням.
+    """
+    return fail("завантаження виконує застосунок — підніміть його командою "
+                "`nysh serve` або скористайтесь `nysh get`")
+
+
 # ── завдання ─────────────────────────────────────────────────────────────────
 class JobArgs(BaseModel):
     action: Literal["list", "status", "wait", "cancel"] = "list"

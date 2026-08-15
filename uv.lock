@@ -2249,6 +2249,8 @@ ocr = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "fastapi" },
+    { name = "httpx" },
     { name = "mypy" },
     { name = "numpy" },
     { name = "pytest" },
@@ -2256,6 +2258,7 @@ dev = [
     { name = "ruff" },
     { name = "selectolax" },
     { name = "types-psutil" },
+    { name = "uvicorn" },
 ]
 
 [package.metadata]
@@ -2298,6 +2301,8 @@ provides-extras = ["app", "archives", "gedcom", "htr", "ocr", "agent", "all"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "fastapi", specifier = ">=0.115" },
+    { name = "httpx", specifier = ">=0.27" },
     { name = "mypy", specifier = ">=1.13" },
     { name = "numpy", specifier = ">=1.26" },
     { name = "pytest", specifier = ">=8.3" },
@@ -2305,6 +2310,7 @@ dev = [
     { name = "ruff", specifier = ">=0.8" },
     { name = "selectolax", specifier = ">=0.3.21" },
     { name = "types-psutil", specifier = ">=7.2.2.20260518" },
+    { name = "uvicorn", specifier = ">=0.32" },
 ]
 
 [[package]]

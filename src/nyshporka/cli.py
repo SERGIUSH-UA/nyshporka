@@ -238,6 +238,156 @@ def crawl(source: str = typer.Argument("archium", help="id джерела"),
                   f"справ {stats['cases']}")
 
 
+@app.command()
+def init(
+    path: str = typer.Argument("", help="куди покласти простір; порожньо — запропоную"),
+    name: str = typer.Option("", "--name", help="як зветься дослідження"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="без питань (для інсталятора)"),
+) -> None:
+    """Створити робочий простір — теку, де житиме дослідження.
+
+    🔴 Мовчки простір не створюється ніколи: тека, що з'явилась сама, — це
+    дослідження, яке потім не можуть знайти.
+    """
+    from nyshporka.core.workspace import WorkspaceError
+    from nyshporka.setup import wizard
+
+    try:
+        p = wizard.plan(path or None)
+    except WorkspaceError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=2) from None
+    console.print(f"Простір: [bold]{p.root}[/bold]"
+                  + ("" if p.creating else "  [dim](уже існує)[/dim]"))
+    if p.warning:
+        console.print(f"[yellow]⚠ {p.warning}[/yellow]")
+    if p.creating and not yes and not typer.confirm("Створити?", default=True):
+        raise typer.Exit(code=1)
+    root = wizard.create(p.root, name=name)
+    console.print(f"✅ готово: {root}")
+    console.print("[dim]далі: `nysh look <тека зі сканами>` або `nysh serve`[/dim]")
+
+
+@app.command()
+def doctor(
+    as_json: bool = typer.Option(False, "--json"),
+) -> None:
+    """Перевірити те, що ламається ТИХО: карта, хмарна тека, місце, рушії."""
+
+    from nyshporka.setup import doctor as doc
+
+    checks = doc.run()
+    if as_json:
+        console.print_json(data=[{"name": c.name, "level": c.level,
+                                  "detail": c.detail, "fix": c.fix}
+                                 for c in checks])
+        raise typer.Exit(code=0 if all(c.level != "fail" for c in checks) else 1)
+    for c in checks:
+        console.print(f"{c.mark} [bold]{c.name}[/bold]  {c.detail}")
+        if c.fix and c.level != "ok":
+            console.print(f"   [dim]{c.fix}[/dim]")
+    bad = [c for c in checks if c.level == "fail"]
+    raise typer.Exit(code=1 if bad else 0)
+
+
+htr_app = typer.Typer(help="Рушії читання рукопису.", no_args_is_help=True)
+app.add_typer(htr_app, name="htr")
+
+
+@htr_app.command("install")
+def htr_install(
+    no_cuda: bool = typer.Option(False, "--no-cuda", help="не чіпати torch"),
+) -> None:
+    """Зібрати середовище рушіїв — ОКРЕМИЙ інтерпретатор поруч із простором.
+
+    🔴 Окремий не для краси: сегментація йде на `kraken==7.0.2` з двома
+    патчами приватних функцій, доведеними рівними оригіналу саме на цій версії.
+    Інша версія дала б ТИХУ розбіжність — ті самі скани, інші полігони рядків,
+    інший текст, без помилки в лозі. Тримати такий пін в основному середовищі
+    означало б нав'язати його всьому, що там є.
+    """
+    from nyshporka.core.workspace import WorkspaceError
+    from nyshporka.htr import env as E
+    from nyshporka.setup import doctor as doc
+
+    try:
+        venv = doc.engine_venv()
+    except WorkspaceError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=2) from None
+    rep = E.setup(venv, with_cuda=not no_cuda)
+    console.print(f"\npython : {rep.python or '—'}")
+    console.print(f"kraken : {rep.kraken or '—'}")
+    console.print(f"torch  : {rep.torch or '—'}  cuda={rep.cuda} "
+                  f"capability={rep.capability or '—'}")
+    for p in rep.problems:
+        console.print(f"[yellow]⚠ {p}[/yellow]")
+    if rep.missing:
+        console.print(f"[red]🔴 бракує: {', '.join(rep.missing)}[/red]")
+    raise typer.Exit(code=0 if rep.ok else 1)
+
+
+models_app = typer.Typer(help="Ваги моделей письма.", no_args_is_help=True)
+app.add_typer(models_app, name="models")
+
+
+@models_app.command("list")
+def models_list() -> None:
+    """Що є, чого немає, що зіпсоване."""
+    from nyshporka.setup import packs
+
+    state = packs.as_dict()
+    mark = {"ok": "✅", "absent": "▫️", "broken": "🔴"}
+    for p in state["packs"]:
+        size = f"{p['size'] / 2**20:.0f} МБ" if p["size"] else "?"
+        console.print(f"  {mark.get(p['state'], '?')} [bold]{p['label']}[/bold] "
+                      f"[dim]{p['script']}/{p['engine']} · {size}[/dim]")
+    console.print(f"[dim]тека: {state['dir']}[/dim]")
+
+
+@models_app.command("get")
+def models_get(
+    which: str = typer.Argument("", help="id пака; порожньо — усі, яких бракує"),
+) -> None:
+    """Завантажити ваги. sha256 звіряється завжди."""
+    from nyshporka.setup import packs
+
+    want = [p for p in packs.catalog() if not which or p.id == which]
+    want = [p for p in want if not packs.verify(p)]
+    if not want:
+        console.print("✅ усе на місці")
+        return
+    for p in want:
+        console.print(f"⬇ {p.label} …")
+        try:
+            dst = packs.fetch(p)
+        except Exception as exc:
+            console.print(f"[red]✗ {p.id}: {exc}[/red]")
+            raise typer.Exit(code=1) from None
+        console.print(f"  ✅ {dst}")
+
+
+@app.command()
+def serve(
+    port: int = typer.Option(8788, "--port"),
+    no_browser: bool = typer.Option(False, "--no-browser",
+                                    help="не відкривати вкладку самому"),
+) -> None:
+    """Підняти застосунок у браузері.
+
+    🔴 Слухає ЛИШЕ 127.0.0.1, і опції це змінити немає. Тут архів однієї
+    людини — канон про живих родичів, скани, нотатки; прапорець «слухати всюди»
+    рано чи пізно вмикають «на хвилинку» й лишають.
+    """
+    try:
+        from nyshporka.daemon import serve as _serve
+    except (ImportError, RuntimeError) as exc:
+        console.print(f"[red]{exc}[/red]")
+        console.print(r"[dim]pip install 'nyshporka\[app]'[/dim]")
+        raise typer.Exit(code=1) from None
+    _serve(port=port, open_browser=not no_browser)
+
+
 @app.command("ops")
 def ops_list(agent_only: bool = typer.Option(False, "--agent",
                                              help="лише те, що бачить агент")) -> None:

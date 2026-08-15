@@ -7,6 +7,8 @@ FastAPI, ні torch, ні знання про конкретний архів. �
 from __future__ import annotations
 
 import importlib
+import json
+import subprocess
 import sys
 
 import pytest
@@ -35,11 +37,26 @@ def test_cold_core_stays_cold():
 
     Не естетика: щойно ядро почне імпортувати torch, `nysh` стартуватиме
     секундами, а «подивитись каталог справ» вимагатиме кількох гігабайтів.
+
+    🔴 Перевірка йде в ОКРЕМОМУ ПРОЦЕСІ, і це не педантизм. Раніше тут
+    читався `sys.modules` спільного процесу pytest — тобто тест доводив не
+    «ядро холодне», а «до цього моменту ніхто не імпортував важкого». Він
+    зеленів, поки в наборі не з'явився тест демона, який чесно тягне FastAPI;
+    після цього почав червоніти на рівному місці, нічого не знайшовши в ядрі.
     """
-    for name in MODULES:
-        importlib.import_module(name)
-    for heavy in ("torch", "fastapi", "ultralytics", "transformers", "mkdocs"):
-        assert heavy not in sys.modules, f"холодне ядро притягло {heavy}"
+    code = (
+        "import importlib, sys, json\n"
+        f"for name in {list(MODULES)!r}:\n"
+        "    importlib.import_module(name)\n"
+        "heavy = [h for h in ('torch', 'fastapi', 'ultralytics', 'transformers',"
+        " 'mkdocs') if h in sys.modules]\n"
+        "print(json.dumps(heavy))\n"
+    )
+    res = subprocess.run([sys.executable, "-c", code], capture_output=True,
+                         text=True, encoding="utf-8")
+    assert res.returncode == 0, res.stderr
+    pulled = json.loads(res.stdout.strip().splitlines()[-1])
+    assert not pulled, f"холодне ядро притягло {pulled}"
 
 
 # ── транслітерація ───────────────────────────────────────────────────────────

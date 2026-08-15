@@ -76,6 +76,15 @@ class Envelope:
         self.next.append(NextStep(op, why))
         return self
 
+    def stale_because(self, reasons: list[str], fix: str = "") -> Envelope:
+        """Позначити відповідь як зняту зі старого зрізу.
+
+        Окремий метод, а не присвоєння поля: застарілість мусить потрапляти І в
+        структуру, І в текст для агента — а це легко зробити наполовину.
+        """
+        self.stale = Staleness(is_stale=True, reasons=tuple(reasons), fix=fix)
+        return self
+
     def as_dict(self) -> dict[str, Any]:
         out: dict[str, Any] = {"ok": self.ok, "v": SCHEMA}
         if self.ok:

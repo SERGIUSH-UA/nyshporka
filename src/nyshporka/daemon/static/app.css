@@ -1,0 +1,83 @@
+/* Нишпорка — оформлення.
+   Світла й темна тема з системної налаштованості: застосунок відкривають на
+   ноутбуці в архіві, і біле полотно в темній залі читається гірше за скан. */
+:root {
+  --bg: #fbfaf7; --fg: #23201c; --muted: #7a736a; --line: #e3ded4;
+  --accent: #7a4f2b; --warn-bg: #fff6e0; --warn-fg: #6b4d00; --err: #a32b2b;
+  --card: #fff;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1b1a18; --fg: #e8e3da; --muted: #9a938a; --line: #34312c;
+    --accent: #d3a06a; --warn-bg: #3a3320; --warn-fg: #f0d79a; --err: #ff8a8a;
+    --card: #232120;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--bg); color: var(--fg);
+  font: 15px/1.5 system-ui, "Segoe UI", sans-serif;
+}
+header {
+  display: flex; align-items: center; gap: 1rem;
+  padding: .6rem 1rem; border-bottom: 1px solid var(--line);
+  position: sticky; top: 0; background: var(--bg); z-index: 2;
+}
+.brand { font-weight: 700; letter-spacing: .02em; }
+nav { display: flex; gap: .25rem; flex-wrap: wrap; }
+nav button {
+  background: none; border: 0; color: var(--muted); cursor: pointer;
+  padding: .35rem .6rem; border-radius: .4rem; font: inherit;
+}
+nav button:hover { background: var(--line); color: var(--fg); }
+nav button.on { color: var(--fg); font-weight: 600; background: var(--line); }
+#jobcount:not(:empty) {
+  background: var(--accent); color: var(--bg); border-radius: 1rem;
+  padding: 0 .4rem; font-size: .7rem; margin-left: -.4rem;
+}
+.lang { margin-left: auto; background: none; border: 0; cursor: pointer; font-size: 1.1rem; }
+main { padding: 1.2rem; max-width: 62rem; margin: 0 auto; }
+h2 { margin: 0 0 1rem; font-size: 1.3rem; }
+
+/* Три картки першого запуску — головний екран не-програміста. */
+.cards { display: grid; gap: .8rem; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); }
+.card {
+  display: flex; flex-direction: column; gap: .35rem; text-align: left;
+  padding: 1rem; border: 1px solid var(--line); border-radius: .6rem;
+  background: var(--card); cursor: pointer; font: inherit; color: inherit;
+}
+.card:hover { border-color: var(--accent); }
+.card-title { font-weight: 600; }
+.card-hint { color: var(--muted); font-size: .87rem; }
+
+.row { display: flex; gap: .5rem; flex-wrap: wrap; margin-bottom: 1rem; }
+.row input, .row select {
+  flex: 1 1 14rem; padding: .5rem .6rem; font: inherit;
+  border: 1px solid var(--line); border-radius: .4rem;
+  background: var(--card); color: var(--fg);
+}
+button[type=submit], .job button, td button {
+  padding: .45rem .8rem; font: inherit; cursor: pointer; color: var(--bg);
+  background: var(--accent); border: 0; border-radius: .4rem;
+}
+table { width: 100%; border-collapse: collapse; font-size: .92rem; }
+th, td { text-align: left; padding: .4rem .5rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { color: var(--muted); font-weight: 600; }
+.num { text-align: right; white-space: nowrap; }
+.mono { font-family: ui-monospace, Consolas, monospace; font-size: .87em; }
+.muted { color: var(--muted); }
+pre {
+  background: var(--card); border: 1px solid var(--line); border-radius: .4rem;
+  padding: .7rem; overflow-x: auto;
+}
+
+/* 🔴 Попередження мусять бути ВИДНІ. Саме тут живе «нуль зі знаменником»:
+   різниця між «не знайшлось» і «не знайшлось, бо шукали в одному каталозі». */
+.warn {
+  background: var(--warn-bg); color: var(--warn-fg);
+  border-left: 3px solid var(--accent); border-radius: .3rem;
+  padding: .5rem .7rem; margin: .5rem 0;
+}
+.warn.err { color: var(--err); border-left-color: var(--err); }
+.job { border: 1px solid var(--line); border-radius: .5rem; padding: .7rem; margin-bottom: .6rem; }
+.job progress { width: 100%; height: .5rem; display: block; margin: .4rem 0; }

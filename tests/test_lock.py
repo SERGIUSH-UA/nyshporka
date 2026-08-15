@@ -146,3 +146,19 @@ def test_lock_reports_who_holds_it(tmp_path):
         info = L.read(tmp_path)
         assert info.pid == os.getpid() and info.port == 1234
         assert info.age() < 5 and not info.is_stale()
+
+
+def test_reacquire_on_a_held_lock_is_a_noop(tmp_path):
+    """🔴 `with WorkspaceLock(...).acquire() as l:` НЕ має відмовляти сам собі.
+
+    Це найприродніший запис, і `__enter__` у ньому кличе `acquire` вдруге.
+    Без ідемпотентності процес знаходив власний щойно створений замок і
+    відмовлявся стартувати — повідомленням «простір уже зайнято іншим
+    процесом», яке називало чужим його ж pid. Спіймано на першому живому
+    запуску демона, не тестом.
+    """
+    from nyshporka.core.lock import WorkspaceLock
+
+    with WorkspaceLock(tmp_path).acquire() as held:
+        assert held.held
+    assert not (tmp_path / ".lock").exists()
