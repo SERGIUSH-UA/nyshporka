@@ -91,8 +91,11 @@ class Envelope:
             out["data"] = self.data
         else:
             out["error"] = self.error
-        if self.warnings:
-            out["warnings"] = [w.as_dict() for w in self.warnings]
+        # 🔴 `warnings` є ЗАВЖДИ, навіть порожній. Поле, яке то з'являється, то
+        # зникає, змушує кожного читача писати захисне `.get(...)` — а той, хто
+        # напише пряме звертання, зламається не на попередженні, а на його
+        # ВІДСУТНОСТІ, тобто на найспокійнішій відповіді. Ціна — три байти.
+        out["warnings"] = [w.as_dict() for w in self.warnings]
         if self.stale is not None:
             out["stale"] = self.stale.as_dict()
         if self.next:

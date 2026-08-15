@@ -126,6 +126,30 @@ def case_path(case_dir: str | Path) -> Path:
     return p.resolve()
 
 
+def reachable(case_dir: Path) -> bool:
+    """Чи побачить цю теку збірка бібліотеки.
+
+    🔴 Сканується ЛИШЕ `<простір>/data/raw` (та оголошені корені справ). Тека
+    на робочому столі чи на флешці лишається невидимою — а саме туди й показує
+    людина, яка щойно поставила застосунок.
+
+    Питання не косметичне: без нього заведення справи проходило з ✅, опис
+    писався в теку — і на цьому все закінчувалось. Реєстр лишався порожній,
+    облік прочитаного не мав куди лягти, пошук нічого не знаходив, вивантаження
+    відмовляло. Кожен наступний крок падав з окремої причини, і жодна з них не
+    називала справжню.
+    """
+    from nyshporka.core.workspace import workspace
+
+    for root in workspace().case_roots():
+        try:
+            case_dir.relative_to(root.resolve())
+        except ValueError:
+            continue
+        return True
+    return False
+
+
 def describe(case_dir: str | Path, *, shifra: str = "", title: str = "",
              doc_type: str = "", year_from: int | None = None,
              year_to: int | None = None, place: str = "", note: str = "",

@@ -270,3 +270,61 @@ def test_unknown_case_folder_is_not_reported_as_zero_scans(tmp_path: Path) -> No
     assert env.ok
     assert env.data["case_dir_known"] is False
     assert any(w.code == "case_dir_unknown" for w in env.warnings)
+
+
+def test_a_folder_outside_the_workspace_is_flagged_not_silently_accepted(
+        space: Path, tmp_path: Path) -> None:
+    """🔴 Мовчазна поразка всього подальшого шляху.
+
+    Збірка бібліотеки дивиться лише в `<простір>/data/raw`. Тека на робочому
+    столі чи на флешці — а саме туди й показує людина, яка щойно поставила
+    застосунок, — лишається невидимою. Без цього застереження заведення
+    проходило з ✅, опис писався, і на цьому все: реєстр порожній, обліку
+    прочитаного нема куди лягти, пошук нічого не знаходить, вивантаження
+    відмовляє. Кожен наступний крок падав з окремої причини, і жодна з них не
+    називала справжню.
+    """
+    from nyshporka import ops as O
+
+    outside = tmp_path.parent / "стороння_тека"
+    outside.mkdir(exist_ok=True)
+    (outside / "0001.jpg").write_bytes(b"x")
+
+    env = O.call("case.register", {"case_dir": str(outside),
+                                   "shifra": "ДАХмО 315-1-8433", "reindex": False})
+    assert env.ok, env.error
+    assert env.data["reachable"] is False
+    warn = next((w for w in env.warnings if w.code == "outside_workspace"), None)
+    assert warn is not None, "тека поза простором прийнята мовчки"
+    assert "data" in warn.text.lower() or "raw" in warn.text.lower(), \
+        "сказали «не з'явиться», але не сказали, КУДИ класти"
+
+
+def test_a_folder_inside_the_workspace_is_not_flagged(space: Path) -> None:
+    from nyshporka import ops as O
+
+    env = O.call("case.register", {"case_dir": str(space),
+                                   "shifra": "ДАХмО 315-1-8433", "reindex": False})
+    assert env.ok and env.data["reachable"] is True
+    assert not any(w.code == "outside_workspace" for w in env.warnings)
+
+
+@pytest.mark.parametrize("where", ["decode", "pages", "records"])
+def test_a_zero_always_carries_its_denominator(space: Path, where: str) -> None:
+    """🔴 Головне правило проєкту — і воно довго трималось лише в одній гілці.
+
+    Порожній результат — найдорожча відповідь у генеалогії: «немає» закриває
+    напрям назавжди. Пошук по декоду знаменник давав, а пошук по виписаному
+    оком і по розібраних записах віддавав голий нуль — саме там, де його читає
+    людина, а не агент.
+    """
+    from nyshporka import ops as O
+
+    O.call("case.register", {"case_dir": str(space), "shifra": "ДАХмО 315-1-8433",
+                             "reindex": False})
+    env = O.call("search.run", {"q": "Неіснуючий", "where": where})
+    assert env.ok, env.error
+    assert not env.data["hits"]
+    assert "coverage" in env.data, "нуль без знаменника"
+    assert any(w.code == "zero_with_denominator" for w in env.warnings), \
+        "нуль не сказав, ЯКИЙ обсяг переглянуто"

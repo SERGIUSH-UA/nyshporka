@@ -53,13 +53,21 @@ const STRINGS = {
     'search.where.pages': 'у виписаних прізвищах',
     'search.where.records': 'в учасниках записів',
     'search.run': 'Знайти',
-    'search.coverage': 'шукали по',
+    'search.coverage': 'шукали по', 'search.runs': 'прогонах',
+    'search.cases': 'справах, занесених оком',
     'nav.eye': 'Око',
     'eye.case': 'Справа', 'eye.check': 'Що вже дивились',
     'eye.disk': 'на диску', 'eye.noted': 'занесено', 'eye.left': 'ще не дивились',
     'eye.note': 'Занести сторінку', 'eye.scan': 'Скан', 'eye.type': 'Тип',
     'eye.surnames': 'Прізвища ЯК У ДЖЕРЕЛІ (через кому)',
     'eye.status': 'Повнота', 'eye.comment': 'Коментар', 'eye.save': 'Занести',
+    'ptype.birth': 'народження', 'ptype.marriage': 'шлюб',
+    'ptype.death': 'смерть', 'ptype.confession': 'сповідний розпис',
+    'ptype.revision': 'ревізька казка', 'ptype.census': 'перепис',
+    'ptype.index': 'покажчик', 'ptype.title': 'титул',
+    'ptype.cover': 'обкладинка', 'ptype.flyleaf': 'форзац',
+    'ptype.blank': 'порожня', 'ptype.illegible': 'не читається',
+    'ptype.mixed': 'мішана', 'ptype.other': 'інше',
     'eye.rule': 'Заносьте КОЖЕН відкритий скан — навіть порожній. Інакше наступного разу ви відкриєте його знову.',
     'case.title': 'Завести або виправити справу',
     'case.dir': 'Тека зі сканами', 'case.shifra': 'Шифра',
@@ -125,13 +133,21 @@ const STRINGS = {
     'search.where.pages': 'in noted surnames',
     'search.where.records': 'in record participants',
     'search.run': 'Search',
-    'search.coverage': 'searched across',
+    'search.coverage': 'searched across', 'search.runs': 'runs',
+    'search.cases': 'cases noted by eye',
     'nav.eye': 'Eye',
     'eye.case': 'Case', 'eye.check': 'Already looked at',
     'eye.disk': 'on disk', 'eye.noted': 'noted', 'eye.left': 'not looked at yet',
     'eye.note': 'Note a page', 'eye.scan': 'Scan', 'eye.type': 'Type',
     'eye.surnames': 'Surnames AS WRITTEN (comma separated)',
     'eye.status': 'Completeness', 'eye.comment': 'Comment', 'eye.save': 'Save',
+    'ptype.birth': 'birth', 'ptype.marriage': 'marriage',
+    'ptype.death': 'death', 'ptype.confession': 'confession list',
+    'ptype.revision': 'revision list', 'ptype.census': 'census',
+    'ptype.index': 'index', 'ptype.title': 'title page',
+    'ptype.cover': 'cover', 'ptype.flyleaf': 'flyleaf',
+    'ptype.blank': 'blank', 'ptype.illegible': 'illegible',
+    'ptype.mixed': 'mixed', 'ptype.other': 'other',
     'eye.rule': 'Note EVERY scan you opened — even an empty one. Otherwise you will open it again next time.',
     'case.title': 'Register or correct a case',
     'case.dir': 'Folder with scans', 'case.shifra': 'Reference',
@@ -212,6 +228,17 @@ function failure(env) {
 }
 
 // ── екрани ───────────────────────────────────────────────────────────────────
+/**
+ * Типи сторінок — рівно ті, що приймає сховище.
+ *
+ * 🔴 Порядок не абетковий, а за частотою в роботі: метричні рубрики першими,
+ * службові аркуші наприкінці. Заносити доводиться сотні сторінок поспіль, і
+ * зайвий рух до потрібного рядка множиться на цю сотню.
+ */
+const PAGE_TYPES = ['birth', 'marriage', 'death', 'confession', 'revision',
+  'census', 'index', 'title', 'cover', 'flyleaf', 'blank', 'illegible',
+  'mixed', 'other'];
+
 const SCREENS = {};
 
 /** Остання вивантажена таблиця — щоб CSV збирався без повторного запиту. */
@@ -480,14 +507,16 @@ const ACTIONS = {
     el('hits').innerHTML = `
       ${renderWarnings(env)}
       <table><tbody>${hits.map((h) => `<tr>
-        <td class="mono">${esc(h.case || h.name || '')}</td>
+        <td class="mono">${esc(h.shifra || h.case || h.key || h.name || '')}</td>
         <td class="mono">${esc(h.page || h.scan || '')}</td>
-        <td>${esc((h.line || h.text || h.surname || '').slice(0, 120))}</td>
+        <td>${esc(String(h.matched || h.line || h.text || h.surname || '').slice(0, 120))}</td>
         <td class="num">${esc(h.score ?? '')}</td>
       </tr>`).join('')}</tbody></table>
       ${cov.runs !== undefined
-        ? `<p class="muted">${t('search.coverage')}: ${cov.runs} прогонів, ${cov.pages} ${t('common.pages')}</p>`
-        : ''}`;
+        ? `<p class="muted">${t('search.coverage')}: ${cov.runs} ${t('search.runs')}, ${cov.pages} ${t('common.pages')}</p>`
+        : cov.cases !== undefined
+          ? `<p class="muted">${t('search.coverage')}: ${cov.cases} ${t('search.cases')}</p>`
+          : ''}`;
   },
 
   // 🔴 Спершу ПЛАН, і лише окремою кнопкою — старт. Справа читається годинами;
@@ -510,7 +539,8 @@ const ACTIONS = {
       <form data-act="eye.note">
         <div class="row">
           <input name="scan" placeholder="${t('eye.scan')}: 0030.JPG">
-          <input name="page_type" placeholder="${t('eye.type')}: confession">
+          <select name="page_type">${PAGE_TYPES.map((k) =>
+            `<option value="${k}">${t(`ptype.${k}`)}</option>`).join('')}</select>
           <select name="status">
             <option value="full">full — виписано ВСІ прізвища</option>
             <option value="partial">partial — не всі</option>

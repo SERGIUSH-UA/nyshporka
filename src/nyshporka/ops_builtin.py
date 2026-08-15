@@ -343,7 +343,26 @@ def search_run(a: SearchArgs) -> Envelope:
     else:
         res = query.grep_records(a.q, thresh=a.thresh, case_key=a.case or None,
                                  limit=a.limit)
-    return ok(res)
+    # 🔴 Знаменник тут ТАКИЙ САМИЙ обов'язковий, як у пошуку по декоду, — і
+    # довго його не було саме тут, у гілці, найближчій до людини. «Не
+    # знайшлось у виписаному» означає лише «серед того, що вже занесли оком»:
+    # занесена завжди менша частина того, що на диску. Без цього числа нуль
+    # читається як вирок про рід, а він про обсяг роботи.
+    hits = res.get("hits") or []
+    env = ok({"hits": hits, "total": res.get("total", len(hits)),
+              "coverage": {"cases": res.get("cases") or 0,
+                           "thresh": res.get("thresh", a.thresh),
+                           "stems": res.get("stems") or []}})
+    if res.get("error"):
+        env.warn("bad_query", str(res["error"]))
+    elif not hits:
+        where = ("виписаних прізвищах" if a.where == "pages"
+                 else "учасниках розібраних записів")
+        env.warn("zero_with_denominator",
+                 f"не знайшлось у {where}: переглянуто {res.get('cases') or 0} "
+                 f"справ. Це НЕ означає, що запису немає — означає, що його "
+                 f"немає в занесеному оком.")
+    return env
 
 
 # ── гортач ───────────────────────────────────────────────────────────────────
@@ -456,6 +475,24 @@ def case_register(a: CaseRegisterArgs) -> Envelope:
     except RegisterError as exc:
         return fail(str(exc))
     env = ok({"case_dir": a.case_dir, "sidecar": out})
+    # 🔴 Тека поза простором — мовчазна поразка всього подальшого. Опис у ній
+    # запишеться, ✅ покажеться, а збірка бібліотеки її не побачить: сканується
+    # лише `data/raw` (і оголошені корені справ). Далі кожен крок падав окремо
+    # й не називав справжньої причини. Тому кажемо одразу і кажемо, куди класти.
+    from nyshporka.cases.register import case_path, reachable
+
+    here = case_path(a.case_dir)
+    if not reachable(here):
+        from nyshporka.core.workspace import workspace
+
+        env.data["reachable"] = False
+        env.warn("outside_workspace",
+                 f"тека лежить поза простором, тож у переліках справа НЕ "
+                 f"з'явиться: збірка дивиться в {workspace().raw}. Перенесіть "
+                 f"теку туди (можна разом із описом — він усередині) і "
+                 f"заведіть її ще раз уже за новим шляхом.")
+    else:
+        env.data["reachable"] = True
     if not out.get("title"):
         env.warn("no_title",
                  "назви немає — у переліках справа буде «без назви», і впізнати "
@@ -618,13 +655,23 @@ def pages_status(a: PagesStatusArgs) -> Envelope:
 class PageNoteArgs(BaseModel):
     case: str = Field(description="справа у будь-якому форматі")
     scan: str = Field(description="голе ім'я файлу скана: 0030.JPG")
-    page_type: str = Field(description="birth/marriage/death/confession/revision/…")
+    # 🔴 Перелік значень, а не вільний рядок з «…» у поясненні. Приймається
+    # рівно чотирнадцять слів, і поки схема мовчала про це, форма показувала
+    # порожнє поле: людина писала «метрична» й діставала відмову переліком
+    # англійських літералів. Оголошений перелік доїжджає в `/api/ops`, тож
+    # вибір будується сам — і в консолі, і в будь-якого читача схеми.
+    page_type: Literal[
+        "birth", "marriage", "death", "confession", "revision", "census",
+        "index", "title", "cover", "flyleaf", "blank", "illegible", "mixed",
+        "other"] = Field(description="що це за сторінка")
     surnames: str = Field(default="", description="кома-список ЯК НАПИСАНО в джерелі")
     places: str = Field(default="")
     years: str = Field(default="", description="кома-список років: 1858,1859")
     sheet: str = Field(default="", description="архівний аркуш: 31зв-32")
-    status: str = Field(default="full", description="full/partial/skipped/unreadable")
-    method: str = Field(default="visual", description="visual/htr/ocr/hybrid/text")
+    status: Literal["full", "partial", "skipped", "unreadable"] = Field(
+        default="full", description="наскільки повно виписано")
+    method: Literal["visual", "htr", "ocr", "hybrid", "text"] = Field(
+        default="visual", description="чим читали")
     comment: str = Field(default="")
     agent: str = Field(default="", description="хто заносив")
 
@@ -652,10 +699,10 @@ def pages_note(a: PageNoteArgs) -> Envelope:
     try:
         ref = store.resolve_case(a.case)
         note = PageNote(
-            scan=a.scan, page_type=a.page_type,  # type: ignore[arg-type]
+            scan=a.scan, page_type=a.page_type,
             surnames=_csv(a.surnames), places=_csv(a.places),
             years=[int(y) for y in _csv(a.years)], sheet=a.sheet,
-            status=a.status, method=a.method,  # type: ignore[arg-type]
+            status=a.status, method=a.method,
             comment=a.comment, agent=a.agent)
     except (ValidationError, ValueError) as exc:
         return fail(str(exc))

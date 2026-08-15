@@ -613,9 +613,16 @@ def pages_grep_cmd(
         console.print(f"[red]{env.error}[/red]")
         raise typer.Exit(code=1)
     for h in (env.data.get("hits") or [])[:limit]:
-        console.print(f"  [bold]{h.get('case') or h.get('key') or ''}[/bold] "
-                      f"{h.get('scan') or h.get('page') or ''}  "
-                      f"{str(h.get('surname') or h.get('line') or h.get('name') or '')[:80]}")
+        # 🔴 `matched` — найцінніше в знахідці, і саме його друкувалка й губила:
+        # шукали «Ковальський», а в джерелі стоїть «Ковальскій». Заради цієї
+        # різниці пошук і фаззі; без неї на екрані лишався голий номер скана.
+        what = str(h.get("matched") or h.get("line") or h.get("text")
+                   or h.get("surname") or h.get("name") or "")
+        score = h.get("score")
+        console.print(f"  [bold]{h.get('case') or h.get('shifra') or h.get('key') or ''}"
+                      f"[/bold] {h.get('scan') or h.get('page') or ''}  "
+                      f"{what[:80]}"
+                      + (f" [dim]{score}[/dim]" if score is not None else ""))
     for w in env.warnings:
         console.print(f"[yellow]⚠[/yellow] [dim]{w.text}[/dim]")
 
