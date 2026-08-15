@@ -10,7 +10,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TypeVar
+from typing import Any, TypeVar
 
 import frontmatter
 import yaml
@@ -21,14 +21,14 @@ from nyshporka.models import Family, Person, Place, Source
 T = TypeVar("T", bound=BaseModel)
 
 
-def _yaml_dump(data: dict) -> str:
+def _yaml_dump(data: dict[str, Any]) -> str:
     """YAML з юнікодом і стабільним порядком ключів."""
-    return yaml.safe_dump(
+    return str(yaml.safe_dump(
         data,
         allow_unicode=True,
         default_flow_style=False,
         sort_keys=False,
-    )
+    ))
 
 
 def read_entity(path: Path, model: type[T]) -> T:
@@ -45,7 +45,9 @@ def write_entity(path: Path, entity: BaseModel) -> None:
     notes = str(full.pop("notes", "") or "")
     post = frontmatter.Post(content=notes, **full)
 
-    text = frontmatter.dumps(post, handler=frontmatter.YAMLHandler())
+    # `YAMLHandler` у python-frontmatter не оголошений у `__all__`, хоч і є
+    # публічним у документації — звідси позначка, а не обхідний імпорт.
+    text = frontmatter.dumps(post, handler=frontmatter.YAMLHandler())  # type: ignore[attr-defined]
     # frontmatter не дає опції allow_unicode напряму — переписуємо YAML-блок самі.
     text = _rewrite_unicode_frontmatter(text, full)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -54,7 +56,7 @@ def write_entity(path: Path, entity: BaseModel) -> None:
     tmp.replace(path)
 
 
-def _rewrite_unicode_frontmatter(text: str, metadata: dict) -> str:
+def _rewrite_unicode_frontmatter(text: str, metadata: dict[str, Any]) -> str:
     """Замінити ascii-escaped YAML на юнікодний, зберігши тіло MD."""
     parts = text.split("---", 2)
     if len(parts) < 3:

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import re
 from functools import lru_cache
+from typing import TypedDict
 
 from nyshporka.utils.translit import normalize_for_matching
 
@@ -140,14 +141,29 @@ def _settlement_name(chunk: str) -> str:
     return s
 
 
-def parse_place(raw: str) -> dict:
+class ParsedPlace(TypedDict):
+    """Форма розібраного місця. Оголошена, бо цей словник ходить далеко.
+
+    Він потрапляє в реєстр справ, у геозріз і в лендінг; там його читають по
+    ключах, і хибно названий ключ мовчки дав би порожню географію — тобто
+    справу, яку не знайдуть за селом.
+    """
+
+    settlements: list[str]
+    uezds: list[str]
+    guberniya: str
+    alt_names: list[str]
+
+
+def parse_place(raw: str) -> ParsedPlace:
     """Вільний текст → {settlements, uezds, guberniya, alt_names}.
 
     Порожній результат означає «розібрати не вдалось», а не «місця немає»:
     виклик має лишити `place_raw` і показати це окремо.
     """
     text = _clean(raw)
-    out = {"settlements": [], "uezds": [], "guberniya": "", "alt_names": []}
+    out: ParsedPlace = {"settlements": [], "uezds": [], "guberniya": "",
+                        "alt_names": []}
     if not text:
         return out
     code = _CODES.get(text.lower())

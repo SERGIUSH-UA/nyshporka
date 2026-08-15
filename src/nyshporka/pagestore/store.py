@@ -14,6 +14,10 @@ import time
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 from nyshporka.core.workspace import workspace
 from nyshporka.library import (
@@ -80,9 +84,9 @@ class MergeReport:
     added: list[str] = field(default_factory=list)
     merged: list[str] = field(default_factory=list)
     replaced: list[str] = field(default_factory=list)
-    errors: list[dict] = field(default_factory=list)
+    errors: list[dict[str, Any]] = field(default_factory=list)
 
-    def as_dict(self) -> dict:
+    def as_dict(self) -> dict[str, Any]:
         return {"path": self.path, "added": self.added, "merged": self.merged,
                 "replaced": self.replaced, "errors": self.errors}
 
@@ -125,7 +129,7 @@ def resolve_case(value: str) -> CaseRef:
     # Мовчки взяти перший-ліпший = дописати аркуші в чужу справу, тому — помилка
     # з переліком того, що реально є на диску.
     if (repo, fond) in _OPYS_IN_KEY and not opys and not str(spr).startswith("@"):
-        cands = sorted({e.get("opys") for e in lib
+        cands = sorted({str(e["opys"]) for e in lib
                         if e.get("repo") == repo and e.get("fond") == fond
                         and e.get("spr") == spr and e.get("opys")})
         if len(cands) == 1:
@@ -188,7 +192,8 @@ def _empty_case(ref: CaseRef) -> CaseFile:
 
 # ── lockfile: паралельні агенти пишуть в одну справу ─────────────────────────
 @contextmanager
-def _lock(path: Path, timeout: float = 5.0, stale: float = 30.0):
+def _lock(path: Path, timeout: float = 5.0,
+          stale: float = 30.0) -> Iterator[None]:
     lockp = path.with_name(path.name + ".lock")
     lockp.parent.mkdir(parents=True, exist_ok=True)
     deadline = time.monotonic() + timeout
@@ -349,16 +354,25 @@ def _compress(names: list[str]) -> list[str]:
     return out
 
 
-def case_status(ref: CaseRef, scans: list[str] | None = None) -> dict:
+def case_status(ref: CaseRef, scans: list[str] | None = None) -> dict[str, Any]:
     """Гейт перед рендером: що вже оброблено, що ні."""
     cf = load_case(ref)
     pages = cf.pages if cf else {}
     if scans:
-        return {"key": ref.key, "shifra": ref.shifra, "scans": [
-            ({"scan": s, "noted": True, "page_type": n.page_type, "status": n.status,
-              "surnames_n": len(n.surnames), "noted_date": n.noted.isoformat()}
-             if (n := pages.get(s)) else {"scan": s, "noted": False})
-            for s in scans]}
+        # Розкладено з тернарного виразу з «моржем» у звичайну функцію. Той
+        # вираз працював (умова обчислюється перша, тож `n` встигає звʼязатись),
+        # але перевіряч його не доводив — а гілка «сторінку вже дивились» тут
+        # головна: саме вона рятує від повторного рендеру всієї справи.
+        def _one(scan: str) -> dict[str, Any]:
+            note = pages.get(scan)
+            if note is None:
+                return {"scan": scan, "noted": False}
+            return {"scan": scan, "noted": True, "page_type": note.page_type,
+                    "status": note.status, "surnames_n": len(note.surnames),
+                    "noted_date": note.noted.isoformat()}
+
+        return {"key": ref.key, "shifra": ref.shifra,
+                "scans": [_one(s) for s in scans]}
     disk = _disk_scans(ref)
     unnoted = [s for s in disk if s not in pages]
     by_status: dict[str, int] = {}

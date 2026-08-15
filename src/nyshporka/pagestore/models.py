@@ -15,12 +15,12 @@ import datetime as _dt
 import re
 from hashlib import blake2b
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from nyshporka.models.citation import Confidence
-from nyshporka.models.common import GedDate
+from nyshporka.models.common import DatePrecision, GedDate
 
 # ⚠ поле Record.date затіняє б ім'я `date` у тілі класу (і в default_factory,
 # і в резолюції анотацій pydantic) — тому datetime тільки через `_dt.date`
@@ -113,7 +113,7 @@ class RecordPerson(BaseModel):
     @field_validator("surname", "given", "patronymic", "sex", "estate",
                      "age", "place", "note", mode="before")
     @classmethod
-    def _blank_to_none(cls, v):
+    def _blank_to_none(cls, v: Any) -> Any:
         """Порожній рядок = «не вказано», а не невалідне значення.
 
         Агенти рівно так само охоче шлють `"sex": ""`, як і `null`; валити
@@ -157,14 +157,14 @@ class Record(BaseModel):
 
     @field_validator("row", "sheet", "comment", "agent", mode="before")
     @classmethod
-    def _none_to_blank(cls, v):
+    def _none_to_blank(cls, v: Any) -> Any:
         """Агенти регулярно шлють null там, де поле просто відсутнє в акті.
         Валити через це весь запис — втрачати вичитану сторінку на дрібниці."""
         return "" if v is None else v
 
     @field_validator("counts", mode="before")
     @classmethod
-    def _clean_counts(cls, v):
+    def _clean_counts(cls, v: Any) -> Any:
         """Нечислові значення викидаємо, а не валимо запис.
 
         Агент, який чесно не розібрав цифру підсумку, пише `{"m": "нрзб"}` —
@@ -173,7 +173,7 @@ class Record(BaseModel):
         """
         if not isinstance(v, dict):
             return v
-        out = {}
+        out: dict[str, int] = {}
         for k, val in v.items():
             if isinstance(val, bool):
                 continue
@@ -185,7 +185,7 @@ class Record(BaseModel):
 
     @field_validator("date", "date2", mode="before")
     @classmethod
-    def _date_from_str(cls, v):
+    def _date_from_str(cls, v: Any) -> Any:
         """Зручність для агентів: '1858-03-14' / '1858-03' / '1858' → GedDate.
 
         Порожній рядок — це «дати немає», а не помилка: агенти шлють `""`
@@ -195,12 +195,16 @@ class Record(BaseModel):
             iso = v.strip()
             if not iso:
                 return None
-            precision = {1: "year", 2: "month", 3: "day"}.get(len(iso.split("-")), "day")
+            # Точність — те, що ДІЙСНО написано в акті: «1858» це рік, а не
+            # 1 січня. Дописати відсутнє означало б вигадати дату й видати її
+            # за прочитану.
+            by_parts: dict[int, DatePrecision] = {1: "year", 2: "month", 3: "day"}
+            precision: DatePrecision = by_parts.get(len(iso.split("-")), "day")
             return GedDate(value=iso, precision=precision)
         return v
 
     @model_validator(mode="after")
-    def _auto_rid(self):
+    def _auto_rid(self) -> Record:
         """rid ДЕТЕРМІНОВАНИЙ — інакше конвеєр не ідемпотентний.
 
         Раніше тут стояв `uuid4`, і повторний `ingest` того самого виводу
@@ -248,7 +252,7 @@ class CaseFile(BaseModel):
     records: list[Record] = Field(default_factory=list)
 
     @model_validator(mode="after")
-    def _sync_scan_keys(self):
+    def _sync_scan_keys(self) -> CaseFile:
         for scan, note in self.pages.items():
             if note.scan != scan:
                 raise ValueError(f"ключ pages «{scan}» ≠ note.scan «{note.scan}»")

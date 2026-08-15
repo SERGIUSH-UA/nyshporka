@@ -11,13 +11,14 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
+from typing import Any
 
 import typer
 from pydantic import ValidationError
 from rich.console import Console
 
 from nyshporka.pagestore import query, store
-from nyshporka.pagestore.models import PageNote, Record
+from nyshporka.pagestore.models import Method, PageNote, PageStatus, PageType, Record
 from nyshporka.pagestore.store import CaseRef
 
 pages_app = typer.Typer(
@@ -40,7 +41,7 @@ def _resolve(case: str) -> CaseRef:
         raise typer.Exit(1) from None
 
 
-def _emit(data: dict, as_json: bool, human: str | None = None) -> None:
+def _emit(data: dict[str, Any], as_json: bool, human: str | None = None) -> None:
     if as_json:
         print(json.dumps(data, ensure_ascii=False))
     elif human is not None:
@@ -51,7 +52,21 @@ def _csv(value: str | None) -> list[str]:
     return [s.strip() for s in (value or "").split(",") if s.strip()]
 
 
-def _read_batch(file: Path | None) -> list[dict]:
+def _allowed(literal: Any) -> str:
+    """Дозволені значення — З МОДЕЛІ, а не переписані в довідку рукою.
+
+    🔴 Переписані розходяться. Тут це вже сталось: довідка `--method` називала
+    чотири значення, а модель приймала п'ять — `text` («читав лише декод, оком
+    не звірено») був невидимий саме для того, хто мав його ставити. Позначка
+    методу вирішує, чи можна довіряти прочитанню, тож невидиме значення
+    означало чужі помилки, успадковані під виглядом власного перегляду.
+    """
+    from typing import get_args
+
+    return "/".join(str(x) for x in get_args(literal))
+
+
+def _read_batch(file: Path | None) -> list[Any]:
     """JSON-масив або JSON-lines із файлу чи stdin."""
     text = file.read_text(encoding="utf-8") if file else sys.stdin.read()
     text = text.strip()
@@ -97,13 +112,13 @@ def pages_status(
 def pages_note(
     case: str = typer.Argument(...),
     scan: str = typer.Argument(..., help="Голе ім'я файлу скана: 0030.JPG / page_003."),
-    page_type: str = typer.Option(..., "--type", help="birth/marriage/death/confession/revision/census/index/title/cover/blank/illegible/mixed/other"),
+    page_type: str = typer.Option(..., "--type", help=_allowed(PageType)),
     surnames: str = typer.Option("", "--surnames", help="Кома-список ЯК У ДЖЕРЕЛІ."),
     places: str = typer.Option("", "--places"),
     years: str = typer.Option("", "--years", help="Кома-список років: 1858,1859."),
     sheet: str = typer.Option("", "--sheet", help="Архівний аркуш: 31зв–32."),
-    status: str = typer.Option("full", "--status", help="full/partial/skipped/unreadable"),
-    method: str = typer.Option("visual", "--method", help="visual/htr/ocr/hybrid"),
+    status: str = typer.Option("full", "--status", help=_allowed(PageStatus)),
+    method: str = typer.Option("visual", "--method", help=_allowed(Method)),
     comment: str = typer.Option("", "--comment"),
     agent: str = typer.Option("", "--agent"),
     replace: bool = typer.Option(False, "--replace", help="Замінити анотацію повністю (без merge)."),
@@ -112,9 +127,15 @@ def pages_note(
     """Анотувати одну сторінку."""
     ref = _resolve(case)
     try:
-        note = PageNote(scan=scan, page_type=page_type, surnames=_csv(surnames),
+        # 🔴 `type: ignore` тут свідомий і вузький. З командного рядка приходить
+        # рядок, а модель хоче перелік — і перевіряти його мусить САМЕ модель:
+        # вона єдине місце, де цей перелік визначено, і її повідомлення про
+        # хибне значення показує всі допустимі. Продублювати перевірку тут
+        # означало б завести другий перелік, який розійдеться з першим.
+        note = PageNote(scan=scan, page_type=page_type,  # type: ignore[arg-type]
+                        surnames=_csv(surnames),
                         places=_csv(places), years=[int(y) for y in _csv(years)],
-                        sheet=sheet, status=status, method=method,
+                        sheet=sheet, status=status, method=method,  # type: ignore[arg-type]
                         comment=comment, agent=agent)
     except (ValidationError, ValueError) as e:
         err_console.print(f"[red]{e}[/red]")
@@ -159,8 +180,14 @@ def pages_note_batch(
           f"✅ {ref.shifra}: додано {len(report.added)}, домержено {len(report.merged)}, "
           f"замінено {len(report.replaced)}, помилок {len(errors)}")
     if errors and not as_json:
-        for e in errors:
-            err_console.print(f"[yellow]#{e['index']} ({e['scan']}): {e['error']}[/yellow]")
+        # 🔴 Ім'я `e` тут НЕ перевикористовується. Python видаляє змінну винятку
+        # на виході з `except`, і хоча цикл присвоює її заново (тобто працює),
+        # перевіряч типів цього не доводить і мусить попереджати — а нам той
+        # клас попереджень потрібен увімкненим: справжнє читання видаленої
+        # змінної падає `NameError` уже в бойовому прогоні, посеред партії.
+        for bad in errors:
+            err_console.print(
+                f"[yellow]#{bad['index']} ({bad['scan']}): {bad['error']}[/yellow]")
     if not notes:
         raise typer.Exit(1)
 
@@ -246,8 +273,8 @@ def records_add(
           f"✅ {ref.shifra}: записів додано {len(report.added)}, оновлено {len(report.merged)}, "
           f"помилок {len(errors)}")
     if errors and not as_json:
-        for e in errors:
-            err_console.print(f"[yellow]#{e['index']}: {e['error']}[/yellow]")
+        for bad in errors:
+            err_console.print(f"[yellow]#{bad['index']}: {bad['error']}[/yellow]")
     if not recs:
         raise typer.Exit(1)
 

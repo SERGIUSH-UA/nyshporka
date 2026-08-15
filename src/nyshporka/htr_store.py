@@ -20,6 +20,7 @@ import json
 import os
 import re
 from pathlib import Path
+from typing import Any
 
 from rapidfuzz import fuzz
 
@@ -99,12 +100,13 @@ def _case_dir(name: str) -> Path | None:
     return d
 
 
-def load_meta(name: str) -> dict | None:
+def load_meta(name: str) -> dict[str, Any] | None:
     d = _case_dir(name)
     if d is None:
         return None
     try:
-        return json.loads((d / "_htr_meta.json").read_text(encoding="utf-8"))
+        meta = json.loads((d / "_htr_meta.json").read_text(encoding="utf-8"))
+        return dict(meta) if isinstance(meta, dict) else None
     except (OSError, json.JSONDecodeError):
         return None
 
@@ -115,7 +117,7 @@ _ENGINE_BY_SUFFIX = {".mlmodel": "kraken", ".pt": "parseq",
                      ".ckpt": "parseq", ".pth": "parseq"}
 
 
-def run_engine(meta: dict) -> str:
+def run_engine(meta: dict[str, Any]) -> str:
     """Рушій прогону. Мети до 2026-07-30 поля `engine` не мають — вгадуємо з
     розширення імені моделі; воно є в кожній меті, включно з прогонами старого
     `pysar_lines_infer.py`."""
@@ -150,7 +152,7 @@ PHANTOM_CONTRAST = 40.0
 
 def phantom_pages(name: str, frac: float = PHANTOM_FRAC,
                   min_lines: int = PHANTOM_MIN_LINES,
-                  contrast_max: float = PHANTOM_CONTRAST) -> dict:
+                  contrast_max: float = PHANTOM_CONTRAST) -> dict[str, Any]:
     """🪤 Сторінки, де кількість рядків НЕ підкріплена чорнилом.
 
     Навіщо. Сегментація рахує рядки за скелетом темних смуг, а не за текстом,
@@ -212,7 +214,7 @@ def phantom_pages(name: str, frac: float = PHANTOM_FRAC,
     cpl = sorted(c / ln for _, ln, c, _, _ in rows)
     mid = len(cpl) // 2
     median = cpl[mid] if len(cpl) % 2 else (cpl[mid - 1] + cpl[mid]) / 2
-    out: dict[str, dict] = {}
+    out: dict[str, dict[str, Any]] = {}
     for scan, lines, chars, contrast, enhanced in rows:
         ratio = chars / lines
         if lines < min_lines or ratio >= median * frac:
@@ -231,15 +233,15 @@ def phantom_pages(name: str, frac: float = PHANTOM_FRAC,
                        "contrast_max": contrast_max}}
 
 
-def list_cases() -> list[dict]:
+def list_cases() -> list[dict[str, Any]]:
     """Прогони з reports/htr/* — для списку в'ювера. Назва справи — з бібліотеки."""
-    out = []
+    out: list[dict[str, Any]] = []
     if not HTR_ROOT.is_dir():
         return out
     try:
         from nyshporka.library import describe_case
     except Exception:  # бібліотека не критична для списку
-        def describe_case(_p):  # type: ignore[misc]
+        def describe_case(_p: str) -> dict[str, Any] | None:  # type: ignore[misc]
             return None
     for meta_path in sorted(HTR_ROOT.glob("*/_htr_meta.json")):
         name = meta_path.parent.name
@@ -271,11 +273,11 @@ def list_cases() -> list[dict]:
     return out
 
 
-def runs_by_case_dir() -> dict[str, list[dict]]:
+def runs_by_case_dir() -> dict[str, list[dict[str, Any]]]:
     """Мапа resolved-case_dir → прогони цієї теки. Для масового збагачення пікера
     файлового браузера (десятки тек за один запит) — щоб НЕ пере-читувати всі
     `_htr_meta.json` per-тека (`list_cases()` уже це робить один раз)."""
-    out: dict[str, list[dict]] = {}
+    out: dict[str, list[dict[str, Any]]] = {}
     for c in list_cases():
         # abspath, не resolve: ключ мусить збігатися з тим, що дає `under_raw`,
         # інакше junction-справи (ф.196 на T:) не матчились би з пікером
@@ -287,7 +289,7 @@ def runs_by_case_dir() -> dict[str, list[dict]]:
     return out
 
 
-def find_runs_for_case(case: str) -> list[dict]:
+def find_runs_for_case(case: str) -> list[dict[str, Any]]:
     """Прогони, чия case_dir збігається з `case` (та сама розрізнення теки, що при
     enqueue) — щоб пікер показав «прогін уже був» ще ДО постановки в чергу."""
     case = (case or "").strip()
@@ -298,7 +300,7 @@ def find_runs_for_case(case: str) -> list[dict]:
     return runs_by_case_dir().get(str(case_dir), [])
 
 
-def case_pages(name: str) -> dict | None:
+def case_pages(name: str) -> dict[str, Any] | None:
     """Мета + сторінки прогону (для навігації в'ювера)."""
     meta = load_meta(name)
     if meta is None:
@@ -314,7 +316,7 @@ def case_pages(name: str) -> dict | None:
             "failed": meta.get("failed") or [], "pages": pages}
 
 
-def read_page_text(name: str, page: str) -> dict | None:
+def read_page_text(name: str, page: str) -> dict[str, Any] | None:
     meta = load_meta(name)
     if meta is None:
         return None
@@ -330,7 +332,7 @@ def read_page_text(name: str, page: str) -> dict | None:
             "conf": info.get("conf"), "detector": info.get("detector")}
 
 
-def page_lines(name: str, page: str) -> dict | None:
+def page_lines(name: str, page: str) -> dict[str, Any] | None:
     """🖼 Геометрія рядків сторінки — щоб в'ювер міг показати, ЗВІДКИ рядок тексту.
 
     Джерело — `<стем>.lines.json`, який пише прогін: `boxes` (AABB, ним ріжуть
@@ -416,7 +418,7 @@ def resolve_scan(name: str, page: str) -> tuple[Path, int] | None:
 
 # ── fuzzy-пошук ──────────────────────────────────────────────────────────────
 # Кеш нормалізованих токенів: name → (cache_key, [(page, line_no, raw, [(tok, norm)])])
-_CACHE: dict[str, tuple[str, list]] = {}
+_CACHE: dict[str, tuple[str, list[Any]]] = {}
 
 #: Скільки попередніх рядків тримати для склейки розірваного прізвища.
 #: 1 = лише сусідній (стара поведінка). У табличних бланках сегментація зшиває
@@ -424,7 +426,7 @@ _CACHE: dict[str, tuple[str, list]] = {}
 LINE_BREAK_WINDOW = 3
 
 
-def _case_index(name: str) -> list:
+def _case_index(name: str) -> list[Any]:
     d = _case_dir(name)
     meta_path = d / "_htr_meta.json" if d else None
     if d is None or meta_path is None or not meta_path.is_file():
@@ -509,7 +511,7 @@ def _case_index(name: str) -> list:
 
 
 def search(q: str, name: str | None = None, thresh: int = 78,
-           limit: int = 200) -> dict:
+           limit: int = 200) -> dict[str, Any]:
     """Fuzzy-пошук по текстах прогонів. `name=None` — по всіх справах."""
     stems = [_norm(w) for w in _TOKEN_RE.findall(q) if len(w) >= 3]
     stems = [s for s in stems if len(s) >= 3]
@@ -531,7 +533,9 @@ def search(q: str, name: str | None = None, thresh: int = 78,
             continue
         scanned += 1
         for page, ln_no, raw, cands in index:
-            best_sc, best_word = 0, ""
+            # 0.0, а не 0: rapidfuzz рахує у float, і ціле тут лише прикидалось
+            # би типом — поріг `thresh` порівнюється саме з цим числом.
+            best_sc, best_word = 0.0, ""
             for word, norm in cands:
                 for stem in stems:
                     # закороткий токен не може легітимно матчити довгий стем

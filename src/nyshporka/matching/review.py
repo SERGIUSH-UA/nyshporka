@@ -78,7 +78,11 @@ def review_loop(
             counters["skipped"] += 1
         elif action == "o":
             if os.name == "nt" and Path(candidate.raw_path).exists():
-                os.startfile(candidate.raw_path)  # type: ignore[attr-defined]
+                # 🔴 Подвійна позначка навмисна: `os.startfile` існує лише на
+                # Windows, тож на Linux потрібен `attr-defined`, а на Windows
+                # той самий рядок робить позначку зайвою. CI ганяє обидві
+                # платформи — без `unused-ignore` він червонітиме то тут, то там.
+                os.startfile(candidate.raw_path)  # type: ignore[attr-defined, unused-ignore]
             counters["skipped"] += 1
         elif action == "q":
             counters["quit"] += 1
@@ -127,8 +131,8 @@ def _render_candidate(
                 )
             panels.append(Panel(t, title="Proposed canonical match"))
 
-    for p in panels:
-        console.print(p)
+    for panel in panels:
+        console.print(panel)
     console.print(
         "[dim]Дія: [a]ccept  [r]eject  [s]kip  [n]ote  [o]pen raw  [q]uit[/dim]"
     )

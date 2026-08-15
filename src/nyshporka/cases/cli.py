@@ -4,9 +4,11 @@ from __future__ import annotations
 import json as _json
 import subprocess as _sp
 import sys
+from pathlib import Path
+from typing import Any
 
 import typer
-from rich.console import Console
+from rich.console import Console, JustifyMethod
 from rich.table import Table
 
 from nyshporka.cases import db
@@ -41,7 +43,7 @@ def _warn_stale() -> None:
                   f"({'; '.join(st['reasons'][:3])}) — [bold]nysh cases build[/bold]")
 
 
-def _place(row: dict) -> str:
+def _place(row: dict[str, Any]) -> str:
     """Місце для списку: розібране, а якщо розбору не вийшло — сире, з міткою `?`.
 
     Мітка потрібна, бо порожня клітинка читалась би як «місце невідоме», хоч воно
@@ -56,7 +58,7 @@ def _place(row: dict) -> str:
     return f"[dim]?[/dim] {raw}" if raw else ""
 
 
-def _years(row: dict) -> str:
+def _years(row: dict[str, Any]) -> str:
     yf, yt = row.get("year_from"), row.get("year_to")
     if yf and yt and yf != yt:
         return f"{yf}–{yt}"
@@ -221,7 +223,7 @@ def cmd_orphans(as_json: bool = typer.Option(False, "--json")) -> None:
     decided = [r for r in rows if (r.get("resolved_by") or "") == "override"]
     unresolved = [r for r in rows if (r.get("resolved_by") or "") != "override"]
 
-    def _table(items: list[dict]) -> Table:
+    def _table(items: list[dict[str, Any]]) -> Table:
         t = Table(header_style="bold")
         for col in ("прогін", "сторінок", "модель", "звідки", "case_dir у меті"):
             t.add_column(col, overflow="fold",
@@ -322,7 +324,14 @@ def _parse_key(key: str) -> tuple[str, str, str, str, str]:
         raise typer.BadParameter(str(e)) from e
 
 
-def _opys_registry_row(repo: str, fond: str, opys: str, spr: str, letter: str):
+def _opys_registry_row(repo: str, fond: str, opys: str, spr: str,
+                       letter: str) -> tuple[dict[str, Any] | None, Path]:
+    """Рядок реєстру опису ПЛЮС шлях реєстру — шлях потрібен у повідомленні.
+
+    ⚠ Пара, а не самий рядок: коли справи в реєстрі немає, користувачу треба
+    сказати, ДЕ саме її шукали, інакше «немає» не відрізнити від «реєстр
+    цього фонду не зібраний».
+    """
     return _fonds.registry_row(repo, fond, opys, spr, letter)
 
 
@@ -424,14 +433,18 @@ def cmd_fond(
 
     t = Table(header_style="bold",
               title=f"{repo.upper()} ф.{fond} — реєстр опису ({len(sel)} з {len(rows)})")
-    for col, just in (("шифра", "left"), ("назва", "left"), ("роки", "left"),
-                      ("арк.", "right"), ("скан", "left"), ("диск", "left"),
-                      ("№", "left")):
+    cols: tuple[tuple[str, JustifyMethod], ...] = (
+        ("шифра", "left"), ("назва", "left"), ("роки", "left"),
+        ("арк.", "right"), ("скан", "left"), ("диск", "left"), ("№", "left"))
+    for col, just in cols:
         t.add_column(col, justify=just)
     for r in sel[:limit]:
-        cs = r.get("commons_size")
+        # Розмір із Commons приходить і числом, і рядком, і None — тому спершу
+        # зводимо до рядка, і лише перевіривши, беремо число. Порядок важливий:
+        # `int(None)` тут упав би посеред друку таблиці.
+        cs = str(r.get("commons_size") or "")
         scan_mark = ""
-        if str(cs).isdigit() and int(cs):
+        if cs.isdigit() and int(cs):
             scan_mark = f"C {int(cs) / 2**20:.0f}М"
         elif r.get("mirror_url"):
             scan_mark = "[yellow]дзерк.[/yellow]"

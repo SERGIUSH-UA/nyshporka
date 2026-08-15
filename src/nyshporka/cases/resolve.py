@@ -21,6 +21,7 @@ import re
 from collections import defaultdict
 from dataclasses import dataclass
 from functools import lru_cache
+from typing import Any
 
 from nyshporka.cases.model import RunLink
 from nyshporka.library import ROOT, _archium_parse, dejunction, load_library, parse_case_code
@@ -90,12 +91,12 @@ class _Cand:
 class LibraryIndex:
     """Індекси бібліотеки для звірки кандидатів (fond/opys/spr, шлях, ключ)."""
 
-    def __init__(self, rows: list[dict] | None = None) -> None:
+    def __init__(self, rows: list[dict[str, Any]] | None = None) -> None:
         self.rows = rows if rows is not None else load_library()
-        self.by_key: dict[str, dict] = {}
+        self.by_key: dict[str, dict[str, Any]] = {}
         self.by_path: dict[str, str] = {}
-        self._by_fos: dict[tuple, list[str]] = defaultdict(list)
-        self._by_fs: dict[tuple, list[str]] = defaultdict(list)
+        self._by_fos: dict[tuple[Any, ...], list[str]] = defaultdict(list)
+        self._by_fs: dict[tuple[Any, ...], list[str]] = defaultdict(list)
         self._by_spr: dict[str, list[str]] = defaultdict(list)
         for e in self.rows:
             key = e.get("key")
@@ -157,7 +158,7 @@ class LibraryIndex:
 
 
 @lru_cache(maxsize=1)
-def load_overrides() -> dict:
+def load_overrides() -> dict[str, Any]:
     """Ручні рішення реєстру (git). Найвищий пріоритет — це рішення людини.
 
     Дві секції. `runs` — пряма прив'язка прогону до справи там, де автомат не може
@@ -167,23 +168,24 @@ def load_overrides() -> dict:
     до однієї справи була б вигадкою, а викидання сховало б 3390 сторінок декоду.
     """
     try:
-        return json.loads(OVERRIDES_PATH.read_text(encoding="utf-8"))
+        data = json.loads(OVERRIDES_PATH.read_text(encoding="utf-8"))
+        return dict(data)
     except Exception:
         return {}
 
 
 @lru_cache(maxsize=1)
-def _run_overrides() -> dict[str, dict]:
+def _run_overrides() -> dict[str, dict[str, Any]]:
     """ім'я прогону → рішення (з обох секцій; `bundles.runs` розгортається)."""
     data = load_overrides()
-    out: dict[str, dict] = dict(data.get("runs") or {})
+    out: dict[str, dict[str, Any]] = dict(data.get("runs") or {})
     for key, b in (data.get("bundles") or {}).items():
         for run in b.get("runs") or []:
             out.setdefault(run, {"key": key, "why": b.get("label") or ""})
     return out
 
 
-def bundles() -> dict[str, dict]:
+def bundles() -> dict[str, dict[str, Any]]:
     """Оголошені збірки: ключ → опис (для рядків реєстру, яких немає в бібліотеці)."""
     return dict(load_overrides().get("bundles") or {})
 
@@ -219,8 +221,9 @@ def _numbers(tokens: list[str]) -> list[str]:
             digits = re.sub(r"\D", "", raw)
             if glued and digits.isdigit() and _YEAR_LO <= int(digits) <= _YEAR_HI:
                 continue                          # рік у жанровому префіксі
-            if _DAVO_HEAD_RE.match(raw) and len(raw) >= 5:
-                out.append(_norm(_DAVO_HEAD_RE.match(raw).group(1)) or "")
+            head = _DAVO_HEAD_RE.match(raw)
+            if head and len(raw) >= 5:
+                out.append(_norm(head.group(1)) or "")
             else:
                 out.append(_norm(raw) or "")
     return [x for x in out if x]

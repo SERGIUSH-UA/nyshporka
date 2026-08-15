@@ -10,6 +10,7 @@ initials, родинні id-маси та об'єкт families[] для sugiyama
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Any
 
 from nyshporka.models import Family, Person
 from nyshporka.storage.reindex import (
@@ -27,7 +28,7 @@ from nyshporka.storage.reindex import (
 )
 
 
-def build_tree_graph(persons: list[Person], families: list[Family]) -> dict:
+def build_tree_graph(persons: list[Person], families: list[Family]) -> dict[str, Any]:
     """Зібрати `tree.json` з усіма полями для multi-pane UI."""
     branch_of = _connected_components(persons, families)
     lived_map = _compute_lived_all(persons, families)
@@ -43,7 +44,7 @@ def build_tree_graph(persons: list[Person], families: list[Family]) -> dict:
     ancestor_counts = _compute_relation_counts(persons, parents_of)
     descendant_counts = _compute_relation_counts(persons, children_of)
 
-    nodes: list[dict] = []
+    nodes: list[dict[str, Any]] = []
     for p in persons:
         birth = _year_of("birth", p.facts)
         death = _year_of("death", p.facts)
@@ -84,8 +85,8 @@ def build_tree_graph(persons: list[Person], families: list[Family]) -> dict:
             }
         )
 
-    links: list[dict] = _build_links(families, by_id)
-    fams: list[dict] = _build_families_list(families)
+    links: list[dict[str, Any]] = _build_links(families, by_id)
+    fams: list[dict[str, Any]] = _build_families_list(families)
     events = _build_events(persons, families)
 
     gens = [g for g in generations.values() if g is not None]
@@ -214,7 +215,7 @@ _ERA_LENGTH = 25
 
 def _compute_eras(
     persons: list[Person],
-    lived_map: dict[str, dict],
+    lived_map: dict[str, dict[str, Any]],
 ) -> dict[str, int]:
     """Era index = (lived_from - anchor) // 25. None якщо немає жодної дати.
 
@@ -253,7 +254,7 @@ def _compute_relation_counts(
 # ----- фото та ініціали -----------------------------------------------------
 
 
-def _select_photo(p: Person) -> dict:
+def _select_photo(p: Person) -> dict[str, Any]:
     """Перше photo з media. Не редагує — для приватних робить redact layer."""
     for m in p.media:
         if m.type != "photo":
@@ -281,9 +282,9 @@ def _initials(p: Person) -> str:
 # ----- links ----------------------------------------------------------------
 
 
-def _build_links(families: list[Family], by_id: dict[str, Person]) -> list[dict]:
+def _build_links(families: list[Family], by_id: dict[str, Person]) -> list[dict[str, Any]]:
     """Parent + spouse links у форматі, готовому для dagre+D3."""
-    links: list[dict] = []
+    links: list[dict[str, Any]] = []
     seen_spouses: set[tuple[str, str]] = set()
     for fam in families:
         marriage = _marriage_fact(fam)
@@ -326,7 +327,8 @@ def _build_links(families: list[Family], by_id: dict[str, Person]) -> list[dict]
             for wife, w_hyp in all_wives:
                 if husband not in by_id or wife not in by_id:
                     continue
-                pair = tuple(sorted([husband, wife]))
+                lo, hi = sorted([husband, wife])
+                pair = (lo, hi)
                 if pair in seen_spouses:
                     continue
                 seen_spouses.add(pair)
@@ -351,9 +353,9 @@ def _build_links(families: list[Family], by_id: dict[str, Person]) -> list[dict]
 # ----- families[] -----------------------------------------------------------
 
 
-def _build_families_list(families: list[Family]) -> list[dict]:
+def _build_families_list(families: list[Family]) -> list[dict[str, Any]]:
     """Структура `families[]` для рендерера: пара + діти + статус шлюбу."""
-    out: list[dict] = []
+    out: list[dict[str, Any]] = []
     for fam in families:
         marriage = _marriage_fact(fam)
         marriage_year = None

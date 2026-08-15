@@ -11,6 +11,10 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 from rapidfuzz import fuzz
 
@@ -20,10 +24,10 @@ from nyshporka.utils.translit import normalize_archival
 _TOKEN_RE = re.compile(r"[^\s.,;:()\[\]{}/\\|«»\"'’—–-]+")
 
 # path(str) → (mtime_ns, index-dict)
-_CACHE: dict[str, tuple[int, dict]] = {}
+_CACHE: dict[str, tuple[int, dict[str, Any]]] = {}
 
 
-def _iter_files(case_key: str | None = None):
+def _iter_files(case_key: str | None = None) -> Iterator[Path]:
     root = store.PAGES_ROOT
     if not root.is_dir():
         return
@@ -38,7 +42,7 @@ def _iter_files(case_key: str | None = None):
             yield p
 
 
-def _index(path: Path) -> dict | None:
+def _index(path: Path) -> dict[str, Any] | None:
     """Індекс одного файлу справи: сирі + нормалізовані рядки для скорингу."""
     try:
         mtime = path.stat().st_mtime_ns
@@ -81,7 +85,8 @@ def _stems(q: str) -> list[str]:
 
 
 def _score(norm: str, stems: list[str]) -> int:
-    best = 0
+    # 0.0, а не 0: rapidfuzz рахує у float, і ціле тут лише прикидалося б типом.
+    best = 0.0
     for stem in stems:
         # закороткий рядок не може легітимно матчити довгий стем (гард htr_store)
         if len(norm) < max(4, int(len(stem) * 0.6)):
@@ -94,7 +99,7 @@ def _score(norm: str, stems: list[str]) -> int:
 
 
 def grep_surnames(q: str, thresh: int = 80, case_key: str | None = None,
-                  places: bool = False, limit: int = 200) -> dict:
+                  places: bool = False, limit: int = 200) -> dict[str, Any]:
     """Fuzzy по всіх збережених прізвищах (або місцях) усіх справ."""
     stems = _stems(q)
     if not stems:
@@ -121,7 +126,7 @@ def grep_surnames(q: str, thresh: int = 80, case_key: str | None = None,
 
 def grep_records(q: str, thresh: int = 80, case_key: str | None = None,
                  role: str | None = None, rtype: str | None = None,
-                 limit: int = 200) -> dict:
+                 limit: int = 200) -> dict[str, Any]:
     """Fuzzy по учасниках записів (RecordPerson.surname, fallback — хвіст name)."""
     stems = _stems(q)
     if not stems:

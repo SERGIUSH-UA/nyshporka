@@ -27,6 +27,7 @@ import re
 import time
 import unicodedata
 from pathlib import Path
+from typing import Any
 
 # 🔴 Символи, яких у рукописі XIX ст. не буває ФІЗИЧНО, — службові маркери
 # конфлікту з LLM-злиття (`‹26|20›`). Одного разу вони протекли у трен-корпус
@@ -42,7 +43,7 @@ def clean_pysar_text(s: str) -> str:
     return " ".join(_JUNK.sub(" ", s).split())
 
 
-def load_pysar(ckpt: Path, device: str):
+def load_pysar(ckpt: Path, device: str) -> Any:
     """best.pt (model_state+charset+config) + код baudm/parseq (strhub).
 
     Гіперпараметри архітектури беруться з чекпойнта, а не з дефолтів PARSeq —
@@ -129,7 +130,7 @@ def main() -> int:
             continue
         tensors = []
         for c in crops:
-            im = Image.open(c).convert("RGB").resize((w, h), Image.LANCZOS)
+            im = Image.open(c).convert("RGB").resize((w, h), Image.Resampling.LANCZOS)
             arr = (np.asarray(im, dtype="float32") / 255.0 - 0.5) / 0.5
             tensors.append(torch.from_numpy(arr).permute(2, 0, 1))
 

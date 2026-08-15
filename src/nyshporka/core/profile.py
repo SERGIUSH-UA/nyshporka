@@ -23,6 +23,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from functools import lru_cache
+from pathlib import Path
 from typing import Any
 
 import yaml
@@ -111,8 +112,8 @@ class ResearchProfile:
     anchors: dict[str, tuple[int, str, str]] = field(default_factory=dict)
     #: Приймачі самоперевірки пошуку — сторінки, знайдені оком і внесені в канон.
     selftest: dict[str, Any] = field(default_factory=dict)
-    places: tuple[dict, ...] = ()
-    archives: tuple[dict, ...] = ()
+    places: tuple[dict[str, Any], ...] = ()
+    archives: tuple[dict[str, Any], ...] = ()
 
     # ── похідні таблиці ──────────────────────────────────────────────────────
     @property
@@ -176,7 +177,7 @@ class ResearchProfile:
 
 
 # ── читання конфігу ──────────────────────────────────────────────────────────
-def _deep_merge(base: dict, over: dict) -> dict:
+def _deep_merge(base: dict[str, Any], over: dict[str, Any]) -> dict[str, Any]:
     out = dict(base)
     for k, v in over.items():
         out[k] = _deep_merge(out[k], v) if isinstance(v, dict) and isinstance(
@@ -184,19 +185,19 @@ def _deep_merge(base: dict, over: dict) -> dict:
     return out
 
 
-def config_path():
+def config_path() -> Path:
     return workspace().config / CONFIG_NAME
 
 
 @lru_cache(maxsize=1)
-def _raw() -> dict:
+def _raw() -> dict[str, Any]:
     path = config_path()
     if not path.is_file():
         return {"defaults": {}, "profiles": {}, "fallback": ""}
     return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
 
 
-def available() -> list[dict]:
+def available() -> list[dict[str, Any]]:
     raw = _raw()
     return [{"name": n, "display": (b or {}).get("display", ""),
              "extends": (b or {}).get("extends", "")}
@@ -215,7 +216,7 @@ def _pairs(value: Any) -> tuple[tuple[str, float], ...]:
     return tuple(out)
 
 
-def _build(name: str, body: dict) -> ResearchProfile:
+def _build(name: str, body: dict[str, Any]) -> ResearchProfile:
     sur = body.get("surname") or {}
     return ResearchProfile(
         name=name,
@@ -262,7 +263,7 @@ def resolve(name: str | None = None) -> ResearchProfile:
         if cur and cur not in profiles:
             raise ProfileError(f"«{chain[-1]}» успадковує невідомий профіль «{cur}»")
 
-    body: dict = dict(raw.get("defaults") or {})
+    body: dict[str, Any] = dict(raw.get("defaults") or {})
     for nm in reversed(chain):
         body = _deep_merge(body, profiles.get(nm) or {})
     return _build(target, body)

@@ -11,6 +11,7 @@ import sqlite3
 from dataclasses import asdict, fields
 from datetime import UTC, datetime, timezone  # noqa: F401  (timezone — у staleness)
 from pathlib import Path
+from typing import Any
 
 from nyshporka.cases.collect import collect_rows
 from nyshporka.cases.model import CaseRow
@@ -63,7 +64,7 @@ CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
 """
 
 
-def _row_values(row: CaseRow) -> dict:
+def _row_values(row: CaseRow) -> dict[str, Any]:
     d = asdict(row)
     for f in _JSON_FIELDS:
         d[f] = json.dumps(d.get(f) or [], ensure_ascii=False)
@@ -74,7 +75,7 @@ def _row_values(row: CaseRow) -> dict:
 
 
 def build_index(db_path: Path | None = None,
-                index: LibraryIndex | None = None) -> dict:
+                index: LibraryIndex | None = None) -> dict[str, Any]:
     """Зібрати реєстр і перезаписати базу. Повертає підсумок для друку."""
     path = Path(db_path or DB_PATH)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -128,7 +129,9 @@ _GEO_SUFFIXES = ("skogo", "skomu", "skoi", "skii", "skij", "skiy", "ska", "skoy"
 
 def _geo_root(value: str) -> str:
     """Нормалізована форма без суфікса прикметника: `olgopilskii` → `olgopil`."""
-    from nyshporka.cases.geo import normalize_for_matching
+    # Беремо з першоджерела, а не через `cases.geo`: там воно лише реекспорт,
+    # і імпорт «крізь» модуль ховає справжню залежність.
+    from nyshporka.utils.translit import normalize_for_matching
     v = normalize_for_matching(value or "")
     for suf in _GEO_SUFFIXES:
         if v.endswith(suf) and len(v) - len(suf) >= 4:
@@ -172,7 +175,7 @@ def query_rows(q: str = "", repo: str = "", state: str = "", htr: str = "",
                fuzzy: str = "", year: str = "", place: str = "", doc: str = "",
                verdict: str = "", curated: bool = False, kind: str = "",
                uezd: str = "", settlement: str = "", place_id: str = "",
-               limit: int = 0, db_path: Path | None = None) -> list[dict]:
+               limit: int = 0, db_path: Path | None = None) -> list[dict[str, Any]]:
     """Рядки реєстру за фільтрами. Порожній фільтр не звужує вибірку."""
     where: list[str] = []
     args: dict[str, object] = {}
@@ -253,7 +256,7 @@ def query_rows(q: str = "", repo: str = "", state: str = "", htr: str = "",
     return rows
 
 
-def orphan_runs(db_path: Path | None = None) -> list[dict]:
+def orphan_runs(db_path: Path | None = None) -> list[dict[str, Any]]:
     con = _connect(db_path)
     try:
         return [dict(r) for r in con.execute(
@@ -262,7 +265,7 @@ def orphan_runs(db_path: Path | None = None) -> list[dict]:
         con.close()
 
 
-def staleness(db_path: Path | None = None) -> dict:
+def staleness(db_path: Path | None = None) -> dict[str, Any]:
     """Чи відстав реєстр від своїх джерел — і від яких саме.
 
     🔴 Навіщо це в коді, а не лише в інструкції. Реєстр — derived-зріз п'яти
@@ -330,7 +333,7 @@ def staleness(db_path: Path | None = None) -> dict:
     return {"built": built_raw, "stale": bool(reasons), "reasons": reasons}
 
 
-def index_meta(db_path: Path | None = None) -> dict:
+def index_meta(db_path: Path | None = None) -> dict[str, Any]:
     con = _connect(db_path)
     try:
         return {r["key"]: r["value"] for r in con.execute("SELECT key, value FROM meta")}
@@ -338,15 +341,18 @@ def index_meta(db_path: Path | None = None) -> dict:
         con.close()
 
 
-def stats(db_path: Path | None = None) -> dict:
+def stats(db_path: Path | None = None) -> dict[str, Any]:
     """Зведення реєстру — те, що вчора збиралося вручну шістьма запитами."""
     con = _connect(db_path)
     try:
-        one = lambda sql: con.execute(sql).fetchone()[0]  # noqa: E731
+        def one(sql: str) -> int:
+            return int(con.execute(sql).fetchone()[0])
+
         # 🔴 Скрізь `kind='case'`: кадри збірки — ті самі файли, що й у її справах,
         # тож в одному підсумку вони подвоїли б сторінки. Збірки рахуються окремо.
         c = "WHERE kind = 'case'"
-        out = {
+        # Зведення неоднорідне за побудовою: числа плюс розрізи списками.
+        out: dict[str, Any] = {
             "cases": one(f"SELECT count(*) FROM cases {c}"),
             "frames": one(f"SELECT coalesce(sum(frames), 0) FROM cases {c}"),
             "ordered": one(f"SELECT count(*) FROM cases {c} AND state = 'ordered'"),

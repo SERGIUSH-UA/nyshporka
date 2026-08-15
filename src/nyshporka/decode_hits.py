@@ -32,6 +32,7 @@ import json
 import os
 from datetime import date
 from pathlib import Path
+from typing import Any
 
 from nyshporka.core.workspace import workspace
 
@@ -51,7 +52,7 @@ VERDICTS = {
 }
 
 
-def load() -> dict:
+def load() -> dict[str, Any]:
     """Увесь реєстр. Порожній скелет, якщо файлу ще немає."""
     if not HITS_PATH.exists():
         return {"version": 1, "cases": {}}
@@ -60,17 +61,17 @@ def load() -> dict:
     except (json.JSONDecodeError, OSError):
         return {"version": 1, "cases": {}}
     data.setdefault("cases", {})
-    return data
+    return dict(data)
 
 
-def save(data: dict) -> Path:
+def save(data: dict[str, Any]) -> Path:
     HITS_PATH.parent.mkdir(parents=True, exist_ok=True)
     HITS_PATH.write_text(
         json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return HITS_PATH
 
 
-def cases() -> list[dict]:
+def cases() -> list[dict[str, Any]]:
     """Справи з хітами + лічильники — для списку у вкладці «👁 Гортач»."""
     out = []
     for key, case in load()["cases"].items():
@@ -91,7 +92,7 @@ def cases() -> list[dict]:
     return out
 
 
-def case_hits(key: str) -> dict | None:
+def case_hits(key: str) -> dict[str, Any] | None:
     """Справа з хітами. `scan_index` — позиція скана у теці, для гортання контексту."""
     case = load()["cases"].get(key)
     if not case:
@@ -148,7 +149,7 @@ def _inside_repo(path: str | Path) -> Path | None:
     return under_raw(path)
 
 
-def set_verdict(key: str, scan: str, verdict: str | None, note: str = "") -> dict:
+def set_verdict(key: str, scan: str, verdict: str | None, note: str = "") -> dict[str, Any]:
     """Вердикт людини по конкретному скану. verdict=None — зняти (повернути в чергу)."""
     if verdict and verdict not in VERDICTS:
         raise ValueError(f"невідомий вердикт: {verdict} (треба {', '.join(VERDICTS)})")
@@ -162,12 +163,12 @@ def set_verdict(key: str, scan: str, verdict: str | None, note: str = "") -> dic
             h["verdict_note"] = note
             h["verdict_date"] = date.today().isoformat() if verdict else ""
             save(data)
-            return h
+            return dict(h)
     raise ValueError(f"скана «{scan}» немає серед хітів справи «{key}»")
 
 
 def add_case(key: str, path: str, shifra: str = "", title: str = "",
-             hits: list[dict] | None = None, replace: bool = False) -> dict:
+             hits: list[dict[str, Any]] | None = None, replace: bool = False) -> dict[str, Any]:
     """Внести справу з хітами. За замовчуванням ДОПИСУЄ, зберігаючи чужі вердикти.
 
     Вердикт людини — дорожчий за будь-який машинний результат, тож повторний декод
@@ -205,4 +206,4 @@ def add_case(key: str, path: str, shifra: str = "", title: str = "",
         existing[scan] = merged
     case["hits"] = sorted(existing.values(), key=lambda h: h["scan"])
     save(data)
-    return case
+    return dict(case)

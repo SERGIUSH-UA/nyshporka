@@ -31,6 +31,7 @@ import tomllib
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
+from typing import Any
 
 MARKER = "nyshporka.toml"
 
@@ -155,7 +156,7 @@ class Workspace:
 
 
 # ── резолвер ─────────────────────────────────────────────────────────────────
-def _read_marker(path: Path) -> dict:
+def _read_marker(path: Path) -> dict[str, Any]:
     try:
         with path.open("rb") as fh:
             return (tomllib.load(fh) or {}).get("workspace") or {}

@@ -11,8 +11,21 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
-from nyshporka.models import Family, Person, Place, RegionRegistry, Source, load_regions
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+from nyshporka.models import (
+    Citation,
+    Fact,
+    Family,
+    Person,
+    Place,
+    RegionRegistry,
+    Source,
+    load_regions,
+)
 from nyshporka.storage.files import read_family, read_person, read_place, read_source
 
 # `build_tree_graph` живе в окремому модулі (нова multi-pane візуалізація).
@@ -251,7 +264,7 @@ _COVERAGE_RECORD_TYPES = [
 ]
 
 
-def _build_coverage(sources: list[Source], registry: RegionRegistry) -> dict:
+def _build_coverage(sources: list[Source], registry: RegionRegistry) -> dict[str, Any]:
     """coverage.json: реєстр регіонів + сирі спани джерел (rollup рахує клієнт)."""
     valid_codes = registry.codes()
     bad: list[str] = []
@@ -413,21 +426,24 @@ def _write_sqlite(
             )
 
     facts_count = 0
+    # `fid` вище — це ID РОДИНИ (рядок), а тут rowid вставленого факту (число).
+    # Різні сутності під одним іменем в одній функції; окреме ім'я коштує нічого.
     for p in persons:
         for fact in p.facts:
-            fid = _insert_fact(cur, fact, person_id=p.id)
-            _insert_citations(cur, fid, fact.citations)
+            fact_row = _insert_fact(cur, fact, person_id=p.id)
+            _insert_citations(cur, fact_row, fact.citations)
             facts_count += 1
     for fam in families:
         for fact in fam.facts:
-            fid = _insert_fact(cur, fact, family_id=fam.id)
-            _insert_citations(cur, fid, fact.citations)
+            fact_row = _insert_fact(cur, fact, family_id=fam.id)
+            _insert_citations(cur, fact_row, fact.citations)
             facts_count += 1
 
     return facts_count
 
 
-def _insert_fact(cur: sqlite3.Cursor, fact, *, person_id=None, family_id=None) -> int:
+def _insert_fact(cur: sqlite3.Cursor, fact: Fact, *, person_id: str | None = None,
+                 family_id: str | None = None) -> int:
     date = fact.date
     cur.execute(
         "INSERT INTO facts ("
@@ -449,7 +465,8 @@ def _insert_fact(cur: sqlite3.Cursor, fact, *, person_id=None, family_id=None) -
     return cur.lastrowid  # type: ignore[return-value]
 
 
-def _insert_citations(cur: sqlite3.Cursor, fact_id: int, citations) -> None:
+def _insert_citations(cur: sqlite3.Cursor, fact_id: int,
+                      citations: list[Citation]) -> None:
     for c in citations:
         cur.execute(
             "INSERT INTO citations "
@@ -478,17 +495,17 @@ _CONF_WEIGHT = {
 }
 
 
-def _weakest_confidence(confs: list[str]) -> str | None:
+def _weakest_confidence(confs: Sequence[str]) -> str | None:
     """Найслабша confidence зі списку (за _CONF_WEIGHT). None якщо порожньо."""
     if not confs:
         return None
-    return min(confs, key=lambda c: _CONF_WEIGHT.get(c, 99))
+    return str(min(confs, key=lambda c: _CONF_WEIGHT.get(c, 99)))
 
 
-def _year_of(fact_type: str, facts: list) -> str | None:
+def _year_of(fact_type: str, facts: list[Any]) -> str | None:
     for f in facts:
         if f.type == fact_type and f.date and f.date.value[:4].isdigit():
-            return f.date.value[:4]
+            return str(f.date.value[:4])
     return None
 
 
@@ -498,22 +515,22 @@ def _decade_of(year: str | None) -> str | None:
     return f"{int(year) // 10 * 10}s"
 
 
-def _person_confidences(p) -> list[str]:
+def _person_confidences(p: Person) -> list[str]:
     return [c.confidence for f in p.facts for c in f.citations]
 
 
-def _has_disputed(facts: list) -> bool:
+def _has_disputed(facts: list[Any]) -> bool:
     return any(f.status == "disputed" for f in facts)
 
 
-def _marriage_fact(family) -> object | None:
+def _marriage_fact(family: Family) -> Fact | None:
     for f in family.facts:
         if f.type == "marriage":
             return f
     return None
 
 
-def _spouse_attrs(marriage_fact) -> dict:
+def _spouse_attrs(marriage_fact: Fact | None) -> dict[str, Any]:
     """status + confidence для spouse-ребра.
 
     `Family.husband + wife` — структурне твердження «вони подружжя» (з GEDCOM
@@ -538,7 +555,7 @@ def _spouse_attrs(marriage_fact) -> dict:
     return {"status": status, "confidence": weakest}
 
 
-def _parent_attrs(marriage_fact) -> dict:
+def _parent_attrs(marriage_fact: Fact | None) -> dict[str, Any]:
     """status + confidence для parent-ребра.
 
     Структурне твердження «X — дитина цих батьків» (з Family.children)
@@ -598,16 +615,20 @@ def _connected_components(
         components.setdefault(root, []).append(p)
 
     branch_of: dict[str, str] = {}
-    for members in components.values():
-        rootless = [p for p in members if not p.parent_family]
-        candidates = rootless or members
+    # Ім'я `members` вище вже зайняте списком ІДЕНТИФІКАТОРІВ, а тут це список
+    # осіб. Одне ім'я на дві різні речі в одній функції — саме те, через що
+    # перевіряч не міг довести жодного доступу до поля, і саме те, що людина
+    # читає неправильно.
+    for people in components.values():
+        rootless = [p for p in people if not p.parent_family]
+        candidates = rootless or people
 
-        def sort_key(p: Person):
+        def sort_key(p: Person) -> tuple[str, str]:
             birth = _year_of("birth", p.facts) or "9999"
             return (birth, p.id)
 
         chosen = min(candidates, key=sort_key)
-        for m in members:
+        for m in people:
             branch_of[m.id] = chosen.id
 
     return branch_of
@@ -625,9 +646,9 @@ _EVENT_LABELS = {
 }
 
 
-def _build_events(persons: list[Person], families: list[Family]) -> list[dict]:
+def _build_events(persons: list[Person], families: list[Family]) -> list[dict[str, Any]]:
     """Зібрати ключові події роду з фактів — для timeline під графом."""
-    events: list[dict] = []
+    events: list[dict[str, Any]] = []
     for p in persons:
         for f in p.facts:
             if f.type not in _EVENT_FACT_TYPES and f.status != "disputed":
@@ -684,7 +705,7 @@ _MAX_FUTURE_PRIVATE = _CURRENT_YEAR + 80
 _MAX_FUTURE_PUBLIC = _CURRENT_YEAR
 
 
-def _exact_year_with_q(fact_type: str, facts: list) -> tuple[int | None, str | None]:
+def _exact_year_with_q(fact_type: str, facts: list[Any]) -> tuple[int | None, str | None]:
     """Перший факт типу + його qualifier ('exact'/'about'/...)."""
     for f in facts:
         if f.type == fact_type and f.date and f.date.value[:4].isdigit():
@@ -692,7 +713,7 @@ def _exact_year_with_q(fact_type: str, facts: list) -> tuple[int | None, str | N
     return None, None
 
 
-def _life_fact_year_range(facts: list) -> tuple[int | None, int | None]:
+def _life_fact_year_range(facts: list[Any]) -> tuple[int | None, int | None]:
     """Min/max рік серед датованих life-фактів (occupation, education...).
     Враховує range_end, ігнорує birth/death."""
     years: list[int] = []
@@ -713,7 +734,7 @@ def _life_fact_year_range(facts: list) -> tuple[int | None, int | None]:
     return min(years), max(years)
 
 
-def _compute_own_lived(p: Person) -> dict:
+def _compute_own_lived(p: Person) -> dict[str, Any]:
     """lived_from/to з власних даних особи (без родичів).
     Повертає {'from': int|None, 'to': int|None, 'certainty': str, 'method': str}."""
     if p.floruit:
@@ -799,10 +820,10 @@ def _build_family_graph_index(
 
 def _compute_lived_all(
     persons: list[Person], families: list[Family]
-) -> dict[str, dict]:
+) -> dict[str, dict[str, Any]]:
     """Повна карта person_id → {from, to, certainty, method}.
     Pass 1: власні факти. Pass 2+: поширення через generation gap і spouse."""
-    lived: dict[str, dict] = {p.id: _compute_own_lived(p) for p in persons}
+    lived: dict[str, dict[str, Any]] = {p.id: _compute_own_lived(p) for p in persons}
     parents_of, children_of, spouses_of = _build_family_graph_index(families)
     by_id = {p.id: p for p in persons}
 
@@ -867,7 +888,7 @@ def _compute_lived_all(
     return lived
 
 
-def _build_graph(persons: list[Person], families: list[Family]) -> dict:
+def _build_graph(persons: list[Person], families: list[Family]) -> dict[str, Any]:
     branch_of = _connected_components(persons, families)
     lived_map = _compute_lived_all(persons, families)
 
@@ -934,7 +955,8 @@ def _build_graph(persons: list[Person], families: list[Family]) -> dict:
 
         for husband, h_hyp in all_husbands:
             for wife, w_hyp in all_wives:
-                pair = tuple(sorted([husband, wife]))
+                lo, hi = sorted([husband, wife])
+                pair = (lo, hi)
                 if pair in seen_spouses:
                     continue
                 seen_spouses.add(pair)
@@ -982,9 +1004,9 @@ def _classify_region(admin: list[str] | None) -> str:
 def _build_geojson(
     places: list[Place],
     persons: list[Person],
-    lived_map: dict[str, dict],
-) -> dict:
-    place_persons: dict[str, list[dict]] = {pl.id: [] for pl in places}
+    lived_map: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    place_persons: dict[str, list[dict[str, Any]]] = {pl.id: [] for pl in places}
     for p in persons:
         lived = lived_map.get(p.id, {})
         for f in p.facts:

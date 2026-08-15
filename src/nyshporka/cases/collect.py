@@ -9,6 +9,10 @@ import json
 import re
 import sqlite3
 from collections import defaultdict
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 from nyshporka.cases.geo import (
     geo_blob,
@@ -78,7 +82,7 @@ def _model_voice(model: str, engine: str) -> list[tuple[str, str]]:
     return out
 
 
-def _iter_htr_runs():
+def _iter_htr_runs() -> Iterator[tuple[str, dict[str, Any]]]:
     """(ім'я прогону, мета) для кожної теки з `_htr_meta.json`."""
     if not HTR_ROOT.is_dir():
         return
@@ -91,7 +95,7 @@ def _iter_htr_runs():
             yield meta_path.parent.name, meta
 
 
-def _engine_of(meta: dict) -> str:
+def _engine_of(meta: dict[str, Any]) -> str:
     model = str(meta.get("model") or "")
     if ".pt" in model:
         return "parseq"
@@ -100,13 +104,13 @@ def _engine_of(meta: dict) -> str:
     return str(meta.get("engine") or "")
 
 
-def _ordered_cases(index: LibraryIndex) -> list[dict]:
+def _ordered_cases(index: LibraryIndex) -> list[dict[str, Any]]:
     """Теки з карткою справи, але БЕЗ кадрів — «замовлено, не завантажено».
 
     Бібліотека їх не бачить за побудовою (вимагає зображень або PDF), і саме через
     це сім справ ДАОО по парафії Фараонівка не потрапили у вчорашню інвентаризацію.
     """
-    out: list[dict] = []
+    out: list[dict[str, Any]] = []
     if not RAW_DIR.is_dir():
         return out
     seen: set[str] = set()
@@ -202,7 +206,7 @@ def _unfiled_material(index: LibraryIndex, known: set[str]) -> list[tuple[str, i
     return out
 
 
-def _sidecar_near(rel: str) -> dict:
+def _sidecar_near(rel: str) -> dict[str, Any]:
     """Опис справи з сайдкара теки АБО її батьківської теки.
 
     🔴 Кадри часто лежать у підтеці, а сайдкар — на рівень вище:
@@ -246,14 +250,15 @@ def _sidecar_near(rel: str) -> dict:
     return {}
 
 
-def _to_year(v) -> int | None:
+def _to_year(v: Any) -> int | None:
     s = str(v or "").strip()[:4]
     return int(s) if s.isdigit() else None
 
 
-def _clan_runs() -> dict[str, dict]:
+def _clan_runs() -> dict[str, dict[str, Any]]:
     try:
-        return json.loads(CLAN_STATE.read_text(encoding="utf-8")).get("runs", {})
+        runs = json.loads(CLAN_STATE.read_text(encoding="utf-8")).get("runs", {})
+        return dict(runs)
     except Exception:
         return {}
 
@@ -288,7 +293,7 @@ def _pages_counts() -> dict[str, tuple[int, int]]:
     return out
 
 
-def _canon_counts() -> dict[str, dict]:
+def _canon_counts() -> dict[str, dict[str, Any]]:
     """source_id → {facts, persons, scans}. Читає derived-базу, не canonical MD.
 
     🔴 Аркуші рахуються з `citations.page` **і** з тексту цитати/примітки («спр.99
@@ -297,7 +302,7 @@ def _canon_counts() -> dict[str, dict]:
     `media[]` тут НЕ враховано — вона не має `source_id`, тож прив'язка до справи
     була б здогадом; це відома неповнота, а не забутий шар.
     """
-    out: dict[str, dict] = {}
+    out: dict[str, dict[str, Any]] = {}
     if not DERIVED_DB.is_file():
         return out
     try:
@@ -312,7 +317,7 @@ def _canon_counts() -> dict[str, dict]:
         return out
     finally:
         con.close()
-    agg: dict[str, dict] = defaultdict(
+    agg: dict[str, dict[str, Any]] = defaultdict(
         lambda: {"facts": 0, "persons": set(), "scans": set()})
     for source_id, person_id, page, quote, note in rows:
         if not source_id:
@@ -375,7 +380,7 @@ def _fuzzy_stage(row: CaseRow) -> str:
     return "reviewed" if row.fuzzy_reviewed else "scanned"
 
 
-def collect_rows(index: LibraryIndex | None = None) -> tuple[list[CaseRow], list]:
+def collect_rows(index: LibraryIndex | None = None) -> tuple[list[CaseRow], list[Any]]:
     """Зібрати реєстр. Повертає (рядки справ, нерозв'язані прив'язки прогонів)."""
     idx = index or LibraryIndex()
     rows: dict[str, CaseRow] = {}
@@ -503,7 +508,7 @@ def collect_rows(index: LibraryIndex | None = None) -> tuple[list[CaseRow], list
             why="матеріал на диску без шифри справи — сайдкар не несе фонд/справу",
         )
 
-    orphans: list = []
+    orphans: list[Any] = []
 
     # 🔴 Прогін пошуку роду й HTR-прогін — ОДНА Й ТА САМА тека `reports/htr/<run>`,
     # тож і справа в них мусить бути одна. Доти HTR-гілка резолвилась із `case_dir`
@@ -571,26 +576,29 @@ def collect_rows(index: LibraryIndex | None = None) -> tuple[list[CaseRow], list
         if parsed:
             by_case_sid[f"{parsed[0]}/{parsed[1]}/{parsed[3]}"].append(sid)
     for key, sids in by_case_sid.items():
-        row = rows.get(key)
-        if not row:
+        # Окремі імена в цих трьох циклах: вище в цій же функції `row` уже
+        # зв'язане як CaseRow без None, тож перевіряч не бачив тутешньої гілки
+        # «такої справи в реєстрі немає» — а вона тут головна.
+        canon_row = rows.get(key)
+        if not canon_row:
             continue
-        row.canon_facts = sum(canon[s]["facts"] for s in sids)
-        row.canon_persons = max(canon[s]["persons"] for s in sids)
-        row.canon_scans = sum(canon[s]["scans"] for s in sids)
-        row.canon_source_id = row.canon_source_id or sids[0]
+        canon_row.canon_facts = sum(canon[s]["facts"] for s in sids)
+        canon_row.canon_persons = max(canon[s]["persons"] for s in sids)
+        canon_row.canon_scans = sum(canon[s]["scans"] for s in sids)
+        canon_row.canon_source_id = canon_row.canon_source_id or sids[0]
 
     # ── око ─────────────────────────────────────────────────────────────────
     for key, (noted, full) in _pages_counts().items():
-        row = rows.get(key)
-        if row:
-            row.pages_noted, row.pages_full = noted, full
+        seen_row = rows.get(key)
+        if seen_row:
+            seen_row.pages_noted, seen_row.pages_full = noted, full
 
     # ── людські вердикти ────────────────────────────────────────────────────
     for key, v in load_verdicts().items():
-        row = rows.get(key)
-        if row:
-            row.verdict = str(v.get("verdict") or "")
-            row.verdict_note = str(v.get("note") or "")
+        verdict_row = rows.get(key)
+        if verdict_row:
+            verdict_row.verdict = str(v.get("verdict") or "")
+            verdict_row.verdict_note = str(v.get("note") or "")
 
     # ── дозаповнення опису із сайдкара ──────────────────────────────────────
     # Бібліотека бере назву лише з поля `title`, а сайдкари ДАОО описують справу
