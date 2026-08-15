@@ -206,10 +206,16 @@ async def _start_read(bus: JobBus, ws: Workspace,
                   out_dir=payload.get("out_dir") or "",
                   script=str(payload.get("script") or ""),
                   second_voice=bool(payload.get("second_voice", True)))
+    # 🔴 Шифра береться З ТЕКИ, коли її не передали. Прогін без шифри стає в
+    # реєстрі «нічиїм»: він є, текст є, а до якої справи належить — невідомо,
+    # і зшивати це потім доводиться правкою JSON руками. З консолі шифру ніхто
+    # не вводить (форма читання питає лише теку), тож без цього КОЖЕН запуск
+    # кнопкою давав нічию — при тому, що опис лежить у тій самій теці.
+    case_key = str(payload.get("case_key") or "") or _key_from_folder(plan.case_dir)
     job, created = await bus.enqueue(
         "read",
         title=f"{plan.case_dir.name}: {plan.frames} кадрів, {plan.model.name}",
-        cfg={**plan.as_dict(), "case_key": payload.get("case_key") or ""},
+        cfg={**plan.as_dict(), "case_key": case_key},
         # Ключ — тека виходу: повторний запит на ту саму справу має віддати те
         # саме завдання, а не другий прогін, що б'ється з першим за карту.
         idempotency_key=f"read:{plan.out_dir}",
@@ -218,6 +224,22 @@ async def _start_read(bus: JobBus, ws: Workspace,
         _keep(asyncio.create_task(_run_read(bus, job, plan,
                                             str(payload.get("case_key") or ""))))
     return job
+
+
+def _key_from_folder(case_dir: Path) -> str:
+    """Шифра з опису, що лежить у теці справи.
+
+    Опис їде В ТЕЦІ саме для таких випадків: усе, що треба знати про матеріал,
+    подорожує разом із ним. Немає опису — повертаємо порожнє, і прогін чесно
+    лишається нічиїм: вигадувати шифру з імені теки не можна, бо приписаний не
+    тій справі текст гірший за неприписаний.
+    """
+    try:
+        from nyshporka.cases.register import read_sidecar
+
+        return str(read_sidecar(case_dir).get("shifra") or "")
+    except Exception:
+        return ""
 
 
 async def _run_read(bus: JobBus, job: JobRecord, plan: Any,

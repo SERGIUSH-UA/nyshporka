@@ -322,7 +322,13 @@ def search_run(a: SearchArgs) -> Envelope:
         res = htr_store.search(a.q, name=a.case or None, thresh=a.thresh,
                                limit=a.limit)
         runs = htr_store.list_cases()
-        pages = sum(int(c.get("pages") or 0) for c in runs)
+        # 🔴 Ключ називається `pages_done`. Поки тут стояло `pages`, знаменник
+        # був ТОТОЖНО НУЛЬОВИЙ: на просторі з 506 прогонами й 320 669
+        # прочитаними сторінками відповідь звучала «не знайшлось у 506
+        # прогонах (0 сторінок)». Це не описка у виводі, а зруйноване головне
+        # правило: нуль подавався зі знаменником, який сам був нулем, тобто
+        # читався як «нічого не прочитано» — і закривав напрям пошуку.
+        pages = sum(int(c.get("pages_done") or c.get("pages") or 0) for c in runs)
         env = ok({"hits": res.get("hits") or [],
                   "coverage": {"runs": res.get("cases") or len(runs),
                                "pages": pages, "thresh": a.thresh}})
@@ -385,7 +391,14 @@ def page_text(a: PageArgs) -> Envelope:
     if txt is None:
         return fail(f"немає сторінки «{a.page}» у прогоні «{a.run}»")
     geo = S.page_lines(a.run, a.page) or {}
-    env = ok({**txt, "lines": geo})
+    # 🔴 Текст і геометрія — під РІЗНИМИ ключами. `read_page_text` віддає рядки
+    # тексту саме як `lines`, і накладання геометрії тим самим ім'ям знищувало
+    # прочитане: відповідь лишалась `ok`, але тексту в ній не було зовсім.
+    # Гортач через це показував порожню сторінку — тобто головний екран
+    # «подивитись, що прочитала машина» мовчки не показував нічого.
+    text_lines = list(txt.get("lines") or [])
+    env = ok({**txt, "lines": text_lines, "text": "\n".join(text_lines),
+              "geometry": geo})
     if not geo.get("has"):
         # Рамок немає — гортач покаже сторінку цілком. Це не помилка, але
         # мовчати не можна: перегляд рядка й перегляд сторінки коштують по-різному.

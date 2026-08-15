@@ -53,6 +53,8 @@ const STRINGS = {
     'search.where.pages': 'у виписаних прізвищах',
     'search.where.records': 'в учасниках записів',
     'search.run': 'Знайти',
+    'hit.eye': 'подивитись на рядок оком',
+    'hit.note': 'занести цю сторінку в облік',
     'search.coverage': 'шукали по', 'search.runs': 'прогонах',
     'search.cases': 'справах, занесених оком',
     'nav.eye': 'Око',
@@ -133,6 +135,8 @@ const STRINGS = {
     'search.where.pages': 'in noted surnames',
     'search.where.records': 'in record participants',
     'search.run': 'Search',
+    'hit.eye': 'look at the line with your own eyes',
+    'hit.note': 'note this page in the reading log',
     'search.coverage': 'searched across', 'search.runs': 'runs',
     'search.cases': 'cases noted by eye',
     'nav.eye': 'Eye',
@@ -338,14 +342,23 @@ SCREENS.search = async () => {
 };
 
 SCREENS.eye = async () => {
+  const e = EYE || {};
   setView(`
     <h2>${t('nav.eye')}</h2>
     <p class="muted">${t('eye.rule')}</p>
     <form class="row" data-act="eye.check">
-      <input name="case" placeholder="${t('eye.case')}: DAHMO/315/8433" autofocus>
+      <input name="case" placeholder="${t('eye.case')}: DAHMO/315/8433"
+        value="${esc(e.case || '')}" ${e.case ? '' : 'autofocus'}>
       <button type="submit">${t('eye.check')}</button>
     </form>
     <div id="hits"></div>`);
+  if (!e.case) return;
+  await ACTIONS['eye.check']({
+    preventDefault() {}, target: el('view').querySelector('form') });
+  // Скан, на якому спрацював пошук, підставляється у форму занесення: людина
+  // прийшла сюди саме з нього, і набирати його ще раз — зайвий шанс на описку.
+  const note = el('view').querySelector('form[data-act="eye.note"]');
+  if (note && e.scan) note.querySelector('input[name="scan"]').value = e.scan;
 };
 
 SCREENS.newcase = async () => {
@@ -387,15 +400,27 @@ SCREENS.newcase = async () => {
 };
 
 SCREENS.view = async () => {
+  // Значення підставляє САМ екран, а не той, хто на нього переходить: інакше
+  // перехід із пошуку мусив би підробляти подію форми, і будь-яка зміна
+  // розмітки тихо ламала б саме цей шлях.
+  const v = VIEW || {};
   setView(`
     <h2>${t('nav.view')}</h2>
     <p class="muted">${t('view.eye')}</p>
     <form class="row" data-act="view.open">
-      <input name="run" placeholder="${t('view.run')}" autofocus>
-      <input name="page" placeholder="00003.JPG">
+      <input name="run" placeholder="${t('view.run')}" value="${esc(v.run || '')}"
+        ${v.run ? '' : 'autofocus'}>
+      <input name="page" placeholder="00003.JPG" value="${esc(v.page || '')}">
       <button type="submit">${t('view.open')}</button>
     </form>
     <div id="hits"></div>`);
+  if (v.run && v.page) {
+    await ACTIONS['view.open']({
+      preventDefault() {}, target: el('view').querySelector('form') });
+    if (v.line !== null && v.line !== undefined) {
+      await ACTIONS['view.line']({}, { dataset: { line: String(v.line) } });
+    }
+  }
 };
 
 SCREENS.read = async () => {
@@ -511,6 +536,19 @@ const ACTIONS = {
         <td class="mono">${esc(h.page || h.scan || '')}</td>
         <td>${esc(String(h.matched || h.line || h.text || h.surname || '').slice(0, 120))}</td>
         <td class="num">${esc(h.score ?? '')}</td>
+        <td>${/* 🔴 Виявити ≠ перевірити: машина подає кандидата, вирішує око.
+                 Доти хіт був рядком таблиці — щоб глянути на нього, треба було
+                 переписати прогін і сторінку в гортач руками, а це та сама
+                 дія, заради якої пошук і робився. */''}
+          ${h.name && h.page
+            ? `<button data-act="hit.eye" data-run="${esc(h.name)}"
+                 data-page="${esc(h.page)}" data-line="${esc(h.line_no ?? '')}"
+                 title="${t('hit.eye')}">👁</button>` : ''}
+          ${(h.key || h.shifra) && (h.scan || h.page)
+            ? `<button data-act="hit.note" data-case="${esc(h.key || h.shifra)}"
+                 data-scan="${esc(h.scan || h.page)}"
+                 title="${t('hit.note')}">✎</button>` : ''}
+        </td>
       </tr>`).join('')}</tbody></table>
       ${cov.runs !== undefined
         ? `<p class="muted">${t('search.coverage')}: ${cov.runs} ${t('search.runs')}, ${cov.pages} ${t('common.pages')}</p>`
@@ -605,6 +643,20 @@ const ACTIONS = {
       <div class="warn">✅ <b>${esc(sc.shifra)}</b> — ${esc(sc.title || 'без назви')}</div>`;
   },
 
+  // 🔴 Хіт — це кандидат, а не висновок: дивиться око. Доти, щоб глянути на
+  // знайдений рядок, треба було переписати ім'я прогону й номер сторінки в
+  // гортач руками — тобто зробити ту саму роботу, заради якої пошук і є.
+  'hit.eye': async (_ev, elm) => {
+    VIEW = { run: elm.dataset.run, page: elm.dataset.page,
+             line: elm.dataset.line === '' ? null : Number(elm.dataset.line) };
+    await show('view');
+  },
+
+  'hit.note': async (_ev, elm) => {
+    EYE = { case: elm.dataset.case, scan: elm.dataset.scan };
+    await show('eye');
+  },
+
   'view.open': async (ev) => {
     ev.preventDefault();
     const fd = new FormData(ev.target);
@@ -612,8 +664,8 @@ const ACTIONS = {
     el('hits').innerHTML = `<p class="muted">${t('common.loading')}</p>`;
     const env = await callOp('page.text', VIEW);
     if (!env.ok) return failure(env);
-    const lines = (env.data.text || '').split('\n');
-    const geo = env.data.lines || {};
+    const lines = env.data.lines || [];
+    const geo = env.data.geometry || {};
     el('hits').innerHTML = `
       ${renderWarnings(env)}
       <p class="muted">${lines.length} ${t('view.lines')}${geo.has ? '' : ' · без рамок'}</p>

@@ -142,3 +142,42 @@ def test_mcp_sends_the_image_as_an_image_not_as_text() -> None:
     got = _pop_image(env)
     assert got == ("QUJD", "image/png")
     assert "image" not in env.data, "картинка лишилась ще й у JSON"
+
+
+def test_page_text_actually_carries_the_text(run) -> None:
+    """🔴 Відповідь була `ok`, а тексту в ній не було зовсім.
+
+    `read_page_text` віддає рядки тексту під ключем `lines`; операція
+    накладала туди ж геометрію рамок — і прочитане зникало. Гортач, головний
+    екран «подивитись, що прочитала машина», показував порожню сторінку й
+    «0 рядків»: не помилку, не попередження, просто нічого. Знайшлось лише
+    проходом по реальному прогону, бо на рівні окремої функції все справне.
+    """
+    from nyshporka import ops as O
+
+    name, page = run
+    env = O.call("page.text", {"run": name, "page": page})
+    assert env.ok, env.error
+    assert env.data["lines"] == ["перший рядок", "другий рядок", "третій рядок"]
+    assert "перший рядок" in env.data["text"]
+    # Геометрія лишається — під власним іменем, а не замість тексту.
+    assert env.data["geometry"]["has"] is True
+    assert len(env.data["geometry"]["boxes"]) == 3
+
+
+def test_the_viewer_reads_the_same_keys_the_op_returns() -> None:
+    """Гортач і операція мусять називати ті самі речі однаково.
+
+    Саме розходження імен («text» проти «lines») і давало порожній екран без
+    жодної помилки: JS звертався до поля, якого в відповіді не існує, і
+    отримував `undefined`, а не збій.
+    """
+    import re
+
+    js = (Path(__file__).resolve().parents[1] / "src" / "nyshporka" / "daemon"
+          / "static" / "app.js").read_text(encoding="utf-8")
+    block = re.search(r"'view\.open': async.*?\n  \},", js, re.S)
+    assert block, "обробник гортача змінився — перевірку треба переписати"
+    used = set(re.findall(r"env\.data\.(\w+)", block.group(0)))
+    assert used <= {"lines", "geometry", "text", "page", "orient", "conf",
+                    "detector"}, f"гортач читає невідомі поля: {used}"

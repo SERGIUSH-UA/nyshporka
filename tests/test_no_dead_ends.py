@@ -240,3 +240,22 @@ def test_translations_cover_every_key_in_both_languages() -> None:
     used = set(re.findall(r"\bt\('([\w.]+)'\)", js)) | set(
         re.findall(r'data-i18n="([\w.]+)"', _html()))
     assert not (used - dicts["uk"]), f"ужито без перекладу: {sorted(used - dicts['uk'])}"
+
+
+def test_the_decode_denominator_is_read_from_the_right_field() -> None:
+    """🔴 Знаменник, який сам є нулем, скасовує правило, заради якого він є.
+
+    Перелік прогонів називає число прочитаних сторінок полем `pages_done`.
+    Поки пошук додавав `pages`, сума виходила ТОТОЖНО нульова: на просторі з
+    506 прогонами й 320 669 сторінками відповідь звучала «не знайшлось у 506
+    прогонах (0 сторінок)» — тобто «нічого не прочитано», і напрям пошуку
+    закривався висновком, якого ніхто не робив.
+
+    Перевірка тримається за ІМ'Я поля, а не за поведінку на порожньому
+    просторі: там обидва варіанти дають нуль і різниці не видно.
+    """
+    src = (SRC / "ops_builtin.py").read_text(encoding="utf-8")
+    block = re.search(r"runs = htr_store\.list_cases\(\).*?\n\s*env = ok", src, re.S)
+    assert block, "гілка пошуку по декоду змінилась — перевірку треба переписати"
+    assert "pages_done" in block.group(0), \
+        "знаменник рахується не з того поля — див. htr_store.list_cases()"
