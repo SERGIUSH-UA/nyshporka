@@ -185,13 +185,26 @@ def test_no_private_default_case_roots(tmp_path):
 
 
 def test_workspace_refuses_dangerous_roots():
+    """🔴 Гард шляхів пропускає все, що під коренем простору.
+
+    А шлях у в'ювер сторінок приходить ІЗ HTTP-ЗАПИТУ. Простір, що дорівнює
+    диску чи домівці, перетворює цей гард на «дозволено все» — і зламаною
+    виявляється не програма, а межа між нею й рештою диска.
+
+    ⚠ Перелік залежить від платформи, і це не дрібниця: `"C:/"` на Linux — це
+    не корінь диска, а звичайна відносна назва, тож перевірка там доводила б
+    рівно нічого. Спіймано на CI: тест зеленів на Windows і падав на Linux.
+    """
+    import os
     from pathlib import Path
 
     from nyshporka.core import workspace as W
 
-    for bad in ("C:/", str(Path.home()), "/"):
+    bad = [str(Path.home()), os.path.abspath(os.sep)]
+    bad += ["C:/", "C:\\"] if os.name == "nt" else ["/", "/home", "/usr", "/etc"]
+    for path in bad:
         with pytest.raises(W.WorkspaceError):
-            W.validate_root(Path(bad))
+            W.validate_root(Path(path))
 
 
 def test_missing_workspace_fails_loudly_not_silently(tmp_path, monkeypatch):
