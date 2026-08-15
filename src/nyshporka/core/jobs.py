@@ -264,9 +264,17 @@ class JobBus:
     def load(self) -> int:
         """Підняти чергу з диска. Повертає, скільки завдань відновлено.
 
-        🔴 Завдання, що були `running`, повертаються в `queued`: процес, який їх
-        виконував, помер разом із застосунком. Лишити їх «у роботі» означало б
-        чергу, що назавжди зайнята привидами.
+        🔴 Незавершене завдання відновлюється як ПОМИЛКА, а не як «у черзі».
+
+        Виконавця йому ніхто не повертає: задачі живуть у циклі подій процесу,
+        який помер разом із застосунком, і жодного відновлення роботи тут
+        немає. «У черзі» означає «буде зроблено» — тож привид у цьому стані
+        обіцяє те, чого не станеться: людина чекає, нічого не рухається, і
+        виглядає це як зависання, а не як обірваний прогін. Гірше того, така
+        робота блокує ЗАПУСК нової: перевірки «чи вже йде» бачать її живою.
+
+        Тому стан чесний, причина написана, а сама робота лишається в журналі
+        — вона є доказом того, що прогін починався.
         """
         try:
             data = json.loads(self.path.read_text(encoding="utf-8"))
@@ -277,13 +285,16 @@ class JobBus:
                 prog = Progress(**{k: v for k, v in (raw.get("progress") or {}).items()
                                    if k in Progress.__dataclass_fields__})
                 state = JobState(raw.get("state") or "queued")
-                if state is JobState.RUNNING:
-                    state = JobState.QUEUED
+                err = str(raw.get("error") or "")
+                if not state.final:
+                    state = JobState.ERROR
+                    err = err or ("застосунок зупинився, не докінчивши цю "
+                                  "роботу — її треба запустити наново")
                 job = JobRecord(
                     id=str(raw["id"]), kind=str(raw.get("kind") or ""),
                     title=str(raw.get("title") or ""), state=state,
                     cfg=dict(raw.get("cfg") or {}), progress=prog,
-                    result=raw.get("result"), error=str(raw.get("error") or ""),
+                    result=raw.get("result"), error=err,
                     created=float(raw.get("created") or time.time()),
                     updated=float(raw.get("updated") or time.time()))
                 self._jobs[job.id] = job

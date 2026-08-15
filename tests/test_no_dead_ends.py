@@ -16,6 +16,8 @@
 from __future__ import annotations
 
 import re
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -158,7 +160,23 @@ def test_screens_send_only_fields_the_schema_accepts() -> None:
     assert not bad, f"екран шле поля, яких схема не має: {sorted(set(bad))}"
 
 
-# ── 6. переклад повний в обидва боки ─────────────────────────────────────────
+# ── 6. розмітка й скрипт узагалі розбираються ────────────────────────────────
+@pytest.mark.skipif(shutil.which("node") is None,
+                    reason="node немає — синтаксис JS перевірити нічим")
+def test_frontend_javascript_parses() -> None:
+    """🔴 Синтаксична помилка в консолі не падає НІДЕ, крім браузера користувача.
+
+    Жоден тест не виконує цей файл — його лише читають як текст. Тому зайвий
+    апостроф усередині рядка (`'п'яти сховищ'` — звичайне українське слово)
+    робить порожню сторінку без єдиної ознаки в тестах, лінті чи типах. Спіймано
+    саме так, за годину після того, як перевірку писали.
+    """
+    res = subprocess.run(["node", "--check", str(STATIC / "app.js")],
+                         capture_output=True, text=True)
+    assert res.returncode == 0, f"app.js не розбирається:\n{res.stderr[:800]}"
+
+
+# ── 7. переклад повний в обидва боки ─────────────────────────────────────────
 def test_translations_cover_every_key_in_both_languages() -> None:
     """Ключ без перекладу показує сирий `case.edit` замість напису.
 

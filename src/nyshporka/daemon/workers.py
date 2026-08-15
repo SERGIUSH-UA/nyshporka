@@ -27,6 +27,10 @@ if TYPE_CHECKING:
 _ALIVE: set[asyncio.Task[None]] = set()
 
 
+#: Замок навколо «чи вже йде перезбірка» + постановки. Див. `_start_build`.
+_BUILD_GATE = asyncio.Lock()
+
+
 def _keep(task: asyncio.Task[None]) -> None:
     _ALIVE.add(task)
     task.add_done_callback(_ALIVE.discard)
@@ -50,7 +54,67 @@ async def start(bus: JobBus, ws: Workspace, op_name: str,
         return await _start_acquire(bus, ws, payload)
     if op_name == "read.start":
         return await _start_read(bus, ws, payload)
+    if op_name == "cases.build":
+        return await _start_build(bus, payload)
     raise ValueError(f"довга операція «{op_name}» не має виконавця")
+
+
+async def _start_build(bus: JobBus, payload: dict[str, Any]) -> JobRecord:
+    """Перезбірка реєстру справ.
+
+    🔴 Захист тут — від ДРУГОГО ОДНОЧАСНОГО проходу, а не від другої
+    перезбірки взагалі, і різниця принципова. Два паралельні проходи писали б
+    у ту саму базу й у той самий файл бібліотеки. Але ключ ідемпотентності
+    живе десять хвилин і після завершення роботи віддавав би СТАРИЙ готовий
+    запис — а натискають цю кнопку саме тому, що щойно щось змінилось:
+    людина побачила б «готово» з числами до своєї зміни й повірила б їм.
+
+    Тому шукається активна робота, а не ключ: поки перезбірка йде, повторні
+    натискання чіпляються до неї; щойно вона завершилась — нове натискання дає
+    новий прохід.
+    """
+    from nyshporka.core.jobs import JobState
+
+    rescan = bool(payload.get("rescan", True))
+    # Перевірка «чи вже йде» і постановка мусять бути НЕПОДІЛЬНІ: між ними є
+    # точка очікування (лок черги), і без цього замка двоє одночасних натискань
+    # обидва бачили б «нічого не йде» й завели б два проходи.
+    async with _BUILD_GATE:
+        for j in bus.jobs():
+            if j.kind == "build" and j.state in (JobState.QUEUED, JobState.RUNNING):
+                return j
+        job, _ = await bus.enqueue("build", title="перезбірка реєстру справ",
+                                   cfg={"rescan": rescan})
+    _keep(asyncio.create_task(_run_build(bus, job, rescan)))
+    return job
+
+
+async def _run_build(bus: JobBus, job: JobRecord, rescan: bool) -> None:
+    from nyshporka.core.jobs import JobState, Progress
+
+    await bus.update(job.id, state=JobState.RUNNING)
+
+    def work() -> dict[str, Any]:
+        out: dict[str, Any] = {}
+        if rescan:
+            from nyshporka.library import build_library, write_library
+
+            entries = build_library()
+            write_library(entries)
+            out["library"] = len(entries)
+        from nyshporka.cases import db
+
+        return {**out, **db.build_index()}
+
+    try:
+        res = await asyncio.to_thread(work)
+    except Exception as exc:
+        await bus.update(job.id, state=JobState.ERROR,
+                         error=f"{type(exc).__name__}: {exc}")
+        return
+    n = int(res.get("cases") or 0)
+    await bus.update(job.id, state=JobState.DONE, result=res,
+                     progress=Progress(i=n, n=n, done=n, basis="справа"))
 
 
 async def _start_acquire(bus: JobBus, ws: Workspace,

@@ -463,6 +463,31 @@ def case_register(a: CaseRegisterArgs) -> Envelope:
     return env
 
 
+class CasesBuildArgs(BaseModel):
+    rescan: bool = Field(default=True,
+                         description="перечитати ще й диск — потрібно, коли "
+                                     "з'явились нові теки, а не лише новий декод")
+
+
+# `agent=False`: агент дізнається про застарілий зріз із поля `stale` в конверті
+# й має пораду в ньому ж; окремий tool на це з'їдав би місце в переліку.
+@op("cases.build", summary="Перезібрати реєстр справ", args=CasesBuildArgs,
+    mutates=True, long=True, agent=False)
+def cases_build(a: CasesBuildArgs) -> Envelope:
+    """🔴 Кнопка, на яку посилались тексти, якої не було.
+
+    Реєстр — зріз п'яти сховищ, і будь-який прогін робить його старим за
+    хвилини. Про це чесно попереджав кожен перелік — і відсилав по виправлення
+    в командний рядок. Для того, хто працює формами, це те саме, що не мати
+    виправлення взагалі.
+
+    Виконує роботу застосунок: на просторі в тисячу справ перезбірка триває
+    десятки секунд, і синхронна відповідь означала б завислу вкладку.
+    """
+    return fail("перезбірку веде застосунок — підніміть його командою "
+                "`nysh serve` або скористайтесь `nysh cases build`")
+
+
 class CaseShowArgs(BaseModel):
     case_dir: str = Field(description="тека зі сканами")
 

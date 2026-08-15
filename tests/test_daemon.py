@@ -155,3 +155,37 @@ def test_front_has_no_inline_handlers_or_globals() -> None:
     assert "onclick" not in html and "onsubmit" not in html
     assert "data-act=" in html
     assert "window." not in js.replace("window.location", "")
+
+
+def test_rebuild_button_gives_one_job_for_two_clicks(client: TestClient,
+                                                     monkeypatch) -> None:
+    """🔴 Кнопку 🔄 натискають двічі — бо після першого натискання нічого не видно.
+
+    Два проходи писали б у ту саму базу й у той самий файл бібліотеки. Захист
+    тут — пошук АКТИВНОЇ роботи, а не ключ ідемпотентності: той живе десять
+    хвилин і після завершення віддавав би старий готовий запис, а натискають
+    цю кнопку саме тому, що щойно щось змінилось.
+    """
+    import time
+
+    from nyshporka.cases import db
+
+    # Перезбірку сповільнюємо, щоб робота гарантовано була ЩЕ активною на
+    # момент другого натискання — інакше тест вимірював би швидкість диска.
+    def slow_index(*_a: object, **_k: object) -> dict[str, object]:
+        time.sleep(0.6)
+        return {"cases": 0, "orphans": 0, "path": "тест"}
+
+    monkeypatch.setattr(db, "build_index", slow_index)
+
+    h = {TOKEN_HEADER: TOKEN}
+    body = {"rescan": False}
+    first = client.post("/api/op/cases.build", json=body, headers=h).json()
+    second = client.post("/api/op/cases.build", json=body, headers=h).json()
+    assert first["data"]["job_id"] == second["data"]["job_id"], \
+        "друге натискання завело другий прохід по тій самій базі"
+
+
+def test_rebuild_is_a_mutation_and_needs_a_token(client: TestClient) -> None:
+    """Перезбірка переписує реєстр — чужа вкладка на localhost не має права."""
+    assert client.post("/api/op/cases.build", json={}).status_code == 403

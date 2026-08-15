@@ -40,6 +40,8 @@ const STRINGS = {
     'cases.title': 'Справи в роботі',
     'cases.frames': 'кадрів', 'cases.read': 'прочитано', 'cases.none': 'не читано',
     'cases.nodir': 'теки на цій машині немає — правити нічого',
+    'cases.build': 'перезібрати реєстр',
+    'cases.build.why': "Реєстр — зріз п'яти сховищ: після прогону, завантаження чи занесення в облік він старіє за хвилини.",
     'search.q': 'Прізвище', 'search.where': 'Де шукати',
     'search.where.decode': 'у прочитаному машиною',
     'search.where.pages': 'у виписаних прізвищах',
@@ -104,6 +106,8 @@ const STRINGS = {
     'cases.title': 'Cases in progress',
     'cases.frames': 'frames', 'cases.read': 'read', 'cases.none': 'not read',
     'cases.nodir': 'folder not present on this machine — nothing to edit',
+    'cases.build': 'rebuild registry',
+    'cases.build.why': 'The registry is a snapshot of five stores: after a run, a download or a note it goes stale within minutes.',
     'search.q': 'Surname', 'search.where': 'Where to look',
     'search.where.decode': 'in machine-read text',
     'search.where.pages': 'in noted surnames',
@@ -175,8 +179,11 @@ const el = (id) => document.getElementById(id);
 function renderWarnings(env) {
   const bits = [];
   if (env.stale && env.stale.is) {
-    bits.push(`<div class="warn stale">⚠ ${esc(env.stale.reasons.join('; '))}` +
-      (env.stale.fix ? ` — <code>${esc(env.stale.fix)}</code>` : '') + '</div>');
+    // 🔴 Виправлення поруч із застереженням, а не в підказці «наберіть у
+    // терміналі». Той, хто працює формами, інакше лишається із застереженням
+    // і без способу його зняти — тобто змушений вірити застарілому зрізу.
+    bits.push(`<div class="warn stale">⚠ ${esc(env.stale.reasons.join('; '))}
+      <button data-act="cases.build">${t('cases.build')}</button></div>`);
   }
   for (const w of env.warnings || []) {
     bits.push(`<div class="warn">⚠ ${esc(w.text)}</div>`);
@@ -255,7 +262,8 @@ SCREENS.cases = async () => {
   if (!env.ok) return failure(env);
   const rows = env.data.cases || [];
   setView(`
-    <h2>${t('cases.title')}</h2>
+    <h2>${t('cases.title')} <button data-act="cases.build"
+      title="${t('cases.build.why')}">🔄 ${t('cases.build')}</button></h2>
     ${renderWarnings(env)}
     <table><thead><tr>
       <th>шифра</th><th>назва</th><th class="num">${t('common.frames')}</th>
@@ -501,6 +509,14 @@ const ACTIONS = {
     box.innerHTML = `<div class="warn">✅ ${esc(fd.scan)} занесено</div>`
       + renderWarnings(env);
     ev.target.reset();
+  },
+
+  'cases.build': async () => {
+    const env = await callOp('cases.build', { rescan: true });
+    if (!env.ok) return failure(env);
+    // Робота йде у черзі — туди ж і ведемо: інакше кнопка виглядає як така,
+    // що нічого не зробила, і її натискають ще раз.
+    await show('jobs');
   },
 
   'case.edit': async (_ev, elm) => {

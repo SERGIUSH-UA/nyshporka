@@ -178,19 +178,50 @@ async def test_state_survives_restart(bus, tmp_path):
     assert got.title == "довга справа" and got.result == {"pages": 20}
 
 
-async def test_running_jobs_come_back_as_queued(bus, tmp_path):
+async def test_interrupted_jobs_come_back_as_errors_not_as_queued(bus, tmp_path):
     """🔴 Процес, що їх виконував, помер разом із застосунком.
 
-    Лишити їх «у роботі» означало б чергу, назавжди зайняту привидами: нові
-    завдання не стартують, бо «одне вже біжить», і зрушити це можна лише
-    руками, здогадавшись подивитись у JSON.
+    Перша редакція повертала їх у `queued` — і це була половина виправлення:
+    привид переставав займати «у роботі», але починав обіцяти роботу, якої не
+    буде. Виконавця йому ніхто не повертає: задачі жили в циклі подій мертвого
+    процесу, і відновлення роботи в черзі немає. «У черзі» читається як «буде
+    зроблено», тож людина чекала б порожнечу, а перевірки «чи вже йде» бачили
+    б цю роботу живою й не давали запустити нову — спіймано на кнопці 🔄, яка
+    чіплялась до завдання з попереднього запуску застосунку.
     """
     job, _ = await bus.enqueue("read")
     await bus.update(job.id, state=JobState.RUNNING)
 
     fresh = JobBus(tmp_path / "jobs.json")
     fresh.load()
-    assert fresh.get(job.id).state is JobState.QUEUED
+    got = fresh.get(job.id)
+    assert got.state is JobState.ERROR
+    assert got.error, "обірвана робота мусить сказати, ЧОМУ вона обірвана"
+
+
+async def test_queued_but_never_started_also_comes_back_as_error(bus, tmp_path):
+    """Робота, збережена ДО старту виконавця, — такий самий привид.
+
+    Різниця між `queued` і `running` на диску — це частка секунди між записом
+    і створенням задачі, а не різниця в долі: жодну з них ніхто не підхопить.
+    """
+    job, _ = await bus.enqueue("acquire")
+
+    fresh = JobBus(tmp_path / "jobs.json")
+    fresh.load()
+    assert fresh.get(job.id).state is JobState.ERROR
+
+
+async def test_finished_jobs_survive_a_restart_untouched(bus, tmp_path):
+    """А от завершені чіпати не можна: вони і є історія роботи."""
+    job, _ = await bus.enqueue("read")
+    await bus.update(job.id, state=JobState.DONE, result={"pages": 7})
+
+    fresh = JobBus(tmp_path / "jobs.json")
+    fresh.load()
+    got = fresh.get(job.id)
+    assert got.state is JobState.DONE and got.result == {"pages": 7}
+    assert not got.error
 
 
 async def test_broken_state_file_does_not_block_startup(tmp_path):
