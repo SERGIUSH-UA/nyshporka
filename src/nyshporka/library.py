@@ -53,6 +53,11 @@ _ARCHIUM_SLUG = "dahmo_archium"
 
 _IMG_EXT = {".jpg", ".jpeg", ".png"}
 
+# Скільки PDF у теці ще варто розкривати заради лічильника сторінок. Справа-PDF це
+# один-два файли; десятки PDF в одній теці — вже не справа, а збірка чи корпус, і
+# точне число сторінок там нічого не вирішує.
+_PDF_PROBE_LIMIT = 50
+
 # Теки data/raw/<slug>, що НЕ містять архівних справ (описи фондів, OCR-корпуси,
 # періодика за роками) — навіть якщо їх імена схожі на шифри.
 _SKIP_SLUGS = {"davo_opysy", "dahmo_319_f65_opisy", "bev_pdh", "kev_pdh",
@@ -478,9 +483,71 @@ def _external_files(d: Path) -> int:
     return n
 
 
+@lru_cache(maxsize=8192)
+def _pdf_pages_cached(path: str, size: int, mtime: int) -> int:
+    """Сторінок у PDF. 0 = порахувати не вийшло (кличний код лишає файловий лік).
+
+    Ключ кешу несе розмір і mtime, тож дописаний чи перекачаний файл перечитується
+    сам. `pypdfium2` — оголошена залежність пакета (легша й з дозвільною ліцензією),
+    `fitz` лишається запасним, бо стоїть у споживачів.
+    """
+    try:
+        import pypdfium2 as pdfium
+    except ImportError:
+        try:
+            import fitz
+        except ImportError:
+            return 0
+        try:
+            with fitz.open(path) as doc:
+                return int(doc.page_count)
+        except Exception:
+            return 0
+    try:
+        doc = pdfium.PdfDocument(path)
+        try:
+            return len(doc)
+        finally:
+            doc.close()
+    except Exception:
+        return 0
+
+
+def _pdf_pages(paths: list[Path]) -> int:
+    """Сумарно сторінок; 0 — якщо не вийшло. Стеля файлів боронить від періодики."""
+    if not paths or len(paths) > _PDF_PROBE_LIMIT:
+        return 0
+    total = 0
+    for p in paths:
+        try:
+            st = p.stat()
+        except OSError:
+            return 0
+        n = _pdf_pages_cached(str(p), st.st_size, int(st.st_mtime))
+        if not n:
+            return 0
+        total += n
+    return total
+
+
 def _count_case(d: Path) -> tuple[int, int]:
-    """(images, pdfs) прямо у теці; PDF на архівному томі — через `external_path`."""
+    """(images, СТОРІНКИ) прямо у теці; PDF на архівному томі — через `external_path`.
+
+    🔴 Друге число — СТОРІНКИ PDF, а не кількість файлів (виправлено 2026-08-15).
+    Справа, завантажена одним PDF (вікі-дзеркало ДАВіО: `904-24-17/904-24-17.pdf`,
+    275 стор.), давала `frames=1` і ставала в бібліотеці невідрізненною від голої
+    картки опису — справи, якої на диску немає ВЗАГАЛІ. **Ціна помилки виміряна:**
+    по реєстру виходило, що метрик Гарячківки 1861-1870 у нас немає, і їх замовили
+    в архіві вдруге, хоча обидва томи (спр.17 і 19, 275 і 313 стор.) лежали на диску.
+
+    Замір 2026-08-15: 95 PDF-тек у `data/raw` (періодика й описи вже відсічені
+    `_SKIP_SLUGS`), ~4.5 мс на файл проти 16.3 с самого обходу диска.
+    ⚠ Не вийшло порахувати (немає бібліотеки, битий файл, тека понад стелю) —
+    лишається файловий лік: занижене число краще за нуль, бо нуль читається як
+    «на диску нічого немає».
+    """
     imgs = pdfs = 0
+    pdf_paths: list[Path] = []
     try:
         for p in d.iterdir():
             if not p.is_file():
@@ -490,10 +557,13 @@ def _count_case(d: Path) -> tuple[int, int]:
                 imgs += 1
             elif ext == ".pdf":
                 pdfs += 1
+                pdf_paths.append(p)
     except OSError:
         pass
     if not (imgs or pdfs):
         pdfs = _external_files(d)
+    elif pdf_paths and not imgs:
+        pdfs = _pdf_pages(pdf_paths) or pdfs
     return imgs, pdfs
 
 
@@ -780,6 +850,8 @@ def _fallback_name(rel_path: str, key_parts: tuple | None) -> dict:
         # місце буває у `place` або `covers` (spr-6739 vs spr-8676)
         yf = _to_int(m.get("year_from")) or _to_int(m.get("year"))
         yt = _to_int(m.get("year_to")) or yf
+        if not yf:
+            yf, yt = _years_span(m.get("years"))
         if harvest:
             yf, yt = yf or harvest["year_from"], yt or harvest["year_to"]
         delo = _parse_delo(m.get("delo")) if not (m.get("shifra") or "").strip() else None
@@ -875,6 +947,24 @@ def _fallback_name(rel_path: str, key_parts: tuple | None) -> dict:
                     "desc_source": "fs_master"}
     return {"title": "", "doc_type": "", "year_from": None, "year_to": None,
             "place": "", "desc_source": "code"}
+
+
+def _years_span(v) -> tuple[int | None, int | None]:
+    """«1861-1870» або «1857-1866, 1869-1873» → (1861, 1870) / (1857, 1873).
+
+    Третя конвенція сайдкара, крім `year_from/year_to` і `year`: суцільний РЯДОК
+    років. Так пише `_source.json` справ, знятих із Wikimedia Commons, де роки
+    стоять просто в назві файла. Без розбору такі справи лежали в реєстрі без
+    років узагалі, тобто фільтр `--year` їх не бачив ЖОДНОГО разу — а це саме ті
+    справи, які качаються безкоштовно й у яких шукають прогалину десятиліття.
+
+    ⚠ Повертається ОБВІДНА, а не покриття: «1857-1866, 1869-1873» дасть
+    (1857, 1873), хоча 1867-68 у книзі немає. Для фільтра «може містити рік X»
+    це правильна семантика (краще показати зайве, ніж сховати потрібне), але
+    вважати обвідну доказом покриття не можна — точні роки в назві справи.
+    """
+    years = sorted({int(y) for y in _HARVEST_YEAR_RE.findall(str(v or ""))})
+    return (years[0], years[-1]) if years else (None, None)
 
 
 def _to_int(v) -> int | None:
@@ -1090,7 +1180,7 @@ def build_library() -> list[CaseEntry]:
             continue
         e.path = e.raw_path
         e.tag = _tag_from_path(e.raw_path)
-        i, d = _count_case(p) if p.is_dir() else (0, 1)
+        i, d = _count_case(p) if p.is_dir() else (0, _pdf_pages([p]) or 1)
         e.frames = i or d
         e.on_disk = bool(e.frames)
 
@@ -1167,7 +1257,7 @@ def build_library() -> list[CaseEntry]:
             if p.exists():
                 e.path = e.raw_path
                 e.tag = _tag_from_path(e.raw_path)
-                i, d = _count_case(p) if p.is_dir() else (0, 1)
+                i, d = _count_case(p) if p.is_dir() else (0, _pdf_pages([p]) or 1)
                 e.frames = i or d
                 e.on_disk = bool(e.frames)
 

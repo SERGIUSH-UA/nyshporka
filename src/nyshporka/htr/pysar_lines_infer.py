@@ -15,10 +15,10 @@ strhub'ом, не kraken'ом (memory ``parseq-train-job-and-cyrillic-consensus`
 ⚠ Запускати ПІД СЕРЕДОВИЩЕМ РУШІЇВ (py3.11 + torch + strhub/timm/nltk), не тим
 інтерпретатором, у якому стоїть пакет — тому тут немає імпортів `nyshporka`:
 
-    .venv_kraken/Scripts/python.exe scripts/pysar_lines_infer.py \\
-        --model data/spotter/models/pysar_cyr_v1.pt \\
+    <python середовища рушіїв> pysar_lines_infer.py \\
+        --model <ваги Писаря>.pt \\
         --lines <тека з вирізками рядків> \\
-        --out reports/htr/_pysar_kazky1811
+        --out reports/htr/<назва прогону>
 """
 from __future__ import annotations
 
