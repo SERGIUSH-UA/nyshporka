@@ -45,6 +45,10 @@ const STRINGS = {
     'search.where.records': 'в учасниках записів',
     'search.run': 'Знайти',
     'search.coverage': 'шукали по',
+    'nav.view': 'Гортач',
+    'view.run': 'Прогін', 'view.open': 'Відкрити',
+    'view.pages': 'сторінок', 'view.lines': 'рядків',
+    'view.eye': 'Око вирішує, машина лише подає — дивіться на рядок, а не на текст.',
     'nav.read': 'Читання',
     'read.dir': 'Тека зі сканами (пласка)', 'read.plan': 'Що робитимемо',
     'read.go': 'Читати', 'read.frames': 'кадрів', 'read.script': 'письмо',
@@ -88,6 +92,10 @@ const STRINGS = {
     'search.where.records': 'in record participants',
     'search.run': 'Search',
     'search.coverage': 'searched across',
+    'nav.view': 'Viewer',
+    'view.run': 'Run', 'view.open': 'Open',
+    'view.pages': 'pages', 'view.lines': 'lines',
+    'view.eye': 'The eye decides, the machine only proposes — look at the line, not the text.',
     'nav.read': 'Reading',
     'read.dir': 'Folder with scans (flat)', 'read.plan': 'What we will do',
     'read.go': 'Read', 'read.frames': 'frames', 'read.script': 'script',
@@ -159,6 +167,9 @@ let LAST_EXPORT = null;
 /** Остання тека, для якої рахували план читання. */
 let LAST_READ = null;
 
+/** Прогін і сторінка, відкриті в гортачі. */
+let VIEW = null;
+
 SCREENS.home = async () => {
   const env = await callOp('workspace.info', {});
   const ws = env.ok ? env.data : {};
@@ -225,6 +236,18 @@ SCREENS.search = async () => {
         <option value="records">${t('search.where.records')}</option>
       </select>
       <button type="submit">${t('search.run')}</button>
+    </form>
+    <div id="hits"></div>`);
+};
+
+SCREENS.view = async () => {
+  setView(`
+    <h2>${t('nav.view')}</h2>
+    <p class="muted">${t('view.eye')}</p>
+    <form class="row" data-act="view.open">
+      <input name="run" placeholder="${t('view.run')}" autofocus>
+      <input name="page" placeholder="00003.JPG">
+      <button type="submit">${t('view.open')}</button>
     </form>
     <div id="hits"></div>`);
 };
@@ -337,6 +360,40 @@ const ACTIONS = {
   // 🔴 Спершу ПЛАН, і лише окремою кнопкою — старт. Справа читається годинами;
   // дізнатись «модель не та» або «кадрів не 20, а 3000» після запуску означає
   // втратити ніч.
+  'view.open': async (ev) => {
+    ev.preventDefault();
+    const fd = new FormData(ev.target);
+    VIEW = { run: fd.get('run'), page: fd.get('page') };
+    el('hits').innerHTML = `<p class="muted">${t('common.loading')}</p>`;
+    const env = await callOp('page.text', VIEW);
+    if (!env.ok) return failure(env);
+    const lines = (env.data.text || '').split('\n');
+    const geo = env.data.lines || {};
+    el('hits').innerHTML = `
+      ${renderWarnings(env)}
+      <p class="muted">${lines.length} ${t('view.lines')}${geo.has ? '' : ' · без рамок'}</p>
+      <div id="shot"></div>
+      <table><tbody>${lines.map((ln, i) => `<tr>
+        <td class="num mono">${i}</td>
+        <td><button data-act="view.line" data-line="${i}">👁</button></td>
+        <td>${esc(ln)}</td></tr>`).join('')}</tbody></table>`;
+  },
+
+  // 🔴 Рядок, а не сторінка. Вирізка легша в десятки разів (виміряно: 15 КБ
+  // проти 1.1 МБ), а звірок за сеанс бувають десятки.
+  'view.line': async (_ev, elm) => {
+    if (!VIEW) return;
+    const env = await callOp('page.view',
+      { ...VIEW, line: Number(elm.dataset.line), region: 'line' });
+    if (!env.ok) return alert(env.error);
+    const d = env.data;
+    el('shot').innerHTML = `
+      ${renderWarnings(env)}
+      <img src="${d.image}" alt="рядок ${d.line}" style="max-width:100%">
+      <p class="muted mono">${esc(d.text || '')}</p>`;
+    el('shot').scrollIntoView({ block: 'nearest' });
+  },
+
   'read.plan': async (ev) => {
     ev.preventDefault();
     const fd = new FormData(ev.target);

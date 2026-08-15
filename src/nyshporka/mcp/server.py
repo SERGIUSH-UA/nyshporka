@@ -66,8 +66,31 @@ def call_tool(name: str, arguments: dict[str, Any] | None = None) -> dict[str, A
                                    ensure_ascii=False),
                         f"Невідомий tool «{name}». Доступні: {known}")
     env = ops.call(op_name, arguments or {})
+    # 🔴 Зображення віддається КАРТИНКОЮ, а не рядком base64 у JSON. Модель не
+    # вміє «подивитись» на текст; звірка рядка оком — саме те, заради чого
+    # існує `page.view`, і без картинки вона перетворюється на ще один переказ
+    # того, що вже сказала машина.
+    image = _pop_image(env)
     payload = json.dumps(env.as_dict(), ensure_ascii=False, indent=1, default=str)
-    return _content(payload, env.as_agent_text())
+    return _content(payload, env.as_agent_text(), image=image)
+
+
+def _pop_image(env: Any) -> tuple[str, str] | None:
+    """Витягти `(base64, mime)` з відповіді, прибравши його з JSON.
+
+    Лишати картинку ще й у полі означало б надіслати ті самі сотні кілобайтів
+    двічі — раз як зображення, раз як нечитабельний рядок.
+    """
+    if not isinstance(env.data, dict):
+        return None
+    data: dict[str, Any] = env.data
+    url = data.get("image")
+    if not isinstance(url, str) or not url.startswith("data:"):
+        return None
+    head, _, body = url.partition(",")
+    mime = head[5:].split(";", 1)[0] or "image/png"
+    data.pop("image", None)
+    return body, mime
 
 
 def _op_name(tool_name: str) -> str | None:
@@ -77,10 +100,13 @@ def _op_name(tool_name: str) -> str | None:
     return None
 
 
-def _content(payload: str, note: str) -> dict[str, Any]:
+def _content(payload: str, note: str,
+             image: tuple[str, str] | None = None) -> dict[str, Any]:
     blocks: list[dict[str, str]] = []
     if note:
         blocks.append({"type": "text", "text": note})
+    if image is not None:
+        blocks.append({"type": "image", "data": image[0], "mimeType": image[1]})
     blocks.append({"type": "text", "text": payload})
     return {"content": blocks}
 
@@ -92,7 +118,7 @@ def serve() -> int:
         import anyio
         from mcp.server import Server
         from mcp.server.stdio import stdio_server
-        from mcp.types import TextContent, Tool
+        from mcp.types import ImageContent, TextContent, Tool
     except ImportError:
         print("Для агентної поверхні потрібен пакет `mcp`:\n"
               "    pip install 'nyshporka[agent]'")
@@ -106,9 +132,17 @@ def serve() -> int:
                      inputSchema=d["inputSchema"]) for d in tool_definitions()]
 
     @server.call_tool()
-    async def _call(name: str, arguments: dict[str, Any]) -> list[TextContent]:
+    async def _call(name: str, arguments: dict[str, Any]
+                    ) -> list[TextContent | ImageContent]:
         res = call_tool(name, arguments)
-        return [TextContent(type="text", text=b["text"]) for b in res["content"]]
+        out: list[TextContent | ImageContent] = []
+        for b in res["content"]:
+            if b.get("type") == "image":
+                out.append(ImageContent(type="image", data=b["data"],
+                                        mimeType=b["mimeType"]))
+            else:
+                out.append(TextContent(type="text", text=b["text"]))
+        return out
 
     async def _run() -> None:
         async with stdio_server() as (r, w):

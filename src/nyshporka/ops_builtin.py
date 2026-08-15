@@ -305,6 +305,75 @@ def search_run(a: SearchArgs) -> Envelope:
     return ok(res)
 
 
+# ── гортач ───────────────────────────────────────────────────────────────────
+class PageArgs(BaseModel):
+    run: str = Field(description="ім'я прогону (тека в reports/htr)")
+    page: str = Field(default="", description="скан; порожньо = перелік сторінок")
+
+
+@op("page.text", summary="Що прочитано на сторінці й де саме лежить кожен рядок",
+    args=PageArgs, mutates=False)
+def page_text(a: PageArgs) -> Envelope:
+    from nyshporka import htr_store as S
+
+    if not a.page:
+        pages = S.case_pages(a.run)
+        if pages is None:
+            return fail(f"немає прогону «{a.run}»")
+        return ok(pages)
+    txt = S.read_page_text(a.run, a.page)
+    if txt is None:
+        return fail(f"немає сторінки «{a.page}» у прогоні «{a.run}»")
+    geo = S.page_lines(a.run, a.page) or {}
+    env = ok({**txt, "lines": geo})
+    if not geo.get("has"):
+        # Рамок немає — гортач покаже сторінку цілком. Це не помилка, але
+        # мовчати не можна: перегляд рядка й перегляд сторінки коштують по-різному.
+        env.warn("no_line_boxes",
+                 "прогін не зберіг рамок рядків — показати окремий рядок "
+                 "не вийде, лише сторінку цілком")
+    return env
+
+
+class ViewArgs(BaseModel):
+    run: str = Field(description="ім'я прогону")
+    page: str = Field(description="скан сторінки")
+    line: int | None = Field(default=None, description="номер рядка з нуля")
+    region: Literal["line", "page"] = Field(
+        default="line",
+        description="line — вирізка рядка (дешево); page — уся сторінка (дорого)")
+    pad: int = Field(default=24, ge=0, le=200,
+                     description="запас навколо рядка в пікселях")
+    annotate: bool = Field(
+        default=True,
+        description="домалювати рамку рядка — без неї видно кілька рядків "
+                    "і незрозуміло, який оцінюють")
+
+
+@op("page.view", summary="Подивитись на рядок чи сторінку ОКОМ", args=ViewArgs,
+    mutates=False)
+def page_view(a: ViewArgs) -> Envelope:
+    """🔴 Центральна операція звірки: виявити ≠ перевірити.
+
+    Машина подає кандидата, вирішує око — і другий рушій тут не суддя, бо
+    ознака в пікселях. Дефолт — РЯДОК: ціла сторінка коштує моделі вчетверо
+    дорожче, а звірок за сеанс бувають десятки.
+    """
+    from nyshporka.htr.view import ViewError, shot
+
+    try:
+        s = shot(a.run, a.page, line=a.line, region=a.region, pad=a.pad,
+                 annotate=a.annotate)
+    except ViewError as exc:
+        return fail(str(exc))
+    except Exception as exc:
+        return fail(f"{type(exc).__name__}: {exc}")
+    env = ok({**s.as_dict(), "image": s.data_url})
+    if s.note:
+        env.warn("view_fallback", s.note)
+    return env
+
+
 # ── експорт ──────────────────────────────────────────────────────────────────
 class ExportArgs(BaseModel):
     case: str = Field(description="справа у будь-якому форматі")

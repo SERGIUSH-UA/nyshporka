@@ -406,14 +406,65 @@ def resolve_scan(name: str, page: str) -> tuple[Path, int] | None:
     info = (meta.get("pages") or {}).get(page)
     if info is None:
         return None
+    orient = int(info.get("orient") or 0)
     # junction-safe: див. `under_raw` — `.resolve()` тут відкидав увесь ф.196
     base = under_raw(meta.get("case_dir") or "")
-    if base is None:
-        return None
-    target = Path(os.path.abspath(base / page))
-    if target.parent != base or not target.is_file():
-        return None
-    return target, int(info.get("orient") or 0)
+    if base is not None:
+        target = Path(os.path.abspath(base / page))
+        if target.parent == base and target.is_file():
+            return target, orient
+
+    # 🔴 Фолбек через реєстр справ, і він ПОДВОЮЄ зону видимості гортача.
+    # Хмарний прогін пише в мету шлях ОРЕНДОВАНОГО БОКСА
+    # (`/tmp/htrcase/pages_dl`) або стейджингу — теки, якої на цій машині немає
+    # й не було. Текст такого прогону є, рамки рядків є, а подивитись оком
+    # нічим: `case_dir` веде в нікуди. Резолвер саме для цього й існує — він
+    # зводить ім'я прогону до справи бібліотеки, а в неї шлях уже справжній.
+    #
+    # Заміряно 2026-08-15 на 478 прогонах: скан лежить там, де каже мета, у
+    # 161; ще 165 знаходяться цим фолбеком (34% → 68%). Решта 150 — справи, що
+    # лежать PDF-ом: прогін читав РЕНДЕР, якого на цій машині ніколи не було,
+    # і вгадувати відповідність «кадр → сторінка PDF» тут не можна — показати
+    # не той аркуш гірше, ніж не показати нічого.
+    for cand in _case_dirs_via_registry(name):
+        target = Path(os.path.abspath(cand / page))
+        if target.parent == cand and target.is_file():
+            return target, orient
+    return None
+
+
+def _case_dirs_via_registry(run: str) -> list[Path]:
+    """Теки, де МОЖУТЬ лежати скани цього прогону, за реєстром справ.
+
+    Справа часто лежить у кількох теках — оригінали, зменшені копії для хмари,
+    посторінковий рендер PDF, — і сторінка з тим самим іменем є не в кожній.
+    Тому повертається перелік, а не одна тека.
+    """
+    try:
+        from nyshporka.cases.resolve import LibraryIndex, resolve_run
+        from nyshporka.library import load_library
+    except Exception:
+        return []
+    try:
+        link = resolve_run(run)
+    except Exception:
+        return []
+    if not link.key:
+        return []
+    out: list[Path] = []
+    try:
+        idx = LibraryIndex(load_library())
+        entry = idx.by_key.get(link.key) or {}
+    except Exception:
+        return []
+    for rel in (entry.get("path"), entry.get("raw_path"),
+                *(entry.get("extra_paths") or [])):
+        if not rel:
+            continue
+        d = under_raw(str(rel))
+        if d is not None and d.is_dir() and d not in out:
+            out.append(d)
+    return out
 
 
 # ── fuzzy-пошук ──────────────────────────────────────────────────────────────
