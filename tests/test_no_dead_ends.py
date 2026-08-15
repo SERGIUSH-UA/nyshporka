@@ -121,6 +121,51 @@ def test_advised_commands_exist(where: str) -> None:
     assert not bad, f"порада веде в нікуди: {sorted(set(bad))}"
 
 
+def test_advised_flags_exist_too() -> None:
+    """🔴 Команда може існувати, а прапорець у пораді — ні.
+
+    `nysh doctor` радив `nysh models get --all`; команда була, прапорця не
+    було, і перевірка самих імен команд це пропускала. Для людини різниці
+    немає: скопійована порада не працює, а вона щойно поставила застосунок.
+    """
+    import typer.main
+
+    from nyshporka.cli import app
+
+    flags: dict[str, set[str]] = {}
+
+    def walk(t: object, prefix: str = "") -> None:
+        for c in t.registered_commands:  # type: ignore[attr-defined]
+            name = f"{prefix} {c.name or c.callback.__name__.replace('_', '-')}".strip()
+            got = {o for p in typer.main.get_command(_single(c)).params
+                   for o in p.opts}
+            flags[name] = got | {"--help"}
+        for g in t.registered_groups:  # type: ignore[attr-defined]
+            walk(g.typer_instance, f"{prefix} {g.name or ''}".strip())
+
+    def _single(cmd: object) -> object:
+        one = typer.Typer()
+        one.registered_commands.append(cmd)  # type: ignore[arg-type]
+        return one
+
+    walk(app)
+    bad: list[str] = []
+    pattern = re.compile(r"`nysh ([a-z][a-z-]*(?: [a-z][a-z-]*)?)((?: --?[\w-]+)+)")
+    files = [*SRC.rglob("*.py"), *SRC.rglob("*.js"), README]
+    for path in files:
+        if "patches" in path.parts:
+            continue
+        for m in pattern.finditer(path.read_text(encoding="utf-8", errors="replace")):
+            cmd, tail = m.group(1).strip(), m.group(2)
+            known = flags.get(cmd) or flags.get(cmd.split()[0])
+            if known is None:
+                continue
+            for flag in re.findall(r"--?[\w-]+", tail):
+                if flag not in known:
+                    bad.append(f"{path.name}: nysh {cmd} {flag}")
+    assert not bad, f"порада з неіснуючим прапорцем: {sorted(set(bad))}"
+
+
 # ── 3. кнопка щось робить ────────────────────────────────────────────────────
 def test_every_button_has_a_handler() -> None:
     """Кнопка без обробника мовчить — а мовчання читається як «зламалось»."""

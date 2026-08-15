@@ -208,7 +208,7 @@ def _models() -> Check:
     have = packs.installed()
     if not have:
         return Check("Моделі письма", "warn", "жодної не завантажено",
-                     "nysh models get --all")
+                     "nysh models get")
     return Check("Моделі письма", "ok", ", ".join(sorted(have)))
 
 

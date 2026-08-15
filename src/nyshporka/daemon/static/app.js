@@ -27,8 +27,14 @@ const STRINGS = {
     'home.have_scans.hint': 'тека з фотографіями або PDF зі справою',
     'home.where': 'Не знаю, де шукати',
     'home.where.hint': 'пошук по каталогах архівів і покажчиках плівок',
-    'home.demo': 'Показати на прикладі',
-    'home.demo.hint': 'демо-справа: перевірити, що читання працює на цій машині',
+    'home.demo': 'Перевірити цю машину',
+    'home.demo.hint': 'чи складеться читання рукопису тут — ДО того, як вкладати скани',
+    'check.title': 'Чи готова ця машина читати рукопис',
+    'check.why': 'Перевірка робиться до того, як ви вкладете тисячі сканів і чекатимете ніч.',
+    'check.ready': 'Усе на місці — можна читати.',
+    'check.notready': '⚠ Читання поки не запуститься. Нижче — чого бракує і чим це ставиться.',
+    'check.nosample': 'Зразкової справи в застосунок поки не вкладено, тож перевірка показує стан машини, а не приклад читання.',
+    'case.dirhint': 'Шлях до теки скопіюйте з адресного рядка провідника. Вибрати теку віконцем браузер не дозволяє — це його обмеження, не застосунку.',
     'sources.q': 'Село, прізвище або слово із заголовка справи',
     'sources.find': 'Шукати',
     'sources.searched': 'шукали в',
@@ -93,8 +99,14 @@ const STRINGS = {
     'home.have_scans.hint': 'a folder of photographs, or a PDF of a case',
     'home.where': "I don't know where to look",
     'home.where.hint': 'search archive catalogues and film sheet indexes',
-    'home.demo': 'Show me an example',
-    'home.demo.hint': 'demo case: check that reading works on this machine',
+    'home.demo': 'Check this machine',
+    'home.demo.hint': 'will handwriting reading work here — BEFORE you commit scans',
+    'check.title': 'Is this machine ready to read handwriting',
+    'check.why': 'Run this before you commit thousands of scans and wait a night.',
+    'check.ready': 'Everything is in place — you can read.',
+    'check.notready': '⚠ Reading will not start yet. Below: what is missing and what installs it.',
+    'check.nosample': 'No sample case ships with the app yet, so this shows the state of the machine, not an example of reading.',
+    'case.dirhint': 'Copy the folder path from your file manager address bar. Picking a folder with a dialog is not something the browser allows — its limitation, not the app’s.',
     'sources.q': 'Village, surname, or a word from the case title',
     'sources.find': 'Search',
     'sources.searched': 'searched in',
@@ -322,6 +334,7 @@ SCREENS.newcase = async () => {
     <form data-act="case.save">
       <div class="row"><input name="case_dir" placeholder="${t('case.dir')}"
         value="${dir}" ${EDIT ? '' : 'autofocus'}></div>
+      ${EDIT ? '' : `<p class="muted">${t('case.dirhint')}</p>`}
       <div class="row">
         <input name="shifra" placeholder="${t('case.shifra')}: ДАХмО 315-1-8433"
           value="${v('shifra')}">
@@ -396,21 +409,35 @@ SCREENS.jobs = async () => {
 const ACTIONS = {
   nav: (_ev, elm) => show(elm.dataset.arg),
 
-  'home.scans': () => {
-    // Нативного вибору теки з браузера немає й не буде — тому кажемо прямо, а
-    // не показуємо кнопку, яка нічого не робить.
-    setView(`<h2>📁 ${t('home.have_scans')}</h2>
-      <p>Вкажіть теку зі сканами командою:</p>
-      <pre>nysh look &lt;шлях до теки&gt;</pre>
-      <p class="muted">Браузер не має права зазирати у файли на диску, тож цей
-      крок робиться з командного рядка. Далі все знову тут.</p>`);
+  'home.scans': async () => {
+    // 🔴 Раніше ця картка — перший клік того, заради кого все й робилось —
+    // відсилала в командний рядок за `nysh look`. Вибору теки віконцем браузер
+    // справді не дасть, але ШЛЯХ у форму вписати можна, і форма вже є. Відсилати
+    // до терміналу того, хто щойно поставив застосунок подвійним кліком, значило
+    // б обірвати шлях на першому ж кроці.
+    await show('newcase');
   },
 
   'home.demo': async () => {
+    // 🔴 Раніше тут вивалювався сирий JSON про середовище рушіїв — під написом
+    // «перевірити, що читання працює на цій машині». Питання правильне, а
+    // відповідь була не тими словами й не про те: людина, яка щойно поставила
+    // застосунок, мусить прочитати, ЧОГО бракує і ЧИМ це ставиться.
     busy();
-    const env = await callOp('htr.env', {});
-    setView(`<h2>▶ ${t('home.demo')}</h2>${renderWarnings(env)}
-      <pre>${esc(JSON.stringify(env.data, null, 1))}</pre>`);
+    const env = await callOp('setup.check', {});
+    if (!env.ok) return failure(env);
+    const rows = (env.data.checks || []).map((c) => {
+      const mark = { ok: '✅', warn: '⚠', fail: '🔴' }[c.level] || '•';
+      return `<tr><td>${mark}</td><td><b>${esc(c.name)}</b><br>
+        <span class="muted">${esc(c.detail)}</span></td>
+        <td>${c.fix ? `<code>${esc(c.fix)}</code>` : ''}</td></tr>`;
+    }).join('');
+    setView(`<h2>▶ ${t('check.title')}</h2>
+      <p class="muted">${t('check.why')}</p>
+      ${env.data.ready ? `<div class="warn">✅ ${t('check.ready')}</div>`
+        : `<div class="warn">${t('check.notready')}</div>`}
+      <table><tbody>${rows}</tbody></table>
+      <p class="muted">${t('check.nosample')}</p>`);
   },
 
   'sources.find': async (ev) => {

@@ -666,6 +666,30 @@ htr_app = typer.Typer(help="Рушії читання рукопису.", no_arg
 app.add_typer(htr_app, name="htr")
 
 
+@htr_app.command("env")
+def htr_env_cmd(as_json: bool = typer.Option(False, "--json")) -> None:
+    """Що стоїть у середовищі рушіїв: версії, чого бракує.
+
+    Загальну готовність машини каже `nysh doctor`; тут — подробиці саме про
+    рушій, потрібні тоді, коли прогін падає, а `doctor` каже «все гаразд».
+    """
+    from nyshporka import ops as O
+
+    env = O.call("htr.env", {})
+    if not env.ok:
+        console.print(f"[red]{env.error}[/red]")
+        raise typer.Exit(code=1)
+    if as_json:
+        console.print_json(data=env.data)
+        return
+    d = env.data
+    console.print(f"{'✅' if d['ok'] else '⚠'} інтерпретатор: {d['python'] or '—'}")
+    console.print(f"  kraken {d.get('kraken') or '—'} · torch "
+                  f"{d.get('torch') or '—'} · cuda {d.get('cuda') or '—'}")
+    for w in env.warnings:
+        console.print(f"[yellow]⚠[/yellow] [dim]{w.text}[/dim]")
+
+
 @htr_app.command("install")
 def htr_install(
     no_cuda: bool = typer.Option(False, "--no-cuda", help="не чіпати torch"),
@@ -712,7 +736,11 @@ def models_list() -> None:
     mark = {"ok": "✅", "absent": "▫️", "broken": "🔴"}
     for p in state["packs"]:
         size = f"{p['size'] / 2**20:.0f} МБ" if p["size"] else "?"
+        # 🔴 `id` друкується, бо саме його треба набрати в `models get`. Перелік
+        # із самими людськими назвами («Писар v17») лишав людину без того
+        # слова, якого від неї чекає наступна команда.
         console.print(f"  {mark.get(p['state'], '?')} [bold]{p['label']}[/bold] "
+                      f"[cyan]{p['id']}[/cyan] "
                       f"[dim]{p['script']}/{p['engine']} · {size}[/dim]")
     console.print(f"[dim]тека: {state['dir']}[/dim]")
 
@@ -724,7 +752,16 @@ def models_get(
     """Завантажити ваги. sha256 звіряється завжди."""
     from nyshporka.setup import packs
 
-    want = [p for p in packs.catalog() if not which or p.id == which]
+    known = packs.catalog()
+    # 🔴 Невідоме ім'я мусить бути відмовою, а не «нічого робити».
+    # Друкарська помилка в id («pysar» замість «pysar-cyr-v17») давала «✅ усе
+    # на місці»: людина читала це як «ваги стоять», ішла читати справу — і
+    # діставала відмову аж там, де вже незрозуміло, при чому тут ваги.
+    if which and not any(p.id == which for p in known):
+        console.print(f"[red]немає пака «{which}»[/red]")
+        console.print("[dim]є: " + ", ".join(p.id for p in known) + "[/dim]")
+        raise typer.Exit(code=1)
+    want = [p for p in known if not which or p.id == which]
     want = [p for p in want if not packs.verify(p)]
     if not want:
         console.print("✅ усе на місці")

@@ -269,10 +269,22 @@ def cases_list(a: CasesArgs) -> Envelope:
     try:
         rows = db.query_rows(q=a.q, repo=a.repo, htr=a.htr, year=a.year,
                              place=a.place, limit=a.limit)
+    except FileNotFoundError:
+        # 🔴 «Реєстру ще немає» — це НОРМАЛЬНИЙ стан щойно створеного простору,
+        # а не поламка. Відмова тут була першим, що бачив новачок, відкривши
+        # «Мої справи»: червоне «Не вийшло» замість порожнього переліку. Гірше
+        # того, екран на відмові не малювався взагалі — разом із кнопкою 🔄,
+        # якою це й лікується, тобто вихід зникав саме тоді, коли був потрібен.
+        env = ok({"cases": [], "shown": 0, "registry": False})
+        env.warn("no_registry_yet",
+                 "реєстру справ ще немає — його збирають після того, як у "
+                 "просторі з'явиться перша справа")
+        env.stale_because(["реєстр ще не збирали"], fix="nysh cases build")
+        return env
     except Exception as exc:
         return fail(f"реєстр справ недоступний ({type(exc).__name__}: {exc}) — "
                     f"зберіть його командою `nysh cases build`")
-    env = ok({"cases": rows, "shown": len(rows)})
+    env = ok({"cases": rows, "shown": len(rows), "registry": True})
     try:
         st = db.staleness()
     except Exception:
@@ -460,6 +472,37 @@ def case_register(a: CaseRegisterArgs) -> Envelope:
                      f"опис записано, але бібліотеку не перезібрано "
                      f"({type(exc).__name__}: {exc}) — справа з'явиться в "
                      f"переліках після наступної перезбірки")
+    return env
+
+
+# `agent=False` — це питання про МАШИНУ, а не про дослідження: агентові
+# середовище описує `htr.env`, а решту він бачить у відмовах операцій.
+@op("setup.check", summary="Чи готова ця машина читати рукопис", agent=False)
+def setup_check(_: NoArgs) -> Envelope:
+    """🔴 Найважливіше питання аматора — і до нього не було входу з екрана.
+
+    Людина, яка щойно поставила застосунок, має дізнатись, чи все складеться,
+    ДО того, як вкладе три тисячі сканів і чекатиме ніч. Ця перевірка була
+    лише в командному рядку (`nysh doctor`), а на екрані картка «показати на
+    прикладі» віддавала сирий JSON про середовище рушіїв — тобто відповідала
+    не на те питання й не тими словами.
+    """
+    from nyshporka.setup.doctor import run
+
+    checks = [{"name": c.name, "level": c.level, "detail": c.detail, "fix": c.fix}
+              for c in run()]
+    worst = ("fail" if any(c["level"] == "fail" for c in checks)
+             else "warn" if any(c["level"] == "warn" for c in checks) else "ok")
+    env = ok({"checks": checks, "level": worst,
+              "ready": worst == "ok",
+              # 🔴 Названо окремим полем, бо це не поламка машини, а межа
+              # версії: сказати «не готово» без цієї різниці означало б
+              # послати людину лагодити те, що справне.
+              "sample_case": False})
+    if worst != "ok":
+        env.warn("not_ready",
+                 "читання рукопису на цій машині поки не запуститься — нижче "
+                 "написано, чого бракує і чим це ставиться")
     return env
 
 

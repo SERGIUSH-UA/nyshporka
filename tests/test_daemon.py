@@ -212,3 +212,21 @@ def test_an_unknown_source_is_named_not_swallowed(client: TestClient) -> None:
                     headers={TOKEN_HEADER: TOKEN})
     assert r.status_code == 400
     assert "невідоме" in r.json()["error"]
+
+
+def test_fresh_workspace_shows_an_empty_list_not_a_failure(client: TestClient) -> None:
+    """🔴 Перше, що бачить новачок, відкривши «Мої справи».
+
+    Реєстру в щойно створеному просторі немає — і це нормальний стан, а не
+    поламка. Відмова малювала червоне «Не вийшло» замість порожнього переліку,
+    а екран на відмові не будувався взагалі — разом із кнопкою 🔄, якою це й
+    лікується: вихід зникав саме тоді, коли був потрібен.
+    """
+    r = client.post("/api/op/cases.list", json={})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ok"] is True
+    assert body["data"]["cases"] == []
+    assert body["data"]["registry"] is False
+    assert any(w["code"] == "no_registry_yet" for w in body["warnings"])
+    assert body["stale"]["is"] is True and body["stale"]["fix"]
