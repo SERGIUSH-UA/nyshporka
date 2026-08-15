@@ -463,6 +463,51 @@ def case_register(a: CaseRegisterArgs) -> Envelope:
     return env
 
 
+class CaseShowArgs(BaseModel):
+    case_dir: str = Field(description="тека зі сканами")
+
+
+# `agent=False` — це підживлення форми, а не дія дослідження: агент читає опис
+# через `cases.list` і `pages.status`, де він іде разом зі станом обробки.
+@op("case.show", summary="Поточний опис теки — щоб правити, а не передруковувати",
+    args=CaseShowArgs, agent=False)
+def case_show(a: CaseShowArgs) -> Envelope:
+    """🔴 Правити наосліп — не правка.
+
+    Форма без поточних значень змушує передруковувати весь опис заново, аби
+    змінити одне слово; напівзаповнена форма при цьому виглядає як повний опис.
+    Тому «змінити» починається з показу того, що вже записано.
+    """
+    import json
+
+    from nyshporka.cases.register import SIDECAR, case_path
+
+    d = case_path(a.case_dir)
+    if not d.is_dir():
+        return fail(f"теки немає: {d}")
+    sc: dict[str, Any] = {}
+    path = d / SIDECAR
+    if path.is_file():
+        try:
+            sc = json.loads(path.read_text(encoding="utf-8"))
+        except ValueError as exc:
+            return fail(f"опис пошкоджено ({exc}) — виправте {path} або "
+                        f"видаліть його й заведіть справу наново")
+    scans = sum(1 for p in d.iterdir()
+                if p.suffix.lower() in {".jpg", ".jpeg", ".png", ".tif", ".tiff"})
+    env = ok({"case_dir": str(d), "described": bool(sc), "scans": scans,
+              "sidecar": sc})
+    if not sc:
+        env.warn("not_described",
+                 "тека ще не справа: без шифри в неї немає ключа, а отже ні "
+                 "обліку прочитаного, ні місця в реєстрі")
+    elif not scans:
+        env.warn("no_scans",
+                 "опис є, а зображень у теці немає — можливо, скани лежать "
+                 "у підтеці, і читання їх не побачить")
+    return env
+
+
 # ── облік прочитаного ────────────────────────────────────────────────────────
 class PagesStatusArgs(BaseModel):
     case: str = Field(description="справа у будь-якому форматі")

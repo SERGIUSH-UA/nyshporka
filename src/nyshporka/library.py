@@ -1310,7 +1310,7 @@ def write_library(entries: list[CaseEntry]) -> Path:
     LIBRARY_PATH.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "_comment": ("Бібліотека архівних справ (канон ∪ диск). Опис статичний — "
-                     "перебудова: `nysh library build` або кнопка 🔄 у консолі. "
+                     "перебудова: `nysh cases build` або кнопка 🔄 у консолі. "
                      "Статус скану рахується наживо (не тут)."),
         "count": len(entries),
         "cases": [asdict(e) for e in entries],

@@ -39,6 +39,7 @@ const STRINGS = {
     'sources.manifest': 'Що принесе',
     'cases.title': 'Справи в роботі',
     'cases.frames': 'кадрів', 'cases.read': 'прочитано', 'cases.none': 'не читано',
+    'cases.nodir': 'теки на цій машині немає — правити нічого',
     'search.q': 'Прізвище', 'search.where': 'Де шукати',
     'search.where.decode': 'у прочитаному машиною',
     'search.where.pages': 'у виписаних прізвищах',
@@ -56,6 +57,10 @@ const STRINGS = {
     'case.dir': 'Тека зі сканами', 'case.shifra': 'Шифра',
     'case.name': 'Назва справи', 'case.type': 'Тип документа',
     'case.years': 'Роки', 'case.place': 'Місце', 'case.save': 'Зберегти',
+    'case.note': 'Примітка: звідки взято, що незрозуміло',
+    'case.edit': 'Змінити опис справи', 'case.fresh': 'Завести іншу',
+    'case.editing': 'Правимо опис теки',
+    'case.keep': 'Порожнє поле лишає попереднє значення — стерти опис можна лише правкою файлу _source.json у теці.',
     'case.why': 'Без шифри тека лишається купою файлів: немає ні обліку прочитаного, ні можливості послатись на знахідку.',
     'nav.view': 'Гортач',
     'view.run': 'Прогін', 'view.open': 'Відкрити',
@@ -98,6 +103,7 @@ const STRINGS = {
     'sources.manifest': 'What it brings',
     'cases.title': 'Cases in progress',
     'cases.frames': 'frames', 'cases.read': 'read', 'cases.none': 'not read',
+    'cases.nodir': 'folder not present on this machine — nothing to edit',
     'search.q': 'Surname', 'search.where': 'Where to look',
     'search.where.decode': 'in machine-read text',
     'search.where.pages': 'in noted surnames',
@@ -115,6 +121,10 @@ const STRINGS = {
     'case.dir': 'Folder with scans', 'case.shifra': 'Reference',
     'case.name': 'Case title', 'case.type': 'Document type',
     'case.years': 'Years', 'case.place': 'Place', 'case.save': 'Save',
+    'case.note': 'Note: where it came from, what is unclear',
+    'case.edit': 'Edit case description', 'case.fresh': 'Register another',
+    'case.editing': 'Editing the description of',
+    'case.keep': 'An empty field keeps the previous value — to erase a field, edit _source.json in the folder.',
     'case.why': 'Without a reference the folder stays a pile of files: no record of what was read, no way to cite a finding.',
     'nav.view': 'Viewer',
     'view.run': 'Run', 'view.open': 'Open',
@@ -197,6 +207,15 @@ let VIEW = null;
 /** Справа, відкрита в обліку прочитаного. */
 let EYE = null;
 
+/**
+ * Опис, підвантажений у форму «Завести справу» для ПРАВКИ.
+ *
+ * 🔴 Порожня форма над уже описаною текою — пастка: людина бачить порожні
+ * поля, вважає, що опису немає, і друкує його заново — часто інакше, ніж
+ * попереднього разу. Тому правка починається з показу записаного.
+ */
+let EDIT = null;
+
 SCREENS.home = async () => {
   const env = await callOp('workspace.info', {});
   const ws = env.ok ? env.data : {};
@@ -240,7 +259,7 @@ SCREENS.cases = async () => {
     ${renderWarnings(env)}
     <table><thead><tr>
       <th>шифра</th><th>назва</th><th class="num">${t('common.frames')}</th>
-      <th>читання</th></tr></thead><tbody>
+      <th>читання</th><th></th></tr></thead><tbody>
     ${rows.map((r) => `<tr>
       <td class="mono">${esc(r.shifra || r.key)}</td>
       <td>${esc((r.title || '').slice(0, 90))}</td>
@@ -248,6 +267,10 @@ SCREENS.cases = async () => {
       <td>${r.htr_stage && r.htr_stage !== 'none'
         ? `${t('cases.read')} ${esc(r.htr_pages_max || '')}`
         : `<span class="muted">${t('cases.none')}</span>`}</td>
+      <td>${r.path
+        ? `<button data-act="case.edit" data-arg="${esc(r.path)}"
+             title="${t('case.edit')}">✏</button>`
+        : `<span class="muted" title="${t('cases.nodir')}">—</span>`}</td>
     </tr>`).join('')}
     </tbody></table>`);
 };
@@ -279,24 +302,40 @@ SCREENS.eye = async () => {
 };
 
 SCREENS.newcase = async () => {
+  const sc = (EDIT && EDIT.sidecar) || {};
+  const v = (k) => esc(sc[k] === null || sc[k] === undefined ? '' : sc[k]);
+  const dir = EDIT ? esc(EDIT.case_dir) : '';
   setView(`
-    <h2>${t('case.title')}</h2>
+    <h2>${EDIT ? t('case.edit') : t('case.title')}</h2>
     <p class="muted">${t('case.why')}</p>
+    ${EDIT ? `<div class="warn">${t('case.editing')} <b class="mono">${dir}</b>
+       · ${esc(EDIT.scans)} ${t('common.frames')}<br>
+       <span class="muted">${t('case.keep')}</span></div>` : ''}
     <form data-act="case.save">
-      <div class="row"><input name="case_dir" placeholder="${t('case.dir')}" autofocus></div>
+      <div class="row"><input name="case_dir" placeholder="${t('case.dir')}"
+        value="${dir}" ${EDIT ? '' : 'autofocus'}></div>
       <div class="row">
-        <input name="shifra" placeholder="${t('case.shifra')}: ДАХмО 315-1-8433">
-        <input name="doc_type" placeholder="${t('case.type')}: метрична">
+        <input name="shifra" placeholder="${t('case.shifra')}: ДАХмО 315-1-8433"
+          value="${v('shifra')}">
+        <input name="doc_type" placeholder="${t('case.type')}: метрична"
+          value="${v('doc_type')}">
       </div>
-      <div class="row"><input name="title" placeholder="${t('case.name')}"></div>
+      <div class="row"><input name="title" placeholder="${t('case.name')}"
+        value="${v('title')}" ${EDIT ? 'autofocus' : ''}></div>
       <div class="row">
-        <input name="place" placeholder="${t('case.place')}">
-        <input name="year_from" placeholder="${t('case.years')}: 1858" size="6">
-        <input name="year_to" placeholder="1860" size="6">
+        <input name="place" placeholder="${t('case.place')}" value="${v('place')}">
+        <input name="year_from" placeholder="${t('case.years')}: 1858" size="6"
+          value="${v('year_from')}">
+        <input name="year_to" placeholder="1860" size="6" value="${v('year_to')}">
       </div>
-      <div class="row"><button type="submit">${t('case.save')}</button></div>
+      <div class="row"><input name="note" placeholder="${t('case.note')}"
+        value="${v('note')}"></div>
+      <div class="row"><button type="submit">${t('case.save')}</button>
+        ${EDIT ? `<button type="button" data-act="case.fresh">${t('case.fresh')}</button>`
+          : ''}</div>
     </form>
     <div id="hits"></div>`);
+  EDIT = null;
 };
 
 SCREENS.view = async () => {
@@ -462,6 +501,21 @@ const ACTIONS = {
     box.innerHTML = `<div class="warn">✅ ${esc(fd.scan)} занесено</div>`
       + renderWarnings(env);
     ev.target.reset();
+  },
+
+  'case.edit': async (_ev, elm) => {
+    const env = await callOp('case.show', { case_dir: elm.dataset.arg });
+    if (!env.ok) return failure(env);
+    EDIT = env.data;
+    await show('newcase');
+    if (env.warnings && env.warnings.length) {
+      el('hits').innerHTML = renderWarnings(env);
+    }
+  },
+
+  'case.fresh': async () => {
+    EDIT = null;
+    await show('newcase');
   },
 
   'case.save': async (ev) => {

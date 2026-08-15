@@ -159,6 +159,27 @@ def test_describe_without_shifra_on_a_fresh_folder_refuses(space: Path) -> None:
         R.describe(space, title="Просто назва")
 
 
+def test_relative_path_from_the_registry_resolves_against_the_workspace(
+        space: Path, monkeypatch, tmp_path: Path) -> None:
+    """🔴 Реєстр зберігає шляхи ВІДНОСНИМИ — щоб простір можна було перенести.
+
+    Тому кнопка «змінити» подає `data/raw/…`, а не абсолютний шлях. Якщо його
+    резолвити від поточної теки процесу, та сама справа з консолі «зникає», а
+    з-під `cd` у корені простору знаходиться: помилка залежить не від даних, а
+    від того, звідки запущено, — і тому не відтворюється в того, хто її шукає.
+    """
+    from nyshporka import ops as O
+
+    R.describe(space, shifra="ДАХмО 315-1-8433", title="Метрична книга")
+    rel = space.relative_to(tmp_path).as_posix()
+    monkeypatch.chdir(tmp_path.parent)  # свідомо НЕ корінь простору
+
+    env = O.call("case.show", {"case_dir": rel})
+    assert env.ok, env.error
+    assert env.data["described"] is True
+    assert env.data["scans"] == 3
+
+
 def test_forget_removes_only_the_sidecar(space: Path) -> None:
     R.describe(space, shifra="ДАХмО 315-1-8433")
     assert R.forget(space) is True

@@ -395,6 +395,88 @@ def case_cmd(
         console.print(f"[yellow]⚠[/yellow] [dim]{w.text}[/dim]")
 
 
+@app.command("archive")
+def archive_cmd(
+    repo: str = typer.Argument(..., help="код архіву: DAHMO, CDIAK, ANRM…"),
+    fond: str = typer.Argument(..., help="номер фонду"),
+    as_json: bool = typer.Option(False, "--json"),
+) -> None:
+    """Що пак знає про фонд: губернія, опис у ключі, дефолти.
+
+    🔴 Питати це треба ПЕРЕД тим, як складати ключ справи. У частині фондів
+    опис входить у ключ, і без нього різні книги злипаються в одну — знайти
+    це потім можна лише за чужими сторінками у своїй справі.
+    """
+    from nyshporka import ops as O
+
+    env = O.call("archive.fond", {"repo": repo, "fond": fond})
+    if not env.ok:
+        console.print(f"[red]{env.error}[/red]")
+        raise typer.Exit(code=1)
+    if as_json:
+        console.print_json(data=env.data)
+        return
+    d = env.data
+    console.print(f"[bold]{d['repo_label'] or d['repo']} ф.{d['fond']}[/bold] "
+                  f"{d.get('name') or ''}")
+    console.print(f"  губернія: {d.get('guberniya') or '—'} · опис у ключі: "
+                  f"{'ТАК' if d.get('opys_in_key') else 'ні'} · опис за "
+                  f"замовчуванням: {d.get('default_opys') or '—'}")
+    if d.get("note"):
+        console.print(f"  [dim]{d['note']}[/dim]")
+    for w in env.warnings:
+        console.print(f"[yellow]⚠[/yellow] [dim]{w.text}[/dim]")
+
+
+@app.command("profile")
+def profile_cmd(as_json: bool = typer.Option(False, "--json")) -> None:
+    """Чий рід шукаємо: форми прізвища, корені, парадигма.
+
+    🔴 Перше, що варто спитати на чужому просторі. Без свого профілю пошук
+    мовчки працює на прізвище того, хто налаштовував простір до вас, — і нуль
+    у відповіді буде про чужий рід.
+    """
+    from nyshporka import ops as O
+
+    env = O.call("profile.show", {})
+    if not env.ok:
+        console.print(f"[red]{env.error}[/red]")
+        for w in env.warnings:
+            console.print(f"[yellow]⚠[/yellow] [dim]{w.text}[/dim]")
+        raise typer.Exit(code=1)
+    if as_json:
+        console.print_json(data=env.data)
+        return
+    d = env.data
+    console.print(f"[bold]{d.get('display') or d.get('name')}[/bold] "
+                  f"[dim]парадигма {d.get('paradigm') or '—'}[/dim]")
+    console.print(f"  корені: {', '.join(d.get('roots') or []) or '—'}")
+    console.print(f"  форми: {len(d.get('spellings') or [])} · "
+                  f"самоперевірка: {d.get('selftest_mode')}")
+
+
+@app.command("review")
+def review_cmd(
+    source: str = typer.Option("", "--source", help="лише з цього джерела"),
+    min_score: float = typer.Option(0.0, "--min-score"),
+) -> None:
+    """Людський gate: перебрати кандидатів із зовнішніх джерел.
+
+    🔴 Жоден кандидат не потрапляє в канон машиною. Це не обережність, а
+    вимірювана вартість: збіг прізвища й десятиліття дає правдоподібну, але
+    чужу особу, і виявляється це через покоління дерева.
+
+    Кандидатів пишуть fetcher'и зовнішніх сайтів, яких у цій версії ще немає
+    (правове питання ToS чужих сервісів), тож на щойно створеному просторі
+    черга буде порожня — це стан, а не поламка.
+    """
+    from nyshporka.core.workspace import workspace
+    from nyshporka.matching.review import review_loop
+
+    review_loop(workspace().root, source=source or None, min_score=min_score,
+                console=console)
+
+
 cases_app = typer.Typer(help="Реєстр справ: що є, що прочитано, що прошукано.",
                         no_args_is_help=True)
 app.add_typer(cases_app, name="cases")
@@ -536,6 +618,48 @@ def pages_grep_cmd(
                       f"{str(h.get('surname') or h.get('line') or h.get('name') or '')[:80]}")
     for w in env.warnings:
         console.print(f"[yellow]⚠[/yellow] [dim]{w.text}[/dim]")
+
+
+records_app = typer.Typer(help="Розібрані записи джерела: хто, коли, чиї.",
+                          no_args_is_help=True)
+app.add_typer(records_app, name="records")
+
+
+@records_app.command("add")
+def records_add_cmd(
+    case: str = typer.Argument(..., help="справа у будь-якому форматі"),
+    from_json: str = typer.Option("-", "--json",
+                                  help="файл із масивом записів; «-» — stdin"),
+) -> None:
+    """Занести розібрані акти структурою, а не прозою.
+
+    Проза не шукається за роллю: «хто був батьком» і «хто був восприємником» у
+    ній однакові рядки. Невалідні елементи пропускаються зі звітом — не
+    втрачати сорок розібраних актів через одруківку в сорок першому.
+    """
+    from nyshporka import ops as O
+
+    payload = (sys.stdin.read() if from_json == "-"
+               else Path(from_json).read_text(encoding="utf-8"))
+    env = O.call("records.add", {"case": case, "records": payload})
+    if not env.ok:
+        console.print(f"[red]{env.error}[/red]")
+        raise typer.Exit(code=1)
+    d = env.data
+    console.print(f"✅ [bold]{d.get('shifra') or d.get('case')}[/bold] "
+                  f"додано: {d.get('added', 0)} · оновлено: {d.get('updated', 0)}")
+    for w in env.warnings:
+        console.print(f"[yellow]⚠[/yellow] [dim]{w.text}[/dim]")
+
+
+@records_app.command("grep")
+def records_grep_cmd(
+    q: str = typer.Argument(..., help="прізвище"),
+    case: str = typer.Option("", "--case"),
+    limit: int = typer.Option(50, "--limit"),
+) -> None:
+    """Знайти прізвище серед розібраних записів."""
+    pages_grep_cmd(q=q, where="records", case=case, limit=limit)
 
 
 htr_app = typer.Typer(help="Рушії читання рукопису.", no_args_is_help=True)

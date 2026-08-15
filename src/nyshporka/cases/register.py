@@ -108,6 +108,24 @@ def read_sidecar(case_dir: Path) -> dict[str, Any]:
     return {}
 
 
+def case_path(case_dir: str | Path) -> Path:
+    """Тека справи як АБСОЛЮТНИЙ шлях.
+
+    🔴 Реєстр справ зберігає шляхи ВІДНОСНИМИ до простору — щоб простір можна
+    було перенести на інший диск чи віддати колезі. Через це `Path(...)` від
+    такого рядка резолвиться від поточної теки процесу, а вона в демона й у
+    командному рядку різна: та сама справа, натиснута кнопкою, «зникала» б, а
+    з-під `cd` у корені простору знаходилась. Тому відносний шлях завжди
+    добудовується коренем простору, і лише абсолютний береться як є.
+    """
+    p = Path(case_dir).expanduser()
+    if not p.is_absolute():
+        from nyshporka.core.workspace import workspace
+
+        p = workspace().root / p
+    return p.resolve()
+
+
 def describe(case_dir: str | Path, *, shifra: str = "", title: str = "",
              doc_type: str = "", year_from: int | None = None,
              year_to: int | None = None, place: str = "", note: str = "",
@@ -117,7 +135,7 @@ def describe(case_dir: str | Path, *, shifra: str = "", title: str = "",
     Порожнє поле НЕ затирає наявне: правка одного заголовка не має стирати
     роки, які хтось уже уточнив.
     """
-    d = Path(case_dir).expanduser().resolve()
+    d = case_path(case_dir)
     if not d.is_dir():
         raise RegisterError(f"теки немає: {d}")
 
@@ -165,7 +183,7 @@ def forget(case_dir: str | Path) -> bool:
     ⚠ Прибирає РІВНО сайдкар, нічого більше: скани й прочитане лишаються. Без
     опису тека просто повертається в стан «матеріал без шифри».
     """
-    f = Path(case_dir).expanduser().resolve() / SIDECAR
+    f = case_path(case_dir) / SIDECAR
     if not f.is_file():
         return False
     f.unlink()

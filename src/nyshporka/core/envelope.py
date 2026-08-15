@@ -14,7 +14,7 @@
     {"ok": true, "v": 1,
      "data": {...},
      "warnings": [{"code": "stale_index", "text": "…"}],
-     "stale": {"is": true, "reasons": [...], "fix": "nysh index build"},
+     "stale": {"is": true, "reasons": [...], "fix": "nysh cases build"},
      "next": [{"op": "pages.note", "why": "переглянуто 3 скани, не занесено"}]}
 
 `next` — не прикраса: конвеєр має обов'язкові пари дій («подивився → занеси»),
