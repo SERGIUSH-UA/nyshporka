@@ -120,7 +120,19 @@ def create_app(ws: Workspace | None = None, *, token: str = "") -> FastAPI:
         if op.mutates:
             require_token(token_hdr)
         if op.long:
-            job = await workers.start(bus, space, name, payload or {})
+            # 🔴 Причина відмови мусить дійти до людини. Постановка в чергу
+            # робить справжню роботу ДО старту (шукає теку, рахує кадри, добирає
+            # модель) — і саме там ловляться найчастіші перші помилки: не та
+            # тека, порожня тека, немає ваг. Без цього перехоплення вони
+            # прилітали як «Internal Server Error»: екран показував «Не вийшло»
+            # без жодного слова про те, що саме, хоч слово було написане.
+            try:
+                job = await workers.start(bus, space, name, payload or {})
+            except Exception as exc:
+                text = str(exc) or type(exc).__name__
+                return JSONResponse({"ok": False, "v": 1, "error": text,
+                                     "warnings": [], "data": {}},
+                                    status_code=400)
             return JSONResponse({"ok": True, "v": 1,
                                  "data": {"job_id": job.id, "state": str(job.state)}})
         env = O.call(name, payload or {})

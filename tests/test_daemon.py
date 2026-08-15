@@ -189,3 +189,26 @@ def test_rebuild_button_gives_one_job_for_two_clicks(client: TestClient,
 def test_rebuild_is_a_mutation_and_needs_a_token(client: TestClient) -> None:
     """Перезбірка переписує реєстр — чужа вкладка на localhost не має права."""
     assert client.post("/api/op/cases.build", json={}).status_code == 403
+
+
+def test_a_long_op_that_cannot_start_says_why(client: TestClient) -> None:
+    """🔴 Найперша помилка аматора — не та тека. Він мусить це прочитати.
+
+    Постановка в чергу робить справжню роботу ДО старту: шукає теку, рахує
+    кадри, добирає модель. Саме там ловляться найчастіші перші відмови — і без
+    перехоплення вони прилітали як «Internal Server Error»: екран показував
+    «Не вийшло» без жодного слова про причину, хоч причина була написана.
+    """
+    r = client.post("/api/op/read.start", json={"case_dir": "Ж:/нема-такої-теки"},
+                    headers={TOKEN_HEADER: TOKEN})
+    assert r.status_code == 400, "відмова прийшла як збій сервера"
+    body = r.json()
+    assert body["ok"] is False
+    assert "теки" in body["error"], f"причина не дійшла: {body['error']!r}"
+
+
+def test_an_unknown_source_is_named_not_swallowed(client: TestClient) -> None:
+    r = client.post("/api/op/acquire.start", json={"source": "невідоме", "ref": "x"},
+                    headers={TOKEN_HEADER: TOKEN})
+    assert r.status_code == 400
+    assert "невідоме" in r.json()["error"]
