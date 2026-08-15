@@ -26,9 +26,10 @@
 from __future__ import annotations
 
 import os
+import re
 import sys
 import tomllib
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -300,6 +301,43 @@ def use(root: str | Path | Workspace) -> Workspace:
     _override = root if isinstance(root, Workspace) else _build(
         validate_root(Path(root)), "explicit")
     return _override
+
+
+def add_case_root(path: str | Path) -> Path:
+    """Оголосити теку зі сканами поза простором — і записати це в маркер.
+
+    🔴 Розширення зони гарда, тому воно ЯВНЕ і зберігається у файлі, який
+    людина може прочитати. Мовчазне «пущу будь-який абсолютний шлях» зняло б
+    єдину перепону між запитом із браузера й рештою диска.
+
+    Записується в `nyshporka.toml`, бо простір переносять разом із маркером:
+    інакше після переїзду скани «зникали б» без сліду, чому.
+    """
+    p = validate_root(Path(path))
+    if not p.is_dir():
+        raise WorkspaceError(f"теки немає: {p}")
+    ws = workspace()
+    if p == ws.raw or p in ws.case_roots():
+        return p
+
+    marker = ws.marker
+    text = marker.read_text(encoding="utf-8") if marker.is_file() else "[workspace]\n"
+    roots = [str(x).replace("\\", "/") for x in ws.extra_case_roots]
+    roots.append(str(p).replace("\\", "/"))
+    listed = ", ".join(f'"{r}"' for r in roots)
+    line = f"case_roots = [{listed}]"
+    # Рядок може бути закоментованим зразком із майстра, наявним значенням або
+    # відсутнім зовсім — усі три випадки трапляються на живому просторі.
+    if re.search(r"(?m)^\s*case_roots\s*=", text):
+        text = re.sub(r"(?m)^\s*case_roots\s*=.*$", line, text, count=1)
+    else:
+        text = text.rstrip("\n") + "\n" + line + "\n"
+    marker.write_text(text, encoding="utf-8")
+
+    global _override
+    _override = replace(ws, extra_case_roots=(*ws.extra_case_roots, p))
+    _cached.cache_clear()
+    return p
 
 
 def reset() -> None:

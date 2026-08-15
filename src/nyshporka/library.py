@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import csv
 import json
+import os
 import re
 from dataclasses import asdict, dataclass, field
 from functools import lru_cache
@@ -570,30 +571,86 @@ def _count_case(d: Path) -> tuple[int, int]:
     return imgs, pdfs
 
 
+def _scan_roots() -> list[Path]:
+    """Де шукати теки справ: `data/raw` плюс оголошені корені поза простором.
+
+    🔴 Довго сканувалась ЛИШЕ `data/raw`, і через це скани мусили лежати
+    всередині простору. Для дослідника це нормально — він сам будував дерево;
+    для людини зі сканами на зовнішньому диску це означало, що заведена справа
+    просто не з'являлась ніде, без жодної помилки.
+
+    Корені вже описані в `nyshporka.toml` (`case_roots`) і в
+    `Workspace.case_roots()` — саме як «корені, з яких дозволено брати теки
+    справ». Тут вони нарешті використовуються за призначенням: зона лишається
+    явним переліком, а не «будь-який абсолютний шлях».
+    """
+    roots: list[Path] = [RAW_DIR]
+    try:
+        from nyshporka.core.workspace import workspace
+
+        # 🔴 Порівнюємо шляхи ЯК Є (з поправкою на регістр), а не `resolve()`:
+        # `data/raw` містить junction'и на архівний диск, і резолвінг прирівняв
+        # би корінь до його цілі — тобто мовчки викинув би з обходу або сам
+        # `data/raw`, або оголошений корінь.
+        known = {os.path.normcase(str(RAW_DIR))}
+        for p in workspace().case_roots():
+            key = os.path.normcase(str(p))
+            if key not in known:
+                known.add(key)
+                roots.append(p)
+    except Exception:
+        # Без простору (тести холодного ядра, виклик поза робочою текою)
+        # лишається канонічний корінь — це не привід не зібрати бібліотеку.
+        pass
+    return [r for r in roots if r.exists()]
+
+
 def _scan_disk_cases(limit: int = 4000) -> list[tuple[str, int, int]]:
-    """Теки data/raw/** (1-4 рівні) з зображеннями/PDF → [(rel, images, pdfs)].
+    """Теки коренів справ (1-4 рівні) з зображеннями/PDF → [(шлях, images, pdfs)].
 
     4-й рівень з'явився з `fsfiles_download.py harvest`: `anrm/villages/<село>/<тека>`
     — одна тека на справу, ім'я за плівкою й кадрами, шифра в `_source.json`.
+
+    Шлях повертається ВІДНОСНИМ, доки тека лежить у просторі, — щоб простір
+    можна було перенести на інший диск чи віддати колезі. Для теки за межами
+    простору відносного шляху не існує, тож іде абсолютний; читачі складають
+    його як `ROOT / path`, а це на обох платформах віддає сам абсолютний шлях.
     """
     out: list[tuple[str, int, int]] = []
-    if not RAW_DIR.exists():
-        return out
     seen: set[Path] = set()
-    for depth in ("*", "*/*", "*/*/*", "*/*/*/*"):
-        for d in sorted(RAW_DIR.glob(depth)):
-            if not d.is_dir() or d in seen or d.name.startswith("_"):
-                continue
-            # періодика/описи/корпуси — тисячі PDF за роками, не справи (і не обходити T:)
-            if d.relative_to(RAW_DIR).parts[0] in _SKIP_SLUGS:
-                continue
-            imgs, pdfs = _count_case(d)
+    for i, base in enumerate(_scan_roots()):
+        # 🔴 Оголошений корінь МОЖЕ БУТИ САМ текою справи: людина показує на
+        # «D:/Метрики 1858», а не на теку, що їх містить. Обхід `glob("*")`
+        # видає лише вміст, тож без цієї перевірки оголошена тека лишалась би
+        # невидимою — тобто дія «взяти під облік» тихо не давала б нічого.
+        # Для `data/raw` цього не робимо: розкидані там файли — не справа.
+        if i and base not in seen:
+            imgs, pdfs = _count_case(base)
             if imgs or pdfs:
-                seen.add(d)
-                rel = str(d.relative_to(ROOT)).replace("\\", "/")
-                out.append((rel, imgs, pdfs))
-            if len(out) >= limit:
-                return out
+                seen.add(base)
+                out.append((str(base).replace("\\", "/"), imgs, pdfs))
+        for depth in ("*", "*/*", "*/*/*", "*/*/*/*"):
+            for d in sorted(base.glob(depth)):
+                if not d.is_dir() or d in seen or d.name.startswith("_"):
+                    continue
+                # періодика/описи/корпуси — тисячі PDF за роками, не справи
+                if d.relative_to(base).parts[0] in _SKIP_SLUGS:
+                    continue
+                imgs, pdfs = _count_case(d)
+                if imgs or pdfs:
+                    seen.add(d)
+                    # 🔴 БЕЗ `resolve()`. Тека справи буває junction'ом на
+                    # архівний диск; резолвінг підмінив би шлях ціллю — і вся
+                    # прив'язка (прогони, цитати, реєстр) поїхала б на інший
+                    # рядок без жодної помилки. Це вже ставалось: «косметична»
+                    # заміна коштувала 35 справ ф.196.
+                    try:
+                        path = str(d.relative_to(ROOT))
+                    except ValueError:
+                        path = str(d)
+                    out.append((path.replace("\\", "/"), imgs, pdfs))
+                if len(out) >= limit:
+                    return out
     return out
 
 

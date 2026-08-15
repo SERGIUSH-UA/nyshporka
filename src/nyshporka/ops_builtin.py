@@ -459,6 +459,10 @@ class CaseRegisterArgs(BaseModel):
     year_to: int | None = None
     place: str = Field(default="", description="село, повіт, губернія")
     note: str = Field(default="", description="звідки взято, що незрозуміло")
+    adopt: bool = Field(
+        default=False,
+        description="взяти теку під облік, якщо вона лежить ПОЗА простором: "
+                    "оголосити її коренем справ у nyshporka.toml")
     reindex: bool = Field(
         default=True,
         description="перезібрати бібліотеку, щоб справа одразу з'явилась у переліках")
@@ -495,17 +499,30 @@ def case_register(a: CaseRegisterArgs) -> Envelope:
     from nyshporka.cases.register import case_path, reachable
 
     here = case_path(a.case_dir)
+    env.data["reachable"] = True
     if not reachable(here):
-        from nyshporka.core.workspace import workspace
+        from nyshporka.core.workspace import WorkspaceError, add_case_root
 
-        env.data["reachable"] = False
-        env.warn("outside_workspace",
-                 f"тека лежить поза простором, тож у переліках справа НЕ "
-                 f"з'явиться: збірка дивиться в {workspace().raw}. Перенесіть "
-                 f"теку туди (можна разом із описом — він усередині) і "
-                 f"заведіть її ще раз уже за новим шляхом.")
-    else:
-        env.data["reachable"] = True
+        if a.adopt:
+            try:
+                root = add_case_root(here)
+            except WorkspaceError as exc:
+                env.data["reachable"] = False
+                env.warn("adopt_refused",
+                         f"взяти теку під облік не вийшло: {exc}")
+            else:
+                env.data["adopted"] = str(root)
+                env.warn("adopted",
+                         f"теку взято під облік: {root}. Її оголошено в "
+                         f"nyshporka.toml, тож вона лишиться видимою й після "
+                         f"перезапуску — і поїде разом із простором.")
+        else:
+            env.data["reachable"] = False
+            env.warn("outside_workspace",
+                     "тека лежить поза простором, тож у переліках справа НЕ "
+                     "з'явиться. Поставте позначку «взяти теку під облік» — "
+                     "і вона буде видима там, де лежить, без перенесення "
+                     "файлів.")
     if not out.get("title"):
         env.warn("no_title",
                  "назви немає — у переліках справа буде «без назви», і впізнати "

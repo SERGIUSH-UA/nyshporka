@@ -296,8 +296,12 @@ def test_a_folder_outside_the_workspace_is_flagged_not_silently_accepted(
     assert env.data["reachable"] is False
     warn = next((w for w in env.warnings if w.code == "outside_workspace"), None)
     assert warn is not None, "тека поза простором прийнята мовчки"
-    assert "data" in warn.text.lower() or "raw" in warn.text.lower(), \
-        "сказали «не з'явиться», але не сказали, КУДИ класти"
+    # Сказати «не з'явиться» й не сказати, що з цим робити, — половина роботи.
+    # Спершу тут перевірялось, чи названо КУДИ перенести теку; відтоді з'явився
+    # кращий вихід — узяти її під облік там, де вона лежить, — і перевірка
+    # тримається за наявність виходу, а не за конкретний із них.
+    assert "облік" in warn.text.lower(), \
+        "сказали «не з'явиться», але не сказали, ЩО з цим робити"
 
 
 def test_a_folder_inside_the_workspace_is_not_flagged(space: Path) -> None:
@@ -328,3 +332,66 @@ def test_a_zero_always_carries_its_denominator(space: Path, where: str) -> None:
     assert "coverage" in env.data, "нуль без знаменника"
     assert any(w.code == "zero_with_denominator" for w in env.warnings), \
         "нуль не сказав, ЯКИЙ обсяг переглянуто"
+
+
+# ── розташування сканів ──────────────────────────────────────────────────────
+def test_an_adopted_folder_outside_the_workspace_becomes_a_visible_case(
+        space: Path, tmp_path: Path) -> None:
+    """🔴 Скани не мусять переїжджати в простір, щоб їх було видно.
+
+    Збірка бібліотеки довго дивилась ЛИШЕ в `data/raw`. Для дослідника, який
+    сам будував дерево, це природно; для людини зі сканами на зовнішньому диску
+    означало, що заведена справа не з'являлась ніде — без жодної помилки.
+
+    Корені поза простором уже були описані (`case_roots` у `nyshporka.toml`),
+    але обхід їх не використовував. Тепер використовує — і зона лишається
+    ЯВНИМ переліком: тека потрапляє в неї лише за прямою згодою.
+    """
+    from nyshporka import library as L
+    from nyshporka import ops as O
+
+    outside = tmp_path.parent / "зовнішній_диск" / "Метрики 1858"
+    outside.mkdir(parents=True, exist_ok=True)
+    for i in (1, 2, 3, 4):
+        (outside / f"000{i}.jpg").write_bytes(b"x")
+
+    env = O.call("case.register", {"case_dir": str(outside),
+                                   "shifra": "ДАХмО 315-1-9001",
+                                   "adopt": True, "reindex": False})
+    assert env.ok, env.error
+    assert env.data["reachable"] is True
+    assert env.data.get("adopted"), "теку не оголошено коренем"
+
+    for fn in ("_sidecar_case", "_sidecar_village"):
+        getattr(L, fn).cache_clear()
+    found = [e for e in L.build_library() if e.key == "DAHMO/315/9001"]
+    assert found, "оголошена тека так і не стала справою"
+    assert found[0].frames == 4, "кадри порахувались не там"
+
+
+def test_paths_inside_the_workspace_stay_relative(space: Path) -> None:
+    """🔴 Простір переносять на інший диск і віддають колезі.
+
+    Тому шлях справи, що лежить усередині, лишається ВІДНОСНИМ: абсолютний
+    пережив би переїзд лише на тій самій машині. Абсолютний з'являється рівно
+    там, де відносного не існує, — для теки за межами простору.
+    """
+    from nyshporka import library as L
+
+    R.describe(space, shifra="ДАХмО 315-1-8433")
+    for fn in ("_sidecar_case", "_sidecar_village"):
+        getattr(L, fn).cache_clear()
+    entry = next(e for e in L.build_library() if e.key == "DAHMO/315/8433")
+    assert not Path(entry.path).is_absolute(), f"шлях став абсолютним: {entry.path}"
+
+
+def test_declaring_a_root_refuses_a_whole_drive(space: Path) -> None:
+    """Оголошення кореня — розширення зони гарда, і воно не безмежне.
+
+    Шлях у гортач приходить із HTTP-запиту; корінь диска перетворив би
+    перевірку «чи під дозволеним коренем» на «дозволено все».
+    """
+    from nyshporka.core.workspace import WorkspaceError, add_case_root
+
+    with pytest.raises(WorkspaceError):
+        add_case_root(Path(space.anchor))

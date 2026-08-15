@@ -76,6 +76,8 @@ const STRINGS = {
     'case.name': 'Назва справи', 'case.type': 'Тип документа',
     'case.years': 'Роки', 'case.place': 'Місце', 'case.save': 'Зберегти',
     'case.note': 'Примітка: звідки взято, що незрозуміло',
+    'case.adopt': 'Узяти теку під облік там, де вона лежить',
+    'case.adopt.why': "Потрібно лише для теки ПОЗА простором (зовнішній диск, робочий стіл): інакше справа не з'явиться в переліках. Файли не переносяться — теку буде оголошено в nyshporka.toml.",
     'case.edit': 'Змінити опис справи', 'case.fresh': 'Завести іншу',
     'case.editing': 'Правимо опис теки',
     'case.keep': 'Порожнє поле лишає попереднє значення — стерти опис можна лише правкою файлу _source.json у теці.',
@@ -158,6 +160,8 @@ const STRINGS = {
     'case.name': 'Case title', 'case.type': 'Document type',
     'case.years': 'Years', 'case.place': 'Place', 'case.save': 'Save',
     'case.note': 'Note: where it came from, what is unclear',
+    'case.adopt': 'Take this folder into the registry where it is',
+    'case.adopt.why': 'Needed only for a folder OUTSIDE the workspace (external drive, desktop): otherwise the case will not appear in any listing. Nothing is moved — the folder is declared in nyshporka.toml.',
     'case.edit': 'Edit case description', 'case.fresh': 'Register another',
     'case.editing': 'Editing the description of',
     'case.keep': 'An empty field keeps the previous value — to erase a field, edit _source.json in the folder.',
@@ -391,6 +395,9 @@ SCREENS.newcase = async () => {
       </div>
       <div class="row"><input name="note" placeholder="${t('case.note')}"
         value="${v('note')}"></div>
+      <div class="row"><label><input type="checkbox" name="adopt" value="1">
+        ${t('case.adopt')}</label></div>
+      <p class="muted">${t('case.adopt.why')}</p>
       <div class="row"><button type="submit">${t('case.save')}</button>
         ${EDIT ? `<button type="button" data-act="case.fresh">${t('case.fresh')}</button>`
           : ''}</div>
@@ -633,6 +640,8 @@ const ACTIONS = {
     ev.preventDefault();
     const fd = Object.fromEntries(new FormData(ev.target).entries());
     for (const k of ['year_from', 'year_to']) fd[k] = fd[k] ? Number(fd[k]) : null;
+    // Незнята позначка у FormData просто відсутня — схема чекає булеве поле.
+    fd.adopt = fd.adopt === '1';
     const env = await callOp('case.register', fd);
     if (!env.ok) {
       el('hits').innerHTML = `<div class="warn err">${esc(env.error)}</div>`;
