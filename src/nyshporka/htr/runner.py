@@ -594,7 +594,18 @@ def _line_crops(im: Image.Image, seg) -> list:
     _reset()
     try:
         crops = []
-        for (c, _), ln in zip(extract_polygons(im, seg), seg.lines):
+        # 🔴 `strict=False` тут СВІДОМИЙ, а не забутий. `extract_polygons` —
+        # чужа функція kraken, і чи може вона віддати менше вирізок, ніж рядків
+        # (вироджений полігон), ми не міряли. Впасти означало б утратити
+        # сторінку через припущення; мовчки обрізати — прив'язати кроп до ЧУЖОЇ
+        # геометрії рядка, а це вже спотворення тексту, якого не видно.
+        # Тому: не падаємо, але розбіжність називаємо вголос.
+        _polys = list(extract_polygons(im, seg))
+        if len(_polys) != len(seg.lines):
+            print(f"[htr-run] ⚠ сегментація віддала {len(_polys)} вирізок на "
+                  f"{len(seg.lines)} рядків — прив'язка геометрії на цій "
+                  f"сторінці ненадійна", flush=True)
+        for (c, _), ln in zip(_polys, seg.lines, strict=False):
             if c.width >= PARSEQ_MIN_CROP_W:
                 crops.append(c)
                 _add(ln)
@@ -1220,7 +1231,9 @@ def ocr_page_parseq(im: Image.Image, segmenter, rec, device: str,
         with torch.no_grad():
             probs = model(x).softmax(-1)
         preds, per_tok = model.tokenizer.decode(probs)
-        for _k, (text, p) in enumerate(zip(preds, per_tok)):
+        # Обидва з ОДНОГО `decode` — різна довжина означала б ваду рушія, і
+        # тихо обрізати її не можна: сторінка мовчки лишилась би без хвоста.
+        for _k, (text, p) in enumerate(zip(preds, per_tok, strict=True)):
             # NFC — щоб combining-діакритика не ламала fuzzy-пошук (як у kraken-гілці);
             # clean_pysar_text прибирає маркери конфлікту ‹|›, які модель v5b
             # успадкувала з забрудненого корпусу і вставляє прямо в текст справи
@@ -2570,8 +2583,12 @@ def main() -> int:
                         files.append(cf)
                     except Exception:
                         continue
+                # `idxs` і `crops_` наповнюються ПАРОЮ, тож розбіжність тут
+                # означала б, що текст ляже на ЧУЖИЙ номер рядка — саме та
+                # тиха підміна, від якої рятувальний прохід і рятує.
                 for idx, txt in zip(idxs, kraken_decode_crops(voice, crops_,
-                                                              VOICE_BATCH)):
+                                                              VOICE_BATCH),
+                                    strict=True):
                     body[idx] = txt.replace("\n", " ").strip()
                     if body[idx]:
                         n_read += 1

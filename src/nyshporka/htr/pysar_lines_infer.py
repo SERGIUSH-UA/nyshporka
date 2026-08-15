@@ -147,7 +147,8 @@ def main() -> int:
         # з'їдається): у 00049 нема line_022, і позиційний запис зсував увесь
         # хвіст сторінки на +1 — декод діставався сусідньому рядку, а GT,
         # зібраний по номерах кропів, зіставлявся з чужим текстом.
-        by_idx = {int(c.stem.split("_")[-1]): t for c, t in zip(crops, texts)}
+        by_idx = {int(c.stem.split("_")[-1]): t
+                  for c, t in zip(crops, texts, strict=True)}
         # NFC — щоб combining-діакритика не ламала fuzzy-пошук (як у Скриби)
         body = "\n".join(unicodedata.normalize("NFC", by_idx.get(i, ""))
                          for i in range(max(by_idx) + 1))

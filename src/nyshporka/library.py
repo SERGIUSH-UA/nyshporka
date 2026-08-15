@@ -28,6 +28,7 @@ import re
 from dataclasses import asdict, dataclass, field
 from functools import lru_cache
 from pathlib import Path
+from typing import Any
 
 from nyshporka.core.workspace import workspace
 from nyshporka.models import Source
@@ -199,13 +200,13 @@ def candidate_keys(parsed: tuple[str, str, str | None, str] | None) -> list[str]
 
 
 @lru_cache(maxsize=1)
-def _archium_cases() -> dict[str, dict]:
+def _archium_cases() -> dict[str, dict[str, Any]]:
     """file_id → рядок `_crawl/cases.tsv` (fond_no, inv_label, case_no, date, …).
 
     Ім'я теки скану (`f794_spr_16732`) несе **id файлу на сайті**, а не архівну шифру,
     тож без цього індексу бібліотека показувала б «ДАХмО 794-16732» замість «794-1-2».
     """
-    out: dict[str, dict] = {}
+    out: dict[str, dict[str, Any]] = {}
     try:
         with _ARCHIUM_CASES.open(encoding="utf-8") as fh:
             for row in csv.DictReader(fh, delimiter="\t"):
@@ -270,8 +271,8 @@ def parse_case_path(rel: str) -> tuple[str, str, str | None, str] | None:
     md = _DAVO_DIR_RE.match(stem)
     if md and (repo in (None, "DAVO") or slug == "davo"):
         fond2, opys2, spr2 = md.groups()
-        return (repo or "DAVO", fond or _norm_spr(fond2), _norm_spr(opys2),
-                str(_norm_spr(spr2)))
+        return (repo or "DAVO", str(fond or _norm_spr(fond2)),
+                _norm_spr(opys2), str(_norm_spr(spr2)))
     # опис із проміжної теки f904_op24
     for seg in parts[1:-1]:
         fm = _FSUB_RE.fullmatch(seg)
@@ -349,7 +350,7 @@ def _sidecar_case(rel: str) -> tuple[str, str, str | None, str] | None:
         repo = (re.split(r"[\s\d]", shifra, maxsplit=1)[0] or "").upper()
         if not repo.isalpha():
             repo = _repo_from_rel(rel)
-        fond, opys, spr = (_norm_spr(g) for g in msh.groups())
+        fond, opys, spr = (_norm_spr(g) or "" for g in msh.groups())
         opys = _norm_spr(m.get("inv") or m.get("opys") or "") or opys
         if repo and fond and spr:
             return repo, str(fond), str(opys) if opys else None, str(spr)
@@ -362,7 +363,7 @@ _DELO_RE = re.compile(
     r"(?:Д|Спр|D|Dosar)\w*\.?\s*(\d+[а-яa-z]?)", re.IGNORECASE)
 
 
-def _parse_delo(value) -> tuple[str, str | None, str] | None:
+def _parse_delo(value: Any) -> tuple[str, str | None, str] | None:
     """«Ф. 211 Оп. 3 Д. 140» → («211», «3», «140»). None якщо не розпізнано.
 
     Кілька шифр в одному полі (плівка накриває суміжні справи) — беремо ПЕРШУ:
@@ -385,7 +386,7 @@ _LISTY_RE = re.compile(r"Л\.\s*(\d+)\s*[-–]\s*(\d+|…|\.\.\.)?", re.IGNORECA
 _SHEET_DOMINANCE = 0.80
 
 
-def _case_from_sheet_index(m: dict, d: Path) -> tuple[str, str | None, str] | None:
+def _case_from_sheet_index(m: dict[str, Any], d: Path) -> tuple[str, str | None, str] | None:
     """Справа теки за ПЕРЕТИНОМ кадрів на диску з діапазонами «Л.» покажчика.
 
     Плівка сама по собі справою не є: `2086507_1864` несе спр.242-249, а
@@ -398,8 +399,10 @@ def _case_from_sheet_index(m: dict, d: Path) -> tuple[str, str | None, str] | No
     тому діапазон можна зіставляти з іменами файлів.
     """
     items = [x for x in (m.get("sheet_index") or []) if isinstance(x, dict)]
-    cases = [(_parse_delo(x.get("delo")), x.get("listy") or "") for x in items]
-    cases = [(c, ly) for c, ly in cases if c]
+    # Окреме ім'я для відфільтрованого: перезапис `cases` собою ж ховає, що
+    # після фільтра шифра вже точно є — і читач, і перевіряч бачать старий тип.
+    parsed = [(_parse_delo(x.get("delo")), x.get("listy") or "") for x in items]
+    cases = [(c, ly) for c, ly in parsed if c is not None]
     if not cases:
         return None
     uniq = {c for c, _ in cases}
@@ -410,7 +413,7 @@ def _case_from_sheet_index(m: dict, d: Path) -> tuple[str, str | None, str] | No
     if not frames:
         return None
     # межі справ: заповнюємо відкриті хвости («Л. 742-…») початком наступної
-    spans: list[tuple[tuple, int, int]] = []
+    spans: list[tuple[tuple[Any, ...], int, int]] = []
     for i, (case, listy) in enumerate(cases):
         ml = _LISTY_RE.search(listy)
         if not ml:
@@ -597,17 +600,17 @@ def _scan_disk_cases(limit: int = 4000) -> list[tuple[str, int, int]]:
 # ── fallback-резолвери назв ───────────────────────────────────────────────────
 
 @lru_cache(maxsize=1)
-def _wikisource_meta() -> dict:
+def _wikisource_meta() -> dict[str, Any]:
     try:
-        return json.loads(_WIKISOURCE_META.read_text(encoding="utf-8"))
+        return dict(json.loads(_WIKISOURCE_META.read_text(encoding="utf-8")))
     except Exception:
         return {}
 
 
 @lru_cache(maxsize=1)
-def _opys_merged() -> dict:
+def _opys_merged() -> dict[tuple[str, str], dict[str, Any]]:
     """(opys, spr_norm) → row(dict). Опис фонду 315 з Вікіджерел/ukrfamily."""
-    out: dict[tuple[str, str], dict] = {}
+    out: dict[tuple[str, str], dict[str, Any]] = {}
     try:
         with _OPYS_MERGED.open(encoding="utf-8") as fh:
             for row in csv.DictReader(fh, delimiter="\t"):
@@ -621,7 +624,7 @@ def _opys_merged() -> dict:
 
 
 @lru_cache(maxsize=1)
-def _master_index() -> dict:
+def _master_index() -> dict[tuple[str, str], dict[str, Any]]:
     """(opys, spr) → рядок f315_MASTER_INDEX.tsv (12.8k справ фонду 315).
 
     ⚠ Колонку `title` ІГНОРУЄМО — вона генерична («Церковні записи, Подільська
@@ -631,7 +634,7 @@ def _master_index() -> dict:
     НЕнадійні (див. memory dahmo-f315-opys-full-scrape: FS масово хибно тегає
     адмін-справи «Religious Records»).
     """
-    out: dict[tuple[str, str], dict] = {}
+    out: dict[tuple[str, str], dict[str, Any]] = {}
     try:
         with _MASTER_INDEX.open(encoding="utf-8") as fh:
             for row in csv.DictReader(fh, delimiter="\t"):
@@ -645,9 +648,9 @@ def _master_index() -> dict:
 
 
 @lru_cache(maxsize=1)
-def _klirovi_index() -> dict:
+def _klirovi_index() -> dict[str, Any]:
     """spr → рядок klirovi_index.tsv (курований індекс клірових відомостей ф.315)."""
-    out: dict[str, dict] = {}
+    out: dict[str, dict[str, Any]] = {}
     try:
         with _KLIROVI_INDEX.open(encoding="utf-8") as fh:
             for row in csv.DictReader(fh, delimiter="\t"):
@@ -666,10 +669,10 @@ _F904_PART = {"Н": "народження", "Ш": "шлюби", "С": "смер�
 
 
 @lru_cache(maxsize=1)
-def _davo_f904_catalog() -> dict:
+def _davo_f904_catalog() -> dict[str, Any]:
     """spr → {part, year_from, year_to} з людського каталогу ДАВО ф.904 оп.24
     (М'ястківська Свято-Благовіщенська ц.). Рядки виду `| Н | 1876-1885 | спр.53 |`."""
-    out: dict[str, dict] = {}
+    out: dict[str, dict[str, Any]] = {}
     try:
         for line in _DAVO_F904_CATALOG.read_text(encoding="utf-8").splitlines():
             m = _F904_ROW_RE.match(line.strip())
@@ -691,7 +694,7 @@ _D226_ROW_RE = re.compile(
 
 
 @lru_cache(maxsize=1)
-def _dahmo_226_catalog() -> dict:
+def _dahmo_226_catalog() -> dict[str, Any]:
     """spr → {opys, year, type, uezd} з курованого CATALOG.md ф.226
     (Подільська казенна палата — ревізькі казки; таблиця ведеться вручну).
 
@@ -702,7 +705,7 @@ def _dahmo_226_catalog() -> dict:
     (`inv|spr|рік|тип|повіт|…`, `inv|spr|рік|вміст|стан`, `inv|spr|в описі|реальний
     вміст|вердикт`) — без цієї межі рядки пізніших таблиць лізуть у поле «тип».
     """
-    out: dict[str, dict] = {}
+    out: dict[str, dict[str, Any]] = {}
     try:
         in_section = False
         for line in _DAHMO_226_CATALOG.read_text(encoding="utf-8").splitlines():
@@ -741,7 +744,7 @@ _ARCHIUM_GENRE = ("метрич", "метрик", "сповідальн", "сп�
                   "ревізьк", "ревизск", "казк", "кліров", "клирови", "посімейн")
 
 
-def _archium_desc(row: dict) -> dict:
+def _archium_desc(row: dict[str, Any]) -> dict[str, Any]:
     """Рядок cases.tsv → поля опису для CaseEntry (title/роки/місце)."""
     desc = (row.get("description") or "").strip()
     for rx in (_ARCHIUM_TAIL_RE, _ARCHIUM_SHEETS_RE):
@@ -783,7 +786,7 @@ def _clean_wiki(text: str) -> str:
 _HARVEST_YEAR_RE = re.compile(r"\b(1[6-9]\d\d)\b")
 
 
-def _harvest_desc(m: dict, single_case: bool = False) -> dict | None:
+def _harvest_desc(m: dict[str, Any], single_case: bool = False) -> dict[str, Any] | None:
     """Опис теки `fsfiles harvest` з полів покажчика дзеркала. None якщо їх нема."""
     sod = (m.get("soderzhanie") or "").strip()
     village = (m.get("village") or "").strip()
@@ -819,7 +822,7 @@ def _harvest_desc(m: dict, single_case: bool = False) -> dict | None:
             "listy": listy}
 
 
-def _fallback_name(rel_path: str, key_parts: tuple | None) -> dict:
+def _fallback_name(rel_path: str, key_parts: tuple[Any, ...] | None) -> dict[str, Any]:
     """Назва теки без канону: _source.json → wikisource → opys_tsv → код."""
     d = ROOT / rel_path
     # 1) сайдкар у теці — писаний руками, найточніший опис поза каноном.
@@ -949,7 +952,7 @@ def _fallback_name(rel_path: str, key_parts: tuple | None) -> dict:
             "place": "", "desc_source": "code"}
 
 
-def _years_span(v) -> tuple[int | None, int | None]:
+def _years_span(v: Any) -> tuple[int | None, int | None]:
     """«1861-1870» або «1857-1866, 1869-1873» → (1861, 1870) / (1857, 1873).
 
     Третя конвенція сайдкара, крім `year_from/year_to` і `year`: суцільний РЯДОК
@@ -967,7 +970,7 @@ def _years_span(v) -> tuple[int | None, int | None]:
     return (years[0], years[-1]) if years else (None, None)
 
 
-def _to_int(v) -> int | None:
+def _to_int(v: Any) -> int | None:
     try:
         return int(str(v).strip()[:4])
     except (TypeError, ValueError):
@@ -1019,7 +1022,7 @@ def _sidecar_script(rel_path: str | None) -> tuple[str, list[str]]:
         script = _SCRIPT_ALIASES.get(str(m.get("script") or "").strip().lower(), "")
         if not script and langs:
             got = {_LANG_SCRIPT.get(x) for x in langs} - {None}
-            script = got.pop() if len(got) == 1 else ("mixed" if got else "")
+            script = (got.pop() or "") if len(got) == 1 else ("mixed" if got else "")
         if script or langs:
             return script, langs
     return "", []
@@ -1102,7 +1105,8 @@ def _source_to_entry(src: Source) -> CaseEntry | None:
     )
 
 
-def _shifra(repo, fond, opys, spr) -> str:
+def _shifra(repo: str | None, fond: str | None, opys: str | None,
+            spr: str | None) -> str:
     lbl = _REPO_LABEL.get(repo or "", repo or "")
     mid = f"{fond}-{opys}-{spr}" if opys else f"{fond}-{spr}"
     return f"{lbl} {mid}".strip()
@@ -1128,9 +1132,9 @@ def _tag_from_path(rel: str) -> str:
 
 # ── scan_targets (курована черга §9) ──────────────────────────────────────────
 
-def _load_curated() -> dict[str, dict]:
+def _load_curated() -> dict[str, dict[str, Any]]:
     """rel-path → {group, why, tag, expected} з scan_targets.json (для позначки 🎖)."""
-    out: dict[str, dict] = {}
+    out: dict[str, dict[str, Any]] = {}
     try:
         data = json.loads(SCAN_TARGETS_PATH.read_text(encoding="utf-8"))
     except Exception:
@@ -1173,13 +1177,17 @@ def build_library() -> list[CaseEntry]:
     #    запускав іншу). raw_path на `data/source/archives/**` НЕ пінимо — то стор
     #    першоджерел, а прогін іде по теці в data/raw (її знайде крок 3).
     for e in list(by_key.values()):
-        if not (e.raw_path or "").startswith("data/raw/"):
+        # Локальна змінна, а не `e.raw_path` двічі: перевіряч не доводить
+        # звуження крізь `(x or "")`, а читач через це не бачить, що далі
+        # шлях уже точно є.
+        raw = e.raw_path or ""
+        if not raw.startswith("data/raw/"):
             continue
-        p = ROOT / e.raw_path
+        p = ROOT / raw
         if not p.exists():
             continue
-        e.path = e.raw_path
-        e.tag = _tag_from_path(e.raw_path)
+        e.path = raw
+        e.tag = _tag_from_path(raw)
         i, d = _count_case(p) if p.is_dir() else (0, _pdf_pages([p]) or 1)
         e.frames = i or d
         e.on_disk = bool(e.frames)
@@ -1228,6 +1236,8 @@ def build_library() -> list[CaseEntry]:
         # у ключі, і порахований до цього рядка ключ був би без опису (два різні
         # описи злиплися б в один запис бібліотеки).
         key = _mk_key(repo, fond, spr, opys)
+        if not key:
+            continue          # без ключа запис ніде не знайдеться
         shifra = fb.get("shifra_hint") or _shifra(repo, fond, opys, spr)
         # `rtypes_final=[]` від резолвера = «жанр не книга записів, не вгадувати»
         final = fb.get("rtypes_final")
@@ -1325,16 +1335,17 @@ VERDICT_KINDS = {
 }
 
 
-def load_verdicts() -> dict:
+def load_verdicts() -> dict[str, Any]:
     """key справи → {verdict, note, pages, date}. Порожньо якщо файла ще нема."""
     try:
-        return json.loads(VERDICTS_PATH.read_text(encoding="utf-8")).get("verdicts", {})
+        return dict(json.loads(
+            VERDICTS_PATH.read_text(encoding="utf-8")).get("verdicts", {}))
     except Exception:
         return {}
 
 
 def set_verdict(key: str, verdict: str | None, note: str = "",
-                pages: int | None = None, date: str = "") -> dict:
+                pages: int | None = None, date: str = "") -> dict[str, Any]:
     """Виставити/зняти ручний вердикт справи (verdict=None або "" знімає)."""
     if verdict and verdict not in VERDICT_KINDS:
         raise ValueError(f"невідомий вердикт: {verdict}")
@@ -1352,26 +1363,27 @@ def set_verdict(key: str, verdict: str | None, note: str = "",
     tmp = VERDICTS_PATH.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=1), encoding="utf-8")
     tmp.replace(VERDICTS_PATH)
-    return data.get(key, {})
+    return dict(data.get(key, {}))
 
 
-def load_library() -> list[dict]:
+def load_library() -> list[dict[str, Any]]:
     """Прочитати case_library.json (порожньо якщо ще не збудовано)."""
     try:
-        return json.loads(LIBRARY_PATH.read_text(encoding="utf-8")).get("cases", [])
+        return list(json.loads(
+            LIBRARY_PATH.read_text(encoding="utf-8")).get("cases", []))
     except Exception:
         return []
 
 
 @lru_cache(maxsize=1)
-def _describe_index() -> tuple[float, dict, dict]:
+def _describe_index() -> tuple[float, dict[str, Any], dict[str, Any]]:
     """(mtime, path→entry, key→entry) з case_library.json — для describe_case."""
     try:
         mtime = LIBRARY_PATH.stat().st_mtime
     except OSError:
         return (0.0, {}, {})
-    by_path: dict[str, dict] = {}
-    by_key: dict[str, dict] = {}
+    by_path: dict[str, dict[str, Any]] = {}
+    by_key: dict[str, dict[str, Any]] = {}
     for e in load_library():
         for p in (e.get("path"), e.get("raw_path")):
             if p:
@@ -1426,7 +1438,7 @@ def dejunction(path: str) -> str | None:
     return None
 
 
-def describe_case(path: str) -> dict | None:
+def describe_case(path: str) -> dict[str, Any] | None:
     """Знайти опис справи за шляхом входу (для збагачення пікера консолі).
 
     Кеш скидається коли case_library.json перезаписано (звірка mtime).
@@ -1454,7 +1466,7 @@ def describe_case(path: str) -> dict | None:
     if rel not in by_path:
         rel = dejunction(path) or rel
     if rel in by_path:
-        return by_path[rel]
+        return dict(by_path[rel])
     parsed = parse_case_code(rel) or parse_case_code(path)
     if parsed:
         return next((by_key[k] for k in candidate_keys(parsed) if k in by_key), None)
@@ -1465,7 +1477,7 @@ def describe_case(path: str) -> dict | None:
 _BANK_NS = ("_addtp/", "_direct/", "_synthetic/", "_svshch/")
 
 
-def describe_bank_case(case_id: str) -> dict | None:
+def describe_bank_case(case_id: str) -> dict[str, Any] | None:
     """Опис справи за ідентифікатором запису БАНКУ (`data/spotter/canonical/pages.jsonl`).
 
     Ідентифікатор там — не шлях: `davo_904_24/010904-24-00053` (тека/підтека),

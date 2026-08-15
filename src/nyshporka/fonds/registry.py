@@ -53,12 +53,12 @@ _YEAR_RE = re.compile(r"^(\d{4})(?:\s*[-–]\s*(\d{4}))?$")
 
 #: memo: fond_id → (stamp, rows). stamp = (path, mtime_ns, size) — перезбірка реєстру
 #: змінює mtime, тож кеш протухає сам і його не треба скидати руками.
-_CACHE: dict[str, tuple[tuple, list[dict]]] = {}
+_CACHE: dict[str, tuple[tuple[Any, ...], list[dict[str, Any]]]] = {}
 
 
 # ── дискавері ─────────────────────────────────────────────────────────────────
 
-def _stamp(p: Path) -> tuple:
+def _stamp(p: Path) -> tuple[Any, ...]:
     st = p.stat()
     return (str(p), st.st_mtime_ns, st.st_size)
 
@@ -73,9 +73,9 @@ def registry_dir(fond_id: str) -> Path:
     return workspace().raw / fond_id / "registry"
 
 
-def discover_fonds() -> list[dict]:
+def discover_fonds() -> list[dict[str, Any]]:
     """Усі реєстри описів на диску. Без хардкоду переліку фондів."""
-    out: list[dict] = []
+    out: list[dict[str, Any]] = []
     raw = workspace().raw
     if not raw.exists():
         return out
@@ -102,7 +102,7 @@ def discover_fonds() -> list[dict]:
 
 # ── читання й нормалізація ────────────────────────────────────────────────────
 
-def _norm_legacy(r: dict) -> dict:
+def _norm_legacy(r: dict[str, Any]) -> dict[str, Any]:
     """Стара схема ф.315 → канонічна форма.
 
     `has_commons` (0/1) НЕ стає `commons_url`: прапорець каже «скан десь є», а
@@ -125,7 +125,7 @@ def _norm_legacy(r: dict) -> dict:
     return out
 
 
-def _norm_merged(r: dict) -> dict:
+def _norm_merged(r: dict[str, Any]) -> dict[str, Any]:
     out: dict[str, Any] = {}
     for k in FIELDS:
         if k in ("spr", "shifra"):
@@ -138,7 +138,7 @@ def _norm_merged(r: dict) -> dict:
     return out
 
 
-def load_rows(fond_id: str) -> list[dict]:
+def load_rows(fond_id: str) -> list[dict[str, Any]]:
     """Нормалізовані рядки реєстру опису; memo за (path, mtime, size)."""
     p = fond_path(fond_id)
     if not p.exists():
@@ -155,7 +155,7 @@ def load_rows(fond_id: str) -> list[dict]:
         raw = list(rd)
 
     fond = fond_id.rsplit("_", 1)[-1]
-    rows: list[dict] = []
+    rows: list[dict[str, Any]] = []
     for r in raw:
         n = _norm_legacy(r) if legacy else _norm_merged(r)
         n["spr"] = f"{n.get('spr_int') or ''}{n.get('spr_letter') or ''}"
@@ -180,17 +180,17 @@ def schema_of(fond_id: str) -> str:
 
 # ── супутні файли ─────────────────────────────────────────────────────────────
 
-def load_coverage(fond_id: str) -> dict | None:
+def load_coverage(fond_id: str) -> dict[str, Any] | None:
     p = registry_dir(fond_id) / "coverage.json"
     if not p.exists():
         return None
     try:
-        return json.loads(p.read_text(encoding="utf-8"))
+        return dict(json.loads(p.read_text(encoding="utf-8")))
     except Exception:
         return None
 
 
-def load_conflicts(fond_id: str) -> list[dict] | None:
+def load_conflicts(fond_id: str) -> list[dict[str, Any]] | None:
     p = registry_dir(fond_id) / "conflicts.tsv"
     if not p.exists():
         return None
@@ -198,7 +198,7 @@ def load_conflicts(fond_id: str) -> list[dict] | None:
         return list(csv.DictReader(fh, delimiter="\t"))
 
 
-def load_alfavitka(fond_id: str) -> list[dict] | None:
+def load_alfavitka(fond_id: str) -> list[dict[str, Any]] | None:
     p = registry_dir(fond_id) / "alfavitka.tsv"
     if not p.exists():
         return None
@@ -256,7 +256,9 @@ def live_on_disk(repo: str, fond: str) -> dict[tuple[str, str, str], str]:
 
 # ── похідні для UI ────────────────────────────────────────────────────────────
 
-def row_status(row: dict, live: dict, conflicts: dict) -> dict:
+def row_status(row: dict[str, Any],
+               live: dict[tuple[str, str, str], str],
+               conflicts: dict[tuple[str, str], int]) -> dict[str, Any]:
     """`disk_state`, `flags`, `on_disk_live`, `disk_mismatch`, `conflicts`."""
     key = (row.get("opys") or "", row.get("spr_int") or "",
            row.get("spr_letter") or "")
@@ -307,11 +309,11 @@ def _year_bounds(year: str | None) -> tuple[int | None, int | None]:
     return a, int(m.group(2) or a)
 
 
-def filter_rows(rows: list[dict], *, opys: str = "", q: str = "", surname: str = "",
+def filter_rows(rows: list[dict[str, Any]], *, opys: str = "", q: str = "", surname: str = "",
                 year: str = "", uezd: str = "", scan: bool = False,
                 on_disk: bool = False, todo: bool = False, state: str = "",
-                flag: str = "", live: dict | None = None,
-                status: dict | None = None) -> list[dict]:
+                flag: str = "", live: dict[tuple[str, str, str], str] | None = None,
+                status: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     """Єдиний фільтр реєстру опису.
 
     `scan`/`on_disk`/`todo` — булеві прапорці CLI; `state` — те саме одним
@@ -323,7 +325,7 @@ def filter_rows(rows: list[dict], *, opys: str = "", q: str = "", surname: str =
     live = live if live is not None else {}
     status = status or {}
 
-    def keep(r: dict) -> bool:
+    def keep(r: dict[str, Any]) -> bool:
         if opys and (r.get("opys") or "") != opys:
             return False
         if ql:
@@ -342,12 +344,20 @@ def filter_rows(rows: list[dict], *, opys: str = "", q: str = "", surname: str =
             return False
         if todo and st["disk_state"] != "todo":
             return False
-        if state and st["disk_state"] != state:
-            if not (state == "scan" and (r.get("commons_url") or r.get("mirror_url"))):
-                return False
+        # `state=scan` — не стан диска, а «десь є оцифроване»: справа може бути
+        # ще не завантаженою, але вже мати скан на Commons чи дзеркалі. Тому
+        # умова читається як одне ціле, а не як виняток усередині фільтра.
+        if (state and st["disk_state"] != state
+                and not (state == "scan"
+                         and (r.get("commons_url") or r.get("mirror_url")))):
+            return False
         if want_flags and not want_flags.issubset(set(st["flags"])):
             return False
-        if yf is not None:
+        # Обидві межі перевіряються разом: `_year_bounds` віддає їх ПАРОЮ —
+        # або обидві, або жодної. Перевіряти лише нижню означало б лишити
+        # порівняння з None на випадок, якого сьогодні немає, але який
+        # зʼявиться від першої ж зміни в тій функції.
+        if yf is not None and yt is not None:
             a = str(r.get("year_from") or "")
             b = str(r.get("year_to") or a)
             if not a.isdigit():
@@ -361,7 +371,8 @@ def filter_rows(rows: list[dict], *, opys: str = "", q: str = "", surname: str =
 
 # ── зведення й фасети ─────────────────────────────────────────────────────────
 
-def summarize(rows: list[dict], live: dict | None = None) -> dict:
+def summarize(rows: list[dict[str, Any]],
+              live: dict[tuple[str, str, str], str] | None = None) -> dict[str, Any]:
     live = live if live is not None else {}
     s = {"rows": len(rows), "commons": 0, "mirror_only": 0, "truncated": 0,
          "on_disk": 0, "on_disk_live": 0, "todo": 0, "order": 0,
@@ -411,7 +422,7 @@ _UEZD_LABEL = {"балтск": "Балтський", "ольгопольск": "
                "могилевск": "Могилівський", "ушицк": "Ушицький"}
 
 
-def facets(rows: list[dict]) -> dict:
+def facets(rows: list[dict[str, Any]]) -> dict[str, Any]:
     opys_c: dict[str, int] = {}
     uezd_c: dict[str, int] = {}
     for r in rows:
@@ -462,7 +473,7 @@ def fond_id_of(repo: str, fond: str) -> str:
 
 
 def registry_row(repo: str, fond: str, opys: str, spr: str,
-                 letter: str = "") -> tuple[dict | None, Path]:
+                 letter: str = "") -> tuple[dict[str, Any] | None, Path]:
     """Нормалізований рядок однієї справи + шлях реєстру (для повідомлень)."""
     fond_id = fond_id_of(repo, fond)
     path = fond_path(fond_id)
