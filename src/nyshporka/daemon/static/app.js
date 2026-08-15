@@ -45,6 +45,18 @@ const STRINGS = {
     'search.where.records': 'в учасниках записів',
     'search.run': 'Знайти',
     'search.coverage': 'шукали по',
+    'nav.eye': 'Око',
+    'eye.case': 'Справа', 'eye.check': 'Що вже дивились',
+    'eye.disk': 'на диску', 'eye.noted': 'занесено', 'eye.left': 'ще не дивились',
+    'eye.note': 'Занести сторінку', 'eye.scan': 'Скан', 'eye.type': 'Тип',
+    'eye.surnames': 'Прізвища ЯК У ДЖЕРЕЛІ (через кому)',
+    'eye.status': 'Повнота', 'eye.comment': 'Коментар', 'eye.save': 'Занести',
+    'eye.rule': 'Заносьте КОЖЕН відкритий скан — навіть порожній. Інакше наступного разу ви відкриєте його знову.',
+    'case.title': 'Завести або виправити справу',
+    'case.dir': 'Тека зі сканами', 'case.shifra': 'Шифра',
+    'case.name': 'Назва справи', 'case.type': 'Тип документа',
+    'case.years': 'Роки', 'case.place': 'Місце', 'case.save': 'Зберегти',
+    'case.why': 'Без шифри тека лишається купою файлів: немає ні обліку прочитаного, ні можливості послатись на знахідку.',
     'nav.view': 'Гортач',
     'view.run': 'Прогін', 'view.open': 'Відкрити',
     'view.pages': 'сторінок', 'view.lines': 'рядків',
@@ -92,6 +104,18 @@ const STRINGS = {
     'search.where.records': 'in record participants',
     'search.run': 'Search',
     'search.coverage': 'searched across',
+    'nav.eye': 'Eye',
+    'eye.case': 'Case', 'eye.check': 'Already looked at',
+    'eye.disk': 'on disk', 'eye.noted': 'noted', 'eye.left': 'not looked at yet',
+    'eye.note': 'Note a page', 'eye.scan': 'Scan', 'eye.type': 'Type',
+    'eye.surnames': 'Surnames AS WRITTEN (comma separated)',
+    'eye.status': 'Completeness', 'eye.comment': 'Comment', 'eye.save': 'Save',
+    'eye.rule': 'Note EVERY scan you opened — even an empty one. Otherwise you will open it again next time.',
+    'case.title': 'Register or correct a case',
+    'case.dir': 'Folder with scans', 'case.shifra': 'Reference',
+    'case.name': 'Case title', 'case.type': 'Document type',
+    'case.years': 'Years', 'case.place': 'Place', 'case.save': 'Save',
+    'case.why': 'Without a reference the folder stays a pile of files: no record of what was read, no way to cite a finding.',
     'nav.view': 'Viewer',
     'view.run': 'Run', 'view.open': 'Open',
     'view.pages': 'pages', 'view.lines': 'lines',
@@ -170,6 +194,9 @@ let LAST_READ = null;
 /** Прогін і сторінка, відкриті в гортачі. */
 let VIEW = null;
 
+/** Справа, відкрита в обліку прочитаного. */
+let EYE = null;
+
 SCREENS.home = async () => {
   const env = await callOp('workspace.info', {});
   const ws = env.ok ? env.data : {};
@@ -236,6 +263,38 @@ SCREENS.search = async () => {
         <option value="records">${t('search.where.records')}</option>
       </select>
       <button type="submit">${t('search.run')}</button>
+    </form>
+    <div id="hits"></div>`);
+};
+
+SCREENS.eye = async () => {
+  setView(`
+    <h2>${t('nav.eye')}</h2>
+    <p class="muted">${t('eye.rule')}</p>
+    <form class="row" data-act="eye.check">
+      <input name="case" placeholder="${t('eye.case')}: DAHMO/315/8433" autofocus>
+      <button type="submit">${t('eye.check')}</button>
+    </form>
+    <div id="hits"></div>`);
+};
+
+SCREENS.newcase = async () => {
+  setView(`
+    <h2>${t('case.title')}</h2>
+    <p class="muted">${t('case.why')}</p>
+    <form data-act="case.save">
+      <div class="row"><input name="case_dir" placeholder="${t('case.dir')}" autofocus></div>
+      <div class="row">
+        <input name="shifra" placeholder="${t('case.shifra')}: ДАХмО 315-1-8433">
+        <input name="doc_type" placeholder="${t('case.type')}: метрична">
+      </div>
+      <div class="row"><input name="title" placeholder="${t('case.name')}"></div>
+      <div class="row">
+        <input name="place" placeholder="${t('case.place')}">
+        <input name="year_from" placeholder="${t('case.years')}: 1858" size="6">
+        <input name="year_to" placeholder="1860" size="6">
+      </div>
+      <div class="row"><button type="submit">${t('case.save')}</button></div>
     </form>
     <div id="hits"></div>`);
 };
@@ -360,6 +419,65 @@ const ACTIONS = {
   // 🔴 Спершу ПЛАН, і лише окремою кнопкою — старт. Справа читається годинами;
   // дізнатись «модель не та» або «кадрів не 20, а 3000» після запуску означає
   // втратити ніч.
+  'eye.check': async (ev) => {
+    ev.preventDefault();
+    EYE = { case: new FormData(ev.target).get('case') };
+    el('hits').innerHTML = `<p class="muted">${t('common.loading')}</p>`;
+    const env = await callOp('pages.status', EYE);
+    if (!env.ok) return failure(env);
+    const d = env.data;
+    el('hits').innerHTML = `
+      ${renderWarnings(env)}
+      <p><b>${esc(d.shifra)}</b> ${esc(d.title || '')}</p>
+      <p class="muted">${t('eye.disk')}: ${d.total_disk ?? 0} ·
+         ${t('eye.noted')}: ${d.noted} ·
+         ${t('eye.left')}: ${d.unnoted_count ?? '?'}</p>
+      <h3>${t('eye.note')}</h3>
+      <form data-act="eye.note">
+        <div class="row">
+          <input name="scan" placeholder="${t('eye.scan')}: 0030.JPG">
+          <input name="page_type" placeholder="${t('eye.type')}: confession">
+          <select name="status">
+            <option value="full">full — виписано ВСІ прізвища</option>
+            <option value="partial">partial — не всі</option>
+            <option value="skipped">skipped — не читав</option>
+            <option value="unreadable">unreadable — не читається</option>
+          </select>
+        </div>
+        <div class="row"><input name="surnames" placeholder="${t('eye.surnames')}"></div>
+        <div class="row">
+          <input name="comment" placeholder="${t('eye.comment')}">
+          <button type="submit">${t('eye.save')}</button>
+        </div>
+      </form>
+      <div id="noted"></div>`;
+  },
+
+  'eye.note': async (ev) => {
+    ev.preventDefault();
+    const fd = Object.fromEntries(new FormData(ev.target).entries());
+    const env = await callOp('pages.note', { ...EYE, ...fd });
+    const box = el('noted');
+    if (!env.ok) { box.innerHTML = `<div class="warn err">${esc(env.error)}</div>`; return; }
+    box.innerHTML = `<div class="warn">✅ ${esc(fd.scan)} занесено</div>`
+      + renderWarnings(env);
+    ev.target.reset();
+  },
+
+  'case.save': async (ev) => {
+    ev.preventDefault();
+    const fd = Object.fromEntries(new FormData(ev.target).entries());
+    for (const k of ['year_from', 'year_to']) fd[k] = fd[k] ? Number(fd[k]) : null;
+    const env = await callOp('case.register', fd);
+    if (!env.ok) {
+      el('hits').innerHTML = `<div class="warn err">${esc(env.error)}</div>`;
+      return;
+    }
+    const sc = env.data.sidecar;
+    el('hits').innerHTML = `${renderWarnings(env)}
+      <div class="warn">✅ <b>${esc(sc.shifra)}</b> — ${esc(sc.title || 'без назви')}</div>`;
+  },
+
   'view.open': async (ev) => {
     ev.preventDefault();
     const fd = new FormData(ev.target);

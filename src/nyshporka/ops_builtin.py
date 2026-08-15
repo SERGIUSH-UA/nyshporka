@@ -403,6 +403,208 @@ def page_view(a: ViewArgs) -> Envelope:
     return env
 
 
+# ── завести справу руками ────────────────────────────────────────────────────
+class CaseRegisterArgs(BaseModel):
+    case_dir: str = Field(description="тека зі сканами")
+    shifra: str = Field(default="",
+                        description="«ДАХмО 315-1-8433», «ф.315 оп.1 спр.8433», "
+                                    "«Ф. 211 Оп. 3 Д. 140»")
+    title: str = Field(default="", description="назва справи, як в описі архіву")
+    doc_type: str = Field(default="", description="метрична / сповідна / ревізька…")
+    year_from: int | None = None
+    year_to: int | None = None
+    place: str = Field(default="", description="село, повіт, губернія")
+    note: str = Field(default="", description="звідки взято, що незрозуміло")
+    reindex: bool = Field(
+        default=True,
+        description="перезібрати бібліотеку, щоб справа одразу з'явилась у переліках")
+
+
+@op("case.register", summary="Завести або виправити справу: шифра, назва, роки",
+    args=CaseRegisterArgs, mutates=True)
+def case_register(a: CaseRegisterArgs) -> Envelope:
+    """Зробити теку зі сканами СПРАВОЮ.
+
+    🔴 Без шифри тека лишається купою файлів: у неї немає ключа, а отже ні
+    обліку прочитаного, ні місця в реєстрі, ні можливості послатись на
+    знахідку. Опис пишеться В ТЕКУ — вона переїжджає між дисками й потрапляє
+    до колег, і опис мусить їхати з нею.
+
+    🔴 Бібліотека перезбирається ОДРАЗУ. Інакше людина заводить справу, іде в
+    «Мої справи» — і не бачить її там; виглядає це як «нічого не спрацювало»,
+    хоча опис записаний. На великому просторі це коштує секунд двадцять, і це
+    чесна ціна: система щойно дізналась про нову справу.
+    """
+    from nyshporka.cases.register import RegisterError, describe
+
+    try:
+        out = describe(a.case_dir, shifra=a.shifra, title=a.title,
+                       doc_type=a.doc_type, year_from=a.year_from,
+                       year_to=a.year_to, place=a.place, note=a.note)
+    except RegisterError as exc:
+        return fail(str(exc))
+    env = ok({"case_dir": a.case_dir, "sidecar": out})
+    if not out.get("title"):
+        env.warn("no_title",
+                 "назви немає — у переліках справа буде «без назви», і впізнати "
+                 "її за рік стане важко")
+    if a.reindex:
+        try:
+            from nyshporka.library import build_library, write_library
+
+            entries = build_library()
+            write_library(entries)
+            env.data["library"] = len(entries)
+        except Exception as exc:
+            env.warn("reindex_failed",
+                     f"опис записано, але бібліотеку не перезібрано "
+                     f"({type(exc).__name__}: {exc}) — справа з'явиться в "
+                     f"переліках після наступної перезбірки")
+    return env
+
+
+# ── облік прочитаного ────────────────────────────────────────────────────────
+class PagesStatusArgs(BaseModel):
+    case: str = Field(description="справа у будь-якому форматі")
+    scans: str = Field(default="", description="кома-список сканів для точкової перевірки")
+
+
+@op("pages.status", summary="Що в цій справі вже дивились оком, а що ні",
+    args=PagesStatusArgs, mutates=False)
+def pages_status(a: PagesStatusArgs) -> Envelope:
+    """🔴 Гейт ПЕРЕД переглядом, а не звіт після.
+
+    Найдорожча помилка в довгій справі — передивитись ті самі аркуші вдруге:
+    тисяча сторінок коштує вечора, і другий вечір на них не додає нічого. Тому
+    питання «що вже бачили» ставиться до того, як щось відкривати.
+    """
+    from nyshporka.pagestore import store
+
+    try:
+        ref = store.resolve_case(a.case)
+    except ValueError as exc:
+        return fail(str(exc))
+    scans = [s.strip() for s in a.scans.split(",") if s.strip()]
+    st = store.case_status(ref, scans or None)
+    env = ok(st)
+    if not st.get("case_dir_known", True):
+        # 🔴 «0 на диску» тут читалось би як «скани зникли». Насправді реєстр
+        # просто ще не знає, де лежить справа, — і це лікується одним кроком.
+        env.warn("case_dir_unknown",
+                 "теки зі сканами цієї справи реєстр не знає, тож «на диску» "
+                 "нижче — не нуль, а «невідомо». Заведіть справу "
+                 "(`nysh case <тека> --shifra …`) або перезберіть реєстр")
+    left = st.get("unnoted_count")
+    if left:
+        env.suggest("pages.note",
+                    f"{left} сторінок ще ніхто не заносив — переглянуте без "
+                    f"запису наступна сесія перегляне заново")
+    return env
+
+
+class PageNoteArgs(BaseModel):
+    case: str = Field(description="справа у будь-якому форматі")
+    scan: str = Field(description="голе ім'я файлу скана: 0030.JPG")
+    page_type: str = Field(description="birth/marriage/death/confession/revision/…")
+    surnames: str = Field(default="", description="кома-список ЯК НАПИСАНО в джерелі")
+    places: str = Field(default="")
+    years: str = Field(default="", description="кома-список років: 1858,1859")
+    sheet: str = Field(default="", description="архівний аркуш: 31зв-32")
+    status: str = Field(default="full", description="full/partial/skipped/unreadable")
+    method: str = Field(default="visual", description="visual/htr/ocr/hybrid/text")
+    comment: str = Field(default="")
+    agent: str = Field(default="", description="хто заносив")
+
+
+@op("pages.note", summary="Занести переглянуту сторінку в облік", args=PageNoteArgs,
+    mutates=True)
+def pages_note(a: PageNoteArgs) -> Envelope:
+    """🔴 БЕЗ ВИНЯТКІВ: кожен скан, який реально відкривали, заноситься.
+
+    Навіть якщо він виявився пустишкою. Негативний результат коштує тих самих
+    очей, що й позитивний, і без запису наступна сесія перегляне той самий
+    аркуш ще раз. У коментарі варто писати, ЧОМУ це не те.
+
+    ⚠ `status=full` ставиться, ЛИШЕ якщо виписано ВСІ прізвища сторінки —
+    інакше `partial`. Від цього залежить, чи можна довіряти нулю по цій справі.
+    """
+    from pydantic import ValidationError
+
+    from nyshporka.pagestore import store
+    from nyshporka.pagestore.models import PageNote
+
+    def _csv(v: str) -> list[str]:
+        return [x.strip() for x in v.split(",") if x.strip()]
+
+    try:
+        ref = store.resolve_case(a.case)
+        note = PageNote(
+            scan=a.scan, page_type=a.page_type,  # type: ignore[arg-type]
+            surnames=_csv(a.surnames), places=_csv(a.places),
+            years=[int(y) for y in _csv(a.years)], sheet=a.sheet,
+            status=a.status, method=a.method,  # type: ignore[arg-type]
+            comment=a.comment, agent=a.agent)
+    except (ValidationError, ValueError) as exc:
+        return fail(str(exc))
+    report = store.annotate_pages(ref, [note])
+    env = ok({"case": ref.key, "shifra": ref.shifra, **report.as_dict()})
+    if a.status == "full" and not note.surnames:
+        env.warn("full_without_surnames",
+                 "status=full означає «виписано ВСІ прізвища сторінки», а їх "
+                 "тут жодного. Якщо сторінка не порожня — це має бути partial")
+    if a.method in ("htr", "text"):
+        env.warn("not_eye_verified",
+                 "метод каже, що читали ДЕКОД, а не зображення — така гілка "
+                 "успадковує чужі помилки; у коментарі варто позначити «оком не звірено»")
+    return env
+
+
+class RecordsAddArgs(BaseModel):
+    case: str = Field(description="справа у будь-якому форматі")
+    records: str = Field(description="JSON-масив записів (Record)")
+
+
+@op("records.add", summary="Занести розібрані записи джерела", args=RecordsAddArgs,
+    mutates=True)
+def records_add(a: RecordsAddArgs) -> Envelope:
+    """Хто/коли/батьки/восприємники — структурою, а не прозою.
+
+    Невалідні елементи пропускаються зі звітом, валідні лягають: не втрачати
+    сорок розібраних актів через одну одруківку в сорок першому.
+    """
+    import json as _json
+
+    from pydantic import ValidationError
+
+    from nyshporka.pagestore import store
+    from nyshporka.pagestore.models import Record
+
+    try:
+        raw = _json.loads(a.records)
+    except ValueError as exc:
+        return fail(f"records не є JSON: {exc}")
+    if not isinstance(raw, list):
+        raw = [raw]
+    try:
+        ref = store.resolve_case(a.case)
+    except ValueError as exc:
+        return fail(str(exc))
+    recs, errors = [], []
+    for i, item in enumerate(raw):
+        try:
+            recs.append(Record.model_validate(item))
+        except ValidationError as exc:
+            errors.append({"index": i, "error": str(exc)[:400]})
+    report = store.add_records(ref, recs) if recs else store.MergeReport(path="")
+    env = ok({"case": ref.key, "shifra": ref.shifra, **report.as_dict(),
+              "ok": len(recs), "failed": len(errors), "errors": errors})
+    if errors:
+        env.warn("some_records_refused",
+                 f"{len(errors)} записів не пройшли перевірку — решта {len(recs)} "
+                 f"занесені; виправте й додайте окремо")
+    return env
+
+
 # ── експорт ──────────────────────────────────────────────────────────────────
 class ExportArgs(BaseModel):
     case: str = Field(description="справа у будь-якому форматі")
@@ -475,8 +677,11 @@ class ReadArgs(BaseModel):
     case_key: str = Field(default="", description="шифра справи у мету прогону")
 
 
+# `agent=False`: план рахує й сам `read.start`, а людині він потрібен ОКРЕМО —
+# щоб побачити його до того, як натисне «читати». Агентові двох tool'ів на
+# одну дію не треба.
 @op("read.plan", summary="Чим і як читатимемо цю справу — ДО запуску",
-    args=ReadArgs, mutates=False)
+    args=ReadArgs, mutates=False, agent=False)
 def read_plan(a: ReadArgs) -> Envelope:
     """Скільки кадрів, яке письмо, яка модель, куди ляже текст.
 
@@ -561,7 +766,9 @@ def job_query(a: JobArgs) -> Envelope:
 
 
 # ── профіль дослідження ──────────────────────────────────────────────────────
-@op("profile.show", summary="Чий рід шукаємо: форми, корені, парадигма")
+# `agent=False` — це конфіг дослідження, а не дія. Читається файлом.
+@op("profile.show", summary="Чий рід шукаємо: форми, корені, парадигма",
+    agent=False)
 def profile_show(_: NoArgs) -> Envelope:
     from nyshporka.core.profile import ProfileError, active
     from nyshporka.core.workspace import WorkspaceError
@@ -588,8 +795,11 @@ class FondArgs(BaseModel):
     fond: str = Field(description="номер фонду")
 
 
+# `agent=False` — довідка про фонд: потрібна раз на дослідження й читається
+# з паку архівів. У переліку tool'ів вона з'їдала б місце, яке модель мусить
+# дочитати до кінця.
 @op("archive.fond", summary="Що відомо про фонд: губернія, опис у ключі, дефолти",
-    args=FondArgs)
+    args=FondArgs, agent=False)
 def archive_fond(a: FondArgs) -> Envelope:
     from nyshporka.archives import active
 
@@ -619,7 +829,11 @@ class EnvArgs(BaseModel):
                                               "порожньо — узяти з простору")
 
 
-@op("htr.env", summary="Чи готове середовище рушіїв читання", args=EnvArgs)
+# 🔴 `agent=False` — діагностика. У агента для неї є `nysh doctor`, який каже
+# більше й одним викликом; тримати її ще й окремим tool'ом означає з'їдати
+# місце в переліку, який модель мусить дочитати до кінця.
+@op("htr.env", summary="Чи готове середовище рушіїв читання", args=EnvArgs,
+    agent=False)
 def htr_env(a: EnvArgs) -> Envelope:
     from nyshporka.core.workspace import WorkspaceError, workspace
     from nyshporka.htr import env as E

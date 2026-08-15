@@ -360,6 +360,184 @@ def read(
     raise typer.Exit(code=0 if rc == 0 and not missing else 1)
 
 
+@app.command("case")
+def case_cmd(
+    case_dir: str = typer.Argument(..., help="тека зі сканами"),
+    shifra: str = typer.Option("", "--shifra", help="«ДАХмО 315-1-8433»"),
+    title: str = typer.Option("", "--title", help="назва справи"),
+    doc_type: str = typer.Option("", "--type", help="метрична / сповідна / ревізька"),
+    year_from: int = typer.Option(0, "--from", help="рік початку"),
+    year_to: int = typer.Option(0, "--to", help="рік кінця"),
+    place: str = typer.Option("", "--place", help="село, повіт, губернія"),
+    note: str = typer.Option("", "--note"),
+) -> None:
+    """Завести або виправити справу: сказати, ЩО лежить у цій теці.
+
+    🔴 Без шифри тека лишається купою файлів — ні ключа, ні обліку, ні
+    можливості послатись на знахідку.
+    """
+    from nyshporka import ops as O
+
+    env = O.call("case.register", {
+        "case_dir": case_dir, "shifra": shifra, "title": title,
+        "doc_type": doc_type, "place": place, "note": note,
+        "year_from": year_from or None, "year_to": year_to or None})
+    if not env.ok:
+        console.print(f"[red]{env.error}[/red]")
+        raise typer.Exit(code=1)
+    sc = env.data["sidecar"]
+    console.print(f"✅ [bold]{sc['shifra']}[/bold] — {sc.get('title') or 'без назви'}")
+    if sc.get("year_from") or sc.get("place"):
+        console.print(f"   [dim]{sc.get('place') or ''} "
+                      f"{sc.get('year_from') or ''}"
+                      f"{'-' + str(sc['year_to']) if sc.get('year_to') else ''}[/dim]")
+    for w in env.warnings:
+        console.print(f"[yellow]⚠[/yellow] [dim]{w.text}[/dim]")
+
+
+cases_app = typer.Typer(help="Реєстр справ: що є, що прочитано, що прошукано.",
+                        no_args_is_help=True)
+app.add_typer(cases_app, name="cases")
+
+
+@cases_app.command("build")
+def cases_build(
+    rescan: bool = typer.Option(True, "--rescan/--no-rescan",
+                                help="перечитати ще й диск (нові теки)"),
+) -> None:
+    """Зібрати реєстр справ.
+
+    🔴 Реєстр — це ЗРІЗ п'яти сховищ, а не сховище. Він старіє за хвилини, і
+    застарілий зріз небезпечніший за відсутній: він виглядає як відповідь
+    («декоду немає») там, де роботу зробили годину тому. Тому перезбирати його
+    треба після кожного прогону, завантаження й занесення в облік — а команди
+    для цього досі не існувало, хоч усі повідомлення на неї посилались.
+    """
+    from nyshporka.cases import db
+
+    if rescan:
+        from nyshporka.library import build_library, write_library
+
+        entries = build_library()
+        write_library(entries)
+        console.print(f"[dim]бібліотеку перезібрано: {len(entries)} справ[/dim]")
+    res = db.build_index()
+    console.print(f"✅ реєстр: [bold]{res['cases']}[/bold] справ · "
+                  f"нерозв'язаних прогонів: {res.get('orphans', 0)} · {res['path']}")
+
+
+@cases_app.command("list")
+def cases_list_cmd(
+    q: str = typer.Option("", "--q", help="підрядок: шифра, назва, місце"),
+    repo: str = typer.Option("", "--repo"),
+    year: str = typer.Option("", "--year", help="рік або «1840-1860»"),
+    limit: int = typer.Option(40, "--limit"),
+) -> None:
+    """Перелік справ із станом обробки."""
+    from nyshporka import ops as O
+
+    env = O.call("cases.list", {"q": q, "repo": repo, "year": year, "limit": limit})
+    if not env.ok:
+        console.print(f"[red]{env.error}[/red]")
+        raise typer.Exit(code=1)
+    from rich.table import Table as _T
+
+    t = _T(header_style="bold")
+    for col in ("шифра", "назва", "кадрів", "читання"):
+        t.add_column(col, max_width=44, no_wrap=True, overflow="ellipsis")
+    for r in env.data.get("cases") or []:
+        t.add_row(r.get("shifra") or r.get("key") or "",
+                  (r.get("title") or "[dim]без назви[/dim]")[:60],
+                  str(r.get("frames") or 0),
+                  r.get("htr_stage") or "—")
+    console.print(t)
+    if env.stale and env.stale.is_stale:
+        console.print(f"[yellow]⚠ зріз застарів[/yellow] [dim]"
+                      f"{'; '.join(env.stale.reasons[:2])} — nysh cases build[/dim]")
+
+
+pages_app = typer.Typer(help="Облік переглянутого оком.", no_args_is_help=True)
+app.add_typer(pages_app, name="pages")
+
+
+@pages_app.command("status")
+def pages_status_cmd(
+    case: str = typer.Argument(..., help="справа у будь-якому форматі"),
+    as_json: bool = typer.Option(False, "--json"),
+) -> None:
+    """Що в цій справі вже дивились, а що ні — ПЕРЕД тим, як відкривати."""
+    from nyshporka import ops as O
+
+    env = O.call("pages.status", {"case": case})
+    if not env.ok:
+        console.print(f"[red]{env.error}[/red]")
+        raise typer.Exit(code=1)
+    if as_json:
+        console.print_json(data=env.data)
+        return
+    d = env.data
+    console.print(f"[bold]{d['shifra']}[/bold] {d.get('title') or ''}")
+    console.print(f"  на диску: {d.get('total_disk', 0)} · анотовано: {d['noted']} "
+                  f"· записів: {d['records']} · статуси: {d.get('by_status') or {}}")
+    if d.get("unnoted_count"):
+        console.print(f"  [yellow]необроблених: {d['unnoted_count']}[/yellow]")
+
+
+@pages_app.command("note")
+def pages_note_cmd(
+    case: str = typer.Argument(...),
+    scan: str = typer.Argument(..., help="голе ім'я файлу: 0030.JPG"),
+    page_type: str = typer.Option(..., "--type"),
+    surnames: str = typer.Option("", "--surnames", help="кома-список ЯК У ДЖЕРЕЛІ"),
+    places: str = typer.Option("", "--places"),
+    years: str = typer.Option("", "--years"),
+    sheet: str = typer.Option("", "--sheet"),
+    status: str = typer.Option("full", "--status"),
+    method: str = typer.Option("visual", "--method"),
+    comment: str = typer.Option("", "--comment"),
+) -> None:
+    """Занести переглянуту сторінку.
+
+    🔴 БЕЗ ВИНЯТКІВ: кожен скан, який реально відкривали, заноситься — навіть
+    якщо він виявився пустишкою. Негативний результат коштує тих самих очей, а
+    без запису наступна сесія перегляне той самий аркуш ще раз.
+    """
+    from nyshporka import ops as O
+
+    env = O.call("pages.note", {
+        "case": case, "scan": scan, "page_type": page_type,
+        "surnames": surnames, "places": places, "years": years, "sheet": sheet,
+        "status": status, "method": method, "comment": comment})
+    if not env.ok:
+        console.print(f"[red]{env.error}[/red]")
+        raise typer.Exit(code=1)
+    console.print(f"✅ {env.data['shifra']} {scan}")
+    for w in env.warnings:
+        console.print(f"[yellow]⚠[/yellow] [dim]{w.text}[/dim]")
+
+
+@pages_app.command("grep")
+def pages_grep_cmd(
+    q: str = typer.Argument(..., help="прізвище"),
+    where: str = typer.Option("pages", "--where", help="pages | records | decode"),
+    case: str = typer.Option("", "--case"),
+    limit: int = typer.Option(50, "--limit"),
+) -> None:
+    """Знайти прізвище в тому, що вже прочитано."""
+    from nyshporka import ops as O
+
+    env = O.call("search.run", {"q": q, "where": where, "case": case, "limit": limit})
+    if not env.ok:
+        console.print(f"[red]{env.error}[/red]")
+        raise typer.Exit(code=1)
+    for h in (env.data.get("hits") or [])[:limit]:
+        console.print(f"  [bold]{h.get('case') or h.get('key') or ''}[/bold] "
+                      f"{h.get('scan') or h.get('page') or ''}  "
+                      f"{str(h.get('surname') or h.get('line') or h.get('name') or '')[:80]}")
+    for w in env.warnings:
+        console.print(f"[yellow]⚠[/yellow] [dim]{w.text}[/dim]")
+
+
 htr_app = typer.Typer(help="Рушії читання рукопису.", no_args_is_help=True)
 app.add_typer(htr_app, name="htr")
 

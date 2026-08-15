@@ -381,6 +381,10 @@ def case_status(ref: CaseRef, scans: list[str] | None = None) -> dict[str, Any]:
     return {
         "key": ref.key, "shifra": ref.shifra, "title": ref.title,
         "total_disk": len(disk) or (ref.frames or 0),
+        # 🔴 Нуль сканів і «теки не знайшли» — різні речі, і плутати їх дорого:
+        # перше означає «справа порожня», друге — «реєстр про неї ще не знає».
+        # Показане як «0 на диску», друге виглядає так, ніби скани зникли.
+        "case_dir_known": bool(ref.path),
         "noted": len(pages), "by_status": by_status,
         "records": len(cf.records) if cf else 0,
         "unnoted_count": len(unnoted) if disk else None,
