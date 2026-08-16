@@ -64,12 +64,54 @@ _YEAR_RE = re.compile(r"^(\d{4})(?:\s*[-–]\s*(\d{4}))?$")
 #: змінює mtime, тож кеш протухає сам і його не треба скидати руками.
 _CACHE: dict[str, tuple[tuple[Any, ...], list[dict[str, Any]]]] = {}
 
+#: memo супутніх файлів реєстру за тим самим штампом: fond_id → (stamp, значення).
+#: Кожен із них парсився наново на кожен запит вкладки: `alfavitka.tsv` — 220 КБ,
+#: `conflicts.tsv` — 157 КБ, а `facets` ще й ганяв regex по заголовку кожного з
+#: 12 824 рядків (137 мс, найдорожча одинична операція запиту).
+_ALF_CACHE: dict[str, tuple[tuple[Any, ...], list[dict[str, Any]] | None]] = {}
+_CONF_CACHE: dict[str, tuple[tuple[Any, ...], list[dict[str, Any]] | None]] = {}
+_FACETS_CACHE: dict[str, tuple[tuple[Any, ...], dict[str, Any]]] = {}
+
+#: memo живого стану диска: (repo, fond) → (штамп бібліотеки, мапа).
+_LIVE_CACHE: dict[tuple[str, str], tuple[tuple[Any, ...], dict[tuple[str, str, str], str]]] = {}
+
 
 # ── дискавері ─────────────────────────────────────────────────────────────────
 
 def _stamp(p: Path) -> tuple[Any, ...]:
     st = p.stat()
     return (str(p), st.st_mtime_ns, st.st_size)
+
+
+def _stamp_or_none(p: Path) -> tuple[Any, ...]:
+    """Штамп файла, який може не існувати. Відсутність — теж стан, і його треба
+    кешувати: інакше кожен запит по фонду без алфавітки платив би `stat()`."""
+    try:
+        return _stamp(p)
+    except OSError:
+        return (str(p), -1, -1)
+
+
+def _facets_stamp(fond_id: str, rows: list[dict[str, Any]]) -> tuple[Any, ...]:
+    """Штамп для memo фасетів: файл реєстру + скільки рядків насправді дали."""
+    return (*_stamp_or_none(fond_path(fond_id)), len(rows))
+
+
+def _library_stamp() -> tuple[Any, ...]:
+    """Штамп `case_library.json` — по ньому протухає кеш живого стану диска.
+
+    🔴 Шлях береться з `library.LIBRARY_PATH`, а не рахується наново з простору.
+    Різниця не теоретична: `LIBRARY_PATH` фіксується на ІМПОРТІ модуля, і якщо
+    простір перемкнули пізніше (`workspace.use()`), обчислений тут шлях указував
+    би на інший файл, ніж той, який читає `load_library()`. Кеш тоді ніколи не
+    протухав би — і вкладка показувала б стан диска чужого простору, мовчки.
+    """
+    try:
+        from nyshporka.library import LIBRARY_PATH
+        return _stamp_or_none(LIBRARY_PATH)
+    except Exception:
+        # бібліотеки не дістати — кешувати нічого, кожен виклик рахує наново
+        return ("<no-library>", -1, -1)
 
 
 def fond_path(fond_id: str) -> Path:
@@ -179,10 +221,23 @@ def load_rows(fond_id: str) -> list[dict[str, Any]]:
 
 
 def invalidate(fond_id: str | None = None) -> None:
+    """Скинути memo.
+
+    🔴 Чистить УСІ кеші фонду разом. Кожен із них має власний штамп і протухає
+    сам, але часткова інвалідація давала б стан, у якому рядки нові, а фасети до
+    них старі — розбіжність усередині ОДНІЄЇ відповіді, яку неможливо пояснити з
+    екрана. `_LIVE_CACHE` чиститься цілком: він ключований парою (архів, фонд), а
+    не `fond_id`, і зайва повторна збірка мапи коштує 20 мс.
+    """
+    caches: tuple[dict[str, Any], ...] = (_CACHE, _ALF_CACHE, _CONF_CACHE,
+                                          _FACETS_CACHE)
     if fond_id:
-        _CACHE.pop(fond_id, None)
+        for c in caches:
+            c.pop(fond_id, None)
     else:
-        _CACHE.clear()
+        for c in caches:
+            c.clear()
+    _LIVE_CACHE.clear()
 
 
 def schema_of(fond_id: str) -> str:
@@ -204,18 +259,34 @@ def load_coverage(fond_id: str) -> dict[str, Any] | None:
 
 def load_conflicts(fond_id: str) -> list[dict[str, Any]] | None:
     p = registry_dir(fond_id) / "conflicts.tsv"
+    stamp = _stamp_or_none(p)
+    hit = _CONF_CACHE.get(fond_id)
+    if hit is not None and hit[0] == stamp:
+        return hit[1]
+    rows: list[dict[str, Any]] | None
     if not p.exists():
-        return None
-    with p.open(encoding="utf-8", newline="") as fh:
-        return list(csv.DictReader(fh, delimiter="\t"))
+        rows = None
+    else:
+        with p.open(encoding="utf-8", newline="") as fh:
+            rows = list(csv.DictReader(fh, delimiter="\t"))
+    _CONF_CACHE[fond_id] = (stamp, rows)
+    return rows
 
 
 def load_alfavitka(fond_id: str) -> list[dict[str, Any]] | None:
     p = registry_dir(fond_id) / "alfavitka.tsv"
+    stamp = _stamp_or_none(p)
+    hit = _ALF_CACHE.get(fond_id)
+    if hit is not None and hit[0] == stamp:
+        return hit[1]
+    rows: list[dict[str, Any]] | None
     if not p.exists():
-        return None
-    with p.open(encoding="utf-8", newline="") as fh:
-        return list(csv.DictReader(fh, delimiter="\t"))
+        rows = None
+    else:
+        with p.open(encoding="utf-8", newline="") as fh:
+            rows = list(csv.DictReader(fh, delimiter="\t"))
+    _ALF_CACHE[fond_id] = (stamp, rows)
+    return rows
 
 
 def conflicts_index(fond_id: str) -> dict[tuple[str, str], int]:
@@ -242,7 +313,18 @@ def live_on_disk(repo: str, fond: str) -> dict[tuple[str, str, str], str]:
 
     Ключ несе ОПИС і ЛІТЕРУ: номер справи неунікальний між описами, а «24» і
     «24а» — різні книги (без цього 11 справ на диску показувались як 16).
+
+    ⏱ Мемо за штампом файла бібліотеки. Без нього кожен виклик перечитував і
+    перепарсював `case_library.json` (1.25 МБ) — а на один запит вкладки «Фонди»
+    він викликався двічі, і ще раз на кожен фонд у картці газетира
+    (`geog.gazetteer.place_card`). Штамп той самий, що в `load_rows`: перезбірка
+    бібліотеки міняє mtime, тож кеш протухає сам і скидати його руками не треба.
     """
+    stamp = _library_stamp()
+    hit = _LIVE_CACHE.get((repo.upper(), str(fond)))
+    if hit is not None and hit[0] == stamp:
+        return hit[1]
+
     try:
         from nyshporka.library import load_library
     except Exception:
@@ -263,6 +345,7 @@ def live_on_disk(repo: str, fond: str) -> dict[tuple[str, str, str], str]:
             continue
         opys = str(c.get("opys") or "1")
         out[(opys, m.group(1), m.group(2).lower())] = c.get("path") or ""
+    _LIVE_CACHE[(repo.upper(), str(fond))] = (stamp, out)
     return out
 
 
@@ -356,6 +439,8 @@ def filter_rows(rows: list[dict[str, Any]], *, opys: str = "", q: str = "", surn
     want_flags = {x.strip() for x in (flag or "").split(",") if x.strip()}
     live = live if live is not None else {}
     status = status or {}
+    #: чи взагалі питають про стан справи — див. гілку в `keep()`
+    _needs_status = bool(on_disk or todo or state or want_flags)
 
     def keep(r: dict[str, Any]) -> bool:
         if opys and (r.get("opys") or "") != opys:
@@ -376,20 +461,26 @@ def filter_rows(rows: list[dict[str, Any]], *, opys: str = "", q: str = "", surn
             return False
         if scan and not (r.get("commons_url") or r.get("mirror_url")):
             return False
-        st = status.get(r["shifra"]) or row_status(r, live, {})
-        if on_disk and not (r.get("on_disk") or st["on_disk_live"]):
-            return False
-        if todo and st["disk_state"] != "todo":
-            return False
-        # `state=scan` — не стан диска, а «десь є оцифроване»: справа може бути
-        # ще не завантаженою, але вже мати скан на Commons чи дзеркалі. Тому
-        # умова читається як одне ціле, а не як виняток усередині фільтра.
-        if (state and st["disk_state"] != state
-                and not (state == "scan"
-                         and (r.get("commons_url") or r.get("mirror_url")))):
-            return False
-        if want_flags and not want_flags.issubset(set(st["flags"])):
-            return False
+        # ⏱ `row_status` рахується ЛИШЕ якщо про нього справді питають. Раніше він
+        # будувався для кожного рядка беззастережно — тобто повний зайвий прохід
+        # по фонду на кожному запиті вкладки, включно з тим, де жодного фільтра
+        # стану немає. Перелік умов нижче й перелік у `_needs_status` мусять
+        # лишатись одним і тим самим набором.
+        if _needs_status:
+            st = status.get(r["shifra"]) or row_status(r, live, {})
+            if on_disk and not (r.get("on_disk") or st["on_disk_live"]):
+                return False
+            if todo and st["disk_state"] != "todo":
+                return False
+            # `state=scan` — не стан диска, а «десь є оцифроване»: справа може бути
+            # ще не завантаженою, але вже мати скан на Commons чи дзеркалі. Тому
+            # умова читається як одне ціле, а не як виняток усередині фільтра.
+            if (state and st["disk_state"] != state
+                    and not (state == "scan"
+                             and (r.get("commons_url") or r.get("mirror_url")))):
+                return False
+            if want_flags and not want_flags.issubset(set(st["flags"])):
+                return False
         # Обидві межі перевіряються разом: `_year_bounds` віддає їх ПАРОЮ —
         # або обидві, або жодної. Перевіряти лише нижню означало б лишити
         # порівняння з None на випадок, якого сьогодні немає, але який
@@ -414,9 +505,15 @@ def summarize(rows: list[dict[str, Any]],
     s = {"rows": len(rows), "commons": 0, "mirror_only": 0, "truncated": 0,
          "on_disk": 0, "on_disk_live": 0, "todo": 0, "order": 0,
          "interp": 0, "lo": 0, "no_title": 0, "title_conflict": 0,
-         "with_title": 0, "with_surnames": 0, "letters": 0}
+         "with_title": 0, "with_surnames": 0, "letters": 0,
+         # ⏱ рахується ТУТ, а не окремим проходом. Роутер вкладки «Фонди» мав на
+         # це власний цикл `sum(1 for r in rows if row_status(...))` — третій
+         # повний прохід по фонду за один запит заради одного числа.
+         "disk_mismatch": 0}
     for r in rows:
         st = row_status(r, live, {})
+        if st["disk_mismatch"]:
+            s["disk_mismatch"] += 1
         if r.get("commons_url"):
             s["commons"] += 1
         elif r.get("mirror_url"):
@@ -459,7 +556,25 @@ _UEZD_LABEL = {"балтск": "Балтський", "ольгопольск": "
                "могилевск": "Могилівський", "ушицк": "Ушицький"}
 
 
-def facets(rows: list[dict[str, Any]]) -> dict[str, Any]:
+def facets(rows: list[dict[str, Any]], fond_id: str | None = None) -> dict[str, Any]:
+    """Фасети «опис» і «повіт» по ВСІХ рядках фонду.
+
+    ⏱ `fond_id` — лише ключ кеша; без нього рахується як раніше. Regex повіту по
+    заголовку кожного з 12 824 рядків коштує 137 мс, тобто третину запиту, а
+    відповідь залежить рівно від файла реєстру — тож штамп той самий, що в
+    `load_rows`.
+
+    🔴 У штамп входить і ДОВЖИНА списку. Без неї виклик із відфільтрованими
+    рядками отримав би фасети всього фонду (або навпаки) — а фасети саме тому й
+    рахуються по всіх рядках, що знаменник не має зникати разом із фільтром.
+    Помилка була б тиха: числа правдоподібні, просто не ті.
+    """
+    key = _facets_stamp(fond_id, rows) if fond_id else None
+    if key is not None:
+        hit = _FACETS_CACHE.get(fond_id or "")
+        if hit is not None and hit[0] == key:
+            return hit[1]
+
     opys_c: dict[str, int] = {}
     uezd_c: dict[str, int] = {}
     for r in rows:
@@ -470,12 +585,15 @@ def facets(rows: list[dict[str, Any]]) -> dict[str, Any]:
         if m:
             lbl = _UEZD_LABEL.get(m.group(1).lower(), m.group(1))
             uezd_c[lbl] = uezd_c.get(lbl, 0) + 1
-    return {
+    out = {
         "opys": [{"code": k, "n": v} for k, v in
                  sorted(opys_c.items(), key=lambda kv: int(kv[0]) if kv[0].isdigit() else 0)],
         "uezd": [{"code": k, "n": v} for k, v in
                  sorted(uezd_c.items(), key=lambda kv: -kv[1])],
     }
+    if key is not None:
+        _FACETS_CACHE[fond_id or ""] = (key, out)
+    return out
 
 
 def surname_list(fond_id: str, limit: int = 400) -> list[str]:
