@@ -577,25 +577,23 @@ def _count_case(d: Path) -> tuple[int, int]:
     лишається файловий лік: занижене число краще за нуль, бо нуль читається як
     «на диску нічого немає».
     """
-    imgs = pdfs = 0
-    pdf_paths: list[Path] = []
+    from nyshporka.cases.walk import scan_dir
 
-    def _tally(folder: Path) -> None:
-        nonlocal imgs, pdfs
-        try:
-            for p in folder.iterdir():
-                if not p.is_file():
-                    continue
-                ext = p.suffix.lower()
-                if ext in _IMG_EXT:
-                    imgs += 1
-                elif ext == ".pdf":
-                    pdfs += 1
-                    pdf_paths.append(p)
-        except OSError:
-            pass
+    return _count_case_from_scan(scan_dir(d, d.parent, (d.name,), 1))
 
-    _tally(d)
+
+def _count_case_from_scan(scan: Any) -> tuple[int, int]:
+    """Те саме, що `_count_case`, але з уже прочитаної теки (`cases.walk.DirScan`).
+
+    ⏱ Обхід читає теку ОДИН раз і вже має лічильники; тут лишається тільки
+    логіка «де саме шукати», яка й була суттю функції. Було `iterdir()` з
+    `p.is_file()` і `p.suffix` — два системні виклики на кожен кадр.
+    """
+    from nyshporka.cases.walk import scan_dir
+
+    d = scan.path
+    imgs, pdfs = scan.n_img, scan.n_pdf
+    pdf_paths: list[Path] = list(scan.pdf_paths)
     # 🔴 Кадри бувають на ОДИН шар глибше, і теку з ними видно не всім
     # завантажувачам однаково: `cdiak_download.py` (рушій ARCHIUM — ЦДІАК,
     # ЦДАМЛМ) кладе скани у `<справа>/pages/`, тоді як решта сипле їх у корінь.
@@ -607,9 +605,17 @@ def _count_case(d: Path) -> tuple[int, int]:
     # Заглядаємо саме в `pages`, а не рекурсією: у теці справи поруч лежать
     # `_decoded`, кропи й інші похідні, і рекурсія рахувала б їх як кадри.
     if not (imgs or pdfs):
-        sub = d / "pages"
-        if sub.is_dir():
-            _tally(sub)
+        # 🔴 Порівняння через `normcase`, а не `"pages" in scan.dirs`: на Windows
+        # `(d / "pages").is_dir()`, яке тут стояло, знаходило й теку `Pages`, бо
+        # файлова система регістронечутлива. Точний збіг рядка тихо втратив би
+        # такі теки — тобто справа знову стала б «без кадрів».
+        name = next((n for n in scan.dirs
+                     if os.path.normcase(n) == os.path.normcase("pages")), None)
+        if name is not None:
+            sub = scan_dir(d / name, scan.base, (*scan.rel_parts, name),
+                           scan.depth + 1)
+            imgs, pdfs = sub.n_img, sub.n_pdf
+            pdf_paths = list(sub.pdf_paths)
     if not (imgs or pdfs):
         pdfs = _external_files(d)
     elif pdf_paths and not imgs:
@@ -661,42 +667,48 @@ def _scan_disk_cases(limit: int = 4000) -> list[tuple[str, int, int]]:
     можна було перенести на інший диск чи віддати колезі. Для теки за межами
     простору відносного шляху не існує, тож іде абсолютний; читачі складають
     його як `ROOT / path`, а це на обох платформах віддає сам абсолютний шлях.
+
+    ⏱ Обхід — `cases.walk`, один прохід замість чотирьох `glob`-патернів, кожен
+    з яких обходив дерево ЗГОРИ наново. Порядок видачі там відтворено дослівно
+    (по рівнях, сортування об'єктами `Path`), бо від нього залежить, які теки
+    потраплять під стелю `limit`, — паритет закріплено `tests/test_walk_parity.py`.
     """
+    from nyshporka.cases.walk import scan_dir, walk_root
+
     out: list[tuple[str, int, int]] = []
     seen: set[Path] = set()
     for i, base in enumerate(_scan_roots()):
         # 🔴 Оголошений корінь МОЖЕ БУТИ САМ текою справи: людина показує на
-        # «D:/Метрики 1858», а не на теку, що їх містить. Обхід `glob("*")`
-        # видає лише вміст, тож без цієї перевірки оголошена тека лишалась би
-        # невидимою — тобто дія «взяти під облік» тихо не давала б нічого.
+        # «D:/Метрики 1858», а не на теку, що їх містить. Обхід видає лише
+        # вміст, тож без цієї перевірки оголошена тека лишалась би невидимою —
+        # тобто дія «взяти під облік» тихо не давала б нічого.
         # Для `data/raw` цього не робимо: розкидані там файли — не справа.
         if i and base not in seen:
-            imgs, pdfs = _count_case(base)
+            imgs, pdfs = _count_case_from_scan(
+                scan_dir(base, base.parent, (base.name,), 1))
             if imgs or pdfs:
                 seen.add(base)
                 out.append((str(base).replace("\\", "/"), imgs, pdfs))
-        for depth in ("*", "*/*", "*/*/*", "*/*/*/*"):
-            for d in sorted(base.glob(depth)):
-                if not d.is_dir() or d in seen or d.name.startswith("_"):
-                    continue
-                # періодика/описи/корпуси — тисячі PDF за роками, не справи
-                if d.relative_to(base).parts[0] in _SKIP_SLUGS:
-                    continue
-                imgs, pdfs = _count_case(d)
-                if imgs or pdfs:
-                    seen.add(d)
-                    # 🔴 БЕЗ `resolve()`. Тека справи буває junction'ом на
-                    # архівний диск; резолвінг підмінив би шлях ціллю — і вся
-                    # прив'язка (прогони, цитати, реєстр) поїхала б на інший
-                    # рядок без жодної помилки. Це вже ставалось: «косметична»
-                    # заміна коштувала 35 справ ф.196.
-                    try:
-                        path = str(d.relative_to(ROOT))
-                    except ValueError:
-                        path = str(d)
-                    out.append((path.replace("\\", "/"), imgs, pdfs))
-                if len(out) >= limit:
-                    return out
+        for scan in walk_root(base, max_depth=4,
+                              skip_slugs=frozenset(_SKIP_SLUGS)):
+            d = scan.path
+            if d in seen or d.name.startswith("_"):
+                continue
+            imgs, pdfs = _count_case_from_scan(scan)
+            if imgs or pdfs:
+                seen.add(d)
+                # 🔴 БЕЗ `resolve()`. Тека справи буває junction'ом на
+                # архівний диск; резолвінг підмінив би шлях ціллю — і вся
+                # прив'язка (прогони, цитати, реєстр) поїхала б на інший
+                # рядок без жодної помилки. Це вже ставалось: «косметична»
+                # заміна коштувала 35 справ ф.196.
+                try:
+                    path = str(d.relative_to(ROOT))
+                except ValueError:
+                    path = str(d)
+                out.append((path.replace("\\", "/"), imgs, pdfs))
+            if len(out) >= limit:
+                return out
     return out
 
 

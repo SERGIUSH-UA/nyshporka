@@ -6,6 +6,7 @@ r"""Збірка реєстру: опис бібліотеки + чотири ш
 from __future__ import annotations
 
 import json
+import os
 import re
 import sqlite3
 from collections import defaultdict
@@ -104,58 +105,99 @@ def _engine_of(meta: dict[str, Any]) -> str:
     return str(meta.get("engine") or "")
 
 
-def _ordered_cases(index: LibraryIndex) -> list[dict[str, Any]]:
+def _raw_scans() -> list[Any]:
+    """Один обхід `data/raw` на всю збірку — замість трьох наборів `glob`-ів.
+
+    ⏱ `_ordered_cases`, `_unfiled_material` і `_count_frames` ходили деревом
+    кожен сам: 3+4 `glob`-патерни, кожен згори, плюс `iterdir()` з двома
+    системними викликами на кожен кадр. Тут дерево читається РАЗ, і всі три
+    беруть із нього готове. Порядок видачі — той самий, що давали `glob`-и
+    (див. `cases.walk`), тож зріз не змінюється.
+    """
+    from nyshporka.cases.walk import walk_root
+
+    if not RAW_DIR.is_dir():
+        return []
+    return list(walk_root(RAW_DIR, max_depth=4, skip_slugs=frozenset(_SKIP_SLUGS)))
+
+
+def _ordered_cases(index: LibraryIndex,
+                   scans: list[Any] | None = None) -> list[dict[str, Any]]:
     """Теки з карткою справи, але БЕЗ кадрів — «замовлено, не завантажено».
 
     Бібліотека їх не бачить за побудовою (вимагає зображень або PDF), і саме через
     це сім справ ДАОО по парафії Фараонівка не потрапили у вчорашню інвентаризацію.
     """
     out: list[dict[str, Any]] = []
-    if not RAW_DIR.is_dir():
-        return out
     seen: set[str] = set()
-    for depth in ("*/*", "*/*/*", "*/*/*/*"):
-        for d in sorted(RAW_DIR.glob(depth)):
-            if not d.is_dir() or d.name.startswith("_"):
-                continue
-            try:
-                if d.relative_to(RAW_DIR).parts[0] in _SKIP_SLUGS:
-                    continue
-            except ValueError:
-                continue
-            rel = str(d.relative_to(ROOT)).replace("\\", "/")
-            if rel in seen or rel in index.by_path:
-                continue
-            sidecar = next((d / n for n in ("_source.json", "meta.json")
-                            if (d / n).is_file()), None)
-            if sidecar is None:
-                continue
-            if any(p.suffix.lower() in _IMG_EXT or p.suffix.lower() == ".pdf"
-                   for p in d.iterdir() if p.is_file()):
-                continue                      # матеріал є → це справа бібліотеки
-            try:
-                meta = json.loads(sidecar.read_text(encoding="utf-8"))
-            except Exception:
-                continue
-            seen.add(rel)
-            out.append({"rel": rel, "meta": meta})
+    for scan in (_raw_scans() if scans is None else scans):
+        # глибина 1 тут не бралась ніколи: `glob` починався з `*/*`
+        if scan.depth < 2 or scan.path.name.startswith("_"):
+            continue
+        rel = str(scan.path.relative_to(ROOT)).replace("\\", "/")
+        if rel in seen or rel in index.by_path:
+            continue
+        if not scan.sidecar:
+            continue
+        if scan.has_material():
+            continue                      # матеріал є → це справа бібліотеки
+        try:
+            meta = json.loads((scan.path / scan.sidecar).read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        seen.add(rel)
+        out.append({"rel": rel, "meta": meta})
+    return out
+
+
+#: rel-шлях (normcase) → кадрів. Заповнюється зі спільного обходу; шляхи поза
+#: `data/raw` (архівний том, оголошений корінь) сюди не потрапляють і рахуються
+#: прямим читанням теки.
+_FRAMES_INDEX: dict[str, int] = {}
+
+
+def _frames_index(scans: list[Any]) -> dict[str, int]:
+    out: dict[str, int] = {}
+    for s in scans:
+        try:
+            rel = str(s.path.relative_to(ROOT)).replace("\\", "/")
+        except ValueError:
+            continue
+        out[os.path.normcase(rel)] = s.n_img + s.n_pdf
     return out
 
 
 def _count_frames(rel: str | None) -> int:
-    """Кадри (або PDF) прямо в теці; для файла-PDF — 1."""
+    """Кадри (або PDF) прямо в теці; для файла-PDF — 1.
+
+    ⏱ Спершу дивиться в індекс спільного обходу (`_FRAMES_INDEX`) — саме там
+    лежить переважна більшість запитів. Прямий `scandir` лишається для шляхів
+    поза `data/raw`: оголошені корені на архівному диску в обхід не входять.
+    """
     if not rel:
         return 0
+    hit = _FRAMES_INDEX.get(os.path.normcase(str(rel).replace("\\", "/")))
+    if hit is not None:
+        return hit
     p = ROOT / rel
     if p.is_file():
         return 1 if p.suffix.lower() in _IMG_EXT | {".pdf"} else 0
     if not p.is_dir():
         return 0
     n = 0
+    want = _IMG_EXT | {".pdf"}
     try:
-        for f in p.iterdir():
-            if f.is_file() and f.suffix.lower() in _IMG_EXT | {".pdf"}:
-                n += 1
+        with os.scandir(p) as it:
+            for f in it:
+                try:
+                    if not f.is_file():
+                        continue
+                except OSError:
+                    continue
+                low = f.name.lower()
+                dot = low.rfind(".")
+                if dot >= 0 and low[dot:] in want:
+                    n += 1
     except OSError:
         return n
     return n
@@ -172,7 +214,8 @@ def _best_frames(row_paths: list[str | None]) -> int:
     return max((_count_frames(p) for p in row_paths if p), default=0)
 
 
-def _unfiled_material(index: LibraryIndex, known: set[str]) -> list[tuple[str, int]]:
+def _unfiled_material(index: LibraryIndex, known: set[str],
+                      scans: list[Any] | None = None) -> list[tuple[str, int]]:
     """Теки з кадрами, які НЕ вдалось звести до жодної справи → [(rel, кадрів)].
 
     🔴 Це не дрібниця обліку: 14 плівок ANRM ф.211 (13 535 кадрів) лежать на диску
@@ -181,28 +224,19 @@ def _unfiled_material(index: LibraryIndex, known: set[str]) -> list[tuple[str, i
     просто зникали — при тому, що це найбільший необроблений масив проєкту.
     """
     out: list[tuple[str, int]] = []
-    if not RAW_DIR.is_dir():
-        return out
     seen: set[str] = set()
-    for depth in ("*", "*/*", "*/*/*", "*/*/*/*"):
-        for d in sorted(RAW_DIR.glob(depth)):
-            if not d.is_dir() or d.name.startswith("_"):
-                continue
-            try:
-                rel_parts = d.relative_to(RAW_DIR).parts
-            except ValueError:
-                continue
-            if rel_parts[0] in _SKIP_SLUGS:
-                continue
-            rel = str(d.relative_to(ROOT)).replace("\\", "/")
-            if rel in known or rel in seen:
-                continue
-            if any(rel.startswith(k + "/") for k in known):
-                continue                      # підтека вже врахованої справи/збірки
-            frames = _count_frames(rel)
-            if frames:
-                seen.add(rel)
-                out.append((rel, frames))
+    for scan in (_raw_scans() if scans is None else scans):
+        if scan.path.name.startswith("_"):
+            continue
+        rel = str(scan.path.relative_to(ROOT)).replace("\\", "/")
+        if rel in known or rel in seen:
+            continue
+        if any(rel.startswith(k + "/") for k in known):
+            continue                      # підтека вже врахованої справи/збірки
+        frames = scan.n_img + scan.n_pdf
+        if frames:
+            seen.add(rel)
+            out.append((rel, frames))
     return out
 
 
@@ -381,8 +415,16 @@ def _fuzzy_stage(row: CaseRow) -> str:
 
 
 def collect_rows(index: LibraryIndex | None = None) -> tuple[list[CaseRow], list[Any]]:
-    """Зібрати реєстр. Повертає (рядки справ, нерозв'язані прив'язки прогонів)."""
+    """Зібрати реєстр. Повертає (рядки справ, нерозв'язані прив'язки прогонів).
+
+    ⏱ Дерево `data/raw` читається РАЗ на всю збірку (`_raw_scans`), і той самий
+    зріз живить три місця, які раніше обходили його кожне своїми `glob`-ами:
+    «замовлене без кадрів», «матеріал без справи» і лічильник кадрів.
+    """
     idx = index or LibraryIndex()
+    scans = _raw_scans()
+    global _FRAMES_INDEX
+    _FRAMES_INDEX = _frames_index(scans)
     rows: dict[str, CaseRow] = {}
     for e in idx.rows:
         key = e.get("key")
@@ -407,7 +449,7 @@ def collect_rows(index: LibraryIndex | None = None) -> tuple[list[CaseRow], list
         )
 
     # ── замовлене: картка справи без кадрів ─────────────────────────────────
-    for item in _ordered_cases(idx):
+    for item in _ordered_cases(idx, scans):
         meta, rel = item["meta"], item["rel"]
         shifra = str(meta.get("shifra") or "").strip()
         parsed = None
@@ -457,7 +499,7 @@ def collect_rows(index: LibraryIndex | None = None) -> tuple[list[CaseRow], list
     # ── матеріал на диску, який не звівся до справи ─────────────────────────
     known_paths = set(idx.by_path)
     known_paths.update(r.path for r in rows.values() if r.path)
-    for rel, frames in _unfiled_material(idx, known_paths):
+    for rel, frames in _unfiled_material(idx, known_paths, scans):
         # Спершу пробуємо звести теку до вже відомої справи: рендери й зменшені
         # копії (`dahmo_315_pages/spr-7864`) — це той самий матеріал, а не новий.
         hit = slug_case(rel, idx)
