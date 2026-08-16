@@ -38,13 +38,22 @@ FIELDS = ("opys", "spr_int", "spr_letter", "spr", "shifra", "title", "title_src"
           "title_alt", "commons_title", "year_from", "year_to", "years_src",
           "folios", "folios_src", "dv_no", "commons_url", "commons_size",
           "commons_pages", "mirror_url", "mirror_size", "truncated_mirror",
-          "on_disk", "src_page", "page_quality", "num_src", "surnames", "sources")
+          "on_disk", "src_page", "page_quality", "num_src", "surnames",
+          # 🎞 FamilySearch: окремий канал доступу до справи. `fs_dgs` — те, за
+          # чим плівку відкривають; для фондів без оцифровки на Commons це
+          # єдиний спосіб побачити документ, не замовляючи його в архіві.
+          # 👁 прочитане оком з обкладинки: село книги і діапазон абетки збірного тому
+          "cover_place", "cover_letters", "cover_note",
+          "fs_dgs", "fs_film", "fs_url", "fs_record_type", "fs_place", "fs_frames",
+          "sources")
 
 #: поля, яких стара схема не має → `None`
 _LEGACY_UNKNOWN = ("title_alt", "commons_title", "years_src", "folios", "folios_src",
                    "dv_no", "commons_url", "commons_size", "commons_pages",
                    "mirror_url", "mirror_size", "truncated_mirror", "on_disk",
-                   "src_page", "page_quality", "num_src", "surnames")
+                   "src_page", "page_quality", "num_src", "surnames",
+                   "fs_dgs", "fs_url", "fs_record_type", "fs_place", "fs_frames",
+                   "cover_place", "cover_letters", "cover_note")
 
 _SPR_RE = re.compile(r"^(\d+)\s*([а-яіїєґa-z]?)$", re.IGNORECASE)
 _KEY_RE = re.compile(r"^([A-Za-zА-Яа-яІЇЄҐіїєґ]+)[/\s-]+(\d+)[/\s-]+(?:(\d+)[/\s-]+)?"
@@ -134,7 +143,10 @@ def _norm_merged(r: dict[str, Any]) -> dict[str, Any]:
         if isinstance(out[k], str):
             out[k] = out[k].strip()
     out["commons_flag"] = bool(out.get("commons_url"))
-    out["fs_film"] = ""
+    # ⚠ Тут стояло `out["fs_film"] = ""` — залишок часів, коли merged-схема поля
+    # не мала. Після міграції майстер-індексу FS у реєстр воно затирало живі
+    # дані: 12 794 справи з плівкою читались як «плівки немає».
+    out["fs_film"] = (out.get("fs_film") or "")
     return out
 
 
@@ -309,9 +321,28 @@ def _year_bounds(year: str | None) -> tuple[int | None, int | None]:
     return a, int(m.group(2) or a)
 
 
+def _loose(s: Any) -> str:
+    """Назва повіту → форма, стійка до різнобою транскрипції.
+
+    🔴 Виміряно на ЦДІАК ф.224: заголовки описів пишуть повіт ДВОМА способами —
+    «Ольгопільський» (73 справи) і «Ольгопільский» (42), — тож точний підрядок
+    віддавав 73 зі 115 і мовчав про решту 42. Серед загублених були всі три
+    метричні книги Старої Горячківки 1771-1802, тобто саме те село, звідки
+    тягнеться відкрите питання роду. Пошук, який пропускає ТРЕТИНУ повіту й не
+    каже про це, гірший за відсутній: його нуль читають як негатив.
+
+    Зводимо м'який знак і взаємозамінні и/і/ї — цього досить на різнобій
+    «-ський/-ский». Пари з різним КОРЕНЕМ («Проскурівський» ↔ «Проскуровський»)
+    так не зводяться; це інша вада, і вона тут свідомо не лікується.
+    """
+    out = str(s or "").lower().replace("ь", "")
+    return out.replace("і", "и").replace("ї", "и")
+
+
 def filter_rows(rows: list[dict[str, Any]], *, opys: str = "", q: str = "", surname: str = "",
                 year: str = "", uezd: str = "", scan: bool = False,
-                on_disk: bool = False, todo: bool = False, state: str = "",
+                on_disk: bool = False, todo: bool = False, fs: bool = False,
+                state: str = "",
                 flag: str = "", live: dict[tuple[str, str, str], str] | None = None,
                 status: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     """Єдиний фільтр реєстру опису.
@@ -320,7 +351,8 @@ def filter_rows(rows: list[dict[str, Any]], *, opys: str = "", q: str = "", surn
     значенням для UI. Обидва входи дають той самий результат.
     """
     yf, yt = _year_bounds(year)
-    ql, sl, ul = q.lower().strip(), surname.lower().strip(), uezd.lower().strip()
+    ql, sl = q.lower().strip(), surname.lower().strip()
+    ul = _loose(uezd)
     want_flags = {x.strip() for x in (flag or "").split(",") if x.strip()}
     live = live if live is not None else {}
     status = status or {}
@@ -335,7 +367,12 @@ def filter_rows(rows: list[dict[str, Any]], *, opys: str = "", q: str = "", surn
                 return False
         if sl and sl not in str(r.get("surnames") or "").lower():
             return False
-        if ul and ul not in str(r.get("title") or "").lower():
+        if ul and ul not in _loose(r.get("title")):
+            return False
+        # 🎞 FS — окремий канал доступу, а не різновид «скану»: плівка не лежить
+        # файлом на Commons, її дивляться/качають за DGS. Для ф.315 це 12 794
+        # справи проти 882 зі сканом, тобто головний спосіб дістати документ.
+        if fs and not (r.get("fs_dgs") or r.get("fs_film")):
             return False
         if scan and not (r.get("commons_url") or r.get("mirror_url")):
             return False

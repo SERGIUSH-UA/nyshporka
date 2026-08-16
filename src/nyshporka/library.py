@@ -518,10 +518,27 @@ def _pdf_pages_cached(path: str, size: int, mtime: int) -> int:
 
 
 def _pdf_pages(paths: list[Path]) -> int:
-    """Сумарно сторінок; 0 — якщо не вийшло. Стеля файлів боронить від періодики."""
+    """Сторінок у теці; 0 — якщо не вийшло. Стеля файлів боронить від періодики.
+
+    🔴 НЕ проста сума: у теці справи разом лежать ЧАСТИНИ («Ч.1»…«Ч.6») і той
+    самий том ОДНИМ файлом, а часто ще й вирізка на кілька аркушів. Сліпе
+    додавання дає подвійний лік, і реєстр показує недороблений декод там, де його
+    зроблено повністю (виміряно 2026-08-16):
+      · спр.6862 — Ч.1-6 (1955 стор.) + `_combined_6862.pdf` (1955) → «3910»,
+        покриття 1955/3910 читалось як «50%»;
+      · спр.6775 — Ч.1-3 (962) + два повні файли по 962 + вирізка 22 → «2908»,
+        тобто «33%».
+    Ціна: обидві справи потрапили в рекомендацію «догнати прогін у хмарі», хоча
+    гнати не було чого.
+
+    Частини й повний том — це ДВА ПРЕДСТАВЛЕННЯ однієї справи, тому береться
+    більше з них, а не сума. Копії (однакове число сторінок) рахуються раз.
+    """
     if not paths or len(paths) > _PDF_PROBE_LIMIT:
         return 0
-    total = 0
+    part_re = re.compile(r"(^|[ _.\-])(ч|part|pt)\s*\.?\s*\d+", re.IGNORECASE)
+    parts = 0
+    singles: list[int] = []
     for p in paths:
         try:
             st = p.stat()
@@ -530,12 +547,22 @@ def _pdf_pages(paths: list[Path]) -> int:
         n = _pdf_pages_cached(str(p), st.st_size, int(st.st_mtime))
         if not n:
             return 0
-        total += n
-    return total
+        if part_re.search(p.stem):
+            parts += n
+        else:
+            singles.append(n)
+    whole = max(singles) if singles else 0
+    if parts and whole:
+        return max(parts, whole)
+    if parts:
+        return parts
+    # без частин: копії того самого тому не додаємо
+    return sum(sorted(set(singles), reverse=True)[:1]) if len(set(singles)) == 1 else sum(set(singles))
 
 
 def _count_case(d: Path) -> tuple[int, int]:
-    """(images, СТОРІНКИ) прямо у теці; PDF на архівному томі — через `external_path`.
+    """(images, СТОРІНКИ) у теці справи або в її `pages/`; PDF на архівному томі
+    — через `external_path`.
 
     🔴 Друге число — СТОРІНКИ PDF, а не кількість файлів (виправлено 2026-08-15).
     Справа, завантажена одним PDF (вікі-дзеркало ДАВіО: `904-24-17/904-24-17.pdf`,
@@ -552,18 +579,37 @@ def _count_case(d: Path) -> tuple[int, int]:
     """
     imgs = pdfs = 0
     pdf_paths: list[Path] = []
-    try:
-        for p in d.iterdir():
-            if not p.is_file():
-                continue
-            ext = p.suffix.lower()
-            if ext in _IMG_EXT:
-                imgs += 1
-            elif ext == ".pdf":
-                pdfs += 1
-                pdf_paths.append(p)
-    except OSError:
-        pass
+
+    def _tally(folder: Path) -> None:
+        nonlocal imgs, pdfs
+        try:
+            for p in folder.iterdir():
+                if not p.is_file():
+                    continue
+                ext = p.suffix.lower()
+                if ext in _IMG_EXT:
+                    imgs += 1
+                elif ext == ".pdf":
+                    pdfs += 1
+                    pdf_paths.append(p)
+        except OSError:
+            pass
+
+    _tally(d)
+    # 🔴 Кадри бувають на ОДИН шар глибше, і теку з ними видно не всім
+    # завантажувачам однаково: `cdiak_download.py` (рушій ARCHIUM — ЦДІАК,
+    # ЦДАМЛМ) кладе скани у `<справа>/pages/`, тоді як решта сипле їх у корінь.
+    # Обхід лише кореня рахував такій справі НУЛЬ кадрів, тобто вона ставала
+    # невідрізненною від голої картки опису — рівно та помилка, що вже коштувала
+    # повторного замовлення в архіві (див. вище про PDF). Заміряно на ЦДІАК
+    # ф.224: 6 справ, 313 кадрів, серед них обидві метрики М'ястківки XVIII ст.
+    # (спр.864 і 865) — бібліотека бачила 3 теки з 9.
+    # Заглядаємо саме в `pages`, а не рекурсією: у теці справи поруч лежать
+    # `_decoded`, кропи й інші похідні, і рекурсія рахувала б їх як кадри.
+    if not (imgs or pdfs):
+        sub = d / "pages"
+        if sub.is_dir():
+            _tally(sub)
     if not (imgs or pdfs):
         pdfs = _external_files(d)
     elif pdf_paths and not imgs:

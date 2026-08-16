@@ -405,6 +405,7 @@ def cmd_fond(
     scan: bool = typer.Option(False, "--scan", help="лише ті, що мають скан онлайн"),
     on_disk: bool = typer.Option(False, "--on-disk", help="лише завантажені"),
     todo: bool = typer.Option(False, "--todo", help="скан є, а на диску немає"),
+    fs: bool = typer.Option(False, "--fs", help="лише ті, що мають плівку FamilySearch"),
     limit: int = typer.Option(40, "--limit"),
     as_json: bool = typer.Option(False, "--json"),
 ) -> None:
@@ -426,16 +427,21 @@ def cmd_fond(
     live = _fonds.live_on_disk(repo.upper(), fond)
     sel = _fonds.filter_rows(rows, opys=opys or "", q=q or "", surname=surname or "",
                              year=year or "", uezd=uezd or "", scan=scan,
-                             on_disk=on_disk, todo=todo, live=live)
+                             on_disk=on_disk, todo=todo, fs=fs, live=live)
     if as_json:
-        typer.echo(_json.dumps(sel[:limit], ensure_ascii=False, indent=1))
+        # 🔴 `--limit 0` означає «без обмеження» (як в інших командах), а не
+        # «нуль рядків»: доти `sel[:0]` віддавав ПОРОЖНІЙ масив, і машинний
+        # споживач читав повний реєстр як «нічого не знайдено».
+        typer.echo(_json.dumps(sel if limit <= 0 else sel[:limit],
+                               ensure_ascii=False, indent=1))
         return
 
     t = Table(header_style="bold",
               title=f"{repo.upper()} ф.{fond} — реєстр опису ({len(sel)} з {len(rows)})")
     cols: tuple[tuple[str, JustifyMethod], ...] = (
         ("шифра", "left"), ("назва", "left"), ("роки", "left"),
-        ("арк.", "right"), ("скан", "left"), ("диск", "left"), ("№", "left"))
+        ("арк.", "right"), ("скан", "left"), ("FS", "left"),
+        ("👁 село / літери", "left"), ("диск", "left"), ("№", "left"))
     for col, just in cols:
         t.add_column(col, justify=just)
     for r in sel[:limit]:
@@ -461,17 +467,31 @@ def cmd_fond(
         disk = "✓" if st["on_disk_live"] else ("✓?" if r.get("on_disk") else "")
         if st["disk_mismatch"]:
             disk += " [yellow]⚠[/yellow]"
+        # 🎞 плівка: показуємо DGS — саме його вводять у FamilySearch, щоб
+        # відкрити справу; кадри поруч кажуть, чи том узагалі підйомний
+        dgs = str(r.get("fs_dgs") or "").strip()
+        frames = str(r.get("fs_frames") or "").strip()
+        fs_mark = (f"{dgs}" + (f" ·{frames}" if frames else "")) if dgs else ""
+        # 👁 прочитане оком з обкладинки: для збірного тому — діапазон абетки,
+        # для книги одного села — сама назва. Це те, чого немає в каталогах.
+        cov = (r.get("cover_place") or "").strip()
+        letters = (r.get("cover_letters") or "").strip()
+        cover_mark = f"[bold]{letters}[/bold]" if letters else cov[:26]
         t.add_row(r.get("shifra") or f"{fond}-{r.get('opys')}-{r.get('spr')}",
                   title,
                   "–".join(x for x in (r.get("year_from"), r.get("year_to")) if x)[:9],
                   r.get("folios") or "",
                   scan_mark,
+                  fs_mark,
+                  cover_mark,
                   disk,
                   "[red]~[/red]" if r.get("num_src") == "interp" else "")
     console.print(t)
     if len(sel) > limit:
         console.print(f"[dim]показано {limit} з {len(sel)} — --limit більше[/dim]")
     console.print("[dim]скан: C = Commons (повний) · ✂ дзеркало обрізане · "
+                  "FS = DGS плівки FamilySearch ·кадрів · "
+                  "👁 = прочитане ОКОМ з обкладинки (жирним — діапазон абетки збірного тому) · "
                   "№ «~» = номер справи відновлено, звіряти оком[/dim]")
 
 
