@@ -383,7 +383,18 @@ def cmd_opys(key: str = typer.Argument(..., help="DAHMO/230/43 або DAHMO/230/
         mark = " [red](ОБРІЗАНО — не качати звідси)[/red]" if row.get(
             "truncated_mirror") else ""
         console.print(f"  дзеркало: {int(ms) / 2**20:.0f} МБ{mark}")
-    if not cs and not ms:
+    # 🎞 FS — третій канал доступу, і для метричних фондів головний. Без цієї
+    # гілки картка радила «замовлення в архіві» про справи з живою плівкою:
+    # ЦДІАК ф.224 має DGS у 1827 справах (колонка «Посилання на FamilySearch»
+    # у таблиці опису), а Commons — лише в 42. Саме так метрики с. Слюсарева
+    # (224-1-1190, DGS 110032617) числились недоступними.
+    film = (row.get("fs_film") or row.get("fs_dgs") or "").strip()
+    if film:
+        console.print(f"  [green]FamilySearch:[/green] DGS {film}"
+                      + (f" · {row['fs_frames']} кадрів" if row.get("fs_frames") else ""))
+        console.print("    https://www.familysearch.org/records/images/"
+                      f"search-results?imageGroupNumbers={film}")
+    if not cs and not ms and not film:
         console.print("  [yellow]сканів онлайн немає — замовлення в архіві[/yellow]")
     console.print(f"  на диску: {row.get('on_disk') or '[dim]—[/dim]'}")
     console.print(f"  [dim]джерела рядка: {row.get('sources')}[/dim]")
@@ -521,7 +532,26 @@ def cmd_take(key: str = typer.Argument(..., help="DAHMO/230/43 або DAHMO/230/
             console.print(f"  на дзеркалі є ({int(row.get('mirror_size') or 0) / 2**20:.0f}"
                           " МБ), але воно обрізає великі справи — качати руками свідомо:")
             console.print(f"  {row['mirror_url']}")
-        else:
+        # 🎞 Плівка FS — раніше цю гілку не перевіряли, і команда радила
+        #    «замовлення в архіві» про справи, які лежать онлайн. Для метричних
+        #    фондів це типовий випадок: ЦДІАК ф.224 має DGS у 1827 справах
+        #    проти 42 сканів на Commons.
+        film = (row.get("fs_film") or row.get("fs_dgs") or "").strip()
+        if film:
+            console.print(f"  [green]але є плівка FamilySearch — DGS {film}[/green]")
+            console.print("    перегляд: https://www.familysearch.org/records/images/"
+                          f"search-results?imageGroupNumbers={film}")
+            # 🔴 Порада мусить вести туди, що є В ЦЬОМУ пакеті. Дзеркало плівок
+            # — звичайне джерело (`nysh sources`), тож качається тим самим
+            # `nysh get`, що й решта. Радити тут скрипт із дослідницького репо
+            # означало б дати команду, якої в людини на машині немає, — а це
+            # читається як поламаний застосунок, не як відсутня можливість.
+            console.print("    завантаження (поза `take`, бо це не Commons):")
+            console.print(f"      nysh browse fsfilm {film}"
+                          "        [dim]що лежить на плівці[/dim]")
+            console.print(f"      nysh get fsfilm {film} --out <тека>"
+                          "  [dim]забрати кадри[/dim]")
+        elif not row.get("mirror_url"):
             console.print("  → замовлення в архіві; шифра: "
                           f"{repo} ф.{fond} оп.{opys} спр.{spr}{letter}")
         raise typer.Exit(2)

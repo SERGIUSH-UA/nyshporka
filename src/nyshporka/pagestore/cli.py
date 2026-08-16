@@ -174,11 +174,25 @@ def pages_note_batch(
     report = store.annotate_pages(ref, notes, replace=replace) if notes else \
         store.MergeReport(path="")
     report.errors = errors
+    # 🔴 Ключ сторінки мусить збігатися з ІМЕНЕМ ФАЙЛУ на диску («0106.jpg»), бо
+    # саме так `case_status` рахує unnoted. Ключ без розширення проходить
+    # валідацію моделі, але зі сканами не матчиться — і сторінка, яку вже
+    # дивилися оком, лишається в черзі на рендер (2026-08-16: так розійшлись
+    # 62 ключі у 23 справах). Тека без зображень (справа з PDF, де конвенція
+    # «page_003») дає порожній `disk` — там попередження не буде.
+    disk = set(store._disk_scans(ref))
+    off_disk = [n.scan for n in notes if n.scan not in disk] if disk else []
     out = {"key": ref.key, **report.as_dict(),
-           "ok": len(notes), "failed": len(errors)}
+           "ok": len(notes), "failed": len(errors), "off_disk": off_disk}
     _emit(out, as_json,
           f"✅ {ref.shifra}: додано {len(report.added)}, домержено {len(report.merged)}, "
           f"замінено {len(report.replaced)}, помилок {len(errors)}")
+    if off_disk and not as_json:
+        err_console.print(
+            f"[yellow]⚠ {len(off_disk)} сканів немає на диску теки справи "
+            f"({', '.join(off_disk[:5])}{'…' if len(off_disk) > 5 else ''}) — "
+            f"ключ має бути ІМЕНЕМ ФАЙЛУ («0106.jpg»), інакше `pages status` "
+            f"рахуватиме сторінку непереглянутою[/yellow]")
     if errors and not as_json:
         # 🔴 Ім'я `e` тут НЕ перевикористовується. Python видаляє змінну винятку
         # на виході з `except`, і хоча цикл присвоює її заново (тобто працює),
