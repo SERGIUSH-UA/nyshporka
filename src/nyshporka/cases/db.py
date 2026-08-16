@@ -74,11 +74,26 @@ def _row_values(row: CaseRow) -> dict[str, Any]:
     return d
 
 
+def _pulse_seq() -> int:
+    """Мітка пульсу простору; 0, якщо пульсу немає (це теж дійсний стан)."""
+    try:
+        from nyshporka.core import pulse
+
+        return pulse.seq()
+    except Exception:
+        return 0
+
+
 def build_index(db_path: Path | None = None,
                 index: LibraryIndex | None = None) -> dict[str, Any]:
     """Зібрати реєстр і перезаписати базу. Повертає підсумок для друку."""
     path = Path(db_path or DB_PATH)
     path.parent.mkdir(parents=True, exist_ok=True)
+    # 💓 Мітку пульсу знімаємо ПЕРЕД збором, а не після. Збірка триває секунди, і
+    # удар, що стався в цей час, описує зміну, якої ми ще не прочитали. Записавши
+    # мітку «після», ми оголосили б реєстр свіжим саме тоді, коли він уже ні —
+    # помилка в небезпечному напрямку. «До» дає щонайбільше зайву перезбірку.
+    pulse_at_start = _pulse_seq()
     rows, orphans = collect_rows(index)
     tmp = path.with_suffix(".sqlite.tmp")
     if tmp.exists():
@@ -109,6 +124,10 @@ def build_index(db_path: Path | None = None,
             ("cases", str(len(rows))),
             ("orphan_runs", str(len(orphans) - decided)),
             ("decided_none_runs", str(decided)),
+            # 💓 Мітка пульсу (знята ДО збору — див. вище). По ній
+            # `staleness(quick=True)` за один `stat` каже «точно застарів»,
+            # не обходячи 840 файлів.
+            ("pulse", str(pulse_at_start)),
         ])
         con.commit()
     finally:
@@ -265,8 +284,18 @@ def orphan_runs(db_path: Path | None = None) -> list[dict[str, Any]]:
         con.close()
 
 
-def staleness(db_path: Path | None = None) -> dict[str, Any]:
+def staleness(db_path: Path | None = None, *, quick: bool = False) -> dict[str, Any]:
     """Чи відстав реєстр від своїх джерел — і від яких саме.
+
+    ⏱ `quick=True` — дешевий шар на 💓 пульсі (`core.pulse`): якщо мітка простору
+    змінилась після збірки, реєстр застарів ТОЧНО, і повну перевірку робити
+    нема сенсу. Коштує один `stat` замість двох `glob` і ~840 `stat`.
+
+    🔴 Зворотне НЕ виконується, і на цьому тримається вся чесність механізму:
+    збіг мітки означає лише «через застосунок нічого не міняли». Файл, покладений
+    у `data/raw` Провідником, пульсу не б'є. Тому `quick` при збігу мітки чесно
+    каже «не знаю» (`unknown=True`), а не «свіжий», і викликач мусить або зробити
+    повну перевірку, або показати це станом — але не видавати за відповідь.
 
     🔴 Навіщо це в коді, а не лише в інструкції. Реєстр — derived-зріз п'яти
     сховищ, і будь-який прогін, пошук чи внесення факту робить його старим за
@@ -290,6 +319,27 @@ def staleness(db_path: Path | None = None) -> dict[str, Any]:
         return {"built": built_raw, "stale": True, "reasons": ["час збірки не читається"]}
     if built.tzinfo is None:
         built = built.replace(tzinfo=UTC)
+
+    if quick:
+        try:
+            from nyshporka.core import pulse
+
+            now, at_build = pulse.seq(), int(meta.get("pulse") or 0)
+        except Exception:
+            now, at_build = 0, 0
+        # 🔴 Проста нерівність, а не `now and at_build and now != at_build`.
+        # Нуль тут — ЗНАЧУЩЕ значення («пульсу не було»), а не «немає даних»:
+        # збірка на просторі без пульсу записує 0, і перший же удар дає 0 → N,
+        # тобто справжню зміну. Вимога «обидві ненульові» робила саме цей
+        # перехід невидимим — і найчастіший випадок (перша збірка, потім робота)
+        # мовчки читався б як «нічого не міняли».
+        if now != at_build:
+            return {"built": built_raw, "stale": True, "unknown": False,
+                    "reasons": ["у просторі щось міняли після збірки"]}
+        # мітки збіглись — це НЕ доказ свіжості, а лише «через застосунок
+        # нічого не міняли»
+        return {"built": built_raw, "stale": False, "unknown": True, "reasons": []}
+
     reasons: list[str] = []
     for label, target in (
         ("каталог справ", ROOT / "data" / "derived" / "case_library.json"),
@@ -330,7 +380,8 @@ def staleness(db_path: Path | None = None) -> dict[str, Any]:
     newest_note = max((p.stat().st_mtime for p in pages_dir.glob("*/*.json")), default=0)
     if newest_note and datetime.fromtimestamp(newest_note, tz=UTC) > built:
         reasons.append("сховище сторінок оновлено")
-    return {"built": built_raw, "stale": bool(reasons), "reasons": reasons}
+    return {"built": built_raw, "stale": bool(reasons), "unknown": False,
+            "reasons": reasons}
 
 
 def index_meta(db_path: Path | None = None) -> dict[str, Any]:

@@ -127,6 +127,18 @@ class Registry:
             env = op.fn(args)
         except Exception as exc:
             return fail(f"{name}: {type(exc).__name__}: {exc}")
+        # 💓 Пульс — тут і БІЛЬШЕ НІДЕ. Це єдиний вхід для CLI, HTTP і MCP, тож
+        # позначка «дані змінились» не може загубитись через те, що автор нової
+        # операції про неї не знав. Умисно ПІСЛЯ виклику й лише на успіху:
+        # операція, що впала, нічого не змінила, і бити за неї означало б
+        # оголошувати реєстр застарілим без причини.
+        if op.mutates and getattr(env, "ok", True):
+            try:
+                from nyshporka.core import pulse
+
+                pulse.beat(name)
+            except Exception:
+                pass  # прискорювач; без нього лишається повна перевірка
         for hint_op, why in op.next_hints:
             env.suggest(hint_op, why)
         return env
