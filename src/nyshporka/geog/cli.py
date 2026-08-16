@@ -46,12 +46,15 @@ def cmd_find(
     q: str = typer.Argument("", help="назва села (укр або рос; фаззі)"),
     uezd: str = typer.Option("", "--uezd", help="повіт/губернія"),
     fond: str = typer.Option("", "--fond", help="лише де є справи цього фонду"),
+    section: str = typer.Option("", "--section",
+                                help="church | decanats | rabbinate "
+                                     "(порожньо = всі конфесії)"),
     limit: int = typer.Option(20, "--limit"),
     json: bool = typer.Option(False, "--json"),
 ) -> None:
     """Знайти поселення за назвою."""
     _warn()
-    rows = find_places(q, limit=limit, uezd=uezd, fond=fond)
+    rows = find_places(q, limit=limit, uezd=uezd, fond=fond, section=section)
     if json:
         typer.echo(_json.dumps(rows, ensure_ascii=False, indent=1))
         return
@@ -59,9 +62,9 @@ def cmd_find(
         typer.echo("нічого не знайдено")
         return
     for r in rows:
-        typer.echo(f"  {r['village_uk']:30s} {r['village_ru']:26s} "
-                   f"{(r['uezd_gub'] or '')[:38]:38s} справ {r['n_cases']:4d}  "
-                   f"[{r['card']}]")
+        typer.echo(f"  {(r.get('institution') or '')[:18]:18s} "
+                   f"{r['village_uk']:28s} {r['village_ru']:24s} "
+                   f"{(r['uezd_gub'] or '')[:34]:34s} справ {r['n_cases']:4d}")
 
 
 @app.command("card")
@@ -88,7 +91,8 @@ def cmd_card(
     if json:
         typer.echo(_json.dumps(data, ensure_ascii=False, indent=1))
         return
-    typer.echo(f"\n🗺 {data['village_uk']}  ({data['village_ru']})")
+    typer.echo(f"\n🗺 {data['village_uk']}  ({data['village_ru']})"
+               f"   [{data.get('institution') or '—'}]")
     typer.echo(f"   до 1793: {data['hist_place']}")
     typer.echo(f"   після  : {data['uezd_gub']}")
     typer.echo(f"   нині   : {data['modern_place']}")
@@ -103,6 +107,11 @@ def cmd_card(
                  if c["year_from"] else "—        ")
         typer.echo(f"     {mark} {c['shifra']:16s} {years:11s} "
                    f"{(c['doc_type'] or '')[:18]:18s} {(c['parish'] or '')[:34]}")
+    if data.get("siblings"):
+        typer.echo("\n   🕍 те саме поселення в інших конфесіях:")
+        for x in data["siblings"]:
+            typer.echo(f"     {x['institution']:20s} {x['village_uk']:26s} "
+                       f"справ {x['n_cases']:4d}  [{x['card']}]")
     if data.get("confusers"):
         typer.echo("\n   ⚠ схожі назви (fuzzy плутає їх із цим селом):")
         for x in data["confusers"]:

@@ -39,7 +39,7 @@ from nyshporka.core.workspace import workspace
 
 #: тека, куди `cdiak_geog_catalog.py` кладе свої виходи
 GEOG_DIR = "cdiak_geog"
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 def catalog_dir() -> Path:
@@ -94,8 +94,10 @@ def build_index(verbose: bool = False) -> dict[str, int]:
     con = sqlite3.connect(tmp)
     con.executescript("""
         CREATE TABLE places (
-            card TEXT PRIMARY KEY, village_uk TEXT, village_ru TEXT,
+            card TEXT PRIMARY KEY, section TEXT, institution TEXT,
+            village_uk TEXT, village_ru TEXT,
             hist_place TEXT, uezd_gub TEXT, modern_place TEXT, church TEXT,
+            eparchy TEXT, parishes TEXT, note TEXT,
             norm_uk TEXT, norm_ru TEXT, n_cases INTEGER DEFAULT 0);
         CREATE TABLE cases (
             card TEXT, fond TEXT, opys TEXT, spr TEXT,
@@ -103,6 +105,7 @@ def build_index(verbose: bool = False) -> dict[str, int]:
         CREATE INDEX ix_cases_card ON cases(card);
         CREATE INDEX ix_cases_fond ON cases(fond, opys);
         CREATE INDEX ix_places_uk ON places(norm_uk);
+        CREATE INDEX ix_places_sec ON places(section);
         CREATE INDEX ix_places_ru ON places(norm_ru);
         CREATE TABLE meta (k TEXT PRIMARY KEY, v TEXT);
     """)
@@ -110,11 +113,15 @@ def build_index(verbose: bool = False) -> dict[str, int]:
     with places_tsv.open(encoding="utf-8") as f:
         for r in csv.DictReader(f, delimiter="\t"):
             con.execute(
-                "INSERT OR REPLACE INTO places(card,village_uk,village_ru,"
-                "hist_place,uezd_gub,modern_place,church,norm_uk,norm_ru)"
-                " VALUES(?,?,?,?,?,?,?,?,?)",
-                (r["card"], r["village_uk"], r["village_ru"], r["hist_place"],
+                "INSERT OR REPLACE INTO places(card,section,institution,"
+                "village_uk,village_ru,hist_place,uezd_gub,modern_place,church,"
+                "eparchy,parishes,note,norm_uk,norm_ru)"
+                " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (r["card"], r.get("section", "church"),
+                 r.get("institution", "православна церква"),
+                 r["village_uk"], r["village_ru"], r["hist_place"],
                  r["uezd_gub"], r["modern_place"], r["church"],
+                 r.get("eparchy", ""), r.get("parishes", ""), r.get("note", ""),
                  norm_name(r["village_uk"]), norm_name(r["village_ru"])))
             n_pl += 1
     if cases_tsv.is_file():
@@ -185,7 +192,7 @@ def index_stale() -> str:
 # ── пошук ─────────────────────────────────────────────────────────────────────
 
 def find_places(q: str, limit: int = 40, uezd: str = "",
-                fond: str = "") -> list[dict[str, Any]]:
+                fond: str = "", section: str = "") -> list[dict[str, Any]]:
     """Пошук поселення за назвою (укр або рос), з фаззі-добором.
 
     Спершу точний і префіксний збіг, і лише потім фаззі: інакше на короткому
@@ -203,6 +210,13 @@ def find_places(q: str, limit: int = 40, uezd: str = "",
             rows[d["card"]] = d
 
     where, args = "", []
+    # 🔴 Конфесія — ФІЛЬТР, а не поділ на три газетири. Одне містечко присутнє в
+    # кількох розділах: у М'ястківці була православна церква, костел і єврейська
+    # громада, і метрики кожної лежать окремо. Дефолт «усі» саме тому: шукати
+    # лише в православному означало б систематично не бачити двох третин.
+    if section:
+        where += " AND section = ?"
+        args.append(section)
     if uezd:
         where += " AND (uezd_gub LIKE ? OR hist_place LIKE ?)"
         args += [f"%{uezd}%", f"%{uezd}%"]
@@ -276,7 +290,27 @@ def place_card(card: str, repo: str = "CDIAK") -> dict[str, Any]:
         c["on_disk"] = disk.get((c["fond"], c["opys"], n, letter), "")
     place["cases"] = cases
     place["n_on_disk"] = sum(1 for c in cases if c["on_disk"])
+    # 🕍 те саме поселення в ІНШИХ конфесіях: костел і рабинат того самого
+    # містечка — окремі картки, і не показати їх означало б віддати «усі
+    # документи села», умовчавши про дві третини
+    place["siblings"] = siblings(card)
     return place
+
+
+def siblings(card: str) -> list[dict[str, Any]]:
+    """Те саме поселення в інших розділах каталогу (конфесіях)."""
+    con = _con()
+    me = con.execute("SELECT * FROM places WHERE card = ?", [card]).fetchone()
+    if me is None:
+        con.close()
+        return []
+    rows = [dict(r) for r in con.execute(
+        "SELECT card, section, institution, village_uk, church, n_cases "
+        "FROM places WHERE card != ? AND section != ? "
+        "AND (norm_uk = ? OR norm_ru = ?)",
+        [card, me["section"], me["norm_uk"], me["norm_ru"]])]
+    con.close()
+    return rows
 
 
 def places_for_fond(fond: str) -> dict[tuple[str, str], dict[str, str]]:
