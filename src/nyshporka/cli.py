@@ -481,6 +481,19 @@ cases_app = typer.Typer(help="Реєстр справ: що є, що прочи�
                         no_args_is_help=True)
 app.add_typer(cases_app, name="cases")
 
+# 🗺 Газетир: від СЕЛА до справ по всіх фондах — зворотний напрям до реєстру
+# опису. Модуль існував, але зареєстрований не був: команди `nysh geog …` не
+# існувало, хоч код і повідомлення на неї вже посилались (глухий кут у сенсі
+# `test_no_dead_ends`).
+from nyshporka.geog.cli import app as geog_app  # noqa: E402
+
+app.add_typer(geog_app, name="geog")
+
+# 🗂 Каталог — довідники, які їдуть у комплекті й оновлюються окремо від коду.
+from nyshporka.catalog.cli import app as catalog_app  # noqa: E402
+
+app.add_typer(catalog_app, name="catalog")
+
 
 @cases_app.command("build")
 def cases_build(

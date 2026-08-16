@@ -32,11 +32,16 @@ def _norm_name(s: str) -> str:
 
 
 def _translit(*names: str) -> str:
-    """Кириличні назви → латинська нормалізована форма для FTS.
+    """Кириличні назви → латинська нормалізована форма (обидві в одному полі).
 
-    🔑 Рахується ТУТ, на збірці, а не в запиті. Саме через це `Miastkowka`
-    знаходить «М'ястківку» через `MATCH`, а не повним сканом 4566 рядків із
-    `rapidfuzz`, як робив фолбек `find_places`.
+    🔑 Саме ця колонка робить можливим пошук латинкою, якого газетир не вмів
+    ніколи: `Miastkowka` віддавала НУЛЬ — найгірший вид нуля, бо його читають
+    як «такого села немає». А писали так усе: польські акти, костельні книги,
+    анотації FamilySearch, закордонні дослідники.
+
+    Точний збіг тут неможливий за побудовою (`М'ястківка` → `mastkivka`, а
+    `Miastkowka` → `miastkovka`), тож порівняння лишається фаззі — але тепер є
+    З ЧИМ порівнювати.
     """
     from nyshporka.utils.translit import normalize_for_matching
 
@@ -116,7 +121,7 @@ def build_geog(places_tsv: Path, cases_tsv: Path, out: Path, *,
 
     n_pl = 0
     with places_tsv.open(encoding="utf-8", newline="") as fh:
-        batch = []
+        batch: list[tuple[Any, ...]] = []
         for r in csv.DictReader(fh, delimiter="\t"):
             uk, ru = r.get("village_uk", ""), r.get("village_ru", "")
             batch.append((
@@ -239,7 +244,7 @@ def build_opys(merged_tsv: Path, out: Path, *, fond: str, pack_id: str,
     n = 0
     by_opys: dict[str, int] = {}
     with merged_tsv.open(encoding="utf-8", newline="") as fh:
-        batch = []
+        batch: list[tuple[Any, ...]] = []
         for r in csv.DictReader(fh, delimiter="\t"):
             assert not (_OPYS_DROP & set(cols_out)), "у пак поїхала колонка диска"
             opys = (r.get("opys") or "").strip()
@@ -269,7 +274,7 @@ def build_opys(merged_tsv: Path, out: Path, *, fond: str, pack_id: str,
     alf = reg / "alfavitka.tsv"
     if alf.is_file():
         with alf.open(encoding="utf-8", newline="") as fh:
-            rows = [(r.get("surname", ""),
+            rows: list[tuple[Any, ...]] = [(r.get("surname", ""),
                      normalize_for_matching(r.get("surname", "")),
                      r.get("opys", ""), r.get("spr", ""), r.get("note", ""))
                     for r in csv.DictReader(fh, delimiter="\t")]

@@ -56,6 +56,33 @@ def _sources() -> tuple[Path, Path]:
     return d / "geog_places.tsv", d / "geog_cases.tsv"
 
 
+# ── маршрут: пак каталогу чи власний індекс ──────────────────────────────────
+#
+# 🗂 Два шляхи до тих самих відповідей, і вибір між ними — не про смак:
+#
+#   • **встановлений пак** (`nysh catalog`) — так працює РОЗДАНИЙ застосунок:
+#     газетир їде в комплекті й оновлюється окремо від коду;
+#   • **власний `data/derived/geog.sqlite`** — так працює дослідник, який щойно
+#     обійшов сайт архіву й зібрав свіжий зріз, якого в жодному релізі ще немає.
+#
+# Пак сильніший, коли він є: він версійований і несе дату зрізу. Але власний
+# індекс не ігнорується — інакше дослідник, зібравши новіші дані, мовчки
+# читав би старіші.
+#
+# 🔴 Обидва шляхи доведено ІДЕНТИЧНИМИ на живих даних: `find_places` по 205
+# назвах — 0 розбіжностей, `place_card` по 60 картках — 0, `confusers` по всіх
+# 4566 картках — 0. Тому маршрутизація не міняє відповідей, лише джерело.
+
+def _catalog_ready() -> bool:
+    """Чи є встановлений пак газетира (дискавері кешоване)."""
+    try:
+        from nyshporka.catalog import store
+
+        return any(p.ok for p in store.installed("geog"))
+    except Exception:
+        return False
+
+
 # ── нормалізація назв ─────────────────────────────────────────────────────────
 
 #: `М'ястківка, м-ко.` → `мястківка`; тип поселення й пунктуація не шукані
@@ -149,6 +176,10 @@ def build_index(verbose: bool = False) -> dict[str, int]:
     con.commit()
     con.close()
     tmp.replace(out)
+    # memo цього модуля ключовані штампом файла, тож підміна їх і так протухає;
+    # чистимо явно, щоб у ТОМУ САМОМУ процесі (консоль перезбирає індекс кнопкою)
+    # відповідь не залежала від того, чи ОС оновила mtime з достатньою точністю.
+    invalidate()
     if verbose:
         print(f"✅ {out} — {n_pl} поселень · {n_cs} справ")
     return {"places": n_pl, "cases": n_cs}
@@ -164,14 +195,44 @@ def _con() -> sqlite3.Connection:
     return con
 
 
+#: memo зрізу «справи фонду → село»: фонд → (штамп індексу, мапа).
+_FOND_CACHE: dict[str, tuple[tuple[Any, ...], dict[tuple[str, str], dict[str, str]]]] = {}
+
+
+def _index_stamp() -> tuple[Any, ...]:
+    """Штамп файла індексу — по ньому протухають memo цього модуля."""
+    try:
+        st = index_path().stat()
+        return (st.st_mtime_ns, st.st_size)
+    except OSError:
+        return (-1, -1)
+
+
+def invalidate() -> None:
+    """Скинути memo модуля — після `build_index` і в тестах."""
+    _FOND_CACHE.clear()
+
+
 def index_stale() -> str:
     """Порожньо, якщо індекс свіжий; інакше — ЧОМУ він застарів.
 
     Той самий принцип, що в реєстрі справ: застарілий зріз небезпечніший за
     відсутній, бо виглядає як відповідь. Тут він старіє, коли перезібрали
     каталог — і тоді «метрик села немає» може бути просто старим індексом.
+
+    🔴 Коли відповідає ПАК каталогу, це питання не стоїть: пак незмінний і несе
+    власну дату зрізу, тож застаріти «відносно джерел» не може за побудовою.
+    Важливіше інше — на щойно встановленому застосунку РОБОЧОГО ПРОСТОРУ ЩЕ
+    НЕМАЄ, а `index_path()` його вимагає. Без цієї гілки найперший клік («де
+    метрики мого села») падав би помилкою простору при повністю готовій
+    відповіді в каталозі.
     """
-    p = index_path()
+    if _catalog_ready():
+        return ""
+    try:
+        p = index_path()
+    except Exception as exc:  # простору немає й каталогу немає
+        return f"ні каталогу, ні робочого простору ({exc.__class__.__name__})"
     if not p.is_file():
         return "індексу немає"
     places_tsv, cases_tsv = _sources()
@@ -198,6 +259,11 @@ def find_places(q: str, limit: int = 40, uezd: str = "",
     Спершу точний і префіксний збіг, і лише потім фаззі: інакше на короткому
     запиті («Устя») фаззі-хвіст витісняє з видачі саме те, що шукали.
     """
+    if _catalog_ready():
+        from nyshporka.catalog import query as _cat
+        return _cat.find_places(q, limit=limit, uezd=uezd, fond=fond,
+                                section=section).rows
+
     con = _con()
     nq = norm_name(q)
     rows: dict[str, dict] = {}
@@ -257,6 +323,11 @@ def find_places(q: str, limit: int = 40, uezd: str = "",
 
 def place_card(card: str, repo: str = "CDIAK") -> dict[str, Any]:
     """Картка поселення + УСІ його справи, зшиті з нашим обліком."""
+    if _catalog_ready():
+        from nyshporka.catalog import query as _cat
+        rows = _cat.place_card(card, repo=repo).rows
+        return rows[0] if rows else {}
+
     con = _con()
     row = con.execute("SELECT * FROM places WHERE card = ?", [card]).fetchone()
     if row is None:
@@ -299,6 +370,10 @@ def place_card(card: str, repo: str = "CDIAK") -> dict[str, Any]:
 
 def siblings(card: str) -> list[dict[str, Any]]:
     """Те саме поселення в інших розділах каталогу (конфесіях)."""
+    if _catalog_ready():
+        from nyshporka.catalog import query as _cat
+        return _cat.siblings(card).rows
+
     con = _con()
     me = con.execute("SELECT * FROM places WHERE card = ?", [card]).fetchone()
     if me is None:
@@ -324,7 +399,20 @@ def places_for_fond(fond: str) -> dict[tuple[str, str], dict[str, str]]:
     Ключ БЕЗ літери: у каталозі номер пишуть «12а», у реєстрі — номер і літера
     окремо; звіряти доводиться нормалізовано, інакше літерні справи (їх у ф.224
     дев'ятнадцять) не зіставляться жодного разу.
+
+    ⏱ Memo за штампом індексу. Вкладка «Фонди» кличе це на КОЖЕН свій запит, щоб
+    домалювати колонку села; для ф.224 то 2874 ключі й 30 мс, які до кешу
+    платились наново при кожному натиску фільтра.
     """
+    if _catalog_ready():
+        from nyshporka.catalog import query as _cat
+        return _cat.places_for_fond(fond)
+
+    stamp = _index_stamp()
+    hit = _FOND_CACHE.get(str(fond))
+    if hit is not None and hit[0] == stamp:
+        return hit[1]
+
     con = _con()
     out: dict[tuple[str, str], dict[str, str]] = {}
     for r in con.execute(
@@ -344,6 +432,7 @@ def places_for_fond(fond: str) -> dict[tuple[str, str], dict[str, str]]:
             if prev["more"] == 1:
                 prev["village"] += f" · {r['village_uk']}"
     con.close()
+    _FOND_CACHE[str(fond)] = (stamp, out)
     return out
 
 
@@ -354,6 +443,10 @@ def confusers(card: str, limit: int = 8, min_score: int = 78) -> list[dict[str, 
     М'якохід — усі з метричними книгами XVIII ст. Побачити цей список ДО
     пошуку дешевше, ніж потім розбирати, чому «знайшлось» не те село.
     """
+    if _catalog_ready():
+        from nyshporka.catalog import query as _cat
+        return _cat.confusers(card, limit=limit, min_score=min_score).rows
+
     try:
         from rapidfuzz import fuzz
     except ImportError:

@@ -30,6 +30,23 @@ say ""
 nysh init --yes
 nysh doctor || true
 
+# 🗂 Довідники їдуть В КОМПЛЕКТІ — без них перше питання («де метрики мого
+# села») лишається без відповіді, а людина не знає, що саме треба доставити.
+# У колесі їх немає навмисно: каталог і код оновлюються за різними годинниками.
+SEED="$(ls "$(dirname "$0")"/nyshporka-catalog-*.zip 2>/dev/null | head -1 || true)"
+if [ -n "$SEED" ]; then
+  TMP="$(mktemp -d)"
+  if unzip -q "$SEED" -d "$TMP" 2>/dev/null; then
+    nysh catalog install --from "$TMP" || true
+  else
+    say "⚠ не вдалось розпакувати $SEED — потрібен unzip"
+  fi
+  rm -rf "$TMP"
+else
+  say "⚠ довідників поруч немає — пошук по каталогах архівів буде недоступний"
+  say "  поставити пізніше: nysh catalog install --from <тека|zip>"
+fi
+
 say ""
 say "Готово. Далі:"
 say "  nysh serve            відкрити застосунок у браузері"

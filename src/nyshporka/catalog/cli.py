@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import json as _json
 import shutil
+import tempfile
+import zipfile
 from pathlib import Path
 
 import typer
@@ -96,7 +98,7 @@ def cmd_verify() -> None:
 @app.command("install")
 def cmd_install(
     src: Path = typer.Option(None, "--from", exists=True,
-                             help="тека або .sqlite-пак (офлайн-установлення)"),
+                             help="тека, .zip або .sqlite-пак (офлайн)"),
     domain: str = typer.Option("", "--domain", help="лише цього домену"),
 ) -> None:
     """Покласти паки в каталог із теки чи файла.
@@ -112,7 +114,19 @@ def cmd_install(
         raise typer.Exit(code=2)
     dst = store.catalog_dir()
     dst.mkdir(parents=True, exist_ok=True)
-    files = [src] if src.is_file() else sorted(src.glob("*.sqlite"))
+
+    # zip приймається нарівні з текою: саме так довідники їдуть з інсталятором,
+    # і змушувати людину розпаковувати вручну означало б зайвий крок там, де
+    # його легко зробити самим
+    tmpdir: tempfile.TemporaryDirectory[str] | None = None
+    if src.is_file() and src.suffix.lower() == ".zip":
+        tmpdir = tempfile.TemporaryDirectory(prefix="nysh-catalog-")
+        with zipfile.ZipFile(src) as zf:
+            zf.extractall(tmpdir.name)
+        src = Path(tmpdir.name)
+
+    files = ([src] if src.is_file() else
+             sorted(p for p in src.rglob("*.sqlite") if p.is_file()))
     if not files:
         typer.echo(f"у {src} немає жодного .sqlite")
         raise typer.Exit(code=1)
@@ -129,6 +143,8 @@ def cmd_install(
         tmp.replace(target)
         n += 1
         typer.echo(f"✅ {f.name} → {target}")
+    if tmpdir is not None:
+        tmpdir.cleanup()
     store.invalidate()
     typer.echo(f"поставлено паків: {n}")
 

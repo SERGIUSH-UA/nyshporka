@@ -229,8 +229,9 @@ def open_packs(domain: str, *, with_own: bool = True
 
 
 def close_all(packs: list[tuple[str, sqlite3.Connection]]) -> None:
+    """Закрити всі з'єднання віяла. Помилка закриття нікого не рятує й не губить."""
+    import contextlib
+
     for _, con in packs:
-        try:
+        with contextlib.suppress(sqlite3.Error):
             con.close()
-        except sqlite3.Error:
-            pass

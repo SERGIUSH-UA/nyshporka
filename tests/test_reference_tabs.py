@@ -19,7 +19,7 @@ from typing import Any
 
 import pytest
 
-O: Any = None
+OPS: Any = None
 
 _PLACES = [("c1", "church", "православна церква", "М'ястківка", "Мястковка",
             "Брацлавського пов.", "Ольгопольського пов.", "Городківка",
@@ -30,7 +30,7 @@ _CASES = [("224", "1", "864", 1752, 1777, "метрична книга", "Бла
 @pytest.fixture
 def space(tmp_path: Path, monkeypatch):
     """Простір + каталог із одним паком газетира."""
-    global O
+    global OPS
     from nyshporka.core import workspace as W
 
     ws = tmp_path / "ws"
@@ -65,7 +65,7 @@ def space(tmp_path: Path, monkeypatch):
     B.build_geog(p_tsv, c_tsv, cat / "geog-test-2026.08.sqlite",
                  pack_id="geog-test-2026.08", taken="2026-08-16")
     S.invalidate()
-    O = _O
+    OPS = _O
     yield tmp_path
     W.reset()
     S.invalidate()
@@ -123,7 +123,7 @@ def test_tabs_are_wired_in_the_page_and_the_script():
 
 def test_find_carries_coverage_even_when_it_found_nothing(space):
     """🔴 Головне: порожня відповідь приходить РАЗОМ зі знаменником."""
-    env = O.call("geog.find", {"q": "Такогоселанемає"})
+    env = OPS.call("geog.find", {"q": "Такогоселанемає"})
     assert env.ok and env.data["shown"] == 0
     assert env.coverage, "нуль без покриття читається як «ніде не шукали»"
     assert env.coverage[0].taken == "2026-08-16"
@@ -145,7 +145,7 @@ def test_find_refuses_when_there_is_nowhere_to_search(tmp_path, monkeypatch):
 
 
 def test_card_shows_cases_and_confusers(space):
-    env = O.call("geog.card", {"card": "М'ястківка"})
+    env = OPS.call("geog.card", {"card": "М'ястківка"})
     assert env.ok
     place = env.data["place"]
     assert place["village_uk"] == "М'ястківка"
@@ -173,7 +173,7 @@ def test_fond_rows_keep_the_denominator(space, monkeypatch):
     monkeypatch.setattr(R, "conflicts_index", lambda fid: {})
     monkeypatch.setattr(R, "live_on_disk", lambda repo, f: {})
 
-    env = O.call("fond.rows", {"fond": "test_999", "limit": 5})
+    env = OPS.call("fond.rows", {"fond": "test_999", "limit": 5})
     assert env.ok
     assert env.data["shown"] == 5
     assert env.data["matched"] == 20
@@ -183,5 +183,5 @@ def test_fond_rows_keep_the_denominator(space, monkeypatch):
 
 
 def test_unknown_fond_lists_the_known_ones(space):
-    env = O.call("fond.rows", {"fond": "немає_такого"})
+    env = OPS.call("fond.rows", {"fond": "немає_такого"})
     assert not env.ok and "немає серед реєстрів опису" in env.error

@@ -48,6 +48,38 @@ class NextStep:
 
 
 @dataclass(frozen=True)
+class CoverageItem:
+    """ДЕ САМЕ шукали — і якого віку те, в чому шукали.
+
+    🔴 Друга половина правила «нуль мусить щось означати». Перша — відмова
+    джерела, яке шукати не може; ця — про джерела, які змогли: «нічого не
+    знайдено» без переліку переглянутого не відрізнити від «ніде не шукали», а в
+    генеалогії ціна цієї плутанини максимальна — «немає» закриває напрям
+    назавжди.
+
+    `taken` — дата ЗРІЗУ, а не дата збірки: довідник, знятий із сайту архіву
+    пів року тому, не стає свіжішим від того, що пак перезібрали вчора.
+    """
+
+    source: str
+    taken: str = ""
+    rows: int = 0
+    scope: str = ""
+
+    def as_dict(self) -> dict[str, Any]:
+        return {"source": self.source, "taken": self.taken,
+                "rows": self.rows, "scope": self.scope}
+
+    def human(self) -> str:
+        bits = [self.source]
+        if self.taken:
+            bits.append(f"зріз {self.taken}")
+        if self.scope:
+            bits.append(self.scope)
+        return ", ".join(bits)
+
+
+@dataclass(frozen=True)
 class Staleness:
     """Чи відповідь спирається на застарілий зріз — і що з цим зробити."""
 
@@ -67,9 +99,21 @@ class Envelope:
     warnings: list[Warning_] = field(default_factory=list)
     stale: Staleness | None = None
     next: list[NextStep] = field(default_factory=list)
+    coverage: list[CoverageItem] = field(default_factory=list)
 
     def warn(self, code: str, text: str) -> Envelope:
         self.warnings.append(Warning_(code, text))
+        return self
+
+    def covered_by(self, items: list[CoverageItem]) -> Envelope:
+        """Назвати, ДЕ САМЕ шукали.
+
+        Окремий метод, а не присвоєння поля, з тієї самої причини, що й
+        `stale_because`: покриття мусить потрапляти І в структуру, І в текст для
+        агента — а це легко зробити наполовину, і тоді саме той читач, який не
+        помічає нічого поза даними, лишиться без знаменника.
+        """
+        self.coverage.extend(items)
         return self
 
     def suggest(self, op: str, why: str) -> Envelope:
@@ -100,6 +144,12 @@ class Envelope:
             out["stale"] = self.stale.as_dict()
         if self.next:
             out["next"] = [n.as_dict() for n in self.next]
+        # `coverage` — лише там, де воно є: не кожна операція шукає в довідниках,
+        # і порожній список у відповіді «завести справу» означав би «ніде не
+        # шукали» там, де питання пошуку взагалі не стояло. Це відрізняє його від
+        # `warnings`, які осмислені порожніми завжди.
+        if self.coverage:
+            out["coverage"] = [c.as_dict() for c in self.coverage]
         return out
 
     def as_agent_text(self) -> str:
@@ -115,6 +165,12 @@ class Envelope:
             fix = f" Полагодити: {self.stale.fix}" if self.stale.fix else ""
             lines.append(f"⚠ ЗРІЗ ЗАСТАРІВ ({why}) — числу нижче вірити не можна.{fix}")
         lines += [f"⚠ {w.text}" for w in self.warnings]
+        if self.coverage:
+            # 🔴 Текстом, а не лише полем: саме тут «нуль знайдено» перестає
+            # означати «ніде не шукали». Без цього рядка агент рапортує порожній
+            # результат як негатив, а негатив у генеалогії закриває напрям.
+            lines.append("🔎 шукали в: "
+                         + "; ".join(c.human() for c in self.coverage))
         lines += [f"→ далі: {n.op} — {n.why}" for n in self.next]
         return "\n".join(lines)
 

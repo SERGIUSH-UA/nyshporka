@@ -23,7 +23,6 @@ from pydantic import BaseModel, Field
 from nyshporka.core.envelope import CoverageItem, Envelope, fail, ok
 from nyshporka.core.ops import NoArgs, op
 
-
 # 🔴 УСІ операції цього модуля — `agent=False`, і це не забудькуватість.
 #
 # Перелік агентських tool'ів має СТЕЛЮ 18 (`mcp.server.TOOL_LIMIT`), і вона не

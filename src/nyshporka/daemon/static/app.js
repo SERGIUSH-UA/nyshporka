@@ -22,6 +22,41 @@ const STRINGS = {
   uk: {
     'nav.home': 'Дослідження', 'nav.sources': 'Джерела', 'nav.cases': 'Мої справи',
     'nav.search': 'Пошук', 'nav.jobs': 'Роботи',
+    'nav.geog': 'Газетир', 'nav.fonds': 'Фонди',
+    'cov.searched': 'шукали в',
+    'geog.title': 'Де метрики цього села',
+    'geog.why': 'Зворотний напрям до опису: ви знаєте СЕЛО, а не фонд. Каталог показує справи по всіх фондах архіву одразу — і по всіх конфесіях: метрики православної громади, костелу й рабинату одного містечка лежать окремо.',
+    'geog.q': 'Назва села — українською, російською або латинкою',
+    'geog.find': 'Знайти',
+    'geog.section.all': 'усі конфесії',
+    'geog.section.church': 'православні',
+    'geog.section.decanats': 'костели',
+    'geog.section.rabbinate': 'рабинати',
+    'geog.nothing': 'У переглянутих довідниках такого поселення немає.',
+    'geog.cases': 'справ у каталозі',
+    'geog.ondisk': 'з них у нас',
+    'geog.siblings': 'те саме поселення в інших конфесіях',
+    'geog.confusers': 'схожі назви — фаззі-пошук плутає їх із цим селом',
+    'geog.church': 'церква',
+    'geog.hist': 'до 1793',
+    'geog.after': 'після',
+    'geog.modern': 'нині',
+    'fonds.title': 'Що взагалі існує в архіві',
+    'fonds.why': 'Реєстр опису — третє сховище поруч із «мої справи». «Справи немає» тут означає «в архіві не існує», а не «ще не завантажено».',
+    'fonds.rows': 'справ в опису',
+    'fonds.ondisk': 'у нас',
+    'fonds.todo': 'скан є, не взято',
+    'fonds.filter': 'Заголовок, село або слово',
+    'fonds.surname': 'Прізвище з алфавітки',
+    'fonds.uezd': 'Повіт',
+    'fonds.state.any': 'будь-який стан',
+    'fonds.state.disk': 'у нас на диску',
+    'fonds.state.todo': 'скан є, не взято',
+    'fonds.state.order': 'замовляти в архіві',
+    'fonds.matched': 'під фільтр',
+    'fonds.of': 'із',
+    'catalog.title': 'Довідники',
+    'catalog.none': 'Довідників немає — пошук по каталогах архівів недоступний, і його нуль нічого не означатиме.',
     'home.title': 'З чого почнемо',
     'home.have_scans': 'У мене є скани',
     'home.have_scans.hint': 'тека з фотографіями або PDF зі справою',
@@ -106,6 +141,41 @@ const STRINGS = {
   en: {
     'nav.home': 'Research', 'nav.sources': 'Sources', 'nav.cases': 'My cases',
     'nav.search': 'Search', 'nav.jobs': 'Jobs',
+    'nav.geog': 'Gazetteer', 'nav.fonds': 'Fonds',
+    'cov.searched': 'searched in',
+    'geog.title': 'Where the records of this village are',
+    'geog.why': 'The reverse direction: you know the VILLAGE, not the fond. The catalogue lists cases across all fonds at once — and all confessions: Orthodox, Catholic and Jewish registers of one town are kept separately.',
+    'geog.q': 'Village name — Ukrainian, Russian or Latin script',
+    'geog.find': 'Search',
+    'geog.section.all': 'all confessions',
+    'geog.section.church': 'Orthodox',
+    'geog.section.decanats': 'Catholic',
+    'geog.section.rabbinate': 'Jewish',
+    'geog.nothing': 'No such settlement in the reference sets searched.',
+    'geog.cases': 'cases in catalogue',
+    'geog.ondisk': 'of them here',
+    'geog.siblings': 'same settlement in other confessions',
+    'geog.confusers': 'similar names — fuzzy search confuses them with this one',
+    'geog.church': 'church',
+    'geog.hist': 'before 1793',
+    'geog.after': 'after',
+    'geog.modern': 'today',
+    'fonds.title': 'What exists in the archive at all',
+    'fonds.why': 'The finding aid is a third store next to “my cases”. “No such case” here means “does not exist in the archive”, not “not downloaded yet”.',
+    'fonds.rows': 'cases in finding aid',
+    'fonds.ondisk': 'here',
+    'fonds.todo': 'scan exists, not taken',
+    'fonds.filter': 'Title, village or word',
+    'fonds.surname': 'Surname from the archive index',
+    'fonds.uezd': 'Uyezd',
+    'fonds.state.any': 'any state',
+    'fonds.state.disk': 'on our disk',
+    'fonds.state.todo': 'scan exists, not taken',
+    'fonds.state.order': 'order at the archive',
+    'fonds.matched': 'matched',
+    'fonds.of': 'of',
+    'catalog.title': 'Reference sets',
+    'catalog.none': 'No reference sets installed — catalogue search is unavailable, and its zero would mean nothing.',
     'home.title': 'Where do we start',
     'home.have_scans': 'I have scans',
     'home.have_scans.hint': 'a folder of photographs, or a PDF of a case',
@@ -227,6 +297,25 @@ function renderWarnings(env) {
   return bits.join('');
 }
 
+/**
+ * Покриття конверта — ДЕ САМЕ шукали і якого воно зрізу.
+ *
+ * 🔴 Друга половина правила «нуль мусить щось означати». Перша — відмова
+ * джерела, яке шукати не може; ця — про джерела, які змогли: порожня видача без
+ * переліку переглянутого не відрізняється на екрані від «ніде не шукали», а
+ * коштує ця плутанина напряму пошуку, закритого назавжди.
+ */
+function renderCoverage(env) {
+  const cov = env.coverage || [];
+  if (!cov.length) return '';
+  const bits = cov.map((c) => {
+    const taken = c.taken ? `, зріз ${esc(c.taken)}` : '';
+    const scope = c.scope ? ` — ${esc(c.scope)}` : '';
+    return `${esc(c.source)}${taken}${scope}`;
+  });
+  return `<p class="muted cov">🔎 ${t('cov.searched')}: ${bits.join('; ')}</p>`;
+}
+
 function setView(html) { el('view').innerHTML = html; }
 
 function busy() { setView(`<p class="muted">${t('common.loading')}</p>`); }
@@ -328,6 +417,86 @@ SCREENS.cases = async () => {
         : `<span class="muted" title="${t('cases.nodir')}">—</span>`}</td>
     </tr>`).join('')}
     </tbody></table>`);
+};
+
+/**
+ * 🗺 Газетир — від СЕЛА до справ по ВСІХ фондах архіву.
+ *
+ * 🔑 Найчастіший перший крок дослідника: він знає село, а не фонд. Реєстр опису
+ * на це відповісти не може — він знає один фонд і мовчить про сусідні.
+ *
+ * 🕍 Конфесія тут ФІЛЬТР, а не три окремі довідники: метрики православної
+ * громади, костелу й рабинату одного містечка лежать у РІЗНИХ фондах, тож
+ * дефолт «усі» — не зручність, а захист від систематичного недобору.
+ */
+SCREENS.geog = async () => {
+  busy();
+  // 🔴 Стан довідників показуємо ОДРАЗУ, поруч із полем пошуку, а не ховаємо в
+  // діагностику. Це і є знаменник: без нього «нічого не знайдено» не
+  // відрізнити від «нема де шукати», і людина закриє напрям, якого не
+  // перевіряла. Особливо на щойно встановленому застосунку.
+  const packs = await callOp('catalog.packs', {});
+  const ok = ((packs.data || {}).packs || []).filter((x) => x.state === 'ok');
+  setView(`
+    <h2>${t('geog.title')}</h2>
+    <p class="muted">${t('geog.why')}</p>
+    ${ok.length ? '' : `<div class="warn">${t('catalog.none')}</div>`}
+    <form class="row" data-act="geog.find">
+      <input name="q" placeholder="${t('geog.q')}" autofocus>
+      <select name="section">
+        <option value="">${t('geog.section.all')}</option>
+        <option value="church">${t('geog.section.church')}</option>
+        <option value="decanats">${t('geog.section.decanats')}</option>
+        <option value="rabbinate">${t('geog.section.rabbinate')}</option>
+      </select>
+      <button type="submit">${t('geog.find')}</button>
+    </form>
+    <div id="geoghits"></div>
+    <h3>${t('catalog.title')}</h3>
+    <table><tbody>${ok.map((x) => `<tr>
+      <td class="mono">${esc(x.pack_id)}</td>
+      <td>${x.taken ? `зріз ${esc(x.taken)}` : ''}</td>
+      <td class="muted">${esc(x.note || '')}</td>
+    </tr>`).join('')}</tbody></table>
+    ${renderWarnings(packs)}`);
+};
+
+/**
+ * 🏛 Фонди — реєстр ОПИСУ: «що взагалі існує в архіві».
+ *
+ * Третє сховище поруч із «мої справи». Плутати їх дорого: «справи немає» тут
+ * означає «в архіві не існує», а в «моїх справах» — «ще не завантажено».
+ */
+SCREENS.fonds = async () => {
+  busy();
+  const env = await callOp('fond.list', {});
+  if (!env.ok) return failure(env);
+  const fonds = env.data.fonds || [];
+  if (!fonds.length) {
+    return setView(`<h2>${t('fonds.title')}</h2>${renderWarnings(env)}
+      <p class="muted">${t('catalog.none')}</p>`);
+  }
+  setView(`
+    <h2>${t('fonds.title')}</h2>
+    <p class="muted">${t('fonds.why')}</p>
+    ${renderWarnings(env)}
+    <form class="row" data-act="fond.rows">
+      <select name="fond">
+        ${fonds.map((f) => `<option value="${esc(f.id)}">${esc(f.label)} —
+          ${f.rows} ${t('fonds.rows')}, ${t('fonds.ondisk')} ${f.on_disk}, ${t('fonds.todo')} ${f.todo}</option>`).join('')}
+      </select>
+      <input name="q" placeholder="${t('fonds.filter')}">
+      <input name="surname" placeholder="${t('fonds.surname')}" size="18">
+      <input name="uezd" placeholder="${t('fonds.uezd')}" size="12">
+      <select name="state">
+        <option value="">${t('fonds.state.any')}</option>
+        <option value="disk">${t('fonds.state.disk')}</option>
+        <option value="todo">${t('fonds.state.todo')}</option>
+        <option value="order">${t('fonds.state.order')}</option>
+      </select>
+      <button type="submit">${t('geog.find')}</button>
+    </form>
+    <div id="fondrows"></div>`);
 };
 
 SCREENS.search = async () => {
@@ -497,6 +666,97 @@ const ACTIONS = {
         : `<div class="warn">${t('check.notready')}</div>`}
       <table><tbody>${rows}</tbody></table>
       <p class="muted">${t('check.nosample')}</p>`);
+  },
+
+  'geog.find': async (ev) => {
+    ev.preventDefault();
+    const f = new FormData(ev.target);
+    el('geoghits').innerHTML = `<p class="muted">${t('common.loading')}</p>`;
+    const env = await callOp('geog.find',
+      { q: f.get('q'), section: f.get('section') || '', limit: 40 });
+    // 🔴 Відмова каталогу — це НЕ «нічого не знайдено»: довідника просто немає,
+    // і нуль тут не означав би нічого. Показуємо причину, а не порожню таблицю.
+    if (!env.ok) { el('geoghits').innerHTML = `<div class="warn err">${esc(env.error)}</div>`; return; }
+    const places = env.data.places || [];
+    el('geoghits').innerHTML = `
+      ${renderWarnings(env)}
+      ${places.length ? '' : `<p><b>${t('geog.nothing')}</b></p>`}
+      <table><tbody>${places.map((pl) => `<tr>
+        <td>${esc(pl.institution || '')}</td>
+        <td><b>${esc(pl.village_uk)}</b><br>
+            <span class="muted">${esc(pl.village_ru || '')}</span></td>
+        <td>${esc(pl.uezd_gub || '')}</td>
+        <td class="num">${pl.n_cases || 0}</td>
+        <td><button data-act="geog.card" data-arg="${esc(pl.card)}">${t('view.open')}</button></td>
+      </tr>`).join('')}</tbody></table>
+      ${renderCoverage(env)}`;
+  },
+
+  'geog.card': async (_ev, elm) => {
+    busy();
+    const env = await callOp('geog.card', { card: elm.dataset.arg });
+    if (!env.ok) return failure(env);
+    const pl = env.data.place;
+    if (!pl) return setView(`<h2>${t('geog.title')}</h2>${renderWarnings(env)}${renderCoverage(env)}`);
+    const cases = pl.cases || [];
+    setView(`
+      <h2>🗺 ${esc(pl.village_uk)} <span class="muted">(${esc(pl.village_ru || '')})</span></h2>
+      <p class="muted">
+        ${t('geog.hist')}: ${esc(pl.hist_place || '—')} ·
+        ${t('geog.after')}: ${esc(pl.uezd_gub || '—')} ·
+        ${t('geog.modern')}: ${esc(pl.modern_place || '—')}
+        ${pl.church ? ` · ${t('geog.church')}: ${esc(pl.church)}` : ''}
+      </p>
+      ${renderWarnings(env)}
+      <p><b>${cases.length}</b> ${t('geog.cases')}, ${t('geog.ondisk')} <b>${pl.n_on_disk || 0}</b></p>
+      <table><tbody>${cases.map((c) => `<tr>
+        <td>${c.on_disk ? '✓' : '·'}</td>
+        <td class="mono">${esc(c.shifra)}</td>
+        <td>${c.year_from ? `${esc(c.year_from)}–${esc(c.year_to)}` : ''}</td>
+        <td>${esc(c.doc_type || '')}</td>
+        <td class="muted">${esc(c.parish || '')}</td>
+      </tr>`).join('')}</tbody></table>
+      ${(pl.siblings || []).length ? `<h3>🕍 ${t('geog.siblings')}</h3>
+        <table><tbody>${pl.siblings.map((x) => `<tr>
+          <td>${esc(x.institution || '')}</td><td>${esc(x.village_uk)}</td>
+          <td class="num">${x.n_cases || 0}</td>
+          <td><button data-act="geog.card" data-arg="${esc(x.card)}">${t('view.open')}</button></td>
+        </tr>`).join('')}</tbody></table>` : ''}
+      ${(pl.confusers || []).length ? `<h3>⚠ ${t('geog.confusers')}</h3>
+        <table><tbody>${pl.confusers.map((x) => `<tr>
+          <td class="num">${esc(x.score)}</td><td>${esc(x.village_uk)}</td>
+          <td class="muted">${esc(x.uezd_gub || '')}</td>
+        </tr>`).join('')}</tbody></table>` : ''}
+      ${renderCoverage(env)}`);
+  },
+
+  'fond.rows': async (ev) => {
+    ev.preventDefault();
+    const f = new FormData(ev.target);
+    el('fondrows').innerHTML = `<p class="muted">${t('common.loading')}</p>`;
+    const env = await callOp('fond.rows', {
+      fond: f.get('fond'), q: f.get('q') || '', surname: f.get('surname') || '',
+      uezd: f.get('uezd') || '', state: f.get('state') || '', limit: 200,
+    });
+    if (!env.ok) { el('fondrows').innerHTML = `<div class="warn err">${esc(env.error)}</div>`; return; }
+    const rows = env.data.rows || [];
+    // 🔴 Знаменник поруч із числом: «5 справ» без «із 2944» читається як
+    // «у фонді п'ять справ», тобто як зовсім інша відповідь.
+    el('fondrows').innerHTML = `
+      ${renderWarnings(env)}
+      <p>${t('fonds.matched')} <b>${env.data.matched}</b> ${t('fonds.of')}
+         <b>${env.data.summary.rows}</b></p>
+      <table><thead><tr><th></th><th>шифра</th><th>назва</th><th>роки</th>
+        <th>арк.</th><th>плівка</th></tr></thead><tbody>
+      ${rows.map((r) => `<tr>
+        <td title="${esc(r.state)}">${r.on_disk ? '✓' : (r.state === 'todo' ? '⬇' : '·')}</td>
+        <td class="mono">${esc(r.shifra)}</td>
+        <td>${esc((r.title || '').slice(0, 90))}</td>
+        <td>${r.year_from ? `${esc(r.year_from)}–${esc(r.year_to)}` : ''}</td>
+        <td class="num">${esc(r.folios || '')}</td>
+        <td class="mono">${esc(r.fs_film || '')}</td>
+      </tr>`).join('')}
+      </tbody></table>`;
   },
 
   'sources.find': async (ev) => {

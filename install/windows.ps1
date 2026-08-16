@@ -78,7 +78,25 @@ Say ""
 & $nysh init --yes
 & $nysh doctor
 
-# ── 5. ярлик ─────────────────────────────────────────────────────────────────
+# ── 5. довідники ─────────────────────────────────────────────────────────────
+# 🗂 Газетир і реєстри описів їдуть В КОМПЛЕКТІ — саме тому, що без них перше
+# питання («де метрики мого села») лишається без відповіді, а людина не знає, що
+# саме треба доставити. У КОЛЕСІ їх немає навмисно: каталог оновлюється, коли
+# архів виклав новий опис, а код — коли полагодили ваду; це різні годинники, і
+# `pip install --upgrade` заміщає дерево разом із тим, що користувач наклав.
+$seed = Get-ChildItem -Path $PSScriptRoot -Filter 'nyshporka-catalog-*.zip' `
+    -ErrorAction SilentlyContinue | Select-Object -First 1
+if ($seed) {
+    $tmp = Join-Path $env:TEMP ('nysh-catalog-' + [guid]::NewGuid().ToString('N'))
+    Expand-Archive -Path $seed.FullName -DestinationPath $tmp -Force
+    & $nysh catalog install --from $tmp
+    Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
+} else {
+    Say "⚠ довідників поруч немає — пошук по каталогах архівів буде недоступний" Yellow
+    Say "  поставити пізніше: nysh catalog install --from <тека|zip>"
+}
+
+# ── 6. ярлик ─────────────────────────────────────────────────────────────────
 if (-not $NoLauncher) {
     $lnk = Join-Path ([Environment]::GetFolderPath('Desktop')) 'Нишпорка.lnk'
     $sh = New-Object -ComObject WScript.Shell

@@ -363,14 +363,14 @@ def confusers(card: str, limit: int = 8, min_score: int = 78) -> Answer:
     return Answer(rows=out[:limit], coverage=cov, partial=tuple(partial))
 
 
-def places_for_fond(fond: str) -> dict[tuple[str, str], dict[str, str]]:
+def places_for_fond(fond: str) -> dict[tuple[str, str], dict[str, Any]]:
     """(опис, номер) → {село, парафія, тип} для всіх справ фонду в каталозі.
 
     Тут навмисно НЕ `Answer`: це не відповідь людині, а зріз для домальовування
     колонки в таблиці реєстру опису. Порожньо, коли каталогу немає, — і саме
     тому колонка тоді просто зникає, а не показує «сіл немає».
     """
-    out: dict[tuple[str, str], dict[str, str]] = {}
+    out: dict[tuple[str, str], dict[str, Any]] = {}
     try:
         packs = open_packs("geog")
     except CatalogMissing:
