@@ -1006,6 +1006,195 @@ def _seg_from_blob(b: dict):
                      for r in v] for k, v in (b.get("regions") or {}).items()})
 
 
+#: Дефолти злиття розсічених baseline (частки медіанної висоти рядка). Підібрані
+#: на ЦДІАК ф.224 спр.864/865 і перевірені на регресії XIX ст. — див.
+#: `merge_split_lines`.
+MERGE_GAP = 1.2
+MERGE_VTOL = 0.35
+#: Скільки дозволено роздутись площі полігона проти суми площ учасників. Це і є
+#: захисник від злиття РІЗНИХ рядків: два сегменти одного рядка стоять майже на
+#: одній прямій, і їхня опукла оболонка майже дорівнює сумі; два рядки під кутом
+#: (сусідні стовпці, крива нижня строчка) дають оболонку вдвічі більшу.
+MERGE_HULL_SLACK = 1.6
+#: Стеля видовженості злитого рядка (ширина / висота). НЕ естетика, а межа
+#: рушія: Писар має ЖОРСТКИЙ вхід 48×512, тобто все, що довше за 10.7 висоти,
+#: він стискає по горизонталі — і на скорописі це коштує деталі, якої потім не
+#: повернути. Виміряно на ЦДІАК 224 (медіанний рядок 814×80 = 10.2:1, уже на
+#: межі): без стелі злиття роздувало рядки до ~14:1, і виграш контексту
+#: з'їдався стисненням — формульних влучань стало НА 4 МЕНШЕ, не більше.
+#: Тому зшиваємо уламки, але не робимо з двох повних рядків один довгий.
+MERGE_MAX_ASPECT = 12.0
+
+
+def merge_split_lines(seg, gap: float = MERGE_GAP, vtol: float = MERGE_VTOL,
+                      hull_slack: float = MERGE_HULL_SLACK,
+                      aspect: float = MERGE_MAX_ASPECT):
+    """Зшити baseline, які `blla` розсік ПОСЕРЕД рядка, у цілий рядок.
+
+    Навіщо. Сегментер веде baseline по чорнилу, і там, де воно вицвіло або де
+    рядок розриває виносна літера, він просто обриває лінію й починає нову.
+    Виміряно на ЦДІАК 224-1-864 кадр 0005 (скоропис 1752): **79 боксів на ~57
+    рядків, 22 уламки**, і `Азъ і[ерей] Іліа Скварчушъ мясковски церкве`
+    приїжджає трьома окремими «рядками» — `Азъ 9.` / `нію въ` / `Марѣдовъ темъ`.
+    Рушій при цьому не винен: він чесно читає те, що йому нарізали.
+
+    🔴 Ціна помилки НЕ симетрична, і саме тому пороги тісні. Не злити розсічене —
+    втратити контекст мовної моделі на трьох коротких уламках (погано, але текст
+    лишається). Злити ДВА РІЗНІ рядки — отримати рядок, якого в книзі немає, і
+    він виглядатиме як звичайний текст. Тому кожна пара має пройти ТРИ
+    незалежні перевірки (зазор, вертикаль з урахуванням нахилу, роздування
+    полігона), і будь-яка з них накладає вето.
+
+    Чому пороги в частках висоти рядка, а не в пікселях: та сама книга
+    приїжджає то прев'ю 1500×2400, то плівкою 5900×4700, і піксельний поріг
+    означав би різну поведінку на тому самому матеріалі.
+
+    Що НЕ робиться: розворот на дві сторінки не ділиться, порядок читання не
+    чіпається (злитий рядок стає на місце свого ЛІВОГО учасника), рядки без
+    baseline не торкаються взагалі.
+
+    Повертає `(seg, скільки_рядків_зникло)`; при `0` віддає ТОЙ САМИЙ об'єкт.
+    """
+    import dataclasses
+
+    lines = list(getattr(seg, "lines", None) or [])
+    if len(lines) < 2:
+        return seg, 0
+
+    def _bl(ln):
+        return [(float(x), float(y)) for x, y in (getattr(ln, "baseline", None) or [])]
+
+    def _h_of(ln):
+        pts = getattr(ln, "boundary", None) or getattr(ln, "baseline", None) or []
+        ys = [p[1] for p in pts]
+        return (max(ys) - min(ys)) if len(ys) > 1 else 0.0
+
+    bl = [_bl(ln) for ln in lines]
+    hs = [h for h in (_h_of(ln) for ln in lines) if h > 0]
+    if not hs:
+        return seg, 0
+    hs.sort()
+    h_med = hs[len(hs) // 2]
+    if h_med <= 0:
+        return seg, 0
+
+    max_gap = gap * h_med
+    max_overlap = 0.3 * h_med          # трохи налазити один на одного — нормально
+    max_dy = vtol * h_med
+
+    # кандидати: індекси з непорожньою baseline, зліва направо
+    idx = [i for i, b in enumerate(bl) if len(b) >= 2]
+    idx.sort(key=lambda i: bl[i][0][0])
+
+    def _slope(b):
+        dx = b[-1][0] - b[0][0]
+        if abs(dx) < 1e-6:
+            return 0.0
+        return max(-0.5, min(0.5, (b[-1][1] - b[0][1]) / dx))
+
+    # для кожного ПРАВОГО сегмента — найкращий лівий сусід (найменший зазор).
+    # Парування 1-до-1: один хвіст не може дістатись двом головам.
+    #
+    # 🔴 Перебір ПОВНИЙ, без вікна «N найближчих за x», і це не марнотратство, а
+    # виправлення вади. Сортування за x перемішує аркуш: рядки з різних місць
+    # сторінки починаються з тієї самої абсциси, тож продовження рядка стоїть у
+    # цьому порядку не поруч, а через десятки позицій. З вікном 12 злиття
+    # спрацьовувало на 5 парах із 22 очевидних уламків — і виглядало це як
+    # «пороги тісні», хоча пороги проходили із запасом (dy 0.00-0.13 при 0.35).
+    # Ціна повного перебору мізерна: сторінка на 200 рядків це 40 тис. дешевих
+    # перевірок проти секунд декоду.
+    best: dict[int, tuple[float, int]] = {}
+    for pos, j in enumerate(idx):
+        bj = bl[j]
+        for i in idx[:pos]:
+            bi = bl[i]
+            g = bj[0][0] - bi[-1][0]
+            if g < -max_overlap or g > max_gap:
+                continue
+            want_y = bi[-1][1] + _slope(bi) * max(g, 0.0)
+            if abs(bj[0][1] - want_y) > max_dy:
+                continue
+            cur = best.get(j)
+            if cur is None or g < cur[0]:
+                best[j] = (g, i)
+
+    taken: set[int] = set()                     # лівий уже віддав свій хвіст
+    parent = list(range(len(lines)))
+
+    def _find(a):
+        while parent[a] != a:
+            parent[a] = parent[parent[a]]
+            a = parent[a]
+        return a
+
+    for j in sorted(best, key=lambda j: best[j][0]):
+        _, i = best[j]
+        if i in taken or _find(i) == _find(j):
+            continue
+        taken.add(i)
+        parent[_find(j)] = _find(i)
+
+    groups: dict[int, list[int]] = {}
+    for i in range(len(lines)):
+        groups.setdefault(_find(i), []).append(i)
+    if all(len(v) == 1 for v in groups.values()):
+        return seg, 0
+
+    def _hull(members):
+        """Полігон злитого рядка + вето, якщо він роздувся."""
+        try:
+            from shapely.geometry import Polygon
+            from shapely.ops import unary_union
+            polys, area = [], 0.0
+            for m in members:
+                pts = getattr(lines[m], "boundary", None) or bl[m]
+                if len(pts) < 3:
+                    return None
+                p = Polygon([(float(x), float(y)) for x, y in pts])
+                if not p.is_valid:
+                    p = p.buffer(0)
+                if p.is_empty:
+                    return None
+                polys.append(p)
+                area += p.area
+            hull = unary_union(polys).convex_hull
+            if area <= 0 or hull.area > hull_slack * area:
+                return None
+            return [(int(x), int(y)) for x, y in hull.exterior.coords]
+        except Exception:
+            return None
+
+    out, merged = [], 0
+    for i in range(len(lines)):
+        if _find(i) != i:
+            continue                            # не голова групи — вже влитий
+        members = sorted(groups[i], key=lambda m: bl[m][0][0] if bl[m] else 0.0)
+        if len(members) == 1:
+            out.append((i, lines[i]))
+            continue
+        # стеля видовженості — перед дорогим полігоном
+        span = max(bl[m][-1][0] for m in members) - min(bl[m][0][0] for m in members)
+        if aspect > 0 and span > aspect * h_med:
+            for m in members:
+                out.append((m, lines[m]))
+            continue
+        poly = _hull(members)
+        if poly is None:                        # вето роздування — лишаємо як було
+            for m in members:
+                out.append((m, lines[m]))
+            continue
+        base: list[tuple[int, int]] = []
+        for m in members:
+            base += [(int(x), int(y)) for x, y in bl[m]]
+        out.append((i, dataclasses.replace(lines[i], baseline=base, boundary=poly)))
+        merged += len(members) - 1
+
+    if not merged:
+        return seg, 0
+    out.sort(key=lambda t: t[0])                # порядок читання — за лівим учасником
+    return dataclasses.replace(seg, lines=[ln for _, ln in out]), merged
+
+
 class Segmenter:
     """Сегментація сторінки з кешем на диску і ЛЕДАЧОЮ моделлю.
 
@@ -1017,11 +1206,20 @@ class Segmenter:
 
     def __init__(self, model_path: str, device: str, seg_height: int = 0,
                  cache_dir: Path | None = None, key: dict | None = None,
-                 write: bool = True):
+                 write: bool = True, merge: dict | None = None):
         self._path, self._device, self._h = model_path, device, seg_height
         self.dir, self._key, self._write = cache_dir, key or {}, write
         self._model = None
         self.hits = self.misses = self.written = 0
+        # 🔴 Злиття розсічених baseline йде ПІСЛЯ кешу, а не до нього, і в ключ
+        # кешу НЕ входить. Так і задумано: кеш зберігає сиру нарізку `blla`, а
+        # злиття — постпроцес поверх неї. Наслідок практичний: одну й ту саму
+        # сегментацію можна перечитати і з `--merge-split-lines`, і без, не
+        # платячи вдруге за 60% вартості сторінки. Клади злиття В кеш — і
+        # порівняти два режими можна було б тільки повним переганянням справи.
+        self._merge = merge or {}
+        self.merged_lines = 0
+        self.merged_pages = 0
 
     # модель вантажиться на ПЕРШОМУ промаху, не на старті
     def _net(self):
@@ -1101,19 +1299,30 @@ class Segmenter:
         except Exception:
             pass                   # кеш — прискорювач, а не умова роботи
 
+    def _post(self, seg):
+        """Постпроцес нарізки. Спільний для гілки кешу і гілки рахунку — інакше
+        режим залежав би від того, чи сторінка вже лежала в кеші."""
+        if not self._merge:
+            return seg
+        seg, n = merge_split_lines(seg, **self._merge)
+        if n:
+            self.merged_lines += n
+            self.merged_pages += 1
+        return seg
+
     def segment(self, im: Image.Image, stem: str = "", orient: int = 0,
                 enhanced: str = ""):
         if stem:
             got = self.load(stem, orient, enhanced)
             if got is not None:
                 self.hits += 1
-                return got
+                return self._post(got)
         from kraken import blla
         seg = blla.segment(im, model=self._net(), device=self._device)
         self.misses += 1
         if stem:
             self.save(stem, orient, enhanced, seg)
-        return seg
+        return self._post(seg)
 
 
 def resolve_case_key(case_dir: Path, run_name: str = "",
@@ -2034,6 +2243,26 @@ def main() -> int:
     ap.add_argument("--ceiling-retry", type=int, default=1600,
                     help="якщо стеля різала — перепустити САМЕ ЦЮ сторінку з "
                          "такою стелею (0 = не перепускати)")
+    # Розсічений baseline — дефект НАРІЗКИ, не моделі, тож і лікується тут, а не
+    # корпусом. Вимкнено за замовчуванням: на фондах, де воно не потрібне, це
+    # зайвий ризик злити два рядки в один, а такий рядок виглядає як звичайний
+    # текст. Вмикати після заміру на своєму матеріалі (число злитих друкується в
+    # підсумку прогону і лягає в мету).
+    ap.add_argument("--merge-split-lines", action="store_true",
+                    help="зшивати baseline, розсічені посеред рядка (вицвіле "
+                         "чорнило, виносні літери). Дає менше рядків, довших і "
+                         "з цілим контекстом; на скорописі XVIII ст. уламків "
+                         "буває чверть сторінки")
+    ap.add_argument("--merge-gap", type=float, default=MERGE_GAP,
+                    help="максимальний зазор між сегментами, у частках висоти "
+                         f"рядка (дефолт {MERGE_GAP})")
+    ap.add_argument("--merge-vtol", type=float, default=MERGE_VTOL,
+                    help="максимальне вертикальне розходження кінців baseline "
+                         f"з поправкою на нахил (дефолт {MERGE_VTOL})")
+    ap.add_argument("--merge-max-aspect", type=float, default=MERGE_MAX_ASPECT,
+                    help="не зливати, якщо рядок стане довшим за N висот "
+                         f"(дефолт {MERGE_MAX_ASPECT}; вхід Писаря 48×512 = "
+                         "10.7, довше він стискає). 0 — без стелі")
     ap.add_argument("--seg-height", type=int, default=0,
                     help="висота ресайзу сторінки для сегментера (0 = рідна "
                          "1800). 1440 ≈ −4%% слів за 1.35x, 1200 ≈ −10%% "
@@ -2118,6 +2347,14 @@ def main() -> int:
                   # прогін із піднятим контрастом — окремий артефакт; без цього
                   # поля неможливо сказати, чому в двох теках різний декод
                   "enhance": args.enhance,
+                  # 🧵 те саме міркування, що й з контрастом: злиття міняє САМІ
+                  # РЯДКИ, тож два прогони однією моделлю по одній справі дадуть
+                  # різний текст і різну їх кількість. Без запису в меті
+                  # порівняти дві теки означало б гадати, чим вони різні.
+                  "merge_split_lines": ({"gap": args.merge_gap,
+                                         "vtol": args.merge_vtol,
+                                         "aspect": args.merge_max_aspect}
+                                        if args.merge_split_lines else None),
                   "started": datetime.now().isoformat(timespec="seconds"),
                   "done": False, "failed": [], "pages": {}}
     old_meta: dict = {}
@@ -2134,7 +2371,7 @@ def main() -> int:
     already = known_pages(out_dir) if shard_n > 1 else set(meta["pages"])
     meta_base = {k: v for k, v in meta.items()
                  if k in ("version", "case_dir", "case_key", "model", "device",
-                          "engine", "script", "enhance")}
+                          "engine", "script", "enhance", "merge_split_lines")}
     saves = 0
     # стан гарда переживає рестарт: без цього кожен запуск (×N шардів) починав
     # 15 очних ставок наново — на 5 рестартах це дало 60% гардованих сторінок
@@ -2279,11 +2516,19 @@ def main() -> int:
         # викликач, який знає workspace.
         seg_cache = (Path(args.seg_cache_dir) if args.seg_cache_dir.strip()
                      else seg_cache_dir_for(case_dir, workspace_root(out_dir, case_dir)))
+    merge_cfg = ({"gap": args.merge_gap, "vtol": args.merge_vtol,
+                  "aspect": args.merge_max_aspect}
+                 if args.merge_split_lines else None)
     segmenter = Segmenter(
         SEGMENTATION_DEFAULT_MODEL, device, seg_height=args.seg_height,
         cache_dir=seg_cache,
         key={"sato": args.sato_sigmas, "kraken": KRAKEN_PIN_VERSION,
-             "max_endpoints": args.max_endpoints})
+             "max_endpoints": args.max_endpoints},
+        merge=merge_cfg)
+    if merge_cfg:
+        print(f"[htr-run] 🧵 злиття розсічених baseline УВІМКНЕНО "
+              f"(зазор ≤{args.merge_gap}×висоти, вертикаль ≤{args.merge_vtol}×) "
+              f"— у кеш сегментації НЕ пишеться", flush=True)
     if seg_cache is not None:
         have = len(list(seg_cache.glob("*.seg.json.gz"))) if seg_cache.is_dir() else 0
         print(f"[htr-run] 💾 кеш сегментації: {seg_cache} ({have} кадрів готово)",
@@ -2555,6 +2800,11 @@ def main() -> int:
             print(f"[htr-run] 💾 сегментація: {segmenter.hits} з кешу · "
                   f"{segmenter.misses} пораховано · {segmenter.written} записано "
                   f"({100 * segmenter.hits / tot:.0f}% влучань)", flush=True)
+    # 🧵 злиття — теж числом: «увімкнув і нічого не змінилось» і «увімкнув, а
+    # воно зшило пів сторінки» ззовні виглядають однаково
+    if merge_cfg:
+        print(f"[htr-run] 🧵 злито розсічених baseline: {segmenter.merged_lines} "
+              f"на {segmenter.merged_pages} стор.", flush=True)
     # рядки голосів, які основна модель замовчала (див. маску в ocr_page_parseq)
     if side_lost:
         print("[htr-run] ⚠ поза маскою основного тексту: "
