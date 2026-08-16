@@ -6,6 +6,7 @@
 """
 from __future__ import annotations
 
+from collections.abc import Iterable
 from typing import Any
 
 # Імпорт наповнює реєстр (декоратори виконуються при завантаженні модуля).
@@ -14,7 +15,8 @@ from nyshporka import ops_catalog as _catalog  # noqa: F401  (те саме: р�
 from nyshporka.core.envelope import Envelope
 from nyshporka.core.ops import REGISTRY, Op, Registry
 
-__all__ = ["REGISTRY", "Op", "Registry", "all_ops", "call", "for_agent", "get"]
+__all__ = ["REGISTRY", "Op", "Registry", "all_ops", "call", "for_agent",
+           "for_sections", "get", "sections_in_use"]
 
 
 def call(name: str, payload: dict[str, Any] | None = None) -> Envelope:
@@ -31,3 +33,11 @@ def all_ops() -> list[Op]:
 
 def for_agent() -> list[Op]:
     return REGISTRY.for_agent()
+
+
+def for_sections(active: Iterable[str]) -> list[Op]:
+    return REGISTRY.for_sections(active)
+
+
+def sections_in_use() -> frozenset[str]:
+    return REGISTRY.sections_in_use()

@@ -214,10 +214,35 @@ def _models() -> Check:
 
 CHECKS = (_python, _workspace, _cloud_sync, _disk, _torch, _engines, _models)
 
+#: Перевірки, які мають сенс лише при ввімкненій секції. 🔴 Не косметика:
+#: «⚠ рушії не встановлені» на машині того, хто прийшов подивитись каталог
+#: справ, — це порада полагодити те, чого він не ставив і не збирався. Доктор
+#: мусить казати про готовність до ТІЄЇ роботи, яку тут справді роблять.
+SECTION_OF_CHECK = {_torch: "htr", _engines: "htr", _models: "htr"}
+
+
+def _active_sections() -> frozenset[str] | None:
+    """Ввімкнені секції або `None`, якщо простору ще немає.
+
+    `None` означає «не звужувати»: доктора часто гукають ДО `nysh init`, саме
+    щоб дізнатись, чого бракує, — і мовчати там про рушії було б найгіршим
+    моментом для мовчання.
+    """
+    from nyshporka.core.workspace import WorkspaceError, workspace
+
+    try:
+        return workspace().sections
+    except WorkspaceError:
+        return None
+
 
 def run() -> list[Check]:
     out: list[Check] = []
+    active = _active_sections()
     for fn in CHECKS:
+        need = SECTION_OF_CHECK.get(fn)
+        if need and active is not None and need not in active:
+            continue
         try:
             out.append(fn())
         except Exception as exc:  # перевірка не має валити доктора

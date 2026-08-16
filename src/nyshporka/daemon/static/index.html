@@ -15,26 +15,20 @@
 <body data-token="{{TOKEN}}">
 <header>
   <span class="brand">Нишпорка</span>
-  <nav>
-    <button data-act="nav" data-arg="home"    data-i18n="nav.home">Дослідження</button>
-    <button data-act="nav" data-arg="sources" data-i18n="nav.sources">Джерела</button>
-    <!--
-      🗺 Газетир і 🏛 Фонди стоять ПЕРЕД «моїми справами» навмисно: обидва
-      відповідають на питання «що взагалі існує», з якого починають, а «мої
-      справи» — на «що я вже маю», яке має сенс лише після цього.
-    -->
-    <button data-act="nav" data-arg="geog"    data-i18n="nav.geog">Газетир</button>
-    <button data-act="nav" data-arg="fonds"   data-i18n="nav.fonds">Фонди</button>
-    <button data-act="nav" data-arg="cases"   data-i18n="nav.cases">Мої справи</button>
-    <button data-act="nav" data-arg="newcase" data-i18n="case.title">Завести справу</button>
-    <button data-act="nav" data-arg="read"    data-i18n="nav.read">Читання</button>
-    <button data-act="nav" data-arg="view"    data-i18n="nav.view">Гортач</button>
-    <button data-act="nav" data-arg="eye"     data-i18n="nav.eye">Око</button>
-    <button data-act="nav" data-arg="search"  data-i18n="nav.search">Пошук</button>
-    <button data-act="nav" data-arg="export"  data-i18n="nav.export">Експорт</button>
-    <button data-act="nav" data-arg="jobs"    data-i18n="nav.jobs">Роботи</button><sup id="jobcount"></sup>
-  </nav>
+  <!--
+    🔴 Кнопки СТАВИТЬ JS із `/api/sections`, а не розмітка. Причина не в
+    зручності: частину застосунку вимикають профілем простору, і другий,
+    зашитий тут перелік розходився б із дозволеним тихо — виглядало б це як
+    кнопка, що веде в порожнечу, або як зникла без пояснення.
+
+    Порядок екранів задає сервер (`core.sections`). 🗺 Газетир і 🏛 Фонди
+    стоять ПЕРЕД «моїми справами» навмисно: обидва відповідають на питання
+    «що взагалі існує», з якого починають, а «мої справи» — на «що я вже маю»,
+    яке має сенс лише після цього.
+  -->
+  <nav id="nav"></nav>
   <button class="lang" data-act="lang.toggle" title="uk / en">🌐</button>
+  <button class="lang" data-act="nav" data-arg="settings" title="Налаштування">⚙</button>
 </header>
 <main id="view"></main>
 <script type="module" src="/static/app.js"></script>

@@ -67,11 +67,22 @@ def plan(root: str | Path | None = None) -> Plan:
     return Plan(root=target, creating=not exists, warning=warning)
 
 
-def create(root: str | Path | None = None, *, name: str = "") -> Path:
-    """Створити простір: тека, маркер, кістяк. Ідемпотентно."""
+def create(root: str | Path | None = None, *, name: str = "",
+           preset: str = "") -> Path:
+    """Створити простір: тека, маркер, кістяк. Ідемпотентно.
+
+    `preset` — які частини застосунку ввімкнути (`core.sections`). Порожній
+    рядок означає «як досі»: у маркер нічого не пишеться, діє дефолт. Так
+    простір, створений без питання про пресет, лишається повним.
+    """
     import tomllib  # noqa: F401  (перевірка, що stdlib має читач TOML)
 
+    from nyshporka.core import sections as S
     from nyshporka.core.workspace import MARKER, use
+
+    if preset and preset not in S.PRESETS:
+        raise ValueError(
+            f"невідомий пресет «{preset}». Є: {', '.join(sorted(S.PRESETS))}")
 
     target = plan(root).root
     target.mkdir(parents=True, exist_ok=True)
@@ -79,6 +90,11 @@ def create(root: str | Path | None = None, *, name: str = "") -> Path:
         (target / sub).mkdir(parents=True, exist_ok=True)
     marker = target / MARKER
     if not marker.is_file():
+        # 🔴 Пресет записується ІМЕНЕМ, а не розгорнутим переліком: тоді секція,
+        # додана в майбутній версії, приїде до цього простору сама. Застиглий
+        # перелік лишив би людину без неї, і дізнатись про це було б нізвідки.
+        chosen = (f"\n# Які частини застосунку ввімкнено (`nysh sections`).\n"
+                  f'preset = "{preset}"\n') if preset else ""
         marker.write_text(
             "# Маркер робочого простору Нишпорки.\n"
             "# Він тут не для краси: саме за цим файлом застосунок і всі\n"
@@ -87,6 +103,7 @@ def create(root: str | Path | None = None, *, name: str = "") -> Path:
             "[workspace]\n"
             "schema = 1\n"
             f'name = "{name or target.name}"\n'
+            f"{chosen}"
             "\n"
             "# Скани, що лежать ПОЗА простором (зовнішній диск, мережева теку):\n"
             "# case_roots = [\"D:/архів\"]\n",

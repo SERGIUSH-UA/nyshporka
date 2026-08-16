@@ -178,6 +178,35 @@ def test_every_button_has_a_handler() -> None:
     assert not (handlers - used), f"дія без кнопки: {sorted(handlers - used)}"
 
 
+# ── 3b. до кожного екрана веде кнопка, і кожна кнопка має секцію ─────────────
+def test_every_screen_is_reachable_and_belongs_to_a_section() -> None:
+    """🔴 Новий спосіб розірвати зв'язність — секції.
+
+    Шапку тепер будує `renderNav` із `NAV_ORDER`, а показувати чи ні — вирішує
+    секція екрана. Тож розрив може статись у трьох нових місцях: екран без
+    кнопки, кнопка без підпису, екран без секції. Усі три однаково лишають
+    людину перед дією, до якої не дійти.
+    """
+    from nyshporka.core import sections as S
+
+    js = _js()
+    screens = set(re.findall(r"^SCREENS\.(\w+)\s*=", js, re.M))
+    order = set(re.findall(r"'(\w+)'", js.split("const NAV_ORDER")[1].split("];")[0]))
+    # Підписи стоять по кілька в рядку, тож прив'язка до початку рядка тут
+    # ловила б лише перший і мовчки звужувала перевірку.
+    labels = set(re.findall(r"(\w+):\s*'",
+                            js.split("const NAV_LABEL")[1].split("};")[0]))
+
+    # `settings` — свідомий виняток: до нього ведуть шестерня в шапці й екран
+    # вимкненої секції, а місця в основному переліку він не займає.
+    assert not (order - screens), f"кнопка без екрана: {sorted(order - screens)}"
+    assert not (screens - order - {"settings"}), \
+        f"екран без кнопки: {sorted(screens - order - {'settings'})}"
+    assert not (order - labels), f"кнопка без підпису: {sorted(order - labels)}"
+    assert not (order - set(S.SCREENS)), \
+        f"екран без секції: {sorted(order - set(S.SCREENS))}"
+
+
 # ── 4. екран кличе те, що існує ──────────────────────────────────────────────
 def test_screens_and_cli_call_existing_ops() -> None:
     """Друкарська помилка в імені операції дає 404 вже в руках користувача."""

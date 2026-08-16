@@ -96,6 +96,26 @@ def create_app(ws: Workspace | None = None, *, token: str = "") -> FastAPI:
     def favicon() -> FileResponse:
         return FileResponse(static_dir / "favicon.svg", media_type="image/svg+xml")
 
+    # ── секції ───────────────────────────────────────────────────────────────
+    def active_sections() -> frozenset[str]:
+        """Ввімкнені секції ЗАРАЗ, а не на старті демона.
+
+        `sections.set` міняє профіль на живому застосунку, тож знімок `space`,
+        узятий при створенні, застарів би одразу після першої зміни — і
+        навігація розходилась би з тим, що справді дозволено.
+        """
+        return _workspace().sections
+
+    @app.get("/api/sections")
+    def list_sections() -> dict[str, Any]:
+        """Що ввімкнено — звідси фронт будує навігацію.
+
+        Кнопки не зашиті в розмітку саме тому: другий перелік розходився б із
+        цим тихо, і розходження виглядало б як зникла кнопка.
+        """
+        env = O.call("sections.show")
+        return env.as_dict()
+
     # ── операції ─────────────────────────────────────────────────────────────
     @app.get("/api/ops")
     def list_ops() -> dict[str, Any]:
@@ -107,8 +127,8 @@ def create_app(ws: Workspace | None = None, *, token: str = "") -> FastAPI:
         """
         return {"ops": [{"name": o.name, "summary": o.summary,
                          "mutates": o.mutates, "long": o.long, "gui": o.gui,
-                         "schema": o.schema()}
-                        for o in O.all_ops() if o.gui]}
+                         "section": o.section, "schema": o.schema()}
+                        for o in O.for_sections(active_sections())]}
 
     @app.post("/api/op/{name}")
     async def call_op(name: str, payload: dict[str, Any] | None = Body(default=None),
@@ -117,6 +137,20 @@ def create_app(ws: Workspace | None = None, *, token: str = "") -> FastAPI:
         op = O.get(name)
         if op is None:
             raise HTTPException(status_code=404, detail=f"немає операції «{name}»")
+        # 🔴 Перевірка ТУТ, а не лише в `core.ops.call()`. Довгі операції йдуть
+        # повз реєстр — у чергу демона (`workers.start` нижче), тож фільтр, який
+        # стоїть тільки в `call()`, пропустив би саме найдорожчі з них: читання
+        # справи й завантаження з архіву.
+        from nyshporka.core import sections as S
+
+        if op.section not in active_sections():
+            sec = S.get(op.section)
+            label = sec.label() if sec else op.section
+            raise HTTPException(
+                status_code=404,
+                detail=(f"секція «{label}» вимкнена у профілі простору, тож "
+                        f"«{name}» недоступна. Увімкнути: "
+                        f"nysh sections enable {op.section}"))
         if op.mutates:
             require_token(token_hdr)
         if op.long:

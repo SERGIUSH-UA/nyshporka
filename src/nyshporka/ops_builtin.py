@@ -73,7 +73,7 @@ def _source(source_id: str) -> Source:
     return src
 
 
-@op("sources.list", summary="Звідки можна брати матеріал")
+@op("sources.list", summary="Звідки можна брати матеріал", section="material")
 def sources_list(_: NoArgs) -> Envelope:
     reg = _registry()
     env = ok({"sources": [{"id": s.id, "label": s.label, "caps": sorted(s.caps)}
@@ -123,7 +123,7 @@ class CatalogSearchArgs(BaseModel):
 
 
 @op("catalog.search", summary="Де взагалі є щось про моє село",
-    args=CatalogSearchArgs, mutates=False)
+    args=CatalogSearchArgs, mutates=False, section="material")
 def catalog_search(a: CatalogSearchArgs) -> Envelope:
     """Пошук по каталогах джерел.
 
@@ -203,7 +203,7 @@ class BrowseArgs(BaseModel):
 
 
 @op("catalog.browse", summary="Що лежить у фонді, описі, теці", args=BrowseArgs,
-    mutates=False)
+    mutates=False, section="material")
 def catalog_browse(a: BrowseArgs) -> Envelope:
     from nyshporka.sources.base import SourceError
 
@@ -223,7 +223,7 @@ class ManifestArgs(BaseModel):
 
 
 @op("catalog.manifest", summary="Що саме принесе завантаження — ДО того, як почалось",
-    args=ManifestArgs, mutates=False)
+    args=ManifestArgs, mutates=False, section="material")
 def catalog_manifest(a: ManifestArgs) -> Envelope:
     from nyshporka.sources.base import SourceError
 
@@ -307,7 +307,7 @@ class SearchArgs(BaseModel):
 
 
 @op("search.run", summary="Знайти прізвище в тому, що вже прочитано",
-    args=SearchArgs, mutates=False)
+    args=SearchArgs, mutates=False, section="research")
 def search_run(a: SearchArgs) -> Envelope:
     """🔴 Нуль ЗАВЖДИ зі знаменником.
 
@@ -378,7 +378,7 @@ class PageArgs(BaseModel):
 
 
 @op("page.text", summary="Що прочитано на сторінці й де саме лежить кожен рядок",
-    args=PageArgs, mutates=False)
+    args=PageArgs, mutates=False, section="htr")
 def page_text(a: PageArgs) -> Envelope:
     from nyshporka import htr_store as S
 
@@ -424,7 +424,7 @@ class ViewArgs(BaseModel):
 
 
 @op("page.view", summary="Подивитись на рядок чи сторінку ОКОМ", args=ViewArgs,
-    mutates=False)
+    mutates=False, section="htr")
 def page_view(a: ViewArgs) -> Envelope:
     """🔴 Центральна операція звірки: виявити ≠ перевірити.
 
@@ -650,7 +650,7 @@ class PagesStatusArgs(BaseModel):
 
 
 @op("pages.status", summary="Що в цій справі вже дивились оком, а що ні",
-    args=PagesStatusArgs, mutates=False)
+    args=PagesStatusArgs, mutates=False, section="research")
 def pages_status(a: PagesStatusArgs) -> Envelope:
     """🔴 Гейт ПЕРЕД переглядом, а не звіт після.
 
@@ -707,7 +707,7 @@ class PageNoteArgs(BaseModel):
 
 
 @op("pages.note", summary="Занести переглянуту сторінку в облік", args=PageNoteArgs,
-    mutates=True)
+    mutates=True, section="research")
 def pages_note(a: PageNoteArgs) -> Envelope:
     """🔴 БЕЗ ВИНЯТКІВ: кожен скан, який реально відкривали, заноситься.
 
@@ -755,7 +755,7 @@ class RecordsAddArgs(BaseModel):
 
 
 @op("records.add", summary="Занести розібрані записи джерела", args=RecordsAddArgs,
-    mutates=True)
+    mutates=True, section="research")
 def records_add(a: RecordsAddArgs) -> Envelope:
     """Хто/коли/батьки/восприємники — структурою, а не прозою.
 
@@ -802,7 +802,7 @@ class ExportArgs(BaseModel):
 
 
 @op("export.case", summary="Викласти прочитане зі справи таблицею", args=ExportArgs,
-    mutates=False)
+    mutates=False, section="research")
 def export_case(a: ExportArgs) -> Envelope:
     """Прочитане зі справи — у плаский вигляд, придатний до таблиці.
 
@@ -871,7 +871,7 @@ class ReadArgs(BaseModel):
 # щоб побачити його до того, як натисне «читати». Агентові двох tool'ів на
 # одну дію не треба.
 @op("read.plan", summary="Чим і як читатимемо цю справу — ДО запуску",
-    args=ReadArgs, mutates=False, agent=False)
+    args=ReadArgs, mutates=False, agent=False, section="htr")
 def read_plan(a: ReadArgs) -> Envelope:
     """Скільки кадрів, яке письмо, яка модель, куди ляже текст.
 
@@ -902,7 +902,7 @@ def read_plan(a: ReadArgs) -> Envelope:
 
 
 @op("read.start", summary="Прочитати справу рукописним рушієм", args=ReadArgs,
-    mutates=True, long=True)
+    mutates=True, long=True, section="htr")
 def read_start(a: ReadArgs) -> Envelope:
     """Ставить читання в чергу; саму роботу веде застосунок.
 
@@ -914,7 +914,7 @@ def read_start(a: ReadArgs) -> Envelope:
 
 
 @op("acquire.start", summary="Завантажити справу або плівку", args=AcquireArgs,
-    mutates=True, long=True)
+    mutates=True, long=True, section="material")
 def acquire_start(a: AcquireArgs) -> Envelope:
     """Ставить у чергу; сама робота йде у застосунку.
 
@@ -989,7 +989,7 @@ class FondArgs(BaseModel):
 # з паку архівів. У переліку tool'ів вона з'їдала б місце, яке модель мусить
 # дочитати до кінця.
 @op("archive.fond", summary="Що відомо про фонд: губернія, опис у ключі, дефолти",
-    args=FondArgs, agent=False)
+    args=FondArgs, agent=False, section="material")
 def archive_fond(a: FondArgs) -> Envelope:
     from nyshporka.archives import active
 
@@ -1023,7 +1023,7 @@ class EnvArgs(BaseModel):
 # більше й одним викликом; тримати її ще й окремим tool'ом означає з'їдати
 # місце в переліку, який модель мусить дочитати до кінця.
 @op("htr.env", summary="Чи готове середовище рушіїв читання", args=EnvArgs,
-    agent=False)
+    agent=False, section="htr")
 def htr_env(a: EnvArgs) -> Envelope:
     from nyshporka.core.workspace import WorkspaceError, workspace
     from nyshporka.htr import env as E
@@ -1045,4 +1045,107 @@ def htr_env(a: EnvArgs) -> Envelope:
         env.warn("engine_incomplete",
                  f"бракує: {', '.join(rep.missing)} — рушій із цими залежностями "
                  f"не запуститься")
+    return env
+
+
+# ── секції застосунку ────────────────────────────────────────────────────────
+# 🔴 Обидві `agent=False`, і це рішення, а не недогляд. Перелік агентських
+# tool'ів має стелю (див. `tests/test_reference_tabs`): далі модель перестає
+# дочитувати описи й починає вгадувати. Переналаштування самого застосунку —
+# не та річ, заради якої її рухати; для цього в агента є командний рядок.
+class SectionsSetArgs(BaseModel):
+    preset: str = Field("", description="пресет: amateur | researcher | lab")
+    enable: list[str] = Field(default_factory=list, description="увімкнути секції")
+    disable: list[str] = Field(default_factory=list, description="вимкнути секції")
+
+
+def _sections_payload() -> dict[str, Any]:
+    from nyshporka.core import sections as S
+    from nyshporka.core.ops import REGISTRY
+    from nyshporka.core.workspace import workspace
+
+    active = workspace().sections
+    in_use = REGISTRY.sections_in_use()
+    rows = []
+    for sec in S.all_sections():
+        n = sum(1 for o in REGISTRY.all() if o.section == sec.id)
+        rows.append({
+            "id": sec.id, "label": sec.label(), "label_en": sec.label_en,
+            "why": sec.why(), "why_en": sec.why_en,
+            "required": sec.required, "active": sec.id in active,
+            "ops": n,
+            # Порожня секція не показується: вкладка без вмісту — обіцянка без входу.
+            "visible": sec.id in in_use,
+            "screens": list(S.screens_of(sec.id)),
+        })
+    return {"sections": rows, "preset": S.preset_of(active),
+            "presets": {n: sorted(s) for n, s in S.PRESETS.items()},
+            "screens": dict(S.SCREENS)}
+
+
+@op("sections.show", summary="Які частини застосунку ввімкнено", agent=False)
+def sections_show(_: NoArgs) -> Envelope:
+    from nyshporka.core.workspace import WorkspaceError, workspace
+
+    try:
+        ws = workspace()
+    except WorkspaceError as exc:
+        return fail(str(exc))
+    env = ok(_sections_payload())
+    problem = ws.profile[2]
+    if problem:
+        env.warn("sections_profile",
+                 f"профіль секцій у {ws.marker.name} не прочитано "
+                 f"({problem}) — діє набір за замовчуванням")
+    return env
+
+
+@op("sections.set", summary="Увімкнути або вимкнути частини застосунку",
+    args=SectionsSetArgs, mutates=True, agent=False)
+def sections_set(a: SectionsSetArgs) -> Envelope:
+    from nyshporka.core import sections as S
+    from nyshporka.core.workspace import WorkspaceError, set_sections, workspace
+
+    try:
+        current = workspace().sections
+    except WorkspaceError as exc:
+        return fail(str(exc))
+
+    if a.preset:
+        try:
+            target = set(S.preset_sections(a.preset))
+        except S.SectionError as exc:
+            return fail(str(exc))
+    else:
+        target = set(current)
+    bad = S.unknown([*a.enable, *a.disable])
+    if bad:
+        return fail(f"невідомі секції: {', '.join(bad)}. "
+                    f"Є: {', '.join(sorted(S.ids()))}")
+    target |= set(a.enable)
+    # 🔴 Обов'язкову секцію не знімаємо навіть на пряме прохання: без неї
+    # лишається шапка без жодного екрана, до якого можна дійти.
+    refused = sorted(set(a.disable) & S.required_ids())
+    target -= set(a.disable) - S.required_ids()
+
+    try:
+        active = set_sections(target)
+    except (S.SectionError, WorkspaceError, OSError) as exc:
+        return fail(f"не вдалось записати профіль: {exc}")
+
+    env = ok(_sections_payload())
+    for sid in refused:
+        sec = S.get(sid)
+        env.warn("section_required",
+                 f"секцію «{sec.label() if sec else sid}» вимкнути не можна — "
+                 f"без неї застосунок лишається без жодного екрана")
+    # Порожню секцію вмикати не заборонено — але сказати про це треба, інакше
+    # людина ввімкне «Лабораторію» й шукатиме, чому в шапці нічого не додалось.
+    from nyshporka.core.ops import REGISTRY
+
+    for sid in sorted((active - S.required_ids()) - REGISTRY.sections_in_use()):
+        sec = S.get(sid)
+        env.warn("section_empty",
+                 f"секція «{sec.label() if sec else sid}» ще порожня — "
+                 f"операцій у ній немає, тож в UI вона не з'явиться")
     return env

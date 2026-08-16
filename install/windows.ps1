@@ -17,12 +17,29 @@
 [CmdletBinding()]
 param(
     [string]$Home_ = "$env:LOCALAPPDATA\Nyshporka",
-    [string]$Source = "nyshporka[app,archives]",
+    [string]$Source = "",
+    # Які частини застосунку ставимо (`nysh sections`).
+    # 🔴 Від цього залежить НЕ лише вигляд шапки, а й вага встановлення:
+    # читання рукопису тягне torch (~2.5 ГБ), і той, хто прийшов подивитись
+    # каталог справ, платити за нього гігабайтами не повинен. Змінити набір
+    # можна будь-коли — але доставити рушії тоді доведеться окремим кроком.
+    [ValidateSet('catalog', 'amateur', 'researcher', 'lab')]
+    [string]$Preset = 'researcher',
     [switch]$NoLauncher
 )
 
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
+
+# Extras під обраний набір. Явно заданий -Source перебиває: хто вписав склад
+# руками, знає, чого хоче.
+# ⚠ Перелік дублює `core.sections.EXTRAS` — інакше інсталятор мусив би спершу
+# поставити пакет, щоб спитати в нього, що ставити. Розбіжність ловить
+# `test_installer_extras_match_the_sections`.
+if (-not $Source) {
+    $Source = if ($Preset -eq 'catalog') { 'nyshporka[app,archives]' }
+              else { 'nyshporka[app,archives,htr]' }
+}
 
 function Say($text, $colour = 'White') { Write-Host $text -ForegroundColor $colour }
 
@@ -75,7 +92,7 @@ if (-not $nysh) {
 # 🔴 Мовчки не створюємо: тека, що з'явилась сама, — це дослідження, яке потім
 # не можуть знайти. `--yes` тут виправданий тим, що шлях НАЗВАНО вище.
 Say ""
-& $nysh init --yes
+& $nysh init --yes --preset $Preset
 & $nysh doctor
 
 # ── 5. довідники ─────────────────────────────────────────────────────────────

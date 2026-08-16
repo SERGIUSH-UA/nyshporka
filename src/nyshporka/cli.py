@@ -25,6 +25,33 @@ app = typer.Typer(
 console = Console()
 
 
+def _need(section: str) -> None:
+    """Відмовити, якщо секція вимкнена у профілі простору.
+
+    🔴 Потрібно саме тут, окремо від `core.ops.call()`. Найдовші команди —
+    `read`, `get`, `crawl` — роблять роботу ПРЯМО в процесі, а не через реєстр
+    (прогін ставлять на ніч по ssh, і вимагати для цього піднятого браузера
+    було б гірше). Тобто фільтр, який стоїть лише в реєстрі, пропускав би рівно
+    те, що коштує найдорожче.
+    """
+    from nyshporka.core import sections as S
+    from nyshporka.core.workspace import WorkspaceError, workspace
+
+    if section in S.required_ids():
+        return
+    try:
+        active = workspace().sections
+    except WorkspaceError:
+        return  # простору ще немає — профіль не привід відмовляти
+    if section in active:
+        return
+    sec = S.get(section)
+    console.print(
+        f"[red]секція «{sec.label() if sec else section}» вимкнена у профілі "
+        f"простору.[/red]\n  увімкнути: [bold]nysh sections enable {section}[/bold]")
+    raise typer.Exit(code=1)
+
+
 @app.command()
 def version() -> None:
     """Версія пакета."""
@@ -60,6 +87,7 @@ def info() -> None:
 @app.command()
 def sources() -> None:
     """Звідки можна брати матеріал — і що кожне джерело вміє."""
+    _need("material")
     reg = _sources_registry()
     for src in reg.all():
         caps = ", ".join(sorted(src.caps)) or "—"
@@ -151,6 +179,7 @@ def browse(source: str = typer.Argument(..., help="id джерела (`nysh sour
     """Що лежить у фонді, описі, теці дзеркала."""
     from nyshporka.sources.base import SourceError
 
+    _need("material")
     src = _pick(source)
     try:
         nodes = src.browse(ref or None)
@@ -179,6 +208,7 @@ def get(source: str = typer.Argument(..., help="id джерела"),
     """
     from nyshporka.sources.base import SourceError
 
+    _need("material")
     src = _pick(source)
     rng: tuple[int, int] | None = None
     if frames:
@@ -229,6 +259,7 @@ def crawl(source: str = typer.Argument("archium", help="id джерела"),
     Для ARCHIUM без цього кроку пошук неможливий у принципі — і саме тому він
     відмовляється відповідати нулем.
     """
+    _need("material")
     src = _pick(source)
     if not hasattr(src, "crawl"):
         console.print(f"[yellow]джерело «{source}» не потребує обходу — "
@@ -249,6 +280,8 @@ def crawl(source: str = typer.Argument("archium", help="id джерела"),
 def init(
     path: str = typer.Argument("", help="куди покласти простір; порожньо — запропоную"),
     name: str = typer.Option("", "--name", help="як зветься дослідження"),
+    preset: str = typer.Option("", "--preset",
+                               help="набір частин: amateur | researcher | lab"),
     yes: bool = typer.Option(False, "--yes", "-y", help="без питань (для інсталятора)"),
 ) -> None:
     """Створити робочий простір — теку, де житиме дослідження.
@@ -256,9 +289,14 @@ def init(
     🔴 Мовчки простір не створюється ніколи: тека, що з'явилась сама, — це
     дослідження, яке потім не можуть знайти.
     """
+    from nyshporka.core import sections as S
     from nyshporka.core.workspace import WorkspaceError
     from nyshporka.setup import wizard
 
+    if preset and preset not in S.PRESETS:
+        console.print(f"[red]невідомий пресет «{preset}»[/red]")
+        console.print(f"[dim]є: {', '.join(sorted(S.PRESETS))}[/dim]")
+        raise typer.Exit(code=2)
     try:
         p = wizard.plan(path or None)
     except WorkspaceError as exc:
@@ -270,8 +308,28 @@ def init(
         console.print(f"[yellow]⚠ {p.warning}[/yellow]")
     if p.creating and not yes and not typer.confirm("Створити?", default=True):
         raise typer.Exit(code=1)
-    root = wizard.create(p.root, name=name)
+
+    # 🔴 Питання ставиться лише в діалозі й лише при створенні. Інсталятор і
+    # скрипти йдуть із `--yes`, і мовчазний дефолт там мусить лишати застосунок
+    # ПОВНИМ: звузити його за людину, яка нічого не обирала, — гірше, ніж
+    # показати їй зайвий екран.
+    if p.creating and not preset and not yes:
+        console.print("\nЧим користуватиметесь? Це можна змінити будь-коли "
+                      "(`nysh sections`).")
+        for pid in ("amateur", "researcher", "lab"):
+            names = ", ".join(
+                s.label() for s in S.all_sections()
+                if s.id in S.PRESETS[pid] and not s.required)
+            console.print(f"  [bold]{pid}[/bold] [dim]— {names}[/dim]")
+        preset = typer.prompt("Набір", default=S.DEFAULT_PRESET)
+        while preset not in S.PRESETS:
+            console.print(f"[yellow]є: {', '.join(sorted(S.PRESETS))}[/yellow]")
+            preset = typer.prompt("Набір", default=S.DEFAULT_PRESET)
+
+    root = wizard.create(p.root, name=name, preset=preset)
     console.print(f"✅ готово: {root}")
+    if preset:
+        console.print(f"[dim]частини: {preset} · змінити — `nysh sections`[/dim]")
     console.print("[dim]далі: `nysh look <тека зі сканами>` або `nysh serve`[/dim]")
 
 
@@ -319,6 +377,7 @@ def read(
     from nyshporka.htr.run import ReadError
     from nyshporka.htr.run import plan as make_plan
 
+    _need("htr")
     try:
         p = make_plan(case_dir, out_dir=out, script=script,
                       second_voice=not one_voice)
@@ -473,6 +532,7 @@ def review_cmd(
     from nyshporka.core.workspace import workspace
     from nyshporka.matching.review import review_loop
 
+    _need("research")
     review_loop(workspace().root, source=source or None, min_score=min_score,
                 console=console)
 
@@ -726,6 +786,8 @@ def htr_install(
     from nyshporka.htr import env as E
     from nyshporka.setup import doctor as doc
 
+    _need("htr")
+
     try:
         venv = doc.engine_venv()
     except WorkspaceError as exc:
@@ -752,6 +814,7 @@ def models_list() -> None:
     """Що є, чого немає, що зіпсоване."""
     from nyshporka.setup import packs
 
+    _need("htr")
     state = packs.as_dict()
     mark = {"ok": "✅", "absent": "▫️", "broken": "🔴"}
     for p in state["packs"]:
@@ -772,6 +835,7 @@ def models_get(
     """Завантажити ваги. sha256 звіряється завжди."""
     from nyshporka.setup import packs
 
+    _need("htr")
     known = packs.catalog()
     # 🔴 Невідоме ім'я мусить бути відмовою, а не «нічого робити».
     # Друкарська помилка в id («pysar» замість «pysar-cyr-v17») давала «✅ усе
@@ -826,7 +890,78 @@ def ops_list(agent_only: bool = typer.Option(False, "--agent",
     for op in (O.for_agent() if agent_only else O.all_ops()):
         marks = "".join(("✎" if op.mutates else " ", "⏳" if op.long else " ",
                          "🤖" if op.agent else " "))
-        console.print(f"  {marks} [bold]{op.name:<18}[/bold] {op.summary}")
+        console.print(f"  {marks} [bold]{op.name:<18}[/bold] [dim]{op.section:<9}[/dim] "
+                      f"{op.summary}")
+
+
+# ── секції ───────────────────────────────────────────────────────────────────
+sections_app = typer.Typer(help="Які частини застосунку ввімкнено.",
+                           invoke_without_command=True)
+app.add_typer(sections_app, name="sections")
+
+
+def _print_sections(data: dict[str, Any]) -> None:
+    for r in data["sections"]:
+        if r["required"]:
+            mark, note = "🔒", "завжди"
+        elif not r["visible"]:
+            # Порожню секцію показуємо чесно: вона оголошена, але вмикати нічого.
+            mark, note = "▫️", "порожня"
+        else:
+            mark, note = ("✅", "увімкнено") if r["active"] else ("⬜", "вимкнено")
+        console.print(f"  {mark} [bold]{r['id']:<9}[/bold] {r['label']:<12} "
+                      f"[dim]{note} · {r['ops']} операцій[/dim]")
+        console.print(f"     [dim]{r['why']}[/dim]")
+    preset = data.get("preset")
+    console.print(f"[dim]пресет: {preset or 'власний набір'} · "
+                  f"є: {', '.join(sorted(data['presets']))}[/dim]")
+
+
+def _sections_call(payload: dict[str, Any]) -> None:
+    from nyshporka import ops as O
+
+    env = O.call("sections.set", payload)
+    if not env.ok:
+        console.print(f"[red]{env.error}[/red]")
+        raise typer.Exit(code=1)
+    for w in env.warnings:
+        console.print(f"  [yellow]⚠ {w.text}[/yellow]")
+    _print_sections(env.data)
+
+
+@sections_app.callback()
+def sections_root(ctx: typer.Context) -> None:
+    """Показати секції, якщо підкоманди немає."""
+    if ctx.invoked_subcommand is not None:
+        return
+    from nyshporka import ops as O
+
+    env = O.call("sections.show")
+    if not env.ok:
+        console.print(f"[red]{env.error}[/red]")
+        raise typer.Exit(code=1)
+    for w in env.warnings:
+        console.print(f"  [yellow]⚠ {w.text}[/yellow]")
+    _print_sections(env.data)
+
+
+@sections_app.command("enable")
+def sections_enable(section: str = typer.Argument(..., help="id секції")) -> None:
+    """Увімкнути секцію."""
+    _sections_call({"enable": [section]})
+
+
+@sections_app.command("disable")
+def sections_disable(section: str = typer.Argument(..., help="id секції")) -> None:
+    """Вимкнути секцію."""
+    _sections_call({"disable": [section]})
+
+
+@sections_app.command("preset")
+def sections_preset(name: str = typer.Argument(..., help="amateur | researcher | lab"),
+                    ) -> None:
+    """Взяти готовий набір секцій."""
+    _sections_call({"preset": name})
 
 
 @app.command("op")

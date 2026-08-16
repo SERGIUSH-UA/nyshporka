@@ -22,19 +22,21 @@ tool'і. Спершу це виглядає як дрібне дублюванн
 розмітки, синтетика, трен) в агентну поверхню не йдуть НІКОЛИ: інакше перелік
 tool'ів росте з кожною фічею, поки модель не перестане його читати. Для такого
 в агента є командний рядок.
+
+🔴 `section=` — до якої частини застосунку належить дія (`core.sections`).
+Вимкнена в профілі секція відмовляє ТУТ, у `call()`, а не в HTTP-шарі: це
+єдиний вхід для CLI, HTTP і MCP, тож інакше три обличчя розійшлися б у тому,
+що ввімкнено, — рівно та розбіжність, заради усунення якої реєстр і зроблено.
 """
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any
 
 from pydantic import BaseModel
 
 from nyshporka.core.envelope import Envelope
-
-#: Хто бачить операцію в браузері: усі, лише в режимі експерта, ніхто.
-GuiVisibility = Literal[True, False, "expert"]
 
 
 class NoArgs(BaseModel):
@@ -49,7 +51,10 @@ class Op:
     args: type[BaseModel] = NoArgs
     #: Чи доступна агентові. Дивись коментар про `agent=False` у докстрінгу.
     agent: bool = True
-    gui: GuiVisibility = True
+    #: Чи показувати в браузері взагалі (незалежно від секцій).
+    gui: bool = True
+    #: Частина застосунку, яку вимикають профілем. Дефолт `core` — незнімна.
+    section: str = "core"
     #: Чи МІНЯЄ стан. Мутації потребують токена, ключа ідемпотентності й
     #: підтвердження в агентній поверхні — тож це не косметична позначка.
     mutates: bool = False
@@ -72,6 +77,31 @@ class Op:
         return self.args.model_json_schema()
 
 
+def _section_refusal(op: Op) -> str | None:
+    """Текст відмови, якщо секція операції вимкнена. `None` — можна виконувати.
+
+    🔴 Простір, який не резолвиться, НЕ блокує нічого. Інакше найперша команда
+    на щойно розпакованій машині («де я взагалі?») відмовляла б через профіль,
+    якого ще немає, — і людина читала б це як поламаний застосунок.
+    """
+    from nyshporka.core import sections as S
+
+    if op.section in S.required_ids():
+        return None
+    try:
+        from nyshporka.core.workspace import workspace
+
+        active = workspace().sections
+    except Exception:
+        return None
+    if op.section in active:
+        return None
+    sec = S.get(op.section)
+    label = sec.label() if sec else op.section
+    return (f"секція «{label}» вимкнена у профілі простору, тож «{op.name}» "
+            f"недоступна. Увімкнути: nysh sections enable {op.section}")
+
+
 @dataclass
 class Registry:
     ops: dict[str, Op] = field(default_factory=dict)
@@ -91,9 +121,19 @@ class Registry:
     def for_agent(self) -> list[Op]:
         return [o for o in self.all() if o.agent]
 
-    def for_gui(self, *, expert: bool = False) -> list[Op]:
-        return [o for o in self.all()
-                if o.gui is True or (expert and o.gui == "expert")]
+    def for_sections(self, active: Iterable[str]) -> list[Op]:
+        """Операції ввімкнених секцій — те, що показує браузер."""
+        on = frozenset(active)
+        return [o for o in self.all() if o.gui and o.section in on]
+
+    def sections_in_use(self) -> frozenset[str]:
+        """Секції, у яких є бодай одна операція.
+
+        Порожня секція не має потрапляти в навігацію: вкладка без вмісту — це
+        обіцянка без входу. Рахуємо за реєстром, а не за оголошенням, щоб
+        відповідь не розходилась із тим, що справді можна зробити.
+        """
+        return frozenset(o.section for o in self.ops.values())
 
     def call(self, name: str, payload: dict[str, Any] | None = None) -> Envelope:
         """Виконати операцію. Валідація аргументів — за схемою, один раз тут.
@@ -109,6 +149,10 @@ class Registry:
         from pydantic import ValidationError
 
         from nyshporka.core.envelope import fail
+
+        off = _section_refusal(op)
+        if off is not None:
+            return fail(off)
         try:
             args = op.args.model_validate(payload or {})
         except ValidationError as exc:
@@ -152,14 +196,26 @@ _OpFn = Callable[[Any], Envelope]
 
 
 def op(name: str, *, summary: str, args: type[BaseModel] = NoArgs,
-       agent: bool = True, gui: GuiVisibility = True, mutates: bool = False,
-       long: bool = False,
+       agent: bool = True, gui: bool = True, section: str = "core",
+       mutates: bool = False, long: bool = False,
        next_hints: tuple[tuple[str, str], ...] = ()) -> Callable[[_OpFn], _OpFn]:
-    """Оголосити операцію."""
+    """Оголосити операцію.
+
+    🔴 `section` перевіряється ПРИ ОГОЛОШЕННІ, а не при виклику. Помилка друку
+    інакше дала б операцію, до якої не дійти жодним обличчям, і побачили б це
+    не в тесті, а на чужій машині.
+    """
+    from nyshporka.core import sections as S
+
+    if section not in S.ids():
+        raise ValueError(
+            f"операція «{name}»: невідома секція «{section}». "
+            f"Є: {', '.join(sorted(S.ids()))}")
 
     def deco(fn: Callable[[Any], Envelope]) -> Callable[[Any], Envelope]:
         REGISTRY.add(Op(name=name, fn=fn, summary=summary, args=args, agent=agent,
-                        gui=gui, mutates=mutates, long=long, next_hints=next_hints))
+                        gui=gui, section=section, mutates=mutates, long=long,
+                        next_hints=next_hints))
         return fn
 
     return deco

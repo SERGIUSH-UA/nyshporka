@@ -29,6 +29,7 @@ import os
 import re
 import sys
 import tomllib
+from collections.abc import Iterable
 from dataclasses import dataclass, field, replace
 from functools import lru_cache
 from pathlib import Path
@@ -109,6 +110,12 @@ class Workspace:
     extra_case_roots: tuple[Path, ...] = field(default=())
     #: Звідки взявся корінь — для діагностики й повідомлень майстра.
     origin: str = "package"
+    #: Пресет секцій із маркера (`None` — не вказано).
+    preset: str | None = None
+    #: Явний перелік секцій із маркера (`None` — не вказано, діє пресет).
+    listed_sections: tuple[str, ...] | None = None
+    #: Чому профіль секцій не прочитався. Показує `doctor` і банер демона.
+    sections_problem: str = ""
 
     # дані дослідження
     @property
@@ -140,6 +147,40 @@ class Workspace:
 
     @property
     def marker(self) -> Path: return self.root / MARKER
+
+    @property
+    def profile(self) -> tuple[str | None, tuple[str, ...] | None, str]:
+        """Профіль секцій — з МАРКЕРА НА ДИСКУ, а не зі знімка процесу.
+
+        🔴 Не педантизм. Демон резолвить простір один раз на старті й живе
+        годинами; `nysh sections` — окремий процес, який міняє файл. Зі
+        знімком браузер показував би вимкнене як увімкнене доти, доки
+        застосунок не перезапустять, — тобто налаштування «не діяли б», і
+        причину цього побачити не було б звідки.
+
+        Читання дешеве (кілька рядків TOML) і ще й з memo за mtime.
+        """
+        live = _profile_on_disk(self.marker, _mtime(self.marker))
+        if live is not None:
+            return live
+        return self.preset, self.listed_sections, self.sections_problem
+
+    @property
+    def sections(self) -> frozenset[str]:
+        """Активні секції застосунку.
+
+        🔴 Профіль із помилкою НЕ валить застосунок: береться дефолт, а причина
+        лишається в `sections_problem` і доїжджає до `doctor` та банера демона.
+        Падати тут означало б зробити застосунок незапускним через одну
+        друкарську помилку в текстовому файлі, який людина редагує руками.
+        """
+        from nyshporka.core import sections as S
+
+        preset, listed, _ = self.profile
+        try:
+            return S.resolve(preset=preset, explicit=listed)
+        except S.SectionError:
+            return S.resolve()
 
     def case_roots(self) -> list[Path]:
         """Корені, з яких дозволено брати теки справ.
@@ -203,8 +244,57 @@ def _build(root: Path, origin: str) -> Workspace:
         extra = tuple(Path(str(s)) for s in cfg["case_roots"])
     else:
         extra = ()
+    preset, listed, problem = _read_sections(cfg)
     return Workspace(root=root, name=str(cfg.get("name") or ""),
-                     extra_case_roots=extra, origin=origin)
+                     extra_case_roots=extra, origin=origin,
+                     preset=preset, listed_sections=listed,
+                     sections_problem=problem)
+
+
+def _mtime(path: Path) -> float:
+    """Час зміни маркера — ключ memo. 0.0 означає «файлу немає»."""
+    try:
+        return path.stat().st_mtime
+    except OSError:
+        return 0.0
+
+
+@lru_cache(maxsize=8)
+def _profile_on_disk(marker: Path, _stamp: float,
+                     ) -> tuple[str | None, tuple[str, ...] | None, str] | None:
+    """Профіль секцій прямо з файлу. `None` — маркера немає.
+
+    `_stamp` в аргументах саме для того, щоб memo протухало разом із файлом:
+    інакше кеш тримав би старий профіль рівно так само, як його тримав знімок
+    простору, і виправлення нічого не змінило б.
+    """
+    if not _stamp:
+        return None
+    return _read_sections(_read_marker(marker))
+
+
+def _read_sections(cfg: dict[str, Any]) -> tuple[str | None, tuple[str, ...] | None, str]:
+    """Профіль секцій із маркера: (пресет, явний перелік, проблема).
+
+    Перевіряємо ТУТ, щоб причина була конкретною («невідома секція htrr»), а не
+    зводилась до мовчазного повернення до дефолту десь усередині.
+    """
+    from nyshporka.core import sections as S
+
+    raw_preset = cfg.get("preset")
+    preset = str(raw_preset).strip() if raw_preset else None
+    raw_listed = cfg.get("sections")
+    listed: tuple[str, ...] | None = None
+    if isinstance(raw_listed, (list, tuple)):
+        listed = tuple(str(s).strip() for s in raw_listed if str(s).strip())
+    elif raw_listed is not None:
+        return preset, None, f"поле sections має бути переліком, а не {type(raw_listed).__name__}"
+
+    try:
+        S.resolve(preset=preset, explicit=listed)
+    except S.SectionError as exc:
+        return preset, listed, str(exc)
+    return preset, listed, ""
 
 
 def resolve(explicit: str | Path | None = None) -> Workspace:
@@ -340,11 +430,64 @@ def add_case_root(path: str | Path) -> Path:
     return p
 
 
+def _marker_set(text: str, key: str, line: str | None) -> str:
+    """Вписати, замінити або зняти рядок `key = …` у тексті маркера.
+
+    Той самий прийом, що й для `case_roots`: рядок може бути закоментованим
+    зразком із майстра, наявним значенням або відсутнім зовсім.
+    """
+    pattern = rf"(?m)^\s*{re.escape(key)}\s*=.*$"
+    if re.search(pattern, text):
+        if line is None:
+            return re.sub(pattern + r"\n?", "", text, count=1)
+        return re.sub(pattern, line, text, count=1)
+    if line is None:
+        return text
+    return text.rstrip("\n") + "\n" + line + "\n"
+
+
+def set_sections(active: Iterable[str]) -> frozenset[str]:
+    """Записати активні секції в маркер простору.
+
+    🔴 Зберігаємо ПРЕСЕТ, коли набір точно йому дорівнює, і явний перелік —
+    лише коли він власний. Причина не косметична: простір із записаним
+    пресетом отримає секцію, додану в майбутній версії, а простір із застиглим
+    переліком — ні, і людина ніколи не дізнається, що щось з'явилось.
+
+    Двох правд у файлі не лишається: записуючи одне, друге знімаємо.
+    """
+    from nyshporka.core import sections as S
+
+    resolved = S.resolve(explicit=list(active))
+    ws = workspace()
+    marker = ws.marker
+    text = marker.read_text(encoding="utf-8") if marker.is_file() else "[workspace]\n"
+
+    name = S.preset_of(resolved)
+    if name is not None:
+        text = _marker_set(text, "preset", f'preset = "{name}"')
+        text = _marker_set(text, "sections", None)
+        listed: tuple[str, ...] | None = None
+    else:
+        listed = tuple(sorted(resolved))
+        joined = ", ".join(f'"{s}"' for s in listed)
+        text = _marker_set(text, "sections", f"sections = [{joined}]")
+        text = _marker_set(text, "preset", None)
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text(text, encoding="utf-8")
+
+    global _override
+    _override = replace(ws, preset=name, listed_sections=listed, sections_problem="")
+    _cached.cache_clear()
+    return resolved
+
+
 def reset() -> None:
     """Скинути кеш — для тестів."""
     global _override
     _override = None
     _cached.cache_clear()
+    _profile_on_disk.cache_clear()
 
 
 def root() -> Path:

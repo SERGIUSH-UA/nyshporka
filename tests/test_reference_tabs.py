@@ -95,23 +95,42 @@ def test_reference_ops_do_not_eat_the_agent_budget():
 
 
 def test_reference_ops_are_visible_in_the_gui():
-    """Вони мусять бути в переліку екранів — інакше вкладок просто немає."""
-    from nyshporka import ops as _O
+    """Вони мусять бути в переліку екранів — інакше вкладок просто немає.
 
-    gui = {o.name for o in _O.REGISTRY.for_gui()}
+    Довідники живуть у секції «Матеріали», тож перевіряємо їх саме в наборі
+    ввімкнених секцій: у профілі, де матеріали вимкнено, вкладок і не має бути.
+    """
+    from nyshporka import ops as _O
+    from nyshporka.core import sections as S
+
+    gui = {o.name for o in _O.for_sections(S.preset_sections("researcher"))}
     for name in ("geog.find", "geog.card", "fond.list", "fond.rows",
                  "catalog.packs"):
         assert name in gui, name
+    off = {o.name for o in _O.for_sections(S.resolve(explicit=["core"]))}
+    assert "geog.find" not in off, (
+        "довідник лишився доступним із вимкненою секцією «Матеріали»")
 
 
 def test_tabs_are_wired_in_the_page_and_the_script():
-    """Кнопка, екран і дія — три місця, і зникнути може будь-яке."""
+    """Кнопка, екран і дія — три місця, і зникнути може будь-яке.
+
+    🔴 Кнопки більше не зашиті в розмітку: шапку будує `renderNav` із
+    `/api/sections`. Тому перевіряємо не HTML, а те, що екран оголошений у
+    порядку навігації, має підпис і має секцію — розрив у будь-якій із трьох
+    ланок так само лишає людину без входу.
+    """
     static = Path(__file__).resolve().parents[1] / "src" / "nyshporka" / "daemon" / "static"
-    html = (static / "index.html").read_text(encoding="utf-8")
     js = (static / "app.js").read_text(encoding="utf-8")
 
+    from nyshporka.core import sections as S
+
     for arg in ("geog", "fonds"):
-        assert f'data-arg="{arg}"' in html, f"немає кнопки вкладки «{arg}»"
+        assert f"'{arg}'" in js.split("const NAV_ORDER")[1].split("]")[0], (
+            f"екран «{arg}» не потрапив у NAV_ORDER — кнопки не буде")
+        assert f"{arg}:" in js.split("const NAV_LABEL")[1].split("};")[0], (
+            f"екран «{arg}» без підпису в NAV_LABEL")
+        assert arg in S.SCREENS, f"екран «{arg}» не належить жодній секції"
         assert f"SCREENS.{arg} " in js or f"SCREENS.{arg}=" in js, (
             f"немає екрана «{arg}»")
     for act in ("'geog.find'", "'geog.card'", "'fond.rows'"):

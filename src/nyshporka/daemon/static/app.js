@@ -23,6 +23,20 @@ const STRINGS = {
     'nav.home': 'Дослідження', 'nav.sources': 'Джерела', 'nav.cases': 'Мої справи',
     'nav.search': 'Пошук', 'nav.jobs': 'Роботи',
     'nav.geog': 'Газетир', 'nav.fonds': 'Фонди',
+    'nav.newcase': 'Завести справу',
+    'sect.title': 'Частини застосунку',
+    'sect.why': 'Нишпорку ставлять дуже різні люди: одному потрібен лише каталог справ, другий читає рукопис відеокартою. Вимкнена частина зникає з шапки, а її дії не виконуються ні тут, ні в командному рядку, ні агентом.',
+    'sect.preset': 'Готовий набір',
+    'sect.custom': 'власний набір',
+    'sect.always': 'завжди',
+    'sect.empty': 'поки порожня',
+    'sect.on': 'Увімкнути',
+    'sect.off': 'Вимкнути',
+    'sect.off.msg': 'Ця частина застосунку вимкнена',
+    'preset.catalog': 'Каталог',
+    'preset.amateur': 'Аматор',
+    'preset.researcher': 'Дослідник',
+    'preset.lab': 'Лабораторія',
     'cov.searched': 'шукали в',
     'geog.title': 'Де метрики цього села',
     'geog.why': 'Зворотний напрям до опису: ви знаєте СЕЛО, а не фонд. Каталог показує справи по всіх фондах архіву одразу — і по всіх конфесіях: метрики православної громади, костелу й рабинату одного містечка лежать окремо.',
@@ -142,6 +156,20 @@ const STRINGS = {
     'nav.home': 'Research', 'nav.sources': 'Sources', 'nav.cases': 'My cases',
     'nav.search': 'Search', 'nav.jobs': 'Jobs',
     'nav.geog': 'Gazetteer', 'nav.fonds': 'Fonds',
+    'nav.newcase': 'New case',
+    'sect.title': 'Parts of the app',
+    'sect.why': 'Nyshporka is installed by very different people: one needs only the case catalogue, another reads handwriting on a GPU. A disabled part disappears from the header, and its actions do not run here, in the command line, or through the agent.',
+    'sect.preset': 'Ready-made set',
+    'sect.custom': 'custom set',
+    'sect.always': 'always on',
+    'sect.empty': 'empty for now',
+    'sect.on': 'Enable',
+    'sect.off': 'Disable',
+    'sect.off.msg': 'This part of the app is disabled',
+    'preset.catalog': 'Catalogue',
+    'preset.amateur': 'Amateur',
+    'preset.researcher': 'Researcher',
+    'preset.lab': 'Lab',
     'cov.searched': 'searched in',
     'geog.title': 'Where the records of this village are',
     'geog.why': 'The reverse direction: you know the VILLAGE, not the fond. The catalogue lists cases across all fonds at once — and all confessions: Orthodox, Catholic and Jewish registers of one town are kept separately.',
@@ -261,6 +289,58 @@ const STRINGS = {
 
 let LANG = localStorage.getItem('nysh.lang') || 'uk';
 const t = (key) => (STRINGS[LANG] && STRINGS[LANG][key]) || STRINGS.uk[key] || key;
+
+// ── секції ───────────────────────────────────────────────────────────────────
+/**
+ * Що ввімкнено в цьому просторі. Приходить із `/api/sections`, тобто з того
+ * самого `core.sections`, який фільтрує операції на сервері.
+ *
+ * 🔴 Другого переліку екранів тут НЕМАЄ навмисно. Мапа «екран → секція» їде
+ * полем `screens` тієї ж відповіді: копія в браузері розходилась би з сервером
+ * тихо, і виглядало б це як кнопка, що веде в порожнечу.
+ */
+let SECTIONS = { sections: [], screens: {}, presets: {}, preset: null };
+
+/** Порядок кнопок у шапці. Екрани, яких тут немає, кнопки не отримують. */
+const NAV_ORDER = ['home', 'sources', 'geog', 'fonds', 'cases', 'newcase',
+  'read', 'view', 'eye', 'search', 'export', 'jobs'];
+
+/** Ключ i18n для кнопки екрана. Підпис «Завести справу» вже є в словнику. */
+const NAV_LABEL = {
+  home: 'nav.home', sources: 'nav.sources', geog: 'nav.geog', fonds: 'nav.fonds',
+  cases: 'nav.cases', newcase: 'nav.newcase', read: 'nav.read', view: 'nav.view',
+  eye: 'nav.eye', search: 'nav.search', export: 'nav.export', jobs: 'nav.jobs',
+};
+
+/** Чи ввімкнена секція цього екрана. Невідомий екран не блокуємо. */
+function screenOn(screen) {
+  const sid = SECTIONS.screens[screen];
+  if (!sid) return true;
+  const sec = SECTIONS.sections.find((s) => s.id === sid);
+  return !sec || (sec.active && sec.visible);
+}
+
+async function loadSections() {
+  try {
+    const res = await fetch('/api/sections');
+    const env = await res.json();
+    if (env.ok) SECTIONS = env.data;
+  } catch {
+    // Мережі немає — лишаємо порожній стан: тоді `screenOn` пропускає все, і
+    // застосунок працює як раніше. Замикати UI через збій довідки не можна.
+  }
+  renderNav();
+}
+
+function renderNav() {
+  const nav = el('nav');
+  if (!nav) return;
+  const bits = NAV_ORDER.filter(screenOn).map((s) => {
+    const tail = s === 'jobs' ? '<sup id="jobcount"></sup>' : '';
+    return `<button data-act="nav" data-arg="${s}">${esc(t(NAV_LABEL[s] || s))}</button>${tail}`;
+  });
+  nav.innerHTML = bits.join('');
+}
 
 // ── транспорт ────────────────────────────────────────────────────────────────
 const TOKEN = document.body.dataset.token || '';
@@ -633,9 +713,73 @@ SCREENS.jobs = async () => {
   await refreshJobs();
 };
 
+/**
+ * ⚙ Налаштування: які частини застосунку ввімкнено.
+ *
+ * Пресет — те, з чого починають («я тут щоб прочитати свої скани»), окремі
+ * перемикачі — для того, хто вже знає, чого хоче. Порожня секція показується
+ * сірою й непереставною: вона оголошена, але вмикати в ній ще нічого, а
+ * кнопка, що нічого не додає до шапки, читається як поламана.
+ */
+SCREENS.settings = async () => {
+  busy();
+  const env = await callOp('sections.show', {});
+  if (!env.ok) return failure(env);
+  SECTIONS = env.data;
+  const presets = Object.keys(env.data.presets || {});
+  const rows = (env.data.sections || []).map((s) => {
+    const label = LANG === 'en' ? s.label_en : s.label;
+    const why = LANG === 'en' ? s.why_en : s.why;
+    const screens = (s.screens || []).map((x) => esc(t(NAV_LABEL[x] || x))).join(' · ');
+    let control;
+    if (s.required) {
+      control = `<span class="muted">${t('sect.always')}</span>`;
+    } else if (!s.visible) {
+      control = `<span class="muted">${t('sect.empty')}</span>`;
+    } else {
+      control = `<button data-act="sections.toggle" data-arg="${esc(s.id)}"
+        data-on="${s.active ? '1' : ''}">${s.active ? t('sect.off') : t('sect.on')}</button>`;
+    }
+    return `<tr>
+      <td>${s.active ? '✅' : (s.visible ? '⬜' : '▫️')}</td>
+      <td><b>${esc(label)}</b><br><span class="muted">${esc(why)}</span>
+          ${screens ? `<br><span class="muted mono">${screens}</span>` : ''}</td>
+      <td class="num">${s.ops}</td>
+      <td>${control}</td>
+    </tr>`;
+  }).join('');
+  setView(`<h2>⚙ ${t('sect.title')}</h2>
+    <p class="muted">${t('sect.why')}</p>
+    ${renderWarnings(env)}
+    <p>${t('sect.preset')}:
+      ${presets.map((p) => `<button data-act="sections.preset" data-arg="${esc(p)}"
+        ${p === env.data.preset ? 'disabled' : ''}>${esc(t('preset.' + p))}</button>`).join(' ')}
+      <span class="muted">${env.data.preset ? '' : t('sect.custom')}</span></p>
+    <table><tbody>${rows}</tbody></table>`);
+};
+
 // ── дії ──────────────────────────────────────────────────────────────────────
 const ACTIONS = {
   nav: (_ev, elm) => show(elm.dataset.arg),
+
+  'sections.preset': async (_ev, elm) => {
+    const env = await callOp('sections.set', { preset: elm.dataset.arg });
+    if (!env.ok) return failure(env);
+    SECTIONS = env.data;
+    renderNav();
+    await show('settings');
+  },
+
+  'sections.toggle': async (_ev, elm) => {
+    const id = elm.dataset.arg;
+    const on = !!elm.dataset.on;
+    const env = await callOp('sections.set',
+      on ? { disable: [id] } : { enable: [id] });
+    if (!env.ok) return failure(env);
+    SECTIONS = env.data;
+    renderNav();
+    await show('settings');
+  },
 
   'home.scans': async () => {
     // 🔴 Раніше ця картка — перший клік того, заради кого все й робилось —
@@ -1058,6 +1202,21 @@ document.addEventListener('submit', dispatch);
 
 // ── навігація ────────────────────────────────────────────────────────────────
 async function show(screen) {
+  // 🔴 Екран вимкненої секції не мовчить і не показує порожнечу. Сюди
+  // потрапляють через закладку чи посилання з часів, коли секція була
+  // ввімкнена, — і «нічого не сталось» тут читається як поламаний застосунок.
+  if (!screenOn(screen)) {
+    const sid = SECTIONS.screens[screen];
+    const sec = SECTIONS.sections.find((s) => s.id === sid) || {};
+    const label = LANG === 'en' ? sec.label_en : sec.label;
+    location.hash = screen;
+    document.querySelectorAll('nav button').forEach((b) => b.classList.remove('on'));
+    setView(`<div class="warn">${t('sect.off.msg')}: <b>${esc(label || sid)}</b>
+      <p class="muted">${esc(LANG === 'en' ? sec.why_en || '' : sec.why || '')}</p>
+      <button data-act="sections.toggle" data-arg="${esc(sid)}">${t('sect.on')}</button>
+      <button data-act="nav" data-arg="settings">⚙ ${t('sect.title')}</button></div>`);
+    return;
+  }
   const fn = SCREENS[screen] || SCREENS.home;
   document.querySelectorAll('nav button').forEach((b) => {
     b.classList.toggle('on', b.dataset.arg === screen);
@@ -1096,7 +1255,10 @@ async function watchJobs() {
       cursor = data.seq;
       if (el('jobs')) await refreshJobs();
       const running = (data.jobs || []).filter((j) => j.state === 'running' || j.state === 'queued');
-      el('jobcount').textContent = running.length ? String(running.length) : '';
+      // Лічильник живе в кнопці «Роботи», яку ставить `renderNav` — до першої
+      // побудови шапки його ще немає.
+      const badge = el('jobcount');
+      if (badge) badge.textContent = running.length ? String(running.length) : '';
     } catch {
       await new Promise((r) => setTimeout(r, 5000));
     }
@@ -1104,11 +1266,14 @@ async function watchJobs() {
 }
 
 // ── старт ────────────────────────────────────────────────────────────────────
-function boot() {
+async function boot() {
   document.querySelectorAll('[data-i18n]').forEach((n) => {
     n.textContent = t(n.dataset.i18n);
   });
-  show((location.hash || '#home').slice(1));
+  // Спершу довідка про секції, і лише потім екран: інакше перший показ ішов би
+  // з порожнім переліком, тобто пускав би на екран, якого в цьому просторі немає.
+  await loadSections();
+  await show((location.hash || '#home').slice(1));
   watchJobs();
 }
 boot();

@@ -65,7 +65,7 @@ class GeogFindArgs(BaseModel):
 
 
 @op("geog.find", summary="Де взагалі є метрики цього села — по ВСІХ фондах архіву",
-    args=GeogFindArgs, mutates=False, agent=False)
+    args=GeogFindArgs, mutates=False, agent=False, section="material")
 def geog_find(a: GeogFindArgs) -> Envelope:
     """Пошук поселення в довідниках.
 
@@ -103,7 +103,7 @@ class GeogCardArgs(BaseModel):
 
 
 @op("geog.card", summary="Картка поселення: церква, УСІ справи, що з них у нас є",
-    args=GeogCardArgs, mutates=False, agent=False)
+    args=GeogCardArgs, mutates=False, agent=False, section="material")
 def geog_card(a: GeogCardArgs) -> Envelope:
     from nyshporka.catalog.query import (
         CatalogMissing,
@@ -150,7 +150,7 @@ def geog_card(a: GeogCardArgs) -> Envelope:
 
 # ── 🗂 стан довідників ───────────────────────────────────────────────────────
 @op("catalog.packs", summary="Які довідники встановлено і якого вони зрізу",
-    mutates=False, agent=False)
+    mutates=False, agent=False, section="material")
 def catalog_packs(_: NoArgs) -> Envelope:
     """Стан каталогу — щоб «нічого не знайдено» можна було пояснити.
 
@@ -197,7 +197,7 @@ class FondRowsArgs(BaseModel):
 
 
 @op("fond.list", summary="Які фонди описано: скільки справ, скільки вже в нас",
-    mutates=False, agent=False)
+    mutates=False, agent=False, section="material")
 def fond_list(_: NoArgs) -> Envelope:
     from nyshporka.fonds import registry as R
 
@@ -224,7 +224,7 @@ def fond_list(_: NoArgs) -> Envelope:
 
 
 @op("fond.rows", summary="Справи фонду за описом: що існує, що вже завантажено",
-    args=FondRowsArgs, mutates=False, agent=False)
+    args=FondRowsArgs, mutates=False, agent=False, section="material")
 def fond_rows(a: FondRowsArgs) -> Envelope:
     from nyshporka.fonds import registry as R
 
