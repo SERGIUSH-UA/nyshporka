@@ -359,13 +359,56 @@ def place_card(card: str, repo: str = "CDIAK") -> dict[str, Any]:
         letter = c["spr"][len(n):].lower()
         c["shifra"] = f"{c['fond']}-{c['opys']}-{c['spr']}"
         c["on_disk"] = disk.get((c["fond"], c["opys"], n, letter), "")
+    n_rows = len(cases)
+    cases = _merge_by_shifra(cases)
     place["cases"] = cases
+    # `n_rows` лишається окремо: це рядки КАТАЛОГУ, і розбіжність із числом
+    # справ — не помилка, а факт про фонд (у Лебедині 499 проти 59)
+    place["n_rows"] = n_rows
     place["n_on_disk"] = sum(1 for c in cases if c["on_disk"])
     # 🕍 те саме поселення в ІНШИХ конфесіях: костел і рабинат того самого
     # містечка — окремі картки, і не показати їх означало б віддати «усі
     # документи села», умовчавши про дві третини
     place["siblings"] = siblings(card)
     return place
+
+
+def _merge_by_shifra(cases: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Рядки однієї шифри → ОДНА справа з переліком парафій.
+
+    🔴 Це НЕ дедуплікація — рядки різні й усі законні. Одна одиниця зберігання
+    містить метрики кількох парафій, і каталог чесно перелічує кожну: Лебедин,
+    справа 1996-1-20 — це шістнадцять парафій міста, кожна зі своїми роками.
+
+    Але одиниця замовлення, завантаження й обліку — СПРАВА. Показувати 499
+    рядків там, де 59 справ, означає завищити обсяг роботи у вісім разів, а
+    саме за цим числом вирішують, братися чи ні. До того ж шістнадцять рядків
+    з однаковою шифрою читаються як збій вивантаження.
+
+    Зливаємо тут, у ядрі, а не в кожному споживачі: інакше CLI й консоль дадуть
+    два різні числа на те саме питання — та сама вада, від якої застерігає
+    «один фільтр на два входи» в реєстрі опису.
+    """
+    out: dict[str, dict[str, Any]] = {}
+    for c in cases:
+        key = c["shifra"]
+        e = out.get(key)
+        if e is None:
+            e = {**c, "parishes": [], "n_parishes": 0}
+            out[key] = e
+        par = (c.get("parish") or "").strip()
+        if par and par not in e["parishes"]:
+            e["parishes"].append(par)
+        for lo, hi in (("year_from", False), ("year_to", True)):
+            v = c.get(lo) or 0
+            if not v:
+                continue
+            cur = e.get(lo) or 0
+            e[lo] = max(cur, v) if hi else (min(cur, v) if cur else v)
+    for e in out.values():
+        e["n_parishes"] = len(e["parishes"])
+        e["parish"] = " · ".join(e["parishes"])
+    return list(out.values())
 
 
 def siblings(card: str) -> list[dict[str, Any]]:

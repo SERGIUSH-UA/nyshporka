@@ -99,14 +99,20 @@ def cmd_card(
     if data.get("church"):
         typer.echo(f"   церква : {data['church']}")
     cases = data["cases"]
-    typer.echo(f"\n   справ у каталозі {len(cases)}, з них у нас "
+    # рядків каталогу буває більше за справи: одна справа містить метрики
+    # кількох парафій, і кожна перелічена окремо (Лебедин: 499 проти 59)
+    extra = (f" ({data['n_rows']} записів каталогу)"
+             if data.get("n_rows", 0) > len(cases) else "")
+    typer.echo(f"\n   справ у каталозі {len(cases)}{extra}, з них у нас "
                f"{data['n_on_disk']}:")
     for c in cases:
         mark = "✓" if c["on_disk"] else "·"
-        years = (f"{c['year_from']}–{c['year_to']}"
-                 if c["year_from"] else "—        ")
+        yf, yt = c["year_from"], c["year_to"]
+        years = f"{yf}" if yf and yf == yt else (f"{yf}–{yt}" if yf else "—")
+        par = (f"{c['n_parishes']} парафій" if c.get("n_parishes", 0) > 1
+               else (c.get("parish") or ""))
         typer.echo(f"     {mark} {c['shifra']:16s} {years:11s} "
-                   f"{(c['doc_type'] or '')[:18]:18s} {(c['parish'] or '')[:34]}")
+                   f"{(c['doc_type'] or '')[:18]:18s} {par[:40]}")
     if data.get("siblings"):
         typer.echo("\n   🕍 те саме поселення в інших конфесіях:")
         for x in data["siblings"]:
