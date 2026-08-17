@@ -86,10 +86,10 @@ GPU-bound — карта простоює на 92% часу (0% util, 3.4 Вт).
     під міжпроцесний лок `--gpu-lock` + `empty_cache`, інакше 4 ГБ GTX 1650 не
     витримує двох одночасних forward'ів.
 
-Smoke-запуск руками:
-    .venv_kraken/Scripts/python.exe scripts/htr_case_run.py \
-        --case-dir "data/raw/miastkovka archive/010792-01-00055" \
-        --out-dir reports/htr/010792-01-00055 --model <шлях .mlmodel> --limit 3
+Smoke-запуск руками (звичайний шлях — `nysh read <тека>`):
+    <інтерпретатор рушіїв> -m nyshporka.htr.runner \
+        --case-dir "<тека справи>" --out-dir "<тека виходу>" \
+        --model <шлях до ваг> --limit 3
 """
 from __future__ import annotations
 
@@ -345,7 +345,7 @@ def orient_candidates(verdict: str) -> list[int]:
     return [0, 90, 270]  # UPRIGHT: retry піде далі по списку лише якщо conf провальний
 
 
-# ── CNN-класифікатор орієнтації (опційний; тренер scripts/htr_orient_train.py) ──
+# ── CNN-класифікатор орієнтації (опційний; тренер у цей пакет не входить) ──
 def load_orient_net(path: str, device: str):
     """TorchScript MobileNetV3 (4 класи). None, якщо не вдалось — фолбек на профіль."""
     try:
@@ -2444,7 +2444,7 @@ def main() -> int:
     if args.gpu_sato and device.startswith("cuda"):
         # ставиться ПОВЕРХ звуження sigmas — той самий патч skimage.filters.sato,
         # але згортки йдуть на карті. Вихід звірено з CPU-версією до float32-епсилону
-        # (scripts/gpu_sato_verify.py), тож полігони рядків не змінюються.
+        # (`nyshporka.htr.patches.gpu_sato_verify`), тож полігони не змінюються.
         sys.path.insert(0, str(_PATCHES_DIR))
         from gpu_sato import install_gpu_sato
         used = install_gpu_sato(sigmas or (1, 3, 5, 7, 9), device=device)

@@ -83,7 +83,7 @@ baseline-хітмапі, яка щойно вийшла з мережі — то
 
 ## 3. Як увімкнено
 
-Обидва — **дефолт ON у самому раннері** (`scripts/htr_case_run.py`,
+Обидва — **дефолт ON у самому раннері** (`nyshporka.htr.runner`,
 `--fast-geom / --no-fast-geom`, `--gpu-sato / --no-gpu-sato`); `gpu_sato`
 реально ставиться лише на `cuda`. Консоль передає **тільки вимкнення**
 (`gpu_sato: false` / `fast_geom: false` у cfg job'а).
@@ -107,7 +107,7 @@ baseline-хітмапі, яка щойно вийшла з мережі — то
 
 Захист у три шари:
 
-1. **Пін** `kraken==7.0.2` у `scripts/htr_env_setup.py` (`KRAKEN_PIN`).
+1. **Пін** `kraken==7.0.2` у маніфесті рушіїв (`htr/data/engines.yaml`).
    Раніше стояло просто `kraken` — перевстановлення середовища через півроку
    привело б іншу версію.
 2. **Гард версій у рантаймі:** `fast_geom.install()` звіряє kraken і shapely,
@@ -117,8 +117,8 @@ baseline-хітмапі, яка щойно вийшла з мережі — то
 3. **Верифікатори** — вони і є доказ, а не заява:
 
 ```
-.venv_kraken/Scripts/python.exe scripts/gpu_sato_verify.py
-.venv_kraken/Scripts/python.exe scripts/fast_geom_verify.py 5
+<інтерпретатор рушіїв> -m nyshporka.htr.patches.gpu_sato_verify
+<інтерпретатор рушіїв> -m nyshporka.htr.patches.fast_geom_verify 5
 ```
 
 Обидва ганяють стару й нову версії **пліч-о-пліч на живій сегментації** реальних

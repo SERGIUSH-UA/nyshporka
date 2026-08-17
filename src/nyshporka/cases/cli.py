@@ -348,8 +348,13 @@ def cmd_opys(key: str = typer.Argument(..., help="DAHMO/230/43 або DAHMO/230/
     if row is None:
         console.print(f"[yellow]у реєстрі опису немає {repo} {fond}-{opys}-{spr}{letter}"
                       f"[/yellow]  ({path})")
-        console.print("  зібрати реєстр: [bold]uv run python "
-                      f"scripts/fond_registry_merge.py --fond {fond}[/bold]")
+        # ⚠ Тут радили скрипт-збирач із дослідницького конвеєра, якого в цьому
+        # пакеті немає. Порада в порожнє гірша за відсутність поради: людина
+        # виконує її, бачить «немає такого файлу» й вирішує, що зламався
+        # застосунок. Реєстр опису сюди приходить ПАКОМ, а не збирається на
+        # місці, — тож і порада мусить бути про пак.
+        console.print("  реєстр опису цього фонду не встановлено: "
+                      "[bold]nysh catalog install --from <тека|zip>[/bold]")
         raise typer.Exit(1)
     if as_json:
         typer.echo(_json.dumps(row, ensure_ascii=False, indent=1))
@@ -433,8 +438,8 @@ def cmd_fond(
     path = _fonds.fond_path(fond_id)
     if not path.exists():
         console.print(f"[yellow]реєстру опису немає: {path}[/yellow]")
-        console.print("  зібрати: [bold]uv run python "
-                      f"scripts/fond_registry_merge.py --fond {fond}[/bold]")
+        console.print("  встановити довідники: "
+                      "[bold]nysh catalog install --from <тека|zip>[/bold]")
         raise typer.Exit(1)
     rows = _fonds.load_rows(fond_id)
     live = _fonds.live_on_disk(repo.upper(), fond)

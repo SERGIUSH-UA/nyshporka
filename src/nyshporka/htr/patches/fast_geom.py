@@ -16,7 +16,7 @@
 ⚠ Це патч ЧУЖОЇ бібліотеки, і від геометрії залежать полігони рядків, тобто
 текст. Тому нічого не «спрощується»: порядок додавання ліній, вибір при рівних
 відстанях (перший мінімум) і типи виходу збережені навмисне. Перевірка —
-`scripts/fast_geom_verify.py`, який ганяє стару і нову версії пліч-о-пліч на
+`nyshporka.htr.patches.fast_geom_verify` — ганяє стару і нову версії пліч-о-пліч на
 реальних сторінках і звіряє масиви.
 """
 from __future__ import annotations
@@ -282,9 +282,12 @@ def _warn_version_drift() -> None:
         except Exception:
             continue
         if have != tested:
+            # ⚠ Верифікатор лежить ПОРУЧ, у самому пакеті. Порада вказувала на
+            # `scripts/`, тобто на розташування, якого тут немає, — і людина,
+            # яка побачила це попередження, не могла його перевірити.
             print(f"[fast-geom] ⚠ {pkg} {have}, а патчі звірені на {tested}. "
-                  f"Перезвір: .venv_kraken/Scripts/python.exe "
-                  f"scripts/fast_geom_verify.py 5", flush=True)
+                  f"Перезвір: <інтерпретатор рушіїв> -m "
+                  f"nyshporka.htr.patches.fast_geom_verify 5", flush=True)
 
 
 def install(verbose: bool = False) -> bool:

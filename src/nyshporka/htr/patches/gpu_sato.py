@@ -9,7 +9,7 @@ segmentation.vectorize_lines` кличе по baseline-хітмапі. Хітм�
 Тут та сама математика на torch. Це НЕ «схожий фільтр»: 1D-ядра беруться з
 самого scipy (`_gaussian_kernel1d`), послідовність застосування повторює
 `_hessian_matrix_with_gaussian`, тож вихід збігається з точністю до float32.
-Перевірка — `scripts/gpu_sato_verify.py`.
+Перевірка — `nyshporka.htr.patches.gpu_sato_verify`.
 
 Що саме рахується (для 2D формула коротка):
     H = гаусові похідні 2-го порядку (два послідовні проходи 1-го порядку)
@@ -161,7 +161,7 @@ def install_gpu_sato(sigmas=(1, 3), device=None) -> tuple:
     # 1D-ядра беруться з приватного `scipy.ndimage._filters._gaussian_kernel1d`,
     # а еквівалентність доведена проти конкретного skimage. Зміна будь-якого з
     # двох може розійтися ТИХО (інші полігони рядків = інший текст), тому версії
-    # звіряються вголос. Звірка: scripts/gpu_sato_verify.py
+    # звіряються вголос. Звірка: `nyshporka.htr.patches.gpu_sato_verify`
     for pkg, tested in (("scikit-image", TESTED_SKIMAGE), ("scipy", TESTED_SCIPY)):
         try:
             have = md.version(pkg)
@@ -169,8 +169,8 @@ def install_gpu_sato(sigmas=(1, 3), device=None) -> tuple:
             continue
         if have != tested:
             print(f"[gpu-sato] ⚠ {pkg} {have}, а патч звірений на {tested}. "
-                  f"Перезвір: .venv_kraken/Scripts/python.exe "
-                  f"scripts/gpu_sato_verify.py", flush=True)
+                  f"Перезвір: <інтерпретатор рушіїв> -m "
+                  f"nyshporka.htr.patches.gpu_sato_verify", flush=True)
 
     sig = tuple(sigmas)
     if not hasattr(skf, "_sato_orig"):

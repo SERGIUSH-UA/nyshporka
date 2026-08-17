@@ -5,8 +5,8 @@
 Тому перевіряємо не «схожість картинок», а максимальну абсолютну похибку
 відносно динамічного діапазону і збіг ненульової маски.
 
-Запуск ПІД .venv_kraken:
-    .venv_kraken/Scripts/python.exe scripts/gpu_sato_verify.py
+Запуск ПІД інтерпретатором рушіїв:
+    <інтерпретатор рушіїв> -m nyshporka.htr.patches.gpu_sato_verify
 """
 from __future__ import annotations
 

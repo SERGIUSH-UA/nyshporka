@@ -1,7 +1,8 @@
 """🖋 Read-сторона HTR-прогонів — тексти справ, розпізнані Kraken'ом.
 
-Пише їх `scripts/htr_case_run.py` (окремий .venv_kraken) у `reports/htr/<name>/`:
-`<stem>.txt` посторінково + `_htr_meta.json` (модель, per-page орієнтація/conf).
+Пише їх раннер (`nyshporka.htr.runner`, окремий інтерпретатор рушіїв; запуск —
+`nysh read`) у `reports/htr/<name>/`: `<stem>.txt` посторінково +
+`_htr_meta.json` (модель, per-page орієнтація/conf).
 Цей модуль лише ЧИТАЄ — консоль (роутер htr) віддає тексти, картинки і fuzzy-пошук.
 
 CER Kraken на скорописі XVIII-XIX ст. ~25-35%: «Franciszka Lubkowskiego» →
