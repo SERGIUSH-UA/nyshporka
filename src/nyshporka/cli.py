@@ -398,6 +398,16 @@ def read(
     one_voice: bool = typer.Option(False, "--one-voice",
                                    help="без другого рушія (швидше, але сліпіше)"),
     case_key: str = typer.Option("", "--case-key", help="шифра справи у мету"),
+    limit: int = typer.Option(0, "--limit", help="лише перші N кадрів"),
+    pages: str = typer.Option("", "--pages", help="діапазони кадрів: 1-50,60"),
+    shard: str = typer.Option("", "--shard",
+                              help="«k/n» — цей процес бере кожен n-й кадр"),
+    gpu_lock: str = typer.Option("", "--gpu-lock",
+                                 help="спільний файл-лок GPU; ОБОВ'ЯЗКОВИЙ при --shard"),
+    gpu_sato: bool = typer.Option(True, "--gpu-sato/--no-gpu-sato",
+                                  help="рахувати sato на карті; зняти при шардингу"),
+    seg_height: int = typer.Option(0, "--seg-height",
+                                   help="висота сегментації (0 = рідна 1800)"),
     dry: bool = typer.Option(False, "--dry-run", help="лише показати план"),
 ) -> None:
     """Прочитати справу рукописним рушієм.
@@ -405,6 +415,12 @@ def read(
     🔴 Читає ПРЯМО тут, а не через застосунок — і це свідомо. Прогін ставлять
     на ніч, часто по ssh, і вимагати для цього піднятого браузера означало б
     зробити найдовшу роботу найкрихкішою.
+
+    Важелі ресурсів (`--shard`, `--gpu-lock`, `--no-gpu-sato`, `--seg-height`)
+    існують тому, що машина в кожного своя. Раннер мав їх від початку, але
+    доступні вони були лише прямим викликом — тобто рівно та людина, якій
+    найбільше треба стиснути прогін під слабку карту, важелів не мала.
+    Як ними користуватись — `docs/agents/htr-tuning.md`.
     """
     import subprocess
 
@@ -424,12 +440,20 @@ def read(
                   f"письмо {p.script} · {p.model.name}"
                   + (f" + {p.voice.name}" if p.voice else ""))
     console.print(f"  [dim]{p.out_dir}[/dim]")
+    if shard and not gpu_lock:
+        # ⚠ Не відмова, а попередження: шардинг без спільного лока працює, доки
+        # карта витримує кілька одночасних сегментацій. Щойно не витримає —
+        # прогін не сповільниться, а завалиться, і причина буде невидима.
+        console.print("[yellow]⚠ --shard без --gpu-lock: процеси змагатимуться "
+                      "за карту. Дайте всім шардам ОДИН файл-лок[/yellow]")
+    cmd = p.command(case_key=case_key, limit=limit, pages=pages, shard=shard,
+                    gpu_lock=gpu_lock, gpu_sato=gpu_sato, seg_height=seg_height)
     if dry:
-        console.print("  [dim]" + " ".join(p.command(case_key=case_key)) + "[/dim]")
+        console.print("  [dim]" + " ".join(cmd) + "[/dim]")
         return
 
     p.out_dir.mkdir(parents=True, exist_ok=True)
-    proc = subprocess.Popen(p.command(case_key=case_key), stdout=subprocess.PIPE,
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
                             stderr=subprocess.STDOUT, text=True,
                             encoding="utf-8", errors="replace", bufsize=1)
     assert proc.stdout is not None
@@ -446,11 +470,19 @@ def read(
     # сторінок дає rc=0 і порожній перелік збоїв.
     from nyshporka.htr.run import count_frames
 
-    pages = len(list(p.out_dir.glob("*.txt")))
-    missing = max(0, count_frames(p.case_dir) - pages)
+    # ⚠ `done`, а не `pages`: так зветься прапорець `--pages`, і однойменна
+    # локальна змінна затінювала його рівно в тому місці, де рахується повнота.
+    done = len(list(p.out_dir.glob("*.txt")))
+    # 🔴 Приймач «усі кадри мають текст» дійсний лише для ПОВНОГО прогону.
+    # Частковий (--limit / --pages / --shard) прочитав менше НАВМИСНО, і
+    # рахувати різницю як утрату означало б лякати червоним там, де все гаразд;
+    # а звикнувши до червоного, його перестають читати й на справжній утраті.
+    partial = bool(limit or pages or shard)
+    missing = 0 if partial else max(0, count_frames(p.case_dir) - done)
     console.print(f"\n{'✅' if rc == 0 and not missing else '🔴'} "
-                  f"сторінок з текстом: {pages} з {p.frames}"
-                  + (f" · БЕЗ ТЕКСТУ: {missing}" if missing else ""))
+                  f"сторінок з текстом: {done} з {p.frames}"
+                  + (f" · БЕЗ ТЕКСТУ: {missing}" if missing else "")
+                  + (" · частковий прогін, повноту не міряю" if partial else ""))
     raise typer.Exit(code=0 if rc == 0 and not missing else 1)
 
 

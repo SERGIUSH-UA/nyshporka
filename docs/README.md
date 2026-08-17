@@ -16,6 +16,8 @@
 | що агент уміє, **чого не вміє**, обхідні шляхи | [`agents/surface.md`](agents/surface.md) |
 | **як читати відповідь: нуль, знаменник, застарілість** | [`agents/envelope.md`](agents/envelope.md) |
 | конвеєри: взяти → прочитати → знайти → записати | [`agents/workflows.md`](agents/workflows.md) |
+| **як шукати**: сховища, склейка переносу, поріг, межі | [`agents/search-channels.md`](agents/search-channels.md) |
+| **читання під обмежені ресурси**: шарди, пам'ять карти, рятунок | [`agents/htr-tuning.md`](agents/htr-tuning.md) |
 | **як агенти вже помилялися**, з цінами | [`agents/antipatterns.md`](agents/antipatterns.md) |
 
 ---

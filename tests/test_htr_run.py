@@ -144,3 +144,49 @@ def test_command_carries_the_second_voice_and_progress_channel(tmp_path: Path) -
     assert "--models" in cmd and "--progress-json" in cmd
     assert cmd[cmd.index("--case-key") + 1] == "DAHMO/315/8433"
     assert "--script" in cmd and cmd[cmd.index("--script") + 1] == "cyrillic"
+
+
+# ── важелі ресурсів ──────────────────────────────────────────────────────────
+def _plan(tmp_path: Path):
+    from nyshporka.htr.run import Plan
+
+    return Plan(case_dir=tmp_path / "справа", out_dir=tmp_path / "out",
+                model=tmp_path / "m.pt", script="cyrillic", frames=100,
+                python=tmp_path / "py.exe", runner=tmp_path / "runner.py")
+
+
+def test_resource_levers_reach_the_runner(tmp_path: Path) -> None:
+    """🔴 Машина в кожного своя, і без важелів відповіддю на «не тягне»
+    лишалось би «купіть іншу карту».
+
+    Раннер має ці ручки від початку, але доступні вони були лише прямим
+    викликом — тобто рівно та людина, якій найбільше треба стиснути прогін під
+    слабку карту, важелів не мала.
+    """
+    cmd = _plan(tmp_path).command(shard="1/3", gpu_lock=str(tmp_path / "x.lock"),
+                                  gpu_sato=False, seg_height=1440,
+                                  pages="1-50", limit=10)
+    assert "--shard" in cmd and cmd[cmd.index("--shard") + 1] == "1/3"
+    assert "--gpu-lock" in cmd
+    assert "--no-gpu-sato" in cmd, "sato лишився на карті — шарди стануть у чергу"
+    assert "--seg-height" in cmd and cmd[cmd.index("--seg-height") + 1] == "1440"
+    assert "--pages" in cmd and "--limit" in cmd
+
+
+def test_default_run_carries_no_levers(tmp_path: Path) -> None:
+    """Дефолт лишається тим самим: важіль з'являється лише коли його попросили.
+
+    Інакше кожен звичайний прогін мовчки міняв би поведінку — і різницю в
+    результаті приписали б моделі, а не прапорцю.
+    """
+    cmd = _plan(tmp_path).command()
+    for flag in ("--shard", "--gpu-lock", "--no-gpu-sato", "--seg-height",
+                 "--pages", "--limit"):
+        assert flag not in cmd, f"{flag} просочився у звичайний прогін"
+
+
+def test_sato_flag_is_negative_only(tmp_path: Path) -> None:
+    """⚠ `--gpu-sato` за замовчуванням УВІМКНЕНИЙ у раннері, тож передавати
+    його ствердно немає сенсу — а от зняття мусить бути явним."""
+    assert "--gpu-sato" not in _plan(tmp_path).command(gpu_sato=True)
+    assert "--no-gpu-sato" in _plan(tmp_path).command(gpu_sato=False)

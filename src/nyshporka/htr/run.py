@@ -48,8 +48,18 @@ class Plan:
     #: заново — а це найдорожча частина сторінки.
     seg_cache: Path | None = None
 
-    def command(self, *, progress_json: bool = True,
-                case_key: str = "", limit: int = 0) -> list[str]:
+    def command(self, *, progress_json: bool = True, case_key: str = "",
+                limit: int = 0, pages: str = "", shard: str = "",
+                gpu_lock: str = "", gpu_sato: bool = True,
+                seg_height: int = 0) -> list[str]:
+        """Команда раннера.
+
+        🔴 Важелі ресурсів приймаються ЗВІДСИ, а не зашиті. Раннер має їх
+        десятками, але машина в читача одна й невідома нам: 4 ГБ відеопам'яті
+        чи 24, шість ядер чи два, справа на 30 аркушів чи на три тисячі. Без
+        цих ручок єдиною відповіддю на «не тягне» лишалось би «купіть іншу
+        карту», і саме так найдовша робота ставала найкрихкішою.
+        """
         cmd = [str(self.python), str(self.runner),
                "--case-dir", str(self.case_dir),
                "--out-dir", str(self.out_dir),
@@ -63,6 +73,20 @@ class Plan:
             cmd += ["--case-key", case_key]
         if limit:
             cmd += ["--limit", str(limit)]
+        if pages:
+            cmd += ["--pages", pages]
+        if shard:
+            cmd += ["--shard", shard]
+        if gpu_lock:
+            cmd += ["--gpu-lock", gpu_lock]
+        if not gpu_sato:
+            # ⚠ Прапорець знімає sato З КАРТИ, а не з розрахунку: вихід
+            # еквівалентний, змінюється лише те, ЧИМ він рахується. Це має
+            # значення при шардингу — на карті найдорожча фаза йде під локом,
+            # і три процеси стають у чергу замість паралельної роботи.
+            cmd.append("--no-gpu-sato")
+        if seg_height:
+            cmd += ["--seg-height", str(seg_height)]
         if progress_json:
             cmd.append("--progress-json")
         return cmd
