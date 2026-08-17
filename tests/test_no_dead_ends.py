@@ -363,7 +363,11 @@ def test_no_advice_points_at_a_missing_file() -> None:
     # дзеркало чужої бібліотеки й правилам стилю не підлягає, але посилання на
     # неіснуючий верифікатор шкодить так само, як будь-де. Саме там і лежали
     # дві поради на файли, які насправді є в пакеті поруч.
-    for path in [*SRC.rglob("*.py"), *SRC.rglob("*.md"), README, *DOCS]:
+    # ⚠ `.json` теж: маніфест паків ваг посилається на збирач релізу, і саме
+    # там прогалина трималась найдовше — дані пакета читають так само уважно,
+    # як код, а перевірялись вони доти ніяк.
+    for path in [*SRC.rglob("*.py"), *SRC.rglob("*.md"), *SRC.rglob("*.json"),
+                 README, *DOCS]:
         text = path.read_text(encoding="utf-8", errors="replace")
         for m in watched.findall(text):
             if not (ROOT / m).exists():
