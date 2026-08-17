@@ -22,9 +22,18 @@ from pathlib import Path
 
 import pytest
 
-SRC = Path(__file__).resolve().parents[1] / "src" / "nyshporka"
+ROOT = Path(__file__).resolve().parents[1]
+SRC = ROOT / "src" / "nyshporka"
 STATIC = SRC / "daemon" / "static"
-README = Path(__file__).resolve().parents[1] / "README.md"
+README = ROOT / "README.md"
+
+#: 🔴 Документація підпадає під ті самі ворота, що й код, і це не педантизм.
+#: Порада в тексті для агента — така сама обіцянка входу, як кнопка в браузері:
+#: агент виконує її буквально, отримує «немає такої команди» й читає це як
+#: поламаний застосунок. Різниця лише в тому, що людина спитає, а агент —
+#: запише висновок і піде далі.
+DOCS = [ROOT / "AGENTS.md", ROOT / "CLAUDE.md", ROOT / "CONTRIBUTING.md",
+        *sorted((ROOT / "docs").rglob("*.md"))]
 
 
 # ── що є насправді ───────────────────────────────────────────────────────────
@@ -96,7 +105,7 @@ def test_every_op_has_at_least_one_entrance() -> None:
 
 
 # ── 2. кожна порада веде кудись ──────────────────────────────────────────────
-@pytest.mark.parametrize("where", ["src", "readme"])
+@pytest.mark.parametrize("where", ["src", "readme", "docs"])
 def test_advised_commands_exist(where: str) -> None:
     """🔴 Найдешевша брехня застосунку — порада на неіснуючу команду.
 
@@ -106,8 +115,8 @@ def test_advised_commands_exist(where: str) -> None:
     """
     cmds = _cli_commands()
     heads = {c.split()[0] for c in cmds}
-    files = ([p for p in SRC.rglob("*.py")] + [p for p in SRC.rglob("*.js")]
-             if where == "src" else [README])
+    files = {"src": [*SRC.rglob("*.py"), *SRC.rglob("*.js")],
+             "readme": [README], "docs": DOCS}[where]
     bad: list[str] = []
     for path in files:
         if "patches" in path.parts:
@@ -157,7 +166,7 @@ def test_advised_flags_exist_too() -> None:
     walk(app)
     bad: list[str] = []
     pattern = re.compile(r"\bnysh ([a-z][a-z-]*(?: [a-z][a-z-]*)?)((?: --?[\w-]+)+)")
-    files = [*SRC.rglob("*.py"), *SRC.rglob("*.js"), README]
+    files = [*SRC.rglob("*.py"), *SRC.rglob("*.js"), README, *DOCS]
     for path in files:
         if "patches" in path.parts:
             continue

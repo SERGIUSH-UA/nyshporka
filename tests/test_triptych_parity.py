@@ -65,6 +65,66 @@ def test_tool_count_stays_readable():
         f"(одна операція з полем `action`), а не плодіть по tool'у на дію")
 
 
+def test_tool_descriptions_never_point_at_a_missing_tool():
+    """🔴 Опис tool'а — теж обіцянка входу, і вона так само буває порожньою.
+
+    Знайдено 2026-08-17: опис довгих операцій радив питати стан «через
+    nysh_job», а tool зветься `nysh_job_query` — тобто застосунок сам відсилав
+    агента до інструмента, якого не існує. Людина на такому перепитала б;
+    модель кличе назване ім'я, отримує «невідомий інструмент» і записує
+    висновок, що застосунок поламаний.
+    """
+    tools = MCP.tool_definitions()
+    names = {t["name"] for t in tools}
+    import re
+
+    bad: list[str] = []
+    for t in tools:
+        for m in re.findall(r"\bnysh_[a-z_]+", t["description"]):
+            if m not in names:
+                bad.append(f"{t['name']}: → {m}")
+    assert not bad, f"опис відсилає до неіснуючого tool'а: {sorted(set(bad))}"
+
+
+def test_agent_docs_cover_the_whole_surface():
+    """🔴 Документація агента мусить старіти ГУЧНО, а не тихо.
+
+    Агент не бачить докстрінгів операцій — у перелік tool'ів іде лише
+    однорядковий підпис. Уся мотивація («нуль зі знаменником», «status=full
+    лише якщо виписані ВСІ прізвища», «дефолт — рядок, бо сторінка коштує
+    вчетверо дорожче») живе в `docs/agents/`, і саме тому там не можна мати
+    ні прогалин, ні привидів:
+
+    * tool, якого немає в документації, агент вживатиме навмання — а половина
+      з них мутує сховище дослідження;
+    * tool, який лишився в документації після зняття, агент кликатиме й
+      отримуватиме відмову, читаючи її як поламаний застосунок.
+
+    Стеля переліку насичена, тож «додати tool» тут завжди означає «прибрати
+    tool» — і цей тест зробить видимою другу половину тієї операції.
+    """
+    from pathlib import Path
+
+    docs = Path(__file__).resolve().parents[1] / "docs" / "agents"
+    text = "\n".join(p.read_text(encoding="utf-8")
+                     for p in sorted(docs.rglob("*.md")))
+    assert text, "теки docs/agents немає — документація агента зникла"
+
+    tools = {t["name"] for t in MCP.tool_definitions()}
+    missing = sorted(t for t in tools if t not in text)
+    assert not missing, (
+        f"tool'и не описані в docs/agents: {missing}. Агент вживатиме їх "
+        f"навмання — а частина з них пише в сховище дослідження")
+
+    import re
+
+    mentioned = set(re.findall(r"\bnysh_[a-z_]+", text))
+    ghosts = sorted(m for m in mentioned if m not in tools)
+    assert not ghosts, (
+        f"docs/agents обіцяють tool'и, яких немає: {ghosts}. Агент покличе їх "
+        f"і прочитає відмову як поламаний застосунок")
+
+
 def test_every_op_is_reachable_from_the_command_line():
     """CLI повний за побудовою: `nysh op <ім'я>` дістає будь-яку операцію.
 

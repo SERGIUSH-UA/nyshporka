@@ -28,6 +28,23 @@ from nyshporka.core.ops import Op
 #: опис і починає вгадувати, а вгадування коштує дорожче за відсутність tool'а.
 TOOL_LIMIT = 18
 
+#: Операція, якою питають стан довгої роботи.
+JOB_OP = "job.query"
+
+
+def _job_tool() -> str:
+    """Ім'я tool'а стану — З РЕЄСТРУ, а не рядком у тексті опису.
+
+    ⚠ Раніше в описі стояло літеральне `nysh_job` — tool'а з такою назвою не
+    існувало ніколи (він `nysh_job_query`). Тобто застосунок сам відсилав агента
+    в порожнє, і для моделі це гірше за відсутність підказки: вона кличе назване
+    ім'я, отримує «невідомий інструмент» і читає це як поламаний застосунок.
+    """
+    for op in ops.for_agent():
+        if op.name == JOB_OP:
+            return op.tool_name
+    return "nysh_" + JOB_OP.replace(".", "_")
+
 
 def tool_definitions() -> list[dict[str, Any]]:
     """Опис tool'ів у формі, яку розуміє MCP."""
@@ -47,8 +64,8 @@ def _description(op: Op) -> str:
     if op.mutates:
         parts.append("МІНЯЄ стан дослідження.")
     if op.long:
-        parts.append("Повертає посилання на завдання, а не результат: "
-                     "стан питати через nysh_job.")
+        parts.append(f"Повертає посилання на завдання, а не результат: "
+                     f"стан питати через {_job_tool()}.")
     return " ".join(parts)
 
 
