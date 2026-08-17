@@ -581,6 +581,62 @@ def profile_cmd(as_json: bool = typer.Option(False, "--json")) -> None:
                   f"самоперевірка: {d.get('selftest_mode')}")
 
 
+@app.command("search")
+def search_cmd(
+    q: str = typer.Argument(..., help="прізвище або слово"),
+    case: str = typer.Option("", "--case", help="лише в цій справі"),
+    where: str = typer.Option("decode", "--where",
+                              help="decode | pages | records"),
+    context: int = typer.Option(1, "--context",
+                                help="рядків сусідства (0 — лише сам рядок)"),
+    thresh: int = typer.Option(80, "--thresh", help="поріг схожості 50-100"),
+    limit: int = typer.Option(40, "--limit"),
+    as_json: bool = typer.Option(False, "--json"),
+) -> None:
+    """Знайти прізвище в тому, що вже прочитано.
+
+    🔴 Хіт друкується ВІКНОМ, а не рядком. Рядок сам по собі не розрізняє
+    прізвищ зі спільним коренем, а в одній парафії їх буває кілька: заміряно на
+    метриках одного села — 78 кандидатів верхівки розклались на ТРИ різні роди
+    з тим самим коренем плюс причт. Розрізняє їх сусідство: географія стоїть
+    рядком вище, перенесена половина слова — нижче.
+
+    Якщо справу читано двома рушіями, поруч іде читання другого: збіг означає
+    надійне читання, розбіжність — що ознака в пікселях і судити має око.
+    """
+    from nyshporka import ops as O
+
+    _need("research")
+    env = O.call("search.run", {"q": q, "case": case, "where": where,
+                                "context": context, "thresh": thresh,
+                                "limit": limit})
+    if not env.ok:
+        console.print(f"[red]{env.error}[/red]")
+        raise typer.Exit(code=1)
+    if as_json:
+        console.print_json(data=env.data)
+        return
+    hits = env.data.get("hits") or []
+    for h in hits:
+        head = f"{h.get('name')} · {h.get('page')} · рядок {h.get('line_no')}"
+        console.print(f"[bold]{h.get('score')}[/bold]  {head}")
+        for b in (h.get("context") or {}).get("before") or []:
+            console.print(f"      [dim]↑ {b}[/dim]")
+        console.print(f"    [yellow]»[/yellow] {h.get('line')}")
+        for a in (h.get("context") or {}).get("after") or []:
+            console.print(f"      [dim]↓ {a}[/dim]")
+        if h.get("alt"):
+            console.print(f"      [cyan]2-й голос:[/cyan] [dim]{h['alt']['line']}[/dim]")
+    # 🔴 Знаменник друкується ЗАВЖДИ, і найважливіший він саме при нулі:
+    # без нього «не знайшлось» читається як «цього не існує».
+    for w in env.warnings:
+        console.print(f"[yellow]⚠[/yellow] [dim]{w.text}[/dim]")
+    console.print(f"[dim]показано {len(hits)} із {env.data.get('total', len(hits))}[/dim]")
+    if hits:
+        console.print("[dim]подивитись оком: гортач у `nysh serve` — і брати "
+                      "line_index, не line_no[/dim]")
+
+
 @app.command("review")
 def review_cmd(
     source: str = typer.Option("", "--source", help="лише з цього джерела"),

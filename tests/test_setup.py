@@ -287,3 +287,98 @@ def test_search_hit_carries_both_line_numbers(tmp_path: Path, monkeypatch) -> No
     eye = js[js.index('data-act="hit.eye"'):]
     eye = eye[:eye.index("</button>")]
     assert "h.line_index" in eye, "кнопка 👁 знову передає людський номер рядка"
+
+
+# ── 🔎 канал контексту: вікно замість рядка ──────────────────────────────────
+def test_search_hit_carries_a_sliding_window(tmp_path: Path, monkeypatch) -> None:
+    """🔴 Рядок-хіт не розрізняє прізвищ зі спільним коренем.
+
+    Заміряно на метриках одного села: 78 кандидатів верхівки розклались на три
+    різні роди з тим самим коренем плюс причт — і за самим рядком вони
+    зливаються в купу однаково правдоподібних хітів. Розрізняє їх сусідство:
+    географія стоїть рядком вище, а перенесена половина слова — нижче.
+    """
+    from nyshporka.core.workspace import Workspace
+    from nyshporka.setup import sample as S
+
+    root = wizard.create(tmp_path / "простір")
+    ws = Workspace(root=root, name="проба")
+    S.install(ws)
+
+    import nyshporka.htr_store as HS
+
+    monkeypatch.setattr(HS, "ROOT", root)
+    monkeypatch.setattr(HS, "HTR_ROOT", ws.htr_reports)
+    monkeypatch.setattr(HS, "_case_roots", lambda: [ws.raw])
+
+    plain = HS.search("Долищинский", limit=3)
+    assert plain["hits"] and "context" not in plain["hits"][0], (
+        "контекст має бути ЯВНИМ: вікно подвоює обсяг відповіді")
+
+    got = HS.search("Долищинский", limit=3, context=1)
+    hit = got["hits"][0]
+    assert hit["context"]["before"] or hit["context"]["after"], "вікно порожнє"
+    # Рядок сам по собі і рядок у вікні — різні обсяги знання.
+    assert len(" ".join(hit["context"]["after"])) > 0
+
+
+def test_context_is_sliding_not_fixed(tmp_path: Path, monkeypatch) -> None:
+    """⚠ Огризок контекстом не вважається.
+
+    Сусідній рядок «на», «и», «3» не пояснює нічого, тож вікно розсувається
+    далі. Без цього «контекст» на щільних формулярах виявляється порожнім рівно
+    там, де він найпотрібніший — між колонками таблиці.
+    """
+    from nyshporka.core.workspace import Workspace
+
+    root = wizard.create(tmp_path / "простір")
+    ws = Workspace(root=root, name="проба")
+    run = ws.htr_reports / "прогін"
+    case = ws.raw / "справа"
+    run.mkdir(parents=True)
+    case.mkdir(parents=True)
+    (run / "0001.txt").write_text("и\n3\nна\nтут нарешті змістовний рядок тексту\n"
+                                  "шуканий Ярошинський\n", encoding="utf-8")
+    (run / "_htr_meta.json").write_text(json.dumps({
+        "version": 1, "case_dir": "data/raw/справа",
+        "pages": {"0001.jpg": {"orient": 0, "lines": 5}}}), encoding="utf-8")
+
+    import nyshporka.htr_store as HS
+
+    monkeypatch.setattr(HS, "ROOT", root)
+    monkeypatch.setattr(HS, "HTR_ROOT", ws.htr_reports)
+    monkeypatch.setattr(HS, "_case_roots", lambda: [ws.raw])
+
+    win = HS.line_window("прогін", "0001.jpg", 4, side=1)
+    joined = " ".join(win["before"])
+    assert "змістовний" in joined, (
+        f"вікно спинилось на огризках і не дійшло до змісту: {win['before']}")
+    assert len(win["before"]) <= HS.MAX_CTX_LINES, "вікно з'їло півсторінки"
+
+
+def test_second_voice_travels_with_the_hit(tmp_path: Path, monkeypatch) -> None:
+    """🔑 Збіг голосів = надійне читання; розбіжність = ознака в пікселях.
+
+    Другий рушій судить кадри умовно незалежно, тож калічить локально,
+    зберігаючи корінь, тоді як рушій із мовною моделлю підставляє правдоподібне
+    слово. Розбіжність саме на прізвищі означає, що вирішувати має око.
+    """
+    from nyshporka.core.workspace import Workspace
+    from nyshporka.setup import sample as S
+
+    root = wizard.create(tmp_path / "простір")
+    ws = Workspace(root=root, name="проба")
+    S.install(ws)
+
+    import nyshporka.htr_store as HS
+
+    monkeypatch.setattr(HS, "ROOT", root)
+    monkeypatch.setattr(HS, "HTR_ROOT", ws.htr_reports)
+    monkeypatch.setattr(HS, "_case_roots", lambda: [ws.raw])
+
+    assert HS.voice_pair(S.RUN_MAIN) == S.RUN_SIDE
+    hit = HS.search("Долищинский", limit=3, context=1)["hits"][0]
+    assert hit.get("alt"), "другий голос не доїхав до хіта"
+    assert hit["alt"]["run"] == S.RUN_SIDE
+    assert hit["alt"]["line"] != hit["line"], (
+        "голоси збіглись побуквенно — тоді це той самий прогін, а не другий")

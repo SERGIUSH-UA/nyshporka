@@ -487,6 +487,76 @@ _CACHE: dict[str, tuple[str, list[Any]]] = {}
 #: колонки і половинки розходяться на 2-3 рядки, тому дефолт 3.
 LINE_BREAK_WINDOW = 3
 
+#: Скільки змістовних символів мусить набратись у контексті з кожного боку.
+#: 🔴 Огризок контекстом НЕ вважається: сусідній рядок «на», «и», «3» не пояснює
+#: нічого, тож вікно розсувається далі, доки не набереться цієї міри. Без такого
+#: розсування «контекст» на щільних формулярах виявляється порожнім рівно там,
+#: де він найпотрібніший — між колонками таблиці.
+MIN_CTX_CHARS = 24
+#: Стеля розсування, щоб вікно не з'їло півсторінки на аркуші з обривками.
+MAX_CTX_LINES = 4
+
+
+def line_window(name: str, page: str, line_index: int, *, side: int = 1,
+                min_chars: int = MIN_CTX_CHARS) -> dict[str, Any]:
+    """Рядок разом із сусідами — РОЗСУВНЕ вікно, а не фіксовані ±N.
+
+    🔴 Навіщо вікно, якщо є сам рядок. Рядок-хіт не розрізняє прізвищ зі
+    спільним коренем, а в одній парафії їх буває кілька; заміряно на метриках
+    одного села: 78 кандидатів верхівки розклались на три різні роди зі
+    спільним коренем плюс причт — і за самим рядком вони зливаються в купу
+    однаково правдоподібних хітів.
+
+    Розрізняє їх СУСІДСТВО: перенесена половина слова читається лише разом із
+    наступним рядком; стан і роль («крестьянка», «псаломщикомъ») зазвичай
+    стоять у сусідньому рядку, а не в тому самому.
+    """
+    got = read_page_text(name, page) or {}
+    lines: list[str] = list(got.get("lines") or [])
+    if not lines or not 0 <= line_index < len(lines):
+        return {"before": [], "line": "", "after": []}
+
+    def grab(rng: range) -> list[str]:
+        out: list[str] = []
+        chars = 0
+        for i in rng:
+            if len(out) >= MAX_CTX_LINES:
+                break
+            s = lines[i].strip()
+            out.append(s)
+            chars += len(_TOKEN_RE.sub("", s).strip()) + sum(
+                len(t) for t in _TOKEN_RE.findall(s) if len(t) >= 3)
+            if chars >= min_chars and len(out) >= side:
+                break
+        return out
+
+    before = grab(range(line_index - 1, -1, -1))[::-1]
+    after = grab(range(line_index + 1, len(lines)))
+    return {"before": before, "line": lines[line_index], "after": after}
+
+
+def voice_pair(name: str) -> str | None:
+    """Прогін-побратим тієї самої справи, зроблений ІНШИМ рушієм.
+
+    🔴 Два голоси на одному рядку — не надлишок. Там, де вони збіглись, читання
+    надійне; де розійшлись — це сигнал, а не шум: рушій із мовною моделлю
+    підставляє правдоподібне слово, а CTC калічить локально, зберігаючи корінь.
+    Саме розбіжність і показує, що ознака в пікселях, а отже суддя — око.
+    """
+    meta = load_meta(name) or {}
+    mine = run_engine(meta)
+    key = meta.get("case_key")
+    base = str(meta.get("case_dir") or "")
+    for other in list_cases():
+        nm = other.get("name") if isinstance(other, dict) else str(other)
+        if not nm or nm == name:
+            continue
+        om = load_meta(nm) or {}
+        same = (key and om.get("case_key") == key) or (base and om.get("case_dir") == base)
+        if same and run_engine(om) != mine:
+            return str(nm)
+    return None
+
 
 def _case_index(name: str) -> list[Any]:
     d = _case_dir(name)
@@ -573,8 +643,18 @@ def _case_index(name: str) -> list[Any]:
 
 
 def search(q: str, name: str | None = None, thresh: int = 78,
-           limit: int = 200) -> dict[str, Any]:
-    """Fuzzy-пошук по текстах прогонів. `name=None` — по всіх справах."""
+           limit: int = 200, context: int = 0) -> dict[str, Any]:
+    """Fuzzy-пошук по текстах прогонів. `name=None` — по всіх справах.
+
+    `context` — скільки рядків сусідства додати до кожного хіта (0 = без них).
+    Вікно розсувне (`line_window`) і, якщо у справи є прогін другим рушієм,
+    несе ще й ЙОГО читання того самого рядка: збіг голосів означає надійне
+    читання, розбіжність — що ознака в пікселях і судити має око.
+
+    🔴 Контекст рахується лише для ПОКАЗАНИХ хітів, після зрізу за `limit`.
+    Інакше на справі з тисячею збігів кожен пошук читав би тисячу сторінок
+    заради вікон, які ніхто не побачить.
+    """
     stems = [_norm(w) for w in _TOKEN_RE.findall(q) if len(w) >= 3]
     stems = [s for s in stems if len(s) >= 3]
     if not stems:
@@ -628,5 +708,39 @@ def search(q: str, name: str | None = None, thresh: int = 78,
                              "engine": eng, "script": scr,
                              "score": round(best_sc)})
     hits.sort(key=lambda h: -h["score"])
-    return {"hits": hits[:limit], "total": len(hits), "cases": scanned,
+    shown = hits[:limit]
+    if context:
+        _add_context(shown, side=context)
+    return {"hits": shown, "total": len(hits), "cases": scanned,
             "stems": stems, "thresh": thresh}
+
+
+def _add_context(hits: list[dict[str, Any]], *, side: int) -> None:
+    """Дописати кожному хіту вікно сусідів і читання другого голосу.
+
+    Побратим шукається РАЗ на прогін, а сторінка другого голосу читається раз
+    на сторінку: на верхівці пошуку хіти йдуть купками по кілька з одного
+    аркуша, і без кешу та сама сторінка перечитувалась би щоразу.
+    """
+    pairs: dict[str, str | None] = {}
+    alt_pages: dict[tuple[str, str], list[str]] = {}
+    for h in hits:
+        nm, page, idx = h["name"], h["page"], h["line_index"]
+        win = line_window(nm, page, idx, side=side)
+        h["context"] = {"before": win["before"], "after": win["after"]}
+        if nm not in pairs:
+            pairs[nm] = voice_pair(nm)
+        other = pairs[nm]
+        if not other:
+            continue
+        key = (other, page)
+        if key not in alt_pages:
+            alt_pages[key] = list((read_page_text(other, page) or {}).get("lines") or [])
+        alt = alt_pages[key]
+        if 0 <= idx < len(alt):
+            # 🔴 Рядок другого голосу беремо ЗА ТИМ САМИМ індексом. Це коректно
+            # лише тому, що обидва прогони йдуть по спільному кешу сегментації,
+            # тобто ділять ті самі рамки рядків. Якби сегментація рахувалась
+            # заново, індекси розійшлись би — і «другий голос» показував би
+            # сусідній рядок, що гірше за його відсутність.
+            h["alt"] = {"run": other, "line": alt[idx]}

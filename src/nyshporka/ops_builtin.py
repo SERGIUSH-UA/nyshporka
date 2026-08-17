@@ -308,6 +308,15 @@ class SearchArgs(BaseModel):
                     "records — учасники розібраних записів")
     case: str = Field(default="", description="обмежити однією справою")
     thresh: int = Field(default=80, ge=50, le=100)
+    # 🔴 Вікно, а не рядок. Рядок-хіт не розрізняє прізвищ зі спільним коренем,
+    # а в одній парафії їх буває кілька: заміряно на метриках одного села — 78
+    # кандидатів верхівки розклались на ТРИ різні роди з тим самим коренем плюс
+    # причт, і за самим рядком вони зливаються в купу однаково правдоподібних
+    # хітів. Розрізняє їх сусідство: перенесена половина слова читається лише
+    # разом із наступним рядком, а стан і роль стоять у сусідньому.
+    context: int = Field(default=1, ge=0, le=3,
+                         description="рядків сусідства до кожного хіта "
+                                     "(0 — лише сам рядок)")
     limit: int = Field(default=100, ge=1, le=500)
 
 
@@ -325,7 +334,7 @@ def search_run(a: SearchArgs) -> Envelope:
         from nyshporka import htr_store
 
         res = htr_store.search(a.q, name=a.case or None, thresh=a.thresh,
-                               limit=a.limit)
+                               limit=a.limit, context=a.context)
         runs = htr_store.list_cases()
         # 🔴 Ключ називається `pages_done`. Поки тут стояло `pages`, знаменник
         # був ТОТОЖНО НУЛЬОВИЙ: на просторі з 506 прогонами й 320 669
