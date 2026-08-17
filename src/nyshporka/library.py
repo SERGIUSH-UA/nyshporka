@@ -72,7 +72,30 @@ _REPO_LABEL = {
     # ДАОО додано 2026-08-12 разом із першими справами: метрики Фараонівки
     # (Аккерманський пов., Кишинівська єпархія) — ф.897/900/904/1009.
     "DAOO": "ДАОО",
+    "DAZHO": "ДАЖО", "CSAMM": "CSAMM",
+    # KOSTEL — не архів, а колекція метрик костелу М'ястківки (насправді ДАЖО
+    # ф.685). Лишається окремим кодом, бо на нього вже зав'язані ключі сховища
+    # сторінок (`data/pages/KOSTEL/685-106.json`); перекодування в DAZHO/685 —
+    # окреме рішення дослідника, не побічний ефект збірки.
+    "KOSTEL": "костел",
 }
+
+#: 🔴 Той самий архів під двома кодами роздвоював УСЮ статистику: «ДАХмО 472» і
+#: «ДАХМО 2», «ДАВО 426» і «ДАВІО 1». Причина — код архіву читається з тексту
+#: шифри (`«ДАХмО 315-1-8676»` → `.upper()` → `ДАХМО`), і кириличний варіант
+#: ставав ОКРЕМИМ repo поруч із латинським каноном. Канон бібліотеки —
+#: латинський код; кирилиця лишається людською міткою у `_REPO_LABEL`.
+_REPO_ALIAS = {
+    "ДАХМО": "DAHMO", "ЦДІАК": "CDIAK", "ЦДІАУК": "CDIAK",
+    "ДАВО": "DAVO", "ДАВІО": "DAVIO", "ДАОО": "DAOO", "ДАЖО": "DAZHO",
+    "АНРМ": "ANRM", "ДАЧВО": "DACHVO", "ДАХМЕЛЬНО": "DAHMO",
+}
+
+
+def _canon_repo(code: str | None) -> str:
+    """Код архіву до канонічного латинського написання."""
+    c = (code or "").strip().upper()
+    return _REPO_ALIAS.get(c, c)
 # опис за замовчуванням для фондів, де скановані справи майже завжди одного опису
 # (ім'я теки spr-XXXX опис не несе). Довідково — canonical парсить опис з repository_ref.
 _DEFAULT_OPYS = {("DAHMO", "315"): "1", ("CDIAK", "224"): "1", ("CDIAK", "127"): "1076"}
@@ -133,8 +156,11 @@ class CaseEntry:
 # ── парсинг кодів справ у ключ ────────────────────────────────────────────────
 
 _ID_RE = re.compile(r"^S_([A-Z]+)_F(\d+)(?:_OP(\d+))?_D([0-9A-Za-z]+)$")
-_SHIFRA_RE = re.compile(r"(\d+)\s*[-–]\s*(\d+)\s*[-–]\s*(\d+)")  # 315-1-8433
-_SLUG_FOND_RE = re.compile(r"^([a-z]+)_(\d+)$")                  # dahmo_315
+# 315-1-8433, і з літерним індексом справи: 230-1-2а (T:-рендери звуть теки так).
+# ⚠️ Без суфікса літера мовчки зникала і том «2а» злипався зі справою «2».
+_SHIFRA_RE = re.compile(r"(\d+)\s*[-–]\s*(\d+)\s*[-–]\s*(\d+[а-яa-z]?)", re.IGNORECASE)
+# dahmo_315, а також із суфіксом джерела/рендера: dahmo_315_fs, dahmo_230_pages
+_SLUG_FOND_RE = re.compile(r"^([a-z]+)_(\d+)(?:[_-][a-z0-9]+)*$")
 _SPR_DIR_RE = re.compile(r"spr[-_]?0*(\w+?)$", re.IGNORECASE)    # spr-8433 / spr-199a
 # опис у назві теки: `op2-spr-148` = опис 2 (інакше візьметься дефолт і збреше)
 _OP_PREFIX_RE = re.compile(r"(?:^|[-_])op(\d+)", re.IGNORECASE)
@@ -149,6 +175,10 @@ _ARCHIUM_DIR_RE = re.compile(r"^(?:f\d+[_-])?spr[_-](\d+)$", re.IGNORECASE)
 _NUM_RE = re.compile(r"(\d+)")
 
 
+#: кирилична літера індексу справи → латинська (канон бібліотеки, див. `_norm_spr`)
+_LETTER_TO_LAT = {"а": "a", "б": "b", "в": "v", "г": "g", "д": "d", "е": "e"}
+
+
 def _norm_spr(s: str | None) -> str | None:
     """Номер справи/фонду/опису без провідних нулів: `00114`→`114`, `080`→`80`.
 
@@ -157,7 +187,15 @@ def _norm_spr(s: str | None) -> str | None:
     """
     if s is None or s == "":
         return None
-    return str(s).strip().lower().lstrip("0") or "0"
+    out = str(s).strip().lower().lstrip("0") or "0"
+    # 🔴 Літерний індекс справи приходить обома письмами: тека на диску зветься
+    # `spr-2a`, а T:-рендер тієї самої книги — `230-1-2а` кирилицею. Без зведення
+    # до одного письма це ДВІ справи в бібліотеці: сира під ДАХмО і рендер під
+    # чужим кодом, з подвоєним числом кадрів у кожному знаменнику. Канон тут
+    # латинський — ним уже названі файли сховища сторінок (`315-7029a.json`).
+    if len(out) > 1 and out[-1] in _LETTER_TO_LAT and out[:-1].isdigit():
+        out = out[:-1] + _LETTER_TO_LAT[out[-1]]
+    return out
 
 
 def _mk_key(repo: str | None, fond: str | None, spr: str | None,
@@ -263,9 +301,21 @@ def parse_case_path(rel: str) -> tuple[str, str, str | None, str] | None:
     repo = fond = opys = None
     m = _SLUG_FOND_RE.match(slug)
     if m:
-        repo, fond = m.group(1).upper(), _norm_spr(m.group(2))
+        repo, fond = _canon_repo(m.group(1)), _norm_spr(m.group(2))
     elif slug.split("_")[0].isalpha():
-        repo = slug.split("_")[0].upper()
+        repo = _canon_repo(slug.split("_")[0])
+    if repo is None:
+        # 🔴 Slug архіву не завжди перший сегмент. Рендери під HTR-чергу лежать на
+        # архівному томі: `<том>/dahmo_230/230-1-2а`, і перший сегмент
+        # там — літера диска. Далі `_DAVO_DIR_RE` розбирає «230-1-2а» як шифру у
+        # davo-стилі й за відсутності repo підставляє DAVO — тобто ВЕСЬ ф.230
+        # задвоювався: сира справа під ДАХмО і її рендер під ДАВО, з подвоєним
+        # числом кадрів. Тому шукаємо `<архів>_<фонд>` у будь-якому сегменті.
+        for seg in parts[:-1]:
+            ms = _SLUG_FOND_RE.match(seg)
+            if ms:
+                repo, fond = _canon_repo(ms.group(1)), fond or _norm_spr(ms.group(2))
+                break
     last = parts[-1]
     stem = re.sub(r"\.(pdf|jpe?g|png)$", "", last, flags=re.IGNORECASE)
     # davo-стиль повного шифру у назві теки
@@ -348,7 +398,7 @@ def _sidecar_case(rel: str) -> tuple[str, str, str | None, str] | None:
             if repo and fond and spr:
                 return repo, fond, opys, spr
             continue
-        repo = (re.split(r"[\s\d]", shifra, maxsplit=1)[0] or "").upper()
+        repo = _canon_repo(re.split(r"[\s\d]", shifra, maxsplit=1)[0] or "")
         if not repo.isalpha():
             repo = _repo_from_rel(rel)
         fond, opys, spr = (_norm_spr(g) or "" for g in msh.groups())
@@ -441,13 +491,27 @@ def _case_from_sheet_index(m: dict[str, Any], d: Path) -> tuple[str, str | None,
 
 
 def _repo_from_rel(rel: str) -> str:
-    """`data/raw/anrm/villages/…` → «ANRM» (slug теки одразу під data/raw)."""
+    """`data/raw/anrm/villages/…` → «ANRM» (slug теки одразу під data/raw).
+
+    🔴 Сегмент «raw» трапляється не лише під `data/`. Архівний том має
+    `<том>/moldavian/ANRM_134-2_revizii_1835-1875/raw/2362410`, і
+    сліпе «перший сегмент після raw» давало код архіву «2362410» — номер плівки
+    FamilySearch ставав окремим архівом у зведенні (три такі рядки). Тому
+    спершу шукаємо ВІДОМИЙ код у будь-якому сегменті шляху, і лише як остача
+    беремо позиційний здогад.
+    """
     parts = [p for p in re.split(r"[\\/]+", rel.strip()) if p]
+    if not parts:
+        return ""
+    for seg in parts:
+        code = _canon_repo(seg.split("_")[0].split("-")[0])
+        if code in _REPO_LABEL:
+            return code
     if "raw" in parts:
         parts = parts[parts.index("raw") + 1:]
     if not parts:
         return ""
-    return (parts[0].split("_")[0] or "").upper()
+    return _canon_repo(parts[0].split("_")[0])
 
 
 def parse_case_code(value: str) -> tuple[str, str, str | None, str] | None:
@@ -1336,6 +1400,19 @@ def build_library() -> list[CaseEntry]:
             if other_opys or (v_new and v_old and v_new != v_old):
                 pass  # → нижче створиться свій запис
             else:
+                # Опис знає, як правило, лише ОДИН зі шляхів: тека `spr-24a` його
+                # не несе, а T:-рендер тієї самої книги зветься `230-1-24a`.
+                # Без цього шифра лишалась «ДАХмО 230-24a» — без опису, і справа
+                # не знаходилась пошуком за «230-1-24».
+                if parsed and parsed[2] and not entry.opys:
+                    # ⚠️ Шифру переписуємо, лише якщо вона МАШИННА (зібрана з
+                    # тих самих полів). Людська з сайдкара чи канону сильніша —
+                    # там опис міг бути свідомо іншим.
+                    machine = _shifra(entry.repo, entry.fond, None, entry.spr)
+                    entry.opys = parsed[2]
+                    if entry.shifra == machine:
+                        entry.shifra = _shifra(entry.repo, entry.fond,
+                                               entry.opys, entry.spr)
                 entry.extra_paths.append(rel)
                 continue
         # Тека не є архівною справою (річні теки єпарх. відомостей, OCR-корпуси,
