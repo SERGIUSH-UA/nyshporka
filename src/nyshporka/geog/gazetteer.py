@@ -114,9 +114,11 @@ def build_index(verbose: bool = False) -> dict[str, int]:
         # ⚠ Порада мусить вести туди, куди людина справді може піти. Тут стояв
         # скрипт-збирач дослідницького конвеєра, якого в цьому пакеті немає:
         # газетир приходить ПАКОМ довідників, а не збирається на місці.
+        from nyshporka.catalog.store import RELEASES_URL
+
         raise FileNotFoundError(
-            f"немає {places_tsv} — газетир не встановлено. Довідники ставлять "
-            "паком: nysh catalog install --from <тека|zip>")
+            f"немає {places_tsv} — газетир не встановлено. Довідники беруть "
+            f"тут: {RELEASES_URL} , далі `nysh catalog install --from <zip>`")
     out = index_path()
     out.parent.mkdir(parents=True, exist_ok=True)
     tmp = out.with_suffix(".tmp")

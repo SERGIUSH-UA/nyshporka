@@ -74,6 +74,12 @@ class Coverage:
         return f"{self.pack_id}{taken}{scope}"
 
 
+#: Де беруть паки довідників. Тримається тут, а не в тексті повідомлення:
+#: адресу називають і `catalog list`, і `geog build`, і реєстр опису, а три
+#: копії рядка розходяться тихо — і рівно тоді, коли людині нікуди піти.
+RELEASES_URL = "https://github.com/SERGIUSH-UA/nyshporka/releases"
+
+
 def catalog_dir() -> Path:
     """Тека каталогу. `user_data_dir`, а не `user_cache_dir` — див. `__init__`."""
     env = os.environ.get(ENV_CATALOG)

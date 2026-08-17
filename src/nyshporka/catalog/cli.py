@@ -47,7 +47,11 @@ def cmd_list(as_json: bool = typer.Option(False, "--json")) -> None:
         return
     if not packs:
         typer.echo(f"каталог порожній: {store.catalog_dir()}")
-        typer.echo("поставити: nysh catalog install --from <тека|zip>")
+        # 🔴 Порада мусить казати, ЗВІДКИ взяти, а не лише «поставте».
+        # «--from <тека|zip>» без адреси — половина поради: людина знає команду
+        # й не знає, що в неї підставити, а довідники на місці не збираються.
+        typer.echo(f"довідники беруть тут: {store.RELEASES_URL}")
+        typer.echo("далі: nysh catalog install --from <завантажений zip>")
         return
     for p in packs:
         mark = "✅" if p.ok else "🔴"

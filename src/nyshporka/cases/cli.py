@@ -12,6 +12,7 @@ from rich.console import Console, JustifyMethod
 from rich.table import Table
 
 from nyshporka.cases import db
+from nyshporka.catalog import store as _store
 from nyshporka.core.workspace import workspace as _workspace
 from nyshporka.fonds import registry as _fonds
 
@@ -354,7 +355,8 @@ def cmd_opys(key: str = typer.Argument(..., help="DAHMO/230/43 або DAHMO/230/
         # застосунок. Реєстр опису сюди приходить ПАКОМ, а не збирається на
         # місці, — тож і порада мусить бути про пак.
         console.print("  реєстр опису цього фонду не встановлено: "
-                      "[bold]nysh catalog install --from <тека|zip>[/bold]")
+                      f"[bold]nysh catalog install --from <zip>[/bold]  "
+                      f"[dim]({_store.RELEASES_URL})[/dim]")
         raise typer.Exit(1)
     if as_json:
         typer.echo(_json.dumps(row, ensure_ascii=False, indent=1))
@@ -439,7 +441,8 @@ def cmd_fond(
     if not path.exists():
         console.print(f"[yellow]реєстру опису немає: {path}[/yellow]")
         console.print("  встановити довідники: "
-                      "[bold]nysh catalog install --from <тека|zip>[/bold]")
+                      f"[bold]nysh catalog install --from <zip>[/bold]  "
+                      f"[dim]({_store.RELEASES_URL})[/dim]")
         raise typer.Exit(1)
     rows = _fonds.load_rows(fond_id)
     live = _fonds.live_on_disk(repo.upper(), fond)
