@@ -177,3 +177,113 @@ def test_cuda_tag_comes_from_the_manifest() -> None:
     assert doctor.cuda_tag("7.5") == "cu126"
     assert doctor.cuda_tag("9.0") == "cu128"
     assert doctor.cuda_tag("не число") is None
+
+
+# ── 📖 зразкова справа ───────────────────────────────────────────────────────
+def test_sample_deploys_a_working_chain(tmp_path: Path, monkeypatch) -> None:
+    """🔴 Приймач зразка — не «файли скопіювались», а ЛАНЦЮГ, що на них працює.
+
+    Зразок існує заради одного питання новачка: «чи воно взагалі щось робить».
+    Відповідь дає не наявність кадрів, а те, що після розгортання гортач
+    показує рядок, а пошук його знаходить. Тому тест іде тим самим шляхом, що
+    й людина: розгорнув — подивився — знайшов.
+    """
+    from nyshporka.core.workspace import Workspace
+    from nyshporka.setup import sample as S
+
+    root = wizard.create(tmp_path / "простір", name="проба")
+    ws = Workspace(root=root, name="проба")
+
+    assert not S.installed(ws), "на щойно створеному просторі зразка бути не може"
+    got = S.install(ws)
+    assert S.installed(ws)
+    assert got["case_key"] == S.CASE_KEY
+    assert len(got["frames"]) >= 3
+    assert S.RUN_MAIN in got["runs"] and S.RUN_SIDE in got["runs"]
+
+    # 🔴 Шлях у меті — ВІДНОСНИЙ. Абсолютний пережив би переїзд простору на
+    # інший диск лише до першого відкриття гортача; саме на цьому й горять
+    # хмарні прогони, у яких лишається тека орендованого боксу.
+    meta = json.loads((ws.htr_reports / S.RUN_MAIN / "_htr_meta.json")
+                      .read_text(encoding="utf-8"))
+    assert meta["case_dir"] == f"data/raw/{S.CASE_DIR}"
+    assert not Path(meta["case_dir"]).is_absolute()
+
+    monkeypatch.setenv("NYSHPORKA_WORKSPACE", str(root))
+    import nyshporka.htr_store as HS
+
+    monkeypatch.setattr(HS, "ROOT", root)
+    monkeypatch.setattr(HS, "HTR_ROOT", ws.htr_reports)
+    monkeypatch.setattr(HS, "_case_roots", lambda: [ws.raw])
+
+    # 1. пошук у декоді знаходить прізвище, заради якого справу й брали
+    found = HS.search("Долищинский", limit=10)
+    assert found["hits"], "декод зразка не шукається"
+    hit = next(h for h in found["hits"] if "Долищинскій" in h["line"])
+
+    # 2. гортач показує ЦЕЙ САМЕ рядок — і не сторінку цілком.
+    # 🔴 Індекс беремо з хіта (`line_index`), а не константою: номер залежить
+    # від сегментації, і прибитий цвяхом «line=1» ламався б від будь-якого
+    # перескладання зразка, хоча ланцюг лишався б робочим.
+    from nyshporka.htr import view as V
+
+    shot = V.shot(S.RUN_MAIN, hit["page"], line=hit["line_index"])
+    assert shot.region == "line", shot.note
+    assert shot.png[:4] == b"\x89PNG"
+    assert "Долищинскій" in shot.text, shot.text
+    # Кроп рядка мусить бути дешевшим за сторінку — на цьому тримається вся
+    # економіка перегляду (виміряно: 15 КБ проти 1.1 МБ).
+    page = V.shot(S.RUN_MAIN, hit["page"], region="page")
+    assert len(shot.png) < len(page.png)
+
+
+def test_sample_install_is_idempotent(tmp_path: Path) -> None:
+    """Двічі розгорнутий зразок не має ні падати, ні дублюватись."""
+    from nyshporka.core.workspace import Workspace
+    from nyshporka.setup import sample as S
+
+    root = wizard.create(tmp_path / "простір")
+    ws = Workspace(root=root, name="проба")
+    first = S.install(ws)
+    again = S.install(ws)
+    assert first["frames"] == again["frames"]
+    assert len(list((ws.raw / S.CASE_DIR).glob("*.jpg"))) == len(first["frames"])
+
+
+def test_search_hit_carries_both_line_numbers(tmp_path: Path, monkeypatch) -> None:
+    """🔴 Номер рядка для ЛЮДИНИ і індекс рамки для ГОРТАЧА — різні числа.
+
+    Пошук нумерує рядки з одиниці (так їх читає людина в таблиці хітів), а
+    гортач адресує рамку в `.lines.json`, тобто з нуля. Доти, доки поле було
+    одне, кнопка 👁 передавала людський номер туди, де ждали індекс, — і око
+    бачило СУСІДНІЙ рядок, маючи всі підстави вірити, що бачить знайдений.
+    Тест закріплює саме різницю: зійдуться назад в одне число — впаде тут, а не
+    в дослідника посеред звірки.
+    """
+    from nyshporka.core.workspace import Workspace
+    from nyshporka.setup import sample as S
+
+    root = wizard.create(tmp_path / "простір")
+    ws = Workspace(root=root, name="проба")
+    S.install(ws)
+
+    import nyshporka.htr_store as HS
+
+    monkeypatch.setattr(HS, "ROOT", root)
+    monkeypatch.setattr(HS, "HTR_ROOT", ws.htr_reports)
+    monkeypatch.setattr(HS, "_case_roots", lambda: [ws.raw])
+
+    hit = next(h for h in HS.search("Долищинский", limit=10)["hits"]
+               if "Долищинскій" in h["line"])
+    assert hit["line_index"] == hit["line_no"] - 1
+
+    # І приймач по суті: рядок, названий індексом, справді той самий.
+    text = HS.read_page_text(S.RUN_MAIN, hit["page"])["lines"]
+    assert text[hit["line_index"]] == hit["line"]
+
+    # А кнопка 👁 у фронті мусить передавати саме індекс, не людський номер.
+    js = (Path(HS.__file__).parent / "daemon" / "static" / "app.js").read_text(
+        encoding="utf-8")
+    eye = js[js.index('data-act="hit.eye"'):]
+    eye = eye[:eye.index("</button>")]
+    assert "h.line_index" in eye, "кнопка 👁 знову передає людський номер рядка"

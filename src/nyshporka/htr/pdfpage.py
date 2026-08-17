@@ -85,39 +85,65 @@ def page_counts(pdfs: list[Path]) -> list[int]:
     return out
 
 
-def mapping(case_dir: Path, frames: list[str]) -> Mapping:
-    """Довести відповідність або відмовитись, назвавши причину."""
+def mapping(case_dir: Path, frames: list[str],
+            total: int | None = None) -> Mapping:
+    """Довести відповідність або відмовитись, назвавши причину.
+
+    `frames` — кадри, які прогін ПРОЧИТАВ. `total` — скільки їх було у справі,
+    якщо прогін це записав (`frames_total` у меті).
+
+    🔴 Навіщо `total`. Доказ будується на щільності `1..N`, але прогін буває
+    частковим — обірваним, точковим, шардованим із утратою сторінки. Тоді
+    прочитаних кадрів менше, ніж сторінок у PDF, і сувора перевірка відмовляла
+    навіть там, де PDF справи лежить поруч: людина бачила «показати нічим» на
+    справі, яку сама ж і читала. Знаючи знаменник, доказ лишається таким самим
+    строгим — кадри мусять бути ПІДМНОЖИНОЮ `1..total`, а сторінок у PDF рівно
+    `total`, — але вже не вимагає, щоб прогін дійшов до кінця.
+
+    Без `total` (старі прогони, які його не писали) поведінка та сама, що й
+    була: вимагаємо щільності. Це не регресія, а межа знання — вгадувати
+    знаменник тут не можна, бо ціна помилки чужий аркуш.
+    """
     nums = sorted(n for n in (frame_number(f) for f in frames) if n is not None)
     if not nums:
         raise PdfPageError("у прогоні немає кадрів із номером в імені")
-    if nums != list(range(1, len(nums) + 1)):
-        # Діра в нумерації означає, що рендер не був суцільним (частину кадрів
-        # відкинули, частину доклали окремо) — і зсув пішов би далі по всій
-        # справі, тихо.
-        holes = [n for i, n in enumerate(nums, 1) if n != i][:3]
-        raise PdfPageError(
-            f"нумерація кадрів не щільна (перший розрив біля {holes}) — "
-            f"відповідність сторінкам PDF недоведена, показувати не буду")
+    if total is not None and total > 0:
+        if nums[-1] > total:
+            raise PdfPageError(
+                f"кадр {nums[-1]} поза межами справи ({total} кадрів) — "
+                f"це інший матеріал; показувати не буду")
+        expect = total
+    else:
+        if nums != list(range(1, len(nums) + 1)):
+            # Діра в нумерації означає, що рендер не був суцільним (частину
+            # кадрів відкинули, частину доклали окремо) — і зсув пішов би далі
+            # по всій справі, тихо.
+            holes = [n for i, n in enumerate(nums, 1) if n != i][:3]
+            raise PdfPageError(
+                f"нумерація кадрів не щільна (перший розрив біля {holes}), а "
+                f"скільки кадрів мала справа, прогін не записав — "
+                f"відповідність сторінкам PDF недоведена, показувати не буду")
+        expect = len(nums)
     pdfs = case_pdfs(case_dir)
     if not pdfs:
         raise PdfPageError(f"у теці справи немає PDF: {case_dir}")
     counts = page_counts(pdfs)
-    if sum(counts) != len(nums):
+    if sum(counts) != expect:
         raise PdfPageError(
-            f"сторінок у PDF {sum(counts)}, а кадрів у прогоні {len(nums)} — "
+            f"сторінок у PDF {sum(counts)}, а кадрів у справі {expect} — "
             f"це різний матеріал або інший рендер; показувати не буду")
-    return Mapping(pdfs=tuple(pdfs), counts=tuple(counts), frames=len(nums))
+    return Mapping(pdfs=tuple(pdfs), counts=tuple(counts), frames=expect)
 
 
 def render(case_dir: Path, frames: list[str], page: str,
-           width: int = DEFAULT_WIDTH) -> bytes:
+           width: int = DEFAULT_WIDTH, total: int | None = None) -> bytes:
     """PNG сторінки справи-PDF, що відповідає кадру `page`."""
     import pypdfium2 as pdfium
 
     no = frame_number(page)
     if no is None:
         raise PdfPageError(f"з імені «{page}» не видно номера кадру")
-    path, index = mapping(case_dir, frames).locate(no)
+    path, index = mapping(case_dir, frames, total).locate(no)
     doc = pdfium.PdfDocument(str(path))
     try:
         pdf_page = doc[index]

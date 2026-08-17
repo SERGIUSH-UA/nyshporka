@@ -2178,7 +2178,6 @@ wheels = [
 
 [[package]]
 name = "nyshporka"
-version = "0.1.0.dev0"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },
@@ -2263,20 +2262,29 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "aiolimiter", marker = "extra == 'all'", specifier = ">=1.1" },
     { name = "aiolimiter", marker = "extra == 'archives'", specifier = ">=1.1" },
+    { name = "aiosqlite", marker = "extra == 'all'", specifier = ">=0.20" },
     { name = "aiosqlite", marker = "extra == 'archives'", specifier = ">=0.20" },
     { name = "anyio", marker = "extra == 'agent'", specifier = ">=4.0" },
+    { name = "anyio", marker = "extra == 'all'", specifier = ">=4.0" },
+    { name = "fastapi", marker = "extra == 'all'", specifier = ">=0.115" },
     { name = "fastapi", marker = "extra == 'app'", specifier = ">=0.115" },
+    { name = "ged4py", marker = "extra == 'all'", specifier = ">=0.5" },
     { name = "ged4py", marker = "extra == 'gedcom'", specifier = ">=0.5" },
     { name = "httpx", specifier = ">=0.27" },
+    { name = "httpx", extras = ["socks"], marker = "extra == 'all'", specifier = ">=0.27" },
     { name = "httpx", extras = ["socks"], marker = "extra == 'archives'", specifier = ">=0.27" },
     { name = "jinja2", specifier = ">=3.1" },
+    { name = "keyring", marker = "extra == 'all'", specifier = ">=25" },
     { name = "keyring", marker = "extra == 'archives'", specifier = ">=25" },
     { name = "loguru", specifier = ">=0.7" },
+    { name = "lxml", marker = "extra == 'all'", specifier = ">=5.3" },
     { name = "lxml", marker = "extra == 'archives'", specifier = ">=5.3" },
     { name = "mcp", marker = "extra == 'agent'", specifier = ">=1.2" },
-    { name = "nyshporka", extras = ["app", "archives", "gedcom", "htr", "agent"], marker = "extra == 'all'" },
+    { name = "mcp", marker = "extra == 'all'", specifier = ">=1.2" },
     { name = "paddleocr", marker = "extra == 'ocr'", specifier = ">=3.5" },
+    { name = "pdfplumber", marker = "extra == 'all'", specifier = ">=0.11" },
     { name = "pdfplumber", marker = "extra == 'archives'", specifier = ">=0.11" },
     { name = "pillow", specifier = ">=10.4" },
     { name = "platformdirs", specifier = ">=4.3" },
@@ -2288,16 +2296,22 @@ requires-dist = [
     { name = "pyyaml", specifier = ">=6" },
     { name = "rapidfuzz", specifier = ">=3.10" },
     { name = "rich", specifier = ">=13.7" },
+    { name = "selectolax", marker = "extra == 'all'", specifier = ">=0.3.21" },
     { name = "selectolax", marker = "extra == 'archives'", specifier = ">=0.3.21" },
+    { name = "tenacity", marker = "extra == 'all'", specifier = ">=9" },
     { name = "tenacity", marker = "extra == 'archives'", specifier = ">=9" },
+    { name = "timm", marker = "extra == 'all'", specifier = ">=1.0" },
     { name = "timm", marker = "extra == 'htr'", specifier = ">=1.0" },
+    { name = "torch", marker = "extra == 'all'", specifier = ">=2.2" },
     { name = "torch", marker = "extra == 'htr'", specifier = ">=2.2" },
+    { name = "torchvision", marker = "extra == 'all'", specifier = ">=0.20" },
     { name = "torchvision", marker = "extra == 'htr'", specifier = ">=0.20" },
     { name = "typer", specifier = ">=0.12" },
     { name = "unidecode", specifier = ">=1.3" },
+    { name = "uvicorn", extras = ["standard"], marker = "extra == 'all'", specifier = ">=0.32" },
     { name = "uvicorn", extras = ["standard"], marker = "extra == 'app'", specifier = ">=0.32" },
 ]
-provides-extras = ["app", "archives", "gedcom", "htr", "ocr", "agent", "all"]
+provides-extras = ["agent", "all", "app", "archives", "gedcom", "htr", "ocr"]
 
 [package.metadata.requires-dev]
 dev = [

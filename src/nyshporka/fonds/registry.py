@@ -37,7 +37,13 @@ _SLUG_REPO = {v: k for k, v in REPO_SLUG.items()}
 FIELDS = ("opys", "spr_int", "spr_letter", "spr", "shifra", "title", "title_src",
           "title_alt", "commons_title", "year_from", "year_to", "years_src",
           "folios", "folios_src", "dv_no", "commons_url", "commons_size",
-          "commons_pages", "mirror_url", "mirror_size", "truncated_mirror",
+          "commons_pages",
+          # 🔴 Одна справа буває кількома файлами на Commons — витягом парафії
+          # («…села Побірка», 30 стор. при томі на 3291) або томами («Частина 1..3»).
+          # `commons_size/pages` — СУМА всіх, `commons_size_max` — найбільший
+          # (за ним міряють обрізаність дзеркала), `commons_parts` — склад JSON'ом.
+          "commons_files", "commons_kind", "commons_size_max", "commons_parts",
+          "mirror_url", "mirror_size", "truncated_mirror",
           "on_disk", "src_page", "page_quality", "num_src", "surnames",
           # 🎞 FamilySearch: окремий канал доступу до справи. `fs_dgs` — те, за
           # чим плівку відкривають; для фондів без оцифровки на Commons це
@@ -50,6 +56,7 @@ FIELDS = ("opys", "spr_int", "spr_letter", "spr", "shifra", "title", "title_src"
 #: поля, яких стара схема не має → `None`
 _LEGACY_UNKNOWN = ("title_alt", "commons_title", "years_src", "folios", "folios_src",
                    "dv_no", "commons_url", "commons_size", "commons_pages",
+                   "commons_files", "commons_kind", "commons_size_max", "commons_parts",
                    "mirror_url", "mirror_size", "truncated_mirror", "on_disk",
                    "src_page", "page_quality", "num_src", "surnames",
                    "fs_dgs", "fs_url", "fs_record_type", "fs_place", "fs_frames",

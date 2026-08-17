@@ -1,0 +1,45 @@
+{
+ "version": 1,
+ "model": "pysar_cyr_v17.pt+diak_v4",
+ "device": "cuda:0",
+ "script": "cyrillic",
+ "started": "2026-08-12T12:14:00",
+ "updated": "2026-08-12T12:14:32",
+ "pages": {
+  "0001.jpg": {
+   "orient": 0,
+   "detector": "side:diak_v4",
+   "retried": false,
+   "guarded": false,
+   "lines": 14,
+   "chars": 243,
+   "conf": null,
+   "sec": null
+  },
+  "0012.jpg": {
+   "orient": 0,
+   "detector": "side:diak_v4",
+   "retried": false,
+   "guarded": false,
+   "lines": 18,
+   "chars": 623,
+   "conf": null,
+   "sec": null
+  },
+  "0015.jpg": {
+   "orient": 0,
+   "detector": "side:diak_v4",
+   "retried": false,
+   "guarded": false,
+   "lines": 40,
+   "chars": 1129,
+   "conf": null,
+   "sec": null
+  }
+ },
+ "done": true,
+ "failed": [],
+ "case_key": "DAHMO/315/159",
+ "frames_total": 26,
+ "sample": true
+}

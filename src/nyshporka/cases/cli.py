@@ -399,7 +399,9 @@ def cmd_opys(key: str = typer.Argument(..., help="DAHMO/230/43 або DAHMO/230/
     console.print(f"  на диску: {row.get('on_disk') or '[dim]—[/dim]'}")
     console.print(f"  [dim]джерела рядка: {row.get('sources')}[/dim]")
     if not row.get("on_disk") and cs:
-        console.print(f"\n  взяти в роботу: [bold]uv run nysh cases take "
+        # 🔴 `take` і `show` живуть ЛИШЕ в megen CLI (`nysh cases` має build/list),
+        # тож підказка з `nysh` обривала роботу на «No such command 'take'».
+        console.print(f"\n  взяти в роботу: [bold]uv run megen cases take "
                       f"{repo}/{fond}/{opys}/{spr}{letter}[/bold]")
 
 
@@ -592,7 +594,7 @@ def cmd_take(key: str = typer.Argument(..., help="DAHMO/230/43 або DAHMO/230/
                       "meta.json[/yellow]")
 
     console.print(f"\n[green]✅ {repo} {fond}-{opys}-{spr}{letter} у роботі.[/green] Далі:")
-    console.print(f"  1. [bold]nysh cases show {repo}/{fond}/{spr}{letter}[/bold] — картка")
+    console.print(f"  1. [bold]megen cases show {repo}/{fond}/{spr}{letter}[/bold] — картка")
     if row.get("num_src") == "interp":
         console.print("  2. [red]звірити ШИФРУ оком[/red] — номер відновлено, "
                       "див. meta.json → shifra_needs_eye")

@@ -251,6 +251,11 @@ class CasesArgs(BaseModel):
     htr: str = Field(default="", description="none | partial | pysar | diak | both")
     year: str = Field(default="", description="рік або діапазон «1840-1860»")
     place: str = ""
+    # ⚠ Прокинуто, бо `cases stats` радить `nysh cases list --kind unfiled` —
+    # а фільтр був лише в дослідницькому CLI, тобто скопійована порада не
+    # працювала. Шар даних (`db.query_rows`) `kind` приймав від початку.
+    kind: str = Field(default="",
+                      description="case | bundle | unfiled (матеріал без шифри)")
     limit: int = Field(default=60, ge=1, le=500)
 
 
@@ -268,7 +273,7 @@ def cases_list(a: CasesArgs) -> Envelope:
 
     try:
         rows = db.query_rows(q=a.q, repo=a.repo, htr=a.htr, year=a.year,
-                             place=a.place, limit=a.limit)
+                             place=a.place, kind=a.kind, limit=a.limit)
     except FileNotFoundError:
         # 🔴 «Реєстру ще немає» — це НОРМАЛЬНИЙ стан щойно створеного простору,
         # а не поламка. Відмова тут була першим, що бачив новачок, відкривши
@@ -554,22 +559,107 @@ def setup_check(_: NoArgs) -> Envelope:
     прикладі» віддавала сирий JSON про середовище рушіїв — тобто відповідала
     не на те питання й не тими словами.
     """
+    from nyshporka.core.workspace import workspace
+    from nyshporka.setup import sample as S
     from nyshporka.setup.doctor import run
 
     checks = [{"name": c.name, "level": c.level, "detail": c.detail, "fix": c.fix}
               for c in run()]
     worst = ("fail" if any(c["level"] == "fail" for c in checks)
              else "warn" if any(c["level"] == "warn" for c in checks) else "ok")
+    # 🔴 Названо окремим полем, бо це не поламка машини: зразок або вже
+    # розгорнутий у просторі, або його треба розгорнути однією командою — і
+    # плутати це з «машина не готова» означало б посилати людину лагодити те,
+    # що справне.
+    try:
+        has_sample = S.installed(workspace())
+    except Exception:
+        has_sample = False          # простору ще немає — питання передчасне
     env = ok({"checks": checks, "level": worst,
               "ready": worst == "ok",
-              # 🔴 Названо окремим полем, бо це не поламка машини, а межа
-              # версії: сказати «не готово» без цієї різниці означало б
-              # послати людину лагодити те, що справне.
-              "sample_case": False})
+              "sample_case": has_sample,
+              "sample_available": S.sample_dir() is not None})
     if worst != "ok":
         env.warn("not_ready",
                  "читання рукопису на цій машині поки не запуститься — нижче "
                  "написано, чого бракує і чим це ставиться")
+    if not has_sample and env.data["sample_available"]:
+        env.warn("no_sample",
+                 "зразкову справу ще не розгорнуто — `nysh sample` покладе в "
+                 "простір три аркуші ДАХмО 315-1-159 з готовим декодом, і "
+                 "застосунок можна буде пройти наскрізь без власних сканів")
+    return env
+
+
+class SampleArgs(BaseModel):
+    force: bool = Field(default=False,
+                        description="перезаписати вже розгорнуті файли — "
+                                    "потрібно лише якщо зразок зіпсовано")
+
+
+# `agent=False`, як і в сусіднього `setup.check`: зразок розгортає ЛЮДИНА, яка
+# щойно поставила застосунок і хоче побачити, що він робить. Агент застосунку не
+# ставить, а місце в переліку tool'ів коштує — там стеля читабельності.
+@op("sample.install", summary="Розгорнути зразкову справу в просторі",
+    args=SampleArgs, agent=False, mutates=True)
+def sample_install(a: SampleArgs) -> Envelope:
+    """📖 Три аркуші справжньої архівної справи з готовим декодом.
+
+    🔴 Зразок НЕ вдає, ніби ваги вже є. Прочитати ці аркуші заново нічим —
+    моделі в цій версії не викладені; зате все, що йде після читання, працює
+    одразу: гортач із рамкою рядка, пошук у декоді, реєстр, сховище
+    прочитаного. Саме цей ланцюг людина й має побачити ДО того, як вкладе три
+    тисячі власних сканів і чекатиме ніч.
+    """
+    from nyshporka.core.workspace import workspace
+    from nyshporka.setup import sample as S
+
+    try:
+        got = S.install(workspace(), force=a.force)
+    except FileNotFoundError as exc:
+        return fail(str(exc))
+    env = ok(got)
+    if not got["runs"]:
+        env.warn("no_decode",
+                 "кадри розгорнуто, але декоду до них немає — гортач покаже "
+                 "аркуш, а пошуку в тексті не буде")
+    return env
+
+
+class BindArgs(BaseModel):
+    run: str = Field(description="ім'я теки прогону в reports/htr")
+    key: str = Field(description="ключ справи: DAHMO/315/159")
+    why: str = Field(default="", description="на чому стоїть рішення")
+
+
+# 🔴 `agent=False` — і це не економія місця в переліку, а суть операції. Вона
+# вписує РІШЕННЯ ЛЮДИНИ, найсильніше в реєстрі: воно перебиває всі п'ять
+# автоматичних каналів резолвера. Агент, якому дати цю ручку, замість «не знаю»
+# видасть правдоподібну прив'язку — а помилка тут тиха й довговічна: чужий
+# декод під правильною шифрою, з якого потім цитують знахідки. Побачити нічиї
+# прогони агент може (`cases.list`, `cases orphans`); вирішувати — ні.
+@op("cases.bind", summary="Прив'язати прогін до справи руками",
+    args=BindArgs, agent=False, mutates=True)
+def cases_bind(a: BindArgs) -> Envelope:
+    """🔗 Ремонт «нічиїх» прогонів — той, що досі вимагав текстового редактора.
+
+    Хмарний прогін пише в мету теку орендованого боксу; на цій машині її немає,
+    і прогін не зводиться до жодної справи. Декод при цьому є, рамки є, а
+    подивитись оком нічим — гортач не знає, де лежать кадри. Автомат тут
+    безсилий за побудовою, тому рішення ухвалює людина, і воно найсильніше.
+    """
+    from nyshporka.cases.resolve import bind_run
+
+    try:
+        got = bind_run(a.run, a.key, a.why)
+    except ValueError as exc:
+        return fail(str(exc))
+    env = ok(got)
+    if not a.why:
+        env.warn("no_reason",
+                 "підстава не записана — через півроку буде видно прив'язку, "
+                 "але не те, на чому вона стоїть")
+    env.stale_because(["ручні прив'язки змінено"], fix="nysh cases build")
     return env
 
 

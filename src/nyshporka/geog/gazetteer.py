@@ -266,9 +266,9 @@ def find_places(q: str, limit: int = 40, uezd: str = "",
 
     con = _con()
     nq = norm_name(q)
-    rows: dict[str, dict] = {}
+    rows: dict[str, dict[str, Any]] = {}
 
-    def _add(r, score):
+    def _add(r: sqlite3.Row, score: int) -> None:
         d = dict(r)
         d["score"] = score
         prev = rows.get(d["card"])
@@ -431,7 +431,7 @@ def siblings(card: str) -> list[dict[str, Any]]:
     return rows
 
 
-def places_for_fond(fond: str) -> dict[tuple[str, str], dict[str, str]]:
+def places_for_fond(fond: str) -> dict[tuple[str, str], dict[str, Any]]:
     """(опис, номер) → {село, парафія, тип} для всіх справ фонду в каталозі.
 
     🔑 Це те, чого реєстр опису дати не може. Село у ньому є лише тоді, коли
@@ -457,7 +457,10 @@ def places_for_fond(fond: str) -> dict[tuple[str, str], dict[str, str]]:
         return hit[1]
 
     con = _con()
-    out: dict[tuple[str, str], dict[str, str]] = {}
+    # ⚠ `Any`, а не `str`: у значенні є ще й лічильник `more` (int). Оголошений
+    # раніше `dict[str, str]` розходився з тим, що ця ж функція віддає, коли
+    # делегує в `catalog.query.places_for_fond` — а вона про це чесно каже `Any`.
+    out: dict[tuple[str, str], dict[str, Any]] = {}
     for r in con.execute(
             "SELECT c.opys, c.spr, c.doc_type, c.parish, p.village_uk, p.card "
             "FROM cases c JOIN places p ON p.card = c.card WHERE c.fond = ?",
@@ -470,8 +473,7 @@ def places_for_fond(fond: str) -> dict[tuple[str, str], dict[str, str]]:
         elif r["village_uk"] not in prev["village"]:
             # одна справа буває на кілька сіл (збірний том) — не губимо їх,
             # але й не роздуваємо: показуємо перші два й лічильник
-            prev.setdefault("more", 0)
-            prev["more"] += 1
+            prev["more"] = int(prev.get("more") or 0) + 1
             if prev["more"] == 1:
                 prev["village"] += f" · {r['village_uk']}"
     con.close()

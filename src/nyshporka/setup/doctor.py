@@ -144,7 +144,12 @@ def _torch() -> Check:
         return Check("Прискорення (GPU)", "warn",
                      f"torch {torch.__version__}, CUDA недоступна "
                      f"(зібрано під {torch.version.cuda or 'CPU'})",
-                     "nysh doctor --gpu добере колеса під вашу карту")
+                     # ⚠ Тут стояв `doctor` із прапорцем «--gpu», якого немає й
+                     # ніколи не було. Порада, що вказує в порожнє, гірша за
+                     # відсутню: людина виконує її, бачить помилку і вирішує, що
+                     # зламався застосунок. Колеса під карту добирає саме
+                     # `htr install` (`_ensure_cuda` читає compute capability).
+                     "nysh htr install добере колеса під вашу карту")
     name = torch.cuda.get_device_name(0)
     cap = ".".join(str(x) for x in torch.cuda.get_device_capability(0))
     vram = torch.cuda.get_device_properties(0).total_memory / 2**30

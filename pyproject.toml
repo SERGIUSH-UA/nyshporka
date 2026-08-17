@@ -4,7 +4,11 @@ build-backend = "hatchling.build"
 
 [project]
 name = "nyshporka"
-version = "0.1.0.dev0"
+# 🔴 Версія живе В ОДНОМУ місці — `src/nyshporka/__init__.py`. Доти, доки вона
+# стояла і тут, і там, ніщо не тримало їх рівними: `nysh version` друкує
+# `__version__`, а `pip show` — метадані колеса, тож розбіжність з'явилась би
+# тихо й показувалась би різним людям по-різному.
+dynamic = ["version"]
 description = "Читання рукописних архівних справ і пошук прізвища в них — для генеалогів"
 readme = "README.md"
 license = "AGPL-3.0-or-later"
@@ -13,9 +17,16 @@ authors = [{ name = "Serhii Dalishchynskyi" }]
 keywords = ["genealogy", "htr", "handwriting", "archives", "ocr", "kraken", "parseq"]
 classifiers = [
   "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Environment :: Web Environment",
   "Intended Audience :: End Users/Desktop",
   "Intended Audience :: Science/Research",
   "Natural Language :: Ukrainian",
+  # Windows першою не за алфавітом: аудиторія — генеалоги зі сканами на
+  # зовнішніх дисках, і саме там живуть junction'и, під які писані гарди шляхів.
+  "Operating System :: Microsoft :: Windows",
+  "Operating System :: POSIX :: Linux",
+  "Operating System :: MacOS",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
@@ -88,7 +99,9 @@ all = ["nyshporka[app,archives,gedcom,htr,agent]"]
 
 [project.urls]
 Homepage = "https://github.com/SERGIUSH-UA/nyshporka"
+Source = "https://github.com/SERGIUSH-UA/nyshporka"
 Issues = "https://github.com/SERGIUSH-UA/nyshporka/issues"
+Changelog = "https://github.com/SERGIUSH-UA/nyshporka/blob/main/CHANGELOG.md"
 
 [project.scripts]
 nysh = "nyshporka.cli:main"
@@ -119,12 +132,19 @@ dev = [
   "httpx>=0.27",
 ]
 
+[tool.hatch.version]
+path = "src/nyshporka/__init__.py"
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/nyshporka"]
-# Дані пакета (маніфест рушіїв, перелік паків, каталоги архівів, фронт) —
-# частина коду, а не ресурси збірки: без них застосунок не знає ні що качати,
-# ні чим читати.
-artifacts = ["src/nyshporka/**/data/*", "src/nyshporka/daemon/static/*"]
+# Дані пакета (маніфест рушіїв, перелік паків, каталоги архівів, зразкова
+# справа, фронт) — частина коду, а не ресурси збірки: без них застосунок не знає
+# ні що качати, ні чим читати.
+# 🔴 `data/**`, а не `data/*`: патерн має gitignore-семантику, де `*` НЕ
+# переходить через `/`. Зі старим правилом кадри зразка
+# (`setup/data/sample/frames/*.jpg`) не потрапили б у колесо — локально й у
+# тестах усе працює, бо файли лежать на диску, а ламається рівно в користувача.
+artifacts = ["src/nyshporka/**/data/**", "src/nyshporka/daemon/static/*"]
 
 [tool.ruff]
 line-length = 100

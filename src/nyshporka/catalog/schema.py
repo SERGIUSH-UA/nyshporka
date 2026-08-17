@@ -112,7 +112,12 @@ CREATE TABLE cases (
     year_from INTEGER, year_to INTEGER, years_src TEXT,
     folios TEXT, folios_src TEXT, dv_no TEXT,
     uezd TEXT,                       -- матеріалізовано на збірці, не regex у запиті
+    -- commons_size/pages — СУМА всіх файлів справи (їх буває кілька: томи
+    -- «Частина 1..3» або витяг однієї парафії поруч із повним томом);
+    -- commons_size_max — найбільший файл, за ним міряють обрізаність дзеркала
     commons_url TEXT, commons_size INTEGER, commons_pages INTEGER,
+    commons_files INTEGER, commons_kind TEXT,
+    commons_size_max INTEGER, commons_parts TEXT,
     mirror_url TEXT, mirror_size INTEGER, truncated_mirror INTEGER,
     src_page TEXT, page_quality TEXT, num_src TEXT, surnames TEXT,
     cover_place TEXT, cover_letters TEXT, cover_note TEXT,

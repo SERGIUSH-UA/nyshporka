@@ -82,6 +82,26 @@ def test_this_repository_is_clean():
         f"{f.path}:{f.line_no} [{f.rule.id}] {f.excerpt}" for f in findings[:20])
 
 
+def test_this_repository_history_is_clean():
+    """🔴 Історія — не копія робочого дерева, і чистого дерева недостатньо.
+
+    Git не забуває: рядок, доданий і виправлений наступним комітом, лишається в
+    історії назавжди. Доти, доки гілка не опублікована, це коштує один
+    `filter-branch`; після push — переписування чужих клонів.
+
+    Перевірено на живому випадку: стара назва CLI (`megen geog build`) лишалась
+    у чотирьох блобах двох комітів, тоді як обидва файли в дереві були вже
+    виправлені. `test_this_repository_is_clean` цього не бачив за побудовою, і
+    єдиним місцем, де провал спливав, був джоб CI — тобто вже після push, коли
+    дешевого виправлення не лишається.
+    """
+    findings = []
+    for rel, text, where in scan.iter_history():
+        findings += scan.scan_text(rel, text, where)
+    assert not findings, "\n".join(
+        f"{f.path}:{f.line_no} [{f.rule.id}] {f.excerpt}" for f in findings[:20])
+
+
 def test_history_mode_still_applies_the_allowlist():
     """🔴 Ворота, які завжди червоні, вимикають — і тоді вони не ловлять нічого.
 

@@ -1,0 +1,100 @@
+name: Release
+
+# Тег — єдиний тригер. Реліз «з кнопки» на довільній гілці означав би, що
+# опубліковане колесо неможливо пов'язати з точкою в історії; тег цю точку
+# називає, і саме він потрапляє в GitHub Release.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  # 🔒 Ті самі ворота, що в CI, і ЗНОВУ перед публікацією, а не «вони вже
+  # проходили на PR». Тег ставлять на коміт, який міг не бачити жодного PR, а
+  # ціна пропуску тут вища за будь-де: колесо на PyPI не видаляється — видалений
+  # реліз лишається у дзеркалах і кешах.
+  private-data:
+    name: приватні дані
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python tools/scan_private.py
+      - run: python tools/scan_private.py --history
+
+  build:
+    name: зібрати
+    needs: private-data
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: uv build
+        run: uv build
+      # 🔴 Приймач — не «файл зібрався», а що версія колеса ДОРІВНЮЄ тегу.
+      # Розбіжність тут дає реліз `v0.2.0`, усередині якого лежить 0.1.0: pip
+      # поставить друге, а людина шукатиме перше й вирішить, що зламався pip.
+      - name: версія колеса == тег
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          got=$(ls dist/*.whl | sed -E 's/.*nyshporka-([^-]+)-py3.*/\1/')
+          test "$tag" = "$got" || { echo "тег $tag ≠ версія колеса $got"; exit 1; }
+          echo "версія збігається: $got"
+      # Ставиться з нуля — той самий приймач, що і в CI: пакет, у якому імпорт
+      # проходить, але `nysh` не стартує, для користувача не існує.
+      - name: колесо ставиться й запускається
+        run: |
+          python -m venv /tmp/clean
+          /tmp/clean/bin/pip install --upgrade pip
+          /tmp/clean/bin/pip install dist/*.whl
+          /tmp/clean/bin/nysh version
+          /tmp/clean/bin/nysh info
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  github-release:
+    name: GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
+          # Передрелізи (0.1.0a1, rc) не мають підмінювати «latest» у людей,
+          # які ставлять за посиланням на останній реліз.
+          prerelease: ${{ contains(github.ref_name, 'a') || contains(github.ref_name, 'b') || contains(github.ref_name, 'rc') }}
+
+  pypi:
+    name: PyPI
+    needs: build
+    runs-on: ubuntu-latest
+    # 🔴 Trusted Publishing (OIDC), а не токен у секретах. Довготривалий токен
+    # публікації в репозиторії, який читає чужі PR, — рівно та річ, яку ворота
+    # проти приватних даних і покликані не пускати.
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1

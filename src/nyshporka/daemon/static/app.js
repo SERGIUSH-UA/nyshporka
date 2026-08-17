@@ -82,7 +82,12 @@ const STRINGS = {
     'check.why': 'Перевірка робиться до того, як ви вкладете тисячі сканів і чекатимете ніч.',
     'check.ready': 'Усе на місці — можна читати.',
     'check.notready': '⚠ Читання поки не запуститься. Нижче — чого бракує і чим це ставиться.',
-    'check.nosample': 'Зразкової справи в застосунок поки не вкладено, тож перевірка показує стан машини, а не приклад читання.',
+    'check.nosample': 'Зразкової справи в цій збірці немає, тож перевірка показує стан машини, а не приклад читання.',
+    'check.sample.title': 'Зразкова справа розгорнута',
+    'check.sample.hint': 'У застосунок вкладено три аркуші справи ДАХмО 315-1-159 (1821-1822) з готовим машинним декодом. Прочитати їх заново нічим — ваги моделей ще не викладені; зате гортач, пошук у декоді й реєстр працюють на них одразу.',
+    'check.sample.do': 'Розгорнути зразкову справу',
+    'check.sample.ready': 'Зразкова справа вже в просторі — її видно в реєстрі й у гортачі.',
+    'check.sample.next': 'Далі: відкрийте гортач і клацніть рядок — видно буде, ЗВІДКИ взявся текст.',
     'case.dirhint': 'Шлях до теки скопіюйте з адресного рядка провідника. Вибрати теку віконцем браузер не дозволяє — це його обмеження, не застосунку.',
     'sources.q': 'Село, прізвище або слово із заголовка справи',
     'sources.find': 'Шукати',
@@ -215,7 +220,12 @@ const STRINGS = {
     'check.why': 'Run this before you commit thousands of scans and wait a night.',
     'check.ready': 'Everything is in place — you can read.',
     'check.notready': '⚠ Reading will not start yet. Below: what is missing and what installs it.',
-    'check.nosample': 'No sample case ships with the app yet, so this shows the state of the machine, not an example of reading.',
+    'check.nosample': 'This build ships no sample case, so the check shows the state of the machine, not an example of reading.',
+    'check.sample.title': 'Sample case deployed',
+    'check.sample.do': 'Deploy the sample case',
+    'check.sample.hint': 'Three leaves of case DAHMO 315-1-159 (1821-1822) ship with the app, machine-decoded already. Reading them anew takes model weights, which are not published yet — but the viewer, decode search and the case registry work on them right away.',
+    'check.sample.ready': 'The sample case is already in your workspace — it shows up in the registry and in the viewer.',
+    'check.sample.next': 'Next: open the viewer and click a line — you will see WHERE the text came from.',
     'case.dirhint': 'Copy the folder path from your file manager address bar. Picking a folder with a dialog is not something the browser allows — its limitation, not the app’s.',
     'sources.q': 'Village, surname, or a word from the case title',
     'sources.find': 'Search',
@@ -402,6 +412,21 @@ function busy() { setView(`<p class="muted">${t('common.loading')}</p>`); }
 
 function failure(env) {
   setView(`<div class="warn err">${t('common.error')}: ${esc(env.error || '?')}</div>`);
+}
+
+/**
+ * 📖 Що сказати про зразкову справу — три РІЗНІ стани, і плутати їх дорого.
+ *
+ * «Зразка немає в цій збірці» — межа версії, лагодити нічого. «Є, але не
+ * розгорнутий» — одна кнопка. «Розгорнутий» — запрошення в гортач. Спільне
+ * формулювання на всі три посилало б людину лагодити те, що справне, або
+ * ховало б дію, яка є.
+ */
+function sampleBlock(d) {
+  if (!d.sample_available) return `<p class="muted">${t('check.nosample')}</p>`;
+  if (d.sample_case) return `<p class="muted">✅ ${t('check.sample.ready')}</p>`;
+  return `<p class="muted">${t('check.sample.hint')}</p>
+    <p><button data-act="sample.install">${t('check.sample.do')}</button></p>`;
 }
 
 // ── екрани ───────────────────────────────────────────────────────────────────
@@ -809,7 +834,23 @@ const ACTIONS = {
       ${env.data.ready ? `<div class="warn">✅ ${t('check.ready')}</div>`
         : `<div class="warn">${t('check.notready')}</div>`}
       <table><tbody>${rows}</tbody></table>
-      <p class="muted">${t('check.nosample')}</p>`);
+      ${sampleBlock(env.data)}`);
+  },
+
+  // 📖 Зразок — єдина дія на цьому екрані, що щось МІНЯЄ. Вона стоїть саме
+  // тут, бо питання «чи воно працює» і відповідь «ось перевірте на трьох
+  // аркушах» — одне питання, і розводити їх по різних екранах означало б
+  // сховати відповідь від того, хто щойно поставив застосунок.
+  'sample.install': async () => {
+    busy();
+    const env = await callOp('sample.install', {});
+    if (!env.ok) return failure(env);
+    const d = env.data;
+    setView(`<h2>📖 ${t('check.sample.title')}</h2>
+      <p>${esc(d.shifra)} — ${d.frames.length}/${d.frames_total}</p>
+      <p class="muted">${esc(d.case_dir)}</p>
+      <p class="muted">${t('check.sample.next')}</p>
+      <p><button data-act="nav" data-arg="view">${t('nav.view')}</button></p>`);
   },
 
   'geog.find': async (ev) => {
@@ -953,7 +994,8 @@ const ACTIONS = {
                  дія, заради якої пошук і робився. */''}
           ${h.name && h.page
             ? `<button data-act="hit.eye" data-run="${esc(h.name)}"
-                 data-page="${esc(h.page)}" data-line="${esc(h.line_no ?? '')}"
+                 data-page="${esc(h.page)}"
+                 data-line="${esc(h.line_index ?? '')}"
                  title="${t('hit.eye')}">👁</button>` : ''}
           ${(h.key || h.shifra) && (h.scan || h.page)
             ? `<button data-act="hit.note" data-case="${esc(h.key || h.shifra)}"

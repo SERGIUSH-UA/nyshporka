@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import subprocess
 import sys
@@ -116,6 +117,29 @@ ALLOW: tuple[tuple[str, str], ...] = (
     # без токена → 403» без токена в коді неможлива, але сусідній тест, який
     # випадково принесе справжній ключ, мусить упертись у ті самі ворота.
     ("tests/test_daemon.py", "bearer"),
+    # 🔴 ТРЕТЯ РОЛЬ прізвища, і межа проходить так само по ролі, а не по слову.
+    # Вкладена зразкова справа — це ЦИТАТА З ПЕРШОДЖЕРЕЛА: машинний декод трьох
+    # аркушів ДАХмО ф.315 оп.1 спр.159 (1821-1822), документа, що зберігається в
+    # держархіві й доступний будь-кому за шифрою. Прізвище стоїть там, де його
+    # написав писар 1822 року, а не в списку форм пошуку й не в фікстурі з
+    # ідентифікаторами живих осіб — тобто це не ознака, що сюди приїхав шматок
+    # приватного конвеєра. Рішення дослідника 2026-08-17.
+    #
+    # ⚠ Виняток ТОЧКОВИЙ саме тому, що роль вирішує все: той самий корінь у
+    # будь-якому іншому файлі пакета лишається знахідкою й валить ворота.
+    ("src/nyshporka/setup/data/sample/*", "clan-surname"),
+    ("src/nyshporka/setup/data/sample/*/*", "clan-surname"),
+    ("src/nyshporka/setup/data/sample/*/*/*", "clan-surname"),
+    # Тест зразка мусить шукати саме те слово, яке в зразку є: приймач ланцюга
+    # «пошук у декоді → гортач показує ТОЙ САМИЙ рядок» інакше нічого не
+    # доводить (див. `test_sample_deploys_a_working_chain`).
+    ("tests/test_setup.py", "clan-surname"),
+    # 🔴 `cases/cli.py` обслуговує ОБА конвеєри й у публічному пакеті нікуди не
+    # підключений (до `nysh` ведуть власні `cases build|list|bind`). Команд
+    # `take`/`show` у `nysh` немає, тож підказка про сусідній інструмент тут
+    # ПРАВДИВА — а замінити її на `nysh` означало б повернути ту саму пораду в
+    # нікуди, яку паралельна сесія щойно й виправляла.
+    ("src/nyshporka/cases/cli.py", "private-repo"),
 )
 
 
@@ -147,10 +171,15 @@ def scan_text(rel: str, text: str, where: str | None = None) -> list[Finding]:
     """
     out: list[Finding] = []
     label = where or rel
+    # 🔴 Винятки залежать від ФАЙЛА, не від рядка, тож рахуються один раз. У
+    # першій редакції `_allowed` стояв усередині подвійного циклу й конструював
+    # `Path` для glob-матчингу на кожну пару (рядок × правило): на історії це
+    # 1.65 млн викликів і 49 секунд там, де роботи на секунду.
+    rules = [r for r in RULES if not _allowed(rel, r.id)]
+    if not rules:
+        return out
     for i, line in enumerate(text.splitlines(), 1):
-        for rule in RULES:
-            if _allowed(rel, rule.id):
-                continue
+        for rule in rules:
             m = rule.pattern.search(line)
             if m:
                 frag = line.strip()
@@ -174,14 +203,28 @@ Item = tuple[str, str, str]
 
 
 def iter_worktree() -> list[Item]:
+    """🔴 `SKIP_DIRS` підрізає ОБХІД, а не відсіює результат.
+
+    `rglob("*")` із перевіркою після факту все одно заходить усередину `.venv` і
+    `node_modules` — а це десятки тисяч файлів, тобто 34 секунди на кожен запуск
+    воріт, які стоять у pre-commit. Тут дешевше не «не читати», а «не заходити».
+    """
     out: list[Item] = []
-    for p in ROOT.rglob("*"):
-        if not p.is_file() or any(part in SKIP_DIRS for part in p.parts):
-            continue
-        if p.suffix.lower() not in TEXT_SUFFIXES or p.stat().st_size > MAX_BYTES:
-            continue
-        rel = p.relative_to(ROOT).as_posix()
-        out.append((rel, p.read_text(encoding="utf-8", errors="replace"), rel))
+    for dirpath, dirnames, filenames in os.walk(ROOT):
+        dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
+        base = Path(dirpath)
+        for fn in filenames:
+            p = base / fn
+            if p.suffix.lower() not in TEXT_SUFFIXES:
+                continue
+            try:
+                if p.stat().st_size > MAX_BYTES:
+                    continue
+                text = p.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            rel = p.relative_to(ROOT).as_posix()
+            out.append((rel, text, rel))
     return out
 
 
@@ -203,33 +246,72 @@ def iter_staged() -> list[Item]:
     return out
 
 
+def _git_bytes(*args: str, stdin: bytes = b"") -> bytes:
+    res = subprocess.run(["git", *args], cwd=ROOT, input=stdin, capture_output=True)
+    if res.returncode != 0:
+        raise RuntimeError(f"git {' '.join(args)}: {res.stderr.decode(errors='replace')}")
+    return res.stdout
+
+
+def _batch_read(shas: list[str]) -> dict[str, bytes]:
+    """Вміст блобів одним викликом `git cat-file --batch`.
+
+    🔴 Не мікрооптимізація. Наївний варіант (`cat-file -s` + `cat-file -p` на
+    кожен об'єкт) — це два процеси на блоб, і на Windows, де запуск процесу
+    коштує дорого, весь режим `--history` займав 171 секунду. Тест, який стільки
+    думає, розробник вимикає — а це рівно ті ворота, ціна пропуску яких
+    незворотна.
+
+    Формат `--batch`: рядок `<sha> <type> <size>`, далі рівно `size` байтів
+    вмісту і `\\n`. Читаємо саме за лічильником, а не за роздільником: у
+    текстовому файлі трапляється будь-що, і розбір «до наступного порожнього
+    рядка» тихо з'їхав би на першому ж файлі з такою послідовністю.
+    """
+    if not shas:
+        return {}
+    buf = _git_bytes("cat-file", "--batch", stdin=("\n".join(shas) + "\n").encode())
+    out: dict[str, bytes] = {}
+    i = 0
+    while i < len(buf):
+        nl = buf.find(b"\n", i)
+        if nl < 0:
+            break
+        head = buf[i:nl].decode(errors="replace").split()
+        i = nl + 1
+        if len(head) != 3:          # `<sha> missing` — об'єкт зник між викликами
+            continue
+        sha, size = head[0], int(head[2])
+        out[sha] = buf[i:i + size]
+        i += size + 1               # +1 — перевід рядка після вмісту
+    return out
+
+
 def iter_history() -> list[Item]:
     """Усі версії всіх текстових файлів в історії.
 
-    Дорого, але потрібно рівно один раз — перед першим `git push`. Після нього
-    прибрати знахідку означає переписати опубліковану історію.
+    Потрібно перед кожним `push`: після нього прибрати знахідку означає
+    переписати опубліковану історію. Один об'єкт може лежати під кількома
+    іменами — беремо перше, бо виняток звіряється зі шляхом.
     """
-    out: list[Item] = []
-    seen: set[str] = set()
-    lines = _git("rev-list", "--objects", "--all").splitlines()
-    for line in lines:
+    names: dict[str, str] = {}
+    for line in _git("rev-list", "--objects", "--all").splitlines():
         sha, _, name = line.partition(" ")
-        if not name or Path(name).suffix.lower() not in TEXT_SUFFIXES or sha in seen:
+        if not name or Path(name).suffix.lower() not in TEXT_SUFFIXES:
             continue
-        seen.add(sha)
-        try:
-            size = int(_git("cat-file", "-s", sha).strip())
-        except (RuntimeError, ValueError):
-            continue
-        if size > MAX_BYTES:
-            continue
-        try:
-            # Шлях для звірки — чистий; коміт-об'єкт іде лише в підпис. Змішавши
-            # їх, ми зробили б винятки недієвими саме тут (див. `scan_text`).
-            out.append((name, _git("cat-file", "-p", sha), f"{name} @{sha[:8]}"))
-        except RuntimeError:
-            continue
-    return out
+        names.setdefault(sha, name)
+    # Розміри — окремим пакетом: `--batch-check` віддає лише заголовки, тож
+    # величезний блоб не доводиться тягти в пам'ять, щоб дізнатись, що він завеликий.
+    small: list[str] = []
+    head = _git_bytes("cat-file", "--batch-check",
+                      stdin=("\n".join(names) + "\n").encode()).decode(errors="replace")
+    for line in head.splitlines():
+        parts = line.split()
+        if len(parts) == 3 and parts[1] == "blob" and int(parts[2]) <= MAX_BYTES:
+            small.append(parts[0])
+    # Шлях для звірки — чистий; коміт-об'єкт іде лише в підпис. Змішавши їх, ми
+    # зробили б винятки недієвими саме тут (див. `scan_text`).
+    return [(names[sha], blob.decode("utf-8", errors="replace"), f"{names[sha]} @{sha[:8]}")
+            for sha, blob in _batch_read(small).items()]
 
 
 def main() -> int:

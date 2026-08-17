@@ -356,6 +356,41 @@ def doctor(
 
 
 @app.command()
+def sample(
+    force: bool = typer.Option(False, "--force",
+                               help="перезаписати вже розгорнуті файли"),
+    as_json: bool = typer.Option(False, "--json"),
+) -> None:
+    """Розгорнути вкладену зразкову справу — щоб пройти застосунок без сканів.
+
+    Три аркуші ДАХмО ф.315 оп.1 спр.159 (1821-1822) з готовим машинним декодом
+    двома голосами. Прочитати їх заново нічим — ваги в цій версії не викладені;
+    зате гортач, пошук у декоді й реєстр працюють на них одразу.
+    """
+    from nyshporka.core.workspace import WorkspaceError, workspace
+    from nyshporka.setup import sample as S
+
+    try:
+        got = S.install(workspace(), force=force)
+    except WorkspaceError:
+        console.print("[red]простору ще немає[/red] — спершу `nysh init`")
+        raise typer.Exit(code=1) from None
+    except FileNotFoundError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1) from None
+    if as_json:
+        console.print_json(data=got)
+        return
+    console.print(f"✅ {got['shifra']} — {len(got['frames'])} аркушів "
+                  f"із {got['frames_total']}")
+    console.print(f"   тека: {got['case_dir']}")
+    for run in got["runs"]:
+        console.print(f"   декод: {run}")
+    console.print("[dim]далі: `nysh serve` → «Гортач», або "
+                  "`nysh find Липовеньке`[/dim]")
+
+
+@app.command()
 def read(
     case_dir: str = typer.Argument(..., help="ПЛАСКА тека зі сканами справи"),
     out: str = typer.Option("", "--out", help="куди класти текст"),
@@ -586,12 +621,15 @@ def cases_list_cmd(
     q: str = typer.Option("", "--q", help="підрядок: шифра, назва, місце"),
     repo: str = typer.Option("", "--repo"),
     year: str = typer.Option("", "--year", help="рік або «1840-1860»"),
+    kind: str = typer.Option("", "--kind",
+                             help="case | bundle | unfiled (матеріал без шифри)"),
     limit: int = typer.Option(40, "--limit"),
 ) -> None:
     """Перелік справ із станом обробки."""
     from nyshporka import ops as O
 
-    env = O.call("cases.list", {"q": q, "repo": repo, "year": year, "limit": limit})
+    env = O.call("cases.list", {"q": q, "repo": repo, "year": year,
+                                "kind": kind, "limit": limit})
     if not env.ok:
         console.print(f"[red]{env.error}[/red]")
         raise typer.Exit(code=1)
@@ -609,6 +647,29 @@ def cases_list_cmd(
     if env.stale and env.stale.is_stale:
         console.print(f"[yellow]⚠ зріз застарів[/yellow] [dim]"
                       f"{'; '.join(env.stale.reasons[:2])} — nysh cases build[/dim]")
+
+
+@cases_app.command("bind")
+def cases_bind_cmd(
+    run: str = typer.Argument(..., help="ім'я теки прогону в reports/htr"),
+    key: str = typer.Argument(..., help="ключ справи: DAHMO/315/159"),
+    why: str = typer.Option("", "--why", help="на чому стоїть рішення"),
+) -> None:
+    """Прив'язати прогін до справи руками — коли автомат не може.
+
+    Найчастіший випадок: прогін зроблено в хмарі, і в його меті лишився шлях
+    орендованого боксу. Декод є, а показати аркуш нічим, бо невідомо, де кадри.
+    """
+    from nyshporka import ops as O
+
+    env = O.call("cases.bind", {"run": run, "key": key, "why": why})
+    if not env.ok:
+        console.print(f"[red]{env.error}[/red]")
+        raise typer.Exit(code=1)
+    console.print(f"✅ {env.data['run']} → {env.data['key']}")
+    for w in env.warnings:
+        console.print(f"[yellow]⚠ {w.text}[/yellow]")
+    console.print("[dim]реєстр треба перезібрати: nysh cases build[/dim]")
 
 
 pages_app = typer.Typer(help="Облік переглянутого оком.", no_args_is_help=True)

@@ -8,6 +8,7 @@ from __future__ import annotations
 import subprocess
 import sys
 
+import pytest
 from typer.testing import CliRunner
 
 from nyshporka import __version__
@@ -20,6 +21,24 @@ def test_version_command():
     res = runner.invoke(app, ["version"])
     assert res.exit_code == 0
     assert __version__ in res.stdout
+
+
+def test_version_matches_package_metadata():
+    """🔴 Одна версія на два питання: «що каже застосунок» і «що поставив pip».
+
+    Доки версія стояла окремо в `pyproject.toml` і в `__init__.py`, ніщо не
+    тримало їх рівними — а розходяться вони тихо й показуються різним людям:
+    `nysh version` друкує `__version__`, `pip show` і сторінка PyPI беруть
+    метадані колеса. Тепер джерело одне (`[tool.hatch.version]`), і цей тест —
+    приймач того, що воно й лишилось одним.
+    """
+    from importlib.metadata import PackageNotFoundError, version
+
+    try:
+        installed = version("nyshporka")
+    except PackageNotFoundError:          # запуск із дерева без установки
+        pytest.skip("пакет не встановлений — звіряти нема з чим")
+    assert installed == __version__
 
 
 def test_info_reports_missing_extras_with_the_fix():

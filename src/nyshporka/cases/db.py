@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from dataclasses import asdict, fields
-from datetime import UTC, datetime, timezone  # noqa: F401  (timezone — у staleness)
+from datetime import UTC, datetime, timedelta, timezone  # noqa: F401  (timezone — у staleness)
 from pathlib import Path
 from typing import Any
 
@@ -339,6 +339,15 @@ def staleness(db_path: Path | None = None, *, quick: bool = False) -> dict[str, 
         # мітки збіглись — це НЕ доказ свіжості, а лише «через застосунок
         # нічого не міняли»
         return {"built": built_raw, "stale": False, "unknown": True, "reasons": []}
+
+    # 🔴 Допуск в одну секунду, і він не «про всяк випадок». Мітка збірки
+    # пишеться з `timespec="seconds"`, тобто ОБРІЗАЄТЬСЯ вниз, а mtime
+    # порівнюється з мікросекундами. `cases build --rescan` сам перезаписує
+    # `case_library.json` — і той опиняється на частку секунди «пізніше» за
+    # власну збірку: щойно зібраний реєстр одразу звітував «зріз застарів».
+    # Заміряно на чистому просторі: built 13:47:16, mtime 13:47:16.745.
+    # Ворота, які завжди червоні, вимикають — і тоді вони не ловлять нічого.
+    built = built + timedelta(seconds=1)
 
     reasons: list[str] = []
     for label, target in (

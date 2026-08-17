@@ -1,0 +1,52 @@
+{
+ "version": 1,
+ "model": "pysar_cyr_v17.pt",
+ "device": "cuda:0",
+ "engine": "parseq",
+ "script": "cyrillic",
+ "enhance": "auto",
+ "started": "2026-08-12T12:14:00",
+ "pages": {
+  "0001.jpg": {
+   "orient": 0,
+   "detector": "forced0",
+   "retried": false,
+   "guarded": false,
+   "lines": 14,
+   "chars": 258,
+   "conf": 0.9593,
+   "sec": 3.3,
+   "enhanced": "clahesmooth",
+   "contrast": 42.0
+  },
+  "0012.jpg": {
+   "orient": 0,
+   "detector": "forced0",
+   "retried": false,
+   "guarded": false,
+   "lines": 18,
+   "chars": 628,
+   "conf": 0.9649,
+   "sec": 7.4,
+   "contrast": 111.0
+  },
+  "0015.jpg": {
+   "orient": 0,
+   "detector": "forced0",
+   "retried": false,
+   "guarded": false,
+   "lines": 40,
+   "chars": 1146,
+   "conf": 0.9783,
+   "sec": 12.2,
+   "enhanced": "clahesmooth",
+   "contrast": 69.0
+  }
+ },
+ "failed": [],
+ "done": true,
+ "updated": "2026-08-12T12:14:32",
+ "case_key": "DAHMO/315/159",
+ "frames_total": 26,
+ "sample": true
+}

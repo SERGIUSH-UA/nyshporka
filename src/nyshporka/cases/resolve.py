@@ -190,6 +190,41 @@ def bundles() -> dict[str, dict[str, Any]]:
     return dict(load_overrides().get("bundles") or {})
 
 
+def bind_run(run: str, key: str, why: str = "") -> dict[str, Any]:
+    """Прив'язати прогін до справи руками — і записати ЧОМУ.
+
+    🔴 Досі це можна було зробити лише текстовим редактором у
+    `data/cases/overrides.json`, а підказку про сам файл друкував `cases
+    orphans`. Тобто найчастіший ремонт («прогін не зводиться до справи, бо в
+    меті шлях орендованого боксу») вимагав від людини знати розкладку
+    внутрішнього файлу — і саме тому третина декоду лишалась «нічиєю».
+
+    `why` не косметика: рішення людини сильніше за будь-який автомат, тож через
+    півроку має бути видно, на чому воно стояло. Порожнє поле тут — та сама
+    вигадка, що й прив'язка без підстави.
+    """
+    if not run or "/" in run or "\\" in run:
+        raise ValueError(f"ім'я прогону негодяще: {run!r}")
+    if not key:
+        raise ValueError("ключ справи обов'язковий")
+    data = dict(load_overrides())
+    runs = dict(data.get("runs") or {})
+    runs[run] = {"key": key, **({"why": why} if why else {})}
+    data["runs"] = runs
+    OVERRIDES_PATH.parent.mkdir(parents=True, exist_ok=True)
+    tmp = OVERRIDES_PATH.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=1) + "\n",
+                   encoding="utf-8")
+    tmp.replace(OVERRIDES_PATH)
+    # 🔴 Кеші скидаємо ОБИДВА. `load_overrides` і `_run_overrides` кешовані
+    # `lru_cache`, тож без цього правка підхопилась би лише після рестарту
+    # процесу — а людина, яка щойно прив'язала прогін, одразу тисне «показати»
+    # і бачить ту саму відмову. Виглядає це як «не спрацювало».
+    load_overrides.cache_clear()
+    _run_overrides.cache_clear()
+    return {"run": run, "key": key, "why": why, "path": str(OVERRIDES_PATH)}
+
+
 def _tokens(name: str) -> list[str]:
     return [t for t in re.split(r"[-_\s]+", name.strip()) if t]
 

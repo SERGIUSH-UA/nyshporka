@@ -127,6 +127,12 @@ def test_advised_flags_exist_too() -> None:
     `nysh doctor` радив `nysh models get --all`; команда була, прапорця не
     було, і перевірка самих імен команд це пропускала. Для людини різниці
     немає: скопійована порада не працює, а вона щойно поставила застосунок.
+
+    ⚠ Backtick перед `nysh` тут НЕ вимагається, і це не дрібниця. Перша редакція
+    патерну починалася з backtick'а — і пропустила `nysh doctor --gpu` у полі
+    `fix` самого доктора, бо поради в `Check(...)` пишуться голим текстом (їх
+    друкує rich, а не markdown). Прапорця `--gpu` не існувало ніколи, тобто
+    рівно та вада, від якої стоїть цей тест, жила в його ж підопічному файлі.
     """
     import typer.main
 
@@ -150,7 +156,7 @@ def test_advised_flags_exist_too() -> None:
 
     walk(app)
     bad: list[str] = []
-    pattern = re.compile(r"`nysh ([a-z][a-z-]*(?: [a-z][a-z-]*)?)((?: --?[\w-]+)+)")
+    pattern = re.compile(r"\bnysh ([a-z][a-z-]*(?: [a-z][a-z-]*)?)((?: --?[\w-]+)+)")
     files = [*SRC.rglob("*.py"), *SRC.rglob("*.js"), README]
     for path in files:
         if "patches" in path.parts:
@@ -162,7 +168,9 @@ def test_advised_flags_exist_too() -> None:
                 continue
             for flag in re.findall(r"--?[\w-]+", tail):
                 if flag not in known:
-                    bad.append(f"{path.name}: nysh {cmd} {flag}")
+                    # Шлях від кореня, а не `path.name`: файлів `cli.py` у
+                    # пакеті сім, і саме одне ім'я змушувало шукати вручну.
+                    bad.append(f"{path.relative_to(SRC.parent)}: nysh {cmd} {flag}")
     assert not bad, f"порада з неіснуючим прапорцем: {sorted(set(bad))}"
 
 
@@ -288,3 +296,34 @@ def test_the_decode_denominator_is_read_from_the_right_field() -> None:
     assert block, "гілка пошуку по декоду змінилась — перевірку треба переписати"
     assert "pages_done" in block.group(0), \
         "знаменник рахується не з того поля — див. htr_store.list_cases()"
+
+
+# ── 5. схема аргументів мусить відповідати підпису функції ───────────────────
+def test_declared_args_match_the_function_signature() -> None:
+    """🔴 Забути `args=` у декораторі — тиха поломка, і вона вже трапилась.
+
+    `@op(...)` дефолтом бере `NoArgs`. Функція при цьому має анотацію
+    `a: BindArgs`, тіло читає `a.run` — і все виглядає правильно в трьох місцях
+    із чотирьох: mypy задоволений (анотація ж є), тести зв'язності задоволені
+    (вхід є), CLI будується. Ламається лише виклик, і не помилкою схеми, а
+    `AttributeError: 'NoArgs' object has no attribute 'run'` — тобто причину
+    доводиться здогадувати з чужого повідомлення.
+
+    Приймач один і дешевий: те, що оголошено, мусить дорівнювати тому, що
+    функція справді приймає.
+    """
+    import typing
+
+    from nyshporka.core.ops import REGISTRY
+
+    bad: list[str] = []
+    for op_ in REGISTRY.all():
+        hints = typing.get_type_hints(op_.fn)
+        params = [p for p in hints if p != "return"]
+        if not params:
+            continue
+        want = hints[params[0]]
+        if want is not op_.args:
+            bad.append(f"{op_.name}: оголошено {op_.args.__name__}, "
+                       f"а функція приймає {getattr(want, '__name__', want)}")
+    assert not bad, "схема аргументів розійшлася з підписом:\n  " + "\n  ".join(bad)
