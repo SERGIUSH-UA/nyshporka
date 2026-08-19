@@ -264,9 +264,31 @@ def _numbers(tokens: list[str]) -> list[str]:
     return [x for x in out if x]
 
 
+def _strip_all_tails(name: str) -> str:
+    """Зняти ВСІ хвости голосу й версії: `…-diak_v4-review` → `…`.
+
+    🔴 Хвіст моделі — це не число справи, і плутати їх дорого. `bershad-678-64`
+    розбиралось правильно, а `bershad-678-64-diak_v4` давало числа
+    `['678','64','4']`, трійка (678, 64, 4) не знаходилась, і `lookup` падав на
+    пару **(678, 4)** — тобто ДРУГИЙ ГОЛОС усіх чотирьох бершадських справ
+    прив'язувався до чужої справи 678-1-4 (титульна заглушка на 3 кадри).
+    Помилка тиха за побудовою: реєстр показував справу «прогнано одним
+    голосом», а другий голос — під чужим шифром.
+
+    Знімаємо ітеративно, бо хвости складаються (`-skryba-test`, `-parseq`).
+    """
+    cur = name
+    for _ in range(4):
+        nxt = _strip_derived(cur)
+        if not nxt or nxt == cur:
+            break
+        cur = nxt
+    return cur
+
+
 def name_candidates(name: str) -> list[_Cand]:
     """Ім'я прогону → впорядковані кандидати-шифри (спершу точніші)."""
-    tokens = _tokens(name)
+    tokens = _tokens(_strip_all_tails(name))
     repo = _repo_hint(tokens)
     nums = _numbers(tokens)
     cands: list[_Cand] = []
@@ -380,7 +402,12 @@ def resolve_run(name: str, case_dir: str = "", index: LibraryIndex | None = None
                        note=ov.get("why") or ov.get("label") or "", case_dir=case_dir)
     # 2) ключ, записаний самим прогоном (`case_key` у меті) — його рахували там,
     # де тека справи ще була під рукою, тож він надійніший за будь-який здогад.
-    if meta_key and (meta_key in idx.by_key or meta_key.startswith("@")):
+    # ⚠ Ключ збірки має вигляд `DAVO/904/@opys24` — «@» стоїть у ТРЕТЬОМУ
+    # сегменті, а не на початку рядка. Доки перевірка була `startswith("@")`,
+    # проставлена в меті збірка не приймалась і прогін ішов далі на розбір
+    # імені — тобто ремонт мети для збірок не діяв узагалі.
+    if meta_key and (meta_key in idx.by_key or meta_key.startswith("@")
+                     or "/@" in meta_key):
         return RunLink(run=name, key=meta_key, resolved_by="meta_key", case_dir=case_dir)
     hit = _from_path(case_dir, idx)                      # 3) шлях із мети прогону
     if hit:

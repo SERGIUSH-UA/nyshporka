@@ -404,6 +404,30 @@ def cmd_opys(key: str = typer.Argument(..., help="DAHMO/230/43 або DAHMO/230/
     if not cs and not ms and not film:
         console.print("  [yellow]сканів онлайн немає — замовлення в архіві[/yellow]")
     console.print(f"  на диску: {row.get('on_disk') or '[dim]—[/dim]'}")
+
+    # 🔴 РОЗБІЖНОСТІ ДЖЕРЕЛ — тут, а не «десь у TSV». Ця команда названа першим
+    # кроком перед будь-якою роботою, тож саме вона мусить сказати, що голоси
+    # про справу не сходяться, і що з цього приводу вже вирішила людина.
+    # Заміряно на ДАВіО 904-24-178: каталог архіву каже «Вільшанка, 1908-1909»,
+    # а файл на Commons — «євреї М'ясківка» і виявився дублем справи 174; без
+    # цього блоку картка мовчки радила б працювати з чужою книгою.
+    try:
+        fid = _fonds.fond_id_of(repo, fond)
+        confl = [c for c in (_fonds.load_conflicts(fid) or [])
+                 if (c.get("opys") or "") == str(opys)
+                 and (c.get("spr") or "") == f"{spr}{letter}"]
+    except Exception:
+        confl = []
+    for c in confl:
+        verdict = (c.get("verdict") or "").strip()
+        head = (f"[green]✔ вердикт: {verdict}[/green]" if verdict
+                else "[yellow]⚠ розбіжність джерел, вердикту ще немає[/yellow]")
+        console.print(f"  {head}  [dim]({c.get('field')})[/dim]")
+        console.print(f"    {c.get('src_a')}: {c.get('value_a')}")
+        console.print(f"    {c.get('src_b')}: {c.get('value_b')}")
+        if c.get("note"):
+            console.print(f"    [dim]{c['note']}[/dim]")
+
     console.print(f"  [dim]джерела рядка: {row.get('sources')}[/dim]")
     if not row.get("on_disk") and cs:
         # 🔴 `take` і `show` живуть ЛИШЕ в megen CLI (`nysh cases` має build/list),
@@ -425,6 +449,10 @@ def cmd_fond(
     scan: bool = typer.Option(False, "--scan", help="лише ті, що мають скан онлайн"),
     on_disk: bool = typer.Option(False, "--on-disk", help="лише завантажені"),
     todo: bool = typer.Option(False, "--todo", help="скан є, а на диску немає"),
+    order: bool = typer.Option(False, "--order",
+                               help="існує за каталогом, вільного каналу НЕМА — замовлення"),
+    village: str = typer.Option("", "--village", "--село",
+                                help="поселення: своє село парафії або ПРИПИСНЕ"),
     fs: bool = typer.Option(False, "--fs", help="лише ті, що мають плівку FamilySearch"),
     limit: int = typer.Option(40, "--limit"),
     as_json: bool = typer.Option(False, "--json"),
@@ -446,9 +474,11 @@ def cmd_fond(
         raise typer.Exit(1)
     rows = _fonds.load_rows(fond_id)
     live = _fonds.live_on_disk(repo.upper(), fond)
+    frames_live = _fonds.live_frames(repo.upper(), fond)
     sel = _fonds.filter_rows(rows, opys=opys or "", q=q or "", surname=surname or "",
                              year=year or "", uezd=uezd or "", scan=scan,
-                             on_disk=on_disk, todo=todo, fs=fs, live=live)
+                             on_disk=on_disk, todo=todo, fs=fs, live=live,
+                             village=village or "", order=order)
     if as_json:
         # 🔴 `--limit 0` означає «без обмеження» (як в інших командах), а не
         # «нуль рядків»: доти `sel[:0]` віддавав ПОРОЖНІЙ масив, і машинний
@@ -462,7 +492,7 @@ def cmd_fond(
     cols: tuple[tuple[str, JustifyMethod], ...] = (
         ("шифра", "left"), ("назва", "left"), ("роки", "left"),
         ("арк.", "right"), ("скан", "left"), ("FS", "left"),
-        ("👁 село / літери", "left"), ("диск", "left"), ("№", "left"))
+        ("село / літери", "left"), ("тип", "left"), ("диск", "left"), ("№", "left"))
     for col, just in cols:
         t.add_column(col, justify=just)
     for r in sel[:limit]:
@@ -484,10 +514,16 @@ def cmd_fond(
             title = (r.get("surnames") or title)[:52]
         # диск — ЖИВИЙ стан бібліотеки, не колонка TSV: та рахувалась на момент
         # останнього merge і після завантаження справи бреше
-        st = _fonds.row_status(r, live, {})
+        st = _fonds.row_status(r, live, {}, frames_live)
         disk = "✓" if st["on_disk_live"] else ("✓?" if r.get("on_disk") else "")
         if st["disk_mismatch"]:
             disk += " [yellow]⚠[/yellow]"
+        # 🔴 Обірване завантаження виглядає точно як ціле, якщо не сказати
+        # інакше: показуємо ЧАСТКУ взятих кадрів, а не саму галочку.
+        if "partial" in st["flags"]:
+            key = (r.get("opys") or "", r.get("spr_int") or "", r.get("spr_letter") or "")
+            disk = (f"[red]{frames_live.get(key, 0)}/"
+                    f"{_fonds.expected_frames(r)}[/red]")
         # 🎞 плівка: показуємо DGS — саме його вводять у FamilySearch, щоб
         # відкрити справу; кадри поруч кажуть, чи том узагалі підйомний
         dgs = str(r.get("fs_dgs") or "").strip()
@@ -498,6 +534,13 @@ def cmd_fond(
         cov = (r.get("cover_place") or "").strip()
         letters = (r.get("cover_letters") or "").strip()
         cover_mark = f"[bold]{letters}[/bold]" if letters else cov[:26]
+        # …а де оком не дивились (а це переважна більшість справ), село бере
+        # ДРУКОВАНИЙ каталог архіву. Позначаємо 👁 проти прочитаного, щоб два
+        # джерела різної сили не злилися в одну колонку без сліду.
+        if cover_mark:
+            cover_mark = f"👁 {cover_mark}"
+        elif r.get("cat_place"):
+            cover_mark = f"[dim]{str(r.get('cat_place'))[:26]}[/dim]"
         t.add_row(r.get("shifra") or f"{fond}-{r.get('opys')}-{r.get('spr')}",
                   title,
                   "–".join(x for x in (r.get("year_from"), r.get("year_to")) if x)[:9],
@@ -505,6 +548,7 @@ def cmd_fond(
                   scan_mark,
                   fs_mark,
                   cover_mark,
+                  str(r.get("record_types") or ""),
                   disk,
                   "[red]~[/red]" if r.get("num_src") == "interp" else "")
     console.print(t)
@@ -512,7 +556,10 @@ def cmd_fond(
         console.print(f"[dim]показано {limit} з {len(sel)} — --limit більше[/dim]")
     console.print("[dim]скан: C = Commons (повний) · ✂ дзеркало обрізане · "
                   "FS = DGS плівки FamilySearch ·кадрів · "
-                  "👁 = прочитане ОКОМ з обкладинки (жирним — діапазон абетки збірного тому) · "
+                  "село: 👁 = прочитане ОКОМ з обкладинки (жирним — діапазон абетки "
+                  "збірного тому), сірим — з друкованого каталогу архіву · "
+                  "тип: Н народження · Ш шлюб · Р розлучення · С смерть · "
+                  "Д дошлюбні · СП сповідальні · "
                   "№ «~» = номер справи відновлено, звіряти оком[/dim]")
 
 

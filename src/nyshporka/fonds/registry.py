@@ -50,6 +50,11 @@ FIELDS = ("opys", "spr_int", "spr_letter", "spr", "shifra", "title", "title_src"
           # єдиний спосіб побачити документ, не замовляючи його в архіві.
           # 👁 прочитане оком з обкладинки: село книги і діапазон абетки збірного тому
           "cover_place", "cover_letters", "cover_note",
+          # 📕 ДРУКОВАНИЙ каталог архіву — єдине джерело про те, що існує В
+          # ПРИРОДІ (решта описує лише вже оцифроване), і єдине, яке називає
+          # ПАРАФІЮ та ТИП ЗАПИСУ справи. `record_types` — Н/Ш/Р/С/Д/СП.
+          "cat_place", "cat_attached", "cat_uezd", "cat_confession",
+          "cat_district", "cat_parishes_n", "record_types",
           "fs_dgs", "fs_film", "fs_url", "fs_record_type", "fs_place", "fs_frames",
           "sources")
 
@@ -80,7 +85,8 @@ _CONF_CACHE: dict[str, tuple[tuple[Any, ...], list[dict[str, Any]] | None]] = {}
 _FACETS_CACHE: dict[str, tuple[tuple[Any, ...], dict[str, Any]]] = {}
 
 #: memo живого стану диска: (repo, fond) → (штамп бібліотеки, мапа).
-_LIVE_CACHE: dict[tuple[str, str], tuple[tuple[Any, ...], dict[tuple[str, str, str], str]]] = {}
+#: (repo, fond) → (штамп бібліотеки, шляхи, кадри) — ОДИН запис на обидві мапи
+_LIVE_CACHE: dict[tuple[str, str], tuple[Any, ...]] = {}
 
 
 # ── дискавері ─────────────────────────────────────────────────────────────────
@@ -327,21 +333,32 @@ def live_on_disk(repo: str, fond: str) -> dict[tuple[str, str, str], str]:
     (`geog.gazetteer.place_card`). Штамп той самий, що в `load_rows`: перезбірка
     бібліотеки міняє mtime, тож кеш протухає сам і скидати його руками не треба.
     """
+    return _live_maps(repo, fond)[0]
+
+
+def _live_maps(repo: str, fond: str
+               ) -> tuple[dict[tuple[str, str, str], str],
+                          dict[tuple[str, str, str], int]]:
+    """Шляхи І кадри одним проходом по бібліотеці, під одним кешем.
+
+    🔴 Двома функціями з власними кешами це коштувало б ДВА читання
+    `case_library.json` (1.25 МБ) за один запит вкладки — рівно та регресія,
+    яку стереже `test_library_is_read_once_per_request`. Мапи потрібні завжди
+    разом (стан диска + чи повністю взято), тож і будуються разом.
+    """
     stamp = _library_stamp()
     hit = _LIVE_CACHE.get((repo.upper(), str(fond)))
     if hit is not None and hit[0] == stamp:
-        return hit[1]
+        return hit[1], hit[2]
 
+    paths: dict[tuple[str, str, str], str] = {}
+    frames: dict[tuple[str, str, str], int] = {}
     try:
         from nyshporka.library import load_library
-    except Exception:
-        return {}
-    try:
         data = load_library()
     except Exception:
-        return {}
+        return paths, frames
     cases = data.get("cases", []) if isinstance(data, dict) else data
-    out: dict[tuple[str, str, str], str] = {}
     for c in cases:
         if str(c.get("fond") or "") != str(fond):
             continue
@@ -350,23 +367,64 @@ def live_on_disk(repo: str, fond: str) -> dict[tuple[str, str, str], str]:
         m = _SPR_RE.match(str(c.get("spr") or ""))
         if not m:
             continue
-        opys = str(c.get("opys") or "1")
-        out[(opys, m.group(1), m.group(2).lower())] = c.get("path") or ""
-    _LIVE_CACHE[(repo.upper(), str(fond))] = (stamp, out)
-    return out
+        key = (str(c.get("opys") or "1"), m.group(1), m.group(2).lower())
+        paths[key] = c.get("path") or ""
+        try:
+            frames[key] = int(c.get("frames") or 0)
+        except (TypeError, ValueError):
+            frames[key] = 0
+    _LIVE_CACHE[(repo.upper(), str(fond))] = (stamp, paths, frames)
+    return paths, frames
 
 
 # ── похідні для UI ────────────────────────────────────────────────────────────
 
+def live_frames(repo: str, fond: str) -> dict[tuple[str, str, str], int]:
+    """(опис, номер, літера) → скільки кадрів РЕАЛЬНО лежить на диску.
+
+    🔴 Потрібно рівно для одного: відрізнити ЗАВАНТАЖЕНУ справу від ПОЧАТОЇ.
+    Без цього обірване завантаження виглядає точно як ціле — «✓ на диску» — і
+    справа тихо випадає з черги. Заміряно 2026-08-19 на ЦДІАК 224-1-1220:
+    1 кадр із 91, а реєстр показував її нарівні з повністю взятими сусідами.
+    """
+    return _live_maps(repo, fond)[1]
+
+
+#: нижче якої частки очікуваних кадрів справа вважається НЕДОВАНТАЖЕНОЮ.
+#: Не 100%: завантажувач пропускає технічні кадри, а `commons_pages` рахує
+#: сторінки PDF, тож дрібний недобір — норма, а не обрив.
+_PARTIAL_RATIO = 0.9
+
+
+def expected_frames(row: dict[str, Any]) -> int:
+    """Скільки кадрів має бути у справі — 0, якщо жодне джерело не каже.
+
+    🔴 `folios` (аркуші опису) сюди НЕ входить, хоч і є майже скрізь: зв'язок
+    аркуш↔кадр не сталий. На тій самій плівці 224-1-247 має 90 арк. на 95
+    кадрів (кадр = розворот), а 224-1-248 — 38 арк. на 85 (кадр = сторінка),
+    тобто різниця в 2.2 раза. Поріг на такій основі кричав би на цілі справи.
+    """
+    for col in ("fs_frames", "commons_pages"):
+        v = str(row.get(col) or "").strip()
+        if v.isdigit() and int(v) > 0:
+            return int(v)
+    return 0
+
+
 def row_status(row: dict[str, Any],
                live: dict[tuple[str, str, str], str],
-               conflicts: dict[tuple[str, str], int]) -> dict[str, Any]:
+               conflicts: dict[tuple[str, str], int],
+               frames: dict[tuple[str, str, str], int] | None = None) -> dict[str, Any]:
     """`disk_state`, `flags`, `on_disk_live`, `disk_mismatch`, `conflicts`."""
     key = (row.get("opys") or "", row.get("spr_int") or "",
            row.get("spr_letter") or "")
     on_live = live.get(key, "")
     on_tsv = row.get("on_disk")
     flags: list[str] = []
+    have = (frames or {}).get(key, 0)
+    want = expected_frames(row)
+    if on_live and want and have and have < want * _PARTIAL_RATIO:
+        flags.append("partial")
     if row.get("truncated_mirror"):
         flags.append("truncated")
     if row.get("num_src") == "interp":
@@ -386,6 +444,12 @@ def row_status(row: dict[str, Any],
         state = "todo"
     elif row.get("mirror_url"):
         state = "mirror_only"
+    elif row.get("fs_dgs") or row.get("fs_film"):
+        # 🎞 Плівка FS — теж ВІЛЬНИЙ канал: справу з живим DGS качають самі, а не
+        # замовляють. Без цієї гілки все, чого немає на Commons, падало в
+        # «замовлення»: на ф.315 це 12 794 справи з плівкою, названі платними,
+        # тобто черга замовлення роздувалась у 14 разів проти справжньої.
+        state = "film"
     else:
         state = "order"
 
@@ -432,13 +496,18 @@ def _loose(s: Any) -> str:
 def filter_rows(rows: list[dict[str, Any]], *, opys: str = "", q: str = "", surname: str = "",
                 year: str = "", uezd: str = "", scan: bool = False,
                 on_disk: bool = False, todo: bool = False, fs: bool = False,
-                state: str = "",
+                state: str = "", village: str = "", order: bool = False,
                 flag: str = "", live: dict[tuple[str, str, str], str] | None = None,
                 status: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     """Єдиний фільтр реєстру опису.
 
-    `scan`/`on_disk`/`todo` — булеві прапорці CLI; `state` — те саме одним
-    значенням для UI. Обидва входи дають той самий результат.
+    `scan`/`on_disk`/`todo`/`order` — булеві прапорці CLI; `state` — те саме
+    одним значенням для UI. Обидва входи дають той самий результат.
+
+    🔴 `todo` і `order` — ДВІ РІЗНІ черги, і зливати їх дорого. `todo` = скан
+    онлайн є, треба лише завантажити; `order` = справа існує за каталогом
+    архіву, але жодного вільного каналу немає — тільки замовлення за гроші.
+    На ДАВіО ф.904 це 1051 проти 3214: різниця між вечором качання і бюджетом.
     """
     yf, yt = _year_bounds(year)
     ql, sl = q.lower().strip(), surname.lower().strip()
@@ -446,8 +515,9 @@ def filter_rows(rows: list[dict[str, Any]], *, opys: str = "", q: str = "", surn
     want_flags = {x.strip() for x in (flag or "").split(",") if x.strip()}
     live = live if live is not None else {}
     status = status or {}
+    vl = _loose(village)
     #: чи взагалі питають про стан справи — див. гілку в `keep()`
-    _needs_status = bool(on_disk or todo or state or want_flags)
+    _needs_status = bool(on_disk or todo or order or state or want_flags)
 
     def keep(r: dict[str, Any]) -> bool:
         if opys and (r.get("opys") or "") != opys:
@@ -460,6 +530,14 @@ def filter_rows(rows: list[dict[str, Any]], *, opys: str = "", q: str = "", surn
         if sl and sl not in str(r.get("surnames") or "").lower():
             return False
         if ul and ul not in _loose(r.get("title")):
+            return False
+        # 🏘 Поселення шукається по ВСІХ голосах про нього, а не лише в заголовку:
+        # своє село каталогу, ПРИПИСНІ села (в них рід теж вінчався і кумував),
+        # прочитане оком з обкладинки і сам заголовок. Приписні тут не розкіш —
+        # у ф.904 парафія Джугастри веде ще Леонівку й частину Шляхетної, і
+        # пошук по заголовку про них мовчить.
+        if vl and not any(vl in _loose(r.get(k)) for k in
+                          ("cat_place", "cat_attached", "cover_place", "title")):
             return False
         # 🎞 FS — окремий канал доступу, а не різновид «скану»: плівка не лежить
         # файлом на Commons, її дивляться/качають за DGS. Для ф.315 це 12 794
@@ -478,6 +556,14 @@ def filter_rows(rows: list[dict[str, Any]], *, opys: str = "", q: str = "", surn
             if on_disk and not (r.get("on_disk") or st["on_disk_live"]):
                 return False
             if todo and st["disk_state"] != "todo":
+                return False
+            # 💰 Черга ЗАМОВЛЕННЯ: існує, але взяти самому нічим. Перевіряємо всі
+            # три канали доступу разом — Commons, дзеркало і плівку FS: справа з
+            # живим DGS у цю чергу не належить, скільки б її не бракувало на
+            # Commons (ф.315: 12 794 плівки проти 882 сканів).
+            if order and ((r.get("on_disk") or st["on_disk_live"])
+                          or r.get("commons_url") or r.get("mirror_url")
+                          or r.get("fs_dgs") or r.get("fs_film")):
                 return False
             # `state=scan` — не стан диска, а «десь є оцифроване»: справа може бути
             # ще не завантаженою, але вже мати скан на Commons чи дзеркалі. Тому
@@ -510,7 +596,10 @@ def summarize(rows: list[dict[str, Any]],
               live: dict[tuple[str, str, str], str] | None = None) -> dict[str, Any]:
     live = live if live is not None else {}
     s = {"rows": len(rows), "commons": 0, "mirror_only": 0, "truncated": 0,
-         "on_disk": 0, "on_disk_live": 0, "todo": 0, "order": 0,
+         # `film` — вільний канал НАРІВНІ з `todo`, лише інший (плівка FS за
+         # DGS, а не файл на Commons). Рахується окремо, бо дія інша: не
+         # завантажувач Commons, а `familysearch_film_download.py`.
+         "on_disk": 0, "on_disk_live": 0, "todo": 0, "film": 0, "order": 0,
          "interp": 0, "lo": 0, "no_title": 0, "title_conflict": 0,
          "with_title": 0, "with_surnames": 0, "letters": 0,
          # ⏱ рахується ТУТ, а не окремим проходом. Роутер вкладки «Фонди» мав на
@@ -533,6 +622,8 @@ def summarize(rows: list[dict[str, Any]],
             s["on_disk_live"] += 1
         if st["disk_state"] == "todo":
             s["todo"] += 1
+        if st["disk_state"] == "film":
+            s["film"] += 1
         if st["disk_state"] == "order":
             s["order"] += 1
         if "interp" in st["flags"]:

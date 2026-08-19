@@ -1777,6 +1777,7 @@ def merge_meta(out_dir: Path, base: dict) -> None:
         pages: dict = {}
         failed: list[str] = []
         started = base.get("started")
+        prev: dict = {}
         try:
             prev = json.loads(merged_path.read_text(encoding="utf-8"))
             pages.update(prev.get("pages") or {})
@@ -1799,8 +1800,21 @@ def merge_meta(out_dir: Path, base: dict) -> None:
                 started = d["started"]
             done_all = done_all and bool(d.get("done"))
         failed = [f for f in failed if f not in pages]
-        merged = {**base, "started": started, "pages": pages, "failed": failed,
-                  "done": done_all and bool(parts),
+        # 🔴 Дописане до мети ПІСЛЯ прогону мусить пережити перезбірку. `base` —
+        # білий список полів ЦЬОГО процесу, і все, чого він не знає, тут зникало:
+        # `case_key`, проставлений ремонтом, і `case_dir_cloud` від забору
+        # чекпоінтів. Тобто резюм справи без `--case-key` мовчки знімав шифру, і
+        # прогін знову ставав нічиїм — рівно та розсинхронізація, заради якої
+        # ключ і заводили.
+        # ⚠ «Не знає» означає і ПОРОЖНЄ: `base` завжди несе `case_key`, і без
+        # `--case-key` це порожній рядок — саме він і затирав. Тому порожнє поле
+        # процесу поступається непорожньому попередньому, а непорожнє — виграє.
+        _volatile = ("pages", "failed", "done", "updated", "started")
+        carried = {k: v for k, v in prev.items()
+                   if k not in _volatile and v not in ("", None)
+                   and base.get(k) in ("", None)}
+        merged = {**base, **carried, "started": started, "pages": pages,
+                  "failed": failed, "done": done_all and bool(parts),
                   "updated": datetime.now().isoformat(timespec="seconds")}
         atomic_write(merged_path,
                      json.dumps(merged, ensure_ascii=False, indent=1) + "\n")
@@ -2882,7 +2896,9 @@ def main() -> int:
             # прогону не бачить і пошук мовчки віддає нуль (та сама пастка, що
             # з ансамблем і beam)
             atomic_write(rout / "_htr_meta.json", json.dumps({
-                "version": 1, "case_dir": str(case_dir), "model": Path(args.rescue).name,
+                "version": 1, "case_dir": str(case_dir),
+                "case_key": meta.get("case_key") or "",
+                "model": Path(args.rescue).name,
                 "engine": "kraken", "script": args.script, "done": True,
                 "rescue_of": out_dir.name,
                 "rescue": {"lines": rescue_n, "read": n_read, "pages": n_pg,
@@ -2932,6 +2948,11 @@ def main() -> int:
                 "chars": sum(len(x) for x in body), "conf": None, "sec": None}
         atomic_write(d / "_htr_meta.json", json.dumps({
             "version": 1, "case_dir": str(case_dir).replace("\\", "/"),
+            # 🔴 Шифра — і в побічну теку теж. Голосів у прогоні два, тек теж
+            # дві, і реєстр бачить їх як ОКРЕМІ прогони; доки ключ стояв лише в
+            # головній, половина всього декоду лишалась без координати й висіла
+            # на розборі імені теки.
+            "case_key": meta.get("case_key") or "",
             "model": f"{Path(args.model).name}+{tag}", "device": device,
             "script": args.script, "started": meta.get("started"),
             "updated": datetime.now().isoformat(timespec="seconds"),

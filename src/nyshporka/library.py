@@ -1010,6 +1010,7 @@ def _harvest_desc(m: dict[str, Any], single_case: bool = False) -> dict[str, Any
 def _fallback_name(rel_path: str, key_parts: tuple[Any, ...] | None) -> dict[str, Any]:
     """Назва теки без канону: _source.json → wikisource → opys_tsv → код."""
     d = ROOT / rel_path
+    stub: dict[str, Any] | None = None   # роки з сайдкара БЕЗ назви, див. нижче
     # 1) сайдкар у теці — писаний руками, найточніший опис поза каноном.
     #    ДВІ конвенції: `_source.json` (shifra/record_type/frames) і `meta.json`
     #    (archive/fond/inv/doc_type/place/folios — 18 тек). Читаємо обидві.
@@ -1022,6 +1023,18 @@ def _fallback_name(rel_path: str, key_parts: tuple[Any, ...] | None) -> dict[str
         except Exception:
             continue
         title = (m.get("title") or "").strip()
+        # формат гуляє: одні сайдкари пишуть year_from/year_to, інші — `year`;
+        # місце буває у `place` або `covers` (spr-6739 vs spr-8676)
+        yf = _to_int(m.get("year_from")) or _to_int(m.get("year"))
+        yt = _to_int(m.get("year_to")) or yf
+        if not yf:
+            # ЧЕТВЕРТА конвенція сайдкара — суцільний рядок `dates` («1847-1848»,
+            # «21.09.1845–1850»). Так пише сайдкар, складений при ЧИТАННІ ТИТУЛКИ
+            # ОКОМ, тож роки в ньому найточніші з наявних. Доки гілки не було,
+            # 43 справи лежали в реєстрі без років, маючи їх у сайдкарі (ф.196
+            # кріпосні акти, ф.241 інвентарі, ЦДІАК ф.224) — тобто фільтр `--year`
+            # не бачив саме тих справ, які людина вже прочитала.
+            yf, yt = _years_span(m.get("years") or m.get("dates"))
         harvest = None
         if not title:
             # сайдкар `harvest` (fsfiles) `title` не має — опис лежить у полях
@@ -1032,14 +1045,23 @@ def _fallback_name(rel_path: str, key_parts: tuple[Any, ...] | None) -> dict[str
             # (вирізка `harvest` під неї) — тоді перелік справ плівки в назві зайвий
             harvest = _harvest_desc(m, single_case=key_parts is not None)
             if harvest is None:
+                # 🔴 Сайдкар БЕЗ НАЗВИ (титулку ще не читали) — але роки, місце й
+                # письмо в ньому вже є. Доки тут стояв голий `continue`, разом із
+                # назвою відкидались і РОКИ: справа падала аж у гілку `code` і
+                # ставала в реєстрі беззнаменниковою (ф.196 спр.1506, 11782, 13889,
+                # 14627, 2-64, 8-712 — усі з `dates` у сайдкарі). Тримаємо роки як
+                # залишок і віддаємо в кінці, якщо назви не дасть жодне інше джерело.
+                if yf and stub is None:
+                    stub = {"title": "",
+                            "doc_type": (m.get("record_type")
+                                         or m.get("doc_type") or "").strip(),
+                            "year_from": yf, "year_to": yt,
+                            "place": _strip_links(m.get("place")
+                                                  or m.get("covers") or ""),
+                            "desc_source": ("source_json" if name == "_source.json"
+                                            else "meta_json")}
                 continue
             title = harvest["title"]
-        # формат гуляє: одні сайдкари пишуть year_from/year_to, інші — `year`;
-        # місце буває у `place` або `covers` (spr-6739 vs spr-8676)
-        yf = _to_int(m.get("year_from")) or _to_int(m.get("year"))
-        yt = _to_int(m.get("year_to")) or yf
-        if not yf:
-            yf, yt = _years_span(m.get("years"))
         if harvest:
             yf, yt = yf or harvest["year_from"], yt or harvest["year_to"]
         delo = _parse_delo(m.get("delo")) if not (m.get("shifra") or "").strip() else None
@@ -1049,7 +1071,15 @@ def _fallback_name(rel_path: str, key_parts: tuple[Any, ...] | None) -> dict[str
                 "place": _strip_links(m.get("place") or m.get("covers")
                                       or (harvest or {}).get("place") or ""),
                 "shifra_hint": (m.get("shifra") or "").strip(),
-                "opys_hint": _norm_spr(m.get("inv") or m.get("opys") or "")
+                # 🔴 `opis` — саме так поле зветься в паспортах, які пишуть
+                # завантажувачі й скіл `fond-case`; читались лише `inv`/`opys`,
+                # тож опис із них не діставався ЗОВСІМ. Різниця в одну літеру
+                # коштувала ключа без опису: тека `spr-33` у ДАВіО ф.904 несе
+                # 904-30-33 (юдейська книга Жабокрича), а 904-24-33 — Вільшанка;
+                # під спільним ключем це або перезапис, або тихе змішування
+                # двох різних книг (пор. `case-key-needs-opys-anrm-f211`).
+                "opys_hint": _norm_spr(m.get("inv") or m.get("opys")
+                                       or m.get("opis") or "")
                              or (delo[1] if delo else None),
                 "desc_source": "source_json" if name == "_source.json" else "meta_json"}
     # ДАХмО archium — офіційний опис справи з краулу каталогу (найточніше поза каноном)
@@ -1133,8 +1163,8 @@ def _fallback_name(rel_path: str, key_parts: tuple[Any, ...] | None) -> dict[str
                     "doc_type": "", "year_from": _to_int(mi.get("year_from")),
                     "year_to": _to_int(mi.get("year_to")), "place": place,
                     "desc_source": "fs_master"}
-    return {"title": "", "doc_type": "", "year_from": None, "year_to": None,
-            "place": "", "desc_source": "code"}
+    return stub or {"title": "", "doc_type": "", "year_from": None, "year_to": None,
+                    "place": "", "desc_source": "code"}
 
 
 def _years_span(v: Any) -> tuple[int | None, int | None]:

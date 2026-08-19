@@ -446,6 +446,23 @@ def read(
         # прогін не сповільниться, а завалиться, і причина буде невидима.
         console.print("[yellow]⚠ --shard без --gpu-lock: процеси змагатимуться "
                       "за карту. Дайте всім шардам ОДИН файл-лок[/yellow]")
+    # 🔴 Шифру беремо з бібліотеки САМІ, якщо її не дали. Раннер уміє
+    # `--case-key` давно, але покладатись на те, що людина його щоразу набере,
+    # виявилось помилкою: замір 2026-08-19 по 909 прогонах — ключ мали СІМ.
+    # А без ключа прив'язка декоду до справи тримається на розборі імені теки,
+    # і будь-яке «людське» ім'я прогону робить справу непрочитаною для всіх,
+    # хто читає лише `_htr_meta.json`.
+    if not case_key:
+        try:
+            from nyshporka.cases.resolve import LibraryIndex, _from_path
+            case_key = _from_path(str(p.case_dir), LibraryIndex()) or ""
+        except Exception:
+            case_key = ""
+        if case_key:
+            console.print(f"  [dim]шифра: {case_key}[/dim]")
+        else:
+            console.print("  [yellow]шифри немає: бібліотека цієї теки не знає — "
+                          "прив'язка триматиметься на імені прогону[/yellow]")
     cmd = p.command(case_key=case_key, limit=limit, pages=pages, shard=shard,
                     gpu_lock=gpu_lock, gpu_sato=gpu_sato, seg_height=seg_height)
     if dry:

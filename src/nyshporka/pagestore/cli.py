@@ -299,14 +299,16 @@ def records_grep(
     role: str = typer.Option(None, "--role", help="child/father/mother/godfather/…"),
     rtype: str = typer.Option(None, "--rtype", help="birth/marriage/death/…"),
     case: str = typer.Option(None, "--case"),
+    place: bool = typer.Option(False, "--place",
+                               help="шукати по МІСЦЮ акту, а не по прізвищу"),
     thresh: int = typer.Option(80, "--thresh"),
     limit: int = typer.Option(200, "--limit"),
     as_json: bool = typer.Option(False, "--json"),
 ) -> None:
-    """Fuzzy-пошук по учасниках записів."""
+    """Fuzzy-пошук по учасниках записів (або по місцю — `--place`)."""
     key = _resolve(case).key if case else None
     res = query.grep_records(q, thresh=max(50, min(100, thresh)), case_key=key,
-                             role=role, rtype=rtype, limit=limit)
+                             role=role, rtype=rtype, place=place, limit=limit)
     if as_json:
         _emit(res, True)
         return
@@ -315,8 +317,10 @@ def records_grep(
         raise typer.Exit(1)
     console.print(f"[bold]{res['total']}[/bold] хітів у {res['cases']} справах")
     for h in res["hits"]:
+        who = f"{h['role']}: «{h['name']}»" if h["name"] else "—"
+        where = f"  ⟨{h['place']}⟩" if h.get("place") else ""
         console.print(f"  {h['score']:>3}  {h['shifra']}  {h['rtype']} {h['date'] or ''}  "
-                      f"{h['role']}: «{h['name']}»  [{','.join(h['scans'])}]  rid={h['rid']}")
+                      f"{who}{where}  [{','.join(h['scans'])}]  rid={h['rid']}")
 
 
 @records_app.command("show")

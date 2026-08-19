@@ -63,8 +63,19 @@ def _index(path: Path) -> dict[str, Any] | None:
         for s in note.get("places") or []:
             places.append((scan, s, normalize_archival(s)))
     persons = []
+    # 🗺 Місце в АКТІ — окрема вісь пошуку, не підмножина прізвищ. Питання «хто з
+    # цього села трапляється в чужих книгах» без неї не ставиться взагалі: формула
+    # «мѣстечка Мястковки крестьянинъ» лежить у `place` учасника, а індексувалося
+    # досі саме лише прізвище. Місце тримається і на записі (`Record.places` —
+    # де відбулась подія), і на учаснику (`RecordPerson.place` — звідки він),
+    # і плутати їх не можна: у шлюбі наречений і наречена якраз із різних сіл.
+    rec_places = []
     for rec in data.get("records") or []:
+        for s in rec.get("places") or []:
+            rec_places.append((rec, None, s, normalize_archival(s)))
         for p in rec.get("persons") or []:
+            if p.get("place"):
+                rec_places.append((rec, p, p["place"], normalize_archival(p["place"])))
             # прізвище явне, або останній токен повного імені як fallback
             raw = p.get("surname")
             if not raw:
@@ -74,7 +85,8 @@ def _index(path: Path) -> dict[str, Any] | None:
                 continue
             persons.append((rec, p, raw, normalize_archival(raw)))
     idx = {"key": data.get("key") or "", "shifra": data.get("shifra") or "",
-           "pages": pages, "surnames": surnames, "places": places, "persons": persons}
+           "pages": pages, "surnames": surnames, "places": places,
+           "persons": persons, "rec_places": rec_places}
     _CACHE[str(path)] = (mtime, idx)
     return idx
 
@@ -126,8 +138,13 @@ def grep_surnames(q: str, thresh: int = 80, case_key: str | None = None,
 
 def grep_records(q: str, thresh: int = 80, case_key: str | None = None,
                  role: str | None = None, rtype: str | None = None,
-                 limit: int = 200) -> dict[str, Any]:
-    """Fuzzy по учасниках записів (RecordPerson.surname, fallback — хвіст name)."""
+                 place: bool = False, limit: int = 200) -> dict[str, Any]:
+    """Fuzzy по учасниках записів; `place=True` — шукати по МІСЦЮ, а не прізвищу.
+
+    Пошук по місцю відповідає на питання, якого прізвищевий не бере: «які акти
+    згадують це поселення» — байдуже, під яким прізвищем. Саме так шукають
+    односельців у книгах чужих парафій.
+    """
     stems = _stems(q)
     if not stems:
         return {"hits": [], "cases": 0, "error": "закороткий запит"}
@@ -137,8 +154,12 @@ def grep_records(q: str, thresh: int = 80, case_key: str | None = None,
         if not idx:
             continue
         scanned += 1
-        for rec, person, _raw, norm in idx["persons"]:
-            if role and person.get("role") != role:
+        for rec, person, raw, norm in idx["rec_places" if place else "persons"]:
+            # Місце з рівня запису учасника не має — тоді фільтр ролі не звужує,
+            # а знищував би вибірку, тож застосовуємо його лише там, де є особа.
+            if role and person is not None and person.get("role") != role:
+                continue
+            if role and person is None:
                 continue
             if rtype and rec.get("rtype") != rtype:
                 continue
@@ -149,8 +170,10 @@ def grep_records(q: str, thresh: int = 80, case_key: str | None = None,
                              "rid": rec.get("rid") or "", "rtype": rec.get("rtype") or "",
                              "date": d.get("value") if isinstance(d, dict) else "",
                              "scans": rec.get("scans") or [],
-                             "role": person.get("role") or "",
-                             "name": person.get("name") or "", "score": sc})
+                             "role": (person or {}).get("role") or "",
+                             "name": (person or {}).get("name") or "",
+                             "place": raw if place else (person or {}).get("place") or "",
+                             "score": sc})
     hits.sort(key=lambda h: -h["score"])
     return {"hits": hits[:limit], "total": len(hits), "cases": scanned,
             "stems": stems, "thresh": thresh}

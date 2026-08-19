@@ -66,6 +66,7 @@ const STRINGS = {
     'fonds.state.any': 'будь-який стан',
     'fonds.state.disk': 'у нас на диску',
     'fonds.state.todo': 'скан є, не взято',
+    'fonds.state.film': 'плівка FS, не взято',
     'fonds.state.order': 'замовляти в архіві',
     'fonds.matched': 'під фільтр',
     'fonds.of': 'із',
@@ -204,6 +205,7 @@ const STRINGS = {
     'fonds.state.any': 'any state',
     'fonds.state.disk': 'on our disk',
     'fonds.state.todo': 'scan exists, not taken',
+    'fonds.state.film': 'FS film, not taken',
     'fonds.state.order': 'order at the archive',
     'fonds.matched': 'matched',
     'fonds.of': 'of',
@@ -597,6 +599,7 @@ SCREENS.fonds = async () => {
         <option value="">${t('fonds.state.any')}</option>
         <option value="disk">${t('fonds.state.disk')}</option>
         <option value="todo">${t('fonds.state.todo')}</option>
+        <option value="film">${t('fonds.state.film')}</option>
         <option value="order">${t('fonds.state.order')}</option>
       </select>
       <button type="submit">${t('geog.find')}</button>

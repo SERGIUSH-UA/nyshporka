@@ -192,7 +192,7 @@ class FondRowsArgs(BaseModel):
     year: str = Field(default="", description="рік або діапазон «1840-1860»")
     uezd: str = ""
     state: str = Field(default="",
-                       description="disk | todo | mirror_only | order | scan")
+                       description="disk | todo | film | mirror_only | order | scan; `film` = вільна плівка FS (качається за DGS), `order` = каналу немає зовсім")
     limit: int = Field(default=50, ge=1, le=500)
 
 
