@@ -184,3 +184,57 @@ def test_opys_in_key_fonds_explain_themselves(pk):
     for f in pk.fonds.values():
         if f.opys_in_key:
             assert f.note.strip(), f"{f.key}: opys_in_key без пояснення"
+
+
+# ── майданчики архівів ───────────────────────────────────────────────────────
+def test_the_pack_and_the_hardcoded_base_do_not_drift() -> None:
+    """🔴 Адреса ДАХмО живе у двох місцях: константою в джерелі (її тримають
+    наявні тести) і в паку, звідки будуються решта майданчиків. Розбіжність тут
+    була б тихою: половина запитів пішла б на один хост, половина на інший."""
+    from nyshporka.archives import active
+    from nyshporka.sources import archium as A
+
+    site = active().site("DAHMO", "archium")
+    assert site is not None, "майданчик ДАХмО зник із паку"
+    assert site.url == A.BASE
+
+
+def test_a_site_without_fond_groups_says_so() -> None:
+    """`/api/v1/fond-groups/` ЦДІАК віддає 500. Без цієї позначки перегляд
+    показав би групи сусіднього архіву — чуже дерево під іменем цього."""
+    from nyshporka.archives import active
+
+    site = active().site("CDIAK", "archium")
+    assert site is not None and site.url.startswith("https://")
+    assert site.fond_groups is False
+    assert site.groups == ()
+
+
+def test_an_archive_may_be_written_two_ways_elsewhere() -> None:
+    """На Commons файли того самого архіву лежать і під «ДАВіО», і під «ДАВО».
+    Пошук за одним написанням мовчки втрачає половину, а нуль читається як
+    «сканів немає»."""
+    from nyshporka.archives import active
+
+    assert active().codes_for("DAVIO", "commons") == ("ДАВіО", "ДАВО")
+    assert active().codes_for("DAHMO", "duck") == ("ДАХмО",)
+    # Невідомий архів дає порожньо, а не здогад: вигаданий код питав би про те,
+    # чого в тій системі немає, і нуль читався б як відповідь.
+    assert active().codes_for("XXX", "duck") == ()
+
+
+def test_a_users_pack_adds_to_a_repository_without_erasing_its_sites(tmp_path) -> None:
+    """🔴 Той самий клас вади, від якого захищає злиття по ключу, лише поверхом
+    нижче: людина, що дописала архіву одну назву в чужій системі, не має
+    втратити його майданчики."""
+    from nyshporka.archives import pack as P
+
+    over = tmp_path / "своє.yaml"
+    over.write_text("repositories:\n  DAHMO:\n    codes:\n      duck: ІНАКШЕ\n",
+                    encoding="utf-8")
+    p = P.load(over)
+
+    assert p.codes_for("DAHMO", "duck") == ("ІНАКШЕ",)
+    site = p.site("DAHMO", "archium")
+    assert site is not None and site.url, "майданчик зник разом із правкою кодів"
+    assert p.repositories["DAHMO"].label == "ДАХмО", "загубився й підпис архіву"

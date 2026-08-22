@@ -37,12 +37,36 @@ WORKSPACE_PACK = "archives.yaml"
 
 
 @dataclass(frozen=True)
+class Site:
+    """Майданчик архіву: де саме лежить його переглядач.
+
+    🔴 Адреса — знання про АРХІВ, а не формат, тому їй місце в паку. Рушій
+    переглядача (`archium`) спільний для кількох архівів, а хости різні; доки
+    хост був константою модуля, джерело вміло рівно один архів, і другий
+    додавався тільки правкою коду.
+    """
+
+    engine: str                     # який парсер це читає: "archium"
+    url: str
+    source_id: str = ""             # id джерела; порожньо — рахується з коду архіву
+    fond_groups: bool = True        # чи є в цього майданчика дерево груп фондів
+    groups: tuple[tuple[str, str], ...] = ()   # (id, назва) — лише якщо є
+    bundled: str = ""               # ім'я вкладеного зрізу каталогу, якщо він є
+
+
+@dataclass(frozen=True)
 class Repository:
     code: str
     label: str
     name: str = ""
     country: str = ""
     note: str = ""
+    #: Майданчики за рушієм переглядача.
+    sites: dict[str, Site] = field(default_factory=dict)
+    #: Як цей архів зветься в ЧУЖИХ системах. Списком, бо буває кілька написань:
+    #: файли ДАВіО лежать на Commons і під «ДАВіО», і під «ДАВО», і пошук лише за
+    #: одним написанням мовчки втрачає половину.
+    codes: dict[str, tuple[str, ...]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -67,6 +91,25 @@ class ArchivesPack:
     skip_slugs: frozenset[str] = frozenset()
     record_type_labels: dict[str, str] = field(default_factory=dict)
     sources: tuple[Path, ...] = ()
+
+    def sites(self, engine: str) -> tuple[tuple[str, Site], ...]:
+        """Усі майданчики цього рушія: `(код архіву, майданчик)`."""
+        return tuple((code, r.sites[engine]) for code, r in
+                     sorted(self.repositories.items()) if engine in r.sites)
+
+    def site(self, repo: str | None, engine: str) -> Site | None:
+        r = self.repositories.get(str(repo or "").upper())
+        return r.sites.get(engine) if r else None
+
+    def codes_for(self, repo: str | None, system: str) -> tuple[str, ...]:
+        """Як архів зветься в чужій системі (`duck`, `commons`).
+
+        Порожньо означає «не знаємо» — і це чесніше за здогад: код, вигаданий
+        за нашим власним, дав би запит про архів, якого в тій системі немає, а
+        нуль у відповідь читався б як «там нічого немає».
+        """
+        r = self.repositories.get(str(repo or "").upper())
+        return r.codes.get(system, ()) if r else ()
 
     # ── те, чим користується решта коду ──────────────────────────────────────
     def repo_label(self, repo: str | None) -> str:
@@ -114,8 +157,21 @@ def _merge(base: dict[str, Any], over: dict[str, Any]) -> dict[str, Any]:
     вбудовані — і це виглядало б як «програма забула половину фондів».
     """
     out = dict(base)
-    out["repositories"] = {**(base.get("repositories") or {}),
-                           **(over.get("repositories") or {})}
+    # 🔴 Репозиторії зливаються ВГЛИБ, а не цілим записом. Інакше людина, що
+    # дописала архіву одну назву в чужій системі, мовчки втратила б його
+    # майданчики — тобто той самий клас вади, від якого захищає злиття по
+    # ключу, лише поверхом нижче.
+    merged_repos = dict(base.get("repositories") or {})
+    for code, body in (over.get("repositories") or {}).items():
+        old_body = merged_repos.get(code) or {}
+        add = body or {}
+        new_body = dict(old_body, **add)
+        for nested in ("sites", "codes"):
+            was, now = old_body.get(nested) or {}, add.get(nested) or {}
+            if was or now:
+                new_body[nested] = {**was, **now}
+        merged_repos[code] = new_body
+    out["repositories"] = merged_repos
     out["record_type_labels"] = {**(base.get("record_type_labels") or {}),
                                  **(over.get("record_type_labels") or {})}
     by_key = {(str(f.get("repo", "")).upper(), str(f.get("fond", ""))): f
@@ -153,10 +209,24 @@ def _build(raw: dict[str, Any], sources: tuple[Path, ...]) -> ArchivesPack:
     repos = {}
     for code, body in (raw.get("repositories") or {}).items():
         b = body or {}
+        sites = {}
+        for engine, sb in (b.get("sites") or {}).items():
+            sb = sb or {}
+            sites[str(engine)] = Site(
+                engine=str(engine), url=str(sb.get("url") or "").rstrip("/"),
+                source_id=str(sb.get("source_id") or ""),
+                fond_groups=bool(sb.get("fond_groups", True)),
+                groups=tuple((str(g.get("id")), str(g.get("label") or ""))
+                             for g in (sb.get("groups") or [])),
+                bundled=str(sb.get("bundled") or ""))
+        codes = {}
+        for system, val in (b.get("codes") or {}).items():
+            listed = val if isinstance(val, list) else [val]
+            codes[str(system)] = tuple(str(v) for v in listed if v)
         repos[str(code).upper()] = Repository(
             code=str(code).upper(), label=str(b.get("label") or code),
             name=str(b.get("name") or ""), country=str(b.get("country") or ""),
-            note=str(b.get("note") or ""))
+            note=str(b.get("note") or ""), sites=sites, codes=codes)
     fonds = {}
     for body in raw.get("fonds") or []:
         b = body or {}
