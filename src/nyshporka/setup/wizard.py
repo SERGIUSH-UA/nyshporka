@@ -28,10 +28,15 @@ class Plan:
     root: Path
     creating: bool
     warning: str = ""
+    #: Звідки взявся `root` — значення з того самого словника, що `Workspace.origin`
+    #: (`explicit` · `env:…` · `marker` · `last-used` · `default`). Без нього ні
+    #: людина, ні тест не відрізнять «шлях зі змінної» від «типового місця», а
+    #: саме ця різниця й була непомітною, доки майстер знав одне джерело з п'яти.
+    origin: str = ""
 
     def as_dict(self) -> dict[str, object]:
         return {"root": str(self.root), "creating": self.creating,
-                "warning": self.warning}
+                "warning": self.warning, "origin": self.origin}
 
 
 def _is_synced(path: Path) -> bool:
@@ -39,7 +44,12 @@ def _is_synced(path: Path) -> bool:
 
 
 def default_root() -> Path:
-    """Куди покласти простір, якщо людина не сказала інакше."""
+    """Куди покласти простір, якщо його не назвало ЖОДНЕ джерело.
+
+    ⚠ Свідомо не читає середовища: це питання про МАШИНУ (де тут тека
+    документів і чи вона не синхронізується), а не про волю людини. Драбина
+    джерел живе в `core.workspace.propose()`; тут — лише її останній щабель.
+    """
     home = Path.home()
     for candidate in (home / "Documents" / DEFAULT_DIRNAME,
                       home / "Документи" / DEFAULT_DIRNAME,
@@ -53,10 +63,14 @@ def default_root() -> Path:
 
 def plan(root: str | Path | None = None) -> Plan:
     """Порахувати, що станеться. Нічого не створює."""
-    from nyshporka.core.workspace import MARKER, validate_root
+    from nyshporka.core.workspace import MARKER, propose
 
-    target = Path(root).expanduser() if root else default_root()
-    validate_root(target)          # кине WorkspaceError на корені диска чи домівці
+    # 🔴 Драбина джерел — одна на застосунок. Доки майстер рахував шлях сам, він
+    # знав ОДНЕ джерело з п'яти: `nysh init` усередині наявного простору
+    # пропонував створити новий, а виставлена змінна не діяла зовсім.
+    # `propose()` повертає вже перевірений АБСОЛЮТНИЙ шлях — тому відносний
+    # аргумент більше не залежить від того, звідки запущено процес.
+    target, origin = propose(root, default=default_root())
     exists = (target / MARKER).is_file()
     warning = ""
     if _is_synced(target):
@@ -64,7 +78,27 @@ def plan(root: str | Path | None = None) -> Plan:
                    "і виглядатиме як зависання")
     elif target.exists() and any(target.iterdir()) and not exists:
         warning = "тека не порожня — простір ляже поруч із наявними файлами"
-    return Plan(root=target, creating=not exists, warning=warning)
+    return Plan(root=target, creating=not exists, warning=warning, origin=origin)
+
+
+def origin_phrase(origin: str) -> str:
+    """Людською: звідки взявся запропонований шлях.
+
+    Тут, а не в `cli.py`: ту саму фразу читатиме екран першого запуску.
+    """
+    from nyshporka.core.workspace import MARKER
+
+    if origin == "explicit":
+        return "вказано вами"
+    if origin.startswith("env:"):
+        return f"зі змінної {origin.split(':', 1)[1]}"
+    if origin == "marker":
+        return f"з {MARKER} у поточній теці або вище"
+    if origin == "last-used":
+        return "простір, відкритий востаннє"
+    if origin == "default":
+        return "типове місце"
+    return origin
 
 
 def create(root: str | Path | None = None, *, name: str = "",

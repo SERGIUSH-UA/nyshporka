@@ -69,6 +69,96 @@ def test_default_root_avoids_synced_folders(monkeypatch, tmp_path: Path) -> None
     assert not wizard._is_synced(wizard.default_root())
 
 
+# ── драбина джерел майстра ───────────────────────────────────────────────────
+# 🔴 Майстер рахував шлях сам і знав ОДНЕ джерело з п'яти, які знає резолвер.
+# Наслідок бачила кожна людина, що виставила змінну: простір створювався в
+# одному місці, а всі інші команди йшли в інше. Ці перевірки стережуть саме
+# драбину — те, чого не було видно жодному тесту, бо тестів на неї не існувало.
+def test_plan_takes_the_root_from_the_variable(monkeypatch, tmp_path: Path) -> None:
+    """Інсталятор кличе `nysh init --yes` БЕЗ шляху — саме той виклик, який
+    ішов повз виставлену змінну."""
+    from nyshporka.core.workspace import ENV_WORKSPACE
+
+    target = tmp_path / "дослідження"
+    monkeypatch.setenv(ENV_WORKSPACE, str(target))
+    p = wizard.plan()
+    assert p.root == target
+    assert p.origin == f"env:{ENV_WORKSPACE}"
+
+
+def test_plan_takes_the_root_from_the_marker_above_cwd(monkeypatch, tmp_path: Path) -> None:
+    """`nysh init` усередині наявного простору пропонував створити НОВИЙ."""
+    from nyshporka.core.workspace import MARKER
+
+    root = tmp_path / "простір"
+    (root / "data" / "raw").mkdir(parents=True)
+    (root / MARKER).write_text(
+        "[workspace]" + chr(10) + "schema = 1" + chr(10), encoding="utf-8")
+    monkeypatch.chdir(root / "data" / "raw")
+
+    p = wizard.plan()
+    assert p.root == root
+    assert p.creating is False       # він уже є, а не «створимо новий»
+    assert p.origin == "marker"
+
+
+def test_explicit_root_beats_the_variable(monkeypatch, tmp_path: Path) -> None:
+    """Названий шлях сильніший за змінну — інакше виправлення перевернуло б
+    пріоритет, і людина не могла б покласти простір туди, куди сказала."""
+    from nyshporka.core.workspace import ENV_WORKSPACE
+
+    monkeypatch.setenv(ENV_WORKSPACE, str(tmp_path / "зі-змінної"))
+    p = wizard.plan(tmp_path / "названий")
+    assert p.root == tmp_path / "названий"
+    assert p.origin == "explicit"
+
+
+def test_the_legacy_variable_is_still_honoured(monkeypatch, tmp_path: Path) -> None:
+    """Аліас оголошений як «лишений на один реліз» — патч не має права зняти
+    його раніше, ніж це зробить сам реліз."""
+    from nyshporka.core.workspace import ENV_LEGACY_WORKSPACE
+
+    target = tmp_path / "старий"
+    monkeypatch.setenv(ENV_LEGACY_WORKSPACE, str(target))
+    p = wizard.plan()
+    assert p.root == target
+    assert p.origin == f"env:{ENV_LEGACY_WORKSPACE}"
+
+
+def test_plan_creates_nothing_even_when_the_variable_points_nowhere(
+        monkeypatch, tmp_path: Path) -> None:
+    """Інваріант «`plan()` нічого не створює» мусить пережити нове джерело."""
+    from nyshporka.core.workspace import ENV_WORKSPACE
+
+    target = tmp_path / "ще-немає"
+    monkeypatch.setenv(ENV_WORKSPACE, str(target))
+    assert wizard.plan().root == target
+    assert not target.exists()
+
+
+def test_a_dangerous_root_in_the_variable_is_refused_and_named(monkeypatch) -> None:
+    """🔴 Змінна не обходить перевірку кореня — і повідомлення називає ВИННЕ
+    джерело. Без назви людина читає «корінь диска не може бути простором» і не
+    знає, яке з п'яти джерел цей шлях подало."""
+    from nyshporka.core.workspace import ENV_WORKSPACE, WorkspaceError
+
+    monkeypatch.setenv(ENV_WORKSPACE, str(Path.home()))
+    with pytest.raises(WorkspaceError) as exc:
+        wizard.plan()
+    assert ENV_WORKSPACE in str(exc.value)
+
+
+def test_default_root_ignores_the_variable(monkeypatch, tmp_path: Path) -> None:
+    """Розподіл ролей: драбина живе в `core`, а «типове місце» — питання про
+    МАШИНУ. Якби `default_root()` читала середовище, полагодженим виявився б
+    один щабель із трьох, а сусідній тест про хмарні теки тихо став би
+    тавтологією."""
+    from nyshporka.core.workspace import ENV_WORKSPACE
+
+    monkeypatch.setenv(ENV_WORKSPACE, str(tmp_path / "зі-змінної"))
+    assert wizard.default_root() != tmp_path / "зі-змінної"
+
+
 # ── паки ─────────────────────────────────────────────────────────────────────
 def test_catalog_lists_the_three_production_models() -> None:
     ids = {p.id for p in packs.catalog()}

@@ -330,6 +330,58 @@ def resolve(explicit: str | Path | None = None) -> Workspace:
         "  • аргумент --workspace")
 
 
+
+def _validated(path: str | Path, source: str) -> Path:
+    """`validate_root()`, але з назвою джерела в помилці.
+
+    🔴 Джерела перевіряються мовчки й по черзі, тож без цього людина, у якої
+    змінна вказує на корінь диска, читає «корінь диска не може бути робочим
+    простором» і не має ЖОДНОГО способу дізнатись, яке з п'яти джерел цей шлях
+    назвало — а лікуються вони по-різному.
+    """
+    try:
+        return validate_root(Path(path))
+    except WorkspaceError as exc:
+        raise WorkspaceError(f"{source}: {exc}") from exc
+
+
+def propose(explicit: str | Path | None = None, *, default: Path) -> tuple[Path, str]:
+    """Куди покласти простір, якого ще може не бути, — і ЗВІДКИ взявся цей шлях.
+
+    🔴 Це НЕ `resolve()`, і різниця не косметична. `resolve()` відповідає на
+    «де ВЖЕ лежить дослідження», тому його остання гілка вважає простором будь-яку
+    теку, у якій є `data/`. Для пошуку наявного це правильно; для вибору місця під
+    НОВИЙ — ні: майстер запропонував би створити простір у теці пакета, а у
+    встановленому колесі це поруч із `site-packages`, звідки дерево змиває
+    найближчий `pip install --upgrade`. «Знайти наявне» і «обрати місце для
+    нового» — різні питання, і однією драбиною вони не відповідаються.
+
+    Отже драбина тут та сама, МІНУС гілка розташування пакета, ПЛЮС останній
+    щабель `default` — типове місце, яке передає той, хто знає про машину
+    (`setup.wizard`), бо «де в цієї ОС тека документів і чи вона не в хмарі» —
+    не знання рівня `core`.
+
+    Нічого не створює й не пише: на цьому тримається обіцянка `wizard.plan()`
+    «порахувати, що станеться».
+    """
+    if explicit:
+        return _validated(explicit, "вказаний шлях"), "explicit"
+
+    for env in (ENV_WORKSPACE, ENV_LEGACY_WORKSPACE):
+        val = os.environ.get(env)
+        if val:
+            return _validated(val, f"{env}={val}"), f"env:{env}"
+
+    found = _find_marker_upwards(Path.cwd())
+    if found is not None:
+        return _validated(found, f"{MARKER} у {found}"), "marker"
+
+    last = _load_last_used()
+    if last is not None and _looks_like_workspace(last):
+        return _validated(last, "останній відкритий простір"), "last-used"
+
+    return _validated(default, "типове місце"), "default"
+
 # ── «останній використаний» ──────────────────────────────────────────────────
 def _state_path() -> Path | None:
     """Файл стану поза простором — інакше «який простір відкривали» жив би в

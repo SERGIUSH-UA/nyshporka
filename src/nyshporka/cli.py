@@ -302,7 +302,11 @@ def init(
     except WorkspaceError as exc:
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(code=2) from None
+    # 🔴 Не лише КУДИ, а й ЧОМУ туди. `nysh init --yes` в інсталяторі не питає
+    # нічого, тож цей рядок — єдине місце, де людина може помітити, що шлях
+    # узявся не звідти, звідки вона думала.
     console.print(f"Простір: [bold]{p.root}[/bold]"
+                  + f"  [dim]({wizard.origin_phrase(p.origin)})[/dim]"
                   + ("" if p.creating else "  [dim](уже існує)[/dim]"))
     if p.warning:
         console.print(f"[yellow]⚠ {p.warning}[/yellow]")
