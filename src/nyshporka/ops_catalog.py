@@ -278,6 +278,7 @@ class CollectArgs(BaseModel):
     opys: str = Field("", description="описи через кому; порожньо — всі")
     refresh: bool = Field(False, description="не читати кеш")
     dry_run: bool = Field(False, description="лише порахувати, нічого не писати")
+    fond_id: str = Field("", description="внутрішній номер фонду на сайті архіву")
 
 
 def _target(a: CollectArgs) -> Any:
@@ -363,11 +364,16 @@ def registry_collect(a: CollectArgs) -> Envelope:
 
     target = _target(a)
     plan = c.plan(target)
-    if not plan.ready:
+    if not plan.ready and not a.fond_id:
         return fail(plan.why or f"{c.label}: збирати нічим")
 
     dest = ws.root / registry_dir(target.fond_id)
-    res = c.collect(target, dest=dest, refresh=a.refresh, dry_run=a.dry_run)
+    kw: dict[str, Any] = {"refresh": a.refresh, "dry_run": a.dry_run}
+    # Внутрішній номер фонду розуміє не кожен збирач — передаємо лише тому, хто
+    # його просить, інакше решта падала б на несподіваному аргументі.
+    if a.fond_id and "fond_id" in getattr(c.collect, "__annotations__", {}):
+        kw["fond_id"] = a.fond_id
+    res = c.collect(target, dest=dest, **kw)
     env = ok(res.as_dict())
     for b in res.blind:
         env.warn(f"blind_{b.kind}", f"{b.count}: {b.why}")

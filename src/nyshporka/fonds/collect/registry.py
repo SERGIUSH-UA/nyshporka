@@ -38,7 +38,9 @@ def _builtin(workspace: Path | None = None) -> list[Collector]:
     джерел: збирач, який шукає простір сам, стає другим резолвером поруч із
     головним, і вони розходяться тихо (склали в один корінь, читаємо з іншого).
     """
-    out: list[Collector] = []
+    from nyshporka.fonds.collect.archium import ArchiumCollector
+
+    out: list[Collector] = [ArchiumCollector(workspace)]
     return out
 
 

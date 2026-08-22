@@ -76,11 +76,14 @@ def cmd_collect(
     opys: str = typer.Option("", "--opys", help="описи через кому"),
     refresh: bool = typer.Option(False, "--refresh", help="не читати кеш"),
     dry_run: bool = typer.Option(False, "--dry-run", help="нічого не писати"),
+    fond_id: str = typer.Option("", "--fond-id",
+                                help="внутрішній номер фонду на сайті архіву"),
 ) -> None:
     """Зібрати перелік справ фонду в `registry/<збирач>.tsv`."""
     env = O.call("registry.collect", {"collector": collector, "repo": repo,
                                       "fond": fond, "opys": opys,
-                                      "refresh": refresh, "dry_run": dry_run})
+                                      "refresh": refresh, "dry_run": dry_run,
+                                      "fond_id": fond_id})
     if not env.ok:
         _fail(env)
     d = env.data or {}
