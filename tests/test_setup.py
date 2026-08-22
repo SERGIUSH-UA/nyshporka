@@ -472,3 +472,17 @@ def test_second_voice_travels_with_the_hit(tmp_path: Path, monkeypatch) -> None:
     assert hit["alt"]["run"] == S.RUN_SIDE
     assert hit["alt"]["line"] != hit["line"], (
         "голоси збіглись побуквенно — тоді це той самий прогін, а не другий")
+
+
+def test_create_remembers_the_workspace_for_the_next_command(tmp_path: Path,
+                                                             last_used_state) -> None:
+    """`remember()` була написана рівно під цей випадок і не викликалась
+    жодного разу — тобто гілка «останній відкритий простір» у резолвері була
+    недосяжна за побудовою: файл читали, але ніхто його не писав."""
+    from nyshporka.core import workspace as W
+
+    root = wizard.create(tmp_path / "простір", preset="catalog")
+    assert last_used_state.is_file(), "простір не запам'ятався"
+
+    W.reset()
+    assert W._load_last_used() == root

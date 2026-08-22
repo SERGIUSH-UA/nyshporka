@@ -112,7 +112,7 @@ def create(root: str | Path | None = None, *, name: str = "",
     import tomllib  # noqa: F401  (перевірка, що stdlib має читач TOML)
 
     from nyshporka.core import sections as S
-    from nyshporka.core.workspace import MARKER, use
+    from nyshporka.core.workspace import MARKER, remember, use
 
     if preset and preset not in S.PRESETS:
         raise ValueError(
@@ -142,5 +142,15 @@ def create(root: str | Path | None = None, *, name: str = "",
             "# Скани, що лежать ПОЗА простором (зовнішній диск, мережева теку):\n"
             "# case_roots = [\"D:/архів\"]\n",
             encoding="utf-8")
-    use(target)
+    # 🔴 Запам'ятати — інакше наступна КОМАНДА простору не знайде. `use()` діє
+    # лише в цьому процесі, а `nysh init` одразу завершується; обидва
+    # інсталятори наступним рядком кличуть `nysh doctor`, і той стартує з іншої
+    # теки, без змінної та без маркера над собою. Тобто останній крок успішного
+    # встановлення показував червоне «робочий простір не знайдено» з порадою
+    # виконати `nysh init` — команду, яку щойно виконали.
+    #
+    # ⚠ Саме тут, а не в `use()`: її кличе кожен запуск із `--workspace` і кожен
+    # тест. Писати стан там означало б, що прапорець «на один запуск» мовчки
+    # стає липким і перевизначає всі наступні команди.
+    remember(use(target))
     return target

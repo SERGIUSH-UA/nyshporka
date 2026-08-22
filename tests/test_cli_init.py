@@ -72,3 +72,36 @@ def test_init_refuses_a_dangerous_path_from_the_variable(monkeypatch, tmp_path: 
     res = runner.invoke(app, ["init", "--yes", "--preset", "catalog"])
     assert res.exit_code == 2
     assert W.ENV_WORKSPACE in res.stdout
+
+
+def test_doctor_finds_the_workspace_created_a_moment_ago(monkeypatch, tmp_path: Path) -> None:
+    """🔴 Рівно два рядки обох інсталяторів, один за одним:
+
+        nysh init --yes --preset researcher
+        nysh doctor
+
+    `init` створював простір і забував його; `doctor` — НОВИЙ процес, стартує з
+    іншої теки, без змінної й без маркера над собою, — не мав звідки взяти шлях
+    і радив виконати `nysh init`, тобто команду, яку щойно виконали. Останній
+    крок успішного встановлення показував червоне.
+    """
+    import json
+
+    root = tmp_path / "дослідження"
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path / "домівка"))
+    assert runner.invoke(app, ["init", "--yes", "--preset", "catalog",
+                               str(root)]).exit_code == 0
+
+    # Новий процес: скидаємо все, що жило в пам'яті, і йдемо в СТОРОННЮ теку.
+    W.reset()
+    away = tmp_path / "деінде"
+    away.mkdir()
+    monkeypatch.chdir(away)
+
+    res = runner.invoke(app, ["doctor", "--json"])
+    checks = {c["name"]: c for c in json.loads(res.stdout)}
+    space = checks["Робочий простір"]
+
+    assert space["level"] != "fail", space
+    assert str(root) in space["detail"]
+    assert "last-used" in space["detail"]
