@@ -1124,14 +1124,20 @@ class EnvArgs(BaseModel):
 @op("htr.env", summary="Чи готове середовище рушіїв читання", args=EnvArgs,
     agent=False, section="htr")
 def htr_env(a: EnvArgs) -> Envelope:
-    from nyshporka.core.workspace import WorkspaceError, workspace
+    from nyshporka.core.workspace import WorkspaceError
     from nyshporka.htr import env as E
+    from nyshporka.setup import doctor as doc
 
     if a.venv:
         venv = Path(a.venv)
     else:
         try:
-            venv = workspace().root / ".venv_htr"
+            # 🔴 Шлях до рушіїв рахує `doctor.engine_venv()`, і лише вона.
+            # Власна арифметика тут ігнорувала і `NYSHPORKA_HTR_VENV`, і наявну
+            # `.venv_kraken` — тобто та сама машина відповідала по-різному
+            # залежно від того, спитали `nysh doctor` чи цей tool, і розбіжність
+            # виглядала як «в агента зламано середовище».
+            venv = doc.engine_venv()
         except WorkspaceError as exc:
             return fail(str(exc))
     rep = E.inspect(venv)

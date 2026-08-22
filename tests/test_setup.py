@@ -486,3 +486,54 @@ def test_create_remembers_the_workspace_for_the_next_command(tmp_path: Path,
 
     W.reset()
     assert W._load_last_used() == root
+
+
+# ── шлях до рушіїв рахують в ОДНОМУ місці ────────────────────────────────────
+def test_engine_venv_is_named_in_one_place() -> None:
+    """🔴 Дві гілки кликали `doctor.engine_venv()`, третя рахувала шлях руками —
+    і через це операція `htr.env` не бачила ні змінної `NYSHPORKA_HTR_VENV`, ні
+    наявної `.venv_kraken`. Та сама машина відповідала по-різному залежно від
+    того, хто питає, а виглядало це як «в агента зламане середовище»."""
+    import nyshporka
+
+    src = Path(nyshporka.__file__).parent
+    guilty = [
+        p.relative_to(src).as_posix()
+        for p in src.rglob("*.py")
+        if p.name != "doctor.py" and ".venv_htr" in p.read_text(encoding="utf-8",
+                                                                errors="replace")
+    ]
+    assert not guilty, f"назва теки рушіїв дублюється: {guilty}"
+
+
+def test_htr_env_op_looks_where_doctor_looks(monkeypatch, tmp_path: Path) -> None:
+    """Операція й доктор мусять дивитись в ОДНУ теку — інакше «рушіїв немає»
+    означає різне для браузера, командного рядка й агента."""
+    from nyshporka.core import workspace as W
+    from nyshporka.htr import env as E
+
+    root = wizard.create(tmp_path / "простір", preset="researcher")
+    (root / ".venv_kraken").mkdir()
+
+    seen: list[Path] = []
+
+    def _spy(venv: Path, *a: object, **k: object) -> E.EnvReport:
+        seen.append(venv)
+        return E.EnvReport(ok=False)
+
+    monkeypatch.setattr(E, "inspect", _spy)
+    from nyshporka import ops as O
+
+    try:
+        # 1. змінна середовища сильніша за все
+        engines = tmp_path / "рушії"
+        monkeypatch.setenv("NYSHPORKA_HTR_VENV", str(engines))
+        O.call("htr.env", {})
+        assert seen[-1] == engines
+
+        # 2. без змінної — наявна тека простору, у тому числі стара `.venv_kraken`
+        monkeypatch.delenv("NYSHPORKA_HTR_VENV")
+        O.call("htr.env", {})
+        assert seen[-1] == root / ".venv_kraken"
+    finally:
+        W.reset()
