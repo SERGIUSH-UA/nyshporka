@@ -36,6 +36,14 @@ TEXT_SUFFIXES = {
 #: Каталоги, у які не заходимо ніколи.
 SKIP_DIRS = {".git", ".venv", "venv", "node_modules", "__pycache__", ".mypy_cache",
              ".ruff_cache", ".pytest_cache", "dist", "build", ".idea", ".vscode"}
+#: 🔴 Імена, які бувають ФАЙЛОМ, а не текою. `SKIP_DIRS` підрізає лише обхід
+#: каталогів, тож `.git` у git-worktree і в субмодулі (там це файл із рядком
+#: `gitdir: <абсолютний шлях>`) проходив повз і давав ХИБНУ тривогу на правило
+#: абсолютного шляху. Ворота, які кричать на службовий файл git, привчають
+#: розробника відмахуватись від них — а це рівно те, чого вони мають не
+#: допустити. Розширення тут не рятує: `Path(".git").suffix` порожній, а
+#: порожній суфікс у `TEXT_SUFFIXES` є навмисно (LICENSE, Dockerfile).
+SKIP_NAMES = {".git"}
 MAX_BYTES = 2_000_000
 
 
@@ -214,6 +222,8 @@ def iter_worktree() -> list[Item]:
         dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
         base = Path(dirpath)
         for fn in filenames:
+            if fn in SKIP_NAMES:
+                continue
             p = base / fn
             if p.suffix.lower() not in TEXT_SUFFIXES:
                 continue

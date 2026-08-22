@@ -226,3 +226,26 @@ def test_broken_contract_reads_as_absent(tmp_path):
     path = tmp_path / env.ENV_FILENAME
     path.write_text("{не json", encoding="utf-8")
     assert env.read_contract(path) is None
+
+
+def test_setup_names_the_missing_tool_instead_of_a_traceback(tmp_path, monkeypatch):
+    """🔴 `uv` і `git` — не залежності пакета, тож у того, хто ставив pip-ом, їх
+    може не бути зовсім, і саме він найімовірніше запустить `nysh htr install`.
+
+    Досі це давало `FileNotFoundError` із надр `subprocess`, текстом ОС мовою
+    системи і без назви інструмента — тобто трасу стека замість одного рядка.
+    """
+    import shutil
+
+    monkeypatch.setattr(shutil, "which", lambda name: None)
+    with pytest.raises(env.ToolMissing) as exc:
+        env.setup(tmp_path / "venv")
+    assert "uv" in str(exc.value)
+    # Не лише діагноз, а й ліки: рядок мусить казати, ЯК це полагодити.
+    assert "astral.sh" in str(exc.value)
+
+    # git перевіряється теж — PARSeq ставиться з репозиторію, не з PyPI.
+    monkeypatch.setattr(shutil, "which", lambda name: None if name == "git" else "/usr/bin/uv")
+    with pytest.raises(env.ToolMissing) as exc:
+        env.setup(tmp_path / "venv")
+    assert "git" in str(exc.value) and "strhub" in str(exc.value)

@@ -959,7 +959,14 @@ def htr_install(
     except WorkspaceError as exc:
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(code=2) from None
-    rep = E.setup(venv, with_cuda=not no_cuda)
+    try:
+        rep = E.setup(venv, with_cuda=not no_cuda)
+    except E.ToolMissing as exc:
+        # 🔴 Не трасою стека: `uv` і `git` — не залежності пакета, тож у того,
+        # хто ставив `pip install`, їх може не бути зовсім, і саме він
+        # найімовірніше опиниться тут.
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=2) from None
     console.print(f"\npython : {rep.python or '—'}")
     console.print(f"kraken : {rep.kraken or '—'}")
     console.print(f"torch  : {rep.torch or '—'}  cuda={rep.cuda} "

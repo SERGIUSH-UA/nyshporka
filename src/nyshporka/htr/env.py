@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -112,6 +113,31 @@ def inspect(venv: Path, man: M.Manifest | None = None) -> EnvReport:
                      missing=tuple(missing), problems=tuple(problems))
 
 
+class ToolMissing(RuntimeError):
+    """Зовнішнього інструмента немає на машині — з назвою і що з цим робити.
+
+    🔴 Окремий тип, а не голий `FileNotFoundError` із надр `subprocess`. Той
+    приходить із текстом ОС мовою системи («Не удается найти указанный файл»),
+    без назви інструмента й без жодної підказки — тобто на найчастішому шляху
+    («поставив pip-ом, запустив `nysh htr install`») людина отримує трасу стека
+    замість одного рядка про те, чого бракує.
+    """
+
+
+def _need_tool(name: str, why: str, how: str) -> None:
+    """Перевірити ПЕРЕД запуском, а не впасти всередині.
+
+    Обидві перевірки тут не про педантизм: `uv` і `git` у цьому пакеті — не
+    залежності збірки, тож у людини, яка ставила `pip install`, їх може не бути
+    зовсім. Збірка середовища рушіїв — єдине місце, де вони потрібні, і саме там
+    їхня відсутність досі виглядала як поломка застосунку.
+    """
+    if shutil.which(name):
+        return
+    raise ToolMissing(f"{name} не знайдено — {why}\n"
+                      f"  {how}")
+
+
 def _run(cmd: list[str]) -> None:
     print("  $ " + " ".join(cmd))
     subprocess.run(cmd, check=True)
@@ -121,6 +147,14 @@ def setup(venv: Path, *, man: M.Manifest | None = None, with_cuda: bool = True,
           uv: str = "uv") -> EnvReport:
     """Створити або доповнити середовище. Ідемпотентно: наявне не чіпається."""
     man = man or M.active()
+    _need_tool(uv, "ним створюється й наповнюється середовище рушіїв",
+               "Windows: winget install astral-sh.uv · "
+               "Linux/macOS: curl -LsSf https://astral.sh/uv/install.sh | sh")
+    if man.vcs_packages:
+        # PARSeq (`strhub`) ставиться з репозиторію, а не з PyPI — його там немає.
+        _need_tool("git", "з нього ставиться "
+                          + ", ".join(v["name"] for v in man.vcs_packages),
+                   "https://git-scm.com/downloads")
     py = venv_python(venv)
 
     if py.exists():
