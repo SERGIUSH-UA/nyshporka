@@ -731,6 +731,10 @@ from nyshporka.catalog.cli import app as catalog_app  # noqa: E402
 
 app.add_typer(catalog_app, name="catalog")
 
+from nyshporka.fonds.cli import app as registry_app  # noqa: E402
+
+app.add_typer(registry_app, name="registry")
+
 
 @cases_app.command("build")
 def cases_build(

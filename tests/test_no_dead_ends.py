@@ -73,8 +73,18 @@ def _called_from_js() -> set[str]:
 
 
 def _called_from_cli() -> set[str]:
-    return set(re.findall(r'O\.call\(\s*"([^"]+)"',
-                          (SRC / "cli.py").read_text(encoding="utf-8")))
+    """Виклики з УСІХ модулів командного рядка, а не лише з кореневого.
+
+    ⚠ Спершу тут читався один `cli.py`. Припущення «весь командний рядок в
+    одному файлі» вже неправдиве — поруч живуть `catalog/cli.py`, `geog/cli.py`
+    і `fonds/cli.py`, — тож ворота бачили б не всі справжні входи й вимагали б
+    винятку там, де вхід є.
+    """
+    out: set[str] = set()
+    for path in SRC.rglob("cli.py"):
+        out |= set(re.findall(r'O\.call\(\s*"([^"]+)"',
+                              path.read_text(encoding="utf-8")))
+    return out
 
 
 # 🔴 Виняток дозволений лише з причиною, і причина перевіряється очима на

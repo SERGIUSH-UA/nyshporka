@@ -262,3 +262,121 @@ def fond_rows(a: FondRowsArgs) -> Envelope:
         env.warn("nothing_matched",
                  f"під фільтр не підпало нічого з {summary['rows']} справ опису")
     return env
+
+
+# ── 🧾 збирачі реєстру опису ─────────────────────────────────────────────────
+# Той самий домен, що й решта цього модуля: знання про АРХІВ, а не про нашу
+# роботу. І та сама стеля агентських tool'ів — тому `agent=False`.
+class CollectorsArgs(BaseModel):
+    pass
+
+
+class CollectArgs(BaseModel):
+    collector: str = Field(..., description="id збирача: archium | commons | duck")
+    repo: str = Field(..., description="код архіву: CDIAK, ДАХмО…")
+    fond: str = Field(..., description="номер фонду")
+    opys: str = Field("", description="описи через кому; порожньо — всі")
+    refresh: bool = Field(False, description="не читати кеш")
+    dry_run: bool = Field(False, description="лише порахувати, нічого не писати")
+
+
+def _target(a: CollectArgs) -> Any:
+    from nyshporka.archives import active
+    from nyshporka.fonds.collect import Target
+
+    repo = a.repo.strip()
+    # Архів можна назвати і кодом (`CDIAK`), і як його пишуть люди (`ЦДІАК`).
+    pack = active()
+    if repo.upper() not in pack.repositories:
+        for code, r in pack.repositories.items():
+            if r.label.casefold() == repo.casefold():
+                repo = code
+                break
+    return Target(repo=repo.upper(), fond=a.fond.strip(),
+                  opys=tuple(o.strip() for o in a.opys.split(",") if o.strip()))
+
+
+@op("registry.collectors", summary="Які збирачі реєстру опису є і що кожен уміє",
+    mutates=False, agent=False, section="material")
+def registry_collectors(_: NoArgs) -> Envelope:
+    """Перелік збирачів.
+
+    ⚠ Порожній перелік — це СТАН, а не поломка: збирачі тягнуть extras
+    `archives`, і без них пакет усе одно вміє читати вже зібраний реєстр.
+    """
+    from nyshporka.fonds import collect
+
+    reg = collect.load()
+    env = ok({"collectors": [
+        {"id": c.id, "label": c.label, "file": c.filename,
+         "source": c.source_id, "caps": sorted(c.caps)} for c in reg.all()]})
+    for name, why in reg.broken:
+        env.warn("collector_broken", f"{name}: {why}")
+    if not reg.all():
+        env.warn("no_collectors",
+                 "жодного збирача — реєстр опису можна читати, але не складати. "
+                 "Це стан, а не помилка: pip install 'nyshporka[archives]'")
+    return env
+
+
+@op("registry.plan", summary="Скільки коштуватиме збирання й чого для нього бракує",
+    args=CollectArgs, mutates=False, agent=False, section="material")
+def registry_plan(a: CollectArgs) -> Envelope:
+    """Що принесе збирання — ДО того, як воно почалось.
+
+    Те саме, чим маніфест є для завантаження: фонд на три тисячі справ при
+    п'яти запитах на десять секунд збирається десятки хвилин, і питання
+    «скільки це» мусить мати відповідь до старту.
+    """
+    from nyshporka.fonds import collect
+
+    c = collect.load().get(a.collector)
+    if c is None:
+        return fail(f"збирача «{a.collector}» немає — див. `nysh registry sources`")
+    return ok(c.plan(_target(a)).as_dict())
+
+
+@op("registry.collect", summary="Зібрати перелік справ фонду в registry/*.tsv",
+    args=CollectArgs, mutates=True, long=True, agent=False, section="material")
+def registry_collect(a: CollectArgs) -> Envelope:
+    """Скласти те, що досі можна було лише прочитати.
+
+    🔴 Відповідь несе не лише число рядків. Позиційний розбір таблиці опису вже
+    одного разу віддав 2944 справи з однаковим заголовком і нулем аркушів — за
+    числом рядків це виглядало повним успіхом. Тому поруч їдуть `quality`
+    (скільки рядків мають роки, аркуші, заголовок) і `blind` (чого джерело не
+    бачить або не вважає справою).
+    """
+    from nyshporka.core.workspace import WorkspaceError, workspace
+    from nyshporka.fonds import collect
+    from nyshporka.fonds.registry import registry_dir
+
+    try:
+        ws = workspace()
+    except WorkspaceError as exc:
+        return fail(str(exc))
+
+    reg = collect.load(ws.root)
+    c = reg.get(a.collector)
+    if c is None:
+        return fail(f"збирача «{a.collector}» немає — див. `nysh registry sources`")
+
+    target = _target(a)
+    plan = c.plan(target)
+    if not plan.ready:
+        return fail(plan.why or f"{c.label}: збирати нічим")
+
+    dest = ws.root / registry_dir(target.fond_id)
+    res = c.collect(target, dest=dest, refresh=a.refresh, dry_run=a.dry_run)
+    env = ok(res.as_dict())
+    for b in res.blind:
+        env.warn(f"blind_{b.kind}", f"{b.count}: {b.why}")
+    if res.kept:
+        env.warn("kept_untouched",
+                 f"збережено {res.kept} рядків описів, яких цей запуск не чіпав")
+    # 🔴 Зібране ще не злите. Сказати це треба тут, інакше `registry collect`
+    # виглядає обіцянкою без виходу: файли з'явились, а реєстр опису той самий.
+    env.warn("merge_pending",
+             "зібране лягло в registry/ окремим файлом; зведення джерел в один "
+             "реєстр опису — окремий крок, якого в цій версії ще немає")
+    return env
