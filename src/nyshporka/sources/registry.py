@@ -46,10 +46,22 @@ def _builtin(workspace: Path | None = None) -> list[Source]:
     розходяться тихо: каталог кладеться в один корінь, а шукається в іншому,
     після чого пошук чесно віддає нуль.
     """
+    from nyshporka.archives import active
     from nyshporka.sources.archium import ArchiumSource
     from nyshporka.sources.fsfilm import FilmMirrorSource
 
-    return [LocalSource(), ArchiumSource(workspace), FilmMirrorSource(workspace)]
+    out: list[Source] = [LocalSource()]
+    # 🏛 ARCHIUM — один рушій на кілька архівів, тож джерел стільки, скільки
+    # майданчиків описано в паку. Окремими id, а не одним із параметром: `id`
+    # їде в «де шукали» кожної відповіді, і спільне ім'я на два різні архіви
+    # зробило б знаменник пошуку неправдивим.
+    sites = active().sites("archium")
+    if sites:
+        out += [ArchiumSource(workspace, site=site, repo=repo) for repo, site in sites]
+    else:
+        out.append(ArchiumSource(workspace))   # пак без майданчиків — старий шлях
+    out.append(FilmMirrorSource(workspace))
+    return out
 
 
 def _from_entry_points() -> tuple[list[Source], list[tuple[str, str]]]:

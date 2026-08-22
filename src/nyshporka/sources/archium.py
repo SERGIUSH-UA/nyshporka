@@ -35,6 +35,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
+from nyshporka.archives.pack import Site
 from nyshporka.sources.base import (
     FetchResult,
     Hit,
@@ -187,9 +188,10 @@ def viewer_pages(html: str) -> list[tuple[int, int]]:
     return out
 
 
-def image_url(image_id: int) -> str:
+def image_url(image_id: int, base: str = BASE) -> str:
+    """Адреса кадру. `base` із дефолтом: рушій спільний, хости різні."""
     s = f"{image_id:06d}"
-    return f"{BASE}/static/files/{s[:3]}/{s}.jpg"
+    return f"{base}/static/files/{s[:3]}/{s}.jpg"
 
 
 def _flat(s: str) -> str:
@@ -211,18 +213,63 @@ class ArchiumSource:
     caps = frozenset({"search", "browse", "manifest", "fetch"})
 
     #: Куди обхід складає каталог. Відносно кореня простору.
+    #: ⚠ Лишається константою класу: на неї спираються тести, і для ДАХмО вона
+    #: дорівнює тому, що рахує `catalog_rel` за кодом архіву.
     CATALOG_REL = Path("data") / "raw" / "dahmo_archium" / "_crawl" / "cases.tsv"
 
     def __init__(self, workspace: Path | None = None, *,
+                 site: Site | None = None, repo: str = "DAHMO",
                  fetcher: Fetcher | None = None) -> None:
+        """`site` порожній — майданчик ДАХмО, як було до мультихостовості.
+
+        🔴 `id` і `label` стають атрибутами ЕКЗЕМПЛЯРА: один рушій обслуговує
+        кілька архівів, а `id` їде у «де шукали» кожної відповіді. Спільне ім'я
+        на два різні архіви зробило б знаменник пошуку неправдивим — «шукали в
+        archium» не сказало б, у якому саме.
+        """
         self.workspace = Path(workspace) if workspace else None
-        self.http = fetcher or Fetcher(base=BASE)
+        self.repo = (repo or "DAHMO").upper()
+        self.site = site or self._default_site()
+        self.base = self.site.url or BASE
+        self.id = self.site.source_id or f"archium-{self.repo.lower()}"
+        self.label = f"ARCHIUM ({self._repo_label()})"
+        self.http = fetcher or Fetcher(base=self.base)
+
+    def _default_site(self) -> Site:
+        """Майданчик із паку, а якщо його там немає — зашитий ДАХмО.
+
+        Фолбек не декоративний: пак перекривається файлом користувача, і
+        накладка, що не знає про майданчики, інакше лишила б джерело без адреси.
+        """
+        from nyshporka.archives import active
+
+        found = active().site(self.repo, "archium")
+        return found or Site(engine="archium", url=BASE, source_id="archium")
+
+    def _repo_label(self) -> str:
+        from nyshporka.archives import active
+
+        return active().repo_label(self.repo)
+
+    @property
+    def slug(self) -> str:
+        """Тека архіву в просторі: `dahmo_archium`, `cdiak_archium`."""
+        return f"{self.repo.lower()}_archium"
+
+    @property
+    def catalog_rel(self) -> Path:
+        """Те саме, що `CATALOG_REL`, але за кодом архіву (для ДАХмО збігається)."""
+        return Path("data") / "raw" / self.slug / "_crawl" / "cases.tsv"
+
+    @property
+    def state_rel(self) -> Path:
+        return Path("data") / "raw" / self.slug / "_crawl" / "state.json"
 
     # ── каталог ──────────────────────────────────────────────────────────────
 
     @property
     def catalog_path(self) -> Path | None:
-        return (self.workspace / self.CATALOG_REL) if self.workspace else None
+        return (self.workspace / self.catalog_rel) if self.workspace else None
 
     @staticmethod
     def bundled_catalog() -> tuple[Path, Path] | None:
@@ -238,6 +285,23 @@ class ArchiumSource:
         meta = d / "dahmo_archium_cases.json"
         return (blob, meta) if blob.is_file() else None
 
+    def _bundled_for_site(self) -> tuple[Path, Path] | None:
+        """Зріз каталогу цього майданчика.
+
+        ⚠ Для ДАХмО навмисно йде через `self.bundled_catalog()`: та лишається
+        статичною й без аргументів, бо наявні тести і кличуть її на класі, і
+        підміняють. Виклик через екземпляр зберігає обидві можливості.
+        """
+        if self.repo == "DAHMO":
+            return self.bundled_catalog()
+        name = self.site.bundled
+        if not name:
+            return None
+        d = Path(__file__).resolve().parent.parent / "archives" / "data"
+        blob = d / name
+        meta = blob.with_suffix("").with_suffix(".json")
+        return (blob, meta) if blob.is_file() else None
+
     def catalog_source(self) -> tuple[str, dict[str, Any]]:
         """Звідки братимемо рядки: `workspace` (свіжіший) чи `bundled`.
 
@@ -249,7 +313,7 @@ class ArchiumSource:
         path = self.catalog_path
         if path is not None and path.is_file():
             return "workspace", {"path": str(path)}
-        got = self.bundled_catalog()
+        got = self._bundled_for_site()
         if got is None:
             return "none", {}
         blob, meta_path = got
@@ -316,11 +380,23 @@ class ArchiumSource:
 
     def browse(self, ref: str | None = None) -> list[Node]:
         if not ref:
-            # Групи фондів жорстко задані сайтом і не мають окремого списку в API.
-            return [Node(ref="group:1", label="Фонди давніх актів (1739-1921)"),
-                    Node(ref="group:2", label="Фонди радянського періоду"),
-                    Node(ref="group:3", label="Фонди особового походження"),
-                    Node(ref="group:4", label="Колекції")]
+            # Групи фондів жорстко задані сайтом і окремого списку в API не мають,
+            # тож приходять паком — разом з адресою майданчика.
+            if self.site.groups:
+                return [Node(ref=f"group:{gid}", label=label)
+                        for gid, label in self.site.groups]
+            if self.site.fond_groups:
+                return [Node(ref="group:1", label="Фонди давніх актів (1739-1921)"),
+                        Node(ref="group:2", label="Фонди радянського періоду"),
+                        Node(ref="group:3", label="Фонди особового походження"),
+                        Node(ref="group:4", label="Колекції")]
+            # 🔴 Порожній список тут читався б як «архів порожній», а це неправда:
+            # у цього майданчика просто немає ЗАПИТУ на дерево груп (він віддає
+            # 500). Фонд тут знаходять за номером або за назвою.
+            raise SourceError(
+                f"{self.label}: переліку груп фондів у цього архіву немає — "
+                f"його API на такий запит відповідає помилкою. Фонд шукайте за "
+                f"номером: `nysh browse {self.id} fond:<id>`.")
         kind, _, ident = ref.partition(":")
         if kind == "group":
             return self._group_fonds(ident)
@@ -387,8 +463,8 @@ class ArchiumSource:
         if self.workspace is None:
             raise SourceError("для обходу потрібен робочий простір — каталог "
                               "лягає в нього")
-        cat = self.workspace / self.CATALOG_REL
-        state_path = self.workspace / self.STATE_REL
+        cat = self.workspace / self.catalog_rel
+        state_path = self.workspace / self.state_rel
         cat.parent.mkdir(parents=True, exist_ok=True)
         done: set[str] = set()
         if resume and state_path.is_file():
@@ -491,7 +567,8 @@ class ArchiumSource:
                     res.skipped += 1
                 else:
                     try:
-                        blob = self.http.get(image_url(image_id), client=c).content
+                        blob = self.http.get(image_url(image_id, self.base),
+                                             client=c).content
                         dst.write_bytes(blob)
                         res.frames += 1
                         res.bytes += len(blob)
