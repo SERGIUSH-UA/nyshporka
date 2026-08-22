@@ -376,3 +376,33 @@ def test_no_advice_points_at_a_missing_file() -> None:
         "порада вказує на файл, якого в пакеті немає:\n  " + "\n  ".join(sorted(set(bad)))
         + "\n\nЯкщо інструмент лишився в дослідницькому конвеєрі — не називайте "
           "його шляхом, а скажіть, звідки річ береться в цьому пакеті.")
+
+
+def test_messages_advise_only_existing_options(monkeypatch, tmp_path: Path) -> None:
+    """🔴 Ворота вище дивляться у ФАЙЛИ й вимагають слова `nysh` перед
+    прапорцем. Саме тому вони проґавили найдовше живу пораду застосунку:
+    «робочий простір не знайдено» перелічувала способи маркованим списком —
+    «• аргумент --workspace», — а такої опції не існувало з першого дня.
+
+    Людина, яка бачить цей текст, уже в халепі; порада, що не працює, додає
+    другу. Тому перевіряється саме ПОВІДОМЛЕННЯ — те, що дійде до неї, — а не
+    рядок у вихідному коді.
+    """
+    import typer.main
+
+    from nyshporka.cli import app
+    from nyshporka.core import workspace as W
+
+    known = {o for p in typer.main.get_command(app).params for o in p.opts}
+
+    # Простору немає ЖОДНОГО — той самий спосіб, що в `test_cold_core.py`.
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(W, "_PACKAGE_ANCHOR", tmp_path / "нема")
+    monkeypatch.setattr(W, "_load_last_used", lambda: None)
+    with pytest.raises(W.WorkspaceError) as exc:
+        W.resolve()
+
+    advised = set(re.findall(r"--[\w-]+", str(exc.value)))
+    assert advised, "у повідомленні немає жодної поради — перевірка втратила сенс"
+    assert not (advised - known), (
+        f"повідомлення радить неіснуючу опцію: {sorted(advised - known)}")
