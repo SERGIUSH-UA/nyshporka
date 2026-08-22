@@ -75,3 +75,62 @@ def test_the_bundled_snapshot_belongs_to_its_own_site() -> None:
     означало б показати чужі справи як свої."""
     assert A.ArchiumSource().catalog_source()[0] == "bundled"
     assert _cdiak().catalog_source()[0] == "none"
+
+
+# ── неоцифрована справа ──────────────────────────────────────────────────────
+def _absent_html() -> str:
+    from pathlib import Path
+
+    return (Path(__file__).parent / "fixtures" / "sources"
+            / "archium_viewer_absent.html").read_text(encoding="utf-8")
+
+
+def test_a_case_that_is_not_digitised_answers_200_not_404() -> None:
+    """🔴 Найтихіша пастка цього сайту, і фікстура тут — ЖИВА відповідь.
+
+    На справу, якої в переглядачі немає, ARCHIUM віддає головну сторінку з
+    кодом 200 (заміряно: 9.9 КБ, жодного кадру). Той, хто перевіряє статус,
+    дістає «все гаразд» і порожній список — і читає це як «кадри скінчились»,
+    тобто як властивість СПРАВИ, а не як відсутність сторінки.
+    """
+    html = _absent_html()
+    assert "data-observe-src" not in html, "фікстура не та: у ній є кадри"
+    assert not A.viewer_pages(html)
+    assert not A.case_meta(html), "шифри на цій сторінці бути не може"
+
+
+def test_the_shifra_is_read_from_the_page_when_the_case_is_there() -> None:
+    """Та сама розмітка дає й ВНУТРІШНІ номери сайту: фонд і опис він адресує
+    власними, з архівною шифрою не пов'язаними ніяк, а взяти їх більше нізвідки
+    (для ф.224 сайт зве фонд номером 198)."""
+    html = (
+        '<div class="description"><div class="description-item">'
+        '<h4 class="item-head-upper">'
+        '<a href="/files/51068/" class="no-link-item">Справа&nbsp;1</a></h4>'
+        '<ul class="item-lists">'
+        '<li> Фонд <a href="/fonds/198/">224</a> </li>'
+        '<li> Опис <a href="/inventories/1527/">1</a> </li>'
+        "</ul>")
+    m = A.case_meta(html)
+    assert (m.fond, m.opys, m.spr) == ("224", "1", "1")
+    assert (m.fond_id, m.inv_id) == ("198", "1527")
+    assert m.fond_id != m.fond, "номер сайту й номер фонду — різні числа"
+
+
+def test_the_refusal_says_which_of_the_two_states_it_is() -> None:
+    """«Справи немає в переглядачі» і «справа є, кадрів немає» лікуються
+    по-різному: перше — шукати іншим каналом, друге — замовляти в архіві."""
+    class _One:
+        def get(self, url: str) -> object:
+            class R:
+                status_code = 200
+                text = _absent_html()
+
+                def raise_for_status(self) -> None:
+                    pass
+            return R()
+
+    src = A.ArchiumSource(fetcher=A.Fetcher(base="https://x", delay=0.0, client=_One()))
+    with pytest.raises(SourceError) as exc:
+        src.manifest("file:52170")
+    assert "200" in str(exc.value) and "404" in str(exc.value)

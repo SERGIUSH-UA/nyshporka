@@ -188,6 +188,49 @@ def viewer_pages(html: str) -> list[tuple[int, int]]:
     return out
 
 
+@dataclass(frozen=True)
+class CaseMeta:
+    """Шифра справи, прочитана зі сторінки переглядача.
+
+    Внутрішні `fond_id` та `inv_id` цінні окремо: сайт адресує фонд і опис
+    ВЛАСНИМИ номерами, які з архівною шифрою не пов'язані ніяк, а знайти їх
+    більше нізвідки.
+    """
+
+    fond: str = ""
+    opys: str = ""
+    spr: str = ""
+    fond_id: str = ""
+    inv_id: str = ""
+
+    def __bool__(self) -> bool:
+        return bool(self.fond and self.spr)
+
+
+def case_meta(html: str) -> CaseMeta:
+    """Шифра зі сторінки переглядача; порожня — сторінки справи тут немає.
+
+    🔴 Єдина ознака, за якою можна відрізнити «справи в цьому архіві не
+    оцифровано» від «справа є». Код відповіді для цього НЕ ГОДИТЬСЯ: заміряно
+    на живому сайті — на неоцифровану справу ARCHIUM віддає HTTP 200 і головну
+    сторінку (9.9 КБ, жодного кадру), а не 404. Той, хто перевіряє статус,
+    дістає «все гаразд» і порожній результат, і читає це як «кадри скінчились».
+    """
+    block = re.search(r'<div class="description".*?</ul>', html, re.S)
+    if not block:
+        return CaseMeta()
+    b = block.group(0)
+    spr = re.search(r'/files/\d+/"[^>]*>\s*Справа(?:&nbsp;|\s)*([^<\s]+)', b)
+    fond = re.search(r'Фонд\s*<a href="/fonds/(\d+)/"[^>]*>\s*([^<\s]+)', b)
+    opys = re.search(r'Опис\s*<a href="/inventories/(\d+)/"[^>]*>\s*([^<\s]+)', b)
+    return CaseMeta(
+        fond=fond.group(2) if fond else "",
+        opys=opys.group(2) if opys else "",
+        spr=spr.group(1) if spr else "",
+        fond_id=fond.group(1) if fond else "",
+        inv_id=opys.group(1) if opys else "")
+
+
 def image_url(image_id: int, base: str = BASE) -> str:
     """Адреса кадру. `base` із дефолтом: рушій спільний, хости різні."""
     s = f"{image_id:06d}"
@@ -530,18 +573,31 @@ class ArchiumSource:
         kind, _, ident = ref.partition(":")
         if kind != "file":
             raise SourceError(f"завантажувати можна лише справу, а не {ref!r}")
-        pages = viewer_pages(self.http.get(f"/file-viewer/{ident}").text)
+        html = self.http.get(f"/file-viewer/{ident}").text
+        pages = viewer_pages(html)
         if not pages:
-            # Справа є в каталозі, а сканів немає — звичайна річ, і сказати це
-            # треба прямо: інакше «завантажити» мовчки принесе порожню теку.
+            # 🔴 Два різні стани, які легко сплутати, бо код відповіді в обох
+            # однаковий — 200. Розрізняє їх лише наявність шифри на сторінці:
+            # на неоцифровану справу сайт віддає ГОЛОВНУ, і той, хто дивиться
+            # на статус, читає це як «справа є, кадри скінчились».
+            meta = case_meta(html)
+            if not meta:
+                raise SourceError(
+                    f"{self.label}: справи {ident} у переглядачі немає — сайт "
+                    f"відповів головною сторінкою (і кодом 200, не 404). "
+                    f"Або номер чужий, або справу не оцифровано; шукати її "
+                    f"треба іншим каналом.")
             raise SourceError(
                 f"справа {ident} у каталозі є, але оцифрованих кадрів у ній немає")
         # Заголовок беремо з каталогу, якщо він зібраний. Переглядач його не
         # несе, а підтвердження перед завантаженням на кілька гігабайтів без
         # відповіді «що це» нічого не підтверджує.
+        meta = case_meta(html)
         return Manifest(source=self.id, ref=ref, title=self._title(ident),
                         frames=len(pages),
-                        meta={"image_ids": [i for i, _ in pages]})
+                        meta={"image_ids": [i for i, _ in pages],
+                              "shifra": {"fond": meta.fond, "opys": meta.opys,
+                                         "spr": meta.spr} if meta else {}})
 
     def fetch(self, ref: str, dest: Path, *,
               frames: tuple[int, int] | None = None,
