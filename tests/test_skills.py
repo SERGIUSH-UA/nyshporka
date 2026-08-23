@@ -158,3 +158,41 @@ def test_shipped_references_match_their_source() -> None:
         assert source.is_file(), f"{copy}: немає джерела {source}"
         assert copy.read_bytes() == source.read_bytes(), (
             f"{copy.name} розійшовся з docs/agents/ — оновіть копію")
+
+
+def test_frontmatter_is_valid_yaml() -> None:
+    """Шапка скіла мусить розбиратись як YAML — без здогадів про парсер.
+
+    🔴 Двокрапка з пробілом усередині нелапкованого скаляра робить шапку
+    невалідною: «Знайти рід у декоді так: канал…» YAML читає як вкладений
+    мапінг і падає. Наявні скіли жили з цим, бо читалка виявилась
+    поблажливою, — але покладатись на поблажливість чужого парсера означає
+    дізнатись про межу тоді, коли скіл мовчки перестане спрацьовувати.
+    Лікує одне: опис у лапках.
+    """
+    import yaml
+
+    for sk in S.available():
+        text = sk.card.read_text(encoding="utf-8")
+        assert text.startswith("---"), f"{sk.name}: немає шапки"
+        head = text.split("---", 2)[1]
+        try:
+            data = yaml.safe_load(head)
+        except yaml.YAMLError as exc:  # pragma: no cover - тіло діагностики
+            raise AssertionError(f"{sk.name}: шапка не є YAML — {exc}") from None
+        assert isinstance(data, dict), f"{sk.name}: шапка не мапінг"
+        assert data.get("name") == sk.name
+        assert data.get("description"), f"{sk.name}: порожній опис"
+
+
+def test_description_stays_readable() -> None:
+    """Опис лишається тригером, а не процедурою.
+
+    ⚠ Поріг тут не про технічну межу читалки (вона невідома), а про жанр: опис,
+    який не влазить у 1000 символів, майже завжди означає, що в нього поклали
+    інструкцію замість переліку випадків, коли скіл кликати.
+    """
+    for sk in S.available():
+        text = sk.card.read_text(encoding="utf-8")
+        desc = str(__import__("yaml").safe_load(text.split("---", 2)[1])["description"])
+        assert len(desc) <= 1000, f"{sk.name}: опис {len(desc)} символів"
