@@ -1,0 +1,20 @@
+{
+ "cases": [
+  {
+   "repo": "CDIAK",
+   "fond": "999",
+   "opys": "1",
+   "spr": "9",
+   "path": "data/raw/cdiak_999/999-1-9",
+   "frames": 210
+  },
+  {
+   "repo": "CDIAK",
+   "fond": "224",
+   "opys": "1",
+   "spr": "9",
+   "path": "data/raw/cdiak_224/224-1-9",
+   "frames": 11
+  }
+ ]
+}

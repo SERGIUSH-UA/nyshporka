@@ -1,0 +1,4 @@
+opys	spr_int	spr_letter	part	size	scheme	tls_ok	url	file
+1	5			60000000	https	1	https://mirror.example/5	999-1-5.pdf
+1	7			119000000	https	1	https://mirror.example/7	999-1-7.pdf
+1	17			45000000	https	1	https://mirror.example/17	999-1-17.pdf

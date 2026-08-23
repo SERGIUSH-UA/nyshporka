@@ -1,0 +1,4 @@
+opys	spr_int	spr_letter	title	year_from	year_to	folios	duck_id	duck_url	duck_online	duck_copies	duck_copy_url
+1	2		Метрична книга с. Кленове	1801	1805	70	d2	https://duck.example/2	1	1	https://duck.example/c/2
+1	1		Метрична книга	1801	1810		d1	https://duck.example/1	1	0	
+1	10		Метрична книга с. Вишневе	1841	1843	40	d10	https://duck.example/10	0	0	

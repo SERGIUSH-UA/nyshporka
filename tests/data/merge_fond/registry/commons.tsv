@@ -1,0 +1,9 @@
+opys	spr_int	spr_letter	no_shifra	size	pagecount	url	file
+1	3			500000000	1200	https://commons.example/3a	ЦДІАК 999-1-3 Гайове Частина 1.pdf
+1	3			480000000	1100	https://commons.example/3b	ЦДІАК 999-1-3 Гайове Частина 2.pdf
+1	4			600000000	1500	https://commons.example/4a	ЦДІАК 999-1-4 Березівка.pdf
+1	4			9000000	30	https://commons.example/4b	ЦДІАК 999-1-4 Березівка витяг с. Мала Березівка.pdf
+1	5			300000000	800	https://commons.example/5	ЦДІАК 999-1-5 Кринички.pdf
+1	7			120000000	300	https://commons.example/7	ЦДІАК 999-1-7 Дубина.pdf
+1	9			80000000	210	https://commons.example/9	ЦДІАК 999-1-9 Ясенів.pdf
+			1	10000000	20	https://commons.example/x	Опис фонду без шифри.pdf

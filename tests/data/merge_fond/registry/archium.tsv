@@ -1,0 +1,7 @@
+opys	spr_int	spr_letter	title	year_from	year_to	folios	archium_file	archium_url
+1	1		Метрична книга с. Вербівка	1801	1810	120	70001	https://arch.example/file/70001
+1	3		Метрична книга с. Гайове	1811	1820	200	70003	https://arch.example/file/70003
+1	7		Метрична книга с. Дубина	1821	1830	88	70007	https://arch.example/file/70007
+1	12		Метрична книга с. Ялинка	1841	1845	60	70012	https://arch.example/file/70012
+2	1		Сповідний розпис с. Вербівка	1795	1795	44	70101	https://arch.example/file/70101
+1	16		Метрична книга Свято-Покровської церкви с. Кленове	1871	1875	70	70016	https://arch.example/file/70016
