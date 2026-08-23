@@ -348,14 +348,16 @@ def cmd_opys(key: str = typer.Argument(..., help="DAHMO/230/43 або DAHMO/230/
     if row is None:
         console.print(f"[yellow]у реєстрі опису немає {repo} {fond}-{opys}-{spr}{letter}"
                       f"[/yellow]  ({path})")
-        # ⚠ Тут радили скрипт-збирач із дослідницького конвеєра, якого в цьому
-        # пакеті немає. Порада в порожнє гірша за відсутність поради: людина
-        # виконує її, бачить «немає такого файлу» й вирішує, що зламався
-        # застосунок. Реєстр опису сюди приходить ПАКОМ, а не збирається на
-        # місці, — тож і порада мусить бути про пак.
+        # ⚠ Порада в порожнє гірша за відсутність поради: людина виконує її,
+        # бачить «немає такого файлу» й вирішує, що зламався застосунок. Тому
+        # обидва шляхи названо, і саме в цьому порядку: взяти готовий пак
+        # дешевше, ніж зібрати фонд самому.
         console.print("  реєстр опису цього фонду не встановлено: "
                       f"[bold]nysh catalog install --from <zip>[/bold]  "
                       f"[dim]({_store.RELEASES_URL})[/dim]")
+        console.print(f"  або зібрати самому: [bold]nysh registry collect …[/bold] "
+                      f"→ [bold]nysh registry merge --repo {repo} --fond {fond}"
+                      f"[/bold]")
         raise typer.Exit(1)
     if as_json:
         typer.echo(_json.dumps(row, ensure_ascii=False, indent=1))
