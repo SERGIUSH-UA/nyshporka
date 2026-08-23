@@ -163,6 +163,23 @@ def test_years_src_stays_single_when_one_source_gave_both() -> None:
     assert r["years_src"] == "wikisource", "сильніше джерело років НЕ перебиває"
 
 
+def test_ukrainian_letter_index_is_a_letter() -> None:
+    """«1280і» — літерна справа, а не сміття.
+
+    🔴 Діапазон «а-я» не містить «і ї є ґ», тож такий номер не розбирався
+    ЗОВСІМ: рядок мовчки випадав, і в черзі завантаження на його місці не було
+    нічого. Описи ДАХмО й ДАВіО набирали українською.
+    ⚠ Замір 2026-08-23: на 27 839 наявних значеннях правка не міняє нічого —
+    вона чекає на дані, а не лагодить сьогоднішні.
+    """
+    from nyshporka.fonds.merge.text import key_of
+
+    assert key_of({"opys": "1", "spr": "1280і"}) == ("1", "1280", "і")
+    assert key_of({"opys": "1", "spr": "84є"}) == ("1", "84", "є")
+    assert key_of({"opys": "1", "spr": "24a"}) == ("1", "24", "а"), "латинка → шифр"
+    assert key_of({"opys": "1", "spr": "без номера"}) is None
+
+
 # ── черга розбіжностей ──────────────────────────────────────────────────────
 
 def test_conflict_queue_is_about_a_different_village(run) -> None:
