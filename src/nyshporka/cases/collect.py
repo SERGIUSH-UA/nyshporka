@@ -121,6 +121,12 @@ def _raw_scans() -> list[Any]:
     return list(walk_root(RAW_DIR, max_depth=4, skip_slugs=frozenset(_SKIP_SLUGS)))
 
 
+#: код архіву кирилицею → латинський код репозиторію (як у `fonds.registry`).
+#: Паспорти справ пишуть архів так, як його називають у документах.
+_CYR_REPO = {"ДАХМО": "DAHMO", "ЦДІАК": "CDIAK", "ДАВІО": "DAVIO",
+             "ДАВО": "DAVO", "ДАОО": "DAOO", "ДАЖО": "DAZHO"}
+
+
 def _ordered_cases(index: LibraryIndex,
                    scans: list[Any] | None = None) -> list[dict[str, Any]]:
     """Теки з карткою справи, але БЕЗ кадрів — «замовлено, не завантажено».
@@ -456,6 +462,12 @@ def collect_rows(index: LibraryIndex | None = None) -> tuple[list[CaseRow], list
         m = re.search(r"(\d+)\s*[-–]\s*(\d+)\s*[-–]\s*(\w+)", shifra)
         if m:
             repo = (re.split(r"[\s\d]", shifra, maxsplit=1)[0] or "").upper() or None
+            # 🔴 Код архіву в паспорті пишуть КИРИЛИЦЕЮ («ЦДІАК 224-1-918»), а ключі
+            #    реєстру латинські. Без цієї нормалізації замовлена справа лягала під
+            #    ключем `ЦДІАК/224/918` — окремим простором імен, у який не влучає ні
+            #    `cases show CDIAK/224/918`, ні прив'язка прогону в `overrides.json`.
+            if repo:
+                repo = _CYR_REPO.get(repo, repo)
             parsed = (repo, m.group(1).lstrip("0"), m.group(2).lstrip("0"),
                       m.group(3).lstrip("0"))
         if not parsed or not parsed[0]:

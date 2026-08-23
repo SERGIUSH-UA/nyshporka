@@ -383,6 +383,12 @@ def cmd_opys(key: str = typer.Argument(..., help="DAHMO/230/43 або DAHMO/230/
                       "[/yellow]")
     cs = row.get("commons_size")
     ms = row.get("mirror_size")
+    # 🏛 ARCHIUM першим, бо саме ним справу й візьмуть: переглядач архіву віддає
+    # готові посторінкові JPG (спр.1056 ф.224 — 54 кадри за 4 с), тоді як решта
+    # каналів вимагає або файла на сотні МБ, або обходу дзеркала плівок.
+    arch = (row.get("archium_url") or "").strip()
+    if arch:
+        console.print(f"  [green]ARCHIUM:[/green] посторінкові скани — {arch}")
     if cs and str(cs).isdigit():
         console.print(f"  [green]Commons:[/green] {int(cs) / 2**20:.0f} МБ, "
                       f"{row.get('commons_pages') or '?'} стор.")
@@ -401,7 +407,7 @@ def cmd_opys(key: str = typer.Argument(..., help="DAHMO/230/43 або DAHMO/230/
                       + (f" · {row['fs_frames']} кадрів" if row.get("fs_frames") else ""))
         console.print("    https://www.familysearch.org/records/images/"
                       f"search-results?imageGroupNumbers={film}")
-    if not cs and not ms and not film:
+    if not cs and not ms and not film and not arch:
         console.print("  [yellow]сканів онлайн немає — замовлення в архіві[/yellow]")
     console.print(f"  на диску: {row.get('on_disk') or '[dim]—[/dim]'}")
 
@@ -501,7 +507,12 @@ def cmd_fond(
         # `int(None)` тут упав би посеред друку таблиці.
         cs = str(r.get("commons_size") or "")
         scan_mark = ""
-        if cs.isdigit() and int(cs):
+        # 🏛 ARCHIUM попереду Commons, бо це той канал, яким справу візьмуть:
+        # готові посторінкові JPG проти файла на сотні МБ. Колонка має радити
+        # найшвидший шлях, а не найдавніше реалізований.
+        if r.get("archium_file"):
+            scan_mark = "[green]A[/green]"
+        elif cs.isdigit() and int(cs):
             scan_mark = f"C {int(cs) / 2**20:.0f}М"
         elif r.get("mirror_url"):
             scan_mark = "[yellow]дзерк.[/yellow]"
@@ -554,7 +565,8 @@ def cmd_fond(
     console.print(t)
     if len(sel) > limit:
         console.print(f"[dim]показано {limit} з {len(sel)} — --limit більше[/dim]")
-    console.print("[dim]скан: C = Commons (повний) · ✂ дзеркало обрізане · "
+    console.print("[dim]скан: A = ARCHIUM, переглядач архіву (найшвидший канал) · "
+                  "C = Commons (повний) · ✂ дзеркало обрізане · "
                   "FS = DGS плівки FamilySearch ·кадрів · "
                   "село: 👁 = прочитане ОКОМ з обкладинки (жирним — діапазон абетки "
                   "збірного тому), сірим — з друкованого каталогу архіву · "
@@ -573,8 +585,16 @@ def cmd_take(key: str = typer.Argument(..., help="DAHMO/230/43 або DAHMO/230/
 
     Один крок замість чотирьох ручних, бо саме тут народжуються теки без
     `meta.json` — а така справа невидима для бібліотеки, тобто для всього
-    конвеєра. Качає з Commons (не з обрізаного дзеркала), рахує sha256 і
-    кількість сторінок ІЗ ФАЙЛА, пише `meta.json`, перебудовує бібліотеку й реєстр.
+    конвеєра. Рахує sha256 і кількість сторінок ІЗ ФАЙЛА, пише `meta.json`,
+    перебудовує бібліотеку й реєстр.
+
+    🔴 КАНАЛ ВИБИРАЄТЬСЯ ЗА ШВИДКІСТЮ, а не за тим, який перевіряється першим у
+    коді. ARCHIUM — переглядач самого архіву — віддає готові посторінкові JPG
+    (спр.1056 ф.224: 54 кадри за 4 с), Commons — один файл на сотні МБ,
+    дзеркало обрізає великі справи, плівка FS вимагає обходу дзеркала. Доки
+    перевірявся лише Commons, ЦДІАК ф.224 виглядав фондом майже без сканів
+    (42 справи з 2950) і 1058 справ стояли в черзі «замовлення в архіві»,
+    лежачи при цьому онлайн.
     """
     repo, fond, opys, spr, letter = _parse_key(key)
     row, path = _opys_registry_row(repo, fond, opys, spr, letter)
@@ -582,7 +602,7 @@ def cmd_take(key: str = typer.Argument(..., help="DAHMO/230/43 або DAHMO/230/
         console.print(f"[red]у реєстрі опису немає {repo} {fond}-{opys}-{spr}{letter}"
                       f"[/red] ({path})")
         raise typer.Exit(1)
-    if not row.get("commons_url"):
+    if not (row.get("archium_url") or row.get("commons_url")):
         console.print(f"[yellow]{repo} {fond}-{opys}-{spr}{letter}: сканів на Commons "
                       "немає[/yellow]")
         if row.get("mirror_url"):
@@ -615,12 +635,23 @@ def cmd_take(key: str = typer.Argument(..., help="DAHMO/230/43 або DAHMO/230/
 
     ws = _workspace()
     slug = f"{_REPO_SLUG.get(repo, repo.lower())}_{fond}"
-    cmd = [sys.executable, str(ws.root / "scripts" / "commons_fond_download.py"),
-           "--fond", fond, "--opys", opys, "--spr", f"{spr}{letter}", "--slug", slug]
-    if dry_run:
-        cmd.append("--dry-run")
-    if force:
-        cmd.append("--force")
+    if row.get("archium_url"):
+        channel = "ARCHIUM"
+        cmd = [sys.executable, str(ws.root / "scripts" / "cdiak_download.py"),
+               str(row["archium_url"]), "--slug",
+               _REPO_SLUG.get(repo, repo.lower())]
+        if dry_run:
+            cmd.append("--dry-run")
+    else:
+        channel = "Commons"
+        cmd = [sys.executable, str(ws.root / "scripts" / "commons_fond_download.py"),
+               "--fond", fond, "--opys", opys, "--spr", f"{spr}{letter}",
+               "--slug", slug]
+        if dry_run:
+            cmd.append("--dry-run")
+        if force:
+            cmd.append("--force")
+    console.print(f"[dim]канал: {channel}[/dim]")
     rc = _sp.call(cmd, cwd=str(ws.root))
     if rc != 0:
         console.print(f"[red]завантаження впало (rc={rc})[/red]")
