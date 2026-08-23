@@ -145,6 +145,11 @@ packages = ["src/nyshporka"]
 # (`setup/data/sample/frames/*.jpg`) не потрапили б у колесо — локально й у
 # тестах усе працює, бо файли лежать на диску, а ламається рівно в користувача.
 artifacts = ["src/nyshporka/**/data/**", "src/nyshporka/daemon/static/*"]
+# 🔴 Скіли агента живуть у `.claude/skills/` — там, де їх читає Claude Code,
+# коли працюють НАД САМИМ пакетом. Тобто джерело правди й те, що бачить
+# розробник, — один каталог: розійтись їм ніде. У колесо він їде під іменем
+# пакета, звідки `nysh skills install` кладе його користувачеві.
+force-include = { ".claude/skills" = "nyshporka/skills" }
 
 [tool.ruff]
 line-length = 100

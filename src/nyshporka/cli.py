@@ -1211,6 +1211,85 @@ def op_run(
     raise typer.Exit(code=0 if env.ok else 1)
 
 
+skills_app = typer.Typer(help="Скіли агента: порядок роботи, який вантажиться за потреби.",
+                         no_args_is_help=True)
+app.add_typer(skills_app, name="skills")
+
+
+@skills_app.command("list")
+def skills_list() -> None:
+    """Які скіли несе пакет."""
+    from nyshporka import skills as S
+
+    got = S.available()
+    for sk in got:
+        console.print(f"  [bold]{sk.name:<16}[/bold] {sk.title}")
+        extra = [p for p in sk.files() if p.name != "SKILL.md"]
+        if extra:
+            console.print(f"  {'':<16} [dim]+ {len(extra)} довідник(ів)[/dim]")
+    if not got:
+        console.print("[yellow]![/yellow] скілів у пакеті немає")
+        return
+    console.print(f"\n[dim]усього {len(got)} · встановити: nysh skills install[/dim]")
+
+
+@skills_app.command("install")
+def skills_install(
+    target: str = typer.Option("", "--target",
+                               help="тека, куди класти (типово .claude/skills)"),
+    user: bool = typer.Option(False, "--user",
+                              help="глобально, для всіх проєктів"),
+    force: bool = typer.Option(False, "--force",
+                               help="перезаписати навіть правлене руками"),
+    only: str = typer.Option("", "--only", help="лише ці скіли, через кому"),
+) -> None:
+    """Покласти скіли туди, де їх бачить агент.
+
+    🔴 Не в робочий простір Нишпорки: простір — це тека ДАНИХ, і скіл,
+    покладений туди, не побачить ніхто. Агент читає `.claude/skills/` проєкту
+    або `~/.claude/skills/` користувача, і команда кладе саме туди.
+    """
+    from nyshporka import __version__
+    from nyshporka import skills as S
+
+    if user and target:
+        console.print("[yellow]![/yellow] --user і --target разом не мають сенсу")
+        raise typer.Exit(code=1)
+    dest = (Path.home() / ".claude" / "skills" if user
+            else Path(target or ".claude/skills"))
+
+    names = tuple(n.strip() for n in only.split(",") if n.strip())
+    known = {s.name for s in S.available()}
+    if unknown := set(names) - known:
+        console.print(f"[yellow]![/yellow] немає таких скілів: {', '.join(sorted(unknown))}"
+                      f"  (є: {', '.join(sorted(known))})")
+        raise typer.Exit(code=1)
+
+    out = S.install(dest, version=__version__, force=force, names=names)
+    if not out:
+        console.print("[yellow]![/yellow] нічого не встановлено")
+        raise typer.Exit(code=1)
+
+    tally: dict[str, int] = {}
+    for o in out:
+        tally[o.verdict] = tally.get(o.verdict, 0) + 1
+    word = {"new": "нових", "updated": "оновлено", "same": "без змін",
+            "kept": "лишено (правлено руками)"}
+    parts = [f"{word[k]} {v}" for k, v in tally.items() if k in word]
+    console.print(f"✓ {dest} — " + " · ".join(parts))
+
+    # 🔴 Правлене руками називається ПОІМЕННО: зведене число тут читалось би як
+    # «щось не поклалось», хоча це свідоме рішення інструмента не чіпати чужу
+    # роботу. Мовчазний пропуск був би гіршим за помилку.
+    if kept := [o.rel for o in out if o.verdict == "kept"]:
+        console.print("  [dim]не чіпав (є ваші правки; --force перезапише):[/dim]")
+        for rel in kept:
+            console.print(f"    {rel}")
+
+    where = "у будь-якому проєкті" if user else "у цьому проєкті"
+    console.print(f"  [dim]видно агентові {where}; перезапустіть сесію[/dim]")
+
+
 mcp_app = typer.Typer(help="Агентна поверхня (Claude Code, Codex).",
                       no_args_is_help=True)
 app.add_typer(mcp_app, name="mcp")
