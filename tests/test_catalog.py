@@ -329,3 +329,63 @@ def test_cyrillic_queries_never_enter_the_latin_branch(catalog, monkeypatch):
     _Q.find_places("М'ястківка")
     _Q.find_places("Такогоселанемає")
     assert called == [], "кириличний запит зайшов у латинську гілку"
+
+
+# ── пак довідників: розбіжності й знаменник ──────────────────────────────────
+def test_a_conflict_in_the_pack_shows_what_the_sources_say(tmp_path) -> None:
+    """🔴 Колонки звуться `value_a`/`value_b`, а читались як `a`/`b` — тобто в
+    пак кожна розбіжність їхала ПОРОЖНЬОЮ. Черга ока в довіднику існувала й
+    нічого не показувала: видно, що джерела розходяться, і не видно чим."""
+    import sqlite3
+
+    from nyshporka.catalog.build import build_opys
+
+    reg = tmp_path / "registry"
+    reg.mkdir()
+    (reg / "conflicts.tsv").write_text(
+        "opys\tspr\tfield\tvalue_a\tsrc_a\tvalue_b\tsrc_b\tscore\tverdict\tnote\n"
+        "1\t7\ttitle\tМетрика Вільхівки\tarchium\tМетрика Ольхівки\twikisource\t0.20\t\t\n",
+        encoding="utf-8")
+    merged = tmp_path / "f1_opys_merged.tsv"
+    merged.write_text("opys\tspr_int\tspr_letter\ttitle\n1\t7\t\tМетрика\n",
+                      encoding="utf-8")
+
+    out = tmp_path / "pack.sqlite"
+    build_opys(merged, out, fond="1", pack_id="тест", taken="2026-01-01",
+               registry_dir=reg)
+    con = sqlite3.connect(out)
+    a, b = con.execute("SELECT a, b FROM conflicts").fetchone()
+    con.close()
+    assert a == "Метрика Вільхівки" and b == "Метрика Ольхівки"
+
+
+def test_a_known_bound_stops_the_pack_from_calling_it_unknown(tmp_path) -> None:
+    """🔴 Формат покриття читався не той, тож знаменник НІКОЛИ не доїжджав:
+    `denom` завжди порожній, і поруч завжди стояла нота «межа опису невідома» —
+    навіть коли межа відома. Пак брехав в обидва боки одночасно."""
+    import json
+    import sqlite3
+
+    from nyshporka.catalog.build import build_opys
+
+    reg = tmp_path / "registry"
+    reg.mkdir()
+    (reg / "coverage.json").write_text(json.dumps(
+        {"1": {"last_number": 7438, "present": 7263},
+         "_total": {"present": 7263}}, ensure_ascii=False), encoding="utf-8")
+    merged = tmp_path / "f1_opys_merged.tsv"
+    merged.write_text("opys\tspr_int\tspr_letter\ttitle\n1\t7\t\tх\n2\t3\t\tх\n",
+                      encoding="utf-8")
+
+    out = tmp_path / "pack.sqlite"
+    build_opys(merged, out, fond="1", pack_id="тест", taken="2026-01-01",
+               registry_dir=reg)
+    con = sqlite3.connect(out)
+    got = {v: (d, note) for v, d, note in con.execute(
+        "SELECT value, denom, note FROM coverage_scope WHERE dim='opys'")}
+    con.close()
+
+    assert got["1"][0] == 7438, "відома межа не доїхала"
+    assert not got["1"][1], "відому межу названо невідомою"
+    # А там, де межі справді немає, застереження лишається.
+    assert got["2"][0] is None and "НИЖНЯ" in got["2"][1]

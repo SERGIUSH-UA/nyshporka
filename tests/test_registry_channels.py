@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from nyshporka.fonds.collect.archium import FIELDS as ARCHIUM_FIELDS
 from nyshporka.fonds.collect.commons import FIELDS as COMMONS_FIELDS
+from nyshporka.fonds.collect.duck import FIELDS as DUCK_FIELDS
 from nyshporka.fonds.registry import FIELDS as REGISTRY_FIELDS
 from nyshporka.fonds.registry import row_status
 
@@ -34,16 +35,30 @@ def test_a_case_with_no_channel_at_all_is_an_order() -> None:
 
 
 def test_what_a_collector_writes_the_registry_can_read() -> None:
-    """Ворота проти повторення: колонки збирачів, які описують КАНАЛ, мусять
-    бути відомі читалці реєстру.
+    """Ворота проти повторення: колонки, які збирач пише про ДЖЕРЕЛО справи,
+    мусять бути відомі читалці реєстру.
 
-    ⚠ Не всі колонки збирача сюди належать: `duck_*` описують чужий покажчик і
-    в реєстр опису не вливаються — його заповнює окремий крок злиття. Тому
-    перевіряються саме ті, за якими вирішують, чи можна завантажити.
+    🔴 Тут стояв виняток на `duck_*` — «описують чужий покажчик і в реєстр
+    опису не вливаються». Це було неправдою, і вона вимірна: 2954 з 2955 рядків
+    ф.224 і 4261 з 4391 ф.904 несуть `duck_url`, а читалка їх мовчки відкидала.
+    Виняток, обґрунтований неперевіреним фактом, гірший за відсутній тест: він
+    зробив ваду законною й пережив би наступного читача.
+
+    ⚠ Префікс `duck_` тут не означає каналу завантаження — покажчик сам нічого
+    не віддає. Означає лише: якщо збирач це пише, читалка мусить це бачити.
     """
-    channel_columns = {c for c in (*ARCHIUM_FIELDS, *COMMONS_FIELDS)
-                       if c.startswith(("archium_", "commons_", "mirror_"))}
-    unknown = sorted(channel_columns - set(REGISTRY_FIELDS))
+    # ⚠ МЕЖА, а не виняток: злиття переносить у реєстр три колонки покажчика з
+    # шести — `duck_id` і `duck_copies` лишаються у файлі збирача. Перевірено
+    # на диску: у злитих реєстрах ф.224 і ф.904 стоять рівно `duck_url`,
+    # `duck_online`, `duck_copy_url`. Записано тут, щоб наступний не вважав це
+    # недоглядом і не «полагодив».
+    # 🔜 Коли злиття переїде в пакет, цей перелік замінить прямий зшивач
+    # `set(merge.COLUMNS) <= set(FIELDS)` — і межа стане перевіреною, а не
+    # переказаною.
+    not_carried = {"duck_id", "duck_copies"}
+    written = {c for c in (*ARCHIUM_FIELDS, *COMMONS_FIELDS, *DUCK_FIELDS)
+               if c.startswith(("archium_", "commons_", "mirror_", "duck_"))}
+    unknown = sorted(written - not_carried - set(REGISTRY_FIELDS))
     assert not unknown, (
-        f"збирач пише колонки каналу, яких читалка реєстру не знає: {unknown} — "
-        f"справа зі сканом виглядатиме як «лише замовлення в архіві»")
+        f"збирач пише колонки, яких читалка реєстру не знає: {unknown} — "
+        f"зібране доїде до реєстру й не потрапить у застосунок")

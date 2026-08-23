@@ -287,8 +287,12 @@ def build_opys(merged_tsv: Path, out: Path, *, fond: str, pack_id: str,
     conf = reg / "conflicts.tsv"
     if conf.is_file():
         with conf.open(encoding="utf-8", newline="") as fh:
+            # 🔴 Колонки звуться `value_a`/`value_b`, а читались як `a`/`b`
+            # — тобто в пак кожна розбіжність їхала ПОРОЖНЬОЮ: видно, що
+            # джерела розходяться, і не видно чим. Черга ока в паку
+            # існувала й нічого не показувала.
             rows = [(r.get("opys", ""), r.get("spr", ""), r.get("field", ""),
-                     r.get("a", ""), r.get("b", ""), r.get("note", ""))
+                     r.get("value_a", ""), r.get("value_b", ""), r.get("note", ""))
                     for r in csv.DictReader(fh, delimiter="\t")]
         con.executemany("INSERT INTO conflicts VALUES(?,?,?,?,?,?)", rows)
         n_conf = len(rows)
@@ -301,13 +305,21 @@ def build_opys(merged_tsv: Path, out: Path, *, fond: str, pack_id: str,
             import json
 
             raw = json.loads(cov_json.read_text(encoding="utf-8"))
-            for k, v in (raw.get("opys") or {}).items():
-                if isinstance(v, dict) and v.get("total"):
-                    denoms[str(k)] = int(v["total"])
-        except Exception:
+            # 🔴 Формат читався як `{"opys": {…: {"total": N}}}`, а він
+            # `{"1": {"last_number": N, …}, "_total": {…}}`. Тобто знаменник
+            # НІКОЛИ не доїжджав: `denom` завжди порожній, і поруч завжди
+            # стояла нота «межа опису невідома» — навіть коли межа відома й
+            # дорівнює 7438. Пак брехав в обидва боки одночасно.
+            for k, v in raw.items():
+                if k == "_total" or not isinstance(v, dict):
+                    continue
+                last = v.get("last_number")
+                if str(last or "").isdigit():
+                    denoms[str(k)] = int(str(last))
+        except (OSError, ValueError, TypeError, AttributeError):
             pass
     coverage = [("opys", o, cnt, denoms.get(o),
-                 "" if o in denoms else "межа опису невідома — це НИЖНЯ оцінка")
+                 "" if o in denoms else "межі опису немає — це НИЖНЯ оцінка")
                 for o, cnt in sorted(by_opys.items())]
 
     res = finalize(con, tmp, out, domain="opys", pack_id=pack_id, taken=taken,
