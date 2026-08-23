@@ -6,7 +6,36 @@ from pathlib import Path
 
 import pytest
 
-from nyshporka.cases import acquire as A
+# 🔴 Імпорт ЛІНИВИЙ, і це не стиль. `nyshporka.cases.__init__` тягне модулі, які
+# беруть корінь робочого простору на рівні модуля, тож імпорт на рівні файла
+# падає там, де простору немає. Локально він проходив лише тому, що на машині
+# лишався запам'ятований простір від живих прогонів, — тобто тест перевіряв
+# машину, а не програму, і виявив це аж CI.
+
+
+@pytest.fixture(autouse=True)
+def _space(tmp_path_factory):
+    """Простір потрібен уже для ІМПОРТУ.
+
+    Ланцюг `cases.__init__ → collect → resolve → library` бере корінь на рівні
+    модуля, тож без простору цей файл не імпортується взагалі. Тут це
+    оголошено явно — інакше тест мовчки спирався б на те, що на машині
+    лишився простір від попередньої роботи (саме так і сталось: локально
+    зелено, на CI червоно).
+    """
+    from nyshporka.core import workspace as W
+
+    root = tmp_path_factory.mktemp("простір")
+    (root / "data" / "raw").mkdir(parents=True)
+    W.use(W.Workspace(root=root, name="тест", origin="test"))
+    yield
+    W.reset()
+
+
+def _acq():
+    from nyshporka.cases import acquire
+
+    return acquire
 
 
 def _meta(case_dir: Path, opys: str) -> None:
@@ -24,12 +53,12 @@ def test_two_inventories_never_share_one_case_folder(tmp_path: Path) -> None:
     case = tmp_path / "spr-33"
     _meta(case, "30")
 
-    with pytest.raises(A.AcquireError) as exc:
-        A.guard_inventory(case, "24")
+    with pytest.raises(_acq().AcquireError) as exc:
+        _acq().guard_inventory(case, "24")
     assert "30" in str(exc.value) and "24" in str(exc.value)
 
     # Той самий опис — не перешкода: це доповнення тієї ж справи.
-    A.guard_inventory(case, "30")
+    _acq().guard_inventory(case, "30")
 
 
 def test_the_passport_is_extended_not_replaced(tmp_path: Path) -> None:
@@ -41,7 +70,7 @@ def test_the_passport_is_extended_not_replaced(tmp_path: Path) -> None:
         json.dumps({"inv": "1", "shifra_needs_eye": "звірити оком с.14",
                     "note": "моя нотатка"}, ensure_ascii=False), encoding="utf-8")
 
-    A.write_meta(case, archive="ДАХмО", fond="230", opys="1", spr="1",
+    _acq().write_meta(case, archive="ДАХмО", fond="230", opys="1", spr="1",
                  files=[{"file": "х.pdf"}], source="Wikimedia Commons")
 
     got = json.loads((case / "meta.json").read_text(encoding="utf-8"))
@@ -55,8 +84,8 @@ def test_the_page_count_comes_from_the_file_not_from_the_promise(tmp_path: Path)
     лягла б в облік як повна справа."""
     broken = tmp_path / "не-pdf.pdf"
     broken.write_bytes("це не PDF".encode())
-    assert A.page_count(broken) == 0, "побитий файл видав себе за читаний"
-    assert A.page_count(tmp_path / "нема.pdf") == 0
+    assert _acq().page_count(broken) == 0, "побитий файл видав себе за читаний"
+    assert _acq().page_count(tmp_path / "нема.pdf") == 0
 
 
 def test_the_package_never_runs_scripts_of_the_private_repository() -> None:
