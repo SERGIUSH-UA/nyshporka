@@ -238,3 +238,62 @@ def test_a_users_pack_adds_to_a_repository_without_erasing_its_sites(tmp_path) -
     site = p.site("DAHMO", "archium")
     assert site is not None and site.url, "майданчик зник разом із правкою кодів"
     assert p.repositories["DAHMO"].label == "ДАХмО", "загубився й підпис архіву"
+
+
+# ── межі описів: знаменник покриття ──────────────────────────────────────────
+def test_the_bounds_keep_the_order_they_were_written_in() -> None:
+    """🔴 Покриття пишеться в порядку ітерації описів, тож перестановка ключів
+    міняє байти `coverage.json` — а вони і є приймачем усього перенесення."""
+    from nyshporka.archives import active
+
+    assert list(active().opys_bounds("DAHMO", "230")) == ["1", "2", "3", "4", "5"]
+
+
+def test_a_bound_carries_what_it_stands_on() -> None:
+    """🔴 Саме число неповне. «1515, звірено з переліком архіву» і «231,
+    максимум транскрипції» — різні за силою твердження: друге НИЖНЯ оцінка,
+    тож покриття по ньому завищене. Доки підстава жила в коментарі коду,
+    обидві межі подавались однаково впевнено."""
+    from nyshporka.archives import active
+
+    b = active().opys_bounds("CDIAK", "224")
+    assert b["1"].basis == "official" and not b["1"].is_lower_estimate
+    assert b["2"].is_lower_estimate and b["3"].is_lower_estimate
+    assert "переліком архіву" in b["1"].note
+
+
+def test_a_fond_without_bounds_says_so_by_emptiness() -> None:
+    """Порожньо ≠ нуль: покриття без знаменника не рахується взагалі, бо
+    «0/0 · немає 0» читається як «усе на місці»."""
+    from nyshporka.archives import active
+
+    assert active().opys_bounds("DAVO", "904") == {}
+    assert active().opys_bounds("XXX", "1") == {}
+
+
+def test_the_guide_total_is_optional() -> None:
+    from nyshporka.archives import active
+
+    assert active().guide_total("DAHMO", "230") == 7925
+    assert active().guide_total("CDIAK", "224") is None
+
+
+def test_adding_one_bound_does_not_wipe_the_rest_of_the_fond(tmp_path) -> None:
+    """🔴 Доки в записі фонду була сама губернія, заміщення коштувало мало.
+    Щойно туди їдуть ЗНАМЕННИКИ, ціна стає такою: дослідник, що дописав межу
+    одного опису, мовчки втрачає `default_opys` — і кожна сканована тека
+    дістає чужий опис у ключі справи."""
+    from nyshporka.archives import pack as P
+
+    over = tmp_path / "своє.yaml"
+    over.write_text(
+        'fonds:\n  - repo: CDIAK\n    fond: "224"\n'
+        '    opys_last:\n      "4": {last: 12, basis: manual}\n',
+        encoding="utf-8")
+    p = P.load(over)
+
+    b = p.opys_bounds("CDIAK", "224")
+    assert b["4"].last == 12, "нова межа не доїхала"
+    assert set(b) == {"1", "2", "3", "4"}, "дописування змило наявні межі"
+    assert p.fonds[("CDIAK", "224")].default_opys == "1", "загубився опис за замовчуванням"
+    assert p.fonds[("CDIAK", "224")].name, "загубилась назва фонду"

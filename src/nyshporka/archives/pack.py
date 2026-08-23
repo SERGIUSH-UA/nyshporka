@@ -70,6 +70,28 @@ class Repository:
 
 
 @dataclass(frozen=True)
+class OpysBound:
+    """Останній номер справи в описі — ЗНАМЕННИК покриття фонду.
+
+    🔴 Саме число тут неповне без `basis`. «1515, звірено з офіційним переліком
+    архіву» і «231, максимум того, що встигли транскрибувати» — різні за силою
+    твердження: друге є НИЖНЬОЮ оцінкою, тож покриття по ньому завищене й
+    зростатиме лише вниз. Доки підстава жила в коментарі коду, обидві межі
+    подавались однаково впевнено, і читач не мав як їх розрізнити.
+    """
+
+    opys: str
+    last: int
+    basis: str = ""      # official | guide | header | transcript | manual | ""
+    note: str = ""
+
+    @property
+    def is_lower_estimate(self) -> bool:
+        """Межа з транскрипції — покриття по ній ЗАВИЩЕНЕ."""
+        return self.basis in ("", "transcript")
+
+
+@dataclass(frozen=True)
 class Fond:
     repo: str
     fond: str
@@ -78,6 +100,12 @@ class Fond:
     default_opys: str | None = None
     opys_in_key: bool = False
     note: str = ""
+    #: Межі описів — знання про КОНКРЕТНИЙ фонд конкретного архіву, тому тут, а
+    #: не в коді: номери фондів між архівами колізують, і ключ `(repo, fond)`
+    #: знімає це за побудовою.
+    opys_last: dict[str, OpysBound] = field(default_factory=dict)
+    #: Од.зб. за офіційним путівником архіву — для звірки з розрахунком.
+    guide_total: int | None = None
 
     @property
     def key(self) -> tuple[str, str]:
@@ -100,6 +128,20 @@ class ArchivesPack:
     def site(self, repo: str | None, engine: str) -> Site | None:
         r = self.repositories.get(str(repo or "").upper())
         return r.sites.get(engine) if r else None
+
+    def opys_bounds(self, repo: str | None, fond: str | None) -> dict[str, OpysBound]:
+        """Межі описів фонду. Порожньо — знаменника НЕМАЄ.
+
+        🔴 І це не те саме, що «нуль». Покриття без знаменника не рахується
+        взагалі: частка була б вигадана, а «0/0 · немає 0» читається як «усе на
+        місці». Порожній словник тут мусить звучати як прогалина.
+        """
+        f = self.fonds.get((str(repo or "").upper(), str(fond or "")))
+        return dict(f.opys_last) if f else {}
+
+    def guide_total(self, repo: str | None, fond: str | None) -> int | None:
+        f = self.fonds.get((str(repo or "").upper(), str(fond or "")))
+        return f.guide_total if f else None
 
     def codes_for(self, repo: str | None, system: str) -> tuple[str, ...]:
         """Як архів зветься в чужій системі (`duck`, `commons`).
@@ -174,10 +216,23 @@ def _merge(base: dict[str, Any], over: dict[str, Any]) -> dict[str, Any]:
     out["repositories"] = merged_repos
     out["record_type_labels"] = {**(base.get("record_type_labels") or {}),
                                  **(over.get("record_type_labels") or {})}
+    # 🔴 Записи фонду зливаються ВГЛИБ, як і репозиторії. Доки в них була сама
+    # губернія, ціна заміщення була низька; щойно туди їдуть ЗНАМЕННИКИ
+    # покриття, вона стає такою: дослідник, що дописав своєму фонду межу одного
+    # опису, мовчки втрачає `default_opys` — і кожна сканована тека дістає чужий
+    # опис у ключі справи.
     by_key = {(str(f.get("repo", "")).upper(), str(f.get("fond", ""))): f
               for f in (base.get("fonds") or [])}
     for f in over.get("fonds") or []:
-        by_key[(str(f.get("repo", "")).upper(), str(f.get("fond", "")))] = f
+        k = (str(f.get("repo", "")).upper(), str(f.get("fond", "")))
+        was = by_key.get(k) or {}
+        merged = dict(was, **f)
+        # Межі описів — по номеру опису: додати одну межу можна, не
+        # переписуючи решту.
+        old_b, new_b = was.get("opys_last") or {}, f.get("opys_last") or {}
+        if old_b or new_b:
+            merged["opys_last"] = {**old_b, **new_b}
+        by_key[k] = merged
     out["fonds"] = list(by_key.values())
     out["skip_slugs"] = sorted({*(base.get("skip_slugs") or []),
                                 *(over.get("skip_slugs") or [])})
@@ -230,12 +285,27 @@ def _build(raw: dict[str, Any], sources: tuple[Path, ...]) -> ArchivesPack:
     fonds = {}
     for body in raw.get("fonds") or []:
         b = body or {}
+        bounds: dict[str, OpysBound] = {}
+        # 🔴 Порядок ключів зберігається як у файлі: покриття пишеться в порядку
+        # ітерації описів, тож перестановка міняє байти `coverage.json`.
+        for opys, val in (b.get("opys_last") or {}).items():
+            body = val if isinstance(val, dict) else {"last": val}
+            raw_last = body.get("last")
+            if not str(raw_last or "").strip().isdigit():
+                continue
+            last = int(str(raw_last).strip())
+            bounds[str(opys)] = OpysBound(
+                opys=str(opys), last=last, basis=str(body.get("basis") or ""),
+                note=str(body.get("note") or ""))
+        guide = b.get("guide_total")
         f = Fond(
             repo=str(b.get("repo") or "").upper(), fond=str(b.get("fond") or ""),
             name=str(b.get("name") or ""), guberniya=str(b.get("guberniya") or ""),
             default_opys=(str(b["default_opys"]) if b.get("default_opys") is not None
                           else None),
-            opys_in_key=bool(b.get("opys_in_key")), note=str(b.get("note") or ""))
+            opys_in_key=bool(b.get("opys_in_key")), note=str(b.get("note") or ""),
+            opys_last=bounds,
+            guide_total=int(str(guide)) if str(guide or "").isdigit() else None)
         fonds[f.key] = f
     return ArchivesPack(
         repositories=repos, fonds=fonds,
