@@ -2,7 +2,6 @@ r"""`nysh cases` — центральний реєстр справ: збірк�
 from __future__ import annotations
 
 import json as _json
-import subprocess as _sp
 import sys
 from pathlib import Path
 from typing import Any
@@ -615,17 +614,40 @@ def cmd_take(key: str = typer.Argument(..., help="DAHMO/230/43 або DAHMO/230/
 
     ws = _workspace()
     slug = f"{_REPO_SLUG.get(repo, repo.lower())}_{fond}"
-    cmd = [sys.executable, str(ws.root / "scripts" / "commons_fond_download.py"),
-           "--fond", fond, "--opys", opys, "--spr", f"{spr}{letter}", "--slug", slug]
+    case_dir = ws.root / "data" / "raw" / slug / f"spr-{spr}{letter}"
+    name = str(row.get("commons_title") or "").strip()
+    if not name:
+        console.print("[red]у реєстрі немає назви файлу на Commons "
+                      "(`commons_title`) — качати нічого[/red]")
+        console.print("[dim]зібрати: nysh registry collect commons "
+                      f"--repo {repo} --fond {fond}[/dim]")
+        raise typer.Exit(2)
+
     if dry_run:
-        cmd.append("--dry-run")
-    if force:
-        cmd.append("--force")
-    rc = _sp.call(cmd, cwd=str(ws.root))
-    if rc != 0:
-        console.print(f"[red]завантаження впало (rc={rc})[/red]")
-        raise typer.Exit(rc)
-    if dry_run or skip_build:
+        console.print(f"[dim]узяв би: {name}[/dim]")
+        console.print(f"[dim]у теку : {case_dir}[/dim]")
+        return
+
+    # 🔴 Завантаження й облік — У ЦЬОМУ ПРОЦЕСІ, а не зовнішнім скриптом.
+    # Досі тут запускався файл із дослідницького репозиторію
+    # (`ws.root/"scripts"/…`), тобто публічний пакет залежав від приватного за
+    # шляхом на диску: на чужій машині тієї теки немає, і команда падала з
+    # «файл не знайдено» — виглядало це як поламаний застосунок, а не як
+    # відсутня можливість.
+    from nyshporka.cases import acquire as A
+
+    try:
+        got = A.from_commons(
+            case_dir, name, archive=repo, fond=fond, opys=opys,
+            spr=f"{spr}{letter}", title=str(row.get("title") or ""),
+            year=str(row.get("year_from") or ""),
+            on_progress=lambda **kw: None)
+    except A.AcquireError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from None
+    console.print(f"[green]✓[/green] {got.pages} стор., "
+                  f"{got.bytes / 2**20:.0f} МБ → {got.case_dir}")
+    if skip_build:
         return
 
     # Приймач — ДИСК: справа має з'явитись у бібліотеці, інакше решта конвеєра її
