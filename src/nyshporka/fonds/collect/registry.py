@@ -39,8 +39,9 @@ def _builtin(workspace: Path | None = None) -> list[Collector]:
     головним, і вони розходяться тихо (склали в один корінь, читаємо з іншого).
     """
     from nyshporka.fonds.collect.archium import ArchiumCollector
+    from nyshporka.fonds.collect.commons import CommonsCollector
 
-    out: list[Collector] = [ArchiumCollector(workspace)]
+    out: list[Collector] = [ArchiumCollector(workspace), CommonsCollector(workspace)]
     return out
 
 

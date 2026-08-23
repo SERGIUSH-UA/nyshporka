@@ -48,6 +48,7 @@ def _builtin(workspace: Path | None = None) -> list[Source]:
     """
     from nyshporka.archives import active
     from nyshporka.sources.archium import ArchiumSource
+    from nyshporka.sources.commons import CommonsSource
     from nyshporka.sources.fsfilm import FilmMirrorSource
 
     out: list[Source] = [LocalSource()]
@@ -60,6 +61,7 @@ def _builtin(workspace: Path | None = None) -> list[Source]:
         out += [ArchiumSource(workspace, site=site, repo=repo) for repo, site in sites]
     else:
         out.append(ArchiumSource(workspace))   # пак без майданчиків — старий шлях
+    out.append(CommonsSource(workspace))
     out.append(FilmMirrorSource(workspace))
     return out
 
