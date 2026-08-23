@@ -66,3 +66,96 @@ def aggregate_commons(parts: list[dict[str, Any]]) -> dict[str, str]:
               "sum": p in summed} for p in parts], ensure_ascii=False)
             if len(parts) > 1 else ""),
     }
+
+
+# ── зведення джерел, що описують ДОСТУП до справи ────────────────────────────
+#: Нижче якої частки найбільшого файлу дзеркало вважається обрізаним.
+TRUNCATED_RATIO = 0.6
+
+_RE_LIB_SPR = re.compile(r"^(\d+)\s*([а-яіїєґa-z]?)$", re.IGNORECASE)
+
+
+def fuse_commons(reg: dict[Any, dict[str, Any]], rows: list[dict[str, str]],
+                 unresolved: list[tuple[str, str]]) -> None:
+    """Скани Commons: групуємо файли справи й зводимо обсяг.
+
+    🔴 Скан, шифру якого не розібрано, НЕ зникає мовчки: на ф.481 це два витяги,
+    залиті без шифри в назві. Тихо викинути їх — те саме, що сказати «сканів
+    немає».
+    """
+    from nyshporka.fonds.merge.text import key_of
+
+    groups: dict[Any, list[dict[str, str]]] = {}
+    for row in rows:
+        key = key_of(row)
+        if not key:
+            unresolved.append(("commons", row.get("file", "")))
+            continue
+        reg.setdefault(key, _blank(key))["src"].add("commons")
+        groups.setdefault(key, []).append(row)
+    for key, parts in groups.items():
+        reg[key].update(aggregate_commons(list(parts)))
+
+
+def fuse_mirror(reg: dict[Any, dict[str, Any]], rows: list[dict[str, str]],
+                unresolved: list[tuple[str, str]]) -> None:
+    from nyshporka.fonds.merge.text import key_of
+
+    for row in rows:
+        key = key_of(row)
+        if not key:
+            unresolved.append(("mirror", row.get("file", "")))
+            continue
+        r = reg.setdefault(key, _blank(key))
+        r["src"].add("mirror")
+        if not r["mirror_url"]:
+            r["mirror_url"] = row.get("url", "")
+            r["mirror_size"] = row.get("size", "")
+
+
+def disk_map(cases: list[dict[str, Any]], fond: str) -> dict[Any, str]:
+    """Мапа «справа → тека на диску» з бібліотеки.
+
+    🔴 Ключ несе ОПИС: номер справи сам по собі неунікальний між описами
+    (спр.7 є і в оп.1, і в оп.2), і мапа по голому номеру приписала б скан
+    чужому опису — 18 «наявних» при 11 реальних. І ЛІТЕРУ: інакше справа «24»
+    позначала б наявною ще й «24а» — окрему книгу, якої на диску немає.
+    ⚠ Теки на диску звуться латинкою (`spr-24a`), а шифр в описі кирилицею —
+    тому літера зводиться до одного письма.
+    """
+    from nyshporka.fonds.merge.text import letter_cyr
+
+    out: dict[Any, str] = {}
+    for c in cases:
+        if str(c.get("fond")) != fond:
+            continue
+        opys = str(c.get("opys") or "1")
+        m = _RE_LIB_SPR.match(str(c.get("spr") or ""))
+        if not m:
+            continue
+        out[(opys, m.group(1), letter_cyr(m.group(2).lower()))] = str(c.get("path", ""))
+    return out
+
+
+def mark_disk_and_truncation(reg: dict[Any, dict[str, Any]],
+                             on_disk: dict[Any, str]) -> None:
+    """Обрізане дзеркало й наявність на диску.
+
+    🔴 Обрізаність міряється проти НАЙБІЛЬШОГО файлу, а не проти суми частин:
+    дзеркало віддає справу одним файлом, тож у багатотомної справи сума завжди
+    більша в рази — і кожен такий рядок хибно ставав би «обрізаним».
+    """
+    for r in reg.values():
+        cs = r.get("commons_size_max") or r.get("commons_size") or ""
+        ms = r.get("mirror_size") or ""
+        r["truncated_mirror"] = ""
+        if (str(cs).isdigit() and str(ms).isdigit() and int(cs) > 0
+                and int(ms) < int(cs) * TRUNCATED_RATIO):
+            r["truncated_mirror"] = "1"
+        r["on_disk"] = on_disk.get((r["opys"], r["spr_int"], r["spr_letter"]), "")
+
+
+def _blank(key: Any) -> dict[str, Any]:
+    from nyshporka.fonds.merge.sources import blank_row
+
+    return blank_row(key)
