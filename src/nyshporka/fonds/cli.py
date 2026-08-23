@@ -87,7 +87,10 @@ def cmd_collect(
     if not env.ok:
         _fail(env)
     d = env.data or {}
-    console.print(f"[green]✓[/green] {d.get('rows')} справ → {d.get('out')}")
+    # ⚠ При --dry-run той самий рядок без позначки читається як «записано»:
+    # шлях названо, число названо, а файла немає.
+    mark = "[dim](проба, нічого не записано)[/dim] " if dry_run else ""
+    console.print(f"[green]✓[/green] {mark}{d.get('rows')} справ → {d.get('out')}")
 
     seen, got = d.get("opys_seen") or [], d.get("opys_collected") or []
     if seen:
@@ -100,6 +103,63 @@ def cmd_collect(
     if d.get("kept"):
         console.print(f"  [dim]♻ долучено {d['kept']} рядків описів, "
                       f"яких цей запуск не чіпав[/dim]")
+    for w in env.warnings:
+        console.print(f"[yellow]⚠ {w.text}[/yellow]")
+
+
+@app.command("merge")
+def cmd_merge(
+    fond: str = typer.Option(..., "--fond"),
+    repo: str = typer.Option("DAHMO", "--repo", help="код або назва архіву"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="нічого не писати"),
+) -> None:
+    """Звести джерела опису в один реєстр фонду.
+
+    ⚠ Працює по фонду ЦІЛКОМ: знаменник покриття пофондовий, а зведення одного
+    опису лишило б реєстр із одним описом. Тому прапорця `--opys` тут немає.
+    """
+    env = O.call("registry.merge", {"repo": repo, "fond": fond, "dry_run": dry_run})
+    if not env.ok:
+        _fail(env)
+    d = env.data or {}
+    # ⚠ При --dry-run той самий рядок без позначки читається як «записано»:
+    # шлях названо, число названо, а файла немає.
+    mark = "[dim](проба, нічого не записано)[/dim] " if dry_run else ""
+    console.print(f"[green]✓[/green] {mark}{d.get('rows')} справ → {d.get('out')}")
+
+    src = [(n, c) for n, c in (tuple(x) for x in (d.get("sources") or []))]
+    have = [f"{n} {c}" for n, c in src if c]
+    if have:
+        console.print(f"  джерела: {' · '.join(have)}")
+    # 🔴 Порожні джерела називаються окремо: «джерела не було» і «джерело дало
+    # нуль» — різні відповіді, і мовчазне зникнення ховає прогалину.
+    empty = [n for n, c in src if not c]
+    if empty:
+        console.print(f"  [dim]без рядків: {', '.join(empty)}[/dim]")
+
+    ch = d.get("channels") or {}
+    if ch:
+        console.print(f"  черга: на диску {ch.get('disk', 0)} · "
+                      f"можна взяти самому {ch.get('free', 0)} · "
+                      f"тільки замовлення {ch.get('order', 0)}")
+        by = [f"{k} {ch[k]}" for k in ("archium", "commons", "mirror", "film")
+              if ch.get(k)]
+        if by:
+            console.print(f"    каналами: {' · '.join(by)}")
+
+    cov, denom = d.get("coverage") or {}, d.get("denominator") or ""
+    if denom:
+        for opys, v in cov.items():
+            if opys == "_total" or not isinstance(v, dict):
+                continue
+            last = v.get("last_number") or 1
+            pct = (v.get("present", 0) * 100) // max(int(last), 1)
+            console.print(f"  оп.{opys}: {v.get('present')}/{last} ({pct}%) · "
+                          f"літерних {v.get('letter_rows')} · немає {v.get('absent')}")
+    conf = d.get("conflicts") or 0
+    kept = d.get("verdicts_kept") or 0
+    console.print(f"  розбіжностей: {conf}"
+                  + (f" · збережено вердиктів: {kept}" if kept else ""))
     for w in env.warnings:
         console.print(f"[yellow]⚠ {w.text}[/yellow]")
 

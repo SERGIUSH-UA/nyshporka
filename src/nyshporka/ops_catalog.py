@@ -281,11 +281,11 @@ class CollectArgs(BaseModel):
     fond_id: str = Field("", description="внутрішній номер фонду на сайті архіву")
 
 
-def _target(a: CollectArgs) -> Any:
+def _target(repo_raw: str, fond: str, opys: str = "") -> Any:
     from nyshporka.archives import active
     from nyshporka.fonds.collect import Target
 
-    repo = a.repo.strip()
+    repo = repo_raw.strip()
     # Архів можна назвати і кодом (`CDIAK`), і як його пишуть люди (`ЦДІАК`).
     pack = active()
     if repo.upper() not in pack.repositories:
@@ -293,8 +293,8 @@ def _target(a: CollectArgs) -> Any:
             if r.label.casefold() == repo.casefold():
                 repo = code
                 break
-    return Target(repo=repo.upper(), fond=a.fond.strip(),
-                  opys=tuple(o.strip() for o in a.opys.split(",") if o.strip()))
+    return Target(repo=repo.upper(), fond=fond.strip(),
+                  opys=tuple(o.strip() for o in opys.split(",") if o.strip()))
 
 
 @op("registry.collectors", summary="Які збирачі реєстру опису є і що кожен уміє",
@@ -334,7 +334,53 @@ def registry_plan(a: CollectArgs) -> Envelope:
     c = collect.load().get(a.collector)
     if c is None:
         return fail(f"збирача «{a.collector}» немає — див. `nysh registry sources`")
-    return ok(c.plan(_target(a)).as_dict())
+    return ok(c.plan(_target(a.repo, a.fond, a.opys)).as_dict())
+
+
+class MergeArgs(BaseModel):
+    repo: str = Field(..., description="код архіву: CDIAK, ДАХмО…")
+    fond: str = Field(..., description="номер фонду")
+    dry_run: bool = Field(False, description="лише порахувати, нічого не писати")
+
+
+@op("registry.merge",
+    summary="Звести джерела опису в реєстр фонду, чергу розбіжностей і покриття",
+    args=MergeArgs, mutates=True, long=True, agent=False, section="material")
+def registry_merge(a: MergeArgs) -> Envelope:
+    """Останній крок конвеєра реєстру: з багатьох джерел — один реєстр.
+
+    🔴 Покриття рахується лише там, де відомі МЕЖІ ОПИСІВ. Без них частка була б
+    вигадана, а «0/0 · немає 0» читається як «усе на місці» — тому знаменника
+    немає і в конверті, а не підставлено нуль.
+    """
+    from nyshporka.core.workspace import WorkspaceError, workspace
+    from nyshporka.fonds.merge.run import MergeError, merge_fond
+    from nyshporka.fonds.registry import fond_path, registry_dir
+
+    try:
+        ws = workspace()
+    except WorkspaceError as exc:
+        return fail(str(exc))
+
+    target = _target(a.repo, a.fond)
+    try:
+        res = merge_fond(
+            target, dest=ws.root / registry_dir(target.fond_id),
+            out=ws.root / fond_path(target.fond_id),
+            library=ws.root / "data" / "derived" / "case_library.json",
+            dry_run=a.dry_run)
+    except MergeError as exc:
+        return fail(str(exc))
+
+    env = ok(res.as_dict())
+    for b in res.blind:
+        env.warn(f"blind_{b.kind}", b.why)
+    # Покриття джерел: одне на кожне ім'я, ВКЛЮЧНО З НУЛЕМ. «Джерела не було» і
+    # «джерело дало нуль» — різні відповіді, і плутати їх означає ховати
+    # прогалину.
+    for name, n in res.sources:
+        env.coverage.append(CoverageItem(source=name, rows=n, scope=target.fond_id))
+    return env
 
 
 @op("registry.collect", summary="Зібрати перелік справ фонду в registry/*.tsv",
@@ -362,7 +408,7 @@ def registry_collect(a: CollectArgs) -> Envelope:
     if c is None:
         return fail(f"збирача «{a.collector}» немає — див. `nysh registry sources`")
 
-    target = _target(a)
+    target = _target(a.repo, a.fond, a.opys)
     plan = c.plan(target)
     if not plan.ready and not a.fond_id:
         return fail(plan.why or f"{c.label}: збирати нічим")
@@ -380,9 +426,10 @@ def registry_collect(a: CollectArgs) -> Envelope:
     if res.kept:
         env.warn("kept_untouched",
                  f"збережено {res.kept} рядків описів, яких цей запуск не чіпав")
-    # 🔴 Зібране ще не злите. Сказати це треба тут, інакше `registry collect`
-    # виглядає обіцянкою без виходу: файли з'явились, а реєстр опису той самий.
-    env.warn("merge_pending",
-             "зібране лягло в registry/ окремим файлом; зведення джерел в один "
-             "реєстр опису — окремий крок, якого в цій версії ще немає")
+    # 🔴 Зібране саме по собі реєстру не міняє: воно лягло окремим файлом
+    # джерела. Сказати наступний крок треба тут, інакше `collect` виглядає
+    # обіцянкою без виходу — файли з'явились, а реєстр опису той самий.
+    env.warn("merge_next",
+             f"зібране лягло в registry/ окремим файлом; звести джерела в один "
+             f"реєстр: nysh registry merge --repo {a.repo} --fond {a.fond}")
     return env
