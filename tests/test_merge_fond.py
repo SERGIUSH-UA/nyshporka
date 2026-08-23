@@ -20,6 +20,7 @@ import pytest
 from nyshporka.fonds.collect.base import Target
 from nyshporka.fonds.merge.run import MergeError, merge_fond
 from nyshporka.fonds.merge.sources import COLUMNS, SOURCES, TEXT_ORDER, TITLE_RANK
+from nyshporka.fonds.merge.titles import _fuse_fields
 from nyshporka.fonds.registry import FIELDS
 
 DATA = Path(__file__).parent / "data" / "merge_fond"
@@ -134,6 +135,32 @@ def test_registry_only_source_still_names_the_case(run) -> None:
     r = _rows(run()[2])["1-2"]
     assert r["title_src"] == "duck"
     assert r["duck_url"]
+
+
+def test_years_src_names_both_sources() -> None:
+    """Коли роки прийшли з РІЗНИХ джерел, поле називає обидва.
+
+    ⚠ Наявні джерела дають діапазон цілком (47 020 рядків із 47 020), тож на
+    сьогоднішніх даних ця гілка мовчить — вона тут, щоб перший же однорічний
+    рядок не збрехав про походження другого року.
+    """
+    from nyshporka.fonds.merge.sources import blank_row
+
+    r = blank_row(("1", "1", ""))
+    _fuse_fields(r, {"year_from": "1801"}, "wikisource")
+    assert r["years_src"] == "wikisource"
+    _fuse_fields(r, {"year_to": "1810"}, "archium")
+    assert r["years_src"] == "wikisource+archium"
+    assert (r["year_from"], r["year_to"]) == ("1801", "1810")
+
+
+def test_years_src_stays_single_when_one_source_gave_both() -> None:
+    from nyshporka.fonds.merge.sources import blank_row
+
+    r = blank_row(("1", "1", ""))
+    _fuse_fields(r, {"year_from": "1801", "year_to": "1810"}, "wikisource")
+    _fuse_fields(r, {"year_from": "1799", "year_to": "1802"}, "archium")
+    assert r["years_src"] == "wikisource", "сильніше джерело років НЕ перебиває"
 
 
 # ── черга розбіжностей ──────────────────────────────────────────────────────

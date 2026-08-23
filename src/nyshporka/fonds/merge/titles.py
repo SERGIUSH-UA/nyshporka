@@ -112,13 +112,14 @@ def _fuse_title(r: Row, row: dict[str, str], name: str, key: Key,
 
 def _fuse_fields(r: Row, row: dict[str, str], name: str) -> None:
     """Роки, аркуші й власні поля джерела — правилом «перше непорожнє»."""
+    got: list[str] = []
     for fld in ("year_from", "year_to"):
         v = (row.get(fld) or "").strip()
         if v and not r[fld]:
             r[fld] = v
-            # ⚠ Відома неточність: коли роки прийшли з РІЗНИХ джерел, тут
-            # лишається назва останнього. Виправляти окремо — це змінює байти.
-            r["years_src"] = name
+            got.append(fld)
+    if got:
+        _name_years_src(r, name, got)
 
     fol = (row.get("folios") or "").strip()
     if fol and not r["folios"]:
@@ -144,6 +145,27 @@ def _fuse_fields(r: Row, row: dict[str, str], name: str) -> None:
             v = (row.get(fld) or "").strip()
             if v:
                 r[fld] = v
+
+
+def _name_years_src(r: Row, name: str, got: list[str]) -> None:
+    """Дописати джерело років так, щоб воно називало ОБИДВА, коли їх два.
+
+    🔴 Одна назва там, де роки прийшли з різних джерел, — не скорочення, а
+    хибне свідчення: рядок каже «роки з wikisource», хоча кінцевий дописав
+    archium, і звірити його зі сканом опису вже не можна.
+
+    Формат: `<джерело>`, а коли роки з різних — `<перше>+<друге>`.
+
+    ⚠ Замір 2026-08-23 на всіх наявних джерелах: 47 020 рядків із роками, і в
+    ЖОДНОМУ рік не стоїть наполовину — джерела описів дають діапазон цілком.
+    Тобто друга гілка чекає на дані, яких ще не було; вона тут не заради
+    сьогоднішніх байтів, а щоб та дата не прийшла мовчки.
+    """
+    cur = r["years_src"]
+    if not cur:
+        r["years_src"] = name
+    elif len(got) == 1 and name not in cur.split("+"):
+        r["years_src"] = f"{cur}+{name}"
 
 
 def fuse_alfavitka(reg: dict[Key, Row], rows: list[dict[str, str]]) -> None:
