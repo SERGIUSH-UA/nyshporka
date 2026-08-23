@@ -67,6 +67,13 @@ class Repository:
     #: файли ДАВіО лежать на Commons і під «ДАВіО», і під «ДАВО», і пошук лише за
     #: одним написанням мовчки втрачає половину.
     codes: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    #: Код ТОГО САМОГО архіву, під яким він теж трапляється в обліку.
+    #: 🔴 Знання про це вже було — примітою для людини, — і саме тому «на диску»
+    #: рахувалось лише за номером фонду: розділити архіви машина не вміла.
+    #: Наслідок мовчазний в обидва боки: одеська справа ф.904 позначала наявною
+    #: вінницьку, а десять вінницьких під другим кодом випали б із обліку, якби
+    #: код звіряли строго.
+    same_as: str = ""
 
 
 @dataclass(frozen=True)
@@ -142,6 +149,20 @@ class ArchivesPack:
     def guide_total(self, repo: str | None, fond: str | None) -> int | None:
         f = self.fonds.get((str(repo or "").upper(), str(fond or "")))
         return f.guide_total if f else None
+
+    def canon_repo(self, repo: str | None) -> str:
+        """Код архіву, зведений до канонічного: `DAVIO` → `DAVO`.
+
+        Невідомий код повертається як є — здогадуватись тут нема з чого, а
+        порожній рядок зробив би з невідомого архіву «будь-який».
+        """
+        code = str(repo or "").upper()
+        r = self.repositories.get(code)
+        return r.same_as if r and r.same_as else code
+
+    def same_archive(self, a: str | None, b: str | None) -> bool:
+        """Чи це той самий архів, хай і під різними кодами."""
+        return self.canon_repo(a) == self.canon_repo(b)
 
     def codes_for(self, repo: str | None, system: str) -> tuple[str, ...]:
         """Як архів зветься в чужій системі (`duck`, `commons`).
@@ -281,7 +302,8 @@ def _build(raw: dict[str, Any], sources: tuple[Path, ...]) -> ArchivesPack:
         repos[str(code).upper()] = Repository(
             code=str(code).upper(), label=str(b.get("label") or code),
             name=str(b.get("name") or ""), country=str(b.get("country") or ""),
-            note=str(b.get("note") or ""), sites=sites, codes=codes)
+            note=str(b.get("note") or ""), sites=sites, codes=codes,
+            same_as=str(b.get("same_as") or "").upper())
     fonds = {}
     for body in raw.get("fonds") or []:
         b = body or {}

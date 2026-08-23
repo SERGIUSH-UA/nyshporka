@@ -15,6 +15,14 @@
    "spr": "9",
    "path": "data/raw/cdiak_224/224-1-9",
    "frames": 11
+  },
+  {
+   "repo": "DAOO",
+   "fond": "999",
+   "opys": "1",
+   "spr": "11",
+   "path": "data/raw/daoo/999-1-11",
+   "frames": 5
   }
  ]
 }

@@ -113,7 +113,8 @@ def fuse_mirror(reg: dict[Any, dict[str, Any]], rows: list[dict[str, str]],
             r["mirror_size"] = row.get("size", "")
 
 
-def disk_map(cases: list[dict[str, Any]], fond: str) -> dict[Any, str]:
+def disk_map(cases: list[dict[str, Any]], fond: str,
+             repo: str | None = None) -> dict[Any, str]:
     """Мапа «справа → тека на диску» з бібліотеки.
 
     🔴 Ключ несе ОПИС: номер справи сам по собі неунікальний між описами
@@ -122,12 +123,22 @@ def disk_map(cases: list[dict[str, Any]], fond: str) -> dict[Any, str]:
     позначала б наявною ще й «24а» — окрему книгу, якої на диску немає.
     ⚠ Теки на диску звуться латинкою (`spr-24a`), а шифр в описі кирилицею —
     тому літера зводиться до одного письма.
+
+    🔴 І АРХІВ: номери фондів між архівами колізують по-справжньому, не в
+    теорії. Ф.904 є в трьох (ДАВіО, ДАОО, і той самий ДАВіО під другим кодом),
+    тож одеська справа позначала наявною вінницьку. Звіряти код строго теж не
+    можна — десять справ того самого архіву записані другим кодом і випали б;
+    зводить їх пак, а не цей модуль.
     """
+    from nyshporka.archives import active
     from nyshporka.fonds.merge.text import letter_cyr
 
+    pack = active()
     out: dict[Any, str] = {}
     for c in cases:
         if str(c.get("fond")) != fond:
+            continue
+        if repo and not pack.same_archive(c.get("repo"), repo):
             continue
         opys = str(c.get("opys") or "1")
         m = _RE_LIB_SPR.match(str(c.get("spr") or ""))

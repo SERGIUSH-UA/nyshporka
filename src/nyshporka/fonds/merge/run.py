@@ -65,7 +65,8 @@ def fuse(book: SourceBook, target: Target) -> tuple[dict[Any, dict[str, Any]],
     unresolved: list[tuple[str, str]] = []
     S.fuse_commons(reg, book.rows.get("commons", []), unresolved)
     S.fuse_mirror(reg, book.rows.get("mirror", []), unresolved)
-    S.mark_disk_and_truncation(reg, S.disk_map(book.library, target.fond))
+    S.mark_disk_and_truncation(
+        reg, S.disk_map(book.library, target.fond, target.repo))
 
     TT.fuse_covers(reg, book.rows.get("covers", []))
     TT.fuse_catalog(reg, book.rows.get("catalog", []), conflicts)

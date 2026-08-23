@@ -303,6 +303,33 @@ def test_disk_does_not_leak_from_another_fond(run) -> None:
     assert reg["1-9"]["on_disk"] == "data/raw/cdiak_999/999-1-9"
 
 
+def test_disk_does_not_leak_from_another_archive(run) -> None:
+    """Той самий номер фонду в ЧУЖОМУ архіві не позначає справу наявною.
+
+    🔴 Не теорія: у бібліотеці дослідника ф.904 є в трьох архівах, і одеська
+    справа рахувалась вінницькою. Фільтр за самим номером фонду цього не
+    розрізняє за побудовою.
+    """
+    reg = _rows(run()[2])
+    assert reg["1-11"]["on_disk"] == "", "спр.11 лежить в ДАОО, не в цьому фонді"
+
+
+def test_same_archive_under_two_codes_is_one_archive() -> None:
+    """Другий код того самого архіву не втрачається.
+
+    ⚠ Зворотний бік попереднього: строга звірка коду викинула б десять справ
+    ДАВіО, записаних під альтернативним кодом, — і покриття фонду впало б без
+    жодної зміни на диску.
+    """
+    from nyshporka.archives import active
+
+    pack = active()
+    assert pack.same_archive("DAVIO", "DAVO")
+    assert pack.canon_repo("DAVIO") == "DAVO"
+    assert not pack.same_archive("DAOO", "DAVO")
+    assert pack.canon_repo("НЕВІДОМИЙ") == "НЕВІДОМИЙ"
+
+
 def test_channels_are_mutually_exclusive(run) -> None:
     """Справа з чотирма каналами рахується в черзі рівно раз (спр.7)."""
     res, _, _ = run()
