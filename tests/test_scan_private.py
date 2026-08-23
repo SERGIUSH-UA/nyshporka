@@ -35,6 +35,11 @@ _spec.loader.exec_module(scan)
     ("clan-surname", "VARIANTS = [(\"Долищинский\", 0.28)]"),
     ("clan-surname", 'FULL_FORMS = ["Doliszczynski"]'),
     ("clan-surname", "roots = doliş"),
+    # 🔴 Форми, у яких шуканого складу НЕМАЄ: рушій калічить середину слова,
+    # тож попереднє правило їх не бачить, а разом вони називають рід не гірше
+    # за канонічне написання.
+    ("clan-misread", 'MISREADS = ["ДОМИНСКІЙ", "ДЕМИЦИНСКІЙ"]'),
+    ("clan-misread", "варіант декоду: Домбинскій"),
     # 🔴 Пошта в User-Agent їде в КОЖЕН запит до чужого сайту й осідає в його
     # логах — прибрати її звідти вже не можна. Саме так вона й трапилась: два
     # перенесені завантажувачі несли адресу автора, і жодне з тодішніх правил
@@ -130,6 +135,7 @@ def test_history_mode_still_applies_the_allowlist():
 def test_every_rule_has_a_sample_in_this_file():
     """Правило без зразка — правило, про яке ніхто не знає, чи воно працює."""
     covered = {"canon-person", "canon-family", "canon-place", "canon-source",
-               "clan-surname", "contact-email", "abs-path-win", "abs-path-nix",
+               "clan-surname", "clan-misread",
+               "contact-email", "abs-path-win", "abs-path-nix",
                "private-repo", "aws-presigned", "bearer", "private-host"}
     assert {r.id for r in scan.RULES} == covered
