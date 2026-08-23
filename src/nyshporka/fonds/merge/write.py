@@ -96,6 +96,16 @@ def write_coverage(path: Path, coverage: dict[str, Any]) -> None:
                     encoding="utf-8")
 
 
+def _has_human_input(path: Path) -> bool:
+    """Чи вписала людина в бланк хоч одну шифру."""
+    try:
+        with path.open(encoding="utf-8", newline="") as fh:
+            return any((r.get("opys") or r.get("spr") or "").strip()
+                       for r in csv.DictReader(fh, delimiter="	"))
+    except OSError:
+        return True          # прочитати не вдалось — не чіпати
+
+
 def write_unresolved(path: Path, unresolved: list[tuple[str, str]]) -> bool:
     """Скани, шифру яких не розібрано. Повертає, чи файл записано.
 
@@ -103,6 +113,13 @@ def write_unresolved(path: Path, unresolved: list[tuple[str, str]]) -> bool:
     вгадувати — вгадана вона виглядає як прочитана.
     """
     if not unresolved:
+        # 🔴 Порожній перелік означає, що всі скани розібрались, — а файл із
+        # минулої збірки лишався на місці й свідчив протилежне: черга ручного
+        # розбору виглядала непорожньою тоді, коли розбирати вже нічого.
+        # ⚠ Але прибирати можна лише БЛАНК: це файл для заповнення руками, і
+        # вписана людиною шифра — єдина копія тієї роботи.
+        if path.is_file() and not _has_human_input(path):
+            path.unlink()
         return False
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8", newline="") as fh:

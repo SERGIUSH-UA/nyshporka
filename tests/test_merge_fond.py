@@ -250,6 +250,51 @@ def test_cover_only_case_survives(run) -> None:
     assert r["on_disk"] == "" and r["truncated_mirror"] == ""
 
 
+def test_empty_queue_removes_the_stale_blank(run, tmp_path: Path) -> None:
+    """Розібрались усі скани — бланк ручного розбору прибирається.
+
+    🔴 Досі файл лишався з минулої збірки й свідчив, що черга жива, коли
+    розбирати вже нічого.
+    """
+    d = tmp_path / "registry"
+    run(dest=d)
+    blank = d / "unresolved_scans.tsv"
+    assert blank.is_file()
+
+    # прибираємо з джерела рівно той скан, шифри якого не було
+    com = d / "commons.tsv"
+    keep = [ln for ln in com.read_text(encoding="utf-8").splitlines()
+            if "без шифри" not in ln]
+    com.write_text("\n".join(keep) + "\n", encoding="utf-8", newline="")
+
+    res, _, _ = run(dest=d)
+    assert not blank.exists()
+    assert not [b for b in res.blind if b.kind == "no_shifra"]
+
+
+def test_hand_filled_blank_is_kept_and_named(run, tmp_path: Path) -> None:
+    """Вписану руками шифру не знищуємо — але й не вдаємо, що черга жива.
+
+    🔴 Це файл для заповнення руками: вписане в нього — єдина копія тієї
+    роботи, тож прибирання «за розкладом» коштувало б саме її.
+    """
+    d = tmp_path / "registry"
+    run(dest=d)
+    blank = d / "unresolved_scans.tsv"
+    rows = blank.read_text(encoding="utf-8").splitlines()
+    rows[1] = rows[1].replace("\t\t\t", "\t1\t20\t", 1)   # людина вписала шифру
+    blank.write_text("\n".join(rows) + "\n", encoding="utf-8", newline="")
+
+    com = d / "commons.tsv"
+    keep = [ln for ln in com.read_text(encoding="utf-8").splitlines()
+            if "без шифри" not in ln]
+    com.write_text("\n".join(keep) + "\n", encoding="utf-8", newline="")
+
+    res, _, _ = run(dest=d)
+    assert blank.is_file(), "ручний ввід не знищуємо"
+    assert any("вписані руками" in n for n in res.notes)
+
+
 # ── диск і канали ───────────────────────────────────────────────────────────
 
 def test_disk_does_not_leak_from_another_fond(run) -> None:

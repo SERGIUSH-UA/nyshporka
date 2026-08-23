@@ -166,6 +166,7 @@ def merge_fond(target: Target, *, dest: Path, out: Path,
             why="дзеркало віддає менше за найбільший файл — качати з нього недокачати"))
 
     kept = 0
+    notes: list[str] = []
     extra: tuple[Path, ...] = ()
     n_rows = len(rows_list)
     if not dry_run:
@@ -174,12 +175,19 @@ def merge_fond(target: Target, *, dest: Path, out: Path,
         W.write_conflicts(dest / "conflicts.tsv", conflicts)
         W.write_coverage(dest / "coverage.json", cov)
         extra = (dest / "conflicts.tsv", dest / "coverage.json")
-        if W.write_unresolved(dest / "unresolved_scans.tsv", unresolved):
-            extra += (dest / "unresolved_scans.tsv",)
+        unres = dest / "unresolved_scans.tsv"
+        if W.write_unresolved(unres, unresolved):
+            extra += (unres,)
+        elif unres.is_file():
+            # Бланк лишився, бо в нього вписували руками, — а розбирати вже
+            # нічого. Мовчазний файл тут читався б як жива черга.
+            notes.append(f"{unres.name}: черги вже немає, але файл лишено — у "
+                         f"ньому є вписані руками шифри")
 
     return MergeResult(
         fond_id=target.fond_id, out=out, extra=extra, rows=n_rows,
         sources=book.counts(), conflicts=len(conflicts), verdicts_kept=kept,
         coverage=cov,
         denominator=f"pack:{target.repo}/{target.fond}" if bounds else "",
-        channels=_channels(reg), multi=_multi(reg), blind=tuple(blind))
+        channels=_channels(reg), multi=_multi(reg), blind=tuple(blind),
+        notes=tuple(notes))
