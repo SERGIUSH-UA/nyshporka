@@ -382,6 +382,12 @@ def cmd_opys(key: str = typer.Argument(..., help="DAHMO/230/43 або DAHMO/230/
                       "[/yellow]")
     cs = row.get("commons_size")
     ms = row.get("mirror_size")
+    # 🏛 ARCHIUM першим, бо саме ним справу й візьмуть: переглядач архіву віддає
+    # готові посторінкові JPG (спр.1056 ф.224 — 54 кадри за 4 с), тоді як решта
+    # каналів вимагає або файла на сотні МБ, або обходу дзеркала плівок.
+    arch = (row.get("archium_url") or "").strip()
+    if arch:
+        console.print(f"  [green]ARCHIUM:[/green] посторінкові скани — {arch}")
     if cs and str(cs).isdigit():
         console.print(f"  [green]Commons:[/green] {int(cs) / 2**20:.0f} МБ, "
                       f"{row.get('commons_pages') or '?'} стор.")
@@ -400,7 +406,7 @@ def cmd_opys(key: str = typer.Argument(..., help="DAHMO/230/43 або DAHMO/230/
                       + (f" · {row['fs_frames']} кадрів" if row.get("fs_frames") else ""))
         console.print("    https://www.familysearch.org/records/images/"
                       f"search-results?imageGroupNumbers={film}")
-    if not cs and not ms and not film:
+    if not cs and not ms and not film and not arch:
         console.print("  [yellow]сканів онлайн немає — замовлення в архіві[/yellow]")
     console.print(f"  на диску: {row.get('on_disk') or '[dim]—[/dim]'}")
 
@@ -500,7 +506,12 @@ def cmd_fond(
         # `int(None)` тут упав би посеред друку таблиці.
         cs = str(r.get("commons_size") or "")
         scan_mark = ""
-        if cs.isdigit() and int(cs):
+        # 🏛 ARCHIUM попереду Commons, бо це той канал, яким справу візьмуть:
+        # готові посторінкові JPG проти файла на сотні МБ. Колонка має радити
+        # найшвидший шлях, а не найдавніше реалізований.
+        if r.get("archium_file"):
+            scan_mark = "[green]A[/green]"
+        elif cs.isdigit() and int(cs):
             scan_mark = f"C {int(cs) / 2**20:.0f}М"
         elif r.get("mirror_url"):
             scan_mark = "[yellow]дзерк.[/yellow]"
@@ -553,7 +564,8 @@ def cmd_fond(
     console.print(t)
     if len(sel) > limit:
         console.print(f"[dim]показано {limit} з {len(sel)} — --limit більше[/dim]")
-    console.print("[dim]скан: C = Commons (повний) · ✂ дзеркало обрізане · "
+    console.print("[dim]скан: A = ARCHIUM, переглядач архіву (найшвидший канал) · "
+                  "C = Commons (повний) · ✂ дзеркало обрізане · "
                   "FS = DGS плівки FamilySearch ·кадрів · "
                   "село: 👁 = прочитане ОКОМ з обкладинки (жирним — діапазон абетки "
                   "збірного тому), сірим — з друкованого каталогу архіву · "
@@ -572,8 +584,16 @@ def cmd_take(key: str = typer.Argument(..., help="DAHMO/230/43 або DAHMO/230/
 
     Один крок замість чотирьох ручних, бо саме тут народжуються теки без
     `meta.json` — а така справа невидима для бібліотеки, тобто для всього
-    конвеєра. Качає з Commons (не з обрізаного дзеркала), рахує sha256 і
-    кількість сторінок ІЗ ФАЙЛА, пише `meta.json`, перебудовує бібліотеку й реєстр.
+    конвеєра. Рахує sha256 і кількість сторінок ІЗ ФАЙЛА, пише `meta.json`,
+    перебудовує бібліотеку й реєстр.
+
+    🔴 КАНАЛ ВИБИРАЄТЬСЯ ЗА ШВИДКІСТЮ, а не за тим, який перевіряється першим у
+    коді. ARCHIUM — переглядач самого архіву — віддає готові посторінкові JPG
+    (спр.1056 ф.224: 54 кадри за 4 с), Commons — один файл на сотні МБ,
+    дзеркало обрізає великі справи, плівка FS вимагає обходу дзеркала. Доки
+    перевірявся лише Commons, ЦДІАК ф.224 виглядав фондом майже без сканів
+    (42 справи з 2950) і 1058 справ стояли в черзі «замовлення в архіві»,
+    лежачи при цьому онлайн.
     """
     repo, fond, opys, spr, letter = _parse_key(key)
     row, path = _opys_registry_row(repo, fond, opys, spr, letter)
@@ -581,7 +601,7 @@ def cmd_take(key: str = typer.Argument(..., help="DAHMO/230/43 або DAHMO/230/
         console.print(f"[red]у реєстрі опису немає {repo} {fond}-{opys}-{spr}{letter}"
                       f"[/red] ({path})")
         raise typer.Exit(1)
-    if not row.get("commons_url"):
+    if not (row.get("archium_url") or row.get("commons_url")):
         console.print(f"[yellow]{repo} {fond}-{opys}-{spr}{letter}: сканів на Commons "
                       "немає[/yellow]")
         if row.get("mirror_url"):
@@ -615,33 +635,48 @@ def cmd_take(key: str = typer.Argument(..., help="DAHMO/230/43 або DAHMO/230/
     ws = _workspace()
     slug = f"{_REPO_SLUG.get(repo, repo.lower())}_{fond}"
     case_dir = ws.root / "data" / "raw" / slug / f"spr-{spr}{letter}"
+
+    # 🔴 КАНАЛ ОБИРАЄТЬСЯ ЗА ШВИДКІСТЮ, а не за тим, який перевіряється першим
+    # у коді. Переглядач архіву віддає готові посторінкові JPG, Commons — один
+    # файл на сотні мегабайтів. Доки перевірявся лише Commons, ЦДІАК ф.224
+    # виглядав фондом майже без сканів (42 справи з 2950), і понад тисяча справ
+    # стояла в черзі «замовлення в архіві», лежачи при цьому онлайн.
+    #
+    # 🔴 І те, й те качається В ЦЬОМУ ПРОЦЕСІ. Досі тут запускались файли з
+    # дослідницького репозиторію за шляхом усередині простору, тобто публічний
+    # пакет залежав від приватного за адресою на диску: на чужій машині тієї
+    # теки немає, і команда падала з «файл не знайдено» — виглядало це як
+    # поламаний застосунок, а не як відсутня можливість.
+    from nyshporka.cases import acquire as A
+
+    archium = str(row.get("archium_url") or "").strip()
     name = str(row.get("commons_title") or "").strip()
-    if not name:
-        console.print("[red]у реєстрі немає назви файлу на Commons "
+    channel = "ARCHIUM" if archium else ("Commons" if name else "")
+    if not channel:
+        console.print("[red]у реєстрі немає ні адреси переглядача "
+                      "(`archium_url`), ні назви файлу на Commons "
                       "(`commons_title`) — качати нічого[/red]")
-        console.print("[dim]зібрати: nysh registry collect commons "
+        console.print(f"[dim]зібрати: nysh registry collect archium "
                       f"--repo {repo} --fond {fond}[/dim]")
         raise typer.Exit(2)
 
+    console.print(f"[dim]канал: {channel}[/dim]")
     if dry_run:
-        console.print(f"[dim]узяв би: {name}[/dim]")
+        console.print(f"[dim]узяв би: {archium or name}[/dim]")
         console.print(f"[dim]у теку : {case_dir}[/dim]")
         return
 
-    # 🔴 Завантаження й облік — У ЦЬОМУ ПРОЦЕСІ, а не зовнішнім скриптом.
-    # Досі тут запускався файл із дослідницького репозиторію
-    # (`ws.root/"scripts"/…`), тобто публічний пакет залежав від приватного за
-    # шляхом на диску: на чужій машині тієї теки немає, і команда падала з
-    # «файл не знайдено» — виглядало це як поламаний застосунок, а не як
-    # відсутня можливість.
-    from nyshporka.cases import acquire as A
-
+    shifra = f"{spr}{letter}"
+    title_ = str(row.get("title") or "")
+    year_ = str(row.get("year_from") or "")
     try:
-        got = A.from_commons(
-            case_dir, name, archive=repo, fond=fond, opys=opys,
-            spr=f"{spr}{letter}", title=str(row.get("title") or ""),
-            year=str(row.get("year_from") or ""),
-            on_progress=lambda **kw: None)
+        if archium:
+            got = A.from_archium(case_dir, archium, archive=repo, fond=fond,
+                                 opys=opys, spr=shifra, repo=repo,
+                                 title=title_, year=year_)
+        else:
+            got = A.from_commons(case_dir, name, archive=repo, fond=fond,
+                                 opys=opys, spr=shifra, title=title_, year=year_)
     except A.AcquireError as exc:
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(1) from None

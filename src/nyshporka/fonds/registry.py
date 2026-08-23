@@ -56,6 +56,11 @@ FIELDS = ("opys", "spr_int", "spr_letter", "spr", "shifra", "title", "title_src"
           "cat_place", "cat_attached", "cat_uezd", "cat_confession",
           "cat_district", "cat_parishes_n", "record_types",
           "fs_dgs", "fs_film", "fs_url", "fs_record_type", "fs_place", "fs_frames",
+          # 🏛 ARCHIUM — переглядач самого архіву (ЦДІАК, ДАХмО). `archium_file`
+          # — адреса ПОСТОРІНКОВИХ JPG, тобто найшвидший канал: справа береться
+          # за секунди, без Commons-файла на сотні МБ і без обходу дзеркала
+          # плівок. Поки цього поля не було, ф.224 виглядала фондом без сканів.
+          "archium_file", "archium_url",
           "sources")
 
 #: поля, яких стара схема не має → `None`
@@ -440,7 +445,11 @@ def row_status(row: dict[str, Any],
 
     if on_live:
         state = "disk"
-    elif row.get("commons_url"):
+    elif row.get("archium_file") or row.get("commons_url"):
+        # 🔴 ARCHIUM і Commons — обидва «бери сам», і саме тому стоять в одній
+        # гілці: черга `--todo` питає «чи можна завантажити», а не «звідки».
+        # Порядок усередині вирішує `cases take` — там ARCHIUM перший, бо
+        # віддає готові кадри за секунди.
         state = "todo"
     elif row.get("mirror_url"):
         state = "mirror_only"
@@ -544,7 +553,8 @@ def filter_rows(rows: list[dict[str, Any]], *, opys: str = "", q: str = "", surn
         # справи проти 882 зі сканом, тобто головний спосіб дістати документ.
         if fs and not (r.get("fs_dgs") or r.get("fs_film")):
             return False
-        if scan and not (r.get("commons_url") or r.get("mirror_url")):
+        if scan and not (r.get("commons_url") or r.get("mirror_url")
+                         or r.get("archium_file")):
             return False
         # ⏱ `row_status` рахується ЛИШЕ якщо про нього справді питають. Раніше він
         # будувався для кожного рядка беззастережно — тобто повний зайвий прохід
@@ -562,6 +572,7 @@ def filter_rows(rows: list[dict[str, Any]], *, opys: str = "", q: str = "", surn
             # живим DGS у цю чергу не належить, скільки б її не бракувало на
             # Commons (ф.315: 12 794 плівки проти 882 сканів).
             if order and ((r.get("on_disk") or st["on_disk_live"])
+                          or r.get("archium_file")
                           or r.get("commons_url") or r.get("mirror_url")
                           or r.get("fs_dgs") or r.get("fs_film")):
                 return False
@@ -570,7 +581,8 @@ def filter_rows(rows: list[dict[str, Any]], *, opys: str = "", q: str = "", surn
             # умова читається як одне ціле, а не як виняток усередині фільтра.
             if (state and st["disk_state"] != state
                     and not (state == "scan"
-                             and (r.get("commons_url") or r.get("mirror_url")))):
+                             and (r.get("archium_file") or r.get("commons_url")
+                                  or r.get("mirror_url")))):
                 return False
             if want_flags and not want_flags.issubset(set(st["flags"])):
                 return False
@@ -595,7 +607,10 @@ def filter_rows(rows: list[dict[str, Any]], *, opys: str = "", q: str = "", surn
 def summarize(rows: list[dict[str, Any]],
               live: dict[tuple[str, str, str], str] | None = None) -> dict[str, Any]:
     live = live if live is not None else {}
-    s = {"rows": len(rows), "commons": 0, "mirror_only": 0, "truncated": 0,
+    # `archium` — переглядач самого архіву: найшвидший канал, і рахується
+    # окремо від Commons, бо дія інша (`cdiak_download.py` за `file_id`).
+    s = {"rows": len(rows), "archium": 0, "commons": 0, "mirror_only": 0,
+         "truncated": 0,
          # `film` — вільний канал НАРІВНІ з `todo`, лише інший (плівка FS за
          # DGS, а не файл на Commons). Рахується окремо, бо дія інша: не
          # завантажувач Commons, а `familysearch_film_download.py`.
@@ -610,6 +625,8 @@ def summarize(rows: list[dict[str, Any]],
         st = row_status(r, live, {})
         if st["disk_mismatch"]:
             s["disk_mismatch"] += 1
+        if r.get("archium_file"):
+            s["archium"] += 1
         if r.get("commons_url"):
             s["commons"] += 1
         elif r.get("mirror_url"):

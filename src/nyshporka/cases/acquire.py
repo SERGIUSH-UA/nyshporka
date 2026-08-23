@@ -143,3 +143,50 @@ def from_commons(case_dir: Path, file_name: str, *, archive: str, fond: str,
     write_meta(case_dir, archive=archive, fond=fond, opys=opys, spr=spr,
                files=files, source="Wikimedia Commons", title=title, year=year)
     return Acquired(case_dir=case_dir, files=files, skipped=res.skipped)
+
+
+def from_archium(case_dir: Path, viewer: str, *, archive: str, fond: str,
+                 opys: str, spr: str, repo: str = "", title: str = "",
+                 year: str = "", on_progress: ProgressFn | None = None,
+                 source: Any = None) -> Acquired:
+    """Завантажити справу з переглядача архіву — посторінковими кадрами.
+
+    🔴 Найшвидший канал: кадри приходять готовими JPG, тоді як Commons віддає
+    один файл на сотні мегабайтів. Тому в `cases take` він перевіряється
+    ПЕРШИМ — колонка каналу має радити найшвидший шлях, а не найдавніше
+    реалізований.
+
+    ⚠ Паспорт тут описує саме КАДРИ, а не один файл, і `sha256` рахується по
+    кожному: обірваний набір інакше не відрізнити від повного — файлів просто
+    менше, і за іменами це не видно.
+    """
+    from nyshporka.archives import active
+    from nyshporka.sources.archium import ArchiumSource
+
+    ident = viewer.rstrip("/").rsplit("/", 1)[-1] if "/" in viewer else viewer
+    if not ident.isdigit():
+        raise AcquireError(
+            f"з адреси «{viewer}» не видно номера справи в переглядачі — "
+            f"очікується `.../file-viewer/<номер>/` або сам номер")
+
+    repo = (repo or archive).upper()
+    src = source or ArchiumSource(site=active().site(repo, "archium"), repo=repo)
+    guard_inventory(case_dir, opys)
+    pages_dir = case_dir / "pages"
+    pages_dir.mkdir(parents=True, exist_ok=True)
+
+    res = src.fetch(f"file:{ident}", pages_dir, on_progress=on_progress)
+    if res.errors:
+        raise AcquireError("; ".join(res.errors[:3]))
+
+    files = [{"file": f"pages/{p.name}", "pagecount": 1,
+              "size": p.stat().st_size, "sha256": sha256_of(p)}
+             for p in sorted(pages_dir.glob("*.jpg"))]
+    if not files:
+        raise AcquireError(f"кадрів не завантажено: {pages_dir}")
+
+    write_meta(case_dir, archive=archive, fond=fond, opys=opys, spr=spr,
+               files=files, source="ARCHIUM", title=title, year=year,
+               extra={"viewer_id": ident, "viewer_url": viewer,
+                      "n_pages": len(files)})
+    return Acquired(case_dir=case_dir, files=files, skipped=res.skipped)
