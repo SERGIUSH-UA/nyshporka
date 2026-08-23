@@ -341,6 +341,7 @@ class MergeArgs(BaseModel):
     repo: str = Field(..., description="код архіву: CDIAK, ДАХмО…")
     fond: str = Field(..., description="номер фонду")
     dry_run: bool = Field(False, description="лише порахувати, нічого не писати")
+    fond_id: str = Field("", description="тека фонду, якщо вона не збігається з кодом архіву й номером")
 
 
 @op("registry.merge",
@@ -363,10 +364,14 @@ def registry_merge(a: MergeArgs) -> Envelope:
         return fail(str(exc))
 
     target = _target(a.repo, a.fond)
+    # ⚠ Тека фонду виводиться з коду архіву й номера (`cdiak_224`), але на диску
+    # вона могла з'явитись раніше й під іншим кодом того самого архіву. Хто вже
+    # знає точну теку — називає її, і тоді реєстр не роздвоюється.
+    fond_id = a.fond_id.strip() or target.fond_id
     try:
         res = merge_fond(
-            target, dest=ws.root / registry_dir(target.fond_id),
-            out=ws.root / fond_path(target.fond_id),
+            target, dest=ws.root / registry_dir(fond_id),
+            out=ws.root / fond_path(fond_id),
             library=ws.root / "data" / "derived" / "case_library.json",
             dry_run=a.dry_run)
     except MergeError as exc:

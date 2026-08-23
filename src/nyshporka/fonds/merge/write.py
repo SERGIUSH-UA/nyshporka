@@ -91,9 +91,17 @@ def write_conflicts(path: Path, conflicts: list[dict[str, str]]) -> None:
 
 
 def write_coverage(path: Path, coverage: dict[str, Any]) -> None:
+    """Покриття фонду. 🔴 Кінці рядків задано ЯВНО.
+
+    Без цього `write_text` перекладає перенос у `os.linesep`: на Windows
+    покриття виходить із CRLF, а реєстр поруч — із LF. Наслідок не
+    косметичний: у сховищі, що нормалізує кінці рядків, файл ставав
+    «зміненим» після КОЖНОЇ перезбірки, хоч жодне число в ньому не
+    рухалось, — і справжня зміна покриття тонула в цьому шумі.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(coverage, ensure_ascii=False, indent=2) + "\n",
-                    encoding="utf-8")
+                    encoding="utf-8", newline="\n")
 
 
 def _has_human_input(path: Path) -> bool:

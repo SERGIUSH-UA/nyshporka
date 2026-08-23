@@ -112,13 +112,17 @@ def cmd_merge(
     fond: str = typer.Option(..., "--fond"),
     repo: str = typer.Option("DAHMO", "--repo", help="код або назва архіву"),
     dry_run: bool = typer.Option(False, "--dry-run", help="нічого не писати"),
+    fond_id: str = typer.Option("", "--fond-id",
+                                help="тека фонду, якщо не збігається з кодом і "
+                                     "номером"),
 ) -> None:
     """Звести джерела опису в один реєстр фонду.
 
     ⚠ Працює по фонду ЦІЛКОМ: знаменник покриття пофондовий, а зведення одного
     опису лишило б реєстр із одним описом. Тому прапорця `--opys` тут немає.
     """
-    env = O.call("registry.merge", {"repo": repo, "fond": fond, "dry_run": dry_run})
+    env = O.call("registry.merge", {"repo": repo, "fond": fond,
+                                    "dry_run": dry_run, "fond_id": fond_id})
     if not env.ok:
         _fail(env)
     d = env.data or {}
