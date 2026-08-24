@@ -416,3 +416,50 @@ def test_messages_advise_only_existing_options(monkeypatch, tmp_path: Path) -> N
     assert advised, "у повідомленні немає жодної поради — перевірка втратила сенс"
     assert not (advised - known), (
         f"повідомлення радить неіснуючу опцію: {sorted(advised - known)}")
+
+
+# ── 4. обов'язковий параметр показує свої значення ───────────────────────────
+def test_cli_choices_match_models() -> None:
+    """🔴 Перелік у довідці — теж вхід, і він теж роз'їжджається мовчки.
+
+    `nysh pages note --type` був обов'язковим і не називав жодного припустимого
+    значення: людина набирала осмислене слово («метрична» — саме так підписаний
+    `--type` у сусідньої `nysh case`), діставала відмову валідатора й не мала де
+    підглянути перелік. Тепер переліки стоять у довідці, але живуть ДВІЧІ —
+    у `pagestore.models` і рядком у `cli.py`, бо командний рядок навмисно не
+    тягне pydantic-моделі на імпорті. Ця перевірка й тримає їх рівними.
+
+    ⚠ Значення беруться з ТЕКСТУ моделей, а не імпортом: `nyshporka.pagestore`
+    тягне за собою `library`, а той резолвить робочий простір ще на імпорті —
+    у тестах простору немає за побудовою, тож імпорт тут падав би на тому, що
+    до перевірки стосунку не має.
+    """
+    import ast
+
+    from nyshporka import cli
+
+    tree = ast.parse((SRC / "pagestore" / "models.py").read_text(encoding="utf-8"))
+    literals: dict[str, set[str]] = {}
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Assign) or not isinstance(node.value, ast.Subscript):
+            continue
+        base = node.value.value
+        if not (isinstance(base, ast.Name) and base.id == "Literal"):
+            continue
+        name = node.targets[0].id if isinstance(node.targets[0], ast.Name) else ""
+        vals = {e.value for e in ast.walk(node.value)
+                if isinstance(e, ast.Constant) and isinstance(e.value, str)}
+        if name:
+            literals[name] = vals
+
+    pairs = [("PageType", cli._PAGE_TYPES_HELP, "--type"),
+             ("PageStatus", cli._PAGE_STATUS_HELP, "--status"),
+             ("Method", cli._PAGE_METHOD_HELP, "--method")]
+    bad: list[str] = []
+    for literal_name, help_text, flag in pairs:
+        declared = literals.get(literal_name)
+        assert declared, f"у моделях не знайдено {literal_name} — перевірка втратила сенс"
+        named = set(re.findall(r"[a-z]+", help_text)) & declared
+        if missing := declared - named:
+            bad.append(f"{flag}: у довідці немає {sorted(missing)}")
+    assert not bad, f"довідка розійшлася з моделлю: {bad}"

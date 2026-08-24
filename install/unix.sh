@@ -22,6 +22,10 @@ esac
 # `test_installer_extras_match_the_sections`.
 SOURCE="${NYSH_SOURCE:-$DEFAULT_SOURCE}"
 
+# Звідки брати пак довідників, якщо його немає поруч. Та сама адреса, що її
+# друкує `nysh catalog list` на порожньому каталозі (`catalog.store.RELEASES_URL`).
+CATALOG_URL="https://github.com/SERGIUSH-UA/nyshporka/releases"
+
 say() { printf '%s\n' "$*"; }
 
 # 🐾 Знак ТОЙ САМИЙ, що друкує `nysh info` і старт застосунку — побайтово,
@@ -65,8 +69,10 @@ if [ -n "$SEED" ]; then
   fi
   rm -rf "$TMP"
 else
+  # 🔴 Порада мусить казати, ЗВІДКИ взяти — див. коментар у windows.ps1.
   say "⚠ довідників поруч немає — пошук по каталогах архівів буде недоступний"
-  say "  поставити пізніше: nysh catalog install --from <тека|zip>"
+  say "  взяти: $CATALOG_URL"
+  say "  далі:  nysh catalog install --from <завантажений zip>"
 fi
 
 say ""

@@ -28,6 +28,10 @@ param(
     [switch]$NoLauncher
 )
 
+# Звідки брати пак довідників, якщо його немає поруч. Та сама адреса, що її
+# друкує `nysh catalog list` на порожньому каталозі (`catalog.store.RELEASES_URL`).
+$CatalogUrl = 'https://github.com/SERGIUSH-UA/nyshporka/releases'
+
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 
@@ -125,8 +129,14 @@ if ($seed) {
     & $nysh catalog install --from $tmp
     Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
 } else {
+    # 🔴 Порада мусить казати, ЗВІДКИ взяти. Пак довідників лежить окремим
+    # релізом (він оновлюється, коли архів виклав новий опис, а не коли
+    # полагодили ваду), тож поруч із інсталятором його не буває НІКОЛИ, якщо
+    # людина не зібрала комплект сама. Без адреси цей рядок читався як «щось
+    # загубилось при встановленні», а `nysh find` мовчки лишався без каталогів.
     Say "⚠ довідників поруч немає — пошук по каталогах архівів буде недоступний" Yellow
-    Say "  поставити пізніше: nysh catalog install --from <тека|zip>"
+    Say "  взяти: $CatalogUrl" DarkGray
+    Say "  далі:  nysh catalog install --from <завантажений zip>"
 }
 
 # ── 6. ярлик ─────────────────────────────────────────────────────────────────

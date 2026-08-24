@@ -268,3 +268,68 @@ def test_agent_surface_did_not_grow(space: Path) -> None:
     assert "sections.show" not in agent
     assert "sections.set" not in agent
     assert len(agent) <= 18, f"перелік виріс до {len(agent)}"
+
+
+def test_installers_point_where_the_catalogue_actually_lives() -> None:
+    """🔴 Порада без адреси — половина поради, і саме тут вона найдорожча.
+
+    Пак довідників лежить ОКРЕМИМ релізом: він оновлюється, коли архів виклав
+    новий опис, а колесо — коли полагодили ваду. Тому поруч із інсталятором
+    його не буває ніколи, і кожне чисте встановлення закінчується рядком
+    «довідників поруч немає». Доти цей рядок не казав, звідки їх узяти, — і
+    читався як «щось загубилось при встановленні», а `nysh find` мовчки
+    лишався без каталогів, хоч README обіцяє відповідь одразу після
+    встановлення.
+    """
+    from nyshporka.catalog import store
+
+    root = Path(__file__).resolve().parents[1] / "install"
+    for name in ("windows.ps1", "unix.sh"):
+        text = (root / name).read_text(encoding="utf-8")
+        assert store.RELEASES_URL in text, (
+            f"{name}: порада про довідники не каже, звідки їх брати — "
+            f"адреса має збігатися з `catalog.store.RELEASES_URL` "
+            f"({store.RELEASES_URL})")
+
+
+def test_installers_are_at_least_parseable() -> None:
+    """🔴 Інсталятор мусить бодай розбиратись — інакше він падає на першому рядку.
+
+    ⚠ Це не гіпотетично. Сусідній приймач вище перевіряє, що в скрипті є адреса
+    релізів, і він лишався ЗЕЛЕНИМ, коли `$CatalogUrl = 'https://…` стояв без
+    закривної лапки: адреса в тексті була, а сам скрипт не парсився взагалі —
+    незакритий рядок з'їдав наступні тридцять і валив усе на `Unexpected token`.
+    Тобто перевірка вмісту нічого не каже про те, чи запуститься файл.
+
+    Приймач навмисно слабкий (синтаксис, не поведінка): запускати інсталятор у
+    тестах не можна, а розбір ловить рівно той клас вад, який робить його
+    непрацездатним цілком.
+    """
+    import os
+    import shutil
+    import subprocess
+
+    root = Path(__file__).resolve().parents[1] / "install"
+
+    # ⚠ Кожен скрипт перевіряється ТАМ, ДЕ ВІН ПРАЦЮЄ. `bash`, знайдений на
+    # Windows, — це WSL: для нього диска `E:` не існує взагалі, і перевірка
+    # падала б не на синтаксисі, а на шляху. Перекладати шлях у `/mnt/e/…`
+    # означало б покладатись на здогад про те, який саме bash знайшовся.
+    if os.name != "nt" and shutil.which("bash"):
+        r = subprocess.run(["bash", "-n", str(root / "unix.sh")],
+                           capture_output=True, text=True)
+        assert r.returncode == 0, f"unix.sh не розбирається:\n{r.stderr}"
+
+    pwsh = shutil.which("pwsh") or shutil.which("powershell")
+    if not pwsh:
+        pytest.skip("PowerShell недоступний — розбір windows.ps1 пропущено")
+    # Парсер, а не запуск: `-File` виконав би скрипт, а нам треба лише розбір.
+    check = (
+        "$e=$null; "
+        "$null=[System.Management.Automation.Language.Parser]::ParseFile("
+        f"'{root / 'windows.ps1'}',[ref]$null,[ref]$e); "
+        "if($e.Count){ $e[0].Extent.StartLineNumber; $e[0].Message; exit 1 }"
+    )
+    r = subprocess.run([pwsh, "-NoProfile", "-NonInteractive", "-Command", check],
+                       capture_output=True, text=True)
+    assert r.returncode == 0, f"windows.ps1 не розбирається:\n{r.stdout}{r.stderr}"

@@ -245,8 +245,13 @@ def resolve(name: str | None = None) -> ResearchProfile:
     profiles = raw.get("profiles") or {}
     target = name or raw.get("fallback") or ""
     if not target:
+        # 🔴 Повідомлення мусить називати ВИХІД. Доти воно казало, чого немає, і
+        # мовчало про те, що завести профіль нічим: файл не створює ні `init`,
+        # ні майстер, а команди запису не існувало — тобто людина лишалась
+        # перед налаштуванням, до якого немає дверей.
         raise ProfileError(
-            f"профіль дослідження не задано і немає `fallback` у {config_path()}")
+            f"профіль дослідження не задано і немає `fallback` у {config_path()}"
+            "\nзавести: `nysh profile init <Прізвище>`")
     if target not in profiles:
         raise ProfileError(
             f"немає профілю «{target}». Є: {', '.join(sorted(profiles)) or '(жодного)'}")
@@ -279,3 +284,90 @@ def reset() -> None:
     """Скинути кеші — для тестів і після правки конфігу."""
     _raw.cache_clear()
     active.cache_clear()
+
+
+# ── заведення профілю ────────────────────────────────────────────────────────
+#: Заготовка конфігу. Основи на РЕШТУ орфографій лишаються порожніми навмисно:
+#: докстрінг `core.morph` пояснює, чому їх не виводять правилом («рос. Сикор- →
+#: укр. Сікор-: позиція залежить від історії слова, не від правила»). Порожнє
+#: поле з підписом чесніше за вгадане: воно видно, а хибна основа мовчки
+#: викидає половину написань із пошуку.
+_TEMPLATE = """\
+# Чий рід шукаємо. Один файл на простір; профілів у ньому може бути кілька,
+# `fallback` каже, який брати без імені.
+#
+# 🔴 Основа (`stems`) задається НА КОЖНУ орфографію окремо і руками. Вивести її
+# правилом не можна: рос. «Сикор-» → укр. «Сікор-» міняє першу «и», але не «и»
+# в закінченні, і позиція залежить від історії слова. Заповнені основи дають
+# форми (відмінки, роди, множину) самі — виписувати їх не треба.
+#
+# Орфографії: ru_modern · ru_prereform · uk · pl · bank (історична таблиця
+# підписів розмітки, може бути внутрішньо непослідовною — так і лишати).
+fallback: {name}
+
+profiles:
+  {name}:
+    surname:
+      display: {display}
+      paradigm: {paradigm}      # {paradigm_label}
+      stems:
+        {orth}: {stem}
+{other_stems}
+      # Корені для фаззі-пошуку: рушій калічить саме СЕРЕДИНУ слова, тож корінь
+      # береться коротким. Вага — від 0 до 1.
+      roots:
+        - [{stem}, 1.0]
+      # Написання, які правилом не виводяться: описки писаря, чужі традиції.
+      extra_forms: []
+      # Сусідні прізвища з тим самим хвостом, які дають хибні хіти.
+      confusers: []
+"""
+
+
+def write_config(name: str, display: str, *, paradigm: str = "adj_skyi",
+                 orth: str = "uk", force: bool = False) -> Path:
+    """Створити `config/research_profile.yaml` із заготовкою під це прізвище.
+
+    Повертає шлях. Наявний файл не чіпається без `force`: у ньому вже може
+    лежати робота, а мовчазний перезапис профілю означав би, що пошук назавтра
+    шукає інше прізвище й ніде про це не каже.
+
+    🔴 Основа відсікається за таблицею САМОЇ парадигми, а не здогадом. Це не та
+    згортка, яку `core.morph` забороняє: там ідеться про перенесення основи між
+    орфографіями, тут — про зняття відомого закінчення в межах однієї.
+    """
+    if orth not in morph.ORTHOGRAPHIES:
+        raise ProfileError(
+            f"невідома орфографія «{orth}». Є: {', '.join(morph.ORTHOGRAPHIES)}")
+    try:
+        par = morph.paradigm(paradigm)
+    except KeyError as exc:
+        raise ProfileError(str(exc)) from None
+
+    display = display.strip()
+    if not display:
+        raise ProfileError("порожнє прізвище")
+    ending = (par.endings.get(orth) or {}).get("nom_m", "")
+    stem = display
+    if ending and display.lower().endswith(ending.lower()):
+        stem = display[: -len(ending)]
+
+    path = config_path()
+    if path.exists() and not force:
+        raise ProfileError(
+            f"{path} вже є — правити руками або `nysh profile init --force`")
+
+    others = "\n".join(
+        f"        # {o}:  # ← заповнити, якщо шукати й цією орфографією"
+        for o in morph.ORTHOGRAPHIES if o != orth)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        _TEMPLATE.format(name=name, display=display, paradigm=paradigm,
+                         paradigm_label=par.label, orth=orth, stem=stem,
+                         other_stems=others),
+        encoding="utf-8")
+    # 🔴 Обидва кеші, а не лише сирий конфіг: `active()` тримає зібраний
+    # профіль окремо, і без цього перший же показ у тому самому процесі віддав
+    # би стан «профілю немає» на щойно створений файл.
+    reset()
+    return path

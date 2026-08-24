@@ -120,7 +120,27 @@ def install(ws: Workspace, *, force: bool = False) -> dict[str, Any]:
             json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8")
         runs.append(run_name)
 
+    # 🔴 Реєстр перебудовується ТУТ, а не лишається на людину. Зразок кладе на
+    # диск справу й два прогони — тобто рівно ту зміну, від якої реєстр стає
+    # застарілим. Доти найперший крок новачка закінчувався порожнім екраном
+    # «Мої справи» при розгорнутій справі: застарілий зріз виглядає як
+    # відповідь («справ немає») там, де робота зроблена секунду тому.
+    # Збій збирання не має валити саме розгортання — кадри вже на диску, і
+    # порада `nysh cases build` лишається дійсною.
+    registry_built = False
+    try:
+        from nyshporka.cases import db as _cases_db
+
+        # 🔴 `rebuild`, а не `build_index`: другий лише ЧИТАЄ опис справ, тож
+        # зібраний ним зріз виходить не порожнім, а неправильним — справа без
+        # шифри, обидва прогони нічиї. Саме так і сталося на першому заході.
+        _cases_db.rebuild()
+        registry_built = True
+    except Exception:
+        registry_built = False
+
     info = describe() or {}
     return {"case_dir": str(case), "case_key": CASE_KEY, "frames": frames,
             "runs": runs, "shifra": info.get("shifra", ""),
-            "frames_total": info.get("frames_total")}
+            "frames_total": info.get("frames_total"),
+            "registry_built": registry_built}

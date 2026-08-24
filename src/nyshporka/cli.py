@@ -15,6 +15,19 @@ import typer
 
 from nyshporka import __version__, brand
 
+# 🔴 Обов'язковий параметр, чиї значення видно ЛИШЕ з помилки валідації, —
+# те саме глухе місце, що й порада на неіснуючу команду: людина набирає
+# осмислене слово («метрична», як у сусідній `nysh case --type`), дістає
+# відмову й не має де підглянути перелік. Тому переліки стоять у довідці.
+# ⚠ Рядки ДУБЛЮЮТЬ `pagestore.models` — інакше `cli.py` мусив би тягнути
+# pydantic-моделі на імпорті заради трьох підказок, а він навмисно тримає
+# верхні імпорти порожніми. Розбіжність ловить `test_cli_choices_match_models`.
+_PAGE_TYPES_HELP = ("birth | marriage | death | confession | revision | census | "
+                    "index | title | cover | flyleaf | blank | illegible | mixed | other")
+_PAGE_STATUS_HELP = ("full — перелік прізвищ ПОВНИЙ · partial — бачив, перелік "
+                     "неповний · skipped · unreadable")
+_PAGE_METHOD_HELP = "visual | htr | ocr | hybrid | text"
+
 app = typer.Typer(
     name="nysh",
     # Назва й лінія бренду беруться з `brand.yaml`, а не набрані тут: `--help`
@@ -430,8 +443,15 @@ def sample(
     console.print(f"   тека: {got['case_dir']}")
     for run in got["runs"]:
         console.print(f"   декод: {run}")
+    if not got.get("registry_built"):
+        console.print("[warn]реєстр справ не перезібрався[/warn] — "
+                      "`nysh cases build`, інакше «Мої справи» покажуть нуль")
+    # 🔴 `search`, а не `find`: перше шукає в ПРОЧИТАНОМУ, друге — в каталогах
+    # архівів. Зразкова справа дає саме декод, тож порада «find Липовеньке»
+    # вела найпершого відвідувача рівно в той хибний нуль, проти якого написано
+    # решту застосунку: команда відпрацьовувала бездоганно й не знаходила нічого.
     console.print("[muted]далі: `nysh serve` → «Гортач», або "
-                  "`nysh find Липовеньке`[/muted]")
+                  "`nysh search Липовеньке`[/muted]")
 
 
 @app.command()
@@ -626,7 +646,54 @@ def archive_cmd(
         console.print(f"[warn]⚠[/warn] [muted]{w.text}[/muted]")
 
 
-@app.command("profile")
+# 🔴 Група, але БЕЗ ламання входу: `nysh profile` без підкоманди й далі показує
+# профіль. Заводити його доти не було чим взагалі — `config/` після `nysh init`
+# лишалась порожньою, файл не писав ніхто, а команда падала з exit 1 і не
+# називала виходу. Тобто екран обіцяв налаштування, якого не існувало.
+profile_app = typer.Typer(help="Чий рід шукаємо: форми прізвища, корені, парадигма.",
+                          invoke_without_command=True)
+app.add_typer(profile_app, name="profile")
+
+
+@profile_app.callback(invoke_without_command=True)
+def profile_root(ctx: typer.Context) -> None:
+    """Чий рід шукаємо: форми прізвища, корені, парадигма."""
+    if ctx.invoked_subcommand is None:
+        profile_cmd(as_json=False)
+
+
+@profile_app.command("init")
+def profile_init(
+    display: str = typer.Argument(..., help="прізвище, як воно пишеться: Сікорський"),
+    name: str = typer.Option("", "--name", help="ключ профілю; типово — з прізвища"),
+    paradigm: str = typer.Option("adj_skyi", "--paradigm",
+                                 help="adj_skyi | noun_ov | indeclinable"),
+    orth: str = typer.Option("uk", "--orth",
+                             help="якою орфографією подано прізвище: "
+                                  "uk | ru_modern | ru_prereform | pl | bank"),
+    force: bool = typer.Option(False, "--force", help="перезаписати наявний конфіг"),
+) -> None:
+    """Завести профіль дослідження — файл, у якому живе «чий рід шукаємо».
+
+    Основа відсікається за таблицею самої парадигми, форми породжуються з неї.
+    Основи на ІНШІ орфографії лишаються порожніми навмисно: вивести їх правилом
+    не можна (`core.morph`), а вгадана основа мовчки викидає половину написань
+    із пошуку.
+    """
+    from nyshporka.core.profile import ProfileError, write_config
+    from nyshporka.core.workspace import WorkspaceError
+
+    key = name or "".join(ch for ch in display.lower() if ch.isalnum()) or "rid"
+    try:
+        path = write_config(key, display, paradigm=paradigm, orth=orth, force=force)
+    except (ProfileError, WorkspaceError) as exc:
+        console.print(f"[err]{exc}[/err]")
+        raise typer.Exit(code=1) from None
+    console.print(f"✅ профіль «{key}»: {path}")
+    console.print("[muted]основи на інші орфографії — руками у файлі; "
+                  "перевірити: `nysh profile`[/muted]")
+
+
 def profile_cmd(as_json: bool = typer.Option(False, "--json")) -> None:
     """Чий рід шукаємо: форми прізвища, корені, парадигма.
 
@@ -651,6 +718,9 @@ def profile_cmd(as_json: bool = typer.Option(False, "--json")) -> None:
     console.print(f"  корені: {', '.join(d.get('roots') or []) or '—'}")
     console.print(f"  форми: {len(d.get('spellings') or [])} · "
                   f"самоперевірка: {d.get('selftest_mode')}")
+
+
+profile_app.command("show")(profile_cmd)
 
 
 @app.command("search")
@@ -769,13 +839,9 @@ def cases_build(
     """
     from nyshporka.cases import db
 
-    if rescan:
-        from nyshporka.library import build_library, write_library
-
-        entries = build_library()
-        write_library(entries)
-        console.print(f"[muted]бібліотеку перезібрано: {len(entries)} справ[/muted]")
-    res = db.build_index()
+    res = db.rebuild(rescan=rescan)
+    if res["rescanned"]:
+        console.print(f"[muted]бібліотеку перезібрано: {res['entries']} справ[/muted]")
     console.print(f"✅ реєстр: [bold]{res['cases']}[/bold] справ · "
                   f"нерозв'язаних прогонів: {res.get('orphans', 0)} · {res['path']}")
 
@@ -946,13 +1012,13 @@ def pages_status_cmd(
 def pages_note_cmd(
     case: str = typer.Argument(...),
     scan: str = typer.Argument(..., help="голе ім'я файлу: 0030.JPG"),
-    page_type: str = typer.Option(..., "--type"),
+    page_type: str = typer.Option(..., "--type", help=_PAGE_TYPES_HELP),
     surnames: str = typer.Option("", "--surnames", help="кома-список ЯК У ДЖЕРЕЛІ"),
     places: str = typer.Option("", "--places"),
     years: str = typer.Option("", "--years"),
     sheet: str = typer.Option("", "--sheet"),
-    status: str = typer.Option("full", "--status"),
-    method: str = typer.Option("visual", "--method"),
+    status: str = typer.Option("full", "--status", help=_PAGE_STATUS_HELP),
+    method: str = typer.Option("visual", "--method", help=_PAGE_METHOD_HELP),
     comment: str = typer.Option("", "--comment"),
 ) -> None:
     """Занести переглянуту сторінку.
@@ -1170,14 +1236,27 @@ def models_get(
     if not want:
         console.print("✅ усе на місці")
         return
+    # 🔴 Одна відмова НЕ гасить решту. Аргумент обіцяє «усі, яких бракує», а
+    # вихід на першому ж паку означав «усі до першої вади»: коли ваги
+    # викладають частинами, недоступний пак ховає ті, що взялися б, і людина
+    # бачить одну назву замість переліку того, чого їй бракує. Тому збираємо
+    # збої, а код повернення лишається ненульовим — мовчазного успіху тут бути
+    # не може.
+    failed: list[str] = []
     for p in want:
         console.print(f"⬇ {p.label} …")
         try:
             dst = packs.fetch(p)
         except Exception as exc:
             console.print(f"[err]✗ {p.id}: {exc}[/err]")
-            raise typer.Exit(code=1) from None
+            failed.append(p.id)
+            continue
         console.print(f"  ✅ {dst}")
+    if failed:
+        got = len(want) - len(failed)
+        console.print(f"[warn]не вдалося: {len(failed)} із {len(want)}[/warn]"
+                      + (f" · взято: {got}" if got else ""))
+        raise typer.Exit(code=1)
 
 
 @app.command()

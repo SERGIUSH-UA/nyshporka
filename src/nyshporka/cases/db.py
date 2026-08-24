@@ -466,3 +466,26 @@ def stats(db_path: Path | None = None) -> dict[str, Any]:
         return out
     finally:
         con.close()
+
+
+def rebuild(*, rescan: bool = True) -> dict[str, Any]:
+    """Перезібрати реєстр цілком: опис справ на диску, тоді сам зріз.
+
+    🔴 Два кроки, а не один, і саме тому вони тут разом. `build_index()` лише
+    ЧИТАЄ опис справ (`case_library.json`); зібрати індекс, не перечитавши диск,
+    означає побудувати зріз на бібліотеці, якої ще немає, — і він виходить не
+    порожній, а НЕПРАВИЛЬНИЙ: справа без шифри, прогони нічиї. Тобто гірший за
+    відсутній, бо виглядає як відповідь. Перший виклик у обхід цієї функції вже
+    дав рівно таку картину, тож окремих «зберу лише індекс» бути не повинно.
+
+    `rescan=False` лишається для випадку, коли диск щойно перечитали.
+    """
+    entries = 0
+    if rescan:
+        from nyshporka.library import build_library, write_library
+
+        rows = build_library()
+        write_library(rows)
+        entries = len(rows)
+    res = build_index()
+    return {"entries": entries, "rescanned": rescan, **res}
