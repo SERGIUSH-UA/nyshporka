@@ -15,8 +15,8 @@ from typing import Any
 
 import typer
 from pydantic import ValidationError
-from rich.console import Console
 
+from nyshporka import brand
 from nyshporka.pagestore import query, store
 from nyshporka.pagestore.models import Method, PageNote, PageStatus, PageType, Record
 from nyshporka.pagestore.store import CaseRef
@@ -29,15 +29,15 @@ records_app = typer.Typer(
     help="Структуровані записи джерел (метрики/сповідки/ревізії).",
     no_args_is_help=True,
 )
-console = Console()
-err_console = Console(stderr=True)
+console = brand.console()
+err_console = brand.err()
 
 
 def _resolve(case: str) -> CaseRef:
     try:
         return store.resolve_case(case)
     except ValueError as e:
-        err_console.print(f"[red]{e}[/red]")
+        err_console.print(f"[err]{e}[/err]")
         raise typer.Exit(1) from None
 
 
@@ -138,7 +138,7 @@ def pages_note(
                         sheet=sheet, status=status, method=method,  # type: ignore[arg-type]
                         comment=comment, agent=agent)
     except (ValidationError, ValueError) as e:
-        err_console.print(f"[red]{e}[/red]")
+        err_console.print(f"[err]{e}[/err]")
         raise typer.Exit(1) from None
     report = store.annotate_pages(ref, [note], replace=replace)
     _emit(report.as_dict(), as_json,
@@ -162,7 +162,7 @@ def pages_note_batch(
     try:
         raw_items = _read_batch(file)
     except (OSError, json.JSONDecodeError) as e:
-        err_console.print(f"[red]не JSON: {e}[/red]")
+        err_console.print(f"[err]не JSON: {e}[/err]")
         raise typer.Exit(1) from None
     notes, errors = [], []
     for i, item in enumerate(raw_items):
@@ -189,10 +189,10 @@ def pages_note_batch(
           f"замінено {len(report.replaced)}, помилок {len(errors)}")
     if off_disk and not as_json:
         err_console.print(
-            f"[yellow]⚠ {len(off_disk)} сканів немає на диску теки справи "
+            f"[warn]⚠ {len(off_disk)} сканів немає на диску теки справи "
             f"({', '.join(off_disk[:5])}{'…' if len(off_disk) > 5 else ''}) — "
             f"ключ має бути ІМЕНЕМ ФАЙЛУ («0106.jpg»), інакше `pages status` "
-            f"рахуватиме сторінку непереглянутою[/yellow]")
+            f"рахуватиме сторінку непереглянутою[/warn]")
     if errors and not as_json:
         # 🔴 Ім'я `e` тут НЕ перевикористовується. Python видаляє змінну винятку
         # на виході з `except`, і хоча цикл присвоює її заново (тобто працює),
@@ -201,7 +201,7 @@ def pages_note_batch(
         # змінної падає `NameError` уже в бойовому прогоні, посеред партії.
         for bad in errors:
             err_console.print(
-                f"[yellow]#{bad['index']} ({bad['scan']}): {bad['error']}[/yellow]")
+                f"[warn]#{bad['index']} ({bad['scan']}): {bad['error']}[/warn]")
     if not notes:
         raise typer.Exit(1)
 
@@ -223,7 +223,7 @@ def pages_grep(
         _emit(res, True)
         return
     if res.get("error"):
-        err_console.print(f"[red]{res['error']}[/red]")
+        err_console.print(f"[err]{res['error']}[/err]")
         raise typer.Exit(1)
     console.print(f"[bold]{res['total']}[/bold] хітів у {res['cases']} справах "
                   f"(поріг {res['thresh']}, стеми {res['stems']})")
@@ -248,7 +248,7 @@ def pages_show(
     if scan:
         note = cf.pages.get(scan)
         if note is None:
-            err_console.print(f"[red]скан «{scan}» не анотовано[/red]")
+            err_console.print(f"[err]скан «{scan}» не анотовано[/err]")
             raise typer.Exit(1)
         _emit(note.model_dump(mode="json"), as_json,
               json.dumps(note.model_dump(mode="json"), ensure_ascii=False, indent=1))
@@ -270,7 +270,7 @@ def records_add(
     try:
         raw_items = _read_batch(file)
     except (OSError, json.JSONDecodeError) as e:
-        err_console.print(f"[red]не JSON: {e}[/red]")
+        err_console.print(f"[err]не JSON: {e}[/err]")
         raise typer.Exit(1) from None
     recs, errors = [], []
     for i, item in enumerate(raw_items):
@@ -288,7 +288,7 @@ def records_add(
           f"помилок {len(errors)}")
     if errors and not as_json:
         for bad in errors:
-            err_console.print(f"[yellow]#{bad['index']}: {bad['error']}[/yellow]")
+            err_console.print(f"[warn]#{bad['index']}: {bad['error']}[/warn]")
     if not recs:
         raise typer.Exit(1)
 
@@ -313,7 +313,7 @@ def records_grep(
         _emit(res, True)
         return
     if res.get("error"):
-        err_console.print(f"[red]{res['error']}[/red]")
+        err_console.print(f"[err]{res['error']}[/err]")
         raise typer.Exit(1)
     console.print(f"[bold]{res['total']}[/bold] хітів у {res['cases']} справах")
     for h in res["hits"]:
@@ -336,7 +336,7 @@ def records_show(
     if rid:
         recs = [r for r in recs if r.rid == rid]
         if not recs:
-            err_console.print(f"[red]запису rid={rid} немає[/red]")
+            err_console.print(f"[err]запису rid={rid} немає[/err]")
             raise typer.Exit(1)
     dump = [r.model_dump(mode="json") for r in recs]
     _emit({"key": ref.key, "records": dump}, as_json,

@@ -1183,9 +1183,18 @@ def _sections_payload() -> dict[str, Any]:
             "visible": sec.id in in_use,
             "screens": list(S.screens_of(sec.id)),
         })
+    # 🔴 Знаки їдуть ЗВІДСИ, а не з переліку у фронті. Кнопки навігації будує
+    # браузер, і другий список іконок у ньому розходився б із `brand.yaml`
+    # тихо: додався б екран — і кнопка виявилась би без знака поряд з
+    # оформленими, тобто виглядала б зламаною.
+    from nyshporka.brand import active as _brand
+
+    b = _brand()
     return {"sections": rows, "preset": S.preset_of(active),
             "presets": {n: sorted(s) for n, s in S.PRESETS.items()},
-            "screens": dict(S.SCREENS)}
+            "screens": dict(S.SCREENS),
+            "glyphs": {"screens": dict(b.screen_glyphs),
+                       "sections": dict(b.section_glyphs)}}
 
 
 @op("sections.show", summary="Які частини застосунку ввімкнено", agent=False)

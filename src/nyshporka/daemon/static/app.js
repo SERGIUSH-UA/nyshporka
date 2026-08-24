@@ -311,7 +311,7 @@ const t = (key) => (STRINGS[LANG] && STRINGS[LANG][key]) || STRINGS.uk[key] || k
  * полем `screens` тієї ж відповіді: копія в браузері розходилась би з сервером
  * тихо, і виглядало б це як кнопка, що веде в порожнечу.
  */
-let SECTIONS = { sections: [], screens: {}, presets: {}, preset: null };
+let SECTIONS = { sections: [], screens: {}, presets: {}, preset: null, glyphs: {} };
 
 /** Порядок кнопок у шапці. Екрани, яких тут немає, кнопки не отримують. */
 const NAV_ORDER = ['home', 'sources', 'geog', 'fonds', 'cases', 'newcase',
@@ -347,9 +347,14 @@ async function loadSections() {
 function renderNav() {
   const nav = el('nav');
   if (!nav) return;
+  // Знак приходить із сервера (`brand.yaml`), а не з переліку тут: другий
+  // список іконок у браузері розходився б із джерелом тихо. Знака немає —
+  // кнопка лишається підписом, а не ламається.
+  const glyphs = (SECTIONS.glyphs && SECTIONS.glyphs.screens) || {};
   const bits = NAV_ORDER.filter(screenOn).map((s) => {
     const tail = s === 'jobs' ? '<sup id="jobcount"></sup>' : '';
-    return `<button data-act="nav" data-arg="${s}">${esc(t(NAV_LABEL[s] || s))}</button>${tail}`;
+    const g = glyphs[s] ? `<span class="glyph" aria-hidden="true">${esc(glyphs[s])}</span> ` : '';
+    return `<button data-act="nav" data-arg="${s}">${g}${esc(t(NAV_LABEL[s] || s))}</button>${tail}`;
   });
   nav.innerHTML = bits.join('');
 }
@@ -759,6 +764,9 @@ SCREENS.settings = async () => {
     const label = LANG === 'en' ? s.label_en : s.label;
     const why = LANG === 'en' ? s.why_en : s.why;
     const screens = (s.screens || []).map((x) => esc(t(NAV_LABEL[x] || x))).join(' · ');
+    // Знак секції — той самий, що в переліку `nysh sections`: два обличчя одного
+    // застосунку не мають виглядати як два різні продукти.
+    const g = ((env.data.glyphs || {}).sections || {})[s.id] || '';
     let control;
     if (s.required) {
       control = `<span class="muted">${t('sect.always')}</span>`;
@@ -770,7 +778,7 @@ SCREENS.settings = async () => {
     }
     return `<tr>
       <td>${s.active ? '✅' : (s.visible ? '⬜' : '▫️')}</td>
-      <td><b>${esc(label)}</b><br><span class="muted">${esc(why)}</span>
+      <td><b>${g ? esc(g) + ' ' : ''}${esc(label)}</b><br><span class="muted">${esc(why)}</span>
           ${screens ? `<br><span class="muted mono">${screens}</span>` : ''}</td>
       <td class="num">${s.ops}</td>
       <td>${control}</td>
@@ -1304,6 +1312,10 @@ async function watchJobs() {
       // побудови шапки його ще немає.
       const badge = el('jobcount');
       if (badge) badge.textContent = running.length ? String(running.length) : '';
+      // 🐾 Знак у шапці показує, що робота йде. Саме ПРОЦЕС: результату він не
+      // повідомляє — це справа тексту, який несе знаменник.
+      const paw = document.querySelector('.mark');
+      if (paw) paw.classList.toggle('busy', running.length > 0);
     } catch {
       await new Promise((r) => setTimeout(r, 5000));
     }

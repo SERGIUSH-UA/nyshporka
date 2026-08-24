@@ -1,0 +1,69 @@
+# 🐾 Сайт документації Нишпорки.
+#
+# 🔴 Кольори сайту НЕ описані тут. Вони приходять із `docs/stylesheets/brand.css`,
+# згенерованого з `src/nyshporka/brand/data/brand.yaml` — того самого джерела,
+# з якого беруть тему застосунок і командний рядок. Вписана сюди палітра
+# розійшлася б із ними тихо: сайт виглядав би як окремий продукт.
+#
+#     uv run python -m nyshporka.brand.gen          # переписати згенероване
+#     uv run python -m nyshporka.brand.gen --check  # приймач, він же в CI
+
+site_name: Нишпорка
+site_description: Читає рукопис. Приносить знайдене.
+site_url: https://sergiush-ua.github.io/nyshporka/
+repo_url: https://github.com/SERGIUSH-UA/nyshporka
+repo_name: SERGIUSH-UA/nyshporka
+copyright: AGPL-3.0-or-later
+
+theme:
+  name: material
+  language: uk
+  logo: assets/mark.svg
+  favicon: assets/favicon.svg
+  features:
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+    - search.highlight
+  palette:
+    # Дві теми з перемикачем. Світла перша: сайт відкривають і вдень, і в
+    # читальній залі, а вгадувати за людину, де вона зараз, нема з чого.
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle: {icon: material/weather-night, name: Темна тема}
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle: {icon: material/weather-sunny, name: Світла тема}
+
+# ⚠ `docs/README.md` із сайту виключено явно. MkDocs вважає його синонімом
+# index.md і однаково не публікує, але без цього рядка попереджає про це на
+# кожній збірці — а CI зібрано в `--strict`, де попередження валить прогін.
+# Файл лишається мапою документації для того, хто читає репозиторій із GitHub.
+exclude_docs: |
+  README.md
+
+extra_css:
+  - stylesheets/brand.css
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - tables
+  - toc: {permalink: true}
+  - pymdownx.superfences
+  - pymdownx.details
+  - pymdownx.tabbed: {alternate_style: true}
+
+# ⚠ `docs/README.md` у nav немає навмисно: MkDocs вважає його синонімом
+# index.md і виключає з сайту. Він лишається мапою документації для того,
+# хто читає репозиторій із GitHub, а не із сайту.
+nav:
+  - Нишпорка: index.md
+  - Для агентів:
+      - Перша сесія: agents/first-session.md
+      - Що агент уміє й чого не вміє: agents/surface.md
+      - Як читати відповідь: agents/envelope.md
+      - Конвеєри: agents/workflows.md
+      - Канали пошуку: agents/search-channels.md
+      - Читання під слабку машину: agents/htr-tuning.md
+      - Як агенти вже помилялися: agents/antipatterns.md

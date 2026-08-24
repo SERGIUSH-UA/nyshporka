@@ -61,6 +61,11 @@ jobs:
         run: uv run ruff check .
       - name: mypy
         run: uv run mypy
+      # 🔴 Згенероване з `brand.yaml` протухає ТИХО: кольори правлять у джерелі,
+      # забувають перезібрати — і фронт із сайтом лишаються зі старою палітрою.
+      # Ловиться лише звіркою, і дешевше тут, ніж очима поряд.
+      - name: айдентика не протухла
+        run: uv run python -m nyshporka.brand.gen --check
       - name: pytest
         run: uv run pytest
 

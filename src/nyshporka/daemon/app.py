@@ -92,9 +92,18 @@ def create_app(ws: Workspace | None = None, *, token: str = "") -> FastAPI:
 
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
+    # 🔴 Асети бренду віддаються з `brand/data/assets`, а НЕ копіюються сюди.
+    # Копія знака жила б у двох місцях і розходилась би тихо: у вкладці одна
+    # лапка, у шапці інша. Ті самі файли йдуть у README й на сайт документації.
+    from nyshporka.brand import ASSETS
+
+    app.mount("/brand", StaticFiles(directory=ASSETS), name="brand")
+
     @app.get("/favicon.ico")
     def favicon() -> FileResponse:
-        return FileResponse(static_dir / "favicon.svg", media_type="image/svg+xml")
+        # Ім'я `.ico` лишається історичним: браузери просять саме його, а
+        # віддаємо SVG — він один на всі розміри вкладки.
+        return FileResponse(ASSETS / "favicon.svg", media_type="image/svg+xml")
 
     # ── секції ───────────────────────────────────────────────────────────────
     def active_sections() -> frozenset[str]:
@@ -238,7 +247,14 @@ def serve(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT, *,
         with WorkspaceLock(space.root, port=port).acquire() as held:
             app = create_app(space)
             url = f"http://{host}:{port}/"
-            print(f"Нишпорка: {url}\n  простір: {space.root}")
+            # Старт застосунку — те саме перше враження, що й `nysh info`, тож
+            # знак і лінія бренду тут ті самі. Далі вивід перехоплює uvicorn.
+            from nyshporka import __version__, brand
+
+            out = brand.console()
+            out.print(brand.banner(__version__))
+            out.print(f"  [accent]{url}[/accent]")
+            out.print(f"  [muted]простір: {space.root}[/muted]")
             if open_browser:
                 import threading
                 import webbrowser

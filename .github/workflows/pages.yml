@@ -1,0 +1,57 @@
+# 🐾 Сайт документації → GitHub Pages.
+#
+# Збирається в `--strict`: попередження тут означає биті посилання або сторінку
+# поза навігацією, а на сайті це виглядає як зникла документація. Краще впасти
+# у CI, ніж опублікувати діру.
+name: Сайт
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Одна публікація за раз; чергу не рвемо на півдорозі, щоб на Pages не лишився
+# наполовину викладений сайт.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  build:
+    name: зібрати
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # 🔴 Спершу звірка айдентики. Сайт бере кольори зі згенерованого
+      # `docs/stylesheets/brand.css`; якби той протух, Pages опублікували б
+      # вчорашню палітру, і розбіжність із застосунком побачив би відвідувач,
+      # а не ми.
+      - name: айдентика не протухла
+        run: uv run python -m nyshporka.brand.gen --check
+      - name: зібрати сайт
+        run: uv run --extra docs mkdocs build --strict
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    name: опублікувати
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

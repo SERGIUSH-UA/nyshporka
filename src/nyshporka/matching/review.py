@@ -12,6 +12,7 @@ from rich.panel import Panel
 from rich.prompt import Prompt
 from rich.table import Table
 
+from nyshporka import brand
 from nyshporka.models.candidate import Candidate
 from nyshporka.storage.files import read_person
 
@@ -45,7 +46,7 @@ def review_loop(
     console: Console | None = None,
 ) -> dict[str, int]:
     """Інтерактивно пройти кандидатів. Повертає лічильники по діях."""
-    console = console or Console()
+    console = console or brand.console()
     all_pairs = _load_candidates(root)
     pairs = [
         (p, c)
@@ -54,7 +55,7 @@ def review_loop(
     ]
     counters = {"accepted": 0, "rejected": 0, "skipped": 0, "quit": 0}
     if not pairs:
-        console.print("[yellow]Немає кандидатів для review.[/yellow]")
+        console.print("[warn]Немає кандидатів для review.[/warn]")
         return counters
 
     console.print(f"[bold]До перегляду:[/bold] {len(pairs)} кандидатів")
@@ -92,7 +93,7 @@ def review_loop(
         candidate.reviewed_at = datetime.now(tz=UTC)
         path.write_text(candidate.model_dump_json(indent=2), encoding="utf-8")
 
-    console.print(f"\n[green]Done.[/green] {counters}")
+    console.print(f"\n[ok]Done.[/ok] {counters}")
     return counters
 
 
@@ -101,7 +102,7 @@ def _render_candidate(
 ) -> None:
     extracted = candidate.extracted
     extr_table = Table(title=f"[{idx}/{total}] Кандидат {candidate.id}", show_header=False)
-    extr_table.add_column("ключ", style="dim")
+    extr_table.add_column("ключ", style="muted")
     extr_table.add_column("значення")
     for k in ("surname", "given_name", "patronymic", "birth_year", "birth_place", "father_name"):
         if extracted.get(k):
@@ -118,7 +119,7 @@ def _render_candidate(
             p = read_person(person_path)
             primary = next((n for n in p.names if n.primary), p.names[0])
             t = Table(show_header=False)
-            t.add_column("ключ", style="dim")
+            t.add_column("ключ", style="muted")
             t.add_column("значення")
             t.add_row("id", p.id)
             t.add_row("name", primary.form)
@@ -134,5 +135,5 @@ def _render_candidate(
     for panel in panels:
         console.print(panel)
     console.print(
-        "[dim]Дія: [a]ccept  [r]eject  [s]kip  [n]ote  [o]pen raw  [q]uit[/dim]"
+        "[muted]Дія: [a]ccept  [r]eject  [s]kip  [n]ote  [o]pen raw  [q]uit[/muted]"
     )

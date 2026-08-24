@@ -488,6 +488,41 @@ def add_case_root(path: str | Path) -> Path:
     return p
 
 
+def remove_case_root(path: str | Path) -> bool:
+    """Зняти оголошений корінь справ. `True`, якщо він там був.
+
+    🔴 Зворотна дія обов'язкова саме тому, що пряма — оголошення — робиться
+    одним рухом і легко помиляється: не та тека, тимчасовий диск, флешка
+    колеги. Доки зняти корінь було нічим, єдиним виходом лишалось правити
+    маркер руками — тобто редагувати файл, якого людина не заводила, з ризиком
+    зачепити решту.
+
+    ⚠ Файли не чіпаються ЖОДНІ. Зникає лише видимість: справи з цієї теки
+    випадуть із реєстру після наступної збірки, а самі скани лишаться на місці.
+    """
+    p = Path(path).expanduser()
+    ws = workspace()
+    key = os.path.normcase(str(p))
+    kept = [r for r in ws.extra_case_roots if os.path.normcase(str(r)) != key]
+    if len(kept) == len(ws.extra_case_roots):
+        return False
+
+    marker = ws.marker
+    text = marker.read_text(encoding="utf-8") if marker.is_file() else "[workspace]\n"
+    listed = ", ".join(f'"{str(r).replace(chr(92), "/")}"' for r in kept)
+    # Порожній перелік знімається рядком, а не лишається `[]`: маркер читає
+    # людина, і `case_roots = []` виглядає як налаштування, якого вона не
+    # робила.
+    text = _marker_set(text, "case_roots",
+                       f"case_roots = [{listed}]" if kept else None)
+    marker.write_text(text, encoding="utf-8")
+
+    global _override
+    _override = replace(ws, extra_case_roots=tuple(kept))
+    _cached.cache_clear()
+    return True
+
+
 def _marker_set(text: str, key: str, line: str | None) -> str:
     """Вписати, замінити або зняти рядок `key = …` у тексті маркера.
 

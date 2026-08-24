@@ -1,0 +1,53 @@
+/* ⚠ ЗГЕНЕРОВАНО з `src/nyshporka/brand/data/brand.yaml` — руками не правити.
+   Правка тут живе рівно до наступного `python -m nyshporka.brand.gen`.
+   Змінювати кольори — у brand.yaml; перевіряти — `--check` (він же в CI). */
+
+[data-md-color-scheme="default"] {
+  --md-primary-fg-color: #7a4f2b;
+  --md-primary-bg-color: #fbfaf7;
+  --md-accent-fg-color: #7a4f2b;
+  --md-default-bg-color: #fbfaf7;
+  --md-default-fg-color: #23201c;
+  --md-typeset-color: #23201c;
+  --md-typeset-a-color: #7a4f2b;
+  --md-code-bg-color: #ffffff;
+  --md-footer-bg-color: #ffffff;
+  --bg: #fbfaf7;
+  --fg: #23201c;
+  --muted: #766f66;
+  --line: #e3ded4;
+  --accent: #7a4f2b;
+  --card: #ffffff;
+  --warn-bg: #fff6e0;
+  --warn-fg: #6b4d00;
+  --err: #a32b2b;
+  --ok: #3f6b33;
+  --engine-pysar: #3a4a86;
+  --engine-diak: #2c645c;
+  --engine-skryba: #733f80;
+}
+
+[data-md-color-scheme="slate"] {
+  --md-primary-fg-color: #d3a06a;
+  --md-primary-bg-color: #1b1a18;
+  --md-accent-fg-color: #d3a06a;
+  --md-default-bg-color: #1b1a18;
+  --md-default-fg-color: #e8e3da;
+  --md-typeset-color: #e8e3da;
+  --md-typeset-a-color: #d3a06a;
+  --md-code-bg-color: #232120;
+  --md-footer-bg-color: #232120;
+  --bg: #1b1a18;
+  --fg: #e8e3da;
+  --muted: #9a938a;
+  --line: #34312c;
+  --accent: #d3a06a;
+  --card: #232120;
+  --warn-bg: #3a3320;
+  --warn-fg: #f0d79a;
+  --err: #ff8a8a;
+  --ok: #8fc47a;
+  --engine-pysar: #9db4e0;
+  --engine-diak: #79c7b9;
+  --engine-skryba: #c9a0d9;
+}

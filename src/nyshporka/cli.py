@@ -12,17 +12,20 @@ from pathlib import Path
 from typing import Any
 
 import typer
-from rich.console import Console
 
-from nyshporka import __version__
+from nyshporka import __version__, brand
 
 app = typer.Typer(
     name="nysh",
-    help="Нишпорка — читання рукописних архівних справ і пошук прізвища в них.",
+    # Назва й лінія бренду беруться з `brand.yaml`, а не набрані тут: `--help`
+    # — така сама поверхня, як шапка застосунку, і другий примірник тексту
+    # розійшовся б із рештою тихо.
+    help=f"{brand.active().name_uk} — {brand.active().line_uk} "
+         "Читання рукописних архівних справ і пошук прізвища в них.",
     no_args_is_help=True,
     add_completion=False,
 )
-console = Console()
+console = brand.console()
 
 
 @app.callback()
@@ -54,7 +57,7 @@ def _global_options(
     try:
         use(workspace)
     except WorkspaceError as exc:
-        console.print(f"[red]{exc}[/red]")
+        console.print(f"[err]{exc}[/err]")
         raise typer.Exit(code=2) from None
 
 
@@ -80,8 +83,8 @@ def _need(section: str) -> None:
         return
     sec = S.get(section)
     console.print(
-        f"[red]секція «{sec.label() if sec else section}» вимкнена у профілі "
-        f"простору.[/red]\n  увімкнути: [bold]nysh sections enable {section}[/bold]")
+        f"[err]секція «{sec.label() if sec else section}» вимкнена у профілі "
+        f"простору.[/err]\n  увімкнути: [bold]nysh sections enable {section}[/bold]")
     raise typer.Exit(code=1)
 
 
@@ -94,7 +97,11 @@ def version() -> None:
 @app.command()
 def info() -> None:
     """Стан установки: що вже є, чого ще немає."""
-    console.print(f"[bold]Нишпорка[/bold] {__version__}")
+    # 🐾 Знак друкується ТУТ і лише тут. У `version` його немає навмисно: той
+    # вивід парсять — і три рядки прикраси зламали б кожен `$(nysh version)`.
+    # У робочих командах теж немає: їхній вивід читає агент, і банер коштував
+    # би контексту на кожному виклику.
+    console.print(brand.banner(__version__))
     console.print(f"  python  {platform.python_version()} ({sys.platform})")
 
     # Важкі extras перевіряються НАЯВНІСТЮ, а не імпортом у момент старту:
@@ -112,8 +119,8 @@ def info() -> None:
         # розмітка, і порада перетворюється на «pip install nyshporka», тобто
         # рівно ту команду, яка extra НЕ ставить. Порада, що не працює, гірша
         # за відсутню: користувач виконує її і бачить той самий стан.
-        mark = ("[green]є[/green]" if have
-                else rf"[dim]немає — pip install 'nyshporka\[{extra}]'[/dim]")
+        mark = ("[ok]є[/ok]" if have
+                else rf"[muted]немає — pip install 'nyshporka\[{extra}]'[/muted]")
         console.print(f"  {label:8s} {mark}")
 
 
@@ -125,11 +132,11 @@ def sources() -> None:
     for src in reg.all():
         caps = ", ".join(sorted(src.caps)) or "—"
         console.print(f"  [bold]{src.id:<10}[/bold] {src.label}")
-        console.print(f"  {'':<10} [dim]уміє: {caps}[/dim]")
+        console.print(f"  {'':<10} [muted]уміє: {caps}[/muted]")
     # 🔴 Зламані плагіни називаються поіменно: «мого архіву немає в списку»
     # інакше не має пояснення, і людина шукатиме причину в своїх налаштуваннях.
     for name, why in reg.broken:
-        console.print(f"  [red]✗ {name}[/red] [dim]{why}[/dim]")
+        console.print(f"  [err]✗ {name}[/err] [muted]{why}[/muted]")
 
 
 @app.command()
@@ -138,18 +145,18 @@ def look(path: str = typer.Argument(..., help="тека зі сканами, PDF
     from nyshporka.sources.local import LocalSource, inspect
 
     shape = inspect(path)
-    mark = "[green]✓[/green]" if shape.usable else "[yellow]![/yellow]"
+    mark = "[ok]✓[/ok]" if shape.usable else "[warn]![/warn]"
     console.print(f"{mark} {shape.explain()}")
     if shape.kind == "cases":
         for node in shape.cases:
-            console.print(f"    [dim]{node.frames:>6} кадрів[/dim]  {node.label}")
-        console.print("\n[dim]Оберіть одну зі справ вище або поставте всі в чергу.[/dim]")
+            console.print(f"    [muted]{node.frames:>6} кадрів[/muted]  {node.label}")
+        console.print("\n[muted]Оберіть одну зі справ вище або поставте всі в чергу.[/muted]")
         raise typer.Exit(code=1)
     if not shape.usable:
         raise typer.Exit(code=1)
     m = LocalSource().manifest(str(shape.path))
     if m.bytes_estimate:
-        console.print(f"  [dim]обсяг: {m.bytes_estimate / 1024 / 1024:.0f} МБ[/dim]")
+        console.print(f"  [muted]обсяг: {m.bytes_estimate / 1024 / 1024:.0f} МБ[/muted]")
 
 
 def _sources_registry() -> Any:
@@ -166,7 +173,7 @@ def _pick(source_id: str) -> Any:
     reg = _sources_registry()
     src = reg.get(source_id)
     if src is None:
-        console.print(f"[red]немає джерела «{source_id}»[/red] — є: "
+        console.print(f"[err]немає джерела «{source_id}»[/err] — є: "
                       + ", ".join(s.id for s in reg.all()))
         raise typer.Exit(code=2)
     return src
@@ -181,14 +188,14 @@ def find(q: str = typer.Argument(..., help="село, прізвище чи сл
 
     env = O.call("catalog.search", {"q": q, "source": source, "limit": limit})
     if not env.ok:
-        console.print(f"[red]{env.error}[/red]")
+        console.print(f"[err]{env.error}[/err]")
         raise typer.Exit(code=1)
     hits = env.data.get("hits") or []
     for h in hits:
         head = " · ".join(x for x in (h.get("shifra"), h.get("years")) if x)
         console.print(f"  [bold]{h['source']}[/bold]  {h['title']}")
-        console.print(f"  {'':<{len(h['source'])}}  [dim]{head}[/dim]")
-        console.print(f"  {'':<{len(h['source'])}}  [dim]{h['ref']}[/dim]")
+        console.print(f"  {'':<{len(h['source'])}}  [muted]{head}[/muted]")
+        console.print(f"  {'':<{len(h['source'])}}  [muted]{h['ref']}[/muted]")
     cov = env.data.get("coverage") or {}
     # 🔴 Знаменник друкується ЗАВЖДИ, і найважливіший він саме тоді, коли
     # знахідок нуль: без нього «нічого не знайшлось» читається як «цього не
@@ -196,14 +203,14 @@ def find(q: str = typer.Argument(..., help="село, прізвище чи сл
     basis = "; ".join(
         f"{b['source']}: {b['kind']}" + (f" від {b['taken']}" if b.get("taken") else "")
         for b in (cov.get("basis") or []))
-    console.print(f"\n[dim]знайдено {len(hits)} · шукали в: "
+    console.print(f"\n[muted]знайдено {len(hits)} · шукали в: "
                   f"{', '.join(cov.get('searched') or []) or '—'}"
-                  + (f" ({basis})" if basis else "") + "[/dim]")
+                  + (f" ({basis})" if basis else "") + "[/muted]")
     # 🔴 ВСІ попередження конверта, а не лише про недоступні джерела. Саме тут
     # їде різниця між «не знайшлось» і «не знайшлось у зрізі піврічної давнини»,
     # і показувати її вибірково — те саме, що не показувати.
     for w in env.warnings:
-        console.print(f"[yellow]⚠[/yellow] [dim]{w.text}[/dim]")
+        console.print(f"[warn]⚠[/warn] [muted]{w.text}[/muted]")
 
 
 @app.command()
@@ -217,14 +224,14 @@ def browse(source: str = typer.Argument(..., help="id джерела (`nysh sour
     try:
         nodes = src.browse(ref or None)
     except SourceError as exc:
-        console.print(f"[red]{exc}[/red]")
+        console.print(f"[err]{exc}[/err]")
         raise typer.Exit(code=1) from None
     for n in nodes:
         frames = f"{n.frames:>7} кадрів" if n.frames else " " * 14
         mark = "📄" if n.kind == "case" else "📁"
         console.print(f"  {mark} {frames}  {n.label}")
-        console.print(f"     [dim]{n.ref}[/dim]")
-    console.print(f"\n[dim]{len(nodes)} вузлів[/dim]")
+        console.print(f"     [muted]{n.ref}[/muted]")
+    console.print(f"\n[muted]{len(nodes)} вузлів[/muted]")
 
 
 @app.command()
@@ -249,19 +256,19 @@ def get(source: str = typer.Argument(..., help="id джерела"),
             a, _, b = frames.partition("-")
             rng = (int(a), int(b or a))
         except ValueError:
-            console.print("[red]--frames очікує «12-80»[/red]")
+            console.print("[err]--frames очікує «12-80»[/err]")
             raise typer.Exit(code=2) from None
     try:
         man = src.manifest(ref)
     except SourceError as exc:
-        console.print(f"[red]{exc}[/red]")
+        console.print(f"[err]{exc}[/err]")
         raise typer.Exit(code=1) from None
     console.print(f"[bold]{man.title or ref}[/bold] — кадрів {man.frames}"
                   + (f", беремо {rng[0]}-{rng[1]}" if rng else ""))
     for s in man.sheets[:12]:
-        console.print(f"  [dim]Л.{s.frm}-{s.to}  {s.label[:80]}[/dim]")
+        console.print(f"  [muted]Л.{s.frm}-{s.to}  {s.label[:80]}[/muted]")
     if len(man.sheets) > 12:
-        console.print(f"  [dim]…ще {len(man.sheets) - 12} записів покажчика[/dim]")
+        console.print(f"  [muted]…ще {len(man.sheets) - 12} записів покажчика[/muted]")
 
     state = {"last": -1}
 
@@ -269,13 +276,13 @@ def get(source: str = typer.Argument(..., help="id джерела"),
         pct = int(done * 100 / total) if total else 0
         if pct != state["last"]:
             state["last"] = pct
-            console.print(f"  [dim]{done}/{total} ({pct}%)[/dim]", end="\r")
+            console.print(f"  [muted]{done}/{total} ({pct}%)[/muted]", end="\r")
 
     res = src.fetch(ref, out, frames=rng, on_progress=progress)
     console.print(f"\n✓ {res.frames} кадрів ({res.bytes / 1024 / 1024:.0f} МБ), "
                   f"пропущено {res.skipped} → {res.dest}")
     for e in res.errors[:5]:
-        console.print(f"[yellow]⚠ {e}[/yellow]")
+        console.print(f"[warn]⚠ {e}[/warn]")
     if res.errors:
         raise typer.Exit(code=1)
 
@@ -295,12 +302,12 @@ def crawl(source: str = typer.Argument("archium", help="id джерела"),
     _need("material")
     src = _pick(source)
     if not hasattr(src, "crawl"):
-        console.print(f"[yellow]джерело «{source}» не потребує обходу — "
-                      f"його каталог доступний одразу[/yellow]")
+        console.print(f"[warn]джерело «{source}» не потребує обходу — "
+                      f"його каталог доступний одразу[/warn]")
         raise typer.Exit(code=0)
 
     def progress(done: int = 0, total: int = 0, note: str = "", **_: Any) -> None:
-        console.print(f"  [dim]{done}/{total} фондів · {note}[/dim]", end="\r")
+        console.print(f"  [muted]{done}/{total} фондів · {note}[/muted]", end="\r")
 
     stats = src.crawl(tuple(g.strip() for g in groups.split(",") if g.strip()) or None,
                       on_progress=progress, resume=not fresh)
@@ -327,22 +334,22 @@ def init(
     from nyshporka.setup import wizard
 
     if preset and preset not in S.PRESETS:
-        console.print(f"[red]невідомий пресет «{preset}»[/red]")
-        console.print(f"[dim]є: {', '.join(sorted(S.PRESETS))}[/dim]")
+        console.print(f"[err]невідомий пресет «{preset}»[/err]")
+        console.print(f"[muted]є: {', '.join(sorted(S.PRESETS))}[/muted]")
         raise typer.Exit(code=2)
     try:
         p = wizard.plan(path or None)
     except WorkspaceError as exc:
-        console.print(f"[red]{exc}[/red]")
+        console.print(f"[err]{exc}[/err]")
         raise typer.Exit(code=2) from None
     # 🔴 Не лише КУДИ, а й ЧОМУ туди. `nysh init --yes` в інсталяторі не питає
     # нічого, тож цей рядок — єдине місце, де людина може помітити, що шлях
     # узявся не звідти, звідки вона думала.
     console.print(f"Простір: [bold]{p.root}[/bold]"
-                  + f"  [dim]({wizard.origin_phrase(p.origin)})[/dim]"
-                  + ("" if p.creating else "  [dim](уже існує)[/dim]"))
+                  + f"  [muted]({wizard.origin_phrase(p.origin)})[/muted]"
+                  + ("" if p.creating else "  [muted](уже існує)[/muted]"))
     if p.warning:
-        console.print(f"[yellow]⚠ {p.warning}[/yellow]")
+        console.print(f"[warn]⚠ {p.warning}[/warn]")
     if p.creating and not yes and not typer.confirm("Створити?", default=True):
         raise typer.Exit(code=1)
 
@@ -357,17 +364,17 @@ def init(
             names = ", ".join(
                 s.label() for s in S.all_sections()
                 if s.id in S.PRESETS[pid] and not s.required)
-            console.print(f"  [bold]{pid}[/bold] [dim]— {names}[/dim]")
+            console.print(f"  [bold]{pid}[/bold] [muted]— {names}[/muted]")
         preset = typer.prompt("Набір", default=S.DEFAULT_PRESET)
         while preset not in S.PRESETS:
-            console.print(f"[yellow]є: {', '.join(sorted(S.PRESETS))}[/yellow]")
+            console.print(f"[warn]є: {', '.join(sorted(S.PRESETS))}[/warn]")
             preset = typer.prompt("Набір", default=S.DEFAULT_PRESET)
 
     root = wizard.create(p.root, name=name, preset=preset)
     console.print(f"✅ готово: {root}")
     if preset:
-        console.print(f"[dim]частини: {preset} · змінити — `nysh sections`[/dim]")
-    console.print("[dim]далі: `nysh look <тека зі сканами>` або `nysh serve`[/dim]")
+        console.print(f"[muted]частини: {preset} · змінити — `nysh sections`[/muted]")
+    console.print("[muted]далі: `nysh look <тека зі сканами>` або `nysh serve`[/muted]")
 
 
 @app.command()
@@ -387,7 +394,7 @@ def doctor(
     for c in checks:
         console.print(f"{c.mark} [bold]{c.name}[/bold]  {c.detail}")
         if c.fix and c.level != "ok":
-            console.print(f"   [dim]{c.fix}[/dim]")
+            console.print(f"   [muted]{c.fix}[/muted]")
     bad = [c for c in checks if c.level == "fail"]
     raise typer.Exit(code=1 if bad else 0)
 
@@ -410,10 +417,10 @@ def sample(
     try:
         got = S.install(workspace(), force=force)
     except WorkspaceError:
-        console.print("[red]простору ще немає[/red] — спершу `nysh init`")
+        console.print("[err]простору ще немає[/err] — спершу `nysh init`")
         raise typer.Exit(code=1) from None
     except FileNotFoundError as exc:
-        console.print(f"[red]{exc}[/red]")
+        console.print(f"[err]{exc}[/err]")
         raise typer.Exit(code=1) from None
     if as_json:
         console.print_json(data=got)
@@ -423,8 +430,8 @@ def sample(
     console.print(f"   тека: {got['case_dir']}")
     for run in got["runs"]:
         console.print(f"   декод: {run}")
-    console.print("[dim]далі: `nysh serve` → «Гортач», або "
-                  "`nysh find Липовеньке`[/dim]")
+    console.print("[muted]далі: `nysh serve` → «Гортач», або "
+                  "`nysh find Липовеньке`[/muted]")
 
 
 @app.command()
@@ -470,19 +477,19 @@ def read(
         p = make_plan(case_dir, out_dir=out, script=script,
                       second_voice=not one_voice)
     except ReadError as exc:
-        console.print(f"[red]{exc}[/red]")
+        console.print(f"[err]{exc}[/err]")
         raise typer.Exit(code=1) from None
 
     console.print(f"[bold]{p.case_dir.name}[/bold] — {p.frames} кадрів · "
                   f"письмо {p.script} · {p.model.name}"
                   + (f" + {p.voice.name}" if p.voice else ""))
-    console.print(f"  [dim]{p.out_dir}[/dim]")
+    console.print(f"  [muted]{p.out_dir}[/muted]")
     if shard and not gpu_lock:
         # ⚠ Не відмова, а попередження: шардинг без спільного лока працює, доки
         # карта витримує кілька одночасних сегментацій. Щойно не витримає —
         # прогін не сповільниться, а завалиться, і причина буде невидима.
-        console.print("[yellow]⚠ --shard без --gpu-lock: процеси змагатимуться "
-                      "за карту. Дайте всім шардам ОДИН файл-лок[/yellow]")
+        console.print("[warn]⚠ --shard без --gpu-lock: процеси змагатимуться "
+                      "за карту. Дайте всім шардам ОДИН файл-лок[/warn]")
     # 🔴 Шифру беремо з бібліотеки САМІ, якщо її не дали. Раннер уміє
     # `--case-key` давно, але покладатись на те, що людина його щоразу набере,
     # виявилось помилкою: замір 2026-08-19 по 909 прогонах — ключ мали СІМ.
@@ -496,14 +503,14 @@ def read(
         except Exception:
             case_key = ""
         if case_key:
-            console.print(f"  [dim]шифра: {case_key}[/dim]")
+            console.print(f"  [muted]шифра: {case_key}[/muted]")
         else:
-            console.print("  [yellow]шифри немає: бібліотека цієї теки не знає — "
-                          "прив'язка триматиметься на імені прогону[/yellow]")
+            console.print("  [warn]шифри немає: бібліотека цієї теки не знає — "
+                          "прив'язка триматиметься на імені прогону[/warn]")
     cmd = p.command(case_key=case_key, limit=limit, pages=pages, shard=shard,
                     gpu_lock=gpu_lock, gpu_sato=gpu_sato, seg_height=seg_height)
     if dry:
-        console.print("  [dim]" + " ".join(cmd) + "[/dim]")
+        console.print("  [muted]" + " ".join(cmd) + "[/muted]")
         return
 
     p.out_dir.mkdir(parents=True, exist_ok=True)
@@ -514,10 +521,10 @@ def read(
     for line in proc.stdout:
         ev, human = split(line.rstrip())
         if ev is not None and ev.n:
-            console.print(f"  [dim]{ev.i}/{ev.n} ({ev.pct:.0f}%) {ev.item}[/dim]",
+            console.print(f"  [muted]{ev.i}/{ev.n} ({ev.pct:.0f}%) {ev.item}[/muted]",
                           end="\r")
         elif human:
-            console.print(f"  [dim]{human}[/dim]")
+            console.print(f"  [muted]{human}[/muted]")
     rc = proc.wait()
 
     # 🔴 Приймач повноти — ДИСК, а не код повернення: при шардингу тиха втрата
@@ -550,29 +557,40 @@ def case_cmd(
     year_to: int = typer.Option(0, "--to", help="рік кінця"),
     place: str = typer.Option("", "--place", help="село, повіт, губернія"),
     note: str = typer.Option("", "--note"),
+    adopt: bool = typer.Option(False, "--adopt",
+                               help="взяти теку під облік, якщо вона лежить "
+                                    "ПОЗА простором"),
 ) -> None:
     """Завести або виправити справу: сказати, ЩО лежить у цій теці.
 
     🔴 Без шифри тека лишається купою файлів — ні ключа, ні обліку, ні
     можливості послатись на знахідку.
+
+    ⚠ Тека ПОЗА простором лишається невидимою в переліках: обхід іде по
+    `data/raw` і по оголошених коренях справ. `--adopt` оголошує цю теку
+    коренем у `nyshporka.toml` — файли при цьому не переносяться. Прапорця
+    тут довго не було, хоч операція поле мала: єдиним шляхом з командного
+    рядка лишався `nysh op case.register --args …`, тобто найпотрібніша
+    новачкові дія була доступна найнезручнішим входом.
     """
     from nyshporka import ops as O
 
     env = O.call("case.register", {
         "case_dir": case_dir, "shifra": shifra, "title": title,
         "doc_type": doc_type, "place": place, "note": note,
-        "year_from": year_from or None, "year_to": year_to or None})
+        "year_from": year_from or None, "year_to": year_to or None,
+        "adopt": adopt})
     if not env.ok:
-        console.print(f"[red]{env.error}[/red]")
+        console.print(f"[err]{env.error}[/err]")
         raise typer.Exit(code=1)
     sc = env.data["sidecar"]
     console.print(f"✅ [bold]{sc['shifra']}[/bold] — {sc.get('title') or 'без назви'}")
     if sc.get("year_from") or sc.get("place"):
-        console.print(f"   [dim]{sc.get('place') or ''} "
+        console.print(f"   [muted]{sc.get('place') or ''} "
                       f"{sc.get('year_from') or ''}"
-                      f"{'-' + str(sc['year_to']) if sc.get('year_to') else ''}[/dim]")
+                      f"{'-' + str(sc['year_to']) if sc.get('year_to') else ''}[/muted]")
     for w in env.warnings:
-        console.print(f"[yellow]⚠[/yellow] [dim]{w.text}[/dim]")
+        console.print(f"[warn]⚠[/warn] [muted]{w.text}[/muted]")
 
 
 @app.command("archive")
@@ -591,7 +609,7 @@ def archive_cmd(
 
     env = O.call("archive.fond", {"repo": repo, "fond": fond})
     if not env.ok:
-        console.print(f"[red]{env.error}[/red]")
+        console.print(f"[err]{env.error}[/err]")
         raise typer.Exit(code=1)
     if as_json:
         console.print_json(data=env.data)
@@ -603,9 +621,9 @@ def archive_cmd(
                   f"{'ТАК' if d.get('opys_in_key') else 'ні'} · опис за "
                   f"замовчуванням: {d.get('default_opys') or '—'}")
     if d.get("note"):
-        console.print(f"  [dim]{d['note']}[/dim]")
+        console.print(f"  [muted]{d['note']}[/muted]")
     for w in env.warnings:
-        console.print(f"[yellow]⚠[/yellow] [dim]{w.text}[/dim]")
+        console.print(f"[warn]⚠[/warn] [muted]{w.text}[/muted]")
 
 
 @app.command("profile")
@@ -620,16 +638,16 @@ def profile_cmd(as_json: bool = typer.Option(False, "--json")) -> None:
 
     env = O.call("profile.show", {})
     if not env.ok:
-        console.print(f"[red]{env.error}[/red]")
+        console.print(f"[err]{env.error}[/err]")
         for w in env.warnings:
-            console.print(f"[yellow]⚠[/yellow] [dim]{w.text}[/dim]")
+            console.print(f"[warn]⚠[/warn] [muted]{w.text}[/muted]")
         raise typer.Exit(code=1)
     if as_json:
         console.print_json(data=env.data)
         return
     d = env.data
     console.print(f"[bold]{d.get('display') or d.get('name')}[/bold] "
-                  f"[dim]парадигма {d.get('paradigm') or '—'}[/dim]")
+                  f"[muted]парадигма {d.get('paradigm') or '—'}[/muted]")
     console.print(f"  корені: {', '.join(d.get('roots') or []) or '—'}")
     console.print(f"  форми: {len(d.get('spellings') or [])} · "
                   f"самоперевірка: {d.get('selftest_mode')}")
@@ -665,7 +683,7 @@ def search_cmd(
                                 "context": context, "thresh": thresh,
                                 "limit": limit})
     if not env.ok:
-        console.print(f"[red]{env.error}[/red]")
+        console.print(f"[err]{env.error}[/err]")
         raise typer.Exit(code=1)
     if as_json:
         console.print_json(data=env.data)
@@ -675,20 +693,20 @@ def search_cmd(
         head = f"{h.get('name')} · {h.get('page')} · рядок {h.get('line_no')}"
         console.print(f"[bold]{h.get('score')}[/bold]  {head}")
         for b in (h.get("context") or {}).get("before") or []:
-            console.print(f"      [dim]↑ {b}[/dim]")
-        console.print(f"    [yellow]»[/yellow] {h.get('line')}")
+            console.print(f"      [muted]↑ {b}[/muted]")
+        console.print(f"    [warn]»[/warn] {h.get('line')}")
         for a in (h.get("context") or {}).get("after") or []:
-            console.print(f"      [dim]↓ {a}[/dim]")
+            console.print(f"      [muted]↓ {a}[/muted]")
         if h.get("alt"):
-            console.print(f"      [cyan]2-й голос:[/cyan] [dim]{h['alt']['line']}[/dim]")
+            console.print(f"      [accent]2-й голос:[/accent] [muted]{h['alt']['line']}[/muted]")
     # 🔴 Знаменник друкується ЗАВЖДИ, і найважливіший він саме при нулі:
     # без нього «не знайшлось» читається як «цього не існує».
     for w in env.warnings:
-        console.print(f"[yellow]⚠[/yellow] [dim]{w.text}[/dim]")
-    console.print(f"[dim]показано {len(hits)} із {env.data.get('total', len(hits))}[/dim]")
+        console.print(f"[warn]⚠[/warn] [muted]{w.text}[/muted]")
+    console.print(f"[muted]показано {len(hits)} із {env.data.get('total', len(hits))}[/muted]")
     if hits:
-        console.print("[dim]подивитись оком: гортач у `nysh serve` — і брати "
-                      "line_index, не line_no[/dim]")
+        console.print("[muted]подивитись оком: гортач у `nysh serve` — і брати "
+                      "line_index, не line_no[/muted]")
 
 
 @app.command("review")
@@ -756,7 +774,7 @@ def cases_build(
 
         entries = build_library()
         write_library(entries)
-        console.print(f"[dim]бібліотеку перезібрано: {len(entries)} справ[/dim]")
+        console.print(f"[muted]бібліотеку перезібрано: {len(entries)} справ[/muted]")
     res = db.build_index()
     console.print(f"✅ реєстр: [bold]{res['cases']}[/bold] справ · "
                   f"нерозв'язаних прогонів: {res.get('orphans', 0)} · {res['path']}")
@@ -777,7 +795,7 @@ def cases_list_cmd(
     env = O.call("cases.list", {"q": q, "repo": repo, "year": year,
                                 "kind": kind, "limit": limit})
     if not env.ok:
-        console.print(f"[red]{env.error}[/red]")
+        console.print(f"[err]{env.error}[/err]")
         raise typer.Exit(code=1)
     from rich.table import Table as _T
 
@@ -786,13 +804,13 @@ def cases_list_cmd(
         t.add_column(col, max_width=44, no_wrap=True, overflow="ellipsis")
     for r in env.data.get("cases") or []:
         t.add_row(r.get("shifra") or r.get("key") or "",
-                  (r.get("title") or "[dim]без назви[/dim]")[:60],
+                  (r.get("title") or "[muted]без назви[/muted]")[:60],
                   str(r.get("frames") or 0),
                   r.get("htr_stage") or "—")
     console.print(t)
     if env.stale and env.stale.is_stale:
-        console.print(f"[yellow]⚠ зріз застарів[/yellow] [dim]"
-                      f"{'; '.join(env.stale.reasons[:2])} — nysh cases build[/dim]")
+        console.print(f"[warn]⚠ зріз застарів[/warn] [muted]"
+                      f"{'; '.join(env.stale.reasons[:2])} — nysh cases build[/muted]")
 
 
 @cases_app.command("bind")
@@ -810,12 +828,91 @@ def cases_bind_cmd(
 
     env = O.call("cases.bind", {"run": run, "key": key, "why": why})
     if not env.ok:
-        console.print(f"[red]{env.error}[/red]")
+        console.print(f"[err]{env.error}[/err]")
         raise typer.Exit(code=1)
     console.print(f"✅ {env.data['run']} → {env.data['key']}")
     for w in env.warnings:
-        console.print(f"[yellow]⚠ {w.text}[/yellow]")
-    console.print("[dim]реєстр треба перезібрати: nysh cases build[/dim]")
+        console.print(f"[warn]⚠ {w.text}[/warn]")
+    console.print("[muted]реєстр треба перезібрати: nysh cases build[/muted]")
+
+
+# 🗂 Корені справ — теки зі сканами ПОЗА простором. Оголошення робилось лише
+# побічним ефектом заведення справи (`nysh case --adopt`), а воно вимагає
+# шифри — тобто накрити теку-контейнер із десятками книг було нічим: шифра на
+# контейнер злила б їх в одну справу. Лишалось правити `nyshporka.toml` руками,
+# а це файл, якого людина не заводила.
+roots_app = typer.Typer(help="Теки зі сканами, що лежать поза простором.",
+                        no_args_is_help=True)
+app.add_typer(roots_app, name="roots")
+
+
+@roots_app.command("list")
+def roots_list_cmd() -> None:
+    """Де застосунок шукає справи — і що з цього оголошено руками."""
+    from nyshporka.core.workspace import WorkspaceError, workspace
+
+    try:
+        ws = workspace()
+    except WorkspaceError as exc:
+        console.print(f"[err]{exc}[/err]")
+        raise typer.Exit(code=2) from None
+
+    # 🔴 Перелік будується з ОГОЛОШЕНОГО, а не з `case_roots()`: той віддає лише
+    # теки, які зараз існують. Зовнішній диск від'єднують — і корінь мовчки
+    # зникає з переліку разом зі справами, тобто рівно там, де людині потрібна
+    # причина, вона бачить порожнє місце й читає це як поламку застосунку.
+    rows = [(ws.raw, "простір"), *((p, "оголошено") for p in ws.extra_case_roots)]
+    for path, origin in rows:
+        gone = "" if path.is_dir() else "  [warn]← теки немає[/warn]"
+        console.print(f"  [muted]{origin}[/muted]  {path}{gone}")
+    console.print(f"[muted]усього {len(rows)} · "
+                  f"додати — nysh roots add <тека>[/muted]")
+
+
+@roots_app.command("add")
+def roots_add_cmd(
+    path: str = typer.Argument(..., help="тека зі сканами: справа або контейнер справ"),
+) -> None:
+    """Оголосити теку зі сканами — обхід бачитиме її ТАМ, ДЕ ВОНА ЛЕЖИТЬ.
+
+    🔴 Файли не переносяться й не копіюються. Оголошення явне й записується в
+    маркер простору, бо це розширення зони, у якій застосунок дозволяє собі
+    читати диск, — і переїжджає воно разом із простором.
+
+    ⚠ Шифра тут, на відміну від `nysh case --adopt`, не потрібна: контейнер із
+    десятками книг справою не є, і дати йому шифру означало б оголосити їх
+    однією справою.
+    """
+    from nyshporka.core.workspace import WorkspaceError, add_case_root
+
+    try:
+        root = add_case_root(path)
+    except WorkspaceError as exc:
+        console.print(f"[err]{exc}[/err]")
+        raise typer.Exit(code=2) from None
+    console.print(f"✅ корінь справ: [bold]{root}[/bold]")
+    console.print("[muted]далі: `nysh cases build`, потім `nysh cases list`[/muted]")
+
+
+@roots_app.command("remove")
+def roots_remove_cmd(
+    path: str = typer.Argument(..., help="оголошений корінь — як у `nysh roots list`"),
+) -> None:
+    """Зняти оголошений корінь. Скани лишаються на місці."""
+    from nyshporka.core.workspace import WorkspaceError, remove_case_root
+
+    try:
+        gone = remove_case_root(path)
+    except WorkspaceError as exc:
+        console.print(f"[err]{exc}[/err]")
+        raise typer.Exit(code=2) from None
+    if not gone:
+        console.print("[warn]![/warn] такого кореня не оголошено "
+                      "[muted](перелік — nysh roots list)[/muted]")
+        raise typer.Exit(code=1)
+    console.print(f"✅ знято: {path}")
+    console.print("[muted]файли не чіпались; справи з цієї теки зникнуть із "
+                  "реєстру після `nysh cases build`[/muted]")
 
 
 pages_app = typer.Typer(help="Облік переглянутого оком.", no_args_is_help=True)
@@ -832,7 +929,7 @@ def pages_status_cmd(
 
     env = O.call("pages.status", {"case": case})
     if not env.ok:
-        console.print(f"[red]{env.error}[/red]")
+        console.print(f"[err]{env.error}[/err]")
         raise typer.Exit(code=1)
     if as_json:
         console.print_json(data=env.data)
@@ -842,7 +939,7 @@ def pages_status_cmd(
     console.print(f"  на диску: {d.get('total_disk', 0)} · анотовано: {d['noted']} "
                   f"· записів: {d['records']} · статуси: {d.get('by_status') or {}}")
     if d.get("unnoted_count"):
-        console.print(f"  [yellow]необроблених: {d['unnoted_count']}[/yellow]")
+        console.print(f"  [warn]необроблених: {d['unnoted_count']}[/warn]")
 
 
 @pages_app.command("note")
@@ -871,11 +968,11 @@ def pages_note_cmd(
         "surnames": surnames, "places": places, "years": years, "sheet": sheet,
         "status": status, "method": method, "comment": comment})
     if not env.ok:
-        console.print(f"[red]{env.error}[/red]")
+        console.print(f"[err]{env.error}[/err]")
         raise typer.Exit(code=1)
     console.print(f"✅ {env.data['shifra']} {scan}")
     for w in env.warnings:
-        console.print(f"[yellow]⚠[/yellow] [dim]{w.text}[/dim]")
+        console.print(f"[warn]⚠[/warn] [muted]{w.text}[/muted]")
 
 
 @pages_app.command("grep")
@@ -890,7 +987,7 @@ def pages_grep_cmd(
 
     env = O.call("search.run", {"q": q, "where": where, "case": case, "limit": limit})
     if not env.ok:
-        console.print(f"[red]{env.error}[/red]")
+        console.print(f"[err]{env.error}[/err]")
         raise typer.Exit(code=1)
     for h in (env.data.get("hits") or [])[:limit]:
         # 🔴 `matched` — найцінніше в знахідці, і саме його друкувалка й губила:
@@ -902,9 +999,9 @@ def pages_grep_cmd(
         console.print(f"  [bold]{h.get('case') or h.get('shifra') or h.get('key') or ''}"
                       f"[/bold] {h.get('scan') or h.get('page') or ''}  "
                       f"{what[:80]}"
-                      + (f" [dim]{score}[/dim]" if score is not None else ""))
+                      + (f" [muted]{score}[/muted]" if score is not None else ""))
     for w in env.warnings:
-        console.print(f"[yellow]⚠[/yellow] [dim]{w.text}[/dim]")
+        console.print(f"[warn]⚠[/warn] [muted]{w.text}[/muted]")
 
 
 records_app = typer.Typer(help="Розібрані записи джерела: хто, коли, чиї.",
@@ -930,13 +1027,13 @@ def records_add_cmd(
                else Path(from_json).read_text(encoding="utf-8"))
     env = O.call("records.add", {"case": case, "records": payload})
     if not env.ok:
-        console.print(f"[red]{env.error}[/red]")
+        console.print(f"[err]{env.error}[/err]")
         raise typer.Exit(code=1)
     d = env.data
     console.print(f"✅ [bold]{d.get('shifra') or d.get('case')}[/bold] "
                   f"додано: {d.get('added', 0)} · оновлено: {d.get('updated', 0)}")
     for w in env.warnings:
-        console.print(f"[yellow]⚠[/yellow] [dim]{w.text}[/dim]")
+        console.print(f"[warn]⚠[/warn] [muted]{w.text}[/muted]")
 
 
 @records_app.command("grep")
@@ -964,7 +1061,7 @@ def htr_env_cmd(as_json: bool = typer.Option(False, "--json")) -> None:
 
     env = O.call("htr.env", {})
     if not env.ok:
-        console.print(f"[red]{env.error}[/red]")
+        console.print(f"[err]{env.error}[/err]")
         raise typer.Exit(code=1)
     if as_json:
         console.print_json(data=env.data)
@@ -974,7 +1071,7 @@ def htr_env_cmd(as_json: bool = typer.Option(False, "--json")) -> None:
     console.print(f"  kraken {d.get('kraken') or '—'} · torch "
                   f"{d.get('torch') or '—'} · cuda {d.get('cuda') or '—'}")
     for w in env.warnings:
-        console.print(f"[yellow]⚠[/yellow] [dim]{w.text}[/dim]")
+        console.print(f"[warn]⚠[/warn] [muted]{w.text}[/muted]")
 
 
 @htr_app.command("install")
@@ -998,7 +1095,7 @@ def htr_install(
     try:
         venv = doc.engine_venv()
     except WorkspaceError as exc:
-        console.print(f"[red]{exc}[/red]")
+        console.print(f"[err]{exc}[/err]")
         raise typer.Exit(code=2) from None
     try:
         rep = E.setup(venv, with_cuda=not no_cuda)
@@ -1006,16 +1103,16 @@ def htr_install(
         # 🔴 Не трасою стека: `uv` і `git` — не залежності пакета, тож у того,
         # хто ставив `pip install`, їх може не бути зовсім, і саме він
         # найімовірніше опиниться тут.
-        console.print(f"[red]{exc}[/red]")
+        console.print(f"[err]{exc}[/err]")
         raise typer.Exit(code=2) from None
     console.print(f"\npython : {rep.python or '—'}")
     console.print(f"kraken : {rep.kraken or '—'}")
     console.print(f"torch  : {rep.torch or '—'}  cuda={rep.cuda} "
                   f"capability={rep.capability or '—'}")
     for p in rep.problems:
-        console.print(f"[yellow]⚠ {p}[/yellow]")
+        console.print(f"[warn]⚠ {p}[/warn]")
     if rep.missing:
-        console.print(f"[red]🔴 бракує: {', '.join(rep.missing)}[/red]")
+        console.print(f"[err]🔴 бракує: {', '.join(rep.missing)}[/err]")
     raise typer.Exit(code=0 if rep.ok else 1)
 
 
@@ -1029,17 +1126,26 @@ def models_list() -> None:
     from nyshporka.setup import packs
 
     _need("htr")
+    from nyshporka.htr import manifest as _M
+
     state = packs.as_dict()
+    manifest = _M.active()
     mark = {"ok": "✅", "absent": "▫️", "broken": "🔴"}
     for p in state["packs"]:
         size = f"{p['size'] / 2**20:.0f} МБ" if p["size"] else "?"
+        # 🔴 Рушій визначається за ІМЕНЕМ ФАЙЛУ через маніфест, а не за полем
+        # `engine`: там лежить `kraken`, а `.mlmodel` буває двох письм — тобто
+        # Скриба й Дяк злилися б в один бейдж. Саме цю плутанину бейдж і має
+        # прибирати з очей.
+        eng = manifest.engine_for_model(Path(p["path"]).name) if p.get("path") else None
+        badge = f"{brand.engine_tag(eng.id)} " if eng else ""
         # 🔴 `id` друкується, бо саме його треба набрати в `models get`. Перелік
         # із самими людськими назвами («Писар v17») лишав людину без того
         # слова, якого від неї чекає наступна команда.
-        console.print(f"  {mark.get(p['state'], '?')} [bold]{p['label']}[/bold] "
-                      f"[cyan]{p['id']}[/cyan] "
-                      f"[dim]{p['script']}/{p['engine']} · {size}[/dim]")
-    console.print(f"[dim]тека: {state['dir']}[/dim]")
+        console.print(f"  {mark.get(p['state'], '?')} {badge}[bold]{p['label']}[/bold] "
+                      f"[accent]{p['id']}[/accent] "
+                      f"[muted]{p['script']}/{p['engine']} · {size}[/muted]")
+    console.print(f"[muted]тека: {state['dir']}[/muted]")
 
 
 @models_app.command("get")
@@ -1056,8 +1162,8 @@ def models_get(
     # на місці»: людина читала це як «ваги стоять», ішла читати справу — і
     # діставала відмову аж там, де вже незрозуміло, при чому тут ваги.
     if which and not any(p.id == which for p in known):
-        console.print(f"[red]немає пака «{which}»[/red]")
-        console.print("[dim]є: " + ", ".join(p.id for p in known) + "[/dim]")
+        console.print(f"[err]немає пака «{which}»[/err]")
+        console.print("[muted]є: " + ", ".join(p.id for p in known) + "[/muted]")
         raise typer.Exit(code=1)
     want = [p for p in known if not which or p.id == which]
     want = [p for p in want if not packs.verify(p)]
@@ -1069,7 +1175,7 @@ def models_get(
         try:
             dst = packs.fetch(p)
         except Exception as exc:
-            console.print(f"[red]✗ {p.id}: {exc}[/red]")
+            console.print(f"[err]✗ {p.id}: {exc}[/err]")
             raise typer.Exit(code=1) from None
         console.print(f"  ✅ {dst}")
 
@@ -1089,8 +1195,8 @@ def serve(
     try:
         from nyshporka.daemon import serve as _serve
     except (ImportError, RuntimeError) as exc:
-        console.print(f"[red]{exc}[/red]")
-        console.print(r"[dim]pip install 'nyshporka\[app]'[/dim]")
+        console.print(f"[err]{exc}[/err]")
+        console.print(r"[muted]pip install 'nyshporka\[app]'[/muted]")
         raise typer.Exit(code=1) from None
     _serve(port=port, open_browser=not no_browser)
 
@@ -1104,7 +1210,7 @@ def ops_list(agent_only: bool = typer.Option(False, "--agent",
     for op in (O.for_agent() if agent_only else O.all_ops()):
         marks = "".join(("✎" if op.mutates else " ", "⏳" if op.long else " ",
                          "🤖" if op.agent else " "))
-        console.print(f"  {marks} [bold]{op.name:<18}[/bold] [dim]{op.section:<9}[/dim] "
+        console.print(f"  {marks} [bold]{op.name:<18}[/bold] [muted]{op.section:<9}[/muted] "
                       f"{op.summary}")
 
 
@@ -1115,6 +1221,9 @@ app.add_typer(sections_app, name="sections")
 
 
 def _print_sections(data: dict[str, Any]) -> None:
+    # Знак секції — той самий, що в шапці застосунку: перелік тут і навігація
+    # там мусять читатись як одне місце, а не як два різні продукти.
+    glyphs = (data.get("glyphs") or {}).get("sections") or {}
     for r in data["sections"]:
         if r["required"]:
             mark, note = "🔒", "завжди"
@@ -1123,12 +1232,13 @@ def _print_sections(data: dict[str, Any]) -> None:
             mark, note = "▫️", "порожня"
         else:
             mark, note = ("✅", "увімкнено") if r["active"] else ("⬜", "вимкнено")
-        console.print(f"  {mark} [bold]{r['id']:<9}[/bold] {r['label']:<12} "
-                      f"[dim]{note} · {r['ops']} операцій[/dim]")
-        console.print(f"     [dim]{r['why']}[/dim]")
+        glyph = glyphs.get(r["id"], " ")
+        console.print(f"  {mark} {glyph} [bold]{r['id']:<9}[/bold] {r['label']:<12} "
+                      f"[muted]{note} · {r['ops']} операцій[/muted]")
+        console.print(f"     [muted]{r['why']}[/muted]")
     preset = data.get("preset")
-    console.print(f"[dim]пресет: {preset or 'власний набір'} · "
-                  f"є: {', '.join(sorted(data['presets']))}[/dim]")
+    console.print(f"[muted]пресет: {preset or 'власний набір'} · "
+                  f"є: {', '.join(sorted(data['presets']))}[/muted]")
 
 
 def _sections_call(payload: dict[str, Any]) -> None:
@@ -1136,10 +1246,10 @@ def _sections_call(payload: dict[str, Any]) -> None:
 
     env = O.call("sections.set", payload)
     if not env.ok:
-        console.print(f"[red]{env.error}[/red]")
+        console.print(f"[err]{env.error}[/err]")
         raise typer.Exit(code=1)
     for w in env.warnings:
-        console.print(f"  [yellow]⚠ {w.text}[/yellow]")
+        console.print(f"  [warn]⚠ {w.text}[/warn]")
     _print_sections(env.data)
 
 
@@ -1152,10 +1262,10 @@ def sections_root(ctx: typer.Context) -> None:
 
     env = O.call("sections.show")
     if not env.ok:
-        console.print(f"[red]{env.error}[/red]")
+        console.print(f"[err]{env.error}[/err]")
         raise typer.Exit(code=1)
     for w in env.warnings:
-        console.print(f"  [yellow]⚠ {w.text}[/yellow]")
+        console.print(f"  [warn]⚠ {w.text}[/warn]")
     _print_sections(env.data)
 
 
@@ -1197,7 +1307,7 @@ def op_run(
     try:
         payload = _json.loads(args)
     except ValueError as exc:
-        console.print(f"[red]--args не є JSON:[/red] {exc}")
+        console.print(f"[err]--args не є JSON:[/err] {exc}")
         raise typer.Exit(code=2) from None
 
     env = O.call(name, payload)
@@ -1226,11 +1336,11 @@ def skills_list() -> None:
         console.print(f"  [bold]{sk.name:<16}[/bold] {sk.title}")
         extra = [p for p in sk.files() if p.name != "SKILL.md"]
         if extra:
-            console.print(f"  {'':<16} [dim]+ {len(extra)} довідник(ів)[/dim]")
+            console.print(f"  {'':<16} [muted]+ {len(extra)} довідник(ів)[/muted]")
     if not got:
-        console.print("[yellow]![/yellow] скілів у пакеті немає")
+        console.print("[warn]![/warn] скілів у пакеті немає")
         return
-    console.print(f"\n[dim]усього {len(got)} · встановити: nysh skills install[/dim]")
+    console.print(f"\n[muted]усього {len(got)} · встановити: nysh skills install[/muted]")
 
 
 @skills_app.command("install")
@@ -1253,7 +1363,7 @@ def skills_install(
     from nyshporka import skills as S
 
     if user and target:
-        console.print("[yellow]![/yellow] --user і --target разом не мають сенсу")
+        console.print("[warn]![/warn] --user і --target разом не мають сенсу")
         raise typer.Exit(code=1)
     dest = (Path.home() / ".claude" / "skills" if user
             else Path(target or ".claude/skills"))
@@ -1261,13 +1371,13 @@ def skills_install(
     names = tuple(n.strip() for n in only.split(",") if n.strip())
     known = {s.name for s in S.available()}
     if unknown := set(names) - known:
-        console.print(f"[yellow]![/yellow] немає таких скілів: {', '.join(sorted(unknown))}"
+        console.print(f"[warn]![/warn] немає таких скілів: {', '.join(sorted(unknown))}"
                       f"  (є: {', '.join(sorted(known))})")
         raise typer.Exit(code=1)
 
     out = S.install(dest, version=__version__, force=force, names=names)
     if not out:
-        console.print("[yellow]![/yellow] нічого не встановлено")
+        console.print("[warn]![/warn] нічого не встановлено")
         raise typer.Exit(code=1)
 
     tally: dict[str, int] = {}
@@ -1282,12 +1392,12 @@ def skills_install(
     # «щось не поклалось», хоча це свідоме рішення інструмента не чіпати чужу
     # роботу. Мовчазний пропуск був би гіршим за помилку.
     if kept := [o.rel for o in out if o.verdict == "kept"]:
-        console.print("  [dim]не чіпав (є ваші правки; --force перезапише):[/dim]")
+        console.print("  [muted]не чіпав (є ваші правки; --force перезапише):[/muted]")
         for rel in kept:
             console.print(f"    {rel}")
 
     where = "у будь-якому проєкті" if user else "у цьому проєкті"
-    console.print(f"  [dim]видно агентові {where}; перезапустіть сесію[/dim]")
+    console.print(f"  [muted]видно агентові {where}; перезапустіть сесію[/muted]")
 
 
 mcp_app = typer.Typer(help="Агентна поверхня (Claude Code, Codex).",
@@ -1311,7 +1421,7 @@ def mcp_tools() -> None:
     defs = tool_definitions()
     for d in defs:
         console.print(f"  [bold]{d['name']:<22}[/bold] {d['description']}")
-    console.print(f"\n[dim]усього {len(defs)}[/dim]")
+    console.print(f"\n[muted]усього {len(defs)}[/muted]")
 
 
 @mcp_app.command("install")
@@ -1334,7 +1444,7 @@ def mcp_install(
         try:
             existing = _json.loads(path.read_text(encoding="utf-8"))
         except ValueError:
-            console.print(f"[yellow]![/yellow] {path} не є JSON — не чіпаю його")
+            console.print(f"[warn]![/warn] {path} не є JSON — не чіпаю його")
             raise typer.Exit(code=1) from None
     # Дописуємо, а не заміщаємо: у файлі можуть бути чужі сервери, і затерти їх
     # означало б зламати налаштування, які людина робила руками.

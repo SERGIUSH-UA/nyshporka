@@ -5,6 +5,12 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Нишпорка</title>
 <link rel="icon" href="/favicon.ico" type="image/svg+xml">
+<!--
+  Токени ПЕРЕД оформленням: `tokens.css` згенеровано з `brand.yaml` і несе самі
+  змінні, `app.css` їх лише споживає. Зворотний порядок лишив би верстку без
+  кольорів на перший кадр.
+-->
+<link rel="stylesheet" href="/static/tokens.css">
 <link rel="stylesheet" href="/static/app.css">
 </head>
 <!--
@@ -14,7 +20,16 @@
 -->
 <body data-token="{{TOKEN}}">
 <header>
-  <span class="brand">Нишпорка</span>
+  <!--
+    🐾 Знак — лапка з лупою в подушечці. Малюється `currentColor`, тож обидві
+    теми обходяться одним файлом. Слово поруч лишається ТЕКСТОМ, а не частиною
+    картинки: у SVG воно вимагало б власного шрифту, а той в архіві без
+    інтернету не приїхав би.
+  -->
+  <span class="brand">
+    <span class="mark" aria-hidden="true"></span>
+    Нишпорка
+  </span>
   <!--
     🔴 Кнопки СТАВИТЬ JS із `/api/sections`, а не розмітка. Причина не в
     зручності: частину застосунку вимикають профілем простору, і другий,

@@ -9,18 +9,18 @@
 from __future__ import annotations
 
 import typer
-from rich.console import Console
 from rich.table import Table
 
+from nyshporka import brand
 from nyshporka import ops as O
 
 app = typer.Typer(help="Реєстр опису: скласти перелік справ фонду.",
                   no_args_is_help=True)
-console = Console()
+console = brand.console()
 
 
 def _fail(env: object) -> None:
-    console.print(f"[red]{getattr(env, 'error', '') or 'не вдалось'}[/red]")
+    console.print(f"[err]{getattr(env, 'error', '') or 'не вдалось'}[/err]")
     raise typer.Exit(code=1)
 
 
@@ -32,13 +32,13 @@ def cmd_sources() -> None:
         _fail(env)
     rows = (env.data or {}).get("collectors") or []
     if not rows:
-        console.print("[yellow]жодного збирача[/yellow]")
+        console.print("[warn]жодного збирача[/warn]")
     for c in rows:
         console.print(f"  [bold]{c['id']:<10}[/bold] {c['label']}")
         console.print(f"             уміє: {', '.join(c['caps'])} → {c['file']}"
                       + (f" · качає: {c['source']}" if c["source"] else ""))
     for w in env.warnings:
-        console.print(f"[yellow]⚠ {w.text}[/yellow]")
+        console.print(f"[warn]⚠ {w.text}[/warn]")
 
 
 @app.command("plan")
@@ -55,7 +55,7 @@ def cmd_plan(
         _fail(env)
     d = env.data or {}
     console.print(f"  збирач : [bold]{d.get('collector')}[/bold]")
-    console.print(f"  готовий: {'так' if d.get('ready') else '[red]ні[/red]'}")
+    console.print(f"  готовий: {'так' if d.get('ready') else '[err]ні[/err]'}")
     if d.get("why"):
         console.print(f"  {d['why']}")
     if d.get("opys"):
@@ -65,7 +65,7 @@ def cmd_plan(
         console.print(f"  запитів: {d['requests']}"
                       + (f" · орієнтовно {eta / 60:.0f} хв" if eta > 90 else ""))
     for k, v in (d.get("needs") or {}).items():
-        console.print(f"  [yellow]бракує {k}: {v}[/yellow]")
+        console.print(f"  [warn]бракує {k}: {v}[/warn]")
 
 
 @app.command("collect")
@@ -89,8 +89,8 @@ def cmd_collect(
     d = env.data or {}
     # ⚠ При --dry-run той самий рядок без позначки читається як «записано»:
     # шлях названо, число названо, а файла немає.
-    mark = "[dim](проба, нічого не записано)[/dim] " if dry_run else ""
-    console.print(f"[green]✓[/green] {mark}{d.get('rows')} справ → {d.get('out')}")
+    mark = "[muted](проба, нічого не записано)[/muted] " if dry_run else ""
+    console.print(f"[ok]✓[/ok] {mark}{d.get('rows')} справ → {d.get('out')}")
 
     seen, got = d.get("opys_seen") or [], d.get("opys_collected") or []
     if seen:
@@ -101,10 +101,10 @@ def cmd_collect(
         parts = [f"{name} {n} ({n * 100 // total}%)" for name, n in sorted(q.items())]
         console.print("  " + " · ".join(parts))
     if d.get("kept"):
-        console.print(f"  [dim]♻ долучено {d['kept']} рядків описів, "
-                      f"яких цей запуск не чіпав[/dim]")
+        console.print(f"  [muted]♻ долучено {d['kept']} рядків описів, "
+                      f"яких цей запуск не чіпав[/muted]")
     for w in env.warnings:
-        console.print(f"[yellow]⚠ {w.text}[/yellow]")
+        console.print(f"[warn]⚠ {w.text}[/warn]")
 
 
 @app.command("merge")
@@ -128,8 +128,8 @@ def cmd_merge(
     d = env.data or {}
     # ⚠ При --dry-run той самий рядок без позначки читається як «записано»:
     # шлях названо, число названо, а файла немає.
-    mark = "[dim](проба, нічого не записано)[/dim] " if dry_run else ""
-    console.print(f"[green]✓[/green] {mark}{d.get('rows')} справ → {d.get('out')}")
+    mark = "[muted](проба, нічого не записано)[/muted] " if dry_run else ""
+    console.print(f"[ok]✓[/ok] {mark}{d.get('rows')} справ → {d.get('out')}")
 
     src = [(n, c) for n, c in (tuple(x) for x in (d.get("sources") or []))]
     have = [f"{n} {c}" for n, c in src if c]
@@ -139,7 +139,7 @@ def cmd_merge(
     # нуль» — різні відповіді, і мовчазне зникнення ховає прогалину.
     empty = [n for n, c in src if not c]
     if empty:
-        console.print(f"  [dim]без рядків: {', '.join(empty)}[/dim]")
+        console.print(f"  [muted]без рядків: {', '.join(empty)}[/muted]")
 
     ch = d.get("channels") or {}
     if ch:
@@ -165,7 +165,7 @@ def cmd_merge(
     console.print(f"  розбіжностей: {conf}"
                   + (f" · збережено вердиктів: {kept}" if kept else ""))
     for w in env.warnings:
-        console.print(f"[yellow]⚠ {w.text}[/yellow]")
+        console.print(f"[warn]⚠ {w.text}[/warn]")
 
 
 @app.command("show")
@@ -178,10 +178,10 @@ def cmd_show(fond_id: str = typer.Option(..., "--fond-id",
     try:
         d = workspace().root / registry_dir(fond_id)
     except WorkspaceError as exc:
-        console.print(f"[red]{exc}[/red]")
+        console.print(f"[err]{exc}[/err]")
         raise typer.Exit(code=2) from None
     if not d.is_dir():
-        console.print(f"[yellow]нічого не зібрано: {d}[/yellow]")
+        console.print(f"[warn]нічого не зібрано: {d}[/warn]")
         return
     t = Table(box=None)
     t.add_column("файл")
@@ -210,14 +210,14 @@ def cmd_rate(
 
     audit = xrate.default_state_dir() / f"{key}.audit.jsonl"
     if not audit.exists():
-        console.print(f"[yellow]журналу немає: {audit}[/yellow]")
-        console.print("[dim]жодного запиту цим ключем ще не робили[/dim]")
+        console.print(f"[warn]журналу немає: {audit}[/warn]")
+        console.print("[muted]жодного запиту цим ключем ще не робили[/muted]")
         return
     res = xrate.verify(audit, max_events, window,
                        time.time() - last if last else None)
     console.print(f"  {key}: {res['events']} запитів від {res['pids']} процесів, "
                   f"розтяг {res['span']:.1f} с")
-    mark = "[green]✅ ок[/green]" if res["ok"] else "[red]❌ ПЕРЕВИЩЕНО[/red]"
+    mark = "[ok]✅ ок[/ok]" if res["ok"] else "[err]❌ ПЕРЕВИЩЕНО[/err]"
     console.print(f"  максимум у вікні {window:g} с: {res['worst']} "
                   f"(ліміт {max_events}) — {mark}")
     raise typer.Exit(code=0 if res["ok"] else 1)
