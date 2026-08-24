@@ -348,10 +348,36 @@ def load(extra: Path | None = None) -> ArchivesPack:
     return _build(raw, tuple(used))
 
 
-@lru_cache(maxsize=1)
-def active() -> ArchivesPack:
+def _pack_stamp() -> tuple[tuple[Any, ...], ...]:
+    """Штамп усіх джерел паку: (шлях, mtime_ns, розмір). Відсутність — теж стан."""
+    out: list[tuple[Any, ...]] = []
+    for p in [BUILTIN, *_overlay_paths()]:
+        try:
+            st = p.stat()
+            out.append((str(p), st.st_mtime_ns, st.st_size))
+        except OSError:
+            out.append((str(p), -1, -1))
+    return tuple(out)
+
+
+@lru_cache(maxsize=4)
+def _active_for(stamp: tuple[tuple[Any, ...], ...]) -> ArchivesPack:
     return load()
 
 
+def active() -> ArchivesPack:
+    """Зібраний пак; memo за штампом файлів, як у `fonds.registry`.
+
+    🔴 Було `@lru_cache(maxsize=1)` без єдиного виклику `reset()` в усьому
+    пакеті — тобто в живому демоні пак застигав назавжди. Ціна не косметична:
+    пак несе `opys_bounds`, а це ЗНАМЕННИК покриття фонду. Дослідник дописував
+    межі опису у свою накладку, тиснув «злити фонд» — і покриття рахувалось або
+    по старих межах, або з `blind: no_denominator`, причому в `coverage.json`
+    це виглядало як відповідь. Лікувалось лише рестартом, про який ніщо не
+    повідомляло. Штамп коштує один `stat()` на джерело й протухає сам.
+    """
+    return _active_for(_pack_stamp())
+
+
 def reset() -> None:
-    active.cache_clear()
+    _active_for.cache_clear()

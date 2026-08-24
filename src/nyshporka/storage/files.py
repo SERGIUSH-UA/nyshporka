@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any, TypeVar
 
@@ -17,6 +18,7 @@ import yaml
 from pydantic import BaseModel
 
 from nyshporka.models import Family, Person, Place, Source
+from nyshporka.utils.atomic import atomic_write_text
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -50,18 +52,29 @@ def write_entity(path: Path, entity: BaseModel) -> None:
     text = frontmatter.dumps(post, handler=frontmatter.YAMLHandler())  # type: ignore[attr-defined]
     # frontmatter не дає опції allow_unicode напряму — переписуємо YAML-блок самі.
     text = _rewrite_unicode_frontmatter(text, full)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(text, encoding="utf-8")
-    tmp.replace(path)
+    # tmp тепер із pid і з перечікуванням зайнятого файлу (Windows) — спільна
+    # утиліта замість власного `.tmp`, який два процеси перетирали один одному.
+    atomic_write_text(path, text)
+
+
+#: Огорожа frontmatter — САМОСТІЙНИЙ рядок із трьох дефісів, а не будь-яке `---`.
+_FM_FENCE = re.compile(r"^---[ \t]*$", re.MULTILINE)
 
 
 def _rewrite_unicode_frontmatter(text: str, metadata: dict[str, Any]) -> str:
-    """Замінити ascii-escaped YAML на юнікодний, зберігши тіло MD."""
-    parts = text.split("---", 2)
-    if len(parts) < 3:
+    """Замінити ascii-escaped YAML на юнікодний, зберігши тіло MD.
+
+    🔴 Розріз по РЯДКОВИХ межах, а не `text.split("---", 2)`. Той різав по
+    першому входженню трьох дефісів будь-де — включно з серединою YAML-значення
+    (заголовок справи, цитата, назва місця цілком законно містять `---`). Тоді
+    хвіст YAML-блоку опинявся в тілі, тобто в `notes`, а що `notes` — вільний
+    текст, pydantic це приймав: сміття осідало тихо й накопичувалось із кожним
+    наступним записом.
+    """
+    fences = list(_FM_FENCE.finditer(text))
+    if len(fences) < 2 or fences[0].start() != 0:
         return text
-    body = parts[2].lstrip("\n")
+    body = text[fences[1].end():].lstrip("\n")
     yaml_block = _yaml_dump(metadata)
     return f"---\n{yaml_block}---\n\n{body}".rstrip() + "\n"
 

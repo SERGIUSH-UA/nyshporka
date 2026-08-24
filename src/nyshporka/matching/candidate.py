@@ -12,6 +12,7 @@ from nyshporka.matching.fuzzy import score_record
 from nyshporka.models import Person
 from nyshporka.models.candidate import Candidate
 from nyshporka.storage.files import read_person
+from nyshporka.utils.atomic import atomic_write_text
 
 _AUTO_THRESHOLD = 0.85
 _REVIEW_THRESHOLD = 0.6
@@ -68,6 +69,39 @@ def match_records(
     return out
 
 
+#: Статуси, які поставила ЛЮДИНА в `nysh review`. Повторний матчинг їх не чіпає.
+_HUMAN_STATUSES = ("accepted", "rejected", "merged", "needs_more")
+
+
+def _carry_verdict(path: Path, fresh: Candidate) -> Candidate:
+    """Перенести рішення людини на свіжо порахованого кандидата.
+
+    🔴 `_make_candidate_id` детермінований по (джерело, дайджест запису), тож
+    повторний матчинг того самого джерела дає ТІ САМІ імена файлів. Без цього
+    перенесення прохід `nysh review` по двохстах кандидатах (accepted/rejected +
+    нотатки) зникав від однієї перескрейпленої сторінки: усі файли писались
+    заново зі `status="new"`, без `notes` і без `reviewed_at`.
+
+    Оцінка й розклад балів беруться СВІЖІ — вони машинні й мають оновлюватись;
+    людське лишається людським.
+    """
+    if not path.exists():
+        return fresh
+    try:
+        old = Candidate.model_validate_json(path.read_text(encoding="utf-8"))
+    except Exception:
+        # Побитий файл кандидата — не привід губити новий результат: кандидат
+        # відтворюваний із джерела, на відміну від реєстрів вердиктів.
+        return fresh
+    if old.status not in _HUMAN_STATUSES and not old.notes:
+        return fresh
+    return fresh.model_copy(update={
+        "status": old.status if old.status in _HUMAN_STATUSES else fresh.status,
+        "notes": old.notes or fresh.notes,
+        "reviewed_at": old.reviewed_at,
+    })
+
+
 def save_candidates(candidates: list[Candidate], root: Path) -> MatchReport:
     """Записати кандидатів як JSON у `data/candidates/`. Повернути report."""
     cdir = root / "data" / "candidates"
@@ -75,7 +109,7 @@ def save_candidates(candidates: list[Candidate], root: Path) -> MatchReport:
     auto = review = cold = 0
     for c in candidates:
         path = cdir / f"{c.id}.json"
-        path.write_text(c.model_dump_json(indent=2), encoding="utf-8")
+        atomic_write_text(path, _carry_verdict(path, c).model_dump_json(indent=2))
         if c.score >= _AUTO_THRESHOLD:
             auto += 1
         elif c.score >= _REVIEW_THRESHOLD:

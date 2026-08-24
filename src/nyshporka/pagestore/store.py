@@ -207,16 +207,31 @@ def _lock(path: Path, timeout: float = 5.0,
                     lockp.unlink(missing_ok=True)   # власник помер — забираємо лок
                     continue
             except OSError:
-                continue                             # лок щойно зник — нова спроба
+                # 🔴 Лок щойно зник — АБО `stat()` стійко відмовляє (на Windows
+                # файл у стані pending-delete, антивірус, індексатор). Було
+                # голе `continue`: ні паузи, ні перевірки дедлайну, тож вихід
+                # лишався єдиний — успішний `os.open`. У парі зі стійким
+                # `FileExistsError` це давало вічний цикл на 100% ядра там, де
+                # мав спрацювати `timeout`.
+                pass
             if time.monotonic() > deadline:
                 raise TimeoutError(f"лок {lockp} зайнятий довше {timeout:.0f}с") from None
             time.sleep(0.1)
+    # PID пишеться ДО `yield`: інакше власник лока невідомий рівно в той
+    # проміжок, коли лок і тримають.
+    os.write(fd, str(os.getpid()).encode())
     try:
-        os.write(fd, str(os.getpid()).encode())
         yield
     finally:
         os.close(fd)
-        lockp.unlink(missing_ok=True)
+        # ⚠ Знімаємо лише СВІЙ лок: за час роботи його могли забрати як
+        # протухлий (30 с), і тоді `unlink` без перевірки зняв би чужий.
+        try:
+            if lockp.read_text(encoding="utf-8", errors="replace").strip() \
+                    == str(os.getpid()):
+                lockp.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 def _rel(path: Path) -> str:

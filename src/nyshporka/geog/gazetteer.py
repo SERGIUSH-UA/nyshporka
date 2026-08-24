@@ -122,65 +122,71 @@ def build_index(verbose: bool = False) -> dict[str, int]:
     out = index_path()
     out.parent.mkdir(parents=True, exist_ok=True)
     tmp = out.with_suffix(".tmp")
-    if tmp.exists():
-        tmp.unlink()
+    # 🔴 `missing_ok` + `try/finally`. Без них будь-яка помилка розбору TSV
+    # (бракує колонки — тут вони беруться без `.get`) лишала з'єднання
+    # відкритим, а наступна збірка в ТОМУ САМОМУ процесі (консоль перезбирає
+    # кнопкою) падала на Windows із `WinError 32`: газетир не збирався вже
+    # ніколи, доки не перезапустять демон. Зразок поруч — `catalog/build.py`.
+    tmp.unlink(missing_ok=True)
     con = sqlite3.connect(tmp)
-    con.executescript("""
-        CREATE TABLE places (
-            card TEXT PRIMARY KEY, section TEXT, institution TEXT,
-            village_uk TEXT, village_ru TEXT,
-            hist_place TEXT, uezd_gub TEXT, modern_place TEXT, church TEXT,
-            eparchy TEXT, parishes TEXT, note TEXT,
-            norm_uk TEXT, norm_ru TEXT, n_cases INTEGER DEFAULT 0);
-        CREATE TABLE cases (
-            card TEXT, fond TEXT, opys TEXT, spr TEXT,
-            year_from INTEGER, year_to INTEGER, doc_type TEXT, parish TEXT);
-        CREATE INDEX ix_cases_card ON cases(card);
-        CREATE INDEX ix_cases_fond ON cases(fond, opys);
-        CREATE INDEX ix_places_uk ON places(norm_uk);
-        CREATE INDEX ix_places_sec ON places(section);
-        CREATE INDEX ix_places_ru ON places(norm_ru);
-        CREATE TABLE meta (k TEXT PRIMARY KEY, v TEXT);
-    """)
-    n_pl = n_cs = 0
-    with places_tsv.open(encoding="utf-8") as f:
-        for r in csv.DictReader(f, delimiter="\t"):
-            con.execute(
-                "INSERT OR REPLACE INTO places(card,section,institution,"
-                "village_uk,village_ru,hist_place,uezd_gub,modern_place,church,"
-                "eparchy,parishes,note,norm_uk,norm_ru)"
-                " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                (r["card"], r.get("section", "church"),
-                 r.get("institution", "православна церква"),
-                 r["village_uk"], r["village_ru"], r["hist_place"],
-                 r["uezd_gub"], r["modern_place"], r["church"],
-                 r.get("eparchy", ""), r.get("parishes", ""), r.get("note", ""),
-                 norm_name(r["village_uk"]), norm_name(r["village_ru"])))
-            n_pl += 1
-    if cases_tsv.is_file():
-        with cases_tsv.open(encoding="utf-8") as f:
-            rows = []
+    try:
+        con.executescript("""
+            CREATE TABLE places (
+                card TEXT PRIMARY KEY, section TEXT, institution TEXT,
+                village_uk TEXT, village_ru TEXT,
+                hist_place TEXT, uezd_gub TEXT, modern_place TEXT, church TEXT,
+                eparchy TEXT, parishes TEXT, note TEXT,
+                norm_uk TEXT, norm_ru TEXT, n_cases INTEGER DEFAULT 0);
+            CREATE TABLE cases (
+                card TEXT, fond TEXT, opys TEXT, spr TEXT,
+                year_from INTEGER, year_to INTEGER, doc_type TEXT, parish TEXT);
+            CREATE INDEX ix_cases_card ON cases(card);
+            CREATE INDEX ix_cases_fond ON cases(fond, opys);
+            CREATE INDEX ix_places_uk ON places(norm_uk);
+            CREATE INDEX ix_places_sec ON places(section);
+            CREATE INDEX ix_places_ru ON places(norm_ru);
+            CREATE TABLE meta (k TEXT PRIMARY KEY, v TEXT);
+        """)
+        n_pl = n_cs = 0
+        with places_tsv.open(encoding="utf-8") as f:
             for r in csv.DictReader(f, delimiter="\t"):
-                rows.append((r["card"], r["fond"], r["opys"], r["spr"],
-                             int(r["year_from"] or 0), int(r["year_to"] or 0),
-                             r["doc_type"], r.get("case_church", "")))
-                if len(rows) >= 5000:
+                con.execute(
+                    "INSERT OR REPLACE INTO places(card,section,institution,"
+                    "village_uk,village_ru,hist_place,uezd_gub,modern_place,church,"
+                    "eparchy,parishes,note,norm_uk,norm_ru)"
+                    " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (r["card"], r.get("section", "church"),
+                     r.get("institution", "православна церква"),
+                     r["village_uk"], r["village_ru"], r["hist_place"],
+                     r["uezd_gub"], r["modern_place"], r["church"],
+                     r.get("eparchy", ""), r.get("parishes", ""), r.get("note", ""),
+                     norm_name(r["village_uk"]), norm_name(r["village_ru"])))
+                n_pl += 1
+        if cases_tsv.is_file():
+            with cases_tsv.open(encoding="utf-8") as f:
+                rows = []
+                for r in csv.DictReader(f, delimiter="\t"):
+                    rows.append((r["card"], r["fond"], r["opys"], r["spr"],
+                                 int(r["year_from"] or 0), int(r["year_to"] or 0),
+                                 r["doc_type"], r.get("case_church", "")))
+                    if len(rows) >= 5000:
+                        con.executemany("INSERT INTO cases VALUES(?,?,?,?,?,?,?,?)", rows)
+                        n_cs += len(rows)
+                        rows = []
+                if rows:
                     con.executemany("INSERT INTO cases VALUES(?,?,?,?,?,?,?,?)", rows)
                     n_cs += len(rows)
-                    rows = []
-            if rows:
-                con.executemany("INSERT INTO cases VALUES(?,?,?,?,?,?,?,?)", rows)
-                n_cs += len(rows)
-    con.execute("UPDATE places SET n_cases = "
-                "(SELECT COUNT(*) FROM cases WHERE cases.card = places.card)")
-    src_mtime = max(int(p.stat().st_mtime) for p in (places_tsv, cases_tsv)
-                    if p.is_file())
-    con.executemany("INSERT OR REPLACE INTO meta VALUES(?,?)",
-                    [("version", str(SCHEMA_VERSION)),
-                     ("src_mtime", str(src_mtime)),
-                     ("places", str(n_pl)), ("cases", str(n_cs))])
-    con.commit()
-    con.close()
+        con.execute("UPDATE places SET n_cases = "
+                    "(SELECT COUNT(*) FROM cases WHERE cases.card = places.card)")
+        src_mtime = max(int(p.stat().st_mtime) for p in (places_tsv, cases_tsv)
+                        if p.is_file())
+        con.executemany("INSERT OR REPLACE INTO meta VALUES(?,?)",
+                        [("version", str(SCHEMA_VERSION)),
+                         ("src_mtime", str(src_mtime)),
+                         ("places", str(n_pl)), ("cases", str(n_cs))])
+        con.commit()
+    finally:
+        con.close()
     tmp.replace(out)
     # memo цього модуля ключовані штампом файла, тож підміна їх і так протухає;
     # чистимо явно, щоб у ТОМУ САМОМУ процесі (консоль перезбирає індекс кнопкою)

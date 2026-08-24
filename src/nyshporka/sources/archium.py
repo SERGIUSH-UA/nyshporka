@@ -45,6 +45,7 @@ from nyshporka.sources.base import (
     SourceError,
 )
 from nyshporka.sources.http import Fetcher, HttpError
+from nyshporka.utils.atomic import atomic_write_bytes
 
 BASE = "https://archium.dahmo.gov.ua"
 
@@ -625,7 +626,9 @@ class ArchiumSource:
                     try:
                         blob = self.http.get(image_url(image_id, self.base),
                                              client=c).content
-                        dst.write_bytes(blob)
+                        # `.part` — див. коментар у `fsfilm.fetch`: кадр
+                        # ненульового розміру більше ніколи не докачується.
+                        atomic_write_bytes(dst, blob)
                         res.frames += 1
                         res.bytes += len(blob)
                     except (HttpError, OSError) as exc:

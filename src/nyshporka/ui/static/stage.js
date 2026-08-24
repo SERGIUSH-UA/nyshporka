@@ -8,7 +8,10 @@ export function stApplyZoom(img, cv, zoom, zoomLabelId) {
   const w = Math.round(img.naturalWidth * zoom), h = Math.round(img.naturalHeight * zoom);
   img.style.width = w + 'px'; img.style.height = h + 'px';
   cv.style.width = w + 'px'; cv.style.height = h + 'px';
-  document.getElementById(zoomLabelId).textContent = Math.round(zoom * 100) + '%';
+  // Підпис зуму не обов'язковий: редактор без нього — законний випадок, а
+  // незловлений TypeError тут зупинив би саме масштабування.
+  const label = document.getElementById(zoomLabelId);
+  if (label) label.textContent = Math.round(zoom * 100) + '%';
 }
 
 // Кламп зуму [0.05, 4] (спільний для −/+ кнопок і клавіш).

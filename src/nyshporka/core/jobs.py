@@ -112,6 +112,9 @@ class JobBus:
         self._log: list[dict[str, Any]] = []
         self._idem: dict[str, tuple[str, float]] = {}
         self._wake = asyncio.Event()
+        #: job_id → як спинити роботу НАСПРАВДІ (вбити підпроцес, скасувати
+        #: задачу). Без цього `cancel` лише перефарбовував рядок у списку.
+        self._stoppers: dict[str, Callable[[], None]] = {}
 
     # ── читання (без лока: словники читаються атомарно) ──────────────────────
     def get(self, job_id: str) -> JobRecord | None:
@@ -209,6 +212,14 @@ class JobBus:
             job = self._jobs.get(job_id)
             if job is None:
                 return None
+            # 🔴 Скасоване лишається скасованим. Виконавці доходять до кінця
+            # свого тіла й безумовно ставлять DONE/ERROR — тож без цього
+            # запобіжника робота, яку людина спинила, через годину сама
+            # оголошувала себе виконаною. Решта полів (прогрес, результат)
+            # пишеться як є: скільки встигли зробити — корисно знати.
+            if (job.state == JobState.CANCELLED and "state" in fields
+                    and JobState(fields["state"]) != JobState.CANCELLED):
+                fields = {k: v for k, v in fields.items() if k != "state"}
             for k, v in fields.items():
                 if k == "state":
                     v = JobState(v)
@@ -217,10 +228,39 @@ class JobBus:
             self._persist()
             return job
 
+    def on_stop(self, job_id: str, stopper: Callable[[], None]) -> None:
+        """Зареєструвати, ЯК спинити цю роботу (вбити підпроцес тощо)."""
+        self._stoppers[job_id] = stopper
+
+    def drop_stopper(self, job_id: str) -> None:
+        self._stoppers.pop(job_id, None)
+
+    def cancelled(self, job_id: str) -> bool:
+        """Чи роботу скасували. Виконавцям — щоб не перефарбувати стан назад."""
+        job = self._jobs.get(job_id)
+        return job is not None and job.state == JobState.CANCELLED
+
     async def cancel(self, job_id: str) -> JobRecord | None:
+        """Скасувати роботу — з реальною зупинкою того, що вона запустила.
+
+        🔴 Було саме лише виставлення стану: підпроцес раннера жив далі, тримав
+        карту годинами, а наприкінці сам перезаписував запис на «готово». Плюс
+        ключ ідемпотентності лишався живим 600 с, тож повторний запуск тієї
+        самої справи протягом десяти хвилин повертав скасований запис і не
+        стартував НІЧОГО — глухий кут без жодної помилки.
+        """
         job = self._jobs.get(job_id)
         if job is None or job.state.final:
             return job
+        stopper = self._stoppers.pop(job_id, None)
+        if stopper is not None:
+            # Не вдалось убити підпроцес — стан усе одно виставляємо: приховати
+            # скасування було б гірше за осиротілий процес.
+            with contextlib.suppress(Exception):
+                stopper()
+        for key, (jid, _) in list(self._idem.items()):
+            if jid == job_id:
+                self._idem.pop(key, None)
         return await self.update(job_id, state=JobState.CANCELLED)
 
     # ── внутрішнє ────────────────────────────────────────────────────────────

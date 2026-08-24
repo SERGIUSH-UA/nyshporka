@@ -208,7 +208,17 @@ class Fetcher:
                 # це відповідь, а не збій, і шість спроб на неї лише
                 # розтягують очікування там, де відповідь уже відома.
                 if r.status_code != 429 and r.status_code < 500:
-                    r.raise_for_status()
+                    # 🔴 Статусна помилка виходить звідси як `HttpError`, а не
+                    # як `httpx.HTTPStatusError`. Усі споживачі ловлять
+                    # `(HttpError, OSError)`, тож «голий» httpx-виняток
+                    # пролітав крізь цикл завантаження плівки: один 404 на
+                    # кадрі №300 із 991 валив увесь прогін, губив лічильники
+                    # 299 уже взятих кадрів і навіть не давав спрацювати
+                    # запобіжнику «10 промахів поспіль».
+                    try:
+                        r.raise_for_status()
+                    except httpx.HTTPStatusError as exc:
+                        raise HttpError(f"{url}: HTTP {r.status_code}") from exc
                     if self.delay:
                         time.sleep(self.delay)
                     return r

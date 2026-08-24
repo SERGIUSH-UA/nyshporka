@@ -214,6 +214,7 @@ const STRINGS = {
     'jobs.cancel': 'Спинити',
     'common.loading': 'Хвилинку…',
     'common.error': 'Не вийшло',
+    'err.token': 'Демон перезапустився — перезавантажте сторінку (F5)',
     'common.frames': 'кадрів',
     'common.pages': 'сторінок',
     'common.page': 'сторінка',
@@ -404,6 +405,7 @@ const STRINGS = {
     'jobs.cancel': 'Stop',
     'common.loading': 'One moment…',
     'common.error': 'Did not work',
+    'err.token': 'The daemon restarted — reload the page (F5)',
     'common.frames': 'frames',
     'common.pages': 'pages',
     'common.page': 'page',
@@ -504,7 +506,12 @@ function renderNav() {
   const icons = (SECTIONS.icons && SECTIONS.icons.screens) || {};
   const here = (location.hash || '').slice(1);
   subs.innerHTML = groupScreens(GROUP).map((s) => {
-    const tail = s === 'jobs' ? '<sup id="jobcount"></sup>' : '';
+    // 🔴 Значок малюється ОДРАЗУ з відомим числом. Він живе лише в підсмузі
+    // розділу «core», тож при поверненні з іншого розділу з'являвся порожнім
+    // і наповнювався аж наступною ітерацією `watchJobs` — а та блокується на
+    // сервері до 25 с. Виглядало як «лічильник зник».
+    const tail = s === 'jobs'
+      ? `<sup id="jobcount">${RUNNING_JOBS || ''}</sup>` : '';
     return `<button data-act="nav" data-arg="${s}"${s === here ? ' class="on"' : ''}>`
       + `${icon(icons[s])}${esc(t(NAV_LABEL[s] || s))}</button>${tail}`;
   }).join('');
@@ -527,10 +534,15 @@ function icon(name) {
  * спільний лічильник на перехід між ними.
  */
 let SCREEN_GEN = 0;
+
+/** Скільки робіт зараз іде — щоб значок у шапці не залежав від розділу. */
+let RUNNING_JOBS = 0;
 const alive = (my) => my === SCREEN_GEN;
 
 // ── транспорт ────────────────────────────────────────────────────────────────
 const TOKEN = document.body.dataset.token || '';
+/** Фінальні стани завдання — дзеркало `JobState.final` у `core/jobs.py`. */
+const FINAL_STATES = ['done', 'error', 'cancelled'];
 
 async function callOp(name, args) {
   const res = await fetch(`/api/op/${encodeURIComponent(name)}`, {
@@ -539,7 +551,28 @@ async function callOp(name, args) {
     body: JSON.stringify(args || {}),
   });
   const env = await res.json().catch(() => ({ ok: false, error: `HTTP ${res.status}` }));
-  return env;
+  return normErr(env, res.status);
+}
+
+/**
+ * Дві форми відмови зводяться до однієї.
+ *
+ * 🔴 Помилка операції приходить конвертом `{ok:false, error}`, а `HTTPException`
+ * (403 на токені, 404 на вимкненій секції) — фастапішним `{detail}`. Це валідний
+ * JSON, тож `catch` вище не спрацьовує, і на екран іде об'єкт БЕЗ `ok` і БЕЗ
+ * `error`: `failure()` друкує «Не вийшло: ?», `alert(env.error)` — «undefined»,
+ * а червона плашка виходить порожньою. Найдорожче тут те, що серверне
+ * пояснення вимкненої секції («Увімкнути: nysh sections enable …») написане, але
+ * не доходило до екрана ніколи.
+ */
+function normErr(env, status) {
+  if (env && env.ok !== undefined) return env;
+  const detail = (env && (env.detail || env.error)) || '';
+  // Токен вшитий у сторінку при завантаженні, а демон генерує новий на кожному
+  // старті. Після перезапуску читання ще працює (воно без токена), а КОЖНА
+  // мутація віддає 403 — без цієї підказки людина не здогадається перезавантажити.
+  if (status === 403) return { ok: false, error: t('err.token') };
+  return { ok: false, error: detail || `HTTP ${status}` };
 }
 
 // ── розмітка ─────────────────────────────────────────────────────────────────
@@ -609,6 +642,41 @@ function failure(env) {
 }
 
 /**
+ * Помилка В МЕЖАХ екрана — у власну коробку, а не через `setView`.
+ *
+ * 🔴 `failure()` замінює весь `main#view`, тобто зносить форму разом із
+ * набраним текстом. А половина відмов тут — рівня описки («немає прогону
+ * «X»», «не розпізнана шифра», «по справі ще нічого не занесено»): саме після
+ * них форма й потрібна, а замість неї лишався один рядок помилки й похід у
+ * вкладку заново. Зразок правильної поведінки в файлі вже був — `case.save`.
+ */
+function boxError(id, env) {
+  const box = el(id);
+  if (!box) return failure(env);   // немає куди покласти — краще екраном
+  box.innerHTML = `<div class="warn err">${esc(env.error || '?')}</div>`;
+  return undefined;
+}
+
+/**
+ * Лічильники «виграє остання ВІДПРАВЛЕНА, а не остання ПРИЙНЯТА».
+ *
+ * 🔴 `libLoad` таке має, а три інші пошуки — ні, хоч гонка в них та сама:
+ * виправив описку, натиснув ще раз, перший запит (він обходить усі прогони
+ * простору) прийшов пізніше — і на екрані лишилась видача СТАРОГО запиту.
+ * Гірше за косметику: `SIFT` при цьому вже перезаписаний свіжим, тож таблиця
+ * показує одне, а «Розбір знахідок» відкриває інше.
+ */
+const SEQ = { search: 0, geog: 0, fond: 0 };
+
+/** Заблокувати кнопки форми на час запиту; повертає, як розблокувати. */
+function busyForm(form) {
+  const btns = form && form.tagName === 'FORM'
+    ? [...form.querySelectorAll('button')].filter((b) => !b.disabled) : [];
+  btns.forEach((b) => { b.disabled = true; });
+  return () => btns.forEach((b) => { b.disabled = false; });
+}
+
+/**
  * 📖 Що сказати про зразкову справу — три РІЗНІ стани, і плутати їх дорого.
  *
  * «Зразка немає в цій збірці» — межа версії, лагодити нічого. «Є, але не
@@ -659,7 +727,9 @@ let EYE = null;
 let EDIT = null;
 
 SCREENS.home = async () => {
+  const gen = SCREEN_GEN;
   const env = await callOp('workspace.info', {});
+  if (!alive(gen)) return;
   const ws = env.ok ? env.data : {};
   setView(`
     <h2>${t('home.title')}</h2>
@@ -879,12 +949,14 @@ function libVerdictForm(key) {
 }
 
 SCREENS.geog = async () => {
+  const gen = SCREEN_GEN;
   busy();
   // 🔴 Стан довідників показуємо ОДРАЗУ, поруч із полем пошуку, а не ховаємо в
   // діагностику. Це і є знаменник: без нього «нічого не знайдено» не
   // відрізнити від «нема де шукати», і людина закриє напрям, якого не
   // перевіряла. Особливо на щойно встановленому застосунку.
   const packs = await callOp('catalog.packs', {});
+  if (!alive(gen)) return;
   const ok = ((packs.data || {}).packs || []).filter((x) => x.state === 'ok');
   setView(`
     <h2>${t('geog.title')}</h2>
@@ -917,8 +989,10 @@ SCREENS.geog = async () => {
  * означає «в архіві не існує», а в «моїх справах» — «ще не завантажено».
  */
 SCREENS.fonds = async () => {
+  const gen = SCREEN_GEN;
   busy();
   const env = await callOp('fond.list', {});
+  if (!alive(gen)) return;
   if (!env.ok) return failure(env);
   const fonds = env.data.fonds || [];
   if (!fonds.length) {
@@ -1022,14 +1096,29 @@ function siftDraw() {
     <p class="dim">${t('sift.keys')}</p>`);
 }
 
-/** Вирізка поточного рядка. Окремим кроком: сторінка коштує ~1.1 МБ, рядок 15 КБ. */
+/**
+ * Вирізка поточного рядка. Окремим кроком: сторінка коштує ~1.1 МБ, рядок 15 КБ.
+ *
+ * 🔴 Лічильник обов'язковий. Кожен крок гортача шле ДВА запити (нарізка
+ * зображення на сервері й текст сторінки), і порядок відповідей не
+ * гарантований: на утриманій «→» (автоповтор ~30/с) контекст від хіта N−1
+ * лягав під вирізку хіта N. Це не косметика — саме за сусідніми рядками
+ * виносять вердикт «наш / не наш», і вони мовчки належали чужому запису.
+ */
+let _siftSeq = 0;
+
 async function siftLoadCrop() {
+  const seq = ++_siftSeq;
   const h = SIFT.hits[SIFT.i] || {};
-  const box = el('sift-crop');
-  if (!box || !h.name) return;
+  if (!el('sift-crop') || !h.name) return;
   const env = await callOp('page.view', {
     run: h.name, page: h.page, line: h.line_index, region: 'line',
   });
+  // Вузли резолвимо ПІСЛЯ кожного await і лише коли крок ще актуальний:
+  // захоплений до await `box` — вже від'єднаний, і запис у нього не видно.
+  if (seq !== _siftSeq) return;
+  const box = el('sift-crop');
+  if (!box) return;
   if (!env.ok || !(env.data || {}).image) {
     box.innerHTML = `<p class="muted">${t('sift.crop.fail')}</p>`;
     return;
@@ -1040,6 +1129,7 @@ async function siftLoadCrop() {
   // Сусідні рядки — той самий «контекст двох голосів»: роль і відмінок стоять
   // поряд, а не в самому слові.
   const ctx = await callOp('page.text', { run: h.name, page: h.page });
+  if (seq !== _siftSeq) return;
   const cbox = el('sift-ctx');
   if (!cbox || !ctx.ok) return;
   const lines = (ctx.data || {}).lines || [];
@@ -1298,8 +1388,10 @@ SCREENS.jobs = async () => {
  * кнопка, що нічого не додає до шапки, читається як поламана.
  */
 SCREENS.settings = async () => {
+  const gen = SCREEN_GEN;
   busy();
   const env = await callOp('sections.show', {});
+  if (!alive(gen)) return;
   if (!env.ok) return failure(env);
   SECTIONS = env.data;
   const presets = Object.keys(env.data.presets || {});
@@ -1517,9 +1609,13 @@ const ACTIONS = {
   'geog.find': async (ev) => {
     ev.preventDefault();
     const f = new FormData(ev.target);
+    const seq = ++SEQ.geog;
+    const unlock = busyForm(ev.target);
     el('geoghits').innerHTML = `<p class="muted">${t('common.loading')}</p>`;
     const env = await callOp('geog.find',
       { q: f.get('q'), section: f.get('section') || '', limit: 40 });
+    unlock();
+    if (seq !== SEQ.geog) return;          // нас уже обігнав свіжіший запит
     // 🔴 Відмова каталогу — це НЕ «нічого не знайдено»: довідника просто немає,
     // і нуль тут не означав би нічого. Показуємо причину, а не порожню таблицю.
     if (!env.ok) { el('geoghits').innerHTML = `<div class="warn err">${esc(env.error)}</div>`; return; }
@@ -1579,11 +1675,15 @@ const ACTIONS = {
   'fond.rows': async (ev) => {
     ev.preventDefault();
     const f = new FormData(ev.target);
+    const seq = ++SEQ.fond;
+    const unlock = busyForm(ev.target);
     el('fondrows').innerHTML = `<p class="muted">${t('common.loading')}</p>`;
     const env = await callOp('fond.rows', {
       fond: f.get('fond'), q: f.get('q') || '', surname: f.get('surname') || '',
       uezd: f.get('uezd') || '', state: f.get('state') || '', limit: 200,
     });
+    unlock();
+    if (seq !== SEQ.fond) return;
     if (!env.ok) { el('fondrows').innerHTML = `<div class="warn err">${esc(env.error)}</div>`; return; }
     const rows = env.data.rows || [];
     // 🔴 Знаменник поруч із числом: «5 справ» без «із 2944» читається як
@@ -1610,7 +1710,7 @@ const ACTIONS = {
     const q = new FormData(ev.target).get('q');
     el('hits').innerHTML = `<p class="muted">${t('common.loading')}</p>`;
     const env = await callOp('catalog.search', { q, limit: 40 });
-    if (!env.ok) return failure(env);
+    if (!env.ok) return boxError('hits', env);
     const { hits = [], coverage = {} } = env.data;
     el('hits').innerHTML = `
       ${renderWarnings(env)}
@@ -1636,10 +1736,14 @@ const ACTIONS = {
   'search.run': async (ev) => {
     ev.preventDefault();
     const fd = new FormData(ev.target);
+    const seq = ++SEQ.search;
+    const unlock = busyForm(ev.target);
     el('hits').innerHTML = `<p class="muted">${t('common.loading')}</p>`;
     const env = await callOp('search.run',
       { q: fd.get('q'), where: fd.get('where'), limit: 100 });
-    if (!env.ok) return failure(env);
+    unlock();
+    if (seq !== SEQ.search) return;
+    if (!env.ok) return boxError('hits', env);
     const hits = env.data.hits || [];
     const cov = env.data.coverage || {};
     // Хіти лишаються під рукою: розбір відкривається з них, а не переповторює
@@ -1686,7 +1790,7 @@ const ACTIONS = {
     EYE = { case: new FormData(ev.target).get('case') };
     el('hits').innerHTML = `<p class="muted">${t('common.loading')}</p>`;
     const env = await callOp('pages.status', EYE);
-    if (!env.ok) return failure(env);
+    if (!env.ok) return boxError('hits', env);
     const d = env.data;
     el('hits').innerHTML = `
       ${renderWarnings(env)}
@@ -1786,7 +1890,7 @@ const ACTIONS = {
     VIEW = { run: fd.get('run'), page: fd.get('page') };
     el('hits').innerHTML = `<p class="muted">${t('common.loading')}</p>`;
     const env = await callOp('page.text', VIEW);
-    if (!env.ok) return failure(env);
+    if (!env.ok) return boxError('hits', env);
     const lines = env.data.lines || [];
     const geo = env.data.geometry || {};
     el('hits').innerHTML = `
@@ -1807,11 +1911,18 @@ const ACTIONS = {
       { ...VIEW, line: Number(elm.dataset.line), region: 'line' });
     if (!env.ok) return alert(env.error);
     const d = env.data;
-    el('shot').innerHTML = `
+    // Коробки може не бути: сюди доходять і тоді, коли `view.open` упав, а
+    // нарізка того самого прогону — ні. Без перевірки це незловлений TypeError,
+    // причому мовчазний (дії в `dispatch` не await'яться).
+    const shot = el('shot');
+    if (!shot) return;
+    // `esc` і в атрибуті: зараз тут data-URL, але єдине місце у файлі, де
+    // значення з відповіді йшло в атрибут сире, — саме це.
+    shot.innerHTML = `
       ${renderWarnings(env)}
-      <img src="${d.image}" alt="рядок ${d.line}" style="max-width:100%">
+      <img src="${esc(d.image || '')}" alt="${esc(`рядок ${d.line}`)}" style="max-width:100%">
       <p class="muted mono">${esc(d.text || '')}</p>`;
-    el('shot').scrollIntoView({ block: 'nearest' });
+    shot.scrollIntoView({ block: 'nearest' });
   },
 
   'read.plan': async (ev) => {
@@ -1820,7 +1931,7 @@ const ACTIONS = {
     LAST_READ = { case_dir: fd.get('case_dir'), script: fd.get('script') };
     el('hits').innerHTML = `<p class="muted">${t('common.loading')}</p>`;
     const env = await callOp('read.plan', LAST_READ);
-    if (!env.ok) return failure(env);
+    if (!env.ok) return boxError('hits', env);
     const p = env.data.plan || {};
     el('hits').innerHTML = `
       <table><tbody>
@@ -1846,7 +1957,7 @@ const ACTIONS = {
     el('hits').innerHTML = `<p class="muted">${t('common.loading')}</p>`;
     const env = await callOp('export.case',
       { case: fd.get('case'), what: fd.get('what') });
-    if (!env.ok) return failure(env);
+    if (!env.ok) return boxError('hits', env);
     const { columns = [], rows = [] } = env.data;
     LAST_EXPORT = { columns, rows, name: env.data.shifra || env.data.case };
     el('hits').innerHTML = `
@@ -1875,12 +1986,27 @@ const ACTIONS = {
     a.href = URL.createObjectURL(blob);
     a.download = `${String(name).replace(/[^\w.-]+/g, '_')}.csv`;
     a.click();
-    URL.revokeObjectURL(a.href);
+    // ⚠ Не одразу: посилання не в документі, і Firefox історично рвав
+    // завантаження, коли URL відкликали в тому ж такті, що й `click()`.
+    const href = a.href;
+    setTimeout(() => URL.revokeObjectURL(href), 10_000);
   },
 
   'jobs.cancel': async (_ev, elm) => {
-    await fetch(`/api/jobs/${encodeURIComponent(elm.dataset.job)}/cancel`,
+    // 🔴 Відповідь ПЕРЕВІРЯЄТЬСЯ. Сервер віддає 403 на протухлому токені й 404
+    // на невідомій роботі; доти обидві відмови були нечутні: список
+    // перемальовувався, робота лишалась «running», кнопка на місці — і людина
+    // тиснула її знову й знову, поки прогін тримав карту.
+    const res = await fetch(`/api/jobs/${encodeURIComponent(elm.dataset.job)}/cancel`,
       { method: 'POST', headers: { 'X-Nysh-Token': TOKEN } });
+    if (!res.ok) {
+      const env = await res.json().catch(() => ({}));
+      const why = res.status === 403 ? t('err.token') : (env.detail || `HTTP ${res.status}`);
+      const box = el('jobs');
+      if (box) box.insertAdjacentHTML('afterbegin',
+        `<div class="warn err">${esc(why)}</div>`);
+      return;
+    }
     await refreshJobs();
   },
 
@@ -1906,6 +2032,14 @@ function dispatch(ev) {
   // форми, і браузер скасовував перемикання — галочку неможливо було
   // поставити взагалі, і виглядало це як мертвий чекбокс, а не як помилка.
   if (ev.type !== 'submit' && elm.tagName === 'FORM') return;
+  // 🔴 Те саме для полів: їхня подія — `change` (або `input` із `data-live`),
+  // а не `click`. Диспетчер висить на обох, тож клік по `<select>`/чекбоксу
+  // давав ДВА проходи: один зі старим значенням (у момент кліку), другий зі
+  // свіжим. Клік у текстове поле просто щоб поставити каретку теж запускав
+  // повний прохід по бібліотеці. Видимої вади не було — її ховав `_libSeq`, —
+  // зате кожна взаємодія коштувала вдвічі, а на 1200 справах це відчутно.
+  if (ev.type === 'click'
+      && ['INPUT', 'SELECT', 'TEXTAREA', 'OPTION'].includes(elm.tagName)) return;
   const name = elm.dataset.act;
   const fn = ACTIONS[name];
   if (!fn) {
@@ -1939,7 +2073,15 @@ document.addEventListener('input', (ev) => {
   const elm = ev.target.closest('[data-act][data-live]');
   if (!elm) return;
   clearTimeout(_liveTimer);
-  _liveTimer = setTimeout(() => dispatch(ev), 250);
+  const gen = SCREEN_GEN;
+  _liveTimer = setTimeout(() => {
+    // 🔴 За 250 мс людина могла піти з екрана. Тоді поле вже від'єднане, але
+    // `data-act` на ньому лишився — дія викликалась і читала `(el('lib-q') ||
+    // {}).value`, тобто ПОРОЖНЬО, і мовчки скидала збережений фільтр
+    // бібліотеки. Наступний вхід у бібліотеку показував «нічого не набрано».
+    if (!alive(gen) || !document.contains(elm)) return;
+    dispatch(ev);
+  }, 250);
 });
 
 // ── навігація ────────────────────────────────────────────────────────────────
@@ -1948,6 +2090,9 @@ async function show(screen) {
   // потрапляють через закладку чи посилання з часів, коли секція була
   // ввімкнена, — і «нічого не сталось» тут читається як поламаний застосунок.
   if (!screenOn(screen)) {
+    // Покоління зростає і тут: інакше запит, що летить із попереднього екрана,
+    // домальовує свою таблицю поверх банера про вимкнену секцію.
+    SCREEN_GEN += 1;
     const sid = SECTIONS.screens[screen];
     const sec = SECTIONS.sections.find((s) => s.id === sid) || {};
     const label = LANG === 'en' ? sec.label_en : sec.label;
@@ -1980,7 +2125,11 @@ async function refreshJobs() {
   cursor = data.seq;
   const box = el('jobs');
   if (!box) return;
-  const jobs = (data.jobs || []).filter((j) => j.state !== 'done' || Date.now() / 1000 - j.updated < 300);
+  // 🔴 Вікно ретенції — на ВСІ фінальні стани, а не лише на «готово»:
+  // журнал робіт лежить на диску й переживає рестарти, тож помилка
+  // тижневої давнини висіла в списку «Що зараз робиться» вічно.
+  const jobs = (data.jobs || []).filter(
+    (j) => !FINAL_STATES.includes(j.state) || Date.now() / 1000 - j.updated < 300);
   box.innerHTML = jobs.length ? jobs.map((j) => `
     <div class="job">
       <b>${esc(j.title || j.kind)}</b> <span class="muted">${esc(j.state)}</span>
@@ -2003,6 +2152,9 @@ async function watchJobs() {
       const running = (data.jobs || []).filter((j) => j.state === 'running' || j.state === 'queued');
       // Лічильник живе в кнопці «Роботи», яку ставить `renderNav` — до першої
       // побудови шапки його ще немає.
+      // Число тримається в модулі: шапка перемальовується при кожній зміні
+      // розділу, а робота триває незалежно від того, куди пішла людина.
+      RUNNING_JOBS = running.length;
       const badge = el('jobcount');
       if (badge) badge.textContent = running.length ? String(running.length) : '';
       // 🐾 Знак у шапці показує, що робота йде. Саме ПРОЦЕС: результату він не

@@ -70,8 +70,15 @@ def score_record(record: dict[str, Any], person: Person) -> Score:
 
     surname = _string_score(record.get("surname"), primary.surname)
     given = _string_score(record.get("given_name"), primary.given)
-    has_patronymic = bool(record.get("patronymic"))
-    patronymic = _string_score(record.get("patronymic"), None) if has_patronymic else 0.0
+    # 🔴 Порівнювати по батькові НЕМА З ЧИМ: канонічна особа несе лише
+    # `given`/`surname`, поля патроніма в `NameVariant` немає. Було
+    # `_string_score(record["patronymic"], None)` — а це завжди 0.0, при тому
+    # що вага 0.1 застосовувалась саме тоді, коли патронім у записі Є. Тобто
+    # запис із по батькові виходив на 10% слабшим за той самий запис без нього,
+    # і при порозі перегляду 0.6 з черги випадав найінформативніший із двох.
+    # Доки поля немає, фактор не бере участі в оцінці взагалі.
+    patronymic_comparable = False
+    patronymic = 0.0
 
     person_birth_year = _extract_person_birth_year(person)
     year = _year_score(record.get("birth_year"), person_birth_year)
@@ -84,17 +91,16 @@ def score_record(record: dict[str, Any], person: Person) -> Score:
         "year": year,
         "place": place,
     }
-    # Якщо в записі немає patronymic, його вага перерозподіляється пропорційно
-    # на ім'я й прізвище, щоб брак цього поля не штрафував повний збіг по
-    # решті полів.
+    # Вага фактора, який не порівнювався, перерозподіляється пропорційно на
+    # ім'я й прізвище: інакше недоступне поле штрафувало б повний збіг по решті.
     weights = {
         "surname": _W_SURNAME,
         "given": _W_GIVEN,
-        "patronymic": _W_PATRONYMIC if has_patronymic else 0.0,
+        "patronymic": _W_PATRONYMIC if patronymic_comparable else 0.0,
         "year": _W_YEAR,
         "place": _W_PLACE,
     }
-    if not has_patronymic:
+    if not patronymic_comparable:
         leftover = _W_PATRONYMIC
         weights["surname"] += leftover * (_W_SURNAME / (_W_SURNAME + _W_GIVEN))
         weights["given"] += leftover * (_W_GIVEN / (_W_SURNAME + _W_GIVEN))

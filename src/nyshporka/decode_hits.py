@@ -28,15 +28,14 @@
 """
 from __future__ import annotations
 
-import json
 import os
 from datetime import date
 from pathlib import Path
 from typing import Any
 
 from nyshporka.core.workspace import workspace
+from nyshporka.utils.atomic import CorruptFileError, read_json, write_json
 
-ROOT = workspace().root
 HITS_PATH = workspace().spotter / "decode_hits.json"
 
 KINDS = {
@@ -53,22 +52,23 @@ VERDICTS = {
 
 
 def load() -> dict[str, Any]:
-    """Увесь реєстр. Порожній скелет, якщо файлу ще немає."""
-    if not HITS_PATH.exists():
-        return {"version": 1, "cases": {}}
-    try:
-        data = json.loads(HITS_PATH.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return {"version": 1, "cases": {}}
+    """Увесь реєстр. Порожній скелет, якщо файлу ще немає.
+
+    🔴 Побитий файл — це `CorruptFileError`, а НЕ порожній скелет. Тут лежать
+    вердикти, поставлені оком із мобільного, а кожен писач нижче робить
+    `data = load(); ...; save(data)`: читач, що на побитому JSON віддає порожньо,
+    стирає їх усі першим же дотиком до кнопки.
+    """
+    data = read_json(HITS_PATH, default={"version": 1, "cases": {}})
+    if not isinstance(data, dict):
+        raise CorruptFileError(HITS_PATH, "у корені не об'єкт")
     data.setdefault("cases", {})
     return dict(data)
 
 
 def save(data: dict[str, Any]) -> Path:
-    HITS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    HITS_PATH.write_text(
-        json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    return HITS_PATH
+    """Атомарно: обрив посеред запису лишав обрізаний JSON, тобто — див. `load`."""
+    return write_json(HITS_PATH, data)
 
 
 def cases() -> list[dict[str, Any]]:
@@ -110,8 +110,12 @@ def list_scans(rel_path: str) -> list[str]:
     """Імена файлів-сканів теки справи, відсортовані. Порожньо, якщо теки нема."""
     if not rel_path:
         return []
-    d = (ROOT / rel_path).resolve()
-    if not _inside_repo(d) or not d.is_dir():
+    # 🔴 Без `.resolve()` і з тим самим гардом, що в `scan_path`: `resolve()`
+    # розкриває junction, шлях стає `T:\…`, і гард відкидає теку. Наслідок був
+    # тихий — `n_scans: 0` і `scan_index: -1` на КОЖНОМУ хіті, тобто гортання
+    # сусідніх аркушів мертве, хоч сам скан `scan_path` віддає нормально.
+    d = _inside_repo(rel_path)
+    if d is None or not d.is_dir():
         return []
     return sorted(p.name for p in d.iterdir()
                   if p.is_file() and p.suffix.lower() in (".jpg", ".jpeg", ".png"))

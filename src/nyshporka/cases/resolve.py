@@ -16,7 +16,6 @@ junction, який `dejunction()` не покриває. Тобто
 """
 from __future__ import annotations
 
-import json
 import re
 from collections import defaultdict
 from dataclasses import dataclass
@@ -25,6 +24,7 @@ from typing import Any
 
 from nyshporka.cases.model import RunLink
 from nyshporka.library import ROOT, _archium_parse, dejunction, load_library, parse_case_code
+from nyshporka.utils.atomic import CorruptFileError, read_json, write_json
 
 OVERRIDES_PATH = ROOT / "data" / "cases" / "overrides.json"
 
@@ -166,12 +166,17 @@ def load_overrides() -> dict[str, Any]:
     справи). `bundles` — одиниці роботи, які архівною справою не є: прогін `fuzovka`
     покриває ~100 вирізок із РІЗНИХ справ ф.211, зібраних за селом, тож прив'язка
     до однієї справи була б вигадкою, а викидання сховало б 3390 сторінок декоду.
+
+    🔴 Побитий файл кидає `CorruptFileError`, а не порожньо. Цей файл правлять
+    ТЕКСТОВИМ РЕДАКТОРОМ (так написано двома абзацами нижче, у `bind_run`), тож
+    зайва кома — очікуваний стан, а не екзотика. Читач, що на ній віддавав `{}`,
+    у парі з `bind_run` («прочитати → додати ключ → записати») стирав усі
+    попередні прив'язки й усі `bundles` на першому ж записі.
     """
-    try:
-        data = json.loads(OVERRIDES_PATH.read_text(encoding="utf-8"))
-        return dict(data)
-    except Exception:
-        return {}
+    data = read_json(OVERRIDES_PATH, default={})
+    if not isinstance(data, dict):
+        raise CorruptFileError(OVERRIDES_PATH, "у корені не об'єкт")
+    return dict(data)
 
 
 @lru_cache(maxsize=1)
@@ -211,11 +216,7 @@ def bind_run(run: str, key: str, why: str = "") -> dict[str, Any]:
     runs = dict(data.get("runs") or {})
     runs[run] = {"key": key, **({"why": why} if why else {})}
     data["runs"] = runs
-    OVERRIDES_PATH.parent.mkdir(parents=True, exist_ok=True)
-    tmp = OVERRIDES_PATH.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=1) + "\n",
-                   encoding="utf-8")
-    tmp.replace(OVERRIDES_PATH)
+    write_json(OVERRIDES_PATH, data, indent=1)
     # 🔴 Кеші скидаємо ОБИДВА. `load_overrides` і `_run_overrides` кешовані
     # `lru_cache`, тож без цього правка підхопилась би лише після рестарту
     # процесу — а людина, яка щойно прив'язала прогін, одразу тисне «показати»

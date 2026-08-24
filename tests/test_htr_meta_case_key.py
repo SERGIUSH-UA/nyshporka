@@ -88,3 +88,23 @@ def test_side_voice_and_rescue_metas_carry_the_key(marker: str) -> None:
         "(`<справа>-diak_v4`) і рятувальна тека — обидві реєстр бачить як "
         "окремі прогони"
     )
+
+
+def test_daemon_passes_resolved_case_key_to_the_runner() -> None:
+    """🔴 Третє місце, де ключ зникав: шлях ДЕМОНА.
+
+    `_start_read` резолвить шифру (з payload або з опису в теці) і кладе її в
+    `cfg` завдання — а виконавцеві передавав `payload.get("case_key")` НАНОВО.
+    Форма читання в консолі питає лише теку, тож кожен запуск кнопкою йшов без
+    `--case-key`: у черзі шифра видна, у меті прогону — порожньо, і розходження
+    непомітне. Тестом покрито не було саме це — виклик `_run_read`.
+
+    Перевіряємо текстом: підняти демона з живим раннером у тестах нема чим, а
+    маркер вузький — він зникне разом із дефектом, а не з рефакторингом.
+    """
+    src = (Path(__file__).resolve().parent.parent / "src" / "nyshporka"
+           / "daemon" / "workers.py").read_text(encoding="utf-8")
+    assert "_run_read(bus, job, plan, case_key)" in src, (
+        "виконавцеві має йти вирахувана змінна `case_key`")
+    assert 'payload.get("case_key") or ""))' not in src, (
+        "payload перечитується вдруге — шифра з опису теки губиться")

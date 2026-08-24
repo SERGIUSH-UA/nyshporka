@@ -34,6 +34,7 @@ from typing import Any
 from nyshporka.core.workspace import workspace
 from nyshporka.models import Source
 from nyshporka.storage.files import read_source
+from nyshporka.utils.atomic import CorruptFileError, read_json, write_json
 
 _WS = workspace()
 ROOT = _WS.root
@@ -1535,7 +1536,6 @@ def build_library() -> list[CaseEntry]:
 
 def write_library(entries: list[CaseEntry]) -> Path:
     """Записати бібліотеку у data/derived/case_library.json."""
-    LIBRARY_PATH.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "_comment": ("Бібліотека архівних справ (канон ∪ диск). Опис статичний — "
                      "перебудова: `nysh cases build` або кнопка 🔄 у консолі. "
@@ -1543,10 +1543,9 @@ def write_library(entries: list[CaseEntry]) -> Path:
         "count": len(entries),
         "cases": [asdict(e) for e in entries],
     }
-    tmp = LIBRARY_PATH.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=1), encoding="utf-8")
-    tmp.replace(LIBRARY_PATH)
-    return LIBRARY_PATH
+    # tmp тепер із pid: спільний `.json.tmp` дві перебудови поспіль (кнопка в
+    # консолі + `cases build` у терміналі) писали одночасно й перетирали одна одну.
+    return write_json(LIBRARY_PATH, payload, indent=1, trailing_nl=False)
 
 
 # ── читання / резолвер для пікера ─────────────────────────────────────────────
@@ -1564,12 +1563,16 @@ VERDICT_KINDS = {
 
 
 def load_verdicts() -> dict[str, Any]:
-    """key справи → {verdict, note, pages, date}. Порожньо якщо файла ще нема."""
-    try:
-        return dict(json.loads(
-            VERDICTS_PATH.read_text(encoding="utf-8")).get("verdicts", {}))
-    except Exception:
-        return {}
+    """key справи → {verdict, note, pages, date}. Порожньо якщо файла ще нема.
+
+    🔴 Порожньо — ТІЛЬКИ коли файла немає. Побитий файл кидає `CorruptFileError`:
+    тут лежать рішення ока, які за коментарем вище не застарівають, а `set_verdict`
+    пише поверх прочитаного — тож проковтнута помилка розбору стирала їх усі.
+    """
+    data = read_json(VERDICTS_PATH, default={"verdicts": {}})
+    if not isinstance(data, dict):
+        raise CorruptFileError(VERDICTS_PATH, "у корені не об'єкт")
+    return dict(data.get("verdicts") or {})
 
 
 def set_verdict(key: str, verdict: str | None, note: str = "",
@@ -1583,14 +1586,11 @@ def set_verdict(key: str, verdict: str | None, note: str = "",
                      "pages": pages, "date": date or ""}
     else:
         data.pop(key, None)
-    VERDICTS_PATH.parent.mkdir(parents=True, exist_ok=True)
     payload = {"_comment": ("Ручні вердикти по справах (перегляд оком). Не застарівають "
                             "від зміни YOLO-моделі — на відміну від скану. Ключ = key "
                             "справи з case_library.json."),
                "verdicts": data}
-    tmp = VERDICTS_PATH.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=1), encoding="utf-8")
-    tmp.replace(VERDICTS_PATH)
+    write_json(VERDICTS_PATH, payload, indent=1, trailing_nl=False)
     return dict(data.get(key, {}))
 
 

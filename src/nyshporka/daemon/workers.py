@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -88,11 +89,11 @@ async def _start_generic(bus: JobBus, op_name: str,
         raise ValueError(f"невідома операція «{op_name}»")
     cfg = dict(payload or {})
     # 🔴 Другий однаковий прохід не заводиться, і це не косметика. Через цю
-    # гілку йдуть `registry.collect` і `registry.merge` — обидві МУТУЮТЬ, і
-    # `fonds/merge/write.py` пише реєстр звичайним `open("w")`, без tmp+replace.
-    # Тобто два паралельні злиття того самого фонду труть один одному і реєстр,
-    # і чергу розбіжностей; достатнього приводу шукати не треба — вистачає
-    # подвійного кліку по кнопці.
+    # гілку йдуть `registry.collect` і `registry.merge` — обидві МУТУЮТЬ той
+    # самий реєстр фонду й ту саму чергу розбіжностей. Запис там тепер
+    # атомарний (`fonds/merge/write._write_tsv`), тож обрізаного файлу вже не
+    # буде, але два одночасні злиття все одно дали б результат «хто останній»,
+    # а приводу шукати не треба — вистачає подвійного кліку по кнопці.
     #
     # ⚠ Шукається АКТИВНА робота, а не ключ ідемпотентності. Ключ жив би ще
     # кілька хвилин після завершення й віддавав би СТАРИЙ готовий запис — а
@@ -290,8 +291,7 @@ async def _start_read(bus: JobBus, ws: Workspace,
         idempotency_key=f"read:{plan.out_dir}",
     )
     if created:
-        _keep(asyncio.create_task(_run_read(bus, job, plan,
-                                            str(payload.get("case_key") or ""))))
+        _keep(asyncio.create_task(_run_read(bus, job, plan, case_key)))
     return job
 
 
@@ -322,6 +322,10 @@ async def _run_read(bus: JobBus, job: JobRecord, plan: Any,
     proc = await asyncio.create_subprocess_exec(
         *cmd, stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.STDOUT)
+    # 🔴 «Спинити» має спиняти. Доти кнопка лише перефарбовувала рядок, а
+    # раннер читав справу далі — годинами тримаючи карту, — і наприкінці сам
+    # ставив «готово» поверх «скасовано».
+    bus.on_stop(job.id, lambda: _terminate(proc))
     # 🔴 Хвіст ЛЮДСЬКОГО виводу зберігається окремо. Коли прогін падає, у
     # завданні лишається код повернення — а причина написана саме там, звичайним
     # рядком, і без нього діагностика починається з повторного прогону.
@@ -341,6 +345,7 @@ async def _run_read(bus: JobBus, job: JobRecord, plan: Any,
             tail.append(human)
             del tail[:-40]
     rc = await proc.wait()
+    bus.drop_stopper(job.id)
 
     # 🔴 Приймач повноти — ДИСК, а не код повернення. При шардингу тиха втрата
     # сторінок дає rc=0 і порожній перелік збоїв; єдине, що це ловить, — число
@@ -349,6 +354,14 @@ async def _run_read(bus: JobBus, job: JobRecord, plan: Any,
 
     done_pages = len(list(Path(plan.out_dir).glob("*.txt")))
     missing = max(0, R.count_frames(Path(plan.case_dir)) - done_pages)
+    if bus.cancelled(job.id):
+        # Скасоване лишається скасованим: перезаписати його на DONE/ERROR
+        # означало б сказати, що робота дійшла до кінця. Скільки встигли
+        # прочитати — записуємо, це знадобиться для `resume`.
+        await bus.update(job.id, result={"out_dir": str(plan.out_dir),
+                                         "pages": done_pages, "rc": rc,
+                                         "tail": tail[-12:]})
+        return
     ok = rc == 0 and missing == 0
     await bus.update(
         job.id,
@@ -358,6 +371,30 @@ async def _run_read(bus: JobBus, job: JobRecord, plan: Any,
                (f"; без тексту лишилось {missing} сторінок" if missing else "")),
         result={"out_dir": str(plan.out_dir), "pages": done_pages,
                 "missing": missing, "rc": rc, "tail": tail[-12:]})
+
+
+def _terminate(proc: asyncio.subprocess.Process) -> None:
+    """Спинити раннер: спершу ввічливо, за 5 с — силою.
+
+    ⚠ На Windows `terminate()` це `TerminateProcess`, тобто діти раннера
+    (шарди) можуть пережити батька; ловить їх власний watchdog раннера, а тут
+    важливо не лишити ГОЛОВНИЙ процес, який тримає відеокарту.
+    """
+    if proc.returncode is not None:
+        return
+    try:
+        proc.terminate()
+    except ProcessLookupError:
+        return
+
+    async def _kill_later() -> None:
+        try:
+            await asyncio.wait_for(proc.wait(), timeout=5.0)
+        except TimeoutError:
+            with contextlib.suppress(ProcessLookupError):
+                proc.kill()
+
+    _keep(asyncio.create_task(_kill_later()))
 
 
 def _safe(ref: str) -> str:

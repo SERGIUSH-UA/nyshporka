@@ -90,18 +90,21 @@ def _process_started() -> float:
 _IMPORT_TIME = time.time()
 
 
-def _process_alive(pid: int, started: float) -> bool:
-    """Чи живий ТОЙ САМИЙ процес, а не просто номер.
+def _alive_state(pid: int, started: float) -> bool | None:
+    """Чи живий ТОЙ САМИЙ процес: True / False / None — «не знаю».
 
     Без звірки часу старту перевірка ламається через тиждень: PID
     перевикористовується, і чужий процес виглядає як наш власний писар.
+
+    🔴 «Не знаю» — окремий стан, а не «живий». Від нього залежить, чи можна
+    забрати замок: живого не чіпаємо ніколи, точно мертвого забираємо одразу,
+    а при невідомості лишається єдиний доступний доказ — тиша довша за
+    `STALE_SEC`.
     """
     try:
         import psutil
     except ImportError:
-        # Без psutil судимо лише за биттям серця — гірше, але не хибно:
-        # покинутий замок усе одно протухне за STALE_SEC.
-        return True
+        return None                       # без psutil судити нема чим
     try:
         p = psutil.Process(pid)
         if not p.is_running() or p.status() == psutil.STATUS_ZOMBIE:
@@ -109,6 +112,11 @@ def _process_alive(pid: int, started: float) -> bool:
         return bool(abs(float(p.create_time()) - started) < 2.0)
     except Exception:
         return False
+
+
+def _process_alive(pid: int, started: float) -> bool:
+    """Сумісний вигляд: «не знаю» трактується як живий (нікого не чіпати)."""
+    return _alive_state(pid, started) is not False
 
 
 def read(root: Path) -> LockInfo | None:
@@ -168,8 +176,16 @@ class WorkspaceLock:
                 return self
             raise LockBusy(LockInfo(pid=0, host="?", started=0.0, heartbeat=0.0))
 
-        if self.steal_stale and (holder.is_stale()
-                                 or not _process_alive(holder.pid, holder.started)):
+        # 🔴 Було `is_stale() OR не живий` — тобто самої тиші вистачало, щоб
+        # забрати замок у ЖИВОГО процесу. А серце в демоні билось рівно один
+        # раз, перед `uvicorn.run`, тож будь-який демон старший за 45 секунд
+        # віддавав свій простір першому охочому: два писарі на одну чергу — те,
+        # що цей модуль оголошує неприпустимим у першому ж абзаці.
+        # Тепер: точно мертвий — забираємо одразу; «не знаю» (немає psutil) —
+        # лише коли мовчить довше за `STALE_SEC`; живий — ніколи.
+        alive = _alive_state(holder.pid, holder.started)
+        if self.steal_stale and (alive is False
+                                 or (alive is None and holder.is_stale())):
             self._force_write()
             self._held = True
             return self

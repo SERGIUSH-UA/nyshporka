@@ -7,6 +7,7 @@ Sync (через stdlib `sqlite3`), бо це batch-операція без HTTP
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime
@@ -183,15 +184,25 @@ def reindex(project_root: Path) -> ReindexReport:
         key=lambda x: x.id,
     )
 
+    # 🔴 Збірка йде в tmp і лише потім заміщає базу. Було навпаки — `unlink()`
+    # канонічної бази ПЕРЕД збіркою нової: будь-який збій усередині
+    # (скінчилось місце, битий факт, зміна схеми) лишав систему без
+    # `nyshporka.sqlite` взагалі, а на її mtime дивиться `cases.db.staleness`,
+    # судячи про свіжість реєстру. Зразок поруч — `cases/db.py:build_index`.
+    # ⚠ `with sqlite3.connect(...)` керує ТРАНЗАКЦІЄЮ, а не з'єднанням: без
+    # явного `close()` файл лишається відкритим, і `replace` падає на Windows.
     sqlite_path = derived / "nyshporka.sqlite"
-    if sqlite_path.exists():
-        sqlite_path.unlink()
-
+    sqlite_tmp = derived / f"nyshporka.sqlite.{os.getpid()}.tmp"
+    sqlite_tmp.unlink(missing_ok=True)
     facts_count = 0
-    with sqlite3.connect(sqlite_path) as conn:
+    conn = sqlite3.connect(sqlite_tmp)
+    try:
         conn.executescript(_SCHEMA)
         facts_count = _write_sqlite(conn, persons, families, places, sources)
         conn.commit()
+    finally:
+        conn.close()
+    os.replace(sqlite_tmp, sqlite_path)
 
     graph_path = derived / "graph.json"
     graph_path.write_text(

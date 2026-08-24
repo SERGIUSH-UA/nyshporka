@@ -23,8 +23,15 @@ export function swapHtml(el, html, opts = {}) {
   const prevOuter = scroller ? scroller.scrollTop : 0;
   // висота ДО підміни: інакше між очищенням і промальовкою нового вмісту
   // контейнер має нульову висоту і все під ним підстрибує вгору
+  //
+  // ⚠ `min-height` на елементі табличного боксу (`<tbody>`, `<tr>`) браузер
+  // ігнорує — а саме `<tbody id="lib-rows">` тут найдовший список і найбільший
+  // стрибок. Для таких випадків тримаємо висоту через `height` на самому боксі:
+  // на час підміни це та сама розпірка, і вона знімається тим самим кадром.
   const h = el.offsetHeight;
-  if (h) el.style.minHeight = h + 'px';
+  const prop = /^(TBODY|THEAD|TFOOT|TR|TABLE)$/.test(el.tagName)
+    ? 'height' : 'minHeight';
+  if (h) el.style[prop] = h + 'px';
 
   el.classList.remove('swapped');
   void el.offsetWidth;            // рестарт CSS-анімації проявлення
@@ -36,7 +43,7 @@ export function swapHtml(el, html, opts = {}) {
     if (scroller) scroller.scrollTop = prevOuter;
   }
   // висоту відпускаємо лише коли новий вміст уже вимірявся
-  requestAnimationFrame(() => requestAnimationFrame(() => { el.style.minHeight = ''; }));
+  requestAnimationFrame(() => requestAnimationFrame(() => { el.style[prop] = ''; }));
 }
 
 /** Найближчий предок, що реально скролиться (зазвичай <main>). */

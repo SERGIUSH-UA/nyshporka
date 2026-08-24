@@ -50,6 +50,7 @@ from nyshporka.sources.base import (
     SourceError,
 )
 from nyshporka.sources.http import Fetcher, HttpError
+from nyshporka.utils.atomic import atomic_write_bytes
 
 SPA_URL = "https://fsfiles.ru/"
 STORAGE_BASE = "https://geno-dbase.ru/storage"
@@ -477,7 +478,11 @@ class FilmMirrorSource:
                     try:
                         blob = self.http.get(self.frame_url(slug, path, name),
                                              client=c).content
-                        dst.write_bytes(blob)
+                        # 🔴 Через `.part`: обрив посеред запису лишав кадр
+                        # ненульового розміру, і перевірка «вже є» вище
+                        # рахувала його завантаженим НАЗАВЖДИ — недокачаний
+                        # аркуш виявлявся аж на HTR, через тижні.
+                        atomic_write_bytes(dst, blob)
                         res.frames += 1
                         res.bytes += len(blob)
                         misses = 0

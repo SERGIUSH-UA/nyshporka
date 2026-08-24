@@ -7,13 +7,14 @@
 from __future__ import annotations
 
 import csv
-import json
+import io
 import re
 from pathlib import Path
 from typing import Any
 
 from nyshporka.fonds.merge.sources import COLUMNS
 from nyshporka.fonds.merge.text import opys_sort
+from nyshporka.utils.atomic import atomic_write_text, write_json
 
 CONFLICT_COLUMNS = ("opys", "spr", "field", "value_a", "src_a", "value_b",
                     "src_b", "score", "verdict", "note")
@@ -32,21 +33,35 @@ def cell(value: Any) -> str:
     return _RE_CELL.sub(" ", str(value))
 
 
+def _write_tsv(path: Path, header: tuple[str, ...],
+               rows: list[list[str]]) -> None:
+    """TSV атомарно й побайтово (явний LF — золоті фікстури звіряються байтами).
+
+    🔴 Атомарність тут не косметика: `conflicts.tsv` — ЄДИНА копія вердиктів,
+    які дослідник вписав у чергу розбіжностей, і `run.py` читає їх із того
+    самого файлу, який наступним рядком перезаписує. Обрив посеред `open("w")`
+    лишав обрізаний файл, тобто стирав ту роботу без сліду.
+    """
+    buf = io.StringIO(newline="")
+    wr = csv.writer(buf, delimiter="\t", lineterminator="\n")
+    wr.writerow(header)
+    wr.writerows(rows)
+    atomic_write_text(path, buf.getvalue(), newline="\n")
+
+
 def write_merged(path: Path, reg: dict[Any, dict[str, Any]]) -> int:
     """Реєстр фонду. Повертає кількість рядків."""
     rows = sorted(reg.values(),
                   key=lambda r: (opys_sort(r["opys"]), int(r["spr_int"]),
                                  r["spr_letter"]))
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8", newline="") as fh:
-        wr = csv.writer(fh, delimiter="\t", lineterminator="\n")
-        wr.writerow(COLUMNS)
-        for r in rows:
-            out = dict(r)
-            out["sources"] = ",".join(sorted(r["src"]))
-            out["title_alt"] = "; ".join(r["title_alt"])
-            out["surnames"] = "; ".join(r["surnames"])
-            wr.writerow([cell(out.get(c, "")) for c in COLUMNS])
+    body = []
+    for r in rows:
+        out = dict(r)
+        out["sources"] = ",".join(sorted(r["src"]))
+        out["title_alt"] = "; ".join(r["title_alt"])
+        out["surnames"] = "; ".join(r["surnames"])
+        body.append([cell(out.get(c, "")) for c in COLUMNS])
+    _write_tsv(path, tuple(COLUMNS), body)
     return len(rows)
 
 
@@ -82,12 +97,8 @@ def carry_verdicts(path: Path, conflicts: list[dict[str, str]]) -> int:
 
 
 def write_conflicts(path: Path, conflicts: list[dict[str, str]]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8", newline="") as fh:
-        wr = csv.writer(fh, delimiter="\t", lineterminator="\n")
-        wr.writerow(CONFLICT_COLUMNS)
-        for c in conflicts:
-            wr.writerow([cell(c.get(k, "")) for k in CONFLICT_COLUMNS])
+    _write_tsv(path, CONFLICT_COLUMNS,
+               [[cell(c.get(k, "")) for k in CONFLICT_COLUMNS] for c in conflicts])
 
 
 def write_coverage(path: Path, coverage: dict[str, Any]) -> None:
@@ -99,9 +110,7 @@ def write_coverage(path: Path, coverage: dict[str, Any]) -> None:
     «зміненим» після КОЖНОЇ перезбірки, хоч жодне число в ньому не
     рухалось, — і справжня зміна покриття тонула в цьому шумі.
     """
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(coverage, ensure_ascii=False, indent=2) + "\n",
-                    encoding="utf-8", newline="\n")
+    write_json(path, coverage, indent=2, newline="\n")
 
 
 def _has_human_input(path: Path) -> bool:
@@ -129,10 +138,6 @@ def write_unresolved(path: Path, unresolved: list[tuple[str, str]]) -> bool:
         if path.is_file() and not _has_human_input(path):
             path.unlink()
         return False
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8", newline="") as fh:
-        wr = csv.writer(fh, delimiter="\t", lineterminator="\n")
-        wr.writerow(UNRESOLVED_COLUMNS)
-        for source, name in unresolved:
-            wr.writerow([source, name, "", "", ""])
+    _write_tsv(path, UNRESOLVED_COLUMNS,
+               [[source, name, "", "", ""] for source, name in unresolved])
     return True

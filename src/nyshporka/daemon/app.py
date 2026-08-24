@@ -20,6 +20,7 @@
 """
 from __future__ import annotations
 
+import contextlib
 import secrets
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -80,7 +81,14 @@ def create_app(ws: Workspace | None = None, *, token: str = "") -> FastAPI:
     def require_token(given: str | None) -> None:
         # `compare_digest` навмисно: порівняння рядків «у лоб» витікає довжиною
         # збігу. Тут це параноя, але дешева.
-        if not given or not secrets.compare_digest(given, tok):
+        #
+        # 🔴 Порівнюються БАЙТИ. На рядках `compare_digest` кидає `TypeError`,
+        # щойно в них трапиться не-ASCII, — і замість чесної відмови 403
+        # клієнт отримував 500 Internal Server Error. Токен приходить ззовні,
+        # тобто будь-який зіпсований копіпаст перетворював відмову на збій
+        # сервера, до якого фронт не має жодного пояснення.
+        if not given or not secrets.compare_digest(given.encode("utf-8"),
+                                                   tok.encode("utf-8")):
             raise HTTPException(status_code=403, detail="потрібен токен застосунку")
 
     # ── сторінка ─────────────────────────────────────────────────────────────
@@ -270,8 +278,31 @@ def serve(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT, *,
                 import threading
                 import webbrowser
                 threading.Timer(1.0, lambda: webbrowser.open(url)).start()
+            # 🔴 Серце мусить БИТИСЬ, а не вдаритись один раз. Тут стояв
+            # єдиний `held.beat()` перед `uvicorn.run`, тобто через
+            # `STALE_SEC` (45 с) замок живого демона виглядав покинутим.
+            # Нитка — daemon=True: вона не тримає shutdown, а `uvicorn.run`
+            # блокує потік до кінця життя процесу.
+            import threading as _threading
+
+            from nyshporka.core.lock import HEARTBEAT_SEC
+
+            stop = _threading.Event()
+
+            def _pulse() -> None:
+                while not stop.wait(HEARTBEAT_SEC):
+                    # диск смикнувся — наступний удар за 10 с
+                    with contextlib.suppress(OSError):
+                        held.beat()
+
             held.beat()
-            uvicorn.run(app, host=host, port=port, log_level="warning")
+            hb = _threading.Thread(target=_pulse, name="nysh-lock-beat",
+                                   daemon=True)
+            hb.start()
+            try:
+                uvicorn.run(app, host=host, port=port, log_level="warning")
+            finally:
+                stop.set()
     except LockBusy as busy:
         raise SystemExit(
             f"🔴 простір {space.root} уже зайнятий: {busy}. "
