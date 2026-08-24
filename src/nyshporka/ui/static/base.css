@@ -1,0 +1,399 @@
+/* 🎨 Нишпорка — примітиви спільного шару.
+
+   Цей файл читають ОБИДВІ морди: ком'юніті-застосунок (`nysh serve`) і консоль
+   дослідника. Тут лежить те, що не залежить від того, чия це вкладка: значки,
+   розкладка сторінки, форм-контролі, кнопки, бейджі, рух, поведінка на
+   телефоні. Усе, що знає про конкретну роботу — банк розмітки, синтетику,
+   гортач, — лишається у власному css кожної морди.
+
+   🔴 Кольорів, радіусів і тривалостей ТУТ НЕМАЄ. Вони приходять токенами з
+   `tokens.css`, згенерованого з `brand.yaml`. Вписаний сюди `#2a2a2a` розійшовся
+   б із ними тихо: нічого не падає, просто через півроку це два різні продукти.
+   Єдиний виняток — маска хрестика `type=search`: `stroke='black'` там не колір,
+   а ключове слово всередині маски, яка бере саму лише альфу.
+
+   ⚠ Підключати ПІСЛЯ `tokens.css` і ПЕРЕД власним css морди: свої правила
+   мусять мати змогу перебити базові, не піднімаючи специфічність. */
+/* Кольори/радіуси/тривалості — у tokens.css. Тут лише розкладка й компоненти. */
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+/* 🔴 Chrome 121+ ІГНОРУЄ ::-webkit-scrollbar-*, щойно на елементі стоїть
+   scrollbar-width або scrollbar-color. У стрічки бейджів рев'ю стояв лише
+   scrollbar-width:thin — тож уся кастомізація відпадала і поверх темної картки
+   малювався світлий СИСТЕМНИЙ скролбар зі стрілками. Задаємо колір глобально
+   (scrollbar-color успадковується), ::-webkit-* лишається для Safari. */
+:root {
+  scrollbar-color: var(--line-3) transparent;
+  /* Один рядок фарбує всі 21 checkbox і 13 range консолі; доти акцент був
+     проставлений точково лише в п'яти місцях. */
+  accent-color: var(--accent-fill);
+  /* Форма хрестика для type=search. Живе тут, а не в tokens.css, бо КОЛЬОРУ
+     не несе: `stroke='black'` — ключове слово всередині маски, а маска бере
+     саму лише альфу. Колір дає currentColor у правилі нижче. */
+  --ctl-x: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round'%3E%3Cpath d='m3 3 6 6M9 3l-6 6'/%3E%3C/svg%3E");
+}
+html, body { margin: 0; height: 100%; font: var(--font-size)/var(--line-height) var(--font-text);
+  background: var(--bg); color: var(--fg); }
+/* ══ Іконки ═══════════════════════════════════════════════════════════════
+   Один клас на всі значки зі спрайта `console.html`. `stroke: currentColor`
+   — суть усієї заміни: значок бере колір свого контейнера, тож на активній
+   вкладці стає акцентним, на зеленій кнопці — білим, у приглушеному рядку —
+   сірим. Емодзі так не вміли й лишалися різнобарвними плямами.
+   `stroke-width` заданий тут, а не в спрайті: символи 24×24 масштабуються до
+   14-20px, і фіксована в SVG товщина візуально «худла» на дрібних розмірах.
+   ─────────────────────────────────────────────────────────────────────── */
+.ic { width: 16px; height: 16px; flex: 0 0 auto; display: inline-block;
+  vertical-align: -.185em; margin-right: .4em;
+  fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.ic-o { margin-right: 0; }             /* кнопка БЕЗ підпису — відступ зайвий */
+/* Тон значка (мапа значок→тон — у `core/icons.js`, там же й пояснення).
+   Задається `color`, а не `stroke`: так тон лишається ЗВИЧАЙНИМ успадкуванням
+   і будь-яке правило нижче може його перебити одним рядком. */
+.ic-t-gold   { color: var(--ic-gold); }    .ic-t-amber  { color: var(--ic-amber); }
+.ic-t-orange { color: var(--ic-orange); }  .ic-t-red    { color: var(--ic-red); }
+.ic-t-pink   { color: var(--ic-pink); }    .ic-t-violet { color: var(--ic-violet); }
+.ic-t-indigo { color: var(--ic-indigo); }  .ic-t-blue   { color: var(--ic-blue); }
+.ic-t-sky    { color: var(--ic-sky); }     .ic-t-cyan   { color: var(--ic-cyan); }
+.ic-t-teal   { color: var(--ic-teal); }    .ic-t-green  { color: var(--ic-green); }
+.ic-t-mint   { color: var(--ic-mint); }    .ic-t-lime   { color: var(--ic-lime); }
+.ic-t-sand   { color: var(--ic-sand); }    .ic-t-slate  { color: var(--ic-slate); }
+
+/* ── 🖋 бейдж рушія: колір + ФОРМА + ЛІТЕРА ───────────────────────────────
+   Три ознаки навмисно, і кожна працює сама. Вивід читають у логах, на
+   скріншотах і при дальтонізмі, а Дяк зі Скрибою в даних однаково позначені
+   як `kraken` — тобто без бейджа вони зливаються саме там, де різниця
+   вирішує (одне письмо латинське, інше кириличне).
+   🔴 Форма береться з `data-shape`, а колір із `data-engine` (правила в
+   tokens.css). Обидва атрибути ставить `eng()`, а їхні значення приходять із
+   `brand.yaml` — того самого джерела, що й `nysh models list`. */
+.engine { display: inline-flex; align-items: center; justify-content: center;
+  width: 1.5em; height: 1.5em; flex: 0 0 auto; vertical-align: -.3em;
+  font-size: 11px; font-weight: 800; line-height: 1;
+  border: 2px solid currentColor; color: var(--engine, var(--fg-3)); }
+.engine[data-shape="circle"]  { border-radius: 50%; }
+.engine[data-shape="diamond"] { border-radius: 3px; transform: rotate(45deg); }
+.engine[data-shape="diamond"] > span { transform: rotate(-45deg); }
+.engine[data-shape="notched"] { border-radius: 3px;
+  clip-path: polygon(0 0, 68% 0, 100% 32%, 100% 100%, 0 100%); }
+.engine-row { display: inline-flex; align-items: center; gap: 6px; }
+/* 🔴 Два місця, де тон мусить відступити, інакше значок зникає у фоні:
+   активний розділ (значок стоїть НА суцільному акценті) і будь-яка кнопка,
+   що сама пофарбована в семантичний колір (зелене «зберегти», червоне
+   «видалити»). Там колір несе кнопка цілком, і значок просто йде з нею. */
+/* 🔴 Два місця, де тон мусить відступити, інакше значок зникає у фоні:
+   активний розділ (значок стоїть НА суцільному акценті) і будь-яка кнопка,
+   що сама пофарбована в семантичний колір (зелене «зберегти», червоне
+   «видалити»). Там колір несе кнопка цілком, і значок просто йде з нею.
+   ⚠ Морда, що додає власні пофарбовані кнопки, дописує їх до цього списку в
+   СВОЄМУ css: сюди вони не належать, бо тут таких елементів немає. */
+.tabs button.on .ic, .subtabs button.on .ic, .seg > button.on .ic,
+.btn .ic, .btn-solid .ic, .on-solid .ic { color: inherit; }
+/* 🔴 Тут раніше стояв `[style*="color:#fff"] > .ic` — CSS, зчеплений із
+   ЛІТЕРАЛЬНИМ інлайновим hex у розмітці. Щойно інлайн прибирали, значок на
+   кольоровій кнопці мовчки ставав сірим. Ознака тепер явна: `.btn-solid`
+   і `.on-solid` (правила в секції ПРИМІТИВІВ). */
+.ic-lg { width: 18px; height: 18px; stroke-width: 1.6; }
+.ic-sm { width: 14px; height: 14px; stroke-width: 1.9; }   /* дрібне тоншає — компенсуємо */
+/* у flex-заголовках із baseline-вирівнюванням SVG сідає на базову лінію
+   власного боксу і провалюється нижче тексту — центруємо його явно */
+h4 > .ic { align-self: center; }
+
+#app { display: flex; flex-direction: column; height: 100vh; height: 100dvh; }
+header { background: var(--s-0); padding: 8px 12px; border-bottom: 1px solid var(--line-2); flex: 0 0 auto;
+  display: flex; align-items: center; gap: 10px; }
+.logo { font-weight: 900; letter-spacing: .5px; color: var(--fg); font-size: 15px; }
+.logo .paw { color: var(--accent); }
+.tabs { margin-left: auto; display: flex; border: 1px solid var(--line-3); border-radius: var(--r-s); overflow: hidden; }
+.tabs button { background: var(--s-4); color: var(--fg-2); border: 0; padding: 6px 16px; font-size: 13px; font-weight: 700; cursor: pointer; }
+.tabs button.on { background: var(--accent-fill); color: var(--accent-ink); }
+.tabs button:disabled { opacity: .4; cursor: not-allowed; }
+/* Три стани завантаження картки — класами, а не присвоєнням кольору з JS:
+   інлайновий style перебивав би тему. */
+/* ── перемикач теми ──
+   Значок показує ПОТОЧНИЙ режим, а не той, у який перемкне: інакше стан
+   «за системою» нічим показати, і кнопка перестає бути індикатором. */
+.thm { flex: 0 0 auto; display: flex; align-items: center; justify-content: center;
+  width: 30px; height: 30px; margin-left: 10px; background: var(--s-4);
+  color: var(--fg-3); border: 1px solid var(--line-3);
+  border-radius: var(--r-s); cursor: pointer; }
+.thm:hover { color: var(--accent); border-color: var(--line-4); }
+/* ── другий рівень навігації: підвкладки активного розділу ── */
+.subtabs { flex: 0 0 auto; display: flex; gap: 6px; padding: 6px 12px;
+  background: var(--s-1); border-bottom: 1px solid var(--line);
+  overflow-x: auto; scrollbar-width: none; }
+.subtabs::-webkit-scrollbar { display: none; }
+.subtabs button { flex: 0 0 auto; background: transparent; color: var(--fg-3);
+  border: 1px solid transparent; border-radius: var(--r-pill);
+  padding: 5px 14px; font-size: 13px; font-weight: 700; cursor: pointer; white-space: nowrap; }
+.subtabs button:hover { color: var(--fg); background: var(--s-3); }
+.subtabs button.on { color: var(--accent); border-color: var(--accent); background: var(--accent-bg); }
+.subtabs button.hidden { display: none; }   /* підвкладка чужого розділу */
+main { flex: 1 1 auto; overflow: auto; }
+.view { display: none; }
+.view.on { display: block; }
+/* ══════════════════════════════════════════════════════════════════════
+   ПРИМІТИВИ — класи замість повторюваних інлайн-стилів у HTML і JS.
+   Нові елементи збирати з них, а не з style="…".
+   ══════════════════════════════════════════════════════════════════════ */
+
+/* ══ ФОРМ-КОНТРОЛІ — єдиний скін на всі 133 поля консолі ═══════════════
+   До цього блока правил `input {}` / `select {}` / `textarea {}` не було
+   взагалі: 94 контролі зі 133 не мали ні класу, ні кольору й малювались
+   нативним віджетом ОС — білим по світлому поверх темної консолі.
+
+   🔴 Обгортка `:where()` НАВМИСНА: вона обнуляє специфічність, тож базу
+   перебиває БУДЬ-ЯКЕ наявне правило з класом (.inp-mini, .fld input,
+   .lib-tools input, .gt-in, .fmsel, .rvm-search, .note textarea…). Тому
+   блок нічого не ламає — він лише ДОЗАПОВНЮЄ те, чого компонент не
+   оголосив. Перебити його може тільки інлайн `style=`, і саме тому
+   інлайнові скіни контролів звідси прибрані.
+   ═══════════════════════════════════════════════════════════════════════ */
+:where(input):not([type=checkbox]):not([type=radio]):not([type=range]):not([type=color]):not([type=file]):not([type=image]):not([type=submit]):not([type=reset]):not([type=button]),
+:where(select), :where(textarea) {
+  background: var(--s-3); color: var(--fg);
+  border: 1px solid var(--line-3); border-radius: var(--r-s);
+  padding: 7px 10px;
+  font: inherit; font-size: 13px; line-height: 1.35;   /* контролі не успадковують шрифт */
+  transition: border-color var(--dur-1) var(--ease),
+              background-color var(--dur-1) var(--ease);
+}
+:where(textarea) { resize: vertical; min-height: 60px; }
+/* hover лише на рамці: у щільних тулбарах зміна тла читається як стрибок
+   (той самий принцип, що в «мікровзаємодіях» нижче) */
+:where(input, select, textarea):hover:not(:disabled) { border-color: var(--line-4); }
+:where(input, select, textarea):focus { outline: none; border-color: var(--accent); }
+:where(input, select, textarea):disabled {
+  opacity: .5; cursor: not-allowed; background: var(--s-2); }
+:where(input, textarea)::placeholder { color: var(--fg-5); opacity: 1; }  /* Firefox сам ставить .54 */
+/* 🔴 :user-invalid, а НЕ :invalid — інакше поле червоніє ще до того, як у
+   нього щось ввели. Реально спрацьовує на роках із min/max. */
+:where(input:user-invalid, textarea:user-invalid) {
+  border-color: var(--err); background: var(--err-bg); }
+:where(input:read-only:not([type=range])) { color: var(--fg-3); }
+
+/* Канонічний дрібний розмір — `.inp-mini` (історична назва, 27 місць).
+   `.ctl-sm` — синонім для нового коду, `.ctl-lg` — великі поля пошуку. */
+.ctl-sm { padding: 4px 6px; font-size: 13px; }
+.ctl-lg { padding: 9px 12px; font-size: 14px; border-radius: var(--r-m); }
+
+/* ── стрілка <select> ──
+   `appearance:none` знімає нативний віджет ОС. Попап <option> лишається
+   нативним свідомо: консоллю керують і з телефона через тунель, а там
+   системний wheel-picker переграє будь-який кастомний список. */
+:where(select) {
+  -webkit-appearance: none; -moz-appearance: none; appearance: none;
+  background-image: var(--ctl-caret);
+  background-repeat: no-repeat;
+  background-position: right 9px center;
+  background-size: 12px 12px;
+  padding-right: 26px;
+  cursor: pointer;
+}
+/* 🔴 Селекти, чиї класи задають `padding` ШОРТКАТОМ, затирали б місце під
+   стрілку — і шеврон ліг би на текст останньої опції. Повертаємо точково;
+   правило мусить стояти НИЖЧЕ за всі шість оголошень у файлі. */
+select.inp-mini, select.ctl-sm { padding-right: 22px; }
+
+/* ── type=search: нативний хрестик малювався палітрою ОС ──
+   Маска, а не background-image: маска бере лише АЛЬФУ фігури, а колір дає
+   `currentColor` — тож хрестик іде за темою сам, без другого токена. */
+:where(input[type=search])::-webkit-search-cancel-button {
+  -webkit-appearance: none; appearance: none;
+  width: 13px; height: 13px; margin-left: 4px; cursor: pointer;
+  background-color: currentColor; opacity: .45;
+  -webkit-mask: var(--ctl-x) center / 13px no-repeat;
+          mask: var(--ctl-x) center / 13px no-repeat; }
+:where(input[type=search])::-webkit-search-cancel-button:hover { opacity: .9; }
+
+/* Спінери: всі 21 числове поле консолі завширшки 52-74px, спінер з'їдав би
+   до третини поля і на тачі в нього не влучити. Числа тут набирають. */
+:where(input[type=number]) { -moz-appearance: textfield; appearance: textfield; }
+:where(input[type=number])::-webkit-outer-spin-button,
+:where(input[type=number])::-webkit-inner-spin-button {
+  -webkit-appearance: none; appearance: none; margin: 0; }
+
+/* ── суцільна кольорова кнопка ──
+   🔴 Замінює селектор `[style*="color:#fff"] > .ic`, який зчіплював CSS із
+   ЛІТЕРАЛЬНИМ інлайновим hex у розмітці: щойно інлайн прибирали, значок на
+   кольоровій кнопці мовчки ставав сірим. Тепер ознака явна — клас.
+   Тон задається модифікатором; чорнило завжди --white, бо заливка
+   лишається насиченою в обох темах. */
+.btn-solid { border: 0; border-radius: var(--r-m); padding: 6px 14px;
+  font-size: 13px; font-weight: 800; cursor: pointer;
+  background: var(--s-4); color: var(--fg); }
+.btn-solid.sm { padding: 6px 12px; font-size: 12px; font-weight: 700; }
+.btn-solid.ok    { background: var(--ok-solid); }
+.btn-solid.danger{ background: var(--err-solid); }
+.btn-solid.cool  { background: var(--hover-cool); }
+.btn-solid.teal  { background: var(--ic-teal); color: var(--accent-ink); }
+.btn-solid.go    { background: var(--ok); }
+.btn-solid .ic, .on-solid .ic { color: inherit; }
+/* `.on-solid` мусить перебивати колір компонента, на який його начепили
+   (`.lib-act`, `.rev`, `.modal .mtop button` — усі задають своє чорнило). */
+button.on-solid { color: var(--white); }
+
+/* ── комбобокс (core/combobox.js) — заміна нативному <datalist> ──
+   z-index 80 обраний між .modal (50) / #m-tip (60) і .toast (99): попап
+   мусить бути над модалкою, але не над сповіщенням. */
+.cb-pop { position: fixed; z-index: 80; overflow: auto;
+  overscroll-behavior: contain;
+  background: var(--s-2); border: 1px solid var(--line-3);
+  border-radius: var(--r-m); box-shadow: var(--sh-2);
+  animation: view-in var(--dur-1) var(--ease); }
+.cb-opt { padding: 7px 11px; font-size: 13px; color: var(--fg-2);
+  cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cb-opt:hover { background: var(--s-3); color: var(--fg); }
+/* активний рядок — той, що візьме Enter. Смуга ліворуч, а не суцільна
+   заливка: інакше він не відрізняється від рядка під мишею. */
+.cb-opt.on { background: var(--s-4); color: var(--fg);
+  box-shadow: inset 2px 0 0 var(--accent-fill); }
+.cb-opt mark { background: transparent; color: var(--accent); font-weight: 700; }
+.cb-more { position: sticky; bottom: 0; padding: 6px 11px; font-size: 11px;
+  color: var(--fg-5); background: var(--s-2); border-top: 1px solid var(--line); }
+.cb-empty { padding: 10px 11px; font-size: 12px; color: var(--fg-5); }
+@media (max-width: 820px) { .cb-opt { padding: 11px 12px; font-size: 14px; } }
+
+/* `.dim` вживається 91 раз, а правило було рівно одне — `table.lib td.dim`.
+   У 90 випадках клас не робив нічого: приглушений текст лишався основним. */
+.dim { color: var(--fg-5); }
+/* 🔴 Тут живе «нуль зі знаменником»: різниця між «не знайшлось» і «не
+   знайшлось, бо шукали в одному каталозі». Тому смуга мусить бути ВИДНА, а не
+   зливатися з текстом.
+   ⚠ `.warn` — ПОПЕРЕДЖЕННЯ, `.warn.err` — ВІДМОВА, і це не косметика. Доти
+   обидва малювались червоним однаково, тож «індекс застарів» виглядало так
+   само тривожно, як «операція впала», — а це різні речі для того, хто
+   вирішує, чи можна довіряти нулю. */
+.warn { background: var(--warn-bg); border: 1px solid var(--accent);
+  border-left-width: 3px; color: var(--warn-fg); border-radius: var(--r-m);
+  padding: 8px 11px; font-size: 12px; }
+.warn.err { background: var(--err-bg); border-color: var(--err-line);
+  color: var(--err-2); }
+
+/* бейдж картки рев'ю: 11 умовних сигналів мали кожен свій інлайн-стиль */
+.badge { display: inline-block; border-radius: var(--r-m); padding: 1px 7px; font-size: 11px;
+  font-weight: 700; white-space: nowrap; background: var(--bdg-bg); color: var(--bdg-fg); }
+.badge.known   { background: var(--bdg-known-bg); color: var(--bdg-known-fg); }  /* ★ у каноні */
+.badge.new     { background: var(--bdg-new-bg);   color: var(--bdg-new-fg); }    /* новий */
+.badge.tail    { background: var(--bdg-tail-bg);  color: var(--bdg-tail-fg); }   /* 🪝 хвіст */
+.badge.head    { background: var(--bdg-head-bg);  color: var(--bdg-head-fg); }   /* 🎩 голова */
+.badge.skor    { background: var(--bdg-skor-bg);  color: var(--bdg-skor-fg); }   /* ✒️ скоропис */
+.badge.pech    { background: var(--bdg-pech-bg);  color: var(--bdg-pech-fg); }   /* 🖨 друк */
+.badge.sim     { background: var(--bdg-sim-bg);   color: var(--bdg-sim-fg); }    /* ⚠ схожий */
+.badge.pair    { background: var(--bdg-pair-bg);  color: var(--bdg-pair-fg); }   /* 🔗 пара */
+.badge.full    { background: var(--bdg-full-bg);  color: var(--bdg-full-fg); }   /* 🖼 fullpage */
+.badge.narrow  { background: var(--bdg-bg);       color: var(--bdg-fg); }        /* 🔎 вузький */
+/* чіп-метадані: параметр прогону, лічильник сторінки, будь-яка пара «мітка · значення» */
+.chip { display: inline-block; font-size: 11px; background: var(--info-bg); border: 1px solid var(--info-line);
+  border-radius: var(--r-s); padding: 3px 8px; color: var(--fg-3); font-variant-numeric: tabular-nums; }
+.chip > b { color: var(--ok-soft); }
+.chip.tight { padding: 1px 8px; font-weight: 700; color: var(--info); }
+/* дрібний інпут/селект у тулбарі — було ~10 повторів того самого інлайн-стилю */
+.inp-mini { background: var(--s-3); color: var(--fg-2); border: 1px solid var(--line-3);
+  border-radius: var(--r-s); padding: 4px 6px; font-size: 13px; }
+.lbl-mini { font-size: 12px; color: var(--info); }
+.lbl-mini.lbl-11 { font-size: 11px; }   /* щільні тулбари редакторів */
+/* «вісь схожості» в редакторі додавання: фіолетовий = A/B-порівняння */
+.ctl-ax { color: var(--violet); border-color: var(--violet); }
+.lbl-mini > .inp-mini { margin-left: 4px; }
+/* сегментована група — спосіб згорнути ряд рівноправних кнопок у одну сутність
+   (використовується в тулбарі Банку і в ряду дій картки рев'ю) */
+.seg { display: inline-flex; border: 1px solid var(--line-3); border-radius: var(--r-s); overflow: hidden; }
+.seg > button { background: var(--s-4); color: var(--fg-2); border: 0;
+  border-right: 1px solid var(--line-3); padding: 6px 12px; font-size: 12px;
+  font-weight: 700; cursor: pointer; white-space: nowrap; }
+.seg > button:last-child { border-right: 0; }
+.seg > button.on { background: var(--accent-fill); color: var(--accent-ink); }
+
+/* ══════════════════════════════════════════════════════════════════════
+   РУХ. Одна крива (--ease) і три тривалості на всю консоль.
+   Вимикається цілком через prefers-reduced-motion у tokens.css.
+   ══════════════════════════════════════════════════════════════════════ */
+@keyframes view-in  { from { opacity: 0; transform: translateY(6px); } }
+@keyframes fade-in  { from { opacity: 0; } }
+@keyframes shimmer  { to   { transform: translateX(100%); } }
+
+/* перемикання вкладок: було display:none↔block без переходу */
+.view.on { animation: view-in var(--dur-2) var(--ease); }
+/* нативний <details> розкривається ривком — даємо вмісту проявитись
+   (згортання лишається миттєвим: анімувати його без JS браузер не вміє) */
+details[open] > :not(summary) { animation: view-in var(--dur-2) var(--ease); }
+summary { transition: color var(--dur-1) var(--ease); }
+.tabs button { transition: background-color var(--dur-1) var(--ease), color var(--dur-1) var(--ease); }
+
+
+/* ── блок, що з'являється/зникає, НЕ штовхаючи сусідів ──
+   grid-template-rows 0fr→1fr — єдиний спосіб анімувати «висота за вмістом».
+   .cw тримає overflow:hidden (і заразом BFC, щоб margin вмісту не вилазив). */
+.collapsible { display: grid; grid-template-rows: 0fr; opacity: 0;
+  transition: grid-template-rows var(--dur-3) var(--ease), opacity var(--dur-2) var(--ease); }
+.collapsible.open { grid-template-rows: 1fr; opacity: 1; }
+.collapsible > .cw { overflow: hidden; min-height: 0; }
+
+/* степпер: кількість стадій змінна (3↔4↔5) — приховану НЕ виймаємо з потоку,
+   інакше решта стрибає по ширині; вона схлопується переходом */
+.step { transition: flex-grow var(--dur-3) var(--ease), opacity var(--dur-2) var(--ease),
+  border-color var(--dur-2) var(--ease), color var(--dur-2) var(--ease), padding var(--dur-3) var(--ease); }
+.step.off { flex-grow: 0; flex-basis: 0; padding-left: 0; padding-right: 0;
+  opacity: 0; overflow: hidden; border-width: 0; white-space: nowrap; }
+.pbar { transition: opacity var(--dur-2) var(--ease); }
+.pbar > i { transition: width var(--dur-3) var(--ease), background-color var(--dur-2) var(--ease); }
+
+/* ── скелетони: заглушка «завантаження…» мала іншу висоту за реальний вміст,
+   через що контент стрибав щоразу при завантаженні ── */
+.skel { position: relative; overflow: hidden; background: var(--s-2);
+  border-radius: var(--r-s); }
+.skel::after { content: ''; position: absolute; inset: 0; transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, var(--shim), transparent);
+  animation: shimmer 1.2s infinite; }
+.skel-row  { height: 30px; margin: 6px 0; }
+.skel-cell { height: 16px; margin: 4px 0; }
+.skel-card { height: 168px; }
+/* свіжозамінений вміст списку — проявляється, а не блимає */
+.swapped { animation: fade-in var(--dur-2) var(--ease); }
+
+/* ── мікровзаємодії: єдині для всіх кнопок ──
+   Свідомо БЕЗ зсуву по hover: у щільних тулбарах він сам читається як стрибок. */
+button { transition: background-color var(--dur-1) var(--ease), border-color var(--dur-1) var(--ease),
+  color var(--dur-1) var(--ease), opacity var(--dur-1) var(--ease), filter var(--dur-1) var(--ease),
+  transform var(--dur-1) var(--ease); }
+button:not(:disabled):hover { filter: brightness(1.15); }
+button:not(:disabled):active { transform: scale(.97); }
+/* консоль керується з клавіатури (keys.js — 56 клавіш), а індикації фокуса не було взагалі */
+:where(button, input, select, textarea, summary, a, [tabindex]):focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 2px; }
+/* тост: раніше лише зникав, а з'являвся ривком */
+.toast { position: fixed; left: 50%; bottom: 24px; z-index: 99; pointer-events: none;
+  background: var(--info-bg); border: 1px solid var(--info-line); color: var(--fg-2);
+  padding: 10px 16px; border-radius: var(--r-m); font-size: 13px; box-shadow: var(--sh-2);
+  transform: translateX(-50%); opacity: 1;
+  transition: opacity var(--dur-3) var(--ease), transform var(--dur-2) var(--ease); }
+.toast.hide { opacity: 0; transform: translateX(-50%) translateY(8px); }
+/* Втрачений запис — це втрачена робота ока, тож не тост на 2 секунди,
+   а банер, який висить, доки його не прибрати або не відкрити чергу. */
+.wfail { position: fixed; left: 0; right: 0; top: 0; z-index: 200;
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 10px 14px; background: var(--fail-bg); border-bottom: 1px solid var(--fail-line);
+  color: var(--fail-fg); font-size: 13px; box-shadow: var(--sh-2);
+  animation: view-in var(--dur-2) var(--ease); }
+.wfail b { color: var(--white); }
+.wfail .fbtn { background: var(--err-solid); border-color: var(--fail-line); color: var(--fail-fg); }
+
+/* ══ МОБІЛЬНИЙ: рев'ю + редактори ТП з телефону (Cloudflare tunnel) ══ */
+@media (max-width: 700px) {
+  /* шапка: рядок 1 = лого + GPU, розділи з'їжджають у власний повноширинний рядок.
+     Після групування їх четверо (а не десять вкладок), тож скрол — уже лише запобіжник. */
+  header { flex-wrap: wrap; gap: 8px 10px; padding: 8px 10px; }
+  .logo { font-size: 14px; }
+  .tabs { order: 3; flex-basis: 100%; margin-left: 0; width: 100%;
+    overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch;
+    scrollbar-width: none; }             /* тонка смуга-скрол без видимого скролбара */
+  .tabs::-webkit-scrollbar { display: none; }
+  .tabs button { padding: 9px 15px; font-size: 13px; white-space: nowrap; flex: 0 0 auto; }
+  .subtabs { padding: 6px 10px; -webkit-overflow-scrolling: touch; }
+  .subtabs button { padding: 8px 14px; }   /* тап-таргет */
+
+  /* тулбари модалок мають ДЕСЯТКИ кнопок → на вузькому вони переносяться у стіну; каптуємо
+     висоту й даємо вертикальний скрол, щоб канва не з'їжджала за екран */
+
+
+}
+

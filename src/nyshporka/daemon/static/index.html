@@ -1,16 +1,38 @@
 <!doctype html>
-<html lang="uk">
+<html lang="uk" data-theme="dark">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#111">
 <title>Нишпорка</title>
 <link rel="icon" href="/favicon.ico" type="image/svg+xml">
 <!--
-  Токени ПЕРЕД оформленням: `tokens.css` згенеровано з `brand.yaml` і несе самі
-  змінні, `app.css` їх лише споживає. Зворотний порядок лишив би верстку без
-  кольорів на перший кадр.
+  🔴 Тема ставиться ДО завантаження CSS. Модуль `theme.js` виконується вже після
+  парсингу <head>, тобто після того, як браузер намалював перший кадр — при
+  світлому виборі людина побачила б спалах темного. Дубль логіки тут свідомий;
+  ключ і порядок рішень збігаються з `themeMode()` у `/ui/theme.js`, і міняти їх
+  треба в обох місцях.
 -->
-<link rel="stylesheet" href="/static/tokens.css">
+<script>
+(function () {
+  var k = 'nyshporka.theme', v = null;
+  try { v = localStorage.getItem(k); } catch (e) { /* приватний режим */ }
+  if (v !== 'light' && v !== 'dark') {
+    v = matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+  }
+  document.documentElement.dataset.theme = v;
+  document.querySelector('meta[name="color-scheme"]').setAttribute('content', v);
+})();
+</script>
+<!--
+  Порядок обов'язковий: `tokens.css` несе самі змінні (згенеровано з
+  `brand.yaml`), `base.css` — примітиви спільного шару, `app.css` — те, що є
+  тільки в цієї морди. Зворотний порядок лишив би верстку без кольорів на
+  перший кадр, а власні правила — без змоги перебити базові.
+-->
+<link rel="stylesheet" href="/ui/tokens.css">
+<link rel="stylesheet" href="/ui/base.css">
 <link rel="stylesheet" href="/static/app.css">
 </head>
 <!--
@@ -19,6 +41,13 @@
   localhost. Тут заголовок ставить лише наш код.
 -->
 <body data-token="{{TOKEN}}">
+<!--
+  Спрайт значків вставляє сервер (`nyshporka.ui.with_sprite`). Файлом його
+  підключити не можна: `<use href>` до зовнішнього SVG забороняє успадкування
+  currentColor у Chrome, і значки стали б чорними плямами на темному полотні.
+-->
+{{SPRITE}}
+<div id="app">
 <header>
   <!--
     🐾 Знак — лапка з лупою в подушечці. Малюється `currentColor`, тож обидві
@@ -26,7 +55,7 @@
     картинки: у SVG воно вимагало б власного шрифту, а той в архіві без
     інтернету не приїхав би.
   -->
-  <span class="brand">
+  <span class="brand logo">
     <span class="mark" aria-hidden="true"></span>
     Нишпорка
   </span>
@@ -36,16 +65,23 @@
     зашитий тут перелік розходився б із дозволеним тихо — виглядало б це як
     кнопка, що веде в порожнечу, або як зникла без пояснення.
 
-    Порядок екранів задає сервер (`core.sections`). 🗺 Газетир і 🏛 Фонди
-    стоять ПЕРЕД «моїми справами» навмисно: обидва відповідають на питання
-    «що взагалі існує», з якого починають, а «мої справи» — на «що я вже маю»,
-    яке має сенс лише після цього.
+    Два яруси: `.tabs` — розділи (секції), `.subtabs` — екрани активного
+    розділу. Одним рядом їх було дванадцять, і на вузькому екрані ряд
+    перетворювався на стіну без ієрархії.
   -->
-  <nav id="nav"></nav>
+  <nav id="nav" class="tabs"></nav>
   <button class="lang" data-act="lang.toggle" title="uk / en">🌐</button>
   <button class="lang" data-act="nav" data-arg="settings" title="Налаштування">⚙</button>
+  <!--
+    Перемикач теми. Значок показує ПОТОЧНИЙ режим, а не той, у який перемкне:
+    інакше стан «за системою» нічим показати, і кнопка перестає бути
+    індикатором. Наповнення ставить `theme.js`.
+  -->
+  <button class="thm" id="theme-btn" data-act="theme.cycle"></button>
 </header>
+<nav id="subnav" class="subtabs"></nav>
 <main id="view"></main>
+</div>
 <script type="module" src="/static/app.js"></script>
 </body>
 </html>

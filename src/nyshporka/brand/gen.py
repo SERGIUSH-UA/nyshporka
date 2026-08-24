@@ -1,12 +1,13 @@
 """🐾 `brand.yaml` → файли. Генератор, а не набір стилів.
 
-Два споживачі беруть ті самі токени й через це не можуть розійтися:
+Три споживачі беруть ті самі токени й через це не можуть розійтися:
 
-    daemon/static/tokens.css     застосунок (`nysh serve`)
+    ui/static/tokens.css         спільний шар обох морд (`nysh serve` і консоль)
     docs/stylesheets/brand.css   сайт документації (MkDocs Material)
+    brand/data/assets/*.svg      знак, фавіконка, бейджі рушіїв
 
-🔴 Обидва файли ЗГЕНЕРОВАНІ й руками не правляться. Правка робиться в
-`brand.yaml`, після чого:
+🔴 Усі згенеровані файли руками не правляться. Правка робиться в `brand.yaml`,
+після чого:
 
     uv run python -m nyshporka.brand.gen          # переписати
     uv run python -m nyshporka.brand.gen --check  # чи не протухли (це і в CI)
@@ -24,7 +25,7 @@ import sys
 from pathlib import Path
 
 from nyshporka.brand import paw
-from nyshporka.brand.manifest import Brand, active
+from nyshporka.brand.manifest import Brand, Color, active
 
 #: Шапка згенерованого файлу. Стоїть першою й каже, куди йти зі змінами:
 #: без неї правка неминуче робиться в CSS, живе до наступного прогону
@@ -34,37 +35,146 @@ HEADER = """/* ⚠ ЗГЕНЕРОВАНО з `src/nyshporka/brand/data/brand.yam
    Змінювати кольори — у brand.yaml; перевіряти — `--check` (він же в CI). */
 """
 
+#: Ширина рядка-роздільника секції. Та сама, що в решті CSS проєкту.
+_RULE = 78
 
-def _block(vars_: dict[str, str], indent: str = "  ") -> str:
-    return "".join(f"{indent}--{k}: {v};\n" for k, v in vars_.items())
+#: Проза двох секцій, яких немає в `brand.yaml` як груп. Живе тут, а не в
+#: даних, бо адресована тому, хто верстає: пояснює не бренд, а те, як цим
+#: користуватись у CSS.
+_ENGINES_NOTE = """Письмо задає родину: Писар і Дяк — сусідні холодні (два голоси ОДНОГО
+письма, їх і звіряють між собою), Скриба окремо — окреме письмо.
+⚠ Колір тут ПРИСКОРЮВАЧ, а не носій: бейдж несе ще форму й літеру, бо
+вивід читають і в чорно-білому, і з дальтонізмом."""
+
+_ALIASES_NOTE = """🔴 Не другі кольори, а другі імена: `--card` каже, ЩО це («підкладка
+картки»), `--s-3` — ЯКИЙ це щабель ярусу поверхонь. Тому аліас виходить
+ПОСИЛАННЯМ — перевернеться токен, перевернеться й він, і пари у світлому
+блоці йому не треба."""
+
+
+def _section(title: str, why: str = "", indent: str = "  ") -> str:
+    """Заголовок секції коментарем — разом із прозою, якщо вона є."""
+    dashes = "─" * max(3, _RULE - len(indent) - len(title) - 8)
+    head = f"{indent}/* ── {title} {dashes}"
+    lines = (why or "").splitlines()
+    if not lines:
+        return f"{head} */\n"
+    body = [f"{indent}   {ln}".rstrip() for ln in lines]
+    # `*/` дописується до ОСТАННЬОГО рядка прози, а не висить окремим: інакше
+    # кожна секція коштує зайвого рядка, а їх тут два десятки.
+    body[-1] += " */"
+    return "\n".join([head, *body]) + "\n"
+
+
+def _decls(rows: list[Color], theme: str, indent: str = "  ") -> list[str]:
+    """Декларації однієї секції з хвостовими поясненнями У КОЛОНКУ.
+
+    ⚠ Вирівнювання рахується по секції, а не по файлу: значення тут різної
+    довжини (`#111` поруч із `cubic-bezier(.2,.7,.3,1)`), і спільна колонка на
+    весь файл відсунула б половину пояснень за край екрана.
+    """
+    heads = [f"{indent}--{c.css}: {c.value(theme)};" for c in rows]
+    width = max((len(h) for h, c in zip(heads, rows, strict=True) if c.why), default=0)
+    return [f"{h.ljust(width)}   /* {c.why} */\n" if c.why else f"{h}\n"
+            for h, c in zip(heads, rows, strict=True)]
+
+
+def _theme_block(brand: Brand, theme: str, *, base: bool) -> str:
+    """Тіло блока однієї теми.
+
+    `base` — чи це базова тема. У базовій виходить УСЕ; у перекритті лише те,
+    що справді змінюється, бо повторений незмінний токен нічого не додає, зате
+    ховає в шумі ті, що змінились.
+    """
+    out: list[str] = [f"  color-scheme: {theme};\n"]
+    for g in brand.groups:
+        cols = [c for c in g.colors if base or not c.same]
+        if not cols:
+            continue
+        out.append("\n" + _section(g.title, g.why))
+        out += _decls(cols, theme)
+
+    out.append("\n" + _section("три голоси рушіїв", _ENGINES_NOTE))
+    out += _decls([Color(css=f"engine-{e.id}", why=e.hue_uk, dark=e.dark, light=e.light)
+                   for e in brand.engines_ordered()], theme)
+
+    if base:
+        out.append("\n" + _section("аліаси: друге ім'я того самого токена", _ALIASES_NOTE))
+        # Аліас — посилання, а не значення, тож `_decls` тут не годиться:
+        # у нього немає теми, і колонка рахується по власних рядках.
+        heads = [f"  --{a.css}: var(--{a.of});" for a in brand.aliases]
+        width = max(len(h) for h in heads)
+        out += [f"{h.ljust(width)}   /* {a.why} */\n"
+                for h, a in zip(heads, brand.aliases, strict=True)]
+
+    if base:
+        # 🔴 Тільки системні стеки. Жодного CDN і жодного зовнішнього шрифту:
+        # застосунок працює офлайн — в архіві інтернету може не бути взагалі, а
+        # шрифт, який не приїхав, дає стрибок верстки саме там, де читають скан.
+        out.append("\n" + _section("типографіка"))
+        out += _decls([
+            Color(css="font-text", why="інтерфейс", dark=brand.type_text,
+                  light=brand.type_text, same=True),
+            Color(css="font-mono", why="шифри, декод, поля набору", dark=brand.type_mono,
+                  light=brand.type_mono, same=True),
+            Color(css="font-size", why="базовий кегль", dark=brand.type_size,
+                  light=brand.type_size, same=True),
+            Color(css="line-height", why="інтерліньяж", dark=brand.type_leading,
+                  light=brand.type_leading, same=True),
+        ], theme)
+
+    for title, rows, themed in (
+        ("контроли: значення, які кольором не є", brand.controls, True),
+        ("радіуси", brand.radii, False),
+        ("тіні", brand.shadows, True),
+        ("рух: ЄДИНА крива на всю поверхню", brand.motion, False),
+    ):
+        if not rows or (not base and not themed):
+            continue
+        out.append("\n" + _section(title))
+        out += _decls(list(rows), theme)
+    return "".join(out)
 
 
 def render_app(brand: Brand) -> str:
-    """Токени застосунку.
+    """Токени спільного шару обох морд.
 
-    Світла тема — базова, темна лише ПЕРЕВИЗНАЧАЄ: так будь-який колір, забутий
-    у темному блоці, дає видимо неправильний вигляд замість порожнечі.
+    🔴 Базова тема — ТЕМНА, і вона в голому `:root`; світла ПЕРЕВИЗНАЧАЄ ті
+    самі імена під `[data-theme="light"]`. Раніше було навпаки, і перевертання
+    не косметичне: справу читають годинами, і полотно кольору паперу на весь
+    екран стомлює рівно тоді, коли роботи найбільше.
+
+    ⚠ Тема ставиться АТРИБУТОМ, а не лише системною налаштованістю. Вибір
+    користувача мусить переживати захід сонця, а `@media` цього не вміє:
+    інакше о 20:00 ОС перемкнула б тему під людиною, яка щойно вибрала іншу.
     """
-    fonts = {
-        "font-text": brand.type_text,
-        "font-mono": brand.type_mono,
-        "font-size": brand.type_size,
-        "line-height": brand.type_leading,
-    }
-    out = [HEADER, "\n:root {\n", _block(brand.css_vars("light")), _block(fonts), "}\n"]
-    out += [
-        "\n/* Тема з системної налаштованості: застосунок відкривають на ноутбуці\n"
-        "   в читальній залі, і біле полотно в темній залі читається гірше за скан. */\n",
-        "@media (prefers-color-scheme: dark) {\n  :root {\n",
-        _block(brand.css_vars("dark"), indent="    "),
+    base, other = brand.theme_default, ("light" if brand.theme_default == "dark" else "dark")
+    sel = f':root[data-theme="{other}"]'
+    return "".join([
+        HEADER,
+        "\n:root {\n", _theme_block(brand, base, base=True), "}\n",
+        "\n" + _section(f"{'СВІТЛА' if other == 'light' else 'ТЕМНА'} ТЕМА — "
+                        "перевизначення тих самих імен, не окрема система",
+                        "Ставиться атрибутом `data-theme` на <html>: інлайн-скрипт у <head>\n"
+                        "плюс `theme.js`. Перевизначаються ЛИШЕ кольори — радіуси,\n"
+                        "тривалості й криві однакові в обох темах за побудовою.",
+                        indent=""),
+        f"{sel} {{\n", _theme_block(brand, other, base=False), "}\n",
+        "\n" + _section("менше руху — значить БЕЗ руху, а не швидше", "", indent=""),
+        "@media (prefers-reduced-motion: reduce) {\n"
+        "  :root { " + " ".join(f"--{c.css}: 1ms;" for c in brand.motion
+                                if c.css.startswith("dur-")) + " }\n"
+        "  *, *::before, *::after {\n"
+        "    animation-duration: 1ms !important;\n"
+        "    animation-iteration-count: 1 !important;\n"
+        "    transition-duration: 1ms !important;\n"
+        "    scroll-behavior: auto !important;\n"
         "  }\n}\n",
-    ]
-    # Прив'язка бейджа до рушія теж генерується: інакше новий рушій дістав би з
-    # даних форму й літеру, а колір — ні, і вийшов би сірим серед кольорових.
-    out.append("\n/* Бейджі рушіїв: колір під `data-engine`. Форма — в app.css. */\n")
-    out += [f'.engine[data-engine="{e.id}"] {{ --engine: var(--engine-{e.id}); }}\n'
-            for e in brand.engines_ordered()]
-    return "".join(out)
+        "\n" + _section("бейджі рушіїв: колір під `data-engine`; форма — у base.css",
+                        "", indent=""),
+        *[f'.engine[data-engine="{e.id}"] {{ --engine: var(--engine-{e.id}); }}\n'
+          for e in brand.engines_ordered()],
+    ])
 
 
 def render_docs(brand: Brand) -> str:
@@ -88,16 +198,15 @@ def render_docs(brand: Brand) -> str:
             "md-code-bg-color": v["card"],
             "md-footer-bg-color": v["card"],
         }
-        return f"{selector} {{\n{_block(md)}{_block(v)}}}\n"
+        rows = "".join(f"  --{k}: {x};\n" for k, x in md.items())
+        rows += "".join(f"  --{k}: {x};\n" for k, x in v.items())
+        return f"{selector} {{\n{rows}}}\n"
 
-    parts = [
-        HEADER,
-        "\n",
-        scheme("light", '[data-md-color-scheme="default"]'),
-        "\n",
+    return "".join([
+        HEADER, "\n",
+        scheme("light", '[data-md-color-scheme="default"]'), "\n",
         scheme("dark", '[data-md-color-scheme="slate"]'),
-    ]
-    return "".join(parts)
+    ])
 
 
 # ── бейджі рушіїв ────────────────────────────────────────────────────────────
@@ -106,7 +215,7 @@ def render_docs(brand: Brand) -> str:
 # тихо: картинка лишилась би старою, а застосунок показував би новий колір.
 #
 # Форма — обведенням, літера — тим самим `currentColor`. Тобто бейдж не тягне
-# другого кольору для тла й лягає і на полотно, і на картку, і на сепію.
+# другого кольору для тла й лягає і на полотно, і на картку, і на акцент.
 SHAPES: dict[str, str] = {
     "circle": '<circle cx="16" cy="16" r="13.2" fill="none" '
               'stroke="currentColor" stroke-width="2"/>',
@@ -129,6 +238,8 @@ def render_badge(engine_id: str, brand: Brand | None = None) -> str:
     # ⚠ Лапки в стеку шрифтів («Segoe UI») довелось би екранувати в атрибуті,
     # тож вони йдуть сутністю: інакше SVG перестає бути валідним XML.
     font = b.type_text.replace(chr(34), "&quot;")
+    # Колір статичного файлу береться зі СВІТЛОЇ теми: асет лягає в README і на
+    # сторінку пакета, тобто на біле тло, яке про наш перемикач не знає.
     rows = [
         "<!-- ⚠ ЗГЕНЕРОВАНО з brand.yaml — руками не правити.",
         f"     {style.id}: {style.role_uk} -->",
@@ -152,7 +263,10 @@ def targets() -> dict[str, str]:
     новому рушії.
     """
     out = {
-        "src/nyshporka/daemon/static/tokens.css": "app",
+        # ⚠ Токени лежать у СПІЛЬНОМУ шарі, а не в теці демона: їх читає ще й
+        # консоль дослідника, змонтувавши цю саму теку. Доти файл жив у
+        # `daemon/static/`, і другий споживач мусив би тримати копію.
+        "src/nyshporka/ui/static/tokens.css": "app",
         "docs/stylesheets/brand.css": "docs",
         "src/nyshporka/brand/data/assets/mark.svg": "mark",
         "src/nyshporka/brand/data/assets/favicon.svg": "favicon",
@@ -180,9 +294,12 @@ def render(flavour: str, brand: Brand | None = None) -> str:
     if flavour == "mark":
         return paw.render_svg()
     if flavour == "favicon":
-        # Вкладка браузера: знак полотном на сепійній плитці, без ручки лупи.
-        return paw.render_svg(handle=False, colour=b.color("paper").light,
-                              plate=b.color("sepia").light)
+        # Вкладка браузера: знак полотном на акцентній плитці, без ручки лупи.
+        # 🔴 Кольори — зі СВІТЛОЇ теми, хоч базова тепер темна: фавіконку
+        # малює браузер поруч зі своїми, на власному тлі, і вона мусить
+        # лишатись упізнаваною незалежно від того, яку тему вибрали в застосунку.
+        return paw.render_svg(handle=False, colour=b.color("bg").light,
+                              plate=b.color("accent").light)
     if flavour.startswith("badge:"):
         return render_badge(flavour.split(":", 1)[1], b)
     raise ValueError(f"немає різновиду «{flavour}»")
@@ -200,9 +317,9 @@ PNG_TARGETS: dict[str, tuple[str, int, int]] = {
 def render_png(kind: str, width: int, height: int, brand: Brand | None = None) -> bytes:
     b = brand or active()
     if kind == "social":
-        return paw.render_social(width, height, colour=b.color("sepia").light,
-                                 background=b.color("paper").light)
-    return paw.render_png(width, colour=b.color("sepia").light)
+        return paw.render_social(width, height, colour=b.color("accent").light,
+                                 background=b.color("bg").light)
+    return paw.render_png(width, colour=b.color("accent").light)
 
 
 def _speak_utf8() -> None:

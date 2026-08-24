@@ -152,9 +152,11 @@ SCREENS: dict[str, str] = {
     "sources": "material",
     "geog": "material",
     "fonds": "material",
+    "library": "material",
     "read": "htr",
     "view": "htr",
     "search": "research",
+    "sift": "research",
     "eye": "research",
     "export": "research",
 }

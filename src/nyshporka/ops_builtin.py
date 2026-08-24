@@ -632,6 +632,10 @@ def sample_install(a: SampleArgs) -> Envelope:
         env.warn("no_decode",
                  "кадри розгорнуто, але декоду до них немає — гортач покаже "
                  "аркуш, а пошуку в тексті не буде")
+    if not got.get("registry_built"):
+        env.warn("registry_stale",
+                 "реєстр справ не перезібрався — «Мої справи» покажуть нуль "
+                 "при розгорнутій справі; полагодити: `nysh cases build`")
     return env
 
 
@@ -1194,7 +1198,13 @@ def _sections_payload() -> dict[str, Any]:
             "presets": {n: sorted(s) for n, s in S.PRESETS.items()},
             "screens": dict(S.SCREENS),
             "glyphs": {"screens": dict(b.screen_glyphs),
-                       "sections": dict(b.section_glyphs)}}
+                       "sections": dict(b.section_glyphs)},
+            # Значок спрайта поруч із емодзі, а не замість нього: емодзі
+            # лишається для терміналу й README, де спрайта немає, а у вікні
+            # малюється лінійний знак — він бере `currentColor` і тому не
+            # лишається різнобарвною плямою на пофарбованій активній вкладці.
+            "icons": {"screens": dict(b.screen_icons),
+                      "sections": dict(b.section_icons)}}
 
 
 @op("sections.show", summary="Які частини застосунку ввімкнено", agent=False)

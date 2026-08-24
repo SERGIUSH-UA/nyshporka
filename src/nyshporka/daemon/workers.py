@@ -56,7 +56,54 @@ async def start(bus: JobBus, ws: Workspace, op_name: str,
         return await _start_read(bus, ws, payload)
     if op_name == "cases.build":
         return await _start_build(bus, payload)
-    raise ValueError(f"довга операція «{op_name}» не має виконавця")
+    return await _start_generic(bus, op_name, payload)
+
+
+async def _start_generic(bus: JobBus, op_name: str,
+                         payload: dict[str, Any]) -> JobRecord:
+    """Довга операція без власного виконавця — тілом самої операції, у потоці.
+
+    🔴 Це закриває КЛАС дефекту, а не два випадки. `long=True` означає «не
+    тримай на ній HTTP-запит», а не «десь мусить бути окремо написаний
+    виконавець»; доти будь-яка помічена так операція без запису в диспетчері
+    відповідала браузеру 400 «не має виконавця». Саме це й сталося з
+    `registry.collect` і `registry.merge`: у переліку `/api/ops` вони були,
+    кнопка малювалась, а виклик відмовляв — тобто дефект був не в тому, що
+    роботу не зроблено, а в тому, що вхід у неї вів у глухий кут.
+
+    ⚠ Прогресу тут немає й бути не може: тіло операції — звичайна функція, вона
+    не звітує про кроки. Тому робота показується як «іде», а не смугою; це
+    чесніше за смугу, яка не рухається.
+    """
+    from nyshporka import ops as O
+
+    op = O.get(op_name)
+    if op is None:
+        raise ValueError(f"невідома операція «{op_name}»")
+    job, _ = await bus.enqueue(op_name, title=op.summary, cfg=dict(payload or {}))
+    _keep(asyncio.create_task(_run_generic(bus, job, op_name, payload)))
+    return job
+
+
+async def _run_generic(bus: JobBus, job: JobRecord, op_name: str,
+                       payload: dict[str, Any]) -> None:
+    from nyshporka import ops as O
+    from nyshporka.core.jobs import JobState
+
+    await bus.update(job.id, state=JobState.RUNNING)
+    try:
+        env = await asyncio.to_thread(O.call, op_name, dict(payload or {}))
+    except Exception as exc:
+        await bus.update(job.id, state=JobState.ERROR,
+                         error=f"{type(exc).__name__}: {exc}")
+        return
+    # 🔴 Невдача операції — це невдача РОБОТИ, а не успіх із полем `ok: false`
+    # усередині. Інакше в черзі вона світилась би зеленим, і причину побачив би
+    # лише той, хто розгорнув результат.
+    if not env.ok:
+        await bus.update(job.id, state=JobState.ERROR, error=env.error or "не вийшло")
+        return
+    await bus.update(job.id, state=JobState.DONE, result=env.as_dict().get("data"))
 
 
 async def _start_build(bus: JobBus, payload: dict[str, Any]) -> JobRecord:

@@ -51,6 +51,7 @@ def create_app(ws: Workspace | None = None, *, token: str = "") -> FastAPI:
         ) from exc
 
     from nyshporka import ops as O
+    from nyshporka import ui
     from nyshporka.core.jobs import JobBus
     from nyshporka.core.workspace import use as _use
     from nyshporka.core.workspace import workspace as _workspace
@@ -88,9 +89,19 @@ def create_app(ws: Workspace | None = None, *, token: str = "") -> FastAPI:
         html = (static_dir / "index.html").read_text(encoding="utf-8")
         # Токен вшивається в сторінку, а не видається окремим запитом: інакше
         # його міг би попросити будь-хто, і сенс токена зникав би.
-        return HTMLResponse(html.replace("{{TOKEN}}", tok))
+        #
+        # 🔴 Спрайт значків вставляється В ТІЛО, а не підключається файлом:
+        # `<use href>` до зовнішнього SVG забороняє успадкування currentColor у
+        # Chrome, і всі значки стали б чорними — на темному полотні це просто
+        # порожні місця. Та сама підстановка є в консолі дослідника.
+        return HTMLResponse(ui.with_sprite(html.replace("{{TOKEN}}", tok)))
 
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
+
+    # 🔴 Спільний шар обох морд: токени, примітиви, значки, компоненти. Лежить у
+    # пакеті й монтується звідти, а не копіюється у фронт: консоль дослідника
+    # монтує РІВНО цю саму теку, і копія розійшлася б із нею тихо.
+    app.mount("/ui", StaticFiles(directory=ui.static_dir()), name="ui")
 
     # 🔴 Асети бренду віддаються з `brand/data/assets`, а НЕ копіюються сюди.
     # Копія знака жила б у двох місцях і розходилась би тихо: у вкладці одна

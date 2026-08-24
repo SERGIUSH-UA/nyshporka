@@ -15,7 +15,15 @@
  * що фронт бере СХЕМИ операцій із `/api/ops`, а не переписує поля руками.
  * Останнє сильніше за згенеровані типи: переписане може протухнути, взяте з
  * сервера — ні.
+ *
+ * Компоненти, спільні з консоллю приватного конвеєра, приходять із `/ui/**` —
+ * теки, яку сервер монтує з пакета. Це не «бібліотека для гарного вигляду»:
+ * доти обидві морди мали власні значки, власний перемикач теми й власні
+ * контролі, і розходились вони тихо.
  */
+import { ic, eng } from '/ui/icons.js';
+import { initTheme, cycleTheme } from '/ui/theme.js';
+import { swapHtml, skelRows, skelCards } from '/ui/dom.js';
 
 // ── i18n ─────────────────────────────────────────────────────────────────────
 const STRINGS = {
@@ -98,6 +106,51 @@ const STRINGS = {
       'Порожній результат означає «немає в оглянутих каталогах», а не «не існує».',
     'sources.get': 'Завантажити',
     'sources.manifest': 'Що принесе',
+    'nav.library': 'Бібліотека',
+    'lib.title': 'Бібліотека справ',
+    'lib.why': 'Що взагалі є на руках — канон і диск разом, з рішеннями ока поверх.',
+    'lib.q': 'Шифра, назва або місце',
+    'lib.repo': 'Архів', 'lib.repo.any': 'усі архіви',
+    'lib.verdict': 'Вердикт', 'lib.verdict.any': 'будь-який',
+    'lib.verdict.none': 'без вердикту', 'lib.verdict.all': 'усі справи',
+    'lib.ondisk': 'лише ті, що на диску',
+    'lib.col.shifra': 'шифра', 'lib.col.title': 'назва', 'lib.col.years': 'роки',
+    'lib.col.place': 'місце', 'lib.col.verdict': 'вердикт',
+    'lib.disk': 'на диску', 'lib.nodisk': 'на диску немає',
+    'lib.unbuilt': 'Зведення ще не збирали — це НЕ означає, що справ немає.',
+    'lib.build': 'Зібрати зведення',
+    'lib.count': 'показано {n} із {total}',
+    'lib.verdict.set': 'позначити',
+    'lib.verdict.clear': 'зняти вердикт',
+    'lib.verdict.no_clan': 'роду немає',
+    'lib.verdict.clan_found': 'рід знайдено',
+    'lib.verdict.recheck': 'перевірити ще',
+    'lib.pages': 'Скільки аркушів переглянуто',
+    'lib.pages.why': 'Без цього числа «роду немає» наступного разу прочитають як доведений нуль.',
+    'lib.note': 'Чим доведено',
+    'lib.save': 'Зберегти рішення',
+    'lib.cancel': 'Не зараз',
+    'nav.sift': 'Розбір',
+    'sift.title': 'Розбір знахідок',
+    'sift.empty': 'Немає чого розбирати — спершу знайдіть щось у прочитаному.',
+    'sift.togo': 'знахідка {i} з {n}',
+    'sift.open': 'Розібрати знахідки',
+    'sift.crop': 'вирізка рядка',
+    'sift.crop.load': 'показати вирізку',
+    'sift.crop.fail': 'вирізку взяти не вдалось',
+    'sift.context': 'сусідні рядки',
+    'sift.score': 'бал',
+    'sift.prev': 'Назад', 'sift.next': 'Далі',
+    'sift.note': 'Занести сторінку в облік',
+    'sift.view': 'Відкрити в гортачі',
+    'sift.rule': 'Вирішує ОКО. Машина подала кандидата — прочитайте вирізку самі: '
+      + 'збіг у балах не є доказом, а розбіжність не є спростуванням.',
+    'sift.stem': '⚠ Не відкидайте за коренем слова: рушій калічить саме середину, '
+      + 'тож шукане прізвище виходить із нього невпізнанним.',
+    'view.page': 'Сторінка цілком',
+    'view.page.why': 'Дорого: ціла сторінка важить у десятки разів більше за вирізку рядка. Але саме на ній видно, ЧИЙ це запис і що стоїть поруч.',
+    'view.zoom.fit': 'вписати', 'view.zoom.in': 'більше', 'view.zoom.out': 'менше',
+    'view.close': 'Згорнути',
     'cases.title': 'Справи в роботі',
     'cases.frames': 'кадрів', 'cases.read': 'прочитано', 'cases.none': 'не читано',
     'cases.nodir': 'теки на цій машині немає — правити нічого',
@@ -157,6 +210,7 @@ const STRINGS = {
     'common.error': 'Не вийшло',
     'common.frames': 'кадрів',
     'common.pages': 'сторінок',
+    'common.page': 'сторінка',
   },
   en: {
     'nav.home': 'Research', 'nav.sources': 'Sources', 'nav.cases': 'My cases',
@@ -237,6 +291,51 @@ const STRINGS = {
       'An empty result means "not in the catalogues we looked at", not "does not exist".',
     'sources.get': 'Download',
     'sources.manifest': 'What it brings',
+    'nav.library': 'Library',
+    'lib.title': 'Case library',
+    'lib.why': 'What you actually hold — canon and disk together, with eye decisions on top.',
+    'lib.q': 'Reference, title or place',
+    'lib.repo': 'Archive', 'lib.repo.any': 'all archives',
+    'lib.verdict': 'Verdict', 'lib.verdict.any': 'any',
+    'lib.verdict.none': 'no verdict yet', 'lib.verdict.all': 'all cases',
+    'lib.ondisk': 'only what is on disk',
+    'lib.col.shifra': 'reference', 'lib.col.title': 'title', 'lib.col.years': 'years',
+    'lib.col.place': 'place', 'lib.col.verdict': 'verdict',
+    'lib.disk': 'on disk', 'lib.nodisk': 'not on disk',
+    'lib.unbuilt': 'The summary has never been built — this does NOT mean there are no cases.',
+    'lib.build': 'Build the summary',
+    'lib.count': 'showing {n} of {total}',
+    'lib.verdict.set': 'mark',
+    'lib.verdict.clear': 'clear verdict',
+    'lib.verdict.no_clan': 'clan not here',
+    'lib.verdict.clan_found': 'clan found',
+    'lib.verdict.recheck': 'check again',
+    'lib.pages': 'How many leaves were looked at',
+    'lib.pages.why': 'Without this number, "clan not here" will later be read as a proven zero.',
+    'lib.note': 'What proves it',
+    'lib.save': 'Save the decision',
+    'lib.cancel': 'Not now',
+    'nav.sift': 'Sift',
+    'sift.title': 'Sifting the hits',
+    'sift.empty': 'Nothing to sift yet — find something in the read text first.',
+    'sift.togo': 'hit {i} of {n}',
+    'sift.open': 'Sift these hits',
+    'sift.crop': 'line crop',
+    'sift.crop.load': 'show the crop',
+    'sift.crop.fail': 'could not take the crop',
+    'sift.context': 'neighbouring lines',
+    'sift.score': 'score',
+    'sift.prev': 'Back', 'sift.next': 'Next',
+    'sift.note': 'Note this page',
+    'sift.view': 'Open in the viewer',
+    'sift.rule': 'THE EYE decides. The machine offered a candidate — read the crop '
+      + 'yourself: a high score is not proof, and a mismatch is not a refutation.',
+    'sift.stem': '⚠ Do not reject on the stem: the engine mangles the MIDDLE of a '
+      + 'word, so the surname you want comes out of it unrecognisable.',
+    'view.page': 'Whole page',
+    'view.page.why': 'Expensive: a whole page weighs tens of times more than a line crop. But it is where you see WHOSE record this is and what stands next to it.',
+    'view.zoom.fit': 'fit', 'view.zoom.in': 'larger', 'view.zoom.out': 'smaller',
+    'view.close': 'Collapse',
     'cases.title': 'Cases in progress',
     'cases.frames': 'frames', 'cases.read': 'read', 'cases.none': 'not read',
     'cases.nodir': 'folder not present on this machine — nothing to edit',
@@ -296,6 +395,7 @@ const STRINGS = {
     'common.error': 'Did not work',
     'common.frames': 'frames',
     'common.pages': 'pages',
+    'common.page': 'page',
   },
 };
 
@@ -314,14 +414,14 @@ const t = (key) => (STRINGS[LANG] && STRINGS[LANG][key]) || STRINGS.uk[key] || k
 let SECTIONS = { sections: [], screens: {}, presets: {}, preset: null, glyphs: {} };
 
 /** Порядок кнопок у шапці. Екрани, яких тут немає, кнопки не отримують. */
-const NAV_ORDER = ['home', 'sources', 'geog', 'fonds', 'cases', 'newcase',
-  'read', 'view', 'eye', 'search', 'export', 'jobs'];
+const NAV_ORDER = ['home', 'sources', 'geog', 'fonds', 'library', 'cases', 'newcase',
+  'read', 'view', 'eye', 'search', 'sift', 'export', 'jobs'];
 
 /** Ключ i18n для кнопки екрана. Підпис «Завести справу» вже є в словнику. */
 const NAV_LABEL = {
   home: 'nav.home', sources: 'nav.sources', geog: 'nav.geog', fonds: 'nav.fonds',
-  cases: 'nav.cases', newcase: 'nav.newcase', read: 'nav.read', view: 'nav.view',
-  eye: 'nav.eye', search: 'nav.search', export: 'nav.export', jobs: 'nav.jobs',
+  library: 'nav.library', cases: 'nav.cases', newcase: 'nav.newcase', read: 'nav.read', view: 'nav.view',
+  eye: 'nav.eye', search: 'nav.search', sift: 'nav.sift', export: 'nav.export', jobs: 'nav.jobs',
 };
 
 /** Чи ввімкнена секція цього екрана. Невідомий екран не блокуємо. */
@@ -344,19 +444,64 @@ async function loadSections() {
   renderNav();
 }
 
+/**
+ * Розділ, чиї екрани показані нижнім ярусом.
+ *
+ * Виводиться з поточного екрана, а не зберігається окремим станом: два джерела
+ * правди про «де я» розходяться при першому ж переході за посиланням, і
+ * виглядає це як підсвічений розділ, у якому відкритого екрана немає.
+ */
+let GROUP = null;
+
+/** Розділи, у яких є хоч один доступний екран, у порядку сервера. */
+function navGroups() {
+  return (SECTIONS.sections || []).filter(
+    (s) => s.visible && s.active && (s.screens || []).some((x) => NAV_ORDER.includes(x)));
+}
+
+/** Екрани розділу — у порядку `NAV_ORDER`, а не в порядку відповіді. */
+function groupScreens(sid) {
+  return NAV_ORDER.filter((s) => SECTIONS.screens[s] === sid && screenOn(s));
+}
+
+/**
+ * Дві смуги: розділи зверху, екрани активного розділу під ними.
+ *
+ * 🔴 Одним рядом кнопок було дванадцять, і на вузькому екрані ряд ставав стіною
+ * без ієрархії. Групування береться з СЕКЦІЙ — тих самих, якими вмикають
+ * частини застосунку, — а не з окремого переліку: другий список розходився б
+ * із дозволеним тихо.
+ *
+ * Знак приходить із сервера (`brand.yaml`), а не з переліку тут. Значка немає —
+ * кнопка лишається підписом, а не ламається.
+ */
 function renderNav() {
-  const nav = el('nav');
-  if (!nav) return;
-  // Знак приходить із сервера (`brand.yaml`), а не з переліку тут: другий
-  // список іконок у браузері розходився б із джерелом тихо. Знака немає —
-  // кнопка лишається підписом, а не ламається.
-  const glyphs = (SECTIONS.glyphs && SECTIONS.glyphs.screens) || {};
-  const bits = NAV_ORDER.filter(screenOn).map((s) => {
+  const tabs = el('nav');
+  const subs = el('subnav');
+  if (!tabs) return;
+  const groups = navGroups();
+  if (!GROUP || !groups.some((g) => g.id === GROUP)) GROUP = (groups[0] || {}).id || null;
+
+  const sicons = (SECTIONS.icons && SECTIONS.icons.sections) || {};
+  tabs.innerHTML = groups.map((g) => {
+    const label = esc(LANG === 'en' ? g.label_en || g.label : g.label);
+    return `<button data-act="group" data-arg="${esc(g.id)}"`
+      + `${g.id === GROUP ? ' class="on"' : ''}>${icon(sicons[g.id])}${label}</button>`;
+  }).join('');
+
+  if (!subs) return;
+  const icons = (SECTIONS.icons && SECTIONS.icons.screens) || {};
+  const here = (location.hash || '').slice(1);
+  subs.innerHTML = groupScreens(GROUP).map((s) => {
     const tail = s === 'jobs' ? '<sup id="jobcount"></sup>' : '';
-    const g = glyphs[s] ? `<span class="glyph" aria-hidden="true">${esc(glyphs[s])}</span> ` : '';
-    return `<button data-act="nav" data-arg="${s}">${g}${esc(t(NAV_LABEL[s] || s))}</button>${tail}`;
-  });
-  nav.innerHTML = bits.join('');
+    return `<button data-act="nav" data-arg="${s}"${s === here ? ' class="on"' : ''}>`
+      + `${icon(icons[s])}${esc(t(NAV_LABEL[s] || s))}</button>${tail}`;
+  }).join('');
+}
+
+/** Значок спрайта або порожньо — підпис кнопки читається й без нього. */
+function icon(name) {
+  return name ? ic(name, 'ic-sm') + ' ' : '';
 }
 
 // ── транспорт ────────────────────────────────────────────────────────────────
@@ -413,9 +558,26 @@ function renderCoverage(env) {
   return `<p class="muted cov">🔎 ${t('cov.searched')}: ${bits.join('; ')}</p>`;
 }
 
-function setView(html) { el('view').innerHTML = html; }
+/**
+ * Замінити вміст екрана.
+ *
+ * ⚠ Через `swapHtml`, а не присвоєнням `innerHTML`: голе присвоєння схлопує
+ * контейнер у нульову висоту на один кадр, і сторінка під ним підстрибує —
+ * найпомітніше на довгих таблицях, де око вже стоїть на потрібному рядку.
+ * `keepScroll: false` тут навмисно: зміна екрана мусить починатись згори.
+ */
+function setView(html) { swapHtml(el('view'), html, { keepScroll: false }); }
 
-function busy() { setView(`<p class="muted">${t('common.loading')}</p>`); }
+/**
+ * Стан завантаження.
+ *
+ * 🔴 Скелетон, а не рядок «завантаження…»: текстова заглушка має іншу висоту за
+ * дані, тож у момент їх приходу вміст стрибає. Скелетон тримає приблизно ту
+ * саму висоту, і сторінка лишається на місці.
+ */
+function busy(rows = 8) {
+  setView(`<table><tbody>${skelRows(rows, 4)}</tbody></table>`);
+}
 
 function failure(env) {
   setView(`<div class="warn err">${t('common.error')}: ${esc(env.error || '?')}</div>`);
@@ -541,6 +703,129 @@ SCREENS.cases = async () => {
  * громади, костелу й рабинату одного містечка лежать у РІЗНИХ фондах, тож
  * дефолт «усі» — не зручність, а захист від систематичного недобору.
  */
+/**
+ * 📚 Бібліотека справ — що взагалі є на руках.
+ *
+ * Відповідає на питання, якого не закриває «Мої справи»: там ідеться про взяте
+ * під облік у цьому просторі, тут — про весь матеріал разом із рішеннями ока.
+ *
+ * 🔴 Порожня бібліотека і НЕЗІБРАНА бібліотека показуються по-різному. «0 справ»
+ * читається як факт («шукати нема де»), і людина закриває напрям, якого ніхто
+ * не відкривав; тому незібране каже про себе прямо й дає кнопку.
+ */
+let LIB = { q: '', repo: '', verdict: '', on_disk: null };
+/**
+ * Лічильник запитів бібліотеки.
+ *
+ * ⚠ Захист від ОБІГНАНОЇ відповіді: фільтр набирають швидко, запити летять
+ * підряд, і повільніший ранній може прийти ПІСЛЯ свіжого — на екрані лишиться
+ * видача, що не відповідає полю. Не падає, не помиляється видимо, і саме тому
+ * дорого: людина вирішує по тому, що бачить.
+ */
+let _libSeq = 0;
+
+SCREENS.library = async () => {
+  busy();
+  await libLoad();
+};
+
+async function libLoad() {
+  const seq = ++_libSeq;
+  const env = await callOp('library.list', {
+    q: LIB.q, repo: LIB.repo, verdict: LIB.verdict,
+    ...(LIB.on_disk === null ? {} : { on_disk: LIB.on_disk }),
+  });
+  if (seq !== _libSeq) return;          // нас уже обігнав свіжіший запит
+  if (!env.ok) return failure(env);
+  const d = env.data || {};
+  const rows = d.cases || [];
+  const kinds = d.kinds || {};
+
+  const head = `<h2>${ic('books')} ${t('lib.title')}</h2>
+    <p class="muted">${t('lib.why')}</p>
+    ${renderWarnings(env)}`;
+
+  if (!d.built) {
+    setView(`${head}
+      <div class="warn">${t('lib.unbuilt')}
+        <button data-act="cases.build">${t('lib.build')}</button></div>`);
+    return;
+  }
+
+  const opt = (v, label, cur) =>
+    `<option value="${esc(v)}"${v === cur ? ' selected' : ''}>${esc(label)}</option>`;
+  const repos = [...new Set(rows.map((r) => r.repo).filter(Boolean))].sort();
+
+  setView(`${head}
+    <div class="row">
+      <input id="lib-q" type="search" placeholder="${esc(t('lib.q'))}"
+             value="${esc(LIB.q)}" data-act="lib.filter" data-live="1">
+      <select id="lib-repo" data-act="lib.filter">
+        ${opt('', t('lib.repo.any'), LIB.repo)}
+        ${repos.map((r) => opt(r, r, LIB.repo)).join('')}
+      </select>
+      <select id="lib-verdict" data-act="lib.filter">
+        ${opt('', t('lib.verdict.all'), LIB.verdict)}
+        ${opt('any', t('lib.verdict.any'), LIB.verdict)}
+        ${opt('none', t('lib.verdict.none'), LIB.verdict)}
+        ${Object.keys(kinds).map((k) =>
+          opt(k, t(`lib.verdict.${k}`), LIB.verdict)).join('')}
+      </select>
+      <label class="lbl-mini"><input type="checkbox" id="lib-disk"
+        data-act="lib.filter"${LIB.on_disk ? ' checked' : ''}> ${t('lib.ondisk')}</label>
+    </div>
+    <p class="muted">${esc(t('lib.count')
+      .replace('{n}', d.shown ?? 0).replace('{total}', d.total ?? 0))}</p>
+    <table><thead><tr>
+      <th>${t('lib.col.shifra')}</th><th>${t('lib.col.title')}</th>
+      <th class="num">${t('lib.col.years')}</th><th>${t('lib.col.place')}</th>
+      <th>${t('lib.col.verdict')}</th></tr></thead>
+    <tbody>${rows.map(libRow).join('')}</tbody></table>`);
+}
+
+function libRow(r) {
+  const years = [r.year_from, r.year_to].filter(Boolean).join('–');
+  const disk = r.on_disk
+    ? `<span title="${esc(t('lib.disk'))}">${ic('disk', 'ic-sm')}</span>`
+    : `<span class="muted" title="${esc(t('lib.nodisk'))}">—</span>`;
+  const v = r.verdict
+    ? `<span class="badge ${r.verdict === 'clan_found' ? 'known' : ''}"
+         title="${esc(r.verdict_note || '')}">${esc(t(`lib.verdict.${r.verdict}`))}</span>`
+    : '';
+  return `<tr>
+    <td class="mono">${disk} ${esc(r.shifra || r.key || '')}</td>
+    <td>${esc((r.title || '').slice(0, 90))}</td>
+    <td class="num">${esc(years)}</td>
+    <td>${esc(r.place || '')}</td>
+    <td>${v} <button class="ctl-sm" data-act="lib.verdict" data-arg="${esc(r.key)}"
+      title="${esc(t('lib.verdict.set'))}">${ic('pencil-line', 'ic-o ic-sm')}</button></td>
+  </tr>`;
+}
+
+/**
+ * Форма рішення по справі.
+ *
+ * 🔴 Поле «скільки аркушів переглянуто» стоїть ПОРУЧ із «роду немає», а не в
+ * примітці: нуль без знаменника не результат, і саме цей вердикт наступного
+ * разу закриє напрям. Порожнім лишити можна — вердикт виносить людина, і
+ * машина не має права не пустити її рішення, — але мовчки це не проходить.
+ */
+function libVerdictForm(key) {
+  setView(`<h2>${ic('pencil-line')} ${esc(key)}</h2>
+    <div class="row"><select id="lv-kind">
+      <option value="">${esc(t('lib.verdict.clear'))}</option>
+      <option value="no_clan">${esc(t('lib.verdict.no_clan'))}</option>
+      <option value="clan_found">${esc(t('lib.verdict.clan_found'))}</option>
+      <option value="recheck">${esc(t('lib.verdict.recheck'))}</option>
+    </select></div>
+    <div class="row"><input id="lv-pages" type="number" min="0"
+      placeholder="${esc(t('lib.pages'))}"></div>
+    <p class="muted">${t('lib.pages.why')}</p>
+    <div class="row"><input id="lv-note" placeholder="${esc(t('lib.note'))}"></div>
+    <button data-act="lib.verdict.save" data-arg="${esc(key)}">${t('lib.save')}</button>
+    <button data-act="nav" data-arg="library">${t('lib.cancel')}</button>`);
+}
+
 SCREENS.geog = async () => {
   busy();
   // 🔴 Стан довідників показуємо ОДРАЗУ, поруч із полем пошуку, а не ховаємо в
@@ -627,6 +912,89 @@ SCREENS.search = async () => {
     <div id="hits"></div>`);
 };
 
+/**
+ * 🔬 Розбір знахідок — те місце, де машина віддає рішення людині.
+ *
+ * Пошук подає рядки, схожі на запит; чи це справді шукане прізвище, видно лише
+ * на самому знімку. Тому картка несе ВИРІЗКУ, а не самий декод: рушій калічить
+ * середину слова, і текст, у якому «не той корінь», може бути рівно тим
+ * прізвищем, по яке пошук і кликали.
+ *
+ * 🔴 Два правила стоять НА ЕКРАНІ, а не в документації, бо порушують їх саме
+ * тут: вирішує око, і відсівати за коренем не можна.
+ */
+let SIFT = { hits: [], i: 0, q: '', crop: null, ctx: null };
+
+SCREENS.sift = async () => {
+  if (!SIFT.hits.length) {
+    setView(`<h2>${ic('crop-check')} ${t('sift.title')}</h2>
+      <div class="warn">${t('sift.empty')}
+        <button data-act="nav" data-arg="search">${t('nav.search')}</button></div>`);
+    return;
+  }
+  siftDraw();
+  await siftLoadCrop();
+};
+
+function siftDraw() {
+  const h = SIFT.hits[SIFT.i] || {};
+  const badge = h.engine ? eng(h.engine, true, LANG) : '';
+  const pos = t('sift.togo').replace('{i}', SIFT.i + 1).replace('{n}', SIFT.hits.length);
+  // Збіг підсвічується в рядку, але НЕ вирізається з нього: сусідні слова —
+  // це роль і відмінок, тобто половина того, за чим упізнають запис.
+  const line = esc(h.line || '');
+  const lit = h.matched
+    ? line.replace(esc(h.matched), `<mark>${esc(h.matched)}</mark>`)
+    : line;
+  setView(`<h2>${ic('crop-check')} ${t('sift.title')}</h2>
+    <div class="row">
+      <button data-act="sift.step" data-arg="-1"${SIFT.i ? '' : ' disabled'}>
+        ${ic('arrow-left', 'ic-sm')} ${t('sift.prev')}</button>
+      <span class="muted">${esc(pos)}</span>
+      <button data-act="sift.step" data-arg="1"${
+        SIFT.i + 1 < SIFT.hits.length ? '' : ' disabled'}>${t('sift.next')}</button>
+    </div>
+    <div class="warn">${t('sift.rule')}</div>
+    <p class="mono">${esc(h.name || '')} · ${t('common.page')} ${esc(h.page || '')}
+       · ${badge} · ${t('sift.score')} ${esc(h.score || '')}</p>
+    <div id="sift-crop"><p class="muted">${t('sift.crop.load')}…</p></div>
+    <p class="mono">${lit}</p>
+    <div id="sift-ctx"></div>
+    <p class="muted">${t('sift.stem')}</p>
+    <div class="row">
+      <button data-act="sift.view">${ic('eye', 'ic-sm')} ${t('sift.view')}</button>
+      <button data-act="sift.note">${ic('pencil-line', 'ic-sm')} ${t('sift.note')}</button>
+    </div>`);
+}
+
+/** Вирізка поточного рядка. Окремим кроком: сторінка коштує ~1.1 МБ, рядок 15 КБ. */
+async function siftLoadCrop() {
+  const h = SIFT.hits[SIFT.i] || {};
+  const box = el('sift-crop');
+  if (!box || !h.name) return;
+  const env = await callOp('page.view', {
+    run: h.name, page: h.page, line: h.line_index, region: 'line',
+  });
+  if (!env.ok || !(env.data || {}).image) {
+    box.innerHTML = `<p class="muted">${t('sift.crop.fail')}</p>`;
+    return;
+  }
+  box.innerHTML = `<img src="${esc(env.data.image)}" alt="${esc(t('sift.crop'))}"
+    style="max-width:100%;background:var(--paper);border:1px solid var(--paper-edge);
+           border-radius:var(--r-m)">`;
+  // Сусідні рядки — той самий «контекст двох голосів»: роль і відмінок стоять
+  // поряд, а не в самому слові.
+  const ctx = await callOp('page.text', { run: h.name, page: h.page });
+  const cbox = el('sift-ctx');
+  if (!cbox || !ctx.ok) return;
+  const lines = (ctx.data || {}).lines || [];
+  const near = lines.slice(Math.max(0, (h.line_index || 0) - 1), (h.line_index || 0) + 2);
+  cbox.innerHTML = near.length
+    ? `<p class="muted">${t('sift.context')}</p><pre>${near
+        .map((l) => esc(typeof l === 'string' ? l : l.text || '')).join('\n')}</pre>`
+    : '';
+}
+
 SCREENS.eye = async () => {
   const e = EYE || {};
   setView(`
@@ -701,7 +1069,10 @@ SCREENS.view = async () => {
         ${v.run ? '' : 'autofocus'}>
       <input name="page" placeholder="00003.JPG" value="${esc(v.page || '')}">
       <button type="submit">${t('view.open')}</button>
+      <button type="button" data-act="view.page" title="${esc(t('view.page.why'))}">
+        ${ic('image', 'ic-sm')} ${t('view.page')}</button>
     </form>
+    <div id="stage"></div>
     <div id="hits"></div>`);
   if (v.run && v.page) {
     await ACTIONS['view.open']({
@@ -711,6 +1082,44 @@ SCREENS.view = async () => {
     }
   }
 };
+
+/**
+ * 🖼 Сторінка цілком.
+ *
+ * 🔴 Окремою дією, а не одразу: вирізка рядка важить 15 КБ, ціла сторінка —
+ * близько мегабайта, і при розборі десятків знахідок різниця вирішує. Але
+ * рядок сам по собі не каже, ЧИЙ це запис: роль, відмінок і сусідні імена
+ * стоять поруч, а не в самому слові.
+ *
+ * Зум — шириною зображення, без канви: канва потрібна там, де по знімку
+ * МАЛЮЮТЬ, а тут на нього дивляться.
+ */
+let ZOOM = 100;
+
+async function viewWholePage() {
+  const box = el('stage');
+  const form = el('view').querySelector('form');
+  if (!box || !form) return;
+  const run = form.run.value.trim();
+  const page = form.page.value.trim();
+  if (!run || !page) return;
+  box.innerHTML = `<p class="muted">${t('common.loading')}</p>`;
+  const env = await callOp('page.view', { run, page, region: 'page' });
+  if (!env.ok || !(env.data || {}).image) {
+    box.innerHTML = `<div class="warn err">${esc(env.error || t('sift.crop.fail'))}</div>`;
+    return;
+  }
+  ZOOM = 100;
+  box.innerHTML = `
+    <div class="row">
+      <button data-act="view.zoom" data-arg="-25">${t('view.zoom.out')}</button>
+      <button data-act="view.zoom" data-arg="fit">${t('view.zoom.fit')}</button>
+      <button data-act="view.zoom" data-arg="25">${t('view.zoom.in')}</button>
+      <button data-act="view.stage.close">${t('view.close')}</button>
+    </div>
+    <div class="stage"><img id="stage-img" src="${esc(env.data.image)}"
+      alt="${esc(page)}" style="width:${ZOOM}%"></div>`;
+}
 
 SCREENS.read = async () => {
   setView(`
@@ -797,6 +1206,90 @@ SCREENS.settings = async () => {
 // ── дії ──────────────────────────────────────────────────────────────────────
 const ACTIONS = {
   nav: (_ev, elm) => show(elm.dataset.arg),
+
+  /** Клік по розділу веде на його ПЕРШИЙ екран, а не просто перемальовує
+      смугу: розділ без відкритого екрана виглядав би як кнопка, що нічого не
+      робить. */
+  group: (_ev, elm) => {
+    GROUP = elm.dataset.arg;
+    const first = groupScreens(GROUP)[0];
+    return first ? show(first) : renderNav();
+  },
+
+  /** Тема: авто → світла → темна → авто. Значок показує ПОТОЧНИЙ режим. */
+  'theme.cycle': () => cycleTheme(),
+  /** Фільтр бібліотеки. Читає ВСІ поля одразу: інакше зміна одного скидала б
+      інші до дефолтів, і видача не відповідала б тому, що видно на екрані. */
+  'lib.filter': () => {
+    LIB = {
+      q: (el('lib-q') || {}).value || '',
+      repo: (el('lib-repo') || {}).value || '',
+      verdict: (el('lib-verdict') || {}).value || '',
+      on_disk: (el('lib-disk') || {}).checked ? true : null,
+    };
+    return libLoad();
+  },
+
+  'lib.verdict': (_ev, elm) => libVerdictForm(elm.dataset.arg),
+  /** Вхід у розбір із видачі пошуку. */
+  'sift.open': () => show('sift'),
+  'view.page': () => viewWholePage(),
+
+  'view.zoom': (_ev, elm) => {
+    const img = el('stage-img');
+    if (!img) return;
+    // «Вписати» — не 100%, а ширина контейнера: сторінка з архіву буває
+    // 4000 px завширшки, і сотня відсотків від неї не влазить нікуди.
+    ZOOM = elm.dataset.arg === 'fit'
+      ? 100
+      : Math.max(25, Math.min(600, ZOOM + Number(elm.dataset.arg)));
+    img.style.width = `${ZOOM}%`;
+  },
+
+  'view.stage.close': () => { const b = el('stage'); if (b) b.innerHTML = ''; },
+
+
+  'sift.step': async (_ev, elm) => {
+    const next = SIFT.i + Number(elm.dataset.arg || 0);
+    if (next < 0 || next >= SIFT.hits.length) return;
+    SIFT.i = next;
+    siftDraw();
+    await siftLoadCrop();
+  },
+
+  /** У гортач — на ту саму сторінку й той самий рядок. */
+  'sift.view': () => {
+    const h = SIFT.hits[SIFT.i] || {};
+    VIEW = { run: h.name, page: h.page, line: h.line_index };
+    return show('view');
+  },
+
+  /** В облік — зі справою й сканом уже підставленими. */
+  'sift.note': () => {
+    const h = SIFT.hits[SIFT.i] || {};
+    EYE = { ...(EYE || {}), case: h.key || h.shifra || h.name, scan: h.page };
+    return show('eye');
+  },
+
+
+  'lib.verdict.save': async (_ev, elm) => {
+    const pages = ((el('lv-pages') || {}).value || '').trim();
+    const env = await callOp('library.verdict', {
+      key: elm.dataset.arg,
+      verdict: (el('lv-kind') || {}).value || '',
+      note: (el('lv-note') || {}).value || '',
+      ...(pages ? { pages: Number(pages) } : {}),
+    });
+    if (!env.ok) return failure(env);
+    // Застереження про нуль без знаменника не ковтається: воно доїжджає
+    // конвертом і малюється над поверненою таблицею.
+    await show('library');
+    const box = el('view');
+    if (box && env.warnings && env.warnings.length) {
+      box.insertAdjacentHTML('afterbegin', renderWarnings(env));
+    }
+  },
+
 
   'sections.preset': async (_ev, elm) => {
     const env = await callOp('sections.set', { preset: elm.dataset.arg });
@@ -992,8 +1485,15 @@ const ACTIONS = {
     if (!env.ok) return failure(env);
     const hits = env.data.hits || [];
     const cov = env.data.coverage || {};
+    // Хіти лишаються під рукою: розбір відкривається з них, а не переповторює
+    // пошук — інакше два екрани показували б різні набори того самого запиту.
+    SIFT = { hits: hits.filter((h) => h.name && h.page), i: 0,
+             q: String(fd.get('q') || ''), crop: null, ctx: null };
     el('hits').innerHTML = `
       ${renderWarnings(env)}
+      ${SIFT.hits.length
+        ? `<p><button data-act="sift.open">${ic('crop-check', 'ic-sm')}
+             ${t('sift.open')}</button></p>` : ''}
       <table><tbody>${hits.map((h) => `<tr>
         <td class="mono">${esc(h.shifra || h.case || h.key || h.name || '')}</td>
         <td class="mono">${esc(h.page || h.scan || '')}</td>
@@ -1252,6 +1752,28 @@ function dispatch(ev) {
 }
 document.addEventListener('click', dispatch);
 document.addEventListener('submit', dispatch);
+// Селекти й чекбокси клік не диспетчить: `change` — це їхня подія. Без цього
+// фільтр із випадним списком виглядає робочим і мовчки нічого не міняє.
+document.addEventListener('change', dispatch);
+
+/**
+ * Набір у полі — окремо, і ЗАВЖДИ з паузою.
+ *
+ * ⚠ Без дебаунса кожна натиснута клавіша — окремий запит: десять символів
+ * прізвища дають десять проходів по бібліотеці, і останній не обов'язково
+ * повертається останнім. Пауза прибирає більшість, порядок відповідей
+ * стереже лічильник на боці екрана.
+ *
+ * Реагують лише поля з `data-live`: решта чекає на `change`, тобто на те, що
+ * людина закінчила вводити.
+ */
+let _liveTimer = null;
+document.addEventListener('input', (ev) => {
+  const elm = ev.target.closest('[data-act][data-live]');
+  if (!elm) return;
+  clearTimeout(_liveTimer);
+  _liveTimer = setTimeout(() => dispatch(ev), 250);
+});
 
 // ── навігація ────────────────────────────────────────────────────────────────
 async function show(screen) {
@@ -1271,10 +1793,12 @@ async function show(screen) {
     return;
   }
   const fn = SCREENS[screen] || SCREENS.home;
-  document.querySelectorAll('nav button').forEach((b) => {
-    b.classList.toggle('on', b.dataset.arg === screen);
-  });
   location.hash = screen;
+  // Розділ іде за екраном: перехід за посиланням чи закладкою мусить
+  // підсвітити ту саму пару, що й клік по кнопці.
+  const sid = SECTIONS.screens[screen];
+  if (sid && sid !== GROUP) GROUP = sid;
+  renderNav();
   await fn();
 }
 
@@ -1327,6 +1851,10 @@ async function boot() {
   document.querySelectorAll('[data-i18n]').forEach((n) => {
     n.textContent = t(n.dataset.i18n);
   });
+  // Тема — ПЕРЕД мережею: вона малює кнопку в шапці й вішає слухач системної
+  // налаштованості, і затримка тут дала б видимий стрибок вигляду вже після
+  // того, як сторінка намальована.
+  initTheme();
   // Спершу довідка про секції, і лише потім екран: інакше перший показ ішов би
   // з порожнім переліком, тобто пускав би на екран, якого в цьому просторі немає.
   await loadSections();

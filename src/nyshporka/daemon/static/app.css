@@ -1,25 +1,22 @@
-/* Нишпорка — оформлення.
+/* Нишпорка — оформлення ЦІЄЇ морди.
 
-   🔴 Кольорів і шрифтів ТУТ НЕМАЄ. Вони живуть у `tokens.css`, згенерованому
-   з `brand/data/brand.yaml`, — тим самим джерелом, з якого беруть тему
-   командний рядок і сайт документації. Вписаний сюди `#7a4f2b` розійшовся б
-   із ними тихо: нічого не ламається, просто через півроку це три різні
-   продукти. Правка кольору робиться в brand.yaml, далі
-   `python -m nyshporka.brand.gen`; протухання ловить `--check` у CI. */
-* { box-sizing: border-box; }
-body {
-  margin: 0; background: var(--bg); color: var(--fg);
-  font: var(--font-size)/var(--line-height) var(--font-text);
-}
-header {
-  display: flex; align-items: center; gap: 1rem;
-  padding: .6rem 1rem; border-bottom: 1px solid var(--line);
-  position: sticky; top: 0; background: var(--bg); z-index: 2;
-}
-/* 🐾 Знак у шапці. Маскою, а не картинкою: SVG усередині `<img>` ізольований
-   і `currentColor` у ньому не працює, тож знак лишався б чорним в обох темах.
-   Маска ж фарбується токеном — один файл на світлу й темну. */
-.brand { display: flex; align-items: center; gap: .45rem; font-weight: 700; letter-spacing: .02em; }
+   🔴 Кольорів і шрифтів ТУТ НЕМАЄ. Вони живуть у `/ui/tokens.css`,
+   згенерованому з `brand/data/brand.yaml`, — тим самим джерелом, з якого
+   беруть тему командний рядок і сайт документації. Вписаний сюди `#7a4f2b`
+   розійшовся б із ними тихо: нічого не ламається, просто через півроку це три
+   різні продукти. Правка кольору робиться в brand.yaml, далі
+   `python -m nyshporka.brand.gen`; протухання ловить `--check` у CI.
+
+   ⚠ Розкладки сторінки, форм-контролів, кнопок, бейджів, скелетонів і руху тут
+   теж немає — вони переїхали в `/ui/base.css`, спільний з консоллю приватного
+   конвеєра. Лишилось рівно те, чого немає в тієї морди: знак у шапці з його
+   станом «шукає», картки першого запуску, смуга завдання, таблиці видачі. */
+
+/* ── 🐾 Знак у шапці ────────────────────────────────────────────────────────
+   Маскою, а не картинкою: SVG усередині `<img>` ізольований і `currentColor` у
+   ньому не працює, тож знак лишався б чорним в обох темах. Маска ж фарбується
+   токеном — один файл на світлу й темну. */
+.brand { display: flex; align-items: center; gap: .45rem; }
 .mark {
   width: 1.4em; height: 1.4em; flex: none; background: var(--accent);
   -webkit-mask: url(/brand/mark.svg) center / contain no-repeat;
@@ -32,81 +29,66 @@ header {
 @keyframes paw-search { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
 @media (prefers-reduced-motion: reduce) { .mark.busy { animation: none; } }
 
-/* Знак екрана в кнопці навігації. Приходить із сервера; якщо його немає,
-   кнопка лишається підписом — не ламається. */
-.glyph { font-size: .95em; }
-
-/* Бейдж рушія: колір, форма й ЛІТЕРА. Три ознаки навмисно — вивід читають і в
-   чорно-білому, і з дальтонізмом, тож колір лише прискорює впізнавання.
-   Прив'язку кольору до рушія ставить згенерований `tokens.css`. */
-.engine {
-  display: inline-flex; align-items: center; justify-content: center;
-  width: 1.5em; height: 1.5em; flex: none;
-  font-size: .8rem; font-weight: 700; line-height: 1;
-  border: 2px solid currentColor; color: var(--engine, var(--muted));
-}
-.engine[data-shape="circle"] { border-radius: 50%; }
-.engine[data-shape="diamond"] { border-radius: .14em; transform: rotate(45deg); }
-.engine[data-shape="diamond"] > span { transform: rotate(-45deg); }
-.engine[data-shape="notched"] {
-  border-radius: .14em;
-  clip-path: polygon(0 0, 68% 0, 100% 32%, 100% 100%, 0 100%);
-}
-.engine-row { display: inline-flex; align-items: center; gap: .4rem; }
-nav { display: flex; gap: .25rem; flex-wrap: wrap; }
-nav button {
-  background: none; border: 0; color: var(--muted); cursor: pointer;
-  padding: .35rem .6rem; border-radius: .4rem; font: inherit;
-}
-nav button:hover { background: var(--line); color: var(--fg); }
-nav button.on { color: var(--fg); font-weight: 600; background: var(--line); }
+/* Лічильник роботи в черзі — сидить на кнопці «Роботи». */
 #jobcount:not(:empty) {
-  background: var(--accent); color: var(--bg); border-radius: 1rem;
-  padding: 0 .4rem; font-size: .7rem; margin-left: -.4rem;
+  background: var(--accent-fill); color: var(--accent-ink); border-radius: var(--r-pill);
+  padding: 0 .4rem; font-size: .7rem; margin-left: -.4rem; font-weight: 700;
 }
-.lang { margin-left: auto; background: none; border: 0; cursor: pointer; font-size: 1.1rem; }
+/* Мова й налаштування — праворуч, поряд із перемикачем теми. */
+.lang { margin-left: auto; background: none; border: 0; cursor: pointer;
+  font-size: 1.1rem; color: var(--fg-3); }
+.lang + .lang { margin-left: 0; }
+.lang:hover { color: var(--fg); }
+
 main { padding: 1.2rem; max-width: 62rem; margin: 0 auto; }
 h2 { margin: 0 0 1rem; font-size: 1.3rem; }
 
-/* Три картки першого запуску — головний екран не-програміста. */
+/* ── Три картки першого запуску — головний екран не-програміста ───────────── */
 .cards { display: grid; gap: .8rem; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); }
 .card {
   display: flex; flex-direction: column; gap: .35rem; text-align: left;
-  padding: 1rem; border: 1px solid var(--line); border-radius: .6rem;
-  background: var(--card); cursor: pointer; font: inherit; color: inherit;
+  padding: 1rem; border: 1px solid var(--line-2); border-radius: var(--r-m);
+  background: var(--s-2); cursor: pointer; font: inherit; color: inherit;
+  transition: border-color var(--dur-1) var(--ease);
 }
 .card:hover { border-color: var(--accent); }
 .card-title { font-weight: 600; }
-.card-hint { color: var(--muted); font-size: .87rem; }
+.card-hint { color: var(--fg-3); font-size: .87rem; }
 
+/* ── Рядок фільтрів над видачею ─────────────────────────────────────────── */
 .row { display: flex; gap: .5rem; flex-wrap: wrap; margin-bottom: 1rem; }
-.row input, .row select {
-  flex: 1 1 14rem; padding: .5rem .6rem; font: inherit;
-  border: 1px solid var(--line); border-radius: .4rem;
-  background: var(--card); color: var(--fg);
-}
-button[type=submit], .job button, td button {
-  padding: .45rem .8rem; font: inherit; cursor: pointer; color: var(--bg);
-  background: var(--accent); border: 0; border-radius: .4rem;
-}
+.row input, .row select { flex: 1 1 14rem; }
+
+/* ── Таблиця видачі ─────────────────────────────────────────────────────────
+   Своя, а не спільна: у консолі таблиці різні на кожній вкладці, і зведення їх
+   до одного скіну означало б переписати там дюжину екранів заради косметики. */
 table { width: 100%; border-collapse: collapse; font-size: .92rem; }
-th, td { text-align: left; padding: .4rem .5rem; border-bottom: 1px solid var(--line); vertical-align: top; }
-th { color: var(--muted); font-weight: 600; }
+th, td { text-align: left; padding: .4rem .5rem; border-bottom: 1px solid var(--line);
+  vertical-align: top; }
+th { color: var(--fg-3); font-weight: 600; }
+tr:hover > td { background: var(--hover-soft); }
 .num { text-align: right; white-space: nowrap; }
-.mono { font-family: ui-monospace, Consolas, monospace; font-size: .87em; }
-.muted { color: var(--muted); }
+.mono { font-family: var(--font-mono); font-size: .87em; }
+.muted { color: var(--fg-3); }
+
 pre {
-  background: var(--card); border: 1px solid var(--line); border-radius: .4rem;
-  padding: .7rem; overflow-x: auto;
+  background: var(--s-2); border: 1px solid var(--line-2); border-radius: var(--r-m);
+  padding: .7rem; overflow-x: auto; font-family: var(--font-mono);
 }
 
-/* 🔴 Попередження мусять бути ВИДНІ. Саме тут живе «нуль зі знаменником»:
-   різниця між «не знайшлось» і «не знайшлось, бо шукали в одному каталозі». */
-.warn {
-  background: var(--warn-bg); color: var(--warn-fg);
-  border-left: 3px solid var(--accent); border-radius: .3rem;
-  padding: .5rem .7rem; margin: .5rem 0;
-}
-.warn.err { color: var(--err); border-left-color: var(--err); }
-.job { border: 1px solid var(--line); border-radius: .5rem; padding: .7rem; margin-bottom: .6rem; }
+/* ── Робота в черзі ─────────────────────────────────────────────────────── */
+.job { border: 1px solid var(--line-2); border-radius: var(--r-m); padding: .7rem;
+  margin-bottom: .6rem; background: var(--s-2); }
 .job progress { width: 100%; height: .5rem; display: block; margin: .4rem 0; }
+
+/* ── 🖼 Переглядач скана ─────────────────────────────────────────────────────
+   🔴 Тло НЕ належить темі: під ним фотографія рукопису, а не інтерфейс. Білий
+   підклад засвітив би папір, чорний став би дірою — тому `--stage`, окремий
+   токен саме для цього вікна.
+   Панорама — звичайною прокруткою: сторінка з архіву буває 4000 px завширшки,
+   і тягати її мишею довелося б реалізовувати там, де браузер уже вміє. */
+.stage {
+  max-height: 70vh; overflow: auto; background: var(--stage);
+  border: 1px solid var(--line-2); border-radius: var(--r-m); padding: .4rem;
+}
+.stage img { display: block; height: auto; background: var(--paper); }
