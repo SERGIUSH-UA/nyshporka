@@ -152,6 +152,7 @@ const STRINGS = {
       + 'тож шукане прізвище виходить із нього невпізнанним.',
     'view.run.none': 'такого прогону немає',
     'view.run.empty': 'Жодної справи ще не прочитано — гортати нема чого.',
+    'view.overlay': 'Клацніть по рядку на знімку, щоб побачити його текст.',
     'view.page': 'Сторінка цілком',
     'view.page.why': 'Дорого: ціла сторінка важить у десятки разів більше за вирізку рядка. Але саме на ній видно, ЧИЙ це запис і що стоїть поруч.',
     'view.zoom.fit': 'вписати', 'view.zoom.in': 'більше', 'view.zoom.out': 'менше',
@@ -341,6 +342,7 @@ const STRINGS = {
       + 'word, so the surname you want comes out of it unrecognisable.',
     'view.run.none': 'no such run',
     'view.run.empty': 'Nothing has been read yet — there is nothing to leaf through.',
+    'view.overlay': 'Click a line on the scan to see its text.',
     'view.page': 'Whole page',
     'view.page.why': 'Expensive: a whole page weighs tens of times more than a line crop. But it is where you see WHOSE record this is and what stands next to it.',
     'view.zoom.fit': 'fit', 'view.zoom.in': 'larger', 'view.zoom.out': 'smaller',
@@ -1145,6 +1147,10 @@ async function viewWholePage() {
     return;
   }
   ZOOM = 100;
+  // Рамки рядків — окремим запитом: вони є не в кожного прогону, і сторінка
+  // мусить показатись навіть тоді, коли їх немає.
+  const geo = await callOp('page.lines', { run, page });
+  const g = (geo.ok && geo.data) || {};
   box.innerHTML = `
     <div class="row">
       <button data-act="view.zoom" data-arg="-25">${t('view.zoom.out')}</button>
@@ -1152,8 +1158,38 @@ async function viewWholePage() {
       <button data-act="view.zoom" data-arg="25">${t('view.zoom.in')}</button>
       <button data-act="view.stage.close">${t('view.close')}</button>
     </div>
-    <div class="stage"><img id="stage-img" src="${esc(env.data.image)}"
-      alt="${esc(page)}" style="width:${ZOOM}%"></div>`;
+    ${g.has ? `<p class="dim">${t('view.overlay')}</p>`
+            : renderWarnings(geo)}
+    <div class="stage"><div class="stage-wrap" style="width:${ZOOM}%">
+      <img id="stage-img" src="${esc(env.data.image)}" alt="${esc(page)}">
+      ${stageOverlay(g)}
+    </div></div>
+    <div id="stage-line"></div>`;
+}
+
+/**
+ * 🖼 Рамки рядків поверх знімка.
+ *
+ * SVG у тих самих координатах, що й зображення (`viewBox` = розмір сторінки),
+ * тож масштаб бере на себе браузер — при зумі нічого перераховувати не треба.
+ *
+ * ⚠ `pointer-events: fill` навмисно: фігура намальована без заливки, і без
+ * цього клік ловився б лише самою лінією обведення — тобто попадати треба було
+ * б у два пікселі. Правило живе в base.css поруч із рештою примітивів.
+ */
+function stageOverlay(g) {
+  if (!g.has || !g.size) return '';
+  const [w, h] = g.size;
+  const shapes = (g.polys || g.boxes || []).map((sh, i) => {
+    const isPoly = Array.isArray(sh[0]);
+    const attrs = `class="ln" data-act="view.line.pick" data-arg="${i}"`;
+    return isPoly
+      ? `<polygon ${attrs} points="${sh.map((pt) => pt.join(',')).join(' ')}"/>`
+      : `<rect ${attrs} x="${sh[0]}" y="${sh[1]}"
+           width="${sh[2] - sh[0]}" height="${sh[3] - sh[1]}"/>`;
+  });
+  return `<svg class="stage-ov" viewBox="0 0 ${w} ${h}"
+    preserveAspectRatio="none" aria-hidden="true">${shapes.join('')}</svg>`;
 }
 
 SCREENS.read = async () => {
@@ -1279,6 +1315,24 @@ const ACTIONS = {
       ? 100
       : Math.max(25, Math.min(600, ZOOM + Number(elm.dataset.arg)));
     img.style.width = `${ZOOM}%`;
+  },
+
+  /** Клік по рамці на знімку — показати текст саме цього рядка. */
+  'view.line.pick': async (_ev, elm) => {
+    const i = Number(elm.dataset.arg);
+    const form = el('view').querySelector('form');
+    const box = el('stage-line');
+    if (!form || !box) return;
+    document.querySelectorAll('.stage-ov .ln.on').forEach(
+      (n) => n.classList.remove('on'));
+    elm.classList.add('on');
+    const env = await callOp('page.text',
+      { run: form.run.value.trim(), page: form.page.value.trim() });
+    if (!env.ok) return;
+    const lines = (env.data || {}).lines || [];
+    const one = lines[i];
+    box.innerHTML = `<p class="mono">${esc(
+      typeof one === 'string' ? one : (one || {}).text || '')}</p>`;
   },
 
   'view.stage.close': () => { const b = el('stage'); if (b) b.innerHTML = ''; },

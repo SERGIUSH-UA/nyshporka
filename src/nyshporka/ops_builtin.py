@@ -465,6 +465,36 @@ def runs_list(_: NoArgs) -> Envelope:
     return env
 
 
+class LinesArgs(BaseModel):
+    run: str = Field(description="ім'я прогону")
+    page: str = Field(description="скан сторінки")
+
+
+# 🔴 `agent=False`: це геометрія для ОКА. Агентові рамки нічого не кажуть — він
+# читає текст, а не дивиться на пікселі; tool, який віддає координати, лише
+# росте в переліку.
+@op("page.lines", summary="Рамки рядків сторінки — щоб клікати по знімку",
+    args=LinesArgs, mutates=False, section="htr", agent=False)
+def page_lines(a: LinesArgs) -> Envelope:
+    """Геометрія рядків у координатах ТОГО САМОГО зображення, що показують.
+
+    ⚠ Відсутність рамок — НЕ помилка: старі прогони їх не писали зовсім. Тоді
+    відповідь чесно каже `has: false` з причиною, і гортач лишається без
+    оверлея замість того, щоб виглядати зламаним.
+    """
+    from nyshporka import htr_store
+
+    try:
+        geo = htr_store.page_lines(a.run, a.page) or {}
+    except Exception as exc:
+        return fail(f"{type(exc).__name__}: {exc}")
+    env = ok(geo)
+    if not geo.get("has"):
+        env.warn("no_boxes", str(geo.get("why")
+                 or "цей прогін не записав рамок рядків — клікати по знімку нічим"))
+    return env
+
+
 @op("page.view", summary="Подивитись на рядок чи сторінку ОКОМ", args=ViewArgs,
     mutates=False, section="htr")
 def page_view(a: ViewArgs) -> Envelope:

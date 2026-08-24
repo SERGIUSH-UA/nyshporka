@@ -92,3 +92,18 @@ pre {
   border: 1px solid var(--line-2); border-radius: var(--r-m); padding: .4rem;
 }
 .stage img { display: block; height: auto; background: var(--paper); }
+
+/* Рамки рядків поверх знімка. Обгортка потрібна, щоб SVG лягав РІВНО на
+   зображення: обоє тягнуться на всю її ширину, і зум міняє тільки її. */
+.stage-wrap { position: relative; display: block; }
+.stage-wrap img { width: 100%; }
+.stage-ov { position: absolute; inset: 0; width: 100%; height: 100%; }
+/* 🔴 `pointer-events: fill` — фігура намальована БЕЗ заливки, і без цього клік
+   ловився б лише лінією обведення, тобто цілитись довелося б у два пікселі. */
+.stage-ov .ln {
+  fill: none; stroke: var(--cyan-line); stroke-width: 2;
+  pointer-events: fill; cursor: pointer; opacity: .45;
+}
+.stage-ov .ln:hover { opacity: 1; stroke-width: 3; }
+/* Обраний рядок мусить читатись із відстані: сторінка дрібна, рамок багато. */
+.stage-ov .ln.on { opacity: 1; stroke: var(--box-tp); stroke-width: 4; }
