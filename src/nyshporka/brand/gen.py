@@ -19,6 +19,7 @@ MkDocs'ом, який про наш пакет нічого не знає, а `t
 from __future__ import annotations
 
 import argparse
+import contextlib
 import sys
 from pathlib import Path
 
@@ -204,7 +205,27 @@ def render_png(kind: str, width: int, height: int, brand: Brand | None = None) -
     return paw.render_png(width, colour=b.color("sepia").light)
 
 
+def _speak_utf8() -> None:
+    """Дозволити виводу нести ✅ і 🔴 там, де консоль цього не чекає.
+
+    ⚠ Ловиться не локально. На Windows-раннері CI stdout приходить у cp1252, і
+    голий `print("✅ …")` валить прогін `UnicodeEncodeError` — тобто приймач
+    айдентики падає не тому, що айдентика протухла. Rich у застосунку це вміє
+    сам, а тут `print` голий, бо модуль навмисно не тягне залежностей.
+
+    `errors="replace"` навмисно: втратити позначку в лозі не страшно, зупинити
+    через неї збірку — страшно.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:      # підмінений потік (напр. у тестах)
+            continue
+        with contextlib.suppress(ValueError, OSError):
+            reconfigure(encoding="utf-8", errors="replace")
+
+
 def main(argv: list[str] | None = None) -> int:
+    _speak_utf8()
     ap = argparse.ArgumentParser(description="brand.yaml → файли поверхонь")
     ap.add_argument("--check", action="store_true",
                     help="не писати, а перевірити, чи згенероване не протухло")

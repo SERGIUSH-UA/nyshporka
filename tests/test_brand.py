@@ -304,3 +304,24 @@ def test_windows_installer_is_utf8_with_bom() -> None:
     assert raw.startswith(b"\xef\xbb\xbf"), "windows.ps1 без UTF-8 BOM"
     assert "OutputEncoding" in raw.decode("utf-8-sig"), (
         "кодування консолі не виставлене — вивід лишиться в системній сторінці")
+
+
+def test_generator_speaks_to_a_legacy_console(monkeypatch: pytest.MonkeyPatch) -> None:
+    """⚠ Приймач айдентики не має падати через власну позначку.
+
+    На Windows-раннері CI stdout приходить у cp1252, і `print("✅ …")` валив
+    прогін `UnicodeEncodeError` — тобто перевірка «чи протухло згенероване»
+    падала не тому, що щось протухло. Тут відтворено рівно той потік.
+    """
+    import io
+    import sys
+
+    from nyshporka.brand import gen
+
+    for name in ("stdout", "stderr"):
+        monkeypatch.setattr(
+            sys, name,
+            io.TextIOWrapper(io.BytesIO(), encoding="cp1252", errors="strict"))
+
+    assert gen.main(["--check"]) == 0, "згенероване розійшлося з brand.yaml"
+    sys.stdout.flush()
