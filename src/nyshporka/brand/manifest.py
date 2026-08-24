@@ -245,7 +245,11 @@ def _colours(rows: Any) -> tuple[Color, ...]:
 def _build(raw: dict[str, Any]) -> Brand:
     ident = raw.get("identity") or {}
     typ = raw.get("type") or {}
-    glyphs = lambda key: {str(k): str(v) for k, v in (raw.get(key) or {}).items()}
+
+    def glyphs(key: str) -> dict[str, str]:
+        """Словник «екран → знак»: чотири такі секції, і всі однакової форми."""
+        return {str(k): str(v) for k, v in (raw.get(key) or {}).items()}
+
     return Brand(
         name_uk=str(ident.get("name_uk") or ""),
         name_en=str(ident.get("name_en") or ""),

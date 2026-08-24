@@ -155,3 +155,28 @@ def test_every_long_op_can_actually_start() -> None:
         # Тіло потрібне саме для загального шляху: без нього робота стала б у
         # чергу й одразу впала.
         assert callable(op.fn), f"довга операція «{op.name}» не має тіла"
+
+
+def test_hotkeys_call_actions_that_exist() -> None:
+    """⚠ Клавіша, прив'язана до знятої дії, мовчить.
+
+    Кнопку, що зникла, видно; клавішу — ні: вона просто перестає працювати, і
+    з'ясовується це тоді, коли на неї вже звикли покладатись. Тому прив'язки
+    звіряються з реєстром дій так само, як `data-act` у розмітці.
+
+    Заразом — екрани: клавіші, приписані екранові, якого немає в навігації,
+    лишились би від колишньої розкладки й нічим себе не виказували.
+    """
+    app = (ui.ROOT.parent / "daemon" / "static" / "app.js").read_text(encoding="utf-8")
+    block = re.search(r"const KEYS = \{(.*?)\n\};", app, re.S)
+    assert block, "роутер клавіш не знайдено — змінилась форма запису?"
+    called = set(re.findall(r"ACTIONS\['([\w.]+)'\]", block.group(1)))
+    declared = set(re.findall(r"^  '?([\w.]+)'?:\s*(?:async\s*)?\(", app, re.M))
+    missing = sorted(called - declared)
+    assert not missing, f"клавіші кличуть дії, яких немає: {missing}"
+
+    screens = set(re.findall(r"^  (\w+): \{", block.group(1), re.M))
+    order = re.search(r"const NAV_ORDER = \[(.*?)\];", app, re.S)
+    known = set(re.findall(r"'(\w+)'", order.group(1)))
+    stray = sorted(screens - known)
+    assert not stray, f"клавіші приписані екранам поза навігацією: {stray}"

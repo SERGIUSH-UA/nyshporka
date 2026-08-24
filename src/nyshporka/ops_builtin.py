@@ -437,6 +437,34 @@ class ViewArgs(BaseModel):
                     "і незрозуміло, який оцінюють")
 
 
+# 🔴 `agent=False`: агентові перелік прогонів нічого не додає — він і так
+# приходить із назвою справи, а зайвий tool росте в переліку, який модель мусить
+# читати цілком при кожному виклику. Тут він потрібен ВІКНУ: імена прогонів
+# довгі й схожі, і набирати їх руками означає помилятись у назві саме тоді, коли
+# шукаєш конкретну сторінку.
+@op("runs.list", summary="Прогони читання: що вже прочитано і чим",
+    args=NoArgs, mutates=False, section="htr", agent=False)
+def runs_list(_: NoArgs) -> Envelope:
+    """Перелік прочитаного — для вибору в гортачі.
+
+    ⚠ Рушій тут ЧАСТИНА відповіді, а не прикраса: на одну справу прогонів
+    буває кілька (латинку читає один, кирилицю інший), і без нього два рядки
+    з однаковою назвою нічим не відрізнити.
+    """
+    from nyshporka import htr_store
+
+    try:
+        runs = htr_store.list_cases()
+    except Exception as exc:
+        return fail(f"перелік прогонів недоступний ({type(exc).__name__}: {exc})")
+    env = ok({"runs": runs, "total": len(runs)})
+    if not runs:
+        env.warn("nothing_read_yet",
+                 "жодної справи ще не прочитано — гортати нема чого")
+        env.suggest("read.plan", "порахувати, чим і скільки читати")
+    return env
+
+
 @op("page.view", summary="Подивитись на рядок чи сторінку ОКОМ", args=ViewArgs,
     mutates=False, section="htr")
 def page_view(a: ViewArgs) -> Envelope:

@@ -24,6 +24,7 @@
 import { ic, eng } from '/ui/icons.js';
 import { initTheme, cycleTheme } from '/ui/theme.js';
 import { swapHtml, skelRows, skelCards } from '/ui/dom.js';
+import { attachCombobox } from '/ui/combobox.js';
 
 // ── i18n ─────────────────────────────────────────────────────────────────────
 const STRINGS = {
@@ -132,6 +133,8 @@ const STRINGS = {
     'lib.cancel': 'Не зараз',
     'nav.sift': 'Розбір',
     'sift.title': 'Розбір знахідок',
+    'sift.keys': 'Клавіші: ← → гортати · E — гортач · N — в облік',
+
     'sift.empty': 'Немає чого розбирати — спершу знайдіть щось у прочитаному.',
     'sift.togo': 'знахідка {i} з {n}',
     'sift.open': 'Розібрати знахідки',
@@ -147,6 +150,8 @@ const STRINGS = {
       + 'збіг у балах не є доказом, а розбіжність не є спростуванням.',
     'sift.stem': '⚠ Не відкидайте за коренем слова: рушій калічить саме середину, '
       + 'тож шукане прізвище виходить із нього невпізнанним.',
+    'view.run.none': 'такого прогону немає',
+    'view.run.empty': 'Жодної справи ще не прочитано — гортати нема чого.',
     'view.page': 'Сторінка цілком',
     'view.page.why': 'Дорого: ціла сторінка важить у десятки разів більше за вирізку рядка. Але саме на ній видно, ЧИЙ це запис і що стоїть поруч.',
     'view.zoom.fit': 'вписати', 'view.zoom.in': 'більше', 'view.zoom.out': 'менше',
@@ -317,6 +322,8 @@ const STRINGS = {
     'lib.cancel': 'Not now',
     'nav.sift': 'Sift',
     'sift.title': 'Sifting the hits',
+    'sift.keys': 'Keys: ← → to move · E — viewer · N — note it',
+
     'sift.empty': 'Nothing to sift yet — find something in the read text first.',
     'sift.togo': 'hit {i} of {n}',
     'sift.open': 'Sift these hits',
@@ -332,6 +339,8 @@ const STRINGS = {
       + 'yourself: a high score is not proof, and a mismatch is not a refutation.',
     'sift.stem': '⚠ Do not reject on the stem: the engine mangles the MIDDLE of a '
       + 'word, so the surname you want comes out of it unrecognisable.',
+    'view.run.none': 'no such run',
+    'view.run.empty': 'Nothing has been read yet — there is nothing to leaf through.',
     'view.page': 'Whole page',
     'view.page.why': 'Expensive: a whole page weighs tens of times more than a line crop. But it is where you see WHOSE record this is and what stands next to it.',
     'view.zoom.fit': 'fit', 'view.zoom.in': 'larger', 'view.zoom.out': 'smaller',
@@ -964,7 +973,8 @@ function siftDraw() {
     <div class="row">
       <button data-act="sift.view">${ic('eye', 'ic-sm')} ${t('sift.view')}</button>
       <button data-act="sift.note">${ic('pencil-line', 'ic-sm')} ${t('sift.note')}</button>
-    </div>`);
+    </div>
+    <p class="dim">${t('sift.keys')}</p>`);
 }
 
 /** Вирізка поточного рядка. Окремим кроком: сторінка коштує ~1.1 МБ, рядок 15 КБ. */
@@ -1074,6 +1084,12 @@ SCREENS.view = async () => {
     </form>
     <div id="stage"></div>
     <div id="hits"></div>`);
+  // 🔴 Підказка, а не вільний рядок. Імена прогонів довгі й схожі між собою
+  // (одна справа читається двічі — латинка й кирилиця), тож набраний руками
+  // рядок помиляється саме тоді, коли шукають конкретну сторінку: гортач
+  // відповідає «немає такого прогону», і це читається як «сторінки немає».
+  // Список береться з сервера; не приїхав — поле лишається звичайним.
+  await viewRunHints();
   if (v.run && v.page) {
     await ACTIONS['view.open']({
       preventDefault() {}, target: el('view').querySelector('form') });
@@ -1095,6 +1111,25 @@ SCREENS.view = async () => {
  * МАЛЮЮТЬ, а тут на нього дивляться.
  */
 let ZOOM = 100;
+
+/** Підказки для поля прогону: перелік прочитаного з сервера. */
+async function viewRunHints() {
+  const input = el('view').querySelector('input[name="run"]');
+  if (!input) return;
+  const env = await callOp('runs.list', {});
+  if (!env.ok) return;
+  const runs = (env.data || {}).runs || [];
+  attachCombobox(input, {
+    items: runs.map((r) => r.name).filter(Boolean),
+    empty: t('view.run.none'),
+  });
+  // Знаменник поруч: «нічого не знайшлось» у гортачі означає різне при
+  // нулі прочитаних справ і при трьохстах.
+  const box = el('stage');
+  if (box && !runs.length) {
+    box.innerHTML = `<div class="warn">${t('view.run.empty')}</div>`;
+  }
+}
 
 async function viewWholePage() {
   const box = el('stage');
@@ -1845,6 +1880,46 @@ async function watchJobs() {
     }
   }
 }
+
+// ── клавіші ──────────────────────────────────────────────────────────────────
+/**
+ * Гарячі клавіші розбору.
+ *
+ * 🔴 Свій роутер, а не спільний із консоллю: там він знає про лабораторні
+ * вкладки (банк розмітки, синтетику) і тягне їх за собою імпортом. Спільним
+ * шаром він стати не може, і копіювати його сюди означало б привезти
+ * півсотні прив'язок до екранів, яких тут немає.
+ *
+ * ⚠ Клавіші діють лише там, де НЕ вводять текст. Інакше «н» у полі прізвища
+ * гортало б знахідки замість того, щоб набиратись, — і виглядало б це як
+ * поламане поле, а не як гаряча клавіша.
+ */
+const KEYS = {
+  sift: {
+    ArrowRight: () => ACTIONS['sift.step'](null, { dataset: { arg: '1' } }),
+    ArrowLeft: () => ACTIONS['sift.step'](null, { dataset: { arg: '-1' } }),
+    ' ': () => ACTIONS['sift.step'](null, { dataset: { arg: '1' } }),
+    e: () => ACTIONS['sift.view'](),
+    n: () => ACTIONS['sift.note'](),
+  },
+  view: {
+    '+': () => ACTIONS['view.zoom'](null, { dataset: { arg: '25' } }),
+    '-': () => ACTIONS['view.zoom'](null, { dataset: { arg: '-25' } }),
+    '0': () => ACTIONS['view.zoom'](null, { dataset: { arg: 'fit' } }),
+  },
+};
+
+document.addEventListener('keydown', (ev) => {
+  const tag = (ev.target.tagName || '').toLowerCase();
+  if (tag === 'input' || tag === 'textarea' || tag === 'select'
+      || ev.target.isContentEditable) return;
+  if (ev.ctrlKey || ev.altKey || ev.metaKey) return;
+  const screen = (location.hash || '#home').slice(1);
+  const fn = (KEYS[screen] || {})[ev.key];
+  if (!fn) return;
+  ev.preventDefault();
+  fn();
+});
 
 // ── старт ────────────────────────────────────────────────────────────────────
 async function boot() {
