@@ -107,3 +107,27 @@ pre {
 .stage-ov .ln:hover { opacity: 1; stroke-width: 3; }
 /* Обраний рядок мусить читатись із відстані: сторінка дрібна, рамок багато. */
 .stage-ov .ln.on { opacity: 1; stroke: var(--box-tp); stroke-width: 4; }
+
+/* ── Кнопки ─────────────────────────────────────────────────────────────────
+   🔴 Ця морда малює в `#view` ГОЛІ `<button>` — без класів. Спільний `base.css`
+   оформлює лише класові (`.tabs`, `.subtabs`, `.seg`, `.btn-solid`), бо в
+   консолі кожна кнопка має свій клас; тут же без цього правила «Шукати»,
+   «Зберегти», «Далі» й решта малювались би системним віджетом ОС — світло-сірим
+   на темному полотні.
+   ⚠ Оголошено ТУТ, а не в base.css, навмисно: правило на голий `button` у
+   спільному шарі перефарбувало б і консольні кнопки, які цього не просили. */
+#view button, .job button {
+  padding: .45rem .8rem; font: inherit; cursor: pointer;
+  color: var(--fg-2); background: var(--s-4);
+  border: 1px solid var(--line-3); border-radius: var(--r-s);
+}
+#view button:hover, .job button:hover { color: var(--fg); border-color: var(--line-4); }
+/* Головна дія екрана — заливкою: у ряду з п'яти кнопок мусить бути видно, яка
+   з них та сама, по яку прийшли. */
+#view button[type=submit] {
+  background: var(--accent-fill); color: var(--accent-ink);
+  border-color: var(--accent-fill); font-weight: 700;
+}
+#view button:disabled { opacity: .45; cursor: not-allowed; }
+/* Картка першого запуску — не кнопка в цьому сенсі: вона й так ціла панель. */
+#view .card, #view .card:hover { padding: 1rem; background: var(--s-2); }

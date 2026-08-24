@@ -41,41 +41,61 @@ def theme_name() -> str:
     return want if want in ("light", "dark") else "dark"
 
 
-def _hex6(value: str) -> str:
-    """`#9ab` → `#99aabb`. Та сама величина, інший запис.
+def _for_rich(value: str) -> str | None:
+    """Колір у формі, яку розуміє rich, — або порожньо, якщо не розуміє взагалі.
 
     ⚠ CSS приймає тришестнадцяткову форму, rich — ні: `Style.parse("#9ab")`
     падає `StyleSyntaxError`, і падає воно на ІМПОРТІ `nyshporka.cli`, тобто
     валить геть усе, а не лише кольоровий вивід. У палітрі таких записів
     десятки (`#eee`, `#111`, `#222`), бо коротка форма — норма для верстки.
 
-    🔴 Розгортати треба ТУТ, а не в `brand.yaml`. Це не два різні значення, а
+    🔴 Але коротким hex палітра не вичерпується. У ній є `#e040fb66` (колір із
+    альфою), `rgba(28,28,28,.92)` і `transparent` — жодного з них rich не
+    розбирає, а прозорості в терміналі не існує в принципі. Тому такий токен
+    ВІДКИДАЄТЬСЯ, а не підсовується як є: інакше перший семантичний стиль,
+    наведений на нього, поклав би командний рядок цілком — рівно та відмова,
+    заради якої ця функція й написана.
+
+    🔴 Перетворення живе ТУТ, а не в `brand.yaml`. Це не два різні значення, а
     один колір у формі, яку розуміє конкретний споживач, — рівно те саме, що
     робить `render_docs`, перекладаючи наші імена в материалівські.
     """
     v = value.strip()
     if len(v) == 4 and v.startswith("#"):
         return "#" + "".join(c * 2 for c in v[1:])
-    return v
+    if len(v) == 7 and v.startswith("#"):
+        return v
+    return None
 
 
 def theme() -> Theme:
-    """Іменовані стилі rich, зібрані з палітри."""
+    """Іменовані стилі rich, зібрані з палітри.
+
+    ⚠ Стиль, чий токен терміналу не по зубах (альфа, `rgba`, `transparent`),
+    просто НЕ ОГОЛОШУЄТЬСЯ. Rich на невідоме ім'я стилю не падає — він друкує
+    текст без оформлення, а це саме та деградація, якої тут хочеться: втратити
+    колір дешево, втратити командний рядок — ні.
+    """
     b = active()
-    v = {k: _hex6(x) for k, x in b.css_vars(theme_name()).items()}
+    raw = b.css_vars(theme_name())
+    v = {k: c for k, c in ((k, _for_rich(x)) for k, x in raw.items()) if c}
     # 🔴 Імена СЕМАНТИЧНІ, а не кольорові. Код друкує `[err]`, а не `[red]`:
     # інакше палітра лишається описом, якого ніхто не читає, — саме так у
     # пакеті й було, 236 кольорових літералів повз тему.
-    styles = {
-        "muted": v["muted"],
-        "accent": v["accent"],
-        "warn": v["warn-fg"],
-        "err": v["err"],
-        "ok": v["ok"],
-        "brand": f"bold {v['accent']}",
+    want = {
+        "muted": "muted",
+        "accent": "accent",
+        "warn": "warn-fg",
+        "err": "err",
+        "ok": "ok",
     }
+    styles = {name: v[token] for name, token in want.items() if token in v}
+    if "accent" in v:
+        styles["brand"] = f"bold {v['accent']}"
     for e in b.engines_ordered():
-        styles[f"engine.{e.id}"] = f"bold {v['engine-' + e.id]}"
+        tone = v.get(f"engine-{e.id}")
+        if tone:
+            styles[f"engine.{e.id}"] = f"bold {tone}"
     return Theme(styles)
 
 

@@ -180,3 +180,32 @@ def test_hotkeys_call_actions_that_exist() -> None:
     known = set(re.findall(r"'(\w+)'", order.group(1)))
     stray = sorted(screens - known)
     assert not stray, f"клавіші приписані екранам поза навігацією: {stray}"
+
+
+def test_forms_only_react_to_submit() -> None:
+    """🔴 Дія форми не сміє спрацьовувати від події поля всередині неї.
+
+    ⚠ Це вже ламало все. Слухач `change` на документі знаходив через
+    `closest('[data-act]')` саме ФОРМУ, а `ev.target` лишався полем — і кожна
+    дія форми, яка робить `new FormData(ev.target)`, падала
+    `TypeError: parameter 1 is not of type 'HTMLFormElement'`. Досить було
+    вибрати пункт у будь-якому `<select>` на Газетирі, Пошуку, Фондах.
+
+    Гірший бік тієї ж вади був давніший і тихіший: клік по чекбоксу всередині
+    форми діставав `ev.preventDefault()` від її дії, і браузер СКАСОВУВАВ
+    перемикання — галочку «узяти теку під облік» неможливо було поставити
+    взагалі, і виглядало це як мертвий чекбокс, а не як помилка.
+    """
+    app = (ui.ROOT.parent / "daemon" / "static" / "app.js").read_text(encoding="utf-8")
+    guard = re.search(r"function dispatch\(ev\)\s*\{(.*?)\n\}", app, re.S)
+    assert guard, "диспетчер не знайдено"
+    body = guard.group(1)
+    assert "ev.type !== 'submit'" in body and "'FORM'" in body, (
+        "у диспетчері немає межі «форма реагує лише на submit» — подія з поля "
+        "знову покличе дію форми з чужим `ev.target`")
+
+    # Другий бік тієї самої межі: дія форми мусить брати дані з `ev.target`
+    # лише там, де подія справді `submit`.
+    for m in re.finditer(r"new FormData\((\w+(?:\.\w+)*)\)", app):
+        assert m.group(1) in ("ev.target", "elm"), (
+            f"FormData зібрано з «{m.group(1)}» — джерело має бути формою")

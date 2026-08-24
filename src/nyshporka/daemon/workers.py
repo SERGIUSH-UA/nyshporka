@@ -30,6 +30,11 @@ _ALIVE: set[asyncio.Task[None]] = set()
 #: Замок навколо «чи вже йде перезбірка» + постановки. Див. `_start_build`.
 _BUILD_GATE = asyncio.Lock()
 
+#: Те саме для довгих операцій без власного виконавця. Окремий від `_BUILD_GATE`
+#: навмисно: спільний змусив би перезбірку реєстру чекати на злиття фонду, хоч
+#: вони не діляться нічим.
+_GENERIC_GATE = asyncio.Lock()
+
 
 def _keep(task: asyncio.Task[None]) -> None:
     _ALIVE.add(task)
@@ -76,11 +81,28 @@ async def _start_generic(bus: JobBus, op_name: str,
     чесніше за смугу, яка не рухається.
     """
     from nyshporka import ops as O
+    from nyshporka.core.jobs import JobState
 
     op = O.get(op_name)
     if op is None:
         raise ValueError(f"невідома операція «{op_name}»")
-    job, _ = await bus.enqueue(op_name, title=op.summary, cfg=dict(payload or {}))
+    cfg = dict(payload or {})
+    # 🔴 Другий однаковий прохід не заводиться, і це не косметика. Через цю
+    # гілку йдуть `registry.collect` і `registry.merge` — обидві МУТУЮТЬ, і
+    # `fonds/merge/write.py` пише реєстр звичайним `open("w")`, без tmp+replace.
+    # Тобто два паралельні злиття того самого фонду труть один одному і реєстр,
+    # і чергу розбіжностей; достатнього приводу шукати не треба — вистачає
+    # подвійного кліку по кнопці.
+    #
+    # ⚠ Шукається АКТИВНА робота, а не ключ ідемпотентності. Ключ жив би ще
+    # кілька хвилин після завершення й віддавав би СТАРИЙ готовий запис — а
+    # тиснуть цю кнопку саме тому, що щось щойно змінилось.
+    async with _GENERIC_GATE:
+        for j in bus.jobs():
+            if (j.kind == op_name and j.cfg == cfg
+                    and j.state in (JobState.QUEUED, JobState.RUNNING)):
+                return j
+        job, _ = await bus.enqueue(op_name, title=op.summary, cfg=cfg)
     _keep(asyncio.create_task(_run_generic(bus, job, op_name, payload)))
     return job
 

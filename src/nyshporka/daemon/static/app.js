@@ -515,6 +515,20 @@ function icon(name) {
   return name ? ic(name, 'ic-sm') + ' ' : '';
 }
 
+/**
+ * Покоління показу.
+ *
+ * 🔴 Кожен екран малює себе ПІСЛЯ `await`, і за цей час людина могла піти на
+ * інший. Тоді повільніша відповідь домальовує свою таблицю поверх чужого
+ * екрана — при тому, що підсвітка в шапці показує новий. Виглядає це як
+ * «застосунок показує не те, що я відкрив», і ніяк не як помилка.
+ *
+ * `_libSeq` захищає лише від обігнаної відповіді В МЕЖАХ одного екрана; це —
+ * спільний лічильник на перехід між ними.
+ */
+let SCREEN_GEN = 0;
+const alive = (my) => my === SCREEN_GEN;
+
 // ── транспорт ────────────────────────────────────────────────────────────────
 const TOKEN = document.body.dataset.token || '';
 
@@ -678,8 +692,10 @@ SCREENS.sources = async () => {
 };
 
 SCREENS.cases = async () => {
+  const gen = SCREEN_GEN;
   busy();
   const env = await callOp('cases.list', { limit: 100 });
+  if (!alive(gen)) return;
   if (!env.ok) return failure(env);
   const rows = env.data.cases || [];
   setView(`
@@ -737,27 +753,49 @@ let _libSeq = 0;
 
 SCREENS.library = async () => {
   busy();
-  await libLoad();
+  await libLoad(true);
 };
 
-async function libLoad() {
+/**
+ * @param {boolean} full  перемалювати весь екран (вхід) чи лише видачу (фільтр).
+ *
+ * 🔴 Фільтр оновлює ТІЛЬКИ таблицю. Перемальовуючи весь екран, ми щоразу
+ * знищували б поле пошуку разом із фокусом і кареткою — і символи, набрані
+ * після паузи в 250 мс, ішли б у нікуди. Виглядає це як «клавіатура загубилась»,
+ * а не як помилка.
+ */
+async function libLoad(full = false) {
   const seq = ++_libSeq;
+  const gen = SCREEN_GEN;
   const env = await callOp('library.list', {
     q: LIB.q, repo: LIB.repo, verdict: LIB.verdict,
     ...(LIB.on_disk === null ? {} : { on_disk: LIB.on_disk }),
   });
   if (seq !== _libSeq) return;          // нас уже обігнав свіжіший запит
+  if (!alive(gen)) return;              // з бібліотеки вже пішли
   if (!env.ok) return failure(env);
   const d = env.data || {};
   const rows = d.cases || [];
-  const kinds = d.kinds || {};
+  const count = esc(t('lib.count')
+    .replace('{n}', d.shown ?? 0).replace('{total}', d.total ?? 0));
+
+  if (!full) {
+    // Каркас на місці — міняється лише вміст. `swapHtml` тримає висоту
+    // контейнера на час підміни, тож сторінка під таблицею не підстрибує.
+    const body = el('lib-rows');
+    if (body) swapHtml(body, rows.map(libRow).join(''));
+    const n = el('lib-count');
+    if (n) n.textContent = count;
+    const warn = el('lib-warn');
+    if (warn) warn.innerHTML = renderWarnings(env);
+    return;
+  }
 
   const head = `<h2>${ic('books')} ${t('lib.title')}</h2>
-    <p class="muted">${t('lib.why')}</p>
-    ${renderWarnings(env)}`;
+    <p class="muted">${t('lib.why')}</p>`;
 
   if (!d.built) {
-    setView(`${head}
+    setView(`${head}${renderWarnings(env)}
       <div class="warn">${t('lib.unbuilt')}
         <button data-act="cases.build">${t('lib.build')}</button></div>`);
     return;
@@ -765,7 +803,10 @@ async function libLoad() {
 
   const opt = (v, label, cur) =>
     `<option value="${esc(v)}"${v === cur ? ' selected' : ''}>${esc(label)}</option>`;
-  const repos = [...new Set(rows.map((r) => r.repo).filter(Boolean))].sort();
+  // Перелік архівів дає СЕРВЕР — по всій бібліотеці. Зібраний із видачі, він
+  // схлопувався б до одного пункту після першого ж вибору.
+  const repos = d.repos || [];
+  const kinds = d.kinds || {};
 
   setView(`${head}
     <div class="row">
@@ -785,13 +826,13 @@ async function libLoad() {
       <label class="lbl-mini"><input type="checkbox" id="lib-disk"
         data-act="lib.filter"${LIB.on_disk ? ' checked' : ''}> ${t('lib.ondisk')}</label>
     </div>
-    <p class="muted">${esc(t('lib.count')
-      .replace('{n}', d.shown ?? 0).replace('{total}', d.total ?? 0))}</p>
+    <div id="lib-warn">${renderWarnings(env)}</div>
+    <p class="muted" id="lib-count">${count}</p>
     <table><thead><tr>
       <th>${t('lib.col.shifra')}</th><th>${t('lib.col.title')}</th>
       <th class="num">${t('lib.col.years')}</th><th>${t('lib.col.place')}</th>
       <th>${t('lib.col.verdict')}</th></tr></thead>
-    <tbody>${rows.map(libRow).join('')}</tbody></table>`);
+    <tbody id="lib-rows">${rows.map(libRow).join('')}</tbody></table>`);
 }
 
 function libRow(r) {
@@ -937,6 +978,7 @@ SCREENS.search = async () => {
 let SIFT = { hits: [], i: 0, q: '', crop: null, ctx: null };
 
 SCREENS.sift = async () => {
+  const gen = SCREEN_GEN;
   if (!SIFT.hits.length) {
     setView(`<h2>${ic('crop-check')} ${t('sift.title')}</h2>
       <div class="warn">${t('sift.empty')}
@@ -944,6 +986,7 @@ SCREENS.sift = async () => {
     return;
   }
   siftDraw();
+  if (!alive(gen)) return;
   await siftLoadCrop();
 };
 
@@ -1114,14 +1157,25 @@ SCREENS.view = async () => {
  */
 let ZOOM = 100;
 
-/** Підказки для поля прогону: перелік прочитаного з сервера. */
+/** Живий комбобокс гортача — щоб було що прибрати перед наступним. */
+let _runCb = null;
+
+/**
+ * Підказки для поля прогону: перелік прочитаного з сервера.
+ *
+ * ⚠ Перед новим чіпляємо — старий прибираємо. `setView` щоразу створює НОВЕ
+ * поле, тож внутрішній гард `input._cb` не спрацьовує, і без `destroy()` у
+ * `<body>` накопичувались би попапи, а на `document` — слухачі, що тримають
+ * посилання на давно викинуті поля.
+ */
 async function viewRunHints() {
+  if (_runCb) { _runCb.destroy(); _runCb = null; }
   const input = el('view').querySelector('input[name="run"]');
   if (!input) return;
   const env = await callOp('runs.list', {});
   if (!env.ok) return;
   const runs = (env.data || {}).runs || [];
-  attachCombobox(input, {
+  _runCb = attachCombobox(input, {
     items: runs.map((r) => r.name).filter(Boolean),
     empty: t('view.run.none'),
   });
@@ -1181,9 +1235,18 @@ function stageOverlay(g) {
   if (!g.has || !g.size) return '';
   const [w, h] = g.size;
   const shapes = (g.polys || g.boxes || []).map((sh, i) => {
-    const isPoly = Array.isArray(sh[0]);
+    // 🔴 `null` тут — законне значення, а не поламані дані: рядок без обведення
+    // й без базової лінії рамки не має, і раннер пише в масив саме `null`,
+    // зберігаючи довжину. Без цієї перевірки `sh[0]` кидає TypeError ПОСЕРЕД
+    // обчислення шаблона, тобто `innerHTML` не присвоюється зовсім — і
+    // «сторінка цілком» назавжди лишається на «Хвилинку…», без картинки й без
+    // кнопки «Згорнути».
+    //
+    // ⚠ Індекс береться з `map`, а не з лічильника вцілілих: він же номер
+    // рядка в тексті, і зсунувши його, клік показував би чужий рядок.
+    if (!Array.isArray(sh) || !sh.length) return '';
     const attrs = `class="ln" data-act="view.line.pick" data-arg="${i}"`;
-    return isPoly
+    return Array.isArray(sh[0])
       ? `<polygon ${attrs} points="${sh.map((pt) => pt.join(',')).join(' ')}"/>`
       : `<rect ${attrs} x="${sh[0]}" y="${sh[1]}"
            width="${sh[2] - sh[0]}" height="${sh[3] - sh[1]}"/>`;
@@ -1307,14 +1370,19 @@ const ACTIONS = {
   'view.page': () => viewWholePage(),
 
   'view.zoom': (_ev, elm) => {
-    const img = el('stage-img');
-    if (!img) return;
+    // 🔴 Зум міняє ОБГОРТКУ, а не картинку. Оверлей рамок розтягнутий по
+    // обгортці (`.stage-ov { inset: 0 }`), тож зміна ширини самого `<img>`
+    // роз'їжджає рамки з рядками — і клік по рамці віддає текст іншого рядка.
+    // Помітно це лише після першого «+», а «вписати» випадково лікує, тобто
+    // вада виглядає плаваючою.
+    const wrap = document.querySelector('.stage-wrap');
+    if (!wrap) return;
     // «Вписати» — не 100%, а ширина контейнера: сторінка з архіву буває
     // 4000 px завширшки, і сотня відсотків від неї не влазить нікуди.
     ZOOM = elm.dataset.arg === 'fit'
       ? 100
       : Math.max(25, Math.min(600, ZOOM + Number(elm.dataset.arg)));
-    img.style.width = `${ZOOM}%`;
+    wrap.style.width = `${ZOOM}%`;
   },
 
   /** Клік по рамці на знімку — показати текст саме цього рядка. */
@@ -1828,6 +1896,16 @@ const ACTIONS = {
 function dispatch(ev) {
   const elm = ev.target.closest('[data-act]');
   if (!elm) return;
+  // 🔴 Форма реагує ТІЛЬКИ на `submit`. Без цієї межі будь-яка подія з поля
+  // всередині `<form data-act="…">` спливала б до самої форми й кликала її
+  // дію — а та бере `new FormData(ev.target)`, де `ev.target` уже поле, не
+  // форма: `TypeError: parameter 1 is not of type 'HTMLFormElement'`.
+  //
+  // ⚠ Той самий шлях через `click` мав наслідок, гірший за виняток: клік по
+  // чекбоксу «узяти теку під облік» діставав `ev.preventDefault()` від дії
+  // форми, і браузер скасовував перемикання — галочку неможливо було
+  // поставити взагалі, і виглядало це як мертвий чекбокс, а не як помилка.
+  if (ev.type !== 'submit' && elm.tagName === 'FORM') return;
   const name = elm.dataset.act;
   const fn = ACTIONS[name];
   if (!fn) {
@@ -1882,6 +1960,8 @@ async function show(screen) {
     return;
   }
   const fn = SCREENS[screen] || SCREENS.home;
+  // Усе, що малювалось досі, стає неактуальним рівно тут.
+  SCREEN_GEN += 1;
   location.hash = screen;
   // Розділ іде за екраном: перехід за посиланням чи закладкою мусить
   // підсвітити ту саму пару, що й клік по кнопці.

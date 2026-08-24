@@ -485,9 +485,17 @@ def page_lines(a: LinesArgs) -> Envelope:
     from nyshporka import htr_store
 
     try:
-        geo = htr_store.page_lines(a.run, a.page) or {}
+        geo = htr_store.page_lines(a.run, a.page)
     except Exception as exc:
         return fail(f"{type(exc).__name__}: {exc}")
+    # 🔴 «Прогону чи сторінки немає» і «рамок не записано» — РІЗНІ відповіді.
+    # `page_lines` віддає `None` на обидва, і зведення їх до одного застереження
+    # каже людині лагодити не те: вона шукала б старий прогін, тоді як насправді
+    # помилилась у назві. Порожня відповідь тут ще й іншої форми — без `has`, —
+    # тож фронт мовчки лишався б без оверлея й без пояснення.
+    if geo is None:
+        return fail(f"немає сторінки «{a.page}» у прогоні «{a.run}» — "
+                    f"звірте назву прогону (`runs.list`) і скан")
     env = ok(geo)
     if not geo.get("has"):
         env.warn("no_boxes", str(geo.get("why")

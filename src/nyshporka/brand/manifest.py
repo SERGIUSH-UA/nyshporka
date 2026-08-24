@@ -165,9 +165,28 @@ class Brand:
         return tuple(c for g in self.groups for c in g.colors)
 
     def color(self, css: str) -> Color:
+        """Токен за іменем — з палітри, рушіїв або не-кольорових розділів.
+
+        ⚠ Шукати лише в `palette` було б пасткою: `css_vars()` віддає ще й
+        `engine-*`, аліаси, радіуси й тіні, тож ті самі імена, які бачить
+        верстка, тут відповідали б «немає такого токена».
+        """
         for c in self.palette:
             if c.css == css:
                 return c
+        for e in self.engines_ordered():
+            if f"engine-{e.id}" == css:
+                return Color(css=css, why=e.hue_uk, dark=e.dark, light=e.light)
+        for c in self.non_colour():
+            if c.css == css:
+                return c
+        for a in self.aliases:
+            if a.css == css:
+                # Аліас віддає значення ЦІЛІ: своїх значень у нього немає й бути
+                # не може — у CSS він виходить посиланням.
+                target = self.color(a.of)
+                return Color(css=css, why=a.why, dark=target.dark,
+                             light=target.light, same=target.same)
         raise KeyError(f"немає токена «{css}» — перелік у brand.yaml")
 
     def mark(self, mid: str) -> Mark:
@@ -215,6 +234,14 @@ class Brand:
         out = {c.css: c.value(theme) for c in self.palette}
         out.update({f"engine-{e.id}": e.value(theme) for e in self.engines_ordered()})
         for a in self.aliases:
+            # ⚠ Друкарська помилка в `of` інакше дає голий `KeyError` з-під
+            # `brand.console.theme()` — тобто рубає ВЕСЬ кольоровий вивід
+            # командного рядка, і повідомлення не каже, де шукати. Генератор на
+            # тих самих даних мовчки написав би `--card: var(--немає)`.
+            if a.of not in out:
+                raise KeyError(
+                    f"аліас «{a.css}» показує на токен «{a.of}», якого немає — "
+                    f"перелік у brand.yaml")
             out[a.css] = out[a.of]
         return out
 
@@ -233,9 +260,20 @@ def _colour(raw: dict[str, Any]) -> Color:
     css, why = str(raw.get("css") or ""), str(raw.get("why") or "")
     if raw.get("same") or ("value" in raw and "dark" not in raw):
         v = str(raw.get("value") or "")
+        if not v:
+            raise ValueError(f"токен «{css}» оголошений одним значенням, але "
+                             f"самого значення немає (`value`)")
         return Color(css=css, why=why, dark=v, light=v, same=True)
-    return Color(css=css, why=why,
-                 dark=str(raw.get("dark") or ""), light=str(raw.get("light") or ""))
+    dark, light = str(raw.get("dark") or ""), str(raw.get("light") or "")
+    # 🔴 Половина пари — гірше за жодної. Порожнє значення виходить у CSS як
+    # `--x: ;` і в блоці ПЕРЕКРИТТЯ затирає базову тему: елемент лишається без
+    # кольору рівно в одній темі, нічого не падає, `--check` проходить.
+    if not dark or not light:
+        missing = "light" if dark else "dark"
+        raise ValueError(
+            f"токен «{css}» не має значення для теми «{missing}». Якщо він "
+            f"навмисно однаковий в обох — оголосіть `same: true` з `value`")
+    return Color(css=css, why=why, dark=dark, light=light)
 
 
 def _colours(rows: Any) -> tuple[Color, ...]:

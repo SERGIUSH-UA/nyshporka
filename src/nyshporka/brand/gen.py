@@ -25,7 +25,7 @@ import sys
 from pathlib import Path
 
 from nyshporka.brand import paw
-from nyshporka.brand.manifest import Brand, Color, active
+from nyshporka.brand.manifest import THEMES, Brand, Color, active
 
 #: Шапка згенерованого файлу. Стоїть першою й каже, куди йти зі змінами:
 #: без неї правка неминуче робиться в CSS, живе до наступного прогону
@@ -103,7 +103,10 @@ def _theme_block(brand: Brand, theme: str, *, base: bool) -> str:
         # Аліас — посилання, а не значення, тож `_decls` тут не годиться:
         # у нього немає теми, і колонка рахується по власних рядках.
         heads = [f"  --{a.css}: var(--{a.of});" for a in brand.aliases]
-        width = max(len(h) for h in heads)
+        # ⚠ `default=0`: без нього порожній (або відсутній) розділ аліасів валить
+        # генератор на `max() iterable argument is empty` — так само, як це вже
+        # враховано в `_decls`.
+        width = max((len(h) for h in heads), default=0)
         out += [f"{h.ljust(width)}   /* {a.why} */\n"
                 for h, a in zip(heads, brand.aliases, strict=True)]
 
@@ -148,7 +151,15 @@ def render_app(brand: Brand) -> str:
     користувача мусить переживати захід сонця, а `@media` цього не вміє:
     інакше о 20:00 ОС перемкнула б тему під людиною, яка щойно вибрала іншу.
     """
-    base, other = brand.theme_default, ("light" if brand.theme_default == "dark" else "dark")
+    # ⚠ Невідома тема інакше зникає тихо: `other` став би «dark», база
+    # намалювалася б світлими значеннями під `color-scheme: <що завгодно>`, а
+    # блок другої теми не з'явився б узагалі. Ні винятку, ні падіння `--check`.
+    if brand.theme_default not in THEMES:
+        raise ValueError(
+            f"theme_default «{brand.theme_default}» невідома — очікується "
+            f"одна з: {', '.join(THEMES)}")
+    base = brand.theme_default
+    other = "light" if base == "dark" else "dark"
     sel = f':root[data-theme="{other}"]'
     return "".join([
         HEADER,

@@ -21,6 +21,7 @@
 """
 from __future__ import annotations
 
+import json
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
@@ -48,7 +49,14 @@ _FIELDS = ("key", "repo", "repo_label", "fond", "opys", "spr", "shifra", "title"
            "on_disk", "frames", "script", "langs", "curated", "group", "why")
 
 
-def _row(case: dict[str, Any], verdicts: dict[str, Any]) -> dict[str, Any]:
+def _row(case: Any, verdicts: dict[str, Any]) -> dict[str, Any] | None:
+    """Рядок видачі або порожньо, якщо запис не є записом.
+
+    ⚠ Один кривий елемент у зведенні не має ховати решту: тут це рядок, який
+    просто не показують, а не відмова на весь екран.
+    """
+    if not isinstance(case, dict):
+        return None
     out = {k: case.get(k) for k in _FIELDS}
     v = verdicts.get(case.get("key") or "") or {}
     out["verdict"] = v.get("verdict") or ""
@@ -98,25 +106,42 @@ def library_list(a: LibraryArgs) -> Envelope:
     """
     from nyshporka import library as L
 
-    try:
-        cases = L.load_library()
-    except Exception as exc:
-        return fail(f"бібліотека недоступна ({type(exc).__name__}: {exc}) — "
-                    f"зберіть її командою `nysh cases build`")
-    if not cases and not L.LIBRARY_PATH.exists():
+    # 🔴 Три стани, а не два, і читаються вони ТУТ, а не через `load_library()`.
+    # Той ковтає будь-який виняток і віддає `[]`, тобто зводить «файла немає» і
+    # «файл побитий» до «справ немає» — рівно того хибного нуля, від якого
+    # написаний докстрінг модуля. Побита бібліотека при цьому виглядала б
+    # гірше за відсутню: `built: true`, «0 справ», жодного натяку на причину.
+    if not L.LIBRARY_PATH.exists():
         env = ok({"cases": [], "shown": None, "total": None, "built": False})
         env.warn("no_library_yet",
                  "бібліотеку ще не збирали — це не означає, що справ немає")
         env.stale_because(["зведення справ ще не будували"], fix="nysh cases build")
         env.suggest("cases.build", "зібрати зведення з канону й диска")
         return env
+    try:
+        raw = json.loads(L.LIBRARY_PATH.read_text(encoding="utf-8"))
+        cases = list(raw.get("cases") or [])
+    except Exception as exc:
+        return fail(f"зведення справ не читається ({type(exc).__name__}: {exc}) — "
+                    f"файл {L.LIBRARY_PATH.name} побитий; перезберіть його "
+                    f"командою `nysh cases build`")
 
     verdicts = L.load_verdicts()
-    rows = [_row(c, verdicts) for c in cases]
+    rows = [r for r in (_row(c, verdicts) for c in cases) if r is not None]
+    skipped = len(cases) - len(rows)
     hit = [r for r in rows if _matches(r, a)]
     env = ok({"cases": hit[:a.limit], "shown": min(len(hit), a.limit),
               "total": len(rows), "built": True,
+              # 🔴 Перелік архівів — з УСІЄЇ бібліотеки, а не з видачі. Зібраний
+              # із відфільтрованого, він схлопується до одного пункту після
+              # першого ж вибору: решта архівів зникає зі списку, і повернутись
+              # до них нема чим — екран починає брехати про діючий фільтр.
+              "repos": sorted({r["repo"] for r in rows if r.get("repo")}),
               "kinds": {k: v["label"] for k, v in L.VERDICT_KINDS.items()}})
+    if skipped:
+        env.warn("bad_rows",
+                 f"{skipped} записів зведення пропущено — вони не схожі на справи; "
+                 f"перезбирання (`nysh cases build`) зазвичай це лікує")
     if len(hit) > a.limit:
         env.warn("truncated",
                  f"показано {a.limit} із {len(hit)} — звузьте фільтр, "
