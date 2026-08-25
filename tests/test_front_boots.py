@@ -105,9 +105,36 @@ globalThis.fetch = async (url) => {
                      runs: [{ name: 'прогін', engine_id: 'pysar',
                               pages_done: 2, alt: '' }] },
     'case.frame': { width: 9, height: 9, bytes: 9, image: 'data:image/jpeg;base64,AA' },
-    'library.list': { cases: [], built: true, summary: {}, facets: {} },
+    'library.list': { cases: [], built: true, summary: {}, facets: {},
+                      total: 0, page: 0, page_size: 50, pages: 0 },
     'runs.list': { runs: [{ name: 'прогін', case_dir: 'c', engine_id: 'pysar',
-                            pages_done: 2, frames: 2 }] },
+                            case_key: 'A/1/2', shifra: 'A 1-1-2',
+                            pages_done: 2, frames: 2 }],
+                   shown: 1, total: 1, everything: 1, orphans: 0,
+                   page: 0, page_size: 25, pages: 1 },
+    'cases.list': { cases: [{ key: '@disk/x', kind: 'unfiled', path: 'x',
+                              frames: 7 }],
+                    shown: 1, total: 1, registry: true, page: 0,
+                    page_size: 50, pages: 1,
+                    counts: { unfiled: 1, bundle: 0, case: 3 } },
+    'fond.list': { fonds: [{ id: 'a_1', label: 'А ф.1', repo: 'A', fond: '1',
+                             rows: 9, on_disk: 1, todo: 2, scans: 3 }],
+                   shown: 1 },
+    'fond.rows': { fond: 'А ф.1', fond_id: 'a_1', matched: 1, total: 1,
+                   shown: 1, page: 0, page_size: 50, pages: 1,
+                   summary: { rows: 9 },
+                   rows: [{ shifra: '1-1-2', spr: '2', key: 'A/1/2',
+                            title: 'книга', state: 'todo', on_disk: '',
+                            takeable: true }] },
+    'registry.collectors': { collectors: [{ id: 'archium', label: 'ARCHIUM' }] },
+    'sources.list': { sources: [
+        { id: 'archium', label: 'ARCHIUM', caps: ['search', 'browse', 'fetch'],
+          catalog: { searchable: true, kind: 'bundled', taken: '2026-07-02',
+                     rows: 9020, scope: '', fix: '' } },
+        { id: 'x', label: 'Ікс', caps: ['search'],
+          catalog: { searchable: true, kind: 'none', taken: '', rows: null,
+                     scope: '', fix: 'nysh crawl x' } }],
+      shown: 2, searchable: 2, with_catalog: 1 },
     'page.text': { name: 'прогін', engine_id: 'pysar', model: 'pysar_cyr_v4.pt',
                    pages: [{ page: 'a.jpg', lines: 2 }, { page: 'b.jpg', lines: 2 }],
                    lines: ['перший рядок', 'другий рядок'] },
@@ -190,6 +217,24 @@ out.reader = reader.length;
 if (reader.length) {
   const ovNode = reader[0].querySelector('.lb-ov');
   out.shapes = (ovNode.children || []).length;
+}
+
+// ── три перероблені екрани мусять НАМАЛЮВАТИСЬ, а не лише зареєструватись ──
+// 🔴 Модуль, який завантажився, і екран, який щось показав, — різні речі. Саме
+// між ними живе клас вад «кнопка є, натискається, нічого не відбувається».
+for (const name of ['cases', 'fonds', 'sources']) {
+  await SCREENS[name]();
+  await new Promise((r) => setTimeout(r, 30));
+  const view = document.getElementById('view');
+  const html = view.innerHTML || '';
+  out[`drew_${name}`] = html.length;
+  // Знаменник приймальні: число описаних справ мусить бути ВИДНИМ, інакше
+  // «192 теки» читаються як увесь простір.
+  if (name === 'cases') out.intakeHasLibraryLink = html.includes('data-arg="library"');
+  // Опис мусить показати ПЕРЕЛІК фондів, а не саму лише форму пошуку.
+  if (name === 'fonds') out.fondsListsFonds = html.includes('data-act="fond.open"');
+  // Каталоги мусять назвати, на чому шукали, ДО будь-якого запиту.
+  if (name === 'sources') out.sourcesShowBasis = html.includes('nysh crawl x');
 }
 
 console.log('@@' + JSON.stringify(out));
@@ -338,3 +383,51 @@ def test_the_library_reader_shows_the_decode_too(probe) -> None:
     assert probe.get("libShapes") == 1, (
         f"читалка бібліотеки поклала {probe.get('libShapes')} рамок замість "
         "однієї — прочитане з бібліотеки не видно")
+
+
+def test_the_reworked_screens_actually_draw(probe) -> None:
+    """🔴 Модуль завантажився ≠ екран щось показав.
+
+    Між цими двома станами живе цілий клас вад: кнопка в шапці є, натискається,
+    і лишає порожнє полотно. Помітно це лише оком, а оком дивляться не щодня —
+    тому три перероблені екрани виконуються тут і мусять лишити по собі
+    розмітку.
+    """
+    for name in ("cases", "fonds", "sources"):
+        size = probe.get(f"drew_{name}") or 0
+        assert size > 200, (
+            f"екран «{name}» намалював {size} символів розмітки — це порожньо, "
+            f"а не екран")
+
+
+def test_intake_names_the_library_too(probe) -> None:
+    """🔴 Знаменник обома боками межі.
+
+    Приймальня без числа бібліотеки читається як увесь простір: «192 теки» —
+    і невідомо, з чого. Саме на цій парі дослідник і спитав, чим одна закладка
+    відрізняється від другої, тож посилання на сусідній реєстр тут не
+    оздоблення, а частина відповіді.
+    """
+    assert probe.get("intakeHasLibraryLink"), (
+        "приймальня не назвала бібліотеку — її число лишилось без знаменника")
+
+
+def test_the_finding_aid_lists_its_fonds_without_a_query(probe) -> None:
+    """🔴 Перелік фондів був захований у випадному списку всередині форми.
+
+    Щоб побачити, що реєстр не порожній, треба було спершу натиснути «Знайти», —
+    і той, хто цього не зробив, чесно вважав, що описів у нього немає.
+    """
+    assert probe.get("fondsListsFonds"), (
+        "екран описів не показав жодного фонду до запиту")
+
+
+def test_catalogues_name_what_they_searched_before_the_query(probe) -> None:
+    """🔴 «Нічого не знайшлось» без переліку оглянутого не є відповіддю.
+
+    Джерело, яке вміє шукати й не має каталогу, мусить бути назване поіменно —
+    разом із командою, якою це лікується, — ДО пошуку, а не після одинадцяти
+    секунд очікування.
+    """
+    assert probe.get("sourcesShowBasis"), (
+        "екран каталогів не назвав джерело без обходу й спосіб це полагодити")
