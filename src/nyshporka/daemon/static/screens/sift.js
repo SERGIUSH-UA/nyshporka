@@ -4,7 +4,7 @@ import { t, LANG } from '../core/strings.js';
 import { TOKEN, callOp, SEQ } from '../core/net.js';
 import { esc, el, setView, busy, failure, boxError, busyForm,
   renderWarnings, renderCoverage, curGen, alive } from '../core/view.js';
-import { SCREENS, ACTIONS } from '../core/registry.js';
+import { SCREENS, ACTIONS, KEYS } from '../core/registry.js';
 import { SECTIONS, NAV_LABEL, show, renderNav,
   refreshJobs } from '../core/nav.js';
 import { ST } from '../core/state.js';
@@ -164,5 +164,17 @@ Object.assign(ACTIONS, {
     const h = ST.sift.hits[ST.sift.i] || {};
     ST.eye = { ...(ST.eye || {}), case: h.key || h.shifra || h.name, scan: h.page };
     return show('eye');
+  },
+});
+
+// Гортання знахідок клавішами: розбір — це сотні кроків поспіль, і мишею їх
+// не роблять.
+Object.assign(KEYS, {
+  sift: {
+    ArrowRight: () => ACTIONS['sift.step'](null, { dataset: { arg: '1' } }),
+    ArrowLeft: () => ACTIONS['sift.step'](null, { dataset: { arg: '-1' } }),
+    ' ': () => ACTIONS['sift.step'](null, { dataset: { arg: '1' } }),
+    e: () => ACTIONS['sift.view'](),
+    n: () => ACTIONS['sift.note'](),
   },
 });

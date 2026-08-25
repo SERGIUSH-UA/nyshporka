@@ -497,3 +497,60 @@ def test_cli_choices_match_models() -> None:
         if missing := declared - named:
             bad.append(f"{flag}: у довідці немає {sorted(missing)}")
     assert not bad, f"довідка розійшлася з моделлю: {bad}"
+
+
+# ── 8. модуль бере те, чим користується ──────────────────────────────────────
+def test_every_module_imports_what_it_uses() -> None:
+    """🔴 Розкладання фронту на модулі додало НОВИЙ спосіб зламати все мовчки.
+
+    Функція, що переїхала в сусідній файл, лишається видимою в редакторі й
+    зникає лише в браузері — `ReferenceError` кидається В МОМЕНТ ВИКЛИКУ, тобто
+    тоді, коли людина натиснула кнопку, а не коли сторінка вантажилась. Ні
+    лінт, ні `node --check` цього не бачать: синтаксис бездоганний.
+
+    ⚠ Спіймано саме так: перелік робіт фільтрувався за `FINAL_STATES`, а модуль
+    навігації його не імпортував. Черга просто впала б при першому оновленні —
+    після того, як людина поставила справу на ніч.
+
+    Перевіряються лише імена, які ХТОСЬ експортує: решта (ключі об'єктів, теги
+    розмітки, поля відповіді) до модульних меж не належить, і ловити їх тут
+    означало б потонути в хибних тривогах.
+    """
+    exported: dict[str, str] = {}
+    for path in front_files():
+        src = path.read_text(encoding="utf-8")
+        for m in re.finditer(r"^export\s+(?:const|let|function|async function|class)\s+(\w+)",
+                             src, re.M):
+            exported[m.group(1)] = path.name
+        for m in re.finditer(r"^export\s*\{([^}]*)\}", src, re.M):
+            for part in m.group(1).split(","):
+                name = part.strip().split(" as ")[-1].strip()
+                if name:
+                    exported[name] = path.name
+    assert exported, "жодного експорту — перевірка втратила сенс"
+
+    bad: list[str] = []
+    for path in front_files():
+        src = path.read_text(encoding="utf-8")
+        own = {m.group(1) for m in re.finditer(
+            r"^(?:export\s+)?(?:const|let|var|function|async function|class)\s+(\w+)",
+            src, re.M)}
+        got = set()
+        for m in re.finditer(r"import\s*\{([^}]*)\}\s*from", src, re.S):
+            for part in m.group(1).split(","):
+                name = part.strip().split(" as ")[-1].strip()
+                if name:
+                    got.add(name)
+        # Рядки й коментарі геть: слово з тексту не є вживанням імені.
+        clean = re.sub(r"`(?:[^`\\]|\\.)*`", "``", src)
+        clean = re.sub(r"'(?:[^'\\\n]|\\.)*'", "''", clean)
+        clean = re.sub(r"/\*.*?\*/", "", clean, flags=re.S)
+        clean = re.sub(r"//[^\n]*", "", clean)
+        for name, home in exported.items():
+            if home == path.name or name in own or name in got:
+                continue
+            if re.search(rf"(?<![.\w$]){re.escape(name)}\s*[(.\[]", clean):
+                bad.append(f"{path.name}: {name} (живе в {home})")
+    assert not bad, (
+        "модуль користується тим, чого не імпортував — у браузері це "
+        f"ReferenceError у мить натискання: {sorted(bad)}")

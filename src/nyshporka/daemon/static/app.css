@@ -139,3 +139,102 @@ pre {
   border-left: 3px solid var(--accent-2);
   color: var(--fg-2);
 }
+
+/* ── 📜 прогони ────────────────────────────────────────────────────────────── */
+/* 🔴 Група — це СПРАВА, а не прогін. Межа групи мусить читатись одразу:
+   два прогони однієї книги стоять поруч саме для того, щоб було видно, чи
+   покрите її письмо, і зливши групи, ми повернули б плоский перелік. */
+.run-group {
+  margin: 1rem 0;
+  padding: .6rem .8rem;
+  border: 1px solid var(--paper-edge);
+  border-radius: var(--r-m);
+  background: var(--paper);
+}
+
+.run-group > h3 {
+  margin: 0 0 .4rem;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.run-group > h3 .dim { font-weight: 400; }
+
+.run-group table { margin: 0; }
+
+.run-group > p { margin: .4rem 0 0; }
+
+/* Нічиї прогони не розчиняються серед решти: їхня ціна — правка JSON руками. */
+.run-group.orphan { border-color: var(--warn-fg); }
+
+/* Число невдалих сторінок — поруч із рядком, а не в підказці: воно міняє
+   висновок про повноту прогону. */
+.warn-inline { color: var(--err-2, var(--warn-fg)); font-weight: 600; }
+
+/* ── 📄 гортач: знімок і текст поряд ───────────────────────────────────────── */
+/* 🔴 Дві панелі, а не дві вкладки. Машинне читання скоропису має десятки
+   відсотків помилок, тож рядок сам по собі нічого не доводить — доводить
+   лише той самий рядок на знімку. Перемикання між ними зробило б звірку
+   роботою пам'яті, а не ока. */
+#view-split {
+  display: grid;
+  grid-template-columns: 3fr 2fr;
+  gap: .8rem;
+  align-items: start;
+}
+
+/* На вузькому екрані колонки стають одна під одною: половина від половини
+   не читається ні як текст, ні як знімок. */
+@media (max-width: 48rem) {
+  #view-split { grid-template-columns: 1fr; }
+}
+
+#view-text pre.lines {
+  margin: 0;
+  max-height: 70vh;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: var(--paper);
+  border: 1px solid var(--paper-edge);
+  border-radius: var(--r-m);
+  padding: .5rem .4rem;
+}
+
+/* Рядок — цілий блок, а не самий текст: наводити треба на всю смугу, інакше
+   потрапляти доводиться в літери. */
+.vln { display: block; padding: 1px .3rem; border-radius: 4px; }
+
+/* 🔴 Номер ДЛЯ ЛЮДИНИ (з одиниці) стоїть у полі; індекс рамки (з нуля) живе
+   в `data-i` і на екран не потрапляє. Показати індекс означало б дати два
+   різні числа на той самий рядок і в різних місцях. */
+.vln .no {
+  display: inline-block;
+  min-width: 2.4em;
+  margin-right: .5rem;
+  text-align: right;
+  color: var(--fg-6, var(--fg-2));
+  user-select: none;
+}
+
+.vln.hot { background: var(--hover-soft); }
+.vln.on  { background: var(--hover-soft); outline: 1px solid var(--accent-2); }
+
+/* Наведення на текст підсвічує рамку — і навпаки. Слабша підсвітка від
+   сильнішої відрізняється навмисно: одна каже «ось цей», друга — «я його
+   вибрав». */
+.stage-ov .ln.hot { opacity: 1; stroke-width: 3; }
+
+/* Вирізка рядка — під панелями, на всю ширину: її розглядають, а не гортають. */
+#view-line img.crop {
+  max-width: 100%;
+  background: var(--paper);
+  border: 1px solid var(--paper-edge);
+  border-radius: var(--r-m);
+}
+
+/* Другий голос: розбіжні рядки видно одразу, бо саме розбіжність і є сигналом. */
+#view-alt pre.lines.alt { max-height: 40vh; }
+#view-alt .vln.differs { border-left: 3px solid var(--accent-2); }
+
+.view-nav select { max-width: 22rem; }

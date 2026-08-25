@@ -172,9 +172,50 @@ const STRINGS = {
     'case.editing': 'Правимо опис теки',
     'case.keep': 'Порожнє поле лишає попереднє значення — стерти опис можна лише правкою файлу _source.json у теці.',
     'case.why': 'Без шифри тека лишається купою файлів: немає ні обліку прочитаного, ні можливості послатись на знахідку.',
+    'nav.runs': 'Прогони',
+    'runs.title': 'Прогони читання',
+    'runs.why': 'Що ця машина вже прочитала — і чи покрите письмо кожної книги. '
+      + 'Прогони згруповані за справою: два прогони однієї книги мусять стояти поруч.',
+    'runs.q': 'шифра, назва, модель або тека',
+    'runs.engine.any': 'будь-який рушій',
+    'runs.state.any': 'будь-який стан',
+    'runs.state.done': 'завершені',
+    'runs.state.going': 'незавершені',
+    'runs.state.orphan': 'без справи',
+    'runs.count': 'прогонів: {n}, справ: {c}',
+    'runs.open': 'Гортати сторінки цього прогону',
+    'runs.failed': 'сторінок, які не прочитались',
+    'runs.nodenom': 'кадрів справи не знаємо, тож відсотка не рахуємо: '
+      + 'покриття, поділене саме на себе, завжди дорівнює 100%',
+    'runs.gap.covered': 'письмо справи покрите двома рушіями',
+    'runs.gap.second': 'другого голосу немає — другий рушій помиляється ІНАКШЕ '
+      + 'й витягує те, де перший підставив правдоподібне слово',
+    'runs.orphan.title': 'прогони без справи',
+    'runs.orphan.why': 'Текст є, а до якої справи належить — невідомо. '
+      + 'Такий прогін не видно нікому, хто читає лише мету, тож справа '
+      + 'виглядає непрочитаною.',
+    'runs.empty.filter': 'під фільтр не підпав жоден прогін із {n}',
+    'runs.empty.none': 'жодної справи ще не прочитано — гортати нема чого.',
     'nav.view': 'Гортач',
     'view.run': 'Прогін', 'view.open': 'Відкрити',
     'view.pages': 'сторінок', 'view.lines': 'рядків',
+    'view.prev': 'Назад', 'view.next': 'Далі',
+    'view.prev.key': 'клавіша ← або PageUp',
+    'view.next.key': 'клавіша → або PageDown',
+    'view.nopage': 'сторінки «{p}» у цьому прогоні немає — показано першу',
+    'view.norun': 'у прогоні немає жодної прочитаної сторінки',
+    'view.notext': 'текст сторінки порожній',
+    'view.noboxes': 'цей прогін не записав рамок рядків — по знімку не клікнути',
+    'view.confab': '⚠️ ПІДОЗРА НА ВИГАДКУ: рушій міг дописати правдоподібний '
+      + 'текст замість написаного. Впевненість при цьому НЕ просідає — вірити '
+      + 'лише звіривши зі знімком.',
+    'view.gaploop': '⚠️ прогін цієї сторінки обірвався або зациклився — текст '
+      + 'може бути неповним',
+    'view.alt': 'другий голос:',
+    'view.alt.open': 'розгорніть, щоб порівняти читання двох рушіїв',
+    'view.alt.mismatch': 'порівняти за номером рядка не можна: тут {a} рядків, '
+      + 'там {b}. Прогони не ділять рамок, тож той самий номер означав би '
+      + 'ІНШИЙ рядок — а це гірше за відсутність порівняння.',
     'view.eye': 'Око вирішує, машина лише подає — дивіться на рядок, а не на текст.',
     'nav.read': 'Читання',
     'read.dir': 'Тека зі сканами (пласка)', 'read.plan': 'Що робитимемо',
@@ -364,9 +405,51 @@ const STRINGS = {
     'case.editing': 'Editing the description of',
     'case.keep': 'An empty field keeps the previous value — to erase a field, edit _source.json in the folder.',
     'case.why': 'Without a reference the folder stays a pile of files: no record of what was read, no way to cite a finding.',
+    'nav.runs': 'Runs',
+    'runs.title': 'Reading runs',
+    'runs.why': 'What this machine has already read — and whether each book\'s '
+      + 'script is covered. Runs are grouped by case: two runs of one book '
+      + 'belong side by side.',
+    'runs.q': 'shelfmark, title, model or folder',
+    'runs.engine.any': 'any engine',
+    'runs.state.any': 'any state',
+    'runs.state.done': 'finished',
+    'runs.state.going': 'unfinished',
+    'runs.state.orphan': 'no case',
+    'runs.count': 'runs: {n}, cases: {c}',
+    'runs.open': 'Leaf through this run',
+    'runs.failed': 'pages that failed to read',
+    'runs.nodenom': 'the frame count of the case is unknown, so no percentage: '
+      + 'coverage divided by itself always reads 100%',
+    'runs.gap.covered': 'the script of this case is covered by two engines',
+    'runs.gap.second': 'no second voice — the other engine errs DIFFERENTLY and '
+      + 'recovers what the first replaced with a plausible word',
+    'runs.orphan.title': 'runs with no case',
+    'runs.orphan.why': 'The text exists, but which case it belongs to is '
+      + 'unknown. Such a run is invisible to anyone reading only the metadata, '
+      + 'so the case looks unread.',
+    'runs.empty.filter': 'no run out of {n} matched the filter',
+    'runs.empty.none': 'no case has been read yet — nothing to leaf through.',
     'nav.view': 'Viewer',
     'view.run': 'Run', 'view.open': 'Open',
     'view.pages': 'pages', 'view.lines': 'lines',
+    'view.prev': 'Back', 'view.next': 'Next',
+    'view.prev.key': 'key ← or PageUp',
+    'view.next.key': 'key → or PageDown',
+    'view.nopage': 'this run has no page "{p}" — showing the first one',
+    'view.norun': 'the run has no pages read yet',
+    'view.notext': 'the page text is empty',
+    'view.noboxes': 'this run wrote no line boxes — the scan cannot be clicked',
+    'view.confab': '⚠️ SUSPECTED FABRICATION: the engine may have written a '
+      + 'plausible text instead of what stands on the sheet. Confidence does '
+      + 'NOT drop — trust it only against the scan.',
+    'view.gaploop': '⚠️ the run of this page broke off or looped — the text may '
+      + 'be incomplete',
+    'view.alt': 'second voice:',
+    'view.alt.open': 'expand to compare the reading of two engines',
+    'view.alt.mismatch': 'cannot align by line number: {a} lines here, {b} '
+      + 'there. The runs do not share line boxes, so the same number would mean '
+      + 'a DIFFERENT line — worse than no comparison at all.',
     'view.eye': 'The eye decides, the machine only proposes — look at the line, not the text.',
     'nav.read': 'Reading',
     'read.dir': 'Folder with scans (flat)', 'read.plan': 'What we will do',

@@ -24,7 +24,7 @@
 import { initTheme, cycleTheme } from '/ui/theme.js';
 import { LANG, setLang, t } from './core/strings.js';
 import { esc, el, setView, curGen, alive } from './core/view.js';
-import { ACTIONS, SCREENS } from './core/registry.js';
+import { ACTIONS, KEYS, SCREENS } from './core/registry.js';
 import { SECTIONS, loadSections, renderNav, groupScreens, show,
   refreshJobs, watchJobs, setGroup } from './core/nav.js';
 
@@ -42,6 +42,7 @@ import './screens/sift.js';
 import './screens/eye.js';
 import './screens/view.js';
 import './screens/read.js';
+import './screens/runs.js';
 import './screens/export.js';
 import './screens/jobs.js';
 import './screens/settings.js';
@@ -147,20 +148,6 @@ document.addEventListener('input', (ev) => {
  * гортало б знахідки замість того, щоб набиратись, — і виглядало б це як
  * поламане поле, а не як гаряча клавіша.
  */
-const KEYS = {
-  sift: {
-    ArrowRight: () => ACTIONS['sift.step'](null, { dataset: { arg: '1' } }),
-    ArrowLeft: () => ACTIONS['sift.step'](null, { dataset: { arg: '-1' } }),
-    ' ': () => ACTIONS['sift.step'](null, { dataset: { arg: '1' } }),
-    e: () => ACTIONS['sift.view'](),
-    n: () => ACTIONS['sift.note'](),
-  },
-  view: {
-    '+': () => ACTIONS['view.zoom'](null, { dataset: { arg: '25' } }),
-    '-': () => ACTIONS['view.zoom'](null, { dataset: { arg: '-25' } }),
-    '0': () => ACTIONS['view.zoom'](null, { dataset: { arg: 'fit' } }),
-  },
-};
 
 document.addEventListener('keydown', (ev) => {
   const tag = (ev.target.tagName || '').toLowerCase();

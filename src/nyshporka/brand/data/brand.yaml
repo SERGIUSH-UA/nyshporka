@@ -422,6 +422,7 @@ screen_glyphs:
   cases: "📂"
   newcase: "➕"
   read: "🖋"
+  runs: "📜"
   view: "📄"
   eye: "👁"
   search: "🔎"
@@ -454,6 +455,7 @@ screen_icons:
   cases: folder
   newcase: plus
   read: quill
+  runs: list
   view: page
   eye: eye
   search: search

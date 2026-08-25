@@ -377,7 +377,9 @@ def case_pages(name: str) -> dict[str, Any] | None:
                                       "gap_loop", "suspect_confab")}})
     return {"name": name, "case_dir": meta.get("case_dir") or "",
             "model": meta.get("model") or "", "done": bool(meta.get("done")),
-            "engine": run_engine(meta), "script": meta.get("script") or "",
+            "engine": run_engine(meta), "engine_id": run_engine_id(meta),
+            "script": meta.get("script") or "",
+            "case_key": (meta.get("case_key") or "").strip(),
             "failed": meta.get("failed") or [], "pages": pages}
 
 

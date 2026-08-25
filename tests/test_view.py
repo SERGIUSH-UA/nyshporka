@@ -13,7 +13,6 @@ import json
 from pathlib import Path
 
 import pytest
-from _front import front_js
 
 from nyshporka.htr import view as V
 
@@ -174,13 +173,23 @@ def test_the_viewer_reads_the_same_keys_the_op_returns() -> None:
     отримував `undefined`, а не збій.
     """
     import re
+    from pathlib import Path as _P
 
-    js = front_js()
-    block = re.search(r"'view\.open': async.*?\n  \},", js, re.S)
-    assert block, "обробник гортача змінився — перевірку треба переписати"
-    used = set(re.findall(r"env\.data\.(\w+)", block.group(0)))
-    assert used <= {"lines", "geometry", "text", "page", "orient", "conf",
-                    "detector"}, f"гортач читає невідомі поля: {used}"
+    from _front import FRONT_DIR
+
+    # 🔴 Перевіряється ВЕСЬ модуль гортача, а не самий обробник форми. Доти
+    # приймач тримався за один блок `'view.open'` — а звірка «текст проти
+    # знімка» розкладена по кроку сторінок, смузі стану й другому голосу, тож
+    # більшість читань полів лишалась поза його полем зору.
+    js = _P(FRONT_DIR / "screens" / "view.js").read_text(encoding="utf-8")
+    used = set(re.findall(r"env\.data\.(\w+)", js))
+    # `page.text` без сторінки віддає перелік (`case_pages`), зі сторінкою —
+    # сам текст; `page.view` — вирізку. Тут об'єднання всіх трьох форм.
+    known = {"lines", "geometry", "text", "page", "orient", "conf", "detector",
+             "pages", "name", "case_dir", "model", "done", "engine",
+             "engine_id", "script", "case_key", "failed", "image", "line"}
+    assert used, "гортач не читає жодного поля відповіді — перевірку зламано"
+    assert used <= known, f"гортач читає невідомі поля: {sorted(used - known)}"
 
 
 # ── канал Б: рендер зі справи-PDF ────────────────────────────────────────────
