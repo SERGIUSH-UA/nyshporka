@@ -17,9 +17,12 @@
 from __future__ import annotations
 
 import contextlib
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
+
+from nyshporka.htr.pick import ScriptGuess
 
 _IMG_EXT = {".jpg", ".jpeg", ".png", ".tif", ".tiff"}
 
@@ -47,6 +50,21 @@ class Plan:
     #: (інша модель, другий голос) не бачить готової сегментації й рахує її
     #: заново — а це найдорожча частина сторінки.
     seg_cache: Path | None = None
+
+    #: Чим доведене письмо: `fixed` · `genre` · `epoch` · `folder` · `unknown`.
+    #: 🔴 Їде в плані, а не лишається в голові того, хто рахував: «кирилиця»
+    #: без цього поля читається однаково і як факт з опису справи, і як
+    #: здогад з імені теки — а це різниця між прочитаною книгою й текою
+    #: правдоподібного сміття.
+    script_trust: str = "unknown"
+    script_why: str = ""
+
+    #: 🔴 Файл-лок GPU — ВЛАСТИВІСТЬ ТЕКИ ВИХОДУ, а не аргумент виклику.
+    #: Дозволити викликачеві передати його означало б дозволити двом шардам
+    #: узяти два різні локи, а саме цього лок і не має допустити: два
+    #: одночасні проходи сегментації не влазять у пам'ять типової карти, і
+    #: прогін не сповільнюється, а ЗАВАЛЮЄТЬСЯ.
+    gpu_lock: Path | None = None
 
     def command(self, *, progress_json: bool = True, case_key: str = "",
                 limit: int = 0, pages: str = "", shard: str = "",
@@ -94,7 +112,46 @@ class Plan:
     def as_dict(self) -> dict[str, object]:
         return {"case_dir": str(self.case_dir), "out_dir": str(self.out_dir),
                 "model": self.model.name, "voice": self.voice.name if self.voice else "",
-                "script": self.script, "frames": self.frames}
+                "script": self.script, "frames": self.frames,
+                "script_trust": self.script_trust, "script_why": self.script_why}
+
+    # ── шарди ────────────────────────────────────────────────────────────────
+    def shards(self, workers: int = 1, *, device: str = "",
+               **kw: object) -> tuple[list[list[str]], list[str]]:
+        """Команди N процесів і застереження до них.
+
+        🔴🔴 Три прапорці народжуються й помирають РАЗОМ, і саме тому вони тут,
+        а не в руках викликача. `--shard` без спільного `--gpu-lock` на одній
+        карті не сповільнює прогін — він його ЗАВАЛЮЄ: два одночасні проходи
+        сегментації не влазять у пам'ять типової карти. А без `--no-gpu-sato`
+        шардинг здебільшого не дає нічого: найдорожча фаза сторінки йде під
+        локом, і процеси стають у чергу замість паралельної роботи.
+
+        Доти ці три важелі можна було подати поодинці, і найпоширеніша помилка
+        була ВИРАЗНОЮ — застереження в командному рядку її лише називало.
+        Приймаючи одне число, ми робимо її невимовною.
+
+        ⚠ На процесорі шарди згортаються до одного: там вони не діляться
+        картою, а б'ються за ті самі ядра, тобто платять переключенням
+        контексту й не виграють нічого.
+        """
+        notes: list[str] = []
+        n = max(1, int(workers or 1))
+        if n > 1 and not str(device or "").startswith("cuda"):
+            notes.append(
+                f"шарди згорнуто до одного: на «{device or 'cpu'}» вони не "
+                f"діляться карткою, а змагаються за ті самі ядра")
+            n = 1
+        if n == 1:
+            return [self.command(**kw)], notes  # type: ignore[arg-type]
+        lock = str(self.gpu_lock or (self.out_dir / "_gpu.lock"))
+        cmds = [self.command(shard=f"{k + 1}/{n}", gpu_lock=lock,
+                             gpu_sato=False, **kw)  # type: ignore[arg-type]
+                for k in range(n)]
+        notes.append(
+            f"{n} процеси під одним локом карти; sato знято з карти — виграш "
+            f"дає саме поєднання, не шардинг сам собою")
+        return cmds, notes
 
 
 def count_frames(case_dir: Path) -> int:
@@ -255,18 +312,26 @@ def pick_model(script: str, *, second_voice: bool = False) -> tuple[Path, Path |
 
 
 def guess_script(case_dir: Path, hint: str = "") -> str:
-    """Письмо справи. Підказка від людини сильніша за здогад.
+    """Письмо справи одним словом. Підказка від людини сильніша за здогад.
 
-    ⚠ Здогад тут слабкий за побудовою — з імені теки нічого не видно. Він і не
-    має бути сильним: помилка тиха, тож у сумнівному випадку краще спитати
-    людину, ніж вгадати й віддати сміття.
+    Сам висновок робить `htr.pick`: він дивиться спершу в ОПИС справи, потім у
+    жанр і роки, і лише в останню чергу — в ім'я теки. Доти тут стояв самий
+    розбір імені, тобто найслабша з чотирьох ознак працювала як єдина.
+
+    🔴 Коли не сказати нічого, повертається `cyrillic` — але це НЕ «письмо
+    визначено». Це остання підстава читати хоч чимось, і саме тому повний
+    висновок разом із рівнем довіри везе `guess_script_full()`: план мусить
+    сказати людині, що письмо ВГАДАНО, бо помилка тут дає не збій, а
+    правдоподібне сміття.
     """
-    if hint in ("latin", "cyrillic"):
-        return hint
-    name = case_dir.name.lower()
-    if re.search(r"kostel|parafial|notar|f792|latin", name):
-        return "latin"
-    return "cyrillic"
+    return guess_script_full(case_dir, hint).script or "cyrillic"
+
+
+def guess_script_full(case_dir: Path, hint: str = "") -> ScriptGuess:
+    """Письмо + рівень довіри + причина. `unknown` лишається `unknown`."""
+    from nyshporka.htr import pick
+
+    return pick.guess_script_for_dir(case_dir, hint)
 
 
 def plan(case_dir: str | Path, *, out_dir: str | Path = "", script: str = "",
@@ -296,7 +361,8 @@ def plan(case_dir: str | Path, *, out_dir: str | Path = "", script: str = "",
             f"бракує: {', '.join(rep.missing)}" if rep.missing else "не зібране")
         raise ReadError(f"середовище рушіїв не готове ({why}) — `nysh htr install`")
 
-    scr = guess_script(case, script)
+    guess = guess_script_full(case, script)
+    scr = guess.script if guess.script in ("latin", "cyrillic") else "cyrillic"
     model, voice = pick_model(scr, second_voice=second_voice)
     runner = Path(__file__).resolve().parent / "runner.py"
     ws = workspace()
@@ -311,4 +377,142 @@ def plan(case_dir: str | Path, *, out_dir: str | Path = "", script: str = "",
     seg = ws.derived / "htr_seg" / f"{slug}__{stamp}"
     return Plan(case_dir=case, out_dir=out, model=model, script=scr,
                 frames=frames, python=rep.python, runner=runner, voice=voice,
-                seg_cache=seg)
+                seg_cache=seg, gpu_lock=out / "_gpu.lock",
+                script_trust=guess.trust, script_why=guess.why)
+
+
+def shard_env(workers: int) -> dict[str, str]:
+    """Змінні середовища для шардів: скільки потоків бере кожен на BLAS.
+
+    🔴 Без цього кожен шард бачить усі ядра машини й забирає їх під матричні
+    операції — три процеси по вісім потоків на восьми ядрах душать одне одного
+    рівно на тому місці, де прогін і впирається (найдорожче в сторінці рахує
+    ПРОЦЕСОР, а не карта). Ділимо навпіл ще раз: половина ядер лишається на
+    решту фаз і на саму систему.
+
+    ⚠ Це середовище, а не аргументи, тож ним однаково користуються обидва
+    запускачі — і командний рядок, і застосунок.
+    """
+    n = max(1, int(workers or 1))
+    if n == 1:
+        return {}
+    try:
+        cores = os.cpu_count() or 2
+    except Exception:
+        cores = 2
+    per = max(1, cores // (2 * n))
+    return {"OMP_NUM_THREADS": str(per), "MKL_NUM_THREADS": str(per),
+            "OPENBLAS_NUM_THREADS": str(per)}
+
+
+def case_key_for(case_dir: str | Path) -> tuple[str, str]:
+    """Шифра справи для мети прогону + звідки її взято.
+
+    🔴 Прогін без шифри стає нічиїм: текст є, а до якої справи належить —
+    невідомо. Замір перед ремонтом: із 909 прогонів ключ мали СІМ, і зшивати
+    решту довелося правкою JSON руками. Тому ключ шукається САМ, а не чекає,
+    що людина набере його щоразу.
+
+    Два канали, обидва стоять на факті:
+      1. опис, що лежить У ТІЙ САМІЙ теці (`_source.json`) — подорожує разом
+         із матеріалом, тому найнадійніший;
+      2. резолвер бібліотеки за шляхом теки.
+
+    🔴 Розбору ІМЕНІ теки тут немає навмисно. Приписаний не тій справі текст
+    гірший за неприписаний: рік в імені прогону вже одного разу став номером
+    подільської справи, і декод ліг під чужу книгу, виглядаючи як факт.
+    """
+    d = Path(str(case_dir))
+    try:
+        from nyshporka.cases.register import read_sidecar
+
+        key = str(read_sidecar(d).get("shifra") or "").strip()
+        if key:
+            return key, "опис у теці справи"
+    except Exception:
+        pass
+    try:
+        from nyshporka.cases.resolve import LibraryIndex, _from_path
+
+        got = _from_path(str(d), LibraryIndex())
+        if got:
+            return str(got), "резолвер за шляхом теки"
+    except Exception:
+        pass
+    return "", ""
+
+
+def completeness(case_dir: str | Path, out_dir: str | Path, *,
+                 partial: bool = False) -> dict[str, object]:
+    """Скільки сторінок ДІЙСНО має текст — приймач по диску, не по коду виходу.
+
+    🔴 Є клас відмов, за якого сторінка вбиває процес: лог обривається, перелік
+    збоїв порожній, код повернення успішний. Виміряний випадок — 14 сторінок із
+    18. Єдине, що це ловить, — число готових текстів проти числа кадрів.
+
+    ⚠ Для часткового прогону (`--limit`, `--pages`) повнота не міряється: там
+    прочитано менше НАВМИСНО, і червоне на здоровому прогоні привчає
+    відмахуватись від приймача.
+
+    🔴 Шардинг часткового прогону НЕ робить. У командному рядку один процес —
+    це справді один шард із кількох, і там прогін частковий; у застосунку
+    завдання володіє ВСІМА шардами, тож їхнє об'єднання є повним прогоном.
+    Переплутати означає або лякати червоним справний прогін, або тихо прийняти
+    третину справи як прочитану.
+    """
+    out = Path(str(out_dir))
+    pages = len(list(out.glob("*.txt"))) if out.is_dir() else 0
+    frames = count_frames(Path(str(case_dir)))
+    missing = 0 if partial else max(0, frames - pages)
+    return {"pages": pages, "frames": frames, "missing": missing,
+            "partial": bool(partial), "ok": missing == 0}
+
+
+def model_candidates() -> list[dict[str, str]]:
+    """Ваги, доступні для читання: пак чи власний файл, письмо, рушій, версія.
+
+    🔴 Той самий перелік, з якого вибирає `pick_model()`. Другий перелік поруч
+    розійшовся б із першим тихо: людина бачила б у списку одну модель, а
+    прогін ішов би іншою — і пояснити різницю в тексті було б нічим.
+    """
+    from nyshporka.htr import manifest as M
+    from nyshporka.setup import packs
+
+    try:
+        man = M.active()
+    except Exception:
+        return []
+    named = production_choice()
+    seen: set[Path] = set()
+    out: list[dict[str, str]] = []
+
+    for pack in packs.catalog():
+        p = packs.path_of(pack)
+        ready = False
+        with contextlib.suppress(Exception):
+            ready = packs.verify(pack)
+        seen.add(p)
+        out.append({"id": pack.id, "filename": p.name, "path": str(p),
+                    "script": pack.script, "engine": pack.engine,
+                    "source": "пак", "state": "ok" if ready else "не завантажено",
+                    "version": str(_version_of(p)),
+                    "production": str(p.name == named.get(pack.script, ""))})
+    for p in local_models():
+        if p in seen:
+            continue
+        eng = man.engine_for_model(p.name)
+        if eng is None:
+            # 🔴 Чужі ваги без відомого префікса лишаються ВИДИМИМИ, але без
+            # письма: сховати їх означало б сказати «моделі немає» тому, у кого
+            # вона лежить на диску. Вибрати таку модель можна лише свідомо.
+            out.append({"id": p.stem, "filename": p.name, "path": str(p),
+                        "script": "", "engine": "", "source": "власні ваги",
+                        "state": "поза маніфестом", "version": str(_version_of(p)),
+                        "production": "False"})
+            continue
+        out.append({"id": p.stem, "filename": p.name, "path": str(p),
+                    "script": eng.script, "engine": eng.kind,
+                    "source": "власні ваги", "state": "ok",
+                    "version": str(_version_of(p)),
+                    "production": str(p.name == named.get(eng.script, ""))})
+    return out
