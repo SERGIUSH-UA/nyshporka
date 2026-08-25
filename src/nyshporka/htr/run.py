@@ -381,7 +381,7 @@ def plan(case_dir: str | Path, *, out_dir: str | Path = "", script: str = "",
                 script_trust=guess.trust, script_why=guess.why)
 
 
-def shard_env(workers: int) -> dict[str, str]:
+def shard_env(workers: int, *, cores: int = 0) -> dict[str, str]:
     """Змінні середовища для шардів: скільки потоків бере кожен на BLAS.
 
     🔴 Без цього кожен шард бачить усі ядра машини й забирає їх під матричні
@@ -392,15 +392,22 @@ def shard_env(workers: int) -> dict[str, str]:
 
     ⚠ Це середовище, а не аргументи, тож ним однаково користуються обидва
     запускачі — і командний рядок, і застосунок.
+
+    🔴 `cores` передається, коли прогін іде НЕ на цій машині. Без цього
+    хмарний захід ділив би ядра чужої машини за числом наших: на ноутбуці з
+    чотирма ядрами кожен із восьми шардів орендованої машини отримував би один
+    потік замість шести — тобто найдорожча фаза сторінки лишалась би без
+    процесора рівно там, де його вдосталь.
     """
     n = max(1, int(workers or 1))
     if n == 1:
         return {}
-    try:
-        cores = os.cpu_count() or 2
-    except Exception:
-        cores = 2
-    per = max(1, cores // (2 * n))
+    if cores <= 0:
+        try:
+            cores = os.cpu_count() or 2
+        except Exception:
+            cores = 2
+    per = max(1, int(cores) // (2 * n))
     return {"OMP_NUM_THREADS": str(per), "MKL_NUM_THREADS": str(per),
             "OPENBLAS_NUM_THREADS": str(per)}
 

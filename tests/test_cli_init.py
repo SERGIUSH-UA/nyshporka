@@ -9,8 +9,10 @@
 """
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
 from nyshporka.cli import app
@@ -105,3 +107,68 @@ def test_doctor_finds_the_workspace_created_a_moment_ago(monkeypatch, tmp_path: 
     assert space["level"] != "fail", space
     assert str(root) in space["detail"]
     assert "last-used" in space["detail"]
+
+
+def test_workspace_is_found_after_a_smoke_run_stole_the_state(monkeypatch,
+                                                              tmp_path: Path) -> None:
+    """🔴 «Застосунок загубив моє дослідження» — а воно лежить удома.
+
+    Запис «останній відкритий простір» перебиває будь-який `nysh init`, у тому
+    числі зроблений смоук-прогоном у тимчасовій теці. Таку теку прибирають, і
+    далі драбина джерел не мала куди відступити: змінної немає, маркера над
+    поточною текою немає, стан веде в нікуди, а щабля «звичне місце» в
+    `resolve()` не було — хоч у `propose()` він є. Тому МАЙСТЕР простір
+    знаходив, а кожна команда відповідала «робочий простір не знайдено» про
+    дослідження, яке нікуди не зникало.
+    """
+    import json
+
+    home = tmp_path / "домівка"
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+
+    # Дослідження людини — там, куди його кладе майстер.
+    mine = home / "Нишпорка"
+    assert runner.invoke(app, ["init", "--yes", "--preset", "catalog",
+                               str(mine)]).exit_code == 0
+
+    # Смоук-прогін завів свій простір і забрав собі «останній відкритий».
+    scratch = tmp_path / "smoke"
+    assert runner.invoke(app, ["init", "--yes", "--preset", "catalog",
+                               str(scratch)]).exit_code == 0
+    shutil.rmtree(scratch)
+
+    W.reset()
+    away = tmp_path / "деінде"
+    away.mkdir()
+    monkeypatch.chdir(away)
+
+    res = runner.invoke(app, ["doctor", "--json"])
+    space = {c["name"]: c for c in json.loads(res.stdout)}["Робочий простір"]
+    assert space["level"] != "fail", space
+    assert str(mine) in space["detail"], space
+
+
+def test_a_vanished_workspace_is_named_not_just_missed(monkeypatch,
+                                                       tmp_path: Path) -> None:
+    """Коли відступати нікуди, помилка мусить сказати, що зник САМЕ той шлях.
+
+    «Не знайдено» на місці дослідження, яке ще вчора відкривалось, читається як
+    втрата даних. Різниця між «шукати теку» і «шукати бекап» — один рядок.
+    """
+    home = tmp_path / "домівка"
+    home.mkdir()
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+
+    scratch = tmp_path / "smoke"
+    assert runner.invoke(app, ["init", "--yes", "--preset", "catalog",
+                               str(scratch)]).exit_code == 0
+    shutil.rmtree(scratch)
+
+    W.reset()
+    away = tmp_path / "деінде"
+    away.mkdir()
+    monkeypatch.chdir(away)
+
+    with pytest.raises(W.WorkspaceError) as exc:
+        W.resolve()
+    assert str(scratch) in str(exc.value), str(exc.value)

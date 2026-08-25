@@ -11,6 +11,7 @@ from typing import Any
 
 # Імпорт наповнює реєстр (декоратори виконуються при завантаженні модуля).
 from nyshporka import ops_builtin as _builtin  # noqa: F401  (потрібен саме побічний ефект)
+from nyshporka import ops_case as _case  # noqa: F401  (те саме: реєстрація)
 from nyshporka import ops_catalog as _catalog  # noqa: F401  (те саме: реєстрація)
 from nyshporka import ops_library as _library  # noqa: F401  (те саме: реєстрація)
 from nyshporka.core.envelope import Envelope

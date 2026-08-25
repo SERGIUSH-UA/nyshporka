@@ -823,6 +823,14 @@ from nyshporka.fonds.cli import app as registry_app  # noqa: E402
 
 app.add_typer(registry_app, name="registry")
 
+# ☁️ Читання на ЧУЖІЙ машині. Секція та сама, що й у локального читання, — це
+# те саме читання, лише там, де ядер більше (найдорожче в сторінці рахує
+# процесор, а не карта). Окремої секції немає навмисно: вкладка, порожня без
+# стороннього плагіна, була б обіцянкою без входу.
+from nyshporka.cloud.cli import app as cloud_app  # noqa: E402
+
+app.add_typer(cloud_app, name="cloud")
+
 
 @cases_app.command("build")
 def cases_build(
@@ -1280,17 +1288,53 @@ def serve(
     _serve(port=port, open_browser=not no_browser)
 
 
+def _op_card(op: Any, *, with_doc: bool = False) -> dict[str, Any]:
+    """Машинний опис операції: чим є, що приймає, чим загрожує.
+
+    🔴 `schema` їде РАЗОМ із переліком, а не окремим запитом на кожну операцію.
+    Той, хто кличе операцію з командного рядка (`nysh op …`), інакше знає лише
+    ІМ'Я — і мусить видобувати назви полів по одній із помилок валідації,
+    витрачаючи хід на кожну. Схема вже є в реєстрі; не віддавати її означало
+    тримати повну поверхню за напівзачиненими дверима.
+    """
+    card: dict[str, Any] = {
+        "name": op.name, "summary": op.summary, "section": op.section,
+        "mutates": op.mutates, "long": op.long, "agent": op.agent,
+        "schema": op.schema(),
+    }
+    if with_doc:
+        # Докстрінг — те, що не доїжджає ні в перелік tool'ів, ні в підпис
+        # операції: там однорядковий summary, а причина «чому саме так» разом
+        # із замірами й ціною помилки живе тут.
+        import inspect
+
+        card["doc"] = inspect.getdoc(op.fn) or ""
+    return card
+
+
 @app.command("ops")
 def ops_list(agent_only: bool = typer.Option(False, "--agent",
-                                             help="лише те, що бачить агент")) -> None:
+                                             help="лише те, що бачить агент"),
+             as_json: bool = typer.Option(False, "--json",
+                                          help="машинний перелік зі схемами аргументів"),
+             ) -> None:
     """Перелік операцій — те саме, що доступне агентові й браузеру."""
     from nyshporka import ops as O
 
-    for op in (O.for_agent() if agent_only else O.all_ops()):
+    picked = O.for_agent() if agent_only else O.all_ops()
+    if as_json:
+        console.print_json(data={"v": 1, "ops": [_op_card(o) for o in picked]})
+        return
+    for op in picked:
         marks = "".join(("✎" if op.mutates else " ", "⏳" if op.long else " ",
                          "🤖" if op.agent else " "))
         console.print(f"  {marks} [bold]{op.name:<18}[/bold] [muted]{op.section:<9}[/muted] "
                       f"{op.summary}")
+    if not as_json:
+        console.print("\n[muted]✎ пише на диск · ⏳ довга (див. `nysh op <ім'я> --describe`) "
+                      "· 🤖 доступна агентом[/muted]")
+        console.print("[muted]аргументи: nysh op <ім'я> --describe · "
+                      "усе разом: nysh ops --json[/muted]")
 
 
 # ── секції ───────────────────────────────────────────────────────────────────
@@ -1372,16 +1416,33 @@ def op_run(
     name: str = typer.Argument(..., help="ім'я операції, напр. workspace.info"),
     args: str = typer.Option("{}", "--args", help="аргументи як JSON"),
     as_json: bool = typer.Option(True, "--json/--human", help="формат виводу"),
+    describe: bool = typer.Option(False, "--describe",
+                                  help="аргументи й пояснення, БЕЗ виконання"),
 ) -> None:
     """Виконати операцію напряму.
 
     🔴 Це і є те, що робить командний рядок повним: КОЖНА операція доступна тут
     без окремої команди. Дружні команди (`look`, `sources`) — лише зручні
     обгортки над тими самими операціями, тож відстати від агента CLI не може.
+
+    `--describe` віддає схему аргументів і повний докстрінг, нічого не
+    виконуючи. Це вхід для того, хто працює без переліку tool'ів: там видно
+    лише однорядковий підпис, а тут — назви полів і причина, чому операція
+    така. Розвідка мусить бути дешевою і безпечною, інакше її роблять
+    навмання — викликом мутації «щоб подивитись, що відповість».
     """
     import json as _json
 
     from nyshporka import ops as O
+
+    if describe:
+        op = O.get(name)
+        if op is None:
+            known = ", ".join(sorted(o.name for o in O.all_ops()))
+            console.print(f"[err]невідома операція «{name}».[/err] Є: {known}")
+            raise typer.Exit(code=2)
+        console.print_json(data=_op_card(op, with_doc=True))
+        raise typer.Exit(code=0)
 
     try:
         payload = _json.loads(args)
@@ -1479,7 +1540,7 @@ def skills_install(
     console.print(f"  [muted]видно агентові {where}; перезапустіть сесію[/muted]")
 
 
-mcp_app = typer.Typer(help="Агентна поверхня (Claude Code, Codex).",
+mcp_app = typer.Typer(help="Перелік tool'ів для Claude Code / Codex — коротший шлях до того, що вміє `nysh op`.",
                       no_args_is_help=True)
 app.add_typer(mcp_app, name="mcp")
 

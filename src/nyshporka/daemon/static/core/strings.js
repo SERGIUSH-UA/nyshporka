@@ -83,6 +83,19 @@ const STRINGS = {
     'sources.get': 'Завантажити',
     'sources.manifest': 'Що принесе',
     'nav.library': 'Бібліотека',
+    'nav.frames': 'Аркуші',
+    'frames.title': 'Аркуші справи',
+    'frames.why': 'Подивитись на те, що завантажено — без жодного прогону. '
+      + 'Кадри або сторінки PDF, як їх віддав архів.',
+    'frames.case': 'тека справи',
+    'frames.show': 'Показати',
+    'frames.none': 'на диску немає жодної справи',
+    'frames.empty': 'у цій справі немає аркушів, які можна показати',
+    'frames.frompdf': 'сторінка PDF, відрендерена на льоту',
+    'frames.wide.on': 'На повну ширину',
+    'frames.wide.off': 'Зменшити',
+    'frames.wide.why': 'повна ширина коштує мегабайтами на КОЖЕН аркуш — '
+      + 'вмикайте, коли треба роздивитись, а не гортати',
     'lib.title': 'Бібліотека справ',
     'lib.q.why': 'шукає й приблизно: назва села латинкою чи в іншому '
       + 'відмінку однаково знайдеться',
@@ -122,6 +135,7 @@ const STRINGS = {
     'lib.sum.noclan': 'роду немає (вручну)',
     'lib.sum.nolayers': 'реєстру справ не збирали — про роботу над справами '
       + 'сказати нічого',
+    'lib.act.frames': 'Подивитись аркуші справи',
     'lib.act.read': 'Прочитати цю справу рушієм',
     'lib.act.runs': 'Прогони цієї справи',
     'lib.act.find': 'Шукати в межах цієї справи',
@@ -246,6 +260,7 @@ const STRINGS = {
     'view.run': 'Прогін', 'view.open': 'Відкрити',
     'view.pages': 'сторінок', 'view.lines': 'рядків',
     'view.prev': 'Назад', 'view.next': 'Далі',
+    'view.shot.on': 'Показати знімок', 'view.shot.off': 'Сховати знімок',
     'view.prev.key': 'клавіша ← або PageUp',
     'view.next.key': 'клавіша → або PageDown',
     'view.nopage': 'сторінки «{p}» у цьому прогоні немає — показано першу',
@@ -362,6 +377,19 @@ const STRINGS = {
     'sources.get': 'Download',
     'sources.manifest': 'What it brings',
     'nav.library': 'Library',
+    'nav.frames': 'Sheets',
+    'frames.title': 'Sheets of the case',
+    'frames.why': 'Look at what you have downloaded — with no run at all. '
+      + 'Frames or PDF pages, as the archive gave them.',
+    'frames.case': 'case folder',
+    'frames.show': 'Show',
+    'frames.none': 'no case on disk',
+    'frames.empty': 'this case has no sheets that can be shown',
+    'frames.frompdf': 'a PDF page rendered on the fly',
+    'frames.wide.on': 'Full width',
+    'frames.wide.off': 'Smaller',
+    'frames.wide.why': 'full width costs megabytes for EVERY sheet — turn it '
+      + 'on to examine, not to leaf through',
     'lib.title': 'Case library',
     'lib.q.why': 'matches loosely too: a village name in Latin script or in '
       + 'another case still finds the record',
@@ -401,6 +429,7 @@ const STRINGS = {
     'lib.sum.noclan': 'no clan (by hand)',
     'lib.sum.nolayers': 'the case registry has not been built — nothing to say '
       + 'about work done on the cases',
+    'lib.act.frames': 'Look at the sheets of this case',
     'lib.act.read': 'Read this case with an engine',
     'lib.act.runs': 'Runs of this case',
     'lib.act.find': 'Search within this case',
@@ -526,6 +555,7 @@ const STRINGS = {
     'view.run': 'Run', 'view.open': 'Open',
     'view.pages': 'pages', 'view.lines': 'lines',
     'view.prev': 'Back', 'view.next': 'Next',
+    'view.shot.on': 'Show the scan', 'view.shot.off': 'Hide the scan',
     'view.prev.key': 'key ← or PageUp',
     'view.next.key': 'key → or PageDown',
     'view.nopage': 'this run has no page "{p}" — showing the first one',

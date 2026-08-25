@@ -264,6 +264,13 @@ def cmd_plan(
         except Exception as exc:
             known_host = False
             console.print(f"[err]🔴 {exc}[/err]")
+    # 🔴 Канал називається ВЖЕ ТУТ. Дізнатись, що заливка триватиме дев'ять
+    # годин, після того як почалась оренда, — це те саме, що не дізнатись.
+    # Швидкості напряму без з'єднання не заміряти, але сказати, чи є швидкий
+    # шлях і чого він вартий, можна й без жодного пакета в мережі.
+    from nyshporka.cloud.transfer import load_storage
+
+    p = PL.with_channel(p, storage=load_storage(), speed=None)
     if as_json:
         data = p.as_dict()
         data["host_known"] = known_host
@@ -374,6 +381,10 @@ def cmd_state(
         rows = ST.all_runs()
         if as_json:
             console.print_json(data=[s.as_dict() for s in rows])
+            return
+        if not rows:
+            console.print("[muted]жодного заходу ще не було. Почати: "
+                          "nysh cloud plan <тека> --host <машина>[/muted]")
             return
         for s in rows:
             mark = "🔴" if s.needs_release else ("✅" if s.verdict == "ok" else "·")

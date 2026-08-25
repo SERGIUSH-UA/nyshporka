@@ -35,6 +35,7 @@ import './screens/home.js';
 import './screens/sources.js';
 import './screens/cases.js';
 import './screens/library.js';
+import './screens/frames.js';
 import './screens/geog.js';
 import './screens/fonds.js';
 import './screens/search.js';

@@ -299,6 +299,8 @@ function libRow(r, layers) {
     <td class="work">${libWork(r, layers)}</td>
     <td>${v}</td>
     <td class="acts">
+      ${r.path ? `<button class="ctl-sm" data-act="lib.frames" data-arg="${esc(r.path)}"
+        title="${esc(t('lib.act.frames'))}">${ic('image', 'ic-o ic-sm')}</button>` : ''}
       ${r.path ? `<button class="ctl-sm" data-act="lib.read" data-arg="${esc(r.path)}"
         title="${esc(t('lib.act.read'))}">${ic('quill', 'ic-o ic-sm')}</button>` : ''}
       <button class="ctl-sm" data-act="lib.runs" data-arg="${esc(r.key)}"
@@ -379,6 +381,18 @@ Object.assign(ACTIONS, {
     // зникнути разом з екраном форми.
     if ((env.warnings || []).length) alert(env.warnings.map((w) => w.text).join('\n'));
     return show('library');
+  },
+
+  /**
+   * 🖼 Просто подивитись на аркуші — без прогону й без декоду.
+   *
+   * 🔴 Найчастіша дія над справою, і найдовше її не було: щоб глянути на
+   * завантажене, доводилось спершу прочитати справу рушієм. Тому кнопка стоїть
+   * ПЕРШОЮ в рядку — перед читанням, а не після нього.
+   */
+  'lib.frames': (_ev, elm) => {
+    ST.frames = { case: elm.dataset.arg };
+    return show('frames');
   },
 
   /** 🖋 Читати цю справу: тека підставляється, набирати шлях не треба. */

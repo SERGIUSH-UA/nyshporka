@@ -144,6 +144,91 @@ def test_unknown_op_names_the_available_ones():
     assert "workspace.info" in res.stdout
 
 
+# ── розвідка поверхні без переліку tool'ів ───────────────────────────────────
+def test_command_line_hands_out_the_argument_schema():
+    """🔴 Досяжність без схеми — це половина входу, і половина гірша за нуль.
+
+    Той, хто працює через MCP, отримує `inputSchema` разом із переліком і
+    ніколи не гадає про назви полів. Той, хто працює командним рядком, до
+    2026-08-25 бачив лише ім'я й однорядковий підпис — тобто мусив видобувати
+    поля по одному з помилок валідації, витрачаючи хід на кожне. Схема лежала
+    в реєстрі весь час; не віддавати її означало тримати повну поверхню за
+    напівзачиненими дверима й ще й називати це повнотою.
+    """
+    res = runner.invoke(app, ["op", "pages.note", "--describe"])
+    assert res.exit_code == 0
+    card = json.loads(res.stdout)
+    assert "case" in card["schema"]["properties"], "схема аргументів не доїхала"
+    assert card["doc"], "докстрінг не доїхав — а він і є те, чого немає в підписі"
+    assert card["mutates"] is True, "позначка мутації мусить бути видна ДО виклику"
+
+
+def test_describe_does_not_execute_the_operation():
+    """Розвідка мусить бути безпечною, інакше її роблять мутацією.
+
+    Якби `--describe` виконував операцію, єдиним способом дізнатись аргументи
+    мутації лишався б виклик «щоб подивитись, що відповість» — тобто запис у
+    чуже сховище заради довідки.
+    """
+    from nyshporka.core import pulse
+
+    calls: list[str] = []
+    original, pulse.beat = pulse.beat, lambda name: calls.append(name)
+    try:
+        res = runner.invoke(app, ["op", "case.register", "--describe"])
+    finally:
+        pulse.beat = original
+    assert res.exit_code == 0
+    assert not calls, "describe виконав мутацію"
+    assert "\"ok\"" not in res.stdout, "describe віддав конверт, тобто таки виконав"
+
+
+def test_ops_listing_carries_every_schema():
+    """Перелік і схеми — один запит, а не сорок.
+
+    Сорок викликів на розвідку коштують дорожче за саму роботу, і той, хто
+    рахує ходи, просто не робитиме розвідки.
+    """
+    res = runner.invoke(app, ["ops", "--json"])
+    assert res.exit_code == 0
+    payload = json.loads(res.stdout)
+    got = {o["name"]: o for o in payload["ops"]}
+    assert got.keys() == {o.name for o in O.all_ops()}
+    for op in O.all_ops():
+        assert got[op.name]["schema"] == op.schema(), f"{op.name}: схема розійшлась"
+
+
+def test_ops_that_need_the_queue_name_the_path_without_it():
+    """🔴 Режим не має відкриватись відмовою.
+
+    Частина операцій виконується прямо на місці (`registry.collect` збирає
+    опис синхронно, хоч і позначена довгою), а частина делегує чергу
+    застосунку й поза ним відповідає «підніміть `nysh serve`». Друга група й
+    небезпечна: відповідь чесна, але читає її той, хто вже витратив хід.
+
+    Тому вимога адресна — не «до всіх довгих», а «до тих, хто відсилає до
+    застосунку»: такі мусять назвати шлях БЕЗ черги (`nysh read`, `nysh get`)
+    саме в докстрінгу, бо докстрінг віддається `--describe` ДО виклику.
+    """
+    import inspect
+    import re
+
+    silent = []
+    for op in O.all_ops():
+        src = inspect.getsource(op.fn)
+        if "nysh serve" not in src:            # черги не потребує — питання не стоїть
+            continue
+        doc = inspect.getdoc(op.fn) or ""
+        # Назвати треба саме ІНШУ команду: `nysh serve` — це і є черга, тож
+        # порада підняти її не є шляхом без неї.
+        if not re.search(r"`nysh (?!serve\b)[a-z]+", doc):
+            silent.append(op.name)
+    assert not silent, (
+        f"операція відсилає до застосунку, але не називає шляху без нього: "
+        f"{silent}. Агент дізнається про режим лише з відмови, тобто після "
+        f"витраченого ходу")
+
+
 # ── конверт ──────────────────────────────────────────────────────────────────
 def test_every_answer_is_wrapped_the_same_way():
     """🔴 Операція ЗАВЖДИ повертає конверт — навіть коли всередині впало.

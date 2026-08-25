@@ -20,13 +20,13 @@ let RUNNING_JOBS = 0;
 let SECTIONS = { sections: [], screens: {}, presets: {}, preset: null, glyphs: {} };
 
 /** Порядок кнопок у шапці. Екрани, яких тут немає, кнопки не отримують. */
-const NAV_ORDER = ['home', 'sources', 'geog', 'fonds', 'library', 'cases', 'newcase',
+const NAV_ORDER = ['home', 'sources', 'geog', 'fonds', 'library', 'frames', 'cases', 'newcase',
   'read', 'runs', 'view', 'eye', 'search', 'sift', 'export', 'jobs'];
 
 /** Ключ i18n для кнопки екрана. Підпис «Завести справу» вже є в словнику. */
 const NAV_LABEL = {
   home: 'nav.home', sources: 'nav.sources', geog: 'nav.geog', fonds: 'nav.fonds',
-  library: 'nav.library', cases: 'nav.cases', newcase: 'nav.newcase', read: 'nav.read', runs: 'nav.runs', view: 'nav.view',
+  library: 'nav.library', frames: 'nav.frames', cases: 'nav.cases', newcase: 'nav.newcase', read: 'nav.read', runs: 'nav.runs', view: 'nav.view',
   eye: 'nav.eye', search: 'nav.search', sift: 'nav.sift', export: 'nav.export', jobs: 'nav.jobs',
 };
 

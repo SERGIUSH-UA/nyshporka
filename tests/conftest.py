@@ -50,12 +50,25 @@ def _state_file(tmp_path_factory: pytest.TempPathFactory) -> Path:
     return tmp_path_factory.mktemp("nysh-state") / "state.json"
 
 
+@pytest.fixture(scope="session")
+def _fake_home(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """Підмінна домівка — ОДНА на сесію, з тієї ж причини, що й файл стану."""
+    return tmp_path_factory.mktemp("nysh-home")
+
+
 @pytest.fixture(autouse=True)
 def _isolate_from_the_machine(monkeypatch: pytest.MonkeyPatch,
-                              _state_file: Path) -> None:
+                              _state_file: Path, _fake_home: Path) -> None:
     for name in _ENV:
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setattr(W, "_state_path", lambda: _state_file)
+    # 🔴 Домівка — теж джерело простору, відколи `resolve()` вміє відступати на
+    # звичне місце (`~/Нишпорка`, `~/Documents/Нишпорка`). Без підміни тести
+    # діставали б СПРАВЖНІЙ простір того, хто їх запустив: «немає простору»
+    # мовчки переставало відтворюватись на машині розробника, а гірше — прогін
+    # міг писати в чуже дослідження. Тести, яким потрібна своя домівка,
+    # підмінюють `Path.home` самі; ця підміна лише прибирає машину.
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: _fake_home))
 
 
 @pytest.fixture

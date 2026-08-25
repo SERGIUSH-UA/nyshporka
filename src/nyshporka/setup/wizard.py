@@ -15,8 +15,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-#: Ім'я теки простору за замовчуванням. Кирилицею: її бачить людина, а не код.
-DEFAULT_DIRNAME = "Нишпорка"
+#: Ім'я теки простору за замовчуванням — з ядра, одне на застосунок. Тут воно
+#: потрібне, щоб ЗАПРОПОНУВАТИ місце, а в `core.workspace` — щоб ЗНАЙТИ вже
+#: створений простір; друга копія розійшлася б із першою мовчки.
+from nyshporka.core.workspace import DEFAULT_DIRNAME
 
 _CLOUD_MARKS = ("onedrive", "dropbox", "google drive", "яндекс", "icloud")
 

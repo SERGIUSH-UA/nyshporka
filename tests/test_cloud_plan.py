@@ -180,6 +180,22 @@ def test_small_case_over_sftp_needs_no_warning() -> None:
     assert "⚠" not in why
 
 
+def test_bulk_without_storage_is_warned_even_unmeasured() -> None:
+    """🔴 Промовчати про 31 ГБ не можна навіть тоді, коли швидкість не міряли.
+
+    Вигадати число теж не можна — канал у кожного свій. Тому попередження є, а
+    числа швидкості в ньому немає: обсяг названо, замір обіцяно на старті.
+    """
+    from nyshporka.cloud.transfer import pick_channel
+
+    _, why = pick_channel(nbytes=31 * 10 ** 9, storage=None, sftp=None)
+    assert "⚠" in why and "31 ГБ" in why
+    assert "hosts storage" in why, "мусить вести на швидкий шлях"
+
+    _, quiet = pick_channel(nbytes=30 * 10 ** 6, storage=None, sftp=None)
+    assert "⚠" not in quiet, "на дрібній справі попередження знецінилось би"
+
+
 def test_presigned_name_drops_the_query() -> None:
     """🔴 Підпис у посиланні не має ставати частиною імені файла.
 
