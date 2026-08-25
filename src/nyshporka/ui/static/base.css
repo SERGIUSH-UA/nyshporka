@@ -393,7 +393,7 @@ button:not(:disabled):active { transform: scale(.97); }
 
 }
 
-/* ── 🔍 повноекранний переглядач аркуша ──────────────────────────────────────
+/* ── 🔍 повноекранна читалка аркуша ─────────────────────────────────────────
    🔴 Тло НЕ прозоре й не «як тема»: аркуш розглядають, а просвічений крізь
    нього інтерфейс збиває око з паперу. Колір той самий, що під сканом у
    вбудованому перегляді (`--stage`) — щоб перехід у повний екран не міняв
@@ -401,7 +401,6 @@ button:not(:disabled):active { transform: scale(.97); }
 .lb {
   position: fixed; inset: 0; z-index: 900;
   background: var(--stage);
-  display: flex; align-items: center; justify-content: center;
   overscroll-behavior: contain;
 }
 
@@ -416,15 +415,78 @@ button:not(:disabled):active { transform: scale(.97); }
 
 .lb.grabbing .lb-canvas { cursor: grabbing; }
 
-.lb-img {
-  max-width: none; max-height: none;
+/* 🔴 Трансформується САМЕ ця обгортка, а не знімок. Рамки рядків лежать
+   поверх знімка й мусять їхати з ним як одне ціле: зумуючи `<img>` окремо,
+   ми роз'їжджаємо рамки з рядками — і підказка починає показувати чужий
+   текст, виглядаючи при цьому цілком переконливо. */
+.lb-stage {
+  position: relative; display: inline-block;
   transform-origin: center center;
-  /* 🔴 `pixelated` НЕ ставимо: на скані згладжування читабельніше за пікселі,
-     а різкі краї на скоропису читаються як артефакти чорнила. */
-  user-select: none; -webkit-user-drag: none;
-  background: var(--paper);
-  box-shadow: var(--sh-2, 0 4px 24px rgba(0, 0, 0, .5));
+  box-shadow: var(--sh-2);
 }
+
+.lb-img {
+  display: block; max-width: none; max-height: none;
+  background: var(--paper);
+  user-select: none; -webkit-user-drag: none;
+}
+
+.lb-ov { position: absolute; inset: 0; width: 100%; height: 100%; }
+
+/* ⚠ `pointer-events: fill` навмисно: фігура намальована без заливки, і без
+   цього навести можна було б лише на лінію обведення — тобто в два пікселі. */
+.lb-shape {
+  fill: none; stroke: var(--box-tp); stroke-width: 2;
+  opacity: .25; pointer-events: fill; cursor: pointer;
+  vector-effect: non-scaling-stroke;
+}
+
+.lb-shape:hover { opacity: .9; stroke-width: 3; }
+.lb-shape.on { opacity: 1; stroke-width: 4; }
+
+/* 🔴 Текст спливає НАД своєю рамкою. Рядок формуляра — короткий шматок
+   усередині графи, і в списку під знімком він втрачає єдине, що робить його
+   зрозумілим: де він стояв. */
+.lb-tip {
+  position: fixed; z-index: 910; transform: translate(-50%, -100%);
+  max-width: min(60vw, 46rem); padding: 6px 10px;
+  background: var(--s-2); border: 1px solid var(--line-3);
+  border-radius: var(--r-s); color: var(--fg);
+  font-size: 14px; line-height: 1.35; pointer-events: none;
+  box-shadow: var(--sh-2);
+}
+
+/* Місця вгорі немає — стаємо під рамкою: інакше на верхніх рядках підказка
+   вилазить за край екрана, тобто зникає там, де читають найчастіше. */
+.lb-tip.is-below { transform: translate(-50%, 0); }
+
+/* ── бічна панель: увесь аркуш підряд ─────────────────────────────────────── */
+.lb-side {
+  position: absolute; top: 0; right: 0; bottom: 0; width: 380px;
+  background: var(--s-1); border-left: 1px solid var(--line-2);
+  overflow: auto; padding: 56px 0 16px;
+}
+
+.lb-side-body { padding: 0 10px; }
+
+.lb-line {
+  display: grid; grid-template-columns: 2.2em 1fr; gap: .4rem;
+  padding: 3px 6px; border-radius: 4px; cursor: pointer;
+  color: var(--fg-2); font-size: 13px; line-height: 1.4;
+}
+
+.lb-line:hover { background: var(--hover-soft); }
+.lb-line.on { background: var(--hover-soft); outline: 1px solid var(--accent-2); }
+.lb-line .no { color: var(--fg-5); text-align: right; user-select: none; }
+
+/* 🔴 Другий голос стоїть ПІД своїм рядком, а не окремим стовпцем: збіг
+   голосів означає надійне читання, розбіжність — що ознака в пікселях. */
+.lb-line .alt {
+  grid-column: 2; color: var(--fg-4);
+  border-left: 3px solid var(--accent-2); padding-left: .4rem;
+}
+
+.lb-none { color: var(--fg-4); font-size: 13px; padding: .5rem; }
 
 /* Стрілки — великі й по краях: у них цілять, не дивлячись, бо очі на аркуші. */
 .lb-nav {
@@ -439,6 +501,7 @@ button:not(:disabled):active { transform: scale(.97); }
 .lb-nav:disabled { opacity: .12; cursor: default; }
 .lb-prev { left: 12px; }
 .lb-next { right: 12px; }
+.lb.with-side .lb-next { right: 392px; }
 
 .lb-bar {
   position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
@@ -448,16 +511,19 @@ button:not(:disabled):active { transform: scale(.97); }
   color: var(--fg-2); font-size: 13px; max-width: min(90vw, 60rem);
 }
 
-.lb-bar .lb-label {
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
+.lb-bar .lb-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .lb-bar button {
   background: var(--s-4); color: var(--fg-2); border: 0; cursor: pointer;
-  border-radius: var(--r-s); padding: 3px 9px; font-size: 12px;
+  border-radius: var(--r-s); padding: 3px 9px; font-size: 12px; white-space: nowrap;
 }
 
 .lb-bar button:hover { background: var(--hover-soft); color: var(--fg); }
+
+/* Кнопка тексту з'являється лише там, де текст є: на непрочитаному аркуші
+   вона обіцяла б те, чого немає. */
+.lb-bar .lb-text { display: none; }
+.lb.has-text .lb-bar .lb-text { display: inline-block; }
 
 .lb-hint {
   position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%);
@@ -467,7 +533,8 @@ button:not(:disabled):active { transform: scale(.97); }
 
 /* 🔴 Контроли ховаються за дві секунди спокою. Вони лежать ПОВЕРХ аркуша, а на
    сканах текст іде до самого краю — саме туди, де кнопка. Зникають лише
-   візуально: клавіші й колесо працюють далі. */
+   візуально: клавіші й колесо працюють далі. Панель тексту НЕ ховається: її
+   відкривають, щоб читати. */
 .lb.idle .lb-nav,
 .lb.idle .lb-bar,
 .lb.idle .lb-hint { opacity: 0; }
@@ -475,10 +542,13 @@ button:not(:disabled):active { transform: scale(.97); }
 .lb-nav, .lb-bar, .lb-hint { transition: opacity .25s ease; }
 .lb.idle .lb-canvas { cursor: none; }
 
-/* Поки аркуш їде — смуга каже про це, а не мовчить порожнім екраном. */
+/* Поки аркуш їде — знімок притухає, а не зникає: порожній екран читається як
+   поломка, притухлий — як робота. */
 .lb.busy .lb-img { opacity: .35; }
 
 @media (max-width: 40rem) {
   .lb-nav { width: 44px; height: 64px; font-size: 26px; }
   .lb-hint { display: none; }
+  .lb-side { width: 100%; }
+  .lb.with-side .lb-next { right: 12px; }
 }

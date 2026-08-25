@@ -72,6 +72,9 @@ body.dataset = { token: 'тест' };
 const byId = {};
 globalThis.document = { body, documentElement: node('html'),
   createElement: (t) => node(t),
+  // Накладка рядків малюється в просторі імен SVG — без цього читалка
+  // прогону падає рівно там, де показує прочитане.
+  createElementNS: (_ns, t) => node(t),
   getElementById: (id) => (byId[id] ||= node('div')),
   addEventListener() {}, removeEventListener() {},
   querySelector: () => null, querySelectorAll: () => [] };
@@ -101,7 +104,14 @@ globalThis.fetch = async (url) => {
     'case.frames': { kind: 'image', total: 2, pdfs: [], frames: FRAMES },
     'case.frame': { width: 9, height: 9, bytes: 9, image: 'data:image/jpeg;base64,AA' },
     'library.list': { cases: [], built: true, summary: {}, facets: {} },
-    'runs.list': { runs: [] },
+    'runs.list': { runs: [{ name: 'прогін', case_dir: 'c', engine_id: 'pysar',
+                            pages_done: 2, frames: 2 }] },
+    'page.text': { name: 'прогін', engine_id: 'pysar', model: 'pysar_cyr_v4.pt',
+                   pages: [{ page: 'a.jpg', lines: 2 }, { page: 'b.jpg', lines: 2 }],
+                   lines: ['перший рядок', 'другий рядок'] },
+    'page.lines': { has: true, size: [100, 60],
+                    polys: [[[1, 1], [9, 1], [9, 5], [1, 5]], null] },
+    'page.view': { image: 'data:image/png;base64,AA', line: 0, text: 'рядок' },
   }[name] || {};
   if (String(url).endsWith('/api/sections')) {
     return { ok: true, status: 200, json: async () => ({ ok: true, v: 1,
@@ -157,6 +167,22 @@ if (boxes.length) {
   canvas.fire('pointerup', { target: canvas });
   lb.fire('click', { target: canvas });
   out.closedFromImage = lb.removed;
+}
+
+// ── читалка прогону: знімок РАЗОМ із прочитаним ────────────────────────────
+await import('./screens/view.js');
+const { ST } = await import('./core/state.js');
+ST.view = { run: 'прогін', page: '', line: null };
+await SCREENS.view();
+await new Promise((r) => setTimeout(r, 40));
+const b2 = created.length;
+await ACTIONS['view.full']();
+await new Promise((r) => setTimeout(r, 40));
+const reader = created.slice(b2).filter((c) => c.className === 'lb');
+out.reader = reader.length;
+if (reader.length) {
+  const ovNode = reader[0].querySelector('.lb-ov');
+  out.shapes = (ovNode.children || []).length;
 }
 
 console.log('@@' + JSON.stringify(out));
@@ -268,3 +294,27 @@ def test_a_drag_that_began_on_the_sheet_is_not_a_click_past_it(probe) -> None:
     """
     assert probe.get("closedFromImage") is False, (
         "перетягування з аркуша на тло зачинило переглядач")
+
+
+# ── читалка прогону ──────────────────────────────────────────────────────────
+def test_the_run_reader_opens_with_the_sheet(probe) -> None:
+    """Гортач на весь екран мусить відкриватись так само, як перегляд аркушів."""
+    assert probe.get("reader") == 1, (
+        "читалка прогону не відкрилась — а саме нею тепер і читають")
+
+
+def test_the_reader_draws_the_line_boxes_on_the_scan(probe) -> None:
+    """🔴 Головне, заради чого читалка робилась: текст НА СВОЄМУ МІСЦІ.
+
+    Рядок формуляра — короткий шматок усередині графи, і списком під знімком
+    він втрачає єдине, що робить його зрозумілим: де він стояв. Рамки
+    малюються в просторі імен SVG, і саме на цьому читалка падала б мовчки,
+    якби накладку ніхто не виконував.
+
+    ⚠ Порожня фігура серед рамок — законне значення: рядок без обведення її не
+    має, і раннер пише в масив саме `null`, зберігаючи довжину. Тому з двох
+    рамок малюється одна, а нумерація рядків не зсувається.
+    """
+    assert probe.get("shapes") == 1, (
+        f"на скан лягло {probe.get('shapes')} рамок замість однієї — "
+        "накладка або не намалювалась, або порахувала порожню фігуру")

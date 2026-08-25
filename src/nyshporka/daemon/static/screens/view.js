@@ -41,6 +41,7 @@ function lbLabels() {
   return {
     prev: t('view.prev'), next: t('view.next'), close: t('lb.close'),
     fit: t('view.zoom.fit'), keys: t('lb.keys'), loading: t('common.loading'),
+    text: t('lb.text'), notext: t('lb.notext'), alt: t('sift.alt'),
   };
 }
 
@@ -270,10 +271,15 @@ async function viewShot() {
       <img id="stage-img" src="${esc(env.data.image)}" alt="${esc(p.page)}">
       ${stageOverlay(VS.geo)}
     </div></div>`;
-  // ⚠ Слухач на самому знімку, а не на обгортці: обгортку накриває оверлей
-  // рамок, і клік по рядку мусить лишитись кліком по рядку.
+  // Клік по знімку — у читалку. Одним кліком, а не подвійним: це головний
+  // спосіб читати аркуш, і ховати його за жестом, про який ніхто не здогадається,
+  // означає лишити читалку невідкритою.
+  //
+  // ⚠ Слухач на самому знімку, а не на обгортці: обгортку накриває накладка
+  // рамок, і клік по рядку мусить лишитись кліком по рядку — порожні місця
+  // накладки подій не ловлять, тож долітають саме до знімка.
   const shot = box.querySelector('#stage-img');
-  if (shot) shot.addEventListener('dblclick', viewFull);
+  if (shot) shot.addEventListener('click', viewFull);
 }
 
 /**
@@ -423,11 +429,17 @@ async function viewAltLoad() {
 }
 
 /**
- * Повний екран для сторінок прогону.
+ * Читалка аркуша на весь екран.
  *
- * ⚠ Рамок рядків тут немає навмисно: у повному екрані дивляться на ПАПІР —
- * почерк, чорнило, штампи, — а розбір рядків живе поруч із текстом, де його
- * є з чим звіряти.
+ * 🔴 Сюди їде не самий знімок, а знімок РАЗОМ із прочитаним: рамки рядків,
+ * текст кожного рядка і читання другого рушія. Рядок формуляра — короткий
+ * шматок усередині графи, і списком під зображенням він втрачає єдине, що
+ * робить його зрозумілим, — де він стояв. Тому текст спливає над своєю
+ * рамкою, а панель дає весь аркуш підряд.
+ *
+ * ⚠ Три запити на аркуш (знімок, текст, рамки) шлються РАЗОМ, а не по черзі:
+ * послідовно вони склали б трисекундну паузу на кожне гортання, тоді як
+ * найдовший із них однаково впирається в рендер знімка.
  */
 function viewFull() {
   if (!VS.pages.length) {
@@ -439,16 +451,48 @@ function viewFull() {
     count: VS.pages.length,
     index: VS.i,
     labels: lbLabels(),
+    // Гортання в читалці веде за собою екран під нею: вийшовши, людина
+    // лишається на тому аркуші, який дивилась, а не на тому, з якого зайшла.
     onIndex: (k) => { VS.i = k; },
     load: async (k) => {
       const pg = VS.pages[k];
       if (!pg) return null;
-      const env = await callOp('page.view',
-        { run: VS.run, page: pg.page, region: 'page' });
-      if (!env.ok) return { error: env.error || '' };
-      return { image: (env.data || {}).image, label: pg.page };
+      const [shot, text, geo] = await Promise.all([
+        callOp('page.view', { run: VS.run, page: pg.page, region: 'page' }),
+        callOp('page.text', { run: VS.run, page: pg.page }),
+        callOp('page.lines', { run: VS.run, page: pg.page }),
+      ]);
+      if (!shot.ok) return { error: shot.error || '' };
+      const g = (geo.ok && geo.data) || {};
+      const lines = (text.ok && (text.data || {}).lines) || [];
+      return {
+        image: (shot.data || {}).image,
+        label: pg.page,
+        // Порожні рамки — законна відповідь: старі прогони їх не писали, і
+        // читалка тоді просто показує знімок без накладки.
+        size: g.has ? g.size : null,
+        shapes: g.has ? (g.polys || g.boxes || []) : [],
+        lines,
+        alt: await viewAltLines(pg.page, lines.length),
+      };
     },
   });
+}
+
+/**
+ * Читання того самого аркуша другим рушієм — рядок у рядок.
+ *
+ * 🔴 Вирівнювання за номером законне ЛИШЕ тому, що обидва прогони йдуть по
+ * спільному кешу сегментації, тобто ділять ті самі рамки. Різна кількість
+ * рядків означає, що рамки різні, і тоді порівняння за номером показувало б
+ * ЧУЖИЙ рядок — гірше за відсутність порівняння.
+ */
+async function viewAltLines(page, count) {
+  if (!VS.alt || !count) return [];
+  const env = await callOp('page.text', { run: VS.alt.name, page });
+  if (!env.ok) return [];
+  const other = (env.data || {}).lines || [];
+  return other.length === count ? other : [];
 }
 
 Object.assign(ACTIONS, {

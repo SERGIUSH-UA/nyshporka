@@ -88,8 +88,10 @@ const STRINGS = {
     'lb.open.why': 'аркуш на весь екран: масштаб колесом, тягнути мишею, '
       + 'гортати ← → (клавіша F або Enter)',
     'lb.close': 'Закрити',
+    'lb.text': 'Текст аркуша',
+    'lb.notext': 'цей аркуш ще не прочитано машиною',
     'lb.keys': '← → гортати · колесо — масштаб під курсором · тягнути — рухати '
-      + '· 0 вписати · Esc вийти',
+      + '· T текст · 0 вписати · Esc вийти',
     'frames.title': 'Аркуші справи',
     'frames.why': 'Подивитись на те, що завантажено — без жодного прогону. '
       + 'Кадри або сторінки PDF, як їх віддав архів.',
@@ -390,8 +392,10 @@ const STRINGS = {
     'lb.open.why': 'the sheet full screen: wheel to zoom, drag to pan, '
       + '← → to leaf (key F or Enter)',
     'lb.close': 'Close',
-    'lb.keys': '← → leaf · wheel zooms at the cursor · drag to pan · 0 to fit '
-      + '· Esc to leave',
+    'lb.text': 'Sheet text',
+    'lb.notext': 'this sheet has not been read by a machine yet',
+    'lb.keys': '← → leaf · wheel zooms at the cursor · drag to pan · T text '
+      + '· 0 to fit · Esc to leave',
     'frames.title': 'Sheets of the case',
     'frames.why': 'Look at what you have downloaded — with no run at all. '
       + 'Frames or PDF pages, as the archive gave them.',
