@@ -1,0 +1,96 @@
+/** 🔎 Пошук у прочитаному. */
+
+import { t, LANG } from '../core/strings.js';
+import { TOKEN, callOp, SEQ } from '../core/net.js';
+import { esc, el, setView, busy, failure, boxError, busyForm,
+  renderWarnings, renderCoverage, curGen, alive } from '../core/view.js';
+import { SCREENS, ACTIONS } from '../core/registry.js';
+import { SECTIONS, NAV_LABEL, show, renderNav,
+  refreshJobs } from '../core/nav.js';
+import { ST } from '../core/state.js';
+import { ic, eng } from '/ui/icons.js';
+import { swapHtml, skelRows, skelCards } from '/ui/dom.js';
+import { attachCombobox } from '/ui/combobox.js';
+
+
+
+
+SCREENS.search = async () => {
+  setView(`
+    <h2>${t('nav.search')}</h2>
+    <form class="row" data-act="search.run">
+      <input name="q" placeholder="${t('search.q')}" autofocus>
+      <select name="where">
+        <option value="decode">${t('search.where.decode')}</option>
+        <option value="pages">${t('search.where.pages')}</option>
+        <option value="records">${t('search.where.records')}</option>
+      </select>
+      <button type="submit">${t('search.run')}</button>
+    </form>
+    <div id="hits"></div>`);
+};
+
+Object.assign(ACTIONS, {
+  'search.run': async (ev) => {
+    ev.preventDefault();
+    const fd = new FormData(ev.target);
+    const seq = ++SEQ.search;
+    const unlock = busyForm(ev.target);
+    el('hits').innerHTML = `<p class="muted">${t('common.loading')}</p>`;
+    const env = await callOp('search.run',
+      { q: fd.get('q'), where: fd.get('where'), limit: 100 });
+    unlock();
+    if (seq !== SEQ.search) return;
+    if (!env.ok) return boxError('hits', env);
+    const hits = env.data.hits || [];
+    const cov = env.data.coverage || {};
+    // Хіти лишаються під рукою: розбір відкривається з них, а не переповторює
+    // пошук — інакше два екрани показували б різні набори того самого запиту.
+    ST.sift = { hits: hits.filter((h) => h.name && h.page), i: 0,
+             q: String(fd.get('q') || ''), crop: null, ctx: null };
+    el('hits').innerHTML = `
+      ${renderWarnings(env)}
+      ${ST.sift.hits.length
+        ? `<p><button data-act="sift.open">${ic('crop-check', 'ic-sm')}
+             ${t('sift.open')}</button></p>` : ''}
+      <table><tbody>${hits.map((h) => `<tr>
+        <td class="mono">${esc(h.shifra || h.case || h.key || h.name || '')}</td>
+        <td class="mono">${esc(h.page || h.scan || '')}</td>
+        <td>${esc(String(h.matched || h.line || h.text || h.surname || '').slice(0, 120))}</td>
+        <td class="num">${esc(h.score ?? '')}</td>
+        <td>${/* 🔴 Виявити ≠ перевірити: машина подає кандидата, вирішує око.
+                 Доти хіт був рядком таблиці — щоб глянути на нього, треба було
+                 переписати прогін і сторінку в гортач руками, а це та сама
+                 дія, заради якої пошук і робився. */''}
+          ${h.name && h.page
+            ? `<button data-act="hit.eye" data-run="${esc(h.name)}"
+                 data-page="${esc(h.page)}"
+                 data-line="${esc(h.line_index ?? '')}"
+                 title="${t('hit.eye')}">👁</button>` : ''}
+          ${(h.key || h.shifra) && (h.scan || h.page)
+            ? `<button data-act="hit.note" data-case="${esc(h.key || h.shifra)}"
+                 data-scan="${esc(h.scan || h.page)}"
+                 title="${t('hit.note')}">✎</button>` : ''}
+        </td>
+      </tr>`).join('')}</tbody></table>
+      ${cov.runs !== undefined
+        ? `<p class="muted">${t('search.coverage')}: ${cov.runs} ${t('search.runs')}, ${cov.pages} ${t('common.pages')}</p>`
+        : cov.cases !== undefined
+          ? `<p class="muted">${t('search.coverage')}: ${cov.cases} ${t('search.cases')}</p>`
+          : ''}`;
+  },
+
+  // 🔴 Хіт — це кандидат, а не висновок: дивиться око. Доти, щоб глянути на
+  // знайдений рядок, треба було переписати ім'я прогону й номер сторінки в
+  // гортач руками — тобто зробити ту саму роботу, заради якої пошук і є.
+  'hit.eye': async (_ev, elm) => {
+    ST.view = { run: elm.dataset.run, page: elm.dataset.page,
+             line: elm.dataset.line === '' ? null : Number(elm.dataset.line) };
+    await show('view');
+  },
+
+  'hit.note': async (_ev, elm) => {
+    ST.eye = { case: elm.dataset.case, scan: elm.dataset.scan };
+    await show('eye');
+  },
+});

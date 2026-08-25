@@ -9,6 +9,7 @@ import json
 from pathlib import Path
 
 import pytest
+from _front import front_js
 
 from nyshporka.setup import doctor, packs, wizard
 
@@ -372,8 +373,7 @@ def test_search_hit_carries_both_line_numbers(tmp_path: Path, monkeypatch) -> No
     assert text[hit["line_index"]] == hit["line"]
 
     # А кнопка 👁 у фронті мусить передавати саме індекс, не людський номер.
-    js = (Path(HS.__file__).parent / "daemon" / "static" / "app.js").read_text(
-        encoding="utf-8")
+    js = front_js()
     eye = js[js.index('data-act="hit.eye"'):]
     eye = eye[:eye.index("</button>")]
     assert "h.line_index" in eye, "кнопка 👁 знову передає людський номер рядка"

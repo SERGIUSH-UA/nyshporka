@@ -17,6 +17,8 @@ from __future__ import annotations
 
 import re
 
+from _front import front_js
+
 from nyshporka import ui
 from nyshporka.brand import active
 
@@ -167,7 +169,10 @@ def test_hotkeys_call_actions_that_exist() -> None:
     Заразом — екрани: клавіші, приписані екранові, якого немає в навігації,
     лишились би від колишньої розкладки й нічим себе не виказували.
     """
-    app = (ui.ROOT.parent / "daemon" / "static" / "app.js").read_text(encoding="utf-8")
+    # 🔴 Склейка ВСІХ модулів фронту: сам роутер клавіш лишився у вході, а дії
+    # й порядок навігації переїхали в модулі. Читаючи один файл, ця перевірка
+    # не бачила б жодної оголошеної дії — і впала б на кожній клавіші.
+    app = front_js()
     block = re.search(r"const KEYS = \{(.*?)\n\};", app, re.S)
     assert block, "роутер клавіш не знайдено — змінилась форма запису?"
     called = set(re.findall(r"ACTIONS\['([\w.]+)'\]", block.group(1)))

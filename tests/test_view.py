@@ -13,6 +13,7 @@ import json
 from pathlib import Path
 
 import pytest
+from _front import front_js
 
 from nyshporka.htr import view as V
 
@@ -174,8 +175,7 @@ def test_the_viewer_reads_the_same_keys_the_op_returns() -> None:
     """
     import re
 
-    js = (Path(__file__).resolve().parents[1] / "src" / "nyshporka" / "daemon"
-          / "static" / "app.js").read_text(encoding="utf-8")
+    js = front_js()
     block = re.search(r"'view\.open': async.*?\n  \},", js, re.S)
     assert block, "обробник гортача змінився — перевірку треба переписати"
     used = set(re.findall(r"env\.data\.(\w+)", block.group(0)))

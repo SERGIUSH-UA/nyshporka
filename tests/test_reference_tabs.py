@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from _front import front_js
 
 OPS: Any = None
 
@@ -120,8 +121,10 @@ def test_tabs_are_wired_in_the_page_and_the_script():
     порядку навігації, має підпис і має секцію — розрив у будь-якій із трьох
     ланок так само лишає людину без входу.
     """
-    static = Path(__file__).resolve().parents[1] / "src" / "nyshporka" / "daemon" / "static"
-    js = (static / "app.js").read_text(encoding="utf-8")
+    # 🔴 Фронт розкладено на модулі: `NAV_ORDER` живе в ядрі навігації, а
+    # самі екрани — кожен у своєму файлі. Читаючи один `app.js`, ця
+    # перевірка шукала б порядок навігації там, де його вже немає.
+    js = front_js()
 
     from nyshporka.core import sections as S
 

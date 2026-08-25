@@ -21,6 +21,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from _front import front_files, front_js
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src" / "nyshporka"
@@ -61,7 +62,14 @@ def _ops() -> dict[str, object]:
 
 
 def _js() -> str:
-    return (STATIC / "app.js").read_text(encoding="utf-8")
+    """🔴 УСІ модулі фронту, а не самий `app.js`.
+
+    Фронт розкладено на вхід, спільне ядро й модуль на екран. Читаючи один
+    файл, перевірки нижче бачили б лише навігацію та диспетчер — тобто
+    перестали б перевіряти рівно те, заради чого написані, і зробили б це
+    мовчки.
+    """
+    return front_js()
 
 
 def _html() -> str:
@@ -197,9 +205,16 @@ def test_advised_flags_exist_too() -> None:
 def test_every_button_has_a_handler() -> None:
     """Кнопка без обробника мовчить — а мовчання читається як «зламалось»."""
     js = _js()
-    block = re.search(r"const ACTIONS = \{(.*?)\n\};", js, re.S)
-    assert block, "реєстр дій не знайдено — перевірка втратила сенс"
-    handlers = set(re.findall(r"^  '?([\w.]+)'?:", block.group(1), re.M))
+    # 🔴 Блоків реєстрації тепер багато — по одному на модуль екрана, — і
+    # перевірка мусить зібрати ВСІ. Перша редакція шукала єдиний
+    # `const ACTIONS = {…}`; після розкладання фронту на модулі вона знайшла б
+    # порожньо й упала, а знайшовши один блок — мовчки перевіряла б чотири дії
+    # з сорока однієї.
+    blocks = re.findall(r"Object\.assign\(ACTIONS, \{(.*?)\n\}\);", js, re.S)
+    assert blocks, "реєстр дій не знайдено — перевірка втратила сенс"
+    handlers = set()
+    for b in blocks:
+        handlers |= set(re.findall(r"^  '?([\w.]+)'?:", b, re.M))
     used = set(re.findall(r'data-act="([\w.]+)"', _html() + js))
     assert not (used - handlers), f"кнопка без дії: {sorted(used - handlers)}"
     assert not (handlers - used), f"дія без кнопки: {sorted(handlers - used)}"
@@ -272,9 +287,13 @@ def test_frontend_javascript_parses() -> None:
     робить порожню сторінку без єдиної ознаки в тестах, лінті чи типах. Спіймано
     саме так, за годину після того, як перевірку писали.
     """
-    res = subprocess.run(["node", "--check", str(STATIC / "app.js")],
-                         capture_output=True, text=True)
-    assert res.returncode == 0, f"app.js не розбирається:\n{res.stderr[:800]}"
+    bad = []
+    for path in front_files():
+        res = subprocess.run(["node", "--check", str(path)],
+                             capture_output=True, text=True)
+        if res.returncode != 0:
+            bad.append(f"{path.name}:\n{res.stderr[:500]}")
+    assert not bad, "фронт не розбирається:\n" + "\n".join(bad)
 
 
 # ── 7. переклад повний в обидва боки ─────────────────────────────────────────
