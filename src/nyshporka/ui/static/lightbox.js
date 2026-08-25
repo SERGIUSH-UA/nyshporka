@@ -48,12 +48,17 @@ const DEFAULT_LABELS = {
  * @param {Function} o.load    `async (i) => {image, label}`; порожньо — помилка
  * @param {object}   o.labels  підписи (мова — справа того, хто кличе)
  * @param {Function} o.onIndex зворотний виклик при зміні аркуша
- * @returns {{close: Function}}
+ * @returns {{ok: boolean, why?: string, close: Function}}
  */
 export function lightbox({ count, index = 0, load, labels = {}, onIndex } = {}) {
   const L = { ...DEFAULT_LABELS, ...labels };
   const n = Math.max(0, Number(count) || 0);
-  if (!n || typeof load !== 'function') return { close() {} };
+  // 🔴 Мовчазної відмови тут бути не може. Кнопка, яка нічого не робить і
+  // нічого не каже, читається як зламаний застосунок — а найчастіша причина
+  // прозаїчна: показувати ще нічого, бо справу не відкрито. Тому причина
+  // повертається викликачеві, і той зобов'язаний її показати.
+  if (!n) return { ok: false, why: 'empty', close() {} };
+  if (typeof load !== 'function') return { ok: false, why: 'noload', close() {} };
 
   let i = Math.max(0, Math.min(n - 1, Number(index) || 0));
   // 🔴 `z === null` означає «ще не вписували». Перший аркуш вписується сам, а
@@ -250,5 +255,5 @@ export function lightbox({ count, index = 0, load, labels = {}, onIndex } = {}) 
   }
 
   showFrame(i);
-  return { close, show: showFrame };
+  return { ok: true, close, show: showFrame };
 }

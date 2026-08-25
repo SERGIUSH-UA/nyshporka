@@ -171,6 +171,13 @@ function framesBar() {
  * розмитість рівно там, де починається робота.
  */
 function framesFull() {
+  // 🔴 Порожній стан називається вголос. Мовчазне повернення з цієї функції
+  // виглядало б рівно як мертва кнопка — і саме так його й прочитали.
+  if (!FS.frames.length) {
+    const bar = el('fr-bar');
+    if (bar) bar.innerHTML = `<div class="warn">${t('frames.nothing')}</div>` + bar.innerHTML;
+    return;
+  }
   lightbox({
     count: FS.frames.length,
     index: FS.i,

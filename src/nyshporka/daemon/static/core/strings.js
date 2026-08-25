@@ -97,6 +97,7 @@ const STRINGS = {
     'frames.show': 'Показати',
     'frames.none': 'на диску немає жодної справи',
     'frames.empty': 'у цій справі немає аркушів, які можна показати',
+    'frames.nothing': 'спершу відкрийте справу — показувати ще нічого',
     'frames.frompdf': 'сторінка PDF, відрендерена на льоту',
     'frames.wide.on': 'На повну ширину',
     'frames.wide.off': 'Зменшити',
@@ -271,6 +272,7 @@ const STRINGS = {
     'view.next.key': 'клавіша → або PageDown',
     'view.nopage': 'сторінки «{p}» у цьому прогоні немає — показано першу',
     'view.norun': 'у прогоні немає жодної прочитаної сторінки',
+    'view.nothing': 'спершу відкрийте прогін — показувати ще нічого',
     'view.notext': 'текст сторінки порожній',
     'view.noboxes': 'цей прогін не записав рамок рядків — по знімку не клікнути',
     'view.confab': '⚠️ ПІДОЗРА НА ВИГАДКУ: рушій міг дописати правдоподібний '
@@ -397,6 +399,7 @@ const STRINGS = {
     'frames.show': 'Show',
     'frames.none': 'no case on disk',
     'frames.empty': 'this case has no sheets that can be shown',
+    'frames.nothing': 'open a case first — there is nothing to show yet',
     'frames.frompdf': 'a PDF page rendered on the fly',
     'frames.wide.on': 'Full width',
     'frames.wide.off': 'Smaller',
@@ -572,6 +575,7 @@ const STRINGS = {
     'view.next.key': 'key → or PageDown',
     'view.nopage': 'this run has no page "{p}" — showing the first one',
     'view.norun': 'the run has no pages read yet',
+    'view.nothing': 'open a run first — there is nothing to show yet',
     'view.notext': 'the page text is empty',
     'view.noboxes': 'this run wrote no line boxes — the scan cannot be clicked',
     'view.confab': '⚠️ SUSPECTED FABRICATION: the engine may have written a '

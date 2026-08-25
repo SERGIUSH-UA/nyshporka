@@ -128,7 +128,14 @@ def create_app(ws: Workspace | None = None, *, token: str = "") -> FastAPI:
         # `<use href>` до зовнішнього SVG забороняє успадкування currentColor у
         # Chrome, і всі значки стали б чорними — на темному полотні це просто
         # порожні місця. Та сама підстановка є в консолі дослідника.
-        return HTMLResponse(ui.with_sprite(html.replace("{{TOKEN}}", tok)))
+        # 🔴 Сама сторінка теж без кешу. Статику ми вже закрили, але HTML
+        # віддається окремим маршрутом, і без заголовка браузер кешує його
+        # ЕВРИСТИЧНО — на свій розсуд. Тоді після оновлення застосунку
+        # людина дістає стару розмітку (інший токен, інші місця під
+        # модулі) при свіжих модулях, і збій виглядає як завгодно, крім
+        # застарілого кешу.
+        return HTMLResponse(ui.with_sprite(html.replace("{{TOKEN}}", tok)),
+                            headers={"Cache-Control": "no-cache, must-revalidate"})
 
     app.mount("/static", _NoCacheStatic(directory=static_dir), name="static")
 

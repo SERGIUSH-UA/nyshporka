@@ -430,6 +430,11 @@ async function viewAltLoad() {
  * є з чим звіряти.
  */
 function viewFull() {
+  if (!VS.pages.length) {
+    const bar = el('view-bar');
+    if (bar) bar.innerHTML = `<div class="warn">${t('view.nothing')}</div>` + bar.innerHTML;
+    return;
+  }
   lightbox({
     count: VS.pages.length,
     index: VS.i,
