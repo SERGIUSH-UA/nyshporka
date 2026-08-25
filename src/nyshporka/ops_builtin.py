@@ -459,6 +459,35 @@ class SearchArgs(BaseModel):
     limit: int = Field(default=100, ge=1, le=500)
 
 
+class SweepArgs(BaseModel):
+    q: str = Field(description="прізвище або слово")
+    thresh: int = Field(default=80, ge=50, le=100)
+    context: int = Field(default=1, ge=0, le=3)
+    limit: int = Field(default=100, ge=1, le=500)
+
+
+# `agent=False`: агентові довга робота через чергу недоступна — черга живе в
+# процесі застосунку. Йому лишається `search.run`, і це правильно: він працює
+# у межах справи, а не чеше корпус.
+@op("search.sweep", summary="Прочесати ВСЕ прочитане — робота в черзі",
+    args=SweepArgs, mutates=False, long=True, agent=False, section="research")
+def search_sweep(a: SweepArgs) -> Envelope:
+    """Той самий пошук, що `search.run`, але як робота з видимим поступом.
+
+    🔴 Навіщо друга операція, коли пошук уже є. Різниця не в тому, ЩО робиться,
+    а скільки це триває: у межах справи пошук — це частка секунди, по всьому
+    корпусу — хвилини. Дві хвилини синхронного запиту виглядають у браузері
+    рівно як зависання: сторінка не відповідає й не каже, чому.
+
+    ⚠ Тіло — той самий `htr_store.search`. Другої реалізації пошуку немає й
+    бути не може: розійшовшись, вони давали б різні відповіді на те саме
+    питання залежно від того, звідки спитали.
+    """
+    return search_run(SearchArgs(q=a.q, where="decode", case="",
+                                 thresh=a.thresh, context=a.context,
+                                 limit=a.limit))
+
+
 @op("search.run", summary="Знайти прізвище в тому, що вже прочитано",
     args=SearchArgs, mutates=False, section="research")
 def search_run(a: SearchArgs) -> Envelope:

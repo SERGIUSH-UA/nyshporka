@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -77,9 +78,9 @@ async def _start_generic(bus: JobBus, op_name: str,
     кнопка малювалась, а виклик відмовляв — тобто дефект був не в тому, що
     роботу не зроблено, а в тому, що вхід у неї вів у глухий кут.
 
-    ⚠ Прогресу тут немає й бути не може: тіло операції — звичайна функція, вона
-    не звітує про кроки. Тому робота показується як «іде», а не смугою; це
-    чесніше за смугу, яка не рухається.
+    ⚠ Поступ тут БУВАЄ, але не завжди: тіло операції звітує через
+    `core.progress.report`, якщо має що сказати. Мовчазна операція
+    показується як «іде», а не смугою — це чесніше за смугу, яка не рухається.
     """
     from nyshporka import ops as O
     from nyshporka.core.jobs import JobState
@@ -111,11 +112,35 @@ async def _start_generic(bus: JobBus, op_name: str,
 async def _run_generic(bus: JobBus, job: JobRecord, op_name: str,
                        payload: dict[str, Any]) -> None:
     from nyshporka import ops as O
-    from nyshporka.core.jobs import JobState
+    from nyshporka.core import progress
+    from nyshporka.core.jobs import JobState, Progress
 
     await bus.update(job.id, state=JobState.RUNNING)
+
+    # 🔴 Тіло операції крутиться в ОКРЕМОМУ потоці, а черга живе в циклі подій.
+    # Переносить це на себе приймач, а не той, хто звітує: інакше кожна
+    # операція мусила б знати про цикл, тобто про демона.
+    loop = asyncio.get_running_loop()
+    last = 0.0
+
+    def _tick(i: int, n: int, note: str) -> None:
+        nonlocal last
+        now = time.monotonic()
+        # Тротлінг: без нього тисяча прогонів дасть тисячу подій у журналі, і
+        # він витіснить усе інше. Урок уже засвоєний на завантажувачі.
+        if now - last < 0.25 and i != n:
+            return
+        last = now
+        loop.call_soon_threadsafe(
+            lambda: _keep(asyncio.create_task(bus.update(
+                job.id, progress=Progress(i=i, n=n, basis=note or "кроків")))))
+
+    def _work() -> Any:
+        with progress.sink(_tick):
+            return O.call(op_name, dict(payload or {}))
+
     try:
-        env = await asyncio.to_thread(O.call, op_name, dict(payload or {}))
+        env = await asyncio.to_thread(_work)
     except Exception as exc:
         await bus.update(job.id, state=JobState.ERROR,
                          error=f"{type(exc).__name__}: {exc}")
@@ -126,7 +151,9 @@ async def _run_generic(bus: JobBus, job: JobRecord, op_name: str,
     if not env.ok:
         await bus.update(job.id, state=JobState.ERROR, error=env.error or "не вийшло")
         return
-    await bus.update(job.id, state=JobState.DONE, result=env.as_dict().get("data"))
+    got = env.as_dict()
+    await bus.update(job.id, state=JobState.DONE, result=got.get("data"),
+                     warnings=got.get("warnings") or [])
 
 
 async def _start_build(bus: JobBus, payload: dict[str, Any]) -> JobRecord:

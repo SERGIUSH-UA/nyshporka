@@ -233,10 +233,13 @@ def ensure_all(runs: list[str], *,
     запустив, мусить бачити, де воно зараз, — інакше довга робота нічим не
     відрізняється від зависання.
     """
+    from nyshporka.core import progress as P
+
     total = len(runs)
     for i, run in enumerate(runs, 1):
         if progress:
             progress(i, total, run)
+        P.report(i, total, "прогонів")
         if ensure(run):
             yield run
 
@@ -318,6 +321,8 @@ def sweep(stems: list[str], runs: list[str], *, thresh: int = 78,
     без індексу (порожня тека, збій читання) прогін у знаменник не йде, інакше
     нуль виглядав би повнішим, ніж він є.
     """
+    from nyshporka.core import progress as P
+
     stale = [r for r in runs if not is_fresh(r)]
     build_missing = 0 < len(stale) <= max(0, build_budget)
     hits: list[dict[str, Any]] = []
@@ -329,6 +334,7 @@ def sweep(stems: list[str], runs: list[str], *, thresh: int = 78,
             break
         if progress:
             progress(i, total, run)
+        P.report(i, total, "прогонів")
         ready = ensure(run) if build_missing else is_fresh(run)
         if not ready:
             missing += 1

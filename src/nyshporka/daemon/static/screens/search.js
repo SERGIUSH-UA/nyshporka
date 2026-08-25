@@ -1,7 +1,7 @@
 /** 🔎 Пошук у прочитаному. */
 
 import { t, LANG } from '../core/strings.js';
-import { TOKEN, callOp, SEQ } from '../core/net.js';
+import { TOKEN, callOp, SEQ, FINAL_STATES } from '../core/net.js';
 import { esc, el, setView, busy, failure, boxError, busyForm,
   renderWarnings, renderCoverage, curGen, alive } from '../core/view.js';
 import { SCREENS, ACTIONS } from '../core/registry.js';
@@ -66,6 +66,44 @@ async function searchIndexState() {
         .replace('{all}', d.runs).replace('{mb}', mb.toFixed(0)))}</p>`;
 }
 
+/**
+ * Прочесати все прочитане — роботою в черзі, з видимим поступом.
+ *
+ * 🔴 Поступ тут не оздоблення. Робота триває хвилини, і без числа вона нічим
+ * не відрізняється від зависання — а спинити те, чого не видно, неможливо.
+ *
+ * Повертає конверт із результатом роботи, тобто рівно те саме, що віддав би
+ * синхронний пошук: екран далі не знає, яким шляхом прийшла відповідь.
+ */
+async function sweepJob(q) {
+  const started = await callOp('search.sweep', { q, limit: 100, context: 1 });
+  if (!started.ok) return started;
+  const id = (started.data || {}).job_id || '';
+  const box = el('hits');
+  for (;;) {
+    const res = await fetch('/api/jobs');
+    const data = await res.json().catch(() => ({}));
+    const job = (data.jobs || []).find((x) => x.id === id);
+    if (!job) return { ok: false, error: t('search.sweep.lost') };
+    if (box) {
+      const p = job.progress || {};
+      box.innerHTML = `<div class="warn next">
+        <button data-act="jobs.cancel" data-job="${esc(id)}">${t('jobs.cancel')}</button>
+        <span>${esc(t('search.sweep.going')
+          .replace('{i}', p.i || 0).replace('{n}', p.n || 0))}</span></div>`;
+    }
+    if (FINAL_STATES.includes(job.state)) {
+      if (job.state !== 'done') {
+        return { ok: false, error: job.error || job.state };
+      }
+      // 🔴 Застереження роботи не губляться: саме в них живе знаменник —
+      // скільки прогонів прочесано й скільки лишилось поза індексом.
+      return { ok: true, data: job.result || {}, warnings: job.warnings || [] };
+    }
+    await new Promise((r) => setTimeout(r, 900));
+  }
+}
+
 Object.assign(ACTIONS, {
   /**
    * Зібрати індекс прочитаного.
@@ -89,11 +127,19 @@ Object.assign(ACTIONS, {
     // рядок сам по собі не розрізняє прізвищ зі спільним коренем, бо ім'я
     // стоїть вище, а роль нижче. Разом із вікном приходить читання того самого
     // рядка другим рушієм — те, чого другим запитом не дістати взагалі.
-    const env = await callOp('search.run',
-      { q: fd.get('q'), where: fd.get('where'), limit: 100, context: 1,
-        case: String(fd.get('case') || '') });
+    const only = String(fd.get('case') || '');
+    const where = String(fd.get('where') || 'decode');
+    // 🔴 Той самий пошук, але двома шляхами, і межа не в тому, ЩО робиться, а
+    // скільки це триває. У межах справи — частка секунди, тож синхронно. По
+    // всьому прочитаному — хвилини, і синхронний запит виглядав би в браузері
+    // рівно як зависання: сторінка не відповідає й не каже, чому.
+    const env = (!only && where === 'decode')
+      ? await sweepJob(String(fd.get('q') || ''))
+      : await callOp('search.run',
+        { q: fd.get('q'), where, limit: 100, context: 1, case: only });
     unlock();
     if (seq !== SEQ.search) return;
+    if (!env) return undefined;                // роботу спинили
     if (!env.ok) return boxError('hits', env);
     const hits = env.data.hits || [];
     const cov = env.data.coverage || {};

@@ -84,6 +84,13 @@ class JobRecord:
     cfg: dict[str, Any] = field(default_factory=dict)
     progress: Progress = field(default_factory=Progress)
     result: dict[str, Any] | None = None
+    #: Застереження операції, яка цю роботу виконала.
+    #:
+    #: 🔴 Окремим полем, а не всередині `result`. Саме тут живе знаменник —
+    #: «прочесано 876 із 1159», «зріз застарів», — і без нього результат довгої
+    #: роботи виглядає повнішим, ніж він є. Доти черга зберігала лише `data`,
+    #: тобто рівно ту половину відповіді, яку не можна читати саму.
+    warnings: list[dict[str, Any]] = field(default_factory=list)
     error: str = ""
     idempotency_key: str = ""
     created: float = field(default_factory=time.time)

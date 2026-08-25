@@ -8,6 +8,7 @@
 """
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import pytest
@@ -34,10 +35,14 @@ def ws(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Workspace:
     # першому імпорті — тобто на просторі ІНШОГО тесту. Свіжий простір без цієї
     # підміни показував би чужі справи, і перевірка «порожньо, а не помилка»
     # ловила б зразкову справу з сусіднього тесту.
-    from nyshporka.cases import db as DB
-
-    monkeypatch.setattr(DB, "DB_PATH", tmp_path / "data" / "derived"
-                        / "case_index.sqlite")
+    #
+    # ⚠ Лише якщо модуль УЖЕ завантажений. Імпортувати його тут означало б
+    # потягнути за собою резолвер простору — а простору в цю мить ще немає, і
+    # фікстура падала б до першого рядка тесту.
+    db = sys.modules.get("nyshporka.cases.db")
+    if db is not None:
+        monkeypatch.setattr(db, "DB_PATH", tmp_path / "data" / "derived"
+                            / "case_index.sqlite")
     return Workspace(root=tmp_path, name="тест", origin="test")
 
 
