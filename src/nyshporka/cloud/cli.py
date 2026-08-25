@@ -11,12 +11,12 @@ fetch | verify | stop`.
 """
 from __future__ import annotations
 
-import json as _json
-from pathlib import Path
-
 import typer
 
 from nyshporka import brand
+from nyshporka.cloud.base import Box, CloudError
+from nyshporka.cloud.plan import CloudPlan
+from nyshporka.cloud.state import RunState
 
 app = typer.Typer(help="Прогін справи на іншій машині.", no_args_is_help=True)
 hosts_app = typer.Typer(help="Машини, на яких можна читати.", no_args_is_help=True)
@@ -29,7 +29,30 @@ def _say(text: str) -> None:
     console.print(text)
 
 
-def _need_run(run_id: str) -> "object":
+def _plural(n: int, one: str, few: str, many: str) -> str:
+    """«1 процес · 2 процеси · 5 процесів». Число тут бачать щоразу."""
+    n = abs(int(n))
+    if n % 10 == 1 and n % 100 != 11:
+        return one
+    if 2 <= n % 10 <= 4 and not 12 <= n % 100 <= 14:
+        return few
+    return many
+
+
+def _size(nbytes: int) -> str:
+    """Обсяг у тих одиницях, у яких він читається.
+
+    «0.00 ГБ» на дрібній справі — не число, а шум: воно не відрізняє двадцяти
+    кадрів від двохсот, а саме за обсягом обирається канал передачі.
+    """
+    if nbytes >= 1_000_000_000:
+        return f"{nbytes / 1e9:.2f} ГБ"
+    if nbytes >= 1_000_000:
+        return f"{nbytes / 1e6:.0f} МБ"
+    return f"{nbytes / 1e3:.0f} КБ"
+
+
+def _need_run(run_id: str) -> RunState:
     """Захід за іменем, або єдиний незавершений.
 
     🔴 Коли незавершених кілька — відмова з переліком, а не «візьму перший».
@@ -182,12 +205,9 @@ def hosts_storage(
 
 
 # ── план ─────────────────────────────────────────────────────────────────────
-def _print_plan(p: "object") -> None:
-    from nyshporka.cloud.plan import CloudPlan
-
-    assert isinstance(p, CloudPlan)
+def _print_plan(p: CloudPlan) -> None:
     console.print(f"[bold]{p.case_dir.name}[/bold] · {p.frames} кадрів · "
-                  f"{p.bytes_in / 1e9:.2f} ГБ")
+                  f"{_size(p.bytes_in)}")
     console.print(f"  письмо : {p.script}")
     console.print(f"  модель : {p.model.name}"
                   + (f" + {p.voice.name}" if p.voice else " (один голос)"))
@@ -196,8 +216,10 @@ def _print_plan(p: "object") -> None:
     console.print(f"  вихід  : {p.out_dir}")
     if p.sizing is not None:
         s = p.sizing
-        console.print(f"  машина : {s.cores:g} ядер · {s.shards} процесів"
-                      f" [muted](більше не дає: {s.capped_by or '—'})[/muted]")
+        console.print(
+            f"  машина : {s.cores:g} {_plural(int(s.cores), 'ядро', 'ядра', 'ядер')}"
+            f" · {s.shards} {_plural(s.shards, 'процес', 'процеси', 'процесів')}"
+            f" [muted](більше не дає: {s.capped_by or '—'})[/muted]")
         console.print(f"  темп   : ~{s.pages_per_hour:.0f} стор/год "
                       f"[muted](тисне: {s.limited_by})[/muted]")
         console.print(f"  час    : ~{p.hours:.1f} год"
@@ -232,6 +254,7 @@ def cmd_plan(
     except PL.PlanError as exc:
         console.print(f"[err]{exc}[/err]")
         raise typer.Exit(code=1) from None
+    known_host = True
     if host:
         from nyshporka.cloud.run import _backend
 
@@ -239,11 +262,21 @@ def cmd_plan(
             box = _backend(backend).acquire(p.need, target=host)
             p = PL.with_box(p, box)
         except Exception as exc:
-            console.print(f"[warn]⚠ машину описати не вдалось: {exc}[/warn]")
+            known_host = False
+            console.print(f"[err]🔴 {exc}[/err]")
     if as_json:
-        console.print_json(data=p.as_dict())
+        data = p.as_dict()
+        data["host_known"] = known_host
+        console.print_json(data=data)
         return
     _print_plan(p)
+    # 🔴 Не радимо запуск на машині, якої немає. Порада, яка не спрацює,
+    # гірша за її відсутність: людина виконає її, дістане ту саму відмову й
+    # шукатиме причину в справі, а не в переліку машин.
+    if not known_host:
+        console.print("\n[warn]⚠ план порахований без машини. Спершу додайте "
+                      "її: nysh cloud hosts add <ім'я> <user@host>[/warn]")
+        return
     console.print(f"\n[muted]запустити: nysh cloud start {case_dir}"
                   + (f" --host {host}" if host else "") + "[/muted]")
 
@@ -280,10 +313,7 @@ def cmd_prepare(
         raise typer.Exit(code=1)
 
 
-def _workdir_of(box: "object") -> str:
-    from nyshporka.cloud.base import Box
-
-    assert isinstance(box, Box)
+def _workdir_of(box: Box) -> str:
     raw = box.meta.get("host") if isinstance(box.meta, dict) else None
     if isinstance(raw, dict) and raw.get("workdir"):
         return str(raw["workdir"]).rstrip("/")
@@ -319,7 +349,7 @@ def cmd_start(
         raise typer.Exit(code=1) from None
     try:
         st = RUN.start(p, workers=shards, seg_height=seg_height, on_line=_say)
-    except RUN.CloudError as exc:
+    except CloudError as exc:
         console.print(f"[err]{exc}[/err]")
         raise typer.Exit(code=1) from None
     console.print(f"\nзахід [bold]{st.run_id}[/bold] · {st.human_phase()}")
@@ -353,14 +383,13 @@ def cmd_state(
         return
 
     st = _need_run(run_id)
-    assert isinstance(st, ST.RunState)
     pulse = None
     if st.phase in ("running", "uploading") and st.box:
         try:
             pulse = RUN.poll(st)
             st.pages_done = pulse.pages_done
             ST.save(st)
-        except RUN.CloudError as exc:
+        except CloudError as exc:
             console.print(f"[warn]⚠ машина не відповідає: {exc}[/warn]")
     if as_json:
         data = st.as_dict()
@@ -394,13 +423,11 @@ def cmd_state(
 def cmd_fetch(run_id: str = typer.Argument("")) -> None:
     """Забрати результат. Повторний виклик безпечний і докачує."""
     from nyshporka.cloud import run as RUN
-    from nyshporka.cloud import state as ST
 
     st = _need_run(run_id)
-    assert isinstance(st, ST.RunState)
     try:
         out = RUN.fetch(st, on_line=_say)
-    except RUN.CloudError as exc:
+    except CloudError as exc:
         console.print(f"[err]{exc}[/err]")
         raise typer.Exit(code=1) from None
     console.print(f"✅ у {out}")
@@ -417,11 +444,9 @@ def cmd_verify(
     🔴 Приймач — диск, а не код повернення прогону: є клас відмов, за якого
     лог обривається, перелік збоїв порожній, а прогін виглядає успішним.
     """
-    from nyshporka.cloud import state as ST
     from nyshporka.cloud import verify as V
 
     st = _need_run(run_id)
-    assert isinstance(st, ST.RunState)
     st.enter("verifying")
     got = V.verify(st.out_dir, case_dir=st.case_dir,
                    expected_hint=st.frames_total)
@@ -460,13 +485,11 @@ def cmd_stop(
     дія, але між ними лежить єдина точка, у якій ще можна врятувати роботу.
     """
     from nyshporka.cloud import run as RUN
-    from nyshporka.cloud import state as ST
 
     st = _need_run(run_id)
-    assert isinstance(st, ST.RunState)
     try:
         RUN.release(st, force=force, on_line=_say)
-    except RUN.CloudError as exc:
+    except CloudError as exc:
         console.print(f"[err]{exc}[/err]")
         raise typer.Exit(code=2) from None
     console.print(f"✅ {st.run_id} закрито")

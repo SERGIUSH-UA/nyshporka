@@ -216,6 +216,10 @@ const STRINGS = {
     'case.why': 'Без шифри тека лишається купою файлів: немає ні обліку прочитаного, ні можливості послатись на знахідку.',
     'nav.runs': 'Прогони',
     'runs.title': 'Прогони читання',
+    'runs.st.done': 'готово', 'runs.st.going': 'триває',
+    'runs.col.state': 'стан', 'runs.col.engine': 'рушій',
+    'runs.col.model': 'модель', 'runs.col.pages': 'сторінок',
+    'runs.col.cov': 'покриття', 'runs.col.when': 'оновлено',
     'runs.why': 'Що ця машина вже прочитала — і чи покрите письмо кожної книги. '
       + 'Прогони згруповані за справою: два прогони однієї книги мусять стояти поруч.',
     'runs.q': 'шифра, назва, модель або тека',
@@ -491,6 +495,10 @@ const STRINGS = {
     'case.why': 'Without a reference the folder stays a pile of files: no record of what was read, no way to cite a finding.',
     'nav.runs': 'Runs',
     'runs.title': 'Reading runs',
+    'runs.st.done': 'done', 'runs.st.going': 'running',
+    'runs.col.state': 'state', 'runs.col.engine': 'engine',
+    'runs.col.model': 'model', 'runs.col.pages': 'pages',
+    'runs.col.cov': 'coverage', 'runs.col.when': 'updated',
     'runs.why': 'What this machine has already read — and whether each book\'s '
       + 'script is covered. Runs are grouped by case: two runs of one book '
       + 'belong side by side.',

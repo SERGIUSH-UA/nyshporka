@@ -36,6 +36,14 @@ PAGES_PER_HOUR_PER_SHARD = 250.0
 #: Стеля всього конвеєра — далі впирається вже читання й запис.
 PIPELINE_MAX_PAGES_PER_HOUR = 4500.0
 
+#: Скільки сторінок мусить дістатись шардові, щоб він себе окупив.
+#: 🔴 Кожен процес платить холодний старт — завантаження ваг у пам'ять карти,
+#: прогрів. На справі з дванадцяти кадрів вісім процесів дістануть по півтори
+#: сторінки кожен, тобто весь захід буде складатись із самих накладних. Число
+#: береться з того самого боку, що й решта профілю: краще недорозбити, ніж
+#: платити за розбиття більше, ніж за роботу.
+MIN_PAGES_PER_SHARD = 8
+
 
 @dataclass(frozen=True)
 class EngineProfile:
@@ -93,7 +101,7 @@ class SizingError(ValueError):
 
 def plan_sizing(*, cores: float, vram_gb_min: float, gpus: int = 1,
                 profile: EngineProfile = DEFAULT_PROFILE,
-                gb_per_shard: float | None = None,
+                gb_per_shard: float | None = None, pages: int = 0,
                 shards: int = 0, max_shards: int = 0) -> Sizing:
     """Скільки шардів витримає ця машина.
 
@@ -119,6 +127,9 @@ def plan_sizing(*, cores: float, vram_gb_min: float, gpus: int = 1,
     limits: list[tuple[int, str]] = [(by_cores, "ядра"), (ceiling, "стеля профілю")]
     if vram_gb_min > 0:
         limits.append((by_vram, "пам'ять карти"))
+    if pages > 0:
+        # Розбиття, яке не окупається обсягом, — це не повільніше, це дорожче.
+        limits.append((max(1, pages // MIN_PAGES_PER_SHARD), "обсяг справи"))
     cap, capped_by = min(limits, key=lambda p: p[0])
     cap = max(cap, 1)
 

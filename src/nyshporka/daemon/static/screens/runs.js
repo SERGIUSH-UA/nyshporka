@@ -64,7 +64,9 @@ async function runsLoad(full = false) {
     return;
   }
 
-  const engines = [...new Set(runs.map((r) => r.engine_id).filter(Boolean))];
+  const engines = [...new Set(runs.flatMap((r) =>
+    (r.engine_ids && r.engine_ids.length ? r.engine_ids
+      : [r.engine_id])).filter(Boolean))];
   const opt = (v, label, cur) =>
     `<option value="${esc(v)}"${v === cur ? ' selected' : ''}>${esc(label)}</option>`;
 
@@ -93,7 +95,9 @@ async function runsLoad(full = false) {
 }
 
 function runsMatch(r) {
-  if (RUNS.engine && (r.engine_id || '') !== RUNS.engine) return false;
+  const ids = r.engine_ids && r.engine_ids.length
+    ? r.engine_ids : [r.engine_id].filter(Boolean);
+  if (RUNS.engine && !ids.includes(RUNS.engine)) return false;
   if (RUNS.state === 'done' && !r.done) return false;
   if (RUNS.state === 'going' && r.done) return false;
   if (RUNS.state === 'orphan' && r.case_key) return false;
@@ -127,24 +131,32 @@ function runsGroup(runs) {
 }
 
 function runsRow(r) {
-  const badge = r.engine_id ? eng(r.engine_id, false, LANG) : '';
-  const mark = r.done ? '✅' : '▶';
+  // 🔴 Бейджі ВСІХ рушіїв прогону. Прогін двома голосами пише обидві моделі
+  // одним полем через «+», і показавши лише перший, ми сказали б, що письмо
+  // покрите наполовину — тобто порадили б прогнати те, що вже прогнали.
+  const ids = r.engine_ids && r.engine_ids.length
+    ? r.engine_ids : [r.engine_id].filter(Boolean);
+  const badges = ids.map((x) => eng(x, false, LANG)).join('');
+  const state = r.done
+    ? `<span class="run-state">✅ ${t('runs.st.done')}</span>`
+    : `<span class="run-state">▶ ${t('runs.st.going')}</span>`;
   // 🔴 Відсоток лише зі справжнім знаменником. Немає кадрів справи — друкуємо
   // самі сторінки: покриття, порахане від себе самого, завжди дорівнює 100%
   // і читається як «прочитано все».
   const n = Number(r.frames || 0);
-  const cov = n ? `<td class="num">${Math.round(100 * (r.pages_done || 0) / n)}%</td>`
-                : `<td class="num muted" title="${esc(t('runs.nodenom'))}">—</td>`;
+  const cov = n
+    ? `<td class="num">${Math.round(100 * (r.pages_done || 0) / n)}%</td>`
+    : `<td class="num dim" title="${esc(t('runs.nodenom'))}">—</td>`;
   const fail = r.failed
     ? `<span class="warn-inline" title="${esc(t('runs.failed'))}">✗${r.failed}</span>`
     : '';
   return `<tr>
-    <td>${mark} ${badge}</td>
+    <td>${state}</td>
+    <td>${badges}</td>
     <td class="mono">${esc(r.model || '')}</td>
-    <td class="num">${esc(r.pages_done || 0)}${n ? ` / ${esc(n)}` : ''}</td>
+    <td class="num">${esc(r.pages_done || 0)}${n ? ` / ${esc(n)}` : ''} ${fail}</td>
     ${cov}
-    <td>${fail}</td>
-    <td class="mono dim">${esc((r.updated || '').slice(0, 16))}</td>
+    <td class="mono dim">${esc((r.updated || '').slice(0, 10))}</td>
     <td><button class="ctl-sm" data-act="runs.open" data-arg="${esc(r.name)}"
       title="${esc(t('runs.open'))}">${ic('page', 'ic-o ic-sm')}</button></td>
   </tr>`;
@@ -152,13 +164,21 @@ function runsRow(r) {
 
 function runsGroupHtml(g) {
   const n = g.frames || 0;
-  const gapline = runsGap(g);
   return `<section class="run-group" data-case="${esc(g.key)}">
-    <h3 class="mono">${esc(g.shifra || g.key)}
-      <span class="dim">${esc((g.title || '').slice(0, 70))}</span>
-      ${n ? `<span class="dim">· ${esc(n)} ${t('common.frames')}</span>` : ''}</h3>
-    <table><tbody>${g.runs.map(runsRow).join('')}</tbody></table>
-    ${gapline}
+    <h3>
+      <span class="shifra">${esc(g.shifra || g.key)}</span>
+      <span class="name" title="${esc(g.title || '')}">${esc(g.title || '')}</span>
+      ${n ? `<span class="frames dim">${esc(n)} ${t('common.frames')}</span>` : ''}
+    </h3>
+    <table><thead><tr>
+      <th>${t('runs.col.state')}</th><th>${t('runs.col.engine')}</th>
+      <th>${t('runs.col.model')}</th>
+      <th class="num">${t('runs.col.pages')}</th>
+      <th class="num">${t('runs.col.cov')}</th>
+      <th>${t('runs.col.when')}</th><th></th>
+    </tr></thead>
+    <tbody>${g.runs.map(runsRow).join('')}</tbody></table>
+    ${runsGap(g)}
   </section>`;
 }
 
@@ -170,7 +190,14 @@ function runsGroupHtml(g) {
  * знімається. Тому тут три РІЗНІ речення, а не спільне «щось не так».
  */
 function runsGap(g) {
-  const ids = new Set(g.runs.map((r) => r.engine_id).filter(Boolean));
+  // 🔴 Рахуємо по ВСІХ рушіях кожного прогону, а не по головному. Прогін
+  // «Писар + Дяк» покриває два — і зведений до одного, він давав пораду
+  // прогнати другий голос, який уже прогнали.
+  const ids = new Set();
+  for (const r of g.runs) {
+    for (const x of (r.engine_ids && r.engine_ids.length
+      ? r.engine_ids : [r.engine_id])) if (x) ids.add(x);
+  }
   const scripts = new Set(g.runs.map((r) => r.script).filter(Boolean));
   if (ids.size >= 2) {
     return `<p class="dim">🤝 ${t('runs.gap.covered')}</p>`;

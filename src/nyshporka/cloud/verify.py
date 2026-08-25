@@ -179,8 +179,6 @@ def verify(out_dir: Path | str, *, case_dir: Path | str = "",
     frames = frames_in(Path(case_dir)) if case_dir else []
     meta = read_meta(out)
     meta_total = int(meta.get("frames_total") or 0)
-    meta_pages = meta.get("pages")
-    meta_done = len(meta_pages) if isinstance(meta_pages, dict) else 0
 
     dens = {"кадри": len(frames), "мета прогону": meta_total,
             "підказка плану": int(expected_hint or 0)}

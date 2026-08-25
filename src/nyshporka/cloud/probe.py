@@ -134,9 +134,9 @@ def parse(lines: list[str]) -> Probe:
     allowed = 0.0
     v2 = kv.get("cgroup_v2", "")
     if v2 and not v2.startswith("max"):
-        quota, _, period = v2.partition(" ")
-        per = _num(period) or 100000.0
-        allowed = _num(quota) / per if per else 0.0
+        raw_quota, _, raw_period = v2.partition(" ")
+        period = _num(raw_period) or 100000.0
+        allowed = _num(raw_quota) / period if period else 0.0
     elif kv.get("cfs_quota"):
         quota = _num(kv["cfs_quota"])
         period = _num(kv.get("cfs_period", "100000")) or 100000.0

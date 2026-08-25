@@ -101,6 +101,18 @@ class Need:
                     prefer_cores=self.prefer_cores)
 
 
+def _as_float(value: object, default: float = 0.0) -> float:
+    """Число з нетипізованого поля. Не число — `default`, а не виняток."""
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value.strip())
+        except ValueError:
+            return default
+    return default
+
+
 @dataclass(frozen=True)
 class Box:
     """Машина, на якій буде прогін, — якою її ОБІЦЯЄ бекенд.
@@ -133,16 +145,23 @@ class Box:
 
     @staticmethod
     def from_dict(d: dict[str, object]) -> Box:
+        """Відновити машину зі стану заходу.
+
+        🔴 Числа читаються обережно, бо джерело — файл на диску, який пережив
+        і зміну версії, і правку руками. Машину відновлюють саме тоді, коли її
+        треба ЗВІЛЬНИТИ, тож виняток на кривому полі означав би рахунок за
+        живу оренду, якої нема чим погасити.
+        """
         meta = d.get("meta")
         return Box(
             id=str(d.get("id") or ""), backend=str(d.get("backend") or ""),
             label=str(d.get("label") or ""),
-            cores=float(d.get("cores") or 0.0),
-            vram_gb=float(d.get("vram_gb") or 0.0),
-            ram_gb=float(d.get("ram_gb") or 0.0),
-            disk_gb=float(d.get("disk_gb") or 0.0),
-            gpus=int(d.get("gpus") or 1),
-            price_usd_h=(float(d["price_usd_h"])       # type: ignore[arg-type]
+            cores=_as_float(d.get("cores")),
+            vram_gb=_as_float(d.get("vram_gb")),
+            ram_gb=_as_float(d.get("ram_gb")),
+            disk_gb=_as_float(d.get("disk_gb")),
+            gpus=int(_as_float(d.get("gpus")) or 1),
+            price_usd_h=(_as_float(d.get("price_usd_h"))
                          if d.get("price_usd_h") is not None else None),
             meta=dict(meta) if isinstance(meta, dict) else {})
 

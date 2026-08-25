@@ -118,7 +118,12 @@ def build(case_dir: str | Path, *, backend: str = "ssh", target: str = "",
     from nyshporka.cloud.state import run_id_for
     from nyshporka.cloud.verify import frames_in
     from nyshporka.core.workspace import workspace
-    from nyshporka.htr.run import ReadError, case_key_for, guess_script, pick_model
+    from nyshporka.htr.run import (
+        ReadError,
+        case_key_for,
+        guess_script_full,
+        pick_model,
+    )
 
     case = Path(case_dir).expanduser().resolve()
     if not case.is_dir():
@@ -134,7 +139,18 @@ def build(case_dir: str | Path, *, backend: str = "ssh", target: str = "",
                 f"підтеку або зберіть кадри в одну пласку теку.")
         raise PlanError(f"у теці {case} немає зображень сторінок")
 
-    scr = guess_script(case, script)
+    guess = guess_script_full(case, script)
+    scr = guess.script
+    if scr == "unknown":
+        # 🔴 «Не знаю» — повноцінна відповідь, і для хмари вона дорожча, ніж
+        # для локального читання. Мовчазне «нехай буде кирилиця» коштує тут не
+        # лише ночі прогону, а й заливки гігабайтів та оренди машини — заради
+        # теки правдоподібного сміття, бо невідповідність рушія письму не дає
+        # збою: текст виходить, впевненість не падає.
+        raise PlanError(
+            f"письмо справи не визначається: {guess.why} Вкажіть його явно — "
+            f"`--script cyrillic` або `--script latin`. Вгадати тут не можна: "
+            f"помилка дає не збій, а осмислене на вигляд сміття.")
     try:
         model, voice = pick_model(scr, second_voice=second_voice)
     except ReadError as exc:
@@ -153,9 +169,11 @@ def build(case_dir: str | Path, *, backend: str = "ssh", target: str = "",
             "шифри справи не знайдено — прогін ляже «нічиїм», і облік його не "
             "побачить. Покладіть `_source.json` у теку справи або передайте "
             "`--case-key`")
-    if not script:
+    if guess.is_guess:
+        # Не «чи передали прапорець», а ЧИМ доведене письмо: опис справи — це
+        # факт, жанр і роки — сильний здогад, ім'я теки — найслабша ознака.
         warnings.append(
-            f"письмо «{scr}» ВГАДАНО з імені теки. Помилка тут дає не збій, а "
+            f"письмо «{scr}» ВГАДАНО ({guess.why}). Помилка тут дає не збій, а "
             f"осмислене на вигляд сміття — звірте перші сторінки або вкажіть "
             f"письмо явно")
     if voice is None and scr == "cyrillic":
@@ -177,10 +195,10 @@ def with_box(plan: CloudPlan, box: Box, *,
         # Машина без опису заліза — не привід відмовляти: SSH-ціль, яку людина
         # додала одним рядком, залізо не декларує, і виміряємо ми його одразу
         # по з'єднанню. Просто не вигадуємо чисел.
-        return _replace(plan, box=box, warnings=plan.warnings + [
+        return _replace(plan, box=box, warnings=[*plan.warnings, 
             "залізо машини не описане — план буде порахований після з'єднання"])
     sizing = plan_sizing(cores=box.cores, vram_gb_min=box.vram_gb,
-                         gpus=box.gpus, profile=profile)
+                         gpus=box.gpus, profile=profile, pages=plan.frames)
     return _finish(plan, box=box, probe=None, sizing=sizing, profile=profile)
 
 
@@ -190,7 +208,7 @@ def with_probe(plan: CloudPlan, probe: Probe, *,
     """Уточнити план ВИМІРЯНИМ залізом. Саме цей план іде в роботу."""
     sizing = plan_sizing(cores=probe.cores, vram_gb_min=probe.vram_gb_min,
                          gpus=probe.gpus, profile=profile, shards=shards,
-                         gb_per_shard=gb_per_shard or None)
+                         pages=plan.frames, gb_per_shard=gb_per_shard or None)
     extra: list[str] = []
     if probe.cpu_lied:
         extra.append(
@@ -227,7 +245,7 @@ def _finish(plan: CloudPlan, *, box: Box | None, probe: Probe | None,
     price = box.price_usd_h if box else None
     cost = predict_cost(plan.frames, sizing, price, profile=profile)
     return _replace(plan, box=box, probe=probe, sizing=sizing, hours=hours,
-                    cost=cost, warnings=plan.warnings + list(extra or ()))
+                    cost=cost, warnings=[*plan.warnings, *(extra or ())])
 
 
 def _replace(plan: CloudPlan, **kw: Any) -> CloudPlan:

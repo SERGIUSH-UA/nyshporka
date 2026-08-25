@@ -193,3 +193,35 @@ def test_base_css_declares_no_tokens() -> None:
     css = BASE_CSS.read_text(encoding="utf-8")
     declared = {m for m in re.findall(r"^\s*(--[\w-]+)\s*:", css, re.M)}
     assert declared <= {"--ctl-x"}, f"base.css заводить свої токени: {sorted(declared)}"
+
+
+def test_every_token_used_by_a_rule_actually_exists() -> None:
+    """🔴 Токен, якого немає, не помиляється — він просто НІЧОГО не робить.
+
+    `var(--нема)` без запасного значення робить властивість недійсною: правило
+    тихо зникає, елемент успадковує чуже, і виглядає це як «стиль не
+    застосувався». Ні браузер, ні збірка про це не кажуть, бо CSS так і
+    задумано — невідома властивість пропускається.
+
+    ⚠ Спіймано на живому екрані: панель отримала `background: var(--paper)`,
+    а `--paper` — це підклад ПІД СКАН (білий в обох темах навмисно). Тобто
+    ім'я існувало, але означало зовсім інше — і сусідні `--paper-edge`,
+    прозорий у темній темі, робив рамку невидимою. Цей приймач ловить лише
+    перший клас (імені немає зовсім); від другого рятує читання коментарів
+    біля токена.
+    """
+    declared = set(re.findall(r"^\s*(--[\w-]+)\s*:", TOKENS.read_text(encoding="utf-8"),
+                              re.M))
+    assert declared, "жодного токена не розібрано — перевірка втратила сенс"
+
+    bad: list[str] = []
+    for path in (BASE_CSS, APP_CSS):
+        for i, line in _code_only(path.read_text(encoding="utf-8")):
+            # Запасне значення (`var(--a, ...)`) — законний спосіб пережити
+            # відсутність токена, і його не чіпаємо.
+            for name in re.findall(r"var\((--[\w-]+)\s*\)", line):
+                if name not in declared:
+                    bad.append(f"{path.name}:{i}: {name}")
+    assert not bad, (
+        "правило посилається на неоголошений токен — воно мовчки не діятиме: "
+        f"{sorted(set(bad))}")

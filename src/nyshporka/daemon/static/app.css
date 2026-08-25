@@ -145,11 +145,11 @@ pre {
    два прогони однієї книги стоять поруч саме для того, щоб було видно, чи
    покрите її письмо, і зливши групи, ми повернули б плоский перелік. */
 .run-group {
-  margin: 1rem 0;
-  padding: .6rem .8rem;
-  border: 1px solid var(--paper-edge);
+  margin: .8rem 0;
+  padding: .5rem .7rem .3rem;
+  border: 1px solid var(--line-2);
   border-radius: var(--r-m);
-  background: var(--paper);
+  background: var(--s-2);
 }
 
 .run-group > h3 {
@@ -195,8 +195,9 @@ pre {
   overflow: auto;
   white-space: pre-wrap;
   word-break: break-word;
-  background: var(--paper);
-  border: 1px solid var(--paper-edge);
+  color: var(--fg);
+  background: var(--s-1);
+  border: 1px solid var(--line-2);
   border-radius: var(--r-m);
   padding: .5rem .4rem;
 }
@@ -213,7 +214,7 @@ pre {
   min-width: 2.4em;
   margin-right: .5rem;
   text-align: right;
-  color: var(--fg-6, var(--fg-2));
+  color: var(--fg-5);
   user-select: none;
 }
 
@@ -245,7 +246,7 @@ pre {
   margin: .2rem 0 .6rem;
   padding: .4rem .6rem;
   border-radius: var(--r-m);
-  background: var(--paper);
+  background: var(--s-1);
   color: var(--fg-2);
 }
 
@@ -262,3 +263,44 @@ td.work b.open { color: var(--accent); margin-left: .1rem; }
 td.acts { white-space: nowrap; text-align: right; }
 
 .pager { justify-content: center; margin: .6rem 0; }
+
+/* 🔴 Шапка групи — три різні за силою речі в одному рядку, і читаються вони
+   лише коли різні: шифра (за нею шукають), назва (за нею впізнають) і кадри
+   (знаменник). Однаковим тоном вони зливаються в сіру смугу, а моноширинним
+   шрифтом на всю шапку — ще й у стрічку однакових символів. */
+.run-group > h3 {
+  display: flex;
+  align-items: baseline;
+  gap: .5rem;
+  margin: 0 0 .35rem;
+  font-size: .95rem;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.run-group > h3 .shifra {
+  font-family: var(--font-mono);
+  font-size: .87em;
+  white-space: nowrap;
+}
+
+/* Назва довга майже завжди; ріжемо крапками, а не обриваємо на символі —
+   обірваний рядок читається як зіпсовані дані. */
+.run-group > h3 .name {
+  font-weight: 400;
+  color: var(--fg-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.run-group > h3 .frames { margin-left: auto; white-space: nowrap; }
+
+/* Стан прогону — словом, а не самим значком: значок без підпису доводиться
+   вгадувати, а таблиця читається згори вниз саме за цією колонкою. */
+.run-state { display: inline-flex; align-items: center; gap: .35rem; }
+.run-state .engine { margin-left: .1rem; }
+.run-group td { color: var(--fg-2); }
+.run-group td.mono { color: var(--fg-3); }
+.run-group th { font-size: .8rem; }

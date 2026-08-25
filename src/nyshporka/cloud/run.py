@@ -33,7 +33,7 @@ from typing import Any
 from nyshporka.cloud import state as ST
 from nyshporka.cloud.base import Box, CloudError, Session
 from nyshporka.cloud.plan import CloudPlan
-from nyshporka.cloud.probe import Probe, measure
+from nyshporka.cloud.probe import measure
 from nyshporka.cloud.registry import load as load_registry
 
 #: Імена на машині. Прості й передбачувані: за ними доводиться ходити з іншої

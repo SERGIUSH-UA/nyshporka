@@ -118,6 +118,46 @@ _ENGINE_BY_SUFFIX = {".mlmodel": "kraken", ".pt": "parseq",
                      ".ckpt": "parseq", ".pth": "parseq"}
 
 
+def model_names(meta: dict[str, Any]) -> list[str]:
+    """Імена моделей прогону.
+
+    🔴 Прогін ДВОМА голосами записує обидві моделі одним полем через «+»
+    (`pysar_cyr_v17.pt+diak_v4`), і це не рідкість, а рекомендований спосіб
+    читати кириличну справу. Розбирати таке поле як одне ім'я означає не
+    впізнати жодної з двох: розширення в нього виходить `.pt+diak_v4`, глоб
+    маніфесту не збігається, і прогін лишається «без рушія» — тобто без
+    бейджа, без покриття письма й без другого голосу в гортачі.
+    """
+    return [p.strip() for p in str(meta.get("model") or "").split("+") if p.strip()]
+
+
+def engine_of_model(name: str) -> Any:
+    """Модель → рушій маніфесту, або порожньо.
+
+    Два кроки, і другий обов'язковий. Глоб маніфесту вимагає РОЗШИРЕННЯ
+    (`diak_*.mlmodel`), а другий голос у складеному імені записаний без нього
+    (`diak_v4`). Тому далі пробуємо ПРЕФІКС — ту саму ознаку, якою письмо
+    визначають усюди: `.mlmodel` буває двох письм, і каже про них саме префікс.
+    """
+    from nyshporka.htr import manifest as M
+
+    name = Path(str(name or "")).name
+    if not name:
+        return None
+    try:
+        man = M.active()
+    except Exception:
+        return None
+    got = man.engine_for_model(name)
+    if got is not None:
+        return got
+    low = name.lower()
+    for e in man.engines:
+        if low.startswith(e.id.lower() + "_"):
+            return e
+    return None
+
+
 def run_engine(meta: dict[str, Any]) -> str:
     """Рушій прогону. Мети до 2026-07-30 поля `engine` не мають — вгадуємо з
     розширення імені моделі; воно є в кожній меті, включно з прогонами старого
@@ -125,13 +165,19 @@ def run_engine(meta: dict[str, Any]) -> str:
     engine = (meta.get("engine") or "").strip()
     if engine:
         return engine
-    model = meta.get("model") or ""
+    names = model_names(meta)
+    model = names[0] if names else ""
     # CHURRO-прогони (VLM, `scripts/churro_*`) пишуть у `model` назву HF-репо без
     # розширення — без цієї гілки вони лишались би «без рушія», і гард змішування
     # не захищав би їхні теки
     if "churro" in model.lower():
         return "churro"
-    return _ENGINE_BY_SUFFIX.get(Path(model).suffix.lower(), "")
+    kind = _ENGINE_BY_SUFFIX.get(Path(model).suffix.lower(), "")
+    if kind:
+        return kind
+    # Складене ім'я другого голосу розширення не має — питаємо маніфест.
+    eng = engine_of_model(model)
+    return eng.kind if eng is not None else ""
 
 
 def run_engine_id(meta: dict[str, Any]) -> str:
@@ -152,16 +198,23 @@ def run_engine_id(meta: dict[str, Any]) -> str:
     Порожньо тут — законна відповідь: модель поза маніфестом (чужий файн-тюн,
     CHURRO) ідентичності не має, і вигадувати її не можна.
     """
-    from nyshporka.htr import manifest as M
+    ids = run_engine_ids(meta)
+    return ids[0] if ids else ""
 
-    model = (meta.get("model") or "").strip()
-    if not model:
-        return ""
-    try:
-        eng = M.active().engine_for_model(Path(model).name)
-    except Exception:
-        return ""
-    return eng.id if eng is not None else ""
+
+def run_engine_ids(meta: dict[str, Any]) -> list[str]:
+    """ВСІ рушії прогону: другий голос пише обидві моделі одним полем.
+
+    🔴 Саме тому список, а не рядок. Прогін «Писар + Дяк» покриває письмо
+    двома рушіями, і звівши його до одного, покриття справи виглядало б
+    наполовину зробленим — тобто екран радив би прогнати те, що вже прогнали.
+    """
+    out: list[str] = []
+    for name in model_names(meta):
+        eng = engine_of_model(name)
+        if eng is not None and eng.id not in out:
+            out.append(eng.id)
+    return out
 
 
 #: 🪤 ФАНТОМНІ РЯДКИ — скільки символів на рядок мусить лишитись, щоб сторінка
@@ -331,6 +384,9 @@ def list_cases() -> list[dict[str, Any]]:
             "engine": run_engine(meta),
             # Ідентичність моделі — окремо від виду: `kraken` буває двох письм.
             "engine_id": run_engine_id(meta),
+            # Прогін двома голосами покриває ДВА рушії; звівши його до
+            # одного, покриття справи виглядало б наполовину зробленим.
+            "engine_ids": run_engine_ids(meta),
             "script": meta.get("script") or "",
             "device": meta.get("device") or "",
             "enhance": meta.get("enhance") or "",
@@ -384,6 +440,7 @@ def case_pages(name: str) -> dict[str, Any] | None:
     return {"name": name, "case_dir": meta.get("case_dir") or "",
             "model": meta.get("model") or "", "done": bool(meta.get("done")),
             "engine": run_engine(meta), "engine_id": run_engine_id(meta),
+            "engine_ids": run_engine_ids(meta),
             "script": meta.get("script") or "",
             "case_key": (meta.get("case_key") or "").strip(),
             "failed": meta.get("failed") or [], "pages": pages}
@@ -616,7 +673,15 @@ def voice_pair(name: str) -> str | None:
     Саме розбіжність і показує, що ознака в пікселях, а отже суддя — око.
     """
     meta = load_meta(name) or {}
-    mine = run_engine(meta)
+    # 🔴 Порівнюються ІДЕНТИЧНОСТІ моделей, а не вид рушія. Вид (`kraken` ·
+    # `parseq`) для цього питання завузький одразу з двох боків: латинський
+    # Скриба й кириличний Дяк — обидва `kraken`, а прогін «Писар + Дяк» має
+    # вид першої моделі й на вигляд не відрізняється від самого Писаря.
+    #
+    # ⚠ Побратим — це прогін, у якого є рушій, якого немає в МЕНЕ. Тому
+    # різниця несиметрична: у прогону, що вже несе обидва голоси, побратима
+    # немає — і це правильна відповідь, а не порожнеча через недогляд.
+    mine = set(run_engine_ids(meta)) or {run_engine(meta)}
     key = meta.get("case_key")
     base = str(meta.get("case_dir") or "")
     for other in list_cases():
@@ -625,7 +690,8 @@ def voice_pair(name: str) -> str | None:
             continue
         om = load_meta(nm) or {}
         same = (key and om.get("case_key") == key) or (base and om.get("case_dir") == base)
-        if same and run_engine(om) != mine:
+        theirs = set(run_engine_ids(om)) or {run_engine(om)}
+        if same and theirs - mine:
             return str(nm)
     return None
 

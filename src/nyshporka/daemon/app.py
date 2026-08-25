@@ -51,6 +51,32 @@ def create_app(ws: Workspace | None = None, *, token: str = "") -> FastAPI:
             "браузерна консоль потребує extras: pip install 'nyshporka[app]'"
         ) from exc
 
+    class _NoCacheStatic(StaticFiles):
+        """Статика, яку браузер зобов'язаний перепитати.
+
+        🔴 Без цього фронт застряє В ПАМ'ЯТІ БРАУЗЕРА. Відколи консоль стала
+        набором ES-модулів, сторінка тягне два десятки файлів, і жоден із них
+        не має ні версії в імені, ні заголовка кешу: після оновлення
+        застосунку людина бачить СТАРУ консоль проти нового бекенду. Виглядає
+        це як «кнопка не працює» або «екран порожній», а не як застарілий кеш,
+        і лікується жорстким перезавантаженням, про яке ніхто не здогадується.
+
+        ⚠ Версія в запиті (`?v=…`) цього НЕ закриває: вона переписує посилання
+        в розмітці, а `import` усередині самого модуля лишається без неї —
+        тобто півміри, яка робить збій періодичним замість постійного. Тут
+        коштує це відповіді 304 на кілька байтів по локальній петлі.
+
+        ⚠ Клас оголошений ТУТ, а не на рівні модуля: `fastapi` —
+        необов'язковий extra, і модульне успадкування від `StaticFiles`
+        зробило б імпорт пакета неможливим у того, хто поставив його без
+        застосунку.
+        """
+
+        async def get_response(self, path: str, scope):
+            res = await super().get_response(path, scope)
+            res.headers["Cache-Control"] = "no-cache, must-revalidate"
+            return res
+
     from nyshporka import ops as O
     from nyshporka import ui
     from nyshporka.core.jobs import JobBus
@@ -104,12 +130,12 @@ def create_app(ws: Workspace | None = None, *, token: str = "") -> FastAPI:
         # порожні місця. Та сама підстановка є в консолі дослідника.
         return HTMLResponse(ui.with_sprite(html.replace("{{TOKEN}}", tok)))
 
-    app.mount("/static", StaticFiles(directory=static_dir), name="static")
+    app.mount("/static", _NoCacheStatic(directory=static_dir), name="static")
 
     # 🔴 Спільний шар обох морд: токени, примітиви, значки, компоненти. Лежить у
     # пакеті й монтується звідти, а не копіюється у фронт: консоль дослідника
     # монтує РІВНО цю саму теку, і копія розійшлася б із нею тихо.
-    app.mount("/ui", StaticFiles(directory=ui.static_dir()), name="ui")
+    app.mount("/ui", _NoCacheStatic(directory=ui.static_dir()), name="ui")
 
     # 🔴 Асети бренду віддаються з `brand/data/assets`, а НЕ копіюються сюди.
     # Копія знака жила б у двох місцях і розходилась би тихо: у вкладці одна
