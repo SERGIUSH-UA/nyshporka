@@ -37,8 +37,12 @@ Object.assign(ACTIONS, {
     const seq = ++SEQ.search;
     const unlock = busyForm(ev.target);
     el('hits').innerHTML = `<p class="muted">${t('common.loading')}</p>`;
+    // 🔴 `context: 1` проситься ТУТ, а не добирається потім окремим запитом:
+    // рядок сам по собі не розрізняє прізвищ зі спільним коренем, бо ім'я
+    // стоїть вище, а роль нижче. Разом із вікном приходить читання того самого
+    // рядка другим рушієм — те, чого другим запитом не дістати взагалі.
     const env = await callOp('search.run',
-      { q: fd.get('q'), where: fd.get('where'), limit: 100 });
+      { q: fd.get('q'), where: fd.get('where'), limit: 100, context: 1 });
     unlock();
     if (seq !== SEQ.search) return;
     if (!env.ok) return boxError('hits', env);

@@ -286,13 +286,28 @@ def test_frontend_javascript_parses() -> None:
     апостроф усередині рядка (`'п'яти сховищ'` — звичайне українське слово)
     робить порожню сторінку без єдиної ознаки в тестах, лінті чи типах. Спіймано
     саме так, за годину після того, як перевірку писали.
+
+    🔴🔴 Розширення `.mjs` тут ОБОВ'ЯЗКОВЕ, і це не косметика. `node --check`
+    над файлом `.js`, у якому є `import`, повертає УСПІХ на будь-що: перевірено
+    підкладеним `let A.b = 1;` — код 0, ні слова. Тобто відколи фронт став
+    модулем, ця перевірка не перевіряла нічого, і саме її підопічна вада
+    (синтаксис, що падає лише в браузері користувача) проходила б повз неї
+    мовчки. З розширенням `.mjs` той самий node розбирає файл як модуль і
+    чесно падає.
     """
+    import tempfile
+
     bad = []
-    for path in front_files():
-        res = subprocess.run(["node", "--check", str(path)],
-                             capture_output=True, text=True)
-        if res.returncode != 0:
-            bad.append(f"{path.name}:\n{res.stderr[:500]}")
+    with tempfile.TemporaryDirectory() as tmp:
+        for path in front_files():
+            # Ім'я зберігаємо: воно стоїть у повідомленні про помилку, і без
+            # нього довелося б шукати, який саме з двадцяти модулів не зійшовся.
+            twin = Path(tmp) / (path.stem + ".mjs")
+            twin.write_bytes(path.read_bytes())
+            res = subprocess.run(["node", "--check", str(twin)],
+                                 capture_output=True, text=True)
+            if res.returncode != 0:
+                bad.append(f"{path.name}:\n{res.stderr[:500]}")
     assert not bad, "фронт не розбирається:\n" + "\n".join(bad)
 
 

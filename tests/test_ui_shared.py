@@ -201,7 +201,9 @@ def test_forms_only_react_to_submit() -> None:
     перемикання — галочку «узяти теку під облік» неможливо було поставити
     взагалі, і виглядало це як мертвий чекбокс, а не як помилка.
     """
-    app = (ui.ROOT.parent / "daemon" / "static" / "app.js").read_text(encoding="utf-8")
+    # Сам диспетчер лишився у вході, а форми переїхали в модулі екранів — тож
+    # другий бік межі (`new FormData(…)`) шукається по склейці всього фронту.
+    app = front_js()
     guard = re.search(r"function dispatch\(ev\)\s*\{(.*?)\n\}", app, re.S)
     assert guard, "диспетчер не знайдено"
     body = guard.group(1)
@@ -214,3 +216,59 @@ def test_forms_only_react_to_submit() -> None:
     for m in re.finditer(r"new FormData\((\w+(?:\.\w+)*)\)", app):
         assert m.group(1) in ("ev.target", "elm"), (
             f"FormData зібрано з «{m.group(1)}» — джерело має бути формою")
+
+
+# ── бейдж рушія: ідентичність, а не вид ──────────────────────────────────────
+def test_engine_badge_is_built_from_the_model_identity() -> None:
+    """🔴🔴 Бейдж робиться з `engine_id`, а не з `engine`. Це різні поняття.
+
+    `engine` — ВИД рушія (`kraken` · `parseq`): ним боронять теки від
+    змішування. `engine_id` — ІДЕНТИЧНІСТЬ моделі (`pysar` · `diak` ·
+    `skryba`), і саме нею ключована таблиця бейджів. Одного виду замало навіть
+    для показу: `kraken` буває двох письм — латинський Скриба й кириличний
+    Дяк, — і бейдж із виду назвав би їх однаково рівно там, де різниця
+    вирішує.
+
+    ⚠ Вада, від якої стоїть цей приймач, була ЖИВОЮ й абсолютно мовчазною:
+    розбір знахідок передавав у `eng()` поле `engine`, збігу з таблицею не було
+    ніколи, а `<use>` на неіснуючий символ не помиляється — бейдж просто не
+    з'являвся жодного разу, і виглядало це як «тут нічого не показують».
+    """
+    js = front_js()
+    calls = set(re.findall(r"\beng\(\s*([\w.]+)", js))
+    bad = sorted(c for c in calls
+                 if c.endswith(".engine") or re.fullmatch(r"engine", c))
+    assert not bad, (
+        f"бейдж робиться з виду рушія, а не з ідентичності моделі: {bad}. "
+        "Таблиця бейджів ключована `pysar`/`diak`/`skryba`, тож збігу не буде "
+        "й значок мовчки не з'явиться")
+    assert calls, "жодного виклику бейджа — перевірка втратила сенс"
+
+
+def test_engine_ids_the_store_hands_out_have_badges() -> None:
+    """Ідентичності з прогонів мусять існувати в таблиці бейджів.
+
+    Інакше маємо ту саму тишу з іншого боку: сховище віддає `engine_id`, якого
+    вікно не знає, і замість позначки лишається порожнє місце.
+    """
+    from nyshporka.htr import manifest as M
+
+    known = set(re.findall(r"^  (\w+): \{", ICONS_JS, re.M))
+    for e in M.active().engines:
+        assert e.id in known, (
+            f"рушій «{e.id}» є в маніфесті, а бейджа для нього немає")
+
+
+def test_every_icon_call_names_a_real_symbol() -> None:
+    """🔴 `ic()` САМ додає префікс `i-`, тож `ic('i-alert')` дає `#i-i-alert`.
+
+    `<use>` на неіснуючий id не кидає помилки й не пише в консоль — значок
+    просто зникає. Саме так одного разу пропало вісім значків у газетирі, і
+    помітили це очима, а не перевіркою.
+    """
+    used = set(re.findall(r"\bic\('([\w-]+)'", front_js()))
+    assert used, "жодного виклику значка — перевірка втратила сенс"
+    missing = sorted(used - SYMBOLS)
+    assert not missing, (
+        f"ic() кличе символи, яких немає у спрайті: {missing}. "
+        "Префікс `i-` додається всередині — передавайте голе ім'я")

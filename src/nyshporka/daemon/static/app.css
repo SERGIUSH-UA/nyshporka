@@ -131,3 +131,11 @@ pre {
 #view button:disabled { opacity: .45; cursor: not-allowed; }
 /* Картка першого запуску — не кнопка в цьому сенсі: вона й так ціла панель. */
 #view .card, #view .card:hover { padding: 1rem; background: var(--s-2); }
+
+/* 🔴 Другий голос відрізняється ВИГЛЯДОМ, а не лише підписом: він стоїть під
+   тим самим рядком, і без окремого тону два прочитання зливаються в одне —
+   рівно там, де важлива саме їхня розбіжність. */
+#sift-ctx pre.alt {
+  border-left: 3px solid var(--accent-2);
+  color: var(--fg-2);
+}

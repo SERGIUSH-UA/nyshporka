@@ -26,7 +26,8 @@ import { attachCombobox } from '/ui/combobox.js';
  * 🔴 Два правила стоять НА ЕКРАНІ, а не в документації, бо порушують їх саме
  * тут: вирішує око, і відсівати за коренем не можна.
  */
-let ST.sift = { hits: [], i: 0, q: '', crop: null, ctx: null };
+// Сам стан розбору живе в `core/state.js`: його заповнює пошук, а читає цей
+// екран, тож він не належить жодному з двох.
 
 SCREENS.sift = async () => {
   const gen = curGen();
@@ -43,7 +44,12 @@ SCREENS.sift = async () => {
 
 function siftDraw() {
   const h = ST.sift.hits[ST.sift.i] || {};
-  const badge = h.engine ? eng(h.engine, true, LANG) : '';
+  // 🔴 Бейдж робиться з `engine_id` (ідентичність моделі: Писар · Дяк ·
+  // Скриба), а не з `engine` (ВИД рушія: kraken · parseq). Доти тут стояв
+  // вид — а таблиця бейджів ключована ідентичністю, тож збігу не було ніколи
+  // й бейдж не з'являвся ЖОДНОГО разу. `<use>` на неіснуючий символ мовчить,
+  // тому вада виглядала як «тут просто нічого не показують».
+  const badge = h.engine_id ? eng(h.engine_id, true, LANG) : '';
   const pos = t('sift.togo').replace('{i}', ST.sift.i + 1).replace('{n}', ST.sift.hits.length);
   // Збіг підсвічується в рядку, але НЕ вирізається з нього: сусідні слова —
   // це роль і відмінок, тобто половина того, за чим упізнають запис.
@@ -103,18 +109,35 @@ async function siftLoadCrop() {
   box.innerHTML = `<img src="${esc(env.data.image)}" alt="${esc(t('sift.crop'))}"
     style="max-width:100%;background:var(--paper);border:1px solid var(--paper-edge);
            border-radius:var(--r-m)">`;
-  // Сусідні рядки — той самий «контекст двох голосів»: роль і відмінок стоять
-  // поряд, а не в самому слові.
-  const ctx = await callOp('page.text', { run: h.name, page: h.page });
-  if (seq !== _siftSeq) return;
+  siftCtx(h);
+}
+
+/**
+ * Сусідні рядки й читання другого голосу — З ТОГО САМОГО конверта.
+ *
+ * 🔴 Доти тут стояв ДРУГИЙ запит (`page.text` на всю сторінку) заради ±1
+ * рядка, які пошук уже приніс: `search.run` має поле `context` і повертає
+ * вікно на кожен хіт, а разом із ним — прочитання того самого рядка другим
+ * рушієм. Фронт просто не просив контексту, тож платив зайвим читанням
+ * сторінки на кожен крок гортання й будував вікно сам — ±1 рядок замість
+ * РОЗСУВНОГО, який пропускає огризки («на», «и», «3») і шукає змістовне.
+ *
+ * 🔴 Другий голос тут не прикраса: збіг двох рушіїв означає надійне читання,
+ * а розбіжність саме на прізвищі означає, що ознака в пікселях — і судити має
+ * око, а не третій алгоритм.
+ */
+function siftCtx(h) {
   const cbox = el('sift-ctx');
-  if (!cbox || !ctx.ok) return;
-  const lines = (ctx.data || {}).lines || [];
-  const near = lines.slice(Math.max(0, (h.line_index || 0) - 1), (h.line_index || 0) + 2);
-  cbox.innerHTML = near.length
-    ? `<p class="muted">${t('sift.context')}</p><pre>${near
-        .map((l) => esc(typeof l === 'string' ? l : l.text || '')).join('\n')}</pre>`
+  if (!cbox) return;
+  const ctx = h.context || {};
+  const near = [...(ctx.before || []), h.line || '', ...(ctx.after || [])];
+  const alt = h.alt
+    ? `<p class="muted">${esc(t('sift.alt'))}</p><pre class="alt">${esc(h.alt.line)}</pre>`
     : '';
+  cbox.innerHTML = (ctx.before || ctx.after)
+    ? `<p class="muted">${t('sift.context')}</p><pre>${near
+        .map((l) => esc(l)).join('\n')}</pre>${alt}`
+    : alt;
 }
 
 Object.assign(ACTIONS, {

@@ -134,6 +134,36 @@ def run_engine(meta: dict[str, Any]) -> str:
     return _ENGINE_BY_SUFFIX.get(Path(model).suffix.lower(), "")
 
 
+def run_engine_id(meta: dict[str, Any]) -> str:
+    """Прогін → ІДЕНТИЧНІСТЬ моделі (`pysar` · `diak` · `skryba`), не вид рушія.
+
+    🔴 Два різні поняття, і плутати їх дорого. `run_engine()` віддає ВИД
+    (`kraken` · `parseq`): він каже, яким кодом рахувалось, і саме цим гард
+    боронить теки від змішування. Але одного виду замало для показу: `kraken`
+    буває двох письм — латинський Скриба й кириличний Дяк, — і бейдж, зроблений
+    з виду, назвав би їх однаково рівно там, де різниця вирішує.
+
+    ⚠ Ця розбіжність уже коштувала мовчазної вади: розбір знахідок малював
+    бейдж із поля `engine`, тобто з ВИДУ, а таблиця бейджів ключована
+    ідентичністю — збігу не було ніколи, `<use>` на неіснуючий символ не
+    помиляється, і бейдж просто не з'являвся. Порожньо там, де мала стояти
+    ознака «хто це прочитав».
+
+    Порожньо тут — законна відповідь: модель поза маніфестом (чужий файн-тюн,
+    CHURRO) ідентичності не має, і вигадувати її не можна.
+    """
+    from nyshporka.htr import manifest as M
+
+    model = (meta.get("model") or "").strip()
+    if not model:
+        return ""
+    try:
+        eng = M.active().engine_for_model(Path(model).name)
+    except Exception:
+        return ""
+    return eng.id if eng is not None else ""
+
+
 #: 🪤 ФАНТОМНІ РЯДКИ — скільки символів на рядок мусить лишитись, щоб сторінка
 #: не вважалась підозрілою. Частка від МЕДІАНИ САМОЇ СПРАВИ, а не абсолютне
 #: число: почерк і формуляр у кожній книзі свої (медіана 25.6 симв/рядок на
@@ -234,6 +264,26 @@ def phantom_pages(name: str, frac: float = PHANTOM_FRAC,
                        "contrast_max": contrast_max}}
 
 
+def _sec_median(meta: dict[str, Any]) -> float | None:
+    """Медіана секунд на сторінку в цьому прогоні, або порожньо.
+
+    🔴 Порожньо, а не нуль. Нуль читався б як «читає миттєво» й дав би оцінку
+    «≈0 хв» на справу в три тисячі аркушів; відсутнє число чесно каже, що
+    міряти нема на чому — і тоді на екрані стоїть кількість кадрів замість
+    вигаданого часу.
+
+    ⚠ Беремо саме медіану: перші сторінки прогону несуть розігрів моделі, а
+    порожні звороти — частки секунди, тож середнє бреше в обидва боки.
+    """
+    secs = sorted(float(p["sec"]) for p in (meta.get("pages") or {}).values()
+                  if isinstance(p, dict) and isinstance(p.get("sec"), (int, float))
+                  and p["sec"] > 0)
+    if not secs:
+        return None
+    mid = len(secs) // 2
+    return round(secs[mid] if len(secs) % 2 else (secs[mid - 1] + secs[mid]) / 2, 2)
+
+
 def list_cases() -> list[dict[str, Any]]:
     """Прогони з reports/htr/* — для списку в'ювера. Назва справи — з бібліотеки."""
     out: list[dict[str, Any]] = []
@@ -260,6 +310,12 @@ def list_cases() -> list[dict[str, Any]]:
             "case_dir": meta.get("case_dir") or "",
             "shifra": (case or {}).get("shifra") or "",
             "title": (case or {}).get("title") or "",
+            # 🔴 Шифра З МЕТИ, а не з бібліотеки. Це різні числа: `shifra` вище —
+            # прикраса переліку, яку дав резолвер, а `case_key` — те, що прогін
+            # несе В СОБІ. Саме за ним справу впізнає будь-хто поза цим
+            # простором, і саме його порожність робить прогін нічиїм: текст є,
+            # а чия це справа — невідомо, і зшивати доводиться руками.
+            "case_key": (meta.get("case_key") or "").strip(),
             "pages_done": len(meta.get("pages") or {}),
             "failed": len(meta.get("failed") or []),
             "done": bool(meta.get("done")),
@@ -267,7 +323,15 @@ def list_cases() -> list[dict[str, Any]]:
             # рушій і письмо прогону: на одну справу їх буває кілька (латинку читає
             # Скриба, кирилицю Писар), і без цього не сказати, ЧИМ прочитана сторінка
             "engine": run_engine(meta),
+            # Ідентичність моделі — окремо від виду: `kraken` буває двох письм.
+            "engine_id": run_engine_id(meta),
             "script": meta.get("script") or "",
+            "device": meta.get("device") or "",
+            "enhance": meta.get("enhance") or "",
+            # ⏱ Медіана секунд на сторінку — ЗАМІР ЦІЄЇ машини, а не константа.
+            # Єдине чесне джерело оцінки часу: та сама справа на чужій карті
+            # читається в рази інакше, а на процесорі — на порядок.
+            "sec_median": _sec_median(meta),
             "updated": meta.get("updated") or "",
         })
     out.sort(key=lambda c: c["updated"], reverse=True)
@@ -666,7 +730,7 @@ def search(q: str, name: str | None = None, thresh: int = 78,
     engines = {}
     for nm in names:
         m = load_meta(nm) or {}
-        engines[nm] = (run_engine(m), m.get("script") or "")
+        engines[nm] = (run_engine(m), m.get("script") or "", run_engine_id(m))
     hits = []
     scanned = 0
     for nm in names:
@@ -691,7 +755,7 @@ def search(q: str, name: str | None = None, thresh: int = 78,
                     if sc > best_sc:
                         best_sc, best_word = sc, word
             if best_sc >= thresh:
-                eng, scr = engines.get(nm, ("", ""))
+                eng, scr, eid = engines.get(nm, ("", "", ""))
                 # 🔴 ДВА номери того самого рядка, і це не дублювання.
                 # `line_no` — номер ДЛЯ ЛЮДИНИ, з одиниці, як у редакторі; його
                 # показує таблиця хітів. `line_index` — індекс рамки в
@@ -705,14 +769,53 @@ def search(q: str, name: str | None = None, thresh: int = 78,
                 hits.append({"name": nm, "page": page, "line_no": ln_no,
                              "line_index": ln_no - 1,
                              "line": raw, "matched": best_word,
-                             "engine": eng, "script": scr,
+                             "engine": eng, "engine_id": eid, "script": scr,
                              "score": round(best_sc)})
     hits.sort(key=lambda h: -h["score"])
     shown = hits[:limit]
     if context:
         _add_context(shown, side=context)
+    phantom_n, blind = mark_phantoms(shown)
     return {"hits": shown, "total": len(hits), "cases": scanned,
-            "stems": stems, "thresh": thresh}
+            "stems": stems, "thresh": thresh,
+            "phantom": phantom_n, "phantom_blind": blind}
+
+
+def mark_phantoms(hits: list[dict[str, Any]]) -> tuple[int, float]:
+    """🪤 Позначити хіти, що стоять на сторінках без чорнила. НЕ прибирати.
+
+    🔴 Позначка, а не фільтр, і це рішення. Той самий детектор спрацьовує на
+    роздільному аркуші метричної книги, де три рядки великого письма лежать
+    поверх водяного знака: рядки там зайві, а текст цінний. Викинувши сторінку,
+    ми відібрали б у ока рівно те, заради чого воно й дивиться.
+
+    ⚠ Рахуємо тільки для ПОКАЗАНИХ хітів і по одному разу на прогін: детектор
+    читає всю мету прогону, і на видачі з п'ятисот справ це були б п'ятсот
+    зайвих читань заради позначки на десятку рядків.
+
+    Повертає `(скільки позначено, найгірший `has_contrast`)`. Друге число —
+    чесність самого детектора: на старих метах поля `contrast` немає, працює
+    лише гілка `enhanced`, і детектор мовчки слабшає. Це треба друкувати, а не
+    ховати: інакше «фантомів немає» читається як «сторінки чисті», хоч означає
+    «нічим було перевірити».
+    """
+    cache: dict[str, dict[str, Any]] = {}
+    marked, blind = 0, 1.0
+    for h in hits:
+        nm = h.get("name") or ""
+        if nm not in cache:
+            try:
+                cache[nm] = phantom_pages(nm)
+            except Exception:
+                cache[nm] = {"pages": {}, "has_contrast": 1.0}
+        rep = cache[nm]
+        blind = min(blind, float(rep.get("has_contrast") or 0.0))
+        info = (rep.get("pages") or {}).get(h.get("page") or "")
+        if info:
+            h["phantom"] = True
+            h["phantom_why"] = info.get("why") or ""
+            marked += 1
+    return marked, round(blind, 2) if cache else 1.0
 
 
 def _add_context(hits: list[dict[str, Any]], *, side: int) -> None:
