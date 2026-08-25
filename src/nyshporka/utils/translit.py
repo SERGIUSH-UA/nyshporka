@@ -70,15 +70,71 @@ _CYR_MAP = {
 # g→q/9, o→0). Це єдине місце, де визначено, що дореформене, сучасне й
 # латинізоване написання одного прізвища вважаються тим самим словом; цим
 # користуються і пошук по декоду, і сховище прочитаних сторінок.
-_ARCHIVAL_FOLD = str.maketrans({
+_ARCHIVAL_FOLD_MAP = {
     "ѣ": "e", "ѳ": "f", "ѵ": "i", "ѕ": "z", "ѡ": "o", "є": "e", "ї": "i",
     "q": "g", "9": "g", "0": "o",
-})
+}
+_ARCHIVAL_FOLD = str.maketrans(_ARCHIVAL_FOLD_MAP)
+
+# 🔴 ОДНА таблиця замість посимвольного циклу й двох `.replace`. Заміняється
+# рівно те саме: кирилиця за `_CYR_MAP`, latin y→i (уніфікує з кириличним «й»:
+# Yuriy↔Юрій → uri↔urii) і latin w→v (Polish wójcik → vuitsik).
+#
+# Злиття законне, бо алфавіти не перетинаються: серед значень `_CYR_MAP` немає
+# ні `y`, ні `w`, тож жодна заміна не потрапляє під наступну. Порядок із
+# диграфами збережено — вони йдуть ДО цієї таблиці, як і раніше.
+#
+# ⚠ Навіщо: на корпусі декодів нормалізація з'їдала 80% часу побудови індексу
+# пошуку (38 с із 48 на дванадцяти прогонах), і більша частина цього — мільйони
+# звертань до словника по одному символу.
+_TAIL_MAP = {**_CYR_MAP, "y": "i", "w": "v"}
+_TAIL_TRANS = str.maketrans(_TAIL_MAP)
+#: Те саме плюс архівний фолд — щоб `normalize_archival` не робив другий прохід.
+_TAIL_ARCHIVAL_TRANS = str.maketrans({**_TAIL_MAP, **_ARCHIVAL_FOLD_MAP})
+
+
+#: Чи є в рядку хоч один пробільний символ, і на що його стискати.
+_WS = re.compile(r"\s")
+_WS_RUN = re.compile(r"\s+")
+
+
+def _squash(s: str) -> str:
+    """Стиснути пробіли. Регулярка стиснення кличеться лише там, де є що стискати.
+
+    ⚠ Переважна більшість рядків, які сюди приходять, — окремі СЛОВА без
+    жодного пробілу: пошук по декоду нормалізує токени й склейки токенів. Для
+    них `re.sub` був чистим податком.
+    """
+    if not _WS.search(s):
+        return s
+    return _WS_RUN.sub(" ", s).strip()
 
 
 def normalize_archival(s: str) -> str:
     """normalize_for_matching + фолд історичних літер і Kraken-плутанин."""
-    return normalize_for_matching(s).translate(_ARCHIVAL_FOLD)
+    if not s:
+        return ""
+    return _squash(_digraphs(s.lower().translate(_PL_DIACRITICS))
+                   .translate(_TAIL_ARCHIVAL_TRANS))
+
+
+def _digraphs(s: str) -> str:
+    """PL/RO-диграфи по черзі. Порядок важливий — див. `_PL_DIGRAPHS`.
+
+    🔴 Гард на початку — не здогад, а властивість самого переліку: КОЖЕН диграф
+    містить `z` або `h` (`szcz`, `sz`, `cz`, `rz` — z; `schi`, `sche`, `ghe`,
+    `ghi`, `ch` — h). Рядок без обох літер жодним із них не зачепиться, тож
+    дев'ять проходів по ньому — чистий податок.
+
+    ⚠ Це майже весь кириличний корпус: на цьому кроці кирилиця ще не
+    полатинізована (таблиця йде ПІСЛЯ диграфів), тож латинських `z`/`h` у ній
+    просто немає.
+    """
+    if "z" not in s and "h" not in s:
+        return s
+    for src, dst in _PL_DIGRAPHS:
+        s = s.replace(src, dst)
+    return s
 
 
 def normalize_for_matching(s: str) -> str:
@@ -89,14 +145,5 @@ def normalize_for_matching(s: str) -> str:
     """
     if not s:
         return ""
-    s = s.lower().translate(_PL_DIACRITICS)
-    for src, dst in _PL_DIGRAPHS:
-        s = s.replace(src, dst)
-    # latin y → i: уніфікує з кириличним й (Yuriy↔Юрій → uri↔urii).
-    s = s.replace("y", "i")
-    out = [_CYR_MAP.get(ch, ch) for ch in s]
-    result = "".join(out)
-    # latin W ↔ V (Polish wójcik → vuitsik), нормалізуємо до v.
-    result = result.replace("w", "v")
-    result = re.sub(r"\s+", " ", result).strip()
-    return result
+    return _squash(_digraphs(s.lower().translate(_PL_DIACRITICS))
+                   .translate(_TAIL_TRANS))

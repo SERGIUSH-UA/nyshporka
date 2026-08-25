@@ -374,6 +374,71 @@ def cases_list(a: CasesArgs) -> Envelope:
 
 
 # ── пошук по прочитаному ─────────────────────────────────────────────────────
+@op("search.state", summary="Чи зібрано індекс прочитаного",
+    mutates=False, agent=False, section="research")
+def search_state(_: NoArgs) -> Envelope:
+    """Знаменник екрана пошуку — ДО запиту, а не після.
+
+    🔴 Пошук чеше лише зібране, і «не знайшлось» при повному й частковому
+    індексі — різні відповіді. Показати це можна лише тут: у самій видачі це
+    вже застереження, тобто після того, як людина зачекала й повірила нулю.
+    """
+    from nyshporka.search import decode as D
+
+    try:
+        st = D.stats()
+    except Exception as exc:
+        return fail(f"стан індексу недоступний ({type(exc).__name__}: {exc})")
+    env = ok(st)
+    if st["stale"]:
+        env.suggest("search.index", "зібрати індекс решти прогонів")
+    return env
+
+
+class IndexArgs(BaseModel):
+    rebuild: bool = Field(default=False,
+                          description="перебудувати навіть свіже (після зміни "
+                                      "правил склейки)")
+
+
+@op("search.index", summary="Зібрати індекс прочитаного — щоб пошук був швидким",
+    args=IndexArgs, mutates=True, long=True, agent=False, section="research")
+def search_index(a: IndexArgs) -> Envelope:
+    """Індекс декоду: один раз довго, далі щоразу швидко.
+
+    🔴 Навіщо окрема операція, а не «саме зробиться при пошуку». Зібрати
+    індекс усього прочитаного коштує чверть години на великому корпусі, і
+    робити це мовчки всередині запиту з браузера означає повісити застосунок
+    без жодного слова про те, чим він зайнятий. Тому збирання — робота в
+    черзі: її видно, її можна спинити, і вона робиться раз.
+
+    ⚠ Індекс — ПОХІДНЕ. Його можна видалити будь-коли; наступний пошук просто
+    скаже, скільки прогонів лишилось поза ним.
+    """
+    from nyshporka import htr_store
+    from nyshporka.search import decode as D
+
+    runs = [c["name"] for c in htr_store.list_cases()]
+    if a.rebuild:
+        for r in runs:
+            try:
+                D.index_path(r).unlink(missing_ok=True)
+            except OSError:
+                # Не змогли прибрати — індекс просто лишиться старим, і
+                # наступний прохід звірить його штампом. Валити перезбірку
+                # через один недоступний файл немає підстав.
+                continue
+    built = sum(1 for _ in D.ensure_all(runs))
+    st = D.stats()
+    env = ok({"built": built, **st})
+    if st["stale"]:
+        # Не помилка: прогін без жодного тексту індексувати нема з чого.
+        env.warn("some_not_indexed",
+                 f"{st['stale']} прогонів лишились без індексу — найчастіше це "
+                 f"теки без жодного `.txt`")
+    return env
+
+
 class SearchArgs(BaseModel):
     q: str = Field(description="прізвище або слово")
     where: Literal["decode", "pages", "records"] = Field(
@@ -417,14 +482,27 @@ def search_run(a: SearchArgs) -> Envelope:
         # правило: нуль подавався зі знаменником, який сам був нулем, тобто
         # читався як «нічого не прочитано» — і закривав напрям пошуку.
         pages = sum(int(c.get("pages_done") or c.get("pages") or 0) for c in runs)
+        scanned = res.get("cases") or 0
+        blind = int(res.get("unindexed") or 0)
         env = ok({"hits": res.get("hits") or [],
-                  "coverage": {"runs": res.get("cases") or len(runs),
-                               "pages": pages, "thresh": a.thresh}})
+                  "coverage": {"runs": scanned, "pages": pages,
+                               "thresh": a.thresh,
+                               # 🔴 Скільки прогонів ЛИШИЛОСЬ поза пошуком.
+                               # Це не деталь реалізації індексу, а знаменник:
+                               # «не знайшлось у 400 з 1142» і «не знайшлось у
+                               # 1142» — різні відповіді, і за другою закривають
+                               # напрям, якого не перевіряли.
+                               "unindexed": blind}})
         if res.get("error"):
             env.warn("bad_query", str(res["error"]))
+        if blind:
+            env.warn("partial_index",
+                     f"{blind} прогонів поза пошуком: їхній текст ще не "
+                     f"проіндексовано. Прочесано {scanned}.")
+            env.suggest("search.index", "зібрати індекс решти прогонів")
         if not (res.get("hits") or []):
             env.warn("zero_with_denominator",
-                     f"не знайшлось у {res.get('cases') or len(runs)} прогонах "
+                     f"не знайшлось у {scanned} прогонах "
                      f"({pages} сторінок). Це НЕ означає, що запису немає — "
                      f"означає, що його немає в прочитаному.")
         return env

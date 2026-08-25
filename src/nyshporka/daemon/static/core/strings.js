@@ -261,6 +261,10 @@ const STRINGS = {
     'cases.build': 'перезібрати реєстр',
     'cases.build.why': "Реєстр — зріз п'яти сховищ: після прогону, завантаження чи занесення в облік він старіє за хвилини.",
     'search.only': 'шукаємо лише в межах справи',
+    'search.index.partial': 'Поза пошуком {n} прогонів із {all}: їхній текст '
+      + 'ще не проіндексовано, і нуль по них нічого не означатиме.',
+    'search.index.ready': 'Індекс зібрано на всі {all} прогонів ({mb} МБ).',
+    'search.index.go': 'Зібрати індекс',
     'search.q': 'Прізвище', 'search.where': 'Де шукати',
     'search.where.decode': 'у прочитаному машиною',
     'search.where.pages': 'у виписаних прізвищах',
@@ -622,6 +626,10 @@ const STRINGS = {
     'cases.build': 'rebuild registry',
     'cases.build.why': 'The registry is a snapshot of five stores: after a run, a download or a note it goes stale within minutes.',
     'search.only': 'searching within this case only',
+    'search.index.partial': '{n} of {all} runs are outside the search: their '
+      + 'text is not indexed yet, and a zero over them would mean nothing.',
+    'search.index.ready': 'Index built for all {all} runs ({mb} MB).',
+    'search.index.go': 'Build the index',
     'search.q': 'Surname', 'search.where': 'Where to look',
     'search.where.decode': 'in machine-read text',
     'search.where.pages': 'in noted surnames',

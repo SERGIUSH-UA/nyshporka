@@ -26,10 +26,18 @@ TOKEN = "test-token-abc123"
 
 
 @pytest.fixture
-def ws(tmp_path: Path) -> Workspace:
+def ws(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Workspace:
     (tmp_path / "data" / "derived").mkdir(parents=True)
     (tmp_path / "nyshporka.toml").write_text("[workspace]\nschema = 1\n",
                                              encoding="utf-8")
+    # 🔴 Реєстр справ адресується модульним `DB_PATH`, який зафіксувався при
+    # першому імпорті — тобто на просторі ІНШОГО тесту. Свіжий простір без цієї
+    # підміни показував би чужі справи, і перевірка «порожньо, а не помилка»
+    # ловила б зразкову справу з сусіднього тесту.
+    from nyshporka.cases import db as DB
+
+    monkeypatch.setattr(DB, "DB_PATH", tmp_path / "data" / "derived"
+                        / "case_index.sqlite")
     return Workspace(root=tmp_path, name="тест", origin="test")
 
 

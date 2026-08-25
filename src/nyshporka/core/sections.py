@@ -236,6 +236,8 @@ OP_SCREEN: dict[str, str] = {
     "page.view": "view",
     # research
     "search.run": "search",
+    "search.index": "search",
+    "search.state": "search",
     "pages.status": "eye",
     "pages.note": "eye",
     "records.add": "eye",

@@ -20,10 +20,9 @@ import contextlib
 import json
 import os
 import re
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
-
-from rapidfuzz import fuzz
 
 from nyshporka.core.workspace import workspace
 from nyshporka.utils.translit import normalize_archival
@@ -748,73 +747,90 @@ def _case_index(name: str) -> list[Any]:
     index = []
     for txt in txts:
         page = stem2page.get(txt.stem, txt.name)
-        prev_toks: list[str] = []   # хвости попередніх рядків — для переносів
-        for ln_no, raw in enumerate(txt.read_text(encoding="utf-8").splitlines(), 1):
-            toks = _TOKEN_RE.findall(raw)
-            # ⚠ ОКРЕМИЙ ФІЛЬТР «РЯДКІВ-ОГРИЗКІВ» ТУТ НЕ ПОТРІБЕН — перевірено
-            # заміром 2026-07-31, щоб наступний не пішов тим самим хибним
-            # шляхом. На порожньому звороті сегментація ріже волокна паперу як
-            # рядки, і декод віддає «с / и / св / 1 ; 7 / сащъ». Таких рядків
-            # у корпусі 23.7%, і виглядають вони як явне джерело хибних збігів,
-            # але кандидатів з них майже не виходить: одиночний токен береться
-            # від 4 літер, пара — від 6 сумарно, тож огризок і так відсіюється
-            # довжиною. Спроба глушити їх явно прибрала 0.1% кандидатів і
-            # НУЛЬ хітів на восьми контрольних запитах (рід, Ярошинські,
-            # М'ястківка, Ігнатків, Kowalski, Szczurowski).
-            # 🔴 А глушити такий рядок ЦІЛКОМ (разом із хвостом у `prev_toks`)
-            # прямо шкідливо: у вузькій колонці перша половина прізвища буває
-            # сама в огризку («doi» / «szczynskiego»), і на ф.792-1-16 такий
-            # варіант з'їв три склейки роду.
-            cands: list[tuple[str, str]] = []
-            # 🔴 Прізвище, РОЗІРВАНЕ ПЕРЕНОСОМ через рядок. У вузьких колонках
-            # метрик це норма: «…Teodor Sikor» / «ski z odnodworką»
-            # (костел ф.685, 1847, єдиний підтверджений латинський хіт роду).
-            # Цілого слова в тексті НЕ ІСНУЄ, тому пошук по повній формі мовчить
-            # при будь-якій якості HTR — 43-50 балів проти порогу 78.
-            #
-            # 🔴🔴 ВІКНО, А НЕ СУСІДНІЙ РЯДОК (2026-07-29). Сегментація табличного
-            # бланку ЗШИВАЄ КОЛОНКИ в один рядок, тож половинки прізвища
-            # розповзаються: на еталоні 685-3-106_0273 «Dolsz» стоїть у рядку 31,
-            # а «czynski» — аж у 33. Склейка лише з попереднім рядком той запис
-            # ПРОПУСКАЛА (перевірено на бойовому виводі всіх версій Скриби).
-            # ⚠ Далекі склейки СУВОРІШІ за сусідню. Через рядок-два половинки
-            # злітаються вже не за законом переносу, а випадково, тож уламок в
-            # одну-дві літери («d» + «Jaroszynkim») дає хибний бал на самому лише
-            # сусідньому слові. Для back≥2 вимагаємо, щоб ОБИДВІ частини були
-            # осмислені; сусідній рядок лишається як був — там 39% знахідок.
-            for back, pt in enumerate(reversed(prev_toks), 1):
-                if not toks or len(pt) + len(toks[0]) < 7:
-                    continue
-                if back >= 2 and (len(pt) < 3 or len(toks[0]) < 3):
-                    continue
-                sep = "-" if back == 1 else f"-{back}⏎"
-                cands.append((f"{pt}{sep}{toks[0]}", _norm(pt + toks[0])))
-            for i, t in enumerate(toks):
-                if len(t) >= 4:
-                    cands.append((t, _norm(t)))
-                # прізвище часто розірване пробілом («Lubkow skiego») — клеїмо пару
-                if i + 1 < len(toks) and len(t) + len(toks[i + 1]) >= 6:
-                    pair = t + toks[i + 1]
-                    cands.append((f"{t} {toks[i + 1]}", _norm(pair)))
-                # Kraken на невідомих довгих словах іноді рве їх на 3 фрагменти
-                # («Siko rski» замість «Sikorski») — пара тоді все ще
-                # шум (найкращий склеєний уламок ~65-70), лише трійка виявляє
-                # слово. Гард на довжину кожного фрагмента — інакше комбінаторно
-                # клеїмо випадкові сусідні слова нормальної прози.
-                if (
-                    i + 2 < len(toks)
-                    and len(t) <= 8 and len(toks[i + 1]) <= 8 and len(toks[i + 2]) <= 8
-                    and len(t) + len(toks[i + 1]) + len(toks[i + 2]) >= 9
-                ):
-                    triple = t + toks[i + 1] + toks[i + 2]
-                    cands.append((f"{t} {toks[i + 1]} {toks[i + 2]}", _norm(triple)))
-            if toks:
-                prev_toks.append(toks[-1])
-                del prev_toks[:-LINE_BREAK_WINDOW]
-            if cands:
-                index.append((page, ln_no, raw, cands))
+        for ln_no, raw, cands in page_candidates(
+                txt.read_text(encoding="utf-8").splitlines()):
+            index.append((page, ln_no, raw, cands))
     _CACHE[name] = (key, index)
     return index
+
+
+def page_candidates(lines: list[str]) -> Iterator[tuple[int, str, list[tuple[str, str]]]]:
+    """Рядки сторінки → кандидати на збіг. Один дім на весь застосунок.
+
+    🔴 Виділено з побудови індексу, бо цих правил склейки потребують ДВА
+    читачі: індекс пошуку (гуртом) і розбір знайденого хіта (одна сторінка,
+    щоб назвати саме те слово, яке збіглося). Друга копія правил розійшлася б
+    із першою тихо — і пошук почав би знаходити не те, що вміє пояснити.
+
+    ⚠ Стан переносів (`prev_toks`) живе В МЕЖАХ сторінки: перенос через
+    останній рядок аркуша на перший рядок наступного не буває, а якби ми його
+    допустили, склейка йшла б через розворот.
+    """
+    prev_toks: list[str] = []   # хвости попередніх рядків — для переносів
+    for ln_no, raw in enumerate(lines, 1):
+        toks = _TOKEN_RE.findall(raw)
+        # ⚠ ОКРЕМИЙ ФІЛЬТР «РЯДКІВ-ОГРИЗКІВ» ТУТ НЕ ПОТРІБЕН — перевірено
+        # заміром 2026-07-31, щоб наступний не пішов тим самим хибним
+        # шляхом. На порожньому звороті сегментація ріже волокна паперу як
+        # рядки, і декод віддає «с / и / св / 1 ; 7 / сащъ». Таких рядків
+        # у корпусі 23.7%, і виглядають вони як явне джерело хибних збігів,
+        # але кандидатів з них майже не виходить: одиночний токен береться
+        # від 4 літер, пара — від 6 сумарно, тож огризок і так відсіюється
+        # довжиною. Спроба глушити їх явно прибрала 0.1% кандидатів і
+        # НУЛЬ хітів на восьми контрольних запитах (рід, Ярошинські,
+        # М'ястківка, Ігнатків, Kowalski, Szczurowski).
+        # 🔴 А глушити такий рядок ЦІЛКОМ (разом із хвостом у `prev_toks`)
+        # прямо шкідливо: у вузькій колонці перша половина прізвища буває
+        # сама в огризку («doi» / «szczynskiego»), і на ф.792-1-16 такий
+        # варіант з'їв три склейки роду.
+        cands: list[tuple[str, str]] = []
+        # 🔴 Прізвище, РОЗІРВАНЕ ПЕРЕНОСОМ через рядок. У вузьких колонках
+        # метрик це норма: «…Teodor Sikor» / «ski z odnodworką»
+        # (костел ф.685, 1847, єдиний підтверджений латинський хіт роду).
+        # Цілого слова в тексті НЕ ІСНУЄ, тому пошук по повній формі мовчить
+        # при будь-якій якості HTR — 43-50 балів проти порогу 78.
+        #
+        # 🔴🔴 ВІКНО, А НЕ СУСІДНІЙ РЯДОК (2026-07-29). Сегментація табличного
+        # бланку ЗШИВАЄ КОЛОНКИ в один рядок, тож половинки прізвища
+        # розповзаються: на еталоні 685-3-106_0273 «Dolsz» стоїть у рядку 31,
+        # а «czynski» — аж у 33. Склейка лише з попереднім рядком той запис
+        # ПРОПУСКАЛА (перевірено на бойовому виводі всіх версій Скриби).
+        # ⚠ Далекі склейки СУВОРІШІ за сусідню. Через рядок-два половинки
+        # злітаються вже не за законом переносу, а випадково, тож уламок в
+        # одну-дві літери («d» + «Jaroszynkim») дає хибний бал на самому лише
+        # сусідньому слові. Для back≥2 вимагаємо, щоб ОБИДВІ частини були
+        # осмислені; сусідній рядок лишається як був — там 39% знахідок.
+        for back, pt in enumerate(reversed(prev_toks), 1):
+            if not toks or len(pt) + len(toks[0]) < 7:
+                continue
+            if back >= 2 and (len(pt) < 3 or len(toks[0]) < 3):
+                continue
+            sep = "-" if back == 1 else f"-{back}⏎"
+            cands.append((f"{pt}{sep}{toks[0]}", _norm(pt + toks[0])))
+        for i, t in enumerate(toks):
+            if len(t) >= 4:
+                cands.append((t, _norm(t)))
+            # прізвище часто розірване пробілом («Lubkow skiego») — клеїмо пару
+            if i + 1 < len(toks) and len(t) + len(toks[i + 1]) >= 6:
+                pair = t + toks[i + 1]
+                cands.append((f"{t} {toks[i + 1]}", _norm(pair)))
+            # Kraken на невідомих довгих словах іноді рве їх на 3 фрагменти
+            # («Siko rski» замість «Sikorski») — пара тоді все ще
+            # шум (найкращий склеєний уламок ~65-70), лише трійка виявляє
+            # слово. Гард на довжину кожного фрагмента — інакше комбінаторно
+            # клеїмо випадкові сусідні слова нормальної прози.
+            if (
+                i + 2 < len(toks)
+                and len(t) <= 8 and len(toks[i + 1]) <= 8 and len(toks[i + 2]) <= 8
+                and len(t) + len(toks[i + 1]) + len(toks[i + 2]) >= 9
+            ):
+                triple = t + toks[i + 1] + toks[i + 2]
+                cands.append((f"{t} {toks[i + 1]} {toks[i + 2]}", _norm(triple)))
+        if toks:
+            prev_toks.append(toks[-1])
+            del prev_toks[:-LINE_BREAK_WINDOW]
+        if cands:
+            yield ln_no, raw, cands
 
 
 def search(q: str, name: str | None = None, thresh: int = 78,
@@ -834,62 +850,83 @@ def search(q: str, name: str | None = None, thresh: int = 78,
     stems = [s for s in stems if len(s) >= 3]
     if not stems:
         return {"hits": [], "cases": 0, "error": "закороткий запит"}
+    from nyshporka.search import decode as D
+
     names = [name] if name else [c["name"] for c in list_cases()]
+    # 🔴 Індекс однієї справи збирається на місці — це секунди, і людина
+    # просила саме цю справу. Індекс усього корпусу — чверть години, і робити
+    # це мовчки всередині запиту означає повісити застосунок.
+    got = D.sweep(stems, names, thresh=thresh,
+                  build_budget=len(names) if name else D.INLINE_BUILD)
+    raw_hits = got["hits"]
+    raw_hits.sort(key=lambda h: -h["score"])
+    shown = raw_hits[:limit]
+
     # Рушій кожного прогону — щоб у результатах було видно, ХТО знайшов. Це і є
     # робочий бік симбіозу: у тримовній справі один аркуш ловить Скриба, сусідній
     # Писар, і за міткою одразу ясно, кому з них вірити на цьому письмі.
-    engines = {}
-    for nm in names:
-        m = load_meta(nm) or {}
-        engines[nm] = (run_engine(m), m.get("script") or "", run_engine_id(m))
-    hits = []
-    scanned = 0
-    for nm in names:
-        index = _case_index(nm)
-        if not index:
-            continue
-        scanned += 1
-        for page, ln_no, raw, cands in index:
-            # 0.0, а не 0: rapidfuzz рахує у float, і ціле тут лише прикидалось
-            # би типом — поріг `thresh` порівнюється саме з цим числом.
-            best_sc, best_word = 0.0, ""
-            for word, norm in cands:
-                for stem in stems:
-                    # закороткий токен не може легітимно матчити довгий стем
-                    # (інакше 4-літерні уламки типу «Luib» шумлять на 86)
-                    if len(norm) < max(4, int(len(stem) * 0.6)):
-                        continue
-                    sc = fuzz.ratio(norm, stem)
-                    if len(norm) >= len(stem):
-                        # partial дозволяє відмінкові хвости («-iego», «-ого»)
-                        sc = max(sc, fuzz.partial_ratio(norm, stem))
-                    if sc > best_sc:
-                        best_sc, best_word = sc, word
-            if best_sc >= thresh:
-                eng, scr, eid = engines.get(nm, ("", "", ""))
-                # 🔴 ДВА номери того самого рядка, і це не дублювання.
-                # `line_no` — номер ДЛЯ ЛЮДИНИ, з одиниці, як у редакторі; його
-                # показує таблиця хітів. `line_index` — індекс рамки в
-                # `.lines.json`, з нуля, і саме його чекає гортач.
-                #
-                # Доти, доки поле було одне, кнопка 👁 у пошуку передавала
-                # людський номер туди, де ждали індекс, — і показувала СУСІДНІЙ
-                # рядок. Гірше за відсутність кнопки: вона зроблена рівно заради
-                # «виявити ≠ перевірити», а віддавала оку не той рядок, який
-                # знайшла машина, з тим самим виглядом правильної відповіді.
-                hits.append({"name": nm, "page": page, "line_no": ln_no,
-                             "line_index": ln_no - 1,
-                             "line": raw, "matched": best_word,
-                             "engine": eng, "engine_id": eid, "script": scr,
-                             "score": round(best_sc)})
-    hits.sort(key=lambda h: -h["score"])
-    shown = hits[:limit]
+    #
+    # ⚠ Читається лише для ПОКАЗАНИХ: мета кожного прогону — окремий файл, і на
+    # корпусі це тисяча читань заради поля, яке побачать у двадцяти рядках.
+    engines: dict[str, tuple[str, str, str]] = {}
+    for h in shown:
+        nm = h["name"]
+        if nm not in engines:
+            m = load_meta(nm) or {}
+            engines[nm] = (run_engine(m), m.get("script") or "", run_engine_id(m))
+        eng, scr, eid = engines[nm]
+        # 🔴 ДВА номери того самого рядка, і це не дублювання.
+        # `line_no` — номер ДЛЯ ЛЮДИНИ, з одиниці, як у редакторі; його
+        # показує таблиця хітів. `line_index` — індекс рамки в
+        # `.lines.json`, з нуля, і саме його чекає гортач.
+        #
+        # Доти, доки поле було одне, кнопка 👁 у пошуку передавала
+        # людський номер туди, де ждали індекс, — і показувала СУСІДНІЙ
+        # рядок. Гірше за відсутність кнопки: вона зроблена рівно заради
+        # «виявити ≠ перевірити», а віддавала оку не той рядок, який
+        # знайшла машина, з тим самим виглядом правильної відповіді.
+        h["engine"], h["script"], h["engine_id"] = eng, scr, eid
+    _resolve(shown)
     if context:
         _add_context(shown, side=context)
     phantom_n, blind = mark_phantoms(shown)
-    return {"hits": shown, "total": len(hits), "cases": scanned,
+    return {"hits": shown, "total": len(raw_hits), "cases": got["scanned"],
             "stems": stems, "thresh": thresh,
+            # 🔴 Знаменник ІНДЕКСУ, а не лише прогонів. Прочесане й наявне —
+            # різні числа доти, доки індекс не догнав корпус, і нуль на
+            # частковому індексі означає зовсім не те, що нуль на повному.
+            "runs_total": got["runs"], "unindexed": got["unindexed"],
             "phantom": phantom_n, "phantom_blind": blind}
+
+
+def _resolve(hits: list[dict[str, Any]]) -> None:
+    """Дописати хітам сам РЯДОК і слово, яке збіглося.
+
+    🔴 Індекс тримає лише нормалізовані форми — саме тому він у двадцять разів
+    менший за текст. Показане слово відновлюється тут, і лише для тих кількох
+    рядків, які людина побачить: перебудувати кандидатів однієї сторінки
+    коштує мілісекунди, а зберігати їх для всіх означало б утричі роздути
+    індекс заради даних, що майже ніколи не читаються.
+
+    ⚠ Кандидати рахує `page_candidates` — та сама функція, що будувала індекс.
+    Друга копія правил склейки розійшлася б із першою тихо, і пошук почав би
+    показувати не те слово, яким знайшов.
+    """
+    cands_of: dict[tuple[str, str], dict[int, list[tuple[str, str]]]] = {}
+    text_of: dict[tuple[str, str], list[str]] = {}
+    for h in hits:
+        key = (h["name"], h["page"])
+        if key not in cands_of:
+            got = read_page_text(h["name"], h["page"]) or {}
+            text_of[key] = list(got.get("lines") or [])
+            cands_of[key] = {ln: cands for ln, _raw, cands
+                             in page_candidates(text_of[key])}
+        want = h.pop("norm", "")
+        cands = cands_of[key].get(h["line_no"]) or []
+        h["matched"] = next((w for w, n in cands if n == want), want)
+        lines = text_of[key]
+        idx = h["line_no"] - 1
+        h["line"] = lines[idx] if 0 <= idx < len(lines) else ""
 
 
 def mark_phantoms(hits: list[dict[str, Any]]) -> tuple[int, float]:

@@ -42,6 +42,14 @@ def space(tmp_path: Path, monkeypatch):
 
     monkeypatch.setattr(L, "LIBRARY_PATH", derived / "case_library.json")
     monkeypatch.setattr(L, "VERDICTS_PATH", tmp_path / "verdicts.json")
+    # 🔴 Шлях реєстру теж, і це не формальність. `cases.db.DB_PATH` рахується
+    # ПРИ ІМПОРТІ від того простору, який трапився першим, і далі не змінюється
+    # ніколи. Без цієї підміни тест читав би реєстр ЧУЖОГО простору — того, що
+    # лишився від попереднього тесту, — і «шарів немає» перетворювалось би на
+    # «шари є», причому лише в повній збірці й лише за певного порядку.
+    from nyshporka.cases import db as DB
+
+    monkeypatch.setattr(DB, "DB_PATH", derived / "case_index.sqlite")
     LY.reset()
     yield tmp_path
     LY.reset()

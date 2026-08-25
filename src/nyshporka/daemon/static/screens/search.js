@@ -34,10 +34,51 @@ SCREENS.search = async () => {
       </select>
       <button type="submit">${t('search.run')}</button>
     </form>
-    <div id="hits"></div>`);
+    <div id="hits"></div>
+    <div id="search-index"></div>`);
+  if (!only) await searchIndexState();
 };
 
+/**
+ * Стан індексу прочитаного — ДО пошуку, а не після.
+ *
+ * 🔴 Це знаменник цього екрана. Пошук чеше лише зібране, і «не знайшлось»
+ * означає зовсім різне при повному й частковому індексі. Доти людина цього не
+ * бачила взагалі: відповідь приходила однакова, а покривала різне.
+ *
+ * ⚠ Питається лише при пошуку по ВСЬОМУ прочитаному: у межах однієї справи
+ * індекс збирається на місці за секунди, і питання «скільки лишилось» там не
+ * стоїть.
+ */
+async function searchIndexState() {
+  const box = el('search-index');
+  if (!box) return;
+  const env = await callOp('search.state', {});
+  if (!env.ok) return;
+  const d = env.data || {};
+  if (!d.runs) return;                       // читати ще нема чого
+  const mb = (d.bytes || 0) / (1024 * 1024);
+  box.innerHTML = d.stale
+    ? `<div class="warn">${esc(t('search.index.partial')
+        .replace('{n}', d.stale).replace('{all}', d.runs))}
+       <button data-act="search.index">${t('search.index.go')}</button></div>`
+    : `<p class="muted">${esc(t('search.index.ready')
+        .replace('{all}', d.runs).replace('{mb}', mb.toFixed(0)))}</p>`;
+}
+
 Object.assign(ACTIONS, {
+  /**
+   * Зібрати індекс прочитаного.
+   *
+   * 🔴 Робота довга (чверть години на великому корпусі) і йде в чергу — туди ж
+   * і ведемо. Кнопка, після якої нічого видимо не сталось, натискається вдруге.
+   */
+  'search.index': async () => {
+    const env = await callOp('search.index', {});
+    if (!env.ok) return alert(env.error);
+    return show('jobs');
+  },
+
   'search.run': async (ev) => {
     ev.preventDefault();
     const fd = new FormData(ev.target);
