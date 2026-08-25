@@ -41,7 +41,10 @@ class LibraryArgs(BaseModel):
                                            "та латинки")
     q_thresh: int = Field(default=80, ge=60, le=100,
                           description="поріг приблизного збігу для `q`")
+    key: str = Field(default="", description="точний ключ справи `repo/fond/spr` "
+                                             "— вхід із реєстру опису чи газетира")
     repo: str = Field(default="", description="архів: DAHMO, DAVO, CDIAK…")
+    fond: str = Field(default="", description="номер фонду")
     record_type: str = Field(default="", description="тип запису: birth, revision…")
     doc_type: str = Field(default="", description="тип документа, підрядком")
     uezd: str = Field(default="", description="повіт; порівнюються КОРЕНІ форм")
@@ -113,7 +116,18 @@ def _fuzzy_hit(q: str, row: dict[str, Any], thresh: int) -> bool:
 
 
 def _matches(row: dict[str, Any], a: LibraryArgs) -> bool:
+    # 🔴 ТОЧНИЙ збіг, а не підрядок. Це вхід із реєстру опису й газетира, де
+    # ключ уже відомий; приблизний пошук за шифрою давав би сусідні справи
+    # того самого фонду — тобто відкривав би не ту книгу.
+    #
+    # ⚠ Одному ключу може відповідати КІЛЬКА рядків: та сама архівна справа
+    # буває завантажена кількома вирізками кадрів у різні теки. Показуємо всі —
+    # сховати частину означало б збрехати про те, що є на диску.
+    if a.key and str(row.get("key") or "") != a.key:
+        return False
     if a.repo and (row.get("repo") or "").upper() != a.repo.upper():
+        return False
+    if a.fond and str(row.get("fond") or "") != a.fond:
         return False
     if a.curated and not row.get("curated"):
         return False

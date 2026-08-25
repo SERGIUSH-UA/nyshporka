@@ -263,6 +263,12 @@ button.on-solid { color: var(--white); }
   padding: 8px 11px; font-size: 12px; }
 .warn.err { background: var(--err-bg); border-color: var(--err-line);
   color: var(--err-2); }
+/* 🔴 Порада «→ далі» — не застереження. Вона не про те, що пішло не так, а про
+   те, що робити наступним кроком, тож смуга не фарбується тривожним: інакше
+   застосунок виглядав би так, ніби скаржиться на кожну вдалу відповідь. */
+.warn.next { background: transparent; border-color: var(--line-2);
+  color: var(--fg-2); display: flex; align-items: center; gap: 8px; }
+.warn.next button { flex: none; }
 
 /* бейдж картки рев'ю: 11 умовних сигналів мали кожен свій інлайн-стиль */
 .badge { display: inline-block; border-radius: var(--r-m); padding: 1px 7px; font-size: 11px;

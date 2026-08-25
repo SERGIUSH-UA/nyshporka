@@ -12,7 +12,6 @@ from rich.table import Table
 from nyshporka import brand
 from nyshporka.cases import db
 from nyshporka.catalog import store as _store
-from nyshporka.core.workspace import workspace as _workspace
 from nyshporka.fonds import registry as _fonds
 
 app = typer.Typer(help="Реєстр справ: що є, що декодовано, що прошукано, що бачило око.")
@@ -597,119 +596,51 @@ def cmd_take(key: str = typer.Argument(..., help="DAHMO/230/43 або DAHMO/230/
     (42 справи з 2950) і 1058 справ стояли в черзі «замовлення в архіві»,
     лежачи при цьому онлайн.
     """
-    repo, fond, opys, spr, letter = _parse_key(key)
-    row, path = _opys_registry_row(repo, fond, opys, spr, letter)
-    if row is None:
-        console.print(f"[err]у реєстрі опису немає {repo} {fond}-{opys}-{spr}{letter}"
-                      f"[/err] ({path})")
-        raise typer.Exit(1)
-    if not (row.get("archium_url") or row.get("commons_url")):
-        console.print(f"[warn]{repo} {fond}-{opys}-{spr}{letter}: сканів на Commons "
-                      "немає[/warn]")
-        if row.get("mirror_url"):
-            console.print(f"  на дзеркалі є ({int(row.get('mirror_size') or 0) / 2**20:.0f}"
-                          " МБ), але воно обрізає великі справи — качати руками свідомо:")
-            console.print(f"  {row['mirror_url']}")
-        # 🎞 Плівка FS — раніше цю гілку не перевіряли, і команда радила
-        #    «замовлення в архіві» про справи, які лежать онлайн. Для метричних
-        #    фондів це типовий випадок: ЦДІАК ф.224 має DGS у 1827 справах
-        #    проти 42 сканів на Commons.
-        film = (row.get("fs_film") or row.get("fs_dgs") or "").strip()
-        if film:
-            console.print(f"  [ok]але є плівка FamilySearch — DGS {film}[/ok]")
-            console.print("    перегляд: https://www.familysearch.org/records/images/"
-                          f"search-results?imageGroupNumbers={film}")
-            # 🔴 Порада мусить вести туди, що є В ЦЬОМУ пакеті. Дзеркало плівок
-            # — звичайне джерело (`nysh sources`), тож качається тим самим
-            # `nysh get`, що й решта. Радити тут скрипт із дослідницького репо
-            # означало б дати команду, якої в людини на машині немає, — а це
-            # читається як поламаний застосунок, не як відсутня можливість.
-            console.print("    завантаження (поза `take`, бо це не Commons):")
-            console.print(f"      nysh browse fsfilm {film}"
-                          "        [muted]що лежить на плівці[/muted]")
-            console.print(f"      nysh get fsfilm {film} --out <тека>"
-                          "  [muted]забрати кадри[/muted]")
-        elif not row.get("mirror_url"):
-            console.print("  → замовлення в архіві; шифра: "
-                          f"{repo} ф.{fond} оп.{opys} спр.{spr}{letter}")
-        raise typer.Exit(2)
+    from nyshporka.cases import take as T
 
-    ws = _workspace()
-    slug = f"{_REPO_SLUG.get(repo, repo.lower())}_{fond}"
-    case_dir = ws.root / "data" / "raw" / slug / f"spr-{spr}{letter}"
-
-    # 🔴 КАНАЛ ОБИРАЄТЬСЯ ЗА ШВИДКІСТЮ, а не за тим, який перевіряється першим
-    # у коді. Переглядач архіву віддає готові посторінкові JPG, Commons — один
-    # файл на сотні мегабайтів. Доки перевірявся лише Commons, ЦДІАК ф.224
-    # виглядав фондом майже без сканів (42 справи з 2950), і понад тисяча справ
-    # стояла в черзі «замовлення в архіві», лежачи при цьому онлайн.
-    #
-    # 🔴 І те, й те качається В ЦЬОМУ ПРОЦЕСІ. Досі тут запускались файли з
-    # дослідницького репозиторію за шляхом усередині простору, тобто публічний
-    # пакет залежав від приватного за адресою на диску: на чужій машині тієї
-    # теки немає, і команда падала з «файл не знайдено» — виглядало це як
-    # поламаний застосунок, а не як відсутня можливість.
-    from nyshporka.cases import acquire as A
-
-    archium = str(row.get("archium_url") or "").strip()
-    name = str(row.get("commons_title") or "").strip()
-    channel = "ARCHIUM" if archium else ("Commons" if name else "")
-    if not channel:
-        console.print("[err]у реєстрі немає ні адреси переглядача "
-                      "(`archium_url`), ні назви файлу на Commons "
-                      "(`commons_title`) — качати нічого[/err]")
-        console.print(f"[muted]зібрати: nysh registry collect archium "
-                      f"--repo {repo} --fond {fond}[/muted]")
-        raise typer.Exit(2)
-
-    console.print(f"[muted]канал: {channel}[/muted]")
-    if dry_run:
-        console.print(f"[muted]узяв би: {archium or name}[/muted]")
-        console.print(f"[muted]у теку : {case_dir}[/muted]")
-        return
-
-    shifra = f"{spr}{letter}"
-    title_ = str(row.get("title") or "")
-    year_ = str(row.get("year_from") or "")
+    # 🔴 Одна реалізація на два входи. Вибір каналу, завантаження й перебудова
+    # реєстрів живуть у `cases.take`, а тут лишається лише друк: доти все це
+    # було написано ВСЕРЕДИНІ команди, тож із браузера дістатись до нього було
+    # неможливо, і рядок опису в консолі лишався тупиком.
     try:
-        if archium:
-            got = A.from_archium(case_dir, archium, archive=repo, fond=fond,
-                                 opys=opys, spr=shifra, repo=repo,
-                                 title=title_, year=year_)
-        else:
-            got = A.from_commons(case_dir, name, archive=repo, fond=fond,
-                                 opys=opys, spr=shifra, title=title_, year=year_)
-    except A.AcquireError as exc:
+        plan = T.plan(key)
+    except T.TakeError as exc:
         console.print(f"[err]{exc}[/err]")
         raise typer.Exit(1) from None
-    console.print(f"[ok]✓[/ok] {got.pages} стор., "
-                  f"{got.bytes / 2**20:.0f} МБ → {got.case_dir}")
-    if skip_build:
+
+    label = f"{plan['repo']} {plan['fond']}-{plan['opys']}-{plan['spr']}"
+    if not plan["channel"]:
+        console.print(f"[warn]{label}: {plan['why']}[/warn]")
+        if plan["mirror"]:
+            console.print(f"  {plan['mirror']}")
+        if plan["film"]:
+            console.print(f"  [muted]nysh browse fsfilm {plan['film']}[/muted]")
+            console.print(f"  [muted]nysh get fsfilm {plan['film']} --out <тека>[/muted]")
+        raise typer.Exit(2)
+
+    console.print(f"[muted]канал: {plan['channel']} — {plan['why']}[/muted]")
+    if dry_run:
+        console.print(f"[muted]узяв би: {plan['ref']}[/muted]")
+        console.print(f"[muted]у теку : {plan['case_dir']}[/muted]")
         return
 
-    # Приймач — ДИСК: справа має з'явитись у бібліотеці, інакше решта конвеєра її
-    # не побачить, а прогін ляже «нічиїм». Викликаємо ті самі функції, що й
-    # `nysh cases build --rescan` (пакет не має `__main__`, тож `-m nyshporka` не піде).
-    from nyshporka.library import build_library, write_library
-    entries = build_library()
-    write_library(entries)
-    res = db.build_index()
-    console.print(f"[muted]бібліотека: {len(entries)} справ · реєстр: {res['cases']}[/muted]")
+    try:
+        got = T.take(key, force=force, reindex=not skip_build)
+    except T.TakeError as exc:
+        console.print(f"[err]{exc}[/err]")
+        raise typer.Exit(1) from None
 
-    # 🔴 Приймач — БІБЛІОТЕКА (свіжозібрана), а не реєстр опису: у реєстрі опису
-    # колонка `on_disk` оновиться лише наступним `fond_registry_merge`, тож
-    # перевірка по ньому завжди кричала б «не видима» одразу після завантаження.
-    seen = any(str(e.fond) == fond and str(e.spr) == f"{spr}{letter}"
-               and (e.repo or "").upper() == repo for e in entries)
-    if seen:
-        console.print(f"[muted]бібліотека бачить {repo} {fond}-{opys}-{spr}{letter}[/muted]")
-    else:
+    console.print(f"[ok]✓[/ok] {got['pages']} стор., "
+                  f"{got['bytes'] / 2**20:.0f} МБ → {got['case_dir']}")
+    if got["in_library"] is False:
         console.print("[warn]⚠ справи НЕ видно в бібліотеці — перевір теку й "
                       "meta.json[/warn]")
+    elif got["in_library"]:
+        console.print(f"[muted]бібліотека бачить {label}[/muted]")
 
-    console.print(f"\n[ok]✅ {repo} {fond}-{opys}-{spr}{letter} у роботі.[/ok] Далі:")
-    console.print(f"  1. [bold]megen cases show {repo}/{fond}/{spr}{letter}[/bold] — картка")
-    if row.get("num_src") == "interp":
-        console.print("  2. [err]звірити ШИФРУ оком[/err] — номер відновлено, "
+    console.print("")
+    console.print(f"[ok]✅ {label} у роботі.[/ok] Далі:")
+    if got["shifra_needs_eye"]:
+        console.print("  [err]звірити ШИФРУ оком[/err] — номер відновлено, "
                       "див. meta.json → shifra_needs_eye")
-    console.print("  3. HTR-прогін (письмо за жанром: родовідні 1802 — латинка/Скриба)")
+    console.print("  HTR-прогін (письмо за жанром: родовідні 1802 — латинка/Скриба)")

@@ -4,13 +4,14 @@ import { t, LANG } from '../core/strings.js';
 import { TOKEN, callOp, SEQ } from '../core/net.js';
 import { esc, el, setView, busy, failure, boxError, busyForm,
   renderWarnings, renderCoverage, curGen, alive } from '../core/view.js';
-import { SCREENS, ACTIONS } from '../core/registry.js';
-import { SECTIONS, NAV_LABEL, show, renderNav,
+import { SCREENS, ACTIONS, PAGERS } from '../core/registry.js';
+import { SECTIONS, NAV_LABEL, show, renderNav, goto,
   refreshJobs } from '../core/nav.js';
 import { ST } from '../core/state.js';
 import { ic, eng } from '/ui/icons.js';
 import { swapHtml, skelRows, skelCards } from '/ui/dom.js';
 import { attachCombobox } from '/ui/combobox.js';
+import { pager, step } from '/ui/pager.js';
 
 
 
@@ -24,34 +25,80 @@ import { attachCombobox } from '/ui/combobox.js';
  */
 let EDIT = null;
 
+/** Сторінка приймальні. Переживає вихід з екрана — як фільтр бібліотеки. */
+let PAGE = 0;
+/** Скільки їх усього. Тримається тут, щоб «далі» не везла за край. */
+let PAGES = 1;
+
+/**
+ * 📥 Приймальня — матеріал на диску, який ще НІЧИМ не є.
+ *
+ * 🔴 Екран показує рівно те, чого немає в бібліотеці: теки без шифри
+ * (`unfiled`) і збірки, всередині яких лежить багато справ (`bundle`). Доти він
+ * віддавав ті самі рядки, що й бібліотека, лише без фільтрів і без сторінок —
+ * тобто виглядав її гіршою копією, і питання «а чим вони відрізняються» не мало
+ * відповіді, яку видно очима.
+ *
+ * Межа проста й вона про ключ: у бібліотеки одиниця обліку — справа з шифрою
+ * (`repo/fond/spr`), і саме на цьому ключі тримаються всі її знаменники. Тека
+ * без шифри ключа не має, тож у бібліотеці її не було й не буде — але вона є на
+ * диску, і поки її не описали, вона невидима для всього іншого.
+ */
 SCREENS.cases = async () => {
   const gen = curGen();
   busy();
-  const env = await callOp('cases.list', { limit: 100 });
+  const env = await callOp('cases.list',
+    { kind: 'unfiled,bundle', page: PAGE, page_size: 50 });
   if (!alive(gen)) return;
   if (!env.ok) return failure(env);
-  const rows = env.data.cases || [];
+  const d = env.data;
+  const rows = d.cases || [];
+  const c = d.counts || {};
+  PAGES = d.pages || 1;
   setView(`
-    <h2>${t('cases.title')} <button data-act="cases.build"
+    <h2>${t('nav.cases')} <button data-act="cases.build"
       title="${t('cases.build.why')}">🔄 ${t('cases.build')}</button></h2>
+    <p class="muted">${t('intake.why')}</p>
     ${renderWarnings(env)}
-    <table><thead><tr>
-      <th>шифра</th><th>назва</th><th class="num">${t('common.frames')}</th>
-      <th>читання</th><th></th></tr></thead><tbody>
+    ${intakeCount(d, c)}
+    ${rows.length ? `<table><thead><tr>
+      <th></th><th>тека</th><th class="num">${t('common.frames')}</th><th></th>
+      </tr></thead><tbody>
     ${rows.map((r) => `<tr>
-      <td class="mono">${esc(r.shifra || r.key)}</td>
-      <td>${esc((r.title || '').slice(0, 90))}</td>
+      <td title="${esc(t(`intake.kind.${r.kind}`))}">${r.kind === 'bundle' ? '🗃' : '📄'}</td>
+      <td class="mono">${esc(r.path || r.key)}</td>
       <td class="num">${esc(r.frames || 0)}</td>
-      <td>${r.htr_stage && r.htr_stage !== 'none'
-        ? `${t('cases.read')} ${esc(r.htr_pages_max || '')}`
-        : `<span class="muted">${t('cases.none')}</span>`}</td>
       <td>${r.path
-        ? `<button data-act="case.edit" data-arg="${esc(r.path)}"
-             title="${t('case.edit')}">✏</button>`
+        ? `<button data-act="intake.frames" data-arg="${esc(r.path)}"
+             title="${t('lib.act.frames')}">🖼</button>
+           <button data-act="case.edit" data-arg="${esc(r.path)}"
+             title="${t('intake.describe')}">✏</button>`
         : `<span class="muted" title="${t('cases.nodir')}">—</span>`}</td>
     </tr>`).join('')}
-    </tbody></table>`);
+    </tbody></table>
+    ${pager(d)}`
+      : `<p><b>${t('intake.empty')}</b></p>`}`);
 };
+
+/**
+ * 🔴 Знаменник ОБОМА боками межі.
+ *
+ * Приймальня без числа бібліотеки виглядає як увесь простір, і навпаки. Саме
+ * тому тут стоїть і те, і те: «стільки неописаного, стільки описаного» — і
+ * друге число водночас є кнопкою туди.
+ */
+function intakeCount(d, c) {
+  const described = Number(c.case || 0);
+  const bits = [];
+  if (d.total !== null && d.total !== undefined) {
+    bits.push(`<b>${esc(d.total)}</b> ${t('intake.undescribed')}`);
+  }
+  if (Number(c.bundle || 0)) bits.push(`${esc(c.bundle)} ${t('intake.bundles')}`);
+  const lib = described
+    ? ` · <button data-act="nav" data-arg="library">${esc(described)}
+        ${t('intake.described')} →</button>` : '';
+  return `<p class="muted">${bits.join(' · ')}${lib}</p>`;
+}
 
 SCREENS.newcase = async () => {
   const sc = (EDIT && EDIT.sidecar) || {};
@@ -94,7 +141,15 @@ SCREENS.newcase = async () => {
   EDIT = null;
 };
 
+PAGERS.cases = (delta) => {
+  PAGE = step(PAGE, delta, PAGES);
+  return show('cases');
+};
+
 Object.assign(ACTIONS, {
+  /** 🖼 Подивитись, ЩО це, перш ніж описувати: без кадрів опис — вгадування. */
+  'intake.frames': (_ev, elm) => goto('frames', { case: elm.dataset.arg }),
+
   'cases.build': async () => {
     const env = await callOp('cases.build', { rescan: true });
     if (!env.ok) return failure(env);

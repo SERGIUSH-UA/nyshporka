@@ -256,7 +256,11 @@ class CasesArgs(BaseModel):
     # працювала. Шар даних (`db.query_rows`) `kind` приймав від початку.
     kind: str = Field(default="",
                       description="case | bundle | unfiled (матеріал без шифри)")
-    limit: int = Field(default=60, ge=1, le=500)
+    limit: int = Field(default=60, ge=1, le=500,
+                       description="скільки рядків віддати; `page_size` сильніший")
+    page: int = Field(default=0, ge=0, le=10_000, description="сторінка видачі")
+    page_size: int = Field(default=0, ge=0, le=200,
+                           description="розмір сторінки; 0 — узяти `limit`")
 
 
 @op("cases.list", summary="Мої справи: що є, що прочитано, що прошукано",
@@ -271,16 +275,25 @@ def cases_list(a: CasesArgs) -> Envelope:
     """
     from nyshporka.cases import db
 
+    # 🔴 Знаменник рахується ЗАВЖДИ, навіть коли сторінок не просили. Доти
+    # видача казала лише «показано N», і 60 рядків із півтори тисячі виглядали
+    # як уся відповідь — обрізаний список без знаменника нічим не кращий за
+    # нуль без нього.
+    size = a.page_size or a.limit
     try:
-        rows = db.query_rows(q=a.q, repo=a.repo, htr=a.htr, year=a.year,
-                             place=a.place, kind=a.kind, limit=a.limit)
+        rows, total = db.query_page(page=a.page, page_size=size, q=a.q,
+                                    repo=a.repo, htr=a.htr, year=a.year,
+                                    place=a.place, kind=a.kind)
     except FileNotFoundError:
         # 🔴 «Реєстру ще немає» — це НОРМАЛЬНИЙ стан щойно створеного простору,
         # а не поламка. Відмова тут була першим, що бачив новачок, відкривши
         # «Мої справи»: червоне «Не вийшло» замість порожнього переліку. Гірше
         # того, екран на відмові не малювався взагалі — разом із кнопкою 🔄,
         # якою це й лікується, тобто вихід зникав саме тоді, коли був потрібен.
-        env = ok({"cases": [], "shown": 0, "registry": False})
+        # `shown`/`total` — `None`, а не `0`: нуль тут означав би «перевірили,
+        # справ немає», тоді як реєстру просто не збирали.
+        env = ok({"cases": [], "shown": None, "total": None, "registry": False,
+                  "page": a.page, "page_size": size, "pages": 0})
         env.warn("no_registry_yet",
                  "реєстру справ ще немає — його збирають після того, як у "
                  "просторі з'явиться перша справа")
@@ -289,7 +302,17 @@ def cases_list(a: CasesArgs) -> Envelope:
     except Exception as exc:
         return fail(f"реєстр справ недоступний ({type(exc).__name__}: {exc}) — "
                     f"зберіть його командою `nysh cases build`")
-    env = ok({"cases": rows, "shown": len(rows), "registry": True})
+    pages = (total + size - 1) // size if size else 0
+    try:
+        counts = db.kind_counts()
+    except Exception:
+        counts = {}
+    env = ok({"cases": rows, "shown": len(rows), "total": total,
+              "page": a.page, "page_size": size, "pages": pages,
+              "counts": counts, "registry": True})
+    if a.page and a.page >= pages:
+        env.warn("page_past_end",
+                 f"сторінки {a.page + 1} немає: усього {pages} під цим фільтром")
     try:
         st = db.staleness()
     except Exception:
@@ -1290,6 +1313,10 @@ def _sections_payload() -> dict[str, Any]:
     return {"sections": rows, "preset": S.preset_of(active),
             "presets": {n: sorted(s) for n, s in S.PRESETS.items()},
             "screens": dict(S.SCREENS),
+            # Куди вести з поради «→ далі: <операція>». Конверт називає
+            # операцію, а людині треба екран — без цієї мапи браузер може лише
+            # надрукувати ім'я, тобто сказати те, чого не натиснеш.
+            "op_screen": dict(S.OP_SCREEN),
             "glyphs": {"screens": dict(b.screen_glyphs),
                        "sections": dict(b.section_glyphs)},
             # Значок спрайта поруч із емодзі, а не замість нього: емодзі

@@ -171,6 +171,77 @@ SCREENS: dict[str, str] = {
     "export": "research",
 }
 
+#: Екрани поза секціями — доступні завжди.
+#:
+#: 🔴 `settings` не має гейта НАВМИСНО: саме ним вмикають і вимикають секції.
+#: Замкнути його всередині секції означало б, що вимкнена секція неможливо
+#: увімкнути назад — і виглядало б це як поламаний застосунок, а не як вибір.
+UNGATED_SCREENS: frozenset[str] = frozenset({"settings"})
+
+#: Операція → екран, на якому людина її бачить.
+#:
+#: 🔴 Потрібна саме як ДАНІ, а не як угода про імена: `catalog.search` живе на
+#: екрані «Джерела», `fond.rows` — на «Фондах», `cases.bind` — на «Прогонах».
+#: Вивести це з імені неможливо, а вгадування дало б кнопку, яка веде не туди.
+#:
+#: Заради чого: конверт уже несе пораду «→ далі: <операція>» (`envelope.next`),
+#: і командний рядок з агентом її друкують. Без цієї мапи браузер може лише
+#: показати ім'я операції — тобто сказати людині те, чого вона не натисне.
+OP_SCREEN: dict[str, str] = {
+    # core
+    "workspace.info": "home",
+    "setup.check": "home",
+    "sample.install": "home",
+    "profile.show": "settings",
+    "sections.show": "settings",
+    "sections.set": "settings",
+    "job.query": "jobs",
+    "cases.list": "cases",
+    "cases.build": "cases",
+    "case.show": "cases",
+    "case.register": "newcase",
+    "material.look": "newcase",
+    # material
+    "sources.list": "sources",
+    "catalog.search": "sources",
+    "catalog.browse": "sources",
+    "catalog.manifest": "sources",
+    "acquire.start": "sources",
+    "catalog.packs": "geog",
+    "geog.find": "geog",
+    "geog.card": "geog",
+    "fond.list": "fonds",
+    "fond.rows": "fonds",
+    "fond.take": "fonds",
+    "archive.fond": "fonds",
+    "registry.collectors": "fonds",
+    "registry.plan": "fonds",
+    "registry.collect": "fonds",
+    "registry.merge": "fonds",
+    "library.list": "library",
+    "library.verdict": "library",
+    "case.frames": "frames",
+    "case.frame": "frames",
+    # htr
+    "htr.env": "read",
+    "read.plan": "read",
+    "read.start": "read",
+    "runs.list": "runs",
+    # 🔴 Прив'язка нічийного прогону — на «Прогонах», а не в «Моїх справах»:
+    # питання «чия це робота» ставить саме той, хто дивиться на перелік
+    # прогонів і бачить справу без шифри.
+    "cases.bind": "runs",
+    "page.text": "view",
+    "page.lines": "view",
+    "page.view": "view",
+    # research
+    "search.run": "search",
+    "pages.status": "eye",
+    "pages.note": "eye",
+    "records.add": "eye",
+    "export.case": "export",
+}
+
 
 class SectionError(ValueError):
     """Невідома секція або пресет — із переліком того, що є."""

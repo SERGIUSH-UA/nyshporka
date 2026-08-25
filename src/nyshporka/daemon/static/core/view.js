@@ -1,5 +1,6 @@
 /** Розмітка екрана: підміна вмісту, застереження, покриття, покоління. */
 import { t } from './strings.js';
+import { screenOfOp } from './registry.js';
 import { swapHtml, skelRows } from '/ui/dom.js';
 
 /**
@@ -46,7 +47,37 @@ function renderWarnings(env) {
   for (const w of env.warnings || []) {
     bits.push(`<div class="warn">⚠ ${esc(w.text)}</div>`);
   }
-  return bits.join('');
+  return bits.join('') + renderNext(env);
+}
+
+/**
+ * Порада конверта «→ далі» — кнопкою, а не текстом.
+ *
+ * 🔴 Поле `next` їхало у відповіді від початку, і командний рядок із агентом
+ * друкують його рядком «→ далі: <операція> — <чому>». Браузер не читав його
+ * НІДЕ: з трьох облич одне лишалось глухим саме там, де порада найдешевша —
+ * бо тут її можна не переказати, а виконати.
+ *
+ * Куди веде кнопка, вирішує мапа з сервера (`OP_SCREEN`), і саме тому дія
+ * називається операцією, а не екраном: другий перелік екранів у браузері
+ * розходився б із сервером тихо.
+ *
+ * ⚠ Порада, чийого екрана в цьому просторі немає (секція вимкнена, операція
+ * лише для агента), лишається ТЕКСТОМ. Сховати її означало б приховати від
+ * людини те, що система вже знає про її наступний крок.
+ */
+function renderNext(env) {
+  const steps = env.next || [];
+  if (!steps.length) return '';
+  const rows = steps.map((n) => {
+    const scr = screenOfOp(n.op);
+    const label = scr ? t(`nav.${scr}`) : n.op;
+    const btn = scr
+      ? `<button data-act="next" data-arg="${esc(n.op)}">${esc(label)} →</button>`
+      : `<span class="mono">${esc(n.op)}</span>`;
+    return `<div class="warn next">${btn} <span>${esc(n.why)}</span></div>`;
+  });
+  return rows.join('');
 }
 
 /**

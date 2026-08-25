@@ -24,7 +24,7 @@
 import { initTheme, cycleTheme } from '/ui/theme.js';
 import { LANG, setLang, t } from './core/strings.js';
 import { esc, el, setView, curGen, alive } from './core/view.js';
-import { ACTIONS, KEYS, SCREENS } from './core/registry.js';
+import { ACTIONS, KEYS, SCREENS, PAGERS, screenOfOp } from './core/registry.js';
 import { SECTIONS, loadSections, renderNav, groupScreens, show,
   refreshJobs, watchJobs, setGroup } from './core/nav.js';
 
@@ -50,6 +50,31 @@ import './screens/settings.js';
 
 Object.assign(ACTIONS, {
   nav: (_ev, elm) => show(elm.dataset.arg),
+
+  /**
+   * Порада конверта «→ далі»: перейти туди, де цю операцію роблять.
+   *
+   * 🔴 Кнопка ВЕДЕ, а не ВИКОНУЄ. Половина порад називає операції, які без
+   * аргументів виконати неможливо (`geog.card` без картки, `read.plan` без
+   * теки), і кнопка, що мовчки падає, гірша за її відсутність: вона обіцяє
+   * дію й забирає хід.
+   */
+  next: (_ev, elm) => {
+    const scr = screenOfOp(elm.dataset.arg);
+    return scr ? show(scr) : undefined;
+  },
+
+  /**
+   * Гортання будь-якого списку. Який саме — вирішує ВІДКРИТИЙ екран.
+   *
+   * 🔴 Смуга сторінок однакова скрізь, тож дія теж одна. Своя дія на кожен
+   * список означала б рядок реєстрації, який можна забути, — а забута дія
+   * мовчить, і мовчання читається як поламана кнопка.
+   */
+  page: (_ev, elm) => {
+    const fn = PAGERS[(location.hash || '').slice(1)];
+    return fn ? fn(Number(elm.dataset.arg)) : undefined;
+  },
 
   /** Клік по розділу веде на його ПЕРШИЙ екран, а не просто перемальовує
       смугу: розділ без відкритого екрана виглядав би як кнопка, що нічого не

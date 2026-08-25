@@ -190,17 +190,30 @@ def _connect(db_path: Path | None = None) -> sqlite3.Connection:
     return con
 
 
-def query_rows(q: str = "", repo: str = "", state: str = "", htr: str = "",
-               fuzzy: str = "", year: str = "", place: str = "", doc: str = "",
-               verdict: str = "", curated: bool = False, kind: str = "",
-               uezd: str = "", settlement: str = "", place_id: str = "",
-               limit: int = 0, db_path: Path | None = None) -> list[dict[str, Any]]:
-    """Рядки реєстру за фільтрами. Порожній фільтр не звужує вибірку."""
+def _where(q: str = "", repo: str = "", state: str = "", htr: str = "",
+           fuzzy: str = "", year: str = "", doc: str = "", verdict: str = "",
+           curated: bool = False, kind: str = "", place_id: str = "",
+           ) -> tuple[str, dict[str, object]]:
+    """Умова SQL і її аргументи — спільні для видачі й для лічби.
+
+    🔴 Один конструктор на обидва запити. Друга копія умови розходиться тихо, і
+    розходження виглядає як знаменник, який не дорівнює сумі сторінок, — тобто
+    як число, що бреше, а не як помилка.
+    """
     where: list[str] = []
     args: dict[str, object] = {}
     if kind:
-        where.append("kind = :kind")
-        args["kind"] = kind
+        # Кілька родів через кому — щоб приймальня («неописане») бралась одним
+        # запитом. Два запити дали б два знаменники, які треба складати руками,
+        # а складений руками знаменник рано чи пізно розходиться з даними.
+        kinds = [k.strip() for k in kind.split(",") if k.strip()]
+        if len(kinds) == 1:
+            where.append("kind = :kind")
+            args["kind"] = kinds[0]
+        else:
+            names = [f":kind{i}" for i, _ in enumerate(kinds)]
+            where.append(f"kind IN ({', '.join(names)})")
+            args.update({f"kind{i}": k for i, k in enumerate(kinds)})
     if repo:
         where.append("upper(repo) = upper(:repo)")
         args["repo"] = repo
@@ -240,10 +253,35 @@ def query_rows(q: str = "", repo: str = "", state: str = "", htr: str = "",
                      "OR lower(place_raw) LIKE :q OR lower(coalesce(path, '')) LIKE :q "
                      "OR lower(coalesce(\"group\", '')) LIKE :q)")
         args["q"] = f"%{q.lower()}%"
-    sql = "SELECT * FROM cases"
-    if where:
-        sql += " WHERE " + " AND ".join(where)
-    sql += " ORDER BY repo_label, CAST(fond AS INTEGER), CAST(spr AS INTEGER)"
+    return (" WHERE " + " AND ".join(where)) if where else "", args
+
+
+#: Порядок рядків реєстру. Один на всі запити — інакше сторінка 2 могла б
+#: показати те саме, що сторінка 1.
+_ORDER = " ORDER BY repo_label, CAST(fond AS INTEGER), CAST(spr AS INTEGER)"
+
+
+def _hydrate(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Розібрати JSON-поля рядка. Побите поле стає порожнім списком, не падінням."""
+    for r in rows:
+        for f in _JSON_FIELDS:
+            try:
+                r[f] = json.loads(r.get(f) or "[]")
+            except Exception:
+                r[f] = []
+    return rows
+
+
+def query_rows(q: str = "", repo: str = "", state: str = "", htr: str = "",
+               fuzzy: str = "", year: str = "", place: str = "", doc: str = "",
+               verdict: str = "", curated: bool = False, kind: str = "",
+               uezd: str = "", settlement: str = "", place_id: str = "",
+               limit: int = 0, db_path: Path | None = None) -> list[dict[str, Any]]:
+    """Рядки реєстру за фільтрами. Порожній фільтр не звужує вибірку."""
+    cond, args = _where(q=q, repo=repo, state=state, htr=htr, fuzzy=fuzzy,
+                        year=year, doc=doc, verdict=verdict, curated=curated,
+                        kind=kind, place_id=place_id)
+    sql = "SELECT * FROM cases" + cond + _ORDER
     # LIMIT ставимо ПІСЛЯ гео-фільтра (він у Python), інакше «перші 60» відсіклись
     # би до фільтрації і половина повіту зникла б без сліду.
     geo_filter = bool(uezd or settlement or place)
@@ -254,12 +292,15 @@ def query_rows(q: str = "", repo: str = "", state: str = "", htr: str = "",
         rows = [dict(r) for r in con.execute(sql, args)]
     finally:
         con.close()
-    for r in rows:
-        for f in _JSON_FIELDS:
-            try:
-                r[f] = json.loads(r.get(f) or "[]")
-            except Exception:
-                r[f] = []
+    rows = _geo(_hydrate(rows), uezd=uezd, settlement=settlement, place=place)
+    if limit and geo_filter:
+        rows = rows[:limit]
+    return rows
+
+
+def _geo(rows: list[dict[str, Any]], *, uezd: str = "", settlement: str = "",
+         place: str = "") -> list[dict[str, Any]]:
+    """Гео-фільтри — у Python, бо порівнюються КОРЕНІ форм, а не підрядки."""
     if uezd:
         rows = [r for r in rows if geo_hit(uezd, [r.get("uezd") or "", *(r.get("uezds") or [])])]
     if settlement:
@@ -270,9 +311,56 @@ def query_rows(q: str = "", repo: str = "", state: str = "", htr: str = "",
         rows = [r for r in rows
                 if geo_hit(place, [r.get("place_raw") or "", r.get("guberniya") or "",
                                     *(r.get("settlements") or []), *(r.get("uezds") or [])])]
-    if limit and geo_filter:
-        rows = rows[:limit]
     return rows
+
+
+def query_page(*, page: int = 0, page_size: int = 50, uezd: str = "",
+               settlement: str = "", place: str = "",
+               db_path: Path | None = None, **flt: Any,
+               ) -> tuple[list[dict[str, Any]], int]:
+    """Сторінка рядків реєстру + СКІЛЬКИ ЇХ УСЬОГО під цим фільтром.
+
+    🔴 Знаменник віддається разом зі сторінкою, а не рахується у викликача з
+    довжини видачі: `len(rows)` на сторінці дорівнює розміру сторінки, тож із
+    нього виходило б «50 справ» незалежно від того, п'ятдесят їх чи півтори
+    тисячі. Обрізаний список без знаменника — та сама вада, що й нуль без
+    знаменника: він виглядає як повна відповідь.
+
+    ⚠ Гео-фільтри порівнюють КОРЕНІ форм і живуть у Python, тож при них
+    сторінка ріжеться вже після фільтрації — інакше «перші 50» відсіклись би до
+    неї, і половина повіту зникла б без сліду.
+    """
+    cond, args = _where(**flt)
+    geo = bool(uezd or settlement or place)
+    off = max(0, int(page)) * max(1, int(page_size))
+    con = _connect(db_path)
+    try:
+        if geo:
+            rows = _geo(_hydrate([dict(r) for r in
+                                  con.execute("SELECT * FROM cases" + cond + _ORDER, args)]),
+                        uezd=uezd, settlement=settlement, place=place)
+            return rows[off:off + int(page_size)], len(rows)
+        total = int(con.execute("SELECT count(*) FROM cases" + cond, args).fetchone()[0])
+        sql = ("SELECT * FROM cases" + cond + _ORDER
+               + f" LIMIT {int(page_size)} OFFSET {off}")
+        return _hydrate([dict(r) for r in con.execute(sql, args)]), total
+    finally:
+        con.close()
+
+
+def kind_counts(db_path: Path | None = None) -> dict[str, int]:
+    """Скільки чого в реєстрі: `case` / `bundle` / `unfiled`.
+
+    🔴 Знаменник для обох боків межі. Приймальня показує неописане, бібліотека —
+    описане, і кожна з них без числа сусідки виглядає як увесь простір. Саме на
+    цьому дослідник і спитав, чим одна закладка відрізняється від другої.
+    """
+    con = _connect(db_path)
+    try:
+        return {str(r[0] or ""): int(r[1]) for r in
+                con.execute("SELECT kind, count(*) FROM cases GROUP BY kind")}
+    finally:
+        con.close()
 
 
 def orphan_runs(db_path: Path | None = None) -> list[dict[str, Any]]:

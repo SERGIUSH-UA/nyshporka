@@ -425,12 +425,12 @@ section_glyphs:
 # знака, кнопка виглядала б зламаною, а зайвий знак лишався б мертвим рядком.
 screen_glyphs:
   home: "🐾"
-  sources: "📚"
+  sources: "🗂"
   geog: "🗺"
   fonds: "🏛"
   library: "📚"
   frames: "🖼"
-  cases: "📂"
+  cases: "📥"
   newcase: "➕"
   read: "🖋"
   runs: "📜"
@@ -459,12 +459,12 @@ section_icons:
 
 screen_icons:
   home: paw
-  sources: books
+  sources: radar
   geog: zone
   fonds: archive-box
   library: books
   frames: image
-  cases: folder
+  cases: drawers
   newcase: plus
   read: quill
   runs: list

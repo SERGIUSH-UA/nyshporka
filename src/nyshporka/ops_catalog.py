@@ -193,7 +193,13 @@ class FondRowsArgs(BaseModel):
     uezd: str = ""
     state: str = Field(default="",
                        description="disk | todo | film | mirror_only | order | scan; `film` = вільна плівка FS (качається за DGS), `order` = каналу немає зовсім")
-    limit: int = Field(default=50, ge=1, le=500)
+    spr: str = Field(default="", description="номер справи — точковий вхід із "
+                                             "бібліотеки чи газетира")
+    limit: int = Field(default=50, ge=1, le=500,
+                       description="скільки рядків віддати; `page_size` сильніший")
+    page: int = Field(default=0, ge=0, le=10_000, description="сторінка видачі")
+    page_size: int = Field(default=0, ge=0, le=200,
+                           description="розмір сторінки; 0 — узяти `limit`")
 
 
 @op("fond.list", summary="Які фонди описано: скільки справ, скільки вже в нас",
@@ -239,21 +245,42 @@ def fond_rows(a: FondRowsArgs) -> Envelope:
     conf = R.conflicts_index(a.fond)
     sel = R.filter_rows(rows, opys=a.opys, q=a.q, surname=a.surname, year=a.year,
                         uezd=a.uezd, state=a.state, live=live)
+    if a.spr:
+        # Точковий вхід із бібліотеки чи газетира: там уже знають НОМЕР справи,
+        # і шукати його підрядком у заголовку означало б не знайти нічого.
+        want = a.spr.strip().lower()
+        sel = [r for r in sel if str(r.get("spr") or "").strip().lower() == want]
+    size = a.page_size or a.limit
+    start = max(0, a.page) * size
     out = []
-    for r in sel[: a.limit]:
+    for r in sel[start:start + size]:
         st = R.row_status(r, live, conf)
         out.append({"shifra": r.get("shifra"), "opys": r.get("opys"),
                     "spr": r.get("spr"), "title": r.get("title"),
+                    # 🔴 Спільний ключ трьох реєстрів. Складається ТУТ, поруч
+                    # із джерелом `repo`/`fond`, а не в браузері: складений на
+                    # тому боці, він розійшовся б із бібліотечним тихо, і
+                    # кнопка «показати в бібліотеці» відкривала б порожньо.
+                    "key": f"{f['repo']}/{f['fond']}/{r.get('spr')}",
+                    "repo": f["repo"], "fond": f["fond"],
                     "year_from": r.get("year_from"), "year_to": r.get("year_to"),
                     "folios": r.get("folios"), "fs_film": r.get("fs_film"),
                     "commons_url": r.get("commons_url"),
                     "on_disk": st["on_disk_live"], "state": st["disk_state"],
+                    # 🔴 Чи можна взяти ОДНИМ КЛІКОМ — рахується тут, де видно
+                    # самі адреси. Браузер бачить лише `commons_url`, а качає
+                    # застосунок за `archium_url`/`commons_title`; вгадування на
+                    # тому боці дало б кнопку, яка відмовляє після кліку.
+                    "takeable": bool(r.get("archium_url") or r.get("commons_title")),
                     "flags": st["flags"], "conflicts": st["conflicts"]})
     # 🔴 Знаменник рахується по ВСЬОМУ фонду, а не по фільтру: інакше «5 справ»
     # читалось би як «у фонді п'ять справ», а не «п'ять із семи тисяч».
     summary = R.summarize(rows, live)
+    pages = (len(sel) + size - 1) // size if size else 0
     env = ok({"fond": f["label"], "fond_id": f["id"], "rows": out,
-              "shown": len(out), "matched": len(sel), "summary": summary})
+              "shown": len(out), "matched": len(sel), "total": len(sel),
+              "page": a.page, "page_size": size, "pages": pages,
+              "summary": summary})
     if summary.get("disk_mismatch"):
         env.warn("disk_mismatch",
                  f"колонка «на диску» в реєстрі розходиться з бібліотекою у "
@@ -263,6 +290,46 @@ def fond_rows(a: FondRowsArgs) -> Envelope:
                  f"під фільтр не підпало нічого з {summary['rows']} справ опису")
     return env
 
+
+
+class FondTakeArgs(BaseModel):
+    key: str = Field(description="ключ справи: DAHMO/230/43 або DAHMO/230/1/43")
+    force: bool = Field(default=False, description="перезаписати вже завантажене")
+
+
+@op("fond.take", summary="Узяти справу з опису: завантажити й зареєструвати",
+    args=FondTakeArgs, mutates=True, long=True, agent=False, section="material")
+def fond_take(a: FondTakeArgs) -> Envelope:
+    """Від рядка опису до теки на диску — одним кроком.
+
+    🔴 Досі цей крок жив ЛИШЕ в командному рядку дослідницького конвеєра, тож
+    рядок опису в браузері був тупиком: «скан є, не взято» — і нічим узяти.
+    Логіка не була відокремлена від друку в консоль; тепер вона в
+    `cases.take`, і обидва входи кличуть одне й те саме.
+
+    🔴 Приймач — БІБЛІОТЕКА, а не код завершення: тека без паспорта невидима
+    для всього, що йде далі, і прогін по ній ляже нічиїм.
+    """
+    from nyshporka.cases import take as T
+
+    try:
+        got = T.take(a.key, force=a.force)
+    except T.TakeError as exc:
+        return fail(str(exc))
+    env = ok(got)
+    if got.get("shifra_needs_eye"):
+        # ⚠ Узяти можна, вірити шифрі — ні. Номер відновлено інтерполяцією за
+        # сусідами в опису, і помилка тут дає ПРАВДОПОДІБНУ шифру на чужій
+        # справі — найдорожчий рід помилки в обліку.
+        env.warn("shifra_needs_eye",
+                 "номер справи в описі відновлено, а не прочитано — звірте "
+                 "шифру оком по титулу, перш ніж на неї посилатись")
+    if got.get("in_library") is False:
+        env.warn("not_in_library",
+                 "справи не видно в бібліотеці — перевірте теку й `meta.json`")
+    else:
+        env.suggest("library.list", "справа в бібліотеці — можна читати")
+    return env
 
 # ── 🧾 збирачі реєстру опису ─────────────────────────────────────────────────
 # Той самий домен, що й решта цього модуля: знання про АРХІВ, а не про нашу

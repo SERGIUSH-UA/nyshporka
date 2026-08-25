@@ -2,7 +2,8 @@
 import { t, LANG } from './strings.js';
 import { callOp, FINAL_STATES } from './net.js';
 import { esc, el, setView, curGen, bumpGen, alive } from './view.js';
-import { SCREENS } from './registry.js';
+import { SCREENS, OP_SCREEN } from './registry.js';
+import { ST } from './state.js';
 import { ic } from '/ui/icons.js';
 
 /** Скільки робіт зараз іде — щоб значок у шапці не залежав від розділу. */
@@ -17,7 +18,8 @@ let RUNNING_JOBS = 0;
  * полем `screens` тієї ж відповіді: копія в браузері розходилась би з сервером
  * тихо, і виглядало б це як кнопка, що веде в порожнечу.
  */
-let SECTIONS = { sections: [], screens: {}, presets: {}, preset: null, glyphs: {} };
+let SECTIONS = { sections: [], screens: {}, op_screen: {}, presets: {},
+  preset: null, glyphs: {} };
 
 /** Порядок кнопок у шапці. Екрани, яких тут немає, кнопки не отримують. */
 const NAV_ORDER = ['home', 'sources', 'geog', 'fonds', 'library', 'frames', 'cases', 'newcase',
@@ -49,6 +51,10 @@ async function loadSections() {
     // екрана, і застосунок лишається порожньою сторінкою без жодного слова.
     // Обірвана відповідь довідки не має права гасити весь застосунок.
     if (env.ok) SECTIONS = { ...SECTIONS, ...(env.data || {}) };
+    // Мапа «операція → екран» кладеться в реєстр, а не лишається тут: її
+    // читає `view.renderNext`, а той не сміє імпортувати цей модуль — вийшов
+    // би цикл, який ламається не там, де його завели.
+    Object.assign(OP_SCREEN, SECTIONS.op_screen || {});
   } catch {
     // Мережі немає — лишаємо порожній стан: тоді `screenOn` пропускає все, і
     // застосунок працює як раніше. Замикати UI через збій довідки не можна.
@@ -208,6 +214,22 @@ async function watchJobs() {
  *  іншого модуля мовчки не спрацювало б, і смуга екранів лишалась би на
  *  попередньому розділі. */
 export const setGroup = (v) => { GROUP = v; };
+
+/**
+ * Перейти на екран, ЗАСІЯВШИ його тим, з чого прийшли.
+ *
+ * 🔴 Одна функція на всі переходи, а не поле в `ST` на кожну пару екранів.
+ * Пар багато — опис ↔ бібліотека ↔ прогони ↔ газетир ↔ приймальня, — і кожен
+ * новий механізм передачі це ще одне місце, де посів мовчки не доїде.
+ *
+ * Посів кладеться в `ST[екран]`, і читає його САМ цільовий екран: він один
+ * знає, що з ним робити. Вихідний екран нічого не підробляє — ні події форми,
+ * ні значень полів.
+ */
+export async function goto(screen, seed) {
+  ST[screen] = seed === undefined ? null : seed;
+  await show(screen);
+}
 
 export { SECTIONS, NAV_ORDER, NAV_LABEL, GROUP, screenOn, loadSections,
   navGroups, groupScreens, renderNav, icon, show, refreshJobs, watchJobs,

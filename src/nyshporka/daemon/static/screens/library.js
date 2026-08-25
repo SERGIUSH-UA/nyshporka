@@ -17,15 +17,16 @@ import { t } from '../core/strings.js';
 import { callOp } from '../core/net.js';
 import { esc, el, setView, busy, failure, renderWarnings,
   curGen, alive } from '../core/view.js';
-import { SCREENS, ACTIONS } from '../core/registry.js';
-import { show } from '../core/nav.js';
+import { SCREENS, ACTIONS, PAGERS } from '../core/registry.js';
+import { show, goto } from '../core/nav.js';
 import { ST } from '../core/state.js';
 import { ic, eng } from '/ui/icons.js';
 import { swapHtml, skelRows } from '/ui/dom.js';
+import { pager, step } from '/ui/pager.js';
 
 /** Діючий фільтр. Живе між входами на екран: повернувшись, людина бачить своє. */
 let LIB = {
-  q: '', repo: '', record_type: '', uezd: '', htr: '', fuzzy: '',
+  q: '', key: '', repo: '', record_type: '', uezd: '', htr: '', fuzzy: '',
   status: '', verdict: '', curated: false, on_disk: null, page: 0,
 };
 
@@ -42,8 +43,19 @@ let _libSeq = 0;
 /** Фасети малюються РАЗ на вхід: їхні числа не залежать від фільтра. */
 let _libFacets = false;
 
+/** Скільки сторінок під поточним фільтром — щоб «далі» не везла за край. */
+let LIB_PAGES = 1;
+
 SCREENS.library = async () => {
   _libFacets = false;
+  // 🔴 Засів із реєстру опису чи газетира — ТОЧНИМ ключем, а не пошуком за
+  // шифрою. Приблизний пошук відкривав би сусідні справи того самого фонду з
+  // тим самим виглядом правильної відповіді.
+  const seed = ST.library;
+  if (seed) {
+    LIB = { ...LIB, key: seed.key || '', q: '', page: 0 };
+    ST.library = null;                  // засів одноразовий
+  }
   busy();
   await libLoad(true);
 };
@@ -60,7 +72,8 @@ async function libLoad(full = false) {
   const seq = ++_libSeq;
   const gen = curGen();
   const env = await callOp('library.list', {
-    q: LIB.q, repo: LIB.repo, record_type: LIB.record_type, uezd: LIB.uezd,
+    q: LIB.q, key: LIB.key, repo: LIB.repo, record_type: LIB.record_type,
+    uezd: LIB.uezd,
     htr: LIB.htr, fuzzy: LIB.fuzzy, status: LIB.status, verdict: LIB.verdict,
     curated: LIB.curated, page: LIB.page,
     ...(LIB.on_disk === null ? {} : { on_disk: LIB.on_disk }),
@@ -71,6 +84,7 @@ async function libLoad(full = false) {
   const d = env.data || {};
   const rows = d.cases || [];
   const layers = (d.summary || {}).has_layers;
+  LIB_PAGES = d.pages || 1;
 
   if (!full) {
     // Каркас на місці — міняється лише вміст. `swapHtml` тримає висоту
@@ -80,9 +94,11 @@ async function libLoad(full = false) {
     const n = el('lib-count');
     if (n) n.innerHTML = libCount(d);
     const warn = el('lib-warn');
-    if (warn) warn.innerHTML = renderWarnings(env);
-    const pager = el('lib-pager');
-    if (pager) pager.innerHTML = libPager(d);
+    if (warn) warn.innerHTML = libKeyChip() + renderWarnings(env);
+    // Локальна змінна не зветься `pager`: під цим іменем уже стоїть спільна
+    // смуга, і тінь мовчки перетворила б виклик на звертання до вузла DOM.
+    const pg = el('lib-pager');
+    if (pg) pg.innerHTML = pager(d);
     return;
   }
 
@@ -111,7 +127,7 @@ async function libLoad(full = false) {
       <label class="lbl-mini"><input type="checkbox" id="lib-curated"
         data-act="lib.filter"${LIB.curated ? ' checked' : ''}> ${t('lib.curated')}</label>
     </div>
-    <div id="lib-warn">${renderWarnings(env)}</div>
+    <div id="lib-warn">${libKeyChip()}${renderWarnings(env)}</div>
     <p class="muted" id="lib-count">${libCount(d)}</p>
     <table><thead><tr>
       <th>${t('lib.col.shifra')}</th><th>${t('lib.col.title')}</th>
@@ -121,7 +137,7 @@ async function libLoad(full = false) {
       <th>${t('lib.col.verdict')}</th><th></th></tr></thead>
     <tbody id="lib-rows">${rows.map((r) => libRow(r, layers)).join('')
       || skelRows(6, 8)}</tbody></table>
-    <div id="lib-pager">${libPager(d)}</div>`);
+    <div id="lib-pager">${pager(d)}</div>`);
   _libFacets = true;
 }
 
@@ -222,6 +238,16 @@ function libStageSelects(d) {
 }
 
 /** 🔴 Знаменник поруч із видачею: скільки показано, з чого й із чого всього. */
+function libKeyChip() {
+  if (!LIB.key) return '';
+  // 🔴 Звуження до однієї справи мусить бути ВИДНИМ. Мовчазний точковий фільтр
+  // читається як «у бібліотеці одна справа» — тобто як відповідь про весь
+  // простір, а не про один рядок опису.
+  return `<div class="warn next">
+    <button data-act="lib.all">${t('lib.key.all')}</button>
+    <span>${t('lib.key.one')} <b class="mono">${esc(LIB.key)}</b></span></div>`;
+}
+
 function libCount(d) {
   return esc(t('lib.count').replace('{n}', d.shown ?? 0)
     .replace('{total}', d.total ?? 0)) +
@@ -230,18 +256,7 @@ function libCount(d) {
       : '');
 }
 
-function libPager(d) {
-  if (!d.pages || d.pages < 2) return '';
-  const from = d.page * d.page_size + 1;
-  const to = Math.min(d.total, (d.page + 1) * d.page_size);
-  return `<div class="row pager">
-    <button data-act="lib.page" data-arg="-1"${d.page ? '' : ' disabled'}>
-      ${ic('arrow-left', 'ic-sm')}</button>
-    <span class="muted mono">${from}–${to} / ${esc(d.total)}</span>
-    <button data-act="lib.page" data-arg="1"
-      ${d.page + 1 < d.pages ? '' : ' disabled'}>→</button>
-  </div>`;
-}
+
 
 /**
  * Колонка «обробка» — три шари в одній клітинці.
@@ -307,6 +322,9 @@ function libRow(r, layers) {
         title="${esc(t('lib.act.runs'))}">${ic('list', 'ic-o ic-sm')}</button>
       <button class="ctl-sm" data-act="lib.find" data-arg="${esc(r.key)}"
         title="${esc(t('lib.act.find'))}">${ic('search', 'ic-o ic-sm')}</button>
+      ${r.fond ? `<button class="ctl-sm" data-act="lib.opys"
+        data-arg="${esc(`${r.repo}/${r.fond}/${r.spr}`)}"
+        title="${esc(t('lib.act.opys'))}">${ic('archive-box', 'ic-o ic-sm')}</button>` : ''}
       <button class="ctl-sm" data-act="lib.verdict" data-arg="${esc(r.key)}"
         title="${esc(t('lib.verdict.set'))}">${ic('pencil-line', 'ic-o ic-sm')}</button>
     </td>
@@ -337,13 +355,28 @@ function libVerdictForm(key) {
     <button data-act="nav" data-arg="library">${t('lib.cancel')}</button>`);
 }
 
+PAGERS.library = (delta) => {
+  LIB = { ...LIB, page: step(LIB.page, delta, LIB_PAGES) };
+  return libLoad(false);
+};
+
 Object.assign(ACTIONS, {
+  /** Зняти точковий засів і показати бібліотеку цілком. */
+  'lib.all': () => {
+    LIB = { ...LIB, key: '', page: 0 };
+    return libLoad(true);
+  },
+
   /** Фільтр бібліотеки. Читає ВСІ поля одразу: інакше зміна одного скидала б
       інші до дефолтів, і видача не відповідала б тому, що видно на екрані. */
   'lib.filter': () => {
     const val = (id) => (el(id) || {}).value || '';
     LIB = {
       ...LIB,
+      // 🔴 Будь-яка правка фільтра знімає точковий засів. Інакше людина
+      // крутить фільтри над ОДНІЄЮ справою й бачить порожньо — тобто
+      // бібліотека виглядає порожньою, будучи повною.
+      key: '',
       q: val('lib-q'),
       repo: val('lib-repo'),
       record_type: val('lib-rtype'),
@@ -361,10 +394,6 @@ Object.assign(ACTIONS, {
     return libLoad(false);
   },
 
-  'lib.page': (_ev, elm) => {
-    LIB = { ...LIB, page: Math.max(0, LIB.page + Number(elm.dataset.arg || 0)) };
-    return libLoad(false);
-  },
 
   'lib.verdict': (_ev, elm) => libVerdictForm(elm.dataset.arg),
 
@@ -405,6 +434,19 @@ Object.assign(ACTIONS, {
   'lib.runs': (_ev, elm) => {
     ST.runsFocus = elm.dataset.arg;
     return show('runs');
+  },
+
+  /**
+   * 🏛 Ця сама справа в реєстрі ОПИСУ.
+   *
+   * 🔴 Зворотний бік межі: бібліотека каже «в мене є», опис — «в архіві існує».
+   * Без цього переходу друге питання доводилось ставити руками, набираючи
+   * фонд і номер у формі, — а саме там і губиться зв'язок між двома
+   * реєстрами, які тримаються на ОДНОМУ ключі.
+   */
+  'lib.opys': (_ev, elm) => {
+    const [repo, fond, spr] = String(elm.dataset.arg).split('/');
+    return goto('fonds', { repo, fond, spr });
   },
 
   /** 🔎 Пошук у межах цієї справи. */

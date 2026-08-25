@@ -79,6 +79,7 @@
   <symbol id="i-chevron-up" viewBox="0 0 24 24"><path d="m6 15 6-6 6 6"/></symbol>
   <symbol id="i-arrow-up" viewBox="0 0 24 24"><path d="M12 20.4V4.6"/><path d="m5.4 11.2 6.6-6.6 6.6 6.6"/></symbol>
   <symbol id="i-arrow-left" viewBox="0 0 24 24"><path d="M20 12H4.4"/><path d="m10.4 5.6-6 6.4 6 6.4"/></symbol>
+  <symbol id="i-arrow-right" viewBox="0 0 24 24"><path d="M4 12h15.6"/><path d="m13.6 5.6 6 6.4-6 6.4"/></symbol>
   <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.6"/><path d="M12 11.4v5.2"/><circle cx="12" cy="7.9" r=".95" fill="currentColor" stroke="none"/></symbol>
   <symbol id="i-ruler" viewBox="0 0 24 24"><rect x="2.4" y="8.4" width="19.2" height="7.2" rx="1.6"/><path d="M6.6 8.4v3M10.2 8.4v4.2M13.8 8.4v3M17.4 8.4v4.2"/></symbol>
   <symbol id="i-gauge" viewBox="0 0 24 24"><path d="M14.4 14.3V5a2.4 2.4 0 0 0-4.8 0v9.3a4.4 4.4 0 1 0 4.8 0Z"/><path d="M12 8.6v7.2"/><path d="M16.8 6.6h3M16.8 10h2"/></symbol>

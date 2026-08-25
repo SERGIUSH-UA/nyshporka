@@ -49,7 +49,7 @@ export const TONES = {
   printer: 'slate', hand: 'slate', grid4: 'slate', rect: 'slate', page: 'slate',
   scroll: 'slate', 'help-circle': 'slate', undo: 'slate', expand: 'slate',
   settings: 'slate', menu: 'slate', 'chevron-up': 'slate', 'arrow-up': 'slate',
-  'arrow-left': 'slate',
+  'arrow-left': 'slate', 'arrow-right': 'slate',
 };
 
 export const tone = (name) => TONES[name] || 'slate';
