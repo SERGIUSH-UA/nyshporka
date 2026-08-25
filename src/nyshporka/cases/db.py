@@ -146,7 +146,7 @@ _GEO_MIN = 80
 _GEO_SUFFIXES = ("skogo", "skomu", "skoi", "skii", "skij", "skiy", "ska", "skoy", "sk")
 
 
-def _geo_root(value: str) -> str:
+def geo_root(value: str) -> str:
     """Нормалізована форма без суфікса прикметника: `olgopilskii` → `olgopil`."""
     # Беремо з першоджерела, а не через `cases.geo`: там воно лише реекспорт,
     # і імпорт «крізь» модуль ховає справжню залежність.
@@ -158,7 +158,7 @@ def _geo_root(value: str) -> str:
     return v
 
 
-def _geo_hit(query: str, values: list[str]) -> bool:
+def geo_hit(query: str, values: list[str]) -> bool:
     """Чи згадує рядок це місце — з урахуванням відмінка, суфікса й латинки.
 
     🔴 Чому не SQL LIKE: «Miastkowka» нормалізується в `miastkovka`, а
@@ -167,10 +167,10 @@ def _geo_hit(query: str, values: list[str]) -> bool:
     🔴 Чому не `partial_ratio`: у наших повітів спільний хвіст «-ільський», і
     «Ямпільський» діставав «Ольгопільський» на 80+. Порівнюємо КОРЕНІ.
     """
-    q = _geo_root(query)
+    q = geo_root(query)
     if len(q) < 3:
         return False
-    roots = [_geo_root(v) for v in values if v]
+    roots = [geo_root(v) for v in values if v]
     if any(r and (q.startswith(r) or r.startswith(q)) for r in roots):
         return True
     try:
@@ -261,14 +261,14 @@ def query_rows(q: str = "", repo: str = "", state: str = "", htr: str = "",
             except Exception:
                 r[f] = []
     if uezd:
-        rows = [r for r in rows if _geo_hit(uezd, [r.get("uezd") or "", *(r.get("uezds") or [])])]
+        rows = [r for r in rows if geo_hit(uezd, [r.get("uezd") or "", *(r.get("uezds") or [])])]
     if settlement:
         rows = [r for r in rows
-                if _geo_hit(settlement, [r.get("settlement") or "",
+                if geo_hit(settlement, [r.get("settlement") or "",
                                          *(r.get("settlements") or [])])]
     if place:
         rows = [r for r in rows
-                if _geo_hit(place, [r.get("place_raw") or "", r.get("guberniya") or "",
+                if geo_hit(place, [r.get("place_raw") or "", r.get("guberniya") or "",
                                     *(r.get("settlements") or []), *(r.get("uezds") or [])])]
     if limit and geo_filter:
         rows = rows[:limit]

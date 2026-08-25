@@ -28,9 +28,6 @@ import { swapHtml } from '/ui/dom.js';
 /** Фільтр переліку. Живе між входами на екран, як і в бібліотеці. */
 let RUNS = { q: '', engine: '', state: '' };
 
-/** Справа, до групи якої треба прокрутитись після переходу з бібліотеки. */
-export const RUNS_FOCUS = { key: '' };
-
 let _runsSeq = 0;
 
 SCREENS.runs = async () => {
@@ -55,15 +52,10 @@ async function runsLoad(full = false) {
   if (!env.ok) return failure(env);
 
   const runs = (env.data || {}).runs || [];
-  // Кадри справи — знаменник покриття. Беремо з бібліотеки одним запитом;
-  // немає її — лишаємось без відсотка, але з числом сторінок.
-  const frames = await runsFrames(runs);
-  if (seq !== _runsSeq || !alive(gen)) return;
-
   const groups = runsGroup(runs.filter(runsMatch));
   const orphans = groups.filter((g) => !g.key);
   const known = groups.filter((g) => g.key);
-  const body = known.map((g) => runsGroupHtml(g, frames)).join('')
+  const body = known.map(runsGroupHtml).join('')
     + orphans.map((g) => runsOrphanHtml(g)).join('');
 
   if (!full) {
@@ -100,24 +92,6 @@ async function runsLoad(full = false) {
   runsFocus();
 }
 
-/**
- * Кадри кожної справи — знаменник покриття.
- *
- * ⚠ Один запит на весь екран, а не на групу: бібліотека на тисячу справ
- * коштує помітно, і платити це на кожну книгу означало б зробити перелік
- * повільнішим за саме читання.
- */
-async function runsFrames(runs) {
-  if (!runs.length) return {};
-  const env = await callOp('library.list', { on_disk: true, limit: 2000 });
-  if (!env.ok) return {};
-  const out = {};
-  for (const c of (env.data || {}).cases || []) {
-    if (c.key && c.frames) out[c.key] = c.frames;
-  }
-  return out;
-}
-
 function runsMatch(r) {
   if (RUNS.engine && (r.engine_id || '') !== RUNS.engine) return false;
   if (RUNS.state === 'done' && !r.done) return false;
@@ -139,24 +113,26 @@ function runsGroup(runs) {
     const id = key || `dir:${r.case_dir || r.name}`;
     if (!by.has(id)) {
       by.set(id, { key, id, shifra: r.shifra || key, title: r.title || '',
-                   case_dir: r.case_dir || '', runs: [], updated: '' });
+                   case_dir: r.case_dir || '', frames: 0, runs: [],
+                   updated: '' });
     }
     const g = by.get(id);
     g.runs.push(r);
     if ((r.updated || '') > g.updated) g.updated = r.updated || '';
     if (!g.shifra && r.shifra) g.shifra = r.shifra;
     if (!g.title && r.title) g.title = r.title;
+    if (!g.frames && r.frames) g.frames = r.frames;
   }
   return [...by.values()].sort((a, b) => (b.updated || '').localeCompare(a.updated || ''));
 }
 
-function runsRow(r, frames) {
+function runsRow(r) {
   const badge = r.engine_id ? eng(r.engine_id, false, LANG) : '';
   const mark = r.done ? '✅' : '▶';
   // 🔴 Відсоток лише зі справжнім знаменником. Немає кадрів справи — друкуємо
   // самі сторінки: покриття, порахане від себе самого, завжди дорівнює 100%
   // і читається як «прочитано все».
-  const n = frames[r.case_key] || 0;
+  const n = Number(r.frames || 0);
   const cov = n ? `<td class="num">${Math.round(100 * (r.pages_done || 0) / n)}%</td>`
                 : `<td class="num muted" title="${esc(t('runs.nodenom'))}">—</td>`;
   const fail = r.failed
@@ -174,14 +150,14 @@ function runsRow(r, frames) {
   </tr>`;
 }
 
-function runsGroupHtml(g, frames) {
-  const n = frames[g.key] || 0;
+function runsGroupHtml(g) {
+  const n = g.frames || 0;
   const gapline = runsGap(g);
   return `<section class="run-group" data-case="${esc(g.key)}">
     <h3 class="mono">${esc(g.shifra || g.key)}
       <span class="dim">${esc((g.title || '').slice(0, 70))}</span>
       ${n ? `<span class="dim">· ${esc(n)} ${t('common.frames')}</span>` : ''}</h3>
-    <table><tbody>${g.runs.map((r) => runsRow(r, frames)).join('')}</tbody></table>
+    <table><tbody>${g.runs.map(runsRow).join('')}</tbody></table>
     ${gapline}
   </section>`;
 }
@@ -242,10 +218,10 @@ function runsEmptyHtml(env, total) {
 
 /** Прокрутка до справи, з якої сюди прийшли. */
 function runsFocus() {
-  if (!RUNS_FOCUS.key) return;
+  if (!ST.runsFocus) return;
   const node = document.querySelector(
-    `.run-group[data-case="${CSS.escape(RUNS_FOCUS.key)}"]`);
-  RUNS_FOCUS.key = '';
+    `.run-group[data-case="${CSS.escape(ST.runsFocus)}"]`);
+  ST.runsFocus = '';
   if (node) node.scrollIntoView({ block: 'start', behavior: 'smooth' });
 }
 

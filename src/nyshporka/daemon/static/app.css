@@ -238,3 +238,27 @@ pre {
 #view-alt .vln.differs { border-left: 3px solid var(--accent-2); }
 
 .view-nav select { max-width: 22rem; }
+
+/* ── 📚 бібліотека ─────────────────────────────────────────────────────────── */
+/* Смуга зведення — перше, що читають: саме на ній вирішують, що робити далі. */
+.lib-sum {
+  margin: .2rem 0 .6rem;
+  padding: .4rem .6rem;
+  border-radius: var(--r-m);
+  background: var(--paper);
+  color: var(--fg-2);
+}
+
+.lib-sum .ic { vertical-align: -.15em; }
+
+/* Колонка роботи щільна: у ній три шари, і кожен має лишитись розбірним. */
+td.work { white-space: nowrap; }
+td.work .engine { margin-right: .15rem; }
+
+/* 🔴 Число нерозібраних кандидатів — акцентом. Це єдине число в таблиці, що
+   каже про роботу ЛЮДИНИ, а не машини, і воно легко губиться серед значків. */
+td.work b.open { color: var(--accent); margin-left: .1rem; }
+
+td.acts { white-space: nowrap; text-align: right; }
+
+.pager { justify-content: center; margin: .6rem 0; }

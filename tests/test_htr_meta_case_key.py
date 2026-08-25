@@ -99,12 +99,27 @@ def test_daemon_passes_resolved_case_key_to_the_runner() -> None:
     `--case-key`: у черзі шифра видна, у меті прогону — порожньо, і розходження
     непомітне. Тестом покрито не було саме це — виклик `_run_read`.
 
-    Перевіряємо текстом: підняти демона з живим раннером у тестах нема чим, а
-    маркер вузький — він зникне разом із дефектом, а не з рефакторингом.
+    Перевіряємо ПОВЕДІНКУ там, де можна, і текст лише там, де не можна:
+    підняти демона з живим раннером у тестах нема чим, а от команду раннера
+    зібрати — можна, і саме в ній ключ або є, або немає.
     """
+    from nyshporka.htr.run import Plan
+
+    plan = Plan(case_dir=Path("case"), out_dir=Path("out"),
+                model=Path("pysar_cyr_v4.pt"), script="cyrillic", frames=1,
+                python=Path("python"), runner=Path("runner.py"))
+    for workers in (1, 3):
+        cmds, _ = plan.shards(workers, device="cuda:0", case_key="DAHMO/315/1")
+        for cmd in cmds:
+            assert "--case-key" in cmd, (
+                "команда раннера пішла без шифри — прогін стане нічиїм")
+            assert cmd[cmd.index("--case-key") + 1] == "DAHMO/315/1"
+
     src = (Path(__file__).resolve().parent.parent / "src" / "nyshporka"
            / "daemon" / "workers.py").read_text(encoding="utf-8")
-    assert "_run_read(bus, job, plan, case_key)" in src, (
-        "виконавцеві має йти вирахувана змінна `case_key`")
+    # Вирахувана змінна мусить доїхати до збірки команди, а не бути прочитаною
+    # з payload удруге: форма читання питає лише теку, тож payload порожній.
+    assert "case_key=case_key" in src, (
+        "у команду раннера йде не вирахувана змінна `case_key`")
     assert 'payload.get("case_key") or ""))' not in src, (
         "payload перечитується вдруге — шифра з опису теки губиться")

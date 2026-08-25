@@ -19,10 +19,15 @@ import { attachCombobox } from '/ui/combobox.js';
 let LAST_READ = null;
 
 SCREENS.read = async () => {
+  // 🔴 Тека приходить із бібліотеки, а не з пам'яті людини. Набирати шлях
+  // руками — найдешевший спосіб прочитати не ту теку й дізнатись про це через
+  // годину.
+  const seed = (ST.read || {}).case_dir || '';
   setView(`
     <h2>${t('nav.read')}</h2>
     <form class="row" data-act="read.plan">
-      <input name="case_dir" placeholder="${t('read.dir')}" autofocus>
+      <input name="case_dir" placeholder="${t('read.dir')}"
+        value="${esc(seed)}"${seed ? '' : ' autofocus'}>
       <select name="script">
         <option value="">${t('read.script')}: авто</option>
         <option value="cyrillic">кирилиця</option>
@@ -31,7 +36,29 @@ SCREENS.read = async () => {
       <button type="submit">${t('read.plan')}</button>
     </form>
     <div id="hits"></div>`);
+  // Засів одноразовий: лишившись, він підставляв би стару теку на кожному
+  // наступному вході — а людина в цей момент уже думає про іншу справу.
+  ST.read = null;
+  await readCases();
 };
+
+/**
+ * Підказка тек: справи бібліотеки, які лежать на диску.
+ *
+ * ⚠ Вільний текст лишається: тека поза бібліотекою — законний перший випадок,
+ * і вимагати опису до першого ж читання означало б замкнути двері перед тим,
+ * хто щойно завантажив скани.
+ */
+async function readCases() {
+  const input = el('view').querySelector('input[name="case_dir"]');
+  if (!input) return;
+  const env = await callOp('library.list', { on_disk: true, page_size: 200 });
+  if (!env.ok) return;
+  const items = ((env.data || {}).cases || [])
+    .filter((c) => c.path)
+    .map((c) => c.path);
+  if (items.length) attachCombobox(input, { items, empty: t('lib.count') });
+}
 
 Object.assign(ACTIONS, {
   'read.plan': async (ev) => {

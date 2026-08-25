@@ -16,9 +16,16 @@ import { attachCombobox } from '/ui/combobox.js';
 
 
 SCREENS.search = async () => {
+  // Справа з бібліотеки: пошук у її межах — інше питання, ніж пошук по всьому
+  // прочитаному, і знаменник у відповіді буде інший.
+  const only = (ST.search || {}).case || '';
+  ST.search = null;
   setView(`
     <h2>${t('nav.search')}</h2>
+    ${only ? `<p class="muted">${t('search.only')}
+      <span class="mono">${esc(only)}</span></p>` : ''}
     <form class="row" data-act="search.run">
+      <input name="case" type="hidden" value="${esc(only)}">
       <input name="q" placeholder="${t('search.q')}" autofocus>
       <select name="where">
         <option value="decode">${t('search.where.decode')}</option>
@@ -42,7 +49,8 @@ Object.assign(ACTIONS, {
     // стоїть вище, а роль нижче. Разом із вікном приходить читання того самого
     // рядка другим рушієм — те, чого другим запитом не дістати взагалі.
     const env = await callOp('search.run',
-      { q: fd.get('q'), where: fd.get('where'), limit: 100, context: 1 });
+      { q: fd.get('q'), where: fd.get('where'), limit: 100, context: 1,
+        case: String(fd.get('case') || '') });
     unlock();
     if (seq !== SEQ.search) return;
     if (!env.ok) return boxError('hits', env);
