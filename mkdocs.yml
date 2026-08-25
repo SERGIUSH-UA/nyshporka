@@ -59,9 +59,10 @@ markdown_extensions:
 # хто читає репозиторій із GitHub, а не із сайту.
 nav:
   - Нишпорка: index.md
+  - Карта екранів: screens.md
   - Для агентів:
       - Перша сесія: agents/first-session.md
-      - Що агент уміє й чого не вміє: agents/surface.md
+      - Дві поверхні й карта дій: agents/surface.md
       - Як читати відповідь: agents/envelope.md
       - Конвеєри: agents/workflows.md
       - Канали пошуку: agents/search-channels.md
