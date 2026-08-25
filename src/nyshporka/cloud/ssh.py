@@ -175,7 +175,33 @@ class SshSession:
     def __init__(self, client: Any, host: Host) -> None:
         self._client = client
         self._sftp: Any = None
+        self._home = ""
         self.host = host
+
+    # ── шляхи ────────────────────────────────────────────────────────────────
+    @property
+    def home(self) -> str:
+        """Домівка на машині. Питається один раз і запам'ятовується."""
+        if not self._home:
+            got = self.run("printf %s \"$HOME\"", timeout=CONNECT_TIMEOUT)
+            self._home = (got.out.strip().splitlines() or [""])[-1] or "/root"
+        return self._home
+
+    def resolve(self, remote: str) -> str:
+        """`~/nysh-run` → `/home/ivan/nysh-run`.
+
+        🔴 Робиться ТУТ, а не в командах. До оболонки шлях їде в лапках (інакше
+        пробіл в імені теки розірвав би команду), а в лапках тильда не
+        розкривається — і `mkdir -p '~/nysh-run'` створює теку з ІМЕНЕМ `~`
+        поруч із домівкою. Помилки при цьому немає: робота йде, файли
+        пишуться, і виявляється це аж тоді, коли по них приходять руками.
+        """
+        path = remote.strip()
+        if path == "~":
+            return self.home
+        if path.startswith("~/"):
+            return f"{self.home.rstrip('/')}/{path[2:]}"
+        return path
 
     # ── команди ──────────────────────────────────────────────────────────────
     def run(self, cmd: str, *, timeout: float | None = None,

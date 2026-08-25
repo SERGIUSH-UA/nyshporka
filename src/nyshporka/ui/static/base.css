@@ -393,3 +393,92 @@ button:not(:disabled):active { transform: scale(.97); }
 
 }
 
+/* ── 🔍 повноекранний переглядач аркуша ──────────────────────────────────────
+   🔴 Тло НЕ прозоре й не «як тема»: аркуш розглядають, а просвічений крізь
+   нього інтерфейс збиває око з паперу. Колір той самий, що під сканом у
+   вбудованому перегляді (`--stage`) — щоб перехід у повний екран не міняв
+   вигляду самого документа. */
+.lb {
+  position: fixed; inset: 0; z-index: 900;
+  background: var(--stage);
+  display: flex; align-items: center; justify-content: center;
+  overscroll-behavior: contain;
+}
+
+.lb-canvas {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  overflow: hidden; cursor: grab;
+  /* Жести браузера тут зайві: колесо ми забираємо під масштаб, а тягнення —
+     під панорамування. Без цього тачпад одночасно рухає аркуш і сторінку. */
+  touch-action: none;
+}
+
+.lb.grabbing .lb-canvas { cursor: grabbing; }
+
+.lb-img {
+  max-width: none; max-height: none;
+  transform-origin: center center;
+  /* 🔴 `pixelated` НЕ ставимо: на скані згладжування читабельніше за пікселі,
+     а різкі краї на скоропису читаються як артефакти чорнила. */
+  user-select: none; -webkit-user-drag: none;
+  background: var(--paper);
+  box-shadow: var(--sh-2, 0 4px 24px rgba(0, 0, 0, .5));
+}
+
+/* Стрілки — великі й по краях: у них цілять, не дивлячись, бо очі на аркуші. */
+.lb-nav {
+  position: absolute; top: 50%; transform: translateY(-50%);
+  width: 56px; height: 84px; border: 0; cursor: pointer;
+  background: var(--s-2); color: var(--fg);
+  font-size: 32px; line-height: 1; border-radius: var(--r-m);
+  opacity: .55; transition: opacity .15s ease;
+}
+
+.lb-nav:hover:not(:disabled) { opacity: 1; }
+.lb-nav:disabled { opacity: .12; cursor: default; }
+.lb-prev { left: 12px; }
+.lb-next { right: 12px; }
+
+.lb-bar {
+  position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 12px;
+  padding: 6px 12px; border-radius: var(--r-pill);
+  background: var(--s-2); border: 1px solid var(--line-2);
+  color: var(--fg-2); font-size: 13px; max-width: min(90vw, 60rem);
+}
+
+.lb-bar .lb-label {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+.lb-bar button {
+  background: var(--s-4); color: var(--fg-2); border: 0; cursor: pointer;
+  border-radius: var(--r-s); padding: 3px 9px; font-size: 12px;
+}
+
+.lb-bar button:hover { background: var(--hover-soft); color: var(--fg); }
+
+.lb-hint {
+  position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%);
+  color: var(--fg-4); font-size: 12px; pointer-events: none;
+  text-align: center; padding: 0 1rem;
+}
+
+/* 🔴 Контроли ховаються за дві секунди спокою. Вони лежать ПОВЕРХ аркуша, а на
+   сканах текст іде до самого краю — саме туди, де кнопка. Зникають лише
+   візуально: клавіші й колесо працюють далі. */
+.lb.idle .lb-nav,
+.lb.idle .lb-bar,
+.lb.idle .lb-hint { opacity: 0; }
+
+.lb-nav, .lb-bar, .lb-hint { transition: opacity .25s ease; }
+.lb.idle .lb-canvas { cursor: none; }
+
+/* Поки аркуш їде — смуга каже про це, а не мовчить порожнім екраном. */
+.lb.busy .lb-img { opacity: .35; }
+
+@media (max-width: 40rem) {
+  .lb-nav { width: 44px; height: 64px; font-size: 26px; }
+  .lb-hint { display: none; }
+}

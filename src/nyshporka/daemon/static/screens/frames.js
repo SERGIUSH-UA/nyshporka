@@ -23,6 +23,19 @@ import { show } from '../core/nav.js';
 import { ST } from '../core/state.js';
 import { ic } from '/ui/icons.js';
 import { attachCombobox } from '/ui/combobox.js';
+import { lightbox } from '/ui/lightbox.js';
+
+
+/**
+ * Підписи переглядача. Спільний модуль словника не має й мати не мусить: він
+ * нічого не знає ні про справи, ні про мови — підписи дає той, хто кличе.
+ */
+function lbLabels() {
+  return {
+    prev: t('view.prev'), next: t('view.next'), close: t('lb.close'),
+    fit: t('view.zoom.fit'), keys: t('lb.keys'), loading: t('common.loading'),
+  };
+}
 
 /** Відкрита справа. Живе в межах екрана. */
 let FS = { case: '', kind: '', frames: [], i: -1, zoom: 100, wide: false };
@@ -111,10 +124,16 @@ async function framesShow(i) {
   const d = env.data || {};
   stage.innerHTML = `
     <div class="stage"><div class="stage-wrap" style="width:${FS.zoom}%">
-      <img src="${esc(d.image || '')}" alt="${esc(f.label || f.id)}">
+      <img src="${esc(d.image || '')}" alt="${esc(f.label || f.id)}"
+        class="zoomable" title="${esc(t('lb.open'))}">
     </div></div>
     <p class="muted mono">${esc(d.width)}×${esc(d.height)} ·
       ${Math.round((d.bytes || 0) / 1024)} КБ</p>`;
+  // Клік по аркушу — у повний екран. Це найочевидніший жест над зображенням,
+  // і вимагати замість нього окремої кнопки означало б ховати головний режим
+  // перегляду за другим кроком.
+  const shot = stage.querySelector('img.zoomable');
+  if (shot) shot.addEventListener('click', framesFull);
 }
 
 function framesBar() {
@@ -135,13 +154,44 @@ function framesBar() {
       <button data-act="frames.zoom" data-arg="25">${t('view.zoom.in')}</button>
       <button data-act="frames.wide" title="${esc(t('frames.wide.why'))}">
         ${FS.wide ? t('frames.wide.off') : t('frames.wide.on')}</button>
+      <button data-act="frames.full" title="${esc(t('lb.open.why'))}">
+        ${ic('expand', 'ic-sm')} ${t('lb.open')}</button>
     </div>
     <p class="muted"><b>${FS.i + 1}</b>/${FS.frames.length} ·
       <span class="mono">${esc(f.label || '')}</span>
       ${FS.kind === 'pdf' ? `· <span class="dim">${t('frames.frompdf')}</span>` : ''}</p>`;
 }
 
+/**
+ * Повний екран.
+ *
+ * 🔴 Тут просимо ПОВНУ ширину, а не показову. Вбудований перегляд свідомо
+ * бере зменшену копію — на кожен крок гортання це мегабайти, — але в повному
+ * екрані аркуш саме роздивляються, і зум по зменшеній копії впирається в
+ * розмитість рівно там, де починається робота.
+ */
+function framesFull() {
+  lightbox({
+    count: FS.frames.length,
+    index: FS.i,
+    labels: lbLabels(),
+    // Гортання в повному екрані веде за собою екран під ним: вийшовши, людина
+    // лишається на тому аркуші, який дивилась, а не на тому, з якого зайшла.
+    onIndex: (k) => { FS.i = k; },
+    load: async (k) => {
+      const fr = FS.frames[k];
+      if (!fr) return null;
+      const env = await callOp('case.frame',
+        { case: FS.case, frame: fr.id, width: 3000 });
+      if (!env.ok) return { error: env.error || '' };
+      return { image: (env.data || {}).image, label: fr.label || fr.id };
+    },
+  });
+}
+
 Object.assign(ACTIONS, {
+  'frames.full': () => framesFull(),
+
   'frames.open': async (ev) => {
     ev.preventDefault();
     const fd = new FormData(ev.target);
@@ -177,6 +227,8 @@ Object.assign(KEYS, {
     PageUp: () => framesShow(FS.i - 1),
     Home: () => framesShow(0),
     End: () => framesShow(FS.frames.length - 1),
+    Enter: () => framesFull(),
+    f: () => framesFull(),
     '+': () => ACTIONS['frames.zoom'](null, { dataset: { arg: '25' } }),
     '-': () => ACTIONS['frames.zoom'](null, { dataset: { arg: '-25' } }),
     0: () => ACTIONS['frames.zoom'](null, { dataset: { arg: 'fit' } }),

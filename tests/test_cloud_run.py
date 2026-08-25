@@ -39,6 +39,12 @@ class FakeSession:
         self.closed = False
 
     # ── шляхи ────────────────────────────────────────────────────────────────
+    HOME = "/opt/nysh-home"
+
+    def resolve(self, remote: str) -> str:
+        return (f"{self.HOME}/{remote[2:]}" if remote.startswith("~/")
+                else remote)
+
     def _local(self, remote: str) -> Path:
         return self.root / remote.lstrip("/").replace("~/", "")
 
@@ -267,6 +273,38 @@ def test_the_box_is_recorded_before_it_exists(wired, monkeypatch) -> None:
     monkeypatch.setattr(backend, "acquire", watched)
     RUN.start(plan)
     assert seen == ["acquiring"], "фаза мусить бути на диску ДО оренди"
+
+
+def test_the_tilde_is_expanded_before_anything_uses_it(wired) -> None:
+    """🔴 `~/nysh-run` мусить стати справжнім шляхом ДО першої команди.
+
+    Типова тека роботи задається з тильдою, а до оболонки шлях їде в лапках —
+    інакше пробіл в імені теки розірвав би команду. У лапках тильда НЕ
+    розкривається: `mkdir -p '~/nysh-run'` створює теку з іменем `~` поруч із
+    домівкою. Помилки при цьому немає — робота йде, файли пишуться, і
+    виявляється це аж тоді, коли по них приходять руками.
+    """
+    plan, backend = wired
+    backend.acquire = lambda need, *, target="": Box(   # type: ignore[method-assign]
+        id="box-1", backend="fake", label="фейк", cores=16, vram_gb=8, gpus=1,
+        meta={"host": {"host": "fake", "user": "root", "workdir": "~/nysh-run"}})
+    st = RUN.start(plan)
+    assert "~" not in st.remote_dir, "тильда доїхала до команд нерозкритою"
+    assert st.remote_dir.startswith(FakeSession.HOME)
+
+
+def test_ssh_resolve_is_pure_arithmetic_over_home() -> None:
+    """Розкриття шляху перевіряється без жодної машини."""
+    from nyshporka.cloud.ssh import Host, SshSession
+
+    # ⚠ Домівка навмисно НЕ схожа на `/home/<ім'я>`: ворота проти приватних
+    # даних ловлять такий зразок як шлях із чужої машини, і вони мають рацію —
+    # послаблювати їх заради зручності тесту не можна.
+    session = SshSession(client=None, host=Host(name="x", user="u", host="h"))
+    session._home = "/opt/nysh-home"
+    assert session.resolve("~/nysh-run/справа") == "/opt/nysh-home/nysh-run/справа"
+    assert session.resolve("~") == "/opt/nysh-home"
+    assert session.resolve("/mnt/data/nysh") == "/mnt/data/nysh", "абсолютний — як є"
 
 
 # ── порядок: забрати → звірити → відпустити ──────────────────────────────────

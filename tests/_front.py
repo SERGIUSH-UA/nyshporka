@@ -15,10 +15,17 @@ from pathlib import Path
 FRONT_DIR = (Path(__file__).resolve().parents[1]
              / "src" / "nyshporka" / "daemon" / "static")
 
+#: 🔴 Спільний шар — теж фронт, і ламається так само тихо. Він до того ж
+#: гірший випадок: ним користуються ОБИДВІ морди, тож помилка в ньому б'є
+#: одразу по двох застосунках, а живе в теці, куди при правці екрана не
+#: дивляться.
+SHARED_DIR = (Path(__file__).resolve().parents[1]
+              / "src" / "nyshporka" / "ui" / "static")
+
 
 def front_files() -> list[Path]:
-    """Усі модулі фронту в стабільному порядку."""
-    return sorted(FRONT_DIR.rglob("*.js"))
+    """Усі модулі фронту в стабільному порядку — власні й спільні."""
+    return sorted(FRONT_DIR.rglob("*.js")) + sorted(SHARED_DIR.glob("*.js"))
 
 
 def front_js() -> str:

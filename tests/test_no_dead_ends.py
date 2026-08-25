@@ -532,9 +532,21 @@ def test_every_module_imports_what_it_uses() -> None:
     bad: list[str] = []
     for path in front_files():
         src = path.read_text(encoding="utf-8")
+        # 🔴 Оголошення шукаються БУДЬ-ДЕ, не лише на рівні модуля, і разом із
+        # параметрами. Ім'я, оголошене всередині функції (`function esc(s)`,
+        # `(el) => …`), імпорту не потребує — а прив'язавшись до початку рядка,
+        # приймач бачив би в ньому чужий експорт і кричав би на справний код.
+        # Ціна послаблення відома: локальне ім'я в сусідній функції замаскує
+        # справжню пропажу того самого імені. Гірша тут саме гучність —
+        # приймач, який кричить на здорове, перестають читати.
         own = {m.group(1) for m in re.finditer(
-            r"^(?:export\s+)?(?:const|let|var|function|async function|class)\s+(\w+)",
-            src, re.M)}
+            r"\b(?:const|let|var|function|class)\s+(\w+)", src)}
+        for m in re.finditer(r"\(([^()]*)\)\s*=>", src):
+            own |= {p.strip().split("=")[0].strip() for p in m.group(1).split(",")
+                    if re.fullmatch(r"[\w$]+", p.strip().split("=")[0].strip())}
+        for m in re.finditer(r"function\s*\w*\s*\(([^()]*)\)", src):
+            own |= {p.strip().split("=")[0].strip() for p in m.group(1).split(",")
+                    if re.fullmatch(r"[\w$]+", p.strip().split("=")[0].strip())}
         got = set()
         for m in re.finditer(r"import\s*\{([^}]*)\}\s*from", src, re.S):
             for part in m.group(1).split(","):

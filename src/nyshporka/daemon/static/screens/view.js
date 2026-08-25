@@ -30,6 +30,19 @@ import { ST } from '../core/state.js';
 import { ic, eng } from '/ui/icons.js';
 import { swapHtml } from '/ui/dom.js';
 import { attachCombobox } from '/ui/combobox.js';
+import { lightbox } from '/ui/lightbox.js';
+
+
+/**
+ * Підписи переглядача. Спільний модуль словника не має й мати не мусить: він
+ * нічого не знає ні про справи, ні про мови — підписи дає той, хто кличе.
+ */
+function lbLabels() {
+  return {
+    prev: t('view.prev'), next: t('view.next'), close: t('lb.close'),
+    fit: t('view.zoom.fit'), keys: t('lb.keys'), loading: t('common.loading'),
+  };
+}
 
 /** Усе, що зараз відкрито. Живе в межах екрана, тож тут, а не в спільному стані. */
 let VS = {
@@ -207,6 +220,8 @@ function viewBar() {
         title="${esc(t('view.next.key'))}">${t('view.next')}</button>
       <button data-act="view.page" title="${esc(t('view.page.why'))}">
         ${ic('image', 'ic-sm')} ${VS.shot ? t('view.shot.off') : t('view.shot.on')}</button>
+      <button data-act="view.full" title="${esc(t('lb.open.why'))}">
+        ${ic('expand', 'ic-sm')} ${t('lb.open')}</button>
     </div>
     <p class="muted">${bits.join(' · ')}</p>
     ${warns.join('')}`;
@@ -255,6 +270,10 @@ async function viewShot() {
       <img id="stage-img" src="${esc(env.data.image)}" alt="${esc(p.page)}">
       ${stageOverlay(VS.geo)}
     </div></div>`;
+  // ⚠ Слухач на самому знімку, а не на обгортці: обгортку накриває оверлей
+  // рамок, і клік по рядку мусить лишитись кліком по рядку.
+  const shot = box.querySelector('#stage-img');
+  if (shot) shot.addEventListener('dblclick', viewFull);
 }
 
 /**
@@ -403,7 +422,33 @@ async function viewAltLoad() {
       ><span class="no">${i + 1}</span>${esc(ln)}</span>`).join('\n')}</pre>`;
 }
 
+/**
+ * Повний екран для сторінок прогону.
+ *
+ * ⚠ Рамок рядків тут немає навмисно: у повному екрані дивляться на ПАПІР —
+ * почерк, чорнило, штампи, — а розбір рядків живе поруч із текстом, де його
+ * є з чим звіряти.
+ */
+function viewFull() {
+  lightbox({
+    count: VS.pages.length,
+    index: VS.i,
+    labels: lbLabels(),
+    onIndex: (k) => { VS.i = k; },
+    load: async (k) => {
+      const pg = VS.pages[k];
+      if (!pg) return null;
+      const env = await callOp('page.view',
+        { run: VS.run, page: pg.page, region: 'page' });
+      if (!env.ok) return { error: env.error || '' };
+      return { image: (env.data || {}).image, label: pg.page };
+    },
+  });
+}
+
 Object.assign(ACTIONS, {
+  'view.full': () => viewFull(),
+
   'view.open': async (ev) => {
     ev.preventDefault();
     const fd = new FormData(ev.target);
@@ -453,6 +498,8 @@ Object.assign(KEYS, {
     PageUp: () => viewShow(VS.i - 1),
     Home: () => viewShow(0),
     End: () => viewShow(VS.pages.length - 1),
+    Enter: () => viewFull(),
+    f: () => viewFull(),
     p: () => ACTIONS['view.page'](),
     '+': () => ACTIONS['view.zoom'](null, { dataset: { arg: '25' } }),
     '-': () => ACTIONS['view.zoom'](null, { dataset: { arg: '-25' } }),

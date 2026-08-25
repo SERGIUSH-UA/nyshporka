@@ -167,7 +167,7 @@ class EngineState:
 
 def engine_state(session: Session, remote_dir: str) -> EngineState:
     """Перевірити середовище рушіїв на машині — одним заходом."""
-    py = f"{PurePosixPath(remote_dir).parent}/{VENV_SUB}/bin/python"
+    py = f"{PurePosixPath(session.resolve(remote_dir)).parent}/{VENV_SUB}/bin/python"
     code = ("import kraken, torch, PIL, numpy;"
             "print('OK', torch.__version__, torch.cuda.is_available())")
     got = session.run(
@@ -195,6 +195,7 @@ def prepare(session: Session, remote_dir: str, *,
     from nyshporka.htr import manifest as M
 
     man = M.active()
+    remote_dir = session.resolve(remote_dir)
     root = PurePosixPath(remote_dir).parent
     venv = f"{root}/{VENV_SUB}"
     py = f"{venv}/bin/python"
@@ -400,7 +401,10 @@ def start(plan: CloudPlan, *, workers: int = 0, seg_height: int = 0,
             say(f"⚠ {w}")
         ST.save(st)
 
-        remote_dir = _remote_dir(box, st.run_id)
+        # 🔴 Розкриваємо тильду ОДРАЗУ: далі цей рядок їде і в команди (де він
+        # у лапках, тож `~` не розкрилась би), і в SFTP, і в стан заходу, по
+        # якому людина потім ходить руками. Один рядок правди на всі три.
+        remote_dir = session.resolve(_remote_dir(box, st.run_id))
         st.remote_dir = remote_dir
         engine = engine_state(session, remote_dir)
         if not engine.ready:
