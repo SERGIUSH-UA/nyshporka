@@ -48,7 +48,14 @@ function node(tag = 'div') {
     removeAttribute(k) { delete this.attrs[k]; },
     appendChild(c) { this.children.push(c); created.push(c); return c; },
     insertBefore(c) { this.children.push(c); return c; },
-    remove() {}, addEventListener() {}, removeEventListener() {},
+    // Слухачі записуються, щоб приймач міг послати подію так само, як
+    // браузер: перевіряти жести, не виконуючи їх, — це перевіряти намір.
+    _h: {},
+    removed: false,
+    remove() { this.removed = true; },
+    addEventListener(t, fn) { (this._h[t] ||= []).push(fn); },
+    removeEventListener() {},
+    fire(t, ev) { (this._h[t] || []).forEach((fn) => fn(ev)); },
     setPointerCapture() {}, closest() { return null; },
     getBoundingClientRect() { return { left: 0, top: 0, width: 1200, height: 800 }; },
     querySelector(sel) { const k = 'q' + sel;
@@ -120,7 +127,37 @@ await new Promise((r) => setTimeout(r, 20));
 const before = created.length;
 await ACTIONS['frames.full']();
 await new Promise((r) => setTimeout(r, 20));
-out.lightbox = created.slice(before).filter((c) => c.className === 'lb').length;
+const boxes = created.slice(before).filter((c) => c.className === 'lb');
+out.lightbox = boxes.length;
+
+// ── жест: тягнути аркуш НЕ означає зачинити ────────────────────────────────
+if (boxes.length) {
+  const lb = boxes[0];
+  const canvas = lb.querySelector('.lb-canvas');
+  const press = (t) => ({ button: 0, clientX: 100, clientY: 100,
+                          pointerId: 1, target: t });
+  // 1. Тягнення, що почалось і скінчилось на тлі.
+  canvas.fire('pointerdown', press(canvas));
+  canvas.fire('pointermove', { clientX: 260, clientY: 180, target: canvas });
+  canvas.fire('pointerup', { target: canvas });
+  lb.fire('click', { target: canvas });
+  out.closedByDrag = lb.removed;
+
+  // 2. Справжній клік повз аркуш — має зачинити.
+  lb.removed = false;
+  canvas.fire('pointerdown', press(canvas));
+  canvas.fire('pointerup', { target: canvas });
+  lb.fire('click', { target: canvas });
+  out.closedByClick = lb.removed;
+
+  // 3. Клік, що почався НА аркуші й доїхав до тла, — це теж перетягування.
+  const img = lb.querySelector('.lb-img');
+  lb.removed = false;
+  canvas.fire('pointerdown', { ...press(img), target: img });
+  canvas.fire('pointerup', { target: canvas });
+  lb.fire('click', { target: canvas });
+  out.closedFromImage = lb.removed;
+}
 
 console.log('@@' + JSON.stringify(out));
 // 🔴 Вихід ЯВНИЙ. Застосунок навмисно тримає вічний цикл спостереження за
@@ -201,3 +238,33 @@ def test_keyboard_is_bound_to_the_screens_that_need_it(probe) -> None:
     got = set(probe["keys"])
     assert {"view", "sift", "frames"} <= got, (
         f"клавіші зареєстрували лише {sorted(got)}")
+
+
+# ── жести: тягнути ≠ зачинити ────────────────────────────────────────────────
+def test_dragging_the_sheet_does_not_close_the_viewer(probe) -> None:
+    """🔴 Полотно переглядача займає ВЕСЬ екран, тож натискання «щоб потягнути»
+    падає на тло — а браузер після відпускання все одно шле `click`.
+
+    Доти фон читав його як «клікнули повз аркуш, зачиняємось»: людина тягне,
+    вікно зникає. Найгірше тут те, що жест і закриття невідрізненні — це
+    виглядає як випадковий збій, а не як власна дія.
+    """
+    assert probe.get("closedByDrag") is False, (
+        "перетягування зачинило переглядач — рухати аркуш стало неможливо")
+
+
+def test_a_real_click_past_the_sheet_still_closes(probe) -> None:
+    """Захист від жесту не має вбити саму дію: клік повз аркуш зачиняє."""
+    assert probe.get("closedByClick") is True, (
+        "клік повз аркуш перестав зачиняти — захист з'їв корисну дію")
+
+
+def test_a_drag_that_began_on_the_sheet_is_not_a_click_past_it(probe) -> None:
+    """Жест, що стартував на аркуші й доїхав до тла, — перетягування.
+
+    ⚠ Саме тому запам'ятовується, де натискання ПОЧАЛОСЬ, а не де скінчилось:
+    при наближенні аркуш займає весь екран, і тягнути його доводиться саме
+    «з аркуша на тло».
+    """
+    assert probe.get("closedFromImage") is False, (
+        "перетягування з аркуша на тло зачинило переглядач")

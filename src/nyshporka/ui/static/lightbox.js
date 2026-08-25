@@ -182,17 +182,37 @@ export function lightbox({ count, index = 0, load, labels = {}, onIndex } = {}) 
   }, { passive: false });
 
   let drag = null;
+  /**
+   * 🔴 Слід останнього натискання — саме він відрізняє КЛІК від ПЕРЕТЯГУВАННЯ.
+   *
+   * Без нього переглядач закривався від спроби посунути аркуш: полотно займає
+   * весь екран, тож натискання «щоб потягнути» падає на тло, а браузер після
+   * відпускання все одно шле `click` — і фон читає його як «клікнули повз
+   * аркуш, зачиняємось». Найгірше тут те, що жест і закриття невідрізненні:
+   * людина тягне, вікно зникає, і виглядає це як випадковий збій.
+   */
+  let press = { moved: false, backdrop: false };
+
+  /** Поріг у пікселях, нижче якого рух вважається тремтінням руки, а не жестом. */
+  const DRAG_SLOP = 4;
+
   canvas.addEventListener('pointerdown', (ev) => {
     if (ev.button !== 0) return;
     drag = { px: ev.clientX, py: ev.clientY, x, y };
+    // 🔴 Де почалось натискання, а не де закінчилось. Жест, що стартував на
+    // самому аркуші й доїхав до тла, — це перетягування, а не клік повз.
+    press = { moved: false, backdrop: ev.target === canvas || ev.target === root };
     canvas.setPointerCapture(ev.pointerId);
     root.classList.add('grabbing');
   });
   canvas.addEventListener('pointermove', (ev) => {
     wake();
     if (!drag) return;
-    x = drag.x + (ev.clientX - drag.px);
-    y = drag.y + (ev.clientY - drag.py);
+    const dx = ev.clientX - drag.px;
+    const dy = ev.clientY - drag.py;
+    if (Math.abs(dx) > DRAG_SLOP || Math.abs(dy) > DRAG_SLOP) press.moved = true;
+    x = drag.x + dx;
+    y = drag.y + dy;
     apply();
   });
   const endDrag = () => { drag = null; root.classList.remove('grabbing'); };
@@ -240,9 +260,15 @@ export function lightbox({ count, index = 0, load, labels = {}, onIndex } = {}) 
   root.querySelector('.lb-next').addEventListener('click', () => showFrame(i + 1));
   root.querySelector('.lb-fit').addEventListener('click', fit);
   root.querySelector('.lb-close').addEventListener('click', close);
-  // Клік повз аркуш закриває — але лише коли не тягнули: інакше панорамування,
-  // що закінчилось на тлі, викидало б із перегляду.
+  /**
+   * Клік повз аркуш закриває — але лише справжній клік.
+   *
+   * Три умови разом, і кожна закриває свою дірку: натискання почалось на тлі
+   * (а не на аркуші), відпустилось теж на тлі, і між ними рука не рухалась.
+   * Забравши будь-яку з них, ми повертаємо закриття посеред перетягування.
+   */
   root.addEventListener('click', (ev) => {
+    if (press.moved || !press.backdrop) return;
     if (ev.target === root || ev.target === canvas) close();
   });
 
