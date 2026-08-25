@@ -91,7 +91,7 @@ const STRINGS = {
     'lb.text': 'Текст аркуша',
     'lb.notext': 'цей аркуш ще не прочитано машиною',
     'lb.keys': '← → гортати · колесо — масштаб під курсором · тягнути — рухати '
-      + '· T текст · 0 вписати · Esc вийти',
+      + '· T текст · B рамки · 0 вписати · Esc вийти',
     'frames.title': 'Аркуші справи',
     'frames.why': 'Подивитись на те, що завантажено — без жодного прогону. '
       + 'Кадри або сторінки PDF, як їх віддав архів.',
@@ -101,6 +101,12 @@ const STRINGS = {
     'frames.empty': 'у цій справі немає аркушів, які можна показати',
     'frames.nothing': 'спершу відкрийте справу — показувати ще нічого',
     'frames.frompdf': 'сторінка PDF, відрендерена на льоту',
+    'frames.readby': 'прочитано:',
+    'frames.noruns': 'справу ще не читали машиною — самий папір',
+    'frames.pdf.notext': 'справа лежить одним PDF: прочитане не лягає на '
+      + 'сторінки, бо кадрів на диску немає',
+    'lb.boxes': 'Рамки',
+    'lb.boxes.why': 'показувати рамки рядків на скані (клавіша B)',
     'frames.wide.on': 'На повну ширину',
     'frames.wide.off': 'Зменшити',
     'frames.wide.why': 'повна ширина коштує мегабайтами на КОЖЕН аркуш — '
@@ -395,7 +401,7 @@ const STRINGS = {
     'lb.text': 'Sheet text',
     'lb.notext': 'this sheet has not been read by a machine yet',
     'lb.keys': '← → leaf · wheel zooms at the cursor · drag to pan · T text '
-      + '· 0 to fit · Esc to leave',
+      + '· B boxes · 0 to fit · Esc to leave',
     'frames.title': 'Sheets of the case',
     'frames.why': 'Look at what you have downloaded — with no run at all. '
       + 'Frames or PDF pages, as the archive gave them.',
@@ -405,6 +411,12 @@ const STRINGS = {
     'frames.empty': 'this case has no sheets that can be shown',
     'frames.nothing': 'open a case first — there is nothing to show yet',
     'frames.frompdf': 'a PDF page rendered on the fly',
+    'frames.readby': 'read by:',
+    'frames.noruns': 'this case has not been machine-read — plain paper',
+    'frames.pdf.notext': 'the case is a PDF: the decode cannot be tied to its '
+      + 'pages, because there are no frames on disk',
+    'lb.boxes': 'Boxes',
+    'lb.boxes.why': 'show line boxes on the scan (key B)',
     'frames.wide.on': 'Full width',
     'frames.wide.off': 'Smaller',
     'frames.wide.why': 'full width costs megabytes for EVERY sheet — turn it '

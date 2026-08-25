@@ -42,6 +42,7 @@ function lbLabels() {
     prev: t('view.prev'), next: t('view.next'), close: t('lb.close'),
     fit: t('view.zoom.fit'), keys: t('lb.keys'), loading: t('common.loading'),
     text: t('lb.text'), notext: t('lb.notext'), alt: t('sift.alt'),
+    boxes: t('lb.boxes'), boxesWhy: t('lb.boxes.why'),
   };
 }
 

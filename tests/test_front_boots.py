@@ -101,7 +101,9 @@ globalThis.fetch = async (url) => {
   if (String(url).includes('/api/jobs/wait')) return new Promise(() => {});
   const name = String(url).split('/api/op/')[1] || '';
   const data = {
-    'case.frames': { kind: 'image', total: 2, pdfs: [], frames: FRAMES },
+    'case.frames': { kind: 'image', total: 2, pdfs: [], frames: FRAMES,
+                     runs: [{ name: 'прогін', engine_id: 'pysar',
+                              pages_done: 2, alt: '' }] },
     'case.frame': { width: 9, height: 9, bytes: 9, image: 'data:image/jpeg;base64,AA' },
     'library.list': { cases: [], built: true, summary: {}, facets: {} },
     'runs.list': { runs: [{ name: 'прогін', case_dir: 'c', engine_id: 'pysar',
@@ -139,6 +141,11 @@ await ACTIONS['frames.full']();
 await new Promise((r) => setTimeout(r, 20));
 const boxes = created.slice(before).filter((c) => c.className === 'lb');
 out.lightbox = boxes.length;
+if (boxes.length) {
+  // Читалка бібліотеки мусить мати ті самі рамки, що й читалка гортача:
+  // справа одна, прочитане одне, різниця була лише у вході.
+  out.libShapes = (boxes[0].querySelector('.lb-ov').children || []).length;
+}
 
 // ── жест: тягнути аркуш НЕ означає зачинити ────────────────────────────────
 if (boxes.length) {
@@ -318,3 +325,16 @@ def test_the_reader_draws_the_line_boxes_on_the_scan(probe) -> None:
     assert probe.get("shapes") == 1, (
         f"на скан лягло {probe.get('shapes')} рамок замість однієї — "
         "накладка або не намалювалась, або порахувала порожню фігуру")
+
+
+def test_the_library_reader_shows_the_decode_too(probe) -> None:
+    """🔴 Та сама справа не має читатись по-різному залежно від входу.
+
+    Доти з гортача аркуш відкривався з текстом і рамками, а з бібліотеки —
+    самим папером. Різниця була не в даних, а в тому, що один екран про них не
+    спитав: кадр і сторінка прогону — це одне ім'я файлу, тож зіставляти нічого
+    не треба.
+    """
+    assert probe.get("libShapes") == 1, (
+        f"читалка бібліотеки поклала {probe.get('libShapes')} рамок замість "
+        "однієї — прочитане з бібліотеки не видно")

@@ -35,11 +35,13 @@ function lbLabels() {
     prev: t('view.prev'), next: t('view.next'), close: t('lb.close'),
     fit: t('view.zoom.fit'), keys: t('lb.keys'), loading: t('common.loading'),
     text: t('lb.text'), notext: t('lb.notext'), alt: t('sift.alt'),
+    boxes: t('lb.boxes'), boxesWhy: t('lb.boxes.why'),
   };
 }
 
 /** Відкрита справа. Живе в межах екрана. */
-let FS = { case: '', kind: '', frames: [], i: -1, zoom: 100, wide: false };
+let FS = { case: '', kind: '', frames: [], i: -1, zoom: 100, wide: false,
+           runs: [], run: null };
 
 let _cb = null;
 let _seq = 0;
@@ -92,7 +94,11 @@ async function framesOpen(caseDir) {
     return;
   }
   const d = env.data || {};
-  FS = { ...FS, case: caseDir, kind: d.kind, frames: d.frames || [], i: -1 };
+  const runs = d.runs || [];
+  // Найповніший прогін за замовчуванням — саме він покриє більше аркушів
+  // текстом. Вибрати інший можна в смузі, коли їх кілька.
+  FS = { ...FS, case: caseDir, kind: d.kind, frames: d.frames || [], i: -1,
+         runs, run: runs[0] || null };
   el('fr-bar').innerHTML = renderWarnings(env);
   if (!FS.frames.length) {
     el('fr-bar').innerHTML += `<div class="warn">${t('frames.empty')}</div>`;
@@ -160,7 +166,8 @@ function framesBar() {
     </div>
     <p class="muted"><b>${FS.i + 1}</b>/${FS.frames.length} ·
       <span class="mono">${esc(f.label || '')}</span>
-      ${FS.kind === 'pdf' ? `· <span class="dim">${t('frames.frompdf')}</span>` : ''}</p>`;
+      ${FS.kind === 'pdf' ? `· <span class="dim">${t('frames.frompdf')}</span>` : ''}
+      ${framesRunPick()}</p>`;
 }
 
 /**
@@ -189,16 +196,86 @@ function framesFull() {
     load: async (k) => {
       const fr = FS.frames[k];
       if (!fr) return null;
-      const env = await callOp('case.frame',
-        { case: FS.case, frame: fr.id, width: 3000 });
+      // Знімок і прочитане просяться РАЗОМ: послідовно вони склали б паузу на
+      // кожне гортання, тоді як найдовше однаково рендериться знімок.
+      const [env, txt] = await Promise.all([
+        callOp('case.frame', { case: FS.case, frame: fr.id, width: 3000 }),
+        framesText(fr.id),
+      ]);
       if (!env.ok) return { error: env.error || '' };
-      return { image: (env.data || {}).image, label: fr.label || fr.id };
+      return { image: (env.data || {}).image, label: fr.label || fr.id, ...txt };
     },
   });
 }
 
+/**
+ * Чим прочитана ця справа — і чи є вибір.
+ *
+ * 🔴 Прогін називається ВГОЛОС, навіть коли він один. Текст поверх аркуша
+ * виглядає властивістю самого скана, тоді як це чиєсь прочитання: інший рушій
+ * дасть інші слова на тих самих рядках, і не знати, чиї слова читаєш, —
+ * означає приписувати документу те, чого в ньому немає.
+ */
+function framesRunPick() {
+  if (!FS.runs.length) {
+    return FS.kind === 'pdf'
+      ? `· <span class="dim">${t('frames.pdf.notext')}</span>`
+      : `· <span class="dim">${t('frames.noruns')}</span>`;
+  }
+  if (FS.runs.length === 1) {
+    return `· <span class="dim">${t('frames.readby')}
+      <span class="mono">${esc(FS.runs[0].name)}</span></span>`;
+  }
+  return `· <label class="lbl-mini">${t('frames.readby')}
+    <select id="fr-run" data-act="frames.run">
+      ${FS.runs.map((r) => `<option value="${esc(r.name)}"${
+        FS.run && r.name === FS.run.name ? ' selected' : ''
+      }>${esc(r.name)} · ${esc(r.pages_done)}</option>`).join('')}
+    </select></label>`;
+}
+
+/**
+ * Прочитане для цього аркуша: текст, рамки, другий голос.
+ *
+ * 🔴 Кадр і сторінка прогону — це ОДНЕ ім'я файлу, тож зіставляти нічого не
+ * треба. Саме тому бібліотека може показати текст, не будуючи власної
+ * відповідності: її не існує, збіг прямий.
+ *
+ * ⚠ Порожньо — законна й часта відповідь: прогін міг не дійти до цього аркуша
+ * (частковий, обірваний, шардований), і тоді читалка просто показує папір.
+ */
+async function framesText(frameId) {
+  if (!FS.run || FS.kind === 'pdf') return {};
+  const [text, geo] = await Promise.all([
+    callOp('page.text', { run: FS.run.name, page: frameId }),
+    callOp('page.lines', { run: FS.run.name, page: frameId }),
+  ]);
+  const g = (geo.ok && geo.data) || {};
+  const lines = (text.ok && (text.data || {}).lines) || [];
+  let alt = [];
+  if (FS.run.alt && lines.length) {
+    const other = await callOp('page.text', { run: FS.run.alt, page: frameId });
+    const rows = (other.ok && (other.data || {}).lines) || [];
+    // 🔴 Вирівнювання за номером рядка законне лише при однаковій їх кількості:
+    // різна означає різні рамки, і той самий номер показав би ЧУЖИЙ рядок.
+    alt = rows.length === lines.length ? rows : [];
+  }
+  return {
+    size: g.has ? g.size : null,
+    shapes: g.has ? (g.polys || g.boxes || []) : [],
+    lines,
+    alt,
+  };
+}
+
 Object.assign(ACTIONS, {
   'frames.full': () => framesFull(),
+
+  'frames.run': () => {
+    const want = (el('fr-run') || {}).value || '';
+    FS.run = FS.runs.find((r) => r.name === want) || FS.run;
+    return framesShow(FS.i);
+  },
 
   'frames.open': async (ev) => {
     ev.preventDefault();

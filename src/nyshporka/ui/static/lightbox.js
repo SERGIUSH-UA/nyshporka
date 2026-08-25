@@ -47,12 +47,29 @@ const DRAG_SLOP = 4;
 const DEFAULT_LABELS = {
   prev: 'Попередній', next: 'Наступний', close: 'Закрити', fit: 'Вписати',
   text: 'Текст аркуша', notext: 'цей аркуш не прочитано',
+  boxes: 'Рамки', boxesWhy: 'показувати рамки рядків на скані (клавіша B)',
   alt: 'другий голос',
   keys: '← → гортати · колесо — масштаб · тягнути — рухати · T — текст · Esc — вийти',
   loading: 'Хвилинку…',
 };
 
 const NS = 'http://www.w3.org/2000/svg';
+
+/**
+ * Чи показувати рамки рядків. Живе поза окремим відкриттям читалки навмисно:
+ * це не властивість аркуша, а звичка читача — вимкнувши їх на одній справі,
+ * він не хоче вмикати їх знову на наступній.
+ *
+ * ⚠ У сховищі браузера, а не в пам'яті: читалку відкривають десятки разів за
+ * сеанс, і між ними сторінку перезавантажують.
+ */
+let SHOW_BOXES = true;
+try {
+  SHOW_BOXES = localStorage.getItem('nysh.lb.boxes') !== '0';
+} catch {
+  // Приватне вікно чи заборонене сховище — лишаємо дефолт. Читалка не має
+  // права не відкритись через налаштування, якого нема де тримати.
+}
 
 function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g,
@@ -110,6 +127,7 @@ export function lightbox({ count, index = 0, load, labels = {}, onIndex } = {}) 
       <span class="lb-pos mono"></span>
       <span class="lb-label"></span>
       <span class="lb-zoom mono"></span>
+      <button class="lb-boxes" title="${esc(L.boxesWhy)}">${esc(L.boxes)}</button>
       <button class="lb-text" title="${esc(L.text)}">${esc(L.text)}</button>
       <button class="lb-fit" title="${esc(L.fit)}">${esc(L.fit)}</button>
       <button class="lb-close" title="${esc(L.close)}" aria-label="${esc(L.close)}">✕</button>
@@ -137,6 +155,34 @@ export function lightbox({ count, index = 0, load, labels = {}, onIndex } = {}) 
   function apply() {
     stage.style.transform = `translate(${x}px, ${y}px) scale(${z ?? 1})`;
     zoomEl.textContent = z ? `${Math.round(z * 100)}%` : '';
+  }
+
+  /**
+   * Показувати рамки чи ні.
+   *
+   * 🔴 Разом із рамками зникає й підказка на наведення — інакше текст спливав
+   * би над невидимою фігурою, і аркуш «сам собою» показував би написи там, де
+   * читач щойно попросив чистий папір.
+   *
+   * Панель тексту при цьому лишається: вимикають саме РОЗМІТКУ ПОВЕРХ скану, а
+   * не доступ до прочитаного.
+   */
+  function applyBoxes() {
+    root.classList.toggle('no-boxes', !SHOW_BOXES);
+    if (!SHOW_BOXES) hideTip();
+    const btn = root.querySelector('.lb-boxes');
+    if (btn) btn.classList.toggle('on', SHOW_BOXES);
+  }
+
+  function toggleBoxes(on) {
+    SHOW_BOXES = on === undefined ? !SHOW_BOXES : !!on;
+    try {
+      localStorage.setItem('nysh.lb.boxes', SHOW_BOXES ? '1' : '0');
+    } catch {
+      // Не змогли запам'ятати — вибір діє до кінця сеансу. Це гірше за
+      // запам'ятований, але незрівнянно краще за відмову перемкнути.
+    }
+    applyBoxes();
   }
 
   /** Вписати аркуш у вікно й поставити його по центру. */
@@ -344,7 +390,7 @@ export function lightbox({ count, index = 0, load, labels = {}, onIndex } = {}) 
     wake();
     if (!drag) {
       // Наведення на рамку — підказка з текстом рядка на його місці.
-      const sh = ev.target && ev.target.closest
+      const sh = SHOW_BOXES && ev.target && ev.target.closest
         ? ev.target.closest('.lb-shape') : null;
       if (sh) showTip(Number(sh.dataset.i), sh);
       else hideTip();
@@ -388,6 +434,7 @@ export function lightbox({ count, index = 0, load, labels = {}, onIndex } = {}) 
       '-': () => zoomAt(innerWidth / 2, innerHeight / 2, 1 / 1.25),
       0: fit, f: fit, F: fit,
       t: () => toggleSide(), T: () => toggleSide(), е: () => toggleSide(),
+      b: () => toggleBoxes(), B: () => toggleBoxes(), и: () => toggleBoxes(),
       Escape: close,
     };
     const fn = map[ev.key];
@@ -403,6 +450,7 @@ export function lightbox({ count, index = 0, load, labels = {}, onIndex } = {}) 
   root.querySelector('.lb-prev').addEventListener('click', () => showFrame(i - 1));
   root.querySelector('.lb-next').addEventListener('click', () => showFrame(i + 1));
   root.querySelector('.lb-fit').addEventListener('click', fit);
+  root.querySelector('.lb-boxes').addEventListener('click', () => toggleBoxes());
   root.querySelector('.lb-text').addEventListener('click', () => toggleSide());
   root.querySelector('.lb-close').addEventListener('click', close);
 
@@ -420,7 +468,8 @@ export function lightbox({ count, index = 0, load, labels = {}, onIndex } = {}) 
    * Забравши будь-яку з них, ми повертаємо закриття посеред перетягування.
    */
   root.addEventListener('click', (ev) => {
-    const sh = ev.target && ev.target.closest ? ev.target.closest('.lb-shape') : null;
+    const sh = SHOW_BOXES && ev.target && ev.target.closest
+      ? ev.target.closest('.lb-shape') : null;
     if (sh && !press.moved) { pin(Number(sh.dataset.i)); return; }
     if (press.moved || !press.backdrop) return;
     if (ev.target === root || ev.target === canvas) close();
@@ -434,6 +483,7 @@ export function lightbox({ count, index = 0, load, labels = {}, onIndex } = {}) 
     root.remove();
   }
 
+  applyBoxes();
   showFrame(i);
-  return { ok: true, close, show: showFrame, side: toggleSide };
+  return { ok: true, close, show: showFrame, side: toggleSide, boxes: toggleBoxes };
 }

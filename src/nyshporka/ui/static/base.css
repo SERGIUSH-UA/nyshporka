@@ -520,10 +520,20 @@ button:not(:disabled):active { transform: scale(.97); }
 
 .lb-bar button:hover { background: var(--hover-soft); color: var(--fg); }
 
-/* Кнопка тексту з'являється лише там, де текст є: на непрочитаному аркуші
-   вона обіцяла б те, чого немає. */
-.lb-bar .lb-text { display: none; }
-.lb.has-text .lb-bar .lb-text { display: inline-block; }
+/* Кнопки тексту й рамок з'являються лише там, де текст є: на непрочитаному
+   аркуші вони обіцяли б те, чого немає. */
+.lb-bar .lb-text, .lb-bar .lb-boxes { display: none; }
+.lb.has-text .lb-bar .lb-text,
+.lb.has-text .lb-bar .lb-boxes { display: inline-block; }
+
+/* Увімкнений стан видно КОЛЬОРОМ: інакше кнопка-перемикач нічим не
+   відрізняється від кнопки-дії, і незрозуміло, у якому вона зараз стані. */
+.lb-bar button.on { background: var(--accent-fill); color: var(--accent-ink); }
+
+/* 🔴 Рамки ховаються разом із подіями. Лишивши їх прозорими, ми лишили б і
+   наведення: аркуш «сам собою» показував би написи там, де читач щойно
+   попросив чистий папір. */
+.lb.no-boxes .lb-ov { display: none; }
 
 .lb-hint {
   position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%);
