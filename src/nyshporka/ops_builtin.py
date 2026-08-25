@@ -73,11 +73,62 @@ def _source(source_id: str) -> Source:
     return src
 
 
+def _catalog_basis(src: Any) -> dict[str, Any]:
+    """На чому це джерело шукає — і чи є на чому взагалі.
+
+    🔴 Стан каталогу мусить бути видимим ДО пошуку, а не після. «Нічого не
+    знайшлось» у джерелі без каталогу і «нічого не знайшлось» у зрізі на дев'ять
+    тисяч справ — це різні відповіді, і друга закриває напрям, якого ніхто не
+    перевіряв. Доти перелік джерел казав лише, що джерело існує.
+
+    ⚠ Метод береться через `getattr`: `Source` — це `Protocol`, а не базовий
+    клас, тож дефолту успадкувати нізвідки. Джерело без каталогу (локальна тека)
+    чесно віддає `kind: "none"` і `rows: None` — не нуль.
+    """
+    fn = getattr(src, "catalog_source", None)
+    searchable = "search" in getattr(src, "caps", ())
+    out: dict[str, Any] = {"searchable": searchable, "kind": "none",
+                           "taken": "", "rows": None, "scope": "", "fix": ""}
+    if fn is None:
+        return out
+    try:
+        kind, info = fn()
+    except Exception as exc:
+        out["fix"] = f"каталог не читається: {type(exc).__name__}: {exc}"
+        return out
+    out["kind"] = kind
+    out["taken"] = str(info.get("taken") or "")
+    rows = info.get("rows")
+    out["rows"] = int(rows) if isinstance(rows, int) else None
+    regions = info.get("regions") or []
+    if regions:
+        out["scope"] = ", ".join(str(x) for x in regions)
+    if kind == "none" and searchable:
+        # Порада мусить бути ВИКОНУВАНОЮ. Обхід збирається однією командою, і
+        # саме її бракувало тому, хто діставав `source_unavailable` після
+        # одинадцяти секунд очікування.
+        out["fix"] = f"nysh crawl {src.id}"
+    return out
+
+
 @op("sources.list", summary="Звідки можна брати матеріал", section="material")
 def sources_list(_: NoArgs) -> Envelope:
     reg = _registry()
-    env = ok({"sources": [{"id": s.id, "label": s.label, "caps": sorted(s.caps)}
-                          for s in reg.all()]})
+    rows = [{"id": s.id, "label": s.label, "caps": sorted(s.caps),
+             "catalog": _catalog_basis(s)} for s in reg.all()]
+    env = ok({"sources": rows, "shown": len(rows),
+              # 🔴 Скільки джерел УМІЮТЬ шукати й скільки з них мають на чому.
+              # Друге число і є знаменником кожного нуля на цьому екрані.
+              "searchable": sum(1 for r in rows if r["catalog"]["searchable"]),
+              "with_catalog": sum(1 for r in rows
+                                  if r["catalog"]["searchable"]
+                                  and r["catalog"]["kind"] != "none")})
+    blind = [r["label"] for r in rows
+             if r["catalog"]["searchable"] and r["catalog"]["kind"] == "none"]
+    if blind:
+        env.warn("search_without_catalog",
+                 "шукати нема на чому в джерелах: " + ", ".join(blind)
+                 + " — їхній нуль нічого не означатиме, доки не зібрано обхід")
     for name, why in reg.broken:
         # Зламаний плагін називається поіменно: «мого архіву немає в списку»
         # інакше не має пояснення, і причину шукатимуть у своїх налаштуваннях.
@@ -465,9 +516,19 @@ class ViewArgs(BaseModel):
 # читати цілком при кожному виклику. Тут він потрібен ВІКНУ: імена прогонів
 # довгі й схожі, і набирати їх руками означає помилятись у назві саме тоді, коли
 # шукаєш конкретну сторінку.
+class RunsArgs(BaseModel):
+    q: str = Field(default="", description="підрядок: ім'я прогону, шифра, назва")
+    case: str = Field(default="", description="ключ справи `repo/fond/spr`")
+    engine: str = Field(default="", description="рушій: pysar | diak | skryba")
+    orphan: bool = Field(default=False, description="лише прогони без справи")
+    page: int = Field(default=0, ge=0, le=10_000)
+    page_size: int = Field(default=0, ge=0, le=200,
+                           description="розмір сторінки; 0 — усі прогони")
+
+
 @op("runs.list", summary="Прогони читання: що вже прочитано і чим",
-    args=NoArgs, mutates=False, section="htr", agent=False)
-def runs_list(_: NoArgs) -> Envelope:
+    args=RunsArgs, mutates=False, section="htr", agent=False)
+def runs_list(a: RunsArgs) -> Envelope:
     """Перелік прочитаного — для вибору в гортачі.
 
     ⚠ Рушій тут ЧАСТИНА відповіді, а не прикраса: на одну справу прогонів
@@ -480,11 +541,46 @@ def runs_list(_: NoArgs) -> Envelope:
         runs = htr_store.list_cases()
     except Exception as exc:
         return fail(f"перелік прогонів недоступний ({type(exc).__name__}: {exc})")
-    env = ok({"runs": runs, "total": len(runs)})
-    if not runs:
+    everything = len(runs)
+    orphans = sum(1 for r in runs if not r.get("case_key"))
+    if a.orphan:
+        runs = [r for r in runs if not r.get("case_key")]
+    if a.case:
+        runs = [r for r in runs if r.get("case_key") == a.case]
+    if a.engine:
+        runs = [r for r in runs if a.engine in (r.get("engine_ids") or [])]
+    if a.q:
+        needle = a.q.casefold()
+        runs = [r for r in runs if needle in " ".join(
+            str(r.get(k) or "") for k in ("name", "shifra", "title", "case_key")
+        ).casefold()]
+    total = len(runs)
+    # 🔴 Сторінка ріже ПІСЛЯ фільтрів і НЕ чіпає знаменників: `total` — скільки
+    # підпало, `everything` — скільки їх узагалі. Без другого числа фільтр
+    # «без справи» читався б як «прогонів усього 123».
+    size = a.page_size
+    if size:
+        start = a.page * size
+        runs = runs[start:start + size]
+    env = ok({"runs": runs, "shown": len(runs), "total": total,
+              "everything": everything, "orphans": orphans,
+              "page": a.page, "page_size": size,
+              "pages": ((total + size - 1) // size) if size else 0})
+    if not everything:
         env.warn("nothing_read_yet",
                  "жодної справи ще не прочитано — гортати нема чого")
         env.suggest("read.plan", "порахувати, чим і скільки читати")
+    elif not total:
+        env.warn("nothing_matched",
+                 f"під фільтр не підпало нічого з {everything} прогонів")
+    if orphans and not a.orphan:
+        # 🔴 Нічийний прогін — текст, чия справа невідома. Він не загублений, а
+        # невидимий: жоден екран про справу його не покаже, і зшивати
+        # доводиться правкою файлу руками.
+        env.warn("orphan_runs",
+                 f"{orphans} прогонів без справи — їхнього тексту не видно "
+                 f"з жодної картки")
+        env.suggest("cases.bind", "прив'язати нічийний прогін до справи")
     return env
 
 

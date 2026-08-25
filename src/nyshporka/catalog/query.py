@@ -268,6 +268,12 @@ def place_card(card: str, repo: str = "CDIAK") -> Answer:
         n = re.sub(r"\D", "", c["spr"] or "")
         letter = (c["spr"] or "")[len(n):].lower()
         c["shifra"] = f"{c['fond']}-{c['opys']}-{c['spr']}"
+        # 🔴 Спільний ключ трьох реєстрів — щоб із картки села можна було піти
+        # в бібліотеку й у реєстр опису, а не лише подивитись на позначку «✓».
+        # Доти рядок картки був тупиком: видно, що справа на диску, і нічим її
+        # відкрити.
+        c["repo"] = repo
+        c["key"] = f"{repo}/{c['fond']}/{c['spr']}"
         c["on_disk"] = disk.get((c["fond"], c["opys"], n, letter), "")
     place["cases"] = cases
     place["n_on_disk"] = sum(1 for c in cases if c["on_disk"])

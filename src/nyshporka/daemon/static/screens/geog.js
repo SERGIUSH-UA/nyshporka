@@ -5,7 +5,7 @@ import { TOKEN, callOp, SEQ } from '../core/net.js';
 import { esc, el, setView, busy, failure, boxError, busyForm,
   renderWarnings, renderCoverage, curGen, alive } from '../core/view.js';
 import { SCREENS, ACTIONS } from '../core/registry.js';
-import { SECTIONS, NAV_LABEL, show, renderNav,
+import { SECTIONS, NAV_LABEL, show, renderNav, goto,
   refreshJobs } from '../core/nav.js';
 import { ST } from '../core/state.js';
 import { ic, eng } from '/ui/icons.js';
@@ -61,6 +61,22 @@ SCREENS.geog = async () => {
 };
 
 Object.assign(ACTIONS, {
+  /**
+   * 📚 Ця сама справа в бібліотеці.
+   *
+   * 🔴 Доти картка села була тупиком: вона ЗНАЄ шлях справи на диску (поле
+   * `on_disk`) і показувала лише позначку «✓». Тобто найдешевший перехід у
+   * всьому застосунку — від села до вже завантаженої книги — доводилось
+   * робити руками через пошук за шифрою.
+   */
+  'geog.lib': (_ev, elm) => goto('library', { key: elm.dataset.arg }),
+
+  /** 🏛 Ця сама справа в реєстрі опису — «а що ще є в цьому фонді». */
+  'geog.opys': (_ev, elm) => {
+    const [repo, fond, spr] = String(elm.dataset.arg).split('/');
+    return goto('fonds', { repo, fond, spr });
+  },
+
   'geog.find': async (ev) => {
     ev.preventDefault();
     const f = new FormData(ev.target);
@@ -112,6 +128,14 @@ Object.assign(ACTIONS, {
         <td>${c.year_from ? `${esc(c.year_from)}–${esc(c.year_to)}` : ''}</td>
         <td>${esc(c.doc_type || '')}</td>
         <td class="muted">${esc(c.parish || '')}</td>
+        <td class="acts">
+          ${c.on_disk ? `<button class="ctl-sm" data-act="geog.lib"
+            data-arg="${esc(c.key || '')}"
+            title="${esc(t('geog.act.lib'))}">${ic('books', 'ic-o ic-sm')}</button>` : ''}
+          ${c.key ? `<button class="ctl-sm" data-act="geog.opys"
+            data-arg="${esc(c.key)}"
+            title="${esc(t('geog.act.opys'))}">${ic('archive-box', 'ic-o ic-sm')}</button>` : ''}
+        </td>
       </tr>`).join('')}</tbody></table>
       ${(pl.siblings || []).length ? `<h3>🕍 ${t('geog.siblings')}</h3>
         <table><tbody>${pl.siblings.map((x) => `<tr>

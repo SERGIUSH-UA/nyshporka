@@ -26,9 +26,11 @@ from __future__ import annotations
 
 import contextlib
 import csv
+import datetime as _dt
 import json
 import re
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -249,6 +251,22 @@ def _norm(s: str) -> str:
     return re.sub(r"[^\w']+", " ", s).strip()
 
 
+
+@lru_cache(maxsize=8)
+def _tsv_rows(path: Path, mtime_ns: int, size: int) -> int | None:
+    """Скільки рядків у зібраному каталозі. Кешується штампом файлу.
+
+    ⚠ Ключ кешу несе `mtime`/`size` навмисно: після нового обходу число мусить
+    змінитись, а кеш за самим шляхом віддавав би старе — тобто знаменник
+    відставав би від даних мовчки.
+    """
+    _ = (mtime_ns, size)
+    try:
+        with path.open(encoding="utf-8", newline="") as fh:
+            return max(0, sum(1 for _line in fh) - 1)
+    except OSError:
+        return None
+
 class ArchiumSource:
     """Джерело ARCHIUM. Каталог для пошуку читається з робочого простору."""
 
@@ -356,7 +374,14 @@ class ArchiumSource:
 
         path = self.catalog_path
         if path is not None and path.is_file():
-            return "workspace", {"path": str(path)}
+            st = path.stat()
+            return "workspace", {
+                "path": str(path),
+                # 🔴 Знаменник власного обходу теж мусить бути числом. Без
+                # нього перелік джерел казав «зібрано на місці» — і не казав,
+                # СКІЛЬКИ там справ, тобто нуль пошуку лишався без ваги.
+                "rows": _tsv_rows(path, st.st_mtime_ns, st.st_size),
+                "taken": _dt.date.fromtimestamp(st.st_mtime).isoformat()}
         got = self._bundled_for_site()
         if got is None:
             return "none", {}

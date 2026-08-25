@@ -370,9 +370,14 @@ class FilmMirrorSource:
         Два різні імені означали б, що знаменник для одного джерела показують, а
         для другого мовчки ні.
         """
-        if any(p.is_file() and p.stat().st_size
-               for p in self.cache_dir.glob("*.json.gz")):
-            return "workspace", {}
+        cached = sorted(p.stem.replace(".json", "") for p in
+                        self.cache_dir.glob("*.json.gz")
+                        if p.is_file() and p.stat().st_size)
+        if cached:
+            # 🔴 Які саме регіони в кеші — і є знаменник цього джерела: пошук
+            # дивиться ТІЛЬКИ в них, і мовчання про це перетворює «не
+            # знайшлось» на «не існує».
+            return "workspace", {"regions": cached}
         got = self.bundled_index()
         if got is None:
             return "none", {}

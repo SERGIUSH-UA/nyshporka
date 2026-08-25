@@ -19,14 +19,25 @@ import { t, LANG } from '../core/strings.js';
 import { callOp } from '../core/net.js';
 import { esc, el, setView, busy, failure, renderWarnings,
   curGen, alive } from '../core/view.js';
-import { SCREENS, ACTIONS } from '../core/registry.js';
-import { show } from '../core/nav.js';
+import { SCREENS, ACTIONS, PAGERS } from '../core/registry.js';
+import { show, goto } from '../core/nav.js';
 import { ST } from '../core/state.js';
 import { ic, eng } from '/ui/icons.js';
 import { swapHtml } from '/ui/dom.js';
+import { pager, step } from '/ui/pager.js';
 
 /** Фільтр переліку. Живе між входами на екран, як і в бібліотеці. */
-let RUNS = { q: '', engine: '', state: '' };
+let RUNS = { q: '', engine: '', state: '', page: 0 };
+
+/**
+ * Скільки СПРАВ показувати на сторінці.
+ *
+ * 🔴 Сторінка міряється справами, а не прогонами: екран групує прогони за
+ * справою, і різати по рядках означало б розірвати групу навпіл — половина
+ * прогонів книги лишилась би на наступній сторінці під чужим заголовком.
+ */
+const RUNS_PAGE = 25;
+let RUNS_PAGES = 1;
 
 let _runsSeq = 0;
 
@@ -55,7 +66,16 @@ async function runsLoad(full = false) {
   const groups = runsGroup(runs.filter(runsMatch));
   const orphans = groups.filter((g) => !g.key);
   const known = groups.filter((g) => g.key);
-  const body = known.map(runsGroupHtml).join('')
+  RUNS_PAGES = Math.max(1, Math.ceil(known.length / RUNS_PAGE));
+  if (RUNS.page >= RUNS_PAGES) RUNS.page = 0;
+  const from = RUNS.page * RUNS_PAGE;
+  const shown = known.slice(from, from + RUNS_PAGE);
+  const bar = pager({ page: RUNS.page, pages: RUNS_PAGES,
+    page_size: RUNS_PAGE, total: known.length });
+  // 🔴 Нічиї прогони — ПІД сторінкою й без сторінок: їх мало, і саме з ними
+  // треба щось зробити. Сховати їх на четвертій сторінці означало б лишити
+  // невидимим текст, який і так невидимий з кожної картки справи.
+  const body = bar + shown.map(runsGroupHtml).join('') + bar
     + orphans.map((g) => runsOrphanHtml(g)).join('');
 
   if (!full) {
@@ -93,6 +113,11 @@ async function runsLoad(full = false) {
     <div id="runs-body">${body || runsEmptyHtml(env, runs.length)}</div>`);
   runsFocus();
 }
+
+PAGERS.runs = (delta) => {
+  RUNS.page = step(RUNS.page, delta, RUNS_PAGES);
+  return runsLoad(false);
+};
 
 function runsMatch(r) {
   const ids = r.engine_ids && r.engine_ids.length
@@ -169,6 +194,8 @@ function runsGroupHtml(g) {
       <span class="shifra">${esc(g.shifra || g.key)}</span>
       <span class="name" title="${esc(g.title || '')}">${esc(g.title || '')}</span>
       ${n ? `<span class="frames dim">${esc(n)} ${t('common.frames')}</span>` : ''}
+      ${g.key ? `<button class="ctl-sm" data-act="runs.lib" data-arg="${esc(g.key)}"
+        title="${esc(t('runs.act.lib'))}">${ic('books', 'ic-o ic-sm')}</button>` : ''}
     </h3>
     <table><thead><tr>
       <th>${t('runs.col.state')}</th><th>${t('runs.col.engine')}</th>
@@ -258,9 +285,15 @@ Object.assign(ACTIONS, {
       q: (el('runs-q') || {}).value || '',
       engine: (el('runs-engine') || {}).value || '',
       state: (el('runs-state') || {}).value || '',
+      // Зміна фільтра завжди повертає на першу сторінку: інакше людина звужує
+      // вибірку до трьох справ і бачить порожньо, бо стоїть на сьомій.
+      page: 0,
     };
     return runsLoad(false);
   },
+
+  /** 📚 Ця сама справа в бібліотеці — з групи прогонів. */
+  'runs.lib': (_ev, elm) => goto('library', { key: elm.dataset.arg }),
 
   'runs.open': (_ev, elm) => {
     // Гортач сам відкриє першу сторінку прогону: імені сторінки тут ще ніхто

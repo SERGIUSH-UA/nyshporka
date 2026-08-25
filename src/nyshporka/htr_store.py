@@ -337,8 +337,44 @@ def _sec_median(meta: dict[str, Any]) -> float | None:
     return round(secs[mid] if len(secs) % 2 else (secs[mid - 1] + secs[mid]) / 2, 2)
 
 
+#: Останній зібраний перелік прогонів і штамп, за якого його зібрали.
+#: 🔴 Не заради швидкодії заради швидкодії: на просторі з 1125 прогонами
+#: перелік коштує 8.2 с — стільки читаються 1125 файлів мети плюс опис справи
+#: на кожен. Екран прогонів на таких паузах перестає бути переліком і стає
+#: очікуванням, а гортати його доводиться постійно.
+_RUNS_CACHE: tuple[tuple[int, int], list[dict[str, Any]]] | None = None
+
+
+def _runs_stamp() -> tuple[int, int]:
+    """Скільки тек прогонів і коли найсвіжіша з них торкалась.
+
+    ⚠ Штамп, а не час життя: перелік мусить оновитись ОДРАЗУ після прогону, і
+    кеш «на десять секунд» показував би щойно завершену роботу як відсутню.
+    Один обхід тек коштує міллісекунди проти восьми секунд читання мет.
+    """
+    if not HTR_ROOT.is_dir():
+        return (0, 0)
+    n = 0
+    newest = 0
+    with os.scandir(HTR_ROOT) as it:
+        for e in it:
+            if not e.is_dir():
+                continue
+            n += 1
+            try:
+                newest = max(newest, e.stat().st_mtime_ns)
+            except OSError:
+                continue
+    return (n, newest)
+
+
 def list_cases() -> list[dict[str, Any]]:
     """Прогони з reports/htr/* — для списку в'ювера. Назва справи — з бібліотеки."""
+    global _RUNS_CACHE
+
+    stamp = _runs_stamp()
+    if _RUNS_CACHE is not None and _RUNS_CACHE[0] == stamp:
+        return _RUNS_CACHE[1]
     out: list[dict[str, Any]] = []
     if not HTR_ROOT.is_dir():
         return out
@@ -397,6 +433,7 @@ def list_cases() -> list[dict[str, Any]]:
             "updated": meta.get("updated") or "",
         })
     out.sort(key=lambda c: c["updated"], reverse=True)
+    _RUNS_CACHE = (stamp, out)
     return out
 
 
