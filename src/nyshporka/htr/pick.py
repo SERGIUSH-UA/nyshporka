@@ -26,7 +26,6 @@
 """
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -178,16 +177,22 @@ def covered(runs: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     """
     got: dict[str, dict[str, Any]] = {}
     for r in runs:
-        key = str(r.get("engine_id") or r.get("engine") or "")
-        if not key:
-            continue
-        cur = got.get(key)
-        if cur is None or (r.get("pages_done") or 0) > (cur.get("pages_done") or 0):
-            got[key] = {"run": r.get("name"), "model": r.get("model"),
-                        "pages_done": r.get("pages_done") or 0,
-                        "done": bool(r.get("done")),
-                        "script": r.get("script") or "",
-                        "updated": r.get("updated") or ""}
+        # 🔴 ВСІ рушії прогону, а не перший. Прогін двома голосами записує
+        # обидві моделі одним полем через «+», і взявши лише перший, ми
+        # оголосили б другий голос відсутнім — тобто порадили б поставити ще
+        # одну ніч на роботу, яка вже зроблена.
+        ids = [str(x) for x in (r.get("engine_ids") or []) if x]
+        if not ids:
+            one = str(r.get("engine_id") or r.get("engine") or "")
+            ids = [one] if one else []
+        for key in ids:
+            cur = got.get(key)
+            if cur is None or (r.get("pages_done") or 0) > (cur.get("pages_done") or 0):
+                got[key] = {"run": r.get("name"), "model": r.get("model"),
+                            "pages_done": r.get("pages_done") or 0,
+                            "done": bool(r.get("done")),
+                            "script": r.get("script") or "",
+                            "updated": r.get("updated") or ""}
     return got
 
 
@@ -250,9 +255,14 @@ def case_info(case_dir: str, *, script_hint: str = "") -> dict[str, Any]:
 
     frames = 0
     try:
-        p = Path(os.path.abspath(case_dir))
-        if p.is_dir():
-            frames = R.count_frames(p)
+        # 🔴 Через гард простору, а не `abspath`. Тека приходить відносною
+        # (`data/raw/…`), і `abspath` рахував би її від поточного каталогу
+        # процесу — тобто кадрів «не було» в кожної справи, крім тих, що
+        # передані повним шляхом. Нуль кадрів на екрані читається як «читати
+        # нема чого».
+        d = S.under_raw(case_dir)
+        if d is not None and d.is_dir():
+            frames = R.count_frames(d)
     except Exception:
         frames = 0
 

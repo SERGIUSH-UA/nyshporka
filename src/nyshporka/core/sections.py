@@ -224,6 +224,7 @@ OP_SCREEN: dict[str, str] = {
     "case.frame": "frames",
     # htr
     "htr.env": "read",
+    "htr.case_info": "read",
     "read.plan": "read",
     "read.start": "read",
     "runs.list": "runs",

@@ -352,6 +352,40 @@ const STRINGS = {
       + 'ІНШИЙ рядок — а це гірше за відсутність порівняння.',
     'view.eye': 'Око вирішує, машина лише подає — дивіться на рядок, а не на текст.',
     'nav.read': 'Читання',
+    'read.why': 'Єдиний екран, де машині віддають ніч. Тому все, що можна '
+      + 'дізнатись до запуску, показано до нього.',
+    'read.show': 'Показати справу',
+    'read.case': 'справа',
+    'read.undescribed': 'теку не описано — прогін ляже нічиїм',
+    'read.done': 'уже прочитано',
+    'read.never': 'машиною ще не читали',
+    'read.nocases': 'на диску немає описаних справ — шлях можна набрати руками',
+    'read.script.set': 'вказати:',
+    'read.script.auto': 'з опису справи',
+    'read.script.cyrillic': 'кирилиця',
+    'read.script.latin': 'латинка',
+    'read.script.mixed': 'два письма',
+    'read.script.unknown': 'невідоме',
+    'read.voice.on': 'другим рушієм теж',
+    'read.voice.why': 'він помиляється ІНАКШЕ й витягує там, де перший '
+      + 'підставив правдоподібне слово',
+    'read.expert': 'Для досвідчених',
+    'read.expert.why': 'Тут лише важелі зі зміряним правилом користування. '
+      + '«Кадрів» — спершу спробувати на десятці. «Процесів» — виграш дає '
+      + 'вільна VRAM, а не ядра. «Висота сегментації» — ЄДИНИЙ важіль, що '
+      + 'коштує якістю пошуку: 1440 ≈ −4% слів, 1200 ≈ −10% повноти.',
+    'read.limit': 'лише перших кадрів',
+    'read.pages': 'діапазони кадрів',
+    'read.workers': 'процесів',
+    'read.device': 'пристрій',
+    'read.seg': 'висота сегм.',
+    'read.engines': 'рушії цього письма',
+    'read.confirm.unknown': 'Письмо справи невідоме, і рушій буде дібрано '
+      + 'навмання. Помилка тут дає не збій, а осмислене на вигляд сміття — '
+      + 'через години роботи. Запускати?',
+    'read.confirm.mixed': 'У справі два письма. Один прогін закриє лише одне, '
+      + 'і половина сторінок лишиться непрочитаною при зеленому статусі. '
+      + 'Запускати попри це?',
     'read.dir': 'Тека зі сканами (пласка)', 'read.plan': 'Що робитимемо',
     'read.go': 'Читати', 'read.frames': 'кадрів', 'read.script': 'письмо',
     'read.model': 'модель', 'read.voice': 'другий голос',
@@ -718,6 +752,40 @@ const STRINGS = {
       + 'a DIFFERENT line — worse than no comparison at all.',
     'view.eye': 'The eye decides, the machine only proposes — look at the line, not the text.',
     'nav.read': 'Reading',
+    'read.why': 'The one screen where you hand the machine a night. So '
+      + 'everything knowable before the start is shown before it.',
+    'read.show': 'Show the case',
+    'read.case': 'case',
+    'read.undescribed': 'the folder has no description — the run will be orphaned',
+    'read.done': 'already read',
+    'read.never': 'never read by machine',
+    'read.nocases': 'no described cases on disk — you can type the path',
+    'read.script.set': 'set:',
+    'read.script.auto': 'from the case description',
+    'read.script.cyrillic': 'Cyrillic',
+    'read.script.latin': 'Latin',
+    'read.script.mixed': 'two scripts',
+    'read.script.unknown': 'unknown',
+    'read.voice.on': 'second engine too',
+    'read.voice.why': 'it errs DIFFERENTLY and recovers what the first '
+      + 'replaced with a plausible word',
+    'read.expert': 'For the experienced',
+    'read.expert.why': 'Only levers with a measured rule of use. “Frames” — '
+      + 'try ten first. “Processes” — the win comes from free VRAM, not cores. '
+      + '“Segmentation height” is the ONLY lever that costs search quality: '
+      + '1440 ≈ −4% words, 1200 ≈ −10% recall.',
+    'read.limit': 'first N frames only',
+    'read.pages': 'frame ranges',
+    'read.workers': 'processes',
+    'read.device': 'device',
+    'read.seg': 'seg. height',
+    'read.engines': 'engines for this script',
+    'read.confirm.unknown': 'The script of this case is unknown, so the engine '
+      + 'will be picked blindly. An error here is not a crash but plausible '
+      + 'garbage — after hours of work. Start anyway?',
+    'read.confirm.mixed': 'This case has two scripts. One run covers only one '
+      + 'of them, and half the pages stay unread while the status looks green. '
+      + 'Start anyway?',
     'read.dir': 'Folder with scans (flat)', 'read.plan': 'What we will do',
     'read.go': 'Read', 'read.frames': 'frames', 'read.script': 'script',
     'read.model': 'model', 'read.voice': 'second voice',

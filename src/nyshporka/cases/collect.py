@@ -34,6 +34,8 @@ from nyshporka.library import (
     _DEFAULT_OPYS,
     _REPO_LABEL,
     ROOT,
+    _mk_key,
+    candidate_keys,
     load_verdicts,
     parse_source_id,
 )
@@ -315,10 +317,16 @@ def _pages_counts() -> dict[str, tuple[int, int]]:
             continue
         key = str(data.get("case") or data.get("key") or "").strip()
         if not key:
+            # Ім'я файла буває двох форм: `<фонд>-<спр>` і — для фондів із
+            # `_OPYS_IN_KEY` — `<фонд>-<опис>-<спр>`. Доти розбиралась лише
+            # перша, тож файл із описом в імені лишався БЕЗ ключа й прочитані
+            # аркуші тихо не рахувались.
             repo = f.parent.name.upper()
             stem = f.stem.split("-")
             if len(stem) == 2:
-                key = f"{repo}/{stem[0]}/{stem[1]}"
+                key = _mk_key(repo, stem[0], stem[1]) or ""
+            elif len(stem) == 3:
+                key = _mk_key(repo, stem[0], stem[2], stem[1]) or ""
         pages = data.get("pages")
         if isinstance(pages, dict):
             items = list(pages.values())
@@ -472,7 +480,13 @@ def collect_rows(index: LibraryIndex | None = None) -> tuple[list[CaseRow], list
                       m.group(3).lstrip("0"))
         if not parsed or not parsed[0]:
             continue
-        key = f"{parsed[0]}/{parsed[1]}/{parsed[3]}"
+        # 🔴 Ключ будує `_mk_key`, а не f-рядок: у фондах із `_OPYS_IN_KEY`
+        # (ДАХмО ф.230, ANRM ф.211) він несе ОПИС, і зібраний руками ключ
+        # `REPO/фонд/спр` там не влучає в жоден рядок реєстру.
+        key = next((k for k in candidate_keys(parsed) if k in rows), None) \
+            or _mk_key(parsed[0], parsed[1], parsed[3], parsed[2])
+        if not key:
+            continue
         if key in rows:
             rows[key].state = rows[key].state or "ordered"
             continue
@@ -529,15 +543,21 @@ def collect_rows(index: LibraryIndex | None = None) -> tuple[list[CaseRow], list
         parsed = parse_slug_case(rel)
         if parsed and parsed[1] and parsed[3]:
             repo, fond, opys, spr = parsed
-            key = f"{repo}/{fond}/{spr}"
+            side = _sidecar_near(rel)
+            # опис довизначаємо ДО побудови ключа — у фондах із `_OPYS_IN_KEY`
+            # він у ключ входить, тож зібраний без нього ключ заводить ДРУГИЙ
+            # рядок на ту саму справу.
+            opys = opys or side.get("opys") or _DEFAULT_OPYS.get((repo, fond))
+            key = next((k for k in candidate_keys((repo, fond, opys, spr)) if k in rows),
+                       None) or _mk_key(repo, fond, spr, opys)
+            if not key:
+                continue
             if key in rows:
                 row = rows[key]
                 if rel != row.path and rel not in row.extra_paths:
                     row.extra_paths.append(rel)
                 row.frames = max(row.frames, frames)
                 continue
-            side = _sidecar_near(rel)
-            opys = opys or side.get("opys") or _DEFAULT_OPYS.get((repo, fond))
             label = _REPO_LABEL.get(repo, repo)
             rows[key] = CaseRow(
                 key=key, repo=repo, repo_label=label, fond=fond, opys=opys, spr=spr,
@@ -627,8 +647,14 @@ def collect_rows(index: LibraryIndex | None = None) -> tuple[list[CaseRow], list
     by_case_sid: dict[str, list[str]] = defaultdict(list)
     for sid in canon:
         parsed = parse_source_id(sid)
-        if parsed:
-            by_case_sid[f"{parsed[0]}/{parsed[1]}/{parsed[3]}"].append(sid)
+        if not parsed:
+            continue
+        # 🔴 ID джерела канону опису НЕ несе, а ключ фонду з `_OPYS_IN_KEY` його
+        # вимагає — шукаємо всіма формами, інакше картка каже «канон: фактів 0»
+        # там, де канон цитує аркуш дослівно (заміряно 2026-08-25: 34 факти).
+        key = next((k for k in candidate_keys(parsed) if k in rows), None)
+        if key:
+            by_case_sid[key].append(sid)
     for key, sids in by_case_sid.items():
         # Окремі імена в цих трьох циклах: вище в цій же функції `row` уже
         # зв'язане як CaseRow без None, тож перевіряч не бачив тутешньої гілки

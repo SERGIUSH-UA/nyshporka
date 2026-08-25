@@ -1225,6 +1225,57 @@ class AcquireArgs(BaseModel):
     frames: str = Field(default="", description="діапазон «12-80»; порожньо = всі")
 
 
+class CaseInfoArgs(BaseModel):
+    case_dir: str = Field(description="тека зі сканами")
+    script: Literal["", "latin", "cyrillic", "mixed"] = Field(
+        default="", description="письмо, якщо вирішили самі")
+
+
+# `agent=False`: це картка ДЛЯ ОКА перед довгою роботою. Агент не витрачає ніч
+# карти й не звіряє письмо по перших сторінках — йому вистачає `read.plan`.
+@op("htr.case_info", summary="Що це за справа й чим її читати — ДО прогону",
+    args=CaseInfoArgs, mutates=False, agent=False, section="htr")
+def htr_case_info(a: CaseInfoArgs) -> Envelope:
+    """Опис справи, письмо з причиною, покриття рушіями й розриви.
+
+    🔴 ПИСЬМО ЙДЕ З ПРИЧИНОЮ, і причина важить більше за саме письмо. Здогад
+    із назви теки й запис у паспорті справи — різні за надійністю на порядок,
+    а на екрані виглядали б однаково. Помилка тут не дає збою: вона дає
+    осмислене на вигляд сміття через годину роботи.
+
+    🔴 «Прогін є» мовчки читається як «справу прочитано». Для тримовної книги
+    це неправда: один рушій закриває лише СВОЄ письмо, і половина сторінок
+    лишається непрочитаною при зеленому статусі. Тому розриви називаються
+    окремо від прогонів.
+    """
+    from nyshporka.htr import pick
+
+    try:
+        card = pick.case_info(a.case_dir, script_hint=a.script)
+    except Exception as exc:
+        return fail(f"картка справи недоступна ({type(exc).__name__}: {exc})")
+    env = ok(card)
+    if not card.get("frames"):
+        env.warn("no_frames",
+                 "у теці немає жодного кадру — читати нема чого. Перевірте "
+                 "шлях: перегляд і читання не рекурсивні")
+    if card.get("script") == "unknown":
+        env.warn("script_unknown",
+                 "письмо невідоме, і це ПОВНА відповідь, а не порожня: "
+                 "мовчазний здогад «кирилиця» дав би сміття, схоже на текст")
+    elif card.get("script_trust") == "folder":
+        env.warn("script_guessed", card.get("script_why") or "")
+    if card.get("script") == "mixed":
+        env.warn("mixed_script",
+                 "у справі два письма — потрібні ДВА прогони окремими теками: "
+                 "один рушій закриє лише своє")
+    for gap in card.get("gaps") or []:
+        env.warn(str(gap.get("kind") or "gap"), str(gap.get("text") or ""))
+    if not card.get("found"):
+        env.suggest("case.register", "описати теку — без шифри прогін ляже нічиїм")
+    return env
+
+
 class ReadArgs(BaseModel):
     case_dir: str = Field(description="тека зі сканами (ПЛАСКА, без підтек)")
     out_dir: str = Field(default="", description="куди класти текст; порожньо = у простір")
@@ -1234,6 +1285,22 @@ class ReadArgs(BaseModel):
         default=True,
         description="читати ще й другим рушієм — він помиляється ІНАКШЕ")
     case_key: str = Field(default="", description="шифра справи у мету прогону")
+    # ── важелі для досвідчених ───────────────────────────────────────────────
+    # 🔴 Прокинуто рівно ті, у яких є ЗМІРЯНЕ правило користування. Ручка без
+    # такого правила — пастка: її крутять навмання, а ціна помилки тут ніч
+    # роботи й текст, який виглядає осмисленим.
+    model: str = Field(default="", description="ваги замість добраних самим")
+    limit: int = Field(default=0, ge=0, le=100_000,
+                       description="лише перші N кадрів — спершу спробувати")
+    pages: str = Field(default="", pattern=r"^$|^\d+(-\d+)?(,\d+(-\d+)?)*$",
+                       description="діапазони кадрів: 1-50,60")
+    workers: int = Field(default=1, ge=1, le=8,
+                         description="скільки процесів ділять карту; "
+                                     "вирішує вільна VRAM, а не ядра")
+    seg_height: int = Field(default=0, ge=0, le=4000,
+                            description="висота сегментації; ЄДИНИЙ важіль, "
+                                        "що коштує якістю пошуку")
+    device: str = Field(default="", description="cuda:0 · cpu")
 
 
 # `agent=False`: план рахує й сам `read.start`, а людині він потрібен ОКРЕМО —
@@ -1263,6 +1330,18 @@ def read_plan(a: ReadArgs) -> Envelope:
                  f"письмо «{p.script}» ВГАДАНО з імені теки. Помилка тут дає "
                  f"не збій, а осмислене на вигляд сміття — звірте перші "
                  f"сторінки або вкажіть письмо явно")
+    if a.seg_height:
+        # 🔴 Єдиний важіль, що коштує ЯКІСТЮ, а не лише часом, — і мовчати про
+        # це не можна: збій він дає не одразу, а через місяць, коли по декоду
+        # шукають прізвище й не знаходять.
+        env.warn("seg_height_costs_quality",
+                 f"висота сегментації {a.seg_height} px: 1440 ≈ −4% слів, "
+                 f"1200 ≈ −10% повноти пошуку. Це не швидкість задарма")
+    if a.workers > 1:
+        env.warn("workers_share_the_card",
+                 f"{a.workers} процеси ділять одну карту: виграш дає ВІЛЬНА "
+                 f"VRAM, а не ядра. Приймач — симптом (чи не впало все), а не "
+                 f"секунди")
     if p.voice is None and p.script == "cyrillic":
         env.warn("single_voice",
                  "другого голосу немає — читатиме один рушій. Другий помиляється "

@@ -141,6 +141,13 @@ globalThis.fetch = async (url) => {
     'page.lines': { has: true, size: [100, 60],
                     polys: [[[1, 1], [9, 1], [9, 5], [1, 5]], null] },
     'page.view': { image: 'data:image/png;base64,AA', line: 0, text: 'рядок' },
+    'htr.case_info': { found: true, case_dir: 'c', shifra: 'А 1-1-2',
+                       title: 'книга', frames: 12, script: 'cyrillic',
+                       script_why: 'письмо записане в опису справи',
+                       script_trust: 'fixed',
+                       engines: [{ id: 'pysar', label: 'Писар', note: '' }],
+                       runs: [], covered: {}, gaps: [] },
+    'search.state': { runs: 2, indexed: 1, stale: 1, bytes: 1024, dir: 'd' },
   }[name] || {};
   if (String(url).endsWith('/api/sections')) {
     return { ok: true, status: 200, json: async () => ({ ok: true, v: 1,
@@ -222,11 +229,18 @@ if (reader.length) {
 // ── три перероблені екрани мусять НАМАЛЮВАТИСЬ, а не лише зареєструватись ──
 // 🔴 Модуль, який завантажився, і екран, який щось показав, — різні речі. Саме
 // між ними живе клас вад «кнопка є, натискається, нічого не відбувається».
-for (const name of ['cases', 'fonds', 'sources']) {
+ST.read = { case_dir: 'data/raw/зразок' };
+for (const name of ['cases', 'fonds', 'sources', 'read', 'search']) {
   await SCREENS[name]();
   await new Promise((r) => setTimeout(r, 30));
   const view = document.getElementById('view');
-  const html = view.innerHTML || '';
+  // 🔴 Разом із тим, що екрани домальовують у власні контейнери ПІСЛЯ запиту.
+  // Заглушка тримає їх окремими вузлами, і дивитись лише на `#view` означало б
+  // перевіряти каркас, а не відповідь.
+  const html = (view.innerHTML || '')
+    + (document.getElementById('card').innerHTML || '')
+    + (document.getElementById('search-index').innerHTML || '')
+    + (document.getElementById('hits').innerHTML || '');
   out[`drew_${name}`] = html.length;
   // Знаменник приймальні: число описаних справ мусить бути ВИДНИМ, інакше
   // «192 теки» читаються як увесь простір.
@@ -235,6 +249,10 @@ for (const name of ['cases', 'fonds', 'sources']) {
   if (name === 'fonds') out.fondsListsFonds = html.includes('data-act="fond.open"');
   // Каталоги мусять назвати, на чому шукали, ДО будь-якого запиту.
   if (name === 'sources') out.sourcesShowBasis = html.includes('nysh crawl x');
+  // Картка справи мусить назвати ПРИЧИНУ письма, а не саме лише письмо.
+  if (name === 'read') out.readShowsWhy = html.includes('опису справи');
+  // Пошук мусить сказати, скільки прогонів поза індексом, ДО запиту.
+  if (name === 'search') out.searchShowsIndex = html.includes('data-act="search.index"');
 }
 
 console.log('@@' + JSON.stringify(out));
@@ -431,3 +449,24 @@ def test_catalogues_name_what_they_searched_before_the_query(probe) -> None:
     """
     assert probe.get("sourcesShowBasis"), (
         "екран каталогів не назвав джерело без обходу й спосіб це полагодити")
+
+
+def test_the_read_card_names_why_it_thinks_so(probe) -> None:
+    """🔴 Письмо без ПРИЧИНИ — половина відповіді, і саме дорога половина.
+
+    Здогад із назви теки й запис у паспорті справи розрізняються надійністю на
+    порядок, а на екрані виглядали б однаково. Помилка тут не дає збою: вона
+    дає осмислене на вигляд сміття через годину роботи.
+    """
+    assert probe.get("readShowsWhy"), (
+        "картка справи показала письмо, не сказавши, звідки воно відоме")
+
+
+def test_search_shows_what_is_outside_the_index(probe) -> None:
+    """🔴 Знаменник пошуку — ДО запиту, а не застереженням після нього.
+
+    Пошук чеше лише зібране. Побачивши це вже у видачі, людина встигла
+    зачекати й повірити нулю.
+    """
+    assert probe.get("searchShowsIndex"), (
+        "екран пошуку не сказав, що частина прогонів поза індексом")
