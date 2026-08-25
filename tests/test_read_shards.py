@@ -126,3 +126,45 @@ def test_shard_env_splits_the_cores_and_leaves_one_alone() -> None:
     assert env, "шарди пішли без обмеження потоків"
     assert set(env) >= {"OMP_NUM_THREADS", "MKL_NUM_THREADS"}
     assert all(int(v) >= 1 for v in env.values()), "нуль потоків не буває"
+
+
+# ── приймач повноти ──────────────────────────────────────────────────────────
+def test_completeness_counts_the_disk_not_the_exit_code(tmp_path: Path) -> None:
+    """🔴 Є клас відмов, за якого сторінка вбиває процес: лог обривається,
+    перелік збоїв порожній, код повернення успішний. Виміряний випадок — 14
+    сторінок із 18. Єдине, що це ловить, — число готових текстів проти кадрів.
+    """
+    from nyshporka.htr.run import completeness
+
+    case, out = tmp_path / "case", tmp_path / "out"
+    case.mkdir()
+    out.mkdir()
+    for i in range(18):
+        (case / f"{i:04d}.jpg").write_bytes(b"x")
+    for i in range(14):
+        (out / f"{i:04d}.txt").write_text("текст", encoding="utf-8")
+
+    got = completeness(case, out)
+    assert got["frames"] == 18 and got["pages"] == 14
+    assert got["missing"] == 4, "тиха втрата сторінок пройшла повз приймач"
+    assert got["ok"] is False
+
+
+def test_a_deliberately_partial_run_is_not_called_incomplete(tmp_path: Path) -> None:
+    """⚠ При `--limit`/`--pages` прочитано менше НАВМИСНО.
+
+    Червоне на здоровому прогоні привчає відмахуватись від приймача — і тоді
+    він не спрацює тоді, коли справді треба.
+    """
+    from nyshporka.htr.run import completeness
+
+    case, out = tmp_path / "case", tmp_path / "out"
+    case.mkdir()
+    out.mkdir()
+    for i in range(50):
+        (case / f"{i:04d}.jpg").write_bytes(b"x")
+    (out / "0000.txt").write_text("текст", encoding="utf-8")
+
+    got = completeness(case, out, partial=True)
+    assert got["missing"] == 0 and got["ok"] is True
+    assert got["partial"] is True, "частковість прогону загубилась у відповіді"

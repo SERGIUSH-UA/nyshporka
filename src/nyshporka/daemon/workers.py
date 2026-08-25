@@ -276,101 +276,161 @@ async def _start_read(bus: JobBus, ws: Workspace,
                   out_dir=payload.get("out_dir") or "",
                   script=str(payload.get("script") or ""),
                   second_voice=bool(payload.get("second_voice", True)))
-    # 🔴 Шифра береться З ТЕКИ, коли її не передали. Прогін без шифри стає в
+    # 🔴 Шифра береться З ОПИСУ, коли її не передали. Прогін без шифри стає в
     # реєстрі «нічиїм»: він є, текст є, а до якої справи належить — невідомо,
     # і зшивати це потім доводиться правкою JSON руками. З консолі шифру ніхто
     # не вводить (форма читання питає лише теку), тож без цього КОЖЕН запуск
     # кнопкою давав нічию — при тому, що опис лежить у тій самій теці.
-    case_key = str(payload.get("case_key") or "") or _key_from_folder(plan.case_dir)
+    #
+    # ⚠ Через СПІЛЬНИЙ `case_key_for`, а не через власну гілку. Доти командний
+    # рядок був розумніший за застосунок: після опису він пробував ще резолвер
+    # за шляхом, а браузерний шлях — ні. Тобто найчастіший вхід мав найгіршу
+    # прив'язку саме там, де його найважче помітити.
+    case_key = str(payload.get("case_key") or "") or R.case_key_for(plan.case_dir)[0]
+
+    limit = max(0, int(payload.get("limit") or 0))
+    pages = str(payload.get("pages") or "")
+    workers = max(1, min(8, int(payload.get("workers") or 1)))
+    cmds, notes = plan.shards(
+        workers, device=str(payload.get("device") or ""),
+        case_key=case_key, limit=limit, pages=pages,
+        seg_height=max(0, int(payload.get("seg_height") or 0)))
+
+    title = f"{plan.case_dir.name}: {plan.frames} кадрів, {plan.model.name}"
+    if len(cmds) > 1:
+        title += f" · {len(cmds)} процеси"
     job, created = await bus.enqueue(
         "read",
-        title=f"{plan.case_dir.name}: {plan.frames} кадрів, {plan.model.name}",
-        cfg={**plan.as_dict(), "case_key": case_key},
+        title=title,
+        cfg={**plan.as_dict(), "case_key": case_key, "workers": len(cmds),
+             "limit": limit, "pages": pages, "notes": notes,
+             "gpu_lock": str(plan.gpu_lock or "")},
         # Ключ — тека виходу: повторний запит на ту саму справу має віддати те
         # саме завдання, а не другий прогін, що б'ється з першим за карту.
+        # 🔴 N шардів — ОДНЕ завдання: вони пишуть в одну теку й разом
+        # становлять один прогін.
         idempotency_key=f"read:{plan.out_dir}",
     )
     if created:
-        _keep(asyncio.create_task(_run_read(bus, job, plan, case_key)))
+        _keep(asyncio.create_task(
+            _run_read(bus, job, plan, case_key, cmds,
+                      partial=bool(limit or pages))))
     return job
 
 
-def _key_from_folder(case_dir: Path) -> str:
-    """Шифра з опису, що лежить у теці справи.
+async def _run_read(bus: JobBus, job: JobRecord, plan: Any, case_key: str,
+                    cmds: list[list[str]], *, partial: bool = False) -> None:
+    """Вести N процесів раннера, зводячи їхній прогрес в ОДНЕ завдання.
 
-    Опис їде В ТЕЦІ саме для таких випадків: усе, що треба знати про матеріал,
-    подорожує разом із ним. Немає опису — повертаємо порожнє, і прогін чесно
-    лишається нічиїм: вигадувати шифру з імені теки не можна, бо приписаний не
-    тій справі текст гірший за неприписаний.
+    🔴 Шарди — це не N робіт, а одна: вони пишуть в ту саму теку, ділять один
+    лок карти й разом становлять прогін справи. Тому в черзі вони стоять одним
+    рядком, а числа під ним — сумарні.
     """
-    try:
-        from nyshporka.cases.register import read_sidecar
+    import os
 
-        return str(read_sidecar(case_dir).get("shifra") or "")
-    except Exception:
-        return ""
-
-
-async def _run_read(bus: JobBus, job: JobRecord, plan: Any,
-                    case_key: str) -> None:
-    """Вести підпроцес раннера, переливаючи його канал прогресу в чергу."""
     from nyshporka.core.jobs import JobState, Progress
     from nyshporka.core.progress import split
-
-    await bus.update(job.id, state=JobState.RUNNING)
-    cmd = plan.command(progress_json=True, case_key=case_key)
-    proc = await asyncio.create_subprocess_exec(
-        *cmd, stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.STDOUT)
-    # 🔴 «Спинити» має спиняти. Доти кнопка лише перефарбовувала рядок, а
-    # раннер читав справу далі — годинами тримаючи карту, — і наприкінці сам
-    # ставив «готово» поверх «скасовано».
-    bus.on_stop(job.id, lambda: _terminate(proc))
-    # 🔴 Хвіст ЛЮДСЬКОГО виводу зберігається окремо. Коли прогін падає, у
-    # завданні лишається код повернення — а причина написана саме там, звичайним
-    # рядком, і без нього діагностика починається з повторного прогону.
-    tail: list[str] = []
-    assert proc.stdout is not None
-    while True:
-        raw = await proc.stdout.readline()
-        if not raw:
-            break
-        line = raw.decode("utf-8", "replace").rstrip()
-        ev, human = split(line)
-        if ev is not None:
-            await bus.update(job.id, progress=Progress(
-                i=ev.i, n=ev.n, done=ev.done, skipped=ev.skipped,
-                failed=ev.failed, basis="сторінка"))
-        elif human:
-            tail.append(human)
-            del tail[:-40]
-    rc = await proc.wait()
-    bus.drop_stopper(job.id)
-
-    # 🔴 Приймач повноти — ДИСК, а не код повернення. При шардингу тиха втрата
-    # сторінок дає rc=0 і порожній перелік збоїв; єдине, що це ловить, — число
-    # готових текстів проти числа кадрів.
     from nyshporka.htr import run as R
 
-    done_pages = len(list(Path(plan.out_dir).glob("*.txt")))
-    missing = max(0, R.count_frames(Path(plan.case_dir)) - done_pages)
+    await bus.update(job.id, state=JobState.RUNNING)
+    env = {**os.environ, **R.shard_env(len(cmds)),
+           "PYTHONUNBUFFERED": "1", "PYTHONIOENCODING": "utf-8"}
+    procs = [await asyncio.create_subprocess_exec(
+        *cmd, stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.STDOUT, env=env) for cmd in cmds]
+
+    # 🔴 «Спинити» має спиняти ВСІ процеси. Доти стопер замикався на один — із
+    # шардами це лишило б N−1 читати справу далі, годинами тримаючи карту, при
+    # тому що завдання вже позначене скасованим.
+    bus.on_stop(job.id, lambda: [_terminate(p) for p in procs])
+
+    # 🔴 Хвіст ЛЮДСЬКОГО виводу зберігається окремо, і З НОМЕРОМ ШАРДА. Коли
+    # прогін падає, у завданні лишається код повернення — а причина написана
+    # саме там, звичайним рядком; без номера її не відрізнити від сусідського
+    # виводу, бо друкують усі одночасно.
+    tail: list[str] = []
+    #: Останній прогрес кожного шарда. Сумуються ЖИВІ числа, а не події: подія
+    #: приходить від одного процесу й нічого не каже про решту.
+    st: list[dict[str, int]] = [{"i": 0, "n": 0, "done": 0, "skipped": 0,
+                                 "failed": 0} for _ in cmds]
+    last_push = 0.0
+
+    async def pump(k: int, proc: Any) -> None:
+        nonlocal last_push
+        assert proc.stdout is not None
+        while True:
+            raw = await proc.stdout.readline()
+            if not raw:
+                break
+            line = raw.decode("utf-8", "replace").rstrip()
+            ev, human = split(line)
+            if ev is not None:
+                st[k] = {"i": ev.i, "n": ev.n, "done": ev.done,
+                         "skipped": ev.skipped, "failed": ev.failed}
+                # ⏱ Тротлінг: N шардів × подія на сторінку дають N-кратну
+                # щільність, і журнал робіт перестає читатись — цей урок уже
+                # засвоєно на 991 події однієї плівки.
+                now = asyncio.get_running_loop().time()
+                if now - last_push < 0.25:
+                    continue
+                last_push = now
+                await bus.update(job.id, progress=Progress(
+                    # 🔴 `n` — СУМА, а не число з нульового шарда: кожен
+                    # звітує розмір своєї вибірки після round-robin, тож узяти
+                    # чуже означало б показувати 33% вічно.
+                    i=sum(s["i"] for s in st), n=sum(s["n"] for s in st),
+                    done=sum(s["done"] for s in st),
+                    skipped=sum(s["skipped"] for s in st),
+                    failed=sum(s["failed"] for s in st), basis="сторінка"))
+            elif human:
+                tail.append(human if len(cmds) == 1 else f"w{k + 1}| {human}")
+                del tail[:-40]
+
+    await asyncio.gather(*(pump(k, p) for k, p in enumerate(procs)))
+    codes = [await p.wait() for p in procs]
+    bus.drop_stopper(job.id)
+    # Остання подія могла не пройти тротлінг — дописуємо підсумок.
+    await bus.update(job.id, progress=Progress(
+        i=sum(s["i"] for s in st), n=sum(s["n"] for s in st),
+        done=sum(s["done"] for s in st), skipped=sum(s["skipped"] for s in st),
+        failed=sum(s["failed"] for s in st), basis="сторінка"))
+
+    # 🔴 Приймач повноти — ДИСК, а не код повернення: є клас відмов, за якого
+    # сторінка вбиває процес, лог обривається, перелік збоїв порожній, а код
+    # успішний.
+    #
+    # 🔴 Шардинг тут НЕ робить прогін частковим — на відміну від командного
+    # рядка, де один процес справді читає свою частку. Тут завдання володіє
+    # ВСІМА шардами, тож їхнє об'єднання є повним прогоном; переплутати
+    # означало б тихо прийняти третину справи як прочитану.
+    comp = R.completeness(plan.case_dir, plan.out_dir, partial=partial)
+    missing, pages = int(comp["missing"]), int(comp["pages"])
     if bus.cancelled(job.id):
         # Скасоване лишається скасованим: перезаписати його на DONE/ERROR
         # означало б сказати, що робота дійшла до кінця. Скільки встигли
         # прочитати — записуємо, це знадобиться для `resume`.
         await bus.update(job.id, result={"out_dir": str(plan.out_dir),
-                                         "pages": done_pages, "rc": rc,
+                                         "pages": pages, "rc": codes,
                                          "tail": tail[-12:]})
         return
-    ok = rc == 0 and missing == 0
+    bad = [f"w{k + 1}: код {c}" for k, c in enumerate(codes) if c]
+    ok = not bad and missing == 0
+    why = ""
+    if bad and missing:
+        why = f"{'; '.join(bad)}; без тексту лишилось {missing} сторінок"
+    elif bad:
+        # 🔴 Окреме формулювання: процес упав, але на диску все. Спільний текст
+        # послав би шукати загублені сторінки там, де їх немає.
+        why = f"{'; '.join(bad)} — але всі сторінки мають текст"
+    elif missing:
+        why = f"без тексту лишилось {missing} сторінок при успішному коді"
     await bus.update(
         job.id,
         state=JobState.DONE if ok else JobState.ERROR,
-        error=("" if ok else
-               (f"код {rc}" if rc else "") +
-               (f"; без тексту лишилось {missing} сторінок" if missing else "")),
-        result={"out_dir": str(plan.out_dir), "pages": done_pages,
-                "missing": missing, "rc": rc, "tail": tail[-12:]})
+        error=why,
+        result={"out_dir": str(plan.out_dir), "pages": pages,
+                "missing": missing, "frames": comp["frames"],
+                "partial": comp["partial"], "rc": codes, "tail": tail[-12:]})
 
 
 def _terminate(proc: asyncio.subprocess.Process) -> None:
