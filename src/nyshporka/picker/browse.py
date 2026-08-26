@@ -230,7 +230,12 @@ def _hidden(entry: os.DirEntry[str]) -> bool:
     if os.name != "nt":
         return False
     try:
-        attrs = int(entry.stat(follow_symlinks=False).st_file_attributes)
+        # ⚠ `st_file_attributes` є лише у Windows-збірці `os.stat_result`, і
+        # саме тому доступ іде через `getattr`, а не полем. Перевіряч, запущений
+        # на Linux (CI), поля не бачить і валить прогін — а на машині розробника
+        # під Windows видно рівно протилежне. Гілка й так недосяжна поза `nt`:
+        # вище стоїть ранній вихід.
+        attrs = int(getattr(entry.stat(follow_symlinks=False), "st_file_attributes", 0))
     except (OSError, AttributeError):
         return False
     return bool(attrs & 0x2 or attrs & 0x4)   # HIDDEN | SYSTEM
