@@ -17,7 +17,35 @@ from pathlib import Path
 
 import pytest
 
-from nyshporka.library import _OPYS_IN_KEY, _mk_key, candidate_keys
+# 🔴 `nyshporka.library` НЕ імпортується в шапці, і це не стиль. Модуль бере
+# `ROOT = workspace().root` на рівні модуля, тобто заморожує простір у мить
+# першого імпорту, — а pytest імпортує ВСІ тестові модулі на збиранні, коли
+# ізолювальна фікстура ще не діяла. Одна імпортна стрічка тут прив'язує
+# бібліотеку до простору розробника, і сусідній тест, який підставив тимчасову
+# теку, мовчки бачить справжні справи. Спіймано 2026-08-26: `test_case_roots`
+# окремо проходив, у повному прогоні падав.
+#
+# ⚠ Перенести імпорт усередину тесту НЕ досить: простір тоді знаходять і без
+# змінної середовища — через файл «останній використаний», що лежить у профілі
+# ОС, — тож бібліотека все одно замерзає на чужому. Тому фікстура спершу
+# ОГОЛОШУЄ тимчасовий простір і лише потім імпортує; той самий порядок, що в
+# `test_register_and_notes.space`.
+
+
+@pytest.fixture
+def lib(tmp_path: Path):
+    """Бібліотека, заморожена на ТИМЧАСОВОМУ просторі.
+
+    Констант простору цей файл не читає — лише таблиці фондів і збирачі
+    ключів, — але імпортувати модуль інакше не можна, не лишивши слід сусідам.
+    """
+    from nyshporka.core import workspace as W
+
+    W.use(W.Workspace(root=tmp_path, name="тест", origin="test"))
+
+    from nyshporka import library as L
+
+    return L
 
 PKG = Path(__file__).resolve().parents[1] / "src" / "nyshporka"
 
@@ -37,24 +65,31 @@ def test_no_hand_built_case_keys() -> None:
         "такий ключ не несе опису й не влучає в реєстр:\n" + "\n".join(findings))
 
 
-@pytest.mark.parametrize("fond_in_key", sorted(_OPYS_IN_KEY))
-def test_opys_fond_keys_carry_opys(fond_in_key: tuple[str, str]) -> None:
-    """Для фонду з `_OPYS_IN_KEY` ключ без опису й ключ З описом — різні."""
-    repo, fond = fond_in_key
-    with_opys = _mk_key(repo, fond, "13", "3")
-    without = _mk_key(repo, fond, "13")
-    assert with_opys != without
-    assert with_opys == f"{repo}/{fond}-3/13"
+def test_opys_fond_keys_carry_opys(lib) -> None:
+    """Для фонду з `_OPYS_IN_KEY` ключ без опису й ключ З описом — різні.
+
+    ⚠ Цикл, а не `parametrize`: перелік фондів довелось би прочитати на
+    збиранні, тобто імпортувати `library` у шапці — рівно те, що прив'язує
+    бібліотеку до чужого простору (див. шапку файла).
+    """
+    _OPYS_IN_KEY, _mk_key = lib._OPYS_IN_KEY, lib._mk_key
+
+    assert _OPYS_IN_KEY, "перелік фондів із описом у ключі порожній — тест сліпий"
+    for repo, fond in sorted(_OPYS_IN_KEY):
+        with_opys = _mk_key(repo, fond, "13", "3")
+        without = _mk_key(repo, fond, "13")
+        assert with_opys != without, f"{repo} ф.{fond}"
+        assert with_opys == f"{repo}/{fond}-3/13"
 
 
-def test_candidate_keys_offers_default_opys() -> None:
+def test_candidate_keys_offers_default_opys(lib) -> None:
     """Форма без опису мусить лишатись знаходжуваною через опис за замовчуванням.
 
     ID джерела канону (`S_<архів>_F<фонд>_D<справа>`) опису не несе — і без
     цього кандидата канон відв'язується від справи щойно фонд переходить на
     ключ-з-описом.
     """
-    from nyshporka.library import _DEFAULT_OPYS
+    from nyshporka.library import _DEFAULT_OPYS, _OPYS_IN_KEY, candidate_keys
 
     for (repo, fond), default in _DEFAULT_OPYS.items():
         if (repo, fond) not in _OPYS_IN_KEY:
