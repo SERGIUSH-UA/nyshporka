@@ -5,12 +5,12 @@ import { TOKEN, callOp, SEQ } from '../core/net.js';
 import { esc, el, setView, busy, failure, boxError, busyForm,
   renderWarnings, renderCoverage, curGen, alive } from '../core/view.js';
 import { SCREENS, ACTIONS } from '../core/registry.js';
-import { SECTIONS, NAV_LABEL, show, renderNav,
-  refreshJobs } from '../core/nav.js';
+import { NAV_LABEL, show, renderNav, refreshJobs, setSections } from '../core/nav.js';
 import { ST } from '../core/state.js';
 import { ic, eng } from '/ui/icons.js';
 import { swapHtml, skelRows, skelCards } from '/ui/dom.js';
 import { attachCombobox } from '/ui/combobox.js';
+import { pathField, pickPath } from '../core/paths.js';
 
 
 
@@ -29,7 +29,7 @@ SCREENS.settings = async () => {
   const env = await callOp('sections.show', {});
   if (!alive(gen)) return;
   if (!env.ok) return failure(env);
-  SECTIONS = env.data;
+  setSections(env.data);
   const presets = Object.keys(env.data.presets || {});
   const rows = (env.data.sections || []).map((s) => {
     const label = LANG === 'en' ? s.label_en : s.label;
@@ -62,14 +62,62 @@ SCREENS.settings = async () => {
       ${presets.map((p) => `<button data-act="sections.preset" data-arg="${esc(p)}"
         ${p === env.data.preset ? 'disabled' : ''}>${esc(t('preset.' + p))}</button>`).join(' ')}
       <span class="muted">${env.data.preset ? '' : t('sect.custom')}</span></p>
-    <table><tbody>${rows}</tbody></table>`);
+    <table><tbody>${rows}</tbody></table>
+    <div id="roots"></div>`);
+  await renderRoots();
 };
 
+/**
+ * 🌳 Корені справ: де застосунок шукає скани.
+ *
+ * 🔴 Керувати ними з браузера доти було нічим. Оголосити корінь можна було лише
+ * разом із заведенням однієї справи (позначкою у формі), а зняти — лише руками
+ * в маркері простору. Тобто помилковий корінь — не та тека, флешка колеги —
+ * лишався назавжди, і виправити його пропонувалось редагуванням файлу, якого
+ * людина не заводила.
+ */
+async function renderRoots() {
+  const box = el('roots');
+  if (!box) return;
+  const env = await callOp('roots.list', {});
+  if (!env.ok) return boxError('roots', env);
+  const rows = (env.data.roots || []).map((r) => `<tr>
+    <td>${r.kind === 'space' ? '🏠' : '⚓'}</td>
+    <td class="mono">${esc(r.path)}${r.gone
+      ? ` <span class="warn-inline">${t('roots.gone')}</span>` : ''}</td>
+    <td>${r.kind === 'space'
+      ? `<span class="muted">${t('roots.always')}</span>`
+      : `<button data-act="roots.forget" data-arg="${esc(r.path)}"
+           >${t('roots.forget')}</button>`}</td>
+  </tr>`).join('');
+  box.innerHTML = `<h3>🌳 ${t('roots.title')}</h3>
+    <p class="muted">${t('roots.why')}</p>
+    ${renderWarnings(env)}
+    <table><tbody>${rows}</tbody></table>
+    <p><button data-act="roots.pick">📂 ${t('roots.add')}</button>
+      <span class="muted">${t('roots.keep')}</span></p>`;
+}
+
 Object.assign(ACTIONS, {
+  /** 📂 Оголосити нову теку коренем — вибором, а не набором шляху. */
+  'roots.pick': async () => {
+    const got = await pickPath({ mode: 'dir', purpose: 'roots.add' });
+    if (!got.ok) return;
+    const env = await callOp('roots.add', { path: got.path });
+    if (!env.ok) return failure(env);
+    await renderRoots();
+  },
+
+  'roots.forget': async (_ev, elm) => {
+    const env = await callOp('roots.remove', { path: elm.dataset.arg });
+    if (!env.ok) return failure(env);
+    await renderRoots();
+  },
+
   'sections.preset': async (_ev, elm) => {
     const env = await callOp('sections.set', { preset: elm.dataset.arg });
     if (!env.ok) return failure(env);
-    SECTIONS = env.data;
+    setSections(env.data);
     renderNav();
     await show('settings');
   },
@@ -80,8 +128,12 @@ Object.assign(ACTIONS, {
     const env = await callOp('sections.set',
       on ? { disable: [id] } : { enable: [id] });
     if (!env.ok) return failure(env);
-    SECTIONS = env.data;
+    setSections(env.data);
     renderNav();
-    await show('settings');
+    // 🔴 Повертаємось туди, заради чого вмикали. Кнопка стоїть не лише в
+    // налаштуваннях, а й на банері вимкненої секції — тобто людина йшла на
+    // конкретний екран, і висадити її в налаштуваннях означає змусити шукати
+    // дорогу назад до того, що вона щойно відкрила.
+    await show(elm.dataset.back || 'settings');
   },
 });

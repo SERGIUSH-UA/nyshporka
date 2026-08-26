@@ -35,7 +35,7 @@ def test_a_case_with_no_channel_at_all_is_an_order() -> None:
 
 
 def test_what_a_collector_writes_the_registry_can_read() -> None:
-    """Ворота проти повторення: колонки, які збирач пише про ДЖЕРЕЛО справи,
+    """Ворота проти повторення: колонки, які збирач пише про джерело справи,
     мусять бути відомі читалці реєстру.
 
     🔴 Тут стояв виняток на `duck_*` — «описують чужий покажчик і в реєстр
@@ -47,7 +47,7 @@ def test_what_a_collector_writes_the_registry_can_read() -> None:
     ⚠ Префікс `duck_` тут не означає каналу завантаження — покажчик сам нічого
     не віддає. Означає лише: якщо збирач це пише, читалка мусить це бачити.
     """
-    # ⚠ МЕЖА, а не виняток: злиття переносить у реєстр три колонки покажчика з
+    # ⚠ межа, а не виняток: злиття переносить у реєстр три колонки покажчика з
     # шести — `duck_id` і `duck_copies` лишаються у файлі збирача. Перевірено
     # на диску: у злитих реєстрах ф.224 і ф.904 стоять рівно `duck_url`,
     # `duck_online`, `duck_copy_url`. Записано тут, щоб наступний не вважав це
@@ -62,3 +62,67 @@ def test_what_a_collector_writes_the_registry_can_read() -> None:
     assert not unknown, (
         f"збирач пише колонки, яких читалка реєстру не знає: {unknown} — "
         f"зібране доїде до реєстру й не потрапить у застосунок")
+
+
+# ── ARCHIUM: номер фонду не мусить бути особистою проблемою користувача ──────
+def test_the_pack_remembers_the_site_fond_number() -> None:
+    """🔴 Знайдене одним користувачем однакове для всіх.
+
+    Сайт архіву адресує фонд ВЛАСНИМ номером (ЦДІАК ф.224 значиться там фондом
+    198), і без нього збирач узагалі не стартує. Доти це число жило лише в теці
+    того простору, де його раз знайшли, — тобто кожен наступний користувач мусив
+    шукати те саме заново. Це факт про САЙТ, а не про чиюсь машину.
+    """
+    from nyshporka.archives import active
+
+    f = active().fonds.get(("CDIAK", "224"))
+    assert f is not None, "фонду немає в паку"
+    assert f.archium_fond == "198"
+    assert f.archium_opys.get("3") == "1529", f.archium_opys
+
+
+def test_a_case_link_is_enough_to_calibrate() -> None:
+    """🔴 Людина не мусить знати, що таке «внутрішній номер фонду».
+
+    Вона вміє показати пальцем: ось справа цього фонду. Номер зі сторінки дає
+    САЙТ, а не наш здогад.
+
+    ⚠ Голе число лишається НОМЕРОМ ФОНДУ: обидва числові, і вгадувати тут не
+    можна — ознакою справи є саме адреса.
+    """
+    from nyshporka.fonds.collect.archium import _resolve_fond_id, _viewer_id
+
+    assert _viewer_id("https://archium.cdiak.archives.gov.ua/file-viewer/51068/") == "51068"
+    assert _viewer_id("/file-viewer/51068") == "51068"
+    assert _viewer_id("51068") == "51068"
+    assert _viewer_id("щось інше") == ""
+
+    class _Collector:
+        def __init__(self) -> None:
+            self.asked: list[str] = []
+
+        def fond_id_from_case(self, viewer_id: str, repo: str = "") -> str:
+            self.asked.append(viewer_id)
+            return "198"
+
+    class _T:
+        repo = "CDIAK"
+
+    c = _Collector()
+    assert _resolve_fond_id("https://a/file-viewer/51068/", c, _T()) == "198"
+    assert c.asked == ["51068"], "посилання на справу не спитало сайт"
+    assert _resolve_fond_id("198", c, _T()) == "198"
+    assert c.asked == ["51068"], "голе число сприйняли за справу"
+
+
+def test_a_known_number_means_the_collector_can_start() -> None:
+    """Наслідок, заради якого все й робилось: фонд із номером у паку більше не
+    вимагає від людини нічого — план одразу «готовий»."""
+    from nyshporka.fonds.collect.archium import ArchiumCollector
+
+    class _T:
+        repo, fond, fond_id, opys = "CDIAK", "224", "cdiak_224", ()
+
+    got, invs = ArchiumCollector(workspace=None).known_fond_id(_T())
+    assert got == "198", got
+    assert sorted(invs) == ["1", "2", "3"], invs

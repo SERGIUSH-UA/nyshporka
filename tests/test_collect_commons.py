@@ -174,7 +174,7 @@ def test_the_address_must_name_a_file() -> None:
 
 
 def test_search_refuses_instead_of_returning_zero() -> None:
-    """🔴 Commons знає назви ФАЙЛІВ, а не заголовки справ. Порожній список
+    """🔴 Commons знає назви файлів, а не заголовки справ. Порожній список
     звідси читався б як «в архіві такого немає» — найдорожча відповідь у
     генеалогії, бо вона закриває напрям назавжди."""
     with pytest.raises(SourceError) as exc:

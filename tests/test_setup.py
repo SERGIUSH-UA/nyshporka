@@ -1,6 +1,6 @@
 """🧰 Установлення: доктор, паки, майстер простору.
 
-Кожна перевірка тут стереже ТИХУ поломку. Гучні себе виявляють самі; ці ні —
+Кожна перевірка тут стереже тиху поломку. Гучні себе виявляють самі; ці ні —
 вони виглядають як «повільно», «нічого не знайшлось» або «модель зламана».
 """
 from __future__ import annotations
@@ -71,12 +71,12 @@ def test_default_root_avoids_synced_folders(monkeypatch, tmp_path: Path) -> None
 
 
 # ── драбина джерел майстра ───────────────────────────────────────────────────
-# 🔴 Майстер рахував шлях сам і знав ОДНЕ джерело з п'яти, які знає резолвер.
+# 🔴 Майстер рахував шлях сам і знав одне джерело з п'яти, які знає резолвер.
 # Наслідок бачила кожна людина, що виставила змінну: простір створювався в
 # одному місці, а всі інші команди йшли в інше. Ці перевірки стережуть саме
 # драбину — те, чого не було видно жодному тесту, бо тестів на неї не існувало.
 def test_plan_takes_the_root_from_the_variable(monkeypatch, tmp_path: Path) -> None:
-    """Інсталятор кличе `nysh init --yes` БЕЗ шляху — саме той виклик, який
+    """Інсталятор кличе `nysh init --yes` без шляху — саме той виклик, який
     ішов повз виставлену змінну."""
     from nyshporka.core.workspace import ENV_WORKSPACE
 
@@ -88,7 +88,7 @@ def test_plan_takes_the_root_from_the_variable(monkeypatch, tmp_path: Path) -> N
 
 
 def test_plan_takes_the_root_from_the_marker_above_cwd(monkeypatch, tmp_path: Path) -> None:
-    """`nysh init` усередині наявного простору пропонував створити НОВИЙ."""
+    """`nysh init` усередині наявного простору пропонував створити новий."""
     from nyshporka.core.workspace import MARKER
 
     root = tmp_path / "простір"
@@ -138,7 +138,7 @@ def test_plan_creates_nothing_even_when_the_variable_points_nowhere(
 
 
 def test_a_dangerous_root_in_the_variable_is_refused_and_named(monkeypatch) -> None:
-    """🔴 Змінна не обходить перевірку кореня — і повідомлення називає ВИННЕ
+    """🔴 Змінна не обходить перевірку кореня — і повідомлення називає винне
     джерело. Без назви людина читає «корінь диска не може бути простором» і не
     знає, яке з п'яти джерел цей шлях подало."""
     from nyshporka.core.workspace import ENV_WORKSPACE, WorkspaceError
@@ -151,7 +151,7 @@ def test_a_dangerous_root_in_the_variable_is_refused_and_named(monkeypatch) -> N
 
 def test_default_root_ignores_the_variable(monkeypatch, tmp_path: Path) -> None:
     """Розподіл ролей: драбина живе в `core`, а «типове місце» — питання про
-    МАШИНУ. Якби `default_root()` читала середовище, полагодженим виявився б
+    машину. Якби `default_root()` читала середовище, полагодженим виявився б
     один щабель із трьох, а сусідній тест про хмарні теки тихо став би
     тавтологією."""
     from nyshporka.core.workspace import ENV_WORKSPACE
@@ -181,7 +181,7 @@ def test_versions_are_in_the_filenames() -> None:
 def test_pack_without_hash_is_never_considered_whole(tmp_path, monkeypatch) -> None:
     """🔴 Головна перевірка цього файлу.
 
-    Обірвана закачка лишає файл, який ВИГЛЯДАЄ як модель. `torch.load` на ньому
+    Обірвана закачка лишає файл, який виглядає як модель. `torch.load` на ньому
     падає десь усередині, повідомленням про формат тензора, — тобто причину
     («не докачалось») доводиться здогадувати. Тому «немає хеша» = «не цілий»,
     а не «пропустимо перевірку».
@@ -245,7 +245,7 @@ def test_doctor_never_raises() -> None:
 
 
 def test_doctor_checks_the_silent_failures() -> None:
-    """Перелік перевірок — це перелік ТИХИХ поломок, і він мусить бути повним."""
+    """Перелік перевірок — це перелік тихих поломок, і він мусить бути повним."""
     names = {c.name for c in doctor.run()}
     assert {"Прискорення (GPU)", "Хмарна синхронізація", "Місце на диску",
             "Рушії читання", "Моделі письма"} <= names
@@ -272,7 +272,7 @@ def test_cuda_tag_comes_from_the_manifest() -> None:
 
 # ── 📖 зразкова справа ───────────────────────────────────────────────────────
 def test_sample_deploys_a_working_chain(tmp_path: Path, monkeypatch) -> None:
-    """🔴 Приймач зразка — не «файли скопіювались», а ЛАНЦЮГ, що на них працює.
+    """🔴 Приймач зразка — не «файли скопіювались», а ланцюг, що на них працює.
 
     Зразок існує заради одного питання новачка: «чи воно взагалі щось робить».
     Відповідь дає не наявність кадрів, а те, що після розгортання гортач
@@ -292,7 +292,7 @@ def test_sample_deploys_a_working_chain(tmp_path: Path, monkeypatch) -> None:
     assert len(got["frames"]) >= 3
     assert S.RUN_MAIN in got["runs"] and S.RUN_SIDE in got["runs"]
 
-    # 🔴 Шлях у меті — ВІДНОСНИЙ. Абсолютний пережив би переїзд простору на
+    # 🔴 Шлях у меті — відносний. Абсолютний пережив би переїзд простору на
     # інший диск лише до першого відкриття гортача; саме на цьому й горять
     # хмарні прогони, у яких лишається тека орендованого боксу.
     meta = json.loads((ws.htr_reports / S.RUN_MAIN / "_htr_meta.json")
@@ -312,7 +312,7 @@ def test_sample_deploys_a_working_chain(tmp_path: Path, monkeypatch) -> None:
     assert found["hits"], "декод зразка не шукається"
     hit = next(h for h in found["hits"] if "Долищинскій" in h["line"])
 
-    # 2. гортач показує ЦЕЙ САМЕ рядок — і не сторінку цілком.
+    # 2. гортач показує цей саме рядок — і не сторінку цілком.
     # 🔴 Індекс беремо з хіта (`line_index`), а не константою: номер залежить
     # від сегментації, і прибитий цвяхом «line=1» ламався б від будь-якого
     # перескладання зразка, хоча ланцюг лишався б робочим.
@@ -342,12 +342,12 @@ def test_sample_install_is_idempotent(tmp_path: Path) -> None:
 
 
 def test_search_hit_carries_both_line_numbers(tmp_path: Path, monkeypatch) -> None:
-    """🔴 Номер рядка для ЛЮДИНИ і індекс рамки для ГОРТАЧА — різні числа.
+    """🔴 Номер рядка для людини і індекс рамки для гортача — різні числа.
 
     Пошук нумерує рядки з одиниці (так їх читає людина в таблиці хітів), а
     гортач адресує рамку в `.lines.json`, тобто з нуля. Доти, доки поле було
     одне, кнопка 👁 передавала людський номер туди, де ждали індекс, — і око
-    бачило СУСІДНІЙ рядок, маючи всі підстави вірити, що бачить знайдений.
+    бачило сусідній рядок, маючи всі підстави вірити, що бачить знайдений.
     Тест закріплює саме різницю: зійдуться назад в одне число — впаде тут, а не
     в дослідника посеред звірки.
     """
@@ -403,7 +403,7 @@ def test_search_hit_carries_a_sliding_window(tmp_path: Path, monkeypatch) -> Non
 
     plain = HS.search("Долищинский", limit=3)
     assert plain["hits"] and "context" not in plain["hits"][0], (
-        "контекст має бути ЯВНИМ: вікно подвоює обсяг відповіді")
+        "контекст має бути явним: вікно подвоює обсяг відповіді")
 
     got = HS.search("Долищинский", limit=3, context=1)
     hit = got["hits"][0]
@@ -488,7 +488,7 @@ def test_create_remembers_the_workspace_for_the_next_command(tmp_path: Path,
     assert W._load_last_used() == root
 
 
-# ── шлях до рушіїв рахують в ОДНОМУ місці ────────────────────────────────────
+# ── шлях до рушіїв рахують в одному місці ────────────────────────────────────
 def test_engine_venv_is_named_in_one_place() -> None:
     """🔴 Дві гілки кликали `doctor.engine_venv()`, третя рахувала шлях руками —
     і через це операція `htr.env` не бачила ні змінної `NYSHPORKA_HTR_VENV`, ні
@@ -507,7 +507,7 @@ def test_engine_venv_is_named_in_one_place() -> None:
 
 
 def test_htr_env_op_looks_where_doctor_looks(monkeypatch, tmp_path: Path) -> None:
-    """Операція й доктор мусять дивитись в ОДНУ теку — інакше «рушіїв немає»
+    """Операція й доктор мусять дивитись в одну теку — інакше «рушіїв немає»
     означає різне для браузера, командного рядка й агента."""
     from nyshporka.core import workspace as W
     from nyshporka.htr import env as E

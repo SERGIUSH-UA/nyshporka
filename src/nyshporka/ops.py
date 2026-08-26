@@ -1,6 +1,6 @@
 """⚙️ Доступ до реєстру операцій.
 
-Окремий модуль від `core.ops` навмисно: там МЕХАНІЗМ, тут — гарантія, що
+Окремий модуль від `core.ops` навмисно: там механізм, тут — гарантія, що
 вбудовані операції зареєстровані. Інакше споживач, який імпортував лише
 механізм, отримував би порожній реєстр і вважав, що операцій немає.
 """
@@ -14,6 +14,8 @@ from nyshporka import ops_builtin as _builtin  # noqa: F401  (потрібен �
 from nyshporka import ops_case as _case  # noqa: F401  (те саме: реєстрація)
 from nyshporka import ops_catalog as _catalog  # noqa: F401  (те саме: реєстрація)
 from nyshporka import ops_library as _library  # noqa: F401  (те саме: реєстрація)
+from nyshporka import ops_pick as _pick  # noqa: F401  (те саме: реєстрація)
+from nyshporka import ops_records as _records  # noqa: F401  (те саме: реєстрація)
 from nyshporka.core.envelope import Envelope
 from nyshporka.core.ops import REGISTRY, Op, Registry
 

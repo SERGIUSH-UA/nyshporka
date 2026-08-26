@@ -47,7 +47,7 @@ SCREENS.eye = async () => {
 };
 
 Object.assign(ACTIONS, {
-  // 🔴 Спершу ПЛАН, і лише окремою кнопкою — старт. Справа читається годинами;
+  // 🔴 Спершу план, і лише окремою кнопкою — старт. Справа читається годинами;
   // дізнатись «модель не та» або «кадрів не 20, а 3000» після запуску означає
   // втратити ніч.
   'eye.check': async (ev) => {
@@ -70,7 +70,7 @@ Object.assign(ACTIONS, {
           <select name="page_type">${PAGE_TYPES.map((k) =>
             `<option value="${k}">${t(`ptype.${k}`)}</option>`).join('')}</select>
           <select name="status">
-            <option value="full">full — виписано ВСІ прізвища</option>
+            <option value="full">full — виписано всі прізвища</option>
             <option value="partial">partial — не всі</option>
             <option value="skipped">skipped — не читав</option>
             <option value="unreadable">unreadable — не читається</option>

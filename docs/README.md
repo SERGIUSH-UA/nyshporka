@@ -13,7 +13,7 @@
 | що треба | де |
 |---|---|
 | підняти простір, перші кроки, приймачі | [`agents/first-session.md`](agents/first-session.md) |
-| що агент уміє, **чого не вміє**, обхідні шляхи | [`agents/surface.md`](agents/surface.md) |
+| **дві поверхні**, карта дій, режими довгої роботи | [`agents/surface.md`](agents/surface.md) |
 | **як читати відповідь: нуль, знаменник, застарілість** | [`agents/envelope.md`](agents/envelope.md) |
 | конвеєри: взяти → прочитати → знайти → записати | [`agents/workflows.md`](agents/workflows.md) |
 | **як шукати**: сховища, склейка переносу, поріг, межі | [`agents/search-channels.md`](agents/search-channels.md) |

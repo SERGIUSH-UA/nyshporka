@@ -6,18 +6,19 @@ import { esc, el, setView, busy, failure, boxError, busyForm,
   renderWarnings, renderCoverage, curGen, alive } from '../core/view.js';
 import { SCREENS, ACTIONS, PAGERS } from '../core/registry.js';
 import { SECTIONS, NAV_LABEL, show, renderNav, goto,
-  refreshJobs } from '../core/nav.js';
+  refreshJobs, onJob, jobChip } from '../core/nav.js';
 import { ST } from '../core/state.js';
 import { ic, eng } from '/ui/icons.js';
 import { swapHtml, skelRows, skelCards } from '/ui/dom.js';
 import { attachCombobox } from '/ui/combobox.js';
+import { pathField } from '../core/paths.js';
 import { pager, step } from '/ui/pager.js';
 
 
 
 
 /**
- * Опис, підвантажений у форму «Завести справу» для ПРАВКИ.
+ * Опис, підвантажений у форму «Завести справу» для правки.
  *
  * 🔴 Порожня форма над уже описаною текою — пастка: людина бачить порожні
  * поля, вважає, що опису немає, і друкує його заново — часто інакше, ніж
@@ -31,7 +32,7 @@ let PAGE = 0;
 let PAGES = 1;
 
 /**
- * 📥 Приймальня — матеріал на диску, який ще НІЧИМ не є.
+ * 📥 Приймальня — матеріал на диску, який ще нічим не є.
  *
  * 🔴 Екран показує рівно те, чого немає в бібліотеці: теки без шифри
  * (`unfiled`) і збірки, всередині яких лежить багато справ (`bundle`). Доти він
@@ -81,7 +82,7 @@ SCREENS.cases = async () => {
 };
 
 /**
- * 🔴 Знаменник ОБОМА боками межі.
+ * 🔴 Знаменник обома боками межі.
  *
  * Приймальня без числа бібліотеки виглядає як увесь простір, і навпаки. Саме
  * тому тут стоїть і те, і те: «стільки неописаного, стільки описаного» — і
@@ -111,8 +112,9 @@ SCREENS.newcase = async () => {
        · ${esc(EDIT.scans)} ${t('common.frames')}<br>
        <span class="muted">${t('case.keep')}</span></div>` : ''}
     <form data-act="case.save">
-      <div class="row"><input name="case_dir" placeholder="${t('case.dir')}"
-        value="${dir}" ${EDIT ? '' : 'autofocus'}></div>
+      <div class="row">${pathField({ name: 'case_dir', mode: 'dir',
+        purpose: 'case.dir', value: EDIT ? EDIT.case_dir : '',
+        ph: t('case.dir'), autofocus: !EDIT })}</div>
       ${EDIT ? '' : `<p class="muted">${t('case.dirhint')}</p>`}
       <div class="row">
         <input name="shifra" placeholder="${t('case.shifra')}: ДАХмО 315-1-8433"
@@ -153,9 +155,21 @@ Object.assign(ACTIONS, {
   'cases.build': async () => {
     const env = await callOp('cases.build', { rescan: true });
     if (!env.ok) return failure(env);
-    // Робота йде у черзі — туди ж і ведемо: інакше кнопка виглядає як така,
-    // що нічого не зробила, і її натискають ще раз.
-    await show('jobs');
+    // 🔴 Кнопка, після якої нічого видимо не сталось, натискається вдруге —
+    // тому стан обов'язково видно. Але показувати його треба тут: людина
+    // натиснула «перезібрати», дивлячись на цей перелік, і саме він зміниться
+    // по завершенні. Перекидання на чергу забирало в неї місце й фільтр.
+    const box = el('view');
+    const id = (env.data || {}).job_id;
+    if (!box || !id) return show('cases');
+    box.insertAdjacentHTML('afterbegin',
+      `<p id="cases-job" class="muted">${jobChip({ state: 'queued', progress: {} })}</p>`);
+    const chip = el('cases-job');
+    onJob(id, (j) => {
+      if (chip) chip.innerHTML = jobChip(j);
+      if (j.state === 'done') show('cases');
+    });
+    return undefined;
   },
 
   'case.edit': async (_ev, elm) => {

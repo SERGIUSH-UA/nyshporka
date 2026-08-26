@@ -22,7 +22,7 @@ if TYPE_CHECKING:
     from nyshporka.core.workspace import Workspace
 
 
-#: 🔴 Живі задачі тримаються за посилання. `asyncio` зберігає лише СЛАБКЕ
+#: 🔴 Живі задачі тримаються за посилання. `asyncio` зберігає лише слабке
 #: посилання на задачу, тож без цього набору складальник сміття може прибрати
 #: закачку посеред роботи — і виглядатиме це як обірваний прогін без причини:
 #: ні винятку, ні запису в журналі, просто зупинилось.
@@ -38,7 +38,7 @@ _BUILD_GATE = asyncio.Lock()
 _GENERIC_GATE = asyncio.Lock()
 
 
-def _keep(task: asyncio.Task[None]) -> None:
+def _keep(task: asyncio.Task[Any]) -> None:
     _ALIVE.add(task)
     task.add_done_callback(_ALIVE.discard)
 
@@ -63,14 +63,41 @@ async def start(bus: JobBus, ws: Workspace, op_name: str,
         return await _start_read(bus, ws, payload)
     if op_name == "cases.build":
         return await _start_build(bus, payload)
+    if op_name == "pick.ask":
+        return await _start_pick(bus, payload)
     return await _start_generic(bus, op_name, payload)
+
+
+async def _start_pick(bus: JobBus, payload: dict[str, Any]) -> JobRecord:
+    """Системне вікно вибору — з тим, чим його закрити.
+
+    🔴 Власний виконавець потрібен рівно заради одного рядка: реєстрації
+    гасителя. Загальний виконавець крутить тіло операції в потоці й гасителя не
+    реєструє, тож «Скасувати» над такою роботою міняє стан у черзі й нічого не
+    зупиняє. Для читання справи це прикро, для системного вікна — неприйнятно:
+    воно лишається висіти на екрані, а закрити його зі сторінки неможливо в
+    принципі. Тобто без цих рядків кнопка скасування обіцяє те, чого не робить.
+
+    ⚠ Гаситься слот, а не процес: слот знає сама операція, і в ньому може вже
+    стояти інше вікно того самого поля.
+    """
+    job = await _start_generic(bus, "pick.ask", payload)
+
+    from nyshporka.picker import native
+
+    slot = str((payload or {}).get("purpose") or (payload or {}).get("mode") or "dir")
+    def _shut() -> None:
+        native.close(slot)
+
+    bus.on_stop(job.id, _shut)
+    return job
 
 
 async def _start_generic(bus: JobBus, op_name: str,
                          payload: dict[str, Any]) -> JobRecord:
     """Довга операція без власного виконавця — тілом самої операції, у потоці.
 
-    🔴 Це закриває КЛАС дефекту, а не два випадки. `long=True` означає «не
+    🔴 Це закриває клас дефекту, а не два випадки. `long=True` означає «не
     тримай на ній HTTP-запит», а не «десь мусить бути окремо написаний
     виконавець»; доти будь-яка помічена так операція без запису в диспетчері
     відповідала браузеру 400 «не має виконавця». Саме це й сталося з
@@ -78,7 +105,7 @@ async def _start_generic(bus: JobBus, op_name: str,
     кнопка малювалась, а виклик відмовляв — тобто дефект був не в тому, що
     роботу не зроблено, а в тому, що вхід у неї вів у глухий кут.
 
-    ⚠ Поступ тут БУВАЄ, але не завжди: тіло операції звітує через
+    ⚠ Поступ тут буває, але не завжди: тіло операції звітує через
     `core.progress.report`, якщо має що сказати. Мовчазна операція
     показується як «іде», а не смугою — це чесніше за смугу, яка не рухається.
     """
@@ -90,14 +117,14 @@ async def _start_generic(bus: JobBus, op_name: str,
         raise ValueError(f"невідома операція «{op_name}»")
     cfg = dict(payload or {})
     # 🔴 Другий однаковий прохід не заводиться, і це не косметика. Через цю
-    # гілку йдуть `registry.collect` і `registry.merge` — обидві МУТУЮТЬ той
+    # гілку йдуть `registry.collect` і `registry.merge` — обидві мутують той
     # самий реєстр фонду й ту саму чергу розбіжностей. Запис там тепер
     # атомарний (`fonds/merge/write._write_tsv`), тож обрізаного файлу вже не
     # буде, але два одночасні злиття все одно дали б результат «хто останній»,
     # а приводу шукати не треба — вистачає подвійного кліку по кнопці.
     #
-    # ⚠ Шукається АКТИВНА робота, а не ключ ідемпотентності. Ключ жив би ще
-    # кілька хвилин після завершення й віддавав би СТАРИЙ готовий запис — а
+    # ⚠ Шукається активна робота, а не ключ ідемпотентності. Ключ жив би ще
+    # кілька хвилин після завершення й віддавав би старий готовий запис — а
     # тиснуть цю кнопку саме тому, що щось щойно змінилось.
     async with _GENERIC_GATE:
         for j in bus.jobs():
@@ -117,7 +144,7 @@ async def _run_generic(bus: JobBus, job: JobRecord, op_name: str,
 
     await bus.update(job.id, state=JobState.RUNNING)
 
-    # 🔴 Тіло операції крутиться в ОКРЕМОМУ потоці, а черга живе в циклі подій.
+    # 🔴 Тіло операції крутиться в окремому потоці, а черга живе в циклі подій.
     # Переносить це на себе приймач, а не той, хто звітує: інакше кожна
     # операція мусила б знати про цикл, тобто про демона.
     loop = asyncio.get_running_loop()
@@ -145,7 +172,7 @@ async def _run_generic(bus: JobBus, job: JobRecord, op_name: str,
         await bus.update(job.id, state=JobState.ERROR,
                          error=f"{type(exc).__name__}: {exc}")
         return
-    # 🔴 Невдача операції — це невдача РОБОТИ, а не успіх із полем `ok: false`
+    # 🔴 Невдача операції — це невдача роботи, а не успіх із полем `ok: false`
     # усередині. Інакше в черзі вона світилась би зеленим, і причину побачив би
     # лише той, хто розгорнув результат.
     if not env.ok:
@@ -153,16 +180,17 @@ async def _run_generic(bus: JobBus, job: JobRecord, op_name: str,
         return
     got = env.as_dict()
     await bus.update(job.id, state=JobState.DONE, result=got.get("data"),
-                     warnings=got.get("warnings") or [])
+                     warnings=got.get("warnings") or [],
+                     next=got.get("next") or [])
 
 
 async def _start_build(bus: JobBus, payload: dict[str, Any]) -> JobRecord:
     """Перезбірка реєстру справ.
 
-    🔴 Захист тут — від ДРУГОГО ОДНОЧАСНОГО проходу, а не від другої
+    🔴 Захист тут — від другого одночасного проходу, а не від другої
     перезбірки взагалі, і різниця принципова. Два паралельні проходи писали б
     у ту саму базу й у той самий файл бібліотеки. Але ключ ідемпотентності
-    живе десять хвилин і після завершення роботи віддавав би СТАРИЙ готовий
+    живе десять хвилин і після завершення роботи віддавав би старий готовий
     запис — а натискають цю кнопку саме тому, що щойно щось змінилось:
     людина побачила б «готово» з числами до своєї зміни й повірила б їм.
 
@@ -173,7 +201,7 @@ async def _start_build(bus: JobBus, payload: dict[str, Any]) -> JobRecord:
     from nyshporka.core.jobs import JobState
 
     rescan = bool(payload.get("rescan", True))
-    # Перевірка «чи вже йде» і постановка мусять бути НЕПОДІЛЬНІ: між ними є
+    # Перевірка «чи вже йде» і постановка мусять бути неподільні: між ними є
     # точка очікування (лок черги), і без цього замка двоє одночасних натискань
     # обидва бачили б «нічого не йде» й завели б два проходи.
     async with _BUILD_GATE:
@@ -230,7 +258,7 @@ async def _start_acquire(bus: JobBus, ws: Workspace,
     dest = Path(payload.get("dest") or "") or (
         ws.raw / source_id / _safe(ref))
 
-    # 🔴 Маніфест береться ДО постановки в чергу: питання «скільки це» мусить
+    # 🔴 Маніфест береться до постановки в чергу: питання «скільки це» мусить
     # мати відповідь до початку, а не після. Заразом це перевірка, що адреса
     # взагалі жива — інакше в черзі висіло б завдання, приречене впасти.
     man = await asyncio.to_thread(src.manifest, ref)
@@ -253,7 +281,7 @@ async def _start_acquire(bus: JobBus, ws: Workspace,
 
 async def _run_acquire(bus: JobBus, src: Any, job: JobRecord, dest: Path,
                        ref: str, frames: tuple[int, int] | None,
-                       total: int) -> None:
+                       total: int | None) -> None:
     from nyshporka.core.jobs import JobState, Progress
 
     await bus.update(job.id, state=JobState.RUNNING)
@@ -284,14 +312,18 @@ async def _run_acquire(bus: JobBus, src: Any, job: JobRecord, dest: Path,
         result={"dest": str(res.dest), "frames": res.frames,
                 "skipped": res.skipped, "bytes": res.bytes,
                 "errors": len(res.errors)},
-        progress=Progress(i=total, n=total, done=res.frames,
+        # ⚠ Джерело буває без знаменника (Commons не знає числа сторінок
+        # для одинарного скана). Поступ тоді рахується від зробленого, а
+        # не від обіцяного, — і саме тому число тут не вигадується.
+        progress=Progress(i=total or res.frames, n=total or res.frames,
+                          done=res.frames,
                           skipped=res.skipped, failed=len(res.errors),
                           basis="кадр"))
 
 
 async def _start_read(bus: JobBus, ws: Workspace,
                       payload: dict[str, Any]) -> JobRecord:
-    """Поставити читання справи. План рахується ДО черги.
+    """Поставити читання справи. План рахується до черги.
 
     Так «чим будемо читати і скільки це кадрів» відомо до старту, а не через
     годину — і завдання, приречене впасти на відсутній моделі, у чергу взагалі
@@ -303,13 +335,13 @@ async def _start_read(bus: JobBus, ws: Workspace,
                   out_dir=payload.get("out_dir") or "",
                   script=str(payload.get("script") or ""),
                   second_voice=bool(payload.get("second_voice", True)))
-    # 🔴 Шифра береться З ОПИСУ, коли її не передали. Прогін без шифри стає в
+    # 🔴 Шифра береться З опису, коли її не передали. Прогін без шифри стає в
     # реєстрі «нічиїм»: він є, текст є, а до якої справи належить — невідомо,
     # і зшивати це потім доводиться правкою JSON руками. З консолі шифру ніхто
-    # не вводить (форма читання питає лише теку), тож без цього КОЖЕН запуск
+    # не вводить (форма читання питає лише теку), тож без цього кожен запуск
     # кнопкою давав нічию — при тому, що опис лежить у тій самій теці.
     #
-    # ⚠ Через СПІЛЬНИЙ `case_key_for`, а не через власну гілку. Доти командний
+    # ⚠ Через спільний `case_key_for`, а не через власну гілку. Доти командний
     # рядок був розумніший за застосунок: після опису він пробував ще резолвер
     # за шляхом, а браузерний шлях — ні. Тобто найчастіший вхід мав найгіршу
     # прив'язку саме там, де його найважче помітити.
@@ -334,7 +366,7 @@ async def _start_read(bus: JobBus, ws: Workspace,
              "gpu_lock": str(plan.gpu_lock or "")},
         # Ключ — тека виходу: повторний запит на ту саму справу має віддати те
         # саме завдання, а не другий прогін, що б'ється з першим за карту.
-        # 🔴 N шардів — ОДНЕ завдання: вони пишуть в одну теку й разом
+        # 🔴 N шардів — одне завдання: вони пишуть в одну теку й разом
         # становлять один прогін.
         idempotency_key=f"read:{plan.out_dir}",
     )
@@ -347,7 +379,7 @@ async def _start_read(bus: JobBus, ws: Workspace,
 
 async def _run_read(bus: JobBus, job: JobRecord, plan: Any, case_key: str,
                     cmds: list[list[str]], *, partial: bool = False) -> None:
-    """Вести N процесів раннера, зводячи їхній прогрес в ОДНЕ завдання.
+    """Вести N процесів раннера, зводячи їхній прогрес в одне завдання.
 
     🔴 Шарди — це не N робіт, а одна: вони пишуть в ту саму теку, ділять один
     лок карти й разом становлять прогін справи. Тому в черзі вони стоять одним
@@ -366,17 +398,21 @@ async def _run_read(bus: JobBus, job: JobRecord, plan: Any, case_key: str,
         *cmd, stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.STDOUT, env=env) for cmd in cmds]
 
-    # 🔴 «Спинити» має спиняти ВСІ процеси. Доти стопер замикався на один — із
+    # 🔴 «Спинити» має спиняти всі процеси. Доти стопер замикався на один — із
     # шардами це лишило б N−1 читати справу далі, годинами тримаючи карту, при
     # тому що завдання вже позначене скасованим.
-    bus.on_stop(job.id, lambda: [_terminate(p) for p in procs])
+    def _stop_all() -> None:
+        for p in procs:
+            _terminate(p)
 
-    # 🔴 Хвіст ЛЮДСЬКОГО виводу зберігається окремо, і З НОМЕРОМ ШАРДА. Коли
+    bus.on_stop(job.id, _stop_all)
+
+    # 🔴 Хвіст людського виводу зберігається окремо, і З номером шарда. Коли
     # прогін падає, у завданні лишається код повернення — а причина написана
     # саме там, звичайним рядком; без номера її не відрізнити від сусідського
     # виводу, бо друкують усі одночасно.
     tail: list[str] = []
-    #: Останній прогрес кожного шарда. Сумуються ЖИВІ числа, а не події: подія
+    #: Останній прогрес кожного шарда. Сумуються живі числа, а не події: подія
     #: приходить від одного процесу й нічого не каже про решту.
     st: list[dict[str, int]] = [{"i": 0, "n": 0, "done": 0, "skipped": 0,
                                  "failed": 0} for _ in cmds]
@@ -402,7 +438,7 @@ async def _run_read(bus: JobBus, job: JobRecord, plan: Any, case_key: str,
                     continue
                 last_push = now
                 await bus.update(job.id, progress=Progress(
-                    # 🔴 `n` — СУМА, а не число з нульового шарда: кожен
+                    # 🔴 `n` — сума, а не число з нульового шарда: кожен
                     # звітує розмір своєї вибірки після round-robin, тож узяти
                     # чуже означало б показувати 33% вічно.
                     i=sum(s["i"] for s in st), n=sum(s["n"] for s in st),
@@ -422,15 +458,15 @@ async def _run_read(bus: JobBus, job: JobRecord, plan: Any, case_key: str,
         done=sum(s["done"] for s in st), skipped=sum(s["skipped"] for s in st),
         failed=sum(s["failed"] for s in st), basis="сторінка"))
 
-    # 🔴 Приймач повноти — ДИСК, а не код повернення: є клас відмов, за якого
+    # 🔴 Приймач повноти — диск, а не код повернення: є клас відмов, за якого
     # сторінка вбиває процес, лог обривається, перелік збоїв порожній, а код
     # успішний.
     #
-    # 🔴 Шардинг тут НЕ робить прогін частковим — на відміну від командного
+    # 🔴 Шардинг тут не робить прогін частковим — на відміну від командного
     # рядка, де один процес справді читає свою частку. Тут завдання володіє
-    # ВСІМА шардами, тож їхнє об'єднання є повним прогоном; переплутати
+    # всіма шардами, тож їхнє об'єднання є повним прогоном; переплутати
     # означало б тихо прийняти третину справи як прочитану.
-    comp = R.completeness(plan.case_dir, plan.out_dir, partial=partial)
+    comp: dict[str, Any] = R.completeness(plan.case_dir, plan.out_dir, partial=partial)
     missing, pages = int(comp["missing"]), int(comp["pages"])
     if bus.cancelled(job.id):
         # Скасоване лишається скасованим: перезаписати його на DONE/ERROR
@@ -465,7 +501,7 @@ def _terminate(proc: asyncio.subprocess.Process) -> None:
 
     ⚠ На Windows `terminate()` це `TerminateProcess`, тобто діти раннера
     (шарди) можуть пережити батька; ловить їх власний watchdog раннера, а тут
-    важливо не лишити ГОЛОВНИЙ процес, який тримає відеокарту.
+    важливо не лишити головний процес, який тримає відеокарту.
     """
     if proc.returncode is not None:
         return

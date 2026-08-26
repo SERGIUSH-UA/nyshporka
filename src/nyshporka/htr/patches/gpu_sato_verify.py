@@ -5,7 +5,7 @@
 Тому перевіряємо не «схожість картинок», а максимальну абсолютну похибку
 відносно динамічного діапазону і збіг ненульової маски.
 
-Запуск ПІД інтерпретатором рушіїв:
+Запуск під інтерпретатором рушіїв:
     <інтерпретатор рушіїв> -m nyshporka.htr.patches.gpu_sato_verify
 """
 from __future__ import annotations
@@ -69,7 +69,7 @@ def compare(name: str, img: np.ndarray, device: str = "cuda:0",
     print(f"  CPU {t_cpu*1000:8.1f} мс   GPU {t_gpu*1000:8.1f} мс   "
           f"прискорення ×{t_cpu/max(t_gpu,1e-9):.1f}")
     print(f"  max|Δ| {amax:.3e} (діапазон {rng:.3e}) → відносна {rel:.2e}")
-    print(f"  IoU маски@5% {iou:.6f}   кореляція {corr:.8f}   {'✓ ОК' if ok else '✗ РОЗБІЖНІСТЬ'}")
+    print(f"  IoU маски@5% {iou:.6f}   кореляція {corr:.8f}   {'✓ ок' if ok else '✗ розбіжність'}")
     return ok
 
 
@@ -86,7 +86,7 @@ def main() -> int:
     for p in sorted(Path("data/cache").rglob("bl_map*.npy"))[:1]:
         all_ok &= compare(f"реальна {p.name}", np.load(p), dev)
 
-    print("\n" + ("✓ ЕКВІВАЛЕНТНО" if all_ok else "✗ Є РОЗБІЖНОСТІ — не вмикати"))
+    print("\n" + ("✓ еквівалентно" if all_ok else "✗ Є розбіжності — не вмикати"))
     return 0 if all_ok else 1
 
 

@@ -1,8 +1,8 @@
 """🧾 `nysh registry` — скласти перелік справ фонду.
 
 ⚠ Не `nysh crawl`, хоч обидва обходять чужий сайт. `crawl` збирає каталог на
-ВЕСЬ простір, без фонду й без ключа опису, і живить `nysh find`. Тут інший
-знаменник («усе, що існує в ЦЬОМУ фонді») і інший вихід — файл у `registry/`,
+весь простір, без фонду й без ключа опису, і живить `nysh find`. Тут інший
+знаменник («усе, що існує в цьому фонді») і інший вихід — файл у `registry/`,
 ключований шифрою. Одна команда на два виходи означала б, що людина не знає
 заздалегідь, який файл змінить її запуск.
 """
@@ -13,23 +13,20 @@ from rich.table import Table
 
 from nyshporka import brand
 from nyshporka import ops as O
+from nyshporka.cli_emit import answer, notes
 
 app = typer.Typer(help="Реєстр опису: скласти перелік справ фонду.",
                   no_args_is_help=True)
 console = brand.console()
 
 
-def _fail(env: object) -> None:
-    console.print(f"[err]{getattr(env, 'error', '') or 'не вдалось'}[/err]")
-    raise typer.Exit(code=1)
 
 
 @app.command("sources")
 def cmd_sources() -> None:
     """Які збирачі є і що кожен уміє."""
     env = O.call("registry.collectors", {})
-    if not env.ok:
-        _fail(env)
+    answer(env)
     rows = (env.data or {}).get("collectors") or []
     if not rows:
         console.print("[warn]жодного збирача[/warn]")
@@ -37,8 +34,7 @@ def cmd_sources() -> None:
         console.print(f"  [bold]{c['id']:<10}[/bold] {c['label']}")
         console.print(f"             уміє: {', '.join(c['caps'])} → {c['file']}"
                       + (f" · качає: {c['source']}" if c["source"] else ""))
-    for w in env.warnings:
-        console.print(f"[warn]⚠ {w.text}[/warn]")
+    notes(env)
 
 
 @app.command("plan")
@@ -48,11 +44,10 @@ def cmd_plan(
     repo: str = typer.Option("DAHMO", "--repo", help="код або назва архіву"),
     opys: str = typer.Option("", "--opys", help="описи через кому"),
 ) -> None:
-    """Скільки коштуватиме збирання — ДО того, як воно почалось."""
+    """Скільки коштуватиме збирання — до того, як воно почалось."""
     env = O.call("registry.plan", {"collector": collector, "repo": repo,
                                    "fond": fond, "opys": opys})
-    if not env.ok:
-        _fail(env)
+    answer(env)
     d = env.data or {}
     console.print(f"  збирач : [bold]{d.get('collector')}[/bold]")
     console.print(f"  готовий: {'так' if d.get('ready') else '[err]ні[/err]'}")
@@ -64,8 +59,44 @@ def cmd_plan(
         eta = d.get("eta_sec") or 0
         console.print(f"  запитів: {d['requests']}"
                       + (f" · орієнтовно {eta / 60:.0f} хв" if eta > 90 else ""))
-    for k, v in (d.get("needs") or {}).items():
+    needs = d.get("needs") or {}
+    for k, v in needs.items():
         console.print(f"  [warn]бракує {k}: {v}[/warn]")
+    notes(env)
+    if needs or not d.get("ready"):
+        # 🔴 «Готовий: ні» — це відмова, а не довідка. Поки код повернення був
+        # нульовий, ланцюжок `plan && collect` ішов повз перешкоду, про яку
+        # план щойно попередив; сусідній `collect --dry-run` у тій самій
+        # ситуації давно повертає 1.
+        raise typer.Exit(code=1)
+
+
+@app.command("build")
+def cmd_build(
+    fond: str = typer.Option(..., "--fond"),
+    repo: str = typer.Option("DAHMO", "--repo", help="код або назва архіву"),
+    opys: str = typer.Option("", "--opys", help="описи через кому"),
+    refresh: bool = typer.Option(False, "--refresh", help="не читати кеш"),
+    fond_id: str = typer.Option("", "--fond-id",
+                                help="внутрішній номер фонду на сайті архіву"),
+) -> None:
+    """Зібрати опис фонду всіма доступними джерелами і звести в реєстр.
+
+    🔴 Те, заради чого існують `collect` і `merge` разом. Збирача тут не
+    називають: який саме сайт знає цей фонд — питання до плану, а не до
+    людини. Джерело, яке не готове, пропускається З поясненням і не валить
+    решту; зведення робиться один раз, після всіх обходів.
+    """
+    env = O.call("registry.build", {"repo": repo, "fond": fond, "opys": opys,
+                                    "refresh": refresh, "fond_id": fond_id})
+    answer(env)
+    d = env.data or {}
+    for x in d.get("took") or []:
+        console.print(f"  [ok]✓[/ok] {x['collector']}: {x['rows']} справ "
+                      f"[muted]→ {x['out']}[/muted]")
+    for x in d.get("skipped") or []:
+        console.print(f"  [muted]— {x['collector']}: {x['why']}[/muted]")
+    notes(env)
 
 
 @app.command("collect")
@@ -84,8 +115,7 @@ def cmd_collect(
                                       "fond": fond, "opys": opys,
                                       "refresh": refresh, "dry_run": dry_run,
                                       "fond_id": fond_id})
-    if not env.ok:
-        _fail(env)
+    answer(env)
     d = env.data or {}
     # ⚠ При --dry-run той самий рядок без позначки читається як «записано»:
     # шлях названо, число названо, а файла немає.
@@ -103,8 +133,7 @@ def cmd_collect(
     if d.get("kept"):
         console.print(f"  [muted]♻ долучено {d['kept']} рядків описів, "
                       f"яких цей запуск не чіпав[/muted]")
-    for w in env.warnings:
-        console.print(f"[warn]⚠ {w.text}[/warn]")
+    notes(env)
 
 
 @app.command("merge")
@@ -118,13 +147,12 @@ def cmd_merge(
 ) -> None:
     """Звести джерела опису в один реєстр фонду.
 
-    ⚠ Працює по фонду ЦІЛКОМ: знаменник покриття пофондовий, а зведення одного
+    ⚠ Працює по фонду цілком: знаменник покриття пофондовий, а зведення одного
     опису лишило б реєстр із одним описом. Тому прапорця `--opys` тут немає.
     """
     env = O.call("registry.merge", {"repo": repo, "fond": fond,
                                     "dry_run": dry_run, "fond_id": fond_id})
-    if not env.ok:
-        _fail(env)
+    answer(env)
     d = env.data or {}
     # ⚠ При --dry-run той самий рядок без позначки читається як «записано»:
     # шлях названо, число названо, а файла немає.
@@ -164,8 +192,7 @@ def cmd_merge(
     kept = d.get("verdicts_kept") or 0
     console.print(f"  розбіжностей: {conf}"
                   + (f" · збережено вердиктів: {kept}" if kept else ""))
-    for w in env.warnings:
-        console.print(f"[warn]⚠ {w.text}[/warn]")
+    notes(env)
 
 
 @app.command("show")
@@ -203,7 +230,7 @@ def cmd_rate(
     window: float = typer.Option(10.0, "--window"),
     last: float = typer.Option(0.0, "--last", help="лише останні N секунд"),
 ) -> None:
-    """Чи витримали темп — за ЖУРНАЛОМ фактичних відправок, а не за наміром."""
+    """Чи витримали темп — за журналом фактичних відправок, а не за наміром."""
     import time
 
     from nyshporka.core import xrate
@@ -217,7 +244,7 @@ def cmd_rate(
                        time.time() - last if last else None)
     console.print(f"  {key}: {res['events']} запитів від {res['pids']} процесів, "
                   f"розтяг {res['span']:.1f} с")
-    mark = "[ok]✅ ок[/ok]" if res["ok"] else "[err]❌ ПЕРЕВИЩЕНО[/err]"
+    mark = "[ok]✅ ок[/ok]" if res["ok"] else "[err]❌ перевищено[/err]"
     console.print(f"  максимум у вікні {window:g} с: {res['worst']} "
                   f"(ліміт {max_events}) — {mark}")
     raise typer.Exit(code=0 if res["ok"] else 1)

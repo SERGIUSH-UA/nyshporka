@@ -24,7 +24,7 @@ CoverageStatus = Literal[
     "downloaded",  # скани отримано
     "decoded",     # прочитано/проіндексовано
     "exhausted",   # повністю відпрацьовано
-    "negative",    # перевірено — наших НЕМАЄ
+    "negative",    # перевірено — наших немає
 ]
 
 CoverageRecordType = Literal[

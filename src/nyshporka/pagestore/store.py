@@ -22,11 +22,11 @@ if TYPE_CHECKING:
 from nyshporka.core.workspace import workspace
 from nyshporka.library import (
     _DEFAULT_OPYS,
-    _OPYS_IN_KEY,
     _REPO_LABEL,
     _mk_key,
     _norm_spr,
     load_library,
+    opys_in_key,
     parse_case_code,
     parse_source_id,
     split_fond_opys,
@@ -41,14 +41,14 @@ _IMG_EXT = {".jpg", ".jpeg", ".png"}
 # порядок підвищення статусу: понизити повний прохід частковим не можна
 _STATUS_RANK = {"unreadable": 0, "skipped": 0, "partial": 1, "full": 2}
 
-# «DAHMO/315/8433» і «ANRM/211-3/140» — друга форма з описом у фонді (`_OPYS_IN_KEY`)
-# 🔴 Підкреслення в класі спр. — для ЗБІРОК: `@fuzovka` і `@parkovo` проходили,
+# «DAHMO/315/8433» і «ANRM/211-3/140» — друга форма з описом у фонді (`opys_in_key`)
+# 🔴 Підкреслення в класі спр. — для збірок: `@fuzovka` і `@parkovo` проходили,
 # а `@klirovi_films` і `@kishinev_ispovedn` — ні, бо `_` у клас не входило.
 # Виглядало це не як синтаксична межа, а як «такої справи немає»: команда
 # друкувала перелік прийнятних форм, серед яких ключ і був. Спіймано 2026-08-13,
 # коли перегляд кадру збірки клірових ANRM не було куди занести.
 _KEY_RE = re.compile(r"^([A-Za-z]+)/(\d+(?:-\d+)?)/([0-9A-Za-z@_]+)$")
-# «АРХІВ 123-1-456» / «dahmo 315-1-8433» / «315-1-8433» (без архіву — помилка)
+# «архів 123-1-456» / «dahmo 315-1-8433» / «315-1-8433» (без архіву — помилка)
 _SHIFRA_RE = re.compile(r"^(?:(\S+)\s+)?(\d+)\s*[-–]\s*(\d+)\s*[-–]\s*(\w+)$")
 _LABEL2REPO = {v.casefold(): k for k, v in _REPO_LABEL.items()} | {
     k.casefold(): k for k in _REPO_LABEL
@@ -56,7 +56,7 @@ _LABEL2REPO = {v.casefold(): k for k, v in _REPO_LABEL.items()} | {
 
 _ACCEPTED_FORMATS = (
     "ключ «DAHMO/315/8433» (з описом — «ANRM/211-3/140»), шифра з архівом "
-    "«АРХІВ 123-1-456», source-id «S_<АРХІВ>_F<фонд>_D<справа>» або шлях "
+    "«архів 123-1-456», source-id «S_<архів>_F<фонд>_D<справа>» або шлях "
     "«data/raw/архів_123/spr-456»"
 )
 
@@ -128,7 +128,7 @@ def resolve_case(value: str) -> CaseRef:
     # («ANRM 211-1-140» с. Парково vs «ANRM 211-3-140» Кишинівський собор).
     # Мовчки взяти перший-ліпший = дописати аркуші в чужу справу, тому — помилка
     # з переліком того, що реально є на диску.
-    if (repo, fond) in _OPYS_IN_KEY and not opys and not str(spr).startswith("@"):
+    if opys_in_key(repo, fond) and not opys and not str(spr).startswith("@"):
         cands = sorted({str(e["opys"]) for e in lib
                         if e.get("repo") == repo and e.get("fond") == fond
                         and e.get("spr") == spr and e.get("opys")})
@@ -148,7 +148,7 @@ def resolve_case(value: str) -> CaseRef:
     entry = next((e for e in lib if e.get("key") == key), None)
     if entry is None:
         # ДАВО/ДАВіО-плутанина: лейбл шифри каже одне, тека диска — інше.
-        # Якщо по (fond, spr) у бібліотеці РІВНО один запис — його ключ канонічний,
+        # Якщо по (fond, spr) у бібліотеці рівно один запис — його ключ канонічний,
         # інакше нотатки тієї самої справи розповзуться по двох файлах.
         same = [e for e in lib if e.get("fond") == fond and e.get("spr") == spr
                 and (not opys or not e.get("opys") or e.get("opys") == opys)]
@@ -172,7 +172,7 @@ def case_path(ref: CaseRef) -> Path:
 
     `DAHMO/315/8433` → `DAHMO/315-8433.json`; `ANRM/211-3/140` → `ANRM/211-3-140.json`.
     """
-    if (ref.repo, ref.fond) in _OPYS_IN_KEY and ref.opys and not str(ref.spr).startswith("@"):
+    if opys_in_key(ref.repo, ref.fond) and ref.opys and not str(ref.spr).startswith("@"):
         return PAGES_ROOT / ref.repo / f"{ref.fond}-{ref.opys}-{ref.spr}.json"
     return PAGES_ROOT / ref.repo / f"{ref.fond}-{ref.spr}.json"
 
@@ -207,7 +207,7 @@ def _lock(path: Path, timeout: float = 5.0,
                     lockp.unlink(missing_ok=True)   # власник помер — забираємо лок
                     continue
             except OSError:
-                # 🔴 Лок щойно зник — АБО `stat()` стійко відмовляє (на Windows
+                # 🔴 Лок щойно зник — або `stat()` стійко відмовляє (на Windows
                 # файл у стані pending-delete, антивірус, індексатор). Було
                 # голе `continue`: ні паузи, ні перевірки дедлайну, тож вихід
                 # лишався єдиний — успішний `os.open`. У парі зі стійким
@@ -217,14 +217,14 @@ def _lock(path: Path, timeout: float = 5.0,
             if time.monotonic() > deadline:
                 raise TimeoutError(f"лок {lockp} зайнятий довше {timeout:.0f}с") from None
             time.sleep(0.1)
-    # PID пишеться ДО `yield`: інакше власник лока невідомий рівно в той
+    # PID пишеться до `yield`: інакше власник лока невідомий рівно в той
     # проміжок, коли лок і тримають.
     os.write(fd, str(os.getpid()).encode())
     try:
         yield
     finally:
         os.close(fd)
-        # ⚠ Знімаємо лише СВІЙ лок: за час роботи його могли забрати як
+        # ⚠ Знімаємо лише свій лок: за час роботи його могли забрати як
         # протухлий (30 с), і тоді `unlink` без перевірки зняв би чужий.
         try:
             if lockp.read_text(encoding="utf-8", errors="replace").strip() \
@@ -273,7 +273,7 @@ def _merge_note(old: PageNote, new: PageNote) -> PageNote:
     for f in ("sheet", "agent"):
         if not getattr(new, f):
             setattr(merged, f, getattr(old, f))
-    # коментарі різних агентів НЕ затирають одне одного (інцидент 00898,
+    # коментарі різних агентів не затирають одне одного (інцидент 00898,
     # 2026-07-21: паралельна сесія стерла попередження про фальш-друга) —
     # конкатенуємо відмінні, обрізаючи хвіст на 600 символах
     if not new.comment:
@@ -396,7 +396,7 @@ def case_status(ref: CaseRef, scans: list[str] | None = None) -> dict[str, Any]:
     return {
         "key": ref.key, "shifra": ref.shifra, "title": ref.title,
         "total_disk": len(disk) or (ref.frames or 0),
-        # 🔴 Нуль сканів і «теки не знайшли» — різні речі, і плутати їх дорого:
+        # 🔴 Нуль сканів і «теки не знайшли» — різні речі, і плутати їх не можна:
         # перше означає «справа порожня», друге — «реєстр про неї ще не знає».
         # Показане як «0 на диску», друге виглядає так, ніби скани зникли.
         "case_dir_known": bool(ref.path),
@@ -405,3 +405,44 @@ def case_status(ref: CaseRef, scans: list[str] | None = None) -> dict[str, Any]:
         "unnoted_count": len(unnoted) if disk else None,
         "unnoted": _compress(unnoted) if disk else None,
     }
+
+
+def totals() -> dict[str, Any]:
+    """Скільки аркушів облік ока тримає по всьому сховищу.
+
+    🔴 Одна глобальна відповідь, і саме тому вона тут, а не в реєстрі справ.
+    Реєстр рахує занесені аркуші, розкладені по справах (`cases.collect`), тож
+    замітка у файлі, чийого ключа реєстр не впізнав, у його сумі не з'являється
+    зовсім. Ця різниця — не похибка, а знахідка: занесені аркуші, які жоден
+    екран про справу не покаже. Тому обидва числа лишаються, і в них різні
+    імена, а не одне на двох: один графік із двох визначень показав би падіння
+    там, де просто змінилось джерело.
+
+    Читає файли, а не моделі: сховище дописується різними версіями застосунку,
+    і сувора валідація тут перетворила б зведення на відмову через одну картку.
+    """
+    out: dict[str, Any] = {"files": 0, "pages": 0, "full": 0,
+                           "records": 0, "by_status": {}}
+    if not PAGES_ROOT.is_dir():
+        return out
+    for f in sorted(PAGES_ROOT.glob("*/*.json")):
+        try:
+            data = json.loads(f.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        out["files"] += 1
+        pages = data.get("pages")
+        items = (list(pages.values()) if isinstance(pages, dict)
+                 else pages if isinstance(pages, list) else [])
+        out["pages"] += len(items)
+        for p in items:
+            if not isinstance(p, dict):
+                continue
+            st = str(p.get("status") or "")
+            if st:
+                out["by_status"][st] = out["by_status"].get(st, 0) + 1
+            if st == "full":
+                out["full"] += 1
+        recs = data.get("records")
+        out["records"] += len(recs) if isinstance(recs, list) else 0
+    return out

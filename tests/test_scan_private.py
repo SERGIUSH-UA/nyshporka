@@ -18,7 +18,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 _spec = importlib.util.spec_from_file_location("scan_private", ROOT / "tools" / "scan_private.py")
 scan = importlib.util.module_from_spec(_spec)
-# 🔴 Реєстрація в `sys.modules` ДО виконання обов'язкова, а не косметична:
+# 🔴 Реєстрація в `sys.modules` до виконання обов'язкова, а не косметична:
 # з Python 3.14 `@dataclass` резолвить `cls.__module__` через `sys.modules`, і
 # для незареєстрованого модуля це `None` → AttributeError на самому імпорті.
 # На 3.12/3.13 те саме працює й без цього рядка, тобто пастка спрацьовує рівно
@@ -28,19 +28,19 @@ _spec.loader.exec_module(scan)
 
 
 @pytest.mark.parametrize("rule_id, sample", [
-    ("canon-person", 'ANCHORS = {"I0175": (1803, "З ВІКУ", "…")}'),
+    ("canon-person", 'ANCHORS = {"I0175": (1803, "З віку", "…")}'),
     ("canon-family", "родина F0099 злита з F0021"),
     ("canon-place", "place_id: PL0044"),
     ("canon-source", "S_DAHMO_F315_D8433"),
     ("clan-surname", "VARIANTS = [(\"Долищинский\", 0.28)]"),
     ("clan-surname", 'FULL_FORMS = ["Doliszczynski"]'),
     ("clan-surname", "roots = doliş"),
-    # 🔴 Форми, у яких шуканого складу НЕМАЄ: рушій калічить середину слова,
+    # 🔴 Форми, у яких шуканого складу немає: рушій калічить середину слова,
     # тож попереднє правило їх не бачить, а разом вони називають рід не гірше
     # за канонічне написання.
-    ("clan-misread", 'MISREADS = ["ДОМИНСКІЙ", "ДЕМИЦИНСКІЙ"]'),
+    ("clan-misread", 'MISREADS = ["доминскій", "демицинскій"]'),
     ("clan-misread", "варіант декоду: Домбинскій"),
-    # 🔴 Пошта в User-Agent їде в КОЖЕН запит до чужого сайту й осідає в його
+    # 🔴 Пошта в User-Agent їде в кожен запит до чужого сайту й осідає в його
     # логах — прибрати її звідти вже не можна. Саме так вона й трапилась: два
     # перенесені завантажувачі несли адресу автора, і жодне з тодішніх правил
     # її не бачило.

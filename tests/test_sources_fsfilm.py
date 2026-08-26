@@ -41,7 +41,7 @@ def src(tmp_path: Path) -> FilmMirrorSource:
 # ── реєстр регіонів ──────────────────────────────────────────────────────────
 
 def test_regions_are_read_from_the_page_not_hardcoded() -> None:
-    """Перелік регіонів росте; зашитий знімок протухав би МОВЧКИ.
+    """Перелік регіонів росте; зашитий знімок протухав би мовчки.
 
     Новий архів просто не з'являвся б у застосунку — без помилки, без ознаки,
     що щось не так.
@@ -62,7 +62,7 @@ def test_regions_are_read_from_the_page_not_hardcoded() -> None:
 def test_meta_shape_differs_by_region_and_is_normalised() -> None:
     """🔴 Пастка 2: у Молдові це список словників, у Пскові — голий рядок.
 
-    Різниця тиха: `.get()` по рядку їде по його СИМВОЛАХ і не падає.
+    Різниця тиха: `.get()` по рядку їде по його символах і не падає.
     """
     assert meta_entries([{"listy": "Л. 1-5 - Село"}]) == [{"listy": "Л. 1-5 - Село"}]
     assert meta_entries("22-опись") == [{"listy": "22-опись"}]
@@ -103,7 +103,7 @@ def test_place_is_split_off_the_range() -> None:
 # ── протягування й закриття меж ──────────────────────────────────────────────
 
 def test_shifra_is_carried_forward(src: FilmMirrorSource) -> None:
-    """🔴 Пастка 3: `delo` заповнене лише в ПЕРШОМУ записі блоку.
+    """🔴 Пастка 3: `delo` заповнене лише в першому записі блоку.
 
     Порожнє далі означає «та сама справа». Без протягування 90% записів
     лишились би без шифру — тобто знайдене село не мало б адреси в архіві, а
@@ -113,7 +113,7 @@ def test_shifra_is_carried_forward(src: FilmMirrorSource) -> None:
     assert len(rows) > 50
     assert rows[0]["delo"], "перший запис без шифру — фікстура не та"
     assert all(r["delo"] for r in rows), "шифр десь урвався"
-    # Протягування має ЗМІНЮВАТИСЬ на новому блоці, а не залипати назавжди.
+    # Протягування має змінюватись на новому блоці, а не залипати назавжди.
     assert len({r["delo"] for r in rows}) > 1
 
 
@@ -139,7 +139,7 @@ def test_open_range_is_closed_by_the_neighbour_not_by_film_end(
 # ── контракт джерела ─────────────────────────────────────────────────────────
 
 def test_manifest_answers_where_without_downloading(src: FilmMirrorSource) -> None:
-    """Покажчик відповідає «де метрики мого села» БЕЗ жодного завантаження."""
+    """Покажчик відповідає «де метрики мого села» без жодного завантаження."""
     man = src.manifest(f"moldova/{PARENT}/2086525")
     assert man.frames == 20            # фікстура обрізана, це не обсяг плівки
     assert man.meta["sheet_rows"] == len(man.sheets) > 50
@@ -180,7 +180,7 @@ def test_search_without_tree_and_without_bundle_refuses(tmp_path: Path,
 def test_frame_url_is_computed_not_taken_from_the_tree(src: FilmMirrorSource) -> None:
     """🔴 Пастка 1: `imageBaseUrl` у дереві виглядає авторитетно й дає 404.
 
-    Воно лишає в шляху `/media/mihailo`; робоча адреса — `rootId` БЕЗ цього
+    Воно лишає в шляху `/media/mihailo`; робоча адреса — `rootId` без цього
     префікса, приклеєний до `/storage`. Перевірено запитом: перша форма 404,
     друга 200. Довіритись полю означало б порожню теку без пояснення.
     """
@@ -207,7 +207,7 @@ def test_url_from_the_viewer_is_understood() -> None:
 
 
 def test_zero_length_cache_is_treated_as_missing(src: FilmMirrorSource) -> None:
-    """🔴 Обірваний запис отруйний: `exists()` каже «є», докачки не буде НІКОЛИ.
+    """🔴 Обірваний запис отруйний: `exists()` каже «є», докачки не буде ніколи.
 
     Регіон тихо випадає з обходу під виглядом помилки — а насправді на диску
     лежить нуль байтів після Ctrl-C чи скінченого місця.
@@ -215,7 +215,7 @@ def test_zero_length_cache_is_treated_as_missing(src: FilmMirrorSource) -> None:
     blob = src.cache_dir / "moldova.json.gz"
     blob.write_bytes(b"")
     src._trees.clear()
-    # Мережі немає, тож спроба перекачати впаде — але саме СПРОБА і потрібна:
+    # Мережі немає, тож спроба перекачати впаде — але саме спроба і потрібна:
     # мовчазне «файл є» було б гіршою поведінкою.
     with pytest.raises(Exception, match=r"(?i)example\.invalid|resolve|connect|name"):
         src.tree("moldova")
@@ -248,7 +248,7 @@ def test_bundled_sheet_index_answers_where_without_any_download(tmp_path: Path) 
 
 
 def test_bundled_index_names_the_regions_it_covers(tmp_path: Path) -> None:
-    """🔴 Покажчик є НЕ ВСЮДИ, і мовчати про це не можна.
+    """🔴 Покажчик є не всюди, і мовчати про це не можна.
 
     У більшості регіонів дзеркала `folder_meta` — це голий підпис теки. Не
     назвати покриття означало б видати «нема в покажчику» за «нема на плівках».

@@ -24,8 +24,10 @@ SCREENS.export = async () => {
     <form class="row" data-act="export.run">
       <input name="case" placeholder="${t('export.case')}: DAHMO/315/8433" autofocus>
       <select name="what">
+        <option value="acts">${t('export.acts')}</option>
         <option value="records">${t('export.records')}</option>
         <option value="pages">${t('export.pages')}</option>
+        <option value="tally">${t('export.tally')}</option>
       </select>
       <button type="submit">${t('export.run')}</button>
     </form>
@@ -40,12 +42,14 @@ Object.assign(ACTIONS, {
     const env = await callOp('export.case',
       { case: fd.get('case'), what: fd.get('what') });
     if (!env.ok) return boxError('hits', env);
-    const { columns = [], rows = [] } = env.data;
-    LAST_EXPORT = { columns, rows, name: env.data.shifra || env.data.case };
+    const { columns = [], rows = [], labels = {} } = env.data;
+    LAST_EXPORT = { columns, rows, labels,
+      name: env.data.shifra || env.data.case };
     el('hits').innerHTML = `
       ${renderWarnings(env)}
       ${rows.length ? `<button data-act="export.csv">${t('export.csv')}</button>` : ''}
-      <table><thead><tr>${columns.map((c) => `<th>${esc(c)}</th>`).join('')}</tr></thead>
+      <table><thead><tr>${columns.map(
+        (c) => `<th>${esc(labels[c] || c)}</th>`).join('')}</tr></thead>
       <tbody>${rows.slice(0, 200).map((r) => `<tr>${columns.map(
         (c) => `<td>${esc(String(r[c] ?? '').slice(0, 80))}</td>`).join('')}</tr>`).join('')}
       </tbody></table>
@@ -54,12 +58,16 @@ Object.assign(ACTIONS, {
 
   // 🔴 CSV збирається на клієнті й зберігається діалогом браузера. Писати файл
   // кудись «у простір» тут не можна: людина вивантажує, щоб віднести дані в
-  // ЧУЖУ програму, і мусить сама сказати куди.
+  // чужу програму, і мусить сама сказати куди.
   'export.csv': () => {
     if (!LAST_EXPORT) return;
-    const { columns, rows, name } = LAST_EXPORT;
+    const { columns, rows, labels = {}, name } = LAST_EXPORT;
     const cell = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-    const csv = [columns.join(','), ...rows.map(
+    // Шапка людськими словами — тими самими, що їх дає `export.write`. Мапа
+    // приходить з відповіддю, а не складається тут: другий примірник назв
+    // розійшовся б із першим мовчки.
+    const head = columns.map((c) => cell(labels[c] || c)).join(',');
+    const csv = [head, ...rows.map(
       (r) => columns.map((c) => cell(r[c])).join(','))].join('\r\n');
     // BOM — щоб Excel не з''їв кирилицю: без нього виписка відкривається
     // «крякозябрами», і виглядає це як зіпсовані дані, а не як кодування.

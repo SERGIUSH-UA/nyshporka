@@ -21,7 +21,7 @@ def test_first_takes_it_second_is_refused(tmp_path):
         assert first.held
         with pytest.raises(L.LockBusy) as exc:
             L.WorkspaceLock(tmp_path).acquire()
-        # Повідомлення мусить казати, ХТО тримає й що робити.
+        # Повідомлення мусить казати, хто тримає й що робити.
         msg = str(exc.value)
         assert str(os.getpid()) in msg and "8765" in msg
         assert "Закрийте" in msg or "інший простір" in msg
@@ -65,7 +65,7 @@ def test_started_is_the_process_time_not_the_lock_time(tmp_path):
 
     Перша редакція клала в `started` момент створення `WorkspaceLock`, а звіряла
     його з `create_time()` процесу. Розходження — весь час, що процес прожив до
-    відкриття простору, тож ВЛАСНИЙ замок виглядав чужим і мертвим.
+    відкриття простору, тож власний замок виглядав чужим і мертвим.
 
     Тест ловить це прямо, а не через наслідок: інакше наступний рефакторинг
     поверне ту саму підміну, і впаде вона знову лише в рідкісному сценарії.
@@ -149,7 +149,7 @@ def test_lock_reports_who_holds_it(tmp_path):
 
 
 def test_reacquire_on_a_held_lock_is_a_noop(tmp_path):
-    """🔴 `with WorkspaceLock(...).acquire() as l:` НЕ має відмовляти сам собі.
+    """🔴 `with WorkspaceLock(...).acquire() as l:` не має відмовляти сам собі.
 
     Це найприродніший запис, і `__enter__` у ньому кличе `acquire` вдруге.
     Без ідемпотентності процес знаходив власний щойно створений замок і

@@ -6,7 +6,7 @@ import { esc, el, setView, busy, failure, boxError, busyForm,
   renderWarnings, renderCoverage, curGen, alive } from '../core/view.js';
 import { SCREENS, ACTIONS } from '../core/registry.js';
 import { SECTIONS, NAV_LABEL, show, renderNav,
-  refreshJobs } from '../core/nav.js';
+  refreshJobs, onJob, jobChip } from '../core/nav.js';
 import { ST } from '../core/state.js';
 import { ic, eng } from '/ui/icons.js';
 import { swapHtml, skelRows, skelCards } from '/ui/dom.js';
@@ -34,10 +34,46 @@ SCREENS.search = async () => {
       </select>
       <button type="submit">${t('search.run')}</button>
     </form>
+    <div id="prof-hint"></div>
     <div id="hits"></div>
     <div id="search-index"></div>`);
+  await profileHint();
   if (!only) await searchIndexState();
 };
+
+/**
+ * Написання з профілю — під полем пошуку.
+ *
+ * 🔴 Це та ланка, заради якої профіль узагалі просять заповнити. Доти він був
+ * формою, що нікуди не веде: жодна операція пошуку його не читала, `q`
+ * лишалось обов'язковим, і людина щоразу пригадувала написання сама — саме
+ * там, де рушій калічить середину слова й де пригадати їх найважче.
+ *
+ * ⚠ Поле лише ЗАПОВНЮЄТЬСЯ, а не замикається на профілі. Шукають і сусідів, і
+ * конфузерів, і геть чуже прізвище; підставити прізвище роду назавжди означало
+ * б забрати екран у половини його роботи.
+ */
+async function profileHint() {
+  const box = el('prof-hint');
+  if (!box) return;
+  const env = await callOp('profile.show', {});
+  if (!env.ok) return;
+  const d = env.data || {};
+  const input = el('view').querySelector('input[name="q"]');
+  if (!d.present) {
+    box.innerHTML = `<p class="muted">${t('search.noprofile')}
+      <button class="ctl-sm" data-act="nav" data-arg="profile">${
+      t('step.go')}</button></p>`;
+    return;
+  }
+  if (input && !input.value) input.value = d.display || '';
+  const sp = d.spellings || [];
+  if (!sp.length) return;
+  box.innerHTML = `<p class="muted">${t('search.forms')} (${sp.length}):</p>
+    <div class="prof-forms">${sp.slice(0, 40).map((x) =>
+      `<button class="chip" data-act="search.form" data-arg="${esc(x)}"
+        >${esc(x)}</button>`).join('')}</div>`;
+}
 
 /**
  * Стан індексу прочитаного — ДО пошуку, а не після.
@@ -46,7 +82,7 @@ SCREENS.search = async () => {
  * означає зовсім різне при повному й частковому індексі. Доти людина цього не
  * бачила взагалі: відповідь приходила однакова, а покривала різне.
  *
- * ⚠ Питається лише при пошуку по ВСЬОМУ прочитаному: у межах однієї справи
+ * ⚠ Питається лише при пошуку по всьому прочитаному: у межах однієї справи
  * індекс збирається на місці за секунди, і питання «скільки лишилось» там не
  * стоїть.
  */
@@ -106,6 +142,22 @@ async function sweepJob(q) {
 
 Object.assign(ACTIONS, {
   /**
+   * Клік по написанню — підставити його в поле й шукати одразу.
+   *
+   * ⚠ Саме шукати, а не лише підставити: написань буває тридцять, і перебирати
+   * їх мишею до поля й назад означає тридцять зайвих кліків там, де вся суть у
+   * швидкому переборі.
+   */
+  'search.form': (_ev, elm) => {
+    const input = el('view').querySelector('input[name="q"]');
+    if (!input) return undefined;
+    input.value = elm.dataset.arg;
+    const form = input.closest('form');
+    return form ? ACTIONS['search.run']({ preventDefault() {}, target: form })
+                : undefined;
+  },
+
+  /**
    * Зібрати індекс прочитаного.
    *
    * 🔴 Робота довга (чверть години на великому корпусі) і йде в чергу — туди ж
@@ -113,8 +165,23 @@ Object.assign(ACTIONS, {
    */
   'search.index': async () => {
     const env = await callOp('search.index', {});
-    if (!env.ok) return alert(env.error);
-    return show('jobs');
+    const box = el('hits');
+    if (!env.ok) {
+      if (box) box.innerHTML = `<div class="warn err">${esc(env.error)}</div>`;
+      return undefined;
+    }
+    // Індекс збирається хвилинами; людина в цей час дивиться на свій запит, а
+    // не на чергу. Готовий індекс міняє саме те, що вона бачить, — тож після
+    // завершення видача перечитується сама.
+    const id = (env.data || {}).job_id;
+    if (box) {
+      box.innerHTML = jobChip({ state: 'queued', progress: {} });
+      onJob(id, (j) => {
+        box.innerHTML = jobChip(j);
+        if (j.state === 'done') show('search');
+      });
+    }
+    return undefined;
   },
 
   'search.run': async (ev) => {
@@ -123,7 +190,7 @@ Object.assign(ACTIONS, {
     const seq = ++SEQ.search;
     const unlock = busyForm(ev.target);
     el('hits').innerHTML = `<p class="muted">${t('common.loading')}</p>`;
-    // 🔴 `context: 1` проситься ТУТ, а не добирається потім окремим запитом:
+    // 🔴 `context: 1` проситься тут, а не добирається потім окремим запитом:
     // рядок сам по собі не розрізняє прізвищ зі спільним коренем, бо ім'я
     // стоїть вище, а роль нижче. Разом із вікном приходить читання того самого
     // рядка другим рушієм — те, чого другим запитом не дістати взагалі.
@@ -153,7 +220,7 @@ Object.assign(ACTIONS, {
         ? `<p><button data-act="sift.open">${ic('crop-check', 'ic-sm')}
              ${t('sift.open')}</button></p>` : ''}
       <table><tbody>${hits.map((h) => `<tr>
-        <td class="mono">${esc(h.shifra || h.case || h.key || h.name || '')}</td>
+        <td class="mono">${esc(h.shifra || h.case_key || h.case || '')}</td>
         <td class="mono">${esc(h.page || h.scan || '')}</td>
         <td>${esc(String(h.matched || h.line || h.text || h.surname || '').slice(0, 120))}</td>
         <td class="num">${esc(h.score ?? '')}</td>

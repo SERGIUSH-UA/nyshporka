@@ -1,4 +1,4 @@
-"""🏛 ARCHIUM: розбір каталогу й порядок кадрів — на ЗАПИСАНИХ відповідях.
+"""🏛 ARCHIUM: розбір каталогу й порядок кадрів — на записаних відповідях.
 
 🔴 Чому не живі запити. Тест мережевого джерела, що ходить у мережу, перевіряє
 чужий сервер, а не наш розбір: він червонітиме через профілактику архіву й
@@ -68,7 +68,7 @@ def test_pagination_is_read_from_the_envelope(inventory_view: str) -> None:
 
 
 def test_page_order_comes_from_alt_not_from_image_ids(viewer_html: str) -> None:
-    """🔴 Id кадрів у переглядачі ПЕРЕМІШАНІ — порядок несе `alt`.
+    """🔴 Id кадрів у переглядачі перемішані — порядок несе `alt`.
 
     Взяти кадри в порядку появи в документі (або за зростанням id) означає
     отримати справу, зшиту навмання. Виявиться це аж на читанні, коли записи
@@ -233,7 +233,7 @@ def test_crawl_resumes_instead_of_starting_over(tmp_path: Path,
 
 
 def test_crawl_flattens_titles_so_the_tsv_survives(tmp_path: Path) -> None:
-    """🔴 Табуляція в заголовку розірвала б TSV, і то ТИХО.
+    """🔴 Табуляція в заголовку розірвала б TSV, і то тихо.
 
     Наступний рядок став би «справою» з полями зі зсувом: каталог зіпсувався б
     із середини, а виглядав би цілим.
@@ -244,7 +244,7 @@ def test_crawl_flattens_titles_so_the_tsv_survives(tmp_path: Path) -> None:
 
 def test_manifest_title_comes_from_the_catalog(tmp_path: Path,
                                                viewer_html: str) -> None:
-    """Підтвердження перед качанням гігабайтів мусить казати, ЩО це.
+    """Підтвердження перед качанням гігабайтів мусить казати, що це.
 
     Переглядач заголовка не несе; єдине місце, де він є, — зібраний каталог.
     """
@@ -272,7 +272,7 @@ def test_bundled_snapshot_makes_search_work_on_day_one(tmp_path: Path) -> None:
     готового зрізу вона мусила б спершу години обходити чужий сайт — щоб лише
     дізнатись, чи потрібна справа існує.
     """
-    src = A.ArchiumSource(workspace=tmp_path)      # простір ПОРОЖНІЙ
+    src = A.ArchiumSource(workspace=tmp_path)      # простір порожній
     kind, meta = src.catalog_source()
     assert kind == "bundled", "зріз не доїхав у пакет"
     assert meta["taken"], "зріз без дати — «не знайшлось» не має сенсу"
@@ -285,7 +285,7 @@ def test_bundled_snapshot_makes_search_work_on_day_one(tmp_path: Path) -> None:
 
 
 def test_own_crawl_wins_over_the_bundled_snapshot(tmp_path: Path) -> None:
-    """Зібраний на місці новіший ЗА ПОБУДОВОЮ — вкладений його не перекриває."""
+    """Зібраний на місці новіший за побудовою — вкладений його не перекриває."""
     cat = tmp_path / A.ArchiumSource.CATALOG_REL
     cat.parent.mkdir(parents=True)
     cat.write_text("file_id\tdescription\n1\tсвіжа справа\n", encoding="utf-8")

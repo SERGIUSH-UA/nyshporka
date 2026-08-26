@@ -19,7 +19,7 @@ class MergeError(RuntimeError):
 
 @dataclass(frozen=True)
 class MergeResult:
-    """Що вийшло — і чого НЕ видно."""
+    """Що вийшло — і чого не видно."""
 
     fond_id: str
     out: Path
@@ -54,10 +54,10 @@ class MergeResult:
 def fuse(book: SourceBook, target: Target) -> tuple[dict[Any, dict[str, Any]],
                                                     list[dict[str, str]],
                                                     list[tuple[str, str]]]:
-    """Звести прочитані джерела в рядки реєстру. БЕЗ диска — усе в пам'яті.
+    """Звести прочитані джерела в рядки реєстру. без диска — усе в пам'яті.
 
     ⚠ Порядок кроків тут значущий: каталог звіряє село з назвою файлу скана,
-    тож скани мусять бути зведені ДО нього.
+    тож скани мусять бути зведені до нього.
     """
     reg, conflicts = TT.fuse_text(book)
     TT.fuse_alfavitka(reg, book.rows.get("alfavitka", []))
@@ -75,7 +75,7 @@ def fuse(book: SourceBook, target: Target) -> tuple[dict[Any, dict[str, Any]],
 
 
 def _channels(reg: dict[Any, dict[str, Any]]) -> dict[str, int]:
-    """Черга завантаження. Канали ВЗАЄМОВИКЛЮЧНІ й у порядку швидкості.
+    """Черга завантаження. Канали взаємовиключні й у порядку швидкості.
 
     🔴 Кожна справа рахується рівно в одному — тому, яким її справді візьмуть.
     Інакше сума каналів перевищила б чергу, і «скільки лишилось узяти» стало б
@@ -115,7 +115,7 @@ def merge_fond(target: Target, *, dest: Path, out: Path,
                library: Path | None = None, dry_run: bool = False) -> MergeResult:
     """Звести джерела опису фонду в один реєстр.
 
-    🔴 `target.opys` тут не шанується Й НЕ ІГНОРУЄТЬСЯ МОВЧКИ. Знаменник
+    🔴 `target.opys` тут не шанується Й не ігнорується мовчки. Знаменник
     покриття пофондовий за побудовою, а злиття одного опису лишило б реєстр із
     одним описом — та сама вада, від якої в збирачах стоїть збереження
     незачеплених описів. Тому це помилка з поясненням, а не тиха згода.
@@ -124,7 +124,7 @@ def merge_fond(target: Target, *, dest: Path, out: Path,
 
     if target.opys:
         raise MergeError(
-            "злиття працює по ФОНДУ цілком: знаменник покриття пофондовий, а "
+            "злиття працює по фонду цілком: знаменник покриття пофондовий, а "
             "зведення одного опису лишило б реєстр із одним описом. Приберіть "
             "перелік описів.")
 
@@ -147,12 +147,12 @@ def merge_fond(target: Target, *, dest: Path, out: Path,
         if b.is_lower_estimate:
             blind.append(Blind(
                 kind="lower_estimate", count=1,
-                why=(f"межа опису {opys} — з транскрипції, тобто НИЖНЯ оцінка: "
+                why=(f"межа опису {opys} — з транскрипції, тобто нижня оцінка: "
                      f"покриття по ньому завищене й зростатиме лише вниз")))
     if not book.has_library:
         blind.append(Blind(
             kind="no_library", count=0,
-            why=("бібліотеки справ немає, тож «на диску» порожнє у ВСЬОМУ фонді "
+            why=("бібліотеки справ немає, тож «на диску» порожнє у всьому фонді "
                  "— це не означає, що нічого не завантажено")))
     if unresolved:
         blind.append(Blind(

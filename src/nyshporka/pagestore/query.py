@@ -63,7 +63,7 @@ def _index(path: Path) -> dict[str, Any] | None:
         for s in note.get("places") or []:
             places.append((scan, s, normalize_archival(s)))
     persons = []
-    # 🗺 Місце в АКТІ — окрема вісь пошуку, не підмножина прізвищ. Питання «хто з
+    # 🗺 Місце в акті — окрема вісь пошуку, не підмножина прізвищ. Питання «хто з
     # цього села трапляється в чужих книгах» без неї не ставиться взагалі: формула
     # «мѣстечка Мястковки крестьянинъ» лежить у `place` учасника, а індексувалося
     # досі саме лише прізвище. Місце тримається і на записі (`Record.places` —
@@ -139,7 +139,7 @@ def grep_surnames(q: str, thresh: int = 80, case_key: str | None = None,
 def grep_records(q: str, thresh: int = 80, case_key: str | None = None,
                  role: str | None = None, rtype: str | None = None,
                  place: bool = False, limit: int = 200) -> dict[str, Any]:
-    """Fuzzy по учасниках записів; `place=True` — шукати по МІСЦЮ, а не прізвищу.
+    """Fuzzy по учасниках записів; `place=True` — шукати по місцю, а не прізвищу.
 
     Пошук по місцю відповідає на питання, якого прізвищевий не бере: «які акти
     згадують це поселення» — байдуже, під яким прізвищем. Саме так шукають

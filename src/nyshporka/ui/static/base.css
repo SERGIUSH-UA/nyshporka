@@ -70,11 +70,24 @@ html, body { margin: 0; height: 100%; font: var(--font-size)/var(--line-height) 
   font-size: 11px; font-weight: 800; line-height: 1;
   border: 2px solid currentColor; color: var(--engine, var(--fg-3)); }
 .engine[data-shape="circle"]  { border-radius: 50%; }
-.engine[data-shape="diamond"] { border-radius: 3px; transform: rotate(45deg); }
+/* 🔴 Ромб потребує МІСЦЯ ПІД ПОВОРОТ. Це квадрат, повернутий на 45°, і після
+   повороту його діагональ (сторона × 1.41) виходить за власну коробку на ~21%
+   сторони з кожного боку. Проміжок у ряду рахується по коробках, тож без цієї
+   компенсації 6px проміжку з'їдаються виступом майже повністю: два значки
+   злипаються, а ромб ще й налазить на сусіда — виглядає як склеєна пляма, у
+   якій не видно, що рушіїв два. */
+.engine[data-shape="diamond"] { border-radius: 3px; transform: rotate(45deg);
+  margin-inline: .21em; }
 .engine[data-shape="diamond"] > span { transform: rotate(-45deg); }
 .engine[data-shape="notched"] { border-radius: 3px;
   clip-path: polygon(0 0, 68% 0, 100% 32%, 100% 100%, 0 100%); }
 .engine-row { display: inline-flex; align-items: center; gap: 6px; }
+/* 🔴 Значки бувають і БЕЗ рядка-обгортки: у колонці «рушій» їх склеюють
+   `join('')` просто в потік, тобто `gap` там не діє й два рушії стоять
+   впритул — «ПД» читається як одна склеєна пляма, а не як «прочитано двома».
+   Сусідський селектор лікує саме цей випадок і не чіпає ряд, у якого проміжок
+   уже є. */
+:not(.engine-row) > .engine + .engine { margin-left: 6px; }
 /* 🔴 Два місця, де тон мусить відступити, інакше значок зникає у фоні:
    активний розділ (значок стоїть НА суцільному акценті) і будь-яка кнопка,
    що сама пофарбована в семантичний колір (зелене «зберегти», червоне
@@ -258,9 +271,13 @@ button.on-solid { color: var(--white); }
    обидва малювались червоним однаково, тож «індекс застарів» виглядало так
    само тривожно, як «операція впала», — а це різні речі для того, хто
    вирішує, чи можна довіряти нулю. */
+/* ⚠ Зазор між смугами — не косметика. Конверт віддає їх пачкою (застарілість,
+   кілька застережень, «що далі»), і без відступу вони читаються як один довгий
+   абзац у рамці: око не бачить, де скінчилось одне твердження й почалось інше,
+   а кожне з них — окреме рішення для того, хто вирішує, чи вірити числу. */
 .warn { background: var(--warn-bg); border: 1px solid var(--accent);
   border-left-width: 3px; color: var(--warn-fg); border-radius: var(--r-m);
-  padding: 8px 11px; font-size: 12px; }
+  padding: 8px 11px; font-size: 12px; margin: 8px 0; }
 .warn.err { background: var(--err-bg); border-color: var(--err-line);
   color: var(--err-2); }
 /* 🔴 Порада «→ далі» — не застереження. Вона не про те, що пішло не так, а про
@@ -319,6 +336,39 @@ button.on-solid { color: var(--white); }
    (згортання лишається миттєвим: анімувати його без JS браузер не вміє) */
 details[open] > :not(summary) { animation: view-in var(--dur-2) var(--ease); }
 summary { transition: color var(--dur-1) var(--ease); }
+
+/* ── згортка ────────────────────────────────────────────────────────────────
+   🔴 Нативний `<details>` не має жодного вигляду: рядок тексту з трикутником,
+   який нічим не відрізняється від абзацу поруч. Тобто головне, що він каже, —
+   «тут сховане ще щось, натисни» — доводиться вгадувати. А коли таких рядків
+   двоє поспіль (як на екрані фондів), вони ще й зливаються між собою: не
+   видно, де кінчається один блок і починається другий.
+
+   Тому згортка стає карткою: власна межа відділяє її від сусідів, підкладка
+   заголовка каже, що по ньому клікають, а маркер повертається при розкритті —
+   стан видно, не читаючи вмісту. */
+details { border: 1px solid var(--line-2); border-radius: var(--r-s);
+  background: var(--s-2); margin: .55rem 0; overflow: hidden; }
+details > summary {
+  display: flex; align-items: center; gap: .45rem; cursor: pointer;
+  padding: .45rem .6rem; font-weight: 700; color: var(--fg-2);
+  background: var(--s-3); user-select: none;
+  /* Нативний маркер прибираємо обома способами: `list-style` діє у Firefox,
+     псевдоелемент — у Safari. Свій маркер уміє повертатись, нативний ні. */
+  list-style: none;
+}
+details > summary::-webkit-details-marker { display: none; }
+details > summary::before {
+  content: "›"; flex: 0 0 auto; font-size: 1.1em; line-height: 1;
+  color: var(--fg-4); transition: transform var(--dur-1) var(--ease);
+}
+details[open] > summary::before { transform: rotate(90deg); }
+details > summary:hover { color: var(--fg); background: var(--hover-soft); }
+details > summary:hover::before { color: var(--accent); }
+details[open] > summary { border-bottom: 1px solid var(--line-2); }
+/* Вмісту потрібні власні поля: без них він притискається до межі картки й
+   читається як частина заголовка. */
+details > :not(summary) { padding: .55rem .6rem; }
 .tabs button { transition: background-color var(--dur-1) var(--ease), color var(--dur-1) var(--ease); }
 
 
@@ -567,4 +617,218 @@ button:not(:disabled):active { transform: scale(.97); }
   .lb-hint { display: none; }
   .lb-side { width: 100%; }
   .lb.with-side .lb-next { right: 12px; }
+}
+
+/* ── 📈 Діаграми (`/ui/chart.js`) ────────────────────────────────────────────
+   Спільний шар: фігури малює модуль, доступний обом мордам, тож і стилі мусять
+   бути тут. Лишивши їх у CSS однієї морди, друга дістала б голий SVG.
+
+   🔴 Жодного власного кольору: усе або `currentColor` (лінії успадковують
+   колір тексту блока, у якому стоять), або токен теми. `tokens.css` згенеровано
+   з `brand.yaml`, і відтінок, вписаний сюди руками, розійшовся б із брендом
+   мовчки — а перевірка токенів у CI впала б голосно. */
+
+/* Спарклайн у плитці: колір бере від батька, розмір фіксований у розмітці. */
+.ch-spark { display: block; color: var(--accent); opacity: .8; }
+
+/* ── смуги розрізу ── */
+.ch-bars { display: grid; gap: 3px; }
+.ch-bar {
+  display: grid; grid-template-columns: minmax(6rem, 11rem) 1fr auto;
+  gap: .5rem; align-items: center; font-size: .85rem;
+}
+.ch-bar-l { color: var(--fg-2); overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; }
+.ch-bar.rest .ch-bar-l { color: var(--fg-4); font-style: italic; }
+.ch-bar-t { background: var(--s-4); border-radius: 3px; height: 10px;
+  overflow: hidden; }
+.ch-bar-t > i { display: block; height: 100%; background: var(--accent-fill);
+  border-radius: 3px; }
+.ch-bar.rest .ch-bar-t > i { background: var(--fg-5); }
+.ch-bar-n { color: var(--fg-3); font-variant-numeric: tabular-nums;
+  font-size: .8rem; }
+
+/* ── стекова смуга поступу ── */
+.ch-meter { display: flex; height: 12px; border-radius: 6px; overflow: hidden;
+  background: var(--s-4); }
+.ch-meter > i { display: block; height: 100%; }
+.ch-legend { display: flex; flex-wrap: wrap; gap: .1rem .9rem;
+  margin-top: .35rem; font-size: .82rem; color: var(--fg-3); }
+.ch-key { display: inline-flex; align-items: center; gap: .35rem; }
+.ch-key > i { width: .6rem; height: .6rem; border-radius: 2px; }
+.ch-key b { color: var(--fg-2); font-variant-numeric: tabular-nums; }
+
+/* Тони часток. Іменовані за РОЛЛЮ, а не за кольором: «зроблене» лишається
+   зрозумілим після зміни бренду, «зелене» — ні. */
+.t-done { background: var(--ok); }
+.t-todo { background: var(--accent-fill); }
+.t-wait { background: var(--warn-2, var(--warn)); }
+.t-bad  { background: var(--err); }
+.t-mut  { background: var(--fg-5); }
+
+/* ── сходинки в часі ── */
+/* 🔴 Висота ФІКСОВАНА, а не `auto`. Полотно тягнеться без збереження пропорцій
+   (`preserveAspectRatio="none"`), тож при `height:auto` браузер бере її з
+   viewBox — і на широкому екрані графік із двох точок займав пів сторінки
+   порожнечі. */
+.ch-steps { display: block; width: 100%; height: 9rem; color: var(--accent);
+  overflow: visible; }
+.ch-steps .ch-ax { stroke: var(--line-2); stroke-width: 1; }
+.ch-axis { display: flex; justify-content: space-between; font-size: .75rem;
+  color: var(--fg-4); font-variant-numeric: tabular-nums; }
+/* Стеля шкали — по центру, щоб не сплутати з датою. */
+.ch-axis .ch-top { color: var(--fg-3); }
+
+/* ── стовпчики за десятиліттями ── */
+.ch-cols { display: flex; align-items: flex-end; gap: 2px; height: 5.5rem; }
+.ch-col { flex: 1 1 0; display: flex; flex-direction: column;
+  justify-content: flex-end; align-items: center; height: 100%; min-width: 0; }
+.ch-col > i { display: block; width: 100%; background: var(--accent-fill);
+  border-radius: 2px 2px 0 0; }
+/* Підпис не має розсувати стовпчик: чотиризначний рік ширший за саму колонку,
+   тож він виводиться поверх, по центру, і ряд лишається рівномірним. */
+.ch-col > b { font-size: .68rem; color: var(--fg-4); font-weight: 400;
+  margin-top: 2px; font-variant-numeric: tabular-nums; height: .9rem;
+  overflow: visible; white-space: nowrap; }
+
+@media (max-width: 40rem) {
+  .ch-bar { grid-template-columns: minmax(5rem, 8rem) 1fr auto; }
+  .ch-col > b { display: none; }
+}
+
+/* ── 📂 вибір шляху: гортач тек ───────────────────────────────────────────
+   z-index 850 обраний свідомо, між .toast (99) і .lb (900): попап підказок
+   комбобокса (.cb-pop, 80) фізично не може лягти поверх модалки, а гортач не
+   заступає читалку прогону. Числа сусідів тримати в цьому коментарі — саме він
+   рятує наступного, хто ставитиме сюди ще один шар. */
+/* Пара «поле шляху + кнопка вибору». Поле тягнеться, кнопка ні: шлях довгий за
+   природою, і показувати його в куксі шириною за замовчуванням означає ховати
+   саме той кінець, який відрізняє одну справу від сусідньої. */
+.pf { display: flex; gap: .4rem; flex: 1 1 auto; min-width: 0; }
+.pf > input { flex: 1 1 auto; min-width: 0; }
+.pf > button { flex: 0 0 auto; }
+
+.pp { position: fixed; inset: 0; z-index: 850; background: var(--scrim-2);
+  display: flex; align-items: center; justify-content: center; padding: 2rem 1rem; }
+.pp-box { display: flex; flex-direction: column; width: min(60rem, 100%);
+  height: min(80vh, 44rem); background: var(--s-1); border: 1px solid var(--line-3);
+  border-radius: var(--r-m); box-shadow: var(--sh-2); overflow: hidden; }
+
+/* 🔴 Кнопки гортача одягаються ТУТ, і це не дублювання.
+   Консоль оформлює голі `<button>` селектором `#view button` (app.css), бо
+   малює їх без класів. Але гортач живе в `<body>`, поза `#view`: там те правило
+   не діє, і кнопки виходять системним віджетом ОС — світло-сірим на темному
+   полотні, з білим написом, який на ньому не читається. Рівно та вада, від якої
+   консоль уже застрахована, і рівно тому, що модалка з-під неї вийшла.
+
+   ⚠ `:where(.pp)` — нульова специфічність навмисно: це БАЗА, яку мусить
+   перебивати будь-який клас. Інакше зелена кнопка підтвердження (`.btn-solid`),
+   хлібні крихти й рядки бічної рейки — усі оголошені класами — стали б сірими
+   прямокутниками, бо `.pp button` важить більше за одинарний клас. */
+:where(.pp) button {
+  padding: .4rem .7rem; font: inherit; cursor: pointer;
+  color: var(--fg-2); background: var(--s-4);
+  border: 1px solid var(--line-3); border-radius: var(--r-s);
+}
+:where(.pp) button:hover { color: var(--fg); border-color: var(--line-4); }
+:where(.pp) button:disabled { opacity: .45; cursor: not-allowed; }
+
+.pp-top { display: flex; align-items: center; gap: .4rem; padding: .5rem .6rem;
+  border-bottom: 1px solid var(--line-2); flex: 0 0 auto; }
+.pp-up, .pp-x { flex: 0 0 auto; }
+.pp-crumbs { display: flex; align-items: center; gap: .1rem; overflow-x: auto;
+  flex: 1 1 auto; min-width: 0; scrollbar-width: none; }
+.pp-crumbs::-webkit-scrollbar { display: none; }
+.pp-crumb { flex: 0 0 auto; background: transparent; border: 0; cursor: pointer;
+  color: var(--fg-3); font-size: 13px; padding: 3px 6px; border-radius: var(--r-s); }
+.pp-crumb:hover { color: var(--fg); background: var(--s-3); }
+.pp-crumb.on { color: var(--fg); font-weight: 700; }
+.pp-sep { color: var(--fg-5); flex: 0 0 auto; }
+/* Кнопка не стискається й не переноситься: крихти поруч мають власну
+   прокрутку і зжерли б її до значка, а значок без підпису тут нічого не
+   каже. */
+/* Розділювач між крихтами й кнопкою: крихти прокручуються й обрізаються рівно
+   під нею, і без цієї межі обрізання читається як налізання одного на одне. */
+.pp-native { flex: 0 0 auto; white-space: nowrap; margin-left: .4rem;
+  border-left: 1px solid var(--line-2); padding-left: .6rem; }
+.pp-native.on { border-color: var(--accent); color: var(--accent); }
+.pp-native-off { font-size: 12px; }
+
+.pp-body { display: grid; grid-template-columns: 12rem 1fr; flex: 1 1 auto;
+  min-height: 0; }
+.pp-side { border-right: 1px solid var(--line-2); overflow-y: auto; padding: .4rem; }
+.pp-side-h { font-size: 11px; text-transform: uppercase; letter-spacing: .04em;
+  color: var(--fg-5); padding: .5rem .4rem .2rem; }
+.pp-place { display: block; width: 100%; text-align: left; background: transparent;
+  border: 0; cursor: pointer; color: var(--fg-2); font-size: 13px;
+  padding: 5px 8px; border-radius: var(--r-s); overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
+.pp-place:hover { background: var(--s-3); color: var(--fg); }
+.pp-place.is-workspace, .pp-place.is-case_root { color: var(--accent); }
+.pp-place.is-gone { color: var(--fg-5); }
+
+/* 🔴 `min-height: 0` на КОЖНОМУ рівні вкладеності. Без нього flex-дитина не
+   стискається нижче свого вмісту: список росте на всю висоту записів, коробка
+   перестає тримати межі, і підвал із кнопкою підтвердження лягає ПОВЕРХ
+   рядків. Виглядає це не як розкладка, що поїхала, а як два вікна одночасно. */
+.pp-main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.pp-tools { display: flex; align-items: center; gap: .5rem; padding: .5rem .6rem;
+  border-bottom: 1px solid var(--line); flex: 0 0 auto; }
+.pp-filter { flex: 1 1 auto; min-width: 0; }
+.pp-count { font-size: 12px; color: var(--fg-4); flex: 0 0 auto;
+  font-variant-numeric: tabular-nums; }
+
+.pp-list { flex: 1 1 auto; overflow-y: auto; outline: none; }
+.pp-row { display: flex; align-items: center; gap: .5rem; padding: 7px 10px;
+  border-bottom: 1px solid var(--line); cursor: pointer; font-size: 13px; }
+.pp-row:hover { background: var(--hover-soft); }
+.pp-row.on { background: var(--accent-bg); outline: 1px solid var(--accent-2);
+  outline-offset: -1px; }
+.pp-row.is-picked { background: var(--accent-bg); }
+.pp-row.is-denied { color: var(--fg-5); cursor: not-allowed; }
+.pp-ico, .pp-check { flex: 0 0 auto; }
+.pp-name-t { flex: 0 1 auto; color: var(--fg); overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
+.pp-badge { flex: 0 1 auto; font-size: 12px; color: var(--accent);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pp-meta { margin-left: auto; flex: 0 0 auto; font-size: 12px; color: var(--fg-4);
+  font-variant-numeric: tabular-nums; }
+.pp-empty, .pp-denied { padding: 1rem; color: var(--fg-4); font-size: 13px; }
+.pp-denied { color: var(--warn); }
+.pp-more { display: block; width: 100%; border: 0; border-top: 1px solid var(--line-2);
+  background: var(--s-2); color: var(--fg-3); padding: 7px; cursor: pointer;
+  font-size: 13px; flex: 0 0 auto; }
+.pp-more:hover { background: var(--s-3); color: var(--fg); }
+
+.pp-outside { flex: 0 0 auto; padding: .5rem .7rem; font-size: 12.5px;
+  color: var(--fg-2); background: var(--warn-bg);
+  border-top: 1px solid var(--line-2); }
+.pp-foot { display: flex; align-items: center; gap: .5rem; padding: .6rem;
+  border-top: 1px solid var(--line-2); flex: 0 0 auto; flex-wrap: wrap; }
+.pp-path { flex: 1 1 14rem; min-width: 0; }
+.pp-name { flex: 0 1 14rem; min-width: 0; }
+.pp-sel { font-size: 12px; color: var(--fg-4); }
+.pp-hint { flex: 0 0 auto; padding: .35rem .7rem; font-size: 11.5px;
+  color: var(--fg-5); border-top: 1px solid var(--line); }
+
+/* Накладка чекання системного вікна. Гортач лишається ВИДИМИМ під нею — це і є
+   той видимий вихід, якого не буває, коли системне вікно показують саме по
+   собі: закрити його зі сторінки не можна нічим. */
+.pp-wait { position: absolute; inset: 0; display: flex; align-items: center;
+  justify-content: center; background: var(--scrim-2); padding: 1rem; }
+.pp-wait-box { max-width: 28rem; text-align: center; background: var(--s-2);
+  border: 1px solid var(--line-3); border-radius: var(--r-m); padding: 1.2rem;
+  box-shadow: var(--sh-2); }
+.pp-wait-box p { color: var(--fg-3); font-size: 13px; margin: .5rem 0 1rem; }
+.pp-wait-box button { margin: 0 .25rem; }
+
+@media (max-width: 52rem) {
+  .pp { padding: 0; }
+  .pp-box { width: 100%; height: 100%; border-radius: 0; border: 0; }
+  .pp-body { grid-template-columns: 1fr; }
+  .pp-side { border-right: 0; border-bottom: 1px solid var(--line-2);
+    display: flex; gap: .3rem; overflow-x: auto; max-height: 3rem; }
+  .pp-side-h { display: none; }
+  .pp-place { width: auto; flex: 0 0 auto; }
+  .pp-row { padding: 10px; }
 }

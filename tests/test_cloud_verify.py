@@ -8,7 +8,7 @@
 * знаменники розходяться, коли читали не те, що збирались, — і саме це
   розходження й є діагнозом;
 * порожня тека без знаменника проходить як бездоганно виконана робота;
-* голоси, складені в одну теку, дають нуль знахідок при пошуку БЕЗ помилки.
+* голоси, складені в одну теку, дають нуль знахідок при пошуку без помилки.
 """
 from __future__ import annotations
 
@@ -64,13 +64,13 @@ def test_quarantined_pages_are_not_done(tmp_path: Path) -> None:
         encoding="utf-8")
 
     got = V.verify(out, case_dir=case)
-    assert got.complete is False, "текст є, але сторінка НЕ прочитана"
+    assert got.complete is False, "текст є, але сторінка не прочитана"
     assert got.quarantined == ["0002.jpg"]
     assert "карантині" in got.detail
 
 
 def test_missing_page_is_found_by_name_not_by_count(tmp_path: Path) -> None:
-    """🔴 Звірка ПОКАДРОВА, а не «однаково штук».
+    """🔴 Звірка покадрова, а не «однаково штук».
 
     Три кадри й три тексти — це ще не прочитана справа: тексти можуть бути не
     тих сторінок. Локальному прогону такого не трапляється (тека та сама, прогін
@@ -96,7 +96,7 @@ def test_disagreeing_denominators_are_an_event(tmp_path: Path) -> None:
     out = _out(tmp_path, [f"{i:04d}" for i in range(4)], meta={"frames_total": 4})
     got = V.verify(out, case_dir=case)
     assert got.disagree is True
-    assert got.expected == 10, "беремо БІЛЬШИЙ знаменник"
+    assert got.expected == 10, "беремо більший знаменник"
     assert got.complete is False
     assert "розходяться" in got.detail
 
@@ -119,7 +119,7 @@ def test_voice_branches_must_be_sibling_folders(tmp_path: Path) -> None:
     """🔴 Голоси лягають поруч, а не всередину.
 
     Складені в одну теку, вони перетирають один одного за іменем файла — і
-    пошук потім чесно віддає нуль знахідок БЕЗ жодної помилки.
+    пошук потім чесно віддає нуль знахідок без жодної помилки.
     """
     case = _case(tmp_path, 2)
     out = _out(tmp_path, ["0000", "0001"], meta={"frames_total": 2})
@@ -160,7 +160,7 @@ def test_small_tail_is_cheaper_at_home(tmp_path: Path) -> None:
 
 
 def test_it_mirrors_the_runner_acceptor() -> None:
-    """🔴 Приймач повноти мусить бути ОДИН, хоч і записаний двічі.
+    """🔴 Приймач повноти мусить бути один, хоч і записаний двічі.
 
     Раннер їде під інтерпретатором середовища рушіїв, де пакета немає, тож
     звірка тут — дзеркало його `missing_pages`. Рівність доводить тест, а не

@@ -6,7 +6,7 @@ segmentation.vectorize_lines` кличе по baseline-хітмапі. Хітм�
 з мережі, тобто вже була на карті — і одразу стягується на CPU заради згорток,
 для яких GPU і створений.
 
-Тут та сама математика на torch. Це НЕ «схожий фільтр»: 1D-ядра беруться з
+Тут та сама математика на torch. Це не «схожий фільтр»: 1D-ядра беруться з
 самого scipy (`_gaussian_kernel1d`), послідовність застосування повторює
 `_hessian_matrix_with_gaussian`, тож вихід збігається з точністю до float32.
 Перевірка — `nyshporka.htr.patches.gpu_sato_verify`.
@@ -59,7 +59,7 @@ def _pad_axis(x, r: int, dim: int, mode: str, cval: float):
     саме 'constant', не дефолтний 'reflect' (`kraken/lib/segmentation.py:346`).
     Режими різні по суті, тож підтримуємо обидва:
     - 'constant': доповнення `cval` (у torch — прямий аналог);
-    - 'reflect' scipy = (d c b a | a b c d | d c b a), край ПОВТОРЮЄТЬСЯ.
+    - 'reflect' scipy = (d c b a | a b c d | d c b a), край повторюється.
       У torch такого немає: `F.pad(mode='reflect')` — це scipy 'mirror'
       (край не повторюється), і на ядрі радіусом 71 різниця видна. Тому
       дзеркалимо зрізами вручну, циклом — на випадок радіуса більшого за
@@ -120,7 +120,7 @@ def sato_gpu(image, sigmas=(1, 3), black_ridges: bool = True, device=None,
     out = torch.zeros_like(x)
     for sigma in sigmas:
         s = float(sigma)
-        # truncate береться від ОРИГІНАЛЬНОЇ sigma, а фільтрується масштабованою:
+        # truncate береться від оригінальної sigma, а фільтрується масштабованою:
         # для малих sigma scipy навмисне бере величезний радіус проти аліасингу
         truncate = 8.0 if s > 1 else 100.0
         ss = s / math.sqrt(2.0)
@@ -152,7 +152,7 @@ def install_gpu_sato(sigmas=(1, 3), device=None) -> tuple:
     трьома своїми функціями): патч глобальний на процес, і без збереженого
     імені жоден інший код у цьому ж процесі вже не дістав би справжній
     `skimage.filters.sato` — тихо отримував би GPU-версію. Повторний виклик
-    ідемпотентний і НЕ загортає патч сам у себе.
+    ідемпотентний і не загортає патч сам у себе.
     """
     import importlib.metadata as md
 
@@ -160,7 +160,7 @@ def install_gpu_sato(sigmas=(1, 3), device=None) -> tuple:
 
     # 1D-ядра беруться з приватного `scipy.ndimage._filters._gaussian_kernel1d`,
     # а еквівалентність доведена проти конкретного skimage. Зміна будь-якого з
-    # двох може розійтися ТИХО (інші полігони рядків = інший текст), тому версії
+    # двох може розійтися тихо (інші полігони рядків = інший текст), тому версії
     # звіряються вголос. Звірка: `nyshporka.htr.patches.gpu_sato_verify`
     for pkg, tested in (("scikit-image", TESTED_SKIMAGE), ("scipy", TESTED_SCIPY)):
         try:

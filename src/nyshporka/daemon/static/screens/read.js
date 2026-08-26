@@ -5,10 +5,11 @@ import { callOp } from '../core/net.js';
 import { esc, el, setView, boxError, busyForm,
   renderWarnings, curGen, alive } from '../core/view.js';
 import { SCREENS, ACTIONS } from '../core/registry.js';
-import { show, goto } from '../core/nav.js';
+import { show, goto, onJob, jobChip } from '../core/nav.js';
 import { ST } from '../core/state.js';
 import { ic, eng } from '/ui/icons.js';
 import { attachCombobox } from '/ui/combobox.js';
+import { pathField } from '../core/paths.js';
 
 /** Тека, для якої показана картка. Живе між входами: справа не міняється. */
 let RD = { case_dir: '', script: '', card: null };
@@ -17,10 +18,10 @@ let RD = { case_dir: '', script: '', card: null };
  * 🖋 Читання — єдиний екран, де людина віддає машині ніч.
  *
  * 🔴 Тому все, що можна дізнатись ДО запуску, показується до нього: скільки
- * кадрів, яким письмом і ЗВІДКИ це відомо, чим уже читали й чого бракує.
+ * кадрів, яким письмом і звідки це відомо, чим уже читали й чого бракує.
  * Дізнатись «модель не та» через годину означає втратити ніч.
  *
- * 🔴 Два режими, і межа між ними не в складності, а в ЦІНІ ПОМИЛКИ. Простий
+ * 🔴 Два режими, і межа між ними не в складності, а в ціні помилки. Простий
  * несе те, без чого запускати не можна. «Для досвідчених» — важелі, у яких є
  * зміряне правило користування; ручка без такого правила сюди не потрапляє
  * взагалі.
@@ -37,8 +38,8 @@ SCREENS.read = async () => {
     <h2>${t('nav.read')}</h2>
     <p class="muted">${t('read.why')}</p>
     <form class="row" data-act="read.pick">
-      <input name="case_dir" placeholder="${t('read.dir')}"
-        value="${esc(RD.case_dir)}"${RD.case_dir ? '' : ' autofocus'}>
+      ${pathField({ name: 'case_dir', mode: 'dir', purpose: 'read.case_dir',
+        value: RD.case_dir, ph: t('read.dir'), autofocus: !RD.case_dir })}
       <button type="submit">${t('read.show')}</button>
     </form>
     <div id="card"></div>
@@ -51,7 +52,7 @@ SCREENS.read = async () => {
 /**
  * Підказка тек: справи бібліотеки, які лежать на диску.
  *
- * 🔴 Дошук на СЕРВЕРІ, а не перші двісті рядків у пам'яті. На просторі з
+ * 🔴 Дошук на сервері, а не перші двісті рядків у пам'яті. На просторі з
  * півтори тисячі справ фіксована пачка мовчки ховала більшість: людина
  * набирала назву й бачила «нічого», бо її справа не потрапила в перші двісті.
  *
@@ -109,7 +110,7 @@ async function readCard() {
 }
 
 /**
- * Письмо — трьома РІЗНИМИ станами, ніколи одним.
+ * Письмо — трьома різними станами, ніколи одним.
  *
  * 🔴 Здогад із назви теки й запис у паспорті справи розрізняються надійністю
  * на порядок, а на екрані виглядали б однаково. Помилка тут не дає збою: вона
@@ -134,7 +135,7 @@ function scriptCell(c) {
  * Чим справу вже прочитали — і чого бракує.
  *
  * 🔴 «Прогін є» мовчки читається як «справу прочитано». Для книги з двома
- * письмами це неправда: один рушій закриває лише СВОЄ, і половина сторінок
+ * письмами це неправда: один рушій закриває лише своє, і половина сторінок
  * лишається непрочитаною при зеленому вигляді переліку.
  */
 function coverCell(c) {
@@ -155,7 +156,7 @@ function readForm(c) {
         ${t('read.voice.on')}</label>
       <span class="muted">${t('read.voice.why')}</span>
     </div>
-    <details><summary>▸ ${t('read.expert')}</summary>
+    <details><summary>${t('read.expert')}</summary>
       <div class="row">
         <label class="lbl-mini">${t('read.limit')}
           <input name="limit" size="6" placeholder="0"></label>
@@ -167,6 +168,16 @@ function readForm(c) {
           <input name="device" size="7" placeholder="cuda:0"></label>
         <label class="lbl-mini">${t('read.seg')}
           <input name="seg_height" size="5" placeholder="0"></label>
+      </div>
+      <div class="row">
+        <label class="lbl-mini" for="pf-out_dir">${t('read.outdir')}</label>
+        ${pathField({ name: 'out_dir', mode: 'dir', purpose: 'read.out_dir',
+          ph: t('read.outdir.why') })}
+      </div>
+      <div class="row">
+        <label class="lbl-mini" for="pf-model">${t('read.modelfile')}</label>
+        ${pathField({ name: 'model', mode: 'file', purpose: 'read.model',
+          ph: t('read.modelfile.why') })}
       </div>
       <p class="muted">${t('read.expert.why')}</p>
       ${engines.length
@@ -205,6 +216,11 @@ Object.assign(ACTIONS, {
         workers: Math.max(1, num('workers') || 1),
         seg_height: num('seg_height'),
         device: String(fd.get('device') || ''),
+        // 🔴 Обидва поля мусять доїхати в аргументи. Показане на екрані й не
+        // надіслане — гірше за відсутнє: людина вказала, куди класти текст,
+        // побачила, що вказала, і не отримала цього.
+        out_dir: String(fd.get('out_dir') || ''),
+        model: String(fd.get('model') || ''),
       } };
     el('hits').innerHTML = `<p class="muted">${t('common.loading')}</p>`;
     const env = await callOp('read.plan', RD.args);
@@ -228,7 +244,7 @@ Object.assign(ACTIONS, {
    * Запуск.
    *
    * 🔴 Єдине місце в застосунку, де модальне питання доречне: розбіжність
-   * письма й моделі коштує ГОДИН карти заради правдоподібного сміття, а банер
+   * письма й моделі коштує годин карти заради правдоподібного сміття, а банер
    * на екрані ігнорується — саме тому, що виглядає як решта банерів.
    */
   'read.go': async () => {
@@ -240,8 +256,24 @@ Object.assign(ACTIONS, {
       if (!confirm(why)) return undefined;
     }
     const env = await callOp('read.start', RD.args || { case_dir: RD.case_dir });
-    if (!env.ok) return alert(env.error);
-    return show('jobs');
+    const box = el('read-job') || el('view');
+    if (!env.ok) {
+      if (box) box.insertAdjacentHTML('afterbegin',
+        `<div class="warn err">${esc(env.error)}</div>`);
+      return undefined;
+    }
+    // 🔴 Прогін триває годинами — і саме тому людину не можна викидати з
+    // картки, яку вона щойно налаштувала: повернутись до тих самих параметрів
+    // нічим. Стан пишеться поруч із кнопкою, а перелік робіт лишається для
+    // тих, хто справді пішов дивитись чергу.
+    const id = (env.data || {}).job_id;
+    if (box) {
+      box.insertAdjacentHTML('afterbegin',
+        `<p id="read-job" class="muted">${jobChip({ state: 'queued', progress: {} })}</p>`);
+      const chip = el('read-job');
+      onJob(id, (j) => { if (chip) chip.innerHTML = jobChip(j); });
+    }
+    return undefined;
   },
 
   /** 🖼 Подивитись аркуші перед тим, як віддавати ніч. */

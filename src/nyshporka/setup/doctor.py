@@ -168,7 +168,7 @@ _ENGINE_VENV_NAMES = (".venv_htr", ".venv_kraken")
 def engine_venv() -> Path:
     """Тека середовища рушіїв.
 
-    🔴 Шукається СЕРЕД наявних, а не назначається одна. Збірка цього середовища
+    🔴 Шукається серед наявних, а не назначається одна. Збірка цього середовища
     коштує кількох гігабайтів і довгого встановлення; вимагати другої копії
     лише тому, що тека зветься інакше, — це змусити людину або ставити те саме
     вдруге, або відмовитись від застосунку. Тому: спершу змінна середовища,
@@ -189,7 +189,7 @@ def engine_venv() -> Path:
 
 
 def _engines() -> Check:
-    """Середовище рушіїв — ОКРЕМИЙ інтерпретатор.
+    """Середовище рушіїв — окремий інтерпретатор.
 
     Те, що встановлена сама Нишпорка, про нього не каже нічого: там свій пін
     `kraken==7.0.2` під патчі й свій torch.
@@ -217,19 +217,85 @@ def _models() -> Check:
     return Check("Моделі письма", "ok", ", ".join(sorted(have)))
 
 
-CHECKS = (_python, _workspace, _cloud_sync, _disk, _torch, _engines, _models)
+def _profile() -> Check:
+    """Чи названо, чий рід шукаємо.
+
+    🔴 Рівень `warn`, а не `fail`: на свіжій установці профілю немає ніде — ні
+    `nysh init`, ні майстер його не створюють, шаблону в комплекті теж немає.
+    Червоне тут читалось би як поламка щойно поставленого застосунку.
+
+    🔴 Тут стояло «пошук працює на прізвищі чужого дослідження, яке приїхало зі
+    зразком». Це неправда: зразок конфігу не несе, `q` у пошуку обов'язкове, а
+    дефолтного прізвища в пакеті немає ніде. Фраза лишилась від конвеєра, де рід
+    жив константами в модулях, — і лякала вигаданим ризиком, заразом ховаючи
+    справжній: без профілю всі написання доводиться пригадувати самому, а рушій
+    калічить саме середину слова.
+    """
+    from nyshporka.core.profile import ProfileError, active
+    from nyshporka.core.workspace import WorkspaceError
+
+    try:
+        p = active()
+    except (ProfileError, WorkspaceError) as exc:
+        return Check("Профіль дослідження", "warn", str(exc).splitlines()[0],
+                     "nysh profile init <Прізвище>")
+    return Check("Профіль дослідження", "ok",
+                 f"{p.display or p.name} · написань: {len(p.all_spellings())}")
+
+
+
+def _decode_visible() -> Check:
+    """Чи видно декоди звичайному пошуку по файлах.
+
+    🔴 Простір, розгорнутий усередині git-репо, ховає прочитане від `rg`:
+    `/reports/` і `/data/` стоять у `.gitignore` пакета, а ripgrep його
+    поважає. Пошук Нишпорки це не зачіпає — він ходить по диску, — але людина
+    (і агент) частіше тягнеться до `rg`, і дістає хибний нуль по всій справі,
+    не отримавши жодного натяку, що теку просто не читали.
+    """
+    from nyshporka.core.workspace import WorkspaceError, workspace
+
+    try:
+        root = workspace().root
+    except WorkspaceError:
+        return Check("Декоди видимі для grep", "warn", "простір не визначено")
+    for base in (root, *root.parents):
+        if not (base / ".git").exists():
+            continue
+        ignore = base / ".gitignore"
+        try:
+            text = ignore.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return Check("Декоди видимі для grep", "ok",
+                         f"простір у репозиторії {base.name}, .gitignore нечитний")
+        hidden = [ln.strip() for ln in text.splitlines()
+                  if ln.strip().strip("/") in ("reports", "data")]
+        if hidden:
+            return Check(
+                "Декоди видимі для grep", "warn",
+                f"простір лежить у git-репозиторії {base.name}, а "
+                f"{', '.join(sorted(set(hidden)))} під .gitignore — `rg` туди "
+                f"не зайде й віддасть порожньо",
+                "шукати через `nysh search`, а голим ripgrep — лише з --no-ignore")
+        break
+    return Check("Декоди видимі для grep", "ok", "простір поза git-репозиторієм")
+
+
+CHECKS = (_python, _workspace, _cloud_sync, _disk, _profile, _decode_visible,
+          _torch, _engines, _models)
 
 #: Перевірки, які мають сенс лише при ввімкненій секції. 🔴 Не косметика:
 #: «⚠ рушії не встановлені» на машині того, хто прийшов подивитись каталог
 #: справ, — це порада полагодити те, чого він не ставив і не збирався. Доктор
-#: мусить казати про готовність до ТІЄЇ роботи, яку тут справді роблять.
-SECTION_OF_CHECK = {_torch: "htr", _engines: "htr", _models: "htr"}
+#: мусить казати про готовність до тієї роботи, яку тут справді роблять.
+SECTION_OF_CHECK = {_torch: "htr", _engines: "htr", _models: "htr",
+                    _profile: "research"}
 
 
 def _active_sections() -> frozenset[str] | None:
     """Ввімкнені секції або `None`, якщо простору ще немає.
 
-    `None` означає «не звужувати»: доктора часто гукають ДО `nysh init`, саме
+    `None` означає «не звужувати»: доктора часто гукають до `nysh init`, саме
     щоб дізнатись, чого бракує, — і мовчати там про рушії було б найгіршим
     моментом для мовчання.
     """

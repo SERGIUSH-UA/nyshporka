@@ -29,10 +29,16 @@
 @keyframes paw-search { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
 @media (prefers-reduced-motion: reduce) { .mark.busy { animation: none; } }
 
-/* Лічильник роботи в черзі — сидить на кнопці «Роботи». */
+/* Лічильник роботи в черзі — сидить на кнопці «Роботи».
+   ⚠ Обводка кольором тла, а не самий від'ємний відступ: значок стоїть ПОЗА
+   кнопкою (він іде після неї в розмітці), тож без неї рамка кнопки просвічувала
+   крізь бейдж і той виглядав обрізаним. Підйом угору — щоб він сів на кут, а не
+   перекривав підпис. */
 #jobcount:not(:empty) {
   background: var(--accent-fill); color: var(--accent-ink); border-radius: var(--r-pill);
-  padding: 0 .4rem; font-size: .7rem; margin-left: -.4rem; font-weight: 700;
+  padding: 0 .4rem; font-size: .7rem; font-weight: 700; line-height: 1.4;
+  margin-left: -.6rem; position: relative; top: -.5rem;
+  box-shadow: 0 0 0 2px var(--bg);
 }
 /* Мова й налаштування — праворуч, поряд із перемикачем теми. */
 .lang { margin-left: auto; background: none; border: 0; cursor: pointer;
@@ -41,6 +47,19 @@
 .lang:hover { color: var(--fg); }
 
 main { padding: 1.2rem; max-width: 62rem; margin: 0 auto; }
+/* 🔴 Табличні екрани — на всю ширину. Обмеження вище стоїть заради
+   ТЕКСТУ: довгий рядок на весь монітор читати важче, і саме тому воно
+   лишається для пояснень, форм і порожніх станів. Але реєстр опису має
+   десять колонок, і в 62rem вони або злипаються, або ховаються — тобто
+   обмеження, поставлене заради читабельності, з'їдало саме ті дані,
+   по які на цей екран приходять. */
+/* 🔴 `margin: 0` тут ОБОВ'ЯЗКОВЕ, і саме воно робить роботу, а не `max-width`.
+   `#app` — флекс-колонка, а `main` успадковує `margin: 0 auto` з правила вище.
+   Автополе по ПОПЕРЕЧНІЙ осі флексу скасовує розтягування: замість того щоб
+   зайняти контейнер, елемент стискається до вмісту й центрується. Тобто
+   `max-width: none` знімав стелю, якої й так уже не досягали, а екран лишався
+   вужчим за вікно — і виглядало це як «широкий режим не вмикається». */
+main.wide { max-width: none; margin: 0; }
 h2 { margin: 0 0 1rem; font-size: 1.3rem; }
 
 /* ── Три картки першого запуску — головний екран не-програміста ───────────── */
@@ -58,6 +77,11 @@ h2 { margin: 0 0 1rem; font-size: 1.3rem; }
 /* ── Рядок фільтрів над видачею ─────────────────────────────────────────── */
 .row { display: flex; gap: .5rem; flex-wrap: wrap; margin-bottom: 1rem; }
 .row input, .row select { flex: 1 1 14rem; }
+/* Пара «поле + кнопка вибору» рахується за одне поле: інакше вона лишається
+   завширшки з підказку, і шлях у ній обрізається на другому слові. */
+.row .pf { flex: 1 1 14rem; }
+.row .pf input { flex: 1 1 auto; }
+.row .lbl-mini { align-self: center; flex: 0 0 auto; }
 
 /* ── Таблиця видачі ─────────────────────────────────────────────────────────
    Своя, а не спільна: у консолі таблиці різні на кожній вкладці, і зведення їх
@@ -312,3 +336,191 @@ td.acts { white-space: nowrap; text-align: right; }
 .run-group td { color: var(--fg-2); }
 .run-group td.mono { color: var(--fg-3); }
 .run-group th { font-size: .8rem; }
+
+/* 🔴 Картка плану замість дампу відповіді. Тут стояв `JSON.stringify` — і
+   людина, яка терміналом не користується (а браузер саме для неї), читала
+   `"requests": null` замість «скільки це коштуватиме». */
+.plan-card { border: 1px solid var(--line-2); border-radius: var(--r-m);
+  padding: .7rem .9rem; margin: 8px 0; display: grid; gap: 4px; }
+.plan-card .ok-line { color: var(--ok-fg, var(--fg)); font-weight: 600; }
+
+/* ── 🐾 Дашборд головної ─────────────────────────────────────────────────────
+   Розкладка, а не примітиви: самі фігури живуть у спільному шарі (`base.css`,
+   блок «Діаграми»), тут — тільки те, як вони складені в екран цієї морди. */
+
+/* Шапка: де я, наскільки свіжий зріз, хто востаннє щось міняв. */
+.dash-head { display: flex; flex-wrap: wrap; align-items: baseline;
+  gap: .3rem .9rem; margin: -.4rem 0 1rem; font-size: .84rem;
+  color: var(--fg-3); }
+.dash-head .ws { color: var(--fg-2); font-weight: 600; font-size: .95rem; }
+
+/* Плитки-показники. `auto-fit` без максимуму: на вузькому екрані вони мусять
+   складатись у стовпчик самі, бо перелік плиток залежить від увімкнених
+   секцій і фіксована сітка лишала б діри. */
+.tiles { display: grid; gap: .6rem; margin-bottom: 1.4rem;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); }
+.tile {
+  display: flex; flex-direction: column; gap: .1rem; text-align: left;
+  padding: .7rem .8rem; border: 1px solid var(--line-2);
+  border-radius: var(--r-m); background: var(--s-1); color: inherit;
+  font: inherit; cursor: pointer; min-width: 0;
+  transition: border-color var(--dur-1) var(--ease);
+}
+.tile:hover { border-color: var(--accent); }
+/* Плитка без входу: те саме число, але без обіцянки кліку. */
+.tile.flat { cursor: default; }
+.tile.flat:hover { border-color: var(--line-2); }
+.tile-k { font-size: .78rem; color: var(--fg-3); display: flex;
+  align-items: center; gap: .3rem; }
+.tile-n { font-size: 1.45rem; font-weight: 600; line-height: 1.15;
+  font-variant-numeric: tabular-nums; }
+/* Дрібне число під головним — те, з чого воно складається. Знаменник поруч із
+   чисельником, а не в підказці: «195 706» без «із 287 376» читається як
+   готова робота. */
+.tile-of { font-size: .78rem; color: var(--fg-4); }
+.tile-foot { display: flex; align-items: flex-end; justify-content: space-between;
+  gap: .4rem; margin-top: .3rem; min-height: 24px; }
+/* Приріст за вікно. Кольору НЕМАЄ навмисно: у цьому застосунку зростання не
+   завжди добре (кандидатів, що чекають ока, більшає теж), і фарбувати «+» у
+   зелене означало б хвалити чергу роботи. */
+.tile-d { font-size: .76rem; color: var(--fg-3); white-space: nowrap;
+  font-variant-numeric: tabular-nums; }
+
+/* Секція дашборда. */
+.dash-sec { margin: 0 0 1.5rem; }
+.dash-sec > h3 { margin: 0 0 .5rem; font-size: .95rem; font-weight: 600;
+  display: flex; align-items: center; gap: .4rem; }
+.dash-sec > h3 .ic { vertical-align: -.15em; }
+.dash-sec > h3 .aside { margin-left: auto; font-weight: 400; font-size: .8rem;
+  color: var(--fg-4); }
+.dash-box { padding: .75rem .9rem; border: 1px solid var(--line-2);
+  border-radius: var(--r-m); background: var(--s-1); }
+/* 🔴 Стеля лишається ТІЛЬКИ на прозі. Дашборд іде на всю ширину заради сіток і
+   діаграм, а пояснення під графіком — це звичайний текст, і рядок на півтора
+   монітора читати рівно так само важко, як і на будь-якому іншому екрані. Тобто
+   знімається не обмеження взагалі, а обмеження там, де воно нічого не берегло. */
+.dash-box p { max-width: 62rem; }
+/* Дві колонки там, де є місце: розрізи (архіви/повіти, типи фактів/прізвища)
+   читаються парами, і в один стовпець екран стає вдвічі довшим без користі. */
+.dash-two { display: grid; gap: .9rem;
+  grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr)); }
+.dash-two > div { min-width: 0; }
+.dash-two h4 { margin: 0 0 .4rem; font-size: .82rem; font-weight: 600;
+  color: var(--fg-3); }
+/* Розрізи під рядком чисел мусять від нього відступити: інакше підпис колонки
+   читається як продовження показника над ним. */
+.dash-nums + .dash-two,
+.dash-nums + .ch-cols,
+.dash-two + .dash-two,
+.dash-box > div + div { margin-top: .8rem; }
+
+/* Рядок «показник: число» у коробці. */
+.dash-nums { display: flex; flex-wrap: wrap; gap: .2rem 1.2rem;
+  font-size: .85rem; color: var(--fg-3); }
+.dash-nums span b { color: var(--fg); font-variant-numeric: tabular-nums; }
+/* Число, яке щось означає ЛИШЕ як тривога (факти без цитати, нічиї прогони). */
+.dash-nums span.flag b { color: var(--warn-fg); }
+
+/* Перемикач метрики над графіком часу.
+
+   🔴 Селектор під `#view` навмисно. Вище в цьому файлі стоїть `#view button`,
+   і ідентифікатор перебиває будь-який клас — тобто ні `.seg > button.on` зі
+   спільного шару, ні власне `.dash-pick button.on` без `#view` сюди не
+   дістаються. Мовчки: клас на кнопці є, вигляд не міняється, і виглядає це як
+   «перемикач не працює». Заливка та сама, що в головної дії форми
+   (`#view button[type=submit]`) — активний стан у цій морді має один вигляд. */
+.dash-pick { display: flex; flex-wrap: wrap; gap: .35rem; margin-bottom: .7rem; }
+#view .dash-pick button { padding: .3rem .7rem; font-size: .82rem; }
+#view .dash-pick button.on {
+  background: var(--accent-fill); color: var(--accent-ink);
+  border-color: var(--accent-fill); font-weight: 700;
+}
+
+/* Ряд швидких дій під дашбордом — ті самі двері, що на порожньому просторі,
+   але згорнуті: людині з наповненим простором вони потрібні зрідка. */
+.dash-doors { display: flex; flex-wrap: wrap; gap: .5rem; }
+.dash-doors button { font-size: .85rem; }
+
+/* ── 🏛 Реєстр опису ─────────────────────────────────────────────────────────
+   Шапка: пікер фонду ліворуч, дія зведення праворуч. Зведення фонду йде
+   ОКРЕМИМ рядком під ними — сім чисел у той самий ряд не влазять на ноутбуці,
+   а переносити їх по одному означає розсипати рядок на стовпчик. */
+.fond-head { align-items: center; margin-bottom: .4rem; }
+/* Пікер завширшки зі свій підпис, а не на весь рядок: спільний
+   `.row input` тягне `flex: 1 1 14rem`, і поле розпихало кнопку
+   на протилежний край екрана. */
+.fond-head #fd-pick { flex: 0 1 26rem; }
+.fond-head button { margin-left: auto; }
+#fd-sum { margin: 0 0 .6rem; }
+#fd-sum b { color: var(--fg); }
+
+/* Покриття по описах — вузька таблиця: у ній шість числових колонок і жодного
+   тексту, тож на всю ширину вона перетворюється на розтягнуті пробіли. */
+table.cov { max-width: 44rem; margin: .4rem 0; }
+
+/* 🔴 Обрізане дзеркало фарбується, бо це не деталь, а вирок каналу: качати
+   звідти означає змарнувати ніч і дістати неповну справу. */
+.cut { color: var(--ic-red); }
+/* Розходження реєстру з бібліотекою — акцентом, не тривогою: дані на місці,
+   просто колонка TSV застаріла. */
+.mism { color: var(--accent); }
+
+/* 🔴 Широка таблиця гортається ВБІК, а не ховає колонки за краєм екрана.
+   Реєстр опису має дев'ять колонок; на ноутбуці останні дві просто зникали —
+   і «розбіжності» з «діями» ставали невидимими, тобто рядок знову виглядав
+   тупиком, як до появи кнопок. */
+.tbl-wide { overflow-x: auto; }
+.tbl-wide table { min-width: 56rem; }
+
+/* Картка справи розгортається ПІД рядком таблиці. */
+.card-row > td { background: var(--s-2); }
+.case-card { padding: .6rem .2rem; }
+table.kv { width: auto; }
+table.kv th { text-align: left; font-weight: 600; color: var(--fg-3);
+  white-space: nowrap; padding-right: 1rem; vertical-align: top; }
+table.kv td { word-break: break-word; }
+
+/* ── Шапка ───────────────────────────────────────────────────────────────────
+   🔴 Спільний шар ставить `.tabs { margin-left: auto }`, і разом із таким самим
+   правилом на `.lang` це давало ТРИ купки з двома дірами між ними: назва
+   ліворуч, вкладки десь посередині, значки праворуч. На вузькому вікні цього
+   не видно, на широкому шапка розпадається.
+
+   Тут вкладки стають одразу за назвою — читається як один рядок, — а вправо
+   відходить лише керування (мова, налаштування, тема). Правило живе в css
+   МОРДИ, а не в спільному: у консолі дослідника шапка інша, і перефарбувати її
+   заразом означало б зламати те, чого ніхто не просив. */
+header .tabs { margin-left: .8rem; }
+header .lang { margin-left: 0; }
+header .lang:first-of-type { margin-left: auto; }
+
+/* ── Чекліст першої сесії ──────────────────────────────────────────────────
+   Рядок кроку — сітка, а не таблиця: підпис «чому» під назвою мусить займати
+   всю ширину, а кнопка триматись правого краю незалежно від довжини тексту. */
+.steps .dash-box { padding: .3rem .9rem; }
+.step { display: grid; gap: .2rem .7rem; align-items: baseline;
+  grid-template-columns: 1.2rem 1fr auto auto;
+  padding: .55rem 0; border-bottom: 1px solid var(--line); }
+.step:last-child { border-bottom: 0; }
+.step-t { font-size: .9rem; }
+.step-t .muted { font-size: .8rem; }
+.step-n { font-variant-numeric: tabular-nums; white-space: nowrap;
+  font-size: .82rem; }
+/* Зроблений крок притухає: він лишається видимим (щоб було зрозуміло, скільки
+   всього), але не змагається за увагу з тим, що ще треба зробити. */
+.step.on .step-t { color: var(--fg-3); }
+.step.on .step-t .muted { display: none; }
+
+@media (max-width: 40rem) {
+  .step { grid-template-columns: 1.2rem 1fr; }
+  .step-n, .step > *:last-child { grid-column: 2; }
+}
+
+/* Написання роду: щільна стрічка фішок. Кожна — кнопка, бо клік по ній шукає. */
+.prof-forms { display: flex; flex-wrap: wrap; gap: .3rem; margin: .3rem 0 .8rem; }
+.prof-forms .chip { font-size: .8rem; }
+#view .prof-forms button.chip { padding: .15rem .5rem; font-weight: 400;
+  background: var(--s-3); border: 1px solid var(--line-2); }
+#view .prof-forms button.chip:hover { border-color: var(--accent);
+  color: var(--accent); }
+#view textarea[name="text"] { width: 100%; font-size: 13px; }

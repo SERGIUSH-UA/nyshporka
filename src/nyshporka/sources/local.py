@@ -10,7 +10,7 @@
     тека з зображеннями   → справа як є
     один PDF              → справа, сторінки якої треба відрендерити
     тека з PDF            → одна справа, зібрана з кількох файлів підряд
-    тека з підтеками      → МАСИВ справ (архів віддає так цілий фонд)
+    тека з підтеками      → масив справ (архів віддає так цілий фонд)
 
 🔴 Остання форма — та, на якій найлегше помилитись. Тека, всередині якої лежать
 теки-справи, виглядає як порожня справа: зображень у ній немає. Прийняти її за
@@ -209,7 +209,16 @@ class LocalSource:
         shape = inspect(ref)
         if not shape.usable:
             raise SourceError(shape.explain())
-        frames = shape.images or shape.pages or shape.pdfs
+        # 🔴 `shape.pages is None` означає «PDF є, а читача сторінок немає».
+        # Падати з нього на `shape.pdfs` — підставляти число файлів замість
+        # числа сторінок: знаменник виходив у сотні разів меншим за наявне
+        # й мовчки доводив «повноту» на першому ж кадрі.
+        if shape.images:
+            frames: int | None = shape.images
+        elif shape.pages is not None:
+            frames = shape.pages
+        else:
+            frames = None
         total = 0
         try:
             total = sum(p.stat().st_size for p in shape.path.iterdir() if p.is_file())

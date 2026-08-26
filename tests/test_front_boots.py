@@ -1,4 +1,4 @@
-"""🖥 Фронт не просто розбирається — він ВИКОНУЄТЬСЯ.
+"""🖥 Фронт не просто розбирається — він виконується.
 
 Решта приймачів читає модулі як текст: чи є кнопка, чи є до неї дія, чи є
 переклад. Усе це вони бачать і в коді, який у браузері не запуститься жодного
@@ -91,10 +91,12 @@ globalThis.CSS = { escape: (s) => String(s) };
 globalThis.matchMedia = () => ({ matches: false, addEventListener() {},
   addListener() {} });
 globalThis.FormData = class { get() { return 'data/raw/зразок'; } };
+globalThis.__EMPTY_SPACE = false;
+globalThis.__NO_PROFILE = false;
 const FRAMES = [{ id: 'a.jpg', label: 'a.jpg', kind: 'image' },
                 { id: 'b.jpg', label: 'b.jpg', kind: 'image' }];
 globalThis.fetch = async (url) => {
-  // 🔴 Довге очікування черги мусить ВИСІТИ, як на справжньому сервері. Якщо
+  // 🔴 Довге очікування черги мусить висіти, як на справжньому сервері. Якщо
   // відповідати миттєво, вічний цикл спостерігача перетворюється на щільний
   // потік мікрозадач: макрозадачі (таймери) не отримують ходу взагалі, і
   // прогін зависає — виглядаючи як поламаний приймач, а не як зайнятий фронт.
@@ -118,14 +120,26 @@ globalThis.fetch = async (url) => {
                     page_size: 50, pages: 1,
                     counts: { unfiled: 1, bundle: 0, case: 3 } },
     'fond.list': { fonds: [{ id: 'a_1', label: 'А ф.1', repo: 'A', fond: '1',
-                             rows: 9, on_disk: 1, todo: 2, scans: 3 }],
+                             rows: 9, on_disk: 1, todo: 2, scans: 3,
+                             schema: 'merged_v2',
+                             summary: { rows: 9, commons: 3, on_disk_live: 1,
+                                        todo: 2, truncated: 1, interp: 4,
+                                        with_surnames: 7 } }],
                    shown: 1 },
     'fond.rows': { fond: 'А ф.1', fond_id: 'a_1', matched: 1, total: 1,
                    shown: 1, page: 0, page_size: 50, pages: 1,
-                   summary: { rows: 9 },
+                   schema: 'merged_v2',
+                   summary: { rows: 9, commons: 3, on_disk_live: 1, todo: 2,
+                              truncated: 1, interp: 4, with_surnames: 7 },
+                   facets: { opys: [{ code: '1', n: 9 }],
+                             uezd: [{ code: 'Балтський', n: 4 }] },
+                   surnames: ['Шевченко'],
+                   coverage: null,
                    rows: [{ shifra: '1-1-2', spr: '2', key: 'A/1/2',
                             title: 'книга', state: 'todo', on_disk: '',
-                            takeable: true }] },
+                            takeable: true, commons_url: 'https://c/2',
+                            commons_size: '78643200', commons_pages: '200',
+                            dv_no: null, num_src: 'interp' }] },
     'registry.collectors': { collectors: [{ id: 'archium', label: 'ARCHIUM' }] },
     'sources.list': { sources: [
         { id: 'archium', label: 'ARCHIUM', caps: ['search', 'browse', 'fetch'],
@@ -148,6 +162,79 @@ globalThis.fetch = async (url) => {
                        engines: [{ id: 'pysar', label: 'Писар', note: '' }],
                        runs: [], covered: {}, gaps: [] },
     'search.state': { runs: 2, indexed: 1, stale: 1, bytes: 1024, dir: 'd' },
+    // 🔴 Два стани одного екрана, як і в домівки: профіль є / профілю немає.
+    // Перемикач той самий — глобальний прапорець у заглушці.
+    'profile.show': globalThis.__NO_PROFILE ? {
+      present: false, why: 'профіль дослідження не задано',
+      path: 'C:/простір/config/research_profile.yaml', available: [], source: '',
+      paradigms: [{ id: 'adj_skyi', label: 'на -ський', verified: true },
+                  { id: 'noun_ov', label: 'на -ов', verified: false }],
+      orthographies: ['bank', 'ru_modern', 'ru_prereform', 'uk', 'pl'],
+    } : {
+      present: true, name: 'rid', display: 'Вишневецький', paradigm: 'adj_skyi',
+      stems: { uk: 'Вишневец', pl: 'Wiszniowiec' },
+      roots: ['вишневец'], substrings: ['ишневец'],
+      spellings: ['Вишневецький', 'Вишневецького', 'Wiszniowiecki'],
+      forms: { uk: { nom_m: 'Вишневецький' } },
+      selftest_mode: 'strict',
+      path: 'C:/простір/config/research_profile.yaml',
+      available: [{ name: 'rid', display: 'Вишневецький', active: true }],
+      source: 'fallback: rid\nprofiles:\n  rid: {}\n',
+      paradigms: [{ id: 'adj_skyi', label: 'на -ський', verified: true }],
+      orthographies: ['bank', 'ru_modern', 'ru_prereform', 'uk', 'pl'],
+    },
+    'profile.set': { name: 'rid', path: 'C:/простір/config/research_profile.yaml',
+                     mode: 'created', present: true, display: 'Вишневецький',
+                     stems: {}, roots: [], substrings: [], spellings: [],
+                     paradigm: 'adj_skyi' },
+    'profile.source': { written: false, path: 'C:/простір', exists: true, text: '' },
+    // 🔴 Домівка має два стани під одним іменем, і перемикає їх саме це поле:
+    // порожній простір мусить показати три двері, наповнений — дашборд. Один
+    // зріз на обидва випадки перевіряв би рівно половину екрана.
+    'home.pulse': globalThis.__EMPTY_SPACE ? {
+      workspace: { root: 'C:/простір', name: 'простір' },
+      sections: { active: ['core'], preset: 'catalog' },
+      pulse: { seq: 0, at: '', by: '' },
+      registry: { built: false }, canon: { present: false, why: 'канону немає' },
+      profile: { present: false }, reading: null, search: null, eye: null,
+      jobs: { queue: false }, history: [],
+    } : {
+      workspace: { root: 'C:/простір', name: 'простір' },
+      sections: { active: ['core', 'htr', 'research'], preset: 'researcher' },
+      pulse: { seq: 7, at: '2026-08-26T14:44:53', by: 'cases.build' },
+      registry: { built: true, at: '2026-08-25T16:20:43', cases: 12,
+                  frames: 900, ordered: 1, htr_none: 4, htr_frames_left: 300,
+                  htr_pages: 600, fuzzy_none: 5, fuzzy_hits_open: 8,
+                  eye_cases: 3, eye_pages: 40, eye_pages_full: 9,
+                  by_repo: [{ repo: 'ДАХмО', n: 7, frames: 700, no_htr: 2 }],
+                  by_uezd: [{ uezd: 'Балтський', n: 5, frames: 400, no_htr: 1 }] },
+      canon: { present: true, persons: 30, families: 8, sources: 12, places: 4,
+               facts: 90, citations: 70, media: 2, facts_uncited: 6,
+               persons_no_dates: 3, sources_uncited: 1,
+               facts_by_type: [{ code: 'birth', n: 50 }, { code: 'death', n: 40 }],
+               facts_by_decade: [{ decade: 1800, n: 20 }, { decade: 1810, n: 70 }],
+               top_surnames: [{ code: 'Вишневецький', n: 21 }],
+               coverage: { year_min: 1750, year_max: 1935,
+                           by_status: [{ code: 'decoded', label: 'Прочитано', n: 9 }],
+                           by_record_type: [{ code: 'birth', label: 'Народження', n: 7 }] } },
+      profile: { present: true, name: 'd', display: 'Вишневецький',
+                 roots: ['вишневец'], spellings: 12 },
+      reading: { ok: true, runs: 6, pages: 600, orphans: 1, sec_median: 12.5,
+                 by_engine: [{ code: 'pysar', n: 5 }],
+                 by_model: [{ code: 'pysar_cyr_v17.pt', n: 5 }],
+                 last: [{ name: 'прогін', shifra: 'А 1-1-2', pages: 3,
+                          model: 'pysar_cyr_v17.pt', updated: '2026-08-25T10:00:00' }] },
+      search: { ok: true, runs: 6, indexed: 5, stale: 1 },
+      eye: { built: true, pages: 40, pages_full: 9, files: 3, records: 11,
+             by_status: { full: 9, partial: 31 }, cases: 3, in_registry: 38,
+             hits_open: 8, no_fuzzy: 5 },
+      jobs: { queue: true, running: 1, total: 4, failed: 0, last: [] },
+      history: [
+        { at: '2026-06-01T12:00:00', src: 'backfill', htr_pages: 100, cases: 4 },
+        { at: '2026-07-01T12:00:00', src: 'backfill', htr_pages: 300, cases: 8 },
+        { at: '2026-08-26T14:44:53', src: 'live', htr_pages: 600, cases: 12 },
+      ],
+    },
   }[name] || {};
   if (String(url).endsWith('/api/sections')) {
     return { ok: true, status: 200, json: async () => ({ ok: true, v: 1,
@@ -181,7 +268,7 @@ if (boxes.length) {
   out.libShapes = (boxes[0].querySelector('.lb-ov').children || []).length;
 }
 
-// ── жест: тягнути аркуш НЕ означає зачинити ────────────────────────────────
+// ── жест: тягнути аркуш не означає зачинити ────────────────────────────────
 if (boxes.length) {
   const lb = boxes[0];
   const canvas = lb.querySelector('.lb-canvas');
@@ -201,7 +288,7 @@ if (boxes.length) {
   lb.fire('click', { target: canvas });
   out.closedByClick = lb.removed;
 
-  // 3. Клік, що почався НА аркуші й доїхав до тла, — це теж перетягування.
+  // 3. Клік, що почався на аркуші й доїхав до тла, — це теж перетягування.
   const img = lb.querySelector('.lb-img');
   lb.removed = false;
   canvas.fire('pointerdown', { ...press(img), target: img });
@@ -210,7 +297,7 @@ if (boxes.length) {
   out.closedFromImage = lb.removed;
 }
 
-// ── читалка прогону: знімок РАЗОМ із прочитаним ────────────────────────────
+// ── читалка прогону: знімок разом із прочитаним ────────────────────────────
 await import('./screens/view.js');
 const { ST } = await import('./core/state.js');
 ST.view = { run: 'прогін', page: '', line: null };
@@ -226,15 +313,19 @@ if (reader.length) {
   out.shapes = (ovNode.children || []).length;
 }
 
-// ── три перероблені екрани мусять НАМАЛЮВАТИСЬ, а не лише зареєструватись ──
+// ── екрани мусять намалюватись, а не лише зареєструватись ──────────────────
 // 🔴 Модуль, який завантажився, і екран, який щось показав, — різні речі. Саме
 // між ними живе клас вад «кнопка є, натискається, нічого не відбувається».
+// `settings` тут тому, що він рівно так і зламався: присвоєння в імпортоване
+// зв'язування (`SECTIONS = env.data`) синтаксично бездоганне, статичні
+// перевірки його не бачать, і падає воно лише коли екран справді малюють.
 ST.read = { case_dir: 'data/raw/зразок' };
-for (const name of ['cases', 'fonds', 'sources', 'read', 'search']) {
+for (const name of ['cases', 'fonds', 'sources', 'read', 'search', 'settings',
+                    'profile']) {
   await SCREENS[name]();
   await new Promise((r) => setTimeout(r, 30));
   const view = document.getElementById('view');
-  // 🔴 Разом із тим, що екрани домальовують у власні контейнери ПІСЛЯ запиту.
+  // 🔴 Разом із тим, що екрани домальовують у власні контейнери після запиту.
   // Заглушка тримає їх окремими вузлами, і дивитись лише на `#view` означало б
   // перевіряти каркас, а не відповідь.
   const html = (view.innerHTML || '')
@@ -242,21 +333,73 @@ for (const name of ['cases', 'fonds', 'sources', 'read', 'search']) {
     + (document.getElementById('search-index').innerHTML || '')
     + (document.getElementById('hits').innerHTML || '');
   out[`drew_${name}`] = html.length;
-  // Знаменник приймальні: число описаних справ мусить бути ВИДНИМ, інакше
+  // Знаменник приймальні: число описаних справ мусить бути видним, інакше
   // «192 теки» читаються як увесь простір.
   if (name === 'cases') out.intakeHasLibraryLink = html.includes('data-arg="library"');
-  // Опис мусить показати ПЕРЕЛІК фондів, а не саму лише форму пошуку.
-  if (name === 'fonds') out.fondsListsFonds = html.includes('data-act="fond.open"');
-  // Каталоги мусять назвати, на чому шукали, ДО будь-якого запиту.
+  // Опис мусить назвати фонд і його обсяг до будь-якого запиту. Раніше
+  // ознакою була кнопка в таблиці фондів; тепер фонд обирають пікером, і
+  // видимою частиною є його підпис — «А ф.1 — 9 справ».
+  if (name === 'fonds') {
+    out.fondsListsFonds = html.includes('id="fd-pick"') && html.includes('9 справ');
+    // Зведення фонду — сім чисел, кожне з яких є рішенням.
+    out.fondsShowsSummary = html.includes('зі сканом') && html.includes('обрізано');
+  }
+  // Каталоги мусять назвати, на чому шукали, до будь-якого запиту.
   if (name === 'sources') out.sourcesShowBasis = html.includes('nysh crawl x');
-  // Картка справи мусить назвати ПРИЧИНУ письма, а не саме лише письмо.
+  // Картка справи мусить назвати причину письма, а не саме лише письмо.
   if (name === 'read') out.readShowsWhy = html.includes('опису справи');
-  // Пошук мусить сказати, скільки прогонів поза індексом, ДО запиту.
+  // Пошук мусить сказати, скільки прогонів поза індексом, до запиту.
   if (name === 'search') out.searchShowsIndex = html.includes('data-act="search.index"');
 }
 
+// ── «Рід»: форма є в обох станах ───────────────────────────────────────────
+// 🔴 Доти профіль можна було завести лише командою в терміналі, а вікно про
+// нього тільки попереджало. Приймач тут — саме наявність ФОРМИ у стані «профілю
+// немає»: попередження без неї це знову глухий кут.
+out.profileHasForm = (document.getElementById('view').innerHTML || '')
+  .includes('data-act="prof.save"');
+globalThis.__NO_PROFILE = true;
+await SCREENS.profile();
+await new Promise((r) => setTimeout(r, 30));
+const noProf = document.getElementById('view').innerHTML || '';
+out.profileEmptyForm = noProf.includes('data-act="prof.save"');
+out.profileEmptySource = noProf.includes('data-act="prof.source"');
+globalThis.__NO_PROFILE = false;
+
+// ── домівка: два стани одного екрана ───────────────────────────────────────
+// 🔴 Наповнений простір не має бачити «З чого почнемо», а порожній — плитки з
+// прочерками. Обидва зрізи малюються тим самим модулем, тож помилка тут — це
+// не косметика: людині з тисячею справ головна показувала б онбординг.
+async function drawHome() {
+  await SCREENS.home();
+  await new Promise((r) => setTimeout(r, 30));
+  return document.getElementById('view').innerHTML || '';
+}
+const full = await drawHome();
+out.homeFullTiles = full.includes('class="tile"');
+out.homeFullChart = full.includes('ch-steps') || full.includes('ch-bars');
+out.homeFullCanon = full.includes('Факти за типом');
+out.homeFullDoors = full.includes('data-act="home.scans"');
+
+// Перемикач метрики міняє тільки коробку графіка: застереження конверта на
+// екрані лишаються, бо серед них буває «зріз застарів» із кнопкою перезбірки.
+if (ACTIONS['home.metric']) {
+  await ACTIONS['home.metric'](null, { dataset: { arg: 'cases' } });
+  out.metricKeptScreen = (document.getElementById('view').innerHTML || '')
+    .includes('class="tile"');
+  out.metricSwapped = (document.getElementById('dash-time').innerHTML || '')
+    .includes('aria-pressed="true"');
+}
+
+globalThis.__EMPTY_SPACE = true;
+const empty = await drawHome();
+out.emptyDoors = empty.includes('data-act="home.scans"');
+out.emptyNoTiles = !empty.includes('class="tile"');
+globalThis.__EMPTY_SPACE = false;
+globalThis.__NO_PROFILE = false;
+
 console.log('@@' + JSON.stringify(out));
-// 🔴 Вихід ЯВНИЙ. Застосунок навмисно тримає вічний цикл спостереження за
+// 🔴 Вихід явний. Застосунок навмисно тримає вічний цикл спостереження за
 // чергою робіт: у браузері він блокується на сервері до 25 с, а тут заглушка
 // відповідає миттєво — і прогін крутився б без кінця, виглядаючи як зависання
 // приймача, а не як зроблена робота.
@@ -320,7 +463,7 @@ def test_the_fullscreen_button_actually_opens_the_viewer(probe) -> None:
     """🔴 Кнопка, що мовчить, — найдорожчий вид поломки.
 
     Людина не знає, чи вона не влучила, чи застосунок зламався, чи так і має
-    бути. Тому перевіряється не наявність обробника, а НАСЛІДОК: після виклику
+    бути. Тому перевіряється не наявність обробника, а наслідок: після виклику
     дії в документі мусить з'явитись переглядач.
     """
     assert "frames.full" in probe["actions"], "дії «на весь екран» немає в реєстрі"
@@ -338,7 +481,7 @@ def test_keyboard_is_bound_to_the_screens_that_need_it(probe) -> None:
 
 # ── жести: тягнути ≠ зачинити ────────────────────────────────────────────────
 def test_dragging_the_sheet_does_not_close_the_viewer(probe) -> None:
-    """🔴 Полотно переглядача займає ВЕСЬ екран, тож натискання «щоб потягнути»
+    """🔴 Полотно переглядача займає весь екран, тож натискання «щоб потягнути»
     падає на тло — а браузер після відпускання все одно шле `click`.
 
     Доти фон читав його як «клікнули повз аркуш, зачиняємось»: людина тягне,
@@ -358,7 +501,7 @@ def test_a_real_click_past_the_sheet_still_closes(probe) -> None:
 def test_a_drag_that_began_on_the_sheet_is_not_a_click_past_it(probe) -> None:
     """Жест, що стартував на аркуші й доїхав до тла, — перетягування.
 
-    ⚠ Саме тому запам'ятовується, де натискання ПОЧАЛОСЬ, а не де скінчилось:
+    ⚠ Саме тому запам'ятовується, де натискання почалось, а не де скінчилось:
     при наближенні аркуш займає весь екран, і тягнути його доводиться саме
     «з аркуша на тло».
     """
@@ -374,7 +517,7 @@ def test_the_run_reader_opens_with_the_sheet(probe) -> None:
 
 
 def test_the_reader_draws_the_line_boxes_on_the_scan(probe) -> None:
-    """🔴 Головне, заради чого читалка робилась: текст НА СВОЄМУ МІСЦІ.
+    """🔴 Головне, заради чого читалка робилась: текст на своєму місці.
 
     Рядок формуляра — короткий шматок усередині графи, і списком під знімком
     він втрачає єдине, що робить його зрозумілим: де він стояв. Рамки
@@ -435,16 +578,31 @@ def test_the_finding_aid_lists_its_fonds_without_a_query(probe) -> None:
 
     Щоб побачити, що реєстр не порожній, треба було спершу натиснути «Знайти», —
     і той, хто цього не зробив, чесно вважав, що описів у нього немає.
+
+    ⚠ Ознака змінилась разом із екраном: фонд тепер обирають пікером, а не
+    таблицею. Вимога лишилась та сама — обсяг реєстру мусить бути видний до
+    будь-якого запиту, тож перевіряється підпис «А ф.1 — 9 справ».
     """
     assert probe.get("fondsListsFonds"), (
-        "екран описів не показав жодного фонду до запиту")
+        "екран описів не назвав жодного фонду до запиту")
+
+
+def test_the_fond_says_what_it_costs_to_work_with(probe) -> None:
+    """🔴 `summarize()` рахує вісімнадцять показників, наверх ішли чотири.
+
+    Через це екран не міг сказати ні скільки справ обрізає дзеркало, ні
+    скільки номерів відновлено між якорями — тобто мовчав саме про те, чим
+    вирішують, куди дивитись далі й чи варто качати з дзеркала взагалі.
+    """
+    assert probe.get("fondsShowsSummary"), (
+        "рядок метаданих фонду не показав ні сканів, ні обрізаних справ")
 
 
 def test_catalogues_name_what_they_searched_before_the_query(probe) -> None:
     """🔴 «Нічого не знайшлось» без переліку оглянутого не є відповіддю.
 
     Джерело, яке вміє шукати й не має каталогу, мусить бути назване поіменно —
-    разом із командою, якою це лікується, — ДО пошуку, а не після одинадцяти
+    разом із командою, якою це лікується, — до пошуку, а не після одинадцяти
     секунд очікування.
     """
     assert probe.get("sourcesShowBasis"), (
@@ -452,7 +610,7 @@ def test_catalogues_name_what_they_searched_before_the_query(probe) -> None:
 
 
 def test_the_read_card_names_why_it_thinks_so(probe) -> None:
-    """🔴 Письмо без ПРИЧИНИ — половина відповіді, і саме дорога половина.
+    """🔴 Письмо без причини — половина відповіді, і саме дорога половина.
 
     Здогад із назви теки й запис у паспорті справи розрізняються надійністю на
     порядок, а на екрані виглядали б однаково. Помилка тут не дає збою: вона
@@ -463,10 +621,67 @@ def test_the_read_card_names_why_it_thinks_so(probe) -> None:
 
 
 def test_search_shows_what_is_outside_the_index(probe) -> None:
-    """🔴 Знаменник пошуку — ДО запиту, а не застереженням після нього.
+    """🔴 Знаменник пошуку — до запиту, а не застереженням після нього.
 
     Пошук чеше лише зібране. Побачивши це вже у видачі, людина встигла
     зачекати й повірити нулю.
     """
     assert probe.get("searchShowsIndex"), (
         "екран пошуку не сказав, що частина прогонів поза індексом")
+
+
+def test_home_shows_a_dashboard_when_the_workspace_has_material(probe) -> None:
+    """🔴 Наповнений простір не має бачити онбординг.
+
+    Три двері «з чого почнемо» — правильна відповідь рівно один раз, першого
+    дня. Людині, у якої вже є справи, прогони й канон, вони не кажуть нічого
+    про те, де вона стоїть, — а це єдине, по що на головну й заходять.
+    """
+    assert probe["homeFullTiles"], "дашборд не намалював жодної плитки"
+    assert probe["homeFullChart"], "дашборд без жодної діаграми"
+    assert probe["homeFullCanon"], "розріз канону не намалювався"
+    # Двері лишаються — але внизу, як швидка дія, а не як увесь екран.
+    assert probe["homeFullDoors"], "двері зникли зовсім — почати нове нема звідки"
+
+
+def test_home_stays_an_onboarding_while_the_workspace_is_empty(probe) -> None:
+    """🔴 Порожній простір мусить бачити три двері, а не дашборд із прочерками.
+
+    Нуль справ там, де їх ще не клали, — це не результат, а стан «нічого не
+    починали», і показувати замість входу таблицю нулів означає відповісти на
+    питання, якого не ставили.
+    """
+    assert probe["emptyDoors"], "на порожньому просторі немає входу «у мене є скани»"
+    assert probe["emptyNoTiles"], "порожній простір показує плитки з прочерками"
+
+
+def test_switching_the_time_metric_does_not_wipe_the_warnings(probe) -> None:
+    """🔴 Перемальовується лише коробка графіка.
+
+    Через `setView` пішли б і застереження конверта — а серед них «зріз
+    застарів» із кнопкою перезбірки. Клік по підпису кривої не має права гасити
+    попередження про те, що всі числа поруч старі.
+    """
+    assert probe["metricKeptScreen"], "перемикач метрики зніс увесь екран"
+    assert probe["metricSwapped"], "коробка графіка не перемалювалась"
+
+
+def test_the_family_screen_offers_a_form_when_there_is_no_profile(probe) -> None:
+    """🔴 Найпропущеніший крок першої сесії — і доти єдиний без дверей у вікні.
+
+    Попередження «профілю немає» показувалось, а завести його можна було лише
+    командою в терміналі. Для людини, яка запустила застосунок подвійним
+    кліком, це читалось як «щось не так, і вдіяти нічого не можна» — тобто
+    найдорожчий вид глухого кута: він виглядає як несправність.
+    """
+    assert probe["profileEmptyForm"], (
+        "на порожньому профілі немає форми заведення — попередження знову "
+        "нікуди не веде")
+    assert probe["profileEmptySource"], (
+        "немає редактора файла: полагодити побитий конфіг з вікна нічим")
+
+
+def test_the_family_screen_draws_an_existing_profile_too(probe) -> None:
+    """Форма мусить бути й тоді, коли профіль є: інакше правити його нічим."""
+    assert probe["profileHasForm"]
+    assert probe["drew_profile"] > 200, "екран «Рід» намалював порожнечу"

@@ -1,7 +1,7 @@
 """🖋 Маніфест рушіїв, середовище й ізоляція від пакета.
 
 Головне тут — не «читається YAML», а три речі, кожна з яких коштувала часу:
-рушій має відповідати ПИСЬМУ, а не лише розширенню; середовище має ставити те,
+рушій має відповідати письму, а не лише розширенню; середовище має ставити те,
 без чого рушій не запуститься; і код, який їде під чужим інтерпретатором, не
 сміє імпортувати пакет.
 """
@@ -35,7 +35,7 @@ def test_three_engines_with_distinct_roles(man):
 
 
 def test_same_suffix_can_mean_two_scripts(man):
-    """🔴 `.mlmodel` буває ЛАТИНКОЮ і КИРИЛИЦЕЮ.
+    """🔴 `.mlmodel` буває латинкою і кирилицею.
 
     Тому вибір рушія за самим лише розширенням поставив би на латинську справу
     кириличну модель. Помилка не падає й не просаджує впевненість — текст
@@ -131,7 +131,7 @@ def _toplevel_imports(path: Path) -> set[str]:
 @pytest.mark.parametrize("name", sorted(
     p.name for p in PATCHES_DIR.glob("*.py") if p.name != "__init__.py"))
 def test_patches_do_not_import_the_package(name):
-    """🔴 Патчі виконує ІНШИЙ інтерпретатор — той, де стоїть kraken.
+    """🔴 Патчі виконує інший інтерпретатор — той, де стоїть kraken.
 
     Якби вони імпортували `nyshporka`, у середовищі рушіїв довелося б тримати
     всі залежності застосунку. Умова тримається тестом, а не домовленістю:
@@ -200,11 +200,11 @@ def test_inspector_flags_wrong_kraken_version_as_a_silent_risk(tmp_path, monkeyp
     monkeypatch.setattr(env, "_probe", lambda *a, **k: "7.1.0")
     rep = env.inspect(tmp_path)
     assert not rep.ok
-    assert any("ТИХОЮ" in p for p in rep.problems), rep.problems
+    assert any("тихою" in p for p in rep.problems), rep.problems
 
 
 def test_contract_roundtrip_and_schema_guard(tmp_path):
-    """🔴 Контракт старої схеми читається як ВІДСУТНІЙ.
+    """🔴 Контракт старої схеми читається як відсутній.
 
     Мовчки працювати за версією, де поля могли змінити зміст, гірше, ніж чесно
     сказати «перестворіть середовище».
@@ -241,7 +241,7 @@ def test_setup_names_the_missing_tool_instead_of_a_traceback(tmp_path, monkeypat
     with pytest.raises(env.ToolMissing) as exc:
         env.setup(tmp_path / "venv")
     assert "uv" in str(exc.value)
-    # Не лише діагноз, а й ліки: рядок мусить казати, ЯК це полагодити.
+    # Не лише діагноз, а й ліки: рядок мусить казати, як це полагодити.
     assert "astral.sh" in str(exc.value)
 
     # git перевіряється теж — PARSeq ставиться з репозиторію, не з PyPI.

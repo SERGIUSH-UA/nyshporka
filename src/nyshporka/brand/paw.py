@@ -15,7 +15,7 @@
 бачить продукт уперше.
 
 Усе зведено до еліпсів навмисно: складніший силует не пережив би 16 px у
-вкладці, а лупа зроблена НАСКРІЗНИМ отвором, щоб знак лягав на будь-яке тло.
+вкладці, а лупа зроблена наскрізним отвором, щоб знак лягав на будь-яке тло.
 """
 from __future__ import annotations
 
@@ -79,7 +79,7 @@ def render_svg(*, handle: bool = True, colour: str = "currentColor",
     ]
 
     rows = [
-        "<!-- ⚠ ЗГЕНЕРОВАНО з `mark_geometry` у brand.yaml — руками не правити.",
+        "<!-- ⚠ згенеровано з `mark_geometry` у brand.yaml — руками не правити.",
         "     🐾 Лапка: слід у справі. Лупа в подушечці: те, що вона робить. -->",
         f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {s:g} {s:g}"',
         '     role="img" aria-label="Нишпорка">',
@@ -137,7 +137,7 @@ def render_png(px: int, *, colour: str, background: str | None = None,
 
     draw.ellipse(box(g.pad["cx"], g.pad["cy"], g.pad["rx"], g.pad["ry"]), fill=colour)
 
-    # 🔴 Отвір вибивається ПРОЗОРИМ, а не кольором тла: інакше знак працював би
+    # 🔴 Отвір вибивається прозорим, а не кольором тла: інакше знак працював би
     # лише на тому тлі, під яке його намалювали.
     lens, h = g.lens, g.handle
     draw.ellipse(box(lens["cx"], lens["cy"], lens["r"], lens["r"]), fill=(0, 0, 0, 0))

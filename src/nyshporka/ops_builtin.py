@@ -10,7 +10,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from pydantic import BaseModel, Field
 
@@ -47,6 +47,429 @@ def workspace_info(_: NoArgs) -> Envelope:
     return env
 
 
+# ── корені справ ─────────────────────────────────────────────────────────────
+class RootArgs(BaseModel):
+    path: str = Field(description="тека зі сканами: справа або контейнер справ")
+
+
+# `agent=False`: оголошення кореня розширює зону, у якій застосунок читає диск.
+# Це рішення людини про власний архів, а не крок конвеєра; агент може порадити,
+# але не зробити.
+@op("roots.list", summary="Де застосунок шукає справи", agent=False, private=True)
+def roots_list(_: NoArgs) -> Envelope:
+    """Перелік місць, звідки беруться справи, — з оголошеного, а не з наявного.
+
+    🔴 Різниця не косметична. Перелік «що зараз існує» мовчки губить корінь на
+    від'єднаному диску: людина бачить порожнє місце рівно там, де їй потрібна
+    причина, чому справи зникли з переліків, — і читає це як поламку. Тому
+    оголошене показуємо завжди, а недосяжне позначаємо.
+    """
+    from nyshporka.core.workspace import WorkspaceError, workspace
+
+    try:
+        ws = workspace()
+    except WorkspaceError as exc:
+        return fail(str(exc))
+    rows = [{"path": str(ws.raw), "kind": "space", "gone": not ws.raw.is_dir()}]
+    rows += [{"path": str(p), "kind": "declared", "gone": not p.is_dir()}
+             for p in ws.extra_case_roots]
+    env = ok({"roots": rows, "declared": len(ws.extra_case_roots)})
+    gone = [r["path"] for r in rows if r["gone"]]
+    if gone:
+        env.warn("root_gone",
+                 f"цих тек зараз немає на місці: {', '.join(str(g) for g in gone)} — "
+                 f"справи звідти зникнуть із переліків до наступної збірки")
+    return env
+
+
+@op("roots.add", summary="Оголосити теку зі сканами поза простором",
+    args=RootArgs, agent=False, mutates=True)
+def roots_add(a: RootArgs) -> Envelope:
+    """Обхід бачитиме теку там, ДЕ вона лежить. Файли не переносяться.
+
+    ⚠ Шифра тут, на відміну від заведення справи, не потрібна: контейнер із
+    десятками книг справою не є, і дати йому шифру означало б оголосити їх усі
+    однією справою.
+    """
+    from nyshporka.core.workspace import WorkspaceError, add_case_root
+
+    try:
+        root = add_case_root(a.path)
+    except WorkspaceError as exc:
+        return fail(str(exc))
+    env = ok({"path": str(root)})
+    env.warn("rebuild_needed",
+             "теку оголошено, але в переліках справи звідти з'являться після "
+             "перезбірки реєстру")
+    env.suggest("cases.build", "зібрати реєстр, щоб побачити справи з нового кореня")
+    return env
+
+
+@op("roots.remove", summary="Зняти оголошений корінь; файли лишаються",
+    args=RootArgs, agent=False, mutates=True)
+def roots_remove(a: RootArgs) -> Envelope:
+    """Зникає лише видимість. Скани лишаються на місці — жодного файлу не чіпаємо.
+
+    🔴 Зворотна дія обов'язкова саме тому, що пряма робиться одним рухом і легко
+    помиляється: не та тека, тимчасовий диск, флешка колеги. Доки зняти корінь
+    було нічим, єдиним виходом лишалось правити маркер простору руками.
+    """
+    from nyshporka.core.workspace import WorkspaceError, remove_case_root
+
+    try:
+        gone = remove_case_root(a.path)
+    except WorkspaceError as exc:
+        return fail(str(exc))
+    if not gone:
+        return fail(f"такого кореня не оголошено: {a.path}")
+    env = ok({"path": a.path})
+    env.warn("rebuild_needed",
+             "файли не чіпались; справи з цієї теки зникнуть із реєстру після "
+             "перезбірки")
+    env.suggest("cases.build", "перезібрати реєстр без цього кореня")
+    return env
+
+
+# ── дашборд головної ─────────────────────────────────────────────────────────
+class PulseArgs(BaseModel):
+    history_days: int = Field(default=365, ge=0, le=3650,
+                              description="скільки днів історії віддати; 0 — усю")
+    backfill: bool = Field(
+        default=True,
+        description="добудувати минуле з міток на диску, якщо журнал порожній")
+
+
+# 🔴 `agent=False`. Це розкладка одного екрана, а не окреме знання: усе, що
+# вона зводить, агент уже дістає точнішими операціями (`cases.list`,
+# `runs.list`, `search.state`, `pages.status`). Другий tool із тими самими
+# числами в іншій формі лише з'їдав би місце в переліку, який модель мусить
+# дочитати до кінця, і додавав би привід звітувати зведенням замість знаменника.
+@op("home.pulse", summary="Стан дослідження одним зрізом: реєстр, канон, "
+                          "читання, пошук, історія",
+    args=PulseArgs, agent=False)
+def home_pulse(a: PulseArgs) -> Envelope:
+    """Усе, що показує головна, — одним викликом.
+
+    🔴 Одна операція, а не сім із браузера. Кожна з них самостійно перевіряє
+    свіжість реєстру й читає ті самі бази, тож сім викликів означали б сім
+    перевірок і — головне — сім різних зрізів на одному екрані: реєстр міг
+    перезібратись між першим і сьомим запитом, і плитки почали б суперечити
+    одна одній, не давши читачеві жодного натяку, котрій вірити.
+
+    🔴 Блоки гейтяться активними секціями. Вимкнена частина застосунку не
+    рахується й не приходить порожньою: нуль прочитаних сторінок у просторі, де
+    читання вимкнено, — це не «нічого не прочитано», а «питання не стояло», і
+    дашборд не має права видавати одне за інше.
+    """
+    from nyshporka.core import history, pulse
+    from nyshporka.core.workspace import WorkspaceError, workspace
+
+    try:
+        ws = workspace()
+    except WorkspaceError as exc:
+        return fail(str(exc))
+    on = set(ws.sections)
+
+    data: dict[str, Any] = {
+        "workspace": {"root": str(ws.root), "name": ws.name,
+                      "origin": ws.origin},
+        "sections": {"active": sorted(on), "preset": ws.preset or ""},
+        "pulse": pulse.snapshot(),
+    }
+    env = ok(data)
+
+    registry = _pulse_registry(env)
+    data["registry"] = registry
+    data["canon"] = _pulse_canon(env)
+    data["profile"] = _pulse_profile(env)
+    data["reading"] = _pulse_reading(env) if "htr" in on else None
+    data["search"] = _pulse_search() if "research" in on else None
+    data["eye"] = _pulse_eye(registry, env) if "research" in on else None
+    data["jobs"] = _pulse_jobs()
+    data["machine"] = _pulse_machine()
+
+    # 🔴 Журнал поповнюється тут, а не в диспетчері мутацій: зріз щойно
+    # порахований, тож рядок коштує нуль додаткових запитів. Умова —
+    # пульс зрушив із часу останнього спостереження: без неї файл ріс би на
+    # кожне відкриття вкладки, а графік перетворився б на пряму з тисячі
+    # однакових точок.
+    data["history"] = _pulse_history(data, history, a)
+    return env
+
+
+def _pulse_registry(env: Envelope) -> dict[str, Any]:
+    """Зведення реєстру + чесний стан «його ще не збирали»."""
+    from nyshporka.cases import db
+
+    try:
+        s = db.stats()
+    except Exception:
+        # 🔴 `built: False`, а не нулі. «0 справ» читається як перевірений
+        # результат і закриває питання; «реєстру ще немає» — як робота, яку
+        # треба зробити, і поруч із ним у конверті стоїть, чим саме.
+        env.warn("no_registry_yet",
+                 "реєстру справ ще немає — зведення нема з чого показати")
+        env.stale_because(["реєстр ще не збирали"], fix="nysh cases build")
+        env.suggest("cases.build", "зібрати реєстр справ")
+        return {"built": False}
+    out: dict[str, Any] = {"built": True, **s}
+    try:
+        meta = db.index_meta()
+        out["at"] = meta.get("built", "")
+    except Exception:
+        out["at"] = ""
+    try:
+        st = db.staleness()
+    except Exception:
+        st = {}
+    if st.get("stale"):
+        env.stale_because(st.get("reasons") or [], fix="nysh cases build")
+    return out
+
+
+def _pulse_canon(env: Envelope) -> dict[str, Any]:
+    from nyshporka.storage import canon_stats
+
+    try:
+        canon = canon_stats.summary()
+    except Exception as exc:
+        return {"present": False, "why": f"{type(exc).__name__}: {exc}"}
+    if not canon.get("present"):
+        # ⚠ Банера нема. Для більшості просторів Нишпорки канону не існує
+        # взагалі — його збирає дослідницький конвеєр, — тож попередження
+        # висіло б угорі дашборда постійно й на другий день перестало б
+        # читатись разом із тими, що поруч. Секція каже це на місці, там, де
+        # число мало б стояти.
+        return canon
+    # ⚠ Недоведений факт виглядає в дереві так само, як доведений, тож про
+    # частку без цитат мусить сказати конверт, а не лише дрібний рядок на
+    # плитці: інакше вона роками лишається непоміченою.
+    uncited = int(canon.get("facts_uncited") or 0)
+    if uncited:
+        env.warn("facts_uncited",
+                 f"{uncited} фактів канону не мають жодної цитати — "
+                 f"у дереві вони виглядають так само, як доведені")
+    return canon
+
+
+def _pulse_profile(_env: Envelope) -> dict[str, Any]:
+    """Чий рід шукаємо — для кроку онбордингу на головній.
+
+    ⚠ Банера тут БІЛЬШЕ НЕМАЄ. Він казав про відсутній профіль угорі екрана, а
+    крок чекліста каже те саме на місці — і, на відміну від банера, з кнопкою.
+    Два повідомлення про одне читаються як дві різні проблеми, і людина шукає
+    другу.
+    """
+    from nyshporka.core.profile import ProfileError, active
+    from nyshporka.core.workspace import WorkspaceError
+
+    try:
+        p = active()
+    except (ProfileError, WorkspaceError) as exc:
+        return {"present": False, "why": str(exc)}
+    return {"present": True, "name": p.name, "display": p.display,
+            "paradigm": p.paradigm_id, "stems": p.stems,
+            "roots": [r for r, _ in p.roots],
+            "spellings": len(p.all_spellings())}
+
+
+#: Скільки секунд вірити попередній перевірці машини. Вона імпортує torch і
+#: ходить на диск — платити цим за кожне відкриття головної не можна, а
+#: змінюється вона від встановлення драйвера, не щохвилини.
+_MACHINE_TTL = 300.0
+_MACHINE: dict[str, Any] = {"at": 0.0, "data": None}
+
+
+def _pulse_machine() -> dict[str, Any]:
+    """Чи ця машина готова читати рукопис — коротко, для кроку чекліста.
+
+    ⚠ Кеш на процес, а не на запит. `doctor.run()` перевіряє наявність карти
+    (тобто імпортує torch), місце на диску й хмарну синхронізацію теки; на
+    холодному старті це секунди. Крок чекліста мусить бути дешевим, інакше він
+    коштуватиме рівно там, де його ніхто не просив.
+    """
+    import time
+
+    now = time.monotonic()
+    if _MACHINE["data"] is not None and now - _MACHINE["at"] < _MACHINE_TTL:
+        return cast("dict[str, Any]", _MACHINE["data"])
+    try:
+        from nyshporka.setup.doctor import run
+
+        checks = list(run())
+    except Exception as exc:
+        return {"ok": False, "why": f"{type(exc).__name__}: {exc}"}
+    # ⚠ Профіль сюди НЕ входить: у чекліста він окремий крок. Порахований
+    # двічі, він показував би той самий недолік у двох рядках — а другий рядок
+    # читається як друга проблема, і людина шукає її окремо.
+    checks = [c for c in checks if not c.name.startswith("Профіль")]
+    worst = ("fail" if any(c.level == "fail" for c in checks)
+             else "warn" if any(c.level == "warn" for c in checks) else "ok")
+    out = {"ok": True, "level": worst, "ready": worst == "ok",
+           "bad": [c.name for c in checks if c.level != "ok"]}
+    _MACHINE.update(at=now, data=out)
+    return out
+
+
+def _pulse_reading(env: Envelope) -> dict[str, Any]:
+    """Прогони: скільки, чим, як швидко — і скільки різних сторінок прочитано."""
+    from nyshporka import htr_store
+
+    try:
+        runs = htr_store.list_cases()
+    except Exception as exc:
+        return {"ok": False, "why": f"{type(exc).__name__}: {exc}"}
+    orphans = sum(1 for r in runs if not r.get("case_key"))
+    by_engine: dict[str, int] = {}
+    by_model: dict[str, int] = {}
+    for r in runs:
+        for eid in r.get("engine_ids") or []:
+            by_engine[str(eid)] = by_engine.get(str(eid), 0) + 1
+        model = str(r.get("model") or "")
+        if model:
+            by_model[model] = by_model.get(model, 0) + 1
+    speeds = [float(r["sec_median"]) for r in runs
+              if isinstance(r.get("sec_median"), int | float)]
+    if orphans:
+        env.warn("orphan_runs",
+                 f"{orphans} прогонів без справи — їхнього тексту не видно "
+                 f"на жодному екрані про справу")
+    return {
+        "ok": True,
+        "runs": len(runs),
+        # 🔴 `unique_pages`, а не сума `pages_done`: два голоси проходять ТІ
+        # самі аркуші, тож сума показала б удвічі більше прочитаного на кожній
+        # справі, гнаній обома, — знаменник, більший за наявне.
+        "pages": htr_store.unique_pages(runs),
+        "orphans": orphans,
+        "by_engine": _tally(by_engine),
+        "by_model": _tally(by_model),
+        "sec_median": round(sorted(speeds)[len(speeds) // 2], 2) if speeds else None,
+        "last": [{"name": r.get("name"), "shifra": r.get("shifra"),
+                  "case_key": r.get("case_key"), "pages": r.get("pages_done"),
+                  "model": r.get("model"), "updated": r.get("updated")}
+                 for r in runs[:5]],
+    }
+
+
+def _pulse_search() -> dict[str, Any]:
+    from nyshporka.search import decode as D
+
+    try:
+        return {"ok": True, **D.stats()}
+    except Exception as exc:
+        return {"ok": False, "why": f"{type(exc).__name__}: {exc}"}
+
+
+def _pulse_eye(registry: dict[str, Any], env: Envelope) -> dict[str, Any]:
+    """Облік ока: скільки аркушів у сховищі й скільки з них дійшло до реєстру.
+
+    🔴 Два числа, а не одне. Сховище рахує всі замітки на диску; реєстр —
+    лише ті, чию справу він упізнав. Різниця це не похибка округлення, а
+    занесені аркуші, яких не покаже жоден екран про справу: облік зроблено,
+    роботу зроблено, а знайти її можна тільки грепом по файлах.
+    """
+    from nyshporka.pagestore import store
+
+    try:
+        got = store.totals()
+    except Exception as exc:
+        return {"built": False, "why": f"{type(exc).__name__}: {exc}"}
+    out: dict[str, Any] = {
+        "built": True,
+        "pages": got["pages"], "pages_full": got["full"],
+        "files": got["files"], "records": got["records"],
+        "by_status": got["by_status"],
+    }
+    if registry.get("built"):
+        out["cases"] = registry.get("eye_cases")
+        out["in_registry"] = registry.get("eye_pages")
+        out["hits_open"] = registry.get("fuzzy_hits_open")
+        out["no_fuzzy"] = registry.get("fuzzy_none")
+        lost = got["pages"] - int(registry.get("eye_pages") or 0)
+        if lost > 0:
+            env.warn("notes_off_registry",
+                     f"{lost} занесених аркушів стоять на справах, яких реєстр "
+                     f"не знає — на екранах про справу їх не видно")
+    return out
+
+
+def _pulse_jobs() -> dict[str, Any]:
+    """Черга робіт — лише коли застосунок піднято.
+
+    ⚠ Порожній список у командному рядку означав би «нічого не запущено», тоді
+    як черги там немає взагалі: довга робота йде синхронно й друкує прогрес
+    сама. Тому тут `running: None`, а не нуль.
+    """
+    from nyshporka.runtime import current_bus
+
+    bus = current_bus()
+    if bus is None:
+        return {"queue": False}
+    jobs = [j.as_dict() for j in bus.jobs()]
+    live = [j for j in jobs if j.get("state") in ("running", "queued")]
+    return {"queue": True, "running": len(live), "total": len(jobs),
+            "failed": sum(1 for j in jobs if j.get("state") == "error"),
+            "last": jobs[-6:]}
+
+
+def _pulse_history(data: dict[str, Any], history: Any,
+                   a: PulseArgs) -> list[dict[str, Any]]:
+    reg = data.get("registry") or {}
+    canon = data.get("canon") or {}
+    reading = data.get("reading") or {}
+    eye = data.get("eye") or {}
+    rows: list[dict[str, Any]] = history.read()
+    if not rows and a.backfill:
+        # Разово: без цього графік починався б у день, коли модуль з'явився, —
+        # тобто нове вміння показувало б порожнечу саме тому, що воно нове.
+        try:
+            history.backfill()
+            rows = history.read()
+        except Exception:
+            rows = []
+    if reg.get("built"):
+        # 🔴 Пишемо безумовно, а відсіює однакове сам журнал — за числами.
+        # Спокуса звірятися тут із пульсом є, але пульс б'є й на операціях, які
+        # жодного з цих чисел не міняють (перейменували справу, зняли вердикт),
+        # тож він дав би точку там, де на графіку нічого не зрушило. Числа —
+        # єдиний чесний привід поставити крапку на кривій про числа.
+        # 🔴 Кожне поле журналу має рівно одне джерело — те саме, з якого його
+        # бере бекфіл. Інакше крива падає на 33 тисячі сторінок у день, коли
+        # почались живі спостереження, і виглядає це не як зміна лінійки, а як
+        # утрачена робота. Тому `htr_pages` тут із прогонів (`unique_pages`), а
+        # не з реєстру, а `pages_noted` — зі сховища, а не з його розкладки по
+        # справах. Числа реєстру лишаються на плитках, де вони й означають
+        # рівно те, що написано.
+        snap = {
+            "cases": reg.get("cases"), "frames": reg.get("frames"),
+            "ordered": reg.get("ordered"),
+            "htr_pages": reading.get("pages"),
+            "htr_none": reg.get("htr_none"),
+            "no_fuzzy": reg.get("fuzzy_none"),
+            "hits_open": reg.get("fuzzy_hits_open"),
+            "pages_noted": eye.get("pages"),
+            "runs": reading.get("runs"),
+            "canon_persons": canon.get("persons"),
+            "canon_facts": canon.get("facts"),
+            "canon_sources": canon.get("sources"),
+        }
+        if history.record(snap, by="home.pulse"):
+            rows = history.read()
+    if a.history_days:
+        import time as _t
+
+        cutoff = _t.strftime("%Y-%m-%d",
+                             _t.localtime(_t.time() - a.history_days * 86400))
+        rows = [r for r in rows if str(r.get("at") or "")[:10] >= cutoff]
+    return rows
+
+
+def _tally(got: dict[str, int]) -> list[dict[str, Any]]:
+    return [{"code": k, "n": n}
+            for k, n in sorted(got.items(), key=lambda x: (-x[1], x[0]))]
+
+
 # ── джерела ──────────────────────────────────────────────────────────────────
 def _registry() -> Registry:
     """Реєстр джерел, прив'язаний до простору (там кеші й зібрані каталоги)."""
@@ -76,7 +499,7 @@ def _source(source_id: str) -> Source:
 def _catalog_basis(src: Any) -> dict[str, Any]:
     """На чому це джерело шукає — і чи є на чому взагалі.
 
-    🔴 Стан каталогу мусить бути видимим ДО пошуку, а не після. «Нічого не
+    🔴 Стан каталогу мусить бути видимим до пошуку, а не після. «Нічого не
     знайшлось» у джерелі без каталогу і «нічого не знайшлось» у зрізі на дев'ять
     тисяч справ — це різні відповіді, і друга закриває напрям, якого ніхто не
     перевіряв. Доти перелік джерел казав лише, що джерело існує.
@@ -103,8 +526,12 @@ def _catalog_basis(src: Any) -> dict[str, Any]:
     regions = info.get("regions") or []
     if regions:
         out["scope"] = ", ".join(str(x) for x in regions)
+    elif info.get("scope"):
+        # Джерело без каталогу на диску теж має межі: покажчик накриває свій
+        # перелік архівів, і поза ним його нуль нічого не означає.
+        out["scope"] = str(info["scope"])
     if kind == "none" and searchable:
-        # Порада мусить бути ВИКОНУВАНОЮ. Обхід збирається однією командою, і
+        # Порада мусить бути виконуваною. Обхід збирається однією командою, і
         # саме її бракувало тому, хто діставав `source_unavailable` після
         # одинадцяти секунд очікування.
         out["fix"] = f"nysh crawl {src.id}"
@@ -114,21 +541,22 @@ def _catalog_basis(src: Any) -> dict[str, Any]:
 @op("sources.list", summary="Звідки можна брати матеріал", section="material")
 def sources_list(_: NoArgs) -> Envelope:
     reg = _registry()
-    rows = [{"id": s.id, "label": s.label, "caps": sorted(s.caps),
-             "catalog": _catalog_basis(s)} for s in reg.all()]
+    rows: list[dict[str, Any]] = [
+        {"id": s.id, "label": s.label, "caps": sorted(s.caps),
+         "catalog": _catalog_basis(s)} for s in reg.all()]
     env = ok({"sources": rows, "shown": len(rows),
-              # 🔴 Скільки джерел УМІЮТЬ шукати й скільки з них мають на чому.
+              # 🔴 Скільки джерел уміють шукати й скільки з них мають на чому.
               # Друге число і є знаменником кожного нуля на цьому екрані.
               "searchable": sum(1 for r in rows if r["catalog"]["searchable"]),
               "with_catalog": sum(1 for r in rows
                                   if r["catalog"]["searchable"]
                                   and r["catalog"]["kind"] != "none")})
-    blind = [r["label"] for r in rows
-             if r["catalog"]["searchable"] and r["catalog"]["kind"] == "none"]
-    if blind:
-        env.warn("search_without_catalog",
-                 "шукати нема на чому в джерелах: " + ", ".join(blind)
-                 + " — їхній нуль нічого не означатиме, доки не зібрано обхід")
+    # ⚠ Джерело без обходу тут більше не попереджає. Це не втрата: сам перелік
+    # і є відповіддю на питання «де шукали» — у рядку такого джерела стоїть і
+    # «шукати нема на чому», і команда, якою це лікується, поіменно. Жовтий
+    # рядок згори повторював те саме іншими словами й горів при кожному
+    # відкритті екрана; попередження, яке горить завжди, перестають читати —
+    # разом із тим єдиним, що означає зіпсований нуль.
     for name, why in reg.broken:
         # Зламаний плагін називається поіменно: «мого архіву немає в списку»
         # інакше не має пояснення, і причину шукатимуть у своїх налаштуваннях.
@@ -153,7 +581,7 @@ def material_look(a: LookArgs) -> Envelope:
                       for c in shape.cases]}
     env = ok(data)
     if shape.kind == "cases":
-        # 🔴 Це не помилка й не успіх: тека містить БАГАТО справ. Мовчазне
+        # 🔴 Це не помилка й не успіх: тека містить багато справ. Мовчазне
         # «усе гаразд» призвело б до прогону на нуль сторінок.
         env.warn("many_cases",
                  f"це не одна справа, а {len(shape.cases)} — оберіть потрібну")
@@ -178,7 +606,7 @@ class CatalogSearchArgs(BaseModel):
 def catalog_search(a: CatalogSearchArgs) -> Envelope:
     """Пошук по каталогах джерел.
 
-    🔴 Нуль тут ЗАВЖДИ зі знаменником. Джерело, яке не може шукати (каталог не
+    🔴 Нуль тут завжди зі знаменником. Джерело, яке не може шукати (каталог не
     зібрано, дерево не завантажене), не додає нуль до суми — воно потрапляє в
     `unavailable` з причиною й готовою командою. Інакше «0 знахідок у трьох
     архівах» означало б «дивились у трьох», хоча дивились в одному, і напрям
@@ -193,6 +621,8 @@ def catalog_search(a: CatalogSearchArgs) -> Envelope:
     hits: list[dict[str, object]] = []
     searched: list[str] = []
     unavailable: list[dict[str, str]] = []
+    #: Джерела, чия видача вперлась у власну стелю: їхній перелік неповний.
+    truncated: list[dict[str, Any]] = []
     #: На чому саме шукали — вкладений зріз чи зібраний обходом, і від якої дати.
     basis: list[dict[str, Any]] = []
     for src in picked:
@@ -207,9 +637,17 @@ def catalog_search(a: CatalogSearchArgs) -> Envelope:
             unavailable.append({"source": src.id, "why": f"{type(exc).__name__}: {exc}"})
             continue
         searched.append(src.id)
+        # 🔴 Стеля видачі — це обрізка, а не результат. Джерело з пагінацією в
+        # пошуку (Duck: 50 без продовження) віддає рівно стелю і на слові, під
+        # яке підпадають тисячі справ; узятий за повний, такий перелік стає
+        # знаменником негативу, якого ніхто не міряв.
+        ceiling = int(getattr(src, "search_ceiling", 0) or 0)
+        if ceiling and len(found) >= ceiling:
+            truncated.append({"source": src.id, "ceiling": ceiling})
         # 🔴 Чим саме шукали — частина знаменника. Вкладений зріз каталогу
-        # СТАРІЄ: «не знайшлось» у ньому означає «не було на дату зрізу», а не
-        # «не існує», і без дати ці два висновки не відрізнити.
+        # старіє: «не знайшлось» у ньому означає «не було на дату зрізу», а не
+        # «не існує», і без дати ці два висновки не відрізнити. Саме тому дата
+        # їде в `basis` — його показують до пошуку, коли на нього ще дивляться.
         note = getattr(src, "catalog_source", None)
         if callable(note):
             kind, meta = note()
@@ -220,32 +658,208 @@ def catalog_search(a: CatalogSearchArgs) -> Envelope:
                               "regions": meta.get("regions") or None})
             elif kind == "workspace":
                 basis.append({"source": src.id, "kind": "зібраний на місці"})
+            elif kind == "live":
+                basis.append({"source": src.id, "kind": "живий запит",
+                              "taken": "", "rows": None, "regions": None})
         hits.extend({"source": h.source, "ref": h.ref, "title": h.title,
                      "years": h.years, "place": h.place, "shifra": h.shifra,
-                     "frames": h.frames, "acquirable": h.acquirable, "note": h.note}
+                     "frames": h.frames, "acquirable": h.acquirable,
+                     "note": h.note, "url": h.url,
+                     "repo": h.repo, "archive": h.archive, "fond": h.fond}
                     for h in found)
-    env = ok({"q": a.q, "hits": hits[:a.limit],
+    shown = hits[:a.limit]
+    env = ok({"q": a.q, "hits": shown, "fonds": _by_fond(shown),
               "coverage": {"searched": searched, "unavailable": unavailable,
-                           "basis": basis}})
-    for b in basis:
-        if b.get("kind") != "вкладений зріз" or not b.get("taken"):
-            continue
-        where = ""
-        if b.get("regions"):
-            # 🔴 Покажчик плівок є НЕ ВСЮДИ: у більшості регіонів дзеркала
-            # `folder_meta` це голий підпис теки. Не сказати, які регіони він
-            # накриває, означало б видати «нема в покажчику» за «нема на плівках».
-            where = f", накриває лише: {', '.join(b['regions'])}"
-        env.warn("stale_catalog",
-                 f"{b['source']}: шукали у ВКЛАДЕНОМУ зрізі від {b['taken']} "
-                 f"({b.get('rows') or '?'} записів{where}). Відтоді могло "
-                 f"додатись — свіже збирається на місці")
-    for u in unavailable:
-        env.warn("source_unavailable", f"{u['source']}: {u['why']}")
-    if not searched:
-        env.warn("no_denominator",
-                 "жодне джерело не змогло шукати — цей нуль НІЧОГО не означає")
+                           "basis": basis, "truncated": truncated}})
+    _warn_once(env, hits=hits, searched=searched,
+               unavailable=unavailable, truncated=truncated)
     return env
+
+
+def _by_fond(hits: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Знахідки, зведені у фонди — те, про що насправді приймають рішення.
+
+    🔴 Пошук по каталогах не самоціль, а перший крок циклу: знайти фонд за
+    словом → оцінити, чи він вартий уваги → зібрати його реєстр. Список
+    окремих справ другого кроку не витримує: три томи одного фонду й три
+    випадкові збіги з трьох різних архівів виглядають однаково, а звідки саме
+    прийшла знахідка, доводиться вичитувати з шифри очима.
+
+    Роки беруться з самих знахідок і чесно означають «у знайденому», а не «у
+    фонді»: межі фонду знає його картка (`catalog.fond`), і вигадувати їх тут
+    із випадкової вибірки означало б назвати фонд вужчим, ніж він є.
+    """
+    out: dict[tuple[str, str, str], dict[str, Any]] = {}
+    for h in hits:
+        repo = str(h.get("repo") or "")
+        archive = str(h.get("archive") or "")
+        fond = str(h.get("fond") or "")
+        if not fond:
+            # Джерело, яке не знає фондів (дзеркало плівок адресує плівки), —
+            # не привід вигадати йому фонд: такий рядок просто не бере участі
+            # в оцінці, і це видно з того, що сума по фондах менша за видачу.
+            continue
+        # 🔴 Архів у ключі, а не лише фонд. Номери фондів між архівами
+        # колізують, і два невідомі паку архіви з фондом 118 злилися б в один
+        # рядок — вагу однієї знахідки приписало б іншій.
+        row = out.setdefault((repo, archive, fond), {
+            "repo": repo, "archive": archive, "fond": fond, "hits": 0,
+            # Чим підписати рядок: наш код, якщо архів нам відомий, інакше — як
+            # його зве покажчик. Порожньо лишається лише там, де назви не дав
+            # ніхто, і тоді це справді «невідомо», а не стерте нами.
+            "label": repo or archive,
+            "sources": [], "years": [], "sample": str(h.get("title") or "")[:120]})
+        row["hits"] += 1
+        src = str(h.get("source") or "")
+        if src and src not in row["sources"]:
+            row["sources"].append(src)
+        for part in str(h.get("years") or "").replace("—", "-").split("-"):
+            digits = "".join(c for c in part if c.isdigit())
+            if len(digits) == 4:
+                row["years"].append(int(digits))
+    rows = []
+    for row in out.values():
+        years = row.pop("years")
+        row["year_from"] = min(years) if years else None
+        row["year_to"] = max(years) if years else None
+        rows.append(row)
+    rows.sort(key=lambda r: (-int(r["hits"]), r["label"], r["fond"]))
+    return rows
+
+
+def _warn_once(env: Envelope, *, hits: list[dict[str, object]],
+               searched: list[str], unavailable: list[dict[str, str]],
+               truncated: list[dict[str, Any]]) -> None:
+    """Одне попередження на пошук — і тільки там, де знаменник пошкоджено.
+
+    🔴 Чому не по попередженню на джерело. Раніше кожне джерело з вкладеним
+    зрізом додавало своє «шукали у зрізі від такої дати», і звичайний пошук
+    двома джерелами відкривався трьома жовтими рядками щоразу — при тому, що
+    ті самі дати стоять у переліку джерел просто нижче, з обсягом і станом
+    кожного. Попередження, яке горить завжди, перестають читати; разом із ним
+    перестають читати й те єдине, що означає зіпсований нуль.
+
+    Лишається рівно три приводи, і кожен змінює висновок, а не оформлення:
+
+    - шукати не було де взагалі — нуль не означає нічого;
+    - видача вперлась у стелю джерела — перелік неповний, і негатив по ньому
+      неможливий;
+    - джерело відпало, і при цьому не знайшлось нічого — нуль без частини
+      знаменника. Коли знахідки є, той самий факт лишається в `coverage`:
+      він більше не міняє відповіді, тож не варте жовтого рядка.
+    """
+    parts: list[str] = []
+    code = ""
+    if not searched:
+        code = "no_denominator"
+        parts.append("жодне джерело не змогло шукати — цей нуль нічого не означає")
+    if truncated:
+        code = code or "search_truncated"
+        where = "; ".join(f"{t['source']} (стеля {t['ceiling']})" for t in truncated)
+        parts.append(f"видача обрізана — перелік неповний: {where}. "
+                     f"Звужуй запит або бери фонд цілком")
+    if unavailable and not hits:
+        code = code or "partial_denominator"
+        where = "; ".join(f"{u['source']}: {u['why']}" for u in unavailable)
+        parts.append(f"нуль неповний — не шукали в {where}")
+    if parts:
+        env.warn(code, " · ".join(parts))
+
+
+class FondCardArgs(BaseModel):
+    repo: str = Field(description="код архіву: DAHMO, CDIAK, ДАХмО…")
+    fond: str = Field(description="номер фонду")
+
+
+# ⚠ `agent=False` навмисно: перелік tool'ів тримається під стелею, і картка
+# фонду належить до тієї ж родини, що `fond.list` і `registry.*`, — усі вони
+# живуть у застосунку й командному рядку, а не в переліку агента.
+@op("catalog.fond", summary="Що це за фонд і чи варто збирати його реєстр",
+    args=FondCardArgs, mutates=False, agent=False, section="material")
+def catalog_fond(a: FondCardArgs) -> Envelope:
+    """Картка фонду з зовнішнього покажчика плюс наш власний стан по ньому.
+
+    🔴 Ця операція — пропущена ланка циклу. Пошук по каталогах відповідає «де
+    взагалі щось є» і віддає окремі справи; збирання реєстру опису коштує
+    десятків хвилин під лімітом сервісу. Між ними стояло рішення «чи вартий
+    цей фонд того, щоб його збирати», і приймали його наосліп: назви фонду
+    видача не несе, меж років не знає, скільки в ньому описів — теж, а чи не
+    зібрано його в нас уже — питали в іншому місці й іншими словами.
+
+    Тут обидві половини відповіді разом: що це за фонд у покажчику (назва,
+    роки, описи) і що по ньому є в нас (реєстр, скільки справ, скільки вже на
+    диску). Порожня друга половина — не помилка, а найчастіша причина сюди
+    зайти: фонд бачать уперше.
+    """
+    from nyshporka.archives import active
+    from nyshporka.sources.base import SourceError
+
+    pack = active()
+    raw = str(a.repo or "").strip()
+    # Сюди приходить і наш код («DAHMO»), і той, яким архів зве покажчик
+    # («ДАЖО») — саме він стоїть у знахідці, коли архіву немає в паку. Спершу
+    # пробуємо перекласти чужий на наш: інакше той самий архів, названий двома
+    # способами, дав би дві різні відповіді про те, що в нас уже є.
+    repo = pack.repo_for_code("duck", raw) or pack.canon_repo(raw)
+    codes = pack.codes_for(repo, "duck")
+    # ⚠ Невідомий паку архів не є глухим кутом: у покажчику 43 архіви, і його
+    # власний код можна передати сюди як є. Мовчазна відмова тут закрила б
+    # рівно той випадок, заради якого зведений покажчик і додано, — «архів,
+    # якого ми ще не знаємо».
+    archive_code = codes[0] if codes else raw
+    src = _registry().get("duck")
+    card: dict[str, Any] = {}
+    why = ""
+    if src is None:
+        why = "джерела «duck» немає в реєстрі"
+    else:
+        try:
+            # Картку фонду вміє один покажчик, і протокол `Source` її не
+            # оголошує навмисно: це не спільна можливість, а заглушок контракт
+            # не приймає. Реєстр повертає джерело за id, тобто тип тут ширший
+            # за те, що насправді прийшло.
+            card = src.fond_card(archive_code, a.fond)  # type: ignore[attr-defined]
+        except SourceError as exc:
+            why = str(exc)
+        except Exception as exc:  # мережа, розмітка
+            why = f"{type(exc).__name__}: {exc}"
+    ours = _our_fond(repo, a.fond)
+    env = ok({"repo": repo, "fond": str(a.fond), "archive_code": archive_code,
+              "card": card, "ours": ours})
+    if why:
+        # 🔴 Порожня картка мусить мати причину. Без неї «покажчик про цей фонд
+        # не знає» і «покажчик не відповів» виглядають однаково — а це різниця
+        # між «фонду немає» і «спитай ще раз».
+        env.warn("card_unavailable", f"покажчик не дав картки: {why}")
+    if not ours["has_registry"]:
+        env.suggest("registry.plan",
+                    "скільки коштуватиме зібрати опис цього фонду")
+    return env
+
+
+def _our_fond(repo: str, fond: str) -> dict[str, Any]:
+    """Що по цьому фонду вже є в нас: реєстр, справи, кадри на диску.
+
+    Друга половина оцінки, і без неї перша веде до подвійної роботи: фонд, що
+    виглядає цікавим, регулярно виявляється вже зібраним.
+    """
+    out: dict[str, Any] = {"has_registry": False, "rows": 0, "on_disk": 0}
+    try:
+        from nyshporka.fonds import registry as R
+
+        for f in R.discover_fonds():
+            if not (str(f.get("fond")) == str(fond)
+                    and str(f.get("repo", "")).upper() == str(repo).upper()):
+                continue
+            rows = R.load_rows(f["id"])
+            s = R.summarize(rows, R.live_on_disk(f["repo"], f["fond"]))
+            out.update(has_registry=True, id=f["id"], label=f.get("label", ""),
+                       rows=s["rows"], on_disk=s["on_disk_live"],
+                       todo=s["todo"])
+            break
+    except Exception as exc:  # реєстри недоступні — це не привід валити картку
+        out["why"] = f"{type(exc).__name__}: {exc}"
+    return out
 
 
 class BrowseArgs(BaseModel):
@@ -326,7 +940,7 @@ def cases_list(a: CasesArgs) -> Envelope:
     """
     from nyshporka.cases import db
 
-    # 🔴 Знаменник рахується ЗАВЖДИ, навіть коли сторінок не просили. Доти
+    # 🔴 Знаменник рахується завжди, навіть коли сторінок не просили. Доти
     # видача казала лише «показано N», і 60 рядків із півтори тисячі виглядали
     # як уся відповідь — обрізаний список без знаменника нічим не кращий за
     # нуль без нього.
@@ -336,7 +950,7 @@ def cases_list(a: CasesArgs) -> Envelope:
                                     repo=a.repo, htr=a.htr, year=a.year,
                                     place=a.place, kind=a.kind)
     except FileNotFoundError:
-        # 🔴 «Реєстру ще немає» — це НОРМАЛЬНИЙ стан щойно створеного простору,
+        # 🔴 «Реєстру ще немає» — це нормальний стан щойно створеного простору,
         # а не поламка. Відмова тут була першим, що бачив новачок, відкривши
         # «Мої справи»: червоне «Не вийшло» замість порожнього переліку. Гірше
         # того, екран на відмові не малювався взагалі — разом із кнопкою 🔄,
@@ -377,7 +991,7 @@ def cases_list(a: CasesArgs) -> Envelope:
 @op("search.state", summary="Чи зібрано індекс прочитаного",
     mutates=False, agent=False, section="research")
 def search_state(_: NoArgs) -> Envelope:
-    """Знаменник екрана пошуку — ДО запиту, а не після.
+    """Знаменник екрана пошуку — до запиту, а не після.
 
     🔴 Пошук чеше лише зібране, і «не знайшлось» при повному й частковому
     індексі — різні відповіді. Показати це можна лише тут: у самій видачі це
@@ -412,7 +1026,7 @@ def search_index(a: IndexArgs) -> Envelope:
     без жодного слова про те, чим він зайнятий. Тому збирання — робота в
     черзі: її видно, її можна спинити, і вона робиться раз.
 
-    ⚠ Індекс — ПОХІДНЕ. Його можна видалити будь-коли; наступний пошук просто
+    ⚠ Індекс — похідне. Його можна видалити будь-коли; наступний пошук просто
     скаже, скільки прогонів лишилось поза ним.
     """
     from nyshporka import htr_store
@@ -445,11 +1059,14 @@ class SearchArgs(BaseModel):
         default="decode",
         description="decode — тексти прогонів; pages — виписані прізвища; "
                     "records — учасники розібраних записів")
-    case: str = Field(default="", description="обмежити однією справою")
+    case: str = Field(
+        default="",
+        description="обмежити однією справою: ключ «DAHMO/315/8433», шифра "
+                    "«ДАХмО 315-1-8433», шлях теки або ім'я прогону")
     thresh: int = Field(default=80, ge=50, le=100)
     # 🔴 Вікно, а не рядок. Рядок-хіт не розрізняє прізвищ зі спільним коренем,
     # а в одній парафії їх буває кілька: заміряно на метриках одного села — 78
-    # кандидатів верхівки розклались на ТРИ різні роди з тим самим коренем плюс
+    # кандидатів верхівки розклались на три різні роди з тим самим коренем плюс
     # причт, і за самим рядком вони зливаються в купу однаково правдоподібних
     # хітів. Розрізняє їх сусідство: перенесена половина слова читається лише
     # разом із наступним рядком, а стан і роль стоять у сусідньому.
@@ -469,12 +1086,12 @@ class SweepArgs(BaseModel):
 # `agent=False`: агентові довга робота через чергу недоступна — черга живе в
 # процесі застосунку. Йому лишається `search.run`, і це правильно: він працює
 # у межах справи, а не чеше корпус.
-@op("search.sweep", summary="Прочесати ВСЕ прочитане — робота в черзі",
+@op("search.sweep", summary="Прочесати все прочитане — робота в черзі",
     args=SweepArgs, mutates=False, long=True, agent=False, section="research")
 def search_sweep(a: SweepArgs) -> Envelope:
     """Той самий пошук, що `search.run`, але як робота з видимим поступом.
 
-    🔴 Навіщо друга операція, коли пошук уже є. Різниця не в тому, ЩО робиться,
+    🔴 Навіщо друга операція, коли пошук уже є. Різниця не в тому, що робиться,
     а скільки це триває: у межах справи пошук — це частка секунди, по всьому
     корпусу — хвилини. Дві хвилини синхронного запиту виглядають у браузері
     рівно як зависання: сторінка не відповідає й не каже, чому.
@@ -491,32 +1108,45 @@ def search_sweep(a: SweepArgs) -> Envelope:
 @op("search.run", summary="Знайти прізвище в тому, що вже прочитано",
     args=SearchArgs, mutates=False, section="research")
 def search_run(a: SearchArgs) -> Envelope:
-    """🔴 Нуль ЗАВЖДИ зі знаменником.
+    """🔴 Нуль завжди зі знаменником.
 
     Порожній результат від пошуку по декоду означає «в цих N прогонах не
     знайшлось», а не «цього немає»: декодовано завжди меншу частину того, що є
     на диску. Тому у відповіді йде `coverage` — по скількох прогонах і скількох
-    сторінках шукали. Без цього числа нуль читається як вирок.
+    сторінках шукали. Без цього числа нуль читається як доведений.
     """
     if a.where == "decode":
         from nyshporka import htr_store
 
-        res = htr_store.search(a.q, name=a.case or None, thresh=a.thresh,
-                               limit=a.limit, context=a.context)
-        runs = htr_store.list_cases()
-        # 🔴 Ключ називається `pages_done`. Поки тут стояло `pages`, знаменник
-        # був ТОТОЖНО НУЛЬОВИЙ: на просторі з 506 прогонами й 320 669
-        # прочитаними сторінками відповідь звучала «не знайшлось у 506
-        # прогонах (0 сторінок)». Це не описка у виводі, а зруйноване головне
-        # правило: нуль подавався зі знаменником, який сам був нулем, тобто
-        # читався як «нічого не прочитано» — і закривав напрям пошуку.
-        pages = sum(int(c.get("pages_done") or c.get("pages") or 0) for c in runs)
+        try:
+            res = htr_store.search(a.q, name=a.case or None, thresh=a.thresh,
+                                   limit=a.limit, context=a.context)
+        except ValueError as exc:
+            # Область пошуку не впізнано. Відмова тут нормативна (перелік
+            # прийнятних форм), і вона краща за мовчазний пошук по всьому
+            # корпусу: людина просила одну справу, і відповідь «шукали
+            # скрізь» на це питання не відповідає.
+            return fail(str(exc))
+        # 🔴 Знаменник береться з тієї самої відповіді, що й хіти. Поки він
+        # рахувався тут окремим `list_cases()`, він ігнорував `--case`: на
+        # просторі з 506 прогонами пошук по одній справі звітував «не
+        # знайшлось у 1 прогонах (320 669 сторінок)» — чисельник від справи,
+        # знаменник від усього простору. Раніше той самий рядок брав ключ
+        # `pages` замість `pages_done` і давав знаменник, тотожно рівний
+        # нулю. Обидва рази вада була тиха й читалась як відповідь.
+        pages = int(res.get("pages") or 0)
         scanned = res.get("cases") or 0
         blind = int(res.get("unindexed") or 0)
+        scope_kind = str(res.get("scope") or "all")
         env = ok({"hits": res.get("hits") or [],
                   "coverage": {"runs": scanned, "pages": pages,
                                "thresh": a.thresh,
-                               # 🔴 Скільки прогонів ЛИШИЛОСЬ поза пошуком.
+                               # Чим саме звужено пошук — щоб знаменник можна
+                               # було прочитати, не здогадуючись про область.
+                               "scope": scope_kind,
+                               "case": res.get("scope_key") or "",
+                               "shifra": res.get("scope_shifra") or "",
+                               # 🔴 Скільки прогонів лишилось поза пошуком.
                                # Це не деталь реалізації індексу, а знаменник:
                                # «не знайшлось у 400 з 1142» і «не знайшлось у
                                # 1142» — різні відповіді, і за другою закривають
@@ -529,26 +1159,61 @@ def search_run(a: SearchArgs) -> Envelope:
                      f"{blind} прогонів поза пошуком: їхній текст ще не "
                      f"проіндексовано. Прочесано {scanned}.")
             env.suggest("search.index", "зібрати індекс решти прогонів")
-        if not (res.get("hits") or []):
+        if scope_kind == "case" and not int(res.get("runs_scoped") or 0):
+            # Справу впізнано, але прочитаного в ній немає. Це зовсім інша
+            # відповідь, ніж «шукали й не знайшли», і зливати їх в одну —
+            # означає видати непрочитану справу за перевірену.
+            env.warn("case_not_read",
+                     f"справу {res.get('scope_shifra') or a.case} впізнано, але "
+                     f"жодного прогону в ній немає — шукати нема в чому.")
+            env.suggest("read.plan", "прочитати цю справу рушієм")
+        elif not (res.get("hits") or []) and not res.get("error"):
+            # ⚠ Числа йдуть після двокрапки, а не в узгодженні з іменником:
+            # «у 2 прогонах (3 сторінок)» доводилось би відмінювати під кожне
+            # число, і на «1 прогонах» це щоразу вилазило.
+            if scope_kind == "case":
+                where = f"у справі {res.get('scope_shifra') or res.get('scope_key')}"
+            elif scope_kind == "run":
+                where = f"у прогоні {a.case}"
+            else:
+                where = "у прочитаному"
             env.warn("zero_with_denominator",
-                     f"не знайшлось у {scanned} прогонах "
-                     f"({pages} сторінок). Це НЕ означає, що запису немає — "
-                     f"означає, що його немає в прочитаному.")
+                     f"не знайшлось {where} — прочесано прогонів: {scanned}, "
+                     f"сторінок: {pages}")
         return env
 
     from nyshporka.pagestore import query
 
+    # 🔴 Той самий `--case` мусить означати ту саму справу в усіх трьох гілках.
+    # Сховище сторінок звіряє ключ точним рівнянням, тож шифра, шлях чи ім'я
+    # прогону давали тут тихий нуль — при тому, що в довідці прапорець один і
+    # обіцяє «лише в цій справі».
+    case_key = a.case or None
+    if case_key:
+        from nyshporka import htr_store
+
+        try:
+            scope = htr_store.runs_for_scope(case_key)
+        except ValueError as exc:
+            return fail(str(exc))
+        if not scope["key"]:
+            return fail(
+                f"«{a.case}» — прогін без ключа справи, а виписане ключується "
+                f"справою. Дай ключ або шифру справи, або прив'яжи прогін: "
+                f"nysh cases bind")
+        case_key = scope["key"]
+
     if a.where == "pages":
-        res = query.grep_surnames(a.q, thresh=a.thresh, case_key=a.case or None,
+        res = query.grep_surnames(a.q, thresh=a.thresh, case_key=case_key,
                                   limit=a.limit)
     else:
-        res = query.grep_records(a.q, thresh=a.thresh, case_key=a.case or None,
+        res = query.grep_records(a.q, thresh=a.thresh, case_key=case_key,
                                  limit=a.limit)
-    # 🔴 Знаменник тут ТАКИЙ САМИЙ обов'язковий, як у пошуку по декоду, — і
+    # 🔴 Знаменник тут такий самий обов'язковий, як у пошуку по декоду, — і
     # довго його не було саме тут, у гілці, найближчій до людини. «Не
     # знайшлось у виписаному» означає лише «серед того, що вже занесли оком»:
     # занесена завжди менша частина того, що на диску. Без цього числа нуль
-    # читається як вирок про рід, а він про обсяг роботи.
+    # читається як доведений нуль, хоч він про обсяг роботи.
     hits = res.get("hits") or []
     env = ok({"hits": hits, "total": res.get("total", len(hits)),
               "coverage": {"cases": res.get("cases") or 0,
@@ -560,9 +1225,8 @@ def search_run(a: SearchArgs) -> Envelope:
         where = ("виписаних прізвищах" if a.where == "pages"
                  else "учасниках розібраних записів")
         env.warn("zero_with_denominator",
-                 f"не знайшлось у {where}: переглянуто {res.get('cases') or 0} "
-                 f"справ. Це НЕ означає, що запису немає — означає, що його "
-                 f"немає в занесеному оком.")
+                 f"не знайшлось у {where}: переглянуто "
+                 f"{res.get('cases') or 0} справ")
     return env
 
 
@@ -586,7 +1250,7 @@ def page_text(a: PageArgs) -> Envelope:
     if txt is None:
         return fail(f"немає сторінки «{a.page}» у прогоні «{a.run}»")
     geo = S.page_lines(a.run, a.page) or {}
-    # 🔴 Текст і геометрія — під РІЗНИМИ ключами. `read_page_text` віддає рядки
+    # 🔴 Текст і геометрія — під різними ключами. `read_page_text` віддає рядки
     # тексту саме як `lines`, і накладання геометрії тим самим ім'ям знищувало
     # прочитане: відповідь лишалась `ok`, але тексту в ній не було зовсім.
     # Гортач через це показував порожню сторінку — тобто головний екран
@@ -620,7 +1284,7 @@ class ViewArgs(BaseModel):
 
 # 🔴 `agent=False`: агентові перелік прогонів нічого не додає — він і так
 # приходить із назвою справи, а зайвий tool росте в переліку, який модель мусить
-# читати цілком при кожному виклику. Тут він потрібен ВІКНУ: імена прогонів
+# читати цілком при кожному виклику. Тут він потрібен вікну: імена прогонів
 # довгі й схожі, і набирати їх руками означає помилятись у назві саме тоді, коли
 # шукаєш конкретну сторінку.
 class RunsArgs(BaseModel):
@@ -638,7 +1302,7 @@ class RunsArgs(BaseModel):
 def runs_list(a: RunsArgs) -> Envelope:
     """Перелік прочитаного — для вибору в гортачі.
 
-    ⚠ Рушій тут ЧАСТИНА відповіді, а не прикраса: на одну справу прогонів
+    ⚠ Рушій тут частина відповіді, а не прикраса: на одну справу прогонів
     буває кілька (латинку читає один, кирилицю інший), і без нього два рядки
     з однаковою назвою нічим не відрізнити.
     """
@@ -662,7 +1326,7 @@ def runs_list(a: RunsArgs) -> Envelope:
             str(r.get(k) or "") for k in ("name", "shifra", "title", "case_key")
         ).casefold()]
     total = len(runs)
-    # 🔴 Сторінка ріже ПІСЛЯ фільтрів і НЕ чіпає знаменників: `total` — скільки
+    # 🔴 Сторінка ріже після фільтрів і не чіпає знаменників: `total` — скільки
     # підпало, `everything` — скільки їх узагалі. Без другого числа фільтр
     # «без справи» читався б як «прогонів усього 123».
     size = a.page_size
@@ -696,15 +1360,15 @@ class LinesArgs(BaseModel):
     page: str = Field(description="скан сторінки")
 
 
-# 🔴 `agent=False`: це геометрія для ОКА. Агентові рамки нічого не кажуть — він
+# 🔴 `agent=False`: це геометрія для ока. Агентові рамки нічого не кажуть — він
 # читає текст, а не дивиться на пікселі; tool, який віддає координати, лише
 # росте в переліку.
 @op("page.lines", summary="Рамки рядків сторінки — щоб клікати по знімку",
     args=LinesArgs, mutates=False, section="htr", agent=False)
 def page_lines(a: LinesArgs) -> Envelope:
-    """Геометрія рядків у координатах ТОГО САМОГО зображення, що показують.
+    """Геометрія рядків у координатах того самого зображення, що показують.
 
-    ⚠ Відсутність рамок — НЕ помилка: старі прогони їх не писали зовсім. Тоді
+    ⚠ Відсутність рамок — не помилка: старі прогони їх не писали зовсім. Тоді
     відповідь чесно каже `has: false` з причиною, і гортач лишається без
     оверлея замість того, щоб виглядати зламаним.
     """
@@ -714,7 +1378,7 @@ def page_lines(a: LinesArgs) -> Envelope:
         geo = htr_store.page_lines(a.run, a.page)
     except Exception as exc:
         return fail(f"{type(exc).__name__}: {exc}")
-    # 🔴 «Прогону чи сторінки немає» і «рамок не записано» — РІЗНІ відповіді.
+    # 🔴 «Прогону чи сторінки немає» і «рамок не записано» — різні відповіді.
     # `page_lines` віддає `None` на обидва, і зведення їх до одного застереження
     # каже людині лагодити не те: вона шукала б старий прогін, тоді як насправді
     # помилилась у назві. Порожня відповідь тут ще й іншої форми — без `has`, —
@@ -729,13 +1393,13 @@ def page_lines(a: LinesArgs) -> Envelope:
     return env
 
 
-@op("page.view", summary="Подивитись на рядок чи сторінку ОКОМ", args=ViewArgs,
+@op("page.view", summary="Подивитись на рядок чи сторінку оком", args=ViewArgs,
     mutates=False, section="htr")
 def page_view(a: ViewArgs) -> Envelope:
     """🔴 Центральна операція звірки: виявити ≠ перевірити.
 
     Машина подає кандидата, вирішує око — і другий рушій тут не суддя, бо
-    ознака в пікселях. Дефолт — РЯДОК: ціла сторінка коштує моделі вчетверо
+    ознака в пікселях. Дефолт — рядок: ціла сторінка коштує моделі вчетверо
     дорожче, а звірок за сеанс бувають десятки.
     """
     from nyshporka.htr.view import ViewError, shot
@@ -767,7 +1431,7 @@ class CaseRegisterArgs(BaseModel):
     note: str = Field(default="", description="звідки взято, що незрозуміло")
     adopt: bool = Field(
         default=False,
-        description="взяти теку під облік, якщо вона лежить ПОЗА простором: "
+        description="взяти теку під облік, якщо вона лежить поза простором: "
                     "оголосити її коренем справ у nyshporka.toml")
     reindex: bool = Field(
         default=True,
@@ -777,14 +1441,14 @@ class CaseRegisterArgs(BaseModel):
 @op("case.register", summary="Завести або виправити справу: шифра, назва, роки",
     args=CaseRegisterArgs, mutates=True)
 def case_register(a: CaseRegisterArgs) -> Envelope:
-    """Зробити теку зі сканами СПРАВОЮ.
+    """Зробити теку зі сканами справою.
 
     🔴 Без шифри тека лишається купою файлів: у неї немає ключа, а отже ні
     обліку прочитаного, ні місця в реєстрі, ні можливості послатись на
-    знахідку. Опис пишеться В ТЕКУ — вона переїжджає між дисками й потрапляє
+    знахідку. Опис пишеться В теку — вона переїжджає між дисками й потрапляє
     до колег, і опис мусить їхати з нею.
 
-    🔴 Бібліотека перезбирається ОДРАЗУ. Інакше людина заводить справу, іде в
+    🔴 Бібліотека перезбирається одразу. Інакше людина заводить справу, іде в
     «Мої справи» — і не бачить її там; виглядає це як «нічого не спрацювало»,
     хоча опис записаний. На великому просторі це коштує секунд двадцять, і це
     чесна ціна: система щойно дізналась про нову справу.
@@ -825,7 +1489,7 @@ def case_register(a: CaseRegisterArgs) -> Envelope:
         else:
             env.data["reachable"] = False
             env.warn("outside_workspace",
-                     "тека лежить поза простором, тож у переліках справа НЕ "
+                     "тека лежить поза простором, тож у переліках справа не "
                      "з'явиться. Поставте позначку «взяти теку під облік» — "
                      "і вона буде видима там, де лежить, без перенесення "
                      "файлів.")
@@ -848,14 +1512,14 @@ def case_register(a: CaseRegisterArgs) -> Envelope:
     return env
 
 
-# `agent=False` — це питання про МАШИНУ, а не про дослідження: агентові
+# `agent=False` — це питання про машину, а не про дослідження: агентові
 # середовище описує `htr.env`, а решту він бачить у відмовах операцій.
 @op("setup.check", summary="Чи готова ця машина читати рукопис", agent=False)
 def setup_check(_: NoArgs) -> Envelope:
     """🔴 Найважливіше питання аматора — і до нього не було входу з екрана.
 
     Людина, яка щойно поставила застосунок, має дізнатись, чи все складеться,
-    ДО того, як вкладе три тисячі сканів і чекатиме ніч. Ця перевірка була
+    до того, як вкладе три тисячі сканів і чекатиме ніч. Ця перевірка була
     лише в командному рядку (`nysh doctor`), а на екрані картка «показати на
     прикладі» віддавала сирий JSON про середовище рушіїв — тобто відповідала
     не на те питання й не тими словами.
@@ -898,7 +1562,7 @@ class SampleArgs(BaseModel):
                                     "потрібно лише якщо зразок зіпсовано")
 
 
-# `agent=False`, як і в сусіднього `setup.check`: зразок розгортає ЛЮДИНА, яка
+# `agent=False`, як і в сусіднього `setup.check`: зразок розгортає людина, яка
 # щойно поставила застосунок і хоче побачити, що він робить. Агент застосунку не
 # ставить, а місце в переліку tool'ів коштує — там стеля читабельності.
 @op("sample.install", summary="Розгорнути зразкову справу в просторі",
@@ -906,10 +1570,10 @@ class SampleArgs(BaseModel):
 def sample_install(a: SampleArgs) -> Envelope:
     """📖 Три аркуші справжньої архівної справи з готовим декодом.
 
-    🔴 Зразок НЕ вдає, ніби ваги вже є. Прочитати ці аркуші заново нічим —
+    🔴 Зразок не вдає, ніби ваги вже є. Прочитати ці аркуші заново нічим —
     моделі в цій версії не викладені; зате все, що йде після читання, працює
     одразу: гортач із рамкою рядка, пошук у декоді, реєстр, сховище
-    прочитаного. Саме цей ланцюг людина й має побачити ДО того, як вкладе три
+    прочитаного. Саме цей ланцюг людина й має побачити до того, як вкладе три
     тисячі власних сканів і чекатиме ніч.
     """
     from nyshporka.core.workspace import workspace
@@ -938,7 +1602,7 @@ class BindArgs(BaseModel):
 
 
 # 🔴 `agent=False` — і це не економія місця в переліку, а суть операції. Вона
-# вписує РІШЕННЯ ЛЮДИНИ, найсильніше в реєстрі: воно перебиває всі п'ять
+# вписує рішення людини, найсильніше в реєстрі: воно перебиває всі п'ять
 # автоматичних каналів резолвера. Агент, якому дати цю ручку, замість «не знаю»
 # видасть правдоподібну прив'язку — а помилка тут тиха й довговічна: чужий
 # декод під правильною шифрою, з якого потім цитують знахідки. Побачити нічиї
@@ -1050,7 +1714,7 @@ class PagesStatusArgs(BaseModel):
 @op("pages.status", summary="Що в цій справі вже дивились оком, а що ні",
     args=PagesStatusArgs, mutates=False, section="research")
 def pages_status(a: PagesStatusArgs) -> Envelope:
-    """🔴 Гейт ПЕРЕД переглядом, а не звіт після.
+    """🔴 Гейт перед переглядом, а не звіт після.
 
     Найдорожча помилка в довгій справі — передивитись ті самі аркуші вдруге:
     тисяча сторінок коштує вечора, і другий вечір на них не додає нічого. Тому
@@ -1092,7 +1756,7 @@ class PageNoteArgs(BaseModel):
         "birth", "marriage", "death", "confession", "revision", "census",
         "index", "title", "cover", "flyleaf", "blank", "illegible", "mixed",
         "other"] = Field(description="що це за сторінка")
-    surnames: str = Field(default="", description="кома-список ЯК НАПИСАНО в джерелі")
+    surnames: str = Field(default="", description="кома-список ЯК написано в джерелі")
     places: str = Field(default="")
     years: str = Field(default="", description="кома-список років: 1858,1859")
     sheet: str = Field(default="", description="архівний аркуш: 31зв-32")
@@ -1107,13 +1771,13 @@ class PageNoteArgs(BaseModel):
 @op("pages.note", summary="Занести переглянуту сторінку в облік", args=PageNoteArgs,
     mutates=True, section="research")
 def pages_note(a: PageNoteArgs) -> Envelope:
-    """🔴 БЕЗ ВИНЯТКІВ: кожен скан, який реально відкривали, заноситься.
+    """🔴 без винятків: кожен скан, який реально відкривали, заноситься.
 
     Навіть якщо він виявився пустишкою. Негативний результат коштує тих самих
     очей, що й позитивний, і без запису наступна сесія перегляне той самий
-    аркуш ще раз. У коментарі варто писати, ЧОМУ це не те.
+    аркуш ще раз. У коментарі варто писати, чому це не те.
 
-    ⚠ `status=full` ставиться, ЛИШЕ якщо виписано ВСІ прізвища сторінки —
+    ⚠ `status=full` ставиться, лише якщо виписано всі прізвища сторінки —
     інакше `partial`. Від цього залежить, чи можна довіряти нулю по цій справі.
     """
     from pydantic import ValidationError
@@ -1138,11 +1802,11 @@ def pages_note(a: PageNoteArgs) -> Envelope:
     env = ok({"case": ref.key, "shifra": ref.shifra, **report.as_dict()})
     if a.status == "full" and not note.surnames:
         env.warn("full_without_surnames",
-                 "status=full означає «виписано ВСІ прізвища сторінки», а їх "
+                 "status=full означає «виписано всі прізвища сторінки», а їх "
                  "тут жодного. Якщо сторінка не порожня — це має бути partial")
     if a.method in ("htr", "text"):
         env.warn("not_eye_verified",
-                 "метод каже, що читали ДЕКОД, а не зображення — така гілка "
+                 "метод каже, що читали декод, а не зображення — така гілка "
                  "успадковує чужі помилки; у коментарі варто позначити «оком не звірено»")
     return env
 
@@ -1196,7 +1860,47 @@ def records_add(a: RecordsAddArgs) -> Envelope:
 # ── експорт ──────────────────────────────────────────────────────────────────
 class ExportArgs(BaseModel):
     case: str = Field(description="справа у будь-якому форматі")
-    what: Literal["pages", "records"] = "records"
+    what: Literal["acts", "records", "pages", "tally"] = Field(
+        default="acts",
+        description="acts — рядок=акт, ролі в колонки · records — рядок=учасник "
+                    "(тут фільтрується прізвище, стан, вік) · pages · tally")
+
+
+def _export_case_file(case: str) -> tuple[Any, Any] | Envelope:
+    """Справа зі сховища або готовий конверт відмови — спільне для обох операцій."""
+    from nyshporka.pagestore import store
+
+    try:
+        ref = store.resolve_case(case)
+    except ValueError as exc:
+        return fail(str(exc))
+    cf = store.load_case(ref)
+    if cf is None:
+        return fail(f"по справі {ref.shifra} ще нічого не занесено")
+    return ref, cf
+
+
+def _empty_export_note(env: Envelope, shifra: str, what: str,
+                       cf: Any = None) -> Envelope:
+    """🔴 Порожня таблиця мусить сказати, ЧОМУ вона порожня.
+
+    Без цього рядка вона читається як «у книзі цього немає», хоча означає
+    «цього ще не вичитували»: аркуші могли бути прочитані машиною, а акти в
+    поля не розібрані. Різниця тут та сама, що між нулем і відсутнім
+    знаменником.
+
+    І якщо в справі є хоч щось інше, це називається: інакше людина вирішує, що
+    по справі немає нічого, маючи в сховищі перелік прізвищ по аркушах.
+    """
+    env.warn(
+        "empty_export",
+        f"у справі {shifra} немає нічого типу «{what}» — це стан обліку, а не "
+        f"властивість справи: акти в поля, схоже, ще не розбирали")
+    if cf is not None and what != "pages" and cf.pages:
+        env.warn("pages_are_there",
+                 f"але аркушів у сховищі {len(cf.pages)} — виписка «pages» "
+                 f"віддасть їхні прізвища й географію вже зараз")
+    return env
 
 
 @op("export.case", summary="Викласти прочитане зі справи таблицею", args=ExportArgs,
@@ -1204,45 +1908,117 @@ class ExportArgs(BaseModel):
 def export_case(a: ExportArgs) -> Envelope:
     """Прочитане зі справи — у плаский вигляд, придатний до таблиці.
 
-    🔴 Кожен рядок несе СКАН, а не лише текст. Виписка без посилання на аркуш —
+    🔴 Кожен рядок несе скан, а не лише текст. Виписка без посилання на аркуш —
     це переказ: перевірити його можна тільки перечитавши всю справу, тобто
     ніяк. Саме тому тут немає режиму «лише імена».
+
+    Віддає дані; файл пише `export.write`. Самі вигляди й правила їх побудови —
+    у `nyshporka.tabular`.
     """
-    from nyshporka.pagestore import store
+    from nyshporka import tabular
+
+    got = _export_case_file(a.case)
+    if isinstance(got, Envelope):
+        return got
+    ref, cf = got
+
+    columns, rows = tabular.build(cf, a.what)
+    # Шапки їдуть разом із даними, а не складаються на боці читача: інакше
+    # браузер і командний рядок називали б ті самі колонки по-різному, і
+    # розійшлись би вони тихо.
+    env = ok({"case": ref.key, "shifra": ref.shifra, "what": a.what,
+              "columns": columns, "rows": rows,
+              "labels": {c: tabular.label_for(c, a.what) for c in columns}})
+    if not rows:
+        _empty_export_note(env, ref.shifra, a.what, cf)
+    return env
+
+
+class ExportWriteArgs(BaseModel):
+    case: str = Field(description="справа у будь-якому форматі")
+    out: str = Field(description="куди писати файл; шлях обовʼязковий і явний")
+    what: Literal["acts", "records", "pages", "tally", "all"] = Field(
+        default="acts", description="«all» — усі вигляди аркушами, лише для xlsx")
+    format: Literal["csv", "tsv", "xlsx"] = Field(
+        default="xlsx", description="xlsx потребує openpyxl; csv/tsv — ні")
+    headers: Literal["uk", "raw"] = Field(
+        default="uk", description="uk — людські шапки, raw — машинні ключі полів")
+    overwrite: bool = Field(
+        default=False, description="дозволити перезапис наявного файлу")
+
+
+# `agent=False`: файл лягає ЗА МЕЖІ простору, у теку, яку називає людина. Це
+# рішення про власний архів, а не крок конвеєра, — той самий випадок, що й
+# `roots.add`. Агентові лишається `export.case`: ті самі дані, без запису на
+# чужий диск. Плюс стеля переліку tool'ів насичена, і місце в ній коштує
+# дорожче за зручність.
+@op("export.write", summary="Записати таблицю справи файлом (XLSX/CSV/TSV)",
+    args=ExportWriteArgs, mutates=False, agent=False, section="research")
+def export_write(a: ExportWriteArgs) -> Envelope:
+    """Виписка зі справи файлом — щоб віднести її в Ексель чи чужу програму.
+
+    🔴 Шлях обовʼязковий і нікуди не підставляється сам. Людина вивантажує, щоб
+    забрати дані за МЕЖІ застосунку, і застосунок не має права вирішувати за
+    неї, у якій теці вони опиняться. З тієї самої причини наявний файл не
+    перезаписується мовчки.
+
+    `mutates=False`: сховище не змінюється — файл лягає назовні.
+    """
+    from nyshporka import tabular
+
+    got = _export_case_file(a.case)
+    if isinstance(got, Envelope):
+        return got
+    ref, cf = got
+
+    if a.what == "all" and a.format != "xlsx":
+        return fail("«all» кладе кілька виглядів аркушами, а це вміє лише xlsx; "
+                    f"для csv/tsv назвіть один вигляд: {', '.join(tabular.VIEWS)}")
+
+    dest = Path(a.out).expanduser()
+    if dest.exists() and not a.overwrite:
+        return fail(f"{dest} уже існує; додайте overwrite, щоб перезаписати")
+
+    views = list(tabular.VIEWS) if a.what == "all" else [a.what]
+    built = [(v, *tabular.build(cf, v)) for v in views]
+    human = a.headers == "uk"
 
     try:
-        ref = store.resolve_case(a.case)
-    except ValueError as exc:
+        if a.format == "xlsx":
+            # 🔴 Порожній вигляд аркушем не стає: аркуш «Підсумки» з самою
+            # шапкою читається як «підсумків у книзі немає», хоча означає, що їх
+            # не вичитували. Що саме пропущено — сказано попередженням нижче.
+            # Якщо порожні всі, лишається один аркуш: файл без жодного аркуша
+            # Ексель не відкриє взагалі.
+            sheets = [(v, c, r) for v, c, r in built if r] or built[:1]
+            report = tabular.write_xlsx(dest, sheets, human=human)
+        else:
+            _, columns, rows = built[0]
+            report = tabular.write_delimited(
+                dest, columns, rows, view=built[0][0],
+                sep=tabular.SEPARATOR[a.format], human=human)
+    except tabular.ExportError as exc:
         return fail(str(exc))
-    cf = store.load_case(ref)
-    if cf is None:
-        return fail(f"по справі {ref.shifra} ще нічого не занесено")
+    except OSError as exc:
+        return fail(f"не вдалося записати {dest}: {exc}")
 
-    if a.what == "pages":
-        rows = [{"scan": n.scan, "type": n.page_type, "status": n.status,
-                 "sheet": n.sheet, "surnames": "; ".join(n.surnames),
-                 "places": "; ".join(n.places),
-                 "years": "; ".join(str(y) for y in n.years),
-                 "method": n.method, "comment": n.comment}
-                for n in cf.pages.values()]
-    else:
-        rows = []
-        for rec in cf.records:
-            for p in rec.persons:
-                rows.append({
-                    "rid": rec.rid, "type": rec.rtype,
-                    "date": rec.date.value if rec.date else "",
-                    "scans": "; ".join(rec.scans), "sheet": rec.sheet,
-                    "row": rec.row, "role": p.role, "name": p.name,
-                    "surname": p.surname or "", "patronymic": p.patronymic or "",
-                    "sex": p.sex or "", "estate": p.estate or "",
-                    "age": p.age or "", "place": p.place or ""})
     env = ok({"case": ref.key, "shifra": ref.shifra, "what": a.what,
-              "columns": list(rows[0]) if rows else [], "rows": rows})
-    if not rows:
-        env.warn("empty_export",
-                 f"у справі {ref.shifra} немає нічого типу «{a.what}» — "
-                 f"це стан обліку, а не властивість справи")
+              "format": a.format, **report,
+              "views": [v for v, _, r in built if r]})
+    if not report["rows"]:
+        _empty_export_note(env, ref.shifra, a.what, cf)
+    skipped = [v for v, _, r in built if not r]
+    if skipped and a.what == "all" and report["rows"]:
+        env.warn("views_skipped",
+                 "порожні вигляди аркушами не стали: " + ", ".join(skipped))
+    if report["truncated"]:
+        env.warn("cells_truncated",
+                 f"{report['truncated']} комірок обрізано на межі формату "
+                 f"(32767 символів) — повний текст лишається у сховищі")
+    if report["cleaned"]:
+        env.warn("chars_stripped",
+                 f"{report['cleaned']} комірок містили керівні символи, яких "
+                 f"Ексель не приймає, — їх прибрано з ФАЙЛУ, не зі сховища")
     return env
 
 
@@ -1260,20 +2036,20 @@ class CaseInfoArgs(BaseModel):
         default="", description="письмо, якщо вирішили самі")
 
 
-# `agent=False`: це картка ДЛЯ ОКА перед довгою роботою. Агент не витрачає ніч
+# `agent=False`: це картка для ока перед довгою роботою. Агент не витрачає ніч
 # карти й не звіряє письмо по перших сторінках — йому вистачає `read.plan`.
 @op("htr.case_info", summary="Що це за справа й чим її читати — ДО прогону",
     args=CaseInfoArgs, mutates=False, agent=False, section="htr")
 def htr_case_info(a: CaseInfoArgs) -> Envelope:
     """Опис справи, письмо з причиною, покриття рушіями й розриви.
 
-    🔴 ПИСЬМО ЙДЕ З ПРИЧИНОЮ, і причина важить більше за саме письмо. Здогад
+    🔴 письмо йде З причиною, і причина важить більше за саме письмо. Здогад
     із назви теки й запис у паспорті справи — різні за надійністю на порядок,
     а на екрані виглядали б однаково. Помилка тут не дає збою: вона дає
     осмислене на вигляд сміття через годину роботи.
 
     🔴 «Прогін є» мовчки читається як «справу прочитано». Для тримовної книги
-    це неправда: один рушій закриває лише СВОЄ письмо, і половина сторінок
+    це неправда: один рушій закриває лише своє письмо, і половина сторінок
     лишається непрочитаною при зеленому статусі. Тому розриви називаються
     окремо від прогонів.
     """
@@ -1290,32 +2066,33 @@ def htr_case_info(a: CaseInfoArgs) -> Envelope:
                  "шлях: перегляд і читання не рекурсивні")
     if card.get("script") == "unknown":
         env.warn("script_unknown",
-                 "письмо невідоме, і це ПОВНА відповідь, а не порожня: "
+                 "письмо невідоме, і це повна відповідь, а не порожня: "
                  "мовчазний здогад «кирилиця» дав би сміття, схоже на текст")
     elif card.get("script_trust") == "folder":
         env.warn("script_guessed", card.get("script_why") or "")
     if card.get("script") == "mixed":
         env.warn("mixed_script",
-                 "у справі два письма — потрібні ДВА прогони окремими теками: "
+                 "у справі два письма — потрібні два прогони окремими теками: "
                  "один рушій закриє лише своє")
     for gap in card.get("gaps") or []:
         env.warn(str(gap.get("kind") or "gap"), str(gap.get("text") or ""))
     if not card.get("found"):
-        env.suggest("case.register", "описати теку — без шифри прогін ляже нічиїм")
+        env.suggest("case.register",
+                    "описати теку — без шифри прогін не прив'яжеться до справи")
     return env
 
 
 class ReadArgs(BaseModel):
-    case_dir: str = Field(description="тека зі сканами (ПЛАСКА, без підтек)")
+    case_dir: str = Field(description="тека зі сканами (пласка, без підтек)")
     out_dir: str = Field(default="", description="куди класти текст; порожньо = у простір")
     script: Literal["", "latin", "cyrillic"] = Field(
         default="", description="письмо; порожньо = вгадати з імені теки")
     second_voice: bool = Field(
         default=True,
-        description="читати ще й другим рушієм — він помиляється ІНАКШЕ")
+        description="читати ще й другим рушієм — він помиляється інакше")
     case_key: str = Field(default="", description="шифра справи у мету прогону")
     # ── важелі для досвідчених ───────────────────────────────────────────────
-    # 🔴 Прокинуто рівно ті, у яких є ЗМІРЯНЕ правило користування. Ручка без
+    # 🔴 Прокинуто рівно ті, у яких є зміряне правило користування. Ручка без
     # такого правила — пастка: її крутять навмання, а ціна помилки тут ніч
     # роботи й текст, який виглядає осмисленим.
     model: str = Field(default="", description="ваги замість добраних самим")
@@ -1327,12 +2104,12 @@ class ReadArgs(BaseModel):
                          description="скільки процесів ділять карту; "
                                      "вирішує вільна VRAM, а не ядра")
     seg_height: int = Field(default=0, ge=0, le=4000,
-                            description="висота сегментації; ЄДИНИЙ важіль, "
+                            description="висота сегментації; єдиний важіль, "
                                         "що коштує якістю пошуку")
     device: str = Field(default="", description="cuda:0 · cpu")
 
 
-# `agent=False`: план рахує й сам `read.start`, а людині він потрібен ОКРЕМО —
+# `agent=False`: план рахує й сам `read.start`, а людині він потрібен окремо —
 # щоб побачити його до того, як натисне «читати». Агентові двох tool'ів на
 # одну дію не треба.
 @op("read.plan", summary="Чим і як читатимемо цю справу — ДО запуску",
@@ -1356,11 +2133,11 @@ def read_plan(a: ReadArgs) -> Envelope:
         # Здогад про письмо слабкий за побудовою — з імені теки нічого не
         # видно. Мовчазний здогад тут дав би тихе сміття.
         env.warn("script_guessed",
-                 f"письмо «{p.script}» ВГАДАНО з імені теки. Помилка тут дає "
+                 f"письмо «{p.script}» вгадано з імені теки. Помилка тут дає "
                  f"не збій, а осмислене на вигляд сміття — звірте перші "
                  f"сторінки або вкажіть письмо явно")
     if a.seg_height:
-        # 🔴 Єдиний важіль, що коштує ЯКІСТЮ, а не лише часом, — і мовчати про
+        # 🔴 Єдиний важіль, що коштує якістю, а не лише часом, — і мовчати про
         # це не можна: збій він дає не одразу, а через місяць, коли по декоду
         # шукають прізвище й не знаходять.
         env.warn("seg_height_costs_quality",
@@ -1368,13 +2145,13 @@ def read_plan(a: ReadArgs) -> Envelope:
                  f"1200 ≈ −10% повноти пошуку. Це не швидкість задарма")
     if a.workers > 1:
         env.warn("workers_share_the_card",
-                 f"{a.workers} процеси ділять одну карту: виграш дає ВІЛЬНА "
+                 f"{a.workers} процеси ділять одну карту: виграш дає вільна "
                  f"VRAM, а не ядра. Приймач — симптом (чи не впало все), а не "
                  f"секунди")
     if p.voice is None and p.script == "cyrillic":
         env.warn("single_voice",
                  "другого голосу немає — читатиме один рушій. Другий помиляється "
-                 "ІНАКШЕ й витягує те, де перший підставив правдоподібне слово")
+                 "інакше й витягує те, де перший підставив правдоподібне слово")
     return env
 
 
@@ -1390,7 +2167,7 @@ def read_start(a: ReadArgs) -> Envelope:
     в процесі й друкує прогрес — так і задумано, бо прогін ставлять на ніч,
     часто по ssh. Черга ж потрібна там, де роботу замовляють з іншого вікна:
     `nysh serve`, далі `job.query`. Ця відповідь навмисно називає обидва шляхи
-    ДО виклику (`nysh op read.start --describe`), бо дізнатись про режим
+    до виклику (`nysh op read.start --describe`), бо дізнатись про режим
     постфактум означає витратити хід на відмову.
 
     ⚠ `nysh read` не ідемпотентний: другий запуск по тій самій теці б'ється з
@@ -1410,9 +2187,9 @@ def acquire_start(a: AcquireArgs) -> Envelope:
     посиланням на завдання, а не очікуванням.
 
     Шлях без черги — команда `nysh get <джерело> <ref> --out <тека>`: вона
-    друкує маніфест ДО завантаження, тож обсяг видно перед тим, як його брати.
+    друкує маніфест до завантаження, тож обсяг видно перед тим, як його брати.
     Черга ж є лише в піднятому застосунку (`nysh serve`), і саме тому режим
-    названо тут — щоб він був відомий ДО виклику, а не з відмови.
+    названо тут — щоб він був відомий до виклику, а не з відмови.
     """
     return fail("завантаження виконує застосунок — підніміть його командою "
                 "`nysh serve` або скористайтесь `nysh get`")
@@ -1457,27 +2234,214 @@ def job_query(a: JobArgs) -> Envelope:
 
 
 # ── профіль дослідження ──────────────────────────────────────────────────────
-# `agent=False` — це конфіг дослідження, а не дія. Читається файлом.
-@op("profile.show", summary="Чий рід шукаємо: форми, корені, парадигма",
-    agent=False)
-def profile_show(_: NoArgs) -> Envelope:
+#: Що саме людина втрачає без профілю. Формулювання спільне для всіх трьох
+#: облич, і воно навмисно каже правду про СЬОГОДНІШНІЙ код.
+#:
+#: 🔴 Тут стояло «пошук працюватиме на прізвище чужого дослідження». Це було
+#: не так: `q` у `search.run` обов'язкове, дефолтного прізвища в пакеті немає
+#: ніде, і взятись чужому не було звідки. Фраза лишилась від конвеєра, де рід
+#: жив константами в модулях (`htr/runner.py`), і лякала вигаданим ризиком —
+#: заразом ховаючи справжній: без профілю всі написання прізвища доводиться
+#: пригадувати щоразу самому.
+NO_PROFILE = ("рід не названо: прізвище й усі його написання доведеться "
+              "набирати щоразу руками — а рушій калічить саме середину слова, "
+              "тож пригадати їх усі важче, ніж здається")
+
+
+def _profile_payload(p: Any) -> dict[str, Any]:
+    from nyshporka.core import morph
+
+    return {"present": True,
+            "name": p.name, "display": p.display, "paradigm": p.paradigm_id,
+            "stems": p.stems, "roots": [r for r, _ in p.roots],
+            "substrings": list(p.substrings),
+            "spellings": p.all_spellings(),
+            "forms": {o: p.forms(o) for o in p.stems if o in morph.ORTHOGRAPHIES},
+            "selftest_mode": (p.selftest or {}).get("mode", "strict")}
+
+
+def _profile_shell(env: Envelope) -> dict[str, Any]:
+    """Довідка, потрібна формі незалежно від того, чи профіль є.
+
+    Віддається й у порожньому стані — саме там вона й потрібна: без переліку
+    парадигм і орфографій форму заведення нема з чого намалювати.
+    """
+    from nyshporka.core import morph
+    from nyshporka.core.profile import (
+        ProfileError,
+        available,
+        config_path,
+        paradigm_choices,
+        read_source,
+    )
+
+    out: dict[str, Any] = {"paradigms": paradigm_choices(),
+                           "orthographies": list(morph.ORTHOGRAPHIES)}
+    try:
+        out["path"] = str(config_path())
+        out["available"] = available()
+        out["source"] = read_source()["text"]
+    except ProfileError as exc:
+        # Побитий файл — окремий стан, і його не можна плутати з «профілю
+        # немає»: перше лікується правкою тексту, друге — заведенням.
+        out["broken"] = str(exc)
+        out["available"] = []
+        out["source"] = _raw_text()
+    return out
+
+
+def _active_name() -> str:
+    """Ім'я профілю, який шукається зараз. Порожньо — жодного."""
     from nyshporka.core.profile import ProfileError, active
     from nyshporka.core.workspace import WorkspaceError
 
     try:
+        return active().name
+    except (ProfileError, WorkspaceError):
+        return ""
+
+
+def _raw_text() -> str:
+    """Текст конфігу повз розбір — щоб редактор показав те, що не парситься."""
+    from nyshporka.core.profile import config_path
+
+    try:
+        path = config_path()
+        return path.read_text(encoding="utf-8") if path.is_file() else ""
+    except Exception:
+        return ""
+
+
+# `agent=False` — це конфіг дослідження, а не дія. Читається файлом.
+@op("profile.show", summary="Чий рід шукаємо: форми, корені, парадигма",
+    agent=False)
+def profile_show(_: NoArgs) -> Envelope:
+    """Профіль або чесна відповідь, що його ще немає.
+
+    🔴 «Профілю ще немає» — НОРМАЛЬНИЙ стан щойно створеного простору, а не
+    відмова: `nysh init` його не створює, шаблону в комплекті теж немає. Доти
+    операція повертала `fail`, а конверт відмови не має `data` — тобто саме
+    тоді, коли треба намалювати форму заведення, екран не діставав ні переліку
+    парадигм, ні шляху до файла, ні кнопки. Та сама вада вже виправлена в
+    `cases.list` («реєстру ще немає»), і формулювання там записане дослівно:
+    вихід зникав саме тоді, коли був потрібен.
+
+    Відмовою лишається тільки те, що справді відмова: немає простору.
+    """
+    from nyshporka.core.profile import ProfileError, active
+    from nyshporka.core.workspace import WorkspaceError
+
+    try:
+        shell = _profile_shell(ok())
+    except WorkspaceError as exc:
+        return fail(str(exc))
+    try:
         p = active()
-    # 🔴 `WorkspaceError` теж: профіль лежить у просторі, тож «немає простору»
-    # приходить сюди З-ПІД читання профілю, а не окремо. Перша редакція ловила
-    # лише `ProfileError`, і виклик падав винятком замість чесної відповіді.
+    except ProfileError as exc:
+        env = ok({"present": False, "why": str(exc), **shell})
+        env.warn("no_profile", NO_PROFILE)
+        env.suggest("profile.set", "назвати рід — прізвище й написання")
+        return env
+    except WorkspaceError as exc:
+        return fail(str(exc))
+    return ok({**_profile_payload(p), **shell})
+
+
+class ProfileSetArgs(BaseModel):
+    display: str = Field(description="прізвище, як воно пишеться: Сікорський")
+    name: str = Field(default="", description="ключ профілю; типово — з прізвища")
+    paradigm: str = Field(default="adj_skyi",
+                          description="adj_skyi | noun_ov | indeclinable")
+    orth: str = Field(default="uk",
+                      description="якою орфографією подано прізвище: "
+                                  "uk | ru_modern | ru_prereform | pl | bank")
+    stems: dict[str, str] = Field(
+        default_factory=dict,
+        description="орфографія → ОСНОВА без закінчення: {'pl': 'Liszczyn'}")
+    roots: list[str] = Field(default_factory=list,
+                             description="корені для фаззі-пошуку")
+    substrings: list[str] = Field(
+        default_factory=list, description="куски, за якими прізвище впізнається")
+
+
+# 🔴 `agent=False`, як і в `profile.show`. Прізвище й написання питаються в
+# людини, а не виводяться з назви теки чи з першої знайденої справи — це
+# записано в скілі окремим 🛑. Агентові лишається командний рядок, де той самий
+# запис іде через цю саму операцію.
+@op("profile.set", summary="Назвати рід: прізвище, парадигма, основи",
+    args=ProfileSetArgs, mutates=True, agent=False)
+def profile_set(a: ProfileSetArgs) -> Envelope:
+    """Завести профіль або оновити поля, які показує форма.
+
+    🔴 Не переписує файл, писаний рукою. Подробиці й приймач — у `core.profile.save`.
+    """
+    from nyshporka.core.profile import ProfileError, resolve, save
+    from nyshporka.core.workspace import WorkspaceError
+
+    try:
+        res = save(a.name, a.display, paradigm=a.paradigm, orth=a.orth,
+                   stems=dict(a.stems), roots=list(a.roots),
+                   substrings=list(a.substrings))
     except (ProfileError, WorkspaceError) as exc:
         env = fail(str(exc))
-        env.warn("no_profile",
-                 "без профілю пошук працюватиме на прізвище чужого дослідження")
+        env.suggest("profile.source", "правити текстом — форма тут не пройде")
         return env
-    return ok({"name": p.name, "display": p.display, "paradigm": p.paradigm_id,
-               "stems": p.stems, "roots": [r for r, _ in p.roots],
-               "spellings": p.all_spellings(),
-               "selftest_mode": (p.selftest or {}).get("mode", "strict")})
+    # 🔴 Показуємо ТОЙ профіль, який щойно записали, а не активний. Другий
+    # профіль у файлі активним не стає (`fallback` уже стоїть), і віддавати
+    # замість нього чужий означало б показати людині чуже прізвище рівно в
+    # мить, коли вона зберегла своє.
+    try:
+        wrote = resolve(res["name"])
+    except ProfileError as exc:
+        return fail(str(exc))
+    env = ok({**res, **_profile_payload(wrote)})
+    if wrote.name != _active_name():
+        env.warn("not_active",
+                 f"профіль «{wrote.name}» записано, але шукається зараз інший — "
+                 f"активний задає `fallback` у файлі")
+    missing = [o for o in ("ru_prereform", "pl")
+               if not (env.data.get("stems") or {}).get(o)]
+    if missing:
+        # ⚠ Не помилка, а межа знайденого: без основи на дореформену орфографію
+        # метрики XIX ст. просто не шукаються, і мовчати про це не можна.
+        env.warn("stems_partial",
+                 f"основи не задано для: {', '.join(missing)} — цими "
+                 f"написаннями прізвище не шукатиметься")
+    return env
+
+
+class ProfileSourceArgs(BaseModel):
+    text: str = Field(default="",
+                      description="новий текст конфігу; порожньо — лише прочитати")
+
+
+@op("profile.source", summary="Конфіг роду як текст: прочитати або записати",
+    args=ProfileSourceArgs, mutates=True, agent=False)
+def profile_source(a: ProfileSourceArgs) -> Envelope:
+    """Сирий YAML — для полів, яких форма не знає.
+
+    ⚠ `mutates=True` навіть на читанні: одна операція з двома режимами інакше
+    оминала б перевірку токена в тому режимі, який пише. Дешевше оголосити її
+    мутувальною, ніж розводити на дві й пояснювати, чим вони різняться.
+
+    🔴 Порожній `text` НЕ означає «стерти файл». Стерти конфіг випадковою
+    відправкою порожньої форми — саме той клас втрати, після якого не лишається
+    ні даних, ні сліду; порожнеча тут читається як «покажи, що там».
+    """
+    from nyshporka.core.profile import ProfileError, read_source, write_source
+    from nyshporka.core.workspace import WorkspaceError
+
+    try:
+        if not a.text.strip():
+            env = ok({"written": False, **read_source()})
+            env.warn("read_only", "показано як є — записано нічого не було")
+            return env
+        res = write_source(a.text)
+    except (ProfileError, WorkspaceError) as exc:
+        return fail(str(exc))
+    env = ok({"written": True, **res, **read_source()})
+    env.suggest("profile.show", "звірити написання, які з цього вийшли")
+    return env
 
 
 # ── архіви ───────────────────────────────────────────────────────────────────
@@ -1493,23 +2457,28 @@ class FondArgs(BaseModel):
     args=FondArgs, agent=False, section="material")
 def archive_fond(a: FondArgs) -> Envelope:
     from nyshporka.archives import active
+    from nyshporka.library import default_opys, opys_in_key
 
     pk = active()
     f = pk.fonds.get((a.repo.upper(), a.fond))
+    # 🔴 Відповідь про опис бере той самий предикат, яким збирається ключ.
+    # Читаючи натомість поле паку, команда відповідала «ні» там, де бібліотека
+    # опис включала, — а питання задають рівно перед тим, як складати ключ.
+    in_key = opys_in_key(a.repo.upper(), a.fond)
     data = {"repo": a.repo.upper(), "repo_label": pk.repo_label(a.repo),
             "fond": a.fond, "known": f is not None,
             "name": f.name if f else "", "guberniya": pk.guberniya(a.repo, a.fond),
-            "default_opys": pk.default_opys(a.repo, a.fond),
-            "opys_in_key": pk.opys_in_key(a.repo, a.fond),
+            "default_opys": default_opys(a.repo.upper(), a.fond),
+            "opys_in_key": in_key,
             "note": f.note if f else ""}
     env = ok(data)
     if f is None:
         env.warn("unknown_fond",
                  f"фонд {a.repo.upper()} {a.fond} невідомий паку — правила за "
                  f"замовчуванням можуть не підійти")
-    elif f.opys_in_key:
+    elif in_key:
         env.warn("opys_in_key",
-                 "у цьому фонді ОПИС входить у ключ справи: без нього різні "
+                 "у цьому фонді опис входить у ключ справи: без нього різні "
                  "книги злипаються в одну")
     return env
 
@@ -1585,7 +2554,7 @@ def _sections_payload() -> dict[str, Any]:
             "visible": sec.id in in_use,
             "screens": list(S.screens_of(sec.id)),
         })
-    # 🔴 Знаки їдуть ЗВІДСИ, а не з переліку у фронті. Кнопки навігації будує
+    # 🔴 Знаки їдуть звідси, а не з переліку у фронті. Кнопки навігації будує
     # браузер, і другий список іконок у ньому розходився б із `brand.yaml`
     # тихо: додався б екран — і кнопка виявилась би без знака поряд з
     # оформленими, тобто виглядала б зламаною.

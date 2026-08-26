@@ -1,10 +1,10 @@
 """nysh pages / nysh records — агентський інтерфейс сховища сторінок.
 
-Контракт для агентів: ПЕРЕД рендером сторінок — `nysh pages status CASE --json`
-(скип сканів зі status=full), ПІСЛЯ перегляду — `nysh pages note-batch`.
+Контракт для агентів: перед рендером сторінок — `nysh pages status CASE --json`
+(скип сканів зі status=full), після перегляду — `nysh pages note-batch`.
 `--json` → один компактний JSON на stdout і більше нічого; exit 0/1.
-CASE — будь-який формат: «DAHMO/315/8433», «АРХІВ 123-1-456»,
-«S_<АРХІВ>_F<фонд>_D<справа>», «data/raw/архів_123/spr-456».
+CASE — будь-який формат: «DAHMO/315/8433», «архів 123-1-456»,
+«S_<архів>_F<фонд>_D<справа>», «data/raw/архів_123/spr-456».
 """
 from __future__ import annotations
 
@@ -53,7 +53,7 @@ def _csv(value: str | None) -> list[str]:
 
 
 def _allowed(literal: Any) -> str:
-    """Дозволені значення — З МОДЕЛІ, а не переписані в довідку рукою.
+    """Дозволені значення — З моделі, а не переписані в довідку рукою.
 
     🔴 Переписані розходяться. Тут це вже сталось: довідка `--method` називала
     чотири значення, а модель приймала п'ять — `text` («читав лише декод, оком
@@ -113,7 +113,7 @@ def pages_note(
     case: str = typer.Argument(...),
     scan: str = typer.Argument(..., help="Голе ім'я файлу скана: 0030.JPG / page_003."),
     page_type: str = typer.Option(..., "--type", help=_allowed(PageType)),
-    surnames: str = typer.Option("", "--surnames", help="Кома-список ЯК У ДЖЕРЕЛІ."),
+    surnames: str = typer.Option("", "--surnames", help="Кома-список ЯК У джерелі."),
     places: str = typer.Option("", "--places"),
     years: str = typer.Option("", "--years", help="Кома-список років: 1858,1859."),
     sheet: str = typer.Option("", "--sheet", help="Архівний аркуш: 31зв–32."),
@@ -128,7 +128,7 @@ def pages_note(
     ref = _resolve(case)
     try:
         # 🔴 `type: ignore` тут свідомий і вузький. З командного рядка приходить
-        # рядок, а модель хоче перелік — і перевіряти його мусить САМЕ модель:
+        # рядок, а модель хоче перелік — і перевіряти його мусить саме модель:
         # вона єдине місце, де цей перелік визначено, і її повідомлення про
         # хибне значення показує всі допустимі. Продублювати перевірку тут
         # означало б завести другий перелік, який розійдеться з першим.
@@ -174,7 +174,7 @@ def pages_note_batch(
     report = store.annotate_pages(ref, notes, replace=replace) if notes else \
         store.MergeReport(path="")
     report.errors = errors
-    # 🔴 Ключ сторінки мусить збігатися з ІМЕНЕМ ФАЙЛУ на диску («0106.jpg»), бо
+    # 🔴 Ключ сторінки мусить збігатися з іменем файлу на диску («0106.jpg»), бо
     # саме так `case_status` рахує unnoted. Ключ без розширення проходить
     # валідацію моделі, але зі сканами не матчиться — і сторінка, яку вже
     # дивилися оком, лишається в черзі на рендер (2026-08-16: так розійшлись
@@ -191,10 +191,10 @@ def pages_note_batch(
         err_console.print(
             f"[warn]⚠ {len(off_disk)} сканів немає на диску теки справи "
             f"({', '.join(off_disk[:5])}{'…' if len(off_disk) > 5 else ''}) — "
-            f"ключ має бути ІМЕНЕМ ФАЙЛУ («0106.jpg»), інакше `pages status` "
+            f"ключ має бути іменем файлу («0106.jpg»), інакше `pages status` "
             f"рахуватиме сторінку непереглянутою[/warn]")
     if errors and not as_json:
-        # 🔴 Ім'я `e` тут НЕ перевикористовується. Python видаляє змінну винятку
+        # 🔴 Ім'я `e` тут не перевикористовується. Python видаляє змінну винятку
         # на виході з `except`, і хоча цикл присвоює її заново (тобто працює),
         # перевіряч типів цього не доводить і мусить попереджати — а нам той
         # клас попереджень потрібен увімкненим: справжнє читання видаленої
@@ -300,7 +300,7 @@ def records_grep(
     rtype: str = typer.Option(None, "--rtype", help="birth/marriage/death/…"),
     case: str = typer.Option(None, "--case"),
     place: bool = typer.Option(False, "--place",
-                               help="шукати по МІСЦЮ акту, а не по прізвищу"),
+                               help="шукати по місцю акту, а не по прізвищу"),
     thresh: int = typer.Option(80, "--thresh"),
     limit: int = typer.Option(200, "--limit"),
     as_json: bool = typer.Option(False, "--json"),

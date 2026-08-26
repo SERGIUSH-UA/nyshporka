@@ -3,7 +3,7 @@
 Що тут стережеться. Браузер, командний рядок і агент роблять ті самі речі; у
 дослідницькому конвеєрі вони описували їх окремо й розійшлись — 157 роутів
 проти 13 підключених скриптів. Тому тут перевіряється не «роут відповідає», а
-що роут ОДИН і будується з реєстру: нову дію не можна забути виставити, і не
+що роут один і будується з реєстру: нову дію не можна забути виставити, і не
 можна виставити те, чого в реєстрі немає.
 """
 from __future__ import annotations
@@ -32,11 +32,11 @@ def ws(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Workspace:
     (tmp_path / "nyshporka.toml").write_text("[workspace]\nschema = 1\n",
                                              encoding="utf-8")
     # 🔴 Реєстр справ адресується модульним `DB_PATH`, який зафіксувався при
-    # першому імпорті — тобто на просторі ІНШОГО тесту. Свіжий простір без цієї
+    # першому імпорті — тобто на просторі іншого тесту. Свіжий простір без цієї
     # підміни показував би чужі справи, і перевірка «порожньо, а не помилка»
     # ловила б зразкову справу з сусіднього тесту.
     #
-    # ⚠ Лише якщо модуль УЖЕ завантажений. Імпортувати його тут означало б
+    # ⚠ Лише якщо модуль уже завантажений. Імпортувати його тут означало б
     # потягнути за собою резолвер простору — а простору в цю мить ще немає, і
     # фікстура падала б до першого рядка тесту.
     db = sys.modules.get("nyshporka.cases.db")
@@ -48,7 +48,11 @@ def ws(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Workspace:
 
 @pytest.fixture
 def client(ws: Workspace) -> TestClient:
-    return TestClient(create_app(ws, token=TOKEN))
+    # 🔴 Звертаємось на власне ім'я застосунку, а не на дефолтне `testserver`:
+    # демон відповідає лише на петлю (захист від перев'язування імені), і клієнт
+    # тесту мусить говорити з ним так само, як говорить браузер. Інакше тест
+    # перевіряв би застосунок, якого в житті не буває.
+    return TestClient(create_app(ws, token=TOKEN), base_url="http://127.0.0.1:8788")
 
 
 def test_every_gui_op_is_reachable(client: TestClient) -> None:
@@ -64,7 +68,7 @@ def test_every_gui_op_is_reachable(client: TestClient) -> None:
 
 
 def test_ops_carry_their_schemas(client: TestClient) -> None:
-    """Форми будуються зі СХЕМИ операції, а не з полів, переписаних у фронті.
+    """Форми будуються зі схеми операції, а не з полів, переписаних у фронті.
 
     Переписані розходяться: поле, яке більше не приймається, лишається на
     екрані й мовчки не діє.
@@ -101,7 +105,7 @@ def test_envelope_survives_the_wire(client: TestClient) -> None:
     """Попередження мусять доїхати до браузера полем, а не лише в лозі.
 
     Це та сама діра, що в дослідницькому реєстрі: «⚠ зріз застарів» друкувалось
-    людині й НЕ друкувалось у машинному виводі — тобто саме тому читачеві, який
+    людині й не друкувалось у машинному виводі — тобто саме тому читачеві, який
     не помітить нічого поза даними.
     """
     r = client.post("/api/op/catalog.search", json={"q": "будь-що"})
@@ -109,9 +113,9 @@ def test_envelope_survives_the_wire(client: TestClient) -> None:
     assert body["v"] == 1
     assert body["ok"] is True
 
-    # 🔴 Перевіряється ІНВАРІАНТ, а не конкретний код попередження: відповідь
-    # не приходить без знаменника. Або сказано, ЧИМ шукали (`basis`), або
-    # сказано, ЧОМУ не шукали. Раніше тут стояв `no_denominator` — і тест
+    # 🔴 Перевіряється інваріант, а не конкретний код попередження: відповідь
+    # не приходить без знаменника. Або сказано, чим шукали (`basis`), або
+    # сказано, чому не шукали. Раніше тут стояв `no_denominator` — і тест
     # почервонів, щойно в пакет доїхав вкладений зріз каталогу: шукати стало
     # де, тобто змінилась причина, а не правило.
     cov = body["data"]["coverage"]
@@ -141,7 +145,7 @@ def test_job_cancel_needs_token(client: TestClient) -> None:
 def test_index_carries_the_token_not_a_cookie(client: TestClient) -> None:
     """🔴 Токен вшивається у сторінку.
 
-    Cookie браузер шле САМ — і тоді чужа вкладка на localhost змогла б мутувати
+    Cookie браузер шле сам — і тоді чужа вкладка на localhost змогла б мутувати
     простір, тобто захист зникав би рівно там, де він потрібен.
     """
     html = client.get("/").text
@@ -167,7 +171,11 @@ def test_front_has_no_inline_handlers_or_globals() -> None:
     js = (static / "app.js").read_text(encoding="utf-8")
     assert "onclick" not in html and "onsubmit" not in html
     assert "data-act=" in html
-    assert "window." not in js.replace("window.location", "")
+    # ⚠ Заборона — на глобали, а не на всяку згадку `window`. Підписка на подію
+    # вікна (історія навігації) нічого в глобальний простір не кладе й колізії
+    # імен не створює; читання `window.location` — тим паче.
+    stripped = js.replace("window.location", "").replace("window.addEventListener", "")
+    assert "window." not in stripped
 
 
 def test_rebuild_button_gives_one_job_for_two_clicks(client: TestClient,
@@ -175,7 +183,7 @@ def test_rebuild_button_gives_one_job_for_two_clicks(client: TestClient,
     """🔴 Кнопку 🔄 натискають двічі — бо після першого натискання нічого не видно.
 
     Два проходи писали б у ту саму базу й у той самий файл бібліотеки. Захист
-    тут — пошук АКТИВНОЇ роботи, а не ключ ідемпотентності: той живе десять
+    тут — пошук активної роботи, а не ключ ідемпотентності: той живе десять
     хвилин і після завершення віддавав би старий готовий запис, а натискають
     цю кнопку саме тому, що щойно щось змінилось.
     """
@@ -207,7 +215,7 @@ def test_rebuild_is_a_mutation_and_needs_a_token(client: TestClient) -> None:
 def test_a_long_op_that_cannot_start_says_why(client: TestClient) -> None:
     """🔴 Найперша помилка аматора — не та тека. Він мусить це прочитати.
 
-    Постановка в чергу робить справжню роботу ДО старту: шукає теку, рахує
+    Постановка в чергу робить справжню роботу до старту: шукає теку, рахує
     кадри, добирає модель. Саме там ловляться найчастіші перші відмови — і без
     перехоплення вони прилітали як «Internal Server Error»: екран показував
     «Не вийшло» без жодного слова про причину, хоч причина була написана.
@@ -243,3 +251,44 @@ def test_fresh_workspace_shows_an_empty_list_not_a_failure(client: TestClient) -
     assert body["data"]["registry"] is False
     assert any(w["code"] == "no_registry_yet" for w in body["warnings"])
     assert body["stale"]["is"] is True and body["stale"]["fix"]
+
+
+def test_listing_the_disk_needs_the_app_token(client: TestClient) -> None:
+    """🔴 Гортач тек віддає розкладку диска — це читання, але не публічне.
+
+    Токен вимагається не через `mutates`: позначити читання мутацією означало б
+    збрехати одразу в трьох місцях (пульс «дані змінились», напис агентові
+    «змінює стан», позначка правки в командному рядку) заради одного побічного
+    ефекту. Для цього є окрема ознака, і саме її перевіряє цей тест.
+    """
+    res = client.post("/api/op/pick.browse", json={})
+    assert res.status_code == 403, "вміст тек віддається без токена"
+    res = client.post("/api/op/pick.browse", json={},
+                      headers={TOKEN_HEADER: TOKEN})
+    assert res.status_code == 200
+
+
+def test_a_foreign_host_header_is_refused(client: TestClient) -> None:
+    """🔴 Захист від перев'язування імені, а не від мережі.
+
+    Бінд і так лише на петлю — але сайт із коротким часом життя запису спершу
+    віддає свою адресу, а потім `127.0.0.1`, і для браузера це лишається той
+    самий origin: ні перевірка походження, ні правила куків не спрацьовують.
+    Далі його скрипт говорить із демоном як своя ж сторінка.
+    """
+    res = client.get("/api/health", headers={"Host": "evil.example"})
+    assert res.status_code == 403
+    assert "127.0.0.1" in res.json().get("error", "")
+
+
+def test_the_page_token_never_leaves_under_another_name(client: TestClient) -> None:
+    """🔴 Найдорожче в перев'язуванні імені — те, що токен віддається сам.
+
+    Сторінка несе його вшитим (інакше його міг би попросити будь-хто), тож
+    перший же запит чужого скрипта до кореня видавав би ключ від усього
+    застосунку. Тобто без перевірки імені токенна схема трималась лише на тому,
+    що ніхто не спробує.
+    """
+    res = client.get("/", headers={"Host": "evil.example"})
+    assert res.status_code == 403
+    assert TOKEN not in res.text

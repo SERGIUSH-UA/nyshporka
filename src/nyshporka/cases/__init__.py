@@ -8,7 +8,7 @@ r"""Центральний реєстр справ — один рядок на 
   4. `data/derived/nyshporka.sqlite`      — скільки фактів канону спирається на справу;
   5. `data/pages/**`                  — що прочитано оком.
 
-Опис НЕ дублюється: `nyshporka.library` лишається джерелом назв і шифр, тут вони лише
+Опис не дублюється: `nyshporka.library` лишається джерелом назв і шифр, тут вони лише
 збагачуються. Вихід — `data/derived/case_index.sqlite` (derived, перебудовується).
 """
 from nyshporka.cases.collect import collect_rows

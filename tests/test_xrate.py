@@ -1,7 +1,7 @@
 """🚦 Крос-процесний ліміт запитів.
 
 Цей модуль існує тому, що пауза в коді нічого не доводить: сервер міряє темп по
-КЛІЄНТУ, а `sleep` рахує потік одного процесу. Тому й перевірки тут — не про
+клієнту, а `sleep` рахує потік одного процесу. Тому й перевірки тут — не про
 те, що ми «поставили паузу», а про журнал фактичних відправок і про поведінку
 на межах: побитий файл, стрибок годинника, кілька процесів разом.
 """
@@ -59,7 +59,7 @@ def test_a_clock_jump_forward_does_not_freeze_the_queue(tmp_path: Path) -> None:
 
 
 def test_the_journal_is_the_acceptance_not_the_intention(tmp_path: Path) -> None:
-    """`verify()` читає ФАКТИЧНІ відправки, тож ловить і перевищення."""
+    """`verify()` читає фактичні відправки, тож ловить і перевищення."""
     audit = tmp_path / "к.audit.jsonl"
     now = time.time()
     audit.write_text("".join(
@@ -79,7 +79,7 @@ def test_the_state_directory_follows_the_variable(tmp_path: Path, monkeypatch) -
 def test_the_legacy_directory_is_used_while_it_is_the_only_one(
         tmp_path: Path, monkeypatch) -> None:
     """🔴 Доки поруч працюють і пакет, і скрипти дослідницького репозиторію,
-    різні теки стану означають ДВІ ЧЕРГИ НА ОДИН IP — тобто подвоєний темп
+    різні теки стану означають дві черги на один IP — тобто подвоєний темп
     рівно тим механізмом, який мав його стримати."""
     legacy = tmp_path / "стара"
     legacy.mkdir()

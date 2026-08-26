@@ -1,6 +1,6 @@
 """🦆 Зведений покажчик: перелік справ фонду.
 
-Цінний ПЕРЕЛІКОМ, а не заголовками: бачить усі описи фонду незалежно від того,
+Цінний переліком, а не заголовками: бачить усі описи фонду незалежно від того,
 чи їх оцифровано. Через це його помилки коштують інакше — не «трохи не та
 назва», а фантомна справа в черзі, за якою замовляють документ в архіві.
 """
@@ -59,7 +59,7 @@ def _coll(api: _Api) -> DuckCollector:
 
 
 def test_the_live_shape_of_the_service_is_what_we_parse(tmp_path: Path) -> None:
-    """Фікстура — ЖИВА відповідь сервісу, скорочена до шести справ."""
+    """Фікстура — жива відповідь сервісу, скорочена до шести справ."""
     live = json.loads((FIX / "duck_opys.json").read_text(encoding="utf-8"))
     api = _Api({"inventories": [{"code": "17"}]}, {0: live})
     res = _coll(api).collect(Target(repo="DAVIO", fond="904", opys=("17",)),
@@ -92,7 +92,7 @@ def test_empty_positions_go_to_their_own_file_not_into_the_registry(
 
 def test_a_copy_of_the_whole_inventory_is_not_a_copy_of_each_case(
         tmp_path: Path) -> None:
-    """🔴 Копії з порожнім `file_id` описують УВЕСЬ опис (плівку цілком).
+    """🔴 Копії з порожнім `file_id` описують увесь опис (плівку цілком).
     Приписані кожній справі, вони зробили б увесь опис «оцифрованим»."""
     api = _Api({"inventories": [{"code": "17"}]}, {0: _opys(
         [{"id": "aaa", "code": "1", "title": "Книга", "years": [{"start_year": 1800}]},

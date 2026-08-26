@@ -425,6 +425,7 @@ section_glyphs:
 # знака, кнопка виглядала б зламаною, а зайвий знак лишався б мертвим рядком.
 screen_glyphs:
   home: "🐾"
+  profile: "🎯"
   sources: "🗂"
   geog: "🗺"
   fonds: "🏛"
@@ -459,6 +460,7 @@ section_icons:
 
 screen_icons:
   home: paw
+  profile: target
   sources: radar
   geog: zone
   fonds: archive-box

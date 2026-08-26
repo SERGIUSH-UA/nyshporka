@@ -1,4 +1,4 @@
-"""🏛 Пак архівів мусить відтворювати чинні константи ДОСЛІВНО.
+"""🏛 Пак архівів мусить відтворювати чинні константи дослівно.
 
 Ці словники керують тим, як справа отримує ключ, шифру й географію. Помилка тут
 не падає: вона тихо злипає дві різні книги в одну (якщо загубити `opys_in_key`),
@@ -52,7 +52,7 @@ def test_repo_labels_match_legacy(pk):
 def test_default_opys_matches_legacy(pk):
     got = {k: pk.default_opys(*k) for k in LEGACY_DEFAULT_OPYS}
     assert got == LEGACY_DEFAULT_OPYS
-    # і ЛИШЕ для них — зайвий дефолт приписав би справі чужий опис
+    # і лише для них — зайвий дефолт приписав би справі чужий опис
     extra = [f.key for f in pk.fonds.values()
              if f.default_opys is not None and f.key not in LEGACY_DEFAULT_OPYS]
     assert not extra, f"нові дефолтні описи без підстави: {extra}"
@@ -104,7 +104,7 @@ def test_repo_code_is_case_insensitive(pk):
 
 # ── розширення користувачем ──────────────────────────────────────────────────
 def test_user_overlay_adds_without_erasing_builtin(tmp_path):
-    """🔴 Накладка перебиває ПО КЛЮЧУ, а не заміщає секцію.
+    """🔴 Накладка перебиває по ключу, а не заміщає секцію.
 
     Інакше дослідник, який дописав один свій архів, мовчки втратив би всі
     вбудовані — і це виглядало б як «програма забула половину фондів».
@@ -153,7 +153,7 @@ def test_every_fond_belongs_to_a_known_repository(pk):
 
 
 def test_pack_file_is_tracked_by_git():
-    """🔴 Дані пакета мусять бути В РЕПОЗИТОРІЇ, а не лише на диску.
+    """🔴 Дані пакета мусять бути В репозиторії, а не лише на диску.
 
     Спіймано на коміті, який вийшов на три файли замість чотирьох: правило
     `data/` у `.gitignore`, задумане для робочого простору дослідника, git
@@ -251,7 +251,7 @@ def test_the_bounds_keep_the_order_they_were_written_in() -> None:
 
 def test_a_bound_carries_what_it_stands_on() -> None:
     """🔴 Саме число неповне. «1515, звірено з переліком архіву» і «231,
-    максимум транскрипції» — різні за силою твердження: друге НИЖНЯ оцінка,
+    максимум транскрипції» — різні за силою твердження: друге нижня оцінка,
     тож покриття по ньому завищене. Доки підстава жила в коментарі коду,
     обидві межі подавались однаково впевнено."""
     from nyshporka.archives import active
@@ -280,7 +280,7 @@ def test_the_guide_total_is_optional() -> None:
 
 def test_adding_one_bound_does_not_wipe_the_rest_of_the_fond(tmp_path) -> None:
     """🔴 Доки в записі фонду була сама губернія, заміщення коштувало мало.
-    Щойно туди їдуть ЗНАМЕННИКИ, ціна стає такою: дослідник, що дописав межу
+    Щойно туди їдуть знаменники, ціна стає такою: дослідник, що дописав межу
     одного опису, мовчки втрачає `default_opys` — і кожна сканована тека
     дістає чужий опис у ключі справи."""
     from nyshporka.archives import pack as P
@@ -297,3 +297,46 @@ def test_adding_one_bound_does_not_wipe_the_rest_of_the_fond(tmp_path) -> None:
     assert set(b) == {"1", "2", "3", "4"}, "дописування змило наявні межі"
     assert p.fonds[("CDIAK", "224")].default_opys == "1", "загубився опис за замовчуванням"
     assert p.fonds[("CDIAK", "224")].name, "загубилась назва фонду"
+
+
+# ── довідка про фонд і будівник ключів мусять казати те саме ────────────────
+def test_the_fond_card_answers_with_the_key_builder_not_beside_it() -> None:
+    """🔴 Два «джерела правди» на одне питання розійшлись — і мовчки.
+
+    `nysh archive` читав поле паку, а ключі складала бібліотека зі свого
+    набору. На ДАХмО ф.230 команда відповідала «опис у ключі: ні», тоді як
+    бібліотека клала справу під `DAHMO/230-1/12`. Питання задають рівно перед
+    тим, як складати ключ, тож ціна розбіжності — прив'язка, яка не сходиться,
+    а помічають її за чужими сторінками у своїй справі.
+
+    ⚠ Перевіряється не збіг із паком, а збіг відповіді з тим, що справді
+    станеться з ключем: саме він виконавчий.
+    """
+    from nyshporka import ops as O
+    from nyshporka.library import _mk_key, opys_in_key
+
+    for repo, fond, spr in [("DAHMO", "230", "13"), ("ANRM", "211", "140"),
+                            ("DAHMO", "315", "159"), ("CDIAK", "224", "711")]:
+        env = O.call("archive.fond", {"repo": repo, "fond": fond})
+        assert env.ok, env.error
+        said = bool(env.data["opys_in_key"])
+        # Той самий опис, поданий будівникові: чи потрапить він у ключ.
+        built = _mk_key(repo, fond, spr, "3") or ""
+        really = f"{fond}-3/" in built
+        assert said == really == opys_in_key(repo, fond), (
+            f"{repo} {fond}: команда каже «{said}», ключ виходить «{built}» — "
+            f"саме так довідка й будівник розходились")
+
+
+def test_the_default_opys_answer_matches_what_the_key_will_use() -> None:
+    """Той самий розкол сусіднім полем: команда відповідала «—», а сховище
+    сторінок мовчки підставляло «1»."""
+    from nyshporka import ops as O
+    from nyshporka.library import default_opys
+
+    for repo, fond in [("DAHMO", "230"), ("DAHMO", "315"), ("CDIAK", "224")]:
+        env = O.call("archive.fond", {"repo": repo, "fond": fond})
+        assert env.ok, env.error
+        assert env.data["default_opys"] == default_opys(repo, fond), (
+            f"{repo} {fond}: довідка про опис за замовчуванням не збігається з "
+            f"тим, який підставить ключ")

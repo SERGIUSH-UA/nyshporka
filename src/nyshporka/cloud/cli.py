@@ -9,7 +9,7 @@ fetch | verify | stop`.
 🔴 Порядок `fetch → verify → stop` тут не рекомендація, а перевірка в коді:
 `stop` відмовляється гасити машину, поки роботу не звірено.
 
-🔴 Секції «Читання» ці команди НЕ вимагають — і це рішення, а не недогляд.
+🔴 Секції «Читання» ці команди не вимагають — і це рішення, а не недогляд.
 `nysh read` вимагає її законно: без локального рушія читати нічим. Але хмарний
 прогін існує рівно для тих, у кого рушія немає й не буде — ноутбук на два ядра,
 машина без карти, небажання тягнути 2.5 ГБ `torch` заради роботи, яка все одно
@@ -145,7 +145,7 @@ def hosts_add(
     vram: float = typer.Option(0.0, "--vram", help="заявлена пам'ять карти, ГБ"),
     gpus: int = typer.Option(1, "--gpus"),
 ) -> None:
-    """Записати машину. 🔴 Ключ — ШЛЯХОМ, ніколи не вмістом і не паролем."""
+    """Записати машину. 🔴 Ключ — шляхом, ніколи не вмістом і не паролем."""
     from nyshporka.cloud.ssh import DEFAULT_WORKDIR, Host, load_hosts, parse_target, save_hosts
 
     parsed = parse_target(target)
@@ -240,7 +240,7 @@ def _print_plan(p: CloudPlan) -> None:
 
 @app.command("plan")
 def cmd_plan(
-    case_dir: str = typer.Argument(..., help="тека зі сканами (ПЛАСКА)"),
+    case_dir: str = typer.Argument(..., help="тека зі сканами (пласка)"),
     host: str = typer.Option("", "--host", "-h", help="машина: ім'я або user@host"),
     backend: str = typer.Option("ssh", "--backend", "-b"),
     script: str = typer.Option("", "--script", help="latin | cyrillic"),
@@ -248,7 +248,7 @@ def cmd_plan(
     one_voice: bool = typer.Option(False, "--one-voice"),
     as_json: bool = typer.Option(False, "--json"),
 ) -> None:
-    """Що поїде на машину — БЕЗ жодної мережевої дії й без жодних витрат.
+    """Що поїде на машину — без жодної мережевої дії й без жодних витрат.
 
     Той самий поділ, що `nysh read --dry-run`: дізнатись «модель не та» або
     «кадрів три тисячі» після старту означає втратити ніч, а на орендованій
@@ -272,7 +272,7 @@ def cmd_plan(
         except Exception as exc:
             known_host = False
             console.print(f"[err]🔴 {exc}[/err]")
-    # 🔴 Канал називається ВЖЕ ТУТ. Дізнатись, що заливка триватиме дев'ять
+    # 🔴 Канал називається вже тут. Дізнатись, що заливка триватиме дев'ять
     # годин, після того як почалась оренда, — це те саме, що не дізнатись.
     # Швидкості напряму без з'єднання не заміряти, але сказати, чи є швидкий
     # шлях і чого він вартий, можна й без жодного пакета в мережі.
@@ -302,7 +302,7 @@ def cmd_prepare(
     host: str = typer.Argument(..., help="машина: ім'я або user@host"),
     backend: str = typer.Option("ssh", "--backend", "-b"),
 ) -> None:
-    """Зібрати середовище рушіїв на машині. Робиться ОДИН раз на машину.
+    """Зібрати середовище рушіїв на машині. Робиться один раз на машину.
 
     Довга команда: ставиться рушій сегментації, torch і колесо під карту.
     Повторний виклик безпечний — наявне не чіпається.
@@ -350,7 +350,7 @@ def cmd_start(
 ) -> None:
     """Почати захід. Повертається одразу — робота лишається жити на машині.
 
-    🔴 Повторний виклик на живому заході НЕ бере другої машини, а підхоплює
+    🔴 Повторний виклик на живому заході не бере другої машини, а підхоплює
     свою. Тому після обриву зв'язку правильна дія — просто повторити команду.
     """
     from nyshporka.cloud import plan as PL
@@ -381,7 +381,7 @@ def cmd_state(
     as_json: bool = typer.Option(False, "--json"),
     all_runs: bool = typer.Option(False, "--all", help="усі заходи простору"),
 ) -> None:
-    """Що зараз із заходом. Дані беруться з ДИСКА машини, не з лога."""
+    """Що зараз із заходом. Дані беруться з диска машини, не з лога."""
     from nyshporka.cloud import run as RUN
     from nyshporka.cloud import state as ST
 
@@ -398,7 +398,7 @@ def cmd_state(
             mark = "🔴" if s.needs_release else ("✅" if s.verdict == "ok" else "·")
             console.print(f"{mark} {s.run_id} · {s.human_phase()} · "
                           f"{s.pages_done}/{s.frames_total}"
-                          + (" · МАШИНА ЖИВА" if s.needs_release else ""))
+                          + (" · машина жива" if s.needs_release else ""))
         return
 
     st = _need_run(run_id)
@@ -430,7 +430,7 @@ def cmd_state(
                          " · процесу немає"))
         if pulse.finished:
             console.print(f"  вийшло : rc={pulse.rc}"
-                          + " [muted](код повернення повноти НЕ доводить — "
+                          + " [muted](код повернення повноти не доводить — "
                             "звірка окремо)[/muted]")
     for inc in st.incidents[-5:]:
         console.print(f"  [muted]· {inc.get('kind')}: {inc.get('detail')}[/muted]")
@@ -458,7 +458,7 @@ def cmd_verify(
     run_id: str = typer.Argument(""),
     as_json: bool = typer.Option(False, "--json"),
 ) -> None:
-    """Скільки сторінок ДІЙСНО прочитано — і чим це доведено.
+    """Скільки сторінок дійсно прочитано — і чим це доведено.
 
     🔴 Приймач — диск, а не код повернення прогону: є клас відмов, за якого
     лог обривається, перелік збоїв порожній, а прогін виглядає успішним.
@@ -473,7 +473,11 @@ def cmd_verify(
     st.settle("ok" if got.complete else "incomplete", why=got.detail)
     if as_json:
         console.print_json(data=got.as_dict())
-        return
+        # 🔴 Той самий вирок, що й людині. Поки вихід стояв лише в кінці
+        # людської гілки, машинний читач діставав на неповному прогоні код 0 —
+        # тобто «успіх» там, де людина читає «машину ще не гасіть», і оренда
+        # гасилась на недороблену роботу.
+        raise typer.Exit(code=0 if got.complete else 4)
     console.print(got.human())
     if got.detail:
         console.print(f"  [muted]{got.detail}[/muted]")
@@ -482,7 +486,7 @@ def cmd_verify(
                       f"nysh cloud stop {st.run_id}[/muted]")
         return
     if V.tail_is_small(got):
-        console.print("[warn]⚠ хвіст малий — доганяти його ВДОМА дешевше: "
+        console.print("[warn]⚠ хвіст малий — доганяти його вдома дешевше: "
                       "холодний старт чужої машини коштує близько восьми "
                       "хвилин незалежно від обсягу[/warn]")
         console.print(f"[muted]  nysh read {st.case_dir}[/muted]")

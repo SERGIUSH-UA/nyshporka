@@ -1,4 +1,4 @@
-"""🧭 `nysh init` — команда, яку виконують РІВНО ОДИН раз, і саме тому вона
+"""🧭 `nysh init` — команда, яку виконують рівно один раз, і саме тому вона
 найдорожча в помилці.
 
 Тестів на неї не було взагалі. Через це вада прожила довго й тихо: майстер
@@ -26,7 +26,7 @@ def _marker(root: Path) -> Path:
 
 
 def test_init_without_a_path_uses_the_variable(monkeypatch, tmp_path: Path) -> None:
-    """🔴 Найдорожчий випадок: обидва інсталятори кличуть `nysh init --yes` БЕЗ
+    """🔴 Найдорожчий випадок: обидва інсталятори кличуть `nysh init --yes` без
     шляху. Доки майстер не бачив змінної, це означало, що виставлена людиною
     тека мовчки ігнорувалась саме там, де вона не могла це помітити."""
     target = tmp_path / "дослідження"
@@ -42,7 +42,7 @@ def test_init_without_a_path_uses_the_variable(monkeypatch, tmp_path: Path) -> N
 
 
 def test_init_says_where_the_path_came_from(monkeypatch, tmp_path: Path) -> None:
-    """Сенс `Plan.origin`: людина бачить не лише КУДИ, а й ЧОМУ туди. З `--yes`
+    """Сенс `Plan.origin`: людина бачить не лише куди, а й чому туди. З `--yes`
     питань немає зовсім, тож цей рядок — єдина нагода помітити чужий шлях."""
     monkeypatch.setenv(W.ENV_WORKSPACE, str(tmp_path / "дослідження"))
     res = runner.invoke(app, ["init", "--yes", "--preset", "catalog"])
@@ -51,7 +51,7 @@ def test_init_says_where_the_path_came_from(monkeypatch, tmp_path: Path) -> None
 
 
 def test_init_inside_a_workspace_does_not_offer_a_new_one(monkeypatch, tmp_path: Path) -> None:
-    """`nysh init`, запущений у наявному просторі, пропонував створити НОВИЙ у
+    """`nysh init`, запущений у наявному просторі, пропонував створити новий у
     типовому місці — тобто роздвоював дослідження рівно тим рухом, яким людина
     намагалась його полагодити."""
     root = tmp_path / "простір"
@@ -82,7 +82,7 @@ def test_doctor_finds_the_workspace_created_a_moment_ago(monkeypatch, tmp_path: 
         nysh init --yes --preset researcher
         nysh doctor
 
-    `init` створював простір і забував його; `doctor` — НОВИЙ процес, стартує з
+    `init` створював простір і забував його; `doctor` — новий процес, стартує з
     іншої теки, без змінної й без маркера над собою, — не мав звідки взяти шлях
     і радив виконати `nysh init`, тобто команду, яку щойно виконали. Останній
     крок успішного встановлення показував червоне.
@@ -94,7 +94,7 @@ def test_doctor_finds_the_workspace_created_a_moment_ago(monkeypatch, tmp_path: 
     assert runner.invoke(app, ["init", "--yes", "--preset", "catalog",
                                str(root)]).exit_code == 0
 
-    # Новий процес: скидаємо все, що жило в пам'яті, і йдемо в СТОРОННЮ теку.
+    # Новий процес: скидаємо все, що жило в пам'яті, і йдемо в сторонню теку.
     W.reset()
     away = tmp_path / "деінде"
     away.mkdir()
@@ -117,7 +117,7 @@ def test_workspace_is_found_after_a_smoke_run_stole_the_state(monkeypatch,
     числі зроблений смоук-прогоном у тимчасовій теці. Таку теку прибирають, і
     далі драбина джерел не мала куди відступити: змінної немає, маркера над
     поточною текою немає, стан веде в нікуди, а щабля «звичне місце» в
-    `resolve()` не було — хоч у `propose()` він є. Тому МАЙСТЕР простір
+    `resolve()` не було — хоч у `propose()` він є. Тому майстер простір
     знаходив, а кожна команда відповідала «робочий простір не знайдено» про
     дослідження, яке нікуди не зникало.
     """
@@ -150,7 +150,7 @@ def test_workspace_is_found_after_a_smoke_run_stole_the_state(monkeypatch,
 
 def test_a_vanished_workspace_is_named_not_just_missed(monkeypatch,
                                                        tmp_path: Path) -> None:
-    """Коли відступати нікуди, помилка мусить сказати, що зник САМЕ той шлях.
+    """Коли відступати нікуди, помилка мусить сказати, що зник саме той шлях.
 
     «Не знайдено» на місці дослідження, яке ще вчора відкривалось, читається як
     втрата даних. Різниця між «шукати теку» і «шукати бекап» — один рядок.
@@ -172,3 +172,60 @@ def test_a_vanished_workspace_is_named_not_just_missed(monkeypatch,
     with pytest.raises(W.WorkspaceError) as exc:
         W.resolve()
     assert str(scratch) in str(exc.value), str(exc.value)
+
+
+# ── дві найтихіші перевірки доктора ─────────────────────────────────────────
+def test_the_doctor_notices_a_workspace_hidden_from_ripgrep(
+        tmp_path: Path, monkeypatch) -> None:
+    """🔴 Простір усередині git-репо ховає прочитане від `rg`.
+
+    `/reports/` і `/data/` стоять у `.gitignore` пакета, а ripgrep його
+    поважає — і віддає порожньо по всій справі, не натякнувши, що теку просто
+    не читав. Пошук Нишпорки це не зачіпає, але тягнеться людина (і агент)
+    частіше до `rg`, тож хибний нуль приходить саме звідти.
+    """
+    from nyshporka.core import workspace as W
+    from nyshporka.setup import doctor
+
+    repo = tmp_path / "репо"
+    (repo / ".git").mkdir(parents=True)
+    (repo / ".gitignore").write_text("/reports/\n/data/\n", encoding="utf-8")
+    space = repo / "простір"
+    space.mkdir()
+
+    monkeypatch.setenv(W.ENV_WORKSPACE, str(space))
+    res = runner.invoke(app, ["init", "--yes", "--preset", "researcher"])
+    assert res.exit_code == 0, res.stdout
+    W.reset()
+
+    got = doctor._decode_visible()
+    assert got.level == "warn", got
+    assert "--no-ignore" in got.fix
+    W.reset()
+
+
+def test_the_doctor_asks_whose_clan_we_are_looking_for(
+        tmp_path: Path, monkeypatch) -> None:
+    """🔴 Без профілю пошук працює — але на неповному наборі написань.
+
+    Поломка тиха рівно в тому сенсі, який стереже доктор: людина пригадує
+    форми сама, половина з них не спадає на думку, і нуль із неповного набору
+    виглядає як нуль по всьому роду.
+
+    ⚠ `nysh init` профілю НЕ створює — і це нормальний стан свіжої установки,
+    тож рівень тут `warn`, а не `fail`.
+    """
+    from nyshporka.core import workspace as W
+    from nyshporka.setup import doctor
+
+    monkeypatch.setenv(W.ENV_WORKSPACE, str(tmp_path / "простір"))
+    res = runner.invoke(app, ["init", "--yes", "--preset", "researcher"])
+    assert res.exit_code == 0, res.stdout
+    W.reset()
+
+    got = doctor._profile()
+    # Порада звіряється початком, а не дослівно: у ній стоїть ще й місце під
+    # аргумент («<Прізвище>»), бо команда без нього не виконається — а порада,
+    # яку не можна скопіювати й запустити, це та сама половина відповіді.
+    assert got.level == "warn" and got.fix.startswith("nysh profile init"), got
+    W.reset()

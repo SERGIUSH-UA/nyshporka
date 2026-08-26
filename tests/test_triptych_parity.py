@@ -9,7 +9,7 @@
 командного рядка, і жоден тест цього не бачив, бо кожне обличчя перевірялось
 окремо.
 
-Тому тут перевіряється саме ЗВ'ЯЗОК між ними.
+Тому тут перевіряється саме зв'язок між ними.
 """
 from __future__ import annotations
 
@@ -87,11 +87,11 @@ def test_tool_descriptions_never_point_at_a_missing_tool():
 
 
 def test_agent_docs_cover_the_whole_surface():
-    """🔴 Документація агента мусить старіти ГУЧНО, а не тихо.
+    """🔴 Документація агента мусить старіти гучно, а не тихо.
 
     Агент не бачить докстрінгів операцій — у перелік tool'ів іде лише
     однорядковий підпис. Уся мотивація («нуль зі знаменником», «status=full
-    лише якщо виписані ВСІ прізвища», «дефолт — рядок, бо сторінка коштує
+    лише якщо виписані всі прізвища», «дефолт — рядок, бо сторінка коштує
     вчетверо дорожче») живе в `docs/agents/`, і саме тому там не можна мати
     ні прогалин, ні привидів:
 
@@ -134,7 +134,7 @@ def test_every_op_is_reachable_from_the_command_line():
     for op in O.all_ops():
         res = runner.invoke(app, ["op", op.name, "--args", "{}"])
         # Операція може відмовити по суті (немає простору, потрібні аргументи) —
-        # але вона мусить БУТИ ЗНАЙДЕНА.
+        # але вона мусить бути знайдена.
         assert "невідома операція" not in res.stdout, f"{op.name} недосяжна з CLI"
 
 
@@ -207,8 +207,8 @@ def test_ops_that_need_the_queue_name_the_path_without_it():
     небезпечна: відповідь чесна, але читає її той, хто вже витратив хід.
 
     Тому вимога адресна — не «до всіх довгих», а «до тих, хто відсилає до
-    застосунку»: такі мусять назвати шлях БЕЗ черги (`nysh read`, `nysh get`)
-    саме в докстрінгу, бо докстрінг віддається `--describe` ДО виклику.
+    застосунку»: такі мусять назвати шлях без черги (`nysh read`, `nysh get`)
+    саме в докстрінгу, бо докстрінг віддається `--describe` до виклику.
     """
     import inspect
     import re
@@ -219,7 +219,7 @@ def test_ops_that_need_the_queue_name_the_path_without_it():
         if "nysh serve" not in src:            # черги не потребує — питання не стоїть
             continue
         doc = inspect.getdoc(op.fn) or ""
-        # Назвати треба саме ІНШУ команду: `nysh serve` — це і є черга, тож
+        # Назвати треба саме іншу команду: `nysh serve` — це і є черга, тож
         # порада підняти її не є шляхом без неї.
         if not re.search(r"`nysh (?!serve\b)[a-z]+", doc):
             silent.append(op.name)
@@ -231,7 +231,7 @@ def test_ops_that_need_the_queue_name_the_path_without_it():
 
 # ── конверт ──────────────────────────────────────────────────────────────────
 def test_every_answer_is_wrapped_the_same_way():
-    """🔴 Операція ЗАВЖДИ повертає конверт — навіть коли всередині впало.
+    """🔴 Операція завжди повертає конверт — навіть коли всередині впало.
 
     Знайдено цим тестом: операція чесно ловила свою помилку, але з-під неї
     пролітала помилка робочого простору, і виклик падав винятком замість
@@ -239,14 +239,14 @@ def test_every_answer_is_wrapped_the_same_way():
     «tool failed» без пояснення.
     """
     for op in O.all_ops():
-        env = O.call(op.name, {})          # не має кинути ЖОДНА
+        env = O.call(op.name, {})          # не має кинути жодна
         d = env.as_dict()
         assert d["v"] == 1 and isinstance(d["ok"], bool)
         assert ("data" in d) == d["ok"], f"{op.name}: конверт без даних/помилки"
 
 
 def test_a_throwing_op_still_answers_with_an_envelope():
-    """Контракт тримається МЕХАНІЗМОМ, а не пам'яттю автора операції."""
+    """Контракт тримається механізмом, а не пам'яттю автора операції."""
     from nyshporka.core.ops import NoArgs, Op, Registry
 
     reg = Registry()
@@ -264,7 +264,7 @@ def test_a_throwing_op_still_answers_with_an_envelope():
 def test_warnings_reach_the_agent_as_text_not_only_as_fields():
     """🔴 Та сама діра, що була в реєстрі справ дослідницького конвеєра.
 
-    Там попередження «зріз застарів» друкувалось ЛИШЕ людині, а машинний режим
+    Там попередження «зріз застарів» друкувалось лише людині, а машинний режим
     його не показував — тобто читач, який не вміє помітити нічого поза даними,
     лишався без попередження. Тут воно мусить бути в тексті для моделі.
     """
@@ -339,3 +339,61 @@ def test_mcp_install_refuses_to_clobber_a_broken_file(tmp_path):
 def test_mcp_tools_command_lists_them():
     res = runner.invoke(app, ["mcp", "tools"])
     assert res.exit_code == 0 and "nysh_workspace_info" in res.stdout
+
+
+# ── конверт доїжджає до машинного читача цілим ──────────────────────────────
+@pytest.fixture
+def space(tmp_path, monkeypatch: pytest.MonkeyPatch):
+    """Порожній простір: тут кожна відповідь — нуль, і саме він цікавий."""
+    from nyshporka.core import workspace as W
+
+    monkeypatch.setenv(W.ENV_WORKSPACE, str(tmp_path / "простір"))
+    res = runner.invoke(app, ["init", "--yes", "--preset", "researcher"])
+    assert res.exit_code == 0, res.stdout
+    W.reset()
+    yield tmp_path / "простір"
+    W.reset()
+
+
+@pytest.mark.parametrize("argv", [
+    ["search", "Шевченко", "--json"],
+    ["pages", "status", "DAHMO/315/8433", "--json"],
+    ["htr", "env", "--json"],
+    ["archive", "DAHMO", "230", "--json"],
+    ["profile", "show", "--json"],
+])
+def test_the_json_answer_is_the_whole_envelope(space, argv: list[str]) -> None:
+    """🔴 Дружні команди віддавали машині `env.data` замість `env.as_dict()`.
+
+    Разом із обгорткою зникали `warnings`, `stale`, `next` і `coverage` — тобто
+    все, заради чого конверт існує. Найдорожче це коштувало в пошуку:
+    `partial_index` («N прогонів поза пошуком: їхній текст ще не
+    проіндексовано») — головний генератор хибного нуля, і саме `--json` радять
+    агентові скіли.
+
+    ⚠ Перевірка ганяє саму команду й читає stdout. Наявні тести конверта
+    перевіряли `Envelope.as_dict()` і MCP напряму, минаючи CLI, — тому всі
+    п'ять місць були зелені.
+    """
+    res = runner.invoke(app, argv)
+    payload = json.loads(res.stdout)
+    assert payload.get("v") == 1, f"{argv}: конверт без версії схеми"
+    assert "ok" in payload, f"{argv}: конверт без `ok`"
+    assert "warnings" in payload, (
+        f"{argv}: у відповіді немає `warnings` — саме так із машинного режиму "
+        f"зникав знаменник нуля")
+
+
+def test_a_refusal_reaches_the_machine_as_json_too(space) -> None:
+    """🔴 Помилка теж є відповіддю.
+
+    Кожна команда друкувала відмову rich-розміткою навіть у машинному режимі:
+    агент діставав розмальований текст замість `{"ok": false, ...}` — і з коду
+    повернення не міг відрізнити «не розпізнав справу» від «нічого не знайшлось».
+    """
+    res = runner.invoke(app, ["search", "Шевченко",
+                              "--case", "щось-чого-немає", "--json"])
+    assert res.exit_code == 1
+    payload = json.loads(res.stdout)
+    assert payload["ok"] is False
+    assert "не розпізнав" in payload["error"]

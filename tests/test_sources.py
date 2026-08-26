@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import io
+from pathlib import Path
 
 import pytest
 
@@ -137,7 +138,7 @@ def test_local_declares_only_what_it_can(tmp_path):
 
 # ── покажчик ─────────────────────────────────────────────────────────────────
 def test_manifest_finds_frames_by_index_label():
-    """🔴 Покажчик відповідає «де метрики мого села» БЕЗ завантаження."""
+    """🔴 Покажчик відповідає «де метрики мого села» без завантаження."""
     m = base.Manifest(source="x", ref="r", sheets=(
         base.Sheet(1, 5, "лідер плівки"),
         base.Sheet(11, 13, "Жаврени"),
@@ -186,7 +187,7 @@ def test_plugin_cannot_shadow_a_builtin(monkeypatch):
 def test_plugin_without_id_is_rejected_by_name(monkeypatch):
     """Джерело без `id` не має потрапити в реєстр і не має валити збірку.
 
-    Перевіряється через СПРАВЖНІЙ шлях завантаження (підміняється лише
+    Перевіряється через справжній шлях завантаження (підміняється лише
     `entry_points`), інакше тест доводив би працездатність підміни, а не коду.
     """
     import importlib.metadata as meta
@@ -266,3 +267,347 @@ def test_event_is_one_line_even_with_cyrillic():
 def test_zero_total_does_not_divide_by_zero():
     ev = P.Event(i=0, n=0)
     assert ev.pct == 0.0
+
+
+# ── знаменник завантаження ──────────────────────────────────────────────────
+def test_a_manifest_that_does_not_know_says_so(tmp_path: Path) -> None:
+    """🔴 «Не знаю скільки» і «нуль кадрів» — різні відповіді.
+
+    Поки `Manifest.frames` був просто `int`, обидві зводились до нуля, і звірка
+    завантаженого з обіцяним ставала неможливою: з нулем вона або мовчить
+    завжди, або лається завжди. Різницю породжують самі джерела — Commons знає
+    `pagecount` лише для багатосторінкових, локальна тека не знає сторінок PDF
+    без читача.
+    """
+    from nyshporka.sources.base import Manifest
+
+    assert Manifest(source="x", ref="y").frames == 0
+    assert Manifest(source="x", ref="y", frames=None).frames is None
+
+
+def test_a_pdf_without_a_reader_does_not_pass_files_off_as_pages(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """🔴 Число файлів замість числа сторінок — знаменник у сотні разів менший.
+
+    Тека з одним PDF на 300 сторінок віддавала `frames=1`, і завантаження
+    «сходилось» на першому ж кадрі. Тепер незнання лишається незнанням.
+    """
+    from nyshporka.sources import local
+
+    case = tmp_path / "справа"
+    case.mkdir()
+    (case / "книга.pdf").write_bytes(b"%PDF-1.4\n")
+
+    shape = local.inspect(str(case))
+    if shape.pages is not None:      # читач PDF стоїть — випадок не той
+        pytest.skip("у середовищі є читач PDF, «невідомо» не відтворити")
+    man = local.LocalSource().manifest(str(case))
+    assert man.frames is None, "число файлів видано за число сторінок"
+
+
+def test_the_download_is_measured_against_the_manifest(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """🔴 Приймач — знаменник, а не відсутність помилок.
+
+    Дзеркало, що віддало сорок кадрів із трьохсот і жодного HTTP-збою, давало
+    «✓ 40 кадрів» і код 0: обіцянка маніфесту друкувалась рядком вище й ніде
+    не звірялась. Той самий клас вади, що обірваний архів, який браузер
+    записує як успіх.
+    """
+    from typer.testing import CliRunner
+
+    from nyshporka import cli as C
+    from nyshporka.sources.base import FetchResult, Manifest
+
+    class Половинчасте:
+        id, label, caps = "проба", "Проба", frozenset({"manifest", "fetch"})
+
+        def manifest(self, ref: str) -> Manifest:
+            return Manifest(source=self.id, ref=ref, title="книга", frames=300)
+
+        def fetch(self, ref, dest, *, frames=None, on_progress=None):
+            return FetchResult(dest=Path(dest), frames=40, bytes=1024, skipped=0)
+
+    class Реєстр:
+        def get(self, sid: str):
+            return Половинчасте()
+
+    monkeypatch.setattr(C, "_sources_registry", lambda: Реєстр())
+    res = CliRunner().invoke(C.app, ["get", "проба", "адреса",
+                                     "--out", str(tmp_path / "куди")])
+    assert res.exit_code == 1, res.stdout
+    assert "неповна" in res.stdout, res.stdout
+
+
+def test_a_download_without_a_denominator_is_not_called_complete(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """⚠ Мовчазний «✓» на невідомому знаменнику читається як доведена повнота.
+
+    Нуль без знаменника не є доказом — тож завантаження каже про це вголос,
+    але й не оголошує теку неповною: доводити нема чим.
+    """
+    from typer.testing import CliRunner
+
+    from nyshporka import cli as C
+    from nyshporka.sources.base import FetchResult, Manifest
+
+    class Безмовне:
+        id, label, caps = "проба", "Проба", frozenset({"manifest", "fetch"})
+
+        def manifest(self, ref: str) -> Manifest:
+            return Manifest(source=self.id, ref=ref, title="скан", frames=None)
+
+        def fetch(self, ref, dest, *, frames=None, on_progress=None):
+            return FetchResult(dest=Path(dest), frames=7, bytes=99)
+
+    class Реєстр:
+        def get(self, sid: str):
+            return Безмовне()
+
+    monkeypatch.setattr(C, "_sources_registry", lambda: Реєстр())
+    res = CliRunner().invoke(C.app, ["get", "проба", "адреса",
+                                     "--out", str(tmp_path / "куди")])
+    assert res.exit_code == 0, res.stdout
+    assert "повноту я не міряю" in res.stdout, res.stdout
+
+
+# ── 🦆 зведений покажчик як джерело пошуку ───────────────────────────────────
+class _Ответ:
+    """Двійник відповіді сервісу. `text`, бо саме його читає джерело."""
+
+    def __init__(self, text: str, code: int = 200) -> None:
+        self.text = text
+        self.status_code = code
+
+    def raise_for_status(self) -> None:
+        pass
+
+
+class _Покажчик:
+    """Двійник HTTP-клієнта: пошук приймає лише тіло, тож POST."""
+
+    def __init__(self, payload: object) -> None:
+        import json as _json
+
+        self.body = _json.dumps(payload, ensure_ascii=False)
+        self.seen: list[object] = []
+
+    def post(self, url: str, data=None, json=None):
+        self.seen.append((url, json))
+        return _Ответ(self.body)
+
+
+def _duck(payload: object):
+    from nyshporka.sources.duck import DuckSource
+    from nyshporka.sources.http import Fetcher
+
+    api = _Покажчик(payload)
+    return DuckSource(fetcher=Fetcher(base="https://п", delay=0.0, client=api)), api
+
+
+def test_duck_finds_a_case_that_the_bundled_snapshot_never_saw():
+    """🔴 Заради цього покажчик і стоїть у пошуку.
+
+    Вкладений зріз ARCHIUM описує виставлене в мережу, і по ф.230 має одну
+    позицію з 229 наявних в описі. Запит про справу, якої там немає, віддавав
+    нуль — а нуль на екрані каталогів читається як «такого не існує».
+    """
+    src, api = _duck([{"full_code": "ДАХмО-230-1-2А", "is_online": True,
+                       "title": "Іменні списки дворян Подільської губернії. Том 2",
+                       "years": [{"start_year": 1844, "end_year": 1844}]}])
+    (hit,) = src.search("іменні списки дворян")
+    assert hit.shifra == "ДАХмО-230-1-2А"
+    assert hit.years == "1844"
+    assert hit.url.endswith("/230/1/2%D0%90")
+    assert api.seen[0][1] == {"title": "іменні списки дворян"}
+
+
+def test_duck_promises_no_download_because_it_has_no_files():
+    """Кнопка «Завантажити» там, де за нею немає файлу, гірша за її відсутність.
+
+    Покажчик знає про справу все, крім самої справи, — тож знахідка веде на
+    його сторінку, а не в чергу завантаження.
+    """
+    src, _ = _duck([{"full_code": "ЦДІАК-224-1-1112", "title": "Метрична книга"}])
+    (hit,) = src.search("метрична")
+    assert hit.acquirable is False
+    assert hit.url.startswith("https://inspector.duckarchive.com/archives/")
+
+
+def test_duck_does_not_hide_the_services_ceiling_behind_the_limit():
+    """🔴 Рівно 50 — це «обрізано», а не «знайдено 50»: пагінації в пошуку немає.
+
+    Різати видачу рівно по `limit` означало б, що обрізка, зроблена сервісом,
+    зникає з очей: перелік виглядає повним, хоч ним не є, — і саме таким його
+    беруть за знаменник негативу.
+    """
+    from nyshporka.sources.duck import CEILING
+
+    src, _ = _duck([{"full_code": f"ДАХмО-230-1-{i}", "title": "Справа"}
+                    for i in range(CEILING)])
+    assert len(src.search("справа", limit=10)) == CEILING
+
+
+def test_duck_answers_with_a_reason_not_with_a_silent_zero():
+    """Сервіс віддає HTML сторінки там, де шляху немає, — а це не «нічого»."""
+    from nyshporka.sources.base import SourceError
+    from nyshporka.sources.duck import DuckSource
+    from nyshporka.sources.http import Fetcher
+
+    class _HTML:
+        def post(self, url: str, data=None, json=None):
+            return _Ответ("<!doctype html><html>…")
+
+    src = DuckSource(fetcher=Fetcher(base="https://п", delay=0.0, client=_HTML()))
+    with pytest.raises(SourceError):
+        src.search("будь-що")
+
+
+def test_duck_is_in_the_registry_out_of_the_box():
+    """Джерело, якого немає в реєстрі, не бере участі в жодному знаменнику."""
+    reg = load()
+    src = reg.get("duck")
+    assert src is not None
+    assert "search" in src.caps
+    assert src.catalog_source()[0] == "live"
+
+
+def test_duck_refuses_instead_of_answering_zero_when_the_network_is_off(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    """🔴 Вимкнена мережа мусить читатись як відмова, а не як «такого немає».
+
+    Порожній перелік від джерела, яке навіть не питали, — найдорожчий вид
+    хибного нуля: він додається до знаменника й закриває напрям.
+    """
+    from nyshporka.sources.base import SourceError
+    from nyshporka.sources.duck import DuckSource
+
+    monkeypatch.setenv("NYSHPORKA_NO_NETWORK", "1")
+    with pytest.raises(SourceError):
+        DuckSource().search("будь-що")
+
+
+# ── 🏛 від знахідки до рішення «збирати цей фонд чи ні» ──────────────────────
+def test_hits_are_rolled_up_into_fonds_because_the_decision_is_about_a_fond():
+    """🔴 Рішення після пошуку приймають про фонд, а не про окрему справу.
+
+    Три томи одного фонду й три випадкові збіги з трьох архівів у плаского
+    списку виглядають однаково — і вибір «чий реєстр збирати» доводилось
+    робити, вичитуючи шифри очима.
+    """
+    from nyshporka.ops_builtin import _by_fond
+
+    rows = _by_fond([
+        {"repo": "DAHMO", "archive": "ДАХмО", "fond": "230", "source": "duck",
+         "years": "1844", "title": "Іменні списки. Том 1"},
+        {"repo": "DAHMO", "archive": "ДАХмО", "fond": "230", "source": "archium",
+         "years": "1802-1841"},
+        {"repo": "CDIAK", "archive": "ЦДІАК", "fond": "224", "source": "duck",
+         "years": "1771"},
+    ])
+    assert [(r["repo"], r["fond"], r["hits"]) for r in rows] == [
+        ("DAHMO", "230", 2), ("CDIAK", "224", 1)]
+    assert rows[0]["sources"] == ["duck", "archium"]
+    # Роки — з того, що знайшлось, і межами фонду не прикидаються.
+    assert (rows[0]["year_from"], rows[0]["year_to"]) == (1802, 1844)
+
+
+def test_a_hit_without_a_fond_is_not_given_one():
+    """Дзеркало плівок адресує плівки, а не фонди — вигаданий фонд гірший за брак.
+
+    Такий рядок просто не бере участі в оцінці, і це видно: сума по фондах
+    менша за видачу.
+    """
+    from nyshporka.ops_builtin import _by_fond
+
+    assert _by_fond([{"repo": "", "fond": "", "source": "fsfilm"}]) == []
+
+
+def test_the_fond_card_puts_the_index_and_our_own_state_side_by_side(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    """🔴 Обидві половини оцінки разом — інакше фонд збирають удруге.
+
+    «Що це за фонд» жило в чужому покажчику, «чи є він у нас» — на іншому
+    екрані; поки їх не звели, про вже зібраний фонд дізнавались після збирання.
+    """
+    from nyshporka import ops_builtin as OB
+
+    class _Двійник:
+        id, label, caps = "duck", "Покажчик", frozenset({"search"})
+
+        def fond_card(self, archive: str, fond: str):
+            return {"archive": archive, "fond": fond, "title": "Дворянське зібрання",
+                    "years": "1800-1914", "opys": [{"opys": "3", "years": "1800-1914",
+                                                    "title": "Балтський повіт"}],
+                    "url": "https://п/archives/ДАХмО/230"}
+
+    class _Реєстр:
+        def get(self, sid: str):
+            return _Двійник() if sid == "duck" else None
+
+    monkeypatch.setattr(OB, "_registry", lambda: _Реєстр())
+    monkeypatch.setattr(OB, "_our_fond",
+                        lambda repo, fond: {"has_registry": False, "rows": 0,
+                                            "on_disk": 0})
+    op = next(o for o in __import__("nyshporka").ops.all_ops()
+              if o.name == "catalog.fond")
+    env = op.fn(op.args(repo="DAHMO", fond="230"))
+    assert env.ok
+    assert env.data["card"]["title"] == "Дворянське зібрання"
+    assert [i["opys"] for i in env.data["card"]["opys"]] == ["3"]
+    # Фонд, якого в нас немає, мусить вести до наступного кроку, а не в глухий кут.
+    assert [n.op for n in env.next] == ["registry.plan"]
+
+
+def test_the_fond_card_says_why_it_is_empty(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Порожня картка без причини змішує «фонду немає» і «сервіс не відповів»."""
+    from nyshporka import ops_builtin as OB
+    from nyshporka.sources.base import SourceError
+
+    class _Мовчун:
+        id, label, caps = "duck", "Покажчик", frozenset({"search"})
+
+        def fond_card(self, archive: str, fond: str):
+            raise SourceError("покажчик не відповів: таймаут")
+
+    class _Реєстр:
+        def get(self, sid: str):
+            return _Мовчун()
+
+    monkeypatch.setattr(OB, "_registry", lambda: _Реєстр())
+    monkeypatch.setattr(OB, "_our_fond",
+                        lambda repo, fond: {"has_registry": True, "rows": 7779,
+                                            "on_disk": 39})
+    op = next(o for o in __import__("nyshporka").ops.all_ops()
+              if o.name == "catalog.fond")
+    env = op.fn(op.args(repo="DAHMO", fond="230"))
+    assert env.ok and not env.data["card"]
+    assert any("таймаут" in w.text for w in env.warnings)
+    # Наш стан лишається — картка чужого сервісу не є умовою для власних даних.
+    assert env.data["ours"]["rows"] == 7779
+
+
+def test_an_archive_we_do_not_know_keeps_the_name_the_index_gave_it():
+    """🔴 «?» замість «ДАЖО» ховає рівно те, заради чого йдуть у покажчик.
+
+    Наш код лишається порожнім навмисно — підставлений туди чужий завів би
+    архів, якого в паку немає. Але назва, яку джерело назвало, мусить долітати
+    до екрана: без неї знахідка не адресується й фонд не оцінити.
+    """
+    from nyshporka.ops_builtin import _by_fond
+
+    (row,) = _by_fond([{"repo": "", "archive": "ДАЖО", "fond": "118",
+                        "source": "duck", "years": "1850-1871"}])
+    assert row["repo"] == ""
+    assert row["label"] == "ДАЖО"
+
+
+def test_two_unknown_archives_with_the_same_fond_number_stay_apart():
+    """Номери фондів між архівами колізують — злиття приписало б чужу вагу."""
+    from nyshporka.ops_builtin import _by_fond
+
+    rows = _by_fond([
+        {"repo": "", "archive": "ДАЖО", "fond": "118", "source": "duck"},
+        {"repo": "", "archive": "ДАРО", "fond": "118", "source": "duck"},
+    ])
+    assert sorted(r["label"] for r in rows) == ["ДАЖО", "ДАРО"]

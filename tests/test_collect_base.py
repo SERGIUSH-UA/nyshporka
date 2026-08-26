@@ -14,7 +14,7 @@ def _row(opys: str, num: int, letter: str = "", title: str = "х") -> dict[str, 
 
 
 def test_a_letter_is_glued_to_the_number_not_split_off() -> None:
-    """🔴 Номер справи з літерою пишеться ЗЛИТО. Без негативного lookahead
+    """🔴 Номер справи з літерою пишеться злито. Без негативного lookahead
     «2640 Дзічковських» читається як справа «2640д» — фантом, якого в описі
     немає, тоді як справжня справа лишається «без скана»."""
     assert T.split_code("24а") == (24, "а")

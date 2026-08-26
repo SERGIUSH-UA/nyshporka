@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import cast
 
 from nyshporka.sources.base import Capability, Source, supports
 from nyshporka.sources.local import LocalSource
@@ -49,6 +50,7 @@ def _builtin(workspace: Path | None = None) -> list[Source]:
     from nyshporka.archives import active
     from nyshporka.sources.archium import ArchiumSource
     from nyshporka.sources.commons import CommonsSource
+    from nyshporka.sources.duck import DuckSource
     from nyshporka.sources.fsfilm import FilmMirrorSource
 
     out: list[Source] = [LocalSource()]
@@ -63,6 +65,10 @@ def _builtin(workspace: Path | None = None) -> list[Source]:
         out.append(ArchiumSource(workspace))   # пак без майданчиків — старий шлях
     out.append(CommonsSource(workspace))
     out.append(FilmMirrorSource(workspace))
+    # 🦆 Зведений покажчик. Єдине джерело, яке шукає без попереднього обходу і
+    # бачить справу незалежно від того, чи її оцифровано, — тобто відповідає
+    # там, де решта віддає нуль на голій установці.
+    out.append(cast("Source", DuckSource(workspace)))
     return out
 
 

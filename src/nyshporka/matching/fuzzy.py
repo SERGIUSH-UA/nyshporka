@@ -70,7 +70,7 @@ def score_record(record: dict[str, Any], person: Person) -> Score:
 
     surname = _string_score(record.get("surname"), primary.surname)
     given = _string_score(record.get("given_name"), primary.given)
-    # 🔴 Порівнювати по батькові НЕМА З ЧИМ: канонічна особа несе лише
+    # 🔴 Порівнювати по батькові нема З чим: канонічна особа несе лише
     # `given`/`surname`, поля патроніма в `NameVariant` немає. Було
     # `_string_score(record["patronymic"], None)` — а це завжди 0.0, при тому
     # що вага 0.1 застосовувалась саме тоді, коли патронім у записі Є. Тобто

@@ -1,11 +1,11 @@
 """Моделі сховища знань про сторінки (`data/pages/**`).
 
-`PageNote` — результат перегляду ОДНІЄЇ сторінки: тип, ПОВНИЙ перелік прізвищ
+`PageNote` — результат перегляду однієї сторінки: тип, повний перелік прізвищ
 (ключова гарантія при `status=full`), географія, коментар. `Record` — структурований
 запис метрики/сповідки/ревізії (хто/коли/батьки/восприємники) з посиланням на скани.
 `CaseFile` — один git-версіонований JSON на справу.
 
-Прізвища й місця зберігаються ЯК НАПИСАНО в джерелі (будь-яка писемність);
+Прізвища й місця зберігаються як написано в джерелі (будь-яка писемність);
 нормалізація для fuzzy-пошуку рахується на льоту (`translit.normalize_archival`) —
 щоб покращення нормалізації не «протухали» у збережених даних.
 """
@@ -34,7 +34,7 @@ PageType = Literal[
     "illegible", "mixed", "other",
 ]
 
-# full = ВСІ прізвища сторінки зафіксовано; partial = бачив, але перелік неповний
+# full = всі прізвища сторінки зафіксовано; partial = бачив, але перелік неповний
 # (напр. занотовано лише хіти). Merge підвищує статус, але ніколи не понижує.
 PageStatus = Literal["full", "partial", "skipped", "unreadable"]
 
@@ -50,7 +50,7 @@ class PageNote(BaseModel):
 
     scan: str = Field(description="Голе ім'я файлу скана ('0030.JPG') або 'page_003' для PDF (0-based).")
     page_type: PageType
-    surnames: list[str] = Field(default_factory=list, description="ЯК НАПИСАНО в джерелі.")
+    surnames: list[str] = Field(default_factory=list, description="як написано в джерелі.")
     places: list[str] = Field(default_factory=list)
     years: list[int] = Field(default_factory=list)
     sheet: str = Field(default="", description="Архівний аркуш: '31зв–32' (конвенція decode_hits).")
@@ -144,7 +144,7 @@ class Record(BaseModel):
         description="Лише для rtype='tally': підсумок книги {'m': 5, 'f': 4}.")
     cause: str | None = Field(
         default=None,
-        description="Причина смерті ЯК У ДЖЕРЕЛІ: 'отъ падучей болѣзни', 'старость'. "
+        description="Причина смерті ЯК У джерелі: 'отъ падучей болѣзни', 'старость'. "
                     "Демографічно найцінніша графа книги смертей — епідемії "
                     "видно тільки по ній.")
     persons: list[RecordPerson] = Field(default_factory=list)
@@ -195,7 +195,7 @@ class Record(BaseModel):
             iso = v.strip()
             if not iso:
                 return None
-            # Точність — те, що ДІЙСНО написано в акті: «1858» це рік, а не
+            # Точність — те, що дійсно написано в акті: «1858» це рік, а не
             # 1 січня. Дописати відсутнє означало б вигадати дату й видати її
             # за прочитану.
             by_parts: dict[int, DatePrecision] = {1: "year", 2: "month", 3: "day"}
@@ -205,7 +205,7 @@ class Record(BaseModel):
 
     @model_validator(mode="after")
     def _auto_rid(self) -> Record:
-        """rid ДЕТЕРМІНОВАНИЙ — інакше конвеєр не ідемпотентний.
+        """rid детермінований — інакше конвеєр не ідемпотентний.
 
         Раніше тут стояв `uuid4`, і повторний `ingest` того самого виводу
         агента створював другий комплект записів замість оновлення наявних:

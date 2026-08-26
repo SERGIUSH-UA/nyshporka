@@ -57,14 +57,14 @@ def write_entity(path: Path, entity: BaseModel) -> None:
     atomic_write_text(path, text)
 
 
-#: Огорожа frontmatter — САМОСТІЙНИЙ рядок із трьох дефісів, а не будь-яке `---`.
+#: Огорожа frontmatter — самостійний рядок із трьох дефісів, а не будь-яке `---`.
 _FM_FENCE = re.compile(r"^---[ \t]*$", re.MULTILINE)
 
 
 def _rewrite_unicode_frontmatter(text: str, metadata: dict[str, Any]) -> str:
     """Замінити ascii-escaped YAML на юнікодний, зберігши тіло MD.
 
-    🔴 Розріз по РЯДКОВИХ межах, а не `text.split("---", 2)`. Той різав по
+    🔴 Розріз по рядкових межах, а не `text.split("---", 2)`. Той різав по
     першому входженню трьох дефісів будь-де — включно з серединою YAML-значення
     (заголовок справи, цитата, назва місця цілком законно містять `---`). Тоді
     хвіст YAML-блоку опинявся в тілі, тобто в `notes`, а що `notes` — вільний

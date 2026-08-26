@@ -5,18 +5,18 @@ import { callOp } from '../core/net.js';
 import { esc, el, setView, busy, failure, boxError, busyForm,
   renderWarnings, renderCoverage, curGen, alive } from '../core/view.js';
 import { SCREENS, ACTIONS } from '../core/registry.js';
-import { show } from '../core/nav.js';
+import { show, onJob, jobChip } from '../core/nav.js';
 import { ic } from '/ui/icons.js';
 
 /**
- * 🔎 Каталоги — ЗОВНІШНІ довідники: сайти архівів, покажчики плівок, Commons.
+ * 🔎 Каталоги — зовнішні довідники: сайти архівів, покажчики плівок, Commons.
  *
  * 🔴 Не плутати з «Описами фондів»: там наш власний зібраний реєстр, і «немає»
  * означає «в архіві не існує». Тут — чужі каталоги, і «немає» означає лише
  * «немає в тих, куди ми змогли зазирнути». Два різні «немає», і на другому
  * напрям не закривають.
  *
- * 🔴 Перелік джерел зі СТАНОМ кожного показується ДО пошуку, а не після.
+ * 🔴 Перелік джерел зі станом кожного показується ДО пошуку, а не після.
  * Доти екран був одним полем вводу: людина набирала село, чекала одинадцять
  * секунд, діставала нуль — і не мала способу дізнатись, що шукали у зрізі
  * одного архіву дворічної давнини, а другий архів не переглядали взагалі.
@@ -42,7 +42,7 @@ SCREENS.sources = async () => {
     ${srcTable(d.sources || [])}`);
 };
 
-/** 🔴 Знаменник екрана: скільки джерел УМІЮТЬ шукати й скільки мають на чому. */
+/** 🔴 Знаменник екрана: скільки джерел уміють шукати й скільки мають на чому. */
 function srcCount(d) {
   return esc(t('sources.count')
     .replace('{ok}', d.with_catalog ?? 0)
@@ -88,12 +88,87 @@ function srcBasis(c) {
     return `<span class="warn-inline">${t('sources.blind')}</span>
       ${c.fix ? `<br><code class="mono">${esc(c.fix)}</code>` : ''}`;
   }
-  const what = c.kind === 'workspace' ? t('sources.own') : t('sources.bundled');
+  // 🔴 Живий запит — четвертий стан, а не зріз із порожньою датою. Нуль у
+  // ньому означає «немає в покажчику зараз», а не «не було на дату зняття».
+  const what = { workspace: t('sources.own'), live: t('sources.live') }[c.kind]
+    || t('sources.bundled');
   const bits = [what];
   if (c.taken) bits.push(`${t('sources.taken')} ${esc(c.taken)}`);
   if (c.rows) bits.push(`${esc(c.rows)} ${t('sources.rows')}`);
   if (c.scope) bits.push(esc(c.scope));
   return `<span class="muted">${bits.join(' · ')}</span>`;
+}
+
+/**
+ * Що можна зробити зі знахідкою.
+ *
+ * 🔴 Джерело, яке не віддає файлів, теж мусить кудись вести. Зведений покажчик
+ * знає про справу все, крім самої справи, — і без адреси його знахідка була б
+ * рядком, з яким нічого не зробиш, а виглядало б це як тупик самого пошуку.
+ * Кнопка «Завантажити» там, де за нею немає файлу, гірша за її відсутність.
+ */
+function hitAction(h) {
+  if (h.acquirable) {
+    return `<button data-act="sources.get" data-source="${esc(h.source)}"
+      data-ref="${esc(h.ref)}">${t('sources.get')}</button>`;
+  }
+  return h.url
+    ? `<a href="${esc(h.url)}" target="_blank" rel="noopener">${t('sources.open')}</a>`
+    : '';
+}
+
+/**
+ * 🏛 Фонди, у яких знайшлось, — над списком справ, а не замість нього.
+ *
+ * 🔴 Пошук по каталогах не самоціль: за ним іде рішення «чи збирати реєстр
+ * цього фонду», а воно про ФОНД, не про окрему справу. Плаский список трьох
+ * томів одного фонду й трьох випадкових збігів із трьох архівів виглядає
+ * однаково, і звідки прийшла знахідка, доводилось вичитувати з шифри очима.
+ *
+ * Джерела, які фондів не знають (дзеркало адресує плівки), сюди не потрапляють
+ * — і саме тому сума по фондах буває меншою за видачу.
+ */
+function fondsBlock(fonds) {
+  if (!fonds.length) return '';
+  return `<h3>${t('sources.fonds')}</h3>
+    <table><tbody>${fonds.map((f) => `<tr>
+      <td><b>${esc(f.label || '?')} ф.${esc(f.fond)}</b><br>
+        <span class="muted">${esc(f.sample || '')}</span></td>
+      <td class="num">${esc(f.hits)} ${t('sources.fond.hits')}</td>
+      <td class="mono">${f.year_from ? `${esc(f.year_from)}–${esc(f.year_to)}` : ''}</td>
+      <td class="mono muted">${esc((f.sources || []).join(', '))}</td>
+      <td><button data-act="sources.fond" data-repo="${esc(f.repo || f.archive || '')}"
+        data-fond="${esc(f.fond)}"
+        title="${esc(t('sources.fond.why'))}">${t('sources.fond')}</button></td>
+    </tr>`).join('')}</tbody></table>`;
+}
+
+/**
+ * Картка фонду: чужий покажчик і наш власний стан поруч.
+ *
+ * 🔴 Обидві половини разом, і це не оформлення. Фонд, який виглядає цікавим,
+ * регулярно виявляється вже зібраним — а поки «що це за фонд» і «чи є він у
+ * нас» жили на різних екранах, дізнавались про це після збирання.
+ */
+function fondCard(d) {
+  const c = d.card || {};
+  const o = d.ours || {};
+  const opys = (c.opys || []).map((i) => `<tr>
+      <td class="mono">${t('sources.fond.opys')} ${esc(i.opys)}</td>
+      <td class="mono">${esc(i.years || '')}</td>
+      <td>${esc(i.title || '')}</td>
+    </tr>`).join('');
+  const ours = o.has_registry
+    ? `<b>${esc(o.rows)}</b> ${t('sources.fond.rows')} ·
+       ${esc(o.on_disk)} ${t('sources.fond.ondisk')}`
+    : `<span class="warn-inline">${t('sources.fond.noregistry')}</span>`;
+  return `<div class="box">
+    <h3>${esc(d.repo || '')} ф.${esc(d.fond)}</h3>
+    <p>${esc(c.title || '')} ${c.years ? `<span class="mono">${esc(c.years)}</span>` : ''}</p>
+    <p class="muted">${t('sources.fond.ours')}: ${ours}</p>
+    ${opys ? `<table><tbody>${opys}</tbody></table>` : ''}
+    ${c.url ? `<p><a href="${esc(c.url)}" target="_blank" rel="noopener">${t('sources.open')}</a></p>` : ''}
+  </div>`;
 }
 
 Object.assign(ACTIONS, {
@@ -106,22 +181,34 @@ Object.assign(ACTIONS, {
     const env = await callOp('catalog.search', { q, limit });
     unlock();
     if (!env.ok) return boxError('hits', env);
-    const { hits = [], coverage = {} } = env.data;
+    const { hits = [], fonds = [], coverage = {} } = env.data;
     el('hits').innerHTML = `
       ${renderWarnings(env)}
       ${hits.length ? '' : `<p><b>${t('sources.nothing')}.</b> ${t('sources.zero_warning')}</p>`}
+      ${fondsBlock(fonds)}
+      <div id="fondcard"></div>
       <table><tbody>${hits.map((h) => `<tr>
         <td class="mono">${esc(h.source)}</td>
-        <td>${esc(h.title)}<br><span class="muted">${esc(h.shifra || '')} ${esc(h.years || '')}</span></td>
+        <td>${esc(h.title)}<br><span class="muted">${esc(h.shifra || '')} ${esc(h.years || '')}
+          ${esc(h.note || '')}</span></td>
         <td class="num">${h.frames ? `${h.frames} ${t('common.frames')}` : ''}</td>
-        <td>${h.acquirable
-          ? `<button data-act="sources.get" data-source="${esc(h.source)}" data-ref="${esc(h.ref)}">${t('sources.get')}</button>`
-          : ''}</td>
+        <td>${hitAction(h)}</td>
       </tr>`).join('')}</tbody></table>
       ${hits.length >= limit
         ? `<p class="warn-inline">${esc(t('sources.ceiling').replace('{n}', limit))}</p>`
         : ''}
       <p class="muted">${t('sources.searched')}: ${esc((coverage.searched || []).join(', ') || '—')}</p>`;
+    return undefined;
+  },
+
+  /** 🏛 Оцінити фонд перед тим, як збирати його реєстр опису. */
+  'sources.fond': async (_ev, elm) => {
+    const box = el('fondcard');
+    box.innerHTML = `<p class="muted">${t('common.loading')}</p>`;
+    const env = await callOp('catalog.fond',
+      { repo: elm.dataset.repo, fond: elm.dataset.fond });
+    if (!env.ok) return boxError('fondcard', env);
+    box.innerHTML = `${renderWarnings(env)}${fondCard(env.data)}`;
     return undefined;
   },
 
@@ -142,10 +229,36 @@ Object.assign(ACTIONS, {
     return undefined;
   },
 
+  /**
+   * ⬇ Забрати знахідку з джерела — і показати це рядком знахідки.
+   *
+   * 🔴 Завантаження триває довго, а людина в цей час дивиться на видачу
+   * пошуку: який саме результат вона взяла, видно лише тут. У переліку робіт
+   * цього не видно взагалі, тож перекидання туди міняло зрозумілий стан на
+   * незрозумілий.
+   */
   'sources.get': async (_ev, elm) => {
     const env = await callOp('acquire.start',
       { source: elm.dataset.source, ref: elm.dataset.ref });
-    if (!env.ok) return alert(env.error);
-    return show('jobs');
+    const near = elm.parentElement;
+    if (!env.ok) {
+      if (near) near.insertAdjacentHTML('beforeend',
+        `<span class="warn-inline">${esc(env.error)}</span>`);
+      return undefined;
+    }
+    elm.disabled = true;                  // друге натискання = друга закачка
+    const id = (env.data || {}).job_id;
+    if (near && id) {
+      // ⚠ Вузол створюється й тримається ПОСИЛАННЯМ. `:last-of-type` рахує
+      // останній елемент СВОГО ТИПУ, а не останній із цим класом, — у рядку з
+      // кількома `<span>` він знайшов би чужий, і прогрес одного завантаження
+      // писався б у сусідній результат пошуку.
+      const chip = document.createElement('span');
+      chip.className = 'job-here';
+      chip.innerHTML = jobChip({ state: 'queued', progress: {} });
+      near.appendChild(chip);
+      onJob(id, (j) => { chip.innerHTML = jobChip(j); });
+    }
+    return undefined;
   },
 });

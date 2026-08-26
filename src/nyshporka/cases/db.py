@@ -89,7 +89,7 @@ def build_index(db_path: Path | None = None,
     """Зібрати реєстр і перезаписати базу. Повертає підсумок для друку."""
     path = Path(db_path or DB_PATH)
     path.parent.mkdir(parents=True, exist_ok=True)
-    # 💓 Мітку пульсу знімаємо ПЕРЕД збором, а не після. Збірка триває секунди, і
+    # 💓 Мітку пульсу знімаємо перед збором, а не після. Збірка триває секунди, і
     # удар, що стався в цей час, описує зміну, якої ми ще не прочитали. Записавши
     # мітку «після», ми оголосили б реєстр свіжим саме тоді, коли він уже ні —
     # помилка в небезпечному напрямку. «До» дає щонайбільше зайву перезбірку.
@@ -124,7 +124,7 @@ def build_index(db_path: Path | None = None,
             ("cases", str(len(rows))),
             ("orphan_runs", str(len(orphans) - decided)),
             ("decided_none_runs", str(decided)),
-            # 💓 Мітка пульсу (знята ДО збору — див. вище). По ній
+            # 💓 Мітка пульсу (знята до збору — див. вище). По ній
             # `staleness(quick=True)` за один `stat` каже «точно застарів»,
             # не обходячи 840 файлів.
             ("pulse", str(pulse_at_start)),
@@ -137,7 +137,7 @@ def build_index(db_path: Path | None = None,
             "decided": decided, "path": str(path)}
 
 
-#: Поріг гео-фільтра (`rapidfuzz.ratio` по КОРЕНЯХ нормалізованих форм).
+#: Поріг гео-фільтра (`rapidfuzz.ratio` по коренях нормалізованих форм).
 #: Калібровано заміром: правильні збіги — 80…100 (`Miastkowka`↔«М'ястківка» 80,
 #: `Tsarevka`↔«Царёвка» 80, «Ольгопіль»↔«Ольгопільський» 100 після обрізання),
 #: чужі — до 77 («Ямпільський»↔«Ольгопільський» 77).
@@ -165,7 +165,7 @@ def geo_hit(query: str, values: list[str]) -> bool:
     «М'ястківка» — в `m'astkivka`; підрядком вони не збігаються ніколи, тож
     пошук латинкою по кириличному каталогу мовчки давав нуль.
     🔴 Чому не `partial_ratio`: у наших повітів спільний хвіст «-ільський», і
-    «Ямпільський» діставав «Ольгопільський» на 80+. Порівнюємо КОРЕНІ.
+    «Ямпільський» діставав «Ольгопільський» на 80+. Порівнюємо корені.
     """
     q = geo_root(query)
     if len(q) < 3:
@@ -198,7 +198,7 @@ def _where(q: str = "", repo: str = "", state: str = "", htr: str = "",
 
     🔴 Один конструктор на обидва запити. Друга копія умови розходиться тихо, і
     розходження виглядає як знаменник, який не дорівнює сумі сторінок, — тобто
-    як число, що бреше, а не як помилка.
+    як хибне число, а не як помилка.
     """
     where: list[str] = []
     args: dict[str, object] = {}
@@ -282,7 +282,7 @@ def query_rows(q: str = "", repo: str = "", state: str = "", htr: str = "",
                         year=year, doc=doc, verdict=verdict, curated=curated,
                         kind=kind, place_id=place_id)
     sql = "SELECT * FROM cases" + cond + _ORDER
-    # LIMIT ставимо ПІСЛЯ гео-фільтра (він у Python), інакше «перші 60» відсіклись
+    # LIMIT ставимо після гео-фільтра (він у Python), інакше «перші 60» відсіклись
     # би до фільтрації і половина повіту зникла б без сліду.
     geo_filter = bool(uezd or settlement or place)
     if limit and not geo_filter:
@@ -300,7 +300,7 @@ def query_rows(q: str = "", repo: str = "", state: str = "", htr: str = "",
 
 def _geo(rows: list[dict[str, Any]], *, uezd: str = "", settlement: str = "",
          place: str = "") -> list[dict[str, Any]]:
-    """Гео-фільтри — у Python, бо порівнюються КОРЕНІ форм, а не підрядки."""
+    """Гео-фільтри — у Python, бо порівнюються корені форм, а не підрядки."""
     if uezd:
         rows = [r for r in rows if geo_hit(uezd, [r.get("uezd") or "", *(r.get("uezds") or [])])]
     if settlement:
@@ -318,7 +318,7 @@ def query_page(*, page: int = 0, page_size: int = 50, uezd: str = "",
                settlement: str = "", place: str = "",
                db_path: Path | None = None, **flt: Any,
                ) -> tuple[list[dict[str, Any]], int]:
-    """Сторінка рядків реєстру + СКІЛЬКИ ЇХ УСЬОГО під цим фільтром.
+    """Сторінка рядків реєстру + скільки їх усього під цим фільтром.
 
     🔴 Знаменник віддається разом зі сторінкою, а не рахується у викликача з
     довжини видачі: `len(rows)` на сторінці дорівнює розміру сторінки, тож із
@@ -326,7 +326,7 @@ def query_page(*, page: int = 0, page_size: int = 50, uezd: str = "",
     тисячі. Обрізаний список без знаменника — та сама вада, що й нуль без
     знаменника: він виглядає як повна відповідь.
 
-    ⚠ Гео-фільтри порівнюють КОРЕНІ форм і живуть у Python, тож при них
+    ⚠ Гео-фільтри порівнюють корені форм і живуть у Python, тож при них
     сторінка ріжеться вже після фільтрації — інакше «перші 50» відсіклись би до
     неї, і половина повіту зникла б без сліду.
     """
@@ -376,10 +376,10 @@ def staleness(db_path: Path | None = None, *, quick: bool = False) -> dict[str, 
     """Чи відстав реєстр від своїх джерел — і від яких саме.
 
     ⏱ `quick=True` — дешевий шар на 💓 пульсі (`core.pulse`): якщо мітка простору
-    змінилась після збірки, реєстр застарів ТОЧНО, і повну перевірку робити
+    змінилась після збірки, реєстр застарів точно, і повну перевірку робити
     нема сенсу. Коштує один `stat` замість двох `glob` і ~840 `stat`.
 
-    🔴 Зворотне НЕ виконується, і на цьому тримається вся чесність механізму:
+    🔴 Зворотне не виконується, і на цьому тримається вся чесність механізму:
     збіг мітки означає лише «через застосунок нічого не міняли». Файл, покладений
     у `data/raw` Провідником, пульсу не б'є. Тому `quick` при збігу мітки чесно
     каже «не знаю» (`unknown=True`), а не «свіжий», і викликач мусить або зробити
@@ -416,7 +416,7 @@ def staleness(db_path: Path | None = None, *, quick: bool = False) -> dict[str, 
         except Exception:
             now, at_build = 0, 0
         # 🔴 Проста нерівність, а не `now and at_build and now != at_build`.
-        # Нуль тут — ЗНАЧУЩЕ значення («пульсу не було»), а не «немає даних»:
+        # Нуль тут — значуще значення («пульсу не було»), а не «немає даних»:
         # збірка на просторі без пульсу записує 0, і перший же удар дає 0 → N,
         # тобто справжню зміну. Вимога «обидві ненульові» робила саме цей
         # перехід невидимим — і найчастіший випадок (перша збірка, потім робота)
@@ -424,12 +424,12 @@ def staleness(db_path: Path | None = None, *, quick: bool = False) -> dict[str, 
         if now != at_build:
             return {"built": built_raw, "stale": True, "unknown": False,
                     "reasons": ["у просторі щось міняли після збірки"]}
-        # мітки збіглись — це НЕ доказ свіжості, а лише «через застосунок
+        # мітки збіглись — це не доказ свіжості, а лише «через застосунок
         # нічого не міняли»
         return {"built": built_raw, "stale": False, "unknown": True, "reasons": []}
 
     # 🔴 Допуск в одну секунду, і він не «про всяк випадок». Мітка збірки
-    # пишеться з `timespec="seconds"`, тобто ОБРІЗАЄТЬСЯ вниз, а mtime
+    # пишеться з `timespec="seconds"`, тобто обрізається вниз, а mtime
     # порівнюється з мікросекундами. `cases build --rescan` сам перезаписує
     # `case_library.json` — і той опиняється на частку секунди «пізніше» за
     # власну збірку: щойно зібраний реєстр одразу звітував «зріз застарів».
@@ -514,6 +514,12 @@ def stats(db_path: Path | None = None) -> dict[str, Any]:
                 "SELECT coalesce(sum(max(fuzzy_hits - fuzzy_reviewed, 0)), 0) FROM cases"),
             "canon_cases": one(f"SELECT count(*) FROM cases {c} AND canon_facts > 0"),
             "eye_cases": one(f"SELECT count(*) FROM cases {c} AND pages_noted > 0"),
+            # Скільки самих аркушів заносило око — не скільки справ їх мають.
+            # Без цього числа «око бачило 40 справ» нічого не каже про обсяг:
+            # за ним може стояти і сорок аркушів, і чотири тисячі.
+            "eye_pages": one(f"SELECT coalesce(sum(pages_noted), 0) FROM cases {c}"),
+            "eye_pages_full": one(
+                f"SELECT coalesce(sum(pages_full), 0) FROM cases {c}"),
             "unfiled": one("SELECT count(*) FROM cases WHERE kind = 'unfiled'"),
             "unfiled_frames": one(
                 "SELECT coalesce(sum(frames), 0) FROM cases WHERE kind = 'unfiled'"),
@@ -532,7 +538,7 @@ def stats(db_path: Path | None = None) -> dict[str, Any]:
             "decided_none_runs": one(
                 "SELECT count(*) FROM orphan_runs WHERE resolved_by = 'override'"),
         }
-        # Гео-покриття: скільки справ мають розібране місце. Показуємо ЧЕСНО, бо
+        # Гео-покриття: скільки справ мають розібране місце. Показуємо чесно, бо
         # фільтр за повітом мовчки пропускає все, що не розібралось.
         out["geo_uezd"] = one(f"SELECT count(*) FROM cases {c} AND uezd <> ''")
         out["geo_settlement"] = one(f"SELECT count(*) FROM cases {c} AND settlement <> ''")
@@ -560,9 +566,9 @@ def rebuild(*, rescan: bool = True) -> dict[str, Any]:
     """Перезібрати реєстр цілком: опис справ на диску, тоді сам зріз.
 
     🔴 Два кроки, а не один, і саме тому вони тут разом. `build_index()` лише
-    ЧИТАЄ опис справ (`case_library.json`); зібрати індекс, не перечитавши диск,
+    читає опис справ (`case_library.json`); зібрати індекс, не перечитавши диск,
     означає побудувати зріз на бібліотеці, якої ще немає, — і він виходить не
-    порожній, а НЕПРАВИЛЬНИЙ: справа без шифри, прогони нічиї. Тобто гірший за
+    порожній, а неправильний: справа без шифри, прогони нічиї. Тобто гірший за
     відсутній, бо виглядає як відповідь. Перший виклик у обхід цієї функції вже
     дав рівно таку картину, тож окремих «зберу лише індекс» бути не повинно.
 
@@ -576,4 +582,66 @@ def rebuild(*, rescan: bool = True) -> dict[str, Any]:
         write_library(rows)
         entries = len(rows)
     res = build_index()
+    _note_history()
     return {"entries": entries, "rescanned": rescan, **res}
+
+
+def _note_history() -> None:
+    """Покласти зріз у журнал спостережень (`core.history`).
+
+    🔴 Саме тут, а не в диспетчері операцій: числа щойно пораховані й лежать у
+    базі, тож зріз коштує один запит. Вішати його на кожну мутацію означало б
+    ходити в реєстр, канон і перелік прогонів там, де на графік ніхто не
+    дивиться.
+
+    Невдача ковтається: журнал — надбудова над реєстром, і перезбірка не має
+    падати через те, що на диск не вдалося дописати рядок.
+    """
+    try:
+        from nyshporka.core import history
+
+        s = stats()
+        # 🔴 `htr_pages` і `pages_noted` беруться з тих самих джерел, що й у
+        # бекфілі та в дашборді, а не з реєстру. Реєстр рахує ті самі речі
+        # вужче — лише те, що розклалось по справах, — і підмішати його число
+        # в ту саму криву означало б намалювати падіння там, де просто змінився
+        # вимірювач.
+        history.record({
+            "cases": s.get("cases"), "frames": s.get("frames"),
+            "ordered": s.get("ordered"),
+            "htr_none": s.get("htr_none"), "no_fuzzy": s.get("fuzzy_none"),
+            "hits_open": s.get("fuzzy_hits_open"),
+            **_journal_measures(),
+        }, by="cases.build")
+    except Exception:
+        pass
+
+
+def _journal_measures() -> dict[str, Any]:
+    """Лічильники, чиє джерело спільне для журналу, бекфілу й дашборда."""
+    out: dict[str, Any] = {}
+    try:
+        from nyshporka import htr_store
+
+        runs = htr_store.list_cases()
+        out["runs"] = len(runs)
+        out["htr_pages"] = htr_store.unique_pages(runs)
+    except Exception:
+        pass
+    try:
+        from nyshporka.pagestore import store
+
+        out["pages_noted"] = store.totals()["pages"]
+    except Exception:
+        pass
+    try:
+        from nyshporka.storage import canon_stats
+
+        canon = canon_stats.summary()
+        if canon.get("present"):
+            out["canon_persons"] = canon["persons"]
+            out["canon_facts"] = canon["facts"]
+            out["canon_sources"] = canon["sources"]
+    except Exception:
+        pass
+    return out

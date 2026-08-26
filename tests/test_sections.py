@@ -1,4 +1,4 @@
-"""🧩 Секції: те, що вимкнено, мусить бути вимкнено ВСЮДИ.
+"""🧩 Секції: те, що вимкнено, мусить бути вимкнено всюди.
 
 Три речі, які тут закріплені, бо кожну легко зламати непомітно:
 
@@ -102,7 +102,7 @@ def test_profile_survives_a_reread(space: Path) -> None:
 
 
 def test_preset_is_stored_as_a_preset(space: Path) -> None:
-    """🔴 Набір, що дорівнює пресету, зберігається ІМЕНЕМ пресету.
+    """🔴 Набір, що дорівнює пресету, зберігається іменем пресету.
 
     Простір із записаним пресетом отримає секцію, додану в майбутній версії;
     простір із застиглим переліком — ні, і людина про це не дізнається.
@@ -134,7 +134,7 @@ def test_custom_set_clears_the_preset(space: Path) -> None:
 def test_running_app_sees_a_profile_changed_from_outside(space: Path) -> None:
     """🔴 Знайдено на живому застосунку, а не в тесті.
 
-    Демон резолвить простір ОДИН раз на старті й живе годинами, а
+    Демон резолвить простір один раз на старті й живе годинами, а
     `nysh sections` — окремий процес, який міняє файл. Зі знімком у пам'яті
     браузер показував вимкнене як увімкнене доти, доки застосунок не
     перезапустять: налаштування «не діяли», і зрозуміти чому не було звідки.
@@ -144,7 +144,8 @@ def test_running_app_sees_a_profile_changed_from_outside(space: Path) -> None:
     from nyshporka.core import workspace as W
     from nyshporka.daemon.app import create_app
 
-    client = TestClient(create_app(W.workspace(), token="t0ken"))
+    client = TestClient(create_app(W.workspace(), token="t0ken"),
+                        base_url="http://127.0.0.1:8788")
     assert "search.run" in {o["name"] for o in client.get("/api/ops").json()["ops"]}
 
     # Правку робить хтось інший — прямо у файлі, повз цей процес.
@@ -199,7 +200,7 @@ def test_long_ops_are_filtered_too(space: Path) -> None:
     """🔴 Діра, через яку це майже сталось.
 
     `read.start` і `acquire.start` мають `long=True`: демон віддає їх у чергу,
-    НЕ проходячи через реєстр. Фільтр, який стоїть тільки в `call()`, пропустив
+    не проходячи через реєстр. Фільтр, який стоїть тільки в `call()`, пропустив
     би саме найдорожчі операції — читання справи й завантаження з архіву.
     """
     from fastapi.testclient import TestClient
@@ -209,7 +210,7 @@ def test_long_ops_are_filtered_too(space: Path) -> None:
 
     W.set_sections(["core"])
     app = create_app(W.workspace(), token="t0ken")
-    client = TestClient(app)
+    client = TestClient(app, base_url="http://127.0.0.1:8788")
     for name in ("read.start", "acquire.start"):
         res = client.post(f"/api/op/{name}", json={},
                           headers={"X-Nysh-Token": "t0ken"})
@@ -224,7 +225,8 @@ def test_http_hides_disabled_ops_and_lists_sections(space: Path) -> None:
     from nyshporka.daemon.app import create_app
 
     W.set_sections(["core", "material"])
-    client = TestClient(create_app(W.workspace(), token="t0ken"))
+    client = TestClient(create_app(W.workspace(), token="t0ken"),
+                        base_url="http://127.0.0.1:8788")
 
     names = {o["name"] for o in client.get("/api/ops").json()["ops"]}
     assert "catalog.search" in names
@@ -273,7 +275,7 @@ def test_agent_surface_did_not_grow(space: Path) -> None:
 def test_installers_point_where_the_catalogue_actually_lives() -> None:
     """🔴 Порада без адреси — половина поради, і саме тут вона найдорожча.
 
-    Пак довідників лежить ОКРЕМИМ релізом: він оновлюється, коли архів виклав
+    Пак довідників лежить окремим релізом: він оновлюється, коли архів виклав
     новий опис, а колесо — коли полагодили ваду. Тому поруч із інсталятором
     його не буває ніколи, і кожне чисте встановлення закінчується рядком
     «довідників поруч немає». Доти цей рядок не казав, звідки їх узяти, — і
@@ -296,7 +298,7 @@ def test_installers_are_at_least_parseable() -> None:
     """🔴 Інсталятор мусить бодай розбиратись — інакше він падає на першому рядку.
 
     ⚠ Це не гіпотетично. Сусідній приймач вище перевіряє, що в скрипті є адреса
-    релізів, і він лишався ЗЕЛЕНИМ, коли `$CatalogUrl = 'https://…` стояв без
+    релізів, і він лишався зеленим, коли `$CatalogUrl = 'https://…` стояв без
     закривної лапки: адреса в тексті була, а сам скрипт не парсився взагалі —
     незакритий рядок з'їдав наступні тридцять і валив усе на `Unexpected token`.
     Тобто перевірка вмісту нічого не каже про те, чи запуститься файл.
@@ -311,7 +313,7 @@ def test_installers_are_at_least_parseable() -> None:
 
     root = Path(__file__).resolve().parents[1] / "install"
 
-    # ⚠ Кожен скрипт перевіряється ТАМ, ДЕ ВІН ПРАЦЮЄ. `bash`, знайдений на
+    # ⚠ Кожен скрипт перевіряється там, ДЕ він працює. `bash`, знайдений на
     # Windows, — це WSL: для нього диска `E:` не існує взагалі, і перевірка
     # падала б не на синтаксисі, а на шляху. Перекладати шлях у `/mnt/e/…`
     # означало б покладатись на здогад про те, який саме bash знайшовся.

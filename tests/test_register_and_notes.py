@@ -17,7 +17,7 @@ from typing import Any
 
 import pytest
 
-# 🔴 Імпорт РОЗБІРНИКА ШИФРИ тут відкладений, і це не стиль. `cases/__init__`
+# 🔴 Імпорт розбірника шифри тут відкладений, і це не стиль. `cases/__init__`
 # тягне за собою `library`, а той на рівні модуля кличе `workspace()` — тобто
 # просте `from nyshporka.cases import register` вимагає налаштованого простору
 # ще на етапі збору тестів. Це та сама «застигла константа», що названа в
@@ -38,12 +38,12 @@ def _register_module(space):
 def space(tmp_path: Path, monkeypatch):
     """Простір із текою сканів.
 
-    🔴 Порядок тут ЗНАЧУЩИЙ, і це не примха тесту. `library`, `pagestore.store`
-    і `cases.db` беруть шляхи на рівні МОДУЛЯ (`ROOT = workspace().root`), тобто
-    заморожують їх у мить першого імпорту. Тому простір оголошується ПЕРШИМ
+    🔴 Порядок тут значущий, і це не примха тесту. `library`, `pagestore.store`
+    і `cases.db` беруть шляхи на рівні модуля (`ROOT = workspace().root`), тобто
+    заморожують їх у мить першого імпорту. Тому простір оголошується першим
     рядком — інакше імпорт падає ще до підміни, — а вже заморожені константи
     підмінюються поіменно: `workspace.use()` після імпорту їх не зрушить, і
-    тест мовчки працював би на СПРАВЖНЬОМУ просторі розробника, псуючи його
+    тест мовчки працював би на справжньому просторі розробника, псуючи його
     дані й зеленіючи від чужих.
     """
     from nyshporka.core import workspace as W
@@ -95,7 +95,7 @@ def test_mirror_style_shifra_is_understood() -> None:
 
 
 def test_shifra_without_archive_is_refused(tmp_path: Path) -> None:
-    """🔴 Та сама шифра у двох архівах — це РІЗНІ справи.
+    """🔴 Та сама шифра у двох архівах — це різні справи.
 
     Прийняти «315-1-8433» без архіву означало б злити їх в одну, і виявилось би
     це аж тоді, коли в справі опиняться чужі сторінки.
@@ -111,7 +111,7 @@ def test_empty_shifra_explains_why_it_matters() -> None:
 
 # ── опис ─────────────────────────────────────────────────────────────────────
 def test_describe_writes_the_sidecar_into_the_case_folder(space: Path) -> None:
-    """🔴 Опис їде В ТЕЦІ, а не в окремій базі.
+    """🔴 Опис їде В теці, а не в окремій базі.
 
     Тека переїжджає між дисками, копіюється на резервний носій і потрапляє до
     колеги — опис мусить їхати з нею. Зовнішня база лишила б після переїзду
@@ -138,7 +138,7 @@ def test_editing_one_field_does_not_wipe_the_others(space: Path) -> None:
 
 
 def test_provenance_of_a_downloaded_case_survives_a_hand_edit(space: Path) -> None:
-    """🔴 Сайдкар завантажувача несе, ЗВІДКИ качали. Правка його не стирає.
+    """🔴 Сайдкар завантажувача несе, звідки качали. Правка його не стирає.
 
     Інакше перший же ручний коментар знищив би доказ походження — а він і є
     підстава довіряти шифрі.
@@ -161,7 +161,7 @@ def test_describe_without_shifra_on_a_fresh_folder_refuses(space: Path) -> None:
 
 def test_relative_path_from_the_registry_resolves_against_the_workspace(
         space: Path, monkeypatch, tmp_path: Path) -> None:
-    """🔴 Реєстр зберігає шляхи ВІДНОСНИМИ — щоб простір можна було перенести.
+    """🔴 Реєстр зберігає шляхи відносними — щоб простір можна було перенести.
 
     Тому кнопка «змінити» подає `data/raw/…`, а не абсолютний шлях. Якщо його
     резолвити від поточної теки процесу, та сама справа з консолі «зникає», а
@@ -172,7 +172,7 @@ def test_relative_path_from_the_registry_resolves_against_the_workspace(
 
     R.describe(space, shifra="ДАХмО 315-1-8433", title="Метрична книга")
     rel = space.relative_to(tmp_path).as_posix()
-    monkeypatch.chdir(tmp_path.parent)  # свідомо НЕ корінь простору
+    monkeypatch.chdir(tmp_path.parent)  # свідомо не корінь простору
 
     env = O.call("case.show", {"case_dir": rel})
     assert env.ok, env.error
@@ -216,7 +216,7 @@ def test_full_cycle_register_note_find(space: Path) -> None:
 
 
 def test_a_blank_page_is_worth_noting_too(space: Path) -> None:
-    """🔴 БЕЗ ВИНЯТКІВ: пустишка заноситься так само.
+    """🔴 без винятків: пустишка заноситься так само.
 
     Негативний результат коштує тих самих очей, і без запису наступна сесія
     відкриє той самий аркуш ще раз.
@@ -234,7 +234,7 @@ def test_a_blank_page_is_worth_noting_too(space: Path) -> None:
 
 
 def test_full_without_surnames_is_flagged(space: Path) -> None:
-    """`status=full` означає «виписано ВСІ прізвища» — від цього залежить нуль."""
+    """`status=full` означає «виписано всі прізвища» — від цього залежить нуль."""
     from nyshporka import ops as O
 
     O.call("case.register", {"case_dir": str(space), "shifra": "ДАХмО 315-1-8433"})
@@ -297,7 +297,7 @@ def test_a_folder_outside_the_workspace_is_flagged_not_silently_accepted(
     warn = next((w for w in env.warnings if w.code == "outside_workspace"), None)
     assert warn is not None, "тека поза простором прийнята мовчки"
     # Сказати «не з'явиться» й не сказати, що з цим робити, — половина роботи.
-    # Спершу тут перевірялось, чи названо КУДИ перенести теку; відтоді з'явився
+    # Спершу тут перевірялось, чи названо куди перенести теку; відтоді з'явився
     # кращий вихід — узяти її під облік там, де вона лежить, — і перевірка
     # тримається за наявність виходу, а не за конкретний із них.
     assert "облік" in warn.text.lower(), \
@@ -331,7 +331,7 @@ def test_a_zero_always_carries_its_denominator(space: Path, where: str) -> None:
     assert not env.data["hits"]
     assert "coverage" in env.data, "нуль без знаменника"
     assert any(w.code == "zero_with_denominator" for w in env.warnings), \
-        "нуль не сказав, ЯКИЙ обсяг переглянуто"
+        "нуль не сказав, який обсяг переглянуто"
 
 
 # ── розташування сканів ──────────────────────────────────────────────────────
@@ -339,13 +339,13 @@ def test_an_adopted_folder_outside_the_workspace_becomes_a_visible_case(
         space: Path, tmp_path: Path) -> None:
     """🔴 Скани не мусять переїжджати в простір, щоб їх було видно.
 
-    Збірка бібліотеки довго дивилась ЛИШЕ в `data/raw`. Для дослідника, який
+    Збірка бібліотеки довго дивилась лише в `data/raw`. Для дослідника, який
     сам будував дерево, це природно; для людини зі сканами на зовнішньому диску
     означало, що заведена справа не з'являлась ніде — без жодної помилки.
 
     Корені поза простором уже були описані (`case_roots` у `nyshporka.toml`),
     але обхід їх не використовував. Тепер використовує — і зона лишається
-    ЯВНИМ переліком: тека потрапляє в неї лише за прямою згодою.
+    явним переліком: тека потрапляє в неї лише за прямою згодою.
     """
     from nyshporka import library as L
     from nyshporka import ops as O
@@ -372,7 +372,7 @@ def test_an_adopted_folder_outside_the_workspace_becomes_a_visible_case(
 def test_paths_inside_the_workspace_stay_relative(space: Path) -> None:
     """🔴 Простір переносять на інший диск і віддають колезі.
 
-    Тому шлях справи, що лежить усередині, лишається ВІДНОСНИМ: абсолютний
+    Тому шлях справи, що лежить усередині, лишається відносним: абсолютний
     пережив би переїзд лише на тій самій машині. Абсолютний з'являється рівно
     там, де відносного не існує, — для теки за межами простору.
     """

@@ -1,6 +1,6 @@
 """▶️ Вибір моделі й план прогону: тут помилка коштує ночі й тихого сміття.
 
-Три речі, кожна з яких ламається БЕЗ помилки:
+Три речі, кожна з яких ламається без помилки:
 
 * **не та версія ваг** — читання йде, текст виходить, просто гірший. «Найновіша»
   ≠ «найкраща»: бойовою двічі лишалась не остання версія;
@@ -64,7 +64,7 @@ def test_without_production_file_the_highest_version_wins(space: Path) -> None:
 
 
 def test_script_comes_from_the_name_prefix_not_the_extension(space: Path) -> None:
-    """🔴 `.mlmodel` буває ДВОХ письм: `skryba_*` латинка, `diak_*` кирилиця.
+    """🔴 `.mlmodel` буває двох письм: `skryba_*` латинка, `diak_*` кирилиця.
 
     Вибір «за розширенням» поставив би на латинську справу кириличну модель —
     і це тихе сміття, а не помилка.
@@ -78,7 +78,7 @@ def test_script_comes_from_the_name_prefix_not_the_extension(space: Path) -> Non
 
 
 def test_second_voice_is_a_different_engine(space: Path) -> None:
-    """Другий голос має помилятись ІНАКШЕ, інакше він марний.
+    """Другий голос має помилятись інакше, інакше він марний.
 
     CTC прив'язаний до пікселів і калічить локально, зберігаючи корінь; PARSeq
     має мовну модель і підставляє правдоподібне слово. Два PARSeq'и такої
@@ -106,7 +106,7 @@ def test_missing_script_names_what_is_available(space: Path) -> None:
 # ── план ─────────────────────────────────────────────────────────────────────
 def test_nested_folders_are_explained_not_reported_as_empty(space: Path,
                                                             tmp_path: Path) -> None:
-    """🔴 `--case-dir` НЕ рекурсивний.
+    """🔴 `--case-dir` не рекурсивний.
 
     Тека з підтеками читається як порожня — «у теці немає сторінок». Це
     коштувало прогонів, тож пояснення мусить називати причину, а не наслідок.
@@ -186,7 +186,7 @@ def test_default_run_carries_no_levers(tmp_path: Path) -> None:
 
 
 def test_sato_flag_is_negative_only(tmp_path: Path) -> None:
-    """⚠ `--gpu-sato` за замовчуванням УВІМКНЕНИЙ у раннері, тож передавати
+    """⚠ `--gpu-sato` за замовчуванням увімкнений у раннері, тож передавати
     його ствердно немає сенсу — а от зняття мусить бути явним."""
     assert "--gpu-sato" not in _plan(tmp_path).command(gpu_sato=True)
     assert "--no-gpu-sato" in _plan(tmp_path).command(gpu_sato=False)
