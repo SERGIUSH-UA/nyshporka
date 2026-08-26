@@ -15,6 +15,12 @@ jobs:
   # проходили на PR». Тег ставлять на коміт, який міг не бачити жодного PR, а
   # ціна пропуску тут вища за будь-де: колесо на PyPI не видаляється — видалений
   # реліз лишається у дзеркалах і кешах.
+  #
+  # 🔴 Донедавна цей коментар обіцяв більше, ніж робив файл: воротами тут стояла
+  # ЛИШЕ перевірка приватних даних, а `pytest`, `ruff` і `mypy` лишались у CI —
+  # тобто тег, поставлений на червоне дерево, публікував його на PyPI, і ніщо
+  # цього не спиняло. Спіймано 2026-08-26 на прямому питанні «це правило чи
+  # перевірка?»: правилом воно й було. Тепер — перевірка.
   private-data:
     name: приватні дані
     runs-on: ubuntu-latest
@@ -28,9 +34,35 @@ jobs:
       - run: python tools/scan_private.py
       - run: python tools/scan_private.py --history
 
+  checks:
+    name: ворота якості
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: встановити
+        run: uv sync --group dev
+      - name: ruff
+        run: uv run ruff check .
+      - name: mypy
+        run: uv run mypy
+      - name: айдентика не протухла
+        run: uv run python -m nyshporka.brand.gen --check
+      # ⚠ Одна версія Python, а не матриця з CI. Матриця питає «на чому це
+      # працює» — на це відповідає CI на кожному пуші. Тут питання інше:
+      # «те, що зараз поїде на PyPI, узагалі зелене?», і відповідь на нього не
+      # має коштувати чотирьох раннерів у мить, коли реліз уже запущено.
+      - name: pytest
+        run: uv run pytest
+
   build:
     name: зібрати
-    needs: private-data
+    needs: [private-data, checks]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
