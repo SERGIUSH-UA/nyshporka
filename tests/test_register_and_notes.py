@@ -94,6 +94,35 @@ def test_mirror_style_shifra_is_understood() -> None:
     assert (sh.repo, sh.fond, sh.opys, sh.spr) == ("ANRM", "211", "3", "140")
 
 
+def test_a_soviet_fond_is_registered_under_the_same_key_as_the_library() -> None:
+    """🔴 Два розбори шифри на пакет — і вони розійшлись.
+
+    Бібліотека навчилась читати літерний префікс радянського фонду, а `nysh
+    case` на тій самій шифрі казав «не розібрав»: у нього був ВЛАСНИЙ шаблон
+    номера, де фонд це просто число. Тобто на одне питання — «що таке номер
+    фонду» — у пакеті було дві відповіді.
+
+    ⚠ Приймач звіряє саме ЗБІГ із бібліотекою, а не окремо взятий результат:
+    інакше два місця можуть бути «правильними» кожне по-своєму й далі
+    розходитись.
+    """
+    from nyshporka.library import _norm_fond
+
+    sh = R.parse_shifra("ДАВіО Р-6129-24-5")
+    assert (sh.repo, sh.fond, sh.opys, sh.spr) == ("DAVO", "R-6129", "24", "5")
+    assert sh.fond == _norm_fond("Р-6129"), "реєстрація й бібліотека знову різні"
+    # Обидва письма дають той самий фонд — інакше та сама справа заходить в
+    # облік двома ключами залежно від того, як її набрали.
+    assert R.parse_shifra("ДАВіО R-6129-24-5").fond == sh.fond
+
+
+def test_a_letter_in_the_opys_number_survives() -> None:
+    """Опис теж буває з літерою («201-4б-15»), і доти вона зрізалась разом із
+    рештою розбору — шифра просто не читалась."""
+    sh = R.parse_shifra("ДАХмО 315-4б-15")
+    assert (sh.fond, sh.opys, sh.spr) == ("315", "4б", "15")
+
+
 def test_shifra_without_archive_is_refused(tmp_path: Path) -> None:
     """🔴 Та сама шифра у двох архівах — це різні справи.
 
