@@ -340,3 +340,104 @@ def test_the_default_opys_answer_matches_what_the_key_will_use() -> None:
         assert env.data["default_opys"] == default_opys(repo, fond), (
             f"{repo} {fond}: довідка про опис за замовчуванням не збігається з "
             f"тим, який підставить ключ")
+
+
+# ── склад архівів: один читач, а не три ──────────────────────────────────────
+def test_the_library_reads_the_pack_instead_of_its_own_copy(pk) -> None:
+    """🔴 Скорочення архівів жили копією в `library` — і копія розійшлась.
+
+    Розбіжність тиха в найгіршому місці: `nysh archive` відповідав голим кодом
+    «DAZHO» там, де картка справи показувала «ДАЖО», бо архів дописали в один
+    словник і забули про другий. Той самий клас розколу, що вже лікували на
+    `opys_in_key`, і приймач тут той самий: читач мусить бути ОДИН.
+    """
+    from nyshporka.library import _REPO_LABEL
+
+    assert pk.repo_labels() == _REPO_LABEL, (
+        "склад архівів у бібліотеці розійшовся з паком — знову дві правди")
+    for code in _REPO_LABEL:
+        assert pk.repo_label(code) == _REPO_LABEL[code]
+
+
+def test_case_registration_knows_the_same_archives_as_the_library() -> None:
+    """🔴 Третя копія переліку, і вона теж уже розходилась.
+
+    `nysh case` не знав ДАЧО й ДАЧвО, які бібліотека знала: та сама справа
+    діставала архів або не діставала — залежно від того, якою командою її
+    заводили.
+    """
+    from nyshporka.archives import active
+    from nyshporka.cases.register import parse_shifra
+    from nyshporka.library import _REPO_LABEL
+
+    for code, label in sorted(_REPO_LABEL.items()):
+        got = parse_shifra(f"{label} 315-1-8433")
+        assert got.repo == active().canon_repo(code), (
+            f"«{label}» заводиться як {got.repo}, а бібліотека знає його як {code}")
+
+
+def test_registering_the_second_code_of_one_archive_keeps_one_key() -> None:
+    """🔴 «ДАВіО» і «ДАВО» — той самий архів, і заводитись мусять під тим самим
+    кодом.
+
+    Інакше облік роздвоюється мовчки: під `DAVO` уже лежить увесь матеріал
+    ф.904 і ф.792, а нові справи, заведені другим написанням, пішли б у
+    сусідній код — з окремим лічильником «на диску» для кожного.
+    """
+    from nyshporka.cases.register import parse_shifra
+
+    assert parse_shifra("ДАВіО 904-24-5").repo == "DAVO"
+    assert parse_shifra("ДАВО 904-24-5").repo == "DAVO"
+
+
+def test_an_archive_added_by_the_researcher_reaches_both_readers(tmp_path) -> None:
+    """Заради цього перелік і переїхав у дані: свій архів додається рядком.
+
+    Доти чужий дослідник із власним архівом упирався в правку коду — і не в
+    одному місці, а в трьох.
+    """
+    import nyshporka.archives.pack as P
+
+    over = tmp_path / "archives.yaml"
+    over.write_text("repositories:\n  DAMYE: {label: ДАМиЄ, aliases: [ДАМіЄ]}\n",
+                    encoding="utf-8")
+    p = P.load(extra=over)
+    assert p.repo_label("DAMYE") == "ДАМиЄ"
+    assert p.resolve_code("ДАМиЄ") == "DAMYE"
+    assert p.resolve_code("ДАМіЄ") == "DAMYE", "псевдонім не доїхав"
+    assert p.resolve_code("ДАХмО") == "DAHMO", "вбудовані не мали зникнути"
+
+
+def test_the_two_vinnytsia_spellings_do_not_swallow_volyn(pk) -> None:
+    """🔴 Волинь і Вінниця діляться скороченням, і ціна помилки тут не «не
+    розпізнав», а «поклав у чужий архів».
+
+    «ДАВО» в наших даних історично означає Вінницьку — під ним лежить увесь
+    матеріал ф.904 і ф.792. Тому Волинська мусить мати ВЛАСНЕ повне написання,
+    і воно не сміє бути псевдонімом «ДАВО»: інакше волинська справа тихо
+    ляже у вінницький архів, і побачити це нема як.
+    """
+    assert pk.resolve_code("ДАВоО") == "DAVOO"
+    assert pk.resolve_code("ДАВО") == "DAVO"
+    assert pk.repo_label("DAVOO") == "ДАВоО"
+    assert "ДАВО" not in pk.repositories["DAVOO"].aliases
+
+
+def test_a_short_code_does_not_claim_a_random_folder() -> None:
+    """🔴 «ДАК» і «ДАС» — три літери, і саме тому їх не можна шукати в будь-якому
+    сегменті шляху: тека `das_kopii` ставала справою архіву Севастополя.
+
+    Це той самий клас вади, від якого рятує сам цикл у `_repo_from_rel` (номер
+    плівки FamilySearch ставав архівом), лише з протилежного боку.
+    """
+    from nyshporka.library import _repo_from_rel
+
+    # Сегмент, що випадково склався в трилітерний код, більше не перехоплює
+    # справу в архіву, названого далі по шляху.
+    assert _repo_from_rel("архів/das_kopii/dahmo_315/spr-1") == "DAHMO"
+    assert _repo_from_rel("архів/dak-2024/anrm/villages") == "ANRM"
+    # А в СВОЇЙ позиції — slug'ом одразу під `raw` — короткий код робочий.
+    assert _repo_from_rel("data/raw/dak/spr-1") == "DAK"
+    # І довгий код упізнається будь-де, як і раніше.
+    assert _repo_from_rel("том/moldavian/ANRM_134-2/raw/2362410") == "ANRM"
+    assert _repo_from_rel("data/raw/dahmo_315/spr-8433") == "DAHMO"

@@ -67,6 +67,11 @@ class Repository:
     #: файли ДАВіО лежать на Commons і під «ДАВіО», і під «ДАВО», і пошук лише за
     #: одним написанням мовчки втрачає половину.
     codes: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    #: Як архів пишуть ЛЮДИ, коли набирають шифру: «ДАХмО», «ДАХмельнО»,
+    #: «ЦДІАУК». Не те саме, що `codes` (там — чужі системи): сюди йдуть
+    #: написання, які мусить прийняти розбір шифри, і саме звідси беруться
+    #: словники розпізнавання. Сам код і `label` додаються самі, їх не дублювати.
+    aliases: tuple[str, ...] = ()
     #: Код того самого архіву, під яким він теж трапляється в обліку.
     #: 🔴 Знання про це вже було — примітою для людини, — і саме тому «на диску»
     #: рахувалось лише за номером фонду: розділити архіви машина не вміла.
@@ -218,6 +223,46 @@ class ArchivesPack:
         r = self.repositories.get(code.upper())
         return r.label if r else code
 
+    def repo_labels(self) -> dict[str, str]:
+        """Усі архіви паку як `код → скорочення`.
+
+        🔴 Єдиний склад архівів на застосунок. Доти скорочення жили ще й
+        словником у `library`, і два читачі розійшлись мовчки: `nysh archive`
+        показував голий код там, де бібліотека показувала «ДАЧкО».
+        """
+        return {code: r.label for code, r in self.repositories.items()}
+
+    def resolve_code(self, word: str | None) -> str:
+        """Як людина написала архів → наш код. Невідоме — порожньо.
+
+        Приймає сам код (`dahmo`), скорочення (`ДАХмО`) і будь-яке написання зі
+        списку `aliases`. Порожньо, а не здогад: вигаданий код тихо завів би
+        архів, якого в паку немає, і подальші звірки порівнювали б його сам
+        із собою.
+        """
+        want = str(word or "").strip().rstrip(".").casefold()
+        if not want:
+            return ""
+        return self.word_index().get(want, "")
+
+    def word_index(self) -> dict[str, str]:
+        """Кожне написання архіву → його код: сам код, мітка, псевдоніми.
+
+        Потрібне тим, хто будує власний розпізнавач із паку, а не питає по
+        одному слову: інакше перелік написань доводилось би тримати копією.
+        """
+        # ⚠ Без кешу навмисно: `ArchivesPack` — frozen-датаклас із полями-
+        # словниками, тож він нехешований, і `lru_cache` по `self` тут упав би
+        # у рантаймі. Словник малий (десятки архівів), а будується він двічі за
+        # процес — на побудову похідних словників у `library` й `register`.
+        out: dict[str, str] = {}
+        for code, r in self.repositories.items():
+            for word in (code, r.label, *r.aliases):
+                key = str(word).strip().casefold()
+                if key:
+                    out.setdefault(key, code)
+        return out
+
     def default_opys(self, repo: str | None, fond: str | None) -> str | None:
         """Опис, який мають скановані теки фонду, коли їхнє ім'я його не несе."""
         f = self.fonds.get((str(repo or "").upper(), str(fond or "")))
@@ -336,7 +381,8 @@ def _build(raw: dict[str, Any], sources: tuple[Path, ...]) -> ArchivesPack:
             code=str(code).upper(), label=str(b.get("label") or code),
             name=str(b.get("name") or ""), country=str(b.get("country") or ""),
             note=str(b.get("note") or ""), sites=sites, codes=codes,
-            same_as=str(b.get("same_as") or "").upper())
+            same_as=str(b.get("same_as") or "").upper(),
+            aliases=tuple(str(a) for a in (b.get("aliases") or []) if a))
     fonds = {}
     for body in raw.get("fonds") or []:
         b = body or {}
