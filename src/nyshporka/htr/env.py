@@ -87,7 +87,10 @@ def inspect(venv: Path, man: M.Manifest | None = None) -> EnvReport:
 
     missing: list[str] = []
     for spec in man.packages:
-        dist = spec.split("==")[0].split(">=")[0].strip()
+        # 🔴 Ріже `manifest.dist_name`, а не власний вираз. Доти тут стояла
+        # копія, і саме розбіжність між нею і тим, як ім'я шукав `setup`,
+        # давала тиху ваду. Копія до того ж не знала ні `~=`, ні екстр.
+        dist = M.dist_name(spec)
         if not _version_of(py, dist):
             missing.append(dist)
     for v in man.vcs_packages:
@@ -166,9 +169,26 @@ def setup(venv: Path, *, man: M.Manifest | None = None, with_cuda: bool = True,
     rep = inspect(venv, man)
     if rep.missing:
         print(f"② ставлю: {', '.join(rep.missing)}")
-        specs = [s for s in man.pip_specs()
-                 if any(m in s for m in rep.missing)]
-        _run([uv, "pip", "install", "--python", str(venv_python(venv)), *specs])
+        # 🔴 За КЛЮЧЕМ, а не підрядком. Доти рядок звучав
+        # `if any(m in s for m in rep.missing)` і мовчки викидав усе, чиє ім'я
+        # не є підрядком власної специфікації, — тобто рівно git-залежності:
+        # `strhub` проти `git+https://github.com/baudm/parseq.git`. PARSeq не
+        # ставився ніколи, `pip` виходив із нуля, а `doctor` слав по колу назад
+        # у цю саму команду.
+        plan = man.install_specs()
+        specs = [plan[m] for m in rep.missing if m in plan]
+        unknown = [m for m in rep.missing if m not in plan]
+        if unknown:
+            # Пакет, якого бракує, але ставити його нема чим. Мовчати про це
+            # найгірше: далі буде «поставив» і те саме «бракує» — без причини.
+            print(f"⚠ у маніфесті немає, чим ставити: {', '.join(unknown)}")
+        if specs:
+            _run([uv, "pip", "install", "--python", str(venv_python(venv)), *specs])
+        else:
+            # ⚠ `uv pip install` без жодного пакета виходить ненульовим кодом,
+            # а `_run` іде з `check=True` — тобто порожній список ронив команду
+            # трасуванням там, де насправді просто нема чого ставити.
+            print("⚠ ставити нема чого — жодної специфікації не знайшлось")
     else:
         print("✓ пакети на місці")
 
