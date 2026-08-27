@@ -116,7 +116,11 @@ _DEFAULT_OPYS = {("DAHMO", "315"): "1", ("CDIAK", "224"): "1", ("CDIAK", "127"):
 # спр.3/12/13/129 існують і там, і там. Заміряно 2026-08-25 на купленій зйомці:
 # декод оп.3 спр.13 (295 кадрів) підмішався до оп.1 спр.13 — книги на 1757
 # сторінок із 34 фактами в каноні, — і картка справи показувала числа обох.
-_OPYS_IN_KEY: set[tuple[str, str]] = {("ANRM", "211"), ("DAHMO", "230")}
+# ДАВіО ф.Р-6129 (колекція актових записів ЦС): опис = окрема сільрада, справи в
+# кожному з одиниці, тож «спр.5» існує стільки разів, скільки описів. Внесено
+# 2026-08-27 з ПЕРШОЮ справою фонду — доки мігрувати нічого.
+_OPYS_IN_KEY: set[tuple[str, str]] = {("ANRM", "211"), ("DAHMO", "230"),
+                                      ("DAVO", "R-6129")}
 # тип запису (normalized) → людський підпис для UI
 _RTYPE_LABEL = {
     "birth": "народження", "marriage": "шлюби", "death": "смерті",
@@ -168,10 +172,20 @@ class CaseEntry:
 
 # ── парсинг кодів справ у ключ ────────────────────────────────────────────────
 
-_ID_RE = re.compile(r"^S_([A-Z]+)_F(\d+)(?:_OP(\d+))?_D([0-9A-Za-z]+)$")
+# 🔴 Літерний префікс фонду тут пишеться БЕЗ дефіса (`S_DAVO_FR6129_OP24_D5`),
+# бо дефіс у source_id не вживається; `_norm_fond` зводить його до канонічного
+# `R-6129`. Без цієї групи ID радянського фонду не розбирався ЗОВСІМ, і картка
+# справи казала «канон: фактів 0» там, де канон цитує аркуш дослівно.
+_ID_RE = re.compile(r"^S_([A-Z]+?)_F([А-ЯЄІЇҐA-Z]{0,2}\d+)(?:_OP(\d+))?_D([0-9A-Za-z]+)$")
 # 315-1-8433, і з літерним індексом справи: 230-1-2а (T:-рендери звуть теки так).
 # ⚠️ Без суфікса літера мовчки зникала і том «2а» злипався зі справою «2».
-_SHIFRA_RE = re.compile(r"(\d+)\s*[-–]\s*(\d+)\s*[-–]\s*(\d+[а-яa-z]?)", re.IGNORECASE)
+# 🔴 Літерний префікс фонду входить у групу фонду: радянські фонди звуться «Р-6129»
+# («Р» = фонди радянського періоду, окрема нумерація), і без цієї групи регекс брав
+# із «ДАВіО Р-6129-24-5» саме «6129-24-5», тобто мовчки зливав фонд Р-6129 з фондом
+# 6129, якби той з'явився. Дефіс одразу після літер обов'язковий, тож хвіст назви
+# архіву («ДАВіО ») сюди не потрапляє.
+_SHIFRA_RE = re.compile(
+    r"((?:[А-ЯЄІЇҐA-Z]{1,2}-)?\d+)\s*[-–]\s*(\d+)\s*[-–]\s*(\d+[а-яa-z]?)", re.IGNORECASE)
 # dahmo_315, а також із суфіксом джерела/рендера: dahmo_315_fs, dahmo_230_pages
 _SLUG_FOND_RE = re.compile(r"^([a-z]+)_(\d+)(?:[_-][a-z0-9]+)*$")
 _SPR_DIR_RE = re.compile(r"spr[-_]?0*(\w+?)$", re.IGNORECASE)    # spr-8433 / spr-199a
@@ -209,6 +223,33 @@ def _norm_spr(s: str | None) -> str | None:
     if len(out) > 1 and out[-1] in _LETTER_TO_LAT and out[:-1].isdigit():
         out = out[:-1] + _LETTER_TO_LAT[out[-1]]
     return out
+
+
+#: кирилична літера префікса фонду → латинська. Той самий канон, що й для індексу
+#: справи: «Р-6129» кирилицею і «R-6129» латинкою — це один фонд, а не два.
+_FOND_PREFIX_TO_LAT = {"р": "R", "п": "P", "ф": "F", "c": "C", "с": "S"}
+
+
+def _norm_fond(s: str | None) -> str | None:
+    """Номер фонду; літерний префікс радянських фондів зводиться до латинки.
+
+    `Р-6129` (кирилиця) → `R-6129`, `р-06129` → `R-6129`, `0315` → `315`.
+    Без цього той самий фонд заходив у бібліотеку двома ключами — залежно від
+    того, яким письмом його набрали в сайдкарі.
+    """
+    if s is None or s == "":
+        return None
+    raw = str(s).strip()
+    # дефіс необов'язковий: шифра пише «Р-6129», а source_id — «R6129» (дефіс у
+    # нього не вживається). Обидва мусять дати один фонд, інакше канон і реєстр
+    # розходяться на тому самому фонді.
+    m = re.match(r"^([А-ЯЄІЇҐA-Za-zа-яєіїґ]{1,2})-?(\d.*)$", raw)
+    if not m:
+        return _norm_spr(raw)
+    pref, rest = m.group(1).lower(), _norm_spr(m.group(2))
+    if not rest:
+        return _norm_spr(raw)
+    return f"{_FOND_PREFIX_TO_LAT.get(pref, pref.upper())}-{rest}"
 
 
 def opys_in_key(repo: str | None, fond: str | None) -> bool:
@@ -343,7 +384,7 @@ def parse_source_id(source_id: str) -> tuple[str, str, str | None, str] | None:
     if not m:
         return None
     repo, fond, opys, spr = m.groups()
-    return repo, fond, opys, str(_norm_spr(spr))
+    return repo, str(_norm_fond(fond)), opys, str(_norm_spr(spr))
 
 
 def parse_case_path(rel: str) -> tuple[str, str, str | None, str] | None:
@@ -408,7 +449,11 @@ def parse_case_path(rel: str) -> tuple[str, str, str | None, str] | None:
     else:
         msh = _SHIFRA_RE.search(stem)
         if msh:
-            fond = fond or _norm_spr(msh.group(1))
+            # 🔴 фонд саме через `_norm_fond`: група тепер може нести літерний
+            # префікс радянського фонду («R-93»), а `_norm_spr` зводить рядок до
+            # НИЖНЬОГО регістру — і ключ виходив «DAVO/r-93/19» проти
+            # «DAVO/R-93/19» з сайдкара, тобто дві справи замість однієї.
+            fond = fond or _norm_fond(msh.group(1))
             opys = opys or _norm_spr(msh.group(2))
             spr = _norm_spr(msh.group(3))
     if not (repo and fond and spr):
@@ -465,7 +510,9 @@ def _sidecar_case(rel: str) -> tuple[str, str, str | None, str] | None:
         repo = _canon_repo(re.split(r"[\s\d]", shifra, maxsplit=1)[0] or "")
         if not repo.isalpha():
             repo = _repo_from_rel(rel)
-        fond, opys, spr = (_norm_spr(g) or "" for g in msh.groups())
+        fond = _norm_fond(msh.group(1)) or ""
+        opys = _norm_spr(msh.group(2)) or ""
+        spr = _norm_spr(msh.group(3)) or ""
         opys = _norm_spr(m.get("inv") or m.get("opys") or "") or opys
         if repo and fond and spr:
             return repo, str(fond), str(opys) if opys else None, str(spr)
