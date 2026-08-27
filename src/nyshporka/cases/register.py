@@ -36,13 +36,42 @@ _SHIFRA_RE = re.compile(
 
 #: Людські назви архівів → код репозиторію. Свідомо короткий: розширюється
 #: паком архівів, а не цим файлом.
+#: 🔴 Цей словник — окрема копія `library._REPO_LABEL`/`_REPO_ALIAS`, не та
+#: сама структура: `nysh case` і `records add` резолвили той самий архів
+#: по-різному (тут бракувало навіть ДАЧО/ДАЧвО, які в library.py вже були).
+#: Доки їх не звели в одне джерело, розширювати треба ОБИДВА місця.
 _REPO_WORDS = {
     "дахмо": "DAHMO", "dahmo": "DAHMO",
-    "даво": "DAVO", "давіо": "DAVO", "davo": "DAVO",
-    "цдіак": "CDIAK", "cdiak": "CDIAK",
-    "anrm": "ANRM", "анрм": "ANRM", "нам": "ANRM",
+    "даво": "DAVO", "давіо": "DAVIO", "davio": "DAVIO", "davo": "DAVO",
+    "цдіак": "CDIAK", "cdiak": "CDIAK", "цдіаук": "CDIAK",
+    "anrm": "ANRM", "анрм": "ANRM", "нам": "ANRM", "bnrm": "BNRM",
     "даоо": "DAOO", "daoo": "DAOO",
     "дажо": "DAZHO", "dazho": "DAZHO",
+    "дачво": "DACHVO", "dachvo": "DACHVO",
+    "дачо": "DACHO", "dacho": "DACHO",
+    "даарк": "DAARK", "daark": "DAARK",
+    "дадно": "DADNO", "dadno": "DADNO",
+    "дадоо": "DADOO", "dadoo": "DADOO",
+    "дазко": "DAZKO", "dazko": "DAZKO",
+    "дазпо": "DAZPO", "dazpo": "DAZPO",
+    "даіфо": "DAIFO", "daifo": "DAIFO",
+    "дак": "DAK", "dak": "DAK",
+    "дако": "DAKO", "dako": "DAKO",
+    "дакро": "DAKRO", "dakro": "DAKRO",
+    "дало": "DALO", "dalo": "DALO",
+    "далуо": "DALUO", "daluo": "DALUO",
+    "дамо": "DAMO", "damo": "DAMO",
+    "дапо": "DAPO", "dapo": "DAPO",
+    "даро": "DARO", "daro": "DARO",
+    "дас": "DAS", "das": "DAS",
+    "дасо": "DASO", "daso": "DASO",
+    "дато": "DATO", "dato": "DATO",
+    "дахо": "DAHO", "daho": "DAHO",
+    "дахео": "DAHEO", "daheo": "DAHEO",
+    "дачко": "DACHKO", "dachko": "DACHKO",
+    "цдіал": "CDIAL", "cdial": "CDIAL",
+    "цдаво": "CDAVO", "cdavo": "CDAVO",
+    "цдагоу": "CDAHOU", "cdahou": "CDAHOU",
 }
 
 
