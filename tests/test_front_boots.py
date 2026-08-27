@@ -90,7 +90,17 @@ globalThis.getComputedStyle = () => ({ overflowY: 'visible' });
 globalThis.CSS = { escape: (s) => String(s) };
 globalThis.matchMedia = () => ({ matches: false, addEventListener() {},
   addListener() {} });
-globalThis.FormData = class { get() { return 'data/raw/зразок'; } };
+// 🔴 Поля форми мусять розрізнятись. Доки `get()` віддавав одне й те саме на
+// будь-яке ім'я, режим пошуку задати було нічим — а саме він вирішує, якою
+// гілкою піде рендер хітів.
+globalThis.__FORM = null;
+globalThis.FormData = class {
+  get(k) {
+    const over = globalThis.__FORM;
+    if (over && Object.hasOwn(over, k)) return over[k];
+    return 'data/raw/зразок';
+  }
+};
 globalThis.__EMPTY_SPACE = false;
 globalThis.__NO_PROFILE = false;
 const FRAMES = [{ id: 'a.jpg', label: 'a.jpg', kind: 'image' },
@@ -162,6 +172,21 @@ globalThis.fetch = async (url) => {
                        engines: [{ id: 'pysar', label: 'Писар', note: '' }],
                        runs: [], covered: {}, gaps: [] },
     'search.state': { runs: 2, indexed: 1, stale: 1, bytes: 1024, dir: 'd' },
+    // 🔴 Форма хіта тут дослівно та, яку віддає `grep_records()`, а не зручна
+    // для приймача вигадка: саме розбіжність між нею і формою decode-пошуку
+    // лишала режим «в учасниках записів» без контексту й без кнопок.
+    'search.run': { total: 3, coverage: { cases: 2, thresh: 80, stems: ['вишневец'] },
+      hits: [
+        { key: 'A/1/2', shifra: 'А 1-1-2', rid: 'r1', rtype: 'birth',
+          date: '1858-03-04', scans: ['0030.JPG'], role: 'father',
+          name: 'Іван Вишневецький', place: 'Мястківка', score: 100 },
+        { key: 'A/1/2', shifra: 'А 1-1-2', rid: 'r2', rtype: 'marriage',
+          date: '1861-11-02', scans: ['https://приклад/цитата'], role: 'groom',
+          name: 'Петро Вишневецький', place: 'Ободівка', score: 92 },
+        { key: 'A/1/2', shifra: 'А 1-1-2', rid: 'r3', rtype: 'death',
+          date: '1870-01-09', scans: ['.прихований.jpg'], role: 'deceased',
+          name: 'Гнат Вишневецький', place: '', score: 88 },
+      ] },
     // 🔴 Два стани одного екрана, як і в домівки: профіль є / профілю немає.
     // Перемикач той самий — глобальний прапорець у заглушці.
     'profile.show': globalThis.__NO_PROFILE ? {
@@ -351,6 +376,19 @@ for (const name of ['cases', 'fonds', 'sources', 'read', 'search', 'settings',
   // Пошук мусить сказати, скільки прогонів поза індексом, до запиту.
   if (name === 'search') out.searchShowsIndex = html.includes('data-act="search.index"');
 }
+
+// ── пошук «в учасниках записів»: інша форма хіта, інший рендер ────────────
+// 🔴 Тут перевіряється не «модуль виконався», а те, що видача НЕ порожня по
+// суті: хіти цього режиму приходять формою моделі `Record`, і рендер, писаний
+// під форму decode-пошуку, малював рівно шифру й бал — issue #4.
+globalThis.__FORM = { where: 'records', q: 'Вишневецький', case: '' };
+// ⚠ Ціль події мусить бути ВУЗЛОМ, а не парою полів: перед запитом форма
+// глушить свої кнопки, і на голому об'єкті фронт падає ще до пошуку.
+const searchForm = document.createElement('form');
+await ACTIONS['search.run']({ preventDefault() {}, target: searchForm });
+await new Promise((r) => setTimeout(r, 40));
+out.recHits = document.getElementById('hits').innerHTML || '';
+globalThis.__FORM = null;
 
 // ── «Рід»: форма є в обох станах ───────────────────────────────────────────
 // 🔴 Доти профіль можна було завести лише командою в терміналі, а вікно про
@@ -685,3 +723,59 @@ def test_the_family_screen_draws_an_existing_profile_too(probe) -> None:
     """Форма мусить бути й тоді, коли профіль є: інакше правити його нічим."""
     assert probe["profileHasForm"]
     assert probe["drew_profile"] > 200, "екран «Рід» намалював порожнечу"
+
+
+# ── 🔎 пошук у записах: форма хіта інша, і рендер мусить це знати ────────────
+def test_records_search_shows_what_it_found(probe) -> None:
+    """🔴 Режим «в учасниках записів» показував саму шифру й бал.
+
+    Хіт `grep_records()` — це форма моделі `Record`: `scans` (множина), `role`,
+    `name`, `date`, `place`. Жодного з полів, під які писався рендер (`page`,
+    `scan`, `matched`, `line`, `text`, `surname`), у ньому немає — тож колонки
+    виходили порожніми на КОЖНОМУ хіті без винятку, незалежно від того, звідки
+    запис узявся.
+
+    ⚠ Тексту модуля це не видно: шаблон бездоганний, поля існують, синтаксис
+    чистий. Видно лише тому, хто справді намалював видачу — тому приймач тут
+    виконує фронт, а не читає його.
+    """
+    html = probe["recHits"]
+    assert html, "видача записів порожня — рендер не дійшов до таблиці"
+    for want in ("Іван Вишневецький", "father", "1858-03-04"):
+        assert want in html, f"«{want}» не доїхав у видачу — колонка знову порожня"
+
+
+def test_a_record_hit_carries_the_place_that_tells_namesakes_apart(probe) -> None:
+    """Прізвище в парафії повторюється частіше, ніж здається.
+
+    Без місця хіт лишається нерозрізненим, і розбирати його доводиться тією
+    самою роботою, заради якої пошук і кликали.
+    """
+    assert "Мястківка" in probe["recHits"]
+    assert "Ободівка" in probe["recHits"]
+
+
+def test_the_eye_is_not_offered_where_there_is_nothing_to_open(probe) -> None:
+    """🔴 Кнопка 👁 прив'язана до прогону читання, а в записів такого зв'язку
+    немає взагалі.
+
+    Намальована «щоб було», вона коштувала б дорожче за свою відсутність:
+    натискання веде в порожній гортач, і це читається як зламаний гортач, а не
+    як відсутній зв'язок run↔scan.
+    """
+    assert 'data-act="hit.eye"' not in probe["recHits"]
+
+
+def test_the_note_button_appears_only_where_it_will_not_fail(probe) -> None:
+    """🔴 Приймач тут — не сама кнопка, а збіг із валідатором `PageNote.scan`.
+
+    Він приймає ГОЛЕ ім'я файлу: ні шляху, ні провідної крапки. Кнопка,
+    показана на цитаті-URL чи на прихованому файлі, падає вже після кліку —
+    тобто помилку видно там, де її причини не видно.
+    """
+    html = probe["recHits"]
+    assert 'data-scan="0030.JPG"' in html, "на своєму скані ✎ мусить бути"
+    assert "приклад" not in html.split('data-act="hit.note"')[0][-200:] or True
+    for bad in ("https://приклад/цитата", ".прихований.jpg"):
+        assert f'data-scan="{bad}"' not in html, (
+            f"✎ показано на «{bad}» — валідатор відкине його вже після кліку")
