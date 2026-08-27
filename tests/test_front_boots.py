@@ -464,9 +464,17 @@ def probe(tmp_path_factory) -> dict:
     (root / "_stub.js").write_text(STUB, encoding="utf-8")
     (root / "_probe.mjs").write_text(PROBE, encoding="utf-8")
 
+    # 🔴 Кодування назване явно. `text=True` бере його з локалі системи, а на
+    # Windows це cp1252 — і будь-яка кирилиця у ВИВОДІ пробника валить фікстуру
+    # `UnicodeDecodeError` ще до першої перевірки. Пастка була тиха рівно доти,
+    # доки пробник віддавав самі числа й латиницю: варто йому повернути
+    # намальовану розмітку, як усі 26 тестів модуля падають на Windows і
+    # зеленіють на Linux. `errors="replace"` тут теж не косметика — без нього
+    # JS-помилка з кирилицею гасила б сама себе замість того, щоб показатись.
     res = subprocess.run(["node", "--input-type=module", "-e",
                           f"await import({json.dumps((root / '_probe.mjs').as_uri())})"],
-                         capture_output=True, text=True, cwd=root)
+                         capture_output=True, cwd=root,
+                         encoding="utf-8", errors="replace")
     line = next((x for x in res.stdout.splitlines() if x.startswith("@@")), "")
     assert line, (
         "фронт не виконався — у браузері це порожній екран без жодного слова:\n"
