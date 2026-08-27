@@ -47,16 +47,22 @@ _SHIFRA_RE = re.compile(
     r"(?:спр\.?\s*|д\.?\s*|d\.?\s*)?(?P<spr>[\w@]+)",
     re.IGNORECASE)
 
-#: Людські назви архівів → код репозиторію. Свідомо короткий: розширюється
-#: паком архівів, а не цим файлом.
-_REPO_WORDS = {
-    "дахмо": "DAHMO", "dahmo": "DAHMO",
-    "даво": "DAVO", "давіо": "DAVO", "davo": "DAVO",
-    "цдіак": "CDIAK", "cdiak": "CDIAK",
-    "anrm": "ANRM", "анрм": "ANRM", "нам": "ANRM",
-    "даоо": "DAOO", "daoo": "DAOO",
-    "дажо": "DAZHO", "dazho": "DAZHO",
-}
+#: Людські назви архівів → код репозиторію.
+#:
+#: 🔴 Свідомо НЕ літерал. Доти це була третя копія того самого переліку — і
+#: розходилась вона з рештою не гіпотетично: `nysh case` не знав ДАЧО й ДАЧвО,
+#: які `library` уже знала, тож той самий архів резолвився по-різному залежно
+#: від того, якою командою заводили справу. Перелік один і живе в паку, звідки
+#: його розширює й накладка користувача.
+#: 🔴 Код зводиться до канонічного (`DAVIO` → `DAVO`), і це не косметика:
+#: звідси він їде в `_source.json`, а звідти — у ключ справи. Один архів під
+#: двома кодами роздвоює облік, і роздвоює тихо: половина вінницьких справ
+#: лягла б під другий код, а «на диску» рахувалось би окремо для кожного.
+def _repo_words() -> dict[str, str]:
+    from nyshporka.archives.pack import active
+
+    pk = active()
+    return {w: pk.canon_repo(c) for w, c in pk.word_index().items()}
 
 
 class RegisterError(RuntimeError):
@@ -101,7 +107,7 @@ def parse_shifra(text: str, *, repo_hint: str = "") -> Shifra:
             f"не розібрав шифру «{raw}». Приймаю: «ДАХмО 315-1-8433», "
             f"«315-1-8433», «ф.315 оп.1 спр.8433», «Ф. 211 Оп. 3 Д. 140».")
     word = (m.group("repo") or "").strip().lower().rstrip(".")
-    repo = _REPO_WORDS.get(word, "") or (repo_hint or "").upper()
+    repo = _repo_words().get(word, "") or (repo_hint or "").upper()
     if not repo:
         raise RegisterError(
             f"з «{raw}» не видно архіву. Додайте його назву («ДАХмО 315-1-8433») "
