@@ -12,8 +12,15 @@ import pytest
 from nyshporka.archives import pack as P
 
 # ── еталони: копії констант із дослідницького репо ───────────────────────────
+# ⚠ Один запис свідомо РОЗХОДИТЬСЯ з тим, що було в коді, і саме тому він тут
+# із поясненням, а не мовчки: `DAVO` мав підпис «ДАВО», а такого скорочення
+# серед архівів України немає зовсім — Вінницька це ДАВіО, Волинська ДАВоО.
+# «ДАВО» лишається нашим КОДОМ (під ним ключі сховища сторінок), але підписом
+# бути перестало: показаний людині, він вчить писати шифру, яка не зійдеться
+# ні з архівом, ні з чужим дослідником. Давнє написання приймається
+# псевдонімом — див. `test_no_archive_is_shown_under_a_spelling_that_does_not_exist`.
 LEGACY_REPO_LABEL = {
-    "DAHMO": "ДАХмО", "CDIAK": "ЦДІАК", "DAVO": "ДАВО", "DAVIO": "ДАВіО",
+    "DAHMO": "ДАХмО", "CDIAK": "ЦДІАК", "DAVO": "ДАВіО", "DAVIO": "ДАВіО",
     "ANRM": "ANRM", "BNRM": "BNRM", "DACHVO": "ДАЧвО", "DAOO": "ДАОО",
 }
 LEGACY_DEFAULT_OPYS = {
@@ -418,9 +425,40 @@ def test_the_two_vinnytsia_spellings_do_not_swallow_volyn(pk) -> None:
     ляже у вінницький архів, і побачити це нема як.
     """
     assert pk.resolve_code("ДАВоО") == "DAVOO"
-    assert pk.resolve_code("ДАВО") == "DAVO"
     assert pk.repo_label("DAVOO") == "ДАВоО"
     assert "ДАВО" not in pk.repositories["DAVOO"].aliases
+
+
+def test_no_archive_is_shown_under_a_spelling_that_does_not_exist(pk) -> None:
+    """🔴 «ДАВО» серед скорочень архівів України немає ЗОВСІМ.
+
+    Вінницька — ДАВіО, Волинська — ДАВоО; голе «ДАВО» це наш давній КОД, під
+    яким лежать ключі сховища сторінок, і нічого більше. Показувати кодом
+    неіснуючу абревіатуру означає навчати нею людину — а далі вона тією ж
+    абревіатурою підпише виписку, і та не зійдеться ні з чим.
+
+    Код лишається (перейменування коштувало б міграції всього обліку), підпис
+    стає правдивим, давнє написання приймається псевдонімом.
+    """
+    assert pk.repo_label("DAVO") == "ДАВіО"
+    assert "ДАВО" in pk.repositories["DAVO"].aliases
+    assert pk.resolve_code("ДАВО") == "DAVO", "давні шифри мусять і далі читатись"
+    assert "ДАВО" not in set(pk.repo_labels().values())
+
+
+def test_one_archive_under_two_codes_lands_in_one_place(pk) -> None:
+    """🔴 `DAVO` і `DAVIO` — той самий архів, і зворотний пошук мусить давати
+    один код, а не той, що трапився в словнику пізніше.
+
+    Інакше та сама книга, занесена «ДАВіО 904-24-5», лягала б то в один архів,
+    то в сусідній — залежно від порядку ключів, тобто ні від чого.
+    """
+    from nyshporka.pagestore.store import _LABEL2REPO
+
+    assert pk.canon_repo("DAVIO") == "DAVO"
+    assert _LABEL2REPO["давіо"] == "DAVO"
+    assert _LABEL2REPO["даво"] == "DAVO"
+    assert _LABEL2REPO["давоо"] == "DAVOO", "Волинь не сміє злитись із Вінницею"
 
 
 def test_a_short_code_does_not_claim_a_random_folder() -> None:

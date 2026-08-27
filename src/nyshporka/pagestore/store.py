@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
+from nyshporka.archives.pack import active as _pack_active
 from nyshporka.core.workspace import workspace
 from nyshporka.library import (
     _DEFAULT_OPYS,
@@ -50,9 +51,12 @@ _STATUS_RANK = {"unreadable": 0, "skipped": 0, "partial": 1, "full": 2}
 _KEY_RE = re.compile(r"^([A-Za-z]+)/(\d+(?:-\d+)?)/([0-9A-Za-z@_]+)$")
 # «архів 123-1-456» / «dahmo 315-1-8433» / «315-1-8433» (без архіву — помилка)
 _SHIFRA_RE = re.compile(r"^(?:(\S+)\s+)?(\d+)\s*[-–]\s*(\d+)\s*[-–]\s*(\w+)$")
-_LABEL2REPO = {v.casefold(): k for k, v in _REPO_LABEL.items()} | {
-    k.casefold(): k for k in _REPO_LABEL
-}
+#: 🔴 Зводиться до канонічного коду, а не до першого-ліпшого. Один архів
+#: буває підписаний двома кодами (`DAVO` і `DAVIO` — це ДАВіО), і без зведення
+#: те, під яким кодом опиниться сторінка, вирішував би порядок словника: та
+#: сама книга лягала б то в один архів, то в сусідній.
+_LABEL2REPO = {w: _pack_active().canon_repo(c)
+               for w, c in _pack_active().word_index().items()}
 
 _ACCEPTED_FORMATS = (
     "ключ «DAHMO/315/8433» (з описом — «ANRM/211-3/140»), шифра з архівом "
