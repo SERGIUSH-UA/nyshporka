@@ -90,7 +90,11 @@ profiles:
   moje:
     surname:
       display: Ліщинський
-      paradigm: adj_skyi      # adj_skyi | noun_ov | indeclinable
+      paradigm: adj_skyi      # перелік — `nysh profile init --help`
+                              # ⚠ прізвище на -ко зазвичай НЕ незмінне:
+                              # у метриках XIX ст. воно відмінюється
+                              # (Чипенко → Чипенка / Чипенкова) — це
+                              # `noun_ko`, а не `indeclinable`
       stems:                  # основа без «-ський»: закінчення додасть парадигма
         bank: Лищин           # обов'язкова: з неї беруться підписи й таргети
         ru_prereform: Лищин   # як писали в метриках XIX ст.

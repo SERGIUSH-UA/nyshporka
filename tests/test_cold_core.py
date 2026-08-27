@@ -160,6 +160,73 @@ def test_target_ladder_discounts_truncated_roots():
     assert all(t for t, _ in got), "порожній таргет зробив би пошук всеїдним"
 
 
+def test_the_bare_stem_paradigm_matches_the_books():
+    """🔴 Золотий набір із issue #2 — саме ті написання, що заміряні в книгах.
+
+    `Лут`/`Лутъ` 1330+92×, `Лута` 6×, `Лутова` 100× (метрики 1855-1922, прямим
+    вибиранням із розібраних архівних CSV). Ключове тут — що жіноча форма
+    ОКРЕМА, а не збігається з родовим чоловічим.
+    """
+    from nyshporka.core import morph
+
+    f = morph.paradigm("noun_bare").forms("Лут", "ru_prereform")
+    assert f["nom_m"] == "Лутъ"
+    assert f["gen_m"] == "Лута"
+    assert f["nom_f"] == "Лутова"
+    assert f["gen_m"] != f["nom_f"], "дві різні форми злились в одну"
+
+
+def test_the_ko_paradigm_declines_instead_of_standing_still():
+    """🔴 Прізвища на -ко в цих книгах ВІДМІНЮЮТЬСЯ.
+
+    Доти єдиною безпечною відповіддю на них була `indeclinable` — і вона мовчки
+    не породжувала ні родового, ні жіночого. Причому саме «Шевченко» стояв у її
+    підписі прикладом, тобто підпис вів рівно в цю пастку.
+
+    ⚠ Основа тут БЕЗ «-о»: інакше родовий дав би «Чипенкоа».
+    """
+    from nyshporka.core import morph
+
+    f = morph.paradigm("noun_ko").forms("Чипенк", "ru_prereform")
+    assert (f["nom_m"], f["gen_m"], f["nom_f"]) == ("Чипенко", "Чипенка", "Чипенкова")
+    assert morph.paradigm("noun_ko").form("Завалк", "nom_f", "ru_prereform") == "Завалкова"
+    assert "Шевченко" not in morph.paradigm("indeclinable").label
+
+
+def test_the_possessive_paradigm_still_cannot_do_a_bare_stem():
+    """Чому знадобились нові парадигми — зафіксовано як поведінка, а не як текст.
+
+    `noun_ov` моделює прізвище, де «-ов-» УЖЕ в основі (Иванов → Иванова). На
+    голій основі вона видає родовий чоловічий і називний жіночий однаковими, а
+    на основі з голосною — форму, неможливу за жодних правил.
+    """
+    from nyshporka.core import morph
+
+    f = morph.paradigm("noun_ov").forms("Лут", "ru_prereform")
+    assert f["gen_m"] == f["nom_f"] == "Лута", "саме цей збіг і був приводом"
+    assert morph.paradigm("noun_ov").form("Чипенко", "nom_m", "ru_prereform") == "Чипенкоъ"
+
+
+def test_every_paradigm_declares_a_whole_table():
+    """🔴 Перебір УСІХ парадигм, а не перелічених поіменно.
+
+    Доти приймачі називали дві з трьох, і `indeclinable` не перевіряла жодна.
+    Через це нова парадигма не покривалась би нічим — а неповна таблиця дає
+    тиху діру: `form()` на відсутньому коді повертає None, і написання просто
+    не з'являється.
+    """
+    from nyshporka.core import morph
+
+    for pid, par in morph.PARADIGMS.items():
+        assert par.endings, f"{pid}: жодної орфографії"
+        for orth, table in par.endings.items():
+            assert orth in morph.ORTHOGRAPHIES, f"{pid}: невідома орфографія {orth}"
+            for case in morph.CASES:
+                for gender in morph.GENDERS:
+                    code = f"{case}_{gender}"
+                    assert code in table, f"{pid}/{orth}: немає {code}"
+
+
 def test_unverified_paradigms_say_so():
     """⚠ Заготовки не мають виглядати як перевірені: на них ще не міряли."""
     from nyshporka.core import morph

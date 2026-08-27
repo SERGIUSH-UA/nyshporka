@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 
 from pydantic import BaseModel, Field
 
+from nyshporka.core import morph
 from nyshporka.core.envelope import Envelope, fail, ok
 from nyshporka.core.ops import NoArgs, op
 
@@ -2344,14 +2345,31 @@ def profile_show(_: NoArgs) -> Envelope:
         return env
     except WorkspaceError as exc:
         return fail(str(exc))
-    return ok({**_profile_payload(p), **shell})
+    return _warn_uncovered(ok({**_profile_payload(p), **shell}), p)
+
+
+def _warn_uncovered(env: Envelope, p: Any) -> Envelope:
+    """Сказати вголос, що частина написань не породжується.
+
+    🔴 Без цього втрата не має ЖОДНОЇ ознаки: список написань виглядає повним,
+    бо коротшим він і мав би бути — просто в ньому немає цілої орфографії.
+    """
+    gap = p.uncovered_orthographies()
+    if gap:
+        env.warn("paradigm_gap",
+                 f"парадигма «{p.paradigm_id}» не має таблиці для: "
+                 f"{', '.join(gap)} — основа задана, а написання цими "
+                 f"орфографіями не породжуються й не шукаються")
+    return env
 
 
 class ProfileSetArgs(BaseModel):
     display: str = Field(description="прізвище, як воно пишеться: Сікорський")
     name: str = Field(default="", description="ключ профілю; типово — з прізвища")
-    paradigm: str = Field(default="adj_skyi",
-                          description="adj_skyi | noun_ov | indeclinable")
+    # 🔴 Перелік будується з реєстру, а не переписується. Доти він стояв
+    # літералом і тут, і в довідці CLI, і в шаблоні скіла — три копії, які при
+    # додаванні парадигми мовчки застарівають, причому третя їде в дистрибутиві.
+    paradigm: str = Field(default="adj_skyi", description=morph.paradigm_ids())
     orth: str = Field(default="uk",
                       description="якою орфографією подано прізвище: "
                                   "uk | ru_modern | ru_prereform | pl | bank")
@@ -2407,7 +2425,7 @@ def profile_set(a: ProfileSetArgs) -> Envelope:
         env.warn("stems_partial",
                  f"основи не задано для: {', '.join(missing)} — цими "
                  f"написаннями прізвище не шукатиметься")
-    return env
+    return _warn_uncovered(env, wrote)
 
 
 class ProfileSourceArgs(BaseModel):
