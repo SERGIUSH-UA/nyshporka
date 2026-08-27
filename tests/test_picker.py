@@ -188,6 +188,16 @@ def test_no_display_is_detected_without_starting_a_process(
     """
     monkeypatch.delenv(native.KILL_SWITCH, raising=False)
     monkeypatch.setattr(native.sys, "platform", "linux")
+    # 🔴 Перевірка на tkinter стоїть у `probe()` ПЕРЕД питанням про екран, і на
+    # частині раннерів CI (ubuntu, py3.11 та py3.13) tkinter у складанні Python
+    # немає. Без підміни цей тест міряв би збірку інтерпретатора раннера, а не
+    # нашу гілку — і падав би рівно там, де перевіряти нічого.
+    import importlib.util
+    real_find_spec = importlib.util.find_spec
+    monkeypatch.setattr(
+        importlib.util, "find_spec",
+        lambda name, *a, **kw: (real_find_spec("json") if name == "tkinter"
+                                else real_find_spec(name, *a, **kw)))
     monkeypatch.delenv("DISPLAY", raising=False)
     monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
     monkeypatch.setattr(native.subprocess, "Popen",
