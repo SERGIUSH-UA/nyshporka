@@ -219,26 +219,53 @@ Object.assign(ACTIONS, {
       ${ST.sift.hits.length
         ? `<p><button data-act="sift.open">${ic('crop-check', 'ic-sm')}
              ${t('sift.open')}</button></p>` : ''}
-      <table><tbody>${hits.map((h) => `<tr>
+      <table><tbody>${hits.map((h) => {
+        // 🔴 records-хіт — інша форма, не підмножина decode/pages-хіта: там
+        // немає `page`/`scan` (однина) взагалі, замість `matched`/`line`/
+        // `text`/`surname` — `name`/`role`/`date`, а `scans` (множина) буває
+        // або локальним файлом справи, або зовнішньою цитатою (посилання на
+        // джерело запису, занесеного напряму через `records add` без скана).
+        // Плутати два рендери під один шаблон означало для records-режиму
+        // порожні колонки на кожному хіті без винятку — issue #4.
+        const isRec = where === 'records';
+        const where_col = isRec ? (h.role || '') : (h.page || h.scan || '');
+        // 🔴 Місце йде в контекст нарівні з іменем. Однофамільця від
+        // односельця відрізняє саме воно: прізвище в парафії повторюється
+        // частіше, ніж здається, і рядок без місця лишає хіт нерозрізненим —
+        // тобто повертає рівно ту роботу, заради якої пошук і кликали.
+        const ctx = isRec
+          ? [h.name, h.date, h.place].filter(Boolean).join(' · ')
+          : (h.matched || h.line || h.text || h.surname || '');
+        // ✎ веде на «Око» голим іменем файлу (див. `PageNote.scan`); цитата
+        // без скана — це URL чи інший шлях зі скісною, і показувати кнопку,
+        // яка там гарантовано впаде валідацією, гірше за її відсутність.
+        const scan0 = isRec ? ((h.scans && h.scans[0]) || '') : (h.scan || h.page || '');
+        // ⚠ Перевірка повторює валідатор `PageNote.scan` ЦІЛКОМ, а не
+        // наполовину: він відкидає і шлях, і провідну крапку. Неповна копія
+        // тут гірша за її відсутність — кнопка малюється, а падає вже після
+        // кліку, тобто помилку видно там, де її причини не видно.
+        const scan0Local = scan0 && !/^\.|[\\/]/.test(scan0);
+        return `<tr>
         <td class="mono">${esc(h.shifra || h.case_key || h.case || '')}</td>
-        <td class="mono">${esc(h.page || h.scan || '')}</td>
-        <td>${esc(String(h.matched || h.line || h.text || h.surname || '').slice(0, 120))}</td>
+        <td class="mono">${esc(where_col)}</td>
+        <td>${esc(String(ctx).slice(0, 120))}</td>
         <td class="num">${esc(h.score ?? '')}</td>
         <td>${/* 🔴 Виявити ≠ перевірити: машина подає кандидата, вирішує око.
                  Доти хіт був рядком таблиці — щоб глянути на нього, треба було
                  переписати прогін і сторінку в гортач руками, а це та сама
                  дія, заради якої пошук і робився. */''}
-          ${h.name && h.page
+          ${!isRec && h.name && h.page
             ? `<button data-act="hit.eye" data-run="${esc(h.name)}"
                  data-page="${esc(h.page)}"
                  data-line="${esc(h.line_index ?? '')}"
                  title="${t('hit.eye')}">👁</button>` : ''}
-          ${(h.key || h.shifra) && (h.scan || h.page)
+          ${(h.key || h.shifra) && scan0Local
             ? `<button data-act="hit.note" data-case="${esc(h.key || h.shifra)}"
-                 data-scan="${esc(h.scan || h.page)}"
+                 data-scan="${esc(scan0)}"
                  title="${t('hit.note')}">✎</button>` : ''}
         </td>
-      </tr>`).join('')}</tbody></table>
+      </tr>`;
+      }).join('')}</tbody></table>
       ${cov.runs !== undefined
         ? `<p class="muted">${t('search.coverage')}: ${cov.runs} ${t('search.runs')}, ${cov.pages} ${t('common.pages')}</p>`
         : cov.cases !== undefined

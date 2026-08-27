@@ -249,3 +249,110 @@ def test_setup_names_the_missing_tool_instead_of_a_traceback(tmp_path, monkeypat
     with pytest.raises(env.ToolMissing) as exc:
         env.setup(tmp_path / "venv")
     assert "git" in str(exc.value) and "strhub" in str(exc.value)
+
+
+# ── що саме доїжджає в pip ───────────────────────────────────────────────────
+def test_the_package_name_is_cut_by_one_function_only():
+    """🔴 Вираз, що ріже ім'я зі специфікації, жив копією у двох місцях.
+
+    І копії розійшлись: `inspect` різала за `==`/`>=`, а `setup` не різала
+    взагалі — шукала ім'я підрядком. Дві відповіді на одне питання, і саме на
+    їхній розбіжності PARSeq тихо не ставився.
+    """
+    assert M.dist_name("kraken==7.0.2") == "kraken"
+    assert M.dist_name("pytorch-lightning>=2.0") == "pytorch-lightning"
+    assert M.dist_name("foo[extra]>=1") == "foo", "екстри старий вираз не знав"
+    assert M.dist_name("bar~=1.2") == "bar", "і `~=` не знав теж"
+    # 🔴 Головне: у формі PEP 508 ім'я стоїть ЛІВОРУЧ від «@», і різати спершу
+    # за версією означало б віддати цілий URL замість імені.
+    assert M.dist_name("strhub @ git+https://github.com/baudm/parseq.git") == "strhub"
+
+
+def test_every_missing_name_can_be_installed_by_something(man):
+    """🔴 Інваріант, якого бракувало: кожне ім'я, яке пакет здатен назвати
+    відсутнім, мусить мати чим ставитись.
+
+    Саме його порушення й було вадою — `strhub` потрапляв у «бракує», але не
+    мав відповідної специфікації, бо її шукали підрядком в URL. Тепер це
+    перевіряється для ВСЬОГО маніфесту, тож наступна git-залежність не повторить
+    історію мовчки.
+    """
+    plan = man.install_specs()
+    for spec in man.packages:
+        assert M.dist_name(spec) in plan, f"{spec}: ім'я не веде до специфікації"
+    for v in man.vcs_packages:
+        assert v["name"] in plan, f"{v['name']}: git-залежність без специфікації"
+        assert plan[v["name"]] == v["spec"]
+    # Стільки ж ключів, скільки пакетів: жоден не з'їв сусіда збігом імені.
+    assert len(plan) == len(man.packages) + len(man.vcs_packages)
+
+
+def _fake_env(tmp_path, monkeypatch, missing):
+    """Середовище, у якому бракує рівно `missing`, а інструменти на місці."""
+    import shutil
+
+    venv = tmp_path / "venv"
+    py = env.venv_python(venv)
+    py.parent.mkdir(parents=True, exist_ok=True)
+    py.write_text("", encoding="utf-8")
+    monkeypatch.setattr(shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(env, "inspect",
+                        lambda *a, **k: env.EnvReport(ok=False, missing=tuple(missing)))
+    calls: list[list[str]] = []
+    monkeypatch.setattr(env, "_run", lambda cmd, **k: calls.append([str(c) for c in cmd]))
+    return venv, calls
+
+
+def test_a_git_dependency_actually_reaches_pip(tmp_path, monkeypatch):
+    """🔴 Приймач самої вади (issue #1), і він мусить падати на старому коді.
+
+    ⚠ Маніфест тут ПІДРОБЛЕНИЙ, із голим git-URL без форми PEP 508. Це навмисно:
+    у справжньому маніфесті специфікацію вже переписано як `strhub @ git+…`, і
+    старий підрядковий фільтр на ній випадково спрацював би — тобто тест на
+    реальних даних доводив би сам себе, а не правку.
+
+    Тут ім'я пакета (`strhub`) у специфікації не зустрічається взагалі: у ній є
+    лише ім'я репозиторію (`parseq`). Рівно так воно й було, коли PARSeq не
+    ставився жодного разу.
+    """
+    venv, calls = _fake_env(tmp_path, monkeypatch, ["strhub"])
+    url = "git+https://github.com/baudm/parseq.git"
+    fake = M.Manifest(python="3.11", packages=("kraken==7.0.2",),
+                      vcs_packages=({"name": "strhub", "spec": url, "note": ""},),
+                      torch_default=(), cuda_index="", cuda_matrix=())
+
+    env.setup(venv, man=fake, with_cuda=False)
+
+    pip = [c for c in calls if "install" in c]
+    assert pip, "pip не викликано взагалі"
+    assert url in pip[0], (
+        f"git-залежність не доїхала в pip: {pip[0]}. Саме так PARSeq і зникав")
+    assert "kraken==7.0.2" not in pip[0], "поставилось зайве — kraken на місці"
+
+
+def test_nothing_installable_does_not_run_pip_empty_handed(tmp_path, monkeypatch):
+    """⚠ `uv pip install` без жодного пакета виходить ненульовим кодом, а `_run`
+    іде з `check=True`.
+
+    Тобто порожній список ронив команду трасуванням саме там, де насправді
+    просто нема чого ставити, — і це був другий наслідок тієї самої вади: коли
+    бракувало ЛИШЕ `strhub`, після фільтра не лишалось нічого.
+    """
+    venv, calls = _fake_env(tmp_path, monkeypatch, ["чогось-такого-немає"])
+    fake = M.Manifest(python="3.11", packages=("kraken==7.0.2",), vcs_packages=(),
+                      torch_default=(), cuda_index="", cuda_matrix=())
+
+    env.setup(venv, man=fake, with_cuda=False)
+
+    assert not [c for c in calls if "install" in c], "pip покликано ні з чим"
+
+
+def test_the_real_manifest_installs_parseq_by_its_own_name(tmp_path, monkeypatch):
+    """Той самий шлях, але на справжньому маніфесті: те, що назвали відсутнім,
+    те й ставиться."""
+    venv, calls = _fake_env(tmp_path, monkeypatch, ["strhub"])
+
+    env.setup(venv, with_cuda=False)
+
+    pip = [c for c in calls if "install" in c]
+    assert pip and any("parseq" in a for a in pip[0]), pip

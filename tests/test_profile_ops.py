@@ -258,3 +258,40 @@ def test_the_cli_writes_through_the_same_operation(space):
     block = block[:block.index("\ndef profile_cmd")]
     assert 'O.call("profile.set"' in block
     assert not re.search(r"\bwrite_config\b", block)
+
+
+# ── тиха втрата: основа є, а таблиці для неї немає ───────────────────────────
+def test_a_stem_the_paradigm_cannot_decline_is_said_out_loud(space):
+    """🔴 Найтихіша втрата з усіх, які тут бувають.
+
+    `Paradigm.forms()` на невідомій орфографії повертає порожньо БЕЗ помилки, а
+    `all_spellings()` просто ітерує по заданих основах. Тож профіль із
+    польською основою і парадигмою, у якої польської таблиці немає, давав нуль
+    польських написань — і жодної ознаки, що щось загубилось. Людина бачить
+    список написань, вважає його повним і закриває напрям, якого не шукали.
+
+    Сусідній приймач (`stems_partial`) ловить ЗВОРОТНИЙ випадок — основи немає.
+    На цей не було нічого.
+    """
+    env = _call("profile.set", {"display": "Іванов", "paradigm": "noun_ov",
+                                 "orth": "ru_prereform",
+                                 "stems": {"ru_prereform": "Иванов",
+                                           "pl": "Iwanow"}})
+    assert env.ok, env.error
+    codes = {w.code for w in env.warnings}
+    assert "paradigm_gap" in codes, (
+        f"про непокриту орфографію не сказано нічого: {codes}")
+    gap = next(w for w in env.warnings if w.code == "paradigm_gap")
+    assert "pl" in gap.text and "noun_ov" in gap.text
+
+
+def test_a_paradigm_that_covers_everything_stays_quiet(space):
+    """Попередження мусить мовчати там, де втрати немає, — інакше його
+    перестануть читати."""
+    env = _call("profile.set", {"display": "Лут", "paradigm": "noun_bare",
+                                 "orth": "ru_prereform",
+                                 "stems": {"ru_prereform": "Лут", "uk": "Лут"}})
+    assert env.ok, env.error
+    assert "paradigm_gap" not in {w.code for w in env.warnings}
+    # І та сама перевірка по суті: жіноче написання справді породилось.
+    assert "Лутова" in env.data["spellings"], env.data["spellings"]

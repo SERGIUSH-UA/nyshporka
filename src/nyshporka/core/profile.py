@@ -156,6 +156,23 @@ class ResearchProfile:
         par = self.paradigm
         return [render_slot(s, self.stems, par) for s in self.search_slots]
 
+    def uncovered_orthographies(self) -> list[str]:
+        """Орфографії, де основа задана, а парадигма її не покриває.
+
+        🔴 Це найтихіша втрата з усіх, які тут бувають. `Paradigm.forms()` на
+        невідомій орфографії повертає порожньо БЕЗ помилки, а `all_spellings()`
+        просто ітерує по заданих основах — тож профіль із польською основою і
+        парадигмою, у якої польської таблиці немає, дає нуль польських написань
+        і жодної ознаки, що щось загубилось. Людина бачить список написань,
+        вважає його повним і закриває напрям, якого не шукали.
+
+        Сусідній приймач (`stems_partial`) ловить зворотний випадок — основи
+        немає. На цей — «основа є, а таблиці немає» — не було нічого.
+        """
+        par = self.paradigm
+        return [orth for orth in self.stems
+                if self.stems.get(orth) and not par.endings.get(orth)]
+
     def all_spellings(self) -> list[str]:
         """Усе, чим прізвище може виглядати в тексті — для пошукових ключів.
 

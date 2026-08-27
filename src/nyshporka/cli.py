@@ -17,6 +17,11 @@ from nyshporka import __version__, brand
 from nyshporka.cli_emit import answer as _answer
 from nyshporka.cli_emit import notes as _notes
 
+# ⚠ `core.morph` навмисно холодний (імпортує лише `dataclasses`), тож на
+# час запуску консолі це не впливає — а довідка `--paradigm` мусить
+# збиратись із реєстру ще до розбору аргументів.
+from nyshporka.core import morph
+
 # 🔴 Обов'язковий параметр, чиї значення видно лише з помилки валідації, —
 # те саме глухе місце, що й порада на неіснуючу команду: людина набирає
 # осмислене слово («метрична», як у сусідній `nysh case --type`), дістає
@@ -683,7 +688,7 @@ def profile_init(
     display: str = typer.Argument(..., help="прізвище, як воно пишеться: Сікорський"),
     name: str = typer.Option("", "--name", help="ключ профілю; типово — з прізвища"),
     paradigm: str = typer.Option("adj_skyi", "--paradigm",
-                                 help="adj_skyi | noun_ov | indeclinable"),
+                                 help=morph.paradigm_ids()),
     orth: str = typer.Option("uk", "--orth",
                              help="якою орфографією подано прізвище: "
                                   "uk | ru_modern | ru_prereform | pl | bank"),

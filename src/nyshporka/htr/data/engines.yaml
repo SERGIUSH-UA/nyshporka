@@ -40,7 +40,10 @@ runtime:
 
   vcs_packages:
     - name: strhub
-      spec: "git+https://github.com/baudm/parseq.git"
+      # ⚠ Форма PEP 508 (`ім'я @ URL`) навмисна: без неї в рядку немає імені
+      # пакета взагалі — лише ім'я РЕПОЗИТОРІЮ (`parseq`), яке з ним не
+      # збігається. Саме на цій розбіжності пакет тихо не ставився.
+      spec: "strhub @ git+https://github.com/baudm/parseq.git"
       note: |
         Scene Text Recognition Model Hub, Apache-2.0. Використовується ЛИШЕ
         PARSeq. ⚠ Пакет містить підмодуль `models/abinet` під non-commercial
