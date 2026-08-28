@@ -130,7 +130,7 @@ nysh doctor         # перевірка «Рушії читання» має с
 | що задаємо | `windows.ps1` | `unix.sh` | `.exe` |
 |---|---|---|---|
 | набір | `-Preset catalog` | `NYSH_PRESET=catalog` | `/PRESET=catalog` |
-| **склад пакета цілком** | `-Source 'nyshporka[app,archives,gedcom]'` | `NYSH_SOURCE=…` | — |
+| **склад пакета цілком** | `-Source 'nyshporka[app,archives]==0.6.1'` | `NYSH_SOURCE=…` | — |
 | тека встановлення | `-Home_ D:\Nysh` | — | `/DIR=D:\Nysh` |
 | не класти ярлик | `-NoLauncher` | (не кладе) | — |
 | без питань | (їх і немає) | — | `/VERYSILENT` |
@@ -587,10 +587,15 @@ PyPI не підписуються Authenticode: там цілість гара�
 
 [AGPL-3.0-or-later](LICENSE).
 
-Причина конкретна: конвеєр спирається на `ultralytics` і `PyMuPDF`, обидва під
-AGPL-3.0. Решта стеку читання чиста (kraken, PARSeq, timm, torch — Apache/BSD),
-тож вибір був між «викинути дві залежності» і «прийняти AGPL». Прийняли AGPL:
-код усе одно відкритий, а копілефт тут радше плюс.
+Копілефт тут не вибір настрою, а вимога дерева залежностей: `Unidecode` —
+ядрова залежність (нормалізація імен, `utils/text.py`) — під **GPL-2.0-or-later**.
+AGPL-3.0 з нею сумісна й суворіша, а застосунок працює через браузер, тобто саме
+той випадок, який AGPL і покриває.
+
+⚠ Історична правка: доти тут стояло, що причина — `ultralytics` і `PyMuPDF`.
+Обох у залежностях уже немає (PDF читає `pypdfium2` під BSD/Apache), і
+обґрунтування пережило свої підстави на кілька релізів. Решта стеку читання
+дозвільна: kraken, PARSeq, timm, torch — Apache/BSD.
 
 ⚠ Пакет `strhub` містить підмодуль `models/abinet` під non-commercial ліцензією
 USTC. Нишпорка використовує з нього **лише PARSeq** (Apache-2.0).

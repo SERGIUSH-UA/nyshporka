@@ -83,7 +83,6 @@ archives = [
   "pdfplumber>=0.11",
   "keyring>=25",
 ]
-gedcom = ["ged4py>=0.5"]
 # 🔴 torch БЕЗ індексу й БЕЗ піна на cu126. Пін під GTX 1650 (sm_75) з
 # дослідницького репо тут шкідливий двічі: на новіших картах cu126 не працює
 # взагалі, а на машині без NVIDIA тягне 2.5 ГБ марно. GPU — крок інсталятора
@@ -111,7 +110,7 @@ xlsx = ["openpyxl>=3.1"]
 # застосунок, збирач сайту не потрібен — його ставить лише CI і той, хто
 # правит документацію.
 docs = ["mkdocs-material>=9.5"]
-all = ["nyshporka[app,archives,gedcom,htr,agent,cloud,xlsx]"]
+all = ["nyshporka[app,archives,htr,agent,cloud,xlsx]"]
 
 [project.urls]
 Homepage = "https://github.com/SERGIUSH-UA/nyshporka"

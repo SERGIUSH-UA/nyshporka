@@ -131,7 +131,6 @@ def info() -> None:
     for label, module, extra in (
         ("консоль", "fastapi", "app"),
         ("архіви", "aiolimiter", "archives"),
-        ("GEDCOM", "ged4py", "gedcom"),
         ("HTR", "torch", "htr"),
     ):
         have = find_spec(module) is not None
@@ -450,8 +449,9 @@ def sample(
     """Розгорнути вкладену зразкову справу — щоб пройти застосунок без сканів.
 
     Три аркуші ДАХмО ф.315 оп.1 спр.159 (1821-1822) з готовим машинним декодом
-    двома голосами. Прочитати їх заново нічим — ваги в цій версії не викладені;
-    зате гортач, пошук у декоді й реєстр працюють на них одразу.
+    двома голосами. Гортач, пошук у декоді й реєстр працюють на них одразу, ще
+    до того, як людина поставить рушії; прочитати їх заново можна після
+    `nysh htr install` і `nysh models get`.
     """
     from nyshporka.core.workspace import WorkspaceError, workspace
     from nyshporka.setup import sample as S

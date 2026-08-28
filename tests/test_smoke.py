@@ -52,15 +52,43 @@ def test_info_reports_missing_extras_with_the_fix():
     res = runner.invoke(app, ["info"])
     assert res.exit_code == 0
     assert "python" in res.stdout
-    for label in ("консоль", "архіви", "GEDCOM", "HTR"):
+    for label in ("консоль", "архіви", "HTR"):
         assert label in res.stdout
     from importlib.util import find_spec
 
     for module, extra in (("fastapi", "app"), ("aiolimiter", "archives"),
-                          ("ged4py", "gedcom"), ("torch", "htr")):
+                          ("torch", "htr")):
         if find_spec(module) is None:
             assert f"[{extra}]" in res.stdout, (
                 f"порада для «{extra}» втратила назву extra — команда не працює")
+
+
+def test_info_never_advertises_an_extra_that_does_not_exist():
+    """🔴 Порада поставити те, чого немає, гірша за мовчання.
+
+    `nysh info` показував рядок «GEDCOM» і радив `pip install
+    'nyshporka[gedcom]'`. Extra була оголошена, але `ged4py` не імпортувався в
+    пакеті НІДЕ, і команди GEDCOM у CLI не існувало: людина виконувала пораду,
+    отримувала зайву залежність і той самий стан. Спіймано звіркою колоди для
+    ефіру з кодом, а не тестом — бо тест дублював той самий перелік, замість
+    звіряти його з `pyproject.toml`.
+
+    Тепер звіряє: кожна extra, яку `info` пропонує, мусить бути оголошена в
+    метаданих пакета.
+    """
+    import re
+    from importlib.metadata import metadata
+    from pathlib import Path
+
+    src = (Path(__file__).resolve().parents[1]
+           / "src" / "nyshporka" / "cli.py").read_text(encoding="utf-8")
+    block = src[src.index("for label, module, extra in ("):]
+    offered = set(re.findall(r'\("[^"]+", "[^"]+", "([a-z]+)"\)', block[:600]))
+    assert offered, "перелік extras у `nysh info` не розібрався"
+
+    declared = set(metadata("nyshporka").get_all("Provides-Extra") or [])
+    assert offered <= declared, (
+        f"`nysh info` радить extra, якої немає в пакеті: {offered - declared}")
 
 
 def test_no_args_shows_help_not_traceback():
