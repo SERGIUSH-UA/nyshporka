@@ -319,9 +319,15 @@ def render(flavour: str, brand: Brand | None = None) -> str:
 #: Растри. Живуть окремо від `--check` навмисно: побайтова рівність PNG між
 #: версіями Pillow не гарантована, тож приймач «не протухло» давав би на них
 #: хибні падіння в CI. Перезбираються командою, а звіряється лише наявність.
-PNG_TARGETS: dict[str, tuple[str, int, int]] = {
+RASTER_TARGETS: dict[str, tuple[str, int, int]] = {
     "src/nyshporka/brand/data/assets/mark.png": ("mark", 512, 512),
     "src/nyshporka/brand/data/assets/social-preview.png": ("social", 1280, 640),
+    # 🪟 Іконка інсталятора й ярликів. Windows бере з `.ico` ту врізку, яка
+    # пасує місцю: 16 px у заголовку вікна, 32 у списку «Програми та засоби»,
+    # 256 на робочому столі з великими значками. Один розмір, розтягнутий
+    # системою, у дрібних місцях перетворюється на кашу — а це те, що людина
+    # бачить ще до першого запуску.
+    "src/nyshporka/brand/data/assets/nyshporka.ico": ("icon", 256, 256),
 }
 
 
@@ -330,7 +336,34 @@ def render_png(kind: str, width: int, height: int, brand: Brand | None = None) -
     if kind == "social":
         return paw.render_social(width, height, colour=b.color("accent").light,
                                  background=b.color("bg").light)
+    if kind == "icon":
+        return _render_ico(width, b)
     return paw.render_png(width, colour=b.color("accent").light)
+
+
+#: Врізки, які Windows справді питає. Більше не кладемо: кожна додає вагу до
+#: файлу, який людина качає перед тим, як побачила застосунок.
+ICO_SIZES = (16, 32, 48, 64, 128, 256)
+
+
+def _render_ico(px: int, brand: Brand) -> bytes:
+    """Знак → багаторозмірний `.ico`.
+
+    🐾 Джерело те саме, що в `mark.png`, і це не економія: іконка інсталятора —
+    перше, що бачить людина, і власний малюнок тут означав би, що бренд
+    розходиться ще до встановлення. Той самий принцип, що й у лапки, яку
+    звіряє `test_installers_print_the_same_paw`.
+
+    Pillow збирає врізки сам із найбільшої; окремо рендерити кожну не треба.
+    """
+    import io
+
+    from PIL import Image
+
+    mark = Image.open(io.BytesIO(paw.render_png(px, colour=brand.color("accent").light)))
+    buf = io.BytesIO()
+    mark.save(buf, format="ICO", sizes=[(s, s) for s in ICO_SIZES if s <= px])
+    return buf.getvalue()
 
 
 def _speak_utf8() -> None:
@@ -358,12 +391,12 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--check", action="store_true",
                     help="не писати, а перевірити, чи згенероване не протухло")
     ap.add_argument("--png", action="store_true",
-                    help="перезібрати ще й растри (знак і обкладинку репозиторію)")
+                    help="перезібрати ще й растри (знак, обкладинку, іконку)")
     ns = ap.parse_args(argv)
 
     root, stale = repo_root(), []
     if ns.png and not ns.check:
-        for rel, (kind, w, h) in PNG_TARGETS.items():
+        for rel, (kind, w, h) in RASTER_TARGETS.items():
             path = root / rel
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(render_png(kind, w, h))

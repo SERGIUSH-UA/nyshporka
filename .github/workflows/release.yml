@@ -95,9 +95,112 @@ jobs:
           name: dist
           path: dist/
 
+  # 🪟 Один файл, який людина качає, двічі клацає — і отримує застосунок.
+  # Три скарги першого дня публічного доступу були про установлення, і остання
+  # звелась до того, що термінал відкривати не має ніхто: «користувач має
+  # скачати файл, натиснути встановити». Логіки встановлення тут немає — усе
+  # робить той самий `install/windows.ps1`, який їде всередину.
+  windows-setup:
+    name: інсталятор Windows
+    # `build` уже протягнув `private-data` і `checks` і звірив «версія колеса
+    # == тег». Збирати `.exe` раніше означало б випустити файл, названий
+    # версією, яку ніхто не перевіряв.
+    needs: build
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # 🗂 Пак довідників лежить ОКРЕМИМ релізом (`catalog-РРРР-ММ-ДД`): описи
+      # оновлюються, коли архів виклав новий, а код — коли полагодили ваду, і
+      # це різні годинники. Тому в цьому прогоні його немає й бути не може —
+      # тягнемо з останнього такого релізу.
+      - name: пак довідників
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # ⚠ Чернетки відсіюємо: у власника репозиторію недороблений
+          # `catalog-*` виявився б «останнім» і поїхав би в `.exe`.
+          tag=$(gh release list --limit 100 --json tagName,isDraft \
+                -q '[.[] | select(.isDraft | not) | .tagName
+                     | select(test("^catalog-[0-9]{4}-[0-9]{2}-[0-9]{2}$"))]
+                    | sort | last')
+          # 🔴 Немає пака — реліз падає, і це навмисно. `.exe` без довідників
+          # установиться бездоганно, а на перше ж питання («де метрики мого
+          # села») поверне НУЛЬ — і нуль виглядатиме як відповідь. Гучне
+          # падіння тут коштує п'яти хвилин; тихий нуль коштує довіри людини,
+          # яка вирішить, що її села в архівах немає.
+          test -n "$tag" || { echo "::error::немає жодного релізу catalog-*"; exit 1; }
+          gh release download "$tag" --pattern 'nyshporka-catalog-*.zip' --dir install
+          ls -l install/nyshporka-catalog-*.zip
+
+      # ⚠ Ставити нічого не треба: на образі windows-latest Inno Setup уже є.
+      - name: зібрати .exe
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}".TrimStart('v')
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" `
+              "/DAppVersion=$tag" "install\nyshporka.iss"
+          if ($LASTEXITCODE -ne 0) { throw "ISCC вийшов з $LASTEXITCODE" }
+
+      # 🔴 Той самий приймач, що й «версія колеса == тег», лише для `.exe`.
+      # Розбіжність дає файл, який називається одним, а ставить інше.
+      - name: версія .exe == тег
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}".TrimStart('v')
+          $exe = "dist\nyshporka-$tag-setup.exe"
+          if (-not (Test-Path $exe)) { throw "немає $exe" }
+          $got = (Get-Item $exe).VersionInfo.ProductVersion
+          if ($got -notlike "$tag*") { throw "VersionInfo $got не збігається з тегом $tag" }
+          # Хеш поруч: єдиний спосіб для людини звірити завантажене, доки
+          # файл не підписаний.
+          (Get-FileHash $exe -Algorithm SHA256).Hash | Set-Content "$exe.sha256"
+          # 🔗 Копія зі СТАЛИМ іменем. Саме на неї показує README посиланням
+          # `releases/latest/download/…` — те, що робить «скачати файл» одним
+          # кліком. Версійне ім'я лишається поруч: за ним потім з'ясовують, що
+          # саме людина ставила.
+          # ⚠ Коли приїде підпис, цей рядок має переїхати ПІСЛЯ підписання —
+          # інакше копія лишиться непідписаною, а качатимуть саме її.
+          Copy-Item $exe "dist\nyshporka-setup.exe"
+          Write-Host "зібрано: $exe"
+
+      # ⚠ Окремий артефакт, і в ньому ЛИШЕ інсталятор. По-перше, SignPath
+      # бере файл за `github-artifact-id` і вимагає, щоб той був завантажений
+      # саме `upload-artifact` (v4+) ПЕРЕД подачею. По-друге, поклади ми `.exe`
+      # у спільний `dist`, до Windows-політики підпису поїхало б іще й колесо.
+      - uses: actions/upload-artifact@v4
+        id: setup-artifact
+        with:
+          name: setup-windows
+          path: dist/nyshporka-*setup*
+
+      # ── місце під підпис SignPath Foundation ──────────────────────────────
+      # Безкоштовний підпис для OSS; заявка подана окремо. Коли схвалять —
+      # знімається коментар, і решта воркфлоу не змінюється: `id` вище вже є,
+      # артефакт уже окремий і вже завантажений через `upload-artifact`.
+      # ⚠ Підпис НЕ прибирає попередження SmartScreen одразу: Microsoft
+      # скасувала миттєву репутацію навіть для EV. Він дає ім'я видавця
+      # замість «Невідомий видавець» і репутацію, яка переходить на наступні
+      # версії.
+      # - uses: SignPath/submit-signing-request@v1
+      #   with:
+      #     api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+      #     organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+      #     project-slug: nyshporka
+      #     signing-policy-slug: release-signing
+      #     github-artifact-id: ${{ steps.setup-artifact.outputs.artifact-id }}
+      #     wait-for-completion: true
+      #     output-artifact-directory: dist
+
   github-release:
     name: GitHub Release
-    needs: build
+    # ⚠ `pypi` тут не заради порядку. `.exe` не несе пакета всередині — він
+    # ставить його з PyPI. Викласти реліз раніше, ніж колесо доїхало, означає
+    # вікно в кілька хвилин, коли завантажений інсталятор ставить ПОПЕРЕДНЮ
+    # версію, — рівно тоді, коли на реліз приходять перші люди за посиланням
+    # з анонсу.
+    needs: [build, windows-setup, pypi]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -105,6 +208,12 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: dist
+          path: dist/
+      # ⚠ У ТУ САМУ теку, а не окремим шляхом: тоді `files: dist/*` нижче
+      # лишається незміненим, і два джерела читаються двома рядками.
+      - uses: actions/download-artifact@v4
+        with:
+          name: setup-windows
           path: dist/
       - uses: softprops/action-gh-release@v2
         with:
