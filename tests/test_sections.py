@@ -463,6 +463,37 @@ def test_readme_installs_without_cloning_the_repository() -> None:
         "README не показує шляху з PyPI — єдиного, що обходиться без GitHub")
 
 
+def test_docs_name_every_step_reading_actually_needs() -> None:
+    """🔴 «Як почати» обіцяло читання після одного рядка. Це неправда.
+
+    Установлений пакет рукопис НЕ читає: рушії живуть в окремому інтерпретаторі
+    поруч із простором (`nysh htr install`), а ваги приходять окремим релізом
+    (`nysh models get`). Код це знає й каже в трьох місцях —
+    `htr/run.py` кидає «середовище рушіїв не готове», `setup/doctor.py` вішає
+    попередження з тією ж порадою, `core/sections.py` пише її в опис секції.
+
+    А документація не казала НІДЕ: ні README, ні `AGENTS.md`, ні `docs/`. Тобто
+    людина (чи агент) доходила до цього не з інструкції, а з відмови посеред
+    першої справи — у найдорожчий момент, коли скани вже завантажено й час уже
+    витрачено. Спіймано на звірці колоди для ефіру з кодом.
+
+    Приймач звіряє не текст із текстом, а документацію з КОДОМ: команду беремо
+    з того самого повідомлення про помилку, яке побачить користувач.
+    """
+    root = Path(__file__).resolve().parents[1]
+
+    run_py = (root / "src" / "nyshporka" / "htr" / "run.py").read_text(encoding="utf-8")
+    assert "nysh htr install" in run_py, (
+        "у `htr/run.py` більше немає поради — приймач звіряється не з тим місцем")
+
+    for name in ("README.md", "AGENTS.md", "docs/index.md"):
+        text = (root / name).read_text(encoding="utf-8")
+        for step in ("nysh htr install", "nysh models get"):
+            assert step in text, (
+                f"{name}: не названо крок «{step}», без якого читання відмовляє. "
+                f"Людина дізнається про нього з помилки посеред першої справи")
+
+
 def test_agent_instructions_say_how_to_install() -> None:
     """🔴 Агентові, якому сказали «постав», мусить бути куди піти.
 
