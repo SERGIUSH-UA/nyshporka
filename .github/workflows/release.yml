@@ -219,6 +219,24 @@ jobs:
         with:
           files: dist/*
           generate_release_notes: true
+          # 🔏 Преамбула перед згенерованим переліком змін. Сторінка релізу —
+          # це те, що людина відкриває, аби завантажити файл, і саме тут вона
+          # має дізнатись, що качає й чим це звірити. Умови SignPath Foundation
+          # вимагають згадки програми саме на сторінці завантаження.
+          body: |
+            **Завантажити для Windows:** `nyshporka-setup.exe` — інсталятор,
+            без Python і без прав адміністратора. Поруч лежить `.sha256`, яким
+            завантажене можна звірити.
+
+            <sub>Free code signing provided by [SignPath.io](https://about.signpath.io),
+            certificate by [SignPath Foundation](https://signpath.org).
+            Заявку подано; доки її не схвалено, випуски не підписані й Windows
+            показує «Windows захистив ваш ПК» — це очікувано для програми, яку
+            ще мало хто завантажував.
+            [Політика підписування](https://github.com/SERGIUSH-UA/nyshporka#політика-підписування-коду)
+            · [Приватність](https://github.com/SERGIUSH-UA/nyshporka/blob/main/PRIVACY.md)</sub>
+
+            ---
           # Передрелізи (0.1.0a1, rc) не мають підмінювати «latest» у людей,
           # які ставлять за посиланням на останній реліз.
           prerelease: ${{ contains(github.ref_name, 'a') || contains(github.ref_name, 'b') || contains(github.ref_name, 'rc') }}
