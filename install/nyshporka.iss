@@ -216,6 +216,7 @@ begin
   Script := ExpandConstant('{tmp}\windows.ps1');
   Params := '-NoProfile -ExecutionPolicy Bypass -File "' + Script + '"' +
             ' -Preset ' + SelectedPreset() +
+            ' -Version {#AppVersion}' +
             ' -Home_ "' + ExpandConstant('{app}') + '"' +
             ' -NoLauncher';
 

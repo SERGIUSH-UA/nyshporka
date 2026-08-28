@@ -36,6 +36,14 @@ param(
     # можна будь-коли — але доставити рушії тоді доведеться окремим кроком.
     [ValidateSet('catalog', 'amateur', 'researcher', 'lab')]
     [string]$Preset = 'researcher',
+    # Пін версії пакета. Порожньо — остання з PyPI (так зручніше тому, хто
+    # запускає скрипт руками й хоче свіже).
+    # 🔴 Майстер `.exe` передає сюди СВОЮ версію, і це не педантизм: файл
+    # називається `nyshporka-0.6.2-setup.exe`, показує 0.6.2 у «Програмах і
+    # засобах» — і мусить поставити 0.6.2, а не те, що лежить на PyPI сьогодні.
+    # Та сама вада, проти якої в релізі вже стоїть приймач «версія колеса ==
+    # тег»: реліз, усередині якого інша версія, читається як зламаний pip.
+    [string]$Version = "",
     [switch]$NoLauncher
 )
 
@@ -54,6 +62,10 @@ $ProgressPreference = 'SilentlyContinue'
 if (-not $Source) {
     $Source = if ($Preset -eq 'catalog') { 'nyshporka[app,archives]' }
               else { 'nyshporka[app,archives,htr]' }
+    # ⚠ Пін чіпляється ЛИШЕ до обчисленого складу. Хто задав `-Source` руками,
+    # уже сказав, що саме ставить — дописати туди `==` означало б зіпсувати
+    # його специфікацію, а то й видати `nyshporka[app]==1.0==0.6.2`.
+    if ($Version) { $Source = "$Source==$Version" }
 }
 
 function Say($text, $colour = 'White') { Write-Host $text -ForegroundColor $colour }

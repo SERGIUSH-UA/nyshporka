@@ -130,7 +130,8 @@ nysh doctor         # перевірка «Рушії читання» має с
 | що задаємо | `windows.ps1` | `unix.sh` | `.exe` |
 |---|---|---|---|
 | набір | `-Preset catalog` | `NYSH_PRESET=catalog` | `/PRESET=catalog` |
-| **склад пакета цілком** | `-Source 'nyshporka[app,archives]==0.6.1'` | `NYSH_SOURCE=…` | — |
+| **склад пакета цілком** | `-Source 'nyshporka[app,archives]'` | `NYSH_SOURCE=…` | — |
+| конкретна версія | `-Version 0.6.2` | (через `NYSH_SOURCE`) | вшита в файл |
 | тека встановлення | `-Home_ D:\Nysh` | — | `/DIR=D:\Nysh` |
 | не класти ярлик | `-NoLauncher` | (не кладе) | — |
 | без питань | (їх і немає) | — | `/VERYSILENT` |

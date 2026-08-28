@@ -81,6 +81,14 @@ def test_a_reread_run_rebuilds_its_own_index(space) -> None:
     Дочитану справу пошук мусить бачити одразу. Кеш «на N хвилин» показував би
     щойно прочитану сторінку як неіснуючу — тобто брехав би саме там, де людина
     щойно працювала.
+
+    ⚠ Дочитування імітується так, як його робить РАННЕР: сторінка додається і
+    в теку, і в `pages` мети. Доти тест перезаписував мету тими самими байтами
+    й спирався на те, що зміниться `mtime`, — а роздільність міток на NTFS
+    0.34 мс, тож у половині прогонів вона не змінювалась, і тест падав через
+    раз. Причина була не в тесті: штамп із двох часів справді не бачив
+    дочитаної справи, і це полагоджено в `stamp_of` (третя складова — розмір
+    мети).
     """
     from nyshporka.search import decode as D
 
@@ -91,7 +99,9 @@ def test_a_reread_run_rebuilds_its_own_index(space) -> None:
     run = space / "reports" / "htr" / "проба"
     (run / "0003.txt").write_text("ще одна сторінка\n", encoding="utf-8")
     meta = run / "_htr_meta.json"
-    meta.write_text(meta.read_text(encoding="utf-8"), encoding="utf-8")
+    data = json.loads(meta.read_text(encoding="utf-8"))
+    data["pages"]["0003.jpg"] = {"lines": 1}
+    meta.write_text(json.dumps(data), encoding="utf-8")
 
     assert not D.is_fresh("проба"), "індекс не помітив дочитаної справи"
     assert D.ensure("проба")

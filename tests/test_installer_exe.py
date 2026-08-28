@@ -80,6 +80,33 @@ def test_iss_passes_only_flags_the_script_declares() -> None:
         f"майстер передає те, чого `windows.ps1` не оголошує: {ours - names}")
 
 
+def test_the_installer_pins_the_version_it_is_named_after() -> None:
+    """🔴 Файл, названий однією версією, ставив іншу.
+
+    `nyshporka-0.6.0-setup.exe` показує 0.6.0 у «Програмах і засобах» — і доти
+    ставив те, що лежало на PyPI того дня. Це рівно та вада, проти якої в
+    релізному воркфлоу вже стоїть приймач «версія колеса == тег» із докстрінгом
+    «реліз v0.2.0, всередині якого 0.1.0: pip поставить друге, а людина
+    шукатиме перше й вирішить, що зламався pip». `.exe` відтворював її на
+    поверхню вище, де людина навіть не має чим перевірити.
+
+    Перевірено наскрізно: зібраний із `/DAppVersion=0.6.0` інсталятор ставить
+    саме 0.6.0, хоча на PyPI вже 0.6.2.
+
+    ⚠ Пін чіпляється лише до ОБЧИСЛЕНОГО складу. Хто задав `-Source` руками,
+    уже сказав, що саме ставить; дописати туди `==` означало б зіпсувати чужу
+    специфікацію.
+    """
+    assert "-Version {#AppVersion}" in iss_text(), (
+        "майстер не передає свою версію — `.exe` знову ставитиме «останню»")
+    ps1 = PS1.read_text(encoding="utf-8-sig")
+    assert '$Source = "$Source==$Version"' in ps1, (
+        "`windows.ps1` більше не застосовує пін")
+    head = ps1[:ps1.index("$Source = \"$Source==$Version\"")]
+    assert head.rstrip().endswith("else { 'nyshporka[app,archives,htr]' }") or         "if (-not $Source)" in head[-400:], (
+        "пін виїхав за межі гілки обчисленого складу — він зіпсує явний -Source")
+
+
 def test_iss_never_makes_a_second_desktop_shortcut() -> None:
     """🔴 Без `-NoLauncher` на столі опиняються ДВА ярлики.
 
