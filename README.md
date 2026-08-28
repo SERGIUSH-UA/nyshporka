@@ -102,13 +102,37 @@ sh install/unix.sh
 | перевірити, що вийшло | `nysh doctor` |
 | перелік операцій і їхні контракти | `nysh op <ім'я> --describe` |
 
-Набір передається аргументом (Windows) або змінною (Linux / macOS):
+#### Важелі
+
+Скрипти лишаються повністю керованими — інсталятор `.exe` нічого з цього не
+забрав, він лише інша обгортка навколо того самого `windows.ps1`.
+
+| що задаємо | `windows.ps1` | `unix.sh` | `.exe` |
+|---|---|---|---|
+| набір | `-Preset catalog` | `NYSH_PRESET=catalog` | `/PRESET=catalog` |
+| **склад пакета цілком** | `-Source 'nyshporka[app,archives,gedcom]'` | `NYSH_SOURCE=…` | — |
+| тека встановлення | `-Home_ D:\Nysh` | — | `/DIR=D:\Nysh` |
+| не класти ярлик | `-NoLauncher` | (не кладе) | — |
+| без питань | (їх і немає) | — | `/VERYSILENT` |
+| журнал установлення | — | — | `/LOG=setup.log` |
+| де жити дослідженню | `NYSHPORKA_WORKSPACE` | `NYSHPORKA_WORKSPACE` | `NYSHPORKA_WORKSPACE` |
+
+`-Source` / `NYSH_SOURCE` перебивають набір і приймають будь-яку специфікацію
+PEP 508 — саме ним береться нетиповий склад extras або конкретна версія
+(`'nyshporka[app,archives]==0.6.0'`).
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File "$env:TEMP\nysh-install.ps1" -Preset catalog
 ```
 ```sh
 curl -LsSf https://raw.githubusercontent.com/SERGIUSH-UA/nyshporka/main/install/unix.sh | NYSH_PRESET=catalog sh
+```
+
+Тихе встановлення інсталятором — для машин, де немає Python і не хочеться
+розбиратися з політикою запуску скриптів:
+
+```powershell
+nyshporka-setup.exe /VERYSILENT /SUPPRESSMSGBOXES /PRESET=researcher
 ```
 
 ⚠ **`irm … | iex` для цього скрипта не працює**, і відмова виглядає як десяток
@@ -119,7 +143,8 @@ curl -LsSf https://raw.githubusercontent.com/SERGIUSH-UA/nyshporka/main/install/
 
 🔴 Після встановлення `nysh` доступний у **нових** вікнах термінала. Агентові,
 який продовжує роботу в тому самому сеансі, простіше звертатись повним шляхом —
-його друкує `uv tool dir --bin`.
+його друкує `uv tool dir --bin`. Після `.exe` той самий шлях лежить готовим у
+`install-info.ini` в теці встановлення.
 
 ### Де лежить дослідження
 
