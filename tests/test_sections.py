@@ -294,6 +294,175 @@ def test_installers_point_where_the_catalogue_actually_lives() -> None:
             f"({store.RELEASES_URL})")
 
 
+def _without_functions(text: str, names: set[str]) -> str:
+    """Текст скрипта без тіл названих функцій (лічильник фігурних дужок)."""
+    import re
+
+    pattern = re.compile(r"function\s+(?:" + "|".join(map(re.escape, names)) + r")\b")
+    out, i = [], 0
+    while True:
+        m = pattern.search(text, i)
+        if not m:
+            out.append(text[i:])
+            return "".join(out)
+        out.append(text[i:m.start()])
+        j, depth = text.index("{", m.end()), 0
+        while j < len(text):
+            if text[j] == "{":
+                depth += 1
+            elif text[j] == "}":
+                depth -= 1
+                if depth == 0:
+                    break
+            j += 1
+        i = j + 1
+
+
+def test_windows_installer_never_merges_native_stderr() -> None:
+    """🔴 `2>&1` над рідною командою вбиває інсталятор на ПЕРШОМУ ж запуску.
+
+    Windows PowerShell 5.1 обгортає кожен рядок, який exe написав у stderr, у
+    ErrorRecord `NativeCommandError`, а `$ErrorActionPreference = 'Stop'` на
+    початку скрипта робить його ТЕРМІНАЛЬНИМ. Тобто установлення помирає від
+    ІНФОРМАЦІЙНОГО повідомлення.
+
+    Це не гіпотеза. `& $uv tool update-shell 2>&1 | Out-Null` стояв рівно в
+    тій гілці, яка виконується, коли теки з командою ще немає в PATH, — тобто
+    на КОЖНІЙ чистій машині. uv друкував «Updated PATH to include executable
+    directory …» (успіх), скрипт обривався перед `nysh init`, `doctor` і
+    ярликом, і людина бачила червону стіну там, де насправді все завантажилось
+    (звіт користувача 28.08.2026).
+
+    ⚠ `2>$null` не рятує — перевірено окремо: гасне ВИВІД, а не ErrorRecord.
+    Рятує тільки тимчасово послаблена преференція, тому перенаправлення
+    дозволене виключно всередині помічників, які її знімають.
+    """
+    root = Path(__file__).resolve().parents[1] / "install"
+    text = (root / "windows.ps1").read_text(encoding="utf-8")
+
+    helpers = {"Invoke-Muted", "Get-NativeLine"}
+    for name in helpers:
+        assert f"function {name}" in text, (
+            f"помічник {name} зник — перенаправлення нема куди сховати")
+
+    body = _without_functions(text, helpers)
+    guilty = [ln.strip() for ln in body.splitlines()
+              if not ln.lstrip().startswith("#")
+              and ("2>&1" in ln or "2>$null" in ln)]
+    assert not guilty, (
+        "перенаправлення stderr рідної команди поза помічниками — "
+        "інсталятор упаде на першому ж інформаційному рядку uv:\n  "
+        + "\n  ".join(guilty))
+
+
+def test_installers_put_the_tool_binaries_on_path() -> None:
+    """🔴 Установити команду й не дати її набрати — це не встановлення.
+
+    `uv tool install` кладе `nysh` у власну теку, і в PATH її може не бути.
+    `uv tool update-shell` дописує теку в PATH КОРИСТУВАЧА, тобто для вікон,
+    які відкриють ПІСЛЯ; поточне про це не дізнається ніколи. А останнє, що
+    друкує інсталятор, — «Готово. Далі: nysh serve», і набирає це людина саме
+    в поточному вікні. Обидва наші користувачі 28.08.2026 вперлись сюди:
+    `nysh init …` → «не розпізнано як імʼя командлета».
+
+    Тому обидва скрипти мусять правити PATH ПРОЦЕСУ, а теку — питати в uv, а
+    не вгадувати: вона налаштовується (`UV_TOOL_BIN_DIR`, `XDG_BIN_HOME`), і
+    здогад про `~/.local/bin` збігається лише з типовим випадком.
+    """
+    root = Path(__file__).resolve().parents[1] / "install"
+    for name, mutation in (("windows.ps1", "$env:PATH = \"$binDir;$env:PATH\""),
+                           ("unix.sh", 'PATH="$BIN:$PATH"')):
+        text = (root / name).read_text(encoding="utf-8")
+        assert "tool dir --bin" in text, (
+            f"{name}: теку з командою вгадують замість спитати в uv")
+        assert mutation in text, (
+            f"{name}: PATH поточного процесу не правиться — підказки в кінці "
+            f"установлення не спрацюють у тому ж вікні")
+        assert "update-shell" in text, (
+            f"{name}: PATH не закріплюється для наступних сеансів")
+
+
+def test_installers_survive_having_no_file_of_their_own() -> None:
+    """🔴 Однорядковий запуск означає, що в скрипта НЕМАЄ теки й немає файла.
+
+    `irm … | iex` і `curl … | sh` — те, що дають агентові й людині без клону
+    репозиторію (скарга 28.08.2026: «гітхаб не віддав вміст через доступні
+    інструменти»). У такому запуску `$PSScriptRoot` порожній, а `$0` дорівнює
+    імені оболонки. Обидва скрипти шукають поруч із собою пак довідників —
+    і без явної умови роблять це «поруч» з нізвідки: PowerShell мовчки нічого
+    не знаходить (правильно, але випадково), а `dirname "$0"` дає ПОТОЧНУ
+    теку, тобто пак шукався б там, де людина просто стоїть.
+    """
+    root = Path(__file__).resolve().parents[1] / "install"
+    win = (root / "windows.ps1").read_text(encoding="utf-8")
+    nix = (root / "unix.sh").read_text(encoding="utf-8")
+
+    assert "if ($PSScriptRoot)" in win, (
+        "windows.ps1: пошук пака довідників не захищено від порожнього "
+        "$PSScriptRoot — при запуску через `irm | iex` теки просто немає")
+    assert 'if [ -f "$0" ]; then' in nix, (
+        'unix.sh: пошук пака довідників не захищено від `curl | sh` — '
+        '`dirname "$0"` дасть поточну теку, а не теку інсталятора')
+
+
+def test_install_surfaces_tell_people_to_reopen_the_terminal() -> None:
+    """🔴 Фраза мусить бути КОРОТКА і стояти ПЕРЕД переліком команд.
+
+    Це не стилістика. Користувач 28.08.2026, отримавши після встановлення
+    «nysh init …» → «не розпізнано як імʼя командлета», написав дослівно:
+    «Побачив єдине знайоме слово "перезапустити" і надіслав комп'ютер
+    перезапускатися. Ніби допомогло». Пояснення про PATH він не прочитав —
+    прочиталась дія. Тому обидва інсталятори й README кажуть саме дію, а
+    в інсталяторах вона стоїть до списку команд, а не після нього.
+    """
+    root = Path(__file__).resolve().parents[1]
+    surfaces = {
+        "windows.ps1": (root / "install" / "windows.ps1").read_text(encoding="utf-8"),
+        "unix.sh": (root / "install" / "unix.sh").read_text(encoding="utf-8"),
+        "README.md": (root / "README.md").read_text(encoding="utf-8"),
+    }
+    for name, text in surfaces.items():
+        assert "перезапустіть комп'ютер" in text, (
+            f"{name}: немає запасної поради на випадок, коли нове вікно не "
+            f"допомогло — саме це слово людина й упізнає")
+        # Обрізано до кореня навмисно: «нове вікно» й «новий термінал» —
+        # той самий припис, і рід іменника тут нічого не вирішує.
+        assert "відкрийте нов" in text.lower(), (
+            f"{name}: не сказано найдешевшої дії — відкрити нове вікно")
+
+    for name in ("windows.ps1", "unix.sh"):
+        text = surfaces[name]
+        hint = text.lower().index("відкрийте нов")
+        listing = text.index("nysh serve            відкрити застосунок")
+        assert hint < listing, (
+            f"{name}: підказка про перезапуск стоїть ПІСЛЯ переліку команд — "
+            f"тобто після того, як людина вже спробувала їх набрати")
+
+
+def test_readme_installs_without_cloning_the_repository() -> None:
+    """🔴 Два шляхи, жоден із яких не вимагає ходити сторінками GitHub.
+
+    Скарга 28.08.2026: агент не зміг дістати вміст репозиторію доступними
+    інструментами — а єдиний задокументований спосіб для Windows вимагав
+    спершу мати клон. Тому README мусить нести (1) адресу самого скрипта на
+    `raw.githubusercontent.com` і (2) установлення з PyPI, у якому GitHub не
+    бере участі взагалі.
+    """
+    root = Path(__file__).resolve().parents[1]
+    readme = (root / "README.md").read_text(encoding="utf-8")
+    raw = "https://raw.githubusercontent.com/SERGIUSH-UA/nyshporka/main/install"
+
+    for script in ("windows.ps1", "unix.sh"):
+        assert f"{raw}/{script}" in readme, (
+            f"README не дає прямої адреси {script} — без неї установлення "
+            f"починається з клонування репозиторію")
+        assert (root / "install" / script).exists(), (
+            f"README посилається на install/{script}, якого немає")
+
+    assert 'uv tool install "nyshporka[app,archives,htr]"' in readme, (
+        "README не показує шляху з PyPI — єдиного, що обходиться без GitHub")
+
+
 def test_installers_are_at_least_parseable() -> None:
     """🔴 Інсталятор мусить бодай розбиратись — інакше він падає на першому рядку.
 

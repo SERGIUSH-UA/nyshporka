@@ -11,8 +11,15 @@
     адміністратора не потрібні й не просяться: застосунок працює з файлами
     однієї людини і нічого системного не чіпає.
 
-    Запуск:
+    Запуск із клону репозиторію:
         powershell -ExecutionPolicy Bypass -File install\windows.ps1
+
+    Запуск без клону — однією командою (саме її дають агентові):
+        irm https://raw.githubusercontent.com/SERGIUSH-UA/nyshporka/main/install/windows.ps1 | iex
+
+    Те саме з набором (`param()` вимагає форми зі scriptblock — конвеєр
+    аргументів не передає):
+        & ([scriptblock]::Create((irm https://raw.githubusercontent.com/SERGIUSH-UA/nyshporka/main/install/windows.ps1))) -Preset catalog
 #>
 [CmdletBinding()]
 param(
@@ -46,6 +53,39 @@ if (-not $Source) {
 }
 
 function Say($text, $colour = 'White') { Write-Host $text -ForegroundColor $colour }
+
+# 🔴 Рідну команду НЕ можна глушити через `2>&1` чи `2>$null`.
+# Windows PowerShell 5.1 обгортає КОЖЕН рядок, який exe написав у stderr, у
+# ErrorRecord `NativeCommandError` — байдуже, що там звичайне інформаційне
+# повідомлення, — а `$ErrorActionPreference = 'Stop'` вище робить той
+# ErrorRecord ТЕРМІНАЛЬНИМ. Інсталятор помирав рівно на цьому:
+# `uv tool update-shell` друкує «Updated PATH to include executable
+# directory …» у stderr, і повідомлення про УСПІХ обривало установлення перед
+# `nysh init`, `doctor` і ярликом (звіт користувача 28.08.2026 — червона стіна
+# там, де насправді все завантажилось).
+# ⚠ `2>$null` не рятує: гасне ВИВІД, а не ErrorRecord. Рятує лише тимчасово
+# послаблена преференція — тому перенаправлення живе тільки тут.
+function Invoke-Muted {
+    param([Parameter(Mandatory)][string] $Exe,
+          [Parameter(ValueFromRemainingArguments)] [object[]] $Arguments)
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try     { & $Exe @Arguments 2>&1 | Out-Null }
+    finally { $ErrorActionPreference = $prev }
+}
+
+# Останній рядок stdout рідної команди; stderr і будь-яка відмова — у тишу.
+# Для запитань на кшталт «а куди ти кладеш команди»: відповідь або є, або
+# лишається порожньою, і викликач бере запасний варіант.
+function Get-NativeLine {
+    param([Parameter(Mandatory)][string] $Exe,
+          [Parameter(ValueFromRemainingArguments)] [object[]] $Arguments)
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try     { $out = & $Exe @Arguments 2>$null } catch { $out = $null }
+    finally { $ErrorActionPreference = $prev }
+    if ($out) { ($out | Select-Object -Last 1).ToString().Trim() } else { '' }
+}
 
 # 🔴 Вивід у UTF-8. Без цього кирилиця в консолі перетворюється на кракозябри:
 # Windows PowerShell 5.1 бере кодування консолі з системної кодової сторінки, а
@@ -99,10 +139,40 @@ Say "⬇ Нишпорка ($Source)…" DarkGray
 if ($LASTEXITCODE -ne 0) { throw "не вдалося встановити $Source" }
 Say "✓ Нишпорка" Green
 
+# ── 3½. де команда й чи можна її набрати ─────────────────────────────────────
+# 🔴 PATH тут лагодиться ДВІЧІ, і це дві РІЗНІ речі.
+# `uv tool install` кладе `nysh.exe` у власну теку, і на чистій машині її в
+# PATH немає. `uv tool update-shell` дописує теку в PATH КОРИСТУВАЧА — тобто
+# у вікна, які відкриють ПІСЛЯ; поточне вікно про це не дізнається ніколи. А
+# читає «Готово. Далі: nysh serve» і одразу це набирає людина саме в
+# ПОТОЧНОМУ вікні — і отримує «nysh не розпізнано як імʼя командлета».
+# Тому: теку питаємо в самого uv, дописуємо в PATH ПРОЦЕСУ (щоб працювало
+# зараз) і кличемо `update-shell` (щоб працювало в наступних вікнах).
+# ⚠ Теку саме питаємо, а не вгадуємо: вона налаштовується (`UV_TOOL_BIN_DIR`,
+# `XDG_BIN_HOME`), і здогад `%USERPROFILE%\.local\bin` збігається лише з
+# типовим випадком.
+$binDir = Get-NativeLine $uv tool dir --bin
+if (-not $binDir -or -not (Test-Path $binDir)) {
+    $binDir = Join-Path $env:USERPROFILE '.local\bin'   # старий uv без `--bin`
+}
+$pathWasMissing = -not (($env:PATH -split ';' | Where-Object { $_ } |
+                         ForEach-Object { $_.TrimEnd('\') }) -contains $binDir.TrimEnd('\'))
+if ($pathWasMissing) {
+    $env:PATH = "$binDir;$env:PATH"
+    Invoke-Muted $uv tool update-shell
+}
+
 $nysh = (Get-Command nysh -ErrorAction SilentlyContinue).Source
-if (-not $nysh) {
-    & $uv tool update-shell 2>&1 | Out-Null
-    $nysh = Join-Path $env:USERPROFILE '.local\bin\nysh.exe'
+if (-not $nysh) { $nysh = Join-Path $binDir 'nysh.exe' }
+# 🔴 Перевіряємо ПЕРЕД першим викликом. Інакше далі йде `& $nysh init` з
+# вигаданим шляхом, і людина читає помилку про конвеєр замість того, що
+# застосунок не знайшовся там, де мав лежати.
+if (-not (Test-Path $nysh)) {
+    Say ''
+    Say "✗ пакет установлено, але команди немає: $nysh" Red
+    Say '  надішліть, будь ласка, вивід `uv tool list` — це вада інсталятора,' DarkGray
+    Say '  а не вашої машини' DarkGray
+    throw 'nysh не знайдено після встановлення'
 }
 
 # ── 4. робочий простір ───────────────────────────────────────────────────────
@@ -121,8 +191,14 @@ Say ""
 # саме треба доставити. У КОЛЕСІ їх немає навмисно: каталог оновлюється, коли
 # архів виклав новий опис, а код — коли полагодили ваду; це різні годинники, і
 # `pip install --upgrade` заміщає дерево разом із тим, що користувач наклав.
-$seed = Get-ChildItem -Path $PSScriptRoot -Filter 'nyshporka-catalog-*.zip' `
-    -ErrorAction SilentlyContinue | Select-Object -First 1
+# ⚠ `$PSScriptRoot` порожній, коли скрипт запустили віддалено (`irm | iex`):
+# у пам'яті немає теки, «поруч» із якою можна щось шукати. Порожній `-Path`
+# зараз мовчки не дає нічого, і поведінка виходить правильна — але випадково.
+# Умова робить її навмисною й переживе будь-яку зміну в PowerShell.
+$seed = if ($PSScriptRoot) {
+    Get-ChildItem -Path $PSScriptRoot -Filter 'nyshporka-catalog-*.zip' `
+        -ErrorAction SilentlyContinue | Select-Object -First 1
+} else { $null }
 if ($seed) {
     $tmp = Join-Path $env:TEMP ('nysh-catalog-' + [guid]::NewGuid().ToString('N'))
     Expand-Archive -Path $seed.FullName -DestinationPath $tmp -Force
@@ -153,7 +229,23 @@ if (-not $NoLauncher) {
 }
 
 Say ""
-Say "Готово. Далі:" Cyan
+Say "Готово." Cyan
+
+# 🔴 Підказка стоїть ПЕРЕД переліком команд і сказана однією фразою, без слова
+# «PATH». Відгук користувача 28.08.2026: «Побачив єдине знайоме слово
+# "перезапустити" і надіслав комп'ютер перезапускатися. Ніби допомогло». Тобто
+# пояснення механіки тут не читається взагалі — читається дія. Перезапуск вікна
+# дешевший за перезапуск машини, тому названий першим; машина — як запасний
+# варіант, а не як порада за замовчуванням.
+if ($pathWasMissing) {
+    Say ""
+    Say "  ⚠ Закрийте це вікно й відкрийте нове — команди нижче працюють там." Yellow
+    Say "    У вікнах, відкритих до встановлення, «nysh» не знайдеться." DarkGray
+    Say "    Якщо й у новому не знайдеться — перезапустіть комп'ютер." DarkGray
+}
+
+Say ""
+Say "Далі:" Cyan
 Say "  nysh serve            відкрити застосунок у браузері"
 Say "  nysh look <тека>      подивитись, що за скани"
 Say "  nysh models get       завантажити моделі письма"

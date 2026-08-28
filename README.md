@@ -31,26 +31,68 @@
 
 ## Установлення
 
-На чистій машині — **без Python і без прав адміністратора**. Інсталятор
-приносить `uv`, `uv` приносить власний інтерпретатор:
+На чистій машині — **без Python і без прав адміністратора**, однією командою.
+Клон репозиторію не потрібен: інсталятор приносить `uv`, `uv` приносить власний
+інтерпретатор, усе лягає в профіль користувача.
 
 ```powershell
-# Windows
-powershell -ExecutionPolicy Bypass -File install\windows.ps1
+# Windows (PowerShell)
+irm https://raw.githubusercontent.com/SERGIUSH-UA/nyshporka/main/install/windows.ps1 | iex
 ```
 ```sh
 # Linux / macOS
-sh install/unix.sh
+curl -LsSf https://raw.githubusercontent.com/SERGIUSH-UA/nyshporka/main/install/unix.sh | sh
 ```
 
-Або звичайним способом, якщо Python уже є:
+🔴 **Коли скрипт завершить роботу — закрийте вікно термінала й відкрийте нове.**
+Доти команда `nysh` у ньому не знайдеться. Якщо й у новому вікні не
+знаходиться — перезапустіть комп'ютер.
+
+Якщо Python (або `uv`) на машині вже є, пакет ставиться з PyPI, і GitHub при
+цьому не потрібен узагалі:
 
 ```bash
-pip install 'nyshporka[app,archives,htr]'
+uv tool install "nyshporka[app,archives,htr]"   # або: pip install "nyshporka[app,archives,htr]"
 nysh init                      # створити робочий простір
 nysh doctor                    # перевірити те, що ламається тихо
 nysh serve                     # відкрити застосунок у браузері
 ```
+
+З клону репозиторію працюють ті самі скрипти:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File install\windows.ps1
+```
+```sh
+sh install/unix.sh
+```
+
+### Якщо ставить агент
+
+Усе потрібне — у таблиці нижче. Ходити сторінками GitHub і клонувати репозиторій
+не треба: адреси вище віддають сам скрипт, а PyPI-шлях обходиться без GitHub.
+
+| завдання | команда |
+|---|---|
+| машина без Python | однорядковий інсталятор вище |
+| Python або `uv` уже є | `uv tool install "nyshporka[app,archives,htr]"` |
+| легкий набір, без `torch` (~2.5 ГБ) | `uv tool install "nyshporka[app,archives]"` |
+| перевірити, що вийшло | `nysh doctor` |
+| перелік операцій і їхні контракти | `nysh op <ім'я> --describe` |
+
+Набір при віддаленому запуску передається так (у PowerShell конвеєр аргументів
+не переносить, тому форма зі `scriptblock`):
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/SERGIUSH-UA/nyshporka/main/install/windows.ps1))) -Preset catalog
+```
+```sh
+curl -LsSf https://raw.githubusercontent.com/SERGIUSH-UA/nyshporka/main/install/unix.sh | NYSH_PRESET=catalog sh
+```
+
+🔴 Після встановлення `nysh` доступний у **нових** вікнах термінала. Агентові,
+який продовжує роботу в тому самому сеансі, простіше звертатись повним шляхом —
+його друкує `uv tool dir --bin`.
 
 ### Де лежить дослідження
 

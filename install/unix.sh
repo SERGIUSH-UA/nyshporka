@@ -1,6 +1,12 @@
 #!/usr/bin/env sh
 # Нишпорка — установлення на Linux / macOS без системного Python.
 #
+# Запуск із клону:  sh install/unix.sh
+# Запуск без клону (саме це дають агентові):
+#   curl -LsSf https://raw.githubusercontent.com/SERGIUSH-UA/nyshporka/main/install/unix.sh | sh
+# Набір при цьому передається змінною:
+#   curl -LsSf https://raw.githubusercontent.com/SERGIUSH-UA/nyshporka/main/install/unix.sh | NYSH_PRESET=catalog sh
+#
 # 🔴 Системний інтерпретатор не використовується: на робочих машинах він або
 # старий, або зайнятий чужим проєктом. Інсталятор приносить `uv`, а `uv` —
 # власний Python. Усе кладеться в профіль користувача; sudo не потрібен.
@@ -52,6 +58,28 @@ uv python install 3.12 >/dev/null
 say "⬇ Нишпорка ($SOURCE)…"
 uv tool install --python 3.12 --force "$SOURCE"
 
+# 🔴 PATH лагодиться ДВІЧІ, і це дві РІЗНІ речі.
+# `uv tool install` кладе `nysh` у власну теку, і в PATH її може не бути:
+# гілка вище додає її лише тоді, коли uv ставили МИ. Прийшов uv із apt, brew
+# чи pipx — і наступний рядок падає «nysh: command not found» рівно тоді, коли
+# все вже завантажено й установлено. А `uv tool update-shell` дописує теку в
+# профіль оболонки, тобто для НАСТУПНИХ сеансів; поточний про це не дізнається.
+BIN="$(uv tool dir --bin 2>/dev/null || true)"
+[ -n "$BIN" ] || BIN="$HOME/.local/bin"
+case ":$PATH:" in
+  *":$BIN:"*) PATH_WAS_MISSING=0 ;;
+  *) PATH="$BIN:$PATH"; export PATH; PATH_WAS_MISSING=1
+     uv tool update-shell >/dev/null 2>&1 || true ;;
+esac
+
+# 🔴 Перевірити ПЕРЕД першим викликом: інакше людина читає «command not found»
+# і не має підстав думати, що встановлення взагалі відбулось.
+if ! command -v nysh >/dev/null 2>&1; then
+  say "✗ пакет установлено, але команди немає (шукали в $BIN)"
+  say "  надішліть, будь ласка, вивід «uv tool list» — це вада інсталятора"
+  exit 1
+fi
+
 say ""
 nysh init --yes --preset "$PRESET"
 nysh doctor || true
@@ -59,7 +87,14 @@ nysh doctor || true
 # 🗂 Довідники їдуть В КОМПЛЕКТІ — без них перше питання («де метрики мого
 # села») лишається без відповіді, а людина не знає, що саме треба доставити.
 # У колесі їх немає навмисно: каталог і код оновлюються за різними годинниками.
-SEED="$(ls "$(dirname "$0")"/nyshporka-catalog-*.zip 2>/dev/null | head -1 || true)"
+# ⚠ Запущений через конвеєр (`curl | sh`) скрипт не має свого файла: `$0`
+# дорівнює імені оболонки, і `dirname` дав би поточну теку — тобто пак
+# довідників «поруч з інсталятором» шукався б там, де людина просто стоїть.
+if [ -f "$0" ]; then
+  SEED="$(ls "$(dirname "$0")"/nyshporka-catalog-*.zip 2>/dev/null | head -1 || true)"
+else
+  SEED=""
+fi
 if [ -n "$SEED" ]; then
   TMP="$(mktemp -d)"
   if unzip -q "$SEED" -d "$TMP" 2>/dev/null; then
@@ -76,7 +111,19 @@ else
 fi
 
 say ""
-say "Готово. Далі:"
+say "Готово."
+
+# 🔴 Підказка ПЕРЕД переліком команд і однією фразою, без слова «PATH» —
+# див. коментар у windows.ps1: пояснення механіки тут не читається, читається дія.
+if [ "$PATH_WAS_MISSING" = 1 ]; then
+  say ""
+  say "  ⚠ Закрийте цей термінал і відкрийте новий — команди нижче працюють там."
+  say "    У терміналах, відкритих до встановлення, «nysh» не знайдеться."
+  say "    Якщо й у новому не знайдеться — перезапустіть комп'ютер."
+fi
+
+say ""
+say "Далі:"
 say "  nysh serve            відкрити застосунок у браузері"
 say "  nysh look <тека>      подивитись, що за скани"
 say "  nysh models get       завантажити моделі письма"
