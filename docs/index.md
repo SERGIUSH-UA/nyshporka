@@ -16,9 +16,9 @@
 !!! warning "Стан: alpha"
 
     Каталоги, завантаження, читання рукопису, гортач, сховище прочитаного,
-    пошук, браузерне обличчя й установлення працюють. **Ваги моделей ще не
-    викладені релізом** — доти читати можна лише з власними вагами. Повний
-    перелік того, чого немає, — у розділі «Чого ще немає»
+    пошук, браузерне обличчя й установлення працюють. Ваги трьох моделей
+    ставляться командою `nysh models get`. Повний перелік того, чого немає,
+    — у розділі «Чого ще немає»
     [README](https://github.com/SERGIUSH-UA/nyshporka#чого-ще-немає), без
     замовчувань.
 
@@ -29,14 +29,20 @@
 
 === "Windows"
 
+    [:material-download: Завантажити інсталятор](https://github.com/SERGIUSH-UA/nyshporka/releases/latest/download/nyshporka-setup.exe){ .md-button .md-button--primary }
+
+    Запустити, відповісти на два питання, натиснути «Встановити». Наприкінці
+    майстра галочка «Запустити Нишпорку» відкриє застосунок у браузері.
+
+=== "Термінал"
+
     ```powershell
-    powershell -ExecutionPolicy Bypass -File install\windows.ps1
+    irm https://raw.githubusercontent.com/SERGIUSH-UA/nyshporka/main/install/windows.ps1 -OutFile "$env:TEMP\nysh-install.ps1"
+    powershell -ExecutionPolicy Bypass -File "$env:TEMP\nysh-install.ps1"
     ```
 
-=== "Linux / macOS"
-
     ```sh
-    sh install/unix.sh
+    curl -LsSf https://raw.githubusercontent.com/SERGIUSH-UA/nyshporka/main/install/unix.sh | sh
     ```
 
 === "Python уже є"
@@ -80,6 +86,31 @@
   око. Другий рушій не суддя там, де ознака в пікселях.
 * **Цифра з декоду — не факт.** Суми, площі, кількість душ, дати звіряються із
   зображенням. Проза має за спиною мовну модель, багатозначне число — ні.
+
+## Політика підписування коду
+
+Підписується один артефакт — інсталятор для Windows
+`nyshporka-<версія>-setup.exe` зі [сторінки релізів](https://github.com/SERGIUSH-UA/nyshporka/releases). Він
+збирається виключно в GitHub Actions із тега, після воріт якості; ручної
+збірки в ланцюгу немає. Проєкт веде одна людина, тож ролі Author, Reviewer і
+Approver збігаються, і кожен підпис підтверджується вручну. Поруч із
+інсталятором лежить `.sha256` для незалежної звірки.
+
+> Free code signing provided by [SignPath.io](https://about.signpath.io),
+> certificate by [SignPath Foundation](https://signpath.org)
+
+!!! warning "Заявку подано, випуски ще не підписані"
+
+    Доти Windows показує «Windows захистив ваш ПК» — це очікувано для програми,
+    яку ще мало хто завантажував. Підпис прибере напис «Невідомий видавець»,
+    але саме попередження зникне лише з накопиченням репутації: Microsoft
+    скасувала миттєве довір'я до сертифікатів, зокрема й EV.
+
+## Приватність
+
+Телеметрії немає, облікових записів немає, дослідження нікуди не
+вивантажується, а в мережу застосунок ходить лише за прямою командою. Куди
+саме й навіщо — [PRIVACY.md](https://github.com/SERGIUSH-UA/nyshporka/blob/main/PRIVACY.md).
 
 ## Куди далі
 
