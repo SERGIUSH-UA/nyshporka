@@ -15,6 +15,43 @@
 
 ---
 
+## Якщо Нишпорки на машині ще немає
+
+Приймач один: `nysh doctor --json` відповів — усе стоїть, цей розділ пропусти.
+
+🔴 **Системний Python не чіпай.** Ні `pip install` у системний інтерпретатор,
+ні `venv` поруч із чужим проєктом. На робочих машинах той Python або 3.9 з
+магазину, або вже зайнятий — і кожен із цих випадків дає поломку, яку генеалог
+зі сканами діагностувати не може. Спосіб нижче приносить власний інтерпретатор.
+
+| ситуація | команда |
+|---|---|
+| `uv` або Python уже є | `uv tool install "nyshporka[app,archives,htr]"` |
+| чиста машина, Windows | `irm https://raw.githubusercontent.com/SERGIUSH-UA/nyshporka/main/install/windows.ps1 -OutFile "$env:TEMP\nysh.ps1"` , далі `powershell -ExecutionPolicy Bypass -File "$env:TEMP\nysh.ps1"` |
+| чиста машина, Linux / macOS | `curl -LsSf https://raw.githubusercontent.com/SERGIUSH-UA/nyshporka/main/install/unix.sh \| sh` |
+| людина без термінала (Windows) | дай їй посилання на `nyshporka-setup.exe` з [релізів](https://github.com/SERGIUSH-UA/nyshporka/releases/latest) |
+
+Важелі: `-Preset` / `NYSH_PRESET` (набір), `-Source` / `NYSH_SOURCE` (склад
+пакета цілком, специфікація PEP 508), `-Home_` (тека), `NYSHPORKA_WORKSPACE`
+(де жити дослідженню). Легкий набір без рушіїв читання — `catalog`: він не
+тягне torch (~2.5 ГБ) і його досить, щоб відповісти «де метрики мого села».
+
+⚠ **`irm … | iex` тут НЕ працює.** `windows.ps1` лежить із UTF-8 BOM (без нього
+PowerShell 5.1 ламає кирилицю ще до першого рядка), а `Invoke-RestMethod` віддає
+той BOM усередині рядка — після чого ні `iex`, ні `[scriptblock]::Create` вміст
+не розбирають. Відмова виглядає як десяток помилок розбору в шапці файла. Тому
+спершу `-OutFile`, потім `-File`.
+
+⚠ **У ТОМУ САМОМУ сеансі `nysh` у PATH не з'явиться.** Установлення дописує
+теку в PATH користувача, тобто для вікон, відкритих ПІСЛЯ. Не роби з цього
+висновку, що встановлення не вдалося: клич повним шляхом, який друкує
+`uv tool dir --bin` (після `.exe` він лежить готовим в `install-info.ini` у
+теці встановлення).
+
+✅ Приймач: `nysh doctor --json` віддав JSON без `fail`. Далі — наступний розділ.
+
+---
+
 ## Перші п'ять хвилин
 
 ```bash

@@ -463,6 +463,53 @@ def test_readme_installs_without_cloning_the_repository() -> None:
         "README не показує шляху з PyPI — єдиного, що обходиться без GitHub")
 
 
+def test_agent_instructions_say_how_to_install() -> None:
+    """🔴 Агентові, якому сказали «постав», мусить бути куди піти.
+
+    `AGENTS.md` — єдиний документ, адресований агентові, і він починався з
+    `nysh doctor`, тобто з уже встановленої Нишпорки. Слова «встановити» в
+    ньому не було взагалі, як і в `docs/agents/**`. Тобто на прохання
+    «постав за цим посиланням» агент або йшов читати README (500+ рядків
+    прози для людини), або вигадував спосіб сам — а найпростіший вигаданий
+    спосіб тут `pip install` у системний Python, який на робочій машині
+    ламається тихо.
+
+    Заразом перевіряємо, що інструкція несе саме РОБОЧУ форму: `irm … | iex`
+    для цього файла не працює через BOM, і агент, який її звідси візьме,
+    отримає десяток помилок розбору замість установлення (звід 0.5.2).
+    """
+    root = Path(__file__).resolve().parents[1]
+    agents = (root / "AGENTS.md").read_text(encoding="utf-8")
+    raw = "https://raw.githubusercontent.com/SERGIUSH-UA/nyshporka/main/install"
+
+    for script in ("windows.ps1", "unix.sh"):
+        assert f"{raw}/{script}" in agents, (
+            f"AGENTS.md не каже, звідки взяти {script} — агент почне з клону "
+            f"репозиторію або вигадає свій спосіб")
+    assert "-OutFile" in agents, (
+        "AGENTS.md не дає робочої форми для Windows: спершу `-OutFile`, потім `-File`")
+    assert "windows.ps1 | iex" not in agents, (
+        "AGENTS.md радить форму з конвеєром — вона падає на BOM у шапці файла")
+    assert 'uv tool install "nyshporka[app,archives,htr]"' in agents, (
+        "AGENTS.md не показує шляху з PyPI — найкоротшого там, де Python уже є")
+    assert "nysh doctor --json" in agents, (
+        "в інструкції немає приймача: чим агент доведе, що встановлення вдалося")
+
+
+def test_readme_points_agents_at_one_link() -> None:
+    """⚠ Посилання мусить стояти ТАМ, де його шукають, — у «Установленні».
+
+    Досі `AGENTS.md` згадувався єдиний раз, на 400-му з гаком рядку README, у
+    розділі про роботу з агентом. Людина, яка хоче сказати «дай агентові
+    посилання», доти його не дочитує.
+    """
+    root = Path(__file__).resolve().parents[1]
+    readme = (root / "README.md").read_text(encoding="utf-8")
+    head = readme[readme.index("## Установлення"):readme.index("### Windows")]
+    assert "AGENTS.md" in head, (
+        "у шапці розділу «Установлення» немає посилання для агента")
+
+
 def test_windows_remote_install_downloads_the_file_first() -> None:
     """🔴 `irm … | iex` для цього інсталятора НЕ працює — і це не стиль.
 
