@@ -14,12 +14,16 @@
     Запуск із клону репозиторію:
         powershell -ExecutionPolicy Bypass -File install\windows.ps1
 
-    Запуск без клону — однією командою (саме її дають агентові):
-        irm https://raw.githubusercontent.com/SERGIUSH-UA/nyshporka/main/install/windows.ps1 | iex
+    Запуск без клону — завантажити файл і запустити (саме це дають агентові):
+        irm https://raw.githubusercontent.com/SERGIUSH-UA/nyshporka/main/install/windows.ps1 -OutFile "$env:TEMP\nysh-install.ps1"
+        powershell -ExecutionPolicy Bypass -File "$env:TEMP\nysh-install.ps1" -Preset catalog
 
-    Те саме з набором (`param()` вимагає форми зі scriptblock — конвеєр
-    аргументів не передає):
-        & ([scriptblock]::Create((irm https://raw.githubusercontent.com/SERGIUSH-UA/nyshporka/main/install/windows.ps1))) -Preset catalog
+    🔴 Через конвеєр (`irm … | iex`) цей файл НЕ запускається, і відмова
+    виглядає як десяток помилок розбору в шапці. Причина — BOM: він тут
+    обов'язковий (див. коментар про UTF-8 нижче), `Invoke-RestMethod` віддає
+    його як перший символ рядка, і ні `iex`, ні `[scriptblock]::Create` після
+    цього вміст не розбирають. Перевірено на 5.1: без BOM той самий текст
+    розбирається, з BOM — ні, незалежно від того, що стоїть у першому рядку.
 #>
 [CmdletBinding()]
 param(

@@ -463,6 +463,76 @@ def test_readme_installs_without_cloning_the_repository() -> None:
         "README не показує шляху з PyPI — єдиного, що обходиться без GitHub")
 
 
+def test_windows_remote_install_downloads_the_file_first() -> None:
+    """🔴 `irm … | iex` для цього інсталятора НЕ працює — і це не стиль.
+
+    `windows.ps1` лежить із UTF-8 BOM, і не може не лежати: без BOM Windows
+    PowerShell 5.1 читає файл як ANSI, і кирилиця ламається ще до першого
+    рядка виводу (приймач — `test_windows_installer_is_utf8_with_bom`).
+    А `Invoke-RestMethod` віддає той BOM першим символом рядка, після чого ні
+    `iex`, ні `[scriptblock]::Create` вміст не розбирають: відмова виглядає як
+    десяток помилок розбору всередині коментаря-шапки.
+
+    Спіймано наскрізним прогоном одразу після випуску 0.5.1: у README поїхала
+    саме форма з конвеєром, і команда, яку читач копіює першою, не працювала
+    взагалі. Перевірено на 5.1: той самий текст без BOM розбирається, з BOM —
+    ні, і не рятує ні перенос, ні пробіл, ні рядковий коментар перед шапкою.
+
+    Тому документована форма — завантажити файл і запустити його як файл.
+    """
+    root = Path(__file__).resolve().parents[1]
+    readme = (root / "README.md").read_text(encoding="utf-8")
+
+    win = readme[readme.index("## Установлення"):readme.index("### Де лежить")]
+    assert "-OutFile" in win and "-File " in win, (
+        "README не дає робочої форми віддаленого запуску для Windows: "
+        "спершу `-OutFile`, потім `powershell -File`")
+    for trap in ("windows.ps1 | iex", "[scriptblock]::Create((irm"):
+        assert trap not in win, (
+            f"README знову радить «{trap}» — ця форма падає на BOM, "
+            f"і падає в шапці, тобто до будь-якого корисного виводу")
+
+
+def test_installer_parses_exactly_as_it_is_served() -> None:
+    """🔴 Розбираємо ті самі БАЙТИ, що лягають на диск користувача.
+
+    Сусідній приймач вище розбирає файл через `ParseFile`, і цього виявилось
+    замало: він читає файл із диска, де BOM знімає сам .NET. Дорога, якою
+    файл приходить до людини, інша — завантажений і запущений як файл, — і
+    саме на ній 0.5.1 і спіткнувся. Тут байти копіюються без жодної обробки,
+    тобто перевіряється рівно те, що виконуватиметься.
+
+    ⚠ Тільки Windows PowerShell 5.1: вада версійна, а `pwsh` 7 поводиться
+    інакше й показав би зелене там, де в людини червоне.
+    """
+    import os
+    import subprocess
+    import tempfile
+
+    if os.name != "nt":
+        pytest.skip("вада специфічна для Windows PowerShell 5.1")
+    ps51 = Path(os.environ.get("SYSTEMROOT", r"C:\Windows")) \
+        / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+    if not ps51.exists():
+        pytest.skip("Windows PowerShell 5.1 недоступний")
+
+    src = Path(__file__).resolve().parents[1] / "install" / "windows.ps1"
+    with tempfile.TemporaryDirectory() as tmp:
+        copy = Path(tmp) / "windows.ps1"
+        copy.write_bytes(src.read_bytes())          # побайтово, разом із BOM
+        check = (
+            "$e=$null; $null=[System.Management.Automation.Language.Parser]"
+            f"::ParseFile('{copy}',[ref]$null,[ref]$e); "
+            "if($e.Count){ $e[0].Extent.StartLineNumber; $e[0].Message; exit 1 }"
+        )
+        r = subprocess.run([str(ps51), "-NoProfile", "-NonInteractive",
+                            "-Command", check],
+                           capture_output=True, text=True)
+    assert r.returncode == 0, (
+        "завантажений файл не розбирається під PowerShell 5.1 — саме в такому "
+        f"вигляді він доходить до користувача:\n{r.stdout}{r.stderr}")
+
+
 def test_installers_are_at_least_parseable() -> None:
     """🔴 Інсталятор мусить бодай розбиратись — інакше він падає на першому рядку.
 

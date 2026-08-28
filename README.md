@@ -36,8 +36,9 @@
 інтерпретатор, усе лягає в профіль користувача.
 
 ```powershell
-# Windows (PowerShell)
-irm https://raw.githubusercontent.com/SERGIUSH-UA/nyshporka/main/install/windows.ps1 | iex
+# Windows (PowerShell) — завантажити інсталятор і запустити
+irm https://raw.githubusercontent.com/SERGIUSH-UA/nyshporka/main/install/windows.ps1 -OutFile "$env:TEMP\nysh-install.ps1"
+powershell -ExecutionPolicy Bypass -File "$env:TEMP\nysh-install.ps1"
 ```
 ```sh
 # Linux / macOS
@@ -80,15 +81,20 @@ sh install/unix.sh
 | перевірити, що вийшло | `nysh doctor` |
 | перелік операцій і їхні контракти | `nysh op <ім'я> --describe` |
 
-Набір при віддаленому запуску передається так (у PowerShell конвеєр аргументів
-не переносить, тому форма зі `scriptblock`):
+Набір передається аргументом (Windows) або змінною (Linux / macOS):
 
 ```powershell
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/SERGIUSH-UA/nyshporka/main/install/windows.ps1))) -Preset catalog
+powershell -ExecutionPolicy Bypass -File "$env:TEMP\nysh-install.ps1" -Preset catalog
 ```
 ```sh
 curl -LsSf https://raw.githubusercontent.com/SERGIUSH-UA/nyshporka/main/install/unix.sh | NYSH_PRESET=catalog sh
 ```
+
+⚠ **`irm … | iex` для цього скрипта не працює**, і відмова виглядає як десяток
+помилок розбору в шапці, а не як зрозуміле повідомлення. Файл лежить із UTF-8 BOM (без нього Windows PowerShell 5.1 читає
+кирилицю як ANSI й ламає мову ще до першого рядка виводу), а `Invoke-RestMethod`
+віддає той BOM усередині рядка, де `iex` і `[scriptblock]::Create` його вже не
+переживають. Тому спершу `-OutFile`, потім `-File`.
 
 🔴 Після встановлення `nysh` доступний у **нових** вікнах термінала. Агентові,
 який продовжує роботу в тому самому сеансі, простіше звертатись повним шляхом —
