@@ -2685,8 +2685,15 @@ def archives_list(_: NoArgs) -> Envelope:
              "canon": pk.canon_repo(code)}
             for code, r in sorted(pk.repositories.items(),
                                   key=lambda kv: kv[1].label)]
+    # ⚠ Звичайний цикл, а не `or seen.add(...)` у включенні: той ідіом
+    # спирається на те, що `add` віддає `None`, тобто читається як побічний
+    # ефект, замаскований під умову. Тут це ще й не проходить перевірку типів.
     seen: set[str] = set()
-    uniq = [r for r in rows if not (r["canon"] in seen or seen.add(r["canon"]))]
+    uniq: list[dict[str, Any]] = []
+    for r in rows:
+        if r["canon"] not in seen:
+            seen.add(str(r["canon"]))
+            uniq.append(r)
     return ok({"archives": uniq, "total": len(uniq),
                "overlay": str(_overlay_or_empty())})
 

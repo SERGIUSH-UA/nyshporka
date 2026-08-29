@@ -296,15 +296,15 @@ def describe(case_dir: str | Path, *, shifra: str = "", title: str = "",
             out.pop(key, None)
         elif val:
             out[key] = val
-    for key, val in (("year_from", year_from), ("year_to", year_to)):
-        if _erase(val):
+    for key, year in (("year_from", year_from), ("year_to", year_to)):
+        if _erase(year):
             out.pop(key, None)
-        elif val is not None and str(val).strip():
+        elif year is not None and str(year).strip():
             try:
-                out[key] = int(str(val).strip())
+                out[key] = int(str(year).strip())
             except ValueError:
                 raise RegisterError(
-                    f"«{val}» не рік. Чекаю число (1858) або тире, щоб "
+                    f"«{year}» не рік. Чекаю число (1858) або тире, щоб "
                     f"стерти.") from None
     # 🔴 Слід ручної правки лишається назавжди. Опис, узятий із каталогу архіву,
     # і опис, набраний людиною, мають різну вагу — і не розрізнити їх пізніше
