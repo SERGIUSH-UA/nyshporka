@@ -22,7 +22,7 @@ SCREENS.export = async () => {
   setView(`
     <h2>${t('nav.export')}</h2>
     <form class="row" data-act="export.run">
-      <input name="case" placeholder="${t('export.case')}: DAHMO/315/8433" autofocus>
+      <input name="case" placeholder="${t('export.case')}: ДАХмО 315-1-8433" autofocus>
       <select name="what">
         <option value="acts">${t('export.acts')}</option>
         <option value="records">${t('export.records')}</option>

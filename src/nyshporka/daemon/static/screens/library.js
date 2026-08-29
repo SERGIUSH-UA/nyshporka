@@ -15,7 +15,7 @@
  */
 import { t } from '../core/strings.js';
 import { callOp } from '../core/net.js';
-import { esc, el, setView, busy, failure, renderWarnings,
+import { esc, el, setView, busy, failure, boxError, renderWarnings,
   curGen, alive } from '../core/view.js';
 import { SCREENS, ACTIONS, PAGERS } from '../core/registry.js';
 import { show, goto } from '../core/nav.js';
@@ -405,10 +405,29 @@ Object.assign(ACTIONS, {
       note: (el('lv-note') || {}).value || '',
       ...(pages ? { pages } : {}),
     });
-    if (!env.ok) return failure(env);
+    // 🔴 Відмова лишається В ФОРМІ, а не замінює екран. `failure()` робить
+    // `setView`, тобто зносить `main#view` разом із набраним «Чим доведено» й
+    // числом переглянутих аркушів — а половина відмов тут рівня описки, тобто
+    // саме після них форма й потрібна. Правило описане в `core/view.js`, і
+    // порушувалось воно у файлі, який на нього посилається.
+    if (!env.ok) return boxError('lv-hits', env);
     // Застереження про нуль без знаменника мусить дійти до людини, а не
     // зникнути разом з екраном форми.
-    if ((env.warnings || []).length) alert(env.warnings.map((w) => w.text).join('\n'));
+    // ⚠ Не `alert()`: модалка браузера зникає з першим натисканням і не
+    // лишає слідів, а тут їде знаменник — «прочесано 400 з 1142». Його
+    // перечитують, а не проклацують.
+    // 🔴 Успіх лишається успіхом, навіть коли має що сказати. Доти гілка з
+    // застереженням показувала САМІ застереження — без ✅ і без повернення в
+    // перелік, — тож форма стояла озброєна, і друге натискання надсилало
+    // вердикт удруге. А без `lv-hits` поведінка ще й розходилась залежно від
+    // стану DOM.
+    const box = el('lv-hits');
+    if (box && (env.warnings || []).length) {
+      box.innerHTML = `<div class="warn">✅ ${esc(elm.dataset.arg)}</div>`
+        + renderWarnings(env)
+        + `<p><button data-act="nav" data-arg="library">${t('lib.cancel')}</button></p>`;
+      return undefined;
+    }
     return show('library');
   },
 

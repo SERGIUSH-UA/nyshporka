@@ -32,7 +32,7 @@ SCREENS.eye = async () => {
     <h2>${t('nav.eye')}</h2>
     <p class="muted">${t('eye.rule')}</p>
     <form class="row" data-act="eye.check">
-      <input name="case" placeholder="${t('eye.case')}: DAHMO/315/8433"
+      <input name="case" placeholder="${t('eye.case')}: ДАХмО 315-1-8433"
         value="${esc(e.case || '')}" ${e.case ? '' : 'autofocus'}>
       <button type="submit">${t('eye.check')}</button>
     </form>
@@ -69,12 +69,9 @@ Object.assign(ACTIONS, {
           <input name="scan" placeholder="${t('eye.scan')}: 0030.JPG">
           <select name="page_type">${PAGE_TYPES.map((k) =>
             `<option value="${k}">${t(`ptype.${k}`)}</option>`).join('')}</select>
-          <select name="status">
-            <option value="full">full — виписано всі прізвища</option>
-            <option value="partial">partial — не всі</option>
-            <option value="skipped">skipped — не читав</option>
-            <option value="unreadable">unreadable — не читається</option>
-          </select>
+          <select name="status">${['full', 'partial', 'skipped', 'unreadable']
+            .map((k) => `<option value="${k}">${esc(t(`pstatus.${k}`))}</option>`)
+            .join('')}</select>
         </div>
         <div class="row"><input name="surnames" placeholder="${t('eye.surnames')}"></div>
         <div class="row">
@@ -91,8 +88,28 @@ Object.assign(ACTIONS, {
     const env = await callOp('pages.note', { ...ST.eye, ...fd });
     const box = el('noted');
     if (!env.ok) { box.innerHTML = `<div class="warn err">${esc(env.error)}</div>`; return; }
-    box.innerHTML = `<div class="warn">✅ ${esc(fd.scan)} занесено</div>`
+    box.innerHTML = `<div class="warn">✅ ${esc(fd.scan)} ${t('eye.noted')}</div>`
       + renderWarnings(env);
-    ev.target.reset();
+    // 🔴 Скидаємо ЛИШЕ те, що змінюється від аркуша до аркуша.
+    //
+    // `form.reset()` повертав до типових і «тип сторінки», і «повнота» — а
+    // правило поруч (`eye.rule`) вимагає заносити КОЖЕН відкритий скан, тобто
+    // їх заносять сотнями поспіль, і майже завжди одного типу. Людина або
+    // перевибирала обидва поля на кожному аркуші, або не помічала зміни.
+    //
+    // 🔴🔴 Але «повнота» ЙДЕ РАЗОМ ІЗ ПРІЗВИЩАМИ. Липкий `full` при очищеному
+    // полі прізвищ робить найдорожчу помилку цього застосунку шляхом
+    // найменшого опору: десять наступних аркушів лягають як «виписано всі
+    // прізвища» з порожнім переліком, а `full` без повного переліку — це
+    // підстава для хибного нуля по ВСІЙ справі. Тому липне лише тип сторінки:
+    // він від прізвищ не залежить.
+    for (const name of ['scan', 'surnames', 'comment']) {
+      const f = ev.target.elements[name];
+      if (f) f.value = '';
+    }
+    const st = ev.target.elements.status;
+    if (st) st.value = 'partial';
+    const first = ev.target.elements.scan;
+    if (first) first.focus();
   },
 });

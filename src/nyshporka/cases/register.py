@@ -241,14 +241,33 @@ def reachable(case_dir: Path) -> bool:
     return False
 
 
+#: Чим людина каже «зітри це поле».
+#:
+#: 🔴 Порожнє поле лишає попереднє значення — і це правильно: правка одного
+#: заголовка не має стирати роки, які хтось уже уточнив. Але зворотної дії не
+#: було ЖОДНОЇ: помилково введена назва чи рік лишались назавжди, а підказка у
+#: формі чесно радила «стерти опис можна лише правкою файлу `_source.json` у
+#: теці» — тобто єдиний вихід із застосунку вів у текстовий редактор.
+#: ⚠ Тире, а не порожній рядок: порожнє поле означає «не чіпай» і мусить далі
+#: означати саме це, інакше кожне збереження форми стирало б усе, чого людина
+#: не переписала.
+ERASE = ("-", "—", "–")
+
+
+def _erase(val: object) -> bool:
+    """Чи це прохання стерти поле, а не нове значення."""
+    return isinstance(val, str) and val.strip() in ERASE
+
+
 def describe(case_dir: str | Path, *, shifra: str = "", title: str = "",
-             doc_type: str = "", year_from: int | None = None,
-             year_to: int | None = None, place: str = "", note: str = "",
+             doc_type: str = "", year_from: int | str | None = None,
+             year_to: int | str | None = None, place: str = "", note: str = "",
              repo_hint: str = "") -> dict[str, Any]:
     """Записати або доповнити опис справи в її теці. Повертає готовий сайдкар.
 
     Порожнє поле не затирає наявне: правка одного заголовка не має стирати
-    роки, які хтось уже уточнив.
+    роки, які хтось уже уточнив. А щоб СТЕРТИ поле — тире («-»): доти зворотної
+    дії не було зовсім, і помилково введена назва лишалась назавжди.
     """
     d = case_path(case_dir)
     if not d.is_dir():
@@ -271,15 +290,22 @@ def describe(case_dir: str | Path, *, shifra: str = "", title: str = "",
     out["fond"] = sh.fond
     out["opys"] = sh.opys
     out["spr"] = sh.spr
-    for key, val in (("title", title), ("doc_type", doc_type), ("place", place)):
-        if val:
+    for key, val in (("title", title), ("doc_type", doc_type), ("place", place),
+                     ("note", note)):
+        if _erase(val):
+            out.pop(key, None)
+        elif val:
             out[key] = val
-    if year_from is not None:
-        out["year_from"] = year_from
-    if year_to is not None:
-        out["year_to"] = year_to
-    if note:
-        out["note"] = note
+    for key, val in (("year_from", year_from), ("year_to", year_to)):
+        if _erase(val):
+            out.pop(key, None)
+        elif val is not None and str(val).strip():
+            try:
+                out[key] = int(str(val).strip())
+            except ValueError:
+                raise RegisterError(
+                    f"«{val}» не рік. Чекаю число (1858) або тире, щоб "
+                    f"стерти.") from None
     # 🔴 Слід ручної правки лишається назавжди. Опис, узятий із каталогу архіву,
     # і опис, набраний людиною, мають різну вагу — і не розрізнити їх пізніше
     # означає не знати, чому назва саме така.

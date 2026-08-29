@@ -74,10 +74,14 @@ def case_dir(case: str) -> Path:
         raise FrameError("не сказано, яку справу показувати")
     got = S.under_raw(raw)
     if got is None or not got.is_dir():
+        # ⚠ Порада називає ЕКРАН, а не команду. Коренями справ керує розділ
+        # «🌳 Корені справ» у налаштуваннях — кнопками, обома напрямками, — а
+        # повідомлення про це мовчало й слало в термінал того, хто про термінал
+        # і не знає.
         raise FrameError(
             f"теки «{raw}» немає серед матеріалів простору. Показувати можна "
-            f"лише те, що лежить у `data/raw` або в оголошених коренях "
-            f"(`nysh roots list`)")
+            f"лише те, що лежить у `data/raw` або в оголошених коренях — "
+            f"додати корінь можна в «Налаштування → Корені справ»")
     return got
 
 
@@ -125,8 +129,8 @@ def listing(case: str) -> dict[str, Any]:
     except Exception as exc:
         raise FrameError(
             f"PDF справи не відкривається ({type(exc).__name__}: {exc}). "
-            f"Без `pypdfium2` сторінки не рендеряться: "
-            f"pip install 'nyshporka[ocr]'") from None
+            f"Малювати сторінки PDF нема чим — це окрема частина застосунку; "
+            f"увімкніть її в «Налаштування → Частини застосунку»") from None
 
     frames: list[dict[str, Any]] = []
     no = 0
@@ -227,8 +231,8 @@ def render(case: str, frame: str, width: int = DEFAULT_WIDTH) -> dict[str, Any]:
             import pypdfium2 as pdfium
         except ImportError:
             raise FrameError(
-                "сторінки PDF нічим відрендерити: pip install "
-                "'nyshporka[ocr]'") from None
+                "сторінки PDF нічим відрендерити — цю частину застосунку "
+                "не встановлено. «Налаштування → Частини застосунку»") from None
         doc = pdfium.PdfDocument(str(path))
         try:
             page = doc[index]

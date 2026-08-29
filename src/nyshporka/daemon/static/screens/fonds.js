@@ -5,7 +5,7 @@ import { callOp, SEQ } from '../core/net.js';
 import { esc, el, setView, busy, failure, busyForm,
   renderWarnings, curGen, alive } from '../core/view.js';
 import { SCREENS, ACTIONS, PAGERS } from '../core/registry.js';
-import { show, goto, onJob, jobChip } from '../core/nav.js';
+import { show, goto, onJob, jobChip, jobNotes } from '../core/nav.js';
 import { ST } from '../core/state.js';
 import { ic } from '/ui/icons.js';
 import { swapHtml, skelRows } from '/ui/dom.js';
@@ -560,7 +560,15 @@ function watchHere(box, jobId, done) {
   }
   box.innerHTML = jobChip({ state: 'queued', progress: {} });
   onJob(jobId, (j) => {
-    box.innerHTML = jobChip(j);
+    // 🔴 Разом із застереженнями роботи, а не самим лише чіпом.
+    //
+    // «Зібрати опис фонду», коли не змогло жодне джерело, повертає успіх із
+    // попередженням «реєстр лишився таким, як був» — і це правильно: помилки
+    // виклику не було. Але фронт малював зелене «готово» й перемальовував
+    // екран тим самим порожнім станом, а причини лишались у переліку робіт,
+    // куди людина не йшла. Виходило найгірше: натиснув → «готово» → нічого не
+    // змінилось і ніде не написано чому.
+    box.innerHTML = jobChip(j) + (j.state === 'done' ? jobNotes(j) : '');
     if (j.state === 'done' && done) done();
   });
 }

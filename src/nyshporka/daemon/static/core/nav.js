@@ -414,4 +414,4 @@ export async function goto(screen, seed) {
 
 export { SECTIONS, NAV_ORDER, NAV_LABEL, GROUP, screenOn, loadSections,
   navGroups, groupScreens, renderNav, icon, show, refreshJobs, watchJobs,
-  RUNNING_JOBS };
+  jobNotes, RUNNING_JOBS };

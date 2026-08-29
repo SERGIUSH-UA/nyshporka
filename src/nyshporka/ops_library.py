@@ -224,9 +224,13 @@ def library_list(a: LibraryArgs) -> Envelope:
     try:
         json.loads(L.LIBRARY_PATH.read_text(encoding="utf-8"))
     except Exception as exc:
+        # 🔴 Побите зведення лишало екран БЕЗ жодної кнопки — на відміну від
+        # стану «ще не збирали», де кнопка є. Тобто гірший із двох станів мав
+        # менше виходів, ніж кращий.
         return fail(f"зведення справ не читається ({type(exc).__name__}: {exc}) — "
-                    f"файл {L.LIBRARY_PATH.name} побитий; перезберіть його "
-                    f"командою `nysh cases build`")
+                    f"файл {L.LIBRARY_PATH.name} побитий, його треба "
+                    f"перезібрати").suggest(
+            "cases.build", "перезібрати зведення справ")
 
     all_rows = [_row(c, LY.LAYER_FIELDS) for c in LY.entries()]
     hit = [r for r in all_rows if _matches(r, a)]

@@ -215,7 +215,14 @@ def test_long_ops_are_filtered_too(space: Path) -> None:
         res = client.post(f"/api/op/{name}", json={},
                           headers={"X-Nysh-Token": "t0ken"})
         assert res.status_code == 404, f"{name}: {res.status_code}"
-        assert "nysh sections enable" in res.json()["detail"]
+        # 🔴 Відмова мусить називати вихід — але той, що є в ЦЬОГО обличчя.
+        # Це браузерна поверхня, і людина за нею термінала може не мати
+        # взагалі; той самий стан застосунок уміє показати банером із кнопкою
+        # «Увімкнути». Команду `nysh sections enable` каже інша гілка
+        # (`core.ops.call`), і саме тим, хто працює командним рядком.
+        detail = res.json()["detail"]
+        assert "Налаштування" in detail, detail
+        assert "nysh" not in detail, f"термінал у відповіді браузеру: {detail}"
 
 
 def test_http_hides_disabled_ops_and_lists_sections(space: Path) -> None:

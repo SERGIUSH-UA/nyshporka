@@ -20,7 +20,7 @@ import { t, LANG } from '../core/strings.js';
 import { TOKEN, callOp, SEQ } from '../core/net.js';
 import { esc, el, setView, busy, failure, boxError, busyForm,
   renderWarnings, renderCoverage, curGen, alive } from '../core/view.js';
-import { SCREENS, ACTIONS } from '../core/registry.js';
+import { SCREENS, ACTIONS, screenOfOp } from '../core/registry.js';
 import { SECTIONS, NAV_LABEL, show, renderNav, screenOn,
   refreshJobs } from '../core/nav.js';
 import { ST } from '../core/state.js';
@@ -641,6 +641,7 @@ Object.assign(ACTIONS, {
       <p class="muted">${t('check.why')}</p>
       ${env.data.ready ? `<div class="warn">✅ ${t('check.ready')}</div>`
         : `<div class="warn">${t('check.notready')}</div>`}
+      ${renderWarnings(env)}
       <table><tbody>${rows}</tbody></table>
       ${sampleBlock(env.data)}`);
   },
@@ -693,9 +694,15 @@ Object.assign(ACTIONS, {
     const env = await callOp('sample.install', {});
     if (!env.ok) return failure(env);
     const d = env.data;
+    // 🔴 Разом із застереженнями. Тут їх рівно два — «декоду до кадрів немає» і
+    // «реєстр не перезібрався», — і обидва описують той стан, у якому людина
+    // за хвилину опиниться: піде в «Мої справи», побачить нуль при розгорнутій
+    // справі й вирішить, що зразок не розгорнувся. Викидати попередження саме
+    // тут означало дати справдитись рівно тому, про що попереджали.
     setView(`<h2>📖 ${t('check.sample.title')}</h2>
       <p>${esc(d.shifra)} — ${d.frames.length}/${d.frames_total}</p>
       <p class="muted">${esc(d.case_dir)}</p>
+      ${renderWarnings(env)}
       <p class="muted">${t('check.sample.next')}</p>
       <p><button data-act="nav" data-arg="view">${t('nav.view')}</button></p>`);
   },

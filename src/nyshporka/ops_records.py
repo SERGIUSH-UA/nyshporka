@@ -108,8 +108,11 @@ def records_prep(a: PrepArgs) -> Envelope:
         return got
     ref, cf = got
     if not ref.path:
+        # Порада — структурою, а не командою в тексті: конверт уміє назвати
+        # наступний крок операцією, і фронт малює з неї кнопку.
         return fail(f"у бібліотеці немає теки сканів для {ref.shifra} — "
-                    f"заведіть справу (`nysh case <тека> --shifra …`)")
+                    f"справу треба завести").suggest(
+            "case.register", "описати теку зі сканами цієї справи")
 
     from nyshporka.core.workspace import workspace
 

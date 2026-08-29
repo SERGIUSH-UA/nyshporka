@@ -36,8 +36,8 @@ LEGACY_FOND_GUBERNIYA = {
     ("DAHMO", "226"): "Подільська",
     ("DAHMO", "196"): "Подільська",
     ("DAHMO", "230"): "Подільська",
-    ("DAVO", "904"): "Подільська",
-    ("DAVO", "792"): "Подільська",
+    ("DAVIO", "904"): "Подільська",
+    ("DAVIO", "792"): "Подільська",
 }
 LEGACY_RTYPE_LABEL = {
     "birth": "народження", "marriage": "шлюби", "death": "смерті",
@@ -387,14 +387,20 @@ def test_registering_the_second_code_of_one_archive_keeps_one_key() -> None:
     """🔴 «ДАВіО» і «ДАВО» — той самий архів, і заводитись мусять під тим самим
     кодом.
 
-    Інакше облік роздвоюється мовчки: під `DAVO` уже лежить увесь матеріал
-    ф.904 і ф.792, а нові справи, заведені другим написанням, пішли б у
-    сусідній код — з окремим лічильником «на диску» для кожного.
+    Інакше облік роздвоюється мовчки: нові справи, заведені другим написанням,
+    пішли б у сусідній код — з окремим лічильником «на диску» для кожного.
+
+    🔴 Канонічний код — `DAVIO`, і саме він збігається зі скороченням, яким
+    архів зветься насправді. `DAVO` був ВНУТРІШНІМ кодом дослідницького
+    простору й у пакет для інших їхати не мусив: код, що не відповідає жодному
+    чинному скороченню, вчить писати шифру, яка не зійдеться ні з архівом, ні з
+    колегою. Запис лишається рівно задля давніх ключів — і зводиться сюди.
     """
     from nyshporka.cases.register import parse_shifra
 
-    assert parse_shifra("ДАВіО 904-24-5").repo == "DAVO"
-    assert parse_shifra("ДАВО 904-24-5").repo == "DAVO"
+    assert parse_shifra("ДАВіО 904-24-5").repo == "DAVIO"
+    assert parse_shifra("ДАВО 904-24-5").repo == "DAVIO"
+    assert parse_shifra("DAVO 904-24-5").repo == "DAVIO", "давні ключі не сміють осиротіти"
 
 
 def test_an_archive_added_by_the_researcher_reaches_both_readers(tmp_path) -> None:
@@ -437,12 +443,14 @@ def test_no_archive_is_shown_under_a_spelling_that_does_not_exist(pk) -> None:
     неіснуючу абревіатуру означає навчати нею людину — а далі вона тією ж
     абревіатурою підпише виписку, і та не зійдеться ні з чим.
 
-    Код лишається (перейменування коштувало б міграції всього обліку), підпис
-    стає правдивим, давнє написання приймається псевдонімом.
+    Тому канонічним кодом став `DAVIO`, а давній `DAVO` лишився записом
+    сумісності: давні шифри й ключі читаються, але нічого під неіснуючим
+    скороченням не показується.
     """
+    assert pk.repo_label("DAVIO") == "ДАВіО"
     assert pk.repo_label("DAVO") == "ДАВіО"
-    assert "ДАВО" in pk.repositories["DAVO"].aliases
-    assert pk.resolve_code("ДАВО") == "DAVO", "давні шифри мусять і далі читатись"
+    assert "ДАВО" in pk.repositories["DAVIO"].aliases
+    assert pk.resolve_code("ДАВО") == "DAVIO", "давні шифри мусять і далі читатись"
     assert "ДАВО" not in set(pk.repo_labels().values())
 
 
@@ -453,12 +461,13 @@ def test_one_archive_under_two_codes_lands_in_one_place(pk) -> None:
     Інакше та сама книга, занесена «ДАВіО 904-24-5», лягала б то в один архів,
     то в сусідній — залежно від порядку ключів, тобто ні від чого.
     """
-    from nyshporka.pagestore.store import _LABEL2REPO
+    from nyshporka.pagestore.store import _label2repo
 
-    assert pk.canon_repo("DAVIO") == "DAVO"
-    assert _LABEL2REPO["давіо"] == "DAVO"
-    assert _LABEL2REPO["даво"] == "DAVO"
-    assert _LABEL2REPO["давоо"] == "DAVOO", "Волинь не сміє злитись із Вінницею"
+    lab = _label2repo()
+    assert pk.canon_repo("DAVO") == "DAVIO"
+    assert lab["давіо"] == "DAVIO"
+    assert lab["даво"] == "DAVIO"
+    assert lab["давоо"] == "DAVOO", "Волинь не сміє злитись із Вінницею"
 
 
 def test_a_short_code_does_not_claim_a_random_folder() -> None:
@@ -479,6 +488,7 @@ def test_a_short_code_does_not_claim_a_random_folder() -> None:
     # І довгий код упізнається будь-де, як і раніше.
     assert _repo_from_rel("том/moldavian/ANRM_134-2/raw/2362410") == "ANRM"
     assert _repo_from_rel("data/raw/dahmo_315/spr-8433") == "DAHMO"
+
 
 # ── мішане письмо ────────────────────────────────────────────────────────────
 # 🔴 Звіт користувача 29.08.2026: справа з ключем «ДАКО 705-1-1» не заводилась
@@ -537,6 +547,7 @@ def test_the_refusal_names_the_latin_letters_it_saw() -> None:
     with pytest.raises(RegisterError) as e:
         parse_shifra("ДАЩO 705-1-1")
     assert "O" in str(e.value) and "латинськ" in str(e.value)
+
 
 # ── дописаний архів ──────────────────────────────────────────────────────────
 def test_adding_an_archive_survives_a_comma_in_its_name(tmp_path) -> None:
@@ -611,6 +622,27 @@ def test_a_broken_overlay_is_rolled_back_not_left_broken(tmp_path, monkeypatch) 
     assert "DAHMO" in P.active().repositories, "пак лишився порожнім"
 
 
+def test_an_archive_added_now_is_visible_to_every_reader_now(tmp_path) -> None:
+    """🔴 «✅ додано» і «невідомий архів» в одній сесії — це поламка, а не примха.
+
+    Словники архівів у `library` й `pagestore` збирались НА РІВНІ МОДУЛЯ, тобто
+    заморожувались при імпорті. У довгому демоні це означало: людина тисне
+    «Додати архів», дістає підтвердження, заводить справу — і сховище сторінок
+    відповідає «невідомий архів», бо його знімок старший за кнопку. Лікувалось
+    лише перезапуском, про який ніщо не повідомляло.
+    """
+    from nyshporka.archives import pack as P
+    from nyshporka.core import workspace as W
+    from nyshporka.library import _canon_repo
+    from nyshporka.pagestore.store import _label2repo
+
+    W.use(W.Workspace(root=tmp_path, name="тест", origin="test"))
+    assert _canon_repo("AGAD") == "AGAD", "код невідомого архіву лишається як є"
+    P.add_repository("AGAD", "AGAD", "Archiwum Główne Akt Dawnych", "PL")
+
+    assert _label2repo().get("agad") == "AGAD", "сховище сторінок не бачить нового архіву"
+    assert _canon_repo("agad") == "AGAD", "бібліотека не бачить нового архіву"
+
 
 @pytest.mark.parametrize("shape", [
     "version: 1\nrepositories:\n  OLD: {label: OLD}\n",
@@ -660,23 +692,3 @@ def test_an_unrecognisable_repositories_block_is_refused_not_duplicated(tmp_path
         P.add_repository("NEW", "NEW", "Новий", "PL")
     assert "руками" in str(e.value)
     assert "OLD" in P.active().repositories, "чужий запис усе одно постраждав"
-def test_an_archive_added_now_is_visible_to_every_reader_now(tmp_path) -> None:
-    """🔴 «✅ додано» і «невідомий архів» в одній сесії — це поламка, а не примха.
-
-    Словники архівів у `library` й `pagestore` збирались НА РІВНІ МОДУЛЯ, тобто
-    заморожувались при імпорті. У довгому демоні це означало: людина тисне
-    «Додати архів», дістає підтвердження, заводить справу — і сховище сторінок
-    відповідає «невідомий архів», бо його знімок старший за кнопку. Лікувалось
-    лише перезапуском, про який ніщо не повідомляло.
-    """
-    from nyshporka.archives import pack as P
-    from nyshporka.core import workspace as W
-    from nyshporka.library import _canon_repo
-    from nyshporka.pagestore.store import _label2repo
-
-    W.use(W.Workspace(root=tmp_path, name="тест", origin="test"))
-    assert _canon_repo("AGAD") == "AGAD", "код невідомого архіву лишається як є"
-    P.add_repository("AGAD", "AGAD", "Archiwum Główne Akt Dawnych", "PL")
-
-    assert _label2repo().get("agad") == "AGAD", "сховище сторінок не бачить нового архіву"
-    assert _canon_repo("agad") == "AGAD", "бібліотека не бачить нового архіву"

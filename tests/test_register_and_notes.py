@@ -109,7 +109,7 @@ def test_a_soviet_fond_is_registered_under_the_same_key_as_the_library() -> None
     from nyshporka.library import _norm_fond
 
     sh = R.parse_shifra("ДАВіО Р-6129-24-5")
-    assert (sh.repo, sh.fond, sh.opys, sh.spr) == ("DAVO", "R-6129", "24", "5")
+    assert (sh.repo, sh.fond, sh.opys, sh.spr) == ("DAVIO", "R-6129", "24", "5")
     assert sh.fond == _norm_fond("Р-6129"), "реєстрація й бібліотека знову різні"
     # Обидва письма дають той самий фонд — інакше та сама справа заходить в
     # облік двома ключами залежно від того, як її набрали.
@@ -149,7 +149,11 @@ def test_describe_writes_the_sidecar_into_the_case_folder(space: Path) -> None:
     R.describe(space, shifra="ДАХмО 315-1-8433", title="Метрична книга",
                year_from=1858, place="Борсуківці")
     sc = json.loads((space / R.SIDECAR).read_text(encoding="utf-8"))
-    assert sc["shifra"] == "DAHMO 315-1-8433"
+    # 🔴 Скороченням, а не кодом. Сайдкар їде з текою до колеги, і `DAHMO
+    # 315-1-8433` навчав би писати шифру формою, якої немає в жодному описі
+    # архіву. Код лишається окремим полем `repo` — для машини.
+    assert sc["shifra"] == "ДАХмО 315-1-8433"
+    assert sc["repo"] == "DAHMO", "код мусить лишитись машинним полем"
     assert sc["title"] == "Метрична книга"
     assert sc["year_from"] == 1858
     assert sc["edited_by_hand"] is True
@@ -424,3 +428,55 @@ def test_declaring_a_root_refuses_a_whole_drive(space: Path) -> None:
 
     with pytest.raises(WorkspaceError):
         add_case_root(Path(space.anchor))
+
+
+def test_a_field_can_be_erased_and_an_empty_one_still_keeps(tmp_path) -> None:
+    """🔴 Зворотної дії не було ЗОВСІМ.
+
+    Порожнє поле лишає попереднє значення — правильно: правка заголовка не має
+    стирати роки, які хтось уточнив. Але помилково введена назва через це
+    лишалась назавжди, і підказка у формі чесно радила «правкою файлу
+    `_source.json` у теці» — тобто єдиний вихід із застосунку вів у текстовий
+    редактор.
+    """
+    d = tmp_path / "справа"
+    d.mkdir()
+    R.describe(d, shifra="ДАХмО 315-1-8433", title="Метрична книга",
+               place="М'ястківка", note="куплено 2026")
+
+    # Порожнє — не чіпає.
+    got = R.describe(d, title="")
+    assert got["title"] == "Метрична книга", "порожнє поле затерло наявне"
+
+    # Тире — стирає, і саме те поле, яке назвали.
+    got = R.describe(d, title="-")
+    assert "title" not in got, "тире не стерло поля"
+    assert got["place"] == "М'ястківка", "стерлось не те, що просили"
+    assert got["note"] == "куплено 2026"
+
+    # Довге тире й ен-теш працюють так само: на клавіатурі трапляються всі три.
+    assert "place" not in R.describe(d, place="—")
+    assert "note" not in R.describe(d, note="–")
+
+
+def test_a_wrong_year_can_be_erased_like_any_other_field(tmp_path) -> None:
+    """🔴 Обіцянка «тире стирає поле» не сміє мати мовчазних винятків.
+
+    Роки йшли окремою гілкою `if val is not None`, а форма перетворювала «-» на
+    `Number('-')` → `NaN` → `null`, тобто на «не чіпай». Підказка казала одне,
+    поле робило інше, і помилковий рік лишався назавжди.
+    """
+    d = tmp_path / "справа"
+    d.mkdir()
+    R.describe(d, shifra="ДАХмО 315-1-8433", year_from=1858, year_to=1860)
+
+    got = R.describe(d, year_from="-")
+    assert "year_from" not in got, "рік не стерся"
+    assert got["year_to"] == 1860, "стерлось не те, що просили"
+
+    # Рядок із числом приймається — форма шле саме рядок.
+    assert R.describe(d, year_from="1858")["year_from"] == 1858
+    # А сміття називається сміттям, а не мовчазно ковтається.
+    with pytest.raises(R.RegisterError) as e:
+        R.describe(d, year_from="позаминулого")
+    assert "не рік" in str(e.value)

@@ -966,8 +966,8 @@ def cases_list(a: CasesArgs) -> Envelope:
         env.stale_because(["реєстр ще не збирали"], fix="nysh cases build")
         return env
     except Exception as exc:
-        return fail(f"реєстр справ недоступний ({type(exc).__name__}: {exc}) — "
-                    f"зберіть його командою `nysh cases build`")
+        return fail(f"реєстр справ недоступний ({type(exc).__name__}: {exc})"
+                    ).suggest("cases.build", "зібрати реєстр справ")
     pages = (total + size - 1) // size if size else 0
     try:
         counts = db.kind_counts()
@@ -1792,8 +1792,12 @@ def pages_status(a: PagesStatusArgs) -> Envelope:
         # просто ще не знає, де лежить справа, — і це лікується одним кроком.
         env.warn("case_dir_unknown",
                  "теки зі сканами цієї справи реєстр не знає, тож «на диску» "
-                 "нижче — не нуль, а «невідомо». Заведіть справу "
-                 "(`nysh case <тека> --shifra …`) або перезберіть реєстр")
+                 "нижче — не нуль, а «невідомо»")
+        # Кнопка, а не команда: обидві дії в застосунку є, і саме вони тут
+        # потрібні. Текст із `nysh case …` називав крок тому, кому набирати
+        # його нема де.
+        env.suggest("case.register", "описати теку зі сканами цієї справи")
+        env.suggest("cases.build", "або перезібрати реєстр, якщо опис уже є")
     left = st.get("unnoted_count")
     if left:
         env.suggest("pages.note",

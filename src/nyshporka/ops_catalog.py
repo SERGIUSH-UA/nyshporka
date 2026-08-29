@@ -523,7 +523,7 @@ def registry_collectors(_: NoArgs) -> Envelope:
     if not reg.all():
         env.warn("no_collectors",
                  "жодного збирача — реєстр опису можна читати, але не складати. "
-                 "Це стан, а не помилка: pip install 'nyshporka[archives]'")
+                 "Це стан, а не помилка: збирачі описів — окрема частина застосунку")
     return env
 
 

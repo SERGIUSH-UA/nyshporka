@@ -118,7 +118,8 @@ async function renderRoots() {
     ${renderWarnings(env)}
     <table><tbody>${rows}</tbody></table>
     <p><button data-act="roots.pick">📂 ${t('roots.add')}</button>
-      <span class="muted">${t('roots.keep')}</span></p>`;
+      <span class="muted">${t('roots.keep')}</span></p>
+    <div id="roots-hits"></div>`;
 }
 
 Object.assign(ACTIONS, {
@@ -137,18 +138,26 @@ Object.assign(ACTIONS, {
     box.innerHTML = head + renderWarnings(env)
       + (d.newer ? `<p class="muted">${t('ver.how')}</p><code>${esc(d.how)}</code>` : '');
   },
+
   /** 📂 Оголосити нову теку коренем — вибором, а не набором шляху. */
   'roots.pick': async () => {
     const got = await pickPath({ mode: 'dir', purpose: 'roots.add' });
     if (!got.ok) return;
     const env = await callOp('roots.add', { path: got.path });
-    if (!env.ok) return failure(env);
+    // 🔴 Відмова — у ВЛАСНУ коробку під переліком, а не в `#roots`.
+    //
+    // `#roots` — це весь розділ разом із кнопками «Оголосити корінь» і
+    // «Забути». Писати помилку туди означало стерти саме той засіб, яким її
+    // виправляють: людина вибирає теку, якої вже немає, читає «такої теки
+    // немає» — і бачить, що розділ «Корені справ» зник цілком. Це рівно те
+    // «шукати дорогу назад», проти чого й писалась ця правка.
+    if (!env.ok) return boxError('roots-hits', env);
     await renderRoots();
   },
 
   'roots.forget': async (_ev, elm) => {
     const env = await callOp('roots.remove', { path: elm.dataset.arg });
-    if (!env.ok) return failure(env);
+    if (!env.ok) return boxError('roots-hits', env);
     await renderRoots();
   },
 

@@ -203,7 +203,15 @@ Object.assign(ACTIONS, {
     });
     unlock();
     if (!env.ok) return boxError('prof-hits', env);
-    return show('profile');
+    // 🔴 `show('profile')` перечитує `profile.show`, у якого цих застережень
+    // немає, — тобто вони гинули мовчки. А серед них `not_active`: «профіль
+    // записано, але шукається інший». Людина зберігала рід і не дізнавалась,
+    // що ПОШУК НИМ НЕ КОРИСТУЄТЬСЯ, — і далі читала нулі як відповідь.
+    const said = env.warnings && env.warnings.length ? renderWarnings(env) : '';
+    await show('profile');
+    const box = el('prof-hits');
+    if (box && said) box.innerHTML = said;
+    return undefined;
   },
 
   /** Записати сирий файл. Відмова лишається в коробці — текст не втрачається. */

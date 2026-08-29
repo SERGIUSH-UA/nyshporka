@@ -276,7 +276,13 @@ Object.assign(ACTIONS, {
   'case.save': async (ev) => {
     ev.preventDefault();
     const fd = Object.fromEntries(new FormData(ev.target).entries());
-    for (const k of ['year_from', 'year_to']) fd[k] = fd[k] ? Number(fd[k]) : null;
+    // ⚠ Тире доїжджає ТИРЕ, а не `NaN`. `Number('-')` дає `NaN`, JSON робить із
+    // нього `null`, а `null` для схеми означає «не чіпай» — тобто обіцянка
+    // «тире стирає поле» для років була мовчазним холостим ходом.
+    for (const k of ['year_from', 'year_to']) {
+      const raw = String(fd[k] || '').trim();
+      fd[k] = raw ? (['-', '—', '–'].includes(raw) ? raw : Number(raw)) : null;
+    }
     // Незнята позначка у FormData просто відсутня — схема чекає булеве поле.
     fd.adopt = fd.adopt === '1';
     const env = await callOp('case.register', fd);
