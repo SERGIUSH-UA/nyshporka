@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import time
+import weakref
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -36,6 +37,50 @@ _BUILD_GATE = asyncio.Lock()
 #: навмисно: спільний змусив би перезбірку реєстру чекати на злиття фонду, хоч
 #: вони не діляться нічим.
 _GENERIC_GATE = asyncio.Lock()
+
+#: 🔴🔴 Читання йдуть ПО ОДНОМУ. Не з обережності — інакше вони одне одного
+#: завалюють.
+#:
+#: `idempotency_key` захищав лише від повторного запуску ТІЄЇ САМОЇ справи: дві
+#: різні справи давали два `out_dir`, два завдання і два негайні
+#: `create_task` — тобто на одній карті одночасно йшли два проходи сегментації.
+#: Ціна названа в докстрінгу `htr.run.Plan.shards`: «`--shard` без спільного
+#: `--gpu-lock` на одній карті не сповільнює прогін — він його ЗАВАЛЮЄ». Гірше
+#: за просте падіння те, що число шардів кожен прогін рахує з ВІЛЬНОЇ пам'яті
+#: карти, вважаючи карту своєю: другий міряє її до того, як перший завантажив
+#: моделі, і обидва беруть по N (звіт користувача 29.08.2026 — дві справи
+#: почались паралельно замість того, щоб стати в чергу).
+#:
+#: ⚠ Семафор, а не лок: очікування мусить лишати завдання в черзі ВИДИМИМ, з
+#: підписом «чекає на карту». Слово «черга» в застосунку вже стояло
+#: (`JobState.QUEUED`), і людина обґрунтовано чекала від нього черги — стан був,
+#: а стримувати нікого не стримував.
+#: ⚠ Семафор створюється ЛІНИВО й тримається за самим циклом подій, а не
+#: константою модуля. `asyncio.Semaphore` прив'язується до першого циклу, який
+#: його торкнувся, і в другому падає «bound to a different event loop» — тобто
+#: гейт, який мусить рятувати прогін, сам би його й завалив.
+#:
+#: 🔴 Ключ — ОБ'ЄКТ циклу у `WeakKeyDictionary`, а не `id(loop)`. Словник за
+#: числовим id не тримає циклу живим, CPython переInter'ретовує адресу, і
+#: наступний цикл дістає семафор, прив'язаний до мертвого. Виявилось би це
+#: лише під навантаженням: `Semaphore.acquire` не питає циклу, доки лічильник
+#: більший за нуль, тож падало б рівно тоді, коли два читання таки зійшлись —
+#: у ситуації, заради якої гейт і існує. А виняток у голому `create_task`
+#: лишив би завдання назавжди в черзі, без жодного сліду на екрані.
+_READ_GATES: weakref.WeakKeyDictionary[Any, asyncio.Semaphore] = weakref.WeakKeyDictionary()
+
+
+def _read_gate() -> asyncio.Semaphore:
+    """Гейт карти для ЧИННОГО циклу подій."""
+    loop = asyncio.get_running_loop()
+    gate = _READ_GATES.get(loop)
+    if gate is None:
+        gate = _READ_GATES[loop] = asyncio.Semaphore(1)
+    return gate
+
+#: Підпис завдання, яке стоїть у черзі за картою. Окремою константою — його
+#: шукає приймач, а людина читає з нього, ЧОМУ нічого не відбувається.
+WAITING_FOR_GPU = "чекає на карту"
 
 
 def _keep(task: asyncio.Task[Any]) -> None:
@@ -385,13 +430,44 @@ async def _run_read(bus: JobBus, job: JobRecord, plan: Any, case_key: str,
     лок карти й разом становлять прогін справи. Тому в черзі вони стоять одним
     рядком, а числа під ним — сумарні.
     """
+    from nyshporka.core.jobs import JobState
+
+    # 🔴 Чекаємо гейта ПЕРЕД тим, як стати `RUNNING`. Порядок тут і є той стан,
+    # який людина читає: доки прогін чекає карти, він мусить лишатись у черзі,
+    # а не вдавати роботу. Підпис міняється разом зі станом — «чекає на карту»
+    # відповідає на питання «чому нічого не відбувається».
+    # ⚠ Початковий підпис запам'ятовується ДО правки: `bus.update` міняє той
+    # самий запис, тож «повернути як було» через `job.title` повернуло б уже
+    # виправлений рядок — і завдання, яке вже читає, лишалось би підписане
+    # «чекає на карту». Брехливий підпис гірший за його відсутність.
+    was_title = job.title
+    gate = _read_gate()
+    if gate.locked():
+        await bus.update(job.id, title=f"{was_title} · {WAITING_FOR_GPU}")
+    async with gate:
+        # 🔴🔴 Скасування, ухвалене ПОКИ завдання стояло в черзі, мусить
+        # спрацювати тут. Стопер (`bus.on_stop`) реєструється аж усередині
+        # `_run_read_locked`, коли процеси вже є, тож `cancel` на завданні в
+        # черзі лише фарбує стан і нікого не спиняє. Без цієї перевірки
+        # скасоване читання дочікувалось карти й СТАРТУВАЛО — на годину, з
+        # написом «скасовано» в переліку й без рядка, на якому можна натиснути
+        # «спинити». Тобто найгірший різновид привида: роботи не видно, а карту
+        # вона тримає.
+        if bus.cancelled(job.id):
+            return
+        await bus.update(job.id, state=JobState.RUNNING, title=was_title)
+        await _run_read_locked(bus, job, plan, case_key, cmds, partial=partial)
+
+
+async def _run_read_locked(bus: JobBus, job: JobRecord, plan: Any, case_key: str,
+                           cmds: list[list[str]], *, partial: bool = False) -> None:
+    """Тіло читання під уже взятим гейтом карти."""
     import os
 
     from nyshporka.core.jobs import JobState, Progress
     from nyshporka.core.progress import split
     from nyshporka.htr import run as R
 
-    await bus.update(job.id, state=JobState.RUNNING)
     env = {**os.environ, **R.shard_env(len(cmds)),
            "PYTHONUNBUFFERED": "1", "PYTHONIOENCODING": "utf-8"}
     procs = [await asyncio.create_subprocess_exec(

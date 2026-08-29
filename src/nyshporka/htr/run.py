@@ -142,9 +142,16 @@ class Plan:
                 f"шарди згорнуто до одного: на «{device or 'cpu'}» вони не "
                 f"діляться карткою, а змагаються за ті самі ядра")
             n = 1
-        if n == 1:
-            return [self.command(**kw)], notes  # type: ignore[arg-type]
+        # 🔴 Лок карти ставиться Й ОДИНОЧНОМУ прогону.
+        #
+        # Доти гілка `n == 1` віддавала команду БЕЗ `--gpu-lock` — тобто саме
+        # той випадок, з якого прийшов звіт («запустив 2 справи, вони почались
+        # паралельно»), лишався незахищеним: `workers.ReadArgs.workers` типово
+        # дорівнює одиниці. Черга в застосунку сюди не дістає взагалі — вона не
+        # бачить прогонів, запущених із командного рядка, а карта в них спільна.
         lock = str(self.gpu_lock or (self.out_dir / "_gpu.lock"))
+        if n == 1:
+            return [self.command(gpu_lock=lock, **kw)], notes  # type: ignore[arg-type]
         cmds = [self.command(shard=f"{k + 1}/{n}", gpu_lock=lock,
                              gpu_sato=False, **kw)  # type: ignore[arg-type]
                 for k in range(n)]
@@ -375,9 +382,25 @@ def plan(case_dir: str | Path, *, out_dir: str | Path = "", script: str = "",
     stamp = hashlib.blake2b(str(case).lower().encode("utf-8"),
                             digest_size=4).hexdigest()
     seg = ws.derived / "htr_seg" / f"{slug}__{stamp}"
+    # 🔴🔴 Лок карти — НА ПРОСТІР, а не на прогін.
+    #
+    # Доти він лежав у теці виходу (`out/_gpu.lock`), тобто в кожного прогону
+    # був СВІЙ файл — і два прогони не виключали одне одного взагалі. Правило,
+    # яке цей лок утілює, сформульоване поруч, у `Plan.shards`: два одночасні
+    # проходи сегментації не влазять у пам'ять типової карти й ЗАВАЛЮЮТЬ прогін.
+    # Всередині одного прогону воно діяло, між двома — ні (звіт користувача
+    # 29.08.2026: дві справи почались паралельно замість того, щоб стати чергою).
+    #
+    # ⚠ Лок один на простір, без розрізнення карт. Дві карти в машині цієї
+    # авдиторії — рідкість, а ціна помилки несиметрична: зайва серіалізація
+    # коштує часу, брак її — завалений прогін на годину роботи.
+    # ⚠ Черга в застосунку (`daemon.workers._READ_GATE`) цього не заміняє: вона
+    # не бачить прогонів, запущених із командного рядка, а карта в них спільна.
+    lock_dir = ws.derived / "htr_lock"
+    lock_dir.mkdir(parents=True, exist_ok=True)
     return Plan(case_dir=case, out_dir=out, model=model, script=scr,
                 frames=frames, python=rep.python, runner=runner, voice=voice,
-                seg_cache=seg, gpu_lock=out / "_gpu.lock",
+                seg_cache=seg, gpu_lock=lock_dir / "gpu.lock",
                 script_trust=guess.trust, script_why=guess.why)
 
 

@@ -69,7 +69,7 @@ def test_all_shards_share_one_and_the_same_lock(plan: Plan) -> None:
 
 
 def test_one_process_does_not_pay_the_sharding_tax(plan: Plan) -> None:
-    """Один процес не бере ні лока, ні зняття sato.
+    """Один процес не бере ні `--shard`, ні зняття sato.
 
     ⚠ Зняти sato з карти в однопроцесному прогоні — чистий податок на процесор:
     вигравати нема в кого, бо в черзі за карткою ніхто не стоїть.
@@ -77,8 +77,31 @@ def test_one_process_does_not_pay_the_sharding_tax(plan: Plan) -> None:
     cmds, _ = plan.shards(1, device="cuda:0")
     assert len(cmds) == 1
     f = _flags(cmds[0])
-    assert not ({"--shard", "--gpu-lock", "--no-gpu-sato"} & f), (
+    assert not ({"--shard", "--no-gpu-sato"} & f), (
         f"однопроцесний прогін тягне важелі шардингу: {sorted(f)}")
+
+
+def test_one_process_still_takes_the_card_lock(plan: Plan) -> None:
+    """🔴 А от лок карти бере — і це НЕ податок шардингу.
+
+    Різниця в тому, з ким змагаються. `--no-gpu-sato` і `--shard` мають сенс
+    лише всередині одного прогону, тож одиночному вони справді нічого не дають.
+    Лок же захищає від ДРУГОГО ПРОГОНУ — а `workers.ReadArgs.workers` типово
+    дорівнює одиниці, тобто саме одиночний прогін і є звичайним випадком.
+    Доти ця гілка команду без лока й віддавала, і два `nysh read` з термінала
+    (або термінал плюс застосунок) заходили на карту разом — рівно той звіт,
+    з якого почалась ця правка. Черга в демоні сюди не дістає: вона не бачить
+    прогонів командного рядка, а карта в них спільна.
+    ⚠ Уконтендованому випадку лок безкоштовний — це один файл і один `flock`.
+    """
+    cmds, _ = plan.shards(1, device="cuda:0")
+    f = _flags(cmds[0])
+    assert "--gpu-lock" in f, "одиночний прогін лишився без лока карти"
+    # І лок той САМИЙ, що взяли б шарди, — інакше він нікого не виключає.
+    many, _ = plan.shards(3, device="cuda:0")
+    one = cmds[0][cmds[0].index("--gpu-lock") + 1]
+    rest = {c[c.index("--gpu-lock") + 1] for c in many}
+    assert rest == {one}, f"одиночний прогін узяв інший лок: {one} проти {rest}"
 
 
 def test_shards_collapse_on_a_processor_and_say_so(plan: Plan) -> None:
