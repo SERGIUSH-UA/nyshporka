@@ -59,6 +59,8 @@ markdown_extensions:
 # хто читає репозиторій із GitHub, а не із сайту.
 nav:
   - Нишпорка: index.md
+  - Поставив. Що далі?: start.md
+  - Часті питання: faq.md
   - Карта екранів: screens.md
   - Для агентів:
       - Перша сесія: agents/first-session.md
