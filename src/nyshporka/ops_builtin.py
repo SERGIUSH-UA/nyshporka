@@ -1424,10 +1424,20 @@ class CaseRegisterArgs(BaseModel):
     shifra: str = Field(default="",
                         description="«ДАХмО 315-1-8433», «ф.315 оп.1 спр.8433», "
                                     "«Ф. 211 Оп. 3 Д. 140»")
+    # 🔴 Досі відмова «не видно архіву» радила «вкажіть окремо» — про параметр,
+    # якого не було ні тут, ні у формі, ні в CLI. Порада була нездійсненна, і
+    # людина лишалась без виходу (звіт 29.08.2026). Тепер поле є й справді
+    # рятує шифру, набрану без назви архіву («705-1-1»).
+    repo: str = Field(default="",
+                      description="архів окремо, коли його немає в шифрі: "
+                                  "код (DAKO) або скорочення (ДАКО)")
     title: str = Field(default="", description="назва справи, як в описі архіву")
     doc_type: str = Field(default="", description="метрична / сповідна / ревізька…")
-    year_from: int | None = None
-    year_to: int | None = None
+    # ⚠ `str` поруч із `int` — щоб роки теж можна було СТЕРТИ. Форма обіцяє
+    # «тире стирає поле», і мовчазний виняток для двох полів робив би обіцянку
+    # напівправдою: помилковий рік лишався б назавжди.
+    year_from: int | str | None = Field(default=None, description="рік або «-», щоб стерти")
+    year_to: int | str | None = Field(default=None, description="рік або «-», щоб стерти")
     place: str = Field(default="", description="село, повіт, губернія")
     note: str = Field(default="", description="звідки взято, що незрозуміло")
     adopt: bool = Field(
@@ -1459,7 +1469,8 @@ def case_register(a: CaseRegisterArgs) -> Envelope:
     try:
         out = describe(a.case_dir, shifra=a.shifra, title=a.title,
                        doc_type=a.doc_type, year_from=a.year_from,
-                       year_to=a.year_to, place=a.place, note=a.note)
+                       year_to=a.year_to, place=a.place, note=a.note,
+                       repo_hint=a.repo)
     except RegisterError as exc:
         return fail(str(exc))
     env = ok({"case_dir": a.case_dir, "sidecar": out})
@@ -2498,6 +2509,78 @@ def archive_fond(a: FondArgs) -> Envelope:
         env.warn("opys_in_key",
                  "у цьому фонді опис входить у ключ справи: без нього різні "
                  "книги злипаються в одну")
+    return env
+
+
+class ArchiveAddArgs(BaseModel):
+    code: str = Field(description="внутрішній код: латиниця й цифри (DAKO)")
+    label: str = Field(description="скорочення, яким його пишуть у шифрі (ДАКО)")
+    name: str = Field(default="", description="повна назва архіву")
+    country: str = Field(default="UA", description="код країни")
+
+
+# `agent=False` — перелік архівів агент бачить у відмовах операцій і в довідці
+# про фонд; окремим tool'ом він з'їдав би місце в переліку, який модель мусить
+# дочитати до кінця. А от екранові він потрібен: без нього форма заведення
+# справи вимагає значення зі списку, якого ніде не показано.
+@op("archives.list", summary="Які архіви застосунок знає", agent=False,
+    section="material")
+def archives_list(_: NoArgs) -> Envelope:
+    """Склад паку архівів — для селекта у формі й для довідки.
+
+    🔴 Список був закритий і невидимий одночасно: валідатор шифри вимагав
+    назву саме звідси, а показати його не було де. Дослідник із незнайомим
+    архівом упирався в глухий кут і не мав як зрозуміти, що взагалі приймається.
+    """
+    from nyshporka.archives import active
+
+    pk = active()
+    rows = [{"code": code, "label": r.label, "name": r.name,
+             "country": r.country,
+             # Канонічний код: два записи одного архіву («ДАВіО») мусять
+             # показуватись як один вибір, а не як два однакові рядки.
+             "canon": pk.canon_repo(code)}
+            for code, r in sorted(pk.repositories.items(),
+                                  key=lambda kv: kv[1].label)]
+    seen: set[str] = set()
+    uniq = [r for r in rows if not (r["canon"] in seen or seen.add(r["canon"]))]
+    return ok({"archives": uniq, "total": len(uniq),
+               "overlay": str(_overlay_or_empty())})
+
+
+def _overlay_or_empty() -> str:
+    from nyshporka.archives import pack as PK
+
+    try:
+        p = PK.overlay_path()
+    except Exception:
+        return ""
+    return str(p) if p.is_file() else ""
+
+
+@op("archive.add", summary="Додати архів, якого застосунок ще не знає",
+    args=ArchiveAddArgs, mutates=True, agent=False, section="material")
+def archive_add(a: ArchiveAddArgs) -> Envelope:
+    """Дописати архів у накладку простору.
+
+    🔴 Досі це вміла лише правка YAML руками, і застосунок про неї не казав
+    ніде. Дослідник із польським чи білоруським архівом не заводив справу через
+    інтерфейс узагалі — валідатор шифри вимагав назву зі списку, поповнити який
+    з екрана було нічим.
+    """
+    from nyshporka.archives.pack import PackError, add_repository
+
+    try:
+        path = add_repository(a.code, a.label, a.name, a.country)
+    except PackError as exc:
+        return fail(str(exc))
+    except Exception as exc:
+        return fail(f"не вдалося дописати архів ({type(exc).__name__}: {exc})")
+    env = ok({"code": a.code.upper(), "label": a.label, "path": str(path)})
+    env.warn("local_only",
+             f"архів записано у ваш простір ({path}), а не у вбудований пак. "
+             f"Він поїде разом із простором, але колезі, який працює у своєму, "
+             f"буде невідомий — там його треба додати так само.")
     return env
 
 

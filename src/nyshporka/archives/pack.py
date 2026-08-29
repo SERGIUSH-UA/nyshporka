@@ -20,7 +20,9 @@ YAML на мову програмування.
 """
 from __future__ import annotations
 
+import json
 import os
+import re
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
@@ -49,6 +51,10 @@ BUILTIN = Path(__file__).resolve().parent / "data" / "archives.yaml"
 ENV_PACK = "NYSHPORKA_ARCHIVES_PACK"
 #: Ім'я файлу, який шукається в конфігу робочого простору.
 WORKSPACE_PACK = "archives.yaml"
+
+#: Верхньорівневий блок архівів у накладці — у всіх написаннях, які YAML
+#: дозволяє: `repositories:`, `repositories :`, `repositories:  # коментар`.
+_REPOS_KEY = re.compile(r"^repositories\s*:\s*(#.*)?$")
 
 
 @dataclass(frozen=True)
@@ -490,3 +496,129 @@ def active() -> ArchivesPack:
 
 def reset() -> None:
     _active_for.cache_clear()
+
+
+# ── дописати архів ───────────────────────────────────────────────────────────
+class PackError(RuntimeError):
+    """Архів не додати — з поясненням, чого бракує."""
+
+
+def overlay_path() -> Path:
+    """Файл накладки простору. Може не існувати — це нормальний стан."""
+    from nyshporka.core.workspace import workspace
+
+    return workspace().config / WORKSPACE_PACK
+
+
+def add_repository(code: str, label: str, name: str = "",
+                   country: str = "UA") -> Path:
+    """Дописати архів у накладку простору. Повертає шлях файла.
+
+    🔴 Досі новий архів додавався ЛИШЕ правкою файла руками, і це був глухий
+    кут: дослідник із польським чи білоруським архівом не заводив справу через
+    інтерфейс узагалі, а відмова радила «додайте його назву», не кажучи куди.
+
+    🔴 Вставка ТЕКСТОВА, рядком під `repositories:`, а не перезапис через
+    `yaml.safe_dump`. Накладку пишуть руками, і в ній живуть коментарі з
+    підставами — дамп їх не переносить, тобто кнопка «додати архів» мовчки
+    з'їдала б чуже знання. Той самий принцип, що й у `core.profile._patch`.
+    """
+    code = str(code or "").strip().upper()
+    label = strip_invisible_word(label)
+    if not code.isascii() or not code.isalnum() or not code:
+        raise PackError(
+            "код архіву — латинські літери й цифри без пробілів (DAKO, CDIAL). "
+            "Це внутрішня адреса: під ним лежатимуть теки й ключі справ, тож "
+            "кирилиця й пробіли в ньому обернулись би непридатними іменами.")
+    if not label:
+        raise PackError("скорочення обов'язкове: саме його люди пишуть у шифрі")
+    pk = active()
+    if code in pk.repositories:
+        raise PackError(
+            f"архів «{code}» уже відомий — це {pk.repositories[code].label}. "
+            f"Щоб додати йому ще одне написання, впишіть його в `aliases`.")
+    clash = pk.resolve_code(label)
+    if clash:
+        raise PackError(
+            f"скорочення «{label}» уже належить архіву «{clash}» "
+            f"({pk.repositories[clash].name or clash}). Два архіви під одним "
+            f"написанням злипнуться в обліку тихо.")
+
+    # 🔴🔴 Значення екрануються, а не підставляються як є.
+    #
+    # Голе `name: Archiwum Główne Akt Dawnych, Warszawa` робить YAML
+    # нечитабельним — а `_read` на помилці розбору віддає ПОРОЖНЬО, тобто пак
+    # стає порожнім увесь, і після цього не заводиться ЖОДНА шифра, включно з
+    # вбудованими архівами. Кома в назві архіву не екзотика, і ціна їй була б
+    # рівно та вада, проти якої написана вся ця правка, лише запущена власною
+    # кнопкою. YAML 1.2 — надмножина JSON, тож `json.dumps` дає коректний і
+    # екранований скаляр.
+    def q(v: str) -> str:
+        return json.dumps(str(v), ensure_ascii=False)
+
+    entry = (f"  {code}: {{label: {q(label)}, name: {q(name or label)}, "
+             f"country: {q(country or 'UA')}}}\n")
+    path = overlay_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    #: Що було до нас — щоб було куди повернутись. `None`: файла не було.
+    before = path.read_text(encoding="utf-8") if path.is_file() else None
+    if not path.is_file():
+        path.write_text(
+            "# 🏛 Накладка на вбудований пак архівів.\n"
+            "# Записи звідси перебивають вбудовані по ключу; решта лишається.\n"
+            "# Файл ваш: коментарі тут переживуть кнопку «додати архів».\n"
+            "version: 1\n\nrepositories:\n" + entry, encoding="utf-8")
+        reset()
+        return path
+
+    text = path.read_text(encoding="utf-8")
+    lines = text.splitlines(keepends=True)
+    # 🔴 Якір шукається регуляркою, а не точним рядком. `repositories :`,
+    # `repositories:  # мої архіви` — усе це валідний YAML, і на кожному з них
+    # точне порівняння давало «не знайшов», після чого дописувався ДРУГИЙ
+    # верхньорівневий `repositories:`. PyYAML дублікат ключа приймає й лишає
+    # ОСТАННІЙ — тобто файл далі читався, приймач нижче був задоволений (наш
+    # архів на місці), а всі раніше дописані архіви зникали мовчки.
+    at = next((k for k, ln in enumerate(lines) if _REPOS_KEY.match(ln)), None)
+    if at is None:
+        # ⚠ Ключ у файлі може БУТИ, але не рядком, який ми впізнаємо (плаский
+        # запис `repositories: {…}`, чужий відступ). Дописати другий означало б
+        # стерти чужу роботу; чесніше відмовитись і сказати, що вписати руками.
+        if isinstance(_read(path).get("repositories"), dict):
+            raise PackError(
+                f"у {path} уже є блок `repositories`, але записаний так, що "
+                f"дописати в нього рядком не виходить. Додайте архів туди "
+                f"руками: {entry.strip()}")
+        text = text if text.endswith("\n") else text + "\n"
+        path.write_text(text + "\nrepositories:\n" + entry, encoding="utf-8")
+    else:
+        # ⚠ Якщо блок — останній рядок файла без переводу, вставка склеїлась би
+        # з ним в один рядок і зробила б YAML нечитабельним.
+        if not lines[at].endswith("\n"):
+            lines[at] += "\n"
+        lines.insert(at + 1, entry)
+        path.write_text("".join(lines), encoding="utf-8")
+    # ⚠ Приймач тут-таки: якщо вставка зробила файл нечитабельним, пак мовчки
+    # повернувся б до вбудованого, і архів «додався» б у нікуди.
+    reset()
+    if code not in active().repositories:
+        # 🔴 Відкат, а не сама лише скарга. Накладка, зіпсована НАШИМ записом,
+        # знеструмлює ВЕСЬ пак: `_read` на помилці розбору віддає порожньо, і
+        # після цього не заводиться жодна шифра — навіть тих архівів, що
+        # вбудовані. Лишити людину з таким файлом і порадою «перевірте текстом»
+        # означало б зламати їй застосунок власною кнопкою.
+        if before is None:
+            path.unlink(missing_ok=True)
+        else:
+            path.write_text(before, encoding="utf-8")
+        reset()
+        raise PackError(
+            f"запис не дописався: {path} став би нечитабельним, тож файл "
+            f"повернуто як був. Найімовірніша причина — незвичні символи в "
+            f"назві архіву.")
+    return path
+
+
+def strip_invisible_word(value: str) -> str:
+    """Скорочення без невидимих символів і зайвих пробілів по краях."""
+    return T.strip_invisible(str(value or "")).strip()

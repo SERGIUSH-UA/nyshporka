@@ -220,6 +220,10 @@ OP_SCREEN: dict[str, str] = {
     "fond.rows": "fonds",
     "fond.take": "fonds",
     "archive.fond": "fonds",
+    # 🔴 Обидві — на «Завести справу»: саме там валідатор вимагає назву архіву,
+    # і саме там людина впирається, коли її архіву в паку немає.
+    "archives.list": "newcase",
+    "archive.add": "newcase",
     "registry.collectors": "fonds",
     "registry.plan": "fonds",
     "registry.collect": "fonds",

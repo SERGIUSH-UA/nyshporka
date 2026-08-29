@@ -101,10 +101,43 @@ function intakeCount(d, c) {
   return `<p class="muted">${bits.join(' · ')}${lib}</p>`;
 }
 
+/**
+ * Перелік архівів, які застосунок знає. Тримається між показами екрана: він
+ * міняється лише тоді, коли людина сама додала архів, і перепитувати його на
+ * кожен показ означало б платити запитом за незмінне.
+ */
+let REPOS = null;
+
+/** Селект архівів. Порожній вибір — «архів у самій шифрі», і він за замовчуванням. */
+function repoOptions(picked) {
+  const rows = (REPOS && REPOS.archives) || [];
+  const opt = (val, label) =>
+    `<option value="${esc(val)}"${val === (picked || '') ? ' selected' : ''}>${esc(label)}</option>`;
+  return [opt('', t('case.repo.any')),
+          ...rows.map((r) => opt(r.code, r.name ? `${r.label} — ${r.name}` : r.label))].join('');
+}
+
 SCREENS.newcase = async () => {
   const sc = (EDIT && EDIT.sidecar) || {};
   const v = (k) => esc(sc[k] === null || sc[k] === undefined ? '' : sc[k]);
   const dir = EDIT ? esc(EDIT.case_dir) : '';
+  // 🔴 Валідатор шифри вимагає назву архіву зі свого переліку, а показати цей
+  // перелік не було де: людина читала «архів невідомий» і не мала як довідатись,
+  // що взагалі приймається, ані чим це поповнити (звіт 29.08.2026).
+  const gen = curGen();
+  if (REPOS === null) {
+    const env = await callOp('archives.list', {});
+    // ⚠ Екран малюється лише якщо людина ще тут: `show()` піднімає покоління на
+    // кожній навігації, а до цієї правки форма була синхронною й такої ями не
+    // мала. Без перевірки заведення справи намалювалось би поверх екрана, який
+    // людина відкрила замість нього.
+    if (!alive(gen)) return;
+    // ⚠ Невдачу НЕ запам'ятовуємо: `null` означає «не питали». Порожній перелік
+    // у цій змінній пришив би одну випадкову відмову (секція щойно вимкнена,
+    // демон перезапустився) до всієї сесії — і селект назавжди лишився б із
+    // самим «з шифри», тобто рівно тим станом, проти якого він і зроблений.
+    if (env.ok) REPOS = env.data;
+  }
   setView(`
     <h2>${EDIT ? t('case.edit') : t('case.title')}</h2>
     <p class="muted">${t('case.why')}</p>
@@ -121,6 +154,22 @@ SCREENS.newcase = async () => {
           value="${v('shifra')}">
         <input name="doc_type" placeholder="${t('case.type')}: метрична"
           value="${v('doc_type')}">
+      </div>
+      <div class="row">
+        <label class="lbl-mini">${t('case.repo')}
+          <select name="repo">${repoOptions(sc.repo)}</select></label>
+        <button type="button" data-act="case.repo.toggle">${t('case.repo.add')}</button>
+      </div>
+      <p class="muted">${t('case.repo.why')}</p>
+      <div id="repo-add" hidden>
+        <p class="muted">${t('case.repo.add.why')}</p>
+        <div class="row">
+          <input id="repo-code" placeholder="${t('case.repo.code')}" size="8">
+          <input id="repo-label" placeholder="${t('case.repo.label')}" size="10">
+          <input id="repo-name" placeholder="${t('case.repo.name')}">
+          <button type="button" data-act="case.repo.add">${t('case.repo.save')}</button>
+        </div>
+        <div id="repo-hits"></div>
       </div>
       <div class="row"><input name="title" placeholder="${t('case.name')}"
         value="${v('title')}" ${EDIT ? 'autofocus' : ''}></div>
@@ -185,6 +234,43 @@ Object.assign(ACTIONS, {
   'case.fresh': async () => {
     EDIT = null;
     await show('newcase');
+  },
+
+  'case.repo.toggle': () => {
+    const box = el('repo-add');
+    if (box) box.hidden = !box.hidden;
+  },
+
+  /**
+   * ➕ Додати архів, якого пак не знає.
+   *
+   * 🔴 Досі це вміла лише правка YAML руками, і застосунок не казав про неї
+   * ніде — дослідник із польським чи білоруським архівом не заводив справу
+   * через інтерфейс узагалі. Форма лишається на екрані: людина щойно набирала
+   * опис справи, і викинути його заради додавання архіву означало б змусити
+   * набрати все вдруге.
+   */
+  'case.repo.add': async () => {
+    const env = await callOp('archive.add', {
+      code: (el('repo-code') || {}).value || '',
+      label: (el('repo-label') || {}).value || '',
+      name: (el('repo-name') || {}).value || '',
+    });
+    const hits = el('repo-hits');
+    if (!env.ok) {
+      if (hits) hits.innerHTML = `<div class="warn err">${esc(env.error)}</div>`;
+      return;
+    }
+    // Перелік перепитуємо, а не дописуємо руками: пак міг звести написання
+    // інакше, ніж очікує форма, і розбіжність тут була б невидима.
+    const fresh = await callOp('archives.list', {});
+    if (fresh.ok) REPOS = fresh.data;
+    const sel = document.querySelector('select[name="repo"]');
+    if (sel) sel.innerHTML = repoOptions(env.data.code);
+    if (hits) {
+      hits.innerHTML = `${renderWarnings(env)}
+        <div class="warn">✅ ${esc(env.data.label)} — ${t('case.repo.added')}</div>`;
+    }
   },
 
   'case.save': async (ev) => {

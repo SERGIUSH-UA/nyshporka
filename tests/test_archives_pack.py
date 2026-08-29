@@ -537,3 +537,126 @@ def test_the_refusal_names_the_latin_letters_it_saw() -> None:
     with pytest.raises(RegisterError) as e:
         parse_shifra("ДАЩO 705-1-1")
     assert "O" in str(e.value) and "латинськ" in str(e.value)
+
+# ── дописаний архів ──────────────────────────────────────────────────────────
+def test_adding_an_archive_survives_a_comma_in_its_name(tmp_path) -> None:
+    """🔴🔴 Найдорожча вада кнопки «додати архів», якби її не спіймали.
+
+    Значення підставлялось у YAML як є, тож «Archiwum Główne Akt Dawnych,
+    Warszawa» робило накладку нечитабельною. А `_read` на помилці розбору
+    віддає ПОРОЖНЬО — тобто пак ставав порожнім УВЕСЬ, і після цього не
+    заводилась жодна шифра, навіть вбудованих архівів. Кома в назві архіву не
+    екзотика; ціна їй була б рівно та вада, проти якої писалась уся ця правка,
+    лише запущена власною кнопкою.
+    """
+    from nyshporka.archives import pack as P
+    from nyshporka.cases.register import parse_shifra
+    from nyshporka.core import workspace as W
+
+    W.use(W.Workspace(root=tmp_path, name="тест", origin="test"))
+    P.add_repository("AGAD", "AGAD", "Archiwum Główne Akt Dawnych, Warszawa", "PL")
+
+    assert parse_shifra("AGAD 1-2-3").repo == "AGAD"
+    # І головне: вбудовані архіви живі. Саме це ламалось непомітно.
+    assert parse_shifra("ДАХмО 315-1-8433").repo == "DAHMO"
+
+
+@pytest.mark.parametrize("name", [
+    'Archiwum: "Cyfrowe"',       # двокрапка й лапки — обидві ламають flow-мапу
+    "Архів #1, {особливий}",     # решітка й дужки
+    "Archiwum\tz табуляцією",
+])
+def test_no_punctuation_in_a_name_can_empty_the_pack(tmp_path, name) -> None:
+    from nyshporka.archives import pack as P
+    from nyshporka.core import workspace as W
+
+    W.use(W.Workspace(root=tmp_path, name="тест", origin="test"))
+    P.add_repository("XARCH", "XARCH", name, "PL")
+    pk = P.active()
+    assert "XARCH" in pk.repositories, name
+    assert "DAHMO" in pk.repositories, f"пак спорожнів через «{name}»"
+    assert pk.repositories["XARCH"].name == name, "назву перекручено"
+
+
+def test_a_broken_overlay_is_rolled_back_not_left_broken(tmp_path, monkeypatch) -> None:
+    """🔴 Якщо запис усе-таки зробив файл нечитабельним — повертаємо як було.
+
+    Лишити людину з побитою накладкою й порадою «перевірте текстом» означало б
+    зламати їй застосунок кнопкою: доки файл не полагоджено руками, не
+    заводиться жодна шифра.
+    """
+    from nyshporka.archives import pack as P
+    from nyshporka.core import workspace as W
+
+    W.use(W.Workspace(root=tmp_path, name="тест", origin="test"))
+    P.add_repository("AGAD", "AGAD", "Archiwum", "PL")
+    was = P.overlay_path().read_text(encoding="utf-8")
+
+    # Імітуємо запис, що ламає YAML, — так, як це зробила б будь-яка майбутня
+    # регресія в складанні рядка.
+    monkeypatch.setattr(P, "_norm_word", P._norm_word)          # no-op, для ясності
+    orig = P.Path.write_text
+
+    def broken(self, data, *a, **kw):                            # type: ignore[no-untyped-def]
+        if self.name == P.WORKSPACE_PACK and "NAC" in str(data):
+            data = "repositories: [цe: не: мапа\n"
+        return orig(self, data, *a, **kw)
+
+    monkeypatch.setattr(P.Path, "write_text", broken)
+    with pytest.raises(P.PackError):
+        P.add_repository("NAC", "NAC", "Narodowe", "PL")
+    monkeypatch.setattr(P.Path, "write_text", orig)
+
+    assert P.overlay_path().read_text(encoding="utf-8") == was, "файл лишили побитим"
+    assert "DAHMO" in P.active().repositories, "пак лишився порожнім"
+
+
+
+@pytest.mark.parametrize("shape", [
+    "version: 1\nrepositories:\n  OLD: {label: OLD}\n",
+    "version: 1\nrepositories :\n  OLD: {label: OLD}\n",
+    "version: 1\nrepositories:  # мої архіви\n  OLD: {label: OLD}\n",
+    "version: 1\nrepositories:\n  OLD: {label: OLD}",          # без переводу в кінці
+])
+def test_a_second_archive_never_erases_the_first(tmp_path, shape) -> None:
+    """🔴🔴 Найтихіша втрата з можливих: дописаний архів стирав усі попередні.
+
+    Якір шукався ТОЧНИМ рядком «repositories:». `repositories :` і
+    `repositories:  # коментар` — валідний YAML, який ця перевірка не впізнавала,
+    після чого дописувався ДРУГИЙ верхньорівневий ключ. PyYAML дублікат приймає
+    й лишає останній: файл читається, наш архів на місці, приймач задоволений —
+    а все, що дослідник додав раніше, зникає без жодного слова.
+    """
+    from nyshporka.archives import pack as P
+    from nyshporka.core import workspace as W
+
+    W.use(W.Workspace(root=tmp_path, name="тест", origin="test"))
+    cfg = tmp_path / "config"
+    cfg.mkdir(parents=True, exist_ok=True)
+    (cfg / P.WORKSPACE_PACK).write_text(shape, encoding="utf-8")
+    P.reset()
+
+    P.add_repository("NEW", "NEW", "Новий", "PL")
+    got = P.active().repositories
+    assert "NEW" in got, "новий архів не додався"
+    assert "OLD" in got, f"попередній архів зник: {shape!r}"
+    assert "DAHMO" in got, "вбудовані архіви зникли"
+
+
+def test_an_unrecognisable_repositories_block_is_refused_not_duplicated(tmp_path) -> None:
+    """Плаский запис блока дописати рядком не можна — і вдавати, що можна, гірше
+    за відмову: другий ключ мовчки заміщає перший."""
+    from nyshporka.archives import pack as P
+    from nyshporka.core import workspace as W
+
+    W.use(W.Workspace(root=tmp_path, name="тест", origin="test"))
+    cfg = tmp_path / "config"
+    cfg.mkdir(parents=True, exist_ok=True)
+    (cfg / P.WORKSPACE_PACK).write_text(
+        "version: 1\nrepositories: {OLD: {label: OLD}}\n", encoding="utf-8")
+    P.reset()
+
+    with pytest.raises(P.PackError) as e:
+        P.add_repository("NEW", "NEW", "Новий", "PL")
+    assert "руками" in str(e.value)
+    assert "OLD" in P.active().repositories, "чужий запис усе одно постраждав"
