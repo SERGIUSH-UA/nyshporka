@@ -220,7 +220,12 @@ def test_every_paradigm_declares_a_whole_table():
     for pid, par in morph.PARADIGMS.items():
         assert par.endings, f"{pid}: жодної орфографії"
         for orth, table in par.endings.items():
-            assert orth in morph.ORTHOGRAPHIES, f"{pid}: невідома орфографія {orth}"
+            # ⚠ `ALL_`, а не `ORTHOGRAPHIES`: питані в людини шари й ті, що
+            # мають таблиці, — різні переліки. `bank` це історична таблиця
+            # підписів розмітки, у формі «Рід» її не питають (бо новачок не має
+            # як зрозуміти, що туди писати), але профілі, які на неї спираються,
+            # мусять і далі давати повні написання.
+            assert orth in morph.ALL_ORTHOGRAPHIES, f"{pid}: невідома орфографія {orth}"
             for case in morph.CASES:
                 for gender in morph.GENDERS:
                     code = f"{case}_{gender}"
@@ -287,3 +292,57 @@ def test_missing_workspace_fails_loudly_not_silently(tmp_path, monkeypatch):
         W.resolve()
     # Повідомлення мусить казати, що зробити, а не лише що зламалось.
     assert W.MARKER in str(exc.value) and "--workspace" in str(exc.value)
+
+
+def test_saving_the_form_keeps_a_stem_the_form_never_showed(tmp_path, monkeypatch):
+    """🔴 Збереження «Рід» не сміє стирати історичну основу `bank`.
+
+    Форма надсилає рівно ті орфографії, які питає, а `_patch` замінює блок
+    `surname:` цілком. Тобто одне натискання «Зберегти» зносило б основу, якої
+    форма не бачить, — і всі слоти без «@орфографія» мовчки перемикались би з
+    `bank` на `uk`. Це зміна САМИХ НАПИСАНЬ, якими шукають: помітили б її аж по
+    зміні числа хітів, тобто ніколи.
+    """
+    from nyshporka.core import profile as P
+    from nyshporka.core import workspace as W
+
+    W.use(W.Workspace(root=tmp_path, name="тест", origin="test"))
+    cfg = tmp_path / "config"
+    cfg.mkdir(parents=True, exist_ok=True)
+    (cfg / P.CONFIG_NAME).write_text(
+        "fallback: rid\n\nprofiles:\n  rid:\n    surname:\n"
+        "      display: Ковальський\n      paradigm: adj_skyi\n"
+        "      stems:\n        uk: Ковальськ\n        bank: Ковальск\n",
+        encoding="utf-8")
+    P.reset()
+
+    P.save("rid", "Ковальський", paradigm="adj_skyi", orth="uk",
+           stems={"uk": "Ковальськ", "pl": "Kowalsk"})
+    P.reset()
+    got = P.resolve("rid").stems
+    assert got.get("bank") == "Ковальск", f"основу `bank` стерто: {got}"
+    assert got.get("pl") == "Kowalsk", "нову основу не записано"
+
+
+def test_a_shown_stem_can_still_be_cleared(tmp_path):
+    """Зворотний бік: питаний шар лишається під контролем форми.
+
+    Інакше перенесення непитаних перетворилось би на «жодну основу не стерти».
+    """
+    from nyshporka.core import profile as P
+    from nyshporka.core import workspace as W
+
+    W.use(W.Workspace(root=tmp_path, name="тест", origin="test"))
+    cfg = tmp_path / "config"
+    cfg.mkdir(parents=True, exist_ok=True)
+    (cfg / P.CONFIG_NAME).write_text(
+        "fallback: rid\n\nprofiles:\n  rid:\n    surname:\n"
+        "      display: Ковальський\n      paradigm: adj_skyi\n"
+        "      stems:\n        uk: Ковальськ\n        pl: Kowalsk\n",
+        encoding="utf-8")
+    P.reset()
+
+    P.save("rid", "Ковальський", paradigm="adj_skyi", orth="uk",
+           stems={"uk": "Ковальськ", "pl": ""})
+    P.reset()
+    assert "pl" not in P.resolve("rid").stems, "очищене поле не очистилось"

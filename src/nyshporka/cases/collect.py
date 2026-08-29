@@ -126,7 +126,7 @@ def _raw_scans() -> list[Any]:
 #: код архіву кирилицею → латинський код репозиторію (як у `fonds.registry`).
 #: Паспорти справ пишуть архів так, як його називають у документах.
 _CYR_REPO = {"ДАХМО": "DAHMO", "ЦДІАК": "CDIAK", "ДАВІО": "DAVIO",
-             "ДАВО": "DAVO", "ДАОО": "DAOO", "ДАЖО": "DAZHO"}
+             "ДАВО": "DAVIO", "ДАОО": "DAOO", "ДАЖО": "DAZHO"}
 
 
 def _ordered_cases(index: LibraryIndex,

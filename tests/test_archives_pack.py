@@ -660,3 +660,23 @@ def test_an_unrecognisable_repositories_block_is_refused_not_duplicated(tmp_path
         P.add_repository("NEW", "NEW", "Новий", "PL")
     assert "руками" in str(e.value)
     assert "OLD" in P.active().repositories, "чужий запис усе одно постраждав"
+def test_an_archive_added_now_is_visible_to_every_reader_now(tmp_path) -> None:
+    """🔴 «✅ додано» і «невідомий архів» в одній сесії — це поламка, а не примха.
+
+    Словники архівів у `library` й `pagestore` збирались НА РІВНІ МОДУЛЯ, тобто
+    заморожувались при імпорті. У довгому демоні це означало: людина тисне
+    «Додати архів», дістає підтвердження, заводить справу — і сховище сторінок
+    відповідає «невідомий архів», бо його знімок старший за кнопку. Лікувалось
+    лише перезапуском, про який ніщо не повідомляло.
+    """
+    from nyshporka.archives import pack as P
+    from nyshporka.core import workspace as W
+    from nyshporka.library import _canon_repo
+    from nyshporka.pagestore.store import _label2repo
+
+    W.use(W.Workspace(root=tmp_path, name="тест", origin="test"))
+    assert _canon_repo("AGAD") == "AGAD", "код невідомого архіву лишається як є"
+    P.add_repository("AGAD", "AGAD", "Archiwum Główne Akt Dawnych", "PL")
+
+    assert _label2repo().get("agad") == "AGAD", "сховище сторінок не бачить нового архіву"
+    assert _canon_repo("agad") == "AGAD", "бібліотека не бачить нового архіву"

@@ -754,7 +754,7 @@ def profile_init(
                                  help=morph.paradigm_ids()),
     orth: str = typer.Option("uk", "--orth",
                              help="якою орфографією подано прізвище: "
-                                  "uk | ru_modern | ru_prereform | pl | bank"),
+                                  "uk | ru_modern | ru_prereform | pl"),
 ) -> None:
     """Завести профіль дослідження — файл, у якому живе «чий рід шукаємо».
 

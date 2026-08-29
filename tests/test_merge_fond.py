@@ -325,7 +325,7 @@ def test_same_archive_under_two_codes_is_one_archive() -> None:
 
     pack = active()
     assert pack.same_archive("DAVIO", "DAVO")
-    assert pack.canon_repo("DAVIO") == "DAVO"
+    assert pack.canon_repo("DAVO") == "DAVIO"
     assert not pack.same_archive("DAOO", "DAVO")
     assert pack.canon_repo("НЕВІДОМИЙ") == "НЕВІДОМИЙ"
 

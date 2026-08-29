@@ -54,7 +54,7 @@ _YEAR_LO, _YEAR_HI = 1500, 2100
 #: Слово-архів у імені прогону → repo-код бібліотеки. Звужує кандидатів там, де
 #: номер справи сам по собі неоднозначний (`178-51-418` є і в ДАЖО, і деінде).
 _REPO_HINTS = {
-    "dazho": "DAZHO", "dahmo": "DAHMO", "davo": "DAVO", "davio": "DAVO",
+    "dazho": "DAZHO", "dahmo": "DAHMO", "davo": "DAVIO", "davio": "DAVIO",
     "cdiak": "CDIAK", "anrm": "ANRM", "daoo": "DAOO", "kostel": "KOSTEL",
     "csamm": "CSAMM",
 }

@@ -2314,7 +2314,10 @@ def _profile_payload(p: Any) -> dict[str, Any]:
             "stems": p.stems, "roots": [r for r, _ in p.roots],
             "substrings": list(p.substrings),
             "spellings": p.all_spellings(),
-            "forms": {o: p.forms(o) for o in p.stems if o in morph.ORTHOGRAPHIES},
+            # ⚠ `ALL_`, а не `ORTHOGRAPHIES`: `spellings` нижче рахуються з
+            # УСІХ основ профілю, і віддати таблиці лише з питаних означало б
+            # показати перелік написань, якого таблиці під ним не пояснюють.
+            "forms": {o: p.forms(o) for o in p.stems if o in morph.ALL_ORTHOGRAPHIES},
             "selftest_mode": (p.selftest or {}).get("mode", "strict")}
 
 
@@ -2429,7 +2432,7 @@ class ProfileSetArgs(BaseModel):
     paradigm: str = Field(default="adj_skyi", description=morph.paradigm_ids())
     orth: str = Field(default="uk",
                       description="якою орфографією подано прізвище: "
-                                  "uk | ru_modern | ru_prereform | pl | bank")
+                                  "uk | ru_modern | ru_prereform | pl")
     stems: dict[str, str] = Field(
         default_factory=dict,
         description="орфографія → ОСНОВА без закінчення: {'pl': 'Liszczyn'}")

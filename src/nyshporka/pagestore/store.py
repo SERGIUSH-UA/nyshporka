@@ -55,8 +55,13 @@ _SHIFRA_RE = re.compile(r"^(?:(\S+)\s+)?(\d+)\s*[-–]\s*(\d+)\s*[-–]\s*(\w+)$
 #: буває підписаний двома кодами (`DAVO` і `DAVIO` — це ДАВіО), і без зведення
 #: те, під яким кодом опиниться сторінка, вирішував би порядок словника: та
 #: сама книга лягала б то в один архів, то в сусідній.
-_LABEL2REPO = {w: _pack_active().canon_repo(c)
-               for w, c in _pack_active().word_index().items()}
+#: 🔴 Функція, а не словник на рівні модуля — з тієї самої причини, що й у
+#: `library._repo_alias`: заморожений при імпорті знімок не бачить архіву,
+#: доданого в цій же сесії, і сховище сторінок відмовляє словами «невідомий
+#: архів» одразу після «✅ додано».
+def _label2repo() -> dict[str, str]:
+    pk = _pack_active()
+    return {w: pk.canon_repo(c) for w, c in pk.word_index().items()}
 
 _ACCEPTED_FORMATS = (
     "ключ «DAHMO/315/8433» (з описом — «ANRM/211-3/140»), шифра з архівом "
@@ -103,7 +108,13 @@ def resolve_case(value: str) -> CaseRef:
     m = _KEY_RE.match(v)
     if m:
         fond_part, opys_part = split_fond_opys(m.group(2))
-        parsed = (m.group(1).upper(), str(_norm_spr(fond_part)),
+        # 🔴 Код зводиться до канонічного, як і в сусідній гілці шифри. Голий
+        # `.upper()` означав, що ключ `DAVIO/904/105` шукав файл у
+        # `data/pages/DAVIO/`, тоді як 109 уже записаних аркушів лежать у
+        # `data/pages/DAVO/`. Агент, який чесно питає сховище перед тим, як
+        # відкривати скани, діставав порожньо — і передивлявся переглянуте.
+        parsed = (_label2repo().get(m.group(1).casefold(), m.group(1).upper()),
+                  str(_norm_spr(fond_part)),
                   _norm_spr(opys_part) if opys_part else None,
                   str(_norm_spr(m.group(3))))
     if parsed is None:
@@ -114,7 +125,7 @@ def resolve_case(value: str) -> CaseRef:
                 raise ValueError(
                     f"шифра «{v}» без архіву неоднозначна — додай архів "
                     f"(«ДАХмО {v}») або дай ключ/шлях. Приймаю: {_ACCEPTED_FORMATS}")
-            repo = _LABEL2REPO.get(label.casefold())
+            repo = _label2repo().get(label.casefold())
             if not repo:
                 raise ValueError(
                     f"невідомий архів «{label}» (знаю: {', '.join(sorted(_REPO_LABEL.values()))})")

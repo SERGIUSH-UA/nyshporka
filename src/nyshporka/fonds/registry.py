@@ -27,11 +27,22 @@ from typing import Any
 
 from nyshporka.core.workspace import workspace
 
-REPO_SLUG = {"DAHMO": "dahmo", "CDIAK": "cdiak", "DAVO": "davo", "DAVIO": "davio",
+#: 🔴 Обидва коди Вінницького архіву ведуть в ОДИН slug. Реєстр опису лежить
+#: файлом `<slug>_<фонд>.json`, і два різні slug'и означали б два файли на той
+#: самий фонд: один шлях писав би `davio_904`, другий читав `davo_904`, а
+#: покриття рахувалось би по половині. Канонічний код тепер `DAVIO`, але slug
+#: лишається давній — під ним уже лежать зібрані реєстри на диску.
+REPO_SLUG = {"DAHMO": "dahmo", "CDIAK": "cdiak", "DAVO": "davo", "DAVIO": "davo",
              "DAOO": "daoo", "ANRM": "anrm", "DAZHO": "dazho"}
-REPO_LABEL = {"DAHMO": "ДАХмО", "CDIAK": "ЦДІАК", "DAVO": "ДАВО", "DAVIO": "ДАВіО",
+# ⚠ `DAVO` тут підписаний «ДАВіО», а не «ДАВО»: скорочення «ДАВО» не існує
+# в природі, і копія цього словника вже одного разу розійшлася з паком саме на
+# ньому. Сам код лишається задля давніх ключів — див. `archives.yaml`.
+REPO_LABEL = {"DAHMO": "ДАХмО", "CDIAK": "ЦДІАК", "DAVO": "ДАВіО", "DAVIO": "ДАВіО",
               "DAOO": "ДАОО", "ANRM": "ANRM", "DAZHO": "ДАЖО"}
+#: ⚠ Зворотний бік будується так, щоб `davo` вів у КАНОНІЧНИЙ код, а не в той,
+#: що трапився в словнику останнім.
 _SLUG_REPO = {v: k for k, v in REPO_SLUG.items()}
+_SLUG_REPO["davo"] = "DAVIO"
 
 #: канонічний набір полів нормалізованого рядка
 FIELDS = ("opys", "spr_int", "spr_letter", "spr", "shifra", "title", "title_src",
@@ -744,8 +755,12 @@ def parse_key(key: str) -> tuple[str, str, str, str, str]:
         raise ValueError(f"не розумію ключ «{key}». Приклади: DAHMO/230/43, "
                          "DAHMO/230/1/43")
     repo = m.group(1).upper()
+    # ⚠ «ДАВО» веде на КАНОНІЧНИЙ код архіву, як і скрізь у пакеті. Доти ця
+    # копія віддавала давній `DAVO`, тобто той самий ключ, набраний кирилицею,
+    # розходився з тим, що дає бібліотека, — і фонд лягав у два різні файли
+    # реєстру залежно від того, звідки прийшов виклик.
     repo = {"ДАХМО": "DAHMO", "ЦДІАК": "CDIAK", "ДАВІО": "DAVIO",
-            "ДАВО": "DAVO"}.get(repo, repo)
+            "ДАВО": "DAVIO"}.get(repo, repo)
     return repo, m.group(2), (m.group(3) or "1"), m.group(4), (m.group(5) or "").lower()
 
 

@@ -86,13 +86,29 @@ _REPO_LABEL = _pack_active().repo_labels()
 #:
 #: Будується з паку: мітка архіву й кожен його псевдонім ведуть у код. Доки
 #: перелік стояв літералом, кожен новий архів вимагав пам'ятати про два місця.
-_REPO_ALIAS = {w.upper(): c for w, c in _pack_active().word_index().items()}
+#: 🔴 Функція, а не словник на рівні модуля. Заморожений при імпорті знімок не
+#: бачив архівів, доданих у ту саму сесію: людина тисне «Додати архів», дістає
+#: ✅ — і тут-таки чує від сусіднього екрана, що такого архіву немає. `active()`
+#: перечитує пак за штампом файлів сам, тож правильно питати ЙОГО щоразу.
+def _repo_alias() -> dict[str, str]:
+    """Будь-яке написання архіву → його КАНОНІЧНИЙ код.
+
+    🔴🔴 Саме `canon_repo`, а не сирий код зі словника. `word_index()` про
+    `same_as` не знає — вона віддає той код, під яким написання зареєстроване,
+    — тож бібліотека зводила архів інакше, ніж пак, реєстрація й сховище
+    сторінок. Ціна виміряна на живому просторі: 336 ключів змінили б ім'я при
+    наступній перезбірці, а 13 фізичних книг стали б ДВОМА записами з різним
+    числом кадрів. І накладка простору, яка існує рівно для того, щоб лишити
+    давній код, на цей шлях не впливала взагалі.
+    """
+    pk = _pack_active()
+    return {w.upper(): pk.canon_repo(c) for w, c in pk.word_index().items()}
 
 
 def _canon_repo(code: str | None) -> str:
     """Код архіву до канонічного латинського написання."""
     c = (code or "").strip().upper()
-    return _REPO_ALIAS.get(c, c)
+    return _repo_alias().get(c, c)
 # опис за замовчуванням для фондів, де скановані справи майже завжди одного опису
 # (ім'я теки spr-XXXX опис не несе). Довідково — canonical парсить опис з repository_ref.
 _DEFAULT_OPYS = {("DAHMO", "315"): "1", ("CDIAK", "224"): "1", ("CDIAK", "127"): "1076",
@@ -109,8 +125,11 @@ _DEFAULT_OPYS = {("DAHMO", "315"): "1", ("CDIAK", "224"): "1", ("CDIAK", "127"):
 # ДАВіО ф.Р-6129 (колекція актових записів ЦС): опис = окрема сільрада, справи в
 # кожному з одиниці, тож «спр.5» існує стільки разів, скільки описів. Внесено
 # 2026-08-27 з ПЕРШОЮ справою фонду — доки мігрувати нічого.
+# ⚠ Архів Вінницької області стоїть під обома кодами: канонічний `DAVIO` і
+# давній `DAVO`, на якому міг лишитись чужий простір. Пропустити другий означало
+# б тихо злипнути справи різних описів рівно там, де опис і рятує.
 _OPYS_IN_KEY: set[tuple[str, str]] = {("ANRM", "211"), ("DAHMO", "230"),
-                                      ("DAVO", "R-6129")}
+                                      ("DAVIO", "R-6129"), ("DAVO", "R-6129")}
 # тип запису (normalized) → людський підпис для UI
 _RTYPE_LABEL = {
     "birth": "народження", "marriage": "шлюби", "death": "смерті",
@@ -384,7 +403,11 @@ def parse_source_id(source_id: str) -> tuple[str, str, str | None, str] | None:
     if not m:
         return None
     repo, fond, opys, spr = m.groups()
-    return repo, str(_norm_fond(fond)), opys, str(_norm_spr(spr))
+    # 🔴 Через `_canon_repo`, як і всі інші входи (`parse_case_path`,
+    # `_sidecar_case`, `_repo_from_rel`). Дослівний код з імені файла робив
+    # канонічне джерело й теку на диску ДВОМА записами тієї самої книги — з
+    # різним числом кадрів і різними вердиктами.
+    return _canon_repo(repo), str(_norm_fond(fond)), opys, str(_norm_spr(spr))
 
 
 def parse_case_path(rel: str) -> tuple[str, str, str | None, str] | None:
@@ -425,9 +448,15 @@ def parse_case_path(rel: str) -> tuple[str, str, str | None, str] | None:
     stem = re.sub(r"\.(pdf|jpe?g|png)$", "", last, flags=re.IGNORECASE)
     # davo-стиль повного шифру у назві теки
     md = _DAVO_DIR_RE.match(stem)
-    if md and (repo in (None, "DAVO") or slug == "davo"):
+    # ⚠ Код береться через `_canon_repo`, а не літералом. Літерал обходив
+    # зведення — і накладка простору, яка існує рівно для того, щоб лишити
+    # давній код, на цю гілку не діяла: та сама книга діставала то канонічний
+    # код (зі шляху), то літерал (звідси), тобто ДВА записи бібліотеки з
+    # різними теками й різним числом кадрів.
+    davio = _canon_repo("DAVIO")
+    if md and (repo in (None, davio) or slug == "davo"):
         fond2, opys2, spr2 = md.groups()
-        return (repo or "DAVO", str(fond or _norm_spr(fond2)),
+        return (repo or davio, str(fond or _norm_spr(fond2)),
                 _norm_spr(opys2), str(_norm_spr(spr2)))
     # опис із проміжної теки f904_op24
     for seg in parts[1:-1]:
@@ -1228,7 +1257,7 @@ def _fallback_name(rel_path: str, key_parts: tuple[Any, ...] | None) -> dict[str
                     "desc_source": "catalog_md"}
 
     # ДАВО ф.904 оп.24 — людський каталог М'ястківської Свято-Благовіщенської ц.
-    if key_parts and key_parts[0] == "DAVO" and key_parts[1] == "904" \
+    if key_parts and key_parts[0] in ("DAVIO", "DAVO") and key_parts[1] == "904" \
             and (key_parts[2] or "") == "24":
         c = _davo_f904_catalog().get(key_parts[3])
         if c:

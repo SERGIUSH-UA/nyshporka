@@ -66,7 +66,13 @@ def render_slot(slot: str, stems: dict[str, str], par: morph.Paradigm) -> str:
             return {"hyphen": full, "hyphen_head": head, "hyphen_tail": tail}[fn]
 
     code, _, orth = s.partition("@")
-    orth = orth or "bank"
+    # 🔴 Замовчування залежить від САМОГО профілю, а не від константи. Слот без
+    # «@» досі означав `bank`, і просто перевести його на `uk` означало б тихо
+    # змінити написання, якими вже шукають, — у профілі з десятком слотів це
+    # помітили б аж по зміні числа хітів. Тому: є в профілі основа `bank` —
+    # поводимось як раніше; немає (а в нового дослідника її й не буде) — беремо
+    # українську.
+    orth = orth or ("bank" if stems.get("bank") else "uk")
     stem = stems.get(orth)
     if stem is None:
         raise ProfileError(
@@ -128,8 +134,13 @@ class ResearchProfile:
         return self.paradigm.forms(stem, orth)
 
     def form_examples(self) -> dict[str, str]:
-        """Код форми → приклад-написання для підписів банку розмітки."""
-        return self.forms("bank")
+        """Код форми → приклад-написання для підписів банку розмітки.
+
+        ⚠ `bank` тут лише як історична таблиця: у профілі, заведеному формою,
+        такої основи немає й не буде, а падати на прикладах — найгірший привід
+        зупинити роботу.
+        """
+        return self.forms("bank" if self.stems.get("bank") else "uk")
 
     def htr_targets(self) -> tuple[tuple[str, float], ...]:
         """Драбина таргетів для `spotter.anchor.HTR_TARGETS`."""
@@ -496,7 +507,11 @@ def save(name: str, display: str, *, paradigm: str = "adj_skyi",
     display = (display or "").strip()
     if not display:
         raise ProfileError("порожнє прізвище — нема чого шукати")
-    if orth not in morph.ORTHOGRAPHIES:
+    # ⚠ Приймаються Й історичні шари: профіль, заведений колись із `orth: bank`,
+    # мусить лишитись збережуваним. Питати `bank` у людини перестали (див.
+    # `morph.LEGACY_ORTHOGRAPHIES`), але відмовлятись правити те, що вже є, —
+    # інша річ.
+    if orth not in morph.ALL_ORTHOGRAPHIES:
         raise ProfileError(
             f"невідома орфографія «{orth}». Є: {', '.join(morph.ORTHOGRAPHIES)}")
     try:
@@ -505,8 +520,30 @@ def save(name: str, display: str, *, paradigm: str = "adj_skyi",
         raise ProfileError(str(exc.args[0])) from None
 
     name = (name or "").strip() or _slug(display)
+    # 🔴🔴 `ALL_`, а не `ORTHOGRAPHIES`. Форма «Рід» історичних шарів не показує,
+    # тож у `stems` вони не приходять — але фільтр по ПИТАНИХ шарах викидав би
+    # їх із того, що вже записано. Ціна тиха й дорога: слот без «@орфографія»
+    # означає `bank`, доки основа `bank` у профілі є (`render_slot`), а щойно
+    # збереження форми її зітре — усі такі слоти мовчки перемикаються на `uk`,
+    # тобто міняються самі написання, якими шукають. Помітили б це аж по зміні
+    # числа хітів, тобто ніколи.
     keep = {k: str(v).strip() for k, v in (stems or {}).items()
-            if k in morph.ORTHOGRAPHIES and str(v).strip()}
+            if k in morph.ALL_ORTHOGRAPHIES and str(v).strip()}
+    # 🔴 Основи шарів, ЯКИХ ФОРМА НЕ ПОКАЗУЄ, переносяться з наявного профілю.
+    #
+    # Форма надсилає рівно ті орфографії, які питає (`morph.ORTHOGRAPHIES`), і
+    # `_patch` замінює блок `surname:` цілком — тобто одне збереження стирало б
+    # історичну основу `bank`, якої форма не бачить. Ціна тиха: слот без
+    # «@орфографія» означає `bank`, доки ця основа є (`render_slot`), а щойно
+    # вона зникне — усі такі слоти мовчки перемикаються на `uk`, і міняються
+    # самі написання, якими шукають. Помітно це аж по зміні числа хітів.
+    # ⚠ Переносяться ТІЛЬКИ непитані шари: питані лишаються під контролем форми,
+    # інакше очищене поле не можна було б очистити.
+    was_stems = (((_raw().get("profiles") or {}).get(name) or {})
+                 .get("surname") or {}).get("stems") or {}
+    for k, v in was_stems.items():
+        if k not in morph.ORTHOGRAPHIES and str(v).strip():
+            keep.setdefault(k, str(v).strip())
     keep.setdefault(orth, stem_of(display, paradigm, orth))
     body = _body_of(display, paradigm, keep,
                     [r for r in (roots or []) if r],
@@ -563,6 +600,15 @@ def _verify(before: str, after: str, path: Path, name: str,
                            f"виправте текстом") from None
 
     want = _deep_merge(was, {"profiles": {name: body}})
+    # 🔴 Основи ЗАМІЩУЮТЬСЯ, а не зливаються. Глибоке злиття лишало б у
+    # `want` основу, яку людина щойно очистила у формі, — і звірка падала з
+    # порадою «правте текстом» на цілком законній дії. Тобто поле, яке форма
+    # показує й дозволяє стерти, стерти було неможливо, а відмова говорила про
+    # щось інше. Непитані шари сюди не потрапляють: їх переносить `save()`
+    # у сам `body`, тож заміщення їх не втрачає.
+    sur = ((want.get("profiles") or {}).get(name) or {}).get("surname")
+    if isinstance(sur, dict) and isinstance(body.get("surname"), dict)             and "stems" in body["surname"]:
+        sur["stems"] = body["surname"]["stems"]
     if got != want:
         raise ProfileError(
             f"правка формою зачепила б у {path.name} не лише те, що показано. "
@@ -626,8 +672,7 @@ _HEAD = """\
 # в закінченні, і позиція залежить від історії слова. Заповнені основи дають
 # форми (відмінки, роди, множину) самі — виписувати їх не треба.
 #
-# Орфографії: ru_modern · ru_prereform · uk · pl · bank (історична таблиця
-# підписів розмітки, може бути внутрішньо непослідовною — так і лишати).
+# Орфографії: uk · ru_modern · ru_prereform · pl.
 #
 # Поля, яких тут немає (confusers, rank_down, synth, search_forms, anchors),
 # калібруються замірами на власному матеріалі. Дописувати їх — сюди ж, руками.
