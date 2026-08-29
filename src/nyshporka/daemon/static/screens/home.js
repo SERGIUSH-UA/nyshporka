@@ -623,9 +623,19 @@ Object.assign(ACTIONS, {
     if (!env.ok) return failure(env);
     const rows = (env.data.checks || []).map((c) => {
       const mark = { ok: '✅', warn: '⚠', fail: '🔴' }[c.level] || '•';
+      // 🔴 Колонка «чим це ставиться» була суцільним терміналом: дев'ять
+      // рядків `<code>` і жодної кнопки — під написом, який обіцяв протилежне.
+      // Людина, що ставила застосунок майстром, командного рядка не має в полі
+      // зору взагалі, тож ця порада виконувалась рівно ніким. Тепер кнопка
+      // з'являється там, де операція справді є (поле `op` заповнює сервер), а
+      // команда лишається для решти — чесно, як команда.
+      const act = c.op
+        ? `<button class="ctl-sm" data-act="check.fix" data-arg="${esc(c.op)}"
+             >${esc(t('check.fix'))}</button>`
+        : (c.fix ? `<code>${esc(c.fix)}</code>` : '');
       return `<tr><td>${mark}</td><td><b>${esc(c.name)}</b><br>
         <span class="muted">${esc(c.detail)}</span></td>
-        <td>${c.fix ? `<code>${esc(c.fix)}</code>` : ''}</td></tr>`;
+        <td>${act}</td></tr>`;
     }).join('');
     setView(`<h2>▶ ${t('check.title')}</h2>
       <p class="muted">${t('check.why')}</p>
@@ -633,6 +643,45 @@ Object.assign(ACTIONS, {
         : `<div class="warn">${t('check.notready')}</div>`}
       <table><tbody>${rows}</tbody></table>
       ${sampleBlock(env.data)}`);
+  },
+
+  /**
+   * 🔧 Полагодити рядок перевірки — тим, чим він і лагодиться.
+   *
+   * Дві поведінки, і різниця в тому, чи операція щось міняє. Читальну
+   * (`update.check`) виконуємо тут-таки й показуємо відповідь: людина питала
+   * саме про це. Ту, що міняє (`profile.set`), виконати без її слів не можна —
+   * ведемо на екран, де ці слова питають.
+   */
+  'check.fix': async (_ev, elm) => {
+    const name = elm.dataset.arg;
+    if (name === 'update.check') {
+      const env = await callOp(name, {});
+      // 🔴 Три стани, і всі три різні: відмова операції, «до pypi.org не
+      // дійшли» і відповідь. Доти всі вони йшли однією гілкою по `d.known`,
+      // тож справжня поламка виглядала як порожня червона рамка без тексту.
+      const d = env.data || {};
+      const line = !env.ok
+        ? `<div class="warn err">${esc(env.error || '?')}</div>`
+        : (!d.known
+          ? `<div class="warn">${esc(d.installed)}${renderWarnings(env)}</div>`
+          : `<div class="warn">${d.newer ? '⬆' : '✅'} ${esc(d.installed)} → ${
+              esc(d.latest)}${renderWarnings(env)}${
+              d.newer ? `<br><code>${esc(d.how)}</code>` : ''}</div>`);
+      // ⚠ Заміна, а не дописування: `insertAdjacentHTML` лишав по банеру на
+      // кожне натискання, і таблиця перевірок з'їжджала вниз.
+      let box = el('check-upd');
+      if (!box) {
+        const view = el('view');
+        if (!view) return undefined;
+        view.insertAdjacentHTML('afterbegin', '<div id="check-upd"></div>');
+        box = el('check-upd');
+      }
+      box.innerHTML = line;
+      return undefined;
+    }
+    const scr = screenOfOp(name);
+    return scr ? show(scr) : undefined;
   },
 
   // 📖 Зразок — єдина дія на цьому екрані, що щось міняє. Вона стоїть саме

@@ -63,9 +63,32 @@ SCREENS.settings = async () => {
         ${p === env.data.preset ? 'disabled' : ''}>${esc(t('preset.' + p))}</button>`).join(' ')}
       <span class="muted">${env.data.preset ? '' : t('sect.custom')}</span></p>
     <table><tbody>${rows}</tbody></table>
-    <div id="roots"></div>`);
+    <div id="roots"></div>
+    <div id="ver"></div>`);
   await renderRoots();
+  renderVersion();
 };
+
+/**
+ * ⬆️ Версія й оновлення.
+ *
+ * 🔴 Шляху оновлення не було ЗОВСІМ: ні команди, ні перевірки версії, ні рядка
+ * в переліку — версія показувалась лише в банері старту в консолі. Людина з
+ * `.exe`-установленням не мала звідки дізнатись про нову збірку, тож вада,
+ * полагоджена вчора, лишалась у неї назавжди.
+ *
+ * 🔴 Запит до pypi.org іде ЛИШЕ по натисканню. `PRIVACY.md` обіцяє «фонової
+ * активності в мережі немає», і перевірка, зроблена сама, порушила б обіцянку
+ * заради зручності, якої ніхто не просив.
+ */
+function renderVersion() {
+  const box = el('ver');
+  if (!box) return;
+  box.innerHTML = `<h3>${t('ver.title')}</h3>
+    <p class="muted">${t('ver.why')}</p>
+    <p><button data-act="update.check">${t('ver.check')}</button></p>
+    <div id="ver-hits"></div>`;
+}
 
 /**
  * 🌳 Корені справ: де застосунок шукає скани.
@@ -99,6 +122,21 @@ async function renderRoots() {
 }
 
 Object.assign(ACTIONS, {
+  /** Спитати pypi.org — рівно тоді, коли попросили. */
+  'update.check': async () => {
+    const env = await callOp('update.check', {});
+    const box = el('ver-hits');
+    if (!box) return;
+    if (!env.ok) { box.innerHTML = `<div class="warn err">${esc(env.error)}</div>`; return; }
+    const d = env.data || {};
+    // 🔴 Три стани, не два. «Не питали» відрізняється від «свіжа»: звести їх
+    // в одне означало б показати спокій там, де його ніхто не перевіряв.
+    const head = !d.known
+      ? `<div class="warn">${esc(d.installed)} · ${t('ver.unknown')}</div>`
+      : `<div class="warn">${d.newer ? '⬆' : '✅'} ${esc(d.installed)} → ${esc(d.latest)}</div>`;
+    box.innerHTML = head + renderWarnings(env)
+      + (d.newer ? `<p class="muted">${t('ver.how')}</p><code>${esc(d.how)}</code>` : '');
+  },
   /** 📂 Оголосити нову теку коренем — вибором, а не набором шляху. */
   'roots.pick': async () => {
     const got = await pickPath({ mode: 'dir', purpose: 'roots.add' });

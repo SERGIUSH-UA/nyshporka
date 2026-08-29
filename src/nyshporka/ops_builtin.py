@@ -1524,6 +1524,46 @@ def case_register(a: CaseRegisterArgs) -> Envelope:
     return env
 
 
+# 🔴 `agent=False` і жодної фонової перевірки. Запит іде до pypi.org, тобто в
+# мережу, а `PRIVACY.md` обіцяє «фонової активності в мережі немає» — обіцянка
+# дорожча за зручність. Тому перевірка робиться рівно тоді, коли її попросили
+# кнопкою чи командою.
+@op("update.check", summary="Чи є новіша версія застосунку", agent=False)
+def update_check(_: NoArgs) -> Envelope:
+    """⬆️ Що стоїть, що є на pypi.org і чим оновитись.
+
+    🔴 Шляху оновлення не було зовсім: ні команди, ні перевірки версії, ні
+    рядка в `doctor`. Людина з `.exe`-установленням не мала звідки дізнатись про
+    нову збірку, тож вада, полагоджена вчора, лишалась у неї назавжди — і
+    питання про неї йшло у спільноту замість того, щоб зникнути оновленням.
+    """
+    from nyshporka.setup.update import how_to_update, install_info, latest
+
+    # ⚠ Виклик синхронний, а обробник демона крутиться в циклі подій — тому
+    # стеля очікування в `latest()` навмисно коротка. Виносити операцію в
+    # `long=True` тут не варто: людина натиснула «перевірити» й чекає ВІДПОВІДІ,
+    # а не рядка в переліку робіт.
+    rel = latest()
+    env = ok({"installed": rel.installed, "latest": rel.latest,
+              "newer": rel.newer, "known": rel.known,
+              "how": how_to_update(),
+              "preset": install_info().get("preset", "")})
+    if not rel.known:
+        # 🔴 Третій стан називається вголос. «Не питали» й «свіжа» — різні
+        # відповіді, і зводити їх в одну означає показати спокій там, де його
+        # ніхто не перевіряв.
+        env.warn("not_asked",
+                 f"версію на pypi.org не дізнались: {rel.why}. Це не означає, "
+                 f"що оновлень немає — означає, що ми не питали.")
+    elif rel.newer:
+        env.warn("outdated",
+                 f"стоїть {rel.installed}, вийшла {rel.latest}. Оновлення "
+                 f"робиться в терміналі й ПРИ ЗАКРИТОМУ застосунку: воно міняє "
+                 f"те саме середовище, з якого зараз запущено «nysh», а "
+                 f"працюючий файл на Windows заблокований.")
+    return env
+
+
 # `agent=False` — це питання про машину, а не про дослідження: агентові
 # середовище описує `htr.env`, а решту він бачить у відмовах операцій.
 @op("setup.check", summary="Чи готова ця машина читати рукопис", agent=False)
@@ -1536,11 +1576,17 @@ def setup_check(_: NoArgs) -> Envelope:
     прикладі» віддавала сирий JSON про середовище рушіїв — тобто відповідала
     не на те питання й не тими словами.
     """
+    from nyshporka.core.ops import REGISTRY
     from nyshporka.core.workspace import workspace
     from nyshporka.setup import sample as S
     from nyshporka.setup.doctor import run
 
-    checks = [{"name": c.name, "level": c.level, "detail": c.detail, "fix": c.fix}
+    # 🔴 Кнопка віддається лише тоді, коли операція справді зареєстрована.
+    # Обіцяна в перевірці, але відсутня дія — це та сама порада, якої не
+    # виконати, лише тепер вона ще й виглядає натискальною.
+    known = set(REGISTRY.ops)
+    checks = [{"name": c.name, "level": c.level, "detail": c.detail,
+               "fix": c.fix, "op": c.op if c.op in known else ""}
               for c in run()]
     worst = ("fail" if any(c["level"] == "fail" for c in checks)
              else "warn" if any(c["level"] == "warn" for c in checks) else "ok")

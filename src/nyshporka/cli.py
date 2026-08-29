@@ -419,6 +419,57 @@ def init(
 
 
 @app.command()
+def update(
+    check: bool = typer.Option(False, "--check",
+                               help="лише подивитись, не ставити"),
+    preset: str = typer.Option("", "--preset",
+                               help="набір частин, якщо слід інсталятора втрачено"),
+) -> None:
+    """Оновити застосунок: подивитись версію на pypi.org і поставити нову.
+
+    🔴 Досі шляху оновлення не було зовсім — ні команди, ні перевірки версії,
+    ні рядка в `doctor`. Людина з `.exe`-установленням дізнатись про нову
+    збірку не могла нізвідки, тож вада, полагоджена вчора, лишалась у неї
+    назавжди.
+
+    ⚠ Установлення саме себе на ходу не робиться: `uv tool install --force`
+    міняє те саме середовище, з якого зараз запущено `nysh`. Закрийте
+    застосунок (`nysh serve`) перед оновленням.
+    """
+    import subprocess
+
+    from nyshporka.setup import update as U
+
+    rel = U.latest()
+    console.print(f"стоїть: [bold]{rel.installed}[/bold]")
+    if not rel.known:
+        # 🔴 «Не питали» — окрема відповідь. Мовчазне «все свіже» тут було б
+        # тим самим нулем без знаменника, лише про власну версію.
+        console.print(f"[warn]на pypi.org не подивились: {rel.why}[/warn]")
+        raise typer.Exit(code=1)
+    console.print(f"на pypi.org: [bold]{rel.latest}[/bold]")
+    if not rel.newer:
+        console.print("[muted]оновлювати нема на що[/muted]")
+        raise typer.Exit(code=0)
+    cmd = U.command(preset)
+    console.print(f"[muted]{' '.join(cmd)}[/muted]")
+    if check:
+        raise typer.Exit(code=0)
+    try:
+        rc = subprocess.call(cmd)
+    except OSError as exc:
+        console.print(f"[warn]не вдалося запустити uv ({exc}) — "
+                      f"перевстановіть застосунок інсталятором[/warn]")
+        raise typer.Exit(code=1) from None
+    if rc != 0:
+        console.print("[warn]оновлення не завершилось. Найчастіша причина — "
+                      "застосунок запущений: закрийте `nysh serve` і "
+                      "повторіть[/warn]")
+        raise typer.Exit(code=rc)
+    console.print(f"✅ {rel.latest}")
+
+
+@app.command()
 def doctor(
     as_json: bool = typer.Option(False, "--json"),
 ) -> None:

@@ -199,6 +199,9 @@ OP_SCREEN: dict[str, str] = {
     "profile.show": "profile",
     "profile.set": "profile",
     "profile.source": "profile",
+    # ⬆️ Версія й оновлення — у налаштуваннях: питання про застосунок, а не
+    # про дослідження.
+    "update.check": "settings",
     "sections.show": "settings",
     "sections.set": "settings",
     "job.query": "jobs",

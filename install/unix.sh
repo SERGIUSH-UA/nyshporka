@@ -80,6 +80,23 @@ if ! command -v nysh >/dev/null 2>&1; then
   exit 1
 fi
 
+# ── слід для оновлення ───────────────────────────────────────────────────────
+# 🔴 Той самий файл, що його на Windows пише майстер (`install/windows.ps1`,
+# крок 3¾). З нього `nysh update` дізнається, ДЕ лежить uv і ЯКИМ набором
+# ставили: набір вгадати не можна, а вгаданий або тягне 2.5 ГБ рушіїв тому,
+# хто їх не ставив, або мовчки знімає їх у того, хто ними читає.
+# ⚠ Помилка запису не валить установлення: без цього файла ламається оновлення
+# однією командою, а не сам застосунок.
+NYSH_HOME="${XDG_DATA_HOME:-$HOME/.local/share}/nyshporka"
+if mkdir -p "$NYSH_HOME" 2>/dev/null; then
+  {
+    echo "[nyshporka]"
+    echo "nysh=$(command -v nysh)"
+    echo "uv=$(command -v uv)"
+    echo "preset=$PRESET"
+  } > "$NYSH_HOME/install-info.ini" 2>/dev/null || true
+fi
+
 say ""
 nysh init --yes --preset "$PRESET"
 nysh doctor || true

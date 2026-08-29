@@ -37,6 +37,15 @@ class Check:
     level: Level
     detail: str
     fix: str = ""
+    #: 🔴 Операція, якою це лагодиться З ЕКРАНА. Без неї колонка «чим це
+    #: ставиться» лишалась суцільним терміналом: дев'ять рядків `<code>` і
+    #: жодної кнопки — під написом «нижче — чого бракує і ЧИМ ЦЕ СТАВИТЬСЯ».
+    #: Людина, яка ставила застосунок майстром, командного рядка не має в полі
+    #: зору взагалі, тож порада виконувалась рівно ніким.
+    #: ⚠ Порожньо означає «дії немає», а не «дія та сама, що в `fix`»: частина
+    #: порад — це справді робота в терміналі, і вдавати кнопку там гірше, ніж
+    #: чесно показати команду.
+    op: str = ""
 
     @property
     def mark(self) -> str:
@@ -62,7 +71,8 @@ def _workspace() -> Check:
     bits = [str(ws.root), f"джерело: {ws.origin}"]
     if not ws.data.is_dir():
         return Check("Робочий простір", "warn", " · ".join(bits) + " — ще порожній",
-                     "покладіть скани й запустіть `nysh look <тека>`")
+                     "покладіть скани й запустіть `nysh look <тека>`",
+                     op="material.look")
     return Check("Робочий простір", "ok", " · ".join(bits))
 
 
@@ -238,7 +248,7 @@ def _profile() -> Check:
         p = active()
     except (ProfileError, WorkspaceError) as exc:
         return Check("Профіль дослідження", "warn", str(exc).splitlines()[0],
-                     "nysh profile init <Прізвище>")
+                     "nysh profile init <Прізвище>", op="profile.set")
     return Check("Профіль дослідження", "ok",
                  f"{p.display or p.name} · написань: {len(p.all_spellings())}")
 
@@ -281,8 +291,24 @@ def _decode_visible() -> Check:
     return Check("Декоди видимі для grep", "ok", "простір поза git-репозиторієм")
 
 
-CHECKS = (_python, _workspace, _cloud_sync, _disk, _profile, _decode_visible,
-          _torch, _engines, _models)
+def _version() -> Check:
+    """Яка версія стоїть — і де подивитись, чи є новіша.
+
+    🔴 Мережі тут немає навмисно. `doctor` кличе інсталятор наприкінці
+    встановлення й агент у скриптах, а `PRIVACY.md` обіцяє «фонової активності
+    в мережі немає» — тож питати pypi.org звідси означало б порушити обіцянку
+    рівно там, де людина нічого не просила. Рядок називає версію й дає кнопку;
+    у мережу йде вже вона.
+    """
+    from nyshporka import __version__
+
+    return Check("Версія", "ok", __version__,
+                 "перевірити, чи вийшла новіша: `nysh update --check`",
+                 op="update.check")
+
+
+CHECKS = (_version, _python, _workspace, _cloud_sync, _disk, _profile,
+          _decode_visible, _torch, _engines, _models)
 
 #: Перевірки, які мають сенс лише при ввімкненій секції. 🔴 Не косметика:
 #: «⚠ рушії не встановлені» на машині того, хто прийшов подивитись каталог
