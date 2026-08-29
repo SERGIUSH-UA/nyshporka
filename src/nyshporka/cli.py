@@ -1127,6 +1127,38 @@ def pages_note_cmd(
     _notes(env)
 
 
+@pages_app.command("note-batch")
+def pages_note_batch_cmd(
+    case: str = typer.Argument(...),
+    file: Path = typer.Option(None, "-f", "--file",
+                              help="JSON-масив анотацій; без -f — читаємо stdin"),
+    replace: bool = typer.Option(False, "--replace",
+                                 help="замінити наявні, а не домержити"),
+    as_json: bool = typer.Option(False, "--json"),
+) -> None:
+    """Занести переглянуті сторінки пачкою: аркуші заносять десятками.
+
+    🔴 Крива анотація не забирає з собою решту: валідні лягають, невалідні
+    вертаються переліком. Втратити сорок сторінок через одну одруківку — гірше,
+    ніж занести тридцять дев'ять і назвати сорокову.
+    """
+    import sys as _sys
+
+    from nyshporka import ops as O
+
+    text = file.read_text(encoding="utf-8") if file else _sys.stdin.read()
+    env = O.call("pages.note_batch",
+                 {"case": case, "notes": text, "replace": replace})
+    if _answer(env, as_json):
+        return
+    d = env.data
+    console.print(f"✅ {d['shifra']}: додано {len(d.get('added') or [])}, "
+                  f"домержено {len(d.get('merged') or [])}, "
+                  f"замінено {len(d.get('replaced') or [])}, "
+                  f"не прийнято {d.get('failed', 0)}")
+    _notes(env)
+
+
 @pages_app.command("grep")
 def pages_grep_cmd(
     q: str = typer.Argument(..., help="прізвище"),

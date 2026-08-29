@@ -1873,6 +1873,96 @@ def pages_note(a: PageNoteArgs) -> Envelope:
     return env
 
 
+class PageNoteBatchArgs(BaseModel):
+    case: str = Field(description="справа у будь-якому форматі")
+    notes: str = Field(description="JSON-масив анотацій (PageNote) або JSON-lines")
+    replace: bool = Field(default=False,
+                          description="замінити наявні анотації, а не домержити")
+
+
+# ⚠ `agent=False`, і це не приниження операції. Стеля агентських інструментів
+# у 18 — свідомий приймач: перелік, який модель мусить дочитати до кінця, не
+# росте безкарно, а два інструменти на ту саму дію («занеси сторінку» й «занеси
+# сторінки») — рівно та бавовна, від якої стеля й стереже. Агент має
+# `pages.note`, а масовий шлях скіли ведуть командним рядком
+# (`nysh pages note-batch`), як і `records add`.
+@op("pages.note_batch", summary="Занести переглянуті сторінки пачкою",
+    args=PageNoteBatchArgs, mutates=True, agent=False, section="research")
+def pages_note_batch(a: PageNoteBatchArgs) -> Envelope:
+    """Головний масовий шлях: аркуші заносять десятками за один перегляд.
+
+    🔴 Крива анотація НЕ забирає з собою решту. Валідні лягають, невалідні
+    вертаються переліком із номером і сканом: втратити сорок сторінок через
+    одну одруківку — гірше, ніж занести тридцять дев'ять і назвати сорокову.
+
+    🔴 Ключ сторінки звіряється з ІМЕНАМИ ФАЙЛІВ на диску. Ключ без розширення
+    («0106» замість «0106.jpg») проходить валідацію моделі й зі сканом не
+    матчиться — сторінка, яку вже дивились оком, лишається в черзі на рендер.
+    Саме так 16.08.2026 розійшлись 62 ключі у 23 справах, і побачити це можна
+    лише звіркою з диском. Тека без зображень (справа з PDF) дає порожній
+    перелік — там звіряти нема з чим, і мовчання правильне.
+    """
+    import json as _json
+
+    from pydantic import ValidationError
+
+    from nyshporka.pagestore import store
+    from nyshporka.pagestore.models import PageNote
+
+    try:
+        ref = store.resolve_case(a.case)
+    except ValueError as exc:
+        return fail(str(exc))
+
+    raw = (a.notes or "").strip()
+    items: list[Any] = []
+    if raw:
+        try:
+            got = _json.loads(raw)
+            items = got if isinstance(got, list) else [got]
+        except _json.JSONDecodeError:
+            # JSON-lines — агенти пишуть і так, і так, і вимагати одного
+            # формату означало б завести глухий кут на рівному місці.
+            try:
+                items = [_json.loads(ln) for ln in raw.splitlines() if ln.strip()]
+            except _json.JSONDecodeError as exc:
+                return fail(f"не JSON: {exc}")
+
+    notes: list[Any] = []
+    errors: list[dict[str, Any]] = []
+    for i, item in enumerate(items):
+        try:
+            notes.append(PageNote.model_validate(item))
+        except ValidationError as exc:
+            errors.append({"index": i,
+                           "scan": item.get("scan") if isinstance(item, dict) else None,
+                           "error": str(exc)})
+    report = (store.annotate_pages(ref, notes, replace=a.replace) if notes
+              else store.MergeReport(path=""))
+    disk = set(store._disk_scans(ref))
+    off_disk = [n.scan for n in notes if n.scan not in disk] if disk else []
+
+    env = ok({"case": ref.key, "shifra": ref.shifra, **report.as_dict(),
+              "ok": len(notes), "failed": len(errors), "errors": errors,
+              "off_disk": off_disk})
+    if errors:
+        env.warn("some_notes_refused",
+                 f"{len(errors)} анотацій не прийнято — решта {len(notes)} лягла")
+    if off_disk:
+        env.warn("off_disk",
+                 f"{len(off_disk)} сканів немає на диску теки справи "
+                 f"({', '.join(off_disk[:5])}{'…' if len(off_disk) > 5 else ''}). "
+                 f"Ключ мусить збігатися з іменем файлу, інакше сторінка "
+                 f"лишиться в черзі на перегляд")
+    full_blank = [n.scan for n in notes if n.status == "full" and not n.surnames]
+    if full_blank:
+        env.warn("full_without_surnames",
+                 f"{len(full_blank)} сторінок занесено як «виписано всі "
+                 f"прізвища» з порожнім переліком — якщо вони не порожні, це "
+                 f"partial, і від цього залежить, чи можна вірити нулю по справі")
+    return env
+
+
 class RecordsAddArgs(BaseModel):
     case: str = Field(description="справа у будь-якому форматі")
     records: str = Field(description="JSON-масив записів (Record)")

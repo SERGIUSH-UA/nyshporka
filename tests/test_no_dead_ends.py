@@ -622,3 +622,45 @@ def test_no_module_assigns_to_a_name_it_imported() -> None:
         f"присвоєння в імпортоване ім'я: {sorted(bad)}\n"
         f"В ES-модулях це TypeError під час виконання. Міняти чужу змінну "
         f"можна лише сетером, оголошеним поруч із нею (див. `nav.js: setSections`).")
+
+
+def test_no_typer_app_is_defined_and_never_registered() -> None:
+    """🔴 Підзастосунок, оголошений і не підключений, — це команди, яких немає.
+
+    Так уже сталось: `pagestore/cli.py` оголошував власні `pages` і `records` із
+    `note-batch`, `show` і трьома командами записів, а в CLI був зареєстрований
+    інший, бідніший `pages`. Модуль не імпортував НІХТО, тобто 159 рядків
+    працювали рівно ніде — і жоден приймач цього не бачив, бо мертвий код не
+    падає. Знайшлось випадково, коли до нього писали тести: `nysh pages
+    note-batch` відповідав «No such command».
+    """
+    import ast
+    import pathlib
+
+    root = pathlib.Path(__file__).resolve().parent.parent / "src" / "nyshporka"
+    declared: dict[str, list[str]] = {}
+    registered: set[str] = set()
+
+    for path in root.rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        rel = str(path.relative_to(root)).replace("\\", "/")
+        for node in ast.walk(tree):
+            # `x = typer.Typer(...)`
+            if isinstance(node, ast.Assign) and isinstance(node.value, ast.Call):
+                fn = node.value.func
+                if getattr(fn, "attr", "") == "Typer":
+                    for tgt in node.targets:
+                        if isinstance(tgt, ast.Name):
+                            declared.setdefault(rel, []).append(tgt.id)
+            # `app.add_typer(x, ...)`
+            if (isinstance(node, ast.Call)
+                    and getattr(node.func, "attr", "") == "add_typer"
+                    and node.args and isinstance(node.args[0], ast.Name)):
+                registered.add(node.args[0].id)
+
+    orphans = {rel: [n for n in names if n not in registered and n != "app"]
+               for rel, names in declared.items()}
+    orphans = {rel: names for rel, names in orphans.items() if names}
+    assert not orphans, (
+        "ці підзастосунки оголошені, але нікуди не підключені — їхніх команд "
+        f"не існує: {orphans}")
