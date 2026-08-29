@@ -479,3 +479,61 @@ def test_a_short_code_does_not_claim_a_random_folder() -> None:
     # І довгий код упізнається будь-де, як і раніше.
     assert _repo_from_rel("том/moldavian/ANRM_134-2/raw/2362410") == "ANRM"
     assert _repo_from_rel("data/raw/dahmo_315/spr-8433") == "DAHMO"
+
+# ── мішане письмо ────────────────────────────────────────────────────────────
+# 🔴 Звіт користувача 29.08.2026: справа з ключем «ДАКО 705-1-1» не заводилась
+# узагалі, а відмова цитувала введене — тобто на екрані стояло «не видно
+# архіву» під написом «ДАКО», який людина ввела правильно. Причина: одна літера
+# латинська. Шифри копіюють із сайтів архівів і з Word, де мішане письмо
+# буденна річ, і на екрані підміна не видна НІКОЛИ.
+MIXED_KEY_SPELLINGS = {
+    "чиста кирилиця": "ДАКО 705-1-1",
+    "латинська K": "ДАKО 705-1-1",
+    "латинська O": "ДАКO 705-1-1",
+    "латинська A": "ДAКО 705-1-1",
+    "ZWSP після назви": "ДАКО​ 705-1-1",
+    "крапка після назви": "ДАКО. 705-1-1",
+}
+
+
+@pytest.mark.parametrize("why", sorted(MIXED_KEY_SPELLINGS))
+def test_a_key_that_looks_right_is_accepted_however_it_was_typed(why: str) -> None:
+    """Усі шість написань виглядають на екрані ОДНАКОВО — отже й діяти мусять однаково."""
+    from nyshporka.cases.register import parse_shifra
+
+    got = parse_shifra(MIXED_KEY_SPELLINGS[why])
+    assert (got.repo, got.fond, got.opys, got.spr) == ("DAKO", "705", "1", "1"), why
+
+
+def test_mixed_script_never_invents_an_archive_that_is_not_in_the_pack() -> None:
+    """🔴 Зведення письма — не здогад. Невідомий архів лишається невідомим.
+
+    Інакше правка проти глухої відмови породила б гіршу ваду: тихо підставлений
+    сусідній код, під яким справа лягла б у чужий облік.
+    """
+    from nyshporka.cases.register import RegisterError, parse_shifra
+
+    with pytest.raises(RegisterError) as e:
+        parse_shifra("ДАЩO 705-1-1")     # ДАЩО з латинською «O»
+    assert "невідомий" in str(e.value)
+
+
+def test_pure_latin_codes_survive_the_folding() -> None:
+    """Чисто латинські коди в словнику є самі по собі — зводити їх не можна."""
+    from nyshporka.cases.register import parse_shifra
+
+    assert parse_shifra("DAHMO 315-1-8433").repo == "DAHMO"
+    assert parse_shifra("ANRM 211-3-140").repo == "ANRM"
+
+
+def test_the_refusal_names_the_latin_letters_it_saw() -> None:
+    """Відмова мусить НАЗВАТИ підміну: на екрані її не видно.
+
+    Доти повідомлення описувало стан, якого не існує («додайте назву архіву»
+    там, де назва стояла), і людині не було з чого зрозуміти, що не так.
+    """
+    from nyshporka.cases.register import RegisterError, parse_shifra
+
+    with pytest.raises(RegisterError) as e:
+        parse_shifra("ДАЩO 705-1-1")
+    assert "O" in str(e.value) and "латинськ" in str(e.value)

@@ -28,6 +28,21 @@ from typing import Any
 
 import yaml
 
+from nyshporka.utils import text as T
+
+
+def _norm_word(word: str | None) -> str:
+    """Написання архіву → ключ словника. Одна функція на індекс і на запит.
+
+    🔴 Саме одна: доти індекс будувався `casefold()`, а запит —
+    `strip().rstrip(".").casefold()`, тож два боки порівняння готувались
+    по-різному, і розбіжність жила б доти, доки хтось не набере крапку.
+    Невидимі символи знімаються тут-таки: копіювання з вебсторінки приносить
+    їх регулярно, а на вигляд слова вони не впливають узагалі.
+    """
+    return T.strip_invisible(str(word or "")).strip().rstrip(".").casefold()
+
+
 #: Вбудований пак — їде разом із кодом.
 BUILTIN = Path(__file__).resolve().parent / "data" / "archives.yaml"
 #: Ескейп-хетч: шлях до власного паку.
@@ -239,11 +254,23 @@ class ArchivesPack:
         списку `aliases`. Порожньо, а не здогад: вигаданий код тихо завів би
         архів, якого в паку немає, і подальші звірки порівнювали б його сам
         із собою.
+
+        🔴 Мішане письмо приймається теж. «ДАКО» з латинською «K» на екрані не
+        відрізнити від кириличного, а шифри копіюють із сайтів архівів і з
+        Word — тож слово, яке людина ввела правильно, не знаходилось у
+        словнику, і відмова цитувала його ж (звіт 29.08.2026: справа не
+        заводилась узагалі). Зведення пробується ЛИШЕ після невдалого точного
+        збігу й лише на мішаному слові: на чистій латинці воно зруйнувало б
+        справжні латинські коди, які в словнику є самі по собі.
         """
-        want = str(word or "").strip().rstrip(".").casefold()
+        want = _norm_word(word)
         if not want:
             return ""
-        return self.word_index().get(want, "")
+        idx = self.word_index()
+        hit = idx.get(want, "")
+        if hit or not T.is_mixed_script(want):
+            return hit
+        return idx.get(T.fold_homoglyphs(want), "")
 
     def word_index(self) -> dict[str, str]:
         """Кожне написання архіву → його код: сам код, мітка, псевдоніми.
@@ -258,7 +285,7 @@ class ArchivesPack:
         out: dict[str, str] = {}
         for code, r in self.repositories.items():
             for word in (code, r.label, *r.aliases):
-                key = str(word).strip().casefold()
+                key = _norm_word(word)
                 if key:
                     out.setdefault(key, code)
         return out
