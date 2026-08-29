@@ -159,17 +159,50 @@ def latest(timeout: float = TIMEOUT) -> Release:
     return Release(installed=__version__, latest=got)
 
 
+def has_htr() -> bool:
+    """Чи стоять рушії читання В ЦЬОМУ середовищі (extra `htr`).
+
+    🔴 Питається стан, а не запис. Слід інсталятора фіксує набір НА МОМЕНТ
+    УСТАНОВЛЕННЯ, а частини доставляють потім — і оновлення за старим записом
+    зняло б у такої людини torch на 2.5 ГБ. Помилка мовчазна: застосунок
+    оновився, «Читання» просто зникло.
+    """
+    from importlib.util import find_spec
+
+    try:
+        return find_spec("torch") is not None
+    except (ImportError, ValueError):
+        return False
+
+
+def preset_now(recorded: str = "") -> str:
+    """Набір, який треба поставити: спершу стан, потім запис, потім типовий.
+
+    ⚠ Порядок саме такий. Запис може застаріти в один бік (доставили рушії) і
+    не може в інший: чого немає, того `find_spec` не побачить.
+    """
+    if has_htr():
+        return "researcher"
+    return recorded or "catalog"
+
+
 def command(preset: str = "") -> list[str]:
     """Команда, якою застосунок оновлюється на цій машині.
 
-    🔴 Набір береться зі сліду інсталятора, а не вгадується: `researcher` тягне
-    рушії читання (~2.5 ГБ), `catalog` — ні, і підставити не той означає або
-    змусити платити гігабайтами того, хто прийшов дивитись каталог, або мовчки
-    зняти рушії в того, хто ними читає.
+    🔴 Набір не вгадується: `researcher` тягне рушії читання (~2.5 ГБ),
+    `catalog` — ні, і підставити не той означає або змусити платити
+    гігабайтами того, хто прийшов дивитись каталог, або мовчки зняти рушії в
+    того, хто ними читає.
+
+    ⚠ `--force` перезбирає СЕРЕДОВИЩЕ ІНСТРУМЕНТА, і це не зачіпає ні простір,
+    ні рушії (вони в окремому venv поруч із простором), ні моделі
+    (`<простір>/data/spotter/models`), ні паки довідників (`user_data_dir`).
+    Але пакети, дописані туди руками через `uv tool install --with`, воно
+    змиває — їх доведеться назвати знову.
     """
     info = install_info()
     uv = info.get("uv") or "uv"
-    got = preset or info.get("preset") or "researcher"
+    got = preset or preset_now(info.get("preset", ""))
     extras = "app,archives" if got == "catalog" else "app,archives,htr"
     return [uv, "tool", "install", "--python", "3.12", "--force",
             f"nyshporka[{extras}]"]

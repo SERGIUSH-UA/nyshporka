@@ -9,6 +9,8 @@
 """
 from __future__ import annotations
 
+import pathlib
+
 import pytest
 
 from nyshporka.setup import update as U
@@ -119,3 +121,71 @@ def test_the_machine_report_names_the_version(check):
 
     row = next(c for c in run() if c.name == check)
     assert row.op == "update.check", "рядок є, а натиснути нічого"
+
+
+# ── оновлення й чужі дані ────────────────────────────────────────────────────
+# 🔴 `uv tool install --force` перезбирає середовище інструмента цілком. Питання
+# не в тому, чи воно щось зносить, — зносить, — а в тому, чи лежить у ньому
+# бодай щось із роботи дослідника. Відповідь мусить лишатись «ні», і саме тому
+# вона перевіряється, а не приймається на віру: одна тека, переїхавши всередину
+# пакета, зробила б оновлення знищенням даних без жодного попередження.
+
+
+def test_the_update_touches_nothing_of_the_researchers(tmp_path, monkeypatch):
+    """Команда оновлення не сміє називати жодного шляху з простору."""
+    from nyshporka.core import workspace as W
+
+    W.use(W.Workspace(root=tmp_path, name="тест", origin="test"))
+    monkeypatch.setattr(U, "install_home", lambda: tmp_path / "install")
+    cmd = U.command("researcher")
+    assert all(str(tmp_path) not in part for part in cmd), (
+        f"оновлення цілиться в простір: {cmd}")
+    # І це саме встановлення пакета, а не щось, що ходить файловою системою.
+    assert cmd[1:4] == ["tool", "install", "--python"], cmd
+
+
+def test_everything_expensive_lives_outside_the_tool_environment(tmp_path):
+    """🔴 Чотири речі, втрата яких коштує днів, і жодна не в середовищі пакета.
+
+    Рушії читання (кілька ГБ і довге встановлення), ваги моделей, паки
+    довідників і сам простір. Якби бодай одне з них лежало під пакетом,
+    `--force` зносив би його мовчки — а людина дізнавалась би про це на
+    наступному прогоні.
+    """
+    from nyshporka.catalog.store import catalog_dir
+    from nyshporka.core import workspace as W
+    from nyshporka.setup.doctor import engine_venv
+
+    W.use(W.Workspace(root=tmp_path, name="тест", origin="test"))
+    pkg = pathlib.Path(U.__file__).resolve().parent.parent      # nyshporka/
+
+    for what, path in (("рушії", engine_venv()),
+                       ("моделі", tmp_path / "data" / "spotter" / "models"),
+                       ("паки довідників", catalog_dir()),
+                       ("простір", tmp_path)):
+        assert pkg not in path.resolve().parents and path.resolve() != pkg, (
+            f"{what} лежать усередині пакета — оновлення їх знесе: {path}")
+
+
+def test_the_set_of_parts_follows_the_state_not_a_stale_note(monkeypatch):
+    """🔴 Доставлені потім рушії не сміють зникнути при оновленні.
+
+    Слід інсталятора фіксує набір НА МОМЕНТ УСТАНОВЛЕННЯ. Хто поставив
+    `catalog`, а потім доставив читання, за старим записом дістав би
+    `nyshporka[app,archives]` — тобто torch на 2.5 ГБ знявся б мовчки, і
+    «Читання» просто зникло б з інтерфейсу.
+    """
+    monkeypatch.setattr(U, "has_htr", lambda: True)
+    assert U.preset_now("catalog") == "researcher"
+    assert "nyshporka[app,archives,htr]" in U.command()
+
+    # А чого немає — того й не додаємо: запис лишається джерелом для другого боку.
+    monkeypatch.setattr(U, "has_htr", lambda: False)
+    assert U.preset_now("catalog") == "catalog"
+    assert U.preset_now("researcher") == "researcher"
+
+
+def test_an_explicit_preset_still_wins():
+    """Людина, яка сказала набір руками, головніша за будь-яке визначення."""
+    assert "nyshporka[app,archives]" in U.command("catalog")
+    assert "nyshporka[app,archives,htr]" in U.command("researcher")
