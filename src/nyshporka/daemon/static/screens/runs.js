@@ -20,7 +20,7 @@ import { callOp } from '../core/net.js';
 import { esc, el, setView, busy, failure, renderWarnings,
   curGen, alive } from '../core/view.js';
 import { SCREENS, ACTIONS, PAGERS } from '../core/registry.js';
-import { show, goto } from '../core/nav.js';
+import { show, goto, onJob } from '../core/nav.js';
 import { ST } from '../core/state.js';
 import { ic, eng } from '/ui/icons.js';
 import { swapHtml } from '/ui/dom.js';
@@ -65,6 +65,21 @@ async function runsLoad(full = false) {
   const runs = (env.data || {}).runs || [];
   const groups = runsGroup(runs.filter(runsMatch));
   const orphans = groups.filter((g) => !g.key);
+  // Справи для вибору тягнемо ЛИШЕ якщо нічиї є: на просторі, де все
+  // прив'язане, цей запит нічого не дає й тільки сповільнює екран.
+  if (orphans.length && BIND_CASES === null) {
+    // 🔴 200 — це стеля СХЕМИ (`ops_library.LibraryArgs.page_size`, le=200).
+    // З 300 операція відмовляла цілком, `BIND_CASES` ставав `[]`, і
+    // `<datalist>` виходив порожній ЗАВЖДИ — тобто вибір справи, заради якого
+    // цей блок і зроблено, не працював у жодного користувача, і мовчки: жодна
+    // гілка не дивилась на `lib.ok`.
+    const lib = await callOp('library.list', { page_size: 200 });
+    if (seq !== _runsSeq || !alive(gen)) return;
+    // ⚠ Невдачу НЕ кешуємо: `null` означає «не питали», і наступний показ
+    // екрана спробує ще раз. Порожній масив у цій змінній назавжди пришив би
+    // одну випадкову відмову до всієї сесії.
+    if (lib.ok) BIND_CASES = (lib.data || {}).cases || [];
+  }
   const known = groups.filter((g) => g.key);
   RUNS_PAGES = Math.max(1, Math.ceil(known.length / RUNS_PAGE));
   if (RUNS.page >= RUNS_PAGES) RUNS.page = 0;
@@ -76,7 +91,7 @@ async function runsLoad(full = false) {
   // треба щось зробити. Сховати їх на четвертій сторінці означало б лишити
   // невидимим текст, який і так невидимий з кожної картки справи.
   const body = bar + shown.map(runsGroupHtml).join('') + bar
-    + orphans.map((g) => runsOrphanHtml(g)).join('');
+    + orphans.map((g, gi) => runsOrphanHtml(g, gi)).join('');
 
   if (!full) {
     const box = el('runs-body');
@@ -242,17 +257,41 @@ function runsGap(g) {
  * правкою JSON руками. Тому нічиї стоять окремим блоком із кнопкою, а не
  * розчиняються серед решти.
  */
-function runsOrphanHtml(g) {
+function runsOrphanHtml(g, gi = 0) {
+  // 🔴 Саме тут стоїть кнопка, якої не було. Докстрінг вище обіцяв її з
+  // першого дня, а в рядку жила лише «подивитись» — і вела вона рівно у
+  // відмову гортача «теки справи цей прогін не називає», яка радила набрати
+  // `nysh cases bind` у терміналі. Тобто єдиний вихід із екрана лежав поза
+  // застосунком (звіт користувача 29.08.2026).
+  // 🔴 Ідентифікатори НЕСУТЬ номер блока. Нічиї групуються за текою
+  // (`runsGroup` → `dir:…`), тож блоків буває кілька, а `i` в кожному
+  // починається з нуля. `getElementById` віддає ПЕРШИЙ збіг у документі —
+  // тобто кнопка другого блока читала ключ із першого: або мовчазна відмова
+  // «виберіть справу», або, гірше, чужий ключ, записаний у прив'язку. А
+  // прив'язка — найсильніший канал резолвера, і помилка в ній тиха й довговічна.
+  const uid = (name) => `bind-${gi}-${name}`;
+  const list = `<datalist id="${uid('cases')}">${
+    (BIND_CASES || []).map((c) => `<option value="${esc(c.key)}">${
+      esc([c.shifra, c.title].filter(Boolean).join(' — '))}</option>`).join('')}</datalist>`;
   return `<section class="run-group orphan">
     <h3>⚠ ${t('runs.orphan.title')}</h3>
     <p class="warn">${t('runs.orphan.why')}</p>
-    <table><tbody>${g.runs.map((r) => `<tr>
+    <p class="muted">${t('runs.bind.pick')}</p>
+    ${list}
+    <table><tbody>${g.runs.map((r, i) => `<tr>
       <td class="mono">${esc(r.name)}</td>
       <td class="num">${esc(r.pages_done || 0)}</td>
       <td class="mono dim">${esc(r.case_dir || '')}</td>
-      <td><button class="ctl-sm" data-act="runs.open" data-arg="${esc(r.name)}"
+      <td><input id="${uid(`key-${i}`)}" list="${uid('cases')}" size="22"
+        placeholder="${esc(t('runs.bind.ph'))}"></td>
+      <td><input id="${uid(`why-${i}`)}" size="18"
+        placeholder="${esc(t('runs.bind.why'))}"></td>
+      <td><button class="ctl-sm" data-act="runs.bind" data-arg="${esc(r.name)}"
+        data-row="${esc(uid(String(i)))}">${esc(t('runs.bind'))}</button>
+        <button class="ctl-sm" data-act="runs.open" data-arg="${esc(r.name)}"
         title="${esc(t('runs.open'))}">${ic('page', 'ic-o ic-sm')}</button></td>
     </tr>`).join('')}</tbody></table>
+    <div id="${uid('hits')}"></div>
   </section>`;
 }
 
@@ -269,6 +308,12 @@ function runsEmptyHtml(env, total) {
   return `<div class="warn">${t('runs.empty.none')}
     <button data-act="nav" data-arg="read">${t('nav.read')}</button></div>`;
 }
+
+/**
+ * Справи для вибору при прив'язці. Тягнеться один раз: перелік міняється рідше,
+ * ніж людина відкриває екран, а запит на кожен показ платився б за незмінне.
+ */
+let BIND_CASES = null;
 
 /** Прокрутка до справи, з якої сюди прийшли. */
 function runsFocus() {
@@ -294,6 +339,48 @@ Object.assign(ACTIONS, {
 
   /** 📚 Ця сама справа в бібліотеці — з групи прогонів. */
   'runs.lib': (_ev, elm) => goto('library', { key: elm.dataset.arg }),
+
+  /**
+   * 🔗 Прив'язати нічийний прогін до справи — мишкою, а не командою.
+   *
+   * Після прив'язки реєстр перезбирається одразу: інакше людина натискає
+   * кнопку, повертається в перелік і бачить прогін так само нічиїм — тобто
+   * читає це як «не спрацювало».
+   */
+  'runs.bind': async (_ev, elm) => {
+    // `data-row` несе повний ідентифікатор рядка разом із номером блока —
+    // див. `uid()` у `runsOrphanHtml`.
+    const row = elm.dataset.row;                       // «bind-<блок>-<рядок>»
+    const at = row.lastIndexOf('-');
+    const pre = row.slice(0, at);                      // «bind-<блок>»
+    const i = row.slice(at + 1);
+    const key = ((el(`${pre}-key-${i}`) || {}).value || '').trim();
+    const hits = el(`${pre}-hits`);
+    const say = (html) => { if (hits) hits.innerHTML = html; };
+    if (!key) return say(`<div class="warn err">${t('runs.bind.pick')}</div>`);
+    const env = await callOp('cases.bind', {
+      run: elm.dataset.arg, key,
+      why: ((el(`${pre}-why-${i}`) || {}).value || '').trim(),
+    });
+    if (!env.ok) return say(`<div class="warn err">${esc(env.error)}</div>`);
+    say(`${renderWarnings(env)}<div class="warn">✅ ${esc(elm.dataset.arg)} → ${
+      esc(key)} — ${t('runs.bind.done')}</div>`);
+    // 🔴 Прив'язка змінює реєстр, і доки він не перезібраний, вона нікуди не
+    // видна — сама операція каже про це полем `stale`. Робимо це за людину:
+    // просити натиснути другу кнопку заради того, щоб побачила перша, означало
+    // б лишити той самий глухий кут, лише на крок далі.
+    //
+    // ⚠ `cases.build` оголошена `long=True`: виклик повертає НОМЕР РОБОТИ, а
+    // не зібраний реєстр. Перечитати перелік одразу означало б прочитати його
+    // проти старого зрізу — і побачити прогін так само нічиїм, тобто рівно те
+    // «не спрацювало», проти якого ця кнопка й стоїть.
+    const built = await callOp('cases.build', { rescan: false });
+    const jid = built.ok ? (built.data || {}).job_id : null;
+    BIND_CASES = null;
+    if (!jid) return runsLoad(false);
+    onJob(jid, (j) => { if (j.state === 'done') runsLoad(false); });
+    return undefined;
+  },
 
   'runs.open': (_ev, elm) => {
     // Гортач сам відкриє першу сторінку прогону: імені сторінки тут ще ніхто

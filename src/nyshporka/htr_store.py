@@ -689,8 +689,17 @@ def _case_dirs_via_registry(run: str) -> list[Path]:
         from nyshporka.library import load_library
     except Exception:
         return []
+    # 🔴 Резолвер питається ПОВНІСТЮ, як його питає реєстр справ
+    # (`cases.collect._rows_from_runs`). Доти сюди йшов голий `resolve_run(run)`
+    # — без `case_dir` і без `meta_key`, тобто два найсильніші з шести каналів
+    # були вимкнені просто тим, що аргументи не передали. Наслідок бачив
+    # користувач, а не розробник: реєстр показував прогін прив'язаним, а гортач
+    # на тій самій справі казав «теки справи цей прогін не називає» і слав
+    # набирати `nysh cases bind` у терміналі.
+    meta = load_meta(run) or {}
     try:
-        link = resolve_run(run)
+        link = resolve_run(run, str(meta.get("case_dir") or ""),
+                           meta_key=str(meta.get("case_key") or ""))
     except Exception:
         return []
     if not link.key:

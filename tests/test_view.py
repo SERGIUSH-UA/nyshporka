@@ -422,3 +422,21 @@ def test_page_view_op_warns_when_it_falls_back_to_the_whole_page(
     assert env.ok, env.error
     assert env.data["region"] == "page"
     assert any(w.code == "view_fallback" for w in env.warnings), env.warnings
+
+
+def test_the_bind_hint_survives_a_run_name_with_spaces() -> None:
+    """🔴 Підказку копіюють у термінал цілком, і вона мусить там виконатись.
+
+    Імена прогонів беруться з назв тек, а ті в людей мають вигляд
+    «ДАКрО 705-1-1 (Н-Арх - Варваринська церква 1882-1884)». Без лапок оболонка
+    ріже це на десяток аргументів, і порада падає рівно там, куди її ведуть.
+    """
+    from nyshporka.htr.view import shell_arg
+
+    name = "ДАКрО 705-1-1 (Н-Арх - Варваринська церква 1882-1884)"
+    assert shell_arg(name) == f'"{name}"'
+    # Просте ім'я лишається голим: зайві лапки вчать копіювати їх і туди, де
+    # вони не потрібні.
+    assert shell_arg("dahmo_315-1-8433") == "dahmo_315-1-8433"
+    # Апостроф не ламає обгортку — саме тому лапки подвійні, а не одинарні.
+    assert shell_arg("Мар'янівка 1875") == '"Мар\'янівка 1875"'
