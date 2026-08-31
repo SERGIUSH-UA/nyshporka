@@ -153,3 +153,63 @@ def test_a_soviet_source_id_parses_at_all() -> None:
     # ⚠ Архів і номери тут вигадані навмисно — справжній ID канону в тесті
     # спіймали б ворота проти приватних даних, і вони мали б рацію.
     assert parse_source_id("S_XYZ_F1_D2") == ("XYZ", "1", None, "2")
+
+
+# ── адреса справи: те, що набирає людина ─────────────────────────────────────
+def test_the_natural_order_of_a_shifra_is_accepted(lib) -> None:
+    """🔴 Три числа через скісну — перше, що набере будь-хто.
+
+    Шифра в усьому світі пишеться «фонд-опис-справа» в один ряд, тож
+    «CDIAK/127/781/534» природніше за «CDIAK/127-781/534». Доти перша форма
+    відмовлялась, і правило («опис приєднується до фонду ДЕФІСОМ») треба було
+    вивести з двох прикладів у тексті відмови.
+    """
+    def parts(v):
+        a = lib.parse_address(v)
+        # `repo_word` навмисно зберігає написання людини, тож рівність самих
+        # адрес тут не про те: звірятись мусить РОЗІБРАНЕ.
+        return a and (a.repo, a.fond, a.opys, a.spr)
+
+    want = ("CDIAK", "127", "781", "534")
+    assert parts("CDIAK/127/781/534") == want
+    assert parts("CDIAK/127-781/534") == want
+    assert parts("ЦДІАК 127-781-534") == want
+
+
+def test_the_form_the_app_prints_can_be_typed_back(lib) -> None:
+    """🔴 Замкнена петля: адресу, яку показав застосунок, мусить приймати вхід.
+
+    Пошук друкує в рядку хіта «ДАВіО-172-4-112» саме як адресу справи. Ця
+    форма — назва архіву, приліплена дефісом — не розбиралась ні реєстрацією,
+    ні сховищем сторінок, тобто набрати назад показане було не можна. Клас
+    вади той самий, що стереже `test_no_dead_ends`: обіцянка без входу.
+    """
+    a = lib.parse_address("ДАВіО-172-4-112")
+    assert a and (a.fond, a.opys, a.spr) == ("172", "4", "112")
+    assert a.repo, "архів, приліплений дефісом, не впізнано"
+
+
+def test_a_soviet_fond_is_not_mistaken_for_an_archive(lib) -> None:
+    """🔴 Однолітерне слово — префікс фонду, а не назва архіву.
+
+    «Р-6129-24-5» і «ДАВіО Р-6129-24-5» мають однакову форму. Дозволивши групі
+    архіву одну літеру, ми читали б ф.Р-6129 як архів «Р» і фонд 6129 — рівно
+    та вада, від якої написаний `_norm_fond`.
+    """
+    bare = lib.parse_address("Р-6129-24-5")
+    assert bare and bare.fond == "R-6129" and bare.repo_word == ""
+    named = lib.parse_address("ДАВіО Р-6129-24-5")
+    assert named and named.fond == "R-6129" and named.repo
+
+
+def test_a_three_part_key_still_means_fond_and_case(lib) -> None:
+    """Нова форма строго довша за наявну й нічого в неї не забирає."""
+    assert lib.parse_address("DAHMO/315/8433") is None
+    assert lib.parse_address("CDIAK/127/781") is None
+
+
+def test_a_path_and_a_sentence_are_not_addresses(lib) -> None:
+    """Адреса — це коли рядок ЦІЛКОМ є адресою, інакше пошук перестав би бути
+    повнотекстовим."""
+    assert lib.parse_address("data/raw/dahmo_315/spr-8433") is None
+    assert lib.parse_address("Метрична книга 127-1078-1662") is None

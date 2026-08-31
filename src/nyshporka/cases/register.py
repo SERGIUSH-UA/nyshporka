@@ -259,6 +259,39 @@ def _erase(val: object) -> bool:
     return isinstance(val, str) and val.strip() in ERASE
 
 
+def _no_dir_reason(case_dir: str | Path, resolved: Path) -> str:
+    """Чому теки немає — і чи людина взагалі теку називала.
+
+    🔴 «теки немає: <поточна тека>/ДАХмО 315-1-8433» — відповідь про стан
+    диска, якого не існує: команда мовчки склеїла ШИФРУ з поточною текою і
+    видала результат за факт. Ціна заміряна на живому читачі — побачивши той
+    рядок, він спитав, чому тека архіву лежить не на місці; насправді матеріал
+    лежав рівно там, де мав, а шлях вигадала команда.
+
+    🔴 Резолвити адресу в теку автоматично не можна: `describe` ПИШЕ
+    `_source.json`, і помилка на один номер видала б паспорт чужій теці —
+    найдорожчий рід помилки в обліку. Тому шлях приходить очима, а команда
+    лише називає той, що знає.
+    """
+    from nyshporka.library import find_by_address, parse_address
+
+    addr = parse_address(str(case_dir))
+    if addr is None:
+        return f"теки немає: {resolved}"
+    where = ""
+    try:
+        found = find_by_address(addr)
+    except Exception:      # бібліотека не зібрана — підказка не критична
+        found = []
+    if len(found) == 1 and found[0].get("path"):
+        where = (f" На диску вона лежить у «{found[0]['path']}» — описуйте цю теку: "
+                 f"nysh case \"{found[0]['path']}\" --shifra \"{addr.as_text()}\".")
+    return (f"«{case_dir}» — це адреса справи, а не тека зі сканами. "
+            f"`nysh case` описує ТЕКУ: перший аргумент — шлях до неї, а шифра "
+            f"йде в --shifra.{where} Що вже відомо про справу за цією адресою — "
+            f"nysh pages status \"{case_dir}\".")
+
+
 def describe(case_dir: str | Path, *, shifra: str = "", title: str = "",
              doc_type: str = "", year_from: int | str | None = None,
              year_to: int | str | None = None, place: str = "", note: str = "",
@@ -271,7 +304,7 @@ def describe(case_dir: str | Path, *, shifra: str = "", title: str = "",
     """
     d = case_path(case_dir)
     if not d.is_dir():
-        raise RegisterError(f"теки немає: {d}")
+        raise RegisterError(_no_dir_reason(case_dir, d))
 
     old = read_sidecar(d)
     sh: Shifra | None = None

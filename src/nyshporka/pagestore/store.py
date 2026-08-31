@@ -24,10 +24,13 @@ from nyshporka.core.workspace import workspace
 from nyshporka.library import (
     _DEFAULT_OPYS,
     _REPO_LABEL,
+    Address,
     _mk_key,
     _norm_spr,
+    find_by_address,
     load_library,
     opys_in_key,
+    parse_address,
     parse_case_code,
     parse_source_id,
     split_fond_opys,
@@ -63,10 +66,18 @@ def _label2repo() -> dict[str, str]:
     pk = _pack_active()
     return {w: pk.canon_repo(c) for w, c in pk.word_index().items()}
 
+#: 🔴 Правило СЛОВАМИ, приклад — ілюстрацією. Доти тут стояли самі приклади, з
+#: яких правило треба було вивести, порівнявши два з них між собою: «архів
+#: 123-1-456» через дефіси й «ANRM/211-3/140» через скісну з дефісом усередині.
+#: Людина набирала «CDIAK/127/781/534» — найприроднішу форму, бо шифра в усьому
+#: світі пишеться в один ряд, — і діставала «не розпізнав справу» без жодного
+#: натяку, що саме не так. Тепер порядок і роздільники названі; форма, яка тоді
+#: відмовлялась, приймається.
 _ACCEPTED_FORMATS = (
-    "ключ «DAHMO/315/8433» (з описом — «ANRM/211-3/140»), шифра з архівом "
-    "«архів 123-1-456», source-id «S_<архів>_F<фонд>_D<справа>» або шлях "
-    "«data/raw/архів_123/spr-456»"
+    "шифру «ЦДІАК 127-781-534» — архів, потім фонд, опис і справа саме в цьому "
+    "порядку, розділені дефісом або скісною (тож «ЦДІАК/127/781/534» — те саме); "
+    "ключ без опису «DAHMO/315/8433»; source-id «S_<архів>_F<фонд>_D<справа>»; "
+    "шлях теки «data/raw/архів_123/spr-456»"
 )
 
 
@@ -100,6 +111,70 @@ class MergeReport:
                 "replaced": self.replaced, "errors": self.errors}
 
 
+def _repo_for_write(addr: Address, raw: str) -> str:
+    """Код архіву з адреси — або відмова.
+
+    🔴 Одна політика замість двох, які тут були. Сховище сторінок ПИШЕ, і
+    мовчки взятий перший-ліпший архів означає аркуші, дописані в чужу справу.
+    Тому безархівна шифра — відмова, хоч у пошуку та сама форма є законним
+    питанням: пошук нічого не змінює, і неоднозначність для нього — відповідь.
+
+    ⚠ Латинське невідоме слово лишається як є (`.upper()`): латинський код —
+    наш простір імен, туди попадають архіви, яких пак іще не знає. Кириличне
+    невідоме — відмова: це людське написання, і мовчки зробити з нього код
+    означало б завести архів на одруківку.
+    """
+    if addr.repo:
+        return addr.repo
+    if not addr.repo_word:
+        raise ValueError(
+            f"шифра «{raw}» без архіву неоднозначна — додай архів "
+            f"(«ДАХмО {raw}») або дай ключ/шлях.{_near_miss(addr)} "
+            f"Приймаю: {_ACCEPTED_FORMATS}")
+    if addr.repo_word.isascii():
+        return addr.repo_word.upper()
+    raise ValueError(
+        f"невідомий архів «{addr.repo_word}» "
+        f"(знаю: {', '.join(sorted(_REPO_LABEL.values()))})")
+
+
+#: Два числа замість трьох — найчастіша форма «майже влучив».
+_TWO_NUMS_RE = re.compile(r"^\s*(\d+)\s*[-–/]\s*(\d+[а-яa-z]?)\s*$", re.IGNORECASE)
+
+
+def _two_numbers_hint(v: str) -> str:
+    """Підказка на два числа: неоднозначність тут у самому записі, а не в даних.
+
+    «127-534» однаково правдоподібно читається як «фонд 127, справа 534» і як
+    «фонд 127, опис 534» з нествореною справою. Здогадуватись за людину не
+    можна, а назвати обидва прочитання — можна.
+    """
+    m = _TWO_NUMS_RE.match(v)
+    if not m:
+        return ""
+    a, b = m.group(1), m.group(2)
+    return (f" Два числа неоднозначні: якщо це фонд і справа — «АРХІВ/{a}/{b}»; "
+            f"якщо фонд і опис — дай ще й справу.")
+
+
+def _near_miss(addr: Address) -> str:
+    """«Мабуть, ти мав на увазі X» — але лише коли X справді лежить на диску.
+
+    🔴 Підказка спирається на бібліотеку, а не на перелік форм. Порада назвати
+    архів коштує рядка завжди; порада назвати САМЕ ЦЕЙ архів варта його лише
+    тоді, коли така справа в просторі одна — інакше це здогад, поданий тоном
+    відповіді.
+    """
+    try:
+        found = find_by_address(addr)
+    except Exception:      # бібліотека не зібрана — підказка не критична
+        return ""
+    if len(found) != 1:
+        return ""
+    shifra = found[0].get("shifra") or ""
+    return f" Схоже, це «{shifra}» — тоді набирай так." if shifra else ""
+
+
 # ── резолюція справи ─────────────────────────────────────────────────────────
 def resolve_case(value: str) -> CaseRef:
     """Будь-який людський ідентифікатор справи → CaseRef. ValueError якщо не вийшло."""
@@ -118,6 +193,15 @@ def resolve_case(value: str) -> CaseRef:
                   _norm_spr(opys_part) if opys_part else None,
                   str(_norm_spr(m.group(3))))
     if parsed is None:
+        # Канал адреси — того, що людина набирає, коли називає книгу. Розбір
+        # спільний (`library.parse_address`), тож форми, які вже приймав реєстр
+        # опису, більше не відмовляються тут.
+        # ⚠ Стоїть ПІСЛЯ ключа: тільки `_KEY_RE` знає збірки (`DAHMO/315/@fuzovka`),
+        # а `SPR_TOKEN` номера на «@» не приймає.
+        addr = parse_address(v)
+        if addr:
+            parsed = (_repo_for_write(addr, v), addr.fond, addr.opys, addr.spr)
+    if parsed is None:
         ms = _SHIFRA_RE.match(v)
         if ms:
             label, fond, opys, spr = ms.groups()
@@ -135,7 +219,9 @@ def resolve_case(value: str) -> CaseRef:
     if parsed is None:
         parsed = parse_case_code(v)
     if parsed is None:
-        raise ValueError(f"не розпізнав справу «{value}». Приймаю: {_ACCEPTED_FORMATS}")
+        raise ValueError(
+            f"не розпізнав справу «{value}».{_two_numbers_hint(v)} "
+            f"Приймаю: {_ACCEPTED_FORMATS}")
 
     repo, fond, opys, spr = parsed
     lib = load_library()

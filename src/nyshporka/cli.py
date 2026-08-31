@@ -667,7 +667,8 @@ def read(
 
 @app.command("case")
 def case_cmd(
-    case_dir: str = typer.Argument(..., help="тека зі сканами"),
+    case_dir: str = typer.Argument(
+        ..., help="ШЛЯХ до теки зі сканами (не шифра — вона йде в --shifra)"),
     shifra: str = typer.Option("", "--shifra", help="«ДАХмО 315-1-8433»"),
     title: str = typer.Option("", "--title", help="назва справи"),
     doc_type: str = typer.Option("", "--type", help="метрична / сповідна / ревізька"),

@@ -117,3 +117,38 @@ def test_json_lines_are_accepted_as_well_as_an_array(case):
     ])
     got = _data(_run("pages", "note-batch", "DAHMO/315/8433", "--json", stdin=lines))
     assert got["ok"] == 2, got
+
+
+def test_the_slash_form_of_a_shifra_reaches_the_same_case(case):
+    """🔴 «CDIAK/127/781/534» — форма, яку набирають першою, і вона відмовлялась.
+
+    Тепер вона доходить до тієї самої справи, що й дефісна: розбір адреси в
+    пакеті один, а не чотири розбіжні копії.
+    """
+    got = _data(_run("pages", "status", "DAHMO/315/1/8433", "--json"))
+    assert got["key"] == "DAHMO/315/8433"
+
+
+def test_the_refusal_names_the_rule_not_just_examples(case):
+    """Правило словами, а не два приклади, з яких його треба вивести.
+
+    Скарга була дослівна: «повідомлення показує приклад із дефісом, але правила
+    не називає, тож із нього треба здогадатись, порівнявши два приклади».
+    """
+    r = _run("pages", "status", "казна-що", "--json")
+    assert r.exit_code == 1
+    said = json.loads(r.stdout)["error"]
+    assert "порядку" in said and "скісною" in said, said
+
+
+def test_a_shifra_without_an_archive_is_still_refused_but_names_the_candidate(case):
+    """🔴 Сховище ПИШЕ, тож безархівна шифра лишається відмовою.
+
+    Мовчки взятий перший-ліпший архів — це аркуші, дописані в чужу справу. А от
+    назвати кандидата, коли він на диску рівно один, відмова може й мусить.
+    """
+    r = _run("pages", "status", "315-1-8433", "--json")
+    assert r.exit_code == 1
+    said = json.loads(r.stdout)["error"]
+    assert "без архіву" in said
+    assert "ДАХмО 315-1-8433" in said, said

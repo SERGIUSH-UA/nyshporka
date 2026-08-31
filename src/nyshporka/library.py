@@ -205,6 +205,112 @@ SPR_TOKEN = r"\d+[а-яa-z]?"                      # 8433 · 2а
 
 _SHIFRA_RE = re.compile(
     rf"({FOND_TOKEN})\s*[-–]\s*(\d+)\s*[-–]\s*({SPR_TOKEN})", re.IGNORECASE)
+
+#: 🔴 АДРЕСА СПРАВИ — те, що людина набирає, коли хоче назвати книгу. Одна
+#: відповідь на все, і саме тому вона тут, поруч із трьома цеглинами.
+#:
+#: Доти розбір адреси жив у пакеті ЧОТИРМА копіями, і вони розійшлись —
+#: заміряно: `fonds.registry._KEY_RE` приймав і «ЦДІАК/127/781/534», і
+#: «ДАВіО-172-4-112»; `cases.register._SHIFRA_RE` — жодної з двох;
+#: `pagestore.store._KEY_RE` — теж жодної. Тобто застосунок УМІВ читати обидві
+#: форми, але не тим модулем, який кличуть `pages note` і `nysh case`, і
+#: відмовляв на тому, що сам-таки друкує: рядок «ДАВіО-172-4-112» стоїть у
+#: видачі пошуку як адреса справи, і набрати його назад було не можна.
+#:
+#: 🔴 Рівно ЧОТИРИ сегменти, з якорями. Це знімає двозначність із трисегментною
+#: формою: «CDIAK/127/781» у цей шаблон не влучає, тож «фонд + справа» лишається
+#: собою. Нова форма строго довша за наявну й нічого в неї не забирає.
+#: 🔴 Група архіву — від ДВОХ літер. «Р-6129-24-5» і «ДАВіО Р-6129-24-5» мають
+#: однакову форму, і однолітерне слово ніколи не буває назвою архіву, зате
+#: завжди буває префіксом радянського фонду. Дозволивши одну літеру, ми читали б
+#: ф.Р-6129 як архів «Р» і фонд 6129 — рівно та вада, від якої написаний
+#: `_norm_fond`.
+#: ⚠ `^…$`, а не пошук усередині рядка: адреса — це коли рядок ЦІЛКОМ є
+#: адресою. Інакше запит «Метрична книга 127-1078-1662» перестав би бути
+#: повнотекстовим.
+_ADDR_RE = re.compile(
+    rf"^(?:(?P<repo>[A-Za-zА-Яа-яЄІЇҐєіїґ'’]{{2,}})\.?\s*[-–/\s]\s*)?"
+    rf"(?P<fond>{FOND_TOKEN})\s*[-–/]\s*"
+    rf"(?P<opys>{OPYS_TOKEN})\s*[-–/]\s*"
+    rf"(?P<spr>{SPR_TOKEN})$", re.IGNORECASE)
+
+
+@dataclass(frozen=True)
+class Address:
+    """Розібрана адреса справи. `repo` порожній — архів не названо або не впізнано."""
+
+    repo: str
+    repo_word: str
+    fond: str
+    opys: str
+    spr: str
+
+    def as_text(self) -> str:
+        """Назад у людський запис — тим, чим її написали."""
+        head = f"{self.repo_word or self.repo} " if (self.repo_word or self.repo) else ""
+        return f"{head}{self.fond}-{self.opys}-{self.spr}"
+
+
+def _repo_of_word(word: str) -> str:
+    """Слово перед номерами → канонічний код архіву, або порожньо.
+
+    Питає пак, а не власну копію переліку: там живе і зведення мішаного письма
+    («ДАКО» з латинською «K»), і псевдоніми. `_repo_alias` лишається другим
+    заходом — під нього підпадає латинський код, написаний як є.
+    """
+    w = (word or "").strip()
+    if not w:
+        return ""
+    pk = _pack_active()
+    code = pk.resolve_code(w)
+    if code:
+        return pk.canon_repo(code)
+    return _repo_alias().get(w.upper(), "")
+
+
+def parse_address(value: str) -> Address | None:
+    """«ЦДІАК/127/781/534» · «ЦДІАК 127-781-534» · «ДАВіО-172-4-112» · «315-1-8433».
+
+    Роздільники рівноправні: дефіс, тире й скісна означають те саме. Саме цього
+    бракувало — шифра в усьому світі пишеться «фонд-опис-справа» в один ряд, тож
+    три числа поспіль через скісну це перше, що набере будь-хто.
+
+    `None` — рядок не є адресою; це не помилка, а відповідь «шукай текстом».
+    """
+    m = _ADDR_RE.match((value or "").strip())
+    if not m:
+        return None
+    fond = _norm_fond(m.group("fond"))
+    opys = _norm_spr(m.group("opys"))
+    spr = _norm_spr(m.group("spr"))
+    if not (fond and opys and spr):
+        return None
+    word = m.group("repo") or ""
+    return Address(repo=_repo_of_word(word), repo_word=word,
+                   fond=str(fond), opys=str(opys), spr=str(spr))
+
+
+def find_by_address(addr: Address) -> list[dict]:
+    """Записи бібліотеки, що збігаються з адресою.
+
+    ⚠ Опис звіряється лише там, де він у записі є: більшість тек опису не несе,
+    і вимога рівності викидала б із відповіді саме ті справи, що лежать на диску.
+    Архів звіряється лише названий — безархівна шифра це законне питання до
+    бібліотеки («де в мене 315-1-8433?»), хоч і не законна адреса для запису.
+    """
+    out = []
+    for e in load_library():
+        if str(e.get("fond") or "") != addr.fond:
+            continue
+        if str(_norm_spr(e.get("spr")) or "") != addr.spr:
+            continue
+        got_opys = _norm_spr(e.get("opys"))
+        if got_opys and str(got_opys) != addr.opys:
+            continue
+        if addr.repo and str(e.get("repo") or "") != addr.repo:
+            continue
+        out.append(e)
+    return out
 # dahmo_315, а також із суфіксом джерела/рендера: dahmo_315_fs, dahmo_230_pages
 _SLUG_FOND_RE = re.compile(r"^([a-z]+)_(\d+)(?:[_-][a-z0-9]+)*$")
 _SPR_DIR_RE = re.compile(r"spr[-_]?0*(\w+?)$", re.IGNORECASE)    # spr-8433 / spr-199a

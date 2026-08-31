@@ -480,3 +480,30 @@ def test_a_wrong_year_can_be_erased_like_any_other_field(tmp_path) -> None:
     with pytest.raises(R.RegisterError) as e:
         R.describe(d, year_from="позаминулого")
     assert "не рік" in str(e.value)
+
+
+def test_an_address_is_not_taken_for_a_folder(space: Path) -> None:
+    """🔴 Відмова не сміє називати шлях, якого немає на диску.
+
+    `nysh case "ДАХмО 315-1-8433"` мовчки склеював шифру з поточною текою й
+    видавав «теки немає: <cwd>/ДАХмО 315-1-8433» — відповідь про стан диска,
+    вигаданий самою командою. Ціна заміряна на живому читачі: побачивши той
+    рядок, він спитав, чому тека архіву лежить не на місці, хоч матеріал лежав
+    рівно там, де мав.
+
+    Резолвити адресу в теку автоматично не можна — `describe` ПИШЕ паспорт, і
+    помилка на один номер видала б його чужій теці. Тому команда називає
+    різницю й той шлях, який знає.
+    """
+    with pytest.raises(R.RegisterError) as got:
+        R.describe("ДАХмО 315-1-8433")
+    said = str(got.value)
+    assert "адреса справи" in said
+    assert "--shifra" in said and "pages status" in said
+    assert "теки немає" not in said, "стара відмова про вигаданий шлях лишилась"
+
+
+def test_a_missing_folder_is_still_reported_as_a_missing_folder(space: Path) -> None:
+    """Шлях, який справді є шляхом, лишається шляхом: підказка точкова."""
+    with pytest.raises(R.RegisterError, match="теки немає"):
+        R.describe("data/raw/немає-такої")
