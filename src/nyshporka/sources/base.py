@@ -29,7 +29,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal, Protocol, runtime_checkable
 
-Capability = Literal["search", "browse", "manifest", "fetch"]
+#: `address` — знайти справу за ШИФРОЮ, а не за текстом заголовка. Здатність
+#: окрема від `search` навмисно: каталог часто вміє одне й не вміє друге —
+#: зведений покажчик шукає живим запитом лише по назві, тож спитати його
+#: «що це за 127-1078-1662» нічим, хоч сам він цю шифру в кожному хіті й
+#: друкує. Без окремої здатності нуль такого джерела читався б як «справи
+#: немає», а він означає «його про це не питали».
+Capability = Literal["search", "browse", "manifest", "fetch", "address"]
 
 #: Куди джерело звітує про поступ. Сигнатура навмисно збігається з
 #: `core.progress.emit`, щоб завантаження, читання й трен виглядали однаково.
@@ -167,6 +173,9 @@ class Source(Protocol):
     caps: frozenset[str]
 
     def search(self, q: str, *, limit: int = 30) -> list[Hit]: ...
+
+    def find_case(self, fond: str, opys: str, spr: str, *,
+                  repo: str = "") -> list[Hit]: ...
 
     def browse(self, ref: str | None = None) -> list[Node]: ...
 

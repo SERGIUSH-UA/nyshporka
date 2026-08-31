@@ -204,15 +204,45 @@ def _pick(source_id: str) -> Any:
     return src
 
 
+def _print_address(addr: Any) -> None:
+    """Шапка відповіді про конкретну справу — перед списком знахідок.
+
+    Питання «що це за 127-1078-1662» відрізняється від «де є щось про моє село»
+    саме тим, що відповідь у нього одна, а не перелік. Показати її списком
+    означало б сховати найважливіше — чи справа вже на диску — між рядками.
+    """
+    if not addr:
+        return
+    console.print(f"[bold]{addr.get('shifra') or ''}[/bold] "
+                  f"[muted](адреса справи)[/muted]")
+    for row in addr.get("local") or []:
+        seen = (f" · переглянуто аркушів: {row['noted']}" if row.get("noted")
+                else " · оком ще не дивились")
+        console.print(f"  ✅ на цій машині: [bold]{row.get('path') or row.get('key')}"
+                      f"[/bold]{seen}")
+    reg = addr.get("registry") or {}
+    if reg:
+        row = reg.get("row") or {}
+        head = " · ".join(str(x) for x in (row.get("title"), row.get("years")) if x)
+        console.print(f"  📔 у реєстрі опису {reg.get('label') or ''}: {head[:160]}")
+    console.print("")
+
+
 @app.command()
-def find(q: str = typer.Argument(..., help="село, прізвище чи слово із заголовка"),
+def find(q: str = typer.Argument(..., help="село, прізвище, слово із заголовка "
+                                           "або шифра справи"),
          source: str = typer.Option("", "--source", help="лише це джерело"),
+         text: bool = typer.Option(False, "--text",
+                                   help="шукати текстом, навіть якщо запит "
+                                        "схожий на шифру"),
          limit: int = typer.Option(20, "--limit")) -> None:
     """Де взагалі є щось про моє село — пошук по каталогах джерел."""
     from nyshporka import ops as O
 
-    env = O.call("catalog.search", {"q": q, "source": source, "limit": limit})
+    env = O.call("catalog.search", {"q": q, "source": source, "limit": limit,
+                                    "by_address": not text})
     _answer(env)
+    _print_address(env.data.get("address"))
     hits = env.data.get("hits") or []
     for h in hits:
         head = " · ".join(x for x in (h.get("shifra"), h.get("years")) if x)

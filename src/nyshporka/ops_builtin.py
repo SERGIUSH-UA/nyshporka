@@ -600,6 +600,182 @@ class CatalogSearchArgs(BaseModel):
     q: str = Field(description="назва села, прізвище чи слово із заголовка справи")
     source: str = Field(default="", description="одне джерело; порожньо = усі, що вміють шукати")
     limit: int = Field(default=30, ge=1, le=200)
+    by_address: bool = Field(
+        default=True,
+        description="якщо запит ЦІЛКОМ є шифрою («127-1078-1662»), відповідати "
+                    "про цю справу, а не шукати її текстом заголовка")
+
+
+def _address_answer(a: CatalogSearchArgs, addr: Any) -> Envelope | None:
+    """Відповідь про КОНКРЕТНУ справу — коли запит є її адресою.
+
+    🔴 Пошук по тексту заголовка на шифру не відповідає ніколи: три числа
+    поспіль не трапляються в жодному заголовку, тож «127-1078-1662» давало
+    рівний нуль. Гірше: нуль давала й «ДАВіО-172-4-112» — рядок, який сам
+    застосунок друкує в кожному хіті як адресу справи. Показане не можна було
+    набрати назад.
+
+    Щаблі йдуть від найточнішого до найглухішого: бібліотека (справа може вже
+    лежати на диску) → реєстр опису (заголовок, роки, аркуші) → каталоги, які
+    вміють шукати за шифрою.
+
+    🔴 Тут безархівна шифра — законне питання, хоч у сховищі сторінок вона
+    відмова: пошук нічого не пише, тож неоднозначність для нього це відповідь
+    («ось два кандидати»), а не ризик дописати аркуші в чужу справу.
+
+    `None` — не знайшлось нічого, і тоді запит іде звичайним текстовим
+    маршрутом. Інакше рядок, який лише СХОЖИЙ на шифру (дата «1858-03-14»),
+    діставав би замість пошуку відповідь «такої справи немає».
+    """
+    from nyshporka.library import find_by_address, load_library
+    from nyshporka.pagestore import store
+    from nyshporka.sources.base import SourceError, supports
+
+    hits: list[dict[str, Any]] = []
+    searched: list[str] = []
+    basis: list[dict[str, Any]] = []
+    unavailable: list[dict[str, str]] = []
+
+    # ── щабель 1: те, що вже лежить на цій машині ────────────────────────────
+    local: list[dict[str, Any]] = []
+    try:
+        found = find_by_address(addr)
+        searched.append("library")
+        basis.append({"source": "library", "kind": "локальна бібліотека",
+                      "rows": len(load_library())})
+    except Exception as exc:
+        found = []
+        unavailable.append({"source": "library", "why": f"{type(exc).__name__}: {exc}"})
+    for e in found:
+        row = {"key": e.get("key") or "", "shifra": e.get("shifra") or "",
+               "title": e.get("title") or "", "path": e.get("path") or "",
+               "frames": e.get("frames"), "noted": 0, "records": 0}
+        try:
+            ref = store.resolve_case(str(e.get("key") or ""))
+            cf = store.load_case(ref)
+            if cf is not None:
+                row["noted"] = len(cf.pages)
+                row["records"] = len(cf.records)
+        except Exception:      # сховище не критичне для відповіді про адресу
+            pass
+        local.append(row)
+        hits.append({"source": "library", "ref": row["path"] or row["key"],
+                     "title": row["title"], "years": "", "place": "",
+                     "shifra": row["shifra"], "frames": row["frames"],
+                     "acquirable": False, "note": "уже на цій машині", "url": "",
+                     "repo": e.get("repo") or "", "archive": e.get("repo") or "",
+                     "fond": str(e.get("fond") or "")})
+
+    # ── щабель 2: реєстр опису ──────────────────────────────────────────────
+    registry: dict[str, Any] | None = None
+    try:
+        from nyshporka.fonds import registry as R
+
+        fonds = [f for f in R.discover_fonds()
+                 if str(f.get("fond")) == addr.fond
+                 and (not addr.repo or f.get("repo") == addr.repo)]
+    except Exception as exc:
+        fonds = []
+        unavailable.append({"source": "registry", "why": f"{type(exc).__name__}: {exc}"})
+    if not fonds:
+        # 🔴 Не нуль, а «не питали»: реєстру цього фонду на машині немає, і
+        # мовчазний нуль тут читався б як «такої справи не існує».
+        unavailable.append({
+            "source": f"registry:{addr.repo or '?'}-{addr.fond}",
+            "why": f"реєстру опису ф.{addr.fond} на цій машині немає — зібрати: "
+                   f"nysh op registry.collect"})
+    for f in fonds:
+        searched.append(f"registry:{f['id']}")
+        try:
+            row, path = R.registry_row(f["repo"], f["fond"], addr.opys, addr.spr, "")
+        except Exception as exc:
+            unavailable.append({"source": f"registry:{f['id']}",
+                                "why": f"{type(exc).__name__}: {exc}"})
+            continue
+        basis.append({"source": f"registry:{f['id']}", "kind": "реєстр опису",
+                      "taken": _mtime_day(path)})
+        if row is None:
+            continue
+        registry = {"fond_id": f["id"], "label": f.get("label") or "",
+                    "row": row, "registry": str(path)}
+        # ⚠ Імена полів беруться з реєстру, а не вгадуються: роки лежать двома
+        # колонками, а адреса — трьома різними (дзеркало, Commons, покажчик).
+        y1, y2 = str(row.get("year_from") or ""), str(row.get("year_to") or "")
+        years = y1 if y1 == y2 else "-".join(x for x in (y1, y2) if x)
+        url = str(row.get("archium_url") or row.get("commons_url")
+                  or row.get("duck_url") or "")
+        hits.append({"source": f"registry:{f['id']}", "ref": f"case:{addr.as_text()}",
+                     "title": str(row.get("title") or ""),
+                     "years": years, "place": str(row.get("cat_place") or ""),
+                     "shifra": addr.as_text(),
+                     "frames": R.expected_frames(row) or None,
+                     "acquirable": bool(url), "note": "рядок опису", "url": url,
+                     "repo": f["repo"], "archive": f["repo"], "fond": addr.fond})
+
+    # ── щабель 3: каталоги, які вміють по шифрі ─────────────────────────────
+    reg = _registry()
+    picked = [reg.get(a.source)] if a.source else list(reg.all())
+    for src in picked:
+        if src is None:
+            continue
+        if not supports(src, "address"):
+            # 🔴 Названо причину, а не пропущено мовчки. Покажчик шукає живим
+            # запитом лише по назві справи, тож спитати його про шифру нічим —
+            # і його нуль не є нулем про цю справу.
+            if supports(src, "search"):
+                unavailable.append({
+                    "source": src.id,
+                    "why": "шукає лише за текстом заголовка — за шифрою його "
+                           "спитати нічим"})
+            continue
+        try:
+            got = src.find_case(addr.fond, addr.opys, addr.spr, repo=addr.repo)
+        except SourceError as exc:
+            unavailable.append({"source": src.id, "why": str(exc)})
+            continue
+        except Exception as exc:
+            unavailable.append({"source": src.id, "why": f"{type(exc).__name__}: {exc}"})
+            continue
+        searched.append(src.id)
+        hits.extend({"source": h.source, "ref": h.ref, "title": h.title,
+                     "years": h.years, "place": h.place, "shifra": h.shifra,
+                     "frames": h.frames, "acquirable": h.acquirable,
+                     "note": h.note, "url": h.url,
+                     "repo": h.repo, "archive": h.archive, "fond": h.fond}
+                    for h in got)
+
+    if not hits:
+        return None
+
+    shown = hits[:a.limit]
+    env = ok({"q": a.q, "hits": shown, "fonds": _by_fond(shown),
+              "address": {"query": a.q, "repo": addr.repo, "fond": addr.fond,
+                          "opys": addr.opys, "spr": addr.spr,
+                          "shifra": addr.as_text(),
+                          "local": local, "registry": registry},
+              "coverage": {"searched": searched, "unavailable": unavailable,
+                           "basis": basis, "truncated": []}})
+    # 🔴 Заборона вдавати, що прочесали каталоги. Маршрут інший, знаменник
+    # інший — і сказати про це мусить сама відповідь, а не здогад читача.
+    env.warn("address_route",
+             f"«{a.q}» — адреса справи, тож шукали ЇЇ. Повнотекстового пошуку "
+             f"по каталогах НЕ було; щоб текстом — додай --text")
+    if local:
+        env.suggest("pages.status", "що в цій справі вже дивились оком")
+    if registry:
+        env.suggest("fond.case", "повний розбір рядка опису: звідки заголовок, "
+                                 "чи ріже дзеркало, чи відновлений номер")
+    return env
+
+
+def _mtime_day(path: Any) -> str:
+    """Дата файла реєстру — частина знаменника: зріз старіє."""
+    try:
+        import datetime as _dt
+
+        return _dt.date.fromtimestamp(Path(path).stat().st_mtime).isoformat()
+    except Exception:
+        return ""
 
 
 @op("catalog.search", summary="Де взагалі є щось про моє село",
@@ -613,12 +789,22 @@ def catalog_search(a: CatalogSearchArgs) -> Envelope:
     архівах» означало б «дивились у трьох», хоча дивились в одному, і напрям
     пошуку закрився б висновком, якого ніхто не робив.
     """
+    from nyshporka.library import parse_address
     from nyshporka.sources.base import SourceError, supports
 
     reg = _registry()
     picked = [reg.get(a.source)] if a.source else reg.with_cap("search")
     if a.source and picked[0] is None:
         return fail(f"джерела {a.source!r} немає")
+    # Адреса справи — інше питання, ніж слово із заголовка, і відповідь на нього
+    # знають інші місця. Якщо там порожньо, запит іде текстом як і раніше: рядок
+    # може бути лише СХОЖИЙ на шифру (дата «1858-03-14»), і відповідати на нього
+    # «такої справи немає» означало б не шукати там, де просили.
+    addr = parse_address(a.q) if a.by_address else None
+    if addr is not None:
+        answered = _address_answer(a, addr)
+        if answered is not None:
+            return answered
     hits: list[dict[str, object]] = []
     searched: list[str] = []
     unavailable: list[dict[str, str]] = []
@@ -672,6 +858,14 @@ def catalog_search(a: CatalogSearchArgs) -> Envelope:
     env = ok({"q": a.q, "hits": shown, "fonds": _by_fond(shown),
               "coverage": {"searched": searched, "unavailable": unavailable,
                            "basis": basis, "truncated": truncated}})
+    if addr is not None:
+        # Запит читається як шифра, але такої справи не знайшлось ні в
+        # бібліотеці, ні в реєстрі опису, ні в каталогах, які вміють по шифрі.
+        # Сказати це прямо дешевше, ніж лишити читача гадати, чому пошук
+        # «за номером справи» повернувся з текстовим знаменником.
+        env.warn("address_not_found",
+                 f"«{a.q}» схоже на шифру, але такої справи немає ні в "
+                 f"бібліотеці, ні в реєстрі опису — шукали текстом")
     _warn_once(env, hits=hits, searched=searched,
                unavailable=unavailable, truncated=truncated)
     return env

@@ -251,6 +251,16 @@ def _norm(s: str) -> str:
     return re.sub(r"[^\w']+", " ", s).strip()
 
 
+def _num(s: object) -> str | None:
+    """Перше число з поля каталогу, без провідних нулів.
+
+    Каталог пише «Опис 1» і «Справа 0114» там, де людина набирає «1» і «114»:
+    звірка сирих рядків не збіглася б жодного разу.
+    """
+    m = re.search(r"\d+", str(s or ""))
+    return str(int(m.group())) if m else None
+
+
 
 @lru_cache(maxsize=8)
 def _tsv_rows(path: Path, mtime_ns: int, size: int) -> int | None:
@@ -272,7 +282,7 @@ class ArchiumSource:
 
     id = "archium"
     label = "ARCHIUM (ДАХмО)"
-    caps = frozenset({"search", "browse", "manifest", "fetch"})
+    caps = frozenset({"search", "browse", "manifest", "fetch", "address"})
 
     #: Куди обхід складає каталог. Відносно кореня простору.
     #: ⚠ Лишається константою класу: на неї спираються тести, і для ДАХмО вона
@@ -447,6 +457,47 @@ class ArchiumSource:
                 note=((row.get("fond_title") or "")[:110] + note_tail).strip()))
             if len(out) >= limit:
                 break
+        return out
+
+    def find_case(self, fond: str, opys: str, spr: str, *,
+                  repo: str = "") -> list[Hit]:
+        """Справа за ШИФРОЮ, а не за словом із заголовка.
+
+        🔴 Каталог носив фонд, опис і номер справи окремими полями з першого
+        дня, а пошук звіряв лише опис і номер справи як ТЕКСТ. Тому «127-1078-1662»
+        не знаходило нічого: три числа поспіль не трапляються в жодному
+        заголовку. Прохід той самий по тому самому TSV, тож дорожче не стало.
+
+        ⚠ Номери звіряються нормалізованими з обох боків: каталог пише «Опис 1»
+        і «Справа 0114» там, де людина набрала «1» і «114».
+        """
+        kind, _ = self.catalog_source()
+        if kind == "none":
+            raise SourceError(
+                "каталог справ недоступний: ні зібраного обходом, ні вкладеного "
+                "в пакет. Зібрати: `nysh crawl archium`.")
+        if repo and repo != self.repo:
+            return []
+        want = (_num(fond), _num(opys), _num(spr))
+        out: list[Hit] = []
+        for row in self._catalog_rows():
+            got = (_num(row.get("fond_no")), _num(row.get("inv_label")),
+                   _num(row.get("case_no")))
+            if got != want or None in got:
+                continue
+            out.append(Hit(
+                source=self.id,
+                ref=f"file:{row.get('file_id', '')}",
+                title=(row.get("description") or "")[:200],
+                years=row.get("date") or "",
+                shifra=f"ф.{row.get('fond_no', '')} {row.get('inv_label', '')} "
+                       f"{row.get('case_no', '')}".strip(),
+                repo=self.repo,
+                archive=self.repo,
+                fond=str(row.get("fond_no") or ""),
+                frames=int(row["sheets"]) if (row.get("sheets") or "").isdigit() else None,
+                acquirable=True,
+                note=(row.get("fond_title") or "")[:110].strip()))
         return out
 
     # ── дерево ───────────────────────────────────────────────────────────────
