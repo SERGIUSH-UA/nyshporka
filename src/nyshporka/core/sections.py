@@ -255,6 +255,7 @@ OP_SCREEN: dict[str, str] = {
     "search.sweep": "search",
     "pages.status": "eye",
     "pages.note": "eye",
+    "pages.show": "eye",
     "records.add": "eye",
     "export.case": "export",
 }

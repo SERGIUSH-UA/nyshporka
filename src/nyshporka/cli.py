@@ -34,6 +34,12 @@ _PAGE_TYPES_HELP = ("birth | marriage | death | confession | revision | census |
 _PAGE_STATUS_HELP = ("full — перелік прізвищ повний · partial — бачив, перелік "
                      "неповний · skipped · unreadable")
 _PAGE_METHOD_HELP = "visual | htr | ocr | hybrid | text"
+_ROLES_HELP = ("child | father | mother | godfather | godmother | groom | bride | "
+               "groom_father | groom_mother | bride_father | bride_mother | "
+               "deceased | spouse | witness | priest | midwife | head | member | "
+               "convert | sponsor | other")
+_RTYPES_HELP = ("birth | marriage | death | conversion | confession_entry | "
+                "revision_entry | tally | other")
 
 app = typer.Typer(
     name="nysh",
@@ -1081,16 +1087,33 @@ app.add_typer(pages_app, name="pages")
 @pages_app.command("status")
 def pages_status_cmd(
     case: str = typer.Argument(..., help="справа у будь-якому форматі"),
+    scans: str = typer.Option("", "--scans",
+                              help="кома-список сканів: питати про ці аркуші, "
+                                   "а не про справу цілком"),
     as_json: bool = typer.Option(False, "--json"),
 ) -> None:
     """Що в цій справі вже дивились, а що ні — перед тим, як відкривати."""
     from nyshporka import ops as O
 
-    env = O.call("pages.status", {"case": case})
+    env = O.call("pages.status", {"case": case, "scans": scans})
     if _answer(env, as_json):
         return
     d = env.data
     console.print(f"[bold]{d['shifra']}[/bold] {d.get('title') or ''}")
+    # 🔴 Дві форми відповіді, а не одна з полем більше: питання про названі
+    # аркуші й питання про справу — різні, і зведення («на диску», «статуси»)
+    # у першому просто немає. Поки друкувалка була одна, точковий режим
+    # падав `KeyError` рівно на тому полі, заради якого його кличуть.
+    if d.get("scans") is not None:
+        for s in d["scans"]:
+            if s["noted"]:
+                console.print(f"  ✅ {s['scan']} — дивились "
+                              f"({s['page_type']}/{s['status']}, прізвищ "
+                              f"{s['surnames_n']}, {s['noted_date']})")
+            else:
+                console.print(f"  ▫️ {s['scan']} — не заносили")
+        _notes(env)
+        return
     console.print(f"  на диску: {d.get('total_disk', 0)} · анотовано: {d['noted']} "
                   f"· записів: {d['records']} · статуси: {d.get('by_status') or {}}")
     if d.get("unnoted_count"):
@@ -1109,6 +1132,9 @@ def pages_note_cmd(
     status: str = typer.Option("full", "--status", help=_PAGE_STATUS_HELP),
     method: str = typer.Option("visual", "--method", help=_PAGE_METHOD_HELP),
     comment: str = typer.Option("", "--comment"),
+    agent: str = typer.Option("", "--agent",
+                              help="хто заносив: ім'я людини або сесії"),
+    as_json: bool = typer.Option(False, "--json"),
 ) -> None:
     """Занести переглянуту сторінку.
 
@@ -1121,8 +1147,9 @@ def pages_note_cmd(
     env = O.call("pages.note", {
         "case": case, "scan": scan, "page_type": page_type,
         "surnames": surnames, "places": places, "years": years, "sheet": sheet,
-        "status": status, "method": method, "comment": comment})
-    _answer(env)
+        "status": status, "method": method, "comment": comment, "agent": agent})
+    if _answer(env, as_json):
+        return
     console.print(f"✅ {env.data['shifra']} {scan}")
     _notes(env)
 
@@ -1161,16 +1188,27 @@ def pages_note_batch_cmd(
 
 @pages_app.command("grep")
 def pages_grep_cmd(
-    q: str = typer.Argument(..., help="прізвище"),
+    q: str = typer.Argument(..., help="прізвище або назва місця"),
     where: str = typer.Option("pages", "--where", help="pages | records | decode"),
     case: str = typer.Option("", "--case"),
+    axis: str = typer.Option("name", "--axis",
+                             help="name — по прізвищу · place — по місцю "
+                                  "(лише pages|records)"),
+    role: str = typer.Option("", "--role", help=_ROLES_HELP),
+    rtype: str = typer.Option("", "--rtype", help=_RTYPES_HELP),
+    thresh: int = typer.Option(80, "--thresh", help="поріг схожості 50-100"),
     limit: int = typer.Option(50, "--limit"),
+    as_json: bool = typer.Option(False, "--json"),
 ) -> None:
     """Знайти прізвище в тому, що вже прочитано."""
     from nyshporka import ops as O
 
-    env = O.call("search.run", {"q": q, "where": where, "case": case, "limit": limit})
-    _answer(env)
+    env = O.call("search.run", {"q": q, "where": where, "case": case,
+                                "axis": axis, "role": role, "rtype": rtype,
+                                "thresh": thresh, "limit": limit})
+    if _answer(env, as_json):
+        return
+    is_rec = where == "records"
     for h in (env.data.get("hits") or [])[:limit]:
         # 🔴 `matched` — найцінніше в знахідці, і саме його друкувалка й губила:
         # шукали «Ковальський», а в джерелі стоїть «Ковальскій». Заради цієї
@@ -1178,10 +1216,37 @@ def pages_grep_cmd(
         what = str(h.get("matched") or h.get("line") or h.get("text")
                    or h.get("surname") or h.get("name") or "")
         score = h.get("score")
+        # 🔴 Хіт запису — інша форма, а не бідніша: аркуш у ньому лежить під
+        # `scans` (їх буває кілька на один акт), а `scan` немає зовсім. Поки
+        # форма була одна на всіх, колонка аркуша в записах стояла порожня —
+        # тобто зникало саме те, чим знахідку перевіряють.
+        sheet = (", ".join(h.get("scans") or []) if is_rec
+                 else h.get("scan") or h.get("page") or "")
+        role_col = f"{h.get('role') or ''}: " if is_rec and h.get("role") else ""
+        tail = ""
+        if is_rec:
+            tail = "  " + " · ".join(
+                x for x in (h.get("rtype"), h.get("date"), h.get("place")) if x)
         console.print(f"  [bold]{h.get('case') or h.get('shifra') or h.get('key') or ''}"
-                      f"[/bold] {h.get('scan') or h.get('page') or ''}  "
-                      f"{what[:80]}"
-                      + (f" [muted]{score}[/muted]" if score is not None else ""))
+                      f"[/bold] {sheet}  {role_col}{what[:80]}"
+                      + (f" [muted]{score}[/muted]" if score is not None else "")
+                      + (f" [muted]{tail}[/muted]" if tail.strip() else ""))
+    _notes(env)
+
+
+@pages_app.command("show")
+def pages_show_cmd(
+    case: str = typer.Argument(..., help="справа у будь-якому форматі"),
+    scan: str = typer.Argument("", help="одна сторінка: голе ім'я файлу"),
+    as_json: bool = typer.Option(False, "--json"),
+) -> None:
+    """Показати занесене про справу як воно лежить у сховищі."""
+    from nyshporka import ops as O
+
+    env = O.call("pages.show", {"case": case, "scan": scan})
+    if _answer(env, as_json):
+        return
+    console.print_json(data=env.data)
     _notes(env)
 
 
@@ -1193,8 +1258,17 @@ app.add_typer(records_app, name="records")
 @records_app.command("add")
 def records_add_cmd(
     case: str = typer.Argument(..., help="справа у будь-якому форматі"),
-    from_json: str = typer.Option("-", "--json",
-                                  help="файл із масивом записів; «-» — stdin"),
+    # ⚠ Вхід через `-f/--file`, як у `pages note-batch`. Доти `--json` тут
+    # означав ФАЙЛ, а в сусідній команді — машинний вивід: те саме слово в
+    # тому самому обліку робило дві протилежні речі.
+    file: Path = typer.Option(None, "-f", "--file",
+                              help="JSON-масив записів; без -f — читаємо stdin"),
+    replace: bool = typer.Option(False, "--replace",
+                                 help="🔴 стерти ВСІ наявні записи справи"),
+    confirm: int = typer.Option(-1, "--confirm",
+                                help="скільки записів дозволено стерти — "
+                                     "число беруть із відмови на --replace"),
+    as_json: bool = typer.Option(False, "--json"),
 ) -> None:
     """Занести розібрані акти структурою, а не прозою.
 
@@ -1204,10 +1278,11 @@ def records_add_cmd(
     """
     from nyshporka import ops as O
 
-    payload = (sys.stdin.read() if from_json == "-"
-               else Path(from_json).read_text(encoding="utf-8"))
-    env = O.call("records.add", {"case": case, "records": payload})
-    _answer(env)
+    payload = (file.read_text(encoding="utf-8") if file else sys.stdin.read())
+    env = O.call("records.add", {"case": case, "records": payload,
+                                 "replace": replace, "confirm": confirm})
+    if _answer(env, as_json):
+        return
     d = env.data
     console.print(f"✅ [bold]{d.get('shifra') or d.get('case')}[/bold] "
                   f"додано: {d.get('added', 0)} · оновлено: {d.get('updated', 0)}")
@@ -1216,12 +1291,35 @@ def records_add_cmd(
 
 @records_app.command("grep")
 def records_grep_cmd(
-    q: str = typer.Argument(..., help="прізвище"),
+    q: str = typer.Argument(..., help="прізвище або назва місця"),
     case: str = typer.Option("", "--case"),
+    role: str = typer.Option("", "--role", help=_ROLES_HELP),
+    rtype: str = typer.Option("", "--rtype", help=_RTYPES_HELP),
+    axis: str = typer.Option("name", "--axis", help="name — по прізвищу · "
+                                                   "place — по місцю"),
+    thresh: int = typer.Option(80, "--thresh", help="поріг схожості 50-100"),
     limit: int = typer.Option(50, "--limit"),
+    as_json: bool = typer.Option(False, "--json"),
 ) -> None:
-    """Знайти прізвище серед розібраних записів."""
-    pages_grep_cmd(q=q, where="records", case=case, limit=limit)
+    """Знайти прізвище серед розібраних записів — за роллю й типом акту."""
+    pages_grep_cmd(q=q, where="records", case=case, axis=axis, role=role,
+                   rtype=rtype, thresh=thresh, limit=limit, as_json=as_json)
+
+
+@records_app.command("show")
+def records_show_cmd(
+    case: str = typer.Argument(..., help="справа у будь-якому форматі"),
+    rid: str = typer.Argument(..., help="id запису — з `records grep`"),
+    as_json: bool = typer.Option(False, "--json"),
+) -> None:
+    """Показати один розібраний запис як він лежить у сховищі."""
+    from nyshporka import ops as O
+
+    env = O.call("pages.show", {"case": case, "rid": rid})
+    if _answer(env, as_json):
+        return
+    console.print_json(data=env.data)
+    _notes(env)
 
 
 @records_app.command("prep")

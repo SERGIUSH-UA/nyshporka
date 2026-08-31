@@ -125,6 +125,36 @@ def test_agent_docs_cover_the_whole_surface():
         f"і прочитає відмову як поламаний застосунок")
 
 
+def test_the_numbers_in_the_agent_docs_are_the_real_ones():
+    """🔴 Числа старіли тихіше за все інше в цій документації.
+
+    Перевірка імен tool'ів ловила прогалини й привидів, але «Операцій у
+    реєстрі 42» вона не бачила: рядок лишався правдоподібним, поки реєстр ріс
+    до сімдесяти з гаком. Агент читає з нього не арифметику, а ВИСНОВОК —
+    скільки роботи лишається за командним рядком, тобто чи варто туди йти
+    взагалі. Заниження в півтора раза відмовляє від половини застосунку.
+    """
+    import re
+    from pathlib import Path
+
+    text = (Path(__file__).resolve().parents[1]
+            / "docs" / "agents" / "surface.md").read_text(encoding="utf-8")
+    total, agent = len(O.all_ops()), len(O.for_agent())
+    want = {
+        r"Операцій у реєстрі \*\*(\d+)\*\*": total,
+        r"Перелік tool'ів показує \*\*(\d+)\*\*": agent,
+        r"\| \*\*усі (\d+)\*\* \|": total,
+        r"MCP — (\d+) операці": total - agent,
+    }
+    bad = []
+    for pattern, expected in want.items():
+        found = re.search(pattern, text)
+        assert found, f"рядок із числом зник із surface.md: {pattern}"
+        if int(found.group(1)) != expected:
+            bad.append(f"«{found.group(0)}» — насправді {expected}")
+    assert not bad, f"числа в surface.md розійшлися з реєстром: {bad}"
+
+
 def test_every_op_is_reachable_from_the_command_line():
     """CLI повний за побудовою: `nysh op <ім'я>` дістає будь-яку операцію.
 

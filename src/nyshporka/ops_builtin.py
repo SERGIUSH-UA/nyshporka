@@ -1075,6 +1075,32 @@ class SearchArgs(BaseModel):
                          description="рядків сусідства до кожного хіта "
                                      "(0 — лише сам рядок)")
     limit: int = Field(default=100, ge=1, le=500)
+    # 🗺 Вісь, а не булеве. Питання «хто з цього села трапляється в ЧУЖИХ
+    # книгах» не є підмножиною прізвищевого: село стоїть в іншому полі й
+    # приходить іншою формулою («мѣстечка Мястковки крестьянинъ»), тож хіт
+    # віддає інше `matched`. Одне поле замість двох булевих ховає ще й
+    # асиметрію імен у шарі даних (`places=` для сторінок, `place=` для
+    # записів) — переплутати їх означає фільтр, який мовчки не спрацював.
+    axis: Literal["name", "place"] = Field(
+        default="name",
+        description="по чому шукати: name — прізвище, place — місце. "
+                    "Лише where=pages|records")
+    # 🔴 Перелік, а не вільний рядок, і причина та сама, що в `pages.note`:
+    # вільний рядок приймає «батько», не матчить нічого й віддає НУЛЬ, а нуль
+    # читається як відповідь. Відмова переліком коштує одного ходу, тихий нуль
+    # закриває напрям.
+    role: Literal[
+        "", "child", "father", "mother", "godfather", "godmother",
+        "groom", "bride", "groom_father", "groom_mother", "bride_father",
+        "bride_mother", "deceased", "spouse", "witness", "priest", "midwife",
+        "head", "member", "convert", "sponsor", "other"] = Field(
+        default="",
+        description="лише where=records: «хто був БАТЬКОМ із цим прізвищем» — "
+                    "інше питання, ніж «хто був восприємником»")
+    rtype: Literal[
+        "", "birth", "marriage", "death", "conversion", "confession_entry",
+        "revision_entry", "tally", "other"] = Field(
+        default="", description="лише where=records: тип акту")
 
 
 class SweepArgs(BaseModel):
@@ -1115,7 +1141,24 @@ def search_run(a: SearchArgs) -> Envelope:
     знайшлось», а не «цього немає»: декодовано завжди меншу частину того, що є
     на диску. Тому у відповіді йде `coverage` — по скількох прогонах і скількох
     сторінках шукали. Без цього числа нуль читається як доведений.
+
+    🔴 Фільтр, який не діє в цій області, ВІДМОВЛЯЄТЬСЯ, а не ігнорується.
+    Проігнорований `role` віддає ШИРШУ вибірку, ніж просили, — і читач бере її
+    за звужену: «серед батьків не знайшлось» замість «не знайшлось узагалі».
+    Це та сама форма хибної відповіді, через яку відмовляє нерозпізнана область
+    пошуку нижче, тільки тихіша: там видно хоч якийсь текст, тут — правдоподібні
+    хіти не з тієї графи.
     """
+    if a.role and a.where != "records":
+        return fail(f"role фільтрує учасників розібраних записів, а шукаємо в "
+                    f"«{a.where}». Постав where=records або прибери role")
+    if a.rtype and a.where != "records":
+        return fail(f"rtype фільтрує розібрані записи, а шукаємо в "
+                    f"«{a.where}». Постав where=records або прибери rtype")
+    if a.axis == "place" and a.where == "decode":
+        return fail("вісь місця живе у виписаному й розібраному, а не в тексті "
+                    "прогонів: постав where=pages або where=records. По декоду "
+                    "село шукається звичайним запитом його назвою")
     if a.where == "decode":
         from nyshporka import htr_store
 
@@ -1204,29 +1247,48 @@ def search_run(a: SearchArgs) -> Envelope:
                 f"nysh cases bind")
         case_key = scope["key"]
 
+    # ⚠ Іменованими, і саме тому, що імена РІЗНІ: вісь місця у сторінках
+    # зветься `places`, у записах `place`. Прокид «як є» тут дав би фільтр,
+    # який мовчки не спрацював, — а мовчазний фільтр гірший за відсутній.
+    by_place = a.axis == "place"
     if a.where == "pages":
         res = query.grep_surnames(a.q, thresh=a.thresh, case_key=case_key,
-                                  limit=a.limit)
+                                  places=by_place, limit=a.limit)
     else:
         res = query.grep_records(a.q, thresh=a.thresh, case_key=case_key,
-                                 limit=a.limit)
+                                 role=a.role or None, rtype=a.rtype or None,
+                                 place=by_place, limit=a.limit)
     # 🔴 Знаменник тут такий самий обов'язковий, як у пошуку по декоду, — і
     # довго його не було саме тут, у гілці, найближчій до людини. «Не
     # знайшлось у виписаному» означає лише «серед того, що вже занесли оком»:
     # занесена завжди менша частина того, що на диску. Без цього числа нуль
     # читається як доведений нуль, хоч він про обсяг роботи.
     hits = res.get("hits") or []
+    # 🔴 Застосований фільтр — частина знаменника, а не оформлення. «Не
+    # знайшлось серед БАТЬКІВ» і «не знайшлось» — різні відповіді, і за другою
+    # закривають напрям, якого не перевіряли. Тому і в `coverage`, і в тексті
+    # нуля стоїть саме те звуження, з яким шукали.
     env = ok({"hits": hits, "total": res.get("total", len(hits)),
               "coverage": {"cases": res.get("cases") or 0,
                            "thresh": res.get("thresh", a.thresh),
-                           "stems": res.get("stems") or []}})
+                           "stems": res.get("stems") or [],
+                           "axis": a.axis, "role": a.role, "rtype": a.rtype}})
     if res.get("error"):
         env.warn("bad_query", str(res["error"]))
     elif not hits:
-        where = ("виписаних прізвищах" if a.where == "pages"
-                 else "учасниках розібраних записів")
+        if a.axis == "place":
+            where = ("виписаних місцях" if a.where == "pages"
+                     else "місцях розібраних записів")
+        else:
+            where = ("виписаних прізвищах" if a.where == "pages"
+                     else "учасниках розібраних записів")
+        narrowed = ""
+        if a.role:
+            narrowed += f", роль «{a.role}»"
+        if a.rtype:
+            narrowed += f", тип запису «{a.rtype}»"
         env.warn("zero_with_denominator",
-                 f"не знайшлось у {where}: переглянуто "
+                 f"не знайшлось у {where}{narrowed}: переглянуто "
                  f"{res.get('cases') or 0} справ")
     return env
 
@@ -1806,6 +1868,73 @@ def pages_status(a: PagesStatusArgs) -> Envelope:
     return env
 
 
+class PagesShowArgs(BaseModel):
+    case: str = Field(description="справа у будь-якому форматі")
+    scan: str = Field(default="", description="одна сторінка: голе ім'я файлу")
+    rid: str = Field(default="", description="один запис за id з `records grep`")
+
+
+# ⚠ `agent=False`, і це не приниження операції. Агентові ті самі дані вже
+# доступні пласко (`export.case`), а `rid` він бере з `search.run` — сирий дамп
+# додає йому не знання, а рядок у переліку, який модель дочитує щоразу. Форма
+# «як воно лежить у сховищі» потрібна людині: коли готують звіт і треба
+# показати запис цілком — із провенансом (`agent`, `noted`), якого пласка
+# виписка не несе, і з підсумками книги (`tally`), які вона виключає.
+@op("pages.show", summary="Показати занесене про справу як воно лежить у сховищі",
+    args=PagesShowArgs, mutates=False, agent=False, section="research")
+def pages_show(a: PagesShowArgs) -> Envelope:
+    """Сховище справи сирим виглядом: уся справа, одна сторінка або один запис."""
+    from nyshporka.pagestore import store
+
+    if a.scan and a.rid:
+        return fail("scan і rid — два різні питання: сторінка чи запис. "
+                    "Постав щось одне")
+    try:
+        ref = store.resolve_case(a.case)
+    except ValueError as exc:
+        return fail(str(exc))
+    cf = store.load_case(ref)
+    if cf is None:
+        env = ok({"case": ref.key, "shifra": ref.shifra,
+                  "pages": {}, "records": []})
+        env.warn("nothing_noted",
+                 f"про {ref.shifra} у сховищі ще нічого немає")
+        env.suggest("pages.status", "що в цій справі є на диску")
+        return env
+    if a.scan:
+        note = cf.pages.get(a.scan)
+        if note is None:
+            # 🔴 Перелік сусідів, а не голе «немає». Ключ сторінки різниться
+            # регістром розширення частіше, ніж здається (0030.JPG проти
+            # 0030.jpg), і без переліку відмову читають як «аркуш не дивились»,
+            # тобто йдуть його передивлятись.
+            known = sorted(cf.pages)[:10]
+            return fail(
+                f"сторінку «{a.scan}» у {ref.shifra} не заносили. "
+                f"Занесені: {', '.join(known) or '—'}"
+                f"{'…' if len(cf.pages) > 10 else ''}")
+        return ok({"case": ref.key, "shifra": ref.shifra,
+                   "page": note.model_dump(mode="json")})
+    if a.rid:
+        found = [r for r in cf.records if r.rid == a.rid]
+        if not found:
+            known = [r.rid for r in cf.records[:10]]
+            return fail(
+                f"запису rid={a.rid} у {ref.shifra} немає. "
+                f"Наявні: {', '.join(known) or '—'}"
+                f"{'…' if len(cf.records) > 10 else ''}")
+        return ok({"case": ref.key, "shifra": ref.shifra,
+                   "record": found[0].model_dump(mode="json")})
+    env = ok(cf.model_dump(mode="json"))
+    size = len(cf.pages) + len(cf.records)
+    if size > 500:
+        env.warn("big_dump",
+                 f"{len(cf.pages)} сторінок і {len(cf.records)} записів одним "
+                 f"шматком — для перегляду це забагато")
+        env.suggest("export.case", "ті самі дані таблицею, колонками")
+    return env
+
+
 class PageNoteArgs(BaseModel):
     case: str = Field(description="справа у будь-якому форматі")
     scan: str = Field(description="голе ім'я файлу скана: 0030.JPG")
@@ -1966,6 +2095,19 @@ def pages_note_batch(a: PageNoteBatchArgs) -> Envelope:
 class RecordsAddArgs(BaseModel):
     case: str = Field(description="справа у будь-якому форматі")
     records: str = Field(description="JSON-масив записів (Record)")
+    replace: bool = Field(
+        default=False,
+        description="🔴 стерти ВСІ наявні записи справи перед внесенням")
+    # 🔴 Підтвердження числом, а не другим булевим. Запит «так, я певен» поруч
+    # із «так, замінити» відповідається тим самим рухом і нічого не додає, а
+    # питати згоди тут нема як: та сама операція йде і в браузер, і в перелік
+    # агента, де діалогу немає взагалі. Число ж є в ЛИШЕ відмові — щоб його
+    # підставити, треба її прочитати, а прочитавши, побачити, скільки саме
+    # зникне. Сліпий повтор тієї самої команди не проходить.
+    confirm: int = Field(
+        default=-1,
+        description="скільки записів дозволено стерти — число беруть із "
+                    "відмови на replace")
 
 
 @op("records.add", summary="Занести розібрані записи джерела", args=RecordsAddArgs,
@@ -1999,9 +2141,25 @@ def records_add(a: RecordsAddArgs) -> Envelope:
             recs.append(Record.model_validate(item))
         except ValidationError as exc:
             errors.append({"index": i, "error": str(exc)[:400]})
-    report = store.add_records(ref, recs) if recs else store.MergeReport(path="")
+    had = 0
+    if a.replace:
+        cf = store.load_case(ref)
+        had = len(cf.records if cf else [])
+        if a.confirm != had:
+            return fail(
+                f"замінення зітре {had} наявних записів справи {ref.shifra} — "
+                f"повтори з confirm={had}, якщо саме цього хочеш")
+    report = (store.add_records(ref, recs, replace=a.replace) if recs
+              else store.MergeReport(path=""))
     env = ok({"case": ref.key, "shifra": ref.shifra, **report.as_dict(),
-              "ok": len(recs), "failed": len(errors), "errors": errors})
+              "ok": len(recs), "failed": len(errors), "errors": errors,
+              "erased": had if a.replace else 0})
+    if a.replace and had:
+        # Стерте називається числом і в успішній відповіді теж: підтвердження
+        # дає згоду, а не звіт, і читач мусить побачити, що саме сталось.
+        env.warn("records_replaced",
+                 f"стерто {had} наявних записів справи {ref.shifra}, "
+                 f"занесено натомість {len(recs)}")
     if errors:
         env.warn("some_records_refused",
                  f"{len(errors)} записів не пройшли перевірку — решта {len(recs)} "
