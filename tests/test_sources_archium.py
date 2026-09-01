@@ -89,24 +89,117 @@ def test_image_url_pads_the_id_into_a_shard(viewer_html: str) -> None:
     assert A.image_url(5) .endswith("/static/files/000/000005.jpg")
 
 
-def test_search_without_any_catalog_refuses_instead_of_returning_zero(
+@pytest.fixture(scope="module")
+def search_view() -> str:
+    """`View` живого пошуку — той самий конверт `{"Status":1,"View":"<html>"}`."""
+    return json.loads(
+        (FIX / "archium_search.json").read_text(encoding="utf-8"))["View"]
+
+
+def _live(tmp_path: Path, monkeypatch, view: str, *, pages: int = 1) -> tuple[Any, _Recorded]:
+    """Джерело без каталогу й із записаною відповіддю пошуку."""
+    from nyshporka.sources.http import Fetcher
+
+    monkeypatch.setattr(A.ArchiumSource, "bundled_catalog", staticmethod(lambda: None))
+    empty = json.dumps({"Status": 1, "View": ""})
+    body = json.dumps({"Status": 1, "View": view})
+    rec = _Recorded({rf"search/act/\?Limit=\d+&Page=[1-{pages}](?!\d)": body,
+                     r"search/act/": empty})
+    src = A.ArchiumSource(workspace=tmp_path,
+                          fetcher=Fetcher(base=A.BASE, delay=0.0, client=rec))
+    return src, rec
+
+
+def test_search_row_carries_shifra_and_viewer_id_together(search_view: str) -> None:
+    """🔥 Обидва в одному рядку — саме цього бракувало.
+
+    Адресу переглядача доти доводилось рахувати від опорної точки, а формула
+    має дрейф: літерні справи (2а, 704А) займають id, не займаючи номера, тож
+    далеко від опори вона промахується на десяток. Тут адреса приходить від
+    самого сайту разом із шифрою.
+    """
+    rows = A.parse_search(search_view)
+    assert len(rows) == 3
+    first = rows[0]
+    assert (first.fond, first.opys, first.spr) == ("127", "2", "53")
+    assert first.file_id == "935"
+    assert first.shifra == "ф.127 оп.2 спр.53"
+    # Обсяг — окремим полем: ним звіряють повноту завантаження, а в підписі він
+    # злитий з датою («15.06.1797, 6 аркушів»).
+    assert first.sheets == 6 and first.date == "15.06.1797"
+
+
+def test_search_without_a_catalog_asks_the_site_instead_of_refusing(
+        tmp_path: Path, monkeypatch, search_view: str) -> None:
+    """🔴 Головне в цьому джерелі — і те, що довго було зроблено навпаки.
+
+    Доти без каталогу джерело відмовлялось: вважалось, що сайт індексує лише
+    назви фондів і описів. Насправді заголовки справ він шукає, і відповідь
+    коштує один запит — тоді як порада «зібрати каталог обходом» це години. Для
+    ЦДІАК каталогу немає взагалі, тобто застосунок не вмів знайти в цьому архіві
+    жодної справи.
+    """
+    src, rec = _live(tmp_path, monkeypatch, search_view)
+    hits = src.search("Шупики")
+    assert [h.ref for h in hits] == ["file:935", "file:1155", "file:1477"]
+    assert hits[0].acquirable and hits[0].frames == 6
+    # Межа каналу їде з кожною знахідкою: за нею читається його нуль.
+    assert "лише оцифровані" in hits[0].note
+    assert any("Search=" in u for u in rec.asked)
+
+
+def test_the_fond_filter_is_applied_here_because_the_server_ignores_it(
+        tmp_path: Path, monkeypatch, search_view: str) -> None:
+    """🪤 Сервер приймає `FondNumber` і не застосовує його.
+
+    Заміряно: запит «1662» з фондом 127 віддає справи фонду 57. Якби ми
+    покладались на серверне звуження, видача чужого фонду читалась би як «ваша
+    справа знайшлась» — найдорожчий різновид хибного позитиву, бо шифра в
+    рядку виглядає правдоподібно.
+    """
+    src, _ = _live(tmp_path, monkeypatch, search_view)
+    assert len(src.live_search("Шупики", fond="127")) == 3
+    assert src.live_search("Шупики", fond="57") == []
+
+
+def test_a_zero_from_the_snapshot_is_checked_against_the_site(
+        tmp_path: Path, monkeypatch, search_view: str) -> None:
+    """🔴 Нуль каталогу — це нуль ЗРІЗУ, а не архіву.
+
+    Обхід міг спинитись на половині, а вкладений пак знято колись; справа,
+    додана після зрізу, для нього не існує. Питати після цього сам сайт коштує
+    один запит — і саме він відповідає про те, чого зріз не бачив.
+    """
+    from nyshporka.sources.http import Fetcher
+
+    cat = tmp_path / A.ArchiumSource.CATALOG_REL
+    cat.parent.mkdir(parents=True)
+    cat.write_text(
+        "fond_no\tfond_title\tinv_label\tfile_id\tcase_no\tdate\tsheets\tdescription\n"
+        "18\tЦеркви\tОпис 1\t5301\tСправа 1\t1881\t45\tЦерква, с. Авратин\n",
+        encoding="utf-8")
+    rec = _Recorded({r"search/act/": json.dumps({"Status": 1, "View": search_view})})
+    src = A.ArchiumSource(workspace=tmp_path,
+                          fetcher=Fetcher(base=A.BASE, delay=0.0, client=rec))
+
+    assert src.search("авратин")[0].ref == "file:5301"      # зріз відповів сам
+    assert not rec.asked, "поки каталог відповідає, сайт не турбуємо"
+
+    hits = src.search("Шупики")
+    assert [h.ref for h in hits] == ["file:935", "file:1155", "file:1477"]
+    assert "каталог мовчав" in hits[0].note
+
+
+def test_a_shifra_needs_the_catalog_and_the_refusal_names_what_works(
         tmp_path: Path, monkeypatch) -> None:
-    """🔴 Головне в цьому джерелі.
+    """За шифрою живий пошук не рятує: номера справи в заголовку немає.
 
-    Вбудований пошук сайту індексує лише назви фондів і описів — не заголовки
-    справ. Тому без каталогу шукати нема де, і мовчазний нуль читався б як «у
-    цьому архіві такого немає»: висновок, що закриває напрям пошуку й коштує
-    місяців. Ціна правильної поведінки — одне речення у відповіді.
-
-    ⚠ У звичайній установці ця гілка недосяжна: зріз каталогу їде разом із
-    пакетом. Але вона мусить лишатись робочою — пакет ставлять і врізаним, і з
-    підміненими даними, а мовчазний нуль звідти нічим не відрізнявся б від
-    чесного.
+    Тому відмова називає не лише обхід (години), а й канал, який працює зараз.
     """
     monkeypatch.setattr(A.ArchiumSource, "bundled_catalog", staticmethod(lambda: None))
     src = A.ArchiumSource(workspace=tmp_path)
-    with pytest.raises(SourceError, match="каталог"):
-        src.search("Борсуківці")
+    with pytest.raises(SourceError, match="слово з назви"):
+        src.find_case("127", "1078", "1662")
 
 
 def test_search_over_the_crawled_catalog(tmp_path: Path) -> None:

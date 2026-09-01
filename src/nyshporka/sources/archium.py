@@ -33,6 +33,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from urllib.parse import quote
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -109,6 +110,67 @@ def parse_cases(view_html: str) -> list[CaseRow]:
             date=date_node.text(strip=True) if date_node else "",
             description=desc,
             sheets=int(ark.group(1)) if ark else None))
+    return out
+
+
+@dataclass(frozen=True)
+class SearchRow:
+    """Знахідка живого пошуку сайту: шифра й viewer-id одним рядком.
+
+    🔥 Цінність саме в тому, що обидва тут разом. Формула «viewer-id = опора +
+    (номер справи − опора)» має дрейф — літерні справи (2а, 704А) займають id,
+    але не займають номера, — тож далеко від опорної точки вона бреше на
+    десяток. Пошук сайту віддає адресу без арифметики й без обходу.
+    """
+
+    fond: str
+    opys: str
+    spr: str
+    title: str
+    date: str
+    sheets: int | None
+    file_id: str
+
+    @property
+    def shifra(self) -> str:
+        return f"ф.{self.fond} оп.{self.opys} спр.{self.spr}"
+
+
+def parse_search(view_html: str) -> list[SearchRow]:
+    """Розбір видачі `/api/v1/search/act/`.
+
+    Шифра лежить окремими підписами («Фонд 127», «Опис 2», «Справа 53»), а не
+    рядком, тож збирається з них, а не вигризається регексом із заголовка.
+    """
+    out: list[SearchRow] = []
+    for row in _parser(view_html).css("div.row"):
+        left = row.css_first("div.left")
+        right = row.css_first("div.right")
+        if not left or not right:
+            continue
+        link = right.css_first("a")
+        m = _FILE_ID_RE.search(link.attributes.get("href", "") if link else "")
+        if not m:
+            continue
+        parts: dict[str, str] = {}
+        for span in left.css("span"):
+            text = span.text(strip=True)
+            key, _, value = text.partition(" ")
+            if value:
+                parts[key.lower()] = value.strip()
+        title_node = right.css_first("p.doc-title")
+        date_node = right.css_first("p.date")
+        date = date_node.text(strip=True) if date_node else ""
+        ark = _ARK_RE.search(date)
+        out.append(SearchRow(
+            fond=parts.get("фонд", ""), opys=parts.get("опис", ""),
+            spr=parts.get("справа", ""),
+            title=title_node.text(strip=True) if title_node else "",
+            # У підписі дата й обсяг стоять разом («1806, 16 аркушів»); обсяг
+            # виноситься в поле, бо ним звіряють повноту завантаження.
+            date=date.split(",")[0].strip(),
+            sheets=int(ark.group(1)) if ark else None,
+            file_id=m.group(1)))
     return out
 
 
@@ -414,21 +476,80 @@ class ArchiumSource:
             with gzip.open(info["path"], "rt", encoding="utf-8", newline="") as fh:
                 yield from csv.DictReader(fh, delimiter="\t")
 
+    #: Скільки сторінок живого пошуку гортати щонайбільше. Стеля навмисна:
+    #: канал точковий («Шупики метрична»), і сотня сторінок на запит з одного
+    #: поширеного слова — це вже не пошук справи, а обхід чужим коштом.
+    LIVE_PAGES = 5
+
+    def live_search(self, q: str, *, limit: int = 30, fond: str = "") -> list[SearchRow]:
+        """Пошук САЙТУ, без каталогу на диску: слово в заголовку → шифра + viewer-id.
+
+        🔴 Канал існує, і його довго не було в застосунку через хибний висновок,
+        що сайт заголовків справ не індексує. Індексує: `/api/v1/search/act/`
+        віддає рівно те, чого бракує, — фонд, опис, номер справи й `/files/<id>/`,
+        тобто адресу для завантажувача. Саме так знайшлась спр.144, тоді як
+        арифметика по опорній точці давала сусідній id.
+
+        🪤 `FondNumber` сервер приймає й ІГНОРУЄ: запит «1662» з фондом 127
+        віддає справи фонду 57. Тому фонд відсівається тут, на розібраних
+        рядках, — інакше звуження було б удаваним, а видача чужого фонду
+        читалась би як «ваша справа знайшлась».
+
+        ⚠ Шукає лише по оцифрованих і лише за текстом заголовка: номер справи в
+        заголовку не стоїть, тож спитати цей канал ШИФРОЮ не можна.
+        """
+        needle = (q or "").strip()
+        if not needle:
+            return []
+        want = _num(fond) if fond else None
+        out: list[SearchRow] = []
+        with self.http.client() as c:
+            for page in range(1, self.LIVE_PAGES + 1):
+                url = (f"/api/v1/search/act/?Limit={min(limit, 100)}&Page={page}"
+                       f"&Search={quote(needle)}&Type=digitized")
+                view = self.http.get(url, client=c).json().get("View", "") or ""
+                rows = parse_search(view)
+                out += [r for r in rows if want is None or _num(r.fond) == want]
+                # Пагінації в розмітці немає, тож кінець видно лише по неповній
+                # сторінці — і по ній же зупиняємось, не питаючи наступну.
+                if len(rows) < min(limit, 100) or len(out) >= limit:
+                    break
+        return out[:limit]
+
+    def _live_hits(self, q: str, *, limit: int, note: str) -> list[Hit]:
+        return [Hit(
+            source=self.id,
+            ref=f"file:{r.file_id}",
+            title=r.title[:200],
+            years=r.date,
+            shifra=r.shifra,
+            repo=self.repo,
+            archive=self.repo,
+            fond=r.fond,
+            frames=r.sheets,
+            acquirable=True,
+            note=note) for r in self.live_search(q, limit=limit)]
+
+    #: Що саме відповіло, коли відповів сайт. Примітка не косметична: у живого
+    #: каналу інша межа, ніж у каталогу, і за нею читається його нуль.
+    LIVE_NOTE = "живий пошук сайту · лише оцифровані · за словами заголовка"
+
     def search(self, q: str, *, limit: int = 30) -> list[Hit]:
-        """Пошук по каталогу справ: зібраному на місці або вкладеному в пакет.
+        """Пошук по каталогу справ: зібраному на місці, вкладеному — або живому.
 
         🔴 Порожній результат тут не є негативним результатом двічі. По-перше,
-        сайт не індексує заголовки справ, тож без каталогу шукати просто нема
-        де. По-друге, вкладений зріз старіє: архів додає описи, і «не
-        знайшлось» у ньому означає «не було на дату зрізу». Обидві межі
-        називаються у примітці кожної знахідки й у відмові.
+        вкладений зріз старіє: архів додає описи, і «не знайшлось» у ньому
+        означає «не було на дату зрізу». По-друге, каталогу може не бути зовсім.
+        Обидві межі називаються у примітці кожної знахідки й у відмові.
+
+        🔥 Тому там, де каталог мовчить, питається сам сайт. Доти відповіддю
+        була відмова з порадою зібрати каталог обходом — тобто години роботи
+        там, де на питання відповідає один запит. Для ЦДІАК каталогу немає
+        взагалі, і застосунок не вмів знайти жодної справи цього архіву.
         """
         kind, info = self.catalog_source()
         if kind == "none":
-            raise SourceError(
-                "каталог справ недоступний: ні зібраного обходом, ні вкладеного "
-                "в пакет. Вбудований пошук сайту індексує лише назви фондів і "
-                "описів, а не заголовки справ. Зібрати: `nysh crawl archium`.")
+            return self._live_hits(q, limit=limit, note=self.LIVE_NOTE)
         needle = _norm(q)
         if not needle:
             return []
@@ -457,6 +578,13 @@ class ArchiumSource:
                 note=((row.get("fond_title") or "")[:110] + note_tail).strip()))
             if len(out) >= limit:
                 break
+        if not out:
+            # 🔴 Нуль каталогу — це нуль ЗРІЗУ, а не архіву: обхід міг спинитись
+            # на половині, а вкладений пак узагалі знятий колись. Питати після
+            # цього сам сайт коштує один запит, і саме він відповідає про те,
+            # що додали після зрізу.
+            return self._live_hits(q, limit=limit,
+                                   note=f"{self.LIVE_NOTE} · каталог мовчав")
         return out
 
     def find_case(self, fond: str, opys: str, spr: str, *,
@@ -473,9 +601,15 @@ class ArchiumSource:
         """
         kind, _ = self.catalog_source()
         if kind == "none":
+            # ⚠ Живий пошук сайту тут НЕ рятує, і сказати про це треба одразу:
+            # він шукає за текстом заголовка, а номер справи в заголовку не
+            # стоїть. Тож замість самої лише поради «зберіть каталог» (години)
+            # називається канал, який працює зараз, — слово з назви справи.
             raise SourceError(
                 "каталог справ недоступний: ні зібраного обходом, ні вкладеного "
-                "в пакет. Зібрати: `nysh crawl archium`.")
+                "в пакет — а за шифрою сайт не шукає, лише за словами заголовка. "
+                "Зараз: `nysh find <слово з назви>` (живий пошук сайту). "
+                "Назавжди: `nysh crawl archium`.")
         if repo and repo != self.repo:
             return []
         want = (_num(fond), _num(opys), _num(spr))
