@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import platform
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -1642,6 +1643,8 @@ def htr_env_cmd(as_json: bool = typer.Option(False, "--json")) -> None:
 @htr_app.command("install")
 def htr_install(
     no_cuda: bool = typer.Option(False, "--no-cuda", help="не чіпати torch"),
+    cuda: str = typer.Option("", "--cuda", metavar="ТЕГ",
+                             help="поставити колесо вручну (cu126, cu128) замість детекту"),
 ) -> None:
     """Зібрати середовище рушіїв — окремий інтерпретатор поруч із простором.
 
@@ -1657,13 +1660,18 @@ def htr_install(
 
     _need("htr")
 
+    if cuda and not re.fullmatch(r"cu\d{3,4}", cuda):
+        # Тег іде в URL індексу PyTorch. Помилка тут дала б не відмову, а
+        # неіснуючий індекс і довге незрозуміле падіння `uv`.
+        console.print(f"[err]невідома форма тега: {cuda} — очікується cu126, cu128 тощо[/err]")
+        raise typer.Exit(code=2)
     try:
         venv = doc.engine_venv()
     except WorkspaceError as exc:
         console.print(f"[err]{exc}[/err]")
         raise typer.Exit(code=2) from None
     try:
-        rep = E.setup(venv, with_cuda=not no_cuda)
+        rep = E.setup(venv, with_cuda=not no_cuda, force_tag=cuda)
     except E.ToolMissing as exc:
         # 🔴 Не трасою стека: `uv` і `git` — не залежності пакета, тож у того,
         # хто ставив `pip install`, їх може не бути зовсім, і саме він

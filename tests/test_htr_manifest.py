@@ -116,6 +116,35 @@ def test_cuda_index_is_built_from_the_tag(man):
     assert man.cuda_index_url("cu126").endswith("/cu126")
 
 
+@pytest.mark.parametrize("cap, driver, expect", [
+    ("8.6", "581.15", ("cu126", "ok")),        # RTX 3050 з репорту issue #7
+    ("8.6", "", ("cu126", "ok")),              # драйвер невідомий — не привід відмовляти
+    ("", "581.15", (None, "no_capability")),
+    ("6.1", "581.15", (None, "out_of_range")),
+    ("8.6", "460.89", (None, "driver_old:527.41")),
+])
+def test_cuda_pick_says_not_only_what_but_why(man, cap, driver, expect):
+    """🔴 Причина потрібна не менше за тег.
+
+    Одне «не вийшло» на три стани й довелось розплутувати в issue #7: людина з
+    робочою RTX 3050 читала «карта поза відомими межами» там, де насправді її
+    просто не спитали. Далі за цією причиною будується текст поради, а вони
+    різні: оновити драйвер, поставити колесо вручну, лишитись на CPU.
+    """
+    assert man.cuda_pick(cap, driver) == expect
+
+
+def test_driver_is_compared_by_parts_not_as_a_number(man):
+    """🔴 Версія драйвера — не число: на Linux вона з ТРЬОХ частин.
+
+    `float("550.54.15")` кидає помилку, тобто порівняння числом відсіяло б
+    кожну Linux-машину як «драйвер невідомий» — рівно там, де він новіший за
+    потрібний.
+    """
+    assert man.cuda_pick("8.6", "550.54.15")[0] == "cu126"
+    assert man.cuda_pick("8.6", "470.223.02")[0] is None
+
+
 # ── ізоляція від пакета ──────────────────────────────────────────────────────
 def _toplevel_imports(path: Path) -> set[str]:
     tree = ast.parse(path.read_text(encoding="utf-8"))

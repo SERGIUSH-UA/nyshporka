@@ -151,15 +151,24 @@ def _torch() -> Check:
     import torch
 
     if not torch.cuda.is_available():
+        # 🔴 Карту питає драйвер, а не цей torch. На CPU-збірці він про CUDA не
+        # знає за побудовою, тож «карти немає» від нього — не відповідь, а тиша.
+        # Порада теж мусить бути перевірною: доти тут стояло «htr install добере
+        # колеса», і на Windows це вело в глухий кут — та сама CPU-збірка не
+        # давала `htr install` побачити карту, тобто рада поверталась у себе.
+        from nyshporka.htr import gpu
+        from nyshporka.htr import manifest as _M
+
+        card = gpu.detect_card()
+        tag, reason = _M.active().cuda_pick(card.capability if card else "",
+                                            card.driver if card else "")
+        seen = card.label() if card else "карти драйвер не показує"
+        hint = (f"nysh htr install — доставить колесо {tag} під цю карту" if tag
+                else gpu.explain(card, reason))
         return Check("Прискорення (GPU)", "warn",
                      f"torch {torch.__version__}, CUDA недоступна "
-                     f"(зібрано під {torch.version.cuda or 'CPU'})",
-                     # ⚠ Тут стояв `doctor` із прапорцем «--gpu», якого немає й
-                     # ніколи не було. Порада, що вказує в порожнє, гірша за
-                     # відсутню: людина виконує її, бачить помилку і вирішує, що
-                     # зламався застосунок. Колеса під карту добирає саме
-                     # `htr install` (`_ensure_cuda` читає compute capability).
-                     "nysh htr install добере колеса під вашу карту")
+                     f"(зібрано під {torch.version.cuda or 'CPU'}) · {seen}",
+                     hint)
     name = torch.cuda.get_device_name(0)
     cap = ".".join(str(x) for x in torch.cuda.get_device_capability(0))
     vram = torch.cuda.get_device_properties(0).total_memory / 2**30

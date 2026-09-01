@@ -14,7 +14,9 @@
 3. **CUDA обирається за картою, а не зашивається.** Індекс `cu126` підібраний
    під sm_75; на новіших картах таке колесо не працює. Карта поза відомими
    межами лишається на CPU: повільно, але робочо — краще, ніж колесо, яке не
-   запускається.
+   запускається. ⚠ Про карту питається ДРАЙВЕР (`htr/gpu.py` → `nvidia-smi`), а
+   не torch: у CPU-колеса, яке ставиться кроком вище, CUDA немає за побудовою,
+   тож його відповідь «карти немає» нічого не означає (issue #7).
 """
 from __future__ import annotations
 
@@ -27,6 +29,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+from nyshporka.htr import gpu
 from nyshporka.htr import manifest as M
 
 #: Версія контракту. Піднімається, коли міняється склад файлу, щоб застосунок
@@ -147,7 +150,7 @@ def _run(cmd: list[str]) -> None:
 
 
 def setup(venv: Path, *, man: M.Manifest | None = None, with_cuda: bool = True,
-          uv: str = "uv") -> EnvReport:
+          uv: str = "uv", force_tag: str = "") -> EnvReport:
     """Створити або доповнити середовище. Ідемпотентно: наявне не чіпається."""
     man = man or M.active()
     _need_tool(uv, "ним створюється й наповнюється середовище рушіїв",
@@ -193,30 +196,61 @@ def setup(venv: Path, *, man: M.Manifest | None = None, with_cuda: bool = True,
         print("✓ пакети на місці")
 
     if with_cuda:
-        _ensure_cuda(venv, man, uv=uv)
+        _ensure_cuda(venv, man, uv=uv, force_tag=force_tag)
 
     return inspect(venv, man)
 
 
-def _ensure_cuda(venv: Path, man: M.Manifest, uv: str = "uv") -> None:
-    """Доставити CUDA-збірку torch, якщо карта відома й колесо для неї існує."""
+def _ensure_cuda(venv: Path, man: M.Manifest, uv: str = "uv", force_tag: str = "") -> None:
+    """Доставити CUDA-збірку torch за карткою, яку показує ДРАЙВЕР, не torch.
+
+    🔴 Доти capability питали в самого torch — щойно поставленого кроком вище з
+    PyPI, тобто на Windows у CPU-колесі, де CUDA немає взагалі. `device_count()`
+    віддавав 0, карта «зникала», і людина з робочою RTX 3050 читала «карти не
+    видно» (issue #7). На Linux це працювало випадково: там дефолтне колесо
+    тягне бандл `nvidia-*-cu12`. Питає тепер `htr/gpu.py` — через `nvidia-smi`,
+    який приїжджає з драйвером і про torch не знає.
+
+    ⚠ Приймач кроку — НЕ код повернення `uv`, а повторна проба: колесо може
+    стати без помилки й усе одно не побачити карту.
+    """
     py = venv_python(venv)
     if _probe(py, "import torch; print(torch.cuda.is_available())") == "True":
         print("✓ torch уже бачить карту")
         return
-    cap = _probe(py, "import torch;"
-                     "print('%d.%d' % torch.cuda.get_device_capability(0))"
-                     " if torch.cuda.device_count() else print('')")
-    tag = man.cuda_tag(cap or "")
-    if not tag:
-        # Не помилка. Задача впирається в ядра, не в карту: на CPU все працює,
-        # просто повільніше. Неправильне колесо не працювало б узагалі.
-        print("⚠ карти не видно або вона поза відомими межами — лишаю CPU-збірку "
-              "(читання піде ~2 хв/стор замість ~20 с)")
+
+    if force_tag:
+        tag, what = force_tag, "вибрано вручну"
+    else:
+        card = gpu.detect_card()
+        picked, reason = man.cuda_pick(card.capability if card else "",
+                                       card.driver if card else "")
+        if not picked:
+            # Не помилка. Задача впирається в ядра, не в карту: на CPU все
+            # працює, просто повільніше. Неправильне колесо не працювало б
+            # узагалі, тому навмання не ставимо — але й не мовчимо про причину.
+            print("⚠ " + gpu.explain(card, reason))
+            return
+        tag, what = picked, card.label() if card else "карта"
+
+    print(f"③ доставляю torch під карту ({what} → {tag})…")
+    try:
+        _run([uv, "pip", "install", "--python", str(py), "--reinstall",
+              *man.torch_default, "--index-url", man.cuda_index_url(tag)])
+    except subprocess.CalledProcessError:
+        # ⚠ Не трасою назовні: набір CUDA-індексів PyTorch зсувається від релізу
+        # до релізу, а матриця з версією torch ніяк не звірена — тобто колеса
+        # `tag` під ту версію, яку резолвнув `uv`, на індексі може вже не бути.
+        # CPU-збірка при цьому лишається робочою, і команда це має сказати.
+        print(f"⚠ колесо {tag} не встало з {man.cuda_index_url(tag)} — {gpu.CPU_NOTE}.\n"
+              f"  Ймовірно, під цю версію torch колеса {tag} на індексі вже немає: "
+              f"спробуйте інший тег через `nysh htr install --cuda …`")
         return
-    print(f"③ доставляю torch під карту (compute {cap} → {tag})…")
-    _run([uv, "pip", "install", "--python", str(py), "--reinstall",
-          *man.torch_default, "--index-url", man.cuda_index_url(tag)])
+    if _probe(py, "import torch; print(torch.cuda.is_available())") == "True":
+        print(f"✓ карта підхопилась ({tag})")
+    else:
+        print(f"⚠ колесо {tag} стало, але torch усе одно не бачить карту — {gpu.CPU_NOTE}.\n"
+              f"  Це вже не детект: пишіть в issue разом із виводом `nysh doctor`")
 
 
 def write_contract(path: Path, venv: Path, *, model_path: Path | None = None,
@@ -272,10 +306,13 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--contract", help=f"куди писати {ENV_FILENAME}")
     ap.add_argument("--check", action="store_true", help="лише огляд, нічого не ставити")
     ap.add_argument("--no-cuda", action="store_true", help="не чіпати torch")
+    ap.add_argument("--cuda", default="", metavar="ТЕГ",
+                    help="поставити колесо вручну, напр. cu126 (замість детекту карти)")
     a = ap.parse_args(argv)
 
     venv = Path(a.venv)
-    rep = inspect(venv) if a.check else setup(venv, with_cuda=not a.no_cuda)
+    rep = inspect(venv) if a.check else setup(venv, with_cuda=not a.no_cuda,
+                                              force_tag=a.cuda)
     print(f"\npython     : {rep.python or '—'}")
     print(f"kraken     : {rep.kraken or '—'}")
     print(f"torch      : {rep.torch or '—'}  cuda={rep.cuda} capability={rep.capability or '—'}")

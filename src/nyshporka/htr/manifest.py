@@ -22,6 +22,21 @@ BUILTIN = Path(__file__).resolve().parent / "data" / "engines.yaml"
 _SPEC_BREAK = ("@", "==", ">=", "<=", "~=", "!=", ">", "<", "[", ";")
 
 
+def _version(text: str) -> tuple[int, ...]:
+    """Версія драйвера в порівнюваний вигляд: `"527.41"` → `(527, 41)`.
+
+    ⚠ Не `float`: за ним `527.9` вийшло б СТАРШИМ за `527.41`, і guard відсіяв
+    би робочу машину.
+    """
+    parts = str(text or "").strip().split(".")
+    out: list[int] = []
+    for p in parts:
+        if not p.isdigit():
+            break
+        out.append(int(p))
+    return tuple(out)
+
+
 def dist_name(spec: str) -> str:
     """Ім'я пакета з pip-специфікації: `kraken==7.0.2` → `kraken`.
 
@@ -110,22 +125,38 @@ class Manifest:
     def engines_for_script(self, script: str) -> tuple[Engine, ...]:
         return tuple(e for e in self.engines if e.script == script)
 
-    def cuda_tag(self, capability: str) -> str | None:
-        """Compute capability картки → тег колеса torch (`cu126`).
+    def cuda_pick(self, capability: str, driver: str = "") -> tuple[str | None, str]:
+        """Карта → (тег колеса, причина). Причина потрібна не менше за тег.
 
-        Порожньо, якщо карта поза відомими межами: краще лишити CPU-збірку, ніж
-        поставити колесо, яке не запуститься. Мовчазний CPU повільний, але
-        робочий; неправильний CUDA-білд не працює взагалі.
+        🔴 Тег без причини — це рівно та відмова, яку доводилось пояснювати в
+        issue #7: одне «не вийшло» на три різні стани («capability не прочиталась»,
+        «карта поза межами», «драйвер застарий»), з яких лише один справді про
+        карту. Причини: `ok` · `no_capability` · `out_of_range` · `driver_old:<версія>`.
+
+        Порожній тег означає CPU-збірку, і це не аварія: краще лишити повільне,
+        але робоче, ніж поставити колесо, яке не запуститься взагалі.
         """
         try:
             cap = float(capability)
         except (TypeError, ValueError):
-            return None
+            return None, "no_capability"
+        have = _version(driver)
         for row in self.cuda_matrix:
             lo, hi = float(row["min_capability"]), float(row["max_capability"])
-            if lo <= cap <= hi:
-                return str(row["tag"])
-        return None
+            if not lo <= cap <= hi:
+                continue
+            need_s = str(row.get("min_driver") or "")
+            need = _version(need_s)
+            # ⚠ Драйвер перевіряється, лише коли ВІДОМИЙ. Невідомий — не привід
+            # відмовляти: колесо або поїде, або скаже про це своєю помилкою.
+            if need and have and have < need:
+                return None, f"driver_old:{need_s}"
+            return str(row["tag"]), "ok"
+        return None, "out_of_range"
+
+    def cuda_tag(self, capability: str) -> str | None:
+        """Compute capability картки → тег колеса torch (`cu126`), без причини."""
+        return self.cuda_pick(capability)[0]
 
     def cuda_index_url(self, tag: str) -> str:
         return self.cuda_index.format(tag=tag)
