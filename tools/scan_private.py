@@ -256,6 +256,25 @@ def _git(*args: str) -> str:
 Item = tuple[str, str, str]
 
 
+def _ignored() -> set[str]:
+    """Шляхи, які git ігнорує — тобто ті, що в репозиторій не потраплять НІКОЛИ.
+
+    ⚠ Ворота від цього не слабшають: те, що справді може поїхати в коміт,
+    перевіряють `iter_staged()` (індекс) і режим `--history` (уся історія), а
+    ігнорований файл не проходить ні там, ні там. Натомість без цього кроку
+    особистий чернетковий файл у корені робить прогін воріт вічно червоним — а
+    ворота, які завжди червоні, перестають означати «щось не так».
+
+    Порожня множина, якщо git недоступний або це не репозиторій: не пропускаємо
+    нічого, тобто помиляємось у бік перевірки.
+    """
+    try:
+        out = _git("ls-files", "--others", "--ignored", "--exclude-standard", "-z")
+    except (RuntimeError, OSError):
+        return set()
+    return {n for n in out.split("\0") if n}
+
+
 def iter_worktree() -> list[Item]:
     """🔴 `SKIP_DIRS` підрізає ОБХІД, а не відсіює результат.
 
@@ -264,6 +283,7 @@ def iter_worktree() -> list[Item]:
     воріт, які стоять у pre-commit. Тут дешевше не «не читати», а «не заходити».
     """
     out: list[Item] = []
+    skip = _ignored()
     for dirpath, dirnames, filenames in os.walk(ROOT):
         dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
         base = Path(dirpath)
@@ -271,6 +291,8 @@ def iter_worktree() -> list[Item]:
             if fn in SKIP_NAMES:
                 continue
             p = base / fn
+            if p.relative_to(ROOT).as_posix() in skip:
+                continue
             if p.suffix.lower() not in TEXT_SUFFIXES:
                 continue
             try:

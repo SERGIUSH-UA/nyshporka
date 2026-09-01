@@ -136,6 +136,22 @@ def test_local_declares_only_what_it_can(tmp_path):
     assert not base.supports(src, "fetch") and not base.supports(src, "search")
 
 
+def test_a_source_that_claims_address_can_actually_be_asked(tmp_path):
+    """🔴 Заявлена можливість мусить мати чим виконатись.
+
+    `caps` — це обіцянка застосунку, а не опис класу: за нею він вирішує, кого
+    питати про справу за шифрою. Розбіжність між обіцянкою й методом виглядала б
+    як `AttributeError` посеред пошуку, тобто як поламка застосунку на нічого не
+    винному запиті. Зворотний бік теж перевіряється: метод без обіцянки ніхто не
+    покличе, і джерело мовчатиме там, де вміє відповісти.
+    """
+    for src in load().all():
+        has = isinstance(src, base.CaseFinder)
+        claims = base.supports(src, "address")
+        assert has == claims, (
+            f"{src.id}: caps каже address={claims}, а find_case={has}")
+
+
 # ── покажчик ─────────────────────────────────────────────────────────────────
 def test_manifest_finds_frames_by_index_label():
     """🔴 Покажчик відповідає «де метрики мого села» без завантаження."""

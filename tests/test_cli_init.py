@@ -212,8 +212,11 @@ def test_the_doctor_asks_whose_clan_we_are_looking_for(
     форми сама, половина з них не спадає на думку, і нуль із неповного набору
     виглядає як нуль по всьому роду.
 
-    ⚠ `nysh init` профілю НЕ створює — і це нормальний стан свіжої установки,
-    тож рівень тут `warn`, а не `fail`.
+    ⚠ Але питати про це в ПОРОЖНЬОМУ просторі — не перевірка, а докір: `nysh
+    init` профілю не створює й не може (прізвища ніхто ще не називав), тож ⚠
+    з'являлось у кожного в першу хвилину життя простору. Попередження, яке
+    видає щойно виконана успішна дія, вчить не читати попереджень. Тому доки
+    матеріалу немає — це крок; щойно з'явився — попередження.
     """
     from nyshporka.core import workspace as W
     from nyshporka.setup import doctor
@@ -221,11 +224,18 @@ def test_the_doctor_asks_whose_clan_we_are_looking_for(
     monkeypatch.setenv(W.ENV_WORKSPACE, str(tmp_path / "простір"))
     res = runner.invoke(app, ["init", "--yes", "--preset", "researcher"])
     assert res.exit_code == 0, res.stdout
+    assert "profile init" in res.stdout, "крок мусить бути названий одразу"
     W.reset()
 
     got = doctor._profile()
     # Порада звіряється початком, а не дослівно: у ній стоїть ще й місце під
     # аргумент («<Прізвище>»), бо команда без нього не виконається — а порада,
     # яку не можна скопіювати й запустити, це та сама половина відповіді.
+    assert got.level == "ok" and got.fix.startswith("nysh profile init"), got
+
+    # А тепер у просторі з'явилась справа — і мовчати вже не можна.
+    (tmp_path / "простір" / "data" / "raw" / "ДАХмО_315" / "spr-8433").mkdir(
+        parents=True, exist_ok=True)
+    got = doctor._profile()
     assert got.level == "warn" and got.fix.startswith("nysh profile init"), got
     W.reset()

@@ -290,7 +290,7 @@ def parse_address(value: str) -> Address | None:
                    fond=str(fond), opys=str(opys), spr=str(spr))
 
 
-def find_by_address(addr: Address) -> list[dict]:
+def find_by_address(addr: Address) -> list[dict[str, Any]]:
     """Записи бібліотеки, що збігаються з адресою.
 
     ⚠ Опис звіряється лише там, де він у записі є: більшість тек опису не несе,

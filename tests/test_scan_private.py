@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import importlib.util
+import subprocess
 import sys
 from pathlib import Path
 
@@ -91,6 +92,29 @@ def test_this_repository_is_clean():
         findings += scan.scan_text(rel, text, where)
     assert not findings, "\n".join(
         f"{f.path}:{f.line_no} [{f.rule.id}] {f.excerpt}" for f in findings[:20])
+
+
+def test_git_ignored_files_are_not_scanned_in_the_worktree(tmp_path, monkeypatch):
+    """Ігнорований файл у репозиторій не потрапить ніколи — і не має червонити.
+
+    🔴 Це не послаблення воріт, а умова того, щоб вони лишались увімкненими:
+    один особистий чернетковий файл у корені робив прогін вічно червоним, і
+    кожен прогін доводилось запускати з `--ignore`. Те, що справді може поїхати
+    в коміт, ловлять інші два режими — індекс і історія, — і саме вони тут
+    лишаються недоторканими.
+    """
+    secret = 'ROOT = Path("E:/Projects/MeGen")'
+    (tmp_path / ".gitignore").write_text("draft.md\n", encoding="utf-8")
+    (tmp_path / "draft.md").write_text(secret, encoding="utf-8")
+    (tmp_path / "kept.md").write_text(secret, encoding="utf-8")
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+
+    monkeypatch.setattr(scan, "ROOT", tmp_path)
+    seen = {rel for rel, _text, _where in scan.iter_worktree()}
+    assert "draft.md" not in seen, "ігнороване git'ом не сканується в дереві"
+    assert "kept.md" in seen, "неігнороване лишається під перевіркою"
+    # А сам рядок і далі є приватним — ворота не «навчились» його пропускати.
+    assert scan.scan_text("draft.md", secret)
 
 
 def test_this_repository_history_is_clean():

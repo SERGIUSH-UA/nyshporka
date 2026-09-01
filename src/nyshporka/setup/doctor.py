@@ -25,8 +25,12 @@ import os
 import shutil
 import sys
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
+
+if TYPE_CHECKING:
+    from nyshporka.htr.env import EnvReport
 
 Level = Literal["ok", "warn", "fail"]
 
@@ -141,22 +145,30 @@ def _torch() -> Check:
 
     Тому перевіряється не наявність, а `is_available()`: «встановлено» тут
     нічого не означає.
-    """
-    from importlib.util import find_spec
 
-    if find_spec("torch") is None:
-        return Check("Прискорення (GPU)", "warn", "torch не встановлено",
+    🔴 І питається torch СЕРЕДОВИЩА РУШІЇВ, а не той, що поруч із самим
+    застосунком. Доти перевірка дивилась `find_spec("torch")` у власному
+    процесі, а радила `nysh htr install`, який ставить torch в ІНШИЙ
+    інтерпретатор — тобто порада поверталась у себе: виконавши її, людина бачила
+    той самий рядок. Читання йде в `.venv_htr`, і осмислене питання лише про
+    нього; torch поруч із застосунком у читанні не бере участі взагалі.
+    """
+    from nyshporka.htr import gpu
+
+    rep = _engine_report()
+    if rep is None:
+        return Check("Прискорення (GPU)", "warn", "простір не визначено")
+    if not rep.torch:
+        # ⚠ Шлях тут не називається: його вже назвав рядок про рушії, і той
+        # самий шлях двічі поспіль читається як дві різні поломки.
+        return Check("Прискорення (GPU)", "warn",
+                     "torch у середовищі рушіїв немає",
                      "nysh htr install — читання працюватиме й на процесорі, "
                      "просто ~2 хв на сторінку замість ~20 с")
-    import torch
 
-    if not torch.cuda.is_available():
+    if not rep.cuda:
         # 🔴 Карту питає драйвер, а не цей torch. На CPU-збірці він про CUDA не
         # знає за побудовою, тож «карти немає» від нього — не відповідь, а тиша.
-        # Порада теж мусить бути перевірною: доти тут стояло «htr install добере
-        # колеса», і на Windows це вело в глухий кут — та сама CPU-збірка не
-        # давала `htr install` побачити карту, тобто рада поверталась у себе.
-        from nyshporka.htr import gpu
         from nyshporka.htr import manifest as _M
 
         card = gpu.detect_card()
@@ -166,14 +178,11 @@ def _torch() -> Check:
         hint = (f"nysh htr install — доставить колесо {tag} під цю карту" if tag
                 else gpu.explain(card, reason))
         return Check("Прискорення (GPU)", "warn",
-                     f"torch {torch.__version__}, CUDA недоступна "
-                     f"(зібрано під {torch.version.cuda or 'CPU'}) · {seen}",
-                     hint)
-    name = torch.cuda.get_device_name(0)
-    cap = ".".join(str(x) for x in torch.cuda.get_device_capability(0))
-    vram = torch.cuda.get_device_properties(0).total_memory / 2**30
-    return Check("Прискорення (GPU)", "ok",
-                 f"{name} · CUDA {torch.version.cuda} · sm_{cap} · {vram:.1f} ГБ")
+                     f"torch {rep.torch} у рушіях, CUDA недоступна · {seen}", hint)
+    card = gpu.detect_card()
+    bits = [card.name if card else "", f"torch {rep.torch}",
+            f"sm_{rep.capability}" if rep.capability else ""]
+    return Check("Прискорення (GPU)", "ok", " · ".join(b for b in bits if b))
 
 
 #: Змінна середовища для тих, хто тримає рушії деінде.
@@ -207,19 +216,45 @@ def engine_venv() -> Path:
     return root / _ENGINE_VENV_NAMES[0]
 
 
+@lru_cache(maxsize=1)
+def _engine_report() -> EnvReport | None:
+    """Один огляд середовища рушіїв на прогін доктора; `None` — простору немає.
+
+    ⚠ Кеш не косметичний: `inspect()` це десяток запусків чужого інтерпретатора
+    (на Windows — секунди), а питають його ДВІ перевірки — рушії й прискорення.
+    Доктор живе один прогін, тож кеш на процес нічого не встигає застарити.
+    """
+    from nyshporka.core.workspace import WorkspaceError
+    from nyshporka.htr import env as henv
+
+    try:
+        return henv.inspect(engine_venv())
+    except WorkspaceError:
+        return None
+
+
 def _engines() -> Check:
     """Середовище рушіїв — окремий інтерпретатор.
 
     Те, що встановлена сама Нишпорка, про нього не каже нічого: там свій пін
     `kraken==7.0.2` під патчі й свій torch.
     """
-    from nyshporka.htr import env as henv
-
-    rep = henv.inspect(engine_venv())
+    rep = _engine_report()
+    if rep is None:
+        return Check("Рушії читання", "warn", "простір не визначено")
     if not rep.ok:
         why = "; ".join(rep.problems) or (
             f"бракує: {', '.join(rep.missing)}" if rep.missing else "не зібране")
-        return Check("Рушії читання", "warn", why, "nysh htr install")
+        # ⚠ Сказано прямо, що середовище живе В ПРОСТОРІ. Інакше в людини з
+        # другим дослідженням це читається як «ви ще не ставили», хоч поруч усе
+        # стоїть, — а ваги при цьому спільні на машину, тобто розкладка
+        # непослідовна, і мовчати про це дорожче, ніж визнати.
+        venv = engine_venv()
+        if str(venv) not in why:      # «немає інтерпретатора» шлях уже назвав
+            why = f"{why} ({venv})"
+        return Check("Рушії читання", "warn", why,
+                     "nysh htr install — рушій ставиться окремо для КОЖНОГО "
+                     "простору (~2.5 ГБ); ваги при цьому спільні на машину")
     bits = [f"kraken {rep.kraken}" if rep.kraken else "",
             f"torch {rep.torch}" if rep.torch else "",
             "CUDA" if rep.cuda else "CPU"]
@@ -227,13 +262,20 @@ def _engines() -> Check:
 
 
 def _models() -> Check:
+    """⚠ Шлях названо навмисно: ваги лежать ГЛОБАЛЬНО, одні на машину.
+
+    Поруч стоїть рядок про рушії, які ставляться в кожен простір окремо. Доки
+    жоден із двох не каже, де саме він шукає, ця різниця виглядає як випадковість
+    («моделі є, а рушія немає»), і людина шукає ваду там, де її нема.
+    """
     from nyshporka.setup import packs
 
+    where = packs.target_dir("model").parent
     have = packs.installed()
     if not have:
-        return Check("Моделі письма", "warn", "жодної не завантажено",
+        return Check("Моделі письма", "warn", f"жодної не завантажено ({where})",
                      "nysh models get")
-    return Check("Моделі письма", "ok", ", ".join(sorted(have)))
+    return Check("Моделі письма", "ok", f"{', '.join(sorted(have))} · {where}")
 
 
 def _profile() -> Check:
@@ -255,11 +297,48 @@ def _profile() -> Check:
 
     try:
         p = active()
-    except (ProfileError, WorkspaceError) as exc:
+    except WorkspaceError as exc:
+        return Check("Профіль дослідження", "warn", str(exc).splitlines()[0],
+                     "nysh profile init <Прізвище>", op="profile.set")
+    except ProfileError as exc:
+        if not _has_material():
+            # 🔴 Порожній простір не має народжуватись поламаним. `nysh init`
+            # профілю не створює (і не може: прізвища ніхто ще не називав), тож
+            # ⚠ з'являлось у КОЖНОГО в першу хвилину життя простору — а
+            # попередження, яке видає щойно зроблена дія, вчить не читати
+            # попереджень. У браузері це вже крок чекліста, а не поломка.
+            return Check("Профіль дослідження", "ok",
+                         "ще не задано — наступний крок, а не поламка",
+                         "nysh profile init <Прізвище>", op="profile.set")
+        # А от коли матеріал уже є, мовчати не можна: без профілю всі написання
+        # доводиться пригадувати самому, а рушій калічить саме середину слова.
         return Check("Профіль дослідження", "warn", str(exc).splitlines()[0],
                      "nysh profile init <Прізвище>", op="profile.set")
     return Check("Профіль дослідження", "ok",
                  f"{p.display or p.name} · написань: {len(p.all_spellings())}")
+
+
+def _has_material() -> bool:
+    """Чи є в просторі бодай щось, до чого профіль стосується.
+
+    Дивиться на диск, а не в реєстр справ: реєстр з'являється лише після
+    `nysh cases build`, тобто щойно завантажена справа для нього не існує — і
+    відповідь «порожньо» була б неправдою рівно там, де робота вже почалась.
+    """
+    from nyshporka.core.workspace import WorkspaceError, workspace
+
+    try:
+        root = workspace().root
+    except WorkspaceError:
+        return False
+    for rel in ("data/raw", "data/pages", "reports/htr"):
+        p = root / rel
+        try:
+            if p.is_dir() and any(p.iterdir()):
+                return True
+        except OSError:
+            continue
+    return False
 
 
 
@@ -343,6 +422,11 @@ def _active_sections() -> frozenset[str] | None:
 
 
 def run() -> list[Check]:
+    # 🔴 Кеш огляду рушіїв живе рівно один прогін. У демоні процес не вмирає
+    # тижнями, і без цього рядка доктор показував би стан, який був на першому
+    # відкритті сторінки, — тобто відповідав би «рушіїв немає» тому, хто щойно
+    # їх поставив і натиснув «перевірити ще раз».
+    _engine_report.cache_clear()
     out: list[Check] = []
     active = _active_sections()
     for fn in CHECKS:

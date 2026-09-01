@@ -629,7 +629,7 @@ def _address_answer(a: CatalogSearchArgs, addr: Any) -> Envelope | None:
     """
     from nyshporka.library import find_by_address, load_library
     from nyshporka.pagestore import store
-    from nyshporka.sources.base import SourceError, supports
+    from nyshporka.sources.base import CaseFinder, SourceError, supports
 
     hits: list[dict[str, Any]] = []
     searched: list[str] = []
@@ -687,28 +687,32 @@ def _address_answer(a: CatalogSearchArgs, addr: Any) -> Envelope | None:
     for f in fonds:
         searched.append(f"registry:{f['id']}")
         try:
-            row, path = R.registry_row(f["repo"], f["fond"], addr.opys, addr.spr, "")
+            # ⚠ Не `row`: тим іменем вище названо рядок БІБЛІОТЕКИ (:650), і
+            # спільне ім'я на дві різні структури — це не лише плутанина в
+            # читанні, а й розбіжність типів, на якій падала перевірка.
+            reg_row, path = R.registry_row(f["repo"], f["fond"], addr.opys, addr.spr, "")
         except Exception as exc:
             unavailable.append({"source": f"registry:{f['id']}",
                                 "why": f"{type(exc).__name__}: {exc}"})
             continue
         basis.append({"source": f"registry:{f['id']}", "kind": "реєстр опису",
                       "taken": _mtime_day(path)})
-        if row is None:
+        if reg_row is None:
             continue
         registry = {"fond_id": f["id"], "label": f.get("label") or "",
-                    "row": row, "registry": str(path)}
+                    "row": reg_row, "registry": str(path)}
         # ⚠ Імена полів беруться з реєстру, а не вгадуються: роки лежать двома
         # колонками, а адреса — трьома різними (дзеркало, Commons, покажчик).
-        y1, y2 = str(row.get("year_from") or ""), str(row.get("year_to") or "")
+        y1 = str(reg_row.get("year_from") or "")
+        y2 = str(reg_row.get("year_to") or "")
         years = y1 if y1 == y2 else "-".join(x for x in (y1, y2) if x)
-        url = str(row.get("archium_url") or row.get("commons_url")
-                  or row.get("duck_url") or "")
+        url = str(reg_row.get("archium_url") or reg_row.get("commons_url")
+                  or reg_row.get("duck_url") or "")
         hits.append({"source": f"registry:{f['id']}", "ref": f"case:{addr.as_text()}",
-                     "title": str(row.get("title") or ""),
-                     "years": years, "place": str(row.get("cat_place") or ""),
+                     "title": str(reg_row.get("title") or ""),
+                     "years": years, "place": str(reg_row.get("cat_place") or ""),
                      "shifra": addr.as_text(),
-                     "frames": R.expected_frames(row) or None,
+                     "frames": R.expected_frames(reg_row) or None,
                      "acquirable": bool(url), "note": "рядок опису", "url": url,
                      "repo": f["repo"], "archive": f["repo"], "fond": addr.fond})
 
@@ -727,6 +731,15 @@ def _address_answer(a: CatalogSearchArgs, addr: Any) -> Envelope | None:
                     "source": src.id,
                     "why": "шукає лише за текстом заголовка — за шифрою його "
                            "спитати нічим"})
+            continue
+        if not isinstance(src, CaseFinder):
+            # Джерело заявило `address`, а методу не має. Мовчазний пропуск
+            # зробив би його нуль невидимим, а виклик — впав би `AttributeError`
+            # посеред пошуку; тут воно просто називається невідповіддю.
+            unavailable.append({
+                "source": src.id,
+                "why": "заявляє пошук за шифрою, але не вміє його виконати — "
+                       "це вада джерела, а не відповідь про справу"})
             continue
         try:
             got = src.find_case(addr.fond, addr.opys, addr.spr, repo=addr.repo)
@@ -2869,6 +2882,42 @@ def _warn_uncovered(env: Envelope, p: Any) -> Envelope:
     return env
 
 
+def _warn_stems(env: Envelope, p: Any) -> Envelope:
+    """Яких основ бракує — і що саме через це не шукається.
+
+    🔴 Дореформена орфографія відділена від решти навмисно. Доти вона стояла
+    поруч із польською в одному списку й з одним текстом («цими написаннями
+    прізвище не шукатиметься»), тобто подавалась як ще одна необов'язкова
+    орфографія. Насправді для справ Російської імперії до 1918 року вона
+    ЄДИНА орфографія джерела: метрики, сповідки, ревізії писані нею суцільно.
+    Профіль без цієї основи покриває весь той матеріал на нуль — і саме це
+    речення в попередженні мусить стояти, бо інакше людина відкладає крок,
+    ціна якого — всі знахідки XIX століття.
+    """
+    from nyshporka.core.profile import prereform_hint
+
+    stems = dict(env.data.get("stems") or {})
+    if not stems.get("ru_prereform"):
+        hint, doubt = prereform_hint(stems.get("uk") or stems.get("ru_modern") or "")
+        how = (f" Основа тут схожа на «{hint}» — задати: "
+               f"`nysh profile init {p.display or p.name} --orth ru_prereform "
+               f"--paradigm {p.paradigm_id}`."
+               + (f" ⚠ {doubt}." if doubt else "") if hint else
+               " Основу треба взяти з самого документа: перенести її правилом "
+               "не можна (ѣ, и/і, ъ ставились не за сучасним написанням).")
+        env.warn("stem_prereform",
+                 "основи на ru_prereform немає — а це основна орфографія "
+                 "джерел до 1918 року: метрики, сповідки й ревізії писані нею "
+                 "суцільно, тобто по них пошук не працюватиме зовсім." + how)
+    if not stems.get("pl"):
+        # ⚠ Окремо й тихіше: латинка потрібна не в кожному дослідженні —
+        # римо-католицькі метрики, шляхетські виводи, польські архіви.
+        env.warn("stems_partial",
+                 "основи на pl немає — латинські написання (костельні книги, "
+                 "шляхетські справи) не шукатимуться")
+    return _warn_uncovered(env, p)
+
+
 class ProfileSetArgs(BaseModel):
     display: str = Field(description="прізвище, як воно пишеться: Сікорський")
     name: str = Field(default="", description="ключ профілю; типово — з прізвища")
@@ -2903,8 +2952,12 @@ def profile_set(a: ProfileSetArgs) -> Envelope:
     from nyshporka.core.workspace import WorkspaceError
 
     try:
+        # 🔴 «Поля не було» ≠ «поле порожнє». Форма надсилає `stems` завжди й
+        # тому авторитетна; командний рядок його не надсилає взагалі — і саме
+        # там мовчазне «порожньо» стирало основу, задану попереднім прогоном.
+        sent = "stems" in a.model_fields_set
         res = save(a.name, a.display, paradigm=a.paradigm, orth=a.orth,
-                   stems=dict(a.stems), roots=list(a.roots),
+                   stems=dict(a.stems) if sent else None, roots=list(a.roots),
                    substrings=list(a.substrings))
     except (ProfileError, WorkspaceError) as exc:
         env = fail(str(exc))
@@ -2923,15 +2976,7 @@ def profile_set(a: ProfileSetArgs) -> Envelope:
         env.warn("not_active",
                  f"профіль «{wrote.name}» записано, але шукається зараз інший — "
                  f"активний задає `fallback` у файлі")
-    missing = [o for o in ("ru_prereform", "pl")
-               if not (env.data.get("stems") or {}).get(o)]
-    if missing:
-        # ⚠ Не помилка, а межа знайденого: без основи на дореформену орфографію
-        # метрики XIX ст. просто не шукаються, і мовчати про це не можна.
-        env.warn("stems_partial",
-                 f"основи не задано для: {', '.join(missing)} — цими "
-                 f"написаннями прізвище не шукатиметься")
-    return _warn_uncovered(env, wrote)
+    return _warn_stems(env, wrote)
 
 
 class ProfileSourceArgs(BaseModel):

@@ -452,7 +452,11 @@ def init(
     console.print(f"✅ готово: {root}")
     if preset:
         console.print(f"[muted]частини: {preset} · змінити — `nysh sections`[/muted]")
-    console.print("[muted]далі: `nysh look <тека зі сканами>` або `nysh serve`[/muted]")
+    # ⚠ Профіль названо тут, а не лишено доктору: інакше єдиним місцем, де про
+    # нього дізнаються, лишається попередження — тобто перше, що бачить людина
+    # після успішного `init`, це ⚠ про крок, якого їй ніхто не пропонував.
+    console.print("[muted]далі: `nysh profile init <Прізвище>` · "
+                  "`nysh look <тека зі сканами>` · `nysh serve`[/muted]")
 
 
 @app.command()

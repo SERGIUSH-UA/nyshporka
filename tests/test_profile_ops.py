@@ -109,8 +109,74 @@ def test_a_missing_stem_is_named_out_loud(space):
     """
     env = _call("profile.set", {"display": "Ліщинський"})
     codes = [w.code for w in env.warnings]
-    assert "stems_partial" in codes
+    assert "stem_prereform" in codes and "stems_partial" in codes
     assert "ru_prereform" in " ".join(w.text for w in env.warnings)
+
+
+def _warn(env, code: str) -> str:
+    return next(w.text for w in env.warnings if w.code == code)
+
+
+def test_adding_a_stem_does_not_drop_the_one_already_there(space):
+    """🔴 Порада, яка стирає зроблену роботу, гірша за мовчання.
+
+    Другий прогін `profile init` з іншою орфографією — це рівно те, що радить
+    попередження про `ru_prereform`. Доти він стирав основу, задану першим:
+    командний рядок основ не надсилає взагалі, а збереження читало це як
+    «форма надіслала порожньо, отже зітри». Число написань падало з 13 до 10, і
+    жодного слова про це не було.
+    """
+    env = _call("profile.set", {"display": "Василенко", "paradigm": "noun_ko",
+                                "orth": "uk"})
+    before = len(env.data["spellings"])
+    env = _call("profile.set", {"display": "Василенко", "paradigm": "noun_ko",
+                                "orth": "ru_prereform"})
+    assert set(env.data["stems"]) >= {"uk", "ru_prereform"}, env.data["stems"]
+    assert len(env.data["spellings"]) > before
+
+    # ⚠ А форма, яка картину НАДСИЛАЄ, лишається авторитетною: інакше очищене
+    # поле не можна було б очистити.
+    env = _call("profile.set", {"display": "Василенко", "paradigm": "noun_ko",
+                                "orth": "uk", "stems": {"uk": "Василенк"}})
+    assert set(env.data["stems"]) == {"uk"}
+
+
+def test_the_prereform_gap_is_not_one_orthography_among_others(space):
+    """🔴 Дореформена — це орфографія САМОГО ДЖЕРЕЛА, а не ще одне написання.
+
+    Доти вона стояла з польською в одному рядку й з одним текстом, тобто
+    звучала як необов'язкова примітка. Для справ Російської імперії до 1918
+    року вона єдина: метрики, сповідки й ревізії писані нею суцільно, і профіль
+    без цієї основи покриває весь той матеріал на нуль. Текст мусить називати
+    наслідок, інакше крок відкладають — а ціна відкладання це всі знахідки XIX
+    століття.
+    """
+    env = _call("profile.set", {"display": "Ліщинський"})
+    text = _warn(env, "stem_prereform")
+    assert "1918" in text and "не працюватиме" in text
+    # Латинка — окремо й тихіше: вона потрібна не в кожному дослідженні.
+    assert "pl" in _warn(env, "stems_partial")
+
+
+def test_a_stem_that_cannot_diverge_comes_with_a_ready_command(space):
+    """Підказка дається лише там, де вгадувати нема чого.
+
+    «Василенк» дореформеною пишеться так само побуквенно, тож команду можна
+    подати готовою. А в «Ліщинськ» стоять `і` та `и`, які між шарами
+    розходяться, — там підказки немає й бути не може: вгадана основа мовчки
+    викидає з пошуку половину написань.
+    """
+    env = _call("profile.set", {"display": "Василенко", "paradigm": "noun_ko"})
+    text = _warn(env, "stem_prereform")
+    assert "Василенк" in text and "--orth ru_prereform" in text
+    # ⚠ …але «и» має не один відповідник, і про це сказано прямо: мовчазна
+    # підказка тут перетворила б здогад на факт.
+    assert "ы" in text and "Лысенко" in text
+
+    env = _call("profile.set", {"display": "Ліщинський", "name": "l"})
+    text = _warn(env, "stem_prereform")
+    assert "--orth ru_prereform" not in text
+    assert "з самого документа" in text
 
 
 def test_a_second_profile_lands_next_to_the_first(space):

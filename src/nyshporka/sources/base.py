@@ -174,15 +174,27 @@ class Source(Protocol):
 
     def search(self, q: str, *, limit: int = 30) -> list[Hit]: ...
 
-    def find_case(self, fond: str, opys: str, spr: str, *,
-                  repo: str = "") -> list[Hit]: ...
-
     def browse(self, ref: str | None = None) -> list[Node]: ...
 
     def manifest(self, ref: str) -> Manifest: ...
 
     def fetch(self, ref: str, dest: Path, *, frames: tuple[int, int] | None = None,
               on_progress: ProgressFn | None = None) -> FetchResult: ...
+
+
+@runtime_checkable
+class CaseFinder(Protocol):
+    """Джерело, яке вміє `address` — знайти справу за самою лише шифрою.
+
+    🔴 Окремо від `Source`, і це та сама домовленість, що вище: можливість
+    оголошується через `caps`. Доти `find_case` стояв у спільному контракті й
+    вимагав методу від УСІХ, хоч уміє його одне джерело з п'яти — тобто змушував
+    писати рівно ті заглушки, яких контракт просить не писати. Мовчки це не
+    минулось: чотири джерела перестали проходити перевірку типів.
+    """
+
+    def find_case(self, fond: str, opys: str, spr: str, *,
+                  repo: str = "") -> list[Hit]: ...
 
 
 def supports(src: object, cap: Capability) -> bool:

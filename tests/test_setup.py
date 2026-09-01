@@ -251,15 +251,64 @@ def test_doctor_checks_the_silent_failures() -> None:
             "Рушії читання", "Моделі письма"} <= names
 
 
-def test_gpu_check_reports_availability_not_presence() -> None:
+def _engine_state(monkeypatch, **kw) -> None:
+    """Підставити огляд середовища рушіїв, не збираючи його."""
+    from nyshporka.htr.env import EnvReport
+
+    monkeypatch.setattr(doctor, "_engine_report",
+                        lambda: EnvReport(ok=True, python=Path("py"), **kw))
+
+
+def test_gpu_check_reports_availability_not_presence(monkeypatch) -> None:
     """🔴 CPU-torch не падає — він рахує вп'ятеро довше.
 
-    Тому «torch встановлено» не є відповіддю: перевірка мусить називати
-    `is_available()`, інакше різниця між картою й процесором виглядає як
-    «сьогодні гальмує».
+    Тому «torch встановлено» не є відповіддю: різниця між картою й процесором
+    інакше виглядає як «сьогодні гальмує».
     """
-    src = Path(doctor.__file__).read_text(encoding="utf-8")
-    assert "cuda.is_available()" in src
+    _engine_state(monkeypatch, torch="2.13.0+cpu", cuda=False)
+    assert doctor._torch().level == "warn"
+
+    _engine_state(monkeypatch, torch="2.13.0+cu126", cuda=True, capability="7.5")
+    got = doctor._torch()
+    assert got.level == "ok" and "7.5" in got.detail
+
+
+def test_gpu_check_asks_the_environment_that_actually_reads(monkeypatch) -> None:
+    """🔴 Порада не має повертатись у себе.
+
+    Доти перевірка дивилась torch у процесі САМОГО застосунку, а радила
+    `nysh htr install`, який ставить його в інший інтерпретатор — тобто людина,
+    виконавши пораду, бачила той самий рядок. Читання йде в середовищі рушіїв,
+    і питання осмислене лише про нього.
+    """
+    _engine_state(monkeypatch, torch="", cuda=False)
+    got = doctor._torch()
+    assert got.level == "warn" and "руші" in got.detail
+    assert "htr install" in got.fix
+
+
+def test_the_engine_environment_is_inspected_once_per_run(monkeypatch, tmp_path) -> None:
+    """Огляд середовища — це десяток запусків чужого інтерпретатора.
+
+    Його питають дві перевірки (рушії й прискорення), тож без спільного огляду
+    доктор платив би цю ціну двічі за прогін.
+    """
+    from nyshporka.htr import env as henv
+
+    calls: list[Path] = []
+    monkeypatch.setattr(doctor, "engine_venv", lambda: tmp_path)
+    monkeypatch.setattr(henv, "inspect",
+                        lambda venv: calls.append(venv) or henv.EnvReport(ok=True))
+    doctor._engine_report.cache_clear()
+    doctor._engine_report()
+    doctor._engine_report()
+    assert calls == [tmp_path]
+    # 🔴 …але рівно один ПРОГІН: у демоні процес живе тижнями, і кеш, що пережив
+    # прогін, відповідав би «рушіїв немає» тому, хто щойно їх поставив.
+    doctor.run()
+    doctor._engine_report()
+    doctor._engine_report.cache_clear()
+    assert len(calls) > 1
 
 
 def test_cuda_tag_comes_from_the_manifest() -> None:

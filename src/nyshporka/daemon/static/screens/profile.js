@@ -92,8 +92,16 @@ function stemGaps(d) {
   const have = d.stems || {};
   const miss = (d.orthographies || []).filter((o) => !have[o]);
   if (!miss.length) return '';
-  return `<p class="muted">⚠ ${t('prof.gaps')}: <span class="mono">${
-    miss.map(esc).join(' · ')}</span></p>`;
+  // 🔴 Дореформена — окремим рядком, а не в спільному переліку. Для справ до
+  // 1918 року вона орфографія САМОГО ДЖЕРЕЛА, тобто без неї покриття не
+  // «неповне», а нульове; у спільному списку це читалось як дрібниця.
+  const prereform = miss.includes('ru_prereform')
+    ? `<p class="warn">⚠ ${t('prof.gaps.prereform')}</p>` : '';
+  const rest = miss.filter((o) => o !== 'ru_prereform');
+  const others = rest.length
+    ? `<p class="muted">⚠ ${t('prof.gaps')}: <span class="mono">${
+      rest.map(esc).join(' · ')}</span></p>` : '';
+  return prereform + others;
 }
 
 function paradigmLabel(d, id) {
