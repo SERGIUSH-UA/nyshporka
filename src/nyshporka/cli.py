@@ -246,10 +246,20 @@ def find(q: str = typer.Argument(..., help="село, прізвище, слов
     _print_address(env.data.get("address"))
     hits = env.data.get("hits") or []
     for h in hits:
-        head = " · ".join(x for x in (h.get("shifra"), h.get("years")) if x)
+        head = " · ".join(x for x in (h.get("shifra"), h.get("years"),
+                                      h.get("place")) if x)
+        pad = f"  {'':<{len(h['source'])}}  "
         console.print(f"  [bold]{h['source']}[/bold]  {h['title']}")
-        console.print(f"  {'':<{len(h['source'])}}  [muted]{head}[/muted]")
-        console.print(f"  {'':<{len(h['source'])}}  [muted]{h['ref']}[/muted]")
+        console.print(f"{pad}[muted]{head}[/muted]")
+        console.print(f"{pad}[muted]{h['ref']}[/muted]")
+        # 🔴 Місце, примітка й пряме посилання доїжджали до конверта, але в
+        # терміналі не друкувались — тобто джерело, яке відповідає «книги цього
+        # СЕЛА, ось адреса копії», у CLI показувало саму лише шифру. Заразом це
+        # єдине місце, де видно межу відповіді («з 271 за цією назвою»).
+        if h.get("note"):
+            console.print(f"{pad}[muted]{h['note']}[/muted]")
+        if h.get("url"):
+            console.print(f"{pad}[muted]{h['url']}[/muted]")
     cov = env.data.get("coverage") or {}
     # 🔴 Знаменник друкується завжди, і найважливіший він саме тоді, коли
     # знахідок нуль: без нього «нічого не знайшлось» читається як «цього не
@@ -292,12 +302,18 @@ def get(source: str = typer.Argument(..., help="id джерела"),
         ref: str = typer.Argument(..., help="адреса справи чи плівки"),
         out: Path = typer.Option(..., "--out", help="куди складати кадри"),
         frames: str = typer.Option("", "--frames",
-                                   help="діапазон кадрів «12-80»; порожньо = всі")) -> None:
+                                   help="діапазон кадрів «12-80»; порожньо = всі"),
+        why: str = typer.Option("", "--why",
+                                help="навіщо ця справа — лягає в паспорт теки")) -> None:
     """Завантажити справу або плівку.
 
     Спершу друкується маніфест і лише потім починається качання: справа буває
     на кілька гігабайтів, і питання «скільки це» мусить мати відповідь ДО, а не
     після — перервана закачка лишає теку в невизначеному стані.
+
+    🔴 Поруч із кадрами лягає паспорт: джерело, адреса, час і звірка «обіцяно /
+    взято». Доти команда лишала на диску самі пікселі — тобто теку невідомого
+    походження, у якій наступна сесія не знала ні звідки вона, ні чи повна.
     """
     from nyshporka.sources.base import SourceError
 
@@ -349,6 +365,29 @@ def get(source: str = typer.Argument(..., help="id джерела"),
     # сам діапазон, а не обсяг справи.
     want = (rng[1] - rng[0] + 1) if rng else man.frames
     got = res.frames + res.skipped
+
+    # 🔴 Той самий приймач лягає на диск, а не лише на екран. Числа «обіцяно /
+    # взято» живуть рівно одну сесію, а тека лишається — і без них наступний,
+    # хто її відкриє, не має способу дізнатись, чи вона повна.
+    from nyshporka.cases.acquire import patch_meta, provenance
+
+    passport = provenance(source=src.id, ref=ref, url=str(man.meta.get("url") or ""),
+                          promised=want, got=got, why=why)
+    passport["title"] = man.title
+    if rng:
+        passport["frames_range"] = f"{rng[0]}-{rng[1]}"
+    claimed = man.meta.get("shifra") or {}
+    if isinstance(claimed, dict) and any(claimed.values()):
+        # ⚠ Саме `claimed`, а не `shifra`: це те, що каже сторінка джерела, і
+        # звірити його оком ще ніхто не звіряв. Записане під іменем справжньої
+        # шифри, воно стало б у реєстрі фактом — а помилка на один номер
+        # приписує теці чужу справу.
+        passport["shifra_claimed"] = claimed
+    try:
+        patch_meta(res.dest, passport)
+    except OSError as exc:      # диск є, кадри лягли — паспорт не критичний
+        console.print(f"[warn]⚠ паспорт не записався: {exc}[/warn]")
+
     if want is None:
         # ⚠ Мовчазний «✓» тут був би найгіршим із варіантів: він читається як
         # доведена повнота. Нуль без знаменника не є доказом повноти.
@@ -711,6 +750,8 @@ def case_cmd(
     year_to: int = typer.Option(0, "--to", help="рік кінця"),
     place: str = typer.Option("", "--place", help="село, повіт, губернія"),
     note: str = typer.Option("", "--note"),
+    film: str = typer.Option("", "--film",
+                             help="номер плівки, коли шифру ще не встановлено"),
     adopt: bool = typer.Option(False, "--adopt",
                                help="взяти теку під облік, якщо вона лежить "
                                     "поза простором"),
@@ -731,12 +772,16 @@ def case_cmd(
 
     env = O.call("case.register", {
         "case_dir": case_dir, "shifra": shifra, "title": title,
-        "doc_type": doc_type, "place": place, "note": note,
+        "doc_type": doc_type, "place": place, "note": note, "film": film,
         "year_from": year_from or None, "year_to": year_to or None,
         "adopt": adopt})
     _answer(env)
     sc = env.data["sidecar"]
-    console.print(f"✅ [bold]{sc['shifra']}[/bold] — {sc.get('title') or 'без назви'}")
+    # ⚠ Тека без шифри теж описана, і заголовок відповіді мусить це казати
+    # прямо: «✅ без назви» на неототожненому матеріалі читалось би як успішно
+    # заведена справа.
+    head = sc.get("shifra") or f"плівка {sc.get('film') or '?'} · шифру ще не встановлено"
+    console.print(f"✅ [bold]{head}[/bold] — {sc.get('title') or 'без назви'}")
     if sc.get("year_from") or sc.get("place"):
         console.print(f"   [muted]{sc.get('place') or ''} "
                       f"{sc.get('year_from') or ''}"
@@ -942,6 +987,13 @@ app.add_typer(cases_app, name="cases")
 # опису. Модуль існував, але зареєстрований не був: команди `nysh geog …` не
 # існувало, хоч код і повідомлення на неї вже посилались (глухий кут у сенсі
 # `test_no_dead_ends`).
+# ⛪ Парафії й зведені книги: канал, якого немає в описі — чия це церква
+# і які села всередині книги повіту. Стоїть поруч із газетиром: той веде від
+# села до фондів одного архіву, цей — до парафій у всіх архівах покажчика.
+from nyshporka.parish.cli import app as parish_app  # noqa: E402
+
+app.add_typer(parish_app, name="parish")
+
 from nyshporka.geog.cli import app as geog_app  # noqa: E402
 
 app.add_typer(geog_app, name="geog")

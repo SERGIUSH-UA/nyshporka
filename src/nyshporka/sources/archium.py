@@ -810,7 +810,11 @@ class ArchiumSource:
         meta = case_meta(html)
         return Manifest(source=self.id, ref=ref, title=self._title(ident),
                         frames=len(pages),
+                        # ⚠ Адреса переглядача — у маніфесті, а не збирається
+                        # тим, хто його читає: інакше знання про будову адрес
+                        # цього сайту жило б у двох місцях і розійшлося б.
                         meta={"image_ids": [i for i, _ in pages],
+                              "url": f"{self.base}/file-viewer/{ident}/",
                               "shifra": {"fond": meta.fond, "opys": meta.opys,
                                          "spr": meta.spr} if meta else {}})
 

@@ -285,3 +285,31 @@ def test_a_guessed_script_is_said_out_loud(space: Path, monkeypatch) -> None:
     got = PL.build(case)
     assert got.script == "latin"
     assert any("вгадано" in w for w in got.warnings)
+
+
+# ── шифра, якої ще немає ─────────────────────────────────────────────────────
+def test_material_without_a_shifra_is_scolded(tmp_path: Path) -> None:
+    """Тека без опису — це справді «прогін ляже нічиїм», і про це кажуть."""
+    from nyshporka.cloud.plan import _unidentified
+
+    assert _unidentified(tmp_path) == ""
+
+
+def test_a_shifra_that_is_not_established_yet_is_a_decision_not_a_lapse(
+        tmp_path: Path) -> None:
+    """🔴 «Шифри немає» і «шифру ще не встановлено» — різні стани.
+
+    Другий заявлений у паспорті теки: матеріал знайдено за селом у дзеркалі
+    плівок, номер плівки відомий, фонд і опис — ще ні. Докоряти тут означає
+    вимагати вигадати шифру, тобто внести в облік неправду — рівно те, чого
+    заявлений стан і має уникнути.
+    """
+    import json
+
+    from nyshporka.cloud.plan import _unidentified
+
+    (tmp_path / "_source.json").write_text(
+        json.dumps({"unidentified": True, "film": "007548742"}),
+        encoding="utf-8")
+    why = _unidentified(tmp_path)
+    assert "ще не встановлено" in why and "007548742" in why

@@ -272,7 +272,12 @@ def _sidecar_near(rel: str) -> dict[str, Any]:
                 # парафії Фараонівка лишались «без назви» при повному описі поруч.
                 title = " ".join(x for x in (str(m.get("church") or "").strip(),
                                              str(m.get("place") or "").strip()) if x)
-            if not title:
+            # ⚠ Заявлений стан «ще не ототожнено» тримає сайдкар навіть без
+            # назви: там нічого називати, зате є те, чим матеріал адресується
+            # (номер плівки). Мовчазний пропуск повертав би такі теки в «без
+            # шифри · <ім'я теки>» — тобто ховав би рішення дослідника.
+            stated = bool(m.get("unidentified")) or bool(str(m.get("film") or "").strip())
+            if not title and not stated:
                 continue
             # Роки лежать під трьома різними іменами: `dates` (archium),
             # `years` (ДАОО: "1849-1854"), `year_from`/`year_to` (наші сайдкари).
@@ -288,6 +293,9 @@ def _sidecar_near(rel: str) -> dict[str, Any]:
                     "year_from": yf, "year_to": yt or yf,
                     "place": str(m.get("place") or m.get("church") or "").strip(),
                     "opys": str(m.get("opys") or m.get("inv") or "").strip().lstrip("0") or None,
+                    "film": str(m.get("film") or "").strip(),
+                    "unidentified": bool(m.get("unidentified")),
+                    "note": str(m.get("note") or m.get("why") or "").strip(),
                     "desc_source": "source_json" if name == "_source.json" else "meta_json"}
     return {}
 
@@ -574,12 +582,24 @@ def collect_rows(index: LibraryIndex | None = None) -> tuple[list[CaseRow], list
         key = f"@disk/{rel}"
         name = rel.rsplit("/", 1)[-1]
         repo = rel.split("/")[2].split("_")[0].upper() if len(rel.split("/")) > 2 else ""
+        # 🔴 «Ще не ототожнено» і «сайдкар мовчить» — різні рядки в переліку.
+        # Перший — рішення дослідника (плівка відома, фонд і опис ще ні), і
+        # підпис «без шифри · <ім'я теки>» ховав саме те, чим цей матеріал
+        # адресується. Тека переїжджає, ім'я нічого не каже — а номер плівки
+        # каже все.
+        side = _sidecar_near(rel)
+        film = str(side.get("film") or "").strip()
+        stated = bool(side.get("unidentified"))
         rows[key] = CaseRow(
-            key=key, kind="unfiled", shifra=f"без шифри · {name}",
+            key=key, kind="unfiled",
+            shifra=(f"плівка {film}" if stated and film else
+                    "шифру ще не встановлено" if stated else f"без шифри · {name}"),
             repo=repo or None, repo_label=repo or None,
-            title="", path=rel, frames=frames, state="on_disk",
-            desc_source="disk",
-            why="матеріал на диску без шифри справи — сайдкар не несе фонд/справу",
+            title=side.get("title", ""), path=rel, frames=frames, state="on_disk",
+            desc_source=side.get("desc_source", "disk"),
+            why=(str(side.get("note") or "").strip()
+                 or "шифру ще не встановлено — заявлено в паспорті теки" if stated
+                 else "матеріал на диску без шифри справи — сайдкар не несе фонд/справу"),
         )
 
     orphans: list[Any] = []

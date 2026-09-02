@@ -52,6 +52,7 @@ def _builtin(workspace: Path | None = None) -> list[Source]:
     from nyshporka.sources.commons import CommonsSource
     from nyshporka.sources.duck import DuckSource
     from nyshporka.sources.fsfilm import FilmMirrorSource
+    from nyshporka.sources.ridni import RidniSource
 
     out: list[Source] = [LocalSource()]
     # 🏛 ARCHIUM — один рушій на кілька архівів, тож джерел стільки, скільки
@@ -69,6 +70,10 @@ def _builtin(workspace: Path | None = None) -> list[Source]:
     # бачить справу незалежно від того, чи її оцифровано, — тобто відповідає
     # там, де решта віддає нуль на голій установці.
     out.append(cast("Source", DuckSource(workspace)))
+    # 🗺 Каталог за СЕЛОМ. Питання «які книги є про моє село» описи фондів не
+    # ставлять узагалі: вони перелічують справи фонду. Тут же відповідь приходить
+    # разом із прямими адресами копій — і, головне, з роками, яких у фонді немає.
+    out.append(cast("Source", RidniSource(workspace)))
     return out
 
 

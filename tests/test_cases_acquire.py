@@ -105,3 +105,55 @@ def test_the_package_never_runs_scripts_of_the_private_repository() -> None:
         if 'root / "scripts"' in p.read_text(encoding="utf-8", errors="replace")
     ]
     assert not guilty, f"пакет знову кличе скрипт із чужого репозиторію: {guilty}"
+
+
+def test_the_passport_says_where_the_frames_came_from(tmp_path: Path) -> None:
+    """🔴 Тека кадрів без походження — тека невідомого походження.
+
+    Джерело, адресу, час і звірку «обіцяно / взято» знає рівно та мить, коли
+    качали: маніфест друкувався на екран і гинув разом із сесією, а наступна
+    сесія бачила самі пікселі й мусила вгадувати, звідки вони й чи всі.
+    """
+    from nyshporka.cases import acquire as A
+
+    A.patch_meta(tmp_path, A.provenance(
+        source="archium-cdiak", ref="file:131943",
+        url="https://archium.cdiak.archives.gov.ua/file-viewer/131943",
+        promised=429, got=429, why="метрики Шупик 1877"))
+    meta = json.loads((tmp_path / "meta.json").read_text(encoding="utf-8"))
+
+    assert meta["fetched_from"] == "archium-cdiak" and meta["fetched_ref"] == "file:131943"
+    assert meta["fetched"].startswith("20") and meta["fetched_by"].startswith("nyshporka/")
+    assert meta["complete"] is True
+    # 🔴 Причину взяття не можна вивести нізвідки: у метаданих архіву її немає
+    # за визначенням, її знає лише той, хто качав.
+    assert meta["why"] == "метрики Шупик 1877"
+
+
+def test_an_incomplete_folder_says_so_in_the_passport(tmp_path: Path) -> None:
+    """«40 з 300» і «40 з 40» на екрані виглядають однаково успішно."""
+    from nyshporka.cases import acquire as A
+
+    A.patch_meta(tmp_path, A.provenance(source="x", promised=300, got=40))
+    meta = json.loads((tmp_path / "meta.json").read_text(encoding="utf-8"))
+    assert meta["complete"] is False
+    assert meta["frames_promised"] == 300 and meta["frames_got"] == 40
+
+
+def test_a_missing_year_is_a_statement_not_a_gap(tmp_path: Path) -> None:
+    """🔴 Для цілих описів ARCHIUM поле дат порожнє ЗА ПОБУДОВОЮ.
+
+    Порожній рік доти не відрізнявся від забутого, і наступна сесія йшла
+    добувати те, чого в джерелі немає.
+    """
+    from nyshporka.cases import acquire as A
+
+    A.write_meta(tmp_path, archive="ЦДІАК", fond="127", opys="1078", spr="144",
+                 files=[], source="ARCHIUM", year="")
+    meta = json.loads((tmp_path / "meta.json").read_text(encoding="utf-8"))
+    assert meta["year_source"] == "джерело року не дає"
+
+    A.write_meta(tmp_path, archive="ЦДІАК", fond="127", opys="1078", spr="144",
+                 files=[], source="ARCHIUM", year="1877")
+    meta = json.loads((tmp_path / "meta.json").read_text(encoding="utf-8"))
+    assert meta["year_source"] == "реєстр опису"

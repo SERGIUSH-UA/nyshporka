@@ -15,6 +15,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -90,10 +91,8 @@ def guard_inventory(case_dir: Path, opys: str) -> None:
             f"справи — покладіть нову в окрему теку або приберіть стару.")
 
 
-def write_meta(case_dir: Path, *, archive: str, fond: str, opys: str, spr: str,
-               files: list[dict[str, Any]], source: str, title: str = "",
-               year: str = "", extra: dict[str, Any] | None = None) -> Path:
-    """Паспорт справи. Доповнює наявний, а не заміщає його.
+def patch_meta(case_dir: Path, patch: dict[str, Any]) -> Path:
+    """Дописати поля в паспорт теки. Доповнює наявний, а не заміщає його.
 
     ⚠ Заміщення стерло б те, що дописала людина (нотатку про звірку шифри,
     власний заголовок), — а дізналась би вона про це, лише не знайшовши їх.
@@ -105,17 +104,68 @@ def write_meta(case_dir: Path, *, archive: str, fond: str, opys: str, spr: str,
             meta = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             meta = {}
-    meta.update({"archive": archive, "fond": fond, "inv": opys, "spr": spr,
-                 "title": title, "year": year, "files": files, "source": source})
-    meta.update(extra or {})
+    meta.update(patch)
+    case_dir.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(meta, ensure_ascii=False, indent=2) + "\n",
                     encoding="utf-8")
     return path
 
 
+def provenance(*, source: str, ref: str = "", url: str = "",
+               promised: int | None = None, got: int | None = None,
+               why: str = "") -> dict[str, Any]:
+    """Звідки, коли, чим і чи повно — те, чого в теці не було ніколи.
+
+    🔴 Тека кадрів без цього — тека невідомого походження. Джерело, адресу,
+    час і звірку «обіцяно / взято» знає рівно та мить, коли качали: маніфест
+    друкувався на екран і гинув разом із сесією, а наступна сесія бачила лише
+    пікселі й мусила вгадувати, звідки вони й чи всі.
+
+    🔴 `why` не виводиться нізвідки й не лежить у метаданих архіву за
+    визначенням: причину взяття знає тільки той, хто качав. Тека переїжджає між
+    дисками й потрапляє до колег — причина мусить їхати з нею.
+    """
+    from nyshporka import __version__
+
+    out: dict[str, Any] = {
+        "fetched": datetime.now(UTC).isoformat(timespec="seconds"),
+        "fetched_by": f"nyshporka/{__version__}",
+        "fetched_from": source, "fetched_ref": ref}
+    if url:
+        out["fetched_url"] = url
+    if promised is not None:
+        out["frames_promised"] = promised
+    if got is not None:
+        out["frames_got"] = got
+    if promised is not None and got is not None:
+        # Приймач повноти лягає в паспорт числом, а не словом: «40 з 300» і
+        # «40 з 40» на екрані виглядають однаково успішно.
+        out["complete"] = promised == got
+    if why:
+        out["why"] = why
+    return out
+
+
+def write_meta(case_dir: Path, *, archive: str, fond: str, opys: str, spr: str,
+               files: list[dict[str, Any]], source: str, title: str = "",
+               year: str = "", extra: dict[str, Any] | None = None) -> Path:
+    """Паспорт справи з шифрою. Доповнює наявний, а не заміщає його.
+
+    🔴 `year_source` пишеться завжди. Порожній рік доти не відрізнявся від
+    забутого — а для цілих описів ARCHIUM поле дат порожнє ЗА ПОБУДОВОЮ, і
+    наступна сесія йшла добувати те, чого в джерелі немає.
+    """
+    patch: dict[str, Any] = {
+        "archive": archive, "fond": fond, "inv": opys, "spr": spr,
+        "title": title, "year": year, "files": files, "source": source,
+        "year_source": "реєстр опису" if year else "джерело року не дає"}
+    patch.update(extra or {})
+    return patch_meta(case_dir, patch)
+
+
 def from_commons(case_dir: Path, file_name: str, *, archive: str, fond: str,
                  opys: str, spr: str, title: str = "", year: str = "",
-                 on_progress: ProgressFn | None = None,
+                 why: str = "", on_progress: ProgressFn | None = None,
                  source: Any = None) -> Acquired:
     """Завантажити справу з Commons у теку справи й описати її.
 
@@ -141,13 +191,18 @@ def from_commons(case_dir: Path, file_name: str, *, archive: str, fond: str,
               "size": got.stat().st_size, "sha256": sha256_of(got),
               "source_url": f"https://commons.wikimedia.org/wiki/File:{file_name}"}]
     write_meta(case_dir, archive=archive, fond=fond, opys=opys, spr=spr,
-               files=files, source="Wikimedia Commons", title=title, year=year)
+               files=files, source="Wikimedia Commons", title=title, year=year,
+               extra=provenance(
+                   source="commons", ref=f"file:{file_name}",
+                   url=f"https://commons.wikimedia.org/wiki/File:{file_name}",
+                   why=why))
     return Acquired(case_dir=case_dir, files=files, skipped=res.skipped)
 
 
 def from_archium(case_dir: Path, viewer: str, *, archive: str, fond: str,
                  opys: str, spr: str, repo: str = "", title: str = "",
-                 year: str = "", on_progress: ProgressFn | None = None,
+                 year: str = "", why: str = "",
+                 on_progress: ProgressFn | None = None,
                  source: Any = None) -> Acquired:
     """Завантажити справу з переглядача архіву — посторінковими кадрами.
 
@@ -188,5 +243,8 @@ def from_archium(case_dir: Path, viewer: str, *, archive: str, fond: str,
     write_meta(case_dir, archive=archive, fond=fond, opys=opys, spr=spr,
                files=files, source="ARCHIUM", title=title, year=year,
                extra={"viewer_id": ident, "viewer_url": viewer,
-                      "n_pages": len(files)})
+                      "n_pages": len(files),
+                      **provenance(source=getattr(src, "id", "archium"),
+                                   ref=f"file:{ident}", url=viewer,
+                                   got=len(files), why=why)})
     return Acquired(case_dir=case_dir, files=files, skipped=res.skipped)

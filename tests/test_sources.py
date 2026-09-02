@@ -627,3 +627,144 @@ def test_two_unknown_archives_with_the_same_fond_number_stay_apart():
         {"repo": "", "archive": "ДАРО", "fond": "118", "source": "duck"},
     ])
     assert sorted(r["label"] for r in rows) == ["ДАЖО", "ДАРО"]
+
+
+# ── 🗺 каталог книг за селом (ridni.org) ──────────────────────────────────────
+class _Каталог:
+    """Двійник HTTP-клієнта каталогу: один GET, у відповіді — список списків."""
+
+    def __init__(self, payload: object) -> None:
+        import json as _json
+
+        self.body = _json.dumps(payload, ensure_ascii=False)
+        self.asked: list[str] = []
+
+    def get(self, url: str):
+        self.asked.append(url)
+        return _Ответ(self.body)
+
+
+def _ridni(payload: object):
+    from nyshporka.sources.http import Fetcher
+    from nyshporka.sources.ridni import RidniSource
+
+    api = _Каталог(payload)
+    return RidniSource(fetcher=Fetcher(base="https://к", delay=0.0, client=api)), api
+
+
+@pytest.fixture(scope="module")
+def ridni_rows() -> list:
+    import json as _json
+
+    fix = Path(__file__).resolve().parent / "fixtures" / "sources" / "ridni_catalog.json"
+    return _json.loads(fix.read_text(encoding="utf-8"))
+
+
+def test_the_catalog_answers_with_shifra_place_and_a_direct_link(ridni_rows):
+    """Заради цього джерело й додано: книга села, шифра й адреса копії разом."""
+    src, api = _ridni(ridni_rows)
+    hits = src.search("Шупики", limit=10)
+
+    assert hits, "фікстура має книги цього села"
+    first = hits[0]
+    assert first.shifra.startswith("ЦДІАК 127-")
+    assert "Шупики" in first.place and "Канівський" in first.place
+    assert first.repo == "CDIAK", "чужа назва архіву мусить стати нашим кодом"
+    assert not first.acquirable, "качає інше джерело — інакше зіпсується знаменник"
+    assert "settlement=" in api.asked[0]
+    # ⚠ Адреса копії є не в кожної книги (поле оцифрування відстає від архіву),
+    # і саме тому «немає посилання» тут не означає «немає онлайн».
+    assert any(h.url.startswith("http") for h in hits)
+
+
+def test_the_film_number_is_carried_out_of_the_link(ridni_rows):
+    """Номер DGS — це ключ замовлення образів, а в даних він лише всередині URL."""
+    import re
+
+    src, _ = _ridni(ridni_rows)
+    notes = " ".join(h.note for h in src.search("Шупики", limit=10))
+    assert re.search(r"DGS \d{6,}", notes), notes
+
+
+def test_the_denominator_travels_with_every_hit(ridni_rows):
+    """🔴 «Показано 2» без «з 6 за цією назвою» читається як повний перелік книг.
+
+    Каталог шукає за назвою по всій країні й звуження на сервері не має жодного
+    (замір: `povit`, `koatuu`, `limit` приймаються й ігноруються). Тому межу
+    відповіді мусить називати сама відповідь.
+    """
+    src, _ = _ridni(ridni_rows)
+    hits = src.search("Шупики", limit=2)
+    assert len(hits) == 2
+    assert "з 6 за цією назвою" in hits[0].note
+
+
+def test_namesake_villages_are_narrowed_here_because_the_server_will_not(ridni_rows):
+    """🪤 «Іванівка» віддає 13 171 запис зі ста повітів — і всі виглядають своїми.
+
+    Звуження за повітом сервер приймає й ігнорує, тож воно робиться на нашому
+    боці. Помилка тут тиха: чужа книга з правдоподібною шифрою читається як
+    знайдена своя.
+    """
+    src, _ = _ridni(ridni_rows)
+    assert src.search("Шупики, Канівський", limit=10)
+    assert src.search("Шупики, Полтавський", limit=10) == []
+
+
+def test_a_village_attached_to_another_parish_says_so(ridni_rows):
+    """🔑 Книга ЧУЖОЇ парафії, до якої село приписане, — окремий канал.
+
+    Саме там трапляються земляки. Але в рядку стоятиме інша назва села, тож
+    мовчазна видача читалась би як помилка пошуку.
+    """
+
+    row = list(ridni_rows[0])
+    row[5], row[6] = "Березівка, с.", "с.* Карандинці"
+    src, _ = _ridni([row])
+    (hit,) = src.search("Карандинці", limit=5)
+    assert "приписне село" in hit.note and "Березівка" in hit.place
+
+
+def test_a_free_text_code_does_not_invent_a_fond(ridni_rows):
+    """🔴 Поле шифри вільне: трапляється «, оп. -, спр. -» і назва церкви замість опису.
+
+    `fond` їде у зведення по фондах, тож сміття звідти створило б фонд, якого
+    немає, — і на нього ще й пішли б рахувати обсяг.
+    """
+    row = list(ridni_rows[0])
+    row[0], row[1] = "ДАХО", ", оп. -, спр. -"
+    src, _ = _ridni([row])
+    (hit,) = src.search("Шупики", limit=5)
+    assert hit.fond == ""
+
+
+def test_one_record_type_written_four_ways_becomes_one(ridni_rows):
+    """⚠ У даних є «сповідний розпис», «розпіс» і «cповідний» з ЛАТИНСЬКОЮ «c»."""
+    from nyshporka.sources.ridni import _norm_type
+
+    assert _norm_type("Cповідний розпіс") == _norm_type("сповідний розпис")
+    assert _norm_type(" Метрична  книга ") == "метрична книга"
+
+
+def test_the_catalog_answers_with_a_reason_not_with_a_silent_zero():
+    """Сервіс може віддати HTML замість JSON — і це не «книг немає»."""
+    from nyshporka.sources.base import SourceError
+    from nyshporka.sources.http import Fetcher
+    from nyshporka.sources.ridni import RidniSource
+
+    class _HTML:
+        def get(self, url: str):
+            return _Ответ("<!doctype html><html>…")
+
+    src = RidniSource(fetcher=Fetcher(base="https://к", delay=0.0, client=_HTML()))
+    with pytest.raises(SourceError):
+        src.search("Шупики")
+
+
+def test_ridni_is_in_the_registry_out_of_the_box():
+    """Джерело, якого немає в реєстрі, не бере участі в жодному знаменнику."""
+    reg = load()
+    src = reg.get("ridni")
+    assert src is not None
+    assert "search" in src.caps
+    assert src.catalog_source()[0] == "live"

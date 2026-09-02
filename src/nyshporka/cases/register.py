@@ -295,12 +295,24 @@ def _no_dir_reason(case_dir: str | Path, resolved: Path) -> str:
 def describe(case_dir: str | Path, *, shifra: str = "", title: str = "",
              doc_type: str = "", year_from: int | str | None = None,
              year_to: int | str | None = None, place: str = "", note: str = "",
-             repo_hint: str = "") -> dict[str, Any]:
+             repo_hint: str = "", film: str = "") -> dict[str, Any]:
     """Записати або доповнити опис справи в її теці. Повертає готовий сайдкар.
 
     Порожнє поле не затирає наявне: правка одного заголовка не має стирати
     роки, які хтось уже уточнив. А щоб СТЕРТИ поле — тире («-»): доти зворотної
     дії не було зовсім, і помилково введена назва лишалась назавжди.
+
+    🔴 `film` робить виразимим стан «матеріал є, шифра ще ні». Він трапляється
+    щоразу, коли справу знайдено за селом у дзеркалі плівок: номер плівки
+    відомий, а фонд і опис — ще ні. Доти вибір був недобрий: вигадати шифру (і
+    потім розгрібати неправду в обліку) або відкласти роботу. Тепер тека
+    описується тим, що про неї справді відомо.
+
+    ⚠ Ключа справи цей стан НЕ отримує, і це навмисно. Провізорний ключ виглядав
+    би як архівна шифра, розтікся б по обліку сторінок, реєстру й меті прогонів
+    — а в мить, коли шифра встановиться, усе це довелось би переносити. Тут же
+    достатньо вписати шифру в цей самий паспорт: наступний `cases build`
+    перекладе теку на нормальний ключ сам, і переносити нема чого.
     """
     d = case_path(case_dir)
     if not d.is_dir():
@@ -312,17 +324,29 @@ def describe(case_dir: str | Path, *, shifra: str = "", title: str = "",
         sh = parse_shifra(shifra, repo_hint=repo_hint)
     elif old.get("shifra"):
         sh = parse_shifra(str(old["shifra"]), repo_hint=repo_hint)
-    if sh is None:
+    film = " ".join((film or "").split())
+    if sh is None and not (film or old.get("film")):
         raise RegisterError(
-            "у теці ще немає опису, тож шифра обов'язкова: саме вона робить "
-            "теку справою, а не купою файлів.")
+            "у теці ще немає опису, тож потрібна шифра: саме вона робить теку "
+            "справою, а не купою файлів. Якщо шифру ще не встановлено, назвіть "
+            "плівку — `--film <номер>`: тоді тека опишеться тим, що про неї "
+            "відомо, і не вигадуватиме шифри.")
 
     out: dict[str, Any] = dict(old)
-    out["shifra"] = sh.as_text()
-    out["repo"] = sh.repo
-    out["fond"] = sh.fond
-    out["opys"] = sh.opys
-    out["spr"] = sh.spr
+    if film:
+        out["film"] = film
+    if sh is None:
+        # Стан заявлений, а не пропущений: без цього поля наступна сесія читає
+        # теку без шифри як «забули описати» й описує її навмання.
+        out["unidentified"] = True
+        out.pop("shifra", None)
+    else:
+        out.pop("unidentified", None)
+        out["shifra"] = sh.as_text()
+        out["repo"] = sh.repo
+        out["fond"] = sh.fond
+        out["opys"] = sh.opys
+        out["spr"] = sh.spr
     for key, val in (("title", title), ("doc_type", doc_type), ("place", place),
                      ("note", note)):
         if _erase(val):

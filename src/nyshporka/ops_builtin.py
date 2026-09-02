@@ -1709,6 +1709,10 @@ class CaseRegisterArgs(BaseModel):
     year_to: int | str | None = Field(default=None, description="рік або «-», щоб стерти")
     place: str = Field(default="", description="село, повіт, губернія")
     note: str = Field(default="", description="звідки взято, що незрозуміло")
+    film: str = Field(
+        default="",
+        description="номер плівки (DGS), коли шифру ще не встановлено: тека "
+                    "опишеться тим, що відомо, і не вигадуватиме шифри")
     adopt: bool = Field(
         default=False,
         description="взяти теку під облік, якщо вона лежить поза простором: "
@@ -1739,7 +1743,7 @@ def case_register(a: CaseRegisterArgs) -> Envelope:
         out = describe(a.case_dir, shifra=a.shifra, title=a.title,
                        doc_type=a.doc_type, year_from=a.year_from,
                        year_to=a.year_to, place=a.place, note=a.note,
-                       repo_hint=a.repo)
+                       repo_hint=a.repo, film=a.film)
     except RegisterError as exc:
         return fail(str(exc))
     env = ok({"case_dir": a.case_dir, "sidecar": out})

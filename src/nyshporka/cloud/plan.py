@@ -107,6 +107,24 @@ def _bytes_of(frames: list[Path]) -> int:
     return total
 
 
+def _unidentified(case_dir: Path) -> str:
+    """Пояснення, коли шифру ще НЕ встановлено свідомо. Порожньо — стану немає.
+
+    🔴 Різницю між «забули описати» й «ще не ототожнено» видно лише з паспорта
+    теки, і без неї план докоряв би дослідникові за рішення, яке той ухвалив
+    свідомо: матеріал знайдено за селом у дзеркалі плівок, номер плівки
+    відомий, фонд і опис — ще ні.
+    """
+    from nyshporka.cases.register import read_sidecar
+
+    sc = read_sidecar(case_dir)
+    if not sc.get("unidentified"):
+        return ""
+    film = str(sc.get("film") or "").strip()
+    return ("шифру ще не встановлено (заявлено в паспорті теки"
+            + (f"; плівка {film}" if film else "") + ")")
+
+
 def build(case_dir: str | Path, *, backend: str = "ssh", target: str = "",
           out_dir: str | Path = "", script: str = "", second_voice: bool = True,
           case_key: str = "") -> CloudPlan:
@@ -165,10 +183,20 @@ def build(case_dir: str | Path, *, backend: str = "ssh", target: str = "",
     out = Path(out_dir) if out_dir else workspace().htr_reports / case.name
     warnings: list[str] = []
     if not key:
-        warnings.append(
-            "шифри справи не знайдено — прогін ляже «нічиїм», і облік його не "
-            "побачить. Покладіть `_source.json` у теку справи або передайте "
-            "`--case-key`")
+        # 🔴 «Шифри немає» і «шифру ще не встановлено» — різні стани, і докір
+        # доречний лише в першому. Другий заявлений у паспорті теки (плівка
+        # відома, фонд і опис — ні), тобто це рішення дослідника, а не
+        # недбалість; повторювати йому пораду покласти опис означає вимагати
+        # вигадати шифру — рівно те, чого стан і має уникнути.
+        stated = _unidentified(case)
+        if stated:
+            why = stated
+        else:
+            warnings.append(
+                "шифри справи не знайдено — прогін ляже «нічиїм», і облік його "
+                "не побачить. Покладіть `_source.json` у теку справи, передайте "
+                "`--case-key` або, якщо шифру ще не встановлено, опишіть теку "
+                "плівкою: `nysh case <тека> --film <номер>`")
     if guess.is_guess:
         # Не «чи передали прапорець», а чим доведене письмо: опис справи — це
         # факт, жанр і роки — сильний здогад, ім'я теки — найслабша ознака.

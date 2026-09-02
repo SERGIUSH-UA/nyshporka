@@ -785,3 +785,279 @@ def registry_build(a: BuildArgs) -> Envelope:
              + f" — у реєстрі {md.get('rows') or 0} справ фонду {a.repo} {a.fond}")
     env.suggest("fond.list", "подивитись опис фонду")
     return env
+
+
+# ── ⛪ парафія: те, чого немає в описі ───────────────────────────────────────
+#
+# 🔑 Опис знає справу, але не знає, чия вона парафія. Зведений покажчик знає —
+# і це відповідь на два питання, які інакше коштують днів: «де книги мого
+# села» (від парафії до справ) і «чи є моє село в цій книзі повіту» (від
+# справи до парафій). Друге питання ставиться ПЕРЕД читанням рушієм, бо після
+# нього відповідь уже оплачена.
+
+def _duck_coverage() -> list[CoverageItem]:
+    """Живий запит, а не зріз на диску: нуль тут означає «немає зараз».
+
+    Окремий стан важливий тим, що саме означає порожньо. У знятому каталозі —
+    «не було на дату зняття», у живому запиті — «немає в покажчику сьогодні».
+    Звести їх в один рядок означало б приписати живій відповіді чужу давність.
+    """
+    from nyshporka.sources.duck import HOST
+
+    # `rows=0` тут — «перелічувати нічого», а не «нуль знайдено»: у живого
+    # запиту немає зрізу, розмір якого можна назвати. Розмір відповіді
+    # лежить у самих даних.
+    return [CoverageItem(source="duck", taken="", rows=0,
+                         scope=f"зведений покажчик, живий запит ({HOST})")]
+
+
+def _duck() -> Any:
+    from nyshporka.sources.duck import DuckSource
+
+    return DuckSource()
+
+
+def _parish_row(p: Any) -> dict[str, Any]:
+    return {"id": p.id, "title": p.title, "info": p.info, "lat": p.lat,
+            "lng": p.lng, "tags": list(p.tags), "cases": p.cases}
+
+
+def _hit_rows(hits: list[Any]) -> list[dict[str, Any]]:
+    return [{"shifra": h.shifra, "title": h.title, "years": h.years,
+             "info": h.place, "repo": h.repo, "archive": h.archive,
+             "fond": h.fond, "online": "копія онлайн" in (h.note or ""),
+             "note": h.note, "ref": h.ref, "url": h.url} for h in hits]
+
+
+class ParishFindArgs(BaseModel):
+    q: str = Field(description="назва села або містечка")
+    also: list[str] = Field(default_factory=list,
+                            description="додаткові написання: історична назва, "
+                                        "російська форма — форми сучасної назви "
+                                        "будуються самі")
+    books: bool = Field(default=True,
+                        description="одразу взяти перелік книг кожної парафії")
+
+
+@op("parish.find", summary="Чиї парафії в цьому селі — і які книги кожної з них",
+    args=ParishFindArgs, mutates=False, agent=False, section="material")
+def parish_find(a: ParishFindArgs) -> Envelope:
+    """Парафії села всіма конфесіями, і за потреби — книги кожної.
+
+    🕍 **Три конфесії — три окремі парафії.** Метрики православної громади,
+    костелу й рабинату одного містечка лежать у різних справах, тож питати про
+    «церкву села» означає систематично не бачити двох третин книг.
+
+    🔴 Нуль тут найчастіше означає не «парафії немає», а «назва записана
+    інакше»: підрядок звіряється буквально, тож написання з апострофом не
+    збігається з написанням без нього, а сучасна назва — з історичною.
+    Тому форми будуються самі, а історичну назву подають через `also`.
+    """
+    from nyshporka.sources.base import SourceError
+    from nyshporka.sources.duck import AUTHORS_CEILING, name_forms
+
+    forms = name_forms(a.q) + [f for f in a.also if f.strip()]
+    src = _duck()
+    found: dict[str, Any] = {}
+    try:
+        for form in forms:
+            rows = src.parishes(form)
+            if len(rows) >= AUTHORS_CEILING:
+                env = fail(f"«{form}» надто широке: покажчик віддав стелю "
+                           f"{AUTHORS_CEILING} парафій, тобто перелік обрізано")
+                return env
+            for p in rows:
+                found[p.id] = p
+    except SourceError as exc:
+        return fail(str(exc))
+
+    data: dict[str, Any] = {"forms": forms,
+                            "parishes": [_parish_row(p) for p in found.values()],
+                            "books": {}}
+    if a.books:
+        try:
+            for p in found.values():
+                data["books"][p.title] = _hit_rows(src.find_files(author=p.title))
+        except SourceError as exc:
+            return fail(str(exc))
+
+    env = ok(data)
+    env.covered_by(_duck_coverage())
+    if not found:
+        env.warn("nothing_found",
+                 f"парафій під назвами {', '.join(forms)} у покажчику немає — "
+                 "спробуй історичну назву через `also`; це межа покажчика, а не "
+                 "відповідь про архів")
+    elif len(found) > 1:
+        env.warn("many_confessions",
+                 f"парафій {len(found)} — це РІЗНІ конфесії одного поселення, і "
+                 "книги їхні лежать у різних справах; тег конфесії буває хибний, "
+                 "тож вір назві парафії")
+    env.suggest("parish.near", "подивитись, що є по сусідніх селах кола")
+    return env
+
+
+class ParishInCaseArgs(BaseModel):
+    case: str = Field(description="повний код справи покажчика: "
+                                  "архів-фонд-опис-справа")
+    match: list[str] = Field(default_factory=list,
+                             description="назви сіл, які шукаємо в переліку")
+
+
+@op("parish.in_case", summary="Які села всередині цієї книги — до того, як її читати",
+    args=ParishInCaseArgs, mutates=False, agent=False, section="material")
+def parish_in_case(a: ParishInCaseArgs) -> Envelope:
+    """Перелік парафій зведеної книги — один запит замість прогону рушієм.
+
+    🔥 Заголовок «Метричні книги церков повіту» не каже нічого про те, чиї саме
+    це церкви, а книга — це сотні сторінок і повний прогін. Покажчик віддає
+    перелік поіменно (заміряно 157 і 186 парафій у двох справах), тож черга
+    справ на читання шикується за збігом, а не за номером справи.
+
+    ⚠ Три різні відповіді, і плутати їх дорого:
+    **збіг є** — книга вгору черги; **збігу немає, але парафії перелічені** —
+    вниз черги; **парафій нуль** — покажчик цю справу не розбирав, тобто
+    знаменника немає й висновку теж.
+    """
+    from nyshporka.sources.base import SourceError
+
+    try:
+        card = _duck().case_card(a.case)
+    except SourceError as exc:
+        return fail(str(exc))
+
+    parishes = card.get("parishes") or []
+    needles = [m.strip().casefold() for m in a.match if m.strip()]
+    hits = [p for p in parishes
+            if any(n in p.title.casefold() for n in needles)] if needles else []
+    data = {"case": {k: v for k, v in card.items()
+                     if k not in ("parishes", "copies")},
+            "parishes": [_parish_row(p) for p in parishes],
+            "matched": [_parish_row(p) for p in hits],
+            "copies": card.get("copies") or []}
+    env = ok(data)
+    env.covered_by(_duck_coverage())
+    if not parishes:
+        env.warn("no_parishes",
+                 "покажчик не розбирав цю справу на парафії — це НЕ означає, "
+                 "що села в ній немає: знаменника тут просто немає")
+    elif needles and not hits:
+        env.warn("no_match",
+                 f"серед {len(parishes)} парафій книги названих сіл немає — "
+                 "підстава відкласти книгу, а не вердикт: прив'язку роблять "
+                 "руками й вона буває неповна")
+    elif hits:
+        env.suggest("read", "прочитати справу рушієм — село в ній є")
+    if not (card.get("copies") or []):
+        env.warn("not_online",
+                 "онлайн-копій у покажчика немає: справа існує в описі, тобто "
+                 "це позиція для черги ЗАМОВЛЕННЯ, а не завантаження")
+    return env
+
+
+class ParishNearArgs(BaseModel):
+    lat: float = Field(description="широта центра кола")
+    lng: float = Field(description="довгота центра кола")
+    km: float = Field(default=15.0, gt=0, le=200, description="радіус, км")
+    tags: list[str] = Field(default_factory=list,
+                            description="тип документа: метрична книга, "
+                                        "сповідальні відомості, народження, "
+                                        "шлюб, смерть, конфесія")
+    year_from: str = Field(default="")
+    year_to: str = Field(default="")
+    offline_only: bool = Field(default=False,
+                              description="лише неоцифровані — черга замовлення")
+
+
+@op("parish.near", summary="Що є по сусідніх селах — коло одразу справами",
+    args=ParishNearArgs, mutates=False, agent=False, section="material")
+def parish_near(a: ParishNearArgs) -> Envelope:
+    """Справи в колі навколо точки, зі свідомим ставленням до стелі.
+
+    🔴 Стеля видачі — 50, пагінації немає, тож рівно 50 означає «обрізано», а
+    не «знайдено 50». Взята як є, така видача стає хибним знаменником. Тому
+    запит, який упирається в стелю, розбивається по вікнах років: замір на колі
+    25 км — 50 справ суцільним запитом проти 172 розбитим.
+
+    🔴 Знаменник каналу — не «скільки справ у радіусі», а «скільки парафій кола
+    взагалі прив'язано»: справа без прив'язки до церкви з координатами в
+    гео-пошук не потрапляє ніколи.
+    """
+    from nyshporka.sources.base import SourceError
+    from nyshporka.sources.duck import CEILING
+
+    try:
+        hits = _duck().near(str(a.lat), str(a.lng), radius_m=int(a.km * 1000),
+                            split_years=True, tags=tuple(a.tags),
+                            year_from=a.year_from, year_to=a.year_to)
+    except SourceError as exc:
+        return fail(str(exc))
+
+    rows = _hit_rows(hits)
+    if a.offline_only:
+        # 🔴 Фільтр рахується тут, а не запитом: серверний `is_online: false`
+        # не строгий — у видачі трапляються оцифровані (замір: 46 і 4).
+        rows = [r for r in rows if not r["online"]]
+    fonds: dict[str, int] = {}
+    for r in rows:
+        key = f"{r['archive']}-{r['fond']}" if r["archive"] else "—"
+        fonds[key] = fonds.get(key, 0) + 1
+    env = ok({"center": {"lat": a.lat, "lng": a.lng, "km": a.km},
+              "cases": rows, "by_fond": fonds})
+    env.covered_by(_duck_coverage())
+    env.warn("geo_denominator",
+             "гео-пошук бачить лише справи, прив'язані до парафії з "
+             "координатами: нуль тут не є нулем архіву")
+    if len(hits) >= CEILING and not a.year_from:
+        env.warn("ceiling",
+                 f"навіть із розбиттям по роках видача впирається в стелю "
+                 f"{CEILING} — звужуй радіус або роки, перелік неповний")
+    return env
+
+
+class ParishMentionsArgs(BaseModel):
+    q: str = Field(description="назва села; російська форма теж будується сама")
+    also: list[str] = Field(default_factory=list,
+                            description="додаткові написання")
+
+
+@op("parish.mentions", summary="Справи, де село згадане в анотації, а не в назві",
+    args=ParishMentionsArgs, mutates=False, agent=False, section="material")
+def parish_mentions(a: ParishMentionsArgs) -> Envelope:
+    """Світські фонди: суд, поліція, адміністрація.
+
+    🔑 Цей пошук іде по **анотації** справи, а не по заголовку, — тобто
+    знаходить те, чого пошук по назві не знайде ніколи: заголовок каже «Дело о
+    самоубийстве крестьянина», а село й прізвища учасників сидять в описі
+    події. Для роду, який шукається поза метриками, це окремий вхід.
+
+    ⚠ Анотації писані мовою свого часу, тож форма назви має бути відповідна —
+    вона будується сама, історична подається через `also`.
+    """
+    from nyshporka.sources.base import SourceError
+    from nyshporka.sources.duck import CEILING, name_forms
+
+    forms = name_forms(a.q) + [f for f in a.also if f.strip()]
+    src = _duck()
+    seen: dict[str, Any] = {}
+    capped: list[str] = []
+    try:
+        for form in forms:
+            rows = src.find_files(place=form)
+            if len(rows) >= CEILING:
+                capped.append(form)
+            for h in rows:
+                seen.setdefault(h.ref, h)
+    except SourceError as exc:
+        return fail(str(exc))
+
+    env = ok({"forms": forms, "cases": _hit_rows(list(seen.values()))})
+    env.covered_by(_duck_coverage())
+    if capped:
+        env.warn("ceiling",
+                 f"видача обрізана стелею {CEILING} на формах: "
+                 f"{', '.join(capped)} — перелік неповний")
+    if not seen:
+        env.warn("nothing_found",
+                 f"згадок під назвами {', '.join(forms)} у покажчику немає")
+    return env

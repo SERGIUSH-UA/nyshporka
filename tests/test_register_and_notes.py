@@ -188,8 +188,31 @@ def test_provenance_of_a_downloaded_case_survives_a_hand_edit(space: Path) -> No
 
 
 def test_describe_without_shifra_on_a_fresh_folder_refuses(space: Path) -> None:
-    with pytest.raises(R.RegisterError, match="шифра обов'язкова"):
+    """Сама лише назва теку справою не робить — і відмова каже, чим зарадити."""
+    with pytest.raises(R.RegisterError, match="потрібна шифра"):
         R.describe(space, title="Просто назва")
+
+
+def test_material_whose_shifra_is_not_established_yet_can_be_described(
+        space: Path) -> None:
+    """🔴 «Ще не ототожнено» — це стан, а не пропуск.
+
+    Справу знайдено за селом у дзеркалі плівок: номер плівки відомий, фонд і
+    опис — ще ні. Доти вибір був недобрий: вигадати шифру, а потім розгрібати
+    неправду в обліку, — або відкласти роботу. Ключа цей стан не отримує
+    навмисно: провізорний ключ виглядав би як архівна шифра й розтікся б по
+    обліку сторінок, реєстру й меті прогонів.
+    """
+    sc = R.describe(space, film="007548742", note="перепис 1897 за селом")
+    assert sc["unidentified"] is True and sc["film"] == "007548742"
+    assert "shifra" not in sc, "шифри немає — вигадувати її нема з чого"
+
+    # А коли шифра встановилась, вона пишеться в той самий паспорт, і стан
+    # знімається сам: переносити нема чого, бо під провізорним ключем нічого
+    # не накопичувалось.
+    sc = R.describe(space, shifra="ДАХмО 315-1-8433")
+    assert sc["shifra"] == "ДАХмО 315-1-8433" and "unidentified" not in sc
+    assert sc["film"] == "007548742", "плівка лишається — це те, як справу взяли"
 
 
 def test_relative_path_from_the_registry_resolves_against_the_workspace(
