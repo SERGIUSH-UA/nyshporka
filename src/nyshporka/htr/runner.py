@@ -105,8 +105,103 @@ import unicodedata
 from datetime import datetime
 from pathlib import Path
 
-import numpy as np
-from PIL import Image
+#: Змінні, якими BLAS/OpenMP визначають ширину своїх пулів. Читаються ОДИН РАЗ
+#: при завантаженні бібліотеки, тож виставляти їх треба до `import numpy`.
+_THREAD_VARS = ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS",
+                "NUMEXPR_NUM_THREADS", "VECLIB_MAXIMUM_THREADS")
+
+
+def cgroup_quota_cores(root: Path | str = "/sys/fs/cgroup") -> float | None:
+    """Квота cgroup у ядрах, або ``None`` якщо ліміту немає.
+
+    ``root`` параметром не для гнучкості, а щоб перевірку можна було написати:
+    на Windows цих файлів немає, і без параметра тест довів би лише те, що
+    функція не падає на їх відсутності.
+    """
+    root = Path(root)
+    try:  # cgroup v2: "<квота> <період>" або "max <період>"
+        raw = (root / "cpu.max").read_text().split()
+        if raw and raw[0] != "max":
+            period = float(raw[1]) if len(raw) > 1 else 100000.0
+            if period > 0:
+                return float(raw[0]) / period
+    except (OSError, ValueError, IndexError):
+        pass
+    try:  # cgroup v1
+        quota = float((root / "cpu" / "cpu.cfs_quota_us").read_text().strip())
+        period = float((root / "cpu" / "cpu.cfs_period_us").read_text().strip())
+        if quota > 0 and period > 0:
+            return quota / period
+    except (OSError, ValueError):
+        pass
+    return None
+
+
+def usable_cores() -> int:
+    """Ядра, продані НАМ, а не наявні в хоста.
+
+    `os.cpu_count()` показує машину цілком: на орендованому боксі 04.09.2026 —
+    96 видимих проти квоти 46.08.
+    """
+    cores = float(os.cpu_count() or 1)
+    try:
+        allowed = len(os.sched_getaffinity(0))  # type: ignore[attr-defined]
+        if allowed:
+            cores = min(cores, float(allowed))
+    except (AttributeError, OSError):
+        pass
+    quota = cgroup_quota_cores()
+    if quota and quota > 0:
+        cores = min(cores, quota)
+    return max(1, int(cores))
+
+
+def _shards_from_argv(argv: list[str]) -> int:
+    """Скільки нас усього — з власного ``--shard k/n``. Свій зріз раннер знає
+    ще до розбору аргументів, і саме він каже, на скільки ділити машину."""
+    for i, arg in enumerate(argv):
+        raw = ""
+        if arg == "--shard" and i + 1 < len(argv):
+            raw = argv[i + 1]
+        elif arg.startswith("--shard="):
+            raw = arg.split("=", 1)[1]
+        if "/" in raw:
+            try:
+                total = int(raw.split("/", 1)[1])
+            except ValueError:
+                return 1
+            return total if total > 0 else 1
+    return 1
+
+
+def _limit_own_threads(argv: list[str] | None = None) -> int | None:
+    """🔴🔴 Шард обмежує себе САМ, хоч би хто його запустив.
+
+    Без цього кожен шард бачить ядра хоста й розгортає на них BLAS/OpenMP,
+    тимчасом як квота вдвічі менша. Вісім таких шардів дають не флот, а
+    контекст-світчі: замір 04.09.2026 на Tesla V100 (96 видимих ядер, квота
+    46.08) дав 208 стор/год проти 1579 на тому самому боксі й тій самій справі
+    — тобто рівно темп ОДНОГО шарда.
+
+    Батьківський раннер ці змінні виставляє, але покладатись на нього не можна:
+    шарди штатно запускають і руками по SSH, і тоді ваду видно лише як «щось
+    повільно». Тому знання живе тут, у місці, яке не обійти.
+
+    Явне рішення запускача поважається: виставлені змінні не чіпаємо.
+    """
+    if any(os.environ.get(var) for var in _THREAD_VARS):
+        return None
+    shards = _shards_from_argv(sys.argv[1:] if argv is None else argv)
+    threads = max(1, usable_cores() // shards)
+    for var in _THREAD_VARS:
+        os.environ[var] = str(threads)
+    return threads
+
+
+_SELF_LIMITED_TO = _limit_own_threads()
+
+import numpy as np  # noqa: E402  — лише ПІСЛЯ ліміту потоків
+from PIL import Image  # noqa: E402
 
 #: Дзеркало `nyshporka/core/progress.py`. Дублювати доводиться: раннер їде під
 #: інтерпретатором середовища рушіїв, де пакета немає. Рівність двох описів
@@ -2442,6 +2537,14 @@ def main() -> int:
                    "mixed": "мішане", "unknown": "письмо ?"}.get(script, script)
     print(f"[htr-run] {n} стор. · device={device} · рушій={engine} "
           f"({script_note}) · модель={Path(args.model).name}{shard_note}", flush=True)
+    # Приймач до ліміту потоків: без цього рядка не видно, чи шард поділив
+    # машину, чи забрав її всю — а на око це видно лише як «повільно».
+    if _SELF_LIMITED_TO is not None:
+        print(f"[htr-run] потоків собі: {_SELF_LIMITED_TO} · ядер "
+              f"{usable_cores()} із {os.cpu_count()} видимих", flush=True)
+    else:
+        print(f"[htr-run] потоків: {os.environ.get('OMP_NUM_THREADS')} "
+              f"(задано запускачем)", flush=True)
     if engine == "parseq" and args.sure_conf <= 0 and args.orient_check \
             and args.force_orient < 0:
         # друкуємо лише коли детектори справді працюють — інакше рядок описував
