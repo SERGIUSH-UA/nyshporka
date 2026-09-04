@@ -246,6 +246,61 @@ def cmd_orphans(as_json: bool = typer.Option(False, "--json")) -> None:
                           f"{r.get('note') or 'без пояснення'}[/muted]")
 
 
+def _n(v: int) -> str:
+    """Число з нерозривним пробілом між тисячами."""
+    return f"{v:,}".replace(",", " ")
+
+
+def _chars(v: int) -> str:
+    """Обсяг тексту: мільйони на око, точне число лишається в `--json`."""
+    if v >= 1_000_000:
+        return f"{v / 1_000_000:.1f} млн"
+    if v >= 10_000:
+        return f"{v / 1000:.0f} тис."
+    return _n(v)
+
+
+def _pct(part: int, whole: int) -> str:
+    return f"{100 * part / whole:.1f}%" if whole else "—"
+
+
+def _ratio(part: int, whole: int) -> str:
+    return f"{part / whole:.2f}" if whole else "—"
+
+
+def _print_voices(s: dict[str, Any]) -> None:
+    """Розріз за голосами й скільки справ читав лише один із них.
+
+    🔴 Окремим блоком, а не колонкою в таблиці архівів: голоси не діляться між
+    справами так, як діляться кадри. Ансамбль `Писар+Дяк` — один прогін, чиї
+    сторінки належать обом голосам, тож стовпчик у спільній таблиці не сходився
+    б із підсумком і читався б як помилка обліку.
+    """
+    voices = [v for v in (s.get("voices") or []) if v.get("cases")]
+    if not voices:
+        return
+    tv = Table(header_style="bold", title="За голосами (участь у прогоні)")
+    cols: tuple[tuple[str, JustifyMethod], ...] = (
+        ("голос", "left"), ("справ", "right"),
+        ("сторінок", "right"), ("тексту", "right"))
+    for col, just in cols:
+        tv.add_column(col, justify=just)
+    for v in voices:
+        tv.add_row(v["label"], str(v["cases"]), _n(v["pages"]), _chars(v["chars"]))
+    console.print(tv)
+    mix = {int(r["voices"]): r for r in (s.get("voice_mix") or [])}
+    if mix:
+        word = {1: "одним", 2: "двома", 3: "трьома"}
+        console.print("  голосів на справу — " + " · ".join(
+            f"{word.get(k, k)}: {mix[k]['n']} ({_n(mix[k]['pages'])} стор.)"
+            for k in sorted(mix)))
+    one = mix.get(1)
+    if one and one["n"]:
+        console.print(f"  [warn]одноголосих справ: {one['n']} ({_n(one['pages'])} стор.)"
+                      f" — другого рушія по них не було, тож нуль по такій справі"
+                      f" ще нічого не означає[/warn]")
+
+
 @app.command("stats")
 def cmd_stats(as_json: bool = typer.Option(False, "--json")) -> None:
     """Зведення: скільки завантажено, декодовано, прошукано, переглянуто."""
@@ -262,7 +317,20 @@ def cmd_stats(as_json: bool = typer.Option(False, "--json")) -> None:
                   f"декод обірвано: {s['partial']}")
     console.print(f"  без декоду: {s['htr_none']} справ / "
                   f"{s['htr_frames_left']:,} кадрів".replace(",", " "))
-    console.print(f"  декодовано сторінок: {s['htr_pages']:,}".replace(",", " "))
+    # 🔴 Три рядки замість колишнього одного «декодовано сторінок». Одна цифра
+    # тут відповідала на три різні питання одразу і в двох випадках із трьох
+    # брехала: 199 тисяч кадрів — це 372 тисячі сторінко-декодів роботи рушіїв
+    # і 348 мільйонів символів матеріалу, і жодне з чисел не виводиться з решти.
+    console.print(f"  прочитано кадрів: {_n(s['htr_pages'])}"
+                  f" · тексту: {_chars(s['htr_chars'])}"
+                  f" · рядків: {_chars(s['htr_lines'])}")
+    if s.get("htr_pages_all"):
+        console.print(f"  [muted]роботи рушіїв: {_n(s['htr_pages_all'])} сторінко-декодів"
+                      f" ({_ratio(s['htr_pages_all'], s['htr_pages'])} голосу на кадр)"
+                      f" · {_chars(s['htr_chars_all'])}[/muted]")
+    if s.get("htr_blank"):
+        console.print(f"  [muted]рушій не дав нічого: {_n(s['htr_blank'])} стор."
+                      f" ({_pct(s['htr_blank'], s['htr_pages'])})[/muted]")
     console.print(f"  без пошуку роду: {s['fuzzy_none']} справ · "
                   f"кандидатів чекає ока: {s['fuzzy_hits_open']}")
     console.print(f"  цитує канон: {s['canon_cases']} справ · "
@@ -302,6 +370,7 @@ def cmd_stats(as_json: bool = typer.Option(False, "--json")) -> None:
         t.add_row(r["repo"] or "?", str(r["n"]), f"{r['frames']:,}".replace(",", " "),
                   str(r["no_htr"]), f"{r['frames_left']:,}".replace(",", " "))
     console.print(t)
+    _print_voices(s)
 
 
 # ── реєстр опису фонду (що існує) ↔ реєстр справ (що ми з цим зробили) ────────

@@ -85,6 +85,29 @@ def _model_voice(model: str, engine: str) -> list[tuple[str, str]]:
     return out
 
 
+def _volume(pages: dict[str, Any]) -> tuple[int, int, int]:
+    """Обсяг одного прогону: (символів, рядків, сторінок без жодного символу).
+
+    Числа беруться з мети прогону, а не перечитуванням `*.txt`: рушій кладе
+    `chars`/`lines` на кожну сторінку сам, покриття суцільне, і прохід по метах
+    коштує 1196 файлів замість 454 тисяч.
+
+    Порожньою вважається рівно `chars == 0` — «рушій не видав нічого». Порога
+    на кшталт «менше десяти символів» тут навмисно немає: він оголосив би
+    порожніми й ті сторінки, де прочитано самий колонтитул, а це вже не факт
+    про рушій, а здогад про вміст аркуша.
+    """
+    chars = lines = blank = 0
+    for v in pages.values():
+        if not isinstance(v, dict):
+            continue
+        c = int(v.get("chars") or 0)
+        chars += c
+        lines += int(v.get("lines") or 0)
+        blank += not c
+    return chars, lines, blank
+
+
 def _iter_htr_runs() -> Iterator[tuple[str, dict[str, Any]]]:
     """(ім'я прогону, мета) для кожної теки з `_htr_meta.json`."""
     if not HTR_ROOT.is_dir():
@@ -621,16 +644,29 @@ def collect_rows(index: LibraryIndex | None = None) -> tuple[list[CaseRow], list
                                str(meta.get("case_key") or ""))
         link = resolve_run(name, str(meta.get("case_dir") or ""), idx,
                            meta_key=str(meta.get("case_key") or ""))
-        pages = len(meta.get("pages") or {})
+        pg = meta.get("pages") or {}
+        pages = len(pg)
+        chars, lines, blank = _volume(pg)
         if not link.key or link.key not in rows:
             orphans.append({"run": name, "case_dir": link.case_dir, "pages": pages,
+                            "chars": chars,
                             "model": meta.get("model") or "",
                             "resolved_by": link.resolved_by, "note": link.note,
                             "key": link.key})
             continue
         row = rows[link.key]
         row.htr_runs.append(name)
-        row.htr_pages_max = max(row.htr_pages_max, pages)
+        row.htr_pages_all += pages
+        row.htr_chars_all += chars
+        # 🔴 Обсяг береться з ТОГО САМОГО прогону, що дав `htr_pages_max`, інакше
+        # «сторінок» і «символів» описували б різні читання тієї самої справи.
+        # При рівних сторінках виграє більший текст: без цього вибір залежав би
+        # від порядку обходу тек, тобто мовчки плавав би між перезбірками.
+        if (pages, chars) >= (row.htr_pages_max, row.htr_chars_max):
+            row.htr_pages_max = pages
+            row.htr_chars_max = chars
+            row.htr_lines_max = lines
+            row.htr_pages_blank = blank
         upd = str(meta.get("updated") or "")
         if upd > row.htr_updated:
             row.htr_updated = upd
@@ -638,6 +674,7 @@ def collect_rows(index: LibraryIndex | None = None) -> tuple[list[CaseRow], list
             setattr(row, f"htr_{voice}", True)
             if pages >= getattr(row, f"htr_{voice}_pages"):
                 setattr(row, f"htr_{voice}_pages", pages)
+                setattr(row, f"htr_{voice}_chars", chars)
                 setattr(row, f"htr_{voice}_model", model)
 
     # ── fuzzy-пошук роду ────────────────────────────────────────────────────

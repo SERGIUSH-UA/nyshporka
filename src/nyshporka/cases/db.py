@@ -39,6 +39,9 @@ CREATE TABLE cases (
     htr_diak INTEGER, htr_diak_model TEXT, htr_diak_pages INTEGER,
     htr_skryba INTEGER, htr_skryba_model TEXT, htr_skryba_pages INTEGER,
     htr_runs TEXT, htr_pages_max INTEGER, htr_updated TEXT,
+    htr_pysar_chars INTEGER, htr_diak_chars INTEGER, htr_skryba_chars INTEGER,
+    htr_pages_all INTEGER, htr_chars_all INTEGER,
+    htr_chars_max INTEGER, htr_lines_max INTEGER, htr_pages_blank INTEGER,
     fuzzy_scanned TEXT, fuzzy_model TEXT, fuzzy_pages INTEGER, fuzzy_hits INTEGER,
     fuzzy_reviewed INTEGER, fuzzy_swept INTEGER, fuzzy_runs TEXT,
     canon_source_id TEXT, canon_facts INTEGER, canon_persons INTEGER,
@@ -57,7 +60,7 @@ CREATE INDEX idx_cases_place ON cases(place_id);
 -- Прогони, які не прив'язались до жодної справи. Тримаємо в базі, а не викидаємо:
 -- мовчазний фільтр дав би хибне «все прив'язано».
 CREATE TABLE orphan_runs (
-    run TEXT PRIMARY KEY, case_dir TEXT, pages INTEGER, model TEXT,
+    run TEXT PRIMARY KEY, case_dir TEXT, pages INTEGER, chars INTEGER, model TEXT,
     source TEXT, resolved_by TEXT, note TEXT
 );
 CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
@@ -107,11 +110,12 @@ def build_index(db_path: Path | None = None,
         con.executemany(f"INSERT INTO cases ({quoted}) VALUES ({placeholders})",
                         [_row_values(r) for r in rows])
         con.executemany(
-            "INSERT OR REPLACE INTO orphan_runs (run, case_dir, pages, model, source,"
-            " resolved_by, note) VALUES (:run, :case_dir, :pages, :model, :source,"
-            " :resolved_by, :note)",
+            "INSERT OR REPLACE INTO orphan_runs (run, case_dir, pages, chars, model,"
+            " source, resolved_by, note) VALUES (:run, :case_dir, :pages, :chars,"
+            " :model, :source, :resolved_by, :note)",
             [{"run": o.get("run"), "case_dir": o.get("case_dir") or "",
-              "pages": o.get("pages") or 0, "model": o.get("model") or "",
+              "pages": o.get("pages") or 0, "chars": o.get("chars") or 0,
+              "model": o.get("model") or "",
               "source": o.get("source") or "htr",
               "resolved_by": o.get("resolved_by") or "", "note": o.get("note") or ""}
              for o in orphans])
@@ -509,6 +513,17 @@ def stats(db_path: Path | None = None) -> dict[str, Any]:
             "htr_frames_left": one(
                 f"SELECT coalesce(sum(frames), 0) FROM cases {c} AND htr_stage = 'none'"),
             "htr_pages": one(f"SELECT coalesce(sum(htr_pages_max), 0) FROM cases {c}"),
+            # 🔴 Три різні числа про одне й те саме читання, і кожне відповідає на
+            # своє питання. `htr_pages` — КАДРІВ прочитано (кожен раз один).
+            # `htr_pages_all` — СТОРІНКО-ДЕКОДІВ, тобто роботи рушіїв: кадр,
+            # прочитаний Писарем і Дяком, тут двічі. `htr_chars` — скільки з
+            # цього вийшло ТЕКСТУ, бо кадр кадрові не рівня: щільний переписний
+            # розворот дає втричі більше за метричний.
+            "htr_pages_all": one(f"SELECT coalesce(sum(htr_pages_all), 0) FROM cases {c}"),
+            "htr_chars": one(f"SELECT coalesce(sum(htr_chars_max), 0) FROM cases {c}"),
+            "htr_chars_all": one(f"SELECT coalesce(sum(htr_chars_all), 0) FROM cases {c}"),
+            "htr_lines": one(f"SELECT coalesce(sum(htr_lines_max), 0) FROM cases {c}"),
+            "htr_blank": one(f"SELECT coalesce(sum(htr_pages_blank), 0) FROM cases {c}"),
             "fuzzy_none": one(f"SELECT count(*) FROM cases {c} AND fuzzy_stage = 'none'"),
             "fuzzy_hits_open": one(
                 "SELECT coalesce(sum(max(fuzzy_hits - fuzzy_reviewed, 0)), 0) FROM cases"),
@@ -528,6 +543,8 @@ def stats(db_path: Path | None = None) -> dict[str, Any]:
                 "SELECT coalesce(sum(frames), 0) FROM cases WHERE kind = 'bundle'"),
             "bundle_pages": one(
                 "SELECT coalesce(sum(htr_pages_max), 0) FROM cases WHERE kind = 'bundle'"),
+            "bundle_chars": one(
+                "SELECT coalesce(sum(htr_chars_max), 0) FROM cases WHERE kind = 'bundle'"),
             # свідоме «нема до чого прив'язати» (override `key: null`) сюди не йде —
             # це рішення, а не діра; воно рахується окремо як decided_none_runs
             "orphan_runs": one(
@@ -535,9 +552,36 @@ def stats(db_path: Path | None = None) -> dict[str, Any]:
             "orphan_pages": one(
                 "SELECT coalesce(sum(pages), 0) FROM orphan_runs"
                 " WHERE resolved_by <> 'override'"),
+            "orphan_chars": one(
+                "SELECT coalesce(sum(chars), 0) FROM orphan_runs"
+                " WHERE resolved_by <> 'override'"),
             "decided_none_runs": one(
                 "SELECT count(*) FROM orphan_runs WHERE resolved_by = 'override'"),
+            "decided_none_pages": one(
+                "SELECT coalesce(sum(pages), 0) FROM orphan_runs"
+                " WHERE resolved_by = 'override'"),
         }
+        # ── голоси ──────────────────────────────────────────────────────────
+        # 🔴 «За участю голосу», а не «цим голосом»: ансамбль пишеться одним
+        # прогоном (`pysar_cyr_v17.pt+diak_v4`) і його сторінки належать обом
+        # голосам одразу. Тому сума по голосах ПЕРЕВИЩУЄ число кадрів, і це не
+        # помилка — просто відповідь на інше питання: скільки матеріалу цей
+        # рушій узагалі бачив.
+        out["voices"] = [
+            {"voice": v, "label": lbl,
+             "cases": one(f"SELECT count(*) FROM cases {c} AND htr_{v}"),
+             "pages": one(f"SELECT coalesce(sum(htr_{v}_pages), 0) FROM cases {c}"),
+             "chars": one(f"SELECT coalesce(sum(htr_{v}_chars), 0) FROM cases {c}")}
+            for v, lbl in (("pysar", "Писар"), ("diak", "Дяк"), ("skryba", "Скриба"))]
+        # 🔴 Скільки справ прочитано ОДНИМ голосом — головна прогалина, яку це
+        # зведення має показувати саме тут. Одноголоса справа не «читана трохи
+        # гірше»: якщо єдиний голос кириличний, а справа польська, свіпу
+        # латинкою по ній не було зовсім, і нуль по ній нічого не означає.
+        out["voice_mix"] = [dict(r) for r in con.execute(
+            "SELECT (htr_pysar > 0) + (htr_diak > 0) + (htr_skryba > 0) AS voices,"
+            " count(*) AS n, coalesce(sum(htr_pages_max), 0) AS pages"
+            " FROM cases WHERE kind = 'case' AND htr_stage <> 'none'"
+            " GROUP BY voices ORDER BY voices")]
         # Гео-покриття: скільки справ мають розібране місце. Показуємо чесно, бо
         # фільтр за повітом мовчки пропускає все, що не розібралось.
         out["geo_uezd"] = one(f"SELECT count(*) FROM cases {c} AND uezd <> ''")

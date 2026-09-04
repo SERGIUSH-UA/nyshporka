@@ -18,8 +18,21 @@ from nyshporka.core import workspace as W
 
 
 @pytest.fixture
-def space(tmp_path: Path) -> Path:
+def space(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """🔴 `workspace.use()` тут замало, і це не теорія.
+
+    Гард питає корені в `htr_store`, а той бере `ROOT = workspace().root` на
+    рівні модуля — тобто в мить ПЕРШОГО імпорту. Доки цей файл ішов у прогоні
+    першим, підміна простору встигала; варто з'явитись тестові, що піднімає
+    простір раніше за алфавітом, і `ROOT` уже заморожений його тимчасовою
+    текою — власна тека тесту стає «чужою», і падає він, а не винуватець.
+    Тому корінь підмінюється поіменно.
+    """
     W.use(W.Workspace(root=tmp_path, name="тест", origin="test"))
+
+    from nyshporka import htr_store as S
+
+    monkeypatch.setattr(S, "ROOT", tmp_path)
     d = tmp_path / "data" / "raw" / "dahmo_315" / "spr-8433"
     d.mkdir(parents=True)
     for n in range(3):
