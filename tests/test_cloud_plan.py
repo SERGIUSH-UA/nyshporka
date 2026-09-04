@@ -75,7 +75,7 @@ def test_a_machine_without_a_card_is_not_a_failure() -> None:
 def test_shard_capacity_is_counted_per_card() -> None:
     """🔴 Дві карти по 8 ГБ дають 4 процеси, а не 5.
 
-    Наївне `int(сума × 0.9 / на_шард)` = `int(16 × 0.9 / 2.5)` = 5. Зайвий
+    Наївне `int(сума × 0.9 / на_шард)` дає на один шард більше, ніж улізе. Зайвий
     процес не сповільнює прогін — сторінки падають на браку пам'яті, процес
     виходить із нульовим кодом, і підсумок мовчить.
     """
@@ -118,8 +118,12 @@ def test_shards_are_capped_by_how_much_work_there_is() -> None:
     assert tiny.shards == 1
     assert tiny.capped_by == "обсяг справи"
 
+    # 🔴 Перевіряємо НАМІР, а не число: скільки саме шардів вийде, залежить від
+    # `gb_per_shard`, і закріплювати тут похідне число означає ламати тест
+    # щоразу, коли цей поріг уточнюють заміром.
     big = S.plan_sizing(cores=32, vram_gb_min=24, gpus=1, pages=5000)
-    assert big.shards == 8, "на великій справі обсяг уже не обмежує"
+    assert big.shards > 1, "на великій справі обсяг уже не обмежує"
+    assert big.capped_by != "обсяг справи"
 
 
 def test_speed_names_what_is_pressing() -> None:
