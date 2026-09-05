@@ -55,6 +55,34 @@ app = typer.Typer(
 console = brand.console()
 
 
+def _sync_skills() -> None:
+    """Перекласти скіли, якщо облік старший за пакет. Тихо, коли робити нічого.
+
+    🔴 Тут, а не в `nysh update`: та команда замінює саму себе
+    (`uv tool install --force`), і скіли читала б із теки пакета, яку в ту мить
+    саме перезаписують. Перекладає наступний запуск — уже нової збірки.
+
+    🔴 Пише ТІЛЬКИ в теки, куди скіли вже клали руками, і ніколи не заводить
+    нових: тека, яку людина не обирала, нам не належить. Правлені файли
+    лишаються як є — про них скаже підсумок.
+    """
+    try:
+        from nyshporka import __version__
+        from nyshporka import skills as S
+
+        got = S.sync(__version__)
+    except Exception:
+        return          # скіли — зручність, а не умова роботи
+    for dest, tally in got:
+        moved = tally.get("updated", 0) + tally.get("new", 0)
+        kept = tally.get("kept", 0)
+        if not moved and not kept:
+            continue
+        tail = f", лишено правлених руками: {kept}" if kept else ""
+        console.print(f"[muted]скіли оновлено до {__version__} у {dest} "
+                      f"(файлів: {moved}{tail})[/muted]")
+
+
 @app.callback()
 def _global_options(
     workspace: str = typer.Option(
@@ -77,6 +105,7 @@ def _global_options(
     побудована ціла гілка поведінки агента («знайдено здогадом — перепитай
     людину»). Змінну читає драбина простору, і лише вона.
     """
+    _sync_skills()
     if not workspace:
         return
     from nyshporka.core.workspace import WorkspaceError, use

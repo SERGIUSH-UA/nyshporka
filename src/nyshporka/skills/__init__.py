@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -119,6 +120,48 @@ def installed() -> list[tuple[Path, str]]:
         got = _ledger_version(dest)
         if got:
             out.append((dest, got))
+    return out
+
+
+#: Вимикач синхронізації. Потрібен і людині, і тестам: без нього прогін на
+#: машині розробника переписував би його ж власні скіли в `~/.claude/skills`.
+ENV_NO_SYNC = "NYSHPORKA_NO_SKILL_SYNC"
+
+
+def sync(version: str) -> list[tuple[Path, dict[str, int]]]:
+    """Перекласти скіли туди, куди їх УЖЕ клали, коли облік старший за пакет.
+
+    🔴 Чому це не робить `nysh update`. Та команда виконує
+    `uv tool install --force`, тобто **старий процес замінює сам себе**, а скіли
+    він читає з власної теки пакета — у ту мить вона або вже перезаписана, або
+    ще ні. Копіювати звідти означало б розкладати невідомо чию версію. Тому
+    перекладає НАСТУПНИЙ запуск, уже нової збірки.
+
+    🔴 Три межі, які лишаються від рішення «пакет не пише в конфіг агента
+    мовчки»:
+
+    * **тільки наявні теки.** Нових не заводимо: тека, куди людина скіли не
+      клала, — не наша;
+    * **правлене руками не чіпається.** Облік тримає sha256 того, що поклали
+      МИ, тож `install()` віддає такому файлу вердикт `kept` — і ми не
+      передаємо `force`;
+    * **мовчки не буває.** Викликач друкує підсумок; порожній результат означає,
+      що робити не було чого.
+    """
+    out: list[tuple[Path, dict[str, int]]] = []
+    if os.environ.get(ENV_NO_SYNC):
+        return out
+    for dest, was in installed():
+        if was == version:
+            continue
+        try:
+            got = install(dest, version=version)
+        except OSError:
+            continue          # тека зникла або читається лише — не привід падати
+        tally: dict[str, int] = {}
+        for o in got:
+            tally[o.verdict] = tally.get(o.verdict, 0) + 1
+        out.append((dest, tally))
     return out
 
 
