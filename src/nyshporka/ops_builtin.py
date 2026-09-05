@@ -1261,6 +1261,26 @@ def search_index(a: IndexArgs) -> Envelope:
     return env
 
 
+def _warn_expanded(env: Envelope, res: dict[str, Any]) -> None:
+    """Сказати вголос, що шукали не лише тим, що набрали.
+
+    🔴 Мовчазне розширення запиту — та сама вада, що мовчазний фільтр, лише в
+    інший бік: фільтр звужує вибірку непомітно, розширення додає в неї хіти, за
+    які людина не просила. І перше, і друге читається як відповідь на своє
+    питання, а нею не є.
+    """
+    added = list(res.get("stems_added") or [])
+    if not added:
+        return
+    env.warn("stems_expanded",
+             f"шукали ще й написаннями з довідника імен: {', '.join(added)}")
+    if res.get("folk"):
+        env.warn("folk_names_on",
+                 "увімкнено побутові двійники імені: зв'язок там біографічний, "
+                 "а не орфографічний, тож кожен такий хіт доводиться окремо — "
+                 "дивись поле stem_origin=folk")
+
+
 class SearchArgs(BaseModel):
     q: str = Field(description="прізвище або слово")
     where: Literal["decode", "pages", "records"] = Field(
@@ -1308,6 +1328,22 @@ class SearchArgs(BaseModel):
         "", "birth", "marriage", "death", "conversion", "confession_entry",
         "revision_entry", "tally", "other"] = Field(
         default="", description="лише where=records: тип акту")
+    # 🔴 Увімкнено за замовчуванням, і це не «зручність». Замір на живому
+    # rapidfuzz: «Явдоха» проти «Євдокія» дає 61.5 при порозі 80, «Осип» проти
+    # «Іосиф» — 66.7. Тобто без довідника ці пари не знаходяться НІКОЛИ, а нуль
+    # у відповідь читається як «такої людини в книзі немає».
+    given: bool = Field(
+        default=True,
+        description="розкривати гніздо написань імені з довідника "
+                    "(Явдоха=Євдокія, Осип=Іосиф)")
+    # 🔴 А цей — вимкнений, і теж не випадково. Тут не варіанти написання, а
+    # РІЗНІ імена однієї людини (хрестильне й побутове), тож на чужому матеріалі
+    # шар злипає двох різних осіб. Хибний позитив коштує дорожче за пропущений:
+    # пропущене шукають далі, а зліплене вважають знайденим.
+    folk: bool = Field(
+        default=False,
+        description="додати побутових двійників імені (Васса=Анна). Зв'язок "
+                    "біографічний, не орфографічний — кожен такий хіт звіряти")
 
 
 class SweepArgs(BaseModel):
@@ -1315,6 +1351,8 @@ class SweepArgs(BaseModel):
     thresh: int = Field(default=80, ge=50, le=100)
     context: int = Field(default=1, ge=0, le=3)
     limit: int = Field(default=100, ge=1, le=500)
+    given: bool = Field(default=True)
+    folk: bool = Field(default=False)
 
 
 # `agent=False`: агентові довга робота через чергу недоступна — черга живе в
@@ -1336,7 +1374,7 @@ def search_sweep(a: SweepArgs) -> Envelope:
     """
     return search_run(SearchArgs(q=a.q, where="decode", case="",
                                  thresh=a.thresh, context=a.context,
-                                 limit=a.limit))
+                                 limit=a.limit, given=a.given, folk=a.folk))
 
 
 @op("search.run", summary="Знайти прізвище в тому, що вже прочитано",
@@ -1371,7 +1409,8 @@ def search_run(a: SearchArgs) -> Envelope:
 
         try:
             res = htr_store.search(a.q, name=a.case or None, thresh=a.thresh,
-                                   limit=a.limit, context=a.context)
+                                   limit=a.limit, context=a.context,
+                                   given=a.given, folk=a.folk)
         except ValueError as exc:
             # Область пошуку не впізнано. Відмова тут нормативна (перелік
             # прийнятних форм), і вона краща за мовчазний пошук по всьому
@@ -1402,9 +1441,18 @@ def search_run(a: SearchArgs) -> Envelope:
                                # «не знайшлось у 400 з 1142» і «не знайшлось у
                                # 1142» — різні відповіді, і за другою закривають
                                # напрям, якого не перевіряли.
-                               "unindexed": blind}})
+                               "unindexed": blind,
+                               # 🔴 Чим шукали НАСПРАВДІ. Після розкриття
+                               # гнізда імен «шукали Євдокію» перестає бути
+                               # правдою — шукали ще й Явдоху з Овдотьєю, і
+                               # знаменник мусить це показувати.
+                               "stems": res.get("stems") or [],
+                               "stems_asked": res.get("stems_asked") or [],
+                               "stems_added": res.get("stems_added") or [],
+                               "folk": bool(res.get("folk"))}})
         if res.get("error"):
             env.warn("bad_query", str(res["error"]))
+        _warn_expanded(env, res)
         if blind:
             env.warn("partial_index",
                      f"{blind} прогонів поза пошуком: їхній текст ще не "
@@ -1460,11 +1508,13 @@ def search_run(a: SearchArgs) -> Envelope:
     by_place = a.axis == "place"
     if a.where == "pages":
         res = query.grep_surnames(a.q, thresh=a.thresh, case_key=case_key,
-                                  places=by_place, limit=a.limit)
+                                  places=by_place, limit=a.limit,
+                                  given=a.given, folk=a.folk)
     else:
         res = query.grep_records(a.q, thresh=a.thresh, case_key=case_key,
                                  role=a.role or None, rtype=a.rtype or None,
-                                 place=by_place, limit=a.limit)
+                                 place=by_place, limit=a.limit,
+                                 given=a.given, folk=a.folk)
     # 🔴 Знаменник тут такий самий обов'язковий, як у пошуку по декоду, — і
     # довго його не було саме тут, у гілці, найближчій до людини. «Не
     # знайшлось у виписаному» означає лише «серед того, що вже занесли оком»:
@@ -1479,10 +1529,14 @@ def search_run(a: SearchArgs) -> Envelope:
               "coverage": {"cases": res.get("cases") or 0,
                            "thresh": res.get("thresh", a.thresh),
                            "stems": res.get("stems") or [],
+                           "stems_asked": res.get("stems_asked") or [],
+                           "stems_added": res.get("stems_added") or [],
+                           "folk": bool(res.get("folk")),
                            "axis": a.axis, "role": a.role, "rtype": a.rtype}})
     if res.get("error"):
         env.warn("bad_query", str(res["error"]))
-    elif not hits:
+    _warn_expanded(env, res)
+    if not res.get("error") and not hits:
         if a.axis == "place":
             where = ("виписаних місцях" if a.where == "pages"
                      else "місцях розібраних записів")

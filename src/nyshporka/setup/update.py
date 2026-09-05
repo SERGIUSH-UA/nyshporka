@@ -144,8 +144,45 @@ def install_info() -> dict[str, str]:
     return {}
 
 
+#: Ключ у стані користувача: коли востаннє ПИТАЛИ pypi.org.
+STATE_CHECKED = "update_checked"
+
+
+def mark_checked() -> None:
+    """Записати, що зараз питали. Пишеться на спробу, а не на успіх.
+
+    ⚠ Саме на спробу: «мережа мовчала» теж означає, що людина вже питала, і
+    нагадувати їй наступної хвилини нема чого.
+    """
+    import time
+
+    from nyshporka.core.workspace import state_set
+
+    state_set(**{STATE_CHECKED: time.time()})
+
+
+def days_since_check() -> int | None:
+    """Скільки днів тому питали; `None` — не питали жодного разу.
+
+    🔴 Третій стан обов'язковий. «Не питали» і «питали, все свіже» — різні
+    відповіді, і зводити їх в одну означає показати спокій там, де його ніхто
+    не перевіряв. Це та сама вада, що нуль без знаменника, тільки про версію.
+    """
+    import time
+
+    from nyshporka.core.workspace import state_all
+
+    got = state_all().get(STATE_CHECKED)
+    try:
+        when = float(got)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    return max(0, int((time.time() - when) / 86400))
+
+
 def latest(timeout: float = TIMEOUT) -> Release:
     """Спитати PyPI. Мережа мовчить — це стан «не знаємо», а не поламка."""
+    mark_checked()
     req = Request(PYPI_JSON, headers={"Accept": "application/json"})
     try:
         with urlopen(req, timeout=timeout) as resp:

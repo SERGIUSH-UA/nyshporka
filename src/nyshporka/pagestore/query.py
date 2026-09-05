@@ -19,6 +19,7 @@ if TYPE_CHECKING:
 from rapidfuzz import fuzz
 
 from nyshporka.pagestore import store
+from nyshporka.records import names
 from nyshporka.utils.translit import normalize_archival
 
 _TOKEN_RE = re.compile(r"[^\s.,;:()\[\]{}/\\|«»\"'’—–-]+")
@@ -91,14 +92,38 @@ def _index(path: Path) -> dict[str, Any] | None:
     return idx
 
 
-def _stems(q: str) -> list[str]:
-    stems = [normalize_archival(w) for w in _TOKEN_RE.findall(q) if len(w) >= 3]
-    return [s for s in stems if len(s) >= 3]
+def _stems(q: str, *, given: bool = True, folk: bool = False,
+           ) -> tuple[list[str], dict[str, str]]:
+    """Стеми запиту й звідки кожен узявся.
+
+    🔴 Розширення тут те саме, що в пошуку по декоду, і кличеться з того самого
+    місця (`records.names.expand_stems`). Друга копія правила розійшлася б із
+    першою тихо, і три сховища почали б відповідати по-різному на те саме
+    питання — залежно від того, в яке з них спитали.
+    """
+    raw = [normalize_archival(w) for w in _TOKEN_RE.findall(q) if len(w) >= 3]
+    raw = [s for s in raw if len(s) >= 3]
+    if not raw:
+        return [], {}
+    if not (given or folk):
+        return raw, dict.fromkeys(raw, names.ORIGIN_QUERY)
+    return names.expand_stems(raw, given=given, folk=folk)
 
 
-def _score(norm: str, stems: list[str]) -> int:
+def _asked(origin: dict[str, str]) -> list[str]:
+    """Те, що набрала людина, — окремим числом від того, чим шукали насправді."""
+    return [s for s, why in origin.items() if why == names.ORIGIN_QUERY]
+
+
+def _added(origin: dict[str, str]) -> list[str]:
+    return [s for s, why in origin.items() if why != names.ORIGIN_QUERY]
+
+
+def _score(norm: str, stems: list[str]) -> tuple[int, str]:
+    """Найкращий бал і СТЕМ, яким його взято — щоб хіт умів назвати написання."""
     # 0.0, а не 0: rapidfuzz рахує у float, і ціле тут лише прикидалося б типом.
     best = 0.0
+    by = ""
     for stem in stems:
         # закороткий рядок не може легітимно матчити довгий стем (гард htr_store)
         if len(norm) < max(4, int(len(stem) * 0.6)):
@@ -106,14 +131,21 @@ def _score(norm: str, stems: list[str]) -> int:
         sc = fuzz.ratio(norm, stem)
         if len(norm) >= len(stem):
             sc = max(sc, fuzz.partial_ratio(norm, stem))  # відмінкові хвости
-        best = max(best, sc)
-    return round(best)
+        if sc > best:
+            best, by = sc, stem
+    return round(best), by
 
 
 def grep_surnames(q: str, thresh: int = 80, case_key: str | None = None,
-                  places: bool = False, limit: int = 200) -> dict[str, Any]:
-    """Fuzzy по всіх збережених прізвищах (або місцях) усіх справ."""
-    stems = _stems(q)
+                  places: bool = False, limit: int = 200, *,
+                  given: bool = True, folk: bool = False) -> dict[str, Any]:
+    """Fuzzy по всіх збережених прізвищах (або місцях) усіх справ.
+
+    ⚠ Гніздо імен розкривається і для осі МІСЦЯ теж, і це свідомо: назва села
+    поділяє з іменем ту саму нормалізацію, а зайвий стем там просто нічого не
+    знаходить. Окремий вимикач на вісь був би ручкою, яку ніхто не крутить.
+    """
+    stems, origin = _stems(q, given=given, folk=folk)
     if not stems:
         return {"hits": [], "cases": 0, "error": "закороткий запит"}
     hits, scanned = [], 0
@@ -123,29 +155,34 @@ def grep_surnames(q: str, thresh: int = 80, case_key: str | None = None,
             continue
         scanned += 1
         for scan, raw, norm in idx["places" if places else "surnames"]:
-            sc = _score(norm, stems)
+            sc, by = _score(norm, stems)
             if sc >= thresh:
                 note = idx["pages"].get(scan) or {}
                 hits.append({"key": idx["key"], "shifra": idx["shifra"], "scan": scan,
                              "page_type": note.get("page_type") or "",
                              "status": note.get("status") or "",
                              "matched": raw, "score": sc,
+                             "stem": by,
+                             "stem_origin": origin.get(by, names.ORIGIN_QUERY),
                              "comment": note.get("comment") or ""})
     hits.sort(key=lambda h: -h["score"])
     return {"hits": hits[:limit], "total": len(hits), "cases": scanned,
-            "stems": stems, "thresh": thresh}
+            "stems": stems, "stems_asked": _asked(origin),
+            "stems_added": _added(origin), "folk": bool(folk),
+            "thresh": thresh}
 
 
 def grep_records(q: str, thresh: int = 80, case_key: str | None = None,
                  role: str | None = None, rtype: str | None = None,
-                 place: bool = False, limit: int = 200) -> dict[str, Any]:
+                 place: bool = False, limit: int = 200, *,
+                 given: bool = True, folk: bool = False) -> dict[str, Any]:
     """Fuzzy по учасниках записів; `place=True` — шукати по місцю, а не прізвищу.
 
     Пошук по місцю відповідає на питання, якого прізвищевий не бере: «які акти
     згадують це поселення» — байдуже, під яким прізвищем. Саме так шукають
     односельців у книгах чужих парафій.
     """
-    stems = _stems(q)
+    stems, origin = _stems(q, given=given, folk=folk)
     if not stems:
         return {"hits": [], "cases": 0, "error": "закороткий запит"}
     hits, scanned = [], 0
@@ -163,7 +200,7 @@ def grep_records(q: str, thresh: int = 80, case_key: str | None = None,
                 continue
             if rtype and rec.get("rtype") != rtype:
                 continue
-            sc = _score(norm, stems)
+            sc, by = _score(norm, stems)
             if sc >= thresh:
                 d = rec.get("date") or {}
                 hits.append({"key": idx["key"], "shifra": idx["shifra"],
@@ -173,7 +210,11 @@ def grep_records(q: str, thresh: int = 80, case_key: str | None = None,
                              "role": (person or {}).get("role") or "",
                              "name": (person or {}).get("name") or "",
                              "place": raw if place else (person or {}).get("place") or "",
+                             "stem": by,
+                             "stem_origin": origin.get(by, names.ORIGIN_QUERY),
                              "score": sc})
     hits.sort(key=lambda h: -h["score"])
     return {"hits": hits[:limit], "total": len(hits), "cases": scanned,
-            "stems": stems, "thresh": thresh}
+            "stems": stems, "stems_asked": _asked(origin),
+            "stems_added": _added(origin), "folk": bool(folk),
+            "thresh": thresh}

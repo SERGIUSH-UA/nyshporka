@@ -256,7 +256,13 @@ def ensure_all(runs: list[str], *,
 
 def _matches(norms: list[str], stems: list[str], thresh: int
              ) -> dict[int, tuple[float, int]]:
-    """Кандидати понад поріг: індекс → (бал, індекс кандидата).
+    """Кандидати понад поріг: індекс кандидата → (бал, індекс СТЕМА).
+
+    🔴 Другим числом іде саме стем, а не той самий індекс кандидата, як було
+    доти. Відколи запит розширюється написаннями гнізда імен, «яким стемом
+    знайдено» перестало бути деталлю реалізації: хіт по набраному й хіт по
+    двійнику з довідника — різні за силою відповіді, і зливати їх означає
+    показати як рівні. Викликач цим числом підписує кожен хіт.
 
     🔴 Правило зіставлення ТЕ саме, що було в поцикловому пошуку, і це не збіг:
     воно вистраждане замірами. Закороткий кандидат не порівнюється зовсім
@@ -278,21 +284,21 @@ def _matches(norms: list[str], stems: list[str], thresh: int
 
     best: dict[int, tuple[float, int]] = {}
 
-    def take(items: list[Any], need: int, floor: int) -> None:
+    def take(items: list[Any], need: int, floor: int, si: int) -> None:
         for _choice, score, j in items:
             n = len(norms[j])
             if n < need or n < floor:
                 continue
             cur = best.get(j)
             if cur is None or score > cur[0]:
-                best[j] = (float(score), j)
+                best[j] = (float(score), si)
 
-    for stem in stems:
+    for si, stem in enumerate(stems):
         need = max(4, int(len(stem) * 0.6))
         take(process.extract(stem, norms, scorer=fuzz.ratio,
-                             score_cutoff=thresh, limit=None), need, 0)
+                             score_cutoff=thresh, limit=None), need, 0, si)
         take(process.extract(stem, norms, scorer=fuzz.partial_ratio,
-                             score_cutoff=thresh, limit=None), need, len(stem))
+                             score_cutoff=thresh, limit=None), need, len(stem), si)
     return best
 
 
@@ -359,15 +365,18 @@ def sweep(stems: list[str], runs: list[str], *, thresh: int = 78,
         # Найкращий кандидат кожного рядка — а не кожен кандидат понад поріг:
         # рядок у видачі один, і показувати його стільки разів, скільки в ньому
         # схожих слів, означало б роздути число знахідок.
-        by_line: dict[tuple[str, int], tuple[float, int]] = {}
-        for j, (sc, _) in _matches(norms, stems, thresh).items():
+        by_line: dict[tuple[str, int], tuple[float, int, int]] = {}
+        for j, (sc, si) in _matches(norms, stems, thresh).items():
             key = lines[bisect_right(starts, j) - 1]
             cur = by_line.get(key)
             if cur is None or sc > cur[0]:
-                by_line[key] = (sc, j)
-        for (page, ln), (sc, j) in by_line.items():
+                by_line[key] = (sc, j, si)
+        for (page, ln), (sc, j, si) in by_line.items():
             hits.append({"name": run, "page": page, "line_no": ln,
                          "line_index": ln - 1, "norm": norms[j],
+                         # Стем, яким саме знайдено, — щоб хіт по двійнику з
+                         # довідника не читався як хіт по набраному.
+                         "stem": stems[si] if si < len(stems) else "",
                          "score": round(sc)})
     return {"hits": hits, "scanned": scanned, "runs": total,
             "unindexed": missing}

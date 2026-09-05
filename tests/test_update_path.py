@@ -189,3 +189,50 @@ def test_an_explicit_preset_still_wins():
     """Людина, яка сказала набір руками, головніша за будь-яке визначення."""
     assert "nyshporka[app,archives]" in U.command("catalog")
     assert "nyshporka[app,archives,htr]" in U.command("researcher")
+
+
+def test_never_asked_is_its_own_answer(tmp_path, monkeypatch):
+    """🔴 «Не питали» і «питали, все свіже» — різні відповіді.
+
+    Мовчазний зелений рядок про версію показував би спокій там, де його ніхто
+    не перевіряв: людина зі збіркою піврічної давнини бачила б рівно те саме,
+    що людина, яка щойно оновилась.
+    """
+    import time
+
+    from nyshporka.core import workspace as W
+
+    monkeypatch.setattr(W, "_state_path", lambda: tmp_path / "state.json")
+    assert U.days_since_check() is None
+
+    U.mark_checked()
+    assert U.days_since_check() == 0
+
+    W.state_set(**{U.STATE_CHECKED: time.time() - 40 * 86400})
+    assert U.days_since_check() == 40
+
+
+def test_a_broken_stamp_reads_as_never_asked(tmp_path, monkeypatch):
+    """Битий запис не сміє прикидатись свіжою перевіркою."""
+    from nyshporka.core import workspace as W
+
+    monkeypatch.setattr(W, "_state_path", lambda: tmp_path / "state.json")
+    W.state_set(**{U.STATE_CHECKED: "вчора"})
+    assert U.days_since_check() is None
+
+
+def test_remembering_a_workspace_does_not_wipe_the_stamp(tmp_path, monkeypatch):
+    """🔴 Латентна вада, яку тут і стережемо.
+
+    Єдиний писар стану перезаписував файл ЦІЛКОМ, тож будь-яке друге поле в
+    ньому зникало б при наступному відкритті простору — мовчки, бо на вигляд
+    стан лишався справним.
+    """
+    from nyshporka.core import workspace as W
+
+    monkeypatch.setattr(W, "_state_path", lambda: tmp_path / "state.json")
+    U.mark_checked()
+    W.remember(W.Workspace(root=tmp_path, name="тест", origin="test"))
+
+    assert U.days_since_check() == 0, "запис про перевірку затерли"
+    assert W.state_all()["workspace"] == str(tmp_path)

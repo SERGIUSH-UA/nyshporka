@@ -547,6 +547,15 @@ def update(
                       "повторіть[/warn]")
         raise typer.Exit(code=rc)
     console.print(f"✅ {rel.latest}")
+    # 🔴 Скіли не їдуть разом із пакетом: вони лежать копією в теці агента, і
+    # після оновлення людина працює за карткою попередньої версії, не знаючи
+    # про це. Кличемо не самі — пакет, що мовчки пише в конфіг агента, це те,
+    # за що пакети викидають, — а називаємо команду.
+    from nyshporka import skills as S
+
+    if S.installed():
+        console.print("[muted]скіли агента лишились від попередньої версії — "
+                      "покласти наново: `nysh skills install`[/muted]")
 
 
 @app.command()
@@ -632,6 +641,9 @@ def read(
                                   help="рахувати sato на карті; зняти при шардингу"),
     seg_height: int = typer.Option(0, "--seg-height",
                                    help="висота сегментації (0 = рідна 1800)"),
+    force: bool = typer.Option(
+        False, "--force",
+        help="стартувати, навіть якщо інша справа вже читається"),
     dry: bool = typer.Option(False, "--dry-run", help="лише показати план"),
 ) -> None:
     """Прочитати справу рукописним рушієм.
@@ -705,19 +717,44 @@ def read(
         console.print("  [muted]" + " ".join(cmd) + "[/muted]")
         return
 
+    # 🔴 Черга для командного рядка. Лок карти серіалізує лише фазу
+    # сегментації, тож два прогони СТАРТУЮТЬ разом і обидва міряють вільну
+    # VRAM як свою — кожен бере стільки шардів, скільки помістилось би одному.
+    # Далі вони штовхаються цілу ніч. Черга застосунку сюди не дістає: вона
+    # живе в процесі демона й прогонів термінала не бачить.
+    # ⚠ Шарди ТІЄЇ САМОЇ справи проходять: це штатний спосіб її прочитати.
+    from nyshporka.htr import runs as R
+
+    busy = R.others(p.case_dir.name)
+    if busy and not force:
+        console.print("[warn]![/warn] карту вже читає інша справа:")
+        for r in busy:
+            console.print(f"    [muted]{r.label()}[/muted]")
+        console.print("[muted]дочекайтесь кінця — або, якщо певні, що місця "
+                      "вистачить, `--force`[/muted]")
+        raise typer.Exit(code=1)
+
     p.out_dir.mkdir(parents=True, exist_ok=True)
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
                             stderr=subprocess.STDOUT, text=True,
                             encoding="utf-8", errors="replace", bufsize=1)
     assert proc.stdout is not None
-    for line in proc.stdout:
-        ev, human = split(line.rstrip())
-        if ev is not None and ev.n:
-            console.print(f"  [muted]{ev.i}/{ev.n} ({ev.pct:.0f}%) {ev.item}[/muted]",
-                          end="\r")
-        elif human:
-            console.print(f"  [muted]{human}[/muted]")
-    rc = proc.wait()
+    # ⚠ Реєструємо ДОЧІРНІЙ pid, а не свій: помирає першим саме він, і по
+    # ньому ж видно, чи робота ще йде. Запис знімається в `finally` — інакше
+    # Ctrl+C лишав би справу «зайнятою» до перевірки живості.
+    R.register(proc.pid, case=p.case_dir.name, case_key=case_key, shard=shard)
+    try:
+        for line in proc.stdout:
+            ev, human = split(line.rstrip())
+            if ev is not None and ev.n:
+                console.print(
+                    f"  [muted]{ev.i}/{ev.n} ({ev.pct:.0f}%) {ev.item}[/muted]",
+                    end="\r")
+            elif human:
+                console.print(f"  [muted]{human}[/muted]")
+        rc = proc.wait()
+    finally:
+        R.drop(proc.pid)
 
     # 🔴 Приймач повноти — диск, а не код повернення: при шардингу тиха втрата
     # сторінок дає rc=0 і порожній перелік збоїв.
@@ -915,6 +952,13 @@ def search_cmd(
                                 help="рядків сусідства (0 — лише сам рядок)"),
     thresh: int = typer.Option(80, "--thresh", help="поріг схожості 50-100"),
     limit: int = typer.Option(40, "--limit"),
+    given: bool = typer.Option(
+        True, "--given/--no-given",
+        help="розкривати гніздо написань імені (Явдоха=Євдокія, Осип=Іосиф)"),
+    folk: bool = typer.Option(
+        False, "--folk",
+        help="додати побутових двійників імені (Васса=Анна) — зв'язок "
+             "біографічний, кожен такий хіт звіряти окремо"),
     as_json: bool = typer.Option(False, "--json"),
 ) -> None:
     """Знайти прізвище в тому, що вже прочитано.
@@ -933,12 +977,20 @@ def search_cmd(
     _need("research")
     env = O.call("search.run", {"q": q, "case": case, "where": where,
                                 "context": context, "thresh": thresh,
-                                "limit": limit})
+                                "limit": limit, "given": given, "folk": folk})
     if _answer(env, as_json):
         return
     hits = env.data.get("hits") or []
     for h in hits:
         head = f"{h.get('name')} · {h.get('page')} · рядок {h.get('line_no')}"
+        # 🔴 Написання, яким знайдено, друкується ЛИШЕ коли воно не те, що
+        # набрали. Мовчазний хіт по двійнику з довідника читається як хіт по
+        # запиту, а важить менше: його ще треба звірити з тим, що шукали саме
+        # цю особу.
+        why = str(h.get("stem_origin") or "q")
+        if why != "q":
+            mark = "побутове" if why == "folk" else "довідник"
+            head += f" · [warn]{mark}: {h.get('stem')}[/warn]"
         console.print(f"[bold]{h.get('score')}[/bold]  {head}")
         for b in (h.get("context") or {}).get("before") or []:
             console.print(f"      [muted]↑ {b}[/muted]")
@@ -1286,6 +1338,11 @@ def pages_grep_cmd(
     rtype: str = typer.Option("", "--rtype", help=_RTYPES_HELP),
     thresh: int = typer.Option(80, "--thresh", help="поріг схожості 50-100"),
     limit: int = typer.Option(50, "--limit"),
+    given: bool = typer.Option(
+        True, "--given/--no-given",
+        help="розкривати гніздо написань імені (Явдоха=Євдокія)"),
+    folk: bool = typer.Option(
+        False, "--folk", help="додати побутових двійників імені (Васса=Анна)"),
     as_json: bool = typer.Option(False, "--json"),
 ) -> None:
     """Знайти прізвище в тому, що вже прочитано."""
@@ -1293,7 +1350,8 @@ def pages_grep_cmd(
 
     env = O.call("search.run", {"q": q, "where": where, "case": case,
                                 "axis": axis, "role": role, "rtype": rtype,
-                                "thresh": thresh, "limit": limit})
+                                "thresh": thresh, "limit": limit,
+                                "given": given, "folk": folk})
     if _answer(env, as_json):
         return
     is_rec = where == "records"
@@ -1387,11 +1445,23 @@ def records_grep_cmd(
                                                    "place — по місцю"),
     thresh: int = typer.Option(80, "--thresh", help="поріг схожості 50-100"),
     limit: int = typer.Option(50, "--limit"),
+    given: bool = typer.Option(
+        True, "--given/--no-given",
+        help="розкривати гніздо написань імені (Явдоха=Євдокія)"),
+    folk: bool = typer.Option(
+        False, "--folk", help="додати побутових двійників імені (Васса=Анна)"),
     as_json: bool = typer.Option(False, "--json"),
 ) -> None:
-    """Знайти прізвище серед розібраних записів — за роллю й типом акту."""
+    """Знайти прізвище серед розібраних записів — за роллю й типом акту.
+
+    ⚠ Сусідня команда кличеться як звичайна функція, тож КОЖЕН її параметр
+    треба передати явно: неназваний прийде сюди об'єктом `typer.Option`, а не
+    своїм значенням, і операція відмовить на перевірці типу. Саме так поїхали
+    сім тестів, коли до `pages grep` додали два нові прапорці, а тут ні.
+    """
     pages_grep_cmd(q=q, where="records", case=case, axis=axis, role=role,
-                   rtype=rtype, thresh=thresh, limit=limit, as_json=as_json)
+                   rtype=rtype, thresh=thresh, limit=limit,
+                   given=given, folk=folk, as_json=as_json)
 
 
 @records_app.command("show")

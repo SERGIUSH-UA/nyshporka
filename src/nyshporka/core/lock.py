@@ -114,6 +114,22 @@ def _alive_state(pid: int, started: float) -> bool | None:
         return False
 
 
+def process_started() -> float:
+    """Час старту ЦЬОГО процесу — публічний вигляд `_process_started`."""
+    return _process_started()
+
+
+def process_alive(pid: int, started: float) -> bool | None:
+    """Чи живий ТОЙ САМИЙ процес: True / False / None — «не знаю».
+
+    🔴 Публічний вигляд тієї самої перевірки, і другої копії правила бути не
+    сміє. Звірка часу старту тут не деталь: без неї перевірка ламається через
+    тиждень, бо PID перевикористовується, і чужий процес виглядає як наш.
+    Реєстр живих прогонів (`htr.runs`) спирається саме на це.
+    """
+    return _alive_state(pid, started)
+
+
 def _process_alive(pid: int, started: float) -> bool:
     """Сумісний вигляд: «не знаю» трактується як живий (нікого не чіпати)."""
     return _alive_state(pid, started) is not False

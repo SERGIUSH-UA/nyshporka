@@ -446,18 +446,41 @@ def _load_last_used() -> Path | None:
     return Path(val) if val else None
 
 
-def remember(ws: Workspace) -> None:
-    """Запам'ятати простір як останній використаний (для майстра наступного разу)."""
+def state_all() -> dict[str, Any]:
+    """Увесь файл стану користувача. Немає — порожньо, і це не помилка."""
+    path = _state_path()
+    if path is None or not path.is_file():
+        return {}
+    try:
+        import json
+        got = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return got if isinstance(got, dict) else {}
+
+
+def state_set(**fields: Any) -> None:
+    """Дописати поля у стан користувача, не чіпаючи решти.
+
+    🔴 Саме дописати. Доти єдиний писар (`remember`) перезаписував файл цілком,
+    і будь-яке друге поле в ньому зникало б при наступному відкритті простору —
+    мовчки, бо на вигляд стан лишався справним.
+    """
     path = _state_path()
     if path is None:
         return
     try:
         import json
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps({"workspace": str(ws.root)}, ensure_ascii=False),
+        path.write_text(json.dumps({**state_all(), **fields}, ensure_ascii=False),
                         encoding="utf-8")
     except OSError:
         pass  # запам'ятати не вдалось — це зручність, а не умова роботи
+
+
+def remember(ws: Workspace) -> None:
+    """Запам'ятати простір як останній використаний (для майстра наступного разу)."""
+    state_set(workspace=str(ws.root))
 
 
 # ── доступ ───────────────────────────────────────────────────────────────────

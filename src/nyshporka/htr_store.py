@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any
 
 from nyshporka.core.workspace import workspace
+from nyshporka.records import names as NAMES
 from nyshporka.utils.translit import normalize_archival
 
 ROOT = workspace().root
@@ -911,13 +912,18 @@ def page_candidates(lines: list[str]) -> Iterator[tuple[int, str, list[tuple[str
 
 
 def search(q: str, name: str | None = None, thresh: int = 78,
-           limit: int = 200, context: int = 0) -> dict[str, Any]:
+           limit: int = 200, context: int = 0, *,
+           given: bool = True, folk: bool = False) -> dict[str, Any]:
     """Fuzzy-пошук по текстах прогонів. `name=None` — по всіх справах.
 
     `context` — скільки рядків сусідства додати до кожного хіта (0 = без них).
     Вікно розсувне (`line_window`) і, якщо у справи є прогін другим рушієм,
     несе ще й його читання того самого рядка: збіг голосів означає надійне
     читання, розбіжність — що ознака в пікселях і судити має око.
+
+    `given` — розкривати гніздо написань імені з довідника (`records.names`).
+    `folk` — додавати ще й побутових двійників; за замовчуванням вимкнено, бо
+    зв'язок там біографічний, а не орфографічний.
 
     🔴 Контекст рахується лише для показаних хітів, після зрізу за `limit`.
     Інакше на справі з тисячею збігів кожен пошук читав би тисячу сторінок
@@ -927,6 +933,14 @@ def search(q: str, name: str | None = None, thresh: int = 78,
     stems = [s for s in stems if len(s) >= 3]
     if not stems:
         return {"hits": [], "cases": 0, "error": "закороткий запит"}
+    # 🔴 Набране людиною лишається окремим числом. Знаменник «шукали ось цим»
+    # після розширення перестає збігатися з тим, що набрали, і без обох чисел
+    # нуль читається не про те: «не знайшлось по п'яти написаннях» і «не
+    # знайшлось по одному» — різні відповіді.
+    asked = list(stems)
+    origin: dict[str, str] = dict.fromkeys(stems, NAMES.ORIGIN_QUERY)
+    if given or folk:
+        stems, origin = NAMES.expand_stems(stems, given=given, folk=folk)
     from nyshporka.search import decode as D
 
     scope = runs_for_scope(name or "")
@@ -982,12 +996,19 @@ def search(q: str, name: str | None = None, thresh: int = 78,
         # «виявити ≠ перевірити», а віддавала оку не той рядок, який
         # знайшла машина, з тим самим виглядом правильної відповіді.
         h["engine"], h["script"], h["engine_id"] = eng, scr, eid
+        # 🔴 Звідки взявся стем, яким знайдено. Хіт по набраному й хіт по
+        # двійнику з довідника виглядають однаково, а важать по-різному: другий
+        # ще треба звірити з тим, що людина шукала саме цю особу.
+        h["stem_origin"] = origin.get(str(h.get("stem") or ""),
+                                      NAMES.ORIGIN_QUERY)
     _resolve(shown)
     if context:
         _add_context(shown, side=context)
     phantom_n, blind = mark_phantoms(shown)
     return {"hits": shown, "total": len(raw_hits), "cases": got["scanned"],
-            "stems": stems, "thresh": thresh,
+            "stems": stems, "stems_asked": asked,
+            "stems_added": [s for s in stems if origin.get(s) != NAMES.ORIGIN_QUERY],
+            "folk": bool(folk), "thresh": thresh,
             # 🔴 Знаменник їде звідси ж, із тих самих прогонів, у яких шукали.
             # Порахований окремо, він щоразу розходився з чисельником —
             # див. `runs_for_scope`.

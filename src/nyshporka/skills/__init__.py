@@ -93,6 +93,35 @@ def _ledger(dest: Path) -> dict[str, str]:
     return files if isinstance(files, dict) else {}
 
 
+def _ledger_version(dest: Path) -> str:
+    """З якої версії пакета клали скіли в цю теку. Не клали — порожньо."""
+    try:
+        data = json.loads((dest / LEDGER).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return ""
+    return str(data.get("version") or "")
+
+
+def installed() -> list[tuple[Path, str]]:
+    """Куди скіли вже клали і з якої версії — щоб `doctor` міг це показати.
+
+    🔴 Оновлення пакета скіли НЕ ЧІПАЄ: вони копіюються разово й лежать у теці
+    агента, а не в пакеті. Доти про це не було сказано ніде, і людина з новим
+    пакетом працювала за старою карткою — мовчки, бо застарілий скіл виглядає
+    точно так само, як свіжий (звіт 05.09.2026).
+
+    ⚠ Дивимось обидва місця, куди кладе `nysh skills install`: теку проєкту й
+    теку користувача. Порядок той самий, у якому їх читає агент.
+    """
+    out: list[tuple[Path, str]] = []
+    for dest in (Path.cwd() / ".claude" / "skills",
+                 Path.home() / ".claude" / "skills"):
+        got = _ledger_version(dest)
+        if got:
+            out.append((dest, got))
+    return out
+
+
 @dataclass
 class Outcome:
     """Що сталося з одним файлом. Розрізняти обов'язково — див. нижче."""

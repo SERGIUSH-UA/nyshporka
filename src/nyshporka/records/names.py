@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import re
+from typing import Any
 
 from nyshporka.utils.translit import normalize_archival
 
@@ -117,6 +118,159 @@ def norm_surname(value: str | None) -> str:
     """Прізвище: тільки писемність і діакритика — форми не канонізуємо,
     бо «Гончаръ» і «Ганчаръ» можуть бути різними родами; їх зближує fuzzy."""
     return normalize_archival(value or "")
+
+
+# ── те саме гніздо, але прочитане для ПОШУКУ ─────────────────────────────────
+#
+# 🔴 Зворотний бік `_TO_CANON`, і це інша задача, а не та сама навиворіт.
+# Зводу осіб треба ОДНА канонічна форма, щоб дві згадки злились в одну людину.
+# Пошукові — навпаки, УСІ написання гнізда: у документі стоїть якесь одне, а
+# людина набрала інше, і жодна з форм не привілейована.
+#
+# Доти обидві потреби обслуговував самий `_TO_CANON`, тобто пошук довідника не
+# бачив узагалі (звіт користувача 05.09.2026). Ціна названа заміром на живому
+# rapidfuzz: «Явдоха» проти «Євдокія» дає 61.5 при порозі 80, «Осип» проти
+# «Іосиф» — 66.7, «Оксана» проти «Ксенія» — 66.7. Тобто це не «трохи нижче
+# порога», а мовчазний нуль, який читається як відповідь.
+#
+# ⚠ І навпаки: «Ганна» проти «Анна» дає 88.9, тобто fuzzy бере цю пару й без
+# довідника. Приклад із неї — поганий приймач: він проходив би й до правки.
+_NEST: dict[str, tuple[str, ...]] = {}
+for _cn in _ALIASES:
+    _cc = normalize_archival(_cn)
+    _forms = {_cc} | {normalize_archival(_v) for _v in _ALIASES[_cn]}
+    _NEST[_cc] = tuple(sorted(f for f in _forms if f))
+
+
+def expand_given(value: str | None) -> list[str]:
+    """Усі написання гнізда, до якого належить ім'я; невідоме — саме воно."""
+    n = normalize_archival(value or "")
+    if not n:
+        return []
+    return list(_NEST.get(_TO_CANON.get(n, n), (n,)))
+
+
+# ── шар побутових імен ───────────────────────────────────────────────────────
+#
+# 🔴 Це НЕ варіанти написання, і два шари плутати не можна. `_ALIASES` зводить
+# ОДНЕ ім'я, записане по-різному («Явдоха» = «Євдокія»). Тут стоять РІЗНІ
+# імена, які носила та сама людина: хрестильне за святцями й побутове, яким її
+# звали й записували далі. Васса й Анна — дві різні святі (замір: 44.4), і
+# жодна фонетика їх не зблизить; зв'язок тут біографічний, а не орфографічний.
+#
+# 🔴 Саме тому шар вимкнений за замовчуванням. На чужому матеріалі він злипає
+# двох різних жінок, а хибний позитив коштує дорожче за пропущений: пропущене
+# шукають далі, а зліплене вважають знайденим і закривають напрям.
+#
+# ⚠ Таблиця свідомо мала: сюди йде лише те, що ПОБАЧЕНО в документах, а не
+# зведене зі святців. Своє додається накладкою простору — тим самим механізмом,
+# що й `archives.yaml`.
+_FOLK_BUILTIN: dict[str, tuple[str, ...]] = {
+    # Метрика народження називає Вассу, всі пізніші документи того самого села —
+    # Анну (звіт користувача, Сквирський повіт, 1873-1892).
+    "васса": ("анна",),
+}
+
+#: Ім'я файлу накладки в конфігу простору. Формат — `васса: [анна]`.
+WORKSPACE_FOLK = "folk_names.yaml"
+
+_folk_pairs: dict[str, tuple[str, ...]] | None = None
+
+
+def _folk_overlay() -> dict[str, Any]:
+    """Пари з простору. Простору чи файла немає — порожньо, і це не помилка."""
+    try:
+        from nyshporka.core.workspace import workspace
+        path = workspace().config / WORKSPACE_FOLK
+    except Exception:  # простір ще не визначено — це не привід падати
+        return {}
+    if not path.is_file():
+        return {}
+    try:
+        import yaml
+        return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except (OSError, ValueError):
+        return {}
+
+
+def folk_pairs(*, refresh: bool = False) -> dict[str, tuple[str, ...]]:
+    """Побутові пари: вбудовані плюс накладка простору, обидва боки симетрично.
+
+    🔴 Симетрія будується тут, а не покладається на автора таблиці. Пара, задана
+    в один бік, працювала б лише при запиті з того боку — тобто «Васса» шукала б
+    Анну, а «Анна» Вассу ні, і людина діставала б різні відповіді на те саме
+    питання залежно від того, з якого документа почала.
+    """
+    global _folk_pairs
+    if _folk_pairs is not None and not refresh:
+        return _folk_pairs
+    raw: dict[str, list[str]] = {k: list(v) for k, v in _FOLK_BUILTIN.items()}
+    for key, val in (_folk_overlay() or {}).items():
+        vals = [val] if isinstance(val, str) else list(val or [])
+        raw.setdefault(str(key), []).extend(str(v) for v in vals)
+    sym: dict[str, set[str]] = {}
+    for key, vals in raw.items():
+        nk = normalize_archival(key)
+        for v in vals:
+            nv = normalize_archival(v)
+            if not nk or not nv or nk == nv:
+                continue
+            sym.setdefault(nk, set()).add(nv)
+            sym.setdefault(nv, set()).add(nk)
+    _folk_pairs = {k: tuple(sorted(v)) for k, v in sym.items()}
+    return _folk_pairs
+
+
+def expand_folk(value: str | None) -> list[str]:
+    """Побутові двійники імені. Порожньо — значить пари не записано."""
+    n = normalize_archival(value or "")
+    if not n:
+        return []
+    out: list[str] = []
+    for twin in folk_pairs().get(n, ()):
+        out += expand_given(twin)
+    return out
+
+
+#: Звідки взявся стем: набране людиною, гніздо написань, побутовий двійник.
+ORIGIN_QUERY = "q"
+ORIGIN_GIVEN = "given"
+ORIGIN_FOLK = "folk"
+
+
+def expand_stems(stems: list[str], *, given: bool = True, folk: bool = False,
+                 ) -> tuple[list[str], dict[str, str]]:
+    """Стеми запиту + написання їхніх гнізд, і звідки кожен узявся.
+
+    🔴 Розширюється ЗАПИТ, а не нормалізація індексу. Індекс на диску вже
+    збудований виходом `normalize_archival`; підміна цієї функції означала б
+    перебудову всіх індексів і зсув порогів, каліброваних замірами. Тут же
+    ціна — кілька зайвих стемів на запит, а індекс лишається той самий.
+
+    ⚠ Набране людиною йде ПЕРШИМ і ніколи не витісняється. Додане лише
+    дописується в хвіст, тож наявні хіти зсунутись не можуть — вони знайдені
+    тими самими стемами, що й до правки.
+    """
+    out: list[str] = []
+    origin: dict[str, str] = {}
+
+    def add(stem: str, why: str) -> None:
+        if len(stem) < 3 or stem in origin:
+            return
+        out.append(stem)
+        origin[stem] = why
+
+    for s in stems:
+        add(s, ORIGIN_QUERY)
+    if given:
+        for s in list(out):
+            for form in expand_given(s):
+                add(form, ORIGIN_GIVEN)
+    if folk:
+        for s in [x for x in out if origin[x] != ORIGIN_FOLK]:
+            for form in expand_folk(s):
+                add(form, ORIGIN_FOLK)
+    return out, origin
 
 
 def split_name(full: str) -> tuple[str, str, str]:

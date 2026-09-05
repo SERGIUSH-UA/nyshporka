@@ -389,13 +389,57 @@ def _version() -> Check:
     у мережу йде вже вона.
     """
     from nyshporka import __version__
+    from nyshporka.setup import update as U
 
-    return Check("Версія", "ok", __version__,
-                 "перевірити, чи вийшла новіша: `nysh update --check`",
-                 op="update.check")
+    days = U.days_since_check()
+    fix = "перевірити, чи вийшла новіша: `nysh update --check`"
+    # 🔴 «Не питали» — окремий стан, а не «все свіже». Мовчазний зелений рядок
+    # тут показував би спокій там, де його ніхто не перевіряв: людина зі
+    # збіркою піврічної давнини бачила б рівно те саме, що людина, яка щойно
+    # оновилась. Це та сама вада, що нуль без знаменника, лише про версію.
+    #
+    # ⚠ Мережі тут немає й не буде: `PRIVACY.md` обіцяє, що фонової активності
+    # немає, а `doctor` кличе інсталятор і агент у скриптах. Рядок читає лише
+    # ВЛАСНИЙ запис про те, коли питали востаннє; у мережу йде кнопка.
+    if days is None:
+        return Check("Версія", "warn", f"{__version__} · чи є новіша — не питали",
+                     fix, op="update.check")
+    if days >= 30:
+        return Check("Версія", "warn",
+                     f"{__version__} · востаннє питали {days} дн. тому",
+                     fix, op="update.check")
+    return Check("Версія", "ok", f"{__version__} · питали {days} дн. тому",
+                 fix, op="update.check")
 
 
-CHECKS = (_version, _python, _workspace, _cloud_sync, _disk, _profile,
+def _skills() -> Check:
+    """Чи не старші скіли агента за сам пакет.
+
+    🔴 Оновлення пакета скіли не чіпає: вони копіюються разово в теку агента.
+    Тобто після `nysh update` людина працює за КАРТКОЮ ПОПЕРЕДНЬОЇ ВЕРСІЇ, і
+    помітити це нема як — застарілий скіл виглядає точно так само, як свіжий.
+    Дані для перевірки лежали в обліку `.nysh-skills.json` від першого дня;
+    бракувало рівно того, щоб їх спитати.
+    """
+    from nyshporka import __version__
+    from nyshporka import skills as S
+
+    got = S.installed()
+    if not got:
+        return Check("Скіли агента", "ok", "не встановлені",
+                     "покласти туди, де їх бачить агент: `nysh skills install`")
+    stale = [(d, v) for d, v in got if v != __version__]
+    if not stale:
+        where = ", ".join(str(d) for d, _ in got)
+        return Check("Скіли агента", "ok", f"{__version__} · {where}")
+    detail = " · ".join(f"{v} у {d}" for d, v in stale)
+    return Check("Скіли агента", "warn",
+                 f"старші за пакет ({__version__}): {detail}",
+                 "покласти наново: `nysh skills install` — правлене руками "
+                 "лишиться як є")
+
+
+CHECKS = (_version, _skills, _python, _workspace, _cloud_sync, _disk, _profile,
           _decode_visible, _torch, _engines, _models)
 
 #: Перевірки, які мають сенс лише при ввімкненій секції. 🔴 Не косметика:
