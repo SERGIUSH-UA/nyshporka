@@ -162,7 +162,7 @@ nysh op page.view --args '{"run": "…", "page": "0012.jpg", "line": 3}'
 
 | операція | tool | що прочитати |
 |---|---|---|
-| `search.run` | `nysh_search_run` | **знаменник у попередженні** + `line_index` кожного хіта; `role`/`rtype`/`axis` звужують і потрапляють у `coverage` |
+| `search.run` | `nysh_search_run` | **знаменник у попередженні** + `line_index` кожного хіта; `role`/`rtype`/`axis` звужують і потрапляють у `coverage`. Кожен хіт каже, ЯКИМ написанням знайдений (`stem_origin`) і чи опущений чужим словом (`rank_why`) — опущений НЕ зникає. `anchors` додає другий канал (ім'я + по батькові поруч) окремим списком, `selfcheck` — recall на тому, що вже виписало око; обидва в межах справи |
 | `pages.status` | `nysh_pages_status` | **перед** переглядом, не після |
 | `pages.note` ✎ | `nysh_pages_note` | — |
 | `records.add` ✎ | `nysh_records_add` | `replace` стирає всю справу й вимагає `confirm` числом |
