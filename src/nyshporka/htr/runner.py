@@ -536,6 +536,12 @@ def _file_lock_ctx(path: Path):
     return _ctx
 
 
+def _device_slug(device: str) -> str:
+    """`cuda:0` → `cuda0`. Ім'я файла лока мусить розрізняти карти: спільний лок
+    на всі серіалізував би їх між собою."""
+    return re.sub(r"[^A-Za-z0-9]+", "", device) or "cuda"
+
+
 def install_gpu_lock(lock_path: Path, device: str, keep_cache: bool = False) -> None:
     """Серіалізувати між воркерами лише GPU-фазу сегментації.
 
@@ -2667,12 +2673,27 @@ def main() -> int:
         have = len(list(seg_cache.glob("*.seg.json.gz"))) if seg_cache.is_dir() else 0
         print(f"[htr-run] 💾 кеш сегментації: {seg_cache} ({have} кадрів готово)",
               flush=True)
+    # 🔴 Лок GPU-фази ставиться САМ, коли шардів більше одного на одній карті.
+    # Тут стояло лише попередження, а попередження не запобіжник: воно тоне в
+    # лозі, і кожен, хто запускає шарди руками, іде без лока. Хмарний раннер
+    # передає його завжди — тобто бойовий шлях і ручний розходяться саме там,
+    # де ручний найлегше зіпсувати.
+    #
+    # ⚠ Лок купує НЕ швидкість, а піки VRAM: замір 05.09.2026 (2 шарди, 8
+    # густих сторінок, повтори) дав 21.8 с/стор із локом і 21.9 без — різниці
+    # немає. Сенс у тому, що без нього піки forward'ів збігаються, і флот
+    # вичерпує карту тим імовірніше, чим більше шардів.
+    #
+    # Ім'я включає ПРИСТРІЙ: на багатокартковому боксі шарди розкладені по
+    # cuda:0..N, і спільний лок на всіх серіалізував би карти між собою, тобто
+    # зводив би багатокартковість нанівець.
+    if not args.gpu_lock and shard_n > 1 and device.startswith("cuda"):
+        args.gpu_lock = str(out_dir / f"_gpu.{_device_slug(device)}.lock")
+        print(f"[htr-run] лок GPU-фази виведено сам: {Path(args.gpu_lock).name} "
+              f"(шардів {shard_n} на {device})", flush=True)
     if args.gpu_lock and device.startswith("cuda"):
         install_gpu_lock(Path(args.gpu_lock), device, keep_cache=args.keep_cache)
         print(f"[htr-run] GPU-фаза під локом {Path(args.gpu_lock).name}", flush=True)
-    elif shard_n > 1 and device.startswith("cuda"):
-        print("[htr-run] ⚠ --shard без --gpu-lock: одночасні forward'и можуть "
-              "вичерпати VRAM", flush=True)
     # Орієнтація перевіряється лише на явну вимогу. Дефолт «сторінки рівні»
     # обраний заміром, а не з обережності: на ДАВО 904-24-24 детектори дали 53
     # спрацювання з 476 сторінок і жодного правильного — 51 спростував
