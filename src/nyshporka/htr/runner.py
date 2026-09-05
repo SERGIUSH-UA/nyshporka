@@ -2072,27 +2072,36 @@ def add_quarantine(out_dir: Path, page: str, reason: str) -> None:
     самому кадрі — і справа не дочитується ніколи.
     """
     path = out_dir / "_htr_quarantine.json"
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        data = {}
-    known = data.get("pages") if isinstance(data.get("pages"), dict) else {}
-    known[page] = {"reason": reason,
-                   "at": datetime.now().isoformat(timespec="seconds")}
-    try:
-        path.write_text(json.dumps({"version": 1, "pages": known},
-                                   ensure_ascii=False, indent=1) + "\n",
-                        encoding="utf-8")
-    except OSError as exc:
-        print(f"[htr-run] ⚠ карантин не записався ({exc})", flush=True)
+    # 🔴 Під локом: із клеймами сторінка-вбивця може покласти шард A, а потім
+    # дістатись шардові B — два наглядачі пишуть карантин одночасно, і без лока
+    # read-modify-write губить один із записів. Статичний зріз цього не бачив
+    # лише тому, що сторінка завжди била той самий шард.
+    with _file_lock_ctx(out_dir / "_htr_quarantine.lock")():
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            data = {}
+        known = data.get("pages") if isinstance(data.get("pages"), dict) else {}
+        known[page] = {"reason": reason,
+                       "at": datetime.now().isoformat(timespec="seconds")}
+        try:
+            path.write_text(json.dumps({"version": 1, "pages": known},
+                                       ensure_ascii=False, indent=1) + "\n",
+                            encoding="utf-8")
+        except OSError as exc:
+            print(f"[htr-run] ⚠ карантин не записався ({exc})", flush=True)
 
 
 def select_pages(case_dir: Path, pages_arg: str, limit: int,
-                 shard_k: int, shard_n: int) -> list[Path]:
+                 shard_k: int, shard_n: int, claim: bool = False) -> list[Path]:
     """Кадри, які цей процес мусить пройти (з урахуванням --pages/--limit/--shard).
 
     Винесено з main, бо той самий набір потрібен наглядачеві (`supervise`): без
     нього він не знає знаменника і не може сказати, чи прогін повний.
+
+    `claim=True` (динамічний розподіл, `--claim`): зріз `[k::n]` не робиться —
+    кожен шард бачить ПОВНИЙ список і бере лише ті кадри, які встиг заклеймити
+    (`claim_page`). Мета-парт і лок карти далі беруться з `k/n`.
     """
     pages_all = sorted(p for p in case_dir.iterdir()
                        if p.is_file() and p.suffix.lower() in (".jpg", ".jpeg", ".png"))
@@ -2101,11 +2110,134 @@ def select_pages(case_dir: Path, pages_arg: str, limit: int,
         pages_all = [p for i, p in enumerate(pages_all, 1) if i in wanted]
     if limit:
         pages_all = pages_all[:limit]
-    if shard_n > 1:
+    if shard_n > 1 and not claim:
         # round-robin, а не блоками: сторінки нерівні за вартістю (порожні vs
         # щільні), тож чергування вирівнює воркери самé по собі
         pages_all = pages_all[shard_k::shard_n]
     return pages_all
+
+
+# ── клейми: динамічний розподіл сторінок між шардами ─────────────────────────
+# 🔴 Статичний зріз `[k::n]` дає хвіст: шарди фінішують не разом, і карта
+# стоїть, поки останній дочитує свою частку. Замір std160 05.09.2026 (RTX 3090,
+# 8 шардів по 20 стор.): фініші в вікні 110–125 с = 12% роботи; на довгих
+# справах записано ~20%. Клейм — файл `<out>/_claims/<stem>.claim`, створений
+# `O_CREAT|O_EXCL`: рівно один власник на сторінку за побудовою ОС, а не за
+# формулою. Усе, що пише сторінку (txt, lines.json, теки голосів, кропи
+# рятунку), лишається без локів — власник один.
+
+CLAIMS_DIR = "_claims"
+
+
+def _pid_alive(pid: int) -> bool:
+    """Чи живий процес. ⚠ На Windows `os.kill(pid, 0)` УБИВАЄ процес (сигнал
+    там — код виходу), тому там лише запит стану через kernel32."""
+    if pid <= 0:
+        return False
+    if sys.platform == "win32":
+        import ctypes
+
+        kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+        handle = kernel32.OpenProcess(0x1000, False, pid)   # QUERY_LIMITED_INFORMATION
+        if not handle:
+            return False
+        try:
+            code = ctypes.c_ulong()
+            if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
+                return False
+            return code.value == 259                        # STILL_ACTIVE
+        finally:
+            kernel32.CloseHandle(handle)
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def claim_page(out_dir: Path, stem: str, shard: str = "") -> bool:
+    """Узяти сторінку собі. False = її вже тримає хтось інший (або вона зроблена)."""
+    d = out_dir / CLAIMS_DIR
+    d.mkdir(parents=True, exist_ok=True)
+    try:
+        fd = os.open(d / f"{stem}.claim", os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError:
+        return False
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write(f"{os.getpid()} {shard} {datetime.now().isoformat(timespec='seconds')}\n")
+    return True
+
+
+def _claim_owner(path: Path) -> int:
+    try:
+        return int(path.read_text(encoding="utf-8").split()[0])
+    except (OSError, ValueError, IndexError):
+        return 0
+
+
+def orphan_claims(out_dir: Path) -> list[str]:
+    """Стеми з клеймом без `<stem>.txt`, чий власник уже мертвий."""
+    d = out_dir / CLAIMS_DIR
+    if not d.is_dir():
+        return []
+    out = []
+    for c in sorted(d.glob("*.claim")):
+        stem = c.name[:-len(".claim")]
+        if (out_dir / f"{stem}.txt").exists():
+            continue
+        if not _pid_alive(_claim_owner(c)):
+            out.append(stem)
+    return out
+
+
+def release_orphan_claims(out_dir: Path) -> int:
+    """Зняти клейми мертвих власників без тексту — сторінку візьме живий шард.
+
+    Двоє можуть чистити одночасно: `FileNotFoundError` тут не помилка, а знак,
+    що сусід уже зняв; хто візьме сторінку далі — розсудить `O_EXCL`.
+    """
+    n = 0
+    for stem in orphan_claims(out_dir):
+        try:
+            (out_dir / CLAIMS_DIR / f"{stem}.claim").unlink()
+            n += 1
+        except FileNotFoundError:
+            continue
+        except OSError as exc:
+            print(f"[htr-run] ⚠ клейм {stem} не знявся ({exc})", flush=True)
+    return n
+
+
+def held_by_live_stranger(out_dir: Path) -> set[str]:
+    """Стеми без тексту, які зараз тримає ЖИВИЙ чужий процес."""
+    d = out_dir / CLAIMS_DIR
+    if not d.is_dir():
+        return set()
+    me = os.getpid()
+    out: set[str] = set()
+    for c in d.glob("*.claim"):
+        stem = c.name[:-len(".claim")]
+        if (out_dir / f"{stem}.txt").exists():
+            continue
+        owner = _claim_owner(c)
+        if owner != me and _pid_alive(owner):
+            out.add(stem)
+    return out
+
+
+def claimable_missing(pages_all: list[Path], out_dir: Path,
+                      side_dirs: tuple[Path, ...] = ()) -> list[str]:
+    """`missing_pages` мінус сторінки, що їх зараз читає живий сусід.
+
+    🔴 Без цього в claim-режимі кожен шард бачив би чужі недочитані сторінки
+    як свої пропуски: наглядач перезапускав би його, поки сусіди працюють, і
+    карантинував би чужу сторінку.
+    """
+    busy = held_by_live_stranger(out_dir)
+    return [p for p in missing_pages(pages_all, out_dir, side_dirs)
+            if Path(p).stem not in busy]
 
 
 def missing_pages(pages_all: list[Path], out_dir: Path,
@@ -2149,8 +2281,10 @@ def supervise(args: argparse.Namespace, case_dir: Path, out_dir: Path) -> int:
     щоб наступна спроба дійшла до решти. Якщо прогрес був — просто повторюємо.
     """
     shard_k, shard_n = parse_shard(args.shard)
+    claim_mode = bool(getattr(args, "claim", False)) and shard_n > 1
     try:
-        pages_all = select_pages(case_dir, args.pages, args.limit, shard_k, shard_n)
+        pages_all = select_pages(case_dir, args.pages, args.limit, shard_k, shard_n,
+                                 claim=claim_mode)
     except OSError as exc:
         print(f"[htr-run] наглядач: не читається тека справи ({exc})", flush=True)
         return 1
@@ -2178,7 +2312,13 @@ def supervise(args: argparse.Namespace, case_dir: Path, out_dir: Path) -> int:
         import subprocess
         rc = subprocess.run([sys.executable, str(Path(__file__).resolve()), *child_argv],
                             env=env).returncode
-        gone = [p for p in missing_pages(pages_all, out_dir)
+        # 🔴 У claim-режимі знаменник наглядача — лише те, що можна взяти:
+        # сторінки, які зараз читає живий сусід, не є нашими пропусками.
+        # Інакше кожен шард перезапускався б, поки інші працюють, і клав би
+        # в карантин чужі сторінки.
+        orphans = orphan_claims(out_dir) if claim_mode else []
+        finder = claimable_missing if claim_mode else missing_pages
+        gone = [p for p in finder(pages_all, out_dir)
                 if p not in load_quarantine(out_dir)]
         if not gone:
             break
@@ -2195,8 +2335,12 @@ def supervise(args: argparse.Namespace, case_dir: Path, out_dir: Path) -> int:
             # процес помер. Причину пишемо різну, бо лікуються вони по-різному
             why = ("падає з винятком двічі" if rc == 3
                    else f"двічі поклала процес (rc={rc})")
-            add_quarantine(out_dir, gone[0], f"{why} — наглядач htr_case_run")
-            print(f"[htr-run] ☠ {gone[0]}: {why} → карантин, іду далі без неї",
+            # З клеймами винуватець відомий точно: сторінка, чий клейм лишила
+            # щойно померла дитина. Без них — перша пропущена, як і раніше.
+            dead_stems = set(orphans)
+            culprit = next((p for p in gone if Path(p).stem in dead_stems), gone[0])
+            add_quarantine(out_dir, culprit, f"{why} — наглядач htr_case_run")
+            print(f"[htr-run] ☠ {culprit}: {why} → карантин, іду далі без неї",
                   flush=True)
     quar = load_quarantine(out_dir)
     if quar:
@@ -2491,6 +2635,12 @@ def main() -> int:
                     help="'k/n' — цей воркер бере кожну n-ту сторінку зі "
                          "зсувом k (round-robin). Мета пишеться у "
                          "_htr_meta.part<k>.json і зводиться у спільну")
+    ap.add_argument("--claim", action="store_true",
+                    help="динамічний розподіл сторінок: разом із --shard k/n "
+                         "шард іде по ВСЬОМУ списку й бере лише кадри, які "
+                         "встиг заклеймити (<out>/_claims/<stem>.claim, "
+                         "O_EXCL). Знімає хвіст статичного зрізу (12–20%% "
+                         "роботи, замір std160 05.09.2026). Без --shard не діє")
     ap.add_argument("--gpu-lock", default="",
                     help="файл міжпроцесного лока GPU-фази сегментації; "
                          "обов'язковий при --shard на одній карті")
@@ -2544,7 +2694,14 @@ def main() -> int:
         device = "cpu"
 
     shard_k, shard_n = parse_shard(args.shard)
-    pages_all = select_pages(case_dir, args.pages, args.limit, shard_k, shard_n)
+    claim_mode = bool(args.claim) and shard_n > 1
+    pages_all = select_pages(case_dir, args.pages, args.limit, shard_k, shard_n,
+                             claim=claim_mode)
+    if claim_mode:
+        freed = release_orphan_claims(out_dir)
+        busy = len(held_by_live_stranger(out_dir))
+        print(f"[htr-run] 🧲 клейми: динамічний розподіл, знято сирітських {freed}, "
+              f"зайнято живими сусідами {busy}", flush=True)
     if not pages_all:
         print("[htr-run] у теці немає сторінок jpg/jpeg/png", flush=True)
         emit(prog, "done", pages=0, skipped=0, failed=0, error="немає сторінок")
@@ -2885,6 +3042,11 @@ def main() -> int:
             print(f"[htr-run] ⏭ {src.name}: карантин ({reason})", flush=True)
             emit(prog, "htr", i=i, n=n, page=src.name, error=f"карантин: {reason}")
             continue
+        # 🧲 Динамічний розподіл: сторінку бере той, хто перший створив клейм.
+        # Чужа сторінка — не подія цього шарда, тож без emit: лічильники
+        # наглядача рахують done/failed/skipped, а не пройдені індекси.
+        if claim_mode and not claim_page(out_dir, stem, args.shard):
+            continue
         # консоль має знати, на чому саме шард завис: вотчдог бачить лише тишу,
         # а карантинувати треба конкретний файл (див. HtrManager._note_stall)
         emit(prog, "page_start", i=i, n=n, page=src.name)
@@ -3208,7 +3370,8 @@ def main() -> int:
     # саме мовчазний нуль (точніше — rc=1 без жодного рядка) видав справу 241-1-886
     # за завершену, маючи 14 сторінок із 18.
     quar = load_quarantine(out_dir)
-    gone = [p for p in missing_pages(pages_all, out_dir, tuple(side_dirs.values()))
+    finder = claimable_missing if claim_mode else missing_pages
+    gone = [p for p in finder(pages_all, out_dir, tuple(side_dirs.values()))
             if p not in quar]
     meta["missing"] = gone
     # карантин у меті теж потрібен: інакше після нього `missing` порожній, rc=0,

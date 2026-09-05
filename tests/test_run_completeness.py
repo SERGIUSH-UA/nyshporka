@@ -126,3 +126,89 @@ def test_a_page_is_counted_once_even_if_several_voices_are_missing(case, tmp_pat
         (out / f"{p.stem}.txt").write_text("т", encoding="utf-8")
     got = R.missing_pages(pages, out, (a, b))
     assert got == [p.name for p in pages] and len(got) == len(set(got))
+
+
+# ── клейми: динамічний розподіл ──────────────────────────────────────────────
+# Хвіст статичного зрізу на std160 05.09.2026: шарди фінішують у вікні 110–125 с
+# = 12% роботи на 20 стор/шард, на довгих справах ~20%. Динаміка мусить зберегти
+# інваріант «рівно раз», але вже не за формулою, а за файлом-клеймом (O_EXCL).
+
+
+def test_select_pages_with_claim_returns_the_whole_list_for_every_shard(case):
+    for k in range(4):
+        got = R.select_pages(case, "", 0, k, 4, claim=True)
+        assert [p.name for p in got] == [p.name for p in R.select_pages(case, "", 0, 0, 1)]
+    # без прапорця — старий зріз, для відкату й звірок
+    assert len(R.select_pages(case, "", 0, 0, 4)) < 10
+
+
+def test_racing_claimants_take_every_page_exactly_once(case, tmp_path: Path):
+    out = tmp_path / "out"
+    out.mkdir()
+    pages = R.select_pages(case, "", 0, 0, 1)
+    taken: dict[int, list[str]] = {k: [] for k in range(4)}
+    for p in pages:
+        for k in range(4):
+            if R.claim_page(out, p.stem, f"{k + 1}/4"):
+                taken[k].append(p.name)
+    names = [n for part in taken.values() for n in part]
+    assert sorted(names) == sorted(p.name for p in pages)
+    assert len(names) == len(set(names)), "кадр потрапив у два шарди"
+    # повторний обхід тих самих чотирьох не бере нічого
+    assert not any(R.claim_page(out, p.stem) for p in pages)
+    assert (out / R.CLAIMS_DIR / "0001.claim").read_text(encoding="utf-8").split()[0] == str(
+        __import__("os").getpid())
+
+
+def test_a_dead_owner_s_claim_is_released_a_live_one_is_not(case, tmp_path: Path):
+    """Мертвий шард лишає клейм без txt — сторінку візьме живий; свій і чужий
+    живий клейми не чіпаються; клейм зі зробленим txt — не сирота."""
+    out = tmp_path / "out"
+    (out / R.CLAIMS_DIR).mkdir(parents=True)
+    (out / R.CLAIMS_DIR / "0001.claim").write_text("2147483647 1/2 t\n", encoding="utf-8")
+    (out / R.CLAIMS_DIR / "0002.claim").write_text(f"{__import__('os').getpid()} 2/2 t\n",
+                                                   encoding="utf-8")
+    (out / R.CLAIMS_DIR / "0003.claim").write_text("2147483647 1/2 t\n", encoding="utf-8")
+    (out / "0003.txt").write_text("готово\n", encoding="utf-8")
+    assert R.orphan_claims(out) == ["0001"]
+    assert R.release_orphan_claims(out) == 1
+    assert not (out / R.CLAIMS_DIR / "0001.claim").exists()
+    assert (out / R.CLAIMS_DIR / "0002.claim").exists()
+    assert (out / R.CLAIMS_DIR / "0003.claim").exists()
+    assert R.claim_page(out, "0001")
+
+
+def test_claimable_missing_ignores_pages_held_by_a_live_stranger(case, tmp_path: Path,
+                                                                  monkeypatch):
+    """Інакше кожен шард бачив би чужі недочитані сторінки як свої пропуски."""
+    out = tmp_path / "out"
+    (out / R.CLAIMS_DIR).mkdir(parents=True)
+    pages = R.select_pages(case, "", 0, 0, 1)
+    (out / "0001.txt").write_text("є\n", encoding="utf-8")
+    (out / R.CLAIMS_DIR / "0002.claim").write_text("424242 1/2 t\n", encoding="utf-8")
+    monkeypatch.setattr(R, "_pid_alive", lambda pid: pid == 424242)
+    gone = R.claimable_missing(pages, out)
+    assert "0001.jpg" not in gone and "0002.jpg" not in gone
+    assert "0003.jpg" in gone and len(gone) == 8
+    # а для статичного зрізу чужий клейм — не аргумент
+    assert "0002.jpg" in R.missing_pages(pages, out)
+
+
+def test_quarantine_writes_survive_two_writers(tmp_path: Path):
+    """З клеймами сторінка-вбивця може дістатись двом шардам по черзі — два
+    наглядачі пишуть карантин одночасно, і без лока один запис губився."""
+    import threading
+
+    out = tmp_path / "out"
+    out.mkdir()
+
+    def writer(prefix: str):
+        for i in range(30):
+            R.add_quarantine(out, f"{prefix}{i:03d}.jpg", "тест")
+
+    threads = [threading.Thread(target=writer, args=(p,)) for p in ("a", "b", "c")]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert len(R.load_quarantine(out)) == 90

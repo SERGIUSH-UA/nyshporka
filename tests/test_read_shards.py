@@ -191,3 +191,27 @@ def test_a_deliberately_partial_run_is_not_called_incomplete(tmp_path: Path) -> 
     got = completeness(case, out, partial=True)
     assert got["missing"] == 0 and got["ok"] is True
     assert got["partial"] is True, "частковість прогону загубилась у відповіді"
+
+
+def test_claim_never_travels_without_a_shard(plan: Plan) -> None:
+    """`--claim` без `--shard` у раннері не діє — мовчазна «динаміка» без
+    ефекту була б невимовною, тож команда її просто не будує."""
+    assert "--claim" not in plan.command(claim=True)
+    assert "--claim" in plan.command(shard="1/2", claim=True)
+    assert "--claim" not in plan.command(shard="1/2", claim=False)
+
+
+@pytest.mark.parametrize("workers", [2, 4])
+def test_dynamic_shards_all_carry_claim_and_still_the_three_companions(
+    plan: Plan, workers: int
+) -> None:
+    """Хвіст статичного зрізу — 12–20% роботи (std160 05.09.2026); динаміка —
+    дефолт, і вона не знімає жодного з трьох обов'язкових прапорців."""
+    cmds, _ = plan.shards(workers, device="cuda:0")
+    for cmd in cmds:
+        f = _flags(cmd)
+        assert {"--shard", "--gpu-lock", "--no-gpu-sato", "--claim"} <= f
+    static, _ = plan.shards(workers, device="cuda:0", dynamic=False)
+    assert all("--claim" not in _flags(c) for c in static)
+    single, _ = plan.shards(1, device="cuda:0")
+    assert "--claim" not in _flags(single[0]), "одному процесу клейми ні до чого"

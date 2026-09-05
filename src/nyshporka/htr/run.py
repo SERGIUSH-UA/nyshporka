@@ -69,7 +69,8 @@ class Plan:
     def command(self, *, progress_json: bool = True, case_key: str = "",
                 limit: int = 0, pages: str = "", shard: str = "",
                 gpu_lock: str = "", gpu_sato: bool = True,
-                seg_height: int = 0, voice_batch: int = 0) -> list[str]:
+                seg_height: int = 0, voice_batch: int = 0,
+                claim: bool = False) -> list[str]:
         """Команда раннера.
 
         🔴 Важелі ресурсів приймаються звідси, а не зашиті. Раннер має їх
@@ -95,6 +96,10 @@ class Plan:
             cmd += ["--pages", pages]
         if shard:
             cmd += ["--shard", shard]
+            if claim:
+                # 🧲 Лише разом із шардом: без `--shard` прапорець у раннері
+                # не діє, і тиха «динаміка» без ефекту була б невимовною.
+                cmd.append("--claim")
         if gpu_lock:
             cmd += ["--gpu-lock", gpu_lock]
         if not gpu_sato:
@@ -122,7 +127,7 @@ class Plan:
                 "script_trust": self.script_trust, "script_why": self.script_why}
 
     # ── шарди ────────────────────────────────────────────────────────────────
-    def shards(self, workers: int = 1, *, device: str = "",
+    def shards(self, workers: int = 1, *, device: str = "", dynamic: bool = True,
                **kw: object) -> tuple[list[list[str]], list[str]]:
         """Команди N процесів і застереження до них.
 
@@ -158,8 +163,11 @@ class Plan:
         lock = str(self.gpu_lock or (self.out_dir / "_gpu.lock"))
         if n == 1:
             return [self.command(gpu_lock=lock, **kw)], notes  # type: ignore[arg-type]
+        # 🧲 `dynamic` — сторінки розбираються клеймами, а не зрізом `[k::n]`:
+        # хвіст статичного зрізу — 12–20% роботи (std160 05.09.2026). Вимикач
+        # лишається для відкату й для звірок зі старими прогонами.
         cmds = [self.command(shard=f"{k + 1}/{n}", gpu_lock=lock,
-                             gpu_sato=False, **kw)  # type: ignore[arg-type]
+                             gpu_sato=False, claim=dynamic, **kw)  # type: ignore[arg-type]
                 for k in range(n)]
         notes.append(
             f"{n} процеси під одним локом карти; sato знято з карти — виграш "
