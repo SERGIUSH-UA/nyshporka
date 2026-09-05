@@ -181,7 +181,7 @@ def test_default_run_carries_no_levers(tmp_path: Path) -> None:
     """
     cmd = _plan(tmp_path).command()
     for flag in ("--shard", "--gpu-lock", "--no-gpu-sato", "--seg-height",
-                 "--pages", "--limit"):
+                 "--pages", "--limit", "--voice-batch"):
         assert flag not in cmd, f"{flag} просочився у звичайний прогін"
 
 

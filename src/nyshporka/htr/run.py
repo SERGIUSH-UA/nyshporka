@@ -69,7 +69,7 @@ class Plan:
     def command(self, *, progress_json: bool = True, case_key: str = "",
                 limit: int = 0, pages: str = "", shard: str = "",
                 gpu_lock: str = "", gpu_sato: bool = True,
-                seg_height: int = 0) -> list[str]:
+                seg_height: int = 0, voice_batch: int = 0) -> list[str]:
         """Команда раннера.
 
         🔴 Важелі ресурсів приймаються звідси, а не зашиті. Раннер має їх
@@ -105,6 +105,12 @@ class Plan:
             cmd.append("--no-gpu-sato")
         if seg_height:
             cmd += ["--seg-height", str(seg_height)]
+        if voice_batch > 1:
+            # 🎙 Батч другого голосу: удвічі дешевший Дяк ціною ~1% символів у
+            # його теці (замір на 233 рядках — див. `kraken_decode_crops`).
+            # 0/1 = не передавати: дефолт вирішує раннер, і звірка з еталоном
+            # лишається доступною.
+            cmd += ["--voice-batch", str(voice_batch)]
         if progress_json:
             cmd.append("--progress-json")
         return cmd

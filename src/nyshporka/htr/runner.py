@@ -597,7 +597,21 @@ def load_recognizer(model: str, engine: str, device: str):
 KRAKEN_VOICE_PAD = 16
 #: Розмір батча kraken-голосу; 1 = тотожність окремому прогону (див.
 #: `kraken_decode_crops`). Виставляється один раз із `main` за `--voice-batch`.
-VOICE_BATCH = 1
+#:
+#: 🔴 Дефолт 8 — за заміром 06.09.2026 на 661 рядку ДАВО 904-24-24 (10 стор.,
+#: еталон = по одному):
+#:
+#:   батч   CER     дослівно   с/стор   VRAM
+#:      1   0.0000  661/661    1.28     0.09 ГБ
+#:      8   0.0080  569/661    0.60     0.55  ← беремо
+#:     16   0.0084  565/661    0.57     1.07
+#:     32   0.0087  562/661    0.74     2.12
+#:
+#: 8 дає той самий виграш у часі, що 16 і 32 (удвічі), при +0.46 ГБ на шард;
+#: 16 і 32 лише дорожчі за пам'яттю. Ціна — ~0.8% символів у теці голосу
+#: (14% рядків відрізняються хоч одним символом); факт батча пишеться в мету
+#: (`voice_batch`), щоб теки Дяка різних прогонів були порівнянні свідомо.
+VOICE_BATCH = 8
 
 
 def load_kraken_voice(model: str, device: str) -> tuple:
@@ -619,47 +633,101 @@ def load_kraken_voice(model: str, device: str) -> tuple:
     return net, tr, ch
 
 
+def _decode_in_batches(items: list, batch: int, run_batch, run_one,
+                       on_batch_error=None) -> list[str]:
+    """Чиста схема батчевого декоду: кошики по `batch`, а при збої кошика —
+    фолбек по одному. Порядок і довжина результату = як у `items`.
+
+    🔴 Винесено з `kraken_decode_crops` заради єдиного правила: **один битий
+    кроп не сміє знулити кошик.** До 05.09.2026 гілка батча робила
+    `out += [""] * len(chunk)` — тобто при батчі 32 одна зіпсована стрічка
+    мовчки стирала 32 рядки другого голосу, а на 75-рядковій сторінці це 40%
+    голосу, і виглядало це як «Дяк тут нічого не прочитав». Тепер збій кошика
+    → кожен його кроп читається окремо, і порожнім лишається лише той, що
+    падає сам.
+
+    Без torch — щоб схему можна було довести тестом там, де рушіїв немає.
+    `on_batch_error` кличеться перед фолбеком (для `torch.cuda.empty_cache`
+    після OOM: без нього наступний кошик впаде так само).
+    """
+    out: list[str] = []
+    if batch <= 1:
+        for it in items:
+            try:
+                out.append(run_one(it))
+            except Exception:
+                out.append("")
+        return out
+    for j in range(0, len(items), batch):
+        chunk = items[j:j + batch]
+        try:
+            res = list(run_batch(chunk))
+            if len(res) != len(chunk):
+                raise RuntimeError(f"кошик віддав {len(res)} рядків із {len(chunk)}")
+            out += res
+        except Exception:
+            if on_batch_error is not None:
+                on_batch_error()
+            for it in chunk:
+                try:
+                    out.append(run_one(it))
+                except Exception:
+                    out.append("")
+    return out
+
+
 def kraken_decode_crops(voice: tuple, crops: list, batch: int = 1) -> list[str]:
     """Прочитати готові кропи kraken-моделлю. Порядок і довжина = як у `crops`.
 
-    🔴 `batch=1` (дефолт) — не недогляд, а вимір. При батчі рядки доводиться
-    доповнювати до спільної ширини, і CTC віддає трохи інший текст: на тих
-    самих 233 рядках дослівний збіг із `rpred` падає 233/233 → 193/233
-    (CER 0.0095), причому паддінг тут ні до чого — після трансформів фон і так
-    нуль, перевірено окремо (нулями / «папером» / краєм рядка — три способи,
-    той самий CER). Ціна точності — 1.4 → 3.3 с/стор, тобто голос усе одно
-    вчетверо дешевший за окремий прогін (10.0 с/стор). Батч лишається під
-    `--voice-batch` для випадків, де важить час, а не звірка з еталоном.
+    Батч і тотожність (заміряно на 233 рядках ДАВО 904-24-24 проти еталонного
+    `rpred.rpred`, повний протокол — HTR_HISTORY.md «Паддінг: ціна тотожності»):
+
+        по одному, pad=(16,0)        CER 0.0000  дослівно 233/233  1.4–3.3 с/стор
+        батч 16, той самий pad       CER 0.0095  дослівно 193/233  0.7–1.6 с/стор
+        батч + сортування за шириною CER 0.0068–0.0135  196/233   1.7 с/стор
+        по одному, pad=0             CER 0.1307  дослівно  63/233
+
+    Тобто батч робить голос удвічі дешевшим ціною ~1% символів; паддінг тут ні
+    до чого (нулями / «папером» / краєм — той самий CER): різницю дають самі
+    згортки по довшій стрічці й округлення `seq_len` у kraken. Сортування за
+    шириною ВЖЕ пробували — дослівності не повертає і час не покращує, тому
+    кошиків тут немає навмисно. `batch=1` лишається як режим звірки з еталоном.
+
+    ⚠ Раніше в цьому докстрінгу стояло «1.4 → 3.3 с/стор» як ціна точності —
+    хибне прочитання таблиці: 1.4–3.3 це розкид методу «по одному», а не
+    перехід.
     """
     import torch
 
     net, tr, ch = voice
     mode = "L" if ch == 1 else "RGB"
-    out: list[str] = []
-    if batch <= 1:
-        for c in crops:
-            try:
-                t = tr(c.convert(mode))
-                with torch.no_grad():
-                    pr = net.predict_string(t.unsqueeze(0))
-                out.append(unicodedata.normalize("NFC", str(pr[0] if pr else "")).strip())
-            except Exception:
-                out.append("")      # один битий кроп не забирає решту рядків
-        return out
-    for j in range(0, len(crops), batch):
-        chunk = crops[j:j + batch]
-        try:
-            tt = [tr(c.convert(mode)) for c in chunk]
-            wmax = max(x.shape[-1] for x in tt)
-            lens = torch.tensor([x.shape[-1] for x in tt])
-            padded = torch.stack([
-                torch.nn.functional.pad(x, (0, wmax - x.shape[-1])) for x in tt])
-            with torch.no_grad():
-                res = net.predict_string(padded, lens)
-            out += [unicodedata.normalize("NFC", str(s or "")).strip() for s in res]
-        except Exception:
-            out += [""] * len(chunk)
-    return out
+
+    def _norm(s) -> str:
+        return unicodedata.normalize("NFC", str(s or "")).strip()
+
+    def run_one(c) -> str:
+        t = tr(c.convert(mode))
+        with torch.no_grad():
+            pr = net.predict_string(t.unsqueeze(0))
+        return _norm(pr[0] if pr else "")
+
+    def run_batch(chunk) -> list[str]:
+        tt = [tr(c.convert(mode)) for c in chunk]
+        wmax = max(x.shape[-1] for x in tt)
+        lens = torch.tensor([x.shape[-1] for x in tt])
+        padded = torch.stack([
+            torch.nn.functional.pad(x, (0, wmax - x.shape[-1])) for x in tt])
+        with torch.no_grad():
+            res = net.predict_string(padded, lens)
+        return [_norm(s) for s in res]
+
+    def after_batch_error() -> None:
+        # OOM у кошику лишає алокатор у тому самому стані — без цього фолбек
+        # по одному впаде на першому ж кропі
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+    return _decode_in_batches(crops, batch, run_batch, run_one, after_batch_error)
 
 
 def _line_crops(im: Image.Image, seg) -> list:
@@ -2307,12 +2375,14 @@ def main() -> int:
                          "вимкнено. Дістає прочитання, яке модель бачила, але не "
                          "поставила першим — на 904-24-24 так знайшовся єдиний "
                          "запис роду, що не брався жодною з чотирьох моделей")
-    ap.add_argument("--voice-batch", type=int, default=1,
+    ap.add_argument("--voice-batch", type=int, default=VOICE_BATCH,
                     help="розмір батча для kraken-голосу (--models з .mlmodel). "
-                         "1 (дефолт) = текст тотожний окремому прогону тієї "
-                         "моделі (CER 0.0000 на 233 рядках проти rpred); >1 — "
-                         "вдвічі швидше, але CTC при спільній ширині батча дає "
-                         "інший текст (дослівно 193/233, CER 0.0095)")
+                         "8 (дефолт) = удвічі дешевший голос ціною ~0.8%% "
+                         "символів у його теці (замір 06.09.2026 на 661 рядку: "
+                         "CER 0.0080, дослівно 569/661, +0.46 ГБ VRAM); "
+                         "1 = текст тотожний окремому прогону тієї моделі "
+                         "(режим звірки з rpred); 16/32 — той самий час, "
+                         "лише більше пам'яті")
     ap.add_argument("--seg-cache", action=argparse.BooleanOptionalAction,
                     default=True,
                     help="💾 кеш сегментації у data/derived/htr_seg (дефолт ON). "
@@ -2508,6 +2578,11 @@ def main() -> int:
                   # прогін із піднятим контрастом — окремий артефакт; без цього
                   # поля неможливо сказати, чому в двох теках різний декод
                   "enhance": args.enhance,
+                  # 🎙 розмір батча kraken-голосу — теж артефакт: батч >1 дає
+                  # ~1% інших символів у теці голосу (див. kraken_decode_crops),
+                  # і без цього поля два прогони Дяка по одній справі були б
+                  # непорівнянними мовчки
+                  "voice_batch": max(1, int(args.voice_batch)),
                   # 🧵 те саме міркування, що й з контрастом: злиття міняє самі
                   # рядки, тож два прогони однією моделлю по одній справі дадуть
                   # різний текст і різну їх кількість. Без запису в меті
@@ -2538,7 +2613,7 @@ def main() -> int:
     meta_base = {k: v for k, v in meta.items()
                  if k in ("version", "case_dir", "case_key", "frames_total",
                           "model", "device", "engine", "script", "enhance",
-                          "merge_split_lines")}
+                          "voice_batch", "merge_split_lines")}
     saves = 0
     # стан гарда переживає рестарт: без цього кожен запуск (×N шардів) починав
     # 15 очних ставок наново — на 5 рестартах це дало 60% гардованих сторінок
@@ -2676,7 +2751,7 @@ def main() -> int:
         if any(e == "kraken" for _, e, _ in extra_recs):
             print(f"[htr-run] 🤝 kraken-голос: pad={KRAKEN_VOICE_PAD}, батч="
                   f"{VOICE_BATCH}"
-                  f"{' (тотожно окремому прогону)' if VOICE_BATCH <= 1 else ' (швидше, CER ~1% проти окремого прогону)'}",
+                  f"{' (тотожно окремому прогону)' if VOICE_BATCH <= 1 else ' (удвічі дешевше, CER ~0.8% проти окремого прогону)'}",
                   flush=True)
     elif args.models.strip():
         # мовчазне ігнорування тут коштувало б цілого прогону: людина чекає на
@@ -3121,6 +3196,8 @@ def main() -> int:
             "case_key": meta.get("case_key") or "",
             "model": f"{Path(args.model).name}+{tag}", "device": device,
             "script": args.script, "started": meta.get("started"),
+            # саме цю мету бачить пошук; батч голосу — властивість тексту в теці
+            "voice_batch": max(1, int(args.voice_batch)),
             "updated": datetime.now().isoformat(timespec="seconds"),
             "pages": pages_meta, "done": len(pages_meta), "failed": []},
             ensure_ascii=False, indent=1))
