@@ -1261,24 +1261,110 @@ def search_index(a: IndexArgs) -> Envelope:
     return env
 
 
-def _warn_expanded(env: Envelope, res: dict[str, Any]) -> None:
-    """Сказати вголос, що шукали не лише тим, що набрали.
+def _warn_search(env: Envelope, res: dict[str, Any]) -> None:
+    """Сказати вголос усе, що пошук зробив понад набране: розширив запит і
+    переставив порядок.
 
     🔴 Мовчазне розширення запиту — та сама вада, що мовчазний фільтр, лише в
     інший бік: фільтр звужує вибірку непомітно, розширення додає в неї хіти, за
     які людина не просила. І перше, і друге читається як відповідь на своє
     питання, а нею не є.
     """
+    # 🔴 Мертве правило рангу називається ГУЧНО. Регекс, написаний кирилицею,
+    # порівнюється з нормалізованим (латинізованим) текстом і не спрацює
+    # ніколи — а на вигляд профіль виглядає налаштованим. Це рівно той клас
+    # мовчазної вади, проти якого написано решту застосунку.
+    if res.get("rank_dead"):
+        env.warn("rank_rule_dead",
+                 f"правила рангу написані кирилицею й не спрацюють ніколи: "
+                 f"{', '.join(res['rank_dead'])} — порівняння йде з "
+                 f"нормалізованим текстом (щ→sc, ч→c, и/і→i)")
+    if res.get("rank_broken"):
+        env.warn("rank_rule_broken",
+                 f"правила рангу не читаються як регекс: "
+                 f"{', '.join(res['rank_broken'])}")
+    ranked = res.get("ranked") or {}
+    if any(ranked.values()):
+        env.warn("ranked_down",
+                 f"опущено вниз: чужим словом пояснюється краще — "
+                 f"{ranked.get('confuser', 0)}, під правилом профілю — "
+                 f"{ranked.get('rank_down', 0)}. Вони НЕ зникли: дивись хвіст "
+                 f"видачі й поле rank_why")
     added = list(res.get("stems_added") or [])
     if not added:
         return
-    env.warn("stems_expanded",
-             f"шукали ще й написаннями з довідника імен: {', '.join(added)}")
+    whose = str(res.get("profile_of") or "")
+    where = (f"написаннями профілю «{whose}» і довідника імен" if whose
+             else "написаннями з довідника імен")
+    env.warn("stems_expanded", f"шукали ще й {where}: {', '.join(added)}")
     if res.get("folk"):
         env.warn("folk_names_on",
                  "увімкнено побутові двійники імені: зв'язок там біографічний, "
                  "а не орфографічний, тож кожен такий хіт доводиться окремо — "
                  "дивись поле stem_origin=folk")
+
+
+def _add_selfcheck(env: Envelope, a: Any) -> None:
+    """🎯 Чи бачить пошук те, що око вже знайшло — і сказати це поруч із нулем.
+
+    🔴 Відповідь може бути «не виміряно», і це не поламка. Порожній recall і
+    нульовий recall означають протилежне: перший каже «нема чим міряти»,
+    другий — «пошук сліпий». Зводити їх в одне число заборонено.
+    """
+    from nyshporka.search import selfcheck as SC
+
+    rep = SC.run(a.case, a.q, thresh=a.thresh, limit=a.limit)
+    env.data["selfcheck"] = SC.as_dict(rep)
+    if rep.why:
+        env.warn("recall_not_measured", rep.why)
+        env.suggest("pages.note", "занести аркуш, де прізвище видно оком")
+        return
+    env.warn("recall_measured",
+             f"знайдено {len(rep.found)} з {len(rep.denom)} "
+             f"({rep.pct(rep.found)}%), подано на око {len(rep.shown)} "
+             f"({rep.pct(rep.shown)}%)")
+    if rep.missed:
+        env.warn("recall_missed",
+                 f"пошук НЕ бачить аркушів, де прізвище виписане оком: "
+                 f"{', '.join(rep.missed[:12])}"
+                 f"{'…' if len(rep.missed) > 12 else ''}. Нуль по решті справи "
+                 f"на цьому не будується")
+    if rep.found_not_shown:
+        # 🔴 Найтихіший розрив із двох: сторінка знайдена, але не показана —
+        # вимірювач звітує про здоров'я, а на око вона не поїхала.
+        env.warn("found_not_shown",
+                 f"знайдено, але не подано на око: "
+                 f"{', '.join(rep.found_not_shown[:12])} — підніміть limit")
+
+
+def _warn_anchors(env: Envelope, got: dict[str, Any]) -> None:
+    """Сказати, що дав канал імен — і, головне, чого він НЕ мав.
+
+    🔴 Канал без даних мовчить, і мовчання тут читалось би як «наших імен у
+    справі немає». Тому кожен стан називається: немає `kin` — це не нуль; є
+    люди без дат — вікно не звужене; вікна немає зовсім — звужувати нема чим.
+    """
+    if not got.get("on"):
+        return
+    given, patr = got.get("given") or [], got.get("patronymic") or []
+    if not given or not patr:
+        env.warn("anchors_empty",
+                 f"канал імен мовчить: у профілі {got.get('people', 0)} осіб, "
+                 f"з них у вікно справи потрапило імен {len(given)}, "
+                 f"по батькові {len(patr)}. Пара потрібна обов'язково — "
+                 f"одиночне по батькові стоїть у метриці на кожному аркуші")
+        env.suggest("profile.source", "дописати `kin` — імена й роки роду")
+        return
+    years = got.get("years") or []
+    where = f"вікно {years[0]}-{years[1]}" if len(years) == 2 else "вікна років немає"
+    env.warn("anchors_on",
+             f"канал імен: {len(given)} імен × {len(patr)} по батькові, "
+             f"{where}, знайдено рядків: {got.get('total', 0)}")
+    if got.get("undated"):
+        env.warn("anchors_undated",
+                 f"{got['undated']} осіб профілю без дат — вони вікно НЕ "
+                 f"звужують і в якорі не пішли. Без років якір вироджується "
+                 f"до чверті рядків книги, тобто перестає щось відрізняти")
 
 
 class SearchArgs(BaseModel):
@@ -1344,6 +1430,35 @@ class SearchArgs(BaseModel):
         default=False,
         description="додати побутових двійників імені (Васса=Анна). Зв'язок "
                     "біографічний, не орфографічний — кожен такий хіт звіряти")
+    # 🔴 Опускає, а не викидає. Правило вже стоїть в інструкції агентові
+    # («ранжуй і подавай людині з кропом, а не відкидай»), а механізму під нього
+    # не було: сортування йшло за самим балом, і найгучніші хіти справи
+    # регулярно виявлялись службовим формуляром чи сусіднім родом.
+    rank: bool = Field(
+        default=True,
+        description="опускати вниз те, що профіль пояснює чужим словом "
+                    "(confusers, rank_down). Жоден кандидат не зникає")
+    # 🔴 Профіль знає 10-13 написань, людина набирає одне. Два з семи реальних
+    # спотворень декоду переходять поріг ЛИШЕ завдяки відмінковим формам.
+    profile: bool = Field(
+        default=True,
+        description="шукати всіма написаннями прізвища з профілю простору, "
+                    "коли запит саме про це прізвище")
+    # ⚓ Другий канал: рід шукається не прізвищем, а іменами. Вимкнений, бо без
+    # `kin` у профілі йому нема з чим працювати, а вікно років він бере зі
+    # справи — тобто поза справою канал не має сенсу за побудовою.
+    anchors: bool = Field(
+        default=False,
+        description="ще й канал імен: рядки, де ім'я й по батькові роду стоять "
+                    "поруч. Потребує `kin` у профілі й обов'язково --case")
+    # 🎯 Третє число знаменника. Прапорцем, а не окремою операцією: агентних
+    # інструментів у пакеті стеля, і правило пакета — групувати дії полем, а не
+    # плодити tool на кожну. Заразом число опиняється в тому самому конверті,
+    # де друкується нуль, — тобто рівно там, де ним нехтують.
+    selfcheck: bool = Field(
+        default=False,
+        description="поміряти, чи бачить пошук аркуші, де прізвище вже виписане "
+                    "оком у сховищі сторінок. Потребує --case")
 
 
 class SweepArgs(BaseModel):
@@ -1353,6 +1468,8 @@ class SweepArgs(BaseModel):
     limit: int = Field(default=100, ge=1, le=500)
     given: bool = Field(default=True)
     folk: bool = Field(default=False)
+    rank: bool = Field(default=True)
+    profile: bool = Field(default=True)
 
 
 # `agent=False`: агентові довга робота через чергу недоступна — черга живе в
@@ -1374,7 +1491,8 @@ def search_sweep(a: SweepArgs) -> Envelope:
     """
     return search_run(SearchArgs(q=a.q, where="decode", case="",
                                  thresh=a.thresh, context=a.context,
-                                 limit=a.limit, given=a.given, folk=a.folk))
+                                 limit=a.limit, given=a.given, folk=a.folk,
+                                 rank=a.rank, profile=a.profile))
 
 
 @op("search.run", summary="Знайти прізвище в тому, що вже прочитано",
@@ -1400,6 +1518,21 @@ def search_run(a: SearchArgs) -> Envelope:
     if a.rtype and a.where != "records":
         return fail(f"rtype фільтрує розібрані записи, а шукаємо в "
                     f"«{a.where}». Постав where=records або прибери rtype")
+    if a.anchors and a.where != "decode":
+        return fail(f"канал імен читає текст прогонів, а шукаємо в «{a.where}». "
+                    f"Постав where=decode або прибери anchors")
+    if a.selfcheck and not a.case:
+        return fail("самоперевірка міряє recall у межах справи: дай --case")
+    if a.selfcheck and a.where != "decode":
+        return fail(f"самоперевірка міряє пошук по декоду, а шукаємо в "
+                    f"«{a.where}». Постав where=decode або прибери selfcheck")
+    if a.anchors and not a.case:
+        # 🔴 Не зручність, а побудова: вікно якорів береться з РОКІВ СПРАВИ
+        # (ім'я корисне, поки людина жива; по батькові — поки живі її діти).
+        # Без справи вікна немає, тобто канал або мовчить, або бере всіх — а це
+        # рівно те виродження, від якого прив'язка до років і рятує.
+        return fail("канал імен працює в межах справи: вікно якорів береться з "
+                    "її років. Дай --case (ключ, шифру або ім'я прогону)")
     if a.axis == "place" and a.where == "decode":
         return fail("вісь місця живе у виписаному й розібраному, а не в тексті "
                     "прогонів: постав where=pages або where=records. По декоду "
@@ -1410,7 +1543,8 @@ def search_run(a: SearchArgs) -> Envelope:
         try:
             res = htr_store.search(a.q, name=a.case or None, thresh=a.thresh,
                                    limit=a.limit, context=a.context,
-                                   given=a.given, folk=a.folk)
+                                   given=a.given, folk=a.folk, rank=a.rank,
+                                   profile=a.profile, anchors=a.anchors)
         except ValueError as exc:
             # Область пошуку не впізнано. Відмова тут нормативна (перелік
             # прийнятних форм), і вона краща за мовчазний пошук по всьому
@@ -1449,10 +1583,33 @@ def search_run(a: SearchArgs) -> Envelope:
                                "stems": res.get("stems") or [],
                                "stems_asked": res.get("stems_asked") or [],
                                "stems_added": res.get("stems_added") or [],
-                               "folk": bool(res.get("folk"))}})
+                               "folk": bool(res.get("folk")),
+                               # Скільки правил рангу було чинних і скільки
+                               # хітів вони опустили. «Нічого не позначено» і
+                               # «правил немає» — різні відповіді.
+                               "rank_rules": res.get("rank_rules") or 0,
+                               "rank_confusers": res.get("rank_confusers") or 0,
+                               "ranked": res.get("ranked") or {},
+                               # ⚓ Другий канал рахується ОКРЕМО: «прізвища
+                               # немає, зате поруч стоять наші імена» — це інша
+                               # відповідь, ніж «немає нічого».
+                               "anchor": res.get("anchor") or {"on": False}}})
+        _warn_anchors(env, res.get("anchor") or {})
+        # 🧾 Чим цю справу вже шукали. Мовчати про це означає давати людині
+        # починати з нуля там, де робота зроблена, — або, гірше, вважати
+        # зробленим те, що робив ГІРШИЙ рушій.
+        old = res.get("searched_stale") or []
+        if old:
+            was = "; ".join(f"«{x.get('q')}» {x.get('when')}" for x in old[:3])
+            env.warn("searched_by_older_model",
+                     f"цю справу вже шукали, але ІНШИМИ моделями: {was}. "
+                     f"Той самий запит новішим рушієм дає інші аркуші, тож той "
+                     f"нуль сюди не переноситься")
+        if a.selfcheck:
+            _add_selfcheck(env, a)
         if res.get("error"):
             env.warn("bad_query", str(res["error"]))
-        _warn_expanded(env, res)
+        _warn_search(env, res)
         if blind:
             env.warn("partial_index",
                      f"{blind} прогонів поза пошуком: їхній текст ще не "
@@ -1509,12 +1666,14 @@ def search_run(a: SearchArgs) -> Envelope:
     if a.where == "pages":
         res = query.grep_surnames(a.q, thresh=a.thresh, case_key=case_key,
                                   places=by_place, limit=a.limit,
-                                  given=a.given, folk=a.folk)
+                                  given=a.given, folk=a.folk, rank_hits=a.rank,
+                                  profile=a.profile)
     else:
         res = query.grep_records(a.q, thresh=a.thresh, case_key=case_key,
                                  role=a.role or None, rtype=a.rtype or None,
                                  place=by_place, limit=a.limit,
-                                 given=a.given, folk=a.folk)
+                                 given=a.given, folk=a.folk, rank_hits=a.rank,
+                                 profile=a.profile)
     # 🔴 Знаменник тут такий самий обов'язковий, як у пошуку по декоду, — і
     # довго його не було саме тут, у гілці, найближчій до людини. «Не
     # знайшлось у виписаному» означає лише «серед того, що вже занесли оком»:
@@ -1532,10 +1691,13 @@ def search_run(a: SearchArgs) -> Envelope:
                            "stems_asked": res.get("stems_asked") or [],
                            "stems_added": res.get("stems_added") or [],
                            "folk": bool(res.get("folk")),
+                           "rank_rules": res.get("rank_rules") or 0,
+                           "rank_confusers": res.get("rank_confusers") or 0,
+                           "ranked": res.get("ranked") or {},
                            "axis": a.axis, "role": a.role, "rtype": a.rtype}})
     if res.get("error"):
         env.warn("bad_query", str(res["error"]))
-    _warn_expanded(env, res)
+    _warn_search(env, res)
     if not res.get("error") and not hits:
         if a.axis == "place":
             where = ("виписаних місцях" if a.where == "pages"

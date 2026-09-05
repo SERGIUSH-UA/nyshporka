@@ -26,6 +26,7 @@ from typing import Any
 
 from nyshporka.core.workspace import workspace
 from nyshporka.records import names as NAMES
+from nyshporka.search import rank as RANK
 from nyshporka.utils.translit import normalize_archival
 
 ROOT = workspace().root
@@ -913,7 +914,9 @@ def page_candidates(lines: list[str]) -> Iterator[tuple[int, str, list[tuple[str
 
 def search(q: str, name: str | None = None, thresh: int = 78,
            limit: int = 200, context: int = 0, *,
-           given: bool = True, folk: bool = False) -> dict[str, Any]:
+           given: bool = True, folk: bool = False,
+           rank: bool = True, profile: bool = True,
+           anchors: bool = False) -> dict[str, Any]:
     """Fuzzy-пошук по текстах прогонів. `name=None` — по всіх справах.
 
     `context` — скільки рядків сусідства додати до кожного хіта (0 = без них).
@@ -924,6 +927,12 @@ def search(q: str, name: str | None = None, thresh: int = 78,
     `given` — розкривати гніздо написань імені з довідника (`records.names`).
     `folk` — додавати ще й побутових двійників; за замовчуванням вимкнено, бо
     зв'язок там біографічний, а не орфографічний.
+    `rank` — опускати вниз те, що профіль пояснює чужим словом (`search.rank`).
+    Саме опускати: жоден кандидат не зникає.
+    `profile` — додавати написання прізвища з профілю простору, коли запит саме
+    про це прізвище.
+    `anchors` — ще й канал імен: рядки, де ім'я й по батькові роду стоять поруч.
+    Окремим списком, не домішується до прізвищних хітів.
 
     🔴 Контекст рахується лише для показаних хітів, після зрізу за `limit`.
     Інакше на справі з тисячею збігів кожен пошук читав би тисячу сторінок
@@ -941,6 +950,17 @@ def search(q: str, name: str | None = None, thresh: int = 78,
     origin: dict[str, str] = dict.fromkeys(stems, NAMES.ORIGIN_QUERY)
     if given or folk:
         stems, origin = NAMES.expand_stems(stems, given=given, folk=folk)
+    # 🔴 Написання прізвища з профілю простору. Профіль знає 10-13 форм, людина
+    # набирає одну; доти жодна з решти в пошук не потрапляла. Два з семи
+    # реальних спотворень декоду переходять поріг ЛИШЕ завдяки їм.
+    whose = ""
+    if profile:
+        from nyshporka.core import profile as PROF
+
+        forms, whose = PROF.forms_for_query(q)
+        if forms:
+            stems, origin = NAMES.add_stems(stems, origin, forms,
+                                            NAMES.ORIGIN_PROFILE)
     from nyshporka.search import decode as D
 
     scope = runs_for_scope(name or "")
@@ -953,7 +973,13 @@ def search(q: str, name: str | None = None, thresh: int = 78,
                   build_budget=len(names) if scope["kind"] != "all"
                   else D.INLINE_BUILD)
     raw_hits = got["hits"]
-    raw_hits.sort(key=lambda h: -h["score"])
+    # 🔴 Ранг ставиться ДО зрізу за `limit`. Інакше службовий формуляр і сусідній
+    # рід лишались би на верхівці, а знахідка — за межею показаного: замір
+    # приватного конвеєра дає 60 сильних кандидатів, у яких три верхні місця за
+    # балом займає рубрика книги, а самого роду немає жодного.
+    rul = RANK.rules() if rank else RANK.EMPTY
+    ranked = RANK.mark(raw_hits, rul)
+    raw_hits.sort(key=RANK.sort_key)
     shown = raw_hits[:limit]
 
     # Рушій кожного прогону — щоб у результатах було видно, хто знайшов. Це і є
@@ -1005,10 +1031,51 @@ def search(q: str, name: str | None = None, thresh: int = 78,
     if context:
         _add_context(shown, side=context)
     phantom_n, blind = mark_phantoms(shown)
+    # 🧾 Слід свіпу — щоб наступна сесія знала, чим справу вже шукали. Пишеться
+    # лише в межах справи: свіп по корпусу не належить жодній із них.
+    before: list[dict[str, Any]] = []
+    stale_before: list[dict[str, Any]] = []
+    if scope["key"]:
+        from nyshporka.search import trace as TRACE
+
+        models = [m for r in rows for m in (r.get("engine_ids") or [])]
+        # 🔴 Читаємо ДО запису: інакше «чим шукали раніше» містило б цей самий
+        # запит, і кожен свіп підтверджував би сам себе.
+        before = TRACE.of(scope["key"])
+        stale_before = TRACE.stale(scope["key"], models)
+        TRACE.note(scope["key"], q=q, thresh=thresh, hits=len(raw_hits),
+                   pages=unique_pages(rows), models=models,
+                   channels=["surname"] + (["anchor"] if anchors else []))
+    # ⚓ Другий канал іде ОКРЕМИМ списком, а не домішується до першого. Прізвищний
+    # нуль мусить лишитись прізвищним нулем: «не знайшлось прізвища, зате поруч
+    # стоять наші імена» — це дві різні відповіді, і зливати їх означає втратити
+    # обидві. Так само рахує їх і приватний конвеєр.
+    anchor: dict[str, Any] = {"on": bool(anchors)}
+    if anchors:
+        from nyshporka.search import anchors as A
+
+        y1, y2 = case_years(scope["key"]) if scope["key"] else (None, None)
+        keys = A.keys(y1, y2)
+        found = [] if keys.empty else anchor_hits(rows, keys)
+        anchor.update({"hits": found[:limit], "total": len(found),
+                       "given": list(keys.given), "patronymic": list(keys.patronymic),
+                       "people": keys.people, "undated": keys.undated,
+                       "years": list(keys.years) if keys.years else []})
     return {"hits": shown, "total": len(raw_hits), "cases": got["scanned"],
             "stems": stems, "stems_asked": asked,
             "stems_added": [s for s in stems if origin.get(s) != NAMES.ORIGIN_QUERY],
             "folk": bool(folk), "thresh": thresh,
+            # Скільки хітів опущено вниз і за що. Числа їдуть у знаменник:
+            # «нічого не позначено» і «правил немає» — різні відповіді.
+            "ranked": ranked, "rank_rules": len(rul.rank_down),
+            "rank_confusers": len(rul.confusers),
+            "rank_dead": list(rul.dead), "rank_broken": list(rul.broken),
+            # Чиї написання підмішано. Порожньо — профіль не впізнав запит
+            # своїм, і це теж відповідь: шукали лише набраним.
+            "profile_of": whose, "anchor": anchor,
+            # Чим цю справу вже шукали. `stale` — записи іншими моделями: вони
+            # виглядають як зроблена робота, а зроблені гіршим рушієм.
+            "searched_before": before, "searched_stale": stale_before,
             # 🔴 Знаменник їде звідси ж, із тих самих прогонів, у яких шукали.
             # Порахований окремо, він щоразу розходився з чисельником —
             # див. `runs_for_scope`.
@@ -1050,6 +1117,77 @@ def _resolve(hits: list[dict[str, Any]]) -> None:
         lines = text_of[key]
         idx = h["line_no"] - 1
         h["line"] = lines[idx] if 0 <= idx < len(lines) else ""
+
+
+def case_years(key: str) -> tuple[int | None, int | None]:
+    """Роки справи: спершу реєстр, далі — те, що занесло око.
+
+    🔴 Вікно якорів будується саме з них, тож джерело мусить бути названим. У
+    реєстрі роки приходять із каталогу й сайдкарів, у сховищі сторінок — із
+    того, що дослідник побачив на аркуші; друге точніше, але буває порожнім.
+
+    ⚠ Числа-сміття відсіюються діапазоном: у полі «роки» аркуша трапляється
+    все, що схоже на рік, включно з номером двору й сучасною датою.
+    """
+    lo: list[int] = []
+    hi: list[int] = []
+    with contextlib.suppress(Exception):
+        from nyshporka.cases import db as CDB
+
+        for row in CDB.query_rows(q=key, limit=5):
+            if str(row.get("key") or "") != key:
+                continue
+            for fld, box in (("year_from", lo), ("year_to", hi)):
+                got = row.get(fld)
+                if isinstance(got, int) and 1400 <= got <= 2100:
+                    box.append(got)
+    with contextlib.suppress(Exception):
+        from nyshporka.pagestore import store as PS
+
+        case = PS.load_case(PS.resolve_case(key))
+        if case is not None:
+            seen = [y for note in case.pages.values()
+                    for y in (note.years or []) if 1400 <= int(y) <= 2100]
+            for rec in case.records:
+                got = re.search(r"(1[4-9]\d\d|20\d\d)",
+                                str(getattr(rec.date, "value", "") or ""))
+                if got:
+                    seen.append(int(got.group(1)))
+            if seen:
+                lo.append(min(seen))
+                hi.append(max(seen))
+    if not lo and not hi:
+        return None, None
+    return (min(lo) if lo else None), (max(hi) if hi else None)
+
+
+def anchor_hits(rows: list[dict[str, Any]], k: Any) -> list[dict[str, Any]]:
+    """Рядки, де ім'я й по батькові роду стоять поруч.
+
+    ⚠ Читає ТЕКСТ прогонів, а не стиснений індекс: індекс тримає самі лише
+    нормалізовані кандидати, а тут потрібен порядок токенів у рядку. Тому канал
+    і живе в межах справи — на корпусі це було б перечитування всього декоду.
+    """
+    from nyshporka.search import anchors as A
+
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        name = row["name"]
+        for page, ln_no, raw, _cands in _case_index(name):
+            pair = A.scan(raw, k)
+            if pair is None:
+                continue
+            out.append({"name": name, "page": page, "line_no": ln_no,
+                        "line_index": ln_no - 1,
+                        # 🔴 Канал названий у самому хіті. Знахідка за іменами
+                        # важить інакше, ніж за прізвищем: вона каже «тут наші
+                        # люди», а не «тут наше прізвище».
+                        "channel": "anchor", "stem": " ".join(pair),
+                        "stem_origin": "anchor", "matched": " ".join(pair),
+                        "line": raw,
+                        "case_key": row.get("case_key") or "",
+                        "shifra": row.get("shifra") or ""})
+    return out
 
 
 def mark_phantoms(hits: list[dict[str, Any]]) -> tuple[int, float]:

@@ -959,6 +959,19 @@ def search_cmd(
         False, "--folk",
         help="додати побутових двійників імені (Васса=Анна) — зв'язок "
              "біографічний, кожен такий хіт звіряти окремо"),
+    rank: bool = typer.Option(
+        True, "--rank/--no-rank",
+        help="опускати вниз те, що профіль пояснює чужим словом. Не викидає"),
+    use_profile: bool = typer.Option(
+        True, "--profile/--no-profile",
+        help="шукати всіма написаннями прізвища з профілю простору"),
+    anchors: bool = typer.Option(
+        False, "--anchors",
+        help="ще й канал імен: ім'я + по батькові роду поруч. Потребує --case"),
+    selfcheck: bool = typer.Option(
+        False, "--selfcheck",
+        help="поміряти, чи бачить пошук аркуші, де прізвище виписане оком. "
+             "Потребує --case"),
     as_json: bool = typer.Option(False, "--json"),
 ) -> None:
     """Знайти прізвище в тому, що вже прочитано.
@@ -977,7 +990,10 @@ def search_cmd(
     _need("research")
     env = O.call("search.run", {"q": q, "case": case, "where": where,
                                 "context": context, "thresh": thresh,
-                                "limit": limit, "given": given, "folk": folk})
+                                "limit": limit, "given": given, "folk": folk,
+                                "rank": rank, "profile": use_profile,
+                                "anchors": anchors,
+                                "selfcheck": selfcheck})
     if _answer(env, as_json):
         return
     hits = env.data.get("hits") or []
@@ -999,6 +1015,14 @@ def search_cmd(
             console.print(f"      [muted]↓ {a}[/muted]")
         if h.get("alt"):
             console.print(f"      [accent]2-й голос:[/accent] [muted]{h['alt']['line']}[/muted]")
+    # ⚓ Канал імен друкується ОКРЕМИМ блоком. Домішати його до прізвищних
+    # рядків означало б стерти різницю між «тут наше прізвище» і «тут наші
+    # люди» — а це різні за силою відповіді.
+    anchor = env.data.get("coverage", {}).get("anchor") or {}
+    for h in (anchor.get("hits") or []):
+        console.print(f"[accent]⚓[/accent]  {h.get('name')} · {h.get('page')} · "
+                      f"рядок {h.get('line_no')} · [warn]{h.get('matched')}[/warn]")
+        console.print(f"    [muted]{h.get('line')}[/muted]")
     # 🔴 Знаменник друкується завжди, і найважливіший він саме при нулі:
     # без нього «не знайшлось» читається як «цього не існує».
     _notes(env)

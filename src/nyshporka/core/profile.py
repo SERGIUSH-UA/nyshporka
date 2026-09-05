@@ -116,6 +116,12 @@ class ResearchProfile:
     #: Клас (запис / З віку / гіпотеза) вирішальний — розбіжність із гіпотезою
     #: нічого не спростовує, і саме тут найлегше хибно відкинути правильну знахідку.
     anchors: dict[str, tuple[int, str, str]] = field(default_factory=dict)
+    #: Люди роду як ЯКОРІ пошуку: `{given, patronymic, born, died}`. Окремо від
+    #: `anchors`, і це не дублювання: там роки народження для перевірки віку
+    #: кандидата, тут — імена, якими рід шукається, коли прізвище рушій скалічив.
+    #: 🔴 Роки тут теж потрібні, але для іншого: ім'я корисне, поки людина жива,
+    #: а по батькові — поки живі її діти, тобто вікна в них різні.
+    kin: tuple[dict[str, Any], ...] = ()
     #: Приймачі самоперевірки пошуку — сторінки, знайдені оком і внесені в канон.
     selftest: dict[str, Any] = field(default_factory=dict)
     places: tuple[dict[str, Any], ...] = ()
@@ -295,6 +301,7 @@ def _build(name: str, body: dict[str, Any]) -> ResearchProfile:
         rank_down={str(k): str(v) for k, v in (sur.get("rank_down") or {}).items()},
         anchors={str(k): (int(v[0]), str(v[1]), str(v[2]))
                  for k, v in (body.get("anchors") or {}).items()},
+        kin=tuple(dict(x) for x in (body.get("kin") or []) if isinstance(x, dict)),
         selftest=body.get("selftest") or {},
         places=tuple(body.get("places") or []),
         archives=tuple(body.get("archives") or []),
@@ -357,6 +364,61 @@ def resolve_in(raw: dict[str, Any], name: str | None = None) -> ResearchProfile:
 def active() -> ResearchProfile:
     """Профіль за замовчуванням для процесу."""
     return resolve()
+
+
+#: Наскільки запит має бути схожий на написання профілю, щоб вважатись ним.
+#: Високо навмисно: розширювати запит написаннями ЧУЖОГО прізвища — це шум,
+#: якого людина не просила, і знаменник тоді бреше в обидва боки.
+QUERY_IS_MINE = 85
+
+
+def forms_for_query(q: str) -> tuple[list[str], str]:
+    """Написання профілю, якщо запит — це прізвище саме цього профілю.
+
+    🔴 Профіль знає 10-13 написань, а людина набирає одне. Доти жодне з них у
+    пошук не потрапляло: форма показувала їх чипсами, і кожен чип летів окремим
+    запитом — тобто знаменник розсипався на десяток окремих нулів.
+
+    Що це дає, заміряно на живому rapidfuzz (поріг 80, профіль «Сікорський»,
+    десять написань) проти спотворень, які справді видає рушій:
+
+        корскаго    58.8 → 85.7   ← перетнув поріг: без форм не знайдеться НІКОЛИ
+        Сикорскаго  87.5 → 100.0
+        Сикорского  87.5 → 100.0
+        Сикорск     87.5 → 93.3
+
+    🔑 Головний тут перший рядок. Рушій з'їдає початок слова частіше, ніж
+    кінець, і саме такий уламок лишається поза порогом, поки шукають однією
+    формою — а нуль по ньому читається як «роду тут немає».
+
+    ⚠ Ціна: свіп лінійний за числом стемів. Замір — 10 стемів проти одного це
+    1.26 с проти 0.12 с на 200 тис. кандидатів; на справі непомітно, на корпусі
+    свіп і так іде чергою з поступом.
+
+    ⚠ Розширюємо лише тоді, коли запит справді про це прізвище. Інакше пошук
+    по назві села тягнув би за собою форми роду — шум, за який ніхто не просив.
+
+    Повертає `(нормалізовані написання, як звати профіль)`; чужий запит або
+    відсутній профіль дають порожньо, і це не помилка.
+    """
+    from rapidfuzz import fuzz
+
+    from nyshporka.utils.translit import normalize_archival
+
+    want = normalize_archival(q or "")
+    if not want:
+        return [], ""
+    try:
+        prof = active()
+    except Exception:
+        return [], ""
+    forms = sorted({normalize_archival(f) for f in prof.all_spellings() if f})
+    forms = [f for f in forms if len(f) >= 3]
+    if not forms:
+        return [], ""
+    if max(fuzz.ratio(want, f) for f in forms) < QUERY_IS_MINE:
+        return [], ""
+    return forms, prof.display or prof.name
 
 
 def reset() -> None:

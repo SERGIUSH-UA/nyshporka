@@ -232,10 +232,28 @@ def expand_folk(value: str | None) -> list[str]:
     return out
 
 
-#: Звідки взявся стем: набране людиною, гніздо написань, побутовий двійник.
+#: Звідки взявся стем: набране людиною, гніздо написань, побутовий двійник,
+#: написання прізвища з профілю простору.
 ORIGIN_QUERY = "q"
 ORIGIN_GIVEN = "given"
 ORIGIN_FOLK = "folk"
+ORIGIN_PROFILE = "profile"
+
+
+def add_stems(stems: list[str], origin: dict[str, str], extra: list[str],
+              why: str) -> tuple[list[str], dict[str, str]]:
+    """Дописати стеми з іншого джерела, не чіпаючи вже набраних.
+
+    ⚠ Набране людиною ніколи не витісняється й не перепідписується: якщо те
+    саме написання прийшло з двох джерел, лишається перше — інакше хіт по
+    набраному раптом починав би звітувати, що знайшовся «з профілю».
+    """
+    out, org = list(stems), dict(origin)
+    for s in extra:
+        if len(s) >= 3 and s not in org:
+            out.append(s)
+            org[s] = why
+    return out, org
 
 
 def expand_stems(stems: list[str], *, given: bool = True, folk: bool = False,

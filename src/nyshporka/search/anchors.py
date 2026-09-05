@@ -236,20 +236,30 @@ def scan(line: str, k: Keys) -> tuple[str, str] | None:
     🔴 Заборона self-match лише на БУКВАЛЬНО однакових токенах. Ширший фаззі
     тут зрізав добір еталонних аркушів на третину: «Григорій Григоріевъ» і
     «Іосифъ Іосифовъ» — законні пари, а не подвоєне рушієм слово.
+
+    🔴 Нормалізуються ОБИДВІ сторони, і саме тим кодом, що зводить особи
+    (`norm_given` / `norm_patronymic`). Спершу тут порівнювався сирий токен із
+    канонічною основою — і пара розсипалась на рівному місці: ключ «Ѳеодоровъ»
+    зводиться до `fedor`, а токен лишається `feodorov`, тобто 76.9 при порозі
+    82. Ознака була в даних, а канал її не бачив.
+
+    ⚠ Побічний виграш: гніздо написань імені працює й тут, тож «Явдоха» в
+    профілі ловить «Євдокію» в тексті без окремого правила.
     """
     from rapidfuzz import fuzz
 
     if k.empty:
         return None
-    toks = [normalize_archival(t) for t in _TOKEN.findall(line)]
-    toks = [t for t in toks if len(t) >= MIN_TOK]
-    for i, t in enumerate(toks):
-        if _best(fuzz, t, k.given) < THR_GIVEN:
+    raw = [normalize_archival(t) for t in _TOKEN.findall(line)]
+    toks = [(t, norm_given(t), norm_patronymic(t)) for t in raw
+            if len(t) >= MIN_TOK]
+    for i, (t, g, _p) in enumerate(toks):
+        if _best(fuzz, g, k.given) < THR_GIVEN:
             continue
-        for nxt in toks[i + 1:i + 1 + WIN]:
+        for nxt, _g2, p2 in toks[i + 1:i + 1 + WIN]:
             if nxt == t:
                 continue
-            if _best(fuzz, nxt, k.patronymic) >= THR_PATR:
+            if _best(fuzz, p2, k.patronymic) >= THR_PATR:
                 return t, nxt
     return None
 

@@ -20,6 +20,7 @@ from rapidfuzz import fuzz
 
 from nyshporka.pagestore import store
 from nyshporka.records import names
+from nyshporka.search import rank
 from nyshporka.utils.translit import normalize_archival
 
 _TOKEN_RE = re.compile(r"[^\s.,;:()\[\]{}/\\|«»\"'’—–-]+")
@@ -93,7 +94,7 @@ def _index(path: Path) -> dict[str, Any] | None:
 
 
 def _stems(q: str, *, given: bool = True, folk: bool = False,
-           ) -> tuple[list[str], dict[str, str]]:
+           profile: bool = True) -> tuple[list[str], dict[str, str], str]:
     """Стеми запиту й звідки кожен узявся.
 
     🔴 Розширення тут те саме, що в пошуку по декоду, і кличеться з того самого
@@ -104,10 +105,20 @@ def _stems(q: str, *, given: bool = True, folk: bool = False,
     raw = [normalize_archival(w) for w in _TOKEN_RE.findall(q) if len(w) >= 3]
     raw = [s for s in raw if len(s) >= 3]
     if not raw:
-        return [], {}
-    if not (given or folk):
-        return raw, dict.fromkeys(raw, names.ORIGIN_QUERY)
-    return names.expand_stems(raw, given=given, folk=folk)
+        return [], {}, ""
+    if given or folk:
+        stems, origin = names.expand_stems(raw, given=given, folk=folk)
+    else:
+        stems, origin = raw, dict.fromkeys(raw, names.ORIGIN_QUERY)
+    whose = ""
+    if profile:
+        from nyshporka.core import profile as prof
+
+        forms, whose = prof.forms_for_query(q)
+        if forms:
+            stems, origin = names.add_stems(stems, origin, forms,
+                                            names.ORIGIN_PROFILE)
+    return stems, origin, whose
 
 
 def _asked(origin: dict[str, str]) -> list[str]:
@@ -117,6 +128,27 @@ def _asked(origin: dict[str, str]) -> list[str]:
 
 def _added(origin: dict[str, str]) -> list[str]:
     return [s for s, why in origin.items() if why != names.ORIGIN_QUERY]
+
+
+def _rank(hits: list[dict[str, Any]], on: bool) -> tuple[dict[str, int], Any]:
+    """Ранг і порядок — тим самим кодом, що й у пошуку по декоду.
+
+    🔴 Сортування тут МУСИТЬ збігатися з декодним: інакше та сама знахідка
+    стояла б у різних місцях залежно від того, в яке сховище спитали, а людина
+    читає перші рядки.
+    """
+    rul = rank.rules() if on else rank.EMPTY
+    tally = rank.mark(hits, rul)
+    hits.sort(key=rank.sort_key)
+    return tally, rul
+
+
+def _trim(hits: list[dict[str, Any]], limit: int) -> list[dict[str, Any]]:
+    """Зріз показаного; службова нормалізована форма у відповідь не їде."""
+    out = hits[:limit]
+    for h in out:
+        h.pop("norm", None)
+    return out
 
 
 def _score(norm: str, stems: list[str]) -> tuple[int, str]:
@@ -138,14 +170,16 @@ def _score(norm: str, stems: list[str]) -> tuple[int, str]:
 
 def grep_surnames(q: str, thresh: int = 80, case_key: str | None = None,
                   places: bool = False, limit: int = 200, *,
-                  given: bool = True, folk: bool = False) -> dict[str, Any]:
+                  given: bool = True, folk: bool = False,
+                  rank_hits: bool = True,
+                  profile: bool = True) -> dict[str, Any]:
     """Fuzzy по всіх збережених прізвищах (або місцях) усіх справ.
 
     ⚠ Гніздо імен розкривається і для осі МІСЦЯ теж, і це свідомо: назва села
     поділяє з іменем ту саму нормалізацію, а зайвий стем там просто нічого не
     знаходить. Окремий вимикач на вісь був би ручкою, яку ніхто не крутить.
     """
-    stems, origin = _stems(q, given=given, folk=folk)
+    stems, origin, whose = _stems(q, given=given, folk=folk, profile=profile)
     if not stems:
         return {"hits": [], "cases": 0, "error": "закороткий запит"}
     hits, scanned = [], 0
@@ -162,27 +196,33 @@ def grep_surnames(q: str, thresh: int = 80, case_key: str | None = None,
                              "page_type": note.get("page_type") or "",
                              "status": note.get("status") or "",
                              "matched": raw, "score": sc,
+                             "norm": norm,
                              "stem": by,
                              "stem_origin": origin.get(by, names.ORIGIN_QUERY),
                              "comment": note.get("comment") or ""})
-    hits.sort(key=lambda h: -h["score"])
-    return {"hits": hits[:limit], "total": len(hits), "cases": scanned,
+    ranked, rul = _rank(hits, rank_hits)
+    return {"hits": _trim(hits, limit), "total": len(hits), "cases": scanned,
             "stems": stems, "stems_asked": _asked(origin),
             "stems_added": _added(origin), "folk": bool(folk),
-            "thresh": thresh}
+            "ranked": ranked, "rank_rules": len(rul.rank_down),
+            "rank_confusers": len(rul.confusers),
+            "rank_dead": list(rul.dead), "rank_broken": list(rul.broken),
+            "profile_of": whose, "thresh": thresh}
 
 
 def grep_records(q: str, thresh: int = 80, case_key: str | None = None,
                  role: str | None = None, rtype: str | None = None,
                  place: bool = False, limit: int = 200, *,
-                 given: bool = True, folk: bool = False) -> dict[str, Any]:
+                 given: bool = True, folk: bool = False,
+                 rank_hits: bool = True,
+                 profile: bool = True) -> dict[str, Any]:
     """Fuzzy по учасниках записів; `place=True` — шукати по місцю, а не прізвищу.
 
     Пошук по місцю відповідає на питання, якого прізвищевий не бере: «які акти
     згадують це поселення» — байдуже, під яким прізвищем. Саме так шукають
     односельців у книгах чужих парафій.
     """
-    stems, origin = _stems(q, given=given, folk=folk)
+    stems, origin, whose = _stems(q, given=given, folk=folk, profile=profile)
     if not stems:
         return {"hits": [], "cases": 0, "error": "закороткий запит"}
     hits, scanned = [], 0
@@ -212,9 +252,13 @@ def grep_records(q: str, thresh: int = 80, case_key: str | None = None,
                              "place": raw if place else (person or {}).get("place") or "",
                              "stem": by,
                              "stem_origin": origin.get(by, names.ORIGIN_QUERY),
+                             "norm": norm,
                              "score": sc})
-    hits.sort(key=lambda h: -h["score"])
-    return {"hits": hits[:limit], "total": len(hits), "cases": scanned,
+    ranked, rul = _rank(hits, rank_hits)
+    return {"hits": _trim(hits, limit), "total": len(hits), "cases": scanned,
             "stems": stems, "stems_asked": _asked(origin),
             "stems_added": _added(origin), "folk": bool(folk),
-            "thresh": thresh}
+            "ranked": ranked, "rank_rules": len(rul.rank_down),
+            "rank_confusers": len(rul.confusers),
+            "rank_dead": list(rul.dead), "rank_broken": list(rul.broken),
+            "profile_of": whose, "thresh": thresh}

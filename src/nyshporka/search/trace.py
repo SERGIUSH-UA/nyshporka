@@ -55,8 +55,9 @@ def note(key: str, *, q: str, thresh: int, hits: int, pages: int,
     data = _read()
     prev = [x for x in (data.get(key) or []) if isinstance(x, dict)]
     # Той самий запит тими самими моделями не множить рядків — він їх оновлює.
+    same = (q, tuple(sorted(set(models))))
     prev = [x for x in prev
-            if (x.get("q"), tuple(x.get("models") or ())) != (q, tuple(row["models"]))]
+            if (x.get("q"), tuple(x.get("models") or [])) != same]
     data[key] = [row, *prev][:KEEP]
     p = path()
     try:
