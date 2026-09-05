@@ -664,9 +664,22 @@ class ArchiumSource:
             return self._inventory_cases(ident)
         raise SourceError(f"незрозуміла адреса: {ref!r}")
 
-    def _group_fonds(self, group_id: str) -> list[Node]:
+    def _fonds(self, group_id: str | None) -> list[Node]:
+        """Перелік фондів: у майданчика з групами — по групі, без груп — суцільно.
+
+        🔴 `group_id=None` — не косметика. У майданчика без груп
+        `/api/v1/fond-groups/1/` віддає HTTP 500, тож обхід, який завжди питає
+        групу, для такого архіву неможливий у принципі. Гірше за саме падіння
+        те, як воно виглядає: помилка звинувачує відсічку за темпом або
+        лежачий хост, тобто постійну структурну невідповідність подає як
+        тимчасову мережеву — і той, хто це побачив, чекає й пробує ще раз.
+        Розмітка обох перекликів однакова (`table.fond-groups`), тож розбирає
+        їх той самий `parse_fonds`.
+        """
+        node = f"/api/v1/fond-groups/{group_id}/" if group_id else "/api/v1/fonds/"
+
         def url(page: int) -> str:
-            return (f"/api/v1/fond-groups/{group_id}/?Limit={PAGE_LIMIT}&Page={page}"
+            return (f"{node}?Limit={PAGE_LIMIT}&Page={page}"
                     f"&SortField=FondNumber&SortOrder=asc")
 
         with self.http.client() as c:
@@ -676,6 +689,9 @@ class ArchiumSource:
                 nxt = self.http.get(url(page), client=c).json().get("View", "") or ""
                 out.extend(parse_fonds(nxt))
         return out
+
+    def _group_fonds(self, group_id: str) -> list[Node]:
+        return self._fonds(group_id)
 
     def _inventory_rows(self, inv_id: str) -> list[CaseRow]:
         def url(page: int) -> str:
@@ -708,6 +724,22 @@ class ArchiumSource:
                       "inv_label", "file_id", "case_no", "date", "sheets",
                       "description")
 
+    def _walk_groups(self, groups: tuple[str, ...] | None) -> tuple[str | None, ...]:
+        """Що саме обходити: групи фондів або суцільний перелік.
+
+        🔴 Мовчки зігнорувати переданий `--groups` там, де груп немає,
+        не можна: людина просила частину архіву, а дістала б увесь — і дізналась
+        би про це аж за часом обходу.
+        """
+        if not self.site.fond_groups:
+            if groups:
+                raise SourceError(
+                    f"{self.label}: груп фондів у цього майданчика немає — "
+                    f"обхід іде суцільним переліком, і `--groups` тут нічого не "
+                    f"обмежує. Заберіть аргумент, щоб обійти архів повністю.")
+            return (None,)
+        return tuple(groups or self.DEFAULT_GROUPS)
+
     def crawl(self, groups: tuple[str, ...] | None = None, *,
               on_progress: ProgressFn | None = None,
               resume: bool = True) -> dict[str, int]:
@@ -738,8 +770,8 @@ class ArchiumSource:
                                extrasaction="ignore")
             if new_file:
                 w.writeheader()
-            for group in (groups or self.DEFAULT_GROUPS):
-                fonds = self._group_fonds(group)
+            for group in self._walk_groups(groups):
+                fonds = self._fonds(group)
                 for i, fond in enumerate(fonds, 1):
                     fond_id = fond.ref.partition(":")[2]
                     if fond_id in done:
@@ -753,7 +785,7 @@ class ArchiumSource:
                         stats["inventories"] += 1
                         for row in self._inventory_rows(inv_id):
                             w.writerow({
-                                "group_id": group, "fond_id": fond_id,
+                                "group_id": group or "", "fond_id": fond_id,
                                 "fond_no": fond_no, "fond_title": title,
                                 "inv_id": inv_id, "inv_label": inv.label,
                                 "file_id": row.file_id, "case_no": row.number,

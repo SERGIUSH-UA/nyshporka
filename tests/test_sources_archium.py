@@ -401,3 +401,52 @@ def test_snapshot_has_no_test_rows_of_the_archive() -> None:
         rows = list(csv.DictReader(fh, delimiter="\t"))
     assert not [r for r in rows if r["case_no"].strip() == "Справа 0"]
     assert not [r for r in rows if "test" in (r["inv_label"] or "").lower()]
+def test_crawl_walks_flat_where_the_site_has_no_fond_groups(
+        tmp_path: Path, fond_html: str) -> None:
+    """🔴 У ЦДІАК груп фондів немає: `/api/v1/fond-groups/1/` — HTTP 500.
+
+    Обхід, що завжди питає групу, для такого майданчика падав завжди, і падав
+    повідомленням про відсічку за темпом — постійну ваду видавав за тимчасову.
+    Приймач тут — ЯКУ адресу спитали, а не скільки справ зібрали: каталог на
+    правильній адресі зібрався б і з помилковою гілкою, якби фікстура відповіла
+    на обидві.
+    """
+    from nyshporka.archives.pack import Site
+    from nyshporka.sources.http import Fetcher
+
+    flat = ('<table class="fond-groups"><tbody><tr>'
+            '<td>18</td><td><a href="/fonds/13630/">Церкви</a></td>'
+            '<td>1795-1927</td><td>3160</td></tr></tbody></table>')
+    inv = (FIX / "archium_inventory.json").read_text(encoding="utf-8")
+    empty = json.dumps({"Status": 1, "View": ""})
+    rec = _Recorded({
+        r"/api/v1/fonds/\?Limit=\d+&Page=1(?!\d)": json.dumps({"Status": 1, "View": flat}),
+        r"/api/v1/fonds/": empty,
+        r"/fonds/13630/": fond_html,
+        r"inventories/\d+\?Limit=\d+&Page=1(?!\d)": inv,
+        r"inventories": empty,
+    })
+    site = Site(engine="archium", url="https://архів",
+                source_id="archium-cdiak", fond_groups=False)
+    src = A.ArchiumSource(workspace=tmp_path, site=site, repo="CDIAK",
+                          fetcher=Fetcher(base="https://архів", delay=0.0, client=rec))
+
+    stats = src.crawl()
+
+    assert stats["cases"] == 50
+    assert not any("fond-groups" in u for u in rec.asked), (
+        "обхід спитав групу фондів у майданчика, який їх не має — "
+        f"адреси: {rec.asked}")
+
+
+def test_crawl_says_groups_mean_nothing_where_there_are_none(tmp_path: Path) -> None:
+    """Мовчазне ігнорування `--groups` віддало б увесь архів замість частини."""
+    from nyshporka.archives.pack import Site
+    from nyshporka.sources.http import Fetcher
+
+    site = Site(engine="archium", url="https://архів",
+                source_id="archium-cdiak", fond_groups=False)
+    src = A.ArchiumSource(workspace=tmp_path, site=site, repo="CDIAK",
+                          fetcher=Fetcher(base="https://архів", delay=0.0))
+    with pytest.raises(SourceError, match="груп фондів"):
+        src.crawl(("1",))
