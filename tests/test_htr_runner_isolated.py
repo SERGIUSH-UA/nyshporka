@@ -36,7 +36,8 @@ ENGINE_ENV = {
 }
 
 #: Сусідні файли, що вантажаться за шляхом (той самий трюк, що й патчі).
-LOCAL_MODULES = {"pysar_lines_infer", "gpu_sato", "fast_geom", "seg_ceiling"}
+LOCAL_MODULES = {"pysar_lines_infer", "gpu_sato", "fast_geom", "seg_ceiling",
+                 "seg_resize"}
 
 #: 🔴 Перелік явний, а не `rglob`. У теці живуть модулі двох ярусів: ці їдуть
 #: у середовище рушіїв, а `env.py`/`manifest.py` навпаки — керують ним іззовні,
@@ -44,11 +45,12 @@ LOCAL_MODULES = {"pysar_lines_infer", "gpu_sato", "fast_geom", "seg_ceiling"}
 #: цю межу не вгадати, а новий файл тут — рішення, яке треба ухвалити свідомо.
 GUEST_FILES = ["runner.py", "pysar_lines_infer.py",
                "patches/gpu_sato.py", "patches/fast_geom.py",
-               "patches/seg_ceiling.py",
+               "patches/seg_ceiling.py", "patches/seg_resize.py",
                # Верифікатори — теж гості: вони ганяють стару й нову версію
                # пліч-о-пліч на живій сегментації, тобто всередині того самого
                # середовища. Доказ рівності, знятий деінде, нічого не доводить.
-               "patches/gpu_sato_verify.py", "patches/fast_geom_verify.py"]
+               "patches/gpu_sato_verify.py", "patches/fast_geom_verify.py",
+               "patches/seg_resize_verify.py"]
 
 FILES = [HTR / rel for rel in GUEST_FILES]
 

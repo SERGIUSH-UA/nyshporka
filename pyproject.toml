@@ -281,7 +281,7 @@ ignore_missing_imports = true
 [[tool.mypy.overrides]]
 module = ["torch.*", "torchvision.*", "kraken.*", "strhub.*", "timm.*",
           "skimage.*", "scipy.*", "shapely.*",
-          "gpu_sato", "fast_geom", "seg_ceiling", "pysar_lines_infer"]
+          "gpu_sato", "fast_geom", "seg_ceiling", "seg_resize", "pysar_lines_infer"]
 ignore_missing_imports = true
 
 # Світ ХМАРНОГО ПРОГОНУ. `paramiko`, `boto3` і `keyring` живуть в extras

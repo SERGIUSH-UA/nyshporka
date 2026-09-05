@@ -209,7 +209,8 @@ from PIL import Image  # noqa: E402
 PROGRESS_PREFIX = "@@PROGRESS@@ "
 PROGRESS_SCHEMA = 1
 
-#: Патчі гарячих функцій kraken (`gpu_sato`, `fast_geom`, `seg_ceiling`) лежать
+#: Патчі гарячих функцій kraken (`gpu_sato`, `fast_geom`, `seg_ceiling`,
+#: `seg_resize`) лежать
 #: у підтеці поруч і вантажаться за шляхом, а не імпортом пакета: раннер їде під
 #: інтерпретатором середовища рушіїв, де `nyshporka` не встановлено.
 _PATCHES_DIR = Path(__file__).resolve().parent / "patches"
@@ -2351,6 +2352,12 @@ def main() -> int:
                     help="_calc_roi через STRtree + векторизований shapely "
                          "(вихід побітово той самий — див. fast_geom_verify.py). "
                          "Дефолт ON, вимикач --no-fast-geom")
+    ap.add_argument("--seg-resize", action=argparse.BooleanOptionalAction,
+                    default=True,
+                    help="один LANCZOS-ресайз кадру в compute_segmentation_map "
+                         "замість двох (scal_im і тензор — з того самого PIL; "
+                         "побайтно те саме — див. seg_resize_verify.py). "
+                         "Дефолт ON, вимикач --no-seg-resize")
     ap.add_argument("--gpu-sato", action=argparse.BooleanOptionalAction,
                     default=True,
                     help="рахувати sato на карті (43%% часу сторінки; вихід "
@@ -2618,6 +2625,13 @@ def main() -> int:
     else:
         print("[htr-run] ⚠ геометрія kraken без прискорення (--no-fast-geom)",
               flush=True)
+    if args.seg_resize:
+        # ⚠ ДО `install_gpu_lock` нижче: лок обгортає те, що лежить у
+        # `blla.compute_segmentation_map` на момент установки, і патч мусить
+        # опинитись ПІД локом, а не над ним.
+        sys.path.insert(0, str(_PATCHES_DIR))
+        from seg_resize import install as install_seg_resize
+        install_seg_resize(verbose=True)
     from kraken.kraken import SEGMENTATION_DEFAULT_MODEL
     rec_model = load_recognizer(args.model, engine, device)
     globals()["VOICE_BATCH"] = max(1, int(args.voice_batch))

@@ -90,6 +90,12 @@ patches:
     tested_on: "kraken==7.0.2"
     requires_cuda: false
     gain: "×1.36 на сторінку (_calc_roi через STRtree, boundary_tracing скалярами)"
+  - id: seg_resize
+    module: nyshporka.htr.patches.seg_resize
+    verify: nyshporka.htr.patches.seg_resize_verify
+    tested_on: "kraken==7.0.2"
+    requires_cuda: false
+    gain: "−0.3…−0.5 с/стор на 16-Мпікс кадрах (один LANCZOS-ресайз замість двох)"
 
 # ── рушії ────────────────────────────────────────────────────────────────────
 # 🔴 Розширення моделі каже РУШІЙ, а префікс імені — ПИСЬМО. `.mlmodel` буває
