@@ -1307,9 +1307,14 @@ class Segmenter:
 
     def __init__(self, model_path: str, device: str, seg_height: int = 0,
                  cache_dir: Path | None = None, key: dict | None = None,
-                 write: bool = True, merge: dict | None = None):
+                 write: bool = True, merge: dict | None = None,
+                 autocast: bool = False):
         self._path, self._device, self._h = model_path, device, seg_height
         self.dir, self._key, self._write = cache_dir, key or {}, write
+        # Половинна точність на форварді сегментера (`torch.autocast`). Kraken
+        # приймає її параметром `blla.segment(autocast=…)`, а ми досі передавали
+        # лише модель і пристрій, тобто рахували все у 32 бітах.
+        self._autocast = autocast
         self._model = None
         self.hits = self.misses = self.written = 0
         # 🔴 Злиття розсічених baseline йде після кешу, а не до нього, і в ключ
@@ -1358,6 +1363,12 @@ class Segmenter:
         except Exception:
             pass
         k["seg_height"] = self._h
+        # 🔴 Ключ дописується ЛИШЕ коли autocast увімкнено. Безумовний рядок
+        # змінив би ключ усім наявним записам — а їх понад сто тисяч, і жоден
+        # більше не влучив би. Половинна точність дає інший форвард, тож свій
+        # ключ їй потрібен; але платити за це знеціненням усього кешу не можна.
+        if self._autocast:
+            k["autocast"] = True
         k["v"] = SEG_CACHE_VERSION
         return k
 
@@ -1419,7 +1430,8 @@ class Segmenter:
                 self.hits += 1
                 return self._post(got)
         from kraken import blla
-        seg = blla.segment(im, model=self._net(), device=self._device)
+        seg = blla.segment(im, model=self._net(), device=self._device,
+                           autocast=self._autocast)
         self.misses += 1
         if stem:
             self.save(stem, orient, enhanced, seg)
@@ -2378,6 +2390,14 @@ def main() -> int:
                     help="не зливати, якщо рядок стане довшим за N висот "
                          f"(дефолт {MERGE_MAX_ASPECT}; вхід Писаря 48×512 = "
                          "10.7, довше він стискає). 0 — без стелі")
+    ap.add_argument("--seg-autocast", action="store_true",
+                    help="половинна точність на форварді сегментера "
+                         "(`torch.autocast`). 🔴 ЗАМІРЯНО 05.09.2026 на V100: "
+                         "приросту НЕМАЄ (-0.6%% при розкиді 0.6%%), а нарізка "
+                         "змінюється — 7 сторінок із 9 дали інший текст, тоді "
+                         "як два базові прогони збіглися 9 з 9. Ручка лишена "
+                         "вимкненою й задокументована, щоб цей висновок не "
+                         "виводили заново")
     ap.add_argument("--seg-height", type=int, default=0,
                     help="висота ресайзу сторінки для сегментера (0 = рідна "
                          "1800). 1440 ≈ −4%% слів за 1.35x, 1200 ≈ −10%% "
@@ -2664,7 +2684,7 @@ def main() -> int:
         cache_dir=seg_cache,
         key={"sato": args.sato_sigmas, "kraken": KRAKEN_PIN_VERSION,
              "max_endpoints": args.max_endpoints},
-        merge=merge_cfg)
+        merge=merge_cfg, autocast=args.seg_autocast)
     if merge_cfg:
         print(f"[htr-run] 🧵 злиття розсічених baseline увімкнено "
               f"(зазор ≤{args.merge_gap}×висоти, вертикаль ≤{args.merge_vtol}×) "
