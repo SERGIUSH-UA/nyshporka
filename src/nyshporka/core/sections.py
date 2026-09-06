@@ -173,6 +173,9 @@ SCREENS: dict[str, str] = {
     "sift": "research",
     "eye": "research",
     "export": "research",
+    # lab
+    "sets": "lab",
+    "label": "lab",
 }
 
 #: Екрани поза секціями — доступні завжди.
@@ -258,6 +261,23 @@ OP_SCREEN: dict[str, str] = {
     "pages.show": "eye",
     "records.add": "eye",
     "export.case": "export",
+    # lab
+    "train.sets": "sets",
+    "train.doctor": "sets",
+    "train.cut": "sets",
+    "train.voices": "sets",
+    "train.glossary": "sets",
+    "train.export": "sets",
+    "train.import": "sets",
+    "train.gates": "sets",
+    "train.sheets": "sets",
+    "train.queue": "label",
+    "train.line": "label",
+    "train.page": "label",
+    "train.save": "label",
+    "train.stats": "label",
+    "train.suggest": "label",
+    "train.view": "label",
 }
 
 

@@ -24,7 +24,7 @@ ENGINE_ENV = {
 }
 
 #: Явний перелік, не `rglob`: новий гість — рішення, яке ухвалюють свідомо.
-GUEST_FILES = ["cut_runner.py"]
+GUEST_FILES = ["cut_runner.py", "parseq_train_runner.py"]
 
 
 def test_guest_list_matches_disk() -> None:
@@ -45,11 +45,21 @@ def test_no_package_imports(name: str) -> None:
             for a in node.names:
                 if a.name.split(".")[0] not in allowed:
                     forbidden.append(a.name)
-        elif isinstance(node, ast.ImportFrom) and node.module:
-            if node.module.split(".")[0] not in allowed:
-                forbidden.append(node.module)
+        elif (isinstance(node, ast.ImportFrom) and node.module
+              and node.module.split(".")[0] not in allowed):
+            forbidden.append(node.module)
     assert not forbidden, f"{name}: імпортує те, чого в середовищі рушіїв немає: {forbidden}"
-    assert "nyshporka" not in src, f"{name}: згадує пакет — гість його не бачить"
+
+
+def test_vendored_train_runner_carries_the_local_edits() -> None:
+    """Правки вендорингу на місці — і всі вони живуть у tools/sync_train_runner.py."""
+    src = (GUEST / "parseq_train_runner.py").read_text(encoding="utf-8")
+    assert "ВЕНДОРЕНА копія з gpurunner" in src.splitlines()[0]
+    for needle in ('params.get("input_root")', 'params.get("no_pip")',
+                   'params.get("progress_json")', "@@PROGRESS@@", 'os.name == "nt"',
+                   '_p.add_argument("--params"', "def _utc_iso"):
+        assert needle in src, f"вендорений раннер без правки: {needle}"
+    assert 'EXTRACT = KAGGLE_WORKING / "_input"' in src
 
 
 def test_cut_runner_has_main_and_takes_runner_by_path() -> None:

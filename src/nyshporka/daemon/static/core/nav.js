@@ -23,13 +23,14 @@ let SECTIONS = { sections: [], screens: {}, op_screen: {}, presets: {},
 
 /** Порядок кнопок у шапці. Екрани, яких тут немає, кнопки не отримують. */
 const NAV_ORDER = ['home', 'profile', 'sources', 'geog', 'fonds', 'library', 'frames', 'cases', 'newcase',
-  'read', 'runs', 'view', 'eye', 'search', 'sift', 'export', 'jobs'];
+  'read', 'runs', 'view', 'eye', 'search', 'sift', 'export', 'sets', 'label', 'jobs'];
 
 /** Ключ i18n для кнопки екрана. Підпис «Завести справу» вже є в словнику. */
 const NAV_LABEL = {
   home: 'nav.home', profile: 'nav.profile', sources: 'nav.sources', geog: 'nav.geog', fonds: 'nav.fonds',
   library: 'nav.library', frames: 'nav.frames', cases: 'nav.cases', newcase: 'nav.newcase', read: 'nav.read', runs: 'nav.runs', view: 'nav.view',
-  eye: 'nav.eye', search: 'nav.search', sift: 'nav.sift', export: 'nav.export', jobs: 'nav.jobs',
+  eye: 'nav.eye', search: 'nav.search', sift: 'nav.sift', export: 'nav.export',
+  sets: 'nav.sets', label: 'nav.label', jobs: 'nav.jobs',
 };
 
 /** Чи ввімкнена секція цього екрана. Невідомий екран не блокуємо. */

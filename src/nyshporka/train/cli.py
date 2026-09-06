@@ -290,3 +290,29 @@ def view_cmd(
         return
     console.print(f"{env.data['file']} {env.data['width']}×{env.data['height']} — "
                   f"{env.data['note']}")
+
+
+@app.command("stats")
+def stats_cmd(
+    name: str = typer.Option(..., "--set", metavar="НАБІР"),
+    as_json: bool = typer.Option(False, "--json"),
+) -> None:
+    """Поступ розмітки набору й CER голосу проти ручних міток.
+
+    Число рядків «ok» — знаменник, без якого CER нічого не доводить.
+    """
+    from nyshporka import ops as O
+
+    env = O.call("train.stats", {"name": name})
+    if _answer(env, as_json):
+        return
+    d = env.data
+    st = d["by_status"]
+    console.print(f"розмічено {d['n_done']} з {d['n_total']} рядків на {d['n_pages']} стор. "
+                  f"(ok {st.get('ok', 0)}, ? {st.get('unsure', 0)}, skip {st.get('skip', 0)}) · "
+                  f"лишилось {d['n_left']}")
+    if d["median_secs"]:
+        console.print(f"темп: медіана {d['median_secs']} с/рядок · ще ~{d['eta_min']} хв")
+    if d["cer_draft"] is not None:
+        console.print(f"CER голосу проти людини: {d['cer_draft']:.3f} на {d['cer_lines']} рядках")
+    _notes(env)

@@ -524,3 +524,49 @@ header .lang:first-of-type { margin-left: auto; }
 #view .prof-forms button.chip:hover { border-color: var(--accent);
   color: var(--accent); }
 #view textarea[name="text"] { width: 100%; font-size: 13px; }
+
+
+/* ── ✍️ Розмітка ─────────────────────────────────────────────────────────────
+   Смужка кропа — головний об'єкт екрана; усе інше стоїть навколо неї й не
+   має відбирати висоту. Сцена гасне до onload: інакше попередній кроп видно
+   під новим підписом, і людина читає не той рядок. */
+.lb-pick select, .lb-pick input { flex: 1 1 10rem; }
+.lb-head { display: flex; flex-wrap: wrap; gap: .3rem 1rem; font-size: .85rem;
+  margin: .4rem 0; }
+.lb-head .lb-keys { margin-left: auto; font-size: .75rem; color: var(--fg-4); }
+/* 🔴 Контейнер свайпу мусить бути коробкою: до `display: contents` немає куди
+   застосувати жест, і свайп був би мертвий. */
+.lb-swipe { display: block; touch-action: pan-y; }
+.lb-stage { overflow-x: auto; background: var(--paper); border: 1px solid var(--line-2);
+  border-radius: var(--r-m); padding: .4rem; transition: opacity .12s; }
+.lb-stage.dim { opacity: .25; }
+.lb-stage img { display: block; max-width: none; height: auto; }
+.lb-ctx { font-size: .82rem; color: var(--fg-3); margin: .4rem 0; }
+.lb-ctx-row { display: flex; gap: .5rem; }
+.lb-ctx-row.cur { color: var(--fg); }
+.lb-voices { display: flex; flex-direction: column; gap: .15rem; margin: .3rem 0 .5rem;
+  font-size: .95rem; }
+.lb-vt { cursor: pointer; }
+.lb-vt:hover { text-decoration: underline dotted; }
+/* Пословна підсвітка: `new` — слова, яких немає в жодному голосі (домисел),
+   `fix` — є, але в іншій формі. Червоне — дивитись на кроп, не приймати. */
+.w.new { color: var(--ic-red); font-weight: 600; }
+.w.fix { color: var(--accent); }
+/* 🔴 Поле не менше 17px: на <16px iOS зумить сторінку при фокусі. */
+.lb-in { flex: 1 1 20rem; font-size: 17px; }
+.lb-in-row { margin-bottom: .5rem; }
+/* Липкий ряд великих кнопок — щоб на телефоні екранна клавіатура їх не ховала. */
+.lb-bottom { display: flex; flex-wrap: wrap; gap: .4rem; position: sticky; bottom: 0;
+  padding: .4rem 0; background: var(--bg); z-index: 2; }
+#view .lb-bottom .lb-do { padding: .55rem .9rem; font-size: 1rem; }
+.lb-page { margin-top: .8rem; }
+.lb-pw { overflow: auto; }
+.lb-pw .stage-ov rect.ln { fill: transparent; stroke: var(--box-fp); stroke-width: 3;
+  opacity: .5; cursor: pointer; }
+.lb-pw .stage-ov rect.ln.on { stroke: var(--box-tp); stroke-width: 6; opacity: 1; }
+#view .lb-page button.on { background: var(--accent-fill); color: var(--accent-ink);
+  border-color: var(--accent-fill); }
+@media (max-width: 40rem) {
+  .lb-head .lb-keys { display: none; }
+  #view .lb-bottom .lb-do { flex: 1 1 40%; padding: .8rem .5rem; font-size: 1.05rem; }
+}

@@ -463,3 +463,154 @@ def train_view(a: ViewArgs) -> Envelope:
     return ok({"set": a.name, "page": a.page, "mode": a.mode, "width": shot.width,
                "height": shot.height, "note": shot.note, "file": written,
                "image": shot.data_url})
+
+
+# ── вкладка «Розмітка» ───────────────────────────────────────────────────────
+def _store(name: str) -> Any:
+    from nyshporka.train import store as ST
+
+    return ST.Store(name)
+
+
+class QueueArgs(BaseModel):
+    name: str = Field(description="набір")
+    mode: str = Field(default="spread", description="spread | useful | page | sequential | names")
+    page: str = Field(default="", description="сторінка для режиму page")
+    limit: int = Field(default=400, description="стеля рядків у черзі")
+    include_blank: bool = Field(default=False, description="показувати порожні смужки")
+
+
+@op("train.queue", summary="Черга рядків на розмітку — за розбіжністю голосів",
+    args=QueueArgs, agent=False, section=SECTION)
+def train_queue(a: QueueArgs) -> Envelope:
+    """Що показати людині першим: рядки, де голоси розійшлись, блоками з різних сторінок.
+
+    🔴 `spread` — дефолт: модель, навчена на одному писарі, вміє читати одного
+    писаря, а «найкорисніші» й «підряд» віддають сторінку цілком.
+    """
+    from nyshporka.train import sets as S
+
+    try:
+        st = _store(a.name)
+        got = st.queue(a.mode, a.page, max(1, min(2000, a.limit)), a.include_blank)
+    except S.SetError as exc:
+        return fail(str(exc))
+    env = ok(got)
+    if len(st.spec.drafts) < 2:
+        env.warn("one_voice", "у наборі лише один голос — черга не бачить розбіжності "
+                              "й іде підряд; додайте другий: nysh train voices")
+    if not got["items"]:
+        env.warn("queue_empty", "у цьому режимі рядків не лишилось — усі розмічені "
+                                "або порожні (увімкніть «показувати порожні»)")
+    return env
+
+
+class LineArgs(BaseModel):
+    name: str = Field(description="набір")
+    page: str = Field(description="сторінка")
+    idx: int = Field(description="індекс кропа")
+    span: int = Field(default=2, description="сусідніх рядків з кожного боку")
+
+
+@op("train.line", summary="Один рядок для розмітки: кроп, голоси, сусіди, збережене",
+    args=LineArgs, agent=False, section=SECTION)
+def train_line(a: LineArgs) -> Envelope:
+    """Кроп як data URL плюс усе, що людині треба бачити поруч із ним."""
+    from nyshporka.train import sets as S
+
+    try:
+        return ok(_store(a.name).line(a.page, a.idx, max(1, min(5, a.span))))
+    except S.SetError as exc:
+        return fail(str(exc))
+
+
+class PageArgs(BaseModel):
+    name: str = Field(description="набір")
+    page: str = Field(description="сторінка")
+    max_px: int = Field(default=1800, description="довга сторона зображення")
+
+
+@op("train.page", summary="Сторінка набору з рамками рядків — звідки ця смужка",
+    args=PageArgs, agent=False, section=SECTION)
+def train_page(a: PageArgs) -> Envelope:
+    """Зменшений скан із рамками з мети нарізки; на зумі — 3600 px."""
+    from nyshporka.train import sets as S
+
+    try:
+        return ok(_store(a.name).page_image(a.page, a.max_px))
+    except S.SetError as exc:
+        return fail(str(exc))
+    except Exception as exc:
+        return fail(f"сторінку «{a.page}» показати нічим: {exc}")
+
+
+class SaveArgs(BaseModel):
+    name: str = Field(description="набір")
+    page: str = Field(description="сторінка")
+    idx: int = Field(description="індекс кропа")
+    text: str = Field(default="", description="текст рядка як на аркуші")
+    status: str = Field(default="ok", description="ok | skip | unsure")
+    kind: str = Field(default="hand", description="hand | print | mixed")
+    draft: str = Field(default="", description="чернетка, яку людина бачила")
+    secs: float = Field(default=0.0, description="скільки секунд пішло")
+
+
+@op("train.save", summary="Записати ручну мітку рядка",
+    args=SaveArgs, mutates=True, agent=False, section=SECTION)
+def train_save(a: SaveArgs) -> Envelope:
+    """Append-only: історія правок зберігається, останній запис виграє.
+
+    Маркери розбіжності знімаються на вході — `lines.jsonl` є джерелом
+    правди, і маркер, прийнятий одним Enter, лишився б у ньому назавжди.
+    """
+    from nyshporka.train import sets as S
+
+    try:
+        rec = _store(a.name).save(a.page, a.idx, a.text, a.status, kind=a.kind,
+                                  draft=a.draft, secs=a.secs)
+    except S.SetError as exc:
+        return fail(str(exc))
+    return ok({"rec": rec})
+
+
+class StatsArgs(BaseModel):
+    name: str = Field(description="набір")
+
+
+@op("train.stats", summary="Поступ розмітки набору: зроблено, темп, CER голосу проти людини",
+    args=StatsArgs, agent=False, section=SECTION)
+def train_stats(a: StatsArgs) -> Envelope:
+    """Знаменники розмітки, і один вимірювач: наскільки голос (чи злиття) помиляється.
+
+    `cer_draft` понад ~0.10 означає, що арбітри працювали погано і корпус із
+    такого злиття гірший за відсутній.
+    """
+    from nyshporka.train import sets as S
+
+    try:
+        d = _store(a.name).stats()
+    except S.SetError as exc:
+        return fail(str(exc))
+    env = ok(d)
+    if d["cer_draft"] is not None and d["cer_lines"] < 20:
+        env.warn("cer_small", f"CER голосу міряно лише на {d['cer_lines']} рядках — "
+                              f"на такому числі він ще нічого не доводить")
+    return env
+
+
+class SuggestArgs(BaseModel):
+    name: str = Field(description="набір")
+    q: str = Field(description="початок фрази")
+    limit: int = Field(default=6, description="скільки підказок")
+
+
+@op("train.suggest", summary="Автодоповнення з уже введених міток",
+    args=SuggestArgs, agent=False, section=SECTION)
+def train_suggest(a: SuggestArgs) -> Envelope:
+    """У метриці рядки повторюються: формула набирається один раз."""
+    from nyshporka.train import sets as S
+
+    try:
+        return ok({"items": _store(a.name).suggest(a.q, max(1, min(20, a.limit)))})
+    except S.SetError as exc:
+        return fail(str(exc))
