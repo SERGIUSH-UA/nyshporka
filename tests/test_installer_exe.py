@@ -183,6 +183,10 @@ def test_a_failed_install_leaves_its_reason_for_the_wizard() -> None:
         "майстер знову відсилає до вікна, якого вже немає")
     # Успішний шлях закриває журнал явно — інакше він обривається на `exit 0`.
     assert ps1.rstrip().endswith("exit 0") and "Stop-Transcript" in ps1
+    # Передперевірка запуску з профілю стоїть ДО першого завантаження, а
+    # порада «від імені адміністратора» в майстрі — лише без підвищення.
+    assert ps1.index("_probe.exe") < ps1.index("astral.sh/uv/install.ps1")
+    assert "if not IsAdmin then" in iss
 
 
 def test_iss_compiles() -> None:

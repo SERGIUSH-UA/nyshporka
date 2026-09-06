@@ -80,6 +80,7 @@ trap {
     # виводу exe в консоль, а його заголовок з'їв би весь хвіст.
     $tail = @($script:NativeTail | Where-Object { $_ -and $_.Trim() } | Select-Object -Last 15)
     if ($tail.Count) { $lines += ''; $lines += 'Останні рядки виводу:'; $lines += $tail }
+    if ($script:PreflightNote) { $lines += ''; $lines += $script:PreflightNote }
     $lines += ''
     $lines += ('Повний журнал: ' + $LogFile)
     $text = $lines -join [Environment]::NewLine
@@ -192,6 +193,64 @@ New-Item -ItemType Directory -Force -Path $Home_ | Out-Null
 # щоб людині було що надіслати в issue. Без транскрипту цей вивід живе рівно
 # стільки, скільки вікно консолі.
 try { Start-Transcript -LiteralPath $LogFile -Force | Out-Null } catch {}
+
+# ── 0. передперевірка ────────────────────────────────────────────────────────
+# 🔴 Звіт 06.09.2026: установлення падало з кодом 1 у звичайного користувача і
+# проходило «від імені адміністратора». Жоден крок нижче прав не потребує —
+# усе лягає в профіль, — тож різниця була або в ПОЛІТИЦІ ВИКОНАННЯ (AppLocker,
+# SRP, правила ASR: адміністраторам усе, решті лише Program Files і Windows —
+# і uv.exe з профілю просто не запускається), або в ІНШОМУ ПРОФІЛІ (інший
+# обліковий запис = інші %LOCALAPPDATA%, %TEMP%, домівка). Обидва випадки
+# дешево впізнати за секунду, до того як качати гігабайти, і назвати прямо.
+$script:PreflightNote = ''
+
+# Підвищення: усе ляже в профіль ЦЬОГО облікового запису. Якщо майстер
+# запустили від імені іншого, адміністраторського, — команди `nysh`, PATH і
+# ярлики дістануться йому, а не тому, хто працюватиме.
+$identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+$elevated = ([Security.Principal.WindowsPrincipal]$identity).IsInRole(
+    [Security.Principal.WindowsBuiltInRole]::Administrator)
+if ($elevated) {
+    Say ""
+    Say "  ⚠ Запуск із правами адміністратора. Усе стане в профіль користувача" Yellow
+    Say "    $($identity.Name) ($env:USERPROFILE)." Yellow
+    Say "    Якщо працювати буде інший користувач — йому команда nysh і ярлики" DarkGray
+    Say "    не дістануться; встановлюйте з-під його облікового запису." DarkGray
+}
+
+# Чи запускаються програми з профілю взагалі. Проба — підписаний системний exe,
+# скопійований у теку встановлення: правила за шляхом (типові для AppLocker і
+# SRP) заблокують саме копію, а не оригінал. Відмова проби НЕ зупиняє
+# встановлення (хибне спрацювання коштувало б людині всієї установки), а
+# лишає пояснення, яке trap додасть до першої ж справжньої відмови.
+# ⚠ Саме `cmd /c echo`, а не `where /?`: той пише довідку в stderr, і проба
+# спрацьовувала хибно на цілком здоровій машині (перевірено 06.09.2026).
+$probeSrc = Join-Path $env:SystemRoot 'System32\cmd.exe'
+$probe = Join-Path $Home_ '_probe.exe'
+if (Test-Path -LiteralPath $probeSrc) {
+    try {
+        Copy-Item -LiteralPath $probeSrc -Destination $probe -Force
+        $seen = Get-NativeLine $probe /c echo nysh-probe-ok
+        if ($seen -ne 'nysh-probe-ok') {
+            $script:PreflightNote = (
+                "Передперевірка: програми з профілю користувача ($Home_) на цій машині " +
+                "НЕ ЗАПУСКАЮТЬСЯ — схоже на політику AppLocker/SRP або правило ASR. " +
+                "Нишпорка ставиться в профіль без прав адміністратора, тож тут вона " +
+                "не працюватиме. Варіанти: запустити інсталятор правою кнопкою миші " +
+                "→ «Запустити від імені адміністратора» (тоді все стане в профіль " +
+                "адміністратора), або попросити ІТ дозволити запуск із $Home_ і " +
+                "$env:LOCALAPPDATA\uv.")
+            Say ""
+            Say "  ⚠ $($script:PreflightNote)" Yellow
+        }
+    } catch {
+        # проба не вдалась сама по собі (антивірус, права на копіювання) — це
+        # не вирок машині, мовчки йдемо далі
+    } finally {
+        Remove-Item -LiteralPath $probe -Force -ErrorAction SilentlyContinue
+    }
+}
+
 $uvDir = Join-Path $Home_ 'uv'
 $uv    = Join-Path $uvDir 'uv.exe'
 
