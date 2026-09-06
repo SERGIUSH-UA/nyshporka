@@ -355,6 +355,24 @@ def guess_script_full(case_dir: Path, hint: str = "") -> ScriptGuess:
     return pick.guess_script_for_dir(case_dir, hint)
 
 
+def seg_cache_dir(case_dir: Path, derived: Path) -> Path:
+    """Тека кешу сегментації справи.
+
+    Кеш спільний на простір і на справу, а не на прогін: сенс він має рівно
+    тоді, коли ту саму справу читає друга модель — або коли з неї ріжуть кропи
+    для трену (`train.cut`), і ті мусять бути тими самими, що бачив рушій.
+    Формула одна й тут: другий екземпляр у лабораторії розійшовся б із цим
+    мовчки, і кеш «не знаходився б».
+    """
+    import hashlib
+
+    case = Path(case_dir)
+    slug = re.sub(r"[^\w.\-]+", "_", case.name)[:60]
+    stamp = hashlib.blake2b(str(case).lower().encode("utf-8"),
+                            digest_size=4).hexdigest()
+    return derived / "htr_seg" / f"{slug}__{stamp}"
+
+
 def plan(case_dir: str | Path, *, out_dir: str | Path = "", script: str = "",
          second_voice: bool = True) -> Plan:
     """Зібрати план прогону або пояснити, чого бракує."""
@@ -388,14 +406,7 @@ def plan(case_dir: str | Path, *, out_dir: str | Path = "", script: str = "",
     runner = Path(__file__).resolve().parent / "runner.py"
     ws = workspace()
     out = Path(out_dir) if out_dir else ws.htr_reports / case.name
-    # Кеш сегментації — спільний на простір і на справу, а не на прогін: сенс
-    # він має рівно тоді, коли ту саму справу читає друга модель.
-    import hashlib
-
-    slug = re.sub(r"[^\w.\-]+", "_", case.name)[:60]
-    stamp = hashlib.blake2b(str(case).lower().encode("utf-8"),
-                            digest_size=4).hexdigest()
-    seg = ws.derived / "htr_seg" / f"{slug}__{stamp}"
+    seg = seg_cache_dir(case, ws.derived)
     # 🔴🔴 Лок карти — НА ПРОСТІР, а не на прогін.
     #
     # Доти він лежав у теці виходу (`out/_gpu.lock`), тобто в кожного прогону

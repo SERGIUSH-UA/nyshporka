@@ -152,3 +152,89 @@ def train_doctor(_: NoArgs) -> Envelope:
                  "жоден набір не має ролі holdout — епоху не буде чим обирати, "
                  "а покращення val на тих самих справах не доказ")
     return env
+
+
+# ── кропи з прогону ──────────────────────────────────────────────────────────
+class CutArgs(BaseModel):
+    run: str = Field(description="прогін, з якого різати (тека в reports/htr)")
+    name: str = Field(description="ім’я набору — стане текою")
+    pages: str = Field(default="", description="кома-список сторінок; порожньо — авто")
+    pick: int = Field(default=0, description="скільки сторінок відібрати автоматично")
+    title: str = Field(default="", description="людська назва набору")
+    domain: str = Field(default="", description="жанр для арбітрів: «сповідний розпис», «метрика»")
+    case: str = Field(default="", description="шифра справи, якщо прогін її не знає")
+    no_engine: bool = Field(default=False,
+                            description="різати полігоном пакетом, не кешем сегментації")
+
+
+@op("train.cut", summary="Нарізати кропи рядків із прогону в набір для розмітки",
+    args=CutArgs, mutates=True, long=True, agent=False, section=SECTION)
+def train_cut(a: CutArgs) -> Envelope:
+    """Набір із прогону: кропи = рядки прогону, текст прогону = перший голос.
+
+    🔴 Без окремої сегментації навмисно: геометрію рядків прогін уже записав,
+    і кроп, вирізаний з неї, — це рівно той рядок, який дав текст. Нова
+    сегментація дала б інші індекси, і голос прогону перестав би відповідати
+    кропам.
+    """
+    from nyshporka.train import cut as C
+
+    pages = [p.strip() for p in a.pages.split(",") if p.strip()]
+    try:
+        rep = C.make_set(a.run, a.name, pages=pages or None, pick=a.pick, title=a.title,
+                         domain=a.domain, case=a.case, prefer_engine=not a.no_engine)
+    except C.CutError as exc:
+        return fail(str(exc))
+    from nyshporka.train import sets as S
+
+    st = S.registry().stats(a.name)
+    env = ok({"set": a.name, "lines": rep.n_lines,
+              "pages": [{"page": p.page, "n": p.n, "source": p.source,
+                         "error": p.error} for p in rep.pages],
+              "stats": st})
+    for w in rep.warnings:
+        env.warn("cut", w)
+    if rep.n_lines:
+        env.suggest("train.voices", "додати другий голос: без нього черга й злиття сліпі")
+    return env
+
+
+# ── голоси ───────────────────────────────────────────────────────────────────
+class VoicesArgs(BaseModel):
+    name: str = Field(description="набір")
+    from_run: str = Field(default="", description="сусідній прогін тієї самої справи")
+    models: str = Field(default="", description="кома-список ваг Писаря (.pt) для інферу")
+    device: str = Field(default="cuda:0", description="пристрій для інферу")
+
+
+@op("train.voices", summary="Додати голос рушія до набору: з сусіднього прогону або інфером",
+    args=VoicesArgs, mutates=True, long=True, agent=False, section=SECTION)
+def train_voices(a: VoicesArgs) -> Envelope:
+    """Другий голос — умова і для черги розмітки, і для злиття арбітрами.
+
+    🔴 Голос із прогону береться лише після звірки: число рядків на кожній
+    сторінці мусить збігтися з числом рамок набору. Інакше рядок N чужого
+    прогону ліг би під кроп M — і цю помилку не видно, бо текст правдоподібний.
+    """
+    from nyshporka.train import sets as S
+    from nyshporka.train import voices as V
+
+    if not a.from_run and not a.models:
+        return fail("вкажіть --from-run або --models")
+    got: list[dict[str, Any]] = []
+    try:
+        if a.from_run:
+            r = V.add_from_run(a.name, a.from_run)
+            got.append({"voice": r.voice, "pages": r.pages, "lines": r.lines,
+                        "how": "run"})
+        for m in [x.strip() for x in a.models.split(",") if x.strip()]:
+            r = V.run_model(a.name, m, device=a.device)
+            got.append({"voice": r.voice, "pages": r.pages, "lines": r.lines,
+                        "how": "infer"})
+    except (S.SetError, V.VoiceError) as exc:
+        return fail(str(exc))
+    st = S.registry().stats(a.name)
+    env = ok({"set": a.name, "added": got, "voices": st["voices"]})
+    if len(st["voices"]) >= 2:
+        env.suggest("train.export", "голосів досить — можна експортувати завдання арбітрам")
+    return env
