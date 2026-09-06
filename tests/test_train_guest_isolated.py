@@ -24,7 +24,7 @@ ENGINE_ENV = {
 }
 
 #: Явний перелік, не `rglob`: новий гість — рішення, яке ухвалюють свідомо.
-GUEST_FILES = ["cut_runner.py", "parseq_train_runner.py"]
+GUEST_FILES = ["cut_runner.py", "parseq_train_runner.py", "eval_runner.py"]
 
 
 def test_guest_list_matches_disk() -> None:

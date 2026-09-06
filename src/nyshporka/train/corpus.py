@@ -277,15 +277,23 @@ def build(name: str, cp: CorpusPlan, *, seed: int = 42, prune: bool = False,
         copies_of[src] = {relname(src, p): copies(cp.reps[src], cp.weight.get(str(p), 1.0),
                                                   relname(src, p)) for p, _ in items}
 
-    # val за квотою символів; текст, який уже лежить у train іншим кропом, у val не йде
+    # val за квотою символів; текст, який уже лежить у train іншим кропом, у val не йде.
+    # 🔴 І не більше п'ятої частини рядків джерела: на малому власному наборі
+    # квота в символах з'їдала ВСІ рядки, і train виходив порожнім — трен без
+    # жодного прикладу з того письма, заради якого його запускали.
     val_pick: dict[str, set[str]] = {}
     train_texts: set[str] = set()
+    val_capped: list[str] = []
     for src, items in cp.picked.items():
         keep: set[str] = set()
         chars = 0
         cap = rec.val.quota_chars.get(src, 0)
+        max_rows = max(1, len(items) // 5) if cap else 0
         for p, txt in items:
             if chars >= cap:
+                break
+            if len(keep) >= max_rows:
+                val_capped.append(src)
                 break
             rel = relname(src, p)
             t = _norm(txt)
@@ -350,6 +358,9 @@ def build(name: str, cp: CorpusPlan, *, seed: int = 42, prune: bool = False,
                       rows_val=len(val_rows), val_by_source=vs, copied=copied, failed=failed,
                       pruned=pruned, sha256=sha, warnings=list(cp.warnings))
     rep.warnings += fails
+    if val_capped:
+        rep.warnings.append(f"val обмежено п'ятою частиною рядків джерела ({', '.join(val_capped)}): "
+                            f"квота символів більша за сам набір")
     if not val_rows:
         rep.warnings.append("val порожній — рання зупинка й вибір best у трені будуть сліпі; "
                             "додайте quota_chars для наявних джерел")
