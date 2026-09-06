@@ -44,7 +44,10 @@ param(
     # Та сама вада, проти якої в релізі вже стоїть приймач «версія колеса ==
     # тег»: реліз, усередині якого інша версія, читається як зламаний pip.
     [string]$Version = "",
-    [switch]$NoLauncher
+    [switch]$NoLauncher,
+    # Запуск із майстра `.exe`: консоль зникає разом зі скриптом, тож помилку
+    # треба показати вікном, яке переживе консоль.
+    [switch]$Wizard
 )
 
 # Звідки брати пак довідників, якщо його немає поруч. Та сама адреса, що її
@@ -53,6 +56,46 @@ $CatalogUrl = 'https://github.com/SERGIUSH-UA/nyshporka/releases'
 
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
+
+# ── слід відмови ─────────────────────────────────────────────────────────────
+# 🔴 Текст помилки мусить пережити консоль. Майстер `.exe` запускає цей скрипт
+# у власному вікні PowerShell, і те вікно закривається разом зі скриптом — а
+# майстер показував лише «код 1» і радив читати вікно, якого вже немає (звіт
+# користувача 06.09.2026). Тому будь-яка відмова: (1) лягає у `install.log`
+# разом з усім виводом, (2) коротко — в `install-error.txt`, який майстер
+# вставляє у своє повідомлення, (3) під майстром ще й показується вікном.
+$LogFile   = Join-Path $Home_ 'install.log'
+$ErrorFile = Join-Path $Home_ 'install-error.txt'
+Remove-Item -LiteralPath $ErrorFile -Force -ErrorAction SilentlyContinue
+
+trap {
+    $failure = $_
+    $lines = @('Помилка: ' + $failure.Exception.Message)
+    if ($failure.InvocationInfo -and $failure.InvocationInfo.ScriptLineNumber) {
+        $lines += ('   (рядок ' + $failure.InvocationInfo.ScriptLineNumber + ' інсталятора)')
+    }
+    try { Stop-Transcript | Out-Null } catch {}
+    # Справжня причина — те, що написав uv або nysh перед «не вдалося». Береться
+    # з буфера `Invoke-Logged`; транскрипт тут не годиться — він не бачить
+    # виводу exe в консоль, а його заголовок з'їв би весь хвіст.
+    $tail = @($script:NativeTail | Where-Object { $_ -and $_.Trim() } | Select-Object -Last 15)
+    if ($tail.Count) { $lines += ''; $lines += 'Останні рядки виводу:'; $lines += $tail }
+    $lines += ''
+    $lines += ('Повний журнал: ' + $LogFile)
+    $text = $lines -join [Environment]::NewLine
+    Write-Host ''
+    Write-Host $text -ForegroundColor Red
+    # ⚠ Кодування ANSI навмисно: майстер читає файл як AnsiString і переводить у
+    # Unicode системною кодовою сторінкою — саме тією, якою .NET тут пише.
+    try { [IO.File]::WriteAllText($ErrorFile, $text, [Text.Encoding]::Default) } catch {}
+    if ($Wizard) {
+        try {
+            (New-Object -ComObject WScript.Shell).Popup(
+                $text, 0, 'Нишпорка: установлення не завершилось', 16) | Out-Null
+        } catch {}
+    }
+    exit 1
+}
 
 # Extras під обраний набір. Явно заданий -Source перебиває: хто вписав склад
 # руками, знає, чого хоче.
@@ -92,6 +135,29 @@ function Invoke-Muted {
     finally { $ErrorActionPreference = $prev }
 }
 
+# 🔴 Рідна команда, чий вивід мусить ДІЙТИ до повідомлення про помилку.
+# Транскрипт PowerShell не бачить того, що exe пише прямо в консоль (перевірено
+# на 5.1: у `install.log` після «⬇ Нишпорка…» ішов одразу кінець транскрипту,
+# а причина від uv лишалась у вікні, яке зникло). Тому обидва потоки йдуть
+# через `Write-Host` — його транскрипт бачить — і в буфер, з якого trap бере
+# останні рядки. Код виходу повертається значенням: `$LASTEXITCODE` читається
+# тут же, у тій самій області, де його виставила команда.
+$script:NativeTail = New-Object System.Collections.Generic.List[string]
+function Invoke-Logged {
+    param([Parameter(Mandatory)][string] $Exe,
+          [Parameter(ValueFromRemainingArguments)] [object[]] $Arguments)
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        & $Exe @Arguments 2>&1 | ForEach-Object {
+            $line = "$_"
+            Write-Host $line
+            $script:NativeTail.Add($line)
+        }
+        return $LASTEXITCODE
+    } finally { $ErrorActionPreference = $prev }
+}
+
 # Останній рядок stdout рідної команди; stderr і будь-яка відмова — у тишу.
 # Для запитань на кшталт «а куди ти кладеш команди»: відповідь або є, або
 # лишається порожньою, і викликач бере запасний варіант.
@@ -122,6 +188,10 @@ Say ""
 Say "  тека: $Home_" DarkGray
 
 New-Item -ItemType Directory -Force -Path $Home_ | Out-Null
+# Журнал усього виводу — і для хвоста в повідомленні про помилку, і для того,
+# щоб людині було що надіслати в issue. Без транскрипту цей вивід живе рівно
+# стільки, скільки вікно консолі.
+try { Start-Transcript -LiteralPath $LogFile -Force | Out-Null } catch {}
 $uvDir = Join-Path $Home_ 'uv'
 $uv    = Join-Path $uvDir 'uv.exe'
 
@@ -146,15 +216,16 @@ if (-not (Test-Path $uv)) {
 
 # ── 2. інтерпретатор ─────────────────────────────────────────────────────────
 Say "⬇ Python 3.12…" DarkGray
-& $uv python install 3.12 | Out-Null
+$rc = Invoke-Logged $uv python install 3.12
+if ($rc -ne 0) { throw "не вдалося встановити Python 3.12 (uv повернув $rc)" }
 Say "✓ Python" Green
 
 # ── 3. застосунок ────────────────────────────────────────────────────────────
 # `uv tool install` кладе застосунок у власне ізольоване середовище й дає
 # консольну команду. Це саме те, що треба: жодних конфліктів із чужими пакетами.
 Say "⬇ Нишпорка ($Source)…" DarkGray
-& $uv tool install --python 3.12 --force $Source
-if ($LASTEXITCODE -ne 0) { throw "не вдалося встановити $Source" }
+$rc = Invoke-Logged $uv tool install --python 3.12 --force $Source
+if ($rc -ne 0) { throw "не вдалося встановити $Source (uv повернув $rc)" }
 Say "✓ Нишпорка" Green
 
 # ── 3½. де команда й чи можна її набрати ─────────────────────────────────────
@@ -220,10 +291,10 @@ try {
 # узявся, — тобто мовчазного вибору тут немає.
 # ⚠ Не плутати з `$Home_` вище: то тека ВСТАНОВЛЕННЯ, а не простір.
 Say ""
-& $nysh init --yes --preset $Preset
+$rc = Invoke-Logged $nysh init --yes --preset $Preset
 # 🔴 Простір мусить постати. Без нього застосунок не має де жити, і мовчазний
 # провал тут дав би «встановлено» на порожньому місці.
-if ($LASTEXITCODE -ne 0) { throw "не вдалося створити робочий простір" }
+if ($rc -ne 0) { throw "не вдалося створити робочий простір (nysh повернув $rc)" }
 
 # ⚠ А ось код виходу `doctor` навмисно НЕ перевіряється — рівно як `|| true` в
 # `unix.sh`. Він віддає 1 на будь-якому `fail`, а `fail` — це, зокрема, «менше
@@ -231,7 +302,7 @@ if ($LASTEXITCODE -ne 0) { throw "не вдалося створити робо�
 # цілком успішне встановлення виглядало б як провал — і саме в тієї аудиторії,
 # що возить скани на зовнішніх дисках. Doctor тут світить лампочки, а не судить
 # установлення.
-& $nysh doctor
+$null = Invoke-Logged $nysh doctor
 
 # ── 5. довідники ─────────────────────────────────────────────────────────────
 # 🗂 Газетир і реєстри описів їдуть В КОМПЛЕКТІ — саме тому, що без них перше
@@ -250,7 +321,7 @@ $seed = if ($PSScriptRoot) {
 if ($seed) {
     $tmp = Join-Path $env:TEMP ('nysh-catalog-' + [guid]::NewGuid().ToString('N'))
     Expand-Archive -Path $seed.FullName -DestinationPath $tmp -Force
-    & $nysh catalog install --from $tmp
+    $null = Invoke-Logged $nysh catalog install --from $tmp
     Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
 } else {
     # 🔴 Порада мусить казати, ЗВІДКИ взяти. Пак довідників лежить окремим
@@ -305,4 +376,5 @@ Say "  nysh doctor           перевірити те, що ламається 
 # показати «готово» чи сторінку помилки. Заразом це означає, що кожна рідна
 # команда, дописана нижче, мусить перевірятись явно — тихо просочитись назовні
 # її відмова більше не зможе.
+try { Stop-Transcript | Out-Null } catch {}
 exit 0

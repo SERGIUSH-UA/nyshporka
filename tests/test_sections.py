@@ -372,7 +372,9 @@ def test_windows_installer_never_merges_native_stderr() -> None:
     root = Path(__file__).resolve().parents[1] / "install"
     text = (root / "windows.ps1").read_text(encoding="utf-8")
 
-    helpers = {"Invoke-Muted", "Get-NativeLine"}
+    # `Invoke-Logged` теж знімає преференцію на час виклику: він показує й
+    # запам'ятовує вивід рідної команди для повідомлення про відмову.
+    helpers = {"Invoke-Muted", "Get-NativeLine", "Invoke-Logged"}
     for name in helpers:
         assert f"function {name}" in text, (
             f"помічник {name} зник — перенаправлення нема куди сховати")

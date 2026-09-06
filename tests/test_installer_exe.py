@@ -163,6 +163,28 @@ def test_iss_names_the_minimum_inno_version() -> None:
         "з `.iss` зникла вимога мінімальної версії Inno Setup")
 
 
+def test_a_failed_install_leaves_its_reason_for_the_wizard() -> None:
+    """🔴 Текст помилки мусить пережити вікно PowerShell.
+
+    Майстер запускає скрипт у власній консолі, яка закривається разом із ним;
+    звіт користувача 06.09.2026: «установлення не завершилось, код 1, текст
+    помилки лишився в повершелі» — тобто ніде. Контракт: скрипт при відмові
+    пише `install-error.txt` (і повний `install.log`), майстер читає файл у
+    своє повідомлення і передає `-Wizard`, щоб скрипт ще й показав вікно.
+    """
+    ps1 = PS1.read_text(encoding="utf-8-sig")
+    iss = iss_text()
+    assert re.search(r"^\s*trap\s*\{", ps1, re.M), "у windows.ps1 немає trap на відмову"
+    assert "install-error.txt" in ps1 and "Start-Transcript" in ps1
+    assert "[switch]$Wizard" in ps1 and "' -Wizard'" in iss
+    assert "LoadStringFromFile(ExpandConstant('{app}\\install-error.txt')" in iss, (
+        "майстер не читає текст помилки зі скрипта")
+    assert "лишився у вікні PowerShell" not in iss, (
+        "майстер знову відсилає до вікна, якого вже немає")
+    # Успішний шлях закриває журнал явно — інакше він обривається на `exit 0`.
+    assert ps1.rstrip().endswith("exit 0") and "Stop-Transcript" in ps1
+
+
 def test_iss_compiles() -> None:
     """🔴 Головний приймач: `.iss` мусить збиратись.
 

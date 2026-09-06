@@ -138,6 +138,8 @@ Filename: "{code:GetNyshExe}"; Parameters: "serve"; WorkingDir: "{app}"; Descrip
 
 [UninstallDelete]
 Type: files; Name: "{app}\install-info.ini"
+Type: files; Name: "{app}\install-error.txt"
+Type: files; Name: "{app}\install.log"
 
 [Code]
 var
@@ -203,7 +205,8 @@ end;
 
 procedure RunInstallScript();
 var
-  Script, Params: String;
+  Script, Params, Detail: String;
+  Raw: AnsiString;
   Code: Integer;
 begin
   // Обидва файли лягають у ту саму тимчасову теку, тож `$PSScriptRoot` у
@@ -218,7 +221,10 @@ begin
             ' -Preset ' + SelectedPreset() +
             ' -Version {#AppVersion}' +
             ' -Home_ "' + ExpandConstant('{app}') + '"' +
-            ' -NoLauncher';
+            ' -NoLauncher' +
+            ' -Wizard';
+  // Слід ПОПЕРЕДНЬОЇ відмови не має видаватись за теперішню.
+  DeleteFile(ExpandConstant('{app}\install-error.txt'));
 
   // 🪟 Консоль показуємо (`SW_SHOW`) навмисно. Установлення качає інтерпретатор
   // і пакети — це хвилини, і смуга Inno без жодного тексту читається як
@@ -231,9 +237,22 @@ begin
   // 🔴 Ненульовий код виходу мусить валити встановлення ГОЛОСНО. Мовчазний
   // провал дав би ярлики, які нікуди не ведуть, — а людина вважала б, що
   // застосунок стоїть.
+  // 🔴 І з ТЕКСТОМ, а не з відсиланням до вікна PowerShell: те вікно
+  // закривається разом зі скриптом, і людина бачила лише «код 1». Скрипт
+  // лишає причину в `install-error.txt` (кодування ANSI — саме так її читає
+  // `LoadStringFromFile`), а повний вивід — у `install.log`.
   if Code <> 0 then
-    RaiseException('Установлення не завершилось (код ' + IntToStr(Code) + ').' + #13#10 +
-      'Текст помилки лишився у вікні PowerShell.');
+  begin
+    Detail := '';
+    if LoadStringFromFile(ExpandConstant('{app}\install-error.txt'), Raw) then
+      Detail := Raw;
+    if Trim(Detail) = '' then
+      Detail := 'Текст помилки не зберігся. Журнал: ' + ExpandConstant('{app}\install.log');
+    // ⚠ `#13#10` не на початку рядка: препроцесор Inno читає такий рядок як
+    // свою директиву («Unknown preprocessor directive»).
+    RaiseException('Установлення не завершилось (код ' + IntToStr(Code) + ').' + #13#10#13#10 +
+      Detail);
+  end;
 
   if GetNyshExe('') = '' then
     RaiseException('Нишпорка встановилась, але не сказала, де опинилась команда.' + #13#10 +
