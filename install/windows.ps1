@@ -59,8 +59,10 @@ $ProgressPreference = 'SilentlyContinue'
 # ⚠ Перелік дублює `core.sections.EXTRAS` — інакше інсталятор мусив би спершу
 # поставити пакет, щоб спитати в нього, що ставити. Розбіжність ловить
 # `test_installer_extras_match_the_sections`.
+$ExtrasByPreset = @{ catalog = 'nyshporka[app,archives]'
+                     lab     = 'nyshporka[app,archives,htr,train]' }
 if (-not $Source) {
-    $Source = if ($Preset -eq 'catalog') { 'nyshporka[app,archives]' }
+    $Source = if ($ExtrasByPreset[$Preset]) { $ExtrasByPreset[$Preset] }
               else { 'nyshporka[app,archives,htr]' }
     # ⚠ Пін чіпляється ЛИШЕ до обчисленого складу. Хто задав `-Source` руками,
     # уже сказав, що саме ставить — дописати туди `==` означало б зіпсувати

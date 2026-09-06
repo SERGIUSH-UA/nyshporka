@@ -93,10 +93,10 @@ SECTIONS: tuple[Section, ...] = (
     Section(
         id="lab",
         label_uk="Лабораторія", label_en="Lab",
-        why_uk="Розмітка, синтетика, тренування моделей. Поки порожня — місце "
-               "для того, що ще не приїхало.",
-        why_en="Annotation, synthetic data, model training. Empty for now — a "
-               "place for what has not arrived yet.",
+        why_uk="Розмітка рядків і навчання Писаря на своїх почерках "
+               "(`nysh train`).",
+        why_en="Line annotation and training the Cyrillic engine on your own "
+               "hands (`nysh train`).",
     ),
 )
 
@@ -122,7 +122,7 @@ EXTRAS: dict[str, tuple[str, ...]] = {
     "material": ("archives",),
     "htr": ("htr",),
     "research": (),
-    "lab": (),
+    "lab": ("train",),
 }
 
 

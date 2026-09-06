@@ -19,7 +19,8 @@ set -eu
 PRESET="${NYSH_PRESET:-researcher}"
 case "$PRESET" in
   catalog) DEFAULT_SOURCE="nyshporka[app,archives]" ;;
-  amateur|researcher|lab) DEFAULT_SOURCE="nyshporka[app,archives,htr]" ;;
+  amateur|researcher) DEFAULT_SOURCE="nyshporka[app,archives,htr]" ;;
+  lab) DEFAULT_SOURCE="nyshporka[app,archives,htr,train]" ;;
   *) printf 'невідомий набір «%s»: catalog | amateur | researcher | lab\n' "$PRESET" >&2
      exit 2 ;;
 esac

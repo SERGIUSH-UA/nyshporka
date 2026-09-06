@@ -55,16 +55,21 @@ def client(ws: Workspace) -> TestClient:
     return TestClient(create_app(ws, token=TOKEN), base_url="http://127.0.0.1:8788")
 
 
-def test_every_gui_op_is_reachable(client: TestClient) -> None:
+def test_every_gui_op_is_reachable(client: TestClient, ws: Workspace) -> None:
     """Перелік дій береться з реєстру, а не переписується в роутері.
 
     Переписаний перелік відстає мовчки: дія є в CLI й в агента, а в браузері її
     немає — і ніхто цього не бачить, бо помилки не виникає.
+
+    Порівнюється з реєстром у межах УВІМКНЕНИХ секцій: операції лабораторії
+    (`train.*`) існують у реєстрі, але з профілем за замовчуванням у браузер не
+    їдуть — і це поведінка секцій, а не переписаний перелік.
     """
     got = {o["name"] for o in client.get("/api/ops").json()["ops"]}
-    want = {o.name for o in O.all_ops() if o.gui}
+    want = {o.name for o in O.for_sections(ws.sections)}
     assert got == want
     assert "catalog.search" in got
+    assert not any(n.startswith("train.") for n in got), "лабораторія ввімкнена без профілю"
 
 
 def test_ops_carry_their_schemas(client: TestClient) -> None:

@@ -242,7 +242,9 @@ def test_http_hides_disabled_ops_and_lists_sections(space: Path) -> None:
     data = client.get("/api/sections").json()["data"]
     by_id = {s["id"]: s for s in data["sections"]}
     assert by_id["material"]["active"] and not by_id["research"]["active"]
-    assert not by_id["lab"]["visible"], "порожня секція пропонується як вкладка"
+    # Лабораторія має операції (`ops_train`), тож у навігацію потрапляє; те,
+    # що вона при цьому НЕ активна в профілі «core+material», — окреме поле.
+    assert by_id["lab"]["visible"] and not by_id["lab"]["active"]
 
 
 def test_installer_extras_match_the_sections() -> None:

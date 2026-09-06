@@ -1131,6 +1131,11 @@ from nyshporka.cloud.cli import app as cloud_app  # noqa: E402
 
 app.add_typer(cloud_app, name="cloud")
 
+# 🧪 Лабораторія: розмітка рядків і трен Писаря. Секція `lab`.
+from nyshporka.train.cli import app as train_app  # noqa: E402
+
+app.add_typer(train_app, name="train")
+
 
 @cases_app.command("build")
 def cases_build(
