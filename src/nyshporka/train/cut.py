@@ -131,7 +131,13 @@ def pick_pages(meta: dict[str, Any], n: int, *, skip_first: int = SKIP_FIRST) ->
 
 # ── вирізка ──────────────────────────────────────────────────────────────────
 def crop_by_poly(im: Any, box: list[int], poly: list[list[int]] | None) -> Any:
-    """Вирізка рядка полігоном на білому тлі; без полігону — рамкою."""
+    """Вирізка рядка полігоном; без полігону — рамкою.
+
+    🔴 Поза полігоном — ЧОРНЕ, а не біле: так ріже kraken (`extract_polygons`),
+    на таких кропах учились бойові ваги, і так само рахує частку чорнила
+    `gate.ink_fraction` (чорне тло виключається). Біле тло дало б кроп, якого
+    рушій на читанні не бачить.
+    """
     from PIL import Image, ImageDraw
 
     x0, y0, x1, y1 = (int(v) for v in box[:4])
@@ -142,9 +148,9 @@ def crop_by_poly(im: Any, box: list[int], poly: list[list[int]] | None) -> Any:
         return crop
     mask = Image.new("L", crop.size, 0)
     ImageDraw.Draw(mask).polygon([(int(x) - x0, int(y) - y0) for x, y in poly], fill=255)
-    white = Image.new(crop.mode, crop.size, "white")
-    white.paste(crop, mask=mask)
-    return white
+    black = Image.new(crop.mode, crop.size, "black")
+    black.paste(crop, mask=mask)
+    return black
 
 
 def cut_page_poly(im: Any, geo: dict[str, Any], out: Path) -> PageCut:

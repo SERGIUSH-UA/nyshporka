@@ -71,3 +71,5 @@ nav:
       - Канали пошуку: agents/search-channels.md
       - Читання під слабку машину: agents/htr-tuning.md
       - Як агенти вже помилялися: agents/antipatterns.md
+      - Промпт арбітра міток: agents/arbiter-prompt.md
+      - Жанр і правила розмітки: agents/label-genres.md
