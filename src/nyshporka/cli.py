@@ -53,6 +53,7 @@ app = typer.Typer(
     add_completion=False,
 )
 console = brand.console()
+err_console = brand.err()
 
 
 def _sync_skills() -> None:
@@ -79,12 +80,21 @@ def _sync_skills() -> None:
         if not moved and not kept:
             continue
         tail = f", лишено правлених руками: {kept}" if kept else ""
-        console.print(f"[muted]скіли оновлено до {__version__} у {dest} "
-                      f"(файлів: {moved}{tail})[/muted]")
+        # 🔴 У stderr. Ця замітка йде ПЕРЕД виводом будь-якої команди, а stdout
+        # у `nysh op … --json` читає програма, у `nysh mcp serve` — клієнт
+        # JSON-RPC; один людський рядок попереду ламав розбір обом.
+        err_console.print(f"[muted]скіли оновлено до {__version__} у {dest} "
+                          f"(файлів: {moved}{tail})[/muted]")
+
+
+#: Команди, перед якими скіли не чіпаються: їхній процес живе довго або
+#: спілкується протоколом, і побічна робота на старті тут недоречна.
+_NO_SKILL_SYNC_FOR = frozenset({"mcp", "serve"})
 
 
 @app.callback()
 def _global_options(
+    ctx: typer.Context,
     workspace: str = typer.Option(
         "", "--workspace", "-w", metavar="ТЕКА",
         help="простір для цього запуску (ставиться перед командою)"),
@@ -105,7 +115,8 @@ def _global_options(
     побудована ціла гілка поведінки агента («знайдено здогадом — перепитай
     людину»). Змінну читає драбина простору, і лише вона.
     """
-    _sync_skills()
+    if (ctx.invoked_subcommand or "") not in _NO_SKILL_SYNC_FOR:
+        _sync_skills()
     if not workspace:
         return
     from nyshporka.core.workspace import WorkspaceError, use

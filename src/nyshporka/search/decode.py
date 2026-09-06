@@ -37,6 +37,7 @@ from __future__ import annotations
 import gzip
 import hashlib
 import os
+import threading
 from bisect import bisect_right
 from collections.abc import Callable, Iterator
 from pathlib import Path
@@ -139,7 +140,10 @@ def build(run: str) -> int:
     index = S._case_index(run)
     path = index_path(run, stamp)
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".part")
+    # pid і потік у назві: два одночасні `build()` (дві вкладки, агент і
+    # демон) інакше писали б в ОДИН `.part`, і перший `os.replace` ставив би
+    # під валідним штампом файл, який другий ще дописує.
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.{threading.get_ident()}.part")
     with gzip.open(tmp, "wt", encoding="utf-8", newline="\n") as fh:
         fh.write(stamp + "\n")
         for page, ln_no, _raw, cands in index:

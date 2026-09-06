@@ -162,7 +162,11 @@ def test_racing_claimants_take_every_page_exactly_once(case, tmp_path: Path):
 
 def test_a_dead_owner_s_claim_is_released_a_live_one_is_not(case, tmp_path: Path):
     """Мертвий шард лишає клейм без txt — сторінку візьме живий; свій і чужий
-    живий клейми не чіпаються; клейм зі зробленим txt — не сирота."""
+    живий клейми не чіпаються; клейм зі зробленим txt І записом у меті — не
+    сирота. Але txt БЕЗ мети — сирота: шард пише txt до мети, і смерть між ними
+    інакше лишала сторінку, якої немає в жодній меті, заклеймленою назавжди."""
+    import json
+
     out = tmp_path / "out"
     (out / R.CLAIMS_DIR).mkdir(parents=True)
     (out / R.CLAIMS_DIR / "0001.claim").write_text("2147483647 1/2 t\n", encoding="utf-8")
@@ -170,11 +174,16 @@ def test_a_dead_owner_s_claim_is_released_a_live_one_is_not(case, tmp_path: Path
                                                    encoding="utf-8")
     (out / R.CLAIMS_DIR / "0003.claim").write_text("2147483647 1/2 t\n", encoding="utf-8")
     (out / "0003.txt").write_text("готово\n", encoding="utf-8")
-    assert R.orphan_claims(out) == ["0001"]
-    assert R.release_orphan_claims(out) == 1
+    (out / R.CLAIMS_DIR / "0004.claim").write_text("2147483647 1/2 t\n", encoding="utf-8")
+    (out / "0004.txt").write_text("txt є, мети нема\n", encoding="utf-8")
+    (out / "_htr_meta.json").write_text(
+        json.dumps({"pages": {"0003.jpg": {"lines": 1}}}), encoding="utf-8")
+    assert R.orphan_claims(out) == ["0001", "0004"]
+    assert R.release_orphan_claims(out) == 2
     assert not (out / R.CLAIMS_DIR / "0001.claim").exists()
     assert (out / R.CLAIMS_DIR / "0002.claim").exists()
     assert (out / R.CLAIMS_DIR / "0003.claim").exists()
+    assert not (out / R.CLAIMS_DIR / "0004.claim").exists()
     assert R.claim_page(out, "0001")
 
 

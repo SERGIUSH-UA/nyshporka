@@ -300,8 +300,11 @@ async def _start_acquire(bus: JobBus, ws: Workspace,
 
     # Тека призначення — у простір, під архів і адресу. Так завантажене одразу
     # лежить там, де його шукає бібліотека, а не «десь, де тоді було зручно».
-    dest = Path(payload.get("dest") or "") or (
-        ws.raw / source_id / _safe(ref))
+    # ⚠ Не `Path(x or "") or default`: `Path("")` — це `Path(".")`, а він
+    # істинний завжди. Гілка з дефолтом була мертвою, і кадри без `dest`
+    # лягали в поточну теку процесу демона, а не в `data/raw`.
+    dest_raw = str(payload.get("dest") or "").strip()
+    dest = Path(dest_raw) if dest_raw else ws.raw / source_id / _safe(ref)
 
     # 🔴 Маніфест береться до постановки в чергу: питання «скільки це» мусить
     # мати відповідь до початку, а не після. Заразом це перевірка, що адреса
@@ -456,7 +459,18 @@ async def _run_read(bus: JobBus, job: JobRecord, plan: Any, case_key: str,
         if bus.cancelled(job.id):
             return
         await bus.update(job.id, state=JobState.RUNNING, title=was_title)
-        await _run_read_locked(bus, job, plan, case_key, cmds, partial=partial)
+        # 🔴 Виняток тут (немає інтерпретатора, зайнятий диск, збій звірки
+        # повноти) інакше лишав завдання `running` назавжди: стопера ще немає,
+        # ключ ідемпотентності повертає той самий «живий» запис, і перезапустити
+        # читання неможливо до рестарту демона.
+        try:
+            await _run_read_locked(bus, job, plan, case_key, cmds, partial=partial)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            bus.drop_stopper(job.id)
+            await bus.update(job.id, state=JobState.ERROR,
+                             error=f"{type(exc).__name__}: {exc}")
 
 
 async def _run_read_locked(bus: JobBus, job: JobRecord, plan: Any, case_key: str,

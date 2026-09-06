@@ -9,6 +9,11 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Явно, а не дефолт репозиторію: CI лише читає, і сторонній action у ньому не
+# має діставати права на запис.
+permissions:
+  contents: read
+
 jobs:
   # 🔒 Ворота проти приватних даних ідуть ОКРЕМИМ і ПЕРШИМ джобом.
   # Разом із тестами вони губились би у виводі, а це єдина перевірка, ціна
@@ -55,8 +60,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
+      # `--locked`: інакше `uv.lock` нічого не гарантує — при розбіжності uv
+      # мовчки перерозв'язує, і CI зелений на не тих версіях, що в локу.
       - name: встановити
-        run: uv sync --group dev
+        run: uv sync --locked --group dev
       - name: ruff
         run: uv run ruff check .
       - name: mypy

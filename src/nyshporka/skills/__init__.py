@@ -223,9 +223,15 @@ def install(dest: Path, *, version: str, force: bool = False,
                 out.append(Outcome(rel, "updated"))
 
     kept = {o.rel for o in out if o.verdict == "kept"}
-    (dest / LEDGER).write_text(
-        json.dumps({"version": version,
-                    "files": {k: v for k, v in fresh.items() if k not in kept}},
-                   ensure_ascii=False, indent=1) + "\n",
-        encoding="utf-8", newline="\n")
+    # 🔴 Облік ЗЛИВАЄТЬСЯ з попереднім, а не переписується з нуля: при
+    # `--only X` у `fresh` лише X, і решта скілів випадала з обліку — далі
+    # `sync` бачив їх як «ніколи не клали» й не оновлював уже ніколи.
+    files = {k: v for k, v in known.items() if k not in kept}
+    files.update({k: v for k, v in fresh.items() if k not in kept})
+    from nyshporka.utils.atomic import atomic_write_text
+
+    atomic_write_text(dest / LEDGER,
+                      json.dumps({"version": version, "files": files},
+                                 ensure_ascii=False, indent=1) + "\n",
+                      newline="\n")
     return out

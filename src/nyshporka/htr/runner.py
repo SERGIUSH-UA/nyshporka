@@ -1991,7 +1991,12 @@ def merge_meta(out_dir: Path, base: dict) -> None:
         # ⚠ «Не знає» означає і порожнє: `base` завжди несе `case_key`, і без
         # `--case-key` це порожній рядок — саме він і затирав. Тому порожнє поле
         # процесу поступається непорожньому попередньому, а непорожнє — виграє.
-        _volatile = ("pages", "failed", "done", "updated", "started")
+        # `missing`/`quarantined` — теж зріз моменту: перенесені зі старої мети,
+        # вони переживали б догін шардами й казали «без тексту 0042» про
+        # сторінку, яку щойно дочитали. Обидва поля процес виставляє сам після
+        # злиття, з диска.
+        _volatile = ("pages", "failed", "done", "updated", "started",
+                     "missing", "quarantined")
         carried = {k: v for k, v in prev.items()
                    if k not in _volatile and v not in ("", None)
                    and base.get(k) in ("", None)}
@@ -2085,9 +2090,10 @@ def add_quarantine(out_dir: Path, page: str, reason: str) -> None:
         known[page] = {"reason": reason,
                        "at": datetime.now().isoformat(timespec="seconds")}
         try:
-            path.write_text(json.dumps({"version": 1, "pages": known},
-                                       ensure_ascii=False, indent=1) + "\n",
-                            encoding="utf-8")
+            # Атомарно: обірваний запис карантину читався б усіма як «порожній»,
+            # і сторінка-вбивця знову клала б кожну наступну спробу.
+            atomic_write(path, json.dumps({"version": 1, "pages": known},
+                                          ensure_ascii=False, indent=1) + "\n")
         except OSError as exc:
             print(f"[htr-run] ⚠ карантин не записався ({exc})", flush=True)
 
@@ -2183,9 +2189,15 @@ def orphan_claims(out_dir: Path) -> list[str]:
     if not d.is_dir():
         return []
     out = []
+    # 🔴 «Зроблена» — це txt І запис у меті, як у резюмі. Сама наявність txt не
+    # доказ: шард пише txt ДО мети й тек голосів, і смерть між ними лишала
+    # клейм мертвого власника на сторінці, якої немає в жодній меті, — її не
+    # брав уже ніхто.
+    done = known_pages(out_dir)
     for c in sorted(d.glob("*.claim")):
         stem = c.name[:-len(".claim")]
-        if (out_dir / f"{stem}.txt").exists():
+        if (out_dir / f"{stem}.txt").exists() and any(
+                Path(p).stem == stem for p in done):
             continue
         if not _pid_alive(_claim_owner(c)):
             out.append(stem)
@@ -2321,7 +2333,18 @@ def supervise(args: argparse.Namespace, case_dir: Path, out_dir: Path) -> int:
         gone = [p for p in finder(pages_all, out_dir)
                 if p not in load_quarantine(out_dir)]
         if not gone:
-            break
+            # 🔴 Порожній перелік пропусків ще не означає «прочитано». Порожня
+            # тека справи (rc=1), відмова гарда рушія при чужих `*.txt` у теці
+            # (rc=2), неповні теки голосів (rc=3) — усе це давало `gone=[]` і
+            # наглядач повертав 0 з подією `done`. Тому при ненульовому rc
+            # дитина йде ще раз: якщо справа справді повна, резюм пропустить
+            # усе за секунди й вийде нулем; якщо ні — відмова повториться і
+            # піде нагору як є.
+            if rc == 0 or not pages_all or attempt > args.supervise:
+                break
+            print(f"[htr-run] 🔁 наглядач: пропусків немає, але rc={rc} — "
+                  f"перевіряю ще раз", flush=True)
+            continue
         stuck = prev_missing is not None and len(gone) >= prev_missing
         prev_missing = len(gone)
         if attempt > args.supervise:
@@ -2359,9 +2382,11 @@ def supervise(args: argparse.Namespace, case_dir: Path, out_dir: Path) -> int:
         print(f"[htr-run] ⚠ неповно після {args.supervise + 1} спроб: без тексту "
               f"{len(gone)} з {len(pages_all)} — {', '.join(gone)}", flush=True)
         return 3
-    # rc воркера тут уже не інформативний: справа прочитана повністю (звірено з
-    # диском), а ненульовий код міг лишитись від спроби, яку наглядач і полагодив
-    return 0
+    # Пропусків немає — але rc ОСТАННЬОЇ спроби ще важить: якщо й повторний
+    # прохід по повній теці вийшов ненульовим, це не «полагоджена» спроба, а
+    # відмова (порожня тека, гард рушія, неповні голоси), і ховати її за нулем
+    # означало б оголосити прочитаним те, чого ніхто не читав.
+    return rc if rc else 0
 
 
 def guard_ok(out_dir: Path, engine: str, model: str, force: bool) -> bool:
@@ -3067,6 +3092,13 @@ def main() -> int:
                                orient_net, guard_state, args.guard_warmup,
                                engine, args.batch, args.force_orient,
                                args.enhance)
+            # 🔴 Побічні голоси й кропи знімаються ЗАРАЗ, разом із результатом:
+            # перепуск стелі нижче кличе `process_page` удруге й перезаписує
+            # атрибути функції, а якщо другий результат відкинуто — тека голосу
+            # писалась би з рядків ІНШОЇ нарізки поруч із текстом першої.
+            _side_snap = (dict(getattr(ocr_page_parseq, "side", {}) or {}),
+                          dict(getattr(ocr_page_parseq, "side_lost", {}) or {}),
+                          list(getattr(ocr_page_parseq, "crops", None) or []))
             # сторінка вперлась у стелю — переганяємо тільки її, з піднятою.
             # Беремо новий результат лише якщо рядків справді побільшало:
             # інакше зайвий прохід не має права зіпсувати вже здобуте.
@@ -3093,6 +3125,10 @@ def main() -> int:
                     res2["ceiling_lifted"] = args.ceiling_retry
                     res = res2
                     ceiling_n += 1
+                else:
+                    # перший результат лишається — повертаємо і його голоси
+                    (ocr_page_parseq.side, ocr_page_parseq.side_lost,
+                     ocr_page_parseq.crops) = _side_snap
         except KeyboardInterrupt:
             raise
         except Exception as exc:  # одна сторінка не валить справу

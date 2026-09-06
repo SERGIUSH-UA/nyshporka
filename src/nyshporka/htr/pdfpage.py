@@ -59,9 +59,14 @@ class Mapping:
 
 
 def frame_number(page: str) -> int | None:
-    """`00042.jpg` → 42. None — якщо в імені немає числа."""
-    m = _NUM_RE.search(Path(page).stem)
-    return int(m.group(1)) if m else None
+    """`00042.jpg` → 42. None — якщо в імені немає числа.
+
+    🔴 ОСТАННЄ число в імені, а не перше: `f792-1-55_0042.jpg` — це кадр 42, а
+    не 792. З першим числом усі кадри такої теки мапились на одну сторінку
+    PDF, і гортач показував той самий чужий аркуш для кожної.
+    """
+    nums = _NUM_RE.findall(Path(page).stem)
+    return int(nums[-1]) if nums else None
 
 
 def case_pdfs(case_dir: Path) -> list[Path]:
@@ -112,6 +117,12 @@ def mapping(case_dir: Path, frames: list[str],
             raise PdfPageError(
                 f"кадр {nums[-1]} поза межами справи ({total} кадрів) — "
                 f"це інший матеріал; показувати не буду")
+        if len(set(nums)) != len(nums):
+            # Два кадри з одним номером — імена не є нумерацією аркушів, і
+            # будь-який мапінг показав би не той аркуш.
+            raise PdfPageError(
+                "номери кадрів у прогоні повторюються — за іменами файлів "
+                "сторінку PDF не визначити; показувати не буду")
         expect = total
     else:
         if nums != list(range(1, len(nums) + 1)):

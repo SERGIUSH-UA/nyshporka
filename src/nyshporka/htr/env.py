@@ -138,10 +138,32 @@ def _need_tool(name: str, why: str, how: str) -> None:
     зовсім. Збірка середовища рушіїв — єдине місце, де вони потрібні, і саме там
     їхня відсутність досі виглядала як поломка застосунку.
     """
-    if shutil.which(name):
+    if _resolve_tool(name):
         return
     raise ToolMissing(f"{name} не знайдено — {why}\n"
                       f"  {how}")
+
+
+def _resolve_tool(name: str) -> str:
+    """Голе ім'я інструмента → абсолютний шлях, і НЕ з поточної теки.
+
+    🔴 На Windows і `shutil.which`, і `CreateProcess` для імені без шляху
+    дивляться спершу в cwd. Людина, що стоїть у теці щойно розпакованої чужої
+    зйомки і запускає `nysh htr install`, виконала б `uv.exe` звідти. Знайдене
+    під cwd відкидається, решта повертається абсолютним шляхом — саме він і
+    йде в `subprocess`.
+    """
+    if os.path.sep in name or (os.path.altsep and os.path.altsep in name):
+        return name                        # уже шлях — людина знає, що робить
+    found = shutil.which(name)
+    if not found:
+        return ""
+    try:
+        if Path(found).resolve().parent == Path.cwd().resolve():
+            return ""
+    except OSError:
+        return ""
+    return found
 
 
 def _run(cmd: list[str]) -> None:
@@ -156,6 +178,7 @@ def setup(venv: Path, *, man: M.Manifest | None = None, with_cuda: bool = True,
     _need_tool(uv, "ним створюється й наповнюється середовище рушіїв",
                "Windows: winget install astral-sh.uv · "
                "Linux/macOS: curl -LsSf https://astral.sh/uv/install.sh | sh")
+    uv = _resolve_tool(uv) or uv
     if man.vcs_packages:
         # PARSeq (`strhub`) ставиться з репозиторію, а не з PyPI — його там немає.
         _need_tool("git", "з нього ставиться "

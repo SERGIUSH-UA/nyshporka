@@ -97,7 +97,12 @@ class CommonsSource:
                 "не беруться — качається все, а сторінки вибирає читання")
         ii = self._info(name)
         url, want = str(ii["url"]), int(ii.get("size") or 0)
-        out = dest / name.replace("/", "_")
+        from nyshporka.utils.fsname import UnsafeName, safe_filename
+
+        try:
+            out = dest / safe_filename(name.replace("/", "_"))
+        except UnsafeName as exc:
+            raise SourceError(f"назва файла на Commons не годиться для диска: {exc}") from exc
         res = FetchResult(dest=dest)
         if out.is_file() and out.stat().st_size == want and want:
             res.skipped = 1

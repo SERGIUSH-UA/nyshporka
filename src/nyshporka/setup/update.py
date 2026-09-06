@@ -107,8 +107,18 @@ def _cmp_key(a: str, b: str) -> tuple[tuple[int, ...], tuple[int, ...]]:
 def install_home() -> Path:
     """Тека встановлення, яку заводить інсталятор."""
     if sys.platform == "win32":
-        base = os.environ.get("LOCALAPPDATA") or str(Path.home() / "AppData" / "Local")
-        return Path(base) / "Nyshporka"
+        base = Path(os.environ.get("LOCALAPPDATA")
+                    or str(Path.home() / "AppData" / "Local"))
+        # 🔴 Два кандидати, не один. `windows.ps1` за замовчуванням кладе
+        # `install-info.ini` у `%LOCALAPPDATA%\Nyshporka`, а майстер `.exe`
+        # передає йому `-Home_ {app}` = `%LOCALAPPDATA%\Programs\Nyshporka`
+        # (тека даних навмисно не є текою встановлення — див. `nyshporka.iss`).
+        # Читач, який знав лише перший, у користувачів `.exe` не бачив ані
+        # `uv=`, ані `preset=` — і `nysh update` вгадував набір.
+        for cand in (base / "Programs" / "Nyshporka", base / "Nyshporka"):
+            if (cand / "install-info.ini").is_file():
+                return cand
+        return base / "Nyshporka"
     # ⚠ `XDG_DATA_HOME` читається так само, як його пише `install/unix.sh`.
     # Без цього на машині зі своїм XDG (NixOS, контейнер) слід інсталятора
     # лежав би там, куди читач не дивиться, — і людині з набором `catalog`

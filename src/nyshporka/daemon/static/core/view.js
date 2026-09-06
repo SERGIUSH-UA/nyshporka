@@ -32,6 +32,18 @@ const alive = (my) => my === SCREEN_GEN;
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g,
   (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
+/**
+ * Посилання з ЧУЖИХ даних → `href` або порожньо.
+ *
+ * 🔴 `esc()` екранує лапки, але не схему: `javascript:…` з рядка реєстру,
+ * зібраного з HTML архівного сайту, або з картки каталогу виконався б в origin
+ * консолі з її токеном. Дозволено лише http(s).
+ */
+const safeHref = (u) => {
+  const s = String(u ?? '').trim();
+  return /^https?:\/\//i.test(s) ? esc(s) : '';
+};
+
 const el = (id) => document.getElementById(id);
 
 /** Попередження конверта — на екран завжди. Саме тут живе «нуль зі знаменником». */
@@ -170,5 +182,5 @@ function busyForm(form) {
   return () => btns.forEach((b) => { b.disabled = false; });
 }
 
-export { esc, el, renderWarnings, renderCoverage, setView, busy,
+export { esc, safeHref, el, renderWarnings, renderCoverage, setView, busy,
   failure, boxError, busyForm, alive };

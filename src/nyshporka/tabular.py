@@ -299,6 +299,21 @@ def _header(columns: list[str], human: bool, view: str = "") -> list[str]:
     return [label_for(c, view) for c in columns] if human else list(columns)
 
 
+#: Перший символ, з якого Excel/LibreOffice читають комірку як ФОРМУЛУ.
+_FORMULA_LEAD = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _defuse(value: str) -> str:
+    """Комірка CSV/TSV, яку таблична програма не виконає.
+
+    🔴 Текст у виписці — з декоду чужих сканів і чужих JSON; рядок `=HYPERLINK(…)`
+    або `-1+cmd|…` у клітинці CSV Excel виконує при відкритті. XLSX-гілка від
+    цього захищена типом комірки (`data_type="s"`), CSV такого типу не має —
+    лишається лише апостроф-префікс, який таблиці розуміють як «це текст».
+    """
+    return "'" + value if value.startswith(_FORMULA_LEAD) else value
+
+
 def write_delimited(path: Any, columns: list[str], rows: list[dict[str, str]],
                     *, sep: str = ",", human: bool = True,
                     view: str = "") -> dict[str, Any]:
@@ -308,10 +323,16 @@ def write_delimited(path: Any, columns: list[str], rows: list[dict[str, str]],
     with dest.open("w", encoding=CSV_ENCODING, newline="") as fh:
         writer = csv.writer(fh, delimiter=sep, quoting=csv.QUOTE_MINIMAL)
         writer.writerow(_header(columns, human, view))
+        cleaned = 0
         for row in rows:
-            writer.writerow([row.get(c, "") for c in columns])
+            cells = []
+            for c in columns:
+                val, had_bad, _cut = _clean(str(row.get(c, "") or ""))
+                cleaned += int(had_bad)
+                cells.append(_defuse(val))
+            writer.writerow(cells)
     return {"path": str(dest), "rows": len(rows), "sheets": 1,
-            "cleaned": 0, "truncated": 0}
+            "cleaned": cleaned, "truncated": 0}
 
 
 def write_xlsx(path: Any,

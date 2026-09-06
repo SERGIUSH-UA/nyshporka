@@ -2,7 +2,7 @@
 
 import { t } from '../core/strings.js';
 import { callOp } from '../core/net.js';
-import { esc, el, setView, busy, failure, boxError, busyForm,
+import { esc, safeHref, el, setView, busy, failure, boxError, busyForm,
   renderWarnings, renderCoverage, curGen, alive } from '../core/view.js';
 import { SCREENS, ACTIONS } from '../core/registry.js';
 import { show, onJob, jobChip } from '../core/nav.js';
@@ -112,8 +112,8 @@ function hitAction(h) {
     return `<button data-act="sources.get" data-source="${esc(h.source)}"
       data-ref="${esc(h.ref)}">${t('sources.get')}</button>`;
   }
-  return h.url
-    ? `<a href="${esc(h.url)}" target="_blank" rel="noopener">${t('sources.open')}</a>`
+  return safeHref(h.url)
+    ? `<a href="${safeHref(h.url)}" target="_blank" rel="noopener">${t('sources.open')}</a>`
     : '';
 }
 
@@ -167,7 +167,7 @@ function fondCard(d) {
     <p>${esc(c.title || '')} ${c.years ? `<span class="mono">${esc(c.years)}</span>` : ''}</p>
     <p class="muted">${t('sources.fond.ours')}: ${ours}</p>
     ${opys ? `<table><tbody>${opys}</tbody></table>` : ''}
-    ${c.url ? `<p><a href="${esc(c.url)}" target="_blank" rel="noopener">${t('sources.open')}</a></p>` : ''}
+    ${safeHref(c.url) ? `<p><a href="${safeHref(c.url)}" target="_blank" rel="noopener">${t('sources.open')}</a></p>` : ''}
   </div>`;
 }
 

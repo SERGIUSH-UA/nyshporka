@@ -368,6 +368,11 @@ class JobBus:
                     title=str(raw.get("title") or ""), state=state,
                     cfg=dict(raw.get("cfg") or {}), progress=prog,
                     result=raw.get("result"), error=err,
+                    # Знаменник («прочесано 876 із 1159») живе у `warnings`;
+                    # без цих двох полів після рестарту робота показувалась
+                    # як «готово» без нього.
+                    warnings=list(raw.get("warnings") or []),
+                    next=list(raw.get("next") or []),
                     created=float(raw.get("created") or time.time()),
                     updated=float(raw.get("updated") or time.time()))
                 self._jobs[job.id] = job

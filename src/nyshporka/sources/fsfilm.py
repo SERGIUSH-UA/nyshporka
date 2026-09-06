@@ -51,6 +51,7 @@ from nyshporka.sources.base import (
 )
 from nyshporka.sources.http import Fetcher, HttpError
 from nyshporka.utils.atomic import atomic_write_bytes
+from nyshporka.utils.fsname import UnsafeName, safe_filename
 
 SPA_URL = "https://fsfiles.ru/"
 STORAGE_BASE = "https://geno-dbase.ru/storage"
@@ -476,6 +477,14 @@ class FilmMirrorSource:
         misses = 0
         with self.http.client() as c:
             for done, name in enumerate(files, 1):
+                # 🔴 Ім'я з чужого JSON — не компонент шляху, доки не перевірене:
+                # `..\\..\\x` у дереві регіону писало б тіло відповіді сервера
+                # поза текою справи.
+                try:
+                    name = safe_filename(name)
+                except UnsafeName as exc:
+                    res.errors.append(str(exc))
+                    continue
                 dst = dest / name
                 if dst.exists() and dst.stat().st_size > 0:
                     res.skipped += 1

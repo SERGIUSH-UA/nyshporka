@@ -30,6 +30,7 @@ import yaml
 
 from nyshporka.core import morph
 from nyshporka.core.workspace import workspace
+from nyshporka.utils.atomic import atomic_write_text
 
 CONFIG_NAME = "research_profile.yaml"
 
@@ -659,8 +660,8 @@ def save(name: str, display: str, *, paradigm: str = "adj_skyi",
     path = config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     if not path.is_file():
-        path.write_text(_HEAD.format(name=name) + f"  {name}:\n" + _render(body, 4),
-                        encoding="utf-8")
+        atomic_write_text(path, _HEAD.format(name=name) + f"  {name}:\n"
+                          + _render(body, 4))
         reset()
         return {"name": name, "path": str(path), "mode": "created"}
 
@@ -679,7 +680,11 @@ def save(name: str, display: str, *, paradigm: str = "adj_skyi",
     # задумано. Перечитуємо результат і звіряємо ті поля, які міняли: не
     # зійшлось — файл лишається недоторканим.
     _verify(text, out, path, name, body)
-    path.write_text(out, encoding="utf-8")
+    # Копія попереднього стану й атомарний запис: у профілі живуть ручні
+    # заміри (конфузери, правила ранжування), і обрив посеред запису коштував
+    # би саме їх.
+    atomic_write_text(path.with_name(path.name + ".bak"), text)
+    atomic_write_text(path, out)
     reset()
     return {"name": name, "path": str(path), "mode": mode}
 
@@ -835,8 +840,8 @@ def write_source(text: str) -> dict[str, Any]:
 
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.is_file():
-        path.with_name(path.name + ".bak").write_text(
-            path.read_text(encoding="utf-8"), encoding="utf-8")
-    path.write_text(text, encoding="utf-8")
+        atomic_write_text(path.with_name(path.name + ".bak"),
+                          path.read_text(encoding="utf-8"))
+    atomic_write_text(path, text)
     reset()
     return {"path": str(path), "bytes": len(text.encode("utf-8"))}

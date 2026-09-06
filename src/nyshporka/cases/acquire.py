@@ -97,17 +97,17 @@ def patch_meta(case_dir: Path, patch: dict[str, Any]) -> Path:
     ⚠ Заміщення стерло б те, що дописала людина (нотатку про звірку шифри,
     власний заголовок), — а дізналась би вона про це, лише не знайшовши їх.
     """
+    from nyshporka.utils.atomic import read_json, write_json
+
     path = case_dir / "meta.json"
-    meta: dict[str, Any] = {}
-    if path.is_file():
-        try:
-            meta = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            meta = {}
+    # 🔴 Побитий паспорт — виняток, а не `{}`: інакше наступний запис затирав
+    # би нотатки людини, які в обрізаному файлі ще читаються очима. Запис —
+    # атомарний, щоб Ctrl+C посеред нього такого файла й не лишав.
+    got = read_json(path, default={})
+    meta: dict[str, Any] = dict(got) if isinstance(got, dict) else {}
     meta.update(patch)
     case_dir.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(meta, ensure_ascii=False, indent=2) + "\n",
-                    encoding="utf-8")
+    write_json(path, meta)
     return path
 
 

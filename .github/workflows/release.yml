@@ -46,7 +46,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: встановити
-        run: uv sync --group dev
+        run: uv sync --locked --group dev
       - name: ruff
         run: uv run ruff check .
       - name: mypy

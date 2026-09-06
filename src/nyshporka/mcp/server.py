@@ -175,7 +175,11 @@ def serve() -> int:
         )),
     )
 
-    @server.list_tools()
+    # Декоратор SDK 1.x нетипізований; через `Any`, а не `type: ignore` — бо
+    # без встановленого `mcp` ігнор став би зайвим і впав би на `strict`.
+    list_tools: Any = server.list_tools
+
+    @list_tools()
     async def _list() -> list[Tool]:
         return [Tool(name=d["name"], description=d["description"],
                      inputSchema=d["inputSchema"]) for d in tool_definitions()]

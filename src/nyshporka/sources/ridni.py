@@ -54,6 +54,16 @@ def _clean(value: object) -> str:
     return " ".join(str(value or "").split())
 
 
+def _url(value: object) -> str:
+    """Посилання з чужого каталогу — лише http(s), інакше порожньо.
+
+    🔴 Рядок іде в `href` консолі як є; `javascript:` звідси виконався б в origin
+    застосунку. Схема перевіряється тут, при збиранні, а не лише у фронті.
+    """
+    s = _clean(value)
+    return s if s.lower().startswith(("http://", "https://")) else ""
+
+
 def _norm_type(raw: str) -> str:
     """Тип запису до одного написання.
 
@@ -147,7 +157,7 @@ def parse_rows(rows: object) -> list[Book]:
             attached=_clean(row[F_ATTACHED]),
             county=_clean(row[F_COUNTY]).rstrip(","),
             gubernia=_clean(row[F_GUBERNIA]).rstrip(","),
-            archium_url=_clean(row[F_ARCHIUM]), fs_url=_clean(row[F_FS])))
+            archium_url=_url(row[F_ARCHIUM]), fs_url=_url(row[F_FS])))
     return out
 
 

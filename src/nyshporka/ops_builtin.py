@@ -570,7 +570,7 @@ class LookArgs(BaseModel):
 
 
 @op("material.look", summary="Що це за матеріал: скільки кадрів, одна справа чи багато",
-    args=LookArgs)
+    args=LookArgs, private=True)
 def material_look(a: LookArgs) -> Envelope:
     from nyshporka.sources.local import LocalSource, inspect
 
@@ -2689,8 +2689,11 @@ class ExportWriteArgs(BaseModel):
 # `roots.add`. Агентові лишається `export.case`: ті самі дані, без запису на
 # чужий диск. Плюс стеля переліку tool'ів насичена, і місце в ній коштує
 # дорожче за зручність.
+# 🔴 `mutates=True`: операція пише файл за шляхом із запиту (з `overwrite`),
+# і з `mutates=False` демон не вимагав токена — чужа вкладка могла затерти
+# будь-який файл користувача CSV-вмістом.
 @op("export.write", summary="Записати таблицю справи файлом (XLSX/CSV/TSV)",
-    args=ExportWriteArgs, mutates=False, agent=False, section="research")
+    args=ExportWriteArgs, mutates=True, agent=False, section="research")
 def export_write(a: ExportWriteArgs) -> Envelope:
     """Виписка зі справи файлом — щоб віднести її в Ексель чи чужу програму.
 
@@ -3360,8 +3363,10 @@ class EnvArgs(BaseModel):
 # 🔴 `agent=False` — діагностика. У агента для неї є `nysh doctor`, який каже
 # більше й одним викликом; тримати її ще й окремим tool'ом означає з'їдати
 # місце в переліку, який модель мусить дочитати до кінця.
+# `private`: `venv` із запиту стає шляхом до інтерпретатора, який ЗАПУСКАЄТЬСЯ
+# для проби — таке без токена чужій вкладці давати не можна.
 @op("htr.env", summary="Чи готове середовище рушіїв читання", args=EnvArgs,
-    agent=False, section="htr")
+    agent=False, private=True, section="htr")
 def htr_env(a: EnvArgs) -> Envelope:
     from nyshporka.core.workspace import WorkspaceError
     from nyshporka.htr import env as E

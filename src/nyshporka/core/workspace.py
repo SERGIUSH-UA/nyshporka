@@ -471,9 +471,11 @@ def state_set(**fields: Any) -> None:
         return
     try:
         import json
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps({**state_all(), **fields}, ensure_ascii=False),
-                        encoding="utf-8")
+
+        from nyshporka.utils.atomic import atomic_write_text
+
+        atomic_write_text(path, json.dumps({**state_all(), **fields},
+                                           ensure_ascii=False))
     except OSError:
         pass  # запам'ятати не вдалось — це зручність, а не умова роботи
 
@@ -543,7 +545,7 @@ def add_case_root(path: str | Path) -> Path:
         text = re.sub(r"(?m)^\s*case_roots\s*=.*$", line, text, count=1)
     else:
         text = text.rstrip("\n") + "\n" + line + "\n"
-    marker.write_text(text, encoding="utf-8")
+    _write_marker(marker, text)
 
     global _override
     _override = replace(ws, extra_case_roots=(*ws.extra_case_roots, p))
@@ -578,7 +580,7 @@ def remove_case_root(path: str | Path) -> bool:
     # робила.
     text = _marker_set(text, "case_roots",
                        f"case_roots = [{listed}]" if kept else None)
-    marker.write_text(text, encoding="utf-8")
+    _write_marker(marker, text)
 
     global _override
     _override = replace(ws, extra_case_roots=tuple(kept))
@@ -629,13 +631,25 @@ def set_sections(active: Iterable[str]) -> frozenset[str]:
         joined = ", ".join(f'"{s}"' for s in listed)
         text = _marker_set(text, "sections", f"sections = [{joined}]")
         text = _marker_set(text, "preset", None)
-    marker.parent.mkdir(parents=True, exist_ok=True)
-    marker.write_text(text, encoding="utf-8")
+    _write_marker(marker, text)
 
     global _override
     _override = replace(ws, preset=name, listed_sections=listed, sections_problem="")
     _cached.cache_clear()
     return resolved
+
+
+def _write_marker(marker: Path, text: str) -> None:
+    """Маркер простору — атомарно.
+
+    🔴 Від цього файла залежить резолв простору взагалі: обрізаний Ctrl+C або
+    повним диском TOML ронив би `workspace()` на КОЖНОМУ наступному запуску, і
+    лагодити його довелося б руками.
+    """
+    from nyshporka.utils.atomic import atomic_write_text
+
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    atomic_write_text(marker, text)
 
 
 def reset() -> None:

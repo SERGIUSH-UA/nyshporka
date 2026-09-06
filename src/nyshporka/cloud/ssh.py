@@ -19,6 +19,7 @@
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import re
 import shlex
@@ -226,16 +227,20 @@ class SshSession:
         і вмирає разом із нею — тобто рівно тоді, коли обірветься канал, заради
         переживання якого все це й робиться.
         """
+        # 🔴 pid друкується з міткою і читається ЗА НЕЮ, а не як «усі цифри
+        # виводу»: оболонка під sshd виконує `~/.bashrc` і motd, і будь-яка
+        # цифра звідти («GPU 0: …») ставала префіксом pid — далі `alive()`
+        # казав «мертвий», `adopt` не підхоплював, а `stop` бив чужий процес.
         wrapped = (f"setsid nohup sh -c {shlex.quote(cmd)} "
                    f"> {shlex.quote(log)} 2>&1 < /dev/null & "
-                   f"echo $! | tee {shlex.quote(pidfile)}")
+                   f"echo $! > {shlex.quote(pidfile)}; echo nysh_pid=$!")
         got = self.run(wrapped, timeout=CONNECT_TIMEOUT)
-        pid = "".join(ch for ch in got.out if ch.isdigit())
-        if not pid:
+        m = re.search(r"^nysh_pid=(\d+)\s*$", got.out, re.M)
+        if m is None:
             raise CloudError(
                 f"не вдалось запустити роботу на машині: rc={got.rc} "
                 f"{got.err.strip() or got.out.strip()}")
-        return int(pid)
+        return int(m.group(1))
 
     def alive(self, pid: int) -> bool:
         """Чи живий той процес. Перевірка за pid, ніколи не за патерном."""
@@ -318,6 +323,17 @@ class SshSession:
             self._client.close()
 
 
+def _known_hosts_path() -> Path:
+    """Файл відбитків машин, з якими застосунок уже знайомився.
+
+    У профілі користувача, а не в просторі: простір кладуть у git і в хмарну
+    синхронізацію, а відбитки — властивість цієї машини й цієї людини.
+    """
+    from platformdirs import user_config_dir
+
+    return Path(user_config_dir("nyshporka", appauthor=False)) / "known_hosts"
+
+
 def _load_key(path: Path) -> Any:
     """Ключ явним типом.
 
@@ -363,9 +379,23 @@ class SshBackend:
             raise SshUnavailable() from None
 
         client = paramiko.SSHClient()
-        # ⚠ Свідомо `AutoAdd`: орендований бокс щоразу новий, і питати людину
-        # про відбиток машини, яку вона щойно взяла на годину, — обряд без
-        # змісту. Для постійного сервера ключ і так уже в `known_hosts`.
+        # 🔴 Відбиток машини ЗВІРЯЄТЬСЯ. Доти тут стояв голий `AutoAddPolicy`
+        # без жодного `load_*_host_keys`, тобто `known_hosts` не читався ніколи
+        # — ні системний, ні свій — і будь-хто на шляху міг підставити свій sshd:
+        # він дістав би скани справи і віддав би власний `result.tar`.
+        # Схема: довіра при першому знайомстві (новий хост записується у власний
+        # файл застосунку, бо орендований бокс щоразу новий і питати людину про
+        # нього — обряд без змісту), а ЗМІНЕНИЙ ключ відомого хоста — відмова.
+        # Свій файл, а не `~/.ssh/known_hosts`: чужий файл не правимо.
+        with contextlib.suppress(Exception):   # немає файла / нечитабельний
+            client.load_system_host_keys()
+        known = _known_hosts_path()
+        try:
+            known.parent.mkdir(parents=True, exist_ok=True)
+            known.touch(exist_ok=True)
+            client.load_host_keys(str(known))
+        except OSError:                  # pragma: no cover — read-only профіль
+            pass
         client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
         kwargs: dict[str, Any] = {
             "hostname": host.host, "port": host.port, "username": host.user,
@@ -379,6 +409,12 @@ class SshBackend:
             client.connect(**kwargs)
         except Exception as exc:
             name = type(exc).__name__
+            if name == "BadHostKeyException":
+                raise AuthError(
+                    f"відбиток {host.target} НЕ ЗБІГАЄТЬСЯ із записаним — на "
+                    f"шляху може стояти чужа машина. Якщо це ваш сервер після "
+                    f"перевстановлення або бокс на тій самій адресі, приберіть "
+                    f"рядок «{host.host}» з {known} і повторіть.") from exc
             if "Authentication" in name:
                 raise AuthError(
                     f"{host.target} не прийняв ключ. Перевірте `key` в описі "

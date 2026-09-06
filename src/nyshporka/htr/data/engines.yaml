@@ -43,7 +43,10 @@ runtime:
       # ⚠ Форма PEP 508 (`ім'я @ URL`) навмисна: без неї в рядку немає імені
       # пакета взагалі — лише ім'я РЕПОЗИТОРІЮ (`parseq`), яке з ним не
       # збігається. Саме на цій розбіжності пакет тихо не ставився.
-      spec: "strhub @ git+https://github.com/baudm/parseq.git"
+      # 🔴 Закріплено за комітом, а не за HEAD: інакше кожен `nysh htr install`
+      # і кожен бокс у хмарі виконували б `setup.py` з поточного стану чужого
+      # репозиторію — і збірка рушіїв не була б відтворюваною.
+      spec: "strhub @ git+https://github.com/baudm/parseq.git@1902db043c029a7e03a3818c616c06600af574be"
       note: |
         Scene Text Recognition Model Hub, Apache-2.0. Використовується ЛИШЕ
         PARSeq. ⚠ Пакет містить підмодуль `models/abinet` під non-commercial

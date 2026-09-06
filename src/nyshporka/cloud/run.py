@@ -23,7 +23,9 @@
 """
 from __future__ import annotations
 
+import os
 import shlex
+import shutil
 import tarfile
 import time
 from dataclasses import dataclass
@@ -31,7 +33,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from nyshporka.cloud import state as ST
-from nyshporka.cloud.base import Box, CloudError, Session
+from nyshporka.cloud.base import Box, BoxNotReady, CloudError, Session
 from nyshporka.cloud.plan import CloudPlan
 from nyshporka.cloud.probe import measure
 from nyshporka.cloud.registry import load as load_registry
@@ -342,6 +344,14 @@ def adopt(st: ST.RunState) -> tuple[Session, Box] | None:
     box = Box.from_dict(st.box)
     try:
         session = backend.connect(box)
+    except BoxNotReady as exc:
+        # 🔴 «Не відповідає» ≠ «заходу немає». Повернути тут `None` означало б
+        # узяти ДРУГУ машину при живій першій, ще й затерти її адресу в стані —
+        # сирота, яку далі ніхто не побачить і не погасить.
+        raise RunError(
+            f"машина заходу {st.run_id} не відповідає ({exc}); повторіть "
+            f"пізніше або, якщо вона справді мертва, `nysh cloud stop "
+            f"{st.run_id} --force`") from exc
     except CloudError:
         return None
     if not session.alive(st.pid):
@@ -369,8 +379,8 @@ def start(plan: CloudPlan, *, workers: int = 0, seg_height: int = 0,
 
     live = adopt(st)
     if live is not None:
-        session, _box = live
-        session.close()
+        live_session, _box = live
+        live_session.close()
         say(f"захід {st.run_id} уже працює (pid {st.pid}) — підхоплено, "
             f"другої машини не беремо")
         return ST.save(st)
@@ -387,8 +397,12 @@ def start(plan: CloudPlan, *, workers: int = 0, seg_height: int = 0,
     st.note("acquired", f"машина {box.label or box.id}")
     ST.save(st)
 
-    session = backend.connect(box)
+    # 🔴 `connect` УСЕРЕДИНІ `try`: свіжий бокс часто ще не приймає SSH, і
+    # `BoxNotReady` звідси раніше виходив повз `release` — машина лишалась
+    # орендованою у фазі `acquiring`, доки людина не помічала.
+    session: Session | None = None
     try:
+        session = backend.connect(box)
         probe = measure(session)
         st.probe = probe.as_dict()
         say(f"машина: {probe.human()}")
@@ -446,9 +460,12 @@ def start(plan: CloudPlan, *, workers: int = 0, seg_height: int = 0,
         say(f"пішло: pid {st.pid}, {measured.sizing.shards} процесів, "
             f"~{measured.hours:.1f} год за розрахунком")
         return ST.save(st)
-    except Exception as exc:
+    except BaseException as exc:
+        # `BaseException`, а не `Exception`: Ctrl+C посеред заливки кадрів —
+        # найзвичніший спосіб перервати підготовку, і саме він раніше лишав
+        # машину тарифікованою.
         st.note("failed", f"{type(exc).__name__}: {exc}")
-        st.enter("failed", why=str(exc))
+        st.enter("failed", why=str(exc) or type(exc).__name__)
         # 🔴 Машину, яка тарифікується, не лишаємо живою через власну помилку:
         # це рівно той стан, у якому гроші течуть, а роботи не робиться.
         if st.needs_release:
@@ -462,7 +479,8 @@ def start(plan: CloudPlan, *, workers: int = 0, seg_height: int = 0,
                 ST.save(st)
         raise
     finally:
-        session.close()
+        if session is not None:
+            session.close()
 
 
 def _remote_dir(box: Box, run_id: str) -> str:
@@ -599,29 +617,61 @@ def unpack(tar_path: Path, out_dir: Path) -> Path:
             if not parts:
                 continue
             head, rest = parts[0], parts[1:]
+            # 🔴 Захист від шляху, що виводить за теку: архів прийшов із чужої
+            # машини, і довіряти іменам у ньому підстав немає. Перевірка
+            # ПОКОМПОНЕНТНА, а не `".." in rest`: на Windows `joinpath` розбирає
+            # `\` і `C:` УСЕРЕДИНІ одного POSIX-компонента, тож
+            # `out/..\..\evil` проходив старий фільтр і лягав на два рівні вище.
+            if not rest or not all(_safe_member_part(p) for p in rest):
+                continue
             if head == OUT_SUB:
-                dest = out_dir.joinpath(*rest)
+                base = out_dir
+                dest = base.joinpath(*rest)
             elif head.startswith(f"{OUT_SUB}-"):
                 tag = head[len(OUT_SUB):]          # `-diak_v4`
-                dest = out_dir.with_name(out_dir.name + tag).joinpath(*rest)
+                if not _safe_member_part(tag[1:]):
+                    continue
+                base = out_dir.with_name(out_dir.name + tag)
+                dest = base.joinpath(*rest)
             elif head == LOGS_SUB:
-                dest = out_dir / LOGS_SUB / PurePosixPath(*rest).name
+                base = out_dir / LOGS_SUB
+                dest = base / rest[-1]
             else:
                 continue
-            # 🔴 Захист від шляху, що виводить за теку: архів прийшов із чужої
-            # машини, і довіряти іменам у ньому підстав немає.
-            if ".." in rest:
+            # Другий рубіж — уже на побудованому шляху: що б не пройшло вище,
+            # ціль мусить лишитись під своєю базою.
+            if not _under(dest, base):
                 continue
             dest.parent.mkdir(parents=True, exist_ok=True)
             src = tar.extractfile(member)
             if src is None:
                 continue
             tmp = dest.with_name(dest.name + ".part")
-            tmp.write_bytes(src.read())
+            # Потоком, а не `read()` цілком: член tar із чужої машини може бути
+            # будь-якого розміру, і тримати його в пам'яті нема чого.
+            with tmp.open("wb") as fh:
+                shutil.copyfileobj(src, fh, 1 << 20)
             # `replace`, а не `rename`: ціль може існувати з попереднього
             # забору, і повторний `fetch` мусить лишатись безпечним.
             tmp.replace(dest)
     return out_dir
+
+
+_BAD_MEMBER_CHARS = frozenset("\\:\x00")
+
+
+def _safe_member_part(part: str) -> bool:
+    """Компонент імені з чужого tar, який можна класти на диск як є."""
+    if not part or part in (".", "..") or part.strip() != part:
+        return False
+    return not any(ch in _BAD_MEMBER_CHARS for ch in part)
+
+
+def _under(dest: Path, base: Path) -> bool:
+    try:
+        return Path(os.path.abspath(dest)).is_relative_to(Path(os.path.abspath(base)))
+    except (OSError, ValueError):
+        return False
 
 
 def stamp_case_key(out_dir: Path, case_key: str) -> int:

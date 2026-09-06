@@ -1854,12 +1854,15 @@ def set_verdict(key: str, verdict: str | None, note: str = "",
 
 
 def load_library() -> list[dict[str, Any]]:
-    """Прочитати case_library.json (порожньо якщо ще не збудовано)."""
-    try:
-        return list(json.loads(
-            LIBRARY_PATH.read_text(encoding="utf-8")).get("cases", []))
-    except Exception:
-        return []
+    """Прочитати case_library.json (порожньо якщо ще не збудовано).
+
+    🔴 Порожньо — лише коли файла НЕМАЄ. Побитий файл кидає `CorruptFileError`:
+    доти одна зайва кома робила бібліотеку «порожньою» без жодної ознаки, і
+    далі кожен резолв справи чесно відповідав «на диску знайдено: жодного».
+    """
+    data = read_json(LIBRARY_PATH, default={})
+    cases = data.get("cases") if isinstance(data, dict) else None
+    return list(cases) if isinstance(cases, list) else []
 
 
 @lru_cache(maxsize=1)

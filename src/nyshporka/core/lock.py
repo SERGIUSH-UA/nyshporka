@@ -110,8 +110,12 @@ def _alive_state(pid: int, started: float) -> bool | None:
         if not p.is_running() or p.status() == psutil.STATUS_ZOMBIE:
             return False
         return bool(abs(float(p.create_time()) - started) < 2.0)
-    except Exception:
+    except psutil.NoSuchProcess:
         return False
+    except Exception:
+        # `AccessDenied` (демон іншого користувача, служба) — це «не знаю», а
+        # не «мертвий»: інакше живий писар на спільному просторі втрачав замок.
+        return None
 
 
 def process_started() -> float:

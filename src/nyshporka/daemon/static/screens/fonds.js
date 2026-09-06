@@ -2,7 +2,7 @@
 
 import { t } from '../core/strings.js';
 import { callOp, SEQ } from '../core/net.js';
-import { esc, el, setView, busy, failure, busyForm,
+import { esc, safeHref, el, setView, busy, failure, busyForm,
   renderWarnings, curGen, alive } from '../core/view.js';
 import { SCREENS, ACTIONS, PAGERS } from '../core/registry.js';
 import { show, goto, onJob, jobChip, jobNotes } from '../core/nav.js';
@@ -435,8 +435,8 @@ function scanCell(r) {
     const label = `FS ${esc(r.fs_film || r.fs_dgs)}`;
     const frames = r.fs_frames ? ` · ${esc(r.fs_frames)} ${t('fonds.scan.frames')}` : '';
     const why = [r.fs_place, r.fs_record_type].filter(Boolean).join(' · ');
-    bits.push(r.fs_url
-      ? `<a href="${esc(r.fs_url)}" target="_blank" rel="noopener"
+    bits.push(safeHref(r.fs_url)
+      ? `<a href="${safeHref(r.fs_url)}" target="_blank" rel="noopener"
            title="${esc(why || t('fonds.scan.film'))}">${label}</a>${frames}`
       : `<span title="${esc(why || t('fonds.scan.film.nourl'))}">${label}</span>${frames}`);
   }
@@ -525,9 +525,9 @@ function fondRow(r, bySurname) {
     acts.push(`<button class="ctl-sm" data-act="fond.lib" data-arg="${esc(r.key)}"
       title="${t('fonds.act.lib')}">${ic('books', 'ic-o ic-sm')}</button>`);
   }
-  const url = r.archium_url || r.commons_url;
+  const url = safeHref(r.archium_url) || safeHref(r.commons_url);
   if (url) {
-    acts.push(`<a class="ctl-sm" href="${esc(url)}" target="_blank" rel="noopener"
+    acts.push(`<a class="ctl-sm" href="${url}" target="_blank" rel="noopener"
       title="${t('fonds.act.ext')}">${ic('link', 'ic-o ic-sm')}</a>`);
   }
   const dv = (r.dv_no === null || r.dv_no === undefined || r.dv_no === '')

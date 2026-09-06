@@ -40,7 +40,7 @@ jobs:
       - name: айдентика не протухла
         run: uv run python -m nyshporka.brand.gen --check
       - name: зібрати сайт
-        run: uv run --extra docs mkdocs build --strict
+        run: uv run --locked --extra docs mkdocs build --strict
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site
