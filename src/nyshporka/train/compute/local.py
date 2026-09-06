@@ -158,7 +158,9 @@ class LocalTrainer:
             # Карту ховаємо від процесу цілком: раннер сам бере cuda, якщо її видно.
             kw["env"] = {**os.environ, "CUDA_VISIBLE_DEVICES": ""}
         if os.name == "nt":
-            kw["creationflags"] = (subprocess.CREATE_NEW_PROCESS_GROUP
+            # getattr, а не пряме звертання: обидва прапорці є лише у Windows,
+            # і mypy на Linux відмовляє на самому імені.
+            kw["creationflags"] = (getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
                                    | getattr(subprocess, "DETACHED_PROCESS", 0))
         else:
             kw["start_new_session"] = True
