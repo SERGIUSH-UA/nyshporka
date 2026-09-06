@@ -269,6 +269,29 @@ def test_installer_extras_match_the_sections() -> None:
             assert preset in text, f"{name}: набір «{preset}» не пропонується"
 
 
+def test_app_extra_carries_the_agent_transport() -> None:
+    """🔴 Сервер, який агентові прописали, мусить і підніматись.
+
+    `nysh mcp install` пише `.mcp.json` без жодної перевірки, а `nysh mcp
+    serve` без пакета `mcp` виходить із кодом 2 (`mcp/server.py`, гілка
+    `ImportError`). Доки транспорт жив лише в extra `agent`, жоден набір
+    інсталятора його не тягнув: людина з `.exe` бачила «Нишпорка не
+    підключилась» і не мала жодної ознаки, що бракує трьох мегабайтів
+    залежності. Тому все, що обіцяє `agent`, їде і в `app` — у наборі
+    «Основа», який ставлять усі. Звіряємо з тим самим піном: розбіжність у
+    версії тут була б тихішою за відсутність.
+    """
+    import tomllib
+
+    root = Path(__file__).resolve().parents[1]
+    extras = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))[
+        "project"]["optional-dependencies"]
+    missing = set(extras["agent"]) - set(extras["app"])
+    assert not missing, (
+        f"extra `app` не тягне залежності агентної поверхні: {sorted(missing)}. "
+        f"`nysh mcp install` пропише сервер, який `nysh mcp serve` не підніме")
+
+
 def test_agent_surface_did_not_grow(space: Path) -> None:
     """Стеля агентських tool'ів не зрушила: керування секціями туди не йде."""
     from nyshporka import ops as O

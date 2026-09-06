@@ -60,6 +60,7 @@ markdown_extensions:
 nav:
   - Нишпорка: index.md
   - Поставив. Що далі?: start.md
+  - Підключити агента: agent.md
   - Часті питання: faq.md
   - Карта екранів: screens.md
   - Для агентів:

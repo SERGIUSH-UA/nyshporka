@@ -4,6 +4,7 @@
 |---|---|
 | **працювати агентом у Нишпорці** | [`agents/`](agents/) — почни з [`../AGENTS.md`](../AGENTS.md) |
 | що це за застосунок, як поставити | [`../README.md`](../README.md) |
+| **підключити агента без термінала** (Claude Desktop, Codex) | [`agent.md`](agent.md) |
 | правити сам пакет | [`../CONTRIBUTING.md`](../CONTRIBUTING.md) |
 | що змінилось | [`../CHANGELOG.md`](../CHANGELOG.md) |
 | куди повідомляти про вразливість | [`../SECURITY.md`](../SECURITY.md) |

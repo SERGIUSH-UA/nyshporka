@@ -2392,7 +2392,9 @@ all = [
     { name = "uvicorn", extra = ["standard"] },
 ]
 app = [
+    { name = "anyio" },
     { name = "fastapi" },
+    { name = "mcp" },
     { name = "uvicorn", extra = ["standard"] },
 ]
 archives = [
@@ -2448,6 +2450,7 @@ requires-dist = [
     { name = "aiosqlite", marker = "extra == 'archives'", specifier = ">=0.20" },
     { name = "anyio", marker = "extra == 'agent'", specifier = ">=4.0" },
     { name = "anyio", marker = "extra == 'all'", specifier = ">=4.0" },
+    { name = "anyio", marker = "extra == 'app'", specifier = ">=4.0" },
     { name = "boto3", marker = "extra == 'all'", specifier = ">=1.34" },
     { name = "boto3", marker = "extra == 'cloud'", specifier = ">=1.34" },
     { name = "fastapi", marker = "extra == 'all'", specifier = ">=0.115" },
@@ -2463,6 +2466,7 @@ requires-dist = [
     { name = "lxml", marker = "extra == 'archives'", specifier = ">=5.3" },
     { name = "mcp", marker = "extra == 'agent'", specifier = ">=1.2,<2" },
     { name = "mcp", marker = "extra == 'all'", specifier = ">=1.2,<2" },
+    { name = "mcp", marker = "extra == 'app'", specifier = ">=1.2,<2" },
     { name = "mkdocs-material", marker = "extra == 'docs'", specifier = ">=9.5" },
     { name = "openpyxl", marker = "extra == 'all'", specifier = ">=3.1" },
     { name = "openpyxl", marker = "extra == 'xlsx'", specifier = ">=3.1" },
