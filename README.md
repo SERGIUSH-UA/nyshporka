@@ -217,7 +217,7 @@ $env:NYSHPORKA_WORKSPACE = 'D:\Дослідження'   # PowerShell, на по
 | `catalog` | каталоги, газетир, описи фондів | без рушіїв |
 | `amateur` | + читання рукопису й гортач | + torch |
 | `researcher` (типово) | + пошук у прочитаному, облік переглянутого, експорт | + torch |
-| `lab` | + місце для розмітки й тренування (поки порожнє) | + torch |
+| `lab` | + розмітка рядків і навчання Писаря на своїх почерках (`nysh train`) | + torch, SSH-клієнт |
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File install\windows.ps1 -Preset catalog
