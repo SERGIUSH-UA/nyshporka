@@ -1,0 +1,40 @@
+# 🗂 Зовнішні корпуси для трену — зразок для `config/train/sources.yaml`.
+#
+# Джерела `gt` (ручні мітки наборів простору) і `pseudo` (злиття арбітрів)
+# пакет знає сам; тут описуються лише корпуси поза простором. Шляхи —
+# абсолютні або відносно кореня простору. Кожен `kind` читає свій формат:
+#
+#   manifest — тека з `gt_train.txt` / `gt_val.txt` (TSV `відносний_шлях<TAB>текст`);
+#   tsv      — один або кілька TSV `ім'я<TAB>текст` із текою зображень поруч;
+#   peter    — розкладка Digital Peter: `<розділ>/images/*.jpg` + `<розділ>/words/*.txt`.
+#
+# Опції: `unify_i: true` — латинська `i` → кирилична `і` (Digital Peter пише
+# «і десятеричну» латинкою); `rotate_tall: true` — кропи вищі за ширину
+# повертаються на +90° (у Peter ~2% лежать боком, і без повороту вони стають
+# смужкою у два пікселі); `reject` — JSON `{"reject": {"<ключ>": "чому"}}`
+# з відсіяними рядками (`key: path` — ключ це шлях до кропа, `key: relname`
+# — ім'я кропа в корпусі `images/<джерело>/<хеш>.jpg`).
+version: 1
+
+sources:
+  peter:
+    kind: peter
+    path: "D:/corpora/digital_peter"
+    rotate_tall: true
+    unify_i: true
+  rukopys:
+    kind: manifest
+    path: "D:/corpora/rukopys-v1"
+    files: [gt_train.txt, gt_val.txt]
+    reject: {path: "D:/corpora/rukopys-v1/_reject.json", key: path}
+  ukr_anny:
+    kind: tsv
+    path: "D:/corpora/ukr_anny"
+    files:
+      - {file: METAFILE.tsv, image_dir: lines/lines, header: true}
+  cyrillic_ru:
+    kind: tsv
+    path: "D:/corpora/cyrillic_ru"
+    files:
+      - {file: train.tsv, image_dir: train}
+      - {file: test.tsv, image_dir: test}

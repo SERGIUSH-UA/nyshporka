@@ -1,0 +1,102 @@
+# 📜 Рецепти корпусу для трену Писаря — пакетні дефолти.
+#
+# Простір перекриває або додає свої у `config/train/recipes.yaml` (той самий
+# формат; рецепт з тим самим іменем замінює пакетний). Імена джерел у `mix`
+# мусять існувати в `config/train/sources.yaml` простору; джерела `gt` і
+# `pseudo` пакет знає завжди (ручні мітки наборів і злиття арбітрів).
+#
+# rep — ціле число копій рядка в епосі; share — частка батч-рядків, яку
+# джерело має тримати незалежно від обсягу (перераховується в rep, і ця
+# система сходинкова — `nysh train plan` друкує rep поруч із часткою).
+version: 1
+
+recipes:
+  # 🎯 Цільовий домен: свої мітки й злиття — регуляризатор із зовнішніх корпусів,
+  # якщо вони описані в sources.yaml. Без зовнішніх джерел рецепт працює на
+  # самих `gt` + `pseudo` (тоді частки не мають знаменника, і план про це скаже).
+  domain:
+    note: "свої мітки ~10% батчів, злиття арбітрів ~8%, решта — зовнішні корпуси"
+    mix:
+      gt:     {cap: 0, share: "10%"}
+      pseudo: {cap: 0, share: "8%"}
+      peter:  {cap: 0, rep: 6}
+      rukopys: {cap: 12000, rep: 1}
+      ukr_anny: {cap: 10000, rep: 1}
+      cyrillic_ru: {cap: 12000, rep: 1}
+    pseudo:
+      drop_conf: [low]
+      conf_weight: {high: 1.25}
+      max_repeat: 3
+      hand_repeat: 10
+      print_spread: 4
+    val:
+      quota_chars: {gt: 3000, peter: 2000}
+      min_len: 12
+    crop: {height: 64, max_width: 1024}
+    train:
+      epochs: 16
+      batch: 64
+      lr: 0.0003
+      val_frac: 0.08
+      augment: basic
+      amp: true
+      amp_dtype: auto
+      patience: 4
+      min_delta: 0.0005
+      min_epochs: 9
+      save_epochs: true
+      profile: true
+      charset_mode: extend
+      charset_extra: "ѲѳѢѣЪъЫы"
+    base: "hub:Hukyl/parseq-s-cyrillic-handwritten"
+
+  # 🏆 Той самий баланс, але без надлишку: епоха коротша втричі — за ті самі
+  # години виходить три експерименти замість одного, а виграш давав баланс,
+  # не обсяг.
+  lean:
+    note: "як domain, але зовнішні корпуси врізані до 4000 рядків кожен"
+    mix:
+      gt:     {cap: 0, share: "13%"}
+      pseudo: {cap: 0, share: "10%"}
+      peter:  {cap: 0, rep: 2}
+      rukopys: {cap: 4000, rep: 1}
+      ukr_anny: {cap: 4000, rep: 1}
+      cyrillic_ru: {cap: 4000, rep: 1}
+    pseudo:
+      drop_conf: [low]
+      conf_weight: {high: 1.25}
+    val:
+      quota_chars: {gt: 3000, peter: 2000}
+      min_len: 12
+    train:
+      epochs: 12
+      min_epochs: 6
+      patience: 4
+      min_delta: 0.0005
+
+  # Лише власний матеріал — коли зовнішніх корпусів на машині немає. Ручні
+  # мітки множаться, злиття — ні; val береться з ручних.
+  own:
+    note: "тільки свої набори: мітки ×4, злиття ×1; для першого досліду на своєму почерку"
+    mix:
+      gt:     {cap: 0, rep: 4}
+      pseudo: {cap: 0, rep: 1}
+    val:
+      quota_chars: {gt: 2000}
+      min_len: 10
+    train:
+      epochs: 12
+      min_epochs: 6
+      patience: 4
+
+# Перевизначення для димового прогону: одна коротка епоха, без збереження
+# ваг кожної епохи — лише перевірити, що корпус читається, алфавіт зібрався і
+# карта не голодує.
+smoke:
+  epochs: 1
+  min_epochs: 0
+  max_steps: 80
+  val_limit: 300
+  save_epochs: false
+  patience: 0
+  wall_limit_h: 0.5
