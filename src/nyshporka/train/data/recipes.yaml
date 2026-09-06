@@ -48,7 +48,7 @@ recipes:
       profile: true
       charset_mode: extend
       charset_extra: "ѲѳѢѣЪъЫы"
-    base: "hub:Hukyl/parseq-s-cyrillic-handwritten"
+    base: "Hukyl/parseq-s-cyrillic-handwritten"
 
   # 🏆 Той самий баланс, але без надлишку: епоха коротша втричі — за ті самі
   # години виходить три експерименти замість одного, а виграш давав баланс,

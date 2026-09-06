@@ -56,6 +56,8 @@ def main(argv=None):
                     help="кандидати кешу сегментації, у порядку спроб")
     ap.add_argument("--lines-json", required=True, type=Path)
     ap.add_argument("--out", required=True, type=Path)
+    ap.add_argument("--enhanced", default="",
+                    help="режим посилення, з яким прогін сегментував цю сторінку")
     args = ap.parse_args(argv)
 
     from PIL import Image
@@ -88,20 +90,41 @@ def main(argv=None):
         except Exception as exc:  # noqa: BLE001 — кандидат, не вирок
             tried.append(f"{f.name}: {type(exc).__name__}")
             continue
-        crops = R._line_crops(im, seg)
-        boxes = list(getattr(R._line_crops, "boxes", []) or [])
-        if not _boxes_equal(boxes, want_boxes):
-            tried.append(f"{f.name}: рамок {len(boxes)} проти {len(want_boxes)} "
-                         f"у прогоні, або не ті")
-            continue
-        args.out.mkdir(parents=True, exist_ok=True)
-        n = 0
-        for i, crop in enumerate(crops):
-            crop.save(args.out / f"line_{i:03d}.png")
-            n += 1
-        print(json.dumps({"ok": True, "n": n, "source": "seg_cache",
-                          "seg": str(f), "size": size}, ensure_ascii=False))
-        return 0
+        key = blob.get("key") or {}
+        cached_enh = str(key.get("enhanced") or "")
+        # Кеш зберігає СИРУ сегментацію; рамки прогону — після постобробки.
+        # Тому пробуємо і сиру, і зшиту (злиття розсічених baseline з дефолтами).
+        variants = [("сира", seg)]
+        if hasattr(R, "merge_split_lines"):
+            try:
+                merged, _n = R.merge_split_lines(seg)
+                variants.append(("зшита", merged))
+            except Exception:  # noqa: BLE001 — злиття не обов'язкове
+                pass
+        for label, cand in variants:
+            crops = R._line_crops(im, cand)
+            boxes = list(getattr(R._line_crops, "boxes", []) or [])
+            if _boxes_equal(boxes, want_boxes):
+                args.out.mkdir(parents=True, exist_ok=True)
+                n = 0
+                for i, crop in enumerate(crops):
+                    crop.save(args.out / f"line_{i:03d}.png")
+                    n += 1
+                print(json.dumps({"ok": True, "n": n, "source": "seg_cache",
+                                  "seg": str(f), "variant": label, "size": size},
+                                 ensure_ascii=False))
+                return 0
+            tried.append(f"{f.name} ({label}): рамок {len(boxes)} проти "
+                         f"{len(want_boxes)} у прогоні, або не ті")
+        if args.enhanced and args.enhanced != cached_enh:
+            tried.append(f"{f.name}: прогін сегментував цю сторінку з посиленням "
+                         f"«{args.enhanced}», а кеш зберіг сегментацію без нього")
+        elif cached_enh and not args.enhanced:
+            tried.append(f"{f.name}: кеш від сегментації з посиленням «{cached_enh}», "
+                         f"прогін ішов без нього")
+        else:
+            tried.append(f"{f.name}: кеш спільний на справу і, схоже, перезаписаний "
+                         f"пізнішим прогоном з іншими параметрами")
 
     print(json.dumps({"ok": False, "why": "жоден кеш сегментації не дав тих самих "
                                           "рамок: " + ("; ".join(tried) or "кешу немає")},

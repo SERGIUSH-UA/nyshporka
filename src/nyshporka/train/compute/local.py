@@ -19,7 +19,14 @@ from typing import Any
 from nyshporka.core.progress import parse as parse_progress
 from nyshporka.core.workspace import WorkspaceError
 from nyshporka.train import sizing
-from nyshporka.train.compute import ComputeError, ComputePlan, Pulse, TrainJob
+from nyshporka.train.compute import (
+    ComputeError,
+    ComputePlan,
+    Pulse,
+    TrainJob,
+    base_file,
+    with_local_base,
+)
 from nyshporka.train.state import RunState, load_calib
 
 GUEST = Path(__file__).resolve().parents[1] / "guest" / "parseq_train_runner.py"
@@ -56,7 +63,7 @@ def gpu_memory() -> tuple[str, float, float] | None:
 
 def render_params(job: TrainJob, st: RunState) -> dict[str, Any]:
     """`params.json` раннера: рецепт + корені + локальні прапорці."""
-    p = dict(job.params)
+    p = with_local_base(job.params)
     p.update({"dataset": job.corpus_name, "input_root": str(st.input_dir()),
               "output_root": str(st.out_dir()), "no_pip": True, "progress_json": True})
     if os.name == "nt":
@@ -135,12 +142,21 @@ class LocalTrainer:
                 os.link(job.corpus_tgz, dst)
             except OSError:
                 shutil.copy2(job.corpus_tgz, dst)
+        base = base_file(job.params)
+        if base is not None:
+            bdir = st.input_dir() / "base"
+            bdir.mkdir(parents=True, exist_ok=True)
+            if not (bdir / base.name).is_file():
+                shutil.copy2(base, bdir / base.name)
         params = render_params(job, st)
         st.params_path().write_text(json.dumps(params, ensure_ascii=False, indent=1),
                                     encoding="utf-8")
         log = st.out_dir() / STDOUT_LOG
         cmd = command(py, st.params_path())
         kw: dict[str, Any] = {"cwd": str(run_dir), "stdin": subprocess.DEVNULL}
+        if str(params.get("device") or "auto") == "cpu":
+            # Карту ховаємо від процесу цілком: раннер сам бере cuda, якщо її видно.
+            kw["env"] = {**os.environ, "CUDA_VISIBLE_DEVICES": ""}
         if os.name == "nt":
             kw["creationflags"] = (subprocess.CREATE_NEW_PROCESS_GROUP
                                    | getattr(subprocess, "DETACHED_PROCESS", 0))

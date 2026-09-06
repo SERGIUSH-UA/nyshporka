@@ -115,14 +115,17 @@ def ctx(name: str, page: str, line: int, *, pad: int = 200, k: float = 1.0,
     w = ws if ws is not None else workspace()
     reg = S.registry(w)
     spec = reg.load(name)
-    boxes = ((reg.cut_meta(spec).get("pages") or {}).get(page) or {}).get("boxes") or []
+    cut_page = (reg.cut_meta(spec).get("pages") or {}).get(page) or {}
+    boxes = cut_page.get("boxes") or []
     if not 0 <= line < len(boxes) or not boxes[line]:
         raise ViewError(f"у рядка {page}:{line} немає рамки — контекст неможливий")
     if image_of is None:
         from nyshporka.htr import view as V
 
         image_of = V._page_image
-    im = image_of(spec.source_run, page).convert("L")
+    from nyshporka.train.cut import image_key
+
+    im = image_of(spec.source_run, image_key(cut_page, page)).convert("L")
     x0, y0, x1, y1 = (int(v) for v in boxes[line][:4])
     crop = im.crop((max(0, x0 - pad), max(0, y0 - pad // 2),
                     min(im.width, x1 + pad), min(im.height, y1 + pad // 2)))

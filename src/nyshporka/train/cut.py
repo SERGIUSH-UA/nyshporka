@@ -52,6 +52,7 @@ class CutError(ValueError):
 @dataclass
 class PageCut:
     page: str
+    key: str = ""             # ключ сторінки в меті прогону (ім'я файла)
     n: int = 0
     source: str = ""          # seg_cache | poly
     size: list[int] = field(default_factory=list)
@@ -64,7 +65,8 @@ class PageCut:
     note: str = ""
 
     def as_meta(self) -> dict[str, Any]:
-        return {"n_lines": self.n if not self.error else -1, "crop_source": self.source,
+        return {"n_lines": self.n if not self.error else -1, "key": self.key or self.page,
+                "crop_source": self.source,
                 "size": self.size, "orient": self.orient, "boxes": self.boxes,
                 "polys": self.polys, "widths": self.widths, "src": self.src,
                 "error": self.error, "note": self.note}
@@ -105,6 +107,22 @@ def page_geometry(run: str, page: str, ws: Workspace | None = None) -> dict[str,
     return got if isinstance(got, dict) and got.get("boxes") else None
 
 
+def page_keys(meta: dict[str, Any]) -> dict[str, str]:
+    """Стем сторінки → ключ у меті прогону.
+
+    🔴 Мета прогону ключує сторінки ІМЕНЕМ ФАЙЛА (`0003.JPG`), а текст і рамки
+    лежать за стемом (`0003.txt`, `0003.lines.json`). Набір живе стемами — так
+    названо теки кропів і так люди звуть сторінки, — а до мети й до скана
+    ходить через цю мапу.
+    """
+    return {Path(k).stem: k for k in (meta.get("pages") or {})}
+
+
+def image_key(cut_page: dict[str, Any], page: str) -> str:
+    """Ключ сторінки для показу зображення — з мети нарізки або сам стем."""
+    return str((cut_page or {}).get("key") or page)
+
+
 def pick_pages(meta: dict[str, Any], n: int, *, skip_first: int = SKIP_FIRST) -> list[str]:
     """Автовідбір сторінок під розмітку — за числом символів у прогоні.
 
@@ -114,7 +132,8 @@ def pick_pages(meta: dict[str, Any], n: int, *, skip_first: int = SKIP_FIRST) ->
     обсягу справи, з пропуском перших кадрів (обкладинка, титул).
     """
     pages = meta.get("pages") or {}
-    rows = [(pg, int((info or {}).get("chars") or 0), int((info or {}).get("lines") or 0))
+    rows = [(Path(pg).stem, int((info or {}).get("chars") or 0),
+             int((info or {}).get("lines") or 0))
             for pg, info in sorted(pages.items())]
     rows = [r for r in rows if r[2] >= MIN_LINES]
     body = rows[skip_first:] if len(rows) > skip_first + n else rows
@@ -179,11 +198,13 @@ def cut_page_poly(im: Any, geo: dict[str, Any], out: Path) -> PageCut:
 
 
 def _guest_cut(python: Path, image: Path, orient: int, seg_files: list[Path],
-               lines_json: Path, out: Path) -> dict[str, Any]:
+               lines_json: Path, out: Path, enhanced: str = "") -> dict[str, Any]:
     runner = Path(__file__).resolve().parents[1] / "htr" / "runner.py"
     guest = Path(__file__).resolve().parent / "guest" / "cut_runner.py"
     cmd = [str(python), str(guest), "--runner", str(runner), "--image", str(image),
            "--orient", str(orient), "--lines-json", str(lines_json), "--out", str(out)]
+    if enhanced:
+        cmd += ["--enhanced", enhanced]
     for f in seg_files:
         cmd += ["--seg", str(f)]
     try:
@@ -253,7 +274,9 @@ def make_set(run: str, name: str, *, pages: list[str] | None = None, pick: int =
         if not pages:
             raise CutError(f"у прогоні «{run}» нема сторінок із ≥{MIN_LINES} рядками")
     known = meta.get("pages") or {}
-    unknown = [p for p in pages if p not in known]
+    keys = page_keys(meta)
+    pages = [Path(p).stem for p in pages]
+    unknown = [p for p in pages if p not in keys]
     if unknown:
         raise CutError(f"прогін «{run}» не має сторінок: {', '.join(unknown[:6])}")
 
@@ -292,19 +315,27 @@ def make_set(run: str, name: str, *, pages: list[str] | None = None, pick: int =
     if py is not None and case_dir:
         from nyshporka.htr import run as R
 
-        seg_dir = R.seg_cache_dir(Path(case_dir), w.derived)
+        # 🔴 Стемп теки кешу рахується від АБСОЛЮТНОГО шляху справи (так його
+        # рахував прогін), а мета прогону зберігає шлях відносно простору.
+        # Відносний дав би інший стемп — і кеш «не знаходився б» мовчки.
+        cpath = Path(case_dir)
+        if not cpath.is_absolute():
+            cpath = (w.root / cpath).resolve()
+        seg_dir = R.seg_cache_dir(cpath, w.derived)
 
     rep = CutReport(set=name, pages=[])
     rdir = run_dir(run, w)
     for page in pages:
-        pc = PageCut(page=page, orient=int((known.get(page) or {}).get("orient") or 0))
+        key = keys[page]
+        pc = PageCut(page=page, key=key,
+                     orient=int((known.get(key) or {}).get("orient") or 0))
         geo = page_geometry(run, page, w)
         if geo is None:
             pc.error = "прогін не зберіг рамок рядків цієї сторінки"
             rep.pages.append(pc)
             continue
         try:
-            im = image_of(run, page)
+            im = image_of(run, key)
         except Exception as exc:
             pc.error = f"зображення: {exc}"
             rep.pages.append(pc)
@@ -313,10 +344,11 @@ def make_set(run: str, name: str, *, pages: list[str] | None = None, pick: int =
         done = False
         if py is not None:
             geo_f, _ = HL.resolve_geometry(rdir, page)
-            src_path = _source_path(run, page, w)
+            src_path = _source_path(run, key, w)
             cands = _seg_candidates(seg_dir, page, pc.orient)
             if geo_f is not None and src_path is not None and cands:
-                got = _guest_cut(py, src_path, pc.orient, cands, geo_f, out)
+                got = _guest_cut(py, src_path, pc.orient, cands, geo_f, out,
+                                 enhanced=str((known.get(key) or {}).get("enhanced") or ""))
                 if got.get("ok"):
                     pc.n = int(got.get("n") or 0)
                     pc.source = "seg_cache"
@@ -335,7 +367,7 @@ def make_set(run: str, name: str, *, pages: list[str] | None = None, pick: int =
                 pc.error = str(exc)
                 rep.pages.append(pc)
                 continue
-            got_pc.page, got_pc.orient = page, pc.orient
+            got_pc.page, got_pc.orient, got_pc.key = page, pc.orient, key
             got_pc.note = pc.note
             got_pc.src = pc.src
             pc = got_pc

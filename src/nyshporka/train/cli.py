@@ -321,7 +321,7 @@ def stats_cmd(
 # ── корпус і трен ────────────────────────────────────────────────────────────
 def _print_plan(d: dict) -> None:  # type: ignore[type-arg]
     for s in d["sources"]:
-        console.print(f"  [{s['id']}] {s['n_unique']:6} рядків ×{s['rep']} = {s['rows']:6} "
+        console.print(f"  \[{s['id']}] {s['n_unique']:6} рядків ×{s['rep']} = {s['rows']:6} "
                       f"батч-рядків  [muted]замовлено {s['share_ordered']}, фактично "
                       f"{s['share_actual'] * 100:.1f}%[/muted]")
         for n in s["notes"]:
@@ -392,7 +392,7 @@ def start_cmd(
     epochs: int = typer.Option(0, "--epochs", help="перекрити число епох"),
     params: str = typer.Option("", "-p", "--params", help="перекриття: lr=1e-4,batch=32"),
     smoke: bool = typer.Option(False, "--smoke", help="одна коротка епоха — перевірити конвеєр"),
-    base: str = typer.Option("", "--base", help="базові ваги: hub:… | шлях до .pt"),
+    base: str = typer.Option("", "--base", help="базові ваги: id репозиторію HF або шлях до .pt"),
     dry_run: bool = typer.Option(False, "--dry-run", help="лише план"),
     yes: bool = typer.Option(False, "--yes", help="запустити без підтвердження"),
     as_json: bool = typer.Option(False, "--json"),

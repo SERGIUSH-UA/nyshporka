@@ -124,7 +124,7 @@ class StartArgs(BaseModel):
     gpu: str = Field(default="", description="бажана карта (gpurunner)")
     params: str = Field(default="", description="перекриття: epochs=3,lr=1e-4")
     smoke: bool = Field(default=False, description="димовий прогін: одна коротка епоха")
-    base: str = Field(default="", description="базові ваги: hub:… | path:… ; порожньо — з рецепта")
+    base: str = Field(default="", description="базові ваги: id репозиторію HF або шлях до .pt; порожньо — з рецепта")
     dry_run: bool = Field(default=False, description="лише план")
     yes: bool = Field(default=False, description="запустити без підтвердження плану")
 

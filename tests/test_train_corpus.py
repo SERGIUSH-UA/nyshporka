@@ -70,10 +70,12 @@ def _recipe(**mix: dict) -> R.Recipe:
 
 
 def test_train_params_mirror_the_job_validation() -> None:
-    ours = set(R.TrainParams.model_fields)
-    assert ours | R.COMPUTE_KEYS == R.JOB_PARAM_KEYS, (
+    ours = set(R.TrainParams.model_fields) - {"device"}   # device — наш ключ, не джоби
+    assert ours | R.COMPUTE_KEYS - {"device"} == R.JOB_PARAM_KEYS, (
         f"розійшлись: у нас зайве {ours - R.JOB_PARAM_KEYS}, "
         f"бракує {R.JOB_PARAM_KEYS - ours - R.COMPUTE_KEYS}")
+    with pytest.raises(ValueError):
+        R.TrainParams(device="tpu")
     with pytest.raises(ValueError):
         R.TrainParams(min_epochs=20, epochs=10)
     with pytest.raises(ValueError):

@@ -20,7 +20,14 @@ from typing import Any
 
 from nyshporka.core.progress import parse as parse_progress
 from nyshporka.train import sizing
-from nyshporka.train.compute import ComputeError, ComputePlan, Pulse, TrainJob
+from nyshporka.train.compute import (
+    ComputeError,
+    ComputePlan,
+    Pulse,
+    TrainJob,
+    base_file,
+    with_local_base,
+)
 from nyshporka.train.state import RunState, load_calib
 
 GUEST = Path(__file__).resolve().parents[1] / "guest" / "parseq_train_runner.py"
@@ -66,7 +73,7 @@ def go_script(remote_dir: str, python: str) -> str:
 
 
 def remote_params(job: TrainJob, remote_dir: str) -> dict[str, Any]:
-    p = dict(job.params)
+    p = with_local_base(job.params)
     p.update({"dataset": job.corpus_name, "input_root": f"{remote_dir}/input",
               "output_root": f"{remote_dir}/out", "no_pip": True, "progress_json": True})
     return p
@@ -160,6 +167,10 @@ class SshTrainer:
             session.mkdirs(f"{remote_dir}/out")
             session.mkdirs(f"{remote_dir}/logs")
             session.put(job.corpus_tgz, f"{remote_dir}/input/{job.corpus_tgz.name}")
+            base = base_file(job.params)
+            if base is not None:
+                session.mkdirs(f"{remote_dir}/input/base")
+                session.put(base, f"{remote_dir}/input/base/{base.name}")
             session.put(GUEST, f"{remote_dir}/parseq_train_runner.py")
             params = remote_params(job, remote_dir)
             _put_text(session, f"{remote_dir}/params.json",

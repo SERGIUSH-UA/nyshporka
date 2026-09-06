@@ -601,7 +601,19 @@ def _marker_set(text: str, key: str, line: str | None) -> str:
         return re.sub(pattern, line, text, count=1)
     if line is None:
         return text
-    return text.rstrip("\n") + "\n" + line + "\n"
+    # 🔴 Новий ключ — усередину таблиці `[workspace]`, а не в кінець файлу.
+    # Маркер може нести інші таблиці нижче (сусідні проєкти тримають там свої
+    # корені), і рядок, дописаний у хвіст, потрапляє в ЧУЖУ таблицю, де його
+    # ніхто не читає: `nysh sections enable` рапортує успіх, а секція лишається
+    # вимкненою. Спіймано на просторі з таблицею сусідніх проєктів у хвості маркера.
+    head = re.search(r"(?m)^\s*\[workspace\]\s*$", text)
+    if head is None:
+        return text.rstrip("\n") + "\n" + line + "\n"
+    nxt = re.search(r"(?m)^\s*\[", text[head.end():])
+    end = head.end() + nxt.start() if nxt else len(text)
+    body = text[head.end():end].rstrip("\n")
+    tail = text[end:]
+    return text[:head.end()] + body + "\n" + line + "\n" + ("\n" if nxt else "") + tail
 
 
 def set_sections(active: Iterable[str]) -> frozenset[str]:

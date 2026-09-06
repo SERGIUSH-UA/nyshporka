@@ -26,6 +26,28 @@ class ComputeError(ValueError):
     """Шлях обчислень недоступний або запуск не вдався."""
 
 
+def base_file(params: dict[str, Any]) -> Path | None:
+    """Якщо `pretrained` — файл ваг на диску, повернути його; інакше None.
+
+    Раннер знає два джерела бази: id репозиторію на хабі й `local` (перший
+    `*.pt` під входом). Шлях до файла — третій, наш: файл кладеться під вхід
+    у теку `base/`, а параметри стають `pretrained=local`.
+    """
+    spec = str(params.get("pretrained") or "")
+    if not spec or spec in ("local", "scratch"):
+        return None
+    p = Path(spec).expanduser()
+    return p if p.suffix == ".pt" and p.is_file() else None
+
+
+def with_local_base(params: dict[str, Any]) -> dict[str, Any]:
+    p = dict(params)
+    if base_file(params) is not None:
+        p["pretrained"] = "local"
+        p["pretrained_dataset"] = "base"
+    return p
+
+
 @dataclass
 class TrainJob:
     run_id: str

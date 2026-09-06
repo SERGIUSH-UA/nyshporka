@@ -28,7 +28,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from nyshporka.core.workspace import Workspace, WorkspaceError, workspace
 from nyshporka.train import layout as L
 
-DEFAULT_BASE = "hub:Hukyl/parseq-s-cyrillic-handwritten"
+DEFAULT_BASE = "Hukyl/parseq-s-cyrillic-handwritten"
 PACKAGE_RECIPES = Path(__file__).resolve().parent / "data" / "recipes.yaml"
 
 
@@ -86,6 +86,18 @@ class TrainParams(BaseModel):
     pretrained_dataset: str = ""
     resume: bool = False
     resume_dataset: str = ""
+    #: `auto` — карта, якщо є; `cpu` — примусово процесор (димовий прогін на
+    #: зайнятій карті, машина без NVIDIA). Ключ наш, не раннера: локальний
+    #: бекенд перекладає його на CUDA_VISIBLE_DEVICES.
+    device: str = "auto"
+
+    @field_validator("device")
+    @classmethod
+    def _dev(cls, v: str) -> str:
+        v = v.strip().lower()
+        if v not in ("auto", "cpu"):
+            raise ValueError("device: auto|cpu")
+        return v
 
     @field_validator("charset_mode")
     @classmethod
@@ -162,8 +174,8 @@ JOB_PARAM_KEYS = frozenset({
     "save_epochs", "modal_volume", "cpu", "memory", "seed", "limit", "val_limit",
     "profile", "max_steps", "wall_limit_h",
 })
-#: Ключі, що належать обчисленням, а не рецепту.
-COMPUTE_KEYS = frozenset({"dataset", "modal_volume", "cpu", "memory"})
+#: Ключі, що належать обчисленням, а не рецепту (`device` — наш, не джоби).
+COMPUTE_KEYS = frozenset({"dataset", "modal_volume", "cpu", "memory", "device"})
 
 
 # ── рецепт корпусу ───────────────────────────────────────────────────────────
