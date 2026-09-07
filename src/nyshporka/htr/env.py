@@ -157,13 +157,35 @@ def _resolve_tool(name: str) -> str:
         return name                        # уже шлях — людина знає, що робить
     found = shutil.which(name)
     if not found:
-        return ""
+        # 🔴 `uv` може бути й НЕ в PATH — і це не збій, а норма з 07.09.2026:
+        # інсталятор кладе його у власну теку застосунку саме для того, щоб не
+        # чіпати чуже середовище, і сам кличе повним шляхом. Без цього рядка
+        # `nysh htr install` відмовляв би «uv не знайдено» на машині, де uv
+        # щойно поставили ми, і порада «поставте uv» вела б на другу копію.
+        return _from_install_info(name)
     try:
         if Path(found).resolve().parent == Path.cwd().resolve():
             return ""
     except OSError:
         return ""
     return found
+
+
+def _from_install_info(name: str) -> str:
+    """Інструмент за слідом інсталятора: `uv=` в `install-info.ini`.
+
+    ⚠ Тільки `uv`: більше інсталятор нічого не приносить, а вгадувати шляхи
+    решти означало б підсунути чужий бінарник під знайомим іменем.
+    """
+    if name != "uv":
+        return ""
+    try:
+        from nyshporka.setup.update import install_info
+
+        got = install_info().get("uv", "")
+    except Exception:
+        return ""
+    return got if got and Path(got).is_file() else ""
 
 
 def _run(cmd: list[str]) -> None:

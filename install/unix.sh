@@ -6,10 +6,30 @@
 #   curl -LsSf https://raw.githubusercontent.com/SERGIUSH-UA/nyshporka/main/install/unix.sh | sh
 # Набір при цьому передається змінною:
 #   curl -LsSf https://raw.githubusercontent.com/SERGIUSH-UA/nyshporka/main/install/unix.sh | NYSH_PRESET=catalog sh
+# Подивитись, що буде зроблено, нічого не роблячи:
+#   curl -LsSf … | sh -s -- --dry-run        (або NYSH_DRY_RUN=1 sh …)
 #
 # 🔴 Системний інтерпретатор не використовується: на робочих машинах він або
 # старий, або зайнятий чужим проєктом. Інсталятор приносить `uv`, а `uv` —
 # власний Python. Усе кладеться в профіль користувача; sudo не потрібен.
+#
+# 🔴🔴 І ЧУЖЕ середовище теж не використовується й не переставляється. Скарга
+# розробника (07.09.2026): «ламає env навіть не питаючи… перебило мультиверсії
+# python, tensorflow та кастомні nvidia драйвери». Причина була не в коді
+# застосунку, а в тому, ЯК цей скрипт кликав `uv`, і складалася з двох частин:
+#   1. офіційний інсталятор uv ЗАВЖДИ кладе поруч із собою файл `env`, а без
+#      `UV_NO_MODIFY_PATH` ще й дописує `. "$HOME/.local/bin/env"` одразу в
+#      `.profile`, `.bashrc`, `.bash_profile`, `.bash_login`, `.zshrc`,
+#      `.zshenv` і fish. Той файл ставить `~/.local/bin` НА ПОЧАТОК PATH — і
+#      сам, називаючись `env`, заслоняє `/usr/bin/env` для всього, що потім
+#      пише `env VAR=1 команда`;
+#   2. `uv python install` типово кладе в ту саму теку виконуваний `python3.12`.
+#      Разом із пунктом 1 це означає, що `python3.12` починає вирішуватись у
+#      керований інтерпретатор РАНІШЕ за pyenv, conda й системний, — а за ним
+#      їде все, що зібране під конкретний інтерпретатор.
+# Тому uv тепер лягає у власну теку застосунку (як це вже роблено на Windows,
+# `install/windows.ps1`), shim не створюється взагалі, а єдиний допис у PATH
+# називається в звіті наприкінці й знімається `nysh uninstall`.
 set -eu
 
 # Які частини застосунку ставимо (`nysh sections`): catalog | amateur |
@@ -33,7 +53,54 @@ SOURCE="${NYSH_SOURCE:-$DEFAULT_SOURCE}"
 # друкує `nysh catalog list` на порожньому каталозі (`catalog.store.RELEASES_URL`).
 CATALOG_URL="https://github.com/SERGIUSH-UA/nyshporka/releases"
 
+# 🔴 Тека застосунку оголошена ДО першої дії, бо в ній тепер живе не лише слід
+# інсталятора, а й сам `uv`. Читається так само, як її читає `setup.update`.
+NYSH_HOME="${XDG_DATA_HOME:-$HOME/.local/share}/nyshporka"
+UV_HOME="$NYSH_HOME/uv"
+INFO_FILE="$NYSH_HOME/install-info.ini"
+TRACE_FILE="$NYSH_HOME/install-trace.txt"
+
+# ── прапорці ────────────────────────────────────────────────────────────────
+# ⚠ Через конвеєр аргументи доходять лише як `sh -s -- --dry-run`, і людина
+# про це не зобов'язана знати. Тому кожен прапорець має двійника-змінну.
+DRY="${NYSH_DRY_RUN:-0}"
+KEEP_PATH="${NYSH_NO_MODIFY_PATH:-0}"
+for arg in "$@"; do
+  case "$arg" in
+    --dry-run) DRY=1 ;;
+    --no-modify-path) KEEP_PATH=1 ;;
+    -h|--help)
+      printf 'sh unix.sh [--dry-run] [--no-modify-path]\n'
+      printf '  --dry-run          показати, що буде зроблено, і вийти\n'
+      printf '  --no-modify-path   не чіпати профілі оболонки (NYSH_NO_MODIFY_PATH=1)\n'
+      printf '  змінні: NYSH_PRESET, NYSH_SOURCE\n'
+      exit 0 ;;
+    *) printf 'невідомий аргумент «%s»: --dry-run | --no-modify-path\n' "$arg" >&2
+       exit 2 ;;
+  esac
+done
+
 say() { printf '%s\n' "$*"; }
+
+# ── слід, який лишається на машині ──────────────────────────────────────────
+# 🔴 Накопичується ПО ХОДУ, а не вгадується потім. З цього переліку `nysh
+# uninstall` знімає рівно те, що поставили, — а не те, що здається типовим:
+# теку інструментів можна перенести (`UV_TOOL_BIN_DIR`, `XDG_BIN_HOME`), і
+# здогад про `~/.local/bin` збігається лише з типовим випадком.
+TRACE=""
+trace() { TRACE="$TRACE$1
+"; }
+
+# Розмір файла або 0, якщо його немає. `wc` на macOS вирівнює число пробілами,
+# а рядок далі йде в перелік, розділений пробілами, — тож пробіли знімаємо.
+_size() {
+  _s=$(wc -c < "$1" 2>/dev/null || echo 0)
+  printf '%s' "$_s" | tr -d ' \n'
+}
+
+# Профілі, які править `uv tool update-shell`. Точний перелік узятий з
+# інсталятора uv; зайве ім'я тут нешкідливе (файла немає — розмір 0).
+RC_FILES=".profile .bashrc .bash_profile .bash_login .zshrc .zshenv .config/fish/conf.d/uv.fish"
 
 # 🐾 Знак ТОЙ САМИЙ, що друкує `nysh info` і старт застосунку — побайтово,
 # і це звіряє тест. Інсталятор — найперша поверхня, яку бачить людина, і
@@ -43,35 +110,143 @@ say "  ╭─ ◍ ─╮   Нишпорка"
 say "  ╰─────╯   Читає рукопис. Приносить знайдене."
 say ""
 
-if command -v uv >/dev/null 2>&1; then
-  say "✓ uv уже є: $(command -v uv)"
-else
-  say "⬇ uv…"
-  curl -LsSf https://astral.sh/uv/install.sh | sh
-  # Інсталятор кладе в ~/.local/bin і не завжди чіпає поточний PATH.
-  PATH="$HOME/.local/bin:$PATH"
-  export PATH
+# ── попередження тому, хто веде середовище сам ──────────────────────────────
+# ⚠ Це саме попередження, а не зміна поведінки: людина з pyenv нічим не гірша
+# за решту, їй лише треба знати ЗАЗДАЛЕГІДЬ, що буде дописано в профіль. Shim
+# інтерпретатора ми більше не кладемо, тож самі версії python не зачіпаються.
+if [ "$KEEP_PATH" != 1 ]; then
+  for _mgr in pyenv conda asdf mise; do
+    if command -v "$_mgr" >/dev/null 2>&1; then
+      say "⚠ помічено $_mgr. Інсталятор допише теку з командою «nysh» у ваш"
+      say "  профіль оболонки; інтерпретаторів і чужих середовищ він не чіпає."
+      say "  Не треба чіпати профіль — перервіть і запустіть із"
+      say "  NYSH_NO_MODIFY_PATH=1; побачити повний перелік — з --dry-run."
+      say ""
+      break
+    fi
+  done
 fi
 
+# ── показати й вийти ────────────────────────────────────────────────────────
+if [ "$DRY" = 1 ]; then
+  if command -v uv >/dev/null 2>&1; then
+    say "uv                 уже є: $(command -v uv)"
+    _bin="$(uv tool dir --bin 2>/dev/null || true)"
+  else
+    say "uv                 буде завантажено в $UV_HOME"
+    _bin=""
+  fi
+  [ -n "$_bin" ] || _bin="${XDG_BIN_HOME:-$HOME/.local/bin}"
+  say "Python 3.12        керований, у теці uv; виконуваного файла в PATH НЕ буде"
+  say "Нишпорка           $SOURCE"
+  say "                   в ізольованому середовищі інструмента uv"
+  say "команда nysh       $_bin/nysh"
+  say "слід інсталятора   $INFO_FILE"
+  say "                   $TRACE_FILE"
+  say "простір досліджень тека, яку назве «nysh init» (типово ~/Документи/Нишпорка)"
+  if [ "$KEEP_PATH" = 1 ]; then
+    say "профілі оболонки   не чіпаються (NYSH_NO_MODIFY_PATH=1)"
+  else
+    say "профілі оболонки   один допис «$_bin» у PATH, якщо теки там ще немає"
+  fi
+  say ""
+  say "Нічого не зроблено — це --dry-run."
+  exit 0
+fi
+
+mkdir -p "$NYSH_HOME"
+
+# ── 1. uv ───────────────────────────────────────────────────────────────────
+if command -v uv >/dev/null 2>&1; then
+  UV="$(command -v uv)"
+  say "✓ uv уже є: $UV"
+else
+  say "⬇ uv…"
+  # 🔴 Дві змінні, і кожна закриває свою половину скарги 07.09.2026.
+  # `UV_INSTALL_DIR` — щоб файл `env`, який інсталятор uv створює завжди,
+  # ліг у нашу теку, де він нічого не заслоняє (в `~/.local/bin` він заслоняє
+  # `/usr/bin/env`). `UV_NO_MODIFY_PATH` — щоб профілі оболонки правив один
+  # раз ми, а не інсталятор uv шістьма файлами одразу.
+  # ⚠ Симетрія з `install/windows.ps1`, де тека uv задається так само.
+  #
+  # 🔴 Змінні стоять ПРЕФІКСОМ до `sh`, а не експортуються на весь скрипт, і це
+  # не стиль. `UV_NO_MODIFY_PATH` слухається не лише інсталятором uv, а й
+  # `uv tool update-shell` нижче — тобто експортована, вона мовчки скасовує
+  # ЄДИНИЙ допис у PATH, який нам потрібен. Перевірено прогоном у контейнері:
+  # установлення проходило успішно, а в новій оболонці `nysh` не знаходився.
+  curl -LsSf https://astral.sh/uv/install.sh \
+    | UV_INSTALL_DIR="$UV_HOME" UV_NO_MODIFY_PATH=1 sh
+  UV="$UV_HOME/uv"
+  if [ ! -x "$UV" ]; then
+    say "✗ uv не встановився у $UV_HOME"
+    exit 1
+  fi
+  trace "dir $UV_HOME"
+fi
+
+# ── 2. інтерпретатор ────────────────────────────────────────────────────────
 say "⬇ Python 3.12…"
-uv python install 3.12 >/dev/null
+# 🔴 `UV_PYTHON_INSTALL_BIN=0` — це та сама скарга, друга її половина: типово
+# uv кладе в теку виконуваних файлів ще й `python3.12`, і той стає першим
+# `python3.12` у PATH раніше за pyenv, conda й системний.
+# ⚠ Саме змінною, а не прапорцем `--no-bin`: гілка вище могла взяти ЧУЖИЙ uv,
+# старіший за 0.8, і невідомий прапорець під `set -e` завалив би встановлення
+# на другому кроці. Невідому змінну старий uv просто не помітить.
+UV_PYTHON_INSTALL_BIN=0 "$UV" python install 3.12 >/dev/null
 
+# ── 3. застосунок ───────────────────────────────────────────────────────────
 say "⬇ Нишпорка ($SOURCE)…"
-uv tool install --python 3.12 --force "$SOURCE"
+"$UV" tool install --python 3.12 --force "$SOURCE"
 
+# ── 3½. де команда й чи можна її набрати ────────────────────────────────────
 # 🔴 PATH лагодиться ДВІЧІ, і це дві РІЗНІ речі.
-# `uv tool install` кладе `nysh` у власну теку, і в PATH її може не бути:
-# гілка вище додає її лише тоді, коли uv ставили МИ. Прийшов uv із apt, brew
-# чи pipx — і наступний рядок падає «nysh: command not found» рівно тоді, коли
-# все вже завантажено й установлено. А `uv tool update-shell` дописує теку в
-# профіль оболонки, тобто для НАСТУПНИХ сеансів; поточний про це не дізнається.
-BIN="$(uv tool dir --bin 2>/dev/null || true)"
-[ -n "$BIN" ] || BIN="$HOME/.local/bin"
+# `uv tool install` кладе `nysh` у власну теку, і в PATH її може не бути.
+# Правка PATH ПРОЦЕСУ потрібна, щоб спрацювали виклики нижче й підказки в
+# кінці — їх людина набирає в тому самому вікні. А `uv tool update-shell`
+# дописує теку в профіль оболонки, тобто для НАСТУПНИХ сеансів; поточний про
+# це не дізнається ніколи.
+# ⚠ Теку саме питаємо в uv, а не вгадуємо: вона налаштовується
+# (`UV_TOOL_BIN_DIR`, `XDG_BIN_HOME`).
+BIN="$("$UV" tool dir --bin 2>/dev/null || true)"
+[ -n "$BIN" ] || BIN="${XDG_BIN_HOME:-$HOME/.local/bin}"
 case ":$PATH:" in
   *":$BIN:"*) PATH_WAS_MISSING=0 ;;
-  *) PATH="$BIN:$PATH"; export PATH; PATH_WAS_MISSING=1
-     uv tool update-shell >/dev/null 2>&1 || true ;;
+  *) PATH_WAS_MISSING=1 ;;
 esac
+
+# 🔴 Єдиний допис у чуже середовище за все встановлення — і він робиться лише
+# тоді, коли теки в PATH справді немає, і лише коли людина не сказала не чіпати.
+#
+# 🔴🔴 І робиться ДО того, як ми правимо PATH ПРОЦЕСУ. `uv tool update-shell`
+# дивиться на живий `$PATH`: побачивши там теку, він вважає роботу зробленою й
+# мовчки не чіпає жодного профілю (код виходу 0). Доти рядки стояли в
+# протилежному порядку — тобто на Linux і macOS PATH не закріплювався НІКОЛИ, а
+# порада «закрийте термінал і відкрийте новий» не працювала й не могла. Знайдено
+# прогоном у чистому середовищі; з коду це не видно ніяк.
+#
+# Знімки розмірів до й після — щоб звіт назвав ФАЙЛ, а не «профілі оболонки»:
+# без точного імені деінсталяція вгадувала б, який рядок і звідки прибирати.
+if [ "$PATH_WAS_MISSING" = 1 ] && [ "$KEEP_PATH" != 1 ]; then
+  RC_SNAP=""
+  for _rel in $RC_FILES; do
+    RC_SNAP="$RC_SNAP $_rel:$(_size "$HOME/$_rel")"
+  done
+  "$UV" tool update-shell >/dev/null 2>&1 || true
+  for _item in $RC_SNAP; do
+    _rel="${_item%:*}"
+    _was="${_item##*:}"
+    if [ "$(_size "$HOME/$_rel")" != "$_was" ]; then
+      trace "shell $HOME/$_rel"
+    fi
+  done
+fi
+
+# А тепер — PATH поточного процесу, щоб спрацювали виклики нижче й підказки в
+# кінці: їх людина набирає в тому самому вікні.
+if [ "$PATH_WAS_MISSING" = 1 ]; then
+  PATH="$BIN:$PATH"
+  export PATH
+fi
 
 # 🔴 Перевірити ПЕРЕД першим викликом: інакше людина читає «command not found»
 # і не має підстав думати, що встановлення взагалі відбулось.
@@ -80,23 +255,22 @@ if ! command -v nysh >/dev/null 2>&1; then
   say "  надішліть, будь ласка, вивід «uv tool list» — це вада інсталятора"
   exit 1
 fi
+trace "bin $BIN/nysh"
 
-# ── слід для оновлення ───────────────────────────────────────────────────────
+# ── слід для оновлення й для зняття ─────────────────────────────────────────
 # 🔴 Той самий файл, що його на Windows пише майстер (`install/windows.ps1`,
 # крок 3¾). З нього `nysh update` дізнається, ДЕ лежить uv і ЯКИМ набором
 # ставили: набір вгадати не можна, а вгаданий або тягне 2.5 ГБ рушіїв тому,
 # хто їх не ставив, або мовчки знімає їх у того, хто ними читає.
 # ⚠ Помилка запису не валить установлення: без цього файла ламається оновлення
 # однією командою, а не сам застосунок.
-NYSH_HOME="${XDG_DATA_HOME:-$HOME/.local/share}/nyshporka"
-if mkdir -p "$NYSH_HOME" 2>/dev/null; then
-  {
-    echo "[nyshporka]"
-    echo "nysh=$(command -v nysh)"
-    echo "uv=$(command -v uv)"
-    echo "preset=$PRESET"
-  } > "$NYSH_HOME/install-info.ini" 2>/dev/null || true
-fi
+{
+  echo "[nyshporka]"
+  echo "nysh=$(command -v nysh)"
+  echo "uv=$UV"
+  echo "preset=$PRESET"
+} > "$INFO_FILE" 2>/dev/null || true
+trace "file $INFO_FILE"
 
 say ""
 nysh init --yes --preset "$PRESET"
@@ -128,6 +302,30 @@ else
   say "  далі:  nysh catalog install --from <завантажений zip>"
 fi
 
+# ── що змінилось на цій машині ──────────────────────────────────────────────
+# 🔴 Перелік і друкується, і лягає на диск. Друкується — бо людина має право
+# знати, що з нею зробили, не читаючи скрипта; лягає на диск — бо саме з нього
+# `nysh uninstall` знімає РІВНО поставлене. Доти зняти встановлене на
+# Linux/macOS не було чим узагалі: тестувальник (07.09.2026) мусив просити
+# агента «kill and uninstall completely».
+trace "file $TRACE_FILE"
+printf '%s' "$TRACE" > "$TRACE_FILE" 2>/dev/null || true
+
+say ""
+say "Змінено на цій машині:"
+printf '%s' "$TRACE" | while IFS=' ' read -r _kind _path; do
+  [ -n "$_kind" ] || continue
+  case "$_kind" in
+    dir)   say "  тека        $_path" ;;
+    bin)   say "  команда     $_path" ;;
+    file)  say "  файл        $_path" ;;
+    shell) say "  профіль     $_path (допис теки з командою в PATH)" ;;
+    *)     say "  $_kind $_path" ;;
+  esac
+done
+say "  простір досліджень — тека, яку щойно назвав «nysh init»"
+say "  зняти все це: nysh uninstall"
+
 say ""
 say "Готово."
 
@@ -135,9 +333,15 @@ say "Готово."
 # див. коментар у windows.ps1: пояснення механіки тут не читається, читається дія.
 if [ "$PATH_WAS_MISSING" = 1 ]; then
   say ""
-  say "  ⚠ Закрийте цей термінал і відкрийте новий — команди нижче працюють там."
-  say "    У терміналах, відкритих до встановлення, «nysh» не знайдеться."
-  say "    Якщо й у новому не знайдеться — перезапустіть комп'ютер."
+  if [ "$KEEP_PATH" = 1 ]; then
+    say "  ⚠ Профіль оболонки не чіпали. Щоб команди нижче працювали, додайте"
+    say "    у ваш профіль рядок:"
+    say "      export PATH=\"$BIN:\$PATH\""
+  else
+    say "  ⚠ Закрийте цей термінал і відкрийте новий — команди нижче працюють там."
+    say "    У терміналах, відкритих до встановлення, «nysh» не знайдеться."
+    say "    Якщо й у новому не знайдеться — перезапустіть комп'ютер."
+  fi
 fi
 
 say ""

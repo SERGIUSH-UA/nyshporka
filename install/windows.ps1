@@ -45,6 +45,10 @@ param(
     # тег»: реліз, усередині якого інша версія, читається як зламаний pip.
     [string]$Version = "",
     [switch]$NoLauncher,
+    # Показати, що буде зроблено, і вийти. Симетрія з `--dry-run` в
+    # `install/unix.sh`: людина має право подивитись, що чіпатимуть на її
+    # машині, ДО того, як щось завантажилось.
+    [switch]$DryRun,
     # Запуск із майстра `.exe`: консоль зникає разом зі скриптом, тож помилку
     # треба показати вікном, яке переживе консоль.
     [switch]$Wizard
@@ -115,6 +119,13 @@ if (-not $Source) {
 }
 
 function Say($text, $colour = 'White') { Write-Host $text -ForegroundColor $colour }
+
+# Слід, який лишається на машині. Накопичується ПО ХОДУ, а не вгадується
+# потім: тека інструментів налаштовується (`UV_TOOL_BIN_DIR`, `XDG_BIN_HOME`),
+# і здогад про типове місце збігається лише з типовим випадком. З цього
+# переліку `nysh uninstall` знімає РІВНО поставлене.
+$Trace = New-Object System.Collections.ArrayList
+function Trace($kind, $path) { $null = $Trace.Add("$kind $path") }
 
 # 🔴 Рідну команду НЕ можна глушити через `2>&1` чи `2>$null`.
 # Windows PowerShell 5.1 обгортає КОЖЕН рядок, який exe написав у stderr, у
@@ -187,6 +198,30 @@ Say "  ╭─ ◍ ─╮   Нишпорка" DarkYellow
 Say "  ╰─────╯   Читає рукопис. Приносить знайдене." DarkGray
 Say ""
 Say "  тека: $Home_" DarkGray
+
+if ($DryRun) {
+    $uvNow = (Get-Command uv -ErrorAction SilentlyContinue).Source
+    $binGuess = if ($uvNow) { Get-NativeLine $uvNow tool dir --bin } else { $null }
+    if (-not $binGuess) { $binGuess = Join-Path $env:USERPROFILE '.localin' }
+    Say ""
+    if ($uvNow) { Say "uv                 уже є: $uvNow" }
+    else         { Say "uv                 буде завантажено в $(Join-Path $Home_ 'uv')" }
+    Say "Python 3.12        керований, у теці uv; ні в PATH, ні в реєстрі його не буде"
+    Say "Нишпорка           $(if ($Source) { $Source } else { "набір $Preset" })"
+    Say "                   в ізольованому середовищі інструмента uv"
+    Say "команда nysh       $(Join-Path $binGuess 'nysh.exe')"
+    Say "слід інсталятора   $(Join-Path $Home_ 'install-info.ini')"
+    Say "                   $(Join-Path $Home_ 'install-trace.txt')"
+    Say "простір досліджень тека, яку назве «nysh init»"
+    if ($env:NYSH_NO_MODIFY_PATH -eq '1') {
+        Say "PATH користувача   не чіпається (NYSH_NO_MODIFY_PATH=1)"
+    } else {
+        Say "PATH користувача   один допис «$binGuess», якщо теки там ще немає"
+    }
+    Say ""
+    Say "Нічого не зроблено — це -DryRun." Cyan
+    exit 0
+}
 
 New-Item -ItemType Directory -Force -Path $Home_ | Out-Null
 # Журнал усього виводу — і для хвоста в повідомленні про помилку, і для того,
@@ -266,15 +301,40 @@ if (-not (Test-Path $uv)) {
         Say "⬇ uv…" DarkGray
         New-Item -ItemType Directory -Force -Path $uvDir | Out-Null
         $env:UV_INSTALL_DIR = $uvDir
+        # 🔴 PATH користувача інсталятор uv не чіпає. Тека `$uvDir` наша, ми
+        # кличемо uv повним шляхом, і запис у `HKCU\Environment` тут не дає
+        # нічого, крім зайвої зміни в чужому середовищі. Та сама причина,
+        # що й у `install/unix.sh`, де без цієї змінної інсталятор uv правив
+        # шість файлів профілю одразу (скарга розробника 07.09.2026).
+        $env:UV_NO_MODIFY_PATH = '1'
         # Офіційний інсталятор uv; ставить у вказану теку, без адміністратора.
         Invoke-RestMethod https://astral.sh/uv/install.ps1 | Invoke-Expression
+        # 🔴 І одразу прибираємо. Ця змінна слухається не лише інсталятором uv,
+        # а й `uv tool update-shell` нижче — тобто, лишена в середовищі
+        # процесу, вона мовчки скасовує ЄДИНИЙ допис у PATH, який нам потрібен.
+        # Знайдено прогоном `install/unix.sh` у контейнері: установлення
+        # проходило «успішно», а в новій оболонці команда не знаходилась.
+        Remove-Item Env:UV_NO_MODIFY_PATH -ErrorAction SilentlyContinue
         if (-not (Test-Path $uv)) { throw "uv не встановився у $uvDir" }
+        Trace 'dir' $uvDir
         Say "✓ uv" Green
     }
 }
 
 # ── 2. інтерпретатор ─────────────────────────────────────────────────────────
 Say "⬇ Python 3.12…" DarkGray
+# 🔴 Дві змінні, і обидві — щоб керований інтерпретатор лишався деталлю
+# Нишпорки, а не ставав системним Python 3.12 цієї машини.
+# `UV_PYTHON_INSTALL_BIN=0` не кладе виконуваний `python3.12` у теку команд:
+# на Unix такий файл ставав першим `python3.12` у PATH раніше за pyenv і
+# conda, і за ним їхало все, що зібране під конкретний інтерпретатор
+# (скарга розробника 07.09.2026). `UV_PYTHON_INSTALL_REGISTRY=0` не пише
+# його в реєстр Windows (PEP 514) — інакше він з'являється в `py`-лаунчері
+# та в списках інтерпретаторів чужих IDE, і людина обирає його не знаючи.
+# ⚠ Змінними, а не прапорцями: гілка вище могла взяти ЧУЖИЙ uv, старіший за
+# 0.8, і невідомий прапорець завалив би встановлення на другому кроці.
+$env:UV_PYTHON_INSTALL_BIN = '0'
+$env:UV_PYTHON_INSTALL_REGISTRY = '0'
 $rc = Invoke-Logged $uv python install 3.12
 if ($rc -ne 0) { throw "не вдалося встановити Python 3.12 (uv повернув $rc)" }
 Say "✓ Python" Green
@@ -305,9 +365,21 @@ if (-not $binDir -or -not (Test-Path $binDir)) {
 }
 $pathWasMissing = -not (($env:PATH -split ';' | Where-Object { $_ } |
                          ForEach-Object { $_.TrimEnd('\') }) -contains $binDir.TrimEnd('\'))
+# 🔴 Запис у PATH КОРИСТУВАЧА — єдина зміна в чужому середовищі за все
+# встановлення, тож у неї є вимикач і вона потрапляє у звіт. Хто веде PATH
+# сам, ставить `NYSH_NO_MODIFY_PATH=1` і отримує рядок для вставки руками.
+$keepPath = ($env:NYSH_NO_MODIFY_PATH -eq '1')
 if ($pathWasMissing) {
     $env:PATH = "$binDir;$env:PATH"
-    Invoke-Muted $uv tool update-shell
+    if (-not $keepPath) {
+        # Знімок ДО й ПІСЛЯ — щоб звіт назвав зміну, якої справді не було
+        # раніше: `update-shell` на вже дописаному PATH нічого не робить.
+        $userPath = [Environment]::GetEnvironmentVariable('PATH', 'User')
+        Invoke-Muted $uv tool update-shell
+        if ([Environment]::GetEnvironmentVariable('PATH', 'User') -ne $userPath) {
+            Trace 'path' $binDir
+        }
+    }
 }
 
 $nysh = (Get-Command nysh -ErrorAction SilentlyContinue).Source
@@ -322,6 +394,7 @@ if (-not (Test-Path $nysh)) {
     Say '  а не вашої машини' DarkGray
     throw 'nysh не знайдено після встановлення'
 }
+Trace 'bin' $nysh
 
 # ── 3¾. слід для майстра ─────────────────────────────────────────────────────
 # 🪟 `.exe`-майстер (`install\nyshporka.iss`) кладе ярлики, а при деінсталяції
@@ -342,6 +415,7 @@ try {
 } catch {
     Say "⚠ не вдалося записати $info — ярлики доведеться створити вручну" Yellow
 }
+Trace 'file' $info
 
 # ── 4. робочий простір ───────────────────────────────────────────────────────
 # 🔴 Мовчки не створюємо: тека, що з'явилась сама, — це дослідження, яке потім
@@ -403,8 +477,38 @@ if (-not $NoLauncher) {
     $s.WorkingDirectory = $Home_
     $s.Description = 'Читання рукописних архівних справ'
     $s.Save()
+    Trace 'file' $lnk
     Say "✓ ярлик на робочому столі" Green
 }
+
+# ── 7. що змінилось на цій машині ────────────────────────────────────────────
+# 🔴 Перелік і друкується, і лягає на диск. Друкується — бо людина має право
+# знати, що з нею зробили, не читаючи скрипта; лягає на диск — бо саме з
+# нього `nysh uninstall` знімає РІВНО поставлене, а не те, що здається
+# типовим. Скарга розробника 07.09.2026 була про обидві половини: змінили
+# мовчки і зняти не було чим.
+$traceFile = Join-Path $Home_ 'install-trace.txt'
+Trace 'file' $traceFile
+try {
+    $Trace | Set-Content -LiteralPath $traceFile -Encoding UTF8
+} catch {
+    Say "⚠ не вдалося записати $traceFile — «nysh uninstall» питатиме шляхи" Yellow
+}
+
+Say ""
+Say "Змінено на цій машині:" Cyan
+foreach ($line in $Trace) {
+    $kind, $path = $line -split ' ', 2
+    switch ($kind) {
+        'dir'  { Say "  тека        $path" DarkGray }
+        'bin'  { Say "  команда     $path" DarkGray }
+        'file' { Say "  файл        $path" DarkGray }
+        'path' { Say "  PATH        допис «$path» у змінні середовища користувача" DarkGray }
+        default { Say "  $kind $path" DarkGray }
+    }
+}
+Say "  простір досліджень — тека, яку щойно назвав «nysh init»" DarkGray
+Say "  зняти все це: nysh uninstall" DarkGray
 
 Say ""
 Say "Готово." Cyan

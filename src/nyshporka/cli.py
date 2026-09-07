@@ -599,6 +599,64 @@ def update(
 
 
 @app.command()
+def uninstall(
+    yes: bool = typer.Option(False, "--yes", "-y",
+                             help="зняти; без нього — лише показати"),
+    engines: bool = typer.Option(False, "--engines",
+                                 help="і середовище рушіїв (~2.5 ГБ)"),
+    models: bool = typer.Option(False, "--models", help="і ваги моделей письма"),
+    catalog: bool = typer.Option(False, "--catalog", help="і паки довідників"),
+    skills: bool = typer.Option(False, "--skills", help="і скіли агента"),
+    state: bool = typer.Option(False, "--state", help="і стан застосунку"),
+    everything: bool = typer.Option(False, "--all",
+                                    help="усе перелічене разом"),
+) -> None:
+    """Зняти застосунок: рівно те, що поставили, і нічого з дослідження.
+
+    🔴 Робочий простір не знімається ЖОДНИМ прапорцем — там скани, прочитане й
+    роками зібране дослідження. Знімається пакет, тека застосунку, слід
+    інсталятора й рядок, який інсталятор дописав у PATH; решта — поіменно.
+
+    ⚠ Без `--yes` команда нічого не робить: друкує перелік і виходить. Зняти
+    те, що ставилось годинами, з одного необережного натискання не можна.
+    """
+    from nyshporka.setup import uninstall as U
+
+    if everything:
+        engines = models = catalog = skills = state = True
+    p = U.plan(engines=engines, models=models, catalog=catalog,
+               skills=skills, state=state)
+
+    console.print("[bold]Зняти:[/bold]")
+    for item in p.items:
+        size = f"  [muted]{U.human(item.size)}[/muted]" if item.size else ""
+        console.print(f"  {item.what}{size}")
+        if item.note:
+            console.print(f"    [muted]{item.note}[/muted]")
+    if p.kept:
+        console.print("\n[bold]Лишається:[/bold]")
+        for line in p.kept:
+            console.print(f"  [muted]{line}[/muted]")
+
+    if not yes:
+        console.print("\n[muted]нічого не зроблено — повторіть із `--yes`[/muted]")
+        raise typer.Exit(code=0)
+
+    console.print("")
+    try:
+        for line in U.remove(p, dry=False):
+            console.print(line)
+    except U.Forbidden as exc:
+        # 🔴 Це не «не вийшло», це запобіжник: щось у плані вказало всередину
+        # простору. Зупиняємось, не доробивши, — недознятий застосунок дешевший
+        # за знесене дослідження.
+        console.print(f"[warn]зупинились: {exc}[/warn]")
+        raise typer.Exit(code=1) from None
+    console.print(f"\n[muted]керовані інтерпретатори лишились: "
+                  f"{U.uv_python_hint()}[/muted]")
+
+
+@app.command()
 def doctor(
     as_json: bool = typer.Option(False, "--json"),
 ) -> None:
