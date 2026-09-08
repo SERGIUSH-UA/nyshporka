@@ -236,7 +236,7 @@ def test_verdicts_go_to_the_page_store_including_negatives(case_space: Path) -> 
 
     rows = [
         {"run": "проба", "page": "0004.jpg", "line_no": 3, "verdict": "hit",
-         "surname": "Ковальскій", "note": "розворот"},
+         "surname": "Ковальскій", "note": "розворот", "source": "sheet"},
         {"run": "проба", "page": "0004.jpg", "line_no": 12, "verdict": "noise", "note": ""},
         {"run": "проба", "page": "0004.jpg", "line_no": 1, "verdict": "щось", "note": ""},
     ]
@@ -306,3 +306,90 @@ def test_grep_layers_reads_canon_opys_and_notes_without_the_run_tree(space: Path
     res = runner.invoke(app, ["text", "grep", "Шевченко", "--where", "canon,notes"])
     assert res.exit_code == 0, res.output
     assert "не знайшлось" in res.output and "canon 1" in res.output
+
+
+
+# ── правки за рецензіями 08.09 ───────────────────────────────────────────────
+def test_literals_never_narrow_below_the_regex() -> None:
+    """🔴 Найгірший клас: передфільтр відсіює рядок, який регекс мав би знайти."""
+    from nyshporka.search.store import literals_of
+
+    # група з альтернативою не дає жодного обов'язкового літерала
+    assert literals_of(r"(Ков|Кав)аль") == ["аль"] or literals_of(r"(Ков|Кав)аль") is None
+    assert literals_of(r"(?:Ковалевск|Ковальск)") is None
+    # група з квантифікатором — теж необов'язкова
+    assert literals_of(r"(Коваль)?инск") == ["инск"]
+    assert literals_of(r"Ков(аль|ал)инск") == ["инск"]
+    # звичайні гілки — як були
+    assert literals_of(r"Дол[иіе]щ|Дал[иі]щ") == ["Дол", "Дал"]
+    assert literals_of(r"Липовень?к") == ["Липовен"]
+
+
+def test_grep_with_a_literal_too_short_after_norm_scans_everything(space: Path) -> None:
+    from nyshporka.search import store as ST
+
+    list(ST.ensure_all(["проба"]))
+    got = ST.grep(r"ськ|Коваль", ["проба"])
+    assert not got["prefiltered"] and got["literal_pages"] is None
+    assert got["total"] >= 1
+
+
+def test_whole_stems_never_drop_what_the_person_typed() -> None:
+    from nyshporka.search.store import whole_stems
+
+    keep, dropped = whole_stems(["anna", "gana", "ganna"], keep=["anna"])
+    assert "anna" in keep and "ganna" in keep
+    keep, dropped = whole_stems(["kovalskii", "alskii", "koval-"], keep=["kovalskii"])
+    assert keep == ["kovalskii"] and set(dropped) == {"alskii", "koval-"}
+
+
+def test_short_stems_get_single_grams_in_the_prefilter() -> None:
+    from nyshporka.search.store import match_expr
+
+    expr = match_expr(["kovalskii"])
+    assert '"koval"' in expr or '"kova"' in expr          # одиночна грама є
+    long = match_expr(["kovalevskiego"])
+    assert '("' in long and '"koval"' not in long.replace('("', "")  # лише пари
+
+
+def test_anchor_names_with_apostrophe_or_hyphen_survive() -> None:
+    from nyshporka.search.anchors import _clean_anchor
+
+    assert _clean_anchor("В'ячеслав", ()) == "В'ячеслав"
+    assert _clean_anchor("Марія-Анна", ()) == "Марія-Анна"
+    assert _clean_anchor("митроп.", ()) == ""
+    assert _clean_anchor("Ковальскій", ("koval",)) == ""
+
+
+def test_crop_borrows_geometry_size_from_the_base_run(space: Path) -> None:
+    """Голос Дяка без `.lines.json` ріже за рамками й розміром побратима."""
+    from nyshporka.search import textops as T
+
+    got = T.crop("проба-diak_v4", "4", 3, out=space / "d.png")
+    assert not got.get("error"), got
+    assert got["scale_k"] == 2.0 and got["next"] == 11
+
+
+def test_verdicts_keep_page_type_and_require_a_human_for_surname_verdicts(case_space: Path) -> None:
+    from nyshporka.pagestore import store as PS
+    from nyshporka.pagestore.models import PageNote
+    from nyshporka.search import textops as T
+
+    ref = PS.resolve_case("DAHMO/315/8433")
+    PS.annotate_pages(ref, [PageNote(scan="0004.jpg", page_type="birth", surnames=["Гончаръ"],
+                                     status="partial", method="visual")])
+    rows = [
+        {"run": "проба", "page": "0004.jpg", "line_no": 3, "verdict": "hit",
+         "surname": "Ковальскій", "note": "", "source": "sheet"},
+        {"run": "проба", "page": "0004.jpg", "line_no": 7, "verdict": "other-surname",
+         "surname": "", "note": "агент без гортача"},
+        {"run": "проба", "page": "0004.jpg", "line_no": 12, "verdict": "noise", "note": ""},
+    ]
+    f = case_space / "v3.json"
+    f.write_text(json.dumps(rows, ensure_ascii=False), encoding="utf-8")
+    got = T.verdicts_import(f, "DAHMO/315/8433", q="Ковальскій")
+    assert not got.get("error"), got
+    assert got["imported"] == 2 and len(got["bad"]) == 1
+    assert "виносить людина" in got["bad"][0]
+    st = PS.case_status(ref, scans=["0004.jpg"])["scans"][0]
+    assert st["page_type"] == "birth" and st["surnames_n"] == 2

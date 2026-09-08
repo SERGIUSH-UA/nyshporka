@@ -186,6 +186,28 @@ def _rotated(im: Any, orient: int) -> Any:
     return im
 
 
+def _geometry_size(run: str, page: str) -> list[int] | None:
+    """Розмір зображення, у якому лежать рамки: свій `.lines.json`, інакше —
+    побратима тієї самої справи (стор позичає в нього й рамки)."""
+    from nyshporka import htr_store as S
+
+    geom = S.page_lines(run, page) or {}
+    size = geom.get("size")
+    if size:
+        return [int(size[0]), int(size[1])]
+    if "-" in run:
+        base = run.rsplit("-", 1)[0]
+        bmeta, mine = S.load_meta(base) or {}, S.load_meta(run) or {}
+        same = (mine.get("case_key") and mine.get("case_key") == bmeta.get("case_key")) or \
+               (mine.get("case_dir") and mine.get("case_dir") == bmeta.get("case_dir"))
+        if same:
+            geom = S.page_lines(base, page) or {}
+            size = geom.get("size")
+            if size:
+                return [int(size[0]), int(size[1])]
+    return None
+
+
 def crop(scope: str, page: str, line: int, *, with_next: bool = True, wide: bool = False,
          pad: int = 12, scale: float = 1.0, out: str | Path | None = None,
          ) -> dict[str, Any]:
@@ -240,8 +262,7 @@ def crop(scope: str, page: str, line: int, *, with_next: bool = True, wide: bool
         nxt = by_no.get(nxt_no) if nxt_no else None
         if nxt and nxt.box:
             boxes.append(nxt.box)
-    geom = S.page_lines(run, pg) or {}
-    size = geom.get("size")
+    size = _geometry_size(run, pg)
     got = S.resolve_scan(run, pg)
     if got is None:
         return {"error": f"кадру для {run} · {pg} на цій машині немає: мета веде в "
@@ -515,9 +536,18 @@ def find(q: str, scope: str = "", *, thresh: int = 78, limit: int = 40,
 
     in_case = bool(scope)
     res = S.search(q, name=scope or None, thresh=thresh, limit=limit, context=context,
-                   given=True, folk=False, rank=True, profile=True, anchors=in_case)
+                   given=True, folk=False, rank=True, profile=True, anchors=False)
     if res.get("error") and not res.get("hits"):
         return {"error": str(res["error"])}
+    # 🔴 Якорі — лише коли запит про рід профілю: кін береться з профілю й
+    # канону, і на чуже прізвище канал підносив би імена роду профілю як
+    # «наших людей» (рецензія 08.09).
+    about_profile = bool(res.get("profile_of"))
+    anchor: dict[str, Any] = {"on": False}
+    if in_case and about_profile:
+        with_anchor = S.search(q, name=scope, thresh=thresh, limit=limit, context=0,
+                               given=True, folk=False, rank=True, profile=True, anchors=True)
+        anchor = with_anchor.get("anchor") or {"on": True}
     key = str(res.get("scope_key") or "")
     sc: dict[str, Any] = scope_runs(scope) if scope else {"rows": S.list_cases(), "kind": "all"}
     rows: list[dict[str, Any]] = list(sc["rows"])
@@ -539,26 +569,42 @@ def find(q: str, scope: str = "", *, thresh: int = 78, limit: int = 40,
         finally:
             conn.close()
     fresh = sum(1 for r in rows if known.get(str(r["name"])) == ST.stamp_of(str(r["name"])))
-    pages_hit = len({(h["name"], h["page"]) for h in res.get("hits") or []})
-    anchor = res.get("anchor") or {}
+    total = int(res.get("total") or 0)
+    shown = list(res.get("hits") or [])
+    # Сторінок із хітами — лише коли показано ВСЕ; інакше число брехало б
+    # («262387 хітів / 2 стор.» на обрізаній видачі).
+    pages_hit: int | None = (len({(h["name"], h["page"]) for h in shown})
+                             if total <= len(shown) else None)
+    has_latin = any("skryba" in v for v in voices) or "latin" in scripts
+    if has_latin and "latin" not in scripts:
+        scripts = sorted({*scripts, "latin"})
     channels: list[dict[str, Any]] = [
         {"id": "surname", "label": "прізвище (ціле слово + корінь, склейки в кандидатах)",
-         "ran": True, "hits": int(res.get("total") or 0), "pages": pages_hit,
+         "ran": True, "hits": total, "pages": pages_hit,
          "stems": len(res.get("stems") or []), "dropped": res.get("stems_dropped") or []},
         {"id": "anchor", "label": "якорі: ім'я + по батькові роду у вікні років",
          "ran": bool(anchor.get("on")) and bool(anchor.get("given")) and bool(anchor.get("patronymic")),
          "hits": int(anchor.get("total") or 0),
          "why": ("потребує справи (--case): вікно якорів береться з її років" if not in_case
+                 else "запит не про рід профілю — кін профілю тут ні до чого" if not about_profile
                  else ("у профілі й каноні немає пари ім'я + по батькові у вікні "
                        f"{anchor.get('years') or 'справи'}" if anchor.get("on") else ""))},
         {"id": "latin", "label": "латинський голос (Скриба) у тій самій області",
-         "ran": any("skryba" in v or v == "kraken" for v in voices) or "latin" in scripts,
-         "why": "" if any("skryba" in v for v in voices) or "latin" in scripts
+         "ran": has_latin,
+         "why": "" if has_latin
                 else "у області немає прогону латинкою: польський текст читати Скрибою"},
     ]
     selfcheck: dict[str, Any] | None = None
     if in_case and key:
-        rep = SC.run(scope, q, thresh=max(thresh, 78), limit=max(limit, 100))
+        # Один пошук замість трьох: широка видача береться лише коли показ
+        # обрізаний, а самоперевірка рахує по готових хітах.
+        all_hits = shown
+        if total > len(shown):
+            all_hits = list(S.search(q, name=scope, thresh=thresh, limit=total, context=0,
+                                     given=True, folk=False, rank=True, profile=True,
+                                     anchors=False).get("hits") or [])
+        rep = SC.run(scope, q, thresh=max(thresh, 78), limit=max(limit, 100),
+                     shown_hits=shown, all_hits=all_hits)
         selfcheck = SC.as_dict(rep)
         channels.append({"id": "selfcheck", "label": "самоперевірка на аркушах, виписаних оком",
                          "ran": bool(rep.measured), "why": rep.why or "",
@@ -753,7 +799,7 @@ function collect(){{
     c.classList.add('done');
     rows.push({{run:c.dataset.run,page:c.dataset.page,line_no:parseInt(c.dataset.line),
       verdict:v,surname:c.querySelector('.surname').value.trim(),
-      note:c.querySelector('.note').value.trim()}});
+      note:c.querySelector('.note').value.trim(),source:'sheet'}});
   }});
   const txt=JSON.stringify(rows,null,1);
   document.getElementById('out').value=txt;
@@ -793,6 +839,7 @@ def verdicts_import(path: str | Path, scope: str, *, q: str = "", agent: str = "
     if not key:
         return {"error": f"область «{scope}» не має ключа справи — вердикти нікуди класти"}
     ref = PS.resolve_case(key)
+    existing = (PS.load_case(ref) or PS._empty_case(ref)).pages
     items: dict[str, dict[str, Any]] = {}
     notes: list[PageNote] = []
     bad: list[str] = []
@@ -804,6 +851,14 @@ def verdicts_import(path: str | Path, scope: str, *, q: str = "", agent: str = "
         if v not in VERDICTS or not page:
             bad.append(str(r))
             continue
+        # 🔴 Вердикт про прізвище («наш рід», «уже в каноні», «інше прізвище»)
+        # приймається лише з гортача, тобто від людини (`source: sheet`, який
+        # ставить кнопка). Агент, зібравши JSON руками, може закрити хіба
+        # «не прізвище» й «не читається» — те, що йому й дозволено.
+        if v in ("hit", "known", "other-surname") and str(r.get("source") or "") != "sheet":
+            bad.append(f"{r.get('run')}|{page}|{r.get('line_no')}: «{VERDICT_LABEL[v]}» "
+                       f"без походження з гортача — вердикт про прізвище виносить людина")
+            continue
         ck = f"{r.get('run')}|{page}|{r.get('line_no')}"
         items[ck] = {"verdict": v, "note": str(r.get("note") or ""),
                      "surname": str(r.get("surname") or ""), "q": q,
@@ -811,9 +866,13 @@ def verdicts_import(path: str | Path, scope: str, *, q: str = "", agent: str = "
         surnames = [str(r["surname"])] if r.get("surname") and v in ("hit", "known") else []
         comment = f"вердикт пошуку{(' «' + q + '»') if q else ''}, рядок {r.get('line_no')}: " \
                   f"{VERDICT_LABEL[v]}" + (f" — {r['note']}" if r.get("note") else "")
-        notes.append(PageNote(scan=page, page_type="other", surnames=surnames,
-                              status="partial", method="visual", comment=comment,
-                              agent=agent))
+        prev = existing.get(page)
+        # Тип і спосіб уже описаного аркуша не затираються вердиктом рядка:
+        # «birth», побачений оком, не стає «other» (рецензія 08.09).
+        notes.append(PageNote(scan=page, page_type=prev.page_type if prev else "other",
+                              surnames=surnames, status="partial",
+                              method=prev.method if prev else "visual",
+                              comment=comment, agent=agent))
     if not items:
         return {"error": "жодного дійсного вердикту в файлі", "bad": bad[:5]}
     rep = PS.annotate_pages(ref, notes)

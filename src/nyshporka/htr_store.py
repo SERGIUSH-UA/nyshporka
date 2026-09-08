@@ -376,6 +376,13 @@ def list_cases() -> list[dict[str, Any]]:
     stamp = _runs_stamp()
     if _RUNS_CACHE is not None and _RUNS_CACHE[0] == stamp:
         return _RUNS_CACHE[1]
+    # 🔴 Кеш на диску за тим самим штампом. Читання 1300 мет коштує 3 с у
+    # КОЖНІЙ команді нового процесу (`ctx`, `crop`, `state`) — і саме ці 3 с
+    # робили «< 1 с» недосяжним при готовому сторі.
+    cached = _runs_cache_read(stamp)
+    if cached is not None:
+        _RUNS_CACHE = (stamp, cached)
+        return cached
     out: list[dict[str, Any]] = []
     if not HTR_ROOT.is_dir():
         return out
@@ -435,7 +442,35 @@ def list_cases() -> list[dict[str, Any]]:
         })
     out.sort(key=lambda c: c["updated"], reverse=True)
     _RUNS_CACHE = (stamp, out)
+    _runs_cache_write(stamp, out)
     return out
+
+
+def _runs_cache_path() -> Path:
+    return workspace().derived / "runs_cache.json"
+
+
+def _runs_cache_read(stamp: tuple[int, int]) -> list[dict[str, Any]] | None:
+    try:
+        data = json.loads(_runs_cache_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(data, dict) or list(data.get("stamp") or []) != list(stamp):
+        return None
+    rows = data.get("rows")
+    return [dict(r) for r in rows] if isinstance(rows, list) else None
+
+
+def _runs_cache_write(stamp: tuple[int, int], rows: list[dict[str, Any]]) -> None:
+    p = _runs_cache_path()
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        tmp = p.with_suffix(f".{os.getpid()}.tmp")
+        tmp.write_text(json.dumps({"stamp": list(stamp), "rows": rows}, ensure_ascii=False),
+                       encoding="utf-8")
+        tmp.replace(p)
+    except OSError:
+        pass  # кеш — зручність, не умова роботи
 
 
 def runs_by_case_dir() -> dict[str, list[dict[str, Any]]]:
@@ -991,7 +1026,7 @@ def search(q: str, name: str | None = None, thresh: int = 78,
         # їх сам; стор уже має склейки серед кандидатів, а хвіст «щинскій» як
         # самостійний стем збігається на 100 з кожним «-щинскій» у книзі:
         # заміряно на 230-1-13 — 2113 хітів, верхівка суцільно чужа.
-        stems, dropped = ST.whole_stems(stems)
+        stems, dropped = ST.whole_stems(stems, keep=asked)
         got = ST.sweep(stems, names, thresh=thresh, build_budget=budget)
     else:
         got = D.sweep(stems, names, thresh=thresh, build_budget=budget)
@@ -1197,11 +1232,14 @@ def anchor_hits(rows: list[dict[str, Any]], k: Any) -> list[dict[str, Any]]:
     і живе в межах справи — на корпусі це було б перечитування всього декоду.
     """
     from nyshporka.search import anchors as A
+    from nyshporka.search import store as ST
 
     out: list[dict[str, Any]] = []
     for row in rows:
         name = row["name"]
-        for page, ln_no, raw, _cands in _case_index(name):
+        # 🔴 Текст береться зі стору, коли він свіжий: обхід `.txt` теки прогону
+        # коштував ~9 с на справу й суперечив усьому задуму стору.
+        for page, ln_no, raw in _lines_for_anchors(name, ST):
             pair = A.scan(raw, k)
             if pair is None:
                 continue
@@ -1216,6 +1254,25 @@ def anchor_hits(rows: list[dict[str, Any]], k: Any) -> list[dict[str, Any]]:
                         "case_key": row.get("case_key") or "",
                         "shifra": row.get("shifra") or ""})
     return out
+
+
+def _lines_for_anchors(name: str, ST: Any) -> Iterator[tuple[str, int, str]]:
+    """Рядки прогону для каналу якорів: зі стору, інакше з файлів."""
+    if ST.exists() and ST.is_fresh(name):
+        conn = ST.connect(readonly=True)
+        try:
+            rid = conn.execute("select id from runs where run=?", (name,)).fetchone()
+            if rid:
+                for pid, page in conn.execute(
+                        "select id, page from pages where run_id=? order by id", (rid[0],)):
+                    for i, raw in enumerate(ST._raw_lines(conn, int(pid)), 1):
+                        if raw.strip():
+                            yield str(page), i, raw
+                return
+        finally:
+            conn.close()
+    for page, ln_no, raw, _cands in _case_index(name):
+        yield page, ln_no, raw
 
 
 def mark_phantoms(hits: list[dict[str, Any]]) -> tuple[int, float]:

@@ -177,7 +177,9 @@ def _clean_anchor(tok: str, subs: tuple[str, ...]) -> str:
     відпадають обрізки на кшталт «митроп.» — крапка в якорі не буває.
     """
     s = (tok or "").strip()
-    if not s or not all(ch.isalpha() for ch in s):
+    # Апостроф і дефіс усередині слова законні: «В'ячеслав», «Лук'янович»,
+    # «Марія-Анна». Крапка й цифри — ні: «митроп.» якорем не буває.
+    if not s or not re.fullmatch(r"[^\W\d_]+(?:['’ʼ-][^\W\d_]+)*", s):
         return ""
     n = normalize_archival(s)
     if any(sub and sub in n for sub in subs):

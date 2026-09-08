@@ -62,6 +62,9 @@
 """
 from __future__ import annotations
 
+import contextlib
+import hashlib
+import inspect
 import json
 import re
 import sqlite3
@@ -96,6 +99,9 @@ def kgram_len(stem: str) -> int:
 
 #: Мінімальний розрив між двома грамами пари: далекі докази, не сусідні.
 PAIR_GAP = 2
+#: Від якої довжини стема доказом є лише ПАРА грам. Коротшим вистачає одної:
+#: заміряно, що пари губили «kovlskii», «fedor», «ivnova» (91–94 бали).
+PAIR_MIN_LEN = 11
 
 
 def path() -> Path:
@@ -142,6 +148,14 @@ def connect(*, readonly: bool = False) -> sqlite3.Connection:
     conn.execute("pragma cache_size=-100000")
     if not readonly:
         _ensure_schema(conn)
+    else:
+        row = None
+        with contextlib.suppress(sqlite3.Error):
+            row = conn.execute("select value from meta where key='schema'").fetchone()
+        if row is not None and int(row[0]) != SCHEMA:
+            conn.close()
+            raise RuntimeError(f"стор зібрано схемою {row[0]}, чинна {SCHEMA} — "
+                               f"перебудувати: nysh text index --rebuild")
     return conn
 
 
@@ -164,6 +178,28 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
 
 def exists() -> bool:
     return path().is_file()
+
+
+def rules_hash() -> str:
+    """Відбиток правил, з яких зроблені кандидати в блобах.
+
+    🔴 Приймач для `pages.cands`: правила склейки (`page_candidates`),
+    нормалізація й геометричні константи можуть змінитись без зміни `SCHEMA`,
+    і стор тоді мовчки тримав би старих кандидатів під свіжими штампами.
+    """
+    from nyshporka import htr_store as S
+    from nyshporka.utils import translit as T
+
+    src = "\n".join([inspect.getsource(S.page_candidates), inspect.getsource(T.normalize_archival),
+                     inspect.getsource(successors), inspect.getsource(_geo_cands),
+                     str(S.LINE_BREAK_WINDOW), str(COL_GAP), str(SUCC_REACH), str(MARK)])
+    return hashlib.blake2b(src.encode("utf-8"), digest_size=8).hexdigest()
+
+
+def rules_stale(conn: sqlite3.Connection) -> bool:
+    """Чи кандидати стору зроблені іншими правилами, ніж чинні."""
+    row = conn.execute("select value from meta where key='rules'").fetchone()
+    return bool(row) and row[0] != rules_hash()
 
 
 # ── свіжість ─────────────────────────────────────────────────────────────────
@@ -208,8 +244,8 @@ def _norm(s: str) -> str:
     return S._norm(s)
 
 
-def _geometry_for(run_dir: Path, run: str, stem: str, nlines: int
-                  ) -> list[list[int]] | None:
+def _geometry_for(run_dir: Path, run: str, stem: str, nlines: int,
+                  meta: dict[str, Any] | None = None) -> list[list[int]] | None:
     """Рамки рядків сторінки: свої, а як їх немає — з прогону-побратима.
 
     🔴 Голос Дяка не пише `.lines.json` — він читає ті самі рядки тією самою
@@ -221,7 +257,10 @@ def _geometry_for(run_dir: Path, run: str, stem: str, nlines: int
     cands = [own]
     if "-" in run:
         base = run_dir.parent / run.rsplit("-", 1)[0]
-        if base.is_dir():
+        # 🔴 Побратим — лише прогін ТІЄЇ САМОЇ справи. Обрізання імені по
+        # останньому дефісу з «met1863-904-25» давало «met1863-904» — іншу
+        # справу, чиї рамки на коротких сторінках збігались числом рядків.
+        if base.is_dir() and _same_case(meta, base):
             cands.append(base / f"{stem}.lines.json")
     for f in cands:
         if not f.is_file():
@@ -279,6 +318,18 @@ def _geo_cands(cands: dict[int, list[str]], lines: list[Line],
             cands.setdefault(target, []).append(n)
 
 
+def _same_case(meta: dict[str, Any] | None, base: Path) -> bool:
+    """Чи прогін `base` про ту саму справу, що й `meta`."""
+    from nyshporka import htr_store as S
+
+    if not meta:
+        return False
+    other = S.load_meta(base.name) or {}
+    key, okey = (meta.get("case_key") or "").strip(), (other.get("case_key") or "").strip()
+    cd, ocd = (meta.get("case_dir") or "").strip(), (other.get("case_dir") or "").strip()
+    return bool((key and key == okey) or (cd and cd == ocd))
+
+
 def _delete_run(conn: sqlite3.Connection, run_id: int) -> None:
     pids = [r[0] for r in conn.execute("select id from pages where run_id=?", (run_id,))]
     for pid in pids:
@@ -310,6 +361,8 @@ def index_run(conn: sqlite3.Connection, run: str) -> int:
     old = conn.execute("select id from runs where run=?", (run,)).fetchone()
     if old:
         _delete_run(conn, int(old[0]))
+    if conn.execute("select 1 from meta where key='rules'").fetchone() is None:
+        conn.execute("insert into meta(key,value) values('rules',?)", (rules_hash(),))
     conn.execute(
         "insert into runs(run, stamp, case_key, case_dir, model, script, engine_ids, "
         "indexed_at) values(?,?,?,?,?,?,?,?)",
@@ -326,8 +379,10 @@ def index_run(conn: sqlite3.Connection, run: str) -> int:
         lines = text.splitlines()
         if len(lines) > MAX_LINES:
             lines = lines[:MAX_LINES]
-        page = stem2page.get(txt.stem, txt.name)
-        boxes = _geometry_for(d, run, txt.stem, len(lines))
+        # 🔴 Без запису в меті сторінка зветься ОСНОВОЮ імені, не «0002.txt»:
+        # ім'я з «.txt» протікало у вердикти та кроп як неіснуючий скан.
+        page = stem2page.get(txt.stem, txt.stem)
+        boxes = _geometry_for(d, run, txt.stem, len(lines), meta)
         conn.execute(
             "insert into pages(run_id, page, stem, nlines, geo, raw) values(?,?,?,?,?,?)",
             (run_id, page, txt.stem, len(lines), int(boxes is not None),
@@ -400,6 +455,9 @@ def ensure_all(runs: list[str], *, force: bool = False,
 
     conn = connect()
     try:
+        if force:
+            conn.execute("delete from meta where key='rules'")
+            conn.commit()
         known = stamps(conn)
         total = len(runs)
         for i, run in enumerate(runs, 1):
@@ -410,8 +468,16 @@ def ensure_all(runs: list[str], *, force: bool = False,
             if st and known.get(run) == st and not force:
                 yield run
                 continue
-            if index_run(conn, run) > 0:
-                yield run
+            try:
+                if index_run(conn, run) > 0:
+                    yield run
+            except sqlite3.OperationalError as exc:
+                # Друга сесія індексує той самий стор: цей прогін пропускаємо,
+                # решта переліку не валиться; штамп скаже, що він застарілий.
+                if "locked" not in str(exc).lower():
+                    raise
+                with contextlib.suppress(sqlite3.Error):
+                    conn.rollback()
         conn.execute("insert into fts(fts) values('optimize')")
         conn.commit()
     finally:
@@ -450,11 +516,15 @@ def stats() -> dict[str, Any]:
         fresh = sum(1 for r in runs if known.get(r) and known[r] == stamp_of(r))
         row = conn.execute("select coalesce(sum(pages),0), coalesce(sum(lines),0), "
                            "coalesce(sum(geo),0) from runs").fetchone()
+        rstale = rules_stale(conn)
     finally:
         conn.close()
     return {"runs": len(runs), "indexed": fresh, "stale": len(runs) - fresh,
             "bytes": p.stat().st_size, "pages": int(row[0]), "lines": int(row[1]),
-            "geo": int(row[2]), "file": str(p), "exists": True}
+            "geo": int(row[2]), "file": str(p), "exists": True,
+            # Правила склейки змінились після збірки: кандидати в блобах старі,
+            # штампи цього не бачать — лише `text index --rebuild`.
+            "rules_stale": rstale}
 
 
 # ── читання сторінки зі стору ────────────────────────────────────────────────
@@ -590,23 +660,27 @@ def successors(lines: list[Line]) -> dict[int, int]:
 
 
 # ── зіставлення ──────────────────────────────────────────────────────────────
-def whole_stems(stems: list[str]) -> tuple[list[str], list[str]]:
+def whole_stems(stems: list[str], keep: tuple[str, ...] | list[str] = ()
+                ) -> tuple[list[str], list[str]]:
     """Лишити цілі написання; голови, хвости й склейки переносу — геть.
 
-    Фрагмент — стем із дефісом чи пробілом, або строгий префікс/суфікс іншого
-    стема. Повертає (цілі, відкинуті); порядок цілих збережено.
+    Фрагмент — стем із дефісом чи пробілом, або строгий СУФІКС іншого стема
+    («alskii» ⊂ «kovalskii» — хвіст переносу). Префікс фрагментом не є:
+    «kovalska» ⊂ «kovalskago» — це відмінкова форма, не уламок.
+
+    🔴 `keep` — те, що набрала людина: воно не викидається ніколи. «Анна» після
+    розкриття гнізда імен давала «ganna», і суфіксне правило викидало саме
+    набране слово (рецензія 08.09). Повертає (цілі, відкинуті).
     """
-    clean = [s for s in stems if s and "-" not in s and " " not in s]
-    keep: list[str] = []
+    asked = set(keep)
+    clean = [s for s in stems if s and (("-" not in s and " " not in s) or s in asked)]
+    out: list[str] = []
     dropped: list[str] = [s for s in stems if s not in clean]
     for s in clean:
-        # Хвіст — строгий СУФІКС іншого стема («alskii» ⊂ «kovalskii»).
-        # Префікс не є фрагментом: відмінкові форми одного слова є префіксами
-        # одна одної («kovalska» ⊂ «kovalskago»), і викинути їх означало
-        # б втратити самі відмінки, заради яких профіль їх тримає.
-        tail = any(o != s and len(o) > len(s) and o.endswith(s) for o in clean)
-        (dropped if tail else keep).append(s)
-    return keep, dropped
+        frag = s not in asked and any(o != s and len(o) > len(s) and o.endswith(s)
+                                      for o in clean)
+        (dropped if frag else out).append(s)
+    return out, dropped
 
 
 def match_expr(stems: list[str]) -> str:
@@ -631,6 +705,11 @@ def match_expr(stems: list[str]) -> str:
             terms.add(f'"{s}"')
             continue
         grams = [s[i:i + k] for i in range(len(s) - k + 1)]
+        if len(s) < PAIR_MIN_LEN:
+            # 🔴 Короткому стему пари не лишають місця: одна правка в
+            # «kovalskii» (9 літер) вбиває три сусідні грами, і другого доказу
+            # немає — «kovlskii» (94 бали) губився. Для таких — будь-яка грама.
+            terms.update(f'"{g}"' for g in grams)
         gap = PAIR_GAP if k >= 4 else 2
         for i, a in enumerate(grams):
             for b in grams[i + gap:]:
@@ -686,15 +765,31 @@ def _fts_rows(conn: sqlite3.Connection, expr: str, run_ids: list[int]
     if not run_ids or len(run_ids) >= min(SCOPE_RANGES_MAX, int(total)):
         yield from conn.execute("select rowid from fts where fts match ?", (expr,))
         return
-    marks = ",".join("?" * len(run_ids))
-    row = conn.execute(f"select min(id), max(id) from pages where run_id in ({marks})",
-                       run_ids).fetchone()
-    if not row or row[0] is None:
-        return
-    lo, hi = int(row[0]) << LINE_BITS, ((int(row[1]) + 1) << LINE_BITS) - 1
-    yield from conn.execute(
-        "select rowid from fts where fts match ? and rowid between ? and ?",
-        (expr, lo, hi))
+    # 🔴 Блоки, а не один спільний відрізок. Голос, доіндексований пізніше,
+    # лежить у кінці файлу, і відрізок від першого до останнього накривав
+    # третину корпусу: 6.6 с проти 2.2 с сумою блоків (рецензія 08.09).
+    for lo, hi in _scope_blocks(conn, run_ids):
+        yield from conn.execute(
+            "select rowid from fts where fts match ? and rowid between ? and ?",
+            (expr, lo, hi))
+
+
+def _scope_blocks(conn: sqlite3.Connection, run_ids: list[int]) -> list[tuple[int, int]]:
+    """Суцільні відрізки rowid, які накривають сторінки цих прогонів."""
+    spans: list[tuple[int, int]] = []
+    for rid in run_ids:
+        row = conn.execute("select min(id), max(id) from pages where run_id=?",
+                           (rid,)).fetchone()
+        if row and row[0] is not None:
+            spans.append((int(row[0]), int(row[1])))
+    spans.sort()
+    out: list[tuple[int, int]] = []
+    for a, b in spans:
+        if out and a <= out[-1][1] + 1:
+            out[-1] = (out[-1][0], max(out[-1][1], b))
+        else:
+            out.append((a, b))
+    return [(a << LINE_BITS, ((b + 1) << LINE_BITS) - 1) for a, b in out]
 
 
 def _cands_batch(conn: sqlite3.Connection, wanted: dict[int, set[int]], *,
@@ -904,6 +999,11 @@ def literals_of(pattern: str) -> list[str] | None:
     """
     depth = 0
     branches: list[str] = [""]
+    # 🔴 Група з альтернативою «(Дол|Дал)» або з квантифікатором «(Долищ)?»
+    # не гарантує ЖОДНОЇ своєї літери: перша версія брала «Дол» як обов'язкове
+    # і передфільтр відсіював усі «Далищ…» — на корпусі 1 370 рядків замість
+    # 24 318 (рецензія 08.09). Тепер уміст такої групи стирається до `\x00`.
+    groups: list[tuple[int, bool]] = []      # (позиція початку в гілці, є «|»)
     i = 0
     in_class = False
     while i < len(pattern):
@@ -921,13 +1021,22 @@ def literals_of(pattern: str) -> list[str] | None:
         if ch == "[":
             in_class = True
         elif ch == "(":
-            depth += 1
             branches[-1] += "\x00"
+            groups.append((len(branches[-1]), False))
+            depth += 1
         elif ch == ")":
             depth -= 1
+            start, alt = groups.pop() if groups else (0, False)
+            quant = i + 1 < len(pattern) and pattern[i + 1] in "?*+{"
+            if alt or quant:
+                branches[-1] = branches[-1][:start]
             branches[-1] += "\x00"
         elif ch == "|" and depth == 0:
             branches.append("")
+        elif ch == "|":
+            if groups:
+                groups[-1] = (groups[-1][0], True)
+            branches[-1] += "\x00"
         elif ch in "?*+{":
             # квантифікатор робить попередню літеру необов'язковою
             if branches[-1] and branches[-1][-1] != "\x00":
@@ -970,19 +1079,21 @@ def grep(pattern: str, runs: list[str], *, ignore_case: bool = True,
         pages = _pages_of(conn, list(ids.values()))
         lits = literals_of(pattern)
         pids: set[int]
-        if lits:
-            phrases = []
-            for lit in lits:
-                n = _norm(lit)
-                if len(n) >= 3:
-                    phrases.append(f'"{n}"')
+        phrases: list[str] = []
+        for lit in lits or []:
+            n = _norm(lit)
+            if len(n) >= 3:
+                phrases.append(f'"{n}"')
+        # 🔴 Кожна гілка мусить дати фразу. «ськ» після нормалізації — «sk»,
+        # дві літери; доти така гілка мовчки випадала з OR, а порожній вираз
+        # давав нуль сторінок із позначкою «звужено» (рецензія 08.09).
+        if lits and len(phrases) == len(lits):
             expr = " OR ".join(phrases)
             pids = set()
-            if expr:
-                for (rid,) in conn.execute("select rowid from fts where fts match ?", (expr,)):
-                    pid = rid >> LINE_BITS
-                    if pid in pages:
-                        pids.add(pid)
+            for (rid,) in _fts_rows(conn, expr, list(ids.values())):
+                pid = rid >> LINE_BITS
+                if pid in pages:
+                    pids.add(pid)
             prefiltered = True
         else:
             pids = set(pages)
@@ -1009,7 +1120,11 @@ def grep(pattern: str, runs: list[str], *, ignore_case: bool = True,
         return {"hits": hits, "total": total, "runs": len(ids),
                 "runs_asked": len(runs), "unindexed": len(runs) - len(ids),
                 "pages": len(pages), "pages_scanned": scanned_pages,
-                "prefiltered": prefiltered, "literals": lits or []}
+                "prefiltered": prefiltered, "literals": lits or [],
+                # Скільки сторінок мали літерал У НОРМІ: нуль регексу при
+                # непорожньому передфільтрі означає орфографію («ь»/«ъ»), а
+                # не відсутність слова — і про це треба сказати.
+                "literal_pages": len(pids) if prefiltered else None}
     finally:
         conn.close()
 

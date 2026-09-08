@@ -339,6 +339,8 @@ def find_cmd(
                 nums = f" {ch['hits']}"
                 if ch.get("pages"):
                     nums += f"/{ch['pages']} стор."
+                elif ch["id"] == "surname" and ch["hits"]:
+                    nums += " (сторінок не лічено: показ обрізаний)"
             if ch["id"] == "selfcheck":
                 nums = f" око {ch['eye']} · знайдено {ch['found']} · подано {ch['shown']}"
                 if ch.get("missed"):

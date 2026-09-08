@@ -63,7 +63,9 @@ class Report:
         return round(100 * len(part) / len(self.denom)) if self.denom else 0
 
 
-def run(case: str, q: str = "", *, thresh: int = 80, limit: int = 100) -> Report:
+def run(case: str, q: str = "", *, thresh: int = 80, limit: int = 100,
+        shown_hits: list[dict[str, Any]] | None = None,
+        all_hits: list[dict[str, Any]] | None = None) -> Report:
     """Поміряти recall пошуку на тому, що вже виписало око.
 
     ⚠ `q` за замовчуванням береться з профілю простору: міряти треба саме тим
@@ -116,13 +118,21 @@ def run(case: str, q: str = "", *, thresh: int = 80, limit: int = 100) -> Report
                    f"справі вірити не можна")
         return rep
 
-    got = S.search(q, name=ref.key, thresh=thresh, limit=limit)
-    rep.shown = sorted({_pid(h["page"]) for h in got["hits"]} & set(rep.denom))
+    # Хіти можна передати готовими (`find` уже їх має) — тоді пошук не
+    # повторюється двічі заради тих самих чисел.
+    if shown_hits is None:
+        got = S.search(q, name=ref.key, thresh=thresh, limit=limit)
+        shown_hits, total = got["hits"], int(got["total"] or 0)
+    else:
+        total = len(all_hits) if all_hits is not None else len(shown_hits)
+    rep.shown = sorted({_pid(h["page"]) for h in shown_hits} & set(rep.denom))
     # 🔴 «Знайдено» рахується по ВСІХ хітах понад порогом, а «подано» — лише по
     # тих, що влізли в `limit`. Розрив між ними і є те, чого одне число не
     # показує: сторінка знайшлась, а на око не поїхала.
-    wide = S.search(q, name=ref.key, thresh=thresh, limit=max(limit, got["total"]))
-    rep.found = sorted({_pid(h["page"]) for h in wide["hits"]} & set(rep.denom))
+    if all_hits is None:
+        wide = S.search(q, name=ref.key, thresh=thresh, limit=max(limit, total))
+        all_hits = wide["hits"]
+    rep.found = sorted({_pid(h["page"]) for h in all_hits} & set(rep.denom))
     return rep
 
 

@@ -38,6 +38,9 @@ def text_state(_: NoArgs) -> Envelope:
     env = ok(st)
     if st["stale"]:
         env.suggest("text.index", "догнати стор по решті прогонів")
+    if st.get("rules_stale"):
+        env.warn("rules_stale", "правила склейки кандидатів змінились після збірки — "
+                                "перебудувати: nysh text index --rebuild")
     return env
 
 
@@ -70,6 +73,9 @@ def text_index(a: TextIndexArgs) -> Envelope:
     built = sum(1 for _ in ST.ensure_all(runs, force=a.rebuild))
     st = ST.stats()
     env = ok({"built": built, "asked": len(runs), **st})
+    if st.get("rules_stale"):
+        env.warn("rules_stale", "правила склейки кандидатів змінились після збірки — "
+                                "кандидати в сторі старі; перебудувати: nysh text index --rebuild")
     if st["stale"] and not a.case:
         env.warn("some_not_indexed",
                  f"{st['stale']} прогонів лишились поза стором — найчастіше це "
@@ -167,6 +173,14 @@ def text_grep(a: TextGrepArgs) -> Envelope:
         env.warn("zero_with_denominator",
                  f"не знайшлось — прочесано прогонів: {res['runs']}, "
                  f"сторінок: {res['pages_scanned']}")
+        if res.get("literal_pages"):
+            # 🔴 Літерал є в НОРМАЛІЗОВАНОМУ тексті, а регекс по сирому не
+            # збігся: майже завжди орфографія («Стопковськ» проти «Стопковской»
+            # без «ь»). Це нуль по написанню, а не по слову.
+            env.warn("literal_in_norm",
+                     f"літерал регексу є в нормалізованому тексті на "
+                     f"{res['literal_pages']} стор., але сам регекс по сирому рядку не "
+                     f"збігся — перевірте написання (ь/ъ/і/ѣ) або шукайте `nysh search`")
     return env
 
 
