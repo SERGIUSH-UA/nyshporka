@@ -94,13 +94,27 @@ _PATR_SUFFIX = re.compile(r"(ovic|evic|ovna|evna|icna|ova|eva|ina|ov|ev|in|a)$")
 _PATR_TAIL = re.compile(r"[ie]+$")
 
 
+_GIVEN_MEMO: dict[str, str] = {}
+_PATR_MEMO: dict[str, str] = {}
+
+
 def norm_given(value: str | None) -> str:
-    """Канонічна форма особового імені; невідоме — просто нормалізований рядок."""
-    n = normalize_archival(value or "")
-    return _TO_CANON.get(n, n)
+    """Канонічна форма особового імені; невідоме — просто нормалізований рядок.
+
+    Пам'ять на токен: канал якорів нормалізує мільйони токенів за один прохід
+    справи, і саме тут ішло 20 із 27 с пошуку (замір 08.09).
+    """
+    key = value or ""
+    got = _GIVEN_MEMO.get(key)
+    if got is None:
+        n = normalize_archival(key)
+        got = _TO_CANON.get(n, n)
+        if len(_GIVEN_MEMO) < 300_000:
+            _GIVEN_MEMO[key] = got
+    return got
 
 
-def norm_patronymic(value: str | None) -> str:
+def _norm_patronymic_raw(value: str | None) -> str:
     """«Онисимовъ» / «Анисимовна» → 'anisim'; «Аѳанасіевъ» / «Афанасьевъ» → 'afanas'.
 
     Стать по батькові свідомо не розрізняємо: вона й так відома з ролі, а
@@ -306,3 +320,14 @@ def split_name(full: str) -> tuple[str, str, str]:
     if len(toks) == 2:
         return toks[0], toks[1], ""
     return toks[0], toks[1], " ".join(toks[2:])
+
+
+def norm_patronymic(value: str | None) -> str:
+    """Те саме, що `_norm_patronymic_raw`, з пам'яттю на токен (див. `norm_given`)."""
+    key = value or ""
+    got = _PATR_MEMO.get(key)
+    if got is None:
+        got = _norm_patronymic_raw(key)
+        if len(_PATR_MEMO) < 300_000:
+            _PATR_MEMO[key] = got
+    return got

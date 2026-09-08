@@ -70,7 +70,7 @@ def text_index(a: TextIndexArgs) -> Envelope:
             return fail(str(exc))
     else:
         runs = [c["name"] for c in S.list_cases()]
-    built = sum(1 for _ in ST.ensure_all(runs, force=a.rebuild))
+    built = sum(1 for _ in ST.ensure_all(runs, force=a.rebuild, reset_rules=not a.case))
     st = ST.stats()
     env = ok({"built": built, "asked": len(runs), **st})
     if st.get("rules_stale"):

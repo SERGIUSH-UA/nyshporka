@@ -291,8 +291,9 @@ def test_grep_layers_reads_canon_opys_and_notes_without_the_run_tree(space: Path
     (space / "reports" / "research" / "KOVAL.md").write_text(
         "# Ковальські\n\nГіпотеза про Ковальских закрита.\n", encoding="utf-8")
     # тека прогонів під reports/ — шар нотаток її не торкається
-    (space / "reports" / "htr" / "проба" / "note.md").write_text("Ковальскій у прогоні",
-                                                                 encoding="utf-8")
+    (space / "reports" / "htr" / "чужа").mkdir(parents=True, exist_ok=True)
+    (space / "reports" / "htr" / "чужа" / "note.md").write_text("Ковальскій у прогоні",
+                                                                encoding="utf-8")
     got = T.grep_layers(r"Коваль", ["canon", "opys", "notes"], limit=50)
     layers = {h["layer"] for h in got["hits"]}
     assert layers == {"canon", "opys", "notes"}
@@ -346,9 +347,11 @@ def test_whole_stems_never_drop_what_the_person_typed() -> None:
 def test_short_stems_get_single_grams_in_the_prefilter() -> None:
     from nyshporka.search.store import match_expr
 
-    expr = match_expr(["kovalskii"])
-    assert '"koval"' in expr or '"kova"' in expr          # одиночна грама є
-    long = match_expr(["kovalevskiego"])
+    expr = match_expr(["kovalskii"])                     # область: голі триграми
+    assert '"kov"' in expr and '("' not in expr
+    wide = match_expr(["kovalskii"], wide=True)          # корпус: короткому — і грами
+    assert '"kova"' in wide and '("' in wide
+    long = match_expr(["kovalevskiego"], wide=True)
     assert '("' in long and '"koval"' not in long.replace('("', "")  # лише пари
 
 
@@ -393,3 +396,99 @@ def test_verdicts_keep_page_type_and_require_a_human_for_surname_verdicts(case_s
     assert "виносить людина" in got["bad"][0]
     st = PS.case_status(ref, scans=["0004.jpg"])["scans"][0]
     assert st["page_type"] == "birth" and st["surnames_n"] == 2
+
+
+
+# ── правки за другим раундом рецензій 08.09 ──────────────────────────────────
+def test_literals_ignore_lookaround_comments_and_named_groups() -> None:
+    from nyshporka.search.store import literals_of
+
+    assert literals_of(r"(?!Ковалев)Ков\w+") == ["Ков"]
+    assert literals_of(r"Ков(?#коментар)аль") in (["Ков"], ["аль"])
+    assert literals_of(r"(?P<surname>Ковал)ь") == ["Ковал"] or literals_of(r"(?P<surname>Ковал)ь") == ["ь"] or literals_of(r"(?P<surname>Ковал)ь") is None
+    assert literals_of(r"(?:Коваль)ск") == ["Коваль"]
+    assert literals_of(r"Ков(?<!аль)ск") is None or "аль" not in (literals_of(r"Ков(?<!аль)ск") or [])
+
+
+def test_grep_latin_literal_cut_inside_a_digraph_still_finds_the_line(space: Path) -> None:
+    from nyshporka.search import store as ST
+
+    run = space / "reports" / "htr" / "проба"
+    (run / "0005.txt").write_text("Jan Kowalszczynski z zona\n", encoding="utf-8")
+    meta = json.loads((run / "_htr_meta.json").read_text(encoding="utf-8"))
+    meta["pages"]["0005.jpg"] = {"lines": 1}
+    (run / "_htr_meta.json").write_text(json.dumps(meta), encoding="utf-8")
+    list(ST.ensure_all(["проба"]))
+    got = ST.grep(r"Kowal[sś]zczynski", ["проба"])
+    assert got["total"] == 1, got
+
+
+def test_grep_does_not_count_a_stale_run_as_covered(space: Path) -> None:
+    from nyshporka.search import store as ST
+
+    list(ST.ensure_all(["проба"]))
+    run = space / "reports" / "htr" / "проба"
+    (run / "0006.txt").write_text("Новий Ковальскій\n", encoding="utf-8")
+    meta = json.loads((run / "_htr_meta.json").read_text(encoding="utf-8"))
+    meta["pages"]["0006.jpg"] = {"lines": 1}
+    (run / "_htr_meta.json").write_text(json.dumps(meta), encoding="utf-8")
+    got = ST.grep(r"Коваль", ["проба"])
+    assert got["runs"] == 0 and got["unindexed"] == 1
+
+
+def test_crop_refuses_borrowed_frames_of_another_segmentation(space: Path) -> None:
+    from nyshporka import htr_store as S
+    from nyshporka.search import store as ST
+    from nyshporka.search import textops as T
+
+    d = space / "reports" / "htr" / "проба-skryba_v6"
+    d.mkdir(parents=True)
+    (d / "0004.txt").write_text("перший\nІоаннъ Ковальскій\nтретій\n", encoding="utf-8")
+    meta = json.loads((space / "reports" / "htr" / "проба" / "_htr_meta.json").read_text(encoding="utf-8"))
+    meta.update({"model": "skryba_f792_v6.mlmodel", "script": "latin",
+                 "pages": {"0004.jpg": {"lines": 3, "orient": 0}}})
+    (d / "_htr_meta.json").write_text(json.dumps(meta), encoding="utf-8")
+    S._RUNS_CACHE = None
+    list(ST.ensure_all(["проба-skryba_v6"]))
+    got = T.crop("проба-skryba_v6", "4", 2, out=space / "x.png")
+    assert got.get("error") and "нарізку" in got["error"]
+
+
+def test_verdict_lands_under_the_existing_page_key(case_space: Path) -> None:
+    from nyshporka.pagestore import store as PS
+    from nyshporka.pagestore.models import PageNote
+    from nyshporka.search import textops as T
+
+    ref = PS.resolve_case("DAHMO/315/8433")
+    # Унікальне ім'я аркуша: шлях сховища заморожений на рівні імпорту, і сусідні
+    # тести лишають там свої «0004».
+    PS.annotate_pages(ref, [PageNote(scan="0077", page_type="birth", surnames=["Гончаръ"],
+                                     status="full", method="visual")])
+    f = case_space / "v4.json"
+    f.write_text(json.dumps([{"run": "проба", "page": "0077.jpg", "line_no": 12,
+                              "verdict": "noise", "note": ""}]), encoding="utf-8")
+    got = T.verdicts_import(f, "DAHMO/315/8433")
+    assert got["imported"] == 1
+    pages = PS.load_case(ref).pages
+    assert "0077" in pages and "0077.jpg" not in pages
+    assert pages["0077"].page_type == "birth"
+
+
+def test_runs_cache_sees_a_meta_edited_in_place(space: Path) -> None:
+    from nyshporka import htr_store as S
+
+    rows = S.list_cases()
+    assert rows and rows[0]["case_key"] == ""
+    mp = space / "reports" / "htr" / "проба" / "_htr_meta.json"
+    meta = json.loads(mp.read_text(encoding="utf-8"))
+    meta["case_key"] = "DAHMO/315/1"
+    mp.write_text(json.dumps(meta), encoding="utf-8")   # на місці, без tmp+replace
+    S._RUNS_CACHE = None
+    rows = S.list_cases()
+    assert rows[0]["case_key"] == "DAHMO/315/1"
+
+
+def test_find_does_not_pull_profile_forms_for_a_lookalike_query(space: Path) -> None:
+    from nyshporka.search import textops as T
+
+    assert not T._query_is_profile("Шевченко")

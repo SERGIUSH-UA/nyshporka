@@ -65,7 +65,8 @@ class Report:
 
 def run(case: str, q: str = "", *, thresh: int = 80, limit: int = 100,
         shown_hits: list[dict[str, Any]] | None = None,
-        all_hits: list[dict[str, Any]] | None = None) -> Report:
+        all_hits: list[dict[str, Any]] | None = None,
+        all_pages: list[tuple[str, str]] | None = None) -> Report:
     """Поміряти recall пошуку на тому, що вже виписало око.
 
     ⚠ `q` за замовчуванням береться з профілю простору: міряти треба саме тим
@@ -129,6 +130,9 @@ def run(case: str, q: str = "", *, thresh: int = 80, limit: int = 100,
     # 🔴 «Знайдено» рахується по ВСІХ хітах понад порогом, а «подано» — лише по
     # тих, що влізли в `limit`. Розрив між ними і є те, чого одне число не
     # показує: сторінка знайшлась, а на око не поїхала.
+    if all_pages is not None:
+        rep.found = sorted({_pid(pg) for _run, pg in all_pages} & set(rep.denom))
+        return rep
     if all_hits is None:
         wide = S.search(q, name=ref.key, thresh=thresh, limit=max(limit, total))
         all_hits = wide["hits"]

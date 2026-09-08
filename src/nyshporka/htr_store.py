@@ -376,13 +376,13 @@ def list_cases() -> list[dict[str, Any]]:
     stamp = _runs_stamp()
     if _RUNS_CACHE is not None and _RUNS_CACHE[0] == stamp:
         return _RUNS_CACHE[1]
-    # 🔴 Кеш на диску за тим самим штампом. Читання 1300 мет коштує 3 с у
-    # КОЖНІЙ команді нового процесу (`ctx`, `crop`, `state`) — і саме ці 3 с
-    # робили «< 1 с» недосяжним при готовому сторі.
-    cached = _runs_cache_read(stamp)
-    if cached is not None:
-        _RUNS_CACHE = (stamp, cached)
-        return cached
+    # 🔴 Кеш на диску ПО ПРОГОНАХ, за штампом мети кожного (mtime+розмір —
+    # той самий, що в `decode.stamp_of`). Читання 1300 мет коштує 3 с у КОЖНІЙ
+    # команді нового процесу; кеш за mtime кореня зривався щоразу, коли хоч
+    # один прогін живий, а правку мети на місці не бачив узагалі (рецензія
+    # 08.09). Тепер перечитуються лише прогони, чия мета змінилась.
+    entries = _runs_cache_read()
+    changed = False
     out: list[dict[str, Any]] = []
     if not HTR_ROOT.is_dir():
         return out
@@ -391,10 +391,23 @@ def list_cases() -> list[dict[str, Any]]:
     except Exception:  # бібліотека не критична для списку
         def describe_case(_p: str) -> dict[str, Any] | None:  # type: ignore[misc]
             return None
+    seen: set[str] = set()
     for meta_path in sorted(HTR_ROOT.glob("*/_htr_meta.json")):
         name = meta_path.parent.name
+        seen.add(name)
+        try:
+            ms = meta_path.stat()
+            mstamp = f"{ms.st_mtime_ns:x}-{ms.st_size:x}"
+        except OSError:
+            continue
+        hit = entries.get(name)
+        if hit and hit.get("stamp") == mstamp and isinstance(hit.get("row"), dict):
+            out.append(dict(hit["row"]))
+            continue
+        changed = True
         meta = load_meta(name)
         if not meta:
+            entries.pop(name, None)
             continue
         case = None
         # Шифра — прикраса переліку: прогін без розв'язаної справи лишається
@@ -440,9 +453,14 @@ def list_cases() -> list[dict[str, Any]]:
             "sec_median": _sec_median(meta),
             "updated": meta.get("updated") or "",
         })
+        entries[name] = {"stamp": mstamp, "row": dict(out[-1])}
+    gone = [n for n in entries if n not in seen]
+    for n in gone:
+        entries.pop(n, None)
     out.sort(key=lambda c: c["updated"], reverse=True)
     _RUNS_CACHE = (stamp, out)
-    _runs_cache_write(stamp, out)
+    if changed or gone:
+        _runs_cache_write(entries)
     return out
 
 
@@ -450,23 +468,21 @@ def _runs_cache_path() -> Path:
     return workspace().derived / "runs_cache.json"
 
 
-def _runs_cache_read(stamp: tuple[int, int]) -> list[dict[str, Any]] | None:
+def _runs_cache_read() -> dict[str, dict[str, Any]]:
     try:
         data = json.loads(_runs_cache_path().read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return None
-    if not isinstance(data, dict) or list(data.get("stamp") or []) != list(stamp):
-        return None
-    rows = data.get("rows")
-    return [dict(r) for r in rows] if isinstance(rows, list) else None
+        return {}
+    ent = data.get("entries") if isinstance(data, dict) else None
+    return {str(k): v for k, v in ent.items() if isinstance(v, dict)} if isinstance(ent, dict) else {}
 
 
-def _runs_cache_write(stamp: tuple[int, int], rows: list[dict[str, Any]]) -> None:
+def _runs_cache_write(entries: dict[str, dict[str, Any]]) -> None:
     p = _runs_cache_path()
     try:
         p.parent.mkdir(parents=True, exist_ok=True)
         tmp = p.with_suffix(f".{os.getpid()}.tmp")
-        tmp.write_text(json.dumps({"stamp": list(stamp), "rows": rows}, ensure_ascii=False),
+        tmp.write_text(json.dumps({"entries": entries}, ensure_ascii=False),
                        encoding="utf-8")
         tmp.replace(p)
     except OSError:
@@ -1014,11 +1030,16 @@ def search(q: str, name: str | None = None, thresh: int = 78,
     from nyshporka.search import store as ST
 
     backend = "gzip"
+    backend_why = ""
     if ST.exists():
-        st_stale = ST.stale_count(names)
-        gz_stale = sum(1 for n in names if not D.is_fresh(n))
-        if st_stale <= budget or st_stale <= gz_stale:
-            backend = "store"
+        try:
+            st_stale = ST.stale_count(names)
+            gz_stale = sum(1 for n in names if not D.is_fresh(n))
+            if st_stale <= budget or st_stale <= gz_stale:
+                backend = "store"
+        except RuntimeError as exc:
+            # Стор чужої схеми: не зносити, не падати — gzip і сказати вголос.
+            backend_why = str(exc)
     dropped: list[str] = []
     if backend == "store":
         # 🔴 Фрагменти стема в стор не йдуть. Профіль тримає голови й хвости
@@ -1026,8 +1047,16 @@ def search(q: str, name: str | None = None, thresh: int = 78,
         # їх сам; стор уже має склейки серед кандидатів, а хвіст «щинскій» як
         # самостійний стем збігається на 100 з кожним «-щинскій» у книзі:
         # заміряно на 230-1-13 — 2113 хітів, верхівка суцільно чужа.
-        stems, dropped = ST.whole_stems(stems, keep=asked)
-        got = ST.sweep(stems, names, thresh=thresh, build_budget=budget)
+        # Суфіксне правило — лише для написань із профілю (голови й хвости
+        # переносу); набране й гніздо імен з довідника не чіпаються: «Ганна»
+        # розкривалась у «anna», і саме її суфіксне правило викидало.
+        stems, dropped = ST.whole_stems(
+            stems, keep=[s for s in stems if origin.get(s) != NAMES.ORIGIN_PROFILE])
+        try:
+            got = ST.sweep(stems, names, thresh=thresh, build_budget=budget)
+        except RuntimeError as exc:
+            backend, backend_why = "gzip", str(exc)
+            got = D.sweep(stems, names, thresh=thresh, build_budget=budget)
     else:
         got = D.sweep(stems, names, thresh=thresh, build_budget=budget)
     raw_hits = got["hits"]
@@ -1146,9 +1175,13 @@ def search(q: str, name: str | None = None, thresh: int = 78,
             "runs_total": got["runs"], "unindexed": got["unindexed"],
             # Чим прочесано: стор чи gzip-індекс. Нуль на частковому сторі й
             # нуль на повному gzip-індексі — різні відповіді.
-            "backend": backend,
+            "backend": backend, "backend_why": backend_why,
             # Які написання профілю не пішли в стор і чому — див. `whole_stems`.
             "stems_dropped": dropped,
+            # Сторінки ВСІХ хітів понад порогом, а не лише показаних: самоперевірці
+            # й журналу потрібен саме цей знаменник, і без нього `find` робив
+            # другий повний пошук лише заради нього.
+            "hit_pages": sorted({(h["name"], h["page"]) for h in raw_hits}),
             "phantom": phantom_n, "phantom_blind": blind}
 
 

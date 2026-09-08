@@ -99,6 +99,13 @@ def kgram_len(stem: str) -> int:
 
 #: Мінімальний розрив між двома грамами пари: далекі докази, не сусідні.
 PAIR_GAP = 2
+#: Стільки прогонів — «суттєва збірка», після якої варто злити сегменти FTS.
+OPTIMIZE_MIN = 50
+#: До скількох сторінок в області передфільтр бере ГОЛІ триграми. Заміряно
+#: 08.09 на 36 прогонах (7.4 тис. стор.): триграми — 40 термів, 6 с, пропущено
+#: 2 з 5376 хітів gzip; пари грам — 326 термів, 37 с, пропущено 341. На корпусі
+#: триграми тягнуть 9.4 млн рядків, тож там лишаються пари.
+TRIGRAM_SCOPE_PAGES = 60_000
 #: Від якої довжини стема доказом є лише ПАРА грам. Коротшим вистачає одної:
 #: заміряно, що пари губили «kovlskii», «fedor», «ivnova» (91–94 бали).
 PAIR_MIN_LEN = 11
@@ -132,11 +139,16 @@ create virtual table if not exists fts using fts5(
 """
 
 
-def connect(*, readonly: bool = False) -> sqlite3.Connection:
+def connect(*, readonly: bool = False, migrate: bool = False) -> sqlite3.Connection:
     """З'єднання зі стором. Схема створюється при першому відкритті.
 
     🔴 WAL, бо стор читають під час індексації: пошук з іншої вкладки або
     агент не мусять чекати, поки збірка дійде до кінця корпусу.
+
+    🔴 Стор чужої схеми ЗНОСИТЬ лише `migrate=True`, тобто явна збірка. Доти
+    будь-який читач, що відкривав стор на запис (`is_fresh` з каналу якорів),
+    після оновлення пакета мовчки дропав 6.5 ГБ (рецензія 08.09). Тепер
+    невідповідність — помилка з підказкою, а не дія.
     """
     p = path()
     if readonly and not p.is_file():
@@ -147,7 +159,7 @@ def connect(*, readonly: bool = False) -> sqlite3.Connection:
     conn.execute("pragma synchronous=normal")
     conn.execute("pragma cache_size=-100000")
     if not readonly:
-        _ensure_schema(conn)
+        _ensure_schema(conn, migrate=migrate)
     else:
         row = None
         with contextlib.suppress(sqlite3.Error):
@@ -159,12 +171,16 @@ def connect(*, readonly: bool = False) -> sqlite3.Connection:
     return conn
 
 
-def _ensure_schema(conn: sqlite3.Connection) -> None:
+def _ensure_schema(conn: sqlite3.Connection, *, migrate: bool = False) -> None:
     conn.executescript(_DDL)
     row = conn.execute("select value from meta where key='schema'").fetchone()
     if row is None:
         conn.execute("insert into meta(key,value) values('schema',?)", (str(SCHEMA),))
         conn.commit()
+    elif int(row[0]) != SCHEMA and not migrate:
+        conn.close()
+        raise RuntimeError(f"стор зібрано схемою {row[0]}, чинна {SCHEMA} — "
+                           f"перебудувати: nysh text index --rebuild")
     elif int(row[0]) != SCHEMA:
         # Розкладка інша — перебудова цілком. Індекси попередньої схеми не
         # мають нічого, що варто рятувати: усе відтворюється з прогонів.
@@ -187,13 +203,20 @@ def rules_hash() -> str:
     нормалізація й геометричні константи можуть змінитись без зміни `SCHEMA`,
     і стор тоді мовчки тримав би старих кандидатів під свіжими штампами.
     """
+    import ast
+
     from nyshporka import htr_store as S
     from nyshporka.utils import translit as T
 
-    src = "\n".join([inspect.getsource(S.page_candidates), inspect.getsource(T.normalize_archival),
-                     inspect.getsource(successors), inspect.getsource(_geo_cands),
-                     str(S.LINE_BREAK_WINDOW), str(COL_GAP), str(SUCC_REACH), str(MARK)])
-    return hashlib.blake2b(src.encode("utf-8"), digest_size=8).hexdigest()
+    parts: list[str] = []
+    for fn in (S.page_candidates, T.normalize_archival, successors, _geo_cands):
+        try:
+            # AST без коментарів: правка коментаря не має вимагати перебудови.
+            parts.append(ast.dump(ast.parse(inspect.getsource(fn))))
+        except (OSError, TypeError, SyntaxError):
+            parts.append(f"{fn.__module__}.{fn.__name__}")
+    parts += [str(S.LINE_BREAK_WINDOW), str(COL_GAP), str(SUCC_REACH), str(MARK)]
+    return hashlib.blake2b("\n".join(parts).encode("utf-8"), digest_size=8).hexdigest()
 
 
 def rules_stale(conn: sqlite3.Connection) -> bool:
@@ -219,7 +242,9 @@ def is_fresh(run: str, conn: sqlite3.Connection | None = None) -> bool:
     if not st:
         return False
     own = conn is None
-    c = conn or connect()
+    if own and not path().is_file():
+        return False
+    c = conn or connect(readonly=True)
     try:
         row = c.execute("select stamp from runs where run=?", (run,)).fetchone()
     finally:
@@ -442,7 +467,7 @@ def ensure(run: str, conn: sqlite3.Connection | None = None) -> bool:
             c.close()
 
 
-def ensure_all(runs: list[str], *, force: bool = False,
+def ensure_all(runs: list[str], *, force: bool = False, reset_rules: bool = False,
                progress: Callable[[int, int, str], None] | None = None,
                ) -> Iterator[str]:
     """Догнати стор по переліку прогонів, звітуючи про кожен.
@@ -453,9 +478,10 @@ def ensure_all(runs: list[str], *, force: bool = False,
     """
     from nyshporka.core import progress as P
 
-    conn = connect()
+    built = 0
+    conn = connect(migrate=True)
     try:
-        if force:
+        if force and reset_rules:
             conn.execute("delete from meta where key='rules'")
             conn.commit()
         known = stamps(conn)
@@ -470,6 +496,7 @@ def ensure_all(runs: list[str], *, force: bool = False,
                 continue
             try:
                 if index_run(conn, run) > 0:
+                    built += 1
                     yield run
             except sqlite3.OperationalError as exc:
                 # Друга сесія індексує той самий стор: цей прогін пропускаємо,
@@ -478,8 +505,11 @@ def ensure_all(runs: list[str], *, force: bool = False,
                     raise
                 with contextlib.suppress(sqlite3.Error):
                     conn.rollback()
-        conn.execute("insert into fts(fts) values('optimize')")
-        conn.commit()
+        # `optimize` зливає ВСІ сегменти FTS під write-lock — на 6.5 ГБ це
+        # не для кожного `index --case`; лише коли зібрано багато або примусово.
+        if force or built >= OPTIMIZE_MIN:
+            conn.execute("insert into fts(fts) values('optimize')")
+            conn.commit()
     finally:
         conn.close()
 
@@ -683,7 +713,7 @@ def whole_stems(stems: list[str], keep: tuple[str, ...] | list[str] = ()
     return out, dropped
 
 
-def match_expr(stems: list[str]) -> str:
+def match_expr(stems: list[str], *, wide: bool = False) -> str:
     """Вираз FTS: доказ, що рядок ВАРТО судити rapidfuzz.
 
     Три способи, кожен сам по собі достатній:
@@ -699,12 +729,25 @@ def match_expr(stems: list[str]) -> str:
     жодної згадки, яку губили б не через розрив рядка.
     """
     terms: set[str] = set()
+    if not wide:
+        # 🔴 У межах справи чи фонду — голі триграми. Ціна запиту FTS росте з
+        # числом термів, а не рядків; триграми майже повторюють gzip-свіп
+        # (2 пропуски з 5376) і в шість разів швидші за пари.
+        for s in stems:
+            terms.update(f'"{s[i:i + 3]}"' for i in range(max(1, len(s) - 2)))
+        return " OR ".join(sorted(terms))
     for s in stems:
         k = kgram_len(s)
         if len(s) <= k + 1:
             terms.add(f'"{s}"')
             continue
         grams = [s[i:i + k] for i in range(len(s) - k + 1)]
+        # Тригамні пари з розривом ≥ 3 — острівець із п'яти літер посеред
+        # покаліченого слова («scin»+«cins»), який пари 4-грам не бачать.
+        tri = [s[i:i + 3] for i in range(len(s) - 2)]
+        for i, a in enumerate(tri):
+            for b in tri[i + 3:]:
+                terms.add(f'("{a}" AND "{b}")')
         if len(s) < PAIR_MIN_LEN:
             # 🔴 Короткому стему пари не лишають місця: одна правка в
             # «kovalskii» (9 літер) вбиває три сусідні грами, і другого доказу
@@ -723,13 +766,56 @@ def match_expr(stems: list[str]) -> str:
     return " OR ".join(sorted(terms))
 
 
-def _run_ids(conn: sqlite3.Connection, runs: list[str]) -> dict[str, int]:
+def _run_ids(conn: sqlite3.Connection, runs: list[str], *, fresh_only: bool = False
+             ) -> dict[str, int]:
+    """run → id. `fresh_only` бере лише прогони зі свіжим штампом: дочитана
+    справа зі старим текстом у сторі — це прочесане «вчорашнє», і воно не
+    може зараховуватись як покрите (рецензія 08.09)."""
     out: dict[str, int] = {}
     for run in runs:
-        row = conn.execute("select id from runs where run=?", (run,)).fetchone()
-        if row:
-            out[run] = int(row[0])
+        row = conn.execute("select id, stamp from runs where run=?", (run,)).fetchone()
+        if not row:
+            continue
+        if fresh_only and row[1] != stamp_of(run):
+            continue
+        out[run] = int(row[0])
     return out
+
+
+def _pages_for(conn: sqlite3.Connection, pids: set[int], run_ids: set[int]
+               ) -> dict[int, tuple[int, str]]:
+    """pid → (run_id, page) лише для названих сторінок — а не для всього корпусу
+    заради трьох хітів (мапа 512 тис. сторінок коштувала 2 с на кожен `grep`)."""
+    out: dict[int, tuple[int, str]] = {}
+    ordered = sorted(pids)
+    for i in range(0, len(ordered), 500):
+        chunk = ordered[i:i + 500]
+        marks = ",".join("?" * len(chunk))
+        for pid, rid, page in conn.execute(
+                f"select id, run_id, page from pages where id in ({marks})", chunk):
+            if int(rid) in run_ids:
+                out[int(pid)] = (int(rid), str(page))
+    return out
+
+
+#: Літери латинки, якими диграф ПОЧИНАЄТЬСЯ (sz, cz, rz, ch, sch, gh) і
+#: якими ЗАКІНЧУЄТЬСЯ. Літерал, розрізаний посеред диграфа, нормалізується не
+#: так, як ціле слово («zczynski»→«zcinski» ⊄ «kowalscinski»), тож з країв
+#: зрізаються лише ті літери, що могли бути половиною диграфа через зріз.
+#: Кирилиця диграфів не має — не чіпається.
+_DIGRAPH_HEAD = set("sczrg")
+_DIGRAPH_TAIL = set("zchie")
+
+
+def _literal_core(lit: str) -> str:
+    if not re.search(r"[A-Za-z]", lit):
+        return lit
+    core = lit
+    while core and core[0].lower() in _DIGRAPH_TAIL:
+        core = core[1:]
+    while core and core[-1].lower() in _DIGRAPH_HEAD:
+        core = core[:-1]
+    return core
 
 
 def _pages_of(conn: sqlite3.Connection, run_ids: list[int]) -> dict[int, tuple[int, str]]:
@@ -873,14 +959,28 @@ def _match_cdist(order: list[str], stems: list[str], thresh: int
     # порівнюється, `partial_ratio` — лише коли кандидат не коротший за стем.
     r = cdist(stems, order, scorer=fuzz.ratio, score_cutoff=thresh,
               dtype=np.uint8, workers=-1)
-    pr = cdist(stems, order, scorer=fuzz.partial_ratio, score_cutoff=thresh,
-               dtype=np.uint8, workers=-1)
+    # `partial_ratio` рахується лише для кандидатів, не коротших за стем, —
+    # їх меншість, а другий повний `cdist` коштував половину зіставлення.
+    by_len: dict[int, list[int]] = {}
+    for si, stem in enumerate(stems):
+        by_len.setdefault(max(max(4, int(len(stem) * 0.6)), len(stem)), []).append(si)
+    partial: dict[int, tuple[Any, Any]] = {}
+    for floor, sis in by_len.items():
+        idx = np.flatnonzero(lens >= floor)
+        if len(idx) == 0:
+            continue
+        sub = [order[int(j)] for j in idx]
+        pr = cdist([stems[si] for si in sis], sub, scorer=fuzz.partial_ratio,
+                   score_cutoff=thresh, dtype=np.uint8, workers=-1)
+        for row_i, si in enumerate(sis):
+            partial[si] = (idx, pr[row_i])
     for si, stem in enumerate(stems):
         need = max(4, int(len(stem) * 0.6))
-        ok_r = (r[si] >= thresh) & (lens >= need)
-        ok_p = (pr[si] >= thresh) & (lens >= max(need, len(stem)))
-        sc = np.where(ok_r, r[si], 0).astype(np.int32)
-        sc = np.maximum(sc, np.where(ok_p, pr[si], 0).astype(np.int32))
+        sc = np.where((r[si] >= thresh) & (lens >= need), r[si], 0).astype(np.int32)
+        if si in partial:
+            idx, prow = partial[si]
+            sub_sc = np.where(prow >= thresh, prow, 0).astype(np.int32)
+            sc[idx] = np.maximum(sc[idx], sub_sc)
         for j in np.flatnonzero(sc):
             v = float(sc[j])
             cur = best.get(int(j))
@@ -929,18 +1029,32 @@ def sweep(stems: list[str], runs: list[str], *, thresh: int = 78,
             for i, r in enumerate(stale, 1):
                 if progress:
                     progress(i, len(stale), r)
-                index_run(conn, r)
+                try:
+                    index_run(conn, r)
+                except sqlite3.OperationalError as exc:
+                    # Інша сесія тримає стор на запис: цей прогін лишається
+                    # поза пошуком і йде в `unindexed`, а не валить запит.
+                    if "locked" not in str(exc).lower():
+                        raise
+                    with contextlib.suppress(sqlite3.Error):
+                        conn.rollback()
             known = stamps(conn)
         ready = [r for r in runs if stamp_of(r) and known.get(r) == stamp_of(r)]
         missing = len(runs) - len(ready)
         ids = _run_ids(conn, ready)
         by_id = {v: k for k, v in ids.items()}
-        pages = _pages_of(conn, list(ids.values()))
         hits: list[dict[str, Any]] = []
-        if not pages or not stems:
+        if not ids or not stems:
             return {"hits": hits, "scanned": len(ready), "runs": len(runs),
                     "unindexed": missing, "backend": "store"}
-        expr = match_expr(stems)
+        marks = ",".join("?" * len(ids))
+        scope_pages = int(conn.execute(
+            f"select coalesce(sum(pages),0) from runs where id in ({marks})",
+            list(ids.values())).fetchone()[0])
+        total_runs = int(conn.execute("select count(*) from runs").fetchone()[0])
+        wide = scope_pages > TRIGRAM_SCOPE_PAGES or len(ids) >= total_runs
+        expr = match_expr(stems, wide=wide)
+        run_set = set(ids.values())
         wanted: dict[int, set[int]] = {}
         # 🔴 Разом із рядком беруться кілька наступних. Склейка переносу
         # («Липовень» ⏎ «комъ») приписується рядку з ГОЛОВОЮ, а k-грам стема
@@ -949,10 +1063,13 @@ def sweep(stems: list[str], runs: list[str], *, thresh: int = 78,
         from nyshporka import htr_store as S
 
         reach = S.LINE_BREAK_WINDOW
+        raw: dict[int, set[int]] = {}
         for (rid,) in _fts_rows(conn, expr, list(ids.values())):
-            pid, no = rid >> LINE_BITS, rid & MAX_LINES
+            raw.setdefault(rid >> LINE_BITS, set()).add(rid & MAX_LINES)
+        pages = _pages_for(conn, set(raw), run_set)
+        for pid, nos in raw.items():
             if pid in pages:
-                wanted.setdefault(pid, set()).update(range(no, no + reach + 1))
+                wanted[pid] = {n for no in nos for n in range(no, no + reach + 1)}
         # Один виклик rapidfuzz на всі кандидати, а не по рядку, і кандидати —
         # ГОТОВІ, з блоба сторінки: породжувати їх наново в Python для сотень
         # тисяч рядків коштувало 190 с на запит по корпусу.
@@ -1022,7 +1139,20 @@ def literals_of(pattern: str) -> list[str] | None:
             in_class = True
         elif ch == "(":
             branches[-1] += "\x00"
-            groups.append((len(branches[-1]), False))
+            special = i + 1 < len(pattern) and pattern[i + 1] == "?"
+            if special and pattern.startswith("(?:", i):
+                i += 2
+                groups.append((len(branches[-1]), False))
+            elif special and pattern.startswith("(?P<", i):
+                j = pattern.find(">", i)
+                i = j if j > 0 else i + 3
+                groups.append((len(branches[-1]), False))
+            else:
+                # (?!…), (?<!…), (?=…), (?#…), (?i)… — їхній уміст не є
+                # обов'язковим текстом рядка; група стирається при «)».
+                groups.append((len(branches[-1]), special))
+                if special:
+                    i += 1
             depth += 1
         elif ch == ")":
             depth -= 1
@@ -1074,14 +1204,13 @@ def grep(pattern: str, runs: list[str], *, ignore_case: bool = True,
         return {"hits": [], "error": f"регекс не розбирається: {exc}"}
     conn = connect(readonly=True)
     try:
-        ids = _run_ids(conn, runs)
+        ids = _run_ids(conn, runs, fresh_only=True)
         by_id = {v: k for k, v in ids.items()}
-        pages = _pages_of(conn, list(ids.values()))
         lits = literals_of(pattern)
         pids: set[int]
         phrases: list[str] = []
         for lit in lits or []:
-            n = _norm(lit)
+            n = _norm(_literal_core(lit))
             if len(n) >= 3:
                 phrases.append(f'"{n}"')
         # 🔴 Кожна гілка мусить дати фразу. «ськ» після нормалізації — «sk»,
@@ -1089,13 +1218,12 @@ def grep(pattern: str, runs: list[str], *, ignore_case: bool = True,
         # давав нуль сторінок із позначкою «звужено» (рецензія 08.09).
         if lits and len(phrases) == len(lits):
             expr = " OR ".join(phrases)
-            pids = set()
-            for (rid,) in _fts_rows(conn, expr, list(ids.values())):
-                pid = rid >> LINE_BITS
-                if pid in pages:
-                    pids.add(pid)
+            raw_pids = {rid >> LINE_BITS for (rid,) in _fts_rows(conn, expr, list(ids.values()))}
+            pages = _pages_for(conn, raw_pids, set(ids.values()))
+            pids = set(pages)
             prefiltered = True
         else:
+            pages = _pages_of(conn, list(ids.values()))
             pids = set(pages)
             prefiltered = False
         hits: list[dict[str, Any]] = []
@@ -1117,9 +1245,14 @@ def grep(pattern: str, runs: list[str], *, ignore_case: bool = True,
                     h["before"] = raw[max(0, i - 1 - context):i - 1]
                     h["after"] = raw[i:i + context]
                 hits.append(h)
+        n_pages = (len(pages) if not prefiltered
+                   else int(conn.execute(
+                       f"select coalesce(sum(pages),0) from runs where id in "
+                       f"({','.join('?' * len(ids))})", list(ids.values())).fetchone()[0])
+                   if ids else 0)
         return {"hits": hits, "total": total, "runs": len(ids),
                 "runs_asked": len(runs), "unindexed": len(runs) - len(ids),
-                "pages": len(pages), "pages_scanned": scanned_pages,
+                "pages": n_pages, "pages_scanned": scanned_pages,
                 "prefiltered": prefiltered, "literals": lits or [],
                 # Скільки сторінок мали літерал У НОРМІ: нуль регексу при
                 # непорожньому передфільтрі означає орфографію («ь»/«ъ»), а

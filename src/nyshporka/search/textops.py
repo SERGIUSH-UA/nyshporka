@@ -81,7 +81,8 @@ def find_page(conn: Any, run: str, page: str) -> str | None:
     if want is None:
         return None
     for (pg,) in conn.execute(
-            "select p.page from pages p join runs r on r.id=p.run_id where r.run=?", (run,)):
+            "select p.page from pages p join runs r on r.id=p.run_id where r.run=? "
+            "order by p.id", (run,)):
         if _page_num(str(pg)) == want:
             return str(pg)
     return None
@@ -230,7 +231,13 @@ def crop(scope: str, page: str, line: int, *, with_next: bool = True, wide: bool
     rows = sc["rows"]
     conn = ST.connect(readonly=True)
     try:
-        chosen: tuple[str, str, int] | None = None
+        # 🔴 Рамки позичаються в іншого прогону лише при ТІЙ САМІЙ нарізці
+        # (число рядків збігається): перший-ліпший прогін із рамками різав
+        # рядок N із чужої сегментації, і картка гортача показувала чужий
+        # рядок з виглядом правильного (рецензія 08.09). Названий прогін —
+        # перший у переліку області.
+        named: tuple[str, str, int, int, int] | None = None
+        cands: list[tuple[str, str, int, int, int]] = []
         for r in rows:
             run = str(r["name"])
             pg = find_page(conn, run, page)
@@ -239,14 +246,19 @@ def crop(scope: str, page: str, line: int, *, with_next: bool = True, wide: bool
             pid = ST._page_id(conn, run, pg)
             if pid is None:
                 continue
-            geo = conn.execute("select geo from pages where id=?", (pid,)).fetchone()
-            if geo and geo[0]:
-                chosen = (run, pg, pid)
-                break
-            chosen = chosen or (run, pg, pid)
-        if chosen is None:
+            row = conn.execute("select geo, nlines from pages where id=?", (pid,)).fetchone()
+            item = (run, pg, pid, int(row[0] or 0), int(row[1] or 0))
+            if named is None:
+                named = item
+            cands.append(item)
+        if named is None:
             return {"error": f"сторінки «{page}» немає в області «{scope}»"}
-        run, pg, pid = chosen
+        chosen = next((c for c in cands if c[3] and c[4] == named[4]), None)
+        if chosen is None:
+            return {"error": f"рамок для {named[0]} · {named[1]} немає: прогін без "
+                             f"геометрії, а побратими з рамками мають іншу нарізку "
+                             f"({named[4]} рядків тут)"}
+        run, pg, pid = chosen[0], chosen[1], chosen[2]
         lines = ST._page_lines(conn, pid)
     finally:
         conn.close()
@@ -377,10 +389,12 @@ def coverage(scope: str = "", *, unsearched: bool = False, limit: int = 300
     from nyshporka.search import trace as TRACE
 
     q = ""
+    run_names: set[str] = set()
     if scope:
         try:
             sc = scope_runs(scope)
             q = str(sc.get("key") or "")
+            run_names = {str(r["name"]) for r in sc["rows"]}
         except ValueError:
             q = scope
     try:
@@ -396,6 +410,13 @@ def coverage(scope: str = "", *, unsearched: bool = False, limit: int = 300
         rows = [r for r in rows if q.lower() in str(r.get("key") or "").lower()]
     elif scope and q:
         rows = [r for r in rows if str(r.get("key")) == q]
+    elif scope and run_names:
+        # Прогін без ключа справи: покриття лише тих рядків реєстру, що
+        # згадують його, а не всього корпусу.
+        rows = [r for r in rows
+                if run_names & set(json.loads(r.get("htr_runs") or "[]")
+                                   if isinstance(r.get("htr_runs"), str)
+                                   else (r.get("htr_runs") or []))]
     known: dict[str, str] = {}
     if ST.exists():
         conn = ST.connect(readonly=True)
@@ -521,6 +542,28 @@ def whatis(scope: str) -> dict[str, Any]:
 
 
 # ── find: усі канали разом ───────────────────────────────────────────────────
+def _query_is_profile(q: str) -> bool:
+    """Чи запит є написанням прізвища профілю — стемом, не схожістю."""
+    from nyshporka import htr_store as S
+
+    try:
+        from nyshporka.core import profile as PROF
+
+        forms, whose = PROF.forms_for_query(q)
+    except Exception:
+        return False
+    if not whose:
+        return False
+    want = {S._norm(w) for w in S._TOKEN_RE.findall(q)}
+    have = {S._norm(f) for f in forms} | {S._norm(whose)}
+    try:
+        prof = PROF.active()
+        have |= {S._norm(x) for x in (prof.all_spellings() or [])}
+    except Exception:
+        pass
+    return bool(want) and want <= {h for h in have if h}
+
+
 def find(q: str, scope: str = "", *, thresh: int = 78, limit: int = 40,
          context: int = 1) -> dict[str, Any]:
     """Пошук усіма каналами пакета з журналом заходу.
@@ -535,19 +578,17 @@ def find(q: str, scope: str = "", *, thresh: int = 78, limit: int = 40,
     from nyshporka.search import trace as TRACE
 
     in_case = bool(scope)
+    # 🔴 Запит «про профіль» — лише коли він СТЕМОМ збігається з формою профілю,
+    # а не схожий на 85: сусідній рід із тим самим коренем схожий на 85, і профіль
+    # підмішував 26 форм роду в пошук конфузера (рецензія 08.09). Якорі — теж
+    # лише для профільного запиту: кін чужому прізвищу ні до чого.
+    about_profile = _query_is_profile(q)
     res = S.search(q, name=scope or None, thresh=thresh, limit=limit, context=context,
-                   given=True, folk=False, rank=True, profile=True, anchors=False)
+                   given=True, folk=False, rank=True, profile=about_profile,
+                   anchors=in_case and about_profile)
     if res.get("error") and not res.get("hits"):
         return {"error": str(res["error"])}
-    # 🔴 Якорі — лише коли запит про рід профілю: кін береться з профілю й
-    # канону, і на чуже прізвище канал підносив би імена роду профілю як
-    # «наших людей» (рецензія 08.09).
-    about_profile = bool(res.get("profile_of"))
-    anchor: dict[str, Any] = {"on": False}
-    if in_case and about_profile:
-        with_anchor = S.search(q, name=scope, thresh=thresh, limit=limit, context=0,
-                               given=True, folk=False, rank=True, profile=True, anchors=True)
-        anchor = with_anchor.get("anchor") or {"on": True}
+    anchor: dict[str, Any] = res.get("anchor") or {"on": False}
     key = str(res.get("scope_key") or "")
     sc: dict[str, Any] = scope_runs(scope) if scope else {"rows": S.list_cases(), "kind": "all"}
     rows: list[dict[str, Any]] = list(sc["rows"])
@@ -596,15 +637,11 @@ def find(q: str, scope: str = "", *, thresh: int = 78, limit: int = 40,
     ]
     selfcheck: dict[str, Any] | None = None
     if in_case and key:
-        # Один пошук замість трьох: широка видача береться лише коли показ
-        # обрізаний, а самоперевірка рахує по готових хітах.
-        all_hits = shown
-        if total > len(shown):
-            all_hits = list(S.search(q, name=scope, thresh=thresh, limit=total, context=0,
-                                     given=True, folk=False, rank=True, profile=True,
-                                     anchors=False).get("hits") or [])
+        # Один пошук: самоперевірка рахує по сторінках усіх хітів, які пошук
+        # уже віддав (`hit_pages`), а не другим повним проходом.
         rep = SC.run(scope, q, thresh=max(thresh, 78), limit=max(limit, 100),
-                     shown_hits=shown, all_hits=all_hits)
+                     shown_hits=shown,
+                     all_pages=[(str(a), str(b)) for a, b in (res.get("hit_pages") or [])])
         selfcheck = SC.as_dict(rep)
         channels.append({"id": "selfcheck", "label": "самоперевірка на аркушах, виписаних оком",
                          "ran": bool(rep.measured), "why": rep.why or "",
@@ -840,6 +877,10 @@ def verdicts_import(path: str | Path, scope: str, *, q: str = "", agent: str = "
         return {"error": f"область «{scope}» не має ключа справи — вердикти нікуди класти"}
     ref = PS.resolve_case(key)
     existing = (PS.load_case(ref) or PS._empty_case(ref)).pages
+    # 🔴 Око записує «00301», мета прогону — «00301.jpg». Нотатка кладеться
+    # під ІСНУЮЧИМ ключем аркуша, інакше той самий аркуш подвоюється, і облік
+    # ока («birth, full») підміняється вердиктом рядка (рецензія 08.09).
+    by_stem = {Path(k).stem.lower(): k for k in existing}
     items: dict[str, dict[str, Any]] = {}
     notes: list[PageNote] = []
     bad: list[str] = []
@@ -859,6 +900,7 @@ def verdicts_import(path: str | Path, scope: str, *, q: str = "", agent: str = "
             bad.append(f"{r.get('run')}|{page}|{r.get('line_no')}: «{VERDICT_LABEL[v]}» "
                        f"без походження з гортача — вердикт про прізвище виносить людина")
             continue
+        page = by_stem.get(Path(page).stem.lower(), page)
         ck = f"{r.get('run')}|{page}|{r.get('line_no')}"
         items[ck] = {"verdict": v, "note": str(r.get("note") or ""),
                      "surname": str(r.get("surname") or ""), "q": q,

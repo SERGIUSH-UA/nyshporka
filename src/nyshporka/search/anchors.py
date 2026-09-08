@@ -281,9 +281,7 @@ def scan(line: str, k: Keys) -> tuple[str, str] | None:
 
     if k.empty:
         return None
-    raw = [normalize_archival(t) for t in _TOKEN.findall(line)]
-    toks = [(t, norm_given(t), norm_patronymic(t)) for t in raw
-            if len(t) >= MIN_TOK]
+    toks = [_tok(t) for t in _TOKEN.findall(line) if len(t) >= MIN_TOK]
     for i, (t, g, _p) in enumerate(toks):
         if _best(fuzz, g, k.given) < THR_GIVEN:
             continue
@@ -295,11 +293,35 @@ def scan(line: str, k: Keys) -> tuple[str, str] | None:
     return None
 
 
+#: Пам'ять на токен і на пару «токен × пул». Справа — сорок тисяч рядків і
+#: півтора мільйона токенів, з яких різних — десята частина; без пам'яті канал
+#: коштував 20 із 27 с пошуку по справі (замір 08.09).
+_TOK_MEMO: dict[str, tuple[str, str, str]] = {}
+_BEST_MEMO: dict[tuple[str, tuple[str, ...]], float] = {}
+_MEMO_CAP = 400_000
+
+
+def _tok(raw: str) -> tuple[str, str, str]:
+    got = _TOK_MEMO.get(raw)
+    if got is None:
+        n = normalize_archival(raw)
+        got = (n, norm_given(n), norm_patronymic(n))
+        if len(_TOK_MEMO) < _MEMO_CAP:
+            _TOK_MEMO[raw] = got
+    return got
+
+
 def _best(fuzz: Any, tok: str, pool: tuple[str, ...]) -> float:
     """Найкращий бал із попереднім відсівом за довжиною — він дешевший за фаззі."""
+    key = (tok, pool)
+    got = _BEST_MEMO.get(key)
+    if got is not None:
+        return got
     best = 0.0
     for want in pool:
         if abs(len(tok) - len(want)) > 4:
             continue
         best = max(best, float(fuzz.ratio(tok, want)))
+    if len(_BEST_MEMO) < _MEMO_CAP:
+        _BEST_MEMO[key] = best
     return best
