@@ -211,7 +211,9 @@ def rules_hash() -> str:
     from nyshporka.utils import translit as T
 
     parts: list[str] = []
-    for fn in (S.page_candidates, T.normalize_archival, successors, _geo_cands):
+    # `page_candidates` тепер вьюха — правила живуть у повній версії, і саме
+    # її зміна мусить робити кандидатів застарілими.
+    for fn in (S.page_candidates_full, T.normalize_archival, successors, _geo_cands):
         try:
             # AST без коментарів: правка коментаря не має вимагати перебудови.
             parts.append(ast.dump(ast.parse(inspect.getsource(fn))))

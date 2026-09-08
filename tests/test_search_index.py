@@ -300,3 +300,52 @@ def test_the_hit_carries_the_case_not_just_the_folder(space) -> None:
     assert got["hits"], "фікстура: хіт мусить бути"
     assert got["hits"][0]["case_key"] == "DAHMO/315/159"
     assert got["pages"] == 2, "знаменник їде з тієї самої відповіді"
+
+
+# ── правила породження кандидатів ────────────────────────────────────────────
+def test_a_far_glue_of_two_whole_words_is_never_made() -> None:
+    """🔴 Дві повні половини — це хімера, а не перенос.
+
+    «собрание» у рядку 3 і «дворян» у рядку 5 стоять на аркуші окремими
+    словами; склеєні, вони беруть поріг `partial_ratio` самою довжиною і
+    дістають бал вікна на голову, якої в збігу немає. Заміряно на еталоні
+    ф.904: правило знімає 18% кандидатів і 10
+    сторінок шуму, не втрачаючи ЖОДНОГО аркуша роду.
+    """
+    from nyshporka import htr_store as S
+
+    lines = ["Коваль", "дому", "собрание", "дворянского", "дворян"]
+    made = {w for _no, _raw, cs in S.page_candidates_full(lines) for w, _n, _k in cs}
+    assert "собрание-2⏎дворян" not in made        # обидві по 6+ літер
+    assert "Коваль-3⏎дворянского" not in made
+    assert "дому-2⏎дворянского" in made           # голова-уламок — перенос, лишається
+    assert "дворянского-дворян" in made           # сусідній рядок не чіпаємо ніколи
+
+
+def test_every_candidate_carries_where_it_came_from() -> None:
+    """Вид потрібен для СУДУ, а не для звіту: далеку склейку не можна судити
+    тими самими правилами, що й цілий токен."""
+    from nyshporka import htr_store as S
+
+    lines = ["Іоаннъ Ивановъ Коваль-", "ский съ дому", "пономъ Гри", "горіемъ Сикор"]
+    kinds: dict[str, str] = {}
+    for _no, _raw, cs in S.page_candidates_full(lines):
+        for w, _n, k in cs:
+            kinds[w] = k
+    assert kinds["Коваль"] == "tok"
+    assert kinds["Іоаннъ Ивановъ"] == "pair"
+    assert kinds["Іоаннъ Ивановъ Коваль"] == "triple"
+    assert kinds["Коваль-ский"] == "glue1"
+    assert kinds["дому-2⏎горіемъ"] == "glue2"
+    assert set(S.FAR_KINDS) == {"glue2", "glue3"}
+
+
+def test_the_plain_view_is_the_full_generator_without_the_kind() -> None:
+    """Дві копії правил розійшлися б тихо — тому вьюха, а не другий прохід."""
+    from nyshporka import htr_store as S
+
+    lines = ["Іоаннъ Ивановъ Коваль-", "ский съ дому", "пономъ Гри", "горіемъ Сикор"]
+    plain = list(S.page_candidates(lines))
+    full = [(no, raw, [(w, n) for w, n, _k in cs])
+            for no, raw, cs in S.page_candidates_full(lines)]
+    assert plain == full
