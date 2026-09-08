@@ -181,3 +181,16 @@ def test_a_space_can_add_its_own_pairs(tmp_path: Path,
     finally:
         N._folk_pairs = None
         W.reset()
+
+
+
+def test_an_unknown_word_is_not_renormalised_under_the_dictionary_label() -> None:
+    """Прізвище не є іменем: довідник не має підміняти його «своїм» написанням."""
+    from nyshporka.records import names as N
+
+    stems, origin = N.expand_stems(["krzesovskii"], given=True, folk=False)
+    assert stems == ["krzesovskii"] and origin == {"krzesovskii": N.ORIGIN_QUERY}
+    assert not N.known_given("krzesovskii")
+    assert N.known_given("Ганна")
+    stems, origin = N.expand_stems(["ganna"], given=True, folk=False)
+    assert "anna" in stems and origin["anna"] == N.ORIGIN_GIVEN

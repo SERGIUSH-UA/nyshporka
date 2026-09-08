@@ -23,6 +23,8 @@
 """
 from __future__ import annotations
 
+import contextlib
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -36,8 +38,10 @@ class Report:
     shifra: str = ""
     #: Чим міряли.
     query: str = ""
-    #: Аркуші, де око виписало це прізвище.
+    #: Аркуші, де око виписало це прізвище (сховище сторінок + цитати канону).
     eye: int = 0
+    #: З них — названі цитатами канону.
+    canon: int = 0
     #: З них декодовані — це і є знаменник.
     denom: list[str] = field(default_factory=list)
     #: Знайдені пошуком (понад порогом).
@@ -97,10 +101,17 @@ def run(case: str, q: str = "", *, thresh: int = 80, limit: int = 100,
     # цілком, — тобто recall не мірявся там, де він був найпотрібніший.
     eye = {_pid(h["scan"]) for h in
            (PQ.grep_surnames(q, thresh=thresh, case_key=ref.key)["hits"] or [])}
+    # 🔴 Канон — теж око. Відомий позитив нерідко лежить ЛИШЕ в цитатах осіб
+    # (`data/canonical`), а не у сховищі сторінок, і selfcheck казав «міряти
+    # нема на чому» на справі, де рід був знайдений (перевірка 08.09).
+    canon = canon_pages(q, ref, thresh)
+    rep.canon = len(canon)
+    eye |= canon
     rep.eye = len(eye)
     if not eye:
-        rep.why = ("у сховищі сторінок цієї справи прізвища немає — міряти нема "
-                   "на чому. Занесіть хоч один аркуш, де ви його бачили оком")
+        rep.why = ("ні сховище сторінок, ні цитати канону не називають аркуша цієї "
+                   "справи з цим прізвищем — міряти нема на чому. Занесіть хоч один "
+                   "аркуш, де ви його бачили оком")
         return rep
 
     try:
@@ -147,10 +158,76 @@ def _pid(name: str) -> str:
     return Path(str(name or "")).stem.lower()
 
 
+_SCAN_RE = re.compile(r"(\d{3,5})\.(?:jpe?g|png|tiff?)|скан[иу]?\s*№?\s*(\d{3,5})", re.IGNORECASE)
+_MEDIA_RE = re.compile(r"d(\d+)_(\d{3,5})")
+
+
+def _scans_in(text: str) -> set[str]:
+    return {(a or b).lower() for a, b in _SCAN_RE.findall(text or "")}
+
+
+def _norm_path(p: str) -> str:
+    return str(p or "").replace("\\", "/").rstrip("/").lower()
+
+
+def canon_pages(q: str, ref: Any, thresh: int = 80) -> set[str]:
+    """Аркуші справи, які канон цитує для осіб із цим прізвищем.
+
+    Джерела аркуша: цитата факту (`page`/`note` зі «скан 0034.JPG»), коли
+    джерело цитати веде в теку цієї справи (`raw_path`), і медіа особи
+    (`d114_0034.jpg` — справа й скан у самому імені). Канону немає — порожньо.
+    """
+    try:
+        from rapidfuzz import fuzz
+
+        from nyshporka.core.workspace import workspace
+        from nyshporka.storage.files import read_person, read_source
+        from nyshporka.utils.translit import normalize_archival
+    except Exception:
+        return set()
+    root = workspace().canonical
+    if not (root / "persons").is_dir():
+        return set()
+    want = normalize_archival(q)
+    case_dir = _norm_path(str(getattr(ref, "path", "") or ""))
+    spr = str(getattr(ref, "spr", "") or "")
+    src_ok: dict[str, bool] = {}
+
+    def source_matches(sid: str) -> bool:
+        if sid not in src_ok:
+            ok = False
+            p = root / "sources" / f"{sid}.md"
+            if p.is_file() and case_dir:
+                with contextlib.suppress(Exception):
+                    src = read_source(p)
+                    ok = bool(src.raw_path) and _norm_path(str(src.raw_path)) == case_dir
+            src_ok[sid] = ok
+        return src_ok[sid]
+
+    out: set[str] = set()
+    for path in sorted((root / "persons").glob("*.md")):
+        try:
+            person = read_person(path)
+        except Exception:
+            continue
+        surnames = [str(getattr(nm, "surname", "") or "") for nm in person.names]
+        if not any(s and fuzz.ratio(normalize_archival(s), want) >= thresh for s in surnames):
+            continue
+        for fact in person.facts:
+            for c in fact.citations:
+                if source_matches(c.source_id):
+                    out |= _scans_in(c.page or "") | _scans_in(c.note or "")
+        for m in getattr(person, "media", None) or []:
+            mm = _MEDIA_RE.search(str(getattr(m, "path", "") or ""))
+            if mm and spr and mm.group(1) == spr:
+                out.add(mm.group(2).lower())
+    return out
+
+
 def as_dict(rep: Report) -> dict[str, Any]:
     return {"key": rep.key, "shifra": rep.shifra, "query": rep.query,
             "measured": rep.measured, "why": rep.why,
-            "eye": rep.eye, "denominator": rep.denom,
+            "eye": rep.eye, "canon": rep.canon, "denominator": rep.denom,
             "found": rep.found, "found_pct": rep.pct(rep.found),
             "shown": rep.shown, "shown_pct": rep.pct(rep.shown),
             "missed": rep.missed, "found_not_shown": rep.found_not_shown}

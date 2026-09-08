@@ -118,15 +118,39 @@ def _case_dir(name: str) -> Path | None:
     return d
 
 
+_META_MEMO: dict[str, tuple[str, dict[str, Any]]] = {}
+_META_MEMO_CAP = 256
+
+
 def load_meta(name: str) -> dict[str, Any] | None:
+    """Мета прогону; повторне читання тієї самої мети — з пам'яті процесу.
+
+    ⚠ Ключ пам'яті — mtime і розмір файлу, тобто дописана мета перечитується.
+    Мета справи на тисячу сторінок важить мегабайт, а контекст до 2400 хітів
+    читав її по разу на хіт (перевірка живим пошуком 08.09).
+    """
     d = _case_dir(name)
     if d is None:
         return None
+    path = d / "_htr_meta.json"
     try:
-        meta = json.loads((d / "_htr_meta.json").read_text(encoding="utf-8"))
-        return dict(meta) if isinstance(meta, dict) else None
+        st = path.stat()
+    except OSError:
+        return None
+    stamp = f"{st.st_mtime_ns:x}-{st.st_size:x}"
+    hit = _META_MEMO.get(name)
+    if hit and hit[0] == stamp:
+        return dict(hit[1])
+    try:
+        meta = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
+    if not isinstance(meta, dict):
+        return None
+    if len(_META_MEMO) >= _META_MEMO_CAP:
+        _META_MEMO.clear()
+    _META_MEMO[name] = (stamp, meta)
+    return dict(meta)
 
 
 #: Розширення моделі → рушій (дзеркало `scripts/htr_case_run._ENGINE_BY_SUFFIX`;
@@ -613,13 +637,43 @@ def runs_for_scope(scope: str) -> dict[str, Any]:
 
     from nyshporka.pagestore.store import resolve_case
 
-    ref = resolve_case(want)          # ValueError піде нагору як є
+    try:
+        ref = resolve_case(want)
+    except ValueError:
+        # 🔴 Фонд або опис — теж область: «904-24», «ДАВіО 904-24», «230-1»
+        # означають усі справи серії. Доти доводилось ганяти справи по одній
+        # (перевірка живим пошуком 08.09). Збіг — за хвостом шифри прогону,
+        # тож «230-1» не тягне «230-10».
+        series = _series_rows(rows, want)
+        if not series:
+            raise
+        keys = sorted({(r.get("case_key") or "").strip() for r in series})
+        return {"rows": series, "kind": "cases", "key": "", "shifra": want,
+                "keys": keys}
     mine = [r for r in rows if (r.get("case_key") or "").strip() == ref.key]
     if not mine and ref.path:
         # Прогін, який не несе ключа в собі, ще може вказувати на ту саму теку.
         # Це не рідкість: ключ у меті з'явився пізніше за самі прогони.
         mine = find_runs_for_case(ref.path)
     return {"rows": mine, "kind": "case", "key": ref.key, "shifra": ref.shifra}
+
+
+_SERIES_RE = re.compile(r"(\d+(?:[-/]\d+[a-zа-я]?)*)\s*$")
+
+
+def _series_rows(rows: list[dict[str, Any]], want: str) -> list[dict[str, Any]]:
+    """Прогони справ, чия шифра починається з фонду/опису запиту."""
+    m = _SERIES_RE.search(want.replace("\\", "/").strip())
+    if not m:
+        return []
+    head = m.group(1).replace("/", "-")
+    out: list[dict[str, Any]] = []
+    for r in rows:
+        sh = str(r.get("shifra") or "").strip()
+        tail = sh.split()[-1].replace("/", "-") if sh else ""
+        if tail and (tail == head or tail.startswith(head + "-")):
+            out.append(r)
+    return out
 
 
 def case_pages(name: str) -> dict[str, Any] | None:
@@ -886,17 +940,22 @@ def voice_pair(name: str) -> str | None:
     # різниця несиметрична: у прогону, що вже несе обидва голоси, побратима
     # немає — і це правильна відповідь, а не порожнеча через недогляд.
     mine = set(run_engine_ids(meta)) or {run_engine(meta)}
-    key = meta.get("case_key")
+    key = (meta.get("case_key") or "").strip()
     base = str(meta.get("case_dir") or "")
+    # 🔴 По рядках переліку, не по метах: перелік уже несе ключ, теку й рушії
+    # кожного прогону, а читання 1326 мет на КОЖЕН прогін із хітами давало
+    # 9 хвилин на `find --json --limit 2400` (перевірка живим пошуком 08.09).
     for other in list_cases():
-        nm = other.get("name") if isinstance(other, dict) else str(other)
+        nm = str(other.get("name") or "")
         if not nm or nm == name:
             continue
-        om = load_meta(nm) or {}
-        same = (key and om.get("case_key") == key) or (base and om.get("case_dir") == base)
-        theirs = set(run_engine_ids(om)) or {run_engine(om)}
-        if same and theirs - mine:
-            return str(nm)
+        same = ((key and (other.get("case_key") or "").strip() == key)
+                or (base and str(other.get("case_dir") or "") == base))
+        if not same:
+            continue
+        theirs = set(other.get("engine_ids") or []) or {str(other.get("engine") or "")}
+        if theirs - mine:
+            return nm
     return None
 
 

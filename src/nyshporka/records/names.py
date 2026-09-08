@@ -164,6 +164,12 @@ def expand_given(value: str | None) -> list[str]:
     return list(_NEST.get(_TO_CANON.get(n, n), (n,)))
 
 
+def known_given(value: str | None) -> bool:
+    """Чи є ім'я в довіднику гнізд (після нормалізації)."""
+    n = normalize_archival(value or "")
+    return bool(n) and _TO_CANON.get(n, n) in _NEST
+
+
 # ── шар побутових імен ───────────────────────────────────────────────────────
 #
 # 🔴 Це НЕ варіанти написання, і два шари плутати не можна. `_ALIASES` зводить
@@ -295,7 +301,14 @@ def expand_stems(stems: list[str], *, given: bool = True, folk: bool = False,
     for s in stems:
         add(s, ORIGIN_QUERY)
     if given:
+        # 🔴 Лише ВІДОМІ імена. Невідоме слово `expand_given` віддає «як є»,
+        # але після повторної нормалізації, а вона не тотожна: «krzesovskii»
+        # → «kresovskii», і прізвище губило саме ту літеру, що відрізняє його
+        # від сусіднього роду, — 158 тис. хітів на «Кресовскій» під ярликом
+        # «довідник імен» (перевірка на живому пошуку 08.09).
         for s in list(out):
+            if not known_given(s):
+                continue
             for form in expand_given(s):
                 add(form, ORIGIN_GIVEN)
     if folk:

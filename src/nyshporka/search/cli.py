@@ -113,8 +113,12 @@ def grep_cmd(
     cov = env.data.get("coverage") or {}
     _notes(env)
     if cov.get("scope") != "layers":
+        # Із літералом FTS звужує до сторінок-кандидатів, і регекс іде лише по
+        # них; без нього регекс проходить усі сторінки області.
+        how = ("сторінок-кандидатів за літералом (решта відсіяна індексом)"
+               if cov.get("literals") else "сторінок прочесано регексом")
         console.print(f"[muted]декод: показано {len(hits)} із {env.data.get('total', len(hits))} · "
-                      f"прогонів {cov.get('runs')} · сторінок прочесано "
+                      f"прогонів {cov.get('runs')} · {how} "
                       f"{cov.get('pages_scanned')} із {cov.get('pages')}[/muted]")
 
 
@@ -164,6 +168,8 @@ def crop_cmd(
     page: str = typer.Argument(..., help="скан"),
     line: int = typer.Argument(..., help="рядок з одиниці"),
     with_next: bool = typer.Option(True, "--next/--no-next", help="разом із наступним рядком"),
+    with_prev: bool = typer.Option(False, "--prev", help="разом із попереднім рядком "
+                                                       "(хвіст після переносу)"),
     wide: bool = typer.Option(False, "--wide", help="на всю ширину сторінки"),
     pad: int = typer.Option(12, "--pad"),
     scale: float = typer.Option(1.0, "--scale"),
@@ -174,15 +180,19 @@ def crop_cmd(
     from nyshporka import ops as O
 
     env = O.call("text.crop", {"case": case, "page": page, "line": line,
-                               "with_next": with_next, "wide": wide, "pad": pad,
-                               "scale": scale, "out": out})
+                               "with_next": with_next, "with_prev": with_prev,
+                               "wide": wide, "pad": pad, "scale": scale, "out": out})
     if _answer(env, as_json):
         return
     d = env.data
     console.print(f"[bold]{d['out']}[/bold]  {d['width']}×{d['height']}")
-    console.print(f"[muted]{d['run']} · {d['page']} · рядок {d['line']}"
+    zoom = f" · збільшення ×{d['scale']}" if d.get("scale") not in (None, 1, 1.0) else ""
+    console.print(f"[muted]{d['run']} · {d['page']} · рядок "
+                  f"{str(d['prev']) + ' + ' if d.get('prev') else ''}{d['line']}"
                   f"{' + ' + str(d['next']) if d.get('next') else ''} · кадр {d['frame']} · "
-                  f"поворот {d['orient']} · масштаб {d['scale_k']}[/muted]")
+                  f"поворот {d['orient']} · масштаб кадру до рамок {d['scale_k']}{zoom}[/muted]")
+    if d.get("prev_text"):
+        console.print(f"      [muted]↑ {d['prev_text']}[/muted]")
     console.print(f"    [warn]»[/warn] {d['text']}")
     if d.get("next_text"):
         console.print(f"      [muted]↓ {d['next_text']}[/muted]")

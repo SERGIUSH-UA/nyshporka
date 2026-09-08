@@ -619,3 +619,61 @@ def test_runs_cache_is_dropped_with_the_library(space: Path) -> None:
     S._runs_cache_write({"x": {"stamp": "1", "row": {"name": "x"}}}, "lib-1")
     assert S._runs_cache_read("lib-1") == {"x": {"stamp": "1", "row": {"name": "x"}}}
     assert S._runs_cache_read("lib-2") == {}
+
+
+
+# ── після живого пошуку 08.09: канон у selfcheck, серія як область, кроп ↑ ───
+def test_selfcheck_counts_pages_cited_by_the_canon(case_space: Path) -> None:
+    from nyshporka.pagestore.store import resolve_case
+    from nyshporka.search import selfcheck as SC
+    from nyshporka.search import textops as T
+
+    ref = resolve_case("DAHMO/315/8433")
+    canon = case_space / "data" / "canonical"
+    (canon / "persons").mkdir(parents=True)
+    (canon / "sources").mkdir(parents=True)
+    (canon / "sources" / "S_TEST_KOVAL_CASE.md").write_text(
+        "---\nid: S_TEST_KOVAL_CASE\ntype: archive\ntitle: 'ДАХмО 315-1-8433'\n"
+        f"raw_path: {ref.path}/\n---\n\nДжерело.\n", encoding="utf-8")
+    (canon / "persons" / "P-koval.md").write_text(
+        "---\nid: P-koval\nnames:\n- form: Іван Ковальський\n  lang: uk\n  primary: true\n"
+        "  given: Іван\n  surname: Ковальський\nsex: M\nfacts:\n- type: other\n"
+        "  value: свідок\n  citations:\n  - source_id: S_TEST_KOVAL_CASE\n"
+        "    page: стор. 3\n    confidence: direct\n    accessed: '2026-09-08'\n"
+        "    note: ДАХмО 315-1-8433, скан 0004.jpg\n  status: confirmed\n"
+        "media:\n- path: data/source/citations/dahmo/d8433_0004.jpg\n  type: document\n"
+        "---\n\nСвідок.\n", encoding="utf-8")
+    assert SC.canon_pages("Ковальскій", ref, 78) == {"0004"}
+    got = T.find("Ковальскій", "DAHMO/315/8433", limit=10)
+    sc = got["selfcheck"]
+    assert sc["measured"] and sc["canon"] == 1 and sc["found"] == ["0004"], sc
+
+
+def test_a_fond_or_opys_is_a_scope_too(case_space: Path) -> None:
+    from nyshporka import htr_store as S
+    from nyshporka.search import textops as T
+
+    sc = S.runs_for_scope("315-1")
+    assert sc["kind"] == "cases" and len(sc["rows"]) == 2 and sc["keys"] == ["DAHMO/315/8433"]
+    assert len(S.runs_for_scope("ДАХмО 315-1")["rows"]) == 2
+    with pytest.raises(ValueError):
+        S.runs_for_scope("315-10")
+    got = T.find("Ковальскій", "315-1", limit=10)
+    assert not got.get("error") and got["hits"] and got["ledger"]["runs"] == 2
+
+
+def test_crop_can_take_the_previous_line_for_a_hyphen_tail(space: Path) -> None:
+    from nyshporka.search import textops as T
+
+    got = T.crop("проба", "4", 3, with_prev=True, with_next=False, out=space / "p.png")
+    assert not got.get("error"), got
+    assert got["prev"] == 2 and got["prev_text"] and got["scale"] == 1.0
+
+
+def test_sheet_says_when_it_cut_the_list(case_space: Path) -> None:
+    from nyshporka import ops as O
+
+    env = O.call("text.sheet", {"q": "Ковальскій", "case": "DAHMO/315/8433", "limit": 1,
+                                "crops": 0, "out": str(case_space / "s1.html")})
+    assert env.ok, env
+    assert any(w.code == "cut" for w in env.warnings), [w.code for w in env.warnings]

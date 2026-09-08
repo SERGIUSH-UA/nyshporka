@@ -236,6 +236,8 @@ class TextCropArgs(BaseModel):
     page: str = Field(description="скан")
     line: int = Field(ge=1, description="рядок (з одиниці)")
     with_next: bool = Field(default=True, description="разом із наступним рядком (перенос)")
+    with_prev: bool = Field(default=False,
+                            description="разом із попереднім рядком (хвіст після переносу)")
     wide: bool = Field(default=False, description="на всю ширину сторінки")
     pad: int = Field(default=12, ge=0, le=200)
     scale: float = Field(default=1.0, gt=0, le=4)
@@ -248,8 +250,8 @@ def text_crop(a: TextCropArgs) -> Envelope:
     from nyshporka.search import textops as T
 
     try:
-        res = T.crop(a.case, a.page, a.line, with_next=a.with_next, wide=a.wide,
-                     pad=a.pad, scale=a.scale, out=a.out or None)
+        res = T.crop(a.case, a.page, a.line, with_next=a.with_next, with_prev=a.with_prev,
+                     wide=a.wide, pad=a.pad, scale=a.scale, out=a.out or None)
     except ValueError as exc:
         return fail(str(exc))
     if res.get("error"):
@@ -405,6 +407,9 @@ def text_sheet(a: TextSheetArgs) -> Envelope:
     if res["cards"] and not res["crops"]:
         env.warn("no_crops", "жодного кропу: кадрів справи на цій машині немає або "
                              "прогін без геометрії — гортач лише текстом")
+    if int(res.get("total") or 0) > int(res["cards"]):
+        env.warn("cut", f"у гортачі {res['cards']} із {res['total']} кандидатів — решта "
+                        f"поза ним; підняти --limit або звузити --case")
     env.suggest("text.verdicts", "занести вердикти з гортача у сховище сторінок")
     return env
 

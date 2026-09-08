@@ -235,7 +235,7 @@ def _geometry_size(run: str, page: str) -> list[int] | None:
 
 def crop(scope: str, page: str, line: int, *, with_next: bool = True, wide: bool = False,
          pad: int = 12, scale: float = 1.0, out: str | Path | None = None,
-         ) -> dict[str, Any]:
+         with_prev: bool = False) -> dict[str, Any]:
     """Вирізка рядка з кадру — за рамкою рушія, з поворотом і масштабом.
 
     🔴 Рамки лежать у координатах тієї копії кадру, яку бачив рушій: повернутої
@@ -301,6 +301,15 @@ def crop(scope: str, page: str, line: int, *, with_next: bool = True, wide: bool
         nxt = by_no.get(nxt_no) if nxt_no else None
         if nxt and nxt.box:
             boxes.append(nxt.box)
+    # Хвіст після переносу («-щинскій») читається лише з ГОЛОВОЮ, а вона в
+    # попередньому рядку — за геометрією (чий наступник цей рядок), інакше за файлом.
+    prev_no: int | None = None
+    if with_prev:
+        prev_no = next((ln.no for ln in lines if ln.succ == line), None) \
+            or (line - 1 if (line - 1) in by_no else None)
+        prev = by_no.get(prev_no) if prev_no else None
+        if prev and prev.box:
+            boxes.append(prev.box)
     size = _geometry_size(run, pg)
     got = S.resolve_scan(run, pg)
     if got is None:
@@ -336,11 +345,13 @@ def crop(scope: str, page: str, line: int, *, with_next: bool = True, wide: bool
             dst = Path(out)
         dst.parent.mkdir(parents=True, exist_ok=True)
         piece.save(dst)
-        return {"run": run, "page": pg, "line": line, "next": nxt_no,
+        return {"run": run, "page": pg, "line": line, "next": nxt_no, "prev": prev_no,
                 "frame": str(src), "orient": int(orient), "scale_k": round(k, 3),
+                "scale": scale,
                 "box": list(box), "out": str(dst), "width": piece.width,
                 "height": piece.height, "text": target.toks,
-                "next_text": by_no[nxt_no].toks if nxt_no and nxt_no in by_no else ""}
+                "next_text": by_no[nxt_no].toks if nxt_no and nxt_no in by_no else "",
+                "prev_text": by_no[prev_no].toks if prev_no and prev_no in by_no else ""}
 
 
 # ── голоси ───────────────────────────────────────────────────────────────────
