@@ -969,9 +969,32 @@ def search(q: str, name: str | None = None, thresh: int = 78,
     # 🔴 Індекс однієї справи збирається на місці — це секунди, і людина
     # просила саме цю справу. Індекс усього корпусу — чверть години, і робити
     # це мовчки всередині запиту означає повісити застосунок.
-    got = D.sweep(stems, names, thresh=thresh,
-                  build_budget=len(names) if scope["kind"] != "all"
-                  else D.INLINE_BUILD)
+    budget = len(names) if scope["kind"] != "all" else D.INLINE_BUILD
+    # 🔴 Стор, а не gzip-індекс, щойно він покриває область не гірше. Заміряно
+    # 07.09.2026: той самий свіп по одній справі — 0.6 с проти 4 с, по
+    # корпусу — секунди проти хвилини, з якої 52 с ішло на розпакування.
+    # Фолбек лишається на час, поки стор доганяє корпус: інакше перший день
+    # після появи стору пошук по всьому прочитаному показував би нуль зі
+    # знаменником «1294 прогони поза пошуком».
+    from nyshporka.search import store as ST
+
+    backend = "gzip"
+    if ST.exists():
+        st_stale = ST.stale_count(names)
+        gz_stale = sum(1 for n in names if not D.is_fresh(n))
+        if st_stale <= budget or st_stale <= gz_stale:
+            backend = "store"
+    dropped: list[str] = []
+    if backend == "store":
+        # 🔴 Фрагменти стема в стор не йдуть. Профіль тримає голови й хвости
+        # переносу («doli-», «scinskii», «doli- scinskii») для каналу, що клеїв
+        # їх сам; стор уже має склейки серед кандидатів, а хвіст «щинскій» як
+        # самостійний стем збігається на 100 з кожним «-щинскій» у книзі:
+        # заміряно на 230-1-13 — 2113 хітів, верхівка суцільно чужа.
+        stems, dropped = ST.whole_stems(stems)
+        got = ST.sweep(stems, names, thresh=thresh, build_budget=budget)
+    else:
+        got = D.sweep(stems, names, thresh=thresh, build_budget=budget)
     raw_hits = got["hits"]
     # 🔴 Ранг ставиться ДО зрізу за `limit`. Інакше службовий формуляр і сусідній
     # рід лишались би на верхівці, а знахідка — за межею показаного: замір
@@ -1086,6 +1109,11 @@ def search(q: str, name: str | None = None, thresh: int = 78,
             # різні числа доти, доки індекс не догнав корпус, і нуль на
             # частковому індексі означає зовсім не те, що нуль на повному.
             "runs_total": got["runs"], "unindexed": got["unindexed"],
+            # Чим прочесано: стор чи gzip-індекс. Нуль на частковому сторі й
+            # нуль на повному gzip-індексі — різні відповіді.
+            "backend": backend,
+            # Які написання профілю не пішли в стор і чому — див. `whole_stems`.
+            "stems_dropped": dropped,
             "phantom": phantom_n, "phantom_blind": blind}
 
 

@@ -1576,6 +1576,7 @@ def search_run(a: SearchArgs) -> Envelope:
                                # 1142» — різні відповіді, і за другою закривають
                                # напрям, якого не перевіряли.
                                "unindexed": blind,
+                               "backend": res.get("backend") or "gzip",
                                # 🔴 Чим шукали НАСПРАВДІ. Після розкриття
                                # гнізда імен «шукали Євдокію» перестає бути
                                # правдою — шукали ще й Явдоху з Овдотьєю, і
@@ -1614,7 +1615,8 @@ def search_run(a: SearchArgs) -> Envelope:
             env.warn("partial_index",
                      f"{blind} прогонів поза пошуком: їхній текст ще не "
                      f"проіндексовано. Прочесано {scanned}.")
-            env.suggest("search.index", "зібрати індекс решти прогонів")
+            env.suggest("text.index" if res.get("backend") == "store" else "search.index",
+                        "зібрати індекс решти прогонів")
         if scope_kind == "case" and not int(res.get("runs_scoped") or 0):
             # Справу впізнано, але прочитаного в ній немає. Це зовсім інша
             # відповідь, ніж «шукали й не знайшли», і зливати їх в одну —

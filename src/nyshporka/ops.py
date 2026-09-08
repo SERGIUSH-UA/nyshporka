@@ -16,6 +16,7 @@ from nyshporka import ops_catalog as _catalog  # noqa: F401  (те саме: р�
 from nyshporka import ops_library as _library  # noqa: F401  (те саме: реєстрація)
 from nyshporka import ops_pick as _pick  # noqa: F401  (те саме: реєстрація)
 from nyshporka import ops_records as _records  # noqa: F401  (те саме: реєстрація)
+from nyshporka import ops_text as _text  # noqa: F401  (те саме: реєстрація)
 from nyshporka import ops_train as _train  # noqa: F401  (те саме: реєстрація)
 from nyshporka import ops_train_run as _train_run  # noqa: F401  (те саме: реєстрація)
 from nyshporka.core.envelope import Envelope

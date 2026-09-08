@@ -1172,6 +1172,12 @@ from nyshporka.geog.cli import app as geog_app  # noqa: E402
 
 app.add_typer(geog_app, name="geog")
 
+# 🗄 Текстовий стор: усе прочитане в одному файлі, регекс і стан індексу без
+# обходу дерева прогонів. Секція та сама, що й у пошуку.
+from nyshporka.search.cli import app as text_app  # noqa: E402
+
+app.add_typer(text_app, name="text")
+
 # 🗂 Каталог — довідники, які їдуть у комплекті й оновлюються окремо від коду.
 from nyshporka.catalog.cli import app as catalog_app  # noqa: E402
 

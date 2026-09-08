@@ -88,7 +88,11 @@ def run(case: str, q: str = "", *, thresh: int = 80, limit: int = 100) -> Report
         return Report(query=q, why=str(exc))
     rep.key, rep.shifra = ref.key, ref.shifra
 
-    eye = {h["scan"] for h in
+    # 🔴 Аркуш ототожнюється за ОСНОВОЮ імені без регістру. Око записує «00301»,
+    # мета прогону — «00301.jpg», еталон — «00301.JPG»; порівняння рядків тут
+    # давало «жоден аркуш ока не прочитаний рушієм» на справі, прочитаній
+    # цілком, — тобто recall не мірявся там, де він був найпотрібніший.
+    eye = {_pid(h["scan"]) for h in
            (PQ.grep_surnames(q, thresh=thresh, case_key=ref.key)["hits"] or [])}
     rep.eye = len(eye)
     if not eye:
@@ -104,7 +108,7 @@ def run(case: str, q: str = "", *, thresh: int = 80, limit: int = 100) -> Report
     decoded: set[str] = set()
     for row in scope["rows"]:
         for page in ((S.case_pages(row["name"]) or {}).get("pages") or []):
-            decoded.add(str(page.get("page") or ""))
+            decoded.add(_pid(str(page.get("page") or "")))
     rep.denom = sorted(eye & decoded)
     if not rep.denom:
         rep.why = (f"жоден із {len(eye)} аркушів, де око бачило прізвище, не "
@@ -113,13 +117,20 @@ def run(case: str, q: str = "", *, thresh: int = 80, limit: int = 100) -> Report
         return rep
 
     got = S.search(q, name=ref.key, thresh=thresh, limit=limit)
-    rep.shown = sorted({h["page"] for h in got["hits"]} & set(rep.denom))
+    rep.shown = sorted({_pid(h["page"]) for h in got["hits"]} & set(rep.denom))
     # 🔴 «Знайдено» рахується по ВСІХ хітах понад порогом, а «подано» — лише по
     # тих, що влізли в `limit`. Розрив між ними і є те, чого одне число не
     # показує: сторінка знайшлась, а на око не поїхала.
     wide = S.search(q, name=ref.key, thresh=thresh, limit=max(limit, got["total"]))
-    rep.found = sorted({h["page"] for h in wide["hits"]} & set(rep.denom))
+    rep.found = sorted({_pid(h["page"]) for h in wide["hits"]} & set(rep.denom))
     return rep
+
+
+def _pid(name: str) -> str:
+    """Тотожність аркуша: основа імені без регістру («00301.JPG» → «00301»)."""
+    from pathlib import Path
+
+    return Path(str(name or "")).stem.lower()
 
 
 def as_dict(rep: Report) -> dict[str, Any]:

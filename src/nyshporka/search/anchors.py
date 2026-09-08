@@ -136,6 +136,7 @@ def _from_canon() -> list[Person]:
         root = workspace().canonical / "persons"
         if not root.is_dir():
             return []
+        subs = _surname_substrings()
         out: list[Person] = []
         for path in sorted(root.glob("*.md")):
             try:
@@ -148,12 +149,40 @@ def _from_canon() -> list[Person]:
                     form = nm.form
                     break
             given, patr, _ = split_name(form)
-            out.append(Person(given=given, patronymic=patr,
+            out.append(Person(given=_clean_anchor(given, subs),
+                              patronymic=_clean_anchor(patr, subs),
                               born=_life(person, "birt"),
                               died=_life(person, "deat")))
         return out
     except Exception:
         return []
+
+
+def _surname_substrings() -> tuple[str, ...]:
+    """Підрядки прізвища роду з профілю — щоб воно не стало «по батькові»."""
+    try:
+        from nyshporka.core.profile import active
+
+        return tuple(normalize_archival(s) for s in (active().substrings or ()) if s)
+    except Exception:
+        return ()
+
+
+def _clean_anchor(tok: str, subs: tuple[str, ...]) -> str:
+    """Якір — лише слово з літер, і не прізвище роду.
+
+    🔴 `split_name` бере по батькові розбором рядка, і на картці, де прізвище
+    стоїть не останнім, ним ставало саме прізвище: канал якорів тоді шукав
+    прізвище під виглядом по батькові й підтверджував сам себе. Так само
+    відпадають обрізки на кшталт «митроп.» — крапка в якорі не буває.
+    """
+    s = (tok or "").strip()
+    if not s or not all(ch.isalpha() for ch in s):
+        return ""
+    n = normalize_archival(s)
+    if any(sub and sub in n for sub in subs):
+        return ""
+    return s
 
 
 def _life(person: Any, kind: str) -> int | None:

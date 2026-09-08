@@ -91,8 +91,8 @@ def test_the_search_sees_the_page_the_eye_wrote_down(seeing) -> None:
 
     rep = SC.run(CASE, "Сікорський")
     assert rep.measured, rep.why
-    assert rep.denom == ["0106.jpg"]
-    assert rep.found == ["0106.jpg"]
+    assert rep.denom == ["0106"]   # основа імені, без розширення
+    assert rep.found == ["0106"]
     assert rep.pct(rep.found) == 100
 
 
@@ -103,7 +103,7 @@ def test_a_blind_decode_is_named_by_number(blind) -> None:
     rep = SC.run(CASE, "Сікорський")
     assert rep.measured, rep.why
     assert rep.found == []
-    assert rep.missed == ["0106.jpg"]
+    assert rep.missed == ["0106"]
 
 
 def test_no_positives_is_a_refusal_not_a_zero(seeing) -> None:
@@ -127,7 +127,7 @@ def test_a_page_the_engine_never_read_is_out_of_the_denominator(
                             "--status", "full", "--surnames", "Сікорський"])
         # 0107 занесено оком і воно ПРОЧИТАНЕ, тож у знаменнику двоє.
         rep = SC.run(CASE, "Сікорський")
-        assert rep.denom == ["0106.jpg", "0107.jpg"]
+        assert rep.denom == ["0106", "0107"]
         assert rep.eye == 2
     finally:
         W.reset()
@@ -142,7 +142,7 @@ def test_the_flag_puts_the_number_next_to_the_zero(blind) -> None:
     codes = [w["code"] for w in env.as_dict()["warnings"]]
     assert "recall_measured" in codes
     assert "recall_missed" in codes
-    assert env.data["selfcheck"]["missed"] == ["0106.jpg"]
+    assert env.data["selfcheck"]["missed"] == ["0106"]
 
 
 def test_the_flag_refuses_without_a_case(seeing) -> None:
