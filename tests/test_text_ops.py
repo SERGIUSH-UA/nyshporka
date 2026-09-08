@@ -677,3 +677,55 @@ def test_sheet_says_when_it_cut_the_list(case_space: Path) -> None:
                                 "crops": 0, "out": str(case_space / "s1.html")})
     assert env.ok, env
     assert any(w.code == "cut" for w in env.warnings), [w.code for w in env.warnings]
+
+
+def test_the_opys_ceiling_is_named_when_it_bites(space: Path,
+                                                 monkeypatch: pytest.MonkeyPatch) -> None:
+    """Стеля обходу описів мусить називатись, а не мовчки різати вибірку.
+
+    Мовчазне звуження читається як «не знайшлось»: нуль виходить про НАШ
+    обхід, а виглядає як нуль про матеріал.
+    """
+    from nyshporka import ops as O
+    from nyshporka.search import textops as T
+
+    d = space / "data" / "derived" / "dahmo_opysy_ocr"
+    d.mkdir(parents=True)
+    for i in range(5):
+        (d / f"{i}.txt").write_text("Ковальскій", encoding="utf-8")
+    monkeypatch.setattr(T, "OPYS_FILE_CAP", 2)
+
+    files, cuts = T.layer_files("opys")
+    assert len(files) == 2 and cuts and "файлів 5" in cuts[0]
+
+    env = O.call("text.grep", {"pattern": "Коваль", "where": "opys"})
+    assert env.ok, env
+    assert any(w.code == "layer_cut" for w in env.warnings), [w.code for w in env.warnings]
+
+
+def test_dir_is_its_own_layer_and_a_missing_path_is_said_out_loud(space: Path) -> None:
+    """`--dir` раніше домішувався до нотаток і для решти шарів МОВЧКИ зникав.
+
+    Тепер у нього свій шар зі своїм знаменником, і кожна причина не прочитати
+    щось називається: неіснуючий шлях давав рівно нуль без жодного слова.
+    """
+    from nyshporka import ops as O
+    from nyshporka.search import textops as T
+
+    outside = space.parent / "чужа-тека"
+    outside.mkdir(exist_ok=True)
+    (outside / "нотатка.md").write_text("Ковальскій згадується тут", encoding="utf-8")
+
+    files, notes = T.dir_files([str(outside)])
+    assert len(files) == 1 and not notes
+    _, notes = T.dir_files([str(space / "нема-такого")])
+    assert notes and "не існує" in notes[0]
+
+    # шар канону — той, для якого тека раніше ігнорувалась мовчки
+    got = T.grep_layers("Коваль", ["canon"], extra=[str(outside)])
+    assert got["layers"]["dir"]["hits"] == 1
+
+    env = O.call("text.grep", {"pattern": "Коваль", "where": "canon",
+                               "extra": str(space / "нема-такого")})
+    assert env.ok, env
+    assert any(w.code == "layer_cut" for w in env.warnings), [w.code for w in env.warnings]

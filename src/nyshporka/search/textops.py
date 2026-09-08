@@ -1024,14 +1024,26 @@ def verdicts_import(path: str | Path, scope: str, *, q: str = "", agent: str = "
 #: прогонів: та тримає понад мільйон файлів, і обхід її коштує хвилини.
 LAYERS = ("canon", "opys", "notes")
 
+#: Стеля обходу текстів OCR описів у `data/derived/*opys*`.
+#:
+#: 🔴 Стеля лишається — вона рятує від теки на десятки тисяч дрібних файлів.
+#: Але про кожне спрацювання треба СКАЗАТИ: мовчазне звуження вибірки читається
+#: як «не знайшлось», тобто дає хибний нуль там, де ми просто не дивились.
+OPYS_FILE_CAP = 5000
 
-def layer_files(layer: str, *, extra: list[str] | None = None) -> list[Path]:
-    """Файли шару. Обхід дешевий за побудовою: канон — сотні карток, описи —
-    десятки TSV і текстів OCR, нотатки — теки `reports/` без `htr`."""
+
+def layer_files(layer: str) -> tuple[list[Path], list[str]]:
+    """Файли шару і перелік звужень, які довелось зробити.
+
+    Обхід дешевий за побудовою: канон — сотні карток, описи — десятки TSV і
+    текстів OCR, нотатки — теки `reports/` без `htr`. Друге значення порожнє,
+    коли шар прочесано ПОВНІСТЮ; інакше кожен рядок називає теку й числа.
+    """
     from nyshporka.core.workspace import workspace
 
     ws = workspace()
     out: list[Path] = []
+    cuts: list[str] = []
     if layer == "canon":
         out += sorted(ws.canonical.rglob("*.md")) if ws.canonical.is_dir() else []
     elif layer == "opys":
@@ -1047,7 +1059,11 @@ def layer_files(layer: str, *, extra: list[str] | None = None) -> list[Path]:
         if der.is_dir():
             for d in sorted(der.iterdir()):
                 if d.is_dir() and "opys" in d.name.lower():
-                    out += sorted(d.rglob("*.txt"))[:5000]
+                    found = sorted(d.rglob("*.txt"))
+                    out += found[:OPYS_FILE_CAP]
+                    if len(found) > OPYS_FILE_CAP:
+                        cuts.append(f"{d.name}: файлів {len(found)},"
+                                    f" прочесано {OPYS_FILE_CAP}")
     elif layer == "notes":
         rep = ws.reports
         if rep.is_dir():
@@ -1055,20 +1071,48 @@ def layer_files(layer: str, *, extra: list[str] | None = None) -> list[Path]:
             for d in sorted(rep.iterdir()):
                 if d.is_dir() and d.name != "htr":
                     out += sorted(d.rglob("*.md"))
+    return out, cuts
+
+
+#: Розширення, які має сенс читати регексом у теці, поданій ззовні.
+DIR_SUFFIXES = (".md", ".txt", ".tsv", ".yaml", ".yml", ".json")
+
+
+def dir_files(extra: list[str] | None) -> tuple[list[Path], list[str]]:
+    """Файли тек і файлів, поданих `--dir`, — окремий шар, а не домішка.
+
+    🔴 Раніше `--dir` домішувався до шару `notes` і для решти шарів мовчки
+    ігнорувався: `--where canon --dir <тека>` читався як «прочесали й теку»,
+    а насправді теку не відкривали. Тепер це власний шар зі своїм знаменником,
+    і кожна причина не прочитати щось називається вголос.
+    """
+    out: list[Path] = []
+    notes: list[str] = []
     for e in extra or []:
         p = Path(e)
         if p.is_file():
             out.append(p)
         elif p.is_dir():
-            out += sorted(x for x in p.rglob("*") if x.suffix.lower() in (".md", ".txt", ".tsv", ".yaml", ".yml", ".json"))
-    return out
+            got = sorted(x for x in p.rglob("*")
+                         if x.suffix.lower() in DIR_SUFFIXES)
+            if not got:
+                notes.append(f"{e}: тека є, але читабельних файлів"
+                             f" ({', '.join(DIR_SUFFIXES)}) у ній немає")
+            out += got
+        else:
+            notes.append(f"{e}: шляху не існує")
+    return out, notes
 
 
 def grep_layers(pattern: str, layers: list[str], *, ignore_case: bool = True,
                 limit: int = 100, context: int = 0, extra: list[str] | None = None
                 ) -> dict[str, Any]:
     """Регекс по канону, описах і нотатках — щоб «ми це вже знаємо?» було одним
-    запитом, а не грепом по чотирьох схованках."""
+    запитом, а не грепом по чотирьох схованках.
+
+    Тека з `--dir` іде ОКРЕМИМ шаром `dir`: вона читається рівно раз, скільки б
+    шарів не просили, і має власний знаменник у відповіді.
+    """
     import re as _re
 
     flags = _re.IGNORECASE if ignore_case else 0
@@ -1078,11 +1122,17 @@ def grep_layers(pattern: str, layers: list[str], *, ignore_case: bool = True,
         return {"error": f"регекс не розбирається: {exc}"}
     hits: list[dict[str, Any]] = []
     per_layer: dict[str, dict[str, int]] = {}
+    cuts: list[str] = []
     from nyshporka.core.workspace import workspace
 
     root = workspace().root
-    for layer in layers:
-        files = layer_files(layer, extra=extra if layer == "notes" else None)
+    todo = list(layers) + (["dir"] if extra else [])
+    for layer in todo:
+        if layer == "dir":
+            files, notes = dir_files(extra)
+        else:
+            files, notes = layer_files(layer)
+        cuts += notes
         n_files = n_hits = 0
         for f in files:
             try:
@@ -1109,4 +1159,4 @@ def grep_layers(pattern: str, layers: list[str], *, ignore_case: bool = True,
                 hits.append(h)
         per_layer[layer] = {"files": n_files, "hits": n_hits}
     return {"hits": hits, "total": sum(v["hits"] for v in per_layer.values()),
-            "layers": per_layer}
+            "layers": per_layer, "cuts": cuts}

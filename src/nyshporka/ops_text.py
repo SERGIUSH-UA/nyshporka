@@ -101,6 +101,17 @@ def text_index(a: TextIndexArgs) -> Envelope:
     return env
 
 
+def _warn_cuts(env: Envelope, layered: dict[str, Any]) -> None:
+    """Сказати про кожне звуження вибірки шарів.
+
+    🔴 Мовчазне звуження читається як «не знайшлось». Стеля обходу описів і
+    тека `--dir`, якої немає на диску, дають рівно нуль — і без цього рядка
+    той нуль виглядає як відповідь про матеріал, а не про наш обхід.
+    """
+    for line in layered.get("cuts") or []:
+        env.warn("layer_cut", f"вибірку звужено — {line}")
+
+
 class TextGrepArgs(BaseModel):
     pattern: str = Field(description="регекс Python; кирилиця як у тексті")
     case: str = Field(default="",
@@ -110,7 +121,7 @@ class TextGrepArgs(BaseModel):
     ignore_case: bool = Field(default=True)
     where: str = Field(default="decode",
                        description="decode | canon | opys | notes | all — або кілька через кому")
-    extra: str = Field(default="", description="додаткові теки/файли для шару notes, через «;»")
+    extra: str = Field(default="", description="ще теки/файли окремим шаром «dir», через «;»")
 
 
 @op("text.grep", summary="Регекс по сирому тексту прочитаного — замість rg по теці прогонів",
@@ -133,11 +144,11 @@ def text_grep(a: TextGrepArgs) -> Envelope:
     if bad:
         return fail(f"невідомий шар {bad}: є decode, {', '.join(T.LAYERS)}, all")
     layers = [w for w in wanted if w != "decode"]
+    extra = [x.strip() for x in a.extra.split(";") if x.strip()]
     layered: dict[str, Any] | None = None
-    if layers:
+    if layers or extra:
         layered = T.grep_layers(a.pattern, layers, ignore_case=a.ignore_case,
-                                limit=a.limit, context=a.context,
-                                extra=[x for x in a.extra.split(";") if x.strip()])
+                                limit=a.limit, context=a.context, extra=extra)
         if layered.get("error"):
             return fail(str(layered["error"]))
     if "decode" not in wanted:
@@ -148,6 +159,7 @@ def text_grep(a: TextGrepArgs) -> Envelope:
             env.warn("zero_with_denominator",
                      "не знайшлось — файлів прочесано: " + ", ".join(
                          f"{k} {v['files']}" for k, v in layered["layers"].items()))
+        _warn_cuts(env, layered)
         return env
     if not ST.exists():
         env = fail("текстового стору ще немає")
@@ -179,6 +191,8 @@ def text_grep(a: TextGrepArgs) -> Envelope:
         data["layers"] = {"hits": layered["hits"], "total": layered["total"],
                           "coverage": layered["layers"]}
     env = ok(data)
+    if layered is not None:
+        _warn_cuts(env, layered)
     if res["unindexed"]:
         env.warn("partial_store",
                  f"{res['unindexed']} прогонів поза стором: їхній текст ще не "

@@ -1369,10 +1369,19 @@ def _warn_anchors(env: Envelope, got: dict[str, Any]) -> None:
 
 class SearchArgs(BaseModel):
     q: str = Field(description="прізвище або слово")
-    where: Literal["decode", "pages", "records"] = Field(
+    # 🔴 Слово `where` означає РІЗНЕ у двох сусідніх командах, і це не
+    # недогляд, а різні задачі: тут нечіткий пошук прізвища по трьох областях
+    # свого простору, у `text.grep` — регекс по текстових шарах (канон, описи,
+    # нотатки). Зводити множини в одну не можна: це обіцяло б fuzzy по канону,
+    # якого немає. Але й падати валідацією на `--where all` не можна — саме
+    # так воно поводилось, і читач не діставав жодної підказки, куди йти.
+    # Тому чужі шари приймаються й ВІДМОВЛЯЮТЬСЯ по імені, з адресою.
+    where: Literal["decode", "pages", "records", "all",
+                   "canon", "opys", "notes"] = Field(
         default="decode",
         description="decode — тексти прогонів; pages — виписані прізвища; "
-                    "records — учасники розібраних записів")
+                    "records — учасники розібраних записів; all — усі три, "
+                    "кожна зі своїм знаменником")
     case: str = Field(
         default="",
         description="обмежити однією справою: ключ «DAHMO/315/8433», шифра "
@@ -1495,6 +1504,66 @@ def search_sweep(a: SweepArgs) -> Envelope:
                                  rank=a.rank, profile=a.profile))
 
 
+#: Області пошуку прізвища — і порядок, у якому їх обходить `where=all`.
+#: Декод перший, бо він найбільший і найдешевший на нуль; виписане й розібране
+#: після нього, бо там знаходиться те, що ОКО вже бачило.
+SEARCH_AREAS = ("decode", "pages", "records")
+
+#: Шари `text.grep`, які помилково просять у `nysh search`. Приймаються, щоб
+#: відмовити по імені й дати адресу, а не впасти валідацією.
+TEXT_LAYERS = ("canon", "opys", "notes")
+
+
+def _search_every_area(a: SearchArgs) -> Envelope:
+    """`where=all`: три області поспіль, кожна зі СВОЇМ знаменником.
+
+    🔴 Знаменники не складаються. «Переглянуто 1328 прогонів» і «переглянуто
+    403 справи виписаного» — відповіді на різні питання, і одне число замість
+    двох робить нуль недоказовим рівно там, де він найдорожчий. Тому хіти
+    зливаються в один список (кожен із міткою `area`), а покриття лишається
+    окремим по кожній області.
+
+    Фільтри, що діють лише в одній області (`role`, `rtype`, `anchors`,
+    `selfcheck`), тут не пропускаються: вони змусили б дві інші області
+    відмовити, і `all` перетворився б на найдовший спосіб дістати помилку.
+    """
+    narrow = [n for n, v in (("role", a.role), ("rtype", a.rtype),
+                             ("anchors", a.anchors), ("selfcheck", a.selfcheck))
+              if v]
+    if narrow:
+        return fail(f"{', '.join(narrow)} діє лише в своїй області, а where=all "
+                    f"обходить три. Постав ту область явно")
+    hits: list[dict[str, Any]] = []
+    areas: dict[str, Any] = {}
+    env = ok({})
+    for area in SEARCH_AREAS:
+        sub = search_run(a.model_copy(update={"where": area}))
+        # ⚠ Гілка декоду `total` не віддає взагалі — там показано стільки,
+        # скільки влізло в `limit`. Підставити 0 означало б надрукувати
+        # «decode: 0» під самими ж хітами декоду.
+        got = sub.data.get("hits") or []
+        tot = sub.data.get("total")
+        areas[area] = {"ok": sub.ok, "total": len(got) if tot is None else tot,
+                       "coverage": sub.data.get("coverage") or {}}
+        if not sub.ok:
+            areas[area]["error"] = sub.error
+            continue
+        for h in sub.data.get("hits") or []:
+            hits.append({**h, "area": area})
+        # Попередження області несуть її знаменник і застереження (застарілий
+        # стор, звужений профіль) — загубити їх означає віддати хіти без того,
+        # чим вони обмежені.
+        env.warnings.extend(sub.warnings)
+        env.next.extend(sub.next)
+    env.data = {"hits": hits, "total": sum(v["total"] for v in areas.values()),
+                "coverage": {"areas": areas, "scope": "all"}}
+    if not hits:
+        env.warn("zero_with_denominator",
+                 "не знайшлось у жодній із трьох областей — знаменник кожної "
+                 "окремо в coverage.areas")
+    return env
+
+
 @op("search.run", summary="Знайти прізвище в тому, що вже прочитано",
     args=SearchArgs, mutates=False, section="research")
 def search_run(a: SearchArgs) -> Envelope:
@@ -1512,6 +1581,15 @@ def search_run(a: SearchArgs) -> Envelope:
     пошуку нижче, тільки тихіша: там видно хоч якийсь текст, тут — правдоподібні
     хіти не з тієї графи.
     """
+    if a.where in TEXT_LAYERS:
+        env = fail(f"«{a.where}» — це текстовий шар, а не область пошуку "
+                   f"прізвища: тут нечіткий збіг по прочитаному, виписаному й "
+                   f"розібраному, а канон, описи й нотатки читаються регексом")
+        env.suggest("text.grep", f"регекс по шару {a.where} (і по всіх одразу "
+                                 f"— `nysh text grep <регекс> --where all`)")
+        return env
+    if a.where == "all":
+        return _search_every_area(a)
     if a.role and a.where != "records":
         return fail(f"role фільтрує учасників розібраних записів, а шукаємо в "
                     f"«{a.where}». Постав where=records або прибери role")

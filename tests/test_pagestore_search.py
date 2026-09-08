@@ -244,3 +244,41 @@ def test_the_search_literals_match_the_models() -> None:
     assert set(get_args(SearchArgs.model_fields["rtype"].annotation)) == rtypes | {""}
     assert roles <= set(cli._ROLES_HELP.replace("|", " ").split())
     assert rtypes <= set(cli._RTYPES_HELP.replace("|", " ").split())
+
+
+# ── область пошуку: три свої, чужі — з адресою ───────────────────────────────
+def test_a_text_layer_is_refused_by_name_not_by_a_validation_crash(case):
+    """`--where canon` — це шар `text.grep`, а не область пошуку прізвища.
+
+    🔴 Раніше воно падало валідацією pydantic, і читач не діставав жодної
+    підказки, куди йти. Слово `where` означає різне у двох сусідніх командах,
+    і саме тому чуже значення приймається — щоб відмовити по імені й дати
+    адресу.
+    """
+    r = _run("search", "Ковальський", "--where", "canon", "--json")
+    assert r.exit_code == 1
+    env = json.loads(r.stdout)
+    assert env["ok"] is False and "текстовий шар" in env["error"]
+    assert any(n["op"] == "text.grep" for n in env.get("next") or []), env
+
+
+def test_where_all_walks_three_areas_and_keeps_each_denominator(case):
+    """Знаменники трьох областей НЕ складаються.
+
+    «Прогонів 1328» і «справ 403» — різні одиниці, і одне число замість двох
+    робить нуль недоказовим рівно там, де він найдорожчий.
+    """
+    _seed()
+    env = json.loads(_run("search", "Ковальський", "--where", "all", "--json").stdout)
+    assert env["ok"] is True, env
+    areas = env["data"]["coverage"]["areas"]
+    assert set(areas) == {"decode", "pages", "records"}
+    assert all("coverage" in v for v in areas.values())
+    assert {h.get("area") for h in env["data"]["hits"]} <= {"decode", "pages", "records"}
+
+
+def test_where_all_refuses_a_filter_that_lives_in_one_area(case):
+    """Інакше `all` став би найдовшим способом дістати помилку."""
+    r = _run("search", "Ковальський", "--where", "all", "--anchors", "--json")
+    assert r.exit_code == 1
+    assert "where=all" in json.loads(r.stdout)["error"]

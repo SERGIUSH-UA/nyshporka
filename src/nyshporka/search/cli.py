@@ -67,7 +67,8 @@ def grep_cmd(
     case_sensitive: bool = typer.Option(False, "--case-sensitive"),
     where: str = typer.Option("decode", "--where",
                               help="decode | canon | opys | notes | all, або через кому"),
-    extra: list[str] = typer.Option([], "--dir", help="ще тека або файл для шару notes"),
+    extra: list[str] = typer.Option([], "--dir",
+                                    help="ще тека або файл — окремим шаром «dir»"),
     as_json: bool = typer.Option(False, "--json"),
 ) -> None:
     """Регекс по прочитаному, канону, описах і нотатках — один запит замість

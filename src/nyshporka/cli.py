@@ -1045,7 +1045,7 @@ def search_cmd(
         help="лише в цій справі: ключ «DAHMO/315/8433», шифра "
              "«ДАХмО 315-1-8433», шлях теки або ім'я прогону"),
     where: str = typer.Option("decode", "--where",
-                              help="decode | pages | records"),
+                              help="decode | pages | records | all"),
     context: int = typer.Option(1, "--context",
                                 help="рядків сусідства (0 — лише сам рядок)"),
     thresh: int = typer.Option(80, "--thresh", help="поріг схожості 50-100"),
@@ -1096,23 +1096,48 @@ def search_cmd(
         return
     hits = env.data.get("hits") or []
     for h in hits:
-        head = f"{h.get('name')} · {h.get('page')} · рядок {h.get('line_no')}"
+        # 🔴 Три області — три форми хіта, і одна на всіх не працює: рядок
+        # декоду має `name/page/line_no/line`, виписане прізвище — `shifra/
+        # scan/matched`, розібраний запис — ще й роль та тип акту. Спільний
+        # друк по полях декоду віддавав «None · None · рядок None» на
+        # виписаному й розібраному, тобто ховав ВЕСЬ вміст відповіді, яка в
+        # `--json` була на місці.
+        area = str(h.get("area") or "")
+        tag = f"[muted]{area}[/muted] " if area else ""
         # 🔴 Написання, яким знайдено, друкується ЛИШЕ коли воно не те, що
         # набрали. Мовчазний хіт по двійнику з довідника читається як хіт по
         # запиту, а важить менше: його ще треба звірити з тим, що шукали саме
         # цю особу.
         why = str(h.get("stem_origin") or "q")
+        mark = ""
         if why != "q":
-            mark = "побутове" if why == "folk" else "довідник"
-            head += f" · [warn]{mark}: {h.get('stem')}[/warn]"
-        console.print(f"[bold]{h.get('score')}[/bold]  {head}")
-        for b in (h.get("context") or {}).get("before") or []:
-            console.print(f"      [muted]↑ {b}[/muted]")
-        console.print(f"    [warn]»[/warn] {h.get('line')}")
-        for a in (h.get("context") or {}).get("after") or []:
-            console.print(f"      [muted]↓ {a}[/muted]")
-        if h.get("alt"):
-            console.print(f"      [accent]2-й голос:[/accent] [muted]{h['alt']['line']}[/muted]")
+            what = "побутове" if why == "folk" else "довідник"
+            mark = f" · [warn]{what}: {h.get('stem')}[/warn]"
+        if h.get("line_no") is not None:
+            head = f"{h.get('name')} · {h.get('page')} · рядок {h.get('line_no')}"
+            console.print(f"[bold]{h.get('score')}[/bold]  {tag}{head}{mark}")
+            for b in (h.get("context") or {}).get("before") or []:
+                console.print(f"      [muted]↑ {b}[/muted]")
+            console.print(f"    [warn]»[/warn] {h.get('line')}")
+            for a in (h.get("context") or {}).get("after") or []:
+                console.print(f"      [muted]↓ {a}[/muted]")
+            if h.get("alt"):
+                console.print(f"      [accent]2-й голос:[/accent] "
+                              f"[muted]{h['alt']['line']}[/muted]")
+            continue
+        scan = h.get("scan") or ", ".join(h.get("scans") or []) or "?"
+        head = f"{h.get('shifra') or h.get('key')} · скан {scan}"
+        console.print(f"[bold]{h.get('score')}[/bold]  {tag}{head}{mark}")
+        console.print(f"    [warn]»[/warn] {h.get('matched') or h.get('name')}")
+        # Роль і тип акту — не оформлення: «батько» і «восприємник» це різні
+        # відповіді на те саме прізвище.
+        bits = [str(x) for x in (h.get("role"), h.get("rtype"), h.get("date"),
+                                 h.get("place"), h.get("page_type"),
+                                 h.get("status")) if x]
+        if bits:
+            console.print(f"      [muted]{' · '.join(bits)}[/muted]")
+        if h.get("comment"):
+            console.print(f"      [muted]{str(h['comment'])[:160]}[/muted]")
     # ⚓ Канал імен друкується ОКРЕМИМ блоком. Домішати його до прізвищних
     # рядків означало б стерти різницю між «тут наше прізвище» і «тут наші
     # люди» — а це різні за силою відповіді.
@@ -1124,6 +1149,19 @@ def search_cmd(
     # 🔴 Знаменник друкується завжди, і найважливіший він саме при нулі:
     # без нього «не знайшлось» читається як «цього не існує».
     _notes(env)
+    # 🔴 При `--where all` знаменники НЕ складаються: прогони декоду й справи
+    # виписаного це різні одиниці. Друкуються поруч, кожен зі своєю назвою.
+    areas = (env.data.get("coverage") or {}).get("areas") or {}
+    for name, info in areas.items():
+        cov = info.get("coverage") or {}
+        if info.get("error"):
+            console.print(f"[muted]{name}: відмова — {info['error']}[/muted]")
+        elif cov.get("runs") is not None:
+            console.print(f"[muted]{name}: {info.get('total', 0)} · прогонів "
+                          f"{cov.get('runs')}, сторінок {cov.get('pages')}[/muted]")
+        else:
+            console.print(f"[muted]{name}: {info.get('total', 0)} · справ "
+                          f"{cov.get('cases')}[/muted]")
     console.print(f"[muted]показано {len(hits)} із {env.data.get('total', len(hits))}[/muted]")
     if hits:
         console.print("[muted]подивитись оком: гортач у `nysh serve` — і брати "
