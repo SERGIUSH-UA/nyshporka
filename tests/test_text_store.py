@@ -278,3 +278,40 @@ def test_rules_fingerprint_is_versioned_and_can_be_accepted(space: Path) -> None
     res = runner.invoke(app, ["text", "index", "--accept-rules"])
     assert res.exit_code == 0, res.output
     assert ST.stats()["rules_stale"] is False
+
+
+def test_a_rebuild_killed_halfway_is_visible_run_by_run(space: Path) -> None:
+    """🔴 Спільний відбиток правил бреше на користь свіжості.
+
+    `ensure_all(force, reset_rules)` стирає єдиний рядок `meta.rules`, і перший
+    же переіндексований прогін ставить туди НОВИЙ відбиток. Далі стор рапортує
+    «правила збігаються», хоч решта прогонів ще тримає старих кандидатів.
+    08.09.2026 перебудову на 6.8 ГБ убило браком пам'яті посеред, і
+    `nysh text state` показав «1328 із 1328 · застаріло 0» на сторі, де 234
+    прогони були зібрані іншим правилом склейки; знайшлось це лише прямою
+    звіркою блобів. Тому відбиток стоїть НА КОЖНОМУ прогоні.
+    """
+    from nyshporka.cli import app
+    from nyshporka.search import store as ST
+
+    list(ST.ensure_all(["проба", "проба-diak_v4"]))
+    assert ST.stats()["rules_other"] == 0
+
+    conn = ST.connect()
+    conn.execute("update runs set rules='правила до правки' where run='проба'")
+    conn.commit()
+    conn.close()
+
+    st = ST.stats()
+    # спільний відбиток мовчить — саме цим він і збрехав
+    assert st["rules_stale"] is False
+    assert st["rules_other"] == 1
+
+    res = runner.invoke(app, ["text", "state"])
+    assert res.exit_code == 0, res.output
+    assert "іншим правилом склейки" in res.output
+
+    # і доганяється звичайним `index`, без другої перебудови на 40 хвилин
+    res = runner.invoke(app, ["text", "index"])
+    assert res.exit_code == 0, res.output
+    assert ST.stats()["rules_other"] == 0

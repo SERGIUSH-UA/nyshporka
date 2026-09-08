@@ -31,8 +31,10 @@ def state_cmd(as_json: bool = typer.Option(False, "--json")) -> None:
         return
     d = env.data
     console.print(f"стор: {d['file']}")
+    mixed = (f" · [warn]іншим правилом склейки {d['rules_other']}[/warn]"
+             if d.get("rules_other") else "")
     console.print(f"прогонів у сторі [bold]{d['indexed']}[/bold] із {d['runs']} · "
-                  f"застаріло [bold]{d['stale']}[/bold] · сторінок {d['pages']} "
+                  f"застаріло [bold]{d['stale']}[/bold]{mixed} · сторінок {d['pages']} "
                   f"(з геометрією {d['geo']}) · рядків {d['lines']} · {_mb(d['bytes'])}")
     _notes(env)
 

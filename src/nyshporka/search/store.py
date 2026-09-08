@@ -63,6 +63,7 @@
 from __future__ import annotations
 
 import contextlib
+import functools
 import hashlib
 import inspect
 import json
@@ -125,7 +126,7 @@ create table if not exists runs(
     case_key text default '', case_dir text default '', model text default '',
     script text default '', engine_ids text default '[]',
     pages int default 0, lines int default 0, geo int default 0,
-    indexed_at text default '');
+    indexed_at text default '', rules text default '');
 create table if not exists pages(
     id integer primary key, run_id int not null, page text not null,
     stem text not null, nlines int default 0, geo int default 0, raw blob,
@@ -173,8 +174,35 @@ def connect(*, readonly: bool = False, migrate: bool = False) -> sqlite3.Connect
     return conn
 
 
+def _add_run_rules_column(conn: sqlite3.Connection) -> None:
+    """Відбиток правил на КОЖНОМУ прогоні, а не один на весь стор.
+
+    🔴 Стало причиною тихої брехні 08.09.2026. `ensure_all(force, reset_rules)`
+    стирала єдиний рядок `meta.rules`, і перший же переіндексований прогін
+    ставив туди НОВИЙ відбиток — після чого стор рапортував «правила
+    збігаються», хоч решта 1327 прогонів ще тримала старих кандидатів.
+    Перебудову на 6.8 ГБ убило браком пам'яті посеред, і `nysh text state`
+    показав «1328 із 1328 · застаріло 0» на сторі, де 234 прогони були
+    зібрані іншим правилом склейки. Знайшлось це лише прямою звіркою блобів.
+
+    Міграція нічого не вигадує: наявним рядкам ставиться той відбиток, який
+    стор і так про себе заявляв. Це не робить їх доведено свіжими — це рівно
+    та сама (слабша) заява, перенесена на рівень, де її видно поштучно.
+    """
+    have = {r[1] for r in conn.execute("pragma table_info(runs)")}
+    if "rules" in have:
+        return
+    conn.execute("alter table runs add column rules text default ''")
+    row = conn.execute("select value from meta where key='rules'").fetchone()
+    if row:
+        conn.execute("update runs set rules=?", (row[0],))
+    conn.commit()
+
+
 def _ensure_schema(conn: sqlite3.Connection, *, migrate: bool = False) -> None:
     conn.executescript(_DDL)
+    with contextlib.suppress(sqlite3.Error):
+        _add_run_rules_column(conn)
     row = conn.execute("select value from meta where key='schema'").fetchone()
     if row is None:
         conn.execute("insert into meta(key,value) values('schema',?)", (str(SCHEMA),))
@@ -198,12 +226,20 @@ def exists() -> bool:
     return path().is_file()
 
 
+@functools.lru_cache(maxsize=1)
 def rules_hash() -> str:
     """Відбиток правил, з яких зроблені кандидати в блобах.
 
     🔴 Приймач для `pages.cands`: правила склейки (`page_candidates`),
     нормалізація й геометричні константи можуть змінитись без зміни `SCHEMA`,
     і стор тоді мовчки тримав би старих кандидатів під свіжими штампами.
+
+    🪤 Рахується РАЗ НА ПРОЦЕС, і це не оптимізація. `inspect.getsource` бере
+    текст із файла НА ДИСКУ за номерами рядків код-об'єкта: якщо модуль
+    правлять, поки триває довга індексація, ті самі функції нарізаються по
+    зсунутих рядках і відбиток міняється посеред заходу. Заміряно 08.09.2026 —
+    доіндексація 234 прогонів проставила їм відбиток, якого немає в жодної
+    версії коду, і стор виглядав змішаним при тотожних кандидатах.
     """
     import ast
 
@@ -234,6 +270,22 @@ def rules_stale(conn: sqlite3.Connection) -> bool:
     return bool(row) and row[0] != rules_hash()
 
 
+def runs_of_other_rules(conn: sqlite3.Connection) -> list[str]:
+    """Прогони, чиї кандидати зроблені НЕ чинним правилом склейки.
+
+    🔴 Головна відмінність від `rules_stale`: там одна відповідь на весь стор,
+    тут — поштучно. Перебудова, яку вбили посеред, лишає стор змішаним, і
+    єдиний спільний відбиток тоді бреше на користь свіжості: він уже новий,
+    бо його поставив перший переіндексований прогін.
+    """
+    h = rules_hash()
+    try:
+        return [r[0] for r in conn.execute(
+            "select run from runs where coalesce(rules,'') <> ? order by run", (h,))]
+    except sqlite3.Error:
+        return []
+
+
 def accept_rules() -> str:
     """Записати чинний відбиток правил як той, яким зібрано стор.
 
@@ -245,6 +297,10 @@ def accept_rules() -> str:
     conn = connect()
     try:
         conn.execute("insert or replace into meta(key,value) values('rules',?)", (h,))
+        # Заява стосується ВСІХ прогонів разом, тож і ставиться на всі: інакше
+        # поштучний облік показував би незгоду там, де дослідник її щойно зняв.
+        with contextlib.suppress(sqlite3.Error):
+            conn.execute("update runs set rules=?", (h,))
         conn.commit()
     finally:
         conn.close()
@@ -428,10 +484,11 @@ def index_run(conn: sqlite3.Connection, run: str) -> int:
         conn.execute("insert into meta(key,value) values('rules',?)", (rules_hash(),))
     conn.execute(
         "insert into runs(run, stamp, case_key, case_dir, model, script, engine_ids, "
-        "indexed_at) values(?,?,?,?,?,?,?,?)",
+        "indexed_at, rules) values(?,?,?,?,?,?,?,?,?)",
         (run, stamp, (meta.get("case_key") or "").strip(), meta.get("case_dir") or "",
          meta.get("model") or "", meta.get("script") or "",
-         json.dumps(S.run_engine_ids(meta)), time.strftime("%Y-%m-%dT%H:%M:%S")))
+         json.dumps(S.run_engine_ids(meta)), time.strftime("%Y-%m-%dT%H:%M:%S"),
+         rules_hash()))
     run_id = int(conn.execute("select id from runs where run=?", (run,)).fetchone()[0])
     n_pages = n_lines = n_geo = 0
     for txt in txts:
@@ -529,13 +586,22 @@ def ensure_all(runs: list[str], *, force: bool = False, reset_rules: bool = Fals
             conn.execute("delete from meta where key='rules'")
             conn.commit()
         known = stamps(conn)
+        # 🔴 Прогін вважається свіжим за ДВОМА умовами: незмінений штамп теки
+        # І той самий відбиток правил склейки. Доти друга умова була одна на
+        # весь стор, і перебудова, вбита посеред, лишала змішаний стор, який
+        # рапортував повну свіжість. Тепер недороблене доганяється звичайним
+        # `text index`, без другої перебудови на 40 хвилин.
+        rules_now = rules_hash()
+        by_rules = {r[0]: (r[1] or "") for r in
+                    conn.execute("select run, coalesce(rules,'') from runs")}
         total = len(runs)
         for i, run in enumerate(runs, 1):
             if progress:
                 progress(i, total, run)
             P.report(i, total, "прогонів")
             st = stamp_of(run)
-            if st and known.get(run) == st and not force:
+            if st and known.get(run) == st and by_rules.get(run) == rules_now \
+                    and not force:
                 yield run
                 continue
             try:
@@ -592,6 +658,7 @@ def stats() -> dict[str, Any]:
         row = conn.execute("select coalesce(sum(pages),0), coalesce(sum(lines),0), "
                            "coalesce(sum(geo),0) from runs").fetchone()
         rstale = rules_stale(conn)
+        other = runs_of_other_rules(conn)
     finally:
         conn.close()
     return {"runs": len(runs), "indexed": fresh, "stale": len(runs) - fresh,
@@ -599,7 +666,11 @@ def stats() -> dict[str, Any]:
             "geo": int(row[2]), "file": str(p), "exists": True,
             # Правила склейки змінились після збірки: кандидати в блобах старі,
             # штампи цього не бачать — лише `text index --rebuild`.
-            "rules_stale": rstale}
+            "rules_stale": rstale,
+            # 🔴 А це — ПОШТУЧНО: скільки прогонів зібрані іншим правилом.
+            # Саме його бракувало, коли перебудову вбило посеред і стор
+            # рапортував «застаріло 0» на 234 прогонах зі старими кандидатами.
+            "rules_other": len(other)}
 
 
 # ── читання сторінки зі стору ────────────────────────────────────────────────
