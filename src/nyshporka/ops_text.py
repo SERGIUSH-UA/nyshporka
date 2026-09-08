@@ -270,7 +270,18 @@ def text_crop(a: TextCropArgs) -> Envelope:
         return fail(str(exc))
     if res.get("error"):
         return fail(str(res["error"]))
-    return ok(res)
+    env = ok(res)
+    if res.get("frame_source") == "registry":
+        # 🔴 Кадр узято НЕ звідти, куди веде мета прогону: її шлях мертвий
+        # (типово — тека орендованого бокса), і теку дібрав резолвер за шифрою.
+        # Збіг імені файла при цьому ще не є збігом кадру — плоский стейджинг
+        # перенумеровує сторінки. Кроп — приймач ока, і мовчазна підміна аркуша
+        # тут коштує вердикту.
+        env.warn("frame_by_registry",
+                 f"кадр узято не з меты прогону, а з теки справи за реєстром "
+                 f"({res.get('frame')}): звірити рядок «скан:» перед вердиктом")
+        env.suggest("text.ctx", "звірити текст рядка з тим, що видно на кропі")
+    return env
 
 
 class TextVoicesArgs(BaseModel):
@@ -424,6 +435,15 @@ def text_sheet(a: TextSheetArgs) -> Envelope:
     if int(res.get("total") or 0) > int(res["cards"]):
         env.warn("cut", f"у гортачі {res['cards']} із {res['total']} кандидатів — решта "
                         f"поза ним; підняти --limit або звузити --case")
+    by_reg = res.get("frames_by_registry") or []
+    if by_reg:
+        # 🔴 У гортачі вердикт виносить ОКО по картинці, тож підмінений аркуш
+        # коштує тут дорожче, ніж будь-де: людина закриє кандидата, дивлячись
+        # на чужу сторінку, і сліду не лишиться.
+        env.warn("frame_by_registry",
+                 f"кадри {len(by_reg)} прогонів узято не з меты, а з теки справи "
+                 f"за реєстром ({', '.join(by_reg[:3])}): у цих картках звіряти "
+                 f"рядок «скан:» перед вердиктом")
     env.suggest("text.verdicts", "занести вердикти з гортача у сховище сторінок")
     return env
 

@@ -782,7 +782,20 @@ def _image_size(path: Path) -> list[int] | None:
 
 
 def resolve_scan(name: str, page: str) -> tuple[Path, int] | None:
-    """Оригінальний скан сторінки + кут повороту, яким користувався OCR.
+    """Оригінальний скан сторінки + кут повороту, яким користувався OCR."""
+    got = resolve_scan_how(name, page)
+    return None if got is None else (got[0], got[1])
+
+
+def resolve_scan_how(name: str, page: str) -> tuple[Path, int, str] | None:
+    """Те саме, але третім значенням — ЯК кадр знайшовся: `meta` чи `registry`.
+
+    🔴 Різниця не технічна. `meta` означає, що шлях у меті прогону живий і кадр
+    узято звідти, де рушій його й бачив. `registry` означає, що шлях мертвий
+    (хмарний прогін записав теку орендованого бокса) і тека дібрана за шифрою
+    вже нами — а тоді збіг ІМЕНІ файла ще не є збігом кадру: плоский стейджинг
+    перенумеровує сторінки, і `0001.jpg` однієї теки це не `0001.jpg` іншої.
+    Такий кроп треба звіряти рядком `скан:`, і про це має бути сказано вголос.
 
     Гарди як у decode_hits.scan_path: `page` — голе ім'я, тека справи — під
     data/raw (junction'и на T: лінковані туди ж), результат — прямо в ній.
@@ -801,7 +814,7 @@ def resolve_scan(name: str, page: str) -> tuple[Path, int] | None:
     if base is not None:
         target = Path(os.path.abspath(base / page))
         if target.parent == base and target.is_file():
-            return target, orient
+            return target, orient, "meta"
 
     # 🔴 Фолбек через реєстр справ, і він подвоює зону видимості гортача.
     # Хмарний прогін пише в мету шлях орендованого бокса
@@ -818,8 +831,69 @@ def resolve_scan(name: str, page: str) -> tuple[Path, int] | None:
     for cand in _case_dirs_via_registry(name):
         target = Path(os.path.abspath(cand / page))
         if target.parent == cand and target.is_file():
-            return target, orient
+            return target, orient, "registry"
     return None
+
+
+def frames_match_meta(run: str, sample: int = 3) -> tuple[bool, str]:
+    """Чи ті самі кадри бачить споживач декоду, що бачив рушій.
+
+    🔴 «Кадрів у теці стільки ж» доказом НЕ є. Плоский стейджинг перенумеровує
+    сторінки, тож тека може мати рівно стільки ж файлів із тими самими іменами
+    і бути іншою книгою. Тому три перевірки, і кожна може відмовити окремо:
+
+    1. **ім'я** — сторінки з мети існують у теці, куди резолвиться скан;
+    2. **обсяг** — кадрів у теці не менше, ніж сторінок у прогоні;
+    3. **пропорції** — для `sample` сторінок із рамками розмір, у якому рушій
+       бачив кадр (`size` у `.lines.json`), звіряється з реальним розміром
+       файла з точністю до `orient`. Розбіжність співвідношення сторін означає
+       ІНШИЙ кадр, і це єдина з трьох перевірок, яка ловить перенумерований
+       стейджинг.
+
+    Повертає `(усе сходиться, чому ні)`. Порожня причина при `False` не буває:
+    мовчазний `False` тут був би тим самим мовчазним звуженням.
+    """
+    meta = load_meta(run)
+    if meta is None:
+        return False, "меты прогону немає"
+    pages = list((meta.get("pages") or {}).keys())
+    if not pages:
+        return False, "мета не називає жодної сторінки"
+    missing = [p for p in pages if resolve_scan(run, p) is None]
+    if missing:
+        return False, (f"кадрів немає для {len(missing)} із {len(pages)} сторінок"
+                       f" (напр. {', '.join(missing[:3])})")
+    first = resolve_scan(run, pages[0])
+    assert first is not None
+    folder = first[0].parent
+    have = sum(1 for x in folder.iterdir() if x.is_file())
+    if have < len(pages):
+        return False, (f"у теці {folder.name} кадрів {have}, а сторінок прогону "
+                       f"{len(pages)}")
+    checked = bad = 0
+    for page in pages:
+        if checked >= sample:
+            break
+        geom = page_lines(run, page)
+        size = (geom or {}).get("size")
+        got = resolve_scan(run, page)
+        if not size or got is None:
+            continue
+        real = _image_size(got[0])
+        if not real:
+            continue
+        checked += 1
+        # Рушій міг крутити кадр, тож пропорція звіряється в обидва боки.
+        want = size[0] / size[1] if size[1] else 0.0
+        here = real[0] / real[1] if real[1] else 0.0
+        if want and here and min(abs(want - here), abs(want - 1 / here)) > 0.02:
+            bad += 1
+    if bad:
+        return False, (f"пропорції кадру не сходяться з тим, у чому читав рушій:"
+                       f" {bad} із {checked} звірених сторінок")
+    if not checked:
+        return True, "імена й обсяг сходяться; геометрії немає — звіряти нічим"
+    return True, ""
 
 
 def _case_dirs_via_registry(run: str) -> list[Path]:

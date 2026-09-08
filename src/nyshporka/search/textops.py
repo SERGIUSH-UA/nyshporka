@@ -311,11 +311,11 @@ def crop(scope: str, page: str, line: int, *, with_next: bool = True, wide: bool
         if prev and prev.box:
             boxes.append(prev.box)
     size = _geometry_size(run, pg)
-    got = S.resolve_scan(run, pg)
+    got = S.resolve_scan_how(run, pg)
     if got is None:
         return {"error": f"кадру для {run} · {pg} на цій машині немає: мета веде в "
                          f"нікуди, реєстр справ теки не знає"}
-    src, orient = got
+    src, orient, frame_source = got
     with Image.open(src) as raw:
         im = _rotated(raw.convert("RGB"), int(orient))
         k = 1.0
@@ -346,7 +346,8 @@ def crop(scope: str, page: str, line: int, *, with_next: bool = True, wide: bool
         dst.parent.mkdir(parents=True, exist_ok=True)
         piece.save(dst)
         return {"run": run, "page": pg, "line": line, "next": nxt_no, "prev": prev_no,
-                "frame": str(src), "orient": int(orient), "scale_k": round(k, 3),
+                "frame": str(src), "frame_source": frame_source,
+                "orient": int(orient), "scale_k": round(k, 3),
                 "scale": scale,
                 "box": list(box), "out": str(dst), "width": piece.width,
                 "height": piece.height, "text": target.toks,
@@ -782,8 +783,14 @@ def _verdicts_save(key: str, items: dict[str, dict[str, Any]]) -> None:
     tmp.replace(p)
 
 
-def _crop_b64(scope: str, page: str, line: int, *, max_w: int = 1400) -> str:
-    """Кроп рядка як JPEG у base64 для вбудування в HTML; порожньо — не вийшло."""
+def _crop_b64(scope: str, page: str, line: int, *, max_w: int = 1400,
+              seen: set[str] | None = None) -> str:
+    """Кроп рядка як JPEG у base64 для вбудування в HTML; порожньо — не вийшло.
+
+    `seen` збирає прогони, чий кадр узято НЕ з меты, а з теки за реєстром: у
+    гортачі людина виносить вердикт саме по картинці, тож підмінений аркуш тут
+    коштує найдорожче, і мовчати про нього не можна.
+    """
     import base64
     import io
 
@@ -792,6 +799,8 @@ def _crop_b64(scope: str, page: str, line: int, *, max_w: int = 1400) -> str:
     got = crop(scope, page, line, with_next=True)
     if got.get("error"):
         return ""
+    if seen is not None and got.get("frame_source") == "registry":
+        seen.add(str(got.get("run") or scope))
     try:
         with Image.open(got["out"]) as raw:
             im: Any = raw.convert("RGB")
@@ -832,12 +841,13 @@ def sheet(q: str, scope: str, *, thresh: int = 78, limit: int = 60, crops: int =
     hits = list(got.get("hits") or [])
     cards: list[dict[str, Any]] = []
     n_crops = 0
+    by_registry: set[str] = set()
     for h in hits:
         run, page, no = str(h["name"]), str(h["page"]), int(h["line_no"])
         ck = f"{run}|{page}|{no}"
         img = ""
         if n_crops < crops:
-            img = _crop_b64(run, page, no)
+            img = _crop_b64(run, page, no, seen=by_registry)
             n_crops += bool(img)
         prev = known.get(ck) or known_stem.get(_verdict_stem_key(ck)) or {}
         cards.append({"key": ck, "run": run, "page": page, "line": no,
@@ -860,7 +870,8 @@ def sheet(q: str, scope: str, *, thresh: int = 78, limit: int = 60, crops: int =
     dst.parent.mkdir(parents=True, exist_ok=True)
     dst.write_text(html_doc, encoding="utf-8")
     return {"out": str(dst), "cards": len(cards), "crops": n_crops, "case_key": key,
-            "total": got.get("total"), "known_verdicts": len(known), "ledger": led}
+            "total": got.get("total"), "known_verdicts": len(known), "ledger": led,
+            "frames_by_registry": sorted(by_registry)}
 
 
 def _render_sheet(q: str, got: dict[str, Any], cards: list[dict[str, Any]],

@@ -729,3 +729,52 @@ def test_dir_is_its_own_layer_and_a_missing_path_is_said_out_loud(space: Path) -
                                "extra": str(space / "нема-такого")})
     assert env.ok, env
     assert any(w.code == "layer_cut" for w in env.warnings), [w.code for w in env.warnings]
+
+
+def test_a_crop_taken_by_the_registry_says_so(case_space: Path) -> None:
+    """Кроп — приймач ока, і підміна аркуша тут коштує вердикту.
+
+    🔴 Хмарний прогін пише в мету теку орендованого бокса. Після гасіння оренди
+    шлях мертвий, кадр добирає резолвер за шифрою — і збіг ІМЕНІ файла ще не є
+    збігом кадру. Раніше про це не було ні слова.
+    """
+    import json as _json
+
+    from nyshporka import htr_store as S
+    from nyshporka import ops as O
+
+    mp = case_space / "reports" / "htr" / "проба" / "_htr_meta.json"
+    meta = _json.loads(mp.read_text(encoding="utf-8"))
+    meta["case_dir"] = "/tmp/htrcase/pages_dl_02"
+    mp.write_text(_json.dumps(meta), encoding="utf-8")
+    S._CACHE.clear()
+
+    got = S.resolve_scan_how("проба", "0004.jpg")
+    assert got is not None and got[2] == "registry"
+
+    env = O.call("text.crop", {"case": "проба", "page": "4", "line": 3,
+                               "out": str(case_space / "c.png")})
+    assert env.ok, env
+    assert any(w.code == "frame_by_registry" for w in env.warnings), \
+        [w.code for w in env.warnings]
+
+
+def test_frames_match_meta_refuses_a_run_whose_frames_are_gone(case_space: Path) -> None:
+    """«Кадрів стільки ж» доказом не є — тому три перевірки, і кожна зі своєю
+    причиною. Мовчазний False тут був би тим самим мовчазним звуженням."""
+    import json as _json
+
+    from nyshporka import htr_store as S
+
+    ok_now, why = S.frames_match_meta("проба")
+    assert ok_now, why
+
+    mp = case_space / "reports" / "htr" / "проба" / "_htr_meta.json"
+    meta = _json.loads(mp.read_text(encoding="utf-8"))
+    meta["case_dir"] = "/tmp/htrcase/pages_dl_02"
+    meta["case_key"] = ""
+    mp.write_text(_json.dumps(meta), encoding="utf-8")
+    S._CACHE.clear()
+    S._RUNS_CACHE = None
+    bad, why = S.frames_match_meta("проба")
+    assert not bad and "кадрів немає" in why, why
