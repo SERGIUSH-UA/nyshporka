@@ -92,13 +92,29 @@ def under_raw(path: str | Path) -> Path | None:
 
 
 # ── довідники ────────────────────────────────────────────────────────────────
+_CASE_DIR_MEMO: dict[tuple[str, str], Path] = {}
+
+
 def _case_dir(name: str) -> Path | None:
-    """Тека прогону за іменем — з гардом від traversal у `?name=`."""
+    """Тека прогону за іменем — з гардом від traversal у `?name=`.
+
+    ⚠ Розв'язаний шлях запам'ятовується: `resolve()` на NTFS коштує ~0.4 мс,
+    а штамп свіжості кличе його по кілька разів на кожен із 1300 прогонів —
+    4.9 с із 11 у корпусному пошуку з кешу (замір 08.09). Наявність теки
+    перевіряється щоразу, лише розв'язання не повторюється.
+    """
     if not name or "/" in name or "\\" in name or name.startswith("."):
         return None
+    key = (str(HTR_ROOT), name)
+    d = _CASE_DIR_MEMO.get(key)
+    if d is not None:
+        if d.is_dir():
+            return d
+        _CASE_DIR_MEMO.pop(key, None)
     d = (HTR_ROOT / name).resolve()
     if d.parent != HTR_ROOT.resolve() or not d.is_dir():
         return None
+    _CASE_DIR_MEMO[key] = d
     return d
 
 
@@ -343,20 +359,26 @@ def _sec_median(meta: dict[str, Any]) -> float | None:
 #: перелік коштує 8.2 с — стільки читаються 1125 файлів мети плюс опис справи
 #: на кожен. Екран прогонів на таких паузах перестає бути переліком і стає
 #: очікуванням, а гортати його доводиться постійно.
-_RUNS_CACHE: tuple[tuple[int, int], list[dict[str, Any]]] | None = None
+_RUNS_CACHE: tuple[tuple[int, int, int, str], list[dict[str, Any]]] | None = None
 
 
-def _runs_stamp() -> tuple[int, int]:
-    """Скільки тек прогонів і коли найсвіжіша з них торкалась.
+def _runs_stamp() -> tuple[int, int, int, str]:
+    """Скільки тек прогонів, коли найсвіжіша торкалась, найсвіжіша мета, бібліотека.
 
     ⚠ Штамп, а не час життя: перелік мусить оновитись одразу після прогону, і
     кеш «на десять секунд» показував би щойно завершену роботу як відсутню.
     Один обхід тек коштує міллісекунди проти восьми секунд читання мет.
+
+    🔴 Мета окремо від теки: правка `_htr_meta.json` на місці mtime теки на
+    NTFS не міняє, і довгоживучий процес (в'ювер, MCP) не бачив її до
+    перезапуску (рецензія 08.09, третій раунд). Бібліотека — бо шифра й кадри
+    в рядку переліку беруться з неї.
     """
     if not HTR_ROOT.is_dir():
-        return (0, 0)
+        return (0, 0, 0, "")
     n = 0
     newest = 0
+    newest_meta = 0
     with os.scandir(HTR_ROOT) as it:
         for e in it:
             if not e.is_dir():
@@ -364,9 +386,21 @@ def _runs_stamp() -> tuple[int, int]:
             n += 1
             try:
                 newest = max(newest, e.stat().st_mtime_ns)
+                newest_meta = max(newest_meta,
+                                  os.stat(os.path.join(e.path, "_htr_meta.json")).st_mtime_ns)
             except OSError:
                 continue
-    return (n, newest)
+    return (n, newest, newest_meta, _library_stamp())
+
+
+def _library_stamp() -> str:
+    try:
+        from nyshporka.library import LIBRARY_PATH
+
+        st = LIBRARY_PATH.stat()
+        return f"{st.st_mtime_ns:x}-{st.st_size:x}"
+    except Exception:
+        return ""
 
 
 def list_cases() -> list[dict[str, Any]]:
@@ -381,7 +415,7 @@ def list_cases() -> list[dict[str, Any]]:
     # команді нового процесу; кеш за mtime кореня зривався щоразу, коли хоч
     # один прогін живий, а правку мети на місці не бачив узагалі (рецензія
     # 08.09). Тепер перечитуються лише прогони, чия мета змінилась.
-    entries = _runs_cache_read()
+    entries = _runs_cache_read(stamp[3])
     changed = False
     out: list[dict[str, Any]] = []
     if not HTR_ROOT.is_dir():
@@ -460,7 +494,7 @@ def list_cases() -> list[dict[str, Any]]:
     out.sort(key=lambda c: c["updated"], reverse=True)
     _RUNS_CACHE = (stamp, out)
     if changed or gone:
-        _runs_cache_write(entries)
+        _runs_cache_write(entries, stamp[3])
     return out
 
 
@@ -468,21 +502,25 @@ def _runs_cache_path() -> Path:
     return workspace().derived / "runs_cache.json"
 
 
-def _runs_cache_read() -> dict[str, dict[str, Any]]:
+def _runs_cache_read(lib: str = "") -> dict[str, dict[str, Any]]:
+    """Кеш по прогонах; чужа бібліотека — кеш порожній: шифра й кадри в рядках
+    беруться з неї, і після її перезбірки вони старіли, поки мета не зміниться."""
     try:
         data = json.loads(_runs_cache_path().read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
-    ent = data.get("entries") if isinstance(data, dict) else None
+    if not isinstance(data, dict) or str(data.get("lib") or "") != lib:
+        return {}
+    ent = data.get("entries")
     return {str(k): v for k, v in ent.items() if isinstance(v, dict)} if isinstance(ent, dict) else {}
 
 
-def _runs_cache_write(entries: dict[str, dict[str, Any]]) -> None:
+def _runs_cache_write(entries: dict[str, dict[str, Any]], lib: str = "") -> None:
     p = _runs_cache_path()
     try:
         p.parent.mkdir(parents=True, exist_ok=True)
         tmp = p.with_suffix(f".{os.getpid()}.tmp")
-        tmp.write_text(json.dumps({"entries": entries}, ensure_ascii=False),
+        tmp.write_text(json.dumps({"lib": lib, "entries": entries}, ensure_ascii=False),
                        encoding="utf-8")
         tmp.replace(p)
     except OSError:
@@ -1176,6 +1214,11 @@ def search(q: str, name: str | None = None, thresh: int = 78,
             # Чим прочесано: стор чи gzip-індекс. Нуль на частковому сторі й
             # нуль на повному gzip-індексі — різні відповіді.
             "backend": backend, "backend_why": backend_why,
+            # Скільки прогонів узято з кешу свіпів стору, скільки пораховано
+            # зараз; чи кандидати стору зроблені чинними правилами.
+            "cache": {"runs": int(got.get("cached") or 0),
+                      "computed": int(got.get("computed") or 0)} if backend == "store" else None,
+            "rules_stale": bool(got.get("rules_stale")),
             # Які написання профілю не пішли в стор і чому — див. `whole_stems`.
             "stems_dropped": dropped,
             # Сторінки ВСІХ хітів понад порогом, а не лише показаних: самоперевірці
@@ -1272,10 +1315,10 @@ def anchor_hits(rows: list[dict[str, Any]], k: Any) -> list[dict[str, Any]]:
         name = row["name"]
         # 🔴 Текст береться зі стору, коли він свіжий: обхід `.txt` теки прогону
         # коштував ~9 с на справу й суперечив усьому задуму стору.
-        for page, ln_no, raw in _lines_for_anchors(name, ST):
-            pair = A.scan(raw, k)
-            if pair is None:
-                continue
+        lines = list(_lines_for_anchors(name, ST))
+        for i, t, nxt in A.scan_many([raw for _pg, _no, raw in lines], k):
+            page, ln_no, raw = lines[i]
+            pair = (t, nxt)
             out.append({"name": name, "page": page, "line_no": ln_no,
                         "line_index": ln_no - 1,
                         # 🔴 Канал названий у самому хіті. Знахідка за іменами

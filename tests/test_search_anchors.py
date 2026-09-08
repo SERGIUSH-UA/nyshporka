@@ -190,3 +190,28 @@ def test_the_channel_refuses_outside_a_case(space) -> None:
     env = search_run(SearchArgs(q="Сікорський", anchors=True))
     assert not env.ok
     assert "case" in (env.error or "").lower() or "справ" in (env.error or "")
+
+
+
+def test_people_with_the_same_given_name_stay_apart() -> None:
+    """🔴 Імена в роді повторюються через покоління: ключ — пара, не ім'я."""
+    from nyshporka.search import anchors as A
+
+    class Prof:
+        kin = ({"given": "Іван", "patronymic": "Федорович", "born": 1800},
+               {"given": "Іван", "patronymic": "Петрович", "born": 1850},
+               {"given": "Федір", "patronymic": "Іванович", "born": 1825})
+
+    got = A.people(Prof())
+    assert sorted(p.patronymic for p in got) == ["Іванович", "Петрович", "Федорович"]
+
+
+def test_scan_many_agrees_with_scan_line_by_line(space) -> None:
+    from nyshporka.search import anchors as A
+
+    k = A.keys(1800, 1830)
+    lines = ["у Ѳеодоръ Ѳеодоровъ Cкрсхнй родился сынъ", "того же двора",
+             "Ѳеодоръ Ѳеодоръ Ѳеодоровъ", "Феодора Феодорова дочь", "просто рядок без імен",
+             "Ѳеодоровъ Ѳеодоръ"]
+    want = [(i, *A.scan(ln, k)) for i, ln in enumerate(lines) if A.scan(ln, k)]
+    assert A.scan_many(lines, k) == want and want, want

@@ -114,22 +114,50 @@ def mark(hits: list[dict[str, Any]], rul: Rules, *, key: str = "norm",
     tally = {CONFUSER: 0, RANK_DOWN: 0}
     if rul.empty:
         return tally
+    # 🔴 Рахується по ФОРМАХ, не по хітах: на корпусі 300 тис. хітів, а різних
+    # форм у рази менше, і 2.7 млн викликів регексу давали 7 с із 11 у пошуку
+    # з кешу (замір 08.09). Бал до конфузера й правило зниження залежать лише
+    # від форми; лише порівняння з балом хіта — від хіта.
+    forms = {str(h.get(key) or "") for h in hits}
+    forms.discard("")
+    best_of: dict[str, float] = {}
+    if rul.confusers:
+        best_of = _confuser_scores(fuzz, sorted(forms), rul.confusers)
+    down_of: dict[str, str] = {}
+    for norm in forms:
+        for name, rx in rul.rank_down:
+            if rx.search(norm):
+                down_of[norm] = name
+                break
     for h in hits:
         norm = str(h.get(key) or "")
         if not norm:
             continue
-        if rul.confusers:
-            best = max(fuzz.ratio(norm, c) for c in rul.confusers)
-            if best >= float(h.get("score") or 0):
-                _put(h, CONFUSER, f"чуже слово пояснює краще ({round(best)})")
-                tally[CONFUSER] += 1
-                continue
-        for name, rx in rul.rank_down:
-            if rx.search(norm):
-                _put(h, RANK_DOWN, name)
-                tally[RANK_DOWN] += 1
-                break
+        best = best_of.get(norm)
+        if best is not None and best >= float(h.get("score") or 0):
+            _put(h, CONFUSER, f"чуже слово пояснює краще ({round(best)})")
+            tally[CONFUSER] += 1
+            continue
+        rule = down_of.get(norm)
+        if rule:
+            _put(h, RANK_DOWN, rule)
+            tally[RANK_DOWN] += 1
     return tally
+
+
+def _confuser_scores(fuzz: Any, forms: list[str], confusers: tuple[str, ...]
+                     ) -> dict[str, float]:
+    """Найкращий бал кожної форми до пулу конфузерів — гуртом, якщо є numpy."""
+    try:
+        import numpy as np
+        from rapidfuzz.process import cdist
+    except ImportError:
+        return {f: max(fuzz.ratio(f, c) for c in confusers) for f in forms}
+    if not forms:
+        return {}
+    m = cdist(forms, list(confusers), scorer=fuzz.ratio, dtype=np.float32, workers=-1)
+    best = m.max(axis=1)
+    return {f: float(best[i]) for i, f in enumerate(forms)}
 
 
 def _put(h: dict[str, Any], kind: str, why: str) -> None:

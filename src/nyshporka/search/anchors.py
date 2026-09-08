@@ -101,12 +101,21 @@ def people(prof: Any = None) -> list[Person]:
             prof = active()
         except Exception:
             prof = None
-    out: dict[str, Person] = {}
+    # 🔴 Ключ — ПАРА ім'я + по батькові. У роді імена повторюються через
+    # покоління («Іван Федорович» і «Іван Петрович»), і ключ за самим іменем
+    # зливав їх в одну особу: по батькові другого разом із його вікном років
+    # зникало з якорів (рецензія 08.09, третій раунд).
+    out: dict[tuple[str, str], Person] = {}
     for p in _from_canon():
-        out.setdefault(norm_given(p.given) or p.patronymic, p)
+        out.setdefault(_person_key(p), p)
     for p in _from_profile(prof):
-        out[norm_given(p.given) or p.patronymic] = p
+        out[_person_key(p)] = p
     return [p for p in out.values() if p.given or p.patronymic]
+
+
+def _person_key(p: Person) -> tuple[str, str]:
+    return (norm_given(p.given) or p.given.lower(),
+            norm_patronymic(p.patronymic) or p.patronymic.lower())
 
 
 def _from_profile(prof: Any) -> list[Person]:
@@ -291,6 +300,55 @@ def scan(line: str, k: Keys) -> tuple[str, str] | None:
             if _best(fuzz, p2, k.patronymic) >= THR_PATR:
                 return t, nxt
     return None
+
+
+def scan_many(lines: list[str], k: Keys) -> list[tuple[int, str, str]]:
+    """Те саме, що `scan` по кожному рядку, але гуртом: (індекс рядка, ім'я, по батькові).
+
+    🔴 Ті самі правила, що в `scan` (той самий розбір на токени, ті самі пороги,
+    та сама заборона буквального self-match); різниця лише в ціні: бал до пулу
+    рахується один раз на РІЗНИЙ токен, а не на кожен рядок. Справа на 40 тис.
+    рядків коштувала каналу 7.6 с із 15 (рецензія 08.09, третій раунд).
+    """
+    from rapidfuzz import fuzz
+
+    if k.empty or not lines:
+        return []
+    per_line = [[t for t in _TOKEN.findall(ln) if len(t) >= MIN_TOK] for ln in lines]
+    norms = {t: _tok(t) for ts in per_line for t in ts}
+    given_ok = _pool_hits(fuzz, sorted({g for _n, g, _p in norms.values()}), k.given, THR_GIVEN)
+    patr_ok = _pool_hits(fuzz, sorted({p for _n, _g, p in norms.values()}), k.patronymic, THR_PATR)
+    out: list[tuple[int, str, str]] = []
+    for i, ts in enumerate(per_line):
+        for j, t in enumerate(ts):
+            if norms[t][1] not in given_ok:
+                continue
+            for nxt in ts[j + 1:j + 1 + WIN]:
+                if norms[nxt][0] != norms[t][0] and norms[nxt][2] in patr_ok:
+                    out.append((i, norms[t][0], norms[nxt][0]))
+                    break
+            else:
+                continue
+            break
+    return out
+
+
+def _pool_hits(fuzz: Any, cands: list[str], pool: tuple[str, ...], thr: float) -> set[str]:
+    """Кандидати, чий найкращий бал до пулу не нижчий за поріг — як `_best`."""
+    if not cands or not pool:
+        return set()
+    try:
+        import numpy as np
+        from rapidfuzz.process import cdist
+    except ImportError:
+        return {c for c in cands if _best(fuzz, c, pool) >= thr}
+    m = cdist(cands, list(pool), scorer=fuzz.ratio, dtype=np.float32, workers=-1)
+    lc = np.fromiter((len(c) for c in cands), dtype=np.int32, count=len(cands))
+    lp = np.fromiter((len(p) for p in pool), dtype=np.int32, count=len(pool))
+    # той самий відсів за довжиною, що в `_best`: різниця понад 4 літери — не пара
+    m[np.abs(lc[:, None] - lp[None, :]) > 4] = 0
+    best = m.max(axis=1)
+    return {c for i, c in enumerate(cands) if float(best[i]) >= thr}
 
 
 #: Пам'ять на токен і на пару «токен × пул». Справа — сорок тисяч рядків і

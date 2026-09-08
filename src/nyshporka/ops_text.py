@@ -39,9 +39,14 @@ def text_state(_: NoArgs) -> Envelope:
     if st["stale"]:
         env.suggest("text.index", "догнати стор по решті прогонів")
     if st.get("rules_stale"):
-        env.warn("rules_stale", "правила склейки кандидатів змінились після збірки — "
-                                "перебудувати: nysh text index --rebuild")
+        env.warn("rules_stale", RULES_STALE_MSG)
     return env
+
+
+RULES_STALE_MSG = ("відбиток правил склейки кандидатів не збігається зі збіркою стору — "
+                   "якщо правила змінились, перебудувати: nysh text index --rebuild; "
+                   "якщо змінився лише спосіб рахувати відбиток — прийняти: "
+                   "nysh text index --accept-rules")
 
 
 class TextIndexArgs(BaseModel):
@@ -49,6 +54,9 @@ class TextIndexArgs(BaseModel):
                       description="лише прогони цієї справи або цей прогін; порожньо — усе")
     rebuild: bool = Field(default=False,
                           description="перебудувати й свіже (після зміни правил розбору)")
+    accept_rules: bool = Field(default=False,
+                               description="прийняти чинний відбиток правил без перебудови "
+                                           "(правила не мінялись)")
 
 
 @op("text.index", summary="Зібрати текстовий стор — один раз довго, далі швидко",
@@ -63,6 +71,13 @@ def text_index(a: TextIndexArgs) -> Envelope:
     from nyshporka import htr_store as S
     from nyshporka.search import store as ST
 
+    if a.accept_rules:
+        if not ST.exists():
+            return fail("стору ще немає — нема чого приймати")
+        h = ST.accept_rules()
+        st = ST.stats()
+        env = ok({"built": 0, "asked": 0, "accepted_rules": h, **st})
+        return env
     if a.case:
         try:
             runs = [r["name"] for r in S.runs_for_scope(a.case)["rows"]]
@@ -74,8 +89,11 @@ def text_index(a: TextIndexArgs) -> Envelope:
     st = ST.stats()
     env = ok({"built": built, "asked": len(runs), **st})
     if st.get("rules_stale"):
-        env.warn("rules_stale", "правила склейки кандидатів змінились після збірки — "
-                                "кандидати в сторі старі; перебудувати: nysh text index --rebuild")
+        env.warn("rules_stale", RULES_STALE_MSG)
+    if ST.LOCKED_SKIPPED:
+        env.warn("locked_skipped",
+                 f"{len(ST.LOCKED_SKIPPED)} прогонів пропущено: стор зайнятий іншою сесією "
+                 f"(індексація або optimize) — повторити nysh text index пізніше")
     if st["stale"] and not a.case:
         env.warn("some_not_indexed",
                  f"{st['stale']} прогонів лишились поза стором — найчастіше це "
@@ -340,6 +358,12 @@ def text_find(a: TextFindArgs) -> Envelope:
     if led.get("unindexed"):
         env.warn("partial_store", f"{led['unindexed']} прогонів поза стором")
         env.suggest("text.index", "догнати стор")
+    if led.get("rules_stale"):
+        env.warn("rules_stale", RULES_STALE_MSG)
+    if led.get("short_stems"):
+        env.warn("short_stems",
+                 f"короткі стеми {', '.join(led['short_stems'])}: `partial_ratio` знаходить їх "
+                 f"усередині будь-якого довшого слова — хіти за ними судити з осторогою")
     sc = res.get("selfcheck") or {}
     if sc.get("why"):
         env.warn("recall_not_measured", str(sc["why"]))

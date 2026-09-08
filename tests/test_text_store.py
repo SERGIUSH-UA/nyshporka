@@ -178,3 +178,103 @@ def test_search_prefers_the_store_once_it_covers_the_scope(space: Path) -> None:
     res = S.search("Липовеньке", name="проба", thresh=78, profile=False, given=False)
     assert res["backend"] == "store"
     assert res["hits"]
+
+
+
+# ── правки за третім раундом рецензій 08.09 ──────────────────────────────────
+def test_verbose_flag_disables_the_literal_prefilter() -> None:
+    from nyshporka.search.store import literals_of
+
+    assert literals_of(r"(?x) Ковал # коментар") is None
+    assert literals_of(r"(?ix)Ковал  ь") is None
+    assert literals_of(r"(?i)Коваль") == ["Коваль"]
+
+
+def test_grep_latin_literal_cut_before_the_vowel_of_sch_still_finds_the_line(space: Path) -> None:
+    from nyshporka.search import store as ST
+
+    assert ST._literal_core("Kowalsch") == "Kowal"
+    run = space / "reports" / "htr" / "проба"
+    (run / "0007.txt").write_text("Jan Kowalschinski z zona\n", encoding="utf-8")
+    meta = json.loads((run / "_htr_meta.json").read_text(encoding="utf-8"))
+    meta["pages"]["0007.jpg"] = {"lines": 1}
+    (run / "_htr_meta.json").write_text(json.dumps(meta), encoding="utf-8")
+    list(ST.ensure_all(["проба"]))
+    got = ST.grep(r"Kowalsch", ["проба"])
+    assert got["total"] == 1, got
+
+
+
+# ── швидкість за третім раундом: кеш свіпів, передфільтр partial, правила ────
+def test_sweep_caches_per_run_and_forgets_a_reread_run(space: Path) -> None:
+    import shutil
+
+    from nyshporka import htr_store as S
+    from nyshporka.search import store as ST
+
+    src = space / "reports" / "htr" / "проба"
+    shutil.copytree(src, src.parent / "проба2")
+    S._RUNS_CACHE = None
+    stem = S._norm("Липовеньке")
+    list(ST.ensure_all(["проба", "проба2"]))
+    first = ST.sweep([stem], ["проба", "проба2"], thresh=78)
+    assert first["hits"] and first["cached"] == 0 and first["computed"] == 2
+    second = ST.sweep([stem], ["проба", "проба2"], thresh=78)
+    assert second["cached"] == 2 and second["computed"] == 0
+    assert sorted(map(str, second["hits"])) == sorted(map(str, first["hits"]))
+    # інший поріг — інший ключ, кеш не підсовує чужу відповідь
+    other = ST.sweep([stem], ["проба"], thresh=90)
+    assert other["computed"] == 1
+    # перечитаний прогін випадає з кешу лише сам
+    (src / "0001.txt").write_text("знову Липовеньке" + chr(10), encoding="utf-8")
+    meta = json.loads((src / "_htr_meta.json").read_text(encoding="utf-8"))
+    meta["pages"]["0001.jpg"]["lines"] = 1
+    (src / "_htr_meta.json").write_text(json.dumps(meta), encoding="utf-8")
+    list(ST.ensure_all(["проба"]))
+    third = ST.sweep([stem], ["проба", "проба2"], thresh=78)
+    assert third["cached"] == 1 and third["computed"] == 1
+    assert any(h["name"] == "проба" and h["page"] == "0001.jpg" and h["line_no"] == 1
+               for h in third["hits"])
+
+
+def test_partial_prefilter_keeps_every_hit_of_the_plain_matcher() -> None:
+    """Межа `_partial_bound` — необхідна умова, а не евристика: те саме, що
+    `decode._matches`, до бала, включно зі склейками довшими за стем."""
+    import random
+
+    from nyshporka.search import decode as D
+    from nyshporka.search import store as ST
+
+    stems = ["kovalskii", "kovalskogo", "koval"]
+    base = ["kovalskii", "kovalskiipetr", "ivankovalskii", "kovlskii", "kavalskago",
+            "kovalskiiivanovsyn", "xkovalskiix", "ivanov", "svascennik", "kowalsky",
+            "kovalevskii", "kovalskiykovalskiy", "oval", "kov", "kovals"]
+    rng = random.Random(7)
+    alphabet = "abcdefghijklmnopqrstuvwxyz"
+    for _ in range(400):
+        w = "".join(rng.choice(alphabet) for _ in range(rng.randint(3, 25)))
+        base.append(w)
+        base.append(w[:3] + "kovalsk" + w[3:])       # склейка зі стемом усередині
+    for thresh in (78, 85, 92):
+        a = ST._match_cdist(base, stems, thresh)
+        b = D._matches(base, stems, thresh)
+        assert a is not None and set(a) == set(b), (thresh, set(a) ^ set(b))
+        assert all(round(a[j][0]) == round(b[j][0]) for j in a), thresh
+
+
+def test_rules_fingerprint_is_versioned_and_can_be_accepted(space: Path) -> None:
+    from nyshporka.cli import app
+    from nyshporka.search import store as ST
+
+    assert ST.rules_hash().startswith("v2:")
+    list(ST.ensure_all(["проба"]))
+    conn = ST.connect()
+    conn.execute("update meta set value='старий' where key='rules'")
+    conn.commit()
+    conn.close()
+    assert ST.stats()["rules_stale"] is True
+    got = ST.sweep(["kovalskii"], ["проба"], thresh=78)
+    assert got["rules_stale"] is True
+    res = runner.invoke(app, ["text", "index", "--accept-rules"])
+    assert res.exit_code == 0, res.output
+    assert ST.stats()["rules_stale"] is False

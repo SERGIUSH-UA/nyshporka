@@ -41,13 +41,15 @@ def state_cmd(as_json: bool = typer.Option(False, "--json")) -> None:
 def index_cmd(
     case: str = typer.Option("", "--case", help="лише ця справа або прогін"),
     rebuild: bool = typer.Option(False, "--rebuild", help="перебудувати й свіже"),
+    accept_rules: bool = typer.Option(False, "--accept-rules",
+                                      help="прийняти чинний відбиток правил без перебудови"),
     as_json: bool = typer.Option(False, "--json"),
 ) -> None:
     """Догнати стор по прогонах. Перша збірка корпусу — десятки хвилин, далі
     лише те, що перечитали."""
     from nyshporka import ops as O
 
-    env = O.call("text.index", {"case": case, "rebuild": rebuild})
+    env = O.call("text.index", {"case": case, "rebuild": rebuild, "accept_rules": accept_rules})
     if _answer(env, as_json):
         return
     d = env.data
@@ -309,7 +311,9 @@ def find_cmd(
         head = f"{h.get('name')} · {h.get('page')} · рядок {h.get('line_no')}"
         why = str(h.get("stem_origin") or "q")
         if why != "q":
-            head += f" · [warn]{'побутове' if why == 'folk' else 'профіль'}: {h.get('stem')}[/warn]"
+            label = {"folk": "побутове", "given": "довідник імен",
+                     "profile": "профіль"}.get(why, why)
+            head += f" · [warn]{label}: {h.get('stem')}[/warn]"
         if h.get("rank_why"):
             head += f" · [muted]↓ {h['rank_why']}[/muted]"
         console.print(f"[bold]{h.get('score')}[/bold]  {head}")
@@ -328,9 +332,14 @@ def find_cmd(
     console.print("")
     console.print(f"[bold]знаменник:[/bold] кадрів {led.get('frames') if led.get('frames') is not None else '?'} · "
                   f"прочитано {led.get('decoded') if led.get('decoded') is not None else '?'} · "
-                  f"у сторі прогонів {led['in_store']} із {led['runs']} · сторінок {led.get('pages_scoped')} · "
+                  f"у сторі прогонів {led['in_store']} із {led['runs']} · "
+                  f"сторінок без дублів голосів {led.get('pages_scoped')} · "
                   f"голоси: {', '.join(led.get('voices') or []) or '—'} · письмо: "
                   f"{', '.join(led.get('scripts') or []) or '?'}")
+    cache = led.get("cache") or {}
+    if cache:
+        console.print(f"[muted]свіп: з кешу стору {cache.get('runs', 0)} прогонів, "
+                      f"пораховано зараз {cache.get('computed', 0)}[/muted]")
     parts = []
     for ch in led["channels"]:
         if ch["ran"]:

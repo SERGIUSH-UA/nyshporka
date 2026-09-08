@@ -163,8 +163,9 @@ def test_find_prints_the_ledger_even_on_zero(space: Path) -> None:
     assert ids["surname"]["ran"] and ids["surname"]["hits"] >= 1
     # якорі: справа без ключа й років — канал мовчить, і причина названа
     assert not ids["anchor"]["ran"] and ids["anchor"]["why"]
-    assert led["in_store"] == 2 and led["runs"] == 2
-    assert "pysar" in led["voices"] and "diak" in led["voices"]
+    # прогін без ключа справи — область рівно один прогін, і журнал каже про один
+    assert led["in_store"] == 1 and led["runs"] == 1
+    assert led["voices"] == ["pysar"]
 
     zero = T.find("Шевченко", "проба", thresh=78, limit=10)
     assert not zero.get("error") and zero["hits"] == []
@@ -492,3 +493,129 @@ def test_find_does_not_pull_profile_forms_for_a_lookalike_query(space: Path) -> 
     from nyshporka.search import textops as T
 
     assert not T._query_is_profile("Шевченко")
+
+
+
+# ── правки за третім раундом рецензій 08.09 ──────────────────────────────────
+def test_find_page_tells_a_and_b_sides_of_a_spread_apart(space: Path) -> None:
+    from nyshporka.search import store as ST
+    from nyshporka.search import textops as T
+
+    d = space / "reports" / "htr" / "розворот"
+    d.mkdir(parents=True)
+    (d / "0001a.txt").write_text("лівий аркуш\n", encoding="utf-8")
+    (d / "0001b.txt").write_text("правий аркуш Ковальскій\n", encoding="utf-8")
+    meta = json.loads((space / "reports" / "htr" / "проба" / "_htr_meta.json").read_text(encoding="utf-8"))
+    meta["pages"] = {"0001a.jpg": {"lines": 1}, "0001b.jpg": {"lines": 1}}
+    (d / "_htr_meta.json").write_text(json.dumps(meta), encoding="utf-8")
+    list(ST.ensure_all(["розворот"]))
+    conn = ST.connect(readonly=True)
+    try:
+        assert T.find_page(conn, "розворот", "0001b") == "0001b.jpg"
+        assert T.find_page(conn, "розворот", "1B.jpg") == "0001b.jpg"
+        assert T.find_page(conn, "розворот", "1") == "0001a.jpg"
+        assert T.find_page(conn, "розворот", "0001c") is None
+    finally:
+        conn.close()
+
+
+def test_a_store_of_a_foreign_schema_answers_in_words_not_a_traceback(space: Path) -> None:
+    import sqlite3
+
+    from nyshporka.search import store as ST
+    from nyshporka.search import textops as T
+
+    list(ST.ensure_all(["проба"]))
+    raw = sqlite3.connect(ST.path())
+    raw.execute("update meta set value='1' where key='schema'")
+    raw.commit()
+    raw.close()
+    assert ST.is_fresh("проба") is False
+    for got in (T.ctx("проба", "4", line=3), T.voices("проба", "4"),
+                T.crop("проба", "4", 3, out=space / "y.png")):
+        assert got.get("error") and "схемою" in got["error"], got
+
+
+def test_a_run_without_texts_is_not_counted_as_covered(space: Path) -> None:
+    from nyshporka.search import store as ST
+
+    d = space / "reports" / "htr" / "пусто"
+    d.mkdir(parents=True)
+    (d / "_htr_meta.json").write_text(json.dumps({"model": "pysar_cyr_v17.pt", "pages": {}}),
+                                      encoding="utf-8")
+    assert list(ST.ensure_all(["пусто"])) == []
+    assert ST.is_fresh("пусто") is False
+    got = ST.sweep(["kovalskii"], ["пусто", "проба"], thresh=78, build_budget=0)
+    assert got["scanned"] == 1 and got["unindexed"] == 1
+
+
+def test_profile_gate_accepts_a_spelling_that_carries_the_profile_substring(space: Path) -> None:
+    from nyshporka.core import profile as P
+    from nyshporka.search import textops as T
+
+    (space / "config").mkdir(exist_ok=True)
+    (space / "config" / "research_profile.yaml").write_text(
+        "fallback: rid\nprofiles:\n  rid:\n    surname:\n      display: Ковальський\n"
+        "      paradigm: adj_skyi\n      stems:\n        uk: Коваль\n"
+        "      substrings:\n        - аваль\n", encoding="utf-8")
+    P.reset()
+    try:
+        assert T._query_is_profile("Ковальскій")          # форма профілю
+        assert T._query_is_profile("Кавальскій")          # описка з підрядком роду
+        assert not T._query_is_profile("Ковалевський")    # сусідній рід без підрядка
+        assert not T._query_is_profile("Шевченко")
+    finally:
+        P.reset()
+
+
+def test_find_on_a_run_name_searches_and_reports_the_whole_case(case_space: Path) -> None:
+    from nyshporka.search import textops as T
+
+    got = T.find("Ковальскій", "проба", thresh=78, limit=10)
+    assert not got.get("error"), got
+    led = got["ledger"]
+    assert led["runs"] == 2 and led["in_store"] == 2
+    assert got["case_key"] == "DAHMO/315/8433"
+    assert {h["name"] for h in got["hits"]} >= {"проба", "проба-diak_v4"}
+    ids = {ch["id"]: ch for ch in led["channels"]}
+    assert "selfcheck" in ids and "шифр" not in (ids["selfcheck"]["why"] or "")
+
+
+def test_sheet_shows_a_verdict_stored_under_the_page_store_key(case_space: Path) -> None:
+    from nyshporka.pagestore import store as PS
+    from nyshporka.pagestore.models import PageNote
+    from nyshporka.search import textops as T
+
+    ref = PS.resolve_case("DAHMO/315/8433")
+    PS.annotate_pages(ref, [PageNote(scan="0004", page_type="birth", surnames=["Гончаръ"],
+                                     status="full", method="visual")])
+    h = T.find("Ковальскій", "DAHMO/315/8433", limit=10)["hits"][0]
+    f = case_space / "v5.json"
+    f.write_text(json.dumps([{"run": h["name"], "page": h["page"], "line_no": h["line_no"],
+                              "verdict": "noise", "note": ""}]), encoding="utf-8")
+    assert T.verdicts_import(f, "DAHMO/315/8433")["imported"] == 1
+    out = case_space / "sheet2.html"
+    got = T.sheet("Ковальскій", "DAHMO/315/8433", limit=10, crops=0, out=out)
+    assert got["known_verdicts"] >= 1, got
+    assert 'value="noise" selected' in out.read_text(encoding="utf-8")
+
+
+def test_runs_list_sees_a_meta_edited_in_place_without_a_reset(space: Path) -> None:
+    from nyshporka import htr_store as S
+
+    rows = S.list_cases()
+    assert rows and rows[0]["case_key"] == ""
+    mp = space / "reports" / "htr" / "проба" / "_htr_meta.json"
+    meta = json.loads(mp.read_text(encoding="utf-8"))
+    meta["case_key"] = "DAHMO/315/2"
+    mp.write_text(json.dumps(meta), encoding="utf-8")   # на місці, кеш процесу НЕ скинуто
+    by = {r["name"]: r for r in S.list_cases()}
+    assert by["проба"]["case_key"] == "DAHMO/315/2"
+
+
+def test_runs_cache_is_dropped_with_the_library(space: Path) -> None:
+    from nyshporka import htr_store as S
+
+    S._runs_cache_write({"x": {"stamp": "1", "row": {"name": "x"}}}, "lib-1")
+    assert S._runs_cache_read("lib-1") == {"x": {"stamp": "1", "row": {"name": "x"}}}
+    assert S._runs_cache_read("lib-2") == {}

@@ -136,6 +136,8 @@ create table if not exists lines(
     x0 int, y0 int, x1 int, y1 int, succ int);
 create virtual table if not exists fts using fts5(
     norm, content='', tokenize='trigram', contentless_delete=1);
+create table if not exists sweeps(
+    run_id int not null, key text not null, body blob, primary key(run_id, key));
 """
 
 
@@ -216,13 +218,35 @@ def rules_hash() -> str:
         except (OSError, TypeError, SyntaxError):
             parts.append(f"{fn.__module__}.{fn.__name__}")
     parts += [str(S.LINE_BREAK_WINDOW), str(COL_GAP), str(SUCC_REACH), str(MARK)]
-    return hashlib.blake2b("\n".join(parts).encode("utf-8"), digest_size=8).hexdigest()
+    # 🔴 Префікс версії САМОГО відбитка. Спосіб рахувати (джерело → AST)
+    # змінився в минулому коміті, і живий стор на 6.5 ГБ став «застарілим за
+    # правилами» без жодної зміни правил (рецензія 08.09, третій раунд). Зміна
+    # способу тепер видима як така, а дослідник приймає відбиток без
+    # перебудови: `nysh text index --accept-rules`.
+    return "v2:" + hashlib.blake2b("\n".join(parts).encode("utf-8"), digest_size=8).hexdigest()
 
 
 def rules_stale(conn: sqlite3.Connection) -> bool:
     """Чи кандидати стору зроблені іншими правилами, ніж чинні."""
     row = conn.execute("select value from meta where key='rules'").fetchone()
     return bool(row) and row[0] != rules_hash()
+
+
+def accept_rules() -> str:
+    """Записати чинний відбиток правил як той, яким зібрано стор.
+
+    Рішення дослідника, не автоматика: кажеться лише тоді, коли правила
+    склейки насправді не мінялись (змінився спосіб їх рахувати), інакше
+    кандидати в блобах лишаться старими під свіжим відбитком.
+    """
+    h = rules_hash()
+    conn = connect()
+    try:
+        conn.execute("insert or replace into meta(key,value) values('rules',?)", (h,))
+        conn.commit()
+    finally:
+        conn.close()
+    return h
 
 
 # ── свіжість ─────────────────────────────────────────────────────────────────
@@ -244,7 +268,12 @@ def is_fresh(run: str, conn: sqlite3.Connection | None = None) -> bool:
     own = conn is None
     if own and not path().is_file():
         return False
-    c = conn or connect(readonly=True)
+    try:
+        c = conn or connect(readonly=True)
+    except RuntimeError:
+        # Стор чужої схеми: для читача це «не свіжий», а не падіння —
+        # канал якорів ішов би далі файлами, як і пошук.
+        return False
     try:
         row = c.execute("select stamp from runs where run=?", (run,)).fetchone()
     finally:
@@ -362,6 +391,7 @@ def _delete_run(conn: sqlite3.Connection, run_id: int) -> None:
         conn.execute("delete from fts where rowid between ? and ?", (lo, hi))
         conn.execute("delete from lines where id between ? and ?", (lo, hi))
     conn.execute("delete from pages where run_id=?", (run_id,))
+    conn.execute("delete from sweeps where run_id=?", (run_id,))
     conn.execute("delete from runs where id=?", (run_id,))
 
 
@@ -386,6 +416,12 @@ def index_run(conn: sqlite3.Connection, run: str) -> int:
     old = conn.execute("select id from runs where run=?", (run,)).fetchone()
     if old:
         _delete_run(conn, int(old[0]))
+    if not txts:
+        # 🔴 Тека без жодного `.txt` у стор не лягає: рядок `runs` зі штампом
+        # робив її «свіжою» і «прочесаною», тобто знаменник ріс на прогін, у
+        # якому нема чого шукати (рецензія 08.09, третій раунд).
+        conn.commit()
+        return 0
     if conn.execute("select 1 from meta where key='rules'").fetchone() is None:
         conn.execute("insert into meta(key,value) values('rules',?)", (rules_hash(),))
     conn.execute(
@@ -467,6 +503,11 @@ def ensure(run: str, conn: sqlite3.Connection | None = None) -> bool:
             c.close()
 
 
+#: Прогони, які остання збірка пропустила через замок іншої сесії. Мовчазний
+#: пропуск виглядав як «тека без .txt» (рецензія 08.09, третій раунд).
+LOCKED_SKIPPED: list[str] = []
+
+
 def ensure_all(runs: list[str], *, force: bool = False, reset_rules: bool = False,
                progress: Callable[[int, int, str], None] | None = None,
                ) -> Iterator[str]:
@@ -479,6 +520,7 @@ def ensure_all(runs: list[str], *, force: bool = False, reset_rules: bool = Fals
     from nyshporka.core import progress as P
 
     built = 0
+    LOCKED_SKIPPED.clear()
     conn = connect(migrate=True)
     try:
         if force and reset_rules:
@@ -505,6 +547,7 @@ def ensure_all(runs: list[str], *, force: bool = False, reset_rules: bool = Fals
                     raise
                 with contextlib.suppress(sqlite3.Error):
                     conn.rollback()
+                LOCKED_SKIPPED.append(run)
         # `optimize` зливає ВСІ сегменти FTS під write-lock — на 6.5 ГБ це
         # не для кожного `index --case`; лише коли зібрано багато або примусово.
         if force or built >= OPTIMIZE_MIN:
@@ -799,11 +842,12 @@ def _pages_for(conn: sqlite3.Connection, pids: set[int], run_ids: set[int]
 
 
 #: Літери латинки, якими диграф ПОЧИНАЄТЬСЯ (sz, cz, rz, ch, sch, gh) і
-#: якими ЗАКІНЧУЄТЬСЯ. Літерал, розрізаний посеред диграфа, нормалізується не
+#: якими ЗАКІНЧУЄТЬСЯ. «h» у голові — для «sch»/«gh», зрізаних перед голосною
+#: («Kowalsch» з «Kowalschinski»: норма «kowalsh» не є підрядком «kowalskinski»). Літерал, розрізаний посеред диграфа, нормалізується не
 #: так, як ціле слово («zczynski»→«zcinski» ⊄ «kowalscinski»), тож з країв
 #: зрізаються лише ті літери, що могли бути половиною диграфа через зріз.
 #: Кирилиця диграфів не має — не чіпається.
-_DIGRAPH_HEAD = set("sczrg")
+_DIGRAPH_HEAD = set("sczrgh")
 _DIGRAPH_TAIL = set("zchie")
 
 
@@ -848,13 +892,14 @@ def _fts_rows(conn: sqlite3.Connection, expr: str, run_ids: list[int]
     сторінки всередині нього відсіює викликач по `pages`.
     """
     total = conn.execute("select count(*) from runs").fetchone()[0]
-    if not run_ids or len(run_ids) >= min(SCOPE_RANGES_MAX, int(total)):
+    blocks = _scope_blocks(conn, run_ids) if run_ids and len(run_ids) < int(total) else []
+    if not run_ids or len(run_ids) >= int(total) or len(blocks) > SCOPE_RANGES_MAX:
         yield from conn.execute("select rowid from fts where fts match ?", (expr,))
         return
     # 🔴 Блоки, а не один спільний відрізок. Голос, доіндексований пізніше,
     # лежить у кінці файлу, і відрізок від першого до останнього накривав
     # третину корпусу: 6.6 с проти 2.2 с сумою блоків (рецензія 08.09).
-    for lo, hi in _scope_blocks(conn, run_ids):
+    for lo, hi in blocks:
         yield from conn.execute(
             "select rowid from fts where fts match ? and rowid between ? and ?",
             (expr, lo, hi))
@@ -910,17 +955,21 @@ def _cands_batch(conn: sqlite3.Connection, wanted: dict[int, set[int]], *,
 
 def _match_unique(norms: list[str], stems: list[str], thresh: int
                   ) -> dict[int, tuple[float, int]]:
-    """Те саме, що `decode._matches`, але кожна ФОРМА порівнюється один раз.
+    """Те саме, що `decode._matches`, гуртом на всі кандидати.
 
-    🔴 На корпусі 11.4 млн кандидатів, з них унікальних утричі менше: ті самі
-    «священникъ» і «крестьяне» стоять на кожній сторінці. Зіставляти їх по
-    сто тисяч разів означало 294 с на запит із 26 стемами.
+    З numpy — один `cdist` на всі стеми й усі ядра; без нього — `extract` по
+    стему, як у gzip-індексу, по унікальних формах.
 
-    Коли є numpy, порівняння йде `cdist` по всіх стемах одразу й на всіх
-    ядрах; без нього — `extract` по стему, як у gzip-індексу.
+    ⚠ Дедуплікація форм тут свідомо НЕ робиться з numpy: у межах блока на
+    60 тис. сторінок різних форм дві третини (склейки унікальні за побудовою),
+    і словник на 4.5 млн рядків коштував 2.7 с проти 0.4 с виграшу в `cdist`
+    (замір 08.09, третій раунд).
     """
     from nyshporka.search import decode as D
 
+    got = _match_cdist(norms, stems, thresh)
+    if got is not None:
+        return got
     uniq: dict[str, int] = {}
     order: list[str] = []
     back: list[int] = []
@@ -931,15 +980,30 @@ def _match_unique(norms: list[str], stems: list[str], thresh: int
             uniq[n] = k
             order.append(n)
         back.append(k)
-    best_u = _match_cdist(order, stems, thresh)
-    if best_u is None:
-        best_u = D._matches(order, stems, thresh)
+    best_u = D._matches(order, stems, thresh)
     out: dict[int, tuple[float, int]] = {}
     for j, k in enumerate(back):
-        got = best_u.get(k)
-        if got is not None:
-            out[j] = got
+        hit = best_u.get(k)
+        if hit is not None:
+            out[j] = hit
     return out
+
+
+def _partial_bound(stem_len: int, lens: Any, thresh: int) -> Any:
+    """Нижня межа `ratio`, без якої `partial_ratio ≥ thresh` неможливий.
+
+    `ratio` = 200·LCS/(S+L). `partial_ratio` — це `ratio` стема проти вікна
+    кандидата; вікно може бути коротшим за стем лише скраю, і найкоротше
+    вікно w, здатне дати thresh, — w = t·S/(200−t). Звідси LCS зі стемом не
+    менший за t/100·(S+w)/2, а LCS із цілим кандидатом — не менший за LCS із
+    його вікном. Тож `ratio` цілого кандидата ≥ 200·LCS_min/(S+L). Мінус
+    одиниця — запас на округлення до uint8.
+    """
+    import numpy as np
+
+    w_min = thresh * stem_len / (200 - thresh)
+    lcs_min = thresh / 100 * (stem_len + w_min) / 2
+    return np.floor(200 * lcs_min / (stem_len + lens)) - 1
 
 
 def _match_cdist(order: list[str], stems: list[str], thresh: int
@@ -957,29 +1021,31 @@ def _match_cdist(order: list[str], stems: list[str], thresh: int
     best: dict[int, tuple[float, int]] = {}
     # Правило те саме, що в `decode._matches`: закороткий кандидат не
     # порівнюється, `partial_ratio` — лише коли кандидат не коротший за стем.
-    r = cdist(stems, order, scorer=fuzz.ratio, score_cutoff=thresh,
+    # 🔴 `ratio` рахується з НИЗЬКИМ порогом: він і хіт, і передфільтр для
+    # `partial_ratio`, який коштував 60 % зіставлення (27.6 млн пар на 16 тис.
+    # сторінок), — див. `_partial_bound`. Той самий результат до бала.
+    lmax = int(lens.max()) if len(lens) else 0
+    cutoff = 0
+    if stems:
+        cutoff = max(0, int(min(float(_partial_bound(len(s), np.int32(lmax), thresh))
+                                for s in stems)))
+    r = cdist(stems, order, scorer=fuzz.ratio, score_cutoff=cutoff,
               dtype=np.uint8, workers=-1)
-    # `partial_ratio` рахується лише для кандидатів, не коротших за стем, —
-    # їх меншість, а другий повний `cdist` коштував половину зіставлення.
-    by_len: dict[int, list[int]] = {}
-    for si, stem in enumerate(stems):
-        by_len.setdefault(max(max(4, int(len(stem) * 0.6)), len(stem)), []).append(si)
-    partial: dict[int, tuple[Any, Any]] = {}
-    for floor, sis in by_len.items():
-        idx = np.flatnonzero(lens >= floor)
-        if len(idx) == 0:
-            continue
-        sub = [order[int(j)] for j in idx]
-        pr = cdist([stems[si] for si in sis], sub, scorer=fuzz.partial_ratio,
-                   score_cutoff=thresh, dtype=np.uint8, workers=-1)
-        for row_i, si in enumerate(sis):
-            partial[si] = (idx, pr[row_i])
+    # ⚠ Хіт за `ratio` — окремим проходом із порогом у самому rapidfuzz: поріг
+    # там порівнюється з дробовим балом, а uint8 округлює 77.8 до 78, і без
+    # цього проходу межові кандидати проходили б усупереч `decode._matches`.
+    r_hit = cdist(stems, order, scorer=fuzz.ratio, score_cutoff=thresh,
+                  dtype=np.uint8, workers=-1)
     for si, stem in enumerate(stems):
         need = max(4, int(len(stem) * 0.6))
-        sc = np.where((r[si] >= thresh) & (lens >= need), r[si], 0).astype(np.int32)
-        if si in partial:
-            idx, prow = partial[si]
-            sub_sc = np.where(prow >= thresh, prow, 0).astype(np.int32)
+        floor = max(need, len(stem))
+        row = r[si]
+        sc = np.where((r_hit[si] >= thresh) & (lens >= need), r_hit[si], 0).astype(np.int32)
+        idx = np.flatnonzero((lens >= floor) & (row >= _partial_bound(len(stem), lens, thresh)))
+        if len(idx):
+            pr = cdist([stem], [order[int(j)] for j in idx], scorer=fuzz.partial_ratio,
+                       score_cutoff=thresh, dtype=np.uint8, workers=-1)[0]
+            sub_sc = np.where(pr >= thresh, pr, 0).astype(np.int32)
             sc[idx] = np.maximum(sc[idx], sub_sc)
         for j in np.flatnonzero(sc):
             v = float(sc[j])
@@ -1009,6 +1075,123 @@ def _cands_of(conn: sqlite3.Connection, pid: int, nos: set[int]
     return out
 
 
+# ── кеш свіпів по прогонах ───────────────────────────────────────────────────
+#: Версія формату кешу свіпів; зміна зіставлення — новий ключ, старі рядки
+#: просто не читаються.
+SWEEP_CACHE_VERSION = 1
+
+#: Один хіт у кеші: сторінка, рядок, форма, бал, стем.
+SweepRow = tuple[int, int, str, int, str]
+
+
+def _sweep_key(stems: list[str], thresh: int) -> str:
+    return hashlib.blake2b(
+        json.dumps([sorted(stems), int(thresh), SWEEP_CACHE_VERSION],
+                   ensure_ascii=False).encode("utf-8"), digest_size=10).hexdigest()
+
+
+def _pack(rows: list[SweepRow]) -> bytes:
+    return zlib.compress("\n".join(
+        f"{pid}\t{no}\t{norm}\t{score}\t{stem}" for pid, no, norm, score, stem in rows
+    ).encode("utf-8"), 6)
+
+
+def _unpack(body: bytes | None) -> list[SweepRow]:
+    if not body:
+        return []
+    out: list[SweepRow] = []
+    for line in zlib.decompress(body).decode("utf-8").split("\n"):
+        if not line:
+            continue
+        pid, no, norm, score, stem = line.split("\t")
+        out.append((int(pid), int(no), norm, int(score), stem))
+    return out
+
+
+def _blocks_by_pages(conn: sqlite3.Connection, run_ids: list[int]) -> list[list[int]]:
+    """Прогони блоками не більше `TRIGRAM_SCOPE_PAGES` сторінок, за порядком id."""
+    sizes: dict[int, int] = {}
+    ids = sorted(run_ids)
+    for i in range(0, len(ids), 500):
+        chunk = ids[i:i + 500]
+        marks = ",".join("?" * len(chunk))
+        for rid, n in conn.execute(f"select id, pages from runs where id in ({marks})", chunk):
+            sizes[int(rid)] = int(n or 0)
+    out: list[list[int]] = []
+    cur: list[int] = []
+    acc = 0
+    for rid in ids:
+        n = sizes.get(rid, 0)
+        if cur and acc + n > TRIGRAM_SCOPE_PAGES:
+            out.append(cur)
+            cur, acc = [], 0
+        cur.append(rid)
+        acc += n
+    if cur:
+        out.append(cur)
+    return out
+
+
+def _sweep_block(conn: sqlite3.Connection, stems: list[str], run_ids: list[int],
+                 thresh: int, *, progress: Callable[[int, int, str], None] | None = None,
+                 cancel: Callable[[], bool] | None = None,
+                 ) -> dict[int, list[SweepRow]] | None:
+    """Свіп одного блока прогонів триграмами. None — перервано."""
+    from nyshporka import htr_store as S
+
+    expr = match_expr(stems)
+    run_set = set(run_ids)
+    raw: dict[int, set[int]] = {}
+    for (rid,) in _fts_rows(conn, expr, run_ids):
+        raw.setdefault(rid >> LINE_BITS, set()).add(rid & MAX_LINES)
+    pages = _pages_for(conn, set(raw), run_set)
+    # 🔴 Разом із рядком беруться кілька наступних. Склейка переносу
+    # («Липовень» ⏎ «комъ») приписується рядку з ГОЛОВОЮ, а k-грам стема
+    # стоїть у рядку з хвостом; без розширення хіт зникав би саме там, де
+    # прізвище розірване, — рівно те, заради чого склейка існує.
+    reach = S.LINE_BREAK_WINDOW
+    wanted: dict[int, set[int]] = {}
+    for pid, nos in raw.items():
+        if pid in pages:
+            wanted[pid] = {n for no in nos for n in range(no, no + reach + 1)}
+    # Один виклик rapidfuzz на всі кандидати, а не по рядку, і кандидати —
+    # ГОТОВІ, з блоба сторінки: породжувати їх наново в Python для сотень
+    # тисяч рядків коштувало 190 с на запит по корпусу.
+    norms: list[str] = []
+    starts: list[int] = []
+    owner: list[tuple[int, int]] = []
+    for pid, no, ns in _cands_batch(conn, wanted, progress=progress, cancel=cancel):
+        starts.append(len(norms))
+        owner.append((pid, no))
+        norms.extend(ns)
+    if cancel and cancel():
+        return None
+    by_line: dict[tuple[int, int], tuple[float, int, int]] = {}
+    for j, (sc, si) in _match_unique(norms, stems, thresh).items():
+        key = owner[bisect_right(starts, j) - 1]
+        cur = by_line.get(key)
+        if cur is None or sc > cur[0]:
+            by_line[key] = (sc, j, si)
+    out: dict[int, list[SweepRow]] = {rid: [] for rid in run_ids}
+    for (pid, no), (sc, j, si) in by_line.items():
+        out[pages[pid][0]].append((pid, no, norms[j], round(sc), stems[si]))
+    return out
+
+
+def _sweep_put(conn: sqlite3.Connection, key: str, got: dict[int, list[SweepRow]]) -> bool:
+    """Покласти результати блока в кеш; замок іншої сесії — просто без кешу."""
+    try:
+        conn.execute("begin")
+        conn.executemany("insert or replace into sweeps(run_id, key, body) values(?,?,?)",
+                         [(rid, key, _pack(rows)) for rid, rows in got.items()])
+        conn.commit()
+        return True
+    except sqlite3.OperationalError:
+        with contextlib.suppress(sqlite3.Error):
+            conn.rollback()
+        return False
+
+
 def sweep(stems: list[str], runs: list[str], *, thresh: int = 78,
           build_budget: int = 0,
           progress: Callable[[int, int, str], None] | None = None,
@@ -1019,12 +1202,23 @@ def sweep(stems: list[str], runs: list[str], *, thresh: int = 78,
     більше за бюджет, жоден не збирається, і `unindexed` каже, скільки лишилось
     поза пошуком. Зібрати «скільки встигнеться» означало б віддати нуль зі
     знаменником, що залежить від порядку тек.
+
+    🔴 Кеш по ПРОГОНАХ, ключ — стеми й поріг. Той самий рід шукають по корпусу
+    щосесії, а прочитаних справ між сесіями додається кілька: перший свіп
+    рахує все (хвилини), кожен наступний — лише нові чи перечитані прогони.
+    Кеш живе з прогоном: перечитали — `_delete_run` зніс і його рядок кешу.
+
+    🔴 Один режим передфільтра — триграми, блоками до `TRIGRAM_SCOPE_PAGES`.
+    Режим «корпусу» на парах грам губив 5 % сторінок саме в смузі 78–84, де
+    живуть скалічені форми, і при цьому коштував 48 с FTS (рецензія 08.09,
+    третій раунд); триграми в межах блока на 30 тис. сторінок губили 0 сторінок.
     """
 
     conn = connect()
     try:
         known = stamps(conn)
-        stale = [r for r in runs if stamp_of(r) and known.get(r) != stamp_of(r)]
+        st = {r: stamp_of(r) for r in runs}
+        stale = [r for r in runs if st[r] and known.get(r) != st[r]]
         if 0 < len(stale) <= max(0, build_budget):
             for i, r in enumerate(stale, 1):
                 if progress:
@@ -1039,67 +1233,61 @@ def sweep(stems: list[str], runs: list[str], *, thresh: int = 78,
                     with contextlib.suppress(sqlite3.Error):
                         conn.rollback()
             known = stamps(conn)
-        ready = [r for r in runs if stamp_of(r) and known.get(r) == stamp_of(r)]
+            st = {r: stamp_of(r) for r in runs}
+        ready = [r for r in runs if st[r] and known.get(r) == st[r]]
         missing = len(runs) - len(ready)
         ids = _run_ids(conn, ready)
         by_id = {v: k for k, v in ids.items()}
         hits: list[dict[str, Any]] = []
+        rstale = rules_stale(conn)
         if not ids or not stems:
             return {"hits": hits, "scanned": len(ready), "runs": len(runs),
-                    "unindexed": missing, "backend": "store"}
-        marks = ",".join("?" * len(ids))
-        scope_pages = int(conn.execute(
-            f"select coalesce(sum(pages),0) from runs where id in ({marks})",
-            list(ids.values())).fetchone()[0])
-        total_runs = int(conn.execute("select count(*) from runs").fetchone()[0])
-        wide = scope_pages > TRIGRAM_SCOPE_PAGES or len(ids) >= total_runs
-        expr = match_expr(stems, wide=wide)
-        run_set = set(ids.values())
-        wanted: dict[int, set[int]] = {}
-        # 🔴 Разом із рядком беруться кілька наступних. Склейка переносу
-        # («Липовень» ⏎ «комъ») приписується рядку з ГОЛОВОЮ, а k-грам стема
-        # стоїть у рядку з хвостом; без розширення хіт зникав би саме там, де
-        # прізвище розірване, — рівно те, заради чого склейка існує.
-        from nyshporka import htr_store as S
-
-        reach = S.LINE_BREAK_WINDOW
-        raw: dict[int, set[int]] = {}
-        for (rid,) in _fts_rows(conn, expr, list(ids.values())):
-            raw.setdefault(rid >> LINE_BITS, set()).add(rid & MAX_LINES)
-        pages = _pages_for(conn, set(raw), run_set)
-        for pid, nos in raw.items():
-            if pid in pages:
-                wanted[pid] = {n for no in nos for n in range(no, no + reach + 1)}
-        # Один виклик rapidfuzz на всі кандидати, а не по рядку, і кандидати —
-        # ГОТОВІ, з блоба сторінки: породжувати їх наново в Python для сотень
-        # тисяч рядків коштувало 190 с на запит по корпусу.
-        norms: list[str] = []
-        starts: list[int] = []
-        owner: list[tuple[int, int]] = []
-        for pid, no, ns in _cands_batch(conn, wanted, progress=progress, cancel=cancel):
-            starts.append(len(norms))
-            owner.append((pid, no))
-            norms.extend(ns)
-        by_line: dict[tuple[int, int], tuple[float, int, int]] = {}
-        for j, (sc, si) in _match_unique(norms, stems, thresh).items():
-            key = owner[bisect_right(starts, j) - 1]
-            cur = by_line.get(key)
-            if cur is None or sc > cur[0]:
-                by_line[key] = (sc, j, si)
-        for (pid, no), (sc, j, si) in by_line.items():
-            rid_, page = pages[pid]
-            hits.append({"name": by_id[rid_], "page": page, "line_no": no,
-                         "line_index": no - 1, "norm": norms[j],
-                         "stem": stems[si] if si < len(stems) else "",
-                         "score": round(sc)})
+                    "unindexed": missing, "backend": "store", "cached": 0,
+                    "computed": 0, "rules_stale": rstale}
+        key = _sweep_key(stems, thresh)
+        run_ids = list(ids.values())
+        cached: dict[int, bytes | None] = {}
+        with contextlib.suppress(sqlite3.OperationalError):
+            for i in range(0, len(run_ids), 500):
+                chunk = run_ids[i:i + 500]
+                marks = ",".join("?" * len(chunk))
+                for rid, body in conn.execute(
+                        f"select run_id, body from sweeps where key=? and run_id in ({marks})",
+                        [key, *chunk]):
+                    cached[int(rid)] = body
+        todo = [rid for rid in run_ids if rid not in cached]
+        rows: list[SweepRow] = []
+        for body in cached.values():
+            rows.extend(_unpack(body))
+        blocks = _blocks_by_pages(conn, todo)
+        cancelled = False
+        for bi, block in enumerate(blocks, 1):
+            if progress:
+                progress(bi, len(blocks), f"блок {bi}/{len(blocks)}")
+            got = _sweep_block(conn, stems, block, thresh, cancel=cancel)
+            if got is None:
+                cancelled = True
+                break
+            for lst in got.values():
+                rows.extend(lst)
+            _sweep_put(conn, key, got)
+        pages = _pages_for(conn, {r[0] for r in rows}, set(run_ids))
+        for pid, no, norm, score, stem in rows:
+            got_page = pages.get(pid)
+            if got_page is None:
+                continue
+            hits.append({"name": by_id[got_page[0]], "page": got_page[1], "line_no": no,
+                         "line_index": no - 1, "norm": norm, "stem": stem, "score": score})
         return {"hits": hits, "scanned": len(ready), "runs": len(runs),
-                "unindexed": missing, "backend": "store"}
+                "unindexed": missing, "backend": "store", "cached": len(cached),
+                "computed": len(todo), "cancelled": cancelled, "rules_stale": rstale}
     finally:
         conn.close()
 
 
 # ── регекс по сирому тексту ──────────────────────────────────────────────────
 _LIT_RE = re.compile(r"[^\W\d_]{3,}", re.UNICODE)
+_VERBOSE_FLAG = re.compile(r"\(\?[a-zA-Z-]*x[a-zA-Z-]*[:)]")
 
 
 def literals_of(pattern: str) -> list[str] | None:
@@ -1114,6 +1302,10 @@ def literals_of(pattern: str) -> list[str] | None:
     Гірше, що може статись, — надто широкий передфільтр; звузити нуль він не
     може, бо береться найдовший літерал гілки, а не всі.
     """
+    # 🔴 Прапор «x» (verbose): пробіли й «# коментар» регекс ігнорує, а
+    # розкладка брала б слова коментаря як обов'язковий літерал — хибний нуль.
+    if _VERBOSE_FLAG.search(pattern):
+        return None
     depth = 0
     branches: list[str] = [""]
     # 🔴 Група з альтернативою «(Дол|Дал)» або з квантифікатором «(Долищ)?»

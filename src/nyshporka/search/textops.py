@@ -43,6 +43,20 @@ def _page_num(name: str) -> int | None:
     return int(m[-1]) if m else None
 
 
+_PAGE_KEY = re.compile(r"(\d+)(\D*)$")
+
+
+def _page_key(name: str) -> tuple[int, str] | None:
+    """(номер, літерний хвіст): «0001b» → (1, «b»), «Image00037» → (37, «»).
+
+    🔴 Хвіст значущий: розвороти «0001a»/«0001b» ділять номер, і збіг лише за
+    числом мовчки віддавав аркуш «a» замість «b» — 50 тис. таких сторінок у
+    живому сторі (рецензія 08.09, третій раунд).
+    """
+    m = _PAGE_KEY.search(Path(name).stem)
+    return (int(m.group(1)), m.group(2).lower()) if m else None
+
+
 def scope_runs(scope: str) -> dict[str, Any]:
     """Прогони області: справа, прогін або порожньо. ValueError — не впізнано.
 
@@ -77,14 +91,21 @@ def find_page(conn: Any, run: str, page: str) -> str | None:
         "where r.run=? and (p.page=? or p.stem=?)", (run, page, Path(page).stem)).fetchone()
     if row:
         return str(row[0])
-    want = _page_num(page)
+    want = _page_key(page)
     if want is None:
         return None
-    for (pg,) in conn.execute(
-            "select p.page from pages p join runs r on r.id=p.run_id where r.run=? "
-            "order by p.id", (run,)):
-        if _page_num(str(pg)) == want:
-            return str(pg)
+    pages = [str(pg) for (pg,) in conn.execute(
+        "select p.page from pages p join runs r on r.id=p.run_id where r.run=? "
+        "order by p.id", (run,))]
+    for pg in pages:
+        if _page_key(pg) == want:
+            return pg
+    if want[1]:
+        return None
+    # «73» без хвоста, а сторінки лише з хвостами — перша за номером
+    for pg in pages:
+        if _page_num(pg) == want[0]:
+            return pg
     return None
 
 
@@ -112,7 +133,10 @@ def ctx(scope: str, page: str, line: int | None = None, *, window: int = 4,
     rows = sc["rows"]
     if not rows:
         return {"error": f"у області «{scope}» немає жодного прогону"}
-    conn = ST.connect(readonly=True)
+    try:
+        conn = ST.connect(readonly=True)
+    except RuntimeError as exc:
+        return {"error": str(exc)}
     try:
         voices: list[dict[str, Any]] = []
         pid_main: int | None = None
@@ -229,7 +253,10 @@ def crop(scope: str, page: str, line: int, *, with_next: bool = True, wide: bool
 
     sc = scope_runs(scope)
     rows = sc["rows"]
-    conn = ST.connect(readonly=True)
+    try:
+        conn = ST.connect(readonly=True)
+    except RuntimeError as exc:
+        return {"error": str(exc)}
     try:
         # 🔴 Рамки позичаються в іншого прогону лише при ТІЙ САМІЙ нарізці
         # (число рядків збігається): перший-ліпший прогін із рамками різав
@@ -336,7 +363,10 @@ def voices(scope: str, page: str, *, lines: tuple[int, int] | None = None
 
     sc = scope_runs(scope)
     rows = sc["rows"]
-    conn = ST.connect(readonly=True)
+    try:
+        conn = ST.connect(readonly=True)
+    except RuntimeError as exc:
+        return {"error": str(exc)}
     try:
         got: list[dict[str, Any]] = []
         for run, label in _voices_of(rows):
@@ -542,6 +572,10 @@ def whatis(scope: str) -> dict[str, Any]:
 
 
 # ── find: усі канали разом ───────────────────────────────────────────────────
+#: Стем коротший за стільки літер названий у журналі окремо.
+SHORT_STEM = 6
+
+
 def _query_is_profile(q: str) -> bool:
     """Чи запит є написанням прізвища профілю — стемом, не схожістю."""
     from nyshporka import htr_store as S
@@ -556,12 +590,22 @@ def _query_is_profile(q: str) -> bool:
         return False
     want = {S._norm(w) for w in S._TOKEN_RE.findall(q)}
     have = {S._norm(f) for f in forms} | {S._norm(whose)}
+    subs: set[str] = set()
     try:
         prof = PROF.active()
         have |= {S._norm(x) for x in (prof.all_spellings() or [])}
+        subs = {S._norm(x) for x in (prof.substrings or ()) if x}
     except Exception:
         pass
-    return bool(want) and want <= {h for h in have if h}
+    if not want:
+        return False
+    if want <= {h for h in have if h}:
+        return True
+    # 🔴 Написання, якого профіль не вивів правилом, але яке несе його ПІДРЯДОК
+    # («оваль», «kowal»), — теж про рід: саме таким рід реально знаходили на 96
+    # балів, а точний гейт відрізав його разом із конфузером (рецензія 08.09,
+    # третій раунд). Конфузер підрядка не має — «долин» не містить «долищ».
+    return all(any(s and s in w for s in subs) for w in want)
 
 
 def find(q: str, scope: str = "", *, thresh: int = 78, limit: int = 40,
@@ -583,14 +627,26 @@ def find(q: str, scope: str = "", *, thresh: int = 78, limit: int = 40,
     # підмішував 26 форм роду в пошук конфузера (рецензія 08.09). Якорі — теж
     # лише для профільного запиту: кін чужому прізвищу ні до чого.
     about_profile = _query_is_profile(q)
-    res = S.search(q, name=scope or None, thresh=thresh, limit=limit, context=context,
-                   given=True, folk=False, rank=True, profile=about_profile,
-                   anchors=in_case and about_profile)
+    # 🔴 Ім'я прогону як область означає СПРАВУ цього прогону: пошук іде по всіх
+    # її голосах, і журнал рахує ті самі прогони, що й пошук. Доти пошук брав
+    # один прогін, а журнал — усі голоси справи, і нуль по Писарю читався як
+    # «перевірено й латинкою» (рецензія 08.09, третій раунд). Прогін без ключа
+    # лишається сам: журнал тоді чесно каже про один голос.
+    sc: dict[str, Any] = {"rows": S.list_cases(), "kind": "all", "key": ""}
+    search_scope = scope
+    if scope:
+        sc = S.runs_for_scope(scope)
+        if sc["kind"] == "run" and sc.get("key"):
+            with contextlib.suppress(ValueError):
+                sc = S.runs_for_scope(str(sc["key"]))
+                search_scope = str(sc["key"])
+    res = S.search(q, name=search_scope or None, thresh=thresh, limit=limit,
+                   context=context, given=True, folk=False, rank=True,
+                   profile=about_profile, anchors=in_case and about_profile)
     if res.get("error") and not res.get("hits"):
         return {"error": str(res["error"])}
     anchor: dict[str, Any] = res.get("anchor") or {"on": False}
-    key = str(res.get("scope_key") or "")
-    sc: dict[str, Any] = scope_runs(scope) if scope else {"rows": S.list_cases(), "kind": "all"}
+    key = str(res.get("scope_key") or sc.get("key") or "")
     rows: list[dict[str, Any]] = list(sc["rows"])
     voices = sorted({str(x) for r in rows for x in (r.get("engine_ids") or [])})
     scripts = sorted({str(r.get("script") or "") for r in rows if r.get("script")})
@@ -604,17 +660,21 @@ def find(q: str, scope: str = "", *, thresh: int = 78, limit: int = 40,
                     break
     known: dict[str, str] = {}
     if ST.exists():
-        conn = ST.connect(readonly=True)
-        try:
-            known = ST.stamps(conn)
-        finally:
-            conn.close()
+        with contextlib.suppress(RuntimeError):
+            conn = ST.connect(readonly=True)
+            try:
+                known = ST.stamps(conn)
+            finally:
+                conn.close()
     fresh = sum(1 for r in rows if known.get(str(r["name"])) == ST.stamp_of(str(r["name"])))
     total = int(res.get("total") or 0)
     shown = list(res.get("hits") or [])
     # Сторінок із хітами — лише коли показано ВСЕ; інакше число брехало б
     # («262387 хітів / 2 стор.» на обрізаній видачі).
-    pages_hit: int | None = (len({(h["name"], h["page"]) for h in shown})
+    hit_pages = res.get("hit_pages")
+    pages_hit: int | None = (len({(str(a), str(b)) for a, b in hit_pages})
+                             if hit_pages is not None
+                             else len({(h["name"], h["page"]) for h in shown})
                              if total <= len(shown) else None)
     has_latin = any("skryba" in v for v in voices) or "latin" in scripts
     if has_latin and "latin" not in scripts:
@@ -639,7 +699,7 @@ def find(q: str, scope: str = "", *, thresh: int = 78, limit: int = 40,
     if in_case and key:
         # Один пошук: самоперевірка рахує по сторінках усіх хітів, які пошук
         # уже віддав (`hit_pages`), а не другим повним проходом.
-        rep = SC.run(scope, q, thresh=max(thresh, 78), limit=max(limit, 100),
+        rep = SC.run(key, q, thresh=max(thresh, 78), limit=max(limit, 100),
                      shown_hits=shown,
                      all_pages=[(str(a), str(b)) for a, b in (res.get("hit_pages") or [])])
         selfcheck = SC.as_dict(rep)
@@ -647,9 +707,14 @@ def find(q: str, scope: str = "", *, thresh: int = 78, limit: int = 40,
                          "ran": bool(rep.measured), "why": rep.why or "",
                          "eye": rep.eye, "found": len(rep.found), "shown": len(rep.shown),
                          "missed": rep.missed})
+    # ⚠ Короткий стем із гнізда імен («anna») `partial_ratio` знаходить усередині
+    # будь-якого слова — 1171 хітів на 128 сторінках (рецензія 08.09, третій раунд).
+    short = sorted({str(s) for s in (res.get("stems") or []) if len(str(s)) < SHORT_STEM})
     ledger = {"frames": frames, "decoded": decoded, "runs": len(rows), "in_store": fresh,
               "unindexed": int(res.get("unindexed") or 0), "voices": voices,
               "scripts": scripts, "backend": res.get("backend"),
+              "cache": res.get("cache"), "rules_stale": bool(res.get("rules_stale")),
+              "short_stems": short,
               "pages_scoped": res.get("pages"), "channels": channels,
               "searched_before": TRACE.of(key) if key else []}
     return {"q": q, "scope": sc["kind"], "case_key": key, "shifra": res.get("scope_shifra") or "",
@@ -680,6 +745,13 @@ def verdicts_load(key: str) -> dict[str, dict[str, Any]]:
         return {}
     got = data.get(key) if isinstance(data, dict) else None
     return dict(got) if isinstance(got, dict) else {}
+
+
+def _verdict_stem_key(ck: str) -> str:
+    parts = ck.split("|")
+    if len(parts) >= 3:
+        parts[1] = Path(parts[1]).stem.lower()
+    return "|".join(parts)
 
 
 def _verdicts_save(key: str, items: dict[str, dict[str, Any]]) -> None:
@@ -742,6 +814,10 @@ def sheet(q: str, scope: str, *, thresh: int = 78, limit: int = 60, crops: int =
         return {"error": str(got["error"])}
     key = str(got.get("case_key") or "")
     known = verdicts_load(key) if key else {}
+    # Імпорт кладе вердикт під ключем аркуша сховища («0077»), гортач знає
+    # сторінку прогону («0077.jpg»): звірка за основою, інакше людина судить
+    # той самий рядок удруге.
+    known_stem = {_verdict_stem_key(k): v for k, v in known.items()}
     hits = list(got.get("hits") or [])
     cards: list[dict[str, Any]] = []
     n_crops = 0
@@ -752,7 +828,7 @@ def sheet(q: str, scope: str, *, thresh: int = 78, limit: int = 60, crops: int =
         if n_crops < crops:
             img = _crop_b64(run, page, no)
             n_crops += bool(img)
-        prev = known.get(ck) or {}
+        prev = known.get(ck) or known_stem.get(_verdict_stem_key(ck)) or {}
         cards.append({"key": ck, "run": run, "page": page, "line": no,
                       "score": h.get("score"), "matched": h.get("matched"),
                       "text": h.get("line"), "stem": h.get("stem"),
@@ -918,10 +994,16 @@ def verdicts_import(path: str | Path, scope: str, *, q: str = "", agent: str = "
     if not items:
         return {"error": "жодного дійсного вердикту в файлі", "bad": bad[:5]}
     rep = PS.annotate_pages(ref, notes)
-    _verdicts_save(key, items)
+    journal = ""
+    try:
+        _verdicts_save(key, items)
+    except OSError as exc:
+        # Сховище сторінок уже оновлене; журнал гортача — ні. Сказати, а не
+        # впасти: повтор імпорту домержив би коментар удруге.
+        journal = f"журнал вердиктів не записано: {exc}"
     return {"case_key": key, "shifra": ref.shifra, "imported": len(items),
             "pages_added": len(rep.added), "pages_merged": len(rep.merged),
-            "errors": rep.errors, "bad": bad[:5],
+            "errors": rep.errors + ([journal] if journal else []), "bad": bad[:5],
             "by_verdict": dict(Counter(x["verdict"] for x in items.values()))}
 
 
