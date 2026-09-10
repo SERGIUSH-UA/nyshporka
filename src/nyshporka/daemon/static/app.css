@@ -17,6 +17,8 @@
    ньому не працює, тож знак лишався б чорним в обох темах. Маска ж фарбується
    токеном — один файл на світлу й темну. */
 .brand { display: flex; align-items: center; gap: .45rem; }
+.brand.logo { color: inherit; text-decoration: none; }
+.brand.logo:hover { color: var(--accent); }
 .mark {
   width: 1.4em; height: 1.4em; flex: none; background: var(--accent);
   -webkit-mask: url(/brand/mark.svg) center / contain no-repeat;
