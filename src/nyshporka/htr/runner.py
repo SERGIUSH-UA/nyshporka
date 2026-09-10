@@ -2134,6 +2134,75 @@ def select_pages(case_dir: Path, pages_arg: str, limit: int,
 
 CLAIMS_DIR = "_claims"
 
+#: Файл `<out>/_drain/<k>` просить шард k дочитати поточну сторінку й не брати
+#: нових. Так регулятор флоту на боксі звужує флот без убивства посеред
+#: сторінки: убитий шард лишав би заклеймлену сторінку до кінця справи.
+DRAIN_DIR = "_drain"
+
+
+def drain_requested(out_dir: Path, shard_k: int) -> bool:
+    """Чи просили злити шард `shard_k` (0-based, як з `parse_shard`)."""
+    return (out_dir / DRAIN_DIR / str(shard_k + 1)).exists()
+
+
+def _rss_mb() -> tuple[float | None, float | None]:
+    """(поточний, піковий) RSS цього процесу в МБ; None — не вдалось дізнатись.
+
+    Лише `/proc` (Linux, тобто хмарний бокс). ⚠ Без `psutil`: у середовищі
+    рушіїв його немає, і лінивий імпорт мовчки вимикав би гілку — див.
+    `test_htr_runner_isolated`. Локально на Windows поля просто не буде.
+    """
+    try:
+        cur = peak = None
+        with open("/proc/self/status", encoding="ascii", errors="replace") as fh:
+            for line in fh:
+                if line.startswith("VmRSS:"):
+                    cur = int(line.split()[1]) / 1024.0
+                elif line.startswith("VmHWM:"):
+                    peak = int(line.split()[1]) / 1024.0
+        return cur, peak
+    except (OSError, ValueError, IndexError):
+        return None, None
+
+
+def _reset_vram_peak(device: str) -> None:
+    if not device.startswith("cuda"):
+        return
+    try:
+        import torch
+
+        torch.cuda.reset_peak_memory_stats(device)
+    except Exception:
+        pass
+
+
+def page_memory(device: str) -> dict[str, int]:
+    """Скільки пам'яті сторінка реально взяла: пік VRAM і RSS процесу, МБ.
+
+    🔴 Щільність справи (рядків на сторінку, розмір кадру) наперед не
+    вгадується, і планувальник хмари три дні поспіль брав число шардів із
+    формули, яку нічим було звірити: пам'ять на процес не міряв НІХТО. Звідси
+    три джерела й три числа (1.95 / 3.3 / 1.8 ГБ на шард) для тієї самої речі.
+    Тепер кожна сторінка каже сама; регулятор флоту читає це з події `htr`.
+
+    VRAM — `max_memory_reserved` (що алокатор торча тримав), без CUDA-контексту
+    процесу (~0.3–0.5 ГБ); повну цифру карти регулятор бере з `nvidia-smi`.
+    """
+    out: dict[str, int] = {}
+    if device.startswith("cuda"):
+        try:
+            import torch
+
+            out["vram_peak_mb"] = int(torch.cuda.max_memory_reserved(device) / 2**20)
+        except Exception:
+            pass
+    rss, peak = _rss_mb()
+    if rss is not None:
+        out["rss_mb"] = int(rss)
+    if peak is not None:
+        out["rss_peak_mb"] = int(peak)
+    return out
+
 
 def _pid_alive(pid: int) -> bool:
     """Чи живий процес. ⚠ На Windows `os.kill(pid, 0)` УБИВАЄ процес (сигнал
@@ -2324,6 +2393,15 @@ def supervise(args: argparse.Namespace, case_dir: Path, out_dir: Path) -> int:
         import subprocess
         rc = subprocess.run([sys.executable, str(Path(__file__).resolve()), *child_argv],
                             env=env).returncode
+        # 🚰 Злитий шард вийшов СВІДОМО: недочитане доберуть сусіди. Без цього
+        # наглядач бачив би їхні сторінки як свої пропуски й піднімав дитину
+        # знову — тобто злив, яким регулятор звужує флот, не діяв би.
+        if claim_mode and drain_requested(out_dir, shard_k):
+            print(f"[htr-run] 🚰 наглядач: шард {shard_k + 1} злито (rc={rc}) — "
+                  f"решту доберуть сусіди", flush=True)
+            emit(args.progress_json, "done", pages=0, skipped=0, failed=0,
+                 supervised=True, drained=True)
+            return rc
         # 🔴 У claim-режимі знаменник наглядача — лише те, що можна взяти:
         # сторінки, які зараз читає живий сусід, не є нашими пропусками.
         # Інакше кожен шард перезапускався б, поки інші працюють, і клав би
@@ -3070,12 +3148,19 @@ def main() -> int:
         # 🧲 Динамічний розподіл: сторінку бере той, хто перший створив клейм.
         # Чужа сторінка — не подія цього шарда, тож без emit: лічильники
         # наглядача рахують done/failed/skipped, а не пройдені індекси.
+        # 🚰 Злив: регулятор флоту просить цей шард не брати нових сторінок.
+        # Перевірка ПЕРЕД клеймом, тобто вже після дочитаної сторінки.
+        if claim_mode and drain_requested(out_dir, shard_k):
+            print(f"[htr-run] 🚰 шард {shard_k + 1}: злив — нових сторінок не беру",
+                  flush=True)
+            break
         if claim_mode and not claim_page(out_dir, stem, args.shard):
             continue
         # консоль має знати, на чому саме шард завис: вотчдог бачить лише тишу,
         # а карантинувати треба конкретний файл (див. HtrManager._note_stall)
         emit(prog, "page_start", i=i, n=n, page=src.name)
         t = time.time()
+        _reset_vram_peak(device)
         # 🔴 скидаємо перед сторінкою: інакше сторінка, де сегментація не дала
         # жодного кропа, мовчки успадкувала б побічні виходи попередньої
         if side_dirs:
@@ -3143,6 +3228,7 @@ def main() -> int:
                 torch.cuda.empty_cache()
             continue
         sec = round(time.time() - t, 1)
+        mem = page_memory(device)
         if guard_shared is not None:
             # після кожної сторінки: віддати свою дельту і забрати агрегат по
             # справі — так квота розвідки одна на всіх, а чужий фліп видно одразу
@@ -3228,6 +3314,8 @@ def main() -> int:
             **({"ceiling_lifted": res["ceiling_lifted"]}
                if res.get("ceiling_lifted") else {}),
             **({"contrast": res["contrast"]} if res.get("contrast") is not None else {}),
+            # пам'ять сторінки — щільність справи, виміряна, а не вгадана
+            **mem,
         }
         if res.get("enhanced"):
             enhanced_n += 1
@@ -3241,7 +3329,8 @@ def main() -> int:
              # стан 180°-гарда в UI: без нього «чому сторінка 48 с, а сусідня 21»
              # і «чому темп упаде згодом» не пояснити нічим, крім читання меты
              guard={"checks": guard_state["checks"], "flips": guard_state["flips"],
-                    "warmup": args.guard_warmup})
+                    "warmup": args.guard_warmup},
+             **mem)
 
     meta["done"] = True
     save_meta(force=True)

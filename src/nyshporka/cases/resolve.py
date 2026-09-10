@@ -156,6 +156,48 @@ class LibraryIndex:
         """Лише номер справи (`spov1846-7864`) — приймаємо, якщо в усій бібліотеці один."""
         return self._pick(self._by_spr.get(spr, []), repo)
 
+    def canonical(self, key: str) -> str | None:
+        """Шифра в будь-якій формі → ключ бібліотеки, або None.
+
+        🔴 `DAHMO/315/1/8591` і `DAHMO/315/8591` — та сама справа, але `by_key`
+        знає лише одну форму. 10.09.2026 план приніс форму з описом, і ремонт
+        `case_dir` мовчки пропустив прогін 8591, а резолвер відкинув ключ мети.
+
+        Суворіше за `lookup`, бо тут ключ уже названий, а не вгаданий з імені:
+        архів мусить збігтися, а форма з описом падає на пару «фонд + справа»
+        лише там, де опису бібліотека не знає. Інакше `DAVO/904/24/25` тихо
+        став би справою 25 іншого опису того самого фонду.
+        """
+        if not key:
+            return None
+        if key in self.by_key:
+            return key
+        parts = [p for p in str(key).strip().strip("/").split("/") if p]
+        if len(parts) == 4:
+            repo, fond, opys, spr = parts
+        elif len(parts) == 3:
+            repo, fond, spr = parts
+            opys = ""
+        else:
+            return None
+        if "@" in f"{opys}{spr}":
+            return None                     # збірка — ключ не нормалізується
+        f, o, s = _norm(fond), _norm(opys), _norm(spr)
+        if not (f and s):
+            return None
+
+        def same_repo(keys: list[str]) -> list[str]:
+            return [k for k in keys if (self.by_key[k].get("repo") or "") == repo]
+
+        if o:
+            hit = self._pick(same_repo(self._by_fos.get((f, o, s), [])), repo)
+            if hit:
+                return hit
+            loose = [k for k in same_repo(self._by_fs.get((f, s), []))
+                     if not _norm(self.by_key[k].get("opys"))]
+            return self._pick(loose, repo)
+        return self._pick(same_repo(self._by_fs.get((f, s), [])), repo)
+
 
 @lru_cache(maxsize=1)
 def load_overrides() -> dict[str, Any]:
@@ -410,6 +452,11 @@ def resolve_run(name: str, case_dir: str = "", index: LibraryIndex | None = None
     if meta_key and (meta_key in idx.by_key or meta_key.startswith("@")
                      or "/@" in meta_key):
         return RunLink(run=name, key=meta_key, resolved_by="meta_key", case_dir=case_dir)
+    # Та сама шифра в іншій формі (з описом чи без) — теж ключ мети, не здогад.
+    canon = idx.canonical(meta_key) if meta_key else None
+    if canon:
+        return RunLink(run=name, key=canon, resolved_by="meta_key", case_dir=case_dir,
+                       note=f"ключ мети {meta_key} → {canon}")
     hit = _from_path(case_dir, idx)                      # 3) шлях із мети прогону
     if hit:
         return RunLink(run=name, key=hit, resolved_by="case_dir", case_dir=case_dir)
