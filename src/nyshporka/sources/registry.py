@@ -49,6 +49,7 @@ def _builtin(workspace: Path | None = None) -> list[Source]:
     """
     from nyshporka.archives import active
     from nyshporka.sources.archium import ArchiumSource
+    from nyshporka.sources.babynyar import BabynYarSource
     from nyshporka.sources.commons import CommonsSource
     from nyshporka.sources.duck import DuckSource
     from nyshporka.sources.fsfilm import FilmMirrorSource
@@ -74,6 +75,11 @@ def _builtin(workspace: Path | None = None) -> list[Source]:
     # ставлять узагалі: вони перелічують справи фонду. Тут же відповідь приходить
     # разом із прямими адресами копій — і, головне, з роками, яких у фонді немає.
     out.append(cast("Source", RidniSource(workspace)))
+    # 🕯 Онлайн-архів «Бабин Яр»: 21 архів України однією адресою, і майже все
+    # там — те, чого самі архіви онлайн не показують (зокрема книги РАЦС
+    # 1921-1946, закриті 75-річним обмеженням). Пошуку майданчик не має взагалі,
+    # тож джерело працює по каталогу, зібраному `nysh crawl babynyar`.
+    out.append(cast("Source", BabynYarSource(workspace)))
     return out
 
 

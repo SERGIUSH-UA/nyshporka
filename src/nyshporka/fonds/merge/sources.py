@@ -57,6 +57,13 @@ SOURCES: tuple[Source, ...] = (
            why="знімок попереднього реєстру"),
     Source("ukrfamily", "ukrfamily.tsv", rank=50,
            why="чужа транскрипція опису"),
+    # 🕯 Онлайн-архів «Бабин Яр»: анотації описів приходять від самих архівів у
+    # спільних проєктах оцифрування, тож це не волонтерська транскрипція (50) і
+    # не копія через посередника (45) — але й не сайт архіву (65), бо текст
+    # перенабрано. Єдине джерело, яке знає, скільки кадрів справи вже онлайн і
+    # безкоштовно, а для фондів РАЦС 1921-1946 — взагалі єдине.
+    Source("babynyar", "babynyar.tsv", rank=52,
+           why="опис від оцифровувача + число вже викладених кадрів"),
     # 🦆 Зведений покажчик. Навмисно нижче за всі людські транскрипції: це копія
     # тих самих описів через посередника. Цінний переліком, не заголовком.
     Source("duck", "duck.tsv", rank=45,
@@ -79,8 +86,9 @@ SOURCES: tuple[Source, ...] = (
 #: 🔴 Порядок обробки текстових джерел: слабкі → сильні. Він несе байти —
 #: черга розбіжностей будується в цьому ж порядку, тож будь-яка перестановка
 #: змінить її вміст. Ніколи не `set` і не порядок словника.
-TEXT_ORDER: tuple[str, ...] = ("fs", "ocr", "duck", "catalog", "ukrfamily",
-                               "legacy", "wikisource", "archium", "manual")
+TEXT_ORDER: tuple[str, ...] = ("fs", "ocr", "duck", "babynyar", "catalog",
+                               "ukrfamily", "legacy", "wikisource", "archium",
+                               "manual")
 
 TITLE_RANK: dict[str, int] = {s.name: s.rank for s in SOURCES if s.rank is not None}
 
@@ -98,6 +106,7 @@ COLUMNS: tuple[str, ...] = (
     "cat_parishes_n", "record_types",
     "fs_dgs", "fs_film", "fs_url", "fs_record_type", "fs_place", "fs_frames",
     "archium_file", "archium_url",
+    "babynyar_case", "babynyar_url", "babynyar_scans",
     "duck_url", "duck_online", "duck_copy_url",
     "sources")
 

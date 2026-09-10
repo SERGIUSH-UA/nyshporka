@@ -11,6 +11,7 @@ from nyshporka.fonds.merge import scans as S
 from nyshporka.fonds.merge import titles as TT
 from nyshporka.fonds.merge import write as W
 from nyshporka.fonds.merge.sources import SourceBook, read_book
+from nyshporka.fonds.registry import babynyar_online
 
 
 class MergeError(RuntimeError):
@@ -82,7 +83,7 @@ def _channels(reg: dict[Any, dict[str, Any]]) -> dict[str, int]:
     неправдою.
     """
     out = {"disk": 0, "free": 0, "order": 0,
-           "archium": 0, "commons": 0, "mirror": 0, "film": 0}
+           "archium": 0, "babynyar": 0, "commons": 0, "mirror": 0, "film": 0}
     for r in reg.values():
         if r.get("on_disk"):
             out["disk"] += 1
@@ -90,6 +91,15 @@ def _channels(reg: dict[Any, dict[str, Any]]) -> dict[str, int]:
         if r.get("archium_file"):
             out["free"] += 1
             out["archium"] += 1
+        elif babynyar_online(r):
+            # ⚠ Саме число кадрів, а не `babynyar_url`: адреса є в КОЖНОЇ справи
+            # опису, зокрема неоцифрованої, і по ній черга рахувала б
+            # завантажуваним те, чого завантажити не можна.
+            # 🔴 І саме через `babynyar_online`: поле приходить РЯДКОМ, а рядок
+            # «0» істинний — заміряно на фікстурі, справа без копій рахувалась
+            # каналом.
+            out["free"] += 1
+            out["babynyar"] += 1
         elif r.get("commons_url"):
             out["free"] += 1
             out["commons"] += 1

@@ -104,8 +104,9 @@ def test_processing_order_is_not_the_rank_order() -> None:
     ляже черга розбіжностей. Звести їх «для порядку» означає переписати обидва
     файли-виходи.
     """
-    assert TEXT_ORDER == ("fs", "ocr", "duck", "catalog", "ukrfamily",
-                          "legacy", "wikisource", "archium", "manual")
+    assert TEXT_ORDER == ("fs", "ocr", "duck", "babynyar", "catalog",
+                          "ukrfamily", "legacy", "wikisource", "archium",
+                          "manual")
 
 
 def test_golden_columns_are_the_declared_order() -> None:
@@ -135,6 +136,56 @@ def test_registry_only_source_still_names_the_case(run) -> None:
     r = _rows(run()[2])["1-2"]
     assert r["title_src"] == "duck"
     assert r["duck_url"]
+
+
+# ── 🕯 Бабин Яр ──────────────────────────────────────────────────────────────
+
+def test_babynyar_scans_open_a_download_channel(run) -> None:
+    """Справа з викладеними кадрами стає завантажуваною (спр.11).
+
+    До цього джерела спр.11 не мала жодного каналу: ні скана на Commons, ні
+    дзеркала, ні плівки — тобто лежала в черзі замовлення в архіві.
+    """
+    res, _, out = run()
+    r = _rows(out)["1-11"]
+    assert r["babynyar_scans"] == "250"
+    assert res.channels["babynyar"] >= 1
+
+
+def test_babynyar_address_without_scans_is_not_a_channel(run) -> None:
+    """🔴 Адресу має КОЖЕН рядок опису, зокрема неоцифрований (спр.13).
+
+    Рахувати канал по адресі означало б обіцяти завантаження там, де качати
+    нема чого, — і справа зникла б із черги замовлення в архіві, тобто з
+    єдиного місця, де її ще можна дістати.
+    """
+    res, _, out = run()
+    r = _rows(out)["1-13"]
+    assert r["babynyar_url"] and r["babynyar_scans"] == "0"
+    assert "babynyar" in r["sources"]
+    # Канал спр.11 порахувався, спр.13 — ні: обидві мають адресу.
+    assert res.channels["babynyar"] == 1
+
+
+def test_babynyar_does_not_outrank_the_archive_site(run) -> None:
+    """Заголовок сайту архіву (65) сильніший за перенабраний (52) — спр.1."""
+    r = _rows(run()[2])["1-1"]
+    assert r["title_src"] == "archium"
+    assert r["babynyar_case"] == "91001"
+
+
+def test_babynyar_outranks_the_weaker_transcriptions() -> None:
+    """🔴 Політика рангу — на зшивачі, а не на золоті.
+
+    Ранг тут перевіряється окремо навмисно: щоб додати його гілку у фікстуру,
+    довелось би завести в ній нову справу або новий конфлікт заголовків, а це
+    зсовує п'ять чужих лічильників — і наступний читач золота вже не побачить,
+    де зміна від цього джерела, а де від тих воріт.
+    """
+    assert TITLE_RANK["babynyar"] > TITLE_RANK["duck"]
+    assert TITLE_RANK["babynyar"] > TITLE_RANK["ukrfamily"]
+    assert TITLE_RANK["babynyar"] < TITLE_RANK["archium"]
+    assert TITLE_RANK["babynyar"] < TITLE_RANK["manual"]
 
 
 def test_years_src_names_both_sources() -> None:
@@ -335,7 +386,8 @@ def test_channels_are_mutually_exclusive(run) -> None:
     res, _, _ = run()
     ch = res.channels
     assert ch["disk"] + ch["free"] + ch["order"] == res.rows
-    assert ch["archium"] + ch["commons"] + ch["mirror"] + ch["film"] == ch["free"]
+    assert (ch["archium"] + ch["babynyar"] + ch["commons"] + ch["mirror"]
+            + ch["film"]) == ch["free"]
 
 
 def test_no_library_is_a_named_blindness(run) -> None:

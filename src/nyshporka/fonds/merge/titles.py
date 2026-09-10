@@ -140,6 +140,14 @@ def _fuse_fields(r: Row, row: dict[str, str], name: str) -> None:
             if v:
                 r[fld] = v
 
+    if name == "babynyar":
+        # Адреса справи на майданчику й число вже викладених кадрів — не ще один
+        # заголовок: саме за ними вирішують, качати чи замовляти в архіві.
+        for fld in ("babynyar_case", "babynyar_url", "babynyar_scans"):
+            v = (row.get(fld) or "").strip()
+            if v:
+                r[fld] = v
+
     if name == "duck":
         for fld in ("duck_url", "duck_online", "duck_copy_url"):
             v = (row.get(fld) or "").strip()

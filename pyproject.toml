@@ -93,6 +93,14 @@ archives = [
 # а не властивість збірки.
 htr = ["torch>=2.2", "torchvision>=0.20", "timm>=1.0"]
 ocr = ["paddleocr>=3.5"]
+# 🛡 Проходження Cloudflare, який відсікає клієнта по ВІДБИТКУ TLS, а не по
+# заголовках. Заміряно на `babynyar.org` 09.09.2026: `httpx` із повним набором
+# браузерних заголовків дістає 403 на кожну адресу, включно з відкритим API.
+# 🔴 Окремим extra, а не в `archives`: це бінарне колесо (libcurl-impersonate),
+# і тягнути його всім заради одного майданчика зайве. Без нього джерело ходить
+# системним `curl`, а якщо немає й того — каже про це ВГОЛОС, а не мовчить
+# нулем: мовчазний нуль тут читався б як «в архіві такого немає».
+cfshield = ["curl_cffi>=0.7"]
 # ☁️ Читання на чужій машині. В extras, бо більшість читає локально, а `boto3`
 # з залежностями — це ще одна купа мегабайтів тому, хто ніколи не піде в хмару.
 # 🔴 `boto3` тут не обов'язковий супутник `paramiko`: без нього працює SFTP,
@@ -121,7 +129,7 @@ xlsx = ["openpyxl>=3.1"]
 # застосунок, збирач сайту не потрібен — його ставить лише CI і той, хто
 # правит документацію.
 docs = ["mkdocs-material>=9.5"]
-all = ["nyshporka[app,archives,htr,agent,cloud,train,xlsx]"]
+all = ["nyshporka[app,archives,cfshield,htr,agent,cloud,train,xlsx]"]
 
 [project.urls]
 Homepage = "https://github.com/SERGIUSH-UA/nyshporka"
@@ -302,6 +310,13 @@ ignore_missing_imports = true
 # викликів дорожче, ніж вигода.
 [[tool.mypy.overrides]]
 module = ["paramiko.*", "boto3.*", "botocore.*", "keyring.*"]
+ignore_missing_imports = true
+
+# 🛡 `curl_cffi` живе в extra `cfshield` і в dev-оточенні не стоїть: це бінарне
+# колесо libcurl-impersonate, потрібне рівно одному майданчику. Код навколо
+# нього написаний так, що його відсутність — робочий стан, а не поломка.
+[[tool.mypy.overrides]]
+module = ["curl_cffi.*"]
 ignore_missing_imports = true
 
 # Транспорт MCP живе в extras і в dev-оточенні не стоїть; його декоратори

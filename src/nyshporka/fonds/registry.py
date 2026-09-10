@@ -72,6 +72,12 @@ FIELDS = ("opys", "spr_int", "spr_letter", "spr", "shifra", "title", "title_src"
           # за секунди, без Commons-файла на сотні МБ і без обходу дзеркала
           # плівок. Поки цього поля не було, ф.224 виглядала фондом без сканів.
           "archium_file", "archium_url",
+          # 🕯 Онлайн-архів «Бабин Яр»: `babynyar_scans` — скільки кадрів справи
+          # ВЖЕ викладено безкоштовно, `babynyar_url` — сторінка справи.
+          # 🔴 Каналом завантаження справу робить саме число кадрів, а не адреса:
+          # адресу має КОЖЕН рядок опису, зокрема неоцифрований, і по ній черга
+          # рахувала б завантажуваним те, чого завантажити не можна.
+          "babynyar_case", "babynyar_url", "babynyar_scans",
           # 🦆 Зведений покажчик: `duck_url` — сторінка справи в ньому (саме
           # вона, а не пряме посилання на копію: адреси копій переїжджають і
           # ламаються без попередження). `duck_online` каже, що копія десь є,
@@ -84,6 +90,17 @@ FIELDS = ("opys", "spr_int", "spr_letter", "spr", "shifra", "title", "title_src"
           # а копія лежить у чужому сховищі, качати з якого ми не вміємо.
           "duck_url", "duck_online", "duck_copy_url",
           "sources")
+
+def babynyar_online(row: dict[str, Any] | dict[str, str]) -> bool:
+    """Чи справді є що качати з «Бабиного Яру».
+
+    🔴 Не `bool(row["babynyar_scans"])`. Поле приходить РЯДКОМ, і рядок «0»
+    істинний — тобто наївна перевірка оголошувала завантажуваною справу, копій
+    якої немає. Ціна не косметична: така справа зникає з черги замовлення в
+    архіві, тобто з єдиного місця, де її ще можна дістати.
+    """
+    return (str(row.get("babynyar_scans") or "").strip() or "0") != "0"
+
 
 #: поля, яких стара схема не має → `None`
 _LEGACY_UNKNOWN = ("title_alt", "commons_title", "years_src", "folios", "folios_src",
@@ -467,7 +484,8 @@ def row_status(row: dict[str, Any],
 
     if on_live:
         state = "disk"
-    elif row.get("archium_file") or row.get("commons_url"):
+    elif (row.get("archium_file") or babynyar_online(row)
+          or row.get("commons_url")):
         # 🔴 ARCHIUM і Commons — обидва «бери сам», і саме тому стоять в одній
         # гілці: черга `--todo` питає «чи можна завантажити», а не «звідки».
         # Порядок усередині вирішує `cases take` — там ARCHIUM перший, бо
@@ -576,7 +594,7 @@ def filter_rows(rows: list[dict[str, Any]], *, opys: str = "", q: str = "", surn
         if fs and not (r.get("fs_dgs") or r.get("fs_film")):
             return False
         if scan and not (r.get("commons_url") or r.get("mirror_url")
-                         or r.get("archium_file")):
+                         or r.get("archium_file") or babynyar_online(r)):
             return False
         # ⏱ `row_status` рахується лише якщо про нього справді питають. Раніше він
         # будувався для кожного рядка беззастережно — тобто повний зайвий прохід
@@ -594,7 +612,7 @@ def filter_rows(rows: list[dict[str, Any]], *, opys: str = "", q: str = "", surn
             # живим DGS у цю чергу не належить, скільки б її не бракувало на
             # Commons (ф.315: 12 794 плівки проти 882 сканів).
             if order and ((r.get("on_disk") or st["on_disk_live"])
-                          or r.get("archium_file")
+                          or r.get("archium_file") or babynyar_online(r)
                           or r.get("commons_url") or r.get("mirror_url")
                           or r.get("fs_dgs") or r.get("fs_film")):
                 return False
