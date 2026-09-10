@@ -11,6 +11,7 @@ from nyshporka.fonds.collect.babynyar import (
     FIELDS,
     BabynYarCollector,
     norm_fond,
+    year_span,
     years,
 )
 from nyshporka.fonds.collect.base import CollectError, Target
@@ -131,6 +132,51 @@ def test_collect_says_when_the_opys_gave_fewer_cases_than_promised(
         Target(repo="DAHMO", fond="R-6453"), dest=tmp_path)
     capped = [b for b in res2.blind if b.kind == "capped"]
     assert capped and "240" in capped[0].why
+
+
+def test_a_year_outside_the_fond_is_named_not_trusted() -> None:
+    """🔴 Описка архіву («1993» серед 1892 і 1895) не розтягує діапазон справи.
+
+    Заміряно на ДАМО ф.484 (фонд 1804-1925): шість справ мали роки 19xx серед
+    сусідніх 18xx, і реєстр показував метричну книгу XIX ст. до 1996 року.
+    Виправляти рік на інше століття не можна — це вигадало б дату.
+    """
+    t = ("про народжених (1889, 1892, 1993, 1895), "
+         "про померлих (1889, 1892, 1993, 1895)")
+    assert year_span("", t, bounds=(1804, 1925)) == ("1889", "1895", [1993])
+    # Без меж фонду рік ні з чим не звіряється — і лишається як є.
+    assert year_span("", t) == ("1889", "1993", [])
+    # Усі роки поза межами — діапазону немає, а не вигаданий.
+    assert year_span("", "про народжених (1996)", bounds=(1804, 1925)) == (
+        "", "", [1996])
+
+
+DAMO_FUNDS = ('{"total": 1, "page_next": null, "results": [{"id": 96, '
+              '"number": "484", "name": "Колекція метричних книг", '
+              '"start_date": "1804", "end_date": "1925", '
+              '"descriptions": [{"id": 218, "number": "1"}], '
+              '"archive": {"id": 36, "short_name": "ДАМО"}}]}')
+
+DAMO_CASES = """<table><tbody>
+<tr><td>472</td><td><a href="/archive/case/80472">Метрична книга: Церква св.
+Дмитра, с. Краснопілля, Ананьївський повіт: про народжених (1889, 1892, 1993,
+1895)</a></td><td></td><td>341</td></tr>
+</tbody></table>"""
+
+
+def test_collect_names_the_years_outside_the_fond(tmp_path: Path) -> None:
+    """Збирач звіряє рік справи з межами фонду, які декларує сам архів."""
+    answers = {"/api/archive/funds/": DAMO_FUNDS,
+               "/api/archive/descriptions/218/": '{"id": 218, "cases_count": 1}',
+               "/archive/desc/218": DAMO_CASES}
+    res = _collector(answers, tmp_path).collect(
+        Target(repo="DAMO", fond="484"), dest=tmp_path)
+    _, rows = T.read_tsv(tmp_path / "babynyar.tsv")
+    assert (rows[0]["year_from"], rows[0]["year_to"]) == ("1889", "1895")
+    assert "1993" in rows[0]["title"], "заголовок лишається як у джерелі"
+    odd = [b for b in res.blind if b.kind == "year_out_of_fond"]
+    assert odd and odd[0].count == 1
+    assert "1993" in odd[0].why and "1804-1925" in odd[0].why
 
 
 def test_dry_run_writes_nothing(tmp_path: Path) -> None:

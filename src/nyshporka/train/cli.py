@@ -321,7 +321,7 @@ def stats_cmd(
 # ── корпус і трен ────────────────────────────────────────────────────────────
 def _print_plan(d: dict) -> None:  # type: ignore[type-arg]
     for s in d["sources"]:
-        console.print(f"  \[{s['id']}] {s['n_unique']:6} рядків ×{s['rep']} = {s['rows']:6} "
+        console.print(f"  \\[{s['id']}] {s['n_unique']:6} рядків ×{s['rep']} = {s['rows']:6} "
                       f"батч-рядків  [muted]замовлено {s['share_ordered']}, фактично "
                       f"{s['share_actual'] * 100:.1f}%[/muted]")
         for n in s["notes"]:

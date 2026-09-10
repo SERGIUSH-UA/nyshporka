@@ -121,6 +121,21 @@ def have_curl() -> bool:
     return r.returncode == 0
 
 
+def curl_config(options: dict[str, str]) -> bytes:
+    """Рядки конфігу curl (`name = "value"`) для `--config -`.
+
+    Значення береться в лапки, а зворотна риска, лапка й переводи рядка
+    екрануються: інакше адреса з переводом рядка дописала б у конфіг чужу
+    опцію, тобто підмінила б запит.
+    """
+    lines: list[str] = []
+    for name, value in options.items():
+        esc = (value.replace("\\", "\\\\").replace('"', '\\"')
+               .replace("\n", "\\n").replace("\r", "\\r"))
+        lines.append(f'{name} = "{esc}"')
+    return ("\n".join(lines) + "\n").encode("utf-8")
+
+
 @dataclass
 class CfClient:
     """Мінімальний клієнт: `.get(url)` і `.close()`.
@@ -224,12 +239,20 @@ class CfClient:
                "-w", "\n%{http_code}", "-b", str(self._jar), "-c", str(self._jar)]
         for k, v in self.headers.items():
             cmd += ["-H", f"{k}: {v}"]
-        if self.proxy:
-            cmd += ["--proxy", self.proxy]
+        # 🔴 Проксі — конфігом через stdin (`--config -`), а не аргументом.
+        # Адреса проксі несе логін і пароль (`socks5://user:pass@host`), а
+        # командний рядок процесу видно ВСІМ користувачам машини: `ps`,
+        # `/proc/<pid>/cmdline`, диспетчер задач. Аргументом пароль лежав би
+        # відкрито весь час запиту; stdin бачить лише сам curl.
+        stdin = curl_config({"proxy": self.proxy}) if self.proxy else b""
+        if stdin:
+            cmd += ["--config", "-"]
         cmd.append(url)
+        io: dict[str, Any] = ({"input": stdin} if stdin
+                              else {"stdin": subprocess.DEVNULL})
         try:
             done = subprocess.run(cmd, capture_output=True,
-                                  timeout=self.timeout + 15, check=False)
+                                  timeout=self.timeout + 15, check=False, **io)
         except (OSError, subprocess.SubprocessError) as exc:
             raise httpx.TransportError(f"curl: {exc}") from exc
         if done.returncode != 0:

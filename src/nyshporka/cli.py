@@ -471,6 +471,13 @@ def crawl(source: str = typer.Argument("archium", help="id джерела"),
     console.print(f"\n✓ фондів {stats['fonds']} (пропущено готових "
                   f"{stats['skipped']}) · описів {stats['inventories']} · "
                   f"справ {stats['cases']}")
+    if stats.get("short"):
+        # 🔴 Неповний опис — частина відповіді, а не шум: без цього рядка
+        # каталог виглядав би повним, і нуль пошуку по ньому читався б як
+        # «справи немає».
+        console.print(f"[warn]⚠ описів, що віддали менше справ, ніж обіцяє сам "
+                      f"сайт: {stats['short']}. Наступний `nysh crawl {source}` "
+                      f"перечитає лише їх[/warn]")
 
 
 @app.command()

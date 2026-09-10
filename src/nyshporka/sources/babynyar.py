@@ -34,7 +34,6 @@ from __future__ import annotations
 
 import base64
 import binascii
-import contextlib
 import csv
 import datetime as _dt
 import html as _html
@@ -101,6 +100,19 @@ def _num(s: object) -> str | None:
     """Перше число з поля, без провідних нулів («Справа 0114» → «114»)."""
     m = re.search(r"\d+", str(s or ""))
     return str(int(m.group())) if m else None
+
+
+def _count(s: object) -> int | None:
+    """Число з комірки-лічильника: «1 234» → 1234. Порожньо — `None`.
+
+    🔴 Не `_num`. Той бере ПЕРШЕ число — правильно для шифри («Справа 0114»),
+    але лічильник кадрів майданчик може писати з роздільником тисяч, зокрема
+    нерозривним пробілом, і «1 234» ставало одиницею: справа на тисячу кадрів
+    лягала в каталог як одноаркушна.
+    """
+    digits = re.sub(r"[\s\u00a0\u2009\u202f]", "", str(s or ""))
+    m = re.match(r"\d+", digits)
+    return int(m.group()) if m else None
 
 
 def fond_key(number: object) -> str:
@@ -370,10 +382,9 @@ class BabynYarSource:
         if kind == "desc":
             cases: list[Node] = []
             for cid, c in table_rows(self.page(f"/archive/desc/{ident}"), "case"):
-                scans = _num(c[3]) if len(c) > 3 else None
                 cases.append(Node(ref=f"case:{cid}", kind="case",
                                   label=" · ".join(c[:2])[:160],
-                                  frames=int(scans) if scans else None))
+                                  frames=_count(c[3]) if len(c) > 3 else None))
             return cases
         raise SourceError(f"незрозуміла адреса: {ref!r}")
 
@@ -392,7 +403,10 @@ class BabynYarSource:
         return "workspace", {
             "path": str(path),
             "rows": _tsv_rows(path, st.st_mtime_ns, st.st_size),
-            "taken": _dt.date.fromtimestamp(st.st_mtime).isoformat()}
+            "taken": _dt.date.fromtimestamp(st.st_mtime).isoformat(),
+            # Скільки описів у каталозі неповні: без цього числа нуль пошуку
+            # по такому опису читався б як «справи немає».
+            "short": len(self._read_state().get("descs_short") or {})}
 
     def _catalog_rows(self) -> Iterator[dict[str, str]]:
         kind, info = self.catalog_source()
@@ -423,12 +437,13 @@ class BabynYarSource:
         if not needle:
             return []
         taken = info.get("taken") or ""
+        short = int(info.get("short") or 0)
         out: list[Hit] = []
         for row in self._catalog_rows():
             hay = _norm(f"{row.get('title', '')} {row.get('fond_title', '')}")
             if needle not in hay:
                 continue
-            out.append(self._hit(row, taken))
+            out.append(self._hit(row, taken, short=short))
             if len(out) >= limit:
                 break
         return out
@@ -464,11 +479,16 @@ class BabynYarSource:
                 (exact if same else loose).append(self._hit(row, ""))
         return exact or loose
 
-    def _hit(self, row: dict[str, str], taken: str) -> Hit:
+    def _hit(self, row: dict[str, str], taken: str, *, short: int = 0) -> Hit:
         scans = row.get("scans") or ""
         note = (row.get("fond_title") or "")[:110]
         if taken:
             note = f"{note} · зріз каталогу від {taken}".strip(" ·")
+        if short:
+            # 🔴 Повнота каталогу — частина відповіді. Без цієї примітки
+            # «знайшлось лише це» читалось би як «більше справ немає».
+            note = (f"{note} · ⚠ каталог неповний: описів, що віддали менше "
+                    f"справ, ніж обіцяє сайт, — {short}").strip(" ·")
         return Hit(
             source=self.id,
             ref=f"case:{row.get('case_id', '')}",
@@ -494,20 +514,25 @@ class BabynYarSource:
         """Зібрати каталог справ. `groups` — id архівів майданчика, через кому.
 
         Обхід іде описами, а не справами: сторінка опису вже несе повний перелік
-        справ із номерами, роками й числом сканів, тож увесь сайт коштує ~900
-        запитів. Резюмується по описах — перерваний обхід не починається наново.
+        справ із номерами, роками й числом сканів. Резюмується по описах —
+        перерваний обхід не починається наново.
+
+        🔴 Повнота кожного опису звіряється з `cases_count` самого майданчика.
+        Сторінка опису пагінації не має, але довести це може лише число з
+        іншого каналу: обрізаний перелік інакше ліг би в каталог як повний, і
+        «такої справи немає» стало б відповіддю пошуку. Опис, що віддав менше,
+        НЕ позначається пройденим — наступний запуск перечитає саме його, а вже
+        взяті справи не задвояться (див. `_known_ids`). Ціна — ще один запит
+        API на опис, тобто ~1800 запитів на весь сайт замість ~900.
         """
         if self.workspace is None:
             raise SourceError("для обходу потрібен робочий простір — каталог "
                               "лягає в нього")
         cat = self.workspace / self.CATALOG_REL
-        state_path = self.workspace / self.STATE_REL
         cat.parent.mkdir(parents=True, exist_ok=True)
-        done: set[str] = set()
-        if resume and state_path.is_file():
-            with contextlib.suppress(ValueError, OSError):
-                done = set(json.loads(state_path.read_text(encoding="utf-8"))
-                           .get("descs_done") or [])
+        state = self._read_state() if resume else {}
+        done: set[str] = {str(d) for d in (state.get("descs_done") or [])}
+        short: dict[str, list[int]] = dict(state.get("descs_short") or {})
         want = {str(g).strip() for g in (groups or ()) if str(g).strip()}
         funds = [f for f in self.funds()
                  if not want or str((f.get("archive") or {}).get("id")) in want]
@@ -520,8 +545,9 @@ class BabynYarSource:
         stats = {"archives": len({str((f.get("archive") or {}).get("id"))
                                   for f in funds}),
                  "fonds": len(funds), "inventories": 0, "cases": 0,
-                 "skipped": 0}
-        new_file = not cat.exists() or not resume
+                 "skipped": 0, "short": 0}
+        known = self._known_ids(cat) if resume and cat.exists() else set()
+        new_file = not resume or not cat.exists() or cat.stat().st_size == 0
         with cat.open("w" if new_file else "a", encoding="utf-8", newline="") as fh:
             w = csv.DictWriter(fh, fieldnames=self.CATALOG_FIELDS, delimiter="\t",
                                extrasaction="ignore")
@@ -535,18 +561,80 @@ class BabynYarSource:
                     stats["skipped"] += 1
                     continue
                 stats["inventories"] += 1
-                stats["cases"] += self._write_desc(w, fund, desc, did)
+                written, parsed = self._write_desc(w, fund, desc, did, known)
+                stats["cases"] += written
                 fh.flush()
-                done.add(did)
-                state_path.write_text(json.dumps({"descs_done": sorted(done)}),
-                                      encoding="utf-8")
+                promised = self.cases_count(did)
+                if promised is not None and promised != parsed:
+                    short[did] = [parsed, promised]
+                else:
+                    short.pop(did, None)
+                    done.add(did)
+                self._write_state(done, short)
                 if on_progress:
+                    tail = f" · неповних описів {len(short)}" if short else ""
                     on_progress(done=i, total=len(plan), unit="опис",
-                                note=f"справ зібрано {stats['cases']}")
+                                note=f"справ зібрано {stats['cases']}{tail}")
+        stats["short"] = len(short)
         return stats
 
+    def _read_state(self) -> dict[str, Any]:
+        """Стан обходу; відсутній або битий — порожній, а не виняток."""
+        if self.workspace is None:
+            return {}
+        try:
+            data = json.loads((self.workspace / self.STATE_REL)
+                              .read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    def _write_state(self, done: set[str], short: dict[str, list[int]]) -> None:
+        """Стан обходу — АТОМАРНО, через `.part` і заміну.
+
+        🔴 Прямий запис, обірваний посередині, лишав напівфайл; його читання
+        падало на `ValueError`, стан тихо ставав порожнім, і наступний обхід
+        перечитував УСЕ — із дублями того, що вже лежало в каталозі.
+        """
+        if self.workspace is None:
+            return
+        payload = {"descs_done": sorted(done), "descs_short": short}
+        atomic_write_bytes(self.workspace / self.STATE_REL,
+                           json.dumps(payload, ensure_ascii=False).encode("utf-8"))
+
+    @staticmethod
+    def _known_ids(cat: Path) -> set[str]:
+        """Справи, що вже лежать у каталозі, — і лагодження обірваного хвоста.
+
+        🔴 Обрив між дописом рядків і записом стану лишав опис непозначеним, і
+        наступний запуск дописував ті самі справи вдруге: каталог «ріс», а
+        пошук віддавав кожну знахідку двічі. Повтор тепер пропускає вже відомі
+        `case_id`, тож перечитати опис безпечно завжди — на цьому й тримається
+        повторне читання неповних описів.
+
+        ⚠ Обрив посеред рядка лишав напівзаписаний рядок, і наступний допис
+        приклеївся б до нього — зі зсувом полів посеред каталогу. Хвіст без
+        переводу рядка відрізається до останнього цілого рядка.
+        """
+        raw = cat.read_bytes()
+        if raw and not raw.endswith(b"\n"):
+            with cat.open("r+b") as fh:
+                fh.truncate(raw.rfind(b"\n") + 1)
+        ids: set[str] = set()
+        with cat.open(encoding="utf-8", newline="") as fh:
+            for row in csv.DictReader(fh, delimiter="\t"):
+                cid = (row.get("case_id") or "").strip()
+                if cid:
+                    ids.add(cid)
+        return ids
+
     def _write_desc(self, w: Any, fund: dict[str, Any], desc: dict[str, Any],
-                    did: str) -> int:
+                    did: str, known: set[str]) -> tuple[int, int]:
+        """Дописати справи опису. Повертає (дописано, розібрано з таблиці).
+
+        Два числа, а не одне: з `cases_count` звіряється РОЗІБРАНЕ — справи,
+        що вже лежали в каталозі, теж є в описі, просто вдруге не пишуться.
+        """
         arch = fund.get("archive") or {}
         arch_id = str(arch.get("id") or "")
         base = {
@@ -557,16 +645,21 @@ class BabynYarSource:
             "fond_title": _flat(str(fund.get("name") or "")),
             "desc_id": did, "opys": desc.get("number") or "",
         }
-        n = 0
+        written = parsed = 0
         for cid, cells in table_rows(self.page(f"/archive/desc/{did}"), "case"):
+            parsed += 1
+            if cid in known:
+                continue
             spr = cells[0] if cells else ""
             title = cells[1] if len(cells) > 1 else ""
             date = cells[2] if len(cells) > 2 else ""
-            scans = _num(cells[3]) if len(cells) > 3 else ""
+            scans = _count(cells[3]) if len(cells) > 3 else None
             w.writerow({**base, "case_id": cid, "spr": spr, "date": date,
-                        "scans": scans or "", "title": _flat(title)})
-            n += 1
-        return n
+                        "scans": "" if scans is None else str(scans),
+                        "title": _flat(title)})
+            known.add(cid)
+            written += 1
+        return written, parsed
 
     # ── справа ───────────────────────────────────────────────────────────────
 

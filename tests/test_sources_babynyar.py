@@ -6,12 +6,15 @@
 from __future__ import annotations
 
 import base64
+import csv
+import json
 from pathlib import Path
 
 import pytest
 
 from nyshporka.sources.babynyar import (
     BabynYarSource,
+    _count,
     frame_urls,
     s3_name,
     table_rows,
@@ -54,6 +57,21 @@ CASE_HTML = f"""
 <div class="photo-item" data-full="{FRAME_1}"><img src="thumb1.jpg"></div>
 <div class="photo-item" data-full="{FRAME_2}"><img src="thumb2.jpg"></div>
 """
+
+
+#: Другий опис — із ВЛАСНИМИ справами: `case_id` на майданчику унікальні, і
+#: обхід тепер на цьому стоїть (повтор пропускає вже відомі справи).
+CASES_HTML_402 = CASES_HTML.replace("/archive/case/269", "/archive/case/279")
+
+
+def _crawl_answers(count_402: int = 3) -> dict[str, str]:
+    """Відповіді для обходу ДАХмО: два описи й скільки справ обіцяє кожен."""
+    return {"/api/archive/funds/": FUNDS_API,
+            "/api/archive/descriptions/401/": COUNT_API,
+            "/api/archive/descriptions/402/":
+                f'{{"id": 402, "cases_count": {count_402}}}',
+            "/archive/desc/401": CASES_HTML,
+            "/archive/desc/402": CASES_HTML_402}
 
 
 class _R:
@@ -269,21 +287,20 @@ def test_crawl_writes_the_catalog_and_speaks_the_cli_contract(tmp_path: Path) ->
     наприкінці обходу, тобто після десятків хвилин роботи. Приймач — рівно ті
     ключі, які читає CLI, а не «щось повернулось».
     """
-    cf = _Cf({"/api/archive/funds/": FUNDS_API, "/archive/desc/401": CASES_HTML,
-              "/archive/desc/402": CASES_HTML})
+    cf = _Cf(_crawl_answers())
     src = BabynYarSource(tmp_path, client=cf)
     stats = src.crawl(("34",))
     assert {"fonds", "skipped", "inventories", "cases"} <= set(stats)
     assert (stats["fonds"], stats["inventories"], stats["cases"]) == (2, 2, 6)
-    assert {h.ref for h in src.search("розірвання")} == {"case:26918"}
+    # Той самий заголовок у двох описах — дві справи, кожна зі своїм id.
+    assert {h.ref for h in src.search("розірвання")} == {"case:26918", "case:27918"}
     # ⚠ Чужий архів у каталог не лягає: обхід просили лише про ДАХмО.
     assert not any("/archive/desc/218" in u for u in cf.seen)
 
 
 def test_crawl_resumes_instead_of_starting_over(tmp_path: Path) -> None:
     """Перерваний обхід уже коштував запитів — пройдені описи не перечитуються."""
-    cf = _Cf({"/api/archive/funds/": FUNDS_API, "/archive/desc/401": CASES_HTML,
-              "/archive/desc/402": CASES_HTML})
+    cf = _Cf(_crawl_answers())
     src = BabynYarSource(tmp_path, client=cf)
     src.crawl(("34",))
     asked = len(cf.seen)
@@ -298,6 +315,136 @@ def test_crawl_refuses_an_archive_id_the_site_does_not_have(tmp_path: Path) -> N
     with pytest.raises(SourceError) as exc:
         src.crawl(("999",))
     assert "id" in str(exc.value)
+
+
+def test_scan_counts_keep_their_thousands() -> None:
+    """🔴 «1 234» — тисяча двісті тридцять чотири кадри, а не один.
+
+    Лічильник брався першим числом, як номер справи, і роздільник тисяч —
+    зокрема нерозривний пробіл — робив справу на тисячу кадрів одноаркушною.
+    """
+    assert _count("1 234") == 1234
+    assert _count("1\u00a0234") == 1234
+    assert _count("0") == 0
+    assert _count("") is None
+    html = CASES_HTML.replace("<td>529</td>", "<td>1 234</td>")
+    cases = BabynYarSource(client=_Cf({"/archive/desc/401": html})).browse("desc:401")
+    assert cases[0].frames == 1234
+
+
+def test_a_short_opys_is_not_marked_done_and_is_named(tmp_path: Path) -> None:
+    """🔴 Опис, що віддав менше справ, ніж обіцяє сайт, не вважається пройденим.
+
+    Інакше обрізаний перелік ліг би в каталог як повний, і пошук відповідав би
+    нулем там, де справа є, — просто не прочиталась.
+    """
+    src = BabynYarSource(tmp_path, client=_Cf(_crawl_answers(count_402=5)))
+    stats = src.crawl(("34",))
+    assert stats["short"] == 1
+    state = json.loads((tmp_path / BabynYarSource.STATE_REL)
+                       .read_text(encoding="utf-8"))
+    assert state["descs_done"] == ["401"]
+    assert state["descs_short"] == {"402": [3, 5]}
+    # Пошук каже про неповноту разом зі знахідкою, а не мовчить.
+    assert "неповний" in src.search("розірвання")[0].note
+    # Повтор перечитує лише неповний опис — і не задвоює вже взятих справ.
+    again = src.crawl(("34",))
+    assert (again["skipped"], again["inventories"], again["cases"]) == (1, 1, 0)
+    ids = [r["case_id"] for r in src._catalog_rows()]
+    assert len(ids) == len(set(ids)) == 6
+
+
+def test_an_interrupted_write_leaves_no_duplicates_and_no_torn_row(
+        tmp_path: Path) -> None:
+    """🔴 Обрив між дописом рядків і записом стану давав дублі каталогу.
+
+    Тут змодельовано найгірше: справа вже лежить у каталозі, стану немає, а
+    останній рядок обірвано посередині. Повтор мусить і не задвоїти справу, і
+    не приклеїти новий рядок до обірваного.
+    """
+    cat = tmp_path / BabynYarSource.CATALOG_REL
+    cat.parent.mkdir(parents=True)
+    head = "\t".join(BabynYarSource.CATALOG_FIELDS)
+    row = "\t".join(["34", "ДАХО", "DAHMO", "207", "R-6453", "Книги РАЦС",
+                     "401", "1", "26918", "1", "1931 - 1932", "529", "Книга"])
+    cat.write_text(f"{head}\n{row}\n34\tДАХО\tDAH", encoding="utf-8")
+    stats = BabynYarSource(tmp_path, client=_Cf(_crawl_answers())).crawl(("34",))
+    assert stats["cases"] == 5, "справу 26918 вдруге не пишемо"
+    with cat.open(encoding="utf-8", newline="") as fh:
+        rows = list(csv.DictReader(fh, delimiter="\t"))
+    assert len(rows) == 6
+    assert all(None not in r and None not in r.values() for r in rows)
+    assert len({r["case_id"] for r in rows}) == 6
+
+
+def test_crawl_state_is_written_atomically(tmp_path: Path, monkeypatch) -> None:
+    """🔴 Стан обходу — через `.part` і заміну, а не прямим записом.
+
+    Напівзаписаний стан читався як порожній, і наступний обхід перечитував
+    усе — з дублями всього каталогу.
+    """
+    import nyshporka.sources.babynyar as B
+
+    wrote: list[Path] = []
+    real = B.atomic_write_bytes
+
+    def spy(path: Path, data: bytes) -> None:
+        wrote.append(Path(path))
+        real(path, data)
+
+    monkeypatch.setattr(B, "atomic_write_bytes", spy)
+    BabynYarSource(tmp_path, client=_Cf(_crawl_answers())).crawl(("34",))
+    assert tmp_path / BabynYarSource.STATE_REL in wrote
+
+
+def test_proxy_credentials_never_reach_the_command_line(monkeypatch) -> None:
+    """🔴 Командний рядок процесу видно всім користувачам машини (`ps`).
+
+    Проксі з логіном і паролем ішов у curl аргументом — пароль лежав відкрито
+    весь час кожного запиту. Тепер він іде конфігом через stdin.
+    """
+    import types
+
+    import nyshporka.sources.cfclient as C
+
+    monkeypatch.setattr(C, "have_curl_cffi", lambda: False)
+    monkeypatch.setattr(C, "have_curl", lambda: True)
+    calls: list[tuple[list[str], dict[str, object]]] = []
+
+    def fake_run(cmd: list[str], **kw: object) -> object:
+        calls.append((cmd, kw))
+        return types.SimpleNamespace(returncode=0, stdout=b"<table>ok</table>\n200",
+                                     stderr=b"")
+
+    monkeypatch.setattr(C.subprocess, "run", fake_run)
+    c = C.CfClient(proxy="socks5://user:s3cr3t@10.0.0.1:1080")
+    try:
+        r = c.get("https://babynyar.org/archive/desc/1")
+    finally:
+        c.close()
+    assert r.status_code == 200 and "ok" in r.text
+    cmd, kw = calls[-1]
+    assert not any("s3cr3t" in a for a in cmd)
+    assert "--config" in cmd
+    assert b"s3cr3t" in kw["input"]  # type: ignore[operator]
+
+    calls.clear()
+    c = C.CfClient()
+    try:
+        c.get("https://babynyar.org/archive/desc/1")
+    finally:
+        c.close()
+    cmd, kw = calls[-1]
+    assert "--config" not in cmd and "input" not in kw
+
+
+def test_curl_config_cannot_be_hijacked_by_the_value() -> None:
+    """⚠ Лапка чи перевод рядка в значенні не дописують у конфіг чужої опції."""
+    from nyshporka.sources.cfclient import curl_config
+
+    cfg = curl_config({"proxy": 'http://h"\nurl = "http://evil'}).decode()
+    assert cfg.count("\n") == 1, "перевод рядка лише в кінці — одна опція"
+    assert '\\"' in cfg and "\\n" in cfg
 
 
 def test_browse_refuses_an_address_it_does_not_understand() -> None:
