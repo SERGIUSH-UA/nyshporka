@@ -2145,6 +2145,56 @@ def drain_requested(out_dir: Path, shard_k: int) -> bool:
     return (out_dir / DRAIN_DIR / str(shard_k + 1)).exists()
 
 
+# ── адаптивна стеля сегментації ──────────────────────────────────────────────
+# 🔴 Сторінка, що вперлась у стелю (дефолт 200 рядків), читається ДВІЧІ:
+# сегментація й обидва голоси наново з піднятою стелею. На сповіді 1802 р.
+# (ДАХмО 316-1-39, 10.09.2026) так пішло 94 сторінки з 435 — 62 с проти 20,
+# і темп хмари впав на третину. Коли таких сторінок у справі багато, дешевше
+# одразу читати решту з піднятою стелею: один прохід замість двох.
+#: Файл із базовою стелею для всіх шардів справи: {"max_endpoints": N}.
+CEILING_FILE = "_seg_ceiling.json"
+#: Судити після стількох власних сторінок шарда …
+CEILING_ADAPT_MIN_PAGES = 8
+#: … якщо в стелю вперлась хоча б така частка (і не менше двох сторінок).
+CEILING_ADAPT_SHARE = 0.10
+
+
+def adapt_ceiling(pages: int, hits: int, lifted_lines: list[int],
+                  current: int, retry: int) -> int:
+    """Нова базова стеля (max_endpoints) для решти справи, або 0 — лишити як є.
+
+    Стеля — за найгустішою сторінкою, що впиралась: рядки ×2 кінці ×1.25
+    запасу, округлено вгору до 50, не вище стелі перепуску. Вищу не беремо:
+    стеля роздуває пам'ять шарда (1600 колись дало 62% сторінок в OOM).
+    """
+    if not retry or retry <= current or pages < CEILING_ADAPT_MIN_PAGES:
+        return 0
+    if hits < 2 or hits / pages < CEILING_ADAPT_SHARE:
+        return 0
+    densest = max(lifted_lines) if lifted_lines else current // 2
+    need = -(-(densest * 5 // 2) // 50) * 50
+    new = min(retry, max(need, current + 100))
+    return new if new > current else 0
+
+
+def shared_ceiling(out_dir: Path) -> int:
+    """Базова стеля, яку вже підняв котрийсь шард справи (0 — ніхто)."""
+    try:
+        data = json.loads((out_dir / CEILING_FILE).read_text(encoding="utf-8"))
+        return int(data.get("max_endpoints") or 0)
+    except (OSError, ValueError, TypeError, AttributeError):
+        return 0
+
+
+def publish_ceiling(out_dir: Path, max_endpoints: int) -> None:
+    """Сказати сусідам нову стелю. Лише вгору: знижувати її шардові не дано."""
+    if max_endpoints <= shared_ceiling(out_dir):
+        return
+    atomic_write(out_dir / CEILING_FILE, json.dumps(
+        {"max_endpoints": int(max_endpoints),
+         "at": datetime.now().isoformat(timespec="seconds")}))
+
+
 def _rss_mb() -> tuple[float | None, float | None]:
     """(поточний, піковий) RSS цього процесу в МБ; None — не вдалось дізнатись.
 
@@ -3127,6 +3177,10 @@ def main() -> int:
         print(f"[htr-run] карантин: {len(quarantined)} стор. пропускаю "
               f"({', '.join(sorted(quarantined)[:5])}{'…' if len(quarantined) > 5 else ''})",
               flush=True)
+    # адаптивна стеля: власні сторінки шарда, скільки впирались, їхні рядки
+    own_pages = 0
+    ceiling_hits = 0
+    ceiling_lines: list[int] = []
     for i, src in enumerate(pages_all, 1):
         stem = src.stem
         txt_path = out_dir / f"{stem}.txt"
@@ -3161,6 +3215,13 @@ def main() -> int:
         emit(prog, "page_start", i=i, n=n, page=src.name)
         t = time.time()
         _reset_vram_peak(device)
+        # стелю міг уже підняти сусідній шард — читаємо з нею, а не вдвічі
+        shared = shared_ceiling(out_dir)
+        if shared > args.max_endpoints:
+            args.max_endpoints = shared
+            seg_ceiling.set_ceiling(shared)
+            meta["ceiling_adapted"] = shared
+            print(f"[seg-ceiling] ⇪ стеля від сусіда: {shared // 2} рядків", flush=True)
         # 🔴 скидаємо перед сторінкою: інакше сторінка, де сегментація не дала
         # жодного кропа, мовчки успадкувала б побічні виходи попередньої
         if side_dirs:
@@ -3189,6 +3250,7 @@ def main() -> int:
             # інакше зайвий прохід не має права зіпсувати вже здобуте.
             if (args.ceiling_retry and args.ceiling_retry > args.max_endpoints
                     and seg_ceiling.hit(len(res["lines"]))):
+                ceiling_hits += 1
                 seg_ceiling.set_ceiling(args.ceiling_retry)
                 try:
                     res2 = process_page(src, segmenter, rec_model, device,
@@ -3214,6 +3276,18 @@ def main() -> int:
                     # перший результат лишається — повертаємо і його голоси
                     (ocr_page_parseq.side, ocr_page_parseq.side_lost,
                      ocr_page_parseq.crops) = _side_snap
+                ceiling_lines.append(len(res["lines"]))
+            own_pages += 1
+            raised = adapt_ceiling(own_pages, ceiling_hits, ceiling_lines,
+                                   args.max_endpoints, args.ceiling_retry)
+            if raised:
+                publish_ceiling(out_dir, raised)
+                print(f"[seg-ceiling] ⇪ {ceiling_hits} з {own_pages} сторінок у стелі — "
+                      f"решту справи читаю зі стелею {raised // 2} рядків "
+                      f"(один прохід замість двох)", flush=True)
+                args.max_endpoints = raised
+                seg_ceiling.set_ceiling(raised)
+                meta["ceiling_adapted"] = raised
         except KeyboardInterrupt:
             raise
         except Exception as exc:  # одна сторінка не валить справу
