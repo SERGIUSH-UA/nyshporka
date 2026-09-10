@@ -430,6 +430,22 @@ def _geo_cands(cands: dict[int, list[str]], lines: list[Line],
             cands.setdefault(target, []).append(n)
 
 
+def _page_blob(lines: list[str], page_lines: list[Line], *, has_geo: bool,
+               ) -> tuple[str, dict[int, int]]:
+    """Текст блоба `pages.cands` сторінки і наступники за колонкою.
+
+    🔴 Одна функція на збірку й на звірку (`verify`). Друга копія цих кількох
+    рядків у звірці розійшлась би з першою так само тихо, як розходяться
+    правила склейки, — і приймач мовчки перевіряв би сам себе.
+    """
+    cands = _page_cands(lines)
+    succ = successors(page_lines) if has_geo else {}
+    if succ:
+        _geo_cands(cands, page_lines, succ)
+    text = "\n".join(f"{no}\t{' '.join(ns)}" for no, ns in sorted(cands.items()) if ns)
+    return text, succ
+
+
 def _same_case(meta: dict[str, Any] | None, base: Path) -> bool:
     """Чи прогін `base` про ту саму справу, що й `meta`."""
     from nyshporka import htr_store as S
@@ -508,7 +524,6 @@ def index_run(conn: sqlite3.Connection, run: str) -> int:
             (run_id, page, txt.stem, len(lines), int(boxes is not None),
              zlib.compress("\n".join(lines).encode("utf-8"), 6)))
         pid = int(conn.execute("select last_insert_rowid()").fetchone()[0])
-        cands = _page_cands(lines)
         rows: list[tuple[int, str, int | None, int | None, int | None, int | None,
                          int | None]] = []
         ftsrows: list[tuple[int, str]] = []
@@ -520,13 +535,9 @@ def index_run(conn: sqlite3.Connection, run: str) -> int:
             b = boxes[i - 1] if boxes else None
             page_lines.append(Line(i, " ".join(toks),
                                    (b[0], b[1], b[2], b[3]) if b else None))
-        succ = successors(page_lines) if boxes else {}
-        if succ:
-            _geo_cands(cands, page_lines, succ)
+        blob, succ = _page_blob(lines, page_lines, has_geo=bool(boxes))
         conn.execute("update pages set cands=? where id=?",
-                     (zlib.compress("\n".join(
-                         f"{no}\t{' '.join(ns)}" for no, ns in sorted(cands.items()) if ns
-                     ).encode("utf-8"), 6), pid))
+                     (zlib.compress(blob.encode("utf-8"), 6), pid))
         for pl in page_lines:
             rid = (pid << LINE_BITS) + pl.no
             bx = pl.box
@@ -671,6 +682,91 @@ def stats() -> dict[str, Any]:
             # Саме його бракувало, коли перебудову вбило посеред і стор
             # рапортував «застаріло 0» на 234 прогонах зі старими кандидатами.
             "rules_other": len(other)}
+
+
+# ── звірка блобів ────────────────────────────────────────────────────────────
+def _sample(ids: list[int], k: int) -> list[int]:
+    """Перша, остання й рівномірно між ними; `k <= 0` — усі."""
+    if k <= 0 or len(ids) <= k:
+        return list(ids)
+    if k == 1:
+        return [ids[0]]
+    step = (len(ids) - 1) / (k - 1)
+    return list(dict.fromkeys(ids[round(i * step)] for i in range(k)))
+
+
+def _verify_page(conn: sqlite3.Connection, pid: int, cands: bytes | None,
+                 geo: int) -> list[str]:
+    """Що на сторінці розійшлось із чинним кодом: `toks`, `succ`, `cands`."""
+    lines = _raw_lines(conn, pid)
+    stored = _page_lines(conn, pid)
+    what: list[str] = []
+    want_toks = {i: " ".join(t) for i, ln in enumerate(lines, 1) if (t := _tokens(ln))}
+    if want_toks != {ln.no: ln.toks for ln in stored}:
+        what.append("toks")
+    text, succ = _page_blob(lines, stored, has_geo=bool(geo))
+    if succ != {ln.no: ln.succ for ln in stored if ln.succ}:
+        what.append("succ")
+    have = zlib.decompress(cands).decode("utf-8") if cands is not None else None
+    if have != text:
+        what.append("cands")
+    return what
+
+
+def verify(runs: list[str] | None = None, *, sample: int = 3) -> dict[str, Any]:
+    """Звірка блобів: чи дає чинний код тих самих кандидатів, що лежать у сторі.
+
+    🔴 Єдиний приймач однорідності стору після обірваної перебудови. Відбиток
+    правил (`runs.rules`) — лише заява про те, яким кодом зібрано прогін, і
+    08.09.2026 вона збрехала в обидва боки: спершу «правила чинні» на 234
+    прогонах зі старими кандидатами, потім «правила інші» на 234 прогонах із
+    тотожними (відбиток посеред заходу нарізався по зсунутих рядках). Обидва
+    рази правду сказала лише пряма звірка, і досі її робили разовим скриптом.
+
+    Звірка читає лише БД: сирий текст сторінки, рядки й рамки лежать там же,
+    тож обходу тек прогонів немає. Кандидати перераховуються `_page_blob` —
+    тією самою функцією, що й при збірці.
+
+    `differ[].rules_same` розводить два діагнози: `False` — прогін просто
+    зібраний старим правилом, його доганяє `text index`; `True` — відбиток
+    каже «чинне», а кандидати інші, і `text index` такого прогону не побачить.
+    """
+    from nyshporka.core import progress as P
+
+    h = rules_hash()
+    conn = connect(readonly=True)
+    try:
+        rows = conn.execute(
+            "select id, run, coalesce(rules,'') from runs order by run").fetchall()
+        missing: list[str] = []
+        if runs is not None:
+            want = set(runs)
+            rows = [r for r in rows if r[1] in want]
+            missing = sorted(want - {r[1] for r in rows})
+        differ: list[dict[str, Any]] = []
+        fingerprint_only: list[str] = []
+        n_pages = 0
+        for i, (rid, run, rules) in enumerate(rows, 1):
+            P.report(i, len(rows), "прогонів")
+            pids = [r[0] for r in conn.execute(
+                "select id from pages where run_id=? order by id", (rid,))]
+            bad: list[dict[str, Any]] = []
+            for pid in _sample(pids, sample):
+                page, cands, geo = conn.execute(
+                    "select page, cands, geo from pages where id=?", (pid,)).fetchone()
+                n_pages += 1
+                what = _verify_page(conn, pid, cands, geo)
+                if what:
+                    bad.append({"page": page, "what": what})
+            if bad:
+                differ.append({"run": run, "rules_same": rules == h, "pages": bad})
+            elif rules != h:
+                fingerprint_only.append(run)
+    finally:
+        conn.close()
+    return {"runs_checked": len(rows), "pages_checked": n_pages, "sample": sample,
+            "rules": h, "differ": differ, "fingerprint_only": fingerprint_only,
+            "missing": missing}
 
 
 # ── читання сторінки зі стору ────────────────────────────────────────────────

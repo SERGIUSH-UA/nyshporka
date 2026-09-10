@@ -151,6 +151,8 @@ def test_successor_joins_a_surname_split_across_columns(space: Path) -> None:
     hit = next((h for h in got["hits"] if h["page"] == "0004.jpg"), None)
     assert hit is not None and hit["norm"] == stem
     assert hit["line_no"] in (3, 11)
+    # звірка проходить і шляхом геометрії: наступники й склейка за колонкою
+    assert ST.verify(["проба"], sample=0)["differ"] == []
 
 
 def test_cli_grep_answers_with_denominator(space: Path) -> None:
@@ -315,3 +317,69 @@ def test_a_rebuild_killed_halfway_is_visible_run_by_run(space: Path) -> None:
     res = runner.invoke(app, ["text", "index"])
     assert res.exit_code == 0, res.output
     assert ST.stats()["rules_other"] == 0
+
+
+def test_verify_catches_candidates_the_fingerprint_hides(space: Path) -> None:
+    """🔴 Звірка блобів — приймач, якому відбиток не указ.
+
+    Відбиток лише заявляє, яким кодом зібрано прогін. Тут він каже «чинне», а
+    кандидати в блобі інші — `state` мовчить, `text index` такого прогону не
+    перебудує, і знайти це може тільки перерахунок кандидатів.
+    """
+    import zlib
+
+    from nyshporka.cli import app
+    from nyshporka.search import store as ST
+
+    list(ST.ensure_all(["проба"]))
+    v = ST.verify()
+    assert (v["runs_checked"], v["pages_checked"]) == (1, 2)
+    assert v["differ"] == [] and v["fingerprint_only"] == []
+
+    conn = ST.connect()
+    conn.execute("update pages set cands=? where stem='0001'",
+                 (zlib.compress(b"1\tlipovenkomrodilsia"),))
+    conn.commit()
+    conn.close()
+    assert ST.stats()["rules_other"] == 0  # відбиток мовчить
+    v = ST.verify()
+    assert [(d["run"], d["rules_same"]) for d in v["differ"]] == [("проба", True)]
+    assert v["differ"][0]["pages"] == [{"page": "0001.jpg", "what": ["cands"]}]
+
+    res = runner.invoke(app, ["text", "state", "--verify"])
+    assert res.exit_code == 1, res.output
+    assert "проба" in res.output and "--rebuild" in res.output
+
+    res = runner.invoke(app, ["text", "index", "--rebuild", "--case", "проба"])
+    assert res.exit_code == 0, res.output
+    assert ST.verify()["differ"] == []
+
+
+def test_verify_tells_a_changed_fingerprint_from_changed_candidates(space: Path) -> None:
+    """Інший відбиток при тотожних кандидатах — не привід для перебудови.
+
+    Так виглядали 234 прогони 08.09.2026, чий відбиток нарізався по зсунутих
+    рядках модуля, який правили посеред індексації.
+    """
+    from nyshporka.cli import app
+    from nyshporka.search import store as ST
+
+    list(ST.ensure_all(["проба"]))
+    conn = ST.connect()
+    conn.execute("update runs set rules='правила до правки' where run='проба'")
+    conn.commit()
+    conn.close()
+    v = ST.verify()
+    assert v["differ"] == [] and v["fingerprint_only"] == ["проба"]
+    res = runner.invoke(app, ["text", "state", "--verify"])
+    assert res.exit_code == 0, res.output
+    assert "--accept-rules" in res.output
+
+
+def test_verify_sample_takes_both_ends_and_the_middle() -> None:
+    from nyshporka.search import store as ST
+
+    assert ST._sample(list(range(10)), 3) == [0, 4, 9]
+    assert ST._sample([7, 8], 3) == [7, 8]
+    assert ST._sample(list(range(5)), 0) == [0, 1, 2, 3, 4]
+    assert ST._sample(list(range(5)), 1) == [0]

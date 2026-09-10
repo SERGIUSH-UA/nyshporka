@@ -22,12 +22,27 @@ def _mb(n: int) -> str:
 
 
 @app.command("state")
-def state_cmd(as_json: bool = typer.Option(False, "--json")) -> None:
-    """Скільки прогонів у сторі, скільки застаріло, скільки важить."""
+def state_cmd(
+    verify: bool = typer.Option(False, "--verify",
+                                help="звірити блоби кандидатів із чинним кодом "
+                                     "(приймач після обірваної перебудови)"),
+    sample: int = typer.Option(3, "--sample", help="сторінок на прогін для --verify; 0 — усі"),
+    case: str = typer.Option("", "--case", help="звіряти лише цю справу або прогін"),
+    as_json: bool = typer.Option(False, "--json"),
+) -> None:
+    """Скільки прогонів у сторі, скільки застаріло, скільки важить.
+
+    З `--verify` — ще й доказ однорідності: код виходу 1, якщо кандидати хоч
+    однієї звіреної сторінки розійшлись із чинним кодом.
+    """
     from nyshporka import ops as O
 
-    env = O.call("text.state", {})
+    env = O.call("text.state", {"verify": verify, "sample": sample, "case": case})
+    v = (env.data or {}).get("verify") if env.ok else None
+    bad = bool(v and v["differ"])
     if _answer(env, as_json):
+        if bad:
+            raise typer.Exit(code=1)
         return
     d = env.data
     console.print(f"стор: {d['file']}")
@@ -36,7 +51,17 @@ def state_cmd(as_json: bool = typer.Option(False, "--json")) -> None:
     console.print(f"прогонів у сторі [bold]{d['indexed']}[/bold] із {d['runs']} · "
                   f"застаріло [bold]{d['stale']}[/bold]{mixed} · сторінок {d['pages']} "
                   f"(з геометрією {d['geo']}) · рядків {d['lines']} · {_mb(d['bytes'])}")
+    if v is not None:
+        per = "усі" if not v["sample"] else f"до {v['sample']} на прогін"
+        n_bad = sum(len(x["pages"]) for x in v["differ"])
+        console.print(f"звірено блобів: прогонів {v['runs_checked']} · сторінок "
+                      f"{v['pages_checked']} ({per}) · розбіжностей [bold]{n_bad}[/bold]")
+        for x in v["differ"][:20]:
+            pages = ", ".join(f"{p['page']} ({'/'.join(p['what'])})" for p in x["pages"])
+            console.print(f"  [warn]{x['run']}[/warn]: {pages}")
     _notes(env)
+    if bad:
+        raise typer.Exit(code=1)
 
 
 @app.command("index")

@@ -16,26 +16,57 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from nyshporka.core.envelope import Envelope, fail, ok
-from nyshporka.core.ops import NoArgs, op
+from nyshporka.core.ops import op
 
 SECTION = "research"
 
 
+class TextStateArgs(BaseModel):
+    verify: bool = Field(default=False,
+                         description="звірити блоби кандидатів із чинним кодом — приймач "
+                                     "однорідності стору після обірваної перебудови")
+    sample: int = Field(default=3, ge=0,
+                        description="скільки сторінок кожного прогону звіряти (перша, "
+                                    "остання й між ними); 0 — усі")
+    case: str = Field(default="",
+                      description="звіряти лише прогони цієї справи або цей прогін; "
+                                  "порожньо — усе")
+
+
 @op("text.state", summary="Скільки прочитаного лежить у текстовому сторі",
-    mutates=False, agent=False, section=SECTION)
-def text_state(_: NoArgs) -> Envelope:
+    args=TextStateArgs, mutates=False, agent=False, section=SECTION)
+def text_state(a: TextStateArgs) -> Envelope:
     """Знаменник стору — до запиту, а не після.
 
     🔴 «Не знайшлось» на сторі, що покриває 40 прогонів із 1300, — не та сама
     відповідь, що на повному. Число застарілих друкується першим.
+
+    `verify` — не відбиток, а доказ: кандидати звірених сторінок
+    перераховуються чинним кодом і порівнюються з блобами (`store.verify`).
     """
+    from nyshporka import htr_store as S
     from nyshporka.search import store as ST
 
     try:
         st = ST.stats()
     except Exception as exc:
         return fail(f"стан стору недоступний ({type(exc).__name__}: {exc})")
+    if a.verify:
+        if not st.get("exists"):
+            return fail("стору ще немає — нема чого звіряти: nysh text index")
+        runs = None
+        if a.case:
+            try:
+                runs = [r["name"] for r in S.runs_for_scope(a.case)["rows"]]
+            except ValueError as exc:
+                return fail(str(exc))
+        try:
+            st["verify"] = ST.verify(runs, sample=a.sample)
+        except Exception as exc:
+            return fail(f"звірка блобів не вдалась ({type(exc).__name__}: {exc})")
     env = ok(st)
+    if a.verify:
+        _warn_verify(env, st["verify"])
     if st["stale"]:
         env.suggest("text.index", "догнати стор по решті прогонів")
     if st.get("rules_stale"):
@@ -50,6 +81,47 @@ def text_state(_: NoArgs) -> Envelope:
                  f"стор змішаний, і пошук по них відповідає не тим, чим по решті")
         env.suggest("text.index", "доіндексувати саме їх")
     return env
+
+
+def _names(runs: list[str], k: int = 8) -> str:
+    more = f" і ще {len(runs) - k}" if len(runs) > k else ""
+    return ", ".join(runs[:k]) + more
+
+
+def _warn_verify(env: Envelope, v: dict[str, Any]) -> None:
+    """Розбіжності звірки — з діагнозом і тим, що саме її лікує."""
+    lying = [d["run"] for d in v["differ"] if d["rules_same"]]
+    old = [d["run"] for d in v["differ"] if not d["rules_same"]]
+    if lying:
+        # 🔴 Найтихіший випадок: `text index` вважає такі прогони свіжими,
+        # бо відбиток збігається, і сам їх не перебудує ніколи.
+        env.warn("blobs_differ",
+                 f"{len(lying)} прогонів тримають кандидатів, яких чинні правила НЕ дають, "
+                 f"під чинним відбитком — відбиток бреше, і nysh text index їх не "
+                 f"побачить; перебудувати поштучно: nysh text index --rebuild --case "
+                 f"<прогін> ({_names(lying)})")
+    if old:
+        env.warn("blobs_old",
+                 f"{len(old)} прогонів зібрані іншим правилом, і кандидати справді інші — "
+                 f"nysh text index доганяє саме їх ({_names(old)})")
+        env.suggest("text.index", "доіндексувати прогони зі старими кандидатами")
+    fp = v["fingerprint_only"]
+    if fp and not v["differ"]:
+        env.warn("fingerprint_only",
+                 f"{len(fp)} прогонів мають інший відбиток, а кандидати на звірених "
+                 f"сторінках тотожні чинним — перебудова не потрібна: "
+                 f"nysh text index --accept-rules")
+    elif fp:
+        # Відбиток приймається гуртом, на ВСІ прогони: поруч зі справді іншими
+        # кандидатами це поставило б чинну заяву і на них.
+        env.warn("fingerprint_only",
+                 f"{len(fp)} прогонів мають інший відбиток при тотожних кандидатах, але "
+                 f"поруч є прогони зі справді іншими — приймати відбиток гуртом не можна, "
+                 f"спершу полагодити розбіжності")
+    if v["missing"]:
+        env.warn("verify_missing",
+                 f"{len(v['missing'])} прогонів області немає в сторі — їх не звіряли "
+                 f"({_names(v['missing'])})")
 
 
 RULES_STALE_MSG = ("відбиток правил склейки кандидатів не збігається зі збіркою стору — "
