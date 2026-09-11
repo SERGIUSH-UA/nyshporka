@@ -395,6 +395,10 @@ def get(source: str = typer.Argument(..., help="id джерела"),
         console.print(f"[warn]⚠ {e}[/warn]")
     if len(res.errors) > 5:
         console.print(f"[warn]⚠ …ще {len(res.errors) - 5} збоїв[/warn]")
+    # Нотатки — не збої: файл ліг цілим, але людина мусить знати, що з ним не
+    # так (напр. «текстового шару немає»). Код виходу вони не міняють.
+    for n in getattr(res, "notes", None) or []:
+        console.print(f"[muted]ℹ {n}[/muted]")
 
     # 🔴 Приймач — знаменник, а не відсутність помилок. Дзеркало, що віддало
     # сорок кадрів із трьохсот і жодного HTTP-збою, давало «✓ 40 кадрів» і код

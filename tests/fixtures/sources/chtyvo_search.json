@@ -1,0 +1,89 @@
+{
+  "_embedded": {
+    "searchResult": {
+      "page": {
+        "number": 0,
+        "size": 2,
+        "totalPages": 1,
+        "totalElements": 1
+      },
+      "_embedded": {
+        "objects": [
+          {
+            "hitHighlights": null,
+            "_embedded": {
+              "indexableObject": {
+                "uuid": "46bacfed-af93-42a0-be80-83d762bf1211",
+                "name": "Литовські статути в Подільській губернії у першій половині XIX ст.: данина традиції чи правові рудименти?",
+                "handle": "shron/36564",
+                "type": "item",
+                "metadata": {
+                  "dc.contributor.author": [
+                    {
+                      "value": "Анатолій Філінюк"
+                    }
+                  ],
+                  "dc.date.accessioned": [
+                    {
+                      "value": "2026-08-21T23:24:37Z"
+                    }
+                  ],
+                  "dc.date.issued": [
+                    {
+                      "value": "2013"
+                    }
+                  ],
+                  "dc.description.abstract": [
+                    {
+                      "value": "Ukraina Lithuanica: студії з історії Великого князівства Литовського. – К., Інститут історії України НАН України, 2013. – т. ІІ\n\nУ статті на конкретному фактичному матеріалі обґрунтовується теза про чинність норм литовських статутів на теренах Подільської губернії наприкінці ХVІІІ –\nу першій половині ХІХ ст. і їх витіснення з суспільного життя в умовах інкорпорації\nдо складу Російської імперії.\nКлючові слова: подільська губернія, литовські статути, правові норми, російська імперія"
+                    }
+                  ],
+                  "dc.format.mimetype": [
+                    {
+                      "value": "application/pdf"
+                    }
+                  ],
+                  "dc.identifier.other": [
+                    {
+                      "value": "chtyvo:Zadorozhniuk_Andrii/Lytovski_statuty_v_Podilskii_hubernii_u_pershii_polovyni_XIX_st_danyna_tradytsii_chy_pravovi_rudymen"
+                    }
+                  ],
+                  "dc.identifier.uri": [
+                    {
+                      "value": "https://chtyvo.shron.org/authors/Zadorozhniuk_Andrii/Lytovski_statuty_v_Podilskii_hubernii_u_pershii_polovyni_XIX_st_danyna_tradytsii_chy_pravovi_rudymen/"
+                    }
+                  ],
+                  "dc.language.iso": [
+                    {
+                      "value": "uk"
+                    }
+                  ],
+                  "dc.source": [
+                    {
+                      "value": "https://chtyvo.org.ua/authors/Zadorozhniuk_Andrii/Lytovski_statuty_v_Podilskii_hubernii_u_pershii_polovyni_XIX_st_danyna_tradytsii_chy_pravovi_rudymen/"
+                    }
+                  ],
+                  "dc.subject": [
+                    {
+                      "value": "Історична"
+                    }
+                  ],
+                  "dc.title": [
+                    {
+                      "value": "Литовські статути в Подільській губернії у першій половині XIX ст.: данина традиції чи правові рудименти?"
+                    }
+                  ],
+                  "dc.type": [
+                    {
+                      "value": "Text"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

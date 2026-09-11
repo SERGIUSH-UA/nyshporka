@@ -153,6 +153,11 @@ class FetchResult:
     bytes: int = 0
     skipped: int = 0
     errors: list[str] = field(default_factory=list)
+    #: Те, що людина мусить знати про взяте, але що не є збоєм завантаження:
+    #: «у книги немає текстового шару», «шар битий». 🔴 Окремо від `errors`,
+    #: бо помилка робить теку неповною й код виходу ненульовим — а тут файл
+    #: ліг цілим, просто шукати в ньому регексом не вийде.
+    notes: list[str] = field(default_factory=list)
 
 
 class SourceError(RuntimeError):

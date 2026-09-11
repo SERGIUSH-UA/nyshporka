@@ -1,0 +1,58 @@
+{
+  "_embedded": {
+    "bundles": [
+      {
+        "name": "THUMBNAIL",
+        "_embedded": {
+          "bitstreams": {
+            "_embedded": {
+              "bitstreams": [
+                {
+                  "uuid": "1355a93a-766c-479b-b9ee-64f3959fa727",
+                  "name": "Lytovski_statuty_v_Podilskii_hubernii_u_pershii_polovyni_XIX_st_danyna_tradytsii_chy_pravovi_rudymen.pdf.jpg",
+                  "sizeBytes": 5540,
+                  "bundleName": "THUMBNAIL",
+                  "checkSum": {
+                    "checkSumAlgorithm": "MD5",
+                    "value": "5404a58fb0bc6bc6fedc30c8ec4ddb57"
+                  },
+                  "_links": {
+                    "content": {
+                      "href": "https://shron.org/server/api/core/bitstreams/1355a93a-766c-479b-b9ee-64f3959fa727/content"
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "name": "ORIGINAL",
+        "_embedded": {
+          "bitstreams": {
+            "_embedded": {
+              "bitstreams": [
+                {
+                  "uuid": "280d2ee0-59fb-4450-b2db-7bb57e03712e",
+                  "name": "Lytovski_statuty_v_Podilskii_hubernii_u_pershii_polovyni_XIX_st_danyna_tradytsii_chy_pravovi_rudymen.pdf",
+                  "sizeBytes": 574061,
+                  "bundleName": "ORIGINAL",
+                  "checkSum": {
+                    "checkSumAlgorithm": "MD5",
+                    "value": "14b26131c4d5b040f4010431b7287fb5"
+                  },
+                  "_links": {
+                    "content": {
+                      "href": "https://shron.org/server/api/core/bitstreams/280d2ee0-59fb-4450-b2db-7bb57e03712e/content"
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        }
+      }
+    ]
+  }
+}

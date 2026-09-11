@@ -50,6 +50,7 @@ def _builtin(workspace: Path | None = None) -> list[Source]:
     from nyshporka.archives import active
     from nyshporka.sources.archium import ArchiumSource
     from nyshporka.sources.babynyar import BabynYarSource
+    from nyshporka.sources.chtyvo import ChtyvoSource
     from nyshporka.sources.commons import CommonsSource
     from nyshporka.sources.duck import DuckSource
     from nyshporka.sources.fsfilm import FilmMirrorSource
@@ -80,6 +81,10 @@ def _builtin(workspace: Path | None = None) -> list[Source]:
     # 1921-1946, закриті 75-річним обмеженням). Пошуку майданчик не має взагалі,
     # тож джерело працює по каталогу, зібраному `nysh crawl babynyar`.
     out.append(cast("Source", BabynYarSource(workspace)))
+    # 📖 Чтиво — друковане, а не архівне: краєзнавство, збірники документів,
+    # словники говірок. Єдине джерело, яке шукає по ПОВНОМУ ТЕКСТУ книг, тож
+    # відповідає «де моє село згадане в літературі» без жодного завантаження.
+    out.append(ChtyvoSource(workspace))
     return out
 
 
