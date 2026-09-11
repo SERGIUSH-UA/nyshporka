@@ -2451,7 +2451,10 @@ def supervise(args: argparse.Namespace, case_dir: Path, out_dir: Path) -> int:
                   f"решту доберуть сусіди", flush=True)
             emit(args.progress_json, "done", pages=0, skipped=0, failed=0,
                  supervised=True, drained=True)
-            return rc
+            # 🔴 Нуль, а не rc дитини: злитий воркер до 12.09.2026 звітував
+            # rc=3 («неповно» — сусіди ще читали), і бокс-раннер валив справу з
+            # «шарди впали» (904-24-70, 11.09.2026). Злив — не збій.
+            return 0
         # 🔴 У claim-режимі знаменник наглядача — лише те, що можна взяти:
         # сторінки, які зараз читає живий сусід, не є нашими пропусками.
         # Інакше кожен шард перезапускався б, поки інші працюють, і клав би
@@ -3181,6 +3184,9 @@ def main() -> int:
     own_pages = 0
     ceiling_hits = 0
     ceiling_lines: list[int] = []
+    # 🚰 Злитий шард виходить свідомо, а недочитане доберуть сусіди. Тому
+    # вердикт повноти в кінці виносить не він (див. `drained` нижче).
+    drained = False
     for i, src in enumerate(pages_all, 1):
         stem = src.stem
         txt_path = out_dir / f"{stem}.txt"
@@ -3207,6 +3213,7 @@ def main() -> int:
         if claim_mode and drain_requested(out_dir, shard_k):
             print(f"[htr-run] 🚰 шард {shard_k + 1}: злив — нових сторінок не беру",
                   flush=True)
+            drained = True
             break
         if claim_mode and not claim_page(out_dir, stem, args.shard):
             continue
@@ -3572,6 +3579,12 @@ def main() -> int:
     finder = claimable_missing if claim_mode else missing_pages
     gone = [p for p in finder(pages_all, out_dir, tuple(side_dirs.values()))
             if p not in quar]
+    if drained:
+        # 🚰 Злитий шард не бачить кінця справи: `claimable_missing` рахує
+        # пропусками всі сторінки, яких ще ніхто не взяв, і шард виходив із
+        # rc=3 — бокс-раннер читав звуження флоту як «шарди впали» (904-24-70,
+        # 11.09.2026). Повноту доводять сусіди й ворота з диска, а не він.
+        gone = []
     meta["missing"] = gone
     # карантин у меті теж потрібен: інакше після нього `missing` порожній, rc=0,
     # і слід про непрочитані сторінки лишається лише в окремому файлі

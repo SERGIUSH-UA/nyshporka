@@ -57,6 +57,21 @@ def test_a_drained_shard_is_not_restarted_by_its_supervisor(
     assert len(calls) == 1
 
 
+def test_a_drained_shard_succeeds_even_if_its_worker_said_incomplete(
+        case: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """🔴 Злитий воркер бачить недочитане сусідами як неповноту й виходить із 3.
+    Бокс-раннер читав це як «шарди впали» й валив справу (904-24-70, 11.09.2026)."""
+    out = tmp_path / "out"
+    (out / R.DRAIN_DIR).mkdir(parents=True)
+    (out / R.DRAIN_DIR / "2").write_text("t", encoding="utf-8")
+    calls: list[object] = []
+    monkeypatch.setattr(subprocess, "run",
+                        lambda *a, **k: (calls.append(a), types.SimpleNamespace(returncode=3))[1])
+    monkeypatch.setattr(R.sys, "argv", ["htr_case_run.py", "--shard", "2/4", "--claim"])
+    assert R.supervise(_args(), case, out) == 0
+    assert len(calls) == 1
+
+
 def test_an_undrained_shard_is_still_restarted(case: Path, tmp_path: Path,
                                                monkeypatch: pytest.MonkeyPatch) -> None:
     """Контроль: без зливу недочитане — пропуски, і наглядач робить свою роботу."""
