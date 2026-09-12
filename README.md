@@ -172,7 +172,7 @@ nysh doctor         # перевірка «Рушії читання» має с
 |---|---|---|---|
 | набір | `-Preset catalog` | `NYSH_PRESET=catalog` | `/PRESET=catalog` |
 | **склад пакета цілком** | `-Source 'nyshporka[app,archives]'` | `NYSH_SOURCE=…` | — |
-| конкретна версія | `-Version 0.6.2` | (через `NYSH_SOURCE`) | вшита в файл |
+| конкретна версія | `-Version X.Y.Z` | (через `NYSH_SOURCE`) | вшита в файл |
 | тека встановлення | `-Home_ D:\Nysh` | — | `/DIR=D:\Nysh` |
 | не класти ярлик | `-NoLauncher` | (не кладе) | — |
 | без питань | (їх і немає) | — | `/VERYSILENT` |
@@ -181,7 +181,7 @@ nysh doctor         # перевірка «Рушії читання» має с
 
 `-Source` / `NYSH_SOURCE` перебивають набір і приймають будь-яку специфікацію
 PEP 508 — саме ним береться нетиповий склад extras або конкретна версія
-(`'nyshporka[app,archives]==0.6.0'`).
+(`'nyshporka[app,archives]==X.Y.Z'`).
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File "$env:TEMP\nysh-install.ps1" -Preset catalog
