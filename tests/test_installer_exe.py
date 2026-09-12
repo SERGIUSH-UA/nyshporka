@@ -137,6 +137,23 @@ def test_iss_uninstall_never_touches_the_research() -> None:
             f"деінсталятор дотягується до чужого: «{trap}»")
 
 
+def test_iss_uninstall_takes_what_the_script_put() -> None:
+    """🔴 Деінсталятор знімає все, що `windows.ps1` клав у `{app}`.
+
+    Перелік того, що скрипт кладе в теку встановлення, уже записаний один раз —
+    `HOME_OWNED` у `setup/uninstall.py`, з якого знімає `nysh uninstall`. Майстер
+    знав лише три файли з п'яти: після «Видалити» в `Programs\\Nyshporka`
+    лишались `install-trace.txt` і власний uv, і тека не спорожнювалась.
+    """
+    from nyshporka.setup.uninstall import HOME_OWNED
+
+    text = iss_text()
+    section = text[text.index("[UninstallDelete]"):text.index("[Code]")]
+    for name in HOME_OWNED:
+        assert f'Name: "{{app}}\\{name}' in section, (
+            f"майстер при деінсталяції лишає «{name}» у теці встановлення")
+
+
 def test_iss_is_utf8_without_bom() -> None:
     """⚠ Дзеркало `test_windows_installer_is_utf8_with_bom`, і навмисно НАВПАКИ.
 
