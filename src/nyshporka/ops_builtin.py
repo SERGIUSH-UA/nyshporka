@@ -638,6 +638,7 @@ def _address_answer(a: CatalogSearchArgs, addr: Any) -> Envelope | None:
 
     # ── щабель 1: те, що вже лежить на цій машині ────────────────────────────
     local: list[dict[str, Any]] = []
+    store_failed: list[str] = []
     try:
         found = find_by_address(addr)
         searched.append("library")
@@ -656,8 +657,11 @@ def _address_answer(a: CatalogSearchArgs, addr: Any) -> Envelope | None:
             if cf is not None:
                 row["noted"] = len(cf.pages)
                 row["records"] = len(cf.records)
-        except Exception:      # сховище не критичне для відповіді про адресу
-            pass
+        except Exception as exc:
+            # Сховище не критичне для відповіді про адресу — але й «0» тут
+            # неправда: облік не прочитався, тож «невідомо», а не «не дивились».
+            row["noted"] = row["records"] = None
+            store_failed.append(f"{row['key'] or row['shifra']}: {exc}")
         local.append(row)
         hits.append({"source": "library", "ref": row["path"] or row["key"],
                      "title": row["title"], "years": "", "place": "",
@@ -773,6 +777,10 @@ def _address_answer(a: CatalogSearchArgs, addr: Any) -> Envelope | None:
     env.warn("address_route",
              f"«{a.q}» — адреса справи, тож шукали ЇЇ. Повнотекстового пошуку "
              f"по каталогах НЕ було; щоб текстом — додай --text")
+    if store_failed:
+        env.warn("pages_unreadable",
+                 "облік переглянутого не прочитався, тож скільки аркушів уже "
+                 "дивились — невідомо: " + " · ".join(store_failed))
     if local:
         env.suggest("pages.status", "що в цій справі вже дивились оком")
     if registry:

@@ -79,6 +79,26 @@ def test_an_address_query_does_not_pretend_it_combed_the_catalogs(space):
     assert "duck" not in searched, "покажчик не питали, а знаменник каже, що питали"
 
 
+def test_an_unreadable_page_store_is_not_reported_as_nothing_noted(space, monkeypatch):
+    """🔴 Облік справи не прочитався — це «невідомо», а не «оком не дивились».
+
+    Доти будь-яка відмова сховища ковталась, і рядок ішов із `noted: 0`: людина
+    передивлялась аркуші, які вже занесено.
+    """
+    from nyshporka.pagestore import store as S
+
+    # ⚠ Корінь сховища береться на рівні модуля — простір фікстури його не зсуне.
+    monkeypatch.setattr(S, "PAGES_ROOT", space / "data" / "pages")
+    pages = space / "data" / "pages" / "DAHMO"
+    pages.mkdir(parents=True)
+    (pages / "315-8433.json").write_text("{битий", encoding="utf-8")
+    got = _call("315-1-8433")
+    row = got["data"]["address"]["local"][0]
+    assert row["noted"] is None, row
+    said = {w["code"]: w["text"] for w in got["warnings"]}
+    assert "pages_unreadable" in said, got["warnings"]
+
+
 def test_a_source_that_cannot_search_by_address_says_why(space):
     """Джерело, яке вміє лише текстом, іде в `unavailable` з причиною.
 
