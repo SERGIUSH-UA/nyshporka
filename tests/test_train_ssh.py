@@ -160,6 +160,46 @@ def test_ssh_poll_fetch_stop(space: W.Workspace, tmp_path: Path) -> None:
     assert not sess.pid_alive and be.released == ["трен зупинено"]
 
 
+@dataclass
+class EvilSession(FakeSession):
+    """Машина, яка віддає `result.tar` з іменами, що виводять за теку прогону."""
+
+    members: tuple[str, ...] = ()
+
+    def run(self, cmd: str, *, timeout: float | None = None, on_line: Any = None) -> Got:
+        if "tar -cf result.tar" not in cmd:
+            return super().run(cmd, timeout=timeout, on_line=on_line)
+        self.cmds.append(cmd)
+        buf = io.BytesIO()
+        with tarfile.open(fileobj=buf, mode="w") as tf:
+            for name in self.members:
+                blob = b"shkoda" if "стороннє" in name else b"ep1"
+                ti = tarfile.TarInfo(name)
+                ti.size = len(blob)
+                tf.addfile(ti, io.BytesIO(blob))
+        self.files["/srv/nysh/nysh-run/train/r1/result.tar"] = buf.getvalue()
+        return Got()
+
+
+def test_ssh_fetch_keeps_foreign_tar_inside_the_run(space: W.Workspace, tmp_path: Path) -> None:
+    """🔴 Архів ваг приходить із чужої машини — імена в ньому не довіряються.
+
+    Читання справи (`cloud.run.unpack`) це вже стереже; забір трену писав
+    `out/../../x` просто за іменем, тобто будь-хто з доступом до машини клав
+    файл куди завгодно в простір — або вище за нього.
+    """
+    sess = EvilSession(members=("out/../../стороннє.txt", "out/..\\..\\стороннє.txt",
+                                "logs/../../../стороннє.txt", "out/C:стороннє.txt",
+                                "out/parseq_ep01.pt"))
+    tr = SS.SshTrainer(backend=FakeBackend(sess))
+    st = ST.RunState(run_id="r1")
+    tr.start(_job(tmp_path), st)
+    out = tr.fetch(st)
+    stray = [p for p in tmp_path.rglob("*стороннє*")]
+    assert not stray, f"файл із чужого архіву ліг поза текою прогону: {stray}"
+    assert (out / "parseq_ep01.pt").read_bytes() == b"ep1", "чесний член архіву загубився"
+
+
 def test_ssh_plan_needs_a_host(space: W.Workspace, tmp_path: Path) -> None:
     job = _job(tmp_path)
     job.host = ""

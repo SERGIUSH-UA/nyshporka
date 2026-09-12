@@ -24,6 +24,7 @@ import contextlib
 import secrets
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlsplit
 
 if TYPE_CHECKING:
     from fastapi import FastAPI
@@ -128,13 +129,36 @@ def create_app(ws: Workspace | None = None, *, token: str = "") -> FastAPI:
         Тунель (`ssh -L`) шле `localhost` і проходить; іншого імені в петлі бути
         не може.
         """
-        host = (request.headers.get("host") or "").rsplit(":", 1)[0].strip("[]").lower()
+        raw_host = request.headers.get("host") or ""
+        host = raw_host.rsplit(":", 1)[0].strip("[]").lower()
         if host and host not in _OWN_NAMES:
             return JSONResponse(
                 {"ok": False, "v": 1, "data": {}, "warnings": [],
                  "error": f"застосунок відповідає лише на 127.0.0.1, а запит "
                           f"прийшов з іменем «{host}»"},
                 status_code=403)
+        # 🔴 Запис — лише зі своєї сторінки. Ім'я в `Host` чесне й тоді, коли
+        # POST шле ЧУЖА вкладка: вона звертається саме на 127.0.0.1. Токен
+        # стоїть не на всіх операціях (частина лише читає, але вміє покласти
+        # файл туди, куди скаже `out`), а тіло без `Content-Type` браузер шле
+        # без попереднього запиту — і старіші FastAPI (заміряно на 0.115)
+        # розбирають таке тіло як JSON. Тобто залежність `fastapi>=0.115`
+        # лишала відкритим виклик
+        # операції з аргументами чужого сайту. `Origin` браузер ставить на
+        # кожен POST і скриптові підмінити не дає; інструменти без браузера
+        # (агент, `curl`) його не шлють і проходять як раніше.
+        if request.method not in ("GET", "HEAD", "OPTIONS"):
+            origin = request.headers.get("origin")
+            site = (request.headers.get("sec-fetch-site") or "").lower()
+            foreign = site in ("cross-site", "same-site") or (
+                origin is not None
+                and urlsplit(origin).netloc.lower() != raw_host.lower())
+            if foreign:
+                return JSONResponse(
+                    {"ok": False, "v": 1, "data": {}, "warnings": [],
+                     "error": f"запит прийшов з чужої сторінки ({origin or site}) — "
+                              f"змінювати простір може лише сама консоль застосунку"},
+                    status_code=403)
         return await call_next(request)
 
     def require_token(given: str | None) -> None:

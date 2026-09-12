@@ -96,6 +96,31 @@ def test_annotation_marks_which_line_is_being_judged(run) -> None:
     assert plain.png != marked.png, "рамку не домальовано"
 
 
+def test_line_geometry_reaches_the_console_only_as_numbers(run, tmp_path) -> None:
+    """🔴 Рамки йдуть у SVG консолі через `innerHTML`.
+
+    `.lines.json` приїжджає й з орендованої машини. Рядок на місці числа
+    вийшов би з атрибута `x="…"` і виконався б у сторінці застосунку разом із
+    токеном — тобто чужа машина, яка лише читала справу, дістала б право
+    змінювати простір. Зіпсована рамка стає порожньою, а не зсуває нумерацію.
+    """
+    from nyshporka import htr_store as S
+
+    evil = '1" onmouseover="alert(1)'
+    name, page = run
+    (tmp_path / "reports" / "htr" / name / "0001.lines.json").write_text(json.dumps({
+        "size": [600, evil],
+        "boxes": [[40, 30, 560, 80], [evil, 120, 560, 170], None],
+        "polys": [[[40, 30], [560, evil]], None, [[40, 210], [560, 260]]],
+    }), encoding="utf-8")
+    got = S.page_lines(name, page)
+    assert got is not None
+    assert "onmouseover" not in json.dumps(got, ensure_ascii=False), "рядок доїхав до консолі"
+    assert got["boxes"] == [[40, 30, 560, 80], None, None], "нумерація рамок зсунулась"
+    assert got["polys"] == [None, None, [[40, 210], [560, 260]]]
+    assert got["size"] == [600, 400], "розмір мав добратись із самого скану"
+
+
 def test_missing_boxes_fall_back_to_the_page_and_say_so(run, tmp_path) -> None:
     """Прогони до 2026-08-09 рамок не писали — це не помилка, але й не мовчання.
 

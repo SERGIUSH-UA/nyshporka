@@ -215,7 +215,7 @@ function viewBar() {
         title="${esc(t('view.prev.key'))}">${ic('arrow-left', 'ic-sm')} ${t('view.prev')}</button>
       <select id="view-page" data-act="view.goto">
         ${VS.pages.map((x, k) => `<option value="${k}"${k === VS.i ? ' selected' : ''}
-          >${k + 1}. ${esc(x.page)}${x.lines ? ` · ${x.lines} р.` : ''}</option>`).join('')}
+          >${k + 1}. ${esc(x.page)}${x.lines ? ` · ${esc(x.lines)} р.` : ''}</option>`).join('')}
       </select>
       <button data-act="view.step" data-arg="1"
         ${VS.i + 1 < VS.pages.length ? '' : ' disabled'}
