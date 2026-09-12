@@ -49,8 +49,8 @@ def cmd_find(
     section: str = typer.Option("", "--section",
                                 help="church | decanats | rabbinate "
                                      "(порожньо = всі конфесії)"),
-    limit: int = typer.Option(20, "--limit"),
-    json: bool = typer.Option(False, "--json"),
+    limit: int = typer.Option(20, "--limit", help="скільки показати"),
+    json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Знайти поселення за назвою."""
     _warn()
@@ -71,8 +71,10 @@ def cmd_find(
 def cmd_card(
     card: str = typer.Argument(..., help="ідентифікатор картки (miak_003.xml) "
                                          "або назва села"),
-    show_confusers: bool = typer.Option(True, "--confusers/--no-confusers"),
-    json: bool = typer.Option(False, "--json"),
+    show_confusers: bool = typer.Option(
+        True, "--confusers/--no-confusers",
+        help="показати схожі назви, які нечіткий пошук плутає з цим селом"),
+    json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Картка поселення: прив'язка, церква, усі справи + що з них у нас є."""
     _warn()

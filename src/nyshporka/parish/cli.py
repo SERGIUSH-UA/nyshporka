@@ -40,8 +40,8 @@ def cmd_find(
                                         "форма мови діловодства"),
     books: bool = typer.Option(True, "--books/--no-books",
                                help="одразу взяти книги кожної парафії"),
-    limit: int = typer.Option(20, "--limit"),
-    as_json: bool = typer.Option(False, "--json"),
+    limit: int = typer.Option(20, "--limit", help="скільки показати"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Чиї парафії в цьому селі — і які книги кожної з них.
 
@@ -72,8 +72,8 @@ def cmd_in_case(
     case: str = typer.Argument(..., help="повний код справи: архів-фонд-опис-справа"),
     match: list[str] = typer.Option([], "--match",
                                     help="село, яке шукаємо в переліку"),
-    limit: int = typer.Option(30, "--limit"),
-    as_json: bool = typer.Option(False, "--json"),
+    limit: int = typer.Option(30, "--limit", help="скільки показати"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Які села всередині цієї книги — ДО того, як її читати.
 
@@ -119,8 +119,8 @@ def cmd_near(
     years: str = typer.Option("", "--years", help="1780-1830 або 1802"),
     offline_only: bool = typer.Option(False, "--offline",
                                       help="лише неоцифровані — черга замовлення"),
-    limit: int = typer.Option(25, "--limit"),
-    as_json: bool = typer.Option(False, "--json"),
+    limit: int = typer.Option(25, "--limit", help="скільки показати"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Що є по сусідніх селах — коло одразу справами, а не топонімами."""
     y1, _, y2 = years.partition("-")
@@ -147,8 +147,8 @@ def cmd_near(
 def cmd_mentions(
     village: str = typer.Argument(..., help="назва села"),
     also: list[str] = typer.Option([], "--also", help="інше написання"),
-    limit: int = typer.Option(25, "--limit"),
-    as_json: bool = typer.Option(False, "--json"),
+    limit: int = typer.Option(25, "--limit", help="скільки показати"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Справи, де село згадане в АНОТАЦІЇ, а не в назві: суд, поліція, управа.
 

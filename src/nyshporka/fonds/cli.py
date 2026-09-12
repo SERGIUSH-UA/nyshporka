@@ -40,7 +40,7 @@ def cmd_sources() -> None:
 @app.command("plan")
 def cmd_plan(
     collector: str = typer.Argument(..., help="archium | babynyar | commons | duck"),
-    fond: str = typer.Option(..., "--fond"),
+    fond: str = typer.Option(..., "--fond", help="номер фонду"),
     repo: str = typer.Option("DAHMO", "--repo", help="код або назва архіву"),
     opys: str = typer.Option("", "--opys", help="описи через кому"),
 ) -> None:
@@ -73,7 +73,7 @@ def cmd_plan(
 
 @app.command("build")
 def cmd_build(
-    fond: str = typer.Option(..., "--fond"),
+    fond: str = typer.Option(..., "--fond", help="номер фонду"),
     repo: str = typer.Option("DAHMO", "--repo", help="код або назва архіву"),
     opys: str = typer.Option("", "--opys", help="описи через кому"),
     refresh: bool = typer.Option(False, "--refresh", help="не читати кеш"),
@@ -102,7 +102,7 @@ def cmd_build(
 @app.command("collect")
 def cmd_collect(
     collector: str = typer.Argument(..., help="archium | babynyar | commons | duck"),
-    fond: str = typer.Option(..., "--fond"),
+    fond: str = typer.Option(..., "--fond", help="номер фонду"),
     repo: str = typer.Option("DAHMO", "--repo", help="код або назва архіву"),
     opys: str = typer.Option("", "--opys", help="описи через кому"),
     refresh: bool = typer.Option(False, "--refresh", help="не читати кеш"),
@@ -138,7 +138,7 @@ def cmd_collect(
 
 @app.command("merge")
 def cmd_merge(
-    fond: str = typer.Option(..., "--fond"),
+    fond: str = typer.Option(..., "--fond", help="номер фонду"),
     repo: str = typer.Option("DAHMO", "--repo", help="код або назва архіву"),
     dry_run: bool = typer.Option(False, "--dry-run", help="нічого не писати"),
     fond_id: str = typer.Option("", "--fond-id",
@@ -226,8 +226,8 @@ def cmd_show(fond_id: str = typer.Option(..., "--fond-id",
 @app.command("rate")
 def cmd_rate(
     key: str = typer.Option("duck-inspector", "--key", help="ключ черги запитів"),
-    max_events: int = typer.Option(5, "--max"),
-    window: float = typer.Option(10.0, "--window"),
+    max_events: int = typer.Option(5, "--max", help="скільки запитів дозволено у вікні"),
+    window: float = typer.Option(10.0, "--window", help="довжина вікна, секунд"),
     last: float = typer.Option(0.0, "--last", help="лише останні N секунд"),
 ) -> None:
     """Чи витримали темп — за журналом фактичних відправок, а не за наміром."""

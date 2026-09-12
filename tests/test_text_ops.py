@@ -95,10 +95,11 @@ def test_crop_cuts_the_named_line_with_its_geometric_successor(space: Path) -> N
     got = T.crop("проба", "4", 3, out=out)
     assert not got.get("error"), got
     assert got["next"] == 11 and got["scale_k"] == 2.0
-    im = Image.open(out)
+    with Image.open(out) as im:
+        size = (im.width, im.height)
     # рамки 3 (345..1900 × 1380..1450) і 11 (848..1840 × 1490..1550) + pad 12, ×2
     assert got["box"] == [666, 2736, 3824, 3124]
-    assert (im.width, im.height) == (3158, 388)
+    assert size == (3158, 388)
     assert got["text"].endswith("Коваль") and got["next_text"].startswith("скій")
     wide = T.crop("проба", "4", 1, with_next=False, wide=True, out=space / "w.png")
     assert wide["box"][0] == 0 and wide["box"][2] == 6000

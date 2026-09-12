@@ -91,7 +91,7 @@ def _need_run(run_id: str) -> RunState:
 
 # ── машини ───────────────────────────────────────────────────────────────────
 @hosts_app.command("list")
-def hosts_list(as_json: bool = typer.Option(False, "--json")) -> None:
+def hosts_list(as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)")) -> None:
     """Які машини записані й які бекенди доступні."""
     from nyshporka.cloud import registry as REG
     from nyshporka.cloud.ssh import load_hosts
@@ -140,10 +140,11 @@ def hosts_add(
     target: str = typer.Argument(..., help="user@host[:порт]"),
     key: str = typer.Option("", "--key", help="шлях до приватного ключа"),
     workdir: str = typer.Option("", "--workdir", help="тека роботи на машині"),
-    python: str = typer.Option("", "--python"),
+    python: str = typer.Option("", "--python",
+                                help="інтерпретатор на машині; типово python3"),
     cores: float = typer.Option(0.0, "--cores", help="заявлені ядра (для плану)"),
     vram: float = typer.Option(0.0, "--vram", help="заявлена пам'ять карти, ГБ"),
-    gpus: int = typer.Option(1, "--gpus"),
+    gpus: int = typer.Option(1, "--gpus", help="скільки карт на машині"),
 ) -> None:
     """Записати машину. 🔴 Ключ — шляхом, ніколи не вмістом і не паролем."""
     from nyshporka.cloud.ssh import DEFAULT_WORKDIR, Host, load_hosts, parse_target, save_hosts
@@ -165,7 +166,7 @@ def hosts_add(
 
 
 @hosts_app.command("rm")
-def hosts_rm(name: str = typer.Argument(...)) -> None:
+def hosts_rm(name: str = typer.Argument(..., help="коротке ім'я машини")) -> None:
     """Прибрати машину з переліку."""
     from nyshporka.cloud.ssh import load_hosts, save_hosts
 
@@ -182,7 +183,7 @@ def hosts_rm(name: str = typer.Argument(...)) -> None:
 def hosts_storage(
     bucket: str = typer.Argument("", help="назва сегмента; порожньо — показати"),
     endpoint: str = typer.Option("", "--endpoint", help="адреса S3-сумісного API"),
-    region: str = typer.Option("auto", "--region"),
+    region: str = typer.Option("auto", "--region", help="регіон сховища"),
 ) -> None:
     """Об'єктне сховище простору — те, що прискорює передачу в рази.
 
@@ -242,11 +243,14 @@ def _print_plan(p: CloudPlan) -> None:
 def cmd_plan(
     case_dir: str = typer.Argument(..., help="тека зі сканами (пласка)"),
     host: str = typer.Option("", "--host", "-h", help="машина: ім'я або user@host"),
-    backend: str = typer.Option("ssh", "--backend", "-b"),
-    script: str = typer.Option("", "--script", help="latin | cyrillic"),
-    case_key: str = typer.Option("", "--case-key"),
-    one_voice: bool = typer.Option(False, "--one-voice"),
-    as_json: bool = typer.Option(False, "--json"),
+    backend: str = typer.Option("ssh", "--backend", "-b",
+                                 help="де читати: ssh — своя машина; інші — `nysh cloud hosts list`"),
+    script: str = typer.Option("", "--script",
+                                help="письмо: latin | cyrillic; порожньо — визначити самому"),
+    case_key: str = typer.Option("", "--case-key", help="шифра справи для мети прогону"),
+    one_voice: bool = typer.Option(False, "--one-voice",
+                                   help="без другого рушія (швидше, але сліпіше)"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Що поїде на машину — без жодної мережевої дії й без жодних витрат.
 
@@ -300,7 +304,8 @@ def cmd_plan(
 @app.command("prepare")
 def cmd_prepare(
     host: str = typer.Argument(..., help="машина: ім'я або user@host"),
-    backend: str = typer.Option("ssh", "--backend", "-b"),
+    backend: str = typer.Option("ssh", "--backend", "-b",
+                                 help="де читати: ssh — своя машина; інші — `nysh cloud hosts list`"),
 ) -> None:
     """Зібрати середовище рушіїв на машині. Робиться один раз на машину.
 
@@ -338,14 +343,18 @@ def _workdir_of(box: Box) -> str:
 # ── захід ────────────────────────────────────────────────────────────────────
 @app.command("start")
 def cmd_start(
-    case_dir: str = typer.Argument(...),
-    host: str = typer.Option("", "--host", "-h"),
-    backend: str = typer.Option("ssh", "--backend", "-b"),
-    script: str = typer.Option("", "--script"),
-    case_key: str = typer.Option("", "--case-key"),
-    one_voice: bool = typer.Option(False, "--one-voice"),
+    case_dir: str = typer.Argument(..., help="тека зі сканами (пласка)"),
+    host: str = typer.Option("", "--host", "-h", help="машина: ім'я або user@host"),
+    backend: str = typer.Option("ssh", "--backend", "-b",
+                                 help="де читати: ssh — своя машина; інші — `nysh cloud hosts list`"),
+    script: str = typer.Option("", "--script",
+                                help="письмо: latin | cyrillic; порожньо — визначити самому"),
+    case_key: str = typer.Option("", "--case-key", help="шифра справи для мети прогону"),
+    one_voice: bool = typer.Option(False, "--one-voice",
+                                   help="без другого рушія (швидше, але сліпіше)"),
     shards: int = typer.Option(0, "--shards", help="скільки процесів; 0 = порахувати"),
-    seg_height: int = typer.Option(0, "--seg-height"),
+    seg_height: int = typer.Option(0, "--seg-height",
+                                    help="висота сегментації (0 = рідна 1800)"),
     wait: bool = typer.Option(False, "--wait", help="чекати завершення"),
 ) -> None:
     """Почати захід. Повертається одразу — робота лишається жити на машині.
@@ -378,7 +387,7 @@ def cmd_start(
 @app.command("state")
 def cmd_state(
     run_id: str = typer.Argument("", help="ім'я заходу; порожньо — незавершений"),
-    as_json: bool = typer.Option(False, "--json"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
     all_runs: bool = typer.Option(False, "--all", help="усі заходи простору"),
 ) -> None:
     """Що зараз із заходом. Дані беруться з диска машини, не з лога."""
@@ -439,7 +448,8 @@ def cmd_state(
 
 
 @app.command("fetch")
-def cmd_fetch(run_id: str = typer.Argument("")) -> None:
+def cmd_fetch(run_id: str = typer.Argument(
+        "", help="ім'я заходу; порожньо — незавершений")) -> None:
     """Забрати результат. Повторний виклик безпечний і докачує."""
     from nyshporka.cloud import run as RUN
 
@@ -455,8 +465,8 @@ def cmd_fetch(run_id: str = typer.Argument("")) -> None:
 
 @app.command("verify")
 def cmd_verify(
-    run_id: str = typer.Argument(""),
-    as_json: bool = typer.Option(False, "--json"),
+    run_id: str = typer.Argument("", help="ім'я заходу; порожньо — незавершений"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Скільки сторінок дійсно прочитано — і чим це доведено.
 
@@ -498,7 +508,7 @@ def cmd_verify(
 
 @app.command("stop")
 def cmd_stop(
-    run_id: str = typer.Argument(""),
+    run_id: str = typer.Argument("", help="ім'я заходу; порожньо — незавершений"),
     force: bool = typer.Option(False, "--force",
                                help="кинути захід, не звіряючи"),
 ) -> None:
