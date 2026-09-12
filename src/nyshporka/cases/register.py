@@ -209,12 +209,17 @@ def case_path(case_dir: str | Path) -> Path:
     з-під `cd` у корені простору знаходилась. Тому відносний шлях завжди
     добудовується коренем простору, і лише абсолютний береться як є.
     """
+    import os
+
     p = Path(case_dir).expanduser()
     if not p.is_absolute():
         from nyshporka.core.workspace import workspace
 
         p = workspace().root / p
-    return p.resolve()
+    # 🔴 `abspath`, а не `resolve()`: той розкриває junction, і тека
+    # `data/raw/bev_pdh/spr-1` ставала `D:\архів\…` — «поза простором», хоча
+    # бібліотека її бачить (див. `library._junctions`).
+    return Path(os.path.abspath(p))
 
 
 def reachable(case_dir: Path) -> bool:
@@ -230,11 +235,14 @@ def reachable(case_dir: Path) -> bool:
     відмовляло. Кожен наступний крок падав з окремої причини, і жодна з них не
     називала справжню.
     """
+    import os
+
     from nyshporka.core.workspace import workspace
 
     for root in workspace().case_roots():
         try:
-            case_dir.relative_to(root.resolve())
+            # без `resolve()` з тієї самої причини, що й у `case_path`
+            Path(os.path.abspath(case_dir)).relative_to(os.path.abspath(root))
         except ValueError:
             continue
         return True
