@@ -49,6 +49,23 @@ def test_a_current_ledger_is_left_alone(dest) -> None:
     assert _card(dest).stat().st_mtime_ns == before
 
 
+def test_an_older_build_never_rolls_the_skills_back(dest) -> None:
+    """🔴 Синхронізація йде лише вгору.
+
+    Дві установки на машині — звичайний стан (`.exe` і `pip`-venv, стара копія
+    в іншому середовищі). Коли умовою було «не дорівнює», будь-який запуск
+    старшої з них мовчки перекладав скіли назад, і агент працював за карткою,
+    старшою за ту, що вже стояла: живий прогін 12.09.2026, `nysh version` із
+    0.12.2 переписав скіли 0.12.3.
+    """
+    S.sync(VER)
+    before = _card(dest).stat().st_mtime_ns
+    assert S.sync("9.9.8") == [], "старша збірка переклала скіли назад"
+    assert S.sync("9.9") == [], "9.9 і 9.9.0 — та сама, старша за 9.9.9"
+    assert json.loads((dest / S.LEDGER).read_text(encoding="utf-8"))["version"] == VER
+    assert _card(dest).stat().st_mtime_ns == before
+
+
 def test_a_hand_edited_skill_survives(dest) -> None:
     """🔴 Скіл — це текст, який дослідник дописує під свій матеріал.
 

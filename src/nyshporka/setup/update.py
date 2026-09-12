@@ -227,10 +227,44 @@ def preset_now(recorded: str = "") -> str:
 
     ⚠ Порядок саме такий. Запис може застаріти в один бік (доставили рушії) і
     не може в інший: чого немає, того `find_spec` не побачить.
+
+    🔴 Стан лише ПІДНІМАЄ запис, а не підміняє його. Доти рушії на місці
+    завжди давали `researcher`, і людина з набором `lab` оновлювалась без
+    extra `train` — SSH-клієнт трену зникав мовчки, а «Лабораторія» падала
+    вже на першому виносі на свій сервер.
     """
     if has_htr():
-        return "researcher"
+        return recorded if recorded in ("amateur", "researcher", "lab") else "researcher"
     return recorded or "catalog"
+
+
+def tool_env() -> bool:
+    """Чи запущено з середовища інструмента uv (`uv tool install`, `.exe`, скрипти).
+
+    Ознака — `uv-receipt.toml` у корені середовища: його кладе сам uv і лише
+    туди. Слід інсталятора для цього не годиться — його немає в того, хто ставив
+    `uv tool install` руками, і він лишається від установки, поверх якої вже
+    стоїть звичайний `pip`-venv.
+    """
+    return (Path(sys.prefix) / "uv-receipt.toml").is_file()
+
+
+def runs_in_place() -> bool:
+    """Чи може `nysh update` виконати оновлення сам, не лише назвати команду.
+
+    🔴 На Windows — ні, і перевірено живим прогоном 12.09.2026: `uv tool
+    install --force`, запущений із `nysh update`, переставляє пакет, а тоді
+    падає на копіюванні `nysh.exe` («файл зайнятий іншим процесом», код 2) —
+    бо саме з цього файла й запущено команду. Людина бачила «оновлення не
+    завершилось, закрийте `nysh serve`», хоча застосунок не був запущений, а
+    пакет уже стояв новий. На Linux і macOS файл працюючого процесу
+    замінюється, і там оновлення на місці працює.
+
+    ⚠ `pip`-середовище не оновлюється тут ніде: `pip install --upgrade` у чужий
+    venv — рішення людини, а не застосунку, і на Windows воно впирається в той
+    самий зайнятий `nysh.exe`.
+    """
+    return tool_env() and sys.platform != "win32"
 
 
 def command(preset: str = "") -> list[str]:
@@ -241,18 +275,27 @@ def command(preset: str = "") -> list[str]:
     гігабайтами того, хто прийшов дивитись каталог, або мовчки зняти рушії в
     того, хто ними читає.
 
+    🔴 І спосіб установки не вгадується. Доти команда була ЗАВЖДИ `uv tool
+    install`, тож у того, хто ставив `pip install` у свій venv, `nysh update`
+    ставив ДРУГУ копію інструментом uv поруч, а його середовище лишалось старим
+    — і `nysh` у ньому далі казав «є новіша». Тепер середовище uv оновлюється
+    uv, а решта — тим pip, яким її ставили.
+
     ⚠ `--force` перезбирає СЕРЕДОВИЩЕ ІНСТРУМЕНТА, і це не зачіпає ні простір,
     ні рушії (вони в окремому venv поруч із простором), ні моделі
     (`<простір>/data/spotter/models`), ні паки довідників (`user_data_dir`).
     Але пакети, дописані туди руками через `uv tool install --with`, воно
     змиває — їх доведеться назвати знову.
     """
+    from nyshporka.core.sections import install_target
+
     info = install_info()
-    uv = info.get("uv") or "uv"
     got = preset or preset_now(info.get("preset", ""))
-    extras = "app,archives" if got == "catalog" else "app,archives,htr"
-    return [uv, "tool", "install", "--python", "3.12", "--force",
-            f"nyshporka[{extras}]"]
+    spec = install_target(got)
+    if not tool_env():
+        return [sys.executable, "-m", "pip", "install", "--upgrade", spec]
+    uv = info.get("uv") or "uv"
+    return [uv, "tool", "install", "--python", "3.12", "--force", spec]
 
 
 def how_to_update(preset: str = "") -> str:
@@ -263,7 +306,34 @@ def how_to_update(preset: str = "") -> str:
     і прізвищем. Саме цей рядок людина копіює в термінал. Специфікація теж:
     `nyshporka[app,archives,htr]` у zsh без лапок дає «no matches found».
     Та сама вада, що й у підказці `nysh cases bind`, і лікується вона тим самим.
+
+    🔴 На Windows — лапки PowerShell, а не POSIX. Туди саме й веде документація
+    («Пуск → PowerShell»), а POSIX-форма там не виконується взагалі: `\\`
+    подвоювався (`"C:\\\\Users\\\\…\\\\uv.exe"`), а програма в лапках без
+    оператора `&` — це рядок, не команда («Unexpected token 'tool'»). Тобто в
+    КОЖНОГО, хто ставив `.exe` (шлях до uv зі сліду завжди з `\\`), рядок у
+    кнопці «Перевірити оновлення» не запускався. Знайдено живим прогоном.
     """
     from nyshporka.htr.view import shell_arg
 
-    return " ".join(shell_arg(x) for x in command(preset))
+    parts = command(preset)
+    if sys.platform == "win32":
+        return _powershell_line(parts)
+    return " ".join(shell_arg(x) for x in parts)
+
+
+def _powershell_line(parts: list[str]) -> str:
+    """Рядок, який PowerShell виконає як набрано.
+
+    ⚠ Одинарні лапки, а не подвійні: у подвійних PowerShell розкриває `$` і
+    зворотну лапку, а апостроф в імені профілю («Ім'я») подвоюється за правилом
+    самої мови. Кома без лапок робить з аргументу масив — тому
+    `nyshporka[app,archives]` береться в лапки завжди.
+    """
+    def quote(x: str) -> str:
+        if x and not any(c in x for c in " \t'\"`$,;()[]{}&|<>@#"):
+            return x
+        return "'" + x.replace("'", "''") + "'"
+
+    line = " ".join(quote(x) for x in parts)
+    return f"& {line}" if parts and quote(parts[0]) != parts[0] else line

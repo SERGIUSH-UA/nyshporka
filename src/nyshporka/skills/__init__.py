@@ -147,12 +147,22 @@ def sync(version: str) -> list[tuple[Path, dict[str, int]]]:
       передаємо `force`;
     * **мовчки не буває.** Викликач друкує підсумок; порожній результат означає,
       що робити не було чого.
+
+    🔴 І лише ВГОРУ. Доти умовою було «облік не дорівнює пакету», тож будь-який
+    запуск старшої збірки перекладав скіли назад: `.exe` поруч із `pip`-venv,
+    стара копія в іншому середовищі, пробний прогін попередньої версії — і
+    агент мовчки працював за карткою, старшою за ту, що вже стояла. Спіймано
+    живим прогоном 12.09.2026: `nysh version` з 0.12.2 переписав скіли 0.12.3
+    у `~/.claude/skills`, не спитавши й не лишивши сліду, крім рядка в stderr.
     """
+    from nyshporka.setup.update import _cmp_key
+
     out: list[tuple[Path, dict[str, int]]] = []
     if os.environ.get(ENV_NO_SYNC):
         return out
     for dest, was in installed():
-        if was == version:
+        mine, theirs = _cmp_key(version, was)
+        if mine <= theirs:
             continue
         try:
             got = install(dest, version=version)

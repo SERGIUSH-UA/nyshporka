@@ -85,9 +85,16 @@ def traced() -> list[tuple[str, str]]:
     `XDG_BIN_HOME`), і здогад про `~/.local/bin` збігається лише з типовим
     випадком. Тому чого немає в сліді — того ця команда не чіпає.
     """
+    # 🔴🔴 `utf-8-sig`, а не `utf-8`. `windows.ps1` пише слід через
+    # `Set-Content -Encoding UTF8`, а Windows PowerShell 5.1 (саме ним його
+    # запускає майстер `.exe`) кладе туди BOM. Під голим `utf-8` BOM прилипав до
+    # ПЕРШОГО виду: `\ufeffpath` не впізнавався як допис у PATH і падав у гілку
+    # «тека чи файл» — тобто `nysh uninstall --yes` зносив би `rmtree` усю теку
+    # команд uv разом із чужими інструментами. Перший рядок сліду — `path`
+    # рівно в того, в кого uv уже стояв не в `~/.local/bin` (winget, scoop).
     try:
-        text = trace_path().read_text(encoding="utf-8")
-    except OSError:
+        text = trace_path().read_text(encoding="utf-8-sig")
+    except (OSError, UnicodeError):
         return []
     out: list[tuple[str, str]] = []
     for line in text.splitlines():

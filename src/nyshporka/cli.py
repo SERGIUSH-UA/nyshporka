@@ -578,6 +578,8 @@ def update(
     """
     import subprocess
 
+    from rich.markup import escape
+
     from nyshporka.setup import update as U
 
     rel = U.latest()
@@ -592,9 +594,28 @@ def update(
         console.print("[muted]оновлювати нема на що[/muted]")
         raise typer.Exit(code=0)
     cmd = U.command(preset)
-    console.print(f"[muted]{' '.join(cmd)}[/muted]")
+    # 🔴 `escape` обов'язковий. `nyshporka[app,archives]` rich читав як розмітку
+    # і з'їдав: людина бачила `uv tool install … nyshporka`, копіювала — і
+    # ставила пакет БЕЗ консолі й архівів, тобто `nysh serve` після такого
+    # «оновлення» вже не стартував. Рядок той самий, що в кнопці застосунку, —
+    # з лапками, бо шлях до uv буває з пробілом.
+    console.print(f"[muted]{escape(U.how_to_update(preset))}[/muted]")
     if check:
         raise typer.Exit(code=0)
+    if not U.runs_in_place():
+        # 🔴 Не виконуємо там, де виконання не може вдатись або не наше. Рядок
+        # вище вже названо — лишається сказати, де й коли його набрати.
+        if not U.tool_env():
+            why = f"застосунок стоїть у pip-середовищі {sys.prefix}, і оновлює його той самий pip"
+        else:
+            why = ("на Windows застосунок не замінює сам себе: nysh.exe, з якого "
+                   "запущено цю команду, зайнятий до її завершення")
+        console.print(f"[warn]не ставлю: {escape(why)}[/warn]\n"
+                      "  закрийте застосунок і виконайте рядок вище в новому вікні термінала")
+        if sys.platform == "win32" and U.tool_env():
+            console.print("[muted]без термінала — новий nyshporka-setup.exe поверх цього: "
+                          "простір, моделі й довідники лишаються[/muted]")
+        raise typer.Exit(code=1)
     try:
         rc = subprocess.call(cmd)
     except OSError as exc:
@@ -607,15 +628,16 @@ def update(
                       "повторіть[/warn]")
         raise typer.Exit(code=rc)
     console.print(f"✅ {rel.latest}")
-    # 🔴 Скіли не їдуть разом із пакетом: вони лежать копією в теці агента, і
-    # після оновлення людина працює за карткою попередньої версії, не знаючи
-    # про це. Кличемо не самі — пакет, що мовчки пише в конфіг агента, це те,
-    # за що пакети викидають, — а називаємо команду.
+    # 🔴 Скіли не їдуть разом із пакетом: вони лежать копією в теці агента.
+    # Перекладає їх НАСТУПНИЙ запуск уже нової збірки (`_sync_skills`), а не
+    # цей процес — він старий. Тому називаємо, коли це станеться, а не радимо
+    # класти руками: порада «покласти наново» розходилась із тим, що робить
+    # застосунок, і з `docs/agent.md`.
     from nyshporka import skills as S
 
     if S.installed():
-        console.print("[muted]скіли агента лишились від попередньої версії — "
-                      "покласти наново: `nysh skills install`[/muted]")
+        console.print("[muted]скіли агента перекладуться самі при наступному "
+                      "запуску нової збірки[/muted]")
 
 
 @app.command()
@@ -2105,6 +2127,18 @@ def serve(
     людини — канон про живих родичів, скани, нотатки; прапорець «слухати всюди»
     рано чи пізно вмикають «на хвилинку» й лишають.
     """
+    from importlib.util import find_spec
+
+    # 🔴 Перевірка ДО виклику, а не лише навколо імпорту. Демон імпортується й
+    # без extra `app`, а про відсутній сервер дізнається вже всередині
+    # `serve()` — і людина з набором без консолі діставала рамку трасування на
+    # пів екрана, в кінці якої ховалось «pip install 'nyshporka[app]'».
+    # Знайдено прогоном у чистому venv 12.09.2026.
+    if find_spec("uvicorn") is None or find_spec("fastapi") is None:
+        console.print("[err]браузерна консоль потребує сервера — extra `app` не "
+                      "поставлено[/err]")
+        console.print(r"[muted]pip install 'nyshporka\[app]'[/muted]")
+        raise typer.Exit(code=1)
     try:
         from nyshporka.daemon import serve as _serve
     except (ImportError, RuntimeError) as exc:

@@ -137,9 +137,21 @@ Name: "{autodesktop}\{#AppName}"; Filename: "{code:GetNyshExe}"; Parameters: "se
 Filename: "{code:GetNyshExe}"; Parameters: "serve"; WorkingDir: "{app}"; Description: "Запустити {#AppName}"; Flags: nowait postinstall skipifsilent
 
 [UninstallDelete]
+; 🔴 Перелік — дзеркало `HOME_OWNED` у `setup/uninstall.py`: усе, що
+; `windows.ps1` кладе в `{app}`. Доти тут не було `install-trace.txt` і власного
+; uv, тож після деінсталяції в «Programs» лишалась тека з uv.exe і слідом, а
+; `{app}` через них не спорожнювався. Приймач — `test_iss_uninstall_takes_what_the_script_put`.
+; ⚠ uv знімається ПОФАЙЛОВО, а не `filesandordirs`: теку встановлення можна
+; перенести `/DIR=`, і рекурсивне видалення `{app}\uv` на чужому диску зачепило
+; б теку з тим самим ім'ям, яку клав не майстер.
 Type: files; Name: "{app}\install-info.ini"
 Type: files; Name: "{app}\install-error.txt"
 Type: files; Name: "{app}\install.log"
+Type: files; Name: "{app}\install-trace.txt"
+Type: files; Name: "{app}\uv\uv.exe"
+Type: files; Name: "{app}\uv\uvx.exe"
+Type: files; Name: "{app}\uv\uvw.exe"
+Type: dirifempty; Name: "{app}\uv"
 
 [Code]
 var
