@@ -32,10 +32,11 @@ python tools/scan_private.py --history   # уся історія, перед К�
 ```bash
 uv run ruff check .
 uv run mypy
+uv run python -m nyshporka.brand.gen --check
 uv run pytest
 ```
 
-Усі три ганяються в CI на Python 3.11/3.12/3.13 і додатково на Windows —
+Усі чотири ганяються в CI на Python 3.11/3.12/3.13 і додатково на Windows —
 основній платформі аудиторії (зовнішні диски зі сканами, junction'и).
 
 ## Що цінується в коді
