@@ -286,6 +286,53 @@ def test_a_foreign_host_header_is_refused(client: TestClient) -> None:
     assert "127.0.0.1" in res.json().get("error", "")
 
 
+def test_a_foreign_page_cannot_call_ops_without_a_preflight(client: TestClient,
+                                                            monkeypatch) -> None:
+    """🔴 Чужа сторінка шле POST на петлю без жодного попереднього запиту.
+
+    Тіло-`Blob` без типу їде БЕЗ `Content-Type`, тобто як «простий» запит, і
+    браузер не питає дозволу. Старіші FastAPI (заміряно на 0.115) розбирають
+    таке тіло як JSON, а залежність дозволяє `fastapi>=0.115` — отже операція, що не вимагає
+    токена, виконувалась з аргументами чужого сайту. Серед таких є ті, що
+    пишуть файл туди, куди вкаже `out` (`text.crop`, `text.sheet`), — тобто
+    перезапис будь-якого файла людини з відкритої вкладки. Відсікати мусить
+    сам застосунок, а не версія фреймворку.
+    """
+    from nyshporka.search import textops as T
+
+    called: list[object] = []
+
+    def fake_sheet(*a: object, **k: object) -> dict[str, object]:
+        called.append(k.get("out"))
+        return {"out": str(k.get("out")), "cards": 0}
+
+    monkeypatch.setattr(T, "sheet", fake_sheet)
+    body = b'{"q": "x", "case": "x", "out": "../../important.docx"}'
+    r = client.post("/api/op/text.sheet", content=body,
+                    headers={"Origin": "https://evil.example"})
+    assert r.status_code == 403, "операція з чужого origin пройшла"
+    # `Origin: null` — сторінка з пісочниці чи з `file://`
+    r = client.post("/api/op/text.sheet", content=body, headers={"Origin": "null"})
+    assert r.status_code == 403, "операція зі сторінки без origin пройшла"
+    # інша вкладка на тій самій петлі, але чужому порту — теж чужа сторінка
+    r = client.post("/api/op/text.sheet", content=body,
+                    headers={"Origin": "http://127.0.0.1:3000"})
+    assert r.status_code == 403, "операція зі сторінки на іншому порту пройшла"
+    r = client.post("/api/op/text.sheet", content=body,
+                    headers={"Sec-Fetch-Site": "cross-site"})
+    assert r.status_code == 403, "запит, позначений браузером як чужий, пройшов"
+    assert not called, "операцію викликано з аргументами чужої сторінки"
+
+
+def test_own_page_origin_still_works(client: TestClient) -> None:
+    """Власна сторінка шле `Origin` свого ж адреса — її не можна відсікти."""
+    r = client.post("/api/op/workspace.info", json={},
+                    headers={"Origin": "http://127.0.0.1:8788"})
+    assert r.status_code == 200
+    # інструменти без браузера (`curl`, агент) `Origin` не шлють зовсім
+    assert client.post("/api/op/workspace.info", json={}).status_code == 200
+
+
 def test_the_page_token_never_leaves_under_another_name(client: TestClient) -> None:
     """🔴 Найдорожче в перев'язуванні імені — те, що токен віддається сам.
 
