@@ -55,13 +55,14 @@ def test_not_asked_is_not_the_same_as_up_to_date():
     assert U.Release("0.6.3", "0.6.3").known
 
 
-def test_the_update_command_keeps_the_set_of_parts_it_was_installed_with():
+def test_the_update_command_keeps_the_set_of_parts_it_was_installed_with(monkeypatch):
     """🔴 Набір не вгадується.
 
     `researcher` тягне рушії читання (~2.5 ГБ), `catalog` — ні. Підставити не
     той означає або змусити платити гігабайтами того, хто прийшов дивитись
     каталог справ, або мовчки зняти рушії в того, хто ними читає.
     """
+    monkeypatch.setattr(U, "tool_env", lambda: True)
     assert "nyshporka[app,archives]" in U.command("catalog")
     assert "nyshporka[app,archives,htr]" in U.command("researcher")
     assert "--force" in U.command("catalog"), "оновлення мусить переставляти"
@@ -81,6 +82,7 @@ def test_the_installer_trace_is_read_in_both_encodings(tmp_path, monkeypatch):
 def test_no_trace_is_a_state_not_a_crash(tmp_path, monkeypatch):
     """Сліду немає (ставили руками, `pip install`) — команда все одно є."""
     monkeypatch.setattr(U, "install_home", lambda: tmp_path)
+    monkeypatch.setattr(U, "tool_env", lambda: True)
     assert U.install_info() == {}
     assert U.command()[0] == "uv", "без сліду беремо uv із PATH"
 
@@ -137,6 +139,7 @@ def test_the_update_touches_nothing_of_the_researchers(tmp_path, monkeypatch):
 
     W.use(W.Workspace(root=tmp_path, name="тест", origin="test"))
     monkeypatch.setattr(U, "install_home", lambda: tmp_path / "install")
+    monkeypatch.setattr(U, "tool_env", lambda: True)
     cmd = U.command("researcher")
     assert all(str(tmp_path) not in part for part in cmd), (
         f"оновлення цілиться в простір: {cmd}")
@@ -236,3 +239,96 @@ def test_remembering_a_workspace_does_not_wipe_the_stamp(tmp_path, monkeypatch):
 
     assert U.days_since_check() == 0, "запис про перевірку затерли"
     assert W.state_all()["workspace"] == str(tmp_path)
+
+
+# ── спосіб установки й те, що бачить людина ─────────────────────────────────
+# 🔴 Живий прогін 12.09.2026 (чисті venv і ізольована тека інструментів uv)
+# знайшов три вади, яких жоден тест вище не бачив: команда оновлення завжди
+# була `uv tool install` — і в pip-venv ставила другу копію поруч; надрукований
+# рядок губив extras у розмітці rich; на Windows `nysh update` падав на власному
+# зайнятому `nysh.exe`, хоча пакет уже переставив.
+
+
+def test_a_pip_install_is_updated_by_pip_not_by_a_second_uv_tool(tmp_path, monkeypatch):
+    """🔴 Середовище без квитанції uv оновлюється тим інтерпретатором, що в ньому."""
+    import sys
+
+    monkeypatch.setattr(U, "install_home", lambda: tmp_path / "немає")
+    monkeypatch.setattr(U.sys, "prefix", str(tmp_path))
+    assert not U.tool_env()
+    cmd = U.command("catalog")
+    assert cmd[:5] == [sys.executable, "-m", "pip", "install", "--upgrade"], cmd
+    assert cmd[-1] == "nyshporka[app,archives]"
+    assert not U.runs_in_place(), "pip-середовище оновлюємо не самі"
+
+    (tmp_path / "uv-receipt.toml").write_text("[tool]\n", encoding="utf-8")
+    assert U.tool_env(), "квитанцію uv не впізнано"
+    assert U.command("catalog")[1:3] == ["tool", "install"]
+
+
+def test_the_lab_set_keeps_its_training_extra(monkeypatch):
+    """🔴 Рушії на місці не сміють опускати `lab` до `researcher`.
+
+    Інакше оновлення мовчки знімало extra `train` — SSH-клієнт трену, — і
+    «Лабораторія» падала на першому виносі на свій сервер.
+    """
+    monkeypatch.setattr(U, "has_htr", lambda: True)
+    monkeypatch.setattr(U, "tool_env", lambda: True)
+    assert U.preset_now("lab") == "lab"
+    assert U.preset_now("amateur") == "amateur"
+    assert U.preset_now("catalog") == "researcher", "доставлені рушії лишаються"
+    assert "nyshporka[app,archives,htr,train]" in U.command("lab")
+
+
+def test_windows_never_tries_to_replace_the_running_command(monkeypatch):
+    """🔴 `nysh.exe` зайнятий процесом, який саме й кличе оновлення."""
+    monkeypatch.setattr(U, "tool_env", lambda: True)
+    monkeypatch.setattr(U.sys, "platform", "win32")
+    assert not U.runs_in_place()
+    monkeypatch.setattr(U.sys, "platform", "linux")
+    assert U.runs_in_place()
+
+
+def _fake_release(monkeypatch):
+    monkeypatch.setattr(U, "latest", lambda *a, **k: U.Release("0.1.0", "9.9.9"))
+
+
+def test_the_printed_command_keeps_its_extras(monkeypatch):
+    """🔴 Rich читав `[app,archives]` як розмітку й з'їдав його.
+
+    Людина копіювала `uv tool install … nyshporka` і ставила пакет без консолі:
+    після такого «оновлення» `nysh serve` уже не стартував.
+    """
+    from typer.testing import CliRunner
+
+    from nyshporka.cli import app
+
+    _fake_release(monkeypatch)
+    monkeypatch.setattr(U, "tool_env", lambda: True)
+    monkeypatch.setattr(U, "has_htr", lambda: False)
+    monkeypatch.setattr(U, "install_info", lambda: {"preset": "catalog"})
+    got = CliRunner().invoke(app, ["update", "--check"])
+    assert got.exit_code == 0, got.output
+    assert "nyshporka[app,archives]" in got.output, got.output
+
+
+def test_update_that_cannot_run_here_names_the_line_and_runs_nothing(monkeypatch):
+    """Там, де оновлення на місці не вдасться, команда не кличе нічого."""
+    import subprocess
+
+    from typer.testing import CliRunner
+
+    from nyshporka.cli import app
+
+    _fake_release(monkeypatch)
+    monkeypatch.setattr(U, "runs_in_place", lambda: False)
+    monkeypatch.setattr(U, "install_info", lambda: {"preset": "catalog"})
+
+    def _boom(*_a, **_k):
+        raise AssertionError("оновлення запущено там, де воно не може вдатись")
+
+    monkeypatch.setattr(subprocess, "call", _boom)
+    got = CliRunner().invoke(app, ["update"])
+    assert got.exit_code == 1, got.output
+    assert "nyshporka[app,archives]" in got.output
+    assert "не ставлю" in got.output
