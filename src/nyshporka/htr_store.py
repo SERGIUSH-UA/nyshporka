@@ -741,17 +741,26 @@ def page_lines(name: str, page: str) -> dict[str, Any] | None:
         data = json.loads(f.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {"page": page, "has": False}
-    boxes = data.get("boxes") or []
+    if not isinstance(data, dict) or not isinstance(data.get("boxes"), list):
+        return {"page": page, "has": False}
+    # 🔴 Лише числа. Рамки й розмір консоль вписує в SVG через `innerHTML`, а
+    # `.lines.json` приїжджає й з орендованої машини (`cloud fetch`): рядок на
+    # місці числа вийшов би з атрибута й виконався б у сторінці застосунку —
+    # разом із її токеном. Зіпсована рамка стає `null`, як рядок без обведення,
+    # тож нумерація рядків не зсувається.
+    boxes = [_numbers(b) for b in data["boxes"]]
     if not boxes:
         return {"page": page, "has": False}
-    size = data.get("size")
+    size = _numbers(data.get("size"))
+    if size is not None and len(size) < 2:
+        size = None
     if not size:
         got = resolve_scan(name, page)
         if got is not None:
             src, orient = got
             wh = _image_size(src)
             if wh:
-                size = [wh[1], wh[0]] if orient in (90, 270) else wh
+                size = [wh[1], wh[0]] if orient in (90, 270) else [wh[0], wh[1]]
     if not size:
         # 🔴 Рамки Є, але масштаб невідомий — і це різні речі, які досі
         # виглядали однаково. Так буває саме на PDF-прогонах: старий
@@ -764,11 +773,31 @@ def page_lines(name: str, page: str) -> dict[str, Any] | None:
                 "why": "прогін не записав розміру зображення, тож рамку рядка "
                        "накласти нічим — показано всю сторінку (рамки в цьому "
                        "прогоні є, бракує лише масштабу)"}
-    polys = data.get("polys") or None
+    raw_polys = data.get("polys")
+    polys = [_points(p) for p in raw_polys] if isinstance(raw_polys, list) and raw_polys else None
     if polys is not None and len(polys) != len(boxes):
         polys = None            # довжини розійшлись — краще прямокутник, ніж не той рядок
     return {"page": page, "has": True, "size": size,
             "boxes": boxes, "polys": polys}
+
+
+def _numbers(v: Any) -> list[int | float] | None:
+    """Список чисел із чужого JSON як є — або None, якщо там бодай щось інше."""
+    if not isinstance(v, list) or not v:
+        return None
+    if not all(isinstance(x, (int, float)) and not isinstance(x, bool) for x in v):
+        return None
+    return list(v)
+
+
+def _points(v: Any) -> list[list[int | float]] | None:
+    """Полігон рядка: список пар чисел — або None."""
+    if not isinstance(v, list) or not v:
+        return None
+    pts = [_numbers(p) for p in v]
+    if any(p is None for p in pts):
+        return None
+    return [p for p in pts if p is not None]
 
 
 def _image_size(path: Path) -> list[int] | None:
