@@ -41,6 +41,20 @@ def test_another_opys_of_the_same_fond_is_not_our_case() -> None:
     assert idx.canonical("DAVO/904/24/25") is None
 
 
+def test_form_without_opys_does_not_pick_one_of_two_books() -> None:
+    """🔴 У фонді з описом у ключі `ANRM/211/140` — це ДВІ книги (с. Парково й
+    Кишинівський собор). Вибір «сильнішого опису» тихо приписав би прогін
+    чужій справі; резолвер сховища сторінок тут відмовляє — і тут теж."""
+    idx = LibraryIndex([_row("ANRM/211-1/140", opys="1", fond="211", desc_source="canonical"),
+                        _row("ANRM/211-3/140", opys="3", fond="211", desc_source="code")])
+    assert idx.canonical("ANRM/211/140") is None
+
+
+def test_form_without_opys_is_fine_when_the_fond_has_one_such_book() -> None:
+    idx = LibraryIndex([_row("DAHMO/196-8/712", opys="8", fond="196")])
+    assert idx.canonical("DAHMO/196/712") == "DAHMO/196-8/712"
+
+
 def test_another_archive_is_not_our_case() -> None:
     idx = LibraryIndex([_row("DAVO/315/8591")])
     assert idx.canonical("DAHMO/315/8591") is None
