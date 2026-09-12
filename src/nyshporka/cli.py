@@ -2107,6 +2107,18 @@ def serve(
     людини — канон про живих родичів, скани, нотатки; прапорець «слухати всюди»
     рано чи пізно вмикають «на хвилинку» й лишають.
     """
+    from importlib.util import find_spec
+
+    # 🔴 Перевірка ДО виклику, а не лише навколо імпорту. Демон імпортується й
+    # без extra `app`, а про відсутній сервер дізнається вже всередині
+    # `serve()` — і людина з набором без консолі діставала рамку трасування на
+    # пів екрана, в кінці якої ховалось «pip install 'nyshporka[app]'».
+    # Знайдено прогоном у чистому venv 12.09.2026.
+    if find_spec("uvicorn") is None or find_spec("fastapi") is None:
+        console.print("[err]браузерна консоль потребує сервера — extra `app` не "
+                      "поставлено[/err]")
+        console.print(r"[muted]pip install 'nyshporka\[app]'[/muted]")
+        raise typer.Exit(code=1)
     try:
         from nyshporka.daemon import serve as _serve
     except (ImportError, RuntimeError) as exc:

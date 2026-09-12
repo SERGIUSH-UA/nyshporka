@@ -306,7 +306,34 @@ def how_to_update(preset: str = "") -> str:
     і прізвищем. Саме цей рядок людина копіює в термінал. Специфікація теж:
     `nyshporka[app,archives,htr]` у zsh без лапок дає «no matches found».
     Та сама вада, що й у підказці `nysh cases bind`, і лікується вона тим самим.
+
+    🔴 На Windows — лапки PowerShell, а не POSIX. Туди саме й веде документація
+    («Пуск → PowerShell»), а POSIX-форма там не виконується взагалі: `\\`
+    подвоювався (`"C:\\\\Users\\\\…\\\\uv.exe"`), а програма в лапках без
+    оператора `&` — це рядок, не команда («Unexpected token 'tool'»). Тобто в
+    КОЖНОГО, хто ставив `.exe` (шлях до uv зі сліду завжди з `\\`), рядок у
+    кнопці «Перевірити оновлення» не запускався. Знайдено живим прогоном.
     """
     from nyshporka.htr.view import shell_arg
 
-    return " ".join(shell_arg(x) for x in command(preset))
+    parts = command(preset)
+    if sys.platform == "win32":
+        return _powershell_line(parts)
+    return " ".join(shell_arg(x) for x in parts)
+
+
+def _powershell_line(parts: list[str]) -> str:
+    """Рядок, який PowerShell виконає як набрано.
+
+    ⚠ Одинарні лапки, а не подвійні: у подвійних PowerShell розкриває `$` і
+    зворотну лапку, а апостроф в імені профілю («Ім'я») подвоюється за правилом
+    самої мови. Кома без лапок робить з аргументу масив — тому
+    `nyshporka[app,archives]` береться в лапки завжди.
+    """
+    def quote(x: str) -> str:
+        if x and not any(c in x for c in " \t'\"`$,;()[]{}&|<>@#"):
+            return x
+        return "'" + x.replace("'", "''") + "'"
+
+    line = " ".join(quote(x) for x in parts)
+    return f"& {line}" if parts and quote(parts[0]) != parts[0] else line

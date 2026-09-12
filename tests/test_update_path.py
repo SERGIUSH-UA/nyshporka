@@ -289,6 +289,44 @@ def test_windows_never_tries_to_replace_the_running_command(monkeypatch):
     assert U.runs_in_place()
 
 
+def test_the_line_for_windows_is_one_powershell_can_run(monkeypatch):
+    """🔴 POSIX-лапки в PowerShell не виконуються.
+
+    `"C:\\\\Users\\\\…\\\\uv.exe" tool install` там — рядок і помилка розбору, а
+    саме такий вигляд мав рядок у кожного, хто ставив `.exe`.
+    """
+    monkeypatch.setattr(U.sys, "platform", "win32")
+    uv = r"D:\Профілі\Ім'я Прізвище\Nyshporka\uv\uv.exe"
+    monkeypatch.setattr(U, "command", lambda preset="": [
+        uv, "tool", "install", "--python", "3.12", "--force", "nyshporka[app,archives]"])
+    assert U.how_to_update() == (
+        r"& 'D:\Профілі\Ім''я Прізвище\Nyshporka\uv\uv.exe' "
+        "tool install --python 3.12 --force 'nyshporka[app,archives]'")
+
+    monkeypatch.setattr(U, "command", lambda preset="": [
+        r"C:\Nysh\uv\uv.exe", "tool", "install", "nyshporka[app]"])
+    assert U.how_to_update() == r"C:\Nysh\uv\uv.exe tool install 'nyshporka[app]'", (
+        "шлях без пробілів не потребує ні лапок, ні `&`")
+
+
+def test_serve_without_the_app_extra_says_what_to_install(monkeypatch):
+    """Без extra `app` — одна фраза з тим, що поставити, а не рамка трасування."""
+    import importlib.util
+
+    from typer.testing import CliRunner
+
+    from nyshporka.cli import app
+
+    real = importlib.util.find_spec
+    monkeypatch.setattr(importlib.util, "find_spec",
+                        lambda name, *a, **k: None if name in ("uvicorn", "fastapi")
+                        else real(name, *a, **k))
+    got = CliRunner().invoke(app, ["serve", "--no-browser"])
+    assert got.exit_code == 1, got.output
+    assert "nyshporka[app]" in got.output
+    assert "Traceback" not in got.output and not isinstance(got.exception, RuntimeError)
+
+
 def _fake_release(monkeypatch):
     monkeypatch.setattr(U, "latest", lambda *a, **k: U.Release("0.1.0", "9.9.9"))
 
