@@ -249,6 +249,11 @@ class SshTrainer:
             session.get(remote_tar, local_tar)
         finally:
             session.close()
+        # 🔴 Імена в архіві — з чужої машини. Той самий гард, що в читанні
+        # справи (`cloud.run.unpack`): покомпонентно, бо на Windows `\` і `C:`
+        # живуть УСЕРЕДИНІ одного POSIX-компонента, і ще раз на готовому шляху.
+        from nyshporka.cloud.run import _safe_member_part, _under
+
         try:
             with tarfile.open(local_tar, "r") as tar:
                 for m in tar.getmembers():
@@ -257,8 +262,12 @@ class SshTrainer:
                     parts = PurePosixPath(m.name).parts
                     if not parts or parts[0] not in ("out", "logs"):
                         continue
+                    if len(parts) < 2 or not all(_safe_member_part(p) for p in parts[1:]):
+                        continue
                     rel = Path(*parts[1:]) if parts[0] == "out" else Path("logs", *parts[1:])
                     dst = out_dir / rel
+                    if not _under(dst, out_dir):
+                        continue
                     dst.parent.mkdir(parents=True, exist_ok=True)
                     src = tar.extractfile(m)
                     if src is not None:
