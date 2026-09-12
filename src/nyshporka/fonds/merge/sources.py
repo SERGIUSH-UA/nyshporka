@@ -108,7 +108,11 @@ COLUMNS: tuple[str, ...] = (
     "archium_file", "archium_url",
     "babynyar_case", "babynyar_url", "babynyar_scans",
     "duck_url", "duck_online", "duck_copy_url",
-    "sources")
+    "sources",
+    # 📚 Кінець групи справ одним рядком («29-35»). Навмисно в самому кінці:
+    # колонка з'явилась у 0.13.1, і позиційний читач давнього реєстру (скрипт,
+    # `cut -f`) не мусить зсунутись.
+    "spr_to")
 
 
 @dataclass

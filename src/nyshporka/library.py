@@ -67,6 +67,18 @@ _PDF_PROBE_LIMIT = 50
 _SKIP_SLUGS = {"davo_opysy", "dahmo_319_f65_opisy", "bev_pdh", "kev_pdh",
                "khev_pdh", "eev_pdh", "_console_pages"}
 
+
+def skip_slugs() -> frozenset[str]:
+    """Теки-не-справи: вбудований перелік разом із `skip_slugs` паку архівів.
+
+    🔴 Пак свій `skip_slugs` читав і зливав із накладкою, але жоден обхід диска
+    його не питав — усі брали лише цей захардкоджений набір. Тож тека, яку
+    дослідник оголосив «не справою» у `config/archives.yaml`, однаково лягала в
+    бібліотеку «справою без шифри»: так скани описів ІР НБУВ (`irnbuv/`) стали
+    фантомною справою в реєстрі (12.09.2026).
+    """
+    return frozenset(_SKIP_SLUGS) | _pack_active().skip_slugs
+
 # repo-slug (тека data/raw/<slug>) / архів-код → людська абревіатура.
 #
 # 🔴 Склад архівів більше не живе тут копією. Він жив — і розійшовся з паком
@@ -544,7 +556,7 @@ def parse_case_path(rel: str) -> tuple[str, str, str | None, str] | None:
     if not parts:
         return None
     slug = parts[0]
-    if slug in _SKIP_SLUGS:
+    if slug in skip_slugs():
         return None
     if slug == _ARCHIUM_SLUG:
         return _archium_parse(parts[-1])
@@ -1049,8 +1061,7 @@ def _scan_disk_cases(limit: int = 4000) -> list[tuple[str, int, int]]:
             if imgs or pdfs:
                 seen.add(base)
                 out.append((str(base).replace("\\", "/"), imgs, pdfs))
-        for scan in walk_root(base, max_depth=4,
-                              skip_slugs=frozenset(_SKIP_SLUGS)):
+        for scan in walk_root(base, max_depth=4, skip_slugs=skip_slugs()):
             d = scan.path
             if d in seen or d.name.startswith("_"):
                 continue

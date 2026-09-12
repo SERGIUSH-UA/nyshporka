@@ -38,6 +38,7 @@ from nyshporka.library import (
     candidate_keys,
     load_verdicts,
     parse_source_id,
+    skip_slugs,
 )
 
 HTR_ROOT = ROOT / "reports" / "htr"
@@ -47,9 +48,8 @@ CLAN_STATE = ROOT / "data" / "clan_hunt" / "state.json"
 DERIVED_DB = ROOT / "data" / "derived" / "nyshporka.sqlite"
 
 _IMG_EXT = {".jpg", ".jpeg", ".png"}
-#: Теки-не-справи (періодика за роками, описи фондів) — як у `library._SKIP_SLUGS`.
-_SKIP_SLUGS = {"davo_opysy", "dahmo_319_f65_opisy", "bev_pdh", "kev_pdh",
-               "khev_pdh", "eev_pdh", "_console_pages"}
+#: Теки-не-справи беруться з `library.skip_slugs()` — вбудований перелік разом із
+#: паком. ⚠ Тут лежала друга копія набору, і вона так само не знала паку.
 
 #: Аркуш у цитаті: «253» або «253-255». Рік у чотири цифри аркушем не вважаємо.
 _PAGE_ONE_RE = re.compile(r"^\s*(\d{1,5})\s*$")
@@ -143,7 +143,7 @@ def _raw_scans() -> list[Any]:
 
     if not RAW_DIR.is_dir():
         return []
-    return list(walk_root(RAW_DIR, max_depth=4, skip_slugs=frozenset(_SKIP_SLUGS)))
+    return list(walk_root(RAW_DIR, max_depth=4, skip_slugs=skip_slugs()))
 
 
 #: код архіву кирилицею → латинський код репозиторію (як у `fonds.registry`).

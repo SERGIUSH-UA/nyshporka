@@ -74,7 +74,7 @@ def test_the_columns_are_a_promise_not_a_detail() -> None:
     Перейменувати одну означає зламати чужий конвеєр без жодного сигналу: файл
     на місці, рядки в ньому є, а колонка мовчки порожня."""
     assert FIELDS == ("opys", "spr_int", "spr_letter", "title", "year_from",
-                      "year_to", "folios", "archium_file", "archium_url")
+                      "year_to", "folios", "archium_file", "archium_url", "spr_to")
 
 
 def test_a_case_number_is_read_from_how_the_site_writes_it() -> None:

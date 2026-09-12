@@ -125,6 +125,13 @@ def _fuse_fields(r: Row, row: dict[str, str], name: str) -> None:
     if fol and not r["folios"]:
         r["folios"], r["folios_src"] = fol, name
 
+    # Кінець групи справ одним рядком опису («29-35») — правилом «перше
+    # непорожнє», як роки й аркуші. ⚠ Кінець і аркуші можуть прийти з різних
+    # джерел, а розбіжність кінця між джерелами в чергу ока не подається.
+    to = (row.get("spr_to") or "").strip()
+    if to.isdigit() and not r["spr_to"] and int(to) > int(r["spr_int"]):
+        r["spr_to"] = to
+
     if name == "ocr":
         # Єдине джерело номера тому й адреси прочитання в описі.
         for fld in ("dv_no", "src_page", "page_quality", "num_src"):

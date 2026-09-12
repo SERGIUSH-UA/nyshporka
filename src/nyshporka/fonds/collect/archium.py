@@ -33,7 +33,10 @@ if TYPE_CHECKING:
 
 #: Колонки, які читає злиття реєстру. Порядок і назви — зобов'язання.
 FIELDS = ("opys", "spr_int", "spr_letter", "title", "year_from", "year_to",
-          "folios", "archium_file", "archium_url")
+          "folios", "archium_file", "archium_url",
+          # кінець групи справ одним рядком («29-35»); у хвості, щоб давні файли
+          # з тією самою шапкою читались без зсуву
+          "spr_to")
 
 #: Скільки справ просимо однією сторінкою.
 PAGE_LIMIT = 2000
@@ -253,6 +256,7 @@ class ArchiumCollector:
             y1, y2 = d1 or y1, d2 or y2
         return {
             "opys": opys, "spr_int": num, "spr_letter": letter,
+            "spr_to": T.group_end(case.number),
             "title": title, "year_from": y1, "year_to": y2,
             "folios": folios or (str(case.sheets) if case.sheets else ""),
             "archium_file": case.file_id,

@@ -420,10 +420,36 @@ def test_bounds_from_pack_are_used(run) -> None:
     assert res.denominator == "pack:CDIAK/224"
     assert res.coverage["1"]["last_number"] > 0
     # 17 рядків в оп.1, але літерна серед них рахується окремо: номер 8а не
-    # займає позиції 8 у знаменнику опису.
-    assert res.coverage["1"]["present"] == 16
+    # займає позиції 8 у знаменнику опису. Зате рядок-група «17-18» дає два
+    # номери: 16 одиночних + 18 із групи = 17.
+    assert res.coverage["1"]["present"] == 17
     assert res.coverage["1"]["letter_rows"] == 1        # спр.8а
     assert any(b.kind == "lower_estimate" for b in res.blind)
+
+
+def test_case_group_row_covers_its_numbers(run) -> None:
+    """Група справ одним рядком опису не робить опис дірявим (спр.17-18).
+
+    🔴 Описи ІР НБУВ пишуть справи групами («29-35», аркуші на всю групу).
+    Рядок лишається один, з ключем за першим номером, — а покриття без
+    `spr_to` звітувало б решту номерів групи відсутніми, тобто прогалиною там,
+    де опис повний.
+    """
+    res, _, out = run("224")
+    r = _rows(out)["1-17"]
+    assert r["spr_to"] == "18"
+    assert "1-18" not in _rows(out), "група не розгортається в окремі рядки"
+    assert 18 not in res.coverage["1"]["absent_sample"]
+
+
+def test_group_end_not_above_start_is_ignored() -> None:
+    """Кінець групи, не більший за початок, — сміття розбору, а не група."""
+    from nyshporka.fonds.merge.sources import blank_row
+
+    r = blank_row(("1", "20", ""))
+    _fuse_fields(r, {"spr_to": "20"}, "wikisource")
+    _fuse_fields(r, {"spr_to": "7"}, "wikisource")
+    assert r["spr_to"] == ""
 
 
 def test_opys_subset_is_refused(run, tmp_path: Path) -> None:

@@ -89,7 +89,13 @@ FIELDS = ("opys", "spr_int", "spr_letter", "spr", "shifra", "title", "title_src"
           # ⚠ Каналом завантаження це не робить: покажчик сам нічого не віддає,
           # а копія лежить у чужому сховищі, качати з якого ми не вміємо.
           "duck_url", "duck_online", "duck_copy_url",
-          "sources")
+          "sources",
+          # 📚 Кінець групи справ одним рядком опису («29-35», аркуші на всю
+          # групу). Рядок один і ключ за першим номером: розгорнути його в сім
+          # означало б вигадати кожній справі назву й аркуші, яких опис окремо
+          # не дає. ⚠ Останнім навмисно: за цим порядком реєстр пишуть і
+          # сторонні експортери, і давні колонки в них не мусять зсунутись.
+          "spr_to")
 
 def babynyar_online(row: dict[str, Any] | dict[str, str]) -> bool:
     """Чи справді є що качати з «Бабиного Яру».
@@ -103,7 +109,7 @@ def babynyar_online(row: dict[str, Any] | dict[str, str]) -> bool:
 
 
 #: поля, яких стара схема не має → `None`
-_LEGACY_UNKNOWN = ("title_alt", "commons_title", "years_src", "folios", "folios_src",
+_LEGACY_UNKNOWN = ("spr_to", "title_alt", "commons_title", "years_src", "folios", "folios_src",
                    "dv_no", "commons_url", "commons_size", "commons_pages",
                    "commons_files", "commons_kind", "commons_size_max", "commons_parts",
                    "mirror_url", "mirror_size", "truncated_mirror", "on_disk",

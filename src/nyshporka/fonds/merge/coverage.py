@@ -24,11 +24,25 @@ def classify(rows: list[dict[str, Any]], bounds: dict[str, OpysBound],
 
     ⚠ Номер може бути одночасно present і letter_family (справа 24 і 24а) — тоді
     він рахується в обох, і в absent не потрапляє.
+
+    🔴 Рядок-група («29-35») покриває всі свої номери. Без цього опис, що пише
+    справи групами, виглядав би дірявим рівно там, де він повний: ІР НБУВ ф.6
+    записує так сотні справ, і всі вони пішли б у «відсутні».
     """
     out: dict[str, Any] = {}
     for opys, bound in bounds.items():
-        present = {int(r["spr_int"]) for r in rows
-                   if r["opys"] == opys and not r["spr_letter"]}
+        present: set[int] = set()
+        for r in rows:
+            if r["opys"] != opys or r["spr_letter"]:
+                continue
+            n = int(r["spr_int"])
+            present.add(n)
+            to = str(r.get("spr_to") or "")
+            # ⚠ Група обрізається межею опису: кінець, що виходить за неї, —
+            # помилка набору, і без обрізання «присутніх» стало б більше за
+            # номери опису, а 100% сховали б справжні пропуски.
+            if to.isdigit() and int(to) > n:
+                present.update(range(n + 1, min(int(to), bound.last) + 1))
         letters: dict[int, list[str]] = {}
         for r in rows:
             if r["opys"] == opys and r["spr_letter"]:

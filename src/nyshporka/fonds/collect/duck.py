@@ -45,7 +45,10 @@ RATE_WINDOW = 10.0
 #: Колонки, які читає злиття реєстру.
 FIELDS = ("opys", "spr_int", "spr_letter", "title", "year_from", "year_to",
           "folios", "duck_id", "duck_url", "duck_online", "duck_copies",
-          "duck_copy_url")
+          "duck_copy_url",
+          # кінець групи справ одним рядком («29-35»); після давніх колонок, щоб
+          # вони не зсувались (у `duck_void.tsv` за ним ще йде `duck_note`)
+          "spr_to")
 VOID_FIELDS = (*FIELDS, "duck_note")
 
 #: Повна сторінка — ознака, що є наступна (дока: page 0-based, крок 5000).
@@ -231,6 +234,7 @@ class DuckCollector:
             "opys": opys,
             "spr_int": num[0] if num else "",
             "spr_letter": num[1] if num else "",
+            "spr_to": T.group_end(raw) if num else "",
             "title": title,
             "year_from": y1, "year_to": y2,
             "folios": "",
