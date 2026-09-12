@@ -171,6 +171,25 @@ def test_installers_leave_a_trace_of_what_they_changed(name: str) -> None:
         f"{name}: перелік змін не показується людині")
 
 
+@pytest.mark.parametrize("name", ["unix.sh", "windows.ps1", "uninstall.sh",
+                                  "nyshporka.iss"])
+def test_installers_carry_no_control_characters(name: str) -> None:
+    """🔴 Керівний символ у скрипті не видно ні в редакторі, ні в діффі.
+
+    У `windows.ps1` у гілці `-DryRun` замість `'.local\\bin'` лежав байт 0x08
+    (backspace) і `in` — слід того, що рядок колись пройшов крізь рядковий
+    літерал, де `\\b` означає керівний символ. PowerShell у одинарних лапках
+    нічого не екранує, тож перелік «що буде зроблено» на машині без uv друкував
+    `C:\\Users\\…\\.localin\\nysh.exe` — теку, якої не існує, — рівно там, де
+    людина вирішує, чи можна дозволити встановлення. Помітно лише прогоном.
+    """
+    raw = (INSTALL / name).read_bytes()
+    bad = sorted({b for b in raw if b < 0x20 and b not in (0x09, 0x0A, 0x0D)})
+    assert not bad, (
+        f"{name}: керівні символи {[hex(b) for b in bad]} — рядок пройшов крізь "
+        f"екранування й зіпсувався")
+
+
 @pytest.mark.parametrize("name", ["unix.sh", "windows.ps1"])
 def test_installers_can_show_without_doing(name: str) -> None:
     """Подивитись, що чіпатимуть, можна ДО того, як щось завантажилось."""

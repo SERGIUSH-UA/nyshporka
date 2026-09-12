@@ -202,7 +202,7 @@ Say "  тека: $Home_" DarkGray
 if ($DryRun) {
     $uvNow = (Get-Command uv -ErrorAction SilentlyContinue).Source
     $binGuess = if ($uvNow) { Get-NativeLine $uvNow tool dir --bin } else { $null }
-    if (-not $binGuess) { $binGuess = Join-Path $env:USERPROFILE '.localin' }
+    if (-not $binGuess) { $binGuess = Join-Path $env:USERPROFILE '.local\bin' }
     Say ""
     if ($uvNow) { Say "uv                 уже є: $uvNow" }
     else         { Say "uv                 буде завантажено в $(Join-Path $Home_ 'uv')" }
