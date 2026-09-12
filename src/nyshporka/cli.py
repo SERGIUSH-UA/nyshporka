@@ -388,7 +388,14 @@ def get(source: str = typer.Argument(..., help="id джерела"),
             state["last"] = pct
             console.print(f"  [muted]{done}/{total} ({pct}%)[/muted]", end="\r")
 
-    res = src.fetch(ref, out, frames=rng, on_progress=progress)
+    try:
+        res = src.fetch(ref, out, frames=rng, on_progress=progress)
+    except SourceError as exc:
+        # Та сама відмова, що й на маніфесті: джерело може відмовити й посеред
+        # завантаження (мережа, обрізаний перелік файлів), і це текст, а не
+        # трасування.
+        console.print(f"\n[err]{exc}[/err]")
+        raise typer.Exit(code=1) from None
     console.print(f"\n✓ {res.frames} кадрів ({res.bytes / 1024 / 1024:.0f} МБ), "
                   f"пропущено {res.skipped} → {res.dest}")
     for e in res.errors[:5]:

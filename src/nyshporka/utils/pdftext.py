@@ -136,10 +136,12 @@ def extract(pdf: Path, out_dir: Path | None = None) -> TextLayer:
     покриття несе вердикт (`pages_with_text` із `pages`), а не відсутність
     файлів.
     """
+    folder = layer_dir(pdf, out_dir)
+    # Прибирати ДО розбору: файл, який pdfium не відкриває, інакше лишав би
+    # поруч тексти попередньої книги — рівно те, від чого `_clear` існує.
+    _clear(folder)
     texts = page_texts(pdf)
     verdict = judge(texts)
-    folder = layer_dir(pdf, out_dir)
-    _clear(folder)
     written = 0
     for i, raw in enumerate(texts, 1):
         body = raw.replace("\r\n", "\n").replace("\r", "\n").strip()

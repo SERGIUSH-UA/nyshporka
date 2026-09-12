@@ -175,6 +175,38 @@ def _near_miss(addr: Address) -> str:
     return f" Схоже, це «{shifra}» — тоді набирай так." if shifra else ""
 
 
+def _refuse_legacy_file(repo: str, fond: str, opys: str | None, spr: str,
+                        key: str, label: str) -> None:
+    """Відмова, якщо облік цієї книги лежить під іменем без опису.
+
+    🔴 Фонд, що потрапив у `_OPYS_IN_KEY`, міняє ім'я файла сховища:
+    `196-712.json` → `196-1-712.json`. Старий файл лишається, а шукати його вже
+    ніхто не шукає: `pages status` каже «не дивились» про переглянуте, а новий
+    запис лягає окремим файлом поруч. Обидва наслідки тихі, тож — відмова з
+    назвою файлів. Файл, чиє поле `opys` каже про ІНШУ книгу, не заважає.
+    """
+    if not (opys and opys_in_key(repo, fond)) or str(spr).startswith("@"):
+        return
+    legacy = PAGES_ROOT / repo / f"{fond}-{spr}.json"
+    if not legacy.is_file():
+        return
+    try:
+        was = _norm_spr(json.loads(legacy.read_text(encoding="utf-8")).get("opys"))
+    except (OSError, ValueError, AttributeError):
+        was = None
+    if was and was != _norm_spr(opys):
+        return
+    new = PAGES_ROOT / repo / f"{fond}-{opys}-{spr}.json"
+    both = (f" Поруч уже є «{_rel(new)}» — зведіть записи в нього вручну."
+            if new.is_file() else
+            f" Перейменуйте його на «{new.name}» і поставте в ньому "
+            f"\"key\": \"{key}\", \"opys\": \"{opys}\".")
+    raise ValueError(
+        f"облік справи {label} {fond}-{opys}-{spr} лежить у «{_rel(legacy)}» — "
+        f"записаний до того, як опис увійшов у ключ фонду {label} {fond}, і під "
+        f"новим ключем не видний.{both}")
+
+
 # ── резолюція справи ─────────────────────────────────────────────────────────
 def resolve_case(value: str) -> CaseRef:
     """Будь-який людський ідентифікатор справи → CaseRef. ValueError якщо не вийшло."""
@@ -259,6 +291,7 @@ def resolve_case(value: str) -> CaseRef:
     entry = entry or {}
     opys = opys or entry.get("opys") or _DEFAULT_OPYS.get((repo, fond))
     label = _REPO_LABEL.get(repo, repo)
+    _refuse_legacy_file(repo, fond, opys, spr, key, label)
     shifra = entry.get("shifra") or f"{label} {fond}-{opys or '?'}-{spr}"
     return CaseRef(
         key=key, repo=repo, fond=fond, spr=spr, opys=opys, shifra=shifra,

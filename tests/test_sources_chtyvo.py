@@ -367,6 +367,19 @@ def test_stale_pages_of_an_earlier_extract_are_removed(tmp_path: Path) -> None:
     assert not (tmp_path / "k.pdf.text" / "p0002.txt").exists()
 
 
+def test_unreadable_new_file_does_not_keep_the_old_text(tmp_path: Path) -> None:
+    """🔴 Файл на диску замінено, а новий pdfium не відкриває: тексти попередньої
+    книги лишались би поруч і відповідали б регексу за книгу, якої вже немає."""
+    pdf = tmp_path / "k.pdf"
+    pdf.write_bytes(_pdf([LONG, LONG]))
+    extract(pdf)
+    pdf.write_bytes(b"%PDF-1.4\n\xff\xfe obirvano")
+    with pytest.raises(Exception):  # noqa: B017 — pypdfium2 кидає власний PdfiumError
+        extract(pdf)
+
+    assert not list((tmp_path / "k.pdf.text").glob("p*.txt"))
+
+
 def test_broken_fonts_are_flagged() -> None:
     """Кирилиця в латиниці-1 — формально літери, тож `isalpha` її пропускав би."""
     assert judge(["Ïîä³ëüñüêà ãóáåðí³ÿ òà ëèòîâñüê³ ñòàòóòè " * 3]) == "garbage"

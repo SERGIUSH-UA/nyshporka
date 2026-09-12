@@ -23,7 +23,15 @@ from functools import lru_cache
 from typing import Any
 
 from nyshporka.cases.model import RunLink
-from nyshporka.library import ROOT, _archium_parse, dejunction, load_library, parse_case_code
+from nyshporka.library import (
+    ROOT,
+    _archium_parse,
+    _norm_fond,
+    dejunction,
+    load_library,
+    opys_in_key,
+    parse_case_code,
+)
 from nyshporka.utils.atomic import CorruptFileError, read_json, write_json
 
 OVERRIDES_PATH = ROOT / "data" / "cases" / "overrides.json"
@@ -196,7 +204,14 @@ class LibraryIndex:
             loose = [k for k in same_repo(self._by_fs.get((f, s), []))
                      if not _norm(self.by_key[k].get("opys"))]
             return self._pick(loose, repo)
-        return self._pick(same_repo(self._by_fs.get((f, s), [])), repo)
+        keys = same_repo(self._by_fs.get((f, s), []))
+        if opys_in_key(repo, _norm_fond(fond)) and len(set(keys)) > 1:
+            # 🔴 Фонд, де опис входить у ключ: без опису шифра — це кілька
+            # РІЗНИХ книг (ANRM 211-1-140 і 211-3-140), а не дублікати однієї.
+            # «Сильніший опис» тут приписав би прогін чужій справі; сховище
+            # сторінок на тій самій формі відмовляє — і тут теж.
+            return None
+        return self._pick(keys, repo)
 
 
 @lru_cache(maxsize=1)
