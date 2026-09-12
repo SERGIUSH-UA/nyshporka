@@ -355,6 +355,37 @@ def test_the_download_is_measured_against_the_manifest(
     assert "неповна" in res.stdout, res.stdout
 
 
+def test_a_source_refusing_during_fetch_is_a_message_not_a_traceback(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Маніфест відповів, а завантаження відмовило (мережа впала між двома
+    запитами, сервер назвав файл неповним). Відмова джерела — текст для людини
+    й код 1, як і на маніфесті, а не трасування Python."""
+    from typer.testing import CliRunner
+
+    from nyshporka import cli as C
+    from nyshporka.sources.base import Manifest, SourceError
+
+    class Відмовне:
+        id, label, caps = "проба", "Проба", frozenset({"manifest", "fetch"})
+
+        def manifest(self, ref: str) -> Manifest:
+            return Manifest(source=self.id, ref=ref, title="книга", frames=3)
+
+        def fetch(self, ref, dest, *, frames=None, on_progress=None):
+            raise SourceError("сервер не відповів про файли твору")
+
+    class Реєстр:
+        def get(self, sid: str):
+            return Відмовне()
+
+    monkeypatch.setattr(C, "_sources_registry", lambda: Реєстр())
+    res = CliRunner().invoke(C.app, ["get", "проба", "адреса",
+                                     "--out", str(tmp_path / "куди")])
+    assert res.exit_code == 1, res.stdout
+    assert not isinstance(res.exception, SourceError), res.exception
+    assert "сервер не відповів" in res.stdout, res.stdout
+
+
 def test_a_download_without_a_denominator_is_not_called_complete(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """⚠ Мовчазний «✓» на невідомому знаменнику читається як доведена повнота.
