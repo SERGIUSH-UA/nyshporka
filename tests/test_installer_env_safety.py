@@ -316,6 +316,75 @@ def test_uninstall_reads_the_trace_it_was_given(
     assert len(got) == 3      # третій — «кривий рядок» без шляху не пройде
 
 
+def test_a_trace_written_with_a_bom_is_read_as_the_same_trace(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """🔴🔴 BOM від PowerShell 5.1 не сміє перетворити допис у PATH на теку.
+
+    `windows.ps1` пише слід `Set-Content -Encoding UTF8`, і 5.1 кладе BOM. Під
+    голим `utf-8` перший вид читався як `\\ufeffpath`, план бачив у ньому
+    звичайну теку — і `nysh uninstall --yes` зносив би теку команд uv цілком.
+    """
+    from nyshporka.setup import uninstall as U
+
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "чужий-інструмент.exe").write_text("", encoding="utf-8")
+    trace = tmp_path / U.TRACE
+    trace.write_bytes(f"path {bin_dir}\r\nbin {bin_dir / 'nysh.exe'}\r\n"
+                      .encode("utf-8-sig"))
+    monkeypatch.setattr(U, "trace_path", lambda: trace)
+    monkeypatch.setattr(U, "_workspace_root", lambda: None)
+    monkeypatch.setattr(U, "_engine_venv", lambda: None)
+    monkeypatch.setattr(U, "_skill_dirs", lambda: [])
+    monkeypatch.setattr("nyshporka.setup.update.install_home",
+                        lambda: tmp_path / "home")
+
+    assert U.traced()[0] == ("path", str(bin_dir)), U.traced()
+    plan = U.plan()
+    assert not [i for i in plan.items if i.path == bin_dir and i.kind in ("dir", "file")], (
+        "допис у PATH прочитано як теку — uninstall знесе теку команд цілком")
+
+
+@pytest.mark.parametrize("name", ["unix.sh", "windows.ps1"])
+def test_a_second_run_keeps_the_trace_of_the_first(name: str) -> None:
+    """🔴 Повторний запуск інсталятора не сміє затирати слід першого.
+
+    Друга спроба й оновлення тим самим рядком (на Windows — новим `.exe`)
+    бачать uv і теку команд уже на місці, тож самі не записують ні `dir`, ні
+    допису в PATH чи профіль. Перезапис файла лишав `nysh uninstall` без
+    того єдиного рядка, який він мав прибрати з чужого середовища.
+    """
+    text = unix_text() if name == "unix.sh" else ps1_text()
+    write = ('mv -f "$TRACE_FILE.new" "$TRACE_FILE"' if name == "unix.sh"
+             else "Set-Content -LiteralPath $traceFile")
+    read = ('cat "$TRACE_FILE"' if name == "unix.sh"
+            else "Get-Content -LiteralPath $traceFile")
+    assert _uncommented(text, write), f"{name}: слід більше не пишеться там, де чекали"
+    assert _uncommented(text, read), f"{name}: слід попереднього запуску не читається"
+    assert text.index(read) < text.index(write), (
+        f"{name}: слід пишеться раніше, ніж прочитано попередній — перезапис")
+
+
+def test_the_unix_trace_merge_keeps_old_lines_once(tmp_path: Path) -> None:
+    """Сам фрагмент злиття з `unix.sh`, прогнаний оболонкою: старе лишається, дублів немає."""
+    import shutil
+    import subprocess
+
+    sh = shutil.which("sh")
+    if sh is None:
+        pytest.skip("немає POSIX-оболонки")
+    lines = unix_text().splitlines()
+    start = next(i for i, ln in enumerate(lines) if ln.startswith("{ if [ -f \"$TRACE_FILE\" ]"))
+    snippet = "\n".join(lines[start:start + 3])
+    trace = tmp_path / "install-trace.txt"
+    trace.write_text("shell /x/.bashrc\nbin /x/nysh\n", encoding="utf-8")
+    script = (f'TRACE_FILE="{trace.as_posix()}"\n'
+              'TRACE="bin /x/nysh\nfile /x/install-info.ini\n"\n' + snippet + "\n")
+    subprocess.run([sh, "-c", script], check=True, timeout=60)
+    assert trace.read_text(encoding="utf-8").splitlines() == [
+        "shell /x/.bashrc", "bin /x/nysh", "file /x/install-info.ini"]
+
+
 def test_uninstall_keeps_a_copy_before_editing_a_shell_profile(
         tmp_path: Path) -> None:
     """🔴 Правка профілю — рівно те, за що прийшла скарга.

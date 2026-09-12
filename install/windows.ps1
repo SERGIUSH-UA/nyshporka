@@ -490,7 +490,18 @@ if (-not $NoLauncher) {
 $traceFile = Join-Path $Home_ 'install-trace.txt'
 Trace 'file' $traceFile
 try {
-    $Trace | Set-Content -LiteralPath $traceFile -Encoding UTF8
+    # 🔴 ДОПИСУЄМО до сліду попередніх запусків, а не затираємо його. Повторний
+    # запуск — це й оновлення новим `.exe` поверх старого — бачить uv у теці
+    # застосунку й теку команд уже в PATH, тож сам не записує ні `dir`, ні
+    # `path`. Перезапис лишав у файлі лише `bin` і `file`, і допис у PATH,
+    # зроблений ПЕРШИМ запуском, `nysh uninstall` більше не знімав. Друкуємо
+    # нижче лише зміни цього запуску — на диск лягає їхнє об'єднання.
+    $kept = @()
+    if (Test-Path -LiteralPath $traceFile) {
+        $kept = @(Get-Content -LiteralPath $traceFile -Encoding UTF8 |
+                  Where-Object { $_ -and $_.Trim() -and -not $Trace.Contains($_) })
+    }
+    (@($kept) + @($Trace)) | Set-Content -LiteralPath $traceFile -Encoding UTF8
 } catch {
     Say "⚠ не вдалося записати $traceFile — «nysh uninstall» питатиме шляхи" Yellow
 }
