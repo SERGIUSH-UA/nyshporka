@@ -2173,6 +2173,12 @@ def adapt_ceiling(pages: int, hits: int, lifted_lines: list[int],
         return 0
     densest = max(lifted_lines) if lifted_lines else current // 2
     need = -(-(densest * 5 // 2) // 50) * 50
+    if need <= current:
+        # 🔴 Лічильники накопичуються за всю справу: після підйому частка «в
+        # стелі» лишається тією самою, і без цієї межі стеля повзла б на +100
+        # за кожну наступну сторінку аж до стелі перепуску — без жодної нової
+        # сторінки, що впиралась. Найгустіша вже влазить — доказу немає.
+        return 0
     new = min(retry, max(need, current + 100))
     return new if new > current else 0
 

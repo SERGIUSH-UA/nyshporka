@@ -32,6 +32,20 @@ def test_never_above_the_retry_ceiling_and_never_down() -> None:
     assert R.adapt_ceiling(10, 5, [300], current=400, retry=0) == 0        # перепуск вимкнено
 
 
+def test_the_same_evidence_does_not_raise_the_ceiling_twice() -> None:
+    """🔴 Лічильники справи накопичуються, тож після підйому частка «в стелі»
+    лишається тією самою — і стеля повзла б на +100 за КОЖНУ наступну сторінку,
+    аж до стелі перепуску, хоча жодна нова сторінка в стелю не впиралась.
+    Висока стеля роздуває пам'ять шарда, тож без нового доказу — ні кроку."""
+    # 2 з 8 у стелі 400, найгустіша 230 рядків → 575 → 600
+    assert R.adapt_ceiling(8, 2, [230, 230], current=400, retry=1600) == 600
+    # далі легкі сторінки: у стелю 600 не вперлась жодна
+    for pages in range(9, 30):
+        assert R.adapt_ceiling(pages, 2, [230, 230], current=600, retry=1600) == 0
+    # а нова густа сторінка вже при стелі 600 — знову доказ
+    assert R.adapt_ceiling(30, 3, [230, 230, 330], current=600, retry=1600) == 850
+
+
 def test_shared_ceiling_only_goes_up(tmp_path: Path) -> None:
     assert R.shared_ceiling(tmp_path) == 0
     R.publish_ceiling(tmp_path, 800)
