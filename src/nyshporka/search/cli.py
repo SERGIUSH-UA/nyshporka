@@ -12,7 +12,7 @@ from nyshporka import brand
 from nyshporka.cli_emit import answer as _answer
 from nyshporka.cli_emit import notes as _notes
 
-app = typer.Typer(help="Текстовий стор: усе прочитане в одному файлі — стан, збірка, регекс.",
+app = typer.Typer(help="Прочитаний текст в одному сховищі: стан, збірка, пошук регексом.",
                   no_args_is_help=True)
 console = brand.console()
 
@@ -28,7 +28,7 @@ def state_cmd(
                                      "(приймач після обірваної перебудови)"),
     sample: int = typer.Option(3, "--sample", help="сторінок на прогін для --verify; 0 — усі"),
     case: str = typer.Option("", "--case", help="звіряти лише цю справу або прогін"),
-    as_json: bool = typer.Option(False, "--json"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Скільки прогонів у сторі, скільки застаріло, скільки важить.
 
@@ -70,7 +70,7 @@ def index_cmd(
     rebuild: bool = typer.Option(False, "--rebuild", help="перебудувати й свіже"),
     accept_rules: bool = typer.Option(False, "--accept-rules",
                                       help="прийняти чинний відбиток правил без перебудови"),
-    as_json: bool = typer.Option(False, "--json"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Догнати стор по прогонах. Перша збірка корпусу — десятки хвилин, далі
     лише те, що перечитали."""
@@ -90,13 +90,14 @@ def grep_cmd(
     pattern: str = typer.Argument(..., help="регекс Python, кирилиця як у тексті"),
     case: str = typer.Option("", "--case", help="лише ця справа або прогін"),
     context: int = typer.Option(1, "--context", help="рядків сусідства"),
-    limit: int = typer.Option(100, "--limit"),
-    case_sensitive: bool = typer.Option(False, "--case-sensitive"),
+    limit: int = typer.Option(100, "--limit", help="скільки показати"),
+    case_sensitive: bool = typer.Option(False, "--case-sensitive",
+                                        help="розрізняти великі й малі літери"),
     where: str = typer.Option("decode", "--where",
                               help="decode | canon | opys | notes | all, або через кому"),
     extra: list[str] = typer.Option([], "--dir",
                                     help="ще тека або файл — окремим шаром «dir»"),
-    as_json: bool = typer.Option(False, "--json"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Регекс по прочитаному, канону, описах і нотатках — один запит замість
     грепу по чотирьох схованках.
@@ -158,7 +159,7 @@ def ctx_cmd(
     line: int = typer.Option(0, "--line", help="рядок з одиниці; 0 — уся сторінка"),
     window: int = typer.Option(4, "--window", help="рядків з кожного боку"),
     full: bool = typer.Option(False, "--full", help="уся сторінка"),
-    as_json: bool = typer.Option(False, "--json"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Контекст рядка: сторінка, усі голоси, сусіди за геометрією, роки, око."""
     from nyshporka import ops as O
@@ -199,10 +200,10 @@ def crop_cmd(
     with_prev: bool = typer.Option(False, "--prev", help="разом із попереднім рядком "
                                                        "(хвіст після переносу)"),
     wide: bool = typer.Option(False, "--wide", help="на всю ширину сторінки"),
-    pad: int = typer.Option(12, "--pad"),
-    scale: float = typer.Option(1.0, "--scale"),
+    pad: int = typer.Option(12, "--pad", help="поле навколо рамки, пікселів"),
+    scale: float = typer.Option(1.0, "--scale", help="множник масштабу кропу"),
     out: str = typer.Option("", "--out", help="куди зберегти PNG"),
-    as_json: bool = typer.Option(False, "--json"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Кроп рядка з кадру за рамкою рушія — з поворотом і масштабом, як бачив рушій."""
     from nyshporka import ops as O
@@ -233,7 +234,7 @@ def voices_cmd(
     page: str = typer.Argument(..., help="скан"),
     lines: str = typer.Option("", "--lines", help="діапазон «10-30»"),
     only_diff: bool = typer.Option(False, "--diff", help="лише рядки, де голоси розійшлись"),
-    as_json: bool = typer.Option(False, "--json"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Два голоси рядок до рядка: де зійшлись, де ні."""
     from nyshporka import ops as O
@@ -259,8 +260,8 @@ def voices_cmd(
 def coverage_cmd(
     case: str = typer.Option("", "--case", help="справа, фонд або порожньо — усе"),
     unsearched: bool = typer.Option(False, "--unsearched", help="лише прочитані, але не шукані"),
-    limit: int = typer.Option(300, "--limit"),
-    as_json: bool = typer.Option(False, "--json"),
+    limit: int = typer.Option(300, "--limit", help="скільки показати"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Кадри → прочитано → у сторі → чим шукали → скільки бачило око."""
     from rich.table import Table
@@ -291,7 +292,7 @@ def coverage_cmd(
 @app.command("whatis")
 def whatis_cmd(
     case: str = typer.Argument(..., help="справа, шифра або назва прогону"),
-    as_json: bool = typer.Option(False, "--json"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Картка справи: реєстр, паспорт, прогони, слід пошуку, око, найчастіші слова."""
     from nyshporka import ops as O
@@ -332,10 +333,10 @@ def whatis_cmd(
 def find_cmd(
     q: str = typer.Argument(..., help="прізвище або слово"),
     case: str = typer.Option("", "--case", help="справа, шифра або прогін; порожньо — усе"),
-    thresh: int = typer.Option(78, "--thresh"),
-    limit: int = typer.Option(40, "--limit"),
-    context: int = typer.Option(1, "--context"),
-    as_json: bool = typer.Option(False, "--json"),
+    thresh: int = typer.Option(78, "--thresh", help="поріг схожості 50-100"),
+    limit: int = typer.Option(40, "--limit", help="скільки показати"),
+    context: int = typer.Option(1, "--context", help="рядків сусідства"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Знайти рід усіма каналами разом. Нуль друкується лише з журналом заходу."""
     from nyshporka import ops as O
@@ -414,11 +415,11 @@ def find_cmd(
 def sheet_cmd(
     q: str = typer.Argument(..., help="прізвище або слово"),
     case: str = typer.Option(..., "--case", help="справа, шифра або прогін"),
-    thresh: int = typer.Option(78, "--thresh"),
+    thresh: int = typer.Option(78, "--thresh", help="поріг схожості 50-100"),
     limit: int = typer.Option(60, "--limit", help="кандидатів у гортачі"),
     crops: int = typer.Option(40, "--crops", help="скільком верхнім дати кроп"),
     out: str = typer.Option("", "--out", help="куди покласти HTML"),
-    as_json: bool = typer.Option(False, "--json"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """HTML-гортач: кандидати з контекстом, другим голосом, кропом і полем вердикту.
 
@@ -443,7 +444,7 @@ def verdicts_cmd(
     path: str = typer.Argument(..., help="JSON із гортача"),
     case: str = typer.Option(..., "--case", help="справа, шифра або прогін"),
     q: str = typer.Option("", "--q", help="який запит судили"),
-    as_json: bool = typer.Option(False, "--json"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Занести вердикти гортача у сховище сторінок — і негативні теж."""
     from nyshporka import ops as O

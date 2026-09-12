@@ -35,7 +35,7 @@ def cmd_where() -> None:
 
 
 @app.command("list")
-def cmd_list(as_json: bool = typer.Option(False, "--json")) -> None:
+def cmd_list(as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)")) -> None:
     """Що встановлено, якого зрізу й чи ціле."""
     packs = store.installed()
     if as_json:

@@ -276,7 +276,7 @@ def find(q: str = typer.Argument(..., help="село, прізвище, слов
          text: bool = typer.Option(False, "--text",
                                    help="шукати текстом, навіть якщо запит "
                                         "схожий на шифру"),
-         limit: int = typer.Option(20, "--limit")) -> None:
+         limit: int = typer.Option(20, "--limit", help="скільки показати")) -> None:
     """Де взагалі є щось про моє село — пошук по каталогах джерел."""
     from nyshporka import ops as O
 
@@ -352,7 +352,9 @@ def get(source: str = typer.Argument(..., help="id джерела"),
     після — перервана закачка лишає теку в невизначеному стані.
 
     🔴 Поруч із кадрами лягає паспорт: джерело, адреса, час і звірка «обіцяно /
-    взято». Доти команда лишала на диску самі пікселі — тобто теку невідомого
+    взято».
+    \f
+    Доти команда лишала на диску самі пікселі — тобто теку невідомого
     походження, у якій наступна сесія не знала ні звідки вона, ні чи повна.
     """
     from nyshporka.sources.base import SourceError
@@ -489,7 +491,7 @@ def init(
     path: str = typer.Argument("", help="куди покласти простір; порожньо — запропоную"),
     name: str = typer.Option("", "--name", help="як зветься дослідження"),
     preset: str = typer.Option("", "--preset",
-                               help="набір частин: amateur | researcher | lab"),
+                               help="набір частин: catalog | amateur | researcher | lab"),
     yes: bool = typer.Option(False, "--yes", "-y", help="без питань (для інсталятора)"),
 ) -> None:
     """Створити робочий простір — теку, де житиме дослідження.
@@ -558,14 +560,14 @@ def update(
 ) -> None:
     """Оновити застосунок: подивитись версію на pypi.org і поставити нову.
 
+    ⚠ Установлення саме себе на ходу не робиться: `uv tool install --force`
+    міняє те саме середовище, з якого зараз запущено `nysh`. Закрийте
+    застосунок (`nysh serve`) перед оновленням.
+    \f
     🔴 Досі шляху оновлення не було зовсім — ні команди, ні перевірки версії,
     ні рядка в `doctor`. Людина з `.exe`-установленням дізнатись про нову
     збірку не могла нізвідки, тож вада, полагоджена вчора, лишалась у неї
     назавжди.
-
-    ⚠ Установлення саме себе на ходу не робиться: `uv tool install --force`
-    міняє те саме середовище, з якого зараз запущено `nysh`. Закрийте
-    застосунок (`nysh serve`) перед оновленням.
     """
     import subprocess
 
@@ -669,7 +671,7 @@ def uninstall(
 
 @app.command()
 def doctor(
-    as_json: bool = typer.Option(False, "--json"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Перевірити те, що ламається тихо: карта, хмарна тека, місце, рушії."""
 
@@ -693,7 +695,7 @@ def doctor(
 def sample(
     force: bool = typer.Option(False, "--force",
                                help="перезаписати вже розгорнуті файли"),
-    as_json: bool = typer.Option(False, "--json"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Розгорнути вкладену зразкову справу — щоб пройти застосунок без сканів.
 
@@ -736,10 +738,12 @@ def sample(
 def read(
     case_dir: str = typer.Argument(..., help="пласка тека зі сканами справи"),
     out: str = typer.Option("", "--out", help="куди класти текст"),
-    script: str = typer.Option("", "--script", help="latin | cyrillic"),
+    script: str = typer.Option("", "--script",
+                              help="письмо: latin | cyrillic; порожньо — визначити самому"),
     one_voice: bool = typer.Option(False, "--one-voice",
                                    help="без другого рушія (швидше, але сліпіше)"),
-    case_key: str = typer.Option("", "--case-key", help="шифра справи у мету"),
+    case_key: str = typer.Option("", "--case-key",
+                                help="шифра справи для мети прогону; порожньо — з бібліотеки"),
     limit: int = typer.Option(0, "--limit", help="лише перші N кадрів"),
     pages: str = typer.Option("", "--pages", help="діапазони кадрів: 1-50,60"),
     shard: str = typer.Option("", "--shard",
@@ -762,10 +766,12 @@ def read(
     зробити найдовшу роботу найкрихкішою.
 
     Важелі ресурсів (`--shard`, `--gpu-lock`, `--no-gpu-sato`, `--seg-height`)
-    існують тому, що машина в кожного своя. Раннер мав їх від початку, але
-    доступні вони були лише прямим викликом — тобто рівно та людина, якій
-    найбільше треба стиснути прогін під слабку карту, важелів не мала.
-    Як ними користуватись — `docs/agents/htr-tuning.md`.
+    існують тому, що машина в кожного своя. Як ними користуватись —
+    https://sergiush-ua.github.io/nyshporka/agents/htr-tuning/
+    \f
+    Раннер мав ці важелі від початку, але доступні вони були лише прямим
+    викликом — тобто рівно та людина, якій найбільше треба стиснути прогін під
+    слабку карту, важелів не мала.
     """
     import subprocess
 
@@ -895,7 +901,7 @@ def case_cmd(
     year_from: int = typer.Option(0, "--from", help="рік початку"),
     year_to: int = typer.Option(0, "--to", help="рік кінця"),
     place: str = typer.Option("", "--place", help="село, повіт, губернія"),
-    note: str = typer.Option("", "--note"),
+    note: str = typer.Option("", "--note", help="примітка до справи"),
     film: str = typer.Option("", "--film",
                              help="номер плівки, коли шифру ще не встановлено"),
     adopt: bool = typer.Option(False, "--adopt",
@@ -909,8 +915,9 @@ def case_cmd(
 
     ⚠ Тека поза простором лишається невидимою в переліках: обхід іде по
     `data/raw` і по оголошених коренях справ. `--adopt` оголошує цю теку
-    коренем у `nyshporka.toml` — файли при цьому не переносяться. Прапорця
-    тут довго не було, хоч операція поле мала: єдиним шляхом з командного
+    коренем у `nyshporka.toml` — файли при цьому не переносяться.
+    \f
+    Прапорця тут довго не було, хоч операція поле мала: єдиним шляхом з командного
     рядка лишався `nysh op case.register --args …`, тобто найпотрібніша
     новачкові дія була доступна найнезручнішим входом.
     """
@@ -939,7 +946,7 @@ def case_cmd(
 def archive_cmd(
     repo: str = typer.Argument(..., help="код архіву: DAHMO, CDIAK, ANRM…"),
     fond: str = typer.Argument(..., help="номер фонду"),
-    as_json: bool = typer.Option(False, "--json"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Що пак знає про фонд: губернія, опис у ключі, дефолти.
 
@@ -996,8 +1003,9 @@ def profile_init(
     не можна (`core.morph`), а вгадана основа мовчки викидає половину написань
     із пошуку — і жодного сліду про це не лишиться.
 
-    🔴 Іде через ту саму операцію, що й форма в браузері. Доти команда писала
-    файл повз реєстр, тобто той самий запис існував двічі — а реєстр операцій
+    🔴 Іде через ту саму операцію, що й форма в браузері.
+    \f
+    Доти команда писала файл повз реєстр, тобто той самий запис існував двічі — а реєстр операцій
     заведено рівно для того, щоб дія оголошувалась один раз і три обличчя не
     могли розійтись у тому, що вона робить.
     """
@@ -1017,7 +1025,7 @@ def profile_init(
                   f"перевірити: `nysh profile`[/muted]")
 
 
-def profile_cmd(as_json: bool = typer.Option(False, "--json")) -> None:
+def profile_cmd(as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)")) -> None:
     """Чий рід шукаємо: форми прізвища, корені, парадигма.
 
     🔴 Перше, що варто спитати на чужому просторі: пошук спирається на цей файл,
@@ -1060,7 +1068,7 @@ def search_cmd(
     context: int = typer.Option(1, "--context",
                                 help="рядків сусідства (0 — лише сам рядок)"),
     thresh: int = typer.Option(80, "--thresh", help="поріг схожості 50-100"),
-    limit: int = typer.Option(40, "--limit"),
+    limit: int = typer.Option(40, "--limit", help="скільки показати"),
     given: bool = typer.Option(
         True, "--given/--no-given",
         help="розкривати гніздо написань імені (Явдоха=Євдокія, Осип=Іосиф)"),
@@ -1081,7 +1089,7 @@ def search_cmd(
         False, "--selfcheck",
         help="поміряти, чи бачить пошук аркуші, де прізвище виписане оком. "
              "Потребує --case"),
-    as_json: bool = typer.Option(False, "--json"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Знайти прізвище в тому, що вже прочитано.
 
@@ -1182,17 +1190,18 @@ def search_cmd(
 @app.command("review")
 def review_cmd(
     source: str = typer.Option("", "--source", help="лише з цього джерела"),
-    min_score: float = typer.Option(0.0, "--min-score"),
+    min_score: float = typer.Option(0.0, "--min-score",
+                                   help="лише кандидати з балом не нижче цього"),
 ) -> None:
-    """Людський gate: перебрати кандидатів із зовнішніх джерел.
+    """Перебрати кандидатів із зовнішніх джерел: рішення за людиною.
 
     🔴 Жоден кандидат не потрапляє в канон машиною. Це не обережність, а
     вимірювана вартість: збіг прізвища й десятиліття дає правдоподібну, але
     чужу особу, і виявляється це через покоління дерева.
 
-    Кандидатів пишуть fetcher'и зовнішніх сайтів, яких у цій версії ще немає
-    (правове питання ToS чужих сервісів), тож на щойно створеному просторі
-    черга буде порожня — це стан, а не поламка.
+    Кандидатів додають завантажувачі зовнішніх сайтів, яких у цій версії ще
+    немає (умови використання чужих сервісів), тож на щойно створеному
+    просторі черга буде порожня — це стан, а не поламка.
     """
     from nyshporka.core.workspace import workspace
     from nyshporka.matching.review import review_loop
@@ -1257,11 +1266,12 @@ def cases_build(
 ) -> None:
     """Зібрати реєстр справ.
 
-    🔴 Реєстр — це зріз п'яти сховищ, а не сховище. Він старіє за хвилини, і
-    застарілий зріз небезпечніший за відсутній: він виглядає як відповідь
-    («декоду немає») там, де роботу зробили годину тому. Тому перезбирати його
-    треба після кожного прогону, завантаження й занесення в облік — а команди
-    для цього досі не існувало, хоч усі повідомлення на неї посилались.
+    🔴 Реєстр — це зріз п'яти сховищ, а не сховище, і він старіє за хвилини:
+    застарілий зріз виглядає як відповідь («декоду немає») там, де роботу
+    зробили годину тому. Тому перезбирати його треба після кожного прогону,
+    завантаження й занесення в облік.
+    \f
+    Команди для цього довго не існувало, хоч усі повідомлення на неї посилались.
     """
     from nyshporka.cases import db
 
@@ -1275,11 +1285,11 @@ def cases_build(
 @cases_app.command("list")
 def cases_list_cmd(
     q: str = typer.Option("", "--q", help="підрядок: шифра, назва, місце"),
-    repo: str = typer.Option("", "--repo"),
+    repo: str = typer.Option("", "--repo", help="лише цей архів: DAHMO, CDIAK…"),
     year: str = typer.Option("", "--year", help="рік або «1840-1860»"),
     kind: str = typer.Option("", "--kind",
                              help="case | bundle | unfiled (матеріал без шифри)"),
-    limit: int = typer.Option(40, "--limit"),
+    limit: int = typer.Option(40, "--limit", help="скільки показати"),
 ) -> None:
     """Перелік справ із станом обробки."""
     from nyshporka import ops as O
@@ -1412,7 +1422,7 @@ def pages_status_cmd(
     scans: str = typer.Option("", "--scans",
                               help="кома-список сканів: питати про ці аркуші, "
                                    "а не про справу цілком"),
-    as_json: bool = typer.Option(False, "--json"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Що в цій справі вже дивились, а що ні — перед тим, як відкривати."""
     from nyshporka import ops as O
@@ -1444,19 +1454,20 @@ def pages_status_cmd(
 
 @pages_app.command("note")
 def pages_note_cmd(
-    case: str = typer.Argument(...),
+    case: str = typer.Argument(..., help="справа у будь-якому форматі"),
     scan: str = typer.Argument(..., help="голе ім'я файлу: 0030.JPG"),
     page_type: str = typer.Option(..., "--type", help=_PAGE_TYPES_HELP),
     surnames: str = typer.Option("", "--surnames", help="кома-список ЯК У джерелі"),
-    places: str = typer.Option("", "--places"),
-    years: str = typer.Option("", "--years"),
-    sheet: str = typer.Option("", "--sheet"),
+    places: str = typer.Option("", "--places", help="кома-список місць, як у джерелі"),
+    years: str = typer.Option("", "--years", help="кома-список років: 1858,1859"),
+    sheet: str = typer.Option("", "--sheet", help="архівний аркуш: 31зв-32"),
     status: str = typer.Option("full", "--status", help=_PAGE_STATUS_HELP),
     method: str = typer.Option("visual", "--method", help=_PAGE_METHOD_HELP),
-    comment: str = typer.Option("", "--comment"),
+    comment: str = typer.Option("", "--comment",
+                                 help="що на сторінці й чому це не те, що шукали"),
     agent: str = typer.Option("", "--agent",
                               help="хто заносив: ім'я людини або сесії"),
-    as_json: bool = typer.Option(False, "--json"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Занести переглянуту сторінку.
 
@@ -1478,12 +1489,12 @@ def pages_note_cmd(
 
 @pages_app.command("note-batch")
 def pages_note_batch_cmd(
-    case: str = typer.Argument(...),
+    case: str = typer.Argument(..., help="справа у будь-якому форматі"),
     file: Path = typer.Option(None, "-f", "--file",
                               help="JSON-масив анотацій; без -f — читаємо stdin"),
     replace: bool = typer.Option(False, "--replace",
                                  help="замінити наявні, а не домержити"),
-    as_json: bool = typer.Option(False, "--json"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Занести переглянуті сторінки пачкою: аркуші заносять десятками.
 
@@ -1512,20 +1523,20 @@ def pages_note_batch_cmd(
 def pages_grep_cmd(
     q: str = typer.Argument(..., help="прізвище або назва місця"),
     where: str = typer.Option("pages", "--where", help="pages | records | decode"),
-    case: str = typer.Option("", "--case"),
+    case: str = typer.Option("", "--case", help="лише в цій справі"),
     axis: str = typer.Option("name", "--axis",
                              help="name — по прізвищу · place — по місцю "
                                   "(лише pages|records)"),
     role: str = typer.Option("", "--role", help=_ROLES_HELP),
     rtype: str = typer.Option("", "--rtype", help=_RTYPES_HELP),
     thresh: int = typer.Option(80, "--thresh", help="поріг схожості 50-100"),
-    limit: int = typer.Option(50, "--limit"),
+    limit: int = typer.Option(50, "--limit", help="скільки показати"),
     given: bool = typer.Option(
         True, "--given/--no-given",
         help="розкривати гніздо написань імені (Явдоха=Євдокія)"),
     folk: bool = typer.Option(
         False, "--folk", help="додати побутових двійників імені (Васса=Анна)"),
-    as_json: bool = typer.Option(False, "--json"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Знайти прізвище в тому, що вже прочитано."""
     from nyshporka import ops as O
@@ -1566,7 +1577,7 @@ def pages_grep_cmd(
 def pages_show_cmd(
     case: str = typer.Argument(..., help="справа у будь-якому форматі"),
     scan: str = typer.Argument("", help="одна сторінка: голе ім'я файлу"),
-    as_json: bool = typer.Option(False, "--json"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Показати занесене про справу як воно лежить у сховищі."""
     from nyshporka import ops as O
@@ -1596,7 +1607,7 @@ def records_add_cmd(
     confirm: int = typer.Option(-1, "--confirm",
                                 help="скільки записів дозволено стерти — "
                                      "число беруть із відмови на --replace"),
-    as_json: bool = typer.Option(False, "--json"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Занести розібрані акти структурою, а не прозою.
 
@@ -1620,22 +1631,23 @@ def records_add_cmd(
 @records_app.command("grep")
 def records_grep_cmd(
     q: str = typer.Argument(..., help="прізвище або назва місця"),
-    case: str = typer.Option("", "--case"),
+    case: str = typer.Option("", "--case", help="лише в цій справі"),
     role: str = typer.Option("", "--role", help=_ROLES_HELP),
     rtype: str = typer.Option("", "--rtype", help=_RTYPES_HELP),
     axis: str = typer.Option("name", "--axis", help="name — по прізвищу · "
                                                    "place — по місцю"),
     thresh: int = typer.Option(80, "--thresh", help="поріг схожості 50-100"),
-    limit: int = typer.Option(50, "--limit"),
+    limit: int = typer.Option(50, "--limit", help="скільки показати"),
     given: bool = typer.Option(
         True, "--given/--no-given",
         help="розкривати гніздо написань імені (Явдоха=Євдокія)"),
     folk: bool = typer.Option(
         False, "--folk", help="додати побутових двійників імені (Васса=Анна)"),
-    as_json: bool = typer.Option(False, "--json"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Знайти прізвище серед розібраних записів — за роллю й типом акту.
 
+    \f
     ⚠ Сусідня команда кличеться як звичайна функція, тож КОЖЕН її параметр
     треба передати явно: неназваний прийде сюди об'єктом `typer.Option`, а не
     своїм значенням, і операція відмовить на перевірці типу. Саме так поїхали
@@ -1650,7 +1662,7 @@ def records_grep_cmd(
 def records_show_cmd(
     case: str = typer.Argument(..., help="справа у будь-якому форматі"),
     rid: str = typer.Argument(..., help="id запису — з `records grep`"),
-    as_json: bool = typer.Option(False, "--json"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Показати один розібраний запис як він лежить у сховищі."""
     from nyshporka import ops as O
@@ -1671,7 +1683,7 @@ def records_prep_cmd(
     only: str = typer.Option("", "--only", help="лише ці тайли: head/full/left/right"),
     force: bool = typer.Option(False, "--force", help="різати й вичитані начисто"),
     refresh: bool = typer.Option(False, "--refresh", help="перерізати, ігноруючи кеш"),
-    as_json: bool = typer.Option(False, "--json"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Нарізати розворот на тайли, які модель справді читає.
 
@@ -1712,7 +1724,7 @@ def records_ingest_cmd(
     dir_: str = typer.Option("", "--dir", help="тека з JSON-виводами: усі за раз"),
     replace: bool = typer.Option(False, "--replace",
                                  help="замінити анотації сторінок повністю"),
-    as_json: bool = typer.Option(False, "--json"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Прийняти вивід вичитки: сторінки й акти одним JSON.
 
@@ -1743,7 +1755,7 @@ def records_ingest_cmd(
 def records_audit_cmd(
     case: str = typer.Argument(..., help="справа у будь-якому форматі"),
     prof: str = typer.Option("", "--profile", help="профіль книги"),
-    as_json: bool = typer.Option(False, "--json"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Чексуми книги: діри в нумерації й розбіжність із власним підсумком.
 
@@ -1790,7 +1802,7 @@ def records_merge_cmd(
     prof: str = typer.Option("", "--profile", help="профіль книги"),
     apply: bool = typer.Option(False, "--apply", help="занести узгоджене у сховище"),
     tasks: str = typer.Option("", "--tasks", help="куди скласти чергу спірних місць"),
-    as_json: bool = typer.Option(False, "--json"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Звести дві незалежні вичитки: збіг у сховище, спір — на людський розсуд.
 
@@ -1835,7 +1847,7 @@ def export_case_cmd(
     headers: str = typer.Option("uk", "--headers",
                                 help="uk — людські шапки · raw — ключі полів"),
     force: bool = typer.Option(False, "--force", help="перезаписати наявний файл"),
-    as_json: bool = typer.Option(False, "--json"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Прочитане зі справи — таблицею, придатною до Ексселю.
 
@@ -1930,7 +1942,7 @@ app.add_typer(htr_app, name="htr")
 
 
 @htr_app.command("env")
-def htr_env_cmd(as_json: bool = typer.Option(False, "--json")) -> None:
+def htr_env_cmd(as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)")) -> None:
     """Що стоїть у середовищі рушіїв: версії, чого бракує.
 
     Загальну готовність машини каже `nysh doctor`; тут — подробиці саме про
@@ -2076,7 +2088,7 @@ def models_get(
 
 @app.command()
 def serve(
-    port: int = typer.Option(8788, "--port"),
+    port: int = typer.Option(8788, "--port", help="порт на 127.0.0.1"),
     no_browser: bool = typer.Option(False, "--no-browser",
                                     help="не відкривати вкладку самому"),
 ) -> None:
@@ -2206,7 +2218,7 @@ def sections_disable(section: str = typer.Argument(..., help="id секції"))
 
 
 @sections_app.command("preset")
-def sections_preset(name: str = typer.Argument(..., help="amateur | researcher | lab"),
+def sections_preset(name: str = typer.Argument(..., help="catalog | amateur | researcher | lab"),
                     ) -> None:
     """Взяти готовий набір секцій."""
     _sections_call({"preset": name})
@@ -2344,7 +2356,7 @@ def skills_install(
     console.print(f"  [muted]видно агентові {where}; перезапустіть сесію[/muted]")
 
 
-mcp_app = typer.Typer(help="Перелік tool'ів для Claude Code / Codex — коротший шлях до того, що вміє `nysh op`.",
+mcp_app = typer.Typer(help="Підключення агента (Claude Code, Codex) через MCP — коротший шлях до того, що вміє `nysh op`.",
                       no_args_is_help=True)
 app.add_typer(mcp_app, name="mcp")
 

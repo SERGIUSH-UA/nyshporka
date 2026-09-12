@@ -3483,7 +3483,7 @@ def htr_env(a: EnvArgs) -> Envelope:
 # дочитувати описи й починає вгадувати. Переналаштування самого застосунку —
 # не та річ, заради якої її рухати; для цього в агента є командний рядок.
 class SectionsSetArgs(BaseModel):
-    preset: str = Field("", description="пресет: amateur | researcher | lab")
+    preset: str = Field("", description="пресет: catalog | amateur | researcher | lab")
     enable: list[str] = Field(default_factory=list, description="увімкнути секції")
     disable: list[str] = Field(default_factory=list, description="вимкнути секції")
 

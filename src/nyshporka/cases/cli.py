@@ -151,7 +151,7 @@ def cmd_list(
 @app.command("show")
 def cmd_show(
     case: str = typer.Argument(..., help="Шифра, ключ або підрядок назви"),
-    as_json: bool = typer.Option(False, "--json"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Картка справи: усі шари обробки разом."""
     if not as_json:
@@ -209,7 +209,7 @@ def cmd_show(
 
 
 @app.command("orphans")
-def cmd_orphans(as_json: bool = typer.Option(False, "--json")) -> None:
+def cmd_orphans(as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)")) -> None:
     """Прогони, які не прив'язались до жодної справи (їх декод «нічий»)."""
     rows = db.orphan_runs()
     if as_json:
@@ -302,7 +302,7 @@ def _print_voices(s: dict[str, Any]) -> None:
 
 
 @app.command("stats")
-def cmd_stats(as_json: bool = typer.Option(False, "--json")) -> None:
+def cmd_stats(as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)")) -> None:
     """Зведення: скільки завантажено, декодовано, прошукано, переглянуто."""
     s = db.stats()
     if as_json:
@@ -405,7 +405,7 @@ def _opys_registry_row(repo: str, fond: str, opys: str, spr: str,
 
 @app.command("opys")
 def cmd_opys(key: str = typer.Argument(..., help="DAHMO/230/43 або DAHMO/230/1/43"),
-             as_json: bool = typer.Option(False, "--json")) -> None:
+             as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)")) -> None:
     """Що реєстр опису знає про справу — перший крок перед будь-якою роботою.
 
     Відповідає на три питання, кожне з яких змінює дію: звідки качати (Commons чи
@@ -529,8 +529,8 @@ def cmd_fond(
     village: str = typer.Option("", "--village", "--село",
                                 help="поселення: своє село парафії або приписне"),
     fs: bool = typer.Option(False, "--fs", help="лише ті, що мають плівку FamilySearch"),
-    limit: int = typer.Option(40, "--limit"),
-    as_json: bool = typer.Option(False, "--json"),
+    limit: int = typer.Option(40, "--limit", help="скільки показати"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Список справ із реєстру опису фонду — «що взагалі існує», з фільтрами.
 

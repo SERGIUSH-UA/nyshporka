@@ -22,7 +22,7 @@ app = typer.Typer(help="Лабораторія: розмітка рядків і
 def sets_cmd(
     name: str = typer.Option("", "--set", metavar="НАБІР", help="лише цей набір"),
     show_all: bool = typer.Option(False, "--all", help="і приховані"),
-    as_json: bool = typer.Option(False, "--json"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Набори: сторінки, кропи на диску, мітки, покриття злиття.
 
@@ -55,7 +55,7 @@ def sets_cmd(
 
 
 @app.command("doctor")
-def doctor_cmd(as_json: bool = typer.Option(False, "--json")) -> None:
+def doctor_cmd(as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)")) -> None:
     """Що на цій машині є для розмітки й трену.
 
     Середовище рушіїв, карта, gpurunner на шляху, SSH-хости, набори зі
@@ -89,12 +89,12 @@ def cut_cmd(
     name: str = typer.Option(..., "--name", metavar="НАБІР", help="ім'я набору"),
     pages: str = typer.Option("", "--pages", help="кома-список сторінок"),
     pick: int = typer.Option(0, "--pick", help="скільки сторінок відібрати автоматично"),
-    title: str = typer.Option("", "--title"),
+    title: str = typer.Option("", "--title", help="назва набору для людини"),
     domain: str = typer.Option("", "--domain", help="жанр: «сповідний розпис», «метрика»"),
     case: str = typer.Option("", "--case", help="шифра справи"),
     no_engine: bool = typer.Option(False, "--no-engine",
                                    help="різати полігоном, не кешем сегментації"),
-    as_json: bool = typer.Option(False, "--json"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Нарізати кропи рядків із прогону в набір для розмітки.
 
@@ -120,11 +120,11 @@ def cut_cmd(
 
 @app.command("voices")
 def voices_cmd(
-    name: str = typer.Option(..., "--set", metavar="НАБІР"),
+    name: str = typer.Option(..., "--set", metavar="НАБІР", help="ім'я набору"),
     from_run: str = typer.Option("", "--from-run", help="сусідній прогін тієї самої справи"),
     models: str = typer.Option("", "--models", help="кома-список ваг Писаря (.pt)"),
-    device: str = typer.Option("cuda:0", "--device"),
-    as_json: bool = typer.Option(False, "--json"),
+    device: str = typer.Option("cuda:0", "--device", help="пристрій: cuda:0 або cpu"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Додати голос: текст сусіднього прогону або інфер вагами по кропах.
 
@@ -146,12 +146,12 @@ def voices_cmd(
 
 @app.command("glossary")
 def glossary_cmd(
-    name: str = typer.Option(..., "--set", metavar="НАБІР"),
+    name: str = typer.Option(..., "--set", metavar="НАБІР", help="ім'я набору"),
     add: str = typer.Option("", "--add", help="кома-список власних назв"),
     why: str = typer.Option("", "--why", help="звідки взято"),
     remove: str = typer.Option("", "--remove", help="кома-список назв, які прибрати"),
     show: bool = typer.Option(False, "--show", help="лише показати"),
-    as_json: bool = typer.Option(False, "--json"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Словник справи для арбітрів: власні назви, звірені оком.
 
@@ -173,14 +173,14 @@ def glossary_cmd(
 
 @app.command("export")
 def export_cmd(
-    name: str = typer.Option(..., "--set", metavar="НАБІР"),
+    name: str = typer.Option(..., "--set", metavar="НАБІР", help="ім'я набору"),
     pages: str = typer.Option("", "--pages", help="кома-список сторінок"),
     pages_per_file: int = typer.Option(3, "--pages-per-file", help="сторінок на файл"),
     only_missing: bool = typer.Option(False, "--only-missing", help="лише рядки без злиття"),
     drafts: str = typer.Option("", "--drafts", help="кома-список голосів"),
     out: str = typer.Option("", "--out", help="куди класти завдання"),
     no_sheets: bool = typer.Option(False, "--no-sheets", help="без аркушів із рамками"),
-    as_json: bool = typer.Option(False, "--json"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Завдання арбітрам: голоси по сторінках + аркуші з рамками.
 
@@ -205,10 +205,10 @@ def export_cmd(
 
 @app.command("import")
 def import_cmd(
-    name: str = typer.Option(..., "--set", metavar="НАБІР"),
+    name: str = typer.Option(..., "--set", metavar="НАБІР", help="ім'я набору"),
     tasks: str = typer.Option("", "--tasks", help="тека з *.answer.json"),
     keep_old: bool = typer.Option(False, "--keep-old", help="попереднє злиття → merge_old"),
-    as_json: bool = typer.Option(False, "--json"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Забрати відповіді арбітрів у злиття і прогнати ворота.
 
@@ -229,10 +229,10 @@ def import_cmd(
 
 @app.command("gates")
 def gates_cmd(
-    name: str = typer.Option(..., "--set", metavar="НАБІР"),
+    name: str = typer.Option(..., "--set", metavar="НАБІР", help="ім'я набору"),
     suspects: bool = typer.Option(False, "--suspects", help="рядки на очі людині"),
     gt: bool = typer.Option(False, "--gt", help="якір ручних міток"),
-    as_json: bool = typer.Option(False, "--json"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Ворота окремо: підозрілі рядки злиття, якір ручних міток."""
     from nyshporka import ops as O
@@ -249,10 +249,10 @@ def gates_cmd(
 
 @app.command("sheets")
 def sheets_cmd(
-    name: str = typer.Option(..., "--set", metavar="НАБІР"),
+    name: str = typer.Option(..., "--set", metavar="НАБІР", help="ім'я набору"),
     pages: str = typer.Option("", "--pages", help="кома-список сторінок"),
-    out: str = typer.Option("", "--out"),
-    as_json: bool = typer.Option(False, "--json"),
+    out: str = typer.Option("", "--out", help="куди класти аркуші"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Аркуші сторінок із пронумерованими рамками рядків."""
     from nyshporka import ops as O
@@ -270,8 +270,8 @@ def sheets_cmd(
 @app.command("view")
 def view_cmd(
     mode: str = typer.Argument("strip", help="strip | zoom | ctx"),
-    name: str = typer.Option(..., "--set", metavar="НАБІР"),
-    page: str = typer.Option(..., "--page"),
+    name: str = typer.Option(..., "--set", metavar="НАБІР", help="ім'я набору"),
+    page: str = typer.Option(..., "--page", help="сторінка набору"),
     lines: str = typer.Option("", "--lines", help="strip: «6-10,15»"),
     line: int = typer.Option(0, "--line", help="zoom/ctx: індекс рядка"),
     frm: float = typer.Option(0.0, "--from", help="zoom: початок, частка ширини"),
@@ -294,8 +294,8 @@ def view_cmd(
 
 @app.command("stats")
 def stats_cmd(
-    name: str = typer.Option(..., "--set", metavar="НАБІР"),
-    as_json: bool = typer.Option(False, "--json"),
+    name: str = typer.Option(..., "--set", metavar="НАБІР", help="ім'я набору"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Поступ розмітки набору й CER голосу проти ручних міток.
 
@@ -334,9 +334,10 @@ def _print_plan(d: dict) -> None:  # type: ignore[type-arg]
 def plan_cmd(
     recipe: str = typer.Option("own", "--recipe", help="рецепт із recipes.yaml"),
     only: str = typer.Option("", "--only", help="лише ці джерела, через кому"),
-    include_unsure: bool = typer.Option(False, "--include-unsure"),
-    seed: int = typer.Option(42, "--seed"),
-    as_json: bool = typer.Option(False, "--json"),
+    include_unsure: bool = typer.Option(False, "--include-unsure",
+                                        help="брати й рядки з позначкою «непевно»"),
+    seed: int = typer.Option(42, "--seed", help="зерно випадкового відбору"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Що піде в корпус: джерела, кратності, частки, алфавіт — без запису.
 
@@ -356,15 +357,16 @@ def plan_cmd(
 
 @app.command("build")
 def build_cmd(
-    name: str = typer.Option(..., "--name", metavar="КОРПУС"),
-    recipe: str = typer.Option("own", "--recipe"),
-    only: str = typer.Option("", "--only"),
-    include_unsure: bool = typer.Option(False, "--include-unsure"),
+    name: str = typer.Option(..., "--name", metavar="КОРПУС", help="ім'я корпусу"),
+    recipe: str = typer.Option("own", "--recipe", help="рецепт із recipes.yaml"),
+    only: str = typer.Option("", "--only", help="лише ці джерела, через кому"),
+    include_unsure: bool = typer.Option(False, "--include-unsure",
+                                        help="брати й рядки з позначкою «непевно»"),
     prune: bool = typer.Option(False, "--prune", help="прибрати кропи поза маніфестом"),
     force: bool = typer.Option(False, "--force", help="перезібрати наявний"),
-    seed: int = typer.Option(42, "--seed"),
-    workers: int = typer.Option(8, "--workers"),
-    as_json: bool = typer.Option(False, "--json"),
+    seed: int = typer.Option(42, "--seed", help="зерно випадкового відбору"),
+    workers: int = typer.Option(8, "--workers", help="паралельних процесів"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Зібрати корпус: кропи, маніфести, corpus.json, tgz — один артефакт на всі шляхи."""
     from nyshporka import ops as O
@@ -383,7 +385,8 @@ def build_cmd(
 
 @app.command("start")
 def start_cmd(
-    corpus: str = typer.Option(..., "--corpus", metavar="КОРПУС"),
+    corpus: str = typer.Option(..., "--corpus", metavar="КОРПУС",
+                                help="корпус із `nysh train build`"),
     recipe: str = typer.Option("", "--recipe", help="порожньо — рецепт корпусу"),
     compute: str = typer.Option("auto", "--compute", help="auto | local | ssh | gpurunner"),
     host: str = typer.Option("", "--host", help="ssh: хост із nysh cloud hosts"),
@@ -395,7 +398,7 @@ def start_cmd(
     base: str = typer.Option("", "--base", help="базові ваги: id репозиторію HF або шлях до .pt"),
     dry_run: bool = typer.Option(False, "--dry-run", help="лише план"),
     yes: bool = typer.Option(False, "--yes", help="запустити без підтвердження"),
-    as_json: bool = typer.Option(False, "--json"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Запустити трен за корпусом. План друкується завжди; старт — з `--yes`.
 
@@ -427,8 +430,8 @@ def start_cmd(
 @app.command("status")
 def status_cmd(
     run: str = typer.Argument("", help="прогін; порожньо — останній"),
-    show_all: bool = typer.Option(False, "--all"),
-    as_json: bool = typer.Option(False, "--json"),
+    show_all: bool = typer.Option(False, "--all", help="усі прогони"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Пульс прогону з диска: жива карта, епоха, чекпойнти, підсумок."""
     from nyshporka import ops as O
@@ -452,7 +455,7 @@ def status_cmd(
 @app.command("fetch")
 def fetch_cmd(
     run: str = typer.Argument("", help="прогін; порожньо — останній"),
-    as_json: bool = typer.Option(False, "--json"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Забрати ваги з машини, де йшов трен (для ssh і gpurunner)."""
     from nyshporka import ops as O
@@ -468,7 +471,7 @@ def fetch_cmd(
 @app.command("stop")
 def stop_cmd(
     run: str = typer.Argument("", help="прогін; порожньо — останній"),
-    as_json: bool = typer.Option(False, "--json"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Зупинити прогін: локальний процес або оренду (vast тарифікує до cancel)."""
     from nyshporka import ops as O
@@ -485,11 +488,11 @@ def eval_cmd(
     sets: str = typer.Option("", "--sets", help="holdout-набори через кому"),
     models: str = typer.Option("", "--models", help="чинні моделі для порівняння"),
     also: str = typer.Option("", "--also", help="інші файли ваг через кому"),
-    thresh: int = typer.Option(80, "--thresh"),
+    thresh: int = typer.Option(80, "--thresh", help="поріг схожості для recall назв"),
     mode: str = typer.Option("strip", "--mode", help="strip | loose"),
-    device: str = typer.Option("cuda:0", "--device"),
+    device: str = typer.Option("cuda:0", "--device", help="пристрій: cuda:0 або cpu"),
     refresh: bool = typer.Option(False, "--refresh", help="ігнорувати кеш прогнозів"),
-    as_json: bool = typer.Option(False, "--json"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Обрати епоху по holdout: recall назв і CER усіх чекпойнтів одним прогоном.
 
@@ -522,8 +525,9 @@ def promote_cmd(
     why: str = typer.Option(..., "--why", help="чим краща і на чому виміряно"),
     epoch: int = typer.Option(-1, "--epoch", help="номер епохи; типово — переможець за recall"),
     label: str = typer.Option("", "--label", help="або мітка: best | epNN"),
-    force: bool = typer.Option(False, "--force"),
-    as_json: bool = typer.Option(False, "--json"),
+    force: bool = typer.Option(False, "--force",
+                               help="без заміру на holdout або поверх наявного файла"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Зробити чекпойнт бойовою моделлю: копія у data/spotter/models, картка, PRODUCTION.json."""
     from nyshporka import ops as O
