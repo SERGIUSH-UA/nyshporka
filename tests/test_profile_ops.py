@@ -361,3 +361,33 @@ def test_a_paradigm_that_covers_everything_stays_quiet(space):
     assert "paradigm_gap" not in {w.code for w in env.warnings}
     # І та сама перевірка по суті: жіноче написання справді породилось.
     assert "Лутова" in env.data["spellings"], env.data["spellings"]
+
+
+# ── регіон дослідження ───────────────────────────────────────────────────────
+def test_show_returns_places_and_archives_from_the_file(space):
+    """🧭 Скіл-маршрутизатор джерел бере регіон із профілю, а не питає людину.
+
+    Профіль давно читав `places` і `archives`, але `profile.show` їх не
+    віддавав — тож агент або питав те, що вже записане, або ліз у файл
+    напряму. Порожній профіль віддає порожні списки, а не пропускає ключ.
+    """
+    text = HAND + """\
+    places:
+      - name: Ярошинці
+        also: [Jaroszynce]
+        uezd: Могилівський
+        eparchy: Подільська
+        confession: orthodox
+    archives:
+      - repo: DAHMO
+        fond: 315
+"""
+    (space / "config" / "research_profile.yaml").write_text(text, encoding="utf-8")
+    env = _call("profile.show")
+    assert env.ok, env.error
+    d = env.data
+    assert d["present"] is True
+    assert d["places"] == [{"name": "Ярошинці", "also": ["Jaroszynce"],
+                            "uezd": "Могилівський", "eparchy": "Подільська",
+                            "confession": "orthodox"}]
+    assert d["archives"] == [{"repo": "DAHMO", "fond": 315}]

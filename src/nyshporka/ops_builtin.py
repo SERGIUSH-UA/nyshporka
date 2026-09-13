@@ -3088,7 +3088,14 @@ def _profile_payload(p: Any) -> dict[str, Any]:
             # УСІХ основ профілю, і віддати таблиці лише з питаних означало б
             # показати перелік написань, якого таблиці під ним не пояснюють.
             "forms": {o: p.forms(o) for o in p.stems if o in morph.ALL_ORTHOGRAPHIES},
-            "selftest_mode": (p.selftest or {}).get("mode", "strict")}
+            "selftest_mode": (p.selftest or {}).get("mode", "strict"),
+            # 🧭 Регіон дослідження — те, з чого маршрутизатор джерел (скіл
+            # `where-to-dig`) починає, не питаючи людину щоразу: село,
+            # історична назва, повіт, єпархія, конфесія; і архіви, де рід
+            # уже шукали. Профіль ці поля читав давно, але назовні не віддавав —
+            # тож агент ішов питати те, що вже записане.
+            "places": [dict(x) for x in p.places if isinstance(x, dict)],
+            "archives": [dict(x) for x in p.archives if isinstance(x, dict)]}
 
 
 def _profile_shell(env: Envelope) -> dict[str, Any]:
