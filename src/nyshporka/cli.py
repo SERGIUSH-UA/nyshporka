@@ -1256,8 +1256,13 @@ from nyshporka.parish.cli import app as parish_app  # noqa: E402
 app.add_typer(parish_app, name="parish")
 
 from nyshporka.geog.cli import app as geog_app  # noqa: E402
+from nyshporka.geog.cli import church_app  # noqa: E402
 
 app.add_typer(geog_app, name="geog")
+# ⛪ Церкви ~1772 (база Шади): чи була в селі парафія до поділів, чия, і — через
+# зшивку з газетиром — де тепер її книги. Третє питання поруч із газетиром
+# («де книги») і покажчиком («чия парафія в описі»).
+app.add_typer(church_app, name="church")
 
 # 🗄 Текстовий стор: усе прочитане в одному файлі, регекс і стан індексу без
 # обходу дерева прогонів. Секція та сама, що й у пошуку.

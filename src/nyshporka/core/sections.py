@@ -222,6 +222,12 @@ OP_SCREEN: dict[str, str] = {
     "catalog.packs": "geog",
     "geog.find": "geog",
     "geog.card": "geog",
+    "geog.near": "geog",
+    # ⛪ церкви ~1772 живуть на тому ж екрані, що й газетир: питання одне —
+    # «що відомо про село», лише зріз інший (реєстри XVIII ст., не архів)
+    "church.find": "geog",
+    "church.card": "geog",
+    "church.near": "geog",
     "fond.list": "fonds",
     "fond.rows": "fonds",
     "fond.take": "fonds",

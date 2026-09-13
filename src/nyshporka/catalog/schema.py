@@ -152,8 +152,75 @@ CREATE TABLE conflicts (
 -- результат уже кешується за штампом файла.
 """
 
+CHURCHES = _PRAGMA + _COMMON + """
+-- ⛪ Церкви Речі Посполитої близько 1772 р. за базою Б. Шади (Кольбук 1998 +
+-- Radwan «Socjografia» 1782). Одна церква — один рядок; `ob_id` — ключ самої
+-- бази, ним посилаються дослідницькі нотатки, тож він і тут первинний.
+--
+-- 🔴 Координати їдуть як є, але вони — прив'язка укладача бази, не джерела:
+-- у Кольбука й Radwan'а точок немає взагалі. Для записів лише з Socjografia
+-- місце буває поставлене за співзвучним сучасним селом (Jezierna Балтського
+-- деканату лягла на Перельоти, які в XVIII ст. були турецьким берегом).
+-- Тому читач мусить бачити `source` поруч із точкою, а не лише точку.
+CREATE TABLE churches (
+    ob_id       INTEGER PRIMARY KEY,
+    name        TEXT NOT NULL,   -- pl_name, як у базі
+    name_v      TEXT,            -- варіанти назви (за Socjografia), через кому
+    place_type  TEXT,            -- wieś | miasto
+    confession  TEXT,            -- uniate | orthodox | latin
+    role        TEXT,            -- main | auxiliary
+    parish_of   TEXT,            -- для допоміжної: чия це парафія
+    title       TEXT,            -- код присвяти як у базі (OpNMP, Michał A …)
+    title_uk    TEXT,            -- присвята українською; невідомий код — як є
+    material    TEXT,            -- dr | mr | dr-mr
+    patronage   TEXT,            -- s | k | d | mk …
+    monastery   TEXT,            -- Bazylianie | Bazylianki | ''
+    voivodeship TEXT,            -- код воєводства (brac, kij, pod, rus, woł …)
+    deanery     TEXT, adeaconry TEXT, diocese TEXT,
+    source      TEXT,            -- сторінка Кольбука / Socjografia
+    lat REAL, lng REAL,
+    norm        TEXT,            -- normalize_for_matching(name)
+    norm_alt    TEXT,            -- та сама назва з -ów- → -iw- (Rakówka ↔ Раківка)
+    norm_v      TEXT             -- варіанти за Socjografia (+ їх чергування), через « | »
+);
+CREATE INDEX ix_ch_norm  ON churches(norm);
+CREATE INDEX ix_ch_alt   ON churches(norm_alt);
+CREATE INDEX ix_ch_dean  ON churches(deanery);
+CREATE INDEX ix_ch_voiv  ON churches(voivodeship);
+CREATE INDEX ix_ch_geo   ON churches(lat, lng);
+"""
+
+PLACES = _PRAGMA + _COMMON + """
+-- 🗺 Сучасні поселення з координатами (Wikidata). Це не ще один газетир, а
+-- ТОЧКА для кожного села газетира ЦДІАК, у якого точок немає взагалі: без неї
+-- коло сусідів працює лише від церков 1772, а зшивка «церква ↔ село»
+-- перевіряється за воєводством замість відстані.
+--
+-- `admin` несе ВСІ значення P131 — чинні й колишні: у газетирі в полі «нині»
+-- стоїть район до реформи 2020 («Бершадський р-н»), і саме він розводить
+-- однойменні села однієї області.
+CREATE TABLE modern (
+    qid      TEXT PRIMARY KEY,
+    name_uk  TEXT, name_ru TEXT, name_pl TEXT, name_en TEXT,
+    aliases  TEXT,           -- псевдоніми uk/ru/pl, через « | »
+    kind     TEXT,           -- село | селище | смт | місто | …
+    admin    TEXT,           -- усі адмінодиниці (P131), через « | »
+    top      TEXT,           -- область (або верхня одиниця країни)
+    country  TEXT,           -- UA | MD
+    lat REAL, lng REAL,
+    norm_uk  TEXT, norm_ru TEXT,
+    norm_alias TEXT,         -- нормалізовані псевдоніми, через « | »
+    translit TEXT
+);
+CREATE INDEX ix_md_uk  ON modern(norm_uk);
+CREATE INDEX ix_md_ru  ON modern(norm_ru);
+CREATE INDEX ix_md_top ON modern(top);
+CREATE INDEX ix_md_geo ON modern(lat, lng);
+"""
+
 #: Домен → DDL. Ключ домену входить в ім'я пака: `geog-cdiak-2026.08.sqlite`.
-DDL: dict[str, str] = {"geog": GEOG, "opys": OPYS}
+DDL: dict[str, str] = {"geog": GEOG, "opys": OPYS, "churches": CHURCHES,
+                       "places": PLACES}
 
 
 def apply(con: sqlite3.Connection, domain: str) -> None:

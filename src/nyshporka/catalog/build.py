@@ -199,6 +199,147 @@ def build_geog(places_tsv: Path, cases_tsv: Path, out: Path, *,
     return {**res, "places": n_pl, "cases": n_cs}
 
 
+# ── церкви ~1772 (база Шади) ─────────────────────────────────────────────────
+
+def build_churches(dump_json: Path, out: Path, *, pack_id: str, taken: str,
+                   source: str = ("https://services5.arcgis.com/feZdCwP2DrNxyL6T/"
+                                  "arcgis/rest/services/Szady_1772/FeatureServer"),
+                   verbose: bool = False) -> dict[str, Any]:
+    """Пак церков Речі Посполитої ~1772 з дампу бази Шади.
+
+    Джерело — збережений JSON шарів FeatureServer (`geog.szady.iter_features`
+    приймає три форми дампу). Нормалізована назва рахується тут, як `translit`
+    у газетирі: саме нею кириличний запит («Липовеньке») зустрічається з
+    польським записом («Lipoweńkie») без повного скану з `rapidfuzz` на кожен
+    LIKE.
+    """
+    import json
+
+    from nyshporka.geog.szady import records
+    from nyshporka.utils.translit import normalize_for_matching
+
+    con, tmp = _open_fresh(out, "churches")
+    dump = json.loads(dump_json.read_text(encoding="utf-8"))
+
+    cols = ["ob_id", "name", "name_v", "place_type", "confession", "role",
+            "parish_of", "title", "title_uk", "material", "patronage", "monastery",
+            "voivodeship", "deanery", "adeaconry", "diocese", "source",
+            "lat", "lng", "norm", "norm_alt", "norm_v"]
+
+    def _alt(src_name: str) -> str:
+        """🔑 Польське «-ów-» відповідає українському «-ів-» у закритому складі
+        (Rakówka ↔ Раківка, Wójtówka ↔ Війтівка), а транслітерація зводить ó
+        до u. Без цієї форми «Раківка» набирала лише 85 і йшла після
+        «Ракулового» (87, за варіантом Rakułowa) — тобто основна назва
+        програвала варіантові через регулярне чергування. Це форма-здогад для
+        пошуку, як `name_forms` у покажчику; у `name` вона не потрапляє."""
+        if "ów" not in src_name.casefold():
+            return ""
+        return normalize_for_matching(
+            _norm_name(src_name.replace("ów", "iw").replace("Ów", "Iw")))
+
+    n = 0
+    batch: list[tuple[Any, ...]] = []
+    for r in records(dump):
+        r["norm"] = normalize_for_matching(_norm_name(r["name"]))
+        # 🔴 Чергування ОСНОВНОЇ назви — окрема колонка, бо це та сама назва, і
+        # збіг по ній важить стільки ж, скільки по `norm`. Варіанти ж за
+        # Socjografia — інша форма з іншого джерела: за ними шукають нарівні,
+        # але в зшивці вони йдуть після основної назви — інакше Lipoweńkie з
+        # варіантом «Lipówka» зшивалось із Липівкою на 100 поперед власного
+        # Липовенького на 94.
+        alt = _alt(r["name"])
+        r["norm_alt"] = alt if alt and alt != r["norm"] else ""
+        variants = [v.strip() for v in r["name_v"].replace(";", ",").split(",")
+                    if v.strip()]
+        forms: list[str] = []
+        for v in variants:
+            forms.append(normalize_for_matching(_norm_name(v)))
+            forms.append(_alt(v))
+        r["norm_v"] = " | ".join(dict.fromkeys(
+            f for f in forms if f and f not in (r["norm"], r["norm_alt"])))
+        batch.append(tuple(r.get(c) for c in cols))
+        n += 1
+        if len(batch) >= 5000:
+            con.executemany(
+                f"INSERT OR REPLACE INTO churches ({','.join(cols)}) "
+                f"VALUES ({','.join('?' * len(cols))})", batch)
+            batch = []
+    if batch:
+        con.executemany(
+            f"INSERT OR REPLACE INTO churches ({','.join(cols)}) "
+            f"VALUES ({','.join('?' * len(cols))})", batch)
+
+    coverage = [("confession", c, k, None, "")
+                for c, k in con.execute(
+                    "SELECT confession, COUNT(*) FROM churches GROUP BY confession")]
+    coverage += [("voivodeship", v, k, None, "")
+                 for v, k in con.execute(
+                     "SELECT voivodeship, COUNT(*) FROM churches "
+                     "GROUP BY voivodeship ORDER BY COUNT(*) DESC")]
+    res = finalize(con, tmp, out, domain="churches", pack_id=pack_id, taken=taken,
+                   source=source, built_from=_digest([dump_json]), rows=n,
+                   coverage=coverage, note=f"{n} церков ~1772 (Кольбук 1998, "
+                                           f"Socjografia 1782; база Б. Шади)")
+    if verbose:
+        print(f"✅ {out.name} — {n} церков · {res['size'] / 1e6:.1f} МБ")
+    return {**res, "churches": n}
+
+
+# ── сучасні поселення з координатами (Wikidata) ──────────────────────────────
+
+def build_places(dump_json: Path, out: Path, *, pack_id: str, taken: str,
+                 source: str = "https://query.wikidata.org/sparql",
+                 verbose: bool = False) -> dict[str, Any]:
+    """Пак `places`: поселення з координатами, назвами й усіма адмінодиницями.
+
+    Джерело — `places.json`, знятий збирачем дослідницького репозиторію
+    (перелік записів із полями qid, name_*, aliases, kind, admin, top,
+    country, lat, lng).
+    """
+    import json
+
+    con, tmp = _open_fresh(out, "places")
+    rows = json.loads(dump_json.read_text(encoding="utf-8"))
+    if isinstance(rows, dict):
+        rows = rows.get("places") or rows.get("rows") or []
+    cols = ["qid", "name_uk", "name_ru", "name_pl", "name_en", "aliases", "kind",
+            "admin", "top", "country", "lat", "lng", "norm_uk", "norm_ru",
+            "norm_alias", "translit"]
+    n = 0
+    batch: list[tuple[Any, ...]] = []
+    for r in rows:
+        if r.get("lat") is None or not (r.get("name_uk") or r.get("name_ru")):
+            continue
+        uk, ru = r.get("name_uk") or "", r.get("name_ru") or ""
+        aliases = [a.strip() for a in (r.get("aliases") or "").split("|") if a.strip()]
+        norm_alias = " | ".join(dict.fromkeys(
+            x for x in (_norm_name(a) for a in aliases) if x))
+        batch.append((
+            r["qid"], uk, ru, r.get("name_pl") or "", r.get("name_en") or "",
+            " | ".join(aliases), r.get("kind") or "", r.get("admin") or "",
+            r.get("top") or "", r.get("country") or "", float(r["lat"]),
+            float(r["lng"]), _norm_name(uk), _norm_name(ru), norm_alias,
+            _translit(uk, ru, r.get("name_pl") or "")))
+        n += 1
+        if len(batch) >= 5000:
+            con.executemany(f"INSERT OR REPLACE INTO modern ({','.join(cols)}) "
+                            f"VALUES ({','.join('?' * len(cols))})", batch)
+            batch = []
+    if batch:
+        con.executemany(f"INSERT OR REPLACE INTO modern ({','.join(cols)}) "
+                        f"VALUES ({','.join('?' * len(cols))})", batch)
+    coverage = [("region", t, k, None, "")
+                for t, k in con.execute("SELECT top, COUNT(*) FROM modern "
+                                        "GROUP BY top ORDER BY COUNT(*) DESC")]
+    res = finalize(con, tmp, out, domain="places", pack_id=pack_id, taken=taken,
+                   source=source, built_from=_digest([dump_json]), rows=n,
+                   coverage=coverage, note=f"{n} поселень із координатами (Wikidata)")
+    if verbose:
+        print(f"✅ {out.name} — {n} поселень · {res['size'] / 1e6:.1f} МБ")
+    return {**res, "places": n}
+
+
 # ── реєстр опису фонду ───────────────────────────────────────────────────────
 
 #: 🔴 Колонки, які в пак не їдуть. `on_disk` описує диск дослідника на момент

@@ -16,6 +16,7 @@
 """
 from __future__ import annotations
 
+import contextlib
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -145,6 +146,85 @@ def geog_card(a: GeogCardArgs) -> Envelope:
         env.suggest("catalog.search",
                     f"жодної з {n_all} справ цього поселення в нас немає — "
                     f"пошукати, де їх узяти")
+    loc = place.get("location")
+    if loc and loc.get("lat") is not None:
+        if loc.get("how") == "ambiguous":
+            env.warn("location_ambiguous",
+                     f"однойменних поселень в області кілька ({len(loc.get('candidates') or [])}), "
+                     "точку взято від першого — звірити район")
+        env.suggest("geog.near", "сусідні села газетира в колі навколо цієї точки")
+        env.suggest("church.near", "церкви ~1772 навколо цієї точки")
+    return env
+
+
+class GeogNearArgs(BaseModel):
+    at: str = Field(description="центр кола: картка газетира (…xml), назва села "
+                                "або «широта,довгота»")
+    km: float = Field(default=15.0, gt=0, le=200, description="радіус, км")
+    section: str = Field(default="",
+                         description="church | decanats | rabbinate; порожньо — усі")
+    limit: int = Field(default=100, ge=1, le=1000)
+
+
+@op("geog.near", summary="Сусідні села газетира в колі — одразу з числом справ",
+    args=GeogNearArgs, mutates=False, agent=False, section="material")
+def geog_near(a: GeogNearArgs) -> Envelope:
+    """Коло по газетиру: які поселення з книгами в архіві лежать поруч.
+
+    🔑 Відмінність від `parish.near` (покажчик) і `church.near` (1772):
+    тут рядки — картки газетира ЦДІАК, тобто села, у яких книги ВЦІЛІЛИ й
+    відомо де. Точки беруться з пака `places`; село без точки (немає в
+    Wikidata або не зшилось за областю) у коло не потрапляє — знаменник
+    каналу саме такий, і він названий у покритті.
+    """
+    import re as _re
+
+    from nyshporka.catalog.query import (
+        CatalogMissing,
+        find_places,
+        locate,
+        places_near,
+    )
+
+    center: dict[str, Any] = {}
+    try:
+        at = a.at.strip()
+        m = _re.fullmatch(r"\s*(-?\d+(?:\.\d+)?)\s*[,;]\s*(-?\d+(?:\.\d+)?)\s*", at)
+        if m:
+            center = {"lat": float(m.group(1)), "lng": float(m.group(2)), "how": "точка"}
+        else:
+            card = at
+            if not at.endswith(".xml"):
+                found = find_places(at, limit=1).rows
+                if not found:
+                    return fail(f"поселення «{at}» у газетирі немає")
+                card = found[0]["card"]
+            loc = locate(card)
+            if not loc or loc.get("lat") is None:
+                return fail(f"у картки {card} немає точки: у паку `places` такого "
+                            "села в цій області немає або воно неоднозначне — "
+                            "задай центр як «широта,довгота»")
+            center = {"lat": loc["lat"], "lng": loc["lng"], "card": card,
+                      "how": f"{loc.get('name_uk') or card} ({loc['qid']}, {loc['how']})"}
+        ans = places_near(center["lat"], center["lng"], km=a.km, limit=a.limit,
+                          section=a.section)
+    except CatalogMissing as exc:
+        return fail(str(exc))
+    rows = [r for r in ans.rows if r["card"] != center.get("card")]
+    env = ok({"center": {**center, "km": a.km}, "places": rows,
+              "n_cases": sum(int(r.get("n_cases") or 0) for r in rows)})
+    env.covered_by(_coverage_of(ans))
+    env.warn("geo_denominator",
+             "у коло входять лише села газетира, що дістали точку з Wikidata "
+             "за назвою й областю; село без точки тут не з'явиться")
+    if any(r.get("how") == "ambiguous" for r in rows):
+        env.warn("ambiguous",
+                 "у частини сіл точка від першого з однойменних в області — "
+                 "позначено `how=ambiguous`")
+    if len(rows) >= a.limit:
+        env.warn("ceiling", f"видача обрізана стелею {a.limit} — звузь радіус")
+    env.suggest("church.near", "ті самі координати — церкви ~1772 в колі")
+    env.suggest("parish.near", "ті самі координати — справи покажчика в колі")
     return env
 
 
@@ -1060,4 +1140,216 @@ def parish_mentions(a: ParishMentionsArgs) -> Envelope:
     if not seen:
         env.warn("nothing_found",
                  f"згадок під назвами {', '.join(forms)} у покажчику немає")
+    return env
+
+
+# ── ⛪ церкви ~1772: чи була парафія, чия, і де тепер її книги ───────────────
+#
+# 🔑 Третє питання поруч із газетиром і покажчиком: ті кажуть, де лежать книги
+# села; база Шади (Кольбук 1998 + Socjografia 1782) каже, чи БУЛА в селі
+# церква до поділів, якого деканату, з якою присвятою й чиїм патронатом. Для
+# роду, який на 1802 «духовні при церквах», це не довідка, а канал: парафії
+# одного деканату — це коло, де переходили з церкви на церкву.
+#
+# Гібрид тут — зшивка за назвою (`link_churches_to_places`): церква 1772 →
+# поселення газетира → справи по фондах. Газетира може не бути — тоді церква
+# без книг лишається відповіддю про церкву, а не відмовою.
+
+_COORDS_NOTE = ("координати — прив'язка укладача бази, не джерела: у Кольбука й "
+                "Socjografia точок немає; для записів лише з Socjografia місце "
+                "перевіряти окремо")
+
+
+def _church_rows_with_places(rows: list[dict[str, Any]], link: bool
+                             ) -> tuple[list[dict[str, Any]], list[str], list[CoverageItem]]:
+    """Дописати кожній церкві її поселення газетира (якщо просили й він є)."""
+    from nyshporka.catalog import store as _store
+    from nyshporka.catalog.query import link_churches_to_places
+
+    notes: list[str] = []
+    cov: list[CoverageItem] = []
+    if link and rows:
+        links, partial = link_churches_to_places(rows)
+        notes += list(partial)
+        for r in rows:
+            r["places"] = links.get(int(r["ob_id"]), [])
+        if not partial:
+            cov = [CoverageItem(source=c.pack_id, taken=c.taken, rows=c.rows,
+                                scope=c.scope) for c in _store.coverage("geog")]
+    else:
+        for r in rows:
+            r.setdefault("places", [])
+    return rows, notes, cov
+
+
+class ChurchFindArgs(BaseModel):
+    q: str = Field(default="", description="назва села — кирилицею або польською "
+                                           "латинкою; варіанти назви теж шукаються")
+    voivodeship: str = Field(default="",
+                             description="код воєводства: brac | kij | pod | rus | "
+                                         "woł | beł …; порожньо — усі")
+    deanery: str = Field(default="", description="деканат (підрядок)")
+    confession: str = Field(default="",
+                            description="uniate | orthodox | latin; порожньо — усі")
+    link: bool = Field(default=True,
+                       description="зшити з газетиром: поселення й число справ")
+    limit: int = Field(default=20, ge=1, le=200)
+
+
+@op("church.find", summary="Чи була в селі церква ~1772, чия — і де тепер її книги",
+    args=ChurchFindArgs, mutates=False, agent=False, section="material")
+def church_find(a: ChurchFindArgs) -> Envelope:
+    """Церкви бази Шади за назвою села + поселення газетира з тією ж назвою.
+
+    🔴 Назви в базі польські, а питають кирилицею — обидві зводяться до одного
+    ASCII, тож «Липовеньке» знаходить Lipoweńkie. Але це фаззі, а не словник:
+    оцінка нижче 80 означає «схоже», і село в іншому воєводстві з тією ж
+    оцінкою — інше село. Дивитись на деканат, не лише на назву.
+
+    🪤 Варіант назви (`name_v`) — форма за Socjografia, і вона часто ІНША за
+    основну: три церкви з назвою Ozierna/Ezierna мають варіантом «Jezierany».
+    Тому варіанти шукаються нарівні з назвою, з позначкою `via=variant`.
+    """
+    from nyshporka.catalog.query import CatalogMissing, find_churches, find_places
+
+    try:
+        ans = find_churches(a.q, limit=a.limit, voivodeship=a.voivodeship,
+                            deanery=a.deanery, confession=a.confession)
+    except CatalogMissing as exc:
+        return fail(str(exc))
+    rows, notes, geog_cov = _church_rows_with_places(ans.rows, a.link)
+
+    places: list[dict[str, Any]] = []
+    if a.link and a.q:
+        # 🔗 Зворотний бік гібрида: поселення газетира за тим самим запитом —
+        # щоб у відповіді було видно й те село, для якого церкви 1772 немає
+        # (не було, або є під іншою назвою), а книги є.
+        with contextlib.suppress(CatalogMissing):
+            places = find_places(a.q, limit=10).rows
+
+    env = ok({"q": a.q, "churches": rows, "places": places,
+              "linked": sum(1 for r in rows if r.get("places"))})
+    env.covered_by(_coverage_of(ans) + geog_cov)
+    for n in notes:
+        env.warn("geog_unavailable", n)
+    if not rows:
+        env.warn("nothing_found",
+                 "у базі Шади такої назви немає — це межа реєстрів 1772-1782 "
+                 "(Кольбук, Socjografia) і фаззі за транслітом, а не відповідь "
+                 "«церкви не було»: спробуй польське написання або варіант назви")
+    elif len(rows) > 1:
+        env.warn("many",
+                 f"церков із такою назвою {len(rows)} — розрізняти за деканатом "
+                 "і воєводством, а не за оцінкою")
+    if rows:
+        env.suggest("church.near", "коло сусідніх церков того ж часу")
+        if any(r.get("places") for r in rows):
+            env.suggest("geog.card", "усі справи зшитого поселення й що з них у нас є")
+    return env
+
+
+class ChurchCardArgs(BaseModel):
+    ob_id: int = Field(description="ob_id церкви в базі Шади")
+    km: float = Field(default=10.0, gt=0, le=100,
+                      description="радіус кола сусідів, км")
+
+
+@op("church.card", summary="Картка церкви ~1772: присвята, патрон, сусіди, книги села",
+    args=ChurchCardArgs, mutates=False, agent=False, section="material")
+def church_card(a: ChurchCardArgs) -> Envelope:
+    from nyshporka.catalog.query import CatalogMissing
+    from nyshporka.catalog.query import church_card as _card
+
+    try:
+        ans = _card(a.ob_id, km=a.km)
+    except CatalogMissing as exc:
+        return fail(str(exc))
+    env = ok({"church": ans.rows[0] if ans.rows else None})
+    env.covered_by(_coverage_of(ans))
+    for p in ans.partial:
+        env.warn("partial", p)
+    if not ans.rows:
+        return env
+    env.warn("coords", _COORDS_NOTE)
+    row = ans.rows[0]
+    if row.get("lat") is not None:
+        env.suggest("parish.near",
+                    f"справи покажчика в колі навколо цієї точки: "
+                    f"{row['lat']:.4f}, {row['lng']:.4f}")
+    if row.get("places"):
+        env.suggest("geog.card", "справи зшитого поселення по всіх фондах")
+    return env
+
+
+class ChurchNearArgs(BaseModel):
+    at: str = Field(description="центр кола: ob_id церкви, «широта,довгота» "
+                                "або назва села (береться перша знайдена церква)")
+    km: float = Field(default=15.0, gt=0, le=200, description="радіус, км")
+    confession: str = Field(default="", description="uniate | orthodox | latin")
+    link: bool = Field(default=True, description="зшити кожну церкву з газетиром")
+    limit: int = Field(default=60, ge=1, le=500)
+
+
+@op("church.near", summary="Коло церков ~1772 навколо села — з книгами кожного сусіда",
+    args=ChurchNearArgs, mutates=False, agent=False, section="material")
+def church_near(a: ChurchNearArgs) -> Envelope:
+    """Сусідні парафії того ж часу, і де книги кожної.
+
+    🔑 Це відповідь на «куди міг перейти піп» і «де хрестили, поки своєї
+    церкви не було»: коло парафій одного деканату станом на 1772-1782, а не
+    сучасна карта. Знаменник — сама база: сіл без церкви в ній немає взагалі.
+    """
+    import re as _re
+
+    from nyshporka.catalog.query import CatalogMissing, churches_near, find_churches
+    from nyshporka.catalog.query import church_card as _card
+
+    center: dict[str, Any] = {}
+    try:
+        at = a.at.strip()
+        m = _re.fullmatch(r"\s*(-?\d+(?:\.\d+)?)\s*[,;]\s*(-?\d+(?:\.\d+)?)\s*", at)
+        if m:
+            center = {"lat": float(m.group(1)), "lng": float(m.group(2)),
+                      "how": "точка"}
+        elif at.isdigit():
+            got = _card(int(at), km=0.1).rows
+            if not got:
+                return fail(f"церкви ob_id={at} у базі немає")
+            center = {"lat": got[0]["lat"], "lng": got[0]["lng"],
+                      "how": f"церква {got[0]['name']} (ob_id {at})",
+                      "ob_id": got[0]["ob_id"]}
+        else:
+            found = find_churches(at, limit=1).rows
+            if not found:
+                return fail(f"церкви з назвою «{at}» у базі немає — центр кола "
+                            "можна задати як «широта,довгота»")
+            center = {"lat": found[0]["lat"], "lng": found[0]["lng"],
+                      "how": f"церква {found[0]['name']}, {found[0]['deanery'] or '—'} "
+                             f"(ob_id {found[0]['ob_id']}, оцінка {found[0]['score']})",
+                      "ob_id": found[0]["ob_id"]}
+        if center.get("lat") is None:
+            return fail("у центральної церкви немає координат у базі")
+        ans = churches_near(center["lat"], center["lng"], km=a.km, limit=a.limit,
+                            confession=a.confession)
+    except CatalogMissing as exc:
+        return fail(str(exc))
+    rows, notes, geog_cov = _church_rows_with_places(ans.rows, a.link)
+    by_deanery: dict[str, int] = {}
+    for r in rows:
+        key = r.get("deanery") or "—"
+        by_deanery[key] = by_deanery.get(key, 0) + 1
+    env = ok({"center": {**center, "km": a.km}, "churches": rows,
+              "by_deanery": by_deanery,
+              "linked": sum(1 for r in rows if r.get("places"))})
+    env.covered_by(_coverage_of(ans) + geog_cov)
+    for n in notes:
+        env.warn("geog_unavailable", n)
+    if "оцінка" in center["how"]:
+        # центр узято за назвою, тобто за фаззі — людина мусить бачити, ЯКУ
+        # саме церкву взято, бо однойменних у базі по три
+        env.warn("center", f"центр кола: {center['how']}")
+    env.warn("coords", _COORDS_NOTE)
+    if len(rows) >= a.limit:
+        env.warn("ceiling", f"видача обрізана стелею {a.limit} — звузь радіус")
+    env.suggest("parish.near", "ті самі координати — справи покажчика в колі")
     return env

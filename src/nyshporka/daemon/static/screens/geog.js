@@ -51,6 +51,13 @@ SCREENS.geog = async () => {
       <button type="submit">${t('geog.find')}</button>
     </form>
     <div id="geoghits"></div>
+    <h3>⛪ ${t('church.title')}</h3>
+    <p class="muted">${t('church.why')}</p>
+    <form class="row" data-act="church.find">
+      <input name="q" placeholder="${t('church.q')}">
+      <button type="submit">${t('church.find')}</button>
+    </form>
+    <div id="churchhits"></div>
     <h3>${t('catalog.title')}</h3>
     <table><tbody>${ok.map((x) => `<tr>
       <td class="mono">${esc(x.pack_id)}</td>
@@ -59,6 +66,38 @@ SCREENS.geog = async () => {
     </tr>`).join('')}</tbody></table>
     ${renderWarnings(packs)}`);
 };
+
+/** 🗺 Поселення газетира, зшиті з церквою: назва, повіт, справ, оцінка. */
+function renderPlaces(places) {
+  return `<table><tbody>${(places || []).map((p) => `<tr>
+    <td class="num">${esc(p.score)}</td>
+    <td><b>${esc(p.village_uk)}</b>${p.region === 'mismatch' ? ` <span class="warn">⚠ ${t('church.mismatch')}</span>` : ''}${p.region === 'far' ? ` <span class="warn">⚠ ${esc(p.km)} ${t('church.km')}</span>` : ''}${p.km != null && p.region !== 'far' ? ` <span class="muted">${esc(p.km)} ${t('church.km')}</span>` : ''}</td>
+    <td class="muted">${esc(p.uezd_gub || '')}</td>
+    <td class="num">${p.n_cases || 0}</td>
+    <td><button data-act="geog.card" data-arg="${esc(p.card)}">${t('view.open')}</button></td>
+  </tr>`).join('')}</tbody></table>`;
+}
+
+/** ⛪ Перелік церков (пошук або коло) — кожна з зшитими поселеннями під нею. */
+function renderChurches(env, rows, withKm) {
+  return `
+    ${renderWarnings(env)}
+    ${rows.length ? '' : `<p><b>${t('church.nothing')}</b></p>`}
+    <table><tbody>${rows.map((c) => `<tr>
+      ${withKm ? `<td class="num">${esc(c.km)} ${t('church.km')}</td>` : `<td class="num">${esc(c.score)}</td>`}
+      <td><b>${esc(c.name)}</b>${c.name_v ? `<br><span class="muted">${esc(c.name_v)}</span>` : ''}
+          ${c.via === 'variant' ? ` <span class="muted">(${t('church.variant')})</span>` : ''}</td>
+      <td>${esc(c.voivodeship_uk || c.voivodeship || '')}<br><span class="muted">${esc(c.deanery || '')}</span></td>
+      <td>${esc(c.title_uk || c.title || '')}</td>
+      <td>${(c.places || []).map((p) => `<button class="ctl-sm" data-act="geog.card" data-arg="${esc(p.card)}"
+          title="${esc(p.uezd_gub || '')}">${p.region === 'mismatch' ? '⚠ ' : ''}${esc(p.village_uk)} · ${p.n_cases || 0}</button>`).join(' ')}</td>
+      <td class="acts">
+        <button class="ctl-sm" data-act="church.card" data-arg="${esc(c.ob_id)}">${t('view.open')}</button>
+        <button class="ctl-sm" data-act="church.near" data-arg="${esc(c.ob_id)}">${t('church.near')}</button>
+      </td>
+    </tr>`).join('')}</tbody></table>
+    ${renderCoverage(env)}`;
+}
 
 Object.assign(ACTIONS, {
   /**
@@ -105,6 +144,87 @@ Object.assign(ACTIONS, {
       ${renderCoverage(env)}`;
   },
 
+  /**
+   * ⛪ Церкви ~1772 за назвою села — гібрид: кожна церква приходить уже
+   * зшитою з поселенням газетира, тож поруч видно, де тепер її книги.
+   *
+   * 🪤 Однойменне село в іншому воєводстві зшивається теж (Kapitanka
+   * Балтського деканату ↔ Капітанівка Чигиринського повіту), і різниця
+   * помітна лише позначкою `region=mismatch` — тому вона малюється, а не
+   * ховається в даних.
+   */
+  'church.find': async (ev) => {
+    ev.preventDefault();
+    const f = new FormData(ev.target);
+    const unlock = busyForm(ev.target);
+    el('churchhits').innerHTML = `<p class="muted">${t('common.loading')}</p>`;
+    const env = await callOp('church.find', { q: f.get('q'), limit: 20 });
+    unlock();
+    if (!env.ok) { el('churchhits').innerHTML = `<div class="warn err">${esc(env.error)}</div>`; return; }
+    el('churchhits').innerHTML = renderChurches(env, env.data.churches || [], false);
+  },
+
+  /** 🗺 Коло по газетиру: сусідні села, у яких книги вціліли й відомо де. */
+  'geog.near': async (_ev, elm) => {
+    busy();
+    const env = await callOp('geog.near', { at: String(elm.dataset.arg), km: 15, limit: 100 });
+    if (!env.ok) return failure(env);
+    const c = env.data.center || {};
+    const rows = env.data.places || [];
+    setView(`
+      <h2>🗺 ${t('geog.near.title')}</h2>
+      <p class="muted">📍 ${esc(c.how || '')} · ${c.km} ${t('church.km')} · ${rows.length} · ${t('geog.cases')}: <b>${env.data.n_cases || 0}</b></p>
+      ${renderWarnings(env)}
+      <table><tbody>${rows.map((p) => `<tr>
+        <td class="num">${esc(p.km)} ${t('church.km')}${p.how === 'ambiguous' ? ' ?' : ''}</td>
+        <td><b>${esc(p.village_uk)}</b><br><span class="muted">${esc(p.institution || '')}</span></td>
+        <td class="muted">${esc(p.uezd_gub || '')}</td>
+        <td class="num">${p.n_cases || 0}</td>
+        <td><button data-act="geog.card" data-arg="${esc(p.card)}">${t('view.open')}</button></td>
+      </tr>`).join('')}</tbody></table>
+      ${renderCoverage(env)}`);
+  },
+
+  'church.near': async (_ev, elm) => {
+    el('churchhits').innerHTML = `<p class="muted">${t('common.loading')}</p>`;
+    const env = await callOp('church.near', { at: String(elm.dataset.arg), km: 15, limit: 60 });
+    if (!env.ok) { el('churchhits').innerHTML = `<div class="warn err">${esc(env.error)}</div>`; return; }
+    const c = env.data.center || {};
+    el('churchhits').innerHTML = `
+      <p>📍 ${esc(c.how || '')} · ${c.km} ${t('church.km')}</p>
+      ${renderChurches(env, env.data.churches || [], true)}`;
+  },
+
+  'church.card': async (_ev, elm) => {
+    busy();
+    const env = await callOp('church.card', { ob_id: Number(elm.dataset.arg), km: 10 });
+    if (!env.ok) return failure(env);
+    const c = env.data.church;
+    if (!c) return setView(`<h2>⛪ ${t('church.title')}</h2>${renderWarnings(env)}${renderCoverage(env)}`);
+    setView(`
+      <h2>⛪ ${esc(c.name)} <span class="muted">${c.name_v ? `(${esc(c.name_v)})` : ''}</span></h2>
+      <p class="muted">
+        ${t('church.title_of')}: <b>${esc(c.title_uk || c.title || '—')}</b> ·
+        ${t('church.deanery')}: ${esc(c.deanery || '—')} · ${esc(c.voivodeship_uk || c.voivodeship || '')} ·
+        ${t('church.patron')}: ${esc(c.patronage_uk || c.patronage || '—')}
+        ${c.material_uk ? ` · ${esc(c.material_uk)}` : ''}
+        ${c.monastery ? ` · ${esc(c.monastery)}` : ''}<br>
+        ${t('church.source')}: ${esc(c.source || '—')}
+        ${c.lat != null ? ` · ${Number(c.lat).toFixed(4)}, ${Number(c.lng).toFixed(4)}` : ''}
+      </p>
+      ${renderWarnings(env)}
+      ${(c.places || []).length ? `<h3>🗺 ${t('church.places')}</h3>${renderPlaces(c.places)}` : ''}
+      ${(c.nearby || []).length ? `<h3>⛪ ${t('church.nearby')}</h3>
+        <table><tbody>${c.nearby.map((x) => `<tr>
+          <td class="num">${esc(x.km)} ${t('church.km')}</td>
+          <td><b>${esc(x.name)}</b></td>
+          <td class="muted">${esc(x.deanery || '')}</td>
+          <td>${esc(x.title_uk || x.title || '')}</td>
+          <td><button data-act="church.card" data-arg="${esc(x.ob_id)}">${t('view.open')}</button></td>
+        </tr>`).join('')}</tbody></table>` : ''}
+      ${renderCoverage(env)}`);
+  },
+
   'geog.card': async (_ev, elm) => {
     busy();
     const env = await callOp('geog.card', { card: elm.dataset.arg });
@@ -121,6 +241,10 @@ Object.assign(ACTIONS, {
         ${pl.church ? ` · ${t('geog.church')}: ${esc(pl.church)}` : ''}
       </p>
       ${renderWarnings(env)}
+      ${pl.location && pl.location.lat != null ? `<p class="muted">📍 ${Number(pl.location.lat).toFixed(4)}, ${Number(pl.location.lng).toFixed(4)}
+        <span class="mono">${esc(pl.location.qid)}</span>${pl.location.how === 'ambiguous' ? ` ⚠ ${t('geog.loc.ambiguous')}` : ''}
+        <button class="ctl-sm" data-act="geog.near" data-arg="${esc(pl.card)}">${t('geog.near')}</button>
+        <button class="ctl-sm" data-act="church.near" data-arg="${esc(`${pl.location.lat},${pl.location.lng}`)}">${t('geog.near.churches')}</button></p>` : ''}
       <p><b>${cases.length}</b> ${t('geog.cases')}, ${t('geog.ondisk')} <b>${pl.n_on_disk || 0}</b></p>
       <table><tbody>${cases.map((c) => `<tr>
         <td>${c.on_disk ? '✓' : '·'}</td>
