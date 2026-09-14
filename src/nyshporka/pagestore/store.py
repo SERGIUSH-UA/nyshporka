@@ -409,12 +409,15 @@ def _merge_note(old: PageNote, new: PageNote) -> PageNote:
             setattr(merged, f, getattr(old, f))
     # коментарі різних агентів не затирають одне одного (інцидент 00898,
     # 2026-07-21: паралельна сесія стерла попередження про фальш-друга) —
-    # конкатенуємо відмінні, обрізаючи хвіст на 600 символах
+    # конкатенуємо відмінні ЦІЛИМИ. Зріз на 600 символах, що стояв тут,
+    # мовчки з'їдав хвіст нової нотатки й старий коментар цілком: нотатка
+    # суцільної вичитки розвороту має 1–5 тис. символів (інцидент 2026-09-13,
+    # 116 обрізаних записів у сховищі одного дослідника).
     if not new.comment:
         merged.comment = old.comment
     elif old.comment and old.comment not in new.comment \
             and new.comment not in old.comment:
-        merged.comment = f"{new.comment} ⟂ {old.comment}"[:600]
+        merged.comment = f"{new.comment} ⟂ {old.comment}"
     return merged
 
 

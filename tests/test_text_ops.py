@@ -663,6 +663,33 @@ def test_a_fond_or_opys_is_a_scope_too(case_space: Path) -> None:
     assert not got.get("error") and got["hits"] and got["ledger"]["runs"] == 2
 
 
+def test_series_keeps_to_the_archive_named_in_the_query() -> None:
+    """🔴 Архів у запиті серії не губиться.
+
+    13.09.2026 «IRNBUV/1» узяв метрику ДАЖО 1-74-42: звірявся лише хвіст із
+    цифр, тож серія означала «будь-який фонд 1», а знаменник звучав як відповідь
+    про фонд ІР НБУВ. Запит без архіву лишається ширшим, як і був.
+    """
+    from nyshporka import htr_store as S
+
+    rows = [
+        {"name": "a", "shifra": "ЦДІАК 1-1-5", "case_key": "CDIAK/1/5"},
+        {"name": "b", "shifra": "ДАЖО 1-74-42", "case_key": "DAZHO/1-74/42"},
+        {"name": "c", "shifra": "ЦДІАК 1-2-7", "case_key": ""},   # без ключа — архів із шифри
+        {"name": "d", "shifra": "1-3-9", "case_key": ""},          # архів невідомий
+    ]
+
+    def names(want: str) -> list[str]:
+        return [r["name"] for r in S._series_rows(rows, want)]
+
+    assert names("CDIAK/1") == ["a", "c"]
+    assert names("ЦДІАК 1") == ["a", "c"]
+    assert names("ДАЖО 1-74") == ["b"]
+    assert names("DAZHO/1") == ["b"]
+    assert names("1") == ["a", "b", "c", "d"]            # без архіву — як було
+    assert names("НЕВІДОМИЙ 1") == []                    # невідомий архів — не «будь-який»
+
+
 def test_crop_can_take_the_previous_line_for_a_hyphen_tail(space: Path) -> None:
     from nyshporka.search import textops as T
 

@@ -659,21 +659,63 @@ def runs_for_scope(scope: str) -> dict[str, Any]:
 
 
 _SERIES_RE = re.compile(r"(\d+(?:[-/]\d+[a-zа-я]?)*)\s*$")
+_LETTERS_ONLY = re.compile(r"^[^\W\d_]+$")
 
 
 def _series_rows(rows: list[dict[str, Any]], want: str) -> list[dict[str, Any]]:
-    """Прогони справ, чия шифра починається з фонду/опису запиту."""
-    m = _SERIES_RE.search(want.replace("\\", "/").strip())
+    """Прогони справ, чия шифра починається з фонду/опису запиту.
+
+    🔴 Архів із запиту — частина серії, а не прикраса. Доти звірявся лише хвіст
+    із цифр, тож «IRNBUV/1» означало «будь-який фонд 1»: 13.09.2026 пошук роду по
+    фонду I ІР НБУВ узяв 16 прогонів замість 14, серед них метрику ДАЖО 1-74-42,
+    і чужа кирилична справа зайняла більшість гортача. Знаменник при цьому
+    звучав як відповідь про фонд.
+
+    Префікс, який пак архівів упізнає, обмежує серію цим архівом (з урахуванням
+    `same_as`: ДАВО = ДАВіО). Префікс із самих літер, але невідомий, — порожня
+    серія, тобто відмова: здогад «мабуть, будь-який архів» саме й був вадою.
+    Префікс без архіву («904-24», «ф.315 оп.1») поводиться як досі.
+    """
+    text = want.replace("\\", "/").strip()
+    m = _SERIES_RE.search(text)
     if not m:
         return []
     head = m.group(1).replace("/", "-")
+    word = text[:m.start()].strip(" /-_.,:;")
+    repo = ""
+    if word and _LETTERS_ONLY.match(word):
+        from nyshporka.archives import active
+
+        repo = active().resolve_code(word)
+        if not repo:
+            return []
     out: list[dict[str, Any]] = []
     for r in rows:
         sh = str(r.get("shifra") or "").strip()
         tail = sh.split()[-1].replace("/", "-") if sh else ""
-        if tail and (tail == head or tail.startswith(head + "-")):
-            out.append(r)
+        if not (tail and (tail == head or tail.startswith(head + "-"))):
+            continue
+        if repo and not _row_in_archive(r, repo):
+            continue
+        out.append(r)
     return out
+
+
+def _row_in_archive(row: dict[str, Any], repo: str) -> bool:
+    """Чи прогін належить архіву: за ключем справи, а без ключа — за шифрою.
+
+    Прогін, архів якого не встановлюється ні так, ні так, у серію архіву не
+    йде: віднести нічийний прогін до названого архіву — той самий здогад.
+    """
+    from nyshporka.archives import active
+
+    pack = active()
+    key = (row.get("case_key") or "").strip()
+    own = key.split("/", 1)[0] if key else ""
+    if not own:
+        parts = str(row.get("shifra") or "").strip().split()
+        own = pack.resolve_code(parts[0]) if len(parts) > 1 else ""
+    return bool(own) and pack.same_archive(own, repo)
 
 
 def case_pages(name: str) -> dict[str, Any] | None:

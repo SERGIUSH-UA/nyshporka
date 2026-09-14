@@ -14,6 +14,13 @@
 **Літера пишеться злито з номером.** Без негативного lookahead
 «230-1-2640 Дзічковських» дає справу «2640д», якої в описі немає, — а справжня
 2640 лишається «без скана».
+
+**Шифру пишуть і словами.** «ЦДІАК фонд 1040, опис 1, справа 48» і
+«ЦДІАК Ф. 53, о. 2, спр. 216» не мають префікса «ЦДІАК 1040-», тож обидва
+канали, що шукали лише його, їх не бачили. Заміряно 14.09.2026: у ф.1040 так
+названо 141 файл із 434 — серед них том актів консисторії на 816 сторінок,
+який вважався відсутнім онлайн; на всьому Commons назв «фонд · опис · справа»
+775, «ф. · оп. · спр.» — ще 426.
 """
 from __future__ import annotations
 
@@ -67,6 +74,44 @@ def shifra_pattern(archive: str, fond: str) -> re.Pattern[str]:
         rf"([а-яіїєґa-z]?)(?![а-яіїєґa-z])", re.IGNORECASE)
 
 
+def worded_shifra_pattern(archive: str, fond: str) -> re.Pattern[str]:
+    """Шифра словами: «<архів> фонд N, опис N, справа N» і «Ф. N, о. N, спр. N».
+
+    ⚠ Після номера фонду `(?!\\d)`: без нього «фонд 10400» пішов би у фонд
+    1040, тобто чужа справа лягла б у реєстр як своя.
+
+    ⚠ Файл, де названо лише фонд і опис («ЦДІАК фонд 1040 опис 1.pdf»), —
+    це скан самого опису, а не справа; він лишається без шифри.
+    """
+    return re.compile(
+        rf"{re.escape(archive)}\W+(?:фонд|ф)\W*{re.escape(fond)}(?!\d)\W*"
+        rf"(?:опис|оп|о\.)\W*(\d+)(?!\d)\W*(?:справа|спр)\W*(\d+)(?!\d)"
+        rf"([а-яіїєґa-z]?)(?![а-яіїєґa-z])", re.IGNORECASE)
+
+
+def worded_fond_pattern(archive: str, fond: str) -> re.Pattern[str]:
+    """Назва належить фонду, записаному словами («ЦДІАК фонд 1040…», «Ф. 1040»).
+
+    Канали за словесною формою ширші за префікс «<архів> <фонд>-»: префікс
+    «ЦДІАК фонд 1040» ловить і фонд 10400. Тому знайдене ними проходить цей
+    фільтр, а чуже відсікається, а не лягає в реєстр рядком «без шифри».
+    """
+    return re.compile(
+        rf"{re.escape(archive)}\W+(?:фонд|ф)\W*{re.escape(fond)}(?!\d)",
+        re.IGNORECASE)
+
+
+def parse_shifra(title: str, codes: tuple[str, ...],
+                 fond: str) -> tuple[str, str, str] | None:
+    """Опис, справа, літера з назви файлу — хоч цифрами, хоч словами."""
+    for code in codes:
+        for pattern in (shifra_pattern(code, fond), worded_shifra_pattern(code, fond)):
+            m = pattern.search(title)
+            if m:
+                return m.group(1), m.group(2), (m.group(3) or "").lower()
+    return None
+
+
 class CommonsCollector:
     """Перелік сканів фонду, що лежать на Commons."""
 
@@ -106,10 +151,10 @@ class CommonsCollector:
                      f"Здогад тут шкідливий: запит про архів, якого там немає, "
                      f"дає нуль, а нуль читається як «сканів немає». "
                      f"Додайте `codes.commons` у config/archives.yaml."))
-        # Один префіксний обхід на кожне написання плюс батчі метаданих; точне
-        # число знати наперед не можна — воно залежить від того, скільки файлів
-        # знайдеться, і чесніше цього не вигадувати.
-        return Plan(collector=self.id, ready=True, requests=len(codes) * 2,
+        # На кожне написання: два префіксні обходи й три пошуки плюс батчі
+        # метаданих; точне число знати наперед не можна — воно залежить від
+        # того, скільки файлів знайдеться, і чесніше цього не вигадувати.
+        return Plan(collector=self.id, ready=True, requests=len(codes) * 5,
                     opys=target.opys)
 
     # ── обхід ────────────────────────────────────────────────────────────────
@@ -124,13 +169,13 @@ class CommonsCollector:
             return {}
         return data
 
-    def _all_images(self, http: Any, code: str, fond: str) -> list[str]:
-        """Префіксний обхід: усі файли, чия назва починається з шифри фонду."""
+    def _all_images(self, http: Any, prefix: str) -> list[str]:
+        """Префіксний обхід: усі файли, чия назва починається з `prefix`."""
         names: list[str] = []
         cont: str | None = None
         while True:
             params = {"action": "query", "list": "allimages",
-                      "aiprefix": f"{code} {fond}-", "ailimit": str(PAGE_LIMIT)}
+                      "aiprefix": prefix, "ailimit": str(PAGE_LIMIT)}
             if cont:
                 params["aicontinue"] = cont
             data = self._api(http, params)
@@ -140,19 +185,45 @@ class CommonsCollector:
             if not cont:
                 return names
 
-    def _search(self, http: Any, code: str, fond: str) -> list[str]:
-        """Другий канал: пошук за назвою.
+    def _search(self, http: Any, phrase: str) -> list[str]:
+        """Пошук за назвою, усіма сторінками видачі.
 
         ⚠ Він ловить те, чого не бачить префікс, — інший регістр і файли, у
         яких перед шифрою щось стоїть. Один канал тут не досить, і це не
         обережність: два канали на живому фонді дають різні множини.
+
+        🔴 Гортається до кінця. Перша сторінка — 500 назв, а фонд, записаний
+        словами, на Commons буває більшим; без гортання хвіст видачі мовчки
+        зникав би, і справа з живим сканом виглядала б як відсутня.
         """
-        data = self._api(http, {
-            "action": "query", "list": "search",
-            "srsearch": f'intitle:"{code} {fond}-"', "srnamespace": "6",
-            "srlimit": str(PAGE_LIMIT)})
-        return [str(x.get("title") or "").removeprefix("File:")
-                for x in data.get("query", {}).get("search", [])]
+        names: list[str] = []
+        offset = 0
+        while True:
+            data = self._api(http, {
+                "action": "query", "list": "search",
+                "srsearch": f'intitle:"{phrase}"', "srnamespace": "6",
+                "srlimit": str(PAGE_LIMIT), "sroffset": str(offset)})
+            names += [str(x.get("title") or "").removeprefix("File:")
+                      for x in data.get("query", {}).get("search", [])]
+            nxt = (data.get("continue") or {}).get("sroffset")
+            if not nxt or int(nxt) <= offset:
+                return names
+            offset = int(nxt)
+
+    def _names(self, http: Any, code: str, fond: str) -> list[str]:
+        """Усі назви фонду одного написання архіву.
+
+        Канали шифри цифрами («ЦДІАК 1040-») віддають своє без фільтра, як і
+        раніше: там уже є файли, названі по-людськи, і вони мають лишитись
+        видними. Канали шифри словами ширші, тож їхнє проходить фільтр фонду.
+        """
+        names = [*self._all_images(http, f"{code} {fond}-"),
+                 *self._search(http, f"{code} {fond}-")]
+        belongs = worded_fond_pattern(code, fond)
+        worded = [*self._all_images(http, f"{code} фонд {fond}"),
+                  *self._search(http, f"{code} фонд {fond}"),
+                  *self._search(http, f"{code} ф {fond}")]
+        return names + [n for n in worded if belongs.search(norm_title(n))]
 
     def _imageinfo(self, http: Any, names: list[str]) -> dict[str, dict[str, Any]]:
         """Розмір і кількість сторінок — батчами.
@@ -191,8 +262,7 @@ class CommonsCollector:
             if on_progress is not None:
                 on_progress(done=i, total=len(codes), unit="написання",
                             note=f"{code} · знайдено {len(names)}")
-            for raw in [*self._all_images(http, code, target.fond),
-                        *self._search(http, code, target.fond)]:
+            for raw in self._names(http, code, target.fond):
                 key = norm_title(raw)
                 if key:
                     names.setdefault(key, key)
@@ -218,7 +288,18 @@ class CommonsCollector:
         out = dest / self.filename
         kept = 0
         if not dry_run:
-            kept = T.merge_into(out, FIELDS, rows, touched=touched)
+            # 🔴 Рядки без шифри зводяться за НАЗВОЮ ФАЙЛУ, а не за описом: опис
+            # у них порожній, і злиття вважало їх «чужим описом», тож кожен
+            # перезбір долучав старі до нових, а файл, чию назву тепер
+            # розібрано, лишався ще й дублем «без шифри». Але й просто
+            # переписати їх не можна: частину колись знайшли ручним запитом
+            # («Протоколи Київської ревізійної комісії…» у ф.481), і цей обхід
+            # їх не бачить — викинути означало б сховати живий скан.
+            have = {r["file"] for r in rows}
+            _, old = T.read_tsv(out)
+            carried = [r for r in old if not r.get("opys") and r.get("file") not in have]
+            kept = T.merge_into(out, FIELDS, [*rows, *carried], touched=(*touched, ""))
+            kept += len(carried)
 
         blind: list[Blind] = []
         if without:
@@ -239,12 +320,7 @@ class CommonsCollector:
 
     def _row(self, title: str, ii: dict[str, Any], codes: tuple[str, ...],
              fond: str) -> dict[str, Any] | None:
-        opys = spr = letter = ""
-        for code in codes:
-            m = shifra_pattern(code, fond).search(title)
-            if m:
-                opys, spr, letter = m.group(1), m.group(2), (m.group(3) or "").lower()
-                break
+        opys, spr, letter = parse_shifra(title, codes, fond) or ("", "", "")
         return {
             "opys": opys, "spr_int": spr, "spr_letter": letter,
             # 🔴 Файл без шифри не викидається. Скани, названі по-людськи, теж
