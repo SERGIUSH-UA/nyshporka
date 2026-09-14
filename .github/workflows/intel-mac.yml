@@ -3,8 +3,9 @@
 # 🔴 Окремий workflow, а не job у `ci.yml`: тут ставиться справжнє середовище
 # рушіїв — pytorch з conda-forge, kraken 7.0.2, strhub — це хвилини й сотні
 # мегабайт, і на кожен пуш воно не потрібне. Запускається руками або коли
-# міняється те, що це середовище збирає. ⚠ `macos-13` — останній Intel-runner
-# GitHub; коли його знімуть, job перестане стартувати, і це буде видно тут.
+# міняється те, що це середовище збирає. ⚠ Intel-раннери GitHub: `macos-15-intel`
+# і `macos-26-intel` (`macos-13` знято у 2026 — job на ньому висів у черзі без
+# раннера). Коли знімуть і ці, job перестане стартувати, і це буде видно тут.
 name: Intel Mac
 
 on:
@@ -19,8 +20,8 @@ on:
 
 jobs:
   engines:
-    name: рушії з conda-forge · macos-13 (x86_64)
-    runs-on: macos-13
+    name: рушії з conda-forge · macos-15-intel (x86_64)
+    runs-on: macos-15-intel
     timeout-minutes: 60
     env:
       NYSHPORKA_WORKSPACE: ${{ github.workspace }}/ws
