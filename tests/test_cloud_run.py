@@ -214,6 +214,30 @@ def wired(space: Path, monkeypatch):
     return plan, backend
 
 
+def test_upload_needs_no_numpy_and_ships_pysar_infer(wired, monkeypatch) -> None:
+    """🔴 Регресія, заміряна живцем на `gpu3060` (14.09.2026).
+
+    `_upload_assets` раніше робила `import nyshporka.htr.runner`, щоб дістати
+    шлях до файлу — а той модуль (виконується python-ом СЕРЕДОВИЩА РУШІЇВ, за
+    власним docstring) тягне `numpy` top-level. `cloud`-екстра ставить лише
+    `paramiko`/`boto3`, тому оркестрація падала ще до підключення до машини.
+    Тут те саме моделюється блокуванням `numpy` у `sys.modules`.
+
+    Другий інцидент у тій самій команді: без `pysar_lines_infer.py` поруч із
+    `runner.py` кожна кирилична (`.pt`) сторінка йде в карантин з
+    `ModuleNotFoundError`, а GPU показує 0% навантаження — мовчки, без
+    жодної помилки на старті заходу.
+    """
+    import sys
+
+    monkeypatch.setitem(sys.modules, "numpy", None)
+    plan, backend = wired
+    RUN.start(plan)
+    run_dir = backend.session._run_dir()
+    assert (run_dir / "runner.py").exists()
+    assert (run_dir / "pysar_lines_infer.py").exists()
+
+
 # ── ідемпотентність ──────────────────────────────────────────────────────────
 def test_second_start_adopts_instead_of_renting_again(wired) -> None:
     """🔴 Головний тест ідемпотентності.
