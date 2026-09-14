@@ -187,6 +187,14 @@ def info() -> None:
         # за відсутню: користувач виконує її і бачить той самий стан.
         mark = ("[ok]є[/ok]" if have
                 else rf"[muted]немає — pip install 'nyshporka\[{extra}]'[/muted]")
+        if extra == "htr" and not have:
+            from nyshporka.htr.env import intel_mac
+
+            # Intel Mac: torch поруч із застосунком не стане ніколи (PyPI без
+            # колес x86_64), і порада вище вела б у відмову резолвера. Рушії
+            # там збираються окремим кроком з conda-forge.
+            if intel_mac():
+                mark = "[muted]окремим кроком: nysh htr install (з conda-forge)[/muted]"
         console.print(f"  {label:8s} {mark}")
 
 
@@ -2026,11 +2034,6 @@ def htr_install(
         raise typer.Exit(code=2) from None
     try:
         rep = E.setup(venv, with_cuda=not no_cuda, force_tag=cuda)
-    except E.EnginesUnsupported as exc:
-        # Intel Mac: колеса torch під рушії не існує, і не існуватиме. Один
-        # рядок із виходом (`nysh cloud`) замість довгої відмови резолвера.
-        console.print(f"[err]{exc}[/err]")
-        raise typer.Exit(code=2) from None
     except E.ToolMissing as exc:
         # 🔴 Не трасою стека: `uv` і `git` — не залежності пакета, тож у того,
         # хто ставив `pip install`, їх може не бути зовсім, і саме він

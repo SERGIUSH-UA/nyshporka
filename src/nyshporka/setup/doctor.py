@@ -159,14 +159,6 @@ def _torch() -> Check:
     if rep is None:
         return Check("Прискорення (GPU)", "warn", "простір не визначено")
     if not rep.torch:
-        from nyshporka.htr import env as henv
-
-        if henv.unsupported_here():
-            # Intel Mac: рядок про рушії вже назвав причину; тут лише не радити
-            # `nysh htr install`, який на цій машині відмовить.
-            return Check("Прискорення (GPU)", "warn",
-                         "рушіїв на цій машині немає — читання на іншій машині "
-                         "(`nysh cloud`)")
         # ⚠ Шлях тут не називається: його вже назвав рядок про рушії, і той
         # самий шлях двічі поспіль читається як дві різні поломки.
         return Check("Прискорення (GPU)", "warn",
@@ -253,11 +245,6 @@ def _engines() -> Check:
     if not rep.ok:
         from nyshporka.htr import env as henv
 
-        unsupported = henv.unsupported_here()
-        if unsupported:
-            # 🔴 Intel Mac: порада «nysh htr install» тут повертала б людину в
-            # команду, яка відмовляє з тією самою причиною. Причина — замість поради.
-            return Check("Рушії читання", "warn", unsupported)
         why = "; ".join(rep.problems) or (
             f"бракує: {', '.join(rep.missing)}" if rep.missing else "не зібране")
         # ⚠ Сказано прямо, що середовище живе В ПРОСТОРІ. Інакше в людини з
@@ -267,9 +254,13 @@ def _engines() -> Check:
         venv = engine_venv()
         if str(venv) not in why:      # «немає інтерпретатора» шлях уже назвав
             why = f"{why} ({venv})"
-        return Check("Рушії читання", "warn", why,
-                     "nysh htr install — рушій ставиться окремо для КОЖНОГО "
-                     "простору (~2.5 ГБ); ваги при цьому спільні на машину")
+        hint = ("nysh htr install — рушій ставиться окремо для КОЖНОГО "
+                "простору (~2.5 ГБ); ваги при цьому спільні на машину")
+        if henv.intel_mac():
+            # Intel Mac: PyPI без колес torch, тож команда збирає інакше — і
+            # людині варто знати, звідки візьметься інтерпретатор і чому.
+            hint += " · Intel Mac: python і torch беруться з conda-forge (micromamba приїде сам)"
+        return Check("Рушії читання", "warn", why, hint)
     bits = [f"kraken {rep.kraken}" if rep.kraken else "",
             f"torch {rep.torch}" if rep.torch else "",
             "CUDA" if rep.cuda else "CPU"]

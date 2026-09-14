@@ -34,16 +34,18 @@
   `where-to-dig` бере з них регіон дослідження, не питаючи людину щоразу.
 ### Полагоджено
 
-- **Mac з процесором Intel: установлення більше не падає на `torchvision`
-  (issue #10).** PyTorch не випускає колес для macOS x86_64 з torch 2.2.2, а
-  рушіям потрібен torch ≥ 2.4 (`kraken==7.0.2`), тож локальне читання на таких
-  Mac неможливе — а інсталятор падав на резолвері вже після того, як поставив uv
-  і Python, і людина читала це як свою помилку. Тепер інсталятор `unix.sh` на
-  Intel Mac ставить `nyshporka[app,archives,cloud]` замість `…,htr]` і каже
-  чому; extra `htr` в `pyproject` має маркер платформи, тож і `pip install
-  'nyshporka[app,archives,htr]'`, і `nysh update` там проходять; `nysh htr
-  install` відмовляє одним рядком з виходом (`nysh cloud`), а не трасою uv;
-  `nysh doctor` називає причину замість поради «nysh htr install».
+- **Mac з процесором Intel: установлення проходить, рушії збираються з
+  conda-forge (issue #10).** PyTorch не випускає колес для macOS x86_64 з
+  torch 2.2.2, а рушіям потрібен torch ≥ 2.4 (`kraken==7.0.2`), тож з PyPI цю
+  пару не скласти — інсталятор падав на резолвері вже після того, як поставив
+  uv і Python, і людина читала це як свою помилку. Тепер extra `htr` в
+  `pyproject` має маркер платформи, тож `pip install 'nyshporka[app,archives,htr]'`,
+  інсталятор і `nysh update` на Intel Mac проходять; `nysh htr install` там
+  створює середовище рушіїв через micromamba з conda-forge (інтерпретатор і
+  torch звідти, решта pip'ом, як усюди), а micromamba приносить сам у теку
+  застосунку, якщо на машині немає ні його, ні `mamba`, ні `conda`;
+  `nysh doctor` і `nysh info` кажуть про це замість поради, що вела в ту саму
+  відмову. Приймач — job «Intel Mac» на `macos-13`.
 
 ## [0.14.0] — 2026-09-13
 

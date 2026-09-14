@@ -1,0 +1,41 @@
+# Рушії читання на Mac з процесором Intel (issue #10).
+#
+# 🔴 Окремий workflow, а не job у `ci.yml`: тут ставиться справжнє середовище
+# рушіїв — pytorch з conda-forge, kraken 7.0.2, strhub — це хвилини й сотні
+# мегабайт, і на кожен пуш воно не потрібне. Запускається руками або коли
+# міняється те, що це середовище збирає. ⚠ `macos-13` — останній Intel-runner
+# GitHub; коли його знімуть, job перестане стартувати, і це буде видно тут.
+name: Intel Mac
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - src/nyshporka/htr/env.py
+      - src/nyshporka/htr/manifest.py
+      - src/nyshporka/htr/data/engines.yaml
+      - .github/workflows/intel-mac.yml
+
+jobs:
+  engines:
+    name: рушії з conda-forge · macos-13 (x86_64)
+    runs-on: macos-13
+    timeout-minutes: 60
+    env:
+      NYSHPORKA_WORKSPACE: ${{ github.workspace }}/ws
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: це справді x86_64
+        run: uv run --no-project python -c "import platform, sys; print(sys.platform, platform.machine()); assert platform.machine() == 'x86_64'"
+      - name: застосунок
+        run: uv sync --locked
+      - name: простір
+        run: uv run nysh init --yes --preset researcher
+      - name: середовище рушіїв
+        run: uv run nysh htr install --no-cuda
+      - name: що вийшло
+        run: |
+          uv run nysh htr env
+          uv run nysh doctor

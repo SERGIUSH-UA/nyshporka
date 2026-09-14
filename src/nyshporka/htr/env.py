@@ -130,32 +130,98 @@ class ToolMissing(RuntimeError):
     """
 
 
-class EnginesUnsupported(RuntimeError):
-    """На цій машині середовище рушіїв не збирається — з причиною і виходом."""
+def intel_mac() -> bool:
+    """Mac з процесором Intel — або Python під Rosetta на Apple Silicon.
 
+    🔴 Issue #10. PyTorch перестав випускати колеса для macOS x86_64 після
+    torch 2.2.2 / torchvision 0.17.2, а `kraken==7.0.2` — пін під патчі, який
+    знімати не можна, — вимагає torch ≥ 2.4. З PyPI цю пару не скласти ніколи,
+    тож тут середовище створюється інакше: інтерпретатор і torch беруться з
+    conda-forge (`Manifest.conda_*`), а решта ставиться pip'ом, як усюди.
 
-def unsupported_here() -> str:
-    """Чому рушії на цій машині не стануть НІКОЛИ — або порожній рядок.
-
-    🔴 Intel Mac (issue #10). PyTorch перестав випускати колеса для macOS
-    x86_64 після torch 2.2.2 / torchvision 0.17.2, а `kraken==7.0.2` — пін під
-    патчі, який знімати не можна, — вимагає torch ≥ 2.4. Тобто резолвер тут не
-    «не знайшов колесо цього разу», а не знайде його ніколи, і сказати це треба
-    ДО того, як створено venv і скачано гігабайти: інакше людина читає довгу
-    відмову uv про `macosx_13_0_x86_64` і питає, що в неї не так.
-
-    ⚠ Питається ІНТЕРПРЕТАТОР, а не залізо: Python під Rosetta на Apple Silicon
-    теж каже `x86_64` — і йому теж потрібні x86-колеса, яких немає.
+    ⚠ Питається ІНТЕРПРЕТАТОР, а не залізо: Python під Rosetta теж каже
+    `x86_64`, і йому теж потрібні x86-колеса.
     """
     import platform
 
-    if sys.platform == "darwin" and platform.machine() == "x86_64":
-        return ("рушії читання на Mac з процесором Intel не ставляться: PyTorch "
-                "не випускає колес для macOS x86_64 з версії 2.2.2, а рушіям "
-                "потрібен torch 2.4 або новіший. Читати можна на іншій машині — "
-                "`nysh cloud` (потрібен extra `cloud`); решта застосунку тут "
-                "працює як звичайно")
-    return ""
+    return sys.platform == "darwin" and platform.machine() == "x86_64"
+
+
+#: Статичний micromamba для Intel Mac — один файл, без Python і без установки.
+MICROMAMBA_URL = "https://micro.mamba.pm/api/micromamba/osx-64/latest"
+
+
+def _conda_tool() -> str:
+    """Чим створювати conda-середовище: те, що вже є, або власний micromamba.
+
+    Порядок: `micromamba` → `mamba` → `conda` з PATH; далі — той micromamba, що
+    його вже приносили сюди; далі — завантажити. 🔴 Приносити самим, а не
+    радити «поставте conda»: uv інсталятор теж приносить сам, і людина, яка
+    щойно поставила застосунок одним рядком, не мусить на другому кроці йти
+    по інший пакетний менеджер. Лягає в теку застосунку поруч із uv, і
+    `nysh uninstall` знімає її разом з рештою.
+    """
+    for name in ("micromamba", "mamba", "conda"):
+        found = _resolve_tool(name)
+        if found:
+            return found
+    own = _micromamba_home() / "bin" / "micromamba"
+    if own.is_file():
+        return str(own)
+    return _fetch_micromamba(own)
+
+
+def _micromamba_home() -> Path:
+    from nyshporka.setup.update import install_home
+
+    return install_home() / "micromamba"
+
+
+def _fetch_micromamba(target: Path) -> str:
+    """Завантажити статичний micromamba у теку застосунку; шлях до бінарника."""
+    import tarfile
+    import tempfile
+
+    import httpx
+
+    print(f"⬇ micromamba ({MICROMAMBA_URL})…")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory() as tmp:
+        archive = Path(tmp) / "micromamba.tar.bz2"
+        with httpx.stream("GET", MICROMAMBA_URL, follow_redirects=True, timeout=120) as r:
+            r.raise_for_status()
+            with archive.open("wb") as fh:
+                for chunk in r.iter_bytes():
+                    fh.write(chunk)
+        with tarfile.open(archive, "r:bz2") as tar:
+            member = next((m for m in tar.getmembers()
+                           if m.name.endswith("bin/micromamba")), None)
+            if member is None:
+                raise ToolMissing("micromamba: в архіві немає bin/micromamba — "
+                                  "формат роздачі змінився; поставте вручну: "
+                                  "brew install micromamba")
+            src = tar.extractfile(member)
+            assert src is not None
+            target.write_bytes(src.read())
+    target.chmod(0o755)
+    print(f"✓ micromamba: {target}")
+    return str(target)
+
+
+def _create_conda_env(venv: Path, man: M.Manifest, tool: str) -> None:
+    """Середовище з conda-forge: інтерпретатор і torch звідти, решта — pip.
+
+    ⚠ `MAMBA_ROOT_PREFIX` показує в теку застосунку: інакше micromamba завів
+    би `~/micromamba` з кешем пакетів у домівці людини — рівно те, чого
+    інсталятор навчився не робити 07.09.2026.
+    """
+    if not man.conda_packages:
+        raise ToolMissing("у маніфесті рушіїв немає блоку conda — на цій машині "
+                          "torch не поставити: PyPI не має колес для macOS x86_64")
+    env = {**os.environ, "MAMBA_ROOT_PREFIX": str(_micromamba_home() / "root")}
+    _run([tool, "create", "--yes", "-p", str(venv), "--override-channels",
+          "-c", man.conda_channel or "conda-forge",
+          f"python={man.python}", *man.conda_packages], env=env)
 
 
 def _need_tool(name: str, why: str, how: str) -> None:
@@ -216,20 +282,14 @@ def _from_install_info(name: str) -> str:
     return got if got and Path(got).is_file() else ""
 
 
-def _run(cmd: list[str]) -> None:
+def _run(cmd: list[str], env: dict[str, str] | None = None) -> None:
     print("  $ " + " ".join(cmd))
-    subprocess.run(cmd, check=True)
+    subprocess.run(cmd, check=True, env=env)
 
 
 def setup(venv: Path, *, man: M.Manifest | None = None, with_cuda: bool = True,
           uv: str = "uv", force_tag: str = "") -> EnvReport:
     """Створити або доповнити середовище. Ідемпотентно: наявне не чіпається."""
-    # 🔴 Раніше за `uv` і за venv: там, де колеса не буде ніколи, ставити нема
-    # чого — а порожнє середовище лишало б по собі теку й пораду «nysh htr
-    # install», яка веде назад сюди ж.
-    why = unsupported_here()
-    if why:
-        raise EnginesUnsupported(why)
     man = man or M.active()
     _need_tool(uv, "ним створюється й наповнюється середовище рушіїв",
                "Windows: winget install astral-sh.uv · "
@@ -244,6 +304,12 @@ def setup(venv: Path, *, man: M.Manifest | None = None, with_cuda: bool = True,
 
     if py.exists():
         print(f"✓ середовище є: {venv}")
+    elif intel_mac():
+        # 🔴 Intel Mac: `uv venv` + pip дали б відмову резолвера на torch уже
+        # після того, як усе інше стало. Інтерпретатор і torch — з conda-forge.
+        print(f"① створюю {venv.name} з conda-forge (python {man.python} + torch: "
+              f"PyPI не має колес torch для macOS x86_64)…")
+        _create_conda_env(venv, man, _conda_tool())
     else:
         print(f"① створюю {venv.name} (python {man.python})…")
         _run([uv, "venv", str(venv), "--python", man.python])
@@ -294,6 +360,11 @@ def _ensure_cuda(venv: Path, man: M.Manifest, uv: str = "uv", force_tag: str = "
     стати без помилки й усе одно не побачити карту.
     """
     py = venv_python(venv)
+    if sys.platform == "darwin":
+        # CUDA на macOS немає за побудовою — ні колеса, ні драйвера; питати
+        # `nvidia-smi` тут означало б друкувати «карти не видно» на кожному Mac.
+        print(f"✓ macOS: {gpu.CPU_NOTE}")
+        return
     if _probe(py, "import torch; print(torch.cuda.is_available())") == "True":
         print("✓ torch уже бачить карту")
         return

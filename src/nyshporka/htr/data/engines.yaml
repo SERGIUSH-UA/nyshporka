@@ -75,6 +75,16 @@ runtime:
     cuda_matrix:
       - {min_capability: "7.0", max_capability: "8.9", tag: "cu126", min_driver: "527.41"}
       - {min_capability: "9.0", max_capability: "12.9", tag: "cu128", min_driver: "527.41"}
+    # 🔴 Mac з процесором Intel (issue #10): PyTorch не випускає колес для
+    # macOS x86_64 з torch 2.2.2, а kraken 7.0.2 вимагає ≥ 2.4 — з PyPI цю
+    # пару не скласти ніколи. Її збирає conda-forge (pytorch osx-64 є й далі),
+    # тож там середовище створює micromamba, а не `uv venv`: інтерпретатор і
+    # torch — звідси, решта пакетів — pip'ом, як усюди. Стеля 2.10 — верхня
+    # межа самого kraken 7.0.2. Приймач — `uv pip compile` під
+    # x86_64-apple-darwin: з підміненим torch решта 84 пакетів резолвиться.
+    conda:
+      channel: conda-forge
+      packages: ["pytorch>=2.4,<=2.10", "torchvision"]
 
 # ── патчі гарячих функцій kraken ─────────────────────────────────────────────
 # Разом дають 32.7 → 14.8 с/стор при побітово тому самому виході. Це патч ЧУЖОЇ

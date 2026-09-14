@@ -94,6 +94,9 @@ class Manifest:
     engines: tuple[Engine, ...] = ()
     patches: tuple[Patch, ...] = ()
     base_models: tuple[BaseModel, ...] = ()
+    #: Intel Mac: звідки брати інтерпретатор і torch, коли PyPI їх не має.
+    conda_channel: str = ""
+    conda_packages: tuple[str, ...] = ()
 
     # ── питання до маніфесту ─────────────────────────────────────────────────
     def engine_for_model(self, filename: str) -> Engine | None:
@@ -195,7 +198,10 @@ class Manifest:
 def _build(raw: dict[str, Any]) -> Manifest:
     rt = raw.get("runtime") or {}
     torch = rt.get("torch") or {}
+    conda = torch.get("conda") or {}
     return Manifest(
+        conda_channel=str(conda.get("channel") or ""),
+        conda_packages=tuple(str(p) for p in (conda.get("packages") or [])),
         python=str(rt.get("python") or "3.11"),
         packages=tuple(str(p) for p in (rt.get("packages") or [])),
         vcs_packages=tuple({"name": str(v.get("name") or ""),
