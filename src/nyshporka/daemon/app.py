@@ -368,6 +368,19 @@ def create_app(ws: Workspace | None = None, *, token: str = "",
     return app
 
 
+def _bind_host(host: str) -> str:
+    """Адреса, на якій реально слухає uvicorn.
+
+    🔴 Одна конкретна LAN-адреса — це один мережевий інтерфейс. Піднятись
+    лише на ній означало б загубити петлю, якою й далі йде SSH-тунель
+    (`ssh -L` шле саме на `127.0.0.1`) — задокументований шлях доступу б
+    зламався. Тому все, що не петля, розширюється до `0.0.0.0` (усі
+    інтерфейси разом із петлею). Хто саме довірений — вирішує окремо
+    `trusted_names` у `create_app`, не сам бінд.
+    """
+    return host if host in _OWN_NAMES else "0.0.0.0"
+
+
 def serve(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT, *,
           open_browser: bool = True) -> None:
     """Підняти застосунок і взяти замок простору.
@@ -394,6 +407,7 @@ def serve(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT, *,
     try:
         with WorkspaceLock(space.root, port=port).acquire() as held:
             app = create_app(space, host=host)
+            bind_host = _bind_host(host)
             url = f"http://{host}:{port}/"
             # Старт застосунку — те саме перше враження, що й `nysh info`, тож
             # знак і лінія бренду тут ті самі. Далі вивід перехоплює uvicorn.
@@ -429,7 +443,7 @@ def serve(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT, *,
                                    daemon=True)
             hb.start()
             try:
-                uvicorn.run(app, host=host, port=port, log_level="warning")
+                uvicorn.run(app, host=bind_host, port=port, log_level="warning")
             finally:
                 stop.set()
     except LockBusy as busy:

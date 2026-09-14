@@ -333,6 +333,21 @@ def test_own_page_origin_still_works(client: TestClient) -> None:
     assert client.post("/api/op/workspace.info", json={}).status_code == 200
 
 
+def test_bind_widens_to_all_interfaces_but_keeps_loopback_reachable() -> None:
+    """LAN-`--host` не мусить забирати петлю — лише додавати мережу.
+
+    `uvicorn.run(host=...)` слухає рівно ту адресу, яку йому дали: якби це
+    була сама LAN-адреса, SSH-тунель (`127.0.0.1`) лишився б без слухача.
+    Довіру ж (`Host`/`Origin`) і далі вирішує `create_app`, не бінд.
+    """
+    from nyshporka.daemon.app import _bind_host
+
+    assert _bind_host("127.0.0.1") == "127.0.0.1"
+    assert _bind_host("localhost") == "localhost"
+    assert _bind_host("0.0.0.0") == "0.0.0.0"
+    assert _bind_host("192.168.1.162") == "0.0.0.0"
+
+
 def test_lan_host_trusted_only_when_bound_there(ws: Workspace) -> None:
     """`--host` довіряє лише тій адресі, на якій демона реально підняли.
 
