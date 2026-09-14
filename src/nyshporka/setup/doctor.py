@@ -159,6 +159,14 @@ def _torch() -> Check:
     if rep is None:
         return Check("Прискорення (GPU)", "warn", "простір не визначено")
     if not rep.torch:
+        from nyshporka.htr import env as henv
+
+        if henv.unsupported_here():
+            # Intel Mac: рядок про рушії вже назвав причину; тут лише не радити
+            # `nysh htr install`, який на цій машині відмовить.
+            return Check("Прискорення (GPU)", "warn",
+                         "рушіїв на цій машині немає — читання на іншій машині "
+                         "(`nysh cloud`)")
         # ⚠ Шлях тут не називається: його вже назвав рядок про рушії, і той
         # самий шлях двічі поспіль читається як дві різні поломки.
         return Check("Прискорення (GPU)", "warn",
@@ -243,6 +251,13 @@ def _engines() -> Check:
     if rep is None:
         return Check("Рушії читання", "warn", "простір не визначено")
     if not rep.ok:
+        from nyshporka.htr import env as henv
+
+        unsupported = henv.unsupported_here()
+        if unsupported:
+            # 🔴 Intel Mac: порада «nysh htr install» тут повертала б людину в
+            # команду, яка відмовляє з тією самою причиною. Причина — замість поради.
+            return Check("Рушії читання", "warn", unsupported)
         why = "; ".join(rep.problems) or (
             f"бракує: {', '.join(rep.missing)}" if rep.missing else "не зібране")
         # ⚠ Сказано прямо, що середовище живе В ПРОСТОРІ. Інакше в людини з

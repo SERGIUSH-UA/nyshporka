@@ -160,6 +160,7 @@ nysh doctor         # перевірка «Рушії читання» має с
 | Windows, без термінала | [`nyshporka-setup.exe`][setup] (тихо: `/VERYSILENT`) |
 | Python або `uv` уже є | `uv tool install "nyshporka[app,archives,htr]"` |
 | легкий набір, без `torch` (~2.5 ГБ) | `uv tool install "nyshporka[app,archives]"` |
+| Mac з процесором Intel | рушії сюди не стають (PyTorch без колес x86_64 з 2.2.2) — інсталятор сам ставить `nyshporka[app,archives,cloud]`; читання — `nysh cloud` |
 | перевірити, що вийшло | `nysh doctor` |
 | перелік операцій і їхні контракти | `nysh op <ім'я> --describe` |
 

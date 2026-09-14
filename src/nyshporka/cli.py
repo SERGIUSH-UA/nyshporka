@@ -2026,6 +2026,11 @@ def htr_install(
         raise typer.Exit(code=2) from None
     try:
         rep = E.setup(venv, with_cuda=not no_cuda, force_tag=cuda)
+    except E.EnginesUnsupported as exc:
+        # Intel Mac: колеса torch під рушії не існує, і не існуватиме. Один
+        # рядок із виходом (`nysh cloud`) замість довгої відмови резолвера.
+        console.print(f"[err]{exc}[/err]")
+        raise typer.Exit(code=2) from None
     except E.ToolMissing as exc:
         # 🔴 Не трасою стека: `uv` і `git` — не залежності пакета, тож у того,
         # хто ставив `pip install`, їх може не бути зовсім, і саме він

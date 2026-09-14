@@ -130,6 +130,34 @@ class ToolMissing(RuntimeError):
     """
 
 
+class EnginesUnsupported(RuntimeError):
+    """На цій машині середовище рушіїв не збирається — з причиною і виходом."""
+
+
+def unsupported_here() -> str:
+    """Чому рушії на цій машині не стануть НІКОЛИ — або порожній рядок.
+
+    🔴 Intel Mac (issue #10). PyTorch перестав випускати колеса для macOS
+    x86_64 після torch 2.2.2 / torchvision 0.17.2, а `kraken==7.0.2` — пін під
+    патчі, який знімати не можна, — вимагає torch ≥ 2.4. Тобто резолвер тут не
+    «не знайшов колесо цього разу», а не знайде його ніколи, і сказати це треба
+    ДО того, як створено venv і скачано гігабайти: інакше людина читає довгу
+    відмову uv про `macosx_13_0_x86_64` і питає, що в неї не так.
+
+    ⚠ Питається ІНТЕРПРЕТАТОР, а не залізо: Python під Rosetta на Apple Silicon
+    теж каже `x86_64` — і йому теж потрібні x86-колеса, яких немає.
+    """
+    import platform
+
+    if sys.platform == "darwin" and platform.machine() == "x86_64":
+        return ("рушії читання на Mac з процесором Intel не ставляться: PyTorch "
+                "не випускає колес для macOS x86_64 з версії 2.2.2, а рушіям "
+                "потрібен torch 2.4 або новіший. Читати можна на іншій машині — "
+                "`nysh cloud` (потрібен extra `cloud`); решта застосунку тут "
+                "працює як звичайно")
+    return ""
+
+
 def _need_tool(name: str, why: str, how: str) -> None:
     """Перевірити перед запуском, а не впасти всередині.
 
@@ -196,6 +224,12 @@ def _run(cmd: list[str]) -> None:
 def setup(venv: Path, *, man: M.Manifest | None = None, with_cuda: bool = True,
           uv: str = "uv", force_tag: str = "") -> EnvReport:
     """Створити або доповнити середовище. Ідемпотентно: наявне не чіпається."""
+    # 🔴 Раніше за `uv` і за venv: там, де колеса не буде ніколи, ставити нема
+    # чого — а порожнє середовище лишало б по собі теку й пораду «nysh htr
+    # install», яка веде назад сюди ж.
+    why = unsupported_here()
+    if why:
+        raise EnginesUnsupported(why)
     man = man or M.active()
     _need_tool(uv, "ним створюється й наповнюється середовище рушіїв",
                "Windows: winget install astral-sh.uv · "

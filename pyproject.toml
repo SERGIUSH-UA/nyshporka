@@ -91,7 +91,18 @@ archives = [
 # взагалі, а на машині без NVIDIA тягне 2.5 ГБ марно. GPU — крок інсталятора
 # (`nysh doctor --gpu` читає compute capability і доставляє потрібні колеса),
 # а не властивість збірки.
-htr = ["torch>=2.2", "torchvision>=0.20", "timm>=1.0"]
+# 🔴 Маркер на Intel Mac (issue #10): PyTorch не випускає колес для macOS
+# x86_64 з torch 2.2.2, тож `torchvision>=0.20` там не резолвиться ніколи — і
+# валив `pip install 'nyshporka[…,htr]'` і `nysh update` ЦІЛКОМ, разом із
+# консоллю й архівами. Самі рушії живуть в окремому середовищі (`nysh htr
+# install`), і той крок на Intel Mac відмовляє з причиною; тут же extra стає
+# порожнім, і решта застосунку ставиться. `platform_machine` дивиться на
+# ІНТЕРПРЕТАТОР: Python під Rosetta теж x86_64, і йому теж треба x86-колеса.
+htr = [
+  "torch>=2.2; platform_system != 'Darwin' or platform_machine != 'x86_64'",
+  "torchvision>=0.20; platform_system != 'Darwin' or platform_machine != 'x86_64'",
+  "timm>=1.0; platform_system != 'Darwin' or platform_machine != 'x86_64'",
+]
 ocr = ["paddleocr>=3.5"]
 # 🛡 Проходження Cloudflare, який відсікає клієнта по ВІДБИТКУ TLS, а не по
 # заголовках. Заміряно на `babynyar.org` 09.09.2026: `httpx` із повним набором
