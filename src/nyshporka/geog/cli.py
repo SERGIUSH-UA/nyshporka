@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json as _json
+from typing import Any
 
 import typer
 
@@ -177,7 +178,7 @@ church_app = typer.Typer(help="Церкви ~1772 (база Шади): чи бу
                          no_args_is_help=True)
 
 
-def _church_line(r: dict, *, km: bool = False) -> str:
+def _church_line(r: dict[str, Any], *, km: bool = False) -> str:
     dist = f"{r.get('km', 0):5.1f} км " if km else ""
     var = f" ({r['name_v']})" if r.get("name_v") else ""
     role = " ·допоміжна" if r.get("role") == "auxiliary" else ""
@@ -188,7 +189,7 @@ def _church_line(r: dict, *, km: bool = False) -> str:
             f"{' · ' + r['material_uk'] if r.get('material_uk') else ''}")
 
 
-def _places_line(r: dict) -> str:
+def _places_line(r: dict[str, Any]) -> str:
     places = r.get("places") or []
     if not places:
         return ""
