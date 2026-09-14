@@ -2130,15 +2130,21 @@ def models_get(
 
 @app.command()
 def serve(
-    port: int = typer.Option(8788, "--port", help="порт на 127.0.0.1"),
+    port: int = typer.Option(8788, "--port", help="порт"),
+    host: str = typer.Option(
+        "127.0.0.1", "--host",
+        help="адреса, на якій слухати. Дефолт — лише петля; LAN-IP чи "
+             "0.0.0.0 робить застосунок видимим для всіх у цій мережі"),
     no_browser: bool = typer.Option(False, "--no-browser",
                                     help="не відкривати вкладку самому"),
 ) -> None:
     """Підняти застосунок у браузері.
 
-    🔴 Слухає лише 127.0.0.1, і опції це змінити немає. Тут архів однієї
-    людини — канон про живих родичів, скани, нотатки; прапорець «слухати всюди»
-    рано чи пізно вмикають «на хвилинку» й лишають.
+    🔴 Дефолт лишається петлею: тут архів однієї людини — канон про живих
+    родичів, скани, нотатки. `--host` — свідомий вибір відкрити його в
+    локальній мережі (наприклад, дістатись без SSH-тунелю з іншого пристрою
+    вдома); кожен запуск із не-петльовою адресою друкує застереження, щоб це
+    не лишалось непоміченим «на хвилинку».
     """
     from importlib.util import find_spec
 
@@ -2158,7 +2164,11 @@ def serve(
         console.print(f"[err]{exc}[/err]")
         console.print(r"[muted]pip install 'nyshporka\[app]'[/muted]")
         raise typer.Exit(code=1) from None
-    _serve(port=port, open_browser=not no_browser)
+    if host not in ("127.0.0.1", "localhost", "::1"):
+        console.print(
+            f"[warn]слухаю на {host} — застосунок видно кожному в цій "
+            f"мережі, токен на сторінці лишається єдиним захистом[/warn]")
+    _serve(host=host, port=port, open_browser=not no_browser)
 
 
 def _op_card(op: Any, *, with_doc: bool = False) -> dict[str, Any]:

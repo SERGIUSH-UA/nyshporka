@@ -333,6 +333,29 @@ def test_own_page_origin_still_works(client: TestClient) -> None:
     assert client.post("/api/op/workspace.info", json={}).status_code == 200
 
 
+def test_lan_host_trusted_only_when_bound_there(ws: Workspace) -> None:
+    """`--host` довіряє лише тій адресі, на якій демона реально підняли.
+
+    Хтось інший на тій самій мережі не мусить дістати доступ, підмінивши
+    `Host` на LAN-адресу застосунку, — тож адреса, якою підняли демон, не
+    відкриває решту мережі: чужий `Host` лишається чужим.
+    """
+    lan = TestClient(create_app(ws, token=TOKEN, host="192.168.1.162"),
+                     base_url="http://192.168.1.162:8788")
+    res = lan.get("/api/health")
+    assert res.status_code == 200
+    res = lan.get("/api/health", headers={"Host": "evil.example"})
+    assert res.status_code == 403
+    # петля лишається довіреною і на LAN-піднятому демоні
+    res = lan.get("/api/health", headers={"Host": "127.0.0.1:8788"})
+    assert res.status_code == 200
+    # та адреса, яку в create_app не передали, довіри не отримує
+    loopback_only = TestClient(create_app(ws, token=TOKEN),
+                               base_url="http://127.0.0.1:8788")
+    res = loopback_only.get("/api/health", headers={"Host": "192.168.1.162:8788"})
+    assert res.status_code == 403
+
+
 def test_the_page_token_never_leaves_under_another_name(client: TestClient) -> None:
     """🔴 Найдорожче в перев'язуванні імені — те, що токен віддається сам.
 
