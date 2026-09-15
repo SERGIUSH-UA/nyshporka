@@ -2195,7 +2195,14 @@ def serve(
         console.print(f"[err]{exc}[/err]")
         console.print(r"[muted]pip install 'nyshporka\[app]'[/muted]")
         raise typer.Exit(code=1) from None
+    from rich.markup import escape
+
     from nyshporka.daemon import app as D
+
+    # 🔴 Усе з адресою — без розмітки й емодзі: rich читав `[fd00::5]` як тег, а
+    # `:ab:` усередині IPv6 друкував як 🆎.
+    def _refuse(text: str) -> None:
+        console.print(f"[err]{escape(text)}[/err]", emoji=False, highlight=False)
 
     extras = bool(tls_cert or tls_key or rotate_key or confirm_host or confirm_public)
     if D.is_loopback_host(host):
@@ -2213,7 +2220,7 @@ def serve(
         if tls_cert is not None and tls_key is not None:
             D.check_tls(str(tls_cert), str(tls_key))
     except ValueError as exc:
-        console.print(f"[err]{exc}[/err]", markup=True, highlight=False)
+        _refuse(str(exc))
         raise typer.Exit(code=1) from None
 
     from nyshporka.core.workspace import workspace as _workspace
@@ -2225,7 +2232,7 @@ def serve(
     outs = [console] if _stdout_is_tty() else [console, brand.err()]
     for out in outs:
         for line in lines:
-            out.print(line, style="warn", markup=False, highlight=False)
+            out.print(line, style="warn", markup=False, emoji=False, highlight=False)
 
     public = D.is_public_exposure(addr)
 
@@ -2257,7 +2264,7 @@ def serve(
                    "--confirm-host <адреса> (і --confirm-public для 0.0.0.0, :: чи "
                    "публічної адреси)")
     if refusal:
-        console.print(f"[err]{refusal}[/err]", markup=True, highlight=False)
+        _refuse(refusal)
         raise typer.Exit(code=1)
 
     try:
@@ -2267,7 +2274,7 @@ def serve(
                tls_key=str(tls_key) if tls_key is not None else None,
                show_secret=_stdout_is_tty())
     except ValueError as exc:
-        console.print(f"[err]{exc}[/err]", markup=True, highlight=False)
+        _refuse(str(exc))
         raise typer.Exit(code=1) from None
 
 

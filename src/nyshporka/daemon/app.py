@@ -26,11 +26,13 @@
 """
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import contextvars
 import hashlib
 import hmac
 import ipaddress
+import json
 import os
 import secrets
 import socket
@@ -81,11 +83,16 @@ FAILS_MAX = 10
 #: проброшеним портом одна адреса буває в кількох людей, і блок назавжди
 #: перетворився б на спосіб вимкнути доступ самому власнику.
 FAIL_BLOCK_SEC = 15 * 60
-#: Затримка на кожну хибну спробу — глобальне сповільнення перебору, яке нікого
-#: не блокує. Ключ і так 256 біт; це запобіжник від шуму, а не межа.
+#: Затримка на кожну хибну спробу. Хибні відповіді віддаються ПО ОДНІЙ (спільний
+#: замок), тож паралельний перебір із багатьох адрес сповільнюється так само, як
+#: послідовний, а правильний ключ у цю чергу не стає. Ключ і так 256 біт; це
+#: запобіжник від шуму, а не межа.
 FAIL_DELAY_SEC = 1.0
-#: Скільки адрес пам'ятає лічильник: IPv6-клієнт міняє адресу в межах /64.
+#: Скільки адрес пам'ятає лічильник. IPv6 рахується за /64: клієнт міняє адресу
+#: в межах своєї підмережі, і лічильник на кожну окрему не рахував би нічого.
 FAILS_TRACKED_MAX = 1024
+#: Найбільше тіло запиту допуску — у байтах, що реально прийшли.
+ACCESS_BODY_MAX = 4096
 #: Фраза другого підтвердження для «усіх інтерфейсів» чи публічної адреси.
 PUBLIC_PHRASE = "відкрити всім"
 
@@ -147,6 +154,11 @@ def network_host(host: str) -> str:
         raise ValueError(
             f"link-local адреса {raw} не підходить: браузер не пришле її з зоною "
             f"в `Host`. Візьміть адресу мережі (192.168.… / fd…) або ::")
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
+        # Сокет IPv6 на таку адресу не сяде, і людина бачила б лише невиразне
+        # «адреси може не бути на цій машині».
+        raise ValueError(
+            f"IPv4-mapped адреса {raw} не підходить — дайте саму IPv4: {ip.ipv4_mapped}")
     return str(ip)
 
 
@@ -257,7 +269,16 @@ def _write_access_key(path: Path, *, replace: bool) -> None:
         elif sys.platform == "win32":
             os.rename(tmp, path)
         else:
-            os.link(tmp, path)
+            try:
+                os.link(tmp, path)
+            except FileExistsError:
+                raise
+            except OSError:
+                # ФС без жорстких посилань (FAT, частина мережевих): ексклюзивне
+                # встановлення недоступне. Гонки тут немає — ключ пишеться лише
+                # під замком простору.
+                if not path.exists():
+                    os.replace(tmp, path)
     except FileExistsError:
         pass
     finally:
@@ -777,6 +798,7 @@ def _install_gate(app: Any, *, access_key: str, tls: bool, static_dir: Path,
     """
     cookie_want = _cookie_value(access_key)
     fails: dict[str, tuple[int, float]] = {}
+    fail_lock = asyncio.Lock()
 
     def blocked(peer: str) -> bool:
         count, until = fails.get(peer, (0, 0.0))
@@ -785,17 +807,48 @@ def _install_gate(app: Any, *, access_key: str, tls: bool, static_dir: Path,
             return False
         return count >= FAILS_MAX
 
-    def fail(peer: str) -> None:
+    def evict() -> None:
+        """Звільнити місце в лічильнику.
+
+        🔴 Спершу протухлі блоки, далі найстаріший НЕзаблокований запис. Доти
+        витіснявся просто найстаріший, тож тисяча одноразових спроб з інших
+        адрес знімала блок нападника раніше строку. Якщо заблоковані всі —
+        витісняється найстаріший блок; це вже понад десять тисяч хибних спроб.
+        """
+        now = time.monotonic()
+        for key, (_count, until) in list(fails.items()):
+            if until and now >= until:
+                del fails[key]
+        if len(fails) < FAILS_TRACKED_MAX:
+            return
+        for key, (count, _until) in fails.items():
+            if count < FAILS_MAX:
+                del fails[key]
+                return
+        fails.pop(next(iter(fails)))
+
+    def attempt(peer: str) -> int:
+        """Зарахувати спробу ДО перевірки ключа; успіх лічильник скидає.
+
+        🔴 Рахувати лише після відповіді не можна: паралельні запити з однієї
+        адреси всі проходили `blocked()` раніше, ніж зараховувався перший
+        провал, і сорок одночасних спроб давали сорок перевірок ключа.
+        """
         if peer not in fails and len(fails) >= FAILS_TRACKED_MAX:
-            fails.pop(next(iter(fails)))
+            evict()
         count = fails.get(peer, (0, 0.0))[0] + 1
         until = time.monotonic() + FAIL_BLOCK_SEC if count >= FAILS_MAX else 0.0
         fails[peer] = (count, until)
-        if count == FAILS_MAX:
-            from nyshporka import brand
+        return count
 
-            brand.err().print(f"[warn]адреса {peer}: {FAILS_MAX} хибних спроб допуску — "
-                              f"заблоковано на {FAIL_BLOCK_SEC // 60} хв[/warn]")
+    def announce_block(peer: str) -> None:
+        from rich.markup import escape
+
+        from nyshporka import brand
+
+        brand.err().print(f"[warn]адреса {escape(peer)}: {FAILS_MAX} хибних спроб допуску — "
+                          f"заблоковано на {FAIL_BLOCK_SEC // 60} хв[/warn]",
+                          emoji=False, highlight=False)
 
     class _AccessGate:
         # Параметр зветься `app`: так його передає `add_middleware`.
@@ -810,8 +863,8 @@ def _install_gate(app: Any, *, access_key: str, tls: bool, static_dir: Path,
             headers = {k.decode("latin-1").lower(): v.decode("latin-1")
                        for k, v in scope.get("headers") or []}
             raw_host = headers.get("host", "")
-            cookie_ok = _same(_read_cookie(headers.get("cookie", ""),
-                                           _cookie_name(port, tls=tls)), cookie_want)
+            cookie_ok = any(_same(value, cookie_want) for value in _read_cookies(
+                headers.get("cookie", ""), _cookie_name(port, tls=tls)))
             if scope["type"] == "websocket":
                 if cookie_ok and _host_names_connection(raw_host, server_addr):
                     await self._inner(scope, receive, send)
@@ -875,21 +928,26 @@ def _install_gate(app: Any, *, access_key: str, tls: bool, static_dir: Path,
                                     status_code=403)(scope, receive, send)
                 return
             client = scope.get("client")
-            peer = str(client[0]) if client else ""
+            peer = _peer_key(str(client[0])) if client else ""
             if blocked(peer):
                 await json_response(
                     envelope(f"забагато хибних спроб з цієї адреси — спробуйте за "
                              f"{FAIL_BLOCK_SEC // 60} хв"),
                     status_code=429)(scope, receive, send)
                 return
+            too_big = json_response(envelope("завелике тіло запиту"), status_code=413)
             with contextlib.suppress(ValueError):
-                if int(headers.get("content-length") or 0) > 4096:
-                    await json_response(envelope("завелике тіло запиту"),
-                                        status_code=413)(scope, receive, send)
+                if int(headers.get("content-length") or 0) > ACCESS_BODY_MAX:
+                    await too_big(scope, receive, send)
                     return
+            count = attempt(peer)
+            raw = await _read_body(receive, ACCESS_BODY_MAX)
+            if raw is None:
+                await too_big(scope, receive, send)
+                return
             try:
-                body = await request_cls(scope, receive).json()
-            except Exception:
+                body = json.loads(raw) if raw else {}
+            except ValueError:
                 body = {}
             body = body if isinstance(body, dict) else {}
             state = app.state
@@ -899,11 +957,11 @@ def _install_gate(app: Any, *, access_key: str, tls: bool, static_dir: Path,
                 if granted:
                     state.pair_code = ""     # одноразовий
             if not granted:
-                fail(peer)
+                if count == FAILS_MAX:
+                    announce_block(peer)
                 if FAIL_DELAY_SEC:
-                    import asyncio
-
-                    await asyncio.sleep(FAIL_DELAY_SEC)
+                    async with fail_lock:
+                        await asyncio.sleep(FAIL_DELAY_SEC)
                 await json_response(
                     envelope("ключ чи код не підійшов (код сполучення діє "
                              f"{PAIR_TTL_SEC // 60} хв і один раз)"),
@@ -921,12 +979,57 @@ def _install_gate(app: Any, *, access_key: str, tls: bool, static_dir: Path,
     app.add_middleware(_AccessGate)
 
 
-def _read_cookie(header: str, name: str) -> str:
+def _read_cookies(header: str, name: str) -> list[str]:
+    """Усі значення cookie з цим ім'ям, а не лише перше.
+
+    Cookie не розрізняють порти: інший сервіс на тому самому хості може
+    поставити однойменну, і браузер пришле обидві. Перше-збіжне тоді відбивало
+    б справжній допуск.
+    """
+    found = []
     for part in header.split(";"):
         k, _, v = part.strip().partition("=")
         if k == name:
-            return v
-    return ""
+            found.append(v)
+    return found
+
+
+def _peer_key(addr: str) -> str:
+    """Ключ лічильника хибних спроб: IPv4 — сама адреса, IPv6 — її /64."""
+    try:
+        ip = ipaddress.ip_address(addr.split("%", 1)[0])
+    except ValueError:
+        return addr
+    if isinstance(ip, ipaddress.IPv6Address):
+        if ip.ipv4_mapped is not None:
+            return str(ip.ipv4_mapped)
+        return str(ipaddress.IPv6Network(f"{ip}/64", strict=False))
+    return str(ip)
+
+
+async def _read_body(receive: Any, limit: int) -> bytes | None:
+    """Тіло запиту, не більше `limit` байтів; більше — `None`.
+
+    🔴 Лічильник — за байтами, що прийшли, а не за `Content-Length`: chunked-тіло
+    заголовка довжини не має, а `Request.json()` тримав у пам'яті скільки
+    завгодно. Пристрій без жодного допуску так роздував пам'ять демона
+    сотнями мегабайтів.
+    """
+    chunks: list[bytes] = []
+    size = 0
+    while True:
+        msg = await receive()
+        if msg["type"] == "http.disconnect":
+            return b"".join(chunks)
+        if msg["type"] != "http.request":
+            continue
+        part = msg.get("body", b"")
+        size += len(part)
+        if size > limit:
+            return None
+        chunks.append(part)
+        if not msg.get("more_body"):
+            return b"".join(chunks)
 
 
 def serve(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT, *,
@@ -1060,22 +1163,32 @@ def serve(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT, *,
 def _print_network_banner(out: Any, host: str, port: int, *, scheme: str, pair_code: str,
                           key_path: Path, show_secret: bool, rotated: bool,
                           tls: bool) -> None:
-    """Посилання для пристроїв і де взяти ключ."""
+    """Посилання для пристроїв і де взяти ключ.
+
+    🔴 Адреси й шляхи екрануються, а емодзі вимкнено: rich читав `[fd00::5]` як
+    тег розмітки й з'їдав адресу з посилання, а `:ab:` усередині IPv6 підміняв
+    на 🆎 — посилання сполучення для IPv6 виходило непридатним.
+    """
+    from rich.markup import escape
+
+    def say(text: str) -> None:
+        out.print(text, emoji=False, highlight=False)
+
     addrs = _interface_addresses() if host in WILDCARDS else [host]
-    out.print("  [warn]мережевий режим: пристрої пускаються лише з допуском[/warn]")
+    say("  [warn]мережевий режим: пристрої пускаються лише з допуском[/warn]")
     for addr in addrs:
         link = f"{scheme}://{_url_host(addr)}:{port}/"
         if show_secret:
             link += f"#pair={pair_code}"
-        out.print(f"  [accent]{link}[/accent]", markup=True, highlight=False)
+        say(f"  [accent]{escape(link)}[/accent]")
     if show_secret:
-        out.print(f"  [muted]код сполучення в посиланні діє {PAIR_TTL_SEC // 60} хв і "
-                  f"один раз[/muted]")
+        say(f"  [muted]код сполучення в посиланні діє {PAIR_TTL_SEC // 60} хв і "
+            f"один раз[/muted]")
     else:
-        out.print("  [muted]код сполучення не друкується: вивід іде не в термінал[/muted]")
-    out.print(f"  [muted]ключ для ручного вводу: {key_path}[/muted]")
+        say("  [muted]код сполучення не друкується: вивід іде не в термінал[/muted]")
+    say(f"  [muted]ключ для ручного вводу: {escape(str(key_path))}[/muted]")
     if rotated:
-        out.print("  [warn]ключ змінено — усі сполучені пристрої вийшли[/warn]")
+        say("  [warn]ключ змінено — усі сполучені пристрої вийшли[/warn]")
     if tls:
-        out.print("  [muted]сертифікат виписаний не на 127.0.0.1 — вкладка на цій "
-                  "машині попередить про нього[/muted]")
+        say("  [muted]сертифікат виписаний не на 127.0.0.1 — вкладка на цій "
+            "машині попередить про нього[/muted]")
