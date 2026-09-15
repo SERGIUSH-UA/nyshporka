@@ -1083,8 +1083,10 @@ class BrowseArgs(BaseModel):
     ref: str = Field(default="", description="вузол; порожньо = верхній рівень")
 
 
+# `private=True`: з джерелом `local` `ref` — будь-яка тека диска, і відповідь
+# розкриває її вміст.
 @op("catalog.browse", summary="Що лежить у фонді, описі, теці", args=BrowseArgs,
-    mutates=False, section="material")
+    mutates=False, section="material", private=True)
 def catalog_browse(a: BrowseArgs) -> Envelope:
     from nyshporka.sources.base import SourceError
 
@@ -1103,8 +1105,9 @@ class ManifestArgs(BaseModel):
     ref: str = Field(description="адреса справи чи плівки в цьому джерелі")
 
 
+# `private=True`: як `catalog.browse` — з `local` читає будь-яку теку.
 @op("catalog.manifest", summary="Що саме принесе завантаження — ДО того, як почалось",
-    args=ManifestArgs, mutates=False, section="material")
+    args=ManifestArgs, mutates=False, section="material", private=True)
 def catalog_manifest(a: ManifestArgs) -> Envelope:
     from nyshporka.sources.base import SourceError
 
@@ -2301,8 +2304,10 @@ class CaseShowArgs(BaseModel):
 
 # `agent=False` — це підживлення форми, а не дія дослідження: агент читає опис
 # через `cases.list` і `pages.status`, де він іде разом зі станом обробки.
+# `private=True`: `case_dir` береться як є, тож без токена це читання опису з
+# будь-якої теки диска.
 @op("case.show", summary="Поточний опис теки — щоб правити, а не передруковувати",
-    args=CaseShowArgs, agent=False)
+    args=CaseShowArgs, agent=False, private=True)
 def case_show(a: CaseShowArgs) -> Envelope:
     """🔴 Правити наосліп — не правка.
 
@@ -2940,8 +2945,10 @@ class ReadArgs(BaseModel):
 # `agent=False`: план рахує й сам `read.start`, а людині він потрібен окремо —
 # щоб побачити його до того, як натисне «читати». Агентові двох tool'ів на
 # одну дію не треба.
+# `private=True`: `case_dir` і `out_dir` — будь-які шляхи; відповідь каже, чи тека
+# існує і скільки в ній кадрів.
 @op("read.plan", summary="Чим і як читатимемо цю справу — ДО запуску",
-    args=ReadArgs, mutates=False, agent=False, section="htr")
+    args=ReadArgs, mutates=False, agent=False, section="htr", private=True)
 def read_plan(a: ReadArgs) -> Envelope:
     """Скільки кадрів, яке письмо, яка модель, куди ляже текст.
 

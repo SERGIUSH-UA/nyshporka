@@ -91,6 +91,24 @@ def test_reading_needs_no_token(client: TestClient) -> None:
     assert r.json()["ok"] is True
 
 
+#: Операції, що беруть шлях файлової системи від клієнта: пишуть за `out` або
+#: читають довільну теку. Такий шлях — не публічне читання.
+PATH_OPS = ("text.crop", "text.sheet", "train.view", "case.show",
+            "catalog.browse", "catalog.manifest", "read.plan")
+
+
+def test_ops_that_take_a_filesystem_path_need_the_page_token(client: TestClient,
+                                                            ws: Workspace) -> None:
+    """🔴 Без токена ці операції писали файл куди завгодно (`out`) чи розкривали
+    будь-яку теку диска — на петлі їх тримала лише перевірка імені й `Origin`."""
+    for name in PATH_OPS:
+        op = O.get(name)
+        assert op is not None and op.private, f"{name} — шлях від клієнта без токена"
+    enabled = {o.name for o in O.for_sections(ws.sections)}
+    for name in (n for n in PATH_OPS if n in enabled):
+        assert client.post(f"/api/op/{name}", json={}).status_code == 403, name
+
+
 def test_mutation_without_token_is_refused(client: TestClient) -> None:
     """🔴 «Локальний порт» не означає «нікому не доступний».
 
@@ -472,6 +490,131 @@ def test_a_stale_cookie_does_not_count_as_a_wrong_key(ws: Workspace,
     assert lan.post("/api/access", json={"key": ACCESS}).status_code == 200
 
 
+def test_access_body_is_capped_by_bytes_not_by_content_length(ws: Workspace,
+                                                              no_fail_delay: None) -> None:
+    """🔴 Chunked-тіло заголовка довжини не має.
+
+    Ліміт, що дивився лише на `Content-Length`, пропускав таке тіло цілим у
+    пам'ять: пристрій без жодного допуску роздував демона сотнями мегабайтів.
+    """
+    lan = _lan(_lan_app(ws))
+    padded = ('{"key": "' + ACCESS + '", "pad": "' + "x" * 8000 + '"}').encode()
+
+    def chunks():  # type: ignore[no-untyped-def]
+        for i in range(0, len(padded), 1000):
+            yield padded[i:i + 1000]
+
+    hdr = {"Content-Type": "application/json"}
+    assert lan.post("/api/access", content=chunks(), headers=hdr).status_code == 413
+    assert lan.post("/api/access", content=padded, headers=hdr).status_code == 413
+    assert lan.post("/api/access", json={"key": ACCESS}).status_code == 200
+
+
+def test_parallel_wrong_keys_cannot_outrun_the_limit(ws: Workspace,
+                                                     no_fail_delay: None) -> None:
+    """🔴 Спроба рахується до перевірки ключа.
+
+    Доти паралельні запити з однієї адреси всі проходили перевірку блоку раніше,
+    ніж зараховувався перший провал: сорок одночасних — сорок перевірок ключа.
+    """
+    import asyncio
+
+    import httpx
+
+    app = _lan_app(ws)
+
+    async def slow_body(scope, receive, send):  # type: ignore[no-untyped-def]
+        # Справжній клієнт шле тіло не миттєво: читання тіла віддає керування,
+        # і саме в цей момент решта паралельних запитів проходила перевірку блоку.
+        async def slow_receive():  # type: ignore[no-untyped-def]
+            await asyncio.sleep(0.01)
+            return await receive()
+
+        await app(scope, slow_receive, send)  # type: ignore[operator]
+
+    async def burst() -> list[int]:
+        transport = httpx.ASGITransport(app=slow_body, client=("192.168.1.77", 1))
+        async with httpx.AsyncClient(transport=transport,
+                                     base_url=f"http://{LAN}:8788") as cl:
+            got = await asyncio.gather(*[cl.post("/api/access", json={"key": f"не той {i}"})
+                                         for i in range(40)])
+        return [r.status_code for r in got]
+
+    codes = asyncio.run(burst())
+    assert codes.count(401) <= 10, codes
+    assert codes.count(429) >= 30, codes
+
+
+def test_a_blocked_address_is_not_released_by_crowding_the_counter(
+        ws: Workspace, no_fail_delay: None, monkeypatch: pytest.MonkeyPatch) -> None:
+    """🔴 Лічильник витісняв найстаріший запис — тобто саме блок нападника."""
+    from nyshporka.daemon import app as A
+
+    monkeypatch.setattr(A, "FAILS_TRACKED_MAX", 32)
+    app = _lan_app(ws)
+    victim = _lan(app, peer=("192.168.1.66", 1))
+    for _ in range(10):
+        victim.post("/api/access", json={"key": "не той"})
+    for i in range(40):
+        _lan(app, peer=(f"192.168.2.{i + 1}", 1)).post("/api/access", json={"key": "не той"})
+    assert victim.post("/api/access", json={"key": ACCESS}).status_code == 429
+
+
+def test_ipv6_neighbours_in_one_subnet_share_the_counter(ws: Workspace,
+                                                         no_fail_delay: None) -> None:
+    """IPv6-клієнт міняє адресу в межах /64 — лічильник на адресу нічого б не рахував."""
+    app = _lan_app(ws)
+    for i in range(10):
+        _lan(app, peer=(f"2001:db8:1:2::{i + 1:x}", 1)).post(
+            "/api/access", json={"key": "не той"})
+    same_net = _lan(app, peer=("2001:db8:1:2::ff", 1))
+    assert same_net.post("/api/access", json={"key": ACCESS}).status_code == 429
+    other_net = _lan(app, peer=("2001:db8:1:3::1", 1))
+    assert other_net.post("/api/access", json={"key": ACCESS}).status_code == 200
+
+
+def test_a_shadowing_cookie_does_not_hide_real_access(ws: Workspace) -> None:
+    """Однойменна cookie іншого сервісу на тому самому хості не відбиває допуск."""
+    from nyshporka.daemon.app import _cookie_value
+
+    lan = _lan(_lan_app(ws))
+    hdr = {"Cookie": f"nysh_access_8788=junk; nysh_access_8788={_cookie_value(ACCESS)}"}
+    assert lan.get("/api/health", headers=hdr).status_code == 200
+
+
+def test_ipv6_link_survives_rich_markup(tmp_path: Path) -> None:
+    """🔴 rich читав `[fd00::5]` як тег, а `:ab:` — як емодзі 🆎."""
+    import io
+
+    from rich.console import Console
+
+    from nyshporka.daemon.app import _print_network_banner
+
+    # ⚠ Власна консоль, а не `brand.console()`: та спільна, і підміна її `file`
+    # (навіть із відкатом) прибивала вивід CLI до чужого потоку — наступні тести
+    # бачили порожній вивід.
+    buf = io.StringIO()
+    out = Console(file=buf, width=200)
+    _print_network_banner(out, "fd00:ab::5", 8790, scheme="http", pair_code="PAIR",
+                          key_path=tmp_path / "k.key", show_secret=True,
+                          rotated=False, tls=False)
+    assert "http://[fd00:ab::5]:8790/#pair=PAIR" in buf.getvalue()
+
+
+def test_access_key_is_written_where_hard_links_are_not_supported(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from nyshporka.daemon import app as A
+
+    def no_link(*_a: object, **_k: object) -> None:
+        raise PermissionError("hard links are not supported here")
+
+    monkeypatch.setattr(A.sys, "platform", "linux")
+    monkeypatch.setattr(A.os, "link", no_link)
+    path = tmp_path / "k.key"
+    A._write_access_key(path, replace=False)
+    assert len(path.read_text(encoding="ascii")) >= 32
+
+
 def test_loopback_connection_of_a_network_daemon_needs_no_key(ws: Workspace) -> None:
     """Вкладка на самій машині й тунелі приходять через петлю — як без `--host`."""
     local = TestClient(_lan_app(ws), base_url="http://127.0.0.1:8788")  # type: ignore[arg-type]
@@ -595,7 +738,7 @@ def test_network_host_takes_only_an_ip() -> None:
     from nyshporka.daemon.app import network_host
 
     assert network_host(" [::] ") == "::"
-    for bad in ("mybox.local", "fe80::1", ""):
+    for bad in ("mybox.local", "fe80::1", "", "::ffff:192.168.1.50"):
         with pytest.raises(ValueError):
             network_host(bad)
 
@@ -689,6 +832,16 @@ def test_serve_tls_flags_are_checked_before_anything(serve_cli, tmp_path: Path) 
                "--tls-cert", str(cert), "--tls-key", str(cert)])
     assert got.exit_code == 1 and "сертифікат" in got.output
     assert not calls
+
+
+def test_serve_prints_ipv6_addresses_verbatim(serve_cli) -> None:
+    """🔴 У застереженні й відмові rich друкував `fd00:ab::5` як «fd00🆎:5»."""
+    run, calls, _ = serve_cli
+    got = run(["--host", "fd00:ab::5"])
+    assert got.exit_code == 1 and not calls
+    assert "fd00:ab::5" in got.output and "🆎" not in got.output
+    got = run(["--host", "[fd00::5]", "--confirm-host", "fd00::6"])
+    assert got.exit_code == 1 and "[fd00::5]" in got.output
 
 
 def test_serve_network_flags_need_a_network_host(serve_cli) -> None:
