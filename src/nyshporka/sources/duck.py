@@ -40,7 +40,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
-from nyshporka.sources.base import Hit, SourceError
+from nyshporka.sources.base import Hit, SourceAbout, SourceError, SourceScope
 from nyshporka.sources.http import Fetcher, HttpError, app_ua, offline
 
 HOST = "https://inspector.duckarchive.com"
@@ -203,6 +203,23 @@ class DuckSource:
     id = "duck"
     label = "Duck Inspector (зведений покажчик)"
     caps = frozenset({"search"})
+    about = SourceAbout(
+        answers="що взагалі існує про село чи у фонді — оцифроване чи ні",
+        gives="справи за заголовком із шифрою й роками; сторінку покажчика",
+        not_gives="самих справ — покажчик, а не сховище; заголовки — чужі "
+                  "транскрипції, не першоджерело",
+        where_class="зведений покажчик",
+        scope=SourceScope(countries=("UA",),
+                          note="43 архіви України за покажчиком; кодами паку "
+                               "зшито лише частину"),
+        match_on=("title",), match_how="server",
+        zero_means="у заголовках справ покажчика немає цього написання; рівно 50 "
+                   "знахідок — обрізка, а не перелік",
+        pitfalls=("звіряє буквально: апостроф, -ків/-ков і відмінок дають нуль",
+                  "стеля видачі 50 без пагінації",
+                  "та сама парафія кількома записами під різними написаннями села",
+                  "`archive` — кодом покажчика; `repo` порожній, коли архіву немає "
+                  "в паку"))
 
     #: Стеля видачі сервісу. Читається ззовні: рівно стільки знахідок означає
     #: обрізку, а не повний перелік.

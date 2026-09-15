@@ -213,3 +213,105 @@ class CaseFinder(Protocol):
 
 def supports(src: object, cap: Capability) -> bool:
     return cap in getattr(src, "caps", frozenset())
+
+
+#: На чому джерело шукає збіг.
+#:
+#:     title        заголовок справи чи назва альбому
+#:     annotation   опис події, анотація справи чи твору
+#:     fond_title   назва фонду
+#:     fulltext     текст самого документа (OCR, текстовий шар)
+#:     sheet_place  місце в поаркушевому покажчику плівки
+#:     settlement   село, до якого каталог прив'язав книгу
+MatchOn = Literal["title", "annotation", "fond_title", "fulltext", "sheet_place",
+                  "settlement"]
+
+#: Як звіряється слово.
+#:
+#:     substring   підрядок після регістру й апострофів — відмінків не знає
+#:     normalized  підрядок після зведення написань (рос./укр., ё/е)
+#:     exact_word  лише точне слово: інша форма, зірка чи OR — не збіг
+#:     server      правило збігу тримає чужий сервер, і ми його не бачимо
+MatchHow = Literal["substring", "normalized", "exact_word", "server"]
+
+
+def _opt_list(v: tuple[str, ...] | None) -> list[str] | None:
+    return list(v) if v is not None else None
+
+
+@dataclass(frozen=True)
+class SourceScope:
+    """ДЕ і КОЛИ джерело взагалі може щось знати.
+
+    🔴 `None` і `()` — різні відповіді, як у `Manifest.frames`: `None` — «джерело
+    не задекларувало», `()` — «явно порожньо» (Чтиво не архівне, архівів у нього
+    немає). Злиті в одне, «не сказали» читалось би як «накриває все» — і нуль
+    джерела поза його регіоном виглядав би звичайним нулем.
+    """
+
+    #: Коди архівів нашого паку (`DAHMO`, `CDIAK`).
+    archives: tuple[str, ...] | None = None
+    #: Країни кодами паку (`UA`, `MD`).
+    countries: tuple[str, ...] | None = None
+    #: Роки документів (від, до); край `None` — відкритий.
+    years: tuple[int | None, int | None] | None = None
+    #: Жанри документів словами довідника «Куди копати».
+    genres: tuple[str, ...] | None = None
+    #: Межа словами — там, де числом не виходить.
+    note: str = ""
+
+    def as_dict(self) -> dict[str, object]:
+        return {"archives": _opt_list(self.archives),
+                "countries": _opt_list(self.countries),
+                "years": list(self.years) if self.years is not None else None,
+                "genres": _opt_list(self.genres), "note": self.note}
+
+
+@dataclass(frozen=True)
+class SourceAbout:
+    """Самоопис джерела: про що воно, де його межі, що доводить його нуль.
+
+    🔴 Навіщо в коді, а не лише в картці довідника. Агент складав маршрут із
+    таблиці класів у тексті, а перелік джерел жив у реєстрі, і два списки
+    розійшлись мовчки: фотоархів Волока був підключений, але без картки, тож
+    правило «канал без картки в маршрут не ставиться» викинуло його з плану про
+    Донеччину (симуляція 15.09.2026). Опис, що їде разом із джерелом у
+    `sources.list`, від реєстру не відстане, а з карткою його звіряє тест
+    `tests/test_source_cards.py`.
+    """
+
+    #: Питання, на яке відповідає, — як його ставить людина.
+    answers: str
+    gives: str
+    not_gives: str
+    #: Рядок таблиці «Класи каналів» у `where-to-dig.md` — дослівно.
+    where_class: str
+    scope: SourceScope
+    #: Де шукає збіг. `()` — не шукає зовсім.
+    match_on: tuple[MatchOn, ...]
+    match_how: MatchHow | None
+    #: Що доводить нуль цього джерела — одним реченням, для звіту.
+    zero_means: str
+    pitfalls: tuple[str, ...] = ()
+    #: Ключ картки в `where-to-dig-channels.md`, коли `id` інстансний
+    #: (`archium-cdiak` описаний карткою `archium`). Порожньо — сам `id`.
+    card: str = ""
+
+    def as_dict(self) -> dict[str, object]:
+        return {"answers": self.answers, "gives": self.gives,
+                "not_gives": self.not_gives, "where_class": self.where_class,
+                "scope": self.scope.as_dict(), "match_on": list(self.match_on),
+                "match_how": self.match_how, "zero_means": self.zero_means,
+                "pitfalls": list(self.pitfalls), "card": self.card}
+
+
+def about_of(src: object) -> SourceAbout | None:
+    """Самоопис джерела або `None`, якщо його не задекларовано.
+
+    🔴 Не поле `Source`. Протокол не має дефолтів, тож нове поле стало б
+    обов'язковим для кожного стороннього плагіна, який про нього не знає. Тому
+    той самий прийом, що з `catalog_source` і `search_ceiling`: `getattr`, а
+    відсутність видима (`sources.list` → `undeclared`), а не мовчазна.
+    """
+    got = getattr(src, "about", None)
+    return got if isinstance(got, SourceAbout) else None

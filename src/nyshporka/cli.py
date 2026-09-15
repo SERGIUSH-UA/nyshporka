@@ -199,18 +199,36 @@ def info() -> None:
 
 
 @app.command()
-def sources() -> None:
-    """Звідки можна брати матеріал — і що кожне джерело вміє."""
+def sources(as_json: bool = typer.Option(False, "--json",
+                                         help="машинний вивід: увесь конверт")) -> None:
+    """Звідки брати матеріал: що вміє кожне джерело, де його межі й що доводить нуль."""
+    from nyshporka import ops as O
+
     _need("material")
-    reg = _sources_registry()
-    for src in reg.all():
-        caps = ", ".join(sorted(src.caps)) or "—"
-        console.print(f"  [bold]{src.id:<10}[/bold] {src.label}")
+    env = O.call("sources.list", {})
+    if as_json:
+        console.print_json(data=env.as_dict())
+        return
+    for row in env.data.get("sources") or []:
+        caps = ", ".join(row.get("caps") or []) or "—"
+        console.print(f"  [bold]{row['id']:<10}[/bold] {row['label']}")
         console.print(f"  {'':<10} [muted]уміє: {caps}[/muted]")
-    # 🔴 Зламані плагіни називаються поіменно: «мого архіву немає в списку»
-    # інакше не має пояснення, і людина шукатиме причину в своїх налаштуваннях.
-    for name, why in reg.broken:
-        console.print(f"  [err]✗ {name}[/err] [muted]{why}[/muted]")
+        about = row.get("about")
+        if about is None:
+            # 🔴 Джерело без опису не ховається: його межі й сенс нуля невідомі,
+            # і саме це людина мусить побачити поруч із ним.
+            console.print(f"  {'':<10} [warn]без опису — межі й сенс нуля невідомі, "
+                          f"перевірити руками[/warn]")
+            continue
+        match = ", ".join(about.get("match_on") or [])
+        how = f" ({about['match_how']})" if about.get("match_how") else ""
+        console.print(f"  {'':<10} [muted]клас: {about['where_class']}"
+                      + (f" · шукає в: {match}{how}" if match else " · не шукає")
+                      + "[/muted]")
+        console.print(f"  {'':<10} [muted]нуль: {about['zero_means']}[/muted]")
+    # 🔴 Зламані плагіни називаються поіменно (`broken_source`): «мого архіву
+    # немає в списку» інакше не має пояснення, і причину шукатимуть у себе.
+    _notes(env)
 
 
 @app.command()
@@ -320,6 +338,10 @@ def find(q: str = typer.Argument(..., help="село, прізвище, слов
     console.print(f"\n[muted]знайдено {len(hits)} · шукали в: "
                   f"{', '.join(cov.get('searched') or []) or '—'}"
                   + (f" ({basis})" if basis else "") + "[/muted]")
+    # 🔴 Що доводить нуль кожного джерела. «Немає в назвах альбомів» і «немає в
+    # тексті книг» — однаковий 0 у лічильнику й різні висновки у звіті.
+    for z in cov.get("zeros") or []:
+        console.print(f"[muted]  0 · {z['source']}: {z['means']}[/muted]")
     # 🔴 всі попередження конверта, а не лише про недоступні джерела. Саме тут
     # їде різниця між «не знайшлось» і «не знайшлось у зрізі піврічної давнини»,
     # і показувати її вибірково — те саме, що не показувати.

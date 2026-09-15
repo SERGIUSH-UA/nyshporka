@@ -115,7 +115,7 @@ Tool'ів для них немає навмисно — це не робота �
 | `workspace.info` | `nysh_workspace_info` | **`locked_by`**: не `null` — людина працює в браузері просто зараз |
 | `cases.list` | `nysh_cases_list` | **`stale`** — якщо `is: true`, числам вірити не можна |
 | `material.look` | `nysh_material_look` | чи взагалі придатне до читання: скільки кадрів, одна справа чи багато |
-| `sources.list` | `nysh_sources_list` | `caps` — не кожне джерело вміє все |
+| `sources.list` | `nysh_sources_list` | `caps` — не кожне джерело вміє все; `about` — клас, межі (`scope`) і що доводить нуль (`zero_means`); `undeclared` — хто без опису |
 | `library.list` | — | що вже на руках і який вердикт винесла людина |
 | `runs.list` | — | що вже прочитано і чим |
 

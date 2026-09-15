@@ -47,7 +47,9 @@ from nyshporka.sources.base import (
     Node,
     ProgressFn,
     Sheet,
+    SourceAbout,
     SourceError,
+    SourceScope,
 )
 from nyshporka.sources.http import Fetcher, HttpError
 from nyshporka.utils.atomic import atomic_write_bytes
@@ -179,6 +181,21 @@ class FilmMirrorSource:
     id = "fsfilm"
     label = "Дзеркало плівок FamilySearch"
     caps = frozenset({"search", "browse", "manifest", "fetch"})
+    about = SourceAbout(
+        answers="де метрики мого села на плівках — і кадри плівки без входу в сервіс",
+        gives="плівку й діапазон листів за поаркушевим покажчиком; кадри",
+        not_gives="регіонів без покажчика; сіл, що стоять на плівці не першою "
+                  "парафією; масового завантаження з самого сервісу",
+        where_class="дзеркало плівок",
+        scope=SourceScope(note="лише регіони з поаркушевим покажчиком — перелік у "
+                               "`basis.regions`"),
+        match_on=("sheet_place",), match_how="substring",
+        zero_means="у покажчику оглянутих регіонів немає місця з таким підрядком; "
+                   "для регіону без покажчика — «покажчика немає», а не «села немає»",
+        pitfalls=("назва — як у покажчику плівки: однойменне село іншого регіону "
+                  "приходить без попередження («Бахмут» дає молдовське)",
+                  "покажчик тримає лише першу парафію плівки",
+                  "дзеркало обрізає великі файли при збіжному розмірі"))
 
     CACHE_REL = Path("data") / "cache" / "fsfiles"
 

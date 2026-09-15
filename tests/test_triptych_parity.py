@@ -391,6 +391,7 @@ def space(tmp_path, monkeypatch: pytest.MonkeyPatch):
     ["htr", "env", "--json"],
     ["archive", "DAHMO", "230", "--json"],
     ["profile", "show", "--json"],
+    ["sources", "--json"],
 ])
 def test_the_json_answer_is_the_whole_envelope(space, argv: list[str]) -> None:
     """🔴 Дружні команди віддавали машині `env.data` замість `env.as_dict()`.

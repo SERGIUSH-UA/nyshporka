@@ -35,6 +35,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
+from nyshporka.sources.base import SourceAbout, SourceScope
+
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
@@ -345,6 +347,30 @@ class ArchiumSource:
     id = "archium"
     label = "ARCHIUM (ДАХмО)"
     caps = frozenset({"search", "browse", "manifest", "fetch", "address"})
+
+    @property
+    def about(self) -> SourceAbout:
+        """Самоопис майданчика. Властивість, бо архів у кожного екземпляра свій."""
+        from nyshporka.archives import active
+
+        repo = active().repositories.get(self.repo)
+        return SourceAbout(
+            answers="забрати скани справи, яку вже знаю за шифрою; пройти описом фонду",
+            gives="фонди, описи й справи з кількістю аркушів; кадри",
+            not_gives="неоцифрованого й не введеного в опис — сайт індексує лише "
+                      "виставлене",
+            where_class="переглядач архіву",
+            scope=SourceScope(archives=(self.repo,),
+                              countries=(repo.country,) if repo and repo.country
+                              else None),
+            match_on=("title",), match_how="substring",
+            zero_means="у зрізі каталогу (дата в `basis`) немає справи з таким "
+                       "підрядком заголовка; без каталогу — живий пошук сайту лише "
+                       "по оцифрованих заголовках",
+            pitfalls=("на неоцифровану справу майданчик віддає головну сторінку з "
+                      "кодом 200",
+                      "кадри кольорові й утричі важчі, ніж треба для читання"),
+            card="archium")
 
     #: Куди обхід складає каталог. Відносно кореня простору.
     #: ⚠ Лишається константою класу: на неї спираються тести, і для ДАХмО вона

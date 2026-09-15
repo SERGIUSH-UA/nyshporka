@@ -65,7 +65,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote, urlencode
 
-from nyshporka.sources.base import FetchResult, Hit, Manifest, SourceError
+from nyshporka.sources.base import FetchResult, Hit, Manifest, SourceAbout, SourceError, SourceScope
 from nyshporka.sources.http import Fetcher, HttpError, app_ua, offline
 
 if TYPE_CHECKING:
@@ -279,6 +279,23 @@ class IaSource:
     id = "ia"
     label = "Internet Archive (повний текст)"
     caps = frozenset({"search", "manifest", "fetch"})
+    about = SourceAbout(
+        answers="де прізвище чи село згадане в газетах, єпархіальних відомостях, "
+                "пам'ятних книжках на archive.org",
+        gives="документ, лист і вирізку навколо кожного входження; текст по листах "
+              "і кадри листів",
+        not_gives="форм слова, зірки й OR — індекс шукає лише точне слово; "
+                  "OCR-калік; латинки в частині колекцій",
+        where_class="єпархіальні відомості, періодика",
+        scope=SourceScope(archives=(), note="повний текст archive.org; межа — "
+                                            "`in:<колекція|запис>`, `year:рік-рік`"),
+        match_on=("fulltext",), match_how="exact_word",
+        zero_means="цієї форми слова в OCR обраної межі немає — калік та інші "
+                   "форми цей нуль не закриває",
+        pitfalls=("зірка, OR і змішане письмо — відмова, а не нуль",
+                  "`year:` — рік запису: у записі з багатьма томами він один на всі",
+                  "збій бекенду приходить як HTTP 400 — «не опитано», а не «поганий "
+                  "запит»"))
 
     def __init__(self, workspace: Path | None = None, *,
                  fetcher: Fetcher | None = None) -> None:

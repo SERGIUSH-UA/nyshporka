@@ -28,7 +28,9 @@ from nyshporka.sources.base import (
     Manifest,
     Node,
     ProgressFn,
+    SourceAbout,
     SourceError,
+    SourceScope,
 )
 
 IMG_EXT = frozenset({".jpg", ".jpeg", ".png", ".tif", ".tiff", ".webp"})
@@ -192,6 +194,16 @@ class LocalSource:
     id = "local"
     label = "Тека або PDF на цьому комп'ютері"
     caps = frozenset({"browse", "manifest"})
+    about = SourceAbout(
+        answers="що це за матеріал на моєму диску і чи придатний до читання",
+        gives="скільки кадрів чи сторінок, одна справа чи масив справ",
+        not_gives="пошуку — диск не шукається; нічого не качає",
+        where_class="локальні сховища",
+        scope=SourceScope(archives=(), note="лише те, що людина поклала на диск"),
+        match_on=(), match_how=None,
+        zero_means="не шукає; що вже є в просторі — `nysh text grep --where all` "
+                   "і `nysh cases list`",
+        pitfalls=("тека з підтеками — масив справ, а не порожня справа",))
 
     def browse(self, ref: str | None = None) -> list[Node]:
         """Підтеки-справи. Без `ref` — нічого: диск цілком не гортається."""
