@@ -294,7 +294,8 @@ def crop(scope: str, page: str, line: int, *, with_next: bool = True, wide: bool
     if target is None or target.box is None:
         return {"error": f"рамки рядка {line} у прогоні {run} немає — прогін без "
                          f"геометрії або рядок порожній"}
-    boxes = [target.box]
+    tbox = target.box
+    boxes = [tbox]
     joined = [line]
 
     # 🔴 Сусід іде в кроп лише тоді, коли його рамка на аркуші поруч: перетин по
@@ -302,10 +303,8 @@ def crop(scope: str, page: str, line: int, *, with_next: bool = True, wide: bool
     # табличному списку стоїть в іншій графі чи на пів сторінки нижче, і спільна
     # рамка давала смугу на всю колонку з шуканим словом десь угорі (ДАК 312-1-27,
     # 00168 р.118 → 616×2269; замір 15.09.2026). Номер і текст сусіда лишаються.
-    def near(other: tuple[int, int, int, int] | None) -> bool:
-        if not other:
-            return False
-        a = target.box
+    def near(other: tuple[int, int, int, int]) -> bool:
+        a = tbox
         if min(a[2], other[2]) <= max(a[0], other[0]):
             return False
         gap = max(other[1] - a[3], a[1] - other[3])
@@ -315,8 +314,9 @@ def crop(scope: str, page: str, line: int, *, with_next: bool = True, wide: bool
     if with_next:
         nxt_no = target.succ or (line + 1 if (line + 1) in by_no else None)
         nxt = by_no.get(nxt_no) if nxt_no else None
-        if nxt and near(nxt.box):
-            boxes.append(nxt.box)
+        nbox = nxt.box if nxt else None
+        if nxt and nbox is not None and near(nbox):
+            boxes.append(nbox)
             joined.append(nxt.no)
     # Хвіст після переносу («-щинскій») читається лише з ГОЛОВОЮ, а вона в
     # попередньому рядку — за геометрією (чий наступник цей рядок), інакше за файлом.
@@ -325,8 +325,9 @@ def crop(scope: str, page: str, line: int, *, with_next: bool = True, wide: bool
         prev_no = next((ln.no for ln in lines if ln.succ == line), None) \
             or (line - 1 if (line - 1) in by_no else None)
         prev = by_no.get(prev_no) if prev_no else None
-        if prev and near(prev.box):
-            boxes.append(prev.box)
+        pbox = prev.box if prev else None
+        if prev and pbox is not None and near(pbox):
+            boxes.append(pbox)
             joined.append(prev.no)
     size = _geometry_size(run, pg)
     got = S.resolve_scan_how(run, pg)
