@@ -436,8 +436,9 @@ class ViewArgs(BaseModel):
     out: str = Field(default="", description="записати PNG сюди (порожньо — лише data URL)")
 
 
+# `private=True`: `out` пише файл за шляхом від клієнта.
 @op("train.view", summary="Показати кропи набору: смужка, зум, контекст на сторінці",
-    args=ViewArgs, agent=False, section=SECTION)
+    args=ViewArgs, agent=False, section=SECTION, private=True)
 def train_view(a: ViewArgs) -> Envelope:
     """Картинка для ока — арбітра чи людини. У конверті — data URL і примітка."""
     from nyshporka.train import sets as S

@@ -339,8 +339,10 @@ class TextCropArgs(BaseModel):
     out: str = Field(default="", description="куди зберегти PNG; порожньо — data/derived/crops")
 
 
+# `private=True`: `out` пише файл туди, куди скаже клієнт, — без токена це робила
+# б будь-яка сторінка, що дістанеться демона.
 @op("text.crop", summary="Кроп рядка з кадру за рамкою рушія — з поворотом і масштабом",
-    args=TextCropArgs, mutates=False, agent=False, section=SECTION)
+    args=TextCropArgs, mutates=False, agent=False, section=SECTION, private=True)
 def text_crop(a: TextCropArgs) -> Envelope:
     from nyshporka.search import textops as T
 
@@ -497,8 +499,9 @@ class TextSheetArgs(BaseModel):
     out: str = Field(default="", description="куди покласти HTML; порожньо — data/derived/sheets")
 
 
+# `private=True`: як `text.crop` — `out` пише файл за шляхом від клієнта.
 @op("text.sheet", summary="HTML-гортач кандидатів із кропами й полем вердикту для людини",
-    args=TextSheetArgs, mutates=False, agent=False, section=SECTION)
+    args=TextSheetArgs, mutates=False, agent=False, section=SECTION, private=True)
 def text_sheet(a: TextSheetArgs) -> Envelope:
     from nyshporka.search import textops as T
 

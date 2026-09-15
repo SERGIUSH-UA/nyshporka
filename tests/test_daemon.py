@@ -91,6 +91,24 @@ def test_reading_needs_no_token(client: TestClient) -> None:
     assert r.json()["ok"] is True
 
 
+#: Операції, що беруть шлях файлової системи від клієнта: пишуть за `out` або
+#: читають довільну теку. Такий шлях — не публічне читання.
+PATH_OPS = ("text.crop", "text.sheet", "train.view", "case.show",
+            "catalog.browse", "catalog.manifest", "read.plan")
+
+
+def test_ops_that_take_a_filesystem_path_need_the_page_token(client: TestClient,
+                                                            ws: Workspace) -> None:
+    """🔴 Без токена ці операції писали файл куди завгодно (`out`) чи розкривали
+    будь-яку теку диска — на петлі їх тримала лише перевірка імені й `Origin`."""
+    for name in PATH_OPS:
+        op = O.get(name)
+        assert op is not None and op.private, f"{name} — шлях від клієнта без токена"
+    enabled = {o.name for o in O.for_sections(ws.sections)}
+    for name in (n for n in PATH_OPS if n in enabled):
+        assert client.post(f"/api/op/{name}", json={}).status_code == 403, name
+
+
 def test_mutation_without_token_is_refused(client: TestClient) -> None:
     """🔴 «Локальний порт» не означає «нікому не доступний».
 
