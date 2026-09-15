@@ -80,6 +80,13 @@ def main() -> int:
     ap.add_argument("--body", action="store_true",
                     help="разом із преамбулою сторінки релізу")
     args = ap.parse_args()
+    # 🔴 Обидва потоки — UTF-8, і до першого друку. Перемкнутий був лише stdout,
+    # тож відмова з кирилицею йшла в stderr кодуванням консолі (cp1252 на
+    # раннері Windows), і читач процесу діставав байти, які не розбираються.
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            reconfigure(encoding="utf-8")
     text = WHATS_NEW.read_text(encoding="utf-8")
     got = body(args.version, text) if args.body else section(args.version, text)
     if not got:
@@ -87,7 +94,6 @@ def main() -> int:
         print(f"🔴 у {WHATS_NEW.relative_to(ROOT)} немає розділу «## {ver} — <дата>»: "
               f"що тепер можна зробити з цією версією, простою мовою", file=sys.stderr)
         return 1
-    sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
     print(got)
     return 0
 
