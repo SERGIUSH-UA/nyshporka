@@ -33,7 +33,8 @@ Object.assign(ACTIONS, {
       { method: 'POST', headers: { 'X-Nysh-Token': TOKEN } });
     if (!res.ok) {
       const box = el('jobs');
-      const why = res.status === 403 ? t('err.token') : `HTTP ${res.status}`;
+      const why = res.status === 401 ? t('err.access')
+        : res.status === 403 ? t('err.token') : `HTTP ${res.status}`;
       if (box) box.insertAdjacentHTML('afterbegin', `<div class="warn err">${esc(why)}</div>`);
       return;
     }
@@ -49,7 +50,8 @@ Object.assign(ACTIONS, {
       { method: 'POST', headers: { 'X-Nysh-Token': TOKEN } });
     if (!res.ok) {
       const env = await res.json().catch(() => ({}));
-      const why = res.status === 403 ? t('err.token') : (env.detail || `HTTP ${res.status}`);
+      const why = res.status === 401 ? t('err.access')
+        : res.status === 403 ? t('err.token') : (env.detail || `HTTP ${res.status}`);
       const box = el('jobs');
       if (box) box.insertAdjacentHTML('afterbegin',
         `<div class="warn err">${esc(why)}</div>`);

@@ -28,6 +28,9 @@ async function callOp(name, args) {
  * не доходило до екрана ніколи.
  */
 function normErr(env, status) {
+  // 401 дають лише ворота мережевого режиму: допуск пристрою протух (ротація
+  // ключа, строк cookie). Підказка «демон перезапустився» тут збрехала б.
+  if (status === 401) return { ok: false, error: t('err.access') };
   if (env && env.ok !== undefined) return env;
   const detail = (env && (env.detail || env.error)) || '';
   // Токен вшитий у сторінку при завантаженні, а демон генерує новий на кожному

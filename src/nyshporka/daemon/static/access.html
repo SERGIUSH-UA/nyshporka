@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="uk" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<meta name="referrer" content="no-referrer">
+<title>Нишпорка — допуск</title>
+<link rel="icon" href="/favicon.ico" type="image/svg+xml">
+<!--
+  Сторінка допуску мережевого пристрою (`nysh serve --host`). Віддається
+  воротами замість консолі, доки в пристрою немає cookie допуску, тож вантажить
+  лише те, що ворота відкривають без ключа.
+
+  ⚠ Inline-скрипта теми тут немає свідомо: спалах темного на світлій системі
+  на одній сторінці допуску дешевший за другий дубль логіки теми.
+-->
+<link rel="stylesheet" href="/ui/tokens.css">
+<link rel="stylesheet" href="/ui/base.css">
+<link rel="stylesheet" href="/static/access.css">
+</head>
+<body class="access">
+<main class="access-card">
+  <h1 data-i18n="access.title">Допуск цього пристрою</h1>
+  <p class="muted" data-i18n="access.lead">Застосунок відкрито в мережі, і пускає він лише пристрої з допуском.
+    Відкрийте посилання, яке надрукував nysh serve, або введіть ключ доступу.</p>
+  <form id="access-form" autocomplete="off">
+    <input id="access-key" type="password" spellcheck="false" autocomplete="off"
+           data-i18n-placeholder="access.key" placeholder="ключ доступу">
+    <button type="submit" class="btn-solid" data-i18n="access.enter">Увійти</button>
+  </form>
+  <div id="access-msg" role="status"></div>
+</main>
+<script type="module" src="/static/access.js"></script>
+</body>
+</html>

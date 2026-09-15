@@ -2135,17 +2135,47 @@ def models_get(
         raise typer.Exit(code=1)
 
 
+def _stdin_is_tty() -> bool:
+    """Чи можна спитати підтвердження набором. Окремою функцією — для тестів."""
+    return sys.stdin.isatty()
+
+
+def _stdout_is_tty() -> bool:
+    """Чи вивід іде в термінал, а не в файл чи журнал служби."""
+    return sys.stdout.isatty()
+
+
 @app.command()
 def serve(
-    port: int = typer.Option(8788, "--port", help="порт на 127.0.0.1"),
+    port: int = typer.Option(8788, "--port", help="порт"),
+    host: str = typer.Option(
+        "127.0.0.1", "--host",
+        help="вихід у мережу: IP цієї машини, 0.0.0.0 чи :: (усі інтерфейси). "
+             "Друкує застереження, просить підтвердження й пускає пристрої лише "
+             "з ключем доступу; петля 127.0.0.1 працює, як і без прапорця"),
+    tls_cert: Path | None = typer.Option(
+        None, "--tls-cert", help="сертифікат PEM для https (разом із --tls-key)"),
+    tls_key: Path | None = typer.Option(
+        None, "--tls-key", help="закритий ключ PEM без пароля (разом із --tls-cert)"),
+    rotate_key: bool = typer.Option(
+        False, "--rotate-key", help="новий ключ доступу — усі сполучені пристрої виходять"),
+    confirm_host: str = typer.Option(
+        "", "--confirm-host",
+        help="підтвердження без набору (служба, скрипт): та сама адреса, що в --host"),
+    confirm_public: bool = typer.Option(
+        False, "--confirm-public",
+        help="друге підтвердження без набору — для 0.0.0.0 / :: чи публічної адреси"),
     no_browser: bool = typer.Option(False, "--no-browser",
                                     help="не відкривати вкладку самому"),
 ) -> None:
     """Підняти застосунок у браузері.
 
-    🔴 Слухає лише 127.0.0.1, і опції це змінити немає. Тут архів однієї
-    людини — канон про живих родичів, скани, нотатки; прапорець «слухати всюди»
-    рано чи пізно вмикають «на хвилинку» й лишають.
+    🔴 Дефолт — петля 127.0.0.1: тут архів однієї людини — канон про живих
+    родичів, скани, нотатки. `--host` відкриває його в мережі лише як свідомий
+    вибір: конкретне застереження, підтвердження набором адреси (або
+    прапорцями без термінала), і кожен мережевий пристрій — лише з ключем
+    доступу. Прапорця «слухати всюди» без цього всього немає: його рано чи
+    пізно вмикають «на хвилинку» й лишають.
     """
     from importlib.util import find_spec
 
@@ -2165,7 +2195,80 @@ def serve(
         console.print(f"[err]{exc}[/err]")
         console.print(r"[muted]pip install 'nyshporka\[app]'[/muted]")
         raise typer.Exit(code=1) from None
-    _serve(port=port, open_browser=not no_browser)
+    from nyshporka.daemon import app as D
+
+    extras = bool(tls_cert or tls_key or rotate_key or confirm_host or confirm_public)
+    if D.is_loopback_host(host):
+        if extras:
+            console.print("[err]--tls-cert, --tls-key, --rotate-key і --confirm-* діють "
+                          "лише з мережевим --host[/err]")
+            raise typer.Exit(code=1)
+        _serve(host=host, port=port, open_browser=not no_browser)
+        return
+
+    try:
+        addr = D.network_host(host)
+        if (tls_cert is None) != (tls_key is None):
+            raise ValueError("--tls-cert і --tls-key задаються лише разом")
+        if tls_cert is not None and tls_key is not None:
+            D.check_tls(str(tls_cert), str(tls_key))
+    except ValueError as exc:
+        console.print(f"[err]{exc}[/err]", markup=True, highlight=False)
+        raise typer.Exit(code=1) from None
+
+    from nyshporka.core.workspace import workspace as _workspace
+
+    lines = D.exposure_warnings(addr, port, tls=tls_cert is not None,
+                                key_path=D.access_key_path(_workspace().root))
+    # 🔴 Застереження друкується ЗАВЖДИ, навіть із прапорцями підтвердження, і
+    # під службою дублюється в stderr: stdout там часто не йде нікуди.
+    outs = [console] if _stdout_is_tty() else [console, brand.err()]
+    for out in outs:
+        for line in lines:
+            out.print(line, style="warn", markup=False, highlight=False)
+
+    public = D.is_public_exposure(addr)
+
+    def _same_addr(typed: str) -> bool:
+        try:
+            return D.network_host(typed) == addr
+        except ValueError:
+            return False
+
+    refusal = ""
+    if confirm_host or confirm_public:
+        if not _same_addr(confirm_host):
+            refusal = f"--confirm-host мусить дослівно повторити адресу з --host ({host})"
+        elif public and not confirm_public:
+            refusal = (f"{addr} — усі інтерфейси чи публічна адреса: потрібен ще "
+                       f"--confirm-public")
+    elif _stdin_is_tty():
+        typed = typer.prompt("Щоб відкрити, наберіть адресу дослівно",
+                             default="", show_default=False)
+        if not _same_addr(typed):
+            refusal = "адреса не збіглась — не відкриваю"
+        elif public:
+            typed = typer.prompt(f"Це видно за межами локальної мережі. Наберіть "
+                                 f"«{D.PUBLIC_PHRASE}»", default="", show_default=False)
+            if typed.strip() != D.PUBLIC_PHRASE:
+                refusal = "фраза не збіглась — не відкриваю"
+    else:
+        refusal = ("без термінала вихід у мережу підтверджується прапорцями: "
+                   "--confirm-host <адреса> (і --confirm-public для 0.0.0.0, :: чи "
+                   "публічної адреси)")
+    if refusal:
+        console.print(f"[err]{refusal}[/err]", markup=True, highlight=False)
+        raise typer.Exit(code=1)
+
+    try:
+        _serve(host=addr, port=port, open_browser=not no_browser, confirmed=True,
+               rotate_key=rotate_key,
+               tls_cert=str(tls_cert) if tls_cert is not None else None,
+               tls_key=str(tls_key) if tls_key is not None else None,
+               show_secret=_stdout_is_tty())
+    except ValueError as exc:
+        console.print(f"[err]{exc}[/err]", markup=True, highlight=False)
+        raise typer.Exit(code=1) from None
 
 
 def _op_card(op: Any, *, with_doc: bool = False) -> dict[str, Any]:
