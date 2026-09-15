@@ -54,14 +54,18 @@ jobs:
             os: windows-latest
     steps:
       - uses: actions/checkout@v7
+      # 🔴 Python ПЕРЕД setup-uv. Ключ кешу uv містить версію Python, яку
+      # setup-uv бачить у мить свого кроку. Коли він стояв першим, бачив
+      # системний Python раннера (3.12.3), тож три матричні джоби рахували
+      # один ключ, писали кеш одночасно й ділили його між 3.11, 3.12 і 3.13.
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python }}
       # ⚠ Точний тег, а не `@v10`: з v8 setup-uv не публікує мажорних тегів, і
       # `@v10` просто не резолвиться. Оновлювати — номером повністю.
       - uses: astral-sh/setup-uv@v10.1.0
         with:
           enable-cache: true
-      - uses: actions/setup-python@v7
-        with:
-          python-version: ${{ matrix.python }}
       # `--locked`: інакше `uv.lock` нічого не гарантує — при розбіжності uv
       # мовчки перерозв'язує, і CI зелений на не тих версіях, що в локу.
       - name: встановити
