@@ -31,6 +31,7 @@
 | `inspector.duckarchive.com` | зведений покажчик архівних справ |
 | `ridni.org` | каталог книг за селом |
 | `shron.org` | архівна копія е-бібліотеки «Чтиво» |
+| `archive.org`, `iiif.archive.org`, `ia*.us.archive.org` | Internet Archive: пошук по тексту, текст і кадри сторінок |
 | `familysearch.org`, `fsfiles.ru` | дзеркало плівок і поаркушевий покажчик |
 | `commons.wikimedia.org` | повні копії оцифрованих справ |
 | `geno-dbase.ru` | генеалогічний покажчик |
