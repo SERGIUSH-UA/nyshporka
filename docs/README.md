@@ -6,7 +6,8 @@
 | що це за застосунок, як поставити | [`../README.md`](../README.md) |
 | **підключити агента без термінала** (Claude Desktop, Codex) | [`agent.md`](agent.md) |
 | правити сам пакет | [`../CONTRIBUTING.md`](../CONTRIBUTING.md) |
-| що змінилось | [`../CHANGELOG.md`](../CHANGELOG.md) |
+| **що нового простою мовою**: що тепер можна зробити | [`whats-new.md`](whats-new.md) |
+| що змінилось технічно: заміри, ламкі зміни | [`../CHANGELOG.md`](../CHANGELOG.md) |
 | куди повідомляти про вразливість | [`../SECURITY.md`](../SECURITY.md) |
 
 ## Для агентів
