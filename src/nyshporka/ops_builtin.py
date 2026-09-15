@@ -758,7 +758,8 @@ def _address_answer(a: CatalogSearchArgs, addr: Any) -> Envelope | None:
                      "years": h.years, "place": h.place, "shifra": h.shifra,
                      "frames": h.frames, "acquirable": h.acquirable,
                      "note": h.note, "url": h.url,
-                     "repo": h.repo, "archive": h.archive, "fond": h.fond}
+                     "repo": h.repo, "archive": h.archive, "fond": h.fond,
+                     "page": h.page, "crop_url": h.crop_url}
                     for h in got)
 
     if not hits:
@@ -873,7 +874,8 @@ def catalog_search(a: CatalogSearchArgs) -> Envelope:
                      "years": h.years, "place": h.place, "shifra": h.shifra,
                      "frames": h.frames, "acquirable": h.acquirable,
                      "note": h.note, "url": h.url,
-                     "repo": h.repo, "archive": h.archive, "fond": h.fond}
+                     "repo": h.repo, "archive": h.archive, "fond": h.fond,
+                     "page": h.page, "crop_url": h.crop_url}
                     for h in found)
     shown = hits[:a.limit]
     env = ok({"q": a.q, "hits": shown, "fonds": _by_fond(shown),

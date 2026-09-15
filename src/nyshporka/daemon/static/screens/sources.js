@@ -118,6 +118,21 @@ function hitAction(h) {
 }
 
 /**
+ * Вирізка навколо слова — для джерел, що шукають у тексті сканів.
+ *
+ * 🔴 Без неї знахідка в тексті — лише обіцянка: чи це прізвище, чи OCR-калік
+ * сусіднього слова, видно тільки на зображенні, а до нього інакше треба
+ * завантажити цілу справу.
+ */
+function hitCrop(h) {
+  const src = safeHref(h.crop_url);
+  if (!src) return '';
+  const href = safeHref(h.url) || src;
+  return `<br><a href="${href}" target="_blank" rel="noopener"><img class="hit-crop"
+    loading="lazy" src="${src}" alt=""></a>`;
+}
+
+/**
  * 🏛 Фонди, у яких знайшлось, — над списком справ, а не замість нього.
  *
  * 🔴 Пошук по каталогах не самоціль: за ним іде рішення «чи збирати реєстр
@@ -190,7 +205,7 @@ Object.assign(ACTIONS, {
       <table><tbody>${hits.map((h) => `<tr>
         <td class="mono">${esc(h.source)}</td>
         <td>${esc(h.title)}<br><span class="muted">${esc(h.shifra || '')} ${esc(h.years || '')}
-          ${esc(h.note || '')}</span></td>
+          ${esc(h.note || '')}</span>${hitCrop(h)}</td>
         <td class="num">${h.frames ? `${h.frames} ${t('common.frames')}` : ''}</td>
         <td>${hitAction(h)}</td>
       </tr>`).join('')}</tbody></table>

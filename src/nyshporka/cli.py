@@ -308,6 +308,8 @@ def find(q: str = typer.Argument(..., help="село, прізвище, слов
             console.print(f"{pad}[muted]{h['note']}[/muted]")
         if h.get("url"):
             console.print(f"{pad}[muted]{h['url']}[/muted]")
+        if h.get("crop_url"):
+            console.print(f"{pad}[muted]кроп: {h['crop_url']}[/muted]")
     cov = env.data.get("coverage") or {}
     # 🔴 Знаменник друкується завжди, і найважливіший він саме тоді, коли
     # знахідок нуль: без нього «нічого не знайшлось» читається як «цього не
