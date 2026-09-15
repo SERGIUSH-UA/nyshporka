@@ -25,10 +25,10 @@ jobs:
     name: приватні дані
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - run: python tools/scan_private.py
@@ -38,11 +38,13 @@ jobs:
     name: ворота якості
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
-        with:
-          enable-cache: true
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      # ⚠ Точний тег, а не `@v10`: з v8 setup-uv не публікує мажорних тегів.
+      # 🔴 Кеш тут свідомо НЕ вмикається: з v10 `enable-cache: auto` вимикає його
+      # на tag push — захист від отруєного кешу рівно там, де збірка їде на PyPI.
+      # Явне `true` цей захист знімало б.
+      - uses: astral-sh/setup-uv@v10.1.0
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - name: встановити
@@ -65,9 +67,9 @@ jobs:
     needs: [private-data, checks]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.1.0
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - name: uv build
@@ -90,7 +92,7 @@ jobs:
           /tmp/clean/bin/pip install dist/*.whl
           /tmp/clean/bin/nysh version
           /tmp/clean/bin/nysh info
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: dist
           path: dist/
@@ -108,7 +110,7 @@ jobs:
     needs: build
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # 🗂 Пак довідників лежить ОКРЕМИМ релізом (`catalog-РРРР-ММ-ДД`): описи
       # оновлюються, коли архів виклав новий, а код — коли полагодили ваду, і
@@ -169,7 +171,7 @@ jobs:
       # бере файл за `github-artifact-id` і вимагає, щоб той був завантажений
       # саме `upload-artifact` (v4+) ПЕРЕД подачею. По-друге, поклади ми `.exe`
       # у спільний `dist`, до Windows-політики підпису поїхало б іще й колесо.
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         id: setup-artifact
         with:
           name: setup-windows
@@ -205,17 +207,17 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: dist
           path: dist/
       # ⚠ У ТУ САМУ теку, а не окремим шляхом: тоді `files: dist/*` нижче
       # лишається незміненим, і два джерела читаються двома рядками.
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: setup-windows
           path: dist/
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           files: dist/*
           generate_release_notes: true
@@ -252,7 +254,7 @@ jobs:
     permissions:
       id-token: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: dist
           path: dist/
