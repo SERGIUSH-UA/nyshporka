@@ -55,6 +55,7 @@ def _builtin(workspace: Path | None = None) -> list[Source]:
     from nyshporka.sources.duck import DuckSource
     from nyshporka.sources.fsfilm import FilmMirrorSource
     from nyshporka.sources.ridni import RidniSource
+    from nyshporka.sources.volok import VolokSource
 
     out: list[Source] = [LocalSource()]
     # 🏛 ARCHIUM — один рушій на кілька архівів, тож джерел стільки, скільки
@@ -86,6 +87,10 @@ def _builtin(workspace: Path | None = None) -> list[Source]:
     # знаків кожного PDF), тож відповідає «де моє село згадане в літературі»
     # без жодного завантаження — а нуль по довгій книзі перевіряє завантаження.
     out.append(ChtyvoSource(workspace))
+    # 📷 Фотоархів О. Волока: тисячі альбомів зйомки з архівів і бібліотек, а
+    # пошуку по них Flickr не дає. Шукає по вкладеному списку назв, у мережу не
+    # ходить.
+    out.append(cast("Source", VolokSource(workspace)))
     return out
 
 

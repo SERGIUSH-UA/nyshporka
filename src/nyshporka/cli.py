@@ -470,15 +470,38 @@ def crawl(source: str = typer.Argument("archium", help="id джерела"),
           groups: str = typer.Option("", "--groups",
                                      help="групи фондів через кому; порожньо = давні акти"),
           fresh: bool = typer.Option(False, "--fresh",
-                                     help="почати наново, а не продовжити")) -> None:
+                                     help="почати наново, а не продовжити"),
+          from_file: str = typer.Option("", "--from",
+                                        help="файл списку для джерел, чий каталог "
+                                             "приходить файлом (volok)")) -> None:
     """Зібрати каталог справ, по якому потім працює `nysh find`.
 
     🔴 Потрібне не всім джерелам, а тим, чий сайт не індексує заголовків справ.
     Для ARCHIUM без цього кроку пошук неможливий у принципі — і саме тому він
     відмовляється відповідати нулем.
     """
+    from nyshporka.sources.base import SourceError
+
     _need("material")
     src = _pick(source)
+    if hasattr(src, "import_list"):
+        # Каталог, який не обходиться, а приходить від автора файлом.
+        if not from_file:
+            console.print(f"[warn]каталог «{source}» не обходиться, а кладеться "
+                          f"файлом: `nysh crawl {source} --from <файл>`[/warn]")
+            raise typer.Exit(code=2)
+        try:
+            meta = src.import_list(Path(from_file))
+        except SourceError as exc:
+            console.print(f"[err]{exc}[/err]")
+            raise typer.Exit(code=1) from None
+        console.print(f"✓ список від {meta['taken']}: альбомів {meta['rows']}"
+                      + (f" · посилань не на альбом {meta['not_albums']}"
+                         if meta.get("not_albums") else ""))
+        return
+    if from_file:
+        console.print(f"[warn]джерело «{source}» каталогу з файлу не приймає[/warn]")
+        raise typer.Exit(code=2)
     if not hasattr(src, "crawl"):
         console.print(f"[warn]джерело «{source}» не потребує обходу — "
                       f"його каталог доступний одразу[/warn]")
