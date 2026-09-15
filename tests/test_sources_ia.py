@@ -191,6 +191,21 @@ def test_shifted_numbering_gives_no_crop() -> None:
     assert "leaf0_missing" in first.note
 
 
+def test_word_box_without_an_edge_falls_back_to_the_paragraph() -> None:
+    """🪤 Сервер віддає рамку слова без правого краю — раніше це валило весь пошук."""
+    inside = {"matches": [{"text": "a <IA_FTS_MATCH>Креницька</IA_FTS_MATCH> b", "par": [
+        {"l": 100, "t": 200, "r": 900, "b": 400, "page": 5, "page_width": 1000,
+         "page_height": 2000, "boxes": [{"l": 300, "t": 250, "b": 300, "page": 5}]},
+        {"page": 6, "boxes": [{"l": 10, "t": 20, "b": 30, "page": 6}]}]}]}
+    hits = _src(_Api(_svoboda_routes(**{"item_id=Svoboda-1910-01": inside}))).search(
+        "Креницька in:svoboda_newspaper")
+    by_leaf = {h.page: h for h in hits if h.page is not None}
+
+    assert f"{JP2_1910}0005.jp2/" in by_leaf[5].crop_url
+    assert "кроп по абзацу" in by_leaf[5].note
+    assert by_leaf[6].crop_url == "" and "кроп не будую" in by_leaf[6].note
+
+
 def test_positions_are_asked_only_for_the_first_documents(
         monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(IA, "POSITION_MAX", 1)

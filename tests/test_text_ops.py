@@ -105,6 +105,20 @@ def test_crop_cuts_the_named_line_with_its_geometric_successor(space: Path) -> N
     assert wide["box"][0] == 0 and wide["box"][2] == 6000
 
 
+def test_crop_does_not_glue_a_file_successor_that_stands_far_away(space: Path) -> None:
+    from nyshporka.search import textops as T
+
+    # рядок 1 (970..1050) і рядок 2 (1190..1260): щілина 140 при висоті 80 —
+    # у кроп іде лише рамка рядка 1, а номер і текст сусіда лишаються для картки
+    got = T.crop("проба", "4", 1, out=space / "far.png")
+    assert not got.get("error"), got
+    assert got["next"] == 2 and got["next_text"]
+    assert got["joined"] == [1]
+    assert got["box"] == [776, 1916, 1544, 2124]
+    near = T.crop("проба", "4", 3, out=space / "near.png")
+    assert near["joined"] == [3, 11]
+
+
 def test_voices_marks_agreement_per_line(space: Path) -> None:
     from nyshporka.search import textops as T
 

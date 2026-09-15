@@ -295,12 +295,29 @@ def crop(scope: str, page: str, line: int, *, with_next: bool = True, wide: bool
         return {"error": f"рамки рядка {line} у прогоні {run} немає — прогін без "
                          f"геометрії або рядок порожній"}
     boxes = [target.box]
+    joined = [line]
+
+    # 🔴 Сусід іде в кроп лише тоді, коли його рамка на аркуші поруч: перетин по
+    # горизонталі й щілина не більша за півтора рядки. Наступник «за файлом» у
+    # табличному списку стоїть в іншій графі чи на пів сторінки нижче, і спільна
+    # рамка давала смугу на всю колонку з шуканим словом десь угорі (ДАК 312-1-27,
+    # 00168 р.118 → 616×2269; замір 15.09.2026). Номер і текст сусіда лишаються.
+    def near(other: tuple[int, int, int, int] | None) -> bool:
+        if not other:
+            return False
+        a = target.box
+        if min(a[2], other[2]) <= max(a[0], other[0]):
+            return False
+        gap = max(other[1] - a[3], a[1] - other[3])
+        return gap <= 1.5 * max(a[3] - a[1], other[3] - other[1])
+
     nxt_no: int | None = None
     if with_next:
         nxt_no = target.succ or (line + 1 if (line + 1) in by_no else None)
         nxt = by_no.get(nxt_no) if nxt_no else None
-        if nxt and nxt.box:
+        if nxt and near(nxt.box):
             boxes.append(nxt.box)
+            joined.append(nxt.no)
     # Хвіст після переносу («-щинскій») читається лише з ГОЛОВОЮ, а вона в
     # попередньому рядку — за геометрією (чий наступник цей рядок), інакше за файлом.
     prev_no: int | None = None
@@ -308,8 +325,9 @@ def crop(scope: str, page: str, line: int, *, with_next: bool = True, wide: bool
         prev_no = next((ln.no for ln in lines if ln.succ == line), None) \
             or (line - 1 if (line - 1) in by_no else None)
         prev = by_no.get(prev_no) if prev_no else None
-        if prev and prev.box:
+        if prev and near(prev.box):
             boxes.append(prev.box)
+            joined.append(prev.no)
     size = _geometry_size(run, pg)
     got = S.resolve_scan_how(run, pg)
     if got is None:
@@ -346,6 +364,7 @@ def crop(scope: str, page: str, line: int, *, with_next: bool = True, wide: bool
         dst.parent.mkdir(parents=True, exist_ok=True)
         piece.save(dst)
         return {"run": run, "page": pg, "line": line, "next": nxt_no, "prev": prev_no,
+                "joined": joined,
                 "frame": str(src), "frame_source": frame_source,
                 "orient": int(orient), "scale_k": round(k, 3),
                 "scale": scale,
