@@ -304,6 +304,8 @@ def find(q: str = typer.Argument(..., help="село, прізвище, слов
                                         "схожий на шифру"),
          limit: int = typer.Option(20, "--limit", help="скільки показати")) -> None:
     """Де взагалі є щось про моє село — пошук по каталогах джерел."""
+    from rich.markup import escape
+
     from nyshporka import ops as O
 
     env = O.call("catalog.search", {"q": q, "source": source, "limit": limit,
@@ -315,19 +317,23 @@ def find(q: str = typer.Argument(..., help="село, прізвище, слов
         head = " · ".join(x for x in (h.get("shifra"), h.get("years"),
                                       h.get("place")) if x)
         pad = f"  {'':<{len(h['source'])}}  "
-        console.print(f"  [bold]{h['source']}[/bold]  {h['title']}")
-        console.print(f"{pad}[muted]{head}[/muted]")
-        console.print(f"{pad}[muted]{h['ref']}[/muted]")
+        # 🔴 Усе, що прийшло від джерела, — через `escape`. Примітка `ia` несе
+        # сирий OCR газет, і `[/Ред.]` у ньому rich читав як закривальний тег:
+        # `find` падав на першій же такій знахідці разом зі знаменником, а
+        # `[sic]` мовчки зникав із тексту.
+        console.print(f"  [bold]{escape(h['source'])}[/bold]  {escape(h['title'])}")
+        console.print(f"{pad}[muted]{escape(head)}[/muted]")
+        console.print(f"{pad}[muted]{escape(h['ref'])}[/muted]")
         # 🔴 Місце, примітка й пряме посилання доїжджали до конверта, але в
         # терміналі не друкувались — тобто джерело, яке відповідає «книги цього
         # СЕЛА, ось адреса копії», у CLI показувало саму лише шифру. Заразом це
         # єдине місце, де видно межу відповіді («з 271 за цією назвою»).
         if h.get("note"):
-            console.print(f"{pad}[muted]{h['note']}[/muted]")
+            console.print(f"{pad}[muted]{escape(h['note'])}[/muted]")
         if h.get("url"):
-            console.print(f"{pad}[muted]{h['url']}[/muted]")
+            console.print(f"{pad}[muted]{escape(h['url'])}[/muted]")
         if h.get("crop_url"):
-            console.print(f"{pad}[muted]кроп: {h['crop_url']}[/muted]")
+            console.print(f"{pad}[muted]кроп: {escape(h['crop_url'])}[/muted]")
     cov = env.data.get("coverage") or {}
     # 🔴 Знаменник друкується завжди, і найважливіший він саме тоді, коли
     # знахідок нуль: без нього «нічого не знайшлось» читається як «цього не
@@ -336,12 +342,17 @@ def find(q: str = typer.Argument(..., help="село, прізвище, слов
         f"{b['source']}: {b['kind']}" + (f" від {b['taken']}" if b.get("taken") else "")
         for b in (cov.get("basis") or []))
     console.print(f"\n[muted]знайдено {len(hits)} · шукали в: "
-                  f"{', '.join(cov.get('searched') or []) or '—'}"
-                  + (f" ({basis})" if basis else "") + "[/muted]")
+                  + escape(f"{', '.join(cov.get('searched') or []) or '—'}"
+                           + (f" ({basis})" if basis else "")) + "[/muted]")
     # 🔴 Що доводить нуль кожного джерела. «Немає в назвах альбомів» і «немає в
-    # тексті книг» — однаковий 0 у лічильнику й різні висновки у звіті.
-    for z in cov.get("zeros") or []:
-        console.print(f"[muted]  0 · {z['source']}: {z['means']}[/muted]")
+    # тексті книг» — однаковий 0 у лічильнику й різні висновки у звіті. На
+    # повний нуль той самий перелік уже стоїть у попередженні нижче, тож рядки
+    # друкуються лише поруч зі знахідками інших джерел — інакше кожен сенс нуля
+    # стояв би на екрані двічі.
+    if hits:
+        for z in cov.get("zeros") or []:
+            console.print(f"[muted]  0 · {escape(z['source'])}: "
+                          f"{escape(z['means'])}[/muted]")
     # 🔴 всі попередження конверта, а не лише про недоступні джерела. Саме тут
     # їде різниця між «не знайшлось» і «не знайшлось у зрізі піврічної давнини»,
     # і показувати її вибірково — те саме, що не показувати.

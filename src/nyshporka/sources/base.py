@@ -313,5 +313,12 @@ def about_of(src: object) -> SourceAbout | None:
     той самий прийом, що з `catalog_source` і `search_ceiling`: `getattr`, а
     відсутність видима (`sources.list` → `undeclared`), а не мовчазна.
     """
-    got = getattr(src, "about", None)
+    try:
+        got = getattr(src, "about", None)
+    except Exception:
+        # 🔴 Властивість `about` (ARCHIUM, «Бабин Яр») читає пак архівів, а
+        # `getattr` із дефолтом ловить лише `AttributeError`. Збій паку не має
+        # валити пошук по ВСІХ джерелах: джерело стає «без опису» — видимо, в
+        # `undeclared`, а не мовчки.
+        return None
     return got if isinstance(got, SourceAbout) else None

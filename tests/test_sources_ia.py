@@ -206,6 +206,36 @@ def test_word_box_without_an_edge_falls_back_to_the_paragraph() -> None:
     assert by_leaf[6].crop_url == "" and "кроп не будую" in by_leaf[6].note
 
 
+def test_word_box_without_a_left_edge_keeps_its_leaf_and_crop() -> None:
+    """🔴 Ключ дедуплікації рахувався з `box["l"]` ДО запасної рамки абзацу, тож
+    рамка без лівого краю випадала разом із листом (верифікатор 0.16.0)."""
+    inside = {"matches": [{"text": "a <IA_FTS_MATCH>Креницька</IA_FTS_MATCH> b", "par": [
+        {"l": 100, "t": 200, "r": 900, "b": 400, "page": 5, "page_width": 1000,
+         "page_height": 2000, "boxes": [{"t": 250, "r": 400, "b": 300, "page": 5}]}]}]}
+    hits = _src(_Api(_svoboda_routes(**{"item_id=Svoboda-1910-01": inside}))).search(
+        "Креницька in:svoboda_newspaper")
+    by_leaf = {h.page: h for h in hits if h.page is not None}
+
+    assert 5 in by_leaf, "лист мусить лишитись у знахідці"
+    assert f"{JP2_1910}0005.jp2/" in by_leaf[5].crop_url
+    assert "кроп по абзацу" in by_leaf[5].note
+
+
+def test_a_single_year_is_that_year_not_everything_before_it() -> None:
+    """🔴 `{рік: "gte", рік: "lte"}` — один ключ: `year:1910` шукав «до 1910»."""
+    from urllib.parse import parse_qs, urlparse
+
+    def year_filter(q: str) -> Any:
+        api = _Api(_svoboda_routes())
+        _src(api).search(q)
+        url = next(u for u in api.gets if "filter_map" in u)
+        return json.loads(parse_qs(urlparse(url).query)["filter_map"][0])["year"]
+
+    assert year_filter("Креницька in:svoboda_newspaper year:1910") == {"1910": "inc"}
+    assert year_filter("Креницька in:svoboda_newspaper year:1900-1910") == {
+        "1900": "gte", "1910": "lte"}
+
+
 def test_positions_are_asked_only_for_the_first_documents(
         monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(IA, "POSITION_MAX", 1)

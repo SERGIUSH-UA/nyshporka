@@ -371,7 +371,14 @@ class IaSource:
             kind = "collection" if md.get("mediatype") == "collection" else "identifier"
             filters[kind] = {query.scope: "inc"}
         if query.year_from:
-            filters["year"] = {query.year_from: "gte", query.year_to: "lte"}
+            # 🔴 Одиночний рік — `inc`, а не пара gte/lte. У словнику з однаковими
+            # ключами `{рік: "gte", рік: "lte"}` лишався один «lte», і `year:1910`
+            # шукав у всіх роках ДО 1910 включно (замір 15.09.2026: 22 748
+            # документів за «1910» проти 7 249 за 1900-1910).
+            if query.year_from == query.year_to:
+                filters["year"] = {query.year_from: "inc"}
+            else:
+                filters["year"] = {query.year_from: "gte", query.year_to: "lte"}
         check_terms(query.text, latin_blind=query.scope in LATIN_BLIND, scope=query.scope)
 
         params: dict[str, Any] = {"user_query": query.text, "service_backend": "fts",
@@ -450,16 +457,21 @@ class IaSource:
             snip = snippet(str(m.get("text") or ""))
             for par in m.get("par") or []:
                 for box in par.get("boxes") or []:
-                    try:
-                        leaf = int(box.get("page", par.get("page")))
-                        key = (leaf, int(box["l"]), int(box["t"]))
-                    except (KeyError, TypeError, ValueError):
-                        continue
                     # 🪤 Рамка слова буває без краю («Звід пам'яток», замір
                     # 15.09.2026: лише t, b, l). Абзац навколо має всі чотири —
                     # кроп стає ширшим, але слово в ньому є.
                     whole = _box(box)
                     frame = whole or _box(par)
+                    # 🔴 Ключ — із тих країв, що є, і лише ПІСЛЯ запасної рамки.
+                    # Рахований до неї як `box["l"]`, він падав на рамці без лівого
+                    # краю, і лист разом із кропом по абзацу випадав зовсім.
+                    fb: dict[str, int] = frame or {}
+                    try:
+                        leaf = int(box.get("page", par.get("page")))
+                        key = (leaf, int(box.get("l", fb.get("l", -1))),
+                               int(box.get("t", fb.get("t", -1))))
+                    except (TypeError, ValueError):
+                        continue
                     if key in seen:
                         continue
                     seen.add(key)

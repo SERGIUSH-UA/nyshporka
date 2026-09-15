@@ -135,6 +135,15 @@ def test_geog_known_uezd_without_match_is_a_plain_zero(catalog: Path) -> None:
     assert _codes(env) == ["nothing_found"]
 
 
+def test_geog_lowercase_uezd_is_not_called_unknown(catalog: Path) -> None:
+    """🔴 SQLite `LIKE` не зводить регістр кирилиці: «ольгопольськ» ставав
+    «повіту газетир не знає» — хибне закриття напряму (верифікатор 0.16.0)."""
+    from nyshporka.ops_catalog import GeogFindArgs, geog_find
+
+    env = geog_find(GeogFindArgs(q="Такогоселанемає", uezd="ольгопольськ"))
+    assert "outside_pack_scope" not in _codes(env)
+
+
 def test_catalog_list_json_carries_scope_and_note(catalog: Path) -> None:
     from typer.testing import CliRunner
 

@@ -229,17 +229,26 @@ def uezd_known(uezd: str) -> bool:
     в повіті немає» і «цього повіту газетир не знає взагалі». Другий — межа
     довідника, і звітувати його як відсутність села означало б закрити напрям,
     який не перевіряли.
+
+    ⚠ Звірка в Python, а не `LIKE`: SQLite зводить регістр лише для ASCII, тож
+    «балтського» не збігалось із «Балтського пов.», і відомий газетиру повіт
+    називався невідомим; а `%` чи `_` у введенні читались як шаблон.
     """
+    needle = (uezd or "").strip().casefold()
+    if not needle:
+        return True
     packs = open_packs("geog")
     try:
         for _pid, con in packs:
             try:
-                if con.execute("SELECT 1 FROM places WHERE uezd_gub LIKE ? "
-                               "OR hist_place LIKE ? LIMIT 1",
-                               [f"%{uezd}%", f"%{uezd}%"]).fetchone():
-                    return True
+                rows = con.execute(
+                    "SELECT DISTINCT uezd_gub, hist_place FROM places").fetchall()
             except sqlite3.Error:
                 continue
+            for uezd_gub, hist_place in rows:
+                if (needle in str(uezd_gub or "").casefold()
+                        or needle in str(hist_place or "").casefold()):
+                    return True
     finally:
         close_all(packs)
     return False
