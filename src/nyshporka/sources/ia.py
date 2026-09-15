@@ -438,6 +438,11 @@ class IaSource:
                         key = (leaf, int(box["l"]), int(box["t"]))
                     except (KeyError, TypeError, ValueError):
                         continue
+                    # 🪤 Рамка слова буває без краю («Звід пам'яток», замір
+                    # 15.09.2026: лише t, b, l). Абзац навколо має всі чотири —
+                    # кроп стає ширшим, але слово в ньому є.
+                    whole = _box(box)
+                    frame = whole or _box(par)
                     if key in seen:
                         continue
                     seen.add(key)
@@ -447,12 +452,18 @@ class IaSource:
                                          f"нумерації (leaf0_missing) — кроп не будую, "
                                          f"сторінку звіряти в переглядачі")))
                         continue
+                    where = f"лист n{leaf}"
+                    if frame is None:
+                        where += " · рамки слова й абзацу сервер не дав — кроп не будую"
+                    elif whole is None:
+                        where += " · рамка слова неповна — кроп по абзацу"
                     out.append(_with(
                         base, page=leaf, url=viewer_url(ident, doc, leaf, text),
-                        crop_url=crop_url(ident, doc, leaf, box,
+                        crop_url=crop_url(ident, doc, leaf, frame,
                                           page_width=par.get("page_width"),
-                                          page_height=par.get("page_height")),
-                        note=_note(snip, total, f"лист n{leaf}")))
+                                          page_height=par.get("page_height"))
+                        if frame is not None else "",
+                        note=_note(snip, total, where)))
         return out
 
     # ── запис і завантаження ────────────────────────────────────────────────
@@ -686,6 +697,14 @@ def _note(snip: str, total: int, where: str) -> str:
     parts = (f"«{snip}»" if snip and not snip.startswith("«") else snip, where,
              f"з {total} документів за запитом", "лише точне слово")
     return " · ".join(p for p in parts if p)
+
+
+def _box(obj: dict[str, Any]) -> dict[str, int] | None:
+    """Рамка з усіма чотирма краями числами — або `None`."""
+    try:
+        return {k: int(obj[k]) for k in ("l", "t", "r", "b")}
+    except (KeyError, TypeError, ValueError):
+        return None
 
 
 def _with(hit: Hit, **changes: Any) -> Hit:
