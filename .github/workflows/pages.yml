@@ -26,11 +26,12 @@ jobs:
     name: зібрати
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@v7
+      # Точний тег: з v8 setup-uv не публікує мажорних тегів (`@v10` не резолвиться).
+      - uses: astral-sh/setup-uv@v10.1.0
         with:
           enable-cache: true
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       # 🔴 Спершу звірка айдентики. Сайт бере кольори зі згенерованого
@@ -41,7 +42,7 @@ jobs:
         run: uv run python -m nyshporka.brand.gen --check
       - name: зібрати сайт
         run: uv run --locked --extra docs mkdocs build --strict
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: site
 
@@ -54,4 +55,4 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5

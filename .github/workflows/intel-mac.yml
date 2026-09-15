@@ -26,8 +26,9 @@ jobs:
     env:
       NYSHPORKA_WORKSPACE: ${{ github.workspace }}/ws
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@v7
+      # Точний тег: з v8 setup-uv не публікує мажорних тегів (`@v10` не резолвиться).
+      - uses: astral-sh/setup-uv@v10.1.0
       - name: це справді x86_64
         run: uv run --no-project python -c "import platform, sys; print(sys.platform, platform.machine()); assert platform.machine() == 'x86_64'"
       - name: застосунок

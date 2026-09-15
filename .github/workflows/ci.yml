@@ -22,10 +22,10 @@ jobs:
     name: приватні дані
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0   # історія цілком — саме її і перевіряємо
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - name: робоче дерево
@@ -33,7 +33,7 @@ jobs:
       - name: уся історія
         run: python tools/scan_private.py --history
       - name: gitleaks
-        uses: gitleaks/gitleaks-action@v2
+        uses: gitleaks/gitleaks-action@v3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -53,11 +53,13 @@ jobs:
           - python: "3.12"
             os: windows-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@v7
+      # ⚠ Точний тег, а не `@v10`: з v8 setup-uv не публікує мажорних тегів, і
+      # `@v10` просто не резолвиться. Оновлювати — номером повністю.
+      - uses: astral-sh/setup-uv@v10.1.0
         with:
           enable-cache: true
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python }}
       # `--locked`: інакше `uv.lock` нічого не гарантує — при розбіжності uv
@@ -80,8 +82,8 @@ jobs:
     name: ставиться з нуля
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
       # Приймач кроку «скелет»: чисте середовище, установка з коліс, робочий
