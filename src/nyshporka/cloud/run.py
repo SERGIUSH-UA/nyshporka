@@ -257,13 +257,34 @@ def pack_frames(case_dir: Path, dest: Path) -> Path:
 
 def _upload_assets(session: Session, plan: CloudPlan, remote_dir: str,
                    *, on_line: Any = None) -> None:
-    """Раннер, патчі й ваги — усе, чим читатимуть."""
-    from nyshporka.htr import runner as _runner_mod
+    """Раннер, патчі й ваги — усе, чим читатимуть.
 
-    runner_py = Path(_runner_mod.__file__).resolve()
+    🔴 Шлях до `runner.py` береться через `find_spec`, а не `import
+    nyshporka.htr.runner`. Сам раннер (за власним docstring) виконується
+    python-ом СЕРЕДОВИЩА РУШІЇВ — тут потрібен лише його файл, щоб
+    відіслати. Звичайний `import` виконує модуль і тягне за собою `numpy`
+    top-level; `numpy` не входить у жоден пакет, який ставить `cloud`
+    (`paramiko`, `boto3`) — і оркестрація впаде на машині без `htr`-екстри,
+    хоча читає не вона, а орендований бокс.
+    """
+    import importlib.util
+
+    spec = importlib.util.find_spec("nyshporka.htr.runner")
+    if spec is None or spec.origin is None:
+        raise CloudError("nyshporka.htr.runner не знайдено в пакеті")
+    runner_py = Path(spec.origin).resolve()
     session.mkdirs(f"{remote_dir}/{MODELS_SUB}")
     session.mkdirs(f"{remote_dir}/patches")
     session.put(runner_py, f"{remote_dir}/runner.py")
+    # 🔴 `pysar_lines_infer.py` — обов'язковий сусід для `.pt` (PARSeq,
+    # кирилиця): `runner.py` вантажить його `sys.path.insert` + `import`
+    # за файлом поруч, не пакетом. Без цього рядка кожна кирилична сторінка
+    # падає в карантин з `ModuleNotFoundError: pysar_lines_infer`, а GPU
+    # не бачить жодного навантаження — заміряно живцем на `gpu3060`
+    # (14.09.2026, 456 із 457 сторінок пішли в карантин мовчки, доки
+    # `nysh cloud state` не показав нуль активних процесів).
+    session.put(runner_py.parent / "pysar_lines_infer.py",
+               f"{remote_dir}/pysar_lines_infer.py")
     # 🔴 Патчі їдуть поруч із раннером, бо він вантажить їх за шляхом, а не
     # імпортом пакета: на машині `nyshporka` не встановлено й не буде.
     for p in sorted((runner_py.parent / "patches").glob("*.py")):
