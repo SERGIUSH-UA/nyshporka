@@ -100,6 +100,39 @@ def test_a_glued_title_gives_no_shifra_instead_of_a_phantom_case() -> None:
     assert ok and (ok.group(2), ok.group(3)) == ("24", "а")
 
 
+def test_spaces_between_fond_opys_and_case_are_still_a_shifra() -> None:
+    """🔴 ДАЖО ф.146 заливали і «146-01-0624», і «146 01 0767», і «146 -1-2621»:
+    15 файлів зі сканом лягали в «без шифри»."""
+    codes = ("ДАЖО",)
+    assert parse_shifra("ДАЖО 146 01 0767.pdf", codes, "146") == ("1", "767", "")
+    assert parse_shifra("ДАЖО 146 -1-2621 Iliński.pdf", codes, "146") == ("1", "2621", "")
+    assert parse_shifra("ДАЖО 146 1 3099.pdf", codes, "146") == ("1", "3099", "")
+    # звичайна шифра з роком після крапки фантома не дає
+    assert parse_shifra("ДАЖО 146-1-511. 1834. Посімейні списки.pdf", codes, "146") == ("1", "511", "")
+    # скан самого опису лишається без шифри
+    assert parse_shifra("ДАЖО фонд 146 Оп. 01.pdf", codes, "146") is None
+
+
+def test_page_images_cut_from_a_pdf_are_not_volumes() -> None:
+    """🔴 ДАЖО 1-74-99: 1344 JPEG-сторінки поруч із PDF злиття склало в 1345
+    «томів» і поле на 834 КБ, яке ламало читання реєстру."""
+    from nyshporka.fonds.collect.commons import is_page_derivative
+    assert is_page_derivative("ДАЖО 1-74-99. 1844 рік. Метричні книги.pdf page152 1.jpeg")
+    assert is_page_derivative("ДАЖО_1-74-99._1844.pdf_page7.jpg")
+    assert not is_page_derivative("ДАЖО 1-74-99. 1844 рік. Метричні книги.pdf")
+    assert not is_page_derivative("ДАЖО 1-74-99. Том 2.pdf")
+    assert not is_page_derivative("ДАЖО 146-1-511. 1834. Посімейні списки.jpg")
+
+
+def test_leading_zeros_in_opys_and_case_are_the_same_case() -> None:
+    """🔴 «ДАЖО 146-01-0624» — опис 1, справа 624. Злиття ключ не нормалізує, тож
+    «01»/«1» і «00419»/«419» задвоїли 174 справи: з назвою без скана і зі сканом
+    без назви."""
+    codes = ("ДАЖО",)
+    assert parse_shifra("ДАЖО 146-01-0624. Родовід.pdf", codes, "146") == ("1", "624", "")
+    assert parse_shifra("ДАЖО 146-1-00419.pdf", codes, "146") == ("1", "419", "")
+
+
 def test_a_shifra_written_in_words_is_still_a_shifra() -> None:
     """🔴 «ЦДІАК фонд 1040, опис 1, справа 48» — та сама справа, що й
     «ЦДІАК 1040-1-48». У ф.1040 так названо 141 файл із 434, і том на 816

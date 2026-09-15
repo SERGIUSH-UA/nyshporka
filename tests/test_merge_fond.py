@@ -131,6 +131,21 @@ def test_weaker_title_survives_in_alt(run) -> None:
     assert "wikisource:Ревізька казка" in r["title_alt"]
 
 
+def test_ocr_opys_brings_the_family_name_without_winning_the_title() -> None:
+    """🔴 OCR опису — єдине джерело роду в «Дворянських справах» (ДАЖО ф.146:
+    3193 справи). Заголовок покажчика сильніший за рангом, тож без окремої
+    гілки прізвище лишалось би лише в `title_alt`."""
+    from nyshporka.fonds.merge.sources import blank_row
+    r = blank_row(("1", "1332", ""))
+    _fuse_fields(r, {"surnames": "Вильчинских; Бильчинских"}, "ocr")
+    _fuse_fields(r, {"surnames": "Вильчинских"}, "ocr")
+    assert r["surnames"] == ["Вильчинских", "Бильчинских"]
+    # інші джерела прізвищ через цю гілку не приносять
+    r2 = blank_row(("1", "1333", ""))
+    _fuse_fields(r2, {"surnames": "Вильчинских"}, "duck")
+    assert r2["surnames"] == []
+
+
 def test_registry_only_source_still_names_the_case(run) -> None:
     """Справа, про яку знає лише покажчик, доходить із заголовком (спр.2)."""
     r = _rows(run()[2])["1-2"]

@@ -138,6 +138,13 @@ def _fuse_fields(r: Row, row: dict[str, str], name: str) -> None:
             v = (row.get(fld) or "").strip()
             if v and not r[fld]:
                 r[fld] = v
+        # Рід справи з OCR опису («Дело о дворянском происхождении рода X»). Без
+        # цього прізвище лишалось лише в `title_alt`, бо заголовок покажчика
+        # «Дворянські справи» сильніший за рангом — ДАЖО ф.146, 3193 справи.
+        for name_ in (row.get("surnames") or "").split(";"):
+            name_ = name_.strip()
+            if name_ and name_ not in r["surnames"]:
+                r["surnames"].append(name_)
 
     if name == "archium":
         # Адреса кадрів, а не ще один заголовок: саме за нею справа качається

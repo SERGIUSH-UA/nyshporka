@@ -68,9 +68,15 @@ def shifra_pattern(archive: str, fond: str) -> re.Pattern[str]:
     цифрах і віддавав ФАНТОМНУ справу 26 замість того, щоб чесно лишити файл
     без шифри. Фантом гірший за пропуск: він виглядає як відкриття нової
     справи фонду.
+
+    ⚠ Між фондом, описом і справою теж буває не лише дефіс: ДАЖО ф.146 заливали
+    і «ДАЖО 146-01-0624», і «ДАЖО 146 01 0767», і «ДАЖО 146 -1-2621» — 15 файлів
+    зі сканом лягали в «без шифри» (14.09.2026). Тому роздільник — дефіс із
+    пробілами довкола або самі пробіли.
     """
+    sep = r"(?:\s*[-–]\s*|[ _]+)"
     return re.compile(
-        rf"{re.escape(archive)}[ _\-–]+{re.escape(fond)}[-–](\d+)[-–](\d+)(?!\d)"
+        rf"{re.escape(archive)}[ _\-–]+{re.escape(fond)}{sep}(\d+){sep}(\d+)(?!\d)"
         rf"([а-яіїєґa-z]?)(?![а-яіїєґa-z])", re.IGNORECASE)
 
 
@@ -101,14 +107,39 @@ def worded_fond_pattern(archive: str, fond: str) -> re.Pattern[str]:
         re.IGNORECASE)
 
 
+#: «… .pdf page152 1.jpeg» — сторінка, вирізана з уже залитого PDF, а не том справи.
+_PAGE_DERIVATIVE = re.compile(r"\.pdf[ _]+page\d+(?:[ _]+\d+)?\.(?:jpe?g|png|tiff?)$",
+                              re.IGNORECASE)
+
+
+def is_page_derivative(title: str) -> bool:
+    """Файл-сторінка, вирізаний із PDF справи.
+
+    🔴 ДАЖО 1-74-99: поруч із PDF на 1344 сторінки лежать 1344 такі JPEG, і
+    злиття склало їх як 1345 «томів» — поле `commons_parts` на 834 КБ, яке
+    ламало звичайне читання реєстру (`csv` падав на ліміті поля), а число
+    файлів фонду завищувалось із ~2290 до 3634 (14.09.2026).
+    """
+    return bool(_PAGE_DERIVATIVE.search(title or ""))
+
+
 def parse_shifra(title: str, codes: tuple[str, ...],
                  fond: str) -> tuple[str, str, str] | None:
-    """Опис, справа, літера з назви файлу — хоч цифрами, хоч словами."""
+    """Опис, справа, літера з назви файлу — хоч цифрами, хоч словами.
+
+    ⚠ Опис і номер справи віддаються без провідних нулів: «ДАЖО 146-01-0624» —
+    це опис 1, справа 624, як у Вікіджерелах і Качиному Інспекторі, а злиття
+    ключ не нормалізує. Без цього справи ДАЖО ф.146 стояли в реєстрі двічі — з
+    назвою без скана і зі сканом без назви: 154 через опис «01» і ще 20 через
+    номер «00419» (14.09.2026).
+    """
     for code in codes:
         for pattern in (shifra_pattern(code, fond), worded_shifra_pattern(code, fond)):
             m = pattern.search(title)
             if m:
-                return m.group(1), m.group(2), (m.group(3) or "").lower()
+                opys, spr = m.group(1), m.group(2)
+                return (str(int(opys)) if opys.isdigit() else opys,
+                        str(int(spr)), (m.group(3) or "").lower())
     return None
 
 
@@ -320,6 +351,8 @@ class CommonsCollector:
 
     def _row(self, title: str, ii: dict[str, Any], codes: tuple[str, ...],
              fond: str) -> dict[str, Any] | None:
+        if is_page_derivative(title):
+            return None
         opys, spr, letter = parse_shifra(title, codes, fond) or ("", "", "")
         return {
             "opys": opys, "spr_int": spr, "spr_letter": letter,
