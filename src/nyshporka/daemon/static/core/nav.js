@@ -313,6 +313,8 @@ const ZERO_IS_NOISE = ['kept', 'skipped', 'errors', 'failed'];
 
 async function refreshJobs() {
   const res = await fetch(`/api/jobs?since=${cursor}`);
+  // Відмова (допуск протух) — не журнал: без перевірки в курсор лягав `undefined`.
+  if (!res.ok) return;
   const data = await res.json();
   cursor = data.seq;
   const box = el('jobs');
@@ -344,6 +346,9 @@ async function watchJobs() {
   for (;;) {
     try {
       const res = await fetch(`/api/jobs/wait?since=${cursor}&timeout_s=25`);
+      // 🔴 Відмова з JSON-тілом виняток не кидає, а пауза стоїть лише в `catch`:
+      // без цього рядка пристрій без допуску молотив сервер запитами без упину.
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       cursor = data.seq;
       if (el('jobs')) await refreshJobs();

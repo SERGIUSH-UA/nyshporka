@@ -181,6 +181,13 @@ def test_front_has_no_inline_handlers_or_globals() -> None:
     # імен не створює; читання `window.location` — тим паче.
     stripped = js.replace("window.location", "").replace("window.addEventListener", "")
     assert "window." not in stripped
+    # Сторінка допуску мережевого режиму — під тими самими правилами, і без
+    # жодного inline-скрипта: вона віддається пристрою, який ще нічого не довів.
+    gate_html = (static / "access.html").read_text(encoding="utf-8")
+    gate_js = (static / "access.js").read_text(encoding="utf-8")
+    assert "onclick" not in gate_html and "onsubmit" not in gate_html
+    assert "<script>" not in gate_html
+    assert "window." not in gate_js
 
 
 def test_rebuild_button_gives_one_job_for_two_clicks(client: TestClient,
@@ -333,42 +340,362 @@ def test_own_page_origin_still_works(client: TestClient) -> None:
     assert client.post("/api/op/workspace.info", json={}).status_code == 200
 
 
-def test_bind_widens_to_all_interfaces_but_keeps_loopback_reachable() -> None:
-    """LAN-`--host` не мусить забирати петлю — лише додавати мережу.
+# ── мережевий режим (`nysh serve --host`) ────────────────────────────────────
+LAN = "192.168.1.50"
+PEER = ("192.168.1.9", 50000)
+ACCESS = "access-for-tests-0123456789abcdefghijklmnop"
 
-    `uvicorn.run(host=...)` слухає рівно ту адресу, яку йому дали: якби це
-    була сама LAN-адреса, SSH-тунель (`127.0.0.1`) лишився б без слухача.
-    Довіру ж (`Host`/`Origin`) і далі вирішує `create_app`, не бінд.
+
+@pytest.fixture
+def no_fail_delay(monkeypatch: pytest.MonkeyPatch) -> None:
+    from nyshporka.daemon import app as A
+
+    monkeypatch.setattr(A, "FAIL_DELAY_SEC", 0.0)
+
+
+def _lan_app(ws: Workspace, **kw: object) -> object:
+    return create_app(ws, token=TOKEN, host=LAN, access_key=ACCESS, **kw)  # type: ignore[arg-type]
+
+
+def _lan(app: object, peer: tuple[str, int] = PEER, scheme: str = "http") -> TestClient:
+    """Клієнт мережевого пристрою: з'єднання прийшло на LAN-адресу з іншої машини.
+
+    ⚠ `client=` обов'язковий: дефолтний `testclient` — не IP.
     """
-    from nyshporka.daemon.app import _bind_host
-
-    assert _bind_host("127.0.0.1") == "127.0.0.1"
-    assert _bind_host("localhost") == "localhost"
-    assert _bind_host("0.0.0.0") == "0.0.0.0"
-    assert _bind_host("192.168.1.162") == "0.0.0.0"
+    return TestClient(app, base_url=f"{scheme}://{LAN}:8788", client=peer)  # type: ignore[arg-type]
 
 
-def test_lan_host_trusted_only_when_bound_there(ws: Workspace) -> None:
-    """`--host` довіряє лише тій адресі, на якій демона реально підняли.
+def test_network_mode_without_a_key_is_not_built(ws: Workspace) -> None:
+    """🔴 Мережевий режим без ключа — це архів, відкритий кожному в мережі."""
+    with pytest.raises(ValueError):
+        create_app(ws, token=TOKEN, host=LAN)
 
-    Хтось інший на тій самій мережі не мусить дістати доступ, підмінивши
-    `Host` на LAN-адресу застосунку, — тож адреса, якою підняли демон, не
-    відкриває решту мережі: чужий `Host` лишається чужим.
+
+def test_network_device_without_access_sees_only_the_gate(ws: Workspace) -> None:
+    """🔴 Токен у мережі не захищає: сторінку з ним отримує кожен.
+
+    Тому до допуску пристрій не бачить ні консолі, ні читання — лише сторінку
+    допуску й рівно те, що вона вантажить.
     """
-    lan = TestClient(create_app(ws, token=TOKEN, host="192.168.1.162"),
-                     base_url="http://192.168.1.162:8788")
-    res = lan.get("/api/health")
-    assert res.status_code == 200
-    res = lan.get("/api/health", headers={"Host": "evil.example"})
-    assert res.status_code == 403
-    # петля лишається довіреною і на LAN-піднятому демоні
-    res = lan.get("/api/health", headers={"Host": "127.0.0.1:8788"})
-    assert res.status_code == 200
-    # та адреса, яку в create_app не передали, довіри не отримує
-    loopback_only = TestClient(create_app(ws, token=TOKEN),
-                               base_url="http://127.0.0.1:8788")
-    res = loopback_only.get("/api/health", headers={"Host": "192.168.1.162:8788"})
-    assert res.status_code == 403
+    lan = _lan(_lan_app(ws))
+    page = lan.get("/")
+    assert page.status_code == 200
+    assert "access.js" in page.text and TOKEN not in page.text
+    for path in ("/api/health", "/openapi.json", "/api/ops", "/api/jobs",
+                 "/api/jobs/wait?timeout_s=1", "/static/app.js", "/static/core/net.js"):
+        assert lan.get(path).status_code == 401, path
+    assert lan.post("/api/op/workspace.info", json={}).status_code == 401
+    for path in ("/static/access.js", "/static/access.css", "/static/core/strings.js",
+                 "/ui/tokens.css", "/ui/base.css", "/favicon.ico"):
+        assert lan.get(path).status_code == 200, path
+
+
+def test_websocket_from_a_network_device_is_closed(ws: Workspace) -> None:
+    """Ворота стоять і перед websocket: `@app.middleware("http")` його пропускав би."""
+    from starlette.testclient import WebSocketDenialResponse
+    from starlette.websockets import WebSocketDisconnect
+
+    lan = _lan(_lan_app(ws), scheme="ws")
+    with pytest.raises((WebSocketDisconnect, WebSocketDenialResponse)), \
+            lan.websocket_connect("/api/ws"):
+        pass
+
+
+def test_pairing_code_admits_one_device_once(ws: Workspace) -> None:
+    app = _lan_app(ws)
+    code = app.state.pair_code  # type: ignore[attr-defined]
+    lan = _lan(app)
+    res = lan.post("/api/access", json={"code": code})
+    assert res.status_code == 200 and res.json()["ok"] is True
+    cookie = res.headers["set-cookie"].lower()
+    assert "httponly" in cookie and "samesite=strict" in cookie and "max-age=" in cookie
+    assert ACCESS.lower() not in cookie, "у cookie сам ключ, а не похідне від нього"
+    assert lan.get("/api/access").json()["data"]["valid"] is True
+    assert TOKEN in lan.get("/").text
+    assert lan.get("/api/health").status_code == 200
+    # код одноразовий: другий пристрій із тим самим посиланням не проходить
+    other = _lan(app, peer=("192.168.1.10", 50000))
+    assert other.post("/api/access", json={"code": code}).status_code == 401
+
+
+def test_expired_pairing_code_is_refused(ws: Workspace, no_fail_delay: None) -> None:
+    app = _lan_app(ws)
+    app.state.pair_expires = 0.0  # type: ignore[attr-defined]
+    res = _lan(app).post("/api/access", json={"code": app.state.pair_code})  # type: ignore[attr-defined]
+    assert res.status_code == 401
+
+
+def test_the_access_key_admits_a_device(ws: Workspace) -> None:
+    lan = _lan(_lan_app(ws))
+    assert lan.post("/api/access", json={"key": ACCESS}).status_code == 200
+    assert lan.get("/api/health").status_code == 200
+
+
+def test_a_forged_cookie_is_refused(ws: Workspace) -> None:
+    lan = _lan(_lan_app(ws))
+    lan.cookies.set("nysh_access_8788", "0" * 64)
+    assert lan.get("/api/health").status_code == 401
+
+
+def test_access_does_not_replace_the_token_or_origin_check(ws: Workspace) -> None:
+    """Cookie — лише допуск. Мутація й далі вимагає токена й власної сторінки."""
+    lan = _lan(_lan_app(ws))
+    lan.post("/api/access", json={"key": ACCESS})
+    assert lan.post("/api/op/pick.browse", json={}).status_code == 403
+    r = lan.post("/api/op/pick.browse", json={},
+                 headers={TOKEN_HEADER: TOKEN, "Origin": "http://evil.example"})
+    assert r.status_code == 403
+    r = lan.post("/api/op/pick.browse", json={},
+                 headers={TOKEN_HEADER: TOKEN, "Origin": f"http://{LAN}:8788"})
+    assert r.status_code == 200
+
+
+def test_wrong_keys_block_the_address_for_a_while(ws: Workspace, no_fail_delay: None) -> None:
+    app = _lan_app(ws)
+    lan = _lan(app)
+    for _ in range(10):
+        assert lan.post("/api/access", json={"key": "не той"}).status_code == 401
+    assert lan.post("/api/access", json={"key": ACCESS}).status_code == 429
+    # блок — на адресу, а не на всіх
+    assert _lan(app, peer=("192.168.1.11", 1)).post(
+        "/api/access", json={"key": ACCESS}).status_code == 200
+
+
+def test_a_stale_cookie_does_not_count_as_a_wrong_key(ws: Workspace,
+                                                     no_fail_delay: None) -> None:
+    """🔴 Після `--rotate-key` відкрита вкладка власника шле протухлу cookie
+    десятками запитів — рахуй їх, і власник заблокував би сам себе."""
+    lan = _lan(_lan_app(ws))
+    lan.cookies.set("nysh_access_8788", "0" * 64)
+    for _ in range(30):
+        lan.get("/api/jobs")
+    assert lan.post("/api/access", json={"key": ACCESS}).status_code == 200
+
+
+def test_loopback_connection_of_a_network_daemon_needs_no_key(ws: Workspace) -> None:
+    """Вкладка на самій машині й тунелі приходять через петлю — як без `--host`."""
+    local = TestClient(_lan_app(ws), base_url="http://127.0.0.1:8788")  # type: ignore[arg-type]
+    assert TOKEN in local.get("/").text
+
+
+def test_loopback_is_judged_by_the_address_not_by_its_spelling() -> None:
+    from nyshporka.daemon.app import is_loopback_host
+
+    assert is_loopback_host("::ffff:127.0.0.1"), "IPv4-mapped петля на dual-stack"
+    assert is_loopback_host("[::1]") and is_loopback_host("localhost")
+    assert not is_loopback_host(LAN)
+    assert not is_loopback_host("testserver")
+
+
+def test_network_host_header_must_name_the_connection_address(ws: Workspace) -> None:
+    lan = _lan(_lan_app(ws))
+    lan.post("/api/access", json={"key": ACCESS})
+    assert lan.get("/api/health").status_code == 200
+    for bad in ("evil.example", "0.0.0.0", "192.168.1.51"):
+        assert lan.get("/api/health", headers={"Host": bad}).status_code == 403, bad
+
+
+def test_loopback_no_longer_answers_to_zero_address(client: TestClient) -> None:
+    """Сторінка з інтернету шле на `0.0.0.0` з `Host: 0.0.0.0` — своїм це ім'я не є."""
+    assert client.get("/api/health", headers={"Host": "0.0.0.0:8788"}).status_code == 403
+
+
+def test_native_dialog_is_not_opened_from_a_network_device(ws: Workspace) -> None:
+    """🔴 Системне вікно з'явилось би на екрані сервера, а не пристрою."""
+    lan = _lan(_lan_app(ws))
+    lan.post("/api/access", json={"key": ACCESS})
+    hdr = {TOKEN_HEADER: TOKEN}
+    assert lan.post("/api/op/pick.ask", json={}, headers=hdr).status_code == 403
+    assert lan.post("/api/op/pick.can", json={"deep": True}, headers=hdr).status_code == 403
+    can = lan.post("/api/op/pick.can", json={}, headers=hdr).json()
+    assert can["ok"] is True and can["data"]["can"] is False
+
+
+def test_tls_makes_the_access_cookie_secure(ws: Workspace) -> None:
+    lan = _lan(_lan_app(ws, tls=True), scheme="https")
+    res = lan.post("/api/access", json={"key": ACCESS})
+    cookie = res.headers["set-cookie"]
+    assert cookie.startswith("__Host-nysh_access_8788=")
+    assert "secure" in cookie.lower()
+
+
+def test_access_key_is_persistent_rotates_and_lives_outside_the_space(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import platformdirs
+
+    from nyshporka.daemon.app import load_access_key
+
+    monkeypatch.setattr(platformdirs, "user_config_dir",
+                        lambda *a, **k: str(tmp_path / "cfg"))
+    root = tmp_path / "space"
+    root.mkdir()
+    key, path = load_access_key(root)
+    assert root not in path.parents, "ключ простору не мусить лежати в просторі"
+    assert load_access_key(root)[0] == key
+    rotated = load_access_key(root, rotate=True)[0]
+    assert rotated != key and load_access_key(root)[0] == rotated
+    if sys.platform != "win32":
+        assert path.stat().st_mode & 0o777 == 0o600
+
+
+def test_broken_or_open_access_key_is_refused(tmp_path: Path,
+                                              monkeypatch: pytest.MonkeyPatch) -> None:
+    import platformdirs
+
+    from nyshporka.daemon.app import AccessKeyError, load_access_key
+
+    monkeypatch.setattr(platformdirs, "user_config_dir",
+                        lambda *a, **k: str(tmp_path / "cfg"))
+    _, path = load_access_key(tmp_path)
+    path.write_text("", encoding="ascii")
+    with pytest.raises(AccessKeyError):
+        load_access_key(tmp_path)
+    if sys.platform != "win32":
+        load_access_key(tmp_path, rotate=True)
+        path.chmod(0o644)
+        with pytest.raises(AccessKeyError):
+            load_access_key(tmp_path)
+
+
+def test_a_specific_address_is_bound_together_with_loopback() -> None:
+    """🔴 Конкретний IP не розширюється до всіх інтерфейсів, а петля лишається."""
+    from nyshporka.daemon.app import bind_addresses
+
+    assert bind_addresses(LAN) == ["127.0.0.1", LAN]
+    assert bind_addresses("0.0.0.0") == ["0.0.0.0"]
+    assert bind_addresses("::") == ["0.0.0.0", "::"]
+
+
+def test_wildcard_sockets_open(monkeypatch: pytest.MonkeyPatch) -> None:
+    import socket
+
+    from nyshporka.daemon.app import open_sockets
+
+    socks = open_sockets("0.0.0.0", 0)
+    try:
+        assert len(socks) == 1
+    finally:
+        for s in socks:
+            s.close()
+    if not socket.has_ipv6:
+        return
+    monkeypatch.setattr("nyshporka.daemon.app.bind_addresses", lambda host: ["::"])
+    try:
+        socks = open_sockets("::", 0)
+    except OSError:
+        pytest.skip("IPv6 на цій машині недоступний")
+    try:
+        assert socks[0].getsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY) == 1
+    finally:
+        for s in socks:
+            s.close()
+
+
+def test_network_host_takes_only_an_ip() -> None:
+    from nyshporka.daemon.app import network_host
+
+    assert network_host(" [::] ") == "::"
+    for bad in ("mybox.local", "fe80::1", ""):
+        with pytest.raises(ValueError):
+            network_host(bad)
+
+
+def test_serve_does_not_open_the_network_without_confirmation() -> None:
+    """Програмний виклик теж не відкриває мережу мовчки."""
+    from nyshporka.daemon.app import serve
+
+    with pytest.raises(ValueError):
+        serve(host=LAN)
+
+
+# ── `nysh serve --host`: застереження й підтвердження ────────────────────────
+@pytest.fixture
+def serve_cli(ws: Workspace, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """CLI без справжнього сервера: що саме він передав би в `serve`."""
+    import platformdirs
+
+    import nyshporka.cli as C
+    import nyshporka.core.workspace as W
+    import nyshporka.daemon as D
+
+    calls: list[dict[str, object]] = []
+    monkeypatch.setattr(D, "serve", lambda **kw: calls.append(kw))
+    monkeypatch.setattr(W, "workspace", lambda: ws)
+    monkeypatch.setattr(platformdirs, "user_config_dir",
+                        lambda *a, **k: str(tmp_path / "cfg"))
+    tty = {"in": False, "out": False}
+    monkeypatch.setattr(C, "_stdin_is_tty", lambda: tty["in"])
+    monkeypatch.setattr(C, "_stdout_is_tty", lambda: tty["out"])
+
+    from typer.testing import CliRunner
+
+    def run(args: list[str], stdin: str = "") -> object:
+        return CliRunner().invoke(C.app, ["serve", "--no-browser", *args], input=stdin)
+
+    return run, calls, tty
+
+
+def test_serve_default_asks_nothing(serve_cli) -> None:
+    run, calls, _ = serve_cli
+    got = run([])
+    assert got.exit_code == 0, got.output
+    assert calls == [{"host": "127.0.0.1", "port": 8788, "open_browser": False}]
+
+
+def test_serve_network_without_terminal_or_flags_is_refused(serve_cli) -> None:
+    run, calls, _ = serve_cli
+    got = run(["--host", LAN])
+    assert got.exit_code == 1 and not calls
+    assert "--confirm-host" in got.output
+    assert "відкритим текстом" in got.output, "застереження не надруковано"
+
+
+def test_serve_network_needs_the_address_typed(serve_cli) -> None:
+    run, calls, tty = serve_cli
+    tty["in"] = True
+    assert run(["--host", LAN], stdin="192.168.1.51\n").exit_code == 1 and not calls
+    got = run(["--host", LAN], stdin=f"{LAN}\n")
+    assert got.exit_code == 0, got.output
+    assert calls[0]["host"] == LAN and calls[0]["confirmed"] is True
+
+
+def test_serve_all_interfaces_needs_the_phrase_too(serve_cli) -> None:
+    from nyshporka.daemon.app import PUBLIC_PHRASE
+
+    run, calls, tty = serve_cli
+    tty["in"] = True
+    assert run(["--host", "0.0.0.0"], stdin="0.0.0.0\n\n").exit_code == 1 and not calls
+    got = run(["--host", "0.0.0.0"], stdin=f"0.0.0.0\n{PUBLIC_PHRASE}\n")
+    assert got.exit_code == 0, got.output
+    assert calls[0]["host"] == "0.0.0.0"
+
+
+def test_serve_flags_confirm_without_terminal_and_hide_the_code(serve_cli) -> None:
+    run, calls, _ = serve_cli
+    assert run(["--host", LAN, "--confirm-host", "192.168.1.51"]).exit_code == 1
+    assert run(["--host", "0.0.0.0", "--confirm-host", "0.0.0.0"]).exit_code == 1
+    assert not calls
+    got = run(["--host", LAN, "--confirm-host", LAN])
+    assert got.exit_code == 0, got.output
+    assert calls[0]["show_secret"] is False, "код сполучення пішов би в журнал служби"
+
+
+def test_serve_tls_flags_are_checked_before_anything(serve_cli, tmp_path: Path) -> None:
+    run, calls, _ = serve_cli
+    cert = tmp_path / "cert.pem"
+    cert.write_text("не сертифікат", encoding="utf-8")
+    assert run(["--host", LAN, "--confirm-host", LAN, "--tls-cert", str(cert)]).exit_code == 1
+    got = run(["--host", LAN, "--confirm-host", LAN,
+               "--tls-cert", str(cert), "--tls-key", str(cert)])
+    assert got.exit_code == 1 and "сертифікат" in got.output
+    assert not calls
+
+
+def test_serve_network_flags_need_a_network_host(serve_cli) -> None:
+    run, calls, _ = serve_cli
+    assert run(["--rotate-key"]).exit_code == 1
+    assert run(["--confirm-host", "127.0.0.1"]).exit_code == 1
+    assert not calls
 
 
 def test_the_page_token_never_leaves_under_another_name(client: TestClient) -> None:
