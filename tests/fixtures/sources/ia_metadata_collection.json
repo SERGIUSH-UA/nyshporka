@@ -1,0 +1,110 @@
+{
+ "created": 1789475170,
+ "d1": "ia600103.us.archive.org",
+ "d2": "ia800103.us.archive.org",
+ "dir": "/23/items/svoboda_newspaper",
+ "files": [
+  {
+   "name": "__ia_thumb.jpg",
+   "source": "original",
+   "mtime": "1766109242",
+   "size": "21666",
+   "md5": "b7a740fdf11dc168d0550df3344c979e",
+   "crc32": "c10c61c3",
+   "sha1": "05ff5c16bf070158a4651e42f8dcb303f8f39745",
+   "format": "JPEG Thumb",
+   "rotation": "0"
+  },
+  {
+   "name": "history/files/logo_header.jpg.~1~",
+   "source": "original",
+   "format": "JPEG",
+   "mtime": "1411545934",
+   "size": "65709",
+   "md5": "285d83fa0f8d81aa4bf6799655439792",
+   "crc32": "0ccec14d",
+   "sha1": "b72499293f4219332af0b1fecc6c448279fb04d9",
+   "rotation": "0",
+   "old_version": "true"
+  },
+  {
+   "name": "svoboda_newspaper_archive.torrent",
+   "source": "metadata",
+   "btih": "6ec7c14ee7ae5eeff3ced590b641e645eeae3647",
+   "mtime": "1766109242",
+   "size": "2066",
+   "md5": "2dda33f13db93db88b16831a31e7bdcf",
+   "crc32": "bd325bdc",
+   "sha1": "584c2fc6b03bc218710bab8d9fae223379e336ab",
+   "format": "Archive BitTorrent"
+  },
+  {
+   "name": "svoboda_newspaper_files.xml",
+   "source": "original",
+   "format": "Metadata",
+   "md5": "f2c044fc60ad71b1c07fee173f76351c",
+   "summation": "md5"
+  },
+  {
+   "name": "svoboda_newspaper_itemimage.jpg",
+   "source": "original",
+   "mtime": "1602708974",
+   "size": "65709",
+   "md5": "285d83fa0f8d81aa4bf6799655439792",
+   "crc32": "0ccec14d",
+   "sha1": "b72499293f4219332af0b1fecc6c448279fb04d9",
+   "format": "Item Image",
+   "rotation": "0"
+  },
+  {
+   "name": "svoboda_newspaper_meta.sqlite",
+   "source": "original",
+   "format": "Metadata",
+   "mtime": "1602709108",
+   "size": "10240",
+   "md5": "1e2b6e6adc1e01e75bbdc3e2e5cef939",
+   "crc32": "349c7d0b",
+   "sha1": "5168184d966f641f62b1c71a92b8b197841c935a"
+  },
+  {
+   "name": "svoboda_newspaper_meta.xml",
+   "source": "original",
+   "format": "Metadata",
+   "mtime": "1766109242",
+   "size": "894",
+   "md5": "a57e4664ca00db89d3bd2e4ae6359b13",
+   "crc32": "99fa9d22",
+   "sha1": "7d493deedee6a83072c1550f56e8c3d5f824ff34"
+  }
+ ],
+ "files_count": 7,
+ "is_collection": true,
+ "item_last_updated": 1766109243,
+ "item_size": 166284,
+ "metadata": {
+  "identifier": "svoboda_newspaper",
+  "collection": [
+   "newsstand",
+   "newspapers"
+  ],
+  "description": "Freedom was founded in 1893 in the United States. It is the oldest in the world Ukrainian-language newspaper which is published continuously.",
+  "hidden": "true",
+  "mediatype": "collection",
+  "num-recent-reviews": "5",
+  "num-top-dl": "5",
+  "title": "Svoboda (\"Freedom\") Newspaper",
+  "publicdate": "2014-02-21 00:28:00",
+  "addeddate": "2014-02-21 00:28:00",
+  "creator": "Svoboda",
+  "subject": "newspaper;Svoboda;Ukranian",
+  "backup_location": "ia905804_20",
+  "show_search_by_year": "true",
+  "collection_added": "newspapers"
+ },
+ "server": "ia800103.us.archive.org",
+ "uniq": 1499010047,
+ "workable_servers": [
+  "ia800103.us.archive.org",
+  "ia600103.us.archive.org"
+ ]
+}

@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<book>
+  <bookData>
+    <dpi>600</dpi>
+    <bookId>Svoboda-1910-01</bookId>
+    <leafCount>8</leafCount>
+  </bookData>
+  <pageData>
+    <page leafNum="0">
+      <pageType>Normal</pageType>
+      <addToAccessFormats>true</addToAccessFormats>
+      <origWidth>6420</origWidth>
+      <origHeight>9300</origHeight>
+      <cropBox>
+        <x>0</x>
+        <y>0</y>
+        <w>6420</w>
+        <h>9300</h>
+      </cropBox>
+      <bookStart>true</bookStart>
+    </page>
+    <page leafNum="1">
+      <pageType>Normal</pageType>
+      <addToAccessFormats>true</addToAccessFormats>
+      <origWidth>6420</origWidth>
+      <origHeight>9300</origHeight>
+      <cropBox>
+        <x>0</x>
+        <y>0</y>
+        <w>6420</w>
+        <h>9300</h>
+      </cropBox>
+    </page>
+    <page leafNum="2">
+      <pageType>Normal</pageType>
+      <addToAccessFormats>true</addToAccessFormats>
+      <origWidth>6420</origWidth>
+      <origHeight>9300</origHeight>
+      <cropBox>
+        <x>0</x>
+        <y>0</y>
+        <w>6420</w>
+        <h>9300</h>
+      </cropBox>
+    </page>
+    <page leafNum="3">
+      <pageType>Normal</pageType>
+      <addToAccessFormats>true</addToAccessFormats>
+      <origWidth>6420</origWidth>
+      <origHeight>9300</origHeight>
+      <cropBox>
+        <x>0</x>
+        <y>0</y>
+        <w>6420</w>
+        <h>9300</h>
+      </cropBox>
+    </page>
+    <page leafNum="4">
+      <pageType>Normal</pageType>
+      <addToAccessFormats>true</addToAccessFormats>
+      <origWidth>6420</origWidth>
+      <origHeight>9300</origHeight>
+      <cropBox>
+        <x>0</x>
+        <y>0</y>
+        <w>6420</w>
+        <h>9300</h>
+      </cropBox>
+    </page>
+    <page leafNum="5">
+      <pageType>Normal</pageType>
+      <addToAccessFormats>true</addToAccessFormats>
+      <origWidth>6420</origWidth>
+      <origHeight>9300</origHeight>
+      <cropBox>
+        <x>0</x>
+        <y>0</y>
+        <w>6420</w>
+        <h>9300</h>
+      </cropBox>
+    </page>
+    <page leafNum="6">
+      <pageType>Normal</pageType>
+      <addToAccessFormats>true</addToAccessFormats>
+      <origWidth>6420</origWidth>
+      <origHeight>9300</origHeight>
+      <cropBox>
+        <x>0</x>
+        <y>0</y>
+        <w>6420</w>
+        <h>9300</h>
+      </cropBox>
+    </page>
+    <page leafNum="7">
+      <pageType>Normal</pageType>
+      <addToAccessFormats>true</addToAccessFormats>
+      <origWidth>6420</origWidth>
+      <origHeight>9300</origHeight>
+      <cropBox>
+        <x>0</x>
+        <y>0</y>
+        <w>6420</w>
+        <h>9300</h>
+      </cropBox>
+    </page>
+  </pageData>
+</book>
