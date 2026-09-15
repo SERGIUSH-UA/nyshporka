@@ -42,7 +42,11 @@ def cmd_list(as_json: bool = typer.Option(False, "--json", help="машинни�
         typer.echo(_json.dumps(
             [{"pack_id": p.pack_id, "domain": p.domain, "taken": p.taken,
               "rows": p.rows, "size": p.size, "state": "ok" if p.ok else "broken",
-              "problem": p.problem, "path": str(p.path)} for p in packs],
+              "problem": p.problem, "path": str(p.path),
+              # 🔴 Межі пака — частина відповіді «що встановлено»: без них нуль
+              # газетира чи бази церков поза їхнім регіоном читається звичайним.
+              "note": p.note, "scope": store.scope_of(p) if p.ok else []}
+             for p in packs],
             ensure_ascii=False, indent=1))
         return
     if not packs:

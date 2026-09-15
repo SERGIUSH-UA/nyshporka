@@ -18,7 +18,15 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
-from nyshporka.sources.base import FetchResult, Hit, Manifest, Node, SourceError
+from nyshporka.sources.base import (
+    FetchResult,
+    Hit,
+    Manifest,
+    Node,
+    SourceAbout,
+    SourceError,
+    SourceScope,
+)
 from nyshporka.sources.http import Fetcher, HttpError, app_ua
 
 if TYPE_CHECKING:
@@ -33,6 +41,17 @@ class CommonsSource:
     id = "commons"
     label = "Wikimedia Commons"
     caps = frozenset({"manifest", "fetch"})
+    about = SourceAbout(
+        answers="повні томи й описи фондів, викладені волонтерами",
+        gives="файл справи чи опису: кількість сторінок і завантаження",
+        not_gives="пошуку — Commons знає назви файлів, а не заголовки справ",
+        where_class="Commons / Вікіджерела",
+        scope=SourceScope(note="лише фонди, які хтось виклав; адреси дає збирач "
+                               "реєстру (`nysh registry collect commons`)"),
+        match_on=(), match_how=None,
+        zero_means="не шукає; що існує у фонді — реєстр опису",
+        pitfalls=("файл буває витягом однієї парафії, а не справою",
+                  "дзеркала обрізають великі справи: 25 МБ проти 771 МБ на Commons"))
 
     def __init__(self, workspace: Path | None = None, *,
                  fetcher: Fetcher | None = None) -> None:

@@ -181,6 +181,49 @@ def coverage(domain: str) -> list[Coverage]:
             for p in installed(domain) if p.ok]
 
 
+def scope_of(pack: InstalledPack) -> list[dict[str, Any]]:
+    """Межі пака по вимірах — таблиця `coverage_scope`, яку пише збирач.
+
+    🔴 Таблиця є від першої схеми, і не читав її ніхто: пак церков ~1772 знав,
+    які воєводства накриває, а запит про село поза ними все одно отримував
+    звичайний нуль. Нечитабельний пак дає порожньо — «межі невідомі», а не
+    «меж немає».
+    """
+    try:
+        con = sqlite3.connect(f"file:{pack.path}?mode=ro", uri=True)
+    except sqlite3.Error:
+        return []
+    try:
+        return [{"dim": str(d), "value": "" if v is None else str(v), "n": n,
+                 "denom": den, "note": str(nt or "")}
+                for d, v, n, den, nt in con.execute(
+                    "SELECT dim, value, n, denom, note FROM coverage_scope")]
+    except sqlite3.Error:
+        return []
+    finally:
+        con.close()
+
+
+def scope_values(domain: str, dim: str) -> list[str] | None:
+    """Значення виміру по всіх цілих паках домену, у порядку збирача.
+
+    `None` — жоден пак цього виміру не декларує. Тоді порівнювати ні з чим, і
+    назвати запит «поза покриттям» не можна: покриття не назване.
+    """
+    out: list[str] = []
+    seen = False
+    for p in installed(domain):
+        if not p.ok:
+            continue
+        for row in scope_of(p):
+            if row["dim"] != dim:
+                continue
+            seen = True
+            if row["value"] and row["value"] not in out:
+                out.append(row["value"])
+    return out if seen else None
+
+
 def require(domain: str) -> list[InstalledPack]:
     """Паки домену — або відмова з поясненням, що поставити.
 

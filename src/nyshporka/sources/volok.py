@@ -42,7 +42,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from nyshporka.sources.base import Hit, SourceError
+from nyshporka.sources.base import Hit, SourceAbout, SourceError, SourceScope
 from nyshporka.utils.atomic import atomic_write_bytes
 from nyshporka.utils.translit import normalize_for_matching
 
@@ -203,6 +203,23 @@ class VolokSource:
     id = "volok"
     label = "Фотоархів О. Волока (альбоми Flickr)"
     caps = frozenset({"search"})
+    about = SourceAbout(
+        answers="чи знімав хтось цю справу чи книгу — і де подивитись кадри",
+        gives="альбом Flickr: шифра, архів як його пише автор, роки, адреса",
+        not_gives="самих кадрів (їх дивляться на Flickr); топонімів, що стоять на "
+                  "кадрах, а не в назві альбому",
+        where_class="фотоархів дослідника",
+        scope=SourceScope(note="архіви й бібліотеки, де знімав автор: РДІА, ДАДО "
+                               "(ДАДнО), ДАКО (Курськ), ГА РФ, Бундесархів; друковане"),
+        match_on=("title",), match_how="normalized",
+        zero_means="у назвах альбомів списку на дату зрізу немає всіх слів запиту — "
+                   "не «цього ніхто не знімав»",
+        pitfalls=("підрядок без відмінків: «Мелітопол» — 15 альбомів, "
+                  "«Мелітопольський» — 1 (список від 12.09.2026)",
+                  "короткий корінь ловить чуже: «казк» дає народні казки, «Метрич» — "
+                  "«Геометрический план» (15.09.2026)",
+                  "«ДАДО (ДАДнО)» у назвах — Дніпропетровський архів, не Донецький "
+                  "ДАДоО; `repo` у знахідці порожній"))
 
     LIST_REL = Path("data") / "raw" / "volok" / "_list"
 

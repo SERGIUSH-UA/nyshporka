@@ -541,17 +541,35 @@ def _catalog_basis(src: Any) -> dict[str, Any]:
 
 @op("sources.list", summary="Звідки можна брати матеріал", section="material")
 def sources_list(_: NoArgs) -> Envelope:
+    from nyshporka.sources.base import about_of
+
     reg = _registry()
-    rows: list[dict[str, Any]] = [
-        {"id": s.id, "label": s.label, "caps": sorted(s.caps),
-         "catalog": _catalog_basis(s)} for s in reg.all()]
+    rows: list[dict[str, Any]] = []
+    undeclared: list[str] = []
+    for s in reg.all():
+        about = about_of(s)
+        if about is None:
+            undeclared.append(s.id)
+        rows.append({"id": s.id, "label": s.label, "caps": sorted(s.caps),
+                     "catalog": _catalog_basis(s),
+                     # 🔴 Про що джерело, де його межі й що доводить його нуль.
+                     # Доти маршрут складався з таблиці класів у тексті, і
+                     # джерело без картки випадало з нього мовчки.
+                     "about": about.as_dict() if about else None})
     env = ok({"sources": rows, "shown": len(rows),
               # 🔴 Скільки джерел уміють шукати й скільки з них мають на чому.
               # Друге число і є знаменником кожного нуля на цьому екрані.
               "searchable": sum(1 for r in rows if r["catalog"]["searchable"]),
               "with_catalog": sum(1 for r in rows
                                   if r["catalog"]["searchable"]
-                                  and r["catalog"]["kind"] != "none")})
+                                  and r["catalog"]["kind"] != "none"),
+              # Джерела без самоопису не ховаються, а називаються: у плані вони
+              # стоять рядком «без опису — перевірити руками».
+              "undeclared": undeclared})
+    if undeclared:
+        env.warn("source_undeclared",
+                 "джерела без самоопису — межі й сенс нуля невідомі, перевірити "
+                 "руками: " + ", ".join(undeclared))
     # ⚠ Джерело без обходу тут більше не попереджає. Це не втрата: сам перелік
     # і є відповіддю на питання «де шукали» — у рядку такого джерела стоїть і
     # «шукати нема на чому», і команда, якою це лікується, поіменно. Жовтий
@@ -758,7 +776,8 @@ def _address_answer(a: CatalogSearchArgs, addr: Any) -> Envelope | None:
                      "years": h.years, "place": h.place, "shifra": h.shifra,
                      "frames": h.frames, "acquirable": h.acquirable,
                      "note": h.note, "url": h.url,
-                     "repo": h.repo, "archive": h.archive, "fond": h.fond}
+                     "repo": h.repo, "archive": h.archive, "fond": h.fond,
+                     "page": h.page, "crop_url": h.crop_url}
                     for h in got)
 
     if not hits:
@@ -811,7 +830,7 @@ def catalog_search(a: CatalogSearchArgs) -> Envelope:
     пошуку закрився б висновком, якого ніхто не робив.
     """
     from nyshporka.library import parse_address
-    from nyshporka.sources.base import SourceError, supports
+    from nyshporka.sources.base import SourceError, about_of, supports
 
     reg = _registry()
     picked = [reg.get(a.source)] if a.source else reg.with_cap("search")
@@ -833,6 +852,8 @@ def catalog_search(a: CatalogSearchArgs) -> Envelope:
     truncated: list[dict[str, Any]] = []
     #: На чому саме шукали — вкладений зріз чи зібраний обходом, і від якої дати.
     basis: list[dict[str, Any]] = []
+    #: Хто дав нуль і що саме цей нуль доводить.
+    zeros: list[dict[str, str]] = []
     for src in picked:
         if src is None or not supports(src, "search"):
             continue
@@ -856,29 +877,49 @@ def catalog_search(a: CatalogSearchArgs) -> Envelope:
         # старіє: «не знайшлось» у ньому означає «не було на дату зрізу», а не
         # «не існує», і без дати ці два висновки не відрізнити. Саме тому дата
         # їде в `basis` — його показують до пошуку, коли на нього ще дивляться.
+        entry: dict[str, Any] = {"source": src.id, "kind": "не задекларовано",
+                                 "taken": "", "rows": None, "regions": None}
         note = getattr(src, "catalog_source", None)
         if callable(note):
             kind, meta = note()
             if kind == "bundled":
-                basis.append({"source": src.id, "kind": "вкладений зріз",
-                              "taken": str(meta.get("taken") or ""),
-                              "rows": meta.get("rows"),
-                              "regions": meta.get("regions") or None})
+                entry.update(kind="вкладений зріз", taken=str(meta.get("taken") or ""),
+                             rows=meta.get("rows"), regions=meta.get("regions") or None)
             elif kind == "workspace":
-                basis.append({"source": src.id, "kind": "зібраний на місці"})
+                # 🔴 Дата, обсяг і регіони власного обходу — теж знаменник. Гілка
+                # писала самий лише вид, і дзеркало плівок із кешованими деревами
+                # губило рівно той перелік регіонів, яким обмежено його нуль.
+                entry.update(kind="зібраний на місці", taken=str(meta.get("taken") or ""),
+                             rows=meta.get("rows"), regions=meta.get("regions") or None)
             elif kind == "live":
-                basis.append({"source": src.id, "kind": "живий запит",
-                              "taken": "", "rows": None, "regions": None})
+                entry.update(kind="живий запит")
+            else:
+                # Каталогу немає, а джерело все одно шукало: ARCHIUM без зрізу йде
+                # живим пошуком сайту. Мовчання про це ховало, на чому стоїть нуль.
+                entry.update(kind="без каталогу — живий запит")
+        about = about_of(src)
+        # 🔴 Тип нуля — поруч із його знаменником. «Шукали в назвах альбомів» і
+        # «шукали в тексті книг» дають однаковий 0, а доводять різне.
+        entry.update(match=list(about.match_on) if about else None,
+                     match_how=about.match_how if about else None,
+                     zero_means=about.zero_means if about else None)
+        basis.append(entry)
+        if not found:
+            zeros.append({"source": src.id,
+                          "means": about.zero_means if about
+                          else "джерело не задекларувало, що доводить його нуль"})
         hits.extend({"source": h.source, "ref": h.ref, "title": h.title,
                      "years": h.years, "place": h.place, "shifra": h.shifra,
                      "frames": h.frames, "acquirable": h.acquirable,
                      "note": h.note, "url": h.url,
-                     "repo": h.repo, "archive": h.archive, "fond": h.fond}
+                     "repo": h.repo, "archive": h.archive, "fond": h.fond,
+                     "page": h.page, "crop_url": h.crop_url}
                     for h in found)
     shown = hits[:a.limit]
     env = ok({"q": a.q, "hits": shown, "fonds": _by_fond(shown),
               "coverage": {"searched": searched, "unavailable": unavailable,
-                           "basis": basis, "truncated": truncated}})
+                           "basis": basis, "truncated": truncated,
+                           "zeros": zeros}})
     if addr is not None:
         # Запит читається як шифра, але такої справи не знайшлось ні в
         # бібліотеці, ні в реєстрі опису, ні в каталогах, які вміють по шифрі.
@@ -955,14 +996,17 @@ def _warn_once(env: Envelope, *, hits: list[dict[str, object]],
     кожного. Попередження, яке горить завжди, перестають читати; разом із ним
     перестають читати й те єдине, що означає зіпсований нуль.
 
-    Лишається рівно три приводи, і кожен змінює висновок, а не оформлення:
+    Лишається рівно чотири приводи, і кожен змінює висновок, а не оформлення:
 
     - шукати не було де взагалі — нуль не означає нічого;
     - видача вперлась у стелю джерела — перелік неповний, і негатив по ньому
       неможливий;
     - джерело відпало, і при цьому не знайшлось нічого — нуль без частини
       знаменника. Коли знахідки є, той самий факт лишається в `coverage`:
-      він більше не міняє відповіді, тож не варте жовтого рядка.
+      він більше не міняє відповіді, тож не варте жовтого рядка;
+    - повний нуль — і тоді текст називає, що доводить нуль кожного джерела.
+      «Немає в назвах альбомів на дату списку» і «немає на перших сторінках
+      PDF» у лічильнику однакові, а у звіті мусять звучати по-різному.
     """
     parts: list[str] = []
     code = ""
@@ -978,6 +1022,13 @@ def _warn_once(env: Envelope, *, hits: list[dict[str, object]],
         code = code or "partial_denominator"
         where = "; ".join(f"{u['source']}: {u['why']}" for u in unavailable)
         parts.append(f"нуль неповний — не шукали в {where}")
+    if searched and not hits:
+        data = env.data if isinstance(env.data, dict) else {}
+        zeros = (data.get("coverage") or {}).get("zeros") or []
+        code = code or "zero_with_denominator"
+        means = "; ".join(f"{z['source']}: {z['means']}" for z in zeros)
+        parts.append(f"нуль у {len(searched)} джерелах, і кожен доводить своє — "
+                     f"{means}")
     if parts:
         env.warn(code, " · ".join(parts))
 

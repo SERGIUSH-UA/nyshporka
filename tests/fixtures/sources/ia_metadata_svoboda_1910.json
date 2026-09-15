@@ -1,0 +1,204 @@
+{
+ "alternate_locations": {
+  "servers": [
+   {
+    "server": "dn760106.eu.archive.org",
+    "dir": "/0/items/Svoboda-1910-01"
+   },
+   {
+    "server": "dn790006.ca.archive.org",
+    "dir": "/0/items/Svoboda-1910-01"
+   }
+  ],
+  "workable": [
+   {
+    "server": "dn760106.eu.archive.org",
+    "dir": "/0/items/Svoboda-1910-01"
+   },
+   {
+    "server": "dn790006.ca.archive.org",
+    "dir": "/0/items/Svoboda-1910-01"
+   }
+  ]
+ },
+ "created": 1789481779,
+ "d1": "ia600608.us.archive.org",
+ "d2": "ia800608.us.archive.org",
+ "dir": "/33/items/Svoboda-1910-01",
+ "files": [
+  {
+   "name": "Svoboda-1910-01.djvu",
+   "source": "derivative",
+   "format": "DjVu",
+   "original": "Svoboda-1910-01_djvu.xml",
+   "mtime": "1391474057",
+   "size": "3917467",
+   "md5": "003b6d3004b3481c3490f4681655ff48",
+   "crc32": "ebbd6805",
+   "sha1": "601f8df593d93f40dafeccbe259a09493aee6a09"
+  },
+  {
+   "name": "Svoboda-1910-01.gif",
+   "source": "derivative",
+   "format": "Animated GIF",
+   "original": "Svoboda-1910-01_jp2.zip",
+   "mtime": "1391472895",
+   "size": "117938",
+   "md5": "bf615c95ba68ebe930e514a2ed50056c",
+   "crc32": "58d879f2",
+   "sha1": "ac6ce81d632b3ca62349c49cd2e6ea93cb73a833"
+  },
+  {
+   "name": "Svoboda-1910-01.pdf",
+   "source": "original",
+   "format": "Text PDF",
+   "mtime": "1391471791",
+   "size": "4528919",
+   "md5": "fbb8ea42bf9b070faecc25b848de9126",
+   "crc32": "d0f490e6",
+   "sha1": "3736ac1a3d6ac734d43dfd2f21aba54855b5c07f"
+  },
+  {
+   "name": "Svoboda-1910-01_abbyy.gz",
+   "source": "derivative",
+   "format": "Abbyy GZ",
+   "original": "Svoboda-1910-01_jp2.zip",
+   "mtime": "1391473687",
+   "size": "1671475",
+   "md5": "7033bfbb9d255b17b0be046fa16c3995",
+   "crc32": "d82e7281",
+   "sha1": "77520cde21b3fea100be945de425ca46e1047cb9"
+  },
+  {
+   "name": "Svoboda-1910-01_archive.torrent",
+   "source": "metadata",
+   "btih": "5075431726286b521f99880c677d7166f3af284b",
+   "mtime": "1768083244",
+   "size": "5461",
+   "md5": "de7fabdd25232df620558493bef88d78",
+   "crc32": "7e23be5f",
+   "sha1": "2b2165238189c56d617486e5921d45b61c73ee61",
+   "format": "Archive BitTorrent"
+  },
+  {
+   "name": "Svoboda-1910-01_djvu.txt",
+   "source": "derivative",
+   "format": "DjVuTXT",
+   "original": "Svoboda-1910-01.djvu",
+   "mtime": "1391474094",
+   "size": "171583",
+   "md5": "9291301e007b2f4b6edd5909742325e5",
+   "crc32": "9c2a6bd8",
+   "sha1": "86eb42366ce39851b7bcdaca205a61968b5c5a17"
+  },
+  {
+   "name": "Svoboda-1910-01_djvu.xml",
+   "source": "derivative",
+   "format": "Djvu XML",
+   "original": "Svoboda-1910-01_abbyy.gz",
+   "mtime": "1391473732",
+   "size": "1036017",
+   "md5": "f9975278f1435dd61fc284e0c3037dde",
+   "crc32": "a4aa98ab",
+   "sha1": "bb96183bb68686d6bc175545a31d0d83ce205a9b"
+  },
+  {
+   "name": "Svoboda-1910-01_files.xml",
+   "source": "original",
+   "format": "Metadata",
+   "md5": "654bc81c337208e894466b178cc3aeae",
+   "summation": "md5"
+  },
+  {
+   "name": "Svoboda-1910-01_jp2.zip",
+   "source": "derivative",
+   "format": "Single Page Processed JP2 ZIP",
+   "original": "Svoboda-1910-01.pdf",
+   "mtime": "1391472822",
+   "size": "50512334",
+   "md5": "f46f7e62805549dd42c1d9bc09aeb61d",
+   "crc32": "b83d0a7e",
+   "sha1": "84a78207a238f9558df7cb0722732e610f8cd783",
+   "filecount": "8"
+  },
+  {
+   "name": "Svoboda-1910-01_meta.sqlite",
+   "source": "original",
+   "format": "Metadata",
+   "mtime": "1464918323",
+   "size": "6144",
+   "md5": "557a90e3c9f457e80fe31b89fe5118d4",
+   "crc32": "4e912329",
+   "sha1": "f9d0558cafddb265ec7e7f6f7fdae7dcfe0327be"
+  },
+  {
+   "name": "Svoboda-1910-01_meta.xml",
+   "source": "original",
+   "format": "Metadata",
+   "mtime": "1768083242",
+   "size": "1009",
+   "md5": "35491c0a0d6d00ead2602fc492d309ae",
+   "crc32": "512e6a21",
+   "sha1": "06a2ede62949043d52a0f2bf0fcea94a2eeb7a5d"
+  },
+  {
+   "name": "Svoboda-1910-01_scandata.xml",
+   "source": "derivative",
+   "format": "Scandata",
+   "original": "Svoboda-1910-01_djvu.xml",
+   "mtime": "1391474062",
+   "size": "2611",
+   "md5": "0ac612897ee463911c2b2be7651590e3",
+   "crc32": "03e74d7f",
+   "sha1": "7acf45b29a829da95c6d0b0da214bc11fc02241c"
+  },
+  {
+   "name": "__ia_thumb.jpg",
+   "source": "original",
+   "mtime": "1768083244",
+   "size": "25948",
+   "md5": "d8f2d3f2a480de302279c6f06b2e12ed",
+   "crc32": "ce59caf3",
+   "sha1": "8f88979d2ebb71ac666192a3f145b12f5177fc44",
+   "format": "Item Tile",
+   "rotation": "0"
+  }
+ ],
+ "files_count": 13,
+ "item_last_updated": 1768083244,
+ "item_size": 61996906,
+ "metadata": {
+  "identifier": "Svoboda-1910-01",
+  "creator": "Ukrainian National Association, Inc.",
+  "date": "1910",
+  "language": "ukrainian",
+  "mediatype": "texts",
+  "subject": "Svoboda Newspaper;",
+  "title": "Svoboda-1910-01",
+  "year": "1910",
+  "collection": [
+   "svoboda_newspaper",
+   "newspapers",
+   "newsstand"
+  ],
+  "publicdate": "2014-02-03 23:56:31",
+  "addeddate": "2014-02-03 23:56:31",
+  "identifier-access": "http://archive.org/details/Svoboda-1910-01",
+  "identifier-ark": "ark:/13960/t4km1sj1x",
+  "imagecount": "8",
+  "ppi": "600",
+  "ocr": "ABBYY FineReader 9.0",
+  "repub_state": "4",
+  "backup_location": "ia905803_28",
+  "collection_added": [
+   "newsstand",
+   "additional_collections"
+  ]
+ },
+ "server": "ia600608.us.archive.org",
+ "uniq": 1948356635,
+ "workable_servers": [
+  "ia600608.us.archive.org",
+  "ia800608.us.archive.org"
+ ]
+}

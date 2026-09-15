@@ -32,7 +32,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
-from nyshporka.sources.base import Hit, SourceError
+from nyshporka.sources.base import Hit, SourceAbout, SourceError, SourceScope
 from nyshporka.sources.http import Fetcher, HttpError, app_ua, offline
 
 HOST = "https://ridni.org"
@@ -178,6 +178,21 @@ class RidniSource:
     id = "ridni"
     label = "ridni.org (каталог книг за селом)"
     caps = frozenset({"search"})
+    about = SourceAbout(
+        answers="які книги мого села збереглися, за які роки і де копія",
+        gives="метричні, сповідні й клірові книги з роками, церквою, приписними "
+              "селами, шифрою й адресою копії",
+        not_gives="опису фонду цілком; світських фондів; справ без прив'язки до села",
+        where_class="каталог за селом",
+        scope=SourceScope(genres=("метричні книги", "сповідні розписи",
+                                  "клірові відомості"),
+                          note="книги за селом (ЦДІАК та інші)"),
+        match_on=("settlement",), match_how="server",
+        zero_means="каталог зараз не знає книг під цією назвою села; однойменні "
+                   "села всієї країни злипаються, доки не звужено «<село>, <повіт>»",
+        pitfalls=("звуження на сервері немає — відсів за повітом робить пакет",
+                  "у видачі буває книга чужої парафії, до якої село приписане",
+                  "поле копії відстає від архіву — порожнє не означає «немає онлайн»"))
 
     def __init__(self, workspace: Path | None = None, *,
                  fetcher: Fetcher | None = None) -> None:

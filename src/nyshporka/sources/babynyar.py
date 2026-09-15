@@ -48,7 +48,9 @@ from nyshporka.sources.base import (
     Hit,
     Manifest,
     Node,
+    SourceAbout,
     SourceError,
+    SourceScope,
 )
 from nyshporka.sources.cfclient import CfClient, ShieldError
 from nyshporka.sources.http import DEFAULT_DELAY, Fetcher, HttpError
@@ -205,6 +207,29 @@ class BabynYarSource:
     id = "babynyar"
     label = "Бабин Яр (BYHMC)"
     caps = frozenset({"search", "browse", "manifest", "fetch", "address"})
+
+    @property
+    def about(self) -> SourceAbout:
+        """Самоопис. Властивість: архіви беруться з паку, а його перекриває простір."""
+        from nyshporka.archives import active
+
+        return SourceAbout(
+            answers="книги РАЦС і те, чого архіви онлайн не показують",
+            gives="фонди, описи й справи 21 архіву однією адресою; кадри",
+            not_gives="пошуку на самому майданчику — лише по зібраному каталогу; "
+                      "роздільності понад 2000 px",
+            where_class="онлайн-архів XX ст.",
+            scope=SourceScope(archives=active().repos_in("babynyar") or None,
+                              countries=("UA",),
+                              note="21 архів за обходом 09.09.2026, кодами паку зшито "
+                                   "не всі; найбільша частка — РАЦС 1921-1946"),
+            match_on=("title", "fond_title"), match_how="substring",
+            zero_means="у зібраному каталозі (дата в `basis`) немає підрядка ні в "
+                       "заголовку справи, ні в назві фонду",
+            pitfalls=("без каталогу відмовляє: зібрати `nysh crawl babynyar`",
+                      "Cloudflare ріже прямий доступ — властивість маршруту, а не "
+                      "відсутність справи",
+                      "стеля роздільності 2000 px — для скоропису мало"))
 
     CATALOG_REL = Path("data") / "raw" / "babynyar" / "_crawl" / "cases.tsv"
     STATE_REL = Path("data") / "raw" / "babynyar" / "_crawl" / "state.json"

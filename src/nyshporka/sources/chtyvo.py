@@ -48,7 +48,15 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote, unquote
 
-from nyshporka.sources.base import FetchResult, Hit, Manifest, Node, SourceError
+from nyshporka.sources.base import (
+    FetchResult,
+    Hit,
+    Manifest,
+    Node,
+    SourceAbout,
+    SourceError,
+    SourceScope,
+)
 from nyshporka.sources.http import Fetcher, HttpError, app_ua, offline
 
 if TYPE_CHECKING:
@@ -240,6 +248,21 @@ class ChtyvoSource:
     id = "chtyvo"
     label = "Чтиво (архівна копія на shron.org)"
     caps = frozenset({"search", "manifest", "fetch"})
+    about = SourceAbout(
+        answers="де моє село чи прізвище згадане в друкованій літературі",
+        gives="твори, у назві, описі чи на перших сторінках PDF яких є слово; "
+              "завантаження зі звіркою MD5",
+        not_gives="місця слова в книзі — уривка сервер не дає; тексту далі перших "
+                  "100 тис. знаків PDF; DjVu",
+        where_class="текст друкованих книг",
+        scope=SourceScope(archives=(),
+                          note="Чтиво (~79 тис. творів), лише відновлене на shron.org"),
+        match_on=("title", "annotation", "fulltext"), match_how="server",
+        zero_means="немає в назвах, описах і на перших 100 тис. знаків PDF серед "
+                   "відновленого — не «в книзі цього немає»",
+        pitfalls=("DjVu не індексовано — книга без текстового шару виглядає як нуль",
+                  "видача до 100 на сторінку; справжнє число — у примітці знахідки",
+                  "сучасна назва села в старій книзі не трапляється"))
 
     def __init__(self, workspace: Path | None = None, *,
                  fetcher: Fetcher | None = None) -> None:

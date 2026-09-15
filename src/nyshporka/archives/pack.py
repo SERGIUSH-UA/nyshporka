@@ -212,6 +212,15 @@ class ArchivesPack:
         r = self.repositories.get(str(repo or "").upper())
         return r.codes.get(system, ()) if r else ()
 
+    def repos_in(self, system: str) -> tuple[str, ...]:
+        """Наші архіви, що мають код у чужій системі (`babynyar`, `duck`).
+
+        ⚠ Це те, що ЗНАЄ пак, а не те, що накриває система: архів, чий код ще
+        не вписали, сюди не потрапить. Читати як нижню межу покриття.
+        """
+        return tuple(code for code, r in sorted(self.repositories.items())
+                     if r.codes.get(system))
+
     def repo_for_code(self, system: str, code: str) -> str:
         """Зворотне до `codes_for`: як НАШ архів зветься під чужим кодом.
 

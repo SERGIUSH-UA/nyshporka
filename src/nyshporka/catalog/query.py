@@ -32,7 +32,7 @@ from nyshporka.catalog.store import (
 __all__ = ["Answer", "CatalogMissing", "Coverage", "church_card", "churches_near",
            "confusers", "find_churches", "find_places", "link_churches_to_places",
            "locate", "locate_all", "place_card", "places_for_fond", "places_near",
-           "siblings"]
+           "siblings", "uezd_known"]
 
 
 @dataclass
@@ -220,6 +220,29 @@ def find_places(q: str, limit: int = 40, uezd: str = "", fond: str = "",
     finally:
         close_all(packs)
     return Answer(rows=out[:limit], coverage=cov)
+
+
+def uezd_known(uezd: str) -> bool:
+    """Чи є в газетирі хоч одне поселення цього повіту чи губернії.
+
+    🔴 Розрізняє два нулі `geog.find` із фільтром повіту: «села з такою назвою
+    в повіті немає» і «цього повіту газетир не знає взагалі». Другий — межа
+    довідника, і звітувати його як відсутність села означало б закрити напрям,
+    який не перевіряли.
+    """
+    packs = open_packs("geog")
+    try:
+        for _pid, con in packs:
+            try:
+                if con.execute("SELECT 1 FROM places WHERE uezd_gub LIKE ? "
+                               "OR hist_place LIKE ? LIMIT 1",
+                               [f"%{uezd}%", f"%{uezd}%"]).fetchone():
+                    return True
+            except sqlite3.Error:
+                continue
+    finally:
+        close_all(packs)
+    return False
 
 
 def place_card(card: str, repo: str = "CDIAK") -> Answer:

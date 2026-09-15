@@ -54,6 +54,7 @@ def _builtin(workspace: Path | None = None) -> list[Source]:
     from nyshporka.sources.commons import CommonsSource
     from nyshporka.sources.duck import DuckSource
     from nyshporka.sources.fsfilm import FilmMirrorSource
+    from nyshporka.sources.ia import IaSource
     from nyshporka.sources.ridni import RidniSource
     from nyshporka.sources.volok import VolokSource
 
@@ -91,6 +92,10 @@ def _builtin(workspace: Path | None = None) -> list[Source]:
     # пошуку по них Flickr не дає. Шукає по вкладеному списку назв, у мережу не
     # ходить.
     out.append(cast("Source", VolokSource(workspace)))
+    # 🗃 Internet Archive: газети діаспори, єпархіальні відомості, пам'ятні
+    # книжки — і пошук по їхньому ТЕКСТУ з листом і кропом кожного збігу.
+    # Шукає лише точне слово, тож на зірку й OR відмовляє, а не віддає нуль.
+    out.append(IaSource(workspace))
     return out
 
 

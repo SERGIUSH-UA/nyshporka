@@ -49,6 +49,58 @@ def _coverage_of(answer: Any) -> list[CoverageItem]:
                          scope=c.scope) for c in answer.coverage]
 
 
+def _outside(domain: str, dim: str, value: str) -> list[str] | None:
+    """Задекларовані значення виміру, якщо `value` серед них немає; інакше `None`.
+
+    `None` і тоді, коли пак цього виміру не декларує: порівнювати ні з чим, і
+    назвати запит «поза покриттям» означало б вигадати межу.
+    """
+    from nyshporka.catalog.store import scope_values
+
+    if not value:
+        return None
+    declared = scope_values(domain, dim)
+    if declared is None or value in declared:
+        return None
+    return declared
+
+
+#: Скільки фондів збирач газетира кладе в `coverage_scope` (`LIMIT 200`). Коли
+#: їх стільки, перелік обрізаний, і відсутність фонду в ньому нічого не значить.
+_GEOG_FOND_SCOPE_LIMIT = 200
+
+
+def _warn_geog_scope(env: Envelope, a: GeogFindArgs) -> None:
+    """Нуль газетира, що вийшов за межі пака, мусить це назвати.
+
+    🔴 Фільтри звіряються з тим, що пак сам про себе декларує, і лише там, де
+    звірка чесна: розділ — завжди; фонд — лише коли перелік фондів у паку не
+    обрізаний збирачем; повіт — наявністю хоч одного поселення, бо виміру
+    «повіт» у `coverage_scope` немає. Вільна назва села не звіряється: регіону
+    в ній немає.
+    """
+    from nyshporka.catalog.query import uezd_known
+    from nyshporka.catalog.store import scope_values
+
+    outside = _outside("geog", "section", a.section)
+    if outside is not None:
+        env.warn("outside_pack_scope",
+                 f"розділу «{a.section}» у паках газетира немає — є: "
+                 f"{', '.join(outside)}; нуль тут про фільтр, а не про село")
+    if a.fond:
+        fonds = scope_values("geog", "fond")
+        if (fonds is not None and len(fonds) < _GEOG_FOND_SCOPE_LIMIT
+                and a.fond not in fonds):
+            env.warn("outside_pack_scope",
+                     f"фонду {a.fond} у паках газетира немає — нуль тут про фільтр, "
+                     f"а не про село")
+    if a.uezd and not uezd_known(a.uezd):
+        env.warn("outside_pack_scope",
+                 f"повіту чи губернії «{a.uezd}» газетир не знає жодним поселенням — "
+                 f"це межа довідника, а не відповідь про село; шукати в каталогах, "
+                 f"що накривають цей регіон (`nysh find`)")
+
+
 # ── 🗺 газетир: від села до справ по всіх фондах ─────────────────────────────
 #
 # 🔑 Зворотний напрям до реєстру опису, і найчастіше починають саме з нього:
@@ -91,6 +143,7 @@ def geog_find(a: GeogFindArgs) -> Envelope:
         env.warn("nothing_found",
                  "у переглянутих довідниках такого поселення немає — це їхня "
                  "межа, а не відповідь про архів у цілому")
+        _warn_geog_scope(env, a)
     else:
         env.suggest("geog.card",
                     "подивитись усі справи поселення й що з них у нас є")
@@ -1232,11 +1285,26 @@ def church_find(a: ChurchFindArgs) -> Envelope:
     env.covered_by(_coverage_of(ans) + geog_cov)
     for n in notes:
         env.warn("geog_unavailable", n)
+    for dim, value in (("voivodeship", a.voivodeship), ("confession", a.confession)):
+        outside = _outside("churches", dim, value)
+        if outside is not None:
+            env.warn("outside_pack_scope",
+                     f"{dim} «{value}» у паку церков немає — є: {', '.join(outside)}; "
+                     f"нуль тут про фільтр, а не про село")
     if not rows:
+        from nyshporka.catalog.store import scope_values
+
+        # 🔴 Межа пака — у самому нулі. База накриває воєводства Речі
+        # Посполитої ~1772, і села поза ними тут немає за побудовою; без
+        # переліку воєводств такий нуль читався як «церкви не було».
+        voiv = scope_values("churches", "voivodeship")
+        limit_txt = (f" Пак накриває воєводства: {', '.join(voiv)} — села поза ними "
+                     f"тут немає за побудовою." if voiv else "")
         env.warn("nothing_found",
                  "у базі Шади такої назви немає — це межа реєстрів 1772-1782 "
                  "(Кольбук, Socjografia) і фаззі за транслітом, а не відповідь "
-                 "«церкви не було»: спробуй польське написання або варіант назви")
+                 "«церкви не було»: спробуй польське написання або варіант назви."
+                 + limit_txt)
     elif len(rows) > 1:
         env.warn("many",
                  f"церков із такою назвою {len(rows)} — розрізняти за деканатом "
