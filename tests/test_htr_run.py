@@ -190,3 +190,46 @@ def test_sato_flag_is_negative_only(tmp_path: Path) -> None:
     його ствердно немає сенсу — а от зняття мусить бути явним."""
     assert "--gpu-sato" not in _plan(tmp_path).command(gpu_sato=True)
     assert "--no-gpu-sato" in _plan(tmp_path).command(gpu_sato=False)
+
+
+# ── перечитування іншою моделлю ─────────────────────────────────────────────
+@pytest.mark.parametrize(("name", "tag"), [
+    ("skryba_f792_v6.mlmodel", "skryba_v6"),
+    ("diak_cyr_v4.mlmodel", "diak_v4"),
+    ("pysar_cyr_v16.pt", "v16"),
+])
+def test_model_tag_names_the_folder_like_the_runner_names_voices(name: str, tag: str) -> None:
+    assert R.model_tag(name) == tag
+
+
+def test_an_unknown_model_is_a_message_not_a_crash(space: Path) -> None:
+    with pytest.raises(R.ReadError, match="не знайдена"):
+        R.resolve_model("nemaie_v1.mlmodel")
+
+
+def test_rereading_with_a_named_model_goes_to_its_own_folder(space: Path, tmp_path: Path,
+                                                             monkeypatch) -> None:
+    """🔴 Кирилична справа виявилась наполовину латинкою: Скриба читає її в ОКРЕМУ
+    теку (раннер не мішає рушії), письмо — від моделі, сегментація — з кешу."""
+    import types
+
+    from nyshporka.htr import env as E
+    from nyshporka.setup import doctor as doc
+
+    _weights(space, "skryba_f792_v6.mlmodel", "pysar_cyr_v17.pt", "diak_cyr_v4.mlmodel")
+    case = tmp_path / "spr-2461"
+    case.mkdir()
+    (case / "0001.jpg").write_bytes(b"\0")
+    monkeypatch.setattr(doc, "engine_venv", lambda: tmp_path / "venv")
+    monkeypatch.setattr(E, "inspect", lambda venv: types.SimpleNamespace(
+        ok=True, python=tmp_path / "python.exe", problems=[], missing=[]))
+    seg = tmp_path / "з-хмари" / "htr_seg" / "pages_dl_01__085f51d2"
+
+    p = R.plan(case, model="skryba_f792_v6.mlmodel", seg_cache=seg)
+
+    assert p.model.name == "skryba_f792_v6.mlmodel"
+    assert (p.script, p.voice, p.script_trust) == ("latin", None, "fixed")
+    assert p.out_dir.name == "spr-2461-skryba_v6"
+    cmd = p.command()
+    assert cmd[cmd.index("--seg-cache-dir") + 1] == str(seg)
+    assert "--models" not in cmd

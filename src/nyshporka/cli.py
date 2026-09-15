@@ -791,6 +791,13 @@ def read(
                                   help="рахувати sato на карті; зняти при шардингу"),
     seg_height: int = typer.Option(0, "--seg-height",
                                    help="висота сегментації (0 = рідна 1800)"),
+    model: str = typer.Option(
+        "", "--model",
+        help="перечитати ЯВНО названою моделлю (файл або ім'я ваг): письмо від "
+             "моделі, вихід `<справа>-<тег>`, сегментація — з кешу"),
+    seg_cache: str = typer.Option(
+        "", "--seg-cache",
+        help="тека готової сегментації (*.seg.json.gz), напр. забраної з хмари"),
     force: bool = typer.Option(
         False, "--force",
         help="стартувати, навіть якщо інша справа вже читається"),
@@ -819,7 +826,7 @@ def read(
     _need("htr")
     try:
         p = make_plan(case_dir, out_dir=out, script=script,
-                      second_voice=not one_voice)
+                      second_voice=not one_voice, model=model, seg_cache=seg_cache)
     except ReadError as exc:
         console.print(f"[err]{exc}[/err]")
         raise typer.Exit(code=1) from None

@@ -355,6 +355,38 @@ def guess_script_full(case_dir: Path, hint: str = "") -> ScriptGuess:
     return pick.guess_script_for_dir(case_dir, hint)
 
 
+def model_tag(model: str | Path) -> str:
+    """Суфікс теки прогону іншою моделлю: `skryba_f792_v6.mlmodel` → `skryba_v6`.
+
+    Те саме правило, за яким раннер називає теки голосів (`<вихід>-diak_v4`),
+    тож перечитування Скрибою й голос Скриби лягають під одне ім'я.
+    """
+    return (Path(model).stem.replace("pysar_cyr_", "").replace("diak_cyr_", "diak_")
+            .replace("skryba_f792_", "skryba_"))
+
+
+def resolve_model(spec: str) -> tuple[Path, str]:
+    """Явно названа модель → (шлях до ваг, письмо).
+
+    `spec` — шлях до файла або ім'я ваг у теках моделей (`model_dirs`). Письмо
+    бере маніфест рушіїв за префіксом імені, а не здогад із теки справи: для
+    перечитування іншою моделлю саме модель і є рішенням людини про письмо.
+    """
+    from nyshporka.htr import manifest as M
+
+    path = Path(spec).expanduser()
+    if not path.is_file():
+        hits = [d / spec for d in model_dirs() if (d / spec).is_file()]
+        if not hits:
+            raise ReadError(f"модель «{spec}» не знайдена ні як файл, ні в теках моделей "
+                            f"({', '.join(str(d) for d in model_dirs())})")
+        path = hits[0]
+    eng = M.active().engine_for_model(path.name)
+    if eng is None:
+        raise ReadError(f"{path.name}: маніфест рушіїв не знає такої моделі — письмо невідоме")
+    return path.resolve(), eng.script
+
+
 def seg_cache_dir(case_dir: Path, derived: Path) -> Path:
     """Тека кешу сегментації справи.
 
@@ -374,8 +406,18 @@ def seg_cache_dir(case_dir: Path, derived: Path) -> Path:
 
 
 def plan(case_dir: str | Path, *, out_dir: str | Path = "", script: str = "",
-         second_voice: bool = True) -> Plan:
-    """Зібрати план прогону або пояснити, чого бракує."""
+         second_voice: bool = True, model: str = "",
+         seg_cache: str | Path = "") -> Plan:
+    """Зібрати план прогону або пояснити, чого бракує.
+
+    `model` — перечитати справу ЯВНО названою моделлю (напр. Скрибою, коли
+    кирилична справа виявилась наполовину латинкою). Тоді письмо — від моделі,
+    другого голосу немає, а вихід за замовчуванням — `<справа>-<тег>`: раннер
+    відмовляється мішати рушії в одній теці.
+
+    `seg_cache` — тека готової сегментації (напр. забраної з хмари разом із
+    першим прогоном). Без неї береться спільний кеш простору.
+    """
     from nyshporka.core.workspace import workspace
     from nyshporka.htr import env as E
     from nyshporka.setup import doctor as doc
@@ -400,13 +442,21 @@ def plan(case_dir: str | Path, *, out_dir: str | Path = "", script: str = "",
             f"бракує: {', '.join(rep.missing)}" if rep.missing else "не зібране")
         raise ReadError(f"середовище рушіїв не готове ({why}) — `nysh htr install`")
 
-    guess = guess_script_full(case, script)
-    scr = guess.script if guess.script in ("latin", "cyrillic") else "cyrillic"
-    model, voice = pick_model(scr, second_voice=second_voice)
-    runner = Path(__file__).resolve().parent / "runner.py"
     ws = workspace()
-    out = Path(out_dir) if out_dir else ws.htr_reports / case.name
-    seg = seg_cache_dir(case, ws.derived)
+    if model:
+        weights, scr = resolve_model(model)
+        voice = None
+        trust, why = "fixed", f"письмо моделі {weights.name}"
+        default_out = ws.htr_reports / f"{case.name}-{model_tag(weights)}"
+    else:
+        guess = guess_script_full(case, script)
+        scr = guess.script if guess.script in ("latin", "cyrillic") else "cyrillic"
+        weights, voice = pick_model(scr, second_voice=second_voice)
+        trust, why = guess.trust, guess.why
+        default_out = ws.htr_reports / case.name
+    runner = Path(__file__).resolve().parent / "runner.py"
+    out = Path(out_dir) if out_dir else default_out
+    seg = Path(seg_cache).expanduser() if seg_cache else seg_cache_dir(case, ws.derived)
     # 🔴🔴 Лок карти — НА ПРОСТІР, а не на прогін.
     #
     # Доти він лежав у теці виходу (`out/_gpu.lock`), тобто в кожного прогону
@@ -423,10 +473,10 @@ def plan(case_dir: str | Path, *, out_dir: str | Path = "", script: str = "",
     # не бачить прогонів, запущених із командного рядка, а карта в них спільна.
     lock_dir = ws.derived / "htr_lock"
     lock_dir.mkdir(parents=True, exist_ok=True)
-    return Plan(case_dir=case, out_dir=out, model=model, script=scr,
+    return Plan(case_dir=case, out_dir=out, model=weights, script=scr,
                 frames=frames, python=rep.python, runner=runner, voice=voice,
                 seg_cache=seg, gpu_lock=lock_dir / "gpu.lock",
-                script_trust=guess.trust, script_why=guess.why)
+                script_trust=trust, script_why=why)
 
 
 def shard_env(workers: int, *, cores: int = 0) -> dict[str, str]:
