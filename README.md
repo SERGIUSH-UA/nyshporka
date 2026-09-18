@@ -177,7 +177,7 @@ nysh doctor         # перевірка «Рушії читання» має с
 | тека встановлення | `-Home_ D:\Nysh` | — | `/DIR=D:\Nysh` |
 | не класти ярлик | `-NoLauncher` | (не кладе) | — |
 | без питань | (їх і немає) | — | `/VERYSILENT` |
-| пак довідників з останнього релізу `catalog-*` | — | `NYSH_NO_CATALOG=1` — не ставити | (уже в файлі) |
+| пак довідників з останнього релізу `catalog-*` | `-NoCatalog` (або `NYSH_NO_CATALOG=1`) — не ставити | `NYSH_NO_CATALOG=1` — не ставити | (уже в файлі) |
 | журнал установлення | — | — | `/LOG=setup.log` |
 | де жити дослідженню | `NYSHPORKA_WORKSPACE` | `NYSHPORKA_WORKSPACE` | `NYSHPORKA_WORKSPACE` |
 

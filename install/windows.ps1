@@ -17,6 +17,8 @@
     Запуск без клону — завантажити файл і запустити (саме це дають агентові):
         irm https://raw.githubusercontent.com/SERGIUSH-UA/nyshporka/main/install/windows.ps1 -OutFile "$env:TEMP\nysh-install.ps1"
         powershell -ExecutionPolicy Bypass -File "$env:TEMP\nysh-install.ps1" -Preset catalog
+    Пак довідників за замовчуванням береться з останнього релізу catalog-*
+    (звірений sha256); не ставити його зовсім — `-NoCatalog`.
 
     🔴 Через конвеєр (`irm … | iex`) цей файл НЕ запускається, і відмова
     виглядає як десяток помилок розбору в шапці. Причина — BOM: він тут
@@ -49,6 +51,10 @@ param(
     # `install/unix.sh`: людина має право подивитись, що чіпатимуть на її
     # машині, ДО того, як щось завантажилось.
     [switch]$DryRun,
+    # Не брати пак довідників з останнього релізу `catalog-*`, коли його немає
+    # поруч (офлайн-машина; свій пак поставлять окремо `nysh catalog install
+    # --from`). Те саме робить змінна `NYSH_NO_CATALOG=1`, як в `unix.sh`.
+    [switch]$NoCatalog,
     # Запуск із майстра `.exe`: консоль зникає разом зі скриптом, тож помилку
     # треба показати вікном, яке переживе консоль.
     [switch]$Wizard
@@ -57,6 +63,11 @@ param(
 # Звідки брати пак довідників, якщо його немає поруч. Та сама адреса, що її
 # друкує `nysh catalog list` на порожньому каталозі (`catalog.store.RELEASES_URL`).
 $CatalogUrl = 'https://github.com/SERGIUSH-UA/nyshporka/releases'
+# Той самий пак, але звідки його бере САМ інсталятор: перелік релізів API.
+# `per_page=100` — розмір СТОРІНКИ, не стеля пошуку: `catalog-*` виходить
+# рідко, звичайні релізи — щотижня, тож він з часом зсувається за першу сотню.
+$CatalogApi = 'https://api.github.com/repos/SERGIUSH-UA/nyshporka/releases?per_page=100'
+if ($env:NYSH_NO_CATALOG -eq '1') { $NoCatalog = [switch]$true }
 
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
@@ -213,6 +224,11 @@ if ($DryRun) {
     Say "слід інсталятора   $(Join-Path $Home_ 'install-info.ini')"
     Say "                   $(Join-Path $Home_ 'install-trace.txt')"
     Say "простір досліджень тека, яку назве «nysh init»"
+    if ($NoCatalog) {
+        Say "довідники          не ставляться (-NoCatalog / NYSH_NO_CATALOG=1)"
+    } else {
+        Say "довідники          з останнього релізу catalog-* (звірка sha256), якщо немає поруч"
+    }
     if ($env:NYSH_NO_MODIFY_PATH -eq '1') {
         Say "PATH користувача   не чіпається (NYSH_NO_MODIFY_PATH=1)"
     } else {
@@ -447,6 +463,111 @@ $null = Invoke-Logged $nysh doctor
 # у пам'яті немає теки, «поруч» із якою можна щось шукати. Порожній `-Path`
 # зараз мовчки не дає нічого, і поведінка виходить правильна — але випадково.
 # Умова робить її навмисною й переживе будь-яку зміну в PowerShell.
+#
+# 🔴🔴 Пака поруч немає — беремо його з останнього релізу `catalog-РРРР-ММ-ДД`.
+# Майстер `.exe` везе пак із собою, а запуск без клону (`irm … -OutFile`, як
+# велить шапка) — ні, і `nysh find` по каталогах архівів мовчав би завжди.
+# Той самий порядок, що в `unix.sh`: найновіший недрафтовий `catalog-*` з
+# асетом `nyshporka-catalog-*.zip` → sha256 проти поля `digest`, яке рахує
+# сам GitHub → `nysh catalog install --from`. Суми немає чи не збіглась — НЕ
+# ставимо: обірваний файл виглядає як пак і навіть розпаковується, а вада
+# вилазить аж нулем у пошуку, який ніхто не відрізнить від чесного.
+# 🔴 Жоден збій тут не сміє звалити встановлення: каталог необов'язковий, а
+# `$ErrorActionPreference = 'Stop'` зробив би будь-яку мережеву відмову
+# термінальною — і trap показав би «установлення не завершилось» людині, в
+# якої застосунок уже стоїть. Тому все під try, відповідь — $true/$false.
+# ⚠ Функція не сміє нічого писати в конвеєр, крім відповіді: зайвий об'єкт
+# перетворить `$false` на масив, а непорожній масив для `if` — істина.
+function Install-CatalogFromRelease {
+    param([Parameter(Mandatory)][string] $Nysh)
+    # `GetTempPath()`, а не `$env:TEMP`: на Windows це та сама тека, а
+    # приймач проганяє функцію й під pwsh на Linux, де `$env:TEMP` немає.
+    $tmp = Join-Path ([IO.Path]::GetTempPath()) ('nysh-catalog-' + [guid]::NewGuid().ToString('N'))
+    try {
+        $releases = @()
+        for ($page = 1; $page -le 10; $page++) {
+            try {
+                # ⚠ 5.1 віддає JSON-масив ОДНИМ об'єктом, а не елементами;
+                # `ForEach-Object` розгортає його. 7.x розгортає сам — результат
+                # той самий.
+                $batch = @(Invoke-RestMethod -Uri "$CatalogApi&page=$page" `
+                               -TimeoutSec 20 -UseBasicParsing | ForEach-Object { $_ })
+            } catch {
+                # Мережа впала не на першій сторінці — уже прочитане чесніше
+                # за повну відмову: найновіший `catalog-*` може бути серед нього.
+                if ($page -gt 1) { break }
+                Say "⚠ не вдалось прочитати перелік релізів GitHub — мережа чи ліміт API" Yellow
+                return $false
+            }
+            if ($batch.Count -eq 0) { break }     # порожня сторінка — кінець списку
+            $releases += $batch
+        }
+        # Дати ISO сортуються рядком правильно — порівняння рядків навмисне.
+        $best = $releases |
+            Where-Object { -not $_.draft -and "$($_.tag_name)" -match '^catalog-\d{4}-\d{2}-\d{2}$' } |
+            ForEach-Object {
+                $asset = @($_.assets) |
+                    Where-Object { "$($_.name)" -like 'nyshporka-catalog-*.zip' } |
+                    Select-Object -First 1
+                if ($asset) { [pscustomobject]@{ Tag = "$($_.tag_name)"; Asset = $asset } }
+            } |
+            Sort-Object Tag -Descending | Select-Object -First 1
+        if (-not $best) {
+            Say "⚠ жодного релізу catalog-* не знайдено" Yellow
+            return $false
+        }
+        $tag = $best.Tag
+        # `digest` — це `sha256:<64 hex>`; форма звіряється ДО завантаження,
+        # щоб не тягнути мегабайти заради асета, який однаково не звірити.
+        if (-not ("$($best.Asset.digest)" -match '^sha256:([0-9a-fA-F]{64})$')) {
+            Say "⚠ реліз ${tag}: асет без контрольної суми sha256 — качати без звірки не можна" Yellow
+            return $false
+        }
+        $want = $Matches[1]
+        $url = "$($best.Asset.browser_download_url)"
+        if (-not $url) {
+            Say "⚠ реліз ${tag}: не знайдено посилання на завантаження" Yellow
+            return $false
+        }
+
+        New-Item -ItemType Directory -Force -Path $tmp | Out-Null
+        $zip = Join-Path $tmp 'pack.zip'
+        try {
+            Invoke-WebRequest -Uri $url -OutFile $zip -TimeoutSec 120 -UseBasicParsing
+        } catch {
+            Say "⚠ не вдалось завантажити пак довідників ($tag)" Yellow
+            return $false
+        }
+        # ⚠ .NET, а не `Get-FileHash`: 5.1, запущений із вікна PowerShell 7,
+        # успадковує його `PSModulePath`, бере чужий `Microsoft.PowerShell.Utility`
+        # і `Get-FileHash` просто не знаходить (відтворено 18.09.2026).
+        $sha = [Security.Cryptography.SHA256]::Create()
+        $stream = [IO.File]::OpenRead($zip)
+        try     { $got = [BitConverter]::ToString($sha.ComputeHash($stream)) -replace '-', '' }
+        finally { $stream.Dispose(); $sha.Dispose() }
+        # `-ne` у PowerShell байдужий до регістру: .NET дає ВЕЛИКІ літери,
+        # GitHub — малі.
+        if ($got -ne $want) {
+            Say "⚠ контрольна сума пака довідників ($tag) не збіглася — не встановлюю" Yellow
+            return $false
+        }
+        $pack = Join-Path $tmp 'pack'
+        Expand-Archive -LiteralPath $zip -DestinationPath $pack -Force
+        $rc = Invoke-Logged $Nysh catalog install --from $pack
+        if ($rc -eq 0) {
+            Say "✓ пак довідників ${tag}: встановлено (sha256 звірено)" Green
+            return $true
+        }
+        Say "⚠ «nysh catalog install» відмовив на паку $tag" Yellow
+        return $false
+    } catch {
+        Say "⚠ пак довідників з релізу не поставлено: $($_.Exception.Message)" Yellow
+        return $false
+    } finally {
+        Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
 $seed = if ($PSScriptRoot) {
     Get-ChildItem -Path $PSScriptRoot -Filter 'nyshporka-catalog-*.zip' `
         -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -456,6 +577,10 @@ if ($seed) {
     Expand-Archive -Path $seed.FullName -DestinationPath $tmp -Force
     $null = Invoke-Logged $nysh catalog install --from $tmp
     Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
+} elseif ($NoCatalog) {
+    Say "ℹ довідники не ставляться (-NoCatalog / NYSH_NO_CATALOG=1)" DarkGray
+} elseif (Install-CatalogFromRelease -Nysh $nysh) {
+    # встановлено — рядок «✓» уже надрукувала сама функція
 } else {
     # 🔴 Порада мусить казати, ЗВІДКИ взяти. Пак довідників лежить окремим
     # релізом (він оновлюється, коли архів виклав новий опис, а не коли
