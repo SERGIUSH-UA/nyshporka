@@ -451,3 +451,87 @@ def test_docs_tell_a_developer_how_to_be_careful() -> None:
         text = (ROOT / name).read_text(encoding="utf-8")
         assert re.search(r"NYSH_NO_MODIFY_PATH|--dry-run", text), (
             f"{name}: не сказано, як поставити застосунок, не чіпаючи PATH")
+
+
+# ── лапки без фігурних дужок і bash 3.2 в UTF-8-локалі ───────────────────────
+# 🔴 `«$_bin»` без фігурних дужок: під `set -u` bash 3.2 (system `/bin/sh` на
+# macOS) в UTF-8-локалі бере перший байт «»» ЗА ЧАСТИНУ ІМЕНІ змінної — `_bin»:
+# unbound variable» — і `--dry-run` падав рівно на останньому рядку зведення,
+# тож підказка «Нічого не зроблено — це --dry-run.» не друкувалась НІКОЛИ.
+# Відтворено локально: `LC_ALL=uk_UA.UTF-8 sh install/unix.sh --dry-run` падає,
+# `LC_ALL=C` — ні. dash (типовий `/bin/sh` на Linux) цієї вади не має, тож
+# приймач нижче ловить регресію саме там, де вона стається, — на macOS.
+_UNBRACED_VAR_BEFORE_NON_ASCII = re.compile(r"\$[A-Za-z_][A-Za-z0-9_]*[^ -~]")
+
+
+@pytest.mark.parametrize("name", ["unix.sh", "uninstall.sh"])
+def test_no_unbraced_var_touches_a_multibyte_char(name: str) -> None:
+    """🔴 Статичний приймач: `$ім'я`, за яким одразу йде небайтовий символ.
+
+    Без фігурних дужок межа імені змінної для оболонки — це non-word байт, а
+    перший байт багатобайтового UTF-8 символу (наприклад, «»») ним не є. У
+    `set -u` це не тихий збіг символів, а `unbound variable` і код виходу 1.
+    """
+    text = (INSTALL / name).read_text(encoding="utf-8")
+    guilty = []
+    for lineno, line in enumerate(text.splitlines(), start=1):
+        m = _UNBRACED_VAR_BEFORE_NON_ASCII.search(line)
+        if m:
+            guilty.append(f"{name}:{lineno}: {line.strip()}")
+    assert not guilty, (
+        "$ім'я впритул до небайтового символу — під bash 3.2 в UTF-8-локалі "
+        "це `unbound variable` (потрібні фігурні дужки ${ім'я}):\n  "
+        + "\n  ".join(guilty))
+
+
+def _first_available_utf8_locale() -> str | None:
+    import subprocess
+
+    try:
+        out = subprocess.run(["locale", "-a"], capture_output=True,
+                              text=True, timeout=10)
+    except OSError:
+        return None
+    have = {ln.strip() for ln in out.stdout.splitlines()}
+    for candidate in ("C.UTF-8", "en_US.UTF-8"):
+        if candidate in have:
+            return candidate
+    return None
+
+
+def test_unix_dry_run_survives_a_utf8_locale_on_bash_32() -> None:
+    """🔴🔴 Прогін самого скрипта — приймач вище читає текст, цей запускає його.
+
+    Статичний приймач ловить рівно цей патерн; якби регресія прийшла іншим
+    шляхом (інша непарна лапка, інший небайтовий символ у новому рядку поза
+    патерном), він міг би не помітити. Цей приймач байдужий ДО причини:
+    `--dry-run` мусить дійти до кінця й нічого не зробити на диску.
+    """
+    import os
+    import shutil
+    import subprocess
+
+    if os.name == "nt":
+        pytest.skip("system /bin/sh на bash 3.2 — вада macOS/Linux, не Windows")
+    sh = shutil.which("sh")
+    if sh is None:
+        pytest.skip("немає POSIX-оболонки")
+    loc = _first_available_utf8_locale()
+    if loc is None:
+        pytest.skip("немає встановленої UTF-8-локалі (C.UTF-8 / en_US.UTF-8)")
+
+    env = dict(os.environ)
+    env["LC_ALL"] = loc
+    # ⚠ Байти, не `text=True`: сама вада ламає рядок посеред багатобайтового
+    # символу («_bin» + перший байт «»»), і суворий UTF-8-декодер `subprocess`
+    # впав би на цьому власним `UnicodeDecodeError` замість зрозумілого
+    # `assert` — репортер побачив би внутрішню помилку тесту, а не діагноз.
+    proc = subprocess.run([sh, str(UNIX), "--dry-run"], cwd=ROOT,
+                          capture_output=True, timeout=60, env=env)
+    out = proc.stdout.decode("utf-8", errors="replace")
+    err = proc.stderr.decode("utf-8", errors="replace")
+    assert proc.returncode == 0, (
+        f"unix.sh --dry-run під LC_ALL={loc} упав (код {proc.returncode}):\n"
+        + out + err)
+    assert "Нічого не зроблено" in out, (
+        "unix.sh --dry-run не дійшов до прикінцевого рядка зведення:\n" + out)
