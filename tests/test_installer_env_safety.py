@@ -759,7 +759,8 @@ def test_catalog_from_release_picks_the_newest_non_draft_tag(
 
     import subprocess
     proc = subprocess.run([sh, str(driver)], cwd=tmp_path, env=env,
-                          capture_output=True, text=True, timeout=30)
+                          capture_output=True, text=True, timeout=30,
+                          encoding="utf-8", errors="replace")
     assert "RC:0" in proc.stdout, (
         f"нову catalog-* не поставлено:\nSTDOUT:\n{proc.stdout}\n"
         f"STDERR:\n{proc.stderr}")
@@ -837,7 +838,8 @@ def test_catalog_from_release_paginates_past_the_first_page(
 
     import subprocess
     proc = subprocess.run([sh, str(driver)], cwd=tmp_path, env=env,
-                          capture_output=True, text=True, timeout=30)
+                          capture_output=True, text=True, timeout=30,
+                          encoding="utf-8", errors="replace")
     assert "RC:0" in proc.stdout, (
         f"пак зі сторінки 2 не поставлено:\nSTDOUT:\n{proc.stdout}\n"
         f"STDERR:\n{proc.stderr}")
@@ -907,7 +909,8 @@ def test_catalog_digest_mismatch_skips_install_and_exits_clean(
 
     import subprocess
     proc = subprocess.run([sh, str(driver)], cwd=workdir, env=env,
-                          capture_output=True, text=True, timeout=30)
+                          capture_output=True, text=True, timeout=30,
+                          encoding="utf-8", errors="replace")
     assert proc.returncode == 0, (
         f"невдала звірка sha256 звалила встановлення:\n{proc.stdout}\n"
         f"{proc.stderr}")
@@ -952,7 +955,8 @@ def test_catalog_no_catalog_env_skips_the_network_entirely(
 
     import subprocess
     proc = subprocess.run([sh, str(driver)], cwd=workdir, env=env,
-                          capture_output=True, text=True, timeout=30)
+                          capture_output=True, text=True, timeout=30,
+                          encoding="utf-8", errors="replace")
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert "не ставляться (NYSH_NO_CATALOG=1)" in proc.stdout, proc.stdout
 
