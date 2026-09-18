@@ -8,6 +8,9 @@
 #   curl -LsSf https://raw.githubusercontent.com/SERGIUSH-UA/nyshporka/main/install/unix.sh | NYSH_PRESET=catalog sh
 # Подивитись, що буде зроблено, нічого не роблячи:
 #   curl -LsSf … | sh -s -- --dry-run        (або NYSH_DRY_RUN=1 sh …)
+# Пак довідників за замовчуванням тягнеться з останнього релізу catalog-*
+# (звірений sha256); не ставити його зовсім:
+#   curl -LsSf … | NYSH_NO_CATALOG=1 sh
 #
 # 🔴 Системний інтерпретатор не використовується: на робочих машинах він або
 # старий, або зайнятий чужим проєктом. Інсталятор приносить `uv`, а `uv` —
@@ -52,6 +55,16 @@ SOURCE="${NYSH_SOURCE:-$DEFAULT_SOURCE}"
 # Звідки брати пак довідників, якщо його немає поруч. Та сама адреса, що її
 # друкує `nysh catalog list` на порожньому каталозі (`catalog.store.RELEASES_URL`).
 CATALOG_URL="https://github.com/SERGIUSH-UA/nyshporka/releases"
+# 🔴 Той самий пак, але звідки його бере САМ інсталятор, без людини: перелік
+# релізів API, а не сторінка для читання. `catalog-*` виходить рідко, а
+# звичайних релізів `vX.Y.Z` — щотижня, тож зі зростанням репозиторію єдиний
+# `catalog-*` рано чи пізно зсувається за першу сотню й мовчки випадає з
+# видачі. Тому `_catalog_from_release` гортає сторінки (`&page=N`), а не
+# читає лише першу: `per_page=100` тут — розмір СТОРІНКИ, не стеля пошуку.
+RELEASES_API="https://api.github.com/repos/SERGIUSH-UA/nyshporka/releases?per_page=100"
+# Вимкнути качання пака довідників зовсім (офлайн-машина, свій пак поставлять
+# окремо командою `nysh catalog install --from`).
+NO_CATALOG="${NYSH_NO_CATALOG:-0}"
 
 # 🔴 Тека застосунку оголошена ДО першої дії, бо в ній тепер живе не лише слід
 # інсталятора, а й сам `uv`. Читається так само, як її читає `setup.update`.
@@ -73,7 +86,7 @@ for arg in "$@"; do
       printf 'sh unix.sh [--dry-run] [--no-modify-path]\n'
       printf '  --dry-run          показати, що буде зроблено, і вийти\n'
       printf '  --no-modify-path   не чіпати профілі оболонки (NYSH_NO_MODIFY_PATH=1)\n'
-      printf '  змінні: NYSH_PRESET, NYSH_SOURCE\n'
+      printf '  змінні: NYSH_PRESET, NYSH_SOURCE, NYSH_NO_CATALOG\n'
       exit 0 ;;
     *) printf 'невідомий аргумент «%s»: --dry-run | --no-modify-path\n' "$arg" >&2
        exit 2 ;;
@@ -166,6 +179,11 @@ if [ "$DRY" = 1 ]; then
   say "слід інсталятора   $INFO_FILE"
   say "                   $TRACE_FILE"
   say "простір досліджень тека, яку назве «nysh init» (типово ~/Документи/Нишпорка)"
+  if [ "$NO_CATALOG" = 1 ]; then
+    say "довідники          не ставляться (NYSH_NO_CATALOG=1)"
+  else
+    say "довідники          з останнього релізу catalog-* (звірка sha256), якщо немає поруч"
+  fi
   if [ "$KEEP_PATH" = 1 ]; then
     say "профілі оболонки   не чіпаються (NYSH_NO_MODIFY_PATH=1)"
   else
@@ -298,6 +316,145 @@ say ""
 nysh init --yes --preset "$PRESET"
 nysh doctor || true
 
+# sha256 файла — `sha256sum` типовий на Linux, `shasum -a 256` типовий на
+# macOS; беремо перший, який справді є, а не вгадуємо платформу за `uname`.
+_sha256() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{print $1}'
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1" | awk '{print $1}'
+  else
+    return 1
+  fi
+}
+
+# 🔴🔴 Пак довідників з останнього релізу `catalog-РРРР-ММ-ДД` — без нього
+# `nysh find` по каталогах архівів на macOS/Linux мовчав би завжди: `.exe`
+# везе пак УСЕРЕДИНІ (release.yml тягне його для Windows), а тут поруч зі
+# скриптом його не буває НІКОЛИ — ні в клоні, ні тим паче через
+# `curl … | sh`. Кожен крок нижче може відмовити (мережа, ліміт API
+# GitHub, побитий zip) — жоден такий збій не сміє звалити встановлення
+# застосунку заради каталогу, який і так необов'язковий. Тому вся робота в
+# одній функції, а виклик — під `if`: `set -e` під `if` не чіпає команди
+# всередині виклику (перевірено прогоном на bash, dash і bash 3.2), тож
+# збій на будь-якому кроці просто повертає 1, а не валить решту скрипта.
+# ⚠ `set -u` так не працює — необ'явлена змінна валить скрипт НАВІТЬ під
+# `if`, тому кожна змінна тут отримує значення ДО першого читання.
+#
+# Розбір JSON — без `jq` (не гарантований на машині) і без `python3` (сам
+# інсталятор навмисно без системного Python, гл. коментар на початку файла):
+# сирі `grep`/`awk` по видачі GitHub API, яка друкує по одному ключу на
+# рядок із сталим кроком відступу. Формат неофіційний, але передбачуваний;
+# щоб не переплутати поле асета з однойменним полем у вкладеному
+# `uploader`, беремо лише рядки РІВНО на відступі елемента списку `assets`
+# (8 пробілів) — `uploader` вкладений ще на крок глибше (10).
+_catalog_from_release() {
+  _CAT_TMP="$(mktemp -d)" || return 1
+  # 🔴🔴 Одна сторінка не вистачає НАЗАВЖДИ: `catalog-*` виходить рідко,
+  # звичайні релізи — щотижня, і єдиний `catalog-*` рано чи пізно зсувається
+  # за першу сотню. Тоді видача сторінки 1 просто не містить жодного
+  # `"tag_name"` для нього — не помилка, а тихий кінець функціональності,
+  # якщо зупинитись на сторінці 1. Гортаємо до 10 сторінок (1000 релізів —
+  # запас на роки вперед) і спиняємось, щойно сторінка виявляється порожньою
+  # (кінець списку) — так само, як зробив би `gh release list`.
+  _cat_pages=""
+  _cat_page=1
+  while [ "$_cat_page" -le 10 ]; do
+    _cat_page_file="$_CAT_TMP/releases-$_cat_page.json"
+    if ! curl -fsSL --max-time 20 "$RELEASES_API&page=$_cat_page" \
+         -o "$_cat_page_file" 2>/dev/null; then
+      # Мережа впала не на першій сторінці — те, що вже назбирали, чесніше
+      # за повну відмову: серед уже прочитаних сторінок і так може бути
+      # найновіший `catalog-*`.
+      [ "$_cat_page" -gt 1 ] && break
+      say "⚠ не вдалось прочитати перелік релізів GitHub — мережа чи ліміт API"
+      return 1
+    fi
+    grep -q '"tag_name"' "$_cat_page_file" 2>/dev/null || break
+    _cat_pages="$_cat_pages $_cat_page_file"
+    _cat_page=$((_cat_page + 1))
+  done
+  [ -n "$_cat_pages" ] || {
+    say "⚠ не вдалось прочитати перелік релізів GitHub — мережа чи ліміт API"
+    return 1
+  }
+  # `tag<TAB>digest<TAB>url` найновішого недрафтового `catalog-*`, з асетом
+  # `nyshporka-catalog-*.zip`. Дати ISO сортуються рядком правильно, тож
+  # порівняння рядків замість чисел тут навмисне, не недогляд. Один `awk` над
+  # УСІМА сторінками одразу (а не по одній) — `best` і так тримає найбільший
+  # тег через межу файлів, окремий прохід на сторінку нічого б не додав.
+  _cat_row="$(awk '
+    /^    "tag_name": "/   { t=$0; sub(/^    "tag_name": "/,"",t); sub(/",?$/,"",t); tag=t; next }
+    /^    "draft": /       { d=$0; sub(/^    "draft": /,"",d); sub(/,$/,"",d); draft=d; next }
+    /^      \{$/           { name=""; digest=""; url=""; next }
+    /^        "name": "/                { v=$0; sub(/^        "name": "/,"",v); sub(/",?$/,"",v); name=v; next }
+    /^        "digest": "/              { v=$0; sub(/^        "digest": "/,"",v); sub(/",?$/,"",v); digest=v; next }
+    /^        "browser_download_url": "/ { v=$0; sub(/^        "browser_download_url": "/,"",v); sub(/",?$/,"",v); url=v; next }
+    /^      \},?$/ {
+      if (draft == "false" && \
+          tag ~ /^catalog-[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]$/ && \
+          name ~ /^nyshporka-catalog-.*\.zip$/ && \
+          tag > best) { best=tag; best_digest=digest; best_url=url }
+      next
+    }
+    END { if (best != "") printf "%s\t%s\t%s\n", best, best_digest, best_url }
+  ' $_cat_pages 2>/dev/null)"
+  # ⚠ `$_cat_pages` НЕ в лапках навмисно: це список шляхів, зібраний нами
+  # самими через пробіл (mktemp-тека без пробілів у назві), і awk мусить
+  # побачити кожен файл окремим аргументом, а не одним рядком з пробілами.
+  [ -n "${_cat_row:-}" ] || { say "⚠ жодного релізу catalog-* не знайдено"; return 1; }
+
+  _cat_tag="$(printf '%s' "$_cat_row" | cut -f1)"
+  _cat_digest="$(printf '%s' "$_cat_row" | cut -f2)"
+  _cat_url="$(printf '%s' "$_cat_row" | cut -f3)"
+  # `digest` — це `sha256:<64 hex>`; префікс і форма перевіряються ДО
+  # завантаження, щоб не тягнути мегабайти заради асета, який однаково не
+  # звірити.
+  _cat_want="${_cat_digest#sha256:}"
+  if [ "$_cat_want" = "$_cat_digest" ]; then
+    say "⚠ реліз $_cat_tag: асет без контрольної суми sha256 — качати без звірки не можна"
+    return 1
+  fi
+  case "$_cat_want" in
+    *[!0-9a-fA-F]*) _cat_want_bad=1 ;;
+    *) _cat_want_bad=0 ;;
+  esac
+  if [ "$_cat_want_bad" = 1 ] || [ "${#_cat_want}" -ne 64 ]; then
+    say "⚠ реліз $_cat_tag: digest не схожий на sha256 — качати без звірки не можна"
+    return 1
+  fi
+  [ -n "$_cat_url" ] || { say "⚠ реліз $_cat_tag: не знайдено посилання на завантаження"; return 1; }
+
+  _cat_zip="$_CAT_TMP/pack.zip"
+  if ! curl -fsSL --max-time 120 "$_cat_url" -o "$_cat_zip" 2>/dev/null; then
+    say "⚠ не вдалось завантажити пак довідників ($_cat_tag)"
+    return 1
+  fi
+  _cat_got="$(_sha256 "$_cat_zip")" || {
+    say "⚠ немає ні sha256sum, ні shasum — якою сумою звірити пак, незрозуміло"
+    return 1
+  }
+  # 🔴 Саме тут — той самий запобіжник, що його `nysh catalog install --help`
+  # називає прямо: «качати без звірки не можна». Обірваний файл виглядає як
+  # пак: він на місці, має ім'я, навіть розпаковується — вада проявиться аж
+  # у відповіді нулем, який ніхто не відрізнить від чесного.
+  if [ "$_cat_got" != "$_cat_want" ]; then
+    say "⚠ контрольна сума пака довідників ($_cat_tag) не збіглася — не встановлюю"
+    return 1
+  fi
+
+  if ! unzip -q "$_cat_zip" -d "$_CAT_TMP/pack" 2>/dev/null; then
+    say "⚠ не вдалось розпакувати пак довідників ($_cat_tag) — потрібен unzip"
+    return 1
+  fi
+  if nysh catalog install --from "$_CAT_TMP/pack" >/dev/null; then
+    say "✓ пак довідників $_cat_tag: встановлено (sha256 звірено)"
+    return 0
+  fi
+  say "⚠ «nysh catalog install» відмовив на паку $_cat_tag"
+  return 1
+}
+
 # 🗂 Довідники їдуть В КОМПЛЕКТІ — без них перше питання («де метрики мого
 # села») лишається без відповіді, а людина не знає, що саме треба доставити.
 # У колесі їх немає навмисно: каталог і код оновлюються за різними годинниками.
@@ -317,12 +474,17 @@ if [ -n "$SEED" ]; then
     say "⚠ не вдалось розпакувати $SEED — потрібен unzip"
   fi
   rm -rf "$TMP"
+elif [ "$NO_CATALOG" = 1 ]; then
+  say "ℹ довідники не ставляться (NYSH_NO_CATALOG=1)"
+elif _catalog_from_release; then
+  :
 else
   # 🔴 Порада мусить казати, ЗВІДКИ взяти — див. коментар у windows.ps1.
   say "⚠ довідників поруч немає — пошук по каталогах архівів буде недоступний"
   say "  взяти: $CATALOG_URL"
   say "  далі:  nysh catalog install --from <завантажений zip>"
 fi
+[ -z "${_CAT_TMP:-}" ] || rm -rf "$_CAT_TMP" 2>/dev/null || true
 
 # ── що змінилось на цій машині ──────────────────────────────────────────────
 # 🔴 Перелік і друкується, і лягає на диск. Друкується — бо людина має право

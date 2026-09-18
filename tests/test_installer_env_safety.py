@@ -535,3 +535,428 @@ def test_unix_dry_run_survives_a_utf8_locale_on_bash_32() -> None:
         + out + err)
     assert "Нічого не зроблено" in out, (
         "unix.sh --dry-run не дійшов до прикінцевого рядка зведення:\n" + out)
+
+
+# ── пак довідників з останнього релізу catalog-* ─────────────────────────────
+# 🔴 `.exe` везе пак УСЕРЕДИНІ (release.yml тягне його для Windows), а
+# `unix.sh` без цього блоку мовчав би на macOS/Linux завжди: поруч зі скриптом
+# пака не буває ніколи, ні в клоні, ні тим паче через `curl … | sh`. Приймачі
+# нижче не ходять у справжню мережу — фальшиві `curl` і `nysh` на PATH,
+# фальшива видача GitHub API. Логіка живе в двох функціях unix.sh
+# (`_sha256`, `_catalog_from_release`) саме для того, щоб приймач міг
+# підвантажити їх окремо від решти скрипта (той тягне справжній `uv` і
+# ставить пакет — цього офлайн-тест робити не повинен).
+def _unix_snippet(start_prefix: str, end_prefix: str) -> str:
+    """Суцільний шматок `unix.sh` між першим рядком, що починається на
+    `start_prefix`, і першим НАСТУПНИМ рядком на `end_prefix` (не включно)."""
+    lines = unix_text().splitlines()
+    start = next(i for i, ln in enumerate(lines) if ln.startswith(start_prefix))
+    end = next(i for i, ln in enumerate(lines)
+               if i > start and ln.startswith(end_prefix))
+    return "\n".join(lines[start:end])
+
+
+def _write_exec(path: Path, body: str) -> None:
+    path.write_text(f"#!/bin/sh\n{body}\n", encoding="utf-8")
+    path.chmod(0o755)
+
+
+def _zip_bytes(mark: str) -> bytes:
+    import io
+    import zipfile
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("MARK.txt", mark)
+    return buf.getvalue()
+
+
+# Фальшивий `curl`: пише кожен виклик у лог, тягне не з мережі, а з файлів на
+# диску. `--max-time N` і `-o ФАЙЛ` — єдині прапорці з власним значенням у
+# цьому скрипті, тож позиційний розбір, а не справжній парсер аргументів,
+# достатній.
+#
+# Сторінки видачі API — окремі файли `page-N.json` у `$FAKE_RELEASES_DIR`;
+# `_catalog_from_release` завжди звертається за `<RELEASES_API>&page=N`, тож
+# фальшивка впізнає такий URL за префіксом і бере номер сторінки з хвоста.
+# Немає файла для сторінки — те саме, що 404 у справжньому curl: код 22,
+# і виклик, що зробив запит, сам вирішує, чи це кінець списку, чи збій.
+_FAKE_CURL = """
+printf '%s\\n' "$*" >> "$FAKE_CURL_LOG"
+skip=""
+url=""
+out=""
+for a in "$@"; do
+  case "$skip" in
+    maxtime) skip=""; continue ;;
+    out) out="$a"; skip=""; continue ;;
+  esac
+  case "$a" in
+    --max-time) skip=maxtime ;;
+    -o) skip=out ;;
+    -*) ;;
+    *) url="$a" ;;
+  esac
+done
+case "$url" in
+  "$FAKE_RELEASES_URL_PREFIX"'&page='*)
+    page="${url##*&page=}"
+    f="$FAKE_RELEASES_DIR/page-$page.json"
+    if [ -f "$f" ]; then cp "$f" "$out"; exit 0; fi
+    exit 22
+    ;;
+esac
+base=$(basename "$url")
+if [ -f "$FAKE_ZIP_DIR/$base" ]; then
+  cp "$FAKE_ZIP_DIR/$base" "$out"
+  exit 0
+fi
+exit 22
+"""
+
+# Фальшивий `nysh`: пише виклик у лог і дописує вміст маркера з пака, який
+# щойно розпакували, — так тест бачить, який САМЕ пак дійшов до встановлення,
+# а не лише те, що команда викликалась.
+_FAKE_NYSH = """
+printf '%s\\n' "$*" >> "$FAKE_NYSH_LOG"
+prev=""
+dir=""
+for a in "$@"; do
+  [ "$prev" = "--from" ] && dir="$a"
+  prev="$a"
+done
+if [ -n "$dir" ] && [ -f "$dir/MARK.txt" ]; then
+  cat "$dir/MARK.txt" >> "$FAKE_NYSH_LOG"
+fi
+exit 0
+"""
+
+
+def _release_block(tag: str, draft: bool, asset_name: str | None,
+                   digest: str | None, url: str | None) -> str:
+    """Один елемент масиву `releases`, з тим самим кроком відступу, що й
+    справжня видача GitHub API (перевірено прогоном проти справжнього
+    репозиторію: 2 простори на рівень вкладеності)."""
+    head = (f'  {{\n'
+           f'    "tag_name": "{tag}",\n'
+           f'    "draft": {"true" if draft else "false"}')
+    if asset_name is None:
+        return head + "\n  }"
+    return (head + ',\n'
+           '    "assets": [\n'
+           '      {\n'
+           f'        "name": "{asset_name}",\n'
+           f'        "digest": "{digest}",\n'
+           f'        "browser_download_url": "{url}"\n'
+           '      }\n'
+           '    ]\n'
+           '  }')
+
+
+def _releases_json(blocks: list[str]) -> str:
+    return "[\n" + ",\n".join(blocks) + "\n]\n"
+
+
+def _write_releases_pages(dir_path: Path, *pages: str) -> None:
+    """Пише сторінки видачі GitHub API як `page-1.json`, `page-2.json`, …
+
+    Сторінка, якої тут немає, для фальшивого `curl` — 404 (код 22): цим
+    користуються приймачі, де достатньо однієї сторінки, — далі просто
+    нічого не заводять."""
+    dir_path.mkdir(exist_ok=True)
+    for i, content in enumerate(pages, start=1):
+        (dir_path / f"page-{i}.json").write_text(content, encoding="utf-8")
+
+
+def _catalog_env(bin_dir: Path, log_dir: Path) -> dict[str, str]:
+    """Середовище з фальшивими `curl`/`nysh` ПЕРЕД справжнім PATH."""
+    import os
+
+    env = dict(os.environ)
+    env["PATH"] = f"{bin_dir}{os.pathsep}{env.get('PATH', '')}"
+    env["FAKE_CURL_LOG"] = str(log_dir / "curl.log")
+    env["FAKE_NYSH_LOG"] = str(log_dir / "nysh.log")
+    return env
+
+
+def _require_shell_tools() -> str:
+    import shutil
+
+    sh = shutil.which("sh")
+    if sh is None:
+        pytest.skip("немає POSIX-оболонки")
+    if shutil.which("unzip") is None:
+        pytest.skip("немає unzip")
+    return sh
+
+
+def test_catalog_from_release_picks_the_newest_non_draft_tag(
+        tmp_path: Path) -> None:
+    """Серед кількох `catalog-*` і одного НЕ-catalog тега бере найновішу дату.
+
+    Тег без каталожного імені (`v1.0.0`) і чернетка з найпізнішою датою мусять
+    програти навіть тому, хто формально «більший» рядком чи датою: перший —
+    не той клас тега, другий — `draft`. Перевіряється не лише повернений код,
+    а й ЩО САМЕ дійшло до `nysh catalog install --from` — маркер усередині
+    пака.
+    """
+    sh = _require_shell_tools()
+
+    curl_sh, nysh_sh = tmp_path / "curl", tmp_path / "nysh"
+    _write_exec(curl_sh, _FAKE_CURL)
+    _write_exec(nysh_sh, _FAKE_NYSH)
+
+    zips = tmp_path / "zips"
+    zips.mkdir()
+    old_zip = _zip_bytes("catalog-2026-01-01")
+    new_zip = _zip_bytes("catalog-2026-09-01")
+    (zips / "old.zip").write_bytes(old_zip)
+    (zips / "new.zip").write_bytes(new_zip)
+    import hashlib
+    old_digest = "sha256:" + hashlib.sha256(old_zip).hexdigest()
+    new_digest = "sha256:" + hashlib.sha256(new_zip).hexdigest()
+
+    releases_url = "https://example.invalid/api/releases"
+    releases_json = _releases_json([
+        _release_block("v1.0.0", draft=False, asset_name=None,
+                       digest=None, url=None),
+        _release_block("catalog-2026-01-01", draft=False,
+                       asset_name="nyshporka-catalog-2026-01-01.zip",
+                       digest=old_digest,
+                       url="https://example.invalid/dl/old.zip"),
+        _release_block("catalog-2026-12-01", draft=True,
+                       asset_name="nyshporka-catalog-2026-12-01.zip",
+                       digest="sha256:" + "0" * 64,
+                       url="https://example.invalid/dl/draft.zip"),
+        _release_block("catalog-2026-09-01", draft=False,
+                       asset_name="nyshporka-catalog-2026-09-01.zip",
+                       digest=new_digest,
+                       url="https://example.invalid/dl/new.zip"),
+    ])
+    releases_dir = tmp_path / "releases"
+    _write_releases_pages(releases_dir, releases_json)  # усе на сторінці 1
+
+    helpers = _unix_snippet("_sha256() {", "# 🗂 Довідники")
+    driver = tmp_path / "driver.sh"
+    driver.write_text(
+        "set -eu\n"
+        "say() { printf '%s\\n' \"$*\"; }\n"
+        f'RELEASES_API="{releases_url}"\n'
+        f"{helpers}\n"
+        "if _catalog_from_release; then rc=0; else rc=$?; fi\n"
+        "rm -rf \"${_CAT_TMP:-}\" 2>/dev/null || true\n"
+        'printf "RC:%s\\n" "$rc"\n',
+        encoding="utf-8")
+
+    # Мапа «URL з видачі → фікстура на диску» — через саме ім'я файла, яке
+    # бере фальшивий curl (`basename`), тож посилання вище узгоджені з
+    # іменами файлів у `zips/`. Сторінки 2 немає — фальшивий curl віддасть
+    # 404, і саме цього тут і треба: усе вже на сторінці 1.
+    env = _catalog_env(tmp_path, tmp_path)
+    env["FAKE_RELEASES_URL_PREFIX"] = releases_url
+    env["FAKE_RELEASES_DIR"] = str(releases_dir)
+    env["FAKE_ZIP_DIR"] = str(zips)
+
+    import subprocess
+    proc = subprocess.run([sh, str(driver)], cwd=tmp_path, env=env,
+                          capture_output=True, text=True, timeout=30)
+    assert "RC:0" in proc.stdout, (
+        f"нову catalog-* не поставлено:\nSTDOUT:\n{proc.stdout}\n"
+        f"STDERR:\n{proc.stderr}")
+
+    nysh_log = (tmp_path / "nysh.log").read_text(encoding="utf-8")
+    assert "catalog-2026-09-01" in nysh_log, (
+        f"у пак дійшов не найновіший недрафтовий catalog-*:\n{nysh_log}")
+    assert "catalog-2026-01-01" not in nysh_log
+
+    curl_log = (tmp_path / "curl.log").read_text(encoding="utf-8")
+    assert "dl/new.zip" in curl_log
+    assert "dl/old.zip" not in curl_log, (
+        "качало старіший пак замість тільки найновішого:\n" + curl_log)
+    assert "dl/draft.zip" not in curl_log, (
+        "чернетку не мали чіпати взагалі:\n" + curl_log)
+
+
+def test_catalog_from_release_paginates_past_the_first_page(
+        tmp_path: Path) -> None:
+    """🔴🔴 `catalog-*` виходить рідко, звичайні релізи — щотижня.
+
+    Репозиторій на момент цього приймача мав 32 релізи, і єдиний `catalog-*`
+    був НАЙСТАРІШИМ з них — тобто вже сьогодні сторінки 1 (`per_page=100`)
+    вистачає лише тому, що релізів менше сотні. Ще ~68 звичайних релізів — і
+    `catalog-*` тихо випав би за межу першої сторінки: не помилка, не
+    попередження, просто порожній каталог. Тут сторінка 1 не містить жодного
+    `catalog-*` взагалі, пак лежить на сторінці 2, а сторінка 3 — порожній
+    масив (`[]`), яким API сигналізує кінець списку.
+    """
+    sh = _require_shell_tools()
+
+    curl_sh, nysh_sh = tmp_path / "curl", tmp_path / "nysh"
+    _write_exec(curl_sh, _FAKE_CURL)
+    _write_exec(nysh_sh, _FAKE_NYSH)
+
+    zips = tmp_path / "zips"
+    zips.mkdir()
+    zip_bytes = _zip_bytes("catalog-2026-09-01")
+    (zips / "pack.zip").write_bytes(zip_bytes)
+    import hashlib
+    digest = "sha256:" + hashlib.sha256(zip_bytes).hexdigest()
+
+    page1 = _releases_json([
+        _release_block(f"v0.{n}.0", draft=False, asset_name=None,
+                       digest=None, url=None)
+        for n in range(1, 6)
+    ])
+    page2 = _releases_json([
+        _release_block("catalog-2026-09-01", draft=False,
+                       asset_name="nyshporka-catalog-2026-09-01.zip",
+                       digest=digest,
+                       url="https://example.invalid/dl/pack.zip"),
+    ])
+    page3 = "[]\n"
+    releases_url = "https://example.invalid/api/releases"
+    releases_dir = tmp_path / "releases"
+    _write_releases_pages(releases_dir, page1, page2, page3)
+
+    helpers = _unix_snippet("_sha256() {", "# 🗂 Довідники")
+    driver = tmp_path / "driver.sh"
+    driver.write_text(
+        "set -eu\n"
+        "say() { printf '%s\\n' \"$*\"; }\n"
+        f'RELEASES_API="{releases_url}"\n'
+        f"{helpers}\n"
+        "if _catalog_from_release; then rc=0; else rc=$?; fi\n"
+        "rm -rf \"${_CAT_TMP:-}\" 2>/dev/null || true\n"
+        'printf "RC:%s\\n" "$rc"\n',
+        encoding="utf-8")
+
+    env = _catalog_env(tmp_path, tmp_path)
+    env["FAKE_RELEASES_URL_PREFIX"] = releases_url
+    env["FAKE_RELEASES_DIR"] = str(releases_dir)
+    env["FAKE_ZIP_DIR"] = str(zips)
+
+    import subprocess
+    proc = subprocess.run([sh, str(driver)], cwd=tmp_path, env=env,
+                          capture_output=True, text=True, timeout=30)
+    assert "RC:0" in proc.stdout, (
+        f"пак зі сторінки 2 не поставлено:\nSTDOUT:\n{proc.stdout}\n"
+        f"STDERR:\n{proc.stderr}")
+
+    nysh_log = (tmp_path / "nysh.log").read_text(encoding="utf-8")
+    assert "catalog-2026-09-01" in nysh_log, (
+        f"пак зі сторінки 2 не дійшов до встановлення:\n{nysh_log}")
+
+    curl_log = (tmp_path / "curl.log").read_text(encoding="utf-8")
+    assert "page=1" in curl_log and "page=2" in curl_log, (
+        "не гортало сторінок — обмежилось першою:\n" + curl_log)
+
+
+def test_catalog_digest_mismatch_skips_install_and_exits_clean(
+        tmp_path: Path) -> None:
+    """🔴 Розбіжна контрольна сума — не встановлюємо, і скрипт не падає.
+
+    Обірваний файл виглядає як пак: на місці, з іменем, навіть
+    розпаковується. Приймач ганяє ввесь блок «🗂 Довідники» (не саму лише
+    функцію), бо саме там перевіряється друга половина вимоги — після
+    невдалого качання встановлення в цілому доходить до кінця (`exit 0`),
+    так, як воно доходить у справжньому `unix.sh` після цього блоку.
+    """
+    sh = _require_shell_tools()
+
+    curl_sh, nysh_sh = tmp_path / "curl", tmp_path / "nysh"
+    _write_exec(curl_sh, _FAKE_CURL)
+    _write_exec(nysh_sh, _FAKE_NYSH)
+
+    zips = tmp_path / "zips"
+    zips.mkdir()
+    (zips / "pack.zip").write_bytes(_zip_bytes("catalog-2026-05-01"))
+    wrong_digest = "sha256:" + "ab" * 32  # 64 hex, свідомо не той
+
+    releases_url = "https://example.invalid/api/releases"
+    releases_json = _releases_json([
+        _release_block("catalog-2026-05-01", draft=False,
+                       asset_name="nyshporka-catalog-2026-05-01.zip",
+                       digest=wrong_digest,
+                       url="https://example.invalid/dl/pack.zip"),
+    ])
+    releases_dir = tmp_path / "releases"
+    _write_releases_pages(releases_dir, releases_json)
+
+    fetch = _unix_snippet("_sha256() {", "# 🗂 Довідники")
+    call_site = _unix_snippet("# 🗂 Довідники", "# ── що змінилось")
+    # ⚠ `$0` у блоці задає теку пошуку "поруч лежачого" пака (SEED) — фікстури
+    # вище тому НЕ в теці, де лежатиме сам driver-скрипт, інакше SEED знайшов
+    # би їх першим і до `_catalog_from_release` узагалі не дійшло б.
+    workdir = tmp_path / "work"
+    workdir.mkdir()
+    driver = workdir / "driver.sh"
+    driver.write_text(
+        "set -eu\n"
+        "say() { printf '%s\\n' \"$*\"; }\n"
+        f'RELEASES_API="{releases_url}"\n'
+        'CATALOG_URL="https://example.invalid/releases"\n'
+        'NO_CATALOG="${NYSH_NO_CATALOG:-0}"\n'
+        f"{fetch}\n\n{call_site}\n"
+        'exit 0\n',
+        encoding="utf-8")
+
+    env = _catalog_env(tmp_path, tmp_path)
+    env["FAKE_RELEASES_URL_PREFIX"] = releases_url
+    env["FAKE_RELEASES_DIR"] = str(releases_dir)
+    env["FAKE_ZIP_DIR"] = str(zips)
+
+    import subprocess
+    proc = subprocess.run([sh, str(driver)], cwd=workdir, env=env,
+                          capture_output=True, text=True, timeout=30)
+    assert proc.returncode == 0, (
+        f"невдала звірка sha256 звалила встановлення:\n{proc.stdout}\n"
+        f"{proc.stderr}")
+    assert "не збіглася" in proc.stdout, proc.stdout
+    assert "довідників поруч немає" in proc.stdout, (
+        "після невдачі не показано пораду «взяти … / далі …»:\n" + proc.stdout)
+
+    nysh_log_path = tmp_path / "nysh.log"
+    assert not nysh_log_path.exists() or not nysh_log_path.read_text(
+        encoding="utf-8").strip(), (
+        "«nysh catalog install» покликано на паку з невірною сумою")
+
+
+def test_catalog_no_catalog_env_skips_the_network_entirely(
+        tmp_path: Path) -> None:
+    """`NYSH_NO_CATALOG=1` — жодного звернення до GitHub API, навіть перелік."""
+    sh = _require_shell_tools()
+
+    curl_sh, nysh_sh = tmp_path / "curl", tmp_path / "nysh"
+    _write_exec(curl_sh, _FAKE_CURL)
+    _write_exec(nysh_sh, _FAKE_NYSH)
+
+    call_site = _unix_snippet("# 🗂 Довідники", "# ── що змінилось")
+    workdir = tmp_path / "work"
+    workdir.mkdir()
+    driver = workdir / "driver.sh"
+    driver.write_text(
+        "set -eu\n"
+        "say() { printf '%s\\n' \"$*\"; }\n"
+        'RELEASES_API="https://example.invalid/api/releases"\n'
+        'CATALOG_URL="https://example.invalid/releases"\n'
+        'NO_CATALOG="${NYSH_NO_CATALOG:-0}"\n'
+        f"{call_site}\n"
+        'exit 0\n',
+        encoding="utf-8")
+
+    env = _catalog_env(tmp_path, tmp_path)
+    env["NYSH_NO_CATALOG"] = "1"
+    env["FAKE_RELEASES_URL_PREFIX"] = "https://example.invalid/api/releases"
+    env["FAKE_RELEASES_DIR"] = str(tmp_path / "releases")  # не читається
+    env["FAKE_ZIP_DIR"] = str(tmp_path)
+
+    import subprocess
+    proc = subprocess.run([sh, str(driver)], cwd=workdir, env=env,
+                          capture_output=True, text=True, timeout=30)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "не ставляться (NYSH_NO_CATALOG=1)" in proc.stdout, proc.stdout
+
+    curl_log = tmp_path / "curl.log"
+    assert not curl_log.exists(), (
+        "NYSH_NO_CATALOG=1 і все одно кликав curl:\n"
+        + (curl_log.read_text(encoding="utf-8") if curl_log.exists() else ""))
