@@ -632,6 +632,14 @@ exit 0
 """
 
 
+# ⚠ Фальшивки ставляться на початок PATH ЩЕ РАЗ — уже всередині оболонки.
+# PATH із Python не доходить до скрипта незмінним: `Git\bin\sh.exe` (саме його
+# знаходить `shutil.which` на windows-latest) — обгортка, яка ставить
+# `/mingw64/bin` зі справжнім `curl.exe` ПЕРЕД усім переданим, і фальшивий
+# `curl` програвав. `cd` + `pwd` дає теку у формі, яку розуміє сама оболонка.
+_FAKE_PATH_FIRST = 'PATH="$(cd "$FAKE_BIN_DIR" && pwd):$PATH"\n'
+
+
 def _release_block(tag: str, draft: bool, asset_name: str | None,
                    digest: str | None, url: str | None) -> str:
     """Один елемент масиву `releases`, з тим самим кроком відступу, що й
@@ -676,6 +684,7 @@ def _catalog_env(bin_dir: Path, log_dir: Path) -> dict[str, str]:
     env["PATH"] = f"{bin_dir}{os.pathsep}{env.get('PATH', '')}"
     env["FAKE_CURL_LOG"] = str(log_dir / "curl.log")
     env["FAKE_NYSH_LOG"] = str(log_dir / "nysh.log")
+    env["FAKE_BIN_DIR"] = str(bin_dir)
     return env
 
 
@@ -740,6 +749,7 @@ def test_catalog_from_release_picks_the_newest_non_draft_tag(
     driver = tmp_path / "driver.sh"
     driver.write_text(
         "set -eu\n"
+        f"{_FAKE_PATH_FIRST}"
         "say() { printf '%s\\n' \"$*\"; }\n"
         f'RELEASES_API="{releases_url}"\n'
         f"{helpers}\n"
@@ -823,6 +833,7 @@ def test_catalog_from_release_paginates_past_the_first_page(
     driver = tmp_path / "driver.sh"
     driver.write_text(
         "set -eu\n"
+        f"{_FAKE_PATH_FIRST}"
         "say() { printf '%s\\n' \"$*\"; }\n"
         f'RELEASES_API="{releases_url}"\n'
         f"{helpers}\n"
@@ -894,6 +905,7 @@ def test_catalog_digest_mismatch_skips_install_and_exits_clean(
     driver = workdir / "driver.sh"
     driver.write_text(
         "set -eu\n"
+        f"{_FAKE_PATH_FIRST}"
         "say() { printf '%s\\n' \"$*\"; }\n"
         f'RELEASES_API="{releases_url}"\n'
         'CATALOG_URL="https://example.invalid/releases"\n'
@@ -939,6 +951,7 @@ def test_catalog_no_catalog_env_skips_the_network_entirely(
     driver = workdir / "driver.sh"
     driver.write_text(
         "set -eu\n"
+        f"{_FAKE_PATH_FIRST}"
         "say() { printf '%s\\n' \"$*\"; }\n"
         'RELEASES_API="https://example.invalid/api/releases"\n'
         'CATALOG_URL="https://example.invalid/releases"\n'

@@ -480,7 +480,9 @@ $null = Invoke-Logged $nysh doctor
 # перетворить `$false` на масив, а непорожній масив для `if` — істина.
 function Install-CatalogFromRelease {
     param([Parameter(Mandatory)][string] $Nysh)
-    $tmp = Join-Path $env:TEMP ('nysh-catalog-' + [guid]::NewGuid().ToString('N'))
+    # `GetTempPath()`, а не `$env:TEMP`: на Windows це та сама тека, а
+    # приймач проганяє функцію й під pwsh на Linux, де `$env:TEMP` немає.
+    $tmp = Join-Path ([IO.Path]::GetTempPath()) ('nysh-catalog-' + [guid]::NewGuid().ToString('N'))
     try {
         $releases = @()
         for ($page = 1; $page -le 10; $page++) {
