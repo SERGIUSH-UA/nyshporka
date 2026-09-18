@@ -960,3 +960,222 @@ def test_catalog_no_catalog_env_skips_the_network_entirely(
     assert not curl_log.exists(), (
         "NYSH_NO_CATALOG=1 і все одно кликав curl:\n"
         + (curl_log.read_text(encoding="utf-8") if curl_log.exists() else ""))
+
+
+# ── windows.ps1: той самий пак з останнього релізу catalog-* ─────────────────
+# 🔴 Майстер `.exe` везе пак із собою, а `windows.ps1`, завантажений без клону
+# (`irm … -OutFile`), — ні: поруч із ним пака не буває, і `nysh find` по
+# каталогах архівів мовчав би. Логіка — в одній функції
+# `Install-CatalogFromRelease`, щоб приймач міг узяти її з файла розбором AST
+# і прогнати окремо від решти інсталятора (той ставить uv і пакет). Мережа
+# фальшива: `Invoke-RestMethod` і `Invoke-WebRequest` підміняються функціями
+# (функція в PowerShell має перевагу над cmdlet'ом з тим самим іменем),
+# `nysh` — фальшивим `Invoke-Logged`.
+_PS_CATALOG_DRIVER = r"""
+$ErrorActionPreference = 'Stop'
+$src = [IO.File]::ReadAllText($env:PS1_PATH)
+$e = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseInput($src, [ref]$null, [ref]$e)
+$fn = $ast.FindAll({ param($n)
+    $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+    $n.Name -eq 'Install-CatalogFromRelease' }, $true) | Select-Object -First 1
+if (-not $fn) { 'NO-FUNCTION'; exit 3 }
+. ([scriptblock]::Create($fn.Extent.Text))
+
+$CatalogApi = 'https://example.invalid/api/releases?per_page=100'
+function Say($t, $c = 'White') { Write-Host $t }
+function Invoke-RestMethod {
+    param([string]$Uri, $TimeoutSec, [switch]$UseBasicParsing)
+    Add-Content -LiteralPath $env:FAKE_NET_LOG -Value "api $Uri"
+    if ($env:FAKE_API_DOWN -eq '1') { throw 'мережа недоступна' }
+    $page = [regex]::Match($Uri, '&page=(\d+)$').Groups[1].Value
+    $f = Join-Path $env:FAKE_RELEASES_DIR "page-$page.json"
+    if (-not (Test-Path -LiteralPath $f)) { throw "404 $Uri" }
+    Get-Content -LiteralPath $f -Raw -Encoding UTF8 | ConvertFrom-Json
+}
+function Invoke-WebRequest {
+    param([string]$Uri, [string]$OutFile, $TimeoutSec, [switch]$UseBasicParsing)
+    Add-Content -LiteralPath $env:FAKE_NET_LOG -Value "dl $Uri"
+    $f = Join-Path $env:FAKE_ZIP_DIR ($Uri -split '/')[-1]
+    if (-not (Test-Path -LiteralPath $f)) { throw "404 $Uri" }
+    Copy-Item -LiteralPath $f -Destination $OutFile
+}
+function Invoke-Logged {
+    param([string]$Exe, [Parameter(ValueFromRemainingArguments)] [object[]]$Arguments)
+    Add-Content -LiteralPath $env:FAKE_NYSH_LOG -Value "$Exe $Arguments"
+    $mark = Join-Path $Arguments[-1] 'MARK.txt'
+    if (Test-Path -LiteralPath $mark) {
+        Add-Content -LiteralPath $env:FAKE_NYSH_LOG -Value (Get-Content -LiteralPath $mark -Raw)
+    }
+    return 0
+}
+
+$r = Install-CatalogFromRelease -Nysh 'nysh'
+"RESULT:$(@($r).Count):$($r.GetType().Name):$r"
+"""
+
+
+def _powershell() -> str:
+    """Windows PowerShell 5.1 там, де він є (саме в ньому інсталятор працює в
+    людей), інакше `pwsh`; немає жодного — пропуск."""
+    import os
+    import shutil
+
+    if os.name == "nt":
+        ps51 = Path(os.environ.get("SYSTEMROOT", r"C:\Windows")) \
+            / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+        if ps51.exists():
+            return str(ps51)
+    ps = shutil.which("pwsh") or shutil.which("powershell")
+    if ps is None:
+        pytest.skip("PowerShell недоступний")
+    return ps
+
+
+def _gh_release(tag: str, *, draft: bool = False, asset: str | None = None,
+                digest: str | None = None, url: str | None = None) -> dict:
+    rel: dict = {"tag_name": tag, "draft": draft, "assets": []}
+    if asset is not None:
+        a: dict = {"name": asset, "browser_download_url": url}
+        if digest is not None:
+            a["digest"] = digest
+        rel["assets"].append(a)
+    return rel
+
+
+def _run_ps_catalog(tmp_path: Path, pages: list[list[dict]],
+                    zips: dict[str, bytes],
+                    extra_env: dict[str, str] | None = None) -> dict[str, str]:
+    """Проганяє `Install-CatalogFromRelease` проти фальшивого GitHub.
+
+    Повертає відповідь функції, її вивід і журнали мережі та `nysh`."""
+    import json
+    import os
+    import subprocess
+
+    ps = _powershell()
+    rel_dir = tmp_path / "releases"
+    rel_dir.mkdir()
+    for i, page in enumerate(pages, start=1):
+        (rel_dir / f"page-{i}.json").write_text(
+            json.dumps(page, ensure_ascii=False, indent=2), encoding="utf-8")
+    zip_dir = tmp_path / "zips"
+    zip_dir.mkdir()
+    for name, data in zips.items():
+        (zip_dir / name).write_bytes(data)
+    driver = tmp_path / "driver.ps1"
+    # BOM — той самий захист від ANSI-читання, що й у самого інсталятора.
+    driver.write_text(_PS_CATALOG_DRIVER, encoding="utf-8-sig")
+
+    net_log, nysh_log = tmp_path / "net.log", tmp_path / "nysh.log"
+    env = dict(os.environ)
+    env.update({"PS1_PATH": str(PS1), "FAKE_RELEASES_DIR": str(rel_dir),
+                "FAKE_ZIP_DIR": str(zip_dir), "FAKE_NET_LOG": str(net_log),
+                "FAKE_NYSH_LOG": str(nysh_log)})
+    env.update(extra_env or {})
+    proc = subprocess.run(
+        [ps, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+         "-File", str(driver)],
+        capture_output=True, timeout=120, env=env)
+    out = proc.stdout.decode("utf-8", errors="replace")
+    err = proc.stderr.decode("utf-8", errors="replace")
+    m = re.search(r"RESULT:(\d+):(\w+):(\w+)", out)
+    assert proc.returncode == 0 and m, (
+        f"драйвер не дійшов до відповіді (код {proc.returncode}):\n{out}\n{err}")
+    # 🔴 Відповідь мусить бути ОДНИМ Boolean: зайвий об'єкт у конвеєрі робить
+    # з `$false` масив, а непорожній масив для `if` — істина.
+    assert (m.group(1), m.group(2)) == ("1", "Boolean"), (
+        f"функція писала в конвеєр щось, крім відповіді:\n{out}")
+    return {"result": m.group(3), "out": out,
+            "net": net_log.read_text(encoding="utf-8") if net_log.exists() else "",
+            "nysh": nysh_log.read_text(encoding="utf-8") if nysh_log.exists() else ""}
+
+
+def _sha256_digest(data: bytes) -> str:
+    import hashlib
+
+    return "sha256:" + hashlib.sha256(data).hexdigest()
+
+
+def test_ps1_catalog_picks_newest_non_draft_across_pages(tmp_path: Path) -> None:
+    """Найновіший недрафтовий `catalog-*`, і лише він, навіть на сторінці 2.
+
+    Сторінка 1 — звичайні релізи й старий `catalog-*`; сторінка 2 —
+    новіший і ще новіша ЧЕРНЕТКА; сторінка 3 — порожня (кінець списку).
+    """
+    old, new = _zip_bytes("catalog-2026-01-01"), _zip_bytes("catalog-2026-09-01")
+    page1 = [_gh_release(f"v0.{n}.0") for n in range(1, 4)] + [
+        _gh_release("catalog-2026-01-01", asset="nyshporka-catalog-2026-01-01.zip",
+                    digest=_sha256_digest(old),
+                    url="https://example.invalid/dl/old.zip")]
+    page2 = [
+        _gh_release("catalog-2026-12-01", draft=True,
+                    asset="nyshporka-catalog-2026-12-01.zip",
+                    digest="sha256:" + "0" * 64,
+                    url="https://example.invalid/dl/draft.zip"),
+        _gh_release("catalog-2026-09-01", asset="nyshporka-catalog-2026-09-01.zip",
+                    digest=_sha256_digest(new),
+                    url="https://example.invalid/dl/new.zip")]
+    r = _run_ps_catalog(tmp_path, [page1, page2, []],
+                        {"old.zip": old, "new.zip": new})
+
+    assert r["result"] == "True", r["out"]
+    assert "page=1" in r["net"] and "page=2" in r["net"], (
+        "не гортало сторінок — обмежилось першою:\n" + r["net"])
+    assert "dl/new.zip" in r["net"]
+    assert "dl/old.zip" not in r["net"] and "dl/draft.zip" not in r["net"], r["net"]
+    assert "catalog install --from" in r["nysh"], r["nysh"]
+    assert "catalog-2026-09-01" in r["nysh"], (
+        "у `nysh catalog install` дійшов не той пак:\n" + r["nysh"])
+
+
+def test_ps1_catalog_digest_mismatch_is_not_installed(tmp_path: Path) -> None:
+    """🔴 Сума не збіглась — `nysh catalog install` не кличеться, відповідь False."""
+    page = [_gh_release("catalog-2026-05-01", asset="nyshporka-catalog-2026-05-01.zip",
+                        digest="sha256:" + "ab" * 32,
+                        url="https://example.invalid/dl/pack.zip")]
+    r = _run_ps_catalog(tmp_path, [page], {"pack.zip": _zip_bytes("x")})
+    assert r["result"] == "False", r["out"]
+    assert "не збіглася" in r["out"], r["out"]
+    assert not r["nysh"].strip(), "пак із невірною сумою пішов у встановлення"
+
+
+def test_ps1_catalog_without_digest_is_not_even_downloaded(tmp_path: Path) -> None:
+    """Асет без `digest` — звіряти нічим, тож і качати його нема чого."""
+    page = [_gh_release("catalog-2026-05-01", asset="nyshporka-catalog-2026-05-01.zip",
+                        url="https://example.invalid/dl/pack.zip")]
+    r = _run_ps_catalog(tmp_path, [page], {"pack.zip": _zip_bytes("x")})
+    assert r["result"] == "False", r["out"]
+    assert "dl/" not in r["net"], "качало асет, який однаково не звірити:\n" + r["net"]
+    assert not r["nysh"].strip()
+
+
+def test_ps1_catalog_network_failure_does_not_throw(tmp_path: Path) -> None:
+    """🔴 Мережа лежить — відповідь False, а не виняток.
+
+    Виняток із функції під `$ErrorActionPreference = 'Stop'` дійшов би до
+    `trap` інсталятора, і людина, в якої застосунок уже стоїть, побачила б
+    «установлення не завершилось».
+    """
+    r = _run_ps_catalog(tmp_path, [[]], {}, extra_env={"FAKE_API_DOWN": "1"})
+    assert r["result"] == "False", r["out"]
+    assert "мережа чи ліміт API" in r["out"], r["out"]
+
+
+def test_ps1_catalog_is_wired_with_opt_out_before_the_advice() -> None:
+    """Виклик стоїть між паком «поруч» і старою порадою, і його можна вимкнути.
+
+    Порядок має значення: пак поруч (майстер `.exe`) не підміняється мережею,
+    `-NoCatalog` / `NYSH_NO_CATALOG=1` — не ходити в мережу взагалі, а порада
+    «взяти / далі» лишається для будь-якої відмови.
+    """
+    text = ps1_text()
+    assert re.search(r"^\s*\[switch\]\$NoCatalog,", text, re.M), (
+        "windows.ps1: немає параметра -NoCatalog")
+    assert "$env:NYSH_NO_CATALOG -eq '1'" in text, (
+        "windows.ps1: не слухає NYSH_NO_CATALOG=1, як unix.sh")
+    seed = text.index("if ($seed) {")
+    no_cat = text.index("} elseif ($NoCatalog) {", seed)
+    fetch = text.index("} elseif (Install-CatalogFromRelease -Nysh $nysh) {", no_cat)
+    advice = text.index("довідників поруч немає", fetch)
+    assert seed < no_cat < fetch < advice
