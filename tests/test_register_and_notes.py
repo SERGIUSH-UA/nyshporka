@@ -530,3 +530,53 @@ def test_a_missing_folder_is_still_reported_as_a_missing_folder(space: Path) -> 
     """Шлях, який справді є шляхом, лишається шляхом: підказка точкова."""
     with pytest.raises(R.RegisterError, match="теки немає"):
         R.describe("data/raw/немає-такої")
+
+
+# ── паспорт і ключ справи (issue #19) ────────────────────────────────────────
+def _folder(root: Path, rel: str) -> Path:
+    d = root / rel
+    d.mkdir(parents=True)
+    (d / "0001.jpg").write_bytes(b"x")
+    return d
+
+
+def test_passport_beats_a_root_name_that_is_not_an_archive(space: Path) -> None:
+    """🔴 Тека, названа шифрою, під коренем «скани» — ключ з паспорта, не «СКАНИ»."""
+    from nyshporka import library as L
+
+    root = space.parent.parent.parent          # tmp_path — корінь простору
+    d = _folder(root, "скани/ДАХмО 315-1-8433")
+    R.describe(d, shifra="ДАХмО 315-1-8433")
+    L._sidecar_case.cache_clear()
+    got = L.parse_case_path("скани/ДАХмО 315-1-8433")
+    assert got is not None and got[0] == "DAHMO", got
+    assert L._mk_key(got[0], got[1], got[3], got[2]) == "DAHMO/315/8433"
+
+
+def test_known_archive_slug_is_still_read_from_the_name(space: Path) -> None:
+    from nyshporka import library as L
+
+    got = L.parse_case_path("data/raw/dahmo_315/spr-8433")
+    assert got == ("DAHMO", "315", None, "8433")
+
+
+def test_register_warns_when_the_name_and_the_passport_disagree(space: Path) -> None:
+    from nyshporka import ops as O
+
+    d = _folder(space.parent, "dahmo_315/spr-8433")
+    env = O.call("case.register", {"case_dir": str(d), "shifra": "ДАХмО 315-1-8434",
+                                   "reindex": False})
+    assert env.ok, env.error
+    warn = next((w for w in env.warnings if w.code == "key_mismatch"), None)
+    assert warn is not None, "ключ з імені теки суперечить паспорту — і мовчок"
+    assert "DAHMO/315/8433" in warn.text and "DAHMO/315/8434" in warn.text
+
+
+def test_register_is_silent_when_the_name_and_the_passport_agree(space: Path) -> None:
+    from nyshporka import ops as O
+
+    d = _folder(space.parent, "dahmo_315/spr-8433")
+    env = O.call("case.register", {"case_dir": str(d), "shifra": "ДАХмО 315-1-8433",
+                                   "reindex": False})
+    assert env.ok, env.error
+    assert not any(w.code == "key_mismatch" for w in env.warnings)

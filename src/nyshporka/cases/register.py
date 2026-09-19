@@ -249,6 +249,42 @@ def reachable(case_dir: Path) -> bool:
     return False
 
 
+def key_mismatch(case_dir: Path, sidecar: dict[str, Any]) -> str:
+    """Порожньо, якщо бібліотека дасть теці ключ паспорта; інакше — пояснення.
+
+    🔴 Ключ справи бібліотека складає з ІМЕНІ теки й лише тоді, коли ім'я
+    мовчить, питає паспорт. Тож паспорт і ключ можуть розійтись: тека
+    `скани/ДАХмО 315-1-8433` лягала під `СКАНИ/315/8433`, а реєстрація, яка
+    щойно записала поруч «ДАХмО», відповідала `ok` без жодного слова (issue #19).
+    Облік прочитаних аркушів ляже за ключем, тож розбіжність треба назвати
+    одразу, а не тоді, коли облік на старому ключі виявиться порожнім.
+    """
+    import os
+
+    from nyshporka.core.workspace import workspace
+
+    if not sidecar.get("shifra"):
+        return ""
+    want = L._mk_key(sidecar.get("repo"), sidecar.get("fond"), sidecar.get("spr"),
+                     sidecar.get("opys"))
+    if not want:
+        return ""
+    try:
+        rel = Path(os.path.abspath(case_dir)).relative_to(
+            os.path.abspath(workspace().root)).as_posix()
+    except ValueError:
+        rel = Path(case_dir).as_posix()
+    L._sidecar_case.cache_clear()       # паспорт щойно переписано
+    parsed = L.parse_case_path(rel)
+    if not parsed or want in L.candidate_keys(parsed):
+        return ""
+    got = L.candidate_keys(parsed)[0]
+    return (f"бібліотека покладе теку під ключ «{got}» (зібраний з імені теки), "
+            f"а паспорт каже «{want}» ({sidecar.get('shifra')}). Облік прочитаного "
+            f"ляже за першим. Перейменуйте теку або перенесіть її в "
+            f"`data/raw/<архів>_<фонд>/spr-<справа>`.")
+
+
 #: Чим людина каже «зітри це поле».
 #:
 #: 🔴 Порожнє поле лишає попереднє значення — і це правильно: правка одного

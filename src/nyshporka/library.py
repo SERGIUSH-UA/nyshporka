@@ -576,11 +576,15 @@ def parse_case_path(rel: str) -> tuple[str, str, str | None, str] | None:
     if slug == _ARCHIUM_SLUG:
         return _archium_parse(parts[-1])
     repo = fond = opys = None
+    # Архів, ВГАДАНИЙ з голого слова, якого пак не знає (`скани`, `Users`).
+    guessed = False
     m = _SLUG_FOND_RE.match(slug)
     if m:
         repo, fond = _canon_repo(m.group(1)), _norm_spr(m.group(2))
     elif slug.split("_")[0].isalpha():
-        repo = _canon_repo(slug.split("_")[0])
+        word = slug.split("_")[0]
+        repo = _canon_repo(word)
+        guessed = not _repo_of_word(word)
     if repo is None:
         # 🔴 Slug архіву не завжди перший сегмент. Рендери під HTR-чергу лежать на
         # архівному томі: `<том>/dahmo_230/230-1-2а`, і перший сегмент
@@ -652,6 +656,16 @@ def parse_case_path(rel: str) -> tuple[str, str, str | None, str] | None:
         # Ім'я теки коду справи не несе (`harvest` fsfiles зве теки за плівкою й
         # кадрами: `2102930_0309-0313`). Шифра лежить у сайдкарі, писаному руками.
         return _sidecar_case(rel)
+    if guessed:
+        # 🔴 Паспорт сильніший за вгадане ім'я кореня. Тека під `case_roots`,
+        # названа шифрою (`скани/ДАХмО 315-1-8433`), діставала ключ
+        # `СКАНИ/315/8433`: архів брався з імені кореневої теки, а сайдкар, який
+        # `case.register` щойно записав поруч, не питався зовсім — бо з імені
+        # «все вийшло» (issue #19). Назвати теку точніше означало зламати ключ.
+        # Теки без паспорта поводяться як досі.
+        side = _sidecar_case(rel)
+        if side:
+            return side
     return repo, fond, opys, spr
 
 
