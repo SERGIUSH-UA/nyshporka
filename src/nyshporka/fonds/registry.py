@@ -25,7 +25,17 @@ import re
 from pathlib import Path
 from typing import Any
 
+# 🔴 `FOND_TOKEN` — з `shifra_tokens`, а НЕ з `library` (issue #21, CI «ставиться
+# з нуля» падав). `library.py` на рівні модуля виконує `_WS = workspace()`, тож
+# вимагає наявного робочого простору вже при імпорті; `shifra_tokens` — три
+# рядки без жодної залежності, і взяти звідти `FOND_TOKEN` (він живе всередині
+# `re.compile` нижче, на рівні МОДУЛЯ) можна безпечно. `_norm_fond`, навпаки,
+# сама з `library` і без побічних дій не буває — вона йде лениво, всередині
+# `parse_key()`, так само, як сусідні функції цього файлу вже беруть звідти
+# `LIBRARY_PATH`/`load_library()`. Не виносити назад на рівень модуля: саме
+# цей імпорт і зламав установлення на голій машині раніше.
 from nyshporka.core.workspace import workspace
+from nyshporka.shifra_tokens import FOND_TOKEN
 
 #: 🔴 Обидва коди Вінницького архіву ведуть в ОДИН slug. Реєстр опису лежить
 #: файлом `<slug>_<фонд>.json`, і два різні slug'и означали б два файли на той
@@ -118,8 +128,14 @@ _LEGACY_UNKNOWN = ("spr_to", "title_alt", "commons_title", "years_src", "folios"
                    "cover_place", "cover_letters", "cover_note")
 
 _SPR_RE = re.compile(r"^(\d+)\s*([а-яіїєґa-z]?)$", re.IGNORECASE)
-_KEY_RE = re.compile(r"^([A-Za-zА-Яа-яІЇЄҐіїєґ]+)[/\s-]+(\d+)[/\s-]+(?:(\d+)[/\s-]+)?"
-                     r"(\d+)\s*([а-яіїєґa-z]?)$")
+# 🔴 Фонд — через спільну `FOND_TOKEN` (`library.py`), а не власний `\d+`
+# (issue #21). Опис тут — ОКРЕМА необов'язкова група (з власним роздільником
+# після себе), а не дефіс усередині фонду, тож літерний префікс («Р-6129») і
+# його ж власний дефіс не плутаються з дефісом опису: `FOND_TOKEN` забирає рівно
+# «Р-6129», далі роздільник, далі опис — на відміну від `pagestore.store._KEY_RE`,
+# де фонд і опис вписані в один сегмент і довелось зважати на цю саму двозначність.
+_KEY_RE = re.compile(rf"^([A-Za-zА-Яа-яІЇЄҐіїєґ]+)[/\s-]+({FOND_TOKEN})[/\s-]+(?:(\d+)[/\s-]+)?"
+                     r"(\d+)\s*([а-яіїєґa-z]?)$", re.IGNORECASE)
 _YEAR_RE = re.compile(r"^(\d{4})(?:\s*[-–]\s*(\d{4}))?$")
 
 #: memo: fond_id → (stamp, rows). stamp = (path, mtime_ns, size) — перезбірка реєстру
@@ -774,6 +790,16 @@ def surname_list(fond_id: str, limit: int = 400) -> list[str]:
 
 def parse_key(key: str) -> tuple[str, str, str, str, str]:
     """`DAHMO/230/43` або `ДАХмО 230-1-43` → (repo, fond, opys, spr_int, letter)."""
+    # 🔴 Лениво, всередині функції (issue #21) — так само, як `LIBRARY_PATH` і
+    # `load_library()` уже беруться нижче в цьому файлі. `library.py` на рівні
+    # СВОГО модуля вимагає наявного робочого простору (`_WS = workspace()`), і
+    # module-level `from nyshporka.library import _norm_fond` тут зробило б
+    # сам імпорт `nyshporka.fonds.registry` (а через нього — `nyshporka.cli`)
+    # таким, що падає без простору відразу після встановлення. НЕ виносити
+    # нагору — саме цей імпорт уже одного разу зламав `nysh version` на голій
+    # машині.
+    from nyshporka.library import _norm_fond
+
     m = _KEY_RE.match(key.strip())
     if not m:
         raise ValueError(f"не розумію ключ «{key}». Приклади: DAHMO/230/43, "
@@ -785,7 +811,14 @@ def parse_key(key: str) -> tuple[str, str, str, str, str]:
     # реєстру залежно від того, звідки прийшов виклик.
     repo = {"ДАХМО": "DAHMO", "ЦДІАК": "CDIAK", "ДАВІО": "DAVIO",
             "ДАВО": "DAVIO"}.get(repo, repo)
-    return repo, m.group(2), (m.group(3) or "1"), m.group(4), (m.group(5) or "").lower()
+    # 🔴 Фонд — так само через `_norm_fond`, а не сирою групою регексу. `FOND_TOKEN`
+    # (issue #21) навчив цей `_KEY_RE` приймати кириличний префікс («Р-100»), і без
+    # канонізації один фонд знову розходився б на два ключі реєстру — рівно та сама
+    # хвороба, яку `_norm_fond` вже лікує в `pagestore.store.resolve_case` (див.
+    # коментар там). ⚠ Побічний ефект для числового фонду: `_norm_fond` знімає
+    # провідні нулі («0230» → «230»), як і скрізь у пакеті.
+    fond = str(_norm_fond(m.group(2)))
+    return repo, fond, (m.group(3) or "1"), m.group(4), (m.group(5) or "").lower()
 
 
 def fond_id_of(repo: str, fond: str) -> str:

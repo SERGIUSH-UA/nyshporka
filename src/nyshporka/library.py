@@ -34,6 +34,17 @@ from typing import Any
 from nyshporka.archives.pack import active as _pack_active
 from nyshporka.core.workspace import workspace
 from nyshporka.models import Source
+
+# 🔴 Ре-експорт (issue #21): `shifra_tokens` — три цеглинки шифри без побічних
+# дій, винесені окремо саме тому, що `library` (цей модуль) на рівні свого
+# імпорту вимагає робочого простору (`_WS = workspace()` нижче), а
+# `fonds/registry.py` бере `FOND_TOKEN` на рівні СВОГО модуля. Решта коду
+# пакета й далі бере ці три імені з `library` — нічого, крім джерела, не
+# змінюється. `as`-форма — щоб mypy (`--no-implicit-reexport`) визнав це
+# СПРАВЖНІМ ре-експортом, а не позначив непрямим імпортом у кожному вживачі.
+from nyshporka.shifra_tokens import FOND_TOKEN as FOND_TOKEN
+from nyshporka.shifra_tokens import OPYS_TOKEN as OPYS_TOKEN
+from nyshporka.shifra_tokens import SPR_TOKEN as SPR_TOKEN
 from nyshporka.storage.files import read_source
 from nyshporka.utils.atomic import CorruptFileError, read_json, write_json
 
@@ -227,9 +238,8 @@ _ID_RE = re.compile(r"^S_([A-Z]+?)_F([А-ЯЄІЇҐA-Z]{0,2}\d+)(?:_OP(\d+))?_D(
 #: бібліотека навчилась читати «Р-6129», а реєстрація на тій самій шифрі казала
 #: «не розібрав». Розбори різні за призначенням і зводити їх в один не можна, а
 #: от відповідь на питання «що таке номер фонду» мусить бути одна.
-FOND_TOKEN = r"(?:[А-ЯЄІЇҐA-Z]{1,2}-)?\d+"      # 315 · Р-6129 · R-6129
-OPYS_TOKEN = r"\d+[а-яa-z]?"                     # 1 · 24 · 4б
-SPR_TOKEN = r"\d+[а-яa-z]?"                      # 8433 · 2а
+#: (Самі рядки й далі живуть у `shifra_tokens.py` без побічних дій; тут — лише
+#: ре-експорт, імпортований разом з рештою модулів на початку файла.)
 
 _SHIFRA_RE = re.compile(
     rf"({FOND_TOKEN})\s*[-–]\s*(\d+)\s*[-–]\s*({SPR_TOKEN})", re.IGNORECASE)
@@ -464,8 +474,29 @@ def _mk_key(repo: str | None, fond: str | None, spr: str | None,
     return f"{repo}/{fond}/{spr}"
 
 
+#: 🔴 Розбір за `FOND_TOKEN`, а не за першим дефісом. У літерного фонду («Р-6129»)
+#: дефіс — ЧАСТИНА самого номера, і наївний `partition("-")` різав би його
+#: навпіл («Р» + «6129-24» замість «Р-6129» + «24») — issue #21: `_KEY_RE`
+#: `pagestore.store` навчився приймати літерний фонд у цьому самому сегменті
+#: ключа (`repo/фонд[-опис]/справа`), і без цього регексу отримав би на виході
+#: неправильну пару фонд/опис мовчки, без жодної помилки.
+#: ⚠ `re.IGNORECASE`: без прапорця мала літера префікса («r-100») підпадала б
+#: під запасний наївний поділ нижче й тихо віддавала б сміття («r», «100») —
+#: `_ADDR_RE`/`_SHIFRA_RE` малу літеру вже приймають, тож без цього прапорця
+#: тут була б третя, менш терпима відповідь на те саме питання.
+_FOND_OPYS_RE = re.compile(rf"^({FOND_TOKEN})(?:-(\d+))?$", re.IGNORECASE)
+
+
 def split_fond_opys(fond_part: str) -> tuple[str, str | None]:
-    """`211-3` → («211», «3»); `315` → («315», None). Зворотне до `_mk_key`."""
+    """`211-3` → («211», «3»); `315` → («315», None); `Р-6129-24` → («Р-6129», «24»).
+
+    Зворотне до `_mk_key`.
+    """
+    m = _FOND_OPYS_RE.match(fond_part)
+    if m:
+        return m.group(1), m.group(2)
+    # Запасний варіант — старий наївний поділ, для входу, що під `FOND_TOKEN`
+    # не підпадає взагалі (тоді дефіс — не наш, і краще щось віддати, ніж впасти).
     if "-" in fond_part:
         f, _, o = fond_part.partition("-")
         return f, (o or None)
