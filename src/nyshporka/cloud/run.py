@@ -98,6 +98,9 @@ def remote_commands(*, remote_dir: str, python: str, model: str,
     from nyshporka.htr.run import Plan, shard_env
 
     root = PurePosixPath(remote_dir)
+    # `Any`, а не `type: ignore` на генераторі: різні версії mypy називають цю
+    # невідповідність різними кодами, і коментар під одну з них червонів на іншій.
+    voices_extra: Any = tuple(PurePosixPath(v) for v in extra_voices)
     plan = Plan(
         case_dir=root / CASE_SUB,          # type: ignore[arg-type]
         out_dir=root / OUT_SUB,            # type: ignore[arg-type]
@@ -106,7 +109,7 @@ def remote_commands(*, remote_dir: str, python: str, model: str,
         python=PurePosixPath(python),      # type: ignore[arg-type]
         runner=root / "runner.py",         # type: ignore[arg-type]
         voice=PurePosixPath(voice) if voice else None,  # type: ignore[arg-type]
-        extra_voices=tuple(PurePosixPath(v) for v in extra_voices),  # type: ignore[arg-type]
+        extra_voices=voices_extra,
         seg_cache=root / "seg_cache",      # type: ignore[arg-type]
         gpu_lock=root / "_gpu.lock")       # type: ignore[arg-type]
 
@@ -184,6 +187,37 @@ def engine_state(session: Session, remote_dir: str) -> EngineState:
                        detail=got.out.strip()[:300] or "середовища немає")
 
 
+UV_INSTALLER_URL = "https://astral.sh/uv/install.sh"
+
+
+def uv_install_command(probe_out: str) -> str:
+    """Чим завантажити інсталятор `uv` на ЦІЙ машині — за тим, що на ній є.
+
+    `probe_out` — рядки `have=<знаряддя>` від проби. 🔴 `curl` не є даністю:
+    образ орендованого боксу — це образ під обчислення, і мережевих утиліт у
+    ньому може не бути зовсім. Python там є завжди (це образ із torch), тож
+    останній щабель — `urllib`. Немає нічого з переліку — відмова словами, а
+    не `sh: curl: not found` посеред оплаченої підготовки.
+    """
+    have = {ln.strip().partition("=")[2] for ln in probe_out.splitlines()
+            if ln.strip().startswith("have=")}
+    url = UV_INSTALLER_URL
+    if "curl" in have:
+        return f"curl -LsSf {url} | sh"
+    if "wget" in have:
+        return f"wget -qO- {url} | sh"
+    for py in ("python3", "python"):
+        if py in have:
+            code = (f"import sys,urllib.request;"
+                    f"sys.stdout.buffer.write(urllib.request.urlopen('{url}',"
+                    f"timeout=60).read())")
+            return f"{py} -c {shlex.quote(code)} | sh"
+    raise RunError(
+        "на машині немає чим завантажити `uv`: ні `curl`, ні `wget`, ні Python. "
+        "Поставте будь-що з цього (`apt-get install -y curl`) або `uv` руками й "
+        "повторіть.")
+
+
 def prepare(session: Session, remote_dir: str, *,
             on_line: Any = None) -> EngineState:
     """Зібрати середовище рушіїв на машині. Ідемпотентно.
@@ -214,7 +248,10 @@ def prepare(session: Session, remote_dir: str, *,
     have_uv = session.run("command -v uv >/dev/null 2>&1 && echo yes || echo no",
                           timeout=60.0)
     if "yes" not in have_uv.out:
-        step("curl -LsSf https://astral.sh/uv/install.sh | sh",
+        tools = session.run(
+            "for t in curl wget python3 python; do command -v $t >/dev/null 2>&1 "
+            "&& echo have=$t; done; true", timeout=60.0)
+        step(uv_install_command(tools.out),
              "не вдалось поставити `uv` на машину")
     uv = "$HOME/.local/bin/uv"
     step(f"({uv} --version || uv --version) >/dev/null 2>&1", "`uv` не працює")
@@ -364,6 +401,12 @@ def adopt(st: ST.RunState) -> tuple[Session, Box] | None:
     """
     if not st.box or not st.pid:
         return None
+    if st.released:
+        # 🔴 Відпущена машина вже не наша. Орендований бокс після звільнення
+        # або зникає, або мовчить, і «мовчить» нижче читається як `BoxNotReady`
+        # → «повторіть пізніше» — тобто невдалий захід назавжди замикав би
+        # справу: нової машини не взяти, а стара не відповість ніколи.
+        return None
     backend = _backend(st.backend)
     box = Box.from_dict(st.box)
     try:
@@ -384,12 +427,70 @@ def adopt(st: ST.RunState) -> tuple[Session, Box] | None:
     return session, box
 
 
+def _seed_results(session: Session, plan: CloudPlan, remote_dir: str, *,
+                  on_line: Any = None) -> int:
+    """Привезти на машину те, що вже прочитано, — щоб вона читала лише решту.
+
+    Раннер пропускає сторінку, чий текст лежить у теці виходу й записаний у
+    меті. На свіжій машині тека порожня, тож без засіву захід, зупинений на
+    стелі бюджету, при повторі платив би за всі сторінки заново — рівно за те,
+    від чого стеля й мала вберегти.
+
+    🔴 Карантин НЕ їде: він наслідок зіткнення щільної сторінки з розбиттям на
+    процеси на ТІЙ машині, а не властивість кадру. Привезений, він змусив би
+    нову машину пропустити саме ті сторінки, заради яких захід повторюють.
+    """
+    from nyshporka.cloud.verify import QUARANTINE_NAME, texts_in, voice_dirs
+    from nyshporka.core.workspace import workspace
+
+    out = Path(plan.out_dir)
+    if texts_in(out) == 0:
+        return 0
+    tar_path = workspace().derived / "cloud" / "tmp" / f"{plan.run_id}.seed.tar"
+    tar_path.parent.mkdir(parents=True, exist_ok=True)
+    sent = 0
+    try:
+        with tarfile.open(tar_path, "w") as tar:
+            pairs = [(out, OUT_SUB), *((d, OUT_SUB + d.name[len(out.name):])
+                                       for d in voice_dirs(out))]
+            for d, arc in pairs:
+                for p in sorted(d.iterdir()):
+                    if (not p.is_file() or p.name == QUARANTINE_NAME
+                            or p.suffix in (".part", ".lock")):
+                        continue
+                    tar.add(p, arcname=f"{arc}/{p.name}")
+                    sent += 1
+        remote_tar = f"{remote_dir}/seed.tar"
+        session.put(tar_path, remote_tar)
+        session.run(f"cd {shlex.quote(remote_dir)} && tar -xf seed.tar "
+                    f"&& rm -f seed.tar", timeout=CMD_TIMEOUT)
+    finally:
+        tar_path.unlink(missing_ok=True)
+    if on_line:
+        on_line(f"уже прочитане поїхало на машину ({texts_in(out)} сторінок) — "
+                f"читатиметься лише решта")
+    return sent
+
+
 def start(plan: CloudPlan, *, workers: int = 0, seg_height: int = 0,
-          on_line: Any = None) -> ST.RunState:
+          on_line: Any = None, auto_prepare: bool | None = None,
+          seed: bool = False) -> ST.RunState:
     """Почати або підхопити захід. Повертається одразу — робота лишається жити.
 
     Повторний виклик на живому заході нічого не робить, а на завершеному —
     веде до `fetch`, а не до другого прогону.
+
+    `auto_prepare` — зібрати середовище рушіїв самому, якщо його немає. `None`
+    (типово) — як каже бекенд: на орендованій машині збираємо, на своїй — ні.
+    🔴 На оренді це не зручність, а єдиний робочий шлях. Орендований бокс
+    свіжий за побудовою, середовища на ньому немає НІКОЛИ, і відмова «зберіть
+    його окремою командою» тут одразу йде в обробник винятків, який гасить
+    машину: «орендував → погасив» на кожному старті, з оплаченим завантаженням
+    боксу й без жодної сторінки. На своїй машині лишається відмова: ставити
+    гігабайти пакетів на чужий сервер без прямого прохання — не те рішення,
+    яке ухвалюють мовчки.
+
+    `seed` — привезти на машину вже прочитане (див. `_seed_results`).
     """
     from nyshporka.cloud import plan as PL
     from nyshporka.cloud import transfer as T
@@ -400,6 +501,7 @@ def start(plan: CloudPlan, *, workers: int = 0, seg_height: int = 0,
         out_dir=str(plan.out_dir), backend=plan.backend, target=plan.target,
         frames_total=plan.frames)
     st.frames_total = plan.frames
+    st.source_dir = str(plan.source_dir) if plan.source_dir else ""
 
     live = adopt(st)
     if live is not None:
@@ -410,7 +512,30 @@ def start(plan: CloudPlan, *, workers: int = 0, seg_height: int = 0,
         return ST.save(st)
 
     backend = _backend(plan.backend)
+    if st.needs_release:
+        # 🔴 У стані лежить жива оплачувана машина, а підхопити на ній нічого.
+        # Узяти нову поверх означало б затерти її адресу — єдине, чим її можна
+        # погасити: сирота, яка тарифікується, доки хтось не зазирне в рахунок.
+        if st.pid:
+            # Робота на ній була й скінчилась — там лежить результат.
+            raise RunError(
+                f"захід {st.run_id} уже відпрацював на машині "
+                f"{st.box.get('label') or st.box.get('id')}, і вона ще жива. "
+                f"Заберіть і звірте: `nysh cloud fetch {st.run_id}`, "
+                f"`nysh cloud verify {st.run_id}`, потім `nysh cloud stop {st.run_id}`.")
+        # До роботи не дійшло (процес убито посеред підготовки) — забирати
+        # нічого, тож гасимо й починаємо начисто.
+        backend.release(Box.from_dict(st.box), why="failed:orphaned")
+        st.released = True
+        st.rent_ended = time.time()
+        st.note("released", "сироту попередньої спроби погашено")
+        ST.save(st)
+        say("машину попередньої спроби погашено — до роботи на ній не дійшло")
     st.bills = bool(getattr(backend, "caps", frozenset()) & {"rent"})
+    if plan.budget_usd is not None:
+        st.budget_usd = plan.budget_usd
+    if plan.max_hours is not None:
+        st.max_hours = plan.max_hours
 
     # 🔴 Намір записується до того, як машина існує. Машина, створена після
     # запису, знайдеться навіть якщо процес помре наступної секунди; створена
@@ -418,6 +543,17 @@ def start(plan: CloudPlan, *, workers: int = 0, seg_height: int = 0,
     st.enter("acquiring", why=f"беремо машину через «{plan.backend}»")
     box = backend.acquire(plan.need, target=plan.target)
     st.box = box.as_dict()
+    # 🔴 Нова машина — новий лічильник і чистий вирок. Запис заходу переживає
+    # невдалі спроби, і `released=True` від попередньої робив щойно орендовану
+    # машину невидимою для `needs_release`: жива, оплачувана й відсутня в
+    # `nysh cloud state --all`. Так само й старий pid: він із чужого боксу.
+    st.released = False
+    st.verdict = ""
+    st.pid = 0
+    st.catchups = 0
+    st.rent_started = time.time()
+    st.rent_ended = 0.0
+    st.run_started = 0.0
     st.note("acquired", f"машина {box.label or box.id}")
     ST.save(st)
 
@@ -445,6 +581,11 @@ def start(plan: CloudPlan, *, workers: int = 0, seg_height: int = 0,
         remote_dir = session.resolve(_remote_dir(box, st.run_id))
         st.remote_dir = remote_dir
         engine = engine_state(session, remote_dir)
+        if not engine.ready and (st.bills if auto_prepare is None else auto_prepare):
+            st.enter("preparing", why="збираємо середовище рушіїв на машині")
+            say("середовища рушіїв на машині немає — збираємо (це хвилини, "
+                "і вони вже оплачуються)")
+            engine = prepare(session, remote_dir, on_line=say)
         if not engine.ready:
             raise RunError(
                 f"на машині немає середовища рушіїв ({engine.detail}). "
@@ -456,33 +597,18 @@ def start(plan: CloudPlan, *, workers: int = 0, seg_height: int = 0,
         _upload_assets(session, plan, remote_dir, on_line=say)
         _upload_frames(session, plan, remote_dir,
                        storage=T.load_storage(), on_line=say)
+        st.pages_seeded = 0
+        if seed and _seed_results(session, plan, remote_dir, on_line=say):
+            from nyshporka.cloud.verify import texts_in
+
+            st.pages_seeded = texts_in(Path(plan.out_dir))
+        _drain_notes(session, st, say)
 
         device = "cuda:0" if probe.has_gpu else "cpu"
-        cmds, notes = remote_commands(
-            remote_dir=remote_dir, python=engine.python,
-            model=f"{remote_dir}/{MODELS_SUB}/{plan.model.name}",
-            voice=(f"{remote_dir}/{MODELS_SUB}/{plan.voice.name}"
-                   if plan.voice else ""),
-            extra_voices=[f"{remote_dir}/{MODELS_SUB}/{v.name}"
-                          for v in plan.extra_voices],
-            script=plan.script, case_key=plan.case_key,
-            workers=measured.sizing.shards, device=device,
-            gpus=probe.gpus if probe.has_gpu else 1, cores=probe.cores,
-            seg_height=seg_height)
-        for n in notes:
-            say(n)
-            st.note("shards", n)
-
-        script_path = f"{remote_dir}/{GO_SCRIPT}"
-        _put_text(session, script_path, go_script(cmds, remote_dir=remote_dir))
-        session.run(f"rm -f {shlex.quote(remote_dir)}/{DONE_FLAG} "
-                    f"{shlex.quote(remote_dir)}/{RC_FILE}", timeout=CMD_TIMEOUT)
-
-        st.remote_log = f"{remote_dir}/{LOGS_SUB}/go.log"
-        st.enter("running", why=f"{measured.sizing.shards} процесів на {device}")
-        st.pid = session.spawn(f"sh {shlex.quote(script_path)}",
-                               log=st.remote_log,
-                               pidfile=f"{remote_dir}/_pid")
+        _launch(session, st, plan, python=engine.python,
+                workers=measured.sizing.shards, device=device,
+                gpus=probe.gpus if probe.has_gpu else 1, cores=probe.cores,
+                seg_height=seg_height, say=say)
         say(f"пішло: pid {st.pid}, {measured.sizing.shards} процесів, "
             f"~{measured.hours:.1f} год за розрахунком")
         return ST.save(st)
@@ -490,14 +616,20 @@ def start(plan: CloudPlan, *, workers: int = 0, seg_height: int = 0,
         # `BaseException`, а не `Exception`: Ctrl+C посеред заливки кадрів —
         # найзвичніший спосіб перервати підготовку, і саме він раніше лишав
         # машину тарифікованою.
+        at = st.phase
         st.note("failed", f"{type(exc).__name__}: {exc}")
         st.enter("failed", why=str(exc) or type(exc).__name__)
         # 🔴 Машину, яка тарифікується, не лишаємо живою через власну помилку:
         # це рівно той стан, у якому гроші течуть, а роботи не робиться.
         if st.needs_release:
             try:
-                backend.release(box, why="збій під час підготовки")
+                # Причина — коротким машинним словом: бекенд пише її у власний
+                # реєстр машин, і за нею потім відсіюють бокси, що не піднялись.
+                backend.release(box, why=("cancelled"
+                                          if isinstance(exc, KeyboardInterrupt)
+                                          else f"failed:{at}"))
                 st.released = True
+                st.rent_ended = time.time()
                 ST.save(st)
                 say("машину звільнено — до роботи не дійшло")
             except Exception as rel:                     # pragma: no cover
@@ -509,12 +641,142 @@ def start(plan: CloudPlan, *, workers: int = 0, seg_height: int = 0,
             session.close()
 
 
+def _launch(session: Session, st: ST.RunState, plan: CloudPlan, *, python: str,
+            workers: int, device: str, gpus: int, cores: float,
+            seg_height: int = 0, say: Any = None) -> None:
+    """Скласти команди, покласти скрипт і пустити роботу відчеплено.
+
+    Один шлях на перший пуск і на догін: друга збірка команд розійшлася б із
+    першою від першої ж нової опції, і догін читав би іншими прапорцями, ніж
+    основний прохід, — у ту саму теку.
+    """
+    say = say or (lambda _s: None)
+    remote_dir = st.remote_dir
+    cmds, notes = remote_commands(
+        remote_dir=remote_dir, python=python,
+        model=f"{remote_dir}/{MODELS_SUB}/{plan.model.name}",
+        voice=(f"{remote_dir}/{MODELS_SUB}/{plan.voice.name}"
+               if plan.voice else ""),
+        extra_voices=[f"{remote_dir}/{MODELS_SUB}/{v.name}"
+                      for v in plan.extra_voices],
+        script=plan.script, case_key=plan.case_key,
+        workers=workers, device=device, gpus=gpus, cores=cores,
+        seg_height=seg_height)
+    for n in notes:
+        say(n)
+        st.note("shards", n)
+
+    script_path = f"{remote_dir}/{GO_SCRIPT}"
+    _put_text(session, script_path, go_script(cmds, remote_dir=remote_dir))
+    session.run(f"rm -f {shlex.quote(remote_dir)}/{DONE_FLAG} "
+                f"{shlex.quote(remote_dir)}/{RC_FILE}", timeout=CMD_TIMEOUT)
+
+    st.remote_log = f"{remote_dir}/{LOGS_SUB}/go.log"
+    st.enter("running", why=f"{len(cmds)} процесів на {device}")
+    if not st.run_started:
+        st.run_started = time.time()
+    st.pid = session.spawn(f"sh {shlex.quote(script_path)}",
+                           log=st.remote_log, pidfile=f"{remote_dir}/_pid")
+    ST.save(st)
+
+
+def catch_up(st: ST.RunState, plan: CloudPlan, *, on_line: Any = None) -> ST.RunState:
+    """Догнати хвіст на ЖИВІЙ машині — одним процесом, у ту саму теку.
+
+    Раннер сам пропускає готове: сторінка, чий текст уже лежить і записана в
+    меті, іде в resume-скіп за частки секунди (`htr.runner`, цикл сторінок), —
+    тож повторний пуск читає лише те, чого бракує. Кадри, ваги й кеш
+    сегментації вже на машині, холодного старту немає; саме тому на живому
+    боксі догін дешевий, а «доганяйте вдома» лишається порадою для машини, яку
+    вже погашено.
+
+    🔴 Одним процесом, а не тим самим розбиттям. Хвіст — це майже завжди
+    сторінки, що не вмістились поруч із сусідами: щільний аркуш упав на браку
+    пам'яті або двічі поклав процес. Ті самі кадри в один потік проходять із
+    першого разу, а повтор із тим самим числом процесів повторив би й відмову.
+
+    🔴 Карантин відкладається вбік, а не стирається. Він переживає перезапуск,
+    і без цього догін чесно пропустив би рівно ті сторінки, заради яких його
+    пущено. Файл лишається поруч під іншим іменем — як запис про те, що саме й
+    чому не читалось першим проходом; сторінку, яка валить процес і наодинці,
+    наглядач раннера покладе в карантин знову.
+    """
+    from nyshporka.cloud.verify import QUARANTINE_NAME
+
+    say = on_line or (lambda _s: None)
+    if not st.box or not st.remote_dir:
+        raise RunError("немає машини, на якій доганяти")
+    backend = _backend(st.backend)
+    box = Box.from_dict(st.box)
+    session = backend.connect(box)
+    try:
+        if st.pid and session.alive(st.pid):
+            raise RunError(f"робота заходу {st.run_id} ще йде (pid {st.pid}) — "
+                           f"доганяти нема чого, доки вона не скінчилась")
+        q = f"{st.remote_dir}/{OUT_SUB}/{QUARANTINE_NAME}"
+        session.run(f"test -f {shlex.quote(q)} && mv -f {shlex.quote(q)} "
+                    f"{shlex.quote(q + '.before-catchup')} || true",
+                    timeout=CMD_TIMEOUT)
+        engine = engine_state(session, st.remote_dir)
+        if not engine.ready:
+            raise RunError(f"середовище рушіїв на машині зникло ({engine.detail})")
+        probe = st.probe if isinstance(st.probe, dict) else {}
+        has_gpu = bool(probe.get("gpus")) and bool(probe.get("vram_gb_min"))
+        cores = probe.get("cores")
+        st.catchups += 1
+        st.note("catchup", "догін хвоста одним процесом; карантин відкладено")
+        _launch(session, st, plan, python=engine.python, workers=1,
+                device="cuda:0" if has_gpu else "cpu", gpus=1,
+                cores=float(cores) if isinstance(cores, (int, float)) else 0.0,
+                say=say)
+        say(f"догін пішов: pid {st.pid}")
+        return ST.save(st)
+    finally:
+        session.close()
+
+
+def stop_job(st: ST.RunState) -> bool:
+    """Зупинити роботу на машині, НЕ відпускаючи її. `True` — сигнал пішов.
+
+    Окремо від `release` навмисно: на стелі грошей чи годин між «зупинити» й
+    «погасити» мусить улізти забір того, що вже прочитано. Злиті в одну дію,
+    вони дають рівно той випадок, від якого стоїть весь модуль, — погашену
+    машину з неперевезеними сторінками.
+    """
+    if not st.box or not st.pid:
+        return False
+    backend = _backend(st.backend)
+    session = backend.connect(Box.from_dict(st.box))
+    try:
+        session.kill(st.pid)
+        st.note("stopped", f"роботу зупинено (pid {st.pid})")
+        ST.save(st)
+        return True
+    finally:
+        session.close()
+
+
 def _remote_dir(box: Box, run_id: str) -> str:
     raw = box.meta.get("host") if isinstance(box.meta, dict) else None
     workdir = "~/nysh-run"
     if isinstance(raw, dict) and raw.get("workdir"):
         workdir = str(raw["workdir"])
     return f"{workdir.rstrip('/')}/{run_id}"
+
+
+def _drain_notes(session: Session, st: ST.RunState, say: Any) -> None:
+    """Забрати сказане транспортом у журнал заходу й на екран.
+
+    Транспорт не знає про захід, тож складає нотатки в себе (`notes`). Поле
+    необов'язкове: у сесії стороннього бекенда його може не бути зовсім.
+    """
+    notes = getattr(session, "notes", None)
+    if not isinstance(notes, list):
+        return
+    while notes:
+        text = str(notes.pop(0))
+        st.note("transport", text)
+        say(f"⚠ {text}")
 
 
 def _put_text(session: Session, remote: str, text: str) -> None:
@@ -614,16 +876,36 @@ def fetch(st: ST.RunState, *, on_line: Any = None) -> Path:
 
         local_tar = workspace().derived / "cloud" / "tmp" / f"{st.run_id}.result.tar"
         session.get(remote_tar, local_tar)
+        _drain_notes(session, st, say)
         say(f"привезено {local_tar.stat().st_size / 1e6:.1f} МБ")
     finally:
         session.close()
     try:
+        _drop_stale_quarantine(local_tar, out_dir)
         unpack(local_tar, out_dir)
     finally:
         local_tar.unlink(missing_ok=True)
     stamp_case_key(out_dir, st.case_key)
+    stamp_case_dir(out_dir, st.source_dir or st.case_dir)
     ST.save(st)
     return out_dir
+
+
+def _drop_stale_quarantine(tar_path: Path, out_dir: Path) -> None:
+    """Прибрати локальний карантин, якого на машині вже немає.
+
+    Розпакування лише ДОДАЄ файли, тож карантин від попереднього забору
+    переживав би догін, який ті сторінки дочитав: звірка бачила б відкладені
+    сторінки, яких уже ніхто не відкладав, і справа лишалась би «неповною»
+    назавжди. Правду про карантин знає машина, з якої щойно забрали: є він в
+    архіві — ляже поверх, немає — локальний застарів.
+    """
+    from nyshporka.cloud.verify import QUARANTINE_NAME
+
+    with tarfile.open(tar_path, "r") as tar:
+        if f"{OUT_SUB}/{QUARANTINE_NAME}" in tar.getnames():
+            return
+    (Path(out_dir) / QUARANTINE_NAME).unlink(missing_ok=True)
 
 
 def unpack(tar_path: Path, out_dir: Path) -> Path:
@@ -729,6 +1011,42 @@ def stamp_case_key(out_dir: Path, case_key: str) -> int:
     return touched
 
 
+def stamp_case_dir(out_dir: Path, case_dir: str | Path) -> int:
+    """Вписати в мету теку кадрів ЦІЄЇ машини — замість шляху орендованого боксу.
+
+    🔴 Раннер пише `case_dir` там, де працює, тож із хмари мета приїжджає зі
+    шляхом машини, якої вже немає. Кроп і гортач шукають кадр саме за цим
+    полем — і або не знаходять нічого, або (гірше) беруть кадр із випадково
+    наявної теки з тим самим іменем. Шлях боксу не стирається, а переїжджає в
+    `case_dir_cloud`: раннер переносить це поле крізь перезбірку мети.
+
+    🔴 Пишеться ОРИГІНАЛ, а не стиснута копія, що їздила на машину: кроп зі
+    стиснутого кадру вдвічі дрібніший, а знахідку звіряють саме кропом.
+    """
+    if not str(case_dir):
+        return 0
+    from nyshporka.cloud.verify import META_NAME, voice_dirs
+    from nyshporka.utils.atomic import CorruptFileError, read_json, write_json
+
+    local = str(case_dir).replace("\\", "/")
+    touched = 0
+    for d in (Path(out_dir), *voice_dirs(Path(out_dir))):
+        meta_path = d / META_NAME
+        try:
+            meta = read_json(meta_path, default=None)
+        except CorruptFileError:
+            continue
+        if not isinstance(meta, dict) or meta.get("case_dir") == local:
+            continue
+        was = str(meta.get("case_dir") or "")
+        if was and not meta.get("case_dir_cloud"):
+            meta["case_dir_cloud"] = was
+        meta["case_dir"] = local
+        write_json(meta_path, meta)
+        touched += 1
+    return touched
+
+
 def release(st: ST.RunState, *, why: str = "", force: bool = False,
             on_line: Any = None) -> ST.RunState:
     """Відпустити машину.
@@ -741,7 +1059,10 @@ def release(st: ST.RunState, *, why: str = "", force: bool = False,
     if not st.box:
         st.released = True
         return ST.save(st)
-    if not force and st.verdict not in ("ok", "cancelled", "failed"):
+    # `budget_stop` і `deadline` виносяться лише після забору й звірки наявного
+    # (`cloud.go`), тож гасити з ними так само безпечно, як з `ok`.
+    if not force and st.verdict not in ("ok", "cancelled", "failed",
+                                        "budget_stop", "deadline"):
         raise RunError(
             f"захід {st.run_id} ще не звірено — спершу `nysh cloud verify "
             f"{st.run_id}`. Гасити машину до звірки не можна: саме так одного "
@@ -756,10 +1077,14 @@ def release(st: ST.RunState, *, why: str = "", force: bool = False,
                 session.kill(st.pid)
             finally:
                 session.close()
-        except CloudError as exc:
-            st.note("kill_failed", str(exc))
+        except Exception as exc:
+            # 🔴 `Exception`, а не лише `CloudError`: це крок ввічливості перед
+            # гасінням, і будь-яка його відмова (чужий бекенд кидає своє) не
+            # має права стати між нами й `release` — далі стоїть лічильник.
+            st.note("kill_failed", f"{type(exc).__name__}: {exc}")
     backend.release(box, why=why or "захід завершено")
     st.released = True
+    st.rent_ended = time.time()
     st.note("released", why or "звільнено")
     say("машину звільнено" if st.bills else "з'єднання закрито (машина не наша)")
     return ST.save(st)

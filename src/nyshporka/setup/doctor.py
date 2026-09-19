@@ -445,15 +445,74 @@ def _skills() -> Check:
                  "лишиться як є")
 
 
+#: Бекенд оренди, про який доктор каже окремим словом: на нього веде типове
+#: `nysh cloud go`, тож «його немає» — це відповідь на питання, яке поставлять.
+RENT_DEFAULT = "vast"
+
+
+def _rent() -> Check:
+    """Чи є чим орендувати машину під читання — без жодного запиту в мережу.
+
+    🔴 Лише реєстр плагінів і те, що плагін знає локально. Баланс і перелік
+    машин, що тарифікуються, сюди не потрапляють навмисно: доктора гукають
+    часто й офлайн, а перевірка, яка висить на чужому API, робить повільним і
+    крихким увесь звіт. Для них є `nysh cloud rent status`.
+    """
+    from nyshporka.cloud import registry as REG
+    from nyshporka.cloud.base import bills
+
+    reg = REG.load()
+    renters = [b for b in reg.all() if bills(b)]
+    head = f"бекенди {len(reg.all())}, зламані {len(reg.broken)}"
+    broken = "; ".join(f"{n} ({why})" for n, why in reg.broken)
+    install = ("поставити плагін оренди: `pip install \"nyshporka[rent]\"` або "
+               "`nysh update`")
+    got = reg.get(RENT_DEFAULT)
+    if got is None:
+        if any(n == RENT_DEFAULT for n, _ in reg.broken):
+            return Check("Оренда", "warn",
+                         f"{head}; {RENT_DEFAULT} — плагін зламаний: {broken}",
+                         install)
+        others = ", ".join(b.id for b in renters)
+        # Не `warn`: оренда — необов'язковий шлях, і докоряти нею людині, яка
+        # читає на своїй машині, означало б привчити її не читати доктора.
+        return Check("Оренда", "ok",
+                     f"{head}; {RENT_DEFAULT} — немає плагіна"
+                     + (f"; з орендою є: {others}" if others else ""),
+                     install)
+    # Необов'язковий метод плагіна: чи лежить ключ ЛОКАЛЬНО. Без мережі.
+    # Сам `status()` сюди не годиться — він питає баланс і машини в мережі.
+    import os
+
+    fn = getattr(got, "configured", None)
+    state = None
+    if callable(fn):
+        try:
+            state = bool(fn())
+        except Exception:
+            state = None
+    if state is None and os.environ.get(f"{RENT_DEFAULT.upper()}_API_KEY", "").strip():
+        state = True        # ключ у змінній середовища — його бачимо й самі
+    tail = f"; зламані: {broken}" if broken else ""
+    if state is True:
+        return Check("Оренда", "ok", f"{head}; {RENT_DEFAULT} — готовий{tail}")
+    if state is False:
+        return Check("Оренда", "warn", f"{head}; {RENT_DEFAULT} — немає ключа{tail}",
+                     "дати ключ провайдера: `nysh cloud rent login`")
+    return Check("Оренда", "ok",
+                 f"{head}; {RENT_DEFAULT} — плагін є, чи є ключ — невідомо{tail}",
+                 "перевірити ключ і баланс: `nysh cloud rent status`")
+
+
 CHECKS = (_version, _skills, _python, _workspace, _cloud_sync, _disk, _profile,
-          _decode_visible, _torch, _engines, _models)
+          _decode_visible, _torch, _engines, _models, _rent)
 
 #: Перевірки, які мають сенс лише при ввімкненій секції. 🔴 Не косметика:
 #: «⚠ рушії не встановлені» на машині того, хто прийшов подивитись каталог
 #: справ, — це порада полагодити те, чого він не ставив і не збирався. Доктор
 #: мусить казати про готовність до тієї роботи, яку тут справді роблять.
 SECTION_OF_CHECK = {_torch: "htr", _engines: "htr", _models: "htr",
-                    _profile: "research"}
+                    _rent: "htr", _profile: "research"}
 
 
 def _active_sections() -> frozenset[str] | None:

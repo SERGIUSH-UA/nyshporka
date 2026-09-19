@@ -29,7 +29,7 @@ RTX 4090 із двома ядрами на шард іде вдвічі пові
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Literal, Protocol, runtime_checkable
 
@@ -104,13 +104,18 @@ class Need:
     max_price_usd_h: float | None = None
     #: Скільки ядер хотілося б. Саме ядра, а не карта, визначають темп.
     prefer_cores: int = 0
+    #: Виміряна щільність письма — рядків на сторінку, медіана по вже
+    #: прочитаних аркушах ЦІЄЇ справи. `None` — не міряли, і це звичайний стан
+    #: першого заходу.
+    #:
+    #: 🔴 Не побажання, а поправка до кошторису. Темп рахується від щільності:
+    #: сповідний розпис на 164 рядки проти типових 124 дав реальну ціну ×1.96
+    #: від прогнозу ринку. Бекенд, який уміє це врахувати, повертає те саме
+    #: число у своєму кошторисі — і лише тоді вилка витрат звужується.
+    lines_per_page: float | None = None
 
     def with_disk(self, gb: int) -> Need:
-        return Need(pages=self.pages, bytes_in=self.bytes_in,
-                    gb_per_shard=self.gb_per_shard, disk_gb=gb,
-                    max_hours=self.max_hours, budget_usd=self.budget_usd,
-                    max_price_usd_h=self.max_price_usd_h,
-                    prefer_cores=self.prefer_cores)
+        return replace(self, disk_gb=gb)
 
 
 def _as_float(value: object, default: float = 0.0) -> float:

@@ -1,7 +1,11 @@
 """CLI хмарного прогону: `nysh cloud hosts | plan | prepare | start | state |
-fetch | verify | stop`.
+fetch | verify | stop`, а для оренди — `nysh cloud go` і `nysh cloud rent`.
 
-Команди навмисно дрібні й повторювані. Захід триває годинами, і єдиний спосіб
+`go` — ті самі кроки одним заходом, для випадку, де людини поруч немає: машина
+орендується, тож між «почали» й «погасили» не має лишитись жодного кроку, який
+хтось мусить згадати зробити.
+
+Решта команд навмисно дрібні й повторювані. Захід триває годинами, і єдиний спосіб
 пережити обрив, закритий ноутбук і Ctrl+C — щоб кожен крок можна було просто
 викликати ще раз: `start` підхопить свою роботу, `fetch` докачає, `verify`
 нічого не змінить.
@@ -20,6 +24,7 @@ fetch | verify | stop`.
 from __future__ import annotations
 
 import typer
+from rich.markup import escape
 
 from nyshporka import brand
 from nyshporka.cloud.base import Box, CloudError
@@ -29,6 +34,10 @@ from nyshporka.cloud.state import RunState
 app = typer.Typer(help="Прогін справи на іншій машині.", no_args_is_help=True)
 hosts_app = typer.Typer(help="Машини, на яких можна читати.", no_args_is_help=True)
 app.add_typer(hosts_app, name="hosts")
+rent_app = typer.Typer(
+    help="Оренда машини: ключ провайдера, баланс і що зараз тарифікується.",
+    no_args_is_help=True)
+app.add_typer(rent_app, name="rent")
 
 console = brand.console()
 
@@ -192,9 +201,8 @@ def hosts_storage(
     кладуть у git і в хмарну синхронізацію, і секрет, покладений у нього один
     раз, витікає назавжди й тихо.
     """
-    from nyshporka.cloud.ssh import hosts_path
+    from nyshporka.cloud.ssh import update_config
     from nyshporka.cloud.transfer import load_storage
-    from nyshporka.utils.atomic import read_json, write_json
 
     if not bucket:
         got = load_storage()
@@ -204,11 +212,9 @@ def hosts_storage(
         console.print(f"{got.bucket} · {got.endpoint_url or 'типовий S3'} "
                       f"· регіон {got.region}")
         return
-    raw = read_json(hosts_path(), default={})
-    data = raw if isinstance(raw, dict) else {}
-    data["storage"] = {"bucket": bucket, "endpoint_url": endpoint,
-                       "region": region, "prefix": "nysh"}
-    write_json(hosts_path(), data)
+    row = {"bucket": bucket, "endpoint_url": endpoint, "region": region,
+           "prefix": "nysh"}
+    update_config(lambda data: data.__setitem__("storage", row))
     console.print(f"✅ сховище {bucket}. Ключі покладіть у середовище: "
                   f"NYSHPORKA_S3_KEY / NYSHPORKA_S3_SECRET")
 
@@ -239,6 +245,48 @@ def _print_plan(p: CloudPlan) -> None:
         console.print(f"[warn]⚠ {w}[/warn]")
 
 
+#: Що сказати, коли бекенда оренди немає в реєстрі. Оренду дає окремий пакет:
+#: свій SDK, свій акаунт і своя тарифікація в ядрі не живуть.
+_RENT_HINT = ("бекенда оренди немає. Його дає окремий пакет-плагін: "
+              "`pip install \"nyshporka[rent]\"` або `nysh update`; далі — "
+              "`nysh cloud rent login`. Що є зараз: `nysh cloud hosts list`")
+
+
+def _usd(value: float | None, digits: int = 2) -> str:
+    """Гроші або чесне «невідомо». Нуль замість невідомого тут — брехня."""
+    return "невідомо" if value is None else f"${value:.{digits}f}"
+
+
+def _print_money(p: CloudPlan, est: object) -> None:
+    """Кошторис ринку й вилка — числами бекенда, без жодного власного."""
+    from nyshporka.cloud import money as M
+
+    console.print("\n[bold]оренда[/bold]")
+    if not isinstance(est, M.Estimate):
+        console.print("  кошторис: [muted]невідомо — цей бекенд кошторисів не "
+                      "дає. Стелю витрат назвіть самі: --budget[/muted]")
+    elif est.empty:
+        console.print(f"  [warn]⚠ {est.human()}[/warn]")
+    else:
+        console.print(f"  ринок  : {est.human()}")
+        if est.usd_per_1000 is not None:
+            console.print(f"  ціна   : {_usd(est.usd_per_1000)} за тисячу сторінок")
+        if est.cost is not None:
+            low, high = M.budget_fork(est.cost, density_known=(
+                p.lines_per_page is not None and est.lines_per_page is not None))
+            console.print(f"  вилка  : {_usd(low)}–{_usd(high)} "
+                          f"[muted](верх — бюджет заходу; щільність письма "
+                          f"невідома до першого читання)[/muted]")
+    stated = [f"бюджет {_usd(p.budget_usd)}" if p.budget_usd is not None else "",
+              f"до {p.max_hours:g} год" if p.max_hours is not None else "",
+              f"машина до {_usd(p.max_price_usd_h, 3)}/год"
+              if p.max_price_usd_h is not None else ""]
+    if any(stated):
+        console.print("  стелі  : " + " · ".join(s for s in stated if s))
+    console.print(f"  [muted]автозапуск без людини — до "
+                  f"{_usd(M.autostart_ceiling())} (nysh cloud rent ceiling)[/muted]")
+
+
 @app.command("plan")
 def cmd_plan(
     case_dir: str = typer.Argument(..., help="тека зі сканами (пласка)"),
@@ -253,29 +301,50 @@ def cmd_plan(
     with_: list[str] = typer.Option(
         [], "--with",
         help="ще голос тим самим проходом: `latin` (Скриба) або ім'я ваг"),
+    budget: float | None = typer.Option(
+        None, "--budget", help="стеля витрат на захід, $ (для оренди)"),
+    max_hours: float | None = typer.Option(
+        None, "--max-hours", help="стеля тривалості заходу, годин"),
+    max_price: float | None = typer.Option(
+        None, "--max-price", help="стеля ціни машини, $/год"),
     as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
-    """Що поїде на машину — без жодної мережевої дії й без жодних витрат.
+    """Що поїде на машину — без жодних витрат і без оренди.
 
     Той самий поділ, що `nysh read --dry-run`: дізнатись «модель не та» або
     «кадрів три тисячі» після старту означає втратити ніч, а на орендованій
-    машині — ще й гроші.
+    машині — ще й гроші. Для бекенда з орендою показує ще й кошторис ринку —
+    🔴 план не орендує ніколи, з `--host` чи без.
     """
+    from nyshporka.cloud import money as M
     from nyshporka.cloud import plan as PL
+    from nyshporka.cloud.base import bills
 
     try:
         p = PL.build(case_dir, backend=backend, target=host, script=script,
-                     case_key=case_key, second_voice=not one_voice, also=with_)
+                     case_key=case_key, second_voice=not one_voice, also=with_,
+                     budget_usd=budget, max_hours=max_hours,
+                     max_price_usd_h=max_price)
     except PL.PlanError as exc:
         console.print(f"[err]{exc}[/err]")
         raise typer.Exit(code=1) from None
     known_host = True
-    if host:
+    rents = False
+    estimate: M.Estimate | None = None
+    if host or backend != "ssh":
         from nyshporka.cloud.run import _backend
 
         try:
-            box = _backend(backend).acquire(p.need, target=host)
-            p = PL.with_box(p, box)
+            b = _backend(backend)
+            rents = bills(b)
+            if rents:
+                # 🔴 `acquire` у бекенда з орендою — це й Є оренда. Доти план із
+                # `--host` кликав його заради опису заліза, тобто «безплатна»
+                # команда брала б машину. Кошторис — окремим необов'язковим
+                # методом, який нічого не бере.
+                estimate = M.ask_estimate(b, p.need)
+            elif host:
+                p = PL.with_box(p, b.acquire(p.need, target=host))
         except Exception as exc:
             known_host = False
             console.print(f"[err]🔴 {exc}[/err]")
@@ -289,13 +358,22 @@ def cmd_plan(
     if as_json:
         data = p.as_dict()
         data["host_known"] = known_host
+        data["estimate"] = estimate.as_dict() if estimate is not None else None
         console.print_json(data=data)
         return
     _print_plan(p)
+    if rents:
+        _print_money(p, estimate)
+        console.print(f"\n[muted]сухий прогін із рішенням: nysh cloud go "
+                      f"{case_dir} --backend {backend} --dry-run[/muted]")
+        return
     # 🔴 Не радимо запуск на машині, якої немає. Порада, яка не спрацює,
     # гірша за її відсутність: людина виконає її, дістане ту саму відмову й
     # шукатиме причину в справі, а не в переліку машин.
     if not known_host:
+        if backend != "ssh":
+            console.print(f"\n[warn]⚠ {escape(_RENT_HINT)}[/warn]")
+            return
         console.print("\n[warn]⚠ план порахований без машини. Спершу додайте "
                       "її: nysh cloud hosts add <ім'я> <user@host>[/warn]")
         return
@@ -361,6 +439,12 @@ def cmd_start(
     shards: int = typer.Option(0, "--shards", help="скільки процесів; 0 = порахувати"),
     seg_height: int = typer.Option(0, "--seg-height",
                                     help="висота сегментації (0 = рідна 1800)"),
+    budget: float | None = typer.Option(
+        None, "--budget", help="стеля витрат на захід, $ (для оренди)"),
+    max_hours: float | None = typer.Option(
+        None, "--max-hours", help="стеля тривалості заходу, годин"),
+    max_price: float | None = typer.Option(
+        None, "--max-price", help="стеля ціни машини, $/год"),
     wait: bool = typer.Option(False, "--wait", help="чекати завершення"),
 ) -> None:
     """Почати захід. Повертається одразу — робота лишається жити на машині.
@@ -373,7 +457,9 @@ def cmd_start(
 
     try:
         p = PL.build(case_dir, backend=backend, target=host, script=script,
-                     case_key=case_key, second_voice=not one_voice, also=with_)
+                     case_key=case_key, second_voice=not one_voice, also=with_,
+                     budget_usd=budget, max_hours=max_hours,
+                     max_price_usd_h=max_price)
     except PL.PlanError as exc:
         console.print(f"[err]{exc}[/err]")
         raise typer.Exit(code=1) from None
@@ -532,3 +618,337 @@ def cmd_stop(
         console.print(f"[err]{exc}[/err]")
         raise typer.Exit(code=2) from None
     console.print(f"✅ {st.run_id} закрито")
+
+
+# ── захід однією командою ────────────────────────────────────────────────────
+@app.command("go")
+def cmd_go(
+    case: str = typer.Argument(..., help="справа: тека кадрів або шифра з бібліотеки"),
+    backend: str = typer.Option("vast", "--backend", "-b",
+                                 help="бекенд оренди; які є — `nysh cloud hosts list`"),
+    budget: float | None = typer.Option(
+        None, "--budget", help="стеля витрат, $; без неї — верх вилки кошторису"),
+    max_hours: float | None = typer.Option(
+        None, "--max-hours", help="стеля тривалості, годин; без неї — утричі від прогнозу"),
+    max_price: float | None = typer.Option(
+        None, "--max-price", help="стеля ціни машини, $/год"),
+    confirm: bool = typer.Option(
+        False, "--confirm",
+        help="дозвіл ЛЮДИНИ на захід понад стелю автозапуску"),
+    dry_run: bool = typer.Option(
+        False, "--dry-run",
+        help="усе, крім оренди: кадри, стискання, план, кошторис, рішення"),
+    rerun: bool = typer.Option(
+        False, "--rerun", help="справу вже прочитано цією моделлю — перечитати"),
+    allow_partial: bool = typer.Option(
+        False, "--allow-partial",
+        help="кадрів менше, ніж знає бібліотека, або тека ще пишеться — однаково їхати"),
+    rotate_landscape: bool = typer.Option(
+        False, "--rotate-landscape",
+        help="при стисканні повернути кадри, де ширина більша за висоту, на 90° "
+             "за годинниковою (зйомка з книгою на боці; НЕ для розворотів)"),
+    script: str = typer.Option("", "--script",
+                                help="письмо: latin | cyrillic; порожньо — визначити самому"),
+    with_: list[str] = typer.Option(
+        [], "--with",
+        help="ще голос тим самим проходом: `latin` (Скриба) або ім'я ваг"),
+    one_voice: bool = typer.Option(False, "--one-voice",
+                                   help="без другого рушія (швидше, але сліпіше)"),
+    case_key: str = typer.Option("", "--case-key", help="шифра справи для мети прогону"),
+    tick: float = typer.Option(60.0, "--tick", help="як часто питати машину, секунд"),
+    as_json: bool = typer.Option(
+        False, "--json", help="останнім рядком — один JSON-об'єкт із підсумком"),
+) -> None:
+    """Прочитати справу на орендованій машині — від кадрів до погашеної оренди.
+
+    Звіряє кадри, стискає завеликі, рахує кошторис вилкою, орендує, ставить
+    рушії, заливає, читає під наглядом двох стель (гроші й години), забирає,
+    звіряє повноту по диску, раз доганяє малий хвіст, гасить машину й оновлює
+    облік. 🔴 Машина гаситься на кожному шляху виходу.
+
+    Після обриву термінала правильна дія — повторити ту саму команду: живий
+    захід буде підхоплено, другої машини не візьмуть.
+
+    Коди виходу: 0 готово · 2 відмова до оренди · 3 збій · 4 неповно ·
+    5 стеля грошей · 6 ринок порожній · 7 стеля годин · 8 бракує балансу ·
+    9 машину НЕ погашено · 10 потрібен --confirm · 130 перервано.
+    """
+    import json as _json
+
+    from nyshporka.cloud import go as GO
+
+    def on_event(kind: str, text: str, **_data: object) -> None:
+        # Поступ — рядками для людини; у режимі `--json` вони йдуть так само, а
+        # машинний читач бере ОСТАННІЙ рядок.
+        # `escape`: у тексті подій бувають шляхи й `pip install "пакет[extra]"`,
+        # а rich читає квадратні дужки як розмітку й мовчки їх з'їдає.
+        style = {"warning": "warn", "failed": "err", "ceiling": "warn"}.get(kind)
+        safe = escape(text)
+        console.print(f"[{style}]{safe}[/{style}]" if style else safe,
+                      highlight=False)
+
+    res = GO.go(case, backend=backend, budget=budget, max_hours=max_hours,
+                max_price=max_price, confirm=confirm, dry_run=dry_run,
+                with_voices=with_, second_voice=not one_voice, script=script,
+                case_key=case_key, rerun=rerun, allow_partial=allow_partial,
+                rotate_landscape=rotate_landscape, on_event=on_event,
+                tick_sec=max(1.0, tick))
+    if as_json:
+        # `print`, а не rich: один рядок без переносів і розфарбування — його
+        # розбирають `json.loads` від останнього рядка виводу.
+        print(_json.dumps(res.as_dict(), ensure_ascii=False))
+        raise typer.Exit(code=res.exit_code)
+    mark = {"ok": "✅", "dry_run": "·"}.get(res.verdict, "🔴")
+    console.print(f"\n{mark} [bold]{res.verdict}[/bold]"
+                  + (f" — {escape(res.why)}" if res.why else ""), highlight=False)
+    if res.rented:
+        console.print(f"  сторінок : {res.pages_done} з {res.pages_total}")
+        console.print(f"  витрачено: {_usd(res.spent_usd)} за {res.rent_hours:.2f} год")
+        console.print("  машина   : " + ("погашена" if res.released
+                                          else "[err]НЕ ПОГАШЕНА[/err]"))
+    if res.out_dir and res.verdict != "dry_run":
+        console.print(f"  вихід    : {res.out_dir}")
+    for note in res.notes:
+        console.print(f"[warn]⚠ {escape(note)}[/warn]", highlight=False)
+    if res.verdict == "needs_confirm":
+        console.print("[muted]дозволити цей захід: та сама команда з --confirm; "
+                      "підняти стелю назавжди: nysh cloud rent ceiling[/muted]")
+    if res.verdict in ("budget_stop", "deadline", "incomplete"):
+        console.print("[muted]прочитане збережено; повторна команда дочитає "
+                      "решту — готове поїде на машину й не читатиметься вдруге[/muted]")
+    raise typer.Exit(code=res.exit_code)
+
+
+# ── оренда ───────────────────────────────────────────────────────────────────
+def _rent_backend(name: str) -> object:
+    """Бекенд з орендою за іменем — або чесна підказка, як його поставити."""
+    from nyshporka.cloud import registry as REG
+    from nyshporka.cloud.base import bills
+
+    reg = REG.load()
+    got = reg.get(name)
+    if got is None:
+        console.print(f"[err]немає бекенда «{name}»: {escape(_RENT_HINT)}[/err]")
+        for bad, why in reg.broken:
+            console.print(f"[err]  🔴 {bad} — не завантажився: {why}[/err]")
+        raise typer.Exit(code=1)
+    if not bills(got):
+        console.print(f"[err]«{name}» нічого не орендує — ключ і баланс йому "
+                      f"не потрібні[/err]")
+        raise typer.Exit(code=1)
+    return got
+
+
+@rent_app.command("status")
+def rent_status(
+    backend: str = typer.Option("vast", "--backend", "-b", help="бекенд оренди"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
+) -> None:
+    """Ключ, баланс і 🔴 що ЗАРАЗ тарифікується на акаунті.
+
+    Головний запобіжник грошей: машина, про яку забули, коштує більше за всі
+    прочитані справи разом. Перелік береться в провайдера, а не з нашого
+    стану, — саме тому він бачить і те, чого Нишпорка не орендувала.
+
+    Коди виходу: 0 чисто · 1 увійти не можна · 3 щось тарифікується поза
+    заходами цього простору, або спитати про це не вдалось.
+    """
+    b = _rent_backend(backend)
+    fn = getattr(b, "status", None)
+    if not callable(fn):
+        console.print(f"[warn]⚠ бекенд «{backend}» не вміє звітувати про акаунт "
+                      f"(немає `status`). Що тарифікується — дивіться в кабінеті "
+                      f"провайдера.[/warn]")
+        raise typer.Exit(code=1)
+    try:
+        raw = fn()
+    except CloudError as exc:
+        console.print(f"[err]{exc}[/err]")
+        raise typer.Exit(code=1) from None
+    view = _account(raw if isinstance(raw, dict) else {})
+    if as_json:
+        console.print_json(data={"backend": backend, **view.as_dict()})
+        raise typer.Exit(code=view.exit_code)
+    console.print(f"[bold]{backend}[/bold]")
+    _print_account(view)
+    raise typer.Exit(code=view.exit_code)
+
+
+class _Account:
+    """Відповідь `status()` бекенда оренди — розібрана, без жодної домислу.
+
+    🔴 `burning` має ТРИ стани, і зводити їх до двох не можна: перелік машин,
+    порожній перелік («нічого не горить») і `None` («спитати не вдалось»).
+    Показане як «нічого» невдале питання — це рівно та відповідь, після якої
+    забута машина тарифікується тиждень.
+    """
+
+    def __init__(self, data: dict[str, object]) -> None:
+        from nyshporka.cloud import money as M
+        from nyshporka.cloud import state as ST
+
+        self.api_key: bool | None = (bool(data["api_key"])
+                                     if "api_key" in data else None)
+        self.ssh_key = str(data.get("ssh_key") or "")
+        self.balance = M.as_number(data.get("balance_usd"))
+        raw_problems = data.get("problems")
+        self.problems = ([str(p) for p in raw_problems if str(p).strip()]
+                         if isinstance(raw_problems, list) else [])
+        self.ready: bool | None = bool(data["ready"]) if "ready" in data else None
+        self.ceiling = M.autostart_ceiling()
+        burning = data.get("burning")
+        self.burning_known = isinstance(burning, list)
+        # Чиї це машини: звіряємо з власними живими заходами. Чужа — не помилка
+        # (людина могла орендувати щось сама), але сказати про неї треба вголос.
+        ours = {str(s.box.get("id")): s.run_id for s in ST.live() if s.box}
+        self.rows: list[dict[str, object]] = []
+        for r in (burning if isinstance(burning, list) else []):
+            if not isinstance(r, dict):
+                continue
+            iid = str(r.get("instance_id") or "")
+            self.rows.append({
+                "instance_id": iid, "label": str(r.get("label") or ""),
+                "gpu_name": str(r.get("gpu_name") or ""),
+                "status": str(r.get("status") or ""),
+                "price_usd_h": M.as_number(r.get("dph_total")),
+                "run_id": ours.get(iid, "")})
+
+    @property
+    def exit_code(self) -> int:
+        """0 — чисто; 1 — увійти не можна (ключ, проблеми); 3 — щось
+        тарифікується ПОЗА заходами цього простору або спитати не вдалось.
+
+        Трійка — для агента, який питає «чи не горить щось забуте»: на це
+        питання «не знаю» не може виглядати як «ні».
+        """
+        if self.api_key is False or self.problems:
+            return 1
+        if not self.burning_known or any(not r["run_id"] for r in self.rows):
+            return 3
+        return 0
+
+    def as_dict(self) -> dict[str, object]:
+        return {"ready": self.ready, "problems": self.problems,
+                "api_key": self.api_key, "ssh_key": self.ssh_key or None,
+                "balance_usd": self.balance,
+                "autostart_max_usd": self.ceiling,
+                "burning": self.rows if self.burning_known else None}
+
+
+def _account(data: dict[str, object]) -> _Account:
+    return _Account(data)
+
+
+def _print_account(view: _Account) -> None:
+    key = {True: "✅ є", False: "[err]🔴 немає — nysh cloud rent login[/err]",
+           None: "невідомо"}[view.api_key]
+    console.print(f"  ключ API : {key}")
+    # Відсутній SSH-ключ — не проблема: пару згенерує перша оренда.
+    console.print(f"  ключ SSH : {view.ssh_key or 'ще немає — зʼявиться з першою орендою'}",
+                  highlight=False)
+    console.print(f"  баланс   : {_usd(view.balance)}")
+    console.print(f"  автозапуск без людини — до {_usd(view.ceiling)}")
+    for p in view.problems:
+        console.print(f"  [err]🔴 {p}[/err]", highlight=False)
+    if not view.burning_known:
+        console.print("  [warn]⚠ що тарифікується — НЕВІДОМО: спитати в провайдера "
+                      "не вдалось. Це не «нічого»: повторіть або звірте в його "
+                      "кабінеті.[/warn]")
+    elif not view.rows:
+        console.print("  тарифікується: нічого ✅")
+    else:
+        prices = [r["price_usd_h"] for r in view.rows]
+        known = [p for p in prices if isinstance(p, float)]
+        total = (f"разом {_usd(sum(known), 3)}/год"
+                 if len(known) == len(prices) else "сума невідома")
+        console.print(f"  [err]🔴 тарифікується зараз: {len(view.rows)} · {total}[/err]")
+        for r in view.rows:
+            whose = (f"захід {r['run_id']}" if r["run_id"]
+                     else "[warn]НЕ з заходів цього простору[/warn]")
+            price = r["price_usd_h"]
+            console.print(
+                f"    {r['instance_id']} {r['label']} {r['gpu_name']} · "
+                f"{_usd(price if isinstance(price, float) else None, 3)}/год · "
+                f"{r['status'] or 'стан невідомий'} · {whose}", highlight=False)
+
+
+#: Звідки взяти ключ, якщо його не дали прапорцем. Загальне ім'я — перше; друге
+#: складається з імені бекенда (`VAST_API_KEY`), бо саме так його вже тримають
+#: ті, хто користувався провайдером раніше.
+ENV_RENT_KEY = "NYSHPORKA_RENT_KEY"
+
+
+@rent_app.command("login")
+def rent_login(
+    backend: str = typer.Option("vast", "--backend", "-b", help="бекенд оренди"),
+    key: str = typer.Option(
+        "", "--key",
+        help="ключ API провайдера. ⚠ З прапорця він лишається в історії "
+             "оболонки — без прапорця ключ питається прихованим запитом"),
+) -> None:
+    """Віддати ключ API провайдера бекенду оренди.
+
+    🔴 Нишпорка ключа не зберігає й не друкує: він іде в `login` бекенда, і де
+    лежати — вирішує той (зазвичай там само, де його тримає власний клієнт
+    провайдера). У просторі дослідження ключа немає й не буде: простір кладуть
+    у git і в хмарну синхронізацію.
+    """
+    import os
+
+    b = _rent_backend(backend)
+    fn = getattr(b, "login", None)
+    if not callable(fn):
+        console.print(f"[err]бекенд «{backend}» не приймає ключ командою (немає "
+                      f"`login`) — налаштуйте його так, як каже його документація[/err]")
+        raise typer.Exit(code=1)
+    secret = (key or os.environ.get(ENV_RENT_KEY, "")
+              or os.environ.get(f"{backend.upper()}_API_KEY", "")).strip()
+    if not secret:
+        secret = str(typer.prompt(f"ключ API «{backend}»", hide_input=True)).strip()
+    if not secret:
+        console.print("[err]ключ порожній[/err]")
+        raise typer.Exit(code=1)
+    try:
+        raw = fn(secret)
+    except CloudError as exc:
+        # 🔴 Текст чужого винятку може нести ключ (бекенди люблять цитувати
+        # запит) — вирізаємо його перед друком.
+        console.print(f"[err]{str(exc).replace(secret, '***')}[/err]",
+                      highlight=False)
+        raise typer.Exit(code=1) from None
+    # `login` повертає той самий звіт, що й `status`. 🔴 Ключ, який провайдер
+    # ВІДХИЛИВ, бекенд однаково зберігає — і каже про це рядком у `problems`.
+    # Тож «метод не кинув» ще не означає «увійшли»: відмова читається звідти.
+    view = _account(raw if isinstance(raw, dict) else {})
+    view.problems = [p.replace(secret, "***") for p in view.problems]
+    if view.problems or view.api_key is False:
+        console.print(f"[err]🔴 увійти не вдалось — бекенд «{backend}» ключ "
+                      f"зберіг, але працювати з ним не може:[/err]")
+        _print_account(view)
+        raise typer.Exit(code=1)
+    console.print(f"✅ ключ прийнято бекендом «{backend}»")
+    _print_account(view)
+    console.print("[muted]далі — сухий прогін без оренди: nysh cloud go "
+                  "<справа> із прапорцем сухого прогону[/muted]")
+
+
+@rent_app.command("ceiling")
+def rent_ceiling(
+    usd: float | None = typer.Argument(
+        None, help="нова стеля, $; порожньо — показати чинну"),
+) -> None:
+    """Стеля автозапуску: до якої суми `nysh cloud go` стартує без людини.
+
+    Порівнюється з ВЕРХОМ вилки кошторису, а не з прогнозом: захід, який
+    «мав коштувати долар», на щільному письмі коштує два з половиною.
+    """
+    from nyshporka.cloud import money as M
+
+    if usd is None:
+        console.print(f"стеля автозапуску: {_usd(M.autostart_ceiling())}")
+        return
+    try:
+        got = M.set_autostart_ceiling(usd)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from None
+    console.print(f"✅ стеля автозапуску: {_usd(got)}")

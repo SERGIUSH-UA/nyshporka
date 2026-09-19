@@ -781,7 +781,12 @@ def doctor(
     for c in checks:
         console.print(f"{c.mark} [bold]{c.name}[/bold]  {c.detail}")
         if c.fix and c.level != "ok":
-            console.print(f"   [muted]{c.fix}[/muted]")
+            # `escape`: порада на кшталт `pip install "пакет[extra]"` інакше
+            # втрачає дужки — rich читає їх як розмітку й друкує команду, якої
+            # не існує.
+            from rich.markup import escape
+
+            console.print(f"   [muted]{escape(c.fix)}[/muted]")
     bad = [c for c in checks if c.level == "fail"]
     raise typer.Exit(code=1 if bad else 0)
 

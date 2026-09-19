@@ -291,6 +291,65 @@ def test_a_guessed_script_is_said_out_loud(space: Path, monkeypatch) -> None:
     assert any("вгадано" in w for w in got.warnings)
 
 
+# ── гроші в плані ────────────────────────────────────────────────────────────
+def test_ceilings_travel_into_the_need_untouched(space: Path, monkeypatch) -> None:
+    """🔴 Гроші й строк — те, чим людина обмежила захід, а не побажання: план їх
+    лише несе. Загубити стелю на шляху до бекенда означає орендувати без неї."""
+    from nyshporka.cloud import plan as PL
+    from nyshporka.cloud.base import Box
+
+    case = _wire_case(space, monkeypatch)
+    got = PL.build(case, script="cyrillic", budget_usd=1.5, max_hours=6,
+                   max_price_usd_h=0.25)
+    need = got.need
+    assert (need.budget_usd, need.max_hours, need.max_price_usd_h) == (1.5, 6, 0.25)
+    assert need.pages == 3 and need.lines_per_page is None
+
+    # Уточнення залізом не має права загубити стелі: саме тут перелік полів,
+    # складений руками, губив би кожне нове.
+    refined = PL.with_box(got, Box(id="x", backend="ssh", cores=8, vram_gb=8))
+    assert refined.need.budget_usd == 1.5 and refined.need.max_hours == 6
+    assert PL.with_channel(refined, storage=None, speed=None).need.max_price_usd_h == 0.25
+
+
+def test_no_ceiling_means_none_not_zero(space: Path, monkeypatch) -> None:
+    from nyshporka.cloud import plan as PL
+
+    need = PL.build(_wire_case(space, monkeypatch), script="cyrillic").need
+    assert (need.budget_usd, need.max_hours, need.max_price_usd_h) == (None, None, None)
+
+
+@pytest.mark.parametrize("kw", [{"budget_usd": 0}, {"max_hours": -1},
+                                {"max_price_usd_h": 0.0}])
+def test_a_zero_ceiling_is_refused_not_read_as_no_ceiling(space: Path, monkeypatch,
+                                                          kw: dict) -> None:
+    """🔴 Стеля, яку мовчки прочитали як відсутню, — це захід без обмеження
+    витрат там, де людина щойно спробувала його обмежити."""
+    from nyshporka.cloud import plan as PL
+
+    with pytest.raises(PL.PlanError, match="додатним"):
+        PL.build(_wire_case(space, monkeypatch), script="cyrillic", **kw)
+
+
+def test_prefer_cores_is_the_ceiling_of_use_not_a_demand() -> None:
+    """Понад це число ядра оплачуються й простоюють: процесів не буває більше,
+    ніж окупає обсяг справи."""
+    assert S.useful_cores(0) == 0
+    assert S.useful_cores(40) == 10          # 5 процесів × 2 ядра
+    assert S.useful_cores(100_000) == S.DEFAULT_PROFILE.max_shards * 2
+
+
+def test_only_what_is_left_goes_to_the_market(space: Path, monkeypatch) -> None:
+    """Кошторис на всю справу там, де лишилась третина, завищив би вилку й
+    даремно вимагав би дозволу людини."""
+    from nyshporka.cloud import plan as PL
+
+    case = _wire_case(space, monkeypatch)
+    assert PL.build(case, script="cyrillic", pages_left=1).need.pages == 1
+    assert PL.build(case, script="cyrillic", pages_left=0).need.pages == 1
+    assert PL.build(case, script="cyrillic", lines_per_page=164.0).need.lines_per_page == 164.0
+
+
 # ── шифра, якої ще немає ─────────────────────────────────────────────────────
 def test_material_without_a_shifra_is_scolded(tmp_path: Path) -> None:
     """Тека без опису — це справді «прогін ляже нічиїм», і про це кажуть."""

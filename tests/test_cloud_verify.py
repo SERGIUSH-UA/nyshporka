@@ -69,6 +69,23 @@ def test_quarantined_pages_are_not_done(tmp_path: Path) -> None:
     assert "карантині" in got.detail
 
 
+def test_the_runners_own_quarantine_envelope_is_understood(tmp_path: Path) -> None:
+    """🔴 Раннер пише `{"version": 1, "pages": {кадр: причина}}`. Прочитаний як
+    голий словник кадрів, він давав «сторінки» з іменами `pages` і `version`:
+    число відкладеного брехало, а порожній карантин робив повну справу неповною."""
+    case = _case(tmp_path, 3)
+    out = _out(tmp_path, ["0000", "0001", "0002"], meta={"frames_total": 3})
+    (out / V.QUARANTINE_NAME).write_text(
+        json.dumps({"version": 1, "pages": {"0001.jpg": {"reason": "OOM"}}}),
+        encoding="utf-8")
+    assert V.verify(out, case_dir=case).quarantined == ["0001.jpg"]
+
+    (out / V.QUARANTINE_NAME).write_text(
+        json.dumps({"version": 1, "pages": {}}), encoding="utf-8")
+    assert V.verify(out, case_dir=case).complete is True, \
+        "порожній карантин — не відкладені сторінки"
+
+
 def test_missing_page_is_found_by_name_not_by_count(tmp_path: Path) -> None:
     """🔴 Звірка покадрова, а не «однаково штук».
 

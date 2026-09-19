@@ -32,12 +32,20 @@ from typing import Any
 SCHEMA = 1
 
 #: Фази заходу. Порядок важливий: `fetched` не можна перескочити до `released`.
-PHASES = ("planned", "acquiring", "uploading", "running", "fetching",
-          "verifying", "done", "failed")
+#: `preparing` — на свіжій орендованій машині збирається середовище рушіїв.
+#: Окрема фаза, бо це десяток оплачених хвилин, і «веземо» про них бреше.
+PHASES = ("planned", "acquiring", "preparing", "uploading", "running",
+          "fetching", "verifying", "done", "failed")
 
 #: Вердикти. `incomplete` — не «майже ok»: це стан, у якому машину гасити ще
 #: не можна, бо частина роботи лишилась на ній.
-VERDICTS = ("", "ok", "incomplete", "failed", "cancelled")
+#:
+#: `budget_stop` і `deadline` виносить лише автономний захід (`cloud.go`):
+#: стеля грошей або годин спрацювала, роботу зупинено, наявне забрано й
+#: звірено. 🔴 Вони окремі від `failed` навмисно: прочитане на диску справжнє,
+#: і повторний захід дочитає решту, — а «збій» читається як «почни заново».
+VERDICTS = ("", "ok", "incomplete", "failed", "cancelled", "budget_stop",
+            "deadline")
 
 
 def runs_dir() -> Path:
@@ -96,6 +104,33 @@ class RunState:
     started: float = field(default_factory=time.time)
     updated: float = field(default_factory=time.time)
     incidents: list[dict[str, Any]] = field(default_factory=list)
+    #: Оригінальна тека кадрів, коли на машину їхала стиснута копія. Порожньо —
+    #: `case_dir` і є оригінал.
+    source_dir: str = ""
+    # ── гроші (заповнює автономний захід; у ручного — порожні) ───────────────
+    #: Вилка кошторису: низ — прогноз ринку, верх — він же зі множником на
+    #: невідому щільність письма. Бюджет заходу = верх.
+    fork_low: float | None = None
+    fork_high: float | None = None
+    #: Стелі заходу. 🔴 Лежать у стані, а не в пам'яті процесу: нагляд мусить
+    #: діяти й після обриву термінала, коли захід підхопив інший процес — інакше
+    #: стеля діяла б рівно доти, доки її нікому порушити.
+    budget_usd: float | None = None
+    max_hours: float | None = None
+    #: Коли пішов лічильник оренди й коли його зупинено. Окремо від `started`:
+    #: запис заходу переживає невдалі спроби, і рахувати витрати від першої з
+    #: них означало б приписати живій машині години, яких вона не працювала.
+    rent_started: float = 0.0
+    rent_ended: float = 0.0
+    #: Коли пішла сама робота (після завантаження боксу, рушіїв і заливки) і
+    #: скільки сторінок приїхало на машину вже готовими. З цієї пари рахується
+    #: ВИМІРЯНИЙ темп машини — його бекенд пише у свій реєстр боксів.
+    run_started: float = 0.0
+    pages_seeded: int = 0
+    #: Скільки разів доганяли хвіст на живій машині. Догін дозволено один:
+    #: другий означає, що сторінки не читаються взагалі, і платити за третю
+    #: спробу немає за що.
+    catchups: int = 0
 
     # ── дії ──────────────────────────────────────────────────────────────────
     def note(self, kind: str, detail: str) -> RunState:
@@ -132,11 +167,39 @@ class RunState:
         """
         return bool(self.box) and self.bills and not self.released
 
+    @property
+    def price_usd_h(self) -> float | None:
+        """Ціна години машини, якою її назвав бекенд. `None` — невідома."""
+        raw = self.box.get("price_usd_h") if self.box else None
+        if isinstance(raw, (int, float)) and not isinstance(raw, bool) and raw > 0:
+            return float(raw)
+        return None
+
+    def rent_hours(self, now: float | None = None) -> float:
+        """Скільки годин тече (або текла) оренда цього заходу."""
+        if not self.rent_started:
+            return 0.0
+        end = self.rent_ended or (now if now is not None else time.time())
+        return max(0.0, end - self.rent_started) / 3600.0
+
+    def spent_usd(self, now: float | None = None) -> float | None:
+        """Скільки вже витрачено — ціна × години. `None` — ціна невідома.
+
+        🔴 Саме `None`, а не нуль: «витрачено $0.00» на машині без названої
+        ціни читається як «безплатно», і нагляд за бюджетом мовчки вимикається
+        там, де він не має чим рахувати. Невідоме лишається невідомим.
+        """
+        price = self.price_usd_h
+        if price is None:
+            return None
+        return round(price * self.rent_hours(now), 4)
+
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)
 
     def human_phase(self) -> str:
         names = {"planned": "заплановано", "acquiring": "беремо машину",
+                 "preparing": "ставимо рушії",
                  "uploading": "веземо", "running": "читає",
                  "fetching": "забираємо", "verifying": "звіряємо",
                  "done": "завершено", "failed": "збій"}

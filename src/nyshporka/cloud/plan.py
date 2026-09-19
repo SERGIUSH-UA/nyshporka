@@ -64,6 +64,24 @@ class CloudPlan:
     hours: float = 0.0
     cost: float | None = None
     warnings: list[str] = field(default_factory=list)
+    #: Стелі, якими людина обмежила захід. `None` — стелі немає.
+    #: 🔴 Їдуть у `Need` як є й не послаблюються ніде на шляху: план їх лише
+    #: несе, а зважувати можна все інше (ядра, пам'ять, диск).
+    budget_usd: float | None = None
+    max_hours: float | None = None
+    max_price_usd_h: float | None = None
+    #: Виміряна щільність письма цієї справи (рядків на сторінку), якщо вона
+    #: вже частково прочитана. Поправка до кошторису, не вимога.
+    lines_per_page: float | None = None
+    #: Звідки кадри НАСПРАВДІ. Непорожнє лише тоді, коли на машину їде стиснута
+    #: копія: у мету прогону після забору мусить лягти оригінал, бо кроп зі
+    #: стиснутого кадру вдвічі дрібніший, а звіряють знахідку саме кропом.
+    source_dir: Path | None = None
+    #: Скільки сторінок лишилось читати, коли частину вже прочитано (повтор
+    #: після стелі бюджету). `None` — читати все. На ринок іде саме це число:
+    #: кошторис на всю справу там, де лишилась третина, завищив би вилку й
+    #: даремно вимагав би дозволу людини.
+    pages_left: int | None = None
 
     @property
     def voices(self) -> tuple[Path, ...]:
@@ -75,10 +93,17 @@ class CloudPlan:
 
     @property
     def need(self) -> Need:
+        from nyshporka.cloud.sizing import useful_cores
+
         gb = self.sizing.gb_per_shard if self.sizing else DEFAULT_PROFILE.gb_per_shard
         disk = int(self.bytes_in / (1024 ** 3) * 2) + DISK_HEADROOM_GB
-        return Need(pages=self.frames, bytes_in=self.bytes_in, gb_per_shard=gb,
-                    disk_gb=disk)
+        pages = self.frames if self.pages_left is None else max(1, self.pages_left)
+        return Need(pages=pages, bytes_in=self.bytes_in, gb_per_shard=gb,
+                    disk_gb=disk, max_hours=self.max_hours,
+                    budget_usd=self.budget_usd,
+                    max_price_usd_h=self.max_price_usd_h,
+                    prefer_cores=useful_cores(pages),
+                    lines_per_page=self.lines_per_page)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -97,6 +122,10 @@ class CloudPlan:
             "transfer_eta_s": (self.speed.eta_sec(self.bytes_in)
                                if self.speed else None),
             "hours": self.hours, "cost": self.cost,
+            "budget_usd": self.budget_usd, "max_hours": self.max_hours,
+            "max_price_usd_h": self.max_price_usd_h,
+            "lines_per_page": self.lines_per_page,
+            "source_dir": str(self.source_dir) if self.source_dir else "",
             "warnings": list(self.warnings)}
 
 
@@ -134,12 +163,25 @@ def _unidentified(case_dir: Path) -> str:
 
 def build(case_dir: str | Path, *, backend: str = "ssh", target: str = "",
           out_dir: str | Path = "", script: str = "", second_voice: bool = True,
-          case_key: str = "", also: list[str] | tuple[str, ...] = ()) -> CloudPlan:
+          case_key: str = "", also: list[str] | tuple[str, ...] = (),
+          budget_usd: float | None = None, max_hours: float | None = None,
+          max_price_usd_h: float | None = None,
+          lines_per_page: float | None = None,
+          source_dir: str | Path = "",
+          pages_left: int | None = None) -> CloudPlan:
     """Скласти план без жодної мережевої дії.
 
     Кидає `PlanError` рівно там, де захід не має сенсу починати: немає кадрів,
     немає ваг під це письмо, тека не пласка.
     """
+    for name, value in (("--budget", budget_usd), ("--max-hours", max_hours),
+                        ("--max-price", max_price_usd_h)):
+        # 🔴 Нуль і від'ємне — відмова, а не «стелі немає». Стеля, яку мовчки
+        # прочитали як відсутню, — це захід без обмеження витрат там, де людина
+        # щойно спробувала його обмежити.
+        if value is not None and value <= 0:
+            raise PlanError(f"{name} мусить бути додатним числом, а не {value:g}. "
+                            f"Без стелі — просто не передавайте прапорець.")
     from nyshporka.cloud.state import run_id_for
     from nyshporka.cloud.verify import frames_in
     from nyshporka.core.workspace import workspace
@@ -227,7 +269,11 @@ def build(case_dir: str | Path, *, backend: str = "ssh", target: str = "",
         case_dir=case, out_dir=out, model=model, voice=voice, extra_voices=extra,
         script=scr,
         frames=len(frames), bytes_in=_bytes_of(frames), backend=backend,
-        target=target, case_key=key, case_key_why=why, warnings=warnings)
+        target=target, case_key=key, case_key_why=why, warnings=warnings,
+        budget_usd=budget_usd, max_hours=max_hours,
+        max_price_usd_h=max_price_usd_h, lines_per_page=lines_per_page,
+        source_dir=Path(source_dir) if source_dir else None,
+        pages_left=pages_left)
 
 
 def with_box(plan: CloudPlan, box: Box, *,
@@ -291,14 +337,9 @@ def _finish(plan: CloudPlan, *, box: Box | None, probe: Probe | None,
 
 
 def _replace(plan: CloudPlan, **kw: Any) -> CloudPlan:
-    data: dict[str, Any] = {
-        "run_id": plan.run_id, "case_dir": plan.case_dir, "out_dir": plan.out_dir,
-        "model": plan.model, "script": plan.script, "frames": plan.frames,
-        "bytes_in": plan.bytes_in, "backend": plan.backend, "target": plan.target,
-        "case_key": plan.case_key, "case_key_why": plan.case_key_why,
-        "voice": plan.voice, "extra_voices": plan.extra_voices, "box": plan.box, "probe": plan.probe,
-        "sizing": plan.sizing, "channel": plan.channel,
-        "channel_why": plan.channel_why, "speed": plan.speed, "hours": plan.hours,
-        "cost": plan.cost, "warnings": plan.warnings}
-    data.update(kw)
-    return CloudPlan(**data)
+    # 🔴 `dataclasses.replace`, а не перелік полів руками. Перелік губив кожне
+    # нове поле мовчки: стеля витрат, додана в план, зникала б на першому ж
+    # уточненні залізом — тобто рівно перед орендою, де вона й потрібна.
+    from dataclasses import replace
+
+    return replace(plan, **kw)

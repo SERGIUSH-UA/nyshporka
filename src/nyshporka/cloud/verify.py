@@ -154,6 +154,13 @@ def read_quarantine(out_dir: Path) -> list[str]:
     except CorruptFileError:
         return []
     if isinstance(raw, dict):
+        # 🔴 Раннер пише конверт `{"version": 1, "pages": {кадр: причина}}`, а
+        # не голий словник кадрів. Прочитаний як голий, він давав «сторінки»
+        # з іменами `pages` і `version`: число відкладеного бреше, а порожній
+        # карантин робить повністю прочитану справу неповною.
+        pages = raw.get("pages")
+        if isinstance(pages, dict) and set(raw) <= {"version", "pages"}:
+            return sorted(str(k) for k in pages)
         return sorted(str(k) for k in raw)
     if isinstance(raw, list):
         return sorted(str(x) for x in raw)

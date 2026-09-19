@@ -1,0 +1,858 @@
+"""🛫 Захід однією командою: від справи до тексту на диску й погашеної машини.
+
+Решта пакета `cloud` — дрібні повторювані кроки, і кожен із них лишає рішення
+людині. Тут ті самі кроки зібрані в один захід для випадку, де людини поруч
+немає: справа читається на орендованій машині, а дослідник дав лише ключ
+провайдера й має баланс.
+
+    справа → кадри цілі? → завеликі — стиснути → план → кошторис вилкою →
+    рішення → оренда → середовище рушіїв → заливка → прогін під наглядом двох
+    стель → забір → звірка по диску → догін хвоста → гасіння → облік
+
+Автономність тут купується трьома запобіжниками, і всі три — про гроші:
+
+* **стеля автозапуску.** Без людини захід стартує, лише коли ВЕРХ вилки
+  кошторису не перевищує стелі простору (типово два долари). Понад неї —
+  відмова з кодом 10, доки людина не скаже `--confirm`;
+* **дві стелі в роботі** — годинник і гроші. На будь-якій із них роботу
+  зупинено, прочитане забрано й звірено, машину погашено. Вердикт
+  (`deadline` / `budget_stop`) окремий від збою: текст на диску справжній, і
+  повторний захід дочитає решту, а не почне заново;
+* **`release` у `finally`.** Машина гаситься на кожному шляху виходу — успіх,
+  відмова, виняток, Ctrl+C. Єдине, що стоїть перед гасінням, — спроба забрати
+  те, що на ній лежить.
+
+🔴 Порядок `fetch → verify → release` тут той самий, що й у ручних команд, і
+перевіряється тим самим кодом (`run.release` відмовляє без вироку). Автономний
+захід не обходить це правило, а виконує його сам.
+
+🔴 Обрив термінала — штатна подія. Робота живе на машині відчеплено, стан
+заходу — на диску, тож повторний `nysh cloud go` тієї самої справи ПІДХОПЛЮЄ
+живий захід разом із його стелями, а не орендує другу машину.
+"""
+from __future__ import annotations
+
+import contextlib
+import time
+from collections.abc import Callable
+from dataclasses import dataclass, field, replace
+from pathlib import Path
+from typing import Any
+
+from nyshporka.cloud import frames as F
+from nyshporka.cloud import money as M
+from nyshporka.cloud import run as RUN
+from nyshporka.cloud import state as ST
+from nyshporka.cloud import verify as V
+from nyshporka.cloud.base import BoxGone, CloudError, bills
+
+#: Код виходу на кожен вердикт. Частина публічного інтерфейсу: на нього
+#: дивиться агент, який пустив захід і пішов.
+EXIT_CODES: dict[str, int] = {
+    "ok": 0, "dry_run": 0, "refused": 2, "failed": 3, "incomplete": 4,
+    "budget_stop": 5, "market_empty": 6, "deadline": 7, "no_credit": 8,
+    # 🔴 Окремий код, а не «той самий, що у вердикту»: робота могла вдатись, а
+    # машина — лишитись живою. Нуль тут означав би «все гаразд» при лічильнику,
+    # який іде.
+    "release_failed": 9,
+    "needs_confirm": 10, "cancelled": 130}
+
+#: Скільки опитувань поспіль машина може мовчати, перш ніж це збій. Свіжий бокс
+#: і тихий канал мовчать хвилинами, і гасити на першому ж — рівно той рефлекс,
+#: яким уже брали чотири оренди по хвилині поспіль.
+POLL_FAILURES_MAX = 10
+
+#: Скільки чекати, поки облік іншого заходу відпустить замок. Перша збірка
+#: індексу тексту триває десятки хвилин, звичайна догонка — секунди.
+BOOKKEEPING_WAIT_SEC = 1800.0
+
+EventFn = Callable[..., None]
+
+
+def _now() -> float:
+    """Годинник нагляду. Окремою функцією — щоб стелі перевірялись тестом."""
+    return time.time()
+
+
+def _sleep(sec: float) -> None:
+    time.sleep(sec)
+
+
+class GoRefused(CloudError):
+    """Причина не починати. Текст — для людини, дослівно."""
+
+    def __init__(self, message: str, *, verdict: str = "refused") -> None:
+        super().__init__(message)
+        self.verdict = verdict
+
+
+@dataclass
+class GoResult:
+    """Чим скінчився захід — для людини й для машини одним об'єктом."""
+
+    verdict: str = "failed"
+    why: str = ""
+    run_id: str = ""
+    case_key: str = ""
+    case_dir: str = ""
+    out_dir: str = ""
+    backend: str = ""
+    pages_done: int = 0
+    pages_total: int = 0
+    missing: int = 0
+    quarantined: int = 0
+    #: Скільки пішло на оренду. `None` — бекенд не назвав ціни машини.
+    spent_usd: float | None = None
+    rent_hours: float = 0.0
+    fork_low: float | None = None
+    fork_high: float | None = None
+    budget_usd: float | None = None
+    max_hours: float | None = None
+    estimate: dict[str, Any] = field(default_factory=dict)
+    decision: str = ""
+    #: `None` — машини не брали; `False` — брали й НЕ погасили.
+    released: bool | None = None
+    #: Чи дійшов цей виклик до оренди (або підхопив уже орендовану машину).
+    rented: bool = False
+    adopted: bool = False
+    dry_run: bool = False
+    notes: list[str] = field(default_factory=list)
+
+    @property
+    def exit_code(self) -> int:
+        if self.released is False:
+            return EXIT_CODES["release_failed"]
+        return EXIT_CODES.get(self.verdict, EXIT_CODES["failed"])
+
+    def as_dict(self) -> dict[str, Any]:
+        return {"verdict": self.verdict, "exit_code": self.exit_code,
+                "why": self.why, "run_id": self.run_id,
+                "case_key": self.case_key, "case_dir": self.case_dir,
+                "out_dir": self.out_dir, "backend": self.backend,
+                "pages_done": self.pages_done, "pages_total": self.pages_total,
+                "missing": self.missing, "quarantined": self.quarantined,
+                "spent_usd": self.spent_usd,
+                "rent_hours": round(self.rent_hours, 3),
+                "fork_usd": [self.fork_low, self.fork_high],
+                "budget_usd": self.budget_usd, "max_hours": self.max_hours,
+                "estimate": dict(self.estimate), "decision": self.decision,
+                "rented": self.rented, "released": self.released,
+                "adopted": self.adopted,
+                "dry_run": self.dry_run, "notes": list(self.notes)}
+
+
+# ── справа ───────────────────────────────────────────────────────────────────
+@dataclass(frozen=True)
+class CaseRef:
+    """Що саме читаємо: тека кадрів, шифра (якщо відома) і скільки кадрів чекати."""
+
+    frames_dir: Path
+    key: str = ""
+    #: Скільки кадрів знає бібліотека. `0` — не знає.
+    frames_expected: int = 0
+
+
+def case_name(frames_dir: Path) -> str:
+    """Ім'я справи. Кадри в `pages/` — справа зветься іменем батьківської теки."""
+    return frames_dir.parent.name if frames_dir.name == "pages" else frames_dir.name
+
+
+def _index() -> Any:
+    """Індекс бібліотеки або `None`.
+
+    🔴 Порожня чи ще не зібрана бібліотека — звичайний стан, а не відмова:
+    людина, яка щойно поставила застосунок і показала теку зі сканами,
+    бібліотеки не має, і вимагати її заради читання означало б замкнути двері,
+    до яких вона прийшла. Без індексу не працює лише вхід за шифрою.
+    """
+    try:
+        from nyshporka.cases.resolve import LibraryIndex
+
+        return LibraryIndex()
+    except Exception:
+        return None
+
+
+def resolve_case(arg: str) -> CaseRef:
+    """Тека кадрів або шифра → `CaseRef`."""
+    from nyshporka.cloud.verify import frames_in
+
+    given = Path(arg).expanduser()
+    if given.is_dir():
+        d = given.resolve()
+        if not frames_in(d) and (d / "pages").is_dir():
+            d = d / "pages"
+        key, expected = "", 0
+        index = _index()
+        if index is not None:
+            from nyshporka.cases.resolve import _from_path
+
+            # Батьківська тека — лише для розкладки `<справа>/pages`. Питати її
+            # завжди означало б приписати прогін сусідній справі, щойно тека
+            # кадрів лежить усередині чужої: текст під чужою шифрою гірший за
+            # текст без шифри.
+            for cand in ((d, d.parent) if d.name == "pages" else (d,)):
+                try:
+                    key = _from_path(str(cand), index) or ""
+                except Exception:
+                    key = ""
+                if key:
+                    break
+            expected = int((index.by_key.get(key) or {}).get("frames") or 0)
+        return CaseRef(frames_dir=d, key=key, frames_expected=expected)
+
+    index = _index()
+    found = str((index.canonical(arg) if index is not None else "") or "")
+    if not found:
+        raise GoRefused(
+            f"«{arg}»: ні теки з таким шляхом, ні справи з такою шифрою в "
+            f"бібліотеці. Покажіть теку з кадрами або зберіть бібліотеку: "
+            f"`nysh cases build`.")
+    from nyshporka.cases.register import case_path
+
+    key = found
+    entry = index.by_key[key]
+    best: tuple[int, Path] | None = None
+    for raw in (entry.get("path"), entry.get("raw_path"),
+                *(entry.get("extra_paths") or [])):
+        if not raw:
+            continue
+        base = case_path(str(raw))
+        for d in (base, base / "pages"):
+            if d.is_dir():
+                n = len(frames_in(d))
+                # Найбільша тека, а не перша: зменшені копії та уривки лежать
+                # під тією самою шифрою, і читати треба повну.
+                if n and (best is None or n > best[0]):
+                    best = (n, d)
+    if best is None:
+        raise GoRefused(f"{key}: справу бібліотека знає, але теки з кадрами на "
+                        f"диску немає")
+    return CaseRef(frames_dir=best[1], key=key,
+                   frames_expected=int(entry.get("frames") or 0))
+
+
+def already_read(out_dir: Path, *, model: str, frames: int) -> str:
+    """Чи справу вже прочитано ЦІЄЮ моделлю повністю — текст причини або "".
+
+    🔴 Судить мета поруч із текстом, а не реєстр справ: реєстр — зріз, і
+    прогін, який паралельна сесія дочитала хвилину тому, він ще не бачить.
+    Орендувати машину під уже прочитану справу — найдурніший спосіб витратити
+    гроші, і саме він уже траплявся.
+    """
+    meta = V.read_meta(out_dir)
+    if not meta:
+        return ""
+    if Path(str(meta.get("model") or "")).name != Path(model).name:
+        return ""
+    pages = meta.get("pages")
+    n = len(pages) if isinstance(pages, dict) else 0
+    if frames and n >= frames:
+        return (f"{out_dir.name}: уже прочитано {n} з {frames} сторінок моделлю "
+                f"{Path(model).name} ({meta.get('started') or 'дата невідома'})")
+    return ""
+
+
+def _find_live(plan: Any, frames_dir: Path) -> tuple[ST.RunState | None,
+                                                    ST.RunState | None]:
+    """(свій живий захід, чужий захід у ту саму теку виходу) — або `None`.
+
+    🔴 Свій — лише за `run_id`, тобто за справою, моделлю, письмом і бекендом,
+    а не «останній живий»: заходи різних справ ідуть одночасно з різних
+    терміналів, і підхопити чужий означало б забрати його результат і
+    погасити його машину. Ідентифікаторів-кандидатів два, бо на машину їде
+    або сама тека кадрів, або її стиснута копія, — а котра, стане відомо лише
+    після звірки кадрів.
+
+    Чужий захід заважає тільки тоді, коли пише в ТУ САМУ теку виходу (та сама
+    справа іншим письмом): два прогони в одну теку перетирають тексти один
+    одного без жодної помилки.
+    """
+    ids = {plan.run_id,
+           ST.run_id_for(F.shrink_dir_for(frames_dir).resolve(),
+                         model=plan.model.name, script=plan.script,
+                         backend=plan.backend)}
+    own: ST.RunState | None = None
+    for run_id in sorted(ids):
+        st = ST.load(run_id)
+        if st is not None and st.needs_release:
+            own = st
+            break
+    out = str(plan.out_dir).replace("\\", "/").rstrip("/").lower()
+    clash = next((s for s in ST.live() if s.run_id not in ids and s.out_dir
+                  and str(s.out_dir).replace("\\", "/").rstrip("/").lower() == out),
+                 None)
+    return own, clash
+
+
+# ── захід ────────────────────────────────────────────────────────────────────
+def go(case: str, *, backend: str = "vast", budget: float | None = None,
+       max_hours: float | None = None, max_price: float | None = None,
+       confirm: bool = False, dry_run: bool = False,
+       with_voices: list[str] | tuple[str, ...] = (), second_voice: bool = True,
+       script: str = "", case_key: str = "", rerun: bool = False,
+       allow_partial: bool = False, rotate_landscape: bool = False,
+       on_event: EventFn | None = None, tick_sec: float = 60.0) -> GoResult:
+    """Прочитати справу на орендованій машині від початку до кінця.
+
+    Не кидає: відмови, збої й Ctrl+C лягають у `GoResult.verdict`, бо викликач
+    (командний рядок, агент) мусить дістати ОДИН підсумок на будь-якому шляху —
+    зокрема відповідь на питання «чи погашено машину».
+    """
+    res = GoResult(backend=backend, dry_run=dry_run)
+
+    def say(kind: str, text: str, **data: Any) -> None:
+        if on_event is not None:
+            on_event(kind, text, **data)
+
+    try:
+        _go(res, case, say, backend=backend, budget=budget, max_hours=max_hours,
+            max_price=max_price, confirm=confirm, dry_run=dry_run,
+            with_voices=tuple(with_voices), second_voice=second_voice,
+            script=script, case_key=case_key, rerun=rerun,
+            allow_partial=allow_partial, rotate_landscape=rotate_landscape,
+            tick_sec=tick_sec)
+    except GoRefused as exc:
+        res.verdict, res.why = exc.verdict, str(exc)
+    except KeyboardInterrupt:
+        res.verdict, res.why = "cancelled", "перервано з клавіатури"
+    except CloudError as exc:
+        # `market_empty` і `no_credit` виносяться з кошторису ДО оренди, а не
+        # розбором тексту чужої помилки: усе, що впало вже в оренді, — збій.
+        res.verdict, res.why = "failed", str(exc)
+    except Exception as exc:
+        res.verdict, res.why = "failed", f"{type(exc).__name__}: {exc}"
+    _last_line_of_defence(res, say)
+    return res
+
+
+def _last_line_of_defence(res: GoResult, say: EventFn) -> None:
+    """Якщо цей виклик брав машину — переконатись, що вона погашена.
+
+    Оренда й заливка живуть у `run.start`, і він гасить машину на власному
+    збої сам. Тут те саме питання ставиться ще раз, уже по запису на диску: шлях,
+    яким виняток оминув обидва `finally`, дешевше перекрити, ніж довести, що
+    його не існує.
+    """
+    if not res.rented or not res.run_id or res.released is not None:
+        return
+    try:
+        st = ST.load(res.run_id)
+    except Exception:
+        return
+    if st is None or not st.box or not st.bills:
+        return
+    if st.released:
+        res.released = True
+        res.spent_usd, res.rent_hours = st.spent_usd(), st.rent_hours()
+        return
+    _release(st, res, say, why=f"failed:{res.verdict}")
+    res.spent_usd, res.rent_hours = st.spent_usd(), st.rent_hours()
+
+
+def _go(res: GoResult, case: str, say: EventFn, *, backend: str,
+        budget: float | None, max_hours: float | None, max_price: float | None,
+        confirm: bool, dry_run: bool, with_voices: tuple[str, ...],
+        second_voice: bool, script: str, case_key: str, rerun: bool,
+        allow_partial: bool, rotate_landscape: bool, tick_sec: float) -> None:
+    from nyshporka.cloud import plan as PL
+    from nyshporka.core.workspace import workspace
+
+    # 0. бекенд
+    try:
+        b = RUN._backend(backend)
+    except RUN.RunError as exc:
+        raise GoRefused(
+            f"{exc}. Оренду дає окремий пакет-плагін: "
+            f"`pip install \"nyshporka[rent]\"` або `nysh update`, далі "
+            f"`nysh cloud rent login`.") from None
+    if not bills(b):
+        raise GoRefused(
+            f"«{backend}» нічого не орендує — `nysh cloud go` веде захід з "
+            f"орендою від початку до гасіння. Для своєї машини: "
+            f"`nysh cloud start <тека> --host <машина>`.")
+
+    # 1. справа
+    ref = resolve_case(case)
+    key = case_key or ref.key
+    res.case_dir, res.case_key = str(ref.frames_dir), key
+    say("case", f"{key or case_name(ref.frames_dir)} · {ref.frames_dir}")
+
+    def build(frames_dir: Path, **kw: Any) -> PL.CloudPlan:
+        try:
+            return PL.build(
+                frames_dir, backend=backend, script=script, case_key=key,
+                second_voice=second_voice, also=list(with_voices),
+                out_dir=workspace().htr_reports / case_name(ref.frames_dir),
+                max_price_usd_h=max_price, **kw)
+        except PL.PlanError as exc:
+            raise GoRefused(str(exc)) from None
+
+    # 1а. живий захід ЦІЄЇ роботи — підхопити, а не орендувати вдруге
+    plan = build(ref.frames_dir)
+    live, clash = _find_live(plan, ref.frames_dir)
+    if clash is not None:
+        raise GoRefused(
+            f"у теку {plan.out_dir} уже пише інший захід — {clash.run_id} (та "
+            f"сама справа іншою моделлю чи письмом). Два прогони в одну теку "
+            f"перетирають тексти один одного. Дочекайтесь його або киньте: "
+            f"`nysh cloud stop {clash.run_id} --force`.")
+    if live is not None and not live.pid:
+        # Машина є, роботи на ній немає: попередній процес убито посеред
+        # підготовки. Забирати нічого, а лічильник іде — гасимо ДО кошторису,
+        # бо відмова на ньому (брак балансу, потрібен `--confirm`) лишила б
+        # сироту тарифікуватись далі.
+        say("release", f"машина попередньої спроби ({live.run_id}) жива, а "
+                       f"роботи на ній немає — гасимо")
+        _release(live, res, say, why="failed:orphaned")
+        if res.released is False:
+            raise GoRefused(f"машину попередньої спроби ({live.run_id}) погасити "
+                            f"не вдалось — нову поверх неї не беремо")
+        res.released = None     # те було про чужу спробу, не про цей захід
+        live = None
+    if live is not None:
+        if dry_run:
+            raise GoRefused(f"захід {live.run_id} уже йде — сухий прогін нічого "
+                            f"не покаже. Стан: `nysh cloud state {live.run_id}`.")
+        plan = build(Path(live.case_dir), source_dir=live.source_dir or "")
+        res.adopted = True
+        say("adopt", f"захід {live.run_id} уже йде — підхоплено разом зі "
+                     f"стелями, другої машини не беремо")
+        _supervise(live, plan, res, say, tick_sec=tick_sec)
+        return
+
+    # 2. уже прочитано?
+    if not rerun:
+        done = already_read(plan.out_dir, model=plan.model.name, frames=plan.frames)
+        if done:
+            raise GoRefused(f"{done}. Перечитати — `--rerun`; спершу "
+                            f"`nysh cases build` і пошук по готовому.")
+
+    # 3. кадри
+    rep = F.check_frames(ref.frames_dir)
+    say("frames", f"{rep.n} кадрів · {rep.total_mb:.0f} МБ "
+                  f"(медіана {rep.median_mb:.1f} МБ)", **rep.as_dict())
+    if rep.bad:
+        raise GoRefused(
+            f"битих кадрів {len(rep.bad)}: " + "; ".join(rep.bad[:5])
+            + (" …" if len(rep.bad) > 5 else "") + ". Докачайте їх і повторіть.")
+    if rep.still_writing_min is not None and not allow_partial:
+        raise GoRefused(
+            f"останній кадр записано {rep.still_writing_min} хв тому — тека ще "
+            f"качається. Дочекайтесь кінця завантаження (частину справи — "
+            f"лише з `--allow-partial`).")
+    if ref.frames_expected and rep.n < ref.frames_expected and not allow_partial:
+        raise GoRefused(
+            f"кадрів {rep.n}, а бібліотека знає {ref.frames_expected} — "
+            f"завантаження не дійшло? Частину справи — лише з `--allow-partial`.")
+
+    pack = ref.frames_dir
+    if rep.heavy:
+        dst = F.shrink_dir_for(ref.frames_dir)
+        say("shrink", f"кадри завеликі (медіана {rep.median_mb:.1f} МБ) — "
+                      f"стискаємо до висоти {F.TARGET_HEIGHT} у {dst}; "
+                      f"оригінали не чіпаються")
+        got = F.shrink(ref.frames_dir, dst, rotate_landscape=rotate_landscape,
+                       on_line=lambda s: say("shrink", s))
+        if got.landscape and not rotate_landscape:
+            note = (f"{got.landscape} із {got.total} кадрів ширші за висоту. Якщо "
+                    f"це зйомка з книгою на боці — повторіть із "
+                    f"`--rotate-landscape`: без повороту висота рядка падає "
+                    f"вдвічі. Якщо кадр — розворот на два аркуші, усе правильно.")
+            res.notes.append(note)
+            say("warning", f"⚠ {note}")
+        say("shrink", f"стиснуто {got.done}, уже було {got.skipped}"
+                      + (f", ×{got.ratio:g} за обсягом" if got.ratio else ""))
+        pack = dst
+
+    # 4. план і кошторис
+    # Уже прочитане ЦІЄЮ моделлю їде на машину, і вона читає лише решту. З
+    # `--rerun` — ні: людина просить перечитати, а привезений текст раннер
+    # чесно пропустив би. Текст іншої моделі не їде теж: раннер відмовляється
+    # писати в теку з чужим читанням, і захід скінчився б на першій сторінці.
+    before = V.verify(plan.out_dir, case_dir=ref.frames_dir)
+    meta_model = Path(str(V.read_meta(plan.out_dir).get("model") or "")).name
+    seed = not rerun and before.got > 0 and meta_model == plan.model.name
+    # Множиною, а не сумою: відкладена сторінка зазвичай і без тексту, тож у
+    # двох переліках вона та сама.
+    left = len(set(before.missing) | set(before.quarantined)) if seed else None
+    plan = build(pack, source_dir=ref.frames_dir if pack != ref.frames_dir else "",
+                 lines_per_page=F.lines_per_page(plan.out_dir), pages_left=left)
+    res.run_id, res.out_dir = plan.run_id, str(plan.out_dir)
+    res.pages_total = plan.frames
+    for w in plan.warnings:
+        res.notes.append(w)
+        say("warning", f"⚠ {w}")
+    if left is not None:
+        say("plan", f"уже прочитано {before.got} з {plan.frames} — на машину "
+                    f"поїде готове, читатиметься решта ({left})")
+
+    est = M.ask_estimate(b, plan.need)
+    if est is not None:
+        res.estimate = est.as_dict()
+        say("estimate", est.human(), **est.as_dict())
+        if est.empty:
+            raise GoRefused(est.human(), verdict="market_empty")
+    cost = est.cost if est is not None else None
+    if cost is None and budget is None:
+        raise GoRefused(
+            "кошторису немає: бекенд не назвав ні вартості, ні ціни з годинами. "
+            "Вгадувати суму не станемо — назвіть стелю витрат самі: `--budget`.")
+    if cost is not None:
+        # Вилку звужує лише щільність, яку бекенд справді врахував (відлуння
+        # `lines_per_page` у кошторисі), а не та, яку ми йому лише передали.
+        known = (plan.lines_per_page is not None and est is not None
+                 and est.lines_per_page is not None)
+        res.fork_low, res.fork_high = M.budget_fork(cost, density_known=known)
+    high = budget if budget is not None else res.fork_high
+    assert high is not None
+    hours = max_hours if max_hours is not None else (
+        M.max_hours_for(est.hours) if est is not None and est.hours is not None
+        else M.MAX_HOURS_CAP)
+    res.budget_usd, res.max_hours = round(high, 2), hours
+
+    ceiling = M.autostart_ceiling()
+    decision = M.decide_launch(high, est.balance_usd if est is not None else None,
+                               ceiling, confirm)
+    res.decision = decision.why
+    fork = (f"${res.fork_low:.2f}–${res.fork_high:.2f}"
+            if res.fork_high is not None else "вилки немає (кошторис невідомий)")
+    say("money", f"вилка {fork} · бюджет заходу ${high:.2f} · стеля часу "
+                 f"{hours:g} год · рішення: {decision.why}")
+    _say_burning(b, say)
+    if dry_run:
+        res.verdict, res.why = "dry_run", "сухий прогін: оренди не було"
+        return
+    if not decision.launch:
+        raise GoRefused(decision.why, verdict=decision.kind)
+
+    # 5. оренда → середовище → заливка → пуск
+    plan = replace(plan, budget_usd=round(high, 2), max_hours=hours)
+    res.rented = True
+    st = RUN.start(plan, auto_prepare=True, seed=seed,
+                   on_line=lambda s: say("start", s))
+    st.fork_low, st.fork_high = res.fork_low, res.fork_high
+    ST.save(st)
+    raw_meta = st.box.get("meta")
+    doom = raw_meta.get("autodestroy_at") if isinstance(raw_meta, dict) else None
+    if doom:
+        # Страховка бекенда, не наша: бокс знищить себе сам, навіть якщо ця
+        # машина помре. Кажемо вголос — забір мусить устигнути до цієї миті.
+        say("start", f"машина сама знищиться не пізніше {doom}")
+
+    # 6–9. нагляд, забір, звірка, догін, гасіння, облік
+    _supervise(st, plan, res, say, tick_sec=tick_sec)
+
+
+def _say_burning(backend: object, say: EventFn) -> None:
+    """Сказати, що на акаунті вже тарифікується, — і не відмовляти через це.
+
+    Паралельні заходи штатні, тож чужий бокс не привід зупинятись. Але рядок
+    мусить бути: це єдине місце, де людина, яка пускає третій захід, бачить
+    забуту машину від учорашнього. Необов'язковий `status()` бекенда; його
+    відмова нічого не ламає.
+    """
+    fn = getattr(backend, "status", None)
+    if not callable(fn):
+        return
+    try:
+        raw = fn()
+    except Exception as exc:
+        say("burning", f"що вже тарифікується на акаунті — невідомо ({exc})")
+        return
+    burning = raw.get("burning") if isinstance(raw, dict) else None
+    if burning is None:
+        say("burning", "що вже тарифікується на акаунті — невідомо: спитати в "
+                       "провайдера не вдалось")
+        return
+    rows = [r for r in burning if isinstance(r, dict)] if isinstance(burning, list) else []
+    if not rows:
+        return
+    prices = [M.as_number(r.get("dph_total")) for r in rows]
+    total = (f"${sum(p for p in prices if p is not None):.3f}/год"
+             if all(p is not None for p in prices) else "сума невідома")
+    say("burning", f"на акаунті вже тарифікується {len(rows)} боксів ({total}) — "
+                   f"паралельні заходи штатні; чужі видно в `nysh cloud rent status`")
+
+
+def _ceiling_hit(st: ST.RunState, now: float) -> tuple[str, str]:
+    """Яка стеля спрацювала: (`budget_stop` | `deadline` | "", пояснення)."""
+    spent = st.spent_usd(now)
+    if (st.budget_usd is not None and spent is not None
+            and spent >= st.budget_usd - M.STOP_MARGIN_USD):
+        return "budget_stop", (f"витрачено ${spent:.2f} з бюджету "
+                               f"${st.budget_usd:.2f}")
+    hours = st.rent_hours(now)
+    if st.max_hours is not None and st.rent_started and hours >= st.max_hours:
+        return "deadline", f"минуло {hours:.1f} год зі стелі {st.max_hours:g} год"
+    return "", ""
+
+
+#: Коротший прогін темпу не називає: крок опитування (хвилина) на ньому — це
+#: вже десятки відсотків похибки, а число піде в реєстр машин як факт.
+PPH_MIN_RUN_SEC = 600.0
+
+
+def measured_pph(st: ST.RunState, now: float) -> int | None:
+    """Виміряний темп машини, сторінок за годину. `None` — міряти нема з чого.
+
+    Рахується лише з того, що ця машина прочитала сама (без привезеного
+    готовим), і лише за час роботи, без завантаження боксу й заливки.
+    """
+    if not st.run_started:
+        return None
+    sec = now - st.run_started
+    pages = st.pages_done - st.pages_seeded
+    if sec < PPH_MIN_RUN_SEC or pages <= 0:
+        return None
+    return max(1, round(pages / (sec / 3600.0)))
+
+
+def _progress(st: ST.RunState, pulse: RUN.Pulse, now: float) -> str:
+    spent = st.spent_usd(now)
+    money = "витрати невідомі (бекенд не назвав ціни)" if spent is None else (
+        f"витрачено ${spent:.2f}"
+        + (f", до стелі ${max(0.0, st.budget_usd - spent):.2f}"
+           if st.budget_usd is not None else ""))
+    clock = (f" · {st.rent_hours(now):.1f} з {st.max_hours:g} год"
+             if st.max_hours is not None else "")
+    return (f"{st.human_phase()} · {pulse.pages_done} з {pulse.frames_total} "
+            f"({pulse.pct}%) · {money}{clock}")
+
+
+def _wait(st: ST.RunState, say: EventFn, *,
+          tick_sec: float) -> tuple[str, str, bool]:
+    """Чекати кінця роботи під двома стелями.
+
+    Повертає (стеля, пояснення, чи бачили роботу живою). Третє потрібне
+    виміряному темпу: захід, підхоплений після ночі без термінала, застає
+    роботу давно скінченою, і «сторінки ÷ час до цієї миті» було б числом ні
+    про що.
+    """
+    failures = 0
+    saw_alive = False
+    while True:
+        now = _now()
+        try:
+            pulse = RUN.poll(st)
+            failures = 0
+        except BoxGone:
+            raise
+        except CloudError as exc:
+            failures += 1
+            say("warning", f"⚠ машина не відповідає ({failures} з "
+                           f"{POLL_FAILURES_MAX}): {exc}")
+            if failures >= POLL_FAILURES_MAX:
+                raise
+            pulse = None
+        if pulse is not None:
+            st.pages_done = pulse.pages_done
+            ST.save(st)
+            say("progress", _progress(st, pulse, now),
+                pages_done=pulse.pages_done, pages_total=pulse.frames_total,
+                spent_usd=st.spent_usd(now))
+            if pulse.finished or not pulse.alive:
+                return "", "", saw_alive
+            saw_alive = True
+        # 🔴 Стелі перевіряються й тоді, коли машина мовчить: лічильник від
+        # нашого зв'язку з нею не залежить.
+        hit, why = _ceiling_hit(st, now)
+        if hit:
+            return hit, why, saw_alive
+        _sleep(tick_sec)
+
+
+def _fetch_and_verify(st: ST.RunState, res: GoResult, say: EventFn) -> V.Completeness:
+    RUN.fetch(st, on_line=lambda s: say("fetch", s))
+    st.enter("verifying")
+    # Звіряємо з ОРИГІНАЛАМИ, коли їхала стиснута копія: правда про те, що мало
+    # бути прочитано, лежить там, а імена кадрів у копії ті самі.
+    got = V.verify(st.out_dir, case_dir=st.source_dir or st.case_dir,
+                   expected_hint=st.frames_total)
+    st.pages_done = got.got
+    ST.save(st)
+    res.pages_done, res.pages_total = got.got, got.expected or st.frames_total
+    res.missing, res.quarantined = got.missing_count, len(got.quarantined)
+    say("verify", got.human() + (f" · {got.detail}" if got.detail else ""))
+    return got
+
+
+def _release(st: ST.RunState, res: GoResult, say: EventFn, *, why: str) -> None:
+    """Погасити машину й записати, чи вдалось. Не кидає ніколи."""
+    try:
+        try:
+            # Спершу — за правилом: із вироком `run.release` пускає сам.
+            RUN.release(st, why=why, on_line=lambda s: say("release", s))
+        except RUN.RunError:
+            # Вирок «неповно» (або його не вдалось записати): забрано все, що
+            # на машині було, догін уже зроблено — тримати її далі означає
+            # платити за машину, з якої більше нема чого взяти.
+            RUN.release(st, why=why, force=True,
+                        on_line=lambda s: say("release", s))
+        res.released = True
+    except Exception as exc:
+        res.released = False
+        st.note("release_failed", f"{type(exc).__name__}: {exc}")
+        ST.save(st)
+        # 🔴 Єдиний випадок, коли гроші горять без нагляду, — тому великими
+        # літерами і з усіма трьома способами це перевірити й зупинити.
+        note = (f"🔴 МАШИНУ НЕ ВДАЛОСЬ ПОГАСИТИ — ЛІЧИЛЬНИК ІДЕ ({exc}). "
+                f"Повторіть гасіння: `nysh cloud stop {st.run_id} --force`; "
+                f"звірте, що тарифікується: `nysh cloud rent status`; якщо "
+                f"машина лишилась — погасіть її в кабінеті провайдера оренди.")
+        res.notes.append(note)
+        say("release", note)
+
+
+def _supervise(st: ST.RunState, plan: Any, res: GoResult, say: EventFn, *,
+               tick_sec: float) -> None:
+    """Від живої роботи до погашеної машини й обліку."""
+    res.run_id, res.out_dir = st.run_id, st.out_dir
+    res.case_key = res.case_key or st.case_key
+    res.pages_total = res.pages_total or st.frames_total
+    res.budget_usd, res.max_hours = st.budget_usd, st.max_hours
+    res.fork_low, res.fork_high = st.fork_low, st.fork_high
+    res.rented = True
+    verdict, why, release_why = "failed", "захід обірвано", "failed:interrupted"
+    fetched = False
+    pph: int | None = None
+    try:
+        try:
+            while True:
+                hit, hit_why, saw_alive = _wait(st, say, tick_sec=tick_sec)
+                if pph is None and saw_alive and not hit and st.catchups == 0:
+                    pph = measured_pph(st, _now())
+                if hit:
+                    say("ceiling", f"стеля: {hit_why} — зупиняємо роботу й "
+                                   f"забираємо прочитане")
+                    RUN.stop_job(st)
+                got = _fetch_and_verify(st, res, say)
+                fetched = True
+                if hit:
+                    verdict, why, release_why = hit, f"{hit_why}; {got.human()}", hit
+                    break
+                if got.complete:
+                    # Виміряний темп їде бекенду разом із вироком: він пише його
+                    # у свій реєстр машин. Невідомий — просто `ok`, без числа.
+                    verdict, why = "ok", got.detail
+                    release_why = f"ok pph={pph}" if pph else "ok"
+                    break
+                if V.tail_is_small(got) and st.catchups < 1:
+                    say("catchup",
+                        f"бракує {got.missing_count + len(got.quarantined)} "
+                        f"сторінок — доганяємо на живій машині одним процесом")
+                    RUN.catch_up(st, plan, on_line=lambda s: say("catchup", s))
+                    continue
+                verdict, why = "incomplete", got.human()
+                release_why = "failed:incomplete"
+                break
+        except KeyboardInterrupt:
+            verdict, why, release_why = ("cancelled", "перервано з клавіатури",
+                                         "cancelled")
+            say("cancel", "перервано — забираємо прочитане й гасимо машину "
+                          "(ще один Ctrl+C пропустить забір, але не гасіння)")
+            fetched = _salvage(st, res, say) or fetched
+        except Exception as exc:
+            verdict, why = "failed", f"{type(exc).__name__}: {exc}"
+            release_why = f"failed:{type(exc).__name__}"
+            say("failed", f"🔴 {why} — забираємо, що є, і гасимо машину")
+            fetched = _salvage(st, res, say) or fetched
+    finally:
+        # 🔴 Гасіння — у `finally` зовнішнього блока, тож його не обходить ні
+        # виняток із аварійного забору, ні другий Ctrl+C посеред нього. Вирок
+        # пишеться ДО гасіння: `run.release` без нього відмовляє, і це правило
+        # автономний захід виконує, а не обходить.
+        _settle(st, verdict, why)
+        _release(st, res, say, why=release_why)
+    _finish(st, res, verdict, why, fetched, say)
+
+
+def _salvage(st: ST.RunState, res: GoResult, say: EventFn) -> bool:
+    """Аварійний забір: зупинити роботу й привезти, що є. Не кидає."""
+    try:
+        RUN.stop_job(st)
+    except Exception as exc:
+        st.note("stop_failed", f"{type(exc).__name__}: {exc}")
+    try:
+        _fetch_and_verify(st, res, say)
+        return True
+    except Exception as exc:
+        st.note("salvage_failed", f"{type(exc).__name__}: {exc}")
+        res.notes.append(f"забрати прочитане не вдалось: {exc}")
+        return False
+
+
+def _settle(st: ST.RunState, verdict: str, why: str) -> None:
+    # Запис вироку не має стати між нами й гасінням машини.
+    with contextlib.suppress(Exception):
+        st.settle(verdict, why=why)
+
+
+def _finish(st: ST.RunState, res: GoResult, verdict: str, why: str,
+            fetched: bool, say: EventFn) -> None:
+    res.verdict, res.why = verdict, why
+    res.spent_usd = st.spent_usd()
+    res.rent_hours = st.rent_hours()
+    if fetched:
+        # 🔴 Облік — ПІСЛЯ гасіння: індексація тексту триває хвилини, і робити
+        # її при живій машині означало б платити оренду за роботу власного диска.
+        for note in bookkeeping(Path(st.out_dir).name):
+            res.notes.append(note)
+            say("books", f"⚠ {note}")
+    spent = "невідомо" if res.spent_usd is None else f"${res.spent_usd:.2f}"
+    say("done", f"{verdict} · сторінок {res.pages_done} з {res.pages_total} · "
+                f"витрачено {spent} за {res.rent_hours:.2f} год · {st.out_dir}")
+
+
+def bookkeeping(run_name: str) -> list[str]:
+    """Реєстр справ і індекс тексту — те саме, що `nysh cases build` і
+    `nysh text index`. Повертає нотатки про збої; порожньо — усе пройшло.
+
+    🔴 Збій обліку не валить захід. Текст уже на диску, машина погашена, і
+    «захід не вдався» через зайнятий файл індексу було б неправдою, яка ще й
+    спонукає перечитати справу за гроші. Але й мовчати не можна: без
+    перебудови реєстр казатиме «декоду немає» про щойно прочитану справу.
+    """
+    # 🔴 Один облік на простір за раз. Заходи різних справ ідуть паралельно й
+    # нерідко кінчаються в одну хвилину; дві перебудови реєстру в той самий файл
+    # дали б зріз, у якому бракує справи того, хто писав першим. Замок із
+    # ОЧІКУВАННЯМ, а не відмовою: другий просто стає в чергу. Не дочекався —
+    # нотатка, і облік однаково пробуємо: пропущена перебудова гірша за ризик.
+    from nyshporka.core.workspace import workspace
+    from nyshporka.core.xrate import LockTimeout, _locked
+
+    notes: list[str] = []
+    with contextlib.ExitStack() as stack:
+        try:
+            stack.enter_context(_locked(
+                workspace().derived / "cloud" / "_bookkeeping.lock",
+                timeout=BOOKKEEPING_WAIT_SEC))
+        except (LockTimeout, OSError) as exc:
+            notes.append(f"облік іншого заходу не скінчився за "
+                         f"{BOOKKEEPING_WAIT_SEC:.0f} с ({exc}) — перевірте: "
+                         f"`nysh cases build`, `nysh text index`")
+        notes += _bookkeeping(run_name)
+    return notes
+
+
+def _bookkeeping(run_name: str) -> list[str]:
+    notes: list[str] = []
+    try:
+        from nyshporka.cases import db
+
+        db.rebuild(rescan=True)
+    except Exception as exc:
+        notes.append(f"реєстр справ не перебудувався ({type(exc).__name__}: "
+                     f"{exc}) — виконайте `nysh cases build`")
+    try:
+        from nyshporka import ops as O
+
+        env = O.call("text.index", {"case": run_name, "rebuild": False,
+                                    "accept_rules": False})
+        if not env.ok:
+            notes.append(f"індекс тексту не догнано ({env.error}) — виконайте "
+                         f"`nysh text index`")
+    except Exception as exc:
+        notes.append(f"індекс тексту не догнано ({type(exc).__name__}: {exc}) "
+                     f"— виконайте `nysh text index`")
+    return notes

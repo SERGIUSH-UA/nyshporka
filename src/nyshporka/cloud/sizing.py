@@ -155,6 +155,21 @@ def plan_sizing(*, cores: float, vram_gb_min: float, gpus: int = 1,
                   capped_by=capped_by)
 
 
+def useful_cores(pages: int, *, profile: EngineProfile = DEFAULT_PROFILE) -> int:
+    """Скільки ядер ця справа взагалі здатна зайняти. `0` — сказати нічого.
+
+    З цим числом бекенд іде на ринок як із побажанням (`Need.prefer_cores`).
+    🔴 Це стеля КОРИСТІ, а не вимога: понад неї ядра оплачуються й простоюють,
+    бо процесів не буває більше, ніж окупає обсяг (`MIN_PAGES_PER_SHARD`), а
+    кожен процес бере свої `min_cores_per_shard`. На справі з сорока кадрів
+    машина на 64 ядра читає так само, як на десять, — лише дорожче.
+    """
+    if pages <= 0:
+        return 0
+    shards = min(profile.max_shards, max(1, pages // MIN_PAGES_PER_SHARD))
+    return int(shards * profile.min_cores_per_shard)
+
+
 def predict_hours(pages: int, sizing: Sizing, *, warm: bool = False,
                   profile: EngineProfile = DEFAULT_PROFILE) -> float:
     """Скільки годин це триватиме, разом із холодним стартом.

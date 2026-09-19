@@ -23,6 +23,8 @@ import contextlib
 import json
 import re
 import shlex
+import shutil
+import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -51,6 +53,14 @@ CONNECT_TIMEOUT = 30.0
 
 #: Як часто нагадувати про себе, щоб NAT і провайдер не рвали тихий канал.
 KEEPALIVE_SEC = 30
+
+#: Від якого розміру файл їде системним `scp`, а не через SFTP paramiko.
+#: Нижче цього виграш з'їдає запуск окремого процесу з власним рукостисканням;
+#: вище — різниця вже в хвилинах, а на архіві кадрів — у годинах.
+FAST_PATH_BYTES = 32 * 1024 * 1024
+
+#: Шлях на машині, який можна дати `scp` без лапок (див. `SshSession._scp`).
+_SCP_SAFE_RE = re.compile(r"^[\w@%+=,./-]+$")
 
 
 class SshUnavailable(CloudError):
@@ -154,9 +164,37 @@ def load_hosts() -> list[Host]:
 
 
 def save_hosts(rows: list[Host]) -> Path:
-    from nyshporka.utils.atomic import write_json
+    """Записати перелік машин, не чіпаючи решти файла.
 
-    return write_json(hosts_path(), {"hosts": [h.as_dict() for h in rows]})
+    🔴 Файл спільний: поруч із машинами в ньому лежать опис сховища й стеля
+    автозапуску оренди. Запис самого лише `hosts` стирав би їх мовчки — і
+    `hosts add` після `hosts storage` повертав би великі справи на повільний
+    канал без жодного слова про це.
+    """
+    payload = [h.as_dict() for h in rows]
+    return update_config(lambda data: data.__setitem__("hosts", payload))
+
+
+def update_config(mutate: Callable[[dict[str, Any]], None]) -> Path:
+    """Змінити `<простір>/config/cloud.json`: під замком, з перечитуванням.
+
+    🔴 Файл спільний для кількох процесів: заходи різних справ ідуть одночасно
+    з різних терміналів, і поки один дописує машину, інший міняє стелю
+    автозапуску. Атомарна заміна сама цього не рятує — вона боронить від
+    обірваного запису, а не від «прочитав старе, записав поверх чужого». Тому
+    прочитати, змінити й записати — одна дія під файловим замком.
+    """
+    # Той самий портативний замок (msvcrt / flock), яким пакет уже боронить
+    # спільний лічильник темпу запитів; другої реалізації поруч не заводимо.
+    from nyshporka.core.xrate import _locked
+    from nyshporka.utils.atomic import read_json, write_json
+
+    path = hosts_path()
+    with _locked(path.with_name(path.name + ".lock"), timeout=30.0):
+        raw = read_json(path, default={})
+        data = dict(raw) if isinstance(raw, dict) else {}
+        mutate(data)
+        return write_json(path, data)
 
 
 def find_host(target: str) -> Host | None:
@@ -178,6 +216,9 @@ class SshSession:
         self._sftp: Any = None
         self._home = ""
         self.host = host
+        #: Що транспорт хотів сказати тому, хто веде захід (відкат зі швидкого
+        #: шляху тощо). Забирає й очищає викликач.
+        self.notes: list[str] = []
 
     # ── шляхи ────────────────────────────────────────────────────────────────
     @property
@@ -266,15 +307,107 @@ class SshSession:
             self._sftp.get_channel().settimeout(300.0)
         return self._sftp
 
+    def _say(self, text: str) -> None:
+        """Нотатка транспорту — для того, хто веде захід.
+
+        Транспорт не знає ні про стан заходу, ні про консоль, тож складає
+        сказане в `notes`; забирає їх викликач (`cloud.run`). Мовчазний відкат
+        на повільний шлях виглядав би як «заливка чомусь іде годину».
+        """
+        self.notes.append(text)
+
+    def _remote_size(self, remote: str) -> int:
+        """Розмір файла НА МАШИНІ, або -1. Приймач передачі — він, не код виходу."""
+        got = self.run(f"echo nysh_size=$(stat -c %s {shlex.quote(remote)} "
+                       f"2>/dev/null)", timeout=CONNECT_TIMEOUT)
+        m = re.search(r"^nysh_size=(\d+)\s*$", got.out, re.M)
+        return int(m.group(1)) if m else -1
+
+    def _scp(self, *, local: Path, remote: str, upload: bool, size: int) -> bool:
+        """Передати файл системним `scp`. `False` — швидкого шляху не вийшло.
+
+        🔴 Навіщо взагалі другий транспорт. SFTP у paramiko дає 0.4–0.45 МБ/с
+        при домашньому аплінку 15 МБ/с (заміряно на заливці кадрів): вузьке
+        місце — вікно й підтвердження самої бібліотеки, не канал. На своїй
+        машині це терпіння, на орендованій — години оплаченого простою: бокс
+        уже тарифікується, а кадри ще їдуть.
+
+        🔴 `False` — не помилка, а «їдьмо звичайним шляхом»: немає `scp` у
+        PATH, дивний шлях, відмова автентифікації, таймаут. Причина лягає в
+        нотатки, файл їде через SFTP. Кидати тут виняток означало б, що
+        зручність зламала захід, який без неї просто тривав би довше.
+        """
+        exe = shutil.which("scp")
+        if exe is None:
+            self._say("системного `scp` немає в PATH — файл їде через SFTP "
+                      "(повільніше в рази; OpenSSH є у Windows 10+, Linux, macOS)")
+            return False
+        host = self.host
+        # Шлях на машині їде до `scp` без лапок: старий протокол пропускає його
+        # крізь оболонку, новий (SFTP усередині) — ні, і лапки, потрібні
+        # одному, ламають інший. Тому швидкий шлях — лише для шляхів, яким
+        # лапки не потрібні ні там, ні там; решта їде через SFTP.
+        if not _SCP_SAFE_RE.match(remote) or ":" in host.host:
+            self._say(f"шлях «{remote}» не годиться для `scp` без лапок — SFTP")
+            return False
+        known = str(_known_hosts_path())
+        cmd = [exe, "-q", "-P", str(host.port),
+               # 🔴 Жодного запиту з клавіатури: `scp`, який питає пароль у
+               # процесі без термінала, висить до таймауту мовчки.
+               "-o", "BatchMode=yes",
+               # Той самий файл відбитків і та сама політика, що в `connect`:
+               # новий хост записується (орендований бокс щоразу новий), а
+               # ЗМІНЕНИЙ ключ відомого хоста — відмова. Системний файл не
+               # чіпаємо й тут.
+               "-o", "UserKnownHostsFile=" + (f'"{known}"' if " " in known else known),
+               "-o", "StrictHostKeyChecking=accept-new",
+               "-o", f"ConnectTimeout={int(CONNECT_TIMEOUT)}",
+               "-o", f"ServerAliveInterval={KEEPALIVE_SEC}",
+               "-o", "ServerAliveCountMax=6"]
+        if host.key:
+            cmd += ["-i", str(Path(host.key).expanduser()),
+                    "-o", "IdentitiesOnly=yes"]
+        # 🔴 Локальний файл — відносним іменем від власної теки. `C:\…` для
+        # `scp` виглядає як «хост C», і частина збірок саме так його й читає.
+        there = f"{host.user}@{host.host}:{remote}"
+        here = f"./{local.name}"
+        cmd += [here, there] if upload else [there, here]
+        # Стеля часу — від обсягу, із запасом на найповільніший прийнятний
+        # канал (50 КБ/с): таймаут мусить ловити зависання, а не повільність.
+        limit = 300.0 + size / 50_000.0
+        try:
+            done = subprocess.run(cmd, cwd=str(local.parent), capture_output=True,
+                                  text=True, encoding="utf-8", errors="replace",
+                                  timeout=limit, check=False,
+                                  stdin=subprocess.DEVNULL)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            self._say(f"`scp` не спрацював ({type(exc).__name__}) — SFTP")
+            return False
+        if done.returncode != 0:
+            why = (done.stderr or "").strip().splitlines()
+            self._say(f"`scp` відмовив (rc={done.returncode}"
+                      + (f": {why[-1][:160]}" if why else "") + ") — SFTP")
+            return False
+        return True
+
     def put(self, local: Path, remote: str) -> int:
         local = Path(local)
         self.mkdirs(str(Path(remote).parent).replace("\\", "/"))
+        want = local.stat().st_size
+        if want >= FAST_PATH_BYTES and self._scp(local=local, remote=remote,
+                                                 upload=True, size=want):
+            # 🔴 Приймач — розмір на машині, а не нульовий код `scp`: обірваний
+            # канал лишає файл, який виглядає як покладений.
+            got = self._remote_size(remote)
+            if got == want:
+                return got
+            self._say(f"після `scp` на машині {got} байт замість {want} — "
+                      f"перекладаємо через SFTP")
         self.sftp.put(str(local), remote)
         # 🔴 Звіряємо розмір одразу. Обірвана заливка лишає файл, який виглядає
         # як покладений, і виявляється це вже на боксі — після оренди, після
         # встановлення рушія, тобто найдорожчим способом.
         got = int(self.sftp.stat(remote).st_size)
-        want = local.stat().st_size
         if got != want:
             raise CloudError(
                 f"файл доїхав неповним: {local.name} — {got} байт замість {want}")
@@ -286,6 +419,16 @@ class SshSession:
         # Качаємо у тимчасовий і перейменовуємо: обірване качання не має
         # виглядати як привезений результат.
         tmp = local.with_name(local.name + ".part")
+        # Великий результат (тисячі текстів і логи одним архівом) — тим самим
+        # швидким шляхом, що й заливка: машина тарифікується й тоді, коли з неї
+        # забирають.
+        want = self._remote_size(remote)
+        if want >= FAST_PATH_BYTES and self._scp(local=tmp, remote=remote,
+                                                 upload=False, size=want):
+            if tmp.is_file() and tmp.stat().st_size == want:
+                tmp.replace(local)
+                return want
+            self._say("після `scp` файл неповний — забираємо через SFTP")
         self.sftp.get(remote, str(tmp))
         tmp.replace(local)
         return local.stat().st_size
@@ -332,6 +475,35 @@ def _known_hosts_path() -> Path:
     from platformdirs import user_config_dir
 
     return Path(user_config_dir("nyshporka", appauthor=False)) / "known_hosts"
+
+
+def _append_policy(paramiko: Any, known: Path) -> Any:
+    """Політика першого знайомства, яка ДОПИСУЄ рядок, а не переписує файл.
+
+    🔴 Штатна `AutoAddPolicy` зберігає весь набір ключів зі своєї пам'яті поверх
+    файла. Два заходи, що одночасно знайомляться з двома свіжими боксами,
+    читають той самий файл, і той, хто пише другим, стирає відбиток першого:
+    наступне з'єднання з першим боксом знову «перше знайомство» — тобто саме
+    тоді, коли на боксі вже лежать скани, звірка відбитка мовчки вимикається.
+    Один рядок у кінець під замком нічого чужого не зачіпає.
+    """
+
+    class AppendHostKey(paramiko.MissingHostKeyPolicy):  # type: ignore[misc]
+        def missing_host_key(self, client: Any, hostname: str, key: Any) -> None:
+            client._host_keys.add(hostname, key.get_name(), key)
+            line = f"{hostname} {key.get_name()} {key.get_base64()}\n"
+            try:
+                from nyshporka.core.xrate import _locked
+
+                with _locked(known.with_name(known.name + ".lock"), timeout=30.0), \
+                        known.open("a", encoding="utf-8", newline="\n") as fh:
+                    fh.write(line)
+            except Exception:
+                # Не записали — з'єднання однаково довірене на цей сеанс; гірше
+                # було б упустити орендовану машину через файл відбитків.
+                pass
+
+    return AppendHostKey()
 
 
 def _load_key(path: Path) -> Any:
@@ -396,7 +568,7 @@ class SshBackend:
             client.load_host_keys(str(known))
         except OSError:                  # pragma: no cover — read-only профіль
             pass
-        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        client.set_missing_host_key_policy(_append_policy(paramiko, known))
         kwargs: dict[str, Any] = {
             "hostname": host.host, "port": host.port, "username": host.user,
             "timeout": CONNECT_TIMEOUT, "banner_timeout": CONNECT_TIMEOUT,
