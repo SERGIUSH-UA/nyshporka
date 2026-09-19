@@ -127,3 +127,70 @@ def test_silence_beyond_the_limit_is_still_a_failure(space: Path, monkeypatch) -
     res = _go(case)
     assert res.verdict == "failed"
     assert len(backend.released) == 1 and backend.released[0].startswith("failed")
+
+
+# ── забір ────────────────────────────────────────────────────────────────────
+def _break_fetch(session: Box1, monkeypatch, *, times: int, exc: BaseException) -> dict[str, int]:
+    """Перші `times` спроб забрати архів рвуться."""
+    seen = {"n": 0}
+    real_get = session.get
+
+    def get(remote: str, local: Path) -> int:
+        seen["n"] += 1
+        if seen["n"] <= times:
+            raise exc
+        return real_get(remote, local)
+
+    monkeypatch.setattr(session, "get", get)
+    return seen
+
+
+def test_one_network_blip_at_fetch_time_does_not_cost_the_whole_case(
+        space: Path, monkeypatch) -> None:
+    """🔴 Збій мережі в мить забору раніше вів просто до гасіння: машина жива,
+    текст на ній — і його знищували разом із нею."""
+    session = Box1(space / "box", [NAMES])
+    case, backend, _ = _wire(space, monkeypatch, session)
+    seen = _break_fetch(session, monkeypatch, times=3,
+                        exc=ChannelDropped("канал обірвався (забір result.tar)"))
+    pauses: list[float] = []
+    monkeypatch.setattr(GO, "_sleep", pauses.append)
+    told: list[str] = []
+
+    res = _go(case, on_event=lambda kind, text, **_: told.append(text))
+
+    assert (res.verdict, res.pages_done) == ("ok", 3), res.why
+    assert seen["n"] == 4 and backend.released == ["ok"]
+    assert [p for p in pauses if p] == [15.0, 30.0, 60.0], "паузи наростають"
+    assert sum("забір не вдався" in t for t in told) == 3, "людині сказано"
+
+
+def test_a_box_that_is_gone_is_not_waited_for(space: Path, monkeypatch) -> None:
+    from nyshporka.cloud.base import BoxGone
+
+    session = Box1(space / "box", [NAMES])
+    case, backend, _ = _wire(space, monkeypatch, session)
+    seen = _break_fetch(session, monkeypatch, times=99, exc=BoxGone("інстансу немає"))
+    res = _go(case)
+    assert res.verdict == "failed" and "інстансу немає" in res.why
+    assert seen["n"] == 2, "основна спроба й одна аварійна — без очікування"
+    assert len(backend.released) == 1
+
+
+def test_fetch_retries_end_at_the_ceiling(space: Path, monkeypatch) -> None:
+    """Стеля лишається стелею: після неї — кілька спроб, і гасимо без забору."""
+    import time as _t
+
+    session = Box1(space / "box", [NAMES])
+    case, backend, _ = _wire(space, monkeypatch, session)
+    seen = _break_fetch(session, monkeypatch, times=999,
+                        exc=ChannelDropped("канал обірвався"))
+    clock = {"t": _t.time()}
+    monkeypatch.setattr(GO, "_now", lambda: clock["t"])
+    monkeypatch.setattr(GO, "_sleep", lambda s: clock.__setitem__("t", clock["t"] + s))
+
+    res = _go(case, max_hours=1.0)
+    assert res.verdict == "failed" and res.released is True
+    assert len(backend.released) == 1, "машину погашено рівно раз"
+    assert 10 < seen["n"] < 60, "чекали до стелі години, а не вічно й не один раз"
+    assert any("забрати прочитане не вдалось" in n for n in res.notes)

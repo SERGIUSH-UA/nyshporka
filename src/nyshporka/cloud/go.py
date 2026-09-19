@@ -44,7 +44,13 @@ from nyshporka.cloud import money as M
 from nyshporka.cloud import run as RUN
 from nyshporka.cloud import state as ST
 from nyshporka.cloud import verify as V
-from nyshporka.cloud.base import BoxGone, CloudError, bills
+from nyshporka.cloud.base import (
+    BoxGone,
+    BoxNotReady,
+    ChannelDropped,
+    CloudError,
+    bills,
+)
 
 #: Код виходу на кожен вердикт. Частина публічного інтерфейсу: на нього
 #: дивиться агент, який пустив захід і пішов.
@@ -667,8 +673,54 @@ def _wait(st: ST.RunState, say: EventFn, *,
         _sleep(tick_sec)
 
 
+#: Паузи між спробами забору, секунд; остання повторюється, доки не стеля.
+FETCH_RETRY_PAUSES: tuple[float, ...] = (15.0, 30.0, 60.0, 120.0, 300.0)
+
+#: Скільки спроб забору лишається, коли стеля ВЖЕ спрацювала. Нуль означав би,
+#: що зупинений на бюджеті захід втрачає все прочитане через один збій мережі;
+#: без ліку — що стеля перестає бути стелею.
+FETCH_TRIES_PAST_CEILING = 3
+
+
+def _fetch_with_retries(st: ST.RunState, say: EventFn) -> None:
+    """Забрати результат, переживаючи обриви зв'язку.
+
+    🔴 Один збій мережі в мить забору раніше означав погашену машину з
+    неперевезеним текстом: виняток ішов в аварійний обробник, той пробував ще
+    раз тим самим каналом у ту саму секунду — і далі стояло гасіння. Машина при
+    цьому жива, робота на ній скінчена, а результат лежить на її диску; чекати
+    тут коштує центи, а не чекати — всю оплачену справу.
+
+    Повторюються лише відмови ЗВ'ЯЗКУ (`BoxNotReady`, `ChannelDropped`). Решта —
+    «машини більше немає», «нема чого забирати», відмова ключа — від повтору не
+    зміниться. Межа повторів — ті самі дві стелі, що й у роботи: годинник і
+    гроші. Після стелі лишається кілька спроб, і далі гасимо без забору.
+    """
+    attempt = past_ceiling = 0
+    while True:
+        try:
+            RUN.fetch(st, on_line=lambda s: say("fetch", s))
+            return
+        except (BoxNotReady, ChannelDropped) as exc:
+            attempt += 1
+            hit, hit_why = _ceiling_hit(st, _now())
+            if hit:
+                past_ceiling += 1
+                if past_ceiling >= FETCH_TRIES_PAST_CEILING:
+                    say("warning", f"⚠ забрати не вдалось і стеля спрацювала "
+                                   f"({hit_why}) — далі не чекаємо")
+                    raise
+            if not FETCH_RETRY_PAUSES:
+                raise
+            pause = FETCH_RETRY_PAUSES[min(attempt, len(FETCH_RETRY_PAUSES)) - 1]
+            st.note("fetch_retry", f"{type(exc).__name__}: {exc}")
+            say("warning", f"⚠ забір не вдався (спроба {attempt}): {exc} — машина "
+                           f"жива, результат на ній; повтор за {pause:g} с")
+            _sleep(pause)
+
+
 def _fetch_and_verify(st: ST.RunState, res: GoResult, say: EventFn) -> V.Completeness:
-    RUN.fetch(st, on_line=lambda s: say("fetch", s))
+    _fetch_with_retries(st, say)
     st.enter("verifying")
     # Звіряємо з ОРИГІНАЛАМИ, коли їхала стиснута копія: правда про те, що мало
     # бути прочитано, лежить там, а імена кадрів у копії ті самі.
