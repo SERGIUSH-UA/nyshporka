@@ -304,6 +304,30 @@ def test_windows_installer_is_utf8_with_bom() -> None:
     assert raw.startswith(b"\xef\xbb\xbf"), "windows.ps1 без UTF-8 BOM"
     assert "OutputEncoding" in raw.decode("utf-8-sig"), (
         "кодування консолі не виставлене — вивід лишиться в системній сторінці")
+    assert "$env:PYTHONIOENCODING = 'utf-8'" in raw.decode("utf-8-sig"), (
+        "nysh під пайпом інсталятора писатиме в ANSI-сторінці: кирилиця — "
+        "кракозябрами, ✅ — UnicodeEncodeError")
+
+
+def test_console_survives_an_ansi_pipe() -> None:
+    """🔴 `nysh init` під пайпом cp1251 не падає на `✅`.
+
+    Звіт користувача 20.09.2026: інсталятор Windows пускає `nysh init` через
+    пайп, Python пише туди в ANSI-сторінці системи, і повідомлення про успіх
+    обривало установлення `UnicodeEncodeError`. Окремий процес — бо `Console`
+    кешований і прив'язаний до справжнього `sys.stdout`.
+    """
+    import os
+    import subprocess
+    import sys
+
+    env = {**os.environ, "PYTHONIOENCODING": "cp1251", "PYTHONUTF8": "0"}
+    r = subprocess.run(
+        [sys.executable, "-c",
+         "from nyshporka import brand; brand.console().print('✅ готово')"],
+        capture_output=True, env=env, timeout=60)
+    assert r.returncode == 0, r.stderr.decode("utf-8", "replace")
+    assert "? готово" in r.stdout.decode("cp1251")
 
 
 def test_generator_speaks_to_a_legacy_console(monkeypatch: pytest.MonkeyPatch) -> None:
