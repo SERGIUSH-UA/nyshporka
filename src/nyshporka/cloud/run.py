@@ -218,8 +218,12 @@ def uv_install_command(probe_out: str) -> str:
         "повторіть.")
 
 
+#: Скільки разів повторити крок підготовки після обриву каналу.
+PREPARE_RETRIES = 3
+
+
 def prepare(session: Session, remote_dir: str, *,
-            on_line: Any = None) -> EngineState:
+            on_line: Any = None, reconnect: Any = None) -> EngineState:
     """Зібрати середовище рушіїв на машині. Ідемпотентно.
 
     🔴 Пакети ставляться по одному, а не списком. Причина конкретна: рушій
@@ -240,10 +244,38 @@ def prepare(session: Session, remote_dir: str, *,
     py = f"{venv}/bin/python"
 
     def step(cmd: str, why: str, timeout: float = 1800.0) -> None:
-        got = session.run(cmd, timeout=timeout, on_line=on_line)
+        # 🔴 Обрив каналу — не вирок кроку. Справжня оренда (19.09.2026):
+        # `uv pip install kraken` на пів хвилині завантаження колес повернув
+        # rc=-1 — канал SSH закрився, статусу виходу не було. Машину погасили, і
+        # оплачений підйом пішов у нуль. Кроки ідемпотентні, а `uv` уже скачане
+        # тримає в кеші, тож правильна реакція — перепідключитись і повторити.
+        nonlocal session
+        got = None
+        for attempt in range(1, PREPARE_RETRIES + 1):
+            try:
+                got = session.run(cmd, timeout=timeout, on_line=on_line)
+                dropped = got.rc == -1
+            except (OSError, EOFError, CloudError) as exc:
+                got, dropped = None, True
+                if on_line:
+                    on_line(f"канал обірвався: {exc}")
+            if not dropped:
+                break
+            if reconnect is None or attempt == PREPARE_RETRIES:
+                break
+            if on_line:
+                on_line(f"канал до машини обірвався посеред кроку — перепідключаюсь "
+                        f"і повторюю ({attempt} з {PREPARE_RETRIES - 1})")
+            time.sleep(5.0 * attempt)
+            session = reconnect()
+        if got is None:
+            raise RunError(f"{why}: канал до машини обривається, крок не завершено")
         if got.rc != 0:
+            # ХВІСТ виводу, не початок: pip і uv спершу друкують перелік того,
+            # що качають, а причину збою («No space left on device») — останнім
+            # рядком. Перша справжня оренда показала людині саме перелік.
             raise RunError(f"{why}: rc={got.rc} "
-                           f"{(got.err or got.out).strip()[:300]}")
+                           f"… {(got.err or got.out).strip()[-400:]}")
 
     have_uv = session.run("command -v uv >/dev/null 2>&1 && echo yes || echo no",
                           timeout=60.0)
@@ -360,7 +392,7 @@ def _upload_frames(session: Session, plan: CloudPlan, remote_dir: str, *,
                 on_line("кадри доїхали напряму")
         got = session.run(
             f"cd {shlex.quote(remote_dir)} && tar -xf {shlex.quote(remote_tar)} "
-            f"&& rm -f {shlex.quote(remote_tar)}; "
+            f"&& rm -f {shlex.quote(remote_tar)}; echo tar_rc=$?; "
             f"echo landed=$(ls {CASE_SUB} 2>/dev/null | wc -l)",
             timeout=CMD_TIMEOUT)
         landed = 0
@@ -371,9 +403,15 @@ def _upload_frames(session: Session, plan: CloudPlan, remote_dir: str, *,
         # 🔴 Приймач заливки — число кадрів на машині, а не код розпакування.
         # Обірваний архів розпаковується частково й без помилки.
         if landed < plan.frames:
+            # Причина — у виводі `tar`, і без неї людина бачить лише «0 із N»:
+            # перша справжня оренда саме так і закінчилась, і гадати довелось
+            # на платній машині.
+            said = " · ".join(x for x in (got.err.strip()[-300:],
+                                          got.out.strip()[-200:]) if x)
             raise RunError(
                 f"на машину доїхало {landed} кадрів із {plan.frames} — "
-                f"заливку треба повторити, читати неповне немає сенсу")
+                f"заливку треба повторити, читати неповне немає сенсу"
+                + (f" (машина каже: {said})" if said else ""))
     finally:
         tar_path.unlink(missing_ok=True)
 
@@ -585,7 +623,13 @@ def start(plan: CloudPlan, *, workers: int = 0, seg_height: int = 0,
             st.enter("preparing", why="збираємо середовище рушіїв на машині")
             say("середовища рушіїв на машині немає — збираємо (це хвилини, "
                 "і вони вже оплачуються)")
-            engine = prepare(session, remote_dir, on_line=say)
+            def _again() -> Session:
+                # свіжа сесія на тій самій машині: далі `start` користується нею
+                nonlocal session
+                session = backend.connect(box)
+                return session
+
+            engine = prepare(session, remote_dir, on_line=say, reconnect=_again)
         if not engine.ready:
             raise RunError(
                 f"на машині немає середовища рушіїв ({engine.detail}). "

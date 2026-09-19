@@ -36,6 +36,14 @@ from nyshporka.cloud.transfer import Speed, Storage
 #: машини на ринку й звужує вибір там, де його й так небагато.
 DISK_HEADROOM_GB = 5
 
+#: Місце під середовище рушіїв на СВІЖІЙ (орендованій) машині: venv із torch і
+#: бібліотеками CUDA (лише cudnn — 674 МБ колесом), кеш `uv`, ваги.
+#: 🔴 Перша ж справжня оренда (19.09.2026) просила в ринку 5 ГБ — запас, мірений
+#: на своїй машині, де середовище вже стоїть. Бокс дали на 8 ГБ, `kraken` не
+#: поставився (rc=2 посеред завантаження колес), захід закінчився нулем сторінок.
+#: Заміряно на тому ж боксі: до збою встигло лягти понад 5 ГБ.
+ENGINE_ENV_GB = 20
+
 
 @dataclass(frozen=True)
 class CloudPlan:
@@ -82,6 +90,9 @@ class CloudPlan:
     #: кошторис на всю справу там, де лишилась третина, завищив би вилку й
     #: даремно вимагав би дозволу людини.
     pages_left: int | None = None
+    #: Машину беруть з ринку під цей захід, тож середовища рушіїв на ній немає
+    #: за побудовою — і диска треба на нього теж (`ENGINE_ENV_GB`).
+    fresh_machine: bool = False
 
     @property
     def voices(self) -> tuple[Path, ...]:
@@ -97,6 +108,8 @@ class CloudPlan:
 
         gb = self.sizing.gb_per_shard if self.sizing else DEFAULT_PROFILE.gb_per_shard
         disk = int(self.bytes_in / (1024 ** 3) * 2) + DISK_HEADROOM_GB
+        if self.fresh_machine:
+            disk += ENGINE_ENV_GB
         pages = self.frames if self.pages_left is None else max(1, self.pages_left)
         return Need(pages=pages, bytes_in=self.bytes_in, gb_per_shard=gb,
                     disk_gb=disk, max_hours=self.max_hours,
@@ -159,6 +172,17 @@ def _unidentified(case_dir: Path) -> str:
     film = str(sc.get("film") or "").strip()
     return ("шифру ще не встановлено (заявлено в паспорті теки"
             + (f"; плівка {film}" if film else "") + ")")
+
+
+def _rents(backend: str) -> bool:
+    """Чи бекенд бере машину з ринку. Лише локальний реєстр, без мережі."""
+    try:
+        from nyshporka.cloud import registry
+
+        found = registry.load().get(backend)
+    except Exception:
+        return False
+    return "rent" in (getattr(found, "caps", None) or ())
 
 
 def build(case_dir: str | Path, *, backend: str = "ssh", target: str = "",
@@ -269,6 +293,7 @@ def build(case_dir: str | Path, *, backend: str = "ssh", target: str = "",
         case_dir=case, out_dir=out, model=model, voice=voice, extra_voices=extra,
         script=scr,
         frames=len(frames), bytes_in=_bytes_of(frames), backend=backend,
+        fresh_machine=_rents(backend),
         target=target, case_key=key, case_key_why=why, warnings=warnings,
         budget_usd=budget_usd, max_hours=max_hours,
         max_price_usd_h=max_price_usd_h, lines_per_page=lines_per_page,
@@ -306,8 +331,11 @@ def with_probe(plan: CloudPlan, probe: Probe, *,
     if not probe.has_gpu:
         extra.append("карти не видно — читатиме процесор; це працює, але значно "
                      "повільніше")
-    need_gb = plan.bytes_in / (1024 ** 3) * 2 + DISK_HEADROOM_GB
-    if probe.disk_free_gb and probe.disk_free_gb < need_gb:
+    need_gb = plan.need.disk_gb
+    # Допуск 15%: орендований бокс видають рівно на запитаний обсяг, і вільного
+    # на ньому завжди трохи менше — без допуску попередження горіло б на кожній
+    # оренді й перестало б щось означати.
+    if probe.disk_free_gb and probe.disk_free_gb < need_gb * 0.85:
         extra.append(
             f"на машині {probe.disk_free_gb:.0f} ГБ вільно, а треба близько "
             f"{need_gb:.0f} ГБ (кадри розпакуються)")

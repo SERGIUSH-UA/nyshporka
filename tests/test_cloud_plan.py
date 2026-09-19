@@ -376,3 +376,19 @@ def test_a_shifra_that_is_not_established_yet_is_a_decision_not_a_lapse(
         encoding="utf-8")
     why = _unidentified(tmp_path)
     assert "ще не встановлено" in why and "007548742" in why
+
+
+def test_a_rented_machine_is_asked_for_room_for_the_engine() -> None:
+    """🔴 Перша справжня оренда просила в ринку 5 ГБ — запас, мірений на своїй
+    машині, де середовище рушіїв уже стоїть. Бокс дали на 8 ГБ, і `kraken` не
+    поставився: нуль сторінок за оплачений підйом (19.09.2026)."""
+    import dataclasses
+
+    from nyshporka.cloud import plan as PL
+
+    base = PL.CloudPlan(run_id="r", case_dir=Path("c"), out_dir=Path("o"), model=Path("m.pt"),
+                        script="cyrillic", frames=3, bytes_in=6 * 1024 ** 2, backend="ssh")
+    own = base.need.disk_gb
+    rented = dataclasses.replace(base, fresh_machine=True).need.disk_gb
+    assert own == PL.DISK_HEADROOM_GB
+    assert rented == own + PL.ENGINE_ENV_GB

@@ -25,6 +25,7 @@ import re
 import shlex
 import shutil
 import subprocess
+import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -208,6 +209,12 @@ def find_host(target: str) -> Host | None:
     return parse_target(name)
 
 
+#: Рядок команди довший за стільки символів іде через stdin (див. `SshSession.run`).
+#: Запас великий навмисно: обрізання бачили на 213, а найдовша з команд, що
+#: пройшли, мала близько 190.
+LONG_COMMAND = 120
+
+
 class SshSession:
     """Транспорт по SSH. Створюється `SshBackend.connect`."""
 
@@ -248,8 +255,26 @@ class SshSession:
     # ── команди ──────────────────────────────────────────────────────────────
     def run(self, cmd: str, *, timeout: float | None = None,
             on_line: Callable[[str], None] | None = None) -> Completed:
-        """Виконати й дочекатись. Рядки віддаються по ходу, а не в кінці."""
-        _, stdout, stderr = self._client.exec_command(cmd, timeout=timeout,
+        """Виконати й дочекатись. Рядки віддаються по ходу, а не в кінці.
+
+        🔴 Довга команда їде на машину ФАЙЛОМ (SFTP) і виконується коротким
+        `sh <файл>`. Перша справжня оренда (Vast, 19.09.2026): команда
+        розпакування кадрів на 213 символів дійшла до `bash -c` БЕЗ ХВОСТА —
+        «unexpected EOF while looking for matching `)'» — і не виконалась
+        узагалі; усі коротші команди того ж заходу пройшли. Хто саме ріже рядок
+        на шляху до контейнера, не встановлено, тож від довжини рядка `exec` ми
+        просто не залежимо. Саме файлом, а не через stdin оболонки: закриття
+        запису посеред сесії на тому ж шляху не перевірене, а SFTP і короткий
+        `exec` на ньому вже відпрацювали.
+        """
+        longest = max((len(ln) for ln in cmd.splitlines()), default=0)
+        wire = cmd
+        if longest > LONG_COMMAND:
+            script = f"/tmp/.nysh-{uuid.uuid4().hex[:12]}.sh"
+            with self.sftp.open(script, "w") as fh:
+                fh.write(cmd if cmd.endswith("\n") else cmd + "\n")
+            wire = f"sh {script}; nysh_rc=$?; rm -f {script}; exit $nysh_rc"
+        _, stdout, stderr = self._client.exec_command(wire, timeout=timeout,
                                                       get_pty=False)
         out: list[str] = []
         for raw in iter(stdout.readline, ""):

@@ -114,7 +114,7 @@ class Estimate:
             return f"ринок порожній: {self.reason or 'жодна пропозиція не пройшла'}"
         card = (f"{self.gpu}" + (f"×{self.num_gpus}" if self.num_gpus else "")
                 if self.gpu else "карта невідома")
-        cores = f"{self.cores:g} ядер" if self.cores else "ядра невідомі"
+        cores = f"{round(self.cores, 1):g} ядер" if self.cores else "ядра невідомі"
         pph = (f"~{self.pages_per_hour:.0f} стор/год"
                if self.pages_per_hour else "темп невідомий")
         hours = f"~{self.hours:.1f} год" if self.hours is not None else "час невідомий"
