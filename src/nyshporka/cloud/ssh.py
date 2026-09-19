@@ -209,6 +209,19 @@ def find_host(target: str) -> Host | None:
     return parse_target(name)
 
 
+def _quiet_paramiko() -> None:
+    """Прибрати трейсбеки paramiko зі stderr.
+
+    Стук у sshd, який ще не піднявся (свіжий орендований бокс), paramiko пише у
+    свій логер повним трейсбеком, а без обробників Python друкує його просто в
+    stderr — людина бачить «Traceback» за цілком штатного очікування. Про повтори
+    ми кажемо самі, словами.
+    """
+    import logging
+
+    logging.getLogger("paramiko.transport").setLevel(logging.CRITICAL)
+
+
 #: Рядок команди довший за стільки символів іде через stdin (див. `SshSession.run`).
 #: Запас великий навмисно: обрізання бачили на 213, а найдовша з команд, що
 #: пройшли, мала близько 190.
@@ -540,6 +553,7 @@ def _load_key(path: Path) -> Any:
     """
     import paramiko
 
+    _quiet_paramiko()
     last: Exception | None = None
     for cls in (paramiko.Ed25519Key, paramiko.RSAKey, paramiko.ECDSAKey):
         try:

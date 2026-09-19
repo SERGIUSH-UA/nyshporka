@@ -116,7 +116,8 @@ class CloudPlan:
                     budget_usd=self.budget_usd,
                     max_price_usd_h=self.max_price_usd_h,
                     prefer_cores=useful_cores(pages),
-                    lines_per_page=self.lines_per_page)
+                    lines_per_page=self.lines_per_page,
+                    min_compute_cap=_oldest_card() if self.fresh_machine else None)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -172,6 +173,17 @@ def _unidentified(case_dir: Path) -> str:
     film = str(sc.get("film") or "").strip()
     return ("шифру ще не встановлено (заявлено в паспорті теки"
             + (f"; плівка {film}" if film else "") + ")")
+
+
+def _oldest_card() -> float | None:
+    """Найстаріша архітектура карти, під яку маніфест рушіїв має колесо torch."""
+    try:
+        from nyshporka.htr import manifest as M
+
+        floors = [float(row["min_capability"]) for row in M.active().cuda_matrix]
+    except Exception:
+        return None
+    return min(floors) if floors else None
 
 
 def _rents(backend: str) -> bool:

@@ -218,6 +218,53 @@ def uv_install_command(probe_out: str) -> str:
         "повторіть.")
 
 
+def _card_range(man: Any) -> str:
+    rows = list(getattr(man, "cuda_matrix", ()) or ())
+    if not rows:
+        return "невідомий перелік карт"
+    lo = min(float(r["min_capability"]) for r in rows)
+    hi = max(float(r["max_capability"]) for r in rows)
+    return f"{lo:g}–{hi:g}"
+
+
+def _ensure_c_compiler(session: Session, on_line: Any = None) -> None:
+    """Компілятор C на машині — без нього torch не читає жодної сторінки.
+
+    🔴 Справжня оренда 19.09.2026: середовище зібралось, моделі завантажились, а
+    кожна сторінка впала з «Failed to find C compiler. Please specify via CC
+    environment variable» — triton збирає свої ядра на ходу й шукає `gcc`, а
+    образ під обчислення (`pytorch:*-runtime`) компілятора не несе. Своя машина
+    з `nysh cloud prepare` його зазвичай має, тому на фейках і на власних хостах
+    цього не видно.
+
+    Ставимо лише там, де це безпечно й має сенс: є `apt-get` і ми root (так
+    влаштований орендований контейнер). Інакше — попередження словами: далі
+    встановлення піде, але читання, найпевніше, впаде тією самою помилкою.
+    """
+    say = on_line or (lambda _s: None)
+    have = session.run(
+        "(command -v gcc || command -v cc) >/dev/null 2>&1 && echo yes || echo no",
+        timeout=60.0)
+    if "yes" in have.out:
+        return
+    can = session.run(
+        "command -v apt-get >/dev/null 2>&1 && [ \"$(id -u)\" = 0 ] && echo yes || echo no",
+        timeout=60.0)
+    if "yes" not in can.out:
+        say("⚠ на машині немає компілятора C (gcc), і поставити його нічим — "
+            "читання може впасти з «Failed to find C compiler»")
+        return
+    say("на машині немає компілятора C — ставимо gcc (потрібен torch для збирання ядер)")
+    got = session.run(
+        "export DEBIAN_FRONTEND=noninteractive; "
+        "apt-get -o DPkg::Lock::Timeout=180 update -qq && "
+        "apt-get -o DPkg::Lock::Timeout=180 install -y -qq gcc libc6-dev",
+        timeout=1200.0)
+    if got.rc != 0:
+        raise RunError("не вдалось поставити gcc на машину: "
+                       f"rc={got.rc} … {(got.err or got.out).strip()[-300:]}")
+
+
 #: Скільки разів повторити крок підготовки після обриву каналу.
 PREPARE_RETRIES = 3
 
@@ -285,6 +332,7 @@ def prepare(session: Session, remote_dir: str, *,
             "&& echo have=$t; done; true", timeout=60.0)
         step(uv_install_command(tools.out),
              "не вдалось поставити `uv` на машину")
+    _ensure_c_compiler(session, on_line)
     uv = "$HOME/.local/bin/uv"
     step(f"({uv} --version || uv --version) >/dev/null 2>&1", "`uv` не працює")
     step(f"{uv} venv {shlex.quote(venv)} --python {man.python}",
@@ -299,7 +347,15 @@ def prepare(session: Session, remote_dir: str, *,
         f"print('%d.%d' % torch.cuda.get_device_capability(0))"
         f" if torch.cuda.device_count() else print('')\" 2>/dev/null || true",
         timeout=300.0)
-    tag = man.cuda_tag(cap.out.strip())
+    tag, why = man.cuda_pick(cap.out.strip())
+    if tag is None and why == "out_of_range":
+        # 🔴 Карта є, але колеса torch під її архітектуру в маніфесті немає.
+        # Мовчки лишити як є — означає «читати» з помилкою CUDA на кожній
+        # сторінці й привезти нуль: так закінчилась справжня оренда на GTX
+        # TITAN X (19.09.2026). Відмова тут коштує хвилини, а не всього заходу.
+        raise RunError(
+            f"карта цієї машини має архітектуру {cap.out.strip()}, а середовище рушіїв "
+            f"підтримує {_card_range(man)} — читати на ній нема чим; потрібна інша машина")
     if tag:
         step(f"{uv} pip install --python {shlex.quote(py)} --reinstall "
              f"{' '.join(man.torch_default)} --index-url {man.cuda_index_url(tag)}",
@@ -716,12 +772,27 @@ def _launch(session: Session, st: ST.RunState, plan: CloudPlan, *, python: str,
                 f"{shlex.quote(remote_dir)}/{RC_FILE}", timeout=CMD_TIMEOUT)
 
     st.remote_log = f"{remote_dir}/{LOGS_SUB}/go.log"
+    # 🔴 Тека журналу мусить існувати ДО запуску. `go.sh` створює її сам, але
+    # його власний вивід перенаправляється туди ще оболонкою, що його пускає:
+    # немає теки — перенаправлення не вдається, і команда не стартує ВЗАГАЛІ,
+    # хоча pid надруковано. Дві справжні оренди (19.09.2026) «читали» так нуль
+    # сторінок: ні `out`, ні `logs` на машині не з'явилось, а причини не було
+    # де й прочитати.
+    session.mkdirs(f"{remote_dir}/{LOGS_SUB}")
     st.enter("running", why=f"{len(cmds)} процесів на {device}")
     if not st.run_started:
         st.run_started = time.time()
     st.pid = session.spawn(f"sh {shlex.quote(script_path)}",
                            log=st.remote_log, pidfile=f"{remote_dir}/_pid")
     ST.save(st)
+    # Надрукований pid ще не означає, що робота йде: оболонка друкує його й
+    # тоді, коли команда не стартувала. Мертвий одразу після запуску процес без
+    # прапорця завершення — це «не запустилось», і сказати про це треба зараз,
+    # а не після години опитування нуля сторінок.
+    if not session.alive(st.pid) and not session.exists(f"{remote_dir}/{DONE_FLAG}"):
+        said = session.read_text(st.remote_log, limit=2000).strip()[-600:] \
+            if session.exists(st.remote_log) else "журналу запуску на машині немає"
+        raise RunError(f"робота на машині не запустилась (pid {st.pid} уже мертвий): {said}")
 
 
 def catch_up(st: ST.RunState, plan: CloudPlan, *, on_line: Any = None) -> ST.RunState:
@@ -907,12 +978,15 @@ def fetch(st: ST.RunState, *, on_line: Any = None) -> Path:
     session = backend.connect(box)
     try:
         remote_tar = f"{st.remote_dir}/result.tar"
-        # `|| true` на самому tar: він повертає ненульове й тоді, коли просто
-        # не знайшов однієї з необов'язкових тек голосів.
+        # 🔴 В архів ідуть лише теки, які Є. Доти необов'язкову `out-*` давали
+        # tar-ові шаблоном, він «падав» на її відсутності, і запасна гілка
+        # ПЕРЕЗАПИСУВАЛА архів самою текою `out` — тобто журнали губились рівно
+        # тоді, коли прогін упав, не створивши теки другого голосу. Перша
+        # справжня оренда з мертвим раннером привезла додому 0.0 МБ і жодного
+        # слова про причину.
         session.run(
             f"cd {shlex.quote(st.remote_dir)} && rm -f result.tar && "
-            f"tar -cf result.tar {OUT_SUB} {OUT_SUB}-* {LOGS_SUB} 2>/dev/null "
-            f"|| tar -cf result.tar {OUT_SUB} 2>/dev/null || true",
+            f"tar -cf result.tar $(ls -d {OUT_SUB} {OUT_SUB}-* {LOGS_SUB} 2>/dev/null)",
             timeout=CMD_TIMEOUT)
         if not session.exists(remote_tar):
             raise RunError("на машині нема чого забирати — тека виходу порожня")
@@ -932,7 +1006,31 @@ def fetch(st: ST.RunState, *, on_line: Any = None) -> Path:
     stamp_case_key(out_dir, st.case_key)
     stamp_case_dir(out_dir, st.source_dir or st.case_dir)
     ST.save(st)
+    _say_why_nothing_was_read(out_dir, say)
     return out_dir
+
+
+def _say_why_nothing_was_read(out_dir: Path, say: Any) -> None:
+    """Нуль сторінок — показати хвіст журналів раннера, привезених із машини.
+
+    Причина мертвого прогону лежить у `logs/shard*.log`, і після гасіння машини
+    це єдина її копія. Людина, якій сказали лише «0 з N», піде орендувати вдруге.
+    """
+    if any(out_dir.glob("*.txt")):
+        return
+    logs = sorted((out_dir / LOGS_SUB).glob("*.log")) if (out_dir / LOGS_SUB).is_dir() else []
+    if not logs:
+        say("журналів прогону з машини не привезено — причина нуля невідома")
+        return
+    for log in logs[:3]:
+        try:
+            tail = log.read_text(encoding="utf-8", errors="replace").strip().splitlines()[-12:]
+        except OSError:
+            continue
+        if tail:
+            say(f"── {log.name} (хвіст) ──")
+            for line in tail:
+                say("  " + line[:300])
 
 
 def _drop_stale_quarantine(tar_path: Path, out_dir: Path) -> None:
