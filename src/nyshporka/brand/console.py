@@ -13,9 +13,11 @@
 """
 from __future__ import annotations
 
+import contextlib
 import os
 import sys
 from functools import lru_cache
+from typing import TextIO
 
 from rich.console import Console
 from rich.theme import Theme
@@ -99,6 +101,23 @@ def theme() -> Theme:
     return Theme(styles)
 
 
+def _never_choke(stream: TextIO) -> None:
+    """Символ, якого немає в кодуванні потоку, стає «?», а не падінням.
+
+    🔴 На Windows вивід у пайп Python пише в ANSI-сторінці системи (cp1251,
+    cp1252), і `✅` у ній немає. Інсталятор пускає `nysh init` саме через пайп,
+    і повідомлення про УСПІХ обривало установлення `UnicodeEncodeError`
+    (звіт користувача 20.09.2026, Windows 10, PowerShell 5.1). Кодування тут
+    не міняється: хто читає пайп, той і знає, чого чекати, — інсталятор для
+    цього ставить `PYTHONIOENCODING=utf-8`.
+    """
+    reconfigure = getattr(stream, "reconfigure", None)
+    if reconfigure is None or (stream.encoding or "").lower().replace("-", "") == "utf8":
+        return
+    with contextlib.suppress(ValueError, OSError):
+        reconfigure(errors="replace")
+
+
 @lru_cache(maxsize=2)
 def _make(stderr: bool) -> Console:
     # ⚠ Ширина при перенаправленні. Rich за замовчуванням бере 80 колонок для
@@ -106,6 +125,7 @@ def _make(stderr: bool) -> Console:
     # цього ламаються посеред слова — саме в тому виводі, який зберігають у
     # файл або читає агент.
     stream = sys.stderr if stderr else sys.stdout
+    _never_choke(stream)
     width = None if stream.isatty() else 150
     return Console(theme=theme(), stderr=stderr, width=width)
 
