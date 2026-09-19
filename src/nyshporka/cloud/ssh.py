@@ -25,8 +25,9 @@ import re
 import shlex
 import shutil
 import subprocess
+import threading
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -35,6 +36,7 @@ from nyshporka.cloud.base import (
     AuthError,
     Box,
     BoxNotReady,
+    ChannelDropped,
     CloudError,
     Completed,
     Need,
@@ -222,6 +224,35 @@ def _quiet_paramiko() -> None:
     logging.getLogger("paramiko.transport").setLevel(logging.CRITICAL)
 
 
+@contextlib.contextmanager
+def _channel(what: str) -> Iterator[None]:
+    """Обрив каналу посеред дії → `ChannelDropped`, а не сирий виняток транспорту.
+
+    🔴 `EOFError`, `OSError` (зокрема `socket.timeout`) і `SSHException` paramiko
+    кидає з будь-якого читання, щойно канал рветься. Сирими вони летіли повз
+    лічильник відмов опитування (той рахує `CloudError`) просто в аварійний
+    обробник заходу, і він ВБИВАВ здорову роботу на оплаченій машині через
+    хвилинний обрив зв'язку.
+
+    `FileNotFoundError` проходить як є: це відповідь машини («файла немає»), а
+    не стан каналу, і `exists`/`listdir`/`read_text` на неї спираються.
+    """
+    try:
+        yield
+    except (CloudError, FileNotFoundError):
+        raise
+    except (EOFError, OSError) as exc:
+        raise ChannelDropped(
+            f"канал до машини обірвався ({what}): {type(exc).__name__}: {exc}") from exc
+    except Exception as exc:
+        # `SSHException` — без імпорту paramiko на рівні модуля: пакет
+        # необов'язковий, а цей файл імпортується й без нього.
+        if any(k.__name__ == "SSHException" for k in type(exc).__mro__):
+            raise ChannelDropped(
+                f"канал до машини обірвався ({what}): {type(exc).__name__}: {exc}") from exc
+        raise
+
+
 #: Рядок команди довший за стільки символів іде через stdin (див. `SshSession.run`).
 #: Запас великий навмисно: обрізання бачили на 213, а найдовша з команд, що
 #: пройшли, мала близько 190.
@@ -282,21 +313,47 @@ class SshSession:
         """
         longest = max((len(ln) for ln in cmd.splitlines()), default=0)
         wire = cmd
-        if longest > LONG_COMMAND:
-            script = f"/tmp/.nysh-{uuid.uuid4().hex[:12]}.sh"
-            with self.sftp.open(script, "w") as fh:
-                fh.write(cmd if cmd.endswith("\n") else cmd + "\n")
-            wire = f"sh {script}; nysh_rc=$?; rm -f {script}; exit $nysh_rc"
-        _, stdout, stderr = self._client.exec_command(wire, timeout=timeout,
-                                                      get_pty=False)
         out: list[str] = []
-        for raw in iter(stdout.readline, ""):
-            line = raw.rstrip("\r\n")
-            out.append(line)
-            if on_line is not None:
-                on_line(line)
-        rc = int(stdout.channel.recv_exit_status())
-        err = stderr.read().decode("utf-8", "replace")
+        with _channel("команда на машині"):
+            if longest > LONG_COMMAND:
+                script = f"/tmp/.nysh-{uuid.uuid4().hex[:12]}.sh"
+                with self.sftp.open(script, "w") as fh:
+                    fh.write(cmd if cmd.endswith("\n") else cmd + "\n")
+                wire = f"sh {script}; nysh_rc=$?; rm -f {script}; exit $nysh_rc"
+            _, stdout, stderr = self._client.exec_command(wire, timeout=timeout,
+                                                          get_pty=False)
+            # 🔴 stderr читається ОДНОЧАСНО зі stdout, а не після. Обидва потоки
+            # ділять одне вікно каналу (типово 2 МБ), і paramiko поповнює його
+            # лише тоді, коли дані ЧИТАЮТЬ: команда, яка написала в stderr понад
+            # вікно, стає на записі, stdout не закривається ніколи — і ми висимо
+            # на `readline`, доки не спрацює таймаут, а без нього — вічно.
+            # Встановлення пакетів і `apt-get` пишуть у stderr саме стільки.
+            err_box: list[bytes | BaseException] = []
+
+            def drain() -> None:
+                try:
+                    err_box.append(bytes(stderr.read()))
+                except BaseException as exc:      # віддамо основному потоку
+                    err_box.append(exc)
+
+            reader = threading.Thread(target=drain, daemon=True,
+                                      name="nysh-ssh-stderr")
+            reader.start()
+            try:
+                for raw in iter(stdout.readline, ""):
+                    line = raw.rstrip("\r\n")
+                    out.append(line)
+                    if on_line is not None:
+                        on_line(line)
+                rc = int(stdout.channel.recv_exit_status())
+            finally:
+                # Зі стелею: потік-демон не має права тримати нас довше за саму
+                # команду, хоч би що сталося з каналом.
+                reader.join(timeout or 60.0)
+            got = err_box[0] if err_box else b""
+            if isinstance(got, BaseException):
+                raise got
+            err = got.decode("utf-8", "replace")
         return Completed(rc=rc, out="\n".join(out), err=err)
 
     def spawn(self, cmd: str, *, log: str, pidfile: str) -> int:
@@ -325,9 +382,18 @@ class SshSession:
         """Чи живий той процес. Перевірка за pid, ніколи не за патерном."""
         if pid <= 0:
             return False
-        got = self.run(f"kill -0 {int(pid)} 2>/dev/null && echo A || echo D",
-                       timeout=CONNECT_TIMEOUT)
-        return got.out.strip().endswith("A")
+        got = self.run(f"kill -0 {int(pid)} 2>/dev/null && echo nysh_job=A "
+                       f"|| echo nysh_job=D", timeout=CONNECT_TIMEOUT)
+        # 🔴 «Мертвий» — лише ЯВНА відповідь машини. Доти мертвим вважалось усе,
+        # що не скінчилось на «A», зокрема порожній вивід обірваного каналу
+        # (rc=-1): нагляд читав це як «робота скінчилась», забирав 40% справи,
+        # виносив `incomplete` і гасив машину, на якій читання йшло далі.
+        m = re.search(r"^nysh_job=([AD])\s*$", got.out, re.M)
+        if m is None:
+            raise ChannelDropped(
+                f"машина не відповіла, чи живий pid {pid} (rc={got.rc}): "
+                f"{(got.err or got.out).strip()[-160:] or 'порожній вивід'}")
+        return m.group(1) == "A"
 
     def kill(self, pid: int) -> None:
         """Зупинити роботу за pid — разом із групою, яку створив `setsid`."""
@@ -441,11 +507,12 @@ class SshSession:
                 return got
             self._say(f"після `scp` на машині {got} байт замість {want} — "
                       f"перекладаємо через SFTP")
-        self.sftp.put(str(local), remote)
-        # 🔴 Звіряємо розмір одразу. Обірвана заливка лишає файл, який виглядає
-        # як покладений, і виявляється це вже на боксі — після оренди, після
-        # встановлення рушія, тобто найдорожчим способом.
-        got = int(self.sftp.stat(remote).st_size)
+        with _channel(f"заливка {local.name}"):
+            self.sftp.put(str(local), remote)
+            # 🔴 Звіряємо розмір одразу. Обірвана заливка лишає файл, який
+            # виглядає як покладений, і виявляється це вже на боксі — після
+            # оренди, після встановлення рушія, тобто найдорожчим способом.
+            got = int(self.sftp.stat(remote).st_size)
         if got != want:
             raise CloudError(
                 f"файл доїхав неповним: {local.name} — {got} байт замість {want}")
@@ -467,19 +534,22 @@ class SshSession:
                 tmp.replace(local)
                 return want
             self._say("після `scp` файл неповний — забираємо через SFTP")
-        self.sftp.get(remote, str(tmp))
+        with _channel(f"забір {Path(remote).name}"):
+            self.sftp.get(remote, str(tmp))
         tmp.replace(local)
         return local.stat().st_size
 
     def listdir(self, remote: str) -> list[str]:
         try:
-            return list(self.sftp.listdir(remote))
+            with _channel("перелік теки"):
+                return list(self.sftp.listdir(remote))
         except FileNotFoundError:
             return []
 
     def exists(self, remote: str) -> bool:
         try:
-            self.sftp.stat(remote)
+            with _channel("перевірка файла"):
+                self.sftp.stat(remote)
             return True
         except FileNotFoundError:
             return False
@@ -487,7 +557,7 @@ class SshSession:
     def read_text(self, remote: str, *, limit: int = 1 << 20) -> str:
         """Прочитати невеликий файл машини (лог, стан, підсумок)."""
         try:
-            with self.sftp.open(remote, "r") as fh:
+            with _channel("читання файла"), self.sftp.open(remote, "r") as fh:
                 return bytes(fh.read(limit)).decode("utf-8", "replace")
         except FileNotFoundError:
             return ""

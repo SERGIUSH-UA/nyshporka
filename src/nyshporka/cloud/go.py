@@ -638,7 +638,12 @@ def _wait(st: ST.RunState, say: EventFn, *,
             failures = 0
         except BoxGone:
             raise
-        except CloudError as exc:
+        except (CloudError, OSError, EOFError) as exc:
+            # 🔴 Разом із `CloudError` — сирі винятки транспорту. Вбудований SSH
+            # обгортає їх сам (`ChannelDropped`), але сесію дає й сторонній
+            # бекенд, а ціна промаху тут — здорова робота, вбита аварійним
+            # обробником через хвилинний обрив. Кожне опитування відкриває нове
+            # з'єднання, тож повтор — це й є перепідключення.
             failures += 1
             say("warning", f"⚠ машина не відповідає ({failures} з "
                            f"{POLL_FAILURES_MAX}): {exc}")
