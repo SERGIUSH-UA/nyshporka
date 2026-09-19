@@ -19,6 +19,7 @@ from __future__ import annotations
 import contextlib
 import os
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -43,6 +44,11 @@ class Plan:
     python: Path
     runner: Path
     voice: Path | None = None
+    #: Голоси понад другий (`--with latin`): читають ті самі кропи рядків
+    #: основної моделі, кожен у свою сестринську теку `<прогін>-<тег>`.
+    #: Для мішаного письма це один прохід замість двох прогонів, бо
+    #: сегментація — найдорожча частина сторінки — рахується один раз.
+    extra_voices: tuple[Path, ...] = ()
 
     #: Спільний кеш сегментації простору. 🔴 Ставиться звідси, бо простір знає
     #: лише ця сторона: раннер їде в чужому інтерпретаторі й, не отримавши
@@ -66,6 +72,10 @@ class Plan:
     #: прогін не сповільнюється, а завалюється.
     gpu_lock: Path | None = None
 
+    @property
+    def voices(self) -> tuple[Path, ...]:
+        return tuple(v for v in (self.voice, *self.extra_voices) if v is not None)
+
     def command(self, *, progress_json: bool = True, case_key: str = "",
                 limit: int = 0, pages: str = "", shard: str = "",
                 gpu_lock: str = "", gpu_sato: bool = True,
@@ -86,8 +96,8 @@ class Plan:
                "--script", self.script]
         if self.seg_cache is not None:
             cmd += ["--seg-cache-dir", str(self.seg_cache)]
-        if self.voice is not None:
-            cmd += ["--models", str(self.voice)]
+        if self.voices:
+            cmd += ["--models", ",".join(str(v) for v in self.voices)]
         if case_key:
             cmd += ["--case-key", case_key]
         if limit:
@@ -123,6 +133,7 @@ class Plan:
     def as_dict(self) -> dict[str, object]:
         return {"case_dir": str(self.case_dir), "out_dir": str(self.out_dir),
                 "model": self.model.name, "voice": self.voice.name if self.voice else "",
+                "voices": [v.name for v in self.voices],
                 "script": self.script, "frames": self.frames,
                 "script_trust": self.script_trust, "script_why": self.script_why}
 
@@ -387,6 +398,39 @@ def resolve_model(spec: str) -> tuple[Path, str]:
     return path.resolve(), eng.script
 
 
+def resolve_voices(specs: Sequence[str], *, main: Path,
+                   have: Sequence[Path] = ()) -> tuple[Path, ...]:
+    """Додаткові голоси з `--with`: письмо (`latin`) або ім'я ваг.
+
+    Письмо дає бойову модель цього письма — для латинки це Скриба. Голос, що
+    збігся з основною моделлю чи вже взятим голосом, пропускається.
+
+    🔴 Лише за PARSeq-основою: ансамбль у раннері живе в PARSeq-гілці, а за
+    kraken-основою `--models` він ігнорує з попередженням у лозі — тобто
+    людина чекала б теку голосу, а на диску її не було б.
+    """
+    specs = [s.strip() for s in specs if s and s.strip()]
+    if not specs:
+        return ()
+    if main.suffix.lower() != ".pt":
+        raise ReadError(
+            f"додатковий голос можна дати лише кириличному прогону (основа PARSeq), "
+            f"а основна модель тут — {main.name}. Для латинської справи це окремий "
+            f"прогін `--model`.")
+    out: list[Path] = []
+    taken = {main.resolve(), *(Path(h).resolve() for h in have)}
+    for spec in specs:
+        if spec in ("latin", "cyrillic"):
+            path, _ = pick_model(spec)
+        else:
+            path, _ = resolve_model(spec)
+        if path.resolve() in taken:
+            continue
+        taken.add(path.resolve())
+        out.append(path)
+    return tuple(out)
+
+
 def seg_cache_dir(case_dir: Path, derived: Path) -> Path:
     """Тека кешу сегментації справи.
 
@@ -407,7 +451,7 @@ def seg_cache_dir(case_dir: Path, derived: Path) -> Path:
 
 def plan(case_dir: str | Path, *, out_dir: str | Path = "", script: str = "",
          second_voice: bool = True, model: str = "",
-         seg_cache: str | Path = "") -> Plan:
+         seg_cache: str | Path = "", also: Sequence[str] = ()) -> Plan:
     """Зібрати план прогону або пояснити, чого бракує.
 
     `model` — перечитати справу ЯВНО названою моделлю (напр. Скрибою, коли
@@ -417,6 +461,9 @@ def plan(case_dir: str | Path, *, out_dir: str | Path = "", script: str = "",
 
     `seg_cache` — тека готової сегментації (напр. забраної з хмари разом із
     першим прогоном). Без неї береться спільний кеш простору.
+
+    `also` — додаткові голоси тим самим проходом (`latin` → Скриба поруч із
+    Писарем і Дяком), див. `resolve_voices`.
     """
     from nyshporka.core.workspace import workspace
     from nyshporka.htr import env as E
@@ -454,6 +501,7 @@ def plan(case_dir: str | Path, *, out_dir: str | Path = "", script: str = "",
         weights, voice = pick_model(scr, second_voice=second_voice)
         trust, why = guess.trust, guess.why
         default_out = ws.htr_reports / case.name
+    extra = resolve_voices(also, main=weights, have=[voice] if voice else [])
     runner = Path(__file__).resolve().parent / "runner.py"
     out = Path(out_dir) if out_dir else default_out
     seg = Path(seg_cache).expanduser() if seg_cache else seg_cache_dir(case, ws.derived)
@@ -475,7 +523,7 @@ def plan(case_dir: str | Path, *, out_dir: str | Path = "", script: str = "",
     lock_dir.mkdir(parents=True, exist_ok=True)
     return Plan(case_dir=case, out_dir=out, model=weights, script=scr,
                 frames=frames, python=rep.python, runner=runner, voice=voice,
-                seg_cache=seg, gpu_lock=lock_dir / "gpu.lock",
+                extra_voices=extra, seg_cache=seg, gpu_lock=lock_dir / "gpu.lock",
                 script_trust=trust, script_why=why)
 
 

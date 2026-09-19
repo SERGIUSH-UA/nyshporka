@@ -38,6 +38,7 @@ class _Plan:
         self.script = "cyrillic"
         self.model = Path("pysar_cyr_v17.pt")
         self.voice = None
+        self.voices = ()
         self.gpu_lock = out.parent / "gpu.lock"
 
     def command(self, **_: Any) -> list[str]:

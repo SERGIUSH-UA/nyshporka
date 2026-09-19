@@ -693,6 +693,9 @@ const STRINGS = {
     'read.voice.on': 'другим рушієм теж',
     'read.voice.why': 'він помиляється інакше й витягує там, де перший '
       + 'підставив правдоподібне слово',
+    'read.also.latin': 'латинкою теж (третій голос)',
+    'read.also.why': 'латинські аркуші читаються тим самим проходом у сусідню '
+      + 'теку; сегментація вдруге не рахується',
     'read.expert': 'Для досвідчених',
     'read.expert.why': 'Тут лише важелі зі зміряним правилом користування. '
       + '«Кадрів» — спершу спробувати на десятці. «Процесів» — виграш дає '
@@ -709,10 +712,10 @@ const STRINGS = {
       + 'хибний текст — після годин роботи. Запускати?',
     'read.confirm.mixed': 'У справі два письма. Один прогін закриє лише одне, '
       + 'і половина сторінок лишиться непрочитаною при зеленому статусі. '
-      + 'Запускати попри це?',
+      + 'Обидва закриває галочка «латинкою теж». Запускати без неї?',
     'read.dir': 'Тека зі сканами (пласка)', 'read.plan': 'Що робитимемо',
     'read.go': 'Читати', 'read.frames': 'кадрів', 'read.script': 'письмо',
-    'read.model': 'модель', 'read.voice': 'другий голос',
+    'read.model': 'модель', 'read.voice': 'голоси',
     'read.started': 'Поставлено в чергу',
     'nav.export': 'Експорт',
     'export.case': 'Справа', 'export.what': 'Що вивантажити',
@@ -1504,6 +1507,9 @@ const STRINGS = {
     'read.voice.on': 'second engine too',
     'read.voice.why': 'it errs differently and recovers what the first '
       + 'replaced with a plausible word',
+    'read.also.latin': 'Latin too (third voice)',
+    'read.also.why': 'Latin pages are read in the same pass into a sibling '
+      + 'folder; segmentation is not computed twice',
     'read.expert': 'For the experienced',
     'read.expert.why': 'Only levers with a measured rule of use. “Frames” — '
       + 'try ten first. “Processes” — the win comes from free VRAM, not cores. '
@@ -1520,10 +1526,10 @@ const STRINGS = {
       + 'garbage — after hours of work. Start anyway?',
     'read.confirm.mixed': 'This case has two scripts. One run covers only one '
       + 'of them, and half the pages stay unread while the status looks green. '
-      + 'Start anyway?',
+      + 'The “Latin too” box covers both. Start without it?',
     'read.dir': 'Folder with scans (flat)', 'read.plan': 'What we will do',
     'read.go': 'Read', 'read.frames': 'frames', 'read.script': 'script',
-    'read.model': 'model', 'read.voice': 'second voice',
+    'read.model': 'model', 'read.voice': 'voices',
     'read.started': 'Queued',
     'nav.export': 'Export',
     'export.case': 'Case', 'export.what': 'What to export',

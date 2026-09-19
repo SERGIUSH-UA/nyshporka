@@ -53,6 +53,8 @@ class CloudPlan:
     case_key: str = ""
     case_key_why: str = ""
     voice: Path | None = None
+    #: Голоси понад другий (`--with latin`) — див. `htr.run.Plan.extra_voices`.
+    extra_voices: tuple[Path, ...] = ()
     box: Box | None = None
     probe: Probe | None = None
     sizing: Sizing | None = None
@@ -62,6 +64,10 @@ class CloudPlan:
     hours: float = 0.0
     cost: float | None = None
     warnings: list[str] = field(default_factory=list)
+
+    @property
+    def voices(self) -> tuple[Path, ...]:
+        return tuple(v for v in (self.voice, *self.extra_voices) if v is not None)
 
     @property
     def measured(self) -> bool:
@@ -79,6 +85,7 @@ class CloudPlan:
             "run_id": self.run_id, "case_dir": str(self.case_dir),
             "out_dir": str(self.out_dir), "model": self.model.name,
             "voice": self.voice.name if self.voice else "",
+            "voices": [v.name for v in self.voices],
             "script": self.script, "frames": self.frames,
             "bytes_in": self.bytes_in, "backend": self.backend,
             "target": self.target, "case_key": self.case_key,
@@ -127,7 +134,7 @@ def _unidentified(case_dir: Path) -> str:
 
 def build(case_dir: str | Path, *, backend: str = "ssh", target: str = "",
           out_dir: str | Path = "", script: str = "", second_voice: bool = True,
-          case_key: str = "") -> CloudPlan:
+          case_key: str = "", also: list[str] | tuple[str, ...] = ()) -> CloudPlan:
     """Скласти план без жодної мережевої дії.
 
     Кидає `PlanError` рівно там, де захід не має сенсу починати: немає кадрів,
@@ -141,6 +148,7 @@ def build(case_dir: str | Path, *, backend: str = "ssh", target: str = "",
         case_key_for,
         guess_script_full,
         pick_model,
+        resolve_voices,
     )
 
     case = Path(case_dir).expanduser().resolve()
@@ -179,6 +187,11 @@ def build(case_dir: str | Path, *, backend: str = "ssh", target: str = "",
             f"{exc} Для хмарного прогону рушій локально не потрібен, а ваги — "
             f"так: саме їх ми й веземо на машину.") from None
 
+    try:
+        extra = resolve_voices(also, main=model, have=[voice] if voice else [])
+    except ReadError as exc:
+        raise PlanError(str(exc)) from None
+
     key, why = (case_key, "вказано вручну") if case_key else case_key_for(case)
     out = Path(out_dir) if out_dir else workspace().htr_reports / case.name
     warnings: list[str] = []
@@ -211,7 +224,8 @@ def build(case_dir: str | Path, *, backend: str = "ssh", target: str = "",
 
     return CloudPlan(
         run_id=run_id_for(case, model=model.name, script=scr, backend=backend),
-        case_dir=case, out_dir=out, model=model, voice=voice, script=scr,
+        case_dir=case, out_dir=out, model=model, voice=voice, extra_voices=extra,
+        script=scr,
         frames=len(frames), bytes_in=_bytes_of(frames), backend=backend,
         target=target, case_key=key, case_key_why=why, warnings=warnings)
 
@@ -282,7 +296,7 @@ def _replace(plan: CloudPlan, **kw: Any) -> CloudPlan:
         "model": plan.model, "script": plan.script, "frames": plan.frames,
         "bytes_in": plan.bytes_in, "backend": plan.backend, "target": plan.target,
         "case_key": plan.case_key, "case_key_why": plan.case_key_why,
-        "voice": plan.voice, "box": plan.box, "probe": plan.probe,
+        "voice": plan.voice, "extra_voices": plan.extra_voices, "box": plan.box, "probe": plan.probe,
         "sizing": plan.sizing, "channel": plan.channel,
         "channel_why": plan.channel_why, "speed": plan.speed, "hours": plan.hours,
         "cost": plan.cost, "warnings": plan.warnings}

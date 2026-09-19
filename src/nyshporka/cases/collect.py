@@ -35,6 +35,7 @@ from nyshporka.library import (
     _REPO_LABEL,
     ROOT,
     _mk_key,
+    _sidecar_opys,
     candidate_keys,
     load_verdicts,
     parse_source_id,
@@ -315,7 +316,8 @@ def _sidecar_near(rel: str) -> dict[str, Any]:
                     "doc_type": str(m.get("record_type") or m.get("doc_type") or "").strip(),
                     "year_from": yf, "year_to": yt or yf,
                     "place": str(m.get("place") or m.get("church") or "").strip(),
-                    "opys": str(m.get("opys") or m.get("inv") or "").strip().lstrip("0") or None,
+                    "opys": _sidecar_opys(m),
+                    "shifra": str(m.get("shifra") or "").strip(),
                     "film": str(m.get("film") or "").strip(),
                     "unidentified": bool(m.get("unidentified")),
                     "note": str(m.get("note") or m.get("why") or "").strip(),
@@ -590,9 +592,14 @@ def collect_rows(index: LibraryIndex | None = None) -> tuple[list[CaseRow], list
                 row.frames = max(row.frames, frames)
                 continue
             label = _REPO_LABEL.get(repo, repo)
+            # Шифра з паспорта — людська і сильніша за зібрану з полів, так само
+            # як у бібліотеці (`shifra_hint`). Інакше справа, яка ще не потрапила
+            # у знімок бібліотеки, діставала в реєстрі іншу шифру, ніж отримає
+            # після перезбірки бібліотеки.
             rows[key] = CaseRow(
                 key=key, repo=repo, repo_label=label, fond=fond, opys=opys, spr=spr,
-                shifra=f"{label} {fond}-{opys}-{spr}" if opys else f"{label} {fond}-{spr}",
+                shifra=side.get("shifra") or (f"{label} {fond}-{opys}-{spr}" if opys
+                                              else f"{label} {fond}-{spr}"),
                 title=side.get("title", ""), doc_type=side.get("doc_type", ""),
                 year_from=side.get("year_from"), year_to=side.get("year_to"),
                 place_raw=side.get("place", ""),

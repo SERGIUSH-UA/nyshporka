@@ -156,6 +156,11 @@ function readForm(c) {
         ${t('read.voice.on')}</label>
       <span class="muted">${t('read.voice.why')}</span>
     </div>
+    ${c.script === 'latin' ? '' : `<div class="row">
+      <label><input type="checkbox" name="also_latin" value="1"
+        ${c.script === 'mixed' ? 'checked' : ''}> ${t('read.also.latin')}</label>
+      <span class="muted">${t('read.also.why')}</span>
+    </div>`}
     <details><summary>${t('read.expert')}</summary>
       <div class="row">
         <label class="lbl-mini">${t('read.limit')}
@@ -211,6 +216,9 @@ Object.assign(ACTIONS, {
         case_dir: RD.case_dir,
         script: (RD.card || {}).script_trust === 'fixed' ? RD.script : '',
         second_voice: fd.get('second_voice') === '1',
+        // ➕ латинка третім голосом того самого проходу: мішане письмо
+        // закривається одним прогоном, сегментація рахується раз
+        also: fd.get('also_latin') === '1' ? ['latin'] : [],
         limit: num('limit'),
         pages: String(fd.get('pages') || ''),
         workers: Math.max(1, num('workers') || 1),
@@ -233,7 +241,9 @@ Object.assign(ACTIONS, {
         <tr><td>${t('read.frames')}</td><td class="num">${esc(p.frames)}</td></tr>
         <tr><td>${t('read.script')}</td><td>${esc(p.script)}</td></tr>
         <tr><td>${t('read.model')}</td><td class="mono">${esc(p.model)}</td></tr>
-        ${p.voice ? `<tr><td>${t('read.voice')}</td><td class="mono">${esc(p.voice)}</td></tr>` : ''}
+        ${(p.voices || []).length
+    ? `<tr><td>${t('read.voice')}</td><td class="mono">${esc(p.voices.join(' + '))}</td></tr>`
+    : ''}
         <tr><td>→</td><td class="mono">${esc(p.out_dir)}</td></tr>
       </tbody></table>
       <button data-act="read.go">${t('read.go')}</button>`;
@@ -249,7 +259,10 @@ Object.assign(ACTIONS, {
    */
   'read.go': async () => {
     const c = RD.card || {};
-    if (c.script === 'unknown' || c.script === 'mixed') {
+    // Мішане письмо з латинкою третім голосом уже закрите одним проходом —
+    // питати тут означало б лякати тим, від чого галочка й рятує.
+    const bothScripts = ((RD.args || {}).also || []).length > 0;
+    if (c.script === 'unknown' || (c.script === 'mixed' && !bothScripts)) {
       const why = c.script === 'mixed' ? t('read.confirm.mixed')
         : t('read.confirm.unknown');
       // eslint-disable-next-line no-alert

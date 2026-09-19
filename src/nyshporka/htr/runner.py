@@ -3037,6 +3037,9 @@ def main() -> int:
     # окремим прогоном, а знаходить те, чого PARSeq не бачить принципово
     # (PRODUCTION.json: 6 сканів із 62, яких не дав жоден Писар).
     side_dirs: dict[str, Path] = {}
+    # письмо побічної теки — за вагами голосу, а не за прогоном: Скриба поруч
+    # із Писарем інакше лягає в реєстр кирилицею, і латинський свіп її не бачить
+    side_scripts: dict[str, str] = {}
     extra_recs: list = []
     if engine == "parseq" and (args.models.strip() or args.beam > 1):
         for spec in [s.strip() for s in args.models.split(",") if s.strip()]:
@@ -3058,6 +3061,7 @@ def main() -> int:
             else:
                 extra_recs.append((tag, "parseq", load_recognizer(str(p), "parseq", device)))
             side_dirs[tag] = out_dir.parent / f"{out_dir.name}-{tag}"
+            side_scripts[tag] = model_script(str(p), vengine)
         if args.beam > 1:
             side_dirs[f"beam{args.beam}"] = out_dir.parent / f"{out_dir.name}-beam{args.beam}"
         for d in side_dirs.values():
@@ -3569,7 +3573,7 @@ def main() -> int:
             # на розборі імені теки.
             "case_key": meta.get("case_key") or "",
             "model": f"{Path(args.model).name}+{tag}", "device": device,
-            "script": args.script, "started": meta.get("started"),
+            "script": side_scripts.get(tag, script), "started": meta.get("started"),
             # саме цю мету бачить пошук; батч голосу — властивість тексту в теці
             "voice_batch": max(1, int(args.voice_batch)),
             "updated": datetime.now().isoformat(timespec="seconds"),

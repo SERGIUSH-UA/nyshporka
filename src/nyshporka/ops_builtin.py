@@ -2956,8 +2956,10 @@ def htr_case_info(a: CaseInfoArgs) -> Envelope:
         env.warn("script_guessed", card.get("script_why") or "")
     if card.get("script") == "mixed":
         env.warn("mixed_script",
-                 "у справі два письма — потрібні два прогони окремими теками: "
-                 "один рушій закриє лише своє")
+                 "у справі два письма, а один рушій закриє лише своє. Обидва "
+                 "закриває один прохід: кириличний прогін із латинською моделлю "
+                 "третім голосом (`also: [\"latin\"]`, у формі — «латинкою теж»); "
+                 "її текст ляже в сусідню теку")
     for gap in card.get("gaps") or []:
         env.warn(str(gap.get("kind") or "gap"), str(gap.get("text") or ""))
     if not card.get("found"):
@@ -2974,6 +2976,11 @@ class ReadArgs(BaseModel):
     second_voice: bool = Field(
         default=True,
         description="читати ще й другим рушієм — він помиляється інакше")
+    also: list[str] = Field(
+        default_factory=list,
+        description="ще голоси тим самим проходом: `latin` (латинська модель) "
+                    "або ім'я ваг; лише для кириличного прогону. Мішане письмо "
+                    "так закривається одним проходом, а не двома прогонами")
     case_key: str = Field(default="", description="шифра справи у мету прогону")
     # ── важелі для досвідчених ───────────────────────────────────────────────
     # 🔴 Прокинуто рівно ті, у яких є зміряне правило користування. Ручка без
@@ -3011,7 +3018,7 @@ def read_plan(a: ReadArgs) -> Envelope:
 
     try:
         p = plan(a.case_dir, out_dir=a.out_dir, script=a.script,
-                 second_voice=a.second_voice)
+                 second_voice=a.second_voice, model=a.model, also=a.also)
     except ReadError as exc:
         return fail(str(exc))
     env = ok({"plan": p.as_dict()})

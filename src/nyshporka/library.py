@@ -378,6 +378,20 @@ def _norm_spr(s: str | None) -> str | None:
     return out
 
 
+def _sidecar_opys(m: dict[str, Any]) -> str | None:
+    """Опис справи з паспорта теки (`_source.json` / `meta.json`) або None.
+
+    🔴 Поле має три імена: `inv` (meta.json завантажувача archium), `opys`
+    (давні сайдкари) і `opis` (паспорти, які пишуть завантажувачі FS і скіл
+    `fond-case`). Паспорт читали три місця, кожне своїм списком імен, і `opis`
+    знало лише одне. Тож та сама тека діставала опис у бібліотеці й губила його
+    в реєстрі справ: ДАЧО 1462-1-11348 (18.09.2026) лягла шифрою «1462-11348»
+    поруч із «1462-1-11357» з того самого фонду. Читати опис паспорта — тільки
+    звідси.
+    """
+    return _norm_spr(m.get("inv") or m.get("opys") or m.get("opis") or "")
+
+
 #: кирилична літера префікса фонду → латинська. Той самий канон, що й для індексу
 #: справи: «Р-6129» кирилицею і «R-6129» латинкою — це один фонд, а не два.
 _FOND_PREFIX_TO_LAT = {"р": "R", "п": "P", "ф": "F", "c": "C", "с": "S"}
@@ -690,7 +704,7 @@ def _sidecar_case(rel: str) -> tuple[str, str, str | None, str] | None:
         fond = _norm_fond(msh.group(1)) or ""
         opys = _norm_spr(msh.group(2)) or ""
         spr = _norm_spr(msh.group(3)) or ""
-        opys = _norm_spr(m.get("inv") or m.get("opys") or "") or opys
+        opys = _sidecar_opys(m) or opys
         if repo and fond and spr:
             return repo, str(fond), str(opys) if opys else None, str(spr)
     return None
@@ -1372,16 +1386,12 @@ def _fallback_name(rel_path: str, key_parts: tuple[Any, ...] | None) -> dict[str
                 "place": _strip_links(m.get("place") or m.get("covers")
                                       or (harvest or {}).get("place") or ""),
                 "shifra_hint": (m.get("shifra") or "").strip(),
-                # 🔴 `opis` — саме так поле зветься в паспортах, які пишуть
-                # завантажувачі й скіл `fond-case`; читались лише `inv`/`opys`,
-                # тож опис із них не діставався зовсім. Різниця в одну літеру
-                # коштувала ключа без опису: тека `spr-33` у ДАВіО ф.904 несе
-                # 904-30-33 (юдейська книга Жабокрича), а 904-24-33 — Вільшанка;
-                # під спільним ключем це або перезапис, або тихе змішування
-                # двох різних книг (пор. `case-key-needs-opys-anrm-f211`).
-                "opys_hint": _norm_spr(m.get("inv") or m.get("opys")
-                                       or m.get("opis") or "")
-                             or (delo[1] if delo else None),
+                # Різниця в одну літеру імені поля коштувала ключа без опису:
+                # тека `spr-33` у ДАВіО ф.904 несе 904-30-33 (юдейська книга
+                # Жабокрича), а 904-24-33 — Вільшанка; під спільним ключем це
+                # або перезапис, або тихе змішування двох різних книг (пор.
+                # `case-key-needs-opys-anrm-f211`). Імена поля — `_sidecar_opys`.
+                "opys_hint": _sidecar_opys(m) or (delo[1] if delo else None),
                 "desc_source": "source_json" if name == "_source.json" else "meta_json"}
     # ДАХмО archium — офіційний опис справи з краулу каталогу (найточніше поза каноном)
     if _ARCHIUM_SLUG in re.split(r"[\\/]+", rel_path):

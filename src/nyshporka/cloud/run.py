@@ -70,7 +70,9 @@ class Shard:
 def remote_commands(*, remote_dir: str, python: str, model: str,
                     voice: str, script: str, case_key: str, workers: int,
                     device: str, gpus: int = 1, cores: float = 0.0,
-                    seg_height: int = 0) -> tuple[list[Shard], list[str]]:
+                    seg_height: int = 0,
+                    extra_voices: tuple[str, ...] | list[str] = (),
+                    ) -> tuple[list[Shard], list[str]]:
     """Ті самі команди, що й локально, тільки шляхами чужої машини.
 
     🔴 Рядок команди будує та сама `Plan`, що й локальний прогін. Друга збірка
@@ -104,6 +106,7 @@ def remote_commands(*, remote_dir: str, python: str, model: str,
         python=PurePosixPath(python),      # type: ignore[arg-type]
         runner=root / "runner.py",         # type: ignore[arg-type]
         voice=PurePosixPath(voice) if voice else None,  # type: ignore[arg-type]
+        extra_voices=tuple(PurePosixPath(v) for v in extra_voices),  # type: ignore[arg-type]
         seg_cache=root / "seg_cache",      # type: ignore[arg-type]
         gpu_lock=root / "_gpu.lock")       # type: ignore[arg-type]
 
@@ -290,11 +293,11 @@ def _upload_assets(session: Session, plan: CloudPlan, remote_dir: str,
     for p in sorted((runner_py.parent / "patches").glob("*.py")):
         session.put(p, f"{remote_dir}/patches/{p.name}")
     session.put(plan.model, f"{remote_dir}/{MODELS_SUB}/{plan.model.name}")
-    if plan.voice is not None:
-        session.put(plan.voice, f"{remote_dir}/{MODELS_SUB}/{plan.voice.name}")
+    for v in plan.voices:
+        session.put(v, f"{remote_dir}/{MODELS_SUB}/{v.name}")
     if on_line:
         on_line(f"ваги й раннер на місці: {plan.model.name}"
-                + (f" + {plan.voice.name}" if plan.voice else ""))
+                + "".join(f" + {v.name}" for v in plan.voices))
 
 
 def _upload_frames(session: Session, plan: CloudPlan, remote_dir: str, *,
@@ -460,6 +463,8 @@ def start(plan: CloudPlan, *, workers: int = 0, seg_height: int = 0,
             model=f"{remote_dir}/{MODELS_SUB}/{plan.model.name}",
             voice=(f"{remote_dir}/{MODELS_SUB}/{plan.voice.name}"
                    if plan.voice else ""),
+            extra_voices=[f"{remote_dir}/{MODELS_SUB}/{v.name}"
+                          for v in plan.extra_voices],
             script=plan.script, case_key=plan.case_key,
             workers=measured.sizing.shards, device=device,
             gpus=probe.gpus if probe.has_gpu else 1, cores=probe.cores,

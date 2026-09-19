@@ -856,6 +856,10 @@ def read(
     seg_cache: str = typer.Option(
         "", "--seg-cache",
         help="тека готової сегментації (*.seg.json.gz), напр. забраної з хмари"),
+    with_: list[str] = typer.Option(
+        [], "--with",
+        help="ще голос тим самим проходом: `latin` (Скриба) або ім'я ваг; для "
+             "мішаного письма — замість другого прогону"),
     force: bool = typer.Option(
         False, "--force",
         help="стартувати, навіть якщо інша справа вже читається"),
@@ -884,14 +888,15 @@ def read(
     _need("htr")
     try:
         p = make_plan(case_dir, out_dir=out, script=script,
-                      second_voice=not one_voice, model=model, seg_cache=seg_cache)
+                      second_voice=not one_voice, model=model, seg_cache=seg_cache,
+                      also=with_)
     except ReadError as exc:
         console.print(f"[err]{exc}[/err]")
         raise typer.Exit(code=1) from None
 
     console.print(f"[bold]{p.case_dir.name}[/bold] — {p.frames} кадрів · "
                   f"письмо {p.script} · {p.model.name}"
-                  + (f" + {p.voice.name}" if p.voice else ""))
+                  + "".join(f" + {v.name}" for v in p.voices))
     console.print(f"  [muted]{p.out_dir}[/muted]")
     # ⚠ Попередження лишається для того, хто задав `--shard` РУКАМИ й свій лок:
     # спільний лок плану вже стоїть, але людина, яка керує шардами вручну,

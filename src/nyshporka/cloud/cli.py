@@ -219,7 +219,7 @@ def _print_plan(p: CloudPlan) -> None:
                   f"{_size(p.bytes_in)}")
     console.print(f"  письмо : {p.script}")
     console.print(f"  модель : {p.model.name}"
-                  + (f" + {p.voice.name}" if p.voice else " (один голос)"))
+                  + ("".join(f" + {v.name}" for v in p.voices) or " (один голос)"))
     console.print(f"  шифра  : {p.case_key or '—'}"
                   + (f" [muted]({p.case_key_why})[/muted]" if p.case_key else ""))
     console.print(f"  вихід  : {p.out_dir}")
@@ -250,6 +250,9 @@ def cmd_plan(
     case_key: str = typer.Option("", "--case-key", help="шифра справи для мети прогону"),
     one_voice: bool = typer.Option(False, "--one-voice",
                                    help="без другого рушія (швидше, але сліпіше)"),
+    with_: list[str] = typer.Option(
+        [], "--with",
+        help="ще голос тим самим проходом: `latin` (Скриба) або ім'я ваг"),
     as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Що поїде на машину — без жодної мережевої дії й без жодних витрат.
@@ -262,7 +265,7 @@ def cmd_plan(
 
     try:
         p = PL.build(case_dir, backend=backend, target=host, script=script,
-                     case_key=case_key, second_voice=not one_voice)
+                     case_key=case_key, second_voice=not one_voice, also=with_)
     except PL.PlanError as exc:
         console.print(f"[err]{exc}[/err]")
         raise typer.Exit(code=1) from None
@@ -352,6 +355,9 @@ def cmd_start(
     case_key: str = typer.Option("", "--case-key", help="шифра справи для мети прогону"),
     one_voice: bool = typer.Option(False, "--one-voice",
                                    help="без другого рушія (швидше, але сліпіше)"),
+    with_: list[str] = typer.Option(
+        [], "--with",
+        help="ще голос тим самим проходом: `latin` (Скриба) або ім'я ваг"),
     shards: int = typer.Option(0, "--shards", help="скільки процесів; 0 = порахувати"),
     seg_height: int = typer.Option(0, "--seg-height",
                                     help="висота сегментації (0 = рідна 1800)"),
@@ -367,7 +373,7 @@ def cmd_start(
 
     try:
         p = PL.build(case_dir, backend=backend, target=host, script=script,
-                     case_key=case_key, second_voice=not one_voice)
+                     case_key=case_key, second_voice=not one_voice, also=with_)
     except PL.PlanError as exc:
         console.print(f"[err]{exc}[/err]")
         raise typer.Exit(code=1) from None

@@ -382,7 +382,11 @@ async def _start_read(bus: JobBus, ws: Workspace,
     plan = R.plan(payload.get("case_dir") or "",
                   out_dir=payload.get("out_dir") or "",
                   script=str(payload.get("script") or ""),
-                  second_voice=bool(payload.get("second_voice", True)))
+                  second_voice=bool(payload.get("second_voice", True)),
+                  # 🔴 `model` форма надсилала й раніше, але сюди він не доходив:
+                  # поле на екрані було, а прогін ішов бойовою моделлю
+                  model=str(payload.get("model") or ""),
+                  also=[str(v) for v in payload.get("also") or [] if str(v).strip()])
     # 🔴 Шифра береться З опису, коли її не передали. Прогін без шифри стає в
     # реєстрі «нічиїм»: він є, текст є, а до якої справи належить — невідомо,
     # і зшивати це потім доводиться правкою JSON руками. З консолі шифру ніхто
@@ -404,6 +408,8 @@ async def _start_read(bus: JobBus, ws: Workspace,
         seg_height=max(0, int(payload.get("seg_height") or 0)))
 
     title = f"{plan.case_dir.name}: {plan.frames} кадрів, {plan.model.name}"
+    if len(plan.voices) > 1:
+        title += f" + {len(plan.voices)} голоси"
     if len(cmds) > 1:
         title += f" · {len(cmds)} процеси"
     job, created = await bus.enqueue(
