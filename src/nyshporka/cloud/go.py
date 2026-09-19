@@ -311,8 +311,12 @@ def go(case: str, *, backend: str = "vast", budget: float | None = None,
         if on_event is not None:
             on_event(kind, text, **data)
 
+    # Замок власника заходу: бере `_go`, щойно знає `run_id`; відпускаємо тут —
+    # після останньої лінії оборони, бо й вона гасить машину.
+    owner = contextlib.ExitStack()
     try:
-        _go(res, case, say, backend=backend, budget=budget, max_hours=max_hours,
+        _go(res, case, say, owner, backend=backend, budget=budget,
+            max_hours=max_hours,
             max_price=max_price, confirm=confirm, dry_run=dry_run,
             with_voices=tuple(with_voices), second_voice=second_voice,
             script=script, case_key=case_key, rerun=rerun,
@@ -328,7 +332,10 @@ def go(case: str, *, backend: str = "vast", budget: float | None = None,
         res.verdict, res.why = "failed", str(exc)
     except Exception as exc:
         res.verdict, res.why = "failed", f"{type(exc).__name__}: {exc}"
-    _last_line_of_defence(res, say)
+    try:
+        _last_line_of_defence(res, say)
+    finally:
+        owner.close()
     return res
 
 
@@ -356,8 +363,8 @@ def _last_line_of_defence(res: GoResult, say: EventFn) -> None:
     res.spent_usd, res.rent_hours = st.spent_usd(), st.rent_hours()
 
 
-def _go(res: GoResult, case: str, say: EventFn, *, backend: str,
-        budget: float | None, max_hours: float | None, max_price: float | None,
+def _go(res: GoResult, case: str, say: EventFn, owner: contextlib.ExitStack, *,
+        backend: str, budget: float | None, max_hours: float | None, max_price: float | None,
         confirm: bool, dry_run: bool, with_voices: tuple[str, ...],
         second_voice: bool, script: str, case_key: str, rerun: bool,
         allow_partial: bool, rotate_landscape: bool, tick_sec: float) -> None:
@@ -396,6 +403,17 @@ def _go(res: GoResult, case: str, say: EventFn, *, backend: str,
 
     # 1а. живий захід ЦІЄЇ роботи — підхопити, а не орендувати вдруге
     plan = build(ref.frames_dir)
+    # 🔴 Власник — ПЕРЕД читанням стану. Без замка другий `go` тієї самої справи
+    # (зокрема `--dry-run` заради кошторису) бачив «машина є, pid немає» —
+    # штатний стан перших 10-20 хвилин підготовки — і гасив бокс, який перший
+    # саме готував. Зайнято — відмова без жодної дії над машиною. Ключ — від
+    # теки оригіналів: котра тека поїде на машину, стане відомо пізніше.
+    try:
+        owner.enter_context(ST.owned(plan.run_id))
+    except ST.OwnerBusy as exc:
+        raise GoRefused(
+            f"{exc} — другий наглядач забрав би його результат і погасив би його "
+            f"машину. Стан: `nysh cloud state {exc.run_id}`.") from None
     live, clash = _find_live(plan, ref.frames_dir)
     if clash is not None:
         raise GoRefused(
