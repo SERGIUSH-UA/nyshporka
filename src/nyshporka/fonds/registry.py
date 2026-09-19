@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Any
 
 from nyshporka.core.workspace import workspace
+from nyshporka.library import FOND_TOKEN, _norm_fond
 
 #: 🔴 Обидва коди Вінницького архіву ведуть в ОДИН slug. Реєстр опису лежить
 #: файлом `<slug>_<фонд>.json`, і два різні slug'и означали б два файли на той
@@ -118,8 +119,10 @@ _LEGACY_UNKNOWN = ("spr_to", "title_alt", "commons_title", "years_src", "folios"
                    "cover_place", "cover_letters", "cover_note")
 
 _SPR_RE = re.compile(r"^(\d+)\s*([а-яіїєґa-z]?)$", re.IGNORECASE)
-_KEY_RE = re.compile(r"^([A-Za-zА-Яа-яІЇЄҐіїєґ]+)[/\s-]+(\d+)[/\s-]+(?:(\d+)[/\s-]+)?"
-                     r"(\d+)\s*([а-яіїєґa-z]?)$")
+# 🔴 Фонд — спільна цеглина `FOND_TOKEN`: радянський фонд «R-6129» тут брався
+# як `\d+`, і ключ із літерним фондом відмовлявся (issue #21).
+_KEY_RE = re.compile(rf"^([A-Za-zА-Яа-яІЇЄҐіїєґ]+)[/\s-]+({FOND_TOKEN})[/\s-]+(?:(\d+)[/\s-]+)?"
+                     r"(\d+)\s*([а-яіїєґa-z]?)$", re.IGNORECASE)
 _YEAR_RE = re.compile(r"^(\d{4})(?:\s*[-–]\s*(\d{4}))?$")
 
 #: memo: fond_id → (stamp, rows). stamp = (path, mtime_ns, size) — перезбірка реєстру
@@ -785,7 +788,8 @@ def parse_key(key: str) -> tuple[str, str, str, str, str]:
     # реєстру залежно від того, звідки прийшов виклик.
     repo = {"ДАХМО": "DAHMO", "ЦДІАК": "CDIAK", "ДАВІО": "DAVIO",
             "ДАВО": "DAVIO"}.get(repo, repo)
-    return repo, m.group(2), (m.group(3) or "1"), m.group(4), (m.group(5) or "").lower()
+    return (repo, str(_norm_fond(m.group(2))), (m.group(3) or "1"), m.group(4),
+            (m.group(5) or "").lower())
 
 
 def fond_id_of(repo: str, fond: str) -> str:

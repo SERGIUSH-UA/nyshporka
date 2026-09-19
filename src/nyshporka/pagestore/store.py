@@ -24,8 +24,11 @@ from nyshporka.core.workspace import workspace
 from nyshporka.library import (
     _DEFAULT_OPYS,
     _REPO_LABEL,
+    FOND_TOKEN,
+    OPYS_TOKEN,
     Address,
     _mk_key,
+    _norm_fond,
     _norm_spr,
     find_by_address,
     load_library,
@@ -51,7 +54,11 @@ _STATUS_RANK = {"unreadable": 0, "skipped": 0, "partial": 1, "full": 2}
 # Виглядало це не як синтаксична межа, а як «такої справи немає»: команда
 # друкувала перелік прийнятних форм, серед яких ключ і був. Спіймано 2026-08-13,
 # коли перегляд кадру збірки клірових ANRM не було куди занести.
-_KEY_RE = re.compile(r"^([A-Za-z]+)/(\d+(?:-\d+)?)/([0-9A-Za-z@_]+)$")
+# 🔴 Фонд — спільна цеглина `FOND_TOKEN`, а не `\d+`: `cases.list` друкує ключ
+# `DAHMO/R-100/7` для радянського фонду, і цей регекс відмовляв на ньому —
+# рядок, виданий пакетом, не приймався назад (issue #21).
+_KEY_RE = re.compile(rf"^([A-Za-z]+)/({FOND_TOKEN}(?:-{OPYS_TOKEN})?)/([0-9A-Za-z@_]+)$",
+                     re.IGNORECASE)
 # «архів 123-1-456» / «dahmo 315-1-8433» / «315-1-8433» (без архіву — помилка)
 _SHIFRA_RE = re.compile(r"^(?:(\S+)\s+)?(\d+)\s*[-–]\s*(\d+)\s*[-–]\s*(\w+)$")
 #: 🔴 Зводиться до канонічного коду, а не до першого-ліпшого. Один архів
@@ -221,7 +228,7 @@ def resolve_case(value: str) -> CaseRef:
         # `data/pages/DAVO/`. Агент, який чесно питає сховище перед тим, як
         # відкривати скани, діставав порожньо — і передивлявся переглянуте.
         parsed = (_label2repo().get(m.group(1).casefold(), m.group(1).upper()),
-                  str(_norm_spr(fond_part)),
+                  str(_norm_fond(fond_part)),
                   _norm_spr(opys_part) if opys_part else None,
                   str(_norm_spr(m.group(3))))
     if parsed is None:
