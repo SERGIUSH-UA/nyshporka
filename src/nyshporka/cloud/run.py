@@ -98,6 +98,9 @@ def remote_commands(*, remote_dir: str, python: str, model: str,
     from nyshporka.htr.run import Plan, shard_env
 
     root = PurePosixPath(remote_dir)
+    # `Any`, а не `type: ignore` на генераторі: різні версії mypy називають цю
+    # невідповідність різними кодами, і коментар під одну з них червонів на іншій.
+    voices_extra: Any = tuple(PurePosixPath(v) for v in extra_voices)
     plan = Plan(
         case_dir=root / CASE_SUB,          # type: ignore[arg-type]
         out_dir=root / OUT_SUB,            # type: ignore[arg-type]
@@ -106,7 +109,7 @@ def remote_commands(*, remote_dir: str, python: str, model: str,
         python=PurePosixPath(python),      # type: ignore[arg-type]
         runner=root / "runner.py",         # type: ignore[arg-type]
         voice=PurePosixPath(voice) if voice else None,  # type: ignore[arg-type]
-        extra_voices=tuple(PurePosixPath(v) for v in extra_voices),  # type: ignore[arg-type]
+        extra_voices=voices_extra,
         seg_cache=root / "seg_cache",      # type: ignore[arg-type]
         gpu_lock=root / "_gpu.lock")       # type: ignore[arg-type]
 
