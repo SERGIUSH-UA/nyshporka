@@ -625,6 +625,14 @@ def runs_for_scope(scope: str) -> dict[str, Any]:
     if not want:
         return {"rows": rows, "kind": "all", "key": "", "shifra": ""}
 
+    bound = _bound_runs()
+
+    def key_of(r: dict[str, Any]) -> str:
+        name = r.get("name")
+        if name in bound:
+            return bound[name] or ""
+        return (r.get("case_key") or "").strip()
+
     by_name = [r for r in rows if r.get("name") == want]
     if by_name:
         # Ключ прогону віддається разом із ним: те саме значення `--case` має
@@ -632,7 +640,7 @@ def runs_for_scope(scope: str) -> dict[str, Any]:
         # виписаному. Порожньо тут законне — прогін буває нічийним.
         return {"rows": by_name,
                 "kind": "run",
-                "key": (by_name[0].get("case_key") or "").strip(),
+                "key": key_of(by_name[0]),
                 "shifra": by_name[0].get("shifra") or ""}
 
     from nyshporka.pagestore.store import resolve_case
@@ -650,12 +658,34 @@ def runs_for_scope(scope: str) -> dict[str, Any]:
         keys = sorted({(r.get("case_key") or "").strip() for r in series})
         return {"rows": series, "kind": "cases", "key": "", "shifra": want,
                 "keys": keys}
-    mine = [r for r in rows if (r.get("case_key") or "").strip() == ref.key]
+    mine = [r for r in rows if key_of(r) == ref.key]
     if not mine and ref.path:
         # Прогін, який не несе ключа в собі, ще може вказувати на ту саму теку.
         # Це не рідкість: ключ у меті з'явився пізніше за самі прогони.
-        mine = find_runs_for_case(ref.path)
+        # ⚠ Крім тих, кого людина прив'язала деінде або зробила нічиїм: її
+        # рішення сильніше за шлях у меті — так само, як у резолвері.
+        mine = [r for r in find_runs_for_case(ref.path)
+                if bound.get(str(r.get("name")), ref.key) == ref.key]
     return {"rows": mine, "kind": "case", "key": ref.key, "shifra": ref.shifra}
+
+
+def _bound_runs() -> dict[str, str | None]:
+    """Прив'язки прогонів, які поставила людина (`cases.bind`): ім'я → ключ.
+
+    🔴 Пошук питає те саме рішення, що й реєстр справ (`cases.resolve.resolve_run`,
+    канал 1). Доти область справи будувалась лише з `case_key` і `case_dir` мети:
+    після `cases.bind` реєстр казав «нерозв'язаних 0» і показував прогін при
+    справі, а `search --case` на тій самій справі відповідав «жодного прогону»
+    (issue #20). Два здорові на вигляд ствердження про одне й те саме, протилежні.
+
+    `None` — прогін свідомо зроблено нічиїм (`key: null`), і в жодну справу він не
+    потрапляє, хоч би куди вказувала мета. Побитий `overrides.json` не ковтається:
+    мовчки проігнорувати рішення людини і є та вада, яку тут лагодимо.
+    """
+    from nyshporka.cases.resolve import _run_overrides
+
+    return {name: (str(ov.get("key") or "").strip() or None)
+            for name, ov in _run_overrides().items()}
 
 
 _SERIES_RE = re.compile(r"(\d+(?:[-/]\d+[a-zа-я]?)*)\s*$")

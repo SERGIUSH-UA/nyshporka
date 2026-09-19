@@ -2140,10 +2140,18 @@ def case_register(a: CaseRegisterArgs) -> Envelope:
         env.warn("no_title",
                  "назви немає — у переліках справа буде «без назви», і впізнати "
                  "її за рік стане важко")
+    if env.data["reachable"]:
+        from nyshporka.cases.register import key_mismatch
+
+        why = key_mismatch(here, out)
+        if why:
+            env.warn("key_mismatch", why)
     if a.reindex:
         try:
-            from nyshporka.library import build_library, write_library
+            from nyshporka.library import _sidecar_case, build_library, write_library
 
+            # паспорт щойно переписано, а розбір шляху кешує прочитаний
+            _sidecar_case.cache_clear()
             entries = build_library()
             write_library(entries)
             env.data["library"] = len(entries)

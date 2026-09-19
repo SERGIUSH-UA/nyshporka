@@ -22,6 +22,7 @@ from __future__ import annotations
 import csv
 import json
 import re
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -118,8 +119,21 @@ _LEGACY_UNKNOWN = ("spr_to", "title_alt", "commons_title", "years_src", "folios"
                    "cover_place", "cover_letters", "cover_note")
 
 _SPR_RE = re.compile(r"^(\d+)\s*([а-яіїєґa-z]?)$", re.IGNORECASE)
-_KEY_RE = re.compile(r"^([A-Za-zА-Яа-яІЇЄҐіїєґ]+)[/\s-]+(\d+)[/\s-]+(?:(\d+)[/\s-]+)?"
-                     r"(\d+)\s*([а-яіїєґa-z]?)$")
+@lru_cache(maxsize=1)
+def _key_re() -> re.Pattern[str]:
+    """Ключ справи для реєстру опису.
+
+    🔴 Фонд — спільна цеглина `library.FOND_TOKEN`: радянський фонд «R-6129» тут
+    брався лише як число, і ключ із літерним фондом відмовлявся (issue #21).
+    ⚠ Імпорт відкладений: `library` на рівні модуля кличе `workspace()`, а цей
+    модуль вантажить CLI ще до того, як простір знайдено.
+    """
+    from nyshporka.library import FOND_TOKEN
+
+    return re.compile(rf"^([A-Za-zА-Яа-яІЇЄҐіїєґ]+)[/\s-]+({FOND_TOKEN})[/\s-]+"
+                      r"(?:(\d+)[/\s-]+)?(\d+)\s*([а-яіїєґa-z]?)$", re.IGNORECASE)
+
+
 _YEAR_RE = re.compile(r"^(\d{4})(?:\s*[-–]\s*(\d{4}))?$")
 
 #: memo: fond_id → (stamp, rows). stamp = (path, mtime_ns, size) — перезбірка реєстру
@@ -774,7 +788,9 @@ def surname_list(fond_id: str, limit: int = 400) -> list[str]:
 
 def parse_key(key: str) -> tuple[str, str, str, str, str]:
     """`DAHMO/230/43` або `ДАХмО 230-1-43` → (repo, fond, opys, spr_int, letter)."""
-    m = _KEY_RE.match(key.strip())
+    from nyshporka.library import _norm_fond
+
+    m = _key_re().match(key.strip())
     if not m:
         raise ValueError(f"не розумію ключ «{key}». Приклади: DAHMO/230/43, "
                          "DAHMO/230/1/43")
@@ -785,7 +801,8 @@ def parse_key(key: str) -> tuple[str, str, str, str, str]:
     # реєстру залежно від того, звідки прийшов виклик.
     repo = {"ДАХМО": "DAHMO", "ЦДІАК": "CDIAK", "ДАВІО": "DAVIO",
             "ДАВО": "DAVIO"}.get(repo, repo)
-    return repo, m.group(2), (m.group(3) or "1"), m.group(4), (m.group(5) or "").lower()
+    return (repo, str(_norm_fond(m.group(2))), (m.group(3) or "1"), m.group(4),
+            (m.group(5) or "").lower())
 
 
 def fond_id_of(repo: str, fond: str) -> str:
