@@ -3,8 +3,14 @@
 `gpurunner` — сусідній інструмент, який сам орендує карту (Modal, Vast,
 Kaggle…), заливає вхід, стежить і забирає результат. Ми не дублюємо його
 бекенди: рендеримо команду `gpurunner run parseq_train …` з тими самими
-параметрами, що поїхали б локально, читаємо `submitted <handle>` і далі
-ходимо `status`/`fetch`/`cancel`.
+параметрами, що поїхали б локально, беремо handle і далі ходимо
+`status`/`fetch`/`cancel`.
+
+🔴 Відповідь читається з МАШИННОГО виводу (`--json`, gpurunner ≥ 0.2): останній
+рядок stdout, що починається з `{`. Доти тут стояв регекс на `submitted <id>` і
+пошук слів `running`/`failed` у панелі статусу — стик, який ламається від
+правки фрази чи кольору, і ламається мовчки, коли карта вже орендована. Текст
+лишився відкатом для старих версій; яка з двох мов іде — вирішує `--version`.
 
 🔴 Корпус на бекенд потрапляє по-різному, і це не приховується:
 * modal — тгз мусить лежати в томі (`modal volume put <том> <tgz> datasets/…`);
@@ -17,6 +23,7 @@ Kaggle…), заливає вхід, стежить і забирає резул
 """
 from __future__ import annotations
 
+import json
 import re
 import shutil
 import subprocess
@@ -35,8 +42,42 @@ _LOCAL_ONLY = {"input_root", "output_root", "no_pip", "progress_json"}
 _INPUT_ROOT_BACKENDS = {"vast", "lightning", "colab", "beam", "saturn"}
 
 
+#: Перша версія з `--json` у run/status/fetch.
+_JSON_SINCE = (0, 2)
+_VERSION_RE = re.compile(r"(\d+)\.(\d+)")
+_speaks_json: dict[str, bool] = {}
+
+
 def which() -> str | None:
     return shutil.which("gpurunner")
+
+
+def speaks_json() -> bool:
+    """Чи знає встановлений gpurunner `--json`. Один виклик `--version` на процес."""
+    exe = which() or ""
+    if exe not in _speaks_json:
+        ok = False
+        try:
+            res = subprocess.run([exe or "gpurunner", "--version"], capture_output=True,
+                                 text=True, encoding="utf-8", errors="replace", timeout=60)
+            m = _VERSION_RE.search(res.stdout + res.stderr)
+            ok = m is not None and (int(m.group(1)), int(m.group(2))) >= _JSON_SINCE
+        except (OSError, subprocess.TimeoutExpired):
+            ok = False
+        _speaks_json[exe] = ok
+    return _speaks_json[exe]
+
+
+def last_json(text: str) -> dict[str, Any]:
+    """Останній рядок, що починається з `{`: SDK бекендів друкують у stdout своє."""
+    for line in reversed((text or "").splitlines()):
+        if line.startswith("{"):
+            try:
+                obj = json.loads(line)
+            except ValueError:
+                return {}
+            return obj if isinstance(obj, dict) else {}
+    return {}
 
 
 def dataset_args(job: TrainJob, st: RunState) -> tuple[list[str], list[str]]:
@@ -132,8 +173,10 @@ class GpurunnerTrainer:
         if not ok:
             raise ComputeError(why)
         cmd, notes = command(job, st)
-        res = _run(cmd)
-        handle = parse_handle(res.stdout + "\n" + res.stderr)
+        machine = speaks_json()
+        res = _run([*cmd, "--json"] if machine else cmd)
+        reply = last_json(res.stdout) if machine else {}
+        handle = str(reply.get("short") or "") or parse_handle(res.stdout + "\n" + res.stderr)
         if res.returncode != 0 or not handle:
             raise ComputeError(f"gpurunner run не прийняв (rc={res.returncode}): "
                                f"{(res.stdout + res.stderr)[-800:]}")
@@ -150,6 +193,11 @@ class GpurunnerTrainer:
         if not handle:
             pulse.note = "handle відсутній — прогін не стартував"
             return pulse
+        if speaks_json():
+            res = _run(["gpurunner", "status", handle, "--json"], timeout=120)
+            reply = last_json(res.stdout)
+            if reply:
+                return _pulse_from_reply(pulse, reply, st)
         res = _run(["gpurunner", "status", handle], timeout=120)
         text = (res.stdout + res.stderr).strip()
         low = text.lower()
@@ -183,4 +231,24 @@ class GpurunnerTrainer:
             _run(["gpurunner", "cancel", handle], timeout=300)
 
 
-_ = Any
+def _pulse_from_reply(pulse: Pulse, reply: dict[str, Any], st: RunState) -> Pulse:
+    """Стан із машинної відповіді `status --json`.
+
+    🔴 `refreshed: false` означає, що бекенд не відповів і стан узято з
+    локального маніфесту gpurunner. Прогін при цьому вважаємо живим, якщо він
+    не був завершений: інакше хвилинний збій мережі читався б як кінець трену.
+    """
+    state = str(reply.get("state") or "unknown")
+    pulse.note = " · ".join(x for x in (state, str(reply.get("message") or ""),
+                                        str(reply.get("error") or "")) if x)[-400:]
+    if not reply.get("refreshed", True):
+        pulse.note = ("стан із маніфесту, бекенд не відповів · " + pulse.note)[-400:]
+    pulse.finished = state == "completed"
+    pulse.alive = state in ("queued", "running")
+    if state in ("failed", "cancelled"):
+        pulse.rc = 1
+    elif pulse.finished:
+        pulse.rc = 0
+    out = st.out_dir()
+    pulse.ckpts = len(list(out.glob("parseq_ep*.pt"))) if out.is_dir() else 0
+    return pulse
