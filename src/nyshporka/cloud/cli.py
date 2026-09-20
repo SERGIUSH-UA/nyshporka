@@ -497,7 +497,13 @@ def cmd_state(
             return
         for s in rows:
             mark = "🔴" if s.needs_release else ("✅" if s.verdict == "ok" else "·")
-            console.print(f"{mark} {s.run_id} · {s.human_phase()} · "
+            # 🔴 У відчепленого заходу наша фаза заморожена на хвилині, коли ми
+            # від нього відійшли, — показувати її означало б упевнено назвати
+            # «читає» те, що годину як скінчилось. Правду про нього знає
+            # наглядач, і питають його окремою командою на один захід.
+            where = (f"веде наглядач {s.supervisor}" if s.supervisor
+                     else s.human_phase())
+            console.print(f"{mark} {s.run_id} · {where} · "
                           f"{s.pages_done}/{s.frames_total}"
                           + (" · машина жива" if s.needs_release else ""))
         return
@@ -552,6 +558,10 @@ def _state_detached(st: RunState, *, as_json: bool) -> None:
     from nyshporka.cloud import supervised as SUP
 
     data = SUP.state_of(st)
+    if data and SUP.finished(data):
+        # Наглядач доповів підсумок — запис заходу оновлюємо зараз, а не
+        # лишаємо назавжди на хвилині, коли ми від нього відчепились.
+        st = SUP.absorb(st, data)
     if as_json:
         out = st.as_dict()
         out["supervisor_state"] = data or None

@@ -35,6 +35,7 @@ import shutil
 import subprocess
 import sys
 import tarfile
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -507,17 +508,51 @@ def find_live(run_ids: Iterable[str]) -> tuple[ST.RunState, dict[str, Any]] | No
         if st is None or not st.supervisor or st.phase in ("done", "failed"):
             continue
         data = state_of(st)
-        phase = str(data.get("phase") or "")
-        if data and phase not in ("done", "failed", ""):
+        if data and not finished(data):
             return st, data
         if data:
             # Наглядач завершився, а наш запис лишився відкритим — закриваємо
             # його зараз, інакше він мулятиме очі в кожному `nysh cloud state`.
-            verdict = str(data.get("verdict") or "")
-            st.phase = "done" if verdict in ("ok", "cancelled") else "failed"
-            st.why = str(data.get("why") or verdict or "наглядач завершився")
-            ST.save(st)
+            absorb(st, data)
     return None
+
+
+#: Фази наглядача, після яких він уже нічого не робить.
+DONE_PHASES = ("done", "failed", "finished", "stopped")
+
+
+def finished(data: dict[str, Any]) -> bool:
+    """Чи наглядач уже все — за його власним словом."""
+    phase = str(data.get("phase") or "")
+    return bool(data.get("verdict")) or (phase in DONE_PHASES and phase != "")
+
+
+def absorb(st: ST.RunState, data: dict[str, Any]) -> ST.RunState:
+    """Перенести підсумок наглядача в наш запис заходу.
+
+    🔴 Без цього завершений захід назавжди лишається в переліку як «читає з
+    нуля сторінок»: наш запис — знімок хвилини відчеплення, і сам себе він не
+    оновить ніколи, бо роботу вів не наш процес.
+    """
+    verdict = str(data.get("verdict") or "")
+    for case in data.get("cases") or []:
+        if isinstance(case, dict) and case.get("pages_done"):
+            st.pages_done = max(st.pages_done, int(case["pages_done"] or 0))
+    raw_budget = data.get("budget")
+    budget: dict[str, Any] = raw_budget if isinstance(raw_budget, dict) else {}
+    spent = M.as_number(budget.get("spent_usd"))
+    if spent is not None:
+        # Лічильник оренди веде наглядач, і його число — єдине справжнє: своєї
+        # машини ми тут не бачили жодної секунди.
+        st.rent_started = st.rent_started or st.started
+        st.rent_ended = st.rent_ended or time.time()
+        st.box = {**st.box, "price_usd_h": 0.0, "spent_usd": spent}
+    st.why = str(data.get("why") or verdict or "наглядач завершився")
+    st.released = True          # машину гасить наглядач, і він доповів, що все
+    st.verdict = verdict if verdict in ST.VERDICTS else (
+        "ok" if verdict == "ok" else "failed")
+    st.phase = "done" if st.verdict in ("ok", "cancelled") else "failed"
+    return ST.save(st)
 
 
 def state_of(st: ST.RunState) -> dict[str, Any]:
