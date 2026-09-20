@@ -976,7 +976,23 @@ class _Account:
         self.burning_known = isinstance(burning, list)
         # Чиї це машини: звіряємо з власними живими заходами. Чужа — не помилка
         # (людина могла орендувати щось сама), але сказати про неї треба вголос.
+        #
+        # 🔴 Відчеплений захід машини в нашому записі НЕ має — її бере й тримає
+        # наглядач. Доти кожна така машина виглядала «не з заходів цього
+        # простору», тобто власний живий захід звітував як чужа забута оренда:
+        # найгірша з можливих неправд у команді, яку читають саме для того, щоб
+        # вирішити, що гасити. Тому для них питаємо наглядача — він знає, який
+        # інстанс узяв.
         ours = {str(s.box.get("id")): s.run_id for s in ST.live() if s.box}
+        for st in ST.all_runs():
+            if not st.supervisor or st.phase in ("done", "failed"):
+                continue
+            from nyshporka.cloud import supervised as SUP
+
+            box = SUP.state_of(st).get("box")
+            iid = str((box or {}).get("instance_id") or "") if isinstance(box, dict) else ""
+            if iid:
+                ours.setdefault(iid, st.run_id)
         self.rows: list[dict[str, object]] = []
         for r in (burning if isinstance(burning, list) else []):
             if not isinstance(r, dict):

@@ -527,3 +527,33 @@ def test_silent_supervisor_is_not_taken_for_an_absent_one(
     assert len([c for c in fake_gpurunner.called("htr", "supervise")
                 if "--detach" in c]) == 1, "другої машини не взято"
     assert ST.load(first.run_id) is not None
+
+
+def test_our_detached_machine_is_not_reported_as_a_stranger(
+        space: Path, monkeypatch, fake_gpurunner) -> None:
+    """🔴 Машини відчепленого заходу в нашому записі немає — її тримає
+    наглядач. Доти вона звітувала як «не з заходів цього простору», тобто
+    власний живий захід виглядав чужою забутою орендою — найгірша з можливих
+    неправд у команді, яку читають саме щоб вирішити, що гасити."""
+    from typer.testing import CliRunner
+
+    from nyshporka.cloud import cli as C
+    from nyshporka.cloud import registry as REG
+
+    case, backend = _wire(space, monkeypatch)
+    backend.id = "vast"
+    monkeypatch.setattr(REG, "load", lambda: REG.Registry(backends={"vast": backend}))
+    res = _go(case)
+    st = ST.load(res.run_id)
+    assert st is not None
+    fake_gpurunner.set(estimate=ESTIMATE,
+                       state={"session": st.supervisor, "phase": "running",
+                              "box": {"instance_id": "777"}})
+    backend.status_data["burning"] = [{"instance_id": "777", "dph_total": 0.16,
+                                       "label": "htr_case", "gpu_name": "V100",
+                                       "status": "running"}]
+
+    got = CliRunner().invoke(C.app, ["rent", "status"])
+    assert "НЕ з заходів цього простору" not in got.output, got.output
+    assert res.run_id in got.output, "машина названа своїм заходом"
+    assert got.exit_code == 0, "своя машина — не привід для тривоги"
