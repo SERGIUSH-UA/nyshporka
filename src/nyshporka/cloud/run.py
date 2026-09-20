@@ -177,6 +177,11 @@ class EngineState:
     ready: bool
     python: str = ""
     detail: str = ""
+    #: Чи БАЧИТЬ рушій карту. `None` — середовища немає, питати нічого.
+    #: 🔴 Окремо від `ready`: колесо torch, зібране не під ту CUDA, ставиться
+    #: без жодної помилки, імпортується так само — і читає на процесорі, тобто
+    #: вдесятеро повільніше за ту саму оплачувану годину.
+    cuda: bool | None = None
 
 
 def engine_state(session: Session, remote_dir: str) -> EngineState:
@@ -188,7 +193,9 @@ def engine_state(session: Session, remote_dir: str) -> EngineState:
         f"{shlex.quote(py)} -c {shlex.quote(code)} 2>&1 || true",
         timeout=300.0)
     if "OK" in got.out:
-        return EngineState(ready=True, python=py, detail=got.out.strip())
+        said = got.out.strip().split()
+        return EngineState(ready=True, python=py, detail=got.out.strip(),
+                           cuda=(said[-1].lower() == "true") if said else None)
     return EngineState(ready=False, python=py,
                        detail=got.out.strip()[:300] or "середовища немає")
 
@@ -705,6 +712,18 @@ def start(plan: CloudPlan, *, workers: int = 0, seg_height: int = 0,
                 f"на машині немає середовища рушіїв ({engine.detail}). "
                 f"Зберіть його один раз: `nysh cloud prepare {plan.target or box.id}` "
                 f"— далі воно перевикористовується.")
+        if probe.has_gpu and engine.cuda is False:
+            # 🔴 Машина з картою, а рушій її не бачить — це збій, а не «готово».
+            # Читання піде на процесорі: та сама оплачувана година дасть
+            # удесятеро менше сторінок, і побачити це можна буде лише за
+            # темпом, коли гроші вже витрачено.
+            raise RunError(
+                f"рушій на машині не бачить карти ({engine.detail}). Читання "
+                f"пішло б на процесорі — на орендованій карті це найдорожчий "
+                f"спосіб нічого не зробити. Найчастіша причина: колесо torch "
+                f"не під ту CUDA; зберіть середовище наново "
+                f"(`nysh cloud prepare {plan.target or box.id}`) або візьміть "
+                f"іншу машину.")
 
         st.enter("uploading", why="веземо ваги й кадри")
         session.mkdirs(remote_dir)

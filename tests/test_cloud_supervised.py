@@ -412,3 +412,22 @@ def test_thin_path_stays_available(space: Path, monkeypatch, fake_gpurunner) -> 
     assert res.verdict != "detached"
     assert not fake_gpurunner.calls, "тонкий шлях наглядача не турбує"
     assert backend.estimates == 1, "кошторис для нього питається в бекенда"
+
+
+def test_prepare_refuses_to_rent_a_machine(space: Path, monkeypatch) -> None:
+    """🔴 `acquire` на орендному бекенді — це ОРЕНДА, а гасити її в `prepare`
+    нічим: команда закінчується, а лічильник іде."""
+    from typer.testing import CliRunner
+
+    from nyshporka.cloud import cli as C
+    from nyshporka.cloud import registry as REG
+
+    backend = Rent(space / "box", FakeSession(space / "box"))
+    backend.id = "vast"
+    monkeypatch.setattr(REG, "load", lambda: REG.Registry(backends={"vast": backend}))
+    monkeypatch.setattr(RUN, "_backend", lambda name: backend)
+
+    got = CliRunner().invoke(C.app, ["prepare", "будь-яка", "-b", "vast"])
+    assert got.exit_code == 2, got.output
+    assert backend.acquired == 0, "машини навіть не торкнулись"
+    assert "cloud go" in got.output, "людині сказано, як зробити те, що вона хотіла"

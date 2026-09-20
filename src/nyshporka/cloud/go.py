@@ -504,9 +504,12 @@ def _go(res: GoResult, case: str, say: EventFn, owner: contextlib.ExitStack, *,
     pack = ref.frames_dir
     if rep.heavy:
         dst = F.shrink_dir_for(ref.frames_dir)
-        say("shrink", f"кадри завеликі (медіана {rep.median_mb:.1f} МБ) — "
-                      f"стискаємо до висоти {F.TARGET_HEIGHT} у {dst}; "
-                      f"оригінали не чіпаються")
+        why = (f"кадри завеликі (медіана {rep.median_mb:.1f} МБ)"
+               if rep.median_mb > F.SHRINK_MEDIAN_MB else
+               f"{len(rep.alien)} кадрів у форматі, якого читач на машині не "
+               f"бере (напр. {rep.alien[0]})")
+        say("shrink", f"{why} — переводимо в сірий JPEG висотою "
+                      f"{F.TARGET_HEIGHT} у {dst}; оригінали не чіпаються")
         got = F.shrink(ref.frames_dir, dst, rotate_landscape=rotate_landscape,
                        on_line=lambda s: say("shrink", s))
         if got.landscape and not rotate_landscape:

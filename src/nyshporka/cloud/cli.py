@@ -393,11 +393,24 @@ def cmd_prepare(
     Довга команда: ставиться рушій сегментації, torch і колесо під карту.
     Повторний виклик безпечний — наявне не чіпається.
     """
-    from nyshporka.cloud.base import Need
+    from nyshporka.cloud.base import Need, bills
     from nyshporka.cloud.probe import measure
     from nyshporka.cloud.run import _backend, prepare
 
     b = _backend(backend)
+    if bills(b):
+        # 🔴 `acquire` на орендному бекенді — це ОРЕНДА, і гасити її тут нічим:
+        # команда закінчується, а лічильник іде. Але й сенсу в ній немає:
+        # орендована машина щоразу нова, тож готувати її наперед означає
+        # платити за середовище, яке зникне разом із нею. Усередині заходу це
+        # робиться саме собою.
+        console.print(
+            f"[err]«{backend}» орендує машини, а `prepare` готує ТУ, що вже є. "
+            f"Орендована машина щоразу нова: середовище на ній ставиться "
+            f"всередині заходу, і платити за нього окремо нема за що.[/err]")
+        console.print("[muted]прочитати справу: nysh cloud go <тека> "
+                      f"--backend {backend}[/muted]")
+        raise typer.Exit(code=2)
     box = b.acquire(Need(pages=0), target=host)
     session = b.connect(box)
     try:

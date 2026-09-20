@@ -202,3 +202,26 @@ def test_density_is_unknown_until_there_is_enough_to_measure(tmp_path: Path) -> 
     assert F.lines_per_page(tmp_path) is None
     (tmp_path / "9999.txt").write_text("рядок\n\n" * 40, encoding="utf-8")
     assert F.lines_per_page(tmp_path) == 40.0
+
+
+# ── формат, якого машина не бере ─────────────────────────────────────────────
+def test_tiff_is_named_and_converted_before_the_road(tmp_path: Path) -> None:
+    """🔴 TIFF локальне читання розуміє, а хмарний захід пакує лише JPEG і PNG.
+
+    Такий кадр мовчки випав би зі знаменника — половина справи виглядала б
+    прочитаною повністю. Тому він і названий у звірці, і переведений у JPEG
+    разом зі стисканням, хоч би яка була медіана розміру.
+    """
+    case = tmp_path / "sprava"
+    case.mkdir()
+    Image.new("L", (40, 60), 200).save(case / "0001.jpg", "JPEG")
+    Image.new("L", (40, 60), 200).save(case / "0002.tif", "TIFF")
+
+    rep = F.check_frames(case)
+    assert rep.alien == ["0002.tif"], "кадр чужого формату мусить бути названий"
+    assert rep.heavy, "дрібний TIFF однаково треба перевести, а не везти як є"
+
+    out = F.shrink(case, tmp_path / "ready", target_h=50)
+    assert out.done == 2
+    assert sorted(p.name for p in (tmp_path / "ready").iterdir()) == \
+        ["0001.jpg", "0002.jpg"], "на машину їде лише те, що вона читає"

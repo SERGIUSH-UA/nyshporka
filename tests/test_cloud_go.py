@@ -42,10 +42,13 @@ class Box1(FakeSession):
     """
 
     def __init__(self, root: Path, reads: list[list[str]], *, engine: bool = True,
-                 meta_pages: bool = False) -> None:
+                 meta_pages: bool = False, cuda: bool = True) -> None:
         super().__init__(root)
         self.reads = list(reads)
         self.engine = engine
+        #: Чи БАЧИТЬ рушій карту. Окремо від `engine`: колесо torch не під ту
+        #: CUDA ставиться й імпортується без помилок, просто читає процесором.
+        self.cuda = cuda
         self.meta_pages = meta_pages
         self.cmds: list[str] = []
         self.prepared = False
@@ -54,7 +57,8 @@ class Box1(FakeSession):
         self.cmds.append(cmd)
         if "import kraken" in cmd:
             ok = self.engine or self.prepared
-            return Completed(rc=0, out="OK 2.4.0 True" if ok else "No module named kraken")
+            return Completed(rc=0, out=f"OK 2.4.0 {self.cuda}" if ok
+                             else "No module named kraken")
         if " venv " in cmd:
             self.prepared = True
         if cmd.startswith("rm -f") and RUN.DONE_FLAG in cmd:
@@ -1024,3 +1028,19 @@ def test_doctor_reports_rent_without_touching_the_network(monkeypatch) -> None:
                         lambda: ([], [("vast", "ImportError: немає vastai")]))
     broken = D._rent()
     assert broken.level == "warn" and "зламані 1" in broken.detail
+
+
+def test_engine_that_cannot_see_the_card_is_a_failure(space: Path, monkeypatch) -> None:
+    """🔴 Машина з картою, а рушій її не бачить — збій, а не «готово».
+
+    Колесо torch не під ту CUDA ставиться без помилки й імпортується так само,
+    а читає процесором: та сама оплачувана година дає вдесятеро менше сторінок,
+    і помітно це лише за темпом, коли гроші вже витрачено.
+    """
+    case, backend, _ = _wire(space, monkeypatch, Box1(space / "box", [NAMES], cuda=False))
+
+    res = _go(case)
+
+    assert res.verdict == "failed"
+    assert "не бачить карти" in res.why
+    assert res.released is True, "машину погашено — платити за неї нема за що"

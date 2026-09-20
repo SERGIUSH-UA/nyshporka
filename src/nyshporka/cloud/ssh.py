@@ -628,6 +628,16 @@ def _load_key(path: Path) -> Any:
     for cls in (paramiko.Ed25519Key, paramiko.RSAKey, paramiko.ECDSAKey):
         try:
             return cls.from_private_key_file(str(path))
+        except paramiko.PasswordRequiredException:
+            # 🔴 Окремо від «не той тип»: ключ ЧИТАЄТЬСЯ, він просто
+            # зашифрований парольною фразою. Сказати тут «не читається жодним
+            # відомим типом» означає відправити людину шукати формат ключа
+            # замість пароля — а захід іде без людини, і спитати фразу нікому.
+            raise AuthError(
+                f"ключ {path} захищений парольною фразою, а захід іде без "
+                f"людини — спитати її нікому. Дайте ключ без фрази (`ssh-keygen "
+                f"-p -f {path}` знімає її) або вкажіть інший: `nysh cloud hosts "
+                f"add <ім'я> <user@host> --key <шлях>`.") from None
         except Exception as exc:      # не той тип — пробуємо наступний
             last = exc
     raise AuthError(f"ключ {path} не читається жодним відомим типом "

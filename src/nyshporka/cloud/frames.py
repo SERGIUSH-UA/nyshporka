@@ -38,6 +38,12 @@ STILL_WRITING_SEC = 300
 #: Медіана кадру понад стільки МБ — стискати перед дорогою.
 SHRINK_MEDIAN_MB = 3.0
 
+#: Формати, які читач на орендованій машині бере з архіву кадрів. 🔴 Вужче за
+#: те, що вміє локальне читання: TIFF у цей перелік не входить, і кадр у ньому
+#: мовчки випав би зі знаменника — тобто половина справи виглядала б
+#: прочитаною повністю. Такі кадри перетворюються на JPEG при стисканні.
+CLOUD_READY_EXT = {".jpg", ".jpeg", ".png"}
+
 #: Робоча висота кадру. А/Б формату робився на парафіяльній книзі: сірий JPEG
 #: висотою 3100 проти RGB PNG 4800×6400 дав символів 1.02×, рядків від восьми
 #: символів 1.00×, і знахідка шуканого прізвища збереглась. Тобто зменшення —
@@ -67,16 +73,22 @@ class FramesReport:
     #: Скільки хвилин тому записано найсвіжіший кадр, якщо менше п'яти, —
     #: інакше `None`.
     still_writing_min: float | None = None
+    #: Кадри у форматі, якого читач на машині не бере (`.tif` і подібні).
+    #: 🔴 Не дрібниця: локальне читання TIFF розуміє, а хмарний захід пакує
+    #: лише JPEG і PNG — тож такий кадр мовчки випадає зі знаменника, і
+    #: половина справи виглядає прочитаною повністю.
+    alien: list[str] = field(default_factory=list)
 
     @property
     def heavy(self) -> bool:
-        return self.median_mb > SHRINK_MEDIAN_MB
+        return self.median_mb > SHRINK_MEDIAN_MB or bool(self.alien)
 
     def as_dict(self) -> dict[str, Any]:
         return {"n": self.n, "total_mb": self.total_mb,
                 "median_mb": self.median_mb, "bad": self.bad[:50],
                 "bad_count": len(self.bad),
                 "still_writing_min": self.still_writing_min,
+                "alien": self.alien[:50], "alien_count": len(self.alien),
                 "heavy": self.heavy}
 
 
@@ -163,6 +175,7 @@ def check_frames(case_dir: Path | str, *, now: float | None = None) -> FramesRep
                 im.verify()
         except Exception as exc:    # будь-яка відмова розбору = битий кадр
             bad.append(f"{f.name}: не розбирається ({type(exc).__name__})")
+    alien = [f.name for f in frames if f.suffix.lower() not in CLOUD_READY_EXT]
     total = sum(sizes) / 1e6
     median = statistics.median(sizes) / 1e6 if sizes else 0.0
     age = ((now if now is not None else time.time()) - newest) if newest else None
@@ -170,7 +183,7 @@ def check_frames(case_dir: Path | str, *, now: float | None = None) -> FramesRep
                if age is not None and age < STILL_WRITING_SEC else None)
     return FramesReport(n=len(frames), total_mb=round(total, 1),
                         median_mb=round(median, 2), bad=bad,
-                        still_writing_min=writing)
+                        still_writing_min=writing, alien=alien)
 
 
 # ── стискання ────────────────────────────────────────────────────────────────
