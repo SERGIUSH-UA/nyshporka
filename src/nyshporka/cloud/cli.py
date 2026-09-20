@@ -625,6 +625,60 @@ def _num(value: object) -> float | None:
     return as_number(value)
 
 
+def _detached_only(st: RunState, what: str) -> None:
+    """Відмовити командам, які в відчепленому заході нічого не означають.
+
+    🔴 Не косметика. `verify` без наглядача записав би вирок `incomplete` живому
+    заходу — а вирок ставить фазу `failed`, після чого ні перелік живих, ні
+    пошук чужого заходу його вже не бачать, і наступний `go` спокійно бере
+    ДРУГУ машину під ту саму справу. `fetch` так само: забирати нема звідки,
+    бо машини в нашому записі немає.
+    """
+    if not st.supervisor:
+        return
+    console.print(
+        f"[err]{escape(what)} тут нічого не дасть: захід веде наглядач "
+        f"{st.supervisor}, і машина в нього, а не в нас. Забір, звірку й "
+        f"гасіння він робить сам.[/err]")
+    console.print(f"[muted]як справи: nysh cloud state {st.run_id} · "
+                  f"згорнути: nysh cloud stop {st.run_id}[/muted]")
+    raise typer.Exit(code=2)
+
+
+def _stop_detached(st: RunState, *, force: bool) -> None:
+    """Згорнути відчеплений захід — і сказати правду про машину.
+
+    🔴 Типово ми просимо зупинити РОБОТУ, а не вбиваємо наглядача: побачивши,
+    що робота скінчилась, він забирає прочитане, звіряє повноту й гасить
+    оренду. Убити його — означає лишити машину горіти без нікого, хто її
+    погасить: гасити її нам нічим, бо в нашому записі її немає.
+    """
+    from nyshporka.cloud import supervised as SUP
+
+    res = SUP.stop(st, force=force)
+    if res.ok and not res.killed:
+        console.print(f"✅ {st.run_id}: наглядач {st.supervisor} згортає захід "
+                      f"— забере прочитане, звірить і погасить машину сам")
+        console.print(f"[muted]стежити: nysh cloud state {st.run_id}[/muted]")
+    elif res.ok:
+        console.print(f"[warn]⚠ наглядача {st.supervisor} вбито (--force). "
+                      f"МАШИНУ НІКОМУ ГАСИТИ: забору й звірки не було, "
+                      f"прочитане лишилось на ній[/warn]")
+    else:
+        console.print(f"[err]наглядача {st.supervisor} спинити не вдалось[/err]")
+    if res.said:
+        console.print(f"[muted]{escape(res.said)}[/muted]", highlight=False)
+    if res.killed or not res.ok:
+        # 🔴 Єдине, що стоїть між живою машиною й рахунком, — людина. Мовчання
+        # тут коштує стільки, скільки машина горітиме до свого таймера.
+        machine = f" (інстанс {res.machine})" if res.machine else ""
+        console.print(f"[err]🔴 машина могла лишитись живою{escape(machine)}. "
+                      f"Перевірте ПРОСТО ЗАРАЗ: `nysh cloud rent status` — він "
+                      f"питає провайдера напряму й бачить навіть те, про що ми "
+                      f"не знаємо; погасити можна там-таки в кабінеті[/err]")
+    raise typer.Exit(code=0 if res.ok else 2)
+
+
 @app.command("fetch")
 def cmd_fetch(run_id: str = typer.Argument(
         "", help="ім'я заходу; порожньо — незавершений")) -> None:
@@ -632,6 +686,7 @@ def cmd_fetch(run_id: str = typer.Argument(
     from nyshporka.cloud import run as RUN
 
     st = _need_run(run_id)
+    _detached_only(st, "забір")
     try:
         out = RUN.fetch(st, on_line=_say)
     except CloudError as exc:
@@ -654,6 +709,7 @@ def cmd_verify(
     from nyshporka.cloud import verify as V
 
     st = _need_run(run_id)
+    _detached_only(st, "звірка")
     st.enter("verifying")
     got = V.verify(st.out_dir, case_dir=st.case_dir,
                    expected_hint=st.frames_total)
@@ -699,25 +755,8 @@ def cmd_stop(
 
     st = _need_run(run_id)
     if st.supervisor:
-        # 🔴 Машину відчепленого заходу гасить наглядач — у нас її навіть немає
-        # чим назвати. Наша справа тут — переказати прохання й чесно сказати,
-        # що відповіли.
-        from nyshporka.cloud import supervised as SUP
-
-        ok, said = SUP.stop(st)
-        console.print((f"✅ {st.run_id}: наглядач {st.supervisor} спиняє захід"
-                       if ok else
-                       f"[err]наглядача {st.supervisor} спинити не вдалось[/err]")
-                      + (f" — {escape(said)}" if said else ""))
-        if not ok:
-            # 🔴 Наглядач міг померти РАЗОМ із живою машиною, і тоді єдине, що
-            # стоїть між нею та рахунком, — людина. Мовчазна відмова тут
-            # коштувала б стільки, скільки машина горітиме до свого таймера.
-            console.print("[warn]⚠ машина могла лишитись живою. Перевірте "
-                          "просто зараз: `nysh cloud rent status` — він питає "
-                          "провайдера напряму й бачить навіть те, про що ми не "
-                          "знаємо; погасити можна там-таки в кабінеті[/warn]")
-        raise typer.Exit(code=0 if ok else 2)
+        _stop_detached(st, force=force)
+        return
     try:
         RUN.release(st, force=force, on_line=_say)
     except CloudError as exc:

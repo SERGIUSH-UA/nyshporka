@@ -439,6 +439,15 @@ def _go(res: GoResult, case: str, say: EventFn, owner: contextlib.ExitStack, *,
         if found is not None:
             st, data = found
             res.run_id, res.out_dir = st.run_id, st.out_dir
+            if not data:
+                raise GoRefused(
+                    f"цю справу веде наглядач {st.supervisor}, але він мовчить "
+                    f"— стану немає. Мовчання не означає, що заходу немає: "
+                    f"машина може працювати, і друга оренда коштувала б стільки "
+                    f"ж. Погляньте самі (`nysh cloud state {st.run_id}`) і "
+                    f"перевірте, чи щось тарифікується (`nysh cloud rent "
+                    f"status`); якщо захід справді мертвий — згорніть його "
+                    f"(`nysh cloud stop {st.run_id} --force`) і повторіть.")
             raise GoRefused(
                 f"цю справу вже читає відчеплений наглядач {st.supervisor} "
                 f"(фаза {data.get('phase') or '?'}): {data.get('why') or ''}. "
@@ -541,9 +550,19 @@ def _go(res: GoResult, case: str, say: EventFn, owner: contextlib.ExitStack, *,
     for w in plan.warnings:
         res.notes.append(w)
         say("warning", f"⚠ {w}")
-    if left is not None:
+    if left is not None and thin:
         say("plan", f"уже прочитано {before.got} з {plan.frames} — на машину "
                     f"поїде готове, читатиметься решта ({left})")
+    elif left is not None:
+        # 🔴 Кажемо правду, а не те, що звучить краще: готове на машину везе
+        # лише тонкий шлях (`RUN.start(seed=…)`). Відчеплений захід відновиться
+        # з точок відновлення попереднього ЗАХОДУ, якщо вони є, — а прочитане
+        # локально їх не лишає, і тоді ці сторінки читатимуться (й оплатяться)
+        # наново. Обіцяти тут економію означало б брехати про гроші.
+        say("plan", f"уже прочитано {before.got} з {plan.frames} локально, але "
+                    f"на машину готове НЕ їде: відчеплений захід відновлюється "
+                    f"лише зі своїх точок. Дочитати вдома — `nysh read "
+                    f"{ref.frames_dir}`; везти все — просто далі")
 
     # 4а. наглядацький шлях: далі захід веде відчеплений наглядач, а ми виходимо
     if not thin:

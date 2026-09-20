@@ -74,8 +74,8 @@ if args[:2] == ["htr", "state"]:
     print(json.dumps(state, ensure_ascii=False, indent=1))
     sys.exit(0)
 
-if args[:2] == ["htr", "stop"]:
-    print("зупиняю")
+if args[:2] in (["htr", "stop"], ["htr", "quiesce"]):
+    print(cfg.get("stop_say") or "зупиняю")
     sys.exit(cfg.get("stop_rc", 0))
 
 sys.exit(9)
@@ -372,9 +372,9 @@ def test_state_and_stop_ask_the_supervisor(
     data = SUP.state_of(st)
     assert data["phase"] == "running", "багаторядковий JSON наглядача теж читається"
 
-    ok, said = SUP.stop(st)
-    assert ok and "зупиняю" in said
-    assert fake_gpurunner.called("htr", "stop"), "спиняє саме наглядач"
+    got = SUP.stop(st)
+    assert got.ok and "зупиняю" in got.said
+    assert fake_gpurunner.called("htr", "quiesce"), "спиняє саме наглядач"
 
 
 def test_cli_state_shows_what_the_supervisor_says(
@@ -431,3 +431,93 @@ def test_prepare_refuses_to_rent_a_machine(space: Path, monkeypatch) -> None:
     assert got.exit_code == 2, got.output
     assert backend.acquired == 0, "машини навіть не торкнулись"
     assert "cloud go" in got.output, "людині сказано, як зробити те, що вона хотіла"
+
+
+# ── згортання відчепленого заходу ────────────────────────────────────────────
+def test_stop_asks_the_supervisor_to_finish_not_to_die(
+        space: Path, monkeypatch, fake_gpurunner) -> None:
+    """🔴 Убити наглядача — означає лишити машину горіти без нікого, хто її
+    погасить: гасити її нам нічим, бо в нашому записі її немає. Тому типово ми
+    спиняємо РОБОТУ, а захід він доводить до кінця сам."""
+    case, _ = _wire(space, monkeypatch)
+    res = _go(case)
+    st = ST.load(res.run_id)
+    assert st is not None
+    fake_gpurunner.set(estimate=ESTIMATE,
+                       state={"session": st.supervisor, "phase": "running",
+                              "box": {"instance_id": "777"}})
+
+    got = SUP.stop(st)
+    assert got.ok and not got.killed
+    assert fake_gpurunner.called("htr", "quiesce"), \
+        "просимо зупинити роботу, а не вбити наглядача"
+    assert not fake_gpurunner.called("htr", "stop")
+    assert got.machine == "777", "машину треба назвати людині"
+
+    forced = SUP.stop(st, force=True)
+    assert forced.ok and forced.killed
+    assert fake_gpurunner.called("htr", "stop")
+
+
+def test_stop_does_not_swallow_the_warning_about_a_live_machine(
+        space: Path, monkeypatch, fake_gpurunner) -> None:
+    """🔴 Попередження наглядача багаторядкове, і останнім рядком у ньому йде
+    порада про чекпоінти — зрізання хвоста викидало саме те речення, заради
+    якого команду й читають."""
+    from typer.testing import CliRunner
+
+    from nyshporka.cloud import cli as C
+
+    case, _ = _wire(space, monkeypatch)
+    res = _go(case)
+    st = ST.load(res.run_id)
+    assert st is not None
+    fake_gpurunner.set(estimate=ESTIMATE,
+                       state={"session": st.supervisor, "phase": "running",
+                              "box": {"instance_id": "777"}},
+                       stop_say="⚠ бокс machine 42 міг лишитись живим\n"
+                                "  gpurunner htr fetch-ckpt --plan <план>")
+
+    got = CliRunner().invoke(C.app, ["stop", res.run_id, "--force"])
+    assert "міг лишитись живим" in got.output, "попередження мусить дійти цілим"
+    assert "rent status" in got.output, "людині сказано, чим перевірити"
+    assert "777" in got.output, "і який саме інстанс шукати"
+
+
+def test_fetch_and_verify_refuse_on_a_detached_run(
+        space: Path, monkeypatch, fake_gpurunner) -> None:
+    """🔴 `verify` поверх живого відчепленого заходу ставив йому вирок
+    `incomplete` → фаза `failed` → захід зникав з усіх переліків, і наступний
+    `go` брав ДРУГУ машину під ту саму справу."""
+    from typer.testing import CliRunner
+
+    from nyshporka.cloud import cli as C
+
+    case, _ = _wire(space, monkeypatch)
+    res = _go(case)
+    runner = CliRunner()
+
+    for cmd in (["verify", res.run_id], ["fetch", res.run_id]):
+        got = runner.invoke(C.app, cmd)
+        assert got.exit_code == 2, got.output
+        assert "наглядач" in got.output
+
+    st = ST.load(res.run_id)
+    assert st is not None and st.phase == "running", \
+        "захід лишається живим — інакше наступний go візьме другу машину"
+
+
+def test_silent_supervisor_is_not_taken_for_an_absent_one(
+        space: Path, monkeypatch, fake_gpurunner) -> None:
+    """🔴 Мовчання не означає «заходу немає»: наглядач міг саме перезаписувати
+    стан, а машина працює. Друга оренда коштує рівно стільки ж, що й перша."""
+    case, _ = _wire(space, monkeypatch)
+    first = _go(case)
+    fake_gpurunner.set(estimate=ESTIMATE)      # `state` немає → наглядач мовчить
+
+    second = _go(case, rerun=True)
+    assert second.verdict == "refused"
+    assert "мовчить" in second.why and "rent status" in second.why
+    assert len([c for c in fake_gpurunner.called("htr", "supervise")
+                if "--detach" in c]) == 1, "другої машини не взято"
+    assert ST.load(first.run_id) is not None

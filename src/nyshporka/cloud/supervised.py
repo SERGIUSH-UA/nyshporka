@@ -36,6 +36,7 @@ import subprocess
 import sys
 import tarfile
 import time
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -516,7 +517,14 @@ def find_live(run_ids: Iterable[str]) -> tuple[ST.RunState, dict[str, Any]] | No
         if st is None or not st.supervisor or st.phase in ("done", "failed"):
             continue
         data = state_of(st)
-        if data and not finished(data):
+        if not data:
+            # 🔴 Мовчання — не «заходу немає». Наглядач міг саме перезаписувати
+            # свій стан, його програма могла не знайтись, вивід міг зіпсуватись
+            # — а машина при цьому працює. Розв'язувати цю неоднозначність на
+            # користь оренди означає платити за ту саму справу двічі, тож
+            # вважаємо захід живим і віддаємо рішення людині.
+            return st, {}
+        if not finished(data):
             return st, data
         if data:
             # Наглядач завершився, а наш запис лишився відкритим — закриваємо
@@ -556,7 +564,11 @@ def absorb(st: ST.RunState, data: dict[str, Any]) -> ST.RunState:
         st.rent_ended = st.rent_ended or time.time()
         st.box = {**st.box, "price_usd_h": 0.0, "spent_usd": spent}
     st.why = str(data.get("why") or verdict or "наглядач завершився")
-    st.released = True          # машину гасить наглядач, і він доповів, що все
+    # 🔴 «Погашено» — лише коли наглядач сам так каже. Вердикт `orphaned` і
+    # прохання до людини означають протилежне: машина могла лишитись живою, і
+    # саме тоді запис мусить світитись у переліку, а не виглядати закритим.
+    st.released = not (verdict == "orphaned"
+                       or bool(data.get("human_action_required")))
     st.verdict = verdict if verdict in ST.VERDICTS else (
         "ok" if verdict == "ok" else "failed")
     st.phase = "done" if st.verdict in ("ok", "cancelled") else "failed"
@@ -577,16 +589,48 @@ def state_of(st: ST.RunState) -> dict[str, Any]:
     return _json_out(done.stdout or "")
 
 
-def stop(st: ST.RunState) -> tuple[bool, str]:
-    """Спинити відчеплений захід руками наглядача: (вдалось, що сказав)."""
+@dataclass(frozen=True)
+class StopResult:
+    """Чим скінчилась спроба спинити відчеплений захід."""
+
+    ok: bool
+    #: Що сказав наглядач — ЦІЛКОМ, не останній рядок.
+    said: str
+    #: Чи вбито самого наглядача (тоді машину нікому гасити).
+    killed: bool = False
+    #: Машина, про яку знав наглядач, — щоб людині було що шукати в кабінеті.
+    machine: str = ""
+
+
+def stop(st: ST.RunState, *, force: bool = False) -> StopResult:
+    """Спинити відчеплений захід.
+
+    🔴 За замовчуванням — ГРАЦІЙНО: ми просимо зупинити РОБОТУ на машині, а не
+    вбиваємо наглядача. Побачивши, що робота скінчилась, він доводить захід до
+    кінця сам: забирає прочитане, звіряє повноту й гасить оренду. Убити його —
+    означає лишити машину живою без нікого, хто її погасить, бо гасити її нам
+    нічим: у нашому записі її немає й бути не може.
+
+    `force` лишає саме цей — дорогий — шлях, і викликач мусить сказати про
+    наслідки людині. Порядок «забрати → звірити → погасити» тут не обходиться,
+    а делегується тому, хто його й виконує.
+    """
     if not st.supervisor:
-        return False, "це не відчеплений захід"
+        return StopResult(False, "це не відчеплений захід")
     try:
         gr = gpurunner_cmd()
     except SupervisorMissing as exc:
-        return False, str(exc)
-    done = _run([*gr, "htr", "stop", "--session", st.supervisor],
+        return StopResult(False, str(exc))
+    box = state_of(st).get("box")
+    machine = str((box or {}).get("instance_id") or "") if isinstance(box, dict) else ""
+    verb = "stop" if force else "quiesce"
+    done = _run([*gr, "htr", verb, "--session", st.supervisor],
                 env=_env(st.supervisor, gr[0] if len(gr) == 1 else sys.executable),
                 capture=True)
-    tail = (done.stdout or done.stderr or "").strip().splitlines()[-1:]
-    return not done.returncode, " ".join(tail)
+    # 🔴 Увесь вивід, а не останній рядок: попередження «бокс міг лишитись
+    # живим» у наглядача багаторядкове, і останнім рядком у ньому йде порада
+    # про забір чекпоінтів — тобто зрізання хвоста викидало саме те єдине
+    # речення, заради якого людина цю команду й читає.
+    said = (done.stdout or "").strip() or (done.stderr or "").strip()
+    return StopResult(not done.returncode, said[-1500:], killed=force,
+                      machine=machine)
