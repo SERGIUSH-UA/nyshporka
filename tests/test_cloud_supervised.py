@@ -74,7 +74,7 @@ if args[:2] == ["htr", "state"]:
     print(json.dumps(state, ensure_ascii=False, indent=1))
     sys.exit(0)
 
-if args[:2] in (["htr", "stop"], ["htr", "quiesce"]):
+if args[:2] in (["htr", "stop"], ["htr", "wrap-up"]):
     print(cfg.get("stop_say") or "зупиняю")
     sys.exit(cfg.get("stop_rc", 0))
 
@@ -380,7 +380,7 @@ def test_state_and_stop_ask_the_supervisor(
 
     got = SUP.stop(st)
     assert got.ok and "зупиняю" in got.said
-    assert fake_gpurunner.called("htr", "quiesce"), "спиняє саме наглядач"
+    assert fake_gpurunner.called("htr", "wrap-up"), "згортає саме наглядач"
 
 
 def test_cli_state_shows_what_the_supervisor_says(
@@ -455,8 +455,8 @@ def test_stop_asks_the_supervisor_to_finish_not_to_die(
 
     got = SUP.stop(st)
     assert got.ok and not got.killed
-    assert fake_gpurunner.called("htr", "quiesce"), \
-        "просимо зупинити роботу, а не вбити наглядача"
+    assert fake_gpurunner.called("htr", "wrap-up"), \
+        "просимо ЗГОРНУТИ захід, а не вбити наглядача"
     assert not fake_gpurunner.called("htr", "stop")
     assert got.machine == "777", "машину треба назвати людині"
 
