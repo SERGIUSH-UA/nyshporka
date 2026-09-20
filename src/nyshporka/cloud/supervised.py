@@ -324,7 +324,8 @@ def launch(plan: CloudPlan, res: GoResult, say: Callable[..., None], *,
            pack_dir: Path, source_dir: Path, total_mb: float,
            budget: float | None = None, max_hours: float | None = None,
            confirm: bool = False, dry_run: bool = False,
-           transport: str = "auto", params: Sequence[str] = ()) -> None:
+           transport: str = "auto", max_usd_per_1000: float = 0.0,
+           params: Sequence[str] = ()) -> None:
     """Підготувати захід і віддати його відчепленому наглядачеві.
 
     `plan` — наш план (справа, письмо, бойові ваги, шифра, тека виходу);
@@ -379,6 +380,13 @@ def launch(plan: CloudPlan, res: GoResult, say: Callable[..., None], *,
         cmd += ["-p", item]
     if plan.max_price_usd_h:
         cmd += ["--max-price", str(plan.max_price_usd_h)]
+    if max_usd_per_1000:
+        # 🔴 Головний поріг вибору машини. Дефолт наглядача калібрований на
+        # МЕТРИКАХ; щільний аркуш (сповідка, клірова) читається вдвічі довше,
+        # і на ньому той поріг або відсікає весь ринок, або спиняє захід на
+        # ціні посеред роботи — тобто виглядає як «машин немає» там, де
+        # насправді замалий дозвіл.
+        cmd += ["--max-usd-per-1000", str(max_usd_per_1000)]
     if plan.lines_per_page:
         cmd += ["-p", f"lines_per_page={plan.lines_per_page}"]
     say("plan", "складаємо план і веземо кадри в сховище наглядача")

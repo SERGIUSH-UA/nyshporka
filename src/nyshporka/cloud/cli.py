@@ -805,6 +805,12 @@ def cmd_go(
         help="чим везти дані на машину: `auto` — об'єктним сховищем, якщо воно "
              "налаштоване, інакше на саму машину; `box` — завжди на машину "
              "(сховища не потрібно); `store` — лише сховищем"),
+    max_usd_per_1000: float = typer.Option(
+        0.0, "--max-usd-per-1000",
+        help="скільки ви згодні платити за тисячу сторінок, $ (0 = типове "
+             "значення провайдера). Щільний аркуш — сповідний розпис, клірова "
+             "відомість — читається вдвічі довше за метрику, і на типовому "
+             "порозі захід виглядає як «машин немає»: беріть 0.30-0.35"),
     thin: bool = typer.Option(
         False, "--thin",
         help="вести захід самому, не віддаючи наглядачеві: команда триматиме "
@@ -855,6 +861,7 @@ def cmd_go(
                 case_key=case_key, rerun=rerun, allow_partial=allow_partial,
                 rotate_landscape=rotate_landscape, thin=thin,
                 transport={"store": "r2"}.get(transport, transport),
+                max_usd_per_1000=max_usd_per_1000,
                 on_event=on_event,
                 tick_sec=max(1.0, tick))
     if as_json:
