@@ -44,7 +44,13 @@ from nyshporka.cloud import money as M
 from nyshporka.cloud import run as RUN
 from nyshporka.cloud import state as ST
 from nyshporka.cloud import verify as V
-from nyshporka.cloud.base import BoxGone, CloudError, bills
+from nyshporka.cloud.base import (
+    BoxGone,
+    BoxNotReady,
+    ChannelDropped,
+    CloudError,
+    bills,
+)
 
 #: Код виходу на кожен вердикт. Частина публічного інтерфейсу: на нього
 #: дивиться агент, який пустив захід і пішов.
@@ -305,8 +311,12 @@ def go(case: str, *, backend: str = "vast", budget: float | None = None,
         if on_event is not None:
             on_event(kind, text, **data)
 
+    # Замок власника заходу: бере `_go`, щойно знає `run_id`; відпускаємо тут —
+    # після останньої лінії оборони, бо й вона гасить машину.
+    owner = contextlib.ExitStack()
     try:
-        _go(res, case, say, backend=backend, budget=budget, max_hours=max_hours,
+        _go(res, case, say, owner, backend=backend, budget=budget,
+            max_hours=max_hours,
             max_price=max_price, confirm=confirm, dry_run=dry_run,
             with_voices=tuple(with_voices), second_voice=second_voice,
             script=script, case_key=case_key, rerun=rerun,
@@ -322,7 +332,10 @@ def go(case: str, *, backend: str = "vast", budget: float | None = None,
         res.verdict, res.why = "failed", str(exc)
     except Exception as exc:
         res.verdict, res.why = "failed", f"{type(exc).__name__}: {exc}"
-    _last_line_of_defence(res, say)
+    try:
+        _last_line_of_defence(res, say)
+    finally:
+        owner.close()
     return res
 
 
@@ -350,8 +363,8 @@ def _last_line_of_defence(res: GoResult, say: EventFn) -> None:
     res.spent_usd, res.rent_hours = st.spent_usd(), st.rent_hours()
 
 
-def _go(res: GoResult, case: str, say: EventFn, *, backend: str,
-        budget: float | None, max_hours: float | None, max_price: float | None,
+def _go(res: GoResult, case: str, say: EventFn, owner: contextlib.ExitStack, *,
+        backend: str, budget: float | None, max_hours: float | None, max_price: float | None,
         confirm: bool, dry_run: bool, with_voices: tuple[str, ...],
         second_voice: bool, script: str, case_key: str, rerun: bool,
         allow_partial: bool, rotate_landscape: bool, tick_sec: float) -> None:
@@ -390,6 +403,17 @@ def _go(res: GoResult, case: str, say: EventFn, *, backend: str,
 
     # 1а. живий захід ЦІЄЇ роботи — підхопити, а не орендувати вдруге
     plan = build(ref.frames_dir)
+    # 🔴 Власник — ПЕРЕД читанням стану. Без замка другий `go` тієї самої справи
+    # (зокрема `--dry-run` заради кошторису) бачив «машина є, pid немає» —
+    # штатний стан перших 10-20 хвилин підготовки — і гасив бокс, який перший
+    # саме готував. Зайнято — відмова без жодної дії над машиною. Ключ — від
+    # теки оригіналів: котра тека поїде на машину, стане відомо пізніше.
+    try:
+        owner.enter_context(ST.owned(plan.run_id))
+    except ST.OwnerBusy as exc:
+        raise GoRefused(
+            f"{exc} — другий наглядач забрав би його результат і погасив би його "
+            f"машину. Стан: `nysh cloud state {exc.run_id}`.") from None
     live, clash = _find_live(plan, ref.frames_dir)
     if clash is not None:
         raise GoRefused(
@@ -638,7 +662,12 @@ def _wait(st: ST.RunState, say: EventFn, *,
             failures = 0
         except BoxGone:
             raise
-        except CloudError as exc:
+        except (CloudError, OSError, EOFError) as exc:
+            # 🔴 Разом із `CloudError` — сирі винятки транспорту. Вбудований SSH
+            # обгортає їх сам (`ChannelDropped`), але сесію дає й сторонній
+            # бекенд, а ціна промаху тут — здорова робота, вбита аварійним
+            # обробником через хвилинний обрив. Кожне опитування відкриває нове
+            # з'єднання, тож повтор — це й є перепідключення.
             failures += 1
             say("warning", f"⚠ машина не відповідає ({failures} з "
                            f"{POLL_FAILURES_MAX}): {exc}")
@@ -662,8 +691,54 @@ def _wait(st: ST.RunState, say: EventFn, *,
         _sleep(tick_sec)
 
 
+#: Паузи між спробами забору, секунд; остання повторюється, доки не стеля.
+FETCH_RETRY_PAUSES: tuple[float, ...] = (15.0, 30.0, 60.0, 120.0, 300.0)
+
+#: Скільки спроб забору лишається, коли стеля ВЖЕ спрацювала. Нуль означав би,
+#: що зупинений на бюджеті захід втрачає все прочитане через один збій мережі;
+#: без ліку — що стеля перестає бути стелею.
+FETCH_TRIES_PAST_CEILING = 3
+
+
+def _fetch_with_retries(st: ST.RunState, say: EventFn) -> None:
+    """Забрати результат, переживаючи обриви зв'язку.
+
+    🔴 Один збій мережі в мить забору раніше означав погашену машину з
+    неперевезеним текстом: виняток ішов в аварійний обробник, той пробував ще
+    раз тим самим каналом у ту саму секунду — і далі стояло гасіння. Машина при
+    цьому жива, робота на ній скінчена, а результат лежить на її диску; чекати
+    тут коштує центи, а не чекати — всю оплачену справу.
+
+    Повторюються лише відмови ЗВ'ЯЗКУ (`BoxNotReady`, `ChannelDropped`). Решта —
+    «машини більше немає», «нема чого забирати», відмова ключа — від повтору не
+    зміниться. Межа повторів — ті самі дві стелі, що й у роботи: годинник і
+    гроші. Після стелі лишається кілька спроб, і далі гасимо без забору.
+    """
+    attempt = past_ceiling = 0
+    while True:
+        try:
+            RUN.fetch(st, on_line=lambda s: say("fetch", s))
+            return
+        except (BoxNotReady, ChannelDropped) as exc:
+            attempt += 1
+            hit, hit_why = _ceiling_hit(st, _now())
+            if hit:
+                past_ceiling += 1
+                if past_ceiling >= FETCH_TRIES_PAST_CEILING:
+                    say("warning", f"⚠ забрати не вдалось і стеля спрацювала "
+                                   f"({hit_why}) — далі не чекаємо")
+                    raise
+            if not FETCH_RETRY_PAUSES:
+                raise
+            pause = FETCH_RETRY_PAUSES[min(attempt, len(FETCH_RETRY_PAUSES)) - 1]
+            st.note("fetch_retry", f"{type(exc).__name__}: {exc}")
+            say("warning", f"⚠ забір не вдався (спроба {attempt}): {exc} — машина "
+                           f"жива, результат на ній; повтор за {pause:g} с")
+            _sleep(pause)
+
+
 def _fetch_and_verify(st: ST.RunState, res: GoResult, say: EventFn) -> V.Completeness:
-    RUN.fetch(st, on_line=lambda s: say("fetch", s))
+    _fetch_with_retries(st, say)
     st.enter("verifying")
     # Звіряємо з ОРИГІНАЛАМИ, коли їхала стиснута копія: правда про те, що мало
     # бути прочитано, лежить там, а імена кадрів у копії ті самі.

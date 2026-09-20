@@ -19,6 +19,7 @@ from nyshporka.cloud.base import (
     Box,
     BoxGone,
     BoxNotReady,
+    ChannelDropped,
     CloudBackend,
     CloudError,
     Completed,
@@ -29,6 +30,6 @@ from nyshporka.cloud.base import (
 )
 from nyshporka.cloud.registry import Registry, load
 
-__all__ = ["AuthError", "Box", "BoxGone", "BoxNotReady", "CloudBackend",
-           "CloudError", "Completed", "Need", "Registry", "Session", "bills",
-           "load", "supports"]
+__all__ = ["AuthError", "Box", "BoxGone", "BoxNotReady", "ChannelDropped",
+           "CloudBackend", "CloudError", "Completed", "Need", "Registry",
+           "Session", "bills", "load", "supports"]

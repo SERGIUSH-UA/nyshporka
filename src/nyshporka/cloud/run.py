@@ -33,7 +33,13 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from nyshporka.cloud import state as ST
-from nyshporka.cloud.base import Box, BoxNotReady, CloudError, Session
+from nyshporka.cloud.base import (
+    Box,
+    BoxNotReady,
+    ChannelDropped,
+    CloudError,
+    Session,
+)
 from nyshporka.cloud.plan import CloudPlan
 from nyshporka.cloud.probe import measure
 from nyshporka.cloud.registry import load as load_registry
@@ -515,7 +521,15 @@ def adopt(st: ST.RunState) -> tuple[Session, Box] | None:
             f"{st.run_id} --force`") from exc
     except CloudError:
         return None
-    if not session.alive(st.pid):
+    try:
+        alive = session.alive(st.pid)
+    except CloudError as exc:
+        # Те саме правило, що й вище: «не відповіла» — не «роботи немає».
+        session.close()
+        raise RunError(
+            f"машина заходу {st.run_id} не відповіла, чи жива робота ({exc}); "
+            f"повторіть пізніше") from exc
+    if not alive:
         session.close()
         return None
     return session, box
@@ -950,7 +964,14 @@ def poll(st: ST.RunState) -> Pulse:
             key, sep, val = line.strip().partition("=")
             if sep:
                 kv[key] = val.strip()
-        pages = int(kv["pages"]) if kv.get("pages", "").isdigit() else 0
+        if not kv.get("pages", "").isdigit() or kv.get("done") not in ("0", "1"):
+            # 🔴 Немає відповіді — не «нуль сторінок і робота не скінчилась».
+            # Обірваний канал дає rc=-1 і порожній вивід; прочитаний як нуль, він
+            # стирав лічильник поступу, а в парі з `alive()` — закривав нагляд.
+            raise ChannelDropped(
+                f"машина не відповіла на опитування (rc={got.rc}): "
+                f"{(got.err or got.out).strip()[-160:] or 'порожній вивід'}")
+        pages = int(kv["pages"])
         finished = kv.get("done") == "1"
         rc = int(kv["rc"]) if kv.get("rc", "").lstrip("-").isdigit() else None
         alive = session.alive(st.pid) if st.pid else False

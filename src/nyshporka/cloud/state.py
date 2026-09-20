@@ -22,9 +22,13 @@ Ctrl+C. Тому єдиний спосіб зробити захід надій�
 """
 from __future__ import annotations
 
+import contextlib
 import hashlib
+import os
 import re
+import threading
 import time
+from collections.abc import Iterator
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -208,6 +212,67 @@ class RunState:
 
 def path_of(run_id: str) -> Path:
     return runs_dir() / f"{run_id}.json"
+
+
+# ── власник заходу ───────────────────────────────────────────────────────────
+class OwnerBusy(RuntimeError):
+    """Захід уже веде інший процес."""
+
+    def __init__(self, run_id: str, pid: int) -> None:
+        who = f"pid {pid}" if pid else "pid невідомий"
+        super().__init__(f"захід {run_id} веде інший процес ({who})")
+        self.run_id, self.pid = run_id, pid
+
+
+_held = threading.local()
+
+
+@contextlib.contextmanager
+def owned(run_id: str) -> Iterator[None]:
+    """Один власник на захід — від оренди до погашеної машини.
+
+    🔴 Стан «машина є, pid немає» — штатний для перших 10-20 хвилин заходу
+    (підйом боксу, середовище рушіїв, заливка), і той самий стан лишає по собі
+    вбитий процес. Розрізнити їх за файлом стану неможливо, а помилка дорога:
+    другий `go` тієї самої справи — навіть `--dry-run` заради кошторису —
+    вважав машину сиротою й ГАСИВ бокс, який перший саме готував.
+
+    Замок — файловий і рівня ОС (той самий, що боронить `cloud.json`): він
+    зникає разом із процесом, хоч би як той помер, тож «вічного» замка після
+    вбитого власника не буває й перевіряти живість pid не треба. Файл поруч із
+    pid — лише щоб назвати власника людині.
+
+    Повторний вхід із того самого потоку проходить: `go` тримає замок і кличе
+    `run.start`, який бере його ж.
+    """
+    from nyshporka.core.xrate import LockTimeout, _locked
+
+    mine: set[str] | None = getattr(_held, "ids", None)
+    if mine is None:
+        mine = _held.ids = set()
+    if run_id in mine:
+        yield
+        return
+    lock = runs_dir() / f"{run_id}.owner.lock"
+    # Не `.json`: перелік заходів збирається з `*.json` цієї теки.
+    who = runs_dir() / f"{run_id}.owner.pid"
+    with contextlib.ExitStack() as stack:
+        try:
+            stack.enter_context(_locked(lock, timeout=0.0))
+        except LockTimeout:
+            pid = 0
+            with contextlib.suppress(OSError, ValueError):
+                pid = int(who.read_text(encoding="ascii").strip() or 0)
+            raise OwnerBusy(run_id, pid) from None
+        with contextlib.suppress(OSError):
+            who.write_text(str(os.getpid()), encoding="ascii")
+        mine.add(run_id)
+        try:
+            yield
+        finally:
+            mine.discard(run_id)
+            with contextlib.suppress(OSError):
+                who.unlink(missing_ok=True)
 
 
 def save(state: RunState) -> RunState:
