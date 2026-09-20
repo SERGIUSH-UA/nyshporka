@@ -306,15 +306,21 @@ def test_preflight_failure_stops_before_rent(
         "після провального передполіту навіть кошторису не питають"
 
 
-def test_supervisor_that_did_not_start_is_a_refusal(
+def test_unclear_detach_leaves_the_run_accountable(
         space: Path, monkeypatch, fake_gpurunner) -> None:
+    """🔴 «Не стартував» означає лише, що наглядач не доповів вчасно, — процес
+    при цьому може бути живий і піти орендувати машину. Видалений запис зробив
+    би таку оренду невидимою для `state`, `stop` і наступного `go`."""
     case, _ = _wire(space, monkeypatch)
     fake_gpurunner.set(estimate=ESTIMATE, detach_rc=3)
     res = _go(case)
 
     assert res.verdict == "refused"
-    assert ST.load(res.run_id) is None, \
-        "заходу, який не почався, у стані бути не повинно"
+    assert "rent status" in res.why, "людині сказано, чим перевірити машину"
+    st = ST.load(res.run_id)
+    assert st is not None and st.supervisor, "захід лишається підзвітним"
+    assert st.phase == "failed"
+    assert any(i.get("kind") == "detach_unclear" for i in st.incidents)
 
 
 # ── повторний виклик і стан ──────────────────────────────────────────────────

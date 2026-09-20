@@ -446,9 +446,25 @@ def launch(plan: CloudPlan, res: GoResult, say: Callable[..., None], *,
                      "--budget", f"{high:.2f}", "--max-hours", f"{hours:.0f}"],
                     env=env)
     if launched.returncode:
-        ST.remove(plan.run_id)
-        raise GoRefused(f"наглядач не стартував (код {launched.returncode}) — "
-                        f"машини не брали")
+        # 🔴 Запис НЕ видаляємо. «Не стартував» тут означає лише те, що
+        # наглядач не показав свого стану за відведений час, — а процес при
+        # цьому може бути живий і піти орендувати машину. Видалений запис
+        # зробив би таку оренду невидимою для `state`, `stop` і наступного
+        # `go`, тобто нікому не підзвітною; лишений — щонайгірше зайвий рядок
+        # у переліку, який людина закриє `stop --force`.
+        st = ST.load(plan.run_id)
+        if st is not None:
+            st.phase = "failed"
+            st.why = (f"наглядач {session} не доповів про старт (код "
+                      f"{launched.returncode}); якщо він усе-таки живий — "
+                      f"машина на ньому")
+            st.note("detach_unclear", st.why)
+            ST.save(st)
+        raise GoRefused(
+            f"наглядач не доповів про старт (код {launched.returncode}). "
+            f"Найімовірніше машини не брали — але переконайтесь: "
+            f"`nysh cloud rent status`. Якщо там щось тарифікується, захід "
+            f"живий: `nysh cloud state {plan.run_id}`.")
     res.verdict = "detached"
     res.why = (f"наглядач {session} пішов у фон: орендує машину, читає, забирає "
                f"результат і гасить оренду сам")
