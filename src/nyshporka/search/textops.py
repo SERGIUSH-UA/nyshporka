@@ -742,7 +742,18 @@ def find(q: str, scope: str = "", *, thresh: int = 78, limit: int = 40,
     # ⚠ Короткий стем із гнізда імен («anna») `partial_ratio` знаходить усередині
     # будь-якого слова — 1171 хітів на 128 сторінках (рецензія 08.09, третій раунд).
     short = sorted({str(s) for s in (res.get("stems") or []) if len(str(s)) < SHORT_STEM})
+    # 🤝 Чужа частка області. Нуль на своєму декоді й нуль на чужому — різні
+    # відповіді: чуже читала інша модель, за його повноту тут ніхто не
+    # відповідає, і перечитати його можна лише попросивши в того, хто дав.
+    # Без цього рядка знаменник виглядає однаково в обох випадках.
+    shared_rows = [r for r in rows if str(r.get("shared") or "")]
+    shared: dict[str, Any] | None = None
+    if shared_rows:
+        who = sorted({str(r["shared"]) for r in shared_rows})
+        shared = {"runs": len(shared_rows), "of_runs": len(rows),
+                  "pages": S.unique_pages(shared_rows), "from": who}
     ledger = {"frames": frames, "decoded": decoded, "runs": len(rows), "in_store": fresh,
+              "shared": shared,
               "unindexed": int(res.get("unindexed") or 0), "voices": voices,
               "scripts": scripts, "backend": res.get("backend"),
               "cache": res.get("cache"), "rules_stale": bool(res.get("rules_stale")),

@@ -136,6 +136,14 @@ class Workspace:
     @property
     def spotter(self) -> Path: return self.data / "spotter"
 
+    #: Обмін прочитаним: журнал походження і прийняті пакети.
+    #:
+    #: 🔴 У `data`, а не в `derived`. Пакет, з якого взято факт, — доказ-файл, і
+    #: він мусить пережити чистку похідного: інакше цитата провисне рівно тоді,
+    #: коли кеш приберуть.
+    @property
+    def share(self) -> Path: return self.data / "share"
+
     @property
     def reports(self) -> Path: return self.root / "reports"
 

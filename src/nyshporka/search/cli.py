@@ -375,6 +375,12 @@ def find_cmd(
                   f"сторінок без дублів голосів {led.get('pages_scoped')} · "
                   f"голоси: {', '.join(led.get('voices') or []) or '—'} · письмо: "
                   f"{', '.join(led.get('scripts') or []) or '?'}")
+    sh = led.get("shared")
+    if sh:
+        console.print(f"[warn]з них чужий декод:[/warn] прогонів {sh['runs']} із "
+                      f"{sh['of_runs']} · сторінок {sh['pages']} · від "
+                      f"{', '.join(sh['from'])} — читала інша модель, за повноту "
+                      f"тут ніхто не відповідає")
     cache = led.get("cache") or {}
     if cache:
         console.print(f"[muted]свіп: з кешу стору {cache.get('runs', 0)} прогонів, "

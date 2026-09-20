@@ -1,0 +1,238 @@
+"""📤 Зібрати свій декод у пакет: від шифри до файлу й рядка каталогу.
+
+Порядок тут не випадковий: спершу збираємо ЗАЯВУ (що це за справа, скільки
+кадрів, чим читали), проганяємо її крізь ворота — і лише тоді пишемо файл.
+Зворотний порядок (зібрати, потім перевірити) залишає на диску пакет, який не
+можна віддавати, і рано чи пізно хтось його однаково віддасть.
+"""
+from __future__ import annotations
+
+import time
+from pathlib import Path
+from typing import Any
+
+from nyshporka.share import align, bundle, catalog, gates, journal
+from nyshporka.share.bundle import Manifest
+
+
+class PublishError(RuntimeError):
+    """Пакет не зібрати — з названою причиною."""
+
+
+def resolve_runs(scope: str) -> tuple[list[Path], dict[str, Any]]:
+    """Теки прогонів для справи або для одного прогону, разом із голосами.
+
+    🔴 Голоси добираються ЗАВЖДИ. Справу читають двома моделями, і пакет із
+    однією з них виглядає повним: сторінки на місці, знаменник сходиться, а
+    другого прочитання просто немає — і отримувач про це не дізнається.
+    """
+    from nyshporka import htr_store as S
+    from nyshporka.cloud.verify import voice_dirs
+    from nyshporka.core.workspace import workspace
+
+    scope = (scope or "").strip()
+    if not scope:
+        raise PublishError("не названо, що пакувати: шифра справи або ім'я прогону")
+    try:
+        got = S.runs_for_scope(scope)
+    except ValueError as exc:
+        raise PublishError(str(exc)) from exc
+    rows = got.get("rows") or []
+    if not rows:
+        raise PublishError(
+            f"для «{scope}» прочитаного немає. Що є взагалі: nysh text state")
+    root = workspace().htr_reports
+    dirs: list[Path] = []
+    for r in rows:
+        d = root / str(r.get("name") or "")
+        if not d.is_dir():
+            continue
+        if d not in dirs:
+            dirs.append(d)
+        for v in voice_dirs(d):
+            if v not in dirs:
+                dirs.append(v)
+    if not dirs:
+        raise PublishError(f"теки прогонів для «{scope}» немає на диску")
+    return dirs, got
+
+
+def _case_block(scope_info: dict[str, Any], case_dir: Path | None) -> dict[str, Any]:
+    """Шифра й опис справи — з паспорта теки, а не з нашого ключа.
+
+    🔴 `key_local` їде довідково й ніколи як ідентичність: він збирається з
+    імені теки й версії паку, тож в іншого дослідника та сама справа дістане
+    інший ключ (`align` пояснює, чому).
+    """
+    from nyshporka.cases.register import parse_shifra, read_sidecar
+
+    key = str(scope_info.get("key") or "")
+    shifra = str(scope_info.get("shifra") or "")
+    side = read_sidecar(case_dir) if case_dir else {}
+    shifra = str(side.get("shifra") or shifra)
+    out: dict[str, Any] = {"shifra": shifra, "key_local": key}
+    if shifra:
+        try:
+            s = parse_shifra(shifra)
+            out.update(repo=s.repo, fond=s.fond, opys=s.opys, spr=s.spr)
+        except Exception:
+            pass
+    for src, dst in (("title", "title"), ("place", "place"),
+                     ("doc_type", "doc_type")):
+        if side.get(src):
+            out[dst] = side[src]
+    raw_years = [side.get("year_from"), side.get("year_to")]
+    years = [int(y) for y in raw_years
+             if isinstance(y, (int, str)) and str(y).isdigit()]
+    if years:
+        out["years"] = [min(years), max(years)]
+    places = side.get("villages_from_index") or side.get("covers")
+    if isinstance(places, list) and places:
+        out["places"] = [str(p) for p in places][:20]
+    elif side.get("place"):
+        out["places"] = [str(side["place"])]
+    return out
+
+
+def _refs_from_sidecar(case_dir: Path | None) -> list[dict[str, str]]:
+    """Стабільні посилання на джерело зйомки — єдине, що не залежить від нас.
+
+    Ключ справи в кожного свій, а `File:…` у Commons або DGS у FamilySearch
+    однакові для всіх. Саме за ними отримувач знайде ті самі аркуші.
+    """
+    from nyshporka.cases.register import read_sidecar
+
+    if case_dir is None:
+        return []
+    side = read_sidecar(case_dir)
+    out: list[dict[str, str]] = []
+
+    def add(source: str, ref: str, url: str = "") -> None:
+        if ref and not any(r["source"] == source for r in out):
+            row = {"source": source, "ref": ref}
+            if url:
+                row["url"] = url
+            out.append(row)
+
+    if side.get("dgs") or side.get("fs_film") or side.get("film"):
+        ident = side.get("dgs") or side.get("fs_film") or side.get("film")
+        add("fs", f"dgs:{ident}" if side.get("dgs") else f"film:{ident}",
+            str(side.get("fsfiles_url") or side.get("base_url") or ""))
+    if side.get("commons_title"):
+        add("commons", f"file:{side['commons_title']}",
+            str(side.get("commons_url") or ""))
+    if side.get("viewer_id"):
+        add("archium", f"file:{side['viewer_id']}",
+            str(side.get("viewer_url") or ""))
+    if side.get("babynyar_case"):
+        add("babynyar", f"case:{side['babynyar_case']}",
+            str(side.get("babynyar_url") or ""))
+    for key in ("source_url", "duck_url"):
+        if side.get(key):
+            add("url", str(side[key]), str(side[key]))
+            break
+    return out
+
+
+def build_manifest(scope: str, *, geometry: bool = False,
+                   hash_frames: bool = False,
+                   publisher: str = "", contact: str = "", site: str = "",
+                   note: str = "", links: list[dict[str, str]] | None = None,
+                   extra: dict[str, Any] | None = None,
+                   license_text: str = "CC0-1.0",
+                   source_terms: str = "") -> tuple[Manifest, list[Path], list[dict[str, Any]]]:
+    """Скласти заяву пакета. Файл ще не пишеться — спершу ворота."""
+    run_dirs, info = resolve_runs(scope)
+    key = str(info.get("key") or "")
+    case_dir = align.case_dir_for(key) if key else None
+    frames = align.frames_of(case_dir, hash_frames=hash_frames) if case_dir else []
+    voices = [bundle.voice_of(d, geometry=geometry) for d in run_dirs]
+    voices = [v for v in voices if v.pages]
+    if not voices:
+        raise PublishError(
+            f"у теках прогонів немає жодної сторінки тексту: {', '.join(d.name for d in run_dirs)}")
+
+    blank = _blank_pages(run_dirs)
+    decode = {
+        "pages": max(v.pages for v in voices),
+        "lines": sum(v.lines for v in voices),
+        "chars": sum(v.chars for v in voices),
+        "blank_pages": blank,
+        "voices": [v.as_json() for v in voices],
+    }
+    frames_block = align.summary(frames) if frames else {"total": 0, "listed": 0,
+                                                         "with_sha256": 0,
+                                                         "with_apid": 0}
+    pub: dict[str, str] = {}
+    if publisher:
+        pub["handle"] = publisher
+    if contact:
+        pub["contact"] = contact
+    if site:
+        pub["url"] = site
+    lic = {"text": license_text, "images": "не входять"}
+    if source_terms:
+        lic["source_terms"] = source_terms
+    m = Manifest(
+        case=_case_block(info, case_dir), refs=_refs_from_sidecar(case_dir),
+        frames=frames_block, decode=decode, publisher=pub, note=note,
+        links=list(links or []), extra=dict(extra or {}), license=lic,
+        tool=bundle._tool_version(), created=time.strftime("%Y-%m-%dT%H:%M:%S%z"))
+    return m, run_dirs, frames
+
+
+def _blank_pages(run_dirs: list[Path]) -> int:
+    """Скільки сторінок найповнішого голосу порожні.
+
+    Порожня сторінка сама собою нормальна — це vacat, чистий аркуш. Ворота
+    ловлять інше: коли порожня майже вся справа, тобто рушій не взяв письмо.
+    """
+    best = 0
+    blank = 0
+    for d in run_dirs:
+        pages = sorted(d.glob(bundle.PACKED_TEXT))
+        if len(pages) <= best:
+            continue
+        best = len(pages)
+        blank = sum(1 for p in pages
+                    if not p.read_text(encoding="utf-8", errors="replace").strip())
+    return blank
+
+
+def pack(scope: str, dest: Path | None = None, *, geometry: bool = False,
+         hash_frames: bool = False, partial_why: str = "",
+         dry_run: bool = False, **meta: Any) -> dict[str, Any]:
+    """Зібрати пакет справи. `dry_run` — показати, що поїде, і нічого не писати."""
+    m, run_dirs, frames = build_manifest(scope, geometry=geometry,
+                                         hash_frames=hash_frames, **meta)
+    verdict = gates.check(m, partial_why=partial_why)
+    sketch = bundle.plan(run_dirs, geometry=geometry)
+    out: dict[str, Any] = {
+        "manifest": m.as_json(),
+        "gates": verdict.as_json(),
+        "runs": [d.name for d in run_dirs],
+        "files": len(sketch["files"]),
+        "bytes_raw": sketch["bytes"],
+        "frames_listed": len(frames),
+    }
+    if dry_run:
+        out["files_list"] = [f["arc"] for f in sketch["files"]]
+        out["dry_run"] = True
+        return out
+    if not verdict.passed:
+        raise PublishError("ворота не пропустили пакет:\n" + gates.describe(verdict))
+
+    name = bundle.suggest_name(m)
+    dest = Path(dest) if dest else (journal.share_dir() / journal.OUTBOX / name)
+    if dest.is_dir():
+        dest = dest / name
+    wrote = bundle.write(dest, m, run_dirs, frames=frames, geometry=geometry)
+    out.update(wrote)
+    row = catalog.row_for(m, sha256=wrote["sha256"], nbytes=wrote["bytes"])
+    out["catalog_row"] = row.as_tsv()
+    out["catalog"] = row.as_json()
+    journal.record(journal.PACKED, shifra=m.shifra,
+                   case_key=str(m.case.get("key_local") or ""),
+                   pages=m.pages, bytes=wrote["bytes"], sha256=wrote["sha256"],
+                   path=wrote["path"], models=", ".join(m.models()))
+    return out

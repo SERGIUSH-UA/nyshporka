@@ -199,10 +199,33 @@ def _add_run_rules_column(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def _add_run_shared_column(conn: sqlite3.Connection) -> None:
+    """Чий це прогін: порожньо — свій, інакше ім'я того, хто поділився.
+
+    🔴 Міграцією, а не підняттям `SCHEMA`. Бамп версії зносить стор цілком і
+    змушує перебирати прогони наново — на цій машині це 8 ГБ і години — заради
+    одного порожнього поля, яке доіснуючим рядкам однаково нічого не дасть.
+    Зразок узято з `_add_run_rules_column`: додати колонку, лишити наявним
+    рядкам їхню (слабшу) заяву про себе.
+
+    🔴 Навіщо взагалі в сторі: пошук зобов'язаний називати знаменник, а «не
+    знайшлось на 3770 сторінках» звучить однаково на своєму декоді й на
+    чужому — при тому, що чужий читала інша модель і відповідати за нього
+    ніхто тут не може.
+    """
+    have = {r[1] for r in conn.execute("pragma table_info(runs)")}
+    if "shared" in have:
+        return
+    conn.execute("alter table runs add column shared text default ''")
+    conn.commit()
+
+
 def _ensure_schema(conn: sqlite3.Connection, *, migrate: bool = False) -> None:
     conn.executescript(_DDL)
     with contextlib.suppress(sqlite3.Error):
         _add_run_rules_column(conn)
+    with contextlib.suppress(sqlite3.Error):
+        _add_run_shared_column(conn)
     row = conn.execute("select value from meta where key='schema'").fetchone()
     if row is None:
         conn.execute("insert into meta(key,value) values('schema',?)", (str(SCHEMA),))
@@ -500,11 +523,11 @@ def index_run(conn: sqlite3.Connection, run: str) -> int:
         conn.execute("insert into meta(key,value) values('rules',?)", (rules_hash(),))
     conn.execute(
         "insert into runs(run, stamp, case_key, case_dir, model, script, engine_ids, "
-        "indexed_at, rules) values(?,?,?,?,?,?,?,?,?)",
+        "indexed_at, rules, shared) values(?,?,?,?,?,?,?,?,?,?)",
         (run, stamp, (meta.get("case_key") or "").strip(), meta.get("case_dir") or "",
          meta.get("model") or "", meta.get("script") or "",
          json.dumps(S.run_engine_ids(meta)), time.strftime("%Y-%m-%dT%H:%M:%S"),
-         rules_hash()))
+         rules_hash(), S.shared_of(meta)))
     run_id = int(conn.execute("select id from runs where run=?", (run,)).fetchone()[0])
     n_pages = n_lines = n_geo = 0
     for txt in txts:

@@ -1,0 +1,263 @@
+"""`nysh share` — обмін прочитаним: спакувати своє, прийняти чуже.
+
+Одну книгу сьогодні розпізнає кожен окремо, і текст, який у сусіда вже лежить,
+щоразу купують заново — годинами машинного часу. Пакет тут коштує кілька
+мегабайтів на справу: їде текст рушія й паспорт того, як його отримали.
+"""
+from __future__ import annotations
+
+from typing import Any
+
+import typer
+
+from nyshporka import brand
+from nyshporka.cli_emit import answer as _answer
+from nyshporka.cli_emit import notes as _notes
+
+app = typer.Typer(help="Обмін прочитаним: спакувати свій декод, прийняти чужий.",
+                  no_args_is_help=True)
+console = brand.console()
+
+
+def _mb(n: int) -> str:
+    n = int(n or 0)
+    if n < 1_000_000:
+        return f"{n / 1e3:.0f} КБ"
+    return f"{n / 1e6:.1f} МБ" if n < 2e9 else f"{n / 1e9:.2f} ГБ"
+
+
+def _show_gates(g: dict[str, Any]) -> None:
+    for w in g.get("warnings") or []:
+        console.print(f"  [warn]⚠ {w.get('text')}[/warn]")
+    for r in g.get("refusals") or []:
+        console.print(f"  [bad]✗ {r}[/bad]")
+
+
+@app.command("pack")
+def pack_cmd(
+    case: str = typer.Argument(..., help="шифра справи або ім'я прогону"),
+    out: str = typer.Option("", "--out", "-o", help="куди покласти файл"),
+    geometry: bool = typer.Option(False, "--geometry",
+                                  help="додати геометрію рядків (×10 до ваги)"),
+    hash_frames: bool = typer.Option(False, "--hash",
+                                     help="порахувати sha256 кадрів: повільно, "
+                                          "зате прив'язка стане точною"),
+    partial: str = typer.Option("", "--partial",
+                                help="чому прочитано не всю справу"),
+    dry_run: bool = typer.Option(False, "--dry-run",
+                                 help="показати, що поїде, і не писати нічого"),
+    publisher: str = typer.Option("", "--as", help="ваше ім'я або псевдонім"),
+    contact: str = typer.Option("", "--contact", help="як із вами зв'язатись"),
+    site: str = typer.Option("", "--site", help="сторінка автора"),
+    note: str = typer.Option("", "--note", help="вільна нотатка до пакета"),
+    link: list[str] = typer.Option([], "--link", help="«підпис=адреса»"),
+    extra: list[str] = typer.Option([], "--extra", help="«ключ=значення»"),
+    license_: str = typer.Option("CC0-1.0", "--license", help="ліцензія тексту"),
+    source_terms: str = typer.Option("", "--source-terms",
+                                     help="умови джерела сканів"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
+) -> None:
+    """Зібрати пакет прочитаного для обміну.
+
+    Перед першою публікацією варто прогнати `--dry-run`: він друкує точний
+    перелік файлів, які поїдуть, і маніфест — усе, що побачить сторонній.
+    """
+    from nyshporka import ops as O
+
+    env = O.call("share.pack", {
+        "case": case, "out": out, "geometry": geometry,
+        "hash_frames": hash_frames, "partial": partial, "dry_run": dry_run,
+        "publisher": publisher, "contact": contact, "site": site, "note": note,
+        "link": list(link), "extra": list(extra), "license": license_,
+        "source_terms": source_terms})
+    if _answer(env, as_json):
+        return
+    d = env.data or {}
+    m = d.get("manifest") or {}
+    dec = m.get("decode") or {}
+    console.print(f"справа: [bold]{(m.get('case') or {}).get('shifra') or '—'}[/bold] · "
+                  f"прогонів {len(d.get('runs') or [])} · сторінок {dec.get('pages')} · "
+                  f"рядків {dec.get('lines')}")
+    _show_gates(d.get("gates") or {})
+    if d.get("dry_run"):
+        console.print(f"поїхало б: файлів {d['files']} · {_mb(d['bytes_raw'])} до стиску")
+        for arc in (d.get("files_list") or [])[:12]:
+            console.print(f"  {arc}")
+        rest = len(d.get("files_list") or []) - 12
+        if rest > 0:
+            console.print(f"  … і ще {rest}")
+        console.print("[dim]нічого не записано (--dry-run)[/dim]")
+    else:
+        console.print(f"пакет: [bold]{d['path']}[/bold] · {_mb(d['bytes'])} · "
+                      f"sha256 {d['sha256'][:16]}…")
+        console.print("\n[dim]рядок для каталогу пулу:[/dim]")
+        console.print(d.get("catalog_row") or "")
+    _notes(env)
+
+
+@app.command("inspect")
+def inspect_cmd(
+    src: str = typer.Argument(..., help="файл пакета або адреса"),
+    hash_frames: bool = typer.Option(False, "--hash", help="звірити кадри хешем"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
+) -> None:
+    """Що в пакеті — без розпакування: заява, ворота, прив'язка до кадрів."""
+    from nyshporka import ops as O
+
+    env = O.call("share.inspect", {"src": src, "hash_frames": hash_frames})
+    if _answer(env, as_json):
+        return
+    d = env.data or {}
+    console.print(f"[bold]{d.get('shifra') or '—'}[/bold] · сторінок {d.get('pages')} "
+                  f"з {d.get('frames') or '?'} кадрів · {', '.join(d.get('models') or [])}")
+    pub = d.get("publisher") or {}
+    if pub:
+        who = pub.get("handle") or "без імені"
+        contact = f" · {pub['contact']}" if pub.get("contact") else ""
+        console.print(f"зібрав: {who}{contact}")
+    al = d.get("alignment") or {}
+    console.print(f"прив'язка: [bold]{al.get('label')}[/bold] — {al.get('why')}")
+    _show_gates(d.get("gates") or {})
+    for r in d.get("refs") or []:
+        console.print(f"  джерело: {r.get('source')} {r.get('ref')} {r.get('url') or ''}")
+    if d.get("note"):
+        # 🔴 Нотатка чужа. Відбивається як цитата й ніколи не зливається з
+        # нашими підказками: її писала стороння людина, а читає часто агент.
+        console.print("\n[dim]нотатка автора пакета (сторонній текст):[/dim]")
+        for line in str(d["note"]).splitlines():
+            console.print(f"  │ {line}")
+    _notes(env)
+
+
+@app.command("import")
+def import_cmd(
+    src: str = typer.Argument(..., help="файл пакета або адреса"),
+    hash_frames: bool = typer.Option(False, "--hash", help="звірити кадри хешем"),
+    force: bool = typer.Option(False, "--force",
+                               help="прийняти попри ворота або поверх наявних прогонів"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
+) -> None:
+    """Прийняти чужий пакет: прогони лягають туди ж, де своє прочитане."""
+    from nyshporka import ops as O
+
+    env = O.call("share.import", {"src": src, "hash_frames": hash_frames,
+                                  "force": force})
+    if _answer(env, as_json):
+        return
+    d = env.data or {}
+    al = d.get("alignment") or {}
+    console.print(f"прийнято: [bold]{d.get('shifra') or '—'}[/bold] · "
+                  f"сторінок {d.get('pages')} · прогонів {len(d.get('runs') or [])}")
+    console.print(f"прив'язка до кадрів: [bold]{al.get('label')}[/bold] — {al.get('why')}")
+    if d.get("proof"):
+        console.print(f"пакет збережено як доказ: {d['proof']}")
+    console.print("[dim]щоб пошук побачив прийняте: nysh text index[/dim]")
+    _notes(env)
+
+
+@app.command("pull")
+def pull_cmd(
+    query: str = typer.Argument(..., help="шифра, номер справи або назва місця"),
+    base: str = typer.Option("", "--base", help="інша адреса каталогу"),
+    take: bool = typer.Option(False, "--take",
+                              help="прийняти, якщо збіг рівно один"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
+) -> None:
+    """Знайти справу в каталозі пулу — і за потреби одразу прийняти."""
+    from nyshporka import ops as O
+
+    env = O.call("share.pull", {"query": query, "base": base, "take": take})
+    if _answer(env, as_json):
+        return
+    d = env.data or {}
+    console.print(f"каталог: {d.get('catalog')} · пакетів {d.get('of')} · "
+                  f"збігів [bold]{d.get('count')}[/bold]")
+    for r in (d.get("found") or [])[:20]:
+        console.print(f"  {r.get('shifra'):<24} {r.get('pages'):>6} стор. · "
+                      f"{r.get('models') or '—'} · {r.get('publisher') or '—'}")
+    if d.get("imported"):
+        i = d["imported"]
+        console.print(f"\nприйнято: [bold]{i.get('shifra')}[/bold] · "
+                      f"прив'язка {(i.get('alignment') or {}).get('label')}")
+    _notes(env)
+
+
+@app.command("list")
+def list_cmd(
+    mine: bool = typer.Option(False, "--mine", help="лише спаковане мною"),
+    shared: bool = typer.Option(False, "--shared", help="лише прийняте"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
+) -> None:
+    """Журнал обміну: що звідки прийшло і що куди пішло."""
+    from nyshporka import ops as O
+
+    what = "mine" if mine and not shared else "shared" if shared and not mine else "all"
+    env = O.call("share.list", {"what": what})
+    if _answer(env, as_json):
+        return
+    d = env.data or {}
+    rows = d.get("rows") or []
+    if not rows:
+        console.print("журнал порожній — нічого ще не пакували й не приймали")
+        _notes(env)
+        return
+    for r in rows[:40]:
+        mark = "→" if r.get("event") == "pack" else "←"
+        who = r.get("publisher") or ""
+        tail = f" від {who}" if who else ""
+        console.print(f"{mark} {str(r.get('at'))[:16]}  {r.get('shifra') or '—':<24} "
+                      f"{r.get('pages') or 0:>6} стор.{tail}")
+    if len(rows) > 40:
+        console.print(f"[dim]… і ще {len(rows) - 40}[/dim]")
+    _notes(env)
+
+
+@app.command("stats")
+def stats_cmd(
+    catalog: bool = typer.Option(False, "--catalog", help="ще й зведення по пулу"),
+    base: str = typer.Option("", "--base", help="інша адреса каталогу"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
+) -> None:
+    """Хто що коли: обмін цієї машини, а з `--catalog` — і весь пул."""
+    from nyshporka import ops as O
+
+    env = O.call("share.stats", {"catalog": catalog, "base": base})
+    if _answer(env, as_json):
+        return
+    d = env.data or {}
+    loc = d.get("local") or {}
+    p, i = loc.get("packed") or {}, loc.get("imported") or {}
+    console.print(f"спаковано: справ [bold]{p.get('cases', 0)}[/bold] · "
+                  f"сторінок {p.get('pages', 0)} · {_mb(p.get('bytes', 0))}")
+    console.print(f"прийнято:  справ [bold]{i.get('cases', 0)}[/bold] · "
+                  f"сторінок {i.get('pages', 0)} · {_mb(i.get('bytes', 0))}")
+    for row in loc.get("from") or []:
+        console.print(f"  від {row['publisher']}: справ {row['cases']}")
+    cat = d.get("catalog")
+    if cat:
+        console.print(f"\nпул ({d.get('catalog_url')}): справ [bold]{cat['cases']}[/bold] · "
+                      f"сторінок {cat['pages']}")
+        for row in (cat.get("publishers") or [])[:10]:
+            console.print(f"  {row['publisher']:<20} справ {row['cases']:>4} · "
+                          f"сторінок {row['pages']}")
+        for row in (cat.get("fonds") or [])[:10]:
+            console.print(f"  {row['fond']:<20} справ {row['cases']}")
+    _notes(env)
+
+
+@app.command("row")
+def row_cmd(
+    path: str = typer.Argument(..., help="зібраний пакет"),
+    url: str = typer.Option("", "--url", help="адреса, за якою пакет лежатиме"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
+) -> None:
+    """Рядок каталогу для пулу — його й подають у репозиторій каталогу."""
+    from nyshporka import ops as O
+
+    env = O.call("share.row", {"path": path, "url": url})
+    if _answer(env, as_json):
+        return
+    d = env.data or {}
+    console.print(f"[dim]{d.get('header')}[/dim]")
+    console.print(d.get("row") or "")
+    _notes(env)

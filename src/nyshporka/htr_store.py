@@ -243,6 +243,19 @@ def run_engine_id(meta: dict[str, Any]) -> str:
     return ids[0] if ids else ""
 
 
+def shared_of(meta: dict[str, Any]) -> str:
+    """Хто поділився цим прогоном; порожньо — свій.
+
+    🔴 Позначка без імені лишається позначкою: `?` означає «чуже, автор не
+    назвався», і це НЕ те саме, що своє. Різниця тут вирішальна — своїм декодом
+    відповідає той, хто шукає, а чужим не відповідає ніхто.
+    """
+    mark = meta.get("shared")
+    if not isinstance(mark, dict):
+        return ""
+    return str(mark.get("from") or "").strip() or "?"
+
+
 def run_engine_ids(meta: dict[str, Any]) -> list[str]:
     """всі рушії прогону: другий голос пише обидві моделі одним полем.
 
@@ -503,6 +516,12 @@ def list_cases() -> list[dict[str, Any]]:
             # одного, покриття справи виглядало б наполовину зробленим.
             "engine_ids": run_engine_ids(meta),
             "script": meta.get("script") or "",
+            # 🤝 Чужий прогін: ім'я того, хто ним поділився, або порожньо для
+            # свого. Знаменник пошуку зобов'язаний це називати — «не знайшлось
+            # на 3770 сторінках» звучить однаково на своєму декоді й на чужому,
+            # при тому що чужий читала інша модель і відповідати за нього
+            # тут нікому.
+            "shared": shared_of(meta),
             "device": meta.get("device") or "",
             "enhance": meta.get("enhance") or "",
             # ⏱ Медіана секунд на сторінку — замір цієї машини, а не константа.
@@ -526,6 +545,13 @@ def _runs_cache_path() -> Path:
     return workspace().derived / "runs_cache.json"
 
 
+#: Версія РЯДКА кешу прогонів. Кеш ключований міткою мети, тож нове поле в
+#: рядку інакше не з'явилось би доти, доки мета не зміниться, — і читач бачив би
+#: рядки без нього як рядки, у яких це поле порожнє. Різниця між «немає» і
+#: «порожньо» тут не косметична: саме нею позначається чужий прогін.
+ROW_SCHEMA = 2
+
+
 def _runs_cache_read(lib: str = "") -> dict[str, dict[str, Any]]:
     """Кеш по прогонах; чужа бібліотека — кеш порожній: шифра й кадри в рядках
     беруться з неї, і після її перезбірки вони старіли, поки мета не зміниться."""
@@ -534,6 +560,8 @@ def _runs_cache_read(lib: str = "") -> dict[str, dict[str, Any]]:
     except (OSError, ValueError):
         return {}
     if not isinstance(data, dict) or str(data.get("lib") or "") != lib:
+        return {}
+    if int(data.get("row_schema") or 1) != ROW_SCHEMA:
         return {}
     ent = data.get("entries")
     return {str(k): v for k, v in ent.items() if isinstance(v, dict)} if isinstance(ent, dict) else {}
@@ -544,7 +572,8 @@ def _runs_cache_write(entries: dict[str, dict[str, Any]], lib: str = "") -> None
     try:
         p.parent.mkdir(parents=True, exist_ok=True)
         tmp = p.with_suffix(f".{os.getpid()}.tmp")
-        tmp.write_text(json.dumps({"lib": lib, "entries": entries}, ensure_ascii=False),
+        tmp.write_text(json.dumps({"lib": lib, "row_schema": ROW_SCHEMA,
+                                   "entries": entries}, ensure_ascii=False),
                        encoding="utf-8")
         tmp.replace(p)
     except OSError:
