@@ -503,6 +503,9 @@ def cmd_state(
         return
 
     st = _need_run(run_id)
+    if st.supervisor:
+        _state_detached(st, as_json=as_json)
+        return
     pulse = None
     if st.phase in ("running", "uploading") and st.box:
         try:
@@ -537,6 +540,46 @@ def cmd_state(
         console.print(f"  [muted]· {inc.get('kind')}: {inc.get('detail')}[/muted]")
     if st.why:
         console.print(f"  [muted]{st.why}[/muted]")
+
+
+def _state_detached(st: RunState, *, as_json: bool) -> None:
+    """Стан заходу, який веде відчеплений наглядач: питаємо його, не свій запис.
+
+    🔴 Свій запис — знімок хвилини відчеплення, і він однаково каже «читає» і
+    про живу роботу, і про ту, що скінчилась уночі. Наглядач знає, де машина,
+    скільки витрачено й чи забрано результат; ми — ні.
+    """
+    from nyshporka.cloud import supervised as SUP
+
+    data = SUP.state_of(st)
+    if as_json:
+        out = st.as_dict()
+        out["supervisor_state"] = data or None
+        console.print_json(data=out)
+        raise typer.Exit(code=0 if data else 1)
+    console.print(f"[bold]{st.run_id}[/bold] · наглядач {st.supervisor}")
+    console.print(f"  справа : {st.case_dir}")
+    if not data:
+        console.print("[warn]⚠ наглядач не відповідає: стану немає. Він міг "
+                      "завершитись або впасти до того, як завів журнал[/warn]")
+        console.print(f"[muted]  перевірити руками: gpurunner htr state "
+                      f"--session {st.supervisor}[/muted]")
+        raise typer.Exit(code=1)
+    budget = data.get("budget") or {}
+    console.print(f"  фаза   : {data.get('phase') or '?'}"
+                  + (f" · {data.get('verdict')}" if data.get("verdict") else ""))
+    if data.get("why"):
+        console.print(f"  [muted]{escape(str(data['why']))}[/muted]")
+    if budget:
+        console.print(f"  гроші  : {_usd(_num(budget.get('spent_usd')))} з "
+                      f"{_usd(_num(budget.get('budget_usd')))}")
+    console.print(f"  вихід  : {st.out_dir}")
+
+
+def _num(value: object) -> float | None:
+    from nyshporka.cloud.money import as_number
+
+    return as_number(value)
 
 
 @app.command("fetch")
@@ -612,6 +655,18 @@ def cmd_stop(
     from nyshporka.cloud import run as RUN
 
     st = _need_run(run_id)
+    if st.supervisor:
+        # 🔴 Машину відчепленого заходу гасить наглядач — у нас її навіть немає
+        # чим назвати. Наша справа тут — переказати прохання й чесно сказати,
+        # що відповіли.
+        from nyshporka.cloud import supervised as SUP
+
+        ok, said = SUP.stop(st)
+        console.print((f"✅ {st.run_id}: наглядач {st.supervisor} спиняє захід"
+                       if ok else
+                       f"[err]наглядача {st.supervisor} спинити не вдалось[/err]")
+                      + (f" — {escape(said)}" if said else ""))
+        raise typer.Exit(code=0 if ok else 2)
     try:
         RUN.release(st, force=force, on_line=_say)
     except CloudError as exc:
@@ -655,23 +710,34 @@ def cmd_go(
     one_voice: bool = typer.Option(False, "--one-voice",
                                    help="без другого рушія (швидше, але сліпіше)"),
     case_key: str = typer.Option("", "--case-key", help="шифра справи для мети прогону"),
+    thin: bool = typer.Option(
+        False, "--thin",
+        help="вести захід самому, не віддаючи наглядачеві: команда триматиме "
+             "з'єднання з машиною до кінця прогону й помре разом із терміналом. "
+             "Для дрібної справи й для машини, до якої наглядач не вміє"),
     tick: float = typer.Option(60.0, "--tick", help="як часто питати машину, секунд"),
     as_json: bool = typer.Option(
         False, "--json", help="останнім рядком — один JSON-об'єкт із підсумком"),
 ) -> None:
     """Прочитати справу на орендованій машині — від кадрів до погашеної оренди.
 
-    Звіряє кадри, стискає завеликі, рахує кошторис вилкою, орендує, ставить
-    рушії, заливає, читає під наглядом двох стель (гроші й години), забирає,
-    звіряє повноту по диску, раз доганяє малий хвіст, гасить машину й оновлює
-    облік. 🔴 Машина гаситься на кожному шляху виходу.
+    Звіряє кадри, стискає завеликі, збирає ваги й раннер в архів, складає план,
+    рахує кошторис вилкою й вирішує, чи можна стартувати без людини. Далі захід
+    веде ВІДЧЕПЛЕНИЙ наглядач: орендує машину, регулює флот під заміряний темп,
+    доганяє пропуски, забирає результат, звіряє повноту по диску, гасить оренду
+    й оновлює облік — уже без цієї команди, тож термінал можна закрити одразу.
+    Питати про нього — `nysh cloud state`, спиняти — `nysh cloud stop`.
+
+    `--thin` веде захід самотужки, з'єднанням із машиною: воно живе рівно
+    стільки, скільки живий термінал, зате не потребує наглядача.
 
     Після обриву термінала правильна дія — повторити ту саму команду: живий
     захід буде підхоплено, другої машини не візьмуть.
 
-    Коди виходу: 0 готово · 2 відмова до оренди · 3 збій · 4 неповно ·
-    5 стеля грошей · 6 ринок порожній · 7 стеля годин · 8 бракує балансу ·
-    9 машину НЕ погашено · 10 потрібен --confirm · 130 перервано.
+    Коди виходу: 0 готово (або пущено відчеплено) · 2 відмова до оренди ·
+    3 збій · 4 неповно · 5 стеля грошей · 6 ринок порожній · 7 стеля годин ·
+    8 бракує балансу · 9 машину НЕ погашено · 10 потрібен --confirm ·
+    130 перервано.
     """
     import json as _json
 
@@ -691,16 +757,28 @@ def cmd_go(
                 max_price=max_price, confirm=confirm, dry_run=dry_run,
                 with_voices=with_, second_voice=not one_voice, script=script,
                 case_key=case_key, rerun=rerun, allow_partial=allow_partial,
-                rotate_landscape=rotate_landscape, on_event=on_event,
+                rotate_landscape=rotate_landscape, thin=thin, on_event=on_event,
                 tick_sec=max(1.0, tick))
     if as_json:
         # `print`, а не rich: один рядок без переносів і розфарбування — його
         # розбирають `json.loads` від останнього рядка виводу.
         print(_json.dumps(res.as_dict(), ensure_ascii=False))
         raise typer.Exit(code=res.exit_code)
-    mark = {"ok": "✅", "dry_run": "·"}.get(res.verdict, "🔴")
+    mark = {"ok": "✅", "dry_run": "·", "detached": "▶"}.get(res.verdict, "🔴")
     console.print(f"\n{mark} [bold]{res.verdict}[/bold]"
                   + (f" — {escape(res.why)}" if res.why else ""), highlight=False)
+    if res.verdict == "detached":
+        # Тут «витрачено» ще не існує: наглядач тільки пішов по машину. Замість
+        # нулів, які читаються як «безплатно», — чим питати й чим спиняти.
+        console.print(f"  сторінок : {res.pages_total}")
+        console.print(f"  бюджет   : {_usd(res.budget_usd)} · стеля часу "
+                      f"{res.max_hours:g} год" if res.max_hours else "")
+        console.print(f"  вихід    : {res.out_dir}")
+        console.print(f"[muted]стан: nysh cloud state {res.run_id} · "
+                      f"спинити: nysh cloud stop {res.run_id}[/muted]")
+        for note in res.notes:
+            console.print(f"[warn]⚠ {escape(note)}[/warn]", highlight=False)
+        raise typer.Exit(code=res.exit_code)
     if res.rented:
         console.print(f"  сторінок : {res.pages_done} з {res.pages_total}")
         console.print(f"  витрачено: {_usd(res.spent_usd)} за {res.rent_hours:.2f} год")

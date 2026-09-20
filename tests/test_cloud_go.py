@@ -171,6 +171,9 @@ def _wire(space: Path, monkeypatch, session: FakeSession, *, fake_books: bool = 
 
 
 def _go(case: Path, **kw: Any) -> GO.GoResult:
+    # Цей файл — про ТОНКИЙ шлях: ми самі тримаємо машину від оренди до
+    # гасіння. Наглядацький (типовий) перевіряється в `test_cloud_supervised`.
+    kw.setdefault("thin", True)
     kw.setdefault("backend", "fake")
     kw.setdefault("script", "cyrillic")
     kw.setdefault("tick_sec", 0.0)
@@ -980,7 +983,7 @@ def test_go_json_prints_one_object_last(cli, space: Path, monkeypatch) -> None:
     monkeypatch.setattr(RUN, "_backend", lambda name: backend)
 
     got = runner.invoke(app, ["go", str(case), "--script", "cyrillic",
-                              "--dry-run", "--json"])
+                              "--thin", "--dry-run", "--json"])
     assert got.exit_code == 0, got.output
     last = json.loads(got.output.strip().splitlines()[-1])
     assert last["verdict"] == "dry_run" and last["rented"] is False

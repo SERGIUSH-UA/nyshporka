@@ -55,7 +55,10 @@ from nyshporka.cloud.base import (
 #: Код виходу на кожен вердикт. Частина публічного інтерфейсу: на нього
 #: дивиться агент, який пустив захід і пішов.
 EXIT_CODES: dict[str, int] = {
-    "ok": 0, "dry_run": 0, "refused": 2, "failed": 3, "incomplete": 4,
+    # `detached` — робота ПОЧАЛАСЬ і йде без нас: наглядач орендує машину,
+    # читає, забирає й гасить оренду сам. Нуль тут означає «захід пущено», а
+    # не «текст на диску»; про готовність питають `nysh cloud state`.
+    "ok": 0, "dry_run": 0, "detached": 0, "refused": 2, "failed": 3, "incomplete": 4,
     "budget_stop": 5, "market_empty": 6, "deadline": 7, "no_credit": 8,
     # 🔴 Окремий код, а не «той самий, що у вердикту»: робота могла вдатись, а
     # машина — лишитись живою. Нуль тут означав би «все гаразд» при лічильнику,
@@ -259,6 +262,18 @@ def already_read(out_dir: Path, *, model: str, frames: int) -> str:
     return ""
 
 
+def _run_ids(plan: Any, frames_dir: Path) -> set[str]:
+    """Ідентифікатори, під якими міг лягти цей самий захід.
+
+    Їх два, бо на машину їде або сама тека кадрів, або її стиснута копія, — а
+    котра саме, стає відомо лише після звірки кадрів.
+    """
+    return {plan.run_id,
+            ST.run_id_for(F.shrink_dir_for(frames_dir).resolve(),
+                          model=plan.model.name, script=plan.script,
+                          backend=plan.backend)}
+
+
 def _find_live(plan: Any, frames_dir: Path) -> tuple[ST.RunState | None,
                                                     ST.RunState | None]:
     """(свій живий захід, чужий захід у ту саму теку виходу) — або `None`.
@@ -274,10 +289,7 @@ def _find_live(plan: Any, frames_dir: Path) -> tuple[ST.RunState | None,
     справа іншим письмом): два прогони в одну теку перетирають тексти один
     одного без жодної помилки.
     """
-    ids = {plan.run_id,
-           ST.run_id_for(F.shrink_dir_for(frames_dir).resolve(),
-                         model=plan.model.name, script=plan.script,
-                         backend=plan.backend)}
+    ids = _run_ids(plan, frames_dir)
     own: ST.RunState | None = None
     for run_id in sorted(ids):
         st = ST.load(run_id)
@@ -298,6 +310,7 @@ def go(case: str, *, backend: str = "vast", budget: float | None = None,
        with_voices: list[str] | tuple[str, ...] = (), second_voice: bool = True,
        script: str = "", case_key: str = "", rerun: bool = False,
        allow_partial: bool = False, rotate_landscape: bool = False,
+       thin: bool = False,
        on_event: EventFn | None = None, tick_sec: float = 60.0) -> GoResult:
     """Прочитати справу на орендованій машині від початку до кінця.
 
@@ -321,7 +334,7 @@ def go(case: str, *, backend: str = "vast", budget: float | None = None,
             with_voices=tuple(with_voices), second_voice=second_voice,
             script=script, case_key=case_key, rerun=rerun,
             allow_partial=allow_partial, rotate_landscape=rotate_landscape,
-            tick_sec=tick_sec)
+            thin=thin, tick_sec=tick_sec)
     except GoRefused as exc:
         res.verdict, res.why = exc.verdict, str(exc)
     except KeyboardInterrupt:
@@ -367,7 +380,8 @@ def _go(res: GoResult, case: str, say: EventFn, owner: contextlib.ExitStack, *,
         backend: str, budget: float | None, max_hours: float | None, max_price: float | None,
         confirm: bool, dry_run: bool, with_voices: tuple[str, ...],
         second_voice: bool, script: str, case_key: str, rerun: bool,
-        allow_partial: bool, rotate_landscape: bool, tick_sec: float) -> None:
+        allow_partial: bool, rotate_landscape: bool, thin: bool,
+        tick_sec: float) -> None:
     from nyshporka.cloud import plan as PL
     from nyshporka.core.workspace import workspace
 
@@ -414,6 +428,23 @@ def _go(res: GoResult, case: str, say: EventFn, owner: contextlib.ExitStack, *,
         raise GoRefused(
             f"{exc} — другий наглядач забрав би його результат і погасив би його "
             f"машину. Стан: `nysh cloud state {exc.run_id}`.") from None
+    # 🔴 Відчеплений захід тієї самої роботи живе БЕЗ нашого процесу, і його
+    # машини в нашому записі немає — питати треба наглядача. Без цієї перевірки
+    # повторна команда (звична дія після обриву термінала) брала б другу машину
+    # під справу, яку вже читає перша.
+    if not thin:
+        from nyshporka.cloud import supervised as SUP
+
+        found = SUP.find_live(_run_ids(plan, ref.frames_dir))
+        if found is not None:
+            st, data = found
+            res.run_id, res.out_dir = st.run_id, st.out_dir
+            raise GoRefused(
+                f"цю справу вже читає відчеплений наглядач {st.supervisor} "
+                f"(фаза {data.get('phase') or '?'}): {data.get('why') or ''}. "
+                f"Стан: `nysh cloud state {st.run_id}`; спинити: "
+                f"`nysh cloud stop {st.run_id}`.".replace("  ", " "))
+
     live, clash = _find_live(plan, ref.frames_dir)
     if clash is not None:
         raise GoRefused(
@@ -510,6 +541,15 @@ def _go(res: GoResult, case: str, say: EventFn, owner: contextlib.ExitStack, *,
     if left is not None:
         say("plan", f"уже прочитано {before.got} з {plan.frames} — на машину "
                     f"поїде готове, читатиметься решта ({left})")
+
+    # 4а. наглядацький шлях: далі захід веде відчеплений наглядач, а ми виходимо
+    if not thin:
+        from nyshporka.cloud import supervised as SUP
+
+        SUP.launch(plan, res, say, pack_dir=pack, source_dir=ref.frames_dir,
+                   total_mb=rep.total_mb, budget=budget, max_hours=max_hours,
+                   confirm=confirm, dry_run=dry_run)
+        return
 
     est = M.ask_estimate(b, plan.need)
     if est is not None:
