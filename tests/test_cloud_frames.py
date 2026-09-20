@@ -117,7 +117,7 @@ def test_shrink_makes_grey_jpegs_of_working_height(tmp_path: Path) -> None:
 
     got = F.shrink(src, dst, target_h=100)
     assert (got.total, got.done, got.skipped) == (2, 2, 0)
-    assert sorted(p.name for p in dst.iterdir()) == ["0001.jpg", "0002.jpg"]
+    assert sorted(p.name for p in dst.iterdir() if p.name != F.CLAIM_FILE) ==         ["0001.jpg", "0002.jpg"]
     with Image.open(dst / "0001.jpg") as im:
         assert im.height == 100 and im.mode == "L"
     assert not list(src.glob("*.part")) and (src / "0002.png").exists(), \
@@ -131,12 +131,14 @@ def test_shrink_is_idempotent(tmp_path: Path) -> None:
     for i in range(3):
         _jpeg(src / f"{i:04d}.jpg", (120, 200))
     F.shrink(src, dst, target_h=100)
-    stamps = {p.name: p.stat().st_mtime_ns for p in dst.iterdir()}
+    stamps = {p.name: p.stat().st_mtime_ns for p in dst.iterdir()
+              if p.name != F.CLAIM_FILE}
 
     (dst / "0001.jpg").unlink()             # ніби обірвало посередині
     again = F.shrink(src, dst, target_h=100)
     assert (again.done, again.skipped) == (1, 2)
-    after = {p.name: p.stat().st_mtime_ns for p in dst.iterdir()}
+    after = {p.name: p.stat().st_mtime_ns for p in dst.iterdir()
+             if p.name != F.CLAIM_FILE}
     assert after["0000.jpg"] == stamps["0000.jpg"], "готовий кадр не переписано"
     assert not list(dst.glob("*.part")), "тимчасових файлів не лишається"
 
@@ -223,5 +225,25 @@ def test_tiff_is_named_and_converted_before_the_road(tmp_path: Path) -> None:
 
     out = F.shrink(case, tmp_path / "ready", target_h=50)
     assert out.done == 2
-    assert sorted(p.name for p in (tmp_path / "ready").iterdir()) == \
-        ["0001.jpg", "0002.jpg"], "на машину їде лише те, що вона читає"
+    assert sorted(p.name for p in (tmp_path / "ready").iterdir()
+                  if p.name != F.CLAIM_FILE) == ["0001.jpg", "0002.jpg"], \
+        "на машину їде лише те, що вона читає"
+
+
+def test_shrunk_copy_knows_whose_it_is(tmp_path: Path) -> None:
+    """🔴 Імена тек справ збігаються постійно (`pages`, `spr-1`), а імена кадрів
+    у них однакові. Стискання пропускає готове — тож друга справа мовчки
+    дістала б кадри ПЕРШОЇ й поїхала читати чужу книгу під своєю шифрою."""
+    first, second = tmp_path / "a" / "pages", tmp_path / "b" / "pages"
+    for case in (first, second):
+        case.mkdir(parents=True)
+        Image.new("L", (40, 60), 200).save(case / "0001.jpg", "JPEG")
+    dst = tmp_path / "shrunk"
+
+    F.shrink(first, dst, target_h=50)
+    with pytest.raises(F.FramesError, match="ІНШОЇ теки"):
+        F.shrink(second, dst, target_h=50)
+
+    # Своя ж копія доганяється повторним викликом, як і доти.
+    again = F.shrink(first, dst, target_h=50)
+    assert again.skipped == 1

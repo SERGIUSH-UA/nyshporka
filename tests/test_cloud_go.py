@@ -1037,7 +1037,7 @@ def test_engine_that_cannot_see_the_card_is_a_failure(space: Path, monkeypatch) 
     а читає процесором: та сама оплачувана година дає вдесятеро менше сторінок,
     і помітно це лише за темпом, коли гроші вже витрачено.
     """
-    case, backend, _ = _wire(space, monkeypatch, Box1(space / "box", [NAMES], cuda=False))
+    case, _, _ = _wire(space, monkeypatch, Box1(space / "box", [NAMES], cuda=False))
 
     res = _go(case)
 

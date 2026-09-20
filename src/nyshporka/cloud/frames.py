@@ -223,6 +223,35 @@ def shrink_dir_for(case_dir: Path | str) -> Path:
     return workspace().derived / "cloud" / "frames" / name
 
 
+#: Паспорт стиснутої копії: чия вона.
+CLAIM_FILE = "_from.txt"
+
+
+def _claim_dir(dst_dir: Path, src_dir: Path) -> None:
+    """Записати, чию копію тут складено, — або відмовити, якщо вона чужа.
+
+    🔴 Ім'я теки справи унікальним не буває: `pages`, `spr-1`, `probe` з різних
+    архівів збігаються постійно, а імена кадрів у них однакові (`0001.jpg`).
+    Стискання ж пропускає готове, тож друга справа мовчки дістала б кадри
+    ПЕРШОЇ й поїхала читати чужу книгу під своєю шифрою. Перелік імен цього не
+    ловить — саме тому копія підписана шляхом оригіналу.
+    """
+    claim = dst_dir / CLAIM_FILE
+    mine = str(src_dir.resolve())
+    try:
+        theirs = claim.read_text(encoding="utf-8").strip()
+    except OSError:
+        theirs = ""
+    if theirs and theirs != mine:
+        raise FramesError(
+            f"у {dst_dir} лежить стиснута копія ІНШОЇ теки ({theirs}) — імена "
+            f"тек справ збіглися. Приберіть її або перейменуйте теку справи; "
+            f"інакше на машину поїхали б чужі кадри під вашою шифрою.")
+    if not theirs:
+        with contextlib.suppress(OSError):
+            claim.write_text(mine, encoding="utf-8")
+
+
 def shrink(src: Path | str, dst: Path | str, *, target_h: int = TARGET_HEIGHT,
            quality: int = JPEG_QUALITY, rotate_landscape: bool = False,
            on_line: Any = None) -> ShrinkResult:
@@ -265,6 +294,7 @@ def shrink(src: Path | str, dst: Path | str, *, target_h: int = TARGET_HEIGHT,
                 f"Після стискання вони стали б одним файлом — перейменуйте один.")
         stems[p.stem] = p.name
     dst_dir.mkdir(parents=True, exist_ok=True)
+    _claim_dir(dst_dir, src_dir)
     stale = sorted(q.name for q in frames_in(dst_dir) if q.stem not in stems)
     if stale:
         # Не видаляємо: тека з таким іменем могла лишитись від ІНШОЇ справи з
