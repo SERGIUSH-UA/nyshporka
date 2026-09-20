@@ -23,7 +23,6 @@
 """
 from __future__ import annotations
 
-import os
 import shlex
 import shutil
 import tarfile
@@ -43,6 +42,7 @@ from nyshporka.cloud.base import (
 from nyshporka.cloud.plan import CloudPlan
 from nyshporka.cloud.probe import measure
 from nyshporka.cloud.registry import load as load_registry
+from nyshporka.utils import tarsafe
 
 #: Імена на машині. Прості й передбачувані: за ними доводиться ходити з іншої
 #: сесії, іноді руками через `ssh`.
@@ -1147,21 +1147,11 @@ def unpack(tar_path: Path, out_dir: Path) -> Path:
     return out_dir
 
 
-_BAD_MEMBER_CHARS = frozenset("\\:\x00")
-
-
-def _safe_member_part(part: str) -> bool:
-    """Компонент імені з чужого tar, який можна класти на диск як є."""
-    if not part or part in (".", "..") or part.strip() != part:
-        return False
-    return not any(ch in _BAD_MEMBER_CHARS for ch in part)
-
-
-def _under(dest: Path, base: Path) -> bool:
-    try:
-        return Path(os.path.abspath(dest)).is_relative_to(Path(os.path.abspath(base)))
-    except (OSError, ValueError):
-        return False
+# 🔴 Гард живе в `utils/tarsafe`, бо розпакувальників чужого архіву в пакеті
+# двоє: цей і приймач обміну текстами (`share/bundle.py`). Друга копія тихо
+# розійшлася б із першою при наступному уточненні.
+_safe_member_part = tarsafe.safe_member_part
+_under = tarsafe.under
 
 
 def stamp_case_key(out_dir: Path, case_key: str) -> int:

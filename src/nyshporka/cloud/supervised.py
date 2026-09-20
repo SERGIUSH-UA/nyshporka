@@ -435,14 +435,19 @@ def launch(plan: CloudPlan, res: GoResult, say: Callable[..., None], *,
 
     # 6. наглядач у фон
     res.rented = True
+    # 🔴 Запис ПЕРЕД стартом, а не після. Між пуском наглядача й записом стану
+    # ми можемо померти (Ctrl+C, обрив, повний диск) — і тоді захід іде, а для
+    # нас його не існує: наступна команда тієї самої справи чесно візьме ДРУГУ
+    # машину під ту саму роботу. Невдалий старт прибирає запис за собою.
+    _remember(plan, res, session=session, plan_path=plan_path)
     launched = _run([*gr, "htr", "supervise", "--plan", str(plan_path),
                      "--detach", "--session", session,
                      "--budget", f"{high:.2f}", "--max-hours", f"{hours:.0f}"],
                     env=env)
     if launched.returncode:
+        ST.remove(plan.run_id)
         raise GoRefused(f"наглядач не стартував (код {launched.returncode}) — "
                         f"машини не брали")
-    _remember(plan, res, session=session, plan_path=plan_path)
     res.verdict = "detached"
     res.why = (f"наглядач {session} пішов у фон: орендує машину, читає, забирає "
                f"результат і гасить оренду сам")
