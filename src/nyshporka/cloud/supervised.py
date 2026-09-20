@@ -67,6 +67,12 @@ MAX_HOURS_CAP = M.MAX_HOURS_CAP
 DISK_OVERHEAD_GB = 5
 DISK_MIN_GB = 15
 
+#: Скільки ядер ХОЧЕТЬСЯ від машини. 🔴 Шістнадцять, а не шістдесят чотири:
+#: ядра темпу не купують (дуель двох машин це показала), зате машини на 64
+#: ядра на ринку може просто не бути — і захід стоїть у безкоштовному, але
+#: марному чеканні, поки регулятор сам не опустить планку.
+PREFER_CORES = 16.0
+
 
 class SupervisorMissing(RuntimeError):
     """Наглядача немає на цій машині. Текст — для людини, дослівно."""
@@ -359,6 +365,7 @@ def launch(plan: CloudPlan, res: GoResult, say: Callable[..., None], *,
            "--expect-script", f"{RUNNER_ARCNAME}={runner_path()}",
            "--disk", str(disk_for(total_mb)),
            "--max-hours", str(MAX_HOURS_CAP),
+           "--prefer-cores", str(PREFER_CORES),
            "--out", str(plan_path)]
     if not plan.case_key:
         # Шифри немає — наглядач інакше відмовиться від порожнього ключа.

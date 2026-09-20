@@ -241,6 +241,11 @@ def test_case_key_and_run_name_go_to_the_supervisor(
     assert call[call.index("--case-key") + 1] == "ARCH/1/2"
     assert call[call.index("--name") + 1] == Path(res.out_dir).name
     assert Path(call[call.index("--out-root") + 1]) == Path(res.out_dir).parent
+    # 🔴 Планка ядер — 16, а не типові для наглядача 64: машини на 64 ядра на
+    # ринку може не бути взагалі, і захід стоїть у марному чеканні.
+    assert float(call[call.index("--prefer-cores") + 1]) == 16.0
+    assert call[call.index("--expect-script") + 1].startswith(SUP.RUNNER_ARCNAME + "="), \
+        "раннер в архіві звіряється з локальним побайтно"
 
 
 # ── гроші: рішення наше, кошторис — того, хто орендує ────────────────────────
@@ -370,6 +375,32 @@ def test_state_and_stop_ask_the_supervisor(
     ok, said = SUP.stop(st)
     assert ok and "зупиняю" in said
     assert fake_gpurunner.called("htr", "stop"), "спиняє саме наглядач"
+
+
+def test_cli_state_shows_what_the_supervisor_says(
+        space: Path, monkeypatch, fake_gpurunner) -> None:
+    """🔴 Прохання наглядача до людини мусить бути видно ОДРАЗУ: поки воно
+    лежить у журналі, машина тарифікується."""
+    from typer.testing import CliRunner
+
+    from nyshporka.cloud import cli as C
+
+    case, _ = _wire(space, monkeypatch)
+    res = _go(case)
+    fake_gpurunner.set(estimate=ESTIMATE, state={
+        "session": "s", "phase": "running", "why": "читає",
+        "budget": {"cap_usd": 0.5, "spent_usd": 0.03, "max_hours": 4.0,
+                   "elapsed_h": 0.2},
+        "cases": [{"case": "c", "pages_done": 3, "n_pages_expected": 5,
+                   "pages_per_hour": 640.0, "status": "running"}],
+        "box": {"gpu": "RTX 3060", "label": "nysh-1"},
+        "human_action_required": True, "human_action": "поповнити баланс"})
+
+    got = CliRunner().invoke(C.app, ["state", res.run_id])
+    assert got.exit_code == 0, got.output
+    assert "3 з 5" in got.output and "RTX 3060" in got.output
+    assert "$0.03 з $0.50" in got.output
+    assert "потрібна людина" in got.output and "поповнити баланс" in got.output
 
 
 def test_thin_path_stays_available(space: Path, monkeypatch, fake_gpurunner) -> None:

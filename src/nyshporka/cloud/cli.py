@@ -565,15 +565,35 @@ def _state_detached(st: RunState, *, as_json: bool) -> None:
         console.print(f"[muted]  перевірити руками: gpurunner htr state "
                       f"--session {st.supervisor}[/muted]")
         raise typer.Exit(code=1)
-    budget = data.get("budget") or {}
+    budget = data.get("budget") if isinstance(data.get("budget"), dict) else {}
+    box = data.get("box") if isinstance(data.get("box"), dict) else {}
     console.print(f"  фаза   : {data.get('phase') or '?'}"
                   + (f" · {data.get('verdict')}" if data.get("verdict") else ""))
     if data.get("why"):
         console.print(f"  [muted]{escape(str(data['why']))}[/muted]")
+    for case in data.get("cases") or []:
+        if not isinstance(case, dict):
+            continue
+        done, want = case.get("pages_done") or 0, case.get("n_pages_expected") or 0
+        pph = _num(case.get("pages_per_hour")) or 0
+        console.print(f"  сторінок: {done} з {want}"
+                      + (f" · ~{pph:.0f} стор/год" if pph else "")
+                      + (f" · {case.get('status')}" if case.get("status") else ""))
+    if box:
+        console.print(f"  машина : {box.get('gpu') or '?'} "
+                      f"{box.get('label') or box.get('id') or ''}".rstrip())
     if budget:
         console.print(f"  гроші  : {_usd(_num(budget.get('spent_usd')))} з "
-                      f"{_usd(_num(budget.get('budget_usd')))}")
+                      f"{_usd(_num(budget.get('cap_usd')))} · "
+                      f"{_num(budget.get('elapsed_h')) or 0:.2f} з "
+                      f"{_num(budget.get('max_hours')) or 0:g} год")
     console.print(f"  вихід  : {st.out_dir}")
+    if data.get("human_action_required"):
+        # 🔴 Наглядач працює сам, і єдиний стан, у якому він чогось чекає від
+        # людини, мусить бути видно одразу — інакше машина тарифікується, поки
+        # прохання лежить у журналі.
+        console.print(f"[err]🔴 потрібна людина: "
+                      f"{escape(str(data.get('human_action') or '—'))}[/err]")
 
 
 def _num(value: object) -> float | None:
