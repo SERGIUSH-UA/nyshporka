@@ -323,7 +323,7 @@ def launch(plan: CloudPlan, res: GoResult, say: Callable[..., None], *,
            pack_dir: Path, source_dir: Path, total_mb: float,
            budget: float | None = None, max_hours: float | None = None,
            confirm: bool = False, dry_run: bool = False,
-           params: Sequence[str] = ()) -> None:
+           transport: str = "auto", params: Sequence[str] = ()) -> None:
     """Підготувати захід і віддати його відчепленому наглядачеві.
 
     `plan` — наш план (справа, письмо, бойові ваги, шифра, тека виходу);
@@ -367,6 +367,9 @@ def launch(plan: CloudPlan, res: GoResult, say: Callable[..., None], *,
            "--disk", str(disk_for(total_mb)),
            "--max-hours", str(MAX_HOURS_CAP),
            "--prefer-cores", str(PREFER_CORES),
+           # Чим везти дані: об'єктне сховище (якщо воно в людини є) або сама
+           # машина. Вирішує наглядач — він єдиний знає, що налаштовано.
+           "--transport", transport,
            "--out", str(plan_path)]
     if not plan.case_key:
         # Шифри немає — наглядач інакше відмовиться від порожнього ключа.

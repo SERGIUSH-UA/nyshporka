@@ -310,7 +310,7 @@ def go(case: str, *, backend: str = "vast", budget: float | None = None,
        with_voices: list[str] | tuple[str, ...] = (), second_voice: bool = True,
        script: str = "", case_key: str = "", rerun: bool = False,
        allow_partial: bool = False, rotate_landscape: bool = False,
-       thin: bool = False,
+       thin: bool = False, transport: str = "auto",
        on_event: EventFn | None = None, tick_sec: float = 60.0) -> GoResult:
     """Прочитати справу на орендованій машині від початку до кінця.
 
@@ -334,7 +334,7 @@ def go(case: str, *, backend: str = "vast", budget: float | None = None,
             with_voices=tuple(with_voices), second_voice=second_voice,
             script=script, case_key=case_key, rerun=rerun,
             allow_partial=allow_partial, rotate_landscape=rotate_landscape,
-            thin=thin, tick_sec=tick_sec)
+            thin=thin, transport=transport, tick_sec=tick_sec)
     except GoRefused as exc:
         res.verdict, res.why = exc.verdict, str(exc)
     except KeyboardInterrupt:
@@ -381,7 +381,7 @@ def _go(res: GoResult, case: str, say: EventFn, owner: contextlib.ExitStack, *,
         confirm: bool, dry_run: bool, with_voices: tuple[str, ...],
         second_voice: bool, script: str, case_key: str, rerun: bool,
         allow_partial: bool, rotate_landscape: bool, thin: bool,
-        tick_sec: float) -> None:
+        transport: str, tick_sec: float) -> None:
     from nyshporka.cloud import plan as PL
     from nyshporka.core.workspace import workspace
 
@@ -548,7 +548,7 @@ def _go(res: GoResult, case: str, say: EventFn, owner: contextlib.ExitStack, *,
 
         SUP.launch(plan, res, say, pack_dir=pack, source_dir=ref.frames_dir,
                    total_mb=rep.total_mb, budget=budget, max_hours=max_hours,
-                   confirm=confirm, dry_run=dry_run)
+                   confirm=confirm, dry_run=dry_run, transport=transport)
         return
 
     est = M.ask_estimate(b, plan.need)

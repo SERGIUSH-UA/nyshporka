@@ -740,6 +740,11 @@ def cmd_go(
     one_voice: bool = typer.Option(False, "--one-voice",
                                    help="без другого рушія (швидше, але сліпіше)"),
     case_key: str = typer.Option("", "--case-key", help="шифра справи для мети прогону"),
+    transport: str = typer.Option(
+        "auto", "--transport",
+        help="чим везти дані на машину: `auto` — об'єктним сховищем, якщо воно "
+             "налаштоване, інакше на саму машину; `box` — завжди на машину "
+             "(сховища не потрібно); `store` — лише сховищем"),
     thin: bool = typer.Option(
         False, "--thin",
         help="вести захід самому, не віддаючи наглядачеві: команда триматиме "
@@ -787,7 +792,9 @@ def cmd_go(
                 max_price=max_price, confirm=confirm, dry_run=dry_run,
                 with_voices=with_, second_voice=not one_voice, script=script,
                 case_key=case_key, rerun=rerun, allow_partial=allow_partial,
-                rotate_landscape=rotate_landscape, thin=thin, on_event=on_event,
+                rotate_landscape=rotate_landscape, thin=thin,
+                transport={"store": "r2"}.get(transport, transport),
+                on_event=on_event,
                 tick_sec=max(1.0, tick))
     if as_json:
         # `print`, а не rich: один рядок без переносів і розфарбування — його
