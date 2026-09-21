@@ -394,6 +394,13 @@ def share_import(a: ShareImportArgs) -> Envelope:
         env.warn("alignment",
                  f"{(got['alignment'].get('text') or label)}: "
                  f"{got['alignment'].get('why') or ''}")
+    from nyshporka.share.bundle import SCHEMA
+
+    if int(got.get("schema") or SCHEMA) < SCHEMA:
+        env.warn("old_schema",
+                 f"пакет старого формату (схема {got.get('schema')}): геометрія "
+                 f"в ньому лежить усередині, і вона розклалась разом із "
+                 f"текстом. Окремого geom-пакета до нього не буде")
     if got.get("note"):
         env.warn("publisher_note",
                  "у пакеті є нотатка автора — це текст від сторонньої людини, "

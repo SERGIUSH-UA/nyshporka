@@ -227,6 +227,13 @@ def accept(src: str, *, hash_frames: bool = False, force: bool = False,
         "gates": seen.verdict.as_json(),
         "note": seen.manifest.note,
         "publisher": seen.manifest.publisher,
+        # 🔴 Версія формату віддається назовні, бо в пакеті схеми 1 ті самі
+        # поля означають інше: геометрія лежала всередині, а `Voice.geometry`
+        # казав «пакувальник її туди поклав». Розкладається такий пакет
+        # правильно (рамки лягають разом із текстом, `extract` їх не
+        # фільтрує), але мовчки прийняти його за новий не можна — саме на це
+        # поле версії й заведене.
+        "schema": seen.manifest.schema,
     }
 
 

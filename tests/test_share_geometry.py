@@ -178,6 +178,41 @@ def test_tekstovyi_paket_ne_pryimaietsia_yak_heometriia(
         accept.accept_geometry(str(text))
 
 
+# ── старий формат ────────────────────────────────────────────────────────────
+
+def test_paket_skhemy_1_nese_ramky_vseredyni(space: Path, tmp_path: Path) -> None:
+    """🔴 У схемі 1 ті самі поля означали інше — і це мусить бути видно.
+
+    Там геометрія лежала ВСЕРЕДИНІ текстового пакета, а `Voice.geometry`
+    казав «пакувальник її туди поклав». Розкладається такий пакет правильно
+    (`extract` членів не фільтрує), але прийняти його мовчки за новий не
+    можна: окремого geom-пакета до нього не буде ніколи, і той, хто його
+    чекатиме, не дочекається без жодної помилки.
+    """
+    src = space / "reports" / "htr"
+    run = make_run(src, "spr-8433", geometry=True)
+    m = manifest_for([bundle.voice_of(run)])
+    m.schema = 1
+    staryi = tmp_path / "staryi.nyshtext"
+    # Схема 1 пакувала обидва набори в один файл.
+    bundle.write(staryi, m, [run], patterns=(*bundle.PACKED, bundle.PACKED_GEOMETRY))
+    for f in run.iterdir():
+        f.unlink()
+    run.rmdir()
+
+    got = accept.accept(str(staryi))
+    assert got["schema"] == 1
+    assert len(list((src / "spr-8433").glob("*.lines.json"))) == 3, (
+        "рамки старого пакета мусять лягти разом із текстом"
+    )
+
+
+def test_paket_z_maybutnoho_vidmovliaie(space: Path) -> None:
+    """Читач старшої версії відмовляє явно, а не розбирає наосліп."""
+    with pytest.raises(bundle.BundleError, match="оновити"):
+        bundle.Manifest.from_json({"schema": bundle.SCHEMA + 1})
+
+
 # ── журнал ───────────────────────────────────────────────────────────────────
 
 def test_zhurnal_ne_rakhuie_heometriiu_druhym_pryiomom(
