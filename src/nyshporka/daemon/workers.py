@@ -583,13 +583,56 @@ async def _run_read_locked(bus: JobBus, job: JobRecord, plan: Any, case_key: str
         why = f"{'; '.join(bad)} — але всі сторінки мають текст"
     elif missing:
         why = f"без тексту лишилось {missing} сторінок при успішному коді"
+    result: dict[str, Any] = {
+        "out_dir": str(plan.out_dir), "pages": pages,
+        "missing": missing, "frames": comp["frames"],
+        "partial": comp["partial"], "rc": codes, "tail": tail[-12:]}
     await bus.update(
         job.id,
         state=JobState.DONE if ok else JobState.ERROR,
         error=why,
-        result={"out_dir": str(plan.out_dir), "pages": pages,
-                "missing": missing, "frames": comp["frames"],
-                "partial": comp["partial"], "rc": codes, "tail": tail[-12:]})
+        result=result)
+
+    # 🔴 Автовіддача — ПІСЛЯ того, як завдання вже оголошено виконаним.
+    # Заливання пакета триває хвилини, і зроблене до оновлення стану
+    # показувало б людині «ще читається» тоді, коли читання скінчилось.
+    # Результат дописується другим заходом — там, де його побачить той, хто
+    # дивиться на завдання; іншого місця в демона немає.
+    if ok and not comp["partial"] and case_key:
+        viddane = await _autoshare(case_key)
+        if viddane:
+            await bus.update(job.id, result={**result, "supriaha": viddane})
+
+
+async def _autoshare(case_key: str) -> dict[str, Any] | None:
+    """Віддати щойно прочитане, якщо профіль каже «завжди».
+
+    🔴 Та сама операція, що й у командного рядка (`cli._supriaha_autoshare`),
+    а не друга гілка з тими самими умовами. Режим «завжди» без цього мовчки
+    не працював би саме в тих, хто користується застосунком, а не терміналом,
+    тобто в більшості.
+
+    🔴 Не кидає нічого назовні. Це хвіст успішного читання, і він не має
+    права зробити з нього невдале: пакет лишиться на диску, і його видно в
+    `share suggest`.
+    """
+    from nyshporka import ops as O
+
+    try:
+        env = await asyncio.to_thread(
+            O.call, "share.autoshare", {"case": case_key, "complete": True})
+    except Exception as exc:
+        # Широко навмисно: сюди сходяться мережа, сховище ключів і чужий
+        # сервер, і жодна з цих відмов не є приводом зіпсувати прочитане.
+        return {"error": str(exc)}
+    data = dict(env.data or {})
+    if data.get("skipped"):
+        return None
+    # Попередження доходять завжди й першими: у режимі «завжди» людина на
+    # результат не дивиться — вона на нього поклалась, — і «вважаю відданим,
+    # а воно на диску» гірше, ніж не мати режиму зовсім.
+    notes = [w.as_dict() for w in env.warnings]
+    return {**data, "warnings": notes} if notes else data
 
 
 def _terminate(proc: asyncio.subprocess.Process) -> None:

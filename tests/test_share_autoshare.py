@@ -155,6 +155,41 @@ def test_autoshare_bez_shyfry_movchyt(space: Path, uvimknena: None) -> None:
     assert (env.data or {}).get("skipped")
 
 
+def test_demon_klyche_tu_samu_operatsiiu(space: Path, uvimknena: None) -> None:
+    """🔴 Демон і термінал — одна операція, а не дві гілки з тими ж умовами.
+
+    Режим «завжди» без цього мовчки не працював би саме в тих, хто
+    користується застосунком, а не терміналом, тобто в більшості. Помітити
+    таку відмову нічим: прогони йдуть, пакети не їдуть, помилки немає.
+    """
+    import asyncio
+
+    from nyshporka.daemon import workers as W
+
+    prof = P.load()
+    prof.consent = P.ZAVZHDY
+    P.save(prof)
+
+    got = asyncio.run(W._autoshare("DAHMO/315/8433"))
+    # Пакування впаде — прогону з такою шифрою немає, — і це мусить лишитись
+    # записом у результаті завдання, а не винятком із воркера.
+    assert got is not None
+    assert got["packed"] is False
+    assert [w["code"] for w in got["warnings"]] == ["pack_failed"], (
+        "невдача мусить доїхати до того, хто дивиться на завдання"
+    )
+    assert "error" not in got, "це відповідь операції, а не перехоплений виняток"
+
+
+def test_demon_movchyt_u_rezhymi_pytaty(space: Path, uvimknena: None) -> None:
+    """Типовий режим нічого не віддає й у демоні теж."""
+    import asyncio
+
+    from nyshporka.daemon import workers as W
+
+    assert asyncio.run(W._autoshare("DAHMO/315/8433")) is None
+
+
 def test_autoshare_ne_valyt_prohin(space: Path, uvimknena: None, capsys: Any) -> None:
     """🔴 Хвіст успішного прогону не робить із нього невдалий.
 
