@@ -458,9 +458,10 @@ def _prepare(res: GoResult, case: str, say: EventFn, owner: contextlib.ExitStack
     say("case", f"{key or case_name(ref.frames_dir)} · {ref.frames_dir}")
 
     def build(frames_dir: Path, **kw: Any) -> PL.CloudPlan:
+        kw.setdefault("script", script)
         try:
             return PL.build(
-                frames_dir, backend=backend, script=script, case_key=key,
+                frames_dir, backend=backend, case_key=key,
                 second_voice=second_voice, also=list(with_voices), model=model,
                 out_name=case_name(ref.frames_dir),
                 max_price_usd_h=max_price, **kw)
@@ -593,7 +594,13 @@ def _prepare(res: GoResult, case: str, say: EventFn, owner: contextlib.ExitStack
     # Множиною, а не сумою: відкладена сторінка зазвичай і без тексту, тож у
     # двох переліках вона та сама.
     left = len(set(before.missing) | set(before.quarantined)) if seed else None
-    plan = build(pack, source_dir=ref.frames_dir if pack != ref.frames_dir else "",
+    # 🔴 Письмо БЕРЕТЬСЯ З ПЕРШОГО плану, а не вгадується вдруге. Здогад
+    # дивиться на опис справи поруч із кадрами, а стиснута копія лежить у
+    # робочій теці, де опису немає, — тож другий здогад чесно каже «не знаю» і
+    # валить справу вже ПІСЛЯ стискання. Спіймано 21.09.2026 на живому заході:
+    # `DAHMO/196-8/22` випала з черги, хоч письмо було визначене з першого разу.
+    plan = build(pack, script=plan.script,
+                 source_dir=ref.frames_dir if pack != ref.frames_dir else "",
                  lines_per_page=F.lines_per_page(plan.out_dir), pages_left=left)
     for w in plan.warnings:
         notes.append(w)
@@ -669,7 +676,7 @@ def _go(res: GoResult, cases: tuple[str, ...], say: EventFn,
     except RUN.RunError as exc:
         raise GoRefused(
             f"{exc}. Оренду дає окремий пакет-плагін: "
-            f"`pip install \"nyshporka[rent]\"` або `nysh update`, далі "
+            f"`pip install \"gpurunner[vast,r2]\"` поруч із Нишпоркою, далі "
             f"`nysh cloud rent login`.") from None
     if not bills(b):
         raise GoRefused(

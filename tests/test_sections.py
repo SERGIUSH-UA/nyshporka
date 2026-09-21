@@ -561,6 +561,21 @@ def test_agent_instructions_say_how_to_install() -> None:
         "в інструкції немає приймача: чим агент доведе, що встановлення вдалося")
 
 
+def _readme_install_section() -> str:
+    """Розділ встановлення README — від його заголовка до наступного H2.
+
+    ⚠ Ділянка бралась індексами підзаголовків («### Windows», «### Де лежить»),
+    яких у README більше немає: він переписаний у вітрину, де встановлення —
+    один розділ без підрозділів. Вимоги двох тестів нижче від цього не
+    змінились, тому змінюється лише спосіб знайти ділянку.
+    """
+    root = Path(__file__).resolve().parents[1]
+    readme = (root / "README.md").read_text(encoding="utf-8")
+    start = readme.index("## Поставити")
+    end = readme.index(chr(10) + "## ", start + 1)
+    return readme[start:end]
+
+
 def test_readme_points_agents_at_one_link() -> None:
     """⚠ Посилання мусить стояти ТАМ, де його шукають, — у «Установленні».
 
@@ -568,11 +583,8 @@ def test_readme_points_agents_at_one_link() -> None:
     розділі про роботу з агентом. Людина, яка хоче сказати «дай агентові
     посилання», доти його не дочитує.
     """
-    root = Path(__file__).resolve().parents[1]
-    readme = (root / "README.md").read_text(encoding="utf-8")
-    head = readme[readme.index("## Установлення"):readme.index("### Windows")]
-    assert "AGENTS.md" in head, (
-        "у шапці розділу «Установлення» немає посилання для агента")
+    assert "AGENTS.md" in _readme_install_section(), (
+        "у розділі встановлення немає посилання для агента")
 
 
 def test_windows_remote_install_downloads_the_file_first() -> None:
@@ -592,10 +604,7 @@ def test_windows_remote_install_downloads_the_file_first() -> None:
 
     Тому документована форма — завантажити файл і запустити його як файл.
     """
-    root = Path(__file__).resolve().parents[1]
-    readme = (root / "README.md").read_text(encoding="utf-8")
-
-    win = readme[readme.index("## Установлення"):readme.index("### Де лежить")]
+    win = _readme_install_section()
     assert "-OutFile" in win and "-File " in win, (
         "README не дає робочої форми віддаленого запуску для Windows: "
         "спершу `-OutFile`, потім `powershell -File`")

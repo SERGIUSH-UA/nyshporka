@@ -943,3 +943,41 @@ def test_absorb_takes_this_cases_row_not_the_largest(space: Path, monkeypatch) -
     ]}
     got = SUP.absorb(st, data)
     assert got.pages_done == 12, "узято чужий лічильник"
+
+
+def test_the_script_survives_the_shrink(space: Path, monkeypatch, fake_gpurunner) -> None:
+    """🔴 Письмо визначається ОДИН раз — по теці з описом справи.
+
+    Спіймано 21.09.2026 на живому заході: кадри стискаються в робочу теку, де
+    жодного опису немає, і другий здогад чесно казав «не знаю» — справа падала
+    вже ПІСЛЯ стискання, хоч письмо було відоме з першого разу. На партії це
+    виглядало як «справа випала», на одній — як відмова після чверті години
+    роботи.
+    """
+    case, _ = _wire(space, monkeypatch)
+    # робимо кадри «важкими», щоб захід пішов через стискання
+    monkeypatch.setattr(F := __import__("nyshporka.cloud.frames", fromlist=["x"]),
+                        "SHRINK_MEDIAN_MB", 0.0)
+    calls: list[str] = []
+    real = F.check_frames
+
+    def heavy(d, **kw):
+        rep = real(d, **kw)
+        calls.append(str(d))
+        return rep
+
+    monkeypatch.setattr(F, "check_frames", heavy)
+
+    got = _go(case, script="latin", dry_run=True)
+    assert got.verdict == "dry_run", got.why
+    assert "script=latin" in _plan_of(fake_gpurunner)["params"], (
+        "письмо не доїхало: другий здогад по стиснутій копії його загубив")
+
+
+def test_an_explicit_supervisor_path_wins(monkeypatch, tmp_path: Path) -> None:
+    """⚙ Коли Нишпорку кличуть із чужого простору, адресу наглядача знає лише
+    той, хто кличе: там він живе у власному середовищі поруч, а не в нашому."""
+    monkeypatch.setenv("NYSH_GPURUNNER", str(tmp_path / "gr.exe"))
+    assert SUP.gpurunner_cmd() == [str(tmp_path / "gr.exe")]
+    monkeypatch.delenv("NYSH_GPURUNNER")
+    assert SUP.gpurunner_cmd() != [str(tmp_path / "gr.exe")]

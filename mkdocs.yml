@@ -59,7 +59,10 @@ markdown_extensions:
 # хто читає репозиторій із GitHub, а не із сайту.
 nav:
   - Нишпорка: index.md
+  - Встановлення: install.md
   - Поставив. Що далі?: start.md
+  - Що вже працює: features.md
+  - Межі й чого ще немає: limits.md
   - Підключити агента: agent.md
   - Часті питання: faq.md
   - Що нового: whats-new.md
@@ -67,6 +70,7 @@ nav:
   - Навчити Писаря своєму почерку: train.md
   - Прочитати справу на орендованій машині: cloud.md
   - Поділитися прочитаним: share.md
+  - Підписування й ліцензії: signing.md
   - Для агентів:
       - Перша сесія: agents/first-session.md
       - Дві поверхні й карта дій: agents/surface.md

@@ -93,13 +93,21 @@ class SupervisorMissing(RuntimeError):
 def gpurunner_cmd() -> list[str]:
     """Чим кликати наглядача: модуль у цьому ж середовищі або програма в PATH.
 
-    🔴 Спершу модуль (`python -m gpurunner`), а не програма: `nyshporka[rent]`
+    🔴 Спершу модуль (`python -m gpurunner`), а не програма: пакет оренди
     ставить наглядача поруч із нами, і саме його версія звірена з цим кодом.
     Програма з PATH може виявитись чужою збіркою з іншого середовища — а
     відчеплений процес успадковує її на весь захід.
+
+    ⚙ `NYSH_GPURUNNER` сильніша за обидва здогади: коли Нишпорку кличуть із
+    чужого простору, де наглядач живе у власному середовищі поруч, адресу знає
+    лише той, хто кличе. Явно названий шлях не перевіряємо на існування тут —
+    нехай відмовить сам виклик із зрозумілою причиною.
     """
     from importlib.util import find_spec
 
+    named = os.environ.get("NYSH_GPURUNNER", "").strip()
+    if named:
+        return [named]
     try:
         if find_spec("gpurunner") is not None:
             return [sys.executable, "-m", "gpurunner"]
@@ -110,8 +118,8 @@ def gpurunner_cmd() -> list[str]:
         return [found]
     raise SupervisorMissing(
         "наглядача хмарних прогонів немає: `nysh cloud go` на орендованій "
-        "машині веде його. Поставте: `pip install \"nyshporka[rent]\"` "
-        "(або `nysh update`), далі `nysh cloud rent login`. Читати на СВОЇЙ "
+        "машині веде його. Поставте: `pip install \"gpurunner[vast,r2]\"` "
+        "поруч із Нишпоркою, далі `nysh cloud rent login`. Читати на СВОЇЙ "
         "машині по SSH можна й без нього: `nysh cloud go --thin` або "
         "`nysh cloud start <тека> --host <машина>`.")
 

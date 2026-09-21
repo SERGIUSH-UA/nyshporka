@@ -465,8 +465,8 @@ def _rent() -> Check:
     renters = [b for b in reg.all() if bills(b)]
     head = f"бекенди {len(reg.all())}, зламані {len(reg.broken)}"
     broken = "; ".join(f"{n} ({why})" for n, why in reg.broken)
-    install = ("поставити плагін оренди: `pip install \"nyshporka[rent]\"` або "
-               "`nysh update`")
+    install = ("поставити плагін оренди поруч із Нишпоркою: "
+               "`pip install \"gpurunner[vast,r2]\"`")
     got = reg.get(RENT_DEFAULT)
     if got is None:
         if any(n == RENT_DEFAULT for n, _ in reg.broken):

@@ -37,7 +37,7 @@ certificate by [SignPath Foundation](https://signpath.org).
 Заявку подано; доки її не схвалено, випуски не підписані й Windows
 показує «Windows захистив ваш ПК» — це очікувано для програми, яку
 ще мало хто завантажував.
-[Політика підписування](https://github.com/SERGIUSH-UA/nyshporka#політика-підписування-коду)
+[Політика підписування](https://sergiush-ua.github.io/nyshporka/signing/)
 · [Приватність](https://github.com/SERGIUSH-UA/nyshporka/blob/main/PRIVACY.md)</sub>
 """
 
