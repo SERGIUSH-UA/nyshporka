@@ -14,6 +14,7 @@
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import sys
 from pathlib import Path
@@ -989,10 +990,8 @@ def test_an_explicit_supervisor_path_wins(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("NYSH_GPURUNNER", str(tmp_path / "gr.exe"))
     assert SUP.gpurunner_cmd() == [str(tmp_path / "gr.exe")]
     monkeypatch.delenv("NYSH_GPURUNNER")
-    try:
+    with contextlib.suppress(SUP.SupervisorMissing):
         assert SUP.gpurunner_cmd() != [str(tmp_path / "gr.exe")]
-    except SUP.SupervisorMissing:
-        pass
 
 
 def test_a_dropped_seed_takes_the_dense_fleet_with_it(space: Path, monkeypatch,
