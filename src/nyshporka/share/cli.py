@@ -118,6 +118,32 @@ def pack_cmd(
     _notes(env)
 
 
+@app.command("publish")
+def publish_cmd(
+    path: str = typer.Argument(..., help="зібраний пакет .nyshtext"),
+    base: str = typer.Option("", "--base", help="інша адреса пулу"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
+) -> None:
+    """Віддати зібраний пакет у пул.
+
+    Повторний виклик із тим самим змістом безпечний: пул упізнає його за
+    хешем змісту й нічого не заливає вдруге.
+    """
+    from nyshporka import ops as O
+
+    env = O.call("share.publish", {"path": path, "base": base})
+    if _answer(env, as_json):
+        return
+    d = env.data or {}
+    if d.get("duplicate"):
+        console.print("[yellow]цей текст уже в Супрязі[/yellow] — нічого не заливалось")
+    else:
+        console.print(f"внесок [bold]{d.get('contribution')}[/bold] · "
+                      f"книга {d.get('shifra') or d.get('book')}")
+        console.print(d.get("text") or "")
+    _notes(env)
+
+
 @app.command("inspect")
 def inspect_cmd(
     src: str = typer.Argument(..., help="файл пакета або адреса"),

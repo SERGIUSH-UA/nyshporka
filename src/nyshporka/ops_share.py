@@ -76,7 +76,8 @@ class SharePackArgs(BaseModel):
 
 @op("share.pack", summary="Спакувати прочитане у файл для обміну",
     args=SharePackArgs, mutates=True, agent=False, gui=False, section=SECTION,
-    next_hints=(("share.row", "рядок для каталогу пулу"),))
+    next_hints=(("share.publish", "віддати пакет у пул"),
+                ("share.row", "рядок для каталогу пулу"),))
 def share_pack(a: SharePackArgs) -> Envelope:
     """Зібрати пакет справи.
 
@@ -101,6 +102,43 @@ def share_pack(a: SharePackArgs) -> Envelope:
     env = ok(got)
     for w in (got.get("gates") or {}).get("warnings") or []:
         env.warn(str(w.get("code") or "gate"), str(w.get("text") or ""))
+    return env
+
+
+class SharePublishArgs(BaseModel):
+    path: str = Field(description="зібраний пакет .nyshtext")
+    base: str = Field(default="", description="інша адреса пулу")
+
+
+@op("share.publish", summary="Віддати зібраний пакет у пул",
+    args=SharePublishArgs, mutates=True, agent=False, gui=False, section=SECTION,
+    private=True, next_hints=(("share.pull", "перевірити, що пакет знайшовся"),))
+def share_publish(a: SharePublishArgs) -> Envelope:
+    """Реєстрація → байти в сховище → підтвердження.
+
+    🔴 Байти йдуть у сховище НАПРЯМУ, повз сервер пулу. Пакет на сорок
+    мегабайтів через застосунок означав би, що один повільний канал тримає
+    всіх інших.
+
+    Повторний виклик із тим самим змістом безпечний: пул упізнає його за
+    хешем змісту й скаже «вже є», а не заведе другий внесок. Саме на це й
+    розрахунок — найчастіший повтор це «залив удруге, бо перший раз
+    обірвалось».
+    """
+    from pathlib import Path
+
+    from nyshporka.share.upload import UploadError, publish
+
+    try:
+        got = publish(Path(a.path), base=a.base)
+    except UploadError as exc:
+        return fail(str(exc))
+    env = ok(got)
+    if got.get("duplicate"):
+        env.warn("duplicate", "цей текст уже в пулі — нічого не заливалось")
+    for w in got.get("warnings") or []:
+        if isinstance(w, dict):
+            env.warn(str(w.get("code") or "gate"), str(w.get("text") or ""))
     return env
 
 
@@ -210,13 +248,15 @@ def share_stats(a: ShareStatsArgs) -> Envelope:
     if a.catalog:
         from nyshporka.share import catalog as C
 
+        # Зведення рахує сервер. Раніше заради трьох чисел качався весь
+        # каталог — на пулі в десятки тисяч пакетів це коштувало б мегабайти
+        # на кожен виклик `share stats --catalog`.
         try:
-            rows = C.fetch(a.base)
+            data["catalog"] = C.stats(a.base)
         except RuntimeError as exc:
             env.warn("catalog_unreachable", str(exc))
         else:
-            data["catalog"] = C.summarize(rows)
-            data["catalog_url"] = C.catalog_url(a.base)
+            data["catalog_url"] = C.base_url(a.base)
     return env
 
 
@@ -265,17 +305,19 @@ def share_pull(a: SharePullArgs) -> Envelope:
     """
     from nyshporka.share import catalog as C
 
+    # 🔴 Пошук тепер серверний. Раніше сюди качався ВЕСЬ каталог, і збіг
+    # шукався в пам'яті: на сотні пакетів це було дешево, на десятках тисяч
+    # означало б мегабайти на кожне питання про одну справу.
     try:
-        rows = C.fetch(a.base)
+        found, count, of = C.search(a.query, a.base)
     except RuntimeError as exc:
         return fail(str(exc))
-    found = C.find(rows, a.query)
     data: dict[str, Any] = {"found": [r.as_json() for r in found],
-                            "count": len(found), "of": len(rows),
-                            "catalog": C.catalog_url(a.base)}
+                            "count": count, "of": of,
+                            "catalog": C.base_url(a.base)}
     env = ok(data)
     if not found:
-        env.warn("nothing", f"у каталозі {len(rows)} пакетів, жоден не збігся "
+        env.warn("nothing", f"у пулі {of} пакетів, жоден не збігся "
                             f"з «{a.query}»")
         return env
     if a.take:

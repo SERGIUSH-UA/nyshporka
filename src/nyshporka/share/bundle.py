@@ -72,6 +72,7 @@ class Voice:
     chars: int = 0
     conf_mean: float | None = None
     geometry: bool = False
+    content_sha256: str = ""
 
     def as_json(self) -> dict[str, Any]:
         out = {"run": self.run, "engine": self.engine, "model": self.model,
@@ -79,6 +80,8 @@ class Voice:
                "chars": self.chars, "geometry": self.geometry}
         if self.conf_mean is not None:
             out["conf_mean"] = round(self.conf_mean, 3)
+        if self.content_sha256:
+            out["content_sha256"] = self.content_sha256
         return out
 
 
@@ -205,6 +208,39 @@ def _conf_mean(meta: dict[str, Any]) -> float | None:
     return sum(vals) / len(vals) if vals else None
 
 
+#: Розділювач у хеші змісту. Нульовий байт: у назві файлу його не буває, а
+#: в тексті рушія — тим паче.
+_SEP = bytes([0])
+
+
+def content_sha256(run_dir: Path) -> str:
+    """Хеш ЗМІСТУ прогону: над парами (ім'я сторінки, байти тексту).
+
+    🔴 Це не те саме, що sha256 файла пакета, і потрібні вони для різного.
+    Хеш файла відповідає на питання «чи доїхали байти цілими» — і більше ні
+    на що: той самий прогін, спакований двічі, дає РІЗНІ байти, бо в
+    маніфесті стоїть час пакування, у членах tar — `mtime`, а в заголовку
+    gzip — час створення.
+
+    Хеш змісту відповідає на питання «це вже віддавали». Без нього
+    найчастіший повтор — «залив удруге, бо перший раз обірвалось» — на
+    боці пулу виглядає як новий внесок, і та сама робота лягає двічі.
+
+    Рахується по відсортованих іменах, тож порядок обходу теки на нього не
+    впливає; геометрія не входить — вона похідна від кадрів, а не від
+    прочитаного.
+    """
+    h = hashlib.sha256()
+    for f in sorted(run_dir.glob(PACKED_TEXT), key=lambda x: x.name):
+        # Ім'я й текст розділені байтом, якого в жодному з них бути не може:
+        # інакше «0001.txt» + «abc» і «0001.txtabc» + «» дали б один хеш.
+        h.update(f.name.encode("utf-8"))
+        h.update(_SEP)
+        h.update(f.read_bytes())
+        h.update(_SEP)
+    return h.hexdigest()
+
+
 def voice_of(run_dir: Path, *, geometry: bool) -> Voice:
     """Описати одну теку прогону так, як її побачить отримувач."""
     from nyshporka import htr_store as S
@@ -222,7 +258,8 @@ def voice_of(run_dir: Path, *, geometry: bool) -> Voice:
                  model=str(meta.get("model") or ""),
                  script=str(meta.get("script") or ""),
                  pages=pages, lines=lines, chars=chars,
-                 conf_mean=_conf_mean(meta), geometry=bool(has_geo))
+                 conf_mean=_conf_mean(meta), geometry=bool(has_geo),
+                 content_sha256=content_sha256(run_dir))
 
 
 def _members(run_dir: Path, *, geometry: bool) -> list[Path]:

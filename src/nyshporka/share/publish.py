@@ -7,6 +7,7 @@
 """
 from __future__ import annotations
 
+import hashlib
 import time
 from pathlib import Path
 from typing import Any
@@ -159,6 +160,12 @@ def build_manifest(scope: str, *, geometry: bool = False,
         "chars": sum(v.chars for v in voices),
         "blank_pages": blank,
         "voices": [v.as_json() for v in voices],
+        # 🔴 Хеш ЗМІСТУ пакета — не той самий, що sha256 файла. Файл того
+        # самого прогону, спакований двічі, має різні байти (час у маніфесті,
+        # mtime у tar, час у gzip), тож за ним «це вже віддавали» не
+        # впізнати. Зведений по всіх голосах, у порядку імен прогонів, щоб
+        # порядок обходу тек на нього не впливав.
+        "content_sha256": _content_of(voices),
     }
     frames_block = align.summary(frames) if frames else {"total": 0, "listed": 0,
                                                          "with_sha256": 0,
@@ -179,6 +186,21 @@ def build_manifest(scope: str, *, geometry: bool = False,
         links=list(links or []), extra=dict(extra or {}), license=lic,
         tool=bundle._tool_version(), created=time.strftime("%Y-%m-%dT%H:%M:%S%z"))
     return m, run_dirs, frames
+
+
+def _content_of(voices: list[bundle.Voice]) -> str:
+    """Один хеш змісту на весь пакет — зведення хешів голосів.
+
+    Голос без свого хеша (старий прогін, перепакований новим клієнтом)
+    просто не бере участі: краще віддати хеш меншого набору, ніж вигадати
+    його й отримати тихий «дубль» там, де його немає.
+    """
+    parts = sorted(v.content_sha256 for v in voices if v.content_sha256)
+    if not parts:
+        return ""
+    if len(parts) == 1:
+        return parts[0]
+    return hashlib.sha256("\n".join(parts).encode("utf-8")).hexdigest()
 
 
 def _blank_pages(run_dirs: list[Path]) -> int:

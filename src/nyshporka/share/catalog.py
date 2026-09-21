@@ -26,7 +26,10 @@ from typing import Any
 #: пакети можуть переїхати в R2; адреса при цьому не змінюється. Посилання,
 #: роздані в дописах і вписані в чужі маніфести, переживають переїзд — а вони
 #: якраз і є те, що відкликати найдорожче.
-DEFAULT_BASE = "https://nyshporka.online/toloka"
+#: Від 0.18 це адреса API, а не тека зі статичним файлом. Сам домен той
+#: самий — саме заради цього він і заводився: каталог переїхав із TSV у
+#: застосунок, а посилання, роздані в дописах, лишились чинними.
+DEFAULT_BASE = "https://api.nyshporka.online/v1"
 CATALOG_NAME = "catalog.tsv"
 
 #: Інша домівка — для свого дзеркала або для перевірки клієнта проти тестового
@@ -164,20 +167,109 @@ def catalog_url(base: str = "") -> str:
     return f"{base_url(base)}/{CATALOG_NAME}"
 
 
-def fetch(base: str = "", *, dest: Path | None = None) -> list[Row]:
-    """Забрати каталог із мережі. Порожній або недосяжний — виняток із причиною."""
+def _get(url: str) -> dict[str, Any]:
+    """Запит до пулу з розбором відповіді.
+
+    🪤 `Fetcher` ходить із браузерним User-Agent — це видно в `sources/http.py`
+    і це не випадковість. Наслідок для пулу: на його домені не можна вмикати
+    JS-челендж, бо клієнт виглядає як Chrome, але JS не виконує, дістає 403 і
+    НЕ повторює — відступ спрацьовує лише на 429 і 5xx.
+    """
+    import json
+
     from nyshporka.sources.http import Fetcher, HttpError
 
-    url = catalog_url(base)
     try:
         resp = Fetcher().get(url)
     except HttpError as exc:
-        raise RuntimeError(f"каталог за {url} недоступний: {exc}") from exc
+        raise RuntimeError(f"пул за {url} недоступний: {exc}") from exc
     text = resp.text if hasattr(resp, "text") else str(resp)
+    try:
+        got = json.loads(text)
+    except ValueError as exc:
+        raise RuntimeError(f"пул за {url} відповів не JSON: {exc}") from exc
+    if not isinstance(got, dict):
+        raise RuntimeError(f"пул за {url} відповів не тим, чого чекали")
+    return got
+
+
+def _rows(payload: dict[str, Any]) -> list[Row]:
+    """Рядки з відповіді пулу.
+
+    Зайві поля відкидаються, відсутні лишаються порожніми — те саме правило,
+    що й у `parse`: читач старого каталогу мусить лишатись робочим, коли на
+    сервері допишуть колонку.
+    """
+    names = {f.name for f in fields(Row)}
+    out: list[Row] = []
+    for raw in payload.get("rows") or []:
+        if isinstance(raw, dict):
+            out.append(Row(**{k: _clean(str(v)) for k, v in raw.items() if k in names}))
+    return out
+
+
+def search(query: str = "", base: str = "", *, limit: int = 50,
+           offset: int = 0) -> tuple[list[Row], int, int]:
+    """Пошук у пулі → (рядки, скільки збіглося, скільки в пулі всього).
+
+    🔴 Пошук СЕРВЕРНИЙ. Раніше клієнт качав увесь каталог і фільтрував його
+    в пам'яті — на сотні пакетів це працювало, на десятках тисяч означало б
+    мегабайти на кожен запит про одну справу.
+
+    Третє число — розмір пулу; воно потрібне рядку «пакетів N», і без нього
+    людина не бачить, наскільки великою є спільна робота.
+    """
+    from urllib.parse import urlencode
+
+    qs = urlencode({"q": query, "limit": limit, "offset": offset})
+    got = _get(f"{base_url(base)}/search?{qs}")
+    rows = _rows(got)
+    return rows, int(got.get("count") or len(rows)), int(got.get("of") or 0)
+
+
+def stats(base: str = "") -> dict[str, Any]:
+    """Зведення по пулу — рахує сервер.
+
+    Раніше для цих трьох чисел качався весь каталог.
+    """
+    return _get(f"{base_url(base)}/stats")
+
+
+def lookup(shifra: str, *, frames: int = 0, base: str = "") -> dict[str, Any]:
+    """Чи є вже текст цієї книги — питання ПЕРЕД прогоном.
+
+    Ніколи не кидає: пул лежить — повертається «не знайдено» з причиною.
+    Прогін не має падати через те, що пул недоступний.
+    """
+    from urllib.parse import urlencode
+
+    qs = urlencode({"shifra": shifra, "frames": frames})
+    try:
+        return _get(f"{base_url(base)}/lookup?{qs}")
+    except RuntimeError as exc:
+        return {"found": False, "why": str(exc), "offline": True}
+
+
+def fetch(base: str = "", *, dest: Path | None = None) -> list[Row]:
+    """Забрати ввесь каталог — для офлайн-дзеркала.
+
+    Лишається окремо від `search`, бо в нього інша задача: не відповісти на
+    питання, а зняти копію. Гортання сторінками, а не один великий запит:
+    стеля видачі стоїть на сервері й не обходиться.
+    """
+    out: list[Row] = []
+    offset = 0
+    while True:
+        rows, _, of = search("", base, limit=100, offset=offset)
+        out.extend(rows)
+        offset += len(rows)
+        if not rows or offset >= of:
+            break
     if dest is not None:
         Path(dest).parent.mkdir(parents=True, exist_ok=True)
-        Path(dest).write_text(text, encoding="utf-8")
-    return parse(text)
+        Path(dest).write_text(
+            header() + "".join(r.as_tsv() + "\n" for r in out), encoding="utf-8")
+    return out
 
 
 def summarize(rows: list[Row]) -> dict[str, Any]:
