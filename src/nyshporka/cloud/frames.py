@@ -362,7 +362,12 @@ def shrink(src: Path | str, dst: Path | str, *, target_h: int = TARGET_HEIGHT,
                 # — це ширина.
                 if rotate_landscape and im.width > im.height:
                     im = im.transpose(image.ROTATE_270)   # 90° за годинниковою
-                    rotated += 1
+                    with lock:
+                        # Єдиний лічильник, що лишався поза локом; на восьми
+                        # потоках він недорахував би повороти — а саме це число
+                        # людина читає, щоб переконатись, що `--rotate-landscape`
+                        # зробив те, про що вона просила.
+                        rotated += 1
                 if im.height > target_h:
                     w = round(im.width * target_h / im.height)
                     im = im.resize((w, target_h), image.LANCZOS)

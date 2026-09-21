@@ -132,7 +132,14 @@ def geometry_problem(frames: Sequence[Path], base_out: Path) -> str:
                 got = list(im.size)
         except (OSError, ValueError):
             continue
-        if size and list(size) != got:
+        if not size:
+            # 🔴 Розміру в сайдкарі немає (старий прогін) — порівняння НЕ
+            # відбулось, і рахувати його як перевірене не можна: п'ять таких
+            # кадрів підряд вичерпували вибірку, і головний запобіжник модуля
+            # казав «усе гаразд», не звіривши жодного разу. Знайдено рев'ю
+            # 21.09.2026.
+            continue
+        if list(size) != got:
             return (f"кеш знятий із кадрів іншого розміру ({frame.name}: "
                     f"{got[0]}×{got[1]} проти {size[0]}×{size[1]} у першому "
                     f"прогоні — стиснені для хмари?)")

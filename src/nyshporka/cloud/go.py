@@ -207,7 +207,11 @@ def _fill_cases(res: GoResult, convoy: CV.Convoy) -> None:
                             case_dir=str(leg.source), out_dir=str(leg.plan.out_dir),
                             pages_total=leg.plan.frames)
                  for leg in convoy.legs]
-    res.pages_total = convoy.pages
+    # 🔴 Сторінок — СКІЛЬКИ ПРОЧИТАЄ МАШИНА, а не скільки лишилось за нашим
+    # обліком. На наглядацькому шляху прочитане локально на машину не їде
+    # (захід відновлюється зі СВОЇХ точок), тож «лишилось 50» на справі в 3000
+    # аркушів було б обіцянкою, за якою прийде рахунок на всі три тисячі.
+    res.pages_total = sum(c.pages_total for c in res.cases)
     if len(convoy.legs) == 1:
         one = convoy.one
         res.run_id, res.out_dir = one.plan.run_id, str(one.plan.out_dir)
@@ -218,6 +222,26 @@ def _fill_cases(res: GoResult, convoy: CV.Convoy) -> None:
 
 def _case_of(res: GoResult, run_id: str) -> CaseResult | None:
     return next((c for c in res.cases if c.run_id == run_id), None)
+
+
+def _sync_case(res: GoResult) -> None:
+    """Звести підсумок заходу на одну справу в її запис у `cases[]`.
+
+    🔴 `cases[]` мусить існувати ЗАВЖДИ й бути правдою: скіл учить агента
+    читати саме його. Доти запис заповнювався один раз, до роботи, — і після
+    завершеного заходу казав «0 сторінок, вердикту немає», поки верхні поля
+    казали `ok`. Знайдено рев'ю 21.09.2026.
+    """
+    if len(res.cases) != 1:
+        return
+    one = res.cases[0]
+    one.verdict, one.why = res.verdict, res.why
+    one.pages_done, one.missing = res.pages_done, res.missing
+    one.quarantined = res.quarantined
+    if res.run_id:
+        one.run_id = res.run_id
+    if res.out_dir:
+        one.out_dir = res.out_dir
 
 # ── справа ───────────────────────────────────────────────────────────────────
 @dataclass(frozen=True)
@@ -430,6 +454,7 @@ def go(case: str | Sequence[str], *, backend: str = "vast",
         _last_line_of_defence(res, say)
     finally:
         owner.close()
+    _sync_case(res)
     return res
 
 
@@ -697,13 +722,22 @@ def _go(res: GoResult, cases: tuple[str, ...], say: EventFn,
             raise GoRefused(str(exc)) from None
 
     # 1. справи: кожна готується окремо, і кожна може випасти зі свого приводу
+    if case_key and len(cases) > 1:
+        # 🔴 Відмова, а не мовчазне відкидання. Шифра — властивість ОДНІЄЇ
+        # справи, і прийнявши її для черги, ми або підписали б чужу книгу
+        # чужим шифром, або тихо викинули б те, що людина щойно набрала
+        # (знайдено рев'ю 21.09.2026).
+        raise GoRefused(
+            "`--case-key` стосується однієї справи, а названо "
+            f"{len(cases)}. Пустіть їх окремо або покладіть `_source.json` "
+            f"у теки — шифру візьме бібліотека.")
     legs: list[CV.Leg] = []
     dropped: list[tuple[str, str]] = []
     for arg in cases:
         try:
             leg, live = _prepare(res, arg, say, owner, backend=backend,
                                  script=script, model=model,
-                                 case_key=case_key if len(cases) == 1 else "",
+                                 case_key=case_key,
                                  second_voice=second_voice, with_voices=with_voices,
                                  max_price=max_price, rerun=rerun,
                                  allow_partial=allow_partial,
@@ -727,6 +761,12 @@ def _go(res: GoResult, cases: tuple[str, ...], say: EventFn,
                     f"і вона підхопить свою машину")
             plan = build_for(live)
             res.adopted = True
+            # Підхоплений захід теж мусить мати запис справи: агент читає
+            # `cases[]` незалежно від того, як робота почалась.
+            res.cases = [CaseResult(run_id=live.run_id, case_key=live.case_key,
+                                    case_dir=live.source_dir or live.case_dir,
+                                    out_dir=live.out_dir,
+                                    pages_total=live.frames_total)]
             say("adopt", f"захід {live.run_id} уже йде — підхоплено разом зі "
                          f"стелями, другої машини не беремо")
             _supervise(live, plan, res, say, tick_sec=tick_sec)
@@ -738,7 +778,22 @@ def _go(res: GoResult, cases: tuple[str, ...], say: EventFn,
     if not legs:
         raise GoRefused("жодна справа заходу не поїхала: "
                         + "; ".join(f"{arg} — {why}" for arg, why in dropped))
-    convoy = CV.of(legs, dropped)
+    try:
+        convoy = CV.of(legs, dropped)
+    except CV.ConvoyError as exc:
+        # Дві справи з однаковим іменем теки — помилка людини, яку ми вміємо
+        # назвати, а не наш збій: вердикт `refused`, а не `failed` із класом
+        # винятку, приклеєним до ретельно написаного тексту.
+        raise GoRefused(str(exc)) from None
+    if thin and params:
+        # 🔴 Відмова, а не мовчазне ігнорування: тонкий шлях складає команду
+        # раннера сам і каналу для параметрів роботи не має. Прийняти прапорець
+        # і не передати його означало б дати людині думати, що вона керує
+        # прогоном, який іде з дефолтами (знайдено рев'ю 21.09.2026).
+        raise GoRefused(
+            "`-p` працює лише на наглядацькому шляху: тонкий складає команду "
+            "раннера сам і параметрів роботи не передає. Приберіть `--thin` "
+            "або `-p`.")
     if thin and len(convoy.legs) > 1:
         # 🔴 Відмова, а не мовчазне «візьму першу»: тонкий шлях тримає ОДНЕ
         # з'єднання, один віддалений каталог і один pid. Оренди ще не було,

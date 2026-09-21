@@ -811,7 +811,9 @@ def test_two_cases_with_the_same_folder_name_are_refused_before_shrinking(
     twin = _second_case(space / "інший-архів", first.name)
 
     got = _go([str(first), str(twin)], dry_run=True)
-    assert got.verdict == "failed", got.why
+    # Відмова, а не збій: помилку людини ми вміємо назвати, і вердикт має
+    # казати саме це (`refused`, код 2).
+    assert (got.verdict, got.exit_code) == ("refused", 2), got.why
     assert "спільне ім'я прогону" in got.why or "спільну теку" in got.why
     assert not fake_gpurunner.called("htr", "plan"), "плану не складали — і не везли"
 
@@ -981,3 +983,62 @@ def test_an_explicit_supervisor_path_wins(monkeypatch, tmp_path: Path) -> None:
     assert SUP.gpurunner_cmd() == [str(tmp_path / "gr.exe")]
     monkeypatch.delenv("NYSH_GPURUNNER")
     assert SUP.gpurunner_cmd() != [str(tmp_path / "gr.exe")]
+
+
+def test_a_dropped_seed_takes_the_dense_fleet_with_it(space: Path, monkeypatch,
+                                                      fake_gpurunner) -> None:
+    """🔴🔴 Найдорожча помилка з можливих: машина читає з ПОВНОЮ сегментацією,
+    а флот їй дали як для готової.
+
+    Щільніший флот (0.5 ядра на шард) правдивий рівно доти, доки сегментація
+    справді їде. Коли засів знято — людина назвала `--transport box` або
+    сховища немає, — сторінка знову рахує геометрію повністю, і шарди душаться
+    на вдвічі менших ядрах. Платимо за це погодинно.
+
+    Знайдено рев'ю 21.09.2026 на двох шляхах одразу: параметри складались
+    окремо від рішення про засів.
+    """
+    case, _ = _wire(space, monkeypatch)
+    _named_model(space, monkeypatch)
+    _seed_ready(space, case)
+
+    _go(case, model="skryba_f792_v6.mlmodel", dry_run=True, transport="box")
+    plan = _plan_of(fake_gpurunner)
+    assert not plan["cases"][0]["seed_seg"], "засів мав бути знятий"
+    assert not [p for p in plan["params"] if p.startswith(("cores_per_shard=",
+                                                           "vram_gb_per_shard="))], (
+        "флот лишився щільним без засіву: машина читатиме з повною "
+        "сегментацією на вдвічі менших ядрах — і це оплачувані години")
+
+
+def test_a_params_flag_with_thin_is_refused(space: Path, monkeypatch,
+                                            fake_gpurunner) -> None:
+    """🔴 Тонкий шлях складає команду раннера сам і каналу для параметрів не
+    має. Прийняти `-p` і не передати означало б дати людині думати, що вона
+    керує прогоном, який іде з дефолтами."""
+    case, _ = _wire(space, monkeypatch)
+    got = _go(case, thin=True, dry_run=True, params=["shards=6"])
+    assert (got.verdict, got.exit_code) == ("refused", 2)
+    assert "-p" in got.why
+
+
+def test_a_case_key_with_a_batch_is_refused(space: Path, monkeypatch,
+                                            fake_gpurunner) -> None:
+    """Шифра — властивість ОДНІЄЇ справи. Мовчки відкинути те, що людина щойно
+    набрала, не можна; підписати нею всю чергу — тим паче."""
+    first, _ = _wire(space, monkeypatch)
+    second = _second_case(space)
+    got = _go([str(first), str(second)], dry_run=True, case_key="ARCH/1/9")
+    assert (got.verdict, got.exit_code) == ("refused", 2)
+    assert "--case-key" in got.why
+
+
+def test_one_case_result_tells_the_truth_after_the_run(space: Path, monkeypatch,
+                                                       fake_gpurunner) -> None:
+    """🔴 `cases[]` — не знімок до роботи, а підсумок. Скіл учить агента читати
+    саме його, і «0 сторінок, вердикту немає» при `ok` угорі читалося б як
+    непочатий захід."""
+    case, _ = _wire(space, monkeypatch)
+    got = _go(case, dry_run=True)
+    assert len(got.cases) == 1
+    assert got.cases[0].verdict == got.verdict == "dry_run"

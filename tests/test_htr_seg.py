@@ -180,3 +180,31 @@ def test_a_missing_lines_json_is_not_a_geometry_problem(tmp_path: Path) -> None:
 
     got = S.inspect(case, frames, base_out=tmp_path / "порожньо", derived=derived)
     assert got.usable and got.covered == 3
+
+
+def test_a_sidecar_without_a_size_is_not_a_check(tmp_path: Path) -> None:
+    """🔴 П'ять старих сайдкарів на початку теки вичерпували вибірку — і
+    головний запобіжник модуля казав «усе гаразд», не звіривши ЖОДНОГО кадру.
+
+    Старі прогони писали `.lines.json` без поля `size`; такий файл не є
+    порівнянням, і рахувати його як перевірене не можна. Знайдено рев'ю
+    21.09.2026.
+    """
+    from nyshporka.htr.run import seg_cache_dir
+
+    case = tmp_path / "spr-9"
+    case.mkdir()
+    # шість кадрів: перші п'ять із сайдкарами БЕЗ розміру, шостий — із чужим
+    frames = [_frame(case / f"{i:04d}.jpg", (600, 900)) for i in range(6)]
+    out = tmp_path / "out"
+    out.mkdir()
+    for f in frames[:5]:
+        (out / f"{f.stem}.lines.json").write_text(json.dumps({"lines": []}),
+                                                  encoding="utf-8")
+    _lines_json(out, frames[5].stem, (1200, 1800))
+
+    derived = tmp_path / "derived"
+    _cache(seg_cache_dir(case, derived), [f.stem for f in frames])
+    got = S.inspect(case, frames, base_out=out, derived=derived)
+    assert not got.usable, "розбіжність за шостим кадром мусила спрацювати"
+    assert "іншого розміру" in got.why

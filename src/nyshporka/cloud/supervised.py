@@ -387,68 +387,87 @@ def launch(convoy: Convoy, res: GoResult, say: Callable[..., None], *,
     # сховищі — на самій машині їх ще немає, бо машини ще немає. Тому засів
     # можливий лише зі сховищем, і транспорт при ньому називається явно.
     seeded = any(leg.seed is not None for leg in convoy.legs)
+
+    def make_cmd(*, seeded: bool) -> list[str]:
+        """Команда складача плану — ціла, під заданий засів.
+
+        🔴 Команда збирається ОДНІЄЮ функцією, а не латається на місці. Засів
+        і щільніший флот — це одне рішення у двох місцях команди
+        (`--seed-seg` і `-p cores_per_shard=…`), і рознісши їх, ми дістали б
+        найдорожчу з можливих помилок: машина читає з повною сегментацією, а
+        флот їй дали як для готової — тобто шарди душаться на вдвічі менших
+        ядрах, і платимо ми за це погодинно. (Знайдено рев'ю 21.09.2026 на
+        двох шляхах одразу: `--transport box` і відкат без сховища.)
+        """
+        out = [*gr, "htr", "plan"]
+        # 🔴 Справи йдуть трьома паралельними списками, і порядок у них той
+        # самий: наглядач зв'язує ключ, ім'я та засів зі справою ЛИШЕ за
+        # позицією. Порожній елемент теж передається — пропуск зсунув би
+        # решту на одну позицію, і справа дістала б чужу шифру.
+        for leg in convoy.legs:
+            out += ["--case", str(leg.pack), "--case-key", leg.plan.case_key,
+                    "--name", leg.name]
+            if seeded:
+                out += ["--seed-seg", str(leg.seed) if leg.seed else ""]
+        out += ["--out-root", str(convoy.out_root),
+                "--model", plan.model.name, "--voices", voices,
+                "--assets", str(assets),
+                "--expect-script", f"{RUNNER_ARCNAME}={runner_path()}",
+                "--disk", str(convoy.disk_gb()),
+                "--max-hours", str(MAX_HOURS_CAP),
+                "--prefer-cores", str(PREFER_CORES),
+                # Чим везти дані: об'єктне сховище (якщо воно в людини є) або
+                # сама машина. Вирішує наглядач — він єдиний знає, що
+                # налаштовано; при засіві сховище обов'язкове.
+                "--transport", "r2" if seeded else transport,
+                "--out", str(plan_path)]
+        if any(not leg.plan.case_key for leg in convoy.legs):
+            # Шифри немає бодай у однієї справи — наглядач інакше відмовиться
+            # від порожнього ключа. Прапорець заходовий, тож одна безіменна
+            # тека знімає перевірку з усіх; це свідомо: сама перевірка — про
+            # бібліотеку, а рішення «ця тека не архівна справа» вже ухвалила
+            # людина.
+            out.append("--key-not-in-library")
+        # 🔴 Обчислені нами параметри йдуть ПЕРШИМИ, людські — після, бо
+        # наглядач збирає їх у словник і останнє входження перемагає. Людина,
+        # що набрала `-p lines_per_page=…`, мусить перекрити наш здогад.
+        computed = [f"script={plan.script}"]
+        if convoy.lines_per_page:
+            computed.append(f"lines_per_page={convoy.lines_per_page}")
+        if seeded and convoy.dense_fleet:
+            # 🔴 Флот один на всю чергу, тож щільніший ставимо лише коли
+            # засіяні ВСІ справи й засів справді їде: сторінка без кешу рахує
+            # геометрію повністю й задушила б шарди, яким дали вдвічі менше ядер.
+            from nyshporka.htr.seg import CORES_PER_SHARD_SEEDED, GB_PER_SHARD_SEEDED
+
+            computed += [f"cores_per_shard={CORES_PER_SHARD_SEEDED}",
+                         f"vram_gb_per_shard={GB_PER_SHARD_SEEDED}"]
+        given = {item.split("=", 1)[0] for item in params if "=" in item}
+        for item in [*(c for c in computed if c.split("=", 1)[0] not in given), *params]:
+            out += ["-p", item]
+        if plan.max_price_usd_h:
+            out += ["--max-price", str(plan.max_price_usd_h)]
+        if max_usd_per_1000:
+            # 🔴 Головний поріг вибору машини. Дефолт наглядача калібрований на
+            # МЕТРИКАХ; щільний аркуш (сповідка, клірова) читається вдвічі
+            # довше, і на ньому той поріг або відсікає весь ринок, або спиняє
+            # захід на ціні посеред роботи — тобто виглядає як «машин немає»
+            # там, де насправді замалий дозвіл.
+            out += ["--max-usd-per-1000", str(max_usd_per_1000)]
+        return out
+
+    def no_seed(why_said: bool = True) -> None:
+        if why_said:
+            say("warning", _NO_SEED_WHY)
+        res.notes.append(_NO_SEED_NOTE)
+
     if seeded and transport == "box":
         # Людина сказала «вези на машину» — її вибір сильніший за нашу
         # економію. Але ціна мусить бути названа, інакше мовчазна відмова від
         # засіву виглядає як безплатна.
-        say("warning", _NO_SEED_WHY)
-        res.notes.append(_NO_SEED_NOTE)
+        no_seed()
         seeded = False
-    cmd = [*gr, "htr", "plan"]
-    # 🔴 Справи йдуть трьома паралельними списками, і порядок у них той самий:
-    # наглядач зв'язує ключ, ім'я та засів зі справою ЛИШЕ за позицією.
-    # Порожній елемент теж передається — пропуск зсунув би решту на одну
-    # позицію, і справа дістала б чужу шифру.
-    for leg in convoy.legs:
-        cmd += ["--case", str(leg.pack), "--case-key", leg.plan.case_key,
-                "--name", leg.name]
-        if seeded:
-            # Порожній елемент теж передається: позиція — єдине, що зв'язує
-            # засів зі справою.
-            cmd += ["--seed-seg", str(leg.seed) if leg.seed else ""]
-    cmd += ["--out-root", str(convoy.out_root),
-           "--model", plan.model.name, "--voices", voices,
-           "--assets", str(assets),
-           "--expect-script", f"{RUNNER_ARCNAME}={runner_path()}",
-           "--disk", str(convoy.disk_gb()),
-           "--max-hours", str(MAX_HOURS_CAP),
-           "--prefer-cores", str(PREFER_CORES),
-           # Чим везти дані: об'єктне сховище (якщо воно в людини є) або сама
-           # машина. Вирішує наглядач — він єдиний знає, що налаштовано.
-           "--transport", "r2" if seeded else transport,
-           "--out", str(plan_path)]
-    if any(not leg.plan.case_key for leg in convoy.legs):
-        # Шифри немає бодай у однієї справи — наглядач інакше відмовиться від
-        # порожнього ключа. Прапорець заходовий, тож одна безіменна тека знімає
-        # перевірку з усіх; це свідомо: сама перевірка — про бібліотеку, а
-        # рішення «ця тека не архівна справа» вже ухвалила людина.
-        cmd.append("--key-not-in-library")
-    # 🔴 Обчислені нами параметри йдуть ПЕРШИМИ, людські — після, бо наглядач
-    # збирає їх у словник і останнє входження перемагає. Людина, що набрала
-    # `-p lines_per_page=…`, мусить перекрити наш здогад, а не навпаки.
-    computed = [f"script={plan.script}"]
-    if convoy.lines_per_page:
-        computed.append(f"lines_per_page={convoy.lines_per_page}")
-    if convoy.dense_fleet and any(leg.seed for leg in convoy.legs):
-        # 🔴 Флот один на всю чергу, тож щільніший ставимо лише коли засіяні
-        # ВСІ справи: сторінка без кешу рахує геометрію повністю й задушила б
-        # шарди, яким дали вдвічі менше ядер.
-        from nyshporka.htr.seg import CORES_PER_SHARD_SEEDED, GB_PER_SHARD_SEEDED
-
-        computed += [f"cores_per_shard={CORES_PER_SHARD_SEEDED}",
-                     f"vram_gb_per_shard={GB_PER_SHARD_SEEDED}"]
-    given = {item.split("=", 1)[0] for item in params if "=" in item}
-    for item in [*(c for c in computed if c.split("=", 1)[0] not in given), *params]:
-        cmd += ["-p", item]
-    if plan.max_price_usd_h:
-        cmd += ["--max-price", str(plan.max_price_usd_h)]
-    if max_usd_per_1000:
-        # 🔴 Головний поріг вибору машини. Дефолт наглядача калібрований на
-        # МЕТРИКАХ; щільний аркуш (сповідка, клірова) читається вдвічі довше,
-        # і на ньому той поріг або відсікає весь ринок, або спиняє захід на
-        # ціні посеред роботи — тобто виглядає як «машин немає» там, де
-        # насправді замалий дозвіл.
-        cmd += ["--max-usd-per-1000", str(max_usd_per_1000)]
+    cmd = make_cmd(seeded=seeded)
     say("plan", "складаємо план і веземо кадри в сховище наглядача")
     if _run(cmd, env=env).returncode or not plan_path.is_file():
         if not seeded or transport != "auto":
@@ -457,13 +476,8 @@ def launch(convoy: Convoy, res: GoResult, say: Callable[..., None], *,
         # їдемо без засіву й кажемо ЦІНУ: сторінка коштуватиме ще й
         # сегментацію (замір 9.1 → 18.4 с/стор). Повтор безплатний: перевірка
         # транспорту в наглядача стоїть до будь-якої заливки.
-        say("warning", _NO_SEED_WHY)
-        res.notes.append(_NO_SEED_NOTE)
-        while "--seed-seg" in cmd:
-            i = cmd.index("--seed-seg")
-            del cmd[i:i + 2]
-        cmd[cmd.index("--transport") + 1] = transport
-        if _run(cmd, env=env).returncode or not plan_path.is_file():
+        no_seed()
+        if _run(make_cmd(seeded=False), env=env).returncode or not plan_path.is_file():
             raise GoRefused(f"план заходу не склався — див. вивід вище; тека {work}")
 
     # 3. правки, яких наглядач знати не може
