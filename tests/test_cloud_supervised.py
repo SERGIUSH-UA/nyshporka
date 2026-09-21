@@ -1073,3 +1073,24 @@ def test_stopping_one_case_of_a_batch_says_it_wraps_the_whole_queue(
 
     got = CliRunner().invoke(C.app, ["stop", run_id])
     assert "ще 1" in got.output and "чергу" in got.output, got.output
+
+
+def test_bookkeeping_hooks_carry_the_workspace_root(space: Path, monkeypatch,
+                                                    fake_gpurunner) -> None:
+    """🔴🔴 Простір визначається за РОБОЧОЮ ТЕКОЮ, а відчеплений наглядач живе
+    своєю.
+
+    Спіймано живим заходом 21.09.2026: реєстр перебудувався, а `text index
+    --case <справа>` упав для обох справ черги з порадою про формат шифри —
+    він шукав їх у чужому просторі. Тобто пошук по щойно прочитаному дав би
+    нуль, а захід при цьому рапортував `ok`.
+    """
+    first, _ = _wire(space, monkeypatch)
+    second = _second_case(space)
+    _go([str(first), str(second)], dry_run=True)
+
+    hooks = _plan_of(fake_gpurunner).get("post_fetch") or []
+    if not hooks:
+        pytest.skip("у цьому середовищі немає програми nysh")
+    assert all(h.get("cwd") == str(space) for h in hooks), (
+        "гачок без робочої теки шукає справу в чужому просторі")

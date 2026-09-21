@@ -277,13 +277,27 @@ def post_fetch_hooks(run_names: Sequence[str] | str) -> list[dict[str, Any]]:
     🔴 Реєстр перебудовується ОДИН раз на захід, а текст індексується для
     КОЖНОЇ справи: пропущена справа партії — це рівно той хибний нуль, проти
     якого гачки й написані.
+
+    🔴🔴 `cwd` — КОРІНЬ ПРОСТОРУ, і це не дрібниця. Простір Нишпорка визначає
+    за робочою текою, а відчеплений наглядач живе своєю: без цього рядка
+    `nysh text index --case <справа>` шукав справу в ЧУЖОМУ просторі й падав
+    із порадою про формат шифри. Спіймано живим заходом 21.09.2026: реєстр
+    перебудувався, а індекс тексту не дістав жодної з двох справ — тобто
+    пошук по щойно прочитаному давав би нуль.
     """
+    from nyshporka.core.workspace import WorkspaceError, workspace
+
     exe = nysh_exe()
     if not exe:
         return []
+    try:
+        root = str(workspace().root)
+    except WorkspaceError:
+        return []
     names = [run_names] if isinstance(run_names, str) else list(run_names)
-    return [{"cmd": [exe, "cases", "build"], "timeout_sec": 3600},
-            *({"cmd": [exe, "text", "index", "--case", name], "timeout_sec": 3600}
+    return [{"cmd": [exe, "cases", "build"], "cwd": root, "timeout_sec": 3600},
+            *({"cmd": [exe, "text", "index", "--case", name], "cwd": root,
+               "timeout_sec": 3600}
               for name in names)]
 
 
