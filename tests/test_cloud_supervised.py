@@ -167,10 +167,12 @@ def _wire(space: Path, monkeypatch, **kw: Any) -> tuple[Path, Rent]:
     return case, backend
 
 
-def _go(case: Path, **kw: Any) -> GO.GoResult:
+def _go(case: Path | str | list[str], **kw: Any) -> GO.GoResult:
     kw.setdefault("backend", "fake")
     kw.setdefault("script", "cyrillic")
-    return GO.go(str(case), **kw)
+    if isinstance(case, (str, Path)):
+        return GO.go(str(case), **kw)
+    return GO.go([str(c) for c in case], **kw)
 
 
 def _plan_of(fake: Any) -> dict[str, Any]:
@@ -715,3 +717,229 @@ def test_without_a_bucket_the_reread_goes_unseeded_and_says_the_price(
     plan = _plan_of(fake_gpurunner)
     assert not plan["cases"][0]["seed_seg"]
     assert any("без засіву" in n for n in got.notes), got.notes
+
+
+# ── черга справ на одній машині ──────────────────────────────────────────────
+def _second_case(space: Path, name: str = "друга") -> Path:
+    """Ще одна справа поруч із першою — з власним іменем теки."""
+    import os
+    import time
+
+    from PIL import Image
+
+    case = space / name
+    case.mkdir(parents=True, exist_ok=True)
+    old = time.time() - 3600
+    for i in range(3):
+        p = case / f"{i:04d}.jpg"
+        Image.new("L", (40, 60), 200).save(p, "JPEG")
+        os.utime(p, (old, old))
+    return case
+
+
+def test_a_batch_travels_as_one_plan_to_one_supervisor(space: Path, monkeypatch,
+                                                       fake_gpurunner) -> None:
+    """💰 Черга справ на одній машині дешевша за чергу машин: холодний старт —
+    ~5 хвилин оренди плюс час на ринку, і платити його двічі немає за що.
+
+    🔴 Ключ, ім'я прогону й засів зв'язуються зі справою ЛИШЕ за позицією, тож
+    порядок списків перевіряється тут: зсув на одну позицію дав би справі чужу
+    шифру, і виглядало б це як прочитана книга не тієї парафії.
+    """
+    first, _ = _wire(space, monkeypatch)
+    second = _second_case(space)
+
+    got = _go([str(first), str(second)], dry_run=True)
+    assert got.verdict == "dry_run", got.why
+
+    plan = _plan_of(fake_gpurunner)
+    assert [c["case_dir"] for c in plan["cases"]] == [str(first), str(second)]
+    assert [c["name"] for c in plan["cases"]] == [first.name, second.name]
+    assert all(c["case_key"] == "ARCH/1/2" for c in plan["cases"])
+    # один виклик плану, один наглядач, одна машина
+    assert len(fake_gpurunner.called("htr", "plan")) == 1
+    assert len(fake_gpurunner.called("htr", "supervise")) == 1
+
+
+def test_a_batch_reports_every_case_and_leaves_the_top_fields_empty(
+        space: Path, monkeypatch, fake_gpurunner) -> None:
+    """🔴 Верхні `run_id`/`out_dir` на партії ПОРОЖНІ.
+
+    «Перша справа» на їхньому місці читається як відповідь про весь захід:
+    агент подивився б в одну теку й вирішив, що решта загубилась. Порожнє поле
+    ламається голосно й одразу, а правда лежить у `cases[]`.
+    """
+    first, _ = _wire(space, monkeypatch)
+    second = _second_case(space)
+
+    got = _go([str(first), str(second)], dry_run=True)
+    assert (got.run_id, got.out_dir, got.case_dir, got.case_key) == ("", "", "", "")
+    assert [c.case_dir for c in got.cases] == [str(first), str(second)]
+    assert all(c.run_id for c in got.cases), "кожна справа має свій ідентифікатор"
+    assert len({c.run_id for c in got.cases}) == 2
+    assert got.pages_total == 6, "сторінки заходу — сума по справах"
+    payload = got.as_dict()
+    assert payload["run_ids"] == [c.run_id for c in got.cases]
+
+
+def test_one_case_keeps_the_answer_it_always_had(space: Path, monkeypatch,
+                                                 fake_gpurunner) -> None:
+    """🔴 Одна справа мусить відповідати рівно так, як до появи партій.
+
+    На ці поля спирається і скіл у пакеті, і пам'ять агентів, і
+    `nysh cloud state <run_id>`. Партія — додавання, а не зміна.
+    """
+    case, _ = _wire(space, monkeypatch)
+    got = _go(case, dry_run=True)
+    assert got.run_id and got.out_dir and got.case_dir
+    assert len(got.cases) == 1
+    one = got.cases[0]
+    assert (one.run_id, one.out_dir, one.case_dir) == (got.run_id, got.out_dir,
+                                                       got.case_dir)
+
+
+def test_two_cases_with_the_same_folder_name_are_refused_before_shrinking(
+        space: Path, monkeypatch, fake_gpurunner) -> None:
+    """🔴 Колізія імен НЕ падає сама собою: вона тихо зливає кадри в один
+    префікс сховища й перезаписує чужий декод.
+
+    Наглядач її теж ловить — але вже після заливки, а на партії з тисяч кадрів
+    це чверть години стискання й доставки перед відмовою. Тому перевірка тут,
+    до першого байта.
+    """
+    first, _ = _wire(space, monkeypatch)
+    twin = _second_case(space / "інший-архів", first.name)
+
+    got = _go([str(first), str(twin)], dry_run=True)
+    assert got.verdict == "failed", got.why
+    assert "спільне ім'я прогону" in got.why or "спільну теку" in got.why
+    assert not fake_gpurunner.called("htr", "plan"), "плану не складали — і не везли"
+
+
+def test_an_already_read_case_drops_out_and_the_rest_still_go(
+        space: Path, monkeypatch, fake_gpurunner) -> None:
+    """💰 Прочитана справа випадає з черги, а не валить захід.
+
+    🔴 Відмовити всій партії тут було б пасткою: агент, який дістав «відмова»
+    на черзі з трьох справ, де готова одна, майже напевно повторить команду з
+    `--rerun` — і перечитає прочитане за гроші.
+    """
+    first, _ = _wire(space, monkeypatch)
+    second = _second_case(space)
+    from nyshporka.core.workspace import workspace
+
+    done = workspace().htr_reports / first.name
+    done.mkdir(parents=True, exist_ok=True)
+    (done / "_htr_meta.json").write_text(json.dumps({
+        "model": "model_v1.pt",
+        "pages": {f"{i:04d}.jpg": {"lines": 20} for i in range(3)}}),
+        encoding="utf-8")
+
+    got = _go([str(first), str(second)], dry_run=True)
+    assert got.verdict == "dry_run", got.why
+    assert [c.case_dir for c in got.cases] == [str(second)]
+    assert any("уже прочитано" in n for n in got.notes), got.notes
+
+
+def test_a_batch_where_everything_is_already_read_is_refused(
+        space: Path, monkeypatch, fake_gpurunner) -> None:
+    """Коли випали всі — це відмова заходу, а не мовчазний успіх."""
+    from nyshporka.core.workspace import workspace
+
+    case, _ = _wire(space, monkeypatch)
+    done = workspace().htr_reports / case.name
+    done.mkdir(parents=True, exist_ok=True)
+    (done / "_htr_meta.json").write_text(json.dumps({
+        "model": "model_v1.pt",
+        "pages": {f"{i:04d}.jpg": {"lines": 20} for i in range(3)}}),
+        encoding="utf-8")
+    second = _second_case(space)
+    done2 = workspace().htr_reports / second.name
+    done2.mkdir(parents=True, exist_ok=True)
+    (done2 / "_htr_meta.json").write_text(json.dumps({
+        "model": "model_v1.pt",
+        "pages": {f"{i:04d}.jpg": {"lines": 20} for i in range(3)}}),
+        encoding="utf-8")
+
+    got = _go([str(case), str(second)], dry_run=True)
+    assert (got.verdict, got.exit_code) == ("refused", 2)
+    assert not fake_gpurunner.called("htr", "plan")
+
+
+def test_the_thin_path_refuses_more_than_one_case(space: Path, monkeypatch,
+                                                  fake_gpurunner) -> None:
+    """🔴 Тонкий шлях тримає ОДНЕ з'єднання, один віддалений каталог і один
+    pid. Відмова безплатна: оренди ще не було."""
+    first, _ = _wire(space, monkeypatch)
+    second = _second_case(space)
+
+    got = _go([str(first), str(second)], dry_run=True, thin=True)
+    assert (got.verdict, got.exit_code) == ("refused", 2)
+    assert "одну справу" in got.why
+
+
+def test_every_case_of_a_batch_knows_its_siblings(space: Path, monkeypatch,
+                                                  fake_gpurunner) -> None:
+    """🔴 Наглядач і машина в партії одні на всіх: спинивши «цю справу», людина
+    спиняє всю чергу. Запис мусить це знати, інакше сказати правду нічим."""
+    from nyshporka.cloud import state as ST
+
+    first, _ = _wire(space, monkeypatch)
+    second = _second_case(space)
+    _go([str(first), str(second)])
+
+    runs = {s.run_id: s for s in ST.all_runs()}
+    assert len(runs) == 2
+    for run_id, st in runs.items():
+        assert st.siblings == [i for i in runs if i != run_id]
+        assert st.supervisor, "у кожної справи той самий наглядач"
+    assert len({s.supervisor for s in runs.values()}) == 1
+
+
+def test_the_plan_gets_every_original_frames_dir(space: Path, monkeypatch,
+                                                 fake_gpurunner) -> None:
+    """🔴 `case_dir` у меті — ОРИГІНАЛ кожної справи. Підставити один оригінал
+    усій партії означало б різати кропи з чужої книги."""
+    first, _ = _wire(space, monkeypatch)
+    second = _second_case(space)
+    _go([str(first), str(second)], dry_run=True)
+
+    plan = _plan_of(fake_gpurunner)
+    assert [c["case_dir"] for c in plan["cases"]] == [str(first), str(second)]
+
+
+def test_bookkeeping_indexes_every_case_and_rebuilds_once(space: Path, monkeypatch,
+                                                          fake_gpurunner) -> None:
+    """Пропущена справа партії — це «декоду немає» про щойно прочитану книгу,
+    тобто рівно той хибний нуль, проти якого гачки й написані."""
+    first, _ = _wire(space, monkeypatch)
+    second = _second_case(space)
+    _go([str(first), str(second)], dry_run=True)
+
+    hooks = _plan_of(fake_gpurunner).get("post_fetch") or []
+    if not hooks:                      # `nysh` поруч немає — гачків не буває
+        pytest.skip("у цьому середовищі немає програми nysh")
+    builds = [h for h in hooks if h["cmd"][1:] == ["cases", "build"]]
+    indexes = [h["cmd"][-1] for h in hooks if "index" in h["cmd"]]
+    assert len(builds) == 1
+    assert indexes == [first.name, second.name]
+
+
+def test_absorb_takes_this_cases_row_not_the_largest(space: Path, monkeypatch) -> None:
+    """🔴 Запис справи мусить показувати ЇЇ поступ.
+
+    Доти сюди йшов `max(pages_done)` по всіх справах наглядача. На одній справі
+    це те саме число, а на черзі запис справи A показував би сторінки справи C —
+    і людина забирала б результат за чужим лічильником.
+    """
+    from nyshporka.cloud import state as ST
+
+    st = ST.RunState(run_id="r1", case_dir=str(space / "перша"),
+                     out_dir=str(space / "out" / "перша"), backend="fake",
+                     supervisor="htr-q2", frames_total=100)
+    data = {"verdict": "ok", "cases": [
+        {"case": "чужа", "out_dir": str(space / "out" / "чужа"), "pages_done": 900},
+        {"case": "перша", "out_dir": str(space / "out" / "перша"), "pages_done": 12},
+    ]}
+    got = SUP.absorb(st, data)
+    assert got.pages_done == 12, "узято чужий лічильник"

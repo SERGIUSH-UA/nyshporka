@@ -247,3 +247,54 @@ def test_shrunk_copy_knows_whose_it_is(tmp_path: Path) -> None:
     # Своя ж копія доганяється повторним викликом, як і доти.
     again = F.shrink(first, dst, target_h=50)
     assert again.skipped == 1
+
+
+# ── паралельне стискання ─────────────────────────────────────────────────────
+def test_parallel_shrink_gives_byte_identical_output(tmp_path: Path) -> None:
+    """💰 На партії стискання перестає бути дрібницею: шість тисяч кадрів
+    одним потоком — це година перед стартом заходу (замір 21.09.2026: 104
+    кадр/хв одним потоком проти 484 на восьми).
+
+    🔴 Прискорення нічого не варте, якщо міняє вихід: на машину поїхали б інші
+    кадри, ніж ті, що ми перевірили. Тому приймач — побайтова рівність.
+    """
+    import hashlib
+
+    src = tmp_path / "src"
+    src.mkdir()
+    for i in range(12):
+        Image.new("RGB", (900, 1400), (190 + i, 180, 170)).save(
+            src / f"{i:04d}.jpg", "JPEG", quality=92)
+
+    one = F.shrink(src, tmp_path / "one", jobs=1)
+    many = F.shrink(src, tmp_path / "many", jobs=4)
+    assert (one.done, many.done) == (12, 12)
+
+    def sums(d: Path) -> dict[str, str]:
+        return {p.name: hashlib.sha256(p.read_bytes()).hexdigest()
+                for p in sorted(d.iterdir())}
+
+    assert sums(tmp_path / "one") == sums(tmp_path / "many")
+
+
+def test_a_broken_frame_still_fails_the_whole_batch_in_parallel(tmp_path: Path) -> None:
+    """🔴 Приймач — число кадрів у ЦІЛІ, і паралельність його не послаблює:
+    неповна копія на машині читається як повна справа."""
+    src = tmp_path / "src"
+    src.mkdir()
+    for i in range(6):
+        _jpeg(src / f"{i:04d}.jpg", (600, 900))
+    (src / "0003.jpg").write_bytes(b"\xff\xd8\xff" + b"0" * 50)   # битий
+
+    with pytest.raises(F.FramesError, match="кадрів із"):
+        F.shrink(src, tmp_path / "dst", jobs=4)
+
+
+def test_default_jobs_leaves_the_machine_alive(monkeypatch) -> None:
+    """Стискання йде, поки людина працює: усіх ядер не забираємо."""
+    monkeypatch.setattr(F.os, "cpu_count", lambda: 16)
+    assert F.default_jobs() == 8
+    monkeypatch.setattr(F.os, "cpu_count", lambda: 4)
+    assert F.default_jobs() == 2
+    monkeypatch.setattr(F.os, "cpu_count", lambda: 1)
+    assert F.default_jobs() == 1

@@ -47,8 +47,8 @@ from nyshporka.cloud import state as ST
 if TYPE_CHECKING:  # pragma: no cover — лише для перевірки типів
     from collections.abc import Callable, Iterable, Sequence
 
+    from nyshporka.cloud.convoy import Convoy
     from nyshporka.cloud.go import GoResult
-    from nyshporka.cloud.plan import CloudPlan
 
 #: Ім'я, під яким раннер лежить в архіві ассетів і на машині. Наглядач
 #: запускає саме його, тож перейменування тут — це зміна контракту з машиною.
@@ -231,7 +231,7 @@ def disk_for(total_mb: float) -> int:
                math.ceil(total_mb * 2 / 1024 + DISK_OVERHEAD_GB))
 
 
-def session_name(run_name: str) -> str:
+def session_name(run_name: str, *, extra: int = 0) -> str:
     """Ім'я сесії наглядача: справа плюс час ДО СЕКУНД.
 
     🔴 Час тут не робить імені унікальним, і хвіст із чотирьох випадкових
@@ -242,7 +242,10 @@ def session_name(run_name: str) -> str:
     safe = "".join(c if c.isalnum() or c in "-_" else "-"
                    for c in run_name.lower()).strip("-")
     tail = secrets.token_hex(2)
-    return f"htr-{safe or 'case'}-{datetime.now():%m%d-%H%M}-{tail}"
+    # `q3` у імені каже, що в черзі три справи: у переліку сесій видно розмір
+    # заходу, не відкриваючи плану.
+    queue = f"-q{extra + 1}" if extra else ""
+    return f"htr-{safe or 'case'}{queue}-{datetime.now():%m%d-%H%M}-{tail}"
 
 
 def nysh_exe() -> str:
@@ -257,18 +260,23 @@ def nysh_exe() -> str:
     return shutil.which("nysh") or ""
 
 
-def post_fetch_hooks(run_name: str) -> list[dict[str, Any]]:
+def post_fetch_hooks(run_names: Sequence[str] | str) -> list[dict[str, Any]]:
     """Облік після ПОВНОГО забору — те саме, що робить тонкий шлях сам.
 
     Наглядач виконає їх лише при вердикті `ok`. Без цього реєстр казав би
     «декоду немає» про справу, яку щойно прочитано.
+
+    🔴 Реєстр перебудовується ОДИН раз на захід, а текст індексується для
+    КОЖНОЇ справи: пропущена справа партії — це рівно той хибний нуль, проти
+    якого гачки й написані.
     """
     exe = nysh_exe()
     if not exe:
         return []
+    names = [run_names] if isinstance(run_names, str) else list(run_names)
     return [{"cmd": [exe, "cases", "build"], "timeout_sec": 3600},
-            {"cmd": [exe, "text", "index", "--case", run_name],
-             "timeout_sec": 3600}]
+            *({"cmd": [exe, "text", "index", "--case", name], "timeout_sec": 3600}
+              for name in names)]
 
 
 def estimate_from(payload: dict[str, Any]) -> M.Estimate:
@@ -329,19 +337,17 @@ def _json_line(text: str) -> dict[str, Any]:
 
 
 # ── захід ───────────────────────────────────────────────────────────────────
-def launch(plan: CloudPlan, res: GoResult, say: Callable[..., None], *,
-           pack_dir: Path, source_dir: Path, total_mb: float,
+def launch(convoy: Convoy, res: GoResult, say: Callable[..., None], *,
            budget: float | None = None, max_hours: float | None = None,
            confirm: bool = False, dry_run: bool = False,
            transport: str = "auto", max_usd_per_1000: float = 0.0,
-           params: Sequence[str] = (), seed: Path | None = None) -> None:
+           params: Sequence[str] = ()) -> None:
     """Підготувати захід і віддати його відчепленому наглядачеві.
 
-    `plan` — наш план (справа, письмо, бойові ваги, шифра, тека виходу);
-    `pack_dir` — тека, яка поїде на машину (оригінал або стиснута копія);
-    `source_dir` — завжди ОРИГІНАЛ: із нього ріжуться кропи, і саме він має
-    опинитись у меті прогону; `seed` — тека готової сегментації, визнаної
-    придатною (`htr.seg.inspect`), яка поїде першим чекпоінтом.
+    `convoy` — справи, що їдуть разом: у кожної своя тека для машини (оригінал
+    або стиснута копія), свій оригінал для кропів, своя шифра, своє ім'я
+    прогону й, можливо, свій засів сегментації. Наглядач приймає це списками,
+    і ПОРЯДОК — єдине, що зв'язує ключ, ім'я та засів зі справою.
     """
     from nyshporka.cloud.go import GoRefused
 
@@ -349,7 +355,8 @@ def launch(plan: CloudPlan, res: GoResult, say: Callable[..., None], *,
         gr = gpurunner_cmd()
     except SupervisorMissing as exc:
         raise GoRefused(str(exc)) from None
-    session = session_name(plan.out_dir.name)
+    plan = convoy.legs[0].plan
+    session = session_name(convoy.legs[0].name, extra=len(convoy.legs) - 1)
     env = _env(session, gr[0] if len(gr) == 1 else sys.executable)
 
     # 1. ассети: бойові ваги + скрипти цього раннера
@@ -368,30 +375,60 @@ def launch(plan: CloudPlan, res: GoResult, say: Callable[..., None], *,
     work.mkdir(parents=True, exist_ok=True)
     plan_path = work / "plan.json"
     voices = ",".join(p.name for p in models[1:])
-    cmd = [*gr, "htr", "plan",
-           "--case", str(pack_dir),
-           "--case-key", plan.case_key,
-           "--name", plan.out_dir.name,
-           "--out-root", str(plan.out_dir.parent),
+    # 🔴 Засів сегментації їде ПЕРШИМ ЧЕКПОІНТОМ, а чекпоінти живуть у
+    # сховищі — на самій машині їх ще немає, бо машини ще немає. Тому засів
+    # можливий лише зі сховищем, і транспорт при ньому називається явно.
+    seeded = any(leg.seed is not None for leg in convoy.legs)
+    if seeded and transport == "box":
+        # Людина сказала «вези на машину» — її вибір сильніший за нашу
+        # економію. Але ціна мусить бути названа, інакше мовчазна відмова від
+        # засіву виглядає як безплатна.
+        say("warning", _NO_SEED_WHY)
+        res.notes.append(_NO_SEED_NOTE)
+        seeded = False
+    cmd = [*gr, "htr", "plan"]
+    # 🔴 Справи йдуть трьома паралельними списками, і порядок у них той самий:
+    # наглядач зв'язує ключ, ім'я та засів зі справою ЛИШЕ за позицією.
+    # Порожній елемент теж передається — пропуск зсунув би решту на одну
+    # позицію, і справа дістала б чужу шифру.
+    for leg in convoy.legs:
+        cmd += ["--case", str(leg.pack), "--case-key", leg.plan.case_key,
+                "--name", leg.name]
+        if seeded:
+            # Порожній елемент теж передається: позиція — єдине, що зв'язує
+            # засів зі справою.
+            cmd += ["--seed-seg", str(leg.seed) if leg.seed else ""]
+    cmd += ["--out-root", str(convoy.out_root),
            "--model", plan.model.name, "--voices", voices,
            "--assets", str(assets),
            "--expect-script", f"{RUNNER_ARCNAME}={runner_path()}",
-           "--disk", str(disk_for(total_mb)),
+           "--disk", str(convoy.disk_gb()),
            "--max-hours", str(MAX_HOURS_CAP),
            "--prefer-cores", str(PREFER_CORES),
            # Чим везти дані: об'єктне сховище (якщо воно в людини є) або сама
            # машина. Вирішує наглядач — він єдиний знає, що налаштовано.
-           "--transport", transport,
+           "--transport", "r2" if seeded else transport,
            "--out", str(plan_path)]
-    if not plan.case_key:
-        # Шифри немає — наглядач інакше відмовиться від порожнього ключа.
+    if any(not leg.plan.case_key for leg in convoy.legs):
+        # Шифри немає бодай у однієї справи — наглядач інакше відмовиться від
+        # порожнього ключа. Прапорець заходовий, тож одна безіменна тека знімає
+        # перевірку з усіх; це свідомо: сама перевірка — про бібліотеку, а
+        # рішення «ця тека не архівна справа» вже ухвалила людина.
         cmd.append("--key-not-in-library")
     # 🔴 Обчислені нами параметри йдуть ПЕРШИМИ, людські — після, бо наглядач
     # збирає їх у словник і останнє входження перемагає. Людина, що набрала
     # `-p lines_per_page=…`, мусить перекрити наш здогад, а не навпаки.
     computed = [f"script={plan.script}"]
-    if plan.lines_per_page:
-        computed.append(f"lines_per_page={plan.lines_per_page}")
+    if convoy.lines_per_page:
+        computed.append(f"lines_per_page={convoy.lines_per_page}")
+    if convoy.dense_fleet and any(leg.seed for leg in convoy.legs):
+        # 🔴 Флот один на всю чергу, тож щільніший ставимо лише коли засіяні
+        # ВСІ справи: сторінка без кешу рахує геометрію повністю й задушила б
+        # шарди, яким дали вдвічі менше ядер.
+        from nyshporka.htr.seg import CORES_PER_SHARD_SEEDED, GB_PER_SHARD_SEEDED
+
+        computed += [f"cores_per_shard={CORES_PER_SHARD_SEEDED}",
+                     f"vram_gb_per_shard={GB_PER_SHARD_SEEDED}"]
     given = {item.split("=", 1)[0] for item in params if "=" in item}
     for item in [*(c for c in computed if c.split("=", 1)[0] not in given), *params]:
         cmd += ["-p", item]
@@ -404,22 +441,9 @@ def launch(plan: CloudPlan, res: GoResult, say: Callable[..., None], *,
         # ціні посеред роботи — тобто виглядає як «машин немає» там, де
         # насправді замалий дозвіл.
         cmd += ["--max-usd-per-1000", str(max_usd_per_1000)]
-    # 🔴 Засів сегментації їде ПЕРШИМ ЧЕКПОІНТОМ, а чекпоінти живуть у
-    # сховищі — на самій машині їх ще немає, бо машини ще немає. Тому засів
-    # можливий лише зі сховищем, і транспорт тут називається явно.
-    if seed is not None and transport == "box":
-        # Людина сказала «вези на машину» — її вибір сильніший за нашу
-        # економію. Але ціна мусить бути названа, інакше мовчазна відмова від
-        # засіву виглядає як безплатна.
-        say("warning", _NO_SEED_WHY)
-        res.notes.append(_NO_SEED_NOTE)
-        seed = None
-    if seed is not None:
-        cmd += ["--seed-seg", str(seed)]
-        cmd[cmd.index("--transport") + 1] = "r2"
     say("plan", "складаємо план і веземо кадри в сховище наглядача")
     if _run(cmd, env=env).returncode or not plan_path.is_file():
-        if seed is None or transport != "auto":
+        if not seeded or transport != "auto":
             raise GoRefused(f"план заходу не склався — див. вивід вище; тека {work}")
         # Сховища немає, а транспорт людина не називала — не відмовляємо, а
         # їдемо без засіву й кажемо ЦІНУ: сторінка коштуватиме ще й
@@ -427,13 +451,15 @@ def launch(plan: CloudPlan, res: GoResult, say: Callable[..., None], *,
         # транспорту в наглядача стоїть до будь-якої заливки.
         say("warning", _NO_SEED_WHY)
         res.notes.append(_NO_SEED_NOTE)
-        del cmd[cmd.index("--seed-seg"):cmd.index("--seed-seg") + 2]
-        cmd[cmd.index("--transport") + 1] = "auto"
+        while "--seed-seg" in cmd:
+            i = cmd.index("--seed-seg")
+            del cmd[i:i + 2]
+        cmd[cmd.index("--transport") + 1] = transport
         if _run(cmd, env=env).returncode or not plan_path.is_file():
             raise GoRefused(f"план заходу не склався — див. вивід вище; тека {work}")
 
     # 3. правки, яких наглядач знати не може
-    _patch_plan(plan_path, source_dir=source_dir, run_name=plan.out_dir.name)
+    _patch_plan(plan_path, convoy)
 
     # 4. передполіт: живі посилання й доступне сховище — ДО оренди
     if _run([*gr, "htr", "preflight", str(plan_path)], env=env).returncode:
@@ -487,7 +513,7 @@ def launch(plan: CloudPlan, res: GoResult, say: Callable[..., None], *,
     # ми можемо померти (Ctrl+C, обрив, повний диск) — і тоді захід іде, а для
     # нас його не існує: наступна команда тієї самої справи чесно візьме ДРУГУ
     # машину під ту саму роботу. Невдалий старт прибирає запис за собою.
-    _remember(plan, res, session=session, plan_path=plan_path)
+    _remember(convoy, res, session=session, plan_path=plan_path)
     launched = _run([*gr, "htr", "supervise", "--plan", str(plan_path),
                      "--detach", "--session", session,
                      "--budget", f"{high:.2f}", "--max-hours", f"{hours:.0f}"],
@@ -499,8 +525,10 @@ def launch(plan: CloudPlan, res: GoResult, say: Callable[..., None], *,
         # зробив би таку оренду невидимою для `state`, `stop` і наступного
         # `go`, тобто нікому не підзвітною; лишений — щонайгірше зайвий рядок
         # у переліку, який людина закриє `stop --force`.
-        st = ST.load(plan.run_id)
-        if st is not None:
+        for run_id in convoy.run_ids:
+            st = ST.load(run_id)
+            if st is None:
+                continue
             st.phase = "failed"
             st.why = (f"наглядач {session} не доповів про старт (код "
                       f"{launched.returncode}); якщо він усе-таки живий — "
@@ -511,12 +539,17 @@ def launch(plan: CloudPlan, res: GoResult, say: Callable[..., None], *,
             f"наглядач не доповів про старт (код {launched.returncode}). "
             f"Найімовірніше машини не брали — але переконайтесь: "
             f"`nysh cloud rent status`. Якщо там щось тарифікується, захід "
-            f"живий: `nysh cloud state {plan.run_id}`.")
+            f"живий: `nysh cloud state {convoy.run_ids[0]}`.")
     res.verdict = "detached"
+    queue = (f" черга з {len(convoy.legs)} справ: {convoy.label()}."
+             if len(convoy.legs) > 1 else "")
     res.why = (f"наглядач {session} пішов у фон: орендує машину, читає, забирає "
-               f"результат і гасить оренду сам")
-    say("detached", f"▶ {session} — стан: `nysh cloud state {plan.run_id}`, "
-                    f"спинити: `nysh cloud stop {plan.run_id}`")
+               f"результат і гасить оренду сам.{queue}")
+    for case in res.cases:
+        case.verdict = "detached"
+    first = convoy.run_ids[0]
+    say("detached", f"▶ {session} — стан: `nysh cloud state {first}`, "
+                    f"спинити: `nysh cloud stop {first}`")
 
 
 def _workdir() -> Path:
@@ -525,42 +558,64 @@ def _workdir() -> Path:
     return workspace().derived / "cloud" / "supervised"
 
 
-def _patch_plan(plan_path: Path, *, source_dir: Path, run_name: str) -> None:
+def _patch_plan(plan_path: Path, convoy: Convoy) -> None:
     """Дві правки, яких складач плану зробити не може.
 
-    🔴 `case_dir` — ОРИГІНАЛЬНА тека кадрів: у мету прогону має лягти вона, бо
-    кроп зі стиснутої копії вдвічі дрібніший, а дивиться на нього око.
+    🔴 `case_dir` — ОРИГІНАЛЬНА тека кадрів КОЖНОЇ справи: у мету прогону має
+    лягти вона, бо кроп зі стиснутої копії вдвічі дрібніший, а дивиться на
+    нього око. Підставити один оригінал усім справам не можна — на партії це
+    означало б, що кропи ріжуться з чужої книги.
     `post_fetch` — облік цього простору абсолютними шляхами: відчеплений
     процес не має ні нашого PATH, ні нашої робочої теки.
     """
     data = json.loads(plan_path.read_text(encoding="utf-8"))
-    for case in data.get("cases") or []:
-        case["case_dir"] = str(source_dir)
-    hooks = post_fetch_hooks(run_name)
+    cases = data.get("cases") or []
+    by_name = {leg.name: leg for leg in convoy.legs}
+    for i, case in enumerate(cases):
+        leg = by_name.get(str(case.get("name") or ""))
+        if leg is None and i < len(convoy.legs):
+            # Наглядач лишає порядок справ таким, яким ми його дали, тож
+            # позиція — надійний запасний ключ.
+            leg = convoy.legs[i]
+        if leg is not None:
+            case["case_dir"] = str(leg.source)
+    hooks = post_fetch_hooks([leg.name for leg in convoy.legs])
     if hooks:
         data["post_fetch"] = hooks
     plan_path.write_text(json.dumps(data, ensure_ascii=False, indent=1),
                          encoding="utf-8")
 
 
-def _remember(plan: CloudPlan, res: GoResult, *, session: str,
+def _remember(convoy: Convoy, res: GoResult, *, session: str,
               plan_path: Path) -> None:
     """Записати захід так, щоб `nysh cloud state|stop` знали, кого питати.
+
+    🔴 Запис на КОЖНУ справу, а не один на захід. Ідентифікатор справи
+    детермінований, і саме за ним повторна команда тієї самої справи знаходить
+    свою роботу; сховавши партію під спільним іменем, ми зробили б так, що
+    `nysh cloud go <справа з партії>` не бачить живого заходу й бере ДРУГУ
+    машину під те, що вже читається.
 
     🔴 `box` лишається порожнім навмисно: машину бере й гасить наглядач, і
     вигаданий запис про неї означав би, що Нишпорка спробує погасити чужу
     оренду, про яку знає лише з чуток.
     """
-    st = ST.RunState(
-        run_id=plan.run_id, case_dir=str(plan.case_dir), case_key=plan.case_key,
-        out_dir=str(plan.out_dir), backend=plan.backend,
-        supervisor=session, supervisor_plan=str(plan_path),
-        frames_total=plan.frames, phase="running", bills=False,
-        source_dir=str(plan.source_dir or ""),
-        fork_low=res.fork_low, fork_high=res.fork_high,
-        budget_usd=res.budget_usd, max_hours=res.max_hours)
-    st.note("detach", f"наглядач {session}")
-    ST.save(st)
+    ids = list(convoy.run_ids)
+    for leg in convoy.legs:
+        plan = leg.plan
+        st = ST.RunState(
+            run_id=plan.run_id, case_dir=str(plan.case_dir), case_key=plan.case_key,
+            out_dir=str(plan.out_dir), backend=plan.backend,
+            supervisor=session, supervisor_plan=str(plan_path),
+            frames_total=plan.frames, phase="running", bills=False,
+            source_dir=str(plan.source_dir or ""),
+            siblings=[i for i in ids if i != plan.run_id],
+            fork_low=res.fork_low, fork_high=res.fork_high,
+            budget_usd=res.budget_usd, max_hours=res.max_hours)
+        st.note("detach", f"наглядач {session}"
+                          + (f", разом із {len(ids) - 1} іншими справами"
+                             if len(ids) > 1 else ""))
+        ST.save(st)
 
 
 # ── стан і зупинка відчепленого заходу ──────────────────────────────────────
@@ -606,6 +661,30 @@ def finished(data: dict[str, Any]) -> bool:
     return bool(data.get("verdict")) or (phase in DONE_PHASES and phase != "")
 
 
+def _my_case(st: ST.RunState, data: dict[str, Any]) -> dict[str, Any] | None:
+    """Рядок ЦІЄЇ справи у стані наглядача.
+
+    🔴 Шукається за іменем прогону чи текою виходу, а не береться найбільший.
+    Доти тут стояв `max(pages_done)` по всіх справах — на одній справі це те
+    саме число, а на черзі запис справи A показував би сторінки справи C: люди
+    й агенти читали б чужий поступ як свій і вирішували б за ним, коли забирати
+    результат.
+    """
+    rows = [c for c in (data.get("cases") or []) if isinstance(c, dict)]
+    if not rows:
+        return None
+    name = Path(st.out_dir).name if st.out_dir else ""
+    for row in rows:
+        if name and str(row.get("case") or row.get("name") or "") == name:
+            return row
+        out = str(row.get("out_dir") or "")
+        if out and st.out_dir and Path(out) == Path(st.out_dir):
+            return row
+    # Захід на одну справу: ім'я могло змінитись (перейменована тека), але
+    # плутати нема з чим.
+    return rows[0] if len(rows) == 1 else None
+
+
 def absorb(st: ST.RunState, data: dict[str, Any]) -> ST.RunState:
     """Перенести підсумок наглядача в наш запис заходу.
 
@@ -614,9 +693,9 @@ def absorb(st: ST.RunState, data: dict[str, Any]) -> ST.RunState:
     оновить ніколи, бо роботу вів не наш процес.
     """
     verdict = str(data.get("verdict") or "")
-    for case in data.get("cases") or []:
-        if isinstance(case, dict) and case.get("pages_done"):
-            st.pages_done = max(st.pages_done, int(case["pages_done"] or 0))
+    mine = _my_case(st, data)
+    if mine is not None:
+        st.pages_done = max(st.pages_done, int(mine.get("pages_done") or 0))
     raw_budget = data.get("budget")
     budget: dict[str, Any] = raw_budget if isinstance(raw_budget, dict) else {}
     spent = M.as_number(budget.get("spent_usd"))

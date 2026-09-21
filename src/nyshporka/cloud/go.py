@@ -39,6 +39,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
+from nyshporka.cloud import convoy as CV
 from nyshporka.cloud import frames as F
 from nyshporka.cloud import money as M
 from nyshporka.cloud import run as RUN
@@ -95,6 +96,16 @@ class GoRefused(CloudError):
         self.verdict = verdict
 
 
+class Busy(GoRefused):
+    """Справу вже веде інший захід — і це стосується ВСІЄЇ партії.
+
+    🔴 Машина в заході одна. Відкинути зайняту справу й поїхати з рештою
+    означало б узяти другу машину під роботу, яка вже оплачується, — тож така
+    відмова піднімається до самого верху, а не лишається в переліку
+    відкинутих.
+    """
+
+
 @dataclass
 class GoResult:
     """Чим скінчився захід — для людини й для машини одним об'єктом."""
@@ -126,6 +137,10 @@ class GoResult:
     adopted: bool = False
     dry_run: bool = False
     notes: list[str] = field(default_factory=list)
+    #: Справи заходу. Одна справа — рівно одна позиція, і верхні поля дублюють
+    #: її значення; кілька — верхні `run_id`/`case_dir`/`out_dir` порожні, бо
+    #: «перша справа» на їхньому місці читалась би як відповідь про весь захід.
+    cases: list[CaseResult] = field(default_factory=list)
 
     @property
     def exit_code(self) -> int:
@@ -147,8 +162,62 @@ class GoResult:
                 "estimate": dict(self.estimate), "decision": self.decision,
                 "rented": self.rented, "released": self.released,
                 "adopted": self.adopted,
-                "dry_run": self.dry_run, "notes": list(self.notes)}
+                "dry_run": self.dry_run, "notes": list(self.notes),
+                "cases": [c.as_dict() for c in self.cases],
+                "run_ids": [c.run_id for c in self.cases if c.run_id]}
 
+
+@dataclass
+class CaseResult:
+    """Що сталося з ОДНІЄЮ справою заходу.
+
+    🔴 Існує навіть тоді, коли справа одна: інакше читач мусив би розбирати два
+    різні формати відповіді залежно від того, скільки справ він назвав.
+    """
+
+    run_id: str = ""
+    case_key: str = ""
+    case_dir: str = ""
+    out_dir: str = ""
+    verdict: str = ""
+    why: str = ""
+    pages_done: int = 0
+    pages_total: int = 0
+    missing: int = 0
+    quarantined: int = 0
+
+    def as_dict(self) -> dict[str, Any]:
+        return {"run_id": self.run_id, "case_key": self.case_key,
+                "case_dir": self.case_dir, "out_dir": self.out_dir,
+                "verdict": self.verdict, "why": self.why,
+                "pages_done": self.pages_done, "pages_total": self.pages_total,
+                "missing": self.missing, "quarantined": self.quarantined}
+
+
+def _fill_cases(res: GoResult, convoy: CV.Convoy) -> None:
+    """Перенести склад заходу в результат.
+
+    🔴 Одна справа лишає верхні поля рівно такими, як були до появи партій:
+    на них спирається і скіл, і пам'ять агентів, і `nysh cloud state <run_id>`.
+    Кілька — верхні поля порожніють, а правда живе в `cases[]`. Мовчазне
+    «беремо першу» привело б читача дивитись в одну теку й вирішити, що решта
+    загубилась.
+    """
+    res.cases = [CaseResult(run_id=leg.plan.run_id, case_key=leg.plan.case_key,
+                            case_dir=str(leg.source), out_dir=str(leg.plan.out_dir),
+                            pages_total=leg.plan.frames)
+                 for leg in convoy.legs]
+    res.pages_total = convoy.pages
+    if len(convoy.legs) == 1:
+        one = convoy.one
+        res.run_id, res.out_dir = one.plan.run_id, str(one.plan.out_dir)
+        res.case_dir, res.case_key = str(one.source), one.plan.case_key
+    else:
+        res.run_id = res.out_dir = res.case_dir = res.case_key = ""
+
+
+def _case_of(res: GoResult, run_id: str) -> CaseResult | None:
+    return next((c for c in res.cases if c.run_id == run_id), None)
 
 # ── справа ───────────────────────────────────────────────────────────────────
 @dataclass(frozen=True)
@@ -304,7 +373,8 @@ def _find_live(plan: Any, frames_dir: Path) -> tuple[ST.RunState | None,
 
 
 # ── захід ────────────────────────────────────────────────────────────────────
-def go(case: str, *, backend: str = "vast", budget: float | None = None,
+def go(case: str | Sequence[str], *, backend: str = "vast",
+       budget: float | None = None,
        max_hours: float | None = None, max_price: float | None = None,
        confirm: bool = False, dry_run: bool = False,
        with_voices: list[str] | tuple[str, ...] = (), second_voice: bool = True,
@@ -313,13 +383,21 @@ def go(case: str, *, backend: str = "vast", budget: float | None = None,
        thin: bool = False, transport: str = "auto",
        max_usd_per_1000: float = 0.0, params: Sequence[str] = (),
        on_event: EventFn | None = None, tick_sec: float = 60.0) -> GoResult:
-    """Прочитати справу на орендованій машині від початку до кінця.
+    """Прочитати справу (або кілька) на орендованій машині від початку до кінця.
+
+    Кілька справ їдуть ОДНІЄЮ чергою на одну машину: холодний старт коштує
+    ~5 хвилин оренди плюс час на ринку, і платити його за кожну справу окремо
+    немає за що. Тонкий шлях (`thin`) веде лише одну.
 
     Не кидає: відмови, збої й Ctrl+C лягають у `GoResult.verdict`, бо викликач
     (командний рядок, агент) мусить дістати ОДИН підсумок на будь-якому шляху —
     зокрема відповідь на питання «чи погашено машину».
     """
+    cases = (case,) if isinstance(case, str) else tuple(case)
     res = GoResult(backend=backend, dry_run=dry_run)
+    if not cases:
+        res.verdict, res.why = "refused", "не названо жодної справи"
+        return res
 
     def say(kind: str, text: str, **data: Any) -> None:
         if on_event is not None:
@@ -329,7 +407,7 @@ def go(case: str, *, backend: str = "vast", budget: float | None = None,
     # після останньої лінії оборони, бо й вона гасить машину.
     owner = contextlib.ExitStack()
     try:
-        _go(res, case, say, owner, backend=backend, budget=budget,
+        _go(res, cases, say, owner, backend=backend, budget=budget,
             max_hours=max_hours,
             max_price=max_price, confirm=confirm, dry_run=dry_run,
             with_voices=tuple(with_voices), second_voice=second_voice,
@@ -355,57 +433,28 @@ def go(case: str, *, backend: str = "vast", budget: float | None = None,
     return res
 
 
-def _last_line_of_defence(res: GoResult, say: EventFn) -> None:
-    """Якщо цей виклик брав машину — переконатись, що вона погашена.
+def _prepare(res: GoResult, case: str, say: EventFn, owner: contextlib.ExitStack, *,
+             backend: str, script: str, model: str, case_key: str,
+             second_voice: bool, with_voices: tuple[str, ...],
+             max_price: float | None, rerun: bool, allow_partial: bool,
+             rotate_landscape: bool, dry_run: bool, thin: bool,
+             batch: bool) -> tuple[CV.Leg | None, ST.RunState | None]:
+    """Підготувати ОДНУ справу заходу: від теки кадрів до готового до відправки.
 
-    Оренда й заливка живуть у `run.start`, і він гасить машину на власному
-    збої сам. Тут те саме питання ставиться ще раз, уже по запису на диску: шлях,
-    яким виняток оминув обидва `finally`, дешевше перекрити, ніж довести, що
-    його не існує.
+    Повертає `(справа заходу, живий захід)`. Другий елемент непорожній лише
+    тоді, коли цю саму роботу вже веде наш власний захід і його можна
+    підхопити — рішення про підхоплення ухвалює викликач, бо в партії воно
+    неможливе.
+
+    Кидає `Busy`, коли справу веде хтось інший: така відмова стосується всього
+    заходу, бо машина одна.
     """
-    if not res.rented or not res.run_id or res.released is not None:
-        return
-    try:
-        st = ST.load(res.run_id)
-    except Exception:
-        return
-    if st is None or not st.box or not st.bills:
-        return
-    if st.released:
-        res.released = True
-        res.spent_usd, res.rent_hours = st.spent_usd(), st.rent_hours()
-        return
-    _release(st, res, say, why=f"failed:{res.verdict}")
-    res.spent_usd, res.rent_hours = st.spent_usd(), st.rent_hours()
-
-
-def _go(res: GoResult, case: str, say: EventFn, owner: contextlib.ExitStack, *,
-        backend: str, budget: float | None, max_hours: float | None, max_price: float | None,
-        confirm: bool, dry_run: bool, with_voices: tuple[str, ...],
-        second_voice: bool, script: str, model: str, case_key: str, rerun: bool,
-        allow_partial: bool, rotate_landscape: bool, thin: bool,
-        transport: str, max_usd_per_1000: float, params: tuple[str, ...],
-        tick_sec: float) -> None:
     from nyshporka.cloud import plan as PL
 
-    # 0. бекенд
-    try:
-        b = RUN._backend(backend)
-    except RUN.RunError as exc:
-        raise GoRefused(
-            f"{exc}. Оренду дає окремий пакет-плагін: "
-            f"`pip install \"nyshporka[rent]\"` або `nysh update`, далі "
-            f"`nysh cloud rent login`.") from None
-    if not bills(b):
-        raise GoRefused(
-            f"«{backend}» нічого не орендує — `nysh cloud go` веде захід з "
-            f"орендою від початку до гасіння. Для своєї машини: "
-            f"`nysh cloud start <тека> --host <машина>`.")
-
-    # 1. справа
     ref = resolve_case(case)
     key = case_key or ref.key
-    res.case_dir, res.case_key = str(ref.frames_dir), key
+    if not batch:
+        res.case_dir, res.case_key = str(ref.frames_dir), key
     say("case", f"{key or case_name(ref.frames_dir)} · {ref.frames_dir}")
 
     def build(frames_dir: Path, **kw: Any) -> PL.CloudPlan:
@@ -428,7 +477,7 @@ def _go(res: GoResult, case: str, say: EventFn, owner: contextlib.ExitStack, *,
     try:
         owner.enter_context(ST.owned(plan.run_id))
     except ST.OwnerBusy as exc:
-        raise GoRefused(
+        raise Busy(
             f"{exc} — другий наглядач забрав би його результат і погасив би його "
             f"машину. Стан: `nysh cloud state {exc.run_id}`.") from None
     # 🔴 Відчеплений захід тієї самої роботи живе БЕЗ нашого процесу, і його
@@ -441,9 +490,10 @@ def _go(res: GoResult, case: str, say: EventFn, owner: contextlib.ExitStack, *,
         found = SUP.find_live(_run_ids(plan, ref.frames_dir))
         if found is not None:
             st, data = found
-            res.run_id, res.out_dir = st.run_id, st.out_dir
+            if not batch:
+                res.run_id, res.out_dir = st.run_id, st.out_dir
             if not data:
-                raise GoRefused(
+                raise Busy(
                     f"цю справу веде наглядач {st.supervisor}, але він мовчить "
                     f"— стану немає. Мовчання не означає, що заходу немає: "
                     f"машина може працювати, і друга оренда коштувала б стільки "
@@ -451,7 +501,7 @@ def _go(res: GoResult, case: str, say: EventFn, owner: contextlib.ExitStack, *,
                     f"перевірте, чи щось тарифікується (`nysh cloud rent "
                     f"status`); якщо захід справді мертвий — згорніть його "
                     f"(`nysh cloud stop {st.run_id} --force`) і повторіть.")
-            raise GoRefused(
+            raise Busy(
                 f"цю справу вже читає відчеплений наглядач {st.supervisor} "
                 f"(фаза {data.get('phase') or '?'}): {data.get('why') or ''}. "
                 f"Стан: `nysh cloud state {st.run_id}`; спинити: "
@@ -459,7 +509,7 @@ def _go(res: GoResult, case: str, say: EventFn, owner: contextlib.ExitStack, *,
 
     live, clash = _find_live(plan, ref.frames_dir)
     if clash is not None:
-        raise GoRefused(
+        raise Busy(
             f"у теку {plan.out_dir} уже пише інший захід — {clash.run_id} (та "
             f"сама справа іншою моделлю чи письмом). Два прогони в одну теку "
             f"перетирають тексти один одного. Дочекайтесь його або киньте: "
@@ -473,20 +523,15 @@ def _go(res: GoResult, case: str, say: EventFn, owner: contextlib.ExitStack, *,
                        f"роботи на ній немає — гасимо")
         _release(live, res, say, why="failed:orphaned")
         if res.released is False:
-            raise GoRefused(f"машину попередньої спроби ({live.run_id}) погасити "
-                            f"не вдалось — нову поверх неї не беремо")
+            raise Busy(f"машину попередньої спроби ({live.run_id}) погасити "
+                       f"не вдалось — нову поверх неї не беремо")
         res.released = None     # те було про чужу спробу, не про цей захід
         live = None
     if live is not None:
         if dry_run:
-            raise GoRefused(f"захід {live.run_id} уже йде — сухий прогін нічого "
-                            f"не покаже. Стан: `nysh cloud state {live.run_id}`.")
-        plan = build(Path(live.case_dir), source_dir=live.source_dir or "")
-        res.adopted = True
-        say("adopt", f"захід {live.run_id} уже йде — підхоплено разом зі "
-                     f"стелями, другої машини не беремо")
-        _supervise(live, plan, res, say, tick_sec=tick_sec)
-        return
+            raise Busy(f"захід {live.run_id} уже йде — сухий прогін нічого "
+                       f"не покаже. Стан: `nysh cloud state {live.run_id}`.")
+        return None, live
 
     # 2. уже прочитано?
     if not rerun:
@@ -513,6 +558,7 @@ def _go(res: GoResult, case: str, say: EventFn, owner: contextlib.ExitStack, *,
             f"кадрів {rep.n}, а бібліотека знає {ref.frames_expected} — "
             f"завантаження не дійшло? Частину справи — лише з `--allow-partial`.")
 
+    notes: list[str] = []
     pack = ref.frames_dir
     if rep.heavy:
         dst = F.shrink_dir_for(ref.frames_dir)
@@ -529,6 +575,7 @@ def _go(res: GoResult, case: str, say: EventFn, owner: contextlib.ExitStack, *,
                     f"це зйомка з книгою на боці — повторіть із "
                     f"`--rotate-landscape`: без повороту висота рядка падає "
                     f"вдвічі. Якщо кадр — розворот на два аркуші, усе правильно.")
+            notes.append(note)
             res.notes.append(note)
             say("warning", f"⚠ {note}")
         say("shrink", f"стиснуто {got.done}, уже було {got.skipped}"
@@ -548,9 +595,8 @@ def _go(res: GoResult, case: str, say: EventFn, owner: contextlib.ExitStack, *,
     left = len(set(before.missing) | set(before.quarantined)) if seed else None
     plan = build(pack, source_dir=ref.frames_dir if pack != ref.frames_dir else "",
                  lines_per_page=F.lines_per_page(plan.out_dir), pages_left=left)
-    res.run_id, res.out_dir = plan.run_id, str(plan.out_dir)
-    res.pages_total = plan.frames
     for w in plan.warnings:
+        notes.append(w)
         res.notes.append(w)
         say("warning", f"⚠ {w}")
     if left is not None and thin:
@@ -567,41 +613,147 @@ def _go(res: GoResult, case: str, say: EventFn, owner: contextlib.ExitStack, *,
                     f"лише зі своїх точок. Дочитати вдома — `nysh read "
                     f"{ref.frames_dir}`; везти все — просто далі")
 
-    # 3в. перечитування: готова сегментація першого прогону їде на машину
+    # 5. перечитування: готова сегментація першого прогону їде на машину
     seg_seed: Path | None = None
-    dense: tuple[str, ...] = ()
+    coverage = 0.0
     if plan.base_out is not None:
         from nyshporka.htr import seg as SEG
 
         cache = SEG.inspect(ref.frames_dir, SEG.frames_of(pack), base_out=plan.base_out)
         say("plan", f"{'✓' if cache.usable else '⚠'} сегментація: {cache.why}")
         if cache.usable and cache.path is not None:
-            seg_seed = cache.path
-            if cache.coverage >= SEG.DENSE_FLEET_COVERAGE:
-                # 🔴 Щільніший флот — лише на майже повному покритті. Шард без
-                # геометрії й sato бере вдвічі менше ядер, але сторінка, якої в
-                # кеші немає, рахує їх повністю — і на рідкому кеші такий флот
-                # душив би сам себе.
-                dense = (f"cores_per_shard={SEG.CORES_PER_SHARD_SEEDED}",
-                         f"vram_gb_per_shard={SEG.GB_PER_SHARD_SEEDED}")
-                say("plan", f"флот щільніший: {SEG.CORES_PER_SHARD_SEEDED} ядра й "
-                            f"{SEG.GB_PER_SHARD_SEEDED} ГБ VRAM на шард "
-                            f"(сегментація не рахується)")
+            seg_seed, coverage = cache.path, cache.coverage
+
+    return CV.Leg(ref=ref, plan=plan, pack=pack, source=ref.frames_dir,
+                  frames=rep, seed=seg_seed, coverage=coverage, resume=seed,
+                  notes=tuple(notes)), None
+
+
+def _last_line_of_defence(res: GoResult, say: EventFn) -> None:
+    """Якщо цей виклик брав машину — переконатись, що вона погашена.
+
+    Оренда й заливка живуть у `run.start`, і він гасить машину на власному
+    збої сам. Тут те саме питання ставиться ще раз, уже по запису на диску: шлях,
+    яким виняток оминув обидва `finally`, дешевше перекрити, ніж довести, що
+    його не існує.
+    """
+    if not res.rented or not res.run_id or res.released is not None:
+        return
+    try:
+        st = ST.load(res.run_id)
+    except Exception:
+        return
+    if st is None or not st.box or not st.bills:
+        return
+    if st.released:
+        res.released = True
+        res.spent_usd, res.rent_hours = st.spent_usd(), st.rent_hours()
+        return
+    _release(st, res, say, why=f"failed:{res.verdict}")
+    res.spent_usd, res.rent_hours = st.spent_usd(), st.rent_hours()
+
+
+def _go(res: GoResult, cases: tuple[str, ...], say: EventFn,
+        owner: contextlib.ExitStack, *,
+        backend: str, budget: float | None, max_hours: float | None, max_price: float | None,
+        confirm: bool, dry_run: bool, with_voices: tuple[str, ...],
+        second_voice: bool, script: str, model: str, case_key: str, rerun: bool,
+        allow_partial: bool, rotate_landscape: bool, thin: bool,
+        transport: str, max_usd_per_1000: float, params: tuple[str, ...],
+        tick_sec: float) -> None:
+    from nyshporka.cloud import plan as PL
+
+    # 0. бекенд
+    try:
+        b = RUN._backend(backend)
+    except RUN.RunError as exc:
+        raise GoRefused(
+            f"{exc}. Оренду дає окремий пакет-плагін: "
+            f"`pip install \"nyshporka[rent]\"` або `nysh update`, далі "
+            f"`nysh cloud rent login`.") from None
+    if not bills(b):
+        raise GoRefused(
+            f"«{backend}» нічого не орендує — `nysh cloud go` веде захід з "
+            f"орендою від початку до гасіння. Для своєї машини: "
+            f"`nysh cloud start <тека> --host <машина>`.")
+
+    def build_for(live: ST.RunState) -> PL.CloudPlan:
+        """План для заходу, який ми підхоплюємо: тека й шифра — з його запису."""
+        origin = Path(live.source_dir or live.case_dir)
+        try:
+            return PL.build(
+                Path(live.case_dir), backend=backend, script=script,
+                case_key=case_key or live.case_key, second_voice=second_voice,
+                also=list(with_voices), model=model, out_name=case_name(origin),
+                source_dir=live.source_dir or "", max_price_usd_h=max_price)
+        except PL.PlanError as exc:
+            raise GoRefused(str(exc)) from None
+
+    # 1. справи: кожна готується окремо, і кожна може випасти зі свого приводу
+    legs: list[CV.Leg] = []
+    dropped: list[tuple[str, str]] = []
+    for arg in cases:
+        try:
+            leg, live = _prepare(res, arg, say, owner, backend=backend,
+                                 script=script, model=model,
+                                 case_key=case_key if len(cases) == 1 else "",
+                                 second_voice=second_voice, with_voices=with_voices,
+                                 max_price=max_price, rerun=rerun,
+                                 allow_partial=allow_partial,
+                                 rotate_landscape=rotate_landscape,
+                                 dry_run=dry_run, thin=thin, batch=len(cases) > 1)
+        except Busy:
+            # 🔴 Зайнята справа спиняє ВЕСЬ захід: машина одна, і поїхати з
+            # рештою означало б узяти другу під роботу, що вже оплачується.
+            raise
+        except GoRefused as exc:
+            if len(cases) == 1:
+                raise
+            dropped.append((arg, str(exc)))
+            say("warning", f"⚠ {arg}: {exc} — справа випадає, решта їде")
+            continue
+        if live is not None:
+            if len(cases) > 1:
+                raise Busy(
+                    f"{arg}: захід {live.run_id} уже йде. Партію з підхопленням "
+                    f"не поєднуємо — повторіть команду для цієї справи окремо, "
+                    f"і вона підхопить свою машину")
+            plan = build_for(live)
+            res.adopted = True
+            say("adopt", f"захід {live.run_id} уже йде — підхоплено разом зі "
+                         f"стелями, другої машини не беремо")
+            _supervise(live, plan, res, say, tick_sec=tick_sec)
+            return
+        if leg is not None:
+            legs.append(leg)
+    for arg, why in dropped:
+        res.notes.append(f"{arg}: {why}")
+    if not legs:
+        raise GoRefused("жодна справа заходу не поїхала: "
+                        + "; ".join(f"{arg} — {why}" for arg, why in dropped))
+    convoy = CV.of(legs, dropped)
+    if thin and len(convoy.legs) > 1:
+        # 🔴 Відмова, а не мовчазне «візьму першу»: тонкий шлях тримає ОДНЕ
+        # з'єднання, один віддалений каталог і один pid. Оренди ще не було,
+        # тож це безплатно.
+        raise GoRefused(
+            f"тонкий шлях веде одну справу, а названо {len(convoy.legs)}. "
+            f"Черга справ їде наглядацьким шляхом — просто без `--thin`.")
+    _fill_cases(res, convoy)
 
     # 4а. наглядацький шлях: далі захід веде відчеплений наглядач, а ми виходимо
     if not thin:
         from nyshporka.cloud import supervised as SUP
 
-        # Людський параметр сильніший за наш: обчислене, що вже назвали руками,
-        # не дублюємо.
-        named: set[str] = {item.split("=", 1)[0] for item in params if "=" in item}
-        SUP.launch(plan, res, say, pack_dir=pack, source_dir=ref.frames_dir,
-                   total_mb=rep.total_mb, budget=budget, max_hours=max_hours,
+        SUP.launch(convoy, res, say, budget=budget, max_hours=max_hours,
                    confirm=confirm, dry_run=dry_run, transport=transport,
-                   max_usd_per_1000=max_usd_per_1000, seed=seg_seed,
-                   params=[*(item for item in dense
-                             if item.split("=", 1)[0] not in named), *params])
+                   max_usd_per_1000=max_usd_per_1000, params=params)
         return
+
+    # 4б. тонкий шлях веде ОДНУ справу: одне з'єднання, один віддалений
+    # каталог, один pid. Партія сюди не заходить — її спинили ще в `go`.
+    leg = convoy.one
+    plan, seed = leg.plan, leg.resume
 
     est = M.ask_estimate(b, plan.need)
     if est is not None:

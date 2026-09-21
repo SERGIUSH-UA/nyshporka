@@ -655,6 +655,14 @@ def _stop_detached(st: RunState, *, force: bool) -> None:
     """
     from nyshporka.cloud import supervised as SUP
 
+    if st.siblings:
+        # 🔴 Наглядач і машина в партії одні на всіх. Не сказавши цього, ми
+        # дали б людині погасити роботу, про яку вона зараз не думає.
+        console.print(f"[warn]⚠ цей захід везе ще {len(st.siblings)} "
+                      f"{_plural(len(st.siblings), 'справу', 'справи', 'справ')}: "
+                      f"{escape(', '.join(st.siblings))}. Наглядач один на всю "
+                      f"чергу, тож згортається ВЕСЬ захід[/warn]",
+                      highlight=False)
     res = SUP.stop(st, force=force)
     if res.ok and not res.killed:
         console.print(f"✅ {st.run_id}: наглядач {st.supervisor} згортає захід "
@@ -768,7 +776,9 @@ def cmd_stop(
 # ── захід однією командою ────────────────────────────────────────────────────
 @app.command("go")
 def cmd_go(
-    case: str = typer.Argument(..., help="справа: тека кадрів або шифра з бібліотеки"),
+    case: list[str] = typer.Argument(
+        ..., help="справа або кілька: теки кадрів чи шифри з бібліотеки. Кілька "
+                  "справ їдуть ОДНІЄЮ чергою на одну машину"),
     backend: str = typer.Option("vast", "--backend", "-b",
                                  help="бекенд оренди; які є — `nysh cloud hosts list`"),
     budget: float | None = typer.Option(
@@ -897,9 +907,21 @@ def cmd_go(
         console.print(f"  сторінок : {res.pages_total}")
         console.print(f"  бюджет   : {_usd(res.budget_usd)} · стеля часу "
                       f"{res.max_hours:g} год" if res.max_hours else "")
-        console.print(f"  вихід    : {res.out_dir}")
-        console.print(f"[muted]стан: nysh cloud state {res.run_id} · "
-                      f"спинити: nysh cloud stop {res.run_id}[/muted]")
+        if len(res.cases) > 1:
+            # 🔴 Черга друкується поіменно. Одного рядка «вихід» на партію не
+            # буває: справи лягають у різні теки, і людина мусить бачити, за що
+            # саме вона зараз заплатить.
+            console.print(f"  черга    : {len(res.cases)} "
+                          f"{_plural(len(res.cases), 'справа', 'справи', 'справ')}")
+            for c in res.cases:
+                console.print(f"    · {c.pages_total:>5} стор · {c.out_dir}")
+            console.print(f"[muted]стан: nysh cloud state {res.cases[0].run_id} · "
+                          f"спинити (ВСЮ чергу): nysh cloud stop "
+                          f"{res.cases[0].run_id}[/muted]")
+        else:
+            console.print(f"  вихід    : {res.out_dir}")
+            console.print(f"[muted]стан: nysh cloud state {res.run_id} · "
+                          f"спинити: nysh cloud stop {res.run_id}[/muted]")
         for note in res.notes:
             console.print(f"[warn]⚠ {escape(note)}[/warn]", highlight=False)
         raise typer.Exit(code=res.exit_code)

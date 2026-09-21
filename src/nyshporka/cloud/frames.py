@@ -252,9 +252,23 @@ def _claim_dir(dst_dir: Path, src_dir: Path) -> None:
             claim.write_text(mine, encoding="utf-8")
 
 
+def default_jobs() -> int:
+    """Скільки кадрів стискати одночасно.
+
+    💰 Замір 21.09.2026 (40 кадрів ДАХмО ф.315, медіана 6 МБ, 8 ядер):
+    один потік — 104 кадр/хв, чотири — 362, вісім — 484 (×4.6). На партії з
+    шести тисяч кадрів це різниця між годиною й чвертю години, тобто питання
+    не зручності, а того, чи доживе людина до старту заходу.
+
+    Мінус два ядра — щоб машина лишалась живою: стискання часто йде, поки
+    людина працює. Стеля у вісім: далі впирається диск, а не процесор.
+    """
+    return max(1, min(8, (os.cpu_count() or 2) - 2))
+
+
 def shrink(src: Path | str, dst: Path | str, *, target_h: int = TARGET_HEIGHT,
            quality: int = JPEG_QUALITY, rotate_landscape: bool = False,
-           on_line: Any = None) -> ShrinkResult:
+           jobs: int = 0, on_line: Any = None) -> ShrinkResult:
     """Зменшити кадри до робочого розміру: сірий JPEG заданої висоти.
 
     Ідемпотентно: наявне в цілі пропускається, тож перерване стискання
@@ -317,16 +331,24 @@ def shrink(src: Path | str, dst: Path | str, *, target_h: int = TARGET_HEIGHT,
     done = skipped = rotated = 0
     src_bytes = dst_bytes = 0
     failed: list[str] = []
-    for p in files:
+    lock = threading.Lock()
+
+    def one(p: Path) -> None:
+        """Один кадр. 🔴 Усе, що вирішує долю ПАКЕТА, лишилось у батька:
+        захоплення теки, чужі кадри в цілі, збіг імен, приймач по числу кадрів
+        і перевірка ландшафту. Тут — рівно робота над файлом."""
+        nonlocal done, skipped, rotated, src_bytes, dst_bytes
         out = dst_dir / (p.stem + ".jpg")
         if out.exists():
-            skipped += 1
-            dst_bytes += out.stat().st_size
-            continue
+            with lock:
+                skipped += 1
+                dst_bytes += out.stat().st_size
+            return
         # pid і потік в імені: два заходи однієї справи (інша модель, інше
         # письмо) стискають у ту саму теку, і спільний тимчасовий файл дав би
         # кадр, зшитий із двох половин. Вміст у них однаковий, тож хто з двох
-        # перейменує останнім — байдуже.
+        # перейменує останнім — байдуже. Потік в імені потрібен і всередині
+        # одного заходу: кадри йдуть у кілька потоків.
         tmp = out.with_name(f"{out.name}.{os.getpid()}.{threading.get_ident()}.part")
         try:
             # 🔴 `with`, а не голий `open`: присвоєння результату `resize` губить
@@ -349,20 +371,36 @@ def shrink(src: Path | str, dst: Path | str, *, target_h: int = TARGET_HEIGHT,
             im.save(tmp, "JPEG", quality=quality, optimize=True)
             im.close()
             tmp.replace(out)
-            src_bytes += p.stat().st_size
-            dst_bytes += out.stat().st_size
-            done += 1
+            with lock:
+                src_bytes += p.stat().st_size
+                dst_bytes += out.stat().st_size
+                done += 1
+                if done % 100 == 0:
+                    say(f"стиснуто {done} з {len(files)}")
         except Exception as exc:        # один битий кадр не валить пакет
             with contextlib.suppress(OSError):
                 tmp.unlink(missing_ok=True)
-            if out.exists():
-                # Сусідній захід тієї самої справи встиг покласти цей кадр
-                # першим (на Windows заміна відкритого файла відмовляє).
-                skipped += 1
-            else:
-                failed.append(f"{p.name}: {type(exc).__name__}")
-        if done and done % 100 == 0:
-            say(f"стиснуто {done} з {len(files)}")
+            with lock:
+                if out.exists():
+                    # Сусідній захід тієї самої справи встиг покласти цей кадр
+                    # першим (на Windows заміна відкритого файла відмовляє).
+                    skipped += 1
+                else:
+                    failed.append(f"{p.name}: {type(exc).__name__}")
+
+    workers = default_jobs() if jobs <= 0 else max(1, int(jobs))
+    if workers == 1:
+        for p in files:
+            one(p)
+    else:
+        # Потоки, а не процеси: Pillow відпускає GIL на зменшенні й записі, а
+        # процеси на Windows стартують через spawn — тобто імпортують пакет
+        # заново в кожному, і бібліотека перестала б бути придатною до виклику
+        # звідки завгодно. Замір лишається в лозі заходу.
+        from concurrent.futures import ThreadPoolExecutor
+
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            list(pool.map(one, files))
 
     got = len(frames_in(dst_dir))
     if failed or got != len(files):
