@@ -31,12 +31,20 @@
 машині.
 
 <p align="center">
+  <a href="https://www.youtube.com/live/VsvenHgbVZY?t=2550"><b>🎥 Подивитися наживо</b></a>
+  &nbsp;·&nbsp;
   <a href="https://sergiush-ua.github.io/nyshporka/agent/"><b>🤖 Підключити агента</b></a>
   &nbsp;·&nbsp;
   <a href="https://github.com/SERGIUSH-UA/nyshporka/releases/latest/download/nyshporka-setup.exe">⬇ Завантажити для Windows</a>
   &nbsp;·&nbsp;
   <a href="https://sergiush-ua.github.io/nyshporka/start/">поставив — що далі</a>
 </p>
+
+> 🎥 **Як це працює, показано наживо** — на стрімі
+> [«ШІ-агенти в генеалогії: дослідження майбутнього»](https://www.youtube.com/live/VsvenHgbVZY)
+> («В гостях у Качки» №11). Перша частина — про те, навіщо генеалогові агент
+> узагалі; [сама Нишпорка в роботі — приблизно з 42-ї
+> хвилини](https://www.youtube.com/live/VsvenHgbVZY?t=2550).
 
 ## Що дістає агент
 
