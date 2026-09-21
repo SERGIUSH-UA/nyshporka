@@ -54,9 +54,16 @@ def token() -> str:
 
 
 def _request(method: str, url: str, *, body: Any = None, auth: str = "") -> dict[str, Any]:
-    from nyshporka.sources.http import Fetcher, HttpError
+    from nyshporka.sources.http import Fetcher, HttpError, app_ua
 
-    headers = {"Accept": "application/json"}
+    # 🔴 Свій User-Agent, а не браузерний за замовчуванням. Пул — наш сервер,
+    # і маскуватись перед ним нема від чого; натомість він пише подію на
+    # КОЖЕН lookup, і промахи («питали, а в нас нема») — це і є перелік того,
+    # що засівати далі. Під браузерним рядком у тій події не відрізнити
+    # клієнта перед прогоном від людини у вкладці й від пошукового бота, тож
+    # рішення про засів будувалося б на змішаних числах — і помітити це було б
+    # нічим.
+    headers = {"Accept": "application/json", "User-Agent": app_ua()}
     if auth:
         headers["Authorization"] = f"Bearer {auth}"
     fetcher = Fetcher(headers=headers)
@@ -111,7 +118,7 @@ def publish(path: Path, *, base: str = "", auth: str = "") -> dict[str, Any]:
 
     # Геометрія їде окремим об'єктом, і лише якщо пул її попросив: вона
     # важить ×10 від тексту й лягає тільки тому, у кого ті самі кадри.
-    geom = path.with_name(path.name.replace(bundle.SUFFIX, f".geom{bundle.SUFFIX}"))
+    geom = bundle.geom_path(path)
     if upload.get("geom") and geom.exists():
         _put(upload["geom"], geom.read_bytes())
 

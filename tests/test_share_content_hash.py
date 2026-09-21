@@ -31,7 +31,7 @@ def test_khesh_zmistu_perezhyvaie_perepakuvannia(tmp_path: Path) -> None:
     дізнатись про неї треба тут, а не на боці пулу.
     """
     run = make_run(tmp_path, "prohin", pages=3)
-    voice = bundle.voice_of(run, geometry=False)
+    voice = bundle.voice_of(run)
     manifest = bundle.Manifest(
         case={"shifra": "ДАХмО 315-1-8433"},
         decode={"pages": voice.pages, "lines": voice.lines, "chars": voice.chars,
@@ -45,7 +45,7 @@ def test_khesh_zmistu_perezhyvaie_perepakuvannia(tmp_path: Path) -> None:
     b = bundle.write(tmp_path / "b.nyshtext", manifest, [run])
 
     assert a["sha256"] != b["sha256"], "хеш файла раптом став сталим — див. докстрінг"
-    assert bundle.content_sha256(run) == bundle.voice_of(run, geometry=False).content_sha256
+    assert bundle.content_sha256(run) == bundle.voice_of(run).content_sha256
 
 
 def test_khesh_zmistu_lovyt_pravku(tmp_path: Path) -> None:
@@ -70,5 +70,5 @@ def test_khesh_zmistu_ne_zalezhyt_vid_heometrii(tmp_path: Path) -> None:
 def test_khesh_zmistu_v_manifesti(tmp_path: Path) -> None:
     """Поле доїжджає до маніфесту — саме звідти його читає пул."""
     run = make_run(tmp_path, "prohin", pages=3)
-    voice = bundle.voice_of(run, geometry=False)
+    voice = bundle.voice_of(run)
     assert voice.as_json()["content_sha256"] == bundle.content_sha256(run)

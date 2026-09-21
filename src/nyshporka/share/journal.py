@@ -25,6 +25,16 @@ OUTBOX = "outbox"
 
 PACKED = "pack"
 IMPORTED = "import"
+#: Геометрія, докладена до вже прийнятого тексту, — своя подія.
+#:
+#: 🔴 Не `import`. Геометрія доїжджає другим об'єктом до того самого прогону,
+#: і записана тим самим словом вона рахувалася б другим прийомом: «справ
+#: прийнято» росло б удвічі проти зробленого.
+GEOMETRY = "geometry"
+
+#: Події обміну, які взагалі показуються в журналі. Відмова «цю не віддам»
+#: (`suggest.DECLINED`) сюди не входить: це не обмін, а рішення про нього.
+EXCHANGE = (PACKED, IMPORTED, GEOMETRY)
 
 
 def share_dir() -> Path:
@@ -103,7 +113,16 @@ def stats() -> dict[str, Any]:
         key = str(r.get("shifra") or r.get("case_key") or r.get("path") or "")
         if not key:
             continue
-        bucket = packed if r.get("event") == PACKED else taken
+        # 🔴 Кошик обирається ЗА НАЗВОЮ події, а не «пакування чи все решта».
+        # Доти будь-яка нова подія в журналі — відмова «цю не віддам»,
+        # докладена геометрія — мовчки ставала прийнятою справою, і зведення
+        # росло на роботу, якої не було.
+        if r.get("event") == PACKED:
+            bucket = packed
+        elif r.get("event") == IMPORTED:
+            bucket = taken
+        else:
+            continue
         # Найновіша подія по справі виграє: журнал читається новими вперед.
         bucket.setdefault(key, r)
         if r.get("event") == IMPORTED:

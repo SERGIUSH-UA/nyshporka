@@ -30,7 +30,7 @@ def a_bundle(where: Path, dest: Path, *, runs: int = 1) -> Path:
     dirs = [make_run(src, "spr-8433")]
     if runs > 1:
         dirs.append(make_run(src, "spr-8433-diak_v4", model="diak_cyr_v4.mlmodel"))
-    m = manifest_for([bundle.voice_of(d, geometry=False) for d in dirs])
+    m = manifest_for([bundle.voice_of(d) for d in dirs])
     m.refs = [{"source": "commons", "ref": "file:Test.djvu"}]
     m.publisher = {"handle": "oksana", "contact": "t.me/oksana"}
     m.note = "читала Дяком, м'ястківські аркуші наприкінці"
@@ -87,19 +87,51 @@ def test_import_is_written_down(space: Path, tmp_path: Path) -> None:
     assert rows[0]["alignment"] == "text-only"
 
 
-def test_second_import_refuses_until_asked_twice(space: Path, tmp_path: Path) -> None:
-    """Прийняти поверх свого — рішення людини, а не мовчазний наслідок."""
+def test_second_import_refuses(space: Path, tmp_path: Path) -> None:
+    """Прийняти поверх свого — рішення людини, а не мовчазний наслідок.
+
+    Гард саме такий — «прогону ще НЕ мусить бути», — і протилежний до гарда
+    геометрії, яка лягає лише туди, де прогін УЖЕ є (`test_share_geometry`).
+    Спільна функція мусила б відмовляти за обома правилами водночас.
+    """
     pack = a_bundle(space, tmp_path / "pack.nyshtext")
     accept.accept(str(pack))
     with pytest.raises(accept.AcceptError, match="--force"):
         accept.accept(str(pack))
+
+
+def test_second_import_passes_when_asked_twice(space: Path, tmp_path: Path) -> None:
+    pack = a_bundle(space, tmp_path / "pack.nyshtext")
+    accept.accept(str(pack))
     assert accept.accept(str(pack), force=True)["runs"] == ["spr-8433"]
+
+
+def test_pakety_z_pulu_ne_pereteryraiut_odyn_odnoho() -> None:
+    """🔴 inbox — це доказ, а не кеш.
+
+    У пулі КОЖЕН пакет зветься `b/<справа>/<внесок>/text.nyshtext`. За
+    останньою ланкою адреси всі вони лягали б в один `inbox/text.nyshtext`,
+    і друга прийнята книга мовчки робила б доказ першої хибним: у журналі
+    лишається шлях і sha256, шлях є, байти вже чужі, хеш не сходиться.
+    Геометрія додає другий такий самий загальний `geom.nyshtext`.
+    """
+    cdn = "https://cdn.nyshporka.online"
+    a = accept._name_for(f"{cdn}/b/dahmo/315-1-8433/7/text.nyshtext")
+    g = accept._name_for(f"{cdn}/b/dahmo/315-1-8433/7/geom.nyshtext")
+    # 🔴 Та сама шифра в іншому архіві — інша справа. «315-1-8433 є в кожному
+    # другому архіві країни», тож саме цей випадок і має розрізнятись.
+    inshyi_arkhiv = accept._name_for(f"{cdn}/b/tsdial/315-1-8433/9/text.nyshtext")
+    assert len({a, g, inshyi_arkhiv}) == 3
+    assert a.startswith("dahmo-315-1-8433-7")
+    assert a.endswith(bundle.SUFFIX) and g.endswith(bundle.SUFFIX)
+    # Та сама адреса — те саме ім'я: повторне завантаження не плодить копій.
+    assert a == accept._name_for(f"{cdn}/b/dahmo/315-1-8433/7/text.nyshtext")
 
 
 def test_gates_stop_a_bad_bundle_at_the_door(space: Path, tmp_path: Path) -> None:
     src = space / "reports" / "htr"
     run = make_run(src, "spr-8433", pages=3)
-    m = manifest_for([bundle.voice_of(run, geometry=False)])
+    m = manifest_for([bundle.voice_of(run)])
     m.license = {}                      # пакувальник був не наш
     dest = tmp_path / "bad.nyshtext"
     bundle.write(dest, m, [run])

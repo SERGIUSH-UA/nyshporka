@@ -150,7 +150,13 @@ class Alignment:
         return {"label": self.label, "text": LABEL_TEXT.get(self.label, ""),
                 "why": self.why, "case_dir": self.case_dir,
                 "frames_theirs": self.theirs, "frames_ours": self.ours,
-                "matched": self.matched}
+                "matched": self.matched,
+                # 🔴 Рішення, а не мітка. Той, хто вирішує, чи тягти
+                # геометрію, бачить лише цей JSON, і без готової відповіді
+                # він порівнював би рядок сам — тобто завів би другу копію
+                # правила «кроп лише при `exact`». Дві копії розходяться
+                # мовчки, і розійдуться вони в бік «ріжемо, коли не можна».
+                "can_crop": self.can_crop}
 
 
 def _keyset(frames: list[dict[str, Any]], field: str) -> set[str]:

@@ -60,8 +60,9 @@ def _show_gates(g: dict[str, Any]) -> None:
 def pack_cmd(
     case: str = typer.Argument(..., help="шифра справи або ім'я прогону"),
     out: str = typer.Option("", "--out", "-o", help="куди покласти файл"),
-    geometry: bool = typer.Option(False, "--geometry",
-                                  help="додати геометрію рядків (×10 до ваги)"),
+    geometry: bool = typer.Option(True, "--geometry/--no-geometry",
+                                  help="зібрати ще й пакет геометрії рядків "
+                                       "(окремий файл, ×10 до ваги тексту)"),
     hash_frames: bool = typer.Option(False, "--hash",
                                      help="порахувати sha256 кадрів: повільно, "
                                           "зате прив'язка стане точною"),
@@ -110,10 +111,21 @@ def pack_cmd(
         rest = len(d.get("files_list") or []) - 12
         if rest > 0:
             console.print(f"  … і ще {rest}")
+        if d.get("geom_files_list"):
+            console.print(f"  + геометрія окремим файлом: "
+                          f"{len(d['geom_files_list'])} · "
+                          f"{_mb(d.get('geom_bytes_raw') or 0)} до стиску")
         console.print("[dim]нічого не записано (--dry-run)[/dim]")
     else:
         console.print(f"пакет: [bold]{d['path']}[/bold] · {_mb(d['bytes'])} · "
                       f"sha256 {d['sha256'][:16]}…")
+        geom = d.get("geom")
+        if geom:
+            console.print(f"геометрія: [bold]{geom['path']}[/bold] · "
+                          f"{_mb(geom['bytes'])}")
+        elif d.get("geometry_on_disk"):
+            console.print("[dim]геометрія на диску є, але не пакувалась "
+                          "(--no-geometry)[/dim]")
         console.print("\n[dim]рядок для каталогу пулу:[/dim]")
         console.print(d.get("catalog_row") or "")
     _notes(env)
@@ -129,7 +141,8 @@ def setup_cmd(
     lookup: bool | None = typer.Option(None, "--lookup/--no-lookup",
                                        help="питати пул перед прогоном"),
     geometry: bool | None = typer.Option(None, "--geometry/--no-geometry",
-                                         help="тягнути геометрію при точній прив'язці"),
+                                         help="геометрія рядків: тягнути при "
+                                              "точній прив'язці й віддавати своєю"),
     show: bool = typer.Option(False, "--show", help="лише показати профіль"),
     yes: bool = typer.Option(False, "--yes", "-y", help="без питань"),
     as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
@@ -321,6 +334,36 @@ def import_cmd(
     _notes(env)
 
 
+@app.command("geometry")
+def geometry_cmd(
+    src: str = typer.Argument(..., help="пакет .geom.nyshtext або адреса"),
+    force: bool = typer.Option(False, "--force",
+                               help="перезаписати геометрію, яка вже лежить"),
+    reindex: bool = typer.Option(True, "--index/--no-index",
+                                 help="одразу перебудувати стор"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
+) -> None:
+    """Докласти геометрію рядків до вже прийнятого тексту.
+
+    Другий файл того самого внеску: рамки рядків на аркушах. Має сенс лише
+    тому, у кого ті самі кадри — тоді кроп ріже саме той рядок.
+    """
+    from nyshporka import ops as O
+
+    env = O.call("share.geometry", {"src": src, "force": force,
+                                    "reindex": reindex})
+    if _answer(env, as_json):
+        return
+    d = env.data or {}
+    console.print(f"геометрія: [bold]{d.get('shifra') or '—'}[/bold] · "
+                  f"сторінок {d.get('pages')} · прогонів {len(d.get('runs') or [])}")
+    if d.get("indexed"):
+        console.print(f"стор оновлено: {', '.join(d['indexed'])}")
+    else:
+        console.print("[dim]щоб кроп побачив рамки: nysh text index[/dim]")
+    _notes(env)
+
+
 @app.command("pull")
 def pull_cmd(
     query: str = typer.Argument(..., help="шифра, номер справи або назва місця"),
@@ -345,6 +388,9 @@ def pull_cmd(
         i = d["imported"]
         console.print(f"\nприйнято: [bold]{i.get('shifra')}[/bold] · "
                       f"прив'язка {(i.get('alignment') or {}).get('label')}")
+    if d.get("geometry"):
+        g = d["geometry"]
+        console.print(f"геометрія: сторінок {g.get('pages')} · кроп готовий")
     _notes(env)
 
 
@@ -368,7 +414,8 @@ def list_cmd(
         _notes(env)
         return
     for r in rows[:40]:
-        mark = "→" if r.get("event") == "pack" else "←"
+        mark = {"pack": "→", "import": "←", "geometry": "◆"}.get(
+            str(r.get("event") or ""), "·")
         who = r.get("publisher") or ""
         tail = f" від {who}" if who else ""
         console.print(f"{mark} {str(r.get('at'))[:16]}  {r.get('shifra') or '—':<24} "

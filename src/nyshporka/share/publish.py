@@ -135,7 +135,7 @@ def _refs_from_sidecar(case_dir: Path | None) -> list[dict[str, str]]:
     return out
 
 
-def build_manifest(scope: str, *, geometry: bool = False,
+def build_manifest(scope: str, *,
                    hash_frames: bool = False,
                    publisher: str = "", contact: str = "", site: str = "",
                    note: str = "", links: list[dict[str, str]] | None = None,
@@ -147,7 +147,7 @@ def build_manifest(scope: str, *, geometry: bool = False,
     key = str(info.get("key") or "")
     case_dir = align.case_dir_for(key) if key else None
     frames = align.frames_of(case_dir, hash_frames=hash_frames) if case_dir else []
-    voices = [bundle.voice_of(d, geometry=geometry) for d in run_dirs]
+    voices = [bundle.voice_of(d) for d in run_dirs]
     voices = [v for v in voices if v.pages]
     if not voices:
         raise PublishError(
@@ -230,14 +230,25 @@ def _blank_pages(run_dirs: list[Path]) -> int:
     return blank
 
 
-def pack(scope: str, dest: Path | None = None, *, geometry: bool = False,
+def pack(scope: str, dest: Path | None = None, *, geometry: bool = True,
          hash_frames: bool = False, partial_why: str = "",
          dry_run: bool = False, **meta: Any) -> dict[str, Any]:
-    """Зібрати пакет справи. `dry_run` — показати, що поїде, і нічого не писати."""
-    m, run_dirs, frames = build_manifest(scope, geometry=geometry,
-                                         hash_frames=hash_frames, **meta)
+    """Зібрати пакет справи. `dry_run` — показати, що поїде, і нічого не писати.
+
+    Пишеться ДВА файли, коли геометрія є на диску: текстовий пакет і пакет
+    геометрії поруч із ним. Це не два заходи для людини — вона й далі каже
+    «спакуй справу», — а два об'єкти для пулу: текст качають усі, геометрію
+    лише ті, у кого ті самі кадри.
+
+    `geometry=False` лишає другий файл незібраним. Текстовий від цього не
+    змінюється ні на байт, тож хеш змісту той самий і повторним внеском він
+    не стане.
+    """
+    m, run_dirs, frames = build_manifest(scope, hash_frames=hash_frames, **meta)
     verdict = gates.check(m, partial_why=partial_why)
-    sketch = bundle.plan(run_dirs, geometry=geometry)
+    sketch = bundle.plan(run_dirs)
+    geom_dirs = [d for d in run_dirs if bundle.has_geometry(d)]
+    geom_sketch = bundle.plan(geom_dirs, patterns=bundle.PACKED_GEOM) if geom_dirs else None
     out: dict[str, Any] = {
         "manifest": m.as_json(),
         "gates": verdict.as_json(),
@@ -245,9 +256,13 @@ def pack(scope: str, dest: Path | None = None, *, geometry: bool = False,
         "files": len(sketch["files"]),
         "bytes_raw": sketch["bytes"],
         "frames_listed": len(frames),
+        "geometry_on_disk": bool(geom_dirs),
     }
     if dry_run:
         out["files_list"] = [f["arc"] for f in sketch["files"]]
+        if geometry and geom_sketch:
+            out["geom_files_list"] = [f["arc"] for f in geom_sketch["files"]]
+            out["geom_bytes_raw"] = geom_sketch["bytes"]
         out["dry_run"] = True
         return out
     if not verdict.passed:
@@ -257,13 +272,23 @@ def pack(scope: str, dest: Path | None = None, *, geometry: bool = False,
     dest = Path(dest) if dest else (journal.share_dir() / journal.OUTBOX / name)
     if dest.is_dir():
         dest = dest / name
-    wrote = bundle.write(dest, m, run_dirs, frames=frames, geometry=geometry)
+    wrote = bundle.write(dest, m, run_dirs, frames=frames)
     out.update(wrote)
+
+    geom: dict[str, Any] | None = None
+    if geometry and geom_dirs:
+        # Той самий маніфест і той самий перелік кадрів: geom-пакет мусить
+        # називати ту саму справу, інакше приймач не знає, до чого його класти.
+        geom = bundle.write(bundle.geom_path(dest), m, geom_dirs, frames=frames,
+                            patterns=bundle.PACKED_GEOM)
+        out["geom"] = geom
+
     row = catalog.row_for(m, sha256=wrote["sha256"], nbytes=wrote["bytes"])
     out["catalog_row"] = row.as_tsv()
     out["catalog"] = row.as_json()
     journal.record(journal.PACKED, shifra=m.shifra,
                    case_key=str(m.case.get("key_local") or ""),
                    pages=m.pages, bytes=wrote["bytes"], sha256=wrote["sha256"],
-                   path=wrote["path"], models=", ".join(m.models()))
+                   path=wrote["path"], models=", ".join(m.models()),
+                   geom_bytes=int(geom["bytes"]) if geom else 0)
     return out

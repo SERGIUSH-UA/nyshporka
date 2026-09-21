@@ -6,8 +6,10 @@
 
 Що важить пакет. Замір на реальному сторі: текст плюс паспорт — **≈1.1 КБ на
 сторінку стиснуто**, тобто справа на 3772 аркуші виходить у 3–4 МБ. Геометрія
-рядків (`*.lines.json`) додає ×10 і лежить лише під 45% сторінок, тому вона за
-прапорцем. Кропи рятунку (6.8 ГБ із 19.4 на цій машині) не їдуть ніколи.
+рядків (`*.lines.json`) додає ×10 і лежить лише під 45% сторінок, тому вона
+їде ОКРЕМИМ пакетом (`GEOM_SUFFIX`) і лише тому, у кого ті самі кадри: рамка
+рядка прив'язана до пікселів конкретної зйомки, і на чужих кадрах вона ріже
+кроп не там. Кропи рятунку (6.8 ГБ із 19.4 на цій машині) не їдуть ніколи.
 
 🔴 Білий список, а не глоб-виключення. Тека прогону сусідить із дослідженням,
 і правило «беремо все, крім переліченого» помиляється в один бік: новий
@@ -27,6 +29,7 @@ import json
 import re
 import tarfile
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -35,6 +38,15 @@ from nyshporka.utils import tarsafe
 
 #: Розширення пакета. Одне слово, щоб його впізнавали й ті, хто Нишпорки не має.
 SUFFIX = ".nyshtext"
+
+#: Розширення пакета геометрії — другого файлу тієї самої справи.
+#:
+#: 🔴 Константа, а не рядкова заміна на місці. Ім'я geom-файла будують троє:
+#: пакувальник (пише), той, хто віддає в пул (шукає поруч із текстом), і той,
+#: хто приймає (впізнає). Три однакові заміни `.nyshtext` → `.geom.nyshtext`
+#: розійшлися б мовчки, і розбіжність вилізла б як «геометрія не доїхала»
+#: без жодної помилки.
+GEOM_SUFFIX = ".geom" + SUFFIX
 MANIFEST_NAME = "manifest.json"
 FRAMES_NAME = "frames.jsonl"
 README_NAME = "README.md"
@@ -47,7 +59,22 @@ SCHEMA = 1
 #: Що взагалі їде в пакет. Решта — ні, і це рішення, а не недогляд.
 PACKED_TEXT = "*.txt"
 PACKED_GEOMETRY = "*.lines.json"
+
+#: Два ВЗАЄМОВИКЛЮЧНІ набори: текстовий пакет і пакет геометрії.
+#:
+#: 🔴 Геометрія їде окремим файлом, а не прапорцем усередині текстового. Вона
+#: важить ×10 від тексту й лягає лише тому, у кого ті самі кадри, — тобто
+#: всередині спільного пакета вона була б платою, яку вносять усі, а
+#: користуються нею одиниці.
 PACKED = (PACKED_TEXT, META_NAME)
+
+#: 🔴 Мети тут НЕМАЄ, хоч у текстовому наборі вона є. Геометрія доїжджає в
+#: теку, яку щойно створив текстовий імпорт, а там у меті вже лежить позначка
+#: `shared` — доказ, чий це текст. Поклали б мету в geom-пакет, і розпакування
+#: перетерло б цей доказ іменем geom-файла: прогін тихо став би «прийнятим із
+#: geom.nyshtext», тобто джерело тексту зникло б. Та сама причина, через яку
+#: приймач геометрії не кличе `_stamp_shared`.
+PACKED_GEOM = (PACKED_GEOMETRY,)
 
 #: Поля мети, які не переживають переїзд: шлях чужої машини й сліди її диска.
 META_STRIPPED = ("case_dir", "case_dir_cloud", "logs", "review")
@@ -71,6 +98,10 @@ class Voice:
     lines: int = 0
     chars: int = 0
     conf_mean: float | None = None
+    #: 🔴 «Геометрія ІСНУЄ на диску», а не «пакую її зараз». Це поле читає
+    #: сервер пулу, щоб вирішити, чи видавати підписане посилання на другий
+    #: об'єкт. Означало б воно намір пакувальника — і той, хто зібрав пакет
+    #: без геометрії, ніколи б її не віддав, навіть маючи на диску.
     geometry: bool = False
     content_sha256: str = ""
 
@@ -241,7 +272,22 @@ def content_sha256(run_dir: Path) -> str:
     return h.hexdigest()
 
 
-def voice_of(run_dir: Path, *, geometry: bool) -> Voice:
+def has_geometry(run_dir: Path) -> bool:
+    """Чи лежить у теці прогону геометрія рядків."""
+    return any(Path(run_dir).glob(PACKED_GEOMETRY))
+
+
+def geom_path(text_path: Path) -> Path:
+    """Ім'я пакета геометрії поруч із текстовим — єдине місце, де воно будується."""
+    text_path = Path(text_path)
+    name = text_path.name
+    if name.endswith(GEOM_SUFFIX):     # уже він — не подвоювати розширення
+        return text_path
+    stem = name[: -len(SUFFIX)] if name.endswith(SUFFIX) else name
+    return text_path.with_name(stem + GEOM_SUFFIX)
+
+
+def voice_of(run_dir: Path) -> Voice:
     """Описати одну теку прогону так, як її побачить отримувач."""
     from nyshporka import htr_store as S
     from nyshporka.utils.atomic import CorruptFileError, read_json
@@ -253,7 +299,7 @@ def voice_of(run_dir: Path, *, geometry: bool) -> Voice:
     if not isinstance(meta, dict):
         meta = {}
     pages, lines, chars = _run_stats(run_dir)
-    has_geo = geometry and any(run_dir.glob(PACKED_GEOMETRY))
+    has_geo = has_geometry(run_dir)
     return Voice(run=run_dir.name, engine=S.run_engine(meta),
                  model=str(meta.get("model") or ""),
                  script=str(meta.get("script") or ""),
@@ -262,15 +308,14 @@ def voice_of(run_dir: Path, *, geometry: bool) -> Voice:
                  content_sha256=content_sha256(run_dir))
 
 
-def _members(run_dir: Path, *, geometry: bool) -> list[Path]:
-    """Файли теки прогону, які їдуть. Білий список `PACKED`, див. шапку.
+def _members(run_dir: Path, patterns: tuple[str, ...]) -> list[Path]:
+    """Файли теки прогону, які їдуть. Білий список, див. шапку.
 
-    🔴 Перелік береться саме з `PACKED`, а не повторюється тут своїми рядками.
-    Інакше константа лишилась би описом наміру, а поїхало б те, що перелічено
-    в коді, — і розійтись ці двоє могли б мовчки.
+    🔴 Набір передається, а не вгадується з прапорця. Текст і геометрія —
+    два окремі пакети, і набори в них взаємовиключні: спільний прапорець
+    описував би стан «і те, й те», якого більше немає.
     """
     seen: list[Path] = []
-    patterns = (*PACKED, *((PACKED_GEOMETRY,) if geometry else ()))
     for pat in patterns:
         for f in sorted(run_dir.glob(pat)):
             if f.is_file() and f not in seen:
@@ -278,7 +323,7 @@ def _members(run_dir: Path, *, geometry: bool) -> list[Path]:
     return seen
 
 
-def plan(run_dirs: list[Path], *, geometry: bool = False) -> dict[str, Any]:
+def plan(run_dirs: list[Path], *, patterns: tuple[str, ...] = PACKED) -> dict[str, Any]:
     """Що саме ляже в пакет — до того, як його зібрано.
 
     Окрема функція, бо `--dry-run` мусить показувати ТОЙ САМИЙ перелік, який
@@ -287,8 +332,8 @@ def plan(run_dirs: list[Path], *, geometry: bool = False) -> dict[str, Any]:
     files: list[dict[str, Any]] = []
     voices: list[Voice] = []
     for d in run_dirs:
-        voices.append(voice_of(d, geometry=geometry))
-        for f in _members(d, geometry=geometry):
+        voices.append(voice_of(d))
+        for f in _members(d, patterns):
             try:
                 size = f.stat().st_size
             except OSError:
@@ -304,11 +349,15 @@ def plan(run_dirs: list[Path], *, geometry: bool = False) -> dict[str, Any]:
 
 def write(dest: Path, manifest: Manifest, run_dirs: list[Path], *,
           frames: list[dict[str, Any]] | None = None,
-          geometry: bool = False) -> dict[str, Any]:
+          patterns: tuple[str, ...] = PACKED) -> dict[str, Any]:
     """Зібрати пакет. Повертає шлях, розмір і sha256 — рядок для каталогу.
 
     Пишеться в `.part` і перейменовується: обірвана збірка не лишає файлу, що
     виглядає як готовий пакет.
+
+    `patterns` — `PACKED` для тексту або `PACKED_GEOM` для геометрії. Маніфест
+    в обох однаковий, і це навмисно: geom-пакет мусить називати ту саму справу
+    й ті самі прогони, інакше приймач не знає, до чого його класти.
     """
     dest = Path(dest)
     dest.parent.mkdir(parents=True, exist_ok=True)
@@ -321,7 +370,7 @@ def write(dest: Path, manifest: Manifest, run_dirs: list[Path], *,
             rows = "\n".join(json.dumps(f, ensure_ascii=False) for f in frames)
             _add_bytes(tar, FRAMES_NAME, (rows + "\n").encode("utf-8"))
         for d in run_dirs:
-            for f in _members(d, geometry=geometry):
+            for f in _members(d, patterns):
                 arc = f"{RUNS_SUB}/{d.name}/{f.name}"
                 if f.name == META_NAME:
                     _add_bytes(tar, arc, _clean_meta_bytes(f))
@@ -399,23 +448,44 @@ def read_frames(path: Path) -> list[dict[str, Any]]:
     return out
 
 
-def run_names(path: Path) -> list[str]:
-    """Імена прогонів у пакеті — у порядку, у якому їх клали."""
-    seen: list[str] = []
+def members(path: Path) -> list[tuple[str, str]]:
+    """Пари «прогін, ім'я файлу» в пакеті — у порядку, у якому їх клали.
+
+    Потрібне приймачеві геометрії: він мусить знати, які саме `*.lines.json`
+    ляжуть, ЩЕ ДО розпакування, щоб спитати про перезапис наявних, а не
+    повідомити про нього постфактум.
+    """
+    out: list[tuple[str, str]] = []
     with tarfile.open(path, "r:gz") as tar:
         for name in tar.getnames():
             parts = PurePosixPath(name).parts
-            if len(parts) >= 2 and parts[0] == RUNS_SUB and parts[1] not in seen:
-                seen.append(parts[1])
+            if len(parts) >= 3 and parts[0] == RUNS_SUB:
+                out.append((parts[1], parts[-1]))
+    return out
+
+
+def run_names(path: Path) -> list[str]:
+    """Імена прогонів у пакеті — у порядку, у якому їх клали."""
+    seen: list[str] = []
+    for run, _ in members(path):
+        if run not in seen:
+            seen.append(run)
     return seen
 
 
-def extract(path: Path, htr_root: Path) -> list[Path]:
+def extract(path: Path, htr_root: Path,
+            keep: Callable[[str], bool] | None = None) -> list[Path]:
     """Розкласти прогони пакета в теки прочитаного. Повертає теки, що лягли.
 
     🔴 Гард шляхів той самий, що й у хмарного забору (`utils.tarsafe`): пакет
     приїхав від людини, якої ми не знаємо, і довіряти іменам у ньому підстав
     рівно стільки ж, скільки орендованому боксу.
+
+    🔴 `keep` — другий білий список, уже на прийманні. Пакувальник кладе в
+    geom-пакет лише геометрію, але приймач не зобов'язаний вірити тому, що
+    лежить у чужому tar: один підкинутий `_htr_meta.json` перетер би позначку
+    походження тексту. Правило «беремо назване» дешевше за перелік того, чого
+    не можна.
     """
     import shutil
 
@@ -431,6 +501,8 @@ def extract(path: Path, htr_root: Path) -> list[Path]:
                 continue
             rest = parts[1:]
             if not tarsafe.safe_member_parts(rest):
+                continue
+            if keep is not None and not keep(rest[-1]):
                 continue
             base = htr_root / rest[0]
             dest = base.joinpath(*rest[1:])
@@ -454,6 +526,11 @@ def extract(path: Path, htr_root: Path) -> list[Path]:
 _UNSAFE_NAME = re.compile(r"[^0-9A-Za-zА-Яа-яЁёІіЇїЄєҐґ._-]+")
 
 
+def safe_name(raw: str, default: str = "case") -> str:
+    """Рядок, придатний бути іменем файлу на будь-якій із трьох систем."""
+    return _UNSAFE_NAME.sub("_", raw).strip("_") or default
+
+
 def suggest_name(manifest: Manifest) -> str:
     """Ім'я файлу пакета з шифри: `ДАХмО_315-1-8433.nyshtext`."""
     c = manifest.case
@@ -462,8 +539,7 @@ def suggest_name(manifest: Manifest) -> str:
     stem = "-".join(p for p in parts[1:] if p)
     head = parts[0] or "case"
     raw = f"{head}_{stem}" if stem else (manifest.shifra or "case")
-    safe = _UNSAFE_NAME.sub("_", raw).strip("_") or "case"
-    return safe + SUFFIX
+    return safe_name(raw) + SUFFIX
 
 
 def readme(manifest: Manifest) -> str:

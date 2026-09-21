@@ -47,7 +47,7 @@ def base_url(base: str = "") -> str:
 #: каталогу мусить лишатись робочим, інакше оновлення пакета ламає чужі копії.
 COLUMNS = ("shifra", "repo", "fond", "opys", "spr", "years", "places",
            "pages", "frames", "voices", "models", "bytes", "sha256",
-           "license", "publisher", "contact", "url", "added")
+           "license", "publisher", "contact", "url", "added", "geom_url")
 
 
 @dataclass
@@ -72,6 +72,9 @@ class Row:
     contact: str = ""
     url: str = ""
     added: str = ""
+    #: Адреса другого об'єкта — геометрії рядків. Порожньо означає «пакувальник
+    #: її не віддавав», а не «її немає»: рамки без тих самих кадрів марні.
+    geom_url: str = ""
 
     def as_tsv(self) -> str:
         return "\t".join(_clean(getattr(self, c, "")) for c in COLUMNS)
@@ -86,7 +89,7 @@ def _clean(value: Any) -> str:
 
 
 def row_for(manifest: Any, *, sha256: str = "", nbytes: int = 0,
-            url: str = "", added: str = "") -> Row:
+            url: str = "", added: str = "", geom_url: str = "") -> Row:
     """Рядок каталогу з маніфесту зібраного пакета."""
     import time
 
@@ -109,7 +112,7 @@ def row_for(manifest: Any, *, sha256: str = "", nbytes: int = 0,
         license=str((manifest.license or {}).get("text") or ""),
         publisher=str(pub.get("handle") or ""),
         contact=str(pub.get("contact") or ""), url=url,
-        added=added or time.strftime("%Y-%m-%d"))
+        added=added or time.strftime("%Y-%m-%d"), geom_url=geom_url)
 
 
 def header() -> str:
@@ -170,17 +173,23 @@ def catalog_url(base: str = "") -> str:
 def _get(url: str) -> dict[str, Any]:
     """Запит до пулу з розбором відповіді.
 
-    🪤 `Fetcher` ходить із браузерним User-Agent — це видно в `sources/http.py`
-    і це не випадковість. Наслідок для пулу: на його домені не можна вмикати
-    JS-челендж, бо клієнт виглядає як Chrome, але JS не виконує, дістає 403 і
-    НЕ повторює — відступ спрацьовує лише на 429 і 5xx.
+    🔴 Клієнт називається своїм іменем (`app_ua`), а не браузерним рядком
+    `Fetcher` за замовчуванням. Пул пише подію на кожен lookup, і найцінніше
+    в ній — промахи: «питали, а в нас нема» це і є перелік того, що засівати
+    далі. Під браузерним рядком у цій події не відрізнити клієнта перед
+    прогоном від людини у вкладці й від пошукового бота.
+
+    🪤 На домені пулу не можна вмикати JS-челендж: клієнт JS не виконує,
+    дістане 403 і НЕ повторить — відступ спрацьовує лише на 429 і 5xx.
+    Перевірено наживо: і браузерний рядок, і `nyshporka/<версія>` Cloudflare
+    пропускає, тож своє ім'я тут нічого не коштує.
     """
     import json
 
-    from nyshporka.sources.http import Fetcher, HttpError
+    from nyshporka.sources.http import Fetcher, HttpError, app_ua
 
     try:
-        resp = Fetcher().get(url)
+        resp = Fetcher(headers={"User-Agent": app_ua()}).get(url)
     except HttpError as exc:
         raise RuntimeError(f"пул за {url} недоступний: {exc}") from exc
     text = resp.text if hasattr(resp, "text") else str(resp)

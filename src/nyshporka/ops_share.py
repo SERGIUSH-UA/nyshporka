@@ -50,9 +50,9 @@ class SharePackArgs(BaseModel):
     case: str = Field(description="шифра справи або ім'я прогону — що пакувати")
     out: str = Field(default="", description="куди покласти файл; порожньо — "
                                              "у data/share/outbox")
-    geometry: bool = Field(default=False,
-                           description="додати геометрію рядків: ×10 до ваги, "
-                                       "але отримувач зможе різати кропи")
+    geometry: bool = Field(default=True,
+                           description="зібрати ще й пакет геометрії рядків "
+                                       "(окремий файл, ×10 до ваги тексту)")
     hash_frames: bool = Field(default=False,
                               description="порахувати sha256 кадрів — повільно, "
                                           "зате прив'язка стане точною")
@@ -125,7 +125,8 @@ class ShareSetupArgs(BaseModel):
     lookup: bool | None = Field(default=None,
                                 description="питати пул перед прогоном")
     geometry: bool | None = Field(default=None,
-                                  description="тягнути геометрію при точній прив'язці")
+                                  description="геометрія рядків: тягнути при "
+                                              "точній прив'язці й віддавати своєю")
     show: bool = Field(default=False, description="лише показати, нічого не міняти")
 
 
@@ -308,7 +309,12 @@ def share_autoshare(a: ShareAutoshareArgs) -> Envelope:
 
     defaults = P.pack_defaults()
     try:
-        got = pack(a.case, None, publisher=defaults["publisher"],
+        # 🔴 Геометрія за профілем, а не завжди. Вона важить ×10 від тексту,
+        # і в режимі «завжди» людина на результат не дивиться — тобто
+        # десятикратний трафік ліг би на того, хто вмикав автовіддачу
+        # прочитаного, а не розсилання рамок.
+        got = pack(a.case, None, geometry=prof.geometry,
+                   publisher=defaults["publisher"],
                    contact=defaults["contact"], site=defaults["site"],
                    license_text=defaults["license"],
                    source_terms=defaults["source_terms"])
@@ -395,6 +401,44 @@ def share_import(a: ShareImportArgs) -> Envelope:
     return env
 
 
+class ShareGeometryArgs(BaseModel):
+    src: str = Field(description="пакет геометрії .geom.nyshtext або адреса")
+    force: bool = Field(default=False,
+                        description="перезаписати геометрію, яка вже лежить")
+    reindex: bool = Field(default=True,
+                          description="одразу перебудувати стор, щоб кроп запрацював")
+
+
+@op("share.geometry", summary="Докласти геометрію рядків до прийнятого тексту",
+    args=ShareGeometryArgs, mutates=True, agent=False, gui=False, section=SECTION,
+    next_hints=(("text.find", "перевірити, що кроп тепер ріже рядок"),))
+def share_geometry(a: ShareGeometryArgs) -> Envelope:
+    """Другий об'єкт того самого внеску: рамки рядків на аркушах.
+
+    🔴 Лягає лише туди, де текст УЖЕ прийнято. Рамка прив'язана до пікселів
+    конкретної зйомки, і на чужих кадрах вона ріже кроп не там — тобто
+    геометрія без свого тексту не просто марна, а шкідлива.
+
+    🔴 Стор перебудовується тут же. Рамки вмерзають у SQLite під час
+    індексації, тож докладені після неї файли лежали б на диску й не
+    працювали — і причину цього людина не побачила б ніде.
+    """
+    from nyshporka.share.accept import AcceptError, accept_geometry
+
+    try:
+        got = accept_geometry(a.src, force=a.force, reindex=a.reindex)
+    except AcceptError as exc:
+        return fail(str(exc))
+    env = ok(got)
+    if got.get("overwritten"):
+        env.warn("overwritten",
+                 f"перезаписано геометрію на {got['overwritten']} сторінках")
+    if a.reindex and not got.get("indexed"):
+        env.warn("not_indexed",
+                 "стор ще не зібрано — кроп побачить рамки після nysh text index")
+    return env
+
+
 class ShareListArgs(BaseModel):
     what: str = Field(default="all",
                       description="mine — спаковане мною, shared — прийняте, all — усе")
@@ -410,6 +454,10 @@ def share_list(a: ShareListArgs) -> Envelope:
         return fail("what приймає: all, mine, shared")
     event = {"mine": journal.PACKED, "shared": journal.IMPORTED}.get(want, "")
     rows = journal.read(event)
+    if not event:
+        # 🔴 «Усе» — це весь ОБМІН, а не весь журнал. Відмова «цю не віддам»
+        # живе в тому ж файлі й без цього рядка показувалась тут як прийом.
+        rows = [r for r in rows if r.get("event") in journal.EXCHANGE]
     return ok({"rows": rows, "count": len(rows),
                "journal": str(journal.journal_path())})
 
@@ -517,10 +565,30 @@ def share_pull(a: SharePullArgs) -> Envelope:
         if not url:
             env.warn("no_url", "у рядку каталогу немає адреси пакета")
             return env
-        from nyshporka.share.accept import AcceptError, accept
+        from nyshporka.share.accept import AcceptError, accept, accept_geometry
 
         try:
             data["imported"] = accept(url)
         except AcceptError as exc:
             return fail(str(exc))
+
+        # 🔴 Геометрія тягнеться ЛИШЕ на мітці `exact`. Вона важить ×10 і
+        # прив'язана до пікселів конкретної зйомки: при `by-position` рамки
+        # ляжуть не на ті рядки, і кроп ріже сусідній — помилка, гірша за
+        # відсутність кропу, бо виглядає як робота.
+        from nyshporka.share import profile as P
+
+        prylad = data["imported"].get("alignment") or {}
+        label = str(prylad.get("label") or "")
+        geom_url = found[0].geom_url
+        if prylad.get("can_crop") and geom_url and P.load().geometry:
+            try:
+                data["geometry"] = accept_geometry(geom_url)
+            except AcceptError as exc:
+                # Текст уже лежить — обірвана геометрія не мусить це скасувати.
+                env.warn("geometry", f"геометрія не доїхала: {exc}")
+        elif geom_url and not prylad.get("can_crop"):
+            env.warn("geometry_skipped",
+                     f"геометрія є в пулі, але прив'язка «{label}» — рамки "
+                     f"лягли б не на ті рядки")
     return env

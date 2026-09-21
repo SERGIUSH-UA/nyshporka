@@ -49,7 +49,7 @@ def _dirty_run(root: Path) -> Path:
 
 def test_only_text_and_meta_travel(space: Path, tmp_path: Path) -> None:
     run = _dirty_run(space / "reports" / "htr")
-    m = manifest_for([bundle.voice_of(run, geometry=False)])
+    m = manifest_for([bundle.voice_of(run)])
     dest = tmp_path / "pack.nyshtext"
     bundle.write(dest, m, [run])
 
@@ -70,7 +70,7 @@ def test_case_dir_is_stripped_from_meta(space: Path, tmp_path: Path) -> None:
     raw = json.loads((run / bundle.META_NAME).read_text(encoding="utf-8"))
     assert raw["case_dir"] == SECRET_CASE_DIR   # передумова тесту, не перевірка
 
-    m = manifest_for([bundle.voice_of(run, geometry=False)])
+    m = manifest_for([bundle.voice_of(run)])
     dest = tmp_path / "pack.nyshtext"
     bundle.write(dest, m, [run])
 

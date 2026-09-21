@@ -12,6 +12,10 @@
 🔴 Мета чиститься від слідів чужої машини й дістає теку кадрів ЦІЄЇ
 (`cloud.run.stamp_case_dir`). Інакше кроп шукатиме аркуш за шляхом, якого тут
 немає, — або, гірше, знайде випадкову теку з тим самим іменем.
+
+Геометрія приймається ОКРЕМО (`accept_geometry`) і має власний гард: текст
+кладеться туди, де прогону ще немає, а геометрія — туди, де він уже є.
+Спільна функція мусила б відмовляти за обома правилами водночас.
 """
 from __future__ import annotations
 
@@ -70,18 +74,52 @@ def fetch(src: str, dest_dir: Path) -> Path:
         if not p.is_file():
             raise AcceptError(f"пакета немає: {p}")
         return p
-    from nyshporka.sources.http import Fetcher, HttpError
+    from nyshporka.sources.http import Fetcher, HttpError, app_ua
 
-    name = str(src).rstrip("/").rsplit("/", 1)[-1] or ("bundle" + bundle.SUFFIX)
-    if not name.endswith(bundle.SUFFIX):
-        name += bundle.SUFFIX
-    dest = Path(dest_dir) / name
+    dest = Path(dest_dir) / _name_for(src)
     dest.parent.mkdir(parents=True, exist_ok=True)
     try:
-        Fetcher().download(src, dest)
+        # Свій рядок, а не браузерний: качається пакет із нашого ж сховища,
+        # і в його логах клієнт мусить бути відрізнимий від людини. Докладно
+        # — у `share/upload.py`.
+        Fetcher(headers={"User-Agent": app_ua()}).download(src, dest)
     except HttpError as exc:
         raise AcceptError(f"не завантажити {src}: {exc}") from exc
     return dest
+
+
+#: Скільки останніх ланок адреси йде в ім'я збереженого файлу. Чотири — щоб
+#: у назві стояв ще й архів: `dahmo-315-1-8433-1-text.nyshtext`. Унікальності
+#: він не додає (її дає номер внеску), зате робить теку inbox читною для ока.
+_NAME_PARTS = 4
+
+
+def _name_for(url: str) -> str:
+    """Ім'я, під яким завантажений пакет ляже в inbox.
+
+    🔴 Не остання ланка адреси. У пулі всі пакети звуться однаково —
+    `b/<архів>/<справа>/<внесок>/text.nyshtext`, — тож за останньою ланкою
+    КОЖНА книга лягала б у той самий `inbox/text.nyshtext`. А inbox — це не
+    кеш, а доказ: журнал записує туди шлях і sha256 прийнятого пакета, і
+    друга прийнята книга мовчки робила б доказ першої хибним (шлях є, байти
+    чужі, хеш не сходиться). Геометрія додає ще один такий самий загальний
+    `geom.nyshtext`.
+
+    🔴 Унікальним ім'я робить НОМЕР ВНЕСКУ, а не кількість узятих ланок.
+    Номер глобальний на весь пул, тож двох однакових імен бути не може навіть
+    тоді, коли «315-1-8433» трапляється в кожному другому архіві країни. Якщо
+    схема ключів колись зміниться так, що номера в адресі не стане, це місце
+    доведеться переписати — сама по собі довша назва нічого не гарантує.
+
+    Те саме при повторному завантаженні тієї самої адреси: ім'я детерміноване,
+    тож повтор не плодить копій доказу.
+    """
+    from urllib.parse import urlsplit
+
+    lanky = [p for p in urlsplit(url).path.split("/") if p]
+    raw = "-".join(lanky[-_NAME_PARTS:]) or "bundle"
+    name = bundle.safe_name(raw, "bundle")
+    return name if name.endswith(bundle.SUFFIX) else name + bundle.SUFFIX
 
 
 def look(src: str, *, hash_frames: bool = False) -> Look:
@@ -190,6 +228,99 @@ def accept(src: str, *, hash_frames: bool = False, force: bool = False,
         "note": seen.manifest.note,
         "publisher": seen.manifest.publisher,
     }
+
+
+def accept_geometry(src: str, *, force: bool = False, keep_bundle: bool = False,
+                    reindex: bool = True) -> dict[str, Any]:
+    """Докласти геометрію рядків до вже прийнятого тексту.
+
+    Окрема функція, а не прапорець в `accept()`, бо гард у тієї протилежний:
+    вона відмовляє, коли прогін уже є, а тут прогін УЖЕ МУСИТЬ бути. Геометрія
+    без тексту марна: рамки рядків нема на що класти.
+
+    🔴 Позначка `shared` не чіпається. Її поставив текстовий імпорт, і вона
+    каже, ЧИЙ ТЕКСТ лежить у теці. Переписана іменем geom-файла, вона
+    відповідала б на інше питання — «звідки рамки», — і доказ походження
+    тексту зник би.
+    """
+    from nyshporka.core.workspace import workspace
+
+    path = fetch(src, journal.inbox())
+    try:
+        manifest = bundle.read_manifest(path)
+    except (OSError, ValueError, bundle.BundleError) as exc:
+        raise AcceptError(f"не прочитати пакет {path.name}: {exc}") from exc
+
+    lezhyt = [(run, name) for run, name in bundle.members(path)
+              if name.endswith(".lines.json")]
+    if not lezhyt:
+        raise AcceptError(
+            f"у {path.name} немає геометрії. Текст приймається інакше: "
+            f"nysh share import {path.name}")
+
+    htr_root = workspace().htr_reports
+    runs = sorted({run for run, _ in lezhyt})
+    nemaie = [r for r in runs if not (htr_root / r).is_dir()]
+    if nemaie:
+        raise AcceptError(
+            f"геометрія без тексту марна — спершу прийміть текст. "
+            f"Немає прогонів: {', '.join(nemaie)}")
+
+    poverkh = sorted(f"{run}/{name}" for run, name in lezhyt
+                     if (htr_root / run / name).is_file())
+    if poverkh and not force:
+        raise AcceptError(
+            f"геометрія для цих сторінок уже є ({len(poverkh)}, напр. "
+            f"{poverkh[0]}). Перезаписати: --force")
+
+    # 🔴 Другий білий список — тут, на прийманні. Пакувальник кладе в
+    # geom-пакет лише `*.lines.json`, але чужому tar це не зобов'язання:
+    # підкинутий `_htr_meta.json` перетер би позначку походження тексту.
+    dirs = bundle.extract(path, htr_root, keep=lambda n: n.endswith(".lines.json"))
+    if not dirs:
+        raise AcceptError("геометрія не лягла: у пакеті не виявилось прогонів")
+
+    indexed = _reindex(dirs) if reindex else []
+
+    proof = str(journal.keep(path, path.name)) if keep_bundle else ""
+    journal.record(
+        journal.GEOMETRY, shifra=manifest.shifra, case_key=_local_key(manifest),
+        pages=len(lezhyt), bytes=path.stat().st_size,
+        sha256=bundle.sha256_of(path),
+        publisher=str((manifest.publisher or {}).get("handle") or ""),
+        source=str(src), path=proof or str(path),
+        runs=[d.name for d in dirs])
+
+    return {
+        "runs": [d.name for d in dirs],
+        "shifra": manifest.shifra,
+        "pages": len(lezhyt),
+        "overwritten": len(poverkh),
+        "indexed": indexed,
+        "proof": proof,
+    }
+
+
+def _reindex(dirs: list[Path]) -> list[str]:
+    """Перебудувати стор для тек, у які щойно лягла геометрія.
+
+    🔴 Обов'язково `force`. Свіжість прогону міряється штампом «мета плюс
+    тека», і поява нового файлу час теки міняє — але ПЕРЕЗАПИС наявного
+    `*.lines.json` не міняє нічого: вміст файлу в штамп не входить. Тобто
+    без примусу саме повторне докладання геометрії — те, заради якого людина
+    покликала `--force`, — тихо не доїхало б до пошуку.
+
+    🔴 А переіндекс потрібен узагалі тому, що рамки ВМЕРЗАЮТЬ у SQLite під
+    час індексації. Файли лежать поруч із текстом, а кроп читає стор — і без
+    цього кроку геометрія була б на диску й не працювала.
+    """
+    from nyshporka.search import store as ST
+
+    if not ST.path().is_file():
+        # Стору ще немає: перша ж `nysh text index` збере його разом із
+        # геометрією. Заводити стор заради одного прогону — не наше рішення.
+        return []
+    return list(ST.ensure_all([d.name for d in dirs], force=True))
 
 
 def _stamp_shared(run_dir: Path, m: Manifest, src: Path) -> None:
