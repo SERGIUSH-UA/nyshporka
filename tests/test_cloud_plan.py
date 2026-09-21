@@ -392,3 +392,86 @@ def test_a_rented_machine_is_asked_for_room_for_the_engine() -> None:
     rented = dataclasses.replace(base, fresh_machine=True).need.disk_gb
     assert own == PL.DISK_HEADROOM_GB
     assert rented == own + PL.ENGINE_ENV_GB
+
+
+# ── перечитування іншою моделлю ──────────────────────────────────────────────
+def _named_model(space: Path, monkeypatch, name: str, script: str = "latin") -> Path:
+    """Ваги, які резолвер упізнає за іменем."""
+    from nyshporka.htr import run as R
+
+    weights = space / name
+    weights.write_bytes(b"\0")
+    monkeypatch.setattr(R, "resolve_model", lambda spec: (weights, script))
+    return weights
+
+
+def test_an_explicit_model_reads_into_its_own_folder(space: Path, monkeypatch) -> None:
+    """🔴 Перечитування мусить мати СВОЮ теку.
+
+    У теці першого прогону вже лежать тексти, і забір їх не перезаписує — а
+    раннер блокує лише зміну РУШІЯ, тож Скриба поверх Писаря (обидва PARSeq)
+    пройшла б із попередженням і затерла результат, за який уже заплачено.
+    Тег ставить саме складач плану: поставлений вище по шляху, він обходився б.
+    """
+    from nyshporka.cloud import plan as PL
+
+    case = _wire_case(space, monkeypatch)
+    _named_model(space, monkeypatch, "skryba_f792_v6.mlmodel")
+
+    plain = PL.build(case, script="cyrillic")
+    reread = PL.build(case, script="cyrillic", model="skryba_f792_v6.mlmodel")
+
+    assert reread.out_dir.name == f"{case.name}-skryba_v6"
+    assert reread.out_dir != plain.out_dir
+    assert reread.run_id != plain.run_id, (
+        "той самий run_id означав би спільні чекпоінти: платимо за одну "
+        "модель, дістаємо тексти іншої")
+    assert reread.base_out == plain.out_dir, (
+        "звіряти геометрію кешу й шукати привезений кеш треба в теці ПЕРШОГО "
+        "прогону, а не свого")
+    assert reread.script == "latin", "письмо бере модель, а не здогад із теки"
+    assert reread.voice is None, "перечитування одноголосе: ансамбль лише в PARSeq"
+
+
+def test_naming_the_production_model_is_an_ordinary_run(space: Path, monkeypatch) -> None:
+    """💰 `--model` із бойовими вагами — не перечитування.
+
+    Без цієї гілки команда завела б теку `-pysar_v17` поруч зі справжньою й
+    прочитала б справу вдруге тією самою моделлю, тобто заплатила б за копію.
+    """
+    from nyshporka.cloud import plan as PL
+
+    case = _wire_case(space, monkeypatch)
+    # резолвер віддає РІВНО ті ваги, що й `pick_model`
+    _named_model(space, monkeypatch, "m.pt", script="cyrillic")
+    (space / "m.pt").write_bytes(b"\0")
+
+    got = PL.build(case, script="cyrillic", model="m.pt")
+    assert got.out_dir.name == case.name and got.base_out is None
+
+
+def test_model_and_with_together_are_refused(space: Path, monkeypatch) -> None:
+    """Додатковий голос читає ті самі рядки основної моделі, а `--model` міняє
+    саму основну. Разом це означало б неясно що — відмовляємо до оренди."""
+    from nyshporka.cloud import plan as PL
+
+    case = _wire_case(space, monkeypatch)
+    _named_model(space, monkeypatch, "skryba_f792_v6.mlmodel")
+    with pytest.raises(PL.PlanError, match="разом вони не йдуть"):
+        PL.build(case, script="cyrillic", model="skryba_f792_v6.mlmodel",
+                 also=["latin"])
+
+
+def test_an_unknown_model_is_refused_before_anything_moves(space: Path,
+                                                           monkeypatch) -> None:
+    from nyshporka.cloud import plan as PL
+    from nyshporka.htr import run as R
+
+    case = _wire_case(space, monkeypatch)
+
+    def nope(spec: str):
+        raise R.ReadError(f"модель «{spec}» не знайдена")
+
+    monkeypatch.setattr(R, "resolve_model", nope)
+    with pytest.raises(PL.PlanError, match="не знайдена"):
+        PL.build(case, script="cyrillic", model="вигадана.pt")

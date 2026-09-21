@@ -57,6 +57,16 @@ class Plan:
     #: заново — а це найдорожча частина сторінки.
     seg_cache: Path | None = None
 
+    #: Що знайдено про готову сегментацію й чому їй (не) вірять. Порожньо —
+    #: кешу не шукали (звичайний прогін). 🔴 Причина мусить дійти до людини:
+    #: «кеш є, але з кадрів іншого розміру» і «кешу немає» — різні новини, і
+    #: перша означає, що десь поруч лежить прогін по інших кадрах.
+    seg_why: str = ""
+    #: Чи знайдений кеш визнано придатним. Окремим полем, а не розбором
+    #: `seg_why`: текст пишеться для людини й змінюватиметься, а рішення
+    #: «сторінка коштує вдвічі дешевше» має триматись на прапорці.
+    seg_ready: bool = False
+
     #: Чим доведене письмо: `fixed` · `genre` · `epoch` · `folder` · `unknown`.
     #: 🔴 Їде в плані, а не лишається в голові того, хто рахував: «кирилиця»
     #: без цього поля читається однаково і як факт з опису справи, і як
@@ -505,6 +515,24 @@ def plan(case_dir: str | Path, *, out_dir: str | Path = "", script: str = "",
     runner = Path(__file__).resolve().parent / "runner.py"
     out = Path(out_dir) if out_dir else default_out
     seg = Path(seg_cache).expanduser() if seg_cache else seg_cache_dir(case, ws.derived)
+    seg_why, seg_ready = "", False
+    if model and not seg_cache:
+        # 🔴 Перечитування — єдиний випадок, коли готова сегментація справді є
+        # і справді варта пошуку: на ній сторінка коштує лише розпізнавання
+        # (18.4 → 9.1 с/стор). Шукаємо ОБИДВА місця — привезене з хмари й
+        # локальний кеш простору — і беремо повніший.
+        #
+        # 🔴 Непридатний кеш НЕ підставляється: кеш, знятий із кадрів іншого
+        # розміру, дає кропи не з тих місць без жодної помилки. Тоді лишаємо
+        # звичайну адресу кешу простору — раннер сегментує наново й запише
+        # туди своє.
+        from nyshporka.htr import seg as SEG
+
+        found = SEG.inspect(case, base_out=ws.htr_reports / case.name,
+                            derived=ws.derived)
+        seg_why, seg_ready = found.why, found.usable
+        if found.usable and found.path is not None:
+            seg = found.path
     # 🔴🔴 Лок карти — НА ПРОСТІР, а не на прогін.
     #
     # Доти він лежав у теці виходу (`out/_gpu.lock`), тобто в кожного прогону
@@ -524,7 +552,8 @@ def plan(case_dir: str | Path, *, out_dir: str | Path = "", script: str = "",
     return Plan(case_dir=case, out_dir=out, model=weights, script=scr,
                 frames=frames, python=rep.python, runner=runner, voice=voice,
                 extra_voices=extra, seg_cache=seg, gpu_lock=lock_dir / "gpu.lock",
-                script_trust=trust, script_why=why)
+                script_trust=trust, script_why=why, seg_why=seg_why,
+                seg_ready=seg_ready)
 
 
 def shard_env(workers: int, *, cores: int = 0) -> dict[str, str]:

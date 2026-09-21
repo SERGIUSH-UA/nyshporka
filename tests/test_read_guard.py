@@ -40,6 +40,9 @@ class _Plan:
         self.voice = None
         self.voices = ()
         self.gpu_lock = out.parent / "gpu.lock"
+        # звичайний прогін кешу не шукає — команда мовчить про сегментацію
+        self.seg_why = ""
+        self.seg_ready = False
 
     def command(self, **_: Any) -> list[str]:
         return ["python", "-c", "pass"]

@@ -93,6 +93,12 @@ class CloudPlan:
     #: Машину беруть з ринку під цей захід, тож середовища рушіїв на ній немає
     #: за побудовою — і диска треба на нього теж (`ENGINE_ENV_GB`).
     fresh_machine: bool = False
+    #: Тека ПЕРШОГО прогону — непорожня лише тоді, коли це перечитування
+    #: справи іншою моделлю. Там лежать `.lines.json`, якими звіряється
+    #: геометрія кешу сегментації, і, можливо, сам кеш, забраний із хмари.
+    #: 🔴 Не те саме, що `out_dir`: у перечитування тека СВОЯ (з тегом моделі),
+    #: бо тексти першого прогону забір не перезаписує.
+    base_out: Path | None = None
 
     @property
     def voices(self) -> tuple[Path, ...]:
@@ -140,6 +146,7 @@ class CloudPlan:
             "max_price_usd_h": self.max_price_usd_h,
             "lines_per_page": self.lines_per_page,
             "source_dir": str(self.source_dir) if self.source_dir else "",
+            "base_out": str(self.base_out) if self.base_out else "",
             "warnings": list(self.warnings)}
 
 
@@ -199,6 +206,7 @@ def _rents(backend: str) -> bool:
 
 def build(case_dir: str | Path, *, backend: str = "ssh", target: str = "",
           out_dir: str | Path = "", script: str = "", second_voice: bool = True,
+          model: str = "",
           case_key: str = "", also: list[str] | tuple[str, ...] = (),
           budget_usd: float | None = None, max_hours: float | None = None,
           max_price_usd_h: float | None = None,
@@ -225,7 +233,9 @@ def build(case_dir: str | Path, *, backend: str = "ssh", target: str = "",
         ReadError,
         case_key_for,
         guess_script_full,
+        model_tag,
         pick_model,
+        resolve_model,
         resolve_voices,
     )
 
@@ -256,7 +266,7 @@ def build(case_dir: str | Path, *, backend: str = "ssh", target: str = "",
             f"`--script cyrillic` або `--script latin`. Вгадати тут не можна: "
             f"помилка дає не збій, а осмислене на вигляд сміття.")
     try:
-        model, voice = pick_model(scr, second_voice=second_voice)
+        weights, voice = pick_model(scr, second_voice=second_voice)
     except ReadError as exc:
         # 🔴 Ваги потрібні навіть для хмари: саме їх туди і везуть. Але сказати
         # це треба інакше, ніж локальному читанню, — там порада «поставте
@@ -265,13 +275,42 @@ def build(case_dir: str | Path, *, backend: str = "ssh", target: str = "",
             f"{exc} Для хмарного прогону рушій локально не потрібен, а ваги — "
             f"так: саме їх ми й веземо на машину.") from None
 
+    # ── перечитування іншою моделлю ──────────────────────────────────────────
+    # 🔴 Тека виходу дістає суфікс `-<тег моделі>`, і робить це складач плану, а
+    # не викликач: у теці першого прогону вже лежать тексти, забір їх НЕ
+    # перезаписує, і тег, поставлений десь вище по шляху, можна обійти. Інша
+    # тека дає заразом інший `run_id` (модель у нього входить) і інший префікс
+    # чекпоінтів, тобто дві моделі не крадуть роботу одна в одної.
+    reread = False
+    if str(model or "").strip():
+        try:
+            named, named_script = resolve_model(str(model).strip())
+        except ReadError as exc:
+            raise PlanError(str(exc)) from None
+        # 🔴 Названа БОЙОВА модель — не перечитування, а звичайний прогін. Без
+        # цієї гілки `--model pysar_cyr_v17.pt` завів би теку `-pysar_v17`
+        # поруч зі справжньою й перечитав би справу за гроші, нічого не
+        # додавши.
+        if named != weights:
+            reread, weights, voice, scr = True, named, None, named_script
+            if also:
+                # Ансамбль є лише в PARSeq-гілці: додаткові голоси читають ті
+                # самі рядки основної моделі, тож «перечитати іншою» і «додати
+                # голос» — різні дії, і разом вони означали б неясно що.
+                raise PlanError(
+                    "`--with` додає голос до бойової пари, а `--model` читає "
+                    "справу ІНШОЮ моделлю в окрему теку — разом вони не йдуть. "
+                    "Оберіть щось одне.")
+
     try:
-        extra = resolve_voices(also, main=model, have=[voice] if voice else [])
+        extra = resolve_voices(also, main=weights, have=[voice] if voice else [])
     except ReadError as exc:
         raise PlanError(str(exc)) from None
 
     key, why = (case_key, "вказано вручну") if case_key else case_key_for(case)
-    out = Path(out_dir) if out_dir else workspace().htr_reports / case.name
+    base_out = workspace().htr_reports / case.name
+    out = Path(out_dir) if out_dir else (
+        base_out.with_name(f"{case.name}-{model_tag(weights)}") if reread else base_out)
     warnings: list[str] = []
     if not key:
         # 🔴 «Шифри немає» і «шифру ще не встановлено» — різні стани, і докір
@@ -301,8 +340,8 @@ def build(case_dir: str | Path, *, backend: str = "ssh", target: str = "",
             "інакше й витягує те, де перший підставив правдоподібне слово")
 
     return CloudPlan(
-        run_id=run_id_for(case, model=model.name, script=scr, backend=backend),
-        case_dir=case, out_dir=out, model=model, voice=voice, extra_voices=extra,
+        run_id=run_id_for(case, model=weights.name, script=scr, backend=backend),
+        case_dir=case, out_dir=out, model=weights, voice=voice, extra_voices=extra,
         script=scr,
         frames=len(frames), bytes_in=_bytes_of(frames), backend=backend,
         fresh_machine=_rents(backend),
@@ -310,6 +349,7 @@ def build(case_dir: str | Path, *, backend: str = "ssh", target: str = "",
         budget_usd=budget_usd, max_hours=max_hours,
         max_price_usd_h=max_price_usd_h, lines_per_page=lines_per_page,
         source_dir=Path(source_dir) if source_dir else None,
+        base_out=base_out if reread else None,
         pages_left=pages_left)
 
 

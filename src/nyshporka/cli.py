@@ -868,6 +868,9 @@ def read(
     force: bool = typer.Option(
         False, "--force",
         help="стартувати, навіть якщо інша справа вже читається"),
+    rerun: bool = typer.Option(
+        False, "--rerun",
+        help="справу вже прочитано ЦІЄЮ моделлю — однаково перечитати"),
     dry: bool = typer.Option(False, "--dry-run", help="лише показати план"),
 ) -> None:
     """Прочитати справу рукописним рушієм.
@@ -903,6 +906,20 @@ def read(
                   f"письмо {p.script} · {p.model.name}"
                   + "".join(f" + {v.name}" for v in p.voices))
     console.print(f"  [muted]{p.out_dir}[/muted]")
+    # 🔴 Вже прочитане цією моделлю не перечитується мовчки: прогін коштує
+    # ночі, а на диску вже лежить те саме. Судить мета поруч із текстом, а не
+    # реєстр: реєстр міг не побачити прогону, що скінчився хвилину тому.
+    if not rerun:
+        from nyshporka.cloud.go import already_read
+
+        if why := already_read(p.out_dir, model=p.model.name, frames=p.frames):
+            console.print(f"[err]{why}. Перечитати — `--rerun`[/err]")
+            raise typer.Exit(code=1)
+    if p.seg_why:
+        # Перечитування без кешу коштує вдвічі дорожче (18.4 проти 9.1 с/стор),
+        # тож причина мусить бути видна ДО старту, а не в лозі після.
+        console.print(f"  [muted]{'✓' if p.seg_ready else '⚠'} "
+                      f"сегментація: {p.seg_why}[/muted]")
     # ⚠ Попередження лишається для того, хто задав `--shard` РУКАМИ й свій лок:
     # спільний лок плану вже стоїть, але людина, яка керує шардами вручну,
     # мусить знати, що вони мають ділити один файл.
