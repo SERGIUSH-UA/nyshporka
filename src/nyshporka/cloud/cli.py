@@ -794,6 +794,11 @@ def cmd_go(
              "за годинниковою (зйомка з книгою на боці; НЕ для розворотів)"),
     script: str = typer.Option("", "--script",
                                 help="письмо: latin | cyrillic; порожньо — визначити самому"),
+    model: str = typer.Option(
+        "", "--model",
+        help="перечитати справу ІНШОЮ моделлю (файл або ім'я ваг): письмо від "
+             "моделі, вихід `<справа>-<тег>`, готова сегментація першого "
+             "прогону їде на машину — сторінка коштує лише розпізнавання"),
     with_: list[str] = typer.Option(
         [], "--with",
         help="ще голос тим самим проходом: `latin` (Скриба) або ім'я ваг"),
@@ -817,6 +822,11 @@ def cmd_go(
              "з'єднання з орендованою машиною до кінця прогону й помре разом "
              "із терміналом. Для дрібної справи; своя машина по SSH — це не "
              "`go`, а `nysh cloud start`"),
+    param: list[str] = typer.Option(
+        [], "-p", "--param",
+        help="параметр роботи для машини, `ключ=значення` (напр. "
+             "`shards=6`, `max_endpoints=600`). Наш обчислений параметр "
+             "ваш перекриває"),
     tick: float = typer.Option(60.0, "--tick", help="як часто питати машину, секунд"),
     as_json: bool = typer.Option(
         False, "--json", help="останнім рядком — один JSON-об'єкт із підсумком"),
@@ -855,13 +865,22 @@ def cmd_go(
         console.print(f"[{style}]{safe}[/{style}]" if style else safe,
                       highlight=False)
 
+    # 🔴 Форму параметра перевіряємо ТУТ, а не мовчки віддаємо машині: наглядач
+    # відкидає елемент без «=» без жодного слова, і людина дізнавалась би про
+    # помилку з того, що ручка «не подіяла» — після оренди.
+    if bad := [item for item in param if "=" not in item or not item.split("=", 1)[0].strip()]:
+        console.print(f"[err]параметр мусить бути `ключ=значення`: "
+                      f"{escape(', '.join(bad))}[/err]")
+        raise typer.Exit(code=2)
+
     res = GO.go(case, backend=backend, budget=budget, max_hours=max_hours,
                 max_price=max_price, confirm=confirm, dry_run=dry_run,
                 with_voices=with_, second_voice=not one_voice, script=script,
+                model=model,
                 case_key=case_key, rerun=rerun, allow_partial=allow_partial,
                 rotate_landscape=rotate_landscape, thin=thin,
                 transport={"store": "r2"}.get(transport, transport),
-                max_usd_per_1000=max_usd_per_1000,
+                max_usd_per_1000=max_usd_per_1000, params=param,
                 on_event=on_event,
                 tick_sec=max(1.0, tick))
     if as_json:

@@ -46,14 +46,35 @@ def opt(name, default=""):
     return args[args.index(name) + 1] if name in args else default
 
 
+def opts(name):
+    """УСІ входження прапорця, у порядку: справи й параметри йдуть списками."""
+    return [args[i + 1] for i, a in enumerate(args) if a == name and i + 1 < len(args)]
+
+
 if args[:2] == ["htr", "plan"]:
     out = Path(opt("--out"))
     out.parent.mkdir(parents=True, exist_ok=True)
+    cases, keys = opts("--case"), opts("--case-key")
+    names, seeds = opts("--name"), opts("--seed-seg")
+    # 🔴 Фейк відмовляє там само, де справжній наглядач: інакше тест на
+    # порядок списків пройшов би на дублі, який цього правила не знає.
+    for label, got in (("--case-key", keys), ("--name", names), ("--seed-seg", seeds)):
+        if got and len(got) != len(cases):
+            print(f"{label}: {len(got)} проти {len(cases)} справ", file=sys.stderr)
+            sys.exit(2)
+    if any(seeds) and opt("--transport", "auto") == "box":
+        print("--seed-seg потребує сховища: склад на машині з'являється "
+              "аж після оренди", file=sys.stderr)
+        sys.exit(2)
     out.write_text(json.dumps({
-        "cases": [{"case_dir": opt("--case"), "case_key": opt("--case-key"),
-                   "name": opt("--name"), "out_dir": opt("--out-root")}],
+        "cases": [{"case_dir": c,
+                   "case_key": keys[i] if keys else "",
+                   "name": names[i] if names else "",
+                   "seed_seg": seeds[i] if seeds else "",
+                   "out_dir": opt("--out-root")} for i, c in enumerate(cases)],
         "model": opt("--model"), "voices": opt("--voices"),
         "assets": opt("--assets"), "disk_gb": opt("--disk"),
+        "transport": opt("--transport", "auto"), "params": opts("-p"),
     }, ensure_ascii=False), encoding="utf-8")
     sys.exit(0)
 
@@ -557,3 +578,140 @@ def test_our_detached_machine_is_not_reported_as_a_stranger(
     assert "НЕ з заходів цього простору" not in got.output, got.output
     assert res.run_id in got.output, "машина названа своїм заходом"
     assert got.exit_code == 0, "своя машина — не привід для тривоги"
+
+
+# ── параметри роботи, які їдуть на машину ────────────────────────────────────
+def test_the_script_of_the_plan_always_reaches_the_box(space: Path, monkeypatch,
+                                                       fake_gpurunner) -> None:
+    """🔴 Письмо доїжджає до машини, а не лишається вдома.
+
+    Раннер на боксі бере письмо з параметра роботи, і без нього чесно ставить
+    «cyrillic». Тобто `--script latin` мінявся лише в нашому плані: на машину
+    їхали правильні ваги, а в меті прогону писалось не те письмо — і на цю
+    мету дивиться і розмітка, і відбір корпусу, і людина, що потім гадає, чому
+    латинська справа позначена кирилицею. Знайдено 21.09.2026 при перенесенні.
+    """
+    case, _ = _wire(space, monkeypatch)
+    _go(case, script="latin", dry_run=True)
+    assert "script=latin" in _plan_of(fake_gpurunner)["params"]
+
+
+def test_a_user_param_overrides_the_one_we_computed(space: Path, monkeypatch,
+                                                    fake_gpurunner) -> None:
+    """Наш параметр — здогад, людський — рішення. Наглядач збирає `-p` у
+    словник, тож переможе останній: наші йдуть першими, і саме тому людський
+    їх перекриває, а не навпаки."""
+    case, _ = _wire(space, monkeypatch)
+    _go(case, script="cyrillic", dry_run=True, params=["script=mixed", "shards=6"])
+    params = _plan_of(fake_gpurunner)["params"]
+    assert params == ["script=mixed", "shards=6"], (
+        "обчислений параметр не сміє дублювати людський: у словнику виграв би "
+        "один із них, і який саме — залежало б від порядку")
+
+
+def test_params_travel_in_the_order_they_were_given(space: Path, monkeypatch,
+                                                    fake_gpurunner) -> None:
+    case, _ = _wire(space, monkeypatch)
+    _go(case, script="cyrillic", dry_run=True,
+        params=["shards=6", "max_endpoints=600", "vram_gb_per_shard=3.0"])
+    params = _plan_of(fake_gpurunner)["params"]
+    assert params[0] == "script=cyrillic"
+    assert params[1:] == ["shards=6", "max_endpoints=600", "vram_gb_per_shard=3.0"]
+
+
+# ── перечитування через хмару: засів сегментації ─────────────────────────────
+def _seed_ready(space: Path, case: Path, *, covered: int | None = None) -> Path:
+    """Кеш сегментації першого прогону — придатний до засіву."""
+    import gzip
+
+    from nyshporka.htr import seg as SEG
+    from nyshporka.htr.run import seg_cache_dir
+
+    frames = SEG.frames_of(case)
+    d = seg_cache_dir(case, space / "data" / "derived")
+    d.mkdir(parents=True, exist_ok=True)
+    for f in frames[:covered if covered is not None else len(frames)]:
+        with gzip.open(d / f"{f.stem}.c400.seg.json.gz", "wt", encoding="utf-8") as fh:
+            json.dump({"key": dict(SEG.EXPECTED_KEY), "lines": []}, fh)
+    return d
+
+
+def _named_model(space: Path, monkeypatch, name: str = "skryba_f792_v6.mlmodel") -> Path:
+    from nyshporka.htr import run as R
+
+    weights = space / "data" / "spotter" / "models" / name
+    weights.parent.mkdir(parents=True, exist_ok=True)
+    weights.write_bytes(b"\0" * 16)
+    monkeypatch.setattr(R, "resolve_model", lambda spec: (weights, "latin"))
+    return weights
+
+
+def test_a_reread_hands_the_ready_segmentation_to_the_box(space: Path, monkeypatch,
+                                                          fake_gpurunner) -> None:
+    """💰 Сегментація — найдорожча частина сторінки. Коли вона вже порахована,
+    везти її на машину означає читати вдвічі дешевше (18.4 → 9.1 с/стор).
+
+    🔴 Засів їде ПЕРШИМ ЧЕКПОІНТОМ, а чекпоінти живуть у сховищі, тож транспорт
+    тут мусить бути названий явно: на самій машині складу ще немає, бо немає
+    машини.
+    """
+    case, _ = _wire(space, monkeypatch)
+    _named_model(space, monkeypatch)
+    seed = _seed_ready(space, case)
+
+    _go(case, model="skryba_f792_v6.mlmodel", dry_run=True)
+    plan = _plan_of(fake_gpurunner)
+    assert plan["cases"][0]["seed_seg"] == str(seed)
+    assert plan["transport"] == "r2"
+    assert plan["cases"][0]["name"].endswith("-skryba_v6"), (
+        "перечитування мусить лягти у СВОЮ теку: у теці першого прогону вже "
+        "лежать тексти, і забір їх не перезаписує")
+
+
+def test_a_full_cache_makes_the_fleet_denser(space: Path, monkeypatch,
+                                             fake_gpurunner) -> None:
+    """Шард без геометрії й sato бере вдвічі менше ядер — але тільки якщо
+    сегментація є майже на всіх сторінках."""
+    from nyshporka.htr import seg as SEG
+
+    case, _ = _wire(space, monkeypatch)
+    _named_model(space, monkeypatch)
+    _seed_ready(space, case)
+
+    _go(case, model="skryba_f792_v6.mlmodel", dry_run=True)
+    params = _plan_of(fake_gpurunner)["params"]
+    assert f"cores_per_shard={SEG.CORES_PER_SHARD_SEEDED}" in params
+    assert f"vram_gb_per_shard={SEG.GB_PER_SHARD_SEEDED}" in params
+
+
+def test_a_thin_cache_never_makes_the_fleet_denser(space: Path, monkeypatch,
+                                                   fake_gpurunner) -> None:
+    """🔴 Сторінка, якої в кеші немає, рахує геометрію повністю. Щільний флот
+    на рідкому кеші душив би сам себе — тобто ми платили б за повільніше."""
+    case, _ = _wire(space, monkeypatch)
+    _named_model(space, monkeypatch)
+    _seed_ready(space, case, covered=1)          # 1 із 3 — 33%
+
+    _go(case, model="skryba_f792_v6.mlmodel", dry_run=True)
+    params = _plan_of(fake_gpurunner)["params"]
+    assert not [p for p in params if p.startswith("cores_per_shard=")]
+    assert _plan_of(fake_gpurunner)["cases"][0]["seed_seg"], "сам засів лишається"
+
+
+def test_without_a_bucket_the_reread_goes_unseeded_and_says_the_price(
+        space: Path, monkeypatch, fake_gpurunner) -> None:
+    """🔴 Сховища немає — це не привід відмовляти, але й не привід мовчати.
+
+    Засів без сховища неможливий за побудовою, тож захід їде без нього — і
+    мусить сказати ЦІНУ: сторінка коштуватиме ще й сегментацію. Мовчазний
+    відкат виглядав би як «усе гаразд», а рахунок прийшов би вдвічі більший.
+    """
+    case, _ = _wire(space, monkeypatch)
+    _named_model(space, monkeypatch)
+    _seed_ready(space, case)
+
+    got = _go(case, model="skryba_f792_v6.mlmodel", dry_run=True, transport="box")
+    assert got.verdict == "dry_run", got.why
+    plan = _plan_of(fake_gpurunner)
+    assert not plan["cases"][0]["seed_seg"]
+    assert any("без засіву" in n for n in got.notes), got.notes

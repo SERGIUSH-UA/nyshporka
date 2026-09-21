@@ -34,7 +34,7 @@ from __future__ import annotations
 
 import contextlib
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
@@ -308,10 +308,10 @@ def go(case: str, *, backend: str = "vast", budget: float | None = None,
        max_hours: float | None = None, max_price: float | None = None,
        confirm: bool = False, dry_run: bool = False,
        with_voices: list[str] | tuple[str, ...] = (), second_voice: bool = True,
-       script: str = "", case_key: str = "", rerun: bool = False,
+       script: str = "", model: str = "", case_key: str = "", rerun: bool = False,
        allow_partial: bool = False, rotate_landscape: bool = False,
        thin: bool = False, transport: str = "auto",
-       max_usd_per_1000: float = 0.0,
+       max_usd_per_1000: float = 0.0, params: Sequence[str] = (),
        on_event: EventFn | None = None, tick_sec: float = 60.0) -> GoResult:
     """Прочитати справу на орендованій машині від початку до кінця.
 
@@ -333,10 +333,11 @@ def go(case: str, *, backend: str = "vast", budget: float | None = None,
             max_hours=max_hours,
             max_price=max_price, confirm=confirm, dry_run=dry_run,
             with_voices=tuple(with_voices), second_voice=second_voice,
-            script=script, case_key=case_key, rerun=rerun,
+            script=script, model=model, case_key=case_key, rerun=rerun,
             allow_partial=allow_partial, rotate_landscape=rotate_landscape,
             thin=thin, transport=transport,
-            max_usd_per_1000=max_usd_per_1000, tick_sec=tick_sec)
+            max_usd_per_1000=max_usd_per_1000, params=tuple(params),
+            tick_sec=tick_sec)
     except GoRefused as exc:
         res.verdict, res.why = exc.verdict, str(exc)
     except KeyboardInterrupt:
@@ -381,11 +382,11 @@ def _last_line_of_defence(res: GoResult, say: EventFn) -> None:
 def _go(res: GoResult, case: str, say: EventFn, owner: contextlib.ExitStack, *,
         backend: str, budget: float | None, max_hours: float | None, max_price: float | None,
         confirm: bool, dry_run: bool, with_voices: tuple[str, ...],
-        second_voice: bool, script: str, case_key: str, rerun: bool,
+        second_voice: bool, script: str, model: str, case_key: str, rerun: bool,
         allow_partial: bool, rotate_landscape: bool, thin: bool,
-        transport: str, max_usd_per_1000: float, tick_sec: float) -> None:
+        transport: str, max_usd_per_1000: float, params: tuple[str, ...],
+        tick_sec: float) -> None:
     from nyshporka.cloud import plan as PL
-    from nyshporka.core.workspace import workspace
 
     # 0. бекенд
     try:
@@ -411,8 +412,8 @@ def _go(res: GoResult, case: str, say: EventFn, owner: contextlib.ExitStack, *,
         try:
             return PL.build(
                 frames_dir, backend=backend, script=script, case_key=key,
-                second_voice=second_voice, also=list(with_voices),
-                out_dir=workspace().htr_reports / case_name(ref.frames_dir),
+                second_voice=second_voice, also=list(with_voices), model=model,
+                out_name=case_name(ref.frames_dir),
                 max_price_usd_h=max_price, **kw)
         except PL.PlanError as exc:
             raise GoRefused(str(exc)) from None
@@ -566,14 +567,40 @@ def _go(res: GoResult, case: str, say: EventFn, owner: contextlib.ExitStack, *,
                     f"лише зі своїх точок. Дочитати вдома — `nysh read "
                     f"{ref.frames_dir}`; везти все — просто далі")
 
+    # 3в. перечитування: готова сегментація першого прогону їде на машину
+    seg_seed: Path | None = None
+    dense: tuple[str, ...] = ()
+    if plan.base_out is not None:
+        from nyshporka.htr import seg as SEG
+
+        cache = SEG.inspect(ref.frames_dir, SEG.frames_of(pack), base_out=plan.base_out)
+        say("plan", f"{'✓' if cache.usable else '⚠'} сегментація: {cache.why}")
+        if cache.usable and cache.path is not None:
+            seg_seed = cache.path
+            if cache.coverage >= SEG.DENSE_FLEET_COVERAGE:
+                # 🔴 Щільніший флот — лише на майже повному покритті. Шард без
+                # геометрії й sato бере вдвічі менше ядер, але сторінка, якої в
+                # кеші немає, рахує їх повністю — і на рідкому кеші такий флот
+                # душив би сам себе.
+                dense = (f"cores_per_shard={SEG.CORES_PER_SHARD_SEEDED}",
+                         f"vram_gb_per_shard={SEG.GB_PER_SHARD_SEEDED}")
+                say("plan", f"флот щільніший: {SEG.CORES_PER_SHARD_SEEDED} ядра й "
+                            f"{SEG.GB_PER_SHARD_SEEDED} ГБ VRAM на шард "
+                            f"(сегментація не рахується)")
+
     # 4а. наглядацький шлях: далі захід веде відчеплений наглядач, а ми виходимо
     if not thin:
         from nyshporka.cloud import supervised as SUP
 
+        # Людський параметр сильніший за наш: обчислене, що вже назвали руками,
+        # не дублюємо.
+        named: set[str] = {item.split("=", 1)[0] for item in params if "=" in item}
         SUP.launch(plan, res, say, pack_dir=pack, source_dir=ref.frames_dir,
                    total_mb=rep.total_mb, budget=budget, max_hours=max_hours,
                    confirm=confirm, dry_run=dry_run, transport=transport,
-                   max_usd_per_1000=max_usd_per_1000)
+                   max_usd_per_1000=max_usd_per_1000, seed=seg_seed,
+                   params=[*(item for item in dense
+                             if item.split("=", 1)[0] not in named), *params])
         return
 
     est = M.ask_estimate(b, plan.need)

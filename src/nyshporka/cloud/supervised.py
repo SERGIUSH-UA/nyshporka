@@ -76,6 +76,15 @@ DISK_MIN_GB = 15
 PREFER_CORES = 16.0
 
 
+#: Чому захід їде без засіву сегментації — і скільки це коштує. 🔴 Ціна
+#: називається завжди: мовчазний відкат виглядає як «усе гаразд», а рахунок
+#: приходить удвічі більший.
+_NO_SEED_WHY = ("засів сегментації їде першим чекпоінтом у сховище, а його "
+                "тут немає — читаємо БЕЗ засіву: сторінка коштуватиме ще й "
+                "сегментацію (замір 9.1 → 18.4 с/стор)")
+_NO_SEED_NOTE = "перечитування пішло без засіву сегментації: сховища немає"
+
+
 class SupervisorMissing(RuntimeError):
     """Наглядача немає на цій машині. Текст — для людини, дослівно."""
 
@@ -325,13 +334,14 @@ def launch(plan: CloudPlan, res: GoResult, say: Callable[..., None], *,
            budget: float | None = None, max_hours: float | None = None,
            confirm: bool = False, dry_run: bool = False,
            transport: str = "auto", max_usd_per_1000: float = 0.0,
-           params: Sequence[str] = ()) -> None:
+           params: Sequence[str] = (), seed: Path | None = None) -> None:
     """Підготувати захід і віддати його відчепленому наглядачеві.
 
     `plan` — наш план (справа, письмо, бойові ваги, шифра, тека виходу);
     `pack_dir` — тека, яка поїде на машину (оригінал або стиснута копія);
     `source_dir` — завжди ОРИГІНАЛ: із нього ріжуться кропи, і саме він має
-    опинитись у меті прогону.
+    опинитись у меті прогону; `seed` — тека готової сегментації, визнаної
+    придатною (`htr.seg.inspect`), яка поїде першим чекпоінтом.
     """
     from nyshporka.cloud.go import GoRefused
 
@@ -376,7 +386,14 @@ def launch(plan: CloudPlan, res: GoResult, say: Callable[..., None], *,
     if not plan.case_key:
         # Шифри немає — наглядач інакше відмовиться від порожнього ключа.
         cmd.append("--key-not-in-library")
-    for item in params:
+    # 🔴 Обчислені нами параметри йдуть ПЕРШИМИ, людські — після, бо наглядач
+    # збирає їх у словник і останнє входження перемагає. Людина, що набрала
+    # `-p lines_per_page=…`, мусить перекрити наш здогад, а не навпаки.
+    computed = [f"script={plan.script}"]
+    if plan.lines_per_page:
+        computed.append(f"lines_per_page={plan.lines_per_page}")
+    given = {item.split("=", 1)[0] for item in params if "=" in item}
+    for item in [*(c for c in computed if c.split("=", 1)[0] not in given), *params]:
         cmd += ["-p", item]
     if plan.max_price_usd_h:
         cmd += ["--max-price", str(plan.max_price_usd_h)]
@@ -387,11 +404,33 @@ def launch(plan: CloudPlan, res: GoResult, say: Callable[..., None], *,
         # ціні посеред роботи — тобто виглядає як «машин немає» там, де
         # насправді замалий дозвіл.
         cmd += ["--max-usd-per-1000", str(max_usd_per_1000)]
-    if plan.lines_per_page:
-        cmd += ["-p", f"lines_per_page={plan.lines_per_page}"]
+    # 🔴 Засів сегментації їде ПЕРШИМ ЧЕКПОІНТОМ, а чекпоінти живуть у
+    # сховищі — на самій машині їх ще немає, бо машини ще немає. Тому засів
+    # можливий лише зі сховищем, і транспорт тут називається явно.
+    if seed is not None and transport == "box":
+        # Людина сказала «вези на машину» — її вибір сильніший за нашу
+        # економію. Але ціна мусить бути названа, інакше мовчазна відмова від
+        # засіву виглядає як безплатна.
+        say("warning", _NO_SEED_WHY)
+        res.notes.append(_NO_SEED_NOTE)
+        seed = None
+    if seed is not None:
+        cmd += ["--seed-seg", str(seed)]
+        cmd[cmd.index("--transport") + 1] = "r2"
     say("plan", "складаємо план і веземо кадри в сховище наглядача")
     if _run(cmd, env=env).returncode or not plan_path.is_file():
-        raise GoRefused(f"план заходу не склався — див. вивід вище; тека {work}")
+        if seed is None or transport != "auto":
+            raise GoRefused(f"план заходу не склався — див. вивід вище; тека {work}")
+        # Сховища немає, а транспорт людина не називала — не відмовляємо, а
+        # їдемо без засіву й кажемо ЦІНУ: сторінка коштуватиме ще й
+        # сегментацію (замір 9.1 → 18.4 с/стор). Повтор безплатний: перевірка
+        # транспорту в наглядача стоїть до будь-якої заливки.
+        say("warning", _NO_SEED_WHY)
+        res.notes.append(_NO_SEED_NOTE)
+        del cmd[cmd.index("--seed-seg"):cmd.index("--seed-seg") + 2]
+        cmd[cmd.index("--transport") + 1] = "auto"
+        if _run(cmd, env=env).returncode or not plan_path.is_file():
+            raise GoRefused(f"план заходу не склався — див. вивід вище; тека {work}")
 
     # 3. правки, яких наглядач знати не може
     _patch_plan(plan_path, source_dir=source_dir, run_name=plan.out_dir.name)

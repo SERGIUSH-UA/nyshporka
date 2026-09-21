@@ -205,7 +205,8 @@ def _rents(backend: str) -> bool:
 
 
 def build(case_dir: str | Path, *, backend: str = "ssh", target: str = "",
-          out_dir: str | Path = "", script: str = "", second_voice: bool = True,
+          out_dir: str | Path = "", out_name: str = "",
+          script: str = "", second_voice: bool = True,
           model: str = "",
           case_key: str = "", also: list[str] | tuple[str, ...] = (),
           budget_usd: float | None = None, max_hours: float | None = None,
@@ -308,9 +309,15 @@ def build(case_dir: str | Path, *, backend: str = "ssh", target: str = "",
         raise PlanError(str(exc)) from None
 
     key, why = (case_key, "вказано вручну") if case_key else case_key_for(case)
-    base_out = workspace().htr_reports / case.name
+    # 🔴 `out_name` — ім'я справи БЕЗ тега моделі, і воно не завжди дорівнює
+    # імені теки кадрів: на машину їде стиснута копія, яка лежить деінде, а
+    # результат мусить лягти за іменем оригіналу. Тег до нього дописує саме
+    # складач — інакше викликач, що задав `out_dir` руками, його обійшов би, і
+    # перечитування затерло б тексти першого прогону.
+    stem = out_name or case.name
+    base_out = workspace().htr_reports / stem
     out = Path(out_dir) if out_dir else (
-        base_out.with_name(f"{case.name}-{model_tag(weights)}") if reread else base_out)
+        base_out.with_name(f"{stem}-{model_tag(weights)}") if reread else base_out)
     warnings: list[str] = []
     if not key:
         # 🔴 «Шифри немає» і «шифру ще не встановлено» — різні стани, і докір
