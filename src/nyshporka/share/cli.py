@@ -75,7 +75,8 @@ def pack_cmd(
     note: str = typer.Option("", "--note", help="вільна нотатка до пакета"),
     link: list[str] = typer.Option([], "--link", help="«підпис=адреса»"),
     extra: list[str] = typer.Option([], "--extra", help="«ключ=значення»"),
-    license_: str = typer.Option("CC0-1.0", "--license", help="ліцензія тексту"),
+    license_: str = typer.Option("", "--license",
+                                 help="ліцензія тексту; порожньо — з профілю"),
     source_terms: str = typer.Option("", "--source-terms",
                                      help="умови джерела сканів"),
     as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
@@ -115,6 +116,122 @@ def pack_cmd(
                       f"sha256 {d['sha256'][:16]}…")
         console.print("\n[dim]рядок для каталогу пулу:[/dim]")
         console.print(d.get("catalog_row") or "")
+    _notes(env)
+
+
+@app.command("setup")
+def setup_cmd(
+    as_who: str = typer.Option("", "--as", help="ваше ім'я або псевдонім"),
+    contact: str = typer.Option("", "--contact", help="як із вами зв'язатись"),
+    site: str = typer.Option("", "--site", help="сторінка автора"),
+    license_: str = typer.Option("", "--license", help="ліцензія тексту"),
+    consent: str = typer.Option("", "--consent", help="nikoly | zavzhdy | pytaty"),
+    lookup: bool | None = typer.Option(None, "--lookup/--no-lookup",
+                                       help="питати пул перед прогоном"),
+    geometry: bool | None = typer.Option(None, "--geometry/--no-geometry",
+                                         help="тягнути геометрію при точній прив'язці"),
+    show: bool = typer.Option(False, "--show", help="лише показати профіль"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="без питань"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
+) -> None:
+    """Профіль Супряги: заповнюється один раз, потім не питається.
+
+    🔴 Токен сюди не кладеться: профіль їде разом із простором, а простір
+    люди пересилають одне одному. Токен живе в NYSHPORKA_SUPRIAHA_TOKEN.
+    """
+    from nyshporka import ops as O
+    from nyshporka.share import profile as P
+
+    args: dict[str, Any] = {
+        "handle": as_who, "contact": contact, "site": site,
+        "license": license_, "consent": consent, "show": show,
+    }
+    if lookup is not None:
+        args["lookup"] = lookup
+    if geometry is not None:
+        args["geometry"] = geometry
+
+    # 🔴 Питання ставляться лише в діалозі й лише коли поля не задані
+    # прапорцями. Інсталятор і скрипти йдуть із `--yes`, і мовчазний дефолт
+    # там мусить лишати профіль тихим: не ділитись автоматично.
+    if not (show or yes or any([as_who, contact, site, license_, consent])):
+        bulo = P.load()
+        console.print("[dim]Порожні відповіді лишають те, що вже стоїть.[/dim]")
+        args["handle"] = typer.prompt("Ім'я або псевдонім", default=bulo.handle or "")
+        args["contact"] = typer.prompt(
+            "Контакт (публічні дані — лишіть порожнім, якщо не треба)",
+            default=bulo.contact or "")
+        args["license"] = typer.prompt("Ліцензія тексту", default=bulo.license)
+        console.print("\nКоли віддавати прочитане в Супрягу:")
+        for key, text in P.CONSENT_TEXT.items():
+            console.print(f"  [bold]{key}[/bold] — {text}")
+        obrane = typer.prompt("Режим", default=bulo.consent)
+        while obrane not in P.CONSENT:
+            console.print(f"[warn]є: {', '.join(P.CONSENT)}[/warn]")
+            obrane = typer.prompt("Режим", default=bulo.consent)
+        args["consent"] = obrane
+
+    env = O.call("share.setup", args)
+    if _answer(env, as_json):
+        return
+    d = env.data or {}
+    prof = d.get("profile") or {}
+    console.print(f"профіль: [bold]{d.get('path')}[/bold]")
+    console.print(f"  ім'я: {prof.get('handle') or '[dim]без імені[/dim]'}"
+                  f" · ліцензія: {prof.get('license')}")
+    console.print(f"  згода: [bold]{prof.get('consent')}[/bold] — {d.get('consent_text')}")
+    console.print(f"  питати пул перед прогоном: {'так' if prof.get('lookup') else 'ні'}"
+                  f" · геометрія: {'так' if prof.get('geometry') else 'ні'}")
+    _notes(env)
+
+
+@app.command("suggest")
+def suggest_cmd(
+    take: str = typer.Argument("", help="шифра справи — віддати саме її"),
+    skip: str = typer.Option("", "--skip", help="більше не питати про цю справу"),
+    why: str = typer.Option("", "--why", help="чому не віддаєте"),
+    all_: bool = typer.Option(False, "--all", help="віддати все з переліку"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
+) -> None:
+    """Що прочитано, але ще не віддано.
+
+    Без аргументів — просто перелік. `--all` пакує все; далі кожен пакет
+    віддається командою `publish`.
+    """
+    from nyshporka import ops as O
+
+    env = O.call("share.suggest",
+                 {"take": take, "skip": skip, "why": why, "all": all_})
+    if _answer(env, as_json):
+        return
+    d = env.data or {}
+    rows = d.get("rows") or []
+    if skip:
+        console.print(f"більше не питаю про «{skip}» · лишилось {d.get('left')}")
+        _notes(env)
+        return
+    if not rows:
+        console.print("усе прочитане вже в Супрязі — дякую")
+        _notes(env)
+        return
+
+    console.print(f"[bold]{len(rows)}[/bold] прочитаних справ ще не в Супрязі:\n")
+    for r in rows[:30]:
+        console.print(f"  {r['shifra'] or r['case_key']:<28} {r['pages']:>5} стор."
+                      f" · {r['model'] or '—'}")
+    if len(rows) > 30:
+        console.print(f"[dim]… і ще {len(rows) - 30}[/dim]")
+
+    packed = d.get("packed") or []
+    if packed:
+        console.print(f"\nспаковано: [bold]{len(packed)}[/bold]")
+        for row in packed:
+            console.print(f"  {row['path']}")
+        console.print("\n[dim]віддати: nysh share publish <файл>[/dim]")
+    else:
+        console.print("\n[dim]віддати все: nysh share suggest --all[/dim]")
+        console.print("[dim]не віддавати одну: nysh share suggest --skip <шифра> "
+                      "--why <причина>[/dim]")
     _notes(env)
 
 

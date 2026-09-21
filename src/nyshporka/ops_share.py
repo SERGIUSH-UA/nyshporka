@@ -70,7 +70,8 @@ class SharePackArgs(BaseModel):
     extra: list[str] = Field(default_factory=list,
                              description="довільні поля «ключ=значення», які "
                                          "пакет пронесе недоторканими")
-    license: str = Field(default="CC0-1.0", description="ліцензія тексту")
+    license: str = Field(default="", description="ліцензія тексту; "
+                                             "порожньо — з профілю")
     source_terms: str = Field(default="", description="умови джерела сканів")
 
 
@@ -87,21 +88,147 @@ def share_pack(a: SharePackArgs) -> Envelope:
     """
     from pathlib import Path
 
+    from nyshporka.share import profile as P
     from nyshporka.share.publish import PublishError, pack
 
+    # 🔴 Профіль — джерело дефолтів, прапорці його перекривають. Доти
+    # ліцензія стояла захардкодженою у двох місцях (тут і в CLI), і
+    # розійтись вони могли мовчки.
+    defaults = P.pack_defaults()
     try:
         got = pack(a.case, Path(a.out) if a.out else None, geometry=a.geometry,
                    hash_frames=a.hash_frames, partial_why=a.partial,
-                   dry_run=a.dry_run, publisher=a.publisher, contact=a.contact,
-                   site=a.site, note=a.note, links=_links(a.link),
+                   dry_run=a.dry_run,
+                   publisher=a.publisher or defaults["publisher"],
+                   contact=a.contact or defaults["contact"],
+                   site=a.site or defaults["site"], note=a.note,
+                   links=_links(a.link),
                    extra={**_extra(a.extra),
                           **({"partial": a.partial} if a.partial else {})},
-                   license_text=a.license, source_terms=a.source_terms)
+                   license_text=a.license or defaults["license"],
+                   source_terms=a.source_terms or defaults["source_terms"])
     except PublishError as exc:
         return fail(str(exc))
     env = ok(got)
     for w in (got.get("gates") or {}).get("warnings") or []:
         env.warn(str(w.get("code") or "gate"), str(w.get("text") or ""))
+    return env
+
+
+class ShareSetupArgs(BaseModel):
+    handle: str = Field(default="", description="ваше ім'я або псевдонім у каталозі")
+    contact: str = Field(default="", description="як із вами зв'язатись; це публічні дані")
+    site: str = Field(default="", description="сторінка автора")
+    license: str = Field(default="", description="ліцензія тексту за замовчуванням")
+    source_terms: str = Field(default="", description="умови джерела сканів")
+    consent: str = Field(default="", description="nikoly | zavzhdy | pytaty")
+    lookup: bool | None = Field(default=None,
+                                description="питати пул перед прогоном")
+    geometry: bool | None = Field(default=None,
+                                  description="тягнути геометрію при точній прив'язці")
+    show: bool = Field(default=False, description="лише показати, нічого не міняти")
+
+
+@op("share.setup", summary="Профіль Супряги: хто ви й на що згодні",
+    args=ShareSetupArgs, mutates=True, agent=False, gui=False, section=SECTION,
+    private=True)
+def share_setup(a: ShareSetupArgs) -> Envelope:
+    """Заповнити профіль один раз, щоб більше не питали.
+
+    🔴 Типово — НЕ ділитись автоматично. Серед аудиторії є люди, які
+    платили за зйомку, і автоматична роздача відштовхнула б їх назавжди;
+    режим `zavzhdy` вмикає людина сама.
+    """
+    from nyshporka.share import profile as P
+
+    got = P.load()
+    if a.show:
+        return ok({"profile": got.as_json(), "path": str(P.config_path()),
+                   "consent_text": P.CONSENT_TEXT.get(got.consent, "")})
+
+    if a.consent and a.consent not in P.CONSENT:
+        return fail(f"режим згоди приймає: {', '.join(P.CONSENT)}")
+
+    for field_ in ("handle", "contact", "site", "license", "source_terms", "consent"):
+        value = str(getattr(a, field_) or "").strip()
+        if value:
+            setattr(got, field_, value)
+    if a.lookup is not None:
+        got.lookup = a.lookup
+    if a.geometry is not None:
+        got.geometry = a.geometry
+
+    path = P.save(got)
+    env = ok({"profile": got.as_json(), "path": str(path),
+              "consent_text": P.CONSENT_TEXT.get(got.consent, "")})
+    if got.consent == P.ZAVZHDY and not got.handle:
+        env.warn("no_handle",
+                 "режим «завжди» без імені: внески підпишуться «без імені». "
+                 "Це законно, але змінити потім уже роздане не вийде")
+    return env
+
+
+class ShareSuggestArgs(BaseModel):
+    take: str = Field(default="", description="шифра або ключ справи — віддати саме її")
+    skip: str = Field(default="", description="шифра або ключ — більше не питати про неї")
+    why: str = Field(default="", description="чому не віддаєте; лишається в журналі")
+    all: bool = Field(default=False, description="віддати все, що в переліку")
+
+
+@op("share.suggest", summary="Що прочитано, але ще не віддано",
+    args=ShareSuggestArgs, mutates=True, agent=False, gui=False, section=SECTION,
+    private=True, next_hints=(("share.publish", "віддати зібраний пакет"),))
+def share_suggest(a: ShareSuggestArgs) -> Envelope:
+    """Перелік неподіленого; з `take`/`all` — пакування, зі `skip` — відмова.
+
+    🔴 У мережу не ходить. `PRIVACY.md` обіцяє, що фонової активності в
+    мережі немає, і перелік рахується суто локально — з журналу й переліку
+    прогонів. У пул іде лише `share.publish`, і лише коли її покликали.
+    """
+    from pathlib import Path
+
+    from nyshporka.share import profile as P
+    from nyshporka.share import suggest as S
+    from nyshporka.share.publish import PublishError, pack
+
+    if a.skip:
+        row = S.vidmovyty(a.skip, a.skip, a.why)
+        env = ok({"declined": row, "left": len(S.nepodileni())})
+        if not a.why:
+            env.warn("no_why",
+                     "відмова без пояснення: через півроку буде не згадати, "
+                     "чому саме цю справу лишили")
+        return env
+
+    rows = S.nepodileni()
+    data: dict[str, Any] = {"rows": rows, "count": len(rows)}
+    env = ok(data)
+    if not rows:
+        return env
+
+    cherha = [r for r in rows if not a.take or a.take in (r["case_key"], r["shifra"])]
+    if a.take and not cherha:
+        return fail(f"у переліку неподіленого немає «{a.take}»")
+    if not (a.take or a.all):
+        return env
+
+    defaults = P.pack_defaults()
+    packed: list[dict[str, Any]] = []
+    for row in cherha:
+        try:
+            got = pack(row["case_key"], None,
+                       publisher=defaults["publisher"], contact=defaults["contact"],
+                       site=defaults["site"], license_text=defaults["license"],
+                       source_terms=defaults["source_terms"])
+        except PublishError as exc:
+            # Одна справа, яку не спакувати, не має спиняти решту: людина
+            # попросила віддати пачку, а не першу-ліпшу.
+            env.warn("pack_failed", f"{row['shifra'] or row['case_key']}: {exc}")
+            continue
+        packed.append({"case_key": row["case_key"], "path": got.get("path"),
+                       "bytes": got.get("bytes")})
+    data["packed"] = packed
+    data["paths"] = [str(Path(p["path"])) for p in packed if p.get("path")]
     return env
 
 
