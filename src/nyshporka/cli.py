@@ -1399,9 +1399,13 @@ app.add_typer(train_app, name="train")
 
 # 🤝 Обмін прочитаним між дослідниками. Секція та сама, що й у читання: пакет
 # несе рівно те, що дав рушій, і без прочитаного тут нема чого віддавати.
+#
+# 🔴 `hidden=True`, доки не запущено пул: у довідці команди немає, а сама вона
+# відмовляє без прапорця `NYSHPORKA_SUPRIAHA` (див. `share/cli.py`). Інакше
+# людина спакувала б і роздала пакет у форматі, який ще може змінитись.
 from nyshporka.share.cli import app as share_app  # noqa: E402
 
-app.add_typer(share_app, name="share")
+app.add_typer(share_app, name="share", hidden=True)
 
 
 @cases_app.command("build")

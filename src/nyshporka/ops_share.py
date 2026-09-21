@@ -7,6 +7,10 @@
 🔴 `share.list` і `share.stats` — `private=True`: у відповіді видно розкладку
 диска людини й контакти тих, з ким вона обмінюється. Це читання, але не
 публічне, і чужа вкладка його бачити не мусить.
+
+🔴 Усі — ще й `gui=False`, доки не запущено пул: операції лишаються в реєстрі
+(на них стоять тести й ними ведеться розробка), але жодне обличчя їх не показує.
+Знімається разом із прапорцем `NYSHPORKA_SUPRIAHA` у `share/cli.py`.
 """
 from __future__ import annotations
 
@@ -71,7 +75,7 @@ class SharePackArgs(BaseModel):
 
 
 @op("share.pack", summary="Спакувати прочитане у файл для обміну",
-    args=SharePackArgs, mutates=True, agent=False, section=SECTION,
+    args=SharePackArgs, mutates=True, agent=False, gui=False, section=SECTION,
     next_hints=(("share.row", "рядок для каталогу пулу"),))
 def share_pack(a: SharePackArgs) -> Envelope:
     """Зібрати пакет справи.
@@ -107,7 +111,7 @@ class ShareLookArgs(BaseModel):
 
 
 @op("share.inspect", summary="Подивитись чужий пакет, не розпаковуючи",
-    args=ShareLookArgs, mutates=False, agent=False, section=SECTION, private=True,
+    args=ShareLookArgs, mutates=False, agent=False, gui=False, section=SECTION, private=True,
     next_hints=(("share.import", "прийняти цей пакет"),))
 def share_inspect(a: ShareLookArgs) -> Envelope:
     """Заява пакета, ворота й ступінь прив'язки до наявних кадрів.
@@ -138,7 +142,7 @@ class ShareImportArgs(BaseModel):
 
 
 @op("share.import", summary="Прийняти чужий пакет прочитаного",
-    args=ShareImportArgs, mutates=True, agent=False, section=SECTION,
+    args=ShareImportArgs, mutates=True, agent=False, gui=False, section=SECTION,
     next_hints=(("text.index", "догнати стор, щоб пошук побачив прийняте"),))
 def share_import(a: ShareImportArgs) -> Envelope:
     """Розкласти прогони пакета й підписати їх як чужі.
@@ -172,7 +176,7 @@ class ShareListArgs(BaseModel):
 
 
 @op("share.list", summary="Що спаковано й що прийнято",
-    args=ShareListArgs, mutates=False, agent=False, section=SECTION, private=True)
+    args=ShareListArgs, mutates=False, agent=False, gui=False, section=SECTION, private=True)
 def share_list(a: ShareListArgs) -> Envelope:
     from nyshporka.share import journal
 
@@ -192,7 +196,7 @@ class ShareStatsArgs(BaseModel):
 
 
 @op("share.stats", summary="Хто що коли: обмін цієї машини й пулу",
-    args=ShareStatsArgs, mutates=False, agent=False, section=SECTION, private=True)
+    args=ShareStatsArgs, mutates=False, agent=False, gui=False, section=SECTION, private=True)
 def share_stats(a: ShareStatsArgs) -> Envelope:
     """Своє — з журналу, пул — з каталогу.
 
@@ -222,7 +226,7 @@ class ShareRowArgs(BaseModel):
 
 
 @op("share.row", summary="Рядок каталогу для пулу",
-    args=ShareRowArgs, mutates=False, agent=False, section=SECTION)
+    args=ShareRowArgs, mutates=False, agent=False, gui=False, section=SECTION)
 def share_row(a: ShareRowArgs) -> Envelope:
     """Готовий рядок TSV — це і є «подати заявку» в моделі файл-обмінника."""
     from pathlib import Path
@@ -250,7 +254,7 @@ class SharePullArgs(BaseModel):
 
 
 @op("share.pull", summary="Знайти справу в каталозі пулу",
-    args=SharePullArgs, mutates=False, agent=False, section=SECTION,
+    args=SharePullArgs, mutates=False, agent=False, gui=False, section=SECTION,
     next_hints=(("share.import", "прийняти знайдений пакет"),))
 def share_pull(a: SharePullArgs) -> Envelope:
     """Пошук по каталогу; з `take` — приймання, якщо збіг рівно один.
