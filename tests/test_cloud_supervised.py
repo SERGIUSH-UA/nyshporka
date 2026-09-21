@@ -433,6 +433,56 @@ def test_cli_state_shows_what_the_supervisor_says(
     assert "потрібна людина" in got.output and "поповнити баланс" in got.output
 
 
+def test_state_names_the_missing_package_instead_of_blaming_the_supervisor(
+        space: Path, monkeypatch, fake_gpurunner) -> None:
+    """🔴 «Нема чим спитати» НЕ те саме, що «наглядач не відповідає».
+
+    Заміряно 21.09.2026: `nysh` із середовища без пакета оренди (сусідній
+    проєкт кличе Нишпорку обгорткою) казав «наглядач не відповідає: він міг
+    завершитись або впасти» про захід, який цієї миті читав справу. Людина
+    півгодини вважала, що 812 сторінок читаються, поки захід стояв. Хибна
+    тривога тут дорожча за відсутню: за нею йде рішення платити за оренду ще
+    раз.
+    """
+    from typer.testing import CliRunner
+
+    from nyshporka.cloud import cli as C
+
+    case, _ = _wire(space, monkeypatch)
+    res = _go(case)
+
+    def no_supervisor() -> list[str]:
+        raise SUP.SupervisorMissing(
+            'наглядача немає. Поставте: `pip install "nyshporka[rent]"`')
+
+    monkeypatch.setattr(SUP, "gpurunner_cmd", no_supervisor)
+    got = CliRunner().invoke(C.app, ["state", res.run_id])
+
+    assert got.exit_code == 1, got.output
+    assert "спитати наглядача нічим" in got.output
+    assert "не відповідає" not in got.output, "наглядач тут ні в чому не винен"
+    # 🔴 Набір у квадратних дужках мусить дожити до екрана: rich читає їх як
+    # розмітку й лишає `pip install "nyshporka"` — команду, яка ставить усе,
+    # крім потрібного.
+    assert "nyshporka[rent]" in got.output
+    assert "gpurunner htr state --session" in got.output, "чим спитати вручну"
+
+
+def test_state_of_does_not_swallow_a_missing_supervisor(
+        space: Path, monkeypatch, fake_gpurunner) -> None:
+    """Порожній словник з `state_of` означає рівно одне — наглядача спитали."""
+    case, _ = _wire(space, monkeypatch)
+    st = ST.load(_go(case).run_id)
+    assert st is not None
+
+    def no_supervisor() -> list[str]:
+        raise SUP.SupervisorMissing("нема чим")
+
+    monkeypatch.setattr(SUP, "gpurunner_cmd", no_supervisor)
+    with pytest.raises(SUP.SupervisorMissing):
+        SUP.state_of(st)
+
+
 def test_thin_path_stays_available(space: Path, monkeypatch, fake_gpurunner) -> None:
     """`--thin` не ходить до наглядача взагалі — інакше своя машина по SSH
     вимагала б пакета оренди."""
@@ -581,6 +631,38 @@ def test_our_detached_machine_is_not_reported_as_a_stranger(
     assert "НЕ з заходів цього простору" not in got.output, got.output
     assert res.run_id in got.output, "машина названа своїм заходом"
     assert got.exit_code == 0, "своя машина — не привід для тривоги"
+
+
+def test_rent_status_admits_it_could_not_ask_who_owns_the_machine(
+        space: Path, monkeypatch, fake_gpurunner) -> None:
+    """🔴 Не спитавши наглядача, машину заходу не можна називати чужою.
+
+    Власника відчепленої машини знає лише наглядач. Коли спитати його нічим
+    (середовище без пакета оренди), мовчазний пропуск лишав машину в рядку
+    «НЕ з заходів цього простору» — тобто команда радила гасити ВЛАСНИЙ живий
+    захід. Неповноту треба називати, як уже названо невідоме `burning`.
+    """
+    from typer.testing import CliRunner
+
+    from nyshporka.cloud import cli as C
+    from nyshporka.cloud import registry as REG
+
+    case, backend = _wire(space, monkeypatch)
+    backend.id = "vast"
+    monkeypatch.setattr(REG, "load", lambda: REG.Registry(backends={"vast": backend}))
+    res = _go(case)
+    backend.status_data["burning"] = [{"instance_id": "777", "dph_total": 0.16,
+                                       "label": "htr_case", "gpu_name": "V100",
+                                       "status": "running"}]
+
+    def no_supervisor() -> list[str]:
+        raise SUP.SupervisorMissing("нема чим")
+
+    monkeypatch.setattr(SUP, "gpurunner_cmd", no_supervisor)
+    got = CliRunner().invoke(C.app, ["rent", "status"])
+
+    assert "чиї машини — неповно" in got.output, got.output
+    assert res.run_id in got.output, "названо, ЯКИЙ захід лишився невідомим"
 
 
 # ── параметри роботи, які їдуть на машину ────────────────────────────────────

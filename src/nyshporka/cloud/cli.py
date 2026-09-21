@@ -558,7 +558,11 @@ def cmd_state(
     for inc in st.incidents[-5:]:
         console.print(f"  [muted]· {inc.get('kind')}: {inc.get('detail')}[/muted]")
     if st.why:
-        console.print(f"  [muted]{st.why}[/muted]")
+        # 🔴 Екрануємо: у причині стоять квадратні дужки набору
+        # (`nyshporka[rent]`), і rich зжер би їх як розмітку — порада
+        # перетворилась би на `pip install "nyshporka"`, тобто на команду,
+        # яка ставить усе, крім потрібного.
+        console.print(f"  [muted]{escape(st.why)}[/muted]", highlight=False)
 
 
 def _state_detached(st: RunState, *, as_json: bool) -> None:
@@ -570,7 +574,13 @@ def _state_detached(st: RunState, *, as_json: bool) -> None:
     """
     from nyshporka.cloud import supervised as SUP
 
-    data = SUP.state_of(st)
+    #: Чому стану немає. Порожньо — наглядача спитали й він не відповів;
+    #: непорожньо — спитати не було чим, і це зовсім інша причина.
+    cannot_ask = ""
+    try:
+        data = SUP.state_of(st)
+    except SUP.SupervisorMissing as exc:
+        data, cannot_ask = {}, str(exc)
     if data and SUP.finished(data):
         # Наглядач доповів підсумок — запис заходу оновлюємо зараз, а не
         # лишаємо назавжди на хвилині, коли ми від нього відчепились.
@@ -578,10 +588,24 @@ def _state_detached(st: RunState, *, as_json: bool) -> None:
     if as_json:
         out = st.as_dict()
         out["supervisor_state"] = data or None
+        if cannot_ask:
+            out["supervisor_unreachable"] = cannot_ask
         console.print_json(data=out)
         raise typer.Exit(code=0 if data else 1)
     console.print(f"[bold]{st.run_id}[/bold] · наглядач {st.supervisor}")
     console.print(f"  справа : {st.case_dir}")
+    if cannot_ask:
+        # 🔴 Не «наглядач не відповідає»: він може цієї миті читати справу.
+        # Мовчить не він, а це середовище — у ньому немає пакета оренди, тобто
+        # програми, якою наглядача питають. Хибна тривога тут дорожча за
+        # відсутню: людина вирішує, чи перезапускати захід за гроші.
+        console.print(f"[warn]⚠ спитати наглядача нічим: "
+                      f"{escape(cannot_ask)}[/warn]", highlight=False)
+        console.print("[muted]  стан заходу живий — його знає сам наглядач. "
+                      "Спитати його там, де він стоїть:[/muted]")
+        console.print(f"[muted]  gpurunner htr state --session "
+                      f"{st.supervisor}[/muted]")
+        raise typer.Exit(code=1)
     if not data:
         console.print("[warn]⚠ наглядач не відповідає: стану немає. Він міг "
                       "завершитись або впасти до того, як завів журнал[/warn]")
@@ -1037,12 +1061,20 @@ class _Account:
         # вирішити, що гасити. Тому для них питаємо наглядача — він знає, який
         # інстанс узяв.
         ours = {str(s.box.get("id")): s.run_id for s in ST.live() if s.box}
+        #: Заходи, про власника машини яких спитати було нічим. Без цього
+        #: рядка їхні машини мовчки лягають у «НЕ з заходів цього простору» —
+        #: тобто команда радить гасити власний живий захід.
+        self.owner_unknown: list[str] = []
         for st in ST.all_runs():
             if not st.supervisor or st.phase in ("done", "failed"):
                 continue
             from nyshporka.cloud import supervised as SUP
 
-            box = SUP.state_of(st).get("box")
+            try:
+                box = SUP.state_of(st).get("box")
+            except SUP.SupervisorMissing:
+                self.owner_unknown.append(st.run_id)
+                continue
             iid = str((box or {}).get("instance_id") or "") if isinstance(box, dict) else ""
             if iid:
                 ours.setdefault(iid, st.run_id)
@@ -1077,7 +1109,11 @@ class _Account:
                 "api_key": self.api_key, "ssh_key": self.ssh_key or None,
                 "balance_usd": self.balance,
                 "autostart_max_usd": self.ceiling,
-                "burning": self.rows if self.burning_known else None}
+                "burning": self.rows if self.burning_known else None,
+                # Порожній список — карта власників повна; непорожній — ці
+                # заходи спитати не було чим, і «не з заходів цього простору»
+                # про їхні машини читати не можна.
+                "owner_unknown": self.owner_unknown}
 
 
 def _account(data: dict[str, object]) -> _Account:
@@ -1095,6 +1131,13 @@ def _print_account(view: _Account) -> None:
     console.print(f"  автозапуск без людини — до {_usd(view.ceiling)}")
     for p in view.problems:
         console.print(f"  [err]🔴 {p}[/err]", highlight=False)
+    if view.owner_unknown:
+        # 🔴 Машину відчепленого заходу знає лише наглядач. Не спитавши його,
+        # ми не маємо права називати її чужою — а нижче саме так і написано.
+        console.print(f"  [warn]⚠ чиї машини — неповно: у цьому середовищі немає "
+                      f"пакета оренди, тож заходи "
+                      f"{', '.join(view.owner_unknown)} спитати нічим. Їхня "
+                      f"машина нижче виглядатиме чужою.[/warn]")
     if not view.burning_known:
         console.print("  [warn]⚠ що тарифікується — НЕВІДОМО: спитати в провайдера "
                       "не вдалось. Це не «нічого»: повторіть або звірте в його "
