@@ -978,11 +978,21 @@ def test_the_script_survives_the_shrink(space: Path, monkeypatch, fake_gpurunner
 
 def test_an_explicit_supervisor_path_wins(monkeypatch, tmp_path: Path) -> None:
     """⚙ Коли Нишпорку кличуть із чужого простору, адресу наглядача знає лише
-    той, хто кличе: там він живе у власному середовищі поруч, а не в нашому."""
+    той, хто кличе: там він живе у власному середовищі поруч, а не в нашому.
+
+    🪤 Другу половину тесту не можна писати як просту нерівність: на машині БЕЗ
+    gpurunner звичайний пошук чесно відмовляє замість повернути команду. Саме
+    така машина в CI, а на машині розробника наглядач стоїть — тож тест був
+    зелений локально й червоний на всіх чотирьох платформах одразу (21.09.2026).
+    Перевіряємо те, що тест і мав перевіряти: явна адреса більше не діє.
+    """
     monkeypatch.setenv("NYSH_GPURUNNER", str(tmp_path / "gr.exe"))
     assert SUP.gpurunner_cmd() == [str(tmp_path / "gr.exe")]
     monkeypatch.delenv("NYSH_GPURUNNER")
-    assert SUP.gpurunner_cmd() != [str(tmp_path / "gr.exe")]
+    try:
+        assert SUP.gpurunner_cmd() != [str(tmp_path / "gr.exe")]
+    except SUP.SupervisorMissing:
+        pass
 
 
 def test_a_dropped_seed_takes_the_dense_fleet_with_it(space: Path, monkeypatch,
