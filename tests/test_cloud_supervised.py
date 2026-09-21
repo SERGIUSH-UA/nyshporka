@@ -1042,3 +1042,25 @@ def test_one_case_result_tells_the_truth_after_the_run(space: Path, monkeypatch,
     got = _go(case, dry_run=True)
     assert len(got.cases) == 1
     assert got.cases[0].verdict == got.verdict == "dry_run"
+
+
+def test_stopping_one_case_of_a_batch_says_it_wraps_the_whole_queue(
+        space: Path, monkeypatch, fake_gpurunner) -> None:
+    """🔴 Наглядач і машина в партії ОДНІ на всіх: спинивши «цю справу», людина
+    спиняє чергу. Не сказавши цього, ми дали б їй погасити роботу, про яку вона
+    зараз навіть не думає."""
+    from typer.testing import CliRunner
+
+    from nyshporka.cloud import cli as C
+
+    first, _ = _wire(space, monkeypatch)
+    second = _second_case(space)
+    res = _go([str(first), str(second)])
+    run_id = res.cases[0].run_id
+    st = ST.load(run_id)
+    assert st is not None and st.siblings, "запис мусить знати сусідів"
+    fake_gpurunner.set(estimate=ESTIMATE,
+                       state={"session": st.supervisor, "phase": "running"})
+
+    got = CliRunner().invoke(C.app, ["stop", run_id])
+    assert "ще 1" in got.output and "чергу" in got.output, got.output
