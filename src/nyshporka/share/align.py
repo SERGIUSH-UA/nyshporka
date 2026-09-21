@@ -48,6 +48,24 @@ LABEL_TEXT = {
 }
 
 
+def frames_sorted(case_dir: Path) -> list[Path]:
+    """Кадри теки в порядку, однаковому на будь-якій машині.
+
+    🔴 Сортування за `p.name`, а НЕ за самим `Path`. `PurePath.__lt__`
+    порівнює `_str_normcase`: на Windows регістронечутливо, на POSIX —
+    чутливо. Тека з `0001.JPG` і `0001b.jpg` дає різний порядок на різних
+    системах, тобто `n`-й кадр — це різний кадр, і побудований на позиціях
+    відбиток зйомки ламається мовчки.
+
+    Заміна порядку міняє нумерацію `n` у `frames.jsonl`. Це видима зміна
+    формату, і вона зроблена свідомо, доки пул не запущено.
+    """
+    d = Path(case_dir)
+    if not d.is_dir():
+        return []
+    return sorted((p for p in d.iterdir() if is_frame(p)), key=lambda p: p.name)
+
+
 def is_frame(path: Path) -> bool:
     return path.is_file() and path.suffix.lower() in FRAME_SUFFIXES
 
@@ -87,7 +105,7 @@ def frames_of(case_dir: Path, *, hash_frames: bool = False) -> list[dict[str, An
         return []
     fs = _fs_sidecar(case_dir)
     out: list[dict[str, Any]] = []
-    for n, path in enumerate(sorted(p for p in case_dir.iterdir() if is_frame(p)), 1):
+    for n, path in enumerate(frames_sorted(case_dir), 1):
         row: dict[str, Any] = {"n": n, "name": path.name}
         with contextlib.suppress(OSError):
             row["bytes"] = path.stat().st_size
@@ -139,8 +157,46 @@ def _keyset(frames: list[dict[str, Any]], field: str) -> set[str]:
     return {str(f[field]) for f in frames if f.get(field)}
 
 
+def _fingerprint_grade(their_fp: dict[str, Any], case_dir: Path,
+                       theirs: int, ours: int) -> Alignment | None:
+    """Мітка за відбитком зйомки, або `None` — якщо він нічого не довів.
+
+    🔴 `exact` ставиться ТІЛЬКИ при збігу всіх звірених слотів і кількості
+    кадрів. Збіг чотирьох із п'яти — це вже `by-position`, і кроп під
+    сумнівом: різниця в одному слоті означає, що десь у зйомці є зайвий або
+    пропущений аркуш, і далі за ним усе з'їхало на одиницю.
+
+    `None` замість мітки, коли звірити не вдалося нічого: відсутній доказ не
+    є доказом відсутності, і рішення переходить до наступних каналів.
+    """
+    from nyshporka.share import fingerprint as FP
+
+    mine = FP.fingerprint(case_dir)
+    zbihlos, zvireno = FP.compare(mine, their_fp)
+    if not zvireno:
+        return None
+
+    same_count = int(their_fp.get("frames") or 0) == mine.get("frames")
+    if zbihlos == zvireno and same_count:
+        return Alignment(EXACT, f"відбиток зйомки збігся ({zbihlos} з {zvireno} кадрів)",
+                         case_dir=str(case_dir), theirs=theirs, ours=ours,
+                         matched=zbihlos)
+    if zbihlos:
+        return Alignment(
+            BY_POSITION,
+            f"відбиток збігся частково ({zbihlos} з {zvireno}"
+            + ("" if same_count else ", і кількість кадрів різна")
+            + ") — десь зйомка розійшлась на аркуш",
+            case_dir=str(case_dir), theirs=theirs, ours=ours, matched=zbihlos)
+    return Alignment(TEXT_ONLY,
+                     f"відбиток зйомки не збігся жодним із {zvireno} кадрів — "
+                     f"це інша зйомка тієї самої справи",
+                     case_dir=str(case_dir), theirs=theirs, ours=ours)
+
+
 def grade(theirs: list[dict[str, Any]], case_dir: Path | None, *,
-          hash_frames: bool = False) -> Alignment:
+          hash_frames: bool = False,
+          their_fp: dict[str, Any] | None = None) -> Alignment:
     """Виміряти прив'язку. `case_dir=None` або порожня тека → `text-only`.
 
     🔴 Мітка не підвищується здогадом. Кількість кадрів, що збіглася, доводить
@@ -154,6 +210,15 @@ def grade(theirs: list[dict[str, Any]], case_dir: Path | None, *,
     if not ours:
         return Alignment(TEXT_ONLY, f"у теці {case_dir} немає кадрів",
                          case_dir=str(case_dir), theirs=len(theirs))
+
+    # Відбиток зйомки — перший і найсильніший доказ, бо єдиний, що переживає
+    # перекодування. Питається до інших саме тому: `sha256` цілих кадрів
+    # ламається від будь-якого стискання, а імена ламаються від плоского
+    # стейджингу.
+    if their_fp:
+        got = _fingerprint_grade(their_fp, case_dir, len(theirs), len(ours))
+        if got is not None:
+            return got
 
     for field, why in (("apid", "збіглися ідентифікатори кадрів FamilySearch"),
                        ("sha256", "збіглися хеші кадрів")):

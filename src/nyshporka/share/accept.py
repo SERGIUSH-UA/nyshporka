@@ -96,7 +96,11 @@ def look(src: str, *, hash_frames: bool = False) -> Look:
     key = str(manifest.case.get("key_local") or "")
     local = _local_key(manifest) or key
     case_dir = align.case_dir_for(local) if local else None
-    grade = align.grade(frames, case_dir, hash_frames=hash_frames)
+    # Відбиток лежить у шапці кадрів маніфесту. Старий пакет його не має —
+    # тоді прив'язка міряється як раніше, за іменами й кількістю.
+    their_fp = manifest.frames.get("fingerprint")
+    grade = align.grade(frames, case_dir, hash_frames=hash_frames,
+                        their_fp=their_fp if isinstance(their_fp, dict) else None)
     return Look(path=path, manifest=manifest, verdict=verdict, frames=frames,
                 alignment=grade)
 

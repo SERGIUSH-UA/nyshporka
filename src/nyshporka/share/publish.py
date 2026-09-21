@@ -12,7 +12,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from nyshporka.share import align, bundle, catalog, gates, journal
+from nyshporka.share import align, bundle, catalog, fingerprint, gates, journal
 from nyshporka.share.bundle import Manifest
 
 
@@ -167,9 +167,18 @@ def build_manifest(scope: str, *, geometry: bool = False,
         # порядок обходу тек на нього не впливав.
         "content_sha256": _content_of(voices),
     }
-    frames_block = align.summary(frames) if frames else {"total": 0, "listed": 0,
-                                                         "with_sha256": 0,
-                                                         "with_apid": 0}
+    frames_block: dict[str, Any] = (
+        align.summary(frames) if frames
+        else {"total": 0, "listed": 0, "with_sha256": 0, "with_apid": 0})
+    # Відбиток зйомки: п'ять кадрів і два хеші на кожен. Коштує частку
+    # секунди й ~30 МБ читання — на відміну від хешування всієї справи, від
+    # якого відмовились саме через ціну. Саме він робить мітку `exact`
+    # можливою для того, хто качав ту саму зйомку, але розбирав її своїм
+    # інструментом.
+    if case_dir is not None:
+        got = fingerprint.fingerprint(case_dir)
+        if fingerprint.checked(got):
+            frames_block["fingerprint"] = got
     pub: dict[str, str] = {}
     if publisher:
         pub["handle"] = publisher
