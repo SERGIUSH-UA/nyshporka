@@ -269,6 +269,66 @@ def share_publish(a: SharePublishArgs) -> Envelope:
     return env
 
 
+class ShareAutoshareArgs(BaseModel):
+    case: str = Field(description="шифра або ключ справи, яку щойно прочитали")
+    complete: bool = Field(default=True,
+                           description="прогін був повний; частковий не пакуємо")
+
+
+@op("share.autoshare", summary="Віддати щойно прочитане, якщо так налаштовано",
+    args=ShareAutoshareArgs, mutates=True, agent=False, gui=False, section=SECTION,
+    private=True)
+def share_autoshare(a: ShareAutoshareArgs) -> Envelope:
+    """Режим згоди `zavzhdy`: спакувати й віддати одразу після прогону.
+
+    🔴 Одна операція на обидві колії — термінал (`nysh read`) і черга
+    демона. Інакше режим «завжди» мовчки не працював би саме в тих, хто
+    користується застосунком, а не терміналом, тобто в більшості.
+
+    🔴 Мовчить у всіх інших режимах і ніколи не кидає назовні: це хвіст
+    успішного прогону, і він не має права зробити з нього невдалий.
+    """
+    from pathlib import Path
+
+    from nyshporka.share import profile as P
+    from nyshporka.share.publish import PublishError, pack
+    from nyshporka.share.upload import UploadError
+    from nyshporka.share.upload import publish as viddaty
+
+    prof = P.load()
+    if not prof.auto:
+        return ok({"skipped": "режим згоди не «завжди»", "consent": prof.consent})
+    if not a.case:
+        return ok({"skipped": "прогін без шифри — пакувати нема чого"})
+    if not a.complete:
+        # 🔴 Частковий прогін ворота відкинуть за знаменником, і успішне
+        # читання закінчилось би помилкою пакування. Свідомо неповне
+        # віддають руками, з поясненням у `--partial`.
+        return ok({"skipped": "частковий прогін віддають руками"})
+
+    defaults = P.pack_defaults()
+    try:
+        got = pack(a.case, None, publisher=defaults["publisher"],
+                   contact=defaults["contact"], site=defaults["site"],
+                   license_text=defaults["license"],
+                   source_terms=defaults["source_terms"])
+    except PublishError as exc:
+        env = ok({"packed": False})
+        env.warn("pack_failed", f"не спакувалось: {exc}")
+        return env
+
+    env = ok({"packed": True, "path": got.get("path"), "bytes": got.get("bytes")})
+    try:
+        viddane = viddaty(Path(str(got["path"])))
+    except UploadError as exc:
+        # Пакет лишився на диску — його видно в `share suggest` і можна
+        # віддати пізніше. Обірвана мережа не мусить коштувати роботи.
+        env.warn("upload_failed", f"пакет зібрано, але не віддано: {exc}")
+        return env
+    (env.data or {}).update(viddane)
+    return env
+
+
 class ShareLookArgs(BaseModel):
     src: str = Field(description="файл пакета або адреса, звідки його взяти")
     hash_frames: bool = Field(default=False,

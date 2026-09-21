@@ -834,6 +834,85 @@ def sample(
                   "`nysh search Липовеньке`[/muted]")
 
 
+def _supriaha_autoshare(case_key: str) -> None:
+    """Хвіст успішного прогону в режимі згоди «завжди».
+
+    🔴 Не має права зробити з успішного прогону невдалий. Усе, що тут може
+    піти не так — пул лежить, токена немає, ворота не пустили, — це привід
+    написати рядок, а не зіпсувати код повернення команди, за яким люди
+    ставлять свої прогони в черги й скрипти.
+    """
+    import os
+
+    from nyshporka.share.cli import _ON, DEV_FLAG
+
+    if os.environ.get(DEV_FLAG, "").strip().lower() not in _ON:
+        return
+    try:
+        from nyshporka import ops as O
+
+        env = O.call("share.autoshare", {"case": case_key, "complete": True})
+    except Exception:
+        return
+    d = env.data or {}
+
+    # 🔴 Попередження друкуються ЗАВЖДИ, і першими. У режимі «завжди»
+    # людина не дивиться на результат — вона на нього поклалась; мовчазна
+    # невдача означає, що вона вважає справу відданою, а та лежить у себе
+    # на диску. Це гірше, ніж не мати режиму зовсім.
+    for w in env.warnings or []:
+        console.print(f"  [warn]⚠ {w.text}[/warn]")
+
+    if d.get("skipped") or not d.get("packed"):
+        return
+    if d.get("duplicate"):
+        console.print("  [muted]цей текст уже в Супрязі[/muted]")
+    elif d.get("ready"):
+        console.print(f"  🤝 віддано в Супрягу: внесок {d.get('contribution')}")
+    else:
+        console.print(f"  [muted]спаковано: {d.get('path')}[/muted]")
+
+
+def _supriaha_lookup(case_key: str, frames: int) -> None:
+    """Чи цю справу вже прочитали — питання до пулу перед прогоном.
+
+    🔴 Ніколи не спиняє прогін і ніколи не падає. Пул лежить, мережі немає,
+    відповідь дивна — людина просто читає сама, як читала досі. Тихий
+    фолбек тут не зручність, а умова: прогін на ніч не має зриватись через
+    чужий сервер.
+
+    Рішення лишається за людиною й тоді, коли текст знайшовся: ми друкуємо
+    рядок, а не пропонуємо вибір. Питання посеред довгої команди — це те
+    саме, від чого відмовились у режимах згоди.
+    """
+    import os
+
+    from nyshporka.share.cli import _ON, DEV_FLAG
+
+    if os.environ.get(DEV_FLAG, "").strip().lower() not in _ON:
+        return
+    try:
+        from nyshporka.share import catalog as C
+        from nyshporka.share import profile as P
+
+        if not P.load().lookup:
+            return
+        got = C.lookup(case_key, frames=frames)
+    except Exception:
+        return
+    if not got.get("found"):
+        return
+
+    modeli = ", ".join(str(m) for m in (got.get("models") or [])) or "невідомо чим"
+    console.print(
+        f"  [bold]цю справу вже прочитали:[/bold] {got.get('pages')} стор. · "
+        f"{modeli} · {got.get('license') or '—'}"
+    )
+    if got.get("status") == "nove":
+        console.print("  [muted]мітка «не перевірено» — текст ще не дивилась людина[/muted]")
+    console.print(f"  [muted]забрати: nysh share pull «{case_key}»[/muted]")
+
+
 @app.command()
 def read(
     case_dir: str = typer.Argument(..., help="пласка тека зі сканами справи"),
@@ -951,6 +1030,14 @@ def read(
         else:
             console.print("  [warn]шифри немає: бібліотека цієї теки не знає — "
                           "прив'язка триматиметься на імені прогону[/warn]")
+
+    # 🔴 Питаємо пул ДО того, як витратити гроші. У цьому й уся Супряга:
+    # людина не мусить про неї думати, а прогін, який уже хтось зробив, не
+    # мусить робитись удруге. Стоїть поряд із `already_read` вище й з тієї
+    # самої причини — «на диску вже лежить те саме» й «у пулі вже лежить те
+    # саме» це одне питання, задане двом сховищам.
+    if case_key and not (rerun or dry or pages or limit):
+        _supriaha_lookup(case_key, p.frames)
     # 🔴 Лок карти береться З ПЛАНУ, коли людина не задала свій.
     #
     # Доти сюди їхала сама лише опція командного рядка (типово порожня), а
@@ -1022,6 +1109,14 @@ def read(
                   f"сторінок з текстом: {done} з {p.frames}"
                   + (f" · без тексту: {missing}" if missing else "")
                   + (" · частковий прогін, повноту не міряю" if partial else ""))
+
+    # 🔴 Перед `Exit`, інакше не виконається. Хвіст успішного прогону: у
+    # режимі згоди «завжди» пакет збирається й іде в пул сам. У решті
+    # режимів функція мовчить, і жодна її невдача не робить із успішного
+    # прогону невдалий — код повернення нижче від неї не залежить.
+    if rc == 0 and not missing and not partial and case_key:
+        _supriaha_autoshare(case_key)
+
     raise typer.Exit(code=0 if rc == 0 and not missing else 1)
 
 

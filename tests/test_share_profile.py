@@ -204,17 +204,39 @@ def test_perelik_ne_khodyt_u_merezhu(space: Path, monkeypatch: Any) -> None:
 
     Перелік рахується з журналу й прогонів; у пул іде лише те, що людина
     покликала сама.
+
+    🔴 Глушиться ТРАНСПОРТ, а не конкретний клас. Заборона на `Fetcher`
+    ловила б рівно той шлях, який уже є, і мовчала б про прямий `httpx`,
+    `urllib` чи сирий сокет. А прямий `httpx` тут не гіпотеза: профіль має
+    `lookup`, тобто клієнт у пул ходить, і перша ж спроба «а може, це вже
+    хтось виклав» усередині переліку пройшла б повз вужчий запобіжник —
+    обіцянка зламалась би тихо.
     """
-    import nyshporka.sources.http as H
+    import socket
+
+    import httpx
 
     def _zaboronene(*_: Any, **__: Any) -> None:
         raise AssertionError("перелік неподіленого не сміє ходити в мережу")
 
-    monkeypatch.setattr(H.Fetcher, "get", _zaboronene)
-    monkeypatch.setattr(H.Fetcher, "download", _zaboronene)
+    monkeypatch.setattr(httpx.Client, "send", _zaboronene)
+    monkeypatch.setattr(httpx.AsyncClient, "send", _zaboronene)
+    monkeypatch.setattr(socket.socket, "connect", _zaboronene)
+
+    # Заборона мусить довести, що вона жива. Без цієї перевірки тест
+    # лишався б зеленим і тоді, коли підміна промахнулась повз справжній
+    # шлях, — тобто доводив би рівно нічого.
+    with pytest.raises(AssertionError):
+        httpx.Client().send(httpx.Request("GET", "https://nyshporka.online/"))
+    with pytest.raises(AssertionError):
+        socket.socket().connect(("127.0.0.1", 9))
+
     monkeypatch.setattr("nyshporka.htr_store.list_cases", lambda: [])
     S.nepodileni()
     S.nudge()
+    S.vidmovyty("DAHMO/315/1", "ДАХмО 315-1-1", "перевірка")
+    S.viddani()
+    S.vidmovleni()
 
 
 def test_zhurnal_lyshaie_slid_prydatnyi_dlia_ochey(space: Path) -> None:
