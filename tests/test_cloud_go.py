@@ -948,7 +948,7 @@ def test_a_missing_rent_plugin_says_how_to_get_one(space: Path, monkeypatch) -> 
     from nyshporka.cloud import cli as C
 
     got = CliRunner().invoke(C.app, ["rent", "status", "--backend", "нема-такого"])
-    assert got.exit_code == 1 and "gpurunner[vast,r2]" in got.output
+    assert got.exit_code == 1 and "nyshporka[rent]" in got.output
 
 
 def test_plan_shows_the_market_and_never_rents(cli, space: Path, monkeypatch) -> None:
@@ -1004,7 +1004,7 @@ def test_doctor_reports_rent_without_touching_the_network(monkeypatch) -> None:
     monkeypatch.setattr(REG, "_from_entry_points", lambda: ([], []))
     none = D._rent()
     assert none.level == "ok" and "немає плагіна" in none.detail
-    assert "gpurunner[vast,r2]" in none.fix
+    assert "nyshporka[rent]" in none.fix
 
     class Vast(FakeBackend):
         id = "vast"

@@ -701,7 +701,7 @@ def _go(res: GoResult, cases: tuple[str, ...], say: EventFn,
     except RUN.RunError as exc:
         raise GoRefused(
             f"{exc}. Оренду дає окремий пакет-плагін: "
-            f"`pip install \"gpurunner[vast,r2]\"` поруч із Нишпоркою, далі "
+            f"`pip install \"nyshporka[rent]\"`, далі "
             f"`nysh cloud rent login`.") from None
     if not bills(b):
         raise GoRefused(

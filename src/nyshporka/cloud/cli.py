@@ -248,7 +248,7 @@ def _print_plan(p: CloudPlan) -> None:
 #: Що сказати, коли бекенда оренди немає в реєстрі. Оренду дає окремий пакет:
 #: свій SDK, свій акаунт і своя тарифікація в ядрі не живуть.
 _RENT_HINT = ("бекенда оренди немає. Його дає окремий пакет-плагін: "
-              "`pip install \"gpurunner[vast,r2]\"` поруч із Нишпоркою; далі — "
+              "`pip install \"nyshporka[rent]\"`, далі — "
               "`nysh cloud rent login`. Що є зараз: `nysh cloud hosts list`")
 
 

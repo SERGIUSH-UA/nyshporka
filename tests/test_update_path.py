@@ -351,7 +351,14 @@ def test_the_printed_command_keeps_its_extras(monkeypatch):
 
 
 def test_update_that_cannot_run_here_names_the_line_and_runs_nothing(monkeypatch):
-    """Там, де оновлення на місці не вдасться, команда не кличе нічого."""
+    """Там, де оновлення на місці не вдасться, команда не кличе нічого.
+
+    🔴 `has_htr()` підставляється, хоч набір тут і не перевіряється: він питає
+    СЕРЕДОВИЩЕ (`find_spec("torch")`), тож на машині з рушіями рядок стає
+    `nyshporka[app,archives,htr]` і тест червоніє від того, що стоїть у
+    розробника, а не від коду. Спіймано 21.09.2026, коли `uv sync
+    --all-extras` доставив torch у середовище розробки.
+    """
     import subprocess
 
     from typer.testing import CliRunner
@@ -360,6 +367,7 @@ def test_update_that_cannot_run_here_names_the_line_and_runs_nothing(monkeypatch
 
     _fake_release(monkeypatch)
     monkeypatch.setattr(U, "runs_in_place", lambda: False)
+    monkeypatch.setattr(U, "has_htr", lambda: False)
     monkeypatch.setattr(U, "install_info", lambda: {"preset": "catalog"})
 
     def _boom(*_a, **_k):
