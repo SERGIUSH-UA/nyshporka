@@ -145,6 +145,13 @@ class Brand:
     type_mono: str
     type_size: str
     type_leading: str
+    #: Веб-стек. Порожній, поки в `brand.yaml` немає блока `type.web` — сайт
+    #: тоді просто лишається на системних стеках, а не падає.
+    web_serif: str
+    web_sans: str
+    web_mono: str
+    web_size: str
+    web_leading: str
     marks: tuple[Mark, ...]
     engines: tuple[EngineStyle, ...]
     section_glyphs: dict[str, str]
@@ -283,6 +290,7 @@ def _colours(rows: Any) -> tuple[Color, ...]:
 def _build(raw: dict[str, Any]) -> Brand:
     ident = raw.get("identity") or {}
     typ = raw.get("type") or {}
+    web = typ.get("web") or {}
 
     def glyphs(key: str) -> dict[str, str]:
         """Словник «екран → знак»: чотири такі секції, і всі однакової форми."""
@@ -312,6 +320,11 @@ def _build(raw: dict[str, Any]) -> Brand:
         type_mono=str(typ.get("mono") or ""),
         type_size=str(typ.get("base_size") or ""),
         type_leading=str(typ.get("line_height") or ""),
+        web_serif=str(web.get("serif") or ""),
+        web_sans=str(web.get("sans") or ""),
+        web_mono=str(web.get("mono") or ""),
+        web_size=str(web.get("base_size") or ""),
+        web_leading=str(web.get("line_height") or ""),
         marks=tuple(Mark(
             id=str(m.get("id") or ""), glyph=str(m.get("glyph") or ""),
             uk=str(m.get("uk") or ""), en=str(m.get("en") or ""))
