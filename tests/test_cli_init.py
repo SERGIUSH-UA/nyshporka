@@ -64,7 +64,9 @@ def test_init_inside_a_workspace_does_not_offer_a_new_one(monkeypatch, tmp_path:
     res = runner.invoke(app, ["init", "--yes", "--preset", "catalog"])
 
     assert res.exit_code == 0, res.stdout
-    assert "уже існує" in res.stdout
+    # Пробіли зведено: rich переносить довгий рядок зі шляхом за шириною
+    # консолі, і без консолі (воркер xdist, 80 колонок) виходило «уже⏎існує».
+    assert "уже існує" in " ".join(res.stdout.split())
     assert not (tmp_path / "домівка" / "Нишпорка").exists()
 
 

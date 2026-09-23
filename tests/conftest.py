@@ -161,7 +161,65 @@ def _isolate_from_the_machine(monkeypatch: pytest.MonkeyPatch,
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: _fake_home))
 
 
+@pytest.fixture(autouse=True)
+def _own_derived_files(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Сховище сторінок і файли бібліотеки — свої в кожного тесту.
+
+    🔴 `pagestore.store.PAGES_ROOT` і шляхи `library` заморожуються на імпорті,
+    тобто на завантажувальному просторі вище, — одному на весь процес. Тест,
+    що писав туди й не перенаправив шлях сам, лишав слід, а наступний бачив
+    його як свій: `test_pagestore_cli` отримував «вже нотовано 3» після
+    `test_text_ops`, а `test_share_accept` знаходив «свою» справу в бібліотеці,
+    яку записав `test_pagestore_cli`. Послідовно це ховав порядок за абеткою;
+    вилізло, щойно xdist роздав файли інакше (23.09.2026). Тест, якому потрібен
+    свій шлях, і далі ставить його сам — поверх цього.
+    """
+    from nyshporka import library as L
+    from nyshporka.pagestore import store as PS
+
+    monkeypatch.setattr(PS, "PAGES_ROOT", tmp_path / "data" / "pages")
+    derived = tmp_path / "data" / "derived"
+    monkeypatch.setattr(L, "LIBRARY_PATH", derived / "case_library.json")
+    monkeypatch.setattr(L, "VERDICTS_PATH", tmp_path / "data" / "spotter" / "case_verdicts.json")
+    monkeypatch.setattr(L, "SCAN_TARGETS_PATH", tmp_path / "data" / "spotter" / "scan_targets.json")
+    L._describe_index.cache_clear()
+
+
+@pytest.fixture(autouse=True)
+def _fresh_profile_cache():
+    """Профіль дослідження — з простору цього тесту, а не з попереднього.
+
+    `core.profile._raw()` і `active()` кешуються на процес і простору не
+    знають: профіль «Ковальський», заведений одним тестом, доктор наступного
+    бачив як свій. Звичний порядок це ховав (23.09.2026, спіймано xdist).
+    """
+    from nyshporka.core import profile
+
+    profile.reset()
+    yield
+    profile.reset()
+
+
 @pytest.fixture
 def last_used_state(_state_file: Path) -> Path:
     """Той самий файл — для тестів, які перевіряють саме його вміст."""
     return _state_file
+
+
+try:
+    import xdist  # noqa: F401
+except ImportError:  # xdist не стоїть — хук не оголошується, інакше pytest його відкидає
+    pass
+else:
+    def pytest_xdist_auto_num_workers(config) -> int | None:
+        """`-n auto` лише для пака: вузол чи один файл ідуть в одному процесі.
+
+        Старт воркера — ще один інтерпретатор з імпортами (~6-8 с на Windows);
+        для одного тесту це чисте очікування. `None` — хай xdist рахує ядра сам.
+        """
+        paths = [a for a in config.invocation_params.args if not a.startswith("-")]
+        if any("::" in a for a in paths):
+            return 0
+        if len(paths) == 1 and paths[0].endswith(".py"):
+            return 0
+        return None
