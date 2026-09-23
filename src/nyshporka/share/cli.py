@@ -150,7 +150,7 @@ def setup_cmd(
     """Профіль Супряги: заповнюється один раз, потім не питається.
 
     🔴 Токен сюди не кладеться: профіль їде разом із простором, а простір
-    люди пересилають одне одному. Токен живе в NYSHPORKA_SUPRIAHA_TOKEN.
+    люди пересилають одне одному. Ключ бере `nysh share login`.
     """
     from nyshporka import ops as O
     from nyshporka.share import profile as P
@@ -259,7 +259,17 @@ def publish_cmd(
     Повторний виклик із тим самим змістом безпечний: пул упізнає його за
     хешем змісту й нічого не заливає вдруге.
     """
+    import sys
+
     from nyshporka import ops as O
+    from nyshporka.share import upload
+
+    # Ключа ще немає — у діалозі одразу пропонуємо вхід, а не відсилаємо
+    # людину читати помилку. У скрипті питати нікого, тож там лишається
+    # звичайна відмова з підказкою.
+    if (not upload.token() and not as_json and sys.stdin.isatty()
+            and typer.confirm("Ключа Супряги ще немає. Увійти зараз?", default=True)):
+        _login(base_site="", open_browser=True)
 
     env = O.call("share.publish", {"path": path, "base": base})
     if _answer(env, as_json):
@@ -272,6 +282,54 @@ def publish_cmd(
                       f"книга {d.get('shifra') or d.get('book')}")
         console.print(d.get("text") or "")
     _notes(env)
+
+
+def _login(*, base_site: str, open_browser: bool) -> None:
+    from nyshporka.share import login as L
+    from nyshporka.share.upload import UploadError
+
+    def _pokazaty(url: str) -> None:
+        if open_browser:
+            console.print("Відкриваю браузер. Якщо він не відкрився, перейдіть сюди:")
+        else:
+            console.print("Відкрийте в браузері на ЦІЙ машині:")
+        console.print(f"  {url}")
+        console.print("[dim]Чекаю на вхід… (Ctrl+C — скасувати)[/dim]")
+
+    try:
+        L.login(site=base_site, open_browser=open_browser, on_url=_pokazaty)
+    except UploadError as exc:
+        console.print(f"[bad]✗ {exc}[/bad]")
+        raise typer.Exit(code=1) from exc
+    console.print("[ok]✓ Ключ отримано й покладено у сховище ключів системи.[/ok]")
+
+
+@app.command("login")
+def login_cmd(
+    site: str = typer.Option("", "--site", help="інша адреса сайту Супряги"),
+    no_browser: bool = typer.Option(False, "--no-browser",
+                                    help="не відкривати браузер, лише надрукувати адресу"),
+) -> None:
+    """Увійти в Супрягу: браузер, одна кнопка — і ключ у Нишпорці.
+
+    На сторінці можна увійти поштою чи Google або анонімно. Ключ Нишпорка
+    забирає сама й кладе у сховище ключів системи — ні в простір, ні на екран.
+    """
+    _login(base_site=site, open_browser=not no_browser)
+
+
+@app.command("logout")
+def logout_cmd() -> None:
+    """Прибрати ключ Супряги з цієї машини."""
+    from nyshporka.share import login as L
+    from nyshporka.share.upload import UploadError
+
+    try:
+        was = L.forget()
+    except UploadError as exc:
+        console.print(f"[bad]✗ {exc}[/bad]")
+        raise typer.Exit(code=1) from exc
+    console.print("ключ прибрано" if was else "[dim]ключа на цій машині й не було[/dim]")
 
 
 @app.command("inspect")

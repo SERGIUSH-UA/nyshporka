@@ -99,8 +99,8 @@ def publish(path: Path, *, base: str = "", auth: str = "") -> dict[str, Any]:
     tok = auth or token()
     if not tok:
         raise UploadError(
-            f"немає токена. Покладіть його в {ENV_NAME} — узяти в кабінеті на "
-            "nyshporka.online"
+            "немає ключа Супряги. Увійдіть: `nysh share login` — або покладіть "
+            f"ключ у {ENV_NAME} (видається в кабінеті на nyshporka.online)"
         )
 
     manifest = bundle.read_manifest(path)
