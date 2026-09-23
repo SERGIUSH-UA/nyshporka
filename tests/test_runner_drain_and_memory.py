@@ -86,3 +86,45 @@ def test_page_memory_on_cpu_reports_no_vram() -> None:
     mem = R.page_memory("cpu")
     assert "vram_peak_mb" not in mem
     assert all(isinstance(v, int) and v > 0 for v in mem.values())
+
+
+def test_pages_read_by_live_neighbours_do_not_restart_the_worker(
+        case: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """🔴🔴 23.09.2026: кожен шард на кожній справі черги піднімав другого
+    воркера — 7 с моделей і прохід по 15 зайнятих сторінках, «0 розпізнано ·
+    15 скіп». Воркер виходив із 3, бо решту ще читали сусіди, і голова
+    перевіряла «ще раз». Сторінки під живими клеймами — не пропуски цього шарда.
+    """
+    import os
+
+    out = tmp_path / "out"
+    (out / R.CLAIMS_DIR).mkdir(parents=True)
+    for n in range(1, 5):
+        (out / f"{n:04}.txt").write_text("текст", encoding="utf-8")
+    neighbour = os.getppid()               # живий процес, не ми
+    for n in (5, 6):
+        (out / R.CLAIMS_DIR / f"{n:04}.claim").write_text(
+            f"{neighbour} 3/4 2026-09-23T15:00:00\n", encoding="utf-8")
+    calls: list[object] = []
+    monkeypatch.setattr(subprocess, "run",
+                        lambda *a, **k: (calls.append(a), types.SimpleNamespace(returncode=3))[1])
+    monkeypatch.setattr(R.sys, "argv", ["htr_case_run.py", "--shard", "2/4", "--claim"])
+    assert R.supervise(_args(), case, out) == 0
+    assert len(calls) == 1, "другий воркер лише заплатив би за моделі"
+
+
+def test_a_dead_neighbours_page_still_restarts_the_worker(
+        case: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Контроль: клейм, який лишив МЕРТВИЙ процес, — справжній пропуск."""
+    out = tmp_path / "out"
+    (out / R.CLAIMS_DIR).mkdir(parents=True)
+    for n in range(1, 6):
+        (out / f"{n:04}.txt").write_text("текст", encoding="utf-8")
+    (out / R.CLAIMS_DIR / "0006.claim").write_text(
+        "999999999 3/4 2026-09-23T15:00:00\n", encoding="utf-8")
+    calls: list[object] = []
+    monkeypatch.setattr(subprocess, "run",
+                        lambda *a, **k: (calls.append(a), types.SimpleNamespace(returncode=3))[1])
+    monkeypatch.setattr(R.sys, "argv", ["htr_case_run.py", "--shard", "2/4", "--claim"])
+    R.supervise(_args(), case, out)
+    assert len(calls) > 1
