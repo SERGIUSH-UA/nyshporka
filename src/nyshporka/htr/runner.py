@@ -2920,6 +2920,11 @@ def run_queue(args: argparse.Namespace) -> int:
         pos += 1
         if entry.get("end"):
             break
+        if not Path(str(entry["case_dir"])).is_dir():
+            # Справу вже закрито й прибрано (цей процес — піднятий заново і йде
+            # чергою з початку): кадрів немає, і читати тут нічого.
+            emit(args.progress_json, "case_done", qi=int(entry.get("index") or pos), rc=0)
+            continue
         a = copy.copy(args)
         a.queue = ""
         a.case_dir = str(entry["case_dir"])
