@@ -228,9 +228,9 @@ def make_sheets(name: str, pages: list[str], out: Path, *, ws: Workspace | None 
             rep.warnings.append(f"{page}: у меті нарізки немає рамок — аркуша не буде")
             continue
         try:
-            from nyshporka.train.cut import image_key
+            from nyshporka.train.cut import page_image
 
-            im = image_of(spec.source_run, image_key(cut_meta.get(page) or {}, page))
+            im = page_image(spec.source_run, cut_meta.get(page) or {}, page, image_of)
         except Exception as exc:
             rep.warnings.append(f"{page}: зображення: {exc}")
             continue

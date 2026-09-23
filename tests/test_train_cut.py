@@ -92,6 +92,20 @@ def test_recut_appends_pages_and_refuses_another_run(space: W.Workspace) -> None
                    image_of=_images)
 
 
+def test_recut_refuses_runless_set_with_crops(space: W.Workspace) -> None:
+    """Перенесений набір (без прогону, кропи вже є) не дорізається з прогону:
+    записаний прогін перемкнув би зображення наявних сторінок на чужі."""
+    reg = S.registry(space)
+    spec = S.SetSpec(name="legacy")
+    reg.save(spec)
+    (reg.crops_of(spec) / "0001").mkdir(parents=True)
+    _page_image([]).save(reg.crops_of(spec) / "0001" / "line_000.png")
+    with pytest.raises(C.CutError, match="не з прогону"):
+        C.make_set("r1", "legacy", pages=["0001"], prefer_engine=False, ws=space,
+                   image_of=_images)
+    assert reg.load("legacy").source_run == ""
+
+
 def test_missing_geometry_and_unknown_pages_are_named(space: W.Workspace) -> None:
     with pytest.raises(C.CutError, match="не має сторінок"):
         C.make_set("r1", "x", pages=["0009"], prefer_engine=False, ws=space, image_of=_images)
@@ -150,3 +164,38 @@ def test_ops_cut_and_voices_round_trip(space: W.Workspace, monkeypatch: pytest.M
     assert not O.call("train.voices", {"name": "demo"}).ok
     env = O.call("train.sets", {"name": "demo"})
     assert env.data["sets"][0]["n_crops"] == 5
+
+
+# ── зображення сторінки набору без прогону ──────────────────────────────────
+def test_page_image_runless_opens_src_clockwise(tmp_path: Path) -> None:
+    """Набір, нарізаний з кадрів поза прогоном: кадр із `src`, кут за годинниковою.
+
+    Стара нарізка крутила кадр ПРОТИ годинникової (`Image.ROTATE_90` для 90);
+    у меті лабораторії той самий поворот записується як 270 за годинниковою.
+    Рамки лежать у координатах повернутого кадру, тож збіг мусить бути
+    побайтовий, а не «приблизно той самий розмір».
+    """
+    im = _page_image([(10, 40)])
+    ImageDraw.Draw(im).rectangle((0, 0, 30, 30), fill=(255, 0, 0))
+    src = tmp_path / "0001.png"
+    im.save(src)
+    got = C.page_image("", {"src": str(src), "orient": 270}, "0001",
+                       lambda *_: pytest.fail("без прогону image_of не кличеться"))
+    want = Image.open(src).convert("RGB").transpose(Image.Transpose.ROTATE_90)
+    assert got.size == want.size == (PAGE_H, PAGE_W)
+    assert got.tobytes() == want.tobytes()
+
+
+def test_page_image_prefers_run_and_falls_back_to_image_of(tmp_path: Path) -> None:
+    src = tmp_path / "0001.png"
+    _page_image([]).save(src)
+    calls: list[tuple[str, str]] = []
+
+    def image_of(run: str, key: str) -> Image.Image:
+        calls.append((run, key))
+        return Image.new("RGB", (5, 5))
+
+    C.page_image("r1", {"src": str(src), "key": "0001.JPG"}, "0001", image_of)
+    C.page_image("", {"key": "0002.JPG"}, "0002", image_of)            # src немає
+    C.page_image("", {"src": str(tmp_path / "nope.png")}, "0003", image_of)
+    assert calls == [("r1", "0001.JPG"), ("", "0002.JPG"), ("", "0003")]

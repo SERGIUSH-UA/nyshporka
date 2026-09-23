@@ -123,9 +123,9 @@ def ctx(name: str, page: str, line: int, *, pad: int = 200, k: float = 1.0,
         from nyshporka.htr import view as V
 
         image_of = V._page_image
-    from nyshporka.train.cut import image_key
+    from nyshporka.train.cut import page_image
 
-    im = image_of(spec.source_run, image_key(cut_page, page)).convert("L")
+    im = page_image(spec.source_run, cut_page, page, image_of).convert("L")
     x0, y0, x1, y1 = (int(v) for v in boxes[line][:4])
     crop = im.crop((max(0, x0 - pad), max(0, y0 - pad // 2),
                     min(im.width, x1 + pad), min(im.height, y1 + pad // 2)))

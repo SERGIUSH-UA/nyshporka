@@ -408,9 +408,9 @@ class Store:
         size = pg_meta.get("size")
         if not cache.is_file():
             from nyshporka.htr import view as V
-            from nyshporka.train.cut import image_key
+            from nyshporka.train.cut import page_image
 
-            im = V._page_image(self.spec.source_run, image_key(pg_meta, page)).convert("RGB")
+            im = page_image(self.spec.source_run, pg_meta, page, V._page_image).convert("RGB")
             size = size or [im.width, im.height]
             if max(im.size) > max_px:
                 k = max_px / max(im.size)

@@ -123,6 +123,24 @@ def image_key(cut_page: dict[str, Any], page: str) -> str:
     return str((cut_page or {}).get("key") or page)
 
 
+def page_image(run: str, cut_page: dict[str, Any], page: str, image_of: Any) -> Any:
+    """Зображення сторінки набору — в тій системі координат, де лежать рамки.
+
+    Набір, нарізаний з прогону, бере сторінку через прогін (`image_of`). Набір
+    без прогону — нарізаний прямо з кадрів іншим інструментом і перенесений у
+    лабораторію — має в меті нарізки лише файл кадру `src` і кут `orient`
+    (за годинниковою, як у мети прогону); без цієї гілки аркуші й контекст
+    для такого набору не будуються зовсім.
+    """
+    cut_page = cut_page or {}
+    src = str(cut_page.get("src") or "")
+    if not run and src and Path(src).is_file():
+        from nyshporka.htr.view import _open_rotated
+
+        return _open_rotated(Path(src), int(cut_page.get("orient") or 0))
+    return image_of(run, image_key(cut_page, page))
+
+
 def pick_pages(meta: dict[str, Any], n: int, *, skip_first: int = SKIP_FIRST) -> list[str]:
     """Автовідбір сторінок під розмітку — за числом символів у прогоні.
 
@@ -285,6 +303,12 @@ def make_set(run: str, name: str, *, pages: list[str] | None = None, pick: int =
         if spec.source_run and spec.source_run != run:
             raise CutError(f"набір «{name}» уже нарізаний з прогону "
                            f"«{spec.source_run}» — інший прогін дасть інші індекси")
+        # Набір без прогону (перенесений, нарізаний прямо з кадрів) бере
+        # зображення з `src` своєї мети; записаний тут прогін перемкнув би на
+        # нього і вже наявні сторінки — рамки лягли б на чужий кадр.
+        if not spec.source_run and reg.crop_pages(spec):
+            raise CutError(f"набір «{name}» нарізаний не з прогону — дорізати в нього "
+                           f"з прогону «{run}» не можна; заведіть окремий набір")
     else:
         spec = S.SetSpec(name=name, title=title, case=case or str(meta.get("case_key") or ""),
                          script=str(meta.get("script") or "cyrillic"),
