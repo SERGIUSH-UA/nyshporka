@@ -480,6 +480,30 @@ def cmd_opys(key: str = typer.Argument(..., help="DAHMO/230/43 або DAHMO/230/
         console.print("  [warn]сканів онлайн немає — замовлення в архіві[/warn]")
     console.print(f"  на диску: {row.get('on_disk') or '[muted]—[/muted]'}")
 
+    # 🤝 Третій крок тієї самої думки: де взяти → чи маю → чи вже прочитано.
+    # 🔴 «Не знаємо» й «немає» тут мусять звучати по-різному. Сказати «немає»
+    # там, де зрізу не брали, означає послати людину купувати годину прогону на
+    # текст, який лежить готовий, — а це рівно те, проти чого Супряга й є.
+    from nyshporka.share import pool as _pool
+
+    _pk = _pool.quad_key(repo, fond, str(opys), f"{spr}{letter}")
+    _cell = _pool.by_key(_pk) if _pk else None
+    _pm = _pool.meta()
+    if _pm is None:
+        console.print("  у Супрязі: [muted]не знаємо — зрізу пулу не брали[/muted]")
+    else:
+        _koly = f"[muted](зріз {str(_pm.get('taken_at') or '')[:10]})[/muted]"
+        if _cell is None:
+            console.print(f"  у Супрязі: [muted]немає[/muted]  {_koly}")
+        else:
+            _chastyny = [f"{_cell.n} " + ("внесок" if _cell.n == 1 else "внески")]
+            if _cell.pages:
+                _chastyny.append(f"{_cell.pages} стор.")
+            _chastyny.append("геометрія є" if _cell.geom else "без геометрії")
+            if _cell.mine:
+                _chastyny.append("один із них ваш")
+            console.print(f"  [ok]у Супрязі:[/ok] {' · '.join(_chastyny)}  {_koly}")
+
     # 🔴 розбіжності джерел — тут, а не «десь у TSV». Ця команда названа першим
     # кроком перед будь-якою роботою, тож саме вона мусить сказати, що голоси
     # про справу не сходяться, і що з цього приводу вже вирішила людина.
@@ -550,6 +574,12 @@ def cmd_fond(
     rows = _fonds.load_rows(fond_id)
     live = _fonds.live_on_disk(repo.upper(), fond)
     frames_live = _fonds.live_frames(repo.upper(), fond)
+    # 🤝 Третій шар: що з цього вже прочитано в Супрязі. Читається з локального
+    # зрізу — жодного запиту в мережу на малюванні таблиці. `None` тут означає
+    # «зрізу не брали», і колонка мусить сказати саме це, а не «немає».
+    from nyshporka.share import pool as _pool
+
+    pool_map = _pool.by_fond(repo.upper(), fond)
     sel = _fonds.filter_rows(rows, opys=opys or "", q=q or "", surname=surname or "",
                              year=year or "", uezd=uezd or "", scan=scan,
                              on_disk=on_disk, todo=todo, fs=fs, live=live,
@@ -562,12 +592,26 @@ def cmd_fond(
                                ensure_ascii=False, indent=1))
         return
 
+    # 🔴 Вік зрізу — у заголовку, поруч із числами. «Є / немає в пулі» це
+    # твердження НА ДАТУ: показане без неї, воно через півроку бреше в обидва
+    # боки — справу могли додати або внесок могли зняти скаргою.
+    pm = _pool.meta()
+    if pm is None:
+        pool_pidpys = " · [muted]пул: зрізу немає[/muted]"
+    else:
+        vik = _pool.age_days()
+        koly = str(pm.get("taken_at") or "")[:10]
+        dniv = f", {vik:.0f} дн." if vik is not None else ""
+        style = "warn" if _pool.stale() else "muted"
+        pool_pidpys = f" · [{style}]пул: зріз {koly}{dniv}[/{style}]"
     t = Table(header_style="bold",
-              title=f"{repo.upper()} ф.{fond} — реєстр опису ({len(sel)} з {len(rows)})")
+              title=f"{repo.upper()} ф.{fond} — реєстр опису "
+                    f"({len(sel)} з {len(rows)}){pool_pidpys}")
     cols: tuple[tuple[str, JustifyMethod], ...] = (
         ("шифра", "left"), ("назва", "left"), ("роки", "left"),
         ("арк.", "right"), ("скан", "left"), ("FS", "left"),
-        ("село / літери", "left"), ("тип", "left"), ("диск", "left"), ("№", "left"))
+        ("село / літери", "left"), ("тип", "left"), ("диск", "left"),
+        ("пул", "left"), ("№", "left"))
     for col, just in cols:
         t.add_column(col, justify=just)
     for r in sel[:limit]:
@@ -594,7 +638,7 @@ def cmd_fond(
             title = (r.get("surnames") or title)[:52]
         # диск — живий стан бібліотеки, не колонка TSV: та рахувалась на момент
         # останнього merge і після завантаження справи хибний
-        st = _fonds.row_status(r, live, {}, frames_live)
+        st = _fonds.row_status(r, live, {}, frames_live, pool=pool_map)
         disk = "✓" if st["on_disk_live"] else ("✓?" if r.get("on_disk") else "")
         if st["disk_mismatch"]:
             disk += " [warn]⚠[/warn]"
@@ -621,6 +665,19 @@ def cmd_fond(
             cover_mark = f"👁 {cover_mark}"
         elif r.get("cat_place"):
             cover_mark = f"[muted]{str(r.get('cat_place'))[:26]}[/muted]"
+        # 🤝 пул: «·» це «не питали», порожньо — «немає». Різниця носиться
+        # ЗНАКОМ, а не кольором: за NO_COLOR і в логах колір зникає, а сказати
+        # треба однаково. ◆ — геометрія, як у `share list`; * — мій внесок.
+        pool_mark = "[muted]·[/muted]"
+        if st["pool"] is not None:
+            pool_mark = ""
+            if st["pool"] != "none":
+                n = st["pool_n"] or 1
+                pool_mark = "[ok]🤝" + (f"{n}" if n > 1 else "") + "[/ok]"
+                if st["pool"] == "text+geom":
+                    pool_mark += "[muted]◆[/muted]"
+                if st["pool_mine"]:
+                    pool_mark += "[bold]*[/bold]"
         t.add_row(r.get("shifra") or f"{fond}-{r.get('opys')}-{r.get('spr')}",
                   title,
                   "–".join(x for x in (r.get("year_from"), r.get("year_to")) if x)[:9],
@@ -630,6 +687,7 @@ def cmd_fond(
                   cover_mark,
                   str(r.get("record_types") or ""),
                   disk,
+                  pool_mark,
                   "[err]~[/err]" if r.get("num_src") == "interp" else "")
     console.print(t)
     if len(sel) > limit:
@@ -641,6 +699,8 @@ def cmd_fond(
                   "збірного тому), сірим — з друкованого каталогу архіву · "
                   "тип: Н народження · Ш шлюб · Р розлучення · С смерть · "
                   "Д дошлюбні · СП сповідальні · "
+                  "пул: 🤝 текст у Супрязі (число — скільки прогонів), "
+                  "◆ з геометрією рядків, * ваш внесок, «·» зрізу не брали · "
                   "№ «~» = номер справи відновлено, звіряти оком[/muted]")
 
 

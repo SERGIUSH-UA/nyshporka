@@ -458,6 +458,45 @@ def stats_cmd(
     _notes(env)
 
 
+@app.command("sync")
+def sync_cmd(
+    fond: str = typer.Option("", "--fond", help="лише цей фонд (швидше)"),
+    repo: str = typer.Option("", "--repo", help="лише цей архів"),
+    base: str = typer.Option("", "--base", help="інша адреса пулу"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
+) -> None:
+    """Зняти зріз пулу, щоб реєстр опису показував, що вже прочитано.
+
+    🔴 Це ЄДИНЕ місце, яким зріз потрапляє на диск, і єдине, що ходить у мережу
+    заради колонки «пул». Самі таблиці (`cases fond`, `cases opys`) читають уже
+    знятий зріз і не роблять жодного запиту — на цьому стоїть обіцянка, що
+    Нишпорка не має фонової мережевої активності.
+
+    Зріз не оновлюється сам і не протухає: він лежить, доки не знімеш новий, а
+    його вік показується всюди, де показується «є / немає в пулі».
+    """
+    from nyshporka.share import pool as P
+
+    try:
+        got = P.sync(base, repo=repo, fond=fond)
+    except RuntimeError as exc:
+        console.print(f"[err]зріз не знято:[/err] {exc}")
+        console.print("[muted]наявний зріз лишився недоторканим[/muted]")
+        raise typer.Exit(code=1) from exc
+    if as_json:
+        import json as _json
+
+        typer.echo(_json.dumps(got, ensure_ascii=False, indent=1))
+        return
+    console.print(f"[ok]зріз пулу знято:[/ok] книг [bold]{got['of']}[/bold] "
+                  f"· {got['scope']}")
+    if got["via"] == "search":
+        # Повільний шлях має називатись: інакше він виглядає як поломка.
+        console.print("[muted]через пошук — сервер ще не знає /v1/keys[/muted]")
+    console.print("[muted]колонка «пул» у `nysh cases fond` тепер має що "
+                  "показувати[/muted]")
+
+
 @app.command("row")
 def row_cmd(
     path: str = typer.Argument(..., help="зібраний пакет"),

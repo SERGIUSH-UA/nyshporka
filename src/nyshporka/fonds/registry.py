@@ -478,8 +478,20 @@ def expected_frames(row: dict[str, Any]) -> int:
 def row_status(row: dict[str, Any],
                live: dict[tuple[str, str, str], str],
                conflicts: dict[tuple[str, str], int],
-               frames: dict[tuple[str, str, str], int] | None = None) -> dict[str, Any]:
-    """`disk_state`, `flags`, `on_disk_live`, `disk_mismatch`, `conflicts`."""
+               frames: dict[tuple[str, str, str], int] | None = None,
+               *, pool: dict[tuple[str, str, str], Any] | None = None) -> dict[str, Any]:
+    """`disk_state`, `flags`, `on_disk_live`, `disk_mismatch`, `conflicts`, `pool*`.
+
+    🔴 `pool` приходить аргументом, а не окремою функцією поруч, і це вибір
+    форми ПОМИЛКИ. Хто забуде передати його — дістане `pool: None`, тобто
+    видиме на екрані «не знаємо». Хто забув би покликати окрему функцію —
+    дістав би порожньо, тобто мовчазне «в пулі немає», і людина пішла б
+    платити за прогін готового тексту.
+
+    Прецедент тут-таки: `frames` колись додали четвертим аргументом із `None`,
+    і в `ops_catalog.fond_rows` досі стоїть коментар про те, як його забули
+    передати — і `partial` не виставлявся ніколи.
+    """
     key = (row.get("opys") or "", row.get("spr_int") or "",
            row.get("spr_letter") or "")
     on_live = live.get(key, "")
@@ -522,6 +534,26 @@ def row_status(row: dict[str, Any],
     else:
         state = "order"
 
+    # 🔴 Третій шар: чи цей текст уже прочитано в Супрязі. `pool is None`
+    # означає «зрізу не брали», і це НЕ те саме, що «в пулі немає»: перше
+    # правдиве на кожній машині, доки зріз не знято, а друге посилає людину
+    # платити за прогін готового тексту. Той самий припис, що `layers.summary()`
+    # тримає для реєстру справ: `None` ≠ `0`.
+    #
+    # ⚠ Пул свідомо НЕ входить ні в `disk_state`, ні у `flags`. `disk_state`
+    # відповідає «чи можна взяти й звідки», пул — «що з нею вже зробили»; це
+    # ортогональні речі, і п'ятим значенням того енуму пул зробив би його
+    # брехливим. `flags` же означає «чому цьому рядку не варто вірити», а
+    # наявність тексту — не пересторога.
+    # 🪤 Ключ пулу — з ЛАТИНСЬКОЮ літерою індексу. Реєстр опису зберігає її
+    # так, як надруковано в описі (кирилицею: `84а`), а пул зводить до канону
+    # сховища сторінок (`84a`) — і без цього переводу колонка мовчки порожня
+    # саме на літерних справах. Виміряно на ДАХмО 315-1-84а: у пулі текст є,
+    # у таблиці не показувався.
+    from nyshporka.library import _LETTER_TO_LAT
+
+    pool_key = (key[0], key[1], _LETTER_TO_LAT.get(key[2], key[2]))
+    cell = None if pool is None else pool.get(pool_key)
     return {
         "on_disk_live": on_live,
         # розходження лише там, де схема взагалі знає про `on_disk`
@@ -529,7 +561,18 @@ def row_status(row: dict[str, Any],
         "disk_state": state,
         "flags": flags,
         "conflicts": conflicts.get((row.get("opys") or "", row.get("spr") or ""), 0),
+        "pool": None if pool is None else _pool_state(cell),
+        "pool_n": None if pool is None else (cell.n if cell else 0),
+        "pool_pages": None if pool is None else (cell.pages if cell else 0),
+        "pool_mine": None if (pool is None or cell is None) else cell.mine,
     }
+
+
+def _pool_state(cell: Any) -> str:
+    """`none | text | text+geom` для однієї клітинки зрізу."""
+    from nyshporka.share.pool import state_of
+
+    return state_of(cell)
 
 
 # ── фільтр (один на CLI і на UI) ──────────────────────────────────────────────
