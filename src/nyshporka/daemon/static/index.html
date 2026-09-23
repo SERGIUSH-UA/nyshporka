@@ -6,7 +6,8 @@
 <meta name="color-scheme" content="dark">
 <meta name="theme-color" content="#111">
 <title>Нишпорка</title>
-<link rel="icon" href="/favicon.ico" type="image/svg+xml">
+<link rel="icon" href="/ui/img/favicon-32.png" type="image/png" sizes="32x32">
+<link rel="apple-touch-icon" href="/ui/img/apple-touch-icon.png">
 <!--
   🔴 Тема ставиться ДО завантаження CSS. Модуль `theme.js` виконується вже після
   парсингу <head>, тобто після того, як браузер намалював перший кадр — при
@@ -51,15 +52,13 @@
 <div id="app">
 <header>
   <!--
-    🐾 Знак — лапка з лупою в подушечці. Малюється `currentColor`, тож обидві
-    теми обходяться одним файлом. Слово поруч лишається ТЕКСТОМ, а не частиною
-    картинки: у SVG воно вимагало б власного шрифту, а той в архіві без
-    інтернету не приїхав би.
+    🦦 Логотип порталу: маскот і назва. Файл лежить у пакеті (`/ui/img`), тож
+    в архіві без інтернету він на місці. Пульсує, поки в черзі є робота
+    (`nav.js`), — це стан ПРОЦЕСУ, а не результату.
   -->
   <a class="brand logo" href="https://github.com/SERGIUSH-UA/nyshporka"
      target="_blank" rel="noopener" title="Нишпорка на GitHub">
-    <span class="mark" aria-hidden="true"></span>
-    Нишпорка
+    <img class="logo-img" src="/ui/img/logo.webp" alt="Нишпорка" width="132" height="42">
   </a>
   <!--
     🔴 Кнопки СТАВИТЬ JS із `/api/sections`, а не розмітка. Причина не в

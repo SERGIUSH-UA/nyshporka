@@ -12,24 +12,35 @@
    конвеєра. Лишилось рівно те, чого немає в тієї морди: знак у шапці з його
    станом «шукає», картки першого запуску, смуга завдання, таблиці видачі. */
 
-/* ── 🐾 Знак у шапці ────────────────────────────────────────────────────────
-   Маскою, а не картинкою: SVG усередині `<img>` ізольований і `currentColor` у
-   ньому не працює, тож знак лишався б чорним в обох темах. Маска ж фарбується
-   токеном — один файл на світлу й темну. */
-.brand { display: flex; align-items: center; gap: .45rem; }
+/* ── 🦦 Логотип у шапці ─────────────────────────────────────────────────────
+   Картинка порталу (маскот + назва) з пакета; розмір — у base.css, бо той самий
+   логотип стоїть і в консолі. */
+.brand { display: flex; align-items: center; }
 .brand.logo { color: inherit; text-decoration: none; }
-.brand.logo:hover { color: var(--accent); }
-.mark {
-  width: 1.4em; height: 1.4em; flex: none; background: var(--accent);
-  -webkit-mask: url(/brand/mark.svg) center / contain no-repeat;
-  mask: url(/brand/mark.svg) center / contain no-repeat;
+/* Стан «шукає» — поки в черзі є робота. 🔴 Логотип показує ПРОЦЕС, а не
+   висновок: станів «знайшов» і «не знайшов» у нього немає й бути не може —
+   про результат говорить текст із знаменником, а не картинка. */
+.logo-img.busy { animation: paw-search 1.7s ease-in-out infinite; }
+@keyframes paw-search { 0%, 100% { opacity: 1; } 50% { opacity: .55; } }
+@media (prefers-reduced-motion: reduce) { .logo-img.busy { animation: none; } }
+
+/* ── 🦦 Маскот на екранах: лише там, де йде процес ─────────────────────────
+   Поряд із текстом, а не замість нього: пояснення читається й без картинки. */
+.maskot { display: block; height: auto; flex: none; }
+.vitannia { display: flex; align-items: center; gap: 1.2rem; margin: 0 0 1.2rem; }
+.vitannia h2 { margin-bottom: .3rem; }
+.vitannia p { margin: 0; color: var(--fg-2); }
+.dash-top { display: flex; align-items: flex-start; gap: 1rem; }
+.dash-top > div { flex: 1 1 auto; min-width: 0; }
+/* Порожній стан, що виглядає як крок, а не як поломка: картинка, текст, дія. */
+.porozhno { display: flex; flex-direction: column; align-items: center; gap: .5rem;
+  text-align: center; padding: 1.5rem 1rem; }
+.porozhno p { margin: 0; max-width: 34rem; color: var(--fg-2); }
+.search-idle { display: flex; justify-content: center; padding: 1.5rem 0 .5rem; }
+@media (max-width: 700px) {
+  .dash-top .maskot { display: none; }
+  .vitannia { flex-direction: column; text-align: center; }
 }
-/* Стан «шукає» — поки в черзі є робота. 🔴 Знак показує ПРОЦЕС, а не висновок:
-   станів «знайшов» і «не знайшов» у нього немає й бути не може — про результат
-   говорить текст із знаменником, а не картинка. */
-.mark.busy { animation: paw-search 1.7s ease-in-out infinite; }
-@keyframes paw-search { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
-@media (prefers-reduced-motion: reduce) { .mark.busy { animation: none; } }
 
 /* Лічильник роботи в черзі — сидить на кнопці «Роботи».
    ⚠ Обводка кольором тла, а не самий від'ємний відступ: значок стоїть ПОЗА

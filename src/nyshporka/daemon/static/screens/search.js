@@ -3,7 +3,7 @@
 import { t, LANG } from '../core/strings.js';
 import { TOKEN, callOp, SEQ, FINAL_STATES } from '../core/net.js';
 import { esc, el, setView, busy, failure, boxError, busyForm,
-  renderWarnings, renderCoverage, curGen, alive } from '../core/view.js';
+  renderWarnings, renderCoverage, curGen, alive, maskot } from '../core/view.js';
 import { SCREENS, ACTIONS } from '../core/registry.js';
 import { SECTIONS, NAV_LABEL, show, renderNav,
   refreshJobs, onJob, jobChip } from '../core/nav.js';
@@ -35,7 +35,7 @@ SCREENS.search = async () => {
       <button type="submit">${t('search.run')}</button>
     </form>
     <div id="prof-hint"></div>
-    <div id="hits"></div>
+    <div id="hits"><div class="search-idle">${maskot('lupa', 130)}</div></div>
     <div id="search-index"></div>`);
   await profileHint();
   if (!only) await searchIndexState();

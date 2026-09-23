@@ -178,7 +178,9 @@ globalThis.fetch = async (url) => {
     // 🔴 Форма хіта тут дослівно та, яку віддає `grep_records()`, а не зручна
     // для приймача вигадка: саме розбіжність між нею і формою decode-пошуку
     // лишала режим «в учасниках записів» без контексту й без кнопок.
-    'search.run': { total: 3, coverage: { cases: 2, thresh: 80, stems: ['вишневец'] },
+    'search.run': globalThis.__NO_HITS
+      ? { total: 0, coverage: { cases: 2, thresh: 80, stems: ['вишневец'] }, hits: [] }
+      : { total: 3, coverage: { cases: 2, thresh: 80, stems: ['вишневец'] },
       hits: [
         { key: 'A/1/2', shifra: 'А 1-1-2', rid: 'r1', rtype: 'birth',
           date: '1858-03-04', scans: ['0030.JPG'], role: 'father',
@@ -422,6 +424,7 @@ await new Promise((r) => setTimeout(r, 40));
 out.recHits = document.getElementById('hits').innerHTML || '';
 globalThis.__FORM = null;
 
+
 // ── «Рід»: форма є в обох станах ───────────────────────────────────────────
 // 🔴 Доти профіль можна було завести лише командою в терміналі, а вікно про
 // нього тільки попереджало. Приймач тут — саме наявність ФОРМИ у стані «профілю
@@ -467,6 +470,25 @@ out.emptyDoors = empty.includes('data-act="home.scans"');
 out.emptyNoTiles = !empty.includes('class="tile"');
 globalThis.__EMPTY_SPACE = false;
 globalThis.__NO_PROFILE = false;
+
+// ── маскот: процес так, висновок ні ────────────────────────────────────────
+// До запиту маскот із лупою стоїть на місці видачі; перша ж видача його
+// заміняє — і нульова теж: картинка поряд із «нічого немає» читалась би як
+// вердикт.
+await SCREENS.search();
+await new Promise((r) => setTimeout(r, 30));
+// Заглушка не розбирає розмітку на вузли, тож маскот видно в `#view`.
+out.searchIdleMaskot = (document.getElementById('view').innerHTML || '')
+  .includes('id="hits"><div class="search-idle"><img class="maskot');
+globalThis.__NO_HITS = true;
+globalThis.__FORM = { where: 'pages', q: 'Вишневецький', case: '' };
+await ACTIONS['search.run']({ preventDefault() {}, target: document.createElement('form') });
+await new Promise((r) => setTimeout(r, 40));
+const zero = document.getElementById('hits').innerHTML || '';
+out.zeroHitsDrawn = zero.includes('<table>');
+out.zeroHitsMaskot = zero.includes('maskot');
+globalThis.__NO_HITS = false;
+globalThis.__FORM = null;
 
 console.log('@@' + JSON.stringify(out));
 // 🔴 Вихід явний. Застосунок навмисно тримає вічний цикл спостереження за
@@ -621,6 +643,19 @@ def test_a_link_from_the_sheet_opens_the_page_whole(probe) -> None:
     assert seed.get("line") == 1, seed
     assert str(probe.get("linkHash")).lstrip("#") == "view", probe.get("linkHash")
     assert probe.get("linkReader") == 1, "посилання відкрило гортач, але не сторінку цілком"
+
+
+def test_the_mascot_waits_for_the_query_and_never_sits_on_results(probe) -> None:
+    """🔴 Маскот описує процес, а не висновок пошуку.
+
+    До запиту він стоїть на місці видачі; після запиту його немає, і на
+    нульовій видачі теж: картинка поряд із «нічого немає» читається як
+    вердикт, а хибне «немає» закриває напрям пошуку назавжди.
+    """
+    assert probe.get("searchIdleMaskot") is True, "до запиту маскота на пошуку немає"
+    assert probe.get("zeroHitsDrawn") is True, "нульова видача не намалювалась"
+    assert probe.get("zeroHitsMaskot") is False, "маскот сидить на нульовій видачі"
+    assert "maskot" not in (probe.get("recHits") or ""), "маскот сидить на видачі"
 
 
 def test_the_reader_draws_the_line_boxes_on_the_scan(probe) -> None:

@@ -182,5 +182,30 @@ function busyForm(form) {
   return () => btns.forEach((b) => { b.disabled = false; });
 }
 
+/**
+ * 🦦 Маскот — пози й розміри, як на порталі.
+ *
+ * 🔴 Пози описують ПРОЦЕС, а не ВИСНОВОК: вітає, шукає, чекає, що дадуть. Пози
+ * «нічого не знайшов» тут немає й бути не може — картинка, яка каже «немає»,
+ * бреше саме там, де хибне «немає» закриває напрям пошуку назавжди. Тому
+ * маскот не стоїть на видачі пошуку взагалі, і на нульовій теж.
+ *
+ * Перелік закритий: невідома поза не малюється, а не падає на биту картинку.
+ * Розміри — справжні пропорції файлів, щоб верстка не стрибала, поки картинка
+ * їде.
+ */
+const MASKOT = {
+  vitaie: [420, 508], lupa: [560, 647], pratsiuie: [420, 394],
+  mapa: [420, 445], kliuch: [420, 420], 'z-doslidnytseiu': [480, 480],
+};
+
+function maskot(pose, width = 150, cls = '') {
+  const wh = MASKOT[pose];
+  if (!wh) return '';
+  const h = Math.round((width * wh[1]) / wh[0]);
+  return `<img class="maskot${cls ? ` ${cls}` : ''}" src="/ui/img/maskot-${pose}.webp"`
+    + ` alt="" width="${width}" height="${h}" loading="lazy" decoding="async">`;
+}
+
 export { esc, safeHref, el, renderWarnings, renderCoverage, setView, busy,
-  failure, boxError, busyForm, alive };
+  failure, boxError, busyForm, alive, maskot, MASKOT };

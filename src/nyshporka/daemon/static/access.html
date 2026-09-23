@@ -6,7 +6,8 @@
 <meta name="color-scheme" content="dark light">
 <meta name="referrer" content="no-referrer">
 <title>Нишпорка — допуск</title>
-<link rel="icon" href="/favicon.ico" type="image/svg+xml">
+<link rel="icon" href="/ui/img/favicon-32.png" type="image/png" sizes="32x32">
+<link rel="apple-touch-icon" href="/ui/img/apple-touch-icon.png">
 <!--
   Сторінка допуску мережевого пристрою (`nysh serve --host`). Віддається
   воротами замість консолі, доки в пристрою немає cookie допуску, тож вантажить
@@ -22,6 +23,7 @@
 </head>
 <body class="access">
 <main class="access-card">
+  <img class="access-maskot" src="/ui/img/maskot-kliuch.webp" alt="" width="132" height="132">
   <h1 data-i18n="access.title">Допуск цього пристрою</h1>
   <p class="muted" data-i18n="access.lead">Застосунок відкрито в мережі, і пускає він лише пристрої з допуском.
     Відкрийте посилання, яке надрукував nysh serve, або введіть ключ доступу.</p>

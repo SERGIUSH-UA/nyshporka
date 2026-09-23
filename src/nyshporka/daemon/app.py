@@ -100,9 +100,12 @@ PUBLIC_PHRASE = "відкрити всім"
 #: сторінка допуску й рівно те, що вона вантажить.
 _GATE_OPEN = frozenset({
     "/static/access.js", "/static/access.css", "/static/core/strings.js",
-    "/ui/tokens.css", "/ui/base.css", "/favicon.ico",
+    "/ui/fonts.css", "/ui/tokens.css", "/ui/base.css", "/favicon.ico",
+    "/ui/img/logo.webp", "/ui/img/maskot-kliuch.webp",
+    "/ui/img/favicon-32.png", "/ui/img/apple-touch-icon.png",
 })
-_GATE_OPEN_PREFIXES = ("/brand/",)
+#: Шрифти — префіксом: файлів вісім, і всі вони публічні (OFL).
+_GATE_OPEN_PREFIXES = ("/brand/", "/ui/fonts/")
 
 #: Чи поточний запит прийшов мережевим з'єднанням. Ставлять ворота допуску;
 #: читають перевірка імені й `call_op`. Контекстна змінна, а не параметр

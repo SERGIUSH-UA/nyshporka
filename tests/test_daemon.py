@@ -404,8 +404,14 @@ def test_network_device_without_access_sees_only_the_gate(ws: Workspace) -> None
         assert lan.get(path).status_code == 401, path
     assert lan.post("/api/op/workspace.info", json={}).status_code == 401
     for path in ("/static/access.js", "/static/access.css", "/static/core/strings.js",
-                 "/ui/tokens.css", "/ui/base.css", "/favicon.ico"):
+                 "/ui/tokens.css", "/ui/base.css", "/favicon.ico",
+                 "/ui/fonts.css", "/ui/fonts/inter-cyrillic.woff2",
+                 "/ui/img/logo.webp", "/ui/img/maskot-kliuch.webp",
+                 "/ui/img/favicon-32.png"):
         assert lan.get(path).status_code == 200, path
+    # Решта картинок — лише з допуском: ворота відкривають рівно те, що
+    # вантажить сторінка допуску.
+    assert lan.get("/ui/img/maskot-lupa.webp").status_code == 401
 
 
 def test_websocket_from_a_network_device_is_closed(ws: Workspace) -> None:

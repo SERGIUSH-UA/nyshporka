@@ -28,10 +28,11 @@ import mimetypes
 from functools import lru_cache
 from pathlib import Path
 
-# Тип шрифтів для роздачі статики. Реєстр типів Windows `.woff2` не знає, і
+# Типи для роздачі статики. Реєстр типів Windows `.woff2` (і не скрізь `.webp`) не знає, і
 # без цього рядка файли йшли як `application/octet-stream`. Рядок стоїть тут,
 # бо цей модуль імпортують обидві морди, що монтують `/ui`.
 mimetypes.add_type("font/woff2", ".woff2")
+mimetypes.add_type("image/webp", ".webp")
 
 ROOT = Path(__file__).resolve().parent
 STATIC = ROOT / "static"

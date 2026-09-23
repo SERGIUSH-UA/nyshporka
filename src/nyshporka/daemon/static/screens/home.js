@@ -19,7 +19,7 @@
 import { t, LANG } from '../core/strings.js';
 import { TOKEN, callOp, SEQ } from '../core/net.js';
 import { esc, el, setView, busy, failure, boxError, busyForm,
-  renderWarnings, renderCoverage, curGen, alive } from '../core/view.js';
+  renderWarnings, renderCoverage, curGen, alive, maskot } from '../core/view.js';
 import { SCREENS, ACTIONS, screenOfOp } from '../core/registry.js';
 import { SECTIONS, NAV_LABEL, show, renderNav, screenOn,
   refreshJobs } from '../core/nav.js';
@@ -93,7 +93,10 @@ SCREENS.home = async () => {
   // шифри. Саме ці двоє й означають «людина ще нічого не поклала».
   const empty = !reg.built || (!reg.cases && !reg.unfiled);
   if (empty) {
-    setView(`<h2>${t('home.title')}</h2>
+    // Порожній простір — перша зустріч, тож маскот вітає. Це стан ПРОЦЕСУ
+    // («ще нічого не поклали»), а не висновок про архів.
+    setView(`<div class="vitannia">${maskot('vitaie', 140)}
+        <div><h2>${t('home.title')}</h2><p>${t('home.hello')}</p></div></div>
       ${renderWarnings(env)}
       ${doors()}
       ${onboarding(PULSE)}
@@ -157,8 +160,8 @@ function onboarding(d) {
 // ── дашборд ──────────────────────────────────────────────────────────────────
 function dashboard(env, d) {
   const ws = d.workspace || {};
-  return `<h2>${t('dash.title')}</h2>
-    ${headline(d, ws)}
+  return `<div class="dash-top"><div><h2>${t('dash.title')}</h2>
+    ${headline(d, ws)}</div>${maskot('lupa', 92)}</div>
     ${renderWarnings(env)}
     ${onboarding(d)}
     ${tiles(d)}

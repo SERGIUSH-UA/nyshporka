@@ -371,7 +371,7 @@ async function watchJobs() {
       if (badge) badge.textContent = running.length ? String(running.length) : '';
       // 🐾 Знак у шапці показує, що робота йде. Саме процес: результату він не
       // повідомляє — це справа тексту, який несе знаменник.
-      const paw = document.querySelector('.mark');
+      const paw = document.querySelector('.logo-img');
       if (paw) paw.classList.toggle('busy', running.length > 0);
     } catch {
       await new Promise((r) => setTimeout(r, 5000));

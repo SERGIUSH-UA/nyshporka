@@ -117,6 +117,9 @@ header { background: color-mix(in srgb, var(--s-0) 94%, transparent);
   display: flex; align-items: center; gap: 10px; }
 .logo { font-family: var(--font-serif); font-weight: 700; color: var(--fg); font-size: 18px; }
 .logo .paw { color: var(--accent); }
+/* Логотип порталу (маскот + назва, `/ui/img/logo.webp`): висота тримає шапку
+   в один рядок із вкладками. */
+.logo-img { display: block; height: 38px; width: auto; }
 .tabs { margin-left: auto; display: flex; gap: 2px; }
 .tabs button { position: relative; background: transparent; color: var(--fg-2); border: 0;
   border-radius: var(--r-s); padding: 6px 11px; font-size: 14px; font-weight: 500; cursor: pointer; }
@@ -451,6 +454,7 @@ button:not(:disabled):active { transform: scale(.97); }
      Після групування їх четверо (а не десять вкладок), тож скрол — уже лише запобіжник. */
   header { flex-wrap: wrap; gap: 8px 10px; padding: 8px 10px; }
   .logo { font-size: 14px; }
+  .logo-img { height: 32px; }
   .tabs { order: 3; flex-basis: 100%; margin-left: 0; width: 100%;
     overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch;
     scrollbar-width: none; }             /* тонка смуга-скрол без видимого скролбара */

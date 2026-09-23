@@ -7,7 +7,10 @@ body.access {
   width: 100%; max-width: 440px; padding: 24px; box-sizing: border-box;
   border: 1px solid var(--line-3); border-radius: var(--r-m); background: var(--s-2);
 }
-.access-card h1 { font-size: 18px; margin: 0 0 8px; }
+.access-card { text-align: center; }
+.access-card h1 { font-family: var(--font-serif); font-size: 22px; margin: 0 0 8px; }
+/* Маскот із ключем: сторінка — про допуск, і поза каже це раніше за текст. */
+.access-maskot { display: block; margin: -8px auto 4px; width: 132px; height: auto; }
 .access-card form { display: flex; gap: 8px; margin-top: 16px; }
 .access-card input { flex: 1 1 auto; min-width: 0; }
 #access-msg { margin-top: 12px; min-height: 1.4em; }

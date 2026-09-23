@@ -272,3 +272,27 @@ def test_every_icon_call_names_a_real_symbol() -> None:
     assert not missing, (
         f"ic() кличе символи, яких немає у спрайті: {missing}. "
         "Префікс `i-` додається всередині — передавайте голе ім'я")
+
+
+def test_every_brand_image_the_pages_name_is_in_the_package() -> None:
+    """🦦 Логотип, фавікон і пози маскота лежать у пакеті, а не приходять із мережі.
+
+    ⚠ Биту картинку помічають не одразу: у розробника вона в кеші, а зникає
+    вона в того, хто відкрив застосунок уперше — і в архіві без інтернету.
+    """
+    from pathlib import Path
+
+    root = Path(ui.static_dir()).parent.parent / "daemon" / "static"
+    img = Path(ui.static_dir()) / "img"
+    names: set[str] = set()
+    for p in [*root.glob("*.html"), *root.glob("*.css"), *root.rglob("*.js")]:
+        # Шаблон `maskot-${pose}` дає обрізане «maskot-» — пози звіряються нижче.
+        names |= {n for n in re.findall(r"/ui/img/([\w.-]+)", p.read_text(encoding="utf-8"))
+                  if not n.endswith("-")}
+    view = (root / "core" / "view.js").read_text(encoding="utf-8")
+    table = view[view.index("const MASKOT = {"):view.index("};", view.index("const MASKOT = {"))]
+    poses = re.findall(r"'?([\w-]+)'?: \[\d+, \d+\]", table)
+    assert poses, "таблицю поз маскота не знайдено"
+    names |= {f"maskot-{p}.webp" for p in poses}
+    missing = sorted(n for n in names if not (img / n).is_file())
+    assert not missing, f"сторінки називають картинки, яких у пакеті немає: {missing}"

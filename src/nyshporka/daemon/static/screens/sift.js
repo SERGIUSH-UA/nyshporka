@@ -3,7 +3,7 @@
 import { t, LANG } from '../core/strings.js';
 import { TOKEN, callOp, SEQ } from '../core/net.js';
 import { esc, el, setView, busy, failure, boxError, busyForm,
-  renderWarnings, renderCoverage, curGen, alive } from '../core/view.js';
+  renderWarnings, renderCoverage, curGen, alive, maskot } from '../core/view.js';
 import { SCREENS, ACTIONS, KEYS } from '../core/registry.js';
 import { SECTIONS, NAV_LABEL, show, renderNav,
   refreshJobs } from '../core/nav.js';
@@ -34,9 +34,11 @@ import { loadPageFull, readerLabels } from '../core/pageload.js';
 SCREENS.sift = async () => {
   const gen = curGen();
   if (!ST.sift.hits.length) {
+    // Нема чого розбирати — це «ще не передали», а не «нічого не знайшлось»:
+    // сюди потрапляють до пошуку. Тому маскот із мапою — куди йти далі.
     setView(`<h2>${ic('crop-check')} ${t('sift.title')}</h2>
-      <div class="warn">${t('sift.empty')}
-        <button data-act="nav" data-arg="search">${t('nav.search')}</button></div>`);
+      <div class="porozhno">${maskot('mapa', 130)}<p>${t('sift.empty')}</p>
+        <button type="submit" data-act="nav" data-arg="search">${t('nav.search')}</button></div>`);
     return;
   }
   siftDraw();

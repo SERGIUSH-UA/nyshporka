@@ -19,7 +19,7 @@
 import { t, LANG } from '../core/strings.js';
 import { callOp } from '../core/net.js';
 import { esc, el, setView, busy, failure, boxError, busyForm,
-  renderWarnings, curGen, alive } from '../core/view.js';
+  renderWarnings, curGen, alive, maskot } from '../core/view.js';
 import { SCREENS, ACTIONS } from '../core/registry.js';
 import { show } from '../core/nav.js';
 import { ic } from '/ui/icons.js';
@@ -61,7 +61,10 @@ function card(d) {
     return `<div class="warn err">${t('prof.broken')}<br>
       <span class="mono">${esc(d.broken)}</span></div>`;
   }
-  if (!d.present) return `<p class="muted">${t('prof.none')}</p>`;
+  if (!d.present) {
+    return `<div class="porozhno">${maskot('z-doslidnytseiu', 150)}
+      <p>${t('prof.none')}</p></div>`;
+  }
   const sp = d.spellings || [];
   const shown = ALL ? sp : sp.slice(0, SHOWN);
   return `<div class="dash-box">
