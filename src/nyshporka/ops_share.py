@@ -262,7 +262,7 @@ def share_publish(a: SharePublishArgs) -> Envelope:
     except UploadError as exc:
         return fail(str(exc))
     env = ok(got)
-    if got.get("duplicate"):
+    if got.get("duplicate") and not got.get("geometry_attached"):
         env.warn("duplicate", "цей текст уже в пулі — нічого не заливалось")
     for w in got.get("warnings") or []:
         if isinstance(w, dict):
