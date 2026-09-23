@@ -353,7 +353,9 @@ disallow_untyped_decorators = false
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q"
+# Повний пак — паралельно, файл цілком на одному воркері; вузол чи один файл
+# воркерів не стартує (хук у tests/conftest.py).
+addopts = "-q -n auto --dist loadfile"
 # Черга завдань асинхронна за побудовою (усі мутації під одним `asyncio.Lock`),
 # тож її тести — корутини. `auto` позбавляє потреби мітити кожну.
 asyncio_mode = "auto"
