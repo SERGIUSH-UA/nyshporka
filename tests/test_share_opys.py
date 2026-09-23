@@ -254,3 +254,15 @@ def test_seriia_ne_pakuietsia(monkeypatch: pytest.MonkeyPatch) -> None:
 
     with pytest.raises(PUB.PublishError, match="не розпізнано як одну справу"):
         PUB.resolve_runs("ДАВіО ф.792 оп.1 спр.25")
+
+
+@pytest.mark.parametrize("own, want", [
+    ("spr-2462 — рендер із PDF для HTR-черги (Dekanat Bialocerkowski, 1750–1750)",
+     "Dekanat Bialocerkowski"),
+    ("spr-3 — рендер із PDF для HTR-черги (Акти Радомисльського духовного суду, 1754–1756)",
+     "Акти Радомисльського духовного суду"),
+    ("spr-655 — рендер із PDF для HTR-черги", ""),
+])
+def test_nazva_z_duzhok_rendera(own: str, want: str) -> None:
+    """Паспорт рендера несе справжню назву в дужках — її й брати."""
+    assert opys.title(own, None) == want

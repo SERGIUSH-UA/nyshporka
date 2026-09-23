@@ -110,6 +110,19 @@ repositories:
     label: BNRM
     name: Biblioteca Naţională a Republicii Moldova
     country: MD
+  IRNBUV:
+    label: ІРНБУВ
+    name: Інститут рукопису Національної бібліотеки України імені В. І. Вернадського
+    country: UA
+    aliases: [ІР НБУВ, ІР_НБУВ, Інститут рукопису НБУВ]
+    sites:
+      irbis:
+        url: https://irbis-nbuv.gov.ua/cgi-bin/irbis_arch/cgiirbis_64.exe
+  IZMAIL:
+    label: ІА
+    name: КУ «Ізмаїльський архів»
+    country: UA
+    aliases: [Ізмаїльський архів, Измаильский архив, КУ Ізмаїльський архів, izmail]
 
   DAZHO:
     label: ДАЖО

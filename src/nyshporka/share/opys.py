@@ -73,11 +73,20 @@ def title(side_title: str, row: dict[str, Any] | None, library: str = "") -> str
     return _clean(side_title) or _registry_title(row) or _clean(library)
 
 
+#: «spr-2462 — рендер із PDF для HTR-черги (Dekanat Bialocerkowski, 1750–1750)»:
+#: справжня назва в дужках, роки після неї картка показує окремо.
+_RENDER_TITLE = re.compile(r"\(([^()]+?)(?:,\s*\d{3,4}\s*[–-]\s*\d{3,4})?\)\s*$")
+
+
 def _clean(raw: str) -> str:
     own = str(raw or "").strip()
     if own and _working(own):
+        inner = _RENDER_TITLE.search(own)
         stripped = _WORKING_TITLE.sub("", own).strip()
-        own = "" if _working(stripped) else stripped
+        if inner and not _working(inner.group(1)):
+            own = inner.group(1).strip()
+        else:
+            own = "" if _working(stripped) else stripped
     return _SHIFRA_PREFIX.sub("", own).strip() if own else ""
 
 
