@@ -37,6 +37,8 @@
   text-align: center; padding: 1.5rem 1rem; }
 .porozhno p { margin: 0; max-width: 34rem; color: var(--fg-2); }
 .search-idle { display: flex; justify-content: center; padding: 1.5rem 0 .5rem; }
+.jobs-busy { display: flex; align-items: center; gap: 1rem; margin: 0 0 1rem; }
+.jobs-busy p { margin: 0; color: var(--fg-2); }
 @media (max-width: 700px) {
   .dash-top .maskot { display: none; }
   .vitannia { flex-direction: column; text-align: center; }

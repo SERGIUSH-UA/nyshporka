@@ -1,7 +1,7 @@
 /** Секції, шапка, перехід між екранами й черга робіт. */
 import { t, LANG } from './strings.js';
 import { callOp, FINAL_STATES } from './net.js';
-import { esc, el, setView, curGen, bumpGen, alive } from './view.js';
+import { esc, el, setView, curGen, bumpGen, alive, maskot } from './view.js';
 import { SCREENS, OP_SCREEN } from './registry.js';
 import { ST } from './state.js';
 import { ic } from '/ui/icons.js';
@@ -329,7 +329,12 @@ async function refreshJobs() {
   // однаково відсіється.
   const jobs = (data.jobs || []).filter(
     (j) => !FINAL_STATES.includes(j.state) || Date.now() / 1000 - j.updated < 43200);
-  box.innerHTML = jobs.length ? jobs.map((j) => `
+  // Маскот «працює» — лише поки щось справді виконується або чекає: це стан
+  // ПРОЦЕСУ. Над готовими й упалими роботами його немає — там говорить текст.
+  const live = jobs.filter((j) => j.state === 'running' || j.state === 'queued').length;
+  const head = live ? `<div class="jobs-busy">${maskot('pratsiuie', 110)}
+    <p>${esc(t('jobs.busy').replace('{n}', live))}</p></div>` : '';
+  box.innerHTML = head + (jobs.length ? jobs.map((j) => `
     <div class="job">
       <b>${esc(j.title || j.kind)}</b> <span class="muted">${esc(jobState(j.state))}</span>
       ${jobProgress(j)}
@@ -338,7 +343,7 @@ async function refreshJobs() {
       ${jobResult(j)}
       ${j.state === 'running' || j.state === 'queued'
         ? `<button data-act="jobs.cancel" data-job="${esc(j.id)}">${t('jobs.cancel')}</button>` : ''}
-    </div>`).join('') : `<p class="muted">${t('jobs.none')}</p>`;
+    </div>`).join('') : `<p class="muted">${t('jobs.none')}</p>`);
 }
 
 /** Довге очікування на сервері: одне з'єднання замість опитувань щосекунди. */

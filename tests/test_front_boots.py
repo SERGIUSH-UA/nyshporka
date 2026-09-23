@@ -266,6 +266,12 @@ globalThis.fetch = async (url) => {
       ],
     },
   }[name] || {};
+  // Перелік робіт — з глобального прапорця: екран «Роботи» малюється по-різному,
+  // поки щось виконується і коли все скінчилось.
+  if (String(url).includes('/api/jobs?')) {
+    return { ok: true, status: 200,
+      json: async () => ({ seq: 1, jobs: globalThis.__JOBS || [] }) };
+  }
   if (String(url).endsWith('/api/sections')) {
     return { ok: true, status: 200, json: async () => ({ ok: true, v: 1,
       data: { sections: [], screens: {}, presets: {}, icons: {} } }) };
@@ -490,6 +496,20 @@ out.zeroHitsMaskot = zero.includes('maskot');
 globalThis.__NO_HITS = false;
 globalThis.__FORM = null;
 
+// ── «Роботи»: маскот працює, поки робота жива ──────────────────────────────
+const nowS = Date.now() / 1000;
+globalThis.__JOBS = [{ id: 'j1', kind: 'htr', title: 'прогін', state: 'running', updated: nowS }];
+await SCREENS.jobs();
+await new Promise((r) => setTimeout(r, 30));
+out.jobsBusyMaskot = (document.getElementById('jobs').innerHTML || '').includes('maskot-pratsiuie');
+globalThis.__JOBS = [{ id: 'j1', kind: 'htr', title: 'прогін', state: 'done', updated: nowS }];
+await SCREENS.jobs();
+await new Promise((r) => setTimeout(r, 30));
+const doneJobs = document.getElementById('jobs').innerHTML || '';
+out.jobsDoneDrawn = doneJobs.includes('прогін');
+out.jobsDoneMaskot = doneJobs.includes('maskot');
+globalThis.__JOBS = [];
+
 console.log('@@' + JSON.stringify(out));
 // 🔴 Вихід явний. Застосунок навмисно тримає вічний цикл спостереження за
 // чергою робіт: у браузері він блокується на сервері до 25 с, а тут заглушка
@@ -656,6 +676,14 @@ def test_the_mascot_waits_for_the_query_and_never_sits_on_results(probe) -> None
     assert probe.get("zeroHitsDrawn") is True, "нульова видача не намалювалась"
     assert probe.get("zeroHitsMaskot") is False, "маскот сидить на нульовій видачі"
     assert "maskot" not in (probe.get("recHits") or ""), "маскот сидить на видачі"
+
+
+def test_the_mascot_works_only_while_a_job_is_alive(probe) -> None:
+    """Маскот «працює» — стан процесу: є, поки робота виконується чи чекає, і
+    зникає над завершеними, де говорить текст результату."""
+    assert probe.get("jobsBusyMaskot") is True, "робота йде, а маскота немає"
+    assert probe.get("jobsDoneDrawn") is True, "завершена робота не намалювалась"
+    assert probe.get("jobsDoneMaskot") is False, "маскот лишився над завершеною роботою"
 
 
 def test_the_reader_draws_the_line_boxes_on_the_scan(probe) -> None:
