@@ -209,3 +209,24 @@ def test_dubl_ne_dozalyvaie_zaivoho(space: Path, tmp_path: Path,
 
     assert not got.get("geometry_attached")
     assert [c for c in calls if c[0] == "PUT"] == []
+
+
+# ── назва ────────────────────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("own, reg, want", [
+    ("spr-655 — рендер із PDF для HTR-черги", "Посімейні списки дворян", "Посімейні списки дворян"),
+    ("230-1-652 — Список дворян по уездам", "", "Список дворян по уездам"),
+    ("ДАХмО ф.315 оп.1 спр.203г: Протоколи засідань", "", "Протоколи засідань"),
+    ("FS-індекс (не звірено з титулкою): Parish Registers", "Метрична книга", "Метрична книга"),
+    ("Ревизские сказки о духовенстве", "Церковні документи", "Ревизские сказки о духовенстве"),
+    ("", "Церковні документи", "Церковні документи"),
+])
+def test_nazva_bez_robochykh_notatok(own: str, reg: str, want: str) -> None:
+    assert opys.title(own, {"title": reg} if reg else None) == want
+
+
+def test_ocr_nazva_reiestru_ne_ide() -> None:
+    """Сирий OCR опису — не назва: ні в картку, ні в опис справи."""
+    row = {"title": "Саокт дворян по Баптскому", "title_src": "ocr", "folios": "670"}
+    assert opys.title("", row) == ""
+    assert opys.from_registry(row) == {"folios": "670"}

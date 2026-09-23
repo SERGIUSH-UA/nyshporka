@@ -49,6 +49,36 @@ def genre(side: dict[str, Any], title: str = "") -> tuple[str, list[str]]:
     return (types[0] if len(types) == 1 else ""), types
 
 
+#: Ознаки того, що в полі `title` паспорта стоїть робоча нотатка, а не назва
+#: справи: паспорти пишуться для себе, і рендер чи індекс FamilySearch
+#: підписують тим, що важливо в ту мить.
+_NOTE_MARKERS = ("рендер", "htr", "не звірено", "немає", "fs-індекс", "черг")
+_WORKING_TITLE = re.compile(r"^\s*(spr-\S+|\d+(-\d+)*-?\S*)\s+—\s+")
+#: «ДАХмО ф.315 оп.1 спр.203г: …» — шифра, яку картка вже показує окремо.
+_SHIFRA_PREFIX = re.compile(r"^.{0,40}?спр\.\s*\S+\s*:\s*", re.IGNORECASE)
+
+
+def _working(title: str) -> bool:
+    low = title.casefold()
+    return bool(_WORKING_TITLE.match(title)) or any(m in low for m in _NOTE_MARKERS)
+
+
+def title(side_title: str, row: dict[str, Any] | None) -> str:
+    """Назва для картки: з паспорта, якщо це назва, інакше з реєстру опису.
+
+    🔴 Картка — перше, що бачить людина й пошуковик, тож «spr-655 — рендер
+    із PDF для HTR-черги» там гірше за порожнечу. Реєстр опису вичитаний із
+    друкованого опису фонду й таких нотаток не має.
+    """
+    own = str(side_title or "").strip()
+    reg = _registry_title(row)
+    if own and _working(own):
+        stripped = _WORKING_TITLE.sub("", own).strip()
+        own = "" if _working(stripped) else stripped
+    own = _SHIFRA_PREFIX.sub("", own).strip() if own else ""
+    return own or reg
+
+
 def sidecar_extras(side: dict[str, Any]) -> dict[str, Any]:
     """Опис справи з паспорта — лише поля з білого списку."""
     out: dict[str, Any] = {}
@@ -91,10 +121,25 @@ def registry_row(shifra: str) -> dict[str, Any] | None:
     return None
 
 
+#: Джерела назви в реєстрі, яким картка не вірить: сирий OCR опису дає
+#: «Саокт дворян по Баптскому» — у картці це гірше за порожнечу.
+_UNTRUSTED_TITLE_SRC = frozenset({"ocr"})
+
+
+def _registry_title(row: dict[str, Any] | None) -> str:
+    if not row or str(row.get("title_src") or "") in _UNTRUSTED_TITLE_SRC:
+        return ""
+    return str(row.get("title") or "").strip()
+
+
 def from_registry(row: dict[str, Any] | None) -> dict[str, Any]:
     if not row:
         return {}
-    return {k: row[k] for k in REGISTRY_FIELDS if row.get(k) not in (None, "")}
+    out = {k: row[k] for k in REGISTRY_FIELDS if row.get(k) not in (None, "")}
+    if not _registry_title(row):
+        out.pop("title", None)
+        out.pop("title_src", None)
+    return out
 
 
 def _surname(entry: str) -> str:

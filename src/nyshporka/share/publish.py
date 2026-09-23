@@ -272,10 +272,19 @@ def build_manifest(scope: str, *,
         lic["source_terms"] = source_terms
     case = _case_block(info, case_dir)
     row = opys.registry_row(str(case.get("shifra") or ""))
-    # Паспорт мовчить — назву й роки дає реєстр опису: він вичитаний з
-    # друкованого опису фонду, а не складений нами.
-    if row and not case.get("title") and row.get("title"):
-        case["title"] = str(row["title"])
+    # Паспорт мовчить або тримає робочу нотатку — назву й роки дає реєстр
+    # опису: він вичитаний з друкованого опису фонду, а не складений нами.
+    nazva = opys.title(str(case.get("title") or ""), row)
+    if nazva:
+        case["title"] = nazva
+    else:
+        case.pop("title", None)
+    if not case.get("doc_type"):
+        code, types = opys.genre(case, nazva)
+        if code:
+            case["doc_type"] = code
+        if types:
+            case["record_types"] = types
     if row and not case.get("years"):
         ry = [int(row[k]) for k in ("year_from", "year_to")
               if str(row.get(k) or "").isdigit()]
