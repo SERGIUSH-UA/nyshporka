@@ -259,18 +259,9 @@ def publish_cmd(
     Повторний виклик із тим самим змістом безпечний: пул упізнає його за
     хешем змісту й нічого не заливає вдруге.
     """
-    import sys
-
     from nyshporka import ops as O
-    from nyshporka.share import upload
 
-    # Ключа ще немає — у діалозі одразу пропонуємо вхід, а не відсилаємо
-    # людину читати помилку. У скрипті питати нікого, тож там лишається
-    # звичайна відмова з підказкою.
-    if (not upload.token() and not as_json and sys.stdin.isatty()
-            and typer.confirm("Ключа Супряги ще немає. Увійти зараз?", default=True)):
-        _login(base_site="", open_browser=True)
-
+    _kliuch_abo_vkhid(as_json)
     env = O.call("share.publish", {"path": path, "base": base})
     if _answer(env, as_json):
         return
@@ -282,6 +273,24 @@ def publish_cmd(
                       f"книга {d.get('shifra') or d.get('book')}")
         console.print(d.get("text") or "")
     _notes(env)
+
+
+def _kliuch_abo_vkhid(as_json: bool) -> None:
+    """Ключа ще немає — у діалозі одразу пропонуємо під'єднатись.
+
+    Шукати, качати й віддавати пул пускає лише з ключем, тож без нього
+    команда однаково впала б — краще спитати до, ніж показати помилку після.
+    У скрипті (`--json`, не термінал) питати нікого: там лишається звичайна
+    відмова з підказкою `nysh share login`.
+    """
+    import sys
+
+    from nyshporka.share import upload
+
+    if (not upload.token() and not as_json and sys.stdin.isatty()
+            and typer.confirm("Нишпорка ще не під'єднана до Супряги. Під'єднати зараз?",
+                              default=True)):
+        _login(base_site="", open_browser=True)
 
 
 def _login(*, base_site: str, open_browser: bool) -> None:
@@ -433,6 +442,7 @@ def pull_cmd(
     """Знайти справу в каталозі пулу — і за потреби одразу прийняти."""
     from nyshporka import ops as O
 
+    _kliuch_abo_vkhid(as_json)
     env = O.call("share.pull", {"query": query, "base": base, "take": take})
     if _answer(env, as_json):
         return
@@ -535,6 +545,7 @@ def sync_cmd(
     """
     from nyshporka.share import pool as P
 
+    _kliuch_abo_vkhid(as_json)
     try:
         got = P.sync(base, repo=repo, fond=fond)
     except RuntimeError as exc:

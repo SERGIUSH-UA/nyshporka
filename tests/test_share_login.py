@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 import threading
-from typing import Any
+from typing import Any, ClassVar
 from urllib.parse import parse_qs, urlparse
 
 import httpx
@@ -159,3 +159,72 @@ def test_keyring_u_yadri_a_ne_v_extras() -> None:
     meta = tomllib.loads((Path(__file__).resolve().parents[1] / "pyproject.toml")
                          .read_text(encoding="utf-8"))
     assert any(d.startswith("keyring") for d in meta["project"]["dependencies"])
+
+
+# ── пошук і видача: ключ їде сам, 401 перекладається людині ─────────────────
+
+
+class _Fetcher:
+    """Замість мережі: запам'ятати заголовки й відповісти заданим."""
+
+    seen: ClassVar[list[dict[str, str]]] = []
+    status = 200
+
+    def __init__(self, *, headers: dict[str, str], **_: Any) -> None:
+        _Fetcher.seen.append(dict(headers))
+
+    def get(self, url: str) -> Any:
+        from nyshporka.sources.http import HttpError
+
+        if _Fetcher.status != 200:
+            raise HttpError(f"{url}: HTTP {_Fetcher.status}")
+        return type("R", (), {"text": '{"rows": [], "count": 0, "of": 3}'})()
+
+
+@pytest.fixture
+def merezha(monkeypatch: pytest.MonkeyPatch) -> type[_Fetcher]:
+    import nyshporka.sources.http as H
+
+    _Fetcher.seen = []
+    _Fetcher.status = 200
+    monkeypatch.setattr(H, "Fetcher", _Fetcher)
+    return _Fetcher
+
+
+def test_poshuk_nese_kliuch(skhovyshche: _Skhovyshche, merezha: type[_Fetcher]) -> None:
+    from nyshporka.share import catalog
+
+    L.save("kliuch-1")
+    catalog.search("315", "https://probe.invalid/v1")
+    assert merezha.seen[-1]["Authorization"] == "Bearer kliuch-1"
+
+
+def test_bez_kliucha_zapyt_bez_zaholovka(
+    skhovyshche: _Skhovyshche, merezha: type[_Fetcher]
+) -> None:
+    from nyshporka.share import catalog
+
+    catalog.search("315", "https://probe.invalid/v1")
+    assert "Authorization" not in merezha.seen[-1]
+
+
+def test_401_kazhe_yak_pidiednatys(
+    skhovyshche: _Skhovyshche, merezha: type[_Fetcher]
+) -> None:
+    from nyshporka.share import catalog
+
+    merezha.status = 401
+    with pytest.raises(catalog.PotribenKliuch, match="nysh share login"):
+        catalog.search("315", "https://probe.invalid/v1")
+
+
+def test_lookup_bez_kliucha_ne_valyt_prohin(
+    skhovyshche: _Skhovyshche, merezha: type[_Fetcher]
+) -> None:
+    """Перед прогоном пул питають мовчки: 401 — це «не знайдено», а не збій."""
+    from nyshporka.share import catalog
+
+    merezha.status = 401
+    got = catalog.lookup("ДАХмО 315-1-8433", base="https://probe.invalid/v1")
+    assert got["found"] is False
+    assert got.get("need_key") is True

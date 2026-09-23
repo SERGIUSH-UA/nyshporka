@@ -170,6 +170,15 @@ def catalog_url(base: str = "") -> str:
     return f"{base_url(base)}/{CATALOG_NAME}"
 
 
+class PotribenKliuch(RuntimeError):
+    """Пул відповів 401: Нишпорка не під'єднана. Текст призначений людині."""
+
+
+#: Одне формулювання на всі місця, де пул не пустив без ключа.
+KLIUCH_TEXT = ("Супряга пускає лише під'єднану Нишпорку. Під'єднайте: "
+               "nysh share login — один клік, можна анонімно.")
+
+
 def _get(url: str) -> dict[str, Any]:
     """Запит до пулу з розбором відповіді.
 
@@ -186,11 +195,21 @@ def _get(url: str) -> dict[str, Any]:
     """
     import json
 
+    from nyshporka.share.upload import token
     from nyshporka.sources.http import Fetcher, HttpError, app_ua
 
+    # 🔴 Шукати й качати через API пул пускає лише з ключем (рішення
+    # 23.09.2026). Ключ їде в кожному запиті, якщо він є, — окремого «режиму
+    # з ключем» немає, щоб не було місця, яке його забуло.
+    headers = {"User-Agent": app_ua()}
+    kliuch = token()
+    if kliuch:
+        headers["Authorization"] = f"Bearer {kliuch}"
     try:
-        resp = Fetcher(headers={"User-Agent": app_ua()}).get(url)
+        resp = Fetcher(headers=headers).get(url)
     except HttpError as exc:
+        if "HTTP 401" in str(exc):
+            raise PotribenKliuch(KLIUCH_TEXT) from exc
         raise RuntimeError(f"пул за {url} недоступний: {exc}") from exc
     text = resp.text if hasattr(resp, "text") else str(resp)
     try:
@@ -255,6 +274,8 @@ def lookup(shifra: str, *, frames: int = 0, base: str = "") -> dict[str, Any]:
     qs = urlencode({"shifra": shifra, "frames": frames})
     try:
         return _get(f"{base_url(base)}/lookup?{qs}")
+    except PotribenKliuch as exc:
+        return {"found": False, "why": str(exc), "need_key": True}
     except RuntimeError as exc:
         return {"found": False, "why": str(exc), "offline": True}
 
