@@ -114,15 +114,21 @@ def _theme_block(brand: Brand, theme: str, *, base: bool) -> str:
                 for h, a in zip(heads, brand.aliases, strict=True)]
 
     if base:
-        # 🔴 Тільки системні стеки. Жодного CDN і жодного зовнішнього шрифту:
-        # застосунок працює офлайн — в архіві інтернету може не бути взагалі, а
-        # шрифт, який не приїхав, дає стрибок верстки саме там, де читають скан.
+        # 🔴 Жодного CDN: застосунок працює офлайн, тож родини, названі тут,
+        # роздає сам пакет (`ui/static/fonts.css`), а системний стек у кожному
+        # лишається запасом.
         out.append("\n" + _section("типографіка"))
-        out += _decls([
+        fonts = [
             Color(css="font-text", why="інтерфейс", dark=brand.type_text,
                   light=brand.type_text, same=True),
             Color(css="font-mono", why="шифри, декод, поля набору", dark=brand.type_mono,
                   light=brand.type_mono, same=True),
+        ]
+        if brand.type_serif:
+            fonts.append(Color(css="font-serif", why="лише заголовки", dark=brand.type_serif,
+                               light=brand.type_serif, same=True))
+        out += _decls([
+            *fonts,
             Color(css="font-size", why="базовий кегль", dark=brand.type_size,
                   light=brand.type_size, same=True),
             Color(css="line-height", why="інтерліньяж", dark=brand.type_leading,
@@ -295,7 +301,7 @@ def render_web(brand: Brand) -> str:
     `--font-mono`), а не другим набором. Інакше верстка, написана під
     застосунок, на сайті мовчки діставала б системний стек, а поруч жили б два
     імені на одну роль — рівно та вада, від якої заведено `aliases`.
-    `--font-serif` новий, бо в застосунку засічкової ролі немає взагалі.
+    `--font-serif` тут той самий, що в застосунку (заголовки).
 
     🔴 Віддаються лише ІМЕНА родин, не файли. Де лежать байти `.woff2` і як
     вони оголошені `@font-face`, знає той, хто їх роздає: шлях залежить від
@@ -306,7 +312,7 @@ def render_web(brand: Brand) -> str:
     лишається на системних стеках, а не падає на збірці.
     """
     pairs = [
-        ("font-serif", brand.web_serif, "🔴 новий: суцільний текст і заголовки"),
+        ("font-serif", brand.web_serif, "заголовки"),
         ("font-text", brand.web_sans, "перекриває системний стек застосунку"),
         ("font-mono", brand.web_mono, "шифри й числа — потрібні табличні цифри"),
         ("font-size", brand.web_size, "кегль сайту, не верстата"),
@@ -323,11 +329,8 @@ def render_web(brand: Brand) -> str:
         render_app(brand),
         "\n" + _section(
             "веб-типографіка — перевизначення, а не другий набір імен",
-            "🔴 Правило «тільки системні шрифти» вище стоїть на ОФЛАЙНІ:\n"
-            "застосунок відкривають у читальній залі, де мережі може не бути, і\n"
-            "шрифт, який не приїхав, дає стрибок верстки саме там, де читають\n"
-            "скан. Сайт без мережі не відкривається взагалі, тож підстави для\n"
-            "нього немає — і блок у brand.yaml ДОДАНО, а не підмінено.",
+            "Родини ті самі, що в застосунку; сайт відрізняється кеглем та\n"
+            "інтерліньяжем: його читають у браузері з типовим масштабом.",
             indent=""),
         ":root {\n", *rows, "}\n",
     ])

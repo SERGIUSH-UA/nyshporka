@@ -1,39 +1,65 @@
-"""🌐 Веб-стек бренду: окремий блок, який НЕ ламає офлайнового застосунку.
+"""🌐 Веб-стек бренду і шрифти застосунку.
 
 Портал Супряги живе в іншому репозиторії й бере палітру звідси — імпортом
 пакета, а не копією CSS. Копія тут уже коштувала один раз: `#7a4f2b` лежав
 переписаним вручну, і три поверхні розійшлися тихо.
 
-Тому приймач стереже рівно дві межі:
+Застосунок набирається тими самими родинами, що й портал, і приймач стереже
+дві межі:
 
-* різновид `web` **не змінює** нічого для застосунку — `type.text` і `type.mono`
-  лишаються системними, бо в читальній залі мережі може не бути;
-* і при цьому він **перевизначає** ті самі імена токенів, а не заводить другі:
-  інакше верстка, написана під застосунок, на сайті мовчки діставала б
-  системний стек.
+* кожну родину, названу в токенах застосунку, роздає САМ ПАКЕТ (`fonts.css` +
+  файли поруч): у читальній залі мережі може не бути, а шрифт, який не
+  приїхав, дає стрибок верстки саме там, де людина читає скан;
+* різновид `web` **перевизначає** ті самі імена токенів, а не заводить другі.
 """
 from __future__ import annotations
+
+import re
+from pathlib import Path
 
 from nyshporka.brand import gen as GEN
 from nyshporka.brand import manifest as M
 
+UI = Path(GEN.repo_root()) / "src" / "nyshporka" / "ui" / "static"
 
-def test_web_stack_does_not_touch_the_offline_app() -> None:
-    """🔴 Застосунок лишається на системних стеках.
 
-    Це головна причина, чому веб оформлено окремим блоком, а не правкою
-    наявного: шрифт, який не приїхав, дає стрибок верстки саме там, де людина
-    читає скан.
+def _families(stack: str) -> list[str]:
+    return re.findall(r'"([^"]+)"', stack)
+
+
+def test_app_fonts_come_from_the_package_not_the_network() -> None:
+    """🔴 Названа в токенах родина мусить бути оголошена в `fonts.css`, а її
+    файли — лежати в пакеті. Інакше браузер мовчки бере запасний стек, і
+    застосунок «наче на шрифтах порталу» виглядає інакше без жодної помилки.
     """
+    brand = M.active()
+    css = (UI / "fonts.css").read_text(encoding="utf-8")
+    assert "http" not in css, "шрифт із мережі — офлайн у читальній залі його не буде"
+    declared = set(re.findall(r'font-family:\s*"([^"]+)"', css))
+    for stack in (brand.type_text, brand.type_mono, brand.type_serif):
+        for fam in _families(stack):
+            if fam in ("Segoe UI", "Times New Roman"):
+                continue
+            assert fam in declared, f"«{fam}» названа в токенах, але не оголошена в fonts.css"
+    for src in re.findall(r'url\("([^"]+)"\)', css):
+        assert (UI / src).is_file(), f"fonts.css посилається на відсутній файл {src}"
+
+
+def test_every_app_stack_keeps_a_system_fallback() -> None:
+    """Запас у стеку лишається: без нього недоїхалий файл дав би Times."""
     brand = M.active()
     assert "system-ui" in brand.type_text
     assert "ui-monospace" in brand.type_mono
-    assert "Literata" not in brand.type_text
-    assert "IBM Plex" not in brand.type_text
+    assert brand.type_serif.rstrip().endswith("serif")
 
-    app = GEN.render("app")
-    assert "Literata" not in app, "веб-шрифт протік у токени застосунку"
-    assert "IBM Plex" not in app
+
+def test_pages_load_the_fonts_before_the_tokens() -> None:
+    """Обидві сторінки застосунку підключають `fonts.css` — інакше родини в
+    токенах лишаються іменами без файлів."""
+    static = UI.parent.parent / "daemon" / "static"
+    for page in ("index.html", "access.html"):
+        html = (static / page).read_text(encoding="utf-8")
+        assert html.index("/ui/fonts.css") < html.index("/ui/tokens.css"), page
 
 
 def test_web_flavour_only_appends() -> None:
@@ -48,9 +74,8 @@ def test_web_flavour_only_appends() -> None:
 def test_web_redefines_names_instead_of_adding_new_ones() -> None:
     """🔴 Ті самі імена, не другий набір.
 
-    `--font-text` і `--font-mono` мусять прийти повторно — саме тому, що вся
-    наявна верстка звертається до них. `--font-serif` навпаки новий: у
-    застосунку засічкової ролі немає взагалі.
+    `--font-text`, `--font-mono` і `--font-serif` приходять повторно — саме
+    тому, що вся наявна верстка звертається до них.
     """
     web = GEN.render("web")
     tail = web[len(GEN.render("app")):]

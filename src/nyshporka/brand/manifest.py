@@ -143,6 +143,8 @@ class Brand:
     motion: tuple[Color, ...]
     type_text: str
     type_mono: str
+    #: Засічка заголовків; порожньо — ролі немає.
+    type_serif: str
     type_size: str
     type_leading: str
     #: Веб-стек. Порожній, поки в `brand.yaml` немає блока `type.web` — сайт
@@ -318,6 +320,7 @@ def _build(raw: dict[str, Any]) -> Brand:
         motion=_colours(raw.get("motion")),
         type_text=str(typ.get("text") or ""),
         type_mono=str(typ.get("mono") or ""),
+        type_serif=str(typ.get("serif") or ""),
         type_size=str(typ.get("base_size") or ""),
         type_leading=str(typ.get("line_height") or ""),
         web_serif=str(web.get("serif") or ""),

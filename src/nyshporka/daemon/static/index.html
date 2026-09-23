@@ -26,11 +26,12 @@
 })();
 </script>
 <!--
-  Порядок обов'язковий: `tokens.css` несе самі змінні (згенеровано з
+  Порядок обов'язковий: `fonts.css` оголошує шрифти з пакета, `tokens.css` несе самі змінні (згенеровано з
   `brand.yaml`), `base.css` — примітиви спільного шару, `app.css` — те, що є
   тільки в цієї морди. Зворотний порядок лишив би верстку без кольорів на
   перший кадр, а власні правила — без змоги перебити базові.
 -->
+<link rel="stylesheet" href="/ui/fonts.css">
 <link rel="stylesheet" href="/ui/tokens.css">
 <link rel="stylesheet" href="/ui/base.css">
 <link rel="stylesheet" href="/static/app.css">

@@ -107,13 +107,25 @@ html, body { margin: 0; height: 100%; font: var(--font-size)/var(--line-height) 
 h4 > .ic { align-self: center; }
 
 #app { display: flex; flex-direction: column; height: 100vh; height: 100dvh; }
-header { background: var(--s-0); padding: 8px 12px; border-bottom: 1px solid var(--line-2); flex: 0 0 auto;
+/* Шапка й навігація — мовою порталу nyshporka.online: хром напівпрозорий з
+   волосяною лінією, назва засічкою, активний розділ ПІДКРЕСЛЕНИЙ медом, а не
+   залитий. Заливка на екрані лишається за головною дією — інакше вкладка й
+   кнопка «Шукати» сперечаються, що тут головне. */
+header { background: color-mix(in srgb, var(--s-0) 94%, transparent);
+  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+  padding: 8px 12px; border-bottom: 1px solid var(--line); flex: 0 0 auto;
   display: flex; align-items: center; gap: 10px; }
-.logo { font-weight: 900; letter-spacing: .5px; color: var(--fg); font-size: 15px; }
+.logo { font-family: var(--font-serif); font-weight: 700; color: var(--fg); font-size: 18px; }
 .logo .paw { color: var(--accent); }
-.tabs { margin-left: auto; display: flex; border: 1px solid var(--line-3); border-radius: var(--r-s); overflow: hidden; }
-.tabs button { background: var(--s-4); color: var(--fg-2); border: 0; padding: 6px 16px; font-size: 13px; font-weight: 700; cursor: pointer; }
-.tabs button.on { background: var(--accent-fill); color: var(--accent-ink); }
+.tabs { margin-left: auto; display: flex; gap: 2px; }
+.tabs button { position: relative; background: transparent; color: var(--fg-2); border: 0;
+  border-radius: var(--r-s); padding: 6px 11px; font-size: 14px; font-weight: 500; cursor: pointer; }
+.tabs button:hover { color: var(--fg); background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.tabs button.on { color: var(--accent); font-weight: 600; }
+/* Підкреслення стоїть на нижній лінії шапки: `bottom` = внутрішній відступ
+   шапки + її рамка. */
+.tabs button.on::after { content: ""; position: absolute; left: 11px; right: 11px;
+  bottom: -9px; height: 2px; border-radius: 2px; background: var(--honey); }
 .tabs button:disabled { opacity: .4; cursor: not-allowed; }
 /* Три стани завантаження картки — класами, а не присвоєнням кольору з JS:
    інлайновий style перебивав би тему. */
@@ -121,20 +133,23 @@ header { background: var(--s-0); padding: 8px 12px; border-bottom: 1px solid var
    Значок показує ПОТОЧНИЙ режим, а не той, у який перемкне: інакше стан
    «за системою» нічим показати, і кнопка перестає бути індикатором. */
 .thm { flex: 0 0 auto; display: flex; align-items: center; justify-content: center;
-  width: 30px; height: 30px; margin-left: 10px; background: var(--s-4);
-  color: var(--fg-3); border: 1px solid var(--line-3);
-  border-radius: var(--r-s); cursor: pointer; }
+  width: 30px; height: 30px; margin-left: 10px; background: transparent;
+  color: var(--fg-3); border: 1px solid var(--line-2);
+  border-radius: var(--r-pill); cursor: pointer; }
 .thm:hover { color: var(--accent); border-color: var(--line-4); }
 /* ── другий рівень навігації: підвкладки активного розділу ── */
-.subtabs { flex: 0 0 auto; display: flex; gap: 6px; padding: 6px 12px;
+.subtabs { flex: 0 0 auto; display: flex; gap: 18px; padding: 0 12px;
   background: var(--s-1); border-bottom: 1px solid var(--line);
-  overflow-x: auto; scrollbar-width: none; }
+  overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
 .subtabs::-webkit-scrollbar { display: none; }
+/* Як другий рядок навігації порталу: смуга, пункт — текст із підкресленням.
+   `overflow-y: hidden` обов'язкове: прокрутка вбік змушує браузер рахувати
+   `auto` і для вертикалі, і підкреслення давало б вертикальний повзунок. */
 .subtabs button { flex: 0 0 auto; background: transparent; color: var(--fg-3);
-  border: 1px solid transparent; border-radius: var(--r-pill);
-  padding: 5px 14px; font-size: 13px; font-weight: 700; cursor: pointer; white-space: nowrap; }
-.subtabs button:hover { color: var(--fg); background: var(--s-3); }
-.subtabs button.on { color: var(--accent); border-color: var(--accent); background: var(--accent-bg); }
+  border: 0; border-bottom: 2px solid transparent; border-radius: 0;
+  padding: 8px 1px 6px; font-size: 13px; font-weight: 500; cursor: pointer; white-space: nowrap; }
+.subtabs button:hover { color: var(--fg); }
+.subtabs button.on { color: var(--fg); border-bottom-color: var(--accent); font-weight: 600; }
 .subtabs button.hidden { display: none; }   /* підвкладка чужого розділу */
 main { flex: 1 1 auto; overflow: auto; }
 .view { display: none; }
@@ -169,7 +184,8 @@ main { flex: 1 1 auto; overflow: auto; }
 /* hover лише на рамці: у щільних тулбарах зміна тла читається як стрибок
    (той самий принцип, що в «мікровзаємодіях» нижче) */
 :where(input, select, textarea):hover:not(:disabled) { border-color: var(--line-4); }
-:where(input, select, textarea):focus { outline: none; border-color: var(--accent); }
+:where(input, select, textarea):focus { outline: none; border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-bg); }
 :where(input, select, textarea):disabled {
   opacity: .5; cursor: not-allowed; background: var(--s-2); }
 :where(input, textarea)::placeholder { color: var(--fg-5); opacity: 1; }  /* Firefox сам ставить .54 */
@@ -182,7 +198,7 @@ main { flex: 1 1 auto; overflow: auto; }
 /* Канонічний дрібний розмір — `.inp-mini` (історична назва, 27 місць).
    `.ctl-sm` — синонім для нового коду, `.ctl-lg` — великі поля пошуку. */
 .ctl-sm { padding: 4px 6px; font-size: 13px; }
-.ctl-lg { padding: 9px 12px; font-size: 14px; border-radius: var(--r-m); }
+.ctl-lg { padding: 9px 14px; font-size: 14px; border-radius: var(--r-m); }
 
 /* ── стрілка <select> ──
    `appearance:none` знімає нативний віджет ОС. Попап <option> лишається
@@ -226,7 +242,7 @@ select.inp-mini, select.ctl-sm { padding-right: 22px; }
    кольоровій кнопці мовчки ставав сірим. Тепер ознака явна — клас.
    Тон задається модифікатором; чорнило завжди --white, бо заливка
    лишається насиченою в обох темах. */
-.btn-solid { border: 0; border-radius: var(--r-m); padding: 6px 14px;
+.btn-solid { border: 0; border-radius: var(--r-pill); padding: 6px 14px;
   font-size: 13px; font-weight: 800; cursor: pointer;
   background: var(--s-4); color: var(--fg); }
 .btn-solid.sm { padding: 6px 12px; font-size: 12px; font-weight: 700; }
@@ -275,7 +291,7 @@ button.on-solid { color: var(--white); }
    кілька застережень, «що далі»), і без відступу вони читаються як один довгий
    абзац у рамці: око не бачить, де скінчилось одне твердження й почалось інше,
    а кожне з них — окреме рішення для того, хто вирішує, чи вірити числу. */
-.warn { background: var(--warn-bg); border: 1px solid var(--accent);
+.warn { background: var(--warn-bg); border: 1px solid var(--accent-2);
   border-left-width: 3px; color: var(--warn-fg); border-radius: var(--r-m);
   padding: 8px 11px; font-size: 12px; margin: 8px 0; }
 .warn.err { background: var(--err-bg); border-color: var(--err-line);
@@ -288,7 +304,7 @@ button.on-solid { color: var(--white); }
 .warn.next button { flex: none; }
 
 /* бейдж картки рев'ю: 11 умовних сигналів мали кожен свій інлайн-стиль */
-.badge { display: inline-block; border-radius: var(--r-m); padding: 1px 7px; font-size: 11px;
+.badge { display: inline-block; border-radius: var(--r-pill); padding: 1px 8px; font-size: 11px;
   font-weight: 700; white-space: nowrap; background: var(--bdg-bg); color: var(--bdg-fg); }
 .badge.known   { background: var(--bdg-known-bg); color: var(--bdg-known-fg); }  /* ★ у каноні */
 .badge.new     { background: var(--bdg-new-bg);   color: var(--bdg-new-fg); }    /* новий */
@@ -439,9 +455,10 @@ button:not(:disabled):active { transform: scale(.97); }
     overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch;
     scrollbar-width: none; }             /* тонка смуга-скрол без видимого скролбара */
   .tabs::-webkit-scrollbar { display: none; }
-  .tabs button { padding: 9px 15px; font-size: 13px; white-space: nowrap; flex: 0 0 auto; }
-  .subtabs { padding: 6px 10px; -webkit-overflow-scrolling: touch; }
-  .subtabs button { padding: 8px 14px; }   /* тап-таргет */
+  .tabs button { padding: 9px 13px; font-size: 14px; white-space: nowrap; flex: 0 0 auto; }
+  .tabs button.on::after { left: 13px; right: 13px; bottom: 0; }   /* рядок вкладок власний */
+  .subtabs { padding: 0 10px; -webkit-overflow-scrolling: touch; }
+  .subtabs button { padding: 11px 1px 9px; }   /* тап-таргет */
 
   /* тулбари модалок мають ДЕСЯТКИ кнопок → на вузькому вони переносяться у стіну; каптуємо
      висоту й даємо вертикальний скрол, щоб канва не з'їжджала за екран */
