@@ -2533,6 +2533,7 @@ source = { editable = "." }
 dependencies = [
     { name = "httpx" },
     { name = "jinja2" },
+    { name = "keyring" },
     { name = "loguru" },
     { name = "pillow" },
     { name = "platformdirs" },
@@ -2658,6 +2659,7 @@ requires-dist = [
     { name = "httpx", extras = ["socks"], marker = "extra == 'all'", specifier = ">=0.27" },
     { name = "httpx", extras = ["socks"], marker = "extra == 'archives'", specifier = ">=0.27" },
     { name = "jinja2", specifier = ">=3.1" },
+    { name = "keyring", specifier = ">=25" },
     { name = "keyring", marker = "extra == 'all'", specifier = ">=25" },
     { name = "keyring", marker = "extra == 'archives'", specifier = ">=25" },
     { name = "loguru", specifier = ">=0.7" },
