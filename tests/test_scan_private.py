@@ -85,11 +85,41 @@ def test_allow_is_pointwise_not_blanket():
     assert not scan._allowed("src/nyshporka/cli.py", "clan-surname")
 
 
-def test_this_repository_is_clean():
+def _scan_remembering_clean(items, pytestconfig: pytest.Config) -> list:
+    """`scan_text` по всіх `items`, але вже чисті (шлях, вміст) не переглядаються.
+
+    Регекси по 61 МБ історії — ~35 с на кожен прогін, хоча історія не
+    змінюється: той самий блоб під тими самими правилами дає той самий
+    результат. Пам'ятаються ЛИШЕ чисті; файл зі знахідкою перевіряється щоразу.
+    Ключ кешу — відбиток усіх правил і винятків, тож змінене правило чи виняток
+    не знайде старого кешу й перегляне все. Без `cacheprovider` — повний прохід.
+    """
+    import hashlib
+    import json
+
+    cache = getattr(pytestconfig, "cache", None)
+    rules = [(r.id, r.pattern.pattern, r.pattern.flags) for r in scan.RULES]
+    stamp = hashlib.sha1(json.dumps([rules, list(scan.ALLOW)]).encode()).hexdigest()[:16]
+    slot = f"scan_private/clean/{stamp}"
+    clean = set(cache.get(slot, [])) if cache is not None else set()
+    findings, seen_clean = [], set()
+    for rel, text, where in items:
+        key = hashlib.sha1(f"{rel}\0{text}".encode("utf-8", "surrogatepass")).hexdigest()
+        if key in clean:
+            seen_clean.add(key)
+            continue
+        got = scan.scan_text(rel, text, where)
+        findings += got
+        if not got:
+            seen_clean.add(key)
+    if cache is not None:
+        cache.set(slot, sorted(seen_clean | clean))
+    return findings
+
+
+def test_this_repository_is_clean(pytestconfig):
     """Найважливіша перевірка: сам репозиторій не містить приватних даних."""
-    findings = []
-    for rel, text, where in scan.iter_worktree():
-        findings += scan.scan_text(rel, text, where)
+    findings = _scan_remembering_clean(scan.iter_worktree(), pytestconfig)
     assert not findings, "\n".join(
         f"{f.path}:{f.line_no} [{f.rule.id}] {f.excerpt}" for f in findings[:20])
 
@@ -117,7 +147,7 @@ def test_git_ignored_files_are_not_scanned_in_the_worktree(tmp_path, monkeypatch
     assert scan.scan_text("draft.md", secret)
 
 
-def test_this_repository_history_is_clean():
+def test_this_repository_history_is_clean(pytestconfig):
     """🔴 Історія — не копія робочого дерева, і чистого дерева недостатньо.
 
     Git не забуває: рядок, доданий і виправлений наступним комітом, лишається в
@@ -130,9 +160,7 @@ def test_this_repository_history_is_clean():
     єдиним місцем, де провал спливав, був джоб CI — тобто вже після push, коли
     дешевого виправлення не лишається.
     """
-    findings = []
-    for rel, text, where in scan.iter_history():
-        findings += scan.scan_text(rel, text, where)
+    findings = _scan_remembering_clean(scan.iter_history(), pytestconfig)
     assert not findings, "\n".join(
         f"{f.path}:{f.line_no} [{f.rule.id}] {f.excerpt}" for f in findings[:20])
 

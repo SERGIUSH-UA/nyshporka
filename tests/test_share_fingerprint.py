@@ -29,7 +29,51 @@ ImageFilter = pytest.importorskip("PIL.ImageFilter")
 W, H = 1600, 2400
 
 
+#: Намальовані аркуші — PNG без втрат, тобто ті самі пікселі. Малювання з
+#: розмиттям коштує ~0.33 с на аркуш, а файл брав ~340 аркушів на ~80 зернах.
+_NAMALOVANE: dict[tuple[int, tuple[int, int]], bytes] = {}
+#: Готові кадри `kadry()` за (зерно, якість, масштаб).
+_KADRY: dict[tuple[int, int, float], bytes] = {}
+#: Ті самі кадри між прогонами — у `.pytest_cache`; None, коли кешу немає
+#: (`-p no:cacheprovider`). Див. `_kadry_na_dysku`.
+_DYSK: Path | None = None
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _kadry_na_dysku(pytestconfig: pytest.Config):
+    """Кадри детерміновані, тож малювати їх щоразу — ~30 с на прогін.
+
+    Тека кешу названа відбитком усього, від чого залежать байти: коду
+    малювання, розміру аркуша й версії Pillow. Змінив щось із цього — кеш
+    просто не знайдеться, і кадри намалюються наново.
+    """
+    global _DYSK
+    cache = getattr(pytestconfig, "cache", None)
+    if cache is not None:
+        import inspect
+
+        import PIL
+        stamp = hashlib.sha1(
+            f"{inspect.getsource(_namaliuvaty)}|{W}x{H}|{PIL.__version__}".encode()
+        ).hexdigest()[:12]
+        _DYSK = Path(cache.mkdir(f"share_fingerprint_{stamp}"))
+    yield
+    _DYSK = None
+
+
 def _arkush(seed: int, *, size: tuple[int, int] = (W, H)) -> Any:
+    """`_namaliuvaty` з пам'яттю: щоразу свіжий об'єкт, пікселі ті самі."""
+    key = (seed, size)
+    if key not in _NAMALOVANE:
+        buf = io.BytesIO()
+        _namaliuvaty(seed, size=size).save(buf, "PNG", compress_level=1)
+        _NAMALOVANE[key] = buf.getvalue()
+    im = Image.open(io.BytesIO(_NAMALOVANE[key]))
+    im.load()
+    return im
+
+
+def _namaliuvaty(seed: int, *, size: tuple[int, int] = (W, H)) -> Any:
     """Аркуш, схожий на чорнило: товстий штрих і м'який край.
 
     Розмиття наприкінці — не прикраса: чорнило на папері має м'який край,
@@ -63,10 +107,22 @@ def kadry(root: Path, *, n: int = 20, quality: int = 92,
     d = root / "kadry"
     d.mkdir(parents=True, exist_ok=True)
     for i in range(1, n + 1):
-        im = _arkush(seed0 + i * 37)
-        if scale != 1.0:
-            im = im.resize((int(W * scale), int(H * scale)), Image.Resampling.LANCZOS)
-        im.save(d / f"{i:04d}.jpg", "JPEG", quality=quality)
+        key = (seed0 + i * 37, quality, scale)
+        disk = _DYSK / f"{key[0]}_q{quality}_s{scale}.jpg" if _DYSK else None
+        if key not in _KADRY and disk is not None and disk.is_file():
+            _KADRY[key] = disk.read_bytes()
+        if key not in _KADRY:
+            im = _arkush(key[0])
+            if scale != 1.0:
+                im = im.resize((int(W * scale), int(H * scale)), Image.Resampling.LANCZOS)
+            buf = io.BytesIO()
+            im.save(buf, "JPEG", quality=quality)
+            _KADRY[key] = buf.getvalue()
+            if disk is not None:
+                tmp = disk.with_suffix(".part")
+                tmp.write_bytes(_KADRY[key])
+                tmp.replace(disk)
+        (d / f"{i:04d}.jpg").write_bytes(_KADRY[key])
     return d
 
 

@@ -49,7 +49,7 @@ from nyshporka.sources.base import (
     ProgressFn,
     SourceError,
 )
-from nyshporka.sources.http import Fetcher, HttpError
+from nyshporka.sources.http import Fetcher, HttpError, offline
 from nyshporka.utils.atomic import atomic_write_bytes
 
 BASE = "https://archium.dahmo.gov.ua"
@@ -393,6 +393,7 @@ class ArchiumSource:
         self.base = self.site.url or BASE
         self.id = self.site.source_id or f"archium-{self.repo.lower()}"
         self.label = f"ARCHIUM ({self._repo_label()})"
+        self._fetcher = fetcher
         self.http = fetcher or Fetcher(base=self.base)
 
     def _default_site(self) -> Site:
@@ -527,6 +528,11 @@ class ArchiumSource:
         needle = (q or "").strip()
         if not needle:
             return []
+        # 🔴 Вимкнена мережа — відмова, а не порожня видача (як у решти живих
+        # джерел). Без цього рядка тести `catalog.search` ходили на сам сайт:
+        # 30 с таймауту на запит і стук у чужий сервер із кожного прогону.
+        if offline() and self._fetcher is None:
+            raise SourceError(f"мережу вимкнено в цьому середовищі — {self.label} не опитано")
         want = _num(fond) if fond else None
         out: list[SearchRow] = []
         with self.http.client() as c:

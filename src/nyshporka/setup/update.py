@@ -192,6 +192,13 @@ def days_since_check() -> int | None:
 
 def latest(timeout: float = TIMEOUT) -> Release:
     """Спитати PyPI. Мережа мовчить — це стан «не знаємо», а не поламка."""
+    from nyshporka.sources.http import offline
+
+    # Заборона мережі діє й тут: `update.check` проходять тести всіх операцій
+    # підряд, і без цього рядка кожен прогін питав справжній pypi.org.
+    if offline():
+        return Release(installed=__version__,
+                       why="мережу вимкнено в цьому середовищі — pypi.org не питали")
     mark_checked()
     req = Request(PYPI_JSON, headers={"Accept": "application/json"})
     try:

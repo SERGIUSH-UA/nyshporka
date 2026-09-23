@@ -27,6 +27,7 @@ import tempfile
 from pathlib import Path
 
 import pytest
+import typer.testing as typer_testing
 
 from nyshporka.core import workspace as W
 from nyshporka.skills import ENV_NO_SYNC as SKILL_SYNC_OFF
@@ -80,6 +81,40 @@ _ENV = (
     "NYSHPORKA_ARCHIVES_PACK", "NYSHPORKA_PROXY_URL", "MEGEN_PROXY_URL",
     "NYSHPORKA_XRATE_DIR", "MEGEN_XRATE_DIR",
 )
+
+
+def _app_shape(app) -> tuple:
+    """Відбиток складу Typer-застосунку: кожна команда, група й колбек."""
+    cb = app.registered_callback
+    return (
+        id(cb.callback) if cb else None,
+        tuple((id(c), id(c.callback)) for c in app.registered_commands),
+        tuple((id(g), g.name, _app_shape(g.typer_instance))
+              for g in app.registered_groups if g.typer_instance is not None),
+    )
+
+
+_BUILT: dict[int, tuple] = {}
+_build_command = typer_testing._get_command
+
+
+def _get_command_once(app):
+    """`CliRunner.invoke` щоразу збирав ВСЕ дерево CLI наново: ~270 команд,
+    `get_type_hints` на кожну — 0.15 с на виклик, а викликів у наборі сотні.
+
+    Збірка кешується за застосунком і його складом: тест, що додав чи
+    підмінив команду, отримує свіжу збірку. Сам застосунок тримається в кеші
+    — інакше `id` після збирання сміття міг би дістатися іншому об'єкту.
+    """
+    shape = _app_shape(app)
+    hit = _BUILT.get(id(app))
+    if hit is None or hit[0] is not app or hit[1] != shape:
+        hit = (app, shape, _build_command(app))
+        _BUILT[id(app)] = hit
+    return hit[2]
+
+
+typer_testing._get_command = _get_command_once
 
 
 @pytest.fixture(scope="session")

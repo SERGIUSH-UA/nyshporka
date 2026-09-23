@@ -155,12 +155,23 @@ def test_the_numbers_in_the_agent_docs_are_the_real_ones():
     assert not bad, f"числа в surface.md розійшлися з реєстром: {bad}"
 
 
-def test_every_op_is_reachable_from_the_command_line():
+def test_every_op_is_reachable_from_the_command_line(monkeypatch):
     """CLI повний за побудовою: `nysh op <ім'я>` дістає будь-яку операцію.
 
     Саме тому командний рядок не може відстати від агента — не тому, що ми
     пам'ятаємо дописати команду.
+
+    Тіла операцій підмінено: тут перевіряється шлях від CLI до реєстру, а
+    справжнє виконання кожної операції з `{}` коштувало ~11 с і нічого до
+    перевірки не додавало.
     """
+    import dataclasses
+
+    from nyshporka.core.envelope import ok
+
+    for op in O.all_ops():
+        monkeypatch.setitem(O.REGISTRY.ops, op.name,
+                            dataclasses.replace(op, fn=lambda _args: ok()))
     for op in O.all_ops():
         res = runner.invoke(app, ["op", op.name, "--args", "{}"])
         # Операція може відмовити по суті (немає простору, потрібні аргументи) —

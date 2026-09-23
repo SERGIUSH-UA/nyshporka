@@ -198,11 +198,16 @@ ALLOW: tuple[tuple[str, str], ...] = (
 
 
 def _allowed(rel: str, rule_id: str) -> bool:
+    allowed = _allowed_ids(rel)
+    return "*" in allowed or rule_id in allowed
+
+
+def _allowed_ids(rel: str) -> set[str]:
+    """Які правила знято для цього файла. Один `Path` на файл, а не на пару
+    (виняток × правило): на історії це було 450 тис. `Path.match` і 28 с."""
     rel = rel.replace("\\", "/")
-    for pat, allowed in ALLOW:
-        if (rel == pat or Path(rel).match(pat)) and allowed in ("*", rule_id):
-            return True
-    return False
+    p = Path(rel)
+    return {allowed for pat, allowed in ALLOW if rel == pat or p.match(pat)}
 
 
 @dataclass
@@ -229,7 +234,15 @@ def scan_text(rel: str, text: str, where: str | None = None) -> list[Finding]:
     # першій редакції `_allowed` стояв усередині подвійного циклу й конструював
     # `Path` для glob-матчингу на кожну пару (рядок × правило): на історії це
     # 1.65 млн викликів і 49 секунд там, де роботи на секунду.
-    rules = [r for r in RULES if not _allowed(rel, r.id)]
+    allowed = _allowed_ids(rel)
+    if "*" in allowed:
+        return out
+    # Префільтр по всьому тексту: збіг у рядку завжди є й збігом у тексті
+    # (`^` у `abs-path-nix` стоїть поряд із `\s`, а `\s` ловить `\n`), тож
+    # правило без жодного збігу в тексті рядками можна не ганяти. Зворотне не
+    # гарантоване (`\s*` у `bearer` перескакує рядок) — тому остаточне слово
+    # за порядковим проходом нижче. На історії: 17 млн `search` → ~30 тис.
+    rules = [r for r in RULES if r.id not in allowed and r.pattern.search(text)]
     if not rules:
         return out
     for i, line in enumerate(text.splitlines(), 1):

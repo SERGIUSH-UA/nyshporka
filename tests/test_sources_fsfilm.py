@@ -215,10 +215,19 @@ def test_zero_length_cache_is_treated_as_missing(src: FilmMirrorSource) -> None:
     blob = src.cache_dir / "moldova.json.gz"
     blob.write_bytes(b"")
     src._trees.clear()
-    # Мережі немає, тож спроба перекачати впаде — але саме спроба і потрібна:
-    # мовчазне «файл є» було б гіршою поведінкою.
-    with pytest.raises(Exception, match=r"(?i)example\.invalid|resolve|connect|name"):
+    # Потрібна саме спроба перекачати: мовчазне «файл є» було б гіршою
+    # поведінкою. Заглушка замість справжнього DNS-збою — той чекав ретраїв ~30 с.
+    asked: list[str] = []
+
+    class _Offline:
+        def get(self, url: str, **_kw):
+            asked.append(url)
+            raise ConnectionError(f"мережі немає: {url}")
+
+    src.http = _Offline()  # type: ignore[assignment]
+    with pytest.raises(ConnectionError):
         src.tree("moldova")
+    assert asked == ["https://example.invalid/moldova.json.gz"]
     assert not blob.exists(), "порожній блоб мусив бути прибраний"
 
 
