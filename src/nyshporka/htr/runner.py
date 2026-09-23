@@ -323,8 +323,15 @@ def emit(enabled: bool, phase: str, **kw) -> None:
     """
     if enabled:
         print(PROGRESS_PREFIX + json.dumps(
-            {"v": PROGRESS_SCHEMA, "phase": phase, **kw}, ensure_ascii=False),
+            {"v": PROGRESS_SCHEMA, "phase": phase, **_EMIT_EXTRA, **kw},
+            ensure_ascii=False),
             flush=True)
+
+
+#: Поля, які режим черги (`--queue`) додає до КОЖНОЇ події: номер справи в
+#: черзі. Без нього події різних справ одного процесу нерозрізненні — шард, що
+#: дочитав свою частину справи i, уже читає i+1, поки сусіди закінчують i.
+_EMIT_EXTRA: dict = {}
 
 
 # ── підняття контрасту (вицвіле чорнило) ─────────────────────────────────────
@@ -2141,8 +2148,20 @@ DRAIN_DIR = "_drain"
 
 
 def drain_requested(out_dir: Path, shard_k: int) -> bool:
-    """Чи просили злити шард `shard_k` (0-based, як з `parse_shard`)."""
-    return (out_dir / DRAIN_DIR / str(shard_k + 1)).exists()
+    """Чи просили злити шард `shard_k` (0-based, як з `parse_shard`).
+
+    У режимі черги злив приходить на рівні ЧЕРГИ (`<тека черги>/_drain/<k>`):
+    регулятор не знає, у якій справі шард зараз, а злиття стосується процесу,
+    а не справи.
+    """
+    name = str(shard_k + 1)
+    if (out_dir / DRAIN_DIR / name).exists():
+        return True
+    return _QUEUE_DIR is not None and (_QUEUE_DIR / DRAIN_DIR / name).exists()
+
+
+#: Тека файла черги (`--queue`); None — звичайний режим однієї справи.
+_QUEUE_DIR: Path | None = None
 
 
 # ── адаптивна стеля сегментації ──────────────────────────────────────────────
@@ -2606,8 +2625,8 @@ def main() -> int:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--case-dir", required=True)
-    ap.add_argument("--out-dir", required=True)
+    ap.add_argument("--case-dir", default="")
+    ap.add_argument("--out-dir", default="")
     ap.add_argument("--model", required=True,
                     help="модель розпізнавання: .mlmodel (kraken/Скриба) "
                          "або .pt (PARSeq/Писар) — рушій визначається розширенням")
@@ -2826,6 +2845,11 @@ def main() -> int:
                          "Кадр, що двічі поклав процес, іде в карантин, щоб "
                          "справа дочиталась без нього")
     ap.add_argument("--progress-json", action="store_true")
+    ap.add_argument("--queue", default="",
+                    help="файл черги (JSON-рядки {case_dir, out_dir, case_key?, "
+                         "seg_cache_dir?, index?}; рядок {\"end\": true} — кінець). "
+                         "Моделі вантажаться ОДИН раз, справи йдуть по черзі; файл "
+                         "може дописуватись під час роботи")
     args = ap.parse_args()
 
     # Дані, яких раннер не має знати сам: чиє прізвище рятуємо, яка шифра справи,
@@ -2840,6 +2864,95 @@ def main() -> int:
         ap.error("--rescue без --rescue-spec: рятувальний прохід не знає, "
                  "які рядки відбирати")
 
+    if args.queue:
+        return run_queue(args)
+    if not args.case_dir or not args.out_dir:
+        ap.error("потрібні --case-dir і --out-dir (або --queue)")
+    return _main_case(args)
+
+
+def run_queue(args: argparse.Namespace) -> int:
+    """Пройти справи з файла черги ОДНИМ процесом: моделі вантажаться раз.
+
+    🔴🔴 Навіщо. Бокс-раннер піднімав шарди заново на КОЖНУ справу: 23.09.2026
+    на черзі 194 справ по ~15 сторінок шард жив 20 с, із них 7 с — моделі, а
+    флот простоював на хвості кожної справи, поки останній шард дочитував свою
+    сторінку. Тут шард, що дочитав свою частину справи i, одразу бере сторінки
+    справи i+1 — клеймами, як і в межах однієї справи.
+
+    Файл черги дописує бокс-раннер у міру того, як справи готові (кадри
+    розпаковано, стан відновлено). Рядок `{"end": true}` — кінець; доти, доки
+    його немає, шард чекає на нові рядки. Злитий регулятором шард виходить із
+    черги зовсім.
+    """
+    import copy
+
+    global _QUEUE_DIR
+    qfile = Path(args.queue)
+    _QUEUE_DIR = qfile.parent
+    shard_k, _ = parse_shard(args.shard)
+    cache: dict = {}
+    pos = 0
+    worst = 0
+    last_beat = 0.0
+    while True:
+        try:
+            lines = [ln for ln in qfile.read_text(encoding="utf-8").splitlines() if ln.strip()]
+        except OSError:
+            lines = []
+        if pos >= len(lines):
+            if drain_requested(qfile.parent, shard_k):
+                cache["drained"] = True
+                break
+            # Серцебиття: вотчдог бокс-раннера рахує тишу шарда, а чекання
+            # наступної справи (кадри ще качаються) — не зависання.
+            if time.time() - last_beat >= 20:
+                emit(args.progress_json, "queue_wait", done_cases=pos)
+                last_beat = time.time()
+            time.sleep(0.5)
+            continue
+        try:
+            entry = json.loads(lines[pos])
+        except json.JSONDecodeError:
+            # рядок ще дописується — перечитати за мить
+            time.sleep(0.2)
+            continue
+        pos += 1
+        if entry.get("end"):
+            break
+        a = copy.copy(args)
+        a.queue = ""
+        a.case_dir = str(entry["case_dir"])
+        a.out_dir = str(entry["out_dir"])
+        if entry.get("case_key"):
+            a.case_key = str(entry["case_key"])
+        if entry.get("seg_cache_dir"):
+            a.seg_cache_dir = str(entry["seg_cache_dir"])
+        _EMIT_EXTRA.clear()
+        _EMIT_EXTRA["qi"] = int(entry.get("index") or pos)
+        rc = _main_case(a, cache)
+        _EMIT_EXTRA.clear()
+        # 3 — «неповно» з погляду цього шарда (решту читають сусіди або вона в
+        # карантині); повноту справи доводить бокс-раннер із диска.
+        if rc not in (0, 3):
+            worst = rc
+        if cache.get("drained"):
+            break
+    emit(args.progress_json, "queue_done", cases=pos, drained=bool(cache.get("drained")))
+    return worst
+
+
+def _cached(cache: dict | None, key: tuple, make):
+    """Модель із кешу черги або щойно завантажена (і покладена в кеш)."""
+    if cache is None:
+        return make()
+    if key not in cache:
+        cache[key] = make()
+    return cache[key]
+
+
+def _main_case(args: argparse.Namespace, cache: dict | None = None) -> int:
+    """Одна справа. `cache` — моделі й патчі, спільні для черги (`run_queue`)."""
     case_dir = Path(args.case_dir)
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -2848,7 +2961,10 @@ def main() -> int:
     # наглядач сам нічого не вантажить (ні моделей, ні GPU) — лише перезапускає
     # воркер, поки на диску є кадри без тексту. `NYSHPORKA_HTR_CHILD` розриває
     # рекурсію: воркер бачить прапорець, але вже не делегує
-    if args.supervise > 0 and not os.environ.get("NYSHPORKA_HTR_CHILD"):
+    # У черзі голови немає: процес живе через справи, а його смерть і завислі
+    # сторінки веде бокс-раннер (вотчдог, карантин, догін по диску).
+    if (args.supervise > 0 and not os.environ.get("NYSHPORKA_HTR_CHILD")
+            and cache is None):
         return supervise(args, case_dir, out_dir)
 
     engine = detect_engine(args.model)
@@ -3000,45 +3116,55 @@ def main() -> int:
               "правильністю) — орієнтацію вирішують детектор профілю і CNN",
               flush=True)
     t0 = time.time()
-    sigmas = install_sato_sigmas(args.sato_sigmas)
-    if sigmas:
-        print(f"[htr-run] sato sigmas={list(sigmas)} (рідні kraken — 1,3,5,7,9)",
-              flush=True)
-    if args.gpu_sato and device.startswith("cuda"):
-        # ставиться поверх звуження sigmas — той самий патч skimage.filters.sato,
-        # але згортки йдуть на карті. Вихід звірено з CPU-версією до float32-епсилону
-        # (`nyshporka.htr.patches.gpu_sato_verify`), тож полігони не змінюються.
+    warm = cache is not None and bool(cache.get("patched"))
+    if not warm:
+        sigmas = install_sato_sigmas(args.sato_sigmas)
+        if sigmas:
+            print(f"[htr-run] sato sigmas={list(sigmas)} (рідні kraken — 1,3,5,7,9)",
+                  flush=True)
+        if args.gpu_sato and device.startswith("cuda"):
+            # ставиться поверх звуження sigmas — той самий патч skimage.filters.sato,
+            # але згортки йдуть на карті. Вихід звірено з CPU-версією до float32-епсилону
+            # (`nyshporka.htr.patches.gpu_sato_verify`), тож полігони не змінюються.
+            sys.path.insert(0, str(_PATCHES_DIR))
+            from gpu_sato import install_gpu_sato
+            used = install_gpu_sato(sigmas or (1, 3, 5, 7, 9), device=device)
+            print(f"[htr-run] sato НА GPU, sigmas={list(used)}", flush=True)
+        elif not args.gpu_sato:
+            # вимкнення прискорення має бути гучним: різниця ×2 у часі сторінки, і
+            # найдешевший спосіб її діагностувати — побачити причину в шапці логу
+            print("[htr-run] ⚠ sato НА CPU (--no-gpu-sato) — сторінка коштує вдвічі",
+                  flush=True)
         sys.path.insert(0, str(_PATCHES_DIR))
-        from gpu_sato import install_gpu_sato
-        used = install_gpu_sato(sigmas or (1, 3, 5, 7, 9), device=device)
-        print(f"[htr-run] sato НА GPU, sigmas={list(used)}", flush=True)
-    elif not args.gpu_sato:
-        # вимкнення прискорення має бути гучним: різниця ×2 у часі сторінки, і
-        # найдешевший спосіб її діагностувати — побачити причину в шапці логу
-        print("[htr-run] ⚠ sato НА CPU (--no-gpu-sato) — сторінка коштує вдвічі",
-              flush=True)
+        import seg_ceiling
+        seg_ceiling.install(args.max_endpoints)
+        if args.ceiling_retry and args.ceiling_retry > args.max_endpoints:
+            print(f"[seg-ceiling] сторінку, що впреться у стелю, перепускаю з "
+                  f"{args.ceiling_retry // 2} рядками", flush=True)
+        if args.fast_geom:
+            sys.path.insert(0, str(_PATCHES_DIR))
+            from fast_geom import install as install_fast_geom
+            install_fast_geom(verbose=True)
+        else:
+            print("[htr-run] ⚠ геометрія kraken без прискорення (--no-fast-geom)",
+                  flush=True)
+        if args.seg_resize:
+            # ⚠ ДО `install_gpu_lock` нижче: лок обгортає те, що лежить у
+            # `blla.compute_segmentation_map` на момент установки, і патч мусить
+            # опинитись ПІД локом, а не над ним.
+            sys.path.insert(0, str(_PATCHES_DIR))
+            from seg_resize import install as install_seg_resize
+            install_seg_resize(verbose=True)
+        if cache is not None:
+            cache["patched"] = True
     sys.path.insert(0, str(_PATCHES_DIR))
     import seg_ceiling
-    seg_ceiling.install(args.max_endpoints)
-    if args.ceiling_retry and args.ceiling_retry > args.max_endpoints:
-        print(f"[seg-ceiling] сторінку, що впреться у стелю, перепускаю з "
-              f"{args.ceiling_retry // 2} рядками", flush=True)
-    if args.fast_geom:
-        sys.path.insert(0, str(_PATCHES_DIR))
-        from fast_geom import install as install_fast_geom
-        install_fast_geom(verbose=True)
-    else:
-        print("[htr-run] ⚠ геометрія kraken без прискорення (--no-fast-geom)",
-              flush=True)
-    if args.seg_resize:
-        # ⚠ ДО `install_gpu_lock` нижче: лок обгортає те, що лежить у
-        # `blla.compute_segmentation_map` на момент установки, і патч мусить
-        # опинитись ПІД локом, а не над ним.
-        sys.path.insert(0, str(_PATCHES_DIR))
-        from seg_resize import install as install_seg_resize
-        install_seg_resize(verbose=True)
+    if warm:
+        # стеля рядків — своя в кожної справи (сусід міг підняти її на попередній)
+        seg_ceiling.set_ceiling(args.max_endpoints)
     from kraken.kraken import SEGMENTATION_DEFAULT_MODEL
-    rec_model = load_recognizer(args.model, engine, device)
+    rec_model = _cached(cache, ("rec", args.model, device),
+                        lambda: load_recognizer(args.model, engine, device))
     globals()["VOICE_BATCH"] = max(1, int(args.voice_batch))
     # ── ансамбль і beam: додаткові виходи з однієї сегментації ───────────────
     # 🤝 Голос може бути іншого рушія, ніж основна модель: `.mlmodel` (Дяк,
@@ -3068,9 +3194,13 @@ def main() -> int:
             tag = (p.stem.replace("pysar_cyr_", "").replace("diak_cyr_", "diak_")
                    .replace("skryba_f792_", "skryba_"))
             if vengine == "kraken":
-                extra_recs.append((tag, "kraken", load_kraken_voice(str(p), device)))
+                extra_recs.append((tag, "kraken", _cached(
+                    cache, ("voice", str(p), device),
+                    lambda p=p: load_kraken_voice(str(p), device))))
             else:
-                extra_recs.append((tag, "parseq", load_recognizer(str(p), "parseq", device)))
+                extra_recs.append((tag, "parseq", _cached(
+                    cache, ("rec", str(p), device),
+                    lambda p=p: load_recognizer(str(p), "parseq", device))))
             side_dirs[tag] = out_dir.parent / f"{out_dir.name}-{tag}"
             side_scripts[tag] = model_script(str(p), vengine)
         if args.beam > 1:
@@ -3116,6 +3246,9 @@ def main() -> int:
         key={"sato": args.sato_sigmas, "kraken": KRAKEN_PIN_VERSION,
              "max_endpoints": args.max_endpoints},
         merge=merge_cfg, autocast=args.seg_autocast)
+    if cache is not None and cache.get("seg_model") is not None:
+        # модель сегментації — та сама на всю чергу; тека кешу — своя в справи
+        segmenter._model = cache["seg_model"]
     if merge_cfg:
         print(f"[htr-run] 🧵 злиття розсічених baseline увімкнено "
               f"(зазор ≤{args.merge_gap}×висоти, вертикаль ≤{args.merge_vtol}×) "
@@ -3142,9 +3275,12 @@ def main() -> int:
         args.gpu_lock = str(out_dir / f"_gpu.{_device_slug(device)}.lock")
         print(f"[htr-run] лок GPU-фази виведено сам: {Path(args.gpu_lock).name} "
               f"(шардів {shard_n} на {device})", flush=True)
-    if args.gpu_lock and device.startswith("cuda"):
+    if args.gpu_lock and device.startswith("cuda") and not (
+            cache is not None and cache.get("gpu_lock")):
         install_gpu_lock(Path(args.gpu_lock), device, keep_cache=args.keep_cache)
         print(f"[htr-run] GPU-фаза під локом {Path(args.gpu_lock).name}", flush=True)
+        if cache is not None:
+            cache["gpu_lock"] = True
     # Орієнтація перевіряється лише на явну вимогу. Дефолт «сторінки рівні»
     # обраний заміром, а не з обережності: на ДАВО 904-24-24 детектори дали 53
     # спрацювання з 476 сторінок і жодного правильного — 51 спростував
@@ -3157,7 +3293,8 @@ def main() -> int:
               "сторінки» / --orient-check вмикає детектори)", flush=True)
     orient_net = None
     if args.orient_check and args.orient_model and Path(args.orient_model).is_file():
-        orient_net = load_orient_net(args.orient_model, device)
+        orient_net = _cached(cache, ("orient", args.orient_model, device),
+                             lambda: load_orient_net(args.orient_model, device))
         if orient_net is not None:
             print("[htr-run] орієнтація: CNN-класифікатор", flush=True)
     print(f"[htr-run] моделі завантажено за {time.time() - t0:.0f} с", flush=True)
@@ -3591,6 +3728,10 @@ def main() -> int:
             "pages": pages_meta, "done": len(pages_meta), "failed": []},
             ensure_ascii=False, indent=1))
         print(f"[htr-run] побічний вихід {d.name}: {len(pages_meta)} стор.", flush=True)
+    if cache is not None:
+        cache["seg_model"] = segmenter._model
+        if drained:
+            cache["drained"] = True
     # 🔴 приймач повноти — з диска, а не з лічильників: `done/skipped/failed`
     # рахує лише те, до чого дійшов цей процес, тож сторінка, загублена без
     # винятку, у них не видна взагалі. Неповний прогін не має права вийти нулем:
