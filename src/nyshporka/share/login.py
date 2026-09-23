@@ -39,9 +39,32 @@ TIMEOUT = 600.0
 #: Форма несе лише ключ і state; більше — це вже не наша сторінка.
 _MAX_BODY = 4096
 
-_GOTOVO = """<!doctype html><meta charset="utf-8"><title>Нишпорка</title>
-<body style="font-family:system-ui,sans-serif;max-width:32rem;margin:4rem auto;padding:0 1rem">
-<h1>{title}</h1><p>{text}</p></body>"""
+#: Сторінка відповіді петлі. Картинки беруться з сайту, з якого людина щойно
+#: прийшла: у пакеті їх немає, а без мережі лишиться текст — alt порожній
+#: у маскота і змістовний у лого.
+_GOTOVO = """<!doctype html><html lang="uk"><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{title} — Нишпорка</title>
+<style>
+:root{{--bg:#f6f0e4;--card:#fffaf1;--fg:#2b2118;--muted:#6b5b4a;--line:#e3d6c1;--acc:#2f5d3a}}
+@media (prefers-color-scheme:dark){{:root{{--bg:#1c1712;--card:#26201a;--fg:#f1e8da;
+--muted:#b9a88f;--line:#3a3128;--acc:#8fc79b}}}}
+body{{margin:0;min-height:100vh;display:grid;place-items:center;background:var(--bg);
+color:var(--fg);font:16px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif;padding:16px}}
+main{{max-width:26rem;width:100%;text-align:center}}
+.maskot{{width:9rem;height:auto;margin-bottom:-.6rem}}
+.card{{background:var(--card);border:1px solid var(--line);border-radius:16px;
+padding:1.75rem 1.5rem;box-shadow:0 1px 2px rgba(0,0,0,.06)}}
+.logo{{height:2.6rem;width:auto;margin-bottom:1rem}}
+h1{{font-size:1.6rem;margin:0 0 .5rem;color:var(--acc)}}
+p{{margin:0;color:var(--muted)}} code{{font-size:.9em}}
+</style>
+<main>
+<img class="maskot" src="{site}/static/img/{maskot}" alt="">
+<div class="card">
+<img class="logo" src="{site}/static/img/logo.webp" alt="Нишпорка">
+<h1>{title}</h1><p>{text}</p>
+</div></main></html>"""
 
 
 def site_url(site: str = "") -> str:
@@ -81,6 +104,7 @@ def forget() -> bool:
 
 
 class _Pryimach(HTTPServer):
+    site: str
     state: str
     token: str
     done: threading.Event
@@ -93,8 +117,10 @@ class _Handler(BaseHTTPRequestHandler):
         # Типовий обробник пише кожен запит у stderr — посеред виводу команди.
         return
 
-    def _page(self, code: int, title: str, text: str) -> None:
-        body = _GOTOVO.format(title=title, text=text).encode("utf-8")
+    def _page(self, code: int, title: str, text: str,
+              maskot: str = "maskot-lupa.webp") -> None:
+        body = _GOTOVO.format(title=title, text=text, site=self.server.site,
+                              maskot=maskot).encode("utf-8")
         self.send_response(code)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
@@ -121,8 +147,10 @@ class _Handler(BaseHTTPRequestHandler):
                        "Запустіть <code>nysh share login</code> ще раз.")
             return
         self.server.token = token
-        self._page(200, "Готово",
-                   "Нишпорка отримала ключ. Цю вкладку можна закрити.")
+        self._page(200, "Готово!",
+                   "Нишпорка отримала ключ і вже може віддавати ваше прочитане "
+                   "в Супрягу. Цю вкладку можна закрити.",
+                   maskot="maskot-znakhidka.webp")
         self.server.done.set()
 
 
@@ -141,12 +169,13 @@ def login(
     _keyring()
 
     srv = _Pryimach(("127.0.0.1", 0), _Handler)
+    srv.site = site_url(site)
     srv.state = secrets.token_urlsafe(24)
     srv.token = ""
     srv.done = threading.Event()
     port = srv.server_address[1]
 
-    url = f"{site_url(site)}/cli?{urlencode({'port': port, 'state': srv.state})}"
+    url = f"{srv.site}/cli?{urlencode({'port': port, 'state': srv.state})}"
     thread = threading.Thread(target=srv.serve_forever, name="supriaha-login", daemon=True)
     thread.start()
     try:
