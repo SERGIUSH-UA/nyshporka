@@ -266,3 +266,29 @@ def test_seriia_ne_pakuietsia(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_nazva_z_duzhok_rendera(own: str, want: str) -> None:
     """Паспорт рендера несе справжню назву в дужках — її й брати."""
     assert opys.title(own, None) == want
+
+
+# ── архів поза довідником ────────────────────────────────────────────────────
+
+def test_nevidomyi_arkhiv_poperedzhaie(space: Path) -> None:
+    run = make_run(space / "reports" / "htr", "spr-8433")
+    m = manifest_for([bundle.voice_of(run)])
+    m.case.update(repo="XYZARCH", shifra="XYZARCH 1-1-5")
+
+    assert "unknown_archive" in [c for c, _ in gates.check(m).warnings]
+    m.case["repo_name"] = "Архів міста Кракова"
+    assert "unknown_archive" not in [c for c, _ in gates.check(m).warnings]
+
+
+def test_vidomyi_arkhiv_movchyt(space: Path) -> None:
+    run = make_run(space / "reports" / "htr", "spr-8433")
+    m = manifest_for([bundle.voice_of(run)])
+    assert "unknown_archive" not in [c for c, _ in gates.check(m).warnings]
+
+
+def test_archive_name_ide_v_manifest(space: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    run = make_run(space / "reports" / "htr", "spr-8433")
+    monkeypatch.setattr(PUB, "resolve_runs",
+                        lambda scope: ([run], {"key": "", "shifra": "ДАХмО 315-1-8433"}))
+    got = PUB.pack("ДАХмО 315-1-8433", dry_run=True, archive_name="  Архів міста Кракова ")
+    assert got["manifest"]["case"]["repo_name"] == "Архів міста Кракова"

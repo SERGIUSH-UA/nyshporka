@@ -80,6 +80,10 @@ def pack_cmd(
                                  help="ліцензія тексту; порожньо — з профілю"),
     source_terms: str = typer.Option("", "--source-terms",
                                      help="умови джерела сканів"),
+    archive_name: str = typer.Option("", "--archive-name",
+                                     help="повна назва архіву, якщо його немає "
+                                          "в довіднику (шифра тоді — латинським "
+                                          "кодом: KOD/фонд-опис/справа)"),
     as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Зібрати пакет прочитаного для обміну.
@@ -94,7 +98,7 @@ def pack_cmd(
         "hash_frames": hash_frames, "partial": partial, "dry_run": dry_run,
         "publisher": publisher, "contact": contact, "site": site, "note": note,
         "link": list(link), "extra": list(extra), "license": license_,
-        "source_terms": source_terms})
+        "source_terms": source_terms, "archive_name": archive_name})
     if _answer(env, as_json):
         return
     d = env.data or {}
@@ -204,17 +208,23 @@ def suggest_cmd(
     skip: str = typer.Option("", "--skip", help="більше не питати про цю справу"),
     why: str = typer.Option("", "--why", help="чому не віддаєте"),
     all_: bool = typer.Option(False, "--all", help="віддати все з переліку"),
+    ready: bool = typer.Option(False, "--ready",
+                               help="лише готові до віддачі й ті, де в пулі бракує "
+                                    "рамок (разом із --all пакує лише їх)"),
+    limit: int = typer.Option(30, "--limit", help="скільки рядків показати"),
     as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Що прочитано, але ще не віддано.
 
-    Без аргументів — просто перелік. `--all` пакує все; далі кожен пакет
-    віддається командою `publish`.
+    Без аргументів — перелік зі статусами: готова, у пулі без рамок,
+    неповна, без кадрів. Що вже віддано, вирішує зріз пулу
+    (`nysh share sync`); без зрізу — журнал пакувань. `--all` пакує все;
+    далі кожен пакет віддається командою `publish`.
     """
     from nyshporka import ops as O
 
     env = O.call("share.suggest",
-                 {"take": take, "skip": skip, "why": why, "all": all_})
+                 {"take": take, "skip": skip, "why": why, "all": all_, "ready": ready})
     if _answer(env, as_json):
         return
     d = env.data or {}
@@ -228,12 +238,20 @@ def suggest_cmd(
         _notes(env)
         return
 
-    console.print(f"[bold]{len(rows)}[/bold] прочитаних справ ще не в Супрязі:\n")
-    for r in rows[:30]:
-        console.print(f"  {r['shifra'] or r['case_key']:<28} {r['pages']:>5} стор."
-                      f" · {r['model'] or '—'}")
-    if len(rows) > 30:
-        console.print(f"[dim]… і ще {len(rows) - 30}[/dim]")
+    zriz = d.get("pool_snapshot")
+    pidsumok = " · ".join(f"{k} {v}" for k, v in (d.get("summary") or {}).items() if v)
+    console.print(f"[bold]{len(rows)}[/bold] прочитаних справ ще не в Супрязі · {pidsumok}")
+    console.print("[dim]" + (f"звірено зі зрізом пулу від {zriz}" if zriz else
+                             "зрізу пулу немає — звірено лише з журналом пакувань; "
+                             "точніше: nysh share sync") + "[/dim]\n")
+    from nyshporka.share.suggest import READY_STATUSES
+
+    shown = [r for r in rows if not ready or r.get("status") in READY_STATUSES]
+    for r in shown[:limit]:
+        console.print(f"  {r.get('status', ''):<17} {r['shifra'] or r['case_key']:<28} "
+                      f"{r['pages']:>5}/{r['frames'] or '—':<5} · {r['model'] or '—'}")
+    if len(shown) > limit:
+        console.print(f"[dim]… і ще {len(shown) - limit} (--limit N)[/dim]")
 
     packed = d.get("packed") or []
     if packed:

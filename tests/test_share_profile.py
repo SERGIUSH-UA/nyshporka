@@ -246,3 +246,55 @@ def test_zhurnal_lyshaie_slid_prydatnyi_dlia_ochey(space: Path) -> None:
     assert json.dumps(row, ensure_ascii=False)
     assert row["shifra"] == "ДАХмО 315-1-9"
     assert row["event"] == S.DECLINED
+
+
+# ── зріз пулу: «віддано» — те, що в пулі, а не те, що спаковано ──────────────
+
+def _ryadok(key: str, shifra: str, pages: int = 3, frames: int = 3,
+            name: str = "") -> dict[str, Any]:
+    return {"case_key": key, "shifra": shifra, "pages_done": pages, "shared": "",
+            "updated": "2026-09-20", "frames": frames, "model": "m", "title": "",
+            "name": name or key.replace("/", "-")}
+
+
+def test_zriz_pulu_vyrishuie_viddane(space: Path, monkeypatch: Any) -> None:
+    """🔴 Спаковане ≠ віддане: зі зрізом пулу перелік вірить пулу, не журналу."""
+    rows = [_ryadok("DAHMO/315/1", "ДАХмО 315-1-1"),
+            _ryadok("DAHMO/315/2", "ДАХмО 315-1-2"),
+            _ryadok("DAHMO/315/3", "ДАХмО 315-1-3"),
+            _ryadok("DAHMO/315/4", "ДАХмО 315-1-4", pages=1, frames=10),
+            _ryadok("DAHMO/315/5", "ДАХмО 315-1-5", frames=0)]
+    monkeypatch.setattr("nyshporka.htr_store.list_cases", lambda: rows)
+    journal.record(journal.PACKED, shifra="ДАХмО 315-1-1", case_key="DAHMO/315/1")
+    stany = {"DAHMO/315/2": "text+geom", "DAHMO/315/3": "text"}
+    monkeypatch.setattr("nyshporka.share.pool.meta", lambda: {"taken_at": "x"})
+    monkeypatch.setattr(S, "_u_puli", lambda key: stany.get(key, "none"))
+    monkeypatch.setattr(S, "_ye_ramky", lambda name: True)
+
+    got = {r["case_key"]: r["status"] for r in S.nepodileni()}
+
+    assert got == {"DAHMO/315/1": S.GOTOVA, "DAHMO/315/3": S.BEZ_RAMOK,
+                   "DAHMO/315/4": S.NEPOVNA, "DAHMO/315/5": S.BEZ_KADRIV}
+
+
+def test_bez_ramok_na_dysku_ne_pytaie(space: Path, monkeypatch: Any) -> None:
+    """Текст у пулі, а рамок на диску немає — довозити нічого."""
+    monkeypatch.setattr("nyshporka.htr_store.list_cases",
+                        lambda: [_ryadok("DAHMO/315/3", "ДАХмО 315-1-3")])
+    monkeypatch.setattr("nyshporka.share.pool.meta", lambda: {"taken_at": "x"})
+    monkeypatch.setattr(S, "_u_puli", lambda key: "text")
+    monkeypatch.setattr(S, "_ye_ramky", lambda name: False)
+    assert S.nepodileni() == []
+
+
+def test_synonimy_arkhivu(monkeypatch: Any) -> None:
+    """Пул пише Вінницький архів `DAVIO`, простір може лишатись на `DAVO`."""
+    from types import SimpleNamespace
+
+    repos = {"DAVIO": SimpleNamespace(same_as="DAVO"), "DAVO": SimpleNamespace(same_as=""),
+             "DAHMO": SimpleNamespace(same_as="")}
+    monkeypatch.setattr("nyshporka.archives.active",
+                        lambda: SimpleNamespace(repositories=repos))
+    assert S._synonimy("DAVO") == ["DAVO", "DAVIO"]
+    assert S._synonimy("DAVIO") == ["DAVIO", "DAVO"]
+    assert S._synonimy("DAHMO") == ["DAHMO"]

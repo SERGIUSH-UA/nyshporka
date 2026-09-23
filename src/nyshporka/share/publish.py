@@ -231,7 +231,8 @@ def build_manifest(scope: str, *,
                    note: str = "", links: list[dict[str, str]] | None = None,
                    extra: dict[str, Any] | None = None,
                    license_text: str = "CC0-1.0",
-                   source_terms: str = "") -> tuple[Manifest, list[Path], list[dict[str, Any]]]:
+                   source_terms: str = "",
+                   archive_name: str = "") -> tuple[Manifest, list[Path], list[dict[str, Any]]]:
     """Скласти заяву пакета. Файл ще не пишеться — спершу ворота."""
     run_dirs, info = resolve_runs(scope)
     key = str(info.get("key") or "")
@@ -280,6 +281,10 @@ def build_manifest(scope: str, *,
     if source_terms:
         lic["source_terms"] = source_terms
     case = _case_block(info, case_dir)
+    if archive_name.strip():
+        # Архіву немає в довіднику — назву дає людина. Сервер покаже її на
+        # картці, доки архів не з'явиться в довіднику пакета.
+        case["repo_name"] = archive_name.strip()[:120]
     row = opys.registry_row(str(case.get("shifra") or ""))
     # Паспорт мовчить або тримає робочу нотатку — назву й роки дає реєстр
     # опису: він вичитаний з друкованого опису фонду, а не складений нами.

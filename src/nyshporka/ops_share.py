@@ -73,6 +73,8 @@ class SharePackArgs(BaseModel):
     license: str = Field(default="", description="ліцензія тексту; "
                                              "порожньо — з профілю")
     source_terms: str = Field(default="", description="умови джерела сканів")
+    archive_name: str = Field(default="", description="повна назва архіву — коли "
+                                                     "його немає в довіднику Нишпорки")
 
 
 @op("share.pack", summary="Спакувати прочитане у файл для обміну",
@@ -106,7 +108,8 @@ def share_pack(a: SharePackArgs) -> Envelope:
                    extra={**_extra(a.extra),
                           **({"partial": a.partial} if a.partial else {})},
                    license_text=a.license or defaults["license"],
-                   source_terms=a.source_terms or defaults["source_terms"])
+                   source_terms=a.source_terms or defaults["source_terms"],
+                   archive_name=a.archive_name)
     except PublishError as exc:
         return fail(str(exc))
     env = ok(got)
@@ -174,6 +177,8 @@ class ShareSuggestArgs(BaseModel):
     skip: str = Field(default="", description="шифра або ключ — більше не питати про неї")
     why: str = Field(default="", description="чому не віддаєте; лишається в журналі")
     all: bool = Field(default=False, description="віддати все, що в переліку")
+    ready: bool = Field(default=False, description="лише готові до віддачі й ті, де "
+                                                   "в пулі бракує рамок")
 
 
 @op("share.suggest", summary="Що прочитано, але ще не віддано",
@@ -201,13 +206,20 @@ def share_suggest(a: ShareSuggestArgs) -> Envelope:
                      "чому саме цю справу лишили")
         return env
 
+    from nyshporka.share import pool
+
     rows = S.nepodileni()
-    data: dict[str, Any] = {"rows": rows, "count": len(rows)}
+    zriz = pool.meta()
+    data: dict[str, Any] = {"rows": rows, "count": len(rows),
+                            "summary": S.pidsumok(rows),
+                            "pool_snapshot": str((zriz or {}).get("taken_at") or "")}
     env = ok(data)
     if not rows:
         return env
 
     cherha = [r for r in rows if not a.take or a.take in (r["case_key"], r["shifra"])]
+    if a.ready:
+        cherha = [r for r in cherha if r.get("status") in S.READY_STATUSES]
     if a.take and not cherha:
         return fail(f"у переліку неподіленого немає «{a.take}»")
     if not (a.take or a.all):

@@ -71,6 +71,83 @@ def vidmovyty(case_key: str, shifra: str = "", why: str = "") -> dict[str, Any]:
                           why=why or "без пояснення")
 
 
+#: Частка прочитаних сторінок від кадрів, з якої справа «готова» до
+#: віддачі без `--partial` — той самий поріг, що у воротах знаменника
+#: здебільшого перевищують із запасом.
+GOTOVA_CHASTKA = 0.8
+
+#: Статуси рядка переліку — у порядку, в якому їх варто віддавати.
+GOTOVA = "готова"
+BEZ_RAMOK = "у пулі без рамок"
+NEPOVNA = "неповна"
+BEZ_KADRIV = "без кадрів"
+STATUSY = (GOTOVA, BEZ_RAMOK, NEPOVNA, BEZ_KADRIV)
+#: Що можна віддати без `--partial` і без ручної роботи.
+READY_STATUSES = (GOTOVA, BEZ_RAMOK)
+
+
+def _u_puli(case_key: str) -> str | None:
+    """Стан справи в зрізі пулу: `none | text | text+geom`; `None` — зрізу немає.
+
+    🔴 Зріз — єдина правда про «опубліковано». Журнал знає лише «пакували»,
+    а спакований пакет міг і не доїхати: так 22.09 десять справ стояли
+    «відданими», хоч геометрія їхня в пул не пішла.
+    """
+    from nyshporka.share import pool
+
+    if pool.meta() is None:
+        return None
+    try:
+        from nyshporka.pagestore import resolve_case
+
+        ref = resolve_case(case_key)
+    except Exception:
+        return "none"
+    for repo in _synonimy(ref.repo):
+        cell = pool.by_key(pool.quad_key(repo, ref.fond, ref.opys or "", ref.spr))
+        if cell is not None and cell.mine is not False:
+            return pool.state_of(cell)
+    return "none"
+
+
+def _synonimy(repo: str) -> list[str]:
+    """Код архіву й усі коди того самого архіву (`same_as` в обидва боки).
+
+    🔴 Пул пише Вінницький архів каноном пакета `DAVIO`, а дослідницький
+    простір може лишатись на давньому `DAVO`. Без цього справа, що давно в
+    пулі, показувалась «готовою» до віддачі.
+    """
+    out = [repo]
+    try:
+        from nyshporka.archives import active
+
+        repos = active().repositories
+    except Exception:
+        return out
+    same = getattr(repos.get(repo), "same_as", "") or ""
+    for code, r in repos.items():
+        if code != repo and (getattr(r, "same_as", "") == repo or code == same):
+            out.append(code)
+    return out
+
+
+def _ye_ramky(run_name: str) -> bool:
+    """Чи лежать рамки рядків у теці прогону. Один `glob` до першого збігу."""
+    from nyshporka.core.workspace import workspace
+    from nyshporka.share.bundle import PACKED_GEOMETRY
+
+    if not run_name:
+        return False
+    d = workspace().htr_reports / run_name
+    return d.is_dir() and next(d.glob(PACKED_GEOMETRY), None) is not None
+
+
+def _status(pages: int, frames: int) -> str:
+    if not frames:
+        return BEZ_KADRIV
+    return GOTOVA if pages >= GOTOVA_CHASTKA * frames else NEPOVNA
+
+
 def nepodileni() -> list[dict[str, Any]]:
     """Прочитане своїми руками, чого ще немає в Супрязі.
 
@@ -81,13 +158,23 @@ def nepodileni() -> list[dict[str, Any]]:
       чуже не можна: людина віддала його один раз, і другий раз за неї
       ніхто не вирішує;
     * **без сторінок** — прогін, який нічого не прочитав.
+
+    Що вже віддано, вирішує зріз пулу (`nysh share sync`), коли він є; без
+    нього — журнал пакувань, і рядок `pool` тоді `None`: «не питали».
     """
     from nyshporka import htr_store as S
+    from nyshporka.share import pool
 
-    vzhe = viddani() | vidmovleni()
+    zriz = pool.meta() is not None
+    vzhe = vidmovleni() | (set() if zriz else viddani())
     out: list[dict[str, Any]] = []
     seen: set[str] = set()
-    for row in S.list_cases():
+    vsi = S.list_cases()
+    # Голоси однієї справи — окремі прогони, і рамки бувають не в кожному.
+    progony: dict[str, list[str]] = {}
+    for row in vsi:
+        progony.setdefault(str(row.get("case_key") or ""), []).append(str(row.get("name") or ""))
+    for row in vsi:
         key = str(row.get("case_key") or "")
         if not key or row.get("shared") or not row.get("pages_done"):
             continue
@@ -95,17 +182,34 @@ def nepodileni() -> list[dict[str, Any]]:
         if key in vzhe or shifra in vzhe or key in seen:
             continue
         seen.add(key)
+        stan = _u_puli(key) if zriz else None
+        if stan == "text+geom":
+            continue
+        if stan == "text" and not any(_ye_ramky(n) for n in progony.get(key, [])):
+            # Текст у пулі, а рамок на диску немає (старі прогони без
+            # рамок) — довозити нічого, і рядок висів би тут вічно.
+            continue
+        pages = int(row.get("pages_done") or 0)
+        frames = int(row.get("frames") or 0)
         out.append({
             "case_key": key,
             "shifra": shifra,
             "title": row.get("title") or "",
-            "pages": int(row.get("pages_done") or 0),
-            "frames": int(row.get("frames") or 0),
+            "pages": pages,
+            "frames": frames,
             "model": row.get("model") or "",
             "updated": row.get("updated") or "",
+            "pool": stan,
+            "status": BEZ_RAMOK if stan == "text" else _status(pages, frames),
         })
     out.sort(key=lambda r: str(r["updated"]), reverse=True)
+    out.sort(key=lambda r: STATUSY.index(r["status"]))
     return out
+
+
+def pidsumok(rows: list[dict[str, Any]]) -> dict[str, int]:
+    """Скільки чого в переліку — по статусах, у порядку `STATUSY`."""
+    return {s: sum(1 for r in rows if r["status"] == s) for s in STATUSY}
 
 
 def _days_since_nudge() -> int | None:

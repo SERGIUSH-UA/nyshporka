@@ -138,6 +138,22 @@ def _gate_identity(m: Manifest, v: Verdict) -> None:
         v.warn("no_frames",
                "переліку кадрів немає, тож прив'язати текст до чужої зйомки "
                "не вийде: сторінки лишаться номерами")
+    repo = str(m.case.get("repo") or "")
+    if repo and not str(m.case.get("repo_name") or "").strip() and not _known_archive(repo):
+        v.warn("unknown_archive",
+               f"архіву «{repo}» немає в довіднику Нишпорки: у каталозі справа "
+               "стоятиме під голим кодом. Назвіть архів повністю: "
+               "--archive-name \"Державний архів …\"")
+
+
+def _known_archive(repo: str) -> bool:
+    """Чи знає довідник архівів цей код. Довідника немає — не заважати."""
+    try:
+        from nyshporka.archives import active
+
+        return repo in active().repositories
+    except Exception:
+        return True
 
 
 def _gate_license(m: Manifest, v: Verdict) -> None:
