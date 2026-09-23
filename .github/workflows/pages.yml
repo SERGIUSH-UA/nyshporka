@@ -1,4 +1,4 @@
-# 🐾 Сайт документації → GitHub Pages.
+# 🐾 Сайт документації → заглушки на GitHub Pages (сам сайт — nyshporka.online/docs/).
 #
 # Збирається в `--strict`: попередження тут означає биті посилання або сторінку
 # поза навігацією, а на сайті це виглядає як зникла документація. Краще впасти
@@ -40,8 +40,16 @@ jobs:
       # а не ми.
       - name: айдентика не протухла
         run: uv run python -m nyshporka.brand.gen --check
+      # 🔴 З 2026-09-23 документація живе на nyshporka.online/docs/ (її збирає
+      # портал із піна на коміт). Тут лишається збірка в `--strict` — вона
+      # ловить биті посилання в кожному пуші, — а на Pages їдуть заглушки з
+      # canonical на нову адресу: старі посилання роздані роками.
       - name: зібрати сайт
         run: uv run --locked --extra docs mkdocs build --strict
+        env:
+          DOCS_SITE_URL: https://nyshporka.online/docs/
+      - name: старі адреси → nyshporka.online/docs/
+        run: python tools/docs_redirect_stubs.py site https://nyshporka.online/docs/
       - uses: actions/upload-pages-artifact@v5
         with:
           path: site

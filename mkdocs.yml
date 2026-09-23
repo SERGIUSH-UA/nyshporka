@@ -10,7 +10,10 @@
 
 site_name: Нишпорка
 site_description: Читає рукопис. Приносить знайдене.
-site_url: https://sergiush-ua.github.io/nyshporka/
+# Адреса — з оточення: сайт живе на nyshporka.online/docs/ (портал збирає
+# його сам із піна на коміт клієнта), а на github.io лягають заглушки з
+# canonical на нову адресу — їх робить `tools/docs_redirect_stubs.py`.
+site_url: !ENV [DOCS_SITE_URL, "https://nyshporka.online/docs/"]
 repo_url: https://github.com/SERGIUSH-UA/nyshporka
 repo_name: SERGIUSH-UA/nyshporka
 copyright: AGPL-3.0-or-later
@@ -18,21 +21,35 @@ copyright: AGPL-3.0-or-later
 theme:
   name: material
   language: uk
-  logo: assets/mark.svg
-  favicon: assets/favicon.svg
+  logo: assets/logo.webp
+  # Іконка вкладки — порталу, а не лапка застосунку: документація живе
+  # всередині nyshporka.online, і вкладка мусить казати те саме, що й решта.
+  favicon: assets/favicon-32.png
+  # 🔴 Шапка й підвал — порталу: документація живе всередині
+  # nyshporka.online і не мусить виглядати окремим сайтом.
+  custom_dir: overrides
+  # Шрифти — свої, з того самого домену (docs/assets/fonts), а не Google
+  # Fonts: запит до чужого CDN на кожне відкриття сторінки — це адреса
+  # відвідувача на чужому сервері.
+  font: false
   features:
     - navigation.sections
     - navigation.top
+    - navigation.footer
     - content.code.copy
     - search.highlight
   palette:
-    # Дві теми з перемикачем. Світла перша: сайт відкривають і вдень, і в
-    # читальній залі, а вгадувати за людину, де вона зараз, нема з чого.
-    - media: "(prefers-color-scheme: light)"
-      scheme: default
+    # Дві теми з перемикачем, база — світла, як на порталі. Без `media`:
+    # тема та сама, що обрана на порталі (див. overrides/main.html), а не та,
+    # що в системі — інакше з порталу в документацію людина переходила б у
+    # іншу тему. `custom`, щоб палітри Material не перебивали наші змінні.
+    - scheme: default
+      primary: custom
+      accent: custom
       toggle: {icon: material/weather-night, name: Темна тема}
-    - media: "(prefers-color-scheme: dark)"
-      scheme: slate
+    - scheme: slate
+      primary: custom
+      accent: custom
       toggle: {icon: material/weather-sunny, name: Світла тема}
 
 # ⚠ `docs/README.md` із сайту виключено явно. MkDocs вважає його синонімом
@@ -48,6 +65,10 @@ exclude_docs: |
 
 extra_css:
   - stylesheets/brand.css
+  - stylesheets/portal-docs.css
+
+extra_javascript:
+  - javascripts/tema.js
 
 markdown_extensions:
   - admonition
@@ -57,6 +78,11 @@ markdown_extensions:
   - pymdownx.superfences
   - pymdownx.details
   - pymdownx.tabbed: {alternate_style: true}
+  # Іконки Material у тексті (`:material-download:`). Без цього розширення
+  # код іконки друкувався на кнопці буквально — і `--strict` цього не ловить.
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
 
 # ⚠ `docs/README.md` у nav немає навмисно: MkDocs вважає його синонімом
 # index.md і виключає з сайту. Він лишається мапою документації для того,

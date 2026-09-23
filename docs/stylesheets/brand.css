@@ -3,15 +3,22 @@
    Змінювати кольори — у brand.yaml; перевіряти — `--check` (він же в CI). */
 
 [data-md-color-scheme="default"] {
-  --md-primary-fg-color: #8f5300;
-  --md-primary-bg-color: #f4f2ee;
-  --md-accent-fg-color: #8f5300;
-  --md-default-bg-color: #f4f2ee;
-  --md-default-fg-color: #1b1a17;
-  --md-typeset-color: #1b1a17;
-  --md-typeset-a-color: #8f5300;
-  --md-code-bg-color: #fff;
-  --md-footer-bg-color: #fff;
+  --md-primary-fg-color: #0F3D3A;
+  --md-primary-fg-color--light: #1F514C;
+  --md-primary-fg-color--dark: #0F3D3A;
+  --md-primary-bg-color: #F5EDDC;
+  --md-accent-fg-color: #1F514C;
+  --md-default-bg-color: #F5EDDC;
+  --md-default-fg-color: #1F2D2A;
+  --md-default-fg-color--light: #4B5B55;
+  --md-default-fg-color--lighter: #6A6557;
+  --md-default-fg-color--lightest: #CDBB9B;
+  --md-typeset-color: #1F2D2A;
+  --md-typeset-a-color: #0F3D3A;
+  --md-code-bg-color: #F9F4EA;
+  --md-code-fg-color: #1F2D2A;
+  --md-footer-bg-color: #EFE3CC;
+  --md-footer-fg-color: #1F2D2A;
   --s-log: #f2efe9;
   --s-0: #e9e5df;
   --s-1: #efece7;
@@ -161,15 +168,22 @@
 }
 
 [data-md-color-scheme="slate"] {
-  --md-primary-fg-color: #ffb74d;
-  --md-primary-bg-color: #1a1a1a;
-  --md-accent-fg-color: #ffb74d;
-  --md-default-bg-color: #1a1a1a;
-  --md-default-fg-color: #eee;
-  --md-typeset-color: #eee;
-  --md-typeset-a-color: #ffb74d;
-  --md-code-bg-color: #222;
-  --md-footer-bg-color: #222;
+  --md-primary-fg-color: #E3A64B;
+  --md-primary-fg-color--light: #EDBB6D;
+  --md-primary-fg-color--dark: #E3A64B;
+  --md-primary-bg-color: #14201D;
+  --md-accent-fg-color: #EDBB6D;
+  --md-default-bg-color: #14201D;
+  --md-default-fg-color: #F1E8D6;
+  --md-default-fg-color--light: #B3AA97;
+  --md-default-fg-color--lighter: #A39C8B;
+  --md-default-fg-color--lightest: #3A4E48;
+  --md-typeset-color: #F1E8D6;
+  --md-typeset-a-color: #E3A64B;
+  --md-code-bg-color: #0F1917;
+  --md-code-fg-color: #F1E8D6;
+  --md-footer-bg-color: #1A2824;
+  --md-footer-fg-color: #F1E8D6;
   --s-log: #0d0d0d;
   --s-0: #111;
   --s-1: #161616;

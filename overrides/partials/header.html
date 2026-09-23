@@ -1,0 +1,42 @@
+{#- Шапка документації — та сама, що на порталі nyshporka.online: логотип
+    Нишпорки, розділи порталу, пошук і перемикач теми.
+
+    Адреси порталу абсолютні: той самий збірний сайт лежить ще й на
+    github.io (заглушками на нову адресу), і відносне «/supriaha» там вело б
+    у нікуди. Основа — `partials/header.html` Material 9.7; з неї лишено
+    пошук, палітру й кнопку меню, а назву сторінки замінено розділами. -#}
+{% set portal = "https://nyshporka.online" %}
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="{{ lang.t('header') }}">
+    <label class="md-header__button md-icon" for="__drawer">
+      {% set icon = config.theme.icon.menu or "material/menu" %}
+      {% include ".icons/" ~ icon ~ ".svg" %}
+    </label>
+    <a href="{{ portal }}/" class="portal-logo" aria-label="Нишпорка Онлайн — на головну">
+      <img src="{{ 'assets/logo.webp' | url }}" alt="Нишпорка" width="140" height="44">
+    </a>
+    <div class="portal-rozdily" aria-label="Розділи порталу">
+      <a href="{{ portal }}/supriaha">Супряга</a>
+      <a href="{{ portal }}/zavantazhyty">Застосунок</a>
+      <a href="{{ config.site_url or ('.' | url) }}" aria-current="page">Документація</a>
+      <a href="{{ portal }}/pro">Про проєкт</a>
+    </div>
+    <div class="md-header__title" data-md-component="header-title" hidden></div>
+    {% if "material/search" in config.plugins %}
+      {% set search = config.plugins["material/search"] | attr("config") %}
+      {% if search.enabled %}
+        <label class="md-header__button md-icon" for="__search">
+          {% set icon = config.theme.icon.search or "material/magnify" %}
+          {% include ".icons/" ~ icon ~ ".svg" %}
+        </label>
+        {% include "partials/search.html" %}
+      {% endif %}
+    {% endif %}
+    {% if config.theme.palette and not config.theme.palette is mapping %}
+      {% include "partials/palette.html" %}
+    {% endif %}
+    {% if not config.theme.palette is mapping %}
+      {% include "partials/javascripts/palette.html" %}
+    {% endif %}
+  </nav>
+</header>

@@ -1,7 +1,7 @@
 # Нишпорка
 
 <p align="center">
-  <img alt="" src="assets/mark.svg" width="120" height="120">
+  <img alt="Нишпорка з лупою" src="assets/maskot-lupa.webp" width="200" height="231">
 </p>
 
 <p align="center"><em>Читає рукопис. Приносить знайдене.</em></p>

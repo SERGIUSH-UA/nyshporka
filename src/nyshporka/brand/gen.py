@@ -198,19 +198,32 @@ def render_docs(brand: Brand) -> str:
     перекладаються. Перекладаються лише ті, що справді керують виглядом
     сторінки; решта теми лишається материалівською — переписувати чужий
     дизайн цілком означало б підтримувати ще один.
+
+    🔴 Джерело — група порталу `pt-*`, а не спільні `accent`/`bg` застосунку
+    (з 2026-09-23). Документація живе на nyshporka.online/docs/, усередині
+    порталу, і мусить виглядати ним: кремовий папір і бірюза, а не
+    помаранчевий верстат застосунку. Шапка й шрифти — у
+    `docs/stylesheets/portal-docs.css`, який бере ці ж змінні.
     """
     def scheme(theme: str, selector: str) -> str:
         v = brand.css_vars(theme)
         md = {
-            "md-primary-fg-color": v["accent"],
-            "md-primary-bg-color": v["bg"],
-            "md-accent-fg-color": v["accent"],
-            "md-default-bg-color": v["bg"],
-            "md-default-fg-color": v["fg"],
-            "md-typeset-color": v["fg"],
-            "md-typeset-a-color": v["accent"],
-            "md-code-bg-color": v["card"],
-            "md-footer-bg-color": v["card"],
+            "md-primary-fg-color": v["pt-primary"],
+            "md-primary-fg-color--light": v["pt-primary-2"],
+            "md-primary-fg-color--dark": v["pt-primary"],
+            "md-primary-bg-color": v["pt-on-primary"],
+            "md-accent-fg-color": v["pt-primary-2"],
+            "md-default-bg-color": v["pt-bg"],
+            "md-default-fg-color": v["pt-fg"],
+            "md-default-fg-color--light": v["pt-fg-3"],
+            "md-default-fg-color--lighter": v["pt-fg-4"],
+            "md-default-fg-color--lightest": v["pt-line-2"],
+            "md-typeset-color": v["pt-fg"],
+            "md-typeset-a-color": v["pt-primary"],
+            "md-code-bg-color": v["pt-s0"],
+            "md-code-fg-color": v["pt-fg"],
+            "md-footer-bg-color": v["pt-s1"],
+            "md-footer-fg-color": v["pt-fg"],
         }
         rows = "".join(f"  --{k}: {x};\n" for k, x in md.items())
         rows += "".join(f"  --{k}: {x};\n" for k, x in v.items())

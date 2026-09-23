@@ -33,11 +33,11 @@
 <p align="center">
   <a href="https://www.youtube.com/live/VsvenHgbVZY?t=2550"><b>🎥 Подивитися наживо</b></a>
   &nbsp;·&nbsp;
-  <a href="https://sergiush-ua.github.io/nyshporka/agent/"><b>🤖 Підключити агента</b></a>
+  <a href="https://nyshporka.online/docs/agent/"><b>🤖 Підключити агента</b></a>
   &nbsp;·&nbsp;
   <a href="https://github.com/SERGIUSH-UA/nyshporka/releases/latest/download/nyshporka-setup.exe">⬇ Завантажити для Windows</a>
   &nbsp;·&nbsp;
-  <a href="https://sergiush-ua.github.io/nyshporka/start/">поставив — що далі</a>
+  <a href="https://nyshporka.online/docs/start/">поставив — що далі</a>
 </p>
 
 > 🎥 **Як це працює, показано наживо** — на стрімі
@@ -59,7 +59,7 @@
   означав, куди копати далі, як прийняти куплену зйомку, як дотренувати модель
   на своєму почерку.
 * **Правила, а не поради** — [`AGENTS.md`](AGENTS.md) і
-  [для агентів](https://sergiush-ua.github.io/nyshporka/agents/first-session/):
+  [для агентів](https://nyshporka.online/docs/agents/first-session/):
   як читати нуль, чому «не наш рід» вирішує людина, і як агенти вже помилялися
   на цьому матеріалі, з цінами.
 * **Три обличчя, одне ядро.** Браузерна консоль, командний рядок і MCP —
@@ -87,7 +87,7 @@
   станом і прізвищем.
 
 Докладно, з межами кожного джерела — [**що вже
-працює**](https://sergiush-ua.github.io/nyshporka/features/).
+працює**](https://nyshporka.online/docs/features/).
 
 ## Як це виглядає
 
@@ -122,7 +122,7 @@
 
 👤 **Ставите самі, без термінала?** Покрокова інструкція — три програми в
 правильному порядку й один готовий запит —
-[**«Підключити агента»**](https://sergiush-ua.github.io/nyshporka/agent/).
+[**«Підключити агента»**](https://nyshporka.online/docs/agent/).
 
 **Windows.** [⬇ Завантажити інсталятор][setup] — запустити, відповісти на два
 питання, натиснути «Встановити». Python, прав адміністратора й термінала не
@@ -171,7 +171,7 @@ nysh models get     # ваги трьох моделей, ~130 МБ
 На робочій машині розробника інсталятор нічого не переставляє; `--dry-run`
 показує, що буде зроблено, а `NYSH_NO_MODIFY_PATH=1` не чіпає PATH зовсім.
 Важелі, набори частин, деінсталяція й те, де живе дослідження, —
-[**встановлення докладно**](https://sergiush-ua.github.io/nyshporka/install/).
+[**встановлення докладно**](https://nyshporka.online/docs/install/).
 
 ## Стан: alpha
 
@@ -180,20 +180,20 @@ nysh models get     # ваги трьох моделей, ~130 МБ
 актів у поля робить ваш агент і вашим коштом — пакет дає нарізку, контракт,
 валідацію й чексуми повноти, але сам не читає; а моделі читають добре той почерк, на якому
 вчились, — на іншому матеріалі якість не міряна. Повний перелік того, чого ще немає, без замовчувань —
-[**межі**](https://sergiush-ua.github.io/nyshporka/limits/).
+[**межі**](https://nyshporka.online/docs/limits/).
 
 ## Далі
 
 | | |
 |---|---|
-| підключити агента без термінала | [Підключити агента](https://sergiush-ua.github.io/nyshporka/agent/) |
-| перша сесія агента, приймачі кроків | [Для агентів](https://sergiush-ua.github.io/nyshporka/agents/first-session/) |
-| поставив — що робити першим | [Поставив. Що далі?](https://sergiush-ua.github.io/nyshporka/start/) |
-| питання першого тижня | [Часті питання](https://sergiush-ua.github.io/nyshporka/faq/) |
-| який екран на яке питання відповідає | [Карта екранів](https://sergiush-ua.github.io/nyshporka/screens/) |
-| навчити Писаря своєму почерку | [Трен](https://sergiush-ua.github.io/nyshporka/train/) |
-| прочитати справу на орендованій машині | [Хмара](https://sergiush-ua.github.io/nyshporka/cloud/) |
-| що змінилось у версіях | [Що нового](https://sergiush-ua.github.io/nyshporka/whats-new/) |
+| підключити агента без термінала | [Підключити агента](https://nyshporka.online/docs/agent/) |
+| перша сесія агента, приймачі кроків | [Для агентів](https://nyshporka.online/docs/agents/first-session/) |
+| поставив — що робити першим | [Поставив. Що далі?](https://nyshporka.online/docs/start/) |
+| питання першого тижня | [Часті питання](https://nyshporka.online/docs/faq/) |
+| який екран на яке питання відповідає | [Карта екранів](https://nyshporka.online/docs/screens/) |
+| навчити Писаря своєму почерку | [Трен](https://nyshporka.online/docs/train/) |
+| прочитати справу на орендованій машині | [Хмара](https://nyshporka.online/docs/cloud/) |
+| що змінилось у версіях | [Що нового](https://nyshporka.online/docs/whats-new/) |
 
 ## Приватність, ліцензія, участь
 
@@ -204,7 +204,7 @@ nysh models get     # ваги трьох моделей, ~130 МБ
 Код — [AGPL-3.0-or-later](LICENSE), ваги моделей — окремо, під
 [CC BY-SA 4.0](LICENSE-MODELS.md). Чому саме так, як підписується інсталятор і
 що звіряти при завантаженні —
-[підписування й ліцензії](https://sergiush-ua.github.io/nyshporka/signing/).
+[підписування й ліцензії](https://nyshporka.online/docs/signing/).
 
 Знайшли ваду або хочете допомогти — [`CONTRIBUTING.md`](CONTRIBUTING.md) і
 [Issues](https://github.com/SERGIUSH-UA/nyshporka/issues).

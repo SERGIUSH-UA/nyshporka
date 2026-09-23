@@ -69,7 +69,9 @@ def test_ops_hidden_from_both_faces() -> None:
 def test_docs_page_not_published() -> None:
     """Сторінки обміну немає ні в навігації, ні у збірці сайту."""
     cfg = yaml.safe_load(
-        (ROOT / "mkdocs.yml").read_text(encoding="utf-8").replace("!!python/name:", "")
+        # `!ENV` — тег MkDocs для адреси з оточення; safe_load його не знає.
+        (ROOT / "mkdocs.yml").read_text(encoding="utf-8")
+        .replace("!!python/name:", "").replace("!ENV ", "")
     )
     assert "share.md" in (cfg.get("exclude_docs") or "")
     assert "share.md" not in yaml.dump(cfg.get("nav") or [], allow_unicode=True)

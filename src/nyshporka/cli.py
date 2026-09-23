@@ -960,7 +960,7 @@ def read(
 
     Важелі ресурсів (`--shard`, `--gpu-lock`, `--no-gpu-sato`, `--seg-height`)
     існують тому, що машина в кожного своя. Як ними користуватись —
-    https://sergiush-ua.github.io/nyshporka/agents/htr-tuning/
+    https://nyshporka.online/docs/agents/htr-tuning/
     \f
     Раннер мав ці важелі від початку, але доступні вони були лише прямим
     викликом — тобто рівно та людина, якій найбільше треба стиснути прогін під

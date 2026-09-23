@@ -1,0 +1,60 @@
+{#- Підвал документації — колонки порталу. Попередня/наступна сторінка
+    (`navigation.footer`) лишаються, як у Material: документацію читають
+    підряд, і це найкоротша дорога до наступного кроку. -#}
+{% set portal = "https://nyshporka.online" %}
+<footer class="md-footer">
+  {% if page.previous_page or page.next_page %}
+    <nav class="md-footer__inner md-grid" aria-label="{{ lang.t('footer') }}">
+      {% if page.previous_page %}
+        <a href="{{ page.previous_page.url | url }}" class="md-footer__link md-footer__link--prev">
+          <div class="md-footer__button md-icon">{% include ".icons/material/arrow-left.svg" %}</div>
+          <div class="md-footer__title">
+            <span class="md-footer__direction">{{ lang.t("footer.previous") }}</span>
+            <div class="md-ellipsis">{{ page.previous_page.title }}</div>
+          </div>
+        </a>
+      {% endif %}
+      {% if page.next_page %}
+        <a href="{{ page.next_page.url | url }}" class="md-footer__link md-footer__link--next">
+          <div class="md-footer__title">
+            <span class="md-footer__direction">{{ lang.t("footer.next") }}</span>
+            <div class="md-ellipsis">{{ page.next_page.title }}</div>
+          </div>
+          <div class="md-footer__button md-icon">{% include ".icons/material/arrow-right.svg" %}</div>
+        </a>
+      {% endif %}
+    </nav>
+  {% endif %}
+  <div class="portal-pidval">
+    <div class="md-grid portal-pidval__inner">
+      <div class="portal-pidval__znak">
+        <img src="{{ 'assets/pechatka.webp' | url }}" alt="" width="72" height="73">
+        <div>
+          <div class="portal-pidval__nazva">Нишпорка Онлайн</div>
+          <p>Архіви ближче. Люди — рідніші.</p>
+        </div>
+      </div>
+      <div>
+        <h2>Нишпорка</h2>
+        <ul>
+          <li><a href="{{ portal }}/zavantazhyty">Завантажити застосунок</a></li>
+          <li><a href="{{ config.repo_url }}">Код на GitHub</a></li>
+        </ul>
+      </div>
+      <div>
+        <h2>Супряга</h2>
+        <ul>
+          <li><a href="{{ portal }}/supriaha">Каталог справ</a></li>
+          <li><a href="{{ portal }}/supriaha/novyny">Що нового</a></li>
+        </ul>
+      </div>
+      <div>
+        <h2>Проєкт</h2>
+        <ul>
+          <li><a href="{{ portal }}/pro">Про проєкт, ліцензії й правила</a></li>
+          <li>{{ config.copyright }}</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</footer>

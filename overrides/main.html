@@ -1,0 +1,23 @@
+{#- Сайт документації живе на nyshporka.online/docs/ — усередині порталу, а
+    не окремим сайтом. Тут лише те, чого Material не вміє налаштуванням.
+
+    🔴 Тема одна на портал і документацію. Портал пам'ятає вибір у
+    `localStorage['supriaha-tema']`, Material — у власному `__palette`. Цей
+    скрипт стоїть у <head> ДО першого малювання: інакше людина, що обрала
+    темну на порталі, бачила б спалах світлої на кожному переході в /docs/.
+    Зворотний бік (перемкнули тут → портал теж) — у `javascripts/tema.js`. -#}
+{% extends "base.html" %}
+
+{% block extrahead %}
+<script>
+(function () {
+  try {
+    var t = localStorage.getItem("supriaha-tema");
+    if (t !== "dark" && t !== "light") return;
+    var d = t === "dark";
+    __md_set("__palette", {index: d ? 1 : 0, color: {
+      media: "", scheme: d ? "slate" : "default", primary: "custom", accent: "custom"}});
+  } catch (e) { /* приватне вікно: лишається світла, як і на порталі */ }
+})();
+</script>
+{% endblock %}
