@@ -446,8 +446,15 @@ def launch(convoy: Convoy, res: GoResult, say: Callable[..., None], *,
         # наглядач збирає їх у словник і останнє входження перемагає. Людина,
         # що набрала `-p lines_per_page=…`, мусить перекрити наш здогад.
         computed = [f"script={plan.script}"]
-        if convoy.lines_per_page:
-            computed.append(f"lines_per_page={convoy.lines_per_page}")
+        # 🔴 ТИПОВА щільність, а не максимальна: це число йде у ВИБІР МАШИНИ
+        # (темп, стеля часу, ціна тисячі сторінок). Максимум по черзі означав
+        # би міряти ринок по найгустішій сторінці — 23.09.2026 саме так три
+        # заходи поспіль дістали «ринок порожній», хоч машин було 87 зі 142.
+        # Гроші так само лишаються на максимумі: вилку бюджету завищувати
+        # безпечно, а стелю часу — ні.
+        typical = convoy.lines_per_page_typical or convoy.lines_per_page
+        if typical:
+            computed.append(f"lines_per_page={typical}")
         if seeded and convoy.dense_fleet:
             # 🔴 Флот один на всю чергу, тож щільніший ставимо лише коли
             # засіяні ВСІ справи й засів справді їде: сторінка без кешу рахує

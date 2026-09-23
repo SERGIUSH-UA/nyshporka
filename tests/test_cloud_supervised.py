@@ -1176,3 +1176,65 @@ def test_bookkeeping_hooks_carry_the_workspace_root(space: Path, monkeypatch,
         pytest.skip("у цьому середовищі немає програми nysh")
     assert all(h.get("cwd") == str(space) for h in hooks), (
         "гачок без робочої теки шукає справу в чужому просторі")
+
+
+# ── щільність: гроші беруть максимум, машина — типове ────────────────────────
+
+
+def _conv(*pairs: tuple[float, int]):
+    """Захід, у якому важать лише щільність і обсяг справ.
+
+    Конвой перевіряє унікальність імен і спільний корінь виводу, тож підробка
+    мусить давати і те, і те — інакше тест упаде на перевірці, до якої йому
+    діла немає.
+    """
+    from pathlib import Path as P
+    from types import SimpleNamespace
+
+    from nyshporka.cloud import convoy as CV
+
+    legs = []
+    for i, (lines, frames) in enumerate(pairs):
+        plan = SimpleNamespace(lines_per_page=lines, frames=frames, pages_left=None,
+                               out_dir=P(f"/space/out/spr-{i}"), run_id=f"r{i}",
+                               backend="vast")
+        legs.append(SimpleNamespace(plan=plan, name=f"spr-{i}",
+                                    source=P(f"/space/frames/spr-{i}")))
+    return CV.Convoy(tuple(legs), ())
+
+
+def test_the_queue_is_measured_by_its_typical_page_not_its_densest() -> None:
+    """🔴🔴 Максимум по черзі коштував трьох порожніх ринків поспіль.
+
+    Машина читає ВСІ сторінки черги, тож час — це сума по сторінках, а не
+    «сторінок × найгустіша». Заміряно 23.09.2026 на черзі 237 справ / 5115
+    сторінок: зважене середнє 38.9 рядків/стор, максимум 251 — і той максимум
+    давали ДВІ справи. Прогноз часу через це завищувався в 3.7 раза, а на
+    живому ринку зі 142 машин проходило 11 замість 87.
+    """
+    conv = _conv((36, 5000), (251, 100), (40, 15))
+
+    assert conv.lines_per_page == 251, "для ГРОШЕЙ максимум лишається"
+    typical = conv.lines_per_page_typical
+    assert typical is not None and 36 <= typical <= 45, typical
+    assert typical < conv.lines_per_page / 3, "типове мусить бути далеко від піку"
+
+
+def test_a_uniform_queue_gives_the_same_number_either_way() -> None:
+    """Там, де справи однакові, обидва числа збігаються — і це теж приймач."""
+    conv = _conv((50, 100), (50, 300))
+    assert conv.lines_per_page == 50
+    assert conv.lines_per_page_typical == 50
+
+
+def test_the_machine_is_chosen_by_the_typical_density() -> None:
+    """Саме це число йде в `-p lines_per_page=`, тобто у вибір машини."""
+    from pathlib import Path as P
+
+    from nyshporka.cloud import supervised as S
+
+    src = P(S.__file__).read_text(encoding="utf-8")
+    i = src.index("lines_per_page={")
+    window = src[max(0, i - 700):i + 120]
+    assert "lines_per_page_typical" in window, (
+        "у вибір машини знову йде максимум по черзі — ринок виглядатиме порожнім")
