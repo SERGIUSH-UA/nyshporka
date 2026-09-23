@@ -60,7 +60,8 @@ _SHIFRA_PREFIX = re.compile(r"^.{0,40}?спр\.\s*\S+\s*:\s*", re.IGNORECASE)
 
 def _working(title: str) -> bool:
     low = title.casefold()
-    return bool(_WORKING_TITLE.match(title)) or any(m in low for m in _NOTE_MARKERS)
+    return (bool(_WORKING_TITLE.match(title)) or any(m in low for m in _NOTE_MARKERS)
+            or bool(_FS_STUB.search(title)))
 
 
 def title(side_title: str, row: dict[str, Any] | None, library: str = "") -> str:
@@ -124,12 +125,34 @@ def registry_row(shifra: str) -> dict[str, Any] | None:
         for variant in _letter_variants(letter):
             row, _ = _row(ref.repo, ref.fond, ref.opys or "", number, variant)
             if row:
-                return row
+                return {**row, "_title_repeats": _povtory(ref.repo, ref.fond,
+                                                          str(row.get("title") or ""))}
     except Exception:
         # Широко й навмисно: реєстр не обов'язковий, а падінь у нього багато
         # різних — немає простору, немає фонду, битий TSV.
         return None
     return None
+
+
+#: Скільки справ фонду з тією самою назвою робить її заглушкою каталогу, а
+#: не назвою справи: «Церковні записи, Подільська духовна консисторія
+#: (ф. 315)» стоїть у реєстрі на сотнях справ.
+STUB_REPEATS = 5
+#: Заглушка каталогу FamilySearch: «f. 315-1-3574 Church Records Delo».
+_FS_STUB = re.compile(r"church records|\bdelo\b", re.IGNORECASE)
+
+
+def _povtory(repo: str, fond: str, title: str) -> int:
+    """Скільки справ фонду в реєстрі мають саме цю назву."""
+    if not title.strip():
+        return 0
+    try:
+        from nyshporka.fonds.registry import fond_id_of, load_rows
+
+        return sum(1 for r in load_rows(fond_id_of(repo, fond))
+                   if str(r.get("title") or "") == title)
+    except Exception:
+        return 0
 
 
 #: Джерела назви в реєстрі, яким картка не вірить: сирий OCR опису дає
@@ -138,9 +161,17 @@ _UNTRUSTED_TITLE_SRC = frozenset({"ocr"})
 
 
 def _registry_title(row: dict[str, Any] | None) -> str:
+    """Назва з реєстру, якщо це назва справи, а не OCR і не заглушка каталогу.
+
+    🔴 Заглушка гірша за порожнечу: «Церковні записи … (ф. 315)» на картці
+    виглядає як назва, а називає фонд. Порожня картка чесно каже «без назви».
+    """
     if not row or str(row.get("title_src") or "") in _UNTRUSTED_TITLE_SRC:
         return ""
-    return str(row.get("title") or "").strip()
+    title = str(row.get("title") or "").strip()
+    if _FS_STUB.search(title) or int(row.get("_title_repeats") or 0) >= STUB_REPEATS:
+        return ""
+    return title
 
 
 def from_registry(row: dict[str, Any] | None) -> dict[str, Any]:

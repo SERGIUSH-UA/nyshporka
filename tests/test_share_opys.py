@@ -292,3 +292,17 @@ def test_archive_name_ide_v_manifest(space: Path, monkeypatch: pytest.MonkeyPatc
                         lambda scope: ([run], {"key": "", "shifra": "ДАХмО 315-1-8433"}))
     got = PUB.pack("ДАХмО 315-1-8433", dry_run=True, archive_name="  Архів міста Кракова ")
     assert got["manifest"]["case"]["repo_name"] == "Архів міста Кракова"
+
+
+@pytest.mark.parametrize("row", [
+    {"title": "Церковні записи, Подільська духовна консисторія (ф. 315)",
+     "title_src": "duck", "_title_repeats": 412},
+    {"title": "f. 315-1-3574 Church Records Delo", "title_src": "fs"},
+])
+def test_zahlushka_kataloho_ne_nazva(row: dict[str, Any]) -> None:
+    """Назва, що стоїть на сотнях справ фонду, називає фонд, а не справу."""
+    assert opys.title("", row) == ""
+
+
+def test_fs_zahlushka_z_biblioteky_ne_nazva() -> None:
+    assert opys.title("", None, "f  315-1-1121  Church Records BMD  Delo") == ""
