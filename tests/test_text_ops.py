@@ -246,6 +246,38 @@ def test_sheet_renders_cards_with_crops_and_verdict_fields(case_space: Path) -> 
     assert 'value="hit" selected' not in html_doc
 
 
+def test_sheet_cards_link_to_their_whole_page_in_the_app(case_space: Path) -> None:
+    """🔴 Кроп не показує, чий це запис, — лише цілий аркуш. Скан у файл не
+    вбудовується (сорок карток по ~1 МБ), тож картка веде в `nysh serve` на ту
+    саму сторінку й той самий рядок. Номер у застосунку рахується з нуля."""
+    import re
+    from urllib.parse import parse_qs, unquote
+
+    from nyshporka.search import textops as T
+
+    out = case_space / "sheet.html"
+    got = T.sheet("Ковальскій", "DAHMO/315/8433", limit=10, crops=0, out=out,
+                  serve_port=9123)
+    assert not got.get("error"), got
+    html_doc = out.read_text(encoding="utf-8")
+    cards = re.findall(r'<section class="card"[^>]*data-run="([^"]*)"\s*data-page="([^"]*)"'
+                       r' data-line="(\d+)">.*?href="([^"]*)"', html_doc, flags=re.S)
+    assert cards and len(cards) == got["cards"], "не кожна картка має посилання"
+    for run, page, line, href in cards:
+        href = href.replace("&amp;", "&")
+        assert href.startswith("http://127.0.0.1:9123/#view?"), href
+        q = parse_qs(href.split("?", 1)[1])
+        assert unquote(q["run"][0]) == run and q["page"][0] == page
+        assert int(q["line"][0]) == int(line) - 1 and q["full"] == ["1"]
+
+
+def test_sheet_default_port_is_the_serve_port() -> None:
+    from nyshporka.daemon.app import DEFAULT_PORT
+    from nyshporka.search.textops import SERVE_PORT
+
+    assert SERVE_PORT == DEFAULT_PORT
+
+
 def test_verdicts_go_to_the_page_store_including_negatives(case_space: Path) -> None:
     from nyshporka.pagestore import store as PS
     from nyshporka.search import textops as T

@@ -851,8 +851,14 @@ def _esc(s: Any) -> str:
     return html.escape(str(s or ""))
 
 
+# Порт `nysh serve` за замовчуванням — той самий, що `daemon.app.DEFAULT_PORT`
+# (звіряє тест). Сюди не імпортується: модуль сервера тягне FastAPI, а аркуш
+# кандидатів будується й без нього.
+SERVE_PORT = 8788
+
+
 def sheet(q: str, scope: str, *, thresh: int = 78, limit: int = 60, crops: int = 40,
-          out: str | Path | None = None) -> dict[str, Any]:
+          out: str | Path | None = None, serve_port: int = SERVE_PORT) -> dict[str, Any]:
     """HTML-гортач: кандидати з контекстом, другим голосом і кропом, поле вердикту.
 
     🔴 Вердикт виносить людина. Гортач не має кнопки «закрити все»: кожен рядок
@@ -890,7 +896,7 @@ def sheet(q: str, scope: str, *, thresh: int = 78, limit: int = 60, crops: int =
                       "rank_why": h.get("rank_why") or "", "img": img,
                       "verdict": prev.get("verdict") or "", "note": prev.get("note") or ""})
     led = got["ledger"]
-    html_doc = _render_sheet(q, got, cards, led)
+    html_doc = _render_sheet(q, got, cards, led, serve_port=serve_port)
     if out is None:
         from nyshporka.core.workspace import workspace
 
@@ -905,8 +911,23 @@ def sheet(q: str, scope: str, *, thresh: int = 78, limit: int = 60, crops: int =
             "frames_by_registry": sorted(by_registry)}
 
 
+def _page_link(run: str, page: str, line_no: int, port: int) -> str:
+    """Посилання на сторінку хіта цілком у запущеному `nysh serve`.
+
+    🔴 Скан у файл не вбудовується: сторінка важить ~1 МБ, і сорок карток
+    зробили б аркуш на десятки мегабайт. Кроп рядка лишається в картці, а
+    цілий аркуш — із рамками, підсвіченим рядком і текстом — показує застосунок.
+
+    ⚠ Номер рядка в застосунку рахується з нуля, у картці — з одиниці.
+    """
+    from urllib.parse import urlencode
+
+    q = urlencode({"run": run, "page": page, "line": max(0, line_no - 1), "full": 1})
+    return f"http://127.0.0.1:{port}/#view?{q}"
+
+
 def _render_sheet(q: str, got: dict[str, Any], cards: list[dict[str, Any]],
-                  led: dict[str, Any]) -> str:
+                  led: dict[str, Any], *, serve_port: int = SERVE_PORT) -> str:
     dl = _esc(re.sub(r"[^\w.-]+", "_", str(got.get("case_key") or "case")))
     opts = "".join(f'<option value="{v}">{_esc(VERDICT_LABEL[v])}</option>' for v in VERDICTS)
     parts: list[str] = []
@@ -917,6 +938,8 @@ def _render_sheet(q: str, got: dict[str, Any], cards: list[dict[str, Any]],
         img = (f'<img src="data:image/jpeg;base64,{c["img"]}" alt="кроп">' if c["img"]
                else '<div class="noimg">кропу немає (кадр не знайдено або без геометрії)</div>')
         why = f' <span class="why">↓ {_esc(c["rank_why"])}</span>' if c["rank_why"] else ""
+        full = (f'<a class="full" href="{_esc(_page_link(c["run"], c["page"], c["line"], serve_port))}"'
+                f' target="nysh">сторінка цілком ↗</a>')
         sel = opts.replace(f'value="{c["verdict"]}"', f'value="{c["verdict"]}" selected') \
             if c["verdict"] else opts
         parts.append(f'''<section class="card" data-key="{_esc(c["key"])}" data-run="{_esc(c["run"])}"
@@ -925,6 +948,7 @@ def _render_sheet(q: str, got: dict[str, Any], cards: list[dict[str, Any]],
  · <span class="m">{_esc(c["matched"])}</span>{why}</header>
 {ctx_b}<div class="line">» {_esc(c["text"])}</div>{ctx_a}{alt}
 {img}
+{full}
 <div class="verdict"><label>вердикт <select><option value="">—</option>{sel}</select></label>
 <label>прізвище як у джерелі <input class="surname" placeholder="лише для «наш рід» / «уже в каноні»"></label>
 <label>примітка <input class="note" value="{_esc(c["note"])}"></label></div>
@@ -944,6 +968,7 @@ header b{{font-size:18px}} .m{{background:#ffe9a8;padding:0 4px}} .why{{color:#a
 .ctx{{color:#777}} .line{{font-size:17px;margin:4px 0}} .alt{{color:#357;font-style:italic}}
 img{{max-width:100%;border:1px solid #ccc;margin:8px 0;display:block}}
 .noimg{{color:#999;font-style:italic;margin:6px 0}}
+.full{{display:inline-block;margin:0 0 6px}}
 .verdict{{display:flex;gap:16px;flex-wrap:wrap;align-items:center;margin-top:6px}}
 .verdict input{{width:260px}} select{{font-size:15px}}
 .bar{{position:sticky;top:0;background:#f6f4ef;padding:8px 0;border-bottom:1px solid #ccc;margin-bottom:12px}}
@@ -955,6 +980,7 @@ button{{font-size:15px;padding:6px 12px}} textarea{{width:100%;height:160px;marg
 <div class="bar"><button onclick="collect()">Зібрати вердикти → JSON</button>
  <span id="cnt"></span>
  <div><small>Далі: <code>nysh text verdicts &lt;файл.json&gt; --case &lt;справа&gt;</code> — занесе в сховище сторінок.</small></div>
+ <div><small>«Сторінка цілком» відкривається в застосунку: потрібен запущений <code>nysh serve</code> (порт {serve_port}).</small></div>
 <textarea id="out" placeholder="тут з'явиться JSON"></textarea></div>
 {"".join(parts)}
 <script>

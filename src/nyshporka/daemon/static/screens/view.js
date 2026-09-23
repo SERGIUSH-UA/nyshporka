@@ -31,20 +31,8 @@ import { ic, eng } from '/ui/icons.js';
 import { swapHtml } from '/ui/dom.js';
 import { attachCombobox } from '/ui/combobox.js';
 import { lightbox } from '/ui/lightbox.js';
+import { loadPageFull, readerLabels } from '../core/pageload.js';
 
-
-/**
- * Підписи переглядача. Спільний модуль словника не має й мати не мусить: він
- * нічого не знає ні про справи, ні про мови — підписи дає той, хто кличе.
- */
-function lbLabels() {
-  return {
-    prev: t('view.prev'), next: t('view.next'), close: t('lb.close'),
-    fit: t('view.zoom.fit'), keys: t('lb.keys'), loading: t('common.loading'),
-    text: t('lb.text'), notext: t('lb.notext'), alt: t('sift.alt'),
-    boxes: t('lb.boxes'), boxesWhy: t('lb.boxes.why'),
-  };
-}
 
 /** Усе, що зараз відкрито. Живе в межах екрана, тож тут, а не в спільному стані. */
 let VS = {
@@ -90,6 +78,9 @@ SCREENS.view = async () => {
   viewBindSync();
   if (v.run) {
     await viewOpenRun(v.run, v.page || '', v.line);
+    // `full` приходить лише з посилання ззовні (аркуш кандидатів): людина
+    // клацнула «сторінка цілком», тож і відкривається сторінка цілком.
+    if (v.full && alive(gen) && VS.pages.length) viewFull();
   }
 };
 
@@ -165,6 +156,7 @@ async function viewShow(i, line = null) {
   }
   VS.i = Math.max(0, Math.min(VS.pages.length - 1, i));
   const p = VS.pages[VS.i];
+  VS.pick = null;
   ST.view = { run: VS.run, page: p.page, line };
 
   viewBar();
@@ -346,6 +338,7 @@ function viewBindSync() {
 /** Підсвітити рядок з обох боків; `pick` — ще й прокрутити та взяти вирізку. */
 function viewMark(i, pick) {
   const cls = pick ? 'on' : 'hot';
+  if (pick) VS.pick = i;
   document.querySelectorAll(`.vln.${cls}, .ln.${cls}`).forEach(
     (x) => x.classList.remove(cls));
   const txt = document.querySelector(`#view-text .vln[data-i="${i}"]`);
@@ -451,32 +444,20 @@ function viewFull() {
   lightbox({
     count: VS.pages.length,
     index: VS.i,
-    labels: lbLabels(),
+    labels: readerLabels(),
     // Гортання в читалці веде за собою екран під нею: вийшовши, людина
     // лишається на тому аркуші, який дивилась, а не на тому, з якого зайшла.
     onIndex: (k) => { VS.i = k; },
     load: async (k) => {
       const pg = VS.pages[k];
       if (!pg) return null;
-      const [shot, text, geo] = await Promise.all([
-        callOp('page.view', { run: VS.run, page: pg.page, region: 'page' }),
-        callOp('page.text', { run: VS.run, page: pg.page }),
-        callOp('page.lines', { run: VS.run, page: pg.page }),
-      ]);
-      if (!shot.ok) return { error: shot.error || '' };
-      const g = (geo.ok && geo.data) || {};
-      const lines = (text.ok && (text.data || {}).lines) || [];
-      return {
-        image: (shot.data || {}).image,
-        label: pg.page,
-        // Порожні рамки — законна відповідь: старі прогони їх не писали, і
-        // читалка тоді просто показує знімок без накладки.
-        size: g.has ? g.size : null,
-        shapes: g.has ? (g.polys || g.boxes || []) : [],
-        lines,
-        alt: await viewAltLines(pg.page, lines.length),
-      };
+      const got = await loadPageFull(VS.run, pg.page);
+      if (got.error !== undefined) return got;
+      return { ...got, alt: await viewAltLines(pg.page, got.lines.length) };
     },
+    // Відкривається на рядку, який людина щойно вибрала: інакше на повному
+    // аркуші його доводиться шукати наново серед сорока рамок.
+    focus: Number.isInteger(VS.pick) ? VS.pick : null,
   });
 }
 

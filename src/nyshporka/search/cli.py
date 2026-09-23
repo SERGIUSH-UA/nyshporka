@@ -425,6 +425,8 @@ def sheet_cmd(
     limit: int = typer.Option(60, "--limit", help="кандидатів у гортачі"),
     crops: int = typer.Option(40, "--crops", help="скільком верхнім дати кроп"),
     out: str = typer.Option("", "--out", help="куди покласти HTML"),
+    serve_port: int = typer.Option(8788, "--serve-port",
+                                   help="порт `nysh serve` для «сторінка цілком»"),
     as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """HTML-гортач: кандидати з контекстом, другим голосом, кропом і полем вердикту.
@@ -435,7 +437,7 @@ def sheet_cmd(
     from nyshporka import ops as O
 
     env = O.call("text.sheet", {"q": q, "case": case, "thresh": thresh, "limit": limit,
-                                "crops": crops, "out": out})
+                                "crops": crops, "out": out, "serve_port": serve_port})
     if _answer(env, as_json):
         return
     d = env.data

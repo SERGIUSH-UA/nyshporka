@@ -588,8 +588,11 @@ button:not(:disabled):active { transform: scale(.97); }
 
 /* 🔴 Рамки ховаються разом із подіями. Лишивши їх прозорими, ми лишили б і
    наведення: аркуш «сам собою» показував би написи там, де читач щойно
-   попросив чистий папір. */
-.lb.no-boxes .lb-ov { display: none; }
+   попросив чистий папір.
+   Закріплений рядок лишається: це рядок, по який людина прийшла, і без
+   нього «вся сторінка» знову стає пошуком очима. Подій він не ловить. */
+.lb.no-boxes .lb-shape:not(.on) { display: none; }
+.lb.no-boxes .lb-shape.on { pointer-events: none; }
 
 .lb-hint {
   position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%);

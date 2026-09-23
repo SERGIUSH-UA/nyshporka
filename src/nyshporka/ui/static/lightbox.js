@@ -83,9 +83,13 @@ function esc(s) {
  * `shapes: [полігон | рамка | null]`, `lines: [текст]`, `alt: [текст]`.
  * Порожні `shapes` — законна відповідь: аркуш просто ще не читали.
  *
+ * `focus` — номер рядка, закріпленого на ПЕРШОМУ показаному аркуші. Ним
+ * відкривають сторінку хіта: людина мусить одразу бачити, де на аркуші стоїть
+ * рядок, по який прийшла, а не шукати його очима серед сорока рамок.
+ *
  * @returns {{ok: boolean, why?: string, close: Function}}
  */
-export function lightbox({ count, index = 0, load, labels = {}, onIndex } = {}) {
+export function lightbox({ count, index = 0, load, labels = {}, onIndex, focus = null } = {}) {
   const L = { ...DEFAULT_LABELS, ...labels };
   const n = Math.max(0, Number(count) || 0);
   // 🔴 Мовчазної відмови тут бути не може. Кнопка, яка нічого не робить і
@@ -107,6 +111,9 @@ export function lightbox({ count, index = 0, load, labels = {}, onIndex } = {}) 
   let cur = {};            // те, що віддав `load` для поточного аркуша
   let pinned = null;       // закріплений рядок
   let sideOpen = false;
+  // Рядок, який закріпити при першому показі. Одноразово: на сусідньому
+  // аркуші цей номер означає вже інший рядок.
+  let focusOnce = Number.isInteger(focus) && focus >= 0 ? focus : null;
 
   const root = document.createElement('div');
   root.className = 'lb';
@@ -355,6 +362,10 @@ export function lightbox({ count, index = 0, load, labels = {}, onIndex } = {}) 
     labEl.textContent = got.label || '';
     img.src = got.image;
     drawOverlay();
+    if (focusOnce !== null) {
+      pin(focusOnce);
+      focusOnce = null;
+    }
     if (sideOpen) drawSide();
     root.querySelector('.lb-prev').disabled = i === 0;
     root.querySelector('.lb-next').disabled = i >= n - 1;
@@ -485,5 +496,6 @@ export function lightbox({ count, index = 0, load, labels = {}, onIndex } = {}) 
 
   applyBoxes();
   showFrame(i);
-  return { ok: true, close, show: showFrame, side: toggleSide, boxes: toggleBoxes };
+  return { ok: true, close, show: showFrame, side: toggleSide, boxes: toggleBoxes,
+    pinned: () => pinned };
 }

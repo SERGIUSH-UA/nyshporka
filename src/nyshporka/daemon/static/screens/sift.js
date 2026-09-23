@@ -11,6 +11,8 @@ import { ST } from '../core/state.js';
 import { ic, eng } from '/ui/icons.js';
 import { swapHtml, skelRows, skelCards } from '/ui/dom.js';
 import { attachCombobox } from '/ui/combobox.js';
+import { lightbox } from '/ui/lightbox.js';
+import { loadPageFull, readerLabels } from '../core/pageload.js';
 
 
 
@@ -73,6 +75,8 @@ function siftDraw() {
     <div id="sift-ctx"></div>
     <p class="muted">${t('sift.stem')}</p>
     <div class="row">
+      <button data-act="sift.full" title="${esc(t('view.page.why'))}">
+        ${ic('expand', 'ic-sm')} ${t('view.page')}</button>
       <button data-act="sift.view">${ic('eye', 'ic-sm')} ${t('sift.view')}</button>
       <button data-act="sift.note">${ic('pencil-line', 'ic-sm')} ${t('sift.note')}</button>
     </div>
@@ -152,6 +156,26 @@ Object.assign(ACTIONS, {
     await siftLoadCrop();
   },
 
+  /**
+   * Сторінка хіта цілком — НАД розбором, а не замість нього.
+   *
+   * 🔴 Вирізка показує рядок, але не те, чий це запис: графу, роль, сусідів
+   * по формуляру видно лише на цілому аркуші. Доти по нього доводилось іти в
+   * гортач прогону, і розбір губив місце у списку знахідок — на сотнях хітів
+   * це означало гортати до свого місця наново. Читалка закривається, і
+   * людина стоїть на тому самому хіті.
+   */
+  'sift.full': () => {
+    const h = ST.sift.hits[ST.sift.i] || {};
+    if (!h.name) return null;
+    return lightbox({
+      count: 1,
+      labels: readerLabels(),
+      load: () => loadPageFull(h.name, h.page),
+      focus: Number.isInteger(h.line_index) ? h.line_index : null,
+    });
+  },
+
   /** У гортач — на ту саму сторінку й той самий рядок. */
   'sift.view': () => {
     const h = ST.sift.hits[ST.sift.i] || {};
@@ -180,6 +204,7 @@ Object.assign(KEYS, {
     ArrowLeft: () => ACTIONS['sift.step'](null, { dataset: { arg: '-1' } }),
     ' ': () => ACTIONS['sift.step'](null, { dataset: { arg: '1' } }),
     e: () => ACTIONS['sift.view'](),
+    f: () => ACTIONS['sift.full'](),
     n: () => ACTIONS['sift.note'](),
   },
 });

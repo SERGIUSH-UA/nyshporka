@@ -78,8 +78,11 @@ globalThis.document = { body, documentElement: node('html'),
   getElementById: (id) => (byId[id] ||= node('div')),
   addEventListener() {}, removeEventListener() {},
   querySelector: () => null, querySelectorAll: () => [] };
-globalThis.window = { innerWidth: 1600, innerHeight: 900,
-  addEventListener() {}, removeEventListener() {} };
+// Слухачі вікна записуються: перехід за посиланням ззовні (`hashchange`)
+// приймач мусить уміти послати так само, як браузер.
+globalThis.window = { innerWidth: 1600, innerHeight: 900, _h: {},
+  addEventListener(t, fn) { (this._h[t] ||= []).push(fn); },
+  removeEventListener() {} };
 globalThis.innerWidth = 1600; globalThis.innerHeight = 900;
 globalThis.location = { hash: '#home', reload() {} };
 globalThis.localStorage = { _m: {}, getItem(k) { return this._m[k] ?? null; },
@@ -338,6 +341,35 @@ if (reader.length) {
   out.shapes = (ovNode.children || []).length;
 }
 
+// ── розбір знахідок: сторінка хіта цілком ──────────────────────────────────
+ST.sift = { hits: [
+  { name: 'прогін', page: 'a.jpg', line_index: 0, line: 'перший рядок' },
+  { name: 'прогін', page: 'b.jpg', line_index: 1, line: 'другий рядок' },
+], i: 1, q: 'рядок', crop: null, ctx: null };
+location.hash = '#sift';
+await SCREENS.sift();
+await new Promise((r) => setTimeout(r, 30));
+out.siftHasFullButton = (document.getElementById('view').innerHTML || '')
+  .includes('data-act="sift.full"');
+const b3 = created.length;
+const siftLb = await ACTIONS['sift.full']();
+await new Promise((r) => setTimeout(r, 40));
+out.siftReader = created.slice(b3).filter((c) => c.className === 'lb').length;
+out.siftPinned = siftLb && siftLb.pinned ? siftLb.pinned() : null;
+out.siftStayedAt = ST.sift.i;
+out.siftScreenAfter = location.hash;
+if (siftLb && siftLb.close) siftLb.close();
+
+// ── посилання ззовні: #view?run=…&page=…&line=…&full=1 ─────────────────────
+location.hash = '#view?run=' + encodeURIComponent('прогін')
+  + '&page=b.jpg&line=1&full=1';
+const b4 = created.length;
+(window._h.hashchange || []).forEach((fn) => fn());
+await new Promise((r) => setTimeout(r, 80));
+out.linkSeed = ST.view;
+out.linkHash = location.hash;
+out.linkReader = created.slice(b4).filter((c) => c.className === 'lb').length;
+
 // ── екрани мусять намалюватись, а не лише зареєструватись ──────────────────
 // 🔴 Модуль, який завантажився, і екран, який щось показав, — різні речі. Саме
 // між ними живе клас вад «кнопка є, натискається, нічого не відбувається».
@@ -560,6 +592,35 @@ def test_the_run_reader_opens_with_the_sheet(probe) -> None:
     """Гортач на весь екран мусить відкриватись так само, як перегляд аркушів."""
     assert probe.get("reader") == 1, (
         "читалка прогону не відкрилась — а саме нею тепер і читають")
+
+
+# ── сторінка хіта цілком ─────────────────────────────────────────────────────
+def test_sift_opens_the_whole_page_over_itself_on_the_hit_line(probe) -> None:
+    """🔴 Кроп рядка не показує, чий це запис: графу, роль і сусідів видно лише
+    на цілому аркуші. Читалка відкривається НАД розбором, із закріпленим рядком
+    хіта, — і після неї людина стоїть на тому самому хіті, а не шукає його в
+    списку наново.
+    """
+    assert probe.get("siftHasFullButton") is True, "кнопки «сторінка цілком» у розборі немає"
+    assert probe.get("siftReader") == 1, "дія є, а читалка не відкрилась"
+    assert probe.get("siftPinned") == 1, (
+        f"закріплено рядок {probe.get('siftPinned')} замість рядка хіта (1) — "
+        "людина знову шукає його очима серед рамок")
+    assert probe.get("siftStayedAt") == 1 and probe.get("siftScreenAfter") == "#sift", (
+        "розбір загубив місце у списку знахідок")
+
+
+def test_a_link_from_the_sheet_opens_the_page_whole(probe) -> None:
+    """Картка статичного аркуша кандидатів веде в застосунок за адресою.
+
+    ⚠ Параметри в адресі не лишаються: «Назад» чи оновлення не мусять
+    відкривати читалку вдруге.
+    """
+    seed = probe.get("linkSeed") or {}
+    assert seed.get("run") == "прогін" and seed.get("page") == "b.jpg", seed
+    assert seed.get("line") == 1, seed
+    assert str(probe.get("linkHash")).lstrip("#") == "view", probe.get("linkHash")
+    assert probe.get("linkReader") == 1, "посилання відкрило гортач, але не сторінку цілком"
 
 
 def test_the_reader_draws_the_line_boxes_on_the_scan(probe) -> None:

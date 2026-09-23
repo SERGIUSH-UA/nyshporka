@@ -25,6 +25,7 @@ import { initTheme, cycleTheme } from '/ui/theme.js';
 import { LANG, setLang, t } from './core/strings.js';
 import { esc, el, setView, curGen, alive } from './core/view.js';
 import { ACTIONS, KEYS, SCREENS, PAGERS, screenOfOp } from './core/registry.js';
+import { ST } from './core/state.js';
 import { SECTIONS, loadSections, renderNav, groupScreens, show,
   refreshJobs, watchJobs, setGroup, currentScreen } from './core/nav.js';
 
@@ -197,6 +198,33 @@ document.addEventListener('keydown', (ev) => {
 });
 
 // ── старт ────────────────────────────────────────────────────────────────────
+/**
+ * Екран з адреси — разом із посівом, якщо адреса його несе.
+ *
+ * `#view?run=…&page=…&line=…&full=1` — посилання ззовні застосунку: так
+ * картка статичного аркуша кандидатів (`nysh text sheet`) відкриває сторінку
+ * хіта цілком. Файл лежить на диску й сам сканів не несе — важив би десятки
+ * мегабайт, — тож за сторінкою він іде сюди.
+ *
+ * Посів іде в `ST`, а в адресі лишається голе ім'я екрана (`show()` його
+ * переписує): «Назад» і оновлення сторінки не відкривають читалку вдруге.
+ */
+function routeHash() {
+  const raw = (location.hash || '#home').slice(1);
+  const [screen, query] = raw.split('?');
+  if (screen === 'view' && query) {
+    const q = new URLSearchParams(query);
+    const line = q.get('line');
+    ST.view = {
+      run: q.get('run') || '',
+      page: q.get('page') || '',
+      line: line !== null && line !== '' && !Number.isNaN(Number(line)) ? Number(line) : null,
+      full: q.get('full') === '1',
+    };
+  }
+  return screen || 'home';
+}
+
 async function boot() {
   document.querySelectorAll('[data-i18n]').forEach((n) => {
     n.textContent = t(n.dataset.i18n);
@@ -208,7 +236,7 @@ async function boot() {
   // Спершу довідка про секції, і лише потім екран: інакше перший показ ішов би
   // з порожнім переліком, тобто пускав би на екран, якого в цьому просторі немає.
   await loadSections();
-  await show((location.hash || '#home').slice(1));
+  await show(routeHash());
   // 🔴 «Назад» браузера мусить вести назад. `show()` пише в
   // `location.hash` при кожному переході, тобто історія накопичується —
   // а слухача не було жодного, і кнопка змінювала адресу, лишаючи на
@@ -224,8 +252,9 @@ async function boot() {
   // відкритий кнопкою «Назад», малюється зі свого порожнього стану — як
   // при переході за посиланням ззовні.
   window.addEventListener('hashchange', () => {
-    const want = (location.hash || '#home').slice(1);
-    if (want && want !== currentScreen()) show(want);
+    const raw = (location.hash || '#home').slice(1);
+    const want = routeHash();
+    if (want && (want !== currentScreen() || raw.includes('?'))) show(want);
   });
   watchJobs();
 }

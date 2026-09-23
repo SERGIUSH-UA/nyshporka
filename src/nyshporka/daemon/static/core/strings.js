@@ -454,6 +454,7 @@ const STRINGS = {
     'frames.pdf.notext': 'справа лежить одним PDF: прочитане не лягає на '
       + 'сторінки, бо кадрів на диску немає',
     'lb.boxes': 'Рамки',
+    'lb.nobox': 'прогін не зберіг рамок — рядок не підсвічено',
     'lb.boxes.why': 'показувати рамки рядків на скані (клавіша B)',
     'frames.wide.on': 'На повну ширину',
     'frames.wide.off': 'Зменшити',
@@ -527,7 +528,7 @@ const STRINGS = {
     'lib.cancel': 'Не зараз',
     'nav.sift': 'Розбір',
     'sift.title': 'Розбір знахідок',
-    'sift.keys': 'Клавіші: ← → гортати · E — гортач · N — в облік',
+    'sift.keys': 'Клавіші: ← → гортати · F — сторінка цілком · E — гортач · N — в облік',
 
     'sift.empty': 'Немає чого розбирати — спершу знайдіть щось у прочитаному.',
     'sift.togo': 'знахідка {i} з {n}',
@@ -1267,6 +1268,7 @@ const STRINGS = {
     'frames.pdf.notext': 'the case is a PDF: the decode cannot be tied to its '
       + 'pages, because there are no frames on disk',
     'lb.boxes': 'Boxes',
+    'lb.nobox': 'the run kept no line boxes — the line is not highlighted',
     'lb.boxes.why': 'show line boxes on the scan (key B)',
     'frames.wide.on': 'Full width',
     'frames.wide.off': 'Smaller',
@@ -1341,7 +1343,7 @@ const STRINGS = {
     'lib.cancel': 'Not now',
     'nav.sift': 'Sift',
     'sift.title': 'Sifting the hits',
-    'sift.keys': 'Keys: ← → to move · E — viewer · N — note it',
+    'sift.keys': 'Keys: ← → to move · F — whole page · E — viewer · N — note it',
 
     'sift.empty': 'Nothing to sift yet — find something in the read text first.',
     'sift.togo': 'hit {i} of {n}',

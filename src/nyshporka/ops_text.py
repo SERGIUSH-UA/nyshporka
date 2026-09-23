@@ -497,6 +497,8 @@ class TextSheetArgs(BaseModel):
     limit: int = Field(default=60, ge=1, le=2000, description="кандидатів у гортачі")
     crops: int = Field(default=40, ge=0, le=500, description="скільком верхнім дати кроп")
     out: str = Field(default="", description="куди покласти HTML; порожньо — data/derived/sheets")
+    serve_port: int = Field(default=8788, ge=1, le=65535,
+                            description="порт `nysh serve` для посилань «сторінка цілком»")
 
 
 # `private=True`: як `text.crop` — `out` пише файл за шляхом від клієнта.
@@ -507,7 +509,7 @@ def text_sheet(a: TextSheetArgs) -> Envelope:
 
     try:
         res = T.sheet(a.q, a.case, thresh=a.thresh, limit=a.limit, crops=a.crops,
-                      out=a.out or None)
+                      out=a.out or None, serve_port=a.serve_port)
     except ValueError as exc:
         return fail(str(exc))
     if res.get("error"):
