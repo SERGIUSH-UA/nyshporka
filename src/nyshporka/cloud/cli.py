@@ -641,6 +641,11 @@ def _state_detached(st: RunState, *, as_json: bool) -> None:
         # прохання лежить у журналі.
         console.print(f"[err]🔴 потрібна людина: "
                       f"{escape(str(data.get('human_action') or '—'))}[/err]")
+    if data.get("postmortem"):
+        # 🔴 Розтин друкується РАЗОМ із «обірвано», а не лежить у файлі. Двічі
+        # 22.09.2026 наглядач зникав без сліду, і на питання «чому» не було чим
+        # відповісти; тепер відповідь приходить тим самим викликом, що й новина.
+        console.print(f"  розтин : {escape(str(data.get('postmortem')))}")
 
 
 def _num(value: object) -> float | None:

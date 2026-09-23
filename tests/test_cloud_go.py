@@ -1044,3 +1044,44 @@ def test_engine_that_cannot_see_the_card_is_a_failure(space: Path, monkeypatch) 
     assert res.verdict == "failed"
     assert "не бачить карти" in res.why
     assert res.released is True, "машину погашено — платити за неї нема за що"
+
+
+# ── перечитування без готової сегментації ────────────────────────────────────
+
+
+def test_a_reread_without_segmentation_names_the_price_and_the_cure() -> None:
+    """🔴 «⚠ сегментації немає» читається як дрібниця. Це подвійний рахунок.
+
+    Сегментація — 74% процесора сторінки, і замір на тому самому матеріалі дає
+    18.4 с/стор без кешу проти 9.1 з ним. 23.09.2026 повідомлення без числа саме
+    так і прочиталось: прогін 237 справ поїхав без засіву й мав тривати три
+    години замість півтори.
+
+    Тому в тексті мусять бути ОБИДВІ речі — ціна й що робити. Друге не менш
+    важливе: кеш першого прогону лежить у чекпоінтах сховища, і доти рятунок
+    його викидав, тож шукати на диску було марно.
+    """
+    text = GO._SEG_PRICE
+    assert "18.4" in text and "9.1" in text, "повідомлення без ціни не спиняє нікого"
+    assert "ВДВІЧІ" in text
+    assert "fetch-ckpt" in text, "людині треба сказати, ЩО зробити"
+    assert "{where}" in text, "і КУДИ це приїде"
+
+
+def test_the_missing_segmentation_is_a_warning_in_the_notes_not_a_line_in_a_log(
+        ) -> None:
+    """Нотатка заходу, а не рядок, який зникає в лозі.
+
+    Підсумок заходу читає агент, і саме там він мусить побачити, що захід поїхав
+    удвічі дорожчим, ніж мав.
+    """
+    import re
+    from pathlib import Path as P
+
+    src = P(GO.__file__).read_text(encoding="utf-8")
+    i = src.index("cache = SEG.inspect(")
+    window = src[i:i + 1400]
+    assert "_SEG_PRICE.format(" in window
+    assert re.search(r"notes\.append\(price\)", window), "нотатка заходу"
+    assert re.search(r"res\.notes\.append\(price\)", window), "і підсумок"
+    assert 'say("warning", price)' in window, "і видно людині одразу"
