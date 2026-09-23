@@ -135,6 +135,100 @@ def _refs_from_sidecar(case_dir: Path | None) -> list[dict[str, str]]:
     return out
 
 
+def _letter_variants(letter: str) -> list[str]:
+    """Літерний індекс справи обома письмами: `a` → `["a", "а"]`.
+
+    ⚠ Зворотний бік таблиці будується З НЕЇ САМОЇ, а не пишеться вдруге:
+    `_norm_spr` зводить кириличну літеру до латинської, і другий перелік
+    розійшовся б із першим при першому ж доданому рядку.
+    """
+    from nyshporka.library import _LETTER_TO_LAT
+
+    if not letter:
+        return [""]
+    out = [letter]
+    out += [cyr for cyr, lat in _LETTER_TO_LAT.items()
+            if lat == letter and cyr != letter]
+    return out
+
+
+def _links_from_registry(shifra: str) -> list[dict[str, str]]:
+    """Куди піти по ці скани — з реєстру опису фонду.
+
+    🔴 Саме `links`, а НЕ `refs`, і це не косметика. `refs` на боці пулу
+    означає «та сама ЗЙОМКА» і склеює зйомки між собою; реєстр опису знає
+    лише, що СПРАВА є на FamilySearch чи в Commons — а качали її, може,
+    зовсім не звідти. Реєстрове посилання в `refs` склеїло б дві різні
+    зйомки однієї справи в одну, тобто приписало б чужі координати рядків
+    чужим пікселям. `links` цього не роблять: вони для ока, не для добору.
+
+    Навіщо взагалі: ворота попереджають `no_refs` — «звірити знахідку з
+    зображенням отримувачу буде нікуди піти». На десятьох засіяних справах
+    сайдкари джерела не мали (`spr-6940` прямо каже «DGS не зафіксовано на
+    момент завантаження»), а реєстр опису його знає — просто пакувальник
+    туди не заглядав.
+
+    Мовчить у будь-якій халепі: пакування не має падати через те, що
+    реєстру фонду немає або простір ще не зібраний.
+    """
+    if not shifra.strip():
+        return []
+    try:
+        from nyshporka.fonds.registry import registry_row
+        from nyshporka.pagestore import resolve_case
+
+        ref = resolve_case(shifra)
+        spr = str(ref.spr or "")
+        i = len(spr)
+        while i and not spr[i - 1].isdigit():
+            i -= 1
+        number, letter = spr[:i], spr[i:]
+
+        row = None
+        for variant in _letter_variants(letter):
+            row, _ = registry_row(ref.repo, ref.fond, ref.opys or "", number, variant)
+            if row:
+                break
+    except Exception:
+        # Широко й навмисно: реєстр не є обов'язковим для пакування, а падінь
+        # у нього багато різних — немає простору, немає фонду, битий TSV.
+        return []
+    if not row:
+        return []
+
+    out: list[dict[str, str]] = []
+    dgs = str(row.get("fs_dgs") or row.get("fs_film") or "").strip()
+    if dgs:
+        out.append({
+            "label": f"FamilySearch, DGS {dgs}",
+            "url": "https://www.familysearch.org/records/images/"
+                   f"search-results?imageGroupNumbers={dgs}",
+        })
+    commons = str(row.get("commons_title") or "").strip()
+    if commons:
+        out.append({"label": f"Wikimedia Commons: {commons}",
+                    "url": str(row.get("commons_url") or "").strip()})
+    archium = str(row.get("archium_url") or "").strip()
+    if archium:
+        out.append({"label": "ARCHIUM, посторінкові скани", "url": archium})
+    return [x for x in out if x["url"]]
+
+
+def _with_registry(own: list[dict[str, str]], shifra: str) -> list[dict[str, str]]:
+    """Свої посилання плюс реєстрові, без повторів.
+
+    🔴 Назване людиною йде першим і не витісняється: вона знає, звідки
+    качала САМЕ ЦЮ зйомку, а реєстр знає лише, де справа є взагалі.
+    """
+    out = list(own)
+    seen = {x.get("url", "").strip().rstrip("/") for x in out}
+    for link in _links_from_registry(shifra):
+        if link["url"].rstrip("/") not in seen:
+            out.append(link)
+            seen.add(link["url"].rstrip("/"))
+    return out
+
+
 def build_manifest(scope: str, *,
                    hash_frames: bool = False,
                    publisher: str = "", contact: str = "", site: str = "",
@@ -189,10 +283,12 @@ def build_manifest(scope: str, *,
     lic = {"text": license_text, "images": "не входять"}
     if source_terms:
         lic["source_terms"] = source_terms
+    case = _case_block(info, case_dir)
     m = Manifest(
-        case=_case_block(info, case_dir), refs=_refs_from_sidecar(case_dir),
+        case=case, refs=_refs_from_sidecar(case_dir),
         frames=frames_block, decode=decode, publisher=pub, note=note,
-        links=list(links or []), extra=dict(extra or {}), license=lic,
+        links=_with_registry(list(links or []), str(case.get("shifra") or "")),
+        extra=dict(extra or {}), license=lic,
         tool=bundle._tool_version(), created=time.strftime("%Y-%m-%dT%H:%M:%S%z"))
     return m, run_dirs, frames
 
