@@ -87,30 +87,27 @@ markdown_extensions:
 # ⚠ `docs/README.md` у nav немає навмисно: MkDocs вважає його синонімом
 # index.md і виключає з сайту. Він лишається мапою документації для того,
 # хто читає репозиторій із GitHub, а не із сайту.
+# 🔴 Меню — для людини (скорочено 2026-09-23 з 24 пунктів до 8). Сторінки
+# `agents/*` — робочі інструкції помічника: у меню лише їхній вхід, самі вони
+# збираються за старими адресами (на них посилаються AGENTS.md, довідка CLI і
+# копії в скілах). Злиті сторінки (agent, features, limits, screens) лишаються
+# заглушками з `template: redirect.html` — їхні адреси роздані назовні.
 nav:
-  - Нишпорка: index.md
-  - Встановлення: install.md
-  - Поставив. Що далі?: start.md
-  - Що вже працює: features.md
-  - Межі й чого ще немає: limits.md
-  - Підключити агента: agent.md
+  - Що таке Нишпорка: index.md
+  - Поставити й підключити помічника: install.md
+  - Як працювати: start.md
   - Часті питання: faq.md
+  - Для досвідчених:
+      - Дотренувати модель: train.md
+      - Прочитати на орендованій машині: cloud.md
   - Що нового: whats-new.md
-  - Карта екранів: screens.md
-  - Навчити Писаря своєму почерку: train.md
-  - Прочитати справу на орендованій машині: cloud.md
-  - Підписування й ліцензії: signing.md
-  - Для агентів:
-      - Перша сесія: agents/first-session.md
-      - Дві поверхні й карта дій: agents/surface.md
-      - Як читати відповідь: agents/envelope.md
-      - Конвеєри: agents/workflows.md
-      - Канали пошуку: agents/search-channels.md
-      - Куди копати:
-          - Протокол, класи, баланс: agents/where-to-dig.md
-          - Жанри питань: agents/where-to-dig-genres.md
-          - Картки каналів: agents/where-to-dig-channels.md
-      - Читання під слабку машину: agents/htr-tuning.md
-      - Як агенти вже помилялися: agents/antipatterns.md
-      - Промпт арбітра міток: agents/arbiter-prompt.md
-      - Жанр і правила розмітки: agents/label-genres.md
+  - Ліцензії й приватність: signing.md
+  - Для помічника й розробника: agents/index.md
+
+# Сторінки поза меню — без попередження на кожній збірці (`--strict`).
+not_in_nav: |
+  agent.md
+  features.md
+  limits.md
+  screens.md
+  agents/*.md
