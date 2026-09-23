@@ -2932,6 +2932,9 @@ def run_queue(args: argparse.Namespace) -> int:
         _EMIT_EXTRA["qi"] = int(entry.get("index") or pos)
         rc = _main_case(a, cache)
         _EMIT_EXTRA.clear()
+        # Шард ВИЙШОВ зі справи: її мета й побічні виходи дописані. Лише після
+        # цього бокс-раннер має право закривати справу (чекпоінт, прибирання).
+        emit(args.progress_json, "case_done", qi=int(entry.get("index") or pos), rc=rc)
         # 3 — «неповно» з погляду цього шарда (решту читають сусіди або вона в
         # карантині); повноту справи доводить бокс-раннер із диска.
         if rc not in (0, 3):
