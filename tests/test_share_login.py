@@ -148,3 +148,14 @@ def test_publish_bez_kliucha_radyt_login(
     paket.write_bytes(b"")
     with pytest.raises(UploadError, match="nysh share login"):
         upload.publish(paket)
+
+
+def test_keyring_u_yadri_a_ne_v_extras() -> None:
+    """Dev-оточення ставить усі extras, тож без цього тесту випадіння keyring
+    з ядра не видно ніде, крім установки людини (так і сталось 23.09)."""
+    import tomllib
+    from pathlib import Path
+
+    meta = tomllib.loads((Path(__file__).resolve().parents[1] / "pyproject.toml")
+                         .read_text(encoding="utf-8"))
+    assert any(d.startswith("keyring") for d in meta["project"]["dependencies"])
