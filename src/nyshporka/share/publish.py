@@ -12,7 +12,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from nyshporka.share import align, bundle, catalog, fingerprint, gates, journal
+from nyshporka.share import align, bundle, catalog, fingerprint, gates, journal, opys
 from nyshporka.share.bundle import Manifest
 
 
@@ -78,10 +78,18 @@ def _case_block(scope_info: dict[str, Any], case_dir: Path | None) -> dict[str, 
             out.update(repo=s.repo, fond=s.fond, opys=s.opys, spr=s.spr)
         except Exception:
             pass
-    for src, dst in (("title", "title"), ("place", "place"),
-                     ("doc_type", "doc_type")):
+    for src, dst in (("title", "title"), ("place", "place")):
         if side.get(src):
             out[dst] = side[src]
+    # Жанр — кодом зі словника пакета, а не вільним текстом паспорта: картка
+    # фільтрує каталог за ним, а в дослідницьких паспортах поле зветься
+    # `record_type` і пишеться як завгодно («Ревізькі казки причту…»).
+    code, types = opys.genre(side, str(out.get("title") or ""))
+    if code:
+        out["doc_type"] = code
+    if types:
+        out["record_types"] = types
+    out.update(opys.sidecar_extras(side))
     raw_years = [side.get("year_from"), side.get("year_to")]
     years = [int(y) for y in raw_years
              if isinstance(y, (int, str)) and str(y).isdigit()]
@@ -171,28 +179,7 @@ def _links_from_registry(shifra: str) -> list[dict[str, str]]:
     Мовчить у будь-якій халепі: пакування не має падати через те, що
     реєстру фонду немає або простір ще не зібраний.
     """
-    if not shifra.strip():
-        return []
-    try:
-        from nyshporka.fonds.registry import registry_row
-        from nyshporka.pagestore import resolve_case
-
-        ref = resolve_case(shifra)
-        spr = str(ref.spr or "")
-        i = len(spr)
-        while i and not spr[i - 1].isdigit():
-            i -= 1
-        number, letter = spr[:i], spr[i:]
-
-        row = None
-        for variant in _letter_variants(letter):
-            row, _ = registry_row(ref.repo, ref.fond, ref.opys or "", number, variant)
-            if row:
-                break
-    except Exception:
-        # Широко й навмисно: реєстр не є обов'язковим для пакування, а падінь
-        # у нього багато різних — немає простору, немає фонду, битий TSV.
-        return []
+    row = opys.registry_row(shifra)
     if not row:
         return []
 
@@ -284,6 +271,23 @@ def build_manifest(scope: str, *,
     if source_terms:
         lic["source_terms"] = source_terms
     case = _case_block(info, case_dir)
+    row = opys.registry_row(str(case.get("shifra") or ""))
+    # Паспорт мовчить — назву й роки дає реєстр опису: він вичитаний з
+    # друкованого опису фонду, а не складений нами.
+    if row and not case.get("title") and row.get("title"):
+        case["title"] = str(row["title"])
+    if row and not case.get("years"):
+        ry = [int(row[k]) for k in ("year_from", "year_to")
+              if str(row.get(k) or "").isdigit()]
+        if ry:
+            case["years"] = [min(ry), max(ry)]
+    described = opys.build(
+        str(case.get("shifra") or ""), row=row,
+        frames_total=int(frames_block.get("total") or 0),
+        geometry_pages=_geometry_pages(run_dirs),
+        text_pages=max(v.pages for v in voices))
+    if described:
+        case["details"] = described
     m = Manifest(
         case=case, refs=_refs_from_sidecar(case_dir),
         frames=frames_block, decode=decode, publisher=pub, note=note,
@@ -306,6 +310,12 @@ def _content_of(voices: list[bundle.Voice]) -> str:
     if len(parts) == 1:
         return parts[0]
     return hashlib.sha256("\n".join(parts).encode("utf-8")).hexdigest()
+
+
+def _geometry_pages(run_dirs: list[Path]) -> int:
+    """Скільки сторінок має рамки рядків — у найповнішому голосі."""
+    return max((sum(1 for _ in d.glob(bundle.PACKED_GEOMETRY)) for d in run_dirs),
+               default=0)
 
 
 def _blank_pages(run_dirs: list[Path]) -> int:

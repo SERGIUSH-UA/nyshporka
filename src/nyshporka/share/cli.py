@@ -266,7 +266,10 @@ def publish_cmd(
     if _answer(env, as_json):
         return
     d = env.data or {}
-    if d.get("duplicate"):
+    if d.get("duplicate") and d.get("geometry_attached"):
+        console.print(f"текст уже в Супрязі — [bold]дозалито геометрію[/bold] "
+                      f"до внеску {d.get('contribution')}")
+    elif d.get("duplicate"):
         console.print("[yellow]цей текст уже в Супрязі[/yellow] — нічого не заливалось")
     else:
         console.print(f"внесок [bold]{d.get('contribution')}[/bold] · "

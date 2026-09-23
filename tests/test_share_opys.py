@@ -1,0 +1,211 @@
+"""Опис справи в пакеті: жанр, паспорт, сховище сторінок — і нічого приватного.
+
+🔴 Головне, що стережуть ці тести, — що робочі нотатки дослідника не виїжджають
+у каталог. Паспорт теки й сховище сторінок пишуться для себе: у `note` і
+`clan_relevance` лежать міркування про рід і посилання на осіб дерева, у
+`comment` — хід вичитки. Опис бере поля БІЛИМ СПИСКОМ, а ворота відмовляють
+пакету, де такі поля все ж опинились.
+"""
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import Any
+
+import pytest
+from _share import make_run, manifest_for
+
+from nyshporka.pagestore.models import CaseFile, PageNote
+from nyshporka.share import bundle, gates, opys, upload
+from nyshporka.share import publish as PUB
+
+PASPORT: dict[str, Any] = {
+    "shifra": "ДАХмО 315-1-8433",
+    "title": "Ревизские сказки о духовенстве уезда за 1811 год",
+    "record_type": "Ревізькі казки причту (7-ма ревізія)",
+    "repository": "Держархів Хмельницької області (ДАХмО)",
+    "collection": "Подольская духовная консистория",
+    "sheets": 183,
+    "date_started": "1811-08-01",
+    "date_ended": "1811-08-24",
+    "year_from": 1811,
+    "year_to": 1811,
+    "note": "Ковальський Іван [[особа-дерева]] — наш предок, див. гілку",
+    "clan_relevance": "прямий предок",
+}
+
+
+@pytest.fixture
+def space(tmp_path: Path) -> Any:
+    from nyshporka.core import workspace as W
+
+    W.use(W.Workspace(root=tmp_path / "ws", name="тест", origin="test"))
+    yield tmp_path / "ws"
+    W.reset()
+
+
+# ── жанр ─────────────────────────────────────────────────────────────────────
+
+def test_record_type_daie_kod_zhanru() -> None:
+    """У дослідницьких паспортах поле зветься `record_type`, і жанр не мусить губитись."""
+    code, types = opys.genre({"record_type": "Ревізькі казки причту"})
+    assert code == "revision"
+    assert types == ["revision"]
+
+
+def test_metryka_bez_odnoho_kodu() -> None:
+    """Зведена метрика — три типи; вибрати один означало б збрехати в картці."""
+    code, types = opys.genre({"record_type": "Метрична книга"})
+    assert code == ""
+    assert set(types) == {"birth", "marriage", "death"}
+
+
+# ── паспорт ──────────────────────────────────────────────────────────────────
+
+def test_pasport_lyshe_bilym_spyskom() -> None:
+    got = opys.sidecar_extras(PASPORT)
+    assert got["repository"].startswith("Держархів")
+    assert got["dates"] == ["1811-08-01", "1811-08-24"]
+    assert got["record_type"].startswith("Ревізькі")
+    assert "note" not in got and "clan_relevance" not in got
+
+
+def test_case_block_ne_vyvozyt_notatok(tmp_path: Path) -> None:
+    case_dir = tmp_path / "spr-8433"
+    case_dir.mkdir()
+    (case_dir / "_source.json").write_text(json.dumps(PASPORT, ensure_ascii=False),
+                                           encoding="utf-8")
+    case = PUB._case_block({"key": "DAHMO/315/8433"}, case_dir)
+
+    assert case["doc_type"] == "revision"
+    assert case["opys"] == "1", "номер опису не сміє затертись описом справи"
+    dump = json.dumps(case, ensure_ascii=False)
+    assert "предок" not in dump and "[[" not in dump
+    assert not gates._private_keys(case)
+
+
+# ── сховище сторінок ─────────────────────────────────────────────────────────
+
+def _storinky() -> CaseFile:
+    return CaseFile(
+        key="DAHMO/315/8433", repo="DAHMO", fond="315", spr="8433", opys="1",
+        pages={
+            "0001.jpg": PageNote(
+                scan="0001.jpg", page_type="revision", status="full",
+                surnames=["Ковальський Іван (дяк, 40)", "Мельник?", "Ткачъ Петро"],
+                places=["Летичів", "Голенищеве(?)"], years=[1811],
+                comment="наш рід — див. дерево [[особа-дерева]]", agent="сесія 12"),
+            "0002.jpg": PageNote(
+                scan="0002.jpg", page_type="revision", status="partial",
+                surnames=["Кравченко"], places=["Кудринці"], years=[1790]),
+        })
+
+
+def test_skhovyshche_lyshe_z_povnykh_arkushiv(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`partial` — перелік неповний за визначенням; у картці він читався б як повний."""
+    monkeypatch.setattr("nyshporka.pagestore.load_case", lambda ref: _storinky())
+
+    got = opys.from_pagestore("ДАХмО 315-1-8433", frames_total=281)
+
+    assert got["surnames"] == ["Ковальський", "Ткачъ"], "непевне й partial не беруться"
+    assert got["places"] == ["Летичів"]
+    assert got["years"] == [1811, 1811]
+    assert (got["pages_noted"], got["pages_full"], got["frames_total"]) == (2, 1, 281)
+    dump = json.dumps(got, ensure_ascii=False)
+    assert "наш рід" not in dump and "сесія" not in dump
+
+
+def test_bez_skhovyshcha_ne_padaie(monkeypatch: pytest.MonkeyPatch) -> None:
+    def _nemaie(ref: Any) -> None:
+        raise RuntimeError("простір не зібраний")
+
+    monkeypatch.setattr("nyshporka.pagestore.load_case", _nemaie)
+    assert opys.from_pagestore("ДАХмО 315-1-8433") == {}
+
+
+def test_pack_nese_opys_i_heometriiu(space: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    run = make_run(space / "reports" / "htr", "spr-8433", pages=4, geometry=True)
+    monkeypatch.setattr(PUB, "resolve_runs",
+                        lambda scope: ([run], {"key": "", "shifra": "ДАХмО 315-1-8433"}))
+    monkeypatch.setattr("nyshporka.pagestore.load_case", lambda ref: _storinky())
+
+    got = PUB.pack("ДАХмО 315-1-8433", dry_run=True)
+    details = got["manifest"]["case"]["details"]
+
+    assert details["geometry"] == {"pages": 4, "of": 4}
+    assert details["pagestore"]["surnames"] == ["Ковальський", "Ткачъ"]
+    assert got["gates"]["passed"]
+
+
+# ── ворота ───────────────────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("case_extra", [
+    {"note": "нотатка"},
+    {"details": {"pagestore": {"comment": "хід вичитки"}}},
+    {"title": "Ревізія, див. [[особа-дерева]]"},
+])
+def test_vorota_vidmovliaiut_pryvatnomu(space: Path, case_extra: dict[str, Any]) -> None:
+    run = make_run(space / "reports" / "htr", "spr-8433")
+    m = manifest_for([bundle.voice_of(run)])
+    m.case.update(case_extra)
+
+    v = gates.check(m)
+    assert not v.passed
+    assert any("нотат" in r or "дерева" in r for r in v.refusals)
+
+
+# ── дозалив геометрії ────────────────────────────────────────────────────────
+
+def _paket(space: Path, tmp_path: Path) -> Path:
+    run = make_run(space / "reports" / "htr", "spr-8433", geometry=True)
+    m = manifest_for([bundle.voice_of(run)])
+    text = tmp_path / "pack.nyshtext"
+    bundle.write(text, m, [run])
+    bundle.write(bundle.geom_path(text), m, [run], patterns=bundle.PACKED_GEOM)
+    return text
+
+
+def _pul(monkeypatch: pytest.MonkeyPatch, dubl: dict[str, Any]) -> list[tuple[str, str]]:
+    calls: list[tuple[str, str]] = []
+
+    def _req(method: str, url: str, *, body: Any = None, auth: str = "") -> dict[str, Any]:
+        calls.append((method, url))
+        if url.endswith("/contributions"):
+            return dict(dubl)
+        if url.endswith("/geometry"):
+            return {"upload": {"geom": "https://r2.example/geom"}}
+        return {"ready": True}
+
+    monkeypatch.setattr(upload, "_request", _req)
+    monkeypatch.setattr(upload, "_put", lambda url, blob: calls.append(("PUT", url)))
+    return calls
+
+
+def test_dubl_bez_heometrii_dozalyvaie(space: Path, tmp_path: Path,
+                                       monkeypatch: pytest.MonkeyPatch) -> None:
+    """Перші засіяні справи пішли без рамок; повтор тексту мусить їх довезти."""
+    calls = _pul(monkeypatch, {"duplicate": True, "contribution": 7,
+                               "geometry": False, "mine": True})
+
+    got = upload.publish(_paket(space, tmp_path), base="https://pul.example/v1", auth="k")
+
+    assert got["geometry_attached"]
+    assert ("POST", "https://pul.example/v1/contributions/7/geometry") in calls
+    assert ("PUT", "https://r2.example/geom") in calls
+
+
+@pytest.mark.parametrize("dubl", [
+    {"duplicate": True, "contribution": 7, "geometry": True, "mine": True},
+    {"duplicate": True, "contribution": 7, "geometry": False, "mine": False},
+    {"duplicate": True, "contribution": 7},
+])
+def test_dubl_ne_dozalyvaie_zaivoho(space: Path, tmp_path: Path,
+                                    monkeypatch: pytest.MonkeyPatch,
+                                    dubl: dict[str, Any]) -> None:
+    """Геометрія вже є, внесок чужий або пул старий — нічого не заливається."""
+    calls = _pul(monkeypatch, dubl)
+
+    got = upload.publish(_paket(space, tmp_path), base="https://pul.example/v1", auth="k")
+
+    assert not got.get("geometry_attached")
+    assert [c for c in calls if c[0] == "PUT"] == []

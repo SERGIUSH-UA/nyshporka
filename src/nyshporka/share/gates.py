@@ -17,6 +17,7 @@
 """
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -153,6 +154,31 @@ def _gate_payload(m: Manifest, v: Verdict) -> None:
     if leaked:
         v.refuse(f"у маніфесті лишились поля машини, на якій читали: "
                  f"{', '.join(leaked)}")
+    private = sorted(_private_keys(m.case))
+    if private:
+        v.refuse(f"в описі справи робочі нотатки дослідника: {', '.join(private)}. "
+                 "Опис збирається білим списком полів (`share.opys`)")
+    if "[[" in json.dumps(m.case, ensure_ascii=False):
+        v.refuse("в описі справи посилання на особу дерева (`[[…]]`) — "
+                 "це нотатка дослідження, а не опис справи")
+
+
+#: Поля паспорта й сховища сторінок, де лежать нотатки про рід.
+PRIVATE_KEYS = frozenset({"note", "clan_relevance", "comment", "agent", "records"})
+
+
+def _private_keys(node: Any) -> set[str]:
+    if isinstance(node, dict):
+        found = {str(k) for k in node if k in PRIVATE_KEYS}
+        for val in node.values():
+            found |= _private_keys(val)
+        return found
+    if isinstance(node, list):
+        found = set()
+        for val in node:
+            found |= _private_keys(val)
+        return found
+    return set()
 
 
 def describe(v: Verdict) -> str:

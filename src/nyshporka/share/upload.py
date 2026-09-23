@@ -108,7 +108,7 @@ def publish(path: Path, *, base: str = "", auth: str = "") -> dict[str, Any]:
 
     got = _request("POST", f"{home}/contributions", body=manifest.as_json(), auth=tok)
     if got.get("duplicate"):
-        return got
+        return _attach_geometry(got, path, home=home, tok=tok, manifest=manifest)
 
     upload = got.get("upload") or {}
     if not upload.get("text"):
@@ -126,6 +126,32 @@ def publish(path: Path, *, base: str = "", auth: str = "") -> dict[str, Any]:
         "POST", f"{home}/contributions/{got['contribution']}/complete", auth=tok
     )
     return {**got, **done}
+
+
+def _attach_geometry(got: dict[str, Any], path: Path, *, home: str, tok: str,
+                     manifest: Any) -> dict[str, Any]:
+    """Текст уже в пулі, геометрії при ньому немає — довезти її окремо.
+
+    🔴 Без цього кроку геометрію до залитого тексту не додати НІЯК: той самий
+    текст пул упізнає за хешем змісту й відповідає `duplicate`, не видаючи
+    посилань. Саме так перші десять засіяних справ лишились без рамок.
+    """
+    from nyshporka.share import bundle
+
+    geom = bundle.geom_path(path)
+    # Старий пул полів `geometry`/`mine` не віддає — тоді нічого не робимо.
+    if got.get("geometry") is not False or not got.get("mine") or not geom.exists():
+        return got
+    attach = _request(
+        "POST", f"{home}/contributions/{got['contribution']}/geometry",
+        body=manifest.as_json(), auth=tok)
+    url = (attach.get("upload") or {}).get("geom")
+    if not url:
+        return {**got, "geometry_attach": attach}
+    _put(url, geom.read_bytes())
+    done = _request(
+        "POST", f"{home}/contributions/{got['contribution']}/complete", auth=tok)
+    return {**got, **done, "geometry_attached": True}
 
 
 def _put(url: str, blob: bytes) -> None:
