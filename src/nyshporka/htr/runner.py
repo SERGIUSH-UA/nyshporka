@@ -2260,15 +2260,21 @@ def page_memory(device: str) -> dict[str, int]:
     три джерела й три числа (1.95 / 3.3 / 1.8 ГБ на шард) для тієї самої речі.
     Тепер кожна сторінка каже сама; регулятор флоту читає це з події `htr`.
 
-    VRAM — `max_memory_reserved` (що алокатор торча тримав), без CUDA-контексту
-    процесу (~0.3–0.5 ГБ); повну цифру карти регулятор бере з `nvidia-smi`.
+    🔴🔴 VRAM — `max_memory_ALLOCATED` сторінки, тобто скільки їй СПРАВДІ
+    треба, без CUDA-контексту процесу (~0.3–0.5 ГБ). Доти тут стояв
+    `max_memory_reserved` — те, що алокатор ТРИМАВ, — і воно не спадало ніколи:
+    після однієї густої сторінки (437 рядків) кожна наступна, навіть на 27
+    рядків, «брала» 5.2 ГБ (живий захід 23.09.2026). Регулятор на цих числах
+    зливав шарди, хоча свіжий процес на типовій сторінці бере 1.3–2.3 ГБ.
+    Утримане алокатором — окремим полем, для діагностики.
     """
     out: dict[str, int] = {}
     if device.startswith("cuda"):
         try:
             import torch
 
-            out["vram_peak_mb"] = int(torch.cuda.max_memory_reserved(device) / 2**20)
+            out["vram_peak_mb"] = int(torch.cuda.max_memory_allocated(device) / 2**20)
+            out["vram_reserved_mb"] = int(torch.cuda.max_memory_reserved(device) / 2**20)
         except Exception:
             pass
     rss, peak = _rss_mb()
@@ -3476,6 +3482,15 @@ def _main_case(args: argparse.Namespace, cache: dict | None = None) -> int:
             continue
         sec = round(time.time() - t, 1)
         mem = page_memory(device)
+        if device.startswith("cuda") and not args.keep_cache:
+            # 🔴 Віддати кеш карті після КОЖНОЇ сторінки, а не лише після
+            # сегментації під локом: із засівом сегментації (готовий кеш) ту
+            # гілку не проходить жодна сторінка, і алокатор тримав буфери
+            # розпізнавання найгустішої сторінки до кінця процесу — карта
+            # «повна», регулятор зливає шарди, хоча типовій сторінці треба
+            # утричі менше. Коштує мілісекунди.
+            import torch
+            torch.cuda.empty_cache()
         if guard_shared is not None:
             # після кожної сторінки: віддати свою дельту і забрати агрегат по
             # справі — так квота розвідки одна на всіх, а чужий фліп видно одразу

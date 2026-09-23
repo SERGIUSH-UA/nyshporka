@@ -128,3 +128,24 @@ def test_a_dead_neighbours_page_still_restarts_the_worker(
     monkeypatch.setattr(R.sys, "argv", ["htr_case_run.py", "--shard", "2/4", "--claim"])
     R.supervise(_args(), case, out)
     assert len(calls) > 1
+
+
+def test_page_memory_is_what_the_page_needed_not_what_the_allocator_kept() -> None:
+    """🔴🔴 23.09.2026: після однієї сторінки на 437 рядків кожна наступна,
+    навіть на 27 рядків, «брала» 5.2 ГБ — міряли `max_memory_reserved`, тобто
+    утримане алокатором. Регулятор на цьому зливав шарди."""
+    import inspect
+
+    src = inspect.getsource(R.page_memory)
+    assert 'out["vram_peak_mb"] = int(torch.cuda.max_memory_allocated' in src
+
+
+def test_the_cache_is_released_after_every_page() -> None:
+    """Із засівом сегментації гілку лока з `empty_cache` не проходить жодна
+    сторінка — тож кеш мусить віддаватись після сторінки, а не лише там."""
+    import inspect
+
+    src = inspect.getsource(R._main_case)
+    after = src[src.index("mem = page_memory(device)"):]
+    window = after[:900]
+    assert "torch.cuda.empty_cache()" in window and "args.keep_cache" in window
