@@ -230,3 +230,27 @@ def test_ocr_nazva_reiestru_ne_ide() -> None:
     row = {"title": "Саокт дворян по Баптскому", "title_src": "ocr", "folios": "670"}
     assert opys.title("", row) == ""
     assert opys.from_registry(row) == {"folios": "670"}
+
+
+def test_nazva_z_biblioteky_ostannoiu() -> None:
+    """Паспорт і реєстр мовчать — назву знає бібліотека справ."""
+    assert opys.title("", None, "Ревізькі казки однодворців повіту") == \
+        "Ревізькі казки однодворців повіту"
+    assert opys.title("", None, "spr-655 — рендер із PDF") == ""
+
+
+def test_reviziina_komisiia_ne_perepys() -> None:
+    """Протоколи ревізійної комісії — не ревізькі казки."""
+    assert opys.genre({"title": "Протоколи Київської ревізійної комісії за 1838 рік"}) == ("", [])
+    assert opys.genre({"title": "Ревизионная комиссия, журналы"}) == ("", [])
+    assert opys.genre({"title": "Ревізькі казки однодворців"})[0] == "revision"
+
+
+def test_seriia_ne_pakuietsia(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Нерозібрана шифра стає серією фонду — і тягне чужий прогін за хвостом цифр."""
+    monkeypatch.setattr("nyshporka.htr_store.runs_for_scope", lambda scope: {
+        "rows": [{"name": "25-1-182"}], "kind": "cases", "key": "",
+        "shifra": scope, "keys": ["DAVO/25/182"]})
+
+    with pytest.raises(PUB.PublishError, match="не розпізнано як одну справу"):
+        PUB.resolve_runs("ДАВіО ф.792 оп.1 спр.25")

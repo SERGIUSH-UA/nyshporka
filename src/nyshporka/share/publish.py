@@ -38,6 +38,15 @@ def resolve_runs(scope: str) -> tuple[list[Path], dict[str, Any]]:
         got = S.runs_for_scope(scope)
     except ValueError as exc:
         raise PublishError(str(exc)) from exc
+    if got.get("kind") not in ("case", "run"):
+        # 🔴 Серія фонду — не справа. Шифру, якої не розібрав резолвер,
+        # пошук чесно розуміє як серію і збирає прогони за хвостом цифр:
+        # «ДАВіО ф.792 оп.1 спр.25» так зібрало чужий прогін `25-1-182`, і
+        # пакет поїхав би з чужим текстом під цією шифрою.
+        keys = ", ".join(got.get("keys") or []) or "—"
+        raise PublishError(
+            f"«{scope}» не розпізнано як одну справу (знайдено серію: {keys}). "
+            "Назвіть справу ключем, напр. DAVO/792/25")
     rows = got.get("rows") or []
     if not rows:
         raise PublishError(
@@ -274,7 +283,9 @@ def build_manifest(scope: str, *,
     row = opys.registry_row(str(case.get("shifra") or ""))
     # Паспорт мовчить або тримає робочу нотатку — назву й роки дає реєстр
     # опису: він вичитаний з друкованого опису фонду, а не складений нами.
-    nazva = opys.title(str(case.get("title") or ""), row)
+    library = next((str(r.get("title") or "") for r in info.get("rows") or []
+                    if r.get("title")), "")
+    nazva = opys.title(str(case.get("title") or ""), row, library)
     if nazva:
         case["title"] = nazva
     else:

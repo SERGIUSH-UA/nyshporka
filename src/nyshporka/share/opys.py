@@ -63,20 +63,22 @@ def _working(title: str) -> bool:
     return bool(_WORKING_TITLE.match(title)) or any(m in low for m in _NOTE_MARKERS)
 
 
-def title(side_title: str, row: dict[str, Any] | None) -> str:
-    """Назва для картки: з паспорта, якщо це назва, інакше з реєстру опису.
+def title(side_title: str, row: dict[str, Any] | None, library: str = "") -> str:
+    """Назва для картки: паспорт → реєстр опису → бібліотека справ.
 
     🔴 Картка — перше, що бачить людина й пошуковик, тож «spr-655 — рендер
     із PDF для HTR-черги» там гірше за порожнечу. Реєстр опису вичитаний із
     друкованого опису фонду й таких нотаток не має.
     """
-    own = str(side_title or "").strip()
-    reg = _registry_title(row)
+    return _clean(side_title) or _registry_title(row) or _clean(library)
+
+
+def _clean(raw: str) -> str:
+    own = str(raw or "").strip()
     if own and _working(own):
         stripped = _WORKING_TITLE.sub("", own).strip()
         own = "" if _working(stripped) else stripped
-    own = _SHIFRA_PREFIX.sub("", own).strip() if own else ""
-    return own or reg
+    return _SHIFRA_PREFIX.sub("", own).strip() if own else ""
 
 
 def sidecar_extras(side: dict[str, Any]) -> dict[str, Any]:

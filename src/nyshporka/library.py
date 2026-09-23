@@ -1597,11 +1597,17 @@ _RTYPE_HINTS: list[tuple[str, tuple[str, ...]]] = [
 ]
 
 
+_NOT_REVISION = re.compile(r"ревізійн\w*|ревизионн\w*")
+
+
 def _infer_record_types(*texts: str) -> list[str]:
     """Евристика типів із назви/типу документа. Порожньо — якщо нічого не впізнали."""
     blob = " ".join(t for t in texts if t).lower()
     if not blob:
         return []
+    # «Ревізійна комісія» — установа, а не ревізькі казки: ознака «ревіз»
+    # інакше записує її протоколи в перепис.
+    blob = _NOT_REVISION.sub(" ", blob)
     out = [code for code, keys in _RTYPE_HINTS if any(k in blob for k in keys)]
     # «Н+Ш+С» / «Н, Ш, С» — стисла нотація зведеної метрики
     if re.search(r"\bн\s*[+,/]\s*ш\s*[+,/]\s*с\b", blob):
