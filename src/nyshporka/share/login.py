@@ -51,20 +51,21 @@ _GOTOVO = """<!doctype html><html lang="uk"><meta charset="utf-8">
 --muted:#b9a88f;--line:#3a3128;--acc:#8fc79b}}}}
 body{{margin:0;min-height:100vh;display:grid;place-items:center;background:var(--bg);
 color:var(--fg);font:16px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif;padding:16px}}
-main{{max-width:26rem;width:100%;text-align:center}}
+main{{max-width:30rem;width:100%;text-align:center}}
 .maskot{{width:9rem;height:auto;margin-bottom:-.6rem}}
+.scena{{display:block;width:100%;height:auto;border-radius:15px 15px 0 0}}
+.card.z-scenoiu{{padding:0;overflow:hidden}} .card.z-scenoiu .tekst{{padding:1.25rem 1.5rem 1.75rem}}
 .card{{background:var(--card);border:1px solid var(--line);border-radius:16px;
 padding:1.75rem 1.5rem;box-shadow:0 1px 2px rgba(0,0,0,.06)}}
 .logo{{height:2.6rem;width:auto;margin-bottom:1rem}}
 h1{{font-size:1.6rem;margin:0 0 .5rem;color:var(--acc)}}
 p{{margin:0;color:var(--muted)}} code{{font-size:.9em}}
 </style>
-<main>
-<img class="maskot" src="{site}/static/img/{maskot}" alt="">
-<div class="card">
+<main>{nad}
+<div class="card{klas}">{scena}<div class="tekst">
 <img class="logo" src="{site}/static/img/logo.webp" alt="Нишпорка">
 <h1>{title}</h1><p>{text}</p>
-</div></main></html>"""
+</div></div></main></html>"""
 
 
 def site_url(site: str = "") -> str:
@@ -117,10 +118,17 @@ class _Handler(BaseHTTPRequestHandler):
         # Типовий обробник пише кожен запит у stderr — посеред виводу команди.
         return
 
-    def _page(self, code: int, title: str, text: str,
-              maskot: str = "maskot-lupa.webp") -> None:
-        body = _GOTOVO.format(title=title, text=text, site=self.server.site,
-                              maskot=maskot).encode("utf-8")
+    def _page(self, code: int, title: str, text: str, *, gotovo: bool = False) -> None:
+        site = self.server.site
+        if gotovo:
+            nad, klas = "", " z-scenoiu"
+            scena = f'<img class="scena" src="{site}/static/img/scena-gotovo.webp" alt="">'
+        else:
+            nad = (f'<img class="maskot" src="{site}/static/img/'
+                   'maskot-chytaie-kliuch.webp" alt="">')
+            klas = scena = ""
+        body = _GOTOVO.format(title=title, text=text, site=site, nad=nad,
+                              klas=klas, scena=scena).encode("utf-8")
         self.send_response(code)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
@@ -149,8 +157,7 @@ class _Handler(BaseHTTPRequestHandler):
         self.server.token = token
         self._page(200, "Готово!",
                    "Нишпорка отримала ключ і вже може віддавати ваше прочитане "
-                   "в Супрягу. Цю вкладку можна закрити.",
-                   maskot="maskot-znakhidka.webp")
+                   "в Супрягу. Цю вкладку можна закрити.", gotovo=True)
         self.server.done.set()
 
 
