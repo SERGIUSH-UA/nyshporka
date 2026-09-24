@@ -80,8 +80,12 @@ def title(side_title: str, row: dict[str, Any] | None, library: str = "") -> str
 _RENDER_TITLE = re.compile(r"\(([^()]+?)(?:,\s*\d{3,4}\s*[–-]\s*\d{3,4})?\)\s*$")
 
 
+#: Позначки дослідника на початку назви («🔥 Подільська палата…») — не назва.
+_LEADING_MARKS = re.compile(r"^[^\w«\"'(\[]+")
+
+
 def _clean(raw: str) -> str:
-    own = str(raw or "").strip()
+    own = _LEADING_MARKS.sub("", str(raw or "")).strip()
     if own and _working(own):
         inner = _RENDER_TITLE.search(own)
         stripped = _WORKING_TITLE.sub("", own).strip()

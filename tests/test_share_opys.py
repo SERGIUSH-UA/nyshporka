@@ -361,3 +361,12 @@ def test_holos_bez_mety_ne_ide(space: Path, monkeypatch: pytest.MonkeyPatch) -> 
 
     dirs, _ = PUB.resolve_runs("DAHMO/315/8433")
     assert dirs == [run]
+
+
+@pytest.mark.parametrize("own, want", [
+    ("🔥 Подільська палата цивільного суду", "Подільська палата цивільного суду"),
+    ("🏆 ⚠ Ревізькі казки", "Ревізькі казки"),
+    ("«Выписи из книг»", "«Выписи из книг»"),
+])
+def test_poznachky_doslidnyka_ne_v_nazvi(own: str, want: str) -> None:
+    assert opys.title(own, None) == want
