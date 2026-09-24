@@ -361,6 +361,7 @@ def _json_line(text: str) -> dict[str, Any]:
 # ── захід ───────────────────────────────────────────────────────────────────
 def launch(convoy: Convoy, res: GoResult, say: Callable[..., None], *,
            budget: float | None = None, max_hours: float | None = None,
+           max_rents: int = 0,
            confirm: bool = False, dry_run: bool = False,
            transport: str = "auto", max_usd_per_1000: float = 0.0,
            params: Sequence[str] = ()) -> None:
@@ -559,7 +560,8 @@ def launch(convoy: Convoy, res: GoResult, say: Callable[..., None], *,
     _remember(convoy, res, session=session, plan_path=plan_path)
     launched = _run([*gr, "htr", "supervise", "--plan", str(plan_path),
                      "--detach", "--session", session,
-                     "--budget", f"{high:.2f}", "--max-hours", f"{hours:.0f}"],
+                     "--budget", f"{high:.2f}", "--max-hours", f"{hours:.0f}",
+                     *(["--max-rents", str(int(max_rents))] if max_rents else [])],
                     env=env)
     if launched.returncode:
         # 🔴 Запис НЕ видаляємо. «Не стартував» тут означає лише те, що

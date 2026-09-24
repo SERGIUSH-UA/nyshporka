@@ -816,6 +816,10 @@ def cmd_go(
         None, "--max-hours", help="стеля тривалості, годин; без неї — утричі від прогнозу"),
     max_price: float | None = typer.Option(
         None, "--max-price", help="стеля ціни машини, $/год"),
+    max_rents: int = typer.Option(
+        0, "--max-rents",
+        help="скільки невдалих оренд дозволено на захід (типово в наглядача 3); "
+             "на ринку, де хости часто не пускають по SSH, — 6-8"),
     confirm: bool = typer.Option(
         False, "--confirm",
         help="дозвіл ЛЮДИНИ на захід понад стелю автозапуску"),
@@ -918,7 +922,7 @@ def cmd_go(
         raise typer.Exit(code=2)
 
     res = GO.go(case, backend=backend, budget=budget, max_hours=max_hours,
-                max_price=max_price, confirm=confirm, dry_run=dry_run,
+                max_price=max_price, max_rents=max_rents, confirm=confirm, dry_run=dry_run,
                 with_voices=with_, second_voice=not one_voice, script=script,
                 model=model,
                 case_key=case_key, rerun=rerun, allow_partial=allow_partial,

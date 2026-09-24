@@ -218,6 +218,23 @@ def test_missing_weights_are_named(tmp_path: Path) -> None:
 
 
 # ── що саме віддаємо наглядачеві ─────────────────────────────────────────────
+def test_the_rent_ceiling_reaches_the_supervisor_only_when_asked(
+        space: Path, monkeypatch, fake_gpurunner) -> None:
+    """Стеля невдалих оренд: на ринку, де хости не пускають по SSH, трьох мало."""
+    case, _ = _wire(space, monkeypatch)
+    _go(case, max_rents=8)
+    launch = [c for c in fake_gpurunner.called("htr", "supervise") if "--detach" in c][0]
+    assert launch[launch.index("--max-rents") + 1] == "8"
+
+
+def test_without_the_flag_the_supervisor_keeps_its_default(
+        space: Path, monkeypatch, fake_gpurunner) -> None:
+    case, _ = _wire(space, monkeypatch)
+    _go(case)
+    launch = [c for c in fake_gpurunner.called("htr", "supervise") if "--detach" in c][0]
+    assert "--max-rents" not in launch
+
+
 def test_detached_launch_hands_over_plan_and_remembers_session(
         space: Path, monkeypatch, fake_gpurunner) -> None:
     case, _ = _wire(space, monkeypatch)

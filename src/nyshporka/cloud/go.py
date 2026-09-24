@@ -400,6 +400,7 @@ def _find_live(plan: Any, frames_dir: Path) -> tuple[ST.RunState | None,
 def go(case: str | Sequence[str], *, backend: str = "vast",
        budget: float | None = None,
        max_hours: float | None = None, max_price: float | None = None,
+       max_rents: int = 0,
        confirm: bool = False, dry_run: bool = False,
        with_voices: list[str] | tuple[str, ...] = (), second_voice: bool = True,
        script: str = "", model: str = "", case_key: str = "", rerun: bool = False,
@@ -432,7 +433,7 @@ def go(case: str | Sequence[str], *, backend: str = "vast",
     owner = contextlib.ExitStack()
     try:
         _go(res, cases, say, owner, backend=backend, budget=budget,
-            max_hours=max_hours,
+            max_hours=max_hours, max_rents=max_rents,
             max_price=max_price, confirm=confirm, dry_run=dry_run,
             with_voices=tuple(with_voices), second_voice=second_voice,
             script=script, model=model, case_key=case_key, rerun=rerun,
@@ -717,7 +718,7 @@ def _last_line_of_defence(res: GoResult, say: EventFn) -> None:
 def _go(res: GoResult, cases: tuple[str, ...], say: EventFn,
         owner: contextlib.ExitStack, *,
         backend: str, budget: float | None, max_hours: float | None, max_price: float | None,
-        confirm: bool, dry_run: bool, with_voices: tuple[str, ...],
+        max_rents: int, confirm: bool, dry_run: bool, with_voices: tuple[str, ...],
         second_voice: bool, script: str, model: str, case_key: str, rerun: bool,
         allow_partial: bool, rotate_landscape: bool, thin: bool,
         transport: str, max_usd_per_1000: float, params: tuple[str, ...],
@@ -837,7 +838,7 @@ def _go(res: GoResult, cases: tuple[str, ...], say: EventFn,
         from nyshporka.cloud import supervised as SUP
 
         SUP.launch(convoy, res, say, budget=budget, max_hours=max_hours,
-                   confirm=confirm, dry_run=dry_run, transport=transport,
+                   max_rents=max_rents, confirm=confirm, dry_run=dry_run, transport=transport,
                    max_usd_per_1000=max_usd_per_1000, params=params)
         return
 
