@@ -81,3 +81,19 @@ def test_unbound_run_is_not_taken_by_case_dir(scope: Any, tmp_path: Path) -> Non
     R._run_overrides.cache_clear()
     # без збігу за ключем пошук іде в резерв за текою — і там «чужий» відсікається
     assert _names(S.runs_for_scope("ДАХмО R-100-1-7")) == set()
+
+
+def test_shyfra_v_case_key_tezh_svoia(scope: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Старий прогін несе в `case_key` шифру, а не ключ — і лишається своїм.
+
+    Інакше справа, прочитана повністю, для пошуку й пакувальника «без прогонів».
+    """
+    S, _ = scope
+    S._canon_case_key.cache_clear()
+    rows = [*RUNS, {"name": "старий", "case_key": "ДАХмО R-100-1-7",
+                    "case_dir": "E:/elsewhere/spr-7", "pages_done": 26}]
+    monkeypatch.setattr(S, "list_cases", lambda: [dict(r) for r in rows])
+    try:
+        assert "старий" in _names(S.runs_for_scope("ДАХмО R-100-1-7"))
+    finally:
+        S._canon_case_key.cache_clear()

@@ -17,6 +17,7 @@ CER Kraken на скорописі XVIII-XIX ст. ~25-35%: «Franciszka Lubkows
 from __future__ import annotations
 
 import contextlib
+import functools
 import json
 import os
 import re
@@ -660,7 +661,7 @@ def runs_for_scope(scope: str) -> dict[str, Any]:
         name = r.get("name")
         if name in bound:
             return bound[name] or ""
-        return (r.get("case_key") or "").strip()
+        return _canon_case_key((r.get("case_key") or "").strip())
 
     by_name = [r for r in rows if r.get("name") == want]
     if by_name:
@@ -696,6 +697,25 @@ def runs_for_scope(scope: str) -> dict[str, Any]:
         mine = [r for r in find_runs_for_case(ref.path)
                 if bound.get(str(r.get("name")), ref.key) == ref.key]
     return {"rows": mine, "kind": "case", "key": ref.key, "shifra": ref.shifra}
+
+
+@functools.lru_cache(maxsize=4096)
+def _canon_case_key(value: str) -> str:
+    """Ключ справи з мети прогону — канонічним ключем, навіть коли там шифра.
+
+    🔴 Частина старих прогонів несе в `case_key` шифру («ДАХмО 315-1-75»), а
+    не ключ. Звірка за рядком тоді не бачить їх при власній справі: пошук
+    `--case DAHMO/315/75` відповідав «жодного прогону», а пакувальник —
+    «прочитаного немає» на справі, прочитаній повністю.
+    """
+    if not value or "/" in value:
+        return value
+    try:
+        from nyshporka.pagestore.store import resolve_case
+
+        return resolve_case(value).key or value
+    except Exception:
+        return value
 
 
 def _bound_runs() -> dict[str, str | None]:
