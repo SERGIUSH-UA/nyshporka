@@ -660,7 +660,7 @@ def runs_for_scope(scope: str) -> dict[str, Any]:
     def key_of(r: dict[str, Any]) -> str:
         name = r.get("name")
         if name in bound:
-            return bound[name] or ""
+            return _canon_case_key(bound[name] or "")
         return _canon_case_key((r.get("case_key") or "").strip())
 
     by_name = [r for r in rows if r.get("name") == want]

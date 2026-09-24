@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 import time
 from pathlib import Path
 from typing import Any
@@ -232,6 +233,44 @@ def _normalize_shifra(case: dict[str, Any], key: str) -> dict[str, Any]:
     return out
 
 
+_EXPLICIT_OPYS = re.compile(r"^[^/]+/([^/-]+)-([^/]+)/")
+
+
+def _opys_z_progoniv(case: dict[str, Any], info: dict[str, Any]) -> dict[str, Any]:
+    """Опис справи — з прогонів, коли вони називають його явно.
+
+    🔴 У фондах, де опис не входить до ключа (ЦДІАК 127), справи різних
+    описів з тим самим номером мають ОДИН ключ: «127-1076-1664» і
+    «127-1078-1664» — обидві `CDIAK/127/1664`. Резолвер за ключем вгадує
+    опис, і прогін з опису 1078 поїхав би в каталог під шифрою 1076, тобто
+    під чужою справою. Прогін же пам'ятає опис явно — у своїй меті чи в
+    прив'язці («CDIAK/127-1078/1664»). Паспорт теки сильніший: якщо він
+    називає інший опис, нічого не міняється, а розбіжність ловить засів.
+    """
+    from nyshporka import htr_store as S
+
+    bound = S._bound_runs()
+    fond = str(case.get("fond") or "")
+    found: set[str] = set()
+    for r in info.get("rows") or []:
+        raw = str(bound.get(str(r.get("name")), None) or r.get("case_key") or "")
+        m = _EXPLICIT_OPYS.match(raw)
+        if m and m.group(1) == fond:
+            found.add(m.group(2))
+    if len(found) != 1:
+        return case
+    opys = found.pop()
+    if str(case.get("opys") or "") == opys or case.get("shifra_pasport"):
+        return case
+    from nyshporka.library import _shifra
+
+    out = {**case, "opys": opys,
+           "shifra": _shifra(case.get("repo"), case.get("fond"), opys, case.get("spr"))}
+    if case.get("shifra") and case["shifra"] != out["shifra"]:
+        out["shifra_rezolver"] = case["shifra"]
+    return out
+
+
 def _refs_from_sidecar(case_dir: Path | None) -> list[dict[str, str]]:
     """Стабільні посилання на джерело зйомки — єдине, що не залежить від нас.
 
@@ -412,7 +451,7 @@ def build_manifest(scope: str, *,
     lic = {"text": license_text, "images": "не входять"}
     if source_terms:
         lic["source_terms"] = source_terms
-    case = _normalize_shifra(_case_block(info, case_dir), key)
+    case = _opys_z_progoniv(_normalize_shifra(_case_block(info, case_dir), key), info)
     if archive_name.strip():
         # Архіву немає в довіднику — назву дає людина. Сервер покаже її на
         # картці, доки архів не з'явиться в довіднику пакета.

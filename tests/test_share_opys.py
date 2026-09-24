@@ -370,3 +370,29 @@ def test_holos_bez_mety_ne_ide(space: Path, monkeypatch: pytest.MonkeyPatch) -> 
 ])
 def test_poznachky_doslidnyka_ne_v_nazvi(own: str, want: str) -> None:
     assert opys.title(own, None) == want
+
+
+def test_opys_z_progoniv_peremahaie_vhadanyi(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Опис не в ключі: «127-1076-1664» і «127-1078-1664» — один ключ, прогін знає свій."""
+    monkeypatch.setattr("nyshporka.htr_store._bound_runs",
+                        lambda: {"spr-1664": "CDIAK/127-1078/1664"})
+    case = {"shifra": "ЦДІАК 127-1076-1664", "repo": "CDIAK", "fond": "127",
+            "opys": "1076", "spr": "1664"}
+    info = {"rows": [{"name": "spr-1664", "case_key": "CDIAK/127/1664"},
+                     {"name": "spr-1664-diak_v4", "case_key": "CDIAK/127-1078/1664"}]}
+
+    got = PUB._opys_z_progoniv(case, info)
+
+    assert got["opys"] == "1078"
+    assert got["shifra"] == "ЦДІАК 127-1078-1664"
+    assert got["shifra_rezolver"] == "ЦДІАК 127-1076-1664"
+
+
+def test_opys_z_progoniv_ne_hadaie_pry_rozbizhnosti(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Прогони називають різні описи — нічого не міняємо, це ловить засів."""
+    monkeypatch.setattr("nyshporka.htr_store._bound_runs", lambda: {})
+    case = {"shifra": "ЦДІАК 127-1076-1664", "repo": "CDIAK", "fond": "127",
+            "opys": "1076", "spr": "1664"}
+    info = {"rows": [{"name": "a", "case_key": "CDIAK/127-1078/1664"},
+                     {"name": "b", "case_key": "CDIAK/127-1077/1664"}]}
+    assert PUB._opys_z_progoniv(case, info) is case

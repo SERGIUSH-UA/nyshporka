@@ -47,10 +47,20 @@ def scope(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
     monkeypatch.setattr(S, "list_cases", lambda: [dict(r) for r in RUNS])
     monkeypatch.setattr(S, "find_runs_for_case", lambda p: [
         dict(r) for r in RUNS if r["case_dir"] == p])
-    monkeypatch.setattr(PS, "resolve_case", lambda v: CaseRef(
-        key=KEY, repo="DAHMO", fond="R-100", spr="7", opys="1",
-        shifra="ДАХмО R-100-1-7", path="data/raw/dahmo_R-100/spr-7"))
+    ref = CaseRef(key=KEY, repo="DAHMO", fond="R-100", spr="7", opys="1",
+                  shifra="ДАХмО R-100-1-7", path="data/raw/dahmo_R-100/spr-7")
+
+    def _resolve(v: str) -> CaseRef:
+        # Лише тестова справа: чужий ключ резолвер не сміє звести до неї,
+        # інакше прив'язка «деінде» тихо стала б прив'язкою сюди.
+        if v in (KEY, "ДАХмО R-100-1-7"):
+            return ref
+        raise ValueError(f"не розпізнав {v}")
+
+    monkeypatch.setattr(PS, "resolve_case", _resolve)
+    S._canon_case_key.cache_clear()
     yield S, R
+    S._canon_case_key.cache_clear()
     R.load_overrides.cache_clear()
     R._run_overrides.cache_clear()
     S._canon_case_key.cache_clear()
