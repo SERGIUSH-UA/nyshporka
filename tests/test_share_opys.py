@@ -306,3 +306,36 @@ def test_zahlushka_kataloho_ne_nazva(row: dict[str, Any]) -> None:
 
 def test_fs_zahlushka_z_biblioteky_ne_nazva() -> None:
     assert opys.title("", None, "f  315-1-1121  Church Records BMD  Delo") == ""
+
+
+# ── шифра, яку паспорт записав по-своєму ─────────────────────────────────────
+
+@pytest.mark.parametrize("raw", [
+    "ДАХмО ф.315 оп.1 спр.8433",
+    "315-1-8433",
+    "ДАХмО 315-1-8433 (арк. окремої секції)",
+])
+def test_nerozibrana_shyfra_staie_kanonichnoiu(raw: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Каталог шукає за шифрою, яку розбирає резолвер; запис паспорта лишається поруч."""
+    from nyshporka.pagestore.store import CaseRef
+
+    ref = CaseRef(key="DAHMO/315/8433", repo="DAHMO", fond="315", spr="8433", opys="1",
+                  shifra=raw, title="", path="")
+
+    def _resolve(value: str) -> CaseRef:
+        if value in ("DAHMO/315/8433", "ДАХмО 315-1-8433"):
+            return ref
+        raise ValueError("не розпізнав")
+
+    monkeypatch.setattr("nyshporka.pagestore.resolve_case", _resolve)
+    got = PUB._normalize_shifra({"shifra": raw}, "DAHMO/315/8433")
+
+    assert got["shifra"] == "ДАХмО 315-1-8433"
+    assert got["shifra_pasport"] == raw
+    assert (got["repo"], got["fond"], got["opys"], got["spr"]) == ("DAHMO", "315", "1", "8433")
+
+
+def test_rozibrana_shyfra_ne_chipaietsia(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("nyshporka.pagestore.resolve_case", lambda v: object())
+    case = {"shifra": "ДАХмО 315-1-8433"}
+    assert PUB._normalize_shifra(case, "DAHMO/315/8433") is case

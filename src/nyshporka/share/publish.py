@@ -112,6 +112,44 @@ def _case_block(scope_info: dict[str, Any], case_dir: Path | None) -> dict[str, 
     return out
 
 
+def _normalize_shifra(case: dict[str, Any], key: str) -> dict[str, Any]:
+    """Шифра, яку розбирає резолвер, — навіть коли паспорт записав її інакше.
+
+    🔴 Паспорти тримають шифру як завгодно: «ДАВіО ф.726 оп.1 спр.26»,
+    «Р-93-3-19» без архіву, «ДАЖО 178-51-418 (арк. М'ястківської секції)».
+    Резолвер таких не розбирає, і справа йшла б у каталог під шифрою, за
+    якою її ніхто не знайде. Ключ справи відомий — тоді в маніфест іде його
+    канонічна шифра, а запис паспорта лишається поруч довідково.
+    """
+    from nyshporka.pagestore import resolve_case
+
+    raw = str(case.get("shifra") or "")
+    try:
+        resolve_case(raw)
+        return case
+    except Exception:
+        pass
+    try:
+        ref = resolve_case(key) if key else None
+    except Exception:
+        ref = None
+    if ref is None or not ref.opys:
+        return case
+    from nyshporka.library import _shifra
+
+    canon = _shifra(ref.repo, ref.fond, ref.opys, ref.spr)
+    try:
+        if resolve_case(canon).key != ref.key:
+            return case
+    except Exception:
+        return case
+    out = {**case, "shifra": canon, "repo": ref.repo, "fond": ref.fond,
+           "opys": ref.opys, "spr": ref.spr}
+    if raw and raw != canon:
+        out["shifra_pasport"] = raw
+    return out
+
+
 def _refs_from_sidecar(case_dir: Path | None) -> list[dict[str, str]]:
     """Стабільні посилання на джерело зйомки — єдине, що не залежить від нас.
 
@@ -280,7 +318,7 @@ def build_manifest(scope: str, *,
     lic = {"text": license_text, "images": "не входять"}
     if source_terms:
         lic["source_terms"] = source_terms
-    case = _case_block(info, case_dir)
+    case = _normalize_shifra(_case_block(info, case_dir), key)
     if archive_name.strip():
         # Архіву немає в довіднику — назву дає людина. Сервер покаже її на
         # картці, доки архів не з'явиться в довіднику пакета.
