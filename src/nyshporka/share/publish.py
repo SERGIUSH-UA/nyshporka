@@ -60,7 +60,9 @@ def resolve_runs(scope: str) -> tuple[list[Path], dict[str, Any]]:
         if d not in dirs:
             dirs.append(d)
         for v in voice_dirs(d):
-            if v not in dirs:
+            # 🔴 Голос без мети — невідомо, якою моделлю читали, і ворота
+            # відмовили б через нього ВСЬОМУ пакету. Такий голос не їде.
+            if v not in dirs and (v / bundle.META_NAME).is_file():
                 dirs.append(v)
     if not dirs:
         raise PublishError(f"теки прогонів для «{scope}» немає на диску")

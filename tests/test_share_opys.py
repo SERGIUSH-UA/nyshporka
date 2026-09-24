@@ -339,3 +339,25 @@ def test_rozibrana_shyfra_ne_chipaietsia(monkeypatch: pytest.MonkeyPatch) -> Non
     monkeypatch.setattr("nyshporka.pagestore.resolve_case", lambda v: object())
     case = {"shifra": "ДАХмО 315-1-8433"}
     assert PUB._normalize_shifra(case, "DAHMO/315/8433") is case
+
+
+def test_vikirozmitka_ne_nazva() -> None:
+    assert opys.title("[[File:ДАХмО 315-1-7195. 1823. Сповід", {"title": "Сповідні розписи, 1823",
+                                                                 "title_src": "wikisource"}) \
+        == "Сповідні розписи, 1823"
+
+
+def test_holos_bez_mety_ne_ide(space: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Голос без мети валив би ворота всьому пакету — він просто не пакується."""
+    root = space / "reports" / "htr"
+    run = make_run(root, "spr-8433")
+    holos = root / "spr-8433-diak_v4"
+    holos.mkdir(parents=True)
+    (holos / "0001.txt").write_text("рядок\n", encoding="utf-8")
+    monkeypatch.setattr("nyshporka.htr_store.runs_for_scope", lambda scope: {
+        "rows": [{"name": "spr-8433"}], "kind": "case", "key": "DAHMO/315/8433",
+        "shifra": "ДАХмО 315-1-8433"})
+    monkeypatch.setattr("nyshporka.cloud.verify.voice_dirs", lambda d: [holos])
+
+    dirs, _ = PUB.resolve_runs("DAHMO/315/8433")
+    assert dirs == [run]

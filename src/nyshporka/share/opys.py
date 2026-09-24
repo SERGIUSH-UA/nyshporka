@@ -60,8 +60,9 @@ _SHIFRA_PREFIX = re.compile(r"^.{0,40}?спр\.\s*\S+\s*:\s*", re.IGNORECASE)
 
 def _working(title: str) -> bool:
     low = title.casefold()
+    # «[[File:ДАХмО 315-1-7195. 1823. Сповід» — обрізана вікірозмітка, не назва.
     return (bool(_WORKING_TITLE.match(title)) or any(m in low for m in _NOTE_MARKERS)
-            or bool(_FS_STUB.search(title)))
+            or bool(_FS_STUB.search(title)) or "[[" in title)
 
 
 def title(side_title: str, row: dict[str, Any] | None, library: str = "") -> str:
