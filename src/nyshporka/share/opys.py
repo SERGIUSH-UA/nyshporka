@@ -241,7 +241,61 @@ def sidecar_years_from_fs(side: dict[str, Any]) -> bool:
     """Паспорт, чиї роки взято з індексу FamilySearch («FS-індекс (не звірено…)»)."""
     if str(side.get("years_src") or "") in _UNTRUSTED_YEARS_SRC:
         return True
-    return "fs-індекс" in str(side.get("title") or "").casefold()
+    low = str(side.get("title") or "").casefold()
+    return "fs-індекс" in low or "каталогу fs" in low
+
+
+#: Вид документа з каталогу FamilySearch — українською для картки.
+FS_TYPES = {
+    "Religious Records": "Церковні записи",
+    "Religious Marriage Records": "Метричні записи про шлюб",
+    "Religious Birth Records": "Метричні записи про народження",
+    "Religious Death Records": "Метричні записи про смерть",
+    "Baptism Records": "Метричні записи про хрещення",
+    "Metrical Books": "Метричні книги",
+    "Parish Registers": "Парафіяльні книги",
+    "Clergy Records": "Клірові відомості",
+    "Confession Lists": "Сповідні розписи",
+}
+_FS_REGION_TAIL = re.compile(r",\s*(Podolia|Russian Empire)\b.*$", re.IGNORECASE)
+
+
+def catalog_title(row: dict[str, Any] | None) -> str:
+    """Назва з каталогу FamilySearch, коли в описі фонду назви немає.
+
+    Лише вид документа й місце, обидва з рядка каталогу цієї справи, і з
+    позначкою джерела: це опис каталогу, а не назва справи. Рік не береться —
+    у FS це нижня межа, а не роки справи. Місце лишається так, як записане в
+    каталозі: перекладати сотні сіл з латинки означало б вигадувати написання.
+    """
+    if not row:
+        return ""
+    kind = str(row.get("fs_record_type") or "").strip()
+    place = _FS_REGION_TAIL.sub("", str(row.get("fs_place") or "").strip()).strip(" ,")
+    if place.casefold() in ("podolia", ""):
+        place = "Поділля" if str(row.get("fs_place") or "").strip() else ""
+    kind_uk = FS_TYPES.get(kind, kind)
+    if not (kind_uk or place):
+        return ""
+    body = " · ".join(x for x in (kind_uk, place) if x)
+    return f"{body} (каталог FamilySearch)"
+
+
+def passport_title(side: dict[str, Any], doc_type: str = "") -> str:
+    """Назва з паспорта теки, коли іншої немає: вид запису й місце, як їх записав дослідник."""
+    from nyshporka.archives import active
+
+    try:
+        labels = dict(active().record_type_labels)
+    except Exception:
+        labels = {}
+    kind = labels.get(doc_type, "") if doc_type else ""
+    place = str(side.get("place") or "").strip()
+    if not place:
+        return ""
+    if doc_type in ("birth", "marriage", "death") and kind:
+        kind = f"метрична книга ({kind})"
+    return f"{kind[:1].upper()}{kind[1:]} · {place}" if kind else place
 
 
 def _surname(entry: str) -> str:

@@ -473,6 +473,18 @@ def build_manifest(scope: str, *,
             case["doc_type"] = code
         if types:
             case["record_types"] = types
+    if not nazva:
+        # Опис фонду назви не має: краще «Сповідні розписи · Iampol'
+        # (каталог FamilySearch)», ніж картка «без назви» — але лише з полів
+        # цієї справи й з назвою джерела.
+        from nyshporka.cases.register import read_sidecar
+
+        side = read_sidecar(case_dir) if case_dir else {}
+        nazva = (opys.catalog_title(row)
+                 or opys.passport_title(side, str(case.get("doc_type") or "")))
+        if nazva:
+            case["title"] = nazva
+            case["title_src"] = "catalog" if opys.catalog_title(row) else "pasport"
     if row and not case.get("years"):
         ry = opys.trusted_registry_years(row)
         if ry:

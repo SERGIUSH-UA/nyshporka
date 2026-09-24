@@ -417,3 +417,26 @@ def test_roky_pasporta_z_fs_indeksu_ne_berutsia(tmp_path: Path) -> None:
         "title": "FS-індекс (не звірено з титулкою): Confession Lists"}, ensure_ascii=False),
         encoding="utf-8")
     assert "years" not in PUB._case_block({"key": "DAHMO/315/8433"}, case_dir)
+
+
+# ── назва з каталогу, коли в описі її немає ──────────────────────────────────
+
+def test_nazva_z_katalohu_fs() -> None:
+    row = {"fs_record_type": "Confession Lists", "fs_place": "Iampol', Podolia, Russian Empire"}
+    assert opys.catalog_title(row) == "Сповідні розписи · Iampol' (каталог FamilySearch)"
+    assert opys.catalog_title({"fs_record_type": "Religious Records",
+                               "fs_place": "Podolia, Russian Empire"}) \
+        == "Церковні записи · Поділля (каталог FamilySearch)"
+    assert opys.catalog_title({}) == ""
+
+
+def test_roky_pasporta_zahlushky_fs_ne_berutsia() -> None:
+    assert opys.sidecar_years_from_fs(
+        {"title": "Справа ф.315 оп.1 спр.1 за 1797 р. — назви в описі НЕМАЄ (заглушка каталогу FS)"})
+    assert not opys.sidecar_years_from_fs({"title": "Сповідні розписи 1797"})
+
+
+def test_nazva_z_pasporta_metryka() -> None:
+    assert opys.passport_title({"place": "м-ко Голованівськ"}, "birth") \
+        == "Метрична книга (народження) · м-ко Голованівськ"
+    assert opys.passport_title({}, "birth") == ""
