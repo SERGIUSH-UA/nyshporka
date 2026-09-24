@@ -1,10 +1,8 @@
 <p align="center">
   <img alt="Нишпорка"
-       src="https://raw.githubusercontent.com/SERGIUSH-UA/nyshporka/main/src/nyshporka/brand/data/assets/mark.png"
-       width="132" height="132">
+       src="https://raw.githubusercontent.com/SERGIUSH-UA/nyshporka/main/docs/assets/readme-logo.webp"
+       width="292" height="110">
 </p>
-
-<h1 align="center">Нишпорка</h1>
 
 <p align="center"><em>Читає рукопис. Приносить знайдене.</em></p>
 
@@ -16,6 +14,10 @@
   <img alt="Python" src="https://img.shields.io/pypi/pyversions/nyshporka">
   <img alt="Ліцензія" src="https://img.shields.io/badge/license-AGPL--3.0-informational">
 </p>
+
+<img align="right" alt="Нишпорка — куниця з лупою й польовою сумкою"
+     src="https://raw.githubusercontent.com/SERGIUSH-UA/nyshporka/main/docs/assets/readme-maskot.webp"
+     width="180" height="208">
 
 **Нишпорка допомагає шукати предків в архівних документах** — метричних
 книгах, сповідних розписах, ревізіях XVIII–XIX століть. Але працює вона не
