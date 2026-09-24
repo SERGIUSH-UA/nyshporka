@@ -52,7 +52,30 @@ def genre(side: dict[str, Any], title: str = "") -> tuple[str, list[str]]:
 #: Ознаки того, що в полі `title` паспорта стоїть робоча нотатка, а не назва
 #: справи: паспорти пишуться для себе, і рендер чи індекс FamilySearch
 #: підписують тим, що важливо в ту мить.
-_NOTE_MARKERS = ("рендер", "htr", "не звірено", "немає", "fs-індекс", "черг")
+#: ⚠ Без «черг»: він стирав справжню назву «…наряд 1-ї черги 1929 р.», а
+#: нотатку «рендер із PDF для HTR-черги» й так ловлять «рендер» і «htr».
+_NOTE_MARKERS = ("рендер", "htr", "не звірено", "немає", "fs-індекс")
+
+#: Нотатка дослідника, вписана ВСЕРЕДИНУ справжньої назви. Вирізається лише
+#: вона, назва лишається: «Метрична книга Н+Ш+С (титулка звірена 2026-07-09)»
+#: → «Метрична книга Н+Ш+С».
+#:
+#: * дужки з датою роботи або словом звірки;
+#: * хвіст від службової позначки — «FS-тег: …», «FS-місце: …», «⚠ У справі…»;
+#: * жирне з Markdown (`**Петренка А.**`) — розмітка, не текст.
+_NOTE_PARENS = re.compile(
+    r"\s*\((?=[^()]*(?:звір|\b20\d\d-\d\d-\d\d\b|fs-|htr|рендер|перевір))[^()]*\)",
+    re.IGNORECASE)
+_NOTE_TAIL = re.compile(r"\s*[.;,]?\s*(?:\bFS-[\wА-Яа-яіїєґІЇЄҐ]+\s*:|⚠).*$",
+                        re.IGNORECASE | re.DOTALL)
+_MD_BOLD = re.compile(r"\*\*(.+?)\*\*")
+
+
+def _strip_notes(raw: str) -> str:
+    text = _MD_BOLD.sub(r"\1", raw)
+    text = _NOTE_PARENS.sub("", text)
+    text = _NOTE_TAIL.sub("", text)
+    return " ".join(text.split()).strip(" ;,—-")
 _WORKING_TITLE = re.compile(r"^\s*(spr-\S+|\d+(-\d+)*-?\S*)\s+—\s+")
 #: «ДАХмО ф.315 оп.1 спр.203г: …» — шифра, яку картка вже показує окремо.
 _SHIFRA_PREFIX = re.compile(r"^.{0,40}?спр\.\s*\S+\s*:\s*", re.IGNORECASE)
@@ -84,8 +107,13 @@ _RENDER_TITLE = re.compile(r"\(([^()]+?)(?:,\s*\d{3,4}\s*[–-]\s*\d{3,4})?\)\s*
 _LEADING_MARKS = re.compile(r"^[^\w«\"'(\[]+")
 
 
+def clean_text(raw: str) -> str:
+    """Вільний текст паспорта для картки — назва чи жанр без нотаток."""
+    return _clean(raw)
+
+
 def _clean(raw: str) -> str:
-    own = _LEADING_MARKS.sub("", str(raw or "")).strip()
+    own = _strip_notes(_LEADING_MARKS.sub("", str(raw or "")).strip())
     if own and _working(own):
         inner = _RENDER_TITLE.search(own)
         stripped = _WORKING_TITLE.sub("", own).strip()
@@ -103,7 +131,10 @@ def sidecar_extras(side: dict[str, Any]) -> dict[str, Any]:
         val = side.get(key)
         if val not in (None, "", [], {}):
             out[key] = val
-    raw_type = str(side.get("record_type") or "").strip()
+    # 🔴 Жанр із паспорта — вільний текст дослідника, і чиститься так само,
+    # як назва: «Метрична книга Н+Ш+С (титулка звірена 2026-07-09)» їхала
+    # у маніфест сирою.
+    raw_type = _clean(str(side.get("record_type") or ""))
     if raw_type:
         out["record_type"] = raw_type
     dates = [str(side.get(k) or "").strip() for k in ("date_started", "date_ended")]

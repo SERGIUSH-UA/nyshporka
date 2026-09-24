@@ -27,6 +27,20 @@ def space(tmp_path: Path) -> Any:
     W.reset()
 
 
+@pytest.fixture(autouse=True)
+def _ti_sami_kadry(monkeypatch: Any) -> None:
+    """Прив'язка `exact`: геометрія лягає лише на ті самі кадри.
+
+    Тут перевіряється механіка другого об'єкта, а не вимірювання прив'язки —
+    воно в `test_share_align`. Відмову на неточній прив'язці сторожить
+    `test_heometriia_na_chuzhykh_kadrakh_vidmovliaie`.
+    """
+    from nyshporka.share import align
+
+    monkeypatch.setattr(accept.align, "grade", lambda *a, **k: align.Alignment(
+        align.EXACT, "кадри ті самі (тест)"))
+
+
 def _pakety(space: Path, tmp_path: Path, *, pages: int = 3) -> tuple[Path, Path]:
     """Текстовий пакет і пакет геометрії тієї самої справи.
 
@@ -55,7 +69,7 @@ def test_pack_pyshe_dva_faily(space: Path, monkeypatch: Any) -> None:
 
     run = make_run(space / "reports" / "htr", "spr-8433", geometry=True)
     monkeypatch.setattr(PUB, "resolve_runs",
-                        lambda scope: ([run], {"key": "", "shifra": "ДАХмО 315-1-8433"}))
+                        lambda scope, **kw: ([run], {"key": "", "shifra": "ДАХмО 315-1-8433"}))
 
     got = PUB.pack("ДАХмО 315-1-8433")
     assert Path(got["path"]).is_file()
@@ -77,7 +91,7 @@ def test_bez_heometrii_tekst_toy_samyi(space: Path, monkeypatch: Any) -> None:
 
     run = make_run(space / "reports" / "htr", "spr-8433", geometry=True)
     monkeypatch.setattr(PUB, "resolve_runs",
-                        lambda scope: ([run], {"key": "", "shifra": "ДАХмО 315-1-8433"}))
+                        lambda scope, **kw: ([run], {"key": "", "shifra": "ДАХмО 315-1-8433"}))
 
     z = PUB.pack("ДАХмО 315-1-8433", geometry=True)
     bez = PUB.pack("ДАХмО 315-1-8433", geometry=False)

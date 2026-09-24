@@ -232,6 +232,9 @@ def by_fond(repo: str, fond: str) -> dict[tuple[str, str, str], PoolCell] | None
 
     if meta() is None:
         return None
+    kody = synonyms(key[0])
+    if not any(covers(k, fond) for k in kody):
+        return None
 
     con = _connect()
     if con is None:
@@ -239,15 +242,17 @@ def by_fond(repo: str, fond: str) -> dict[tuple[str, str, str], PoolCell] | None
     handle = _handle()
     out: dict[tuple[str, str, str], PoolCell] = {}
     try:
-        rows = con.execute(
-            "SELECT opys, spr, n, pages, geom, publishers, updated "
-            "FROM pool WHERE repo = ? AND fond = ?", key).fetchall()
-        for r in rows:
-            spr = str(r["spr"] or "")
-            i = len(spr)
-            while i and not spr[i - 1].isdigit():
-                i -= 1
-            out[(str(r["opys"] or ""), spr[:i], spr[i:])] = _cell(r, handle)
+        for kod in kody:
+            rows = con.execute(
+                "SELECT opys, spr, n, pages, geom, publishers, updated "
+                "FROM pool WHERE repo = ? AND fond = ?", (kod, key[1])).fetchall()
+            for r in rows:
+                spr = str(r["spr"] or "")
+                i = len(spr)
+                while i and not spr[i - 1].isdigit():
+                    i -= 1
+                out.setdefault((str(r["opys"] or ""), spr[:i], spr[i:]),
+                               _cell(r, handle))
     except sqlite3.Error:
         return None
     finally:
@@ -258,19 +263,70 @@ def by_fond(repo: str, fond: str) -> dict[tuple[str, str, str], PoolCell] | None
 
 
 def by_key(key: str) -> PoolCell | None:
-    """Одна книга за канонічним ключем. `None` — немає зрізу або немає книги."""
+    """Одна книга за канонічним ключем. `None` — немає зрізу або немає книги.
+
+    Код архіву в ключі пробується з усіма синонімами (`DAVO` = `DAVIO`).
+    Чи питали пул про цей фонд узагалі, каже `covers`, а не ця функція.
+    """
     con = _connect()
     if con is None or meta() is None:
         return None
+    head, _, tail = (key or "").partition("/")
     try:
-        row = con.execute(
-            "SELECT opys, spr, n, pages, geom, publishers, updated "
-            "FROM pool WHERE key = ?", (key,)).fetchone()
+        for kod in synonyms(head):
+            row = con.execute(
+                "SELECT opys, spr, n, pages, geom, publishers, updated "
+                "FROM pool WHERE key = ?", (f"{kod}/{tail}",)).fetchone()
+            if row:
+                return _cell(row, _handle())
     except sqlite3.Error:
         return None
     finally:
         con.close()
-    return _cell(row, _handle()) if row else None
+    return None
+
+
+def known(key: str) -> str | None:
+    """Стан книги в зрізі: `none | text | text+geom`, або `None` — не питали.
+
+    Одна відповідь на три випадки, які доти плутались: зрізу немає, фонд
+    поза охопленням зрізу, книги в охопленому фонді немає.
+    """
+    if meta() is None:
+        return None
+    parts = (key or "").split("/")
+    if len(parts) < 2 or not any(covers(k, parts[1]) for k in synonyms(parts[0])):
+        return None
+    cell = by_key(key)
+    if cell is not None and cell.mine is False:
+        # Книга є, але не ваша — для «чи віддавати своє» це «немає».
+        return "none"
+    return state_of(cell)
+
+
+def synonyms(repo: str) -> list[str]:
+    """Код архіву й усі коди того самого архіву (`same_as` в обидва боки).
+
+    🔴 Пул пише Вінницький архів каноном пакета `DAVIO`, а дослідницький
+    простір може лишатись на давньому `DAVO`. Без цього справа, що давно в
+    пулі, показувалась «готовою» до віддачі, а колонка «пул» у `cases fond
+    DAVO …` — порожньою на всьому фонді.
+    """
+    code = (repo or "").strip().upper()
+    out = [code]
+    try:
+        from nyshporka.archives import active
+
+        repos = active().repositories
+    except Exception:
+        return out
+    same = str(getattr(repos.get(code), "same_as", "") or "").upper()
+    for c, r in repos.items():
+        other = str(getattr(r, "same_as", "") or "").upper()
+        if c.upper() != code and (other == code or c.upper() == same
+                                  or (same and other == same)):
+            out.append(c.upper())
+    return list(dict.fromkeys(out))
 
 
 def state_of(cell: PoolCell | None) -> str:
@@ -313,24 +369,30 @@ _DDL = (
 
 
 def _rows_from_keys(base: str, repo: str, fond: str) -> tuple[list[dict[str, Any]], str]:
-    """Швидкий шлях: `/v1/keys` віддає рядок на КНИГУ з лічильниками."""
-    from nyshporka.share.catalog import _get, base_url
+    """Швидкий шлях: `/keys` віддає рядок на КНИГУ з лічильниками.
+
+    ⚠ `base_url()` уже закінчується на `/v1`, тож тут лише `/keys` — доти
+    запит ішов на `/v1/v1/keys`, і швидкого шляху фактично не було.
+    """
+    from urllib.parse import urlencode
+
+    from nyshporka.share.catalog import PoolError, _get, base_url
 
     out: list[dict[str, Any]] = []
     cursor = ""
+    seen: set[str] = set()
     while True:
-        url = f"{base_url(base)}/v1/keys?limit=5000"
-        if repo:
-            url += f"&repo={repo}"
-        if fond:
-            url += f"&fond={fond}"
-        if cursor:
-            url += f"&cursor={cursor}"
-        got = _get(url)
+        params = {"limit": 5000, "repo": repo, "fond": fond, "cursor": cursor}
+        qs = urlencode({k: v for k, v in params.items() if v})
+        got = _get(f"{base_url(base)}/keys?{qs}")
         out.extend(r for r in (got.get("rows") or []) if isinstance(r, dict))
         cursor = str(got.get("next") or "")
         if not cursor:
             break
+        if cursor in seen:
+            # Сервер повторив курсор — без цього цикл не скінчився б ніколи.
+            raise PoolError("пул повторив курсор гортання — зріз не знято")
+        seen.add(cursor)
     return out, "keys"
 
 
@@ -360,13 +422,69 @@ def _rows_from_search(base: str, repo: str, fond: str) -> tuple[list[dict[str, A
                 "opys": r.opys, "spr": r.spr, "n": 0, "pages": 0,
                 "geom": False, "publishers": [], "updated": ""})
             cur["n"] += 1
-            cur["pages"] = max(int(cur["pages"]), int(r.pages or 0))
+            cur["pages"] = max(_int(cur["pages"]), _int(r.pages))
             cur["geom"] = bool(cur["geom"] or getattr(r, "geom_url", ""))
             if r.publisher and r.publisher not in cur["publishers"]:
                 cur["publishers"].append(r.publisher)
             cur["updated"] = max(str(cur["updated"]), str(r.added or ""))
         offset += len(rows)
+        if _usiogo and offset >= _usiogo:
+            break
     return list(zvedeni.values()), "search"
+
+
+def _int(value: Any) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+#: Позначка повного зрізу в `meta.scope`.
+ALL = "*"
+
+
+def _scope_items(repo: str, fond: str) -> list[str]:
+    """Що саме покриває зріз: `*`, `DAHMO` або `DAHMO/315`."""
+    r = (repo or "").strip().upper()
+    f = str(fond or "").strip()
+    if not r and not f:
+        return [ALL]
+    if r and f:
+        return [f"{r}/{f}"]
+    # Фонд без архіву — його номер повторюється в кожному архіві, тож
+    # покриття пишеться окремою формою: «цей фонд у будь-якому архіві».
+    return [r] if r else [f"*/{f}"]
+
+
+def scope() -> list[str]:
+    """Покриття зрізу. Старий зріз без списку — прочитати з рядка."""
+    m = meta()
+    if not m:
+        return []
+    raw = str(m.get("scope_items") or "")
+    if raw:
+        try:
+            got = json.loads(raw)
+            if isinstance(got, list):
+                return [str(x) for x in got]
+        except ValueError:
+            pass
+    return [ALL] if str(m.get("scope") or "все") == "все" else []
+
+
+def covers(repo: str, fond: str) -> bool:
+    """Чи питали пул про цей фонд.
+
+    🔴 Без цього зріз одного фонду (`sync --fond 315`) відповідав «у пулі
+    немає» про решту фондів — тобто «не питали» знову ставало «немає», і
+    людина замовляла прогін справи, яка лежить готова.
+    """
+    items = scope()
+    r = (repo or "").strip().upper()
+    f = str(fond or "").strip()
+    return (ALL in items or r in items or f"{r}/{f}" in items
+            or f"*/{f}" in items)
 
 
 def sync(base: str = "", *, repo: str = "", fond: str = "") -> dict[str, Any]:
@@ -381,13 +499,31 @@ def sync(base: str = "", *, repo: str = "", fond: str = "") -> dict[str, Any]:
     обрив посеред сторінкування не має права лишити напівзріз, який виглядає
     повним.
     """
+    from nyshporka.share.catalog import PoolError, base_url
+
     try:
         rows, via = _rows_from_keys(base, repo, fond)
-    except RuntimeError:
-        # Сервер може не знати `/v1/keys` — тоді збираємо зі `search`.
+    except PoolError as exc:
+        # Сервер може не знати `/keys` — тоді збираємо зі `search`. 🔴 Лише
+        # на 404: будь-яка інша відмова (лежить, немає ключа) повторилась би
+        # і на пошуку, тобто людина чекала б удвічі довше тієї самої помилки.
+        if exc.status != 404:
+            raise
         rows, via = _rows_from_search(base, repo, fond)
 
-    from nyshporka.share.catalog import base_url
+    novi = _scope_items(repo, fond)
+    if novi != [ALL]:
+        # Пошуковий шлях шукає рядком «архів фонд» і приносить сусідів —
+        # у зріз лягає лише те, що справді в охопленні.
+        rows = [r for r in rows if _in_scope(r, novi)]
+
+    # 🔴 Частковий зріз ДОПИСУЄТЬСЯ до наявного, а не замінює його. Інакше
+    # `sync --fond 315` стирав усі інші фонди, і вони читались «у пулі
+    # немає» — хоч про них просто не питали.
+    stari = [] if novi == [ALL] else _old_rows_outside(novi)
+    bulo = [] if novi == [ALL] else [s for s in scope() if s not in novi]
+    pokryttia = [ALL] if ALL in bulo else bulo + novi
+    old_meta = meta() or {}
 
     pool_dir().mkdir(parents=True, exist_ok=True)
     tmp = snapshot_path().with_suffix(".sqlite.tmp")
@@ -396,6 +532,8 @@ def sync(base: str = "", *, repo: str = "", fond: str = "") -> dict[str, Any]:
     try:
         for ddl in _DDL:
             con.execute(ddl)
+        for old in stari:
+            con.execute("INSERT OR REPLACE INTO pool VALUES (?,?,?,?,?,?,?,?,?,?)", old)
         for r in rows:
             key = str(r.get("key") or quad_key(
                 str(r.get("repo") or ""), str(r.get("fond") or ""),
@@ -407,19 +545,54 @@ def sync(base: str = "", *, repo: str = "", fond: str = "") -> dict[str, Any]:
                 "INSERT OR REPLACE INTO pool VALUES (?,?,?,?,?,?,?,?,?,?)",
                 (key, str(r.get("repo") or "").upper(), str(r.get("fond") or ""),
                  str(r.get("opys") or ""), str(r.get("spr") or ""),
-                 int(r.get("n") or 0), int(r.get("pages") or 0),
+                 _int(r.get("n")), _int(r.get("pages")),
                  1 if r.get("geom") else 0,
-                 json.dumps(list(pubs), ensure_ascii=False),
+                 json.dumps(list(pubs) if isinstance(pubs, list) else [],
+                            ensure_ascii=False),
                  str(r.get("updated") or "")))
-        scope = " ".join(x for x in (repo, fond) if x) or "все"
+        now = datetime.now(UTC).isoformat(timespec="seconds")
+        # Вік зрізу — вік НАЙСТАРШОЇ його частини: освіжений фонд не робить
+        # свіжими решту, а показ «зрізу годину» над ними був би неправдою.
+        taken = (str(old_meta.get("taken_at") or now) if stari or bulo else now)
+        total = con.execute("SELECT COUNT(*) FROM pool").fetchone()[0]
+        opys_scope = "все" if pokryttia == [ALL] else ", ".join(pokryttia)
         for k, v in (("schema", str(SCHEMA)), ("base", base_url(base)),
-                     ("taken_at", datetime.now(UTC).isoformat(timespec="seconds")),
-                     ("of", str(len(rows))), ("scope", scope), ("via", via)):
+                     ("taken_at", taken), ("refreshed_at", now),
+                     ("of", str(total)), ("scope", opys_scope),
+                     ("scope_items", json.dumps(pokryttia, ensure_ascii=False)),
+                     ("via", via)):
             con.execute("INSERT OR REPLACE INTO meta VALUES (?,?)", (k, v))
         con.commit()
-    finally:
+    except BaseException:
         con.close()
+        tmp.unlink(missing_ok=True)
+        raise
+    con.close()
 
     tmp.replace(snapshot_path())
     invalidate()
-    return {"of": len(rows), "via": via, "scope": scope, "path": str(snapshot_path())}
+    scope_text = " ".join(x for x in (repo, fond) if x) or "все"
+    return {"of": len(rows), "total": total, "via": via, "scope": scope_text,
+            "covers": pokryttia, "path": str(snapshot_path())}
+
+
+def _in_scope(row: dict[str, Any], items: list[str]) -> bool:
+    r = str(row.get("repo") or "").strip().upper()
+    f = str(row.get("fond") or "").strip()
+    return any(s in (ALL, r, f"{r}/{f}", f"*/{f}") for s in items)
+
+
+def _old_rows_outside(items: list[str]) -> list[tuple[Any, ...]]:
+    """Рядки наявного зрізу поза новим охопленням — вони лишаються як були."""
+    con = _connect()
+    if con is None or meta() is None:
+        return []
+    try:
+        rows = con.execute(
+            "SELECT key, repo, fond, opys, spr, n, pages, geom, publishers, updated "
+            "FROM pool").fetchall()
+    except sqlite3.Error:
+        return []
+    finally:
+        con.close()
+    return [tuple(r) for r in rows if not _in_scope(dict(r), items)]

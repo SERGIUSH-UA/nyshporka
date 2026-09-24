@@ -21,7 +21,7 @@ import json
 from dataclasses import dataclass, field
 from typing import Any
 
-from nyshporka.share.bundle import Manifest
+from nyshporka.share.bundle import Manifest, as_count
 
 #: Нижче цієї частки прочитаних кадрів пакет вважається уривком, і йому
 #: потрібне явне пояснення (`--partial`), інакше знаменник бреше.
@@ -113,15 +113,15 @@ def _gate_model(m: Manifest, v: Verdict) -> None:
 
 def _gate_emptiness(m: Manifest, v: Verdict) -> None:
     """Чи є в пакеті власне текст."""
-    lines = int(m.decode.get("lines") or 0)
-    chars = int(m.decode.get("chars") or 0)
+    lines = as_count(m.decode.get("lines"))
+    chars = as_count(m.decode.get("chars"))
     if lines <= 0:
         v.refuse("у пакеті нуль рядків тексту")
         return
     if chars / lines < MIN_LINE_CHARS:
         v.refuse(f"середній рядок — {chars / lines:.1f} символа: це не текст, а "
                  f"сміття сегментації. Перечитати справу перед тим, як ділитись")
-    blank = int(m.decode.get("blank_pages") or 0)
+    blank = as_count(m.decode.get("blank_pages"))
     if m.pages and blank / m.pages > MAX_BLANK_FRAC:
         v.refuse(f"порожніх сторінок {blank} із {m.pages} — рушій радше не взяв "
                  f"письмо, ніж прочитав порожні аркуші")

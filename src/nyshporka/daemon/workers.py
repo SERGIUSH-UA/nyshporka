@@ -625,6 +625,10 @@ async def _autoshare(case_key: str) -> dict[str, Any] | None:
         # Широко навмисно: сюди сходяться мережа, сховище ключів і чужий
         # сервер, і жодна з цих відмов не є приводом зіпсувати прочитане.
         return {"error": str(exc)}
+    if not env.ok:
+        # Операція впала всередині: `O.call` віддає відмову без даних, і
+        # доти результат мовчки не писався — людина вважала справу відданою.
+        return {"error": str(env.error or "автовіддача не спрацювала")}
     data = dict(env.data or {})
     if data.get("skipped"):
         return None

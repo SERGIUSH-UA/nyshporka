@@ -29,7 +29,15 @@ RUNS = [
 
 @pytest.fixture
 def scope(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
+    from nyshporka.core import workspace as W
+
+    # 🔴 Свій простір ДО імпорту `htr_store`: той читає `workspace()` на рівні
+    # модуля, і після тесту, що скинув простір (`test_pack_scope`), імпорт
+    # падав на «простір не знайдено» — тест залежав від порядку файлів.
+    W.use(W.Workspace(root=tmp_path / "ws", name="тест", origin="test"))
     from nyshporka import htr_store as S
+
+    S._canon_case_key.cache_clear()
     from nyshporka.cases import resolve as R
     from nyshporka.pagestore import store as PS
 
@@ -45,6 +53,8 @@ def scope(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
     yield S, R
     R.load_overrides.cache_clear()
     R._run_overrides.cache_clear()
+    S._canon_case_key.cache_clear()
+    W.reset()
 
 
 def _names(sc: dict[str, Any]) -> set[str]:

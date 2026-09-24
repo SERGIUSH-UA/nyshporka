@@ -21,12 +21,30 @@ import os
 from pathlib import Path
 
 #: Символи, яких у компоненті імені з чужого архіву бути не може.
-BAD_MEMBER_CHARS = frozenset("\\:\x00")
+#:
+#: 🔴 Увесь набір, заборонений у Windows, а не лише ті, що міняють шлях.
+#: `0002?.txt` не виводить запис за межі теки, але `open()` на ньому падає
+#: посеред розпакування — і половина чужого прогону лишається на диску без
+#: позначки «чуже».
+BAD_MEMBER_CHARS = frozenset('\\:\x00<>"|?*') | frozenset(chr(c) for c in range(32))
+
+#: Імена пристроїв Windows: `CON.txt` відкриває консоль, а не файл.
+_RESERVED = frozenset({"CON", "PRN", "AUX", "NUL",
+                       *(f"COM{i}" for i in range(1, 10)),
+                       *(f"LPT{i}" for i in range(1, 10))})
 
 
 def safe_member_part(part: str) -> bool:
-    """Компонент імені з чужого tar, який можна класти на диск як є."""
+    """Компонент імені з чужого tar, який можна класти на диск як є.
+
+    Кінцеві крапка й пробіл теж ні: Windows їх мовчки відкидає, і `spr3.`
+    лягав у наявну теку `spr3`, минаючи перевірку «такий прогін уже є».
+    """
     if not part or part in (".", "..") or part.strip() != part:
+        return False
+    if part.endswith((".", " ")):
+        return False
+    if part.split(".")[0].upper() in _RESERVED:
         return False
     return not any(ch in BAD_MEMBER_CHARS for ch in part)
 

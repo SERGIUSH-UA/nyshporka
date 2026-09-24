@@ -86,15 +86,39 @@ def read(event: str = "") -> list[dict[str, Any]]:
     return out
 
 
-def keep(src: Path, name: str) -> Path:
-    """Покласти прийнятий пакет у постійне сховище. Повертає шлях доказу."""
+def keep(src: Path, name: str, sha256: str = "") -> Path:
+    """Покласти прийнятий пакет у постійне сховище. Повертає шлях доказу.
+
+    🔴 Доказ не перезаписується ІНШИМ пакетом. Два локальні файли з тим
+    самим іменем (`d1/text.nyshtext`, `d2/text.nyshtext`) лягали в один
+    `inbox/text.nyshtext`, і запис журналу про першу справу вказував на
+    байти другої — sha256 не сходився, доказ ставав хибним. Тепер зайняте
+    ім'я з іншим вмістом дістає хвіст із хеша.
+
+    Копія — через `.part` і перейменування: обірване копіювання не лишає
+    файлу, що виглядає доказом.
+    """
     import shutil
 
+    from nyshporka.share.bundle import sha256_of
+
+    src = Path(src)
+    digest = sha256 or sha256_of(src)
     dest = inbox() / name
     dest.parent.mkdir(parents=True, exist_ok=True)
-    if Path(src).resolve() == dest.resolve():
+    if src.resolve() == dest.resolve():
         return dest
-    shutil.copy2(src, dest)
+    if dest.is_file() and sha256_of(dest) != digest:
+        stem = name[: -len(".nyshtext")] if name.endswith(".nyshtext") else name
+        tail = name[len(stem):]
+        dest = dest.with_name(f"{stem}-{digest[:12]}{tail}")
+        if dest.is_file() and sha256_of(dest) == digest:
+            return dest
+    elif dest.is_file():
+        return dest
+    part = dest.with_name(dest.name + ".part")
+    shutil.copy2(src, part)
+    part.replace(dest)
     return dest
 
 

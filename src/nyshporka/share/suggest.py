@@ -102,33 +102,17 @@ def _u_puli(case_key: str) -> str | None:
 
         ref = resolve_case(case_key)
     except Exception:
-        return "none"
-    for repo in _synonimy(ref.repo):
-        cell = pool.by_key(pool.quad_key(repo, ref.fond, ref.opys or "", ref.spr))
-        if cell is not None and cell.mine is not False:
-            return pool.state_of(cell)
-    return "none"
+        # 🔴 «Не розібрали шифру» — це «не знаємо», а не «у пулі немає»:
+        # друге рахувало б справу готовою до віддачі наосліп.
+        return None
+    return pool.known(pool.quad_key(ref.repo, ref.fond, ref.opys or "", ref.spr))
 
 
 def _synonimy(repo: str) -> list[str]:
-    """Код архіву й усі коди того самого архіву (`same_as` в обидва боки).
+    """Синоніми коду архіву — див. `pool.synonyms`, де живе правило."""
+    from nyshporka.share import pool
 
-    🔴 Пул пише Вінницький архів каноном пакета `DAVIO`, а дослідницький
-    простір може лишатись на давньому `DAVO`. Без цього справа, що давно в
-    пулі, показувалась «готовою» до віддачі.
-    """
-    out = [repo]
-    try:
-        from nyshporka.archives import active
-
-        repos = active().repositories
-    except Exception:
-        return out
-    same = getattr(repos.get(repo), "same_as", "") or ""
-    for code, r in repos.items():
-        if code != repo and (getattr(r, "same_as", "") == repo or code == same):
-            out.append(code)
-    return out
+    return pool.synonyms(repo)
 
 
 def _ye_ramky(run_name: str) -> bool:
@@ -159,14 +143,15 @@ def nepodileni() -> list[dict[str, Any]]:
       ніхто не вирішує;
     * **без сторінок** — прогін, який нічого не прочитав.
 
-    Що вже віддано, вирішує зріз пулу (`nysh share sync`), коли він є; без
-    нього — журнал пакувань, і рядок `pool` тоді `None`: «не питали».
+    Що вже віддано, вирішує зріз пулу (`nysh share sync`), коли він покриває
+    справу; інакше — журнал пакувань, і рядок `pool` тоді `None`: «не
+    питали». 🔴 Рішення ПОШТУЧНЕ: зріз одного фонду не має вимикати журнал
+    для решти, інакше вже спаковане поза ним знову лізло б у перелік.
     """
     from nyshporka import htr_store as S
-    from nyshporka.share import pool
 
-    zriz = pool.meta() is not None
-    vzhe = vidmovleni() | (set() if zriz else viddani())
+    vzhe = vidmovleni()
+    spakovani = viddani()
     out: list[dict[str, Any]] = []
     seen: set[str] = set()
     vsi = S.list_cases()
@@ -182,7 +167,9 @@ def nepodileni() -> list[dict[str, Any]]:
         if key in vzhe or shifra in vzhe or key in seen:
             continue
         seen.add(key)
-        stan = _u_puli(key) if zriz else None
+        stan = _u_puli(key)
+        if stan is None and (key in spakovani or shifra in spakovani):
+            continue
         if stan == "text+geom":
             continue
         if stan == "text" and not any(_ye_ramky(n) for n in progony.get(key, [])):

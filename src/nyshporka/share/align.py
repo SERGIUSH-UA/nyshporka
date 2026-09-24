@@ -176,17 +176,25 @@ def _fingerprint_grade(their_fp: dict[str, Any], case_dir: Path,
     є доказом відсутності, і рішення переходить до наступних каналів.
     """
     from nyshporka.share import fingerprint as FP
+    from nyshporka.share.bundle import as_count
 
     mine = FP.fingerprint(case_dir)
     zbihlos, zvireno = FP.compare(mine, their_fp)
     if not zvireno:
         return None
 
-    same_count = int(their_fp.get("frames") or 0) == mine.get("frames")
-    if zbihlos == zvireno and same_count:
+    same_count = as_count(their_fp.get("frames")) == mine.get("frames")
+    dosyt = zvireno >= FP.required(int(mine.get("frames") or 0))
+    if zbihlos == zvireno and same_count and dosyt:
         return Alignment(EXACT, f"відбиток зйомки збігся ({zbihlos} з {zvireno} кадрів)",
                          case_dir=str(case_dir), theirs=theirs, ours=ours,
                          matched=zbihlos)
+    if zbihlos == zvireno and same_count:
+        return Alignment(
+            BY_POSITION,
+            f"відбиток збігся, але звірено лише {zvireno} кадр(и) — для «ті самі "
+            f"кадри» замало", case_dir=str(case_dir), theirs=theirs, ours=ours,
+            matched=zbihlos)
     if zbihlos:
         return Alignment(
             BY_POSITION,
@@ -226,14 +234,25 @@ def grade(theirs: list[dict[str, Any]], case_dir: Path | None, *,
         if got is not None:
             return got
 
-    for field, why in (("apid", "збіглися ідентифікатори кадрів FamilySearch"),
-                       ("sha256", "збіглися хеші кадрів")):
+    for field, why in (("apid", "ідентифікатори кадрів FamilySearch"),
+                       ("sha256", "хеші кадрів")):
         a, b = _keyset(theirs, field), _keyset(ours, field)
         both = a & b
-        if both:
-            return Alignment(EXACT, why, case_dir=str(case_dir),
-                             theirs=len(theirs), ours=len(ours),
-                             matched=len(both))
+        if not both:
+            continue
+        # 🔴 `exact` — лише коли збіглися ВСІ кадри з обох боків. Доти вистачало
+        # одного спільного хеша на всю справу: 500 кадрів у пакеті, 10 на
+        # диску, один спільний — і `can_crop`, за яким `share.take` сам тягнув
+        # чужу геометрію на чужі аркуші.
+        if a == b and len(a) == len(theirs) == len(ours):
+            return Alignment(EXACT, f"збіглися {why} — усі {len(both)}",
+                             case_dir=str(case_dir), theirs=len(theirs),
+                             ours=len(ours), matched=len(both))
+        return Alignment(BY_POSITION,
+                         f"збіглися {why} лише частково: {len(both)} із "
+                         f"{len(theirs)} у пакеті й {len(ours)} на диску",
+                         case_dir=str(case_dir), theirs=len(theirs),
+                         ours=len(ours), matched=len(both))
 
     names_a = _keyset(theirs, "name")
     names_b = _keyset(ours, "name")

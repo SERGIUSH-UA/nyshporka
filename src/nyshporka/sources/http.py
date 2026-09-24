@@ -92,7 +92,30 @@ def offline() -> bool:
 
 
 class HttpError(RuntimeError):
-    """Запит не вдався після всіх спроб."""
+    """Запит не вдався після всіх спроб.
+
+    `status` і `body` — що саме відповів сервер. 🔴 Тіло несе причину: пул
+    пише в нього, котрі саме ворота не пропустили внесок чи що денна норма
+    вичерпана, і без нього людина бачила б голе «HTTP 400».
+    """
+
+    def __init__(self, message: str, *, status: int | None = None,
+                 body: str = "") -> None:
+        super().__init__(message)
+        self.status = status
+        self.body = body
+
+
+def _body_of(r: Any, limit: int = 2000) -> str:
+    """Тіло відповіді для звіту про помилку — обрізане й без падінь."""
+    try:
+        return str(r.text or "")[:limit]
+    except Exception:
+        return ""
+
+
+class TooLarge(HttpError):
+    """Відповідь більша за дозволену стелю — качання обірвано."""
 
 
 class Fetcher:
@@ -106,10 +129,17 @@ class Fetcher:
     def __init__(self, *, base: str = "", delay: float = DEFAULT_DELAY,
                  timeout: float = DEFAULT_TIMEOUT, headers: dict[str, str] | None = None,
                  client: Any = None,
-                 limiter: CrossProcessLimiter | None = None) -> None:
+                 limiter: CrossProcessLimiter | None = None,
+                 attempts: int = MAX_ATTEMPTS, retry_429: bool = True) -> None:
         self.base = base.rstrip("/")
         self.delay = delay
         self.timeout = timeout
+        # 🔴 Шість спроб із відступом — для архівів, які лежать хвилинами.
+        # Свій сервер, що відповідає «норму вичерпано» (429) або лежить, під
+        # тим самим правилом тримав би людину пів хвилини перед кожним
+        # прогоном; тому число спроб і повтор на 429 — ручки виклику.
+        self.attempts = max(1, int(attempts))
+        self.retry_429 = retry_429
         self._headers = {"User-Agent": UA, "Accept": "*/*", **(headers or {})}
         if base:
             self._headers.setdefault("Referer", f"{self.base}/")
@@ -169,7 +199,7 @@ class Fetcher:
 
     def download(self, url: str, dest: Path, *, client: Any = None,
                  on_chunk: Callable[[int], None] | None = None,
-                 chunk: int = 1 << 20) -> int:
+                 chunk: int = 1 << 20, max_bytes: int = 0) -> int:
         """Завантажити у файл потоком. Повертає число байтів.
 
         🔴 Пишемо в сусідній `.part` і перейменовуємо в кінці. Справа архіву —
@@ -180,29 +210,58 @@ class Fetcher:
         ⚠ Повторів тут немає навмисно: половину великого файла не «повторюють»,
         її дочитують, а це інша задача (Range-запити). Обірване завантаження
         видно за розміром — його звіряє той, хто кликав.
+
+        🔴 Будь-яка відмова виходить як `HttpError`, а не сирий виняток httpx:
+        споживачі ловлять `(HttpError, OSError)`, і 404 на одному файлі інакше
+        валив увесь цикл завантаження — та сама вада, що вже була в `_send`.
+
+        `max_bytes` — стеля: файл від незнайомця (пакет обміну) не має права
+        заповнити диск. Перевищення обриває качання й прибирає `.part`.
         """
+        import httpx
+
         part = dest.with_name(dest.name + ".part")
         dest.parent.mkdir(parents=True, exist_ok=True)
         if self.limiter is not None:
             self.limiter.acquire(url)
         got = 0
-        if client is not None:
-            got = self._stream_into(client, url, part, on_chunk, chunk)
-        else:
-            with self.client() as c:
-                got = self._stream_into(c, url, part, on_chunk, chunk)
+        try:
+            if client is not None:
+                got = self._stream_into(client, url, part, on_chunk, chunk, max_bytes)
+            else:
+                with self.client() as c:
+                    got = self._stream_into(c, url, part, on_chunk, chunk, max_bytes)
+        except httpx.HTTPStatusError as exc:
+            part.unlink(missing_ok=True)
+            code = exc.response.status_code
+            raise HttpError(f"{url}: HTTP {code}", status=code,
+                            body=_body_of(exc.response)) from exc
+        except httpx.HTTPError as exc:
+            part.unlink(missing_ok=True)
+            raise HttpError(f"{url}: {type(exc).__name__}: {exc}") from exc
+        except HttpError:
+            part.unlink(missing_ok=True)
+            raise
         part.replace(dest)
         return got
 
     def _stream_into(self, c: Any, url: str, part: Path,
-                     on_chunk: Callable[[int], None] | None, chunk: int) -> int:
+                     on_chunk: Callable[[int], None] | None, chunk: int,
+                     max_bytes: int = 0) -> int:
         got = 0
         with c.stream("GET", url) as r:
+            if int(getattr(r, "status_code", 200) or 200) >= 400:
+                # Тіло відмови — у звіт (`HttpError.body`): потокова відповідь
+                # без `read()` його не віддає.
+                r.read()
             r.raise_for_status()
             with open(part, "wb") as fh:
                 for block in r.iter_bytes(chunk):
-                    fh.write(block)
                     got += len(block)
+                    if max_bytes and got > max_bytes:
+                        raise TooLarge(f"{url}: більше {max_bytes} байт — "
+                                       f"качання обірвано")
+                    fh.write(block)
                     if on_chunk is not None:
                         on_chunk(got)
         return got
@@ -215,7 +274,9 @@ class Fetcher:
         import httpx
 
         last = ""
-        for attempt in range(1, MAX_ATTEMPTS + 1):
+        status: int | None = None
+        body = ""
+        for attempt in range(1, self.attempts + 1):
             # 🔴 Тікет береться на кожну спробу, включно з повторами: для
             # сервера ретрай — такий самий запит, і саме серія повторів після
             # 429 найлегше перетворює ввічливого клієнта на заблокованого.
@@ -229,6 +290,8 @@ class Fetcher:
                 # 🔴 Відступ рівно на 429 і 5xx. 404 повторювати немає сенсу —
                 # це відповідь, а не збій, і шість спроб на неї лише
                 # розтягують очікування там, де відповідь уже відома.
+                if r.status_code == 429 and not self.retry_429:
+                    raise HttpError(f"{url}: HTTP 429", status=429, body=_body_of(r))
                 if r.status_code != 429 and r.status_code < 500:
                     # 🔴 Статусна помилка виходить звідси як `HttpError`, а не
                     # як `httpx.HTTPStatusError`. Усі споживачі ловлять
@@ -240,14 +303,17 @@ class Fetcher:
                     try:
                         r.raise_for_status()
                     except httpx.HTTPStatusError as exc:
-                        raise HttpError(f"{url}: HTTP {r.status_code}") from exc
+                        raise HttpError(f"{url}: HTTP {r.status_code}",
+                                        status=r.status_code, body=_body_of(r)) from exc
                     if self.delay:
                         time.sleep(self.delay)
                     return r
                 last = f"HTTP {r.status_code}"
-            if attempt < MAX_ATTEMPTS:
+                status, body = r.status_code, _body_of(r)
+            if attempt < self.attempts:
                 time.sleep(min(60.0, 2 ** (attempt - 1)))
         raise HttpError(
-            f"{url}: {last} після {MAX_ATTEMPTS} спроб. "
+            f"{url}: {last} після {self.attempts} спроб. "
             f"⚠ Це може бути і відсічка за темпом, і те, що хост лежить, — "
-            f"розрізняє їх лише проба з іншого IP ({ENV_PROXY}).")
+            f"розрізняє їх лише проба з іншого IP ({ENV_PROXY}).",
+            status=status, body=body)

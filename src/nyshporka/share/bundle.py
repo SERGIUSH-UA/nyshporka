@@ -90,7 +90,26 @@ PACKED = (PACKED_TEXT, META_NAME)
 PACKED_GEOM = (PACKED_GEOMETRY,)
 
 #: Поля мети, які не переживають переїзд: шлях чужої машини й сліди її диска.
+#: Ворота (`gates._gate_payload`) шукають їх у маніфесті як ознаку того, що
+#: чистку обійшли.
 META_STRIPPED = ("case_dir", "case_dir_cloud", "logs", "review")
+
+#: Що з мети прогону ЇДЕ в пакет. Решта — ні.
+#:
+#: 🔴 Білий список, а не перелік забороненого, з тієї самої причини, що й
+#: `PACKED`. Мета — робочий файл: на живому просторі в ній лежали
+#: `case_dir_note`, `case_key_note`, `_note`, `orphan_note`, `control_why`
+#: («прогін зроблено ЯК ВИМІР…»), `merged_from`, `rescued` із поясненнями
+#: дослідника — і жодне з них не було в чорному списку. Отримувачу потрібне
+#: інше: чим і як читали та скільки зроблено.
+META_KEPT = ("version", "case_key", "frames_total", "model", "engine", "script",
+             "enhance", "merge_split_lines", "voice_batch", "started", "updated",
+             "done", "failed", "missing", "quarantined", "pages")
+
+#: Поля запису сторінки в `pages` мети, які їдуть. Решта (пам'ять процесу,
+#: відеопам'ять) описує машину читача, а не сторінку.
+PAGE_KEPT = ("orient", "detector", "retried", "guarded", "lines", "chars", "conf",
+             "sec", "contrast", "enhanced", "ceiling_lifted")
 
 
 class BundleError(RuntimeError):
@@ -98,6 +117,24 @@ class BundleError(RuntimeError):
 
 
 # ── маніфест ─────────────────────────────────────────────────────────────────
+
+def as_count(value: Any) -> int:
+    """Лічильник із чужого маніфесту: невід'ємне ціле або нуль.
+
+    🔴 Не `int(...)`. Маніфест приходить від незнайомця, і `"abc"`, `[1]`,
+    `1e400` у полі сторінок валили `inspect` сирою трасою замість названої
+    причини. Нуль тут безпечний: ворота на нулі сторінок відмовляють.
+    """
+    if isinstance(value, bool):
+        return 0
+    if isinstance(value, int):
+        return max(0, value)
+    if isinstance(value, float):
+        return max(0, int(value)) if value == value and abs(value) < 1e12 else 0
+    if isinstance(value, str) and value.strip().isdigit():
+        return int(value.strip())
+    return 0
+
 
 @dataclass
 class Voice:
@@ -164,11 +201,11 @@ class Manifest:
 
     @property
     def pages(self) -> int:
-        return int(self.decode.get("pages") or 0)
+        return as_count(self.decode.get("pages"))
 
     @property
     def frames_total(self) -> int:
-        return int(self.frames.get("total") or 0)
+        return as_count(self.frames.get("total"))
 
     def models(self) -> list[str]:
         seen: list[str] = []
@@ -190,7 +227,11 @@ class Manifest:
     def from_json(cls, raw: Any) -> Manifest:
         if not isinstance(raw, dict):
             raise BundleError("маніфест не є об'єктом JSON")
-        got = int(raw.get("schema") or 0)
+        schema = raw.get("schema")
+        if schema is not None and (isinstance(schema, bool)
+                                   or not isinstance(schema, int)):
+            raise BundleError(f"поле schema маніфесту — не ціле число: {schema!r}")
+        got = int(schema or 0)
         if got > SCHEMA:
             raise BundleError(
                 f"пакет зібрано схемою {got}, ця Нишпорка знає {SCHEMA} — "
@@ -218,8 +259,22 @@ def _tool_version() -> str:
 
 
 def clean_meta(meta: dict[str, Any]) -> dict[str, Any]:
-    """Мета без слідів машини, на якій читали. Див. 🔴 у шапці модуля."""
-    return {k: v for k, v in meta.items() if k not in META_STRIPPED}
+    """Мета лише з полів `META_KEPT`, сторінки — лише з `PAGE_KEPT`.
+
+    Та сама чистка стоїть на ОБОХ кінцях: пакувальник пише чисте, а приймач
+    чистить чужу мету ще раз, бо пакет міг зібрати не наш пакувальник.
+    """
+    out: dict[str, Any] = {}
+    for k in META_KEPT:
+        if k not in meta:
+            continue
+        v = meta[k]
+        if k == "pages" and isinstance(v, dict):
+            v = {str(name): ({f: p[f] for f in PAGE_KEPT if f in p}
+                             if isinstance(p, dict) else {})
+                 for name, p in v.items()}
+        out[k] = v
+    return out
 
 
 def _run_stats(run_dir: Path) -> tuple[int, int, int]:
@@ -240,6 +295,37 @@ def _run_stats(run_dir: Path) -> tuple[int, int, int]:
         lines += len(rows)
         chars += sum(len(r) for r in rows)
     return pages, lines, chars
+
+
+def tally(pages: dict[str, dict[str, str]], models: dict[str, str]) -> dict[str, int]:
+    """Знаменник пакета з САМИХ текстів: `{прогін: {сторінка: текст}}`.
+
+    Один підрахунок на обидва кінці — пакувальник рахує з диска, приймач із
+    вмісту tar, — щоб ворота приймача звіряли з тим самим правилом, а не зі
+    своїм.
+
+    🔴 Сторінки — об'єднання в межах МОДЕЛІ, максимум між моделями. Справу,
+    прочитану двома частинами тією самою моделлю, `max` по голосах рахував
+    би половиною; два прочитання різними моделями, складені сумою, —
+    подвійною.
+    """
+    per_model: dict[str, set[str]] = {}
+    lines = chars = 0
+    blank_by_model: dict[str, set[str]] = {}
+    for run, texts in pages.items():
+        model = models.get(run) or run
+        got = per_model.setdefault(model, set())
+        empty = blank_by_model.setdefault(model, set())
+        for name, body in texts.items():
+            got.add(name)
+            rows = [r for r in body.splitlines() if r.strip()]
+            lines += len(rows)
+            chars += sum(len(r) for r in rows)
+            if not rows:
+                empty.add(name)
+    best = max(per_model, key=lambda m: len(per_model[m]), default="")
+    return {"pages": len(per_model.get(best, set())), "lines": lines,
+            "chars": chars, "blank_pages": len(blank_by_model.get(best, set()))}
 
 
 def _conf_mean(meta: dict[str, Any]) -> float | None:
@@ -424,41 +510,206 @@ def sha256_of(path: Path) -> str:
 
 # ── читання ──────────────────────────────────────────────────────────────────
 
+#: Стелі для пакета від незнайомця. 🔴 Пакет стискається в рази, і tar на
+#: кілька мегабайтів може розгорнутись у гігабайти (маніфест із нулів
+#: стискається в тисячу разів). Числа з запасом: справа на 3772 аркуші — це
+#: ~8 тисяч членів і десятки мегабайтів тексту; геометрія — ×10.
+MAX_MEMBERS = 200_000
+MAX_MEMBER_BYTES = 64 << 20
+MAX_TOTAL_BYTES = 4 << 30
+MAX_MANIFEST_BYTES = 16 << 20
+#: Стеля завантаження пакета за адресою.
+MAX_DOWNLOAD_BYTES = 2 << 30
+
+#: Файли в корені пакета, які взагалі можуть там лежати.
+TOP_LEVEL = frozenset({MANIFEST_NAME, FRAMES_NAME, README_NAME})
+
+
+def _open(path: Path) -> tarfile.TarFile:
+    """Відкрити пакет; битий чи не-gzip файл — `BundleError` з причиною."""
+    try:
+        return tarfile.open(path, "r:gz")
+    except (tarfile.TarError, EOFError, OSError, ValueError) as exc:
+        raise BundleError(f"{Path(path).name} — не пакет обміну (не tar.gz або "
+                          f"обрізаний): {exc}") from exc
+
+
+def _member_bytes(tar: tarfile.TarFile, name: str, cap: int) -> bytes | None:
+    """Вміст члена за іменем, зі стелею. Немає члена — `None`."""
+    try:
+        info = tar.getmember(name)
+    except KeyError:
+        return None
+    if not info.isfile():
+        return None
+    if info.size > cap:
+        raise BundleError(f"{name} у пакеті важить {info.size} байт — більше "
+                          f"за стелю {cap}")
+    src = tar.extractfile(info)
+    if src is None:
+        return None
+    try:
+        return src.read(cap + 1)
+    except (tarfile.TarError, EOFError, OSError, zlib_error()) as exc:
+        raise BundleError(f"{name} не прочитався: {exc}") from exc
+
+
+def zlib_error() -> type[Exception]:
+    import zlib
+
+    return zlib.error
+
+
 def read_manifest(path: Path) -> Manifest:
-    """Маніфест без розпакування пакета — для `inspect` і для воріт."""
-    with tarfile.open(path, "r:gz") as tar:
-        try:
-            src = tar.extractfile(MANIFEST_NAME)
-        except KeyError:
-            src = None
-        if src is None:
-            raise BundleError(
-                f"у пакеті немає {MANIFEST_NAME} — це не пакет обміну Нишпорки")
-        raw = json.loads(src.read().decode("utf-8"))
+    """Маніфест без розпакування пакета — для `inspect` і для воріт.
+
+    Будь-яка вада пакета — `BundleError` з причиною, а не сирий виняток:
+    битий gzip, маніфест не в UTF-8, не JSON, поле не того типу.
+    """
+    try:
+        with _open(path) as tar:
+            blob = _member_bytes(tar, MANIFEST_NAME, MAX_MANIFEST_BYTES)
+    except (tarfile.TarError, EOFError, OSError) as exc:
+        raise BundleError(f"пакет не прочитався: {exc}") from exc
+    if blob is None:
+        raise BundleError(
+            f"у пакеті немає {MANIFEST_NAME} — це не пакет обміну Нишпорки")
+    try:
+        raw = json.loads(blob.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError) as exc:
+        raise BundleError(f"{MANIFEST_NAME} не розібрано: {exc}") from exc
     return Manifest.from_json(raw)
 
 
 def read_frames(path: Path) -> list[dict[str, Any]]:
     """Перелік кадрів пакета. Його може не бути — це не помилка."""
     out: list[dict[str, Any]] = []
-    with tarfile.open(path, "r:gz") as tar:
+    try:
+        with _open(path) as tar:
+            blob = _member_bytes(tar, FRAMES_NAME, MAX_MEMBER_BYTES)
+    except (tarfile.TarError, EOFError, OSError) as exc:
+        raise BundleError(f"пакет не прочитався: {exc}") from exc
+    if blob is None:
+        return out
+    try:
+        text = blob.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise BundleError(f"{FRAMES_NAME} не в UTF-8: {exc}") from exc
+    for row in text.splitlines():
+        row = row.strip()
+        if not row:
+            continue
         try:
-            src = tar.extractfile(FRAMES_NAME)
-        except KeyError:
-            return out
-        if src is None:
-            return out
-        for row in src.read().decode("utf-8").splitlines():
-            row = row.strip()
-            if not row:
-                continue
-            try:
-                got = json.loads(row)
-            except ValueError:
-                continue
-            if isinstance(got, dict):
-                out.append(got)
+            got = json.loads(row)
+        except ValueError:
+            continue
+        if isinstance(got, dict):
+            out.append(got)
     return out
+
+
+@dataclass
+class Inventory:
+    """Що лежить у пакеті — до того, як бодай байт ляг на диск."""
+
+    #: прогін → ім'я файлу → член tar
+    runs: dict[str, dict[str, tarfile.TarInfo]] = field(default_factory=dict)
+    #: Вади, через які пакет не приймається цілком. Не «пропустити файл»:
+    #: пакет, у якому є підкинутий шлях, не варто розкладати й наполовину.
+    problems: list[str] = field(default_factory=list)
+    total_bytes: int = 0
+
+
+def inventory(path: Path) -> Inventory:
+    """Перелічити вміст пакета й знайти вади ДО розпакування.
+
+    🔴 Відмова — на весь пакет і ДО запису. Доти непридатне ім'я (`0002?.txt`
+    на Windows) обривало розпакування посередині: половина прогону вже
+    лежала на диску без позначки «чуже», тобто виглядала власною роботою,
+    а журналу й доказу не було.
+    """
+    inv = Inventory()
+    seen: dict[str, str] = {}
+    n = 0
+    try:
+        with _open(path) as tar:
+            for member in tar:
+                n += 1
+                if n > MAX_MEMBERS:
+                    inv.problems.append(f"у пакеті понад {MAX_MEMBERS} файлів")
+                    break
+                name = member.name
+                parts = PurePosixPath(name).parts
+                if member.isdir():
+                    continue
+                if not member.isfile():
+                    inv.problems.append(f"{name}: посилання чи спецфайл — у пакеті "
+                                        f"обміну таких не буває")
+                    continue
+                if member.size > MAX_MEMBER_BYTES:
+                    inv.problems.append(f"{name}: {member.size} байт — більше за "
+                                        f"стелю {MAX_MEMBER_BYTES}")
+                    continue
+                inv.total_bytes += member.size
+                if len(parts) == 1 and parts[0] in TOP_LEVEL:
+                    continue
+                if len(parts) != 3 or parts[0] != RUNS_SUB:
+                    inv.problems.append(f"{name}: зайвий файл поза "
+                                        f"{RUNS_SUB}/<прогін>/<файл>")
+                    continue
+                if not tarsafe.safe_member_parts(parts[1:]):
+                    inv.problems.append(f"{name}: ім'я, яке не можна покласти на "
+                                        f"диск безпечно")
+                    continue
+                low = "/".join(parts[1:]).casefold()
+                if low in seen:
+                    inv.problems.append(f"{name}: двічі в пакеті (з {seen[low]})")
+                    continue
+                seen[low] = name
+                inv.runs.setdefault(parts[1], {})[parts[2]] = member
+    except (tarfile.TarError, EOFError, OSError, zlib_error()) as exc:
+        raise BundleError(f"пакет не прочитався: {exc}") from exc
+    if inv.total_bytes > MAX_TOTAL_BYTES:
+        inv.problems.append(f"розпакований пакет важив би {inv.total_bytes} байт — "
+                            f"більше за стелю {MAX_TOTAL_BYTES}")
+    return inv
+
+
+def read_texts(path: Path, inv: Inventory,
+               runs: list[str] | None = None) -> dict[str, dict[str, bytes]]:
+    """Сирі байти сторінок пакета: `{прогін: {сторінка: байти}}` — для воріт."""
+    want = set(runs) if runs is not None else set(inv.runs)
+    out: dict[str, dict[str, bytes]] = {r: {} for r in inv.runs if r in want}
+    try:
+        with _open(path) as tar:
+            for run, files in inv.runs.items():
+                if run not in want:
+                    continue
+                for fname, member in files.items():
+                    if not fname.endswith(".txt"):
+                        continue
+                    src = tar.extractfile(member)
+                    out[run][fname] = src.read() if src is not None else b""
+    except (tarfile.TarError, EOFError, OSError, zlib_error()) as exc:
+        raise BundleError(f"пакет не прочитався: {exc}") from exc
+    return out
+
+
+def text_hash(texts: dict[str, bytes]) -> str:
+    """Хеш змісту прогону з байтів у пам'яті — те саме правило, що й
+    `content_sha256` над текою, щоб приймач міг звірити заяву пакета."""
+    h = hashlib.sha256()
+    for name in sorted(texts):
+        h.update(name.encode("utf-8"))
+        h.update(_SEP)
+        h.update(texts[name])
+        h.update(_SEP)
+    return h.hexdigest()
+
+
+def decoded(texts: dict[str, dict[str, bytes]]) -> dict[str, dict[str, str]]:
+    return {run: {n: b.decode("utf-8", errors="replace") for n, b in pages.items()}
+            for run, pages in texts.items()}
 
 
 def members(path: Path) -> list[tuple[str, str]]:
@@ -487,7 +738,8 @@ def run_names(path: Path) -> list[str]:
 
 
 def extract(path: Path, htr_root: Path,
-            keep: Callable[[str], bool] | None = None) -> list[Path]:
+            keep: Callable[[str], bool] | None = None,
+            runs: set[str] | None = None) -> list[Path]:
     """Розкласти прогони пакета в теки прочитаного. Повертає теки, що лягли.
 
     🔴 Гард шляхів той самий, що й у хмарного забору (`utils.tarsafe`): пакет
@@ -499,21 +751,27 @@ def extract(path: Path, htr_root: Path,
     лежить у чужому tar: один підкинутий `_htr_meta.json` перетер би позначку
     походження тексту. Правило «беремо назване» дешевше за перелік того, чого
     не можна.
+
+    `runs` — які прогони розкладати; решта пакета лишається в ньому.
+    Лише файли рівно на глибині `runs/<прогін>/<файл>`: вкладені теки в
+    пакеті обміну не бувають, і `a/b/c/deep.txt` не лягає нікуди.
     """
     import shutil
 
     htr_root = Path(htr_root)
     htr_root.mkdir(parents=True, exist_ok=True)
     touched: dict[str, Path] = {}
-    with tarfile.open(path, "r:gz") as tar:
+    with _open(path) as tar:
         for member in tar.getmembers():
-            if not member.isfile():
+            if not member.isfile() or member.size > MAX_MEMBER_BYTES:
                 continue
             parts = PurePosixPath(member.name).parts
-            if len(parts) < 3 or parts[0] != RUNS_SUB:
+            if len(parts) != 3 or parts[0] != RUNS_SUB:
                 continue
             rest = parts[1:]
             if not tarsafe.safe_member_parts(rest):
+                continue
+            if runs is not None and rest[0] not in runs:
                 continue
             if keep is not None and not keep(rest[-1]):
                 continue

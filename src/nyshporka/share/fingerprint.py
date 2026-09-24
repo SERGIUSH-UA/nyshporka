@@ -226,18 +226,49 @@ def compare(ours: dict[str, Any], theirs: dict[str, Any]) -> tuple[int, int]:
     """
     if ours.get("version") != theirs.get("version"):
         return 0, 0
-    mine = {s["at"]: s for s in ours.get("slots") or [] if s.get("phash")}
-    others = {s["at"]: s for s in theirs.get("slots") or [] if s.get("phash")}
+    mine = _slots(ours)
+    others = _slots(theirs)
     spilni = mine.keys() & others.keys()
     zbihlos = sum(1 for at in spilni if _same(mine[at], others[at]))
     return zbihlos, len(spilni)
 
 
+def _slots(fp: dict[str, Any]) -> dict[float, dict[str, Any]]:
+    """Слоти, які можна звіряти. Чужий відбиток — дані від незнайомця.
+
+    🔴 Слот не того вигляду (не словник, без частки, хеш не рядок) просто не
+    звіряється: доти `slots: ["x"]` чи `phash: 5` валили прийняття сирим
+    винятком замість того, щоб чесно сказати «звірити нічого».
+    """
+    out: dict[float, dict[str, Any]] = {}
+    raw = fp.get("slots")
+    if not isinstance(raw, list):
+        return out
+    for s in raw:
+        if not isinstance(s, dict) or not isinstance(s.get("phash"), str):
+            continue
+        at = s.get("at")
+        if isinstance(at, bool) or not isinstance(at, (int, float)):
+            continue
+        out[float(at)] = s
+    return out
+
+
+def required(frames: int) -> int:
+    """Скільки слотів мусять звіритись, щоб мітка `exact` щось означала.
+
+    Один збіглий кадр доводить лише, що один кадр той самий: чужий відбиток
+    з одним заповненим слотом давав `exact` «1 з 1». Потрібно три — або всі,
+    що взагалі можливі на короткій справі.
+    """
+    return min(3, len(positions_for(frames))) if frames > 0 else 3
+
+
 def _same(a: dict[str, Any], b: dict[str, Any]) -> bool:
     """Чи це той самий кадр."""
-    if a.get("sha256") and a.get("sha256") == b.get("sha256"):
+    if isinstance(a.get("sha256"), str) and a.get("sha256") and a["sha256"] == b.get("sha256"):
         return True
-    return distance(a["phash"], b["phash"]) <= MAX_DISTANCE
+    return distance(str(a["phash"]), str(b["phash"])) <= MAX_DISTANCE
 
 
 def distance(a: str, b: str) -> int:

@@ -126,7 +126,7 @@ def test_bez_skhovyshcha_ne_padaie(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_pack_nese_opys_i_heometriiu(space: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     run = make_run(space / "reports" / "htr", "spr-8433", pages=4, geometry=True)
     monkeypatch.setattr(PUB, "resolve_runs",
-                        lambda scope: ([run], {"key": "", "shifra": "ДАХмО 315-1-8433"}))
+                        lambda scope, **kw: ([run], {"key": "", "shifra": "ДАХмО 315-1-8433"}))
     monkeypatch.setattr("nyshporka.pagestore.load_case", lambda ref: _storinky())
 
     got = PUB.pack("ДАХмО 315-1-8433", dry_run=True)
@@ -289,7 +289,7 @@ def test_vidomyi_arkhiv_movchyt(space: Path) -> None:
 def test_archive_name_ide_v_manifest(space: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     run = make_run(space / "reports" / "htr", "spr-8433")
     monkeypatch.setattr(PUB, "resolve_runs",
-                        lambda scope: ([run], {"key": "", "shifra": "ДАХмО 315-1-8433"}))
+                        lambda scope, **kw: ([run], {"key": "", "shifra": "ДАХмО 315-1-8433"}))
     got = PUB.pack("ДАХмО 315-1-8433", dry_run=True, archive_name="  Архів міста Кракова ")
     assert got["manifest"]["case"]["repo_name"] == "Архів міста Кракова"
 

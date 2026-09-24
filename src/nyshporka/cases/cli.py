@@ -491,6 +491,10 @@ def cmd_opys(key: str = typer.Argument(..., help="DAHMO/230/43 або DAHMO/230/
     _pm = _pool.meta()
     if _pm is None:
         console.print("  у Супрязі: [muted]не знаємо — зрізу пулу не брали[/muted]")
+    elif not any(_pool.covers(k, fond) for k in _pool.synonyms(repo)):
+        console.print("  у Супрязі: [muted]не знаємо — зріз пулу цей фонд не "
+                      f"охоплює (nysh share sync --repo {repo.upper()} --fond {fond})"
+                      "[/muted]")
     else:
         _koly = f"[muted](зріз {str(_pm.get('taken_at') or '')[:10]})[/muted]"
         if _cell is None:
@@ -598,6 +602,8 @@ def cmd_fond(
     pm = _pool.meta()
     if pm is None:
         pool_pidpys = " · [muted]пул: зрізу немає[/muted]"
+    elif pool_map is None:
+        pool_pidpys = " · [muted]пул: зріз цей фонд не охоплює[/muted]"
     else:
         vik = _pool.age_days()
         koly = str(pm.get("taken_at") or "")[:10]

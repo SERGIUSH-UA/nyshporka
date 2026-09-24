@@ -20,7 +20,8 @@ class PublishError(RuntimeError):
     """Пакет не зібрати — з названою причиною."""
 
 
-def resolve_runs(scope: str) -> tuple[list[Path], dict[str, Any]]:
+def resolve_runs(scope: str, *,
+                 skip: tuple[str, ...] | list[str] = ()) -> tuple[list[Path], dict[str, Any]]:
     """Теки прогонів для справи або для одного прогону, разом із голосами.
 
     🔴 Голоси добираються ЗАВЖДИ. Справу читають двома моделями, і пакет із
@@ -64,9 +65,88 @@ def resolve_runs(scope: str) -> tuple[list[Path], dict[str, Any]]:
             # відмовили б через нього ВСЬОМУ пакету. Такий голос не їде.
             if v not in dirs and (v / bundle.META_NAME).is_file():
                 dirs.append(v)
+    dirs, skipped = choose_voices(dirs, str(got.get("key") or ""), skip=skip)
+    got["skipped_runs"] = skipped
     if not dirs:
-        raise PublishError(f"теки прогонів для «{scope}» немає на диску")
+        why = "; ".join(f"{s['run']}: {s['why']}" for s in skipped)
+        raise PublishError(f"теки прогонів для «{scope}» немає на диску"
+                           + (f" (відкинуто: {why})" if why else ""))
     return dirs, got
+
+
+def _meta_of(d: Path) -> dict[str, Any]:
+    from nyshporka.utils.atomic import CorruptFileError, read_json
+
+    try:
+        raw = read_json(d / bundle.META_NAME, default={})
+    except CorruptFileError:
+        return {}
+    return raw if isinstance(raw, dict) else {}
+
+
+def choose_voices(dirs: list[Path], key: str, *,
+                  skip: tuple[str, ...] | list[str] = ()) -> tuple[list[Path], list[dict[str, str]]]:
+    """Які прогони справи — голоси пакета, а які лишаються вдома. І чому.
+
+    🔴 «Усі теки з ключем справи» — не те саме, що «прочитання справи». На
+    живому просторі серед них стояли:
+
+    * **заміри** (`control_run`): латинська модель по кириличному аркушу,
+      прогнана, щоб ДОВЕСТИ, що польських вставок немає, — 942 сторінки
+      сміттєвого тексту, які в пакеті стали б рівноправним голосом;
+    * **проби**: 15 і 40 кадрів тією самою моделлю, яка потім прочитала всі
+      602 — їхні рядки вдруге лягали б у знаменник і в хеш змісту;
+    * **сусіди за префіксом**: `voice_dirs` бере будь-яку теку `<прогін>-*`,
+      і для короткого імені `010241` туди потрапляли прогони ІНШИХ справ;
+    * **чужі прийняті** (`shared`): їх уже віддав автор, і перепакувати їх
+      від свого імені не можна.
+
+    Проба впізнається не за іменем, а за змістом: її сторінки цілком входять
+    у повніший прогін ТІЄЇ САМОЇ моделі. Прогони однієї моделі по різних
+    частинах справи (сторінки не вкладені) лишаються обидва.
+
+    `skip` — імена прогонів, які людина чи агент прибрали явно.
+    """
+    from nyshporka import htr_store as S
+
+    skipped: list[dict[str, str]] = []
+    keep: list[tuple[Path, dict[str, Any], set[str]]] = []
+    want = S._canon_case_key(key) if key else ""
+    skip_set = {str(s).strip() for s in skip if str(s).strip()}
+    for d in dirs:
+        meta = _meta_of(d)
+        if d.name in skip_set:
+            skipped.append({"run": d.name, "why": "прибрано явно (--skip-run)"})
+            continue
+        if meta.get("shared"):
+            skipped.append({"run": d.name, "why": "чужий прийнятий прогін — його "
+                                                  "віддає автор, не ви"})
+            continue
+        if meta.get("control_run"):
+            skipped.append({"run": d.name, "why": "вимірювальний прогін "
+                                                  "(control_run), а не прочитання"})
+            continue
+        own = str(meta.get("case_key") or "")
+        if want and own and S._canon_case_key(own) != want:
+            skipped.append({"run": d.name,
+                            "why": f"прогін іншої справи ({own})"})
+            continue
+        pages = {p.name for p in d.glob(bundle.PACKED_TEXT)}
+        keep.append((d, meta, pages))
+
+    out: list[Path] = []
+    for i, (d, meta, pages) in enumerate(keep):
+        model = str(meta.get("model") or "")
+        wider = next((o for j, (o, m, p) in enumerate(keep)
+                      if j != i and str(m.get("model") or "") == model and model
+                      and pages <= p and (len(p) > len(pages) or j < i)), None)
+        if wider is not None and pages:
+            skipped.append({"run": d.name,
+                            "why": f"пробний: усі його {len(pages)} стор. є в "
+                                   f"повнішому прогоні {wider.name} тієї самої моделі"})
+            continue
+        out.append(d)
+    return out, skipped
 
 
 def _case_block(scope_info: dict[str, Any], case_dir: Path | None) -> dict[str, Any]:
@@ -118,7 +198,7 @@ def _normalize_shifra(case: dict[str, Any], key: str) -> dict[str, Any]:
     """Шифра, яку розбирає резолвер, — навіть коли паспорт записав її інакше.
 
     🔴 Паспорти тримають шифру як завгодно: «ДАВіО ф.726 оп.1 спр.26»,
-    «Р-93-3-19» без архіву, «ДАЖО 178-51-418 (арк. М'ястківської секції)».
+    «Р-93-3-19» без архіву, «ДАЖО 178-51-418 (арк. сільської секції)».
     Резолвер таких не розбирає, і справа йшла б у каталог під шифрою, за
     якою її ніхто не знайде. Ключ справи відомий — тоді в маніфест іде його
     канонічна шифра, а запис паспорта лишається поруч довідково.
@@ -272,9 +352,18 @@ def build_manifest(scope: str, *,
                    extra: dict[str, Any] | None = None,
                    license_text: str = "CC0-1.0",
                    source_terms: str = "",
-                   archive_name: str = "") -> tuple[Manifest, list[Path], list[dict[str, Any]]]:
-    """Скласти заяву пакета. Файл ще не пишеться — спершу ворота."""
-    run_dirs, info = resolve_runs(scope)
+                   archive_name: str = "",
+                   skip_runs: tuple[str, ...] | list[str] = (),
+                   card_fields: dict[str, Any] | None = None,
+                   ) -> tuple[Manifest, list[Path], list[dict[str, Any]], dict[str, Any]]:
+    """Скласти заяву пакета. Файл ще не пишеться — спершу ворота.
+
+    `card_fields` — поля картки поверх запам'ятованої (`share/card.py`):
+    назва, роки, місця, жанр, які людина чи агент задали самі.
+    """
+    from nyshporka.share import card as K
+
+    run_dirs, info = resolve_runs(scope, skip=skip_runs)
     key = str(info.get("key") or "")
     case_dir = align.case_dir_for(key) if key else None
     frames = align.frames_of(case_dir, hash_frames=hash_frames) if case_dir else []
@@ -284,12 +373,15 @@ def build_manifest(scope: str, *,
         raise PublishError(
             f"у теках прогонів немає жодної сторінки тексту: {', '.join(d.name for d in run_dirs)}")
 
-    blank = _blank_pages(run_dirs)
+    counted = bundle.tally(
+        {d.name: {p.name: p.read_text(encoding="utf-8", errors="replace")
+                  for p in sorted(d.glob(bundle.PACKED_TEXT))} for d in run_dirs},
+        {v.run: v.model for v in voices})
     decode = {
-        "pages": max(v.pages for v in voices),
-        "lines": sum(v.lines for v in voices),
-        "chars": sum(v.chars for v in voices),
-        "blank_pages": blank,
+        "pages": counted["pages"],
+        "lines": counted["lines"],
+        "chars": counted["chars"],
+        "blank_pages": counted["blank_pages"],
         "voices": [v.as_json() for v in voices],
         # 🔴 Хеш ЗМІСТУ пакета — не той самий, що sha256 файла. Файл того
         # самого прогону, спакований двічі, має різні байти (час у маніфесті,
@@ -346,11 +438,25 @@ def build_manifest(scope: str, *,
               if str(row.get(k) or "").isdigit()]
         if ry:
             case["years"] = [min(ry), max(ry)]
+    # 🔴 Картка людини — ОСТАННЬОЮ, поверх усього зібраного: паспорт і
+    # реєстр — здогад пакувальника, а задане руками — рішення.
+    kartka = {**K.get(key), **(card_fields or {})}
+    if kartka:
+        case = K.apply(case, kartka)
+        nazva = str(case.get("title") or "")
+    # Робочий запис паспорта про жанр (`record_type`) — вільний текст
+    # дослідника, і в картку він іде лише очищеним, як і назва.
+    if case.get("record_type"):
+        clean_type = opys.clean_text(str(case["record_type"]))
+        if clean_type:
+            case["record_type"] = clean_type
+        else:
+            case.pop("record_type", None)
     described = opys.build(
         str(case.get("shifra") or ""), row=row,
         frames_total=int(frames_block.get("total") or 0),
         geometry_pages=_geometry_pages(run_dirs),
-        text_pages=max(v.pages for v in voices))
+        text_pages=counted["pages"])
     if described:
         case["details"] = described
     m = Manifest(
@@ -359,7 +465,9 @@ def build_manifest(scope: str, *,
         links=_with_registry(list(links or []), str(case.get("shifra") or "")),
         extra=dict(extra or {}), license=lic,
         tool=bundle._tool_version(), created=time.strftime("%Y-%m-%dT%H:%M:%S%z"))
-    return m, run_dirs, frames
+    details = {"skipped_runs": list(info.get("skipped_runs") or []),
+               "card": kartka, "key": key}
+    return m, run_dirs, frames, details
 
 
 def _content_of(voices: list[bundle.Voice]) -> str:
@@ -383,24 +491,6 @@ def _geometry_pages(run_dirs: list[Path]) -> int:
                default=0)
 
 
-def _blank_pages(run_dirs: list[Path]) -> int:
-    """Скільки сторінок найповнішого голосу порожні.
-
-    Порожня сторінка сама собою нормальна — це vacat, чистий аркуш. Ворота
-    ловлять інше: коли порожня майже вся справа, тобто рушій не взяв письмо.
-    """
-    best = 0
-    blank = 0
-    for d in run_dirs:
-        pages = sorted(d.glob(bundle.PACKED_TEXT))
-        if len(pages) <= best:
-            continue
-        best = len(pages)
-        blank = sum(1 for p in pages
-                    if not p.read_text(encoding="utf-8", errors="replace").strip())
-    return blank
-
-
 def pack(scope: str, dest: Path | None = None, *, geometry: bool = True,
          hash_frames: bool = False, partial_why: str = "",
          dry_run: bool = False, **meta: Any) -> dict[str, Any]:
@@ -415,7 +505,10 @@ def pack(scope: str, dest: Path | None = None, *, geometry: bool = True,
     змінюється ні на байт, тож хеш змісту той самий і повторним внеском він
     не стане.
     """
-    m, run_dirs, frames = build_manifest(scope, hash_frames=hash_frames, **meta)
+    card_fields = meta.pop("card_fields", None) or {}
+    remember = bool(meta.pop("remember_card", True))
+    m, run_dirs, frames, details = build_manifest(
+        scope, hash_frames=hash_frames, card_fields=card_fields, **meta)
     verdict = gates.check(m, partial_why=partial_why)
     sketch = bundle.plan(run_dirs)
     geom_dirs = [d for d in run_dirs if bundle.has_geometry(d)]
@@ -424,6 +517,10 @@ def pack(scope: str, dest: Path | None = None, *, geometry: bool = True,
         "manifest": m.as_json(),
         "gates": verdict.as_json(),
         "runs": [d.name for d in run_dirs],
+        # 🔴 Що лишилось удома і чому — завжди видно: проба чи замір, мовчки
+        # викинуті з пакета, виглядали б як загублений голос.
+        "skipped_runs": details["skipped_runs"],
+        "card": details["card"],
         "files": len(sketch["files"]),
         "bytes_raw": sketch["bytes"],
         "frames_listed": len(frames),
@@ -439,6 +536,13 @@ def pack(scope: str, dest: Path | None = None, *, geometry: bool = True,
     if not verdict.passed:
         raise PublishError("ворота не пропустили пакет:\n" + gates.describe(verdict))
 
+    if card_fields and remember and details["key"]:
+        # Задане на пакуванні живе й далі: наступне пакування (автовіддача,
+        # `suggest --all`, дочитування новою моделлю) візьме ту саму картку.
+        from nyshporka.share import card as K
+
+        out["card_saved"] = K.set_fields(details["key"], card_fields)
+
     name = bundle.suggest_name(m)
     dest = Path(dest) if dest else (journal.share_dir() / journal.OUTBOX / name)
     if dest.is_dir():
@@ -453,6 +557,14 @@ def pack(scope: str, dest: Path | None = None, *, geometry: bool = True,
         geom = bundle.write(bundle.geom_path(dest), m, geom_dirs, frames=frames,
                             patterns=bundle.PACKED_GEOM)
         out["geom"] = geom
+    else:
+        # 🔴 Geom-файл від ПОПЕРЕДНЬОГО пакування цієї справи лежить під тим
+        # самим іменем і належить іншому тексту. Лишений тут, він поїхав би
+        # у пул разом із новим текстом, і кроп різав би не ті рядки.
+        stale = bundle.geom_path(dest)
+        if stale.is_file():
+            stale.unlink()
+            out["geom_removed"] = str(stale)
 
     row = catalog.row_for(m, sha256=wrote["sha256"], nbytes=wrote["bytes"])
     out["catalog_row"] = row.as_tsv()

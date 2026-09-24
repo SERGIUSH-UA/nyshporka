@@ -1,17 +1,15 @@
 """🗂 Каталог пулу: рядок на пакет, і сталий URL, за яким його шукати.
 
-Каталог — звичайний TSV у публічному репозиторії. Вибір не від бідності:
-git дає рівно те, чого потребує обмін, і задарма. «Коли й хто» — з історії
-комітів, без жодного сервера; премодерація — це pull request, який можна
-прийняти словом; а відкотити зіпсований рядок дешевше, ніж полагодити базу.
+Каталог — JSON API застосунку Супряги (`https://api.nyshporka.online/v1`):
+`/search`, `/lookup`, `/stats`. Рядок каталогу (`Row`) і його TSV-форма
+(`as_tsv`, `parse`) лишились для офлайн-дзеркала (`fetch(dest=…)`) і для
+`nysh share row`.
 
-🔴 Байти лишаються на GitHub, домен дає їм ІМ'Я. `setup/packs.py` пояснює, чому
-паки роздаються релізом: «у нього є дзеркала, і він переживе автора проєкту».
-Домен — протилежний компроміс: керований, але помирає разом із реєстрацією.
-Тому не заміна, а шар поверх — сталий URL веде на реліз або на сховище, і
-обидві властивості лишаються. Практичний наслідок: коли обмінник переросте в
-пул із чергою приймання, посилання, роздані в дописах і в чужих маніфестах,
-лишаться чинними.
+🔴 Домен, а не адреса сховища: посилання, роздані в дописах і вписані в
+чужі маніфести, переживають переїзд сховища — а їх відкликати найдорожче.
+
+🔴 Ключ Супряги їде лише на довірену адресу (`trusted`): адресу пулу можна
+перемкнути змінною чи прапорцем, а ключ — це обліковий запис людини.
 """
 from __future__ import annotations
 
@@ -47,7 +45,8 @@ def base_url(base: str = "") -> str:
 #: каталогу мусить лишатись робочим, інакше оновлення пакета ламає чужі копії.
 COLUMNS = ("shifra", "repo", "fond", "opys", "spr", "years", "places",
            "pages", "frames", "voices", "models", "bytes", "sha256",
-           "license", "publisher", "contact", "url", "added", "geom_url")
+           "license", "publisher", "contact", "url", "added", "geom_url",
+           "geom_sha256")
 
 
 @dataclass
@@ -75,6 +74,9 @@ class Row:
     #: Адреса другого об'єкта — геометрії рядків. Порожньо означає «пакувальник
     #: її не віддавав», а не «її немає»: рамки без тих самих кадрів марні.
     geom_url: str = ""
+    #: sha256 ПРИЙНЯТОГО пулом geom-файла. Порожньо — сервер його ще не
+    #: віддає; тоді geom звірити нічим, і це відкритий ризик пулу.
+    geom_sha256: str = ""
 
     def as_tsv(self) -> str:
         return "\t".join(_clean(getattr(self, c, "")) for c in COLUMNS)
@@ -128,7 +130,9 @@ def parse(text: str) -> list[Row]:
     """
     rows: list[Row] = []
     known = {f.name for f in fields(Row)}
-    lines = [ln for ln in (text or "").splitlines() if ln.strip()]
+    # BOM на початку файлу (Excel, Блокнот) інакше прилипав до першої колонки,
+    # і шапка не впізнавалась — ставала рядком даних.
+    lines = [ln for ln in (text or "").lstrip("﻿").splitlines() if ln.strip()]
     if not lines:
         return rows
     head = [h.strip() for h in lines[0].split("\t")]
@@ -170,7 +174,15 @@ def catalog_url(base: str = "") -> str:
     return f"{base_url(base)}/{CATALOG_NAME}"
 
 
-class PotribenKliuch(RuntimeError):
+class PoolError(RuntimeError):
+    """Пул не відповів як слід. `status` — HTTP-код, коли він є."""
+
+    def __init__(self, message: str, *, status: int | None = None) -> None:
+        super().__init__(message)
+        self.status = status
+
+
+class PotribenKliuch(PoolError):
     """Пул відповів 401: Нишпорка не під'єднана. Текст призначений людині."""
 
 
@@ -178,8 +190,109 @@ class PotribenKliuch(RuntimeError):
 KLIUCH_TEXT = ("Супряга пускає лише під'єднану Нишпорку. Під'єднайте: "
                "nysh share login — один клік, можна анонімно.")
 
+#: Домен, якому довіряється ключ. Будь-яка інша адреса (`NYSHPORKA_TOLOKA`,
+#: `--base`) ключа не отримує.
+TRUSTED_DOMAIN = "nyshporka.online"
 
-def _get(url: str) -> dict[str, Any]:
+#: Таймаут і спроби для пулу. 🔴 Не ті шість спроб по хвилині, що в
+#: `sources.http` для архівів: пул — наш сервер, і коли він лежить, людина
+#: має дізнатись про це за секунди, а не чекати шість з половиною хвилин
+#: перед прогоном, який вона однаково зробить сама.
+POOL_TIMEOUT = 30.0
+POOL_ATTEMPTS = 2
+#: Питання «чи вже прочитано» стоїть перед прогоном і ніколи його не спиняє,
+#: тож на нього — одна коротка спроба.
+LOOKUP_TIMEOUT = 8.0
+
+
+def trusted(url: str) -> bool:
+    """Чи можна везти ключ Супряги на цю адресу.
+
+    🔴 Ключ — це обліковий запис людини. Адресу пулу можна перемкнути
+    змінною оточення чи прапорцем, і без цієї перевірки бойовий ключ зі
+    сховища ключів їхав би на будь-яке «своє дзеркало», зокрема відкритим
+    HTTP. Довіряємо лише HTTPS на домені пулу й петлі цієї машини (тестовий
+    сервер розробника; процес на петлі й так може прочитати сховище ключів).
+    """
+    from urllib.parse import urlsplit
+
+    parts = urlsplit(url)
+    host = (parts.hostname or "").lower()
+    if host in ("127.0.0.1", "localhost", "::1"):
+        return True
+    return parts.scheme == "https" and (
+        host == TRUSTED_DOMAIN or host.endswith("." + TRUSTED_DOMAIN))
+
+
+def may_send_key(url: str, *, explicit: bool = False) -> bool:
+    """Чи їде ключ на цю адресу.
+
+    Довірена адреса — завжди. Чужа — лише коли ключ названо ЯВНО: переданий
+    аргументом або покладений людиною в `NYSHPORKA_SUPRIAHA_TOKEN` для свого
+    сервера. Ключ зі сховища ключів системи на чужу адресу не їде ніколи.
+    """
+    import os
+
+    from nyshporka.share.upload import ENV_NAME
+
+    return trusted(url) or explicit or bool(os.environ.get(ENV_NAME, "").strip())
+
+
+def reason(exc: Exception) -> str:
+    """Людська причина відмови пулу — з тіла відповіді, а не голий код.
+
+    Сервер кладе причину в `detail`: рядком або словником із `text` і
+    `refusals` (ворота). Без цього людина бачила б «HTTP 400» там, де пул
+    назвав, котрі саме ворота пакет не пройшов.
+    """
+    import json
+
+    body = str(getattr(exc, "body", "") or "")
+    status = getattr(exc, "status", None)
+    detail: Any = None
+    if body:
+        try:
+            detail = json.loads(body).get("detail")
+        except (ValueError, AttributeError):
+            detail = None
+    parts: list[str] = []
+    if isinstance(detail, str):
+        parts.append(detail)
+    elif isinstance(detail, dict):
+        if detail.get("text"):
+            parts.append(str(detail["text"]))
+        for r in detail.get("refusals") or []:
+            parts.append(f"✗ {r}")
+    if not parts:
+        return str(exc)
+    head = f"HTTP {status}: " if status else ""
+    return head + "\n".join(parts)
+
+
+def _fetcher(url: str, *, timeout: float = POOL_TIMEOUT,
+             attempts: int = POOL_ATTEMPTS, auth: str | None = None,
+             accept_json: bool = False) -> Any:
+    """Клієнт до пулу: свій UA, ключ лише на довірену адресу, без повторів 429.
+
+    `auth=None` — узяти ключ зі сховища; порожній рядок — без ключа.
+    """
+    from nyshporka.share.upload import token
+    from nyshporka.sources.http import Fetcher, app_ua, offline
+
+    if offline():
+        raise PoolError("мережу вимкнено (NYSHPORKA_NO_NETWORK) — пул не питається")
+    headers = {"User-Agent": app_ua()}
+    if accept_json:
+        headers["Accept"] = "application/json"
+    kliuch = token() if auth is None else auth
+    if kliuch and may_send_key(url, explicit=bool(auth)):
+        headers["Authorization"] = f"Bearer {kliuch}"
+    return Fetcher(headers=headers, timeout=timeout, attempts=attempts,
+                   retry_429=False)
+
+
+def _get(url: str, *, timeout: float = POOL_TIMEOUT,
+         attempts: int = POOL_ATTEMPTS) -> dict[str, Any]:
     """Запит до пулу з розбором відповіді.
 
     🔴 Клієнт називається своїм іменем (`app_ua`), а не браузерним рядком
@@ -195,29 +308,25 @@ def _get(url: str) -> dict[str, Any]:
     """
     import json
 
-    from nyshporka.share.upload import token
-    from nyshporka.sources.http import Fetcher, HttpError, app_ua
+    from nyshporka.sources.http import HttpError
 
     # 🔴 Шукати й качати через API пул пускає лише з ключем (рішення
-    # 23.09.2026). Ключ їде в кожному запиті, якщо він є, — окремого «режиму
-    # з ключем» немає, щоб не було місця, яке його забуло.
-    headers = {"User-Agent": app_ua()}
-    kliuch = token()
-    if kliuch:
-        headers["Authorization"] = f"Bearer {kliuch}"
+    # 23.09.2026). Ключ їде в кожному запиті, якщо він є і адреса довірена, —
+    # окремого «режиму з ключем» немає, щоб не було місця, яке його забуло.
     try:
-        resp = Fetcher(headers=headers).get(url)
+        resp = _fetcher(url, timeout=timeout, attempts=attempts).get(url)
     except HttpError as exc:
-        if "HTTP 401" in str(exc):
-            raise PotribenKliuch(KLIUCH_TEXT) from exc
-        raise RuntimeError(f"пул за {url} недоступний: {exc}") from exc
+        if exc.status == 401:
+            raise PotribenKliuch(KLIUCH_TEXT, status=401) from exc
+        raise PoolError(f"пул за {url} недоступний: {reason(exc)}",
+                        status=exc.status) from exc
     text = resp.text if hasattr(resp, "text") else str(resp)
     try:
         got = json.loads(text)
     except ValueError as exc:
-        raise RuntimeError(f"пул за {url} відповів не JSON: {exc}") from exc
+        raise PoolError(f"пул за {url} відповів не JSON: {exc}") from exc
     if not isinstance(got, dict):
-        raise RuntimeError(f"пул за {url} відповів не тим, чого чекали")
+        raise PoolError(f"пул за {url} відповів не тим, чого чекали")
     return got
 
 
@@ -232,7 +341,9 @@ def _rows(payload: dict[str, Any]) -> list[Row]:
     out: list[Row] = []
     for raw in payload.get("rows") or []:
         if isinstance(raw, dict):
-            out.append(Row(**{k: _clean(str(v)) for k, v in raw.items() if k in names}))
+            # 🔴 `_clean`, а не `str(v)`: `null` з JSON інакше ставав рядком
+            # «None» — правдивим значенням, і `geom_url=None` читався як «рамки є».
+            out.append(Row(**{k: _clean(v) for k, v in raw.items() if k in names}))
     return out
 
 
@@ -252,7 +363,15 @@ def search(query: str = "", base: str = "", *, limit: int = 50,
     qs = urlencode({"q": query, "limit": limit, "offset": offset})
     got = _get(f"{base_url(base)}/search?{qs}")
     rows = _rows(got)
-    return rows, int(got.get("count") or len(rows)), int(got.get("of") or 0)
+    return rows, as_int(got.get("count")) or len(rows), as_int(got.get("of"))
+
+
+def as_int(value: Any) -> int:
+    """Число з відповіді пулу; нечислове — нуль, а не падіння з трасою."""
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
 
 
 def stats(base: str = "") -> dict[str, Any]:
@@ -273,10 +392,11 @@ def lookup(shifra: str, *, frames: int = 0, base: str = "") -> dict[str, Any]:
 
     qs = urlencode({"shifra": shifra, "frames": frames})
     try:
-        return _get(f"{base_url(base)}/lookup?{qs}")
+        return _get(f"{base_url(base)}/lookup?{qs}", timeout=LOOKUP_TIMEOUT,
+                    attempts=1)
     except PotribenKliuch as exc:
         return {"found": False, "why": str(exc), "need_key": True}
-    except RuntimeError as exc:
+    except Exception as exc:
         return {"found": False, "why": str(exc), "offline": True}
 
 
@@ -298,7 +418,8 @@ def fetch(base: str = "", *, dest: Path | None = None) -> list[Row]:
     if dest is not None:
         Path(dest).parent.mkdir(parents=True, exist_ok=True)
         Path(dest).write_text(
-            header() + "".join(r.as_tsv() + "\n" for r in out), encoding="utf-8")
+            header() + "\n" + "".join(r.as_tsv() + "\n" for r in out),
+            encoding="utf-8")
     return out
 
 

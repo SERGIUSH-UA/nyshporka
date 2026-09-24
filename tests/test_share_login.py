@@ -61,7 +61,11 @@ def _brauzer(monkeypatch: pytest.MonkeyPatch, *, state: str | None = None,
             seen["resp"] = httpx.post(f"http://127.0.0.1:{port}/", data=body, timeout=10)
 
         # У потоці: `webbrowser.open` повертається одразу, і так само мусить тут.
-        threading.Thread(target=_post, daemon=True).start()
+        # Потік запам'ятовується: `login()` повертається, щойно сервер відповів,
+        # а записати відповідь у `seen` потік ще може не встигнути — без
+        # `join` тест падав через раз на чужій гонитві, а не на вході.
+        seen["thread"] = threading.Thread(target=_post, daemon=True)
+        seen["thread"].start()
         return True
 
     monkeypatch.setattr(L.webbrowser, "open", _open)
@@ -78,6 +82,7 @@ def test_kliuch_z_pravylnym_state_lyahaie_u_skhovyshche(
     assert skhovyshche.data[(KEYRING_SERVICE, KEYRING_USER)] == "kliuch-z-saitu"
     assert upload.token() == "kliuch-z-saitu"
     assert seen["url"].startswith("https://probe.invalid/cli?")
+    seen["thread"].join(timeout=10)
     assert seen["resp"].status_code == 200
 
 
@@ -89,6 +94,7 @@ def test_chuzhyi_state_ne_pryimaietsia(
     seen = _brauzer(monkeypatch, state="pidsunutyi-state-ne-toi")
     with pytest.raises(UploadError):
         L.login(site="https://probe.invalid", timeout=2)
+    seen["thread"].join(timeout=10)
     assert seen["resp"].status_code == 400
     assert (KEYRING_SERVICE, KEYRING_USER) not in skhovyshche.data
 
@@ -177,7 +183,7 @@ class _Fetcher:
         from nyshporka.sources.http import HttpError
 
         if _Fetcher.status != 200:
-            raise HttpError(f"{url}: HTTP {_Fetcher.status}")
+            raise HttpError(f"{url}: HTTP {_Fetcher.status}", status=_Fetcher.status)
         return type("R", (), {"text": '{"rows": [], "count": 0, "of": 3}'})()
 
 
@@ -188,15 +194,58 @@ def merezha(monkeypatch: pytest.MonkeyPatch) -> type[_Fetcher]:
     _Fetcher.seen = []
     _Fetcher.status = 200
     monkeypatch.setattr(H, "Fetcher", _Fetcher)
+    # Мережі тут немає — її заміняє `_Fetcher`, тож заборону знімаємо.
+    monkeypatch.delenv(H.ENV_OFFLINE, raising=False)
     return _Fetcher
+
+
+#: Адреса пулу, якій довіряється ключ. Запити не йдуть нікуди — `_Fetcher`.
+PUL = "https://api.nyshporka.online/v1"
 
 
 def test_poshuk_nese_kliuch(skhovyshche: _Skhovyshche, merezha: type[_Fetcher]) -> None:
     from nyshporka.share import catalog
 
     L.save("kliuch-1")
-    catalog.search("315", "https://probe.invalid/v1")
+    catalog.search("315", PUL)
     assert merezha.seen[-1]["Authorization"] == "Bearer kliuch-1"
+
+
+@pytest.mark.parametrize("base", [
+    "https://probe.invalid/v1",               # чужий домен
+    "http://api.nyshporka.online/v1",         # свій домен, але відкритим HTTP
+    "https://nyshporka.online.evil.test/v1",  # підробка під свій домен
+])
+def test_kliuch_ne_ide_na_chuzhu_adresu(
+    skhovyshche: _Skhovyshche, merezha: type[_Fetcher], base: str
+) -> None:
+    """🔴 Адресу пулу міняє змінна `NYSHPORKA_TOLOKA` — ключ за нею не їде."""
+    from nyshporka.share import catalog
+
+    L.save("kliuch-1")
+    catalog.search("315", base)
+    assert "Authorization" not in merezha.seen[-1]
+
+
+def test_publish_ne_shle_kliuch_na_chuzhyi_pul(
+    skhovyshche: _Skhovyshche, tmp_path: Any
+) -> None:
+    L.save("kliuch-1")
+    paket = tmp_path / "p.nyshtext"
+    paket.write_bytes(b"x")
+    with pytest.raises(UploadError, match="не надсилається"):
+        upload.publish(paket, base="https://probe.invalid/v1")
+
+
+def test_bez_merezhi_pul_ne_pytaietsia(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`NYSHPORKA_NO_NETWORK` — жодного запиту до пулу, чесна відмова."""
+    from nyshporka.share import catalog
+
+    monkeypatch.setenv("NYSHPORKA_NO_NETWORK", "1")
+    got = catalog.lookup("ДАХмО 315-1-8433")
+    assert got["found"] is False and got.get("offline") is True
+    with pytest.raises(catalog.PoolError, match="NO_NETWORK"):
+        catalog.search("315")
 
 
 def test_bez_kliucha_zapyt_bez_zaholovka(
@@ -204,7 +253,7 @@ def test_bez_kliucha_zapyt_bez_zaholovka(
 ) -> None:
     from nyshporka.share import catalog
 
-    catalog.search("315", "https://probe.invalid/v1")
+    catalog.search("315", PUL)
     assert "Authorization" not in merezha.seen[-1]
 
 
@@ -215,7 +264,7 @@ def test_401_kazhe_yak_pidiednatys(
 
     merezha.status = 401
     with pytest.raises(catalog.PotribenKliuch, match="nysh share login"):
-        catalog.search("315", "https://probe.invalid/v1")
+        catalog.search("315", PUL)
 
 
 def test_lookup_bez_kliucha_ne_valyt_prohin(
@@ -225,6 +274,6 @@ def test_lookup_bez_kliucha_ne_valyt_prohin(
     from nyshporka.share import catalog
 
     merezha.status = 401
-    got = catalog.lookup("ДАХмО 315-1-8433", base="https://probe.invalid/v1")
+    got = catalog.lookup("ДАХмО 315-1-8433", base=PUL)
     assert got["found"] is False
     assert got.get("need_key") is True

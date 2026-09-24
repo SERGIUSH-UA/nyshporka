@@ -23,30 +23,56 @@ def space(tmp_path: Path) -> Any:
 
 
 @pytest.fixture
-def uvimknena(monkeypatch: Any) -> None:
-    """Ворота фічі зняті — інакше обидва хвости мовчать за побудовою."""
-    from nyshporka.share.cli import DEV_FLAG
+def uvimknena(space: Path, monkeypatch: Any) -> None:
+    """Людина ввімкнула питання пулу й під'єднала Нишпорку."""
+    from nyshporka.share.upload import ENV_NAME
 
-    monkeypatch.setenv(DEV_FLAG, "1")
+    prof = P.load()
+    prof.lookup = True
+    P.save(prof)
+    monkeypatch.setenv(ENV_NAME, "kliuch")
 
 
-def test_lookup_movchyt_bez_vorit(space: Path, monkeypatch: Any, capsys: Any) -> None:
-    """🔴 Поки пул не запущено, прогін про нього не знає.
+def test_lookup_typovo_vymknenyi(space: Path, monkeypatch: Any, capsys: Any) -> None:
+    """🔴 Типово пул перед прогоном НЕ питається.
 
-    Це та сама межа, що ховає команду `share`: роздане один раз живе в
-    чужих теках, і формат ще може змінитись.
+    Запит несе шифру справи й ключ — сервер бачив би, що читає людина.
+    `PRIVACY.md` обіцяє, що фонових запитів немає, доки їх не ввімкнули.
     """
     from nyshporka.cli import _supriaha_lookup
-    from nyshporka.share.cli import DEV_FLAG
+    from nyshporka.share.upload import ENV_NAME
 
-    monkeypatch.delenv(DEV_FLAG, raising=False)
+    monkeypatch.setenv(ENV_NAME, "kliuch")
+    assert P.load().lookup is False
 
     def _ne_klykaty(*_: Any, **__: Any) -> None:
-        raise AssertionError("без воріт фічі в пул не ходимо")
+        raise AssertionError("типово в пул не ходимо")
 
     monkeypatch.setattr("nyshporka.share.catalog.lookup", _ne_klykaty)
     _supriaha_lookup("DAHMO/315/8433", 3772)
     assert capsys.readouterr().out == ""
+
+
+def test_lookup_bez_kliucha_ne_pytaie(space: Path, monkeypatch: Any, capsys: Any) -> None:
+    """Без ключа пул відповів би 401 — запит без відповіді лише витік.
+
+    Замість нього — підказка, як під'єднатись.
+    """
+    from nyshporka.cli import _supriaha_lookup
+    from nyshporka.share.upload import ENV_NAME
+
+    prof = P.load()
+    prof.lookup = True
+    P.save(prof)
+    monkeypatch.delenv(ENV_NAME, raising=False)
+    monkeypatch.setattr("nyshporka.share.upload.token", lambda: "")
+
+    def _ne_klykaty(*_: Any, **__: Any) -> None:
+        raise AssertionError("без ключа в пул не ходимо")
+
+    monkeypatch.setattr("nyshporka.share.catalog.lookup", _ne_klykaty)
+    _supriaha_lookup("DAHMO/315/8433", 3772)
+    assert "share login" in capsys.readouterr().out
 
 
 def test_lookup_movchyt_koly_vymknuto_v_profili(
@@ -105,6 +131,8 @@ def test_lookup_drukuie_znaydene(
     assert "pysar-v3" in out
     assert "не перевірено" in out
     assert "share pull" in out
+    porada = next(ln for ln in out.splitlines() if "share pull" in ln)
+    assert "«" not in porada, "порада без лапок-ялинок: shell передав би їх у запит"
 
 
 def test_lookup_movchyt_na_promakhu(

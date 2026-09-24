@@ -842,17 +842,15 @@ def _supriaha_autoshare(case_key: str) -> None:
     написати рядок, а не зіпсувати код повернення команди, за яким люди
     ставлять свої прогони в черги й скрипти.
     """
-    import os
+    from rich.markup import escape
 
-    from nyshporka.share.cli import _ON, DEV_FLAG
-
-    if os.environ.get(DEV_FLAG, "").strip().lower() not in _ON:
-        return
     try:
         from nyshporka import ops as O
 
         env = O.call("share.autoshare", {"case": case_key, "complete": True})
-    except Exception:
+    except Exception as exc:
+        console.print(f"  [warn]⚠ Супряга: автовіддача не спрацювала: "
+                      f"{escape(str(exc))}[/warn]")
         return
     d = env.data or {}
 
@@ -861,16 +859,27 @@ def _supriaha_autoshare(case_key: str) -> None:
     # невдача означає, що вона вважає справу відданою, а та лежить у себе
     # на диску. Це гірше, ніж не мати режиму зовсім.
     for w in env.warnings or []:
-        console.print(f"  [warn]⚠ {w.text}[/warn]")
+        console.print(f"  [warn]⚠ {escape(str(w.text))}[/warn]")
+    if not env.ok:
+        # Операція впала всередині (`O.call` перетворює виняток на відмову
+        # без попереджень): доти тут не друкувалось НІЧОГО.
+        why = str(env.error or "") or "невідома причина"
+        console.print(f"  [warn]⚠ Супряга: справу не віддано — {escape(why)}[/warn]")
+        return
 
     if d.get("skipped") or not d.get("packed"):
         return
-    if d.get("duplicate"):
-        console.print("  [muted]цей текст уже в Супрязі[/muted]")
-    elif d.get("ready"):
+    from nyshporka.share.upload import OUTCOME_TEXT, VIDDANO
+
+    vyhid = str(d.get("outcome") or "")
+    if vyhid == VIDDANO:
         console.print(f"  🤝 віддано в Супрягу: внесок {d.get('contribution')}")
+    elif vyhid in OUTCOME_TEXT:
+        style = "muted" if vyhid == "vzhe_ye" else "warn"
+        console.print(f"  [{style}]Супряга: {OUTCOME_TEXT[vyhid]}[/{style}]")
     else:
-        console.print(f"  [muted]спаковано: {d.get('path')}[/muted]")
+        console.print(f"  [muted]спаковано, але не віддано: "
+                      f"{escape(str(d.get('path') or ''))}[/muted]")
 
 
 def _supriaha_lookup(case_key: str, frames: int) -> None:
@@ -884,33 +893,46 @@ def _supriaha_lookup(case_key: str, frames: int) -> None:
     Рішення лишається за людиною й тоді, коли текст знайшовся: ми друкуємо
     рядок, а не пропонуємо вибір. Питання посеред довгої команди — це те
     саме, від чого відмовились у режимах згоди.
+
+    🔴 Типово ВИМКНЕНО (`profile.lookup=False`) і вмикається людиною:
+    запит несе шифру справи й ключ, тобто сервер бачить, що саме читає ця
+    людина. `PRIVACY.md` обіцяє, що фонових запитів немає, доки їх не
+    ввімкнули. Без ключа пул не питається зовсім: він однаково відповів би
+    401, а запит без відповіді — це витік без користі.
     """
-    import os
+    from rich.markup import escape
 
-    from nyshporka.share.cli import _ON, DEV_FLAG
-
-    if os.environ.get(DEV_FLAG, "").strip().lower() not in _ON:
-        return
     try:
         from nyshporka.share import catalog as C
         from nyshporka.share import profile as P
+        from nyshporka.share.upload import token
 
         if not P.load().lookup:
             return
+        if not token():
+            console.print("  [muted]Супряга: питати пул перед прогоном можна лише "
+                          "під'єднаній Нишпорці — nysh share login[/muted]")
+            return
         got = C.lookup(case_key, frames=frames)
     except Exception:
+        return
+    if got.get("need_key"):
+        console.print(f"  [muted]Супряга: {escape(str(got.get('why') or ''))}[/muted]")
         return
     if not got.get("found"):
         return
 
     modeli = ", ".join(str(m) for m in (got.get("models") or [])) or "невідомо чим"
     console.print(
-        f"  [bold]цю справу вже прочитали:[/bold] {got.get('pages')} стор. · "
-        f"{modeli} · {got.get('license') or '—'}"
+        f"  [bold]цю справу вже прочитали:[/bold] {escape(str(got.get('pages')))} стор. · "
+        f"{escape(modeli)} · {escape(str(got.get('license') or '—'))}"
     )
     if got.get("status") == "nove":
         console.print("  [muted]мітка «не перевірено» — текст ще не дивилась людина[/muted]")
-    console.print(f"  [muted]забрати: nysh share pull «{case_key}»[/muted]")
+    # Порада — зі ШИФРОЮ, яку знає пул, і без лапок-ялинок: shell передав би
+    # їх частиною запиту, і пошук не знайшов би нічого.
+    zapyt = str(got.get("shifra") or case_key)
+    console.print(f"  [muted]забрати: nysh share pull \"{escape(zapyt)}\" --take[/muted]")
 
 
 @app.command()
@@ -1492,15 +1514,12 @@ from nyshporka.train.cli import app as train_app  # noqa: E402
 
 app.add_typer(train_app, name="train")
 
-# 🤝 Обмін прочитаним між дослідниками. Секція та сама, що й у читання: пакет
-# несе рівно те, що дав рушій, і без прочитаного тут нема чого віддавати.
-#
-# 🔴 `hidden=True`, доки не запущено пул: у довідці команди немає, а сама вона
-# відмовляє без прапорця `NYSHPORKA_SUPRIAHA` (див. `share/cli.py`). Інакше
-# людина спакувала б і роздала пакет у форматі, який ще може змінитись.
+# 🤝 Обмін прочитаним між дослідниками (Супряга). Секція та сама, що й у
+# читання: пакет несе рівно те, що дав рушій, і без прочитаного тут нема чого
+# віддавати.
 from nyshporka.share.cli import app as share_app  # noqa: E402
 
-app.add_typer(share_app, name="share", hidden=True)
+app.add_typer(share_app, name="share")
 
 
 @cases_app.command("build")
