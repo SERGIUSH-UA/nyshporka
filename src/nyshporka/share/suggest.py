@@ -157,8 +157,14 @@ def nepodileni() -> list[dict[str, Any]]:
     vsi = S.list_cases()
     # Голоси однієї справи — окремі прогони, і рамки бувають не в кожному.
     progony: dict[str, list[str]] = {}
+    # 🔴 Сторінки справи — найповніший голос, а не перший-ліпший: Дяк читає
+    # не всі аркуші, і справа з повним Писарем ставала «неповною».
+    naibilshe: dict[str, int] = {}
     for row in vsi:
-        progony.setdefault(str(row.get("case_key") or ""), []).append(str(row.get("name") or ""))
+        k = str(row.get("case_key") or "")
+        progony.setdefault(k, []).append(str(row.get("name") or ""))
+        if not row.get("shared"):
+            naibilshe[k] = max(naibilshe.get(k, 0), int(row.get("pages_done") or 0))
     for row in vsi:
         key = str(row.get("case_key") or "")
         if not key or row.get("shared") or not row.get("pages_done"):
@@ -176,7 +182,7 @@ def nepodileni() -> list[dict[str, Any]]:
             # Текст у пулі, а рамок на диску немає (старі прогони без
             # рамок) — довозити нічого, і рядок висів би тут вічно.
             continue
-        pages = int(row.get("pages_done") or 0)
+        pages = naibilshe.get(key, int(row.get("pages_done") or 0))
         frames = int(row.get("frames") or 0)
         out.append({
             "case_key": key,

@@ -298,3 +298,14 @@ def test_synonimy_arkhivu(monkeypatch: Any) -> None:
     assert S._synonimy("DAVO") == ["DAVO", "DAVIO"]
     assert S._synonimy("DAVIO") == ["DAVIO", "DAVO"]
     assert S._synonimy("DAHMO") == ["DAHMO"]
+
+
+def test_storinky_spravy_z_naipovnishoho_holosu(space: Path, monkeypatch: Any) -> None:
+    """Дяк прочитав 10 аркушів, Писар — усі 89: справа готова, а не «неповна»."""
+    rows = [_ryadok("DAHMO/230-1/230", "ДАХмО 230-1-230", pages=10, frames=89,
+                    name="230-1-230-diak_v4"),
+            _ryadok("DAHMO/230-1/230", "ДАХмО 230-1-230", pages=89, frames=89,
+                    name="230-1-230")]
+    monkeypatch.setattr("nyshporka.htr_store.list_cases", lambda: rows)
+    got = S.nepodileni()
+    assert [(r["pages"], r["status"]) for r in got] == [(89, S.GOTOVA)]
