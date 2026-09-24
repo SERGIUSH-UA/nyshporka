@@ -182,7 +182,8 @@ def _case_block(scope_info: dict[str, Any], case_dir: Path | None) -> dict[str, 
     if types:
         out["record_types"] = types
     out.update(opys.sidecar_extras(side))
-    raw_years = [side.get("year_from"), side.get("year_to")]
+    raw_years = ([] if opys.sidecar_years_from_fs(side)
+                 else [side.get("year_from"), side.get("year_to")])
     years = [int(y) for y in raw_years
              if isinstance(y, (int, str)) and str(y).isdigit()]
     if years:
@@ -473,10 +474,9 @@ def build_manifest(scope: str, *,
         if types:
             case["record_types"] = types
     if row and not case.get("years"):
-        ry = [int(row[k]) for k in ("year_from", "year_to")
-              if str(row.get(k) or "").isdigit()]
+        ry = opys.trusted_registry_years(row)
         if ry:
-            case["years"] = [min(ry), max(ry)]
+            case["years"] = ry
     # 🔴 Картка людини — ОСТАННЬОЮ, поверх усього зібраного: паспорт і
     # реєстр — здогад пакувальника, а задане руками — рішення.
     kartka = {**K.get(key), **(card_fields or {})}

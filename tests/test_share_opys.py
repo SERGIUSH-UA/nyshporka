@@ -396,3 +396,24 @@ def test_opys_z_progoniv_ne_hadaie_pry_rozbizhnosti(monkeypatch: pytest.MonkeyPa
     info = {"rows": [{"name": "a", "case_key": "CDIAK/127-1078/1664"},
                      {"name": "b", "case_key": "CDIAK/127-1077/1664"}]}
     assert PUB._opys_z_progoniv(case, info) is case
+
+
+# ── роки з FamilySearch — нижня межа, не роки справи ─────────────────────────
+
+def test_roky_fs_z_reiestru_ne_berutsia() -> None:
+    assert opys.trusted_registry_years({"year_from": "1795", "year_to": "1795",
+                                        "years_src": "fs"}) == []
+    assert opys.trusted_registry_years({"year_from": "1811", "year_to": "1812",
+                                        "years_src": "duck"}) == [1811, 1812]
+    assert "year_from" not in opys.from_registry({"year_from": "1795", "years_src": "fs",
+                                                  "folios": "10"})
+
+
+def test_roky_pasporta_z_fs_indeksu_ne_berutsia(tmp_path: Path) -> None:
+    case_dir = tmp_path / "spr-1"
+    case_dir.mkdir()
+    (case_dir / "_source.json").write_text(json.dumps({
+        "shifra": "ДАХмО 315-1-8433", "year_from": 1795, "year_to": 1795,
+        "title": "FS-індекс (не звірено з титулкою): Confession Lists"}, ensure_ascii=False),
+        encoding="utf-8")
+    assert "years" not in PUB._case_block({"key": "DAHMO/315/8433"}, case_dir)

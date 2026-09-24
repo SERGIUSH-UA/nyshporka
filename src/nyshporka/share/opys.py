@@ -214,10 +214,34 @@ def from_registry(row: dict[str, Any] | None) -> dict[str, Any]:
     if not row:
         return {}
     out = {k: row[k] for k in REGISTRY_FIELDS if row.get(k) not in (None, "")}
+    if not trusted_registry_years(row):
+        out.pop("year_from", None)
+        out.pop("year_to", None)
     if not _registry_title(row):
         out.pop("title", None)
         out.pop("title_src", None)
     return out
+
+
+#: Джерела років, яким картка не вірить. Рік каталогу FamilySearch — нижня
+#: межа (найраніший документ у справі), а не роки справи: звірка з текстом
+#: на 42 справах ф.315 розійшлася в 28, і «1795» виявлялось 1842–1886.
+_UNTRUSTED_YEARS_SRC = frozenset({"fs"})
+
+
+def trusted_registry_years(row: dict[str, Any] | None) -> list[int]:
+    """Роки з реєстру опису — лише коли джерело не FamilySearch."""
+    if not row or str(row.get("years_src") or "") in _UNTRUSTED_YEARS_SRC:
+        return []
+    ys = [int(row[k]) for k in ("year_from", "year_to") if str(row.get(k) or "").isdigit()]
+    return [min(ys), max(ys)] if ys else []
+
+
+def sidecar_years_from_fs(side: dict[str, Any]) -> bool:
+    """Паспорт, чиї роки взято з індексу FamilySearch («FS-індекс (не звірено…)»)."""
+    if str(side.get("years_src") or "") in _UNTRUSTED_YEARS_SRC:
+        return True
+    return "fs-індекс" in str(side.get("title") or "").casefold()
 
 
 def _surname(entry: str) -> str:
