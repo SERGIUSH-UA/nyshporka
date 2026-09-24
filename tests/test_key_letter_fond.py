@@ -92,3 +92,18 @@ def test_fond_registry_key_with_letter_fond() -> None:
     assert parse_key("DAVIO/R-6129/24/5") == ("DAVIO", "R-6129", "24", "5", "")
     assert parse_key("ДАВіО Р-6129-24-5") == ("DAVIO", "R-6129", "24", "5", "")
     assert parse_key("DAHMO/230/43") == ("DAHMO", "230", "1", "43", "")
+
+
+@pytest.mark.parametrize("ref, spr, want", [
+    ("ЦДІАК, Фонд 127, Опис 1076, Справа 199-А, 507 арк.", "199", "199a"),
+    ("ДАХмО, Опис 1, Справа 84а", "84", "84a"),
+    ("ДАХмО, Опис 1, Справа 8433", "8433", "8433"),
+    ("Справа 199-А", "200", "200"),
+    ("Опис 1, Справа 12, 30 арк.", "12", "12"),
+    ("", "7", "7"),
+])
+def test_litera_spravy_z_repository_ref(ref: str, spr: str, want: str) -> None:
+    """id канону губить літеру (номер без літери при «Справа 199-А» в описі)."""
+    from nyshporka.library import _spr_from_ref
+
+    assert _spr_from_ref(ref, spr) == want

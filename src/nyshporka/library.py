@@ -1629,12 +1629,31 @@ def _opys_from_ref(ref: str | None) -> str | None:
     return m.group(1) if m else None
 
 
+_REF_SPR_RE = re.compile(r"(?:Справа|спр\.?)\s*(\d+)\s*-?\s*([^\W\d_])(?![^\W\d_])",
+                         re.IGNORECASE)
+
+
+def _spr_from_ref(ref: str | None, spr: str) -> str:
+    """Літерний індекс справи з `repository_ref`, коли id його загубив.
+
+    🔴 id канону без літери при «Справа 199-А» в `repository_ref` давав ключ
+    `CDIAK/127/199` — справу без літери, якої в описі немає. Той самий ключ
+    дістали прогони, і пакувальник не знаходив ні теки кадрів, ні паспорта.
+    Літера береться лише тоді, коли номер у `repository_ref` той самий.
+    """
+    m = _REF_SPR_RE.search(ref or "")
+    if not m or m.group(1) != str(spr):
+        return spr
+    return str(_norm_spr(f"{m.group(1)}{m.group(2)}"))
+
+
 def _source_to_entry(src: Source) -> CaseEntry | None:
     """Канонічне джерело → CaseEntry (тільки якщо id парситься як справа)."""
     parsed = parse_source_id(src.id)
     if not parsed:
         return None
     repo, fond, opys, spr = parsed
+    spr = _spr_from_ref(src.repository_ref, spr)
     opys = opys or _opys_from_ref(src.repository_ref) or _DEFAULT_OPYS.get((repo, fond))
     key = _mk_key(repo, fond, spr, opys)
     if not key:
