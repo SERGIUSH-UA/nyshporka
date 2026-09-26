@@ -333,6 +333,7 @@ def test_pidpysani_posylannia_ne_v_vidpovidi(monkeypatch: pytest.MonkeyPatch,
         raise httpx.ConnectError(f"cannot connect to {url}")
 
     monkeypatch.setattr(httpx, "put", _boom)
+    monkeypatch.setattr(upload, "PUT_PAUZY", (0.0, 0.0))
     with pytest.raises(upload.UploadError) as ei:
         upload._put("https://r2.example/b?X-Amz-" + "Signature=SEKRET", b"x")
     assert "SEKRET" not in str(ei.value)

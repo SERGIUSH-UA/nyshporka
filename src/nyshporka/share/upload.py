@@ -34,7 +34,21 @@ KEYRING_USER = "token"
 
 
 class UploadError(RuntimeError):
-    """Не вдалося віддати пакет. Текст призначений людині."""
+    """Не вдалося віддати пакет. Текст призначений людині.
+
+    `status` — код відповіді пулу, коли відмовив саме він. Порожній — до
+    сервера не дійшло або відмовило сховище.
+    """
+
+    def __init__(self, message: str, *, status: int | None = None) -> None:
+        super().__init__(message)
+        self.status = status
+
+
+#: Спроби PUT у сховище й паузи між ними. Решта запитів до пулу вже мала
+#: відступ на обрив, а заливання — найдовший і найкрихкіший із них — ні:
+#: один скинутий конект кидав зареєстрований внесок.
+PUT_PAUZY = (2.0, 5.0)
 
 
 def token() -> str:
@@ -69,7 +83,7 @@ def _request(method: str, url: str, *, body: Any = None, auth: str = "") -> dict
     except HttpError as exc:
         # Причина — з тіла відповіді: пул називає, котрі ворота не пустили
         # пакет, і голе «HTTP 400» людині нічого не каже.
-        raise UploadError(catalog.reason(exc)) from exc
+        raise UploadError(catalog.reason(exc), status=exc.status) from exc
     except catalog.PoolError as exc:
         raise UploadError(str(exc)) from exc
     text = resp.text if hasattr(resp, "text") else str(resp)
@@ -123,20 +137,60 @@ def publish(path: Path, *, base: str = "", auth: str = "") -> dict[str, Any]:
     if not upload.get("text") or not got.get("contribution"):
         raise UploadError("пул не видав посилання на заливання")
 
-    _put(upload["text"], path.read_bytes())
+    # 🔴 Від цього місця внесок уже зареєстровано, і будь-який збій лишає в
+    # пулі оболонку без байтів — ні в черзі, ні в каталозі. Байти йдуть у
+    # сховище повз сервер, тож сам він про обрив не дізнається ніколи: про
+    # це мусить сказати клієнт (`_zvit_pro_zbii`).
+    etap = "put_text"
+    try:
+        _put(upload["text"], path.read_bytes())
 
-    # Геометрія їде окремим об'єктом, і лише якщо пул її попросив: вона
-    # важить ×10 від тексту й лягає тільки тому, у кого ті самі кадри.
-    # 🔴 І лише свіжа: geom-файл від ПОПЕРЕДНЬОГО пакування цієї справи
-    # (див. `_geom_fresh`) прив'язаний до іншого тексту.
-    geom = bundle.geom_path(path)
-    if upload.get("geom") and _geom_fresh(path, geom):
-        _put(upload["geom"], geom.read_bytes())
+        # Геометрія їде окремим об'єктом, і лише якщо пул її попросив: вона
+        # важить ×10 від тексту й лягає тільки тому, у кого ті самі кадри.
+        # 🔴 І лише свіжа: geom-файл від ПОПЕРЕДНЬОГО пакування цієї справи
+        # (див. `_geom_fresh`) прив'язаний до іншого тексту.
+        geom = bundle.geom_path(path)
+        if upload.get("geom") and _geom_fresh(path, geom):
+            etap = "put_geom"
+            _put(upload["geom"], geom.read_bytes())
 
-    done = _request(
-        "POST", f"{home}/contributions/{got['contribution']}/complete", auth=tok
-    )
+        etap = "complete"
+        done = _request(
+            "POST", f"{home}/contributions/{got['contribution']}/complete", auth=tok
+        )
+    except UploadError as exc:
+        # Відмову самого пулу (ворота, стеля) сервер уже знає й записав.
+        if exc.status is None or exc.status >= 500:
+            _zvit_pro_zbii(home, tok, got["contribution"], etap, str(exc))
+        raise
+    except OSError as exc:
+        # Шлях до файлу в причину не йде: у ньому ім'я користувача машини.
+        _zvit_pro_zbii(home, tok, got["contribution"], etap,
+                       f"не прочитався файл пакета: {type(exc).__name__}")
+        raise UploadError(f"не прочитати пакет: {exc}") from exc
+    except KeyboardInterrupt:
+        _zvit_pro_zbii(home, tok, got["contribution"], etap, "перервано (Ctrl+C)")
+        raise
     return _public({**got, **done})
+
+
+def _zvit_pro_zbii(home: str, tok: str, vnesok: Any, etap: str, prychyna: str) -> None:
+    """Сказати пулу, що заливання впало. Навмання: одна спроба, без помилок.
+
+    🔴 Звіт не має права зробити збій гіршим — ні затримати людину на
+    повторах, ні підмінити справжню причину своєю. Старий пул цього маршруту
+    не знає (404), і це теж мовчки.
+    """
+    from nyshporka.sources.http import app_ua
+
+    try:
+        fetcher = catalog._fetcher(home, timeout=10.0, attempts=1, auth=tok,
+                                   accept_json=True)
+        fetcher.post(f"{home}/contributions/{vnesok}/failed", json_body={
+            "stage": etap, "error": prychyna[:500], "client": app_ua()})
+    except Exception:
+        # Звіт про збій сам не падає.
+        pass
 
 
 #: Чим закінчилась віддача — одне слово на всі обличчя.
@@ -266,19 +320,64 @@ def _put(url: str, blob: bytes) -> None:
     після обриву, коли перша спроба встигла дописати. Тоді далі йде
     `complete`, і сервер сам звірить те, що лежить, своїми воротами.
     """
+    import time
+
     import httpx
+
+    from nyshporka.sources.http import proxy_url
 
     headers: dict[str, str] = {}
     conditional = "if-none-match" in _signed_headers(url)
     if conditional:
         headers["If-None-Match"] = "*"
-    # 🔴 У тексті помилки немає адреси: це підписане посилання, і в
-    # повідомленні httpx воно стояло б цілим.
-    try:
-        resp = httpx.put(url, content=blob, headers=headers, timeout=300.0)
-    except httpx.HTTPError as exc:
-        raise UploadError(f"сховище не прийняло байти: {type(exc).__name__}") from None
-    if conditional and resp.status_code == 412:
+    ostannia = ""
+    for sproba in range(len(PUT_PAUZY) + 1):
+        if sproba:
+            time.sleep(PUT_PAUZY[sproba - 1])
+        try:
+            # 🔴 Через той самий проксі, що й решта запитів Нишпорки. Без
+            # нього в людини, якій мережа доступна лише тунелем, реєстрація
+            # проходила, а байти — ні.
+            resp = httpx.put(url, content=blob, headers=headers, timeout=300.0,
+                             proxy=proxy_url())
+        except httpx.TransportError as exc:
+            ostannia = f"{type(exc).__name__}: {_bez_posylannia(str(exc), url)}"
+            continue
+        except httpx.HTTPError as exc:
+            raise UploadError(f"сховище не прийняло байти: {type(exc).__name__}: "
+                              f"{_bez_posylannia(str(exc), url)}") from None
+        # 412 на повторі після обриву — перша спроба встигла дописати.
+        if conditional and resp.status_code == 412:
+            return
+        if resp.status_code >= 500:
+            ostannia = f"HTTP {resp.status_code}"
+            continue
+        if resp.status_code >= 400:
+            raise UploadError(f"сховище не прийняло байти: HTTP {resp.status_code}"
+                              + _kod_s3(resp))
         return
-    if resp.status_code >= 400:
-        raise UploadError(f"сховище не прийняло байти: HTTP {resp.status_code}")
+    raise UploadError(f"сховище не прийняло байти після {len(PUT_PAUZY) + 1} "
+                      f"спроб: {ostannia}")
+
+
+def _bez_posylannia(tekst: str, url: str) -> str:
+    """Причина збою без підписаного посилання.
+
+    🔴 Посилання дає право писати в сховище, а причина їде в журнали, у
+    `--json` і на сервер. Вирізається будь-яка адреса, а не лише ця: httpx
+    буває цитує її з іншими параметрами.
+    """
+    import re
+
+    return re.sub(r"https?://\S+", "<посилання>", tekst.replace(url, "<посилання>"))[:300]
+
+
+def _kod_s3(resp: Any) -> str:
+    """Код відмови S3 із тіла (`SignatureDoesNotMatch`, `AccessDenied`…)."""
+    import re
+
+    try:
+        found = re.search(r"<Code>([A-Za-z]+)</Code>", resp.text or "")
+    except Exception:
+        return ""
+    return f" ({found.group(1)})" if found else ""
