@@ -53,7 +53,7 @@ from nyshporka.sources.base import (
     SourceScope,
 )
 from nyshporka.sources.cfclient import CfClient, ShieldError
-from nyshporka.sources.http import DEFAULT_DELAY, Fetcher, HttpError
+from nyshporka.sources.http import Fetcher, HttpError
 from nyshporka.utils.atomic import atomic_write_bytes
 
 if TYPE_CHECKING:
@@ -68,6 +68,46 @@ PAGE_SIZE = 100
 
 #: Роздільність, яку віддає майданчик. Не параметр: число входить у підпис.
 MAX_SIDE_PX = 2000
+
+#: Темп сторінок каталогу — спільний на машину (`core.xrate`). Десять за
+#: пів хвилини, тобто в середньому запит на три секунди.
+#: 🔴 26–27.09.2026 серія запитів (обхід 515 справ і проби поспіль) завела
+#: адресу під відсіч Cloudflare, яка не минала годинами; разові запити між
+#: серіями проходили. Повільний рівний темп — дешевший за відсіч.
+RATE_KEY = "babynyar-pages"
+RATE_MAX = 10
+RATE_WINDOW = 30.0
+
+#: Скільки машина не стукає на майданчик після відсічі, що не минула.
+OKHOLODZHENNIA_SEC = 30 * 60
+
+
+def _okholodzhennia_file() -> Path:
+    from nyshporka.core.xrate import default_state_dir
+
+    return default_state_dir() / "babynyar-cooldown"
+
+
+def _okholodzhennia_do() -> _dt.datetime | None:
+    """До котрої години триває пауза після відсічі. `None` — паузи немає."""
+    try:
+        until = float(_okholodzhennia_file().read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        return None
+    import time
+
+    return _dt.datetime.fromtimestamp(until) if until > time.time() else None
+
+
+def _okholodyty() -> None:
+    import time
+
+    try:
+        f = _okholodzhennia_file()
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text(str(time.time() + OKHOLODZHENNIA_SEC), encoding="utf-8")
+    except OSError:
+        pass        # пауза — запобіжник, а не умова роботи
 
 
 # ── розбір розмітки ──────────────────────────────────────────────────────────
@@ -151,6 +191,53 @@ def table_rows(html: str, kind: str) -> list[tuple[str, list[str]]]:
         if cells:
             out.append((m.group(1), cells))
     return out
+
+
+_FUND_ARCH = re.compile(r'<a href="/archive/(\d+)">\s*([^<]+?)\s*</a>\s*<span>/</span>')
+_FUND_NO = re.compile(r'(?s)<p class="aside-title">\s*Фонд\s+(.+?)\s*</p>')
+_FUND_NAME = re.compile(r'(?s)<p class="aside-descr">(.*?)</p>')
+
+
+def fund_page(html: str) -> dict[str, Any] | None:
+    """Сторінка фонду → архів, номер, назва, роки й описи з числом справ.
+
+    🔴 Сторінка фонду — єдине, що досі каже про фонд УСЕ. Сторінка архіву
+    показує лише частину фондів (ДАМО: 25), а за прямою адресою живуть і
+    сховані: ф.484 (id 96), найбільша колекція метричних книг майданчика,
+    на сторінці архіву відсутня, а тут — з описом і 1491 справою.
+    `None` — розмітка не схожа на сторінку фонду.
+    """
+    arch = _FUND_ARCH.search(html)
+    no = _FUND_NO.search(html)
+    if not arch or not no:
+        return None
+    name = _FUND_NAME.search(html)
+    descs = []
+    roky: list[str] = []
+    for did, c in table_rows(html, "desc"):
+        roky += re.findall(r"\d{4}", c[2] if len(c) > 2 else "")
+        descs.append({"id": int(did), "number": c[0] if c else "",
+                      "annotation": c[1] if len(c) > 1 else "",
+                      "cases_count": _count(c[3]) if len(c) > 3 else None})
+    return {"number": _cell(no.group(1)), "name": _cell(name.group(1)) if name else "",
+            "archive": {"id": int(arch.group(1)), "short_name": _cell(arch.group(2))},
+            "start_date": min(roky) if roky else "", "end_date": max(roky) if roky else "",
+            "descriptions": descs}
+
+
+#: Індекс фондів майданчика, зібраний `tools/babynyar_funds.py` перебором
+#: сторінок фондів. Постачається з пакетом, бо сторінка архіву показує не всі.
+KNOWN_FUNDS = Path(__file__).parent / "data" / "babynyar_funds.json"
+
+
+@lru_cache(maxsize=1)
+def known_funds() -> tuple[dict[str, Any], ...]:
+    """Фонди з вшитого індексу. Порожньо — індексу в пакеті немає."""
+    try:
+        data = json.loads(KNOWN_FUNDS.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return ()
+    return tuple(f for f in (data.get("funds") or []) if isinstance(f, dict))
 
 
 def frame_urls(html: str) -> list[str]:
@@ -277,21 +364,41 @@ class BabynYarSource:
         """
         if self._pages_http is None:
             injected = self._client is not None
+            limiter = None
             if not injected:
+                from nyshporka.core.xrate import CrossProcessLimiter
                 from nyshporka.sources.http import proxy_url
 
                 self._client = CfClient(proxy=proxy_url())
-            self._pages_http = Fetcher(base=BASE, client=self._client,
-                                       delay=0.0 if injected else DEFAULT_DELAY)
+                # 🔴 Черга одна на машину, а не пауза на процес: CLI, демон і
+                # агент, кожен із чесною паузою, разом давали потрійний темп, а
+                # Cloudflare майданчика рахує по IP.
+                limiter = CrossProcessLimiter(RATE_KEY, max_events=RATE_MAX,
+                                              window=RATE_WINDOW)
+            self._pages_http = Fetcher(base=BASE, client=self._client, delay=0.0,
+                                       limiter=limiter)
         return self._pages_http
 
     def page(self, path: str) -> str:
         """HTML сторінки майданчика. Публічний навмисно: збирач реєстру читає
         ті самі переліки, і другий транспорт поруч розійшовся б із цим."""
         url = path if path.startswith("http") else f"{BASE}{path}"
+        pauza = _okholodzhennia_do() if self._client is None or \
+            isinstance(self._client, CfClient) else None
+        if pauza is not None:
+            raise SourceError(
+                f"«Бабин Яр» відсік запити з цієї машини — Нишпорка не стукає туди "
+                f"до {pauza:%H:%M}, щоб не продовжувати відсіч. Уже зібране "
+                f"(каталог, реєстри) працює як було.")
         try:
             r = self._cf().get(url)
-        except (ShieldError, HttpError) as exc:
+        except ShieldError as exc:
+            # Виклик не минув після всіх пауз: сервер просить зупинитись
+            # надовше. Кожна наступна спроба лише подовжує відсіч — тому пауза
+            # спільна для всіх процесів машини й пам'ятається між запусками.
+            _okholodyty()
+            raise SourceError(str(exc)) from exc
+        except HttpError as exc:
             raise SourceError(str(exc)) from exc
         return str(r.text)
 
@@ -358,6 +465,16 @@ class BabynYarSource:
                 "descriptions_count": _count(c[3]) if len(c) > 3 else None,
                 "archive": {"id": int(arch_id)},
             })
+        # 🔴 Сторінка архіву показує не всі фонди: решту дає вшитий індекс,
+        # зібраний перебором сторінок фондів. Без цього ДАМО ф.484 «не
+        # існувало б», хоч за прямою адресою він живий.
+        na_storintsi = {f["id"] for f in out}
+        for f in known_funds():
+            if str((f.get("archive") or {}).get("id")) == str(arch_id) and \
+                    f.get("id") not in na_storintsi:
+                out.append({**{k: v for k, v in f.items() if k != "descriptions"},
+                            "descriptions_count": len(f.get("descriptions") or []),
+                            "z_indeksu": True})
         self._arch_cache[arch_id] = (now, out)
         return out
 

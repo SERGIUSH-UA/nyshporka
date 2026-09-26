@@ -22,6 +22,14 @@ from nyshporka.sources.babynyar import (
 from nyshporka.sources.base import SourceError
 from nyshporka.sources.cfclient import challenged
 
+
+@pytest.fixture(autouse=True)
+def _bez_vshytoho_indeksu(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Двійники описують сайт самі — вшитий індекс фондів їх не доповнює."""
+    import nyshporka.sources.babynyar as B
+
+    monkeypatch.setattr(B, "known_funds", lambda: ())
+
 # ── зразки розмітки, зняті з живого майданчика 09.09.2026 ────────────────────
 
 # 🔴 26.09.2026 майданчик прибрав JSON-API: архіви, фонди й описи тепер
@@ -637,3 +645,125 @@ def test_fetch_skips_what_is_already_on_disk(tmp_path: Path) -> None:
                          media=_Media())
     res = src.fetch("case:26918", dest)
     assert (res.frames, res.skipped) == (1, 1)
+
+
+# ── сторінка фонду й вшитий індекс ───────────────────────────────────────────
+
+#: Розмітка живої `/archive/fund/96` 27.09.2026 (скорочено): ф.484 ДАМО, якого
+#: немає на сторінці архіву.
+FUND_96_HTML = """
+<div class="aside-nav"> <div class="aside-nav-item"> <a href="/archive/">Архів</a>
+<span>/</span> </div> <div class="aside-nav-item"> <a href="/archive/36">ДАМО</a>
+<span>/</span> </div> <div class="aside-nav-item"> Фонд 484 </div> </div>
+<p class="aside-title">Фонд 484</p>
+<p class="aside-descr"> Колекція метричних книг установ релігійних культів </p>
+""" + _table(_desc_row(218, "1", 1491).replace("1921 - 1940", "1804 - 1925"))
+
+
+def test_fund_page_says_everything_about_the_fund() -> None:
+    from nyshporka.sources.babynyar import fund_page
+
+    got = fund_page(FUND_96_HTML)
+    assert got is not None
+    assert (got["number"], got["archive"]) == ("484", {"id": 36, "short_name": "ДАМО"})
+    assert got["name"].startswith("Колекція метричних книг")
+    assert (got["start_date"], got["end_date"]) == ("1804", "1925")
+    assert got["descriptions"] == [{"id": 218, "number": "1", "annotation": "Опис №1",
+                                    "cases_count": 1491}]
+    assert fund_page("<html>не фонд</html>") is None
+
+
+def test_hidden_fund_comes_from_the_shipped_index(monkeypatch: pytest.MonkeyPatch) -> None:
+    """🔴 Сторінка архіву ДАМО не показує ф.484 — індекс повертає його."""
+    import nyshporka.sources.babynyar as B
+
+    monkeypatch.setattr(B, "known_funds", lambda: (
+        {"id": 96, "number": "484", "name": "Колекція метричних книг",
+         "archive": {"id": 36, "short_name": "ДАМО"}, "start_date": "1804",
+         "end_date": "1925", "descriptions": [{"id": 218, "number": "1"}]},
+        {"id": 207, "number": "R-6453", "name": "дубль видимого",
+         "archive": {"id": 34}, "descriptions": []},
+    ))
+    arch_36 = _table(_fond_row(95, "298", "Видимий фонд", "", 1))
+    src = BabynYarSource(client=_Cf({**TREE, "/archive/36": arch_36}))
+    assert [f["number"] for f in src.funds("36")] == ["298", "484"]
+    assert src.funds("36")[1]["z_indeksu"] is True
+    # Видимий на сторінці фонд із індексу не задвоюється.
+    assert [f["id"] for f in src.funds("34")] == [207, 999]
+
+
+def test_shipped_index_is_valid_if_present() -> None:
+    """Індекс у пакеті — справжні фонди з архівом і описами, без дублів."""
+    import json
+
+    from nyshporka.sources.babynyar import KNOWN_FUNDS
+
+    if not KNOWN_FUNDS.exists():
+        pytest.skip("індексу в пакеті немає")
+    funds = json.loads(KNOWN_FUNDS.read_text(encoding="utf-8"))["funds"]
+    assert funds, "порожній індекс — гірше за відсутній: виглядає як відповідь"
+    ids = [f["id"] for f in funds]
+    assert len(ids) == len(set(ids))
+    for f in funds:
+        assert f["number"] and (f.get("archive") or {}).get("id"), f
+
+
+# ── запобіжники темпу ────────────────────────────────────────────────────────
+
+def test_cooldown_after_a_challenge_that_did_not_pass(
+        monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """🔴 Відсіч, що не минула, — пауза для всієї машини, а не нова серія.
+
+    26–27.09.2026 повтори поспіль лише подовжували відсіч годинами.
+    """
+    import nyshporka.core.xrate as X
+    from nyshporka.sources.cfclient import CfClient, ShieldError
+
+    monkeypatch.setattr(X, "default_state_dir", lambda: tmp_path)
+
+    class _Shield(CfClient):
+        def __post_init__(self) -> None:
+            self.via = "curl"
+            self.asked = 0
+
+        def get(self, url: str) -> _R:  # type: ignore[override]
+            self.asked += 1
+            raise ShieldError("виклик не минув")
+
+    shield = _Shield()
+    src = BabynYarSource(client=shield)
+    with pytest.raises(SourceError):
+        src.page("/archive/")
+    assert (tmp_path / "babynyar-cooldown").exists()
+
+    # Другий виклик — навіть іншим процесом — у мережу не йде.
+    with pytest.raises(SourceError) as exc:
+        BabynYarSource(client=shield).page("/archive/36")
+    assert shield.asked == 1
+    assert "не стукає" in str(exc.value)
+
+
+def test_expired_cooldown_lets_requests_through(
+        monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    import time
+
+    import nyshporka.core.xrate as X
+    from nyshporka.sources import babynyar as B
+
+    monkeypatch.setattr(X, "default_state_dir", lambda: tmp_path)
+    (tmp_path / "babynyar-cooldown").write_text(str(time.time() - 1), encoding="utf-8")
+    assert B._okholodzhennia_do() is None
+
+
+def test_real_pages_share_one_machine_wide_queue(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Справжній транспорт іде крізь спільну чергу, а не власну паузу."""
+    from nyshporka.sources import babynyar as B
+
+    class _NoNet:
+        def __init__(self, **_kw: object) -> None:
+            pass
+
+    monkeypatch.setattr(B, "CfClient", _NoNet)
+    http = B.BabynYarSource()._cf()
+    assert http.limiter is not None and http.limiter.key == B.RATE_KEY
+    assert (http.limiter.max_events, http.delay) == (B.RATE_MAX, 0.0)

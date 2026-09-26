@@ -18,6 +18,14 @@ from nyshporka.fonds.collect.base import CollectError, Target
 from nyshporka.sources.babynyar import BabynYarSource
 
 
+@pytest.fixture(autouse=True)
+def _bez_vshytoho_indeksu(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Двійники описують сайт самі — вшитий індекс фондів їх не доповнює."""
+    import nyshporka.sources.babynyar as B
+
+    monkeypatch.setattr(B, "known_funds", lambda: ())
+
+
 def _collector(answers: dict[str, str], ws: Path | None = None) -> BabynYarCollector:
     return BabynYarCollector(ws, source=BabynYarSource(ws, client=_Cf(answers)))
 
@@ -176,3 +184,20 @@ def test_dry_run_writes_nothing(tmp_path: Path) -> None:
     _collector(ANSWERS, tmp_path).collect(
         Target(repo="DAHMO", fond="R-6453"), dest=tmp_path, dry_run=True)
     assert not (tmp_path / "babynyar.tsv").exists()
+
+
+def test_collect_finds_a_fund_hidden_from_the_archive_page(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """🔴 ДАМО ф.484 немає на сторінці архіву, але він живий — з індексу."""
+    import nyshporka.sources.babynyar as B
+
+    monkeypatch.setattr(B, "known_funds", lambda: (
+        {"id": 96, "number": "484", "name": "Колекція метричних книг",
+         "archive": {"id": 36}, "start_date": "1804", "end_date": "1925",
+         "descriptions": [{"id": 218, "number": "1"}]},))
+    answers = {"/archive/36": _table(""),          # сторінка архіву без ф.484
+               "/archive/fund/96": _fund_html(218, 1),
+               "/archive/desc/218": DAMO_CASES}
+    res = _collector(answers, tmp_path).collect(
+        Target(repo="DAMO", fond="484"), dest=tmp_path)
+    assert res.rows == 1
