@@ -272,3 +272,69 @@ def test_zvit_sam_ne_padaie(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(catalog, "_fetcher", _fetcher)
     upload._zvit_pro_zbii("https://nyshporka.online/v1", "k", 1, "put_text", "x")
+
+
+# ── share.pull і запит ключа ────────────────────────────────────────────────
+
+@pytest.mark.parametrize("znaideno, dali", [(0, []), (1, ["share.import"])])
+def test_pull_radyt_pryiniaty_lyshe_znaidene(monkeypatch: pytest.MonkeyPatch,
+                                             znaideno: int, dali: list[str]) -> None:
+    """🔴 Під нулем знахідок «прийняти знайдений пакет» посилає по неіснуюче."""
+    from nyshporka import ops as O
+    from nyshporka.share import catalog as C
+
+    rows = [C.Row(shifra="ДАХО 40-141-194", url="https://x/t", sha256="a" * 64)][:znaideno]
+    monkeypatch.setattr(C, "search", lambda *a, **k: (rows, len(rows), 1334))
+    env = O.call("share.pull", {"query": "Салтів"})
+    assert env.ok
+    assert [n.op for n in env.next] == dali
+
+
+class _Potik:
+    def __init__(self, tty: bool) -> None:
+        self._tty = tty
+
+    def isatty(self) -> bool:
+        return self._tty
+
+
+@pytest.mark.parametrize("stdin_tty, stdout_tty, pytaie", [
+    (True, False, False),    # Windows: NUL на вході видає себе за термінал
+    (False, True, False),
+    (True, True, True),
+])
+def test_kliuch_pytaie_lyshe_v_terminali(monkeypatch: pytest.MonkeyPatch, stdin_tty: bool,
+                                         stdout_tty: bool, pytaie: bool) -> None:
+    import sys
+
+    import typer
+
+    from nyshporka.share import cli as SC
+
+    pytano: list[str] = []
+    monkeypatch.setattr(upload, "token", lambda: "")
+    monkeypatch.setattr(sys, "stdin", _Potik(stdin_tty))
+    monkeypatch.setattr(sys, "stdout", _Potik(stdout_tty))
+    monkeypatch.setattr(typer, "confirm", lambda *a, **k: pytano.append("так") or False)
+    SC._kliuch_abo_vkhid(as_json=False)
+    assert bool(pytano) is pytaie
+
+
+def test_kliuch_bez_vidpovidi_ne_obryvaie(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Кінець вводу на запитанні — не «Aborted.», а далі до зрозумілої відмови."""
+    import sys
+
+    import click
+    import typer
+
+    from nyshporka.share import cli as SC
+
+    def _abort(*a: Any, **k: Any) -> bool:
+        raise click.exceptions.Abort()
+
+    monkeypatch.setattr(upload, "token", lambda: "")
+    monkeypatch.setattr(sys, "stdin", _Potik(True))
+    monkeypatch.setattr(sys, "stdout", _Potik(True))
+    monkeypatch.setattr(typer, "confirm", _abort)
+    monkeypatch.setattr(SC.console, "print", lambda *a, **k: None)
+    SC._kliuch_abo_vkhid(as_json=False)

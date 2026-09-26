@@ -752,8 +752,7 @@ class SharePullArgs(BaseModel):
 
 
 @op("share.pull", summary="Знайти справу в каталозі пулу",
-    args=SharePullArgs, mutates=True, agent=False, section=SECTION, private=True,
-    next_hints=(("share.import", "прийняти знайдений пакет"),))
+    args=SharePullArgs, mutates=True, agent=False, section=SECTION, private=True)
 def share_pull(a: SharePullArgs) -> Envelope:
     """Пошук по каталогу; з `take` — приймання, якщо збіг рівно один.
 
@@ -779,15 +778,21 @@ def share_pull(a: SharePullArgs) -> Envelope:
                             "count": count, "of": of,
                             "catalog": C.base_url(a.base)}
     env = ok(data)
+    # 🔴 Підказка «прийняти» — лише коли є що приймати і воно ще не прийняте.
+    # Статичною вона стояла й під нулем знахідок, і агент ішов приймати
+    # пакет, якого немає.
     if not found:
         env.warn("nothing", f"у пулі {of} пакетів, жоден не збігся "
                             f"з «{a.query}»")
         return env
+    if not a.take:
+        env.suggest("share.import", "прийняти знайдений пакет")
     if a.take:
         if len(found) != 1:
             env.warn("ambiguous",
                      f"збігів {len(found)} — прийняти можна лише однозначний; "
                      f"візьміть адресу потрібного рядка й: nysh share import <url>")
+            env.suggest("share.import", "прийняти потрібний рядок за його адресою")
             return env
         url = found[0].url
         if not url:

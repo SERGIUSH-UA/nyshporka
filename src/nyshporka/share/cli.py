@@ -418,12 +418,24 @@ def _kliuch_abo_vkhid(as_json: bool) -> None:
     """
     import sys
 
+    import click
+
     from nyshporka.share import upload
 
-    if (not upload.token() and not as_json and sys.stdin.isatty()
-            and typer.confirm("Нишпорка ще не під'єднана до Супряги. Під'єднати зараз?",
-                              default=True)):
-        _login(base_site="", open_browser=True)
+    # 🔴 Обидва потоки, а не лише stdin: на Windows пристрій `NUL` відповідає
+    # `isatty() = True`, а саме його агенти дають командам на вхід. Питання
+    # ішло в порожнечу, і команда обривалась голим «Aborted.» — агент читав
+    # це як завгодно, зокрема як «Супряга ще в розробці».
+    if upload.token() or as_json or not (sys.stdin.isatty() and sys.stdout.isatty()):
+        return
+    try:
+        if typer.confirm("Нишпорка ще не під'єднана до Супряги. Під'єднати зараз?",
+                         default=True):
+            _login(base_site="", open_browser=True)
+    except click.exceptions.Abort:
+        # Відповіді немає (кінець вводу чи Ctrl+C). Не обриваємось мовчки:
+        # далі операція сама скаже, що бракує ключа і як його дістати.
+        console.print()
 
 
 def _login(*, base_site: str, open_browser: bool) -> None:
