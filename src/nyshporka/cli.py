@@ -2747,24 +2747,39 @@ def skills_install(
     console.print(f"  [muted]видно агентові {where}; перезапустіть сесію[/muted]")
 
 
-mcp_app = typer.Typer(help="Підключення агента (Claude Code, Codex) через MCP — коротший шлях до того, що вміє `nysh op`.",
+mcp_app = typer.Typer(help="[застаріле, зникне в 0.19] MCP-сервер для агента. "
+                           "Агентові досить командного рядка: `nysh op <ім'я>` "
+                           "дістає всі операції.",
                       no_args_is_help=True)
 app.add_typer(mcp_app, name="mcp")
+
+#: 🔴 MCP показував менше половини операцій, і саме тих, що потрібні для
+#: віддачі в Супрягу, там не було: агент однаково йшов у командний рядок. Друга
+#: поверхня — друге місце, де інструкції розходяться з дійсністю.
+MCP_ZASTARILO = ("⚠ `nysh mcp` застаріло й зникне в 0.19. Агентові досить "
+                 "командного рядка: `nysh op <ім'я>` дістає всі операції.")
+
+
+def _mcp_zastarilo() -> None:
+    # stderr: у `mcp serve` stdout належить JSON-RPC.
+    err_console.print(f"[warn]{MCP_ZASTARILO}[/warn]")
 
 
 @mcp_app.command("serve")
 def mcp_serve() -> None:
-    """Підняти MCP-сервер по stdio (так його запускає агент)."""
+    """Підняти MCP-сервер по stdio (так його запускає агент). Застаріле."""
     from nyshporka.mcp import serve
 
+    _mcp_zastarilo()
     raise typer.Exit(code=serve())
 
 
 @mcp_app.command("tools")
 def mcp_tools() -> None:
-    """Що саме бачить агент."""
+    """Що саме бачить агент. Застаріле."""
     from nyshporka.mcp import tool_definitions
 
+    _mcp_zastarilo()
     defs = tool_definitions()
     for d in defs:
         console.print(f"  [bold]{d['name']:<22}[/bold] {d['description']}")
@@ -2776,11 +2791,12 @@ def mcp_install(
     target: str = typer.Option(".mcp.json", help="куди дописати конфіг"),
     show: bool = typer.Option(False, "--show", help="лише показати, не писати"),
 ) -> None:
-    """Прописати сервер у `.mcp.json` проєкту."""
+    """Прописати сервер у `.mcp.json` проєкту. Застаріле."""
     import json as _json
 
     from nyshporka.mcp import mcp_config
 
+    _mcp_zastarilo()
     cfg = mcp_config()
     if show:
         console.print_json(data=cfg)

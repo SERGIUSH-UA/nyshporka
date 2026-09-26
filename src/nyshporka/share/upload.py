@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -96,12 +97,17 @@ def _request(method: str, url: str, *, body: Any = None, auth: str = "") -> dict
     return got
 
 
-def publish(path: Path, *, base: str = "", auth: str = "") -> dict[str, Any]:
+def publish(path: Path, *, base: str = "", auth: str = "",
+            say: Callable[[str], None] | None = None) -> dict[str, Any]:
     """Віддати зібраний пакет у пул.
 
     Повертає відповідь сервера. Повторний виклик із тим самим змістом
     безпечний: пул упізнає його за хешем змісту й скаже `duplicate`, а не
     заведе другий внесок.
+
+    `say` — куди казати хід заливки. 🔴 Не прикраса: мовчазна заливка на
+    повільному каналі триває хвилини, і агент-помічник убивав її за
+    тайм-аутом свого інструмента як завислу — внесок лишався без байтів.
     """
     from nyshporka.share import bundle
 
@@ -141,9 +147,11 @@ def publish(path: Path, *, base: str = "", auth: str = "") -> dict[str, Any]:
     # пулі оболонку без байтів — ні в черзі, ні в каталозі. Байти йдуть у
     # сховище повз сервер, тож сам він про обрив не дізнається ніколи: про
     # це мусить сказати клієнт (`_zvit_pro_zbii`).
+    vnesok = got["contribution"]
+    kazhy = say or (lambda _: None)
     etap = "put_text"
     try:
-        _put(upload["text"], path.read_bytes())
+        _zalyty(upload["text"], path.read_bytes(), "текст", kazhy)
 
         # Геометрія їде окремим об'єктом, і лише якщо пул її попросив: вона
         # важить ×10 від тексту й лягає тільки тому, у кого ті самі кадри.
@@ -152,26 +160,61 @@ def publish(path: Path, *, base: str = "", auth: str = "") -> dict[str, Any]:
         geom = bundle.geom_path(path)
         if upload.get("geom") and _geom_fresh(path, geom):
             etap = "put_geom"
-            _put(upload["geom"], geom.read_bytes())
+            _zalyty(upload["geom"], geom.read_bytes(), "геометрію", kazhy)
 
         etap = "complete"
-        done = _request(
-            "POST", f"{home}/contributions/{got['contribution']}/complete", auth=tok
-        )
+        kazhy("пул перевіряє пакет…")
+        done = _request("POST", f"{home}/contributions/{vnesok}/complete", auth=tok)
     except UploadError as exc:
-        # Відмову самого пулу (ворота, стеля) сервер уже знає й записав.
+        # Відмову самого пулу (ворота, стеля) сервер уже знає й записав, і
+        # повтор тут не допоможе — тому й підказки повторити немає.
         if exc.status is None or exc.status >= 500:
-            _zvit_pro_zbii(home, tok, got["contribution"], etap, str(exc))
+            _zvit_pro_zbii(home, tok, vnesok, etap, str(exc))
+            raise UploadError(f"{exc}\n{_POVTORYTY.format(vnesok=vnesok)}",
+                              status=exc.status) from exc
         raise
     except OSError as exc:
         # Шлях до файлу в причину не йде: у ньому ім'я користувача машини.
-        _zvit_pro_zbii(home, tok, got["contribution"], etap,
+        _zvit_pro_zbii(home, tok, vnesok, etap,
                        f"не прочитався файл пакета: {type(exc).__name__}")
         raise UploadError(f"не прочитати пакет: {exc}") from exc
     except KeyboardInterrupt:
-        _zvit_pro_zbii(home, tok, got["contribution"], etap, "перервано (Ctrl+C)")
+        _zvit_pro_zbii(home, tok, vnesok, etap, "перервано (Ctrl+C)")
         raise
     return _public({**got, **done})
+
+
+#: Що робити після збою заливки — прямо в тексті помилки. 🔴 Вивід команди —
+#: єдине, що гарантовано читає будь-який агент: скіли стоять не в кожного.
+_POVTORYTY = ("Внесок {vnesok} уже заведено в пулі. Повторіть ту саму команду "
+              "пізніше — пул підхопить цей внесок, другого не створить.")
+
+#: Як часто казати «ще заливаю», поки PUT іде.
+PULS_S = 15.0
+
+
+def _zalyty(url: str, blob: bytes, shcho: str, say: Callable[[str], None]) -> None:
+    """PUT із ходом: розмір до, пульс під час, час після."""
+    import threading
+    import time
+
+    say(f"заливаю {shcho}: {len(blob) / (1 << 20):.1f} МБ…")
+    start = time.monotonic()
+    stop = threading.Event()
+
+    def _puls() -> None:
+        while not stop.wait(PULS_S):
+            say(f"…ще заливаю {shcho}, {time.monotonic() - start:.0f} с")
+
+    # Демон: убитий чи перерваний процес не мусить чекати на пульс.
+    puls = threading.Thread(target=_puls, daemon=True)
+    puls.start()
+    try:
+        _put(url, blob)
+    finally:
+        stop.set()
+        puls.join(timeout=1.0)
+    say(f"✓ {shcho} за {time.monotonic() - start:.0f} с")
 
 
 def _zvit_pro_zbii(home: str, tok: str, vnesok: Any, etap: str, prychyna: str) -> None:

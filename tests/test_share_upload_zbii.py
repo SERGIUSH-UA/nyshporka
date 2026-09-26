@@ -119,6 +119,56 @@ def test_zbii_put_ide_v_pul(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> 
                       "сховище не прийняло байти після 3 спроб: ReadTimeout")]
 
 
+def test_zbii_kazhe_shcho_robyty(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Вивід команди — єдине, що точно читає будь-який агент."""
+    paket, _ = _pidhotuvaty(monkeypatch, tmp_path)
+
+    def _put(url: str, blob: bytes) -> None:
+        raise upload.UploadError("сховище не прийняло байти після 3 спроб: ReadTimeout")
+
+    monkeypatch.setattr(upload, "_put", _put)
+    with pytest.raises(upload.UploadError) as ei:
+        upload.publish(paket, base="https://nyshporka.online/v1", auth="k")
+    assert "ReadTimeout" in str(ei.value)
+    assert "Внесок 1337" in str(ei.value) and "Повторіть ту саму команду" in str(ei.value)
+
+
+def test_khid_zalyvky(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    paket, _ = _pidhotuvaty(monkeypatch, tmp_path)
+    monkeypatch.setattr(upload, "_put", lambda url, blob: None)
+    khid: list[str] = []
+    upload.publish(paket, base="https://nyshporka.online/v1", auth="k", say=khid.append)
+    assert khid[0].startswith("заливаю текст:") and "МБ" in khid[0]
+    assert khid[1].startswith("✓ текст за")
+    assert khid[-1] == "пул перевіряє пакет…"
+
+
+def test_puls_poky_zalyvaie(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Довгий PUT не мовчить: агент бачить, що процес живий."""
+    import time
+
+    paket, _ = _pidhotuvaty(monkeypatch, tmp_path)
+    monkeypatch.setattr(upload, "PULS_S", 0.02)
+    monkeypatch.setattr(upload, "_put", lambda url, blob: time.sleep(0.2))
+    khid: list[str] = []
+    upload.publish(paket, base="https://nyshporka.online/v1", auth="k", say=khid.append)
+    assert any(r.startswith("…ще заливаю текст") for r in khid)
+
+
+def test_khid_u_stderr_json_chystyi(monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+                                    capsys: pytest.CaptureFixture[str]) -> None:
+    from nyshporka.ops_share import SharePublishArgs, share_publish
+
+    paket, _ = _pidhotuvaty(monkeypatch, tmp_path)
+    monkeypatch.setattr(upload, "_put", lambda url, blob: None)
+    monkeypatch.setenv(upload.ENV_NAME, "k")
+    env = share_publish(SharePublishArgs(path=str(paket), base="https://nyshporka.online/v1"))
+    assert env.ok
+    got = capsys.readouterr()
+    assert "заливаю текст" in got.err
+    assert got.out == "", "stdout належить JSON-конверту"
+
+
 def test_vidmova_pulu_ne_dubliuietsia(monkeypatch: pytest.MonkeyPatch,
                                       tmp_path: Path) -> None:
     """Ворота відмовили на `complete` — пул це вже знає, звіт зайвий."""
@@ -127,9 +177,10 @@ def test_vidmova_pulu_ne_dubliuietsia(monkeypatch: pytest.MonkeyPatch,
 
     paket, zvity = _pidhotuvaty(monkeypatch, tmp_path, complete=_vorota)
     monkeypatch.setattr(upload, "_put", lambda url, blob: None)
-    with pytest.raises(upload.UploadError):
+    with pytest.raises(upload.UploadError) as ei:
         upload.publish(paket, base="https://nyshporka.online/v1", auth="k")
     assert zvity == []
+    assert "Повторіть" not in str(ei.value), "відмову воріт повтор не виправить"
 
 
 def test_ctrl_c_tezh_ide_v_pul(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

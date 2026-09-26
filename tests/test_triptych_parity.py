@@ -382,6 +382,13 @@ def test_mcp_tools_command_lists_them():
     assert res.exit_code == 0 and "nysh_workspace_info" in res.stdout
 
 
+def test_mcp_zastarilo_kazhe_v_stderr():
+    """Застаріле, але працює; попередження — не в stdout, що належить JSON-RPC."""
+    res = runner.invoke(app, ["mcp", "tools"])
+    assert res.exit_code == 0
+    assert "застаріло" in res.stderr and "застаріло" not in res.stdout
+
+
 # ── конверт доїжджає до машинного читача цілим ──────────────────────────────
 @pytest.fixture
 def space(tmp_path, monkeypatch: pytest.MonkeyPatch):

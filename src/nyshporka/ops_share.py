@@ -407,12 +407,21 @@ def share_publish(a: SharePublishArgs) -> Envelope:
     Повторний виклик із тим самим змістом безпечний: пул упізнає його за
     хешем змісту й скаже «вже є», а не заведе другий внесок.
     """
+    import sys
     from pathlib import Path
 
     from nyshporka.share.upload import OUTCOME_TEXT, VIDDANO, UploadError, VZHE_Ye, publish
 
+    def _khid(tekst: str) -> None:
+        # stderr: stdout у `--json` читає програма, і рядок ходу зламав би розбір.
+        # 🔴 У пайпі агента на Windows stderr — cp1251/cp1252, а «✓» і «…» там
+        # немає: голий print валив би заливку на рядку про її хід.
+        enc = getattr(sys.stderr, "encoding", None) or "utf-8"
+        sys.stderr.write(tekst.encode(enc, "replace").decode(enc) + "\n")
+        sys.stderr.flush()
+
     try:
-        got = publish(Path(a.path), base=a.base)
+        got = publish(Path(a.path), base=a.base, say=_khid)
     except UploadError as exc:
         return fail(str(exc))
     env = ok(got)
