@@ -484,6 +484,15 @@ def plan(case_dir: str | Path, *, out_dir: str | Path = "", script: str = "",
         raise ReadError(f"теки немає: {case}")
     frames = count_frames(case)
     if not frames:
+        # 🔴 Справа з Commons приходить одним PDF, і `look` бачив «один PDF, 321
+        # стор.», а `read` казав «зображень немає» — людині лишалось розбирати
+        # PDF самій. Розгортаємо тут, у нумерації, яку доводить переглядач.
+        from nyshporka.htr import pdfpage
+
+        if pdfpage.case_pdfs(case):
+            pdfpage.vytiahnuty_kadry(case)
+            frames = count_frames(case)
+    if not frames:
         nested = _has_subdirs_with_frames(case)
         if nested:
             raise ReadError(

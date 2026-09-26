@@ -446,3 +446,11 @@ def test_a_refusal_reaches_the_machine_as_json_too(space) -> None:
     payload = json.loads(res.stdout)
     assert payload["ok"] is False
     assert "не розпізнав" in payload["error"]
+
+
+def test_mcp_zadovho_kazhe_shcho_robyty():
+    """Операція, що не вклалась, — не мовчання на пів години, а шлях у CLI."""
+    res = MCP._zadovho("nysh_search_run")
+    tekst = res["content"][0]["text"]
+    assert "search.run" in tekst and "nysh op" in tekst
+    assert json.loads(res["content"][-1]["text"])["ok"] is False

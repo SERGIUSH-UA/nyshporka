@@ -245,6 +245,15 @@ def build(case_dir: str | Path, *, backend: str = "ssh", target: str = "",
         raise PlanError(f"теки немає: {case}")
     frames = frames_in(case)
     if not frames:
+        # Та сама справа-PDF, що й у локальному читанні (`htr/run.py:plan`):
+        # розгортаємо в кадри тут, у доведеній нумерації. Вбудовані JPEG
+        # важать стільки ж, скільки сам PDF, тож заливка не роздувається.
+        from nyshporka.htr import pdfpage
+
+        if pdfpage.case_pdfs(case):
+            pdfpage.vytiahnuty_kadry(case)
+            frames = frames_in(case)
+    if not frames:
         nested = [d.name for d in case.iterdir()
                   if d.is_dir() and any(x.is_file() for x in d.iterdir())]
         if nested:

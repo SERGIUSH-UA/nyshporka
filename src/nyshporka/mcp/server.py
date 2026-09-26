@@ -99,6 +99,19 @@ def call_tool(name: str, arguments: dict[str, Any] | None = None) -> dict[str, A
     return _content(payload, env.as_agent_text(), image=image)
 
 
+#: Скільки агент чекає на одну операцію через MCP.
+MCP_TIMEOUT_S = 300.0
+
+
+def _zadovho(name: str) -> dict[str, Any]:
+    """Відповідь на операцію, що не вклалась у `MCP_TIMEOUT_S`."""
+    op_name = _op_name(name) or name
+    tekst = (f"операція «{op_name}» не вклалась у {MCP_TIMEOUT_S / 60:.0f} хв. "
+             f"Через командний рядок вона не обмежена часом: nysh op {op_name} "
+             f"--args '<json>'. MCP-сервер застарів і зникне в 0.19.")
+    return _content(json.dumps({"ok": False, "error": tekst}, ensure_ascii=False), tekst)
+
+
 def _pop_image(env: Any) -> tuple[str, str] | None:
     """Витягти `(base64, mime)` з відповіді, прибравши його з JSON.
 
@@ -192,7 +205,17 @@ def serve() -> int:
     @server.call_tool()
     async def _call(name: str, arguments: dict[str, Any]
                     ) -> list[TextContent | ImageContent]:
-        res = call_tool(name, arguments)
+        # 🔴 У потоці й зі стелею часу. Раніше операція йшла прямо в циклі
+        # подій: пошук, що застряг (26.09.2026 — «Помазуновский», 30 хв без
+        # відповіді), тримав увесь сервер, і агент чекав, поки не здасться
+        # його власний клієнт. Потік, що не вклався, покидається — Python не
+        # вміє його вбити, але відповідь агент отримує вчасно.
+        try:
+            with anyio.fail_after(MCP_TIMEOUT_S):
+                res = await anyio.to_thread.run_sync(
+                    call_tool, name, arguments, abandon_on_cancel=True)
+        except TimeoutError:
+            res = _zadovho(name)
         out: list[TextContent | ImageContent] = []
         for b in res["content"]:
             if b.get("type") == "image":

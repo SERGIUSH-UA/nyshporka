@@ -169,15 +169,39 @@ def publish(path: Path, *, base: str = "", auth: str = "",
     vnesok = got["contribution"]
     kazhy = say or (lambda _: None)
     etap = "put_text"
+    cherez_server = False
     try:
-        _zalyty(upload["text"], path.read_bytes(), "текст", kazhy)
+        tekst = path.read_bytes()
+        try:
+            _zalyty(upload["text"], tekst, "текст", kazhy)
+        except UploadError as exc:
+            if exc.klas not in _ZAPASNYI_KLASY:
+                raise
+            # 🔴 Сталий збій прямого шляху — пробуємо через сервер. Первинний
+            # збій звітується однаково: саме його код (403 і `<Message>`)
+            # каже, що зламано на шляху людини до сховища.
+            kazhy("пряме сховище недоступне — заливаю текст через сервер Супряги…")
+            try:
+                prijniato = _zalyty(f"{home}/contributions/{vnesok}/text", tekst,
+                                    "текст через сервер", kazhy,
+                                    put=lambda url, blob: _zapasnyi_put(url, blob, tok))
+            except UploadError as zapas:
+                raise UploadError(f"{exc}\nзапасний шлях через сервер теж не вдався: "
+                                  f"{zapas}", status=exc.status, klas=exc.klas,
+                                  chomu=exc.chomu) from exc
+            if not prijniato:
+                raise           # старий пул без запасного маршруту
+            _zvit_pro_zbii(home, tok, vnesok, etap, f"[{exc.klas}] {exc} → через сервер")
+            cherez_server = True
 
         # Геометрія їде окремим об'єктом, і лише якщо пул її попросив: вона
         # важить ×10 від тексту й лягає тільки тому, у кого ті самі кадри.
         # 🔴 І лише свіжа: geom-файл від ПОПЕРЕДНЬОГО пакування цієї справи
         # (див. `_geom_fresh`) прив'язаний до іншого тексту.
+        # 🔴 Запасним шляхом геометрія не їде: вона в десятки разів важча, і
+        # пряме сховище їй однаково недоступне.
         geom = bundle.geom_path(path)
-        if upload.get("geom") and _geom_fresh(path, geom):
+        if upload.get("geom") and _geom_fresh(path, geom) and not cherez_server:
             etap = "put_geom"
             _zalyty(upload["geom"], geom.read_bytes(), "геометрію", kazhy)
 
@@ -205,7 +229,55 @@ def publish(path: Path, *, base: str = "", auth: str = "",
     except KeyboardInterrupt:
         _zvit_pro_zbii(home, tok, vnesok, etap, "перервано (Ctrl+C)")
         raise
+    if cherez_server:
+        return _public({**got, **done, "via_server": True})
     return _public({**got, **done})
+
+
+#: Класи прямого збою, на які є сенс пробувати сервер: сталі, пов'язані з
+#: дорогою до сховища. Тимчасовий обрив — ні: його лікує повтор.
+_ZAPASNYI_KLASY = frozenset({"vidmova", "blokuvannia", "sertyfikat", "proksi"})
+
+
+def _zapasnyi_put(url: str, blob: bytes, tok: str) -> bool:
+    """PUT тексту на сервер пулу. `False` — старий пул маршруту не знає.
+
+    Три спроби на обрив, як у прямого PUT; відмову сервера не повторюємо.
+    """
+    import time
+
+    import httpx
+
+    from nyshporka.sources.http import app_ua, proxy_url
+
+    headers = {"Authorization": f"Bearer {tok}", "User-Agent": app_ua(),
+               "Content-Type": "application/octet-stream"}
+    ostannia = ""
+    for sproba in range(len(PUT_PAUZY) + 1):
+        if sproba:
+            time.sleep(PUT_PAUZY[sproba - 1])
+        try:
+            resp = httpx.put(url, content=blob, headers=headers, timeout=300.0,
+                             proxy=proxy_url())
+        except httpx.TransportError as exc:
+            ostannia = f"{type(exc).__name__}: {exc}"
+            continue
+        if resp.status_code in (404, 405):
+            return False
+        if resp.status_code >= 500:
+            ostannia = f"HTTP {resp.status_code}"
+            continue
+        if resp.status_code >= 400:
+            try:
+                detail = str(resp.json().get("detail") or "")
+            except Exception:
+                detail = ""
+            raise UploadError(f"сервер не прийняв текст: HTTP {resp.status_code}"
+                              + (f" — {detail}" if detail else ""),
+                              status=resp.status_code)
+        return True
+    raise UploadError(f"сервер не прийняв текст після {len(PUT_PAUZY) + 1} спроб: "
+                      f"{ostannia}")
 
 
 #: Що робити після збою заливки — прямо в тексті помилки. 🔴 Вивід команди —
@@ -221,8 +293,13 @@ _NE_POVTORYTY = ("Повтор тієї самої команди цього н�
 PULS_S = 15.0
 
 
-def _zalyty(url: str, blob: bytes, shcho: str, say: Callable[[str], None]) -> None:
-    """PUT із ходом: розмір до, пульс під час, час після."""
+def _zalyty(url: str, blob: bytes, shcho: str, say: Callable[[str], None],
+            put: Callable[[str, bytes], Any] | None = None) -> bool:
+    """PUT із ходом: розмір до, пульс під час, час після.
+
+    `put` повертає `False`, коли адресат шляху не знає (старий пул) — тоді й
+    тут `False`, і рядка «✓» немає.
+    """
     import threading
     import time
 
@@ -238,11 +315,13 @@ def _zalyty(url: str, blob: bytes, shcho: str, say: Callable[[str], None]) -> No
     puls = threading.Thread(target=_puls, daemon=True)
     puls.start()
     try:
-        _put(url, blob)
+        prijniato = (put or _put)(url, blob) is not False
     finally:
         stop.set()
         puls.join(timeout=1.0)
-    say(f"✓ {shcho} за {time.monotonic() - start:.0f} с")
+    if prijniato:
+        say(f"✓ {shcho} за {time.monotonic() - start:.0f} с")
+    return prijniato
 
 
 def _zvit_pro_zbii(home: str, tok: str, vnesok: Any, etap: str, prychyna: str) -> None:
@@ -487,11 +566,20 @@ def _bez_posylannia(tekst: str, url: str) -> str:
 
 
 def _kod_s3(resp: Any) -> str:
-    """Код відмови S3 із тіла (`SignatureDoesNotMatch`, `AccessDenied`…)."""
+    """Код і пояснення відмови S3 із тіла.
+
+    🔴 Лише коду мало. 26.09.2026 перша стороння людина отримувала 403 на
+    коректно підписане посилання, і розрізнити «підпис не зійшовся» (щось у
+    мережі змінило запит), «доступ заборонено» і «термін минув» можна лише
+    з `<Message>` — а 0.18.1 не показував навіть коду.
+    """
     import re
 
     try:
-        found = re.search(r"<Code>([A-Za-z]+)</Code>", resp.text or "")
+        tilo = resp.text or ""
     except Exception:
         return ""
-    return f" ({found.group(1)})" if found else ""
+    kod = re.search(r"<Code>([^<]{1,64})</Code>", tilo)
+    poiasnennia = re.search(r"<Message>([^<]{1,300})</Message>", tilo)
+    chastyny = [c.group(1).strip() for c in (kod, poiasnennia) if c]
+    return f" ({': '.join(chastyny)})" if chastyny else ""

@@ -26,6 +26,7 @@ import io
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 #: Ширина рендера. Сегментація рахувалась на кадрах приблизно такого розміру;
 #: дрібніше — не видно скоропису, більше — не додає читабельності, лише ваги.
@@ -144,6 +145,65 @@ def mapping(case_dir: Path, frames: list[str],
             f"сторінок у PDF {sum(counts)}, а кадрів у справі {expect} — "
             f"це різний матеріал або інший рендер; показувати не буду")
     return Mapping(pdfs=tuple(pdfs), counts=tuple(counts), frames=expect)
+
+
+def vytiahnuty_kadry(case_dir: Path, width: int = DEFAULT_WIDTH) -> int:
+    """Розгорнути PDF справи в кадри `0001.jpg…` поруч. Повертає, скільки записано.
+
+    🔴 Нумерація — рівно та, що доводить `mapping`: щільна `1..N` підряд по
+    файлах, відсортованих за іменем. Інакше переглядач показав би не той
+    аркуш проти прочитаного.
+
+    Сторінка-скан із ОДНИМ вбудованим JPEG віддає його байти як є — без
+    перестиснення, тобто без втрати дрібного скоропису; інша сторінка
+    рендериться на `width` пікселів. Наявні кадри не переписуються: обірване
+    розгортання дочитується, а не починається наново.
+    """
+    import pypdfium2 as pdfium
+
+    from nyshporka.utils.atomic import atomic_write_bytes
+
+    pdfs = case_pdfs(case_dir)
+    if not pdfs:
+        return 0
+    total = sum(page_counts(pdfs))
+    digits = max(4, len(str(total)))
+    zapysano = 0
+    no = 0
+    for path in pdfs:
+        doc = pdfium.PdfDocument(str(path))
+        try:
+            for index in range(len(doc)):
+                no += 1
+                dest = case_dir / f"{no:0{digits}d}.jpg"
+                if dest.exists():
+                    continue
+                atomic_write_bytes(dest, _storinka_jpeg(doc[index], width))
+                zapysano += 1
+        finally:
+            doc.close()
+    return zapysano
+
+
+def _storinka_jpeg(page: Any, width: int) -> bytes:
+    """JPEG сторінки: вбудований як є, коли він там один, інакше рендер."""
+    import pypdfium2 as pdfium
+
+    images = list(page.get_objects(filter=[pdfium.raw.FPDF_PAGEOBJ_IMAGE],
+                                   max_depth=1))
+    if len(images) == 1:
+        try:
+            if images[0].get_filters() == ["DCTDecode"]:
+                raw = bytes(images[0].get_data(decode_simple=True))
+                if raw[:2] == b"\xff\xd8":
+                    return raw
+        except Exception:
+            pass    # незвичний образ — рендер нижче впорається
+    scale = max(0.5, min(6.0, width / max(1.0, page.get_width())))
+    pil = page.render(scale=scale).to_pil()
+    buf = io.BytesIO()
+    pil.convert("RGB").save(buf, format="JPEG", quality=92)
+    return buf.getvalue()
 
 
 def render(case_dir: Path, frames: list[str], page: str,

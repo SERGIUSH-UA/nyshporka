@@ -249,7 +249,10 @@ class BabynYarSource:
         self._client = client
         self._pages_http: Fetcher | None = None
         #: (коли взято, перелік) — див. `_all_funds`.
-        self._funds_cache: tuple[float, list[dict[str, Any]]] | None = None
+        self._archives_cache: tuple[float, list[dict[str, Any]]] | None = None
+        self._arch_cache: dict[str, tuple[float, list[dict[str, Any]]]] = {}
+        self._desc_cache: dict[str, list[dict[str, Any]]] = {}
+        self._desc_counts: dict[str, int | None] = {}
         self.media = media or Fetcher(base="https://media.babynyar.org")
 
     # ── транспорт ────────────────────────────────────────────────────────────
@@ -292,85 +295,109 @@ class BabynYarSource:
             raise SourceError(str(exc)) from exc
         return str(r.text)
 
-    def _api(self, path: str) -> dict[str, Any]:
-        try:
-            data = json.loads(self.page(path))
-        except ValueError as exc:
-            raise SourceError(f"{path}: відповідь не є JSON — {exc}") from exc
-        return data if isinstance(data, dict) else {}
-
     # ── дерево ───────────────────────────────────────────────────────────────
 
     def archives(self) -> list[dict[str, Any]]:
-        """Перелік архівів майданчика.
+        """Перелік архівів майданчика — з карток сторінки `/archive/`.
 
-        ⚠ Скорочення тут неоднозначні за побудовою: «ДАЧО» на цьому сайті
-        носять ТРИ різні архіви (Черкаської, Чернігівської й Чернівецької
-        областей), «ДАКО» — два, «ДАХО» — два. Розрізняє їх лише числовий `id`,
-        і саме він, а не скорочення, зшивається з нашим кодом архіву.
-        """
-        data = self._api("/api/archive/archives/?page_size=100")
-        rows = data.get("results")
-        return list(rows) if isinstance(rows, list) else []
+        ⚠ Скорочень сторінка більше не віддає, лише повну назву. Це не втрата:
+        скорочення тут і так були неоднозначні («ДАЧО» носили три різні
+        архіви), а зшивається з нашим кодом архіву числовий `id`.
 
-    def funds(self, archive_id: str = "") -> list[dict[str, Any]]:
-        """Усі фонди майданчика разом з описами — сторінками по 100.
-
-        🔴 Саме API, а не сторінка «фонди архіву». Та сторінка ГОРТАЄТЬСЯ, і
-        перший аркуш віддає лише частину: для ДАМО — 75 фондів із 97, і серед
-        відрізаних була ф.484, тобто найбільша колекція метричних книг на
-        майданчику. Збирач, який читав ту сторінку, чесно казав «такого фонду
-        тут немає» — відповідь, що закриває напрям пошуку назавжди.
-
-        ⚠ `archive_id` відсіюється ТУТ, на розібраних рядках: параметр
-        `?archive=` сервер приймає й ігнорує (`total` не змінюється), тож
-        звуження запитом було б удаваним.
-        """
-        want = str(archive_id or "").strip()
-        return [r for r in self._all_funds()
-                if not want or str((r.get("archive") or {}).get("id")) == want]
-
-    #: Скільки живе перелік фондів на екземплярі. Не нуль і не вічність.
-    FUNDS_TTL_SEC = 600.0
-
-    def _all_funds(self) -> list[dict[str, Any]]:
-        """Увесь перелік фондів — один раз на екземпляр, а не на кожен запит.
-
-        🔴 Кеш тут не про швидкість, а про доступ. Перелік — 7 сторінок API, і
-        перегляд архіву плюс збирання фонду брали їх двічі поспіль; заміряно
-        09.09.2026: Cloudflare показав сторінку-виклик саме на другому проході,
-        посеред збирача. Кожен зайвий запит тут наближає відсічку.
-
-        ⚠ Із терміном, а не назавжди: у живому демоні екземпляр джерела живе
-        годинами, і вічний кеш ховав би фонди, які майданчик виклав після
-        старту, — той самий клас, що вже лікували на паку архівів.
+        🔴 26.09.2026 майданчик прибрав JSON-API (`/api/archive/…` → 404), і
+        `nysh crawl babynyar` падав на першому ж запиті. Дерево тепер
+        розбирається зі сторінок, як уже розбирались справи й кадри.
         """
         import time
 
         now = time.monotonic()
-        if self._funds_cache is not None and now - self._funds_cache[0] < self.FUNDS_TTL_SEC:
-            return self._funds_cache[1]
-        out: list[dict[str, Any]] = []
-        page = 1
-        while True:
-            data = self._api(f"/api/archive/funds/?page={page}&page_size={PAGE_SIZE}")
-            rows = data.get("results") or []
-            out += [r for r in rows if isinstance(r, dict)]
-            if not data.get("page_next") or not rows:
-                break
-            page += 1
-        self._funds_cache = (now, out)
+        if self._archives_cache is not None and now - self._archives_cache[0] < self.FUNDS_TTL_SEC:
+            return self._archives_cache[1]
+        cards = re.findall(r'(?s)class="archive-card"[^>]*>\s*<a href="/archive/(\d+)"[^>]*>(.*?)</a>',
+                           self.page("/archive/"))
+        out = [{"id": int(aid), "name": _cell(name), "short_name": ""} for aid, name in cards]
+        self._archives_cache = (now, out)
         return out
+
+    def funds(self, archive_id: str = "") -> list[dict[str, Any]]:
+        """Фонди майданчика; з `archive_id` — лише цього архіву (одна сторінка).
+
+        Описи сюди не входять: вони лежать на сторінці фонду, і тягнути їх
+        для кожного фонду заради переліку означало б сотні зайвих запитів
+        (див. `descriptions`).
+        """
+        want = str(archive_id or "").strip()
+        if want:
+            return self._arch_funds(want)
+        return self._all_funds()
+
+    #: Скільки живе перелік фондів на екземплярі. Не нуль і не вічність.
+    FUNDS_TTL_SEC = 600.0
+
+    def _arch_funds(self, arch_id: str) -> list[dict[str, Any]]:
+        """Таблиця фондів сторінки архіву: номер, назва, дати, скільки описів.
+
+        ⚠ Гортання сторінка не має (`?page=` ігнорується), а числа фондів для
+        звірки майданчик більше не дає. Тож «фонду тут немає» — це «немає на
+        сторінці архіву», і збирач так і каже (див. `fonds/collect/babynyar`).
+        """
+        import time
+
+        now = time.monotonic()
+        got = self._arch_cache.get(arch_id)
+        if got is not None and now - got[0] < self.FUNDS_TTL_SEC:
+            return got[1]
+        out: list[dict[str, Any]] = []
+        for fid, c in table_rows(self.page(f"/archive/{arch_id}"), "fond"):
+            roky = re.findall(r"\d{4}", c[2] if len(c) > 2 else "")
+            out.append({
+                "id": int(fid), "number": c[0] if c else "",
+                "name": c[1] if len(c) > 1 else "",
+                "start_date": roky[0] if roky else "",
+                "end_date": roky[-1] if roky else "",
+                "descriptions_count": _count(c[3]) if len(c) > 3 else None,
+                "archive": {"id": int(arch_id)},
+            })
+        self._arch_cache[arch_id] = (now, out)
+        return out
+
+    def _all_funds(self) -> list[dict[str, Any]]:
+        """Фонди всіх архівів — сторінка на архів, один раз на екземпляр.
+
+        🔴 Кеш тут не про швидкість, а про доступ: майданчик за Cloudflare, і
+        09.09.2026 сторінка-виклик з'явилась саме на другому проході поспіль.
+        """
+        out: list[dict[str, Any]] = []
+        for a in self.archives():
+            out += self._arch_funds(str(a["id"]))
+        return out
+
+    def descriptions(self, fund_id: str) -> list[dict[str, Any]]:
+        """Описи фонду зі сторінки фонду — разом із числом справ у кожному.
+
+        Число справ — той самий знаменник, що давав API (`cases_count`), тільки
+        тепер з таблиці фонду: одним запитом на фонд, а не на опис.
+        """
+        fid = str(fund_id)
+        if fid not in self._desc_cache:
+            rows = []
+            for did, c in table_rows(self.page(f"/archive/fund/{fid}"), "desc"):
+                count = _count(c[3]) if len(c) > 3 else None
+                rows.append({"id": int(did), "number": c[0] if c else "",
+                             "annotation": c[1] if len(c) > 1 else "",
+                             "cases_count": count})
+                self._desc_counts[str(did)] = count
+            self._desc_cache[fid] = rows
+        return self._desc_cache[fid]
 
     def cases_count(self, desc_id: str) -> int | None:
         """Скільки справ в описі за словами САМОГО майданчика.
 
-        🔴 Знаменник для звірки розбору. Сторінка опису віддає таблицю без
-        пагінації, але довести це можна лише числом із іншого каналу — інакше
-        обрізаний перелік виглядав би як повний фонд.
+        🔴 Знаменник для звірки розбору: обрізаний перелік інакше виглядав би
+        як повний опис. Береться з таблиці фонду, яку вже прочитав
+        `descriptions`; якщо фонд не читали — `None`, а не зайвий запит.
         """
-        got = self._api(f"/api/archive/descriptions/{desc_id}/").get("cases_count")
-        return int(got) if isinstance(got, int) else None
+        return self._desc_counts.get(str(desc_id))
 
     def repo_for(self, arch_id: object) -> str:
         """Наш код архіву за числовим id майданчика. Порожньо — не знаємо.
@@ -394,16 +421,10 @@ class BabynYarSource:
                          label=f"ф.{f.get('number', '')} · {f.get('name', '')}"[:160])
                     for f in self.funds(ident)]
         if kind == "fond":
-            out: list[Node] = []
-            for f in self.funds():
-                if str(f.get("id")) != str(ident):
-                    continue
-                out += [Node(ref=f"desc:{d.get('id')}",
-                             label=f"оп.{d.get('number', '')} · "
-                                   f"{d.get('annotation', '')}"[:160])
-                        for d in (f.get("descriptions") or [])]
-                break
-            return out
+            return [Node(ref=f"desc:{d.get('id')}",
+                         label=f"оп.{d.get('number', '')} · "
+                               f"{d.get('annotation', '')}"[:160])
+                    for d in self.descriptions(ident)]
         if kind == "desc":
             cases: list[Node] = []
             for cid, c in table_rows(self.page(f"/archive/desc/{ident}"), "case"):
@@ -559,14 +580,19 @@ class BabynYarSource:
         done: set[str] = {str(d) for d in (state.get("descs_done") or [])}
         short: dict[str, list[int]] = dict(state.get("descs_short") or {})
         want = {str(g).strip() for g in (groups or ()) if str(g).strip()}
-        funds = [f for f in self.funds()
-                 if not want or str((f.get("archive") or {}).get("id")) in want]
+        if want:
+            # Лише сторінки названих архівів, а не всього майданчика: кожен
+            # зайвий запит наближає виклик Cloudflare.
+            known_ids = {str(a.get("id")) for a in self.archives()}
+            funds = [f for aid in sorted(want & known_ids) for f in self._arch_funds(aid)]
+        else:
+            funds = self.funds()
         if want and not funds:
             raise SourceError(
                 f"на майданчику немає архівів з id {sorted(want)} — перелік "
                 f"дає `nysh browse {self.id}`. ⚠ Тут потрібен саме id: під одним "
                 f"скороченням («ДАЧО») стоять три різні архіви.")
-        plan = [(f, d) for f in funds for d in (f.get("descriptions") or [])]
+        plan = [(f, d) for f in funds for d in self.descriptions(str(f.get("id")))]
         stats = {"archives": len({str((f.get("archive") or {}).get("id"))
                                   for f in funds}),
                  "fonds": len(funds), "inventories": 0, "cases": 0,

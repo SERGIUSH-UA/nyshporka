@@ -59,8 +59,22 @@ class CommonsSource:
         self.http = fetcher or Fetcher(base=BASE, headers={"User-Agent": app_ua()})
 
     def _name(self, ref: str) -> str:
-        kind, _, ident = ref.partition(":")
-        if kind != "file" or not ident:
+        # 🔴 Регістр і мова простору імен — як люди їх приносять: `File:` у
+        # полі link_commons Вікіджерел, `Файл:` в українських вікі, повна
+        # адреса сторінки з браузера. Вимога рівно `file:` відмовляла саме
+        # тому, хто скопіював назву звідти, де вона стоїть.
+        from urllib.parse import unquote
+
+        tekst = unquote(ref.strip())
+        for prefix in ("https://commons.wikimedia.org/wiki/",
+                       "http://commons.wikimedia.org/wiki/"):
+            if tekst.lower().startswith(prefix):
+                tekst = tekst[len(prefix):]
+        kind, _, ident = tekst.partition(":")
+        # `_` не міняємо на пробіл: з назви складається ім'я файлу на диску,
+        # і завантажене раніше мусить упізнаватись. Commons приймає обидва.
+        ident = ident.strip()
+        if kind.strip().lower() not in ("file", "файл") or not ident:
             raise SourceError(
                 f"незрозуміла адреса: {ref!r} — тут очікується "
                 f"`file:<назва файлу на Commons>`")

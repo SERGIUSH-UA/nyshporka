@@ -438,6 +438,10 @@ def share_publish(a: SharePublishArgs) -> Envelope:
                         "той самий пакет пізніше — внесок уже заведено, другого не буде")
         return env
     env = ok(got)
+    if got.get("via_server"):
+        env.warn("via_server",
+                 "пряме сховище з цієї мережі недоступне — текст залито через "
+                 "сервер Супряги; геометрію (рамки рядків) не залито")
     vyhid = str(got.get("outcome") or "")
     if vyhid == VZHE_Ye and not got.get("geometry_attached"):
         env.warn("duplicate", "цей текст уже в пулі — нічого не заливалось")

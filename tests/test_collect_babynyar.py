@@ -4,7 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from test_sources_babynyar import CASES_HTML, COUNT_API, FUNDS_API, _Cf
+from test_sources_babynyar import CASES_HTML, TREE, _Cf, _fond_row, _fund_html, _table
 
 from nyshporka.fonds.collect import tsv as T
 from nyshporka.fonds.collect.babynyar import (
@@ -22,9 +22,7 @@ def _collector(answers: dict[str, str], ws: Path | None = None) -> BabynYarColle
     return BabynYarCollector(ws, source=BabynYarSource(ws, client=_Cf(answers)))
 
 
-ANSWERS = {"/api/archive/funds/": FUNDS_API,
-           "/api/archive/descriptions/401/": COUNT_API,
-           "/archive/desc/401": CASES_HTML}
+ANSWERS = {**TREE, "/archive/desc/401": CASES_HTML}
 
 
 # ── розбір полів ─────────────────────────────────────────────────────────────
@@ -126,8 +124,7 @@ def test_collect_says_when_the_opys_gave_fewer_cases_than_promised(
     assert not any(b.kind == "capped" for b in res.blind), (
         "3 рядки таблиці проти обіцяних 3 — обрізання тут немає")
 
-    short = dict(ANSWERS, **{"/api/archive/descriptions/401/":
-                             '{"id": 401, "cases_count": 240}'})
+    short = {**ANSWERS, "/archive/fund/207": _fund_html(401, 240)}
     res2 = _collector(short, tmp_path).collect(
         Target(repo="DAHMO", fond="R-6453"), dest=tmp_path)
     capped = [b for b in res2.blind if b.kind == "capped"]
@@ -151,11 +148,7 @@ def test_a_year_outside_the_fond_is_named_not_trusted() -> None:
         "", "", [1996])
 
 
-DAMO_FUNDS = ('{"total": 1, "page_next": null, "results": [{"id": 96, '
-              '"number": "484", "name": "Колекція метричних книг", '
-              '"start_date": "1804", "end_date": "1925", '
-              '"descriptions": [{"id": 218, "number": "1"}], '
-              '"archive": {"id": 36, "short_name": "ДАМО"}}]}')
+DAMO_ARCHIVE = _table(_fond_row(96, "484", "Колекція метричних книг", "1804 - 1925", 1))
 
 DAMO_CASES = """<table><tbody>
 <tr><td>472</td><td><a href="/archive/case/80472">Метрична книга: Церква св.
@@ -166,9 +159,9 @@ DAMO_CASES = """<table><tbody>
 
 def test_collect_names_the_years_outside_the_fond(tmp_path: Path) -> None:
     """Збирач звіряє рік справи з межами фонду, які декларує сам архів."""
-    answers = {"/api/archive/funds/": DAMO_FUNDS,
-               "/api/archive/descriptions/218/": '{"id": 218, "cases_count": 1}',
-               "/archive/desc/218": DAMO_CASES}
+    answers = {"/archive/fund/96": _fund_html(218, 1),
+               "/archive/desc/218": DAMO_CASES,
+               "/archive/36": DAMO_ARCHIVE}
     res = _collector(answers, tmp_path).collect(
         Target(repo="DAMO", fond="484"), dest=tmp_path)
     _, rows = T.read_tsv(tmp_path / "babynyar.tsv")

@@ -338,3 +338,69 @@ def test_kliuch_bez_vidpovidi_ne_obryvaie(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setattr(typer, "confirm", _abort)
     monkeypatch.setattr(SC.console, "print", lambda *a, **k: None)
     SC._kliuch_abo_vkhid(as_json=False)
+
+
+# ── 403: діагностика й запасний шлях через сервер ───────────────────────────
+
+def test_kod_s3_z_poiasnenniam() -> None:
+    resp = httpx.Response(403, text=(
+        "<Error><Code>SignatureDoesNotMatch</Code><Message>The request signature "
+        "we calculated does not match</Message></Error>"))
+    assert upload._kod_s3(resp) == (
+        " (SignatureDoesNotMatch: The request signature we calculated does not match)")
+
+
+def _vidmova_403(url: str, blob: bytes) -> None:
+    raise upload.UploadError("сховище не прийняло байти: HTTP 403 (AccessDenied: Access Denied)",
+                             klas=upload.VIDMOVA, chomu="сховище відхилило заливку")
+
+
+def test_403_ide_cherez_server(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    paket, zvity = _pidhotuvaty(monkeypatch, tmp_path)
+    monkeypatch.setattr(upload, "_put", _vidmova_403)
+    cherez: list[str] = []
+    monkeypatch.setattr(upload, "_zapasnyi_put",
+                        lambda url, blob, tok: cherez.append(url) or True)
+    khid: list[str] = []
+    got = upload.publish(paket, base="https://nyshporka.online/v1", auth="k", say=khid.append)
+    assert got["via_server"] is True
+    assert cherez == ["https://nyshporka.online/v1/contributions/1337/text"]
+    assert any("через сервер" in r for r in khid)
+    assert zvity and "AccessDenied" in zvity[0][2], "код 403 мусить дійти до розробника"
+
+
+def test_staryi_pul_bez_zapasnoho(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    paket, _ = _pidhotuvaty(monkeypatch, tmp_path)
+    monkeypatch.setattr(upload, "_put", _vidmova_403)
+    monkeypatch.setattr(upload, "_zapasnyi_put", lambda url, blob, tok: False)
+    with pytest.raises(upload.UploadError) as ei:
+        upload.publish(paket, base="https://nyshporka.online/v1", auth="k")
+    assert "AccessDenied" in str(ei.value) and "цього не виправить" in str(ei.value)
+
+
+def test_tymchasovyi_bez_zapasnoho(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    paket, _ = _pidhotuvaty(monkeypatch, tmp_path)
+
+    def _obryv(url: str, blob: bytes) -> None:
+        raise upload.UploadError("обрив", klas=upload.TYMCHASOVYI)
+
+    cherez: list[str] = []
+    monkeypatch.setattr(upload, "_put", _obryv)
+    monkeypatch.setattr(upload, "_zapasnyi_put",
+                        lambda url, blob, tok: cherez.append(url) or True)
+    with pytest.raises(upload.UploadError):
+        upload.publish(paket, base="https://nyshporka.online/v1", auth="k")
+    assert cherez == [], "обрив лікує повтор, а не сервер"
+
+
+@pytest.mark.parametrize("status, vyhid", [(200, True), (404, False), (405, False)])
+def test_zapasnyi_put_kody(monkeypatch: pytest.MonkeyPatch, status: int, vyhid: bool) -> None:
+    seen: dict[str, Any] = {}
+
+    def _put(url: str, **kw: Any) -> Any:
+        seen.update(kw.get("headers") or {})
+        return httpx.Response(status, json={})
+
+    monkeypatch.setattr(httpx, "put", _put)
+    assert upload._zapasnyi_put("https://p/v1/contributions/1/text", b"x", "k") is vyhid
+    assert seen["Authorization"] == "Bearer k"

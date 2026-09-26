@@ -24,14 +24,52 @@ from nyshporka.sources.cfclient import challenged
 
 # ── зразки розмітки, зняті з живого майданчика 09.09.2026 ────────────────────
 
-# 🔴 Фонди й описи приходять з API, а не зі сторінки «фонди архіву»: та
-# гортається, і перший аркуш неповний (ДАМО: 75 фондів із 97).
+# 🔴 26.09.2026 майданчик прибрав JSON-API: архіви, фонди й описи тепер
+# розбираються зі сторінок. Розмітка нижче — з живих `/archive/`,
+# `/archive/<id>` і `/archive/fund/<id>` того дня.
 # ⚠ Два фонди одного архіву навмисно розрізняються лише префіксом: «R-6453» і
 # «6453» — різні фонди, і зведення їх за першим числом підсунуло б чужий опис.
-FUNDS_API = r'''{"total": 2, "page_size": 100, "page_number": 1, "page_next": null, "results": [{"id": 207, "number": "R-6453", "name": "Книги РАЦС Хмельницького району", "descriptions": [{"id": 401, "number": "1", "annotation": "Опис №1"}], "archive": {"id": 34, "short_name": "ДАХО"}}, {"id": 999, "number": "6453", "name": "Зовсім інший фонд", "descriptions": [{"id": 402, "number": "1", "annotation": "Опис №1"}], "archive": {"id": 34, "short_name": "ДАХО"}}, {"id": 96, "number": "484", "name": "Колекція метричних книг", "descriptions": [{"id": 218, "number": "1", "annotation": "Опис №1"}], "archive": {"id": 36, "short_name": "ДАМО"}}]}'''
+ARCHIVES_HTML = """
+<div class="content">
+ <div class="archive-card"> <a href="/archive/34"> Державний архів Хмельницької області </a> </div>
+ <div class="archive-card"> <a href="/archive/36"> Державний архів Миколаївської області </a> </div>
+</div>
+"""
 
-#: Знаменник розбору: скільки справ в описі за словами самого майданчика.
-COUNT_API = '{"id": 401, "cases_count": 3}'
+
+def _fond_row(fid: int, number: str, name: str, dates: str, n: int) -> str:
+    return (f'<tr> <td class="archive-col-fit">{number}</td> <td class="archive-col-grow"> '
+            f'<a href="/archive/fund/{fid}"> {name} </a> </td> '
+            f'<td class="archive-col-grow"> {dates} </td> <td class="archive-col-fit">{n}</td> </tr>')
+
+
+def _desc_row(did: int, number: str, cases: int) -> str:
+    return (f'<tr> <td class="archive-col-fit">{number}</td> <td class="archive-col-grow"> '
+            f'<a href="/archive/desc/{did}"> Опис №{number} </a> </td> '
+            f'<td class="archive-col-fit"> 1921 - 1940 </td> '
+            f'<td class="archive-col-fit">{cases}</td> </tr>')
+
+
+def _table(rows: str) -> str:
+    return f"<table><thead><tr><th>№</th></tr></thead><tbody>{rows}</tbody></table>"
+
+
+ARCH_34_HTML = _table(_fond_row(207, "R-6453", "Книги РАЦС Хмельницького району",
+                                "1921 - 1940", 1)
+                      + _fond_row(999, "6453", "Зовсім інший фонд", "", 1))
+ARCH_36_HTML = _table(_fond_row(96, "484", "Колекція метричних книг", "1780 - 1920", 1))
+
+
+def _fund_html(did: int, cases: int) -> str:
+    return _table(_desc_row(did, "1", cases))
+
+
+#: Відповіді дерева без справ: архіви, фонди й описи з числом справ.
+TREE = {"/archive/fund/207": _fund_html(401, 3),
+        "/archive/fund/999": _fund_html(402, 3),
+        "/archive/fund/96": _fund_html(218, 3),
+        "/archive/34": ARCH_34_HTML,
+        "/archive/36": ARCH_36_HTML}
 
 CASES_HTML = """
 <table><tbody>
@@ -65,13 +103,16 @@ CASES_HTML_402 = CASES_HTML.replace("/archive/case/269", "/archive/case/279")
 
 
 def _crawl_answers(count_402: int = 3) -> dict[str, str]:
-    """Відповіді для обходу ДАХмО: два описи й скільки справ обіцяє кожен."""
-    return {"/api/archive/funds/": FUNDS_API,
-            "/api/archive/descriptions/401/": COUNT_API,
-            "/api/archive/descriptions/402/":
-                f'{{"id": 402, "cases_count": {count_402}}}',
+    """Відповіді для обходу ДАХмО: два описи й скільки справ обіцяє кожен.
+
+    ⚠ `/archive/` — останнім: двійник шукає підрядок, а цей шлях є в кожній
+    адресі майданчика.
+    """
+    return {**TREE,
+            "/archive/fund/999": _fund_html(402, count_402),
             "/archive/desc/401": CASES_HTML,
-            "/archive/desc/402": CASES_HTML_402}
+            "/archive/desc/402": CASES_HTML_402,
+            "/archive/": ARCHIVES_HTML}
 
 
 class _R:
@@ -145,7 +186,7 @@ def test_challenge_page_is_recognised() -> None:
 # ── дерево ───────────────────────────────────────────────────────────────────
 
 def test_browse_walks_archive_to_case() -> None:
-    cf = _Cf({"/api/archive/funds/": FUNDS_API, "/archive/desc/401": CASES_HTML})
+    cf = _Cf({**TREE, "/archive/desc/401": CASES_HTML})
     src = BabynYarSource(client=cf)
     assert [n.ref for n in src.browse("arch:34")] == ["fond:207", "fond:999"]
     assert [n.ref for n in src.browse("fond:207")] == ["desc:401"]
@@ -156,25 +197,39 @@ def test_browse_walks_archive_to_case() -> None:
     assert cases[1].frames == 0
 
 
-def test_browse_of_one_archive_leaves_out_the_others() -> None:
-    """⚠ `?archive=` сервер приймає й ІГНОРУЄ — відсів мусить бути в нас."""
-    src = BabynYarSource(client=_Cf({"/api/archive/funds/": FUNDS_API}))
-    assert [n.ref for n in src.browse("arch:36")] == ["fond:96"]
+def test_browse_of_one_archive_reads_only_its_page() -> None:
+    """Перегляд архіву — одна сторінка цього архіву, а не весь майданчик."""
+    cf = _Cf(TREE)
+    assert [n.ref for n in BabynYarSource(client=cf).browse("arch:36")] == ["fond:96"]
+    assert not any(u.endswith("/archive/34") for u in cf.seen)
 
 
-def test_funds_page_of_the_site_is_not_used_for_lookup() -> None:
-    """🔴 Сторінка «фонди архіву» ГОРТАЄТЬСЯ, і перший аркуш неповний.
+def test_the_gone_api_is_not_asked() -> None:
+    """🔴 `/api/archive/…` дає 404 з 26.09.2026 — туди не ходимо зовсім."""
+    cf = _Cf({**TREE, "/archive/desc/401": CASES_HTML})
+    src = BabynYarSource(client=cf)
+    src.browse("arch:34")
+    src.browse("fond:207")
+    src.browse("desc:401")
+    assert not any("/api/" in u for u in cf.seen)
 
-    Заміряно на ДАМО: 75 фондів із 97, і серед відрізаних лежала ф.484 —
-    найбільша колекція метричних книг майданчика. Двійник не знає цієї адреси
-    навмисно: якщо код по неї піде, тест упаде, а не мовчки недорахує фондів.
-    """
-    cf = _Cf({"/api/archive/funds/": FUNDS_API})
-    BabynYarSource(client=cf).browse("arch:36")
-    # ⚠ Саме префікс, а не підрядок: адреса API «/api/archive/funds/» містить
-    # шлях сторінки цілком, і наївна перевірка червоніла б завжди.
-    assert not any(u.startswith("https://babynyar.org/archive/funds/")
-                   for u in cf.seen)
+
+def test_fund_page_gives_the_case_count_denominator() -> None:
+    """Число справ опису — з таблиці фонду, без окремого запиту."""
+    cf = _Cf(TREE)
+    src = BabynYarSource(client=cf)
+    assert src.cases_count("401") is None, "фонд ще не читали — не вигадуємо"
+    src.descriptions("207")
+    asked = len(cf.seen)
+    assert src.cases_count("401") == 3
+    assert len(cf.seen) == asked
+
+
+def test_fund_dates_become_bounds() -> None:
+    src = BabynYarSource(client=_Cf(TREE))
+    fund = src.funds("34")[0]
+    assert (fund["start_date"], fund["end_date"]) == ("1921", "1940")
+    assert src.funds("34")[1]["start_date"] == ""
 
 
 def test_catalog_pages_go_through_the_polite_fetcher(monkeypatch) -> None:
@@ -205,29 +260,28 @@ def test_a_real_4xx_is_a_refusal_not_a_crash() -> None:
 
 
 def test_the_fund_list_is_fetched_once_not_per_call() -> None:
-    """🔴 Перелік фондів — 7 сторінок API, і кожен зайвий прохід наближає відсічку.
+    """🔴 Кожен зайвий прохід наближає відсічку.
 
     Заміряно 09.09.2026: перегляд архіву плюс збирання фонду брали перелік
     двічі, і Cloudflare показав виклик саме на другому проході.
     """
-    cf = _Cf({"/api/archive/funds/": FUNDS_API})
+    cf = _Cf(TREE)
     src = BabynYarSource(client=cf)
     src.browse("arch:34")
-    src.browse("arch:36")
+    src.browse("arch:34")
     src.funds("34")
-    assert sum("/api/archive/funds/" in u for u in cf.seen) == 1
+    assert sum(u.endswith("/archive/34") for u in cf.seen) == 1
 
 
-def test_the_fund_list_expires_so_a_daemon_sees_new_funds(monkeypatch) -> None:
+def test_the_fund_list_expires_so_a_daemon_sees_new_funds() -> None:
     """⚠ Вічний кеш у живому демоні ховав би фонди, викладені після старту."""
-    cf = _Cf({"/api/archive/funds/": FUNDS_API})
+    cf = _Cf(TREE)
     src = BabynYarSource(client=cf)
-    src.funds()
-    assert src._funds_cache is not None
-    src._funds_cache = (src._funds_cache[0] - src.FUNDS_TTL_SEC - 1,
-                        src._funds_cache[1])
-    src.funds()
-    assert sum("/api/archive/funds/" in u for u in cf.seen) == 2
+    src.funds("34")
+    taken, rows = src._arch_cache["34"]
+    src._arch_cache["34"] = (taken - src.FUNDS_TTL_SEC - 1, rows)
+    src.funds("34")
+    assert sum(u.endswith("/archive/34") for u in cf.seen) == 2
 
 
 class _ScriptedCf:
@@ -311,7 +365,7 @@ def test_crawl_resumes_instead_of_starting_over(tmp_path: Path) -> None:
 
 def test_crawl_refuses_an_archive_id_the_site_does_not_have(tmp_path: Path) -> None:
     """⚠ Порожній обхід читався б як «архів порожній» — тут відмова з причиною."""
-    src = BabynYarSource(tmp_path, client=_Cf({"/api/archive/funds/": FUNDS_API}))
+    src = BabynYarSource(tmp_path, client=_Cf({"/archive/": ARCHIVES_HTML}))
     with pytest.raises(SourceError) as exc:
         src.crawl(("999",))
     assert "id" in str(exc.value)

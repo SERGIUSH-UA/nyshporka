@@ -312,6 +312,45 @@ def _refs_from_sidecar(case_dir: Path | None) -> list[dict[str, str]]:
     return out
 
 
+def _refs_from_links(links: list[dict[str, str]]) -> list[dict[str, str]]:
+    """Ідентифікатори зйомки з посилань, які людина дала сама (`--link`).
+
+    🔴 Лише користувацькі посилання й лише відомі хости сканів. Реєстрові
+    лишаються в `links` (див. `_links_from_registry`): вони кажуть «справа
+    там є», а не «знімали звідти». А людина, яка дала `--link` на файл
+    Commons, називає саме джерело своїх сканів — і ворота досі казали їй
+    `no_refs` з порадою додати той самий `--link`, який вона вже додала.
+    """
+    import re
+    from urllib.parse import unquote
+
+    out: list[dict[str, str]] = []
+    for link in links:
+        url = str(link.get("url") or "").strip()
+        if not url:
+            continue
+        commons = re.search(r"commons\.wikimedia\.org/wiki/(?:File|Файл):([^?#]+)",
+                            unquote(url), re.IGNORECASE)
+        if commons:
+            out.append({"source": "commons", "ref": f"file:{commons.group(1)}", "url": url})
+            continue
+        dgs = re.search(r"familysearch\.org/.*?(?:imageGroupNumbers=|/film/|dgs[:=])"
+                        r"(\d{6,9})", url, re.IGNORECASE)
+        if dgs:
+            out.append({"source": "fs", "ref": f"dgs:{dgs.group(1)}", "url": url})
+    return out
+
+
+def _merge_refs(pershi: list[dict[str, str]],
+                dodatkovi: list[dict[str, str]]) -> list[dict[str, str]]:
+    """Сайдкар важить більше: джерело, яке він уже назвав, не перебивається."""
+    out = list(pershi)
+    for r in dodatkovi:
+        if not any(x.get("source") == r["source"] for x in out):
+            out.append(r)
+    return out
+
+
 def _letter_variants(letter: str) -> list[str]:
     """Літерний індекс справи обома письмами: `a` → `["a", "а"]`.
 
@@ -511,7 +550,8 @@ def build_manifest(scope: str, *,
     if described:
         case["details"] = described
     m = Manifest(
-        case=case, refs=_refs_from_sidecar(case_dir),
+        case=case,
+        refs=_merge_refs(_refs_from_sidecar(case_dir), _refs_from_links(list(links or []))),
         frames=frames_block, decode=decode, publisher=pub, note=note,
         links=_with_registry(list(links or []), str(case.get("shifra") or "")),
         extra=dict(extra or {}), license=lic,

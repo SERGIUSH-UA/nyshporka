@@ -78,7 +78,7 @@ dependencies = [
 # інсталятор. Транспорт MCP їде ТУТ, а не лише в `agent`: інакше людина, що
 # поставила Нишпорку з `.exe`, дістає від `nysh mcp install` сервер, який не
 # стартує (подробиці над `agent` нижче). Пін той самий, що там.
-app = ["fastapi>=0.115", "uvicorn[standard]>=0.32", "mcp>=1.2,<2", "anyio>=4.0"]
+app = ["fastapi>=0.115", "uvicorn[standard]>=0.32", "mcp>=1.2,<2", "anyio>=4.1"]
 # Завантажувачі з архівів: дзеркала плівок, ARCHIUM, Synology, каталоги.
 archives = [
   "httpx[socks]>=0.27",
@@ -148,7 +148,7 @@ train = ["nyshporka[cloud]"]
 # 🔴 Пін `<2`: `mcp` 2.0 — інший SDK (inputSchema→input_schema, mimeType→mime_type,
 # зникли декоратори `@server.list_tools()`). Код у `nyshporka/mcp/` написаний під 1.x,
 # тож без стелі свіжа інсталяція тягне 2.x і `nysh mcp serve` не стартує.
-agent = ["mcp>=1.2,<2", "anyio>=4.0"]
+agent = ["mcp>=1.2,<2", "anyio>=4.1"]
 # Виписка в Ексель. Окремо, бо CSV/TSV пишуться стандартною бібліотекою й
 # відкриваються тим самим Екселем: `openpyxl` купує аркуші, автофільтр і
 # закріплену шапку, а не саму можливість забрати дані.
