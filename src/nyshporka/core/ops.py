@@ -191,8 +191,13 @@ class Registry:
                 pulse.beat(name)
             except Exception:
                 pass  # прискорювач; без нього лишається повна перевірка
-        for hint_op, why in op.next_hints:
-            env.suggest(hint_op, why)
+        # 🔴 Лише на успіху. Статична підказка описує шлях після вдалої дії:
+        # на збої `share.publish` радила «перевірити, що пакет знайшовся», і
+        # агент ішов шукати пакет, якого немає, замість того, щоб повторити
+        # заливку. Що радити після відмови, вирішує сама операція.
+        if getattr(env, "ok", True):
+            for hint_op, why in op.next_hints:
+                env.suggest(hint_op, why)
         return env
 
 

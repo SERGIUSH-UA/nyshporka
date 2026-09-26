@@ -410,7 +410,14 @@ def share_publish(a: SharePublishArgs) -> Envelope:
     import sys
     from pathlib import Path
 
-    from nyshporka.share.upload import OUTCOME_TEXT, VIDDANO, UploadError, VZHE_Ye, publish
+    from nyshporka.share.upload import (
+        OUTCOME_TEXT,
+        TYMCHASOVYI,
+        VIDDANO,
+        UploadError,
+        VZHE_Ye,
+        publish,
+    )
 
     def _khid(tekst: str) -> None:
         # stderr: stdout у `--json` читає програма, і рядок ходу зламав би розбір.
@@ -423,7 +430,13 @@ def share_publish(a: SharePublishArgs) -> Envelope:
     try:
         got = publish(Path(a.path), base=a.base, say=_khid)
     except UploadError as exc:
-        return fail(str(exc))
+        env = fail(str(exc))
+        # Підказка «далі» — лише там, де повтор справді допоможе. На сталому
+        # збої будь-яка автоматична дія веде по колу.
+        if exc.klas == TYMCHASOVYI:
+            env.suggest("share.publish",
+                        "той самий пакет пізніше — внесок уже заведено, другого не буде")
+        return env
     env = ok(got)
     vyhid = str(got.get("outcome") or "")
     if vyhid == VZHE_Ye and not got.get("geometry_attached"):

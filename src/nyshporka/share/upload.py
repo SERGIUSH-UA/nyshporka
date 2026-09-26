@@ -39,11 +39,30 @@ class UploadError(RuntimeError):
 
     `status` — код відповіді пулу, коли відмовив саме він. Порожній — до
     сервера не дійшло або відмовило сховище.
+
+    `klas` — чи допоможе повтор (`TYMCHASOVYI`) чи ні (решта); `chomu` —
+    людське пояснення сталого збою.
     """
 
-    def __init__(self, message: str, *, status: int | None = None) -> None:
+    def __init__(self, message: str, *, status: int | None = None,
+                 klas: str = "", chomu: str = "") -> None:
         super().__init__(message)
         self.status = status
+        self.klas = klas
+        self.chomu = chomu
+
+
+#: Класи збою заливки. 🔴 Розрізняються, бо порада різна: «повторіть» на
+#: сталому збої веде людину й агента по колу — кожна спроба заводить сигнал,
+#: результату нуль.
+TYMCHASOVYI = "tymchasovyi"      # обрив, тайм-аут, 5xx — повтор допоможе
+SERTYFIKAT = "sertyfikat"        # HTTPS перехоплено (антивірус, корпоративна мережа)
+BLOKUVANNIA = "blokuvannia"      # адреса сховища недосяжна з цієї мережі
+PROKSI = "proksi"                # заданий проксі не пускає
+VIDMOVA = "vidmova"              # сховище відмовило 4xx — вада на нашому боці
+
+#: Куди писати про сталий збій.
+ISSUES = "https://github.com/SERGIUSH-UA/nyshporka/issues"
 
 
 #: Спроби PUT у сховище й паузи між ними. Решта запитів до пулу вже мала
@@ -168,16 +187,21 @@ def publish(path: Path, *, base: str = "", auth: str = "",
     except UploadError as exc:
         # Відмову самого пулу (ворота, стеля) сервер уже знає й записав, і
         # повтор тут не допоможе — тому й підказки повторити немає.
-        if exc.status is None or exc.status >= 500:
-            _zvit_pro_zbii(home, tok, vnesok, etap, str(exc))
-            raise UploadError(f"{exc}\n{_POVTORYTY.format(vnesok=vnesok)}",
-                              status=exc.status) from exc
-        raise
+        if exc.status is not None and exc.status < 500:
+            raise
+        # Обрив до пулу чи його 5xx — тимчасове; сховище клас назвало саме.
+        klas = exc.klas or TYMCHASOVYI
+        _zvit_pro_zbii(home, tok, vnesok, etap, f"[{klas}] {exc}")
+        porada = (_POVTORYTY.format(vnesok=vnesok) if klas == TYMCHASOVYI
+                  else _NE_POVTORYTY.format(vnesok=vnesok, chomu=exc.chomu,
+                                            issues=ISSUES))
+        raise UploadError(f"{exc}\n{porada}", status=exc.status, klas=klas,
+                          chomu=exc.chomu) from exc
     except OSError as exc:
         # Шлях до файлу в причину не йде: у ньому ім'я користувача машини.
         _zvit_pro_zbii(home, tok, vnesok, etap,
                        f"не прочитався файл пакета: {type(exc).__name__}")
-        raise UploadError(f"не прочитати пакет: {exc}") from exc
+        raise UploadError(f"не прочитати пакет: {exc}", klas=VIDMOVA) from exc
     except KeyboardInterrupt:
         _zvit_pro_zbii(home, tok, vnesok, etap, "перервано (Ctrl+C)")
         raise
@@ -188,6 +212,10 @@ def publish(path: Path, *, base: str = "", auth: str = "",
 #: єдине, що гарантовано читає будь-який агент: скіли стоять не в кожного.
 _POVTORYTY = ("Внесок {vnesok} уже заведено в пулі. Повторіть ту саму команду "
               "пізніше — пул підхопить цей внесок, другого не створить.")
+_NE_POVTORYTY = ("Повтор тієї самої команди цього не виправить: {chomu}. "
+                 "Внесок {vnesok} заведено, звіт про збій уже надіслано "
+                 "розробникові. Напишіть, будь ласка, на {issues}, додавши цей "
+                 "текст дослівно.")
 
 #: Як часто казати «ще заливаю», поки PUT іде.
 PULS_S = 15.0
@@ -374,6 +402,7 @@ def _put(url: str, blob: bytes) -> None:
     if conditional:
         headers["If-None-Match"] = "*"
     ostannia = ""
+    klas, chomu = TYMCHASOVYI, ""
     for sproba in range(len(PUT_PAUZY) + 1):
         if sproba:
             time.sleep(PUT_PAUZY[sproba - 1])
@@ -385,22 +414,64 @@ def _put(url: str, blob: bytes) -> None:
                              proxy=proxy_url())
         except httpx.TransportError as exc:
             ostannia = f"{type(exc).__name__}: {_bez_posylannia(str(exc), url)}"
+            klas, chomu = _klas_obryvu(exc)
+            if klas != TYMCHASOVYI:
+                # Сталий збій повтор не виправить — не тримаємо людину.
+                break
             continue
         except httpx.HTTPError as exc:
             raise UploadError(f"сховище не прийняло байти: {type(exc).__name__}: "
-                              f"{_bez_posylannia(str(exc), url)}") from None
+                              f"{_bez_posylannia(str(exc), url)}", klas=VIDMOVA,
+                              chomu="клієнт не зміг сформувати запит") from None
         # 412 на повторі після обриву — перша спроба встигла дописати.
         if conditional and resp.status_code == 412:
             return
         if resp.status_code >= 500:
             ostannia = f"HTTP {resp.status_code}"
+            klas, chomu = TYMCHASOVYI, ""
             continue
         if resp.status_code >= 400:
-            raise UploadError(f"сховище не прийняло байти: HTTP {resp.status_code}"
-                              + _kod_s3(resp))
+            raise UploadError(
+                f"сховище не прийняло байти: HTTP {resp.status_code}" + _kod_s3(resp),
+                klas=VIDMOVA,
+                chomu="сховище відхилило заливку — це вада на нашому боці, а не у вас")
         return
-    raise UploadError(f"сховище не прийняло байти після {len(PUT_PAUZY) + 1} "
-                      f"спроб: {ostannia}")
+    skilky = f" після {sproba + 1} спроб" if sproba else ""
+    raise UploadError(f"сховище не прийняло байти{skilky}: {ostannia}",
+                      klas=klas, chomu=chomu)
+
+
+def _klas_obryvu(exc: Exception) -> tuple[str, str]:
+    """Чи допоможе повтор: клас і людське «чому» — з тексту винятку httpx.
+
+    🔴 Реєстрація в пул щойно пройшла, тобто інтернет на машині є. Тож
+    нерозв'язна чи відкинута адреса сховища — це не «мережа моргнула», а
+    щось між людиною й сховищем, і воно не зникне за п'ять секунд.
+    """
+    import httpx
+
+    from nyshporka.sources.http import proxy_url
+
+    tekst = str(exc)
+    nyzh = tekst.lower()
+    if "certificate_verify_failed" in nyzh or "certificate verify failed" in nyzh:
+        return SERTYFIKAT, ("з'єднання зі сховищем перехоплює програма на цій "
+                            "машині чи в мережі (найчастіше антивірус із перевіркою "
+                            "HTTPS), і сертифікат не сходиться")
+    zadano_proksi = bool(proxy_url() or os.environ.get("HTTPS_PROXY")
+                         or os.environ.get("https_proxy"))
+    if isinstance(exc, httpx.ProxyError) or (
+            zadano_proksi and isinstance(exc, httpx.ConnectError)):
+        return PROKSI, ("проксі, заданий на цій машині, не пускає до сховища; "
+                        "перевірте NYSHPORKA_PROXY_URL чи HTTPS_PROXY")
+    if isinstance(exc, httpx.ConnectError) and any(m in nyzh for m in (
+            "getaddrinfo", "11001", "name or service not known",
+            "nodename nor servname", "10061", "connection refused", "10013")):
+        return BLOKUVANNIA, ("адреса сховища (r2.cloudflarestorage.com) недосяжна з "
+                             "цієї мережі, хоча сайт Супряги відповідає — схоже на "
+                             "блокування фаєрволом, батьківським контролем чи "
+                             "провайдером")
+    return TYMCHASOVYI, ""
 
 
 def _bez_posylannia(tekst: str, url: str) -> str:

@@ -36,8 +36,10 @@ def test_put_povtoriuie_obryv(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_put_kazhe_prychynu_bez_posylannia(monkeypatch: pytest.MonkeyPatch) -> None:
     url = "https://r2.example/k?X-Amz-" + "Signature=SEKRET"
+    sproby: list[int] = []
 
     def _put(u: str, **kw: Any) -> Any:
+        sproby.append(1)
         raise httpx.ConnectError(f"[SSL: CERTIFICATE_VERIFY_FAILED] for {u}")
 
     monkeypatch.setattr(httpx, "put", _put)
@@ -45,7 +47,33 @@ def test_put_kazhe_prychynu_bez_posylannia(monkeypatch: pytest.MonkeyPatch) -> N
         upload._put(url, b"x")
     assert "CERTIFICATE_VERIFY_FAILED" in str(ei.value), "причина мусить дійти до людини"
     assert "SEKRET" not in str(ei.value)
-    assert "3 спроб" in str(ei.value)
+    assert ei.value.klas == upload.SERTYFIKAT and "антивірус" in ei.value.chomu
+    assert len(sproby) == 1, "сталий збій повтор не виправить — не тримаємо людину"
+
+
+@pytest.mark.parametrize("vyniatok, proksi, klas", [
+    (httpx.ReadTimeout("timed out"), False, upload.TYMCHASOVYI),
+    (httpx.ReadError("connection reset"), False, upload.TYMCHASOVYI),
+    (httpx.ConnectError("[Errno 11001] getaddrinfo failed"), False, upload.BLOKUVANNIA),
+    (httpx.ConnectError("[WinError 10061] refused"), False, upload.BLOKUVANNIA),
+    (httpx.ConnectError("[WinError 10061] refused"), True, upload.PROKSI),
+    (httpx.ProxyError("407 Proxy Authentication Required"), False, upload.PROKSI),
+])
+def test_klas_obryvu(monkeypatch: pytest.MonkeyPatch, vyniatok: Exception,
+                     proksi: bool, klas: str) -> None:
+    for name in ("NYSHPORKA_PROXY_URL", "HTTPS_PROXY", "https_proxy"):
+        monkeypatch.delenv(name, raising=False)
+    if proksi:
+        monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:9")
+    assert upload._klas_obryvu(vyniatok)[0] == klas
+
+
+def test_put_403_tse_nasha_vada(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(httpx, "put", lambda u, **kw: httpx.Response(
+        403, text="<Error><Code>AccessDenied</Code></Error>"))
+    with pytest.raises(upload.UploadError) as ei:
+        upload._put("https://r2.example/k", b"x")
+    assert ei.value.klas == upload.VIDMOVA and "нашому боці" in ei.value.chomu
 
 
 def test_put_kod_s3_i_bez_povtoru_na_4xx(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -116,7 +144,7 @@ def test_zbii_put_ide_v_pul(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> 
     with pytest.raises(upload.UploadError):
         upload.publish(paket, base="https://nyshporka.online/v1", auth="k")
     assert zvity == [(1337, "put_text",
-                      "сховище не прийняло байти після 3 спроб: ReadTimeout")]
+                      "[tymchasovyi] сховище не прийняло байти після 3 спроб: ReadTimeout")]
 
 
 def test_zbii_kazhe_shcho_robyty(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -131,6 +159,47 @@ def test_zbii_kazhe_shcho_robyty(monkeypatch: pytest.MonkeyPatch, tmp_path: Path
         upload.publish(paket, base="https://nyshporka.online/v1", auth="k")
     assert "ReadTimeout" in str(ei.value)
     assert "Внесок 1337" in str(ei.value) and "Повторіть ту саму команду" in str(ei.value)
+
+
+def test_stalyi_zbii_ne_radyt_povtoriuvaty(monkeypatch: pytest.MonkeyPatch,
+                                           tmp_path: Path) -> None:
+    """Повтор на сталому збої веде по колу: кожна спроба — сигнал, результату нуль."""
+    paket, zvity = _pidhotuvaty(monkeypatch, tmp_path)
+
+    def _put(url: str, blob: bytes) -> None:
+        raise upload.UploadError("сховище не прийняло байти: ConnectError: getaddrinfo",
+                                 klas=upload.BLOKUVANNIA, chomu="адреса сховища недосяжна")
+
+    monkeypatch.setattr(upload, "_put", _put)
+    with pytest.raises(upload.UploadError) as ei:
+        upload.publish(paket, base="https://nyshporka.online/v1", auth="k")
+    tekst = str(ei.value)
+    assert "Повторіть ту саму команду" not in tekst
+    assert "цього не виправить: адреса сховища недосяжна" in tekst
+    assert upload.ISSUES in tekst and ei.value.klas == upload.BLOKUVANNIA
+    assert zvity[0][2].startswith("[blokuvannia]"), "клас мусить дійти до розробника"
+
+
+@pytest.mark.parametrize("klas, dali", [
+    (upload.TYMCHASOVYI, ["share.publish"]),
+    (upload.BLOKUVANNIA, []),
+])
+def test_dali_pislia_zboiu(monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+                           klas: str, dali: list[str]) -> None:
+    """🔴 Після збою — не «перевірити, що пакет знайшовся»: пакета немає."""
+    from nyshporka import ops as O
+
+    paket, _ = _pidhotuvaty(monkeypatch, tmp_path)
+
+    def _put(url: str, blob: bytes) -> None:
+        raise upload.UploadError("збій", klas=klas, chomu="причина")
+
+    monkeypatch.setattr(upload, "_put", _put)
+    monkeypatch.setenv(upload.ENV_NAME, "k")
+    env = O.call("share.publish", {"path": str(paket),
+                                   "base": "https://nyshporka.online/v1"})
+    assert not env.ok
+    assert [n.op for n in env.next] == dali
 
 
 def test_khid_zalyvky(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
