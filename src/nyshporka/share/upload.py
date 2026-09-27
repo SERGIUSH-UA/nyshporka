@@ -225,9 +225,19 @@ def publish(path: Path, *, base: str = "", auth: str = "",
         # Шлях до файлу в причину не йде: у ньому ім'я користувача машини.
         # Код помилки ОС іде — без нього «OSError» не відрізнити «файл
         # зайнятий антивірусом» (winerror 32) від «файлу немає» (errno 2).
-        _zvit_pro_zbii(home, tok, vnesok, etap,
-                       f"не прочитався файл пакета: {_kod_os(exc)}")
-        raise UploadError(f"не прочитати пакет: {exc}", klas=VIDMOVA) from exc
+        # 🔴 Але не кожен OSError тут — файл: мережеві збої (обрив сокета,
+        # `URLError` з-під `_request`) теж його підкласи, і 27.09.2026 три
+        # звіти «не прочитався файл пакета» прийшли на заливки, що через
+        # 15 хвилин пройшли з тих самих файлів. Файлова помилка несе ім'я
+        # файлу; немає його — це не читання пакета.
+        if exc.filename is not None:
+            _zvit_pro_zbii(home, tok, vnesok, etap,
+                           f"не прочитався файл пакета: {_kod_os(exc)}")
+            raise UploadError(f"не прочитати пакет: {exc}", klas=VIDMOVA) from exc
+        _zvit_pro_zbii(home, tok, vnesok, etap, f"[{TYMCHASOVYI}] збій ОС чи мережі: "
+                       f"{_kod_os(exc)}")
+        raise UploadError(f"{exc}\n{_POVTORYTY.format(vnesok=vnesok)}",
+                          klas=TYMCHASOVYI) from exc
     except KeyboardInterrupt:
         _zvit_pro_zbii(home, tok, vnesok, etap, "перервано (Ctrl+C)")
         raise

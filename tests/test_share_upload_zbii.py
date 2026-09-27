@@ -404,3 +404,41 @@ def test_zapasnyi_put_kody(monkeypatch: pytest.MonkeyPatch, status: int, vyhid: 
     monkeypatch.setattr(httpx, "put", _put)
     assert upload._zapasnyi_put("https://p/v1/contributions/1/text", b"x", "k") is vyhid
     assert seen["Authorization"] == "Bearer k"
+
+
+def test_merezhevyi_oserror_ne_fail_paketa(monkeypatch: pytest.MonkeyPatch,
+                                           tmp_path: Path) -> None:
+    """🔴 Мережевий OSError — не «не прочитався файл пакета».
+
+    27.09.2026 три такі звіти прийшли на заливки, що за 15 хвилин пройшли з
+    тих самих файлів: обробник ловив будь-який OSError блоку заливки.
+    """
+    paket, zvity = _pidhotuvaty(monkeypatch, tmp_path)
+
+    def _put(url: str, blob: bytes) -> None:
+        raise ConnectionResetError(10054, "з'єднання розірвано")
+
+    monkeypatch.setattr(upload, "_put", _put)
+    with pytest.raises(upload.UploadError) as ei:
+        upload.publish(paket, base="https://nyshporka.online/v1", auth="k")
+    [(_, etap, prychyna)] = zvity
+    assert etap == "put_text"
+    assert "файл пакета" not in prychyna
+    assert prychyna.startswith("[tymchasovyi] збій ОС чи мережі: ConnectionResetError")
+    assert "Повторіть ту саму команду" in str(ei.value)
+
+
+def test_failovyi_oserror_kazhe_pro_paket(monkeypatch: pytest.MonkeyPatch,
+                                          tmp_path: Path) -> None:
+    paket, zvity = _pidhotuvaty(monkeypatch, tmp_path)
+
+    def _put(url: str, blob: bytes) -> None:
+        # Файл зайнятий антивірусом: помилка ОС із ім'ям файлу.
+        raise PermissionError(13, "Permission denied", str(paket))
+
+    monkeypatch.setattr(upload, "_put", _put)
+    with pytest.raises(upload.UploadError):
+        upload.publish(paket, base="https://nyshporka.online/v1", auth="k")
+    [(_, _, prychyna)] = zvity
+    assert prychyna.startswith("не прочитався файл пакета: PermissionError errno=13")
+    assert str(tmp_path) not in prychyna, "шлях з іменем користувача пішов у звіт"
