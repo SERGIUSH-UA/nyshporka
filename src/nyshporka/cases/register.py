@@ -290,6 +290,96 @@ def key_mismatch(case_dir: Path, sidecar: dict[str, Any]) -> str:
             f"`data/raw/<архів>_<фонд>/spr-<справа>`.")
 
 
+def _rel_to_root(case_dir: Path) -> str:
+    import os
+
+    from nyshporka.core.workspace import workspace
+
+    try:
+        return Path(os.path.abspath(case_dir)).relative_to(
+            os.path.abspath(workspace().root)).as_posix()
+    except ValueError:
+        return Path(case_dir).as_posix()
+
+
+def _other_opys_case(case_dir: Path, sidecar: dict[str, Any]) -> dict[str, Any] | None:
+    """Справа ІНШОГО опису, яка вже тримає ключ без опису, що дістався б і цій теці.
+
+    Лише тоді справі потрібен власний ключ. Та сама справа (та сама тека чи
+    той самий опис) — не колізія: третя тека для вже відомої книги не сміє
+    змінити їй ключ. Опис, невідомий у наявної справи, — теж не колізія:
+    стверджувати, що це інша книга, нема з чого.
+    """
+    from nyshporka.core.opys_keys import _norm
+
+    repo, fond, opys, spr = (sidecar.get(k) for k in ("repo", "fond", "opys", "spr"))
+    if not (sidecar.get("shifra") and repo and fond and opys and spr):
+        return None
+    if L.opys_in_key(repo, fond):
+        return None                     # фонд і так тримає опис у ключі
+    plain = L._mk_key(repo, fond, str(spr))
+    if not plain:
+        return None
+    here = _rel_to_root(case_dir)
+    try:
+        lib = L.load_library()
+    except Exception:      # бібліотека не зібрана — колізію побачить її збірка
+        return None
+    for e in lib:
+        if e.get("key") != plain:
+            continue
+        other = _norm(e.get("opys"))
+        if not other or other == _norm(opys):
+            continue
+        if here in {e.get("path"), *(e.get("extra_paths") or [])}:
+            continue
+        return e
+    return None
+
+
+def claim_own_key(case_dir: Path, sidecar: dict[str, Any]) -> bool:
+    """Дати справі ключ з описом, якщо ключ без опису вже тримає справа іншого опису.
+
+    🔴 Інший опис — фізично інший підрозділ фонду, тобто інша справа, а не
+    сумнів чи помилка. Тож жодних підтверджень: справа просто отримує власний
+    ключ (`DADNO/193-3/213`), а та, що була першою, лишається під своїм
+    (`DADNO/193/213`) — разом з усім, що на неї вже записано.
+    """
+    from nyshporka.core import opys_keys
+
+    other = _other_opys_case(case_dir, sidecar)
+    if other is None:
+        return False
+    return opys_keys.add(
+        str(sidecar["repo"]), str(sidecar["fond"]), str(sidecar["opys"]),
+        str(sidecar["spr"]), shifra=str(sidecar.get("shifra") or ""),
+        why=f"поруч «{other.get('shifra') or other.get('key')}» — інша справа "
+            f"того самого номера")
+
+
+def own_key_note(case_dir: Path, sidecar: dict[str, Any]) -> str:
+    """Рядок довідки, коли справа має власний ключ з описом. Інакше порожньо."""
+    from nyshporka.core import opys_keys
+
+    repo, fond, opys, spr = (sidecar.get(k) for k in ("repo", "fond", "opys", "spr"))
+    if not opys_keys.has(repo, fond, opys, spr):
+        return ""
+    key = L._mk_key(repo, fond, str(spr), str(opys))
+    plain = L._mk_key(repo, fond, str(spr))
+    other = ""
+    try:
+        for e in L.load_library():
+            if e.get("key") == plain:
+                title = f" — {e['title']}" if e.get("title") else ""
+                other = f"«{e.get('shifra') or plain}»{title}"
+                break
+    except Exception:
+        pass
+    return (f"ключ справи — «{key}»: поруч є справа того самого номера в іншому "
+            f"описі{' ' + other if other else ''}, під ключем «{plain}». Облік "
+            f"прочитаного цієї справи шукайте за «{key}».")
+
+
 #: Чим людина каже «зітри це поле».
 #:
 #: 🔴 Порожнє поле лишає попереднє значення — і це правильно: правка одного
@@ -421,6 +511,9 @@ def describe(case_dir: str | Path, *, shifra: str = "", title: str = "",
     tmp = d / (SIDECAR + ".tmp")
     tmp.write_text(json.dumps(out, ensure_ascii=False, indent=1), encoding="utf-8")
     tmp.replace(d / SIDECAR)
+    # Після запису паспорта, а не до: реєстр ключів без паспорта, що його
+    # пояснює, — рішення без підстави.
+    claim_own_key(d, out)
     return out
 
 

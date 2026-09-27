@@ -2140,6 +2140,14 @@ def case_register(a: CaseRegisterArgs) -> Envelope:
         env.warn("no_title",
                  "назви немає — у переліках справа буде «без назви», і впізнати "
                  "її за рік стане важко")
+    from nyshporka.cases.register import own_key_note
+
+    # Довідка, а не тривога: інший опис — інша справа, і вона законно дістала
+    # власний ключ. Людина мусить знати, яким ключем шукати її облік.
+    note = own_key_note(here, out)
+    if note:
+        env.data["own_key"] = note
+        env.warn("own_key", note)
     if env.data["reachable"]:
         from nyshporka.cases.register import key_mismatch
 

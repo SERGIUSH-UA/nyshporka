@@ -437,6 +437,24 @@ def opys_in_key(repo: str | None, fond: str | None) -> bool:
     return bool(repo and fond and (repo, str(fond)) in _OPYS_IN_KEY)
 
 
+def opys_in_case_key(repo: str | None, fond: str | None, spr: str | None,
+                     opys: str | None) -> bool:
+    """Чи несе опис ключ САМЕ ЦІЄЇ справи: фонд зі списку або справа з реєстру.
+
+    Реєстр (`core.opys_keys`) — справи, що народились поруч зі справою того
+    самого номера в іншому описі. Фонд цілком у ключ-з-описом не переходить:
+    перша справа лишається під ключем без опису, і все записане на неї
+    лишається дійсним.
+    """
+    if not (opys and spr) or str(spr).startswith("@"):
+        return False
+    if opys_in_key(repo, fond):
+        return True
+    from nyshporka.core import opys_keys
+
+    return opys_keys.has(repo, fond, opys, spr)
+
+
 def default_opys(repo: str | None, fond: str | None) -> str | None:
     """Опис, який мається на увазі, коли його не назвали.
 
@@ -464,7 +482,8 @@ def default_opys(repo: str | None, fond: str | None) -> str | None:
 
 def _mk_key(repo: str | None, fond: str | None, spr: str | None,
             opys: str | None = None) -> str | None:
-    """Дедуп-ключ справи. Опис входить у ключ лише для фондів з `_OPYS_IN_KEY`.
+    """Дедуп-ключ справи. Опис входить у ключ для фондів з `_OPYS_IN_KEY` і для
+    справ із реєстру простору (`opys_in_case_key`).
 
     Трійка repo/fond/spr унікальна не всюди: у ANRM ф.211 описи 1/3/5/11 нумерують
     справи кожен з одиниці, тож «211-1-140» (с. Парково) і «211-3-140» (Кишинівський
@@ -475,7 +494,7 @@ def _mk_key(repo: str | None, fond: str | None, spr: str | None,
     """
     if not (repo and fond and spr):
         return None
-    if opys and not str(spr).startswith("@") and (repo, str(fond)) in _OPYS_IN_KEY:
+    if opys_in_case_key(repo, fond, spr, opys):
         return f"{repo}/{fond}-{opys}/{spr}"
     return f"{repo}/{fond}/{spr}"
 

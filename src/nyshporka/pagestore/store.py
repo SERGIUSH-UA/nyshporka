@@ -32,6 +32,7 @@ from nyshporka.library import (
     _norm_spr,
     find_by_address,
     load_library,
+    opys_in_case_key,
     opys_in_key,
     parse_address,
     parse_case_code,
@@ -313,7 +314,7 @@ def case_path(ref: CaseRef) -> Path:
 
     `DAHMO/315/8433` → `DAHMO/315-8433.json`; `ANRM/211-3/140` → `ANRM/211-3-140.json`.
     """
-    if opys_in_key(ref.repo, ref.fond) and ref.opys and not str(ref.spr).startswith("@"):
+    if opys_in_case_key(ref.repo, ref.fond, ref.spr, ref.opys):
         return PAGES_ROOT / ref.repo / f"{ref.fond}-{ref.opys}-{ref.spr}.json"
     return PAGES_ROOT / ref.repo / f"{ref.fond}-{ref.spr}.json"
 

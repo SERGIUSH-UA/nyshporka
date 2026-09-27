@@ -205,7 +205,8 @@ class LibraryIndex:
                      if not _norm(self.by_key[k].get("opys"))]
             return self._pick(loose, repo)
         keys = same_repo(self._by_fs.get((f, s), []))
-        if opys_in_key(repo, _norm_fond(fond)) and len(set(keys)) > 1:
+        different_opys = len({_norm(self.by_key[k].get("opys")) for k in keys}) > 1
+        if len(set(keys)) > 1 and (opys_in_key(repo, _norm_fond(fond)) or different_opys):
             # 🔴 Фонд, де опис входить у ключ: без опису шифра — це кілька
             # РІЗНИХ книг (ANRM 211-1-140 і 211-3-140), а не дублікати однієї.
             # «Сильніший опис» тут приписав би прогін чужій справі; сховище
