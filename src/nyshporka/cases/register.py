@@ -185,9 +185,14 @@ def parse_shifra(text: str, *, repo_hint: str = "") -> Shifra:
 
 
 def read_sidecar(case_dir: Path) -> dict[str, Any]:
-    """Наявний опис теки — або порожньо. Помилка читання = порожньо, не виняток."""
-    for name in (SIDECAR, "meta.json"):
-        f = Path(case_dir) / name
+    """Наявний опис теки — або порожньо. Помилка читання = порожньо, не виняток.
+
+    Кадри в підтеці `pages/` (так кладе `cases take` з ARCHIUM) — опис лежить
+    на рівень вище, поруч із нею.
+    """
+    d = Path(case_dir)
+    dirs = [d, d.parent] if d.name == "pages" else [d]
+    for f in (x / name for x in dirs for name in (SIDECAR, "meta.json")):
         if not f.is_file():
             continue
         try:

@@ -279,6 +279,51 @@ def grade(theirs: list[dict[str, Any]], case_dir: Path | None, *,
                      case_dir=str(case_dir), theirs=len(theirs), ours=len(ours))
 
 
+#: Підтека кадрів у теці справи: так кладе їх `cases take` з ARCHIUM, поруч із
+#: `meta.json`. Перевірка лише верхнього рівня бачила тут «справу без кадрів».
+FRAMES_SUBDIR = "pages"
+
+
+def _key_parts(key: str) -> tuple[str, str, str, str] | None:
+    """`CDIAK/224-2/49` → `("CDIAK", "224", "2", "49")`; без опису — опис порожній."""
+    parts = key.split("/")
+    if len(parts) != 3:
+        return None
+    repo, fond, spr = parts
+    fond, _, opys = fond.partition("-")
+    return repo, fond, opys, spr
+
+
+def _row_matches(row: dict[str, Any], key: str) -> bool:
+    """Рядок бібліотеки — саме ця справа.
+
+    🔴 Ключ пакета несе опис (`CDIAK/224-2/49`), а бібліотека у фондах, де опис
+    не входить до ключа, тримає ту саму справу як `CDIAK/224/49` і опис —
+    окремим полем. Точний збіг рядків ключа тут мовчки губив справу, і пакет
+    їхав без кадрів і без посилання на скани. Опис звіряється ПОЛЕМ: під
+    `CDIAK/224/49` лежать і оп.1, і оп.2 спр.49, тож «ключ без опису» сам по
+    собі взяв би кадри чужої книги.
+    """
+    if str(row.get("key") or "") == key:
+        return True
+    want = _key_parts(key)
+    if want is None or not want[2]:
+        return False
+    repo, fond, opys, spr = want
+    return (str(row.get("repo") or "") == repo
+            and str(row.get("fond") or "") == fond
+            and str(row.get("opys") or "") == opys
+            and str(row.get("spr") or "") == spr)
+
+
+def _frames_dir(p: Path) -> Path | None:
+    """Тека, де лежать самі кадри: `p` або `p/pages`."""
+    for d in (p, p / FRAMES_SUBDIR):
+        if d.is_dir() and any(is_frame(x) for x in d.iterdir()):
+            return d
+    return None
+
+
 def case_dir_for(case_key: str) -> Path | None:
     """Тека кадрів цієї справи на ЦІЙ машині — або нічого.
 
@@ -299,13 +344,14 @@ def case_dir_for(case_key: str) -> Path | None:
     except Exception:
         return None
     for row in rows:
-        if str(row.get("key") or "") != key:
+        if not _row_matches(row, key):
             continue
         for rel in [row.get("path"), *(row.get("extra_paths") or [])]:
             if not rel:
                 continue
             p = Path(rel)
             p = p if p.is_absolute() else root / p
-            if p.is_dir() and any(is_frame(x) for x in p.iterdir()):
-                return p
+            got = _frames_dir(p)
+            if got is not None:
+                return got
     return None

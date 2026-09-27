@@ -26,3 +26,10 @@ def test_saidkar_vazhyt_bilshe() -> None:
     got = _merge_refs(saidkar, [{"source": "commons", "ref": "file:B.pdf"},
                                 {"source": "fs", "ref": "dgs:1"}])
     assert [r["ref"] for r in got] == ["file:A.pdf", "dgs:1"]
+
+
+def test_archium() -> None:
+    url = "https://archium.cdiak.archives.gov.ua/file-viewer/119094/"
+    got = _refs_from_links([{"label": "ARCHIUM", "url": url}])
+    # Та сама форма, що з сайдкара (`viewer_id`) — інакше дві зйомки не склеїти.
+    assert got == [{"source": "archium", "ref": "file:119094", "url": url}]

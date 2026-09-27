@@ -338,6 +338,11 @@ def _refs_from_links(links: list[dict[str, str]]) -> list[dict[str, str]]:
                         r"(\d{6,9})", url, re.IGNORECASE)
         if dgs:
             out.append({"source": "fs", "ref": f"dgs:{dgs.group(1)}", "url": url})
+            continue
+        # Та сама форма, що пише сайдкар (`viewer_id` → `file:<id>`).
+        archium = re.search(r"archium\.[\w.-]+/file-viewer/(\d+)", url, re.IGNORECASE)
+        if archium:
+            out.append({"source": "archium", "ref": f"file:{archium.group(1)}", "url": url})
     return out
 
 
