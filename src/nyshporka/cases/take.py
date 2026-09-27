@@ -47,6 +47,27 @@ def _row(key: str) -> tuple[str, str, str, str, str, dict[str, Any], Path]:
     return repo, fond, opys, spr, letter, row, path
 
 
+#: Опис за замовчуванням не блокує, але називається вголос: той самий номер в
+#: іншому описі — фізично інша справа.
+OPYS_ASSUMED = ("опис у ключі не названо — взято {opys}. Якщо справа з іншого "
+                "опису фонду {fond}, це інша книга: назвіть опис явно "
+                "({repo}/{fond}/<опис>/{spr})")
+
+
+def opys_named(key: str) -> bool:
+    """Чи назвав ключ опис. Ні — `parse_key` підставив «1», і людина мусить це знати.
+
+    Опис за замовчуванням лишається: справа береться з реєстру опису, тож
+    рядок під «1» справді існує. Але якщо мали на увазі інший опис того самого
+    фонду, це вже інша справа з тим самим номером — і мовчки взяти не ту
+    означає покласти її під чужою шифрою.
+    """
+    from nyshporka.fonds import registry as F
+
+    m = F._key_re().match(key.strip())
+    return bool(m and m.group(3))
+
+
 def case_dir_for(repo: str, fond: str, spr: str, letter: str) -> Path:
     """Куди лягає справа. Те саме правило, що й у решти конвеєра.
 
@@ -67,7 +88,7 @@ def plan(key: str) -> dict[str, Any]:
     Окремо від самого взяття, бо відповідь «каналу немає» коштує нуль секунд, а
     дізнаватись про неї після півгодини качання — марна робота.
     """
-    return _plan_from(*_row(key)[:6])
+    return {**_plan_from(*_row(key)[:6]), "opys_assumed": not opys_named(key)}
 
 
 def _plan_from(repo: str, fond: str, opys: str, spr: str, letter: str,
@@ -120,7 +141,8 @@ def take(key: str, *, force: bool = False, reindex: bool = True,
     from nyshporka.cases import acquire as A
 
     repo, fond, opys, spr_i, letter, row, _ = _row(key)
-    p = _plan_from(repo, fond, opys, spr_i, letter, row)
+    p = {**_plan_from(repo, fond, opys, spr_i, letter, row),
+         "opys_assumed": not opys_named(key)}
     if not p["channel"]:
         raise TakeError(p["why"])
     spr = p["spr"]

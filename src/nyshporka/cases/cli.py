@@ -754,6 +754,8 @@ def cmd_take(key: str = typer.Argument(..., help="DAHMO/230/43 або DAHMO/230/
         raise typer.Exit(2)
 
     console.print(f"[muted]канал: {plan['channel']} — {plan['why']}[/muted]")
+    if plan.get("opys_assumed"):
+        console.print(f"[warn]⚠ {T.OPYS_ASSUMED.format(**plan)}[/warn]")
     if dry_run:
         console.print(f"[muted]узяв би: {plan['ref']}[/muted]")
         console.print(f"[muted]у теку : {plan['case_dir']}[/muted]")

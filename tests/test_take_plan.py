@@ -121,3 +121,21 @@ def test_a_broken_key_is_refused_with_examples(space):
     with pytest.raises(T.TakeError) as e:
         T.plan("щось не те")
     assert "не розумію ключ" in str(e.value)
+
+
+# ── опис за замовчуванням ────────────────────────────────────────────────────
+@pytest.mark.parametrize("key, named", [
+    ("DADNO/193/213", False),
+    ("DADNO/193/3/213", True),
+    ("ДАДнО 193-3-213", True),
+    ("DAHMO/230/43", False),
+])
+def test_a_key_without_opys_is_told_apart(key, named):
+    """Опис «1» підставляється й далі, але людина мусить знати, що його не
+    назвали: той самий номер в іншому описі — фізично інша справа."""
+    assert T.opys_named(key) is named
+
+
+def test_the_assumed_opys_is_named_in_words():
+    text = T.OPYS_ASSUMED.format(repo="DADNO", fond="193", opys="1", spr="213")
+    assert "взято 1" in text and "DADNO/193/<опис>/213" in text

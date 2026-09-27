@@ -586,6 +586,8 @@ def fond_take(a: FondTakeArgs) -> Envelope:
     except T.TakeError as exc:
         return fail(str(exc))
     env = ok(got)
+    if got.get("opys_assumed"):
+        env.warn("opys_assumed", T.OPYS_ASSUMED.format(**got))
     if got.get("shifra_needs_eye"):
         # ⚠ Узяти можна, вірити шифрі — ні. Номер відновлено інтерполяцією за
         # сусідами в опису, і помилка тут дає правдоподібну шифру на чужій
