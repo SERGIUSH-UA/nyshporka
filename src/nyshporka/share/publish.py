@@ -424,6 +424,26 @@ def _with_registry(own: list[dict[str, str]], shifra: str) -> list[dict[str, str
     return out
 
 
+def _znamennyk(frames_block: dict[str, Any],
+               row: dict[str, Any] | None) -> dict[str, Any]:
+    """Знаменник покриття — кадри КОПІЇ справи, а не теки на диску.
+
+    🔴 Тека тримає рівно те, що скачали: з дзеркала взяли 5 кадрів із 824 — і
+    маніфест казав «5 із 5», каталог Супряги малював повну смугу, а ворота
+    20 % такий уривок пропускали. Реєстр опису знає, скільки кадрів має
+    копія. Поріг той самий, що в «partial» бібліотеки: завантажувач пропускає
+    технічні кадри, і дрібний недобір — не уривок.
+    """
+    from nyshporka.fonds.registry import _PARTIAL_RATIO, expected_frames
+
+    want = expected_frames(row) if row else 0
+    have = int(frames_block.get("total") or 0)
+    if want and have < want * _PARTIAL_RATIO:
+        # `listed` лишається кадрами на диску: за ним іде прив'язка тексту.
+        return {**frames_block, "total": want, "on_disk": have}
+    return frames_block
+
+
 def build_manifest(scope: str, *,
                    hash_frames: bool = False,
                    publisher: str = "", contact: str = "", site: str = "",
@@ -497,6 +517,7 @@ def build_manifest(scope: str, *,
         # картці, доки архів не з'явиться в довіднику пакета.
         case["repo_name"] = archive_name.strip()[:120]
     row = opys.registry_row(str(case.get("shifra") or ""))
+    frames_block = _znamennyk(frames_block, row)
     # Паспорт мовчить або тримає робочу нотатку — назву й роки дає реєстр
     # опису: він вичитаний з друкованого опису фонду, а не складений нами.
     library = next((str(r.get("title") or "") for r in info.get("rows") or []
