@@ -188,6 +188,8 @@ def share_pack(a: SharePackArgs) -> Envelope:
     gates = got.get("gates") or {}
     for w in gates.get("warnings") or []:
         env.warn(str(w.get("code") or "gate"), str(w.get("text") or ""))
+    for w in got.get("opys_check") or []:
+        env.warn(str(w.get("code") or "opys"), str(w.get("text") or ""))
     # 🔴 `--dry-run` не пише файл і тому не падає на воротах — але відмова
     # мусить бути видна: доти `pack --dry-run --json` віддавав `ok` без
     # жодного сліду, що справжнє пакування не пройде.
@@ -509,6 +511,8 @@ def share_autoshare(a: ShareAutoshareArgs) -> Envelope:
         return env
 
     env = ok({"packed": True, "path": got.get("path"), "bytes": got.get("bytes")})
+    for w in got.get("opys_check") or []:
+        env.warn(str(w.get("code") or "opys"), str(w.get("text") or ""))
     try:
         viddane = viddaty(Path(str(got["path"])))
     except UploadError as exc:

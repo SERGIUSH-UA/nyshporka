@@ -13,7 +13,16 @@ import time
 from pathlib import Path
 from typing import Any
 
-from nyshporka.share import align, bundle, catalog, fingerprint, gates, journal, opys
+from nyshporka.share import (
+    align,
+    bundle,
+    catalog,
+    fingerprint,
+    gates,
+    journal,
+    opys,
+    opys_check,
+)
 from nyshporka.share.bundle import Manifest
 
 
@@ -690,6 +699,9 @@ def pack(scope: str, dest: Path | None = None, *, geometry: bool = True,
         "bytes_raw": sketch["bytes"],
         "frames_listed": len(frames),
         "geometry_on_disk": bool(geom_dirs),
+        # Чи названо той опис: пул — завжди (офлайн), покажчик — лише в пробі,
+        # бо це запит у мережу. Лише підказки, заливку вони не зупиняють.
+        "opys_check": opys_check.check(m.case, network=dry_run),
     }
     if dry_run:
         out["files_list"] = [f["arc"] for f in sketch["files"]]
