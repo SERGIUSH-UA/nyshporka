@@ -165,3 +165,39 @@ def test_register_op_names_the_new_key(space: Path) -> None:
     note = next((w.text for w in env.warnings if w.code == "own_key"), "")
     assert "DADNO/193-3/213" in note and "DADNO/193/213" in note
     assert not any(w.code == "key_mismatch" for w in env.warnings), env.warnings
+
+
+def _passport(d: Path, shifra: str, opys: str) -> None:
+    """Паспорт, який пише завантажувач, а не реєстрація: реєстру ключів він не чіпає."""
+    (d / "_source.json").write_text(json.dumps(
+        {"shifra": shifra, "opis": opys}, ensure_ascii=False), encoding="utf-8")
+
+
+def test_a_folder_of_another_opys_is_not_swallowed_as_a_second_shot(space: Path) -> None:
+    """Тека `dadno_193/spr-213` (ім'я без опису) з паспортом оп. 3 поруч зі
+    справою оп. 1 — окремий запис бібліотеки, а не `extra_paths` чужої книги."""
+    kat = _katerynoslav(space)
+    nik = _folder(space, "dadno_193/spr-213")
+    _passport(nik, "ДАДнО 193-3-213", "3")
+    entries = _rebuild()
+    rel = nik.relative_to(space).as_posix()
+    first = next(e for e in entries if e.path == kat.relative_to(space).as_posix())
+    assert rel not in first.extra_paths
+    assert any(e.path == rel and e.opys == "3" for e in entries)
+
+
+def test_doctor_names_two_opysy_under_one_key_and_registration_heals_it(
+        space: Path) -> None:
+    from nyshporka.setup import doctor as D
+
+    _katerynoslav(space)
+    nik = _folder(space, "dadno_193/spr-213")
+    _passport(nik, "ДАДнО 193-3-213", "3")
+    _rebuild()
+    got = D._shared_keys()
+    assert got.level == "warn" and "DADNO/193/213" in got.detail, got
+
+    R.describe(nik, shifra="ДАДнО 193-3-213")
+    _rebuild()
+    assert D._shared_keys().level == "ok"
+    assert L._mk_key("DADNO", "193", "213", "1") == "DADNO/193/213"

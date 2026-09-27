@@ -1815,7 +1815,16 @@ def build_library() -> list[CaseEntry]:
             #  · різне село — том метрик повіту нарізаний по селах, і вирізка Царевки
             #    не є «іншим ракурсом» вирізки Фузовки, а окремим входом прогону.
             # Решта (справа на двох плівках, `_reshoot`, сторінкові рендери) — extra_paths.
-            other_opys = bool(parsed and parsed[2] and entry.opys and parsed[2] != entry.opys)
+            # 🔴 Опис теки — з імені, а коли ім'я мовчить (`dadno_193/spr-213`), з
+            # паспорта. Доти паспорт тут не питався, і тека справи 193-3-213
+            # мовчки дописувалась до справи 193-1-213 як «другий ракурс» — хоча
+            # інший опис це фізично інша книга.
+            opys_here = parsed[2] if parsed else None
+            if parsed and not opys_here:
+                side = _sidecar_case(rel)
+                if side and side[1] == parsed[1] and side[3] == parsed[3]:
+                    opys_here = side[2]
+            other_opys = bool(opys_here and entry.opys and opys_here != entry.opys)
             v_new, v_old = _sidecar_village(rel), _sidecar_village(entry.path)
             if other_opys or (v_new and v_old and v_new != v_old):
                 pass  # → нижче створиться свій запис
@@ -1842,8 +1851,13 @@ def build_library() -> list[CaseEntry]:
         # нова справа поза каноном → fallback-назва
         repo, fond, opys, spr = parsed
         fb = _fallback_name(rel, parsed)
-        # опис із каталогу авторитетніший за дефолт фонду (ім'я теки його не несе)
-        opys = opys or fb.get("opys_hint") or _DEFAULT_OPYS.get((repo, fond))
+        # опис із каталогу авторитетніший за дефолт фонду (ім'я теки його не несе);
+        # за каталогом — паспорт теки: без нього тека `spr-213` з паспортом оп. 3
+        # лягала б поруч зі справою оп. 1 без опису, тобто як та сама книга
+        side = _sidecar_case(rel) if not opys else None
+        side_opys = side[2] if side and side[1] == fond and side[3] == spr else None
+        opys = (opys or fb.get("opys_hint") or side_opys
+                or _DEFAULT_OPYS.get((repo, fond)))
         # ⚠️ ключ рахується після доповнення опису: для `_OPYS_IN_KEY`-фондів опис
         # у ключі, і порахований до цього рядка ключ був би без опису (два різні
         # описи злиплися б в один запис бібліотеки).
