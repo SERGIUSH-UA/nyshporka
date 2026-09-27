@@ -58,7 +58,15 @@ class Verdict:
 
 
 def check(manifest: Manifest, *, partial_why: str = "") -> Verdict:
-    """Проганяє пакет крізь усі ворота. `partial_why` знімає ворота знаменника."""
+    """Проганяє пакет крізь усі ворота. `partial_why` знімає ворота знаменника.
+
+    🔴 Без явного `partial_why` причина береться з маніфесту
+    (`extra["partial"]`, туди її кладе `pack --partial`). Сервер кличе ворота
+    саме так — без аргументу, покладаючись на маніфест, — і ворота цього поля
+    не читали: пакет, який клієнт з `--partial` пропустив, сервер відхиляв
+    тим самим «уривком». Часткову справу не було як залити взагалі.
+    """
+    partial_why = partial_why or str((manifest.extra or {}).get("partial") or "")
     v = Verdict()
     _gate_denominator(manifest, v, partial_why=partial_why)
     _gate_model(manifest, v)

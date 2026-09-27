@@ -42,3 +42,13 @@ def test_vorota_bachat_uryvok() -> None:
 
     assert uryvok(gates.check(m))
     assert not uryvok(gates.check(m, partial_why="кадри 1-5 — титул і покажчик"))
+
+
+def test_prychyna_urivka_z_manifestu() -> None:
+    # Сервер кличе ворота без `partial_why`: причину мусить дати маніфест.
+    m = Manifest(case={"shifra": "ЦДІАК 127-1078-2901"},
+                 frames=_blok(195), extra={"partial": "прочитано кадри 1–14 із 195"},
+                 decode={"pages": 14, "voices": [{"model": "m", "pages": 14}]})
+    v = gates.check(m)
+    assert not any("уривок" in r for r in v.refusals), v.refusals
+    assert any("1–14" in t for c, t in v.warnings if c == "partial")
