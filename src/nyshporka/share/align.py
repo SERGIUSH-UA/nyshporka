@@ -324,6 +324,48 @@ def _frames_dir(p: Path) -> Path | None:
     return None
 
 
+def case_home_for(case_key: str, opys: str = "") -> Path | None:
+    """Тека СПРАВИ — паспорт, навіть коли кадрів у ній уже немає.
+
+    🔴 Кадри після прочитання прибирають (`_frames_removed.json`), і тоді
+    `case_dir_for` мовчить — а з ним мовчав і паспорт: пакет їхав без
+    посилання на скани й без знаменника, хоча `_source.json` знає і перше, і
+    друге. Шукає бібліотекою, а потім за адресою з шифри (`cases take`) у
+    кожному корені справ простору.
+
+    `opys` — коли ключ опису не несе (`CDIAK/127/1660`): тека чужого опису з
+    тим самим номером справи не береться.
+    """
+    from nyshporka.cases.register import read_sidecar
+    from nyshporka.library import _norm_spr, _sidecar_opys
+
+    key = (case_key or "").strip()
+    got = case_dir_for(key)
+    if got is not None:
+        return got.parent if got.name == FRAMES_SUBDIR else got
+    parts = _key_parts(key)
+    if parts is None:
+        return None
+    repo, fond, opys_key, spr = parts
+    want = _norm_spr(opys_key or opys.strip())
+    try:
+        from nyshporka.core.workspace import workspace
+        from nyshporka.fonds import registry as F
+        ws = workspace()
+    except Exception:
+        return None
+    slug = f"{F.REPO_SLUG.get(repo, repo.lower())}_{fond}"
+    for base in ws.case_roots():
+        d = base / slug / f"spr-{spr}"
+        if not d.is_dir():
+            continue
+        have = _sidecar_opys(read_sidecar(d))
+        if want and have and have != want:
+            continue
+        return d
+    return None
+
+
 def case_dir_for(case_key: str) -> Path | None:
     """Тека кадрів цієї справи на ЦІЙ машині — або нічого.
 

@@ -449,6 +449,49 @@ def _znamennyk(frames_block: dict[str, Any],
     return frames_block
 
 
+def _opys_hint(info: dict[str, Any]) -> str:
+    """Опис справи з `case_key` прогонів — коли ключ бібліотеки його не несе."""
+    for r in info.get("rows") or []:
+        parts = str(r.get("case_key") or "").split("/")
+        if len(parts) == 3 and "-" in parts[1]:
+            return parts[1].split("-", 1)[1]
+    return ""
+
+
+def _znamennyk_z_pasporta(frames_block: dict[str, Any],
+                          home: Path | None) -> dict[str, Any]:
+    """Скільки кадрів мала справа, коли самих кадрів на диску вже немає.
+
+    🔴 Лише знаменник: `listed` лишається нулем, бо прив'язувати текст нема
+    до чого, і відбитка теж не буде. Але «кадрів не названо» там, де паспорт
+    знає число, змушувало картку мовчати про повноту прочитаного.
+    """
+    from nyshporka.cases.register import read_sidecar
+
+    if home is None or frames_block.get("total"):
+        return frames_block
+    side = read_sidecar(home)
+    removed: dict[str, Any] = {}
+    f = home / "_frames_removed.json"
+    if f.is_file():
+        try:
+            import json
+
+            got = json.loads(f.read_text(encoding="utf-8"))
+            removed = got if isinstance(got, dict) else {}
+        except (OSError, ValueError):
+            removed = {}
+    for value in (removed.get("frames_was"), side.get("frames"),
+                  side.get("frames_got"), side.get("n_pages")):
+        try:
+            n = int(value or 0)
+        except (TypeError, ValueError):
+            continue
+        if n > 0:
+            return {**frames_block, "total": n, "on_disk": 0}
+    return frames_block
+
+
 def build_manifest(scope: str, *,
                    hash_frames: bool = False,
                    publisher: str = "", contact: str = "", site: str = "",
@@ -471,6 +514,9 @@ def build_manifest(scope: str, *,
     key = str(info.get("key") or "")
     case_dir = align.case_dir_for(key) if key else None
     frames = align.frames_of(case_dir, hash_frames=hash_frames) if case_dir else []
+    # Тека справи — паспорт — буває й без кадрів (прибрані після читання).
+    # Кадри й відбиток — лише з `case_dir`; опис, посилання й знаменник — звідси.
+    home = align.case_home_for(key, _opys_hint(info)) if key else None
     voices = [bundle.voice_of(d) for d in run_dirs]
     voices = [v for v in voices if v.pages]
     if not voices:
@@ -516,7 +562,9 @@ def build_manifest(scope: str, *,
     lic = {"text": license_text, "images": "не входять"}
     if source_terms:
         lic["source_terms"] = source_terms
-    case = _opys_z_progoniv(_normalize_shifra(_case_block(info, case_dir), key), info)
+    if not frames:
+        frames_block = _znamennyk_z_pasporta(frames_block, home)
+    case = _opys_z_progoniv(_normalize_shifra(_case_block(info, home), key), info)
     if archive_name.strip():
         # Архіву немає в довіднику — назву дає людина. Сервер покаже її на
         # картці, доки архів не з'явиться в довіднику пакета.
@@ -544,7 +592,7 @@ def build_manifest(scope: str, *,
         # цієї справи й з назвою джерела.
         from nyshporka.cases.register import read_sidecar
 
-        side = read_sidecar(case_dir) if case_dir else {}
+        side = read_sidecar(home) if home else {}
         nazva = (opys.catalog_title(row)
                  or opys.passport_title(side, str(case.get("doc_type") or "")))
         if nazva:
@@ -577,7 +625,7 @@ def build_manifest(scope: str, *,
         case["details"] = described
     m = Manifest(
         case=case,
-        refs=_merge_refs(_refs_from_sidecar(case_dir), _refs_from_links(list(links or []))),
+        refs=_merge_refs(_refs_from_sidecar(home), _refs_from_links(list(links or []))),
         frames=frames_block, decode=decode, publisher=pub, note=note,
         links=_with_registry(list(links or []), str(case.get("shifra") or "")),
         extra=dict(extra or {}), license=lic,

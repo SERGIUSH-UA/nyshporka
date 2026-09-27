@@ -55,3 +55,54 @@ def test_nevidomyi_opys_ne_bere_chuzhu_knygu(biblioteka: Path) -> None:
 
 def test_saidkar_z_teky_vyshche_pages(biblioteka: Path) -> None:
     assert read_sidecar(biblioteka / "raw/op2-49/pages") == {"viewer_id": "49"}
+
+
+def _bez_kadriv(root: Path, opys: str, frames: int) -> Path:
+    d = root / "data" / "raw" / "cdiak_127" / "spr-1660"
+    (d / "pages").mkdir(parents=True)
+    (d / "_source.json").write_text(json.dumps({
+        "opys": opys, "frames": frames, "viewer_id": "133462",
+        "viewer_url": "https://archium.cdiak.archives.gov.ua/file-viewer/133462/"}),
+        encoding="utf-8")
+    (d / "_frames_removed.json").write_text(json.dumps({"frames_was": frames}),
+                                            encoding="utf-8")
+    return d
+
+
+@pytest.fixture
+def bez_kadriv(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Кадри прибрано після читання, у бібліотеці справи немає."""
+    import nyshporka.core.workspace as ws
+    import nyshporka.library as lib
+    raw = tmp_path / "data" / "raw"
+    monkeypatch.setattr(ws, "workspace",
+                        lambda: SimpleNamespace(root=tmp_path, case_roots=lambda: [raw]))
+    monkeypatch.setattr(lib, "load_library", lambda: [])
+    return tmp_path
+
+
+def test_teka_bez_kadriv_daie_pasport_i_znamennyk(bez_kadriv: Path) -> None:
+    from nyshporka.share.publish import _refs_from_sidecar, _znamennyk_z_pasporta
+
+    d = _bez_kadriv(bez_kadriv, "1078", 169)
+    assert align.case_dir_for("CDIAK/127-1078/1660") is None, "кадрів немає"
+    home = align.case_home_for("CDIAK/127/1660", opys="1078")
+    assert home == d
+    assert _refs_from_sidecar(home)[0]["ref"] == "file:133462"
+    blok = _znamennyk_z_pasporta({"total": 0, "listed": 0}, home)
+    assert blok["total"] == 169 and blok["listed"] == 0
+
+
+def test_teka_chuzhoho_opysu_ne_beretsia(bez_kadriv: Path) -> None:
+    _bez_kadriv(bez_kadriv, "699", 40)
+    assert align.case_home_for("CDIAK/127/1660", opys="1078") is None
+    assert align.case_home_for("CDIAK/127-1078/1660") is None
+
+
+def test_kod_os_bez_shliakhu() -> None:
+    from nyshporka.share.upload import _kod_os
+
+    exc = PermissionError(13, "Процес не має доступу", "imia/paket.nyshtext")
+    got = _kod_os(exc)
+    assert got.startswith("PermissionError errno=13")
+    assert "imia" not in got and "paket" not in got

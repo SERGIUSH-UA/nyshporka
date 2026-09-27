@@ -223,8 +223,10 @@ def publish(path: Path, *, base: str = "", auth: str = "",
                           chomu=exc.chomu) from exc
     except OSError as exc:
         # Шлях до файлу в причину не йде: у ньому ім'я користувача машини.
+        # Код помилки ОС іде — без нього «OSError» не відрізнити «файл
+        # зайнятий антивірусом» (winerror 32) від «файлу немає» (errno 2).
         _zvit_pro_zbii(home, tok, vnesok, etap,
-                       f"не прочитався файл пакета: {type(exc).__name__}")
+                       f"не прочитався файл пакета: {_kod_os(exc)}")
         raise UploadError(f"не прочитати пакет: {exc}", klas=VIDMOVA) from exc
     except KeyboardInterrupt:
         _zvit_pro_zbii(home, tok, vnesok, etap, "перервано (Ctrl+C)")
@@ -341,6 +343,20 @@ def _zvit_pro_zbii(home: str, tok: str, vnesok: Any, etap: str, prychyna: str) -
     except Exception:
         # Звіт про збій сам не падає.
         pass
+
+
+def _kod_os(exc: OSError) -> str:
+    """`PermissionError errno=13 winerror=32` — тип і коди, без шляху й тексту.
+
+    Текст помилки Windows несе шлях до файлу, а в ньому ім'я користувача.
+    """
+    out = [type(exc).__name__]
+    if exc.errno is not None:
+        out.append(f"errno={exc.errno}")
+    winerror = getattr(exc, "winerror", None)
+    if winerror is not None:
+        out.append(f"winerror={winerror}")
+    return " ".join(out)
 
 
 #: Чим закінчилась віддача — одне слово на всі обличчя.
