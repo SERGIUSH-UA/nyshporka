@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import time
 import weakref
 from pathlib import Path
@@ -422,13 +423,29 @@ async def _start_read(bus: JobBus, ws: Workspace,
         # саме завдання, а не другий прогін, що б'ється з першим за карту.
         # 🔴 N шардів — одне завдання: вони пишуть в одну теку й разом
         # становлять один прогін.
-        idempotency_key=f"read:{plan.out_dir}",
+        # 🔴 І те, ЩО саме читати (аудит 29.09.2026). Ключ із самої теки
+        # віддавав на «сторінки 11-20» живе завдання «сторінки 1-10»: людина
+        # бачила чужий прогін як свій, а просили її ніхто не виконував. Другий
+        # прогін у ту саму теку тут не небезпечний — читання стоять у черзі за
+        # гейтом карти, тож вони йдуть по одному.
+        idempotency_key=_read_key(plan, limit=limit, pages=pages),
     )
     if created:
         _keep(asyncio.create_task(
             _run_read(bus, job, plan, case_key, cmds,
                       partial=bool(limit or pages))))
     return job
+
+
+def _read_key(plan: Any, *, limit: int, pages: str) -> str:
+    """Ключ ідемпотентності читання: тека виходу + що саме в неї читається.
+
+    Кількість процесів у ключ не йде навмисно: це швидкість того самого
+    прогону, а не інший прогін.
+    """
+    what = {"pages": pages, "limit": limit, "model": plan.model.name,
+            "voices": [v.name for v in plan.voices]}
+    return f"read:{plan.out_dir}:{json.dumps(what, ensure_ascii=False, sort_keys=True)}"
 
 
 async def _run_read(bus: JobBus, job: JobRecord, plan: Any, case_key: str,
