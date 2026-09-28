@@ -79,3 +79,19 @@ def test_shrink_dir_follows_the_run_name(tmp_path: Path, monkeypatch) -> None:
     case = _case(tmp_path, "cdiak_2")
     assert F.shrink_dir_for(case).name == "spr-145"
     assert F.shrink_dir_for(case, name="cdiak_2-spr-145").name == "cdiak_2-spr-145"
+
+
+def test_shyfra_i_kliuch_tiiei_samoi_spravy_ne_chuzhi(tmp_path: Path) -> None:
+    """Раннер пише в мету шифру паспорта, `cloud go` — ключ бібліотеки. Рядком
+    вони різні, і доти 318 з 755 прочитаних справ діставали нове ім'я."""
+    rep = tmp_path / "rep"
+    _run(rep, "spr-169", case_key="CDIAK/2/169")
+    case = _case(tmp_path, "cdiak_2", "spr-169")
+    assert run_name(case, "ЦДІАК 2-1-169", reports=rep) == "spr-169"
+
+
+def test_ta_sama_teka_kadriv_peremahaie_riznu_formu_kliucha(tmp_path: Path) -> None:
+    rep = tmp_path / "rep"
+    case = _case(tmp_path, "cdiak_2", "spr-169")
+    _run(rep, "spr-169", case_key="ЦДІАК 2-1-169", case_dir=str(case))
+    assert run_name(case, "CDIAK/2/169", reports=rep) == "spr-169"

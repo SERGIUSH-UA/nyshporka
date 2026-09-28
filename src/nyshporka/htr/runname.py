@@ -52,17 +52,31 @@ def _belongs_elsewhere(meta: dict, frames_dir: Path, case_key: str) -> bool:
     збігтись у двох справ. Тоді лишаємо голе ім'я — краще один зайвий збіг, ніж
     друге читання справи, яку вже прочитано.
     """
-    have = str(meta.get("case_key") or "").strip().lower()
-    want = str(case_key or "").strip().lower()
+    mdir = str(meta.get("case_dir") or "").strip()
+    norm = _norm(mdir) if mdir else ""
+    # Та сама тека кадрів — та сама справа, хоч би як записано ключ.
+    if norm and "/cloud/frames/" not in norm and norm == _norm(frames_dir):
+        return False
+    have = _canon(str(meta.get("case_key") or ""))
+    want = _canon(str(case_key or ""))
     if have and want:
         return have != want
-    mdir = str(meta.get("case_dir") or "").strip()
-    if not mdir:
-        return False
-    norm = _norm(mdir)
-    if "/cloud/frames/" in norm:
+    if not norm or "/cloud/frames/" in norm:
         return False
     return norm != _norm(frames_dir)
+
+
+def _canon(key: str) -> str:
+    """Ключ у канонічній формі. 🔴 Рядком не порівнювати: раннер пише в мету
+    шифру паспорта («ЦДІАК 2-1-169»), а `cloud go` і старі мети — ключ
+    бібліотеки («CDIAK/2/169»). Порівняння рядків бачило в цьому дві справи й
+    давало 318 з 755 прочитаних справ нове ім'я — тобто повторне читання."""
+    key = key.strip()
+    if not key:
+        return ""
+    from nyshporka.htr_store import _canon_case_key
+
+    return _canon_case_key(key).strip().lower()
 
 
 def run_name(frames_dir: str | Path, case_key: str = "", *,

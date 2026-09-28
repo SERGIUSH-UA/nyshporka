@@ -289,9 +289,13 @@ def _key_parts(key: str) -> tuple[str, str, str, str] | None:
     parts = key.split("/")
     if len(parts) != 3:
         return None
-    repo, fond, spr = parts
-    fond, _, opys = fond.partition("-")
-    return repo, fond, opys, spr
+    from nyshporka.library import split_fond_opys
+
+    repo, fond_part, spr = parts
+    # Літерний фонд (`R-6129`) — один сегмент: різання за першим дефісом давало
+    # фонд «R» з описом «6129», і пакувальник шукав паспорт у `dahmo_R/`.
+    fond, opys = split_fond_opys(fond_part)
+    return repo, fond, opys or "", spr
 
 
 def _row_matches(row: dict[str, Any], key: str) -> bool:

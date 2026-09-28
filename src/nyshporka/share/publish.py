@@ -535,10 +535,15 @@ def _znamennyk(frames_block: dict[str, Any],
 
 def _opys_hint(info: dict[str, Any]) -> str:
     """Опис справи з `case_key` прогонів — коли ключ бібліотеки його не несе."""
+    from nyshporka.library import split_fond_opys
+
     for r in info.get("rows") or []:
         parts = str(r.get("case_key") or "").split("/")
-        if len(parts) == 3 and "-" in parts[1]:
-            return parts[1].split("-", 1)[1]
+        if len(parts) == 3:
+            # Літерний фонд (`R-6129`) — один сегмент, а не фонд із описом.
+            _fond, opys = split_fond_opys(parts[1])
+            if opys:
+                return opys
     return ""
 
 

@@ -60,3 +60,20 @@ def parse_series(value: str) -> str | None:
     """`VYD/PEV` → `"PEV"`: усі роки видання як одна область пошуку."""
     m = _SERIES_RE.match((value or "").strip())
     return m.group(1).upper() if m else None
+
+
+_RUN_RE = re.compile(r"^vyd_([a-z][a-z0-9_]{1,23})_(\d{4})$", re.IGNORECASE)
+
+
+def from_run(name: str, meta_key: str = "") -> str | None:
+    """Ключ видання для прогону: з мети, а без неї — з імені `vyd_<код>_<рік>`.
+
+    Реєстр справ питає це ПЕРЕД угадуванням справи за іменем теки: інакше рік
+    у `vyd_pev_1869` читається як номер справи й прогін газети лягає на чужу
+    архівну справу з тим самим номером.
+    """
+    got = parse(meta_key) if meta_key else None
+    if got is None:
+        m = _RUN_RE.match(name or "")
+        got = (m.group(1).upper(), int(m.group(2))) if m else None
+    return key(*got) if got else None

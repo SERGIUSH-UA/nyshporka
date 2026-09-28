@@ -109,3 +109,16 @@ def test_summary_counts_what_is_provable(tmp_path: Path) -> None:
                    fs_meta={"0001": {"apid": "A1", "sha256": "cd" * 32}})
     got = align.summary(align.frames_of(d))
     assert got == {"total": 2, "listed": 2, "with_sha256": 1, "with_apid": 1}
+
+
+def test_liternyi_fond_ne_rizhetsia_na_fond_i_opys() -> None:
+    """`R-6129` — один фонд. Різання за першим дефісом давало фонд «R» з описом
+    «6129», і справа без кадрів на диску пакувалась без паспорта."""
+    from nyshporka.share.align import _key_parts
+    from nyshporka.share.publish import _opys_hint
+
+    assert _key_parts("DAHMO/R-6129/7") == ("DAHMO", "R-6129", "", "7")
+    assert _key_parts("DAHMO/R-6129-24/7") == ("DAHMO", "R-6129", "24", "7")
+    assert _key_parts("CDIAK/224-2/49") == ("CDIAK", "224", "2", "49")
+    assert _opys_hint({"rows": [{"case_key": "DAHMO/R-6129/7"}]}) == ""
+    assert _opys_hint({"rows": [{"case_key": "CDIAK/224-2/49"}]}) == "2"

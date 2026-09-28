@@ -661,6 +661,8 @@ def pull_cmd(
                                  help="код друкованого видання (PEV, BEV, KHEV…): "
                                       "усі його роки одним викликом"),
     years: str = typer.Option("", "--years", help="роки видання: «1880» або «1862-1905»"),
+    force: bool = typer.Option(False, "--force",
+                               help="з --vydannia: перекласти вже взяті роки новішими"),
     as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Знайти справу в каталозі пулу — і за потреби одразу прийняти.
@@ -672,7 +674,7 @@ def pull_cmd(
 
     _kliuch_abo_vkhid(as_json)
     env = O.call("share.pull", {"query": query, "base": base, "take": take,
-                                "vydannia": vydannia, "years": years})
+                                "vydannia": vydannia, "years": years, "force": force})
     if _answer(env, as_json):
         return
     d = env.data or {}

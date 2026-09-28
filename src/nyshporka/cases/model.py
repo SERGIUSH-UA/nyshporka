@@ -29,7 +29,7 @@ class RunLink:
 
     run: str                       # ім'я теки прогону / ключ clan_hunt
     key: str | None = None         # "DAHMO/315/7864"
-    resolved_by: str = ""          # case_dir | run_name | derived | override | none
+    resolved_by: str = ""          # case_dir | run_name | derived | override | vydannia | none
     note: str = ""                 # чому саме так (для overrides і спірних випадків)
     case_dir: str = ""             # як записано в меті прогону (буває шлях боксу)
 

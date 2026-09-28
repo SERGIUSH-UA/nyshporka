@@ -459,6 +459,15 @@ def resolve_run(name: str, case_dir: str = "", index: LibraryIndex | None = None
     if ov is not None:                                   # 1) рішення людини
         return RunLink(run=name, key=ov.get("key") or None, resolved_by="override",
                        note=ov.get("why") or ov.get("label") or "", case_dir=case_dir)
+    # Друковане видання (`VYD/<код>/<рік>`) архівною справою не є й у бібліотеці
+    # його немає. Без цієї гілки розбір імені нижче бере рік із `vyd_pev_1869`
+    # за номер справи й тихо приписує газету чужій справі №1869.
+    from nyshporka import vydannia
+
+    vyd = vydannia.from_run(name, meta_key)
+    if vyd:
+        return RunLink(run=name, key=vyd, resolved_by="vydannia", case_dir=case_dir,
+                       note="друковане видання")
     # 2) ключ, записаний самим прогоном (`case_key` у меті) — його рахували там,
     # де тека справи ще була під рукою, тож він надійніший за будь-який здогад.
     # ⚠ Ключ збірки має вигляд `DAVO/904/@opys24` — «@» стоїть у третьому

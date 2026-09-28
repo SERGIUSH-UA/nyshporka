@@ -838,6 +838,8 @@ class SharePullArgs(BaseModel):
                           description="код друкованого видання: прийняти всі його "
                                       "роки (або --years) одним викликом")
     years: str = Field(default="", description="роки видання: «1880» або «1862-1905»")
+    force: bool = Field(default=False,
+                        description="з --vydannia: перекласти вже взяті роки новішими пакетами")
 
 
 def _years(raw: str) -> tuple[int, int] | None:
@@ -907,9 +909,10 @@ def _pull_vydannia(a: SharePullArgs) -> Envelope:
             env.warn("no_url", f"{code} {year}: у рядку каталогу немає адреси пакета")
             continue
         try:
-            got = accept(r.url, sha256=r.sha256)
+            got = accept(r.url, sha256=r.sha256, force=a.force)
         except AcceptError as exc:
-            env.warn("import_failed", f"{code} {year}: {exc}")
+            env.warn("import_failed", f"{code} {year}: {exc}"
+                     + ("" if a.force else " (оновити взяте: --force)"))
             continue
         data["imported"].append({"year": year, "case_key": got.get("case_key"),
                                  "pages": got.get("pages"), "runs": got.get("runs")})

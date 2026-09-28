@@ -664,6 +664,10 @@ def collect_rows(index: LibraryIndex | None = None) -> tuple[list[CaseRow], list
                                str(meta.get("case_key") or ""))
         link = resolve_run(name, str(meta.get("case_dir") or ""), idx,
                            meta_key=str(meta.get("case_key") or ""))
+        if link.resolved_by == "vydannia":
+            # Газета чи довідник — не справа архіву: у реєстрі справ їй немає
+            # рядка, а в переліку нерозв'язаних вона була б шумом.
+            continue
         pg = meta.get("pages") or {}
         pages = len(pg)
         chars, lines, blank = _volume(pg)

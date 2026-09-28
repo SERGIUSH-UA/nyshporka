@@ -138,13 +138,19 @@ def test_pull_vydannia_bere_po_odnomu_paketu_na_rik(space: Path, monkeypatch) ->
 
     taken: list[str] = []
     monkeypatch.setattr(C, "search", fake_search)
-    monkeypatch.setattr(A, "accept", lambda url, sha256="": taken.append(url) or
-                        {"case_key": "k", "pages": 1, "runs": []})
+    forced: list[bool] = []
+    monkeypatch.setattr(A, "accept", lambda url, sha256="", force=False: (
+        taken.append(url), forced.append(force))[0] or
+        {"case_key": "k", "pages": 1, "runs": []})
     env = ops_share.share_pull(ops_share.SharePullArgs(
         vydannia="pev", years="1880-1890", take=True))
     assert env.ok, env
     assert env.data["years"] == [1880, 1881]
     assert taken == ["u80", "u81b"]
+    assert forced == [False, False]
+    env = ops_share.share_pull(ops_share.SharePullArgs(
+        vydannia="pev", years="1880", take=True, force=True))
+    assert forced[-1] is True
     assert json.dumps(env.data, ensure_ascii=False)
 
 
@@ -167,3 +173,18 @@ def test_seriia_vydannia_ie_oblastiu_poshuku(space: Path, monkeypatch) -> None:
         accept(got["path"])
     scope = S.runs_for_scope("VYD/PEV")
     assert sorted(r["name"] for r in scope["rows"]) == ["vyd_pev_1880", "vyd_pev_1881"]
+
+
+def test_prohin_vydannia_ne_lypne_do_sprawy_z_tym_samym_nomerom() -> None:
+    """`vyd_pev_1869` — не справа №1869. Замір 28.09: без гілки видання реєстр
+    приписував ПЕВ 1869 до ДАХмО 196-1-1869 і ПЕВ 1887 — до ДАХмО 315-1887."""
+    from nyshporka.cases.resolve import LibraryIndex, resolve_run
+
+    idx = LibraryIndex([{"key": "DAHMO/196/1869", "repo": "DAHMO", "fond": "196",
+                         "opys": "1", "spr": "1869", "frames": 10,
+                         "desc_source": "source_json"}])
+    for meta_key in ("VYD/PEV/1869", ""):
+        link = resolve_run("vyd_pev_1869", "", idx, meta_key=meta_key)
+        assert (link.key, link.resolved_by) == ("VYD/PEV/1869", "vydannia")
+    # Звичайна справа з тим самим номером як і раніше знаходиться.
+    assert resolve_run("spr-1869", "", idx).key == "DAHMO/196/1869"
