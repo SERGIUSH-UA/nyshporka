@@ -389,7 +389,8 @@ function viewAltReset() {
   if (!box) return;
   const mine = (VS.all || []).find((r) => r.name === VS.run) || {};
   const twin = (VS.all || []).find(
-    (r) => r.name !== VS.run && r.case_dir && r.case_dir === mine.case_dir
+    // frames_key, не case_dir: хмарний слот /tmp/htrcase/… спільний для різних справ
+    (r) => r.name !== VS.run && r.frames_key && r.frames_key === mine.frames_key
       && r.engine_id && r.engine_id !== mine.engine_id);
   VS.alt = twin || null;
   box.innerHTML = twin

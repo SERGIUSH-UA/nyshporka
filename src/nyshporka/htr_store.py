@@ -63,6 +63,22 @@ def _case_roots() -> list[Path]:
     return workspace().case_roots()
 
 
+def frames_dir_key(case_dir: str | Path | None) -> str:
+    """Тека кадрів прогону як ознака «той самий набір кадрів» — або порожньо.
+
+    🔴 Однаковий `case_dir` у мети двох прогонів доводить спільні кадри, лише
+    коли тека лежить у просторі. Хмарний раннер пише в мету тимчасову теку
+    орендованого боксу (`/tmp/htrcase/pages_dl_11`) і перевикористовує її між
+    справами: 28.09.2026 картка справи ДАХмО 315-1-10117 показала як «голоси
+    тієї самої справи» опис ІР НБУВ і книгу костелу ф.685 — усі три читались
+    у тому самому слоті. Такий шлях ідентичністю не є, і тут він дає «».
+    """
+    if not case_dir:
+        return ""
+    p = under_raw(str(case_dir))
+    return str(p).replace("\\", "/").lower() if p is not None else ""
+
+
 def under_raw(path: str | Path) -> Path | None:
     """Абсолютний шлях справи, якщо він під дозволеним коренем — інакше None.
 
@@ -490,6 +506,8 @@ def list_cases() -> list[dict[str, Any]]:
         out.append({
             "name": name,
             "case_dir": meta.get("case_dir") or "",
+            # спільні кадри рахуються лише за текою в просторі — див. `frames_dir_key`
+            "frames_key": frames_dir_key(meta.get("case_dir") or ""),
             "shifra": (case or {}).get("shifra") or "",
             "title": (case or {}).get("title") or "",
             # 🔴 Шифра З мети, а не з бібліотеки. Це різні числа: `shifra` вище —

@@ -412,6 +412,36 @@ def test_anchor_names_with_apostrophe_or_hyphen_survive() -> None:
     assert _clean_anchor("Ковальскій", ("koval",)) == ""
 
 
+def test_cloud_slot_dir_does_not_make_foreign_runs_siblings(space: Path) -> None:
+    """Хмарний раннер перевикористовує `/tmp/htrcase/pages_dl_N` між справами.
+
+    Однакова тимчасова тека в мети — не спільні кадри: картка справи не має
+    підтягувати чужі книги, що читались у тому самому слоті (28.09.2026:
+    під ДАХмО 315-1-10117 висіли опис ІР НБУВ і книга костелу).
+    """
+    from nyshporka import htr_store as S
+    from nyshporka.search import textops as T
+
+    slot = "/tmp/htrcase/pages_dl_11"
+    for run, key in (("чужа-справа", "DAHMO/315/10117"), ("опис-бібліотеки", "")):
+        d = space / "reports" / "htr" / run
+        d.mkdir(parents=True)
+        (d / "0001.txt").write_text("рядок\n", encoding="utf-8")
+        (d / "_htr_meta.json").write_text(json.dumps({
+            "model": "pysar_cyr_v17.pt", "script": "cyrillic", "case_dir": slot,
+            "case_key": key, "pages": {"0001.jpg": {"lines": 1, "orient": 0}},
+        }), encoding="utf-8")
+    S._CACHE.clear()
+    S._RUNS_CACHE = None
+
+    assert S.frames_dir_key(slot) == ""
+    names = [r["name"] for r in T.scope_runs("чужа-справа")["rows"]]
+    assert names == ["чужа-справа"], names
+    # а два голоси справи в просторі лишаються побратимами
+    local = [r["name"] for r in T.scope_runs("проба")["rows"]]
+    assert set(local) == {"проба", "проба-diak_v4"}, local
+
+
 def test_crop_borrows_geometry_size_from_the_base_run(space: Path) -> None:
     """Голос Дяка без `.lines.json` ріже за рамками й розміром побратима."""
     from nyshporka.search import textops as T
