@@ -160,6 +160,31 @@ def test_shipped_references_match_their_source() -> None:
             f"{copy.name} розійшовся з docs/agents/ — оновіть копію")
 
 
+def test_where_to_dig_carries_no_private_layer() -> None:
+    """«Куди копати» — загальний мозок: класи, традиції, шифри-приклади.
+
+    🔴 Конкретика простору (реєстр позицій, оверлей роду) живе в просторі
+    дослідника і в пакет не їде, доки її не випущено окремо. Довідник, що
+    назвав чужий рід чи приватну команду, вчить агента шукати те, чого в
+    користувача немає, — і виносить назовні те, що дослідник не публікував.
+
+    Прізвища роду тут не перелічено: їх ловить `test_scan_private` по всьому
+    репо, і список прізвищ у публічному тесті сам був би витоком. Тут —
+    приватний простір і села, з яких починається маршрут роду.
+    """
+    import re
+
+    root = Path(__file__).resolve().parents[1]
+    files = [*(root / "docs" / "agents").glob("where-to-dig*.md"),
+             *(root / ".claude" / "skills" / "where-to-dig").rglob("*.md")]
+    assert len(files) >= 10, "довідника не знайдено — перевірка нічого не доводить"
+    leak = re.compile(r"\bmegen\b|\btips\b|Липовень|М'?ястк|Капітанк", re.IGNORECASE)
+    for f in files:
+        for n, line in enumerate(f.read_text(encoding="utf-8").splitlines(), 1):
+            m = leak.search(line)
+            assert m is None, f"{f.name}:{n}: приватний шар у довіднику — «{m.group(0)}»"
+
+
 def test_frontmatter_is_valid_yaml() -> None:
     """Шапка скіла мусить розбиратись як YAML — без здогадів про парсер.
 
