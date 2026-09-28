@@ -281,43 +281,135 @@ def _opys_z_progoniv(case: dict[str, Any], info: dict[str, Any]) -> dict[str, An
     return out
 
 
-def _refs_from_sidecar(case_dir: Path | None) -> list[dict[str, str]]:
-    """Стабільні посилання на джерело зйомки — єдине, що не залежить від нас.
+def _teky_pasportu(case_dir: Path | None) -> list[Path]:
+    """Тека справи й теки, з яких її сторінки відрендерено (`rendered_from`).
 
-    Ключ справи в кожного свій, а `File:…` у Commons або DGS у FamilySearch
-    однакові для всіх. Саме за ними отримувач знайде ті самі аркуші.
+    🔴 Справу, читану з PDF, рушій бачить як теку відрендерених сторінок, і
+    паспорт цієї теки каже лише «рендер із PDF для HTR-черги». Звідки PDF —
+    знає паспорт теки ПОРУЧ із самим PDF. Заміряно 28.09.2026: у пулі стояло
+    822 книги без посилання на скани, і для 298 з них посилання лежало саме
+    там — у паспорті теки-джерела або в її `meta.json`.
     """
     from nyshporka.cases.register import read_sidecar
 
     if case_dir is None:
         return []
-    side = read_sidecar(case_dir)
+    out = [Path(case_dir)]
+    try:
+        from nyshporka.core.workspace import workspace
+
+        root: Path | None = workspace().root
+    except Exception:
+        root = None
+    for rel in read_sidecar(Path(case_dir)).get("rendered_from") or []:
+        p = Path(str(rel))
+        bazy = [x for x in (root, Path(case_dir)) if x is not None]
+        for cand in ([p] if p.is_absolute() else [b / p for b in bazy]):
+            if cand.parent.is_dir() and cand.parent not in out:
+                out.append(cand.parent)
+                break
+    return out
+
+
+def _ref_z_adresy(url: str) -> dict[str, str] | None:
+    """Ідентифікатор зйомки з адреси сканів — або None для чужого хоста.
+
+    Одне правило на `--link` і на паспорт: розійдуться — і та сама адреса
+    Commons із прапорця стане посиланням, а з паспорта ні. Так і було:
+    `source_url` паспорта їхав як `url`, якого пул не приймає, і скани
+    губились дорогою.
+    """
+    import re
+    from urllib.parse import unquote, urlparse
+
+    url = str(url or "").strip()
+    if not url:
+        return None
+    commons = re.search(r"commons\.wikimedia\.org/wiki/(?:File|Файл):([^?#]+)",
+                        unquote(url), re.IGNORECASE)
+    if commons:
+        return {"source": "commons", "ref": f"file:{commons.group(1)}", "url": url}
+    if urlparse(url).netloc.lower() == "upload.wikimedia.org":
+        # Пряма адреса файлу: останній сегмент шляху і є назвою в Commons.
+        imia = unquote(urlparse(url).path.rsplit("/", 1)[-1])
+        if imia:
+            return {"source": "commons", "ref": f"file:{imia}", "url": url}
+    dgs = re.search(r"familysearch\.org/.*?(?:imageGroupNumbers=|/film/|dgs[:=])"
+                    r"(\d{6,9})", url, re.IGNORECASE)
+    if dgs:
+        return {"source": "fs", "ref": f"dgs:{dgs.group(1)}", "url": url}
+    # Та сама форма, що пише сайдкар (`viewer_id` → `file:<id>`).
+    archium = re.search(r"archium\.[\w.-]+/file-viewer/(\d+)", url, re.IGNORECASE)
+    if archium:
+        return {"source": "archium", "ref": f"file:{archium.group(1)}", "url": url}
+    return None
+
+
+def _commons_nazvy(raw: Any) -> list[str]:
+    """Назви файлів Commons: багатотомна справа пише їх через «;»."""
+    out = []
+    for chast in str(raw or "").split(";"):
+        imia = chast.strip().removeprefix("File:").removeprefix("Файл:").strip()
+        if imia:
+            out.append(imia)
+    return out
+
+
+def _refs_from_sidecar(case_dir: Path | None) -> list[dict[str, str]]:
+    """Стабільні посилання на джерело зйомки — єдине, що не залежить від нас.
+
+    Ключ справи в кожного свій, а `File:…` у Commons або DGS у FamilySearch
+    однакові для всіх. Саме за ними отримувач знайде ті самі аркуші.
+
+    Паспорт шукається й у теці, з якої сторінки відрендерено
+    (`_teky_pasportu`), і читається в усіх формах, у яких посилання в
+    паспортах справді лежить: поля `dgs`/`commons_title`/`viewer_id`, назва
+    Commons у мітці чистки бінарників, адреси файлів у старому `meta.json`.
+    """
+    from nyshporka.cases.register import read_sidecar
+
     out: list[dict[str, str]] = []
 
     def add(source: str, ref: str, url: str = "") -> None:
-        if ref and not any(r["source"] == source for r in out):
+        if ref and not any(r["source"] == source and r["ref"] == ref for r in out):
             row = {"source": source, "ref": ref}
             if url:
                 row["url"] = url
             out.append(row)
 
-    if side.get("dgs") or side.get("fs_film") or side.get("film"):
-        ident = side.get("dgs") or side.get("fs_film") or side.get("film")
-        add("fs", f"dgs:{ident}" if side.get("dgs") else f"film:{ident}",
-            str(side.get("fsfiles_url") or side.get("base_url") or ""))
-    if side.get("commons_title"):
-        add("commons", f"file:{side['commons_title']}",
-            str(side.get("commons_url") or ""))
-    if side.get("viewer_id"):
-        add("archium", f"file:{side['viewer_id']}",
-            str(side.get("viewer_url") or ""))
-    if side.get("babynyar_case"):
-        add("babynyar", f"case:{side['babynyar_case']}",
-            str(side.get("babynyar_url") or ""))
-    for key in ("source_url", "duck_url"):
-        if side.get(key):
-            add("url", str(side[key]), str(side[key]))
-            break
+    def z_adresy(url: Any) -> bool:
+        got = _ref_z_adresy(str(url or ""))
+        if got:
+            add(got["source"], got["ref"], got.get("url", ""))
+        return got is not None
+
+    for teka in _teky_pasportu(case_dir):
+        side = read_sidecar(teka)
+        if side.get("dgs") or side.get("fs_film") or side.get("film"):
+            ident = side.get("dgs") or side.get("fs_film") or side.get("film")
+            add("fs", f"dgs:{ident}" if side.get("dgs") else f"film:{ident}",
+                str(side.get("fsfiles_url") or side.get("base_url") or ""))
+        for imia in _commons_nazvy(side.get("commons_title")):
+            add("commons", f"file:{imia}", str(side.get("commons_url") or ""))
+        # Бінарники Commons прибрано після звірки — назва лишилась у мітці.
+        pcv = side.get("purged_commons_verified")
+        if isinstance(pcv, dict):
+            for imia in _commons_nazvy(pcv.get("commons_title")):
+                add("commons", f"file:{imia}")
+        if side.get("viewer_id"):
+            add("archium", f"file:{side['viewer_id']}",
+                str(side.get("viewer_url") or ""))
+        if side.get("babynyar_case"):
+            add("babynyar", f"case:{side['babynyar_case']}",
+                str(side.get("babynyar_url") or ""))
+        # Старий паспорт завантажувача (`meta.json`): адреса в кожного файлу.
+        for f in side.get("files") or []:
+            if isinstance(f, dict):
+                z_adresy(f.get("source_url"))
+        for key in ("source_url", "duck_url"):
+            if side.get(key) and not z_adresy(side[key]):
+                add("url", str(side[key]), str(side[key]))
+                break
     return out
 
 
@@ -330,28 +422,11 @@ def _refs_from_links(links: list[dict[str, str]]) -> list[dict[str, str]]:
     Commons, називає саме джерело своїх сканів — і ворота досі казали їй
     `no_refs` з порадою додати той самий `--link`, який вона вже додала.
     """
-    import re
-    from urllib.parse import unquote
-
     out: list[dict[str, str]] = []
     for link in links:
-        url = str(link.get("url") or "").strip()
-        if not url:
-            continue
-        commons = re.search(r"commons\.wikimedia\.org/wiki/(?:File|Файл):([^?#]+)",
-                            unquote(url), re.IGNORECASE)
-        if commons:
-            out.append({"source": "commons", "ref": f"file:{commons.group(1)}", "url": url})
-            continue
-        dgs = re.search(r"familysearch\.org/.*?(?:imageGroupNumbers=|/film/|dgs[:=])"
-                        r"(\d{6,9})", url, re.IGNORECASE)
-        if dgs:
-            out.append({"source": "fs", "ref": f"dgs:{dgs.group(1)}", "url": url})
-            continue
-        # Та сама форма, що пише сайдкар (`viewer_id` → `file:<id>`).
-        archium = re.search(r"archium\.[\w.-]+/file-viewer/(\d+)", url, re.IGNORECASE)
-        if archium:
-            out.append({"source": "archium", "ref": f"file:{archium.group(1)}", "url": url})
+        got = _ref_z_adresy(str(link.get("url") or ""))
+        if got:
+            out.append(got)
     return out
 
 
@@ -479,25 +554,33 @@ def _znamennyk_z_pasporta(frames_block: dict[str, Any],
 
     if home is None or frames_block.get("total"):
         return frames_block
-    side = read_sidecar(home)
-    removed: dict[str, Any] = {}
-    f = home / "_frames_removed.json"
-    if f.is_file():
-        try:
-            import json
+    for teka in _teky_pasportu(home):
+        side = read_sidecar(teka)
+        removed: dict[str, Any] = {}
+        f = teka / "_frames_removed.json"
+        if f.is_file():
+            try:
+                import json
 
-            got = json.loads(f.read_text(encoding="utf-8"))
-            removed = got if isinstance(got, dict) else {}
-        except (OSError, ValueError):
-            removed = {}
-    for value in (removed.get("frames_was"), side.get("frames"),
-                  side.get("frames_got"), side.get("n_pages")):
-        try:
-            n = int(value or 0)
-        except (TypeError, ValueError):
-            continue
-        if n > 0:
-            return {**frames_block, "total": n, "on_disk": 0}
+                got = json.loads(f.read_text(encoding="utf-8"))
+                removed = got if isinstance(got, dict) else {}
+            except (OSError, ValueError):
+                removed = {}
+        # Старий `meta.json`: сторінки кожного PDF справи.
+        storinok_pdf = 0
+        for fl in side.get("files") or []:
+            try:
+                storinok_pdf += int((fl or {}).get("pagecount") or 0)
+            except (TypeError, ValueError, AttributeError):
+                continue
+        for value in (removed.get("frames_was"), side.get("frames"),
+                      side.get("frames_got"), side.get("n_pages"), storinok_pdf):
+            try:
+                n = int(value or 0)
+            except (TypeError, ValueError):
+                continue
+            if n > 0:
+                return {**frames_block, "total": n, "on_disk": 0}
     return frames_block
 
 
