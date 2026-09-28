@@ -71,10 +71,17 @@ def cmd_build(
 ) -> None:
     """Зібрати реєстр у `data/derived/case_index.sqlite`."""
     if rescan:
+        from nyshporka.core import opys_keys
         from nyshporka.library import build_library, write_library
+
+        before = len(opys_keys.rows())
         entries = build_library()
         write_library(entries)
-        console.print(f"[muted]бібліотеку перебудовано: {len(entries)} справ[/muted]")
+        claimed = len(opys_keys.rows()) - before
+        tail = (f" · [warn]нових ключів з описом: {claimed}[/warn] "
+                f"(книга того самого номера в іншому описі — див. "
+                f"data/cases/opys_keys.json)" if claimed else "")
+        console.print(f"[muted]бібліотеку перебудовано: {len(entries)} справ{tail}[/muted]")
     res = db.build_index()
     tail = (f" · свідомо нічиїх: {res['decided']}" if res.get("decided") else "")
     console.print(f"✅ реєстр: [bold]{res['cases']}[/bold] справ · "

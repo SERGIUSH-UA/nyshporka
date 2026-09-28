@@ -175,28 +175,43 @@ def _passport(d: Path, shifra: str, opys: str) -> None:
 
 def test_a_folder_of_another_opys_is_not_swallowed_as_a_second_shot(space: Path) -> None:
     """Тека `dadno_193/spr-213` (ім'я без опису) з паспортом оп. 3 поруч зі
-    справою оп. 1 — окремий запис бібліотеки, а не `extra_paths` чужої книги."""
+    справою оп. 1 — окремий запис бібліотеки, а не `extra_paths` чужої книги.
+
+    🔴 Ключ, а не лише поле `opys`: доти `build_library()` виявляв колізію
+    (`other_opys`), але заводив «сироту» з ТИМ САМИМ ключем — дві справи з
+    однаковим `key` у бібліотеці, і яка з них виграє в `by_key`, залежало від
+    порядку збірки. Реєстр фондів «тисяча описів на фонд» (напр. Одеса) не
+    рятує список `_OPYS_IN_KEY` — тут захист мусить бути автоматичним.
+    """
     kat = _katerynoslav(space)
     nik = _folder(space, "dadno_193/spr-213")
     _passport(nik, "ДАДнО 193-3-213", "3")
     entries = _rebuild()
     rel = nik.relative_to(space).as_posix()
     first = next(e for e in entries if e.path == kat.relative_to(space).as_posix())
+    second = next(e for e in entries if e.path == rel)
     assert rel not in first.extra_paths
-    assert any(e.path == rel and e.opys == "3" for e in entries)
+    assert second.opys == "3"
+    assert second.key != first.key, "дві справи не сміють ділити один ключ"
+    assert first.key == "DADNO/193/213", "перша лишається під ключем без опису"
 
 
-def test_doctor_names_two_opysy_under_one_key_and_registration_heals_it(
+def test_doctor_sees_it_healed_right_after_build_no_manual_registration(
         space: Path) -> None:
+    """Автоматика — до людини: колізію лікує сама збірка бібліотеки, без
+    обов'язкового ручного `R.describe` другої тек (`data/cases/opys_keys.json`
+    заповнюється прямо в `build_library()`)."""
     from nyshporka.setup import doctor as D
 
     _katerynoslav(space)
     nik = _folder(space, "dadno_193/spr-213")
     _passport(nik, "ДАДнО 193-3-213", "3")
     _rebuild()
-    got = D._shared_keys()
-    assert got.level == "warn" and "DADNO/193/213" in got.detail, got
+    assert D._shared_keys().level == "ok"
+    assert L._mk_key("DADNO", "193", "213", "1") == "DADNO/193/213"
+    assert L._mk_key("DADNO", "193", "213", "3") == "DADNO/193-3/213"
 
+    # Ручна реєстрація лишається чинною й ідемпотентною — ключ не рухається.
     R.describe(nik, shifra="ДАДнО 193-3-213")
     _rebuild()
     assert D._shared_keys().level == "ok"

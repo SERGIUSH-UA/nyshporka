@@ -31,8 +31,10 @@ from nyshporka.library import (
     _mk_key,
     _norm_fond,
     _norm_spr,
+    claim_collision,
     find_by_address,
     load_library,
+    opys_conflict,
     opys_in_case_key,
     opys_in_key,
     parse_address,
@@ -295,12 +297,22 @@ def resolve_case(value: str) -> CaseRef:
         raise ValueError(f"не зібрав ключ зі «{value}» (repo={repo} fond={fond} spr={spr})")
 
     entry = next((e for e in lib if e.get("key") == key), None)
+    if entry is not None and opys_conflict(opys, entry.get("opys")):
+        # 🔴 Ключ без опису знайшов справу, але її опис НАЗВАНИЙ і РІЗНИТЬСЯ —
+        # це фізично інша книга (напр. «ЦДІАК 224-1-49» набрано, а плаский ключ
+        # уже тримає «224-2-49»). Узяти чужий запис за свій означало б показати
+        # чужу шифру/обсяг і писати облік у файл чужої книги. Заводимо власний
+        # ключ з описом і НЕ успадковуємо нічого від знайденого запису.
+        key = claim_collision(
+            repo, fond, opys, spr, holder_shifra=str(entry.get("shifra") or ""),
+            holder_key=str(entry.get("key") or "")) or key
+        entry = None
     if entry is None:
         # ДАВО/ДАВіО-плутанина: лейбл шифри каже одне, тека диска — інше.
         # Якщо по (fond, spr) у бібліотеці рівно один запис — його ключ канонічний,
         # інакше нотатки тієї самої справи розповзуться по двох файлах.
         same = [e for e in lib if e.get("fond") == fond and e.get("spr") == spr
-                and (not opys or not e.get("opys") or e.get("opys") == opys)]
+                and not opys_conflict(opys, e.get("opys"))]
         if len(same) == 1:
             entry = same[0]
             repo, key = entry["repo"], entry["key"]

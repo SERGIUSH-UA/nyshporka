@@ -308,10 +308,8 @@ def _other_opys_case(case_dir: Path, sidecar: dict[str, Any]) -> dict[str, Any] 
     Лише тоді справі потрібен власний ключ. Та сама справа (та сама тека чи
     той самий опис) — не колізія: третя тека для вже відомої книги не сміє
     змінити їй ключ. Опис, невідомий у наявної справи, — теж не колізія:
-    стверджувати, що це інша книга, нема з чого.
+    стверджувати, що це інша книга, нема з чого (`L.opys_conflict`).
     """
-    from nyshporka.core.opys_keys import _norm
-
     repo, fond, opys, spr = (sidecar.get(k) for k in ("repo", "fond", "opys", "spr"))
     if not (sidecar.get("shifra") and repo and fond and opys and spr):
         return None
@@ -328,8 +326,7 @@ def _other_opys_case(case_dir: Path, sidecar: dict[str, Any]) -> dict[str, Any] 
     for e in lib:
         if e.get("key") != plain:
             continue
-        other = _norm(e.get("opys"))
-        if not other or other == _norm(opys):
+        if not L.opys_conflict(opys, e.get("opys")):
             continue
         if here in {e.get("path"), *(e.get("extra_paths") or [])}:
             continue
@@ -343,18 +340,17 @@ def claim_own_key(case_dir: Path, sidecar: dict[str, Any]) -> bool:
     🔴 Інший опис — фізично інший підрозділ фонду, тобто інша справа, а не
     сумнів чи помилка. Тож жодних підтверджень: справа просто отримує власний
     ключ (`DADNO/193-3/213`), а та, що була першою, лишається під своїм
-    (`DADNO/193/213`) — разом з усім, що на неї вже записано.
+    (`DADNO/193/213`) — разом з усім, що на неї вже записано. Сам запис у
+    реєстр і побудова ключа — спільне правило `L.claim_collision`.
     """
-    from nyshporka.core import opys_keys
-
     other = _other_opys_case(case_dir, sidecar)
     if other is None:
         return False
-    return opys_keys.add(
-        str(sidecar["repo"]), str(sidecar["fond"]), str(sidecar["opys"]),
-        str(sidecar["spr"]), shifra=str(sidecar.get("shifra") or ""),
-        why=f"поруч «{other.get('shifra') or other.get('key')}» — інша справа "
-            f"того самого номера")
+    return L.claim_collision(
+        sidecar["repo"], sidecar["fond"], sidecar["opys"], sidecar["spr"],
+        shifra=str(sidecar.get("shifra") or ""),
+        holder_shifra=str(other.get("shifra") or ""),
+        holder_key=str(other.get("key") or "")) is not None
 
 
 def own_key_note(case_dir: Path, sidecar: dict[str, Any]) -> str:

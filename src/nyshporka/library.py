@@ -455,6 +455,38 @@ def opys_in_case_key(repo: str | None, fond: str | None, spr: str | None,
     return opys_keys.has(repo, fond, opys, spr)
 
 
+def opys_conflict(a: str | None, b: str | None) -> bool:
+    """Чи доведено, що це ДВІ різні книги того самого номера.
+
+    Обидва описи мусять бути ВІДОМІ, інакше довести нема з чого: тека, чий
+    паспорт мовчить про опис, — не колізія, а справа, яку ще не дописали.
+    """
+    from nyshporka.core.opys_keys import _norm
+
+    na, nb = _norm(a), _norm(b)
+    return bool(na and nb and na != nb)
+
+
+def claim_collision(repo: str | None, fond: str | None, opys: str | None,
+                    spr: str | None, *, shifra: str = "", holder_shifra: str = "",
+                    holder_key: str = "") -> str | None:
+    """Записати справу в реєстр `opys_keys` і повернути ЇЇ ключ з описом.
+
+    🔴 Власник простого ключа не чіпається: усе, що на нього вже записано
+    (сховище сторінок, мети прогонів, канон), лишається дійсним. Новоприбула
+    справа — та, що отримує ключ з описом, і рішення пишеться в
+    `data/cases/opys_keys.json` рівно один раз, назавжди.
+    """
+    if not (repo and fond and opys and spr):
+        return None
+    from nyshporka.core import opys_keys
+
+    opys_keys.add(str(repo), str(fond), str(opys), str(spr), shifra=shifra,
+                  why=f"поруч «{holder_shifra or holder_key}» — інша справа "
+                      f"того самого номера")
+    return _mk_key(repo, fond, spr, opys)
+
+
 def default_opys(repo: str | None, fond: str | None) -> str | None:
     """Опис, який мається на увазі, коли його не назвали.
 
@@ -1824,7 +1856,17 @@ def build_library() -> list[CaseEntry]:
                 side = _sidecar_case(rel)
                 if side and side[1] == parsed[1] and side[3] == parsed[3]:
                     opys_here = side[2]
-            other_opys = bool(opys_here and entry.opys and opys_here != entry.opys)
+            other_opys = opys_conflict(opys_here, entry.opys)
+            if other_opys:
+                # 🔴 Ключ, порахований нижче (`_mk_key`), несе опис ЛИШЕ якщо
+                # реєстр про цю четвірку вже знає — інакше він вийде тим самим,
+                # яким володіє `entry`, і друга справа стане сиротою під чужим
+                # ключем. Тому колізія реєструється ТУТ, до підрахунку.
+                claim_collision(
+                    entry.repo, entry.fond, opys_here, entry.spr,
+                    shifra=_shifra(entry.repo, entry.fond, opys_here, entry.spr),
+                    holder_shifra=entry.shifra, holder_key=entry.key)
+                parsed = (entry.repo, entry.fond, opys_here, entry.spr)
             v_new, v_old = _sidecar_village(rel), _sidecar_village(entry.path)
             if other_opys or (v_new and v_old and v_new != v_old):
                 pass  # → нижче створиться свій запис

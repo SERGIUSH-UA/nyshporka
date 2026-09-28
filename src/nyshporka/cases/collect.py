@@ -37,7 +37,9 @@ from nyshporka.library import (
     _mk_key,
     _sidecar_opys,
     candidate_keys,
+    claim_collision,
     load_verdicts,
+    opys_conflict,
     parse_source_id,
     skip_slugs,
 )
@@ -561,8 +563,13 @@ def collect_rows(index: LibraryIndex | None = None) -> tuple[list[CaseRow], list
     for rel, frames in _unfiled_material(idx, known_paths, scans):
         # Спершу пробуємо звести теку до вже відомої справи: рендери й зменшені
         # копії (`dahmo_315_pages/spr-7864`) — це той самий матеріал, а не новий.
+        # 🔴 Не сліпо: `slug_case` часто не знає опису теки (ім'я його не несе)
+        # і тоді ранжує кандидатів «сильнішим описом» — а коли опис ВІДОМИЙ з
+        # обох боків і РІЗНИЙ, це фізично інша книга, а не той самий матеріал.
+        parsed = parse_slug_case(rel)
+        own_opys = (parsed[2] if parsed else None) or _sidecar_near(rel).get("opys")
         hit = slug_case(rel, idx)
-        if hit and hit in rows:
+        if hit and hit in rows and not opys_conflict(own_opys, rows[hit].opys):
             row = rows[hit]
             if rel != row.path and rel not in row.extra_paths:
                 row.extra_paths.append(rel)
@@ -573,7 +580,6 @@ def collect_rows(index: LibraryIndex | None = None) -> tuple[list[CaseRow], list
         # Шифра з теки читається, але справи такої бібліотека не знає — заводимо
         # її самі. Інакше ЦДІАК 224-1-864/865 (метрики М'ястківки 1752-1791)
         # лишились би «матеріалом без шифри», хоч номер справи стоїть в імені теки.
-        parsed = parse_slug_case(rel)
         if parsed and parsed[1] and parsed[3]:
             repo, fond, opys, spr = parsed
             side = _sidecar_near(rel)
@@ -583,6 +589,13 @@ def collect_rows(index: LibraryIndex | None = None) -> tuple[list[CaseRow], list
             opys = opys or side.get("opys") or _DEFAULT_OPYS.get((repo, fond))
             key = next((k for k in candidate_keys((repo, fond, opys, spr)) if k in rows),
                        None) or _mk_key(repo, fond, spr, opys)
+            if key and key in rows and opys_conflict(opys, rows[key].opys):
+                # 🔴 Кандидат знайшовся, але це ІНША книга — власний ключ,
+                # а не дописування в чужу: `claim_collision` реєструє рішення
+                # раз і назавжди (`data/cases/opys_keys.json`).
+                key = claim_collision(
+                    repo, fond, opys, spr, shifra=side.get("shifra") or "",
+                    holder_shifra=rows[key].shifra, holder_key=rows[key].key)
             if not key:
                 continue
             if key in rows:
