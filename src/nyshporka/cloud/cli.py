@@ -674,6 +674,27 @@ def _detached_only(st: RunState, what: str) -> None:
     raise typer.Exit(code=2)
 
 
+def _close_if_silent(st: RunState) -> None:
+    """Закрити запис, наглядач якого так і не озвався, — після `--force`.
+
+    🔴 Запис невдалого старту лишається відкритим, щоб наступний `go` не взяв
+    другої машини. Але якщо наглядача насправді не було, питати про стан
+    нікого, і без цього виходу справа трималась би ним вічно. `--force` — це
+    рішення людини, якій щойно сказано перевірити `rent status`; поки наглядач
+    відповідає, запис закриє його власний підсумок, а не ми.
+    """
+    from nyshporka.cloud import supervised as SUP
+
+    try:
+        silent = not SUP.state_of(st)
+    except SUP.SupervisorMissing:
+        return
+    if silent and st.phase not in ("done", "failed"):
+        st.note("closed_by_human", f"наглядач {st.supervisor} мовчить; "
+                                   f"запис закрито `stop --force`")
+        st.enter("failed", why="закрито людиною: наглядач мовчав")
+
+
 def _stop_detached(st: RunState, *, force: bool) -> None:
     """Згорнути відчеплений захід — і сказати правду про машину.
 
@@ -693,6 +714,8 @@ def _stop_detached(st: RunState, *, force: bool) -> None:
                       f"чергу, тож згортається ВЕСЬ захід[/warn]",
                       highlight=False)
     res = SUP.stop(st, force=force)
+    if force:
+        _close_if_silent(st)
     if res.ok and not res.killed:
         console.print(f"✅ {st.run_id}: наглядач {st.supervisor} згортає захід "
                       f"— забере прочитане, звірить і погасить машину сам")
