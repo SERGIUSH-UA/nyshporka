@@ -118,6 +118,42 @@ class TooLarge(HttpError):
     """Відповідь більша за дозволену стелю — качання обірвано."""
 
 
+def _capped_get(c: Any, url: str, max_bytes: int) -> Any:
+    """GET, що читає тіло потоком і не бере більше `max_bytes`.
+
+    Повертає звичайну відповідь httpx із уже прочитаним тілом, тож далі з нею
+    працюють як завжди (`.content`, `.text`, `.json()`). Двійник без `stream`
+    (тести) віддає тіло цілком — тоді стеля звіряється вже по ньому.
+    """
+    import httpx
+
+    if not hasattr(c, "stream"):
+        r = c.get(url)
+        if len(getattr(r, "content", b"") or b"") > max_bytes:
+            raise TooLarge(f"{url}: більше {max_bytes} байт — відповідь відкинуто")
+        return r
+    with c.stream("GET", url) as r:
+        declared = str(r.headers.get("content-length") or "")
+        if declared.isdigit() and int(declared) > max_bytes:
+            raise TooLarge(f"{url}: сервер заявляє {declared} байт — більше "
+                           f"стелі {max_bytes}")
+        got = 0
+        chunks: list[bytes] = []
+        for block in r.iter_bytes():
+            got += len(block)
+            if got > max_bytes:
+                raise TooLarge(f"{url}: більше {max_bytes} байт — качання обірвано")
+            chunks.append(block)
+        # Тіло вже розпаковане (`iter_bytes` знімає gzip транспорту), тож
+        # заголовки кодування й довжини в нову відповідь не переносяться:
+        # інакше httpx спробував би розпакувати його вдруге.
+        headers = [(k, v) for k, v in r.headers.multi_items()
+                   if k.lower() not in ("content-encoding", "content-length",
+                                        "transfer-encoding")]
+        return httpx.Response(r.status_code, headers=headers,
+                              content=b"".join(chunks), request=r.request)
+
+
 class Fetcher:
     """Тонка обгортка над `httpx.Client`: ввічливість і відступ в одному місці.
 
@@ -170,18 +206,24 @@ class Fetcher:
         finally:
             c.close()
 
-    def get(self, url: str, client: Any = None) -> Any:
+    def get(self, url: str, client: Any = None, *, max_bytes: int = 0) -> Any:
         """GET із відступом. `url` може бути відносним, якщо задано `base`.
 
         Тип відповіді навмисно `Any`, а не `httpx.Response`: клієнтом буває
         двійник із записаними відповідями, і обіцяти тут конкретний клас httpx
         означало б збрехати рівно в тому місці, заради якого двійник існує.
+
+        `max_bytes` — стеля тіла. 🔴 Без неї `get` читає відповідь цілком у
+        пам'ять, скільки б сервер не прислав: адреса, взята з чужої сторінки
+        (дзеркало плівок), могла вести на гігабайти (аудит 29.09.2026). Зі
+        стелею тіло читається потоком і обривається `TooLarge`, щойно її
+        перейдено, — ще до того, як зайвий байт ліг у пам'ять.
         """
         full = url if url.startswith("http") else f"{self.base}{url}"
         if client is not None:
-            return self._get_with(client, full)
+            return self._get_with(client, full, max_bytes)
         with self.client() as c:
-            return self._get_with(c, full)
+            return self._get_with(c, full, max_bytes)
 
     def post(self, url: str, *, data: dict[str, Any] | None = None,
              json_body: Any = None, client: Any = None) -> Any:
@@ -266,8 +308,10 @@ class Fetcher:
                         on_chunk(got)
         return got
 
-    def _get_with(self, c: Any, url: str) -> Any:
-        return self._send(url, lambda: c.get(url))
+    def _get_with(self, c: Any, url: str, max_bytes: int = 0) -> Any:
+        if not max_bytes:
+            return self._send(url, lambda: c.get(url))
+        return self._send(url, lambda: _capped_get(c, url, max_bytes))
 
     def _send(self, url: str, call: Callable[[], Any]) -> Any:
         """Спроби, відступ і ввічливість — в одному місці на GET і POST."""

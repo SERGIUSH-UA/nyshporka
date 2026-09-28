@@ -19,6 +19,7 @@ from __future__ import annotations
 import contextlib
 import functools
 import json
+import math
 import os
 import re
 from collections.abc import Iterator
@@ -990,10 +991,16 @@ def page_lines(name: str, page: str) -> dict[str, Any] | None:
 
 
 def _numbers(v: Any) -> list[int | float] | None:
-    """Список чисел із чужого JSON як є — або None, якщо там бодай щось інше."""
+    """Список чисел із чужого JSON як є — або None, якщо там бодай щось інше.
+
+    NaN і нескінченність — теж «щось інше» (аудит 29.09.2026): `json` їх читає,
+    а відповідь демона (`allow_nan=False`) на них падає 500, тож одна зіпсована
+    рамка валила показ усієї сторінки.
+    """
     if not isinstance(v, list) or not v:
         return None
-    if not all(isinstance(x, (int, float)) and not isinstance(x, bool) for x in v):
+    if not all(isinstance(x, (int, float)) and not isinstance(x, bool)
+               and math.isfinite(x) for x in v):
         return None
     return list(v)
 

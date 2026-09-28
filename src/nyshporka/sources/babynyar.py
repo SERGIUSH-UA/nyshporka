@@ -283,6 +283,15 @@ def s3_name(url: str) -> str:
 
 
 @lru_cache(maxsize=8)
+def _not_digitized(ident: str) -> SourceError:
+    """🔴 Код відповіді однаковий (200) і в оцифрованої справи, і в неоцифрованої,
+    тож розрізняє їх лише сам перелік кадрів. Мовчазний нуль читався б як
+    «справа скінчилась», а насправді її просто не оцифровано."""
+    return SourceError(
+        f"справа {ident}: сторінка є, а кадрів на ній немає — на цьому "
+        f"майданчику так виглядає НЕоцифрована справа, а не порожня")
+
+
 def _tsv_rows(path: Path, mtime_ns: int, size: int) -> int | None:
     """Скільки рядків у зібраному каталозі. Ключ кешу — штамп файлу, щоб
     знаменник не відставав від даних після нового обходу."""
@@ -862,12 +871,7 @@ class BabynYarSource:
             f"ф.{row.get('fond_no', '')}-{row.get('opys', '')}-{row.get('spr', '')}"
             if row else "", row.get("title") or "") if x)
         if not urls:
-            # 🔴 Код відповіді в обох станах однаковий (200), тож розрізняє їх
-            # лише сам перелік кадрів. Мовчазний нуль читався б як «справа
-            # скінчилась», а насправді її просто не оцифровано.
-            raise SourceError(
-                f"справа {ident}: сторінка є, а кадрів на ній немає — на цьому "
-                f"майданчику так виглядає НЕоцифрована справа, а не порожня")
+            raise _not_digitized(ident)
         return Manifest(source=self.id, ref=ref, title=title, frames=len(urls),
                         meta={"url": f"{BASE}/archive/case/{ident}",
                               "urls": urls,
@@ -884,11 +888,17 @@ class BabynYarSource:
         if kind != "case":
             raise SourceError(f"завантажувати можна лише справу, а не {ref!r}")
         dest = Path(dest)
-        dest.mkdir(parents=True, exist_ok=True)
         urls = list(enumerate(frame_urls(self.page(f"/archive/case/{ident}")), 1))
+        # Порожній перелік — відмова, а не «0 кадрів, збоїв немає» (аудит
+        # 29.09.2026): мовчазний нуль приймався за завантажену справу.
+        if not urls:
+            raise _not_digitized(ident)
         if frames:
             lo, hi = frames
             urls = [(p, u) for p, u in urls if lo <= p <= hi]
+            if not urls:
+                raise SourceError(f"справа {ident}: у діапазоні {lo}-{hi} кадрів немає")
+        dest.mkdir(parents=True, exist_ok=True)
         res = FetchResult(dest=dest)
         total = len(urls)
         with self.media.client() as c:

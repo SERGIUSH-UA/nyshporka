@@ -44,6 +44,7 @@ from nyshporka.archives.pack import Site
 from nyshporka.sources.base import (
     FetchResult,
     Hit,
+    Hits,
     Manifest,
     Node,
     ProgressFn,
@@ -136,6 +137,12 @@ class SearchRow:
     @property
     def shifra(self) -> str:
         return f"ф.{self.fond} оп.{self.opys} спр.{self.spr}"
+
+
+class LiveRows(list[SearchRow]):
+    """Рядки живого пошуку; `truncated` — чому перелік неповний (див. `Hits`)."""
+
+    truncated: str = ""
 
 
 def parse_search(view_html: str) -> list[SearchRow]:
@@ -507,8 +514,10 @@ class ArchiumSource:
     #: канал точковий («Шупики метрична»), і сотня сторінок на запит з одного
     #: поширеного слова — це вже не пошук справи, а обхід чужим коштом.
     LIVE_PAGES = 5
+    #: Рядків на сторінку живого пошуку щонайбільше (більше сайт не віддає).
+    LIVE_PAGE_ROWS = 100
 
-    def live_search(self, q: str, *, limit: int = 30, fond: str = "") -> list[SearchRow]:
+    def live_search(self, q: str, *, limit: int = 30, fond: str = "") -> LiveRows:
         """Пошук САЙТУ, без каталогу на диску: слово в заголовку → шифра + viewer-id.
 
         🔴 Канал існує, і його довго не було в застосунку через хибний висновок,
@@ -524,32 +533,57 @@ class ArchiumSource:
 
         ⚠ Шукає лише по оцифрованих і лише за текстом заголовка: номер справи в
         заголовку не стоїть, тож спитати цей канал ШИФРОЮ не можна.
+
+        🔴 Обрізка не мовчить (`LiveRows.truncated`). Гортається щонайбільше
+        `LIVE_PAGES` сторінок по ≤100 рядків, а фонд відсівається ПІСЛЯ них:
+        справи фонду, що стоять у видачі сайту далі п'ятої сторінки, зникали
+        без сліду, і нуль «у фонді немає» був нулем перших 500 рядків. Так само
+        `limit` понад 500 тихо зрізався до 500 (аудит 29.09.2026).
         """
         needle = (q or "").strip()
         if not needle:
-            return []
+            return LiveRows()
         # 🔴 Вимкнена мережа — відмова, а не порожня видача (як у решти живих
         # джерел). Без цього рядка тести `catalog.search` ходили на сам сайт:
         # 30 с таймауту на запит і стук у чужий сервер із кожного прогону.
         if offline() and self._fetcher is None:
             raise SourceError(f"мережу вимкнено в цьому середовищі — {self.label} не опитано")
         want = _num(fond) if fond else None
-        out: list[SearchRow] = []
+        per_page = min(limit, self.LIVE_PAGE_ROWS)
+        out = LiveRows()
+        seen = 0
+        more = False
         with self.http.client() as c:
             for page in range(1, self.LIVE_PAGES + 1):
-                url = (f"/api/v1/search/act/?Limit={min(limit, 100)}&Page={page}"
+                url = (f"/api/v1/search/act/?Limit={per_page}&Page={page}"
                        f"&Search={quote(needle)}&Type=digitized")
                 view = self.http.get(url, client=c).json().get("View", "") or ""
                 rows = parse_search(view)
+                seen += len(rows)
                 out += [r for r in rows if want is None or _num(r.fond) == want]
                 # Пагінації в розмітці немає, тож кінець видно лише по неповній
                 # сторінці — і по ній же зупиняємось, не питаючи наступну.
-                if len(rows) < min(limit, 100) or len(out) >= limit:
+                more = len(rows) >= per_page
+                if not more or len(out) >= limit:
                     break
-        return out[:limit]
+        if len(out) > limit:
+            out.truncated = f"видачу зрізано до {limit} рядків"
+        elif more and len(out) < limit:
+            # Гортали до стелі сторінок, а сайт мав що віддавати далі.
+            out.truncated = (f"переглянуто лише {seen} рядків сайту "
+                             f"({self.LIVE_PAGES} стор. по {per_page})"
+                             + (f", фонд {fond} відсіяно вже з них" if want else "")
+                             + " — далі не гортали")
+        elif more and len(out) == limit:
+            out.truncated = f"рівно {limit} — видача обрізана запитом"
+        del out[limit:]
+        return out
 
-    def _live_hits(self, q: str, *, limit: int, note: str) -> list[Hit]:
-        return [Hit(
+    def _live_hits(self, q: str, *, limit: int, note: str) -> Hits:
+        rows = self.live_search(q, limit=limit)
+        if rows.truncated:
+            note = f"{note} · обрізано: {rows.truncated}"
+        hits = Hits(Hit(
             source=self.id,
             ref=f"file:{r.file_id}",
             title=r.title[:200],
@@ -560,7 +594,9 @@ class ArchiumSource:
             fond=r.fond,
             frames=r.sheets,
             acquirable=True,
-            note=note) for r in self.live_search(q, limit=limit)]
+            note=note) for r in rows)
+        hits.truncated = rows.truncated
+        return hits
 
     #: Що саме відповіло, коли відповів сайт. Примітка не косметична: у живого
     #: каналу інша межа, ніж у каталогу, і за нею читається його нуль.
@@ -855,19 +891,7 @@ class ArchiumSource:
         html = self.http.get(f"/file-viewer/{ident}").text
         pages = viewer_pages(html)
         if not pages:
-            # 🔴 Два різні стани, які легко сплутати, бо код відповіді в обох
-            # однаковий — 200. Розрізняє їх лише наявність шифри на сторінці:
-            # на неоцифровану справу сайт віддає головну, і той, хто дивиться
-            # на статус, читає це як «справа є, кадри скінчились».
-            meta = case_meta(html)
-            if not meta:
-                raise SourceError(
-                    f"{self.label}: справи {ident} у переглядачі немає — сайт "
-                    f"відповів головною сторінкою (і кодом 200, не 404). "
-                    f"Або номер чужий, або справу не оцифровано; шукати її "
-                    f"треба іншим каналом.")
-            raise SourceError(
-                f"справа {ident} у каталозі є, але оцифрованих кадрів у ній немає")
+            raise self._no_frames(ident, html)
         # Заголовок беремо з каталогу, якщо він зібраний. Переглядач його не
         # несе, а підтвердження перед завантаженням на кілька гігабайтів без
         # відповіді «що це» нічого не підтверджує.
@@ -882,6 +906,23 @@ class ArchiumSource:
                               "shifra": {"fond": meta.fond, "opys": meta.opys,
                                          "spr": meta.spr} if meta else {}})
 
+    def _no_frames(self, ident: str, html: str) -> SourceError:
+        """Чому кадрів немає — назване, а не мовчазний нуль.
+
+        🔴 Два різні стани, які легко сплутати, бо код відповіді в обох
+        однаковий — 200. Розрізняє їх лише наявність шифри на сторінці: на
+        неоцифровану справу сайт віддає головну, і той, хто дивиться на
+        статус, читає це як «справа є, кадри скінчились».
+        """
+        if not case_meta(html):
+            return SourceError(
+                f"{self.label}: справи {ident} у переглядачі немає — сайт "
+                f"відповів головною сторінкою (і кодом 200, не 404). "
+                f"Або номер чужий, або справу не оцифровано; шукати її "
+                f"треба іншим каналом.")
+        return SourceError(
+            f"справа {ident} у каталозі є, але оцифрованих кадрів у ній немає")
+
     def fetch(self, ref: str, dest: Path, *,
               frames: tuple[int, int] | None = None,
               on_progress: ProgressFn | None = None) -> FetchResult:
@@ -889,11 +930,18 @@ class ArchiumSource:
         if kind != "file":
             raise SourceError(f"завантажувати можна лише справу, а не {ref!r}")
         dest = Path(dest)
-        dest.mkdir(parents=True, exist_ok=True)
-        pages = viewer_pages(self.http.get(f"/file-viewer/{ident}").text)
+        html = self.http.get(f"/file-viewer/{ident}").text
+        pages = viewer_pages(html)
+        # Порожній перелік — відмова, а не «0 кадрів, збоїв немає» (аудит
+        # 29.09.2026): мовчазний нуль приймався за завантажену справу.
+        if not pages:
+            raise self._no_frames(ident, html)
         if frames:
             lo, hi = frames
             pages = [(i, p) for i, p in pages if lo <= p <= hi]
+            if not pages:
+                raise SourceError(f"справа {ident}: у діапазоні {lo}-{hi} кадрів немає")
+        dest.mkdir(parents=True, exist_ok=True)
         res = FetchResult(dest=dest)
         total = len(pages)
         with self.http.client() as c:

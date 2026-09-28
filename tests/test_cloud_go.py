@@ -1085,3 +1085,120 @@ def test_the_missing_segmentation_is_a_warning_in_the_notes_not_a_line_in_a_log(
     assert re.search(r"notes\.append\(price\)", window), "нотатка заходу"
     assert re.search(r"res\.notes\.append\(price\)", window), "і підсумок"
     assert 'say("warning", price)' in window, "і видно людині одразу"
+
+
+# ── аудит 29.09.2026: стелі діють і в підготовці, не лише в нагляді ─────────
+def _clock(monkeypatch) -> dict[str, float]:
+    """Годинник заходу, який тест пересуває: `shift["h"]` годин уперед."""
+    import time as _t
+    from types import SimpleNamespace
+
+    shift = {"h": 0.0}
+    monkeypatch.setattr(RUN, "time", SimpleNamespace(
+        time=lambda: _t.time() + shift["h"] * 3600, sleep=lambda _s: None,
+        monotonic=_t.monotonic))
+    return shift
+
+
+def test_a_ceiling_during_prepare_releases_before_any_work(space: Path, monkeypatch) -> None:
+    """Підготовка (до 1800 с на пакет) ішла без стелі: стеля перевірялась лише
+    в нагляді, ПІСЛЯ пуску. Тепер кожен рядок підготовки — нагода спинитись."""
+    session = Box1(space / "box", [NAMES], engine=False)
+    case, backend, _ = _wire(space, monkeypatch, session)
+    shift = _clock(monkeypatch)
+    real_run = session.run
+    installs = {"n": 0}
+
+    def run(cmd: str, *, timeout=None, on_line=None) -> Completed:
+        if "pip install" in cmd and on_line is not None:
+            installs["n"] += 1
+            shift["h"] = 5.0                          # пакет качався п'ять годин
+            on_line("Downloading torch-2.4.0 (800 MB)")
+        return real_run(cmd, timeout=timeout, on_line=on_line)
+
+    monkeypatch.setattr(session, "run", run)
+    events: list[str] = []
+    res = _go(case, budget=20.0, confirm=True,
+              on_event=lambda kind, text, **_: events.append(text))
+
+    assert (res.verdict, res.exit_code) == ("deadline", 7), res.why
+    assert not any("канал" in e for e in events), "стелю не названо обривом каналу"
+    assert backend.released == ["deadline"], "машину погашено, і саме за стелею"
+    assert session.spawned == [], "роботу не пущено"
+    assert installs["n"] == 1, "стеля — не обрив каналу: крок не повторюється"
+    assert not list(session.root.rglob("runner.py")), "далі підготовки не пішли"
+
+
+def test_an_unknown_price_is_said_out_loud(space: Path, monkeypatch) -> None:
+    """Бекенд не назвав ціни — `spent_usd()` дає None, і бюджет мовчки не діяв."""
+    session = Box1(space / "box", [NAMES])
+    case, backend, _ = _wire(space, monkeypatch, session)
+    real_acquire = backend.acquire
+
+    def acquire(need: Need, *, target: str = "") -> Box:
+        box = real_acquire(need, target=target)
+        return Box.from_dict({**box.as_dict(), "price_usd_h": None})
+
+    monkeypatch.setattr(backend, "acquire", acquire)
+    events: list[str] = []
+    res = _go(case, budget=1.5, on_event=lambda kind, text, **_: events.append(text))
+
+    assert any("ціни" in n and "стеля часу" in n for n in res.notes), (res.verdict, res.why, events)
+    assert any("⚠" in e and "ціни" in e for e in events), "і вголос, по ходу"
+    st = ST.load(res.run_id)
+    assert st is not None and any(i["kind"] == "warning" and "ціни" in i["detail"]
+                                  for i in st.incidents)
+
+
+# ── аудит 29.09.2026: архів не зібрався — машину не гасимо ──────────────────
+def test_an_unpacked_result_keeps_the_box_alive(space: Path, monkeypatch) -> None:
+    """Повний диск на машині: `tar` падає, тексти лежать лише там. Гасіння
+    знищило б оплачену роботу — машина лишається, і про це кажуть уголос."""
+    session = Box1(space / "box", [NAMES])
+    case, backend, _ = _wire(space, monkeypatch, session)
+    real = session.run
+    tars = {"n": 0}
+
+    def run(cmd: str, *, timeout=None, on_line=None) -> Completed:
+        got = real(cmd, timeout=timeout, on_line=on_line)
+        if "tar -cf result.tar" in cmd:
+            tars["n"] += 1
+            return Completed(rc=2, out="", err="tar: No space left on device")
+        return got
+
+    monkeypatch.setattr(session, "run", run)
+    res = _go(case)
+
+    assert res.verdict == "unfetched" and res.exit_code == 9, res.why
+    assert backend.released == [], "машину НЕ погашено"
+    assert res.released is False
+    assert tars["n"] == 1, "обрізаний архів удруге не збирали"
+    assert any("НЕ ПОГАШЕНО" in n and "--force" in n for n in res.notes)
+    st = ST.load(res.run_id)
+    assert st is not None and st.verdict == "unfetched" and not st.released
+    with pytest.raises(RUN.RunError, match="не звірено"):
+        RUN.release(st)                  # `nysh cloud stop` без --force не гасить
+
+
+def test_an_unpacked_result_during_salvage_keeps_the_box_too(space: Path,
+                                                             monkeypatch) -> None:
+    """Той самий повний диск, але на аварійному заборі після збою нагляду."""
+    session = Box1(space / "box", [["0000"]])
+    case, backend, _ = _wire(space, monkeypatch, session)
+    real = session.run
+
+    def run(cmd: str, *, timeout=None, on_line=None) -> Completed:
+        got = real(cmd, timeout=timeout, on_line=on_line)
+        if "tar -cf result.tar" in cmd:
+            return Completed(rc=2, out="", err="tar: No space left on device")
+        return got
+
+    def poll(st: ST.RunState) -> RUN.Pulse:
+        raise RuntimeError("щось зламалось у нагляді")
+
+    monkeypatch.setattr(session, "run", run)
+    monkeypatch.setattr(RUN, "poll", poll)
+    res = _go(case)
+
+    assert res.verdict == "unfetched" and res.exit_code == 9, res.why
+    assert backend.released == [], "машину НЕ погашено"

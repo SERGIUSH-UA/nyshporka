@@ -560,7 +560,10 @@ def launch(convoy: Convoy, res: GoResult, say: Callable[..., None], *,
     _remember(convoy, res, session=session, plan_path=plan_path)
     launched = _run([*gr, "htr", "supervise", "--plan", str(plan_path),
                      "--detach", "--session", session,
-                     "--budget", f"{high:.2f}", "--max-hours", f"{hours:.0f}",
+                     # 🔴 Повна точність, а не `:.2f`/`:.0f` (аудит 29.09.2026):
+                     # наглядач читає float і вважає 0 «не перекривати», тож
+                     # `--max-hours 0.4` їхав як «0» і захід жив 14 год плану.
+                     "--budget", repr(float(high)), "--max-hours", repr(float(hours)),
                      *(["--max-rents", str(int(max_rents))] if max_rents else [])],
                     env=env)
     if launched.returncode:

@@ -138,20 +138,70 @@ def test_pull_vydannia_bere_po_odnomu_paketu_na_rik(space: Path, monkeypatch) ->
 
     taken: list[str] = []
     monkeypatch.setattr(C, "search", fake_search)
-    forced: list[bool] = []
-    monkeypatch.setattr(A, "accept", lambda url, sha256="", force=False: (
-        taken.append(url), forced.append(force))[0] or
+    forced: list[tuple[bool, bool]] = []
+    monkeypatch.setattr(A, "accept", lambda url, sha256="", force=False, replace=False: (
+        taken.append(url), forced.append((force, replace)))[0] or
         {"case_key": "k", "pages": 1, "runs": []})
     env = ops_share.share_pull(ops_share.SharePullArgs(
         vydannia="pev", years="1880-1890", take=True))
     assert env.ok, env
     assert env.data["years"] == [1880, 1881]
     assert taken == ["u80", "u81b"]
-    assert forced == [False, False]
+    assert forced == [(False, False), (False, False)]
     env = ops_share.share_pull(ops_share.SharePullArgs(
         vydannia="pev", years="1880", take=True, force=True))
-    assert forced[-1] is True
+    # 🔴 `--force` видання — лише заміна взятого; ворота він не знімає
+    # (аудит 29.09.2026).
+    assert forced[-1] == (False, True)
     assert json.dumps(env.data, ensure_ascii=False)
+
+
+def test_pull_vydannia_force_ne_znimaie_vorit(space: Path, monkeypatch) -> None:
+    """🔴 `pull --vydannia --force` обіцяє «перекласти взяте новішим», і
+    пакет, який ворота відхилили, від нього не приймається.
+
+    Пакет справжній (зібраний пакувальником), а ворота відмовляють на ньому
+    по-справжньому — підміняється лише каталог пулу й завантаження.
+    """
+    from nyshporka import ops_share
+    from nyshporka.share import catalog as C
+
+    got = pack_print(_pages(space), "PEV", 1880, title="ПЕВ", ocr_by="archive.org",
+                     dest=space / "p.nyshtext")
+    # Порушити ворота, не чіпаючи вмісту: маніфест без моделі голосу.
+    import io
+    import tarfile
+
+    src = Path(got["path"])
+    bad = space / "bad.nyshtext"
+    with tarfile.open(src, "r:gz") as tin, tarfile.open(bad, "w:gz") as tout:
+        for m in tin:
+            blob = tin.extractfile(m).read() if m.isfile() else b""
+            if m.name == bundle.MANIFEST_NAME:
+                raw = json.loads(blob)
+                for v in raw["decode"]["voices"]:
+                    v["model"] = ""
+                blob = json.dumps(raw, ensure_ascii=False).encode()
+                m.size = len(blob)
+            tout.addfile(m, io.BytesIO(blob))
+    assert not _prokhodyt_vorota(bad)
+
+    rows = [C.Row(shifra="VYD/PEV/1880", url=str(bad), sha256="")]
+    monkeypatch.setattr(C, "search", lambda q, base="", *, limit=50, offset=0:
+                        (rows[offset:offset + limit], len(rows), 1))
+    env = ops_share.share_pull(ops_share.SharePullArgs(
+        vydannia="pev", years="1880", take=True, force=True))
+    assert env.data["imported"] == []
+    assert any(w.code == "gate_refusal" for w in env.warnings)
+    text = " ".join(w.text for w in env.warnings)
+    assert "share import" in text and "--force" in text
+    assert not (space / "reports" / "htr" / "vyd_pev_1880").exists()
+
+
+def _prokhodyt_vorota(path: Path) -> bool:
+    from nyshporka.share.accept import look
+
+    return look(str(path)).verdict.passed
 
 
 def test_seriia_vydannia_ie_oblastiu_poshuku(space: Path, monkeypatch) -> None:

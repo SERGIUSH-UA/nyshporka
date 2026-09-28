@@ -232,13 +232,16 @@ globalThis.fetch = async (url) => {
       workspace: { root: 'C:/простір', name: 'простір' },
       sections: { active: ['core', 'htr', 'research'], preset: 'researcher' },
       pulse: { seq: 7, at: '2026-08-26T14:44:53', by: 'cases.build' },
-      registry: { built: true, at: '2026-08-25T16:20:43', cases: 12,
+      // `__XSS`: сервер віддав рядок там, де чекали число (аудит 29.09.2026).
+      registry: { built: true, at: '2026-08-25T16:20:43',
+                  cases: globalThis.__XSS ? '<svg onload=alert(1)>' : 12,
                   frames: 900, ordered: 1, htr_none: 4, htr_frames_left: 300,
                   htr_pages: 600, fuzzy_none: 5, fuzzy_hits_open: 8,
                   eye_cases: 3, eye_pages: 40, eye_pages_full: 9,
                   by_repo: [{ repo: 'ДАХмО', n: 7, frames: 700, no_htr: 2 }],
                   by_uezd: [{ uezd: 'Балтський', n: 5, frames: 400, no_htr: 1 }] },
-      canon: { present: true, persons: 30, families: 8, sources: 12, places: 4,
+      canon: { present: true, persons: 30, families: 8, sources: 12,
+               places: globalThis.__XSS ? '<img src=x onerror=alert(1)>' : 4,
                facts: 90, citations: 70, media: 2, facts_uncited: 6,
                persons_no_dates: 3, sources_uncited: 1,
                facts_by_type: [{ code: 'birth', n: 50 }, { code: 'death', n: 40 }],
@@ -459,6 +462,11 @@ out.homeFullTiles = full.includes('class="tile"');
 out.homeFullChart = full.includes('ch-steps') || full.includes('ch-bars');
 out.homeFullCanon = full.includes('Факти за типом');
 out.homeFullDoors = full.includes('data-act="home.scans"');
+globalThis.__XSS = true;
+const xss = await drawHome();
+globalThis.__XSS = false;
+out.homeXssRaw = xss.includes('<svg onload') || xss.includes('<img src=x');
+out.homeXssShown = xss.includes('&lt;svg onload') && xss.includes('&lt;img src=x');
 
 // Перемикач метрики міняє тільки коробку графіка: застереження конверта на
 // екрані лишаються, бо серед них буває «зріз застарів» із кнопкою перезбірки.
@@ -911,3 +919,13 @@ def test_the_note_button_appears_only_where_it_will_not_fail(probe) -> None:
     for bad in ("https://приклад/цитата", ".прихований.jpg"):
         assert f'data-scan="{bad}"' not in html, (
             f"✎ показано на «{bad}» — валідатор відкине його вже після кліку")
+
+
+def test_home_escapes_what_should_have_been_a_number(probe) -> None:
+    """Аудит 29.09.2026: `num()` і `n()` вставляли нечислове значення сирим.
+
+    Числа на домівці приходять із відповіді сервера, і рядок там ставав
+    розміткою. Тепер він екранується й показується як текст.
+    """
+    assert probe["homeXssRaw"] is False, "рядок із відповіді став розміткою"
+    assert probe["homeXssShown"], "екрановане значення не показалось зовсім"

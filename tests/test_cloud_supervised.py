@@ -1294,3 +1294,28 @@ def test_the_machine_is_chosen_by_the_typical_density() -> None:
     window = src[max(0, i - 700):i + 120]
     assert "lines_per_page_typical" in window, (
         "у вибір машини знову йде максимум по черзі — ринок виглядатиме порожнім")
+
+
+# ── аудит 29.09.2026: стелі доїжджають до наглядача без округлення ─────────
+def test_a_fractional_hours_ceiling_is_not_rounded_to_zero(
+        space: Path, monkeypatch, fake_gpurunner) -> None:
+    """`--max-hours 0.4` їхав як «0», а 0 наглядач читає як «стелі плану»."""
+    case, _ = _wire(space, monkeypatch)
+    res = _go(case, max_hours=0.4, budget=0.37)
+    assert res.verdict == "detached"
+    launch = next(c for c in fake_gpurunner.called("htr", "supervise") if "--detach" in c)
+    assert float(launch[launch.index("--max-hours") + 1]) == 0.4
+    assert float(launch[launch.index("--budget") + 1]) == 0.37
+
+
+@pytest.mark.parametrize("kw", [{"budget": 0.0}, {"budget": -1.0},
+                                {"max_hours": 0.0}, {"max_hours": -2.0}])
+def test_a_zero_or_negative_ceiling_is_refused_before_anything(
+        space: Path, monkeypatch, fake_gpurunner, kw) -> None:
+    """`--budget 0` проходив автозапуск ($0 ≤ стелі) і орендував з бюджетом плану."""
+    case, _ = _wire(space, monkeypatch)
+    res = _go(case, **kw)
+    assert res.verdict == "refused" and res.exit_code == 2
+    assert "додатним" in res.why
+    assert not fake_gpurunner.called("htr", "supervise"), "наглядача навіть не питали"
+    assert not res.rented

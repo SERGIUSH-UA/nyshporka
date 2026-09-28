@@ -42,6 +42,20 @@ Capability = Literal["search", "browse", "manifest", "fetch", "address"]
 ProgressFn = Callable[..., None]
 
 
+class Hits(list["Hit"]):
+    """Видача пошуку, яка знає, що вона НЕПОВНА.
+
+    Звичайний список знахідок плюс `truncated` — чому перелік обрізано
+    (порожньо — не обрізано). 🔴 Для джерел, у яких обрізка не зводиться до
+    сталої стелі (`search_ceiling`): живий пошук archium гортає обмежене
+    число сторінок, а відсів за фондом робиться вже після них, тож нуль по
+    фонду може бути нулем перших сторінок, а не архіву. Мовчки така обрізка
+    читалась би як повний перелік — знаменник для негативу (аудит 29.09.2026).
+    """
+
+    truncated: str = ""
+
+
 @dataclass(frozen=True)
 class Hit:
     """Знахідка в каталозі — те, що показують у списку результатів."""
@@ -167,6 +181,62 @@ class FetchResult:
     #: бо помилка робить теку неповною й код виходу ненульовим — а тут файл
     #: ліг цілим, просто шукати в ньому регексом не вийде.
     notes: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class Completeness:
+    """Вердикт завантаження: обіцяне проти взятого.
+
+    `state`: `complete` — сходиться; `unknown` — джерело не назвало числа, тож
+    повноту не доведено, але й не спростовано; `partial` — взято не стільки,
+    скільки обіцяно; `empty` — не взято нічого. `ok` — чи тека годиться як
+    результат: збої джерела її теж не пускають, навіть коли число зійшлося.
+    """
+
+    want: int | None
+    got: int
+    state: Literal["complete", "unknown", "partial", "empty"]
+    errors: int = 0
+
+    @property
+    def ok(self) -> bool:
+        return self.state in ("complete", "unknown") and not self.errors
+
+    def message(self, res: FetchResult) -> str:
+        if self.state == "empty":
+            return "джерело не віддало жодного кадру — тека порожня"
+        if self.state == "partial":
+            return (f"маніфест обіцяв {self.want}, узято {self.got} "
+                    f"({res.frames} завантажено, {res.skipped} пропущено) — "
+                    f"тека неповна")
+        if self.state == "unknown":
+            return ("джерело не назвало числа кадрів, тож повноту я не міряю — "
+                    "звірте з описом справи вручну")
+        return ""
+
+
+def completeness(res: FetchResult, want: int | None) -> Completeness:
+    """Один приймач повноти для термінала (`nysh get`) і черги демона.
+
+    `want` — знаменник: діапазон кадрів, якщо його просили, інакше
+    `Manifest.frames`. Узято — завантажене плюс те, що вже лежало.
+
+    🔴 Спільна функція, а не два переписи (аудит 29.09.2026): термінал звіряв
+    зі знаменником, а демон ставив DONE усьому, крім «самі збої й жодного
+    кадру», — тож нуль кадрів без збою чи 10 кадрів із 300 показувались
+    завершеною роботою.
+    """
+    got = res.frames + res.skipped
+    state: Literal["complete", "unknown", "partial", "empty"]
+    if got == 0:
+        state = "empty"
+    elif want is None:
+        state = "unknown"
+    elif got != want:
+        state = "partial"
+    else:
+        state = "complete"
+    return Completeness(want=want, got=got, state=state, errors=len(res.errors))
 
 
 class SourceError(RuntimeError):

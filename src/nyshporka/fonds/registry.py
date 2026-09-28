@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Any
 
 from nyshporka.core.workspace import workspace
+from nyshporka.utils.fsname import safe_filename
 
 #: 🔴 Обидва коди Вінницького архіву ведуть в ОДИН slug. Реєстр опису лежить
 #: файлом `<slug>_<фонд>.json`, і два різні slug'и означали б два файли на той
@@ -191,14 +192,26 @@ def _library_stamp() -> tuple[Any, ...]:
         return ("<no-library>", -1, -1)
 
 
+def _fond_dir(fond_id: str) -> Path:
+    """Тека фонду в `data/raw` — лише як ОДИН безпечний компонент шляху.
+
+    🔴 Аудит 29.09.2026: `fond_id` (і номер фонду, з якого його складають)
+    приходить з аргументів команди й форми застосунку і йшов у шлях як є:
+    `registry.merge --fond-id ../../x` писав реєстр поза `data/raw`. Відмова
+    (`UnsafeName`), а не «полагоджене» ім'я: інакше реєстр ліг би в теку, якої
+    людина не називала.
+    """
+    return workspace().raw / safe_filename(fond_id)
+
+
 def fond_path(fond_id: str) -> Path:
     """`dahmo_230` → `data/raw/dahmo_230/f230_opys_merged.tsv`."""
     fond = fond_id.rsplit("_", 1)[-1]
-    return workspace().raw / fond_id / f"f{fond}_opys_merged.tsv"
+    return _fond_dir(fond_id) / f"f{fond}_opys_merged.tsv"
 
 
 def registry_dir(fond_id: str) -> Path:
-    return workspace().raw / fond_id / "registry"
+    return _fond_dir(fond_id) / "registry"
 
 
 def discover_fonds() -> list[dict[str, Any]]:

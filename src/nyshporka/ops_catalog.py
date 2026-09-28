@@ -697,6 +697,7 @@ def registry_merge(a: MergeArgs) -> Envelope:
     from nyshporka.core.workspace import WorkspaceError, workspace
     from nyshporka.fonds.merge.run import MergeError, merge_fond
     from nyshporka.fonds.registry import fond_path, registry_dir
+    from nyshporka.utils.fsname import UnsafeName
 
     try:
         ws = workspace()
@@ -709,9 +710,12 @@ def registry_merge(a: MergeArgs) -> Envelope:
     # знає точну теку — називає її, і тоді реєстр не роздвоюється.
     fond_id = a.fond_id.strip() or target.fond_id
     try:
+        dest, out = registry_dir(fond_id), fond_path(fond_id)
+    except UnsafeName as exc:
+        return fail(f"тека фонду «{fond_id}» не годиться: {exc}")
+    try:
         res = merge_fond(
-            target, dest=ws.root / registry_dir(fond_id),
-            out=ws.root / fond_path(fond_id),
+            target, dest=ws.root / dest, out=ws.root / out,
             library=ws.root / "data" / "derived" / "case_library.json",
             dry_run=a.dry_run)
     except MergeError as exc:
@@ -742,6 +746,7 @@ def registry_collect(a: CollectArgs) -> Envelope:
     from nyshporka.core.workspace import WorkspaceError, workspace
     from nyshporka.fonds import collect
     from nyshporka.fonds.registry import registry_dir
+    from nyshporka.utils.fsname import UnsafeName
 
     try:
         ws = workspace()
@@ -758,7 +763,10 @@ def registry_collect(a: CollectArgs) -> Envelope:
     if not plan.ready and not a.fond_id:
         return fail(plan.why or f"{c.label}: збирати нічим")
 
-    dest = ws.root / registry_dir(target.fond_id)
+    try:
+        dest = ws.root / registry_dir(target.fond_id)
+    except UnsafeName as exc:
+        return fail(f"тека фонду «{target.fond_id}» не годиться: {exc}")
     kw: dict[str, Any] = {"refresh": a.refresh, "dry_run": a.dry_run}
     # Внутрішній номер фонду розуміє не кожен збирач — передаємо лише тому, хто
     # його просить, інакше решта падала б на несподіваному аргументі.

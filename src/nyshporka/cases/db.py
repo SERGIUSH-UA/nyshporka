@@ -7,6 +7,7 @@ r"""SQLite-індекс реєстру справ: схема, запис, за�
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 from dataclasses import asdict, fields
 from datetime import UTC, datetime, timedelta, timezone  # noqa: F401  (timezone — у staleness)
@@ -17,6 +18,7 @@ from nyshporka.cases.collect import collect_rows
 from nyshporka.cases.model import CaseRow
 from nyshporka.cases.resolve import LibraryIndex
 from nyshporka.library import ROOT
+from nyshporka.utils.atomic import replace_retrying
 
 DB_PATH = ROOT / "data" / "derived" / "case_index.sqlite"
 
@@ -102,9 +104,13 @@ def build_index(db_path: Path | None = None,
     # означало б видати неповний зріз за відповідь.
     unreadable: list[dict[str, str]] = []
     rows, orphans = collect_rows(index, unreadable=unreadable)
-    tmp = path.with_suffix(".sqlite.tmp")
-    if tmp.exists():
-        tmp.unlink()
+    # 🔴 Аудит 29.09.2026: tmp мав одне ім'я на всіх (`case_index.sqlite.tmp`),
+    # а заміна йшла без повтору. Дві паралельні `cases build` (дві сесії, демон
+    # після пульсу) видаляли чи підміняли проміжну базу одна одній, а на
+    # Windows падали з PermissionError, поки реєстр читав в'ювер. Тепер tmp під
+    # pid і заміна з перечікуванням; зріз останнього писаря просто перемагає.
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+    tmp.unlink(missing_ok=True)
     con = sqlite3.connect(tmp)
     try:
         con.executescript(_SCHEMA)
@@ -141,9 +147,12 @@ def build_index(db_path: Path | None = None,
             ("unreadable", json.dumps(unreadable, ensure_ascii=False)),
         ])
         con.commit()
-    finally:
+    except BaseException:
         con.close()
-    tmp.replace(path)
+        tmp.unlink(missing_ok=True)
+        raise
+    con.close()
+    replace_retrying(tmp, path)
     return {"cases": len(rows), "orphans": len(orphans) - decided,
             "decided": decided, "path": str(path), "unreadable": unreadable}
 

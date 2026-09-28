@@ -893,7 +893,14 @@ def catalog_search(a: CatalogSearchArgs) -> Envelope:
         # яке підпадають тисячі справ; узятий за повний, такий перелік стає
         # знаменником негативу, якого ніхто не міряв.
         ceiling = int(getattr(src, "search_ceiling", 0) or 0)
-        if ceiling and len(found) >= ceiling:
+        # Друга форма тієї самої вади: джерело саме каже, що видача неповна
+        # (`sources.base.Hits`), — стеля в нього не стала, а залежить від
+        # сторінок і відсіву (аудит 29.09.2026).
+        cut = str(getattr(found, "truncated", "") or "")
+        if cut:
+            truncated.append({"source": src.id, "ceiling": ceiling or len(found),
+                              "why": cut})
+        elif ceiling and len(found) >= ceiling:
             truncated.append({"source": src.id, "ceiling": ceiling})
         # 🔴 Чим саме шукали — частина знаменника. Вкладений зріз каталогу
         # старіє: «не знайшлось» у ньому означає «не було на дату зрізу», а не
@@ -1037,7 +1044,9 @@ def _warn_once(env: Envelope, *, hits: list[dict[str, object]],
         parts.append("жодне джерело не змогло шукати — цей нуль нічого не означає")
     if truncated:
         code = code or "search_truncated"
-        where = "; ".join(f"{t['source']} (стеля {t['ceiling']})" for t in truncated)
+        where = "; ".join(
+            f"{t['source']} ({t.get('why') or 'стеля ' + str(t['ceiling'])})"
+            for t in truncated)
         parts.append(f"видача обрізана — перелік неповний: {where}. "
                      f"Звужуй запит або бери фонд цілком")
     if unavailable and not hits:
@@ -3059,8 +3068,10 @@ def read_plan(a: ReadArgs) -> Envelope:
     from nyshporka.htr.run import ReadError, plan
 
     try:
+        # `zone`: операцію кличе застосунок, і план мусить казати те саме, що
+        # скаже черга (`read.start`), — термінал має свій `nysh read` без гарду.
         p = plan(a.case_dir, out_dir=a.out_dir, script=a.script,
-                 second_voice=a.second_voice, model=a.model, also=a.also)
+                 second_voice=a.second_voice, model=a.model, also=a.also, zone=True)
     except ReadError as exc:
         return fail(str(exc))
     env = ok({"plan": p.as_dict()})

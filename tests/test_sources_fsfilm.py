@@ -290,3 +290,40 @@ def test_bundled_index_holds_only_real_sheet_ranges() -> None:
     assert rows
     assert all(r["start"].isdigit() for r in rows), "запис без діапазону"
     assert all(r["name"].strip() for r in rows), "запис без назви місця"
+
+
+# ── аудит 29.09.2026: дерево регіону з чужої адреси має стелю ───────────────
+
+def test_gzip_bomba_v_kesh_ne_rozpakovuietsia_bez_steli(
+        src: FilmMirrorSource, monkeypatch: pytest.MonkeyPatch) -> None:
+    """🔴 Кілобайти, що розпаковуються в гігабайти, клали процес.
+
+    Адресу блоба дає розмітка дзеркала, тож за нею може лежати будь-що.
+    """
+    import gzip
+
+    from nyshporka.sources import fsfilm as F
+
+    (src.cache_dir / "moldova.json.gz").write_bytes(gzip.compress(b" " * 5_000_000))
+    src._trees.clear()
+    monkeypatch.setattr(F, "MAX_TREE_JSON_BYTES", 1_000_000)
+    with pytest.raises(SourceError, match="розпаковується понад"):
+        src.tree("moldova")
+
+
+def test_blob_z_merezhi_kachaietsia_zi_steleiu(
+        src: FilmMirrorSource, monkeypatch: pytest.MonkeyPatch) -> None:
+    import httpx
+
+    from nyshporka.sources import fsfilm as F
+    from nyshporka.sources.http import Fetcher, TooLarge
+
+    blob = src.cache_dir / "moldova.json.gz"
+    blob.unlink()
+    src._trees.clear()
+    src.http = Fetcher(delay=0.0, client=httpx.Client(transport=httpx.MockTransport(
+        lambda req: httpx.Response(200, content=b"\x1f\x8b" + b"x" * 10_000))))
+    monkeypatch.setattr(F, "MAX_TREE_GZ_BYTES", 1000)
+    with pytest.raises(TooLarge):
+        src.tree("moldova")
+    assert not blob.exists()

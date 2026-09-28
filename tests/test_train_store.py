@@ -175,3 +175,33 @@ def test_ops_queue_line_save_stats(space: W.Workspace) -> None:
     assert env.ok and env.data["n_done"] == 1 and any(w.code == "cer_small" for w in env.warnings)
     assert O.call("train.suggest", {"name": "demo", "q": "те"}).data["items"] == ["текст"]
     assert not O.call("train.queue", {"name": "nope"}).ok
+
+
+def test_page_image_refuses_paths_outside_the_set(space: W.Workspace, tmp_path: Path) -> None:
+    """Аудит 29.09.2026: `page` ішов у шлях кешу, і абсолютний шлях віддавав чужий jpg."""
+    from nyshporka import ops as O
+
+    outside = tmp_path / "Pictures"
+    outside.mkdir()
+    Image.new("RGB", (8, 8), "red").save(outside / "IMG_1800.jpg")
+    st = ST.Store("demo", ws=space)
+    for bad in (str(outside / "IMG"), "C:IMG", "../0001", "..\\0001", "9999"):
+        with pytest.raises(S.SetError):
+            st.page_image(bad, 1800)
+    env = O.call("train.page", {"name": "demo", "page": str(outside / "IMG")})
+    assert not env.ok and "image" not in (env.data or {})
+
+
+def test_page_image_size_is_numbers_only(space: W.Workspace, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Аудит 29.09.2026: `size` з `_cut.json` ішов у viewBox через innerHTML."""
+    from nyshporka.htr import view as VW
+
+    monkeypatch.setattr(VW, "_page_image", lambda run, page: Image.new("RGB", (PAGE_W, PAGE_H), "white"))
+    st = ST.Store("demo", ws=space)
+    meta_f = st.reg.crops_of(st.spec) / S.CUT_META_FILE
+    meta = json.loads(meta_f.read_text(encoding="utf-8"))
+    meta["pages"]["0001"]["size"] = ['1"><img src=x onerror=alert(1)>', 5]
+    meta["pages"]["0002"]["size"] = ["300", 200.0]
+    meta_f.write_text(json.dumps(meta), encoding="utf-8")
+    assert st.page_image("0001", 1800)["size"] == [PAGE_W, PAGE_H]
+    assert st.page_image("0002", 1800)["size"] == [300, 200]

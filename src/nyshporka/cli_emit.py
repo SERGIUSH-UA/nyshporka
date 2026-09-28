@@ -15,6 +15,7 @@
 """
 from __future__ import annotations
 
+import re
 from typing import Any
 
 import typer
@@ -23,6 +24,24 @@ from rich.markup import escape
 from nyshporka import brand
 
 console = brand.console()
+
+#: Керівні символи, яким не місце в друкованому тексті: C0 (крім переносу
+#: рядка й табуляції), DEL і C1 — разом з ESC (`\x1b`) і CSI (`\x9b`).
+_CONTROLS = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
+
+
+def untrusted(value: Any) -> str:
+    """Чужий текст для друку через rich: без керівних символів і з екранованою
+    розміткою.
+
+    🔴 `rich.markup.escape` екранує лише дужки розмітки, а ESC пропускає, і
+    rich друкує його як є. Псевдонім чи нотатка з пакета незнайомця могли
+    нести послідовності терміналу: стерти екран, перемалювати рядок вище,
+    намалювати «ворота пройдено» поверх справжньої відмови (аудит
+    29.09.2026). Одна функція на всі місця, де друкується чуже.
+    """
+    text = str(value if value is not None else "")
+    return escape(_CONTROLS.sub("", text))
 
 
 def _plain(text: Any) -> str:
@@ -34,7 +53,7 @@ def _plain(text: Any) -> str:
     доставити пакет. Спіймано на пораді, з якої зникло рівно те слово, заради
     якого її писали, — і людина побачила команду, що ставить не той пакет.
     """
-    return escape(str(text))
+    return untrusted(text)
 
 
 def answer(env: Any, as_json: bool = False) -> bool:

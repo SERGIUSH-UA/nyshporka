@@ -559,9 +559,21 @@ class IaSource:
     def fetch(self, ref: str, dest: Path, *, frames: tuple[int, int] | None = None,
               on_progress: ProgressFn | None = None) -> FetchResult:
         """Без `frames` — текст по листах; з `frames` — JPEG цих листів."""
+        from nyshporka.utils.fsname import UnsafeName, safe_filename
+
         ident, doc = address_of(ref)
         md = self.meta(ident)
         doc = self._doc(ident, doc, md)
+        # 🔴 Ім'я документа береться з переліку файлів у метаданих archive.org,
+        # тобто його пише той, хто завантажив запис. Далі воно стає частиною
+        # шляху (`<doc>_djvu.xml`, `<doc>.text/`), і `../` чи `C:` у ньому
+        # вивели б запис за межі теки справи (аудит 29.09.2026). Як і в решти
+        # джерел — відмова, а не «полагоджене» ім'я.
+        try:
+            safe_filename(f"{doc}_djvu.xml")
+        except UnsafeName as exc:
+            raise SourceError(f"ім'я документа в записі «{ident}» не годиться "
+                              f"для диска: {exc}") from exc
         leaves = self._leaves(ident, doc, md)
         dest.mkdir(parents=True, exist_ok=True)
         if frames is None:

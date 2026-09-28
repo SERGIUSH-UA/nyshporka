@@ -483,3 +483,25 @@ def test_ia_is_in_the_registry_out_of_the_box() -> None:
     assert {"search", "manifest", "fetch"} <= set(src.caps)
     assert "address" not in src.caps
     assert src.catalog_source()[0] == "live"  # type: ignore[attr-defined]
+
+
+# ── аудит 29.09.2026: ім'я документа з метаданих — не шлях ──────────────────
+
+@pytest.mark.parametrize("evil", ["../../poza", "..\\..\\poza", "C:poza"])
+def test_imia_dokumenta_z_metadanykh_ne_vyvodyt_zapys_za_teku(
+        tmp_path: Path, evil: str) -> None:
+    """🔴 Ім'я документа пише той, хто завантажив запис на archive.org.
+
+    Воно ставало частиною шляху (`<doc>_djvu.xml`) без перевірки, тож `../`
+    у переліку файлів виводив запис за межі теки справи.
+    """
+    blob = _djvu([(0, ["Рік"])])
+    md = copy.deepcopy(_fx("ia_metadata_svoboda_1910.json"))
+    md["files"] = [{"name": f"{evil}_djvu.xml", "size": str(len(blob)),
+                    "md5": hashlib.md5(blob).hexdigest()}]
+    dest = tmp_path / "a" / "b" / "sprava"
+    api = _Api({"/metadata/Svoboda-1910-01": md}, blob=blob)
+    with pytest.raises(SourceError, match="не годиться"):
+        _src(api).fetch("ia:Svoboda-1910-01", dest)
+    assert api.streams == []
+    assert not list(tmp_path.rglob("*poza*"))

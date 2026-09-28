@@ -113,12 +113,31 @@ _TARGET_RE = re.compile(
     r"^(?:(?P<user>[^@/\s]+)@)?(?P<host>[^@:/\s]+)(?::(?P<port>\d+))?$")
 
 
+#: Ім'я користувача й адреса машини, які можна віддати системному `scp`.
+#: 🔴 Аудит 29.09.2026: `scp` читає `user@host:шлях` як АРГУМЕНТ, і ім'я на
+#: кшталт `-oProxyCommand=calc;` він сприймав як опцію — тобто запускав
+#: локальну команду з файла машин, який люди кладуть у git і синхронізацію.
+#: Тому перший символ — не дефіс, а решта — без оболонкових і опційних знаків.
+_SAFE_NAME_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]*$")
+
+
+def unsafe_endpoint(user: str, host: str) -> str | None:
+    """Чому `user`/`host` не годяться в командний рядок; `None` — годяться."""
+    if not _SAFE_NAME_RE.match(user or ""):
+        return f"ім'я користувача «{user}» містить недопустимі знаки"
+    if not _SAFE_NAME_RE.match(host or ""):
+        return f"адреса «{host}» містить недопустимі знаки"
+    return None
+
+
 def parse_target(target: str) -> Host | None:
     """`user@host:port` → `Host`. `None` — не схоже на адресу."""
     m = _TARGET_RE.match(target.strip())
     if not m:
         return None
     host = m.group("host")
+    if unsafe_endpoint(m.group("user") or "root", host):
+        return None
     # 🔴 Відкидаємо те, що адресою не є, але під шаблон підходить: голе слово
     # без крапки — це майже завжди ім'я записаної машини, і мовчки поїхати за
     # ним у DNS означало б давати «не знайдено хост» замість «немає такої
@@ -150,6 +169,16 @@ def load_hosts() -> list[Host]:
     out: list[Host] = []
     for row in rows:
         if not isinstance(row, dict) or not row.get("host"):
+            continue
+        # Файл правлять руками й приносять із синхронізації — перевіряємо й тут,
+        # а не лише в `hosts add` (аудит 29.09.2026). Рядок пропускаємо вголос:
+        # мовчки — людина шукала б «зниклу» машину.
+        why = unsafe_endpoint(str(row.get("user") or "root"), str(row["host"]))
+        if why:
+            import sys
+
+            print(f"⚠ cloud.json: машину «{row.get('name') or row['host']}» "
+                  f"пропущено — {why}", file=sys.stderr)
             continue
         out.append(Host(
             name=str(row.get("name") or row.get("host")),
@@ -454,6 +483,12 @@ class SshSession:
         if not _SCP_SAFE_RE.match(remote) or ":" in host.host:
             self._say(f"шлях «{remote}» не годиться для `scp` без лапок — SFTP")
             return False
+        # Опис машини міг прийти в обхід `load_hosts` (стан заходу, `box.meta`),
+        # тож перевірка — ще й тут, перед самим командним рядком.
+        bad = unsafe_endpoint(host.user, host.host)
+        if bad:
+            self._say(f"{bad} — `scp` не викликаємо, файл їде через SFTP")
+            return False
         known = str(_known_hosts_path())
         cmd = [exe, "-q", "-P", str(host.port),
                # 🔴 Жодного запиту з клавіатури: `scp`, який питає пароль у
@@ -475,7 +510,9 @@ class SshSession:
         # `scp` виглядає як «хост C», і частина збірок саме так його й читає.
         there = f"{host.user}@{host.host}:{remote}"
         here = f"./{local.name}"
-        cmd += [here, there] if upload else [there, here]
+        # `--`: далі лише позиційні аргументи, навіть якщо щось почнеться з
+        # дефіса (аудит 29.09.2026; `scp` і в Windows OpenSSH розбирає getopt).
+        cmd += ["--"] + ([here, there] if upload else [there, here])
         # Стеля часу — від обсягу, із запасом на найповільніший прийнятний
         # канал (50 КБ/с): таймаут мусить ловити зависання, а не повільність.
         limit = 300.0 + size / 50_000.0
@@ -606,10 +643,17 @@ def _append_policy(paramiko: Any, known: Path) -> Any:
                 with _locked(known.with_name(known.name + ".lock"), timeout=30.0), \
                         known.open("a", encoding="utf-8", newline="\n") as fh:
                     fh.write(line)
-            except Exception:
+            except Exception as exc:
                 # Не записали — з'єднання однаково довірене на цей сеанс; гірше
-                # було б упустити орендовану машину через файл відбитків.
-                pass
+                # було б упустити орендовану машину через файл відбитків. Але
+                # вголос (аудит 29.09.2026): мовчки наступне з'єднання знову
+                # «перше знайомство», і підміну машини ніхто не помітить.
+                import sys
+
+                print(f"⚠ відбиток ключа {hostname} не записано у {known} "
+                      f"({type(exc).__name__}: {exc}) — наступне з'єднання "
+                      f"не зможе звірити, що це та сама машина",
+                      file=sys.stderr)
 
     return AppendHostKey()
 

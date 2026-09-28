@@ -64,6 +64,18 @@ class SetError(ValueError):
     """Набору немає, ім'я неприпустиме або опис не читається."""
 
 
+def safe_page(page: str) -> bool:
+    """Ім'я сторінки, яке можна приклеїти до шляху під набором.
+
+    Сторінка приходить із браузера й стає частиною шляху (`crops/<сторінка>/`,
+    `_pageview/<сторінка>_<px>.jpg`). Абсолютний шлях чи диск (`C:…`) pathlib
+    при склеюванні просто підставляє замість кореня набору — так `train.page`
+    віддавав будь-який jpg машини (аудит 29.09.2026).
+    """
+    return (bool(page) and not page.startswith(".")
+            and not any(c in page for c in "/\\:\0"))
+
+
 def _utc() -> str:
     return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -269,8 +281,10 @@ class Registry:
     def crop_path(self, spec: SetSpec, page: str, idx: int) -> Path | None:
         """Файл кропа або `None`. Ширина індексу в імені не вгадується —
         шукається будь-яка."""
+        if not safe_page(page):
+            return None
         d = self.crops_of(spec) / page
-        if not d.is_dir() or "/" in page or "\\" in page or page.startswith("."):
+        if not d.is_dir():
             return None
         for width in (3, 4, 2, 5, 1):
             p = d / f"line_{idx:0{width}d}.png"

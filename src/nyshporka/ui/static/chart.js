@@ -19,11 +19,16 @@
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g,
   (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-/** Число, як його читає людина: 287 376 → «287 376». */
+/**
+ * Число, як його читає людина: 287 376 → «287 376».
+ *
+ * Результат іде в розмітку, тож нечислове екранується (аудит 29.09.2026):
+ * доти рядок із відповіді сервера повертався як є й ставав HTML.
+ */
 export function num(n) {
   if (n === null || n === undefined || n === '') return '—';
   const v = Number(n);
-  if (!Number.isFinite(v)) return String(n);
+  if (!Number.isFinite(v)) return esc(String(n));
   return v.toLocaleString('uk-UA').replace(/ /g, ' ');
 }
 

@@ -55,8 +55,6 @@ _DAHMO_226_CATALOG = RAW_DIR / "dahmo_226" / "CATALOG.md"
 _ARCHIUM_CASES = RAW_DIR / "dahmo_archium" / "_crawl" / "cases.tsv"
 _ARCHIUM_SLUG = "dahmo_archium"
 
-_IMG_EXT = {".jpg", ".jpeg", ".png"}
-
 # Скільки PDF у теці ще варто розкривати заради лічильника сторінок. Справа-PDF це
 # один-два файли; десятки PDF в одній теці — вже не справа, а збірка чи корпус, і
 # точне число сторінок там нічого не вирішує.
@@ -1057,7 +1055,9 @@ def _count_case_from_scan(scan: Any) -> tuple[int, int]:
     from nyshporka.cases.walk import scan_dir
 
     d = scan.path
-    imgs, pdfs = scan.n_img, scan.n_pdf
+    # Кадри — за спільним правилом знаменника (`walk.frame_names`): JPEG/PNG,
+    # а тека з самих TIFF теж матеріал, а не гола картка (аудит 29.09.2026).
+    imgs, pdfs = scan.n_frames, scan.n_pdf
     pdf_paths: list[Path] = list(scan.pdf_paths)
     # 🔴 Кадри бувають на один шар глибше, і теку з ними видно не всім
     # завантажувачам однаково: `cdiak_download.py` (рушій ARCHIUM — ЦДІАК,
@@ -1079,7 +1079,7 @@ def _count_case_from_scan(scan: Any) -> tuple[int, int]:
         if name is not None:
             sub = scan_dir(d / name, scan.base, (*scan.rel_parts, name),
                            scan.depth + 1)
-            imgs, pdfs = sub.n_img, sub.n_pdf
+            imgs, pdfs = sub.n_frames, sub.n_pdf
             pdf_paths = list(sub.pdf_paths)
     if not (imgs or pdfs):
         pdfs = _external_files(d)

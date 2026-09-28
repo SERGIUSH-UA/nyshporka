@@ -586,3 +586,37 @@ def test_htr_env_op_looks_where_doctor_looks(monkeypatch, tmp_path: Path) -> Non
         assert seen[-1] == root / ".venv_kraken"
     finally:
         W.reset()
+
+
+def test_pak_bilshyi_za_rozmir_z_manifestu_obryvaietsia(tmp_path, monkeypatch) -> None:
+    """🔴 Розмір пака — стеля качання (аудит 29.09.2026): підмінена чи
+    зациклена відповідь не заповнює диск до звірки sha256."""
+    from contextlib import contextmanager
+
+    import httpx
+
+    monkeypatch.setattr(packs, "target_dir", lambda kind: tmp_path)
+    monkeypatch.setattr(packs, "PACK_SIZE_SLACK", 0)
+    served: list[int] = []
+
+    @contextmanager
+    def _stream(method: str, url: str, **_: object):
+        class R:
+            @staticmethod
+            def raise_for_status() -> None:
+                pass
+
+            @staticmethod
+            def iter_bytes():
+                for _ in range(1000):
+                    served.append(1)
+                    yield b"x" * 100
+        yield R()
+
+    monkeypatch.setattr(httpx, "stream", _stream)
+    pack = packs.Pack(id="x", kind="model", filename="x.pt", sha256="0" * 64,
+                      size=250, release="r")
+    with pytest.raises(RuntimeError, match="понад 250"):
+        packs.fetch(pack)
+    assert len(served) < 10, "качання не обірвалось на стелі"
+    assert not list(tmp_path.iterdir())

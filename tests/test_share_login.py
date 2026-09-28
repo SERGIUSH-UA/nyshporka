@@ -277,3 +277,57 @@ def test_lookup_bez_kliucha_ne_valyt_prohin(
     got = catalog.lookup("ДАХмО 315-1-8433", base=PUL)
     assert got["found"] is False
     assert got.get("need_key") is True
+
+
+# ── аудит 29.09.2026: ключ з оточення підкоряється тому самому правилу ─────
+
+@pytest.mark.parametrize("base", [
+    "https://probe.invalid/v1",               # чужий домен
+    "http://api.nyshporka.online/v1",         # свій домен, але відкритим HTTP
+    "http://my-pool.example/v1",              # свій сервер, але відкритим HTTP
+])
+def test_kliuch_z_otochennia_ne_ide_na_chuzhu_adresu(
+    skhovyshche: _Skhovyshche, merezha: type[_Fetcher],
+    monkeypatch: pytest.MonkeyPatch, base: str,
+) -> None:
+    """🔴 Ключ у `NYSHPORKA_SUPRIAHA_TOKEN` — не згода віддати його будь-кому.
+
+    Доти сама наявність змінної робила довіреною будь-яку адресу, і підміна
+    `NYSHPORKA_TOLOKA` виманювала ключ — зокрема відкритим HTTP.
+    """
+    from nyshporka.share import catalog
+
+    monkeypatch.setenv(upload.ENV_NAME, "kliuch-env")
+    monkeypatch.delenv(catalog.ENV_TRUST, raising=False)
+    catalog.search("315", base)
+    assert "Authorization" not in merezha.seen[-1]
+
+
+def test_kliuch_z_otochennia_ide_na_yavno_nazvanyi_svii_server(
+    skhovyshche: _Skhovyshche, merezha: type[_Fetcher],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from nyshporka.share import catalog
+
+    monkeypatch.setenv(upload.ENV_NAME, "kliuch-env")
+    monkeypatch.setenv(catalog.ENV_TRUST, "https://my-pool.example")
+    catalog.search("315", "https://my-pool.example/v1")
+    assert merezha.seen[-1]["Authorization"] == "Bearer kliuch-env"
+    # Схожий хост, інший порт чи HTTP — уже не той сервер.
+    for base in ("https://my-pool.example.evil.test/v1",
+                 "https://my-pool.example:8443/v1", "http://my-pool.example/v1"):
+        catalog.search("315", base)
+        assert "Authorization" not in merezha.seen[-1], base
+
+
+def test_publish_z_kliuchem_otochennia_ne_shle_na_chuzhyi_pul(
+    skhovyshche: _Skhovyshche, tmp_path: Any, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from nyshporka.share import catalog
+
+    monkeypatch.setenv(upload.ENV_NAME, "kliuch-env")
+    monkeypatch.delenv(catalog.ENV_TRUST, raising=False)
+    paket = tmp_path / "p.nyshtext"
+    paket.write_bytes(b"x")
+    with pytest.raises(UploadError, match=catalog.ENV_TRUST):
+        upload.publish(paket, base="http://probe.invalid/v1")

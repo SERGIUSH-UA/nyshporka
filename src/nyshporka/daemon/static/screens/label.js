@@ -287,11 +287,16 @@ async function renderPanel(it) {
   const env = await callOp('train.page', { name: LB.set, page: it.page, max_px: px });
   if (!env.ok) { boxError('lb-page', env); return; }
   const d = env.data;
-  const size = d.size || [1, 1];
+  // Розмір і рамки йдуть у розмітку через innerHTML, а беруться з `_cut.json`
+  // — лише числа, інакше рядок у файлі став би HTML (аудит 29.09.2026).
+  const num = (v) => { const x = Number(v); return Number.isFinite(x) ? x : 0; };
+  const size = Array.isArray(d.size) && num(d.size[0]) > 0 && num(d.size[1]) > 0
+    ? [num(d.size[0]), num(d.size[1])] : [1, 1];
   const boxes = Object.entries(d.boxes || {}).map(([i, b]) => {
     const cur = Number(i) === it.idx;
-    return `<rect class="ln${cur ? ' on' : ''}" data-act="label.jump" data-arg="${i}"
-      x="${b[0]}" y="${b[1]}" width="${b[2] - b[0]}" height="${b[3] - b[1]}"></rect>`;
+    const [x0, y0, x1, y1] = [0, 1, 2, 3].map((k) => num(b[k]));
+    return `<rect class="ln${cur ? ' on' : ''}" data-act="label.jump" data-arg="${num(i)}"
+      x="${x0}" y="${y0}" width="${x1 - x0}" height="${y1 - y0}"></rect>`;
   }).join('');
   box.innerHTML = `
     <div class="row">

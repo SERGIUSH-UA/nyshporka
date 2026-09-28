@@ -461,7 +461,8 @@ def seg_cache_dir(case_dir: Path, derived: Path) -> Path:
 
 def plan(case_dir: str | Path, *, out_dir: str | Path = "", script: str = "",
          second_voice: bool = True, model: str = "",
-         seg_cache: str | Path = "", also: Sequence[str] = ()) -> Plan:
+         seg_cache: str | Path = "", also: Sequence[str] = (),
+         zone: bool = False) -> Plan:
     """Зібрати план прогону або пояснити, чого бракує.
 
     `model` — перечитати справу ЯВНО названою моделлю (напр. Скрибою, коли
@@ -474,11 +475,30 @@ def plan(case_dir: str | Path, *, out_dir: str | Path = "", script: str = "",
 
     `also` — додаткові голоси тим самим проходом (`latin` → Скриба поруч із
     Писарем і Дяком), див. `resolve_voices`.
+
+    `zone` — тека лише з коренів справ простору (`htr_store.under_raw`). Так
+    кличе застосунок (`read.plan`, `read.start` у черзі демона): шлях там
+    приходить із браузера, а план не лише читає теку, а й пише в неї (PDF
+    розгортається в кадри). Командний рядок (`nysh read <тека>`) гарду не
+    ставить навмисно: там теку називає сама людина у своєму терміналі
+    (аудит 29.09.2026 — доти гард, описаний у `under_raw`, на черзі не стояв).
     """
     from nyshporka.core.workspace import workspace
     from nyshporka.htr import env as E
     from nyshporka.setup import doctor as doc
 
+    if zone:
+        from nyshporka import htr_store as S
+
+        raw = str(case_dir or "").strip()
+        inside = S.under_raw(raw) if raw else None
+        if inside is None:
+            raise ReadError(
+                f"теки «{raw}» немає серед матеріалів простору. Читати із "
+                f"застосунку можна лише те, що лежить у `data/raw` або в "
+                f"оголошених коренях — додати корінь можна в «Налаштування → "
+                f"Корені справ»")
+        case_dir = inside
     case = Path(case_dir).expanduser().resolve()
     if not case.is_dir():
         raise ReadError(f"теки немає: {case}")

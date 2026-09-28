@@ -896,3 +896,28 @@ def test_a_short_op_runs_off_the_event_loop(client: TestClient,
     r = client.post("/api/op/workspace.info", json={})
     assert r.status_code == 200
     assert where == [False], "операція крутилась просто в циклі подій"
+
+
+# ── аудит 29.09.2026: рамки й IPv6 у `Host` ─────────────────────────────────
+def _no_framing(res) -> None:  # type: ignore[no-untyped-def]
+    assert res.headers.get("x-frame-options") == "DENY", res.headers
+    assert res.headers.get("content-security-policy") == "frame-ancestors 'none'"
+
+
+def test_nothing_can_be_framed(client: TestClient, ws: Workspace) -> None:
+    """Клікджекінг: чужий сайт вкладав консоль у прозору рамку під клік людини.
+
+    Заголовки — на кожній відповіді, зокрема на відмовах і сторінці допуску.
+    """
+    _no_framing(client.get("/"))
+    _no_framing(client.get("/api/health"))
+    _no_framing(client.get("/api/health", headers={"Host": "evil.example"}))
+    _no_framing(_lan(_lan_app(ws)).get("/"))
+
+
+def test_bracketed_ipv6_loopback_is_our_own_name(client: TestClient) -> None:
+    """`Host: [::1]` без порту розбирався в «:» і отримував хибний 403."""
+    for own in ("[::1]", "[::1]:8788", "127.0.0.1", "localhost:8788"):
+        assert client.get("/api/health", headers={"Host": own}).status_code == 200, own
+    for bad in ("[::1", "[::2]", "evil.example:8788"):
+        assert client.get("/api/health", headers={"Host": bad}).status_code == 403, bad

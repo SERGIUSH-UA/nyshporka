@@ -368,8 +368,22 @@ def _merge_record(ra: Record, rb: Record, prefer_a: bool, res: MergeResult,
     return base
 
 
+#: Ранг статусу аркуша: менший — обережніший (як `pagestore.store._STATUS_RANK`).
+_NOTE_RANK = {"unreadable": 0, "skipped": 0, "partial": 1, "full": 2}
+
+
 def _merge_notes(a: list[PageNote], b: list[PageNote]) -> list[PageNote]:
-    """Анотації сторінок об'єднуються union'ом — сховище все одно домержить."""
+    """Анотації сторінок об'єднуються union'ом — сховище все одно домержить.
+
+    🔴 Аудит 29.09.2026: статус і коментар бралися з гілки A. Коментар B
+    (попередження, «аркуш обрізано») зникав, а `full` A перемагав `partial`
+    чи `unreadable` B. Дві незалежні вичитки, що розійшлись у статусі, — це
+    доказ, що аркуш прочитано НЕ повністю: `full` тут означав би повний
+    перелік прізвищ, на який потім спирається нуль по справі. Тож при
+    розбіжності перемагає обережніший статус, а коментарі конкатенуються
+    цілими, як у `pagestore.store._merge_note`. Сховище далі статус лише
+    підвищує, тож занижений тут завжди можна підняти, а завищений — ні.
+    """
     by_scan: dict[str, PageNote] = {}
     for note in [*a, *b]:
         old = by_scan.get(note.scan)
@@ -385,6 +399,15 @@ def _merge_notes(a: list[PageNote], b: list[PageNote]) -> list[PageNote]:
         for y in note.years:
             if y not in old.years:
                 old.years.append(y)
+        if _NOTE_RANK[note.status] < _NOTE_RANK[old.status]:
+            old.status = note.status
+        if note.comment and note.comment not in old.comment:
+            old.comment = (f"{old.comment} ⟂ {note.comment}"
+                           if old.comment and old.comment not in note.comment
+                           else note.comment)
+        for f in ("sheet", "agent"):
+            if not getattr(old, f) and getattr(note, f):
+                setattr(old, f, getattr(note, f))
     return list(by_scan.values())
 
 

@@ -535,3 +535,93 @@ def test_a_plugin_without_release_is_refused_up_front(monkeypatch) -> None:
     got, broken = REG._from_entry_points()
     assert got == [], "недороблений плагін до реєстру не потрапляє"
     assert broken and "release" in broken[0][1], "причина називається вголос"
+
+
+def test_start_takes_the_owner_lock(wired) -> None:
+    """Аудит 29.09.2026: `start` не брав замка власника (брав лише `go`), тож
+    паралельний `start` тієї самої справи вважав чужий бокс у підготовці
+    сиротою й гасив його. Зайнято — відмова без жодної дії над машинами."""
+    import threading
+
+    plan, backend = wired
+    held, done = threading.Event(), threading.Event()
+
+    def owner() -> None:
+        with ST.owned(plan.run_id):
+            held.set()
+            done.wait(10)
+
+    t = threading.Thread(target=owner, daemon=True)
+    t.start()
+    try:
+        assert held.wait(10)
+        with pytest.raises(RUN.RunError, match="інший процес"):
+            RUN.start(plan)
+        assert backend.acquired == 0 and backend.released == []
+    finally:
+        done.set()
+        t.join(10)
+
+
+def test_start_inside_go_does_not_lock_itself_out(wired) -> None:
+    """Замок повторно-вхідний: `go` тримає його й кличе `start`."""
+    plan, backend = wired
+    with ST.owned(plan.run_id):
+        st = RUN.start(plan)
+    assert st.pid and backend.acquired == 1
+
+
+# ── аудит 29.09.2026: код `tar` на машині й лічильник без ARG_MAX ──────────
+def _tar_says(session: FakeSession, monkeypatch, rc: int, err: str = "") -> None:
+    real = session.run
+
+    def run(cmd: str, *, timeout=None, on_line=None) -> Completed:
+        got = real(cmd, timeout=timeout, on_line=on_line)
+        if "tar -cf result.tar" in cmd:
+            return Completed(rc=rc, out="", err=err)
+        return got
+
+    monkeypatch.setattr(session, "run", run)
+
+
+def test_a_failed_tar_on_the_box_is_not_taken_for_a_result(wired, monkeypatch) -> None:
+    """Повний диск: `result.tar` існує, але обрізаний. Доти він їхав додому,
+    а далі — «неповно» і гасіння разом із текстами на машині."""
+    plan, backend = wired
+    st = RUN.start(plan)
+    backend.session.pretend_read(["0000", "0001", "0002"])
+    _tar_says(backend.session, monkeypatch, 2,
+              "tar: out/0002.txt: Cannot write: No space left on device")
+    with pytest.raises(RUN.ResultNotPacked, match="No space left"):
+        RUN.fetch(st)
+    assert not list(Path(st.out_dir).glob("*.txt")), "обрізаний архів не розпаковано"
+
+
+def test_tar_rc_1_is_only_a_warning(wired, monkeypatch) -> None:
+    """GNU tar: 1 — «файл змінився під час читання», архів цілий."""
+    plan, backend = wired
+    st = RUN.start(plan)
+    backend.session.pretend_read(["0000", "0001", "0002"])
+    _tar_says(backend.session, monkeypatch, 1, "tar: out: file changed as we read it")
+    RUN.fetch(st)
+    assert len(list(Path(st.out_dir).glob("*.txt"))) == 3
+
+
+def test_the_page_counter_does_not_expand_a_glob(wired, monkeypatch) -> None:
+    """`ls out/*.txt` на десятках тисяч сторінок упирається в ARG_MAX."""
+    import re
+
+    plan, backend = wired
+    st = RUN.start(plan)
+    seen: list[str] = []
+    real = backend.session.run
+
+    def run(cmd: str, *, timeout=None, on_line=None) -> Completed:
+        seen.append(cmd)
+        return real(cmd, timeout=timeout, on_line=on_line)
+
+    monkeypatch.setattr(backend.session, "run", run)
+    RUN.poll(st)
+    cmd = next(c for c in seen if "echo pages=" in c)
+    assert re.search(r"\S*\*\.txt(?!')", cmd) is None, cmd
+    assert "find " in cmd and "-name '*.txt'" in cmd

@@ -194,6 +194,11 @@ KLIUCH_TEXT = ("Супряга пускає лише під'єднану Ниш�
 #: `--base`) ключа не отримує.
 TRUSTED_DOMAIN = "nyshporka.online"
 
+#: Свій сервер, якому людина ЯВНО довіряє ключ Супряги: точне
+#: джерело `https://хост[:порт]`. Окремою змінною, а не самою наявністю
+#: ключа в оточенні — див. `may_send_key`.
+ENV_TRUST = "NYSHPORKA_SUPRIAHA_TRUST"
+
 #: Таймаут і спроби для пулу. 🔴 Не ті шість спроб по хвилині, що в
 #: `sources.http` для архівів: пул — наш сервер, і коли він лежить, людина
 #: має дізнатись про це за секунди, а не чекати шість з половиною хвилин
@@ -224,18 +229,48 @@ def trusted(url: str) -> bool:
         host == TRUSTED_DOMAIN or host.endswith("." + TRUSTED_DOMAIN))
 
 
-def may_send_key(url: str, *, explicit: bool = False) -> bool:
-    """Чи їде ключ на цю адресу.
+def _origin(url: str) -> tuple[str, str, int | None]:
+    from urllib.parse import urlsplit
 
-    Довірена адреса — завжди. Чужа — лише коли ключ названо ЯВНО: переданий
-    аргументом або покладений людиною в `NYSHPORKA_SUPRIAHA_TOKEN` для свого
-    сервера. Ключ зі сховища ключів системи на чужу адресу не їде ніколи.
+    parts = urlsplit(url.strip())
+    try:
+        port = parts.port
+    except ValueError:
+        port = -1
+    return parts.scheme.lower(), (parts.hostname or "").lower(), port
+
+
+def trusted_own(url: str) -> bool:
+    """Чи адреса — свій сервер, якому людина явно довірила ключ (`ENV_TRUST`).
+
+    Лише HTTPS і лише точний збіг схеми, хоста й порту: ключ на відкритому
+    HTTP читає кожен, хто стоїть на шляху, а «схожий» хост — чужий хост.
     """
     import os
 
-    from nyshporka.share.upload import ENV_NAME
+    own = os.environ.get(ENV_TRUST, "").strip()
+    if not own:
+        return False
+    scheme, host, port = _origin(own)
+    return (scheme == "https" and bool(host) and port != -1
+            and _origin(url) == (scheme, host, port))
 
-    return trusted(url) or explicit or bool(os.environ.get(ENV_NAME, "").strip())
+
+def may_send_key(url: str, *, explicit: bool = False) -> bool:
+    """Чи їде ключ на цю адресу.
+
+    Довірена адреса — завжди. Чужа — лише коли ключ передано аргументом
+    (`explicit`) або коли людина назвала свій сервер у `ENV_TRUST`.
+
+    🔴 Сама наявність ключа в `NYSHPORKA_SUPRIAHA_TOKEN` більше не робить
+    довіреною будь-яку адресу. Доти з ключем в оточенні `lookup`, `search`
+    і `sync` везли його на `NYSHPORKA_TOLOKA` чи `--base` — зокрема
+    відкритим HTTP, — тобто підміна однієї змінної виманювала обліковий
+    запис людини (аудит 29.09.2026). Ключ у змінній — звичайний спосіб
+    тримати його на сервері без сховища ключів, а не згода віддати його
+    першій-ліпшій адресі.
+    """
+    return trusted(url) or explicit or trusted_own(url)
 
 
 def reason(exc: Exception) -> str:

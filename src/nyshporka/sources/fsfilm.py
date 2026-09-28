@@ -56,6 +56,29 @@ from nyshporka.utils.atomic import atomic_write_bytes
 from nyshporka.utils.fsname import UnsafeName, safe_filename
 
 SPA_URL = "https://fsfiles.ru/"
+
+#: Стелі дерева регіону: стиснутого блоба з мережі й розпакованого JSON.
+#: 🔴 Адресу блоба дає розмітка дзеркала, а не ми, тож за нею може лежати що
+#: завгодно — зокрема gzip-бомба, де кілобайти розпаковуються в гігабайти й
+#: кладуть процес разом із пам'яттю машини (аудит 29.09.2026). Стелі з
+#: великим запасом над справжніми деревами — вони про атаку, не про норму.
+MAX_TREE_GZ_BYTES = 256 * 1024 * 1024
+MAX_TREE_JSON_BYTES = 1024 * 1024 * 1024
+
+
+def _gunzip_capped(blob: bytes, cap: int) -> bytes:
+    """Розпакувати gzip, але не більше `cap` байтів — інакше `SourceError`."""
+    out = io.BytesIO()
+    with gzip.GzipFile(fileobj=io.BytesIO(blob)) as gz:
+        while True:
+            block = gz.read(1 << 20)
+            if not block:
+                break
+            if out.tell() + len(block) > cap:
+                raise SourceError(f"дерево регіону розпаковується понад {cap} байт — "
+                                  f"це не дерево, а підкинутий файл; кеш не беру")
+            out.write(block)
+    return out.getvalue()
 STORAGE_BASE = "https://geno-dbase.ru/storage"
 MEDIA_PREFIX = "/media/mihailo"
 SOURCES_TTL = 24 * 3600
@@ -251,7 +274,8 @@ class FilmMirrorSource:
             blob.unlink()
         if refresh or not blob.exists():
             src = self.source(slug)
-            buf = io.BytesIO(self.http.get(src["url"]).content)
+            buf = io.BytesIO(self.http.get(src["url"],
+                                           max_bytes=MAX_TREE_GZ_BYTES).content)
             self.cache_dir.mkdir(parents=True, exist_ok=True)
             tmp = blob.with_name(blob.name + ".part")
             try:
@@ -259,7 +283,8 @@ class FilmMirrorSource:
                 tmp.replace(blob)
             finally:
                 tmp.unlink(missing_ok=True)
-        data = json.loads(gzip.decompress(blob.read_bytes()).decode("utf-8"))
+        data = json.loads(_gunzip_capped(blob.read_bytes(),
+                                         MAX_TREE_JSON_BYTES).decode("utf-8"))
         tree: dict[str, Any] = data["tree"]
         tree["_rootId"] = data.get("rootId", "")
         self._trees[slug] = tree

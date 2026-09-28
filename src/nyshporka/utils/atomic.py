@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import Any
 
 __all__ = ["CorruptFileError", "atomic_write_bytes", "atomic_write_text",
-           "read_json", "write_json"]
+           "read_json", "replace_retrying", "write_json"]
 
 #: Скільки разів перечекати зайнятий файл на Windows.
 _REPLACE_TRIES = 4
@@ -58,6 +58,15 @@ def _replace(tmp: Path, path: Path) -> None:
                 tmp.unlink(missing_ok=True)
                 raise
             time.sleep(_REPLACE_PAUSE)
+
+
+def replace_retrying(tmp: Path | str, path: Path | str) -> None:
+    """Публічне ім'я `_replace` — для писачів, що готують tmp самі (SQLite).
+
+    База реєстру збирається в tmp-файлі з'єднанням `sqlite3`, тож текстовий
+    писач тут не підходить, а заміна з перечікуванням потрібна та сама.
+    """
+    _replace(Path(tmp), Path(path))
 
 
 def atomic_write_text(path: Path | str, text: str, *, encoding: str = "utf-8",

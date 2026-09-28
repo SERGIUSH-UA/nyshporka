@@ -117,3 +117,33 @@ def test_a_download_lands_under_its_real_name_only_when_whole(tmp_path: Path) ->
     assert got == 8 and dest.read_bytes() == "абвг".encode()
     assert not dest.with_name(dest.name + ".part").exists(), "часткового файла не прибрано"
     assert seen == [4, 8], "поступ не доповідався по ходу"
+
+
+# ── аудит 29.09.2026: стеля тіла у `get` ────────────────────────────────────
+
+def _mock_client(body: Any, headers: dict[str, str] | None = None) -> Any:
+    import httpx
+
+    return httpx.Client(transport=httpx.MockTransport(
+        lambda req: httpx.Response(200, content=body, headers=headers or {})))
+
+
+@pytest.mark.parametrize("body", [
+    b"x" * 5000,                                   # із Content-Length
+    (b"x" * 1000 for _ in range(5)),               # потоком, без довжини
+])
+def test_get_zi_steleiu_obryvaie_velyke_tilo(body: Any) -> None:
+    """🔴 Без стелі `get` читав у пам'ять скільки пришле сервер."""
+    with pytest.raises(H.TooLarge):
+        H.Fetcher(client=_mock_client(body), delay=0.0).get(
+            "https://x/tree.json.gz", max_bytes=100)
+
+
+def test_get_zi_steleiu_viddaie_zvychainu_vidpovid() -> None:
+    import gzip
+
+    raw = '{"a": "дерево"}'.encode()
+    # Транспортний gzip знімається один раз: тіло приходить уже розпакованим.
+    client = _mock_client(gzip.compress(raw), {"Content-Encoding": "gzip"})
+    r = H.Fetcher(client=client, delay=0.0).get("https://x/t", max_bytes=1000)
+    assert r.content == raw and r.json() == {"a": "дерево"}

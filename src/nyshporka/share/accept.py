@@ -34,6 +34,19 @@ class AcceptError(RuntimeError):
     """Пакет не прийняти — з названою причиною."""
 
 
+class GatesRefused(AcceptError):
+    """Ворота не пропустили пакет. Окремий клас, бо й порада окрема: це не
+    «оновіть узяте», а рішення людини прийняти попри ворота.
+
+    `detail` — самі відмови воріт, без поради: порада залежить від того, хто
+    кликав (`share import` чи `share pull --vydannia`).
+    """
+
+    def __init__(self, message: str, *, detail: str = "") -> None:
+        super().__init__(message)
+        self.detail = detail
+
+
 @dataclass
 class Look:
     """Що видно в пакеті до того, як його розпаковано."""
@@ -44,6 +57,9 @@ class Look:
     frames: list[dict[str, Any]]
     alignment: align.Alignment
     inventory: bundle.Inventory | None = None
+    #: Пакет щойно завантажено з адреси й він лежить у робочій теці, а не в
+    #: сховищі доказів (`discard` прибирає його, `accept` переносить у доказ).
+    downloaded: bool = False
 
     def as_json(self) -> dict[str, Any]:
         m = self.manifest
@@ -70,6 +86,41 @@ class Look:
         }
 
 
+def staging() -> Path:
+    """Куди качається пакет ДО рішення про нього.
+
+    🔴 Не в `inbox`. Inbox — сховище доказів, і доки завантаження лягало
+    туди прямим `replace`, воно обходило захист `journal.keep` від перезапису:
+    інша адреса з тими самими останніми ланками мовчки заміняла раніше
+    прийнятий пакет, на який уже посилався журнал, а `inspect <url>` лишав у
+    доказах пакети, яких ніхто не приймав, — зокрема відхилені воротами
+    (аудит 29.09.2026). Робоча тека — у `derived`: її можна чистити, і в доказ
+    пакет потрапляє лише через `journal.keep`, після приймання.
+    """
+    from nyshporka.core.workspace import workspace
+
+    return workspace().derived / "share-incoming"
+
+
+def _download_dir() -> Path:
+    """Окрема тека на одне завантаження: дві сесії не ділять одне ім'я."""
+    return staging() / f"{os.getpid()}-{time.time_ns()}"
+
+
+def discard(seen: Look) -> None:
+    """Прибрати завантажене в робочу теку, якщо воно не пішло в доказ."""
+    if seen.downloaded:
+        _drop_download(seen.path)
+
+
+def _drop_download(path: Path) -> None:
+    import contextlib
+
+    path.unlink(missing_ok=True)
+    with contextlib.suppress(OSError):
+        path.parent.rmdir()
+
+
 def fetch(src: str, dest_dir: Path, *, sha256: str = "") -> Path:
     """Взяти пакет: локальний шлях — як є, адреса — завантажити поруч.
 
@@ -77,7 +128,7 @@ def fetch(src: str, dest_dir: Path, *, sha256: str = "") -> Path:
     звірку покладає на того, хто кличе: без неї підмінений або обірваний
     пакет з пулу приймався б як той, що в каталозі.
     """
-    if not str(src).lower().startswith(("http://", "https://")):
+    if not _is_url(src):
         p = Path(src)
         if not p.is_file():
             raise AcceptError(f"пакета немає: {p}")
@@ -155,8 +206,26 @@ def look(src: str, *, hash_frames: bool = False, sha256: str = "",
     відмова з названою причиною.
 
     `texts=False` — пакет геометрії: текстів у ньому немає за побудовою.
+
+    Завантажене з адреси лежить у робочій теці (`staging`); хто кликав
+    `look` лише подивитись, прибирає його `discard`.
     """
-    path = fetch(src, journal.inbox(), sha256=sha256)
+    downloaded = _is_url(src)
+    path = fetch(src, _download_dir(), sha256=sha256)
+    try:
+        return _look_at(path, hash_frames=hash_frames, texts=texts,
+                        downloaded=downloaded)
+    except BaseException:
+        if downloaded:
+            _drop_download(path)
+        raise
+
+
+def _is_url(src: str) -> bool:
+    return str(src).lower().startswith(("http://", "https://"))
+
+
+def _look_at(path: Path, *, hash_frames: bool, texts: bool, downloaded: bool) -> Look:
     try:
         manifest = bundle.read_manifest(path)
         frames = bundle.read_frames(path)
@@ -189,7 +258,7 @@ def look(src: str, *, hash_frames: bool = False, sha256: str = "",
     grade = align.grade(frames, case_dir, hash_frames=hash_frames,
                         their_fp=their_fp if isinstance(their_fp, dict) else None)
     return Look(path=path, manifest=manifest, verdict=verdict, frames=frames,
-                alignment=grade, inventory=inv)
+                alignment=grade, inventory=inv, downloaded=downloaded)
 
 
 def _voice_runs(m: Manifest) -> dict[str, str]:
@@ -271,15 +340,40 @@ def _clashes(htr_root: Path, incoming: list[str]) -> tuple[list[str], list[str]]
     """
     if not htr_root.is_dir():
         return [], []
-    existing = {d.name.casefold(): d for d in htr_root.iterdir() if d.is_dir()}
+    dirs = [d for d in htr_root.iterdir() if d.is_dir()]
+    existing = {d.name.casefold(): d for d in dirs}
     own: list[str] = []
     theirs: list[str] = []
     for name in incoming:
-        d = existing.get(name.casefold())
+        d = existing.get(name.casefold()) or _opened_as(htr_root / name, dirs)
         if d is None:
             continue
         (theirs if _is_shared(d) else own).append(d.name)
     return sorted(own), sorted(theirs)
+
+
+def _opened_as(path: Path, dirs: list[Path]) -> Path | None:
+    """Що файлова система відкриває під цим іменем, хоч рядком воно інше.
+
+    🔴 Звірка рядків бачить лише довгі імена з `iterdir()`. На NTFS із
+    короткими іменами 8.3 назва `DAHMO_~1` відкриває наявну теку
+    `DAHMO_1789_…`, і чужий пакет ліг би поверх власного прочитання людини
+    (аудит 29.09.2026). Тому питається сам диск: ім'я зайняте — шукаємо, ЯКУ
+    саме теку воно відкриває. Не знайшли серед перелічених (файл, посилання) —
+    однаково зайнято, і це рахується як своє: поверх невідомого не кладемо.
+    """
+    try:
+        if not path.exists():
+            return None
+    except OSError:
+        return path
+    for d in dirs:
+        try:
+            if path.samefile(d):
+                return d
+        except OSError:
+            continue
+    return path
 
 
 #: Скільки разів перечекати зайняту теку на Windows: антивірус, індексатор чи
@@ -365,11 +459,31 @@ def _swap_in(stage: Path, staged: list[Path], htr_root: Path,
 
 
 def accept(src: str, *, hash_frames: bool = False, force: bool = False,
-           keep_bundle: bool = True, sha256: str = "") -> dict[str, Any]:
-    """Покласти пакет до себе. Повертає, що саме лягло і як воно прив'язалось."""
+           replace: bool = False, keep_bundle: bool = True,
+           sha256: str = "") -> dict[str, Any]:
+    """Покласти пакет до себе. Повертає, що саме лягло і як воно прив'язалось.
+
+    Два різні дозволи, і змішувати їх не можна (аудит 29.09.2026):
+
+    * `replace` — замінити раніше ПРИЙНЯТИЙ чужий прогін новішим пакетом;
+    * `force` — те саме плюс прийняти попри відмову воріт.
+
+    `share pull --vydannia --force` обіцяв лише перше, а передавав друге:
+    «оновити взяті роки» тихо приймало й пакети, яких ворота не пропустили,
+    тобто той самий хибний знаменник оптом, від якого ворота стоять.
+    """
+    seen = look(src, hash_frames=hash_frames, sha256=sha256)
+    try:
+        return _accept_seen(seen, src, force=force, replace=replace or force,
+                            keep_bundle=keep_bundle)
+    finally:
+        discard(seen)
+
+
+def _accept_seen(seen: Look, src: str, *, force: bool, replace: bool,
+                 keep_bundle: bool) -> dict[str, Any]:
     from nyshporka.core.workspace import workspace
 
-    seen = look(src, hash_frames=hash_frames, sha256=sha256)
     inv = seen.inventory or bundle.Inventory()
     if inv.problems:
         # Вади пакета (шляхи, спецфайли, стелі) не знімаються `--force`:
@@ -378,9 +492,10 @@ def accept(src: str, *, hash_frames: bool = False, force: bool = False,
         raise AcceptError("пакет не можна розкласти:\n"
                           + "\n".join(f"✗ {p}" for p in inv.problems[:20]))
     if not seen.verdict.passed and not force:
-        raise AcceptError(
+        raise GatesRefused(
             "ворота не пропустили пакет:\n" + gates.describe(seen.verdict)
-            + "\nПрийняти попри це: --force")
+            + "\nПрийняти попри це: --force",
+            detail=gates.describe(seen.verdict))
 
     htr_root = workspace().htr_reports
     runs = [r for r in _voice_runs(seen.manifest) if r in inv.runs]
@@ -394,7 +509,7 @@ def accept(src: str, *, hash_frames: bool = False, force: bool = False,
             f"прогони з такими іменами вже є, і вони ВАШІ: {', '.join(own)}. "
             f"Чужий пакет поверх власного прочитання не кладеться — перейменуйте "
             f"свою теку, якщо справді хочете мати обидва")
-    if theirs and not force:
+    if theirs and not replace:
         raise AcceptError(
             f"прогони з такими іменами вже прийнято раніше: {', '.join(theirs)}. "
             f"Замінити новим пакетом: --force")
@@ -444,7 +559,9 @@ def accept(src: str, *, hash_frames: bool = False, force: bool = False,
     stamped_dir = len(dirs) if case_dir is not None else 0
 
     proof = ""
-    if keep_bundle:
+    # Завантажене з адреси йде в доказ завжди: робоча тека чиститься, і
+    # журнал інакше вказував би на файл, якого вже немає.
+    if keep_bundle or seen.downloaded:
         proof = str(journal.keep(seen.path, seen.path.name))
 
     journal.record(
@@ -491,10 +608,21 @@ def accept_geometry(src: str, *, force: bool = False, keep_bundle: bool = False,
     відповідала б на інше питання — «звідки рамки», — і доказ походження
     тексту зник би.
     """
+    downloaded = _is_url(src)
+    path = fetch(src, _download_dir(), sha256=sha256)
+    try:
+        return _accept_geometry_at(path, src, force=force, reindex=reindex,
+                                   keep_bundle=keep_bundle or downloaded)
+    finally:
+        if downloaded:
+            _drop_download(path)
+
+
+def _accept_geometry_at(path: Path, src: str, *, force: bool, reindex: bool,
+                        keep_bundle: bool) -> dict[str, Any]:
     from nyshporka.cloud.verify import read_meta
     from nyshporka.core.workspace import workspace
 
-    path = fetch(src, journal.inbox(), sha256=sha256)
     try:
         manifest = bundle.read_manifest(path)
         inv = bundle.inventory(path)

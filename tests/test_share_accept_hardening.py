@@ -475,3 +475,120 @@ def test_zamina_zberihaie_ne_paketne(space: Path, tmp_path: Path) -> None:
     assert not (run / "0001.lines.json").exists()
     assert len(list(run.glob("*.txt"))) == 3
     assert not _leftovers(_htr(space))
+
+
+# ── аудит 29.09.2026: коротке ім'я 8.3 відкриває чужу теку ─────────────────
+
+def test_korotke_imia_83_ne_perezapysuie_vlasnyi_prohin(
+        space: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """🔴 `DAHMO_~1` на NTFS із короткими іменами відкриває `DAHMO_1789_…`.
+
+    Рядком ці імена різні, тож звірка з `iterdir()` зіткнення не бачила, і
+    чужий пакет ліг би поверх власного прочитання. Короткі імена на дисках
+    тестів зазвичай вимкнені, тож поведінку файлової системи відтворює
+    підміна `exists`/`samefile` рівно для цієї пари шляхів.
+    """
+    root = _htr(space)
+    own = make_run(root, "DAHMO_1789_long_name")
+    alias = root / "DAHMO_~1"
+    real_exists, real_same = Path.exists, Path.samefile
+
+    def exists(self: Path, *a: Any, **kw: Any) -> bool:
+        return True if self == alias else real_exists(self, *a, **kw)
+
+    def samefile(self: Path, other: Any) -> bool:
+        if self == alias:
+            return Path(other) == own
+        return real_same(self, other)
+
+    monkeypatch.setattr(Path, "exists", exists)
+    monkeypatch.setattr(Path, "samefile", samefile)
+    mine, theirs = accept._clashes(root, ["DAHMO_~1"])
+    assert mine == ["DAHMO_1789_long_name"] and theirs == []
+
+
+def test_imia_formy_83_vidmova_do_zapysu(space: Path, tmp_path: Path) -> None:
+    """Прогін із назвою форми `~1` не розкладається взагалі — ще до диска."""
+    root = _htr(space)
+    own = make_run(root, "DAHMO_1789_long_name")
+    bulo = (own / bundle.META_NAME).read_text(encoding="utf-8")
+    with pytest.raises(accept.AcceptError, match="не можна розкласти"):
+        accept.accept(str(handmade(tmp_path / "p.nyshtext", run="DAHMO_~1")),
+                      force=True)
+    assert (own / bundle.META_NAME).read_text(encoding="utf-8") == bulo
+    assert not journal.read()
+
+
+# ── аудит 29.09.2026: завантаження не лягає в сховище доказів ──────────────
+
+def _serve(monkeypatch: pytest.MonkeyPatch, by_url: dict[str, Path]) -> list[str]:
+    """Двійник мережі: адреса → локальний файл пакета."""
+    import nyshporka.sources.http as H
+
+    asked: list[str] = []
+
+    def _download(self: Any, url: str, dest: Path, **_: Any) -> int:
+        asked.append(url)
+        dest.write_bytes(by_url[url].read_bytes())
+        return dest.stat().st_size
+
+    monkeypatch.delenv(H.ENV_OFFLINE, raising=False)
+    monkeypatch.setattr(H.Fetcher, "download", _download)
+    return asked
+
+
+def _inbox_files() -> list[Path]:
+    box = journal.inbox()
+    return sorted(box.iterdir()) if box.is_dir() else []
+
+
+def test_inspect_adresy_ne_lyshaie_nichoho_v_dokazakh(
+        space: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """🔴 Подивитись ≠ прийняти: ні відхилений, ні пропущений пакет не
+    лягає в inbox, і робоча тека після огляду порожня."""
+    from nyshporka.ops_share import ShareLookArgs, share_inspect
+
+    good = handmade(tmp_path / "g.nyshtext")
+    bad = handmade(tmp_path / "b.nyshtext", claim_pages=99)
+    _serve(monkeypatch, {"https://pool.example/b/dahmo/1/1/7/text.nyshtext": good,
+                         "https://pool.example/b/dahmo/1/1/8/text.nyshtext": bad})
+    for url in ("https://pool.example/b/dahmo/1/1/7/text.nyshtext",
+                "https://pool.example/b/dahmo/1/1/8/text.nyshtext"):
+        env = share_inspect(ShareLookArgs(src=url))
+        assert env.ok, env
+        assert env.data["path"] == url
+    assert _inbox_files() == []
+    left = accept.staging()
+    assert not left.exists() or not any(left.rglob("*.nyshtext"))
+
+
+def test_vidkhylenyi_vorotamy_ne_liahaie_v_dokazy(
+        space: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    bad = handmade(tmp_path / "b.nyshtext", claim_pages=99)
+    url = "https://pool.example/b/dahmo/1/1/8/text.nyshtext"
+    _serve(monkeypatch, {url: bad})
+    with pytest.raises(accept.AcceptError, match="ворота"):
+        accept.accept(url)
+    assert _inbox_files() == []
+
+
+def test_insha_adresa_z_tymy_samymy_lankamy_ne_zatyraie_dokaz(
+        space: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """🔴 Дві адреси з однаковими останніми ланками дають одне ім'я файлу.
+
+    Доти друге завантаження лягало в inbox прямим `replace` і підміняло
+    байти першого доказу, на який уже посилався журнал.
+    """
+    a = handmade(tmp_path / "a.nyshtext", run="r-a")
+    b = handmade(tmp_path / "b.nyshtext", run="r-b", pages=2)
+    ua = "https://one.example/x/b/dahmo/1/1/7/text.nyshtext"
+    ub = "https://two.example/y/b/dahmo/1/1/7/text.nyshtext"
+    _serve(monkeypatch, {ua: a, ub: b})
+    pa = Path(accept.accept(ua)["proof"])
+    pb = Path(accept.accept(ub)["proof"])
+    assert pa != pb
+    assert bundle.sha256_of(pa) == bundle.sha256_of(a)
+    assert bundle.sha256_of(pb) == bundle.sha256_of(b)
+    rows = journal.read(journal.IMPORTED)
+    for row in rows:
+        assert bundle.sha256_of(Path(row["path"])) == row["sha256"]

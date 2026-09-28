@@ -186,3 +186,82 @@ def test_a_big_result_comes_back_through_scp_too(rig, tmp_path) -> None:
     again = tmp_path / "in" / "y.result.tar"
     assert session.get("/w/result.tar", again) == 7000
     assert sftp.gets == ["/w/result.tar"], "відкат на SFTP"
+
+
+# --- Аудит 29.09.2026: ім'я користувача як опція `scp` ---------------------
+
+
+def test_positional_arguments_come_after_a_double_dash(rig, tmp_path) -> None:
+    """`--` перед `user@host:шлях`: навіть дефіс на початку не стане опцією."""
+    session, _sftp, calls, _, _box = rig
+    big = tmp_path / "case.tar"
+    big.write_bytes(b"x" * 5000)
+    session.put(big, "/w/case.tar")
+    assert calls[0]["cmd"][-3] == "--"
+
+
+def test_an_option_like_user_never_reaches_scp(rig, tmp_path) -> None:
+    """`user="-oProxyCommand=calc;"` — локальне виконання команди через `scp`."""
+    from dataclasses import replace
+
+    session, sftp, calls, _, _box = rig
+    session.host = replace(session.host, user="-oProxyCommand=calc;")
+    big = tmp_path / "case.tar"
+    big.write_bytes(b"x" * 5000)
+    session.put(big, "/w/case.tar")
+    assert calls == [], "`scp` із таким іменем не запускається взагалі"
+    assert sftp.puts == ["/w/case.tar"], "файл однаково доїхав, через SFTP"
+
+
+@pytest.mark.parametrize("target", [
+    "-oProxyCommand=calc;@203.0.113.7",
+    "root;id@203.0.113.7",
+    "a&b@203.0.113.7",
+    "root@-oProxyCommand=x.example",
+])
+def test_parse_target_rejects_option_and_shell_characters(target) -> None:
+    assert S.parse_target(target) is None
+
+
+def test_parse_target_still_takes_a_normal_address() -> None:
+    h = S.parse_target("ubuntu_1@10.0.0.7:2222")
+    assert h is not None and (h.user, h.host, h.port) == ("ubuntu_1", "10.0.0.7", 2222)
+
+
+def test_load_hosts_skips_an_unsafe_row_out_loud(tmp_path, monkeypatch, capsys) -> None:
+    import json
+
+    cfg = tmp_path / "cloud.json"
+    cfg.write_text(json.dumps({"hosts": [
+        {"name": "зла", "user": "-oProxyCommand=calc;", "host": "203.0.113.7"},
+        {"name": "добра", "user": "root", "host": "203.0.113.8"},
+    ]}), encoding="utf-8")
+    monkeypatch.setattr(S, "hosts_path", lambda: cfg)
+    assert [h.name for h in S.load_hosts()] == ["добра"]
+    assert "зла" in capsys.readouterr().err
+
+
+def test_an_unwritten_host_key_is_reported_not_swallowed(tmp_path, capsys) -> None:
+    """Аудит 29.09.2026: відбиток не записався — наступне з'єднання знову
+    «перше знайомство». З'єднання не рвемо, але кажемо вголос."""
+
+    class Policy:
+        pass
+
+    class Keys:
+        def __init__(self) -> None:
+            self.added: list[str] = []
+
+        def add(self, hostname: str, kind: str, key: Any) -> None:
+            self.added.append(hostname)
+
+    key = SimpleNamespace(get_name=lambda: "ssh-ed25519", get_base64=lambda: "AAAA")
+    client = SimpleNamespace(_host_keys=Keys())
+    known = tmp_path / "known_hosts"
+    known.mkdir()  # на місці файла тека: дописати рядок не вийде
+    policy = S._append_policy(SimpleNamespace(MissingHostKeyPolicy=Policy), known)
+
+    policy.missing_host_key(client, "203.0.113.7", key)
+    assert client._host_keys.added == ["203.0.113.7"], "сеанс однаково довірений"
+    err = capsys.readouterr().err
+    assert "203.0.113.7" in err and "не записано" in err

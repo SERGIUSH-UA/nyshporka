@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 
 #: Символи, яких у компоненті імені з чужого архіву бути не може.
@@ -33,6 +34,9 @@ _RESERVED = frozenset({"CON", "PRN", "AUX", "NUL",
                        *(f"COM{i}" for i in range(1, 10)),
                        *(f"LPT{i}" for i in range(1, 10))})
 
+#: `~` із цифрою — форма, якою Windows називає теку коротким іменем 8.3.
+_SHORT_ALIAS = re.compile(r"~\d")
+
 
 def safe_member_part(part: str) -> bool:
     """Компонент імені з чужого tar, який можна класти на диск як є.
@@ -45,6 +49,13 @@ def safe_member_part(part: str) -> bool:
     if part.endswith((".", " ")):
         return False
     if part.split(".")[0].upper() in _RESERVED:
+        return False
+    # 🔴 Форма короткого імені 8.3 (`DAHMO_~1`). На NTFS з увімкненими
+    # короткими іменами така назва ВІДКРИВАЄ наявну теку з довгим іменем, і
+    # чужий прогін лягав би в чужу (або власну) теку, минаючи звірку рядків
+    # «такий прогін уже є» (аудит 29.09.2026). Живі назви прогонів і сторінок
+    # такої форми не мають.
+    if _SHORT_ALIAS.search(part):
         return False
     return not any(ch in BAD_MEMBER_CHARS for ch in part)
 

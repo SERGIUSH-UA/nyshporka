@@ -479,8 +479,11 @@ def get(source: str = typer.Argument(..., help="id джерела"),
     #
     # 🔴 Просити діапазон — не те саме, що просити все: там знаменником стає
     # сам діапазон, а не обсяг справи.
+    from nyshporka.sources.base import completeness
+
     want = (rng[1] - rng[0] + 1) if rng else man.frames
-    got = res.frames + res.skipped
+    verdict = completeness(res, want)
+    got = verdict.got
 
     # 🔴 Той самий приймач лягає на диск, а не лише на екран. Числа «обіцяно /
     # взято» живуть рівно одну сесію, а тека лишається — і без них наступний,
@@ -504,15 +507,13 @@ def get(source: str = typer.Argument(..., help="id джерела"),
     except OSError as exc:      # диск є, кадри лягли — паспорт не критичний
         console.print(f"[warn]⚠ паспорт не записався: {exc}[/warn]")
 
-    if want is None:
+    # Приймач один на термінал і чергу демона — `sources.base.completeness`.
+    if verdict.state == "unknown":
         # ⚠ Мовчазний «✓» тут був би найгіршим із варіантів: він читається як
         # доведена повнота. Нуль без знаменника не є доказом повноти.
-        console.print("[warn]⚠ джерело не назвало числа кадрів, тож повноту "
-                      "я не міряю — звірте з описом справи вручну[/warn]")
-    elif got != want:
-        console.print(f"[warn]⚠ маніфест обіцяв {want}, узято {got} "
-                      f"({res.frames} завантажено, {res.skipped} пропущено) — "
-                      f"тека неповна[/warn]")
+        console.print(f"[warn]⚠ {verdict.message(res)}[/warn]")
+    elif verdict.state in ("partial", "empty"):
+        console.print(f"[warn]⚠ {verdict.message(res)}[/warn]")
         console.print("[muted]  качати заново дешевше зараз, ніж шукати "
                       "пропущений аркуш у декоді[/muted]")
         raise typer.Exit(code=1)

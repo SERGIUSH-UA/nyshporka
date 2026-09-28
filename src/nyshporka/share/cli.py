@@ -17,6 +17,7 @@ import typer
 from nyshporka import brand
 from nyshporka.cli_emit import answer as _answer
 from nyshporka.cli_emit import notes as _notes
+from nyshporka.cli_emit import untrusted
 
 app = typer.Typer(help="Обмін прочитаним (Супряга): спакувати свій декод, прийняти чужий.",
                   no_args_is_help=True)
@@ -30,10 +31,12 @@ def _e(value: Any) -> str:
     сторонніх людей. Без екранування `[/i]` у псевдонімі валив `share pull`
     і `share list` у кожного, чий пошук знаходив цей пакет (`MarkupError`),
     `[link=…]` ховав справжню адресу, а `[sic]` у назві просто зникав.
-    """
-    from rich.markup import escape
 
-    return escape(str(value if value is not None else ""))
+    🔴 І без керівних символів (`cli_emit.untrusted`): екранування розмітки
+    ESC не чіпає, а ним чужа нотатка перемальовувала термінал (аудит
+    29.09.2026).
+    """
+    return untrusted(value)
 
 
 def _mb(n: int) -> str:
@@ -63,7 +66,7 @@ def _show_card(card: dict[str, Any], indent: str = "  ") -> None:
     if card.get("doc_type"):
         console.print(f"{indent}жанр: {_e(card['doc_type'])}")
     if card.get("frames"):
-        console.print(f"{indent}кадрів: {card['frames']}")
+        console.print(f"{indent}кадрів: {_e(card['frames'])}")
 
 
 # Прапорці картки однакові в `pack`, `suggest` і `card` — одна довідка.
@@ -662,7 +665,9 @@ def pull_cmd(
                                       "усі його роки одним викликом"),
     years: str = typer.Option("", "--years", help="роки видання: «1880» або «1862-1905»"),
     force: bool = typer.Option(False, "--force",
-                               help="з --vydannia: перекласти вже взяті роки новішими"),
+                               help="з --vydannia: перекласти вже взяті роки новішими; "
+                                    "ворота діють як завжди (прийняти попри них — "
+                                    "share import <адреса> --force)"),
     as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Знайти справу в каталозі пулу — і за потреби одразу прийняти.

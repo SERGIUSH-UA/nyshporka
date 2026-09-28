@@ -546,7 +546,9 @@ function sec(icon, title, body, aside = '') {
 
 function n(label, value, flag = false) {
   if (value === null || value === undefined || value === '') return '';
-  const shown = typeof value === 'string' ? value : num(value);
+  // Рядок екранується, як і все, що йде в розмітку (аудит 29.09.2026): доти
+  // він вставлявся сирим, а значення приходять із відповіді сервера.
+  const shown = typeof value === 'string' ? esc(value) : num(value);
   return `<span${flag ? ' class="flag"' : ''}>${esc(label)}: <b>${shown}</b></span>`;
 }
 

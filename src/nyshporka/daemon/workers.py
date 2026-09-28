@@ -406,13 +406,24 @@ async def _run_acquire(bus: JobBus, src: Any, job: JobRecord, dest: Path,
         await bus.update(job.id, state=JobState.ERROR,
                          error=f"{type(exc).__name__}: {exc}")
         return
+    from nyshporka.sources.base import completeness
+
+    # 🔴 Той самий приймач, що в `nysh get` (аудит 29.09.2026): доти DONE
+    # ставилось усьому, крім «самі збої й жодного кадру», — нуль кадрів без
+    # збою чи 10 кадрів із 300 висіли в черзі завершеною роботою.
+    verdict = completeness(res, total)
+    said = verdict.message(res)
+    why = "; ".join(x for x in (said, *res.errors[:3]) if x) if not verdict.ok else ""
     await bus.update(
         job.id,
-        state=JobState.ERROR if res.errors and not res.frames else JobState.DONE,
-        error="; ".join(res.errors[:3]),
+        state=JobState.DONE if verdict.ok else JobState.ERROR,
+        error=why,
         result={"dest": str(res.dest), "frames": res.frames,
                 "skipped": res.skipped, "bytes": res.bytes,
-                "errors": len(res.errors)},
+                "errors": len(res.errors), "promised": verdict.want,
+                "got": verdict.got, "complete": verdict.state,
+                # «Повноту не доведено» — не збій, але й не мовчазний успіх.
+                "note": said if verdict.ok else ""},
         # ⚠ Джерело буває без знаменника (Commons не знає числа сторінок
         # для одинарного скана). Поступ тоді рахується від зробленого, а
         # не від обіцяного, — і саме тому число тут не вигадується.
@@ -451,7 +462,9 @@ async def _start_read(bus: JobBus, ws: Workspace,
                       # 🔴 `model` форма надсилала й раніше, але сюди він не
                       # доходив: поле на екрані було, а прогін ішов бойовою моделлю
                       model=str(payload.get("model") or ""),
-                      also=[str(v) for v in payload.get("also") or [] if str(v).strip()])
+                      also=[str(v) for v in payload.get("also") or [] if str(v).strip()],
+                      # Шлях прийшов із браузера — лише корені справ (аудит 29.09.2026).
+                      zone=True)
         # 🔴 Шифра береться З опису, коли її не передали. Прогін без шифри стає
         # в реєстрі «нічиїм»: він є, текст є, а до якої справи належить —
         # невідомо, і зшивати це потім доводиться правкою JSON руками. З консолі

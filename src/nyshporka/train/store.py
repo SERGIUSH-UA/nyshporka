@@ -176,6 +176,20 @@ def dedupe_similar(items: list[dict[str, Any]], limit: int = NAME_DUP_LIMIT,
     return out
 
 
+def _size(v: Any) -> list[int] | None:
+    """`[ширина, висота]` цілими або `None`.
+
+    Розмір береться з `_cut.json`, а екран розмітки вставляє його в `viewBox`
+    через innerHTML — рядок замість числа там став би розміткою (аудит
+    29.09.2026). Нечислове — `None`, і розмір візьметься з самого зображення.
+    """
+    try:
+        w, h = int(v[0]), int(v[1])
+    except (TypeError, ValueError, IndexError, KeyError, OverflowError):
+        return None
+    return [w, h] if w > 0 and h > 0 else None
+
+
 def draft_label(draft_id: str) -> str:
     """Людська назва голосу; злиття арбітрів підписується окремо."""
     if draft_id == S.MERGE_ID:
@@ -400,12 +414,18 @@ class Store:
         """
         from PIL import Image
 
-        pg_meta = (self.reg.cut_meta(self.spec).get("pages") or {}).get(page) or {}
+        cut_pages = self.reg.cut_meta(self.spec).get("pages") or {}
+        # Лише сторінка самого набору: ім'я йде в шлях кешу й у джерело кадру,
+        # а файл повертається base64 — без гарду це читання будь-якого jpg
+        # машини (аудит 29.09.2026).
+        if not S.safe_page(page) or (page not in cut_pages and page not in self.pages()):
+            raise S.SetError(f"сторінки «{page}» немає в наборі «{self.name}»")
+        pg_meta = cut_pages.get(page) or {}
         boxes = {str(i): [int(v) for v in b[:4]]
                  for i, b in enumerate(pg_meta.get("boxes") or []) if b}
         max_px = max(600, min(4000, int(max_px)))
         cache = self.reg.set_dir(self.name) / PAGEVIEW_DIR / f"{page}_{max_px}.jpg"
-        size = pg_meta.get("size")
+        size = _size(pg_meta.get("size"))
         if not cache.is_file():
             from nyshporka.htr import view as V
             from nyshporka.train.cut import page_image

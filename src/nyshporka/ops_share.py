@@ -10,6 +10,7 @@
 """
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -619,13 +620,20 @@ def share_inspect(a: ShareLookArgs) -> Envelope:
     а не його заяву. «У відправника перевірено» не є перевіркою: пакет міг
     зібрати інший інструмент або інша версія цього.
     """
-    from nyshporka.share.accept import AcceptError, look
+    from nyshporka.share.accept import AcceptError, discard, look
 
     try:
         seen = look(a.src, hash_frames=a.hash_frames)
     except AcceptError as exc:
         return fail(str(exc))
-    env = ok(seen.as_json())
+    data = seen.as_json()
+    # 🔴 Подивитись — не прийняти. Завантажене з адреси прибирається одразу:
+    # доти воно лягало в сховище доказів і лишалось там, навіть коли ворота
+    # пакет відхилили (аудит 29.09.2026).
+    if seen.downloaded:
+        discard(seen)
+        data["path"] = a.src
+    env = ok(data)
     for code, text in seen.verdict.warnings:
         env.warn(code, text)
     for why in seen.verdict.refusals:
@@ -807,16 +815,44 @@ class ShareRowArgs(BaseModel):
     url: str = Field(default="", description="адреса, за якою пакет лежатиме")
 
 
+def _row_path(raw: str) -> tuple[Path | None, str]:
+    """Шлях пакета для `share.row`, лише в межах простору чи коренів справ.
+
+    Аудит 29.09.2026: операція без токена хешувала будь-який файл машини —
+    відповідь видавала, чи файл існує, і його sha256, а мережевий шлях (UNC,
+    `//хост/x`) змушував Windows іти на чужий SMB-сервер і віддавати йому NTLM-хеш.
+    Мережевий шлях відсікається до першого звертання до диска, решта —
+    `abspath` без `resolve()` (той самий принцип, що в `htr_store.under_raw`).
+    """
+    import os
+
+    from nyshporka.core.workspace import workspace
+
+    raw = (raw or "").strip()
+    if not raw or raw.startswith(("\\\\", "//")) or "\0" in raw:
+        return None, "мережевий або порожній шлях пакета не приймається"
+    ws = workspace()
+    p = Path(raw) if Path(raw).is_absolute() else ws.root / raw
+    p = Path(os.path.abspath(p))
+    for base in (ws.root, *ws.case_roots()):
+        try:
+            p.relative_to(Path(os.path.abspath(base)))
+            return p, ""
+        except ValueError:
+            continue
+    return None, f"пакет має лежати в просторі ({ws.root}) або в корені справ"
+
+
 @op("share.row", summary="Рядок каталогу для пулу",
-    args=ShareRowArgs, mutates=False, agent=False, section=SECTION)
+    args=ShareRowArgs, mutates=False, agent=False, section=SECTION, private=True)
 def share_row(a: ShareRowArgs) -> Envelope:
     """Готовий рядок TSV — для свого дзеркала чи офлайн-копії каталогу."""
-    from pathlib import Path
-
     from nyshporka.share import bundle
     from nyshporka.share import catalog as C
 
-    p = Path(a.path)
+    p, why = _row_path(a.path)
+    if p is None:
+        return fail(why)
     if not p.is_file():
         return fail(f"пакета немає: {p}")
     try:
@@ -838,7 +874,8 @@ class SharePullArgs(BaseModel):
                                       "роки (або --years) одним викликом")
     years: str = Field(default="", description="роки видання: «1880» або «1862-1905»")
     force: bool = Field(default=False,
-                        description="з --vydannia: перекласти вже взяті роки новішими пакетами")
+                        description="з --vydannia: перекласти вже взяті роки новішими "
+                                    "пакетами; ворота при цьому діють як завжди")
 
 
 def _years(raw: str) -> tuple[int, int] | None:
@@ -863,7 +900,7 @@ def _pull_vydannia(a: SharePullArgs) -> Envelope:
     """
     from nyshporka import vydannia
     from nyshporka.share import catalog as C
-    from nyshporka.share.accept import AcceptError, accept
+    from nyshporka.share.accept import AcceptError, GatesRefused, accept
 
     code = a.vydannia.strip().upper()
     if not vydannia.is_code(code):
@@ -908,7 +945,18 @@ def _pull_vydannia(a: SharePullArgs) -> Envelope:
             env.warn("no_url", f"{code} {year}: у рядку каталогу немає адреси пакета")
             continue
         try:
-            taken = accept(r.url, sha256=r.sha256, force=a.force)
+            # 🔴 `--force` тут — лише «замінити взяте новішим» (`replace`), а
+            # не «попри ворота». Доти він передавався як `force` і знімав ще й
+            # ворота — оптом, на всі роки видання (аудит 29.09.2026). Прийняти
+            # пакет, який ворота відхилили, — рішення про ОДИН пакет, і воно
+            # робиться окремим викликом `share import <адреса> --force`.
+            taken = accept(r.url, sha256=r.sha256, replace=a.force)
+        except GatesRefused as exc:
+            env.warn("gate_refusal",
+                     f"{code} {year}: ворота не пропустили пакет:\n{exc.detail}\n"
+                     f"Прийняти попри ворота — лише окремим рішенням про цей "
+                     f"пакет: nysh share import {r.url} --force")
+            continue
         except AcceptError as exc:
             env.warn("import_failed", f"{code} {year}: {exc}"
                      + ("" if a.force else " (оновити взяте: --force)"))

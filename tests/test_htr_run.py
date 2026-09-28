@@ -233,3 +233,50 @@ def test_rereading_with_a_named_model_goes_to_its_own_folder(space: Path, tmp_pa
     cmd = p.command()
     assert cmd[cmd.index("--seg-cache-dir") + 1] == str(seg)
     assert "--models" not in cmd
+
+
+# ── гард теки для застосунку (аудит 29.09.2026) ─────────────────────────────
+def test_app_reads_only_from_case_roots(space: Path, tmp_path: Path) -> None:
+    """Шлях із браузера — лише з коренів справ; термінал гарду не має.
+
+    План не лише читає теку, а й пише в неї (PDF розгортається в кадри), а
+    черга демона доти брала будь-яку теку машини.
+    """
+    from nyshporka import ops as O
+
+    foreign = tmp_path / "чужа"
+    foreign.mkdir()
+    (foreign / "0001.jpg").write_bytes(b"\0")
+    with pytest.raises(R.ReadError, match="Корені справ"):
+        R.plan(foreign, zone=True)
+    with pytest.raises(R.ReadError, match="Корені справ"):
+        R.plan(str(tmp_path / "data" / "raw" / ".." / ".." / "чужа"), zone=True)
+    env = O.call("read.plan", {"case_dir": str(foreign)})
+    assert not env.ok and "Корені справ" in env.error
+    inside = tmp_path / "data" / "raw" / "спр"
+    inside.mkdir(parents=True)
+    with pytest.raises(R.ReadError, match="немає зображень"):
+        R.plan(inside, zone=True)
+    with pytest.raises(R.ReadError) as exc:
+        R.plan(foreign)                     # термінал: тека людини, гарду нема
+    assert "Корені справ" not in str(exc.value)
+
+
+def test_daemon_queue_asks_for_the_guard(monkeypatch: pytest.MonkeyPatch) -> None:
+    import asyncio
+
+    from nyshporka.daemon import workers as W
+
+    seen: dict = {}
+
+    class _Stop(Exception):
+        pass
+
+    def fake(case_dir, **kw):
+        seen.update(kw)
+        raise _Stop
+
+    monkeypatch.setattr(R, "plan", fake)
+    with pytest.raises(_Stop):
+        asyncio.run(W._start_read(None, None, {"case_dir": "x"}))  # type: ignore[arg-type]
+    assert seen.get("zone") is True

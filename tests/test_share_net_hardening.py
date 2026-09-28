@@ -494,3 +494,43 @@ def test_lokalnyi_paket_zviriaietsia_z_sha(tmp_path: Path) -> None:
     p.write_bytes(b"x")
     with pytest.raises(A.AcceptError, match="sha256"):
         A.fetch(str(p), tmp_path, sha256="0" * 64)
+
+
+# ── аудит 29.09.2026: керівні символи в чужих даних ─────────────────────────
+
+#: Стерти екран, перемалювати рядок вище, заголовок вікна, CSI одним байтом.
+KERIVNI = "\x1b[2J\x1b[1A\x1b[2K✓ ворота пройдено\x1b]0;x\x07 \x9b31m кінець"
+
+
+@pytest.mark.parametrize("cmd, op, data", [
+    (["share", "inspect", "p.nyshtext"], "share.inspect",
+     {"shifra": KERIVNI, "pages": 1, "frames": 1, "models": [KERIVNI],
+      "publisher": {"handle": KERIVNI, "contact": KERIVNI}, "note": KERIVNI,
+      "alignment": {"label": "text-only", "why": KERIVNI},
+      "gates": {"refusals": [KERIVNI]}, "refs": [{"source": KERIVNI, "ref": KERIVNI}]}),
+    (["share", "pull", "315"], "share.pull",
+     {"found": [{"shifra": KERIVNI, "pages": "3", "models": KERIVNI,
+                 "publisher": KERIVNI}], "count": 1, "of": 1, "catalog": "x"}),
+])
+def test_keruiuchi_symvoly_z_chuzhykh_danykh_ne_druk(
+        monkeypatch: pytest.MonkeyPatch, cmd: list[str], op: str,
+        data: dict[str, Any]) -> None:
+    """🔴 Екранування розмітки rich ESC не чіпає, і нотатка незнайомця
+    могла намалювати «ворота пройдено» поверх справжньої відмови."""
+    from nyshporka import ops as O
+    from nyshporka.cli import app
+    from nyshporka.core.envelope import ok
+    from nyshporka.share import cli as SC
+
+    def _call(name: str, args: Any) -> Any:
+        env = ok(data)
+        env.warn("gate_refusal", KERIVNI)
+        return env
+
+    monkeypatch.setattr(O, "call", _call)
+    monkeypatch.setattr(SC, "_kliuch_abo_vkhid", lambda as_json: None)
+    res = CliRunner().invoke(app, cmd)
+    assert res.exit_code == 0, res.output
+    assert "ворота пройдено" in res.output, "сам текст мусить лишитись"
+    for bad in ("\x1b", "\x9b", "\x07"):
+        assert bad not in res.output, repr(bad)

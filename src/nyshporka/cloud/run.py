@@ -315,6 +315,10 @@ def prepare(session: Session, remote_dir: str, *,
             try:
                 got = session.run(cmd, timeout=timeout, on_line=on_line)
                 dropped = got.rc == -1
+            except CeilingHit:
+                # Стеля з `on_line` — не обрив каналу: повторювати крок означало
+                # б платити далі саме тоді, коли гроші скінчились.
+                raise
             except (OSError, EOFError, CloudError) as exc:
                 got, dropped = None, True
                 if on_line:
@@ -587,9 +591,59 @@ def _seed_results(session: Session, plan: CloudPlan, remote_dir: str, *,
     return sent
 
 
+class CeilingHit(RunError):
+    """Стеля грошей чи часу спрацювала ще до пуску роботи (підготовка, заливка)."""
+
+    def __init__(self, kind: str, why: str) -> None:
+        super().__init__(why)
+        self.kind = kind
+
+
+def ceiling_hit(st: ST.RunState, now: float) -> tuple[str, str]:
+    """Яка стеля спрацювала: (`budget_stop` | `deadline` | "", пояснення).
+
+    Одна правда для нагляду (`go._wait`) і для підготовки (`start`): стеля, яку
+    рахують двома способами, рано чи пізно розійдеться сама з собою.
+    """
+    from nyshporka.cloud import money as M
+
+    spent = st.spent_usd(now)
+    if (st.budget_usd is not None and spent is not None
+            and spent >= st.budget_usd - M.STOP_MARGIN_USD):
+        return "budget_stop", (f"витрачено ${spent:.2f} з бюджету "
+                               f"${st.budget_usd:.2f}")
+    hours = st.rent_hours(now)
+    if st.max_hours is not None and st.rent_started and hours >= st.max_hours:
+        return "deadline", f"минуло {hours:.1f} год зі стелі {st.max_hours:g} год"
+    return "", ""
+
+
 def start(plan: CloudPlan, *, workers: int = 0, seg_height: int = 0,
           on_line: Any = None, auto_prepare: bool | None = None,
           seed: bool = False) -> ST.RunState:
+    """Почати або підхопити захід під замком власника (докладно — `_start`).
+
+    🔴 Замок тут, а не лише в `go` (аудит 29.09.2026). Без нього паралельний
+    `nysh cloud start` чи `go --thin` тієї самої справи бачив «машина є, pid
+    немає» — штатний стан підготовки — і гасив чужий бокс як сироту. Замок
+    повторно-вхідний у межах потоку, тож `go`, який уже тримає його, проходить.
+    """
+    import contextlib
+
+    with contextlib.ExitStack() as stack:
+        try:
+            stack.enter_context(ST.owned(plan.run_id))
+        except ST.OwnerBusy as exc:
+            raise RunError(
+                f"{exc} — другий власник погасив би його машину як сироту. "
+                f"Стан: `nysh cloud state {plan.run_id}`.") from None
+        return _start(plan, workers=workers, seg_height=seg_height,
+                      on_line=on_line, auto_prepare=auto_prepare, seed=seed)
+
+
+def _start(plan: CloudPlan, *, workers: int = 0, seg_height: int = 0,
+           on_line: Any = None, auto_prepare: bool | None = None,
+           seed: bool = False) -> ST.RunState:
     """Почати або підхопити захід. Повертається одразу — робота лишається жити.
 
     Повторний виклик на живому заході нічого не робить, а на завершеному —
@@ -670,7 +724,36 @@ def start(plan: CloudPlan, *, workers: int = 0, seg_height: int = 0,
     st.rent_ended = 0.0
     st.run_started = 0.0
     st.note("acquired", f"машина {box.label or box.id}")
+    # 🔴 Ціни бекенд не назвав — бюджет стежити нема чим: `spent_usd()` дає
+    # None, і стеля грошей мовчки не діє (аудит 29.09.2026). Кажемо вголос і
+    # в стан, а тримає захід лише стеля часу.
+    if st.bills and st.budget_usd is not None and st.price_usd_h is None:
+        warn = (f"бекенд не назвав ціни машини — бюджет ${st.budget_usd:.2f} "
+                f"стежити нема чим; захід обмежує лише стеля часу"
+                + (f" ({st.max_hours:g} год)" if st.max_hours is not None
+                   else ", а її не задано — задайте `--max-hours`"))
+        st.note("warning", warn)
+        say(f"⚠ {warn}")
     ST.save(st)
+
+    def guard(where: str) -> None:
+        """Стеля між платними кроками підготовки (аудит 29.09.2026).
+
+        Доти стелі перевірялись лише в нагляді, ПІСЛЯ пуску: підготовка (до
+        1800 с на пакет) і заливка без стелі часу йшли за будь-яку ціну.
+        Роботи ще немає, тож забирати нічого — виняток іде в обробник нижче,
+        а той гасить машину.
+        """
+        if not st.bills:
+            return
+        kind, why = ceiling_hit(st, time.time())
+        if kind:
+            raise CeilingHit(kind, f"{why} — {where}; роботу ще не пущено, "
+                                   f"машину гасимо")
+
+    def watched(line: str) -> None:
+        say(line)
+        guard("під час підготовки")
 
     # 🔴 `connect` УСЕРЕДИНІ `try`: свіжий бокс часто ще не приймає SSH, і
     # `BoxNotReady` звідси раніше виходив повз `release` — машина лишалась
@@ -706,7 +789,8 @@ def start(plan: CloudPlan, *, workers: int = 0, seg_height: int = 0,
                 session = backend.connect(box)
                 return session
 
-            engine = prepare(session, remote_dir, on_line=say, reconnect=_again)
+            engine = prepare(session, remote_dir, on_line=watched, reconnect=_again)
+            guard("після підготовки середовища")
         if not engine.ready:
             raise RunError(
                 f"на машині немає середовища рушіїв ({engine.detail}). "
@@ -728,14 +812,17 @@ def start(plan: CloudPlan, *, workers: int = 0, seg_height: int = 0,
         st.enter("uploading", why="веземо ваги й кадри")
         session.mkdirs(remote_dir)
         _upload_assets(session, plan, remote_dir, on_line=say)
+        guard("після заливки ваг")
         _upload_frames(session, plan, remote_dir,
                        storage=T.load_storage(), on_line=say)
+        guard("після заливки кадрів")
         st.pages_seeded = 0
         if seed and _seed_results(session, plan, remote_dir, on_line=say):
             from nyshporka.cloud.verify import texts_in
 
             st.pages_seeded = texts_in(Path(plan.out_dir))
         _drain_notes(session, st, say)
+        guard("перед пуском роботи")
 
         device = "cuda:0" if probe.has_gpu else "cpu"
         _launch(session, st, plan, python=engine.python,
@@ -760,6 +847,7 @@ def start(plan: CloudPlan, *, workers: int = 0, seg_height: int = 0,
                 # реєстр машин, і за нею потім відсіюють бокси, що не піднялись.
                 backend.release(box, why=("cancelled"
                                           if isinstance(exc, KeyboardInterrupt)
+                                          else exc.kind if isinstance(exc, CeilingHit)
                                           else f"failed:{at}"))
                 st.released = True
                 st.rent_ended = time.time()
@@ -973,8 +1061,12 @@ def poll(st: ST.RunState) -> Pulse:
         # за порядком — і розбір мовчки з'їжджає, щойно машина додасть від себе
         # хоч один рядок (привітання оболонки, попередження locale).
         d = shlex.quote(st.remote_dir)
+        # `find`, а не `ls out/*.txt` (аудит 29.09.2026): шаблон розгортає
+        # оболонка, і на десятках тисяч сторінок рядок упирається в ARG_MAX —
+        # `ls` падає, і лічильник показує нуль посеред живої роботи.
         got = session.run(
-            f"echo pages=$(ls {d}/{OUT_SUB}/*.txt 2>/dev/null | wc -l); "
+            f"echo pages=$(find {d}/{OUT_SUB} -maxdepth 1 -type f -name '*.txt' "
+            f"! -name '.*' 2>/dev/null | wc -l); "
             f"echo done=$(test -f {d}/{DONE_FLAG} && echo 1 || echo 0); "
             f"echo rc=$(cat {d}/{RC_FILE} 2>/dev/null || echo -)",
             timeout=CMD_TIMEOUT)
@@ -998,6 +1090,14 @@ def poll(st: ST.RunState) -> Pulse:
                      frames_total=st.frames_total, rc=rc)
     finally:
         session.close()
+
+
+class ResultNotPacked(RunError):
+    """Архів результату на машині не зібрався: тексти лишились на її диску.
+
+    Окремий клас, бо рішення після нього протилежне звичайному збою забору:
+    машину НЕ гасять, доки людина не забере прочитане (аудит 29.09.2026).
+    """
 
 
 def fetch(st: ST.RunState, *, on_line: Any = None) -> Path:
@@ -1024,12 +1124,26 @@ def fetch(st: ST.RunState, *, on_line: Any = None) -> Path:
         # тоді, коли прогін упав, не створивши теки другого голосу. Перша
         # справжня оренда з мертвим раннером привезла додому 0.0 МБ і жодного
         # слова про причину.
-        session.run(
+        packed = session.run(
             f"cd {shlex.quote(st.remote_dir)} && rm -f result.tar && "
             f"tar -cf result.tar $(ls -d {OUT_SUB} {OUT_SUB}-* {LOGS_SUB} 2>/dev/null)",
             timeout=CMD_TIMEOUT)
+        if packed.rc == -1:
+            raise ChannelDropped("канал обірвався, поки на машині збирався архів "
+                                 "результату")
         if not session.exists(remote_tar):
             raise RunError("на машині нема чого забирати — тека виходу порожня")
+        # 🔴 Код `tar` — не формальність (аудит 29.09.2026). Повний диск дає
+        # обрізаний `result.tar`, який існує, їде додому й розпаковується без
+        # скарг, а далі стоїть «неповно» і гасіння — разом із текстами, що
+        # лишились на машині. 1 у GNU tar — «файл змінився під час читання»:
+        # архів цілий, це попередження; 2 і вище — архів зібрати не вдалось.
+        if packed.rc not in (0, 1):
+            said = (packed.err or packed.out).strip()[-300:]
+            raise ResultNotPacked(
+                f"архів результату на машині не зібрався (tar rc={packed.rc}"
+                + (f": {said}" if said else "") + ") — прочитане лишилось на "
+                "її диску; найчастіше це повний диск")
         from nyshporka.core.workspace import workspace
 
         local_tar = workspace().derived / "cloud" / "tmp" / f"{st.run_id}.result.tar"

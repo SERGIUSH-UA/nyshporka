@@ -30,6 +30,7 @@ from nyshporka.cases.resolve import (
     resolve_run,
     slug_case,
 )
+from nyshporka.cases.walk import IMG_EXT, frame_names
 from nyshporka.library import (
     _DEFAULT_OPYS,
     _REPO_LABEL,
@@ -51,7 +52,9 @@ PAGES_ROOT = ROOT / "data" / "pages"
 CLAN_STATE = ROOT / "data" / "clan_hunt" / "state.json"
 DERIVED_DB = ROOT / "data" / "derived" / "nyshporka.sqlite"
 
-_IMG_EXT = {".jpg", ".jpeg", ".png"}
+#: Які файли теки — кадри, і які з них ідуть у знаменник, вирішує
+#: `cases.walk` (`IMG_EXT`, `frame_names`): одне правило для обходу, прямого
+#: читання теки, збірок і сховища сторінок (аудит 29.09.2026).
 #: Теки-не-справи беруться з `library.skip_slugs()` — вбудований перелік разом із
 #: паком. ⚠ Тут лежала друга копія набору, і вона так само не знала паку.
 
@@ -188,11 +191,18 @@ _CYR_REPO = {"ДАХМО": "DAHMO", "ЦДІАК": "CDIAK", "ДАВІО": "DAVIO"
 
 
 def _ordered_cases(index: LibraryIndex,
-                   scans: list[Any] | None = None) -> list[dict[str, Any]]:
+                   scans: list[Any] | None = None,
+                   unreadable: list[Unreadable] | None = None,
+                   ) -> list[dict[str, Any]]:
     """Теки з карткою справи, але без кадрів — «замовлено, не завантажено».
 
     Бібліотека їх не бачить за побудовою (вимагає зображень або PDF), і саме через
     це сім справ ДАОО по парафії Фараонівка не потрапили у вчорашню інвентаризацію.
+
+    Нечитаний паспорт іде в `unreadable`, як і решта шарів (аудит 29.09.2026):
+    тут стояло `except Exception: continue`, і замовлена справа з битим
+    `_source.json` просто зникала з реєстру — «такої справи немає» там, де
+    вона замовлена й чекає кадрів.
     """
     out: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -207,9 +217,14 @@ def _ordered_cases(index: LibraryIndex,
             continue
         if scan.has_material():
             continue                      # матеріал є → це справа бібліотеки
+        passport = scan.path / scan.sidecar
         try:
-            meta = json.loads((scan.path / scan.sidecar).read_text(encoding="utf-8"))
-        except Exception:
+            meta = json.loads(passport.read_text(encoding="utf-8"))
+        except Exception as exc:
+            _note_unreadable(unreadable, passport, exc)
+            continue
+        if not isinstance(meta, dict):
+            _note_unreadable(unreadable, passport, "паспорт не є JSON-об'єктом")
             continue
         seen.add(rel)
         out.append({"rel": rel, "meta": meta})
@@ -250,7 +265,7 @@ def _frames_index(scans: list[Any]) -> dict[str, tuple[int, bool]]:
             rel = str(s.path.relative_to(ROOT)).replace("\\", "/")
         except ValueError:
             continue
-        out[os.path.normcase(rel)] = _material_frames(s.n_img, list(s.pdf_paths))
+        out[os.path.normcase(rel)] = _material_frames(s.n_frames, list(s.pdf_paths))
     return out
 
 
@@ -271,10 +286,10 @@ def _count_frames_exact(rel: str | None) -> tuple[int, bool]:
         suf = p.suffix.lower()
         if suf == ".pdf":
             return _material_frames(0, [p])
-        return (1 if suf in _IMG_EXT else 0), True
+        return (1 if suf in IMG_EXT else 0), True
     if not p.is_dir():
         return 0, True
-    n_img = 0
+    names: list[str] = []
     pdfs: list[Any] = []
     try:
         with os.scandir(p) as it:
@@ -284,16 +299,16 @@ def _count_frames_exact(rel: str | None) -> tuple[int, bool]:
                         continue
                 except OSError:
                     continue
-                low = f.name.lower()
-                dot = low.rfind(".")
-                ext = low[dot:] if dot >= 0 else ""
-                if ext in _IMG_EXT:
-                    n_img += 1
-                elif ext == ".pdf":
+                if f.name.lower().endswith(".pdf"):
                     pdfs.append(p / f.name)
+                else:
+                    names.append(f.name)
     except OSError:
         pass
-    return _material_frames(n_img, pdfs)
+    # 🔴 Те саме правило, що в обході (`frame_names`): тут стояв свій набір
+    # розширень, і одна справа мала два знаменники — з індексу обходу (з
+    # TIFF) і з прямого читання (без них), залежно від того, де лежить тека.
+    return _material_frames(len(frame_names(names)), pdfs)
 
 
 def _count_frames(rel: str | None) -> int:
@@ -347,7 +362,7 @@ def _unfiled_material(index: LibraryIndex, known: set[str],
             continue                      # підтека вже врахованої справи/збірки
         # Сторінки PDF, а не число файлів — та сама міра, що й у справ
         # (аудит 29.09.2026).
-        frames = (_material_frames(scan.n_img, list(scan.pdf_paths))[0]
+        frames = (_material_frames(scan.n_frames, list(scan.pdf_paths))[0]
                   if scan.has_material() else 0)
         if frames:
             seen.add(rel)
@@ -623,7 +638,7 @@ def collect_rows(index: LibraryIndex | None = None, *,
         )
 
     # ── замовлене: картка справи без кадрів ─────────────────────────────────
-    for item in _ordered_cases(idx, scans):
+    for item in _ordered_cases(idx, scans, unreadable):
         meta, rel = item["meta"], item["rel"]
         shifra = str(meta.get("shifra") or "").strip()
         parsed = None
@@ -670,8 +685,7 @@ def collect_rows(index: LibraryIndex | None = None, *,
         frames = 0
         d = ROOT / rel if rel else None
         if d is not None and d.is_dir():
-            frames = sum(1 for p in d.iterdir()
-                         if p.is_file() and p.suffix.lower() in _IMG_EXT)
+            frames = len(frame_names(p.name for p in d.iterdir() if p.is_file()))
         rows[key] = CaseRow(
             key=key, kind="bundle", shifra=str(b.get("label") or key),
             repo=b.get("repo"), repo_label=b.get("repo_label") or b.get("repo"),

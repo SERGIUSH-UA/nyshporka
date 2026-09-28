@@ -156,8 +156,8 @@ def publish(path: Path, *, base: str = "", auth: str = "",
         # виманити підміною `NYSHPORKA_TOLOKA`.
         raise UploadError(
             f"ключ Супряги не надсилається на {home}: довірена лише "
-            f"https://…{catalog.TRUSTED_DOMAIN}. Для свого сервера покладіть "
-            f"ключ явно в {ENV_NAME}")
+            f"https://…{catalog.TRUSTED_DOMAIN}. Для свого сервера назвіть його "
+            f"явно: {catalog.ENV_TRUST}=https://хост[:порт] (лише HTTPS)")
     try:
         manifest = bundle.read_manifest(path)
     except (OSError, ValueError, bundle.BundleError, EOFError) as exc:

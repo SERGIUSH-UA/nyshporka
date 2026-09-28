@@ -1952,6 +1952,63 @@ def parse_shard(spec: str) -> tuple[int, int]:
     return k - 1, n
 
 
+#: Скільки разів перечитати спільну мету, яку саме тримає читач (Windows).
+_META_READ_TRIES = 4
+
+
+def _read_prev_meta(path: Path) -> dict | None:
+    """Наявна спільна мета для злиття: `{}` — її немає, `None` — злиття пропустити.
+
+    🔴 Аудит 29.09.2026: тут стояло `except (OSError, JSONDecodeError): pass`,
+    тобто «не прочиталась» = «немає». Злита мета тоді писалась з самих партів
+    і назавжди губила сторінки до-шардингових прогонів разом із дописаними
+    полями (`case_key`, `case_dir_cloud`) — прогін знову ставав нічиїм.
+    Тепер три випадки розведено:
+      · файла немає — нормальний перший запуск, `{}`;
+      · файл тимчасово не читається (в'ювер тримає, антивірус) — кілька
+        повторів, а якщо не минуло — `None`: злиття цього разу пропускається,
+        наступний шард перезбере, і нічого не втрачено;
+      · файл є, але побитий — його копія лягає поруч як `.corrupt-<час>` і про
+        це кажемо вголос; далі злиття йде з партів, бо лишити справу без
+        спільної мети гірше, а старий вміст збережено для ручного ремонту.
+    """
+    raw = None
+    for attempt in range(_META_READ_TRIES):
+        try:
+            raw = path.read_text(encoding="utf-8")
+            break
+        except FileNotFoundError:
+            return {}
+        except OSError as exc:
+            if attempt == _META_READ_TRIES - 1:
+                print(f"[htr-run] ⚠ спільна мета {path.name} не читається ({exc}) — "
+                      f"злиття пропущено, його повторить наступний шард", flush=True)
+                return None
+            time.sleep(0.2)
+    if raw is None or not raw.strip():
+        return {}
+    try:
+        prev = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        prev = None
+        why = f"рядок {exc.lineno}: {exc.msg}"
+    else:
+        why = "не JSON-об'єкт"
+    if isinstance(prev, dict):
+        return prev
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    keep = path.with_name(f"{path.name}.corrupt-{stamp}")
+    try:
+        keep.write_text(raw, encoding="utf-8")
+        where = f"копія — {keep.name}"
+    except OSError as exc:
+        where = f"копію зберегти не вдалось ({exc})"
+    print(f"[htr-run] 🔴 спільна мета {path.name} побита ({why}); {where}. "
+          f"Зливаю з партів: сторінки й поля попередніх прогонів, яких немає "
+          f"в партах, лишились лише в копії.", flush=True)
+    return {}
+
+
 def merge_meta(out_dir: Path, base: dict) -> None:
     """Звести `_htr_meta.part*.json` шардів у спільний `_htr_meta.json`.
 
@@ -1966,13 +2023,11 @@ def merge_meta(out_dir: Path, base: dict) -> None:
         pages: dict = {}
         failed: list[str] = []
         started = base.get("started")
-        prev: dict = {}
-        try:
-            prev = json.loads(merged_path.read_text(encoding="utf-8"))
-            pages.update(prev.get("pages") or {})
-            started = prev.get("started") or started
-        except (OSError, json.JSONDecodeError):
-            pass
+        prev = _read_prev_meta(merged_path)
+        if prev is None:
+            return                       # не прочиталась — не переписуємо наосліп
+        pages.update(prev.get("pages") or {})
+        started = prev.get("started") or started
         done_all = True
         parts = sorted(out_dir.glob("_htr_meta.part*.json"))
         for part in parts:
@@ -2105,6 +2160,42 @@ def add_quarantine(out_dir: Path, page: str, reason: str) -> None:
             print(f"[htr-run] ⚠ карантин не записався ({exc})", flush=True)
 
 
+#: Кадри, які читає раннер. 🔴 Дзеркало `nyshporka.cases.walk.READ_EXT`
+#: (імпортувати пакет раннерові не можна — див. `test_htr_runner_isolated`);
+#: рівність двох множин звіряє `test_frame_ext_parity`. TIFF/WebP Pillow
+#: відкрив би, але 16-бітний TIFF після `convert("RGB")` стає білим аркушем, а
+#: хмарний захід їх не везе взагалі (`cloud.frames.alien`) — тож такі кадри
+#: перед прогоном переганяють у JPEG, а не читають як є (аудит 29.09.2026).
+FRAME_EXT = frozenset({".jpg", ".jpeg", ".png"})
+
+
+class StemCollision(ValueError):
+    """Два кадри з одним стемом: текст обох ліг би в один `<стем>.txt`."""
+
+
+def check_stem_collisions(pages: list[Path]) -> None:
+    """Відмовити, якщо два кадри мають один стем (`0001.jpg` і `0001.png`).
+
+    🔴 Аудит 29.09.2026: вихід сторінки — `<стем>.txt`, і приймач повноти теж
+    звіряє кадр за стемом. Другий кадр із тим самим стемом або перетирав текст
+    першого, або рахувався прочитаним, хоча його не читали ніколи — справа
+    виглядала повною з половиною сторінок. Регістр теж зливається: на Windows
+    `0001.txt` і `0001.TXT` — один файл. Відмова на старті нічого не коштує;
+    кадри треба перейменувати або розвести по теках.
+    """
+    by_stem: dict[str, list[str]] = {}
+    for p in pages:
+        by_stem.setdefault(p.stem.casefold(), []).append(p.name)
+    clashes = [names for names in by_stem.values() if len(names) > 1]
+    if clashes:
+        shown = "; ".join(" + ".join(n) for n in clashes[:5])
+        more = f" і ще {len(clashes) - 5}" if len(clashes) > 5 else ""
+        raise StemCollision(
+            f"у теці справи {len(clashes)} груп кадрів з одним ім'ям без розширення "
+            f"({shown}{more}): текст обох ліг би в один .txt, і другий кадр "
+            f"рахувався б прочитаним. Перейменуйте кадри або розведіть по теках.")
+
+
 def select_pages(case_dir: Path, pages_arg: str, limit: int,
                  shard_k: int, shard_n: int, claim: bool = False) -> list[Path]:
     """Кадри, які цей процес мусить пройти (з урахуванням --pages/--limit/--shard).
@@ -2117,7 +2208,8 @@ def select_pages(case_dir: Path, pages_arg: str, limit: int,
     (`claim_page`). Мета-парт і лок карти далі беруться з `k/n`.
     """
     pages_all = sorted(p for p in case_dir.iterdir()
-                       if p.is_file() and p.suffix.lower() in (".jpg", ".jpeg", ".png"))
+                       if p.is_file() and p.suffix.lower() in FRAME_EXT)
+    check_stem_collisions(pages_all)
     wanted = parse_pages(pages_arg, len(pages_all))
     if wanted is not None:
         pages_all = [p for i, p in enumerate(pages_all, 1) if i in wanted]
@@ -2285,6 +2377,25 @@ def page_memory(device: str) -> dict[str, int]:
     return out
 
 
+_KERNEL32 = None
+
+
+def _win_kernel32():
+    """kernel32 з `use_last_error`: інакше код відмови `OpenProcess` не прочитати."""
+    global _KERNEL32
+    if _KERNEL32 is None:
+        import ctypes
+
+        _KERNEL32 = ctypes.WinDLL("kernel32", use_last_error=True)  # type: ignore[attr-defined]
+    return _KERNEL32
+
+
+def _win_last_error() -> int:
+    import ctypes
+
+    return int(ctypes.get_last_error())  # type: ignore[attr-defined]
+
+
 def _pid_alive(pid: int) -> bool:
     """Чи живий процес. ⚠ На Windows `os.kill(pid, 0)` УБИВАЄ процес (сигнал
     там — код виходу), тому там лише запит стану через kernel32."""
@@ -2293,14 +2404,19 @@ def _pid_alive(pid: int) -> bool:
     if sys.platform == "win32":
         import ctypes
 
-        kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+        kernel32 = _win_kernel32()
         handle = kernel32.OpenProcess(0x1000, False, pid)   # QUERY_LIMITED_INFORMATION
         if not handle:
-            return False
+            # 🔴 Аудит 29.09.2026: будь-яка відмова тут означала «мертвий». Але
+            # ERROR_ACCESS_DENIED (5) — це процес, який Є, просто не наш за
+            # правами (інша сесія, підвищений наглядач). Його клейм знімався як
+            # сирітський, і сторінку читали двічі. Мертвим вважаємо лише
+            # відсутній pid (ERROR_INVALID_PARAMETER та інше).
+            return _win_last_error() == 5
         try:
             code = ctypes.c_ulong()
             if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
-                return False
+                return True          # процес відкрився, отже існує; стану не знаємо
             return code.value == 259                        # STILL_ACTIVE
         finally:
             kernel32.CloseHandle(handle)
@@ -2333,6 +2449,30 @@ def _claim_owner(path: Path) -> int:
         return 0
 
 
+#: Клейм без власника, молодший за стільки секунд, вважається живим.
+CLAIM_GRACE_S = 10.0
+
+
+def _claim_held(path: Path) -> bool:
+    """Чи тримає клейм живий процес.
+
+    🔴 Аудит 29.09.2026: файл клейма створюється `O_EXCL`, а pid пишеться в
+    нього ПІСЛЯ. Сусід, що читав клейм у цьому проміжку, бачив власника 0,
+    вважав його мертвим, знімав клейм — і сторінку читали двоє. Порожній чи
+    нерозбірний клейм у перші секунди — це власник, який ще пише своє ім'я;
+    мертвим він стає лише коли постарів без імені (процес помер між
+    `O_EXCL` і записом).
+    """
+    owner = _claim_owner(path)
+    if owner > 0:
+        return _pid_alive(owner)
+    try:
+        age = time.time() - path.stat().st_mtime
+    except OSError:
+        return True              # клейм щойно зник — знімати вже нічого
+    return age < CLAIM_GRACE_S
+
+
 def orphan_claims(out_dir: Path) -> list[str]:
     """Стеми з клеймом без `<stem>.txt`, чий власник уже мертвий."""
     d = out_dir / CLAIMS_DIR
@@ -2349,7 +2489,7 @@ def orphan_claims(out_dir: Path) -> list[str]:
         if (out_dir / f"{stem}.txt").exists() and any(
                 Path(p).stem == stem for p in done):
             continue
-        if not _pid_alive(_claim_owner(c)):
+        if not _claim_held(c):
             out.append(stem)
     return out
 
@@ -2384,7 +2524,7 @@ def held_by_live_stranger(out_dir: Path) -> set[str]:
         if (out_dir / f"{stem}.txt").exists():
             continue
         owner = _claim_owner(c)
-        if owner != me and _pid_alive(owner):
+        if owner != me and _claim_held(c):
             out.add(stem)
     return out
 
@@ -2447,6 +2587,9 @@ def supervise(args: argparse.Namespace, case_dir: Path, out_dir: Path) -> int:
     try:
         pages_all = select_pages(case_dir, args.pages, args.limit, shard_k, shard_n,
                                  claim=claim_mode)
+    except StemCollision as exc:
+        print(f"[htr-run] 🔴 {exc}", flush=True)
+        return 2
     except OSError as exc:
         print(f"[htr-run] наглядач: не читається тека справи ({exc})", flush=True)
         return 1
@@ -2998,8 +3141,13 @@ def _main_case(args: argparse.Namespace, cache: dict | None = None) -> int:
 
     shard_k, shard_n = parse_shard(args.shard)
     claim_mode = bool(args.claim) and shard_n > 1
-    pages_all = select_pages(case_dir, args.pages, args.limit, shard_k, shard_n,
-                             claim=claim_mode)
+    try:
+        pages_all = select_pages(case_dir, args.pages, args.limit, shard_k, shard_n,
+                                 claim=claim_mode)
+    except StemCollision as exc:
+        print(f"[htr-run] 🔴 {exc}", flush=True)
+        emit(prog, "done", pages=0, skipped=0, failed=0, error=str(exc))
+        return 2
     if claim_mode:
         freed = release_orphan_claims(out_dir)
         busy = len(held_by_live_stranger(out_dir))
@@ -3029,8 +3177,7 @@ def _main_case(args: argparse.Namespace, cache: dict | None = None) -> int:
                   # справи лежить поруч. Рахуємо до --pages/--limit/--shard.
                   "frames_total": len(sorted(
                       p for p in case_dir.iterdir()
-                      if p.is_file()
-                      and p.suffix.lower() in (".jpg", ".jpeg", ".png"))),
+                      if p.is_file() and p.suffix.lower() in FRAME_EXT)),
                   "model": Path(args.model).name, "device": device,
                   # рушій і письмо — щоб пошук/консоль могли сказати, чим
                   # прочитана сторінка, коли на одну справу є кілька прогонів

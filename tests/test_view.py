@@ -121,6 +121,25 @@ def test_line_geometry_reaches_the_console_only_as_numbers(run, tmp_path) -> Non
     assert got["size"] == [600, 400], "розмір мав добратись із самого скану"
 
 
+def test_nan_in_geometry_does_not_break_the_json_answer(run, tmp_path) -> None:
+    """Аудит 29.09.2026: NaN і нескінченність з `.lines.json` давали 500.
+
+    `json` їх читає, а відповідь демона (`allow_nan=False`) — ні, тож одна
+    зіпсована рамка валила показ цілої сторінки.
+    """
+    from nyshporka import htr_store as S
+
+    name, page = run
+    (tmp_path / "reports" / "htr" / name / "0001.lines.json").write_text(
+        '{"size": [600, NaN], "boxes": [[40, 30, 560, 80], [Infinity, 120, 560, 170]],'
+        ' "polys": [[[40, 30], [560, -Infinity]], null]}', encoding="utf-8")
+    got = S.page_lines(name, page)
+    assert got is not None
+    json.dumps(got, allow_nan=False)       # падає ValueError, якщо щось доїхало
+    assert got["boxes"] == [[40, 30, 560, 80], None]
+    assert got["size"] == [600, 400], "розмір мав добратись із самого скану"
+
+
 def test_missing_boxes_fall_back_to_the_page_and_say_so(run, tmp_path) -> None:
     """Прогони до 2026-08-09 рамок не писали — це не помилка, але й не мовчання.
 

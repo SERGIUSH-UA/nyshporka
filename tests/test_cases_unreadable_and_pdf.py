@@ -258,3 +258,32 @@ def test_image_case_complete_run_stays_complete(space: Path) -> None:
     _run(space, "spr-8433", ["0001.jpg", "0002.jpg"])
     _library()
     assert _only_case(collect_rows()[0]).htr_stage == "pysar"
+
+
+def test_ordered_case_with_broken_passport_is_reported(space: Path) -> None:
+    """Замовлена справа з битим паспортом не зникає мовчки (аудит 29.09.2026).
+
+    Тека з карткою, але без кадрів — «замовлено, не завантажено». Нечитаний
+    `_source.json` тут відкидався `except Exception: continue`, і справа
+    просто випадала з реєстру.
+    """
+    from nyshporka.cases.collect import collect_rows
+
+    ok = space / "data" / "raw" / "daoo" / "spr-1"
+    ok.mkdir(parents=True)
+    (ok / "_source.json").write_text(
+        '{"shifra": "ДАОО 37-1-1", "title": "Метрична книга"}', encoding="utf-8")
+    bad = space / "data" / "raw" / "daoo" / "spr-2"
+    bad.mkdir(parents=True)
+    (bad / "_source.json").write_text('{"shifra": "ДАОО 37-1-2", ', encoding="utf-8")
+    listy = space / "data" / "raw" / "daoo" / "spr-3"
+    listy.mkdir(parents=True)
+    (listy / "_source.json").write_text("[1, 2]", encoding="utf-8")
+    _library()
+    got: list[dict[str, str]] = []
+    rows, _ = collect_rows(unreadable=got)
+
+    paths = {g["path"] for g in got}
+    assert "data/raw/daoo/spr-2/_source.json" in paths, got
+    assert "data/raw/daoo/spr-3/_source.json" in paths, got
+    assert any(r.path == "data/raw/daoo/spr-1" and r.state == "ordered" for r in rows)

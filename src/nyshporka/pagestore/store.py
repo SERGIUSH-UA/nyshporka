@@ -21,6 +21,7 @@ if TYPE_CHECKING:
 
 from nyshporka import vydannia
 from nyshporka.archives.pack import active as _pack_active
+from nyshporka.cases.walk import frame_names
 from nyshporka.core.workspace import workspace
 from nyshporka.library import (
     _DEFAULT_OPYS,
@@ -43,11 +44,10 @@ from nyshporka.library import (
     split_fond_opys,
 )
 from nyshporka.pagestore.models import CaseFile, PageNote, Record
+from nyshporka.utils.atomic import atomic_write_text
 
 ROOT = workspace().root
 PAGES_ROOT = workspace().pages
-
-_IMG_EXT = {".jpg", ".jpeg", ".png"}
 
 # порядок підвищення статусу: понизити повний прохід частковим не можна
 _STATUS_RANK = {"unreadable": 0, "skipped": 0, "partial": 1, "full": 2}
@@ -353,6 +353,40 @@ def _empty_case(ref: CaseRef) -> CaseFile:
 
 
 # ── lockfile: паралельні агенти пишуть в одну справу ─────────────────────────
+def _steal_stale(lockp: Path, stale: float) -> bool:
+    """Зняти протухлий лок — лише під сторожем і з повторною перевіркою.
+
+    🔴 Аудит 29.09.2026: було «побачив старий mtime → `unlink`». Двоє чекачів
+    бачать той самий протухлий лок; A знімає його й ставить свій, а B, який
+    свою перевірку вже зробив, знімає СВІЖИЙ лок A — і обидва пишуть справу,
+    тобто read-modify-write одного губить нотатки іншого. Тепер знімати може
+    лише той, хто тримає сторож `<lock>.steal` (`O_EXCL`), і він перевіряє вік
+    лока ще раз уже під сторожем: чужий свіжий лок там видно як свіжий.
+    Сторож живе мікросекунди; якщо його лишив мертвий процес — знімається за
+    тим самим віком, що й лок.
+    """
+    guard = lockp.with_name(lockp.name + ".steal")
+    try:
+        g = os.open(guard, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError:
+        try:
+            if time.time() - guard.stat().st_mtime > stale:
+                guard.unlink(missing_ok=True)
+        except OSError:
+            pass
+        return False                          # знімає інший — чекаємо далі
+    try:
+        if time.time() - lockp.stat().st_mtime > stale:
+            lockp.unlink(missing_ok=True)
+            return True
+        return False                          # лок уже чийсь свіжий — не чіпаємо
+    except OSError:
+        return True                           # лок уже зник — розсудить O_EXCL
+    finally:
+        os.close(g)
+        guard.unlink(missing_ok=True)
+
+
 @contextmanager
 def _lock(path: Path, timeout: float = 5.0,
           stale: float = 30.0) -> Iterator[None]:
@@ -365,8 +399,10 @@ def _lock(path: Path, timeout: float = 5.0,
             fd = os.open(lockp, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
         except FileExistsError:
             try:
-                if time.time() - lockp.stat().st_mtime > stale:
-                    lockp.unlink(missing_ok=True)   # власник помер — забираємо лок
+                # власник помер — забираємо лок; не вдалось (знімає інший або
+                # лок уже свіжий) — чекаємо далі з паузою й дедлайном
+                if (time.time() - lockp.stat().st_mtime > stale
+                        and _steal_stale(lockp, stale)):
                     continue
             except OSError:
                 # 🔴 Лок щойно зник — або `stat()` стійко відмовляє (на Windows
@@ -408,10 +444,12 @@ def _write(path: Path, cf: CaseFile) -> None:
     cf.pages = dict(sorted(cf.pages.items()))
     cf.records.sort(key=lambda r: (r.scans[0] if r.scans else "", r.rid))
     payload = cf.model_dump(mode="json")
-    tmp = path.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=1) + "\n",
-                   encoding="utf-8")
-    tmp.replace(path)
+    # 🔴 Аудит 29.09.2026: тут стояв голий `tmp.replace(path)` зі спільним
+    # `.json.tmp`. На Windows заміна падає з PermissionError, поки файл справи
+    # тримає читач (збірка реєстру, підсумки, в'ювер), — і запис обривався,
+    # лишаючи `.json.tmp` поруч. Спільний писар пакета перечікує зайняту ціль
+    # і кладе tmp під pid, тож дві сесії не пишуть в один проміжний файл.
+    atomic_write_text(path, json.dumps(payload, ensure_ascii=False, indent=1) + "\n")
 
 
 # ── merge ────────────────────────────────────────────────────────────────────
@@ -505,8 +543,9 @@ def _disk_scans(ref: CaseRef) -> list[str]:
     d = (ROOT / ref.path)
     if not d.is_dir():
         return []
-    return sorted(p.name for p in d.iterdir()
-                  if p.is_file() and p.suffix.lower() in _IMG_EXT)
+    # Знаменник — за тим самим правилом, що в реєстрі й раннері (`frame_names`):
+    # свій набір розширень тут давав справі інше число кадрів (аудит 29.09.2026).
+    return sorted(frame_names(p.name for p in d.iterdir() if p.is_file()))
 
 
 _NUM_NAME_RE = re.compile(r"^(.*?)(\d+)(\D*)$")

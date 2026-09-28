@@ -517,8 +517,8 @@ def create_app(ws: Workspace | None = None, *, token: str = "",
         """
         raw_host = request.headers.get("host") or ""
         if not _NETWORK_CONN.get():
-            host_name = raw_host.rsplit(":", 1)[0].strip("[]").lower()
-            if host_name and host_name not in _OWN_NAMES:
+            host_name = _host_name(raw_host)
+            if raw_host and host_name not in _OWN_NAMES:
                 return JSONResponse(
                     _envelope(f"застосунок відповідає лише на 127.0.0.1, а запит "
                               f"прийшов з іменем «{host_name}»"),
@@ -763,7 +763,59 @@ def create_app(ws: Workspace | None = None, *, token: str = "",
         return {"ok": True, "workspace": str(space.root), "name": space.name,
                 "jobs": len(bus.jobs())}
 
+    # Останнім, тобто найзовнішнім: заголовки мусять лягти й на відмови воріт
+    # допуску та перевірки імені, а не лише на відповіді маршрутів.
+    app.add_middleware(_NoFraming)
     return app
+
+
+#: Заборона вбудовувати застосунок у чужу сторінку (аудит 29.09.2026). Демон
+#: не слав ні `X-Frame-Options`, ні `frame-ancestors`, тож будь-який сайт міг
+#: показати консоль у прозорій рамці й підставити під клік людини кнопку
+#: «Видалити» чи «Читати». Сам застосунок себе в рамки не вкладає (жодного
+#: `iframe` у статиці), тож заборона повна — без `SAMEORIGIN`.
+NO_FRAMING_HEADERS: tuple[tuple[bytes, bytes], ...] = (
+    (b"x-frame-options", b"DENY"),
+    (b"content-security-policy", b"frame-ancestors 'none'"),
+)
+
+
+class _NoFraming:
+    """Чисте ASGI-middleware: заголовки проти вбудовування на кожну відповідь.
+
+    Не `@app.middleware("http")`: воно б не обгорнуло ворота допуску, а
+    сторінка допуску з полем ключа — саме те, що клікджекінгом і ловлять.
+    """
+
+    def __init__(self, app: Any) -> None:
+        self.app = app
+
+    async def __call__(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
+        if scope.get("type") != "http":
+            await self.app(scope, receive, send)
+            return
+
+        async def send_framed(msg: dict[str, Any]) -> None:
+            if msg.get("type") == "http.response.start":
+                names = {k.lower() for k, _ in msg.get("headers") or []}
+                msg["headers"] = [*(msg.get("headers") or []),
+                                  *(h for h in NO_FRAMING_HEADERS if h[0] not in names)]
+            await send(msg)
+
+        await self.app(scope, receive, send_framed)
+
+
+def _host_name(raw_host: str) -> str:
+    """Ім'я з `Host` без порту; `[::1]` — це `::1`.
+
+    Аудит 29.09.2026: розбір `rsplit(":")` різав IPv6 у дужках без порту
+    (`[::1]` → «:») і відбивав власну петлю 403. Нерозбірне — порожнє ім'я,
+    і воно не збігається з жодним своїм.
+    """
+    try:
+        return (urlsplit("//" + raw_host).hostname or "").lower()
+    except ValueError:
+        return ""
 
 
 def _foreign_origin(origin: str | None, fetch_site: str | None, raw_host: str) -> str:

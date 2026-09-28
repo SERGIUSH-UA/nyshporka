@@ -450,3 +450,56 @@ def test_crawl_says_groups_mean_nothing_where_there_are_none(tmp_path: Path) -> 
                           fetcher=Fetcher(base="https://архів", delay=0.0))
     with pytest.raises(SourceError, match="груп фондів"):
         src.crawl(("1",))
+
+
+# ── аудит 29.09.2026: обрізка живого пошуку не мовчить ─────────────────────
+
+def test_fond_za_stelieiu_storinok_ne_ie_nulem_fondu(
+        tmp_path: Path, monkeypatch, search_view: str) -> None:
+    """🔴 Сайт фонд ігнорує, а відсів іде після п'яти сторінок видачі.
+
+    Справи фонду далі п'ятої сторінки зникали без сліду, і порожній перелік
+    читався як «у фонді немає». Тепер він каже, скільки саме переглянуто.
+    """
+    src, rec = _live(tmp_path, monkeypatch, search_view, pages=9)
+    rows = src.live_search("Шупики", limit=3, fond="57")
+    assert rows == []
+    assert rows.truncated and "фонд 57" in rows.truncated
+    assert sum("search/act/" in u for u in rec.asked) == A.ArchiumSource.LIVE_PAGES
+
+
+def test_limit_ponad_stelu_storinok_ne_zrizaietsia_movchky(
+        tmp_path: Path, monkeypatch, search_view: str) -> None:
+    """`limit` понад те, що вміщають сторінки, тихо зрізався до них
+    (на сайті — 5 сторінок по 100, тобто `limit` > 500 давав 500 мовчки)."""
+    monkeypatch.setattr(A.ArchiumSource, "LIVE_PAGES", 2)
+    monkeypatch.setattr(A.ArchiumSource, "LIVE_PAGE_ROWS", 3)
+    src, _ = _live(tmp_path, monkeypatch, search_view, pages=9)
+    rows = src.live_search("Шупики", limit=10)
+    assert len(rows) == 6
+    assert "переглянуто лише 6" in rows.truncated
+    full, _ = _live(tmp_path, monkeypatch, search_view, pages=1)
+    # Неповна друга сторінка — видача скінчилась сама, обрізки немає.
+    assert not full.live_search("Шупики", limit=5).truncated
+
+
+def test_obrizka_zhyvoho_poshuku_dokhodyt_do_poperedzhennia(
+        tmp_path: Path, monkeypatch, search_view: str) -> None:
+    """Обрізку бачить не лише джерело: `catalog.search` каже про неї
+    тим самим попередженням, що й про стелю Duck."""
+    from nyshporka import ops_builtin as OB
+
+    src, _ = _live(tmp_path, monkeypatch, search_view, pages=9)
+
+    class _Reg:
+        def get(self, sid: str) -> Any:
+            return src if sid == src.id else None
+
+        def with_cap(self, cap: str) -> list[Any]:
+            return [src]
+
+    monkeypatch.setattr(OB, "_registry", lambda: _Reg())
+    env = OB.catalog_search(OB.CatalogSearchArgs(q="Шупики", source=src.id, limit=3))
+    assert env.ok, env
+    assert any(w.code == "search_truncated" for w in env.warnings), env.warnings
+    assert all("обрізано" in h["note"] for h in env.data["hits"])

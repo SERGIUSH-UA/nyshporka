@@ -65,6 +65,8 @@ EXIT_CODES: dict[str, int] = {
     # машина — лишитись живою. Нуль тут означав би «все гаразд» при лічильнику,
     # який іде.
     "release_failed": 9,
+    # Машину лишено живою навмисно: на ній прочитане, яке не вдалось забрати.
+    "unfetched": 9,
     "needs_confirm": 10, "cancelled": 130}
 
 #: Скільки опитувань поспіль машина може мовчати, перш ніж це збій. Свіжий бокс
@@ -454,6 +456,10 @@ def go(case: str | Sequence[str], *, backend: str = "vast",
             tick_sec=tick_sec)
     except GoRefused as exc:
         res.verdict, res.why = exc.verdict, str(exc)
+    except RUN.CeilingHit as exc:
+        # Стеля спрацювала ще в підготовці (аудит 29.09.2026): це не збій, а
+        # той самий вирок, що й у нагляді; машину `start` уже погасив.
+        res.verdict, res.why = exc.kind, str(exc)
     except KeyboardInterrupt:
         res.verdict, res.why = "cancelled", "перервано з клавіатури"
     except CloudError as exc:
@@ -736,6 +742,17 @@ def _go(res: GoResult, cases: tuple[str, ...], say: EventFn,
         tick_sec: float) -> None:
     from nyshporka.cloud import plan as PL
 
+    # 0. стелі. 🔴 Нуль і від'ємне — відмова ДО всього (аудит 29.09.2026).
+    # Наглядач читає 0 як «не перекривати» і бере стелю плану, а рішення про
+    # автозапуск бачить `$0 ≤ стелі` і пускає без `--confirm`: `--budget 0`
+    # означав оренду з бюджетом плану без жодного питання людині. `plan.build`
+    # таке вже відкидає, але `go` передає стелі в обхід нього.
+    for flag, value in (("--budget", budget), ("--max-hours", max_hours),
+                        ("--max-price", max_price)):
+        if value is not None and not value > 0:
+            raise GoRefused(f"{flag} мусить бути додатним числом, а не {value:g}. "
+                            f"Без стелі — просто не передавайте прапорець.")
+
     # 0. бекенд
     try:
         b = RUN._backend(backend)
@@ -905,6 +922,13 @@ def _go(res: GoResult, cases: tuple[str, ...], say: EventFn,
                    on_line=lambda s: say("start", s))
     st.fork_low, st.fork_high = res.fork_low, res.fork_high
     ST.save(st)
+    if st.budget_usd is not None and st.price_usd_h is None:
+        # Попередження `start` про невідому ціну — ще й у підсумок: агент
+        # читає `GoResult`, а не рядки поступу (аудит 29.09.2026).
+        res.notes.append(
+            f"ціни машини бекенд не назвав — бюджет ${st.budget_usd:.2f} не "
+            f"стежився; захід обмежувала лише стеля часу"
+            + (f" {st.max_hours:g} год" if st.max_hours is not None else ""))
     raw_meta = st.box.get("meta")
     doom = raw_meta.get("autodestroy_at") if isinstance(raw_meta, dict) else None
     if doom:
@@ -949,15 +973,7 @@ def _say_burning(backend: object, say: EventFn) -> None:
 
 def _ceiling_hit(st: ST.RunState, now: float) -> tuple[str, str]:
     """Яка стеля спрацювала: (`budget_stop` | `deadline` | "", пояснення)."""
-    spent = st.spent_usd(now)
-    if (st.budget_usd is not None and spent is not None
-            and spent >= st.budget_usd - M.STOP_MARGIN_USD):
-        return "budget_stop", (f"витрачено ${spent:.2f} з бюджету "
-                               f"${st.budget_usd:.2f}")
-    hours = st.rent_hours(now)
-    if st.max_hours is not None and st.rent_started and hours >= st.max_hours:
-        return "deadline", f"минуло {hours:.1f} год зі стелі {st.max_hours:g} год"
-    return "", ""
+    return RUN.ceiling_hit(st, now)
 
 
 #: Коротший прогін темпу не називає: крок опитування (хвилина) на ньому — це
@@ -1138,6 +1154,8 @@ def _supervise(st: ST.RunState, plan: Any, res: GoResult, say: EventFn, *,
     res.rented = True
     verdict, why, release_why = "failed", "захід обірвано", "failed:interrupted"
     fetched = False
+    #: Чому прочитане лишилось на машині (архів не зібрався) — див. `finally`.
+    stranded: list[str] = []
     pph: int | None = None
     try:
         try:
@@ -1174,24 +1192,51 @@ def _supervise(st: ST.RunState, plan: Any, res: GoResult, say: EventFn, *,
                                          "cancelled")
             say("cancel", "перервано — забираємо прочитане й гасимо машину "
                           "(ще один Ctrl+C пропустить забір, але не гасіння)")
-            fetched = _salvage(st, res, say) or fetched
+            fetched = _salvage(st, res, say, stranded) or fetched
+        except RUN.ResultNotPacked as exc:
+            # Повторний забір зібрав би той самий обрізаний архів — не пробуємо.
+            stranded.append(str(exc))
         except Exception as exc:
             verdict, why = "failed", f"{type(exc).__name__}: {exc}"
             release_why = f"failed:{type(exc).__name__}"
             say("failed", f"🔴 {why} — забираємо, що є, і гасимо машину")
-            fetched = _salvage(st, res, say) or fetched
+            fetched = _salvage(st, res, say, stranded) or fetched
     finally:
-        # 🔴 Гасіння — у `finally` зовнішнього блока, тож його не обходить ні
-        # виняток із аварійного забору, ні другий Ctrl+C посеред нього. Вирок
-        # пишеться ДО гасіння: `run.release` без нього відмовляє, і це правило
-        # автономний захід виконує, а не обходить.
-        _settle(st, verdict, why)
-        _release(st, res, say, why=release_why)
+        if stranded:
+            # 🔴 Архів результату не зібрався (аудит 29.09.2026): тексти лежать
+            # лише на диску машини, і гасіння знищило б їх разом з оплаченою
+            # роботою. Лишаємо її живою й кажемо вголос; вирок `unfetched`
+            # `run.release` без `--force` не пускає, тож і `nysh cloud stop` не
+            # погасить її мимохідь. Страховка від вічного лічильника — таймер
+            # самознищення бекенда.
+            verdict, why = "unfetched", f"{stranded[-1]}; попередній вирок: {verdict}"
+            _settle(st, verdict, why)
+            res.released = False
+            note = (f"🔴 МАШИНУ НЕ ПОГАШЕНО НАВМИСНО — ЛІЧИЛЬНИК ІДЕ: {stranded[-1]}. "
+                    f"Звільніть місце на машині й заберіть: `nysh cloud fetch "
+                    f"{st.run_id}`, `nysh cloud verify {st.run_id}`; тоді "
+                    f"`nysh cloud stop {st.run_id} --force`.")
+            st.note("kept_alive", note)
+            ST.save(st)
+            res.notes.append(note)
+            say("release", note)
+        else:
+            # 🔴 Гасіння — у `finally` зовнішнього блока, тож його не обходить
+            # ні виняток із аварійного забору, ні другий Ctrl+C посеред нього.
+            # Вирок пишеться ДО гасіння: `run.release` без нього відмовляє, і
+            # це правило автономний захід виконує, а не обходить.
+            _settle(st, verdict, why)
+            _release(st, res, say, why=release_why)
     _finish(st, res, verdict, why, fetched, say)
 
 
-def _salvage(st: ST.RunState, res: GoResult, say: EventFn) -> bool:
-    """Аварійний забір: зупинити роботу й привезти, що є. Не кидає."""
+def _salvage(st: ST.RunState, res: GoResult, say: EventFn,
+             stranded: list[str] | None = None) -> bool:
+    """Аварійний забір: зупинити роботу й привезти, що є. Не кидає.
+
+    `stranded` дістає причину, коли архів результату на машині не зібрався:
+    тоді машину гасити не можна (див. `_supervise`).
+    """
     try:
         RUN.stop_job(st)
     except Exception as exc:
@@ -1200,6 +1245,8 @@ def _salvage(st: ST.RunState, res: GoResult, say: EventFn) -> bool:
         _fetch_and_verify(st, res, say)
         return True
     except Exception as exc:
+        if isinstance(exc, RUN.ResultNotPacked) and stranded is not None:
+            stranded.append(str(exc))
         st.note("salvage_failed", f"{type(exc).__name__}: {exc}")
         res.notes.append(f"забрати прочитане не вдалось: {exc}")
         return False

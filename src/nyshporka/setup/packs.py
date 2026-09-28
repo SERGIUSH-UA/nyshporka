@@ -127,6 +127,10 @@ def missing(kind: str = "") -> list[Pack]:
     return [p for p in catalog() if (not kind or p.kind == kind) and not verify(p)]
 
 
+#: Запас над розміром пака з маніфесту: розмір там може бути округлений.
+PACK_SIZE_SLACK = 1 << 20
+
+
 def fetch(pack: Pack, *, on_progress: Callable[..., None] | None = None,
           force: bool = False) -> Path:
     """Завантажити пак і звірити хеш. Повертає шлях.
@@ -150,14 +154,23 @@ def fetch(pack: Pack, *, on_progress: Callable[..., None] | None = None,
     dst.parent.mkdir(parents=True, exist_ok=True)
     tmp = dst.with_suffix(dst.suffix + ".part")
     got = 0
+    # 🔴 Розмір пака відомий з маніфесту — він і стеля (із запасом на
+    # округлення в маніфесті). Доти качання читало скільки дадуть, і підмінена
+    # чи зациклена відповідь заповнювала диск раніше, ніж звірка sha256
+    # встигала відмовити (аудит 29.09.2026).
+    cap = pack.size + PACK_SIZE_SLACK if pack.size else 0
     try:
         with httpx.stream("GET", pack.url, follow_redirects=True,
                           timeout=120) as r:
             r.raise_for_status()
             with tmp.open("wb") as fh:
                 for chunk in r.iter_bytes():
-                    fh.write(chunk)
                     got += len(chunk)
+                    if cap and got > cap:
+                        raise RuntimeError(
+                            f"{pack.filename}: сервер віддає понад {cap} байт при "
+                            f"заявлених {pack.size} — це не той файл, качання обірвано")
+                    fh.write(chunk)
                     if on_progress:
                         on_progress(done=got, total=pack.size, unit="Б")
         digest = sha256_of(tmp)

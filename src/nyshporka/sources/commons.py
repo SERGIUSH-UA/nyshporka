@@ -148,7 +148,11 @@ class CommonsSource:
                 on_progress(done=done, total=want or None, unit="байт", note=name)
 
         try:
-            got = self.http.download(url, out, on_chunk=_tick)
+            # 🔴 Розмір, названий Commons, — стеля качання (аудит 29.09.2026).
+            # Більше за нього файл однаково не ляже (звірка нижче), тож
+            # дочитувати зайве не було сенсу — а без стелі сервер міг
+            # заповнити диск раніше, ніж звірка встигла б відмовити.
+            got = self.http.download(url, out, on_chunk=_tick, max_bytes=want)
         except (HttpError, OSError) as exc:
             res.errors.append(f"{name}: {exc}")
             return res

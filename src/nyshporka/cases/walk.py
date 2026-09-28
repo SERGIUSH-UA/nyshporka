@@ -37,13 +37,42 @@ from __future__ import annotations
 
 import hashlib
 import os
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 
-#: Розширення, які вважаються кадрами. Тримається тут, щоб обхід міг рахувати
-#: одразу, не змушуючи споживача другий раз перебирати імена.
-IMG_EXT = frozenset({".jpg", ".jpeg", ".png", ".tif", ".tiff", ".webp"})
+#: Кадри, які читає рушій, — ЄДИНИЙ знаменник повноти прогону для реєстру,
+#: сховища сторінок і раннера. Раннер пакета не імпортує, тож тримає дзеркало
+#: (`htr.runner.FRAME_EXT`); рівність звіряє `test_frame_ext_parity`.
+#: 🔴 Аудит 29.09.2026: обхід рахував кадрами ще й TIFF/WebP, а раннер,
+#: `collect._count_frames` і `pagestore._disk_scans` — ні. У теці з JPEG і
+#: кількома TIFF (обкладинки, еталони кольору) знаменник був більший за те, що
+#: рушій узагалі може прочитати, і справа назавжди лишалась «частковою».
+READ_EXT = frozenset({".jpg", ".jpeg", ".png"})
+#: Кадри, яких рушій не бере: матеріал є, але перед прогоном його переганяють
+#: у JPEG (16-бітний TIFF рушій зіпсував би, а хмара не везе його взагалі).
+ALIEN_EXT = frozenset({".tif", ".tiff", ".webp"})
+#: Усе, що вважається кадром на диску.
+IMG_EXT = READ_EXT | ALIEN_EXT
+
+
+def frame_names(names: Iterable[str]) -> list[str]:
+    """Кадри теки, що йдуть у знаменник: читабельні, а без них — чужі.
+
+    Правило одне для всіх лічильників: є хоч один JPEG/PNG — рахуються лише
+    вони (TIFF поруч — це обкладинки й еталони, яких рушій не прочитає). Тека
+    з самих TIFF не порожня: матеріал є, просто ще не перегнаний, і нуль тут
+    читався б як «на диску нічого немає».
+    """
+    read, alien = [], []
+    for n in names:
+        low = n.lower()
+        ext = low[low.rfind("."):] if "." in low else ""
+        if ext in READ_EXT:
+            read.append(n)
+        elif ext in ALIEN_EXT:
+            alien.append(n)
+    return read or alien
 
 #: Сайдкари опису справи, від найсильнішого.
 SIDECAR_NAMES = ("_source.json", "meta.json")
@@ -67,7 +96,10 @@ class DirScan:
     """Імена підтек (відсортовані як `Path`)."""
     n_files: int = 0
     n_img: int = 0
+    """Кадри, які читає рушій (`READ_EXT`)."""
     n_pdf: int = 0
+    n_alien: int = 0
+    """Кадри, яких рушій не бере (`ALIEN_EXT`)."""
     pdf_names: tuple[str, ...] = ()
     """Імена PDF — їх мало, а `_pdf_pages` потребує саме шляхів."""
     nbytes: int = 0
@@ -97,9 +129,14 @@ class DirScan:
     def pdf_paths(self) -> tuple[Path, ...]:
         return self._pdf_paths
 
+    @property
+    def n_frames(self) -> int:
+        """Знаменник кадрів теки — те саме правило, що `frame_names`."""
+        return self.n_img or self.n_alien
+
     def has_material(self) -> bool:
         """Чи є прямо тут кадри або PDF — критерій «це справа, а не картка»."""
-        return bool(self.n_img or self.n_pdf)
+        return bool(self.n_img or self.n_alien or self.n_pdf)
 
 
 def scan_dir(path: Path, base: Path, rel_parts: tuple[str, ...],
@@ -111,7 +148,7 @@ def scan_dir(path: Path, base: Path, rel_parts: tuple[str, ...],
         dir_ns = 0
     dirs: list[str] = []
     pdf_paths: list[Path] = []
-    n_files = n_img = n_pdf = 0
+    n_files = n_img = n_pdf = n_alien = 0
     nbytes = 0
     newest_ns = 0
     sidecar = ""
@@ -136,8 +173,10 @@ def scan_dir(path: Path, base: Path, rel_parts: tuple[str, ...],
                     rows.append(f"{e.name}\t{st.st_size}\t{st.st_mtime_ns}")
                     low = e.name.lower()
                     ext = low[low.rfind("."):] if "." in low else ""
-                    if ext in IMG_EXT:
+                    if ext in READ_EXT:
                         n_img += 1
+                    elif ext in ALIEN_EXT:
+                        n_alien += 1
                     elif ext == ".pdf":
                         n_pdf += 1
                         pdf_paths.append(path / e.name)
@@ -164,7 +203,7 @@ def scan_dir(path: Path, base: Path, rel_parts: tuple[str, ...],
     return DirScan(
         base=base, path=path, rel_parts=rel_parts, depth=depth,
         dirs=tuple(sorted(dirs, key=lambda n: (path / n))),
-        n_files=n_files, n_img=n_img, n_pdf=n_pdf,
+        n_files=n_files, n_img=n_img, n_pdf=n_pdf, n_alien=n_alien,
         pdf_names=tuple(p.name for p in pdf_paths),
         nbytes=nbytes, newest_ns=newest_ns, dir_ns=dir_ns,
         sidecar=sidecar, names_sha1=h.hexdigest(),
