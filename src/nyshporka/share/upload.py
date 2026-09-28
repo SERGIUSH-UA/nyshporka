@@ -176,7 +176,7 @@ def publish(path: Path, *, base: str = "", auth: str = "",
     # сховище повз сервер, тож сам він про обрив не дізнається ніколи: про
     # це мусить сказати клієнт (`_zvit_pro_zbii`).
     vnesok = got["contribution"]
-    kazhy = say or (lambda _: None)
+    kazhy = _tykhyi(say)
     etap = "put_text"
     cherez_server = False
     try:
@@ -312,6 +312,31 @@ _NE_POVTORYTY = ("Повтор тієї самої команди цього н�
 
 #: Як часто казати «ще заливаю», поки PUT іде.
 PULS_S = 15.0
+
+
+def _tykhyi(say: Callable[[str], None] | None) -> Callable[[str], None]:
+    """Хід заливки, який не може її обірвати.
+
+    🔴 Рядок ходу — прикраса, а байти — робота. 28.09.2026 три внески ДАОО 37-2
+    лягли в пул без тексту: вивід `publish` ішов у пайп, читач якого вже
+    закрився, і запис першого ж рядка «заливаю текст…» у stderr на Windows дав
+    `OSError [Errno 22]` — заливку обірвано до PUT, а звіт назвав це збоєм
+    мережі. Після першої відмови виводу рядки просто більше не пишуться.
+    """
+    if say is None:
+        return lambda _t: None
+    zlamano = False
+
+    def _say(tekst: str) -> None:
+        nonlocal zlamano
+        if zlamano:
+            return
+        try:
+            say(tekst)
+        except (OSError, ValueError):   # закритий пайп / закритий потік
+            zlamano = True
+
+    return _say
 
 
 def _zalyty(url: str, blob: bytes, shcho: str, say: Callable[[str], None],

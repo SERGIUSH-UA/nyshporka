@@ -442,3 +442,20 @@ def test_failovyi_oserror_kazhe_pro_paket(monkeypatch: pytest.MonkeyPatch,
     [(_, _, prychyna)] = zvity
     assert prychyna.startswith("не прочитався файл пакета: PermissionError errno=13")
     assert str(tmp_path) not in prychyna, "шлях з іменем користувача пішов у звіт"
+
+
+def test_zlamanyi_vyvid_khodu_ne_obryvaie_zalyvku(monkeypatch: pytest.MonkeyPatch,
+                                                   tmp_path: Path) -> None:
+    """28.09.2026: вивід `publish` ішов у закритий пайп, перший рядок ходу дав
+    `OSError [Errno 22]`, і три внески ДАОО 37-2 лягли в пул без тексту."""
+    paket, zvity = _pidhotuvaty(monkeypatch, tmp_path)
+    polozheno: list[bytes] = []
+    monkeypatch.setattr(upload, "_put", lambda url, blob: polozheno.append(blob))
+
+    def _say(tekst: str) -> None:
+        raise OSError(22, "Invalid argument")
+
+    got = upload.publish(paket, base="https://nyshporka.online/v1", auth="k", say=_say)
+    assert polozheno == [b"bytes"], "байти мусять доїхати, хоч вивід і зламаний"
+    assert got.get("ready") is True
+    assert zvity == [], "збою заливки не було — і звіту про нього теж"
