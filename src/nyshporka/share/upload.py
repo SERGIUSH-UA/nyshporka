@@ -133,6 +133,15 @@ def publish(path: Path, *, base: str = "", auth: str = "",
     path = Path(path)
     if not path.exists():
         raise UploadError(f"немає файлу {path}")
+    # 🔴 Файл геометрії — не пакет. `geom_path` від нього повертає його ж, тож
+    # він їхав і на місце тексту, і на місце геометрії: 28.09.2026 так 31
+    # внесок ліг у пул без жодної сторінки тексту, коли `publish` кликали
+    # циклом по всіх `*.nyshtext` теки. Геометрія їде разом зі своїм текстом.
+    if path.name.endswith(bundle.GEOM_SUFFIX):
+        tekstovyi = path.with_name(path.name[: -len(bundle.GEOM_SUFFIX)] + bundle.SUFFIX)
+        raise UploadError(
+            f"{path.name} — файл геометрії, а не пакет. Заливайте текстовий пакет "
+            f"{tekstovyi.name}: геометрія поїде разом із ним.")
     tok = auth or token()
     if not tok:
         raise UploadError(
