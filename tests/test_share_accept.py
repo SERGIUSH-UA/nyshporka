@@ -25,7 +25,7 @@ def space(tmp_path: Path):
     W.reset()
 
 
-def a_bundle(where: Path, dest: Path, *, runs: int = 1) -> Path:
+def a_bundle(where: Path, dest: Path, *, runs: int = 1, shifra: str = "") -> Path:
     src = where / "reports" / "htr"
     dirs = [make_run(src, "spr-8433")]
     if runs > 1:
@@ -34,6 +34,8 @@ def a_bundle(where: Path, dest: Path, *, runs: int = 1) -> Path:
     m.refs = [{"source": "commons", "ref": "file:Test.djvu"}]
     m.publisher = {"handle": "oksana", "contact": "t.me/oksana"}
     m.note = "читала Дяком, м'ястківські аркуші наприкінці"
+    if shifra:
+        m.case = {"shifra": shifra}
     bundle.write(dest, m, dirs, frames=[{"n": 1, "name": "0001.jpg"}])
     for d in dirs:                      # прибрати джерело, щоб приймач не збігся сам
         for f in d.iterdir():
@@ -61,6 +63,23 @@ def test_accepted_run_is_marked_as_someone_elses(space: Path, tmp_path: Path) ->
             .read_text(encoding="utf-8"))
         assert meta["shared"]["from"] == "oksana"
         assert S.shared_of(meta) == "oksana"
+
+
+def test_a_foreign_case_key_does_not_attach_the_run_to_our_case(
+        space: Path, tmp_path: Path) -> None:
+    """🔴 Шифра пакета тут не розв'язалась — значить, справи в нас немає.
+
+    Чужий `case_key` у меті прогону (а він у білому списку `clean_meta`)
+    приєднував би текст до справи, яку назвав відправник: її покриття росло б
+    чужими сторінками, а нуль по ній ставав би довіреним (аудит 29.09.2026).
+    """
+    pack = a_bundle(space, tmp_path / "pack.nyshtext", shifra="казна-що 7")
+    assert accept._local_key(bundle.read_manifest(pack)) == "", \
+        "у тесті шифра пакета не мусить розв'язуватись"
+    accept.accept(str(pack))
+    meta = json.loads((space / "reports" / "htr" / "spr-8433" / bundle.META_NAME)
+                      .read_text(encoding="utf-8"))
+    assert "case_key" not in meta, meta.get("case_key")
 
 
 def test_unnamed_publisher_still_counts_as_someone_elses() -> None:
