@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import time
 import weakref
 from pathlib import Path
@@ -37,6 +38,18 @@ _BUILD_GATE = asyncio.Lock()
 #: навмисно: спільний змусив би перезбірку реєстру чекати на злиття фонду, хоч
 #: вони не діляться нічим.
 _GENERIC_GATE = asyncio.Lock()
+
+#: job_id → задача виконавця загальної операції. Задача живе рівно стільки,
+#: скільки потік із тілом операції, — тож саме вона, а не стан у черзі, каже,
+#: чи робота ще йде. Див. `_start_generic`.
+_GENERIC_RUNS: dict[str, asyncio.Task[None]] = {}
+
+#: Що сказати людині, яка скасувала загальну операцію.
+CANT_INTERRUPT = ("скасування цю операцію посередині не перериває: вона "
+                  "доробляється у фоні, і повторний запуск стане можливим, "
+                  "коли вона скінчиться")
+FINISHED_AFTER_CANCEL = ("операцію скасовано, коли вона вже йшла, і вона "
+                         "доробилась до кінця — результат нижче справжній")
 
 #: 🔴🔴 Читання йдуть ПО ОДНОМУ. Не з обережності — інакше вони одне одного
 #: завалюють.
@@ -171,13 +184,44 @@ async def _start_generic(bus: JobBus, op_name: str,
     # ⚠ Шукається активна робота, а не ключ ідемпотентності. Ключ жив би ще
     # кілька хвилин після завершення й віддавав би старий готовий запис — а
     # тиснуть цю кнопку саме тому, що щось щойно змінилось.
+    #
+    # 🔴 «Активна» — за живим потоком, а не за станом (аудит 29.09.2026).
+    # Потік Python убити нема чим, тож «Скасувати» над такою роботою
+    # перефарбовувало рядок у «скасовано», а `registry.merge` ішов далі. Гейт,
+    # що дивився лише на стан, пропускав тоді другий клік — і два злиття того
+    # самого реєстру йшли паралельно, тобто рівно те, від чого гейт ставили.
     async with _GENERIC_GATE:
         for j in bus.jobs():
-            if (j.kind == op_name and j.cfg == cfg
-                    and j.state in (JobState.QUEUED, JobState.RUNNING)):
+            if j.kind != op_name or j.cfg != cfg:
+                continue
+            if j.state in (JobState.QUEUED, JobState.RUNNING):
                 return j
+            run = _GENERIC_RUNS.get(j.id)
+            if run is not None and not run.done():
+                raise ValueError(f"попереднє «{op.summary}» ще йде: {CANT_INTERRUPT}")
         job, _ = await bus.enqueue(op_name, title=op.summary, cfg=cfg)
-    _keep(asyncio.create_task(_run_generic(bus, job, op_name, payload)))
+        # Задача заводиться під гейтом: між постановкою й реєстрацією задачі
+        # інакше було б вікно, у якому робота ще не має «живого потоку».
+        task = asyncio.create_task(_run_generic(bus, job, op_name, payload))
+        _keep(task)
+        _GENERIC_RUNS[job.id] = task
+        jid = job.id
+
+        def _gone(_t: asyncio.Task[None]) -> None:
+            _GENERIC_RUNS.pop(jid, None)
+
+        task.add_done_callback(_gone)
+
+    # 🔴 Скасування мусить сказати правду про себе. Гасителя в загальної
+    # операції немає (кооперативної зупинки тіла операцій теж: перервати
+    # злиття реєстру на випадковому кроці гірше, ніж дати йому дійти), тож
+    # «гаситель» тут лише дописує до роботи, що вона ще йде. `pick.ask`
+    # поверх цього реєструє справжнього — і той заміняє цей.
+    def _say_cant_stop() -> None:
+        note = {"code": "cant_interrupt", "text": CANT_INTERRUPT}
+        _keep(asyncio.create_task(bus.update(job.id, warnings=[*job.warnings, note])))
+
+    bus.on_stop(job.id, _say_cant_stop)
     return job
 
 
@@ -217,6 +261,9 @@ async def _run_generic(bus: JobBus, job: JobRecord, op_name: str,
         await bus.update(job.id, state=JobState.ERROR,
                          error=f"{type(exc).__name__}: {exc}")
         return
+    finally:
+        # Потік скінчився — казати «ще доробляється» більше нема про що.
+        bus.drop_stopper(job.id)
     # 🔴 Невдача операції — це невдача роботи, а не успіх із полем `ok: false`
     # усередині. Інакше в черзі вона світилась би зеленим, і причину побачив би
     # лише той, хто розгорнув результат.
@@ -224,9 +271,15 @@ async def _run_generic(bus: JobBus, job: JobRecord, op_name: str,
         await bus.update(job.id, state=JobState.ERROR, error=env.error or "не вийшло")
         return
     got = env.as_dict()
+    warnings = list(got.get("warnings") or [])
+    # 🔴 Скасована робота, що доробилась, лишається «скасованою» (див.
+    # `JobBus.update`), але її результат записується — і людина мусить знати,
+    # що це не обрізок, а повний результат (аудит 29.09.2026).
+    if bus.cancelled(job.id):
+        warnings.append({"code": "finished_after_cancel",
+                         "text": FINISHED_AFTER_CANCEL})
     await bus.update(job.id, state=JobState.DONE, result=got.get("data"),
-                     warnings=got.get("warnings") or [],
-                     next=got.get("next") or [])
+                     warnings=warnings, next=got.get("next") or [])
 
 
 async def _start_build(bus: JobBus, payload: dict[str, Any]) -> JobRecord:
@@ -376,36 +429,49 @@ async def _start_read(bus: JobBus, ws: Workspace,
     Так «чим будемо читати і скільки це кадрів» відомо до старту, а не через
     годину — і завдання, приречене впасти на відсутній моделі, у чергу взагалі
     не потрапляє.
+
+    🔴 Сам план рахується в потоці, а не в циклі подій (аудит 29.09.2026).
+    `R.plan` запускає підпроцес на кожен пакет маніфесту (імпорт torch — до
+    120 с кожен) і розкладає PDF у кадри; у циклі подій це заморожувало ВЕСЬ
+    демон: жоден запит, навіть перелік робіт чи скасування, не отримував
+    відповіді, і вкладка виглядала мертвою. Постановка в чергу лишається в
+    циклі — лок черги прив'язаний до нього.
     """
     from nyshporka.htr import run as R
-
-    plan = R.plan(payload.get("case_dir") or "",
-                  out_dir=payload.get("out_dir") or "",
-                  script=str(payload.get("script") or ""),
-                  second_voice=bool(payload.get("second_voice", True)),
-                  # 🔴 `model` форма надсилала й раніше, але сюди він не доходив:
-                  # поле на екрані було, а прогін ішов бойовою моделлю
-                  model=str(payload.get("model") or ""),
-                  also=[str(v) for v in payload.get("also") or [] if str(v).strip()])
-    # 🔴 Шифра береться З опису, коли її не передали. Прогін без шифри стає в
-    # реєстрі «нічиїм»: він є, текст є, а до якої справи належить — невідомо,
-    # і зшивати це потім доводиться правкою JSON руками. З консолі шифру ніхто
-    # не вводить (форма читання питає лише теку), тож без цього кожен запуск
-    # кнопкою давав нічию — при тому, що опис лежить у тій самій теці.
-    #
-    # ⚠ Через спільний `case_key_for`, а не через власну гілку. Доти командний
-    # рядок був розумніший за застосунок: після опису він пробував ще резолвер
-    # за шляхом, а браузерний шлях — ні. Тобто найчастіший вхід мав найгіршу
-    # прив'язку саме там, де його найважче помітити.
-    case_key = str(payload.get("case_key") or "") or R.case_key_for(plan.case_dir)[0]
 
     limit = max(0, int(payload.get("limit") or 0))
     pages = str(payload.get("pages") or "")
     workers = max(1, min(8, int(payload.get("workers") or 1)))
-    cmds, notes = plan.shards(
-        workers, device=str(payload.get("device") or ""),
-        case_key=case_key, limit=limit, pages=pages,
-        seg_height=max(0, int(payload.get("seg_height") or 0)))
+
+    def _prepare() -> tuple[Any, str, list[list[str]], list[str]]:
+        plan = R.plan(payload.get("case_dir") or "",
+                      out_dir=payload.get("out_dir") or "",
+                      script=str(payload.get("script") or ""),
+                      second_voice=bool(payload.get("second_voice", True)),
+                      # 🔴 `model` форма надсилала й раніше, але сюди він не
+                      # доходив: поле на екрані було, а прогін ішов бойовою моделлю
+                      model=str(payload.get("model") or ""),
+                      also=[str(v) for v in payload.get("also") or [] if str(v).strip()])
+        # 🔴 Шифра береться З опису, коли її не передали. Прогін без шифри стає
+        # в реєстрі «нічиїм»: він є, текст є, а до якої справи належить —
+        # невідомо, і зшивати це потім доводиться правкою JSON руками. З консолі
+        # шифру ніхто не вводить (форма читання питає лише теку), тож без цього
+        # кожен запуск кнопкою давав нічию — при тому, що опис лежить у тій
+        # самій теці.
+        #
+        # ⚠ Через спільний `case_key_for`, а не через власну гілку. Доти
+        # командний рядок був розумніший за застосунок: після опису він пробував
+        # ще резолвер за шляхом, а браузерний шлях — ні. Тобто найчастіший вхід
+        # мав найгіршу прив'язку саме там, де його найважче помітити.
+        case_key = (str(payload.get("case_key") or "")
+                    or R.case_key_for(plan.case_dir)[0])
+        cmds, notes = plan.shards(
+            workers, device=str(payload.get("device") or ""),
+            case_key=case_key, limit=limit, pages=pages,
+            seg_height=max(0, int(payload.get("seg_height") or 0)))
+        return plan, case_key, cmds, notes
+
+    plan, case_key, cmds, notes = await asyncio.to_thread(_prepare)
 
     title = f"{plan.case_dir.name}: {plan.frames} кадрів, {plan.model.name}"
     if len(plan.voices) > 1:
@@ -422,13 +488,29 @@ async def _start_read(bus: JobBus, ws: Workspace,
         # саме завдання, а не другий прогін, що б'ється з першим за карту.
         # 🔴 N шардів — одне завдання: вони пишуть в одну теку й разом
         # становлять один прогін.
-        idempotency_key=f"read:{plan.out_dir}",
+        # 🔴 І те, ЩО саме читати (аудит 29.09.2026). Ключ із самої теки
+        # віддавав на «сторінки 11-20» живе завдання «сторінки 1-10»: людина
+        # бачила чужий прогін як свій, а просили її ніхто не виконував. Другий
+        # прогін у ту саму теку тут не небезпечний — читання стоять у черзі за
+        # гейтом карти, тож вони йдуть по одному.
+        idempotency_key=_read_key(plan, limit=limit, pages=pages),
     )
     if created:
         _keep(asyncio.create_task(
             _run_read(bus, job, plan, case_key, cmds,
                       partial=bool(limit or pages))))
     return job
+
+
+def _read_key(plan: Any, *, limit: int, pages: str) -> str:
+    """Ключ ідемпотентності читання: тека виходу + що саме в неї читається.
+
+    Кількість процесів у ключ не йде навмисно: це швидкість того самого
+    прогону, а не інший прогін.
+    """
+    what = {"pages": pages, "limit": limit, "model": plan.model.name,
+            "voices": [v.name for v in plan.voices]}
+    return f"read:{plan.out_dir}:{json.dumps(what, ensure_ascii=False, sort_keys=True)}"
 
 
 async def _run_read(bus: JobBus, job: JobRecord, plan: Any, case_key: str,

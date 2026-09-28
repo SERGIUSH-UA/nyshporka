@@ -61,6 +61,29 @@ async def test_no_key_means_no_deduplication(bus):
     assert a.id != b.id
 
 
+@pytest.mark.parametrize("final", [JobState.ERROR, JobState.DONE])
+async def test_a_finished_job_does_not_answer_its_key(bus, final):
+    """🔴 Аудит 29.09.2026: «ще раз» після впалого читання не стартувало нічого.
+
+    Ключ чистив лише `cancel`, тож десять хвилин після збою чи завершення
+    повторний запуск отримував той самий мертвий запис із `created=False`.
+    """
+    first, _ = await bus.enqueue("read", idempotency_key="read:/out/спр4")
+    await bus.update(first.id, state=final)
+
+    again, created = await bus.enqueue("read", idempotency_key="read:/out/спр4")
+    assert created, f"завершене ({final}) завдання тримало ключ"
+    assert again.id != first.id
+
+
+async def test_a_running_job_still_answers_its_key(bus):
+    """Ретрай посеред живого прогону — те саме завдання, як і було задумано."""
+    first, _ = await bus.enqueue("read", idempotency_key="k")
+    await bus.update(first.id, state=JobState.RUNNING)
+    again, created = await bus.enqueue("read", idempotency_key="k")
+    assert not created and again.id == first.id
+
+
 # ── попередня перевірка ──────────────────────────────────────────────────────
 async def test_precheck_refusal_is_a_readable_error(bus):
     async def refuse():

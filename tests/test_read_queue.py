@@ -176,3 +176,107 @@ async def test_the_gate_belongs_to_the_loop_object_not_its_address(bus):
     loop = asyncio.get_running_loop()
     assert W._read_gate() is W._read_gate(), "той самий цикл — той самий гейт"
     assert loop in W._READ_GATES
+
+
+# ── постановка читання (аудит 29.09.2026) ────────────────────────────────────
+class _Named:
+    def __init__(self, name: str) -> None:
+        self.name = name
+
+
+class _FakePlan:
+    """Стільки плану, скільки бачить `_start_read`, — без моделей і диска."""
+
+    def __init__(self, root) -> None:
+        self.case_dir = root / "спр4"
+        self.out_dir = root / "спр4-out"
+        self.frames = 12
+        self.model = _Named("pysar_cyr_v9.pt")
+        self.voices = [_Named("pysar_cyr_v9.pt")]
+        self.gpu_lock = ""
+
+    def shards(self, workers, **kw):
+        return [["runner"]], []
+
+    def as_dict(self):
+        return {"case_dir": str(self.case_dir), "out_dir": str(self.out_dir)}
+
+
+@pytest.fixture
+def fake_read(tmp_path, monkeypatch):
+    """`R.plan` підмінено, прогін не стартує: лишається саме постановка."""
+    from nyshporka.htr import run as R
+
+    calls: list[dict] = []
+
+    def fake_plan(case_dir, **kw):
+        calls.append(kw)
+        return _FakePlan(tmp_path)
+
+    async def no_run(*a, **kw):
+        return None
+
+    monkeypatch.setattr(R, "plan", fake_plan)
+    monkeypatch.setattr(W, "_run_read", no_run)
+    return calls
+
+
+@pytest.mark.asyncio
+async def test_a_failed_reading_can_be_started_again(bus, fake_read):
+    """🔴 «Ще раз» після впалого читання ставить НОВЕ завдання.
+
+    Доти ключ ідемпотентності десять хвилин віддавав мертвий запис, і кнопка
+    мовчки нічого не робила.
+    """
+    payload = {"case_dir": "x", "case_key": "904-24-4"}
+    first = await W._start_read(bus, None, payload)
+    await bus.update(first.id, state=JobState.ERROR, error="раннер упав")
+
+    again = await W._start_read(bus, None, payload)
+    assert again.id != first.id, "повтор повернув впале завдання"
+    assert bus.get(again.id).state == JobState.QUEUED
+
+
+@pytest.mark.asyncio
+async def test_other_pages_are_another_reading_not_the_first_one(bus, fake_read):
+    """🔴 Сторінки 11-20 не мають повертати живе завдання «сторінки 1-10».
+
+    Ключ був лише текою виходу, тож людина отримувала чужий прогін як свій.
+    """
+    base = {"case_dir": "x", "case_key": "904-24-4"}
+    a = await W._start_read(bus, None, {**base, "pages": "1-10"})
+    b = await W._start_read(bus, None, {**base, "pages": "11-20"})
+    c = await W._start_read(bus, None, {**base, "limit": 5})
+    assert len({a.id, b.id, c.id}) == 3, "інші параметри віддали перше завдання"
+
+    retry = await W._start_read(bus, None, {**base, "pages": "1-10"})
+    assert retry.id == a.id, "ретрай того самого запиту мав дати те саме завдання"
+
+
+@pytest.mark.asyncio
+async def test_the_plan_is_counted_off_the_event_loop(bus, tmp_path, monkeypatch):
+    """🔴 Аудит 29.09.2026: план читання заморожував увесь демон.
+
+    `R.plan` запускає підпроцес на кожен пакет маніфесту (імпорт torch — до
+    120 с) і розкладає PDF у кадри. У циклі подій це означало, що жоден інший
+    запит — перелік робіт, скасування — не отримував відповіді.
+    """
+    from nyshporka.htr import run as R
+
+    where: list[bool] = []
+
+    def fake_plan(case_dir, **kw):
+        try:
+            asyncio.get_running_loop()
+            where.append(True)
+        except RuntimeError:
+            where.append(False)
+        return _FakePlan(tmp_path)
+
+    async def no_run(*a, **kw):
+        return None
+
+    monkeypatch.setattr(R, "plan", fake_plan)
+    monkeypatch.setattr(W, "_run_read", no_run)
+    await W._start_read(bus, None, {"case_dir": "x", "case_key": "904-24-4"})
+    assert where == [False], "план рахувався просто в циклі подій"

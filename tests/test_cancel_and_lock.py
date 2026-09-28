@@ -143,3 +143,66 @@ def test_status_error_is_wrapped_into_http_error():
     with pytest.raises(HttpError) as got:
         f._send("https://архів/кадр/300.jpg", lambda: _Resp())
     assert "404" in str(got.value)
+
+
+# ── загальна довга операція (аудит 29.09.2026) ───────────────────────────────
+@pytest.mark.asyncio
+async def test_a_cancelled_generic_op_blocks_a_second_run_until_its_thread_ends(
+        bus, monkeypatch):
+    """🔴 «Скасувати» над злиттям реєстру не спиняло потоку — і гейт відкривався.
+
+    Загальний виконавець гасителя не реєструє, тож скасування лише
+    перефарбовувало рядок, а `registry.merge` ішов далі. Гейт дивився на стан,
+    тож другий клік заводив паралельне злиття того самого реєстру — рівно те,
+    від чого гейт ставили. Тепер робота «йде», доки йде потік, а скасування
+    чесно каже, що перервати її не може.
+    """
+    import asyncio
+    import threading
+
+    from nyshporka import ops as O
+    from nyshporka.core.envelope import Envelope
+    from nyshporka.daemon import workers as W
+
+    entered = threading.Event()
+    release = threading.Event()
+    runs: list[int] = []
+
+    class _Op:
+        summary = "злиття реєстру"
+
+    def fake_call(name, payload=None):
+        runs.append(1)
+        entered.set()
+        release.wait(5)
+        return Envelope(ok=True, data={"merged": 3})
+
+    monkeypatch.setattr(O, "get", lambda name: _Op())
+    monkeypatch.setattr(O, "call", fake_call)
+
+    job = await W._start_generic(bus, "registry.merge", {"fond": "904"})
+    assert await asyncio.to_thread(entered.wait, 5), "тіло операції не стартувало"
+
+    await bus.cancel(job.id)
+    await asyncio.sleep(0.05)
+    after = bus.get(job.id)
+    assert after.state == JobState.CANCELLED
+    assert any(w["code"] == "cant_interrupt" for w in after.warnings), (
+        "скасування вдавало, що спинило роботу")
+
+    with pytest.raises(ValueError, match="ще йде"):
+        await W._start_generic(bus, "registry.merge", {"fond": "904"})
+    assert runs == [1], "друге злиття пішло паралельно з першим"
+
+    release.set()
+    await W._GENERIC_RUNS[job.id]
+    done = bus.get(job.id)
+    assert done.state == JobState.CANCELLED
+    assert done.result == {"merged": 3}
+    assert any(w["code"] == "finished_after_cancel" for w in done.warnings)
+
+    again = await W._start_generic(bus, "registry.merge", {"fond": "904"})
+    assert again.id != job.id, "після кінця потоку новий запуск мав піти"
+    tail = W._GENERIC_RUNS.get(again.id)
+    if tail is not None:
+        await tail
