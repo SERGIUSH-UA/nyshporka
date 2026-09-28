@@ -803,20 +803,29 @@ def _verdict_stem_key(ck: str) -> str:
 
 
 def _verdicts_save(key: str, items: dict[str, dict[str, Any]]) -> None:
+    """Дописати вердикти справи в журнал гортача.
+
+    🔴 Аудит 29.09.2026: читання тут ковтало будь-яку помилку як `{}`, і запис
+    однієї справи перезаписував журнал ВСІХ — досить було антивіруса, що тримав
+    файл у мить читання, чи зайвої коми. Тепер незчитаний або побитий журнал —
+    `CorruptFileError`, і файл лишається як був: це рішення людини, починати
+    їх «заново» мовчки не можна. Лок — бо два імпорти вердиктів паралельно
+    читали той самий стан і другий губив записи першого; а tmp із фіксованою
+    назвою `verdicts.tmp` вони ще й перетирали одне одному (у `write_json` —
+    pid у назві й повтор заміни на зайнятій цілі).
+    """
+    from nyshporka.pagestore.store import _lock
+    from nyshporka.utils.atomic import CorruptFileError, read_json, write_json
+
     p = _verdicts_path()
-    try:
-        data = json.loads(p.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        data = {}
-    if not isinstance(data, dict):
-        data = {}
-    cur: dict[str, Any] = dict(data[key]) if isinstance(data.get(key), dict) else {}
-    cur.update(items)
-    data[key] = cur
-    p.parent.mkdir(parents=True, exist_ok=True)
-    tmp = p.with_suffix(".tmp")
-    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
-    tmp.replace(p)
+    with _lock(p):
+        data = read_json(p, default={})
+        if not isinstance(data, dict):
+            raise CorruptFileError(p, "у корені не об'єкт")
+        cur: dict[str, Any] = dict(data[key]) if isinstance(data.get(key), dict) else {}
+        cur.update(items)
+        data[key] = cur
+        write_json(p, data, indent=1, trailing_nl=False)
 
 
 def _crop_b64(scope: str, page: str, line: int, *, max_w: int = 1400,
@@ -1079,9 +1088,11 @@ def verdicts_import(path: str | Path, scope: str, *, q: str = "", agent: str = "
         return {"error": "жодного дійсного вердикту в файлі", "bad": bad[:5]}
     rep = PS.annotate_pages(ref, notes)
     journal = ""
+    from nyshporka.utils.atomic import CorruptFileError
+
     try:
         _verdicts_save(key, items)
-    except OSError as exc:
+    except (OSError, CorruptFileError) as exc:
         # Сховище сторінок уже оновлене; журнал гортача — ні. Сказати, а не
         # впасти: повтор імпорту домержив би коментар удруге.
         journal = f"журнал вердиктів не записано: {exc}"

@@ -18,7 +18,8 @@
 from __future__ import annotations
 
 import json
-import os
+import sys
+import time
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -37,11 +38,60 @@ def path() -> Path:
 
 
 def _read() -> dict[str, Any]:
+    """Для ПОКАЗУ: побитий чи зайнятий файл — порожньо, пошук не падає.
+
+    ⚠ Писати поверх цього не можна: див. `_read_for_write`.
+    """
     try:
         got = json.loads(path().read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
     return got if isinstance(got, dict) else {}
+
+
+def _read_for_write(p: Path) -> dict[str, Any] | None:
+    """Прочитати слід під запис. `None` — цього разу не писати.
+
+    🔴 Аудит 29.09.2026: `note` читав через `_read`, а той на будь-якій помилці
+    віддавав `{}` — і запис одного свіпу перезаписував слід УСІХ справ. Досить
+    було антивіруса, що тримав файл у мить читання (PermissionError на Windows).
+    Тому розводимо два випадки:
+
+    * файл не ЧИТАЄТЬСЯ (зайнятий, немає прав) — він, найпевніше, цілий, тож
+      пропускаємо запис: слід — зручність, а втратити всі інші гірше, ніж
+      недописати один;
+    * файл читається, але не РОЗБИРАЄТЬСЯ — відновлювати нема з чого. Відсуваємо
+      його вбік `.corrupt-<час>` (руками ще можна дістати рядки) і починаємо
+      заново, сказавши про це вголос.
+    """
+    from nyshporka.utils.atomic import CorruptFileError, read_json
+
+    try:
+        got = read_json(p, default={})
+    except CorruptFileError as e:
+        if isinstance(e.__cause__, OSError):
+            print(f"⚠ слід свіпу не записано: {e.__cause__}", file=sys.stderr)
+            return None
+        aside = p.with_name(f"{p.name}.corrupt-{time.strftime('%Y%m%d-%H%M%S')}")
+        try:
+            p.replace(aside)
+        except OSError as exc:
+            print(f"⚠ слід свіпу побитий і не відсувається ({exc}); не записано",
+                  file=sys.stderr)
+            return None
+        print(f"⚠ слід свіпу {p} не розбирався — відсунуто в {aside.name}, "
+              f"починаю новий", file=sys.stderr)
+        return {}
+    if not isinstance(got, dict):
+        aside = p.with_name(f"{p.name}.corrupt-{time.strftime('%Y%m%d-%H%M%S')}")
+        try:
+            p.replace(aside)
+        except OSError:
+            return None
+        print(f"⚠ слід свіпу {p} — не об'єкт; відсунуто в {aside.name}",
+              file=sys.stderr)
+        return {}
+    return got
 
 
 def note(key: str, *, q: str, thresh: int, hits: int, pages: int,
@@ -52,25 +102,30 @@ def note(key: str, *, q: str, thresh: int, hits: int, pages: int,
     row = {"q": q, "thresh": thresh, "hits": hits, "pages": pages,
            "models": sorted(set(models)), "channels": channels,
            "when": date.today().isoformat()}
-    data = _read()
-    prev = [x for x in (data.get(key) or []) if isinstance(x, dict)]
-    # Той самий запит тими самими моделями не множить рядків — він їх оновлює.
-    # Канали — частина ключа: свіп прізвищем і свіп з якорями відповідають на
-    # різні питання, і другий не має затирати перший.
-    same = (q, tuple(sorted(set(models))), tuple(channels))
-    prev = [x for x in prev
-            if (x.get("q"), tuple(x.get("models") or []),
-                tuple(x.get("channels") or [])) != same]
-    data[key] = [row, *prev][:KEEP]
+    from nyshporka.pagestore.store import _lock
+    from nyshporka.utils.atomic import write_json
+
     p = path()
+    # Лок на все «прочитати → дописати → замінити» (аудит 29.09.2026): два
+    # паралельні свіпи інакше читали той самий стан, і другий затирав запис
+    # першого. Лок — той самий, що береже сховище сторінок.
     try:
-        p.parent.mkdir(parents=True, exist_ok=True)
-        tmp = p.with_suffix(f".{os.getpid()}.tmp")
-        tmp.write_text(json.dumps(data, ensure_ascii=False, indent=1) + "\n",
-                       encoding="utf-8", newline="\n")
-        tmp.replace(p)
+        with _lock(p):
+            data = _read_for_write(p)
+            if data is None:
+                return
+            prev = [x for x in (data.get(key) or []) if isinstance(x, dict)]
+            # Той самий запит тими самими моделями не множить рядків — він їх
+            # оновлює. Канали — частина ключа: свіп прізвищем і свіп з якорями
+            # відповідають на різні питання, і другий не має затирати перший.
+            same = (q, tuple(sorted(set(models))), tuple(channels))
+            prev = [x for x in prev
+                    if (x.get("q"), tuple(x.get("models") or []),
+                        tuple(x.get("channels") or [])) != same]
+            data[key] = [row, *prev][:KEEP]
+            write_json(p, data, indent=1, newline="\n")
     except OSError:
-        pass  # слід — зручність, а не умова роботи
+        pass  # слід — зручність, а не умова роботи (сюди ж — зайнятий лок)
 
 
 def of(key: str) -> list[dict[str, Any]]:
