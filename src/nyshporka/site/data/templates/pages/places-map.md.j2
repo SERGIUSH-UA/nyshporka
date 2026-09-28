@@ -1,0 +1,17 @@
+---
+title: Мапа місць
+---
+
+# Мапа місць
+
+**{{ counts.places_with_coords }}** з **{{ counts.places }}** місць канону мають координати й стоять на мапі.
+Натисни на маркер — побачиш, хто там згаданий, і перейдеш на сторінку місця.
+
+<div id="nysh-places-map" data-geojson-url="assets/places.geojson"
+     data-groups="{{ place_groups_json | e }}" data-eras="{{ eras_json | e }}"></div>
+{% if counts.places_with_coords < counts.places %}
+
+!!! note "Не всі місця на мапі"
+    {{ counts.places - counts.places_with_coords }} місць без координат (`coords` у картці місця) — вони є в
+    [переліку місць](places/index.md), але на мапу не потрапляють.
+{% endif %}

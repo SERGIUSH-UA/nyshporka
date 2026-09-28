@@ -1,0 +1,103 @@
+---
+title: {{ person.primary_name }}
+private: {{ "true" if person.private else "false" }}
+---
+
+# {{ person.primary_name }}
+
+{% if person.private -%}
+!!! warning "Приватна особа"
+    Особа жива — точні дати й фото приховані. Канонічні дані зберігаються
+    локально у `data/canonical/persons/{{ person.id }}.md`.
+{%- endif %}
+
+## Інфобокс
+
+| | |
+|---|---|
+| **ID** | `{{ person.id }}` |
+| **Стать** | {{ {"M":"чоловіча", "F":"жіноча", "U":"невідома"}[person.sex] }} |
+{% set _birth = person.facts | selectattr("type", "equalto", "birth") | first | default(None) -%}
+{% if _birth -%}
+| **Народження** | {{ _birth.date | format_date(decade_only=person.private) }}{% if _birth.place_id %} · [{{ place_names[_birth.place_id] }}](../places/{{ _birth.place_id }}.md){% endif %} |
+{% endif -%}
+{% set _death = person.facts | selectattr("type", "equalto", "death") | first | default(None) -%}
+{% if _death and not person.private -%}
+| **Смерть** | {{ _death.date | format_date }}{% if _death.place_id %} · [{{ place_names[_death.place_id] }}](../places/{{ _death.place_id }}.md){% endif %} |
+{% endif -%}
+{% if person.aliases -%}
+| **Альтернативні ID** | {{ person.aliases | join(", ") }} |
+{% endif %}
+
+## Імена
+
+{% for n in person.names -%}
+- {% if n.primary %}**{% endif %}{{ n.form }}{% if n.primary %}**{% endif %} _(lang: {{ n.lang }})_
+{% endfor %}
+
+## Факти
+
+{% for f in person.facts -%}
+- {{ fact_summary(f, place_names, decade_only=person.private) }}
+{% endfor %}
+
+{% if relations.confirmed.has_parents or relations.confirmed.has_siblings or relations.confirmed.has_spouses %}
+## Родинні зв'язки
+
+{{ "- **Батьки:** " ~ relations.confirmed.parents_md ~ (" _(родина " ~ relations.confirmed.parent_family_md ~ ")_" if relations.confirmed.parent_family_md else "") if relations.confirmed.has_parents else "" }}
+{{ "- **Брати/сестри:** " ~ relations.confirmed.siblings_md if relations.confirmed.has_siblings else "" }}
+{% for fam in relations.confirmed.spouses %}
+- **Подружжя:** {{ fam.partner_md }} _(родина {{ fam.family_md }})_
+{{ "    - **Діти:** " ~ fam.children_md if fam.has_children else "" }}
+{{ "    - **Можливі діти:** " ~ fam.hypothetical_children_md ~ " _(гіпотеза)_" if fam.has_hypothetical_children else "" }}
+{% endfor %}
+{% endif %}
+
+{% if relations.hypothetical.has_parents or relations.hypothetical.has_siblings or relations.hypothetical.has_spouses %}
+## Гіпотетичні зв'язки
+
+!!! note "Не верифіковано джерелом"
+    Виведено з логіки, прізвища, хронології або суміжних згадок. Підтверджуючого
+    метричного запису або документа з прямою згадкою спорідненості ще нема.
+
+{{ "- **Гіп. батьки:** " ~ relations.hypothetical.parents_md ~ (" _(родина " ~ relations.hypothetical.parent_family_md ~ ")_" if relations.hypothetical.parent_family_md else "") if relations.hypothetical.has_parents else "" }}
+{{ "- **Гіп. брати/сестри:** " ~ relations.hypothetical.siblings_md if relations.hypothetical.has_siblings else "" }}
+{% for fam in relations.hypothetical.spouses %}
+- **Гіп. подружжя:** {{ fam.partner_md }} _(родина {{ fam.family_md }})_
+{{ "    - **Діти:** " ~ fam.children_md if fam.has_children else "" }}
+{% endfor %}
+{% endif %}
+
+{% if media_lines %}
+## Медіа
+
+{{ media_lines | join('\n') }}
+{% endif %}
+
+{% if documents %}
+## Документи
+
+{% for d in documents if d.is_img %}
+[![{{ d.caption }}]({{ d.url }})]({{ d.url }})
+*{{ d.caption }}*
+
+{% endfor %}
+{% set pdfs = documents | selectattr('is_pdf') | list %}
+{% if pdfs %}
+**Скани-першоджерела (PDF):**
+
+{% for d in pdfs %}
+- 📄 [{{ d.caption }}]({{ d.url }})
+{% endfor %}
+{% endif %}
+{% endif %}
+
+{% if person.notes -%}
+## Нотатки
+
+{{ person.notes }}
+{%- endif %}
+
+{% for s in all_sources -%}
+[^{{ s.id }}]: {{ s.title if s.withheld else "[" ~ s.title ~ "](../sources/" ~ s.id ~ ".md)" }}
+{% endfor %}

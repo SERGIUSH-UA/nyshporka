@@ -1,0 +1,69 @@
+---
+title: {{ source.title }}
+---
+
+# {{ source.title }}
+
+## Інфобокс
+
+| | |
+|---|---|
+| **ID** | `{{ source.id }}` |
+| **Тип** | {{ source.type }} |
+{% if source.authority -%}
+| **Установа** | {{ source.authority }} |
+{% endif -%}
+{% if source.url -%}
+| **URL** | [{{ source.url }}]({{ source.url }}) |
+{% endif -%}
+{% if source.repository_ref -%}
+| **Архівне посилання** | `{{ source.repository_ref }}` |
+{% endif -%}
+{% if source.fetched -%}
+| **Завантажено** | {{ source.fetched }} |
+{% endif -%}
+
+
+{% if source.coverage -%}
+## Покриття
+
+| Регіон | Парафія | Роки | Записи | Статус |
+|---|---|---|---|---|
+{% for c in source.coverage -%}
+| {{ region_names.get(c.region, c.region) }} | {{ c.parish or "—" }} | {{ c.year_from }}{% if c.year_to %}–{{ c.year_to }}{% endif %} | {% for rt in c.record_types %}{{ cov_rt_labels.get(rt, rt) }}{% if not loop.last %}, {% endif %}{% else %}—{% endfor %} | {{ cov_status_labels.get(c.status, c.status) }} |
+{% endfor %}
+{% endif %}
+
+{% if source.notes -%}
+## Нотатки
+
+{{ source.notes }}
+{%- endif %}
+
+{% if referenced_facts -%}
+## Згадки в канонічній базі
+
+Цитується у {{ referenced_facts | length }} фактах:
+
+{% for entry in referenced_facts -%}
+- [{{ entry.person_name }}](../persons/{{ entry.person_id }}.md): {{ entry.fact_type | fact_label }}
+{% endfor %}
+{%- endif %}
+
+{% if documents %}
+## Доказ-вирізки
+
+{% for d in documents if d.is_img %}
+[![{{ d.caption }}]({{ d.url }})]({{ d.url }})
+*{{ d.caption }}*
+
+{% endfor %}
+{% set pdfs = documents | selectattr('is_pdf') | list %}
+{% if pdfs %}
+**Скани-першоджерела (PDF):**
+
+{% for d in pdfs %}
+- 📄 [{{ d.caption }}]({{ d.url }})
+{% endfor %}
+{% endif %}
+{% endif %}

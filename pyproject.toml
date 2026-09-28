@@ -155,6 +155,8 @@ agent = ["mcp>=1.2,<2", "anyio>=4.1"]
 xlsx = ["openpyxl>=3.1"]
 # Засівання канону з GEDCOM (`nysh canon import`) — разова дія, тому не в ядрі.
 gedcom = ["ged4py>=0.5"]
+# Сайт роду з канону (`nysh site build`) — MkDocs Material і вікі-посилання.
+site = ["mkdocs-material>=9.5", "mkdocs-roamlinks-plugin>=0.3"]
 # Сайт документації. 🔴 В `all` НЕ входить: генеалогові, який ставить
 # застосунок, збирач сайту не потрібен — його ставить лише CI і той, хто
 # правит документацію.
@@ -319,7 +321,8 @@ disable_error_code = ["attr-defined", "arg-type", "assignment", "unused-ignore",
 
 # Пакети без анотацій, на які ми не впливаємо.
 [[tool.mypy.overrides]]
-module = ["frontmatter.*", "unidecode.*", "yaml.*", "pypdfium2.*", "fitz.*", "ged4py.*",
+module = ["frontmatter.*", "unidecode.*", "yaml.*", "pypdfium2.*", "fitz.*", "ged4py.*", "mkdocs.*", "material.*",
+          "mkdocs_roamlinks_plugin.*",
           "mcp.*", "anyio.*"]
 ignore_missing_imports = true
 

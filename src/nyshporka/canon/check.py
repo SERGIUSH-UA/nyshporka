@@ -24,6 +24,7 @@ import json
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass, field
+from datetime import date
 from pathlib import Path
 from typing import Any, Literal
 
@@ -62,6 +63,9 @@ MIN_PARENT_AGE = 14
 MAX_FATHER_AGE = 70
 MAX_MOTHER_AGE = 50
 MAX_LIFESPAN = 110
+
+#: Хто без дати смерті й народжений не раніше стількох років тому, імовірно живий.
+LIVING_WINDOW = 100
 
 #: Рівні доказу, з якими `confirmed` чесний. Решта — підстава для гіпотези.
 STRONG_CONFIDENCE = frozenset({"direct", "indirect"})
@@ -322,6 +326,14 @@ def _chronology(c: Canon, r: Report) -> None:
                 r.add("WARN", "duplicate_fact", pid, f"{len(facts)} фактів {kind} (дубль?)")
             store[pid] = year_of(facts[0].date) if facts else None
         by, dy = births[pid], deaths[pid]
+        # Приватна збірка сайту ховає живих лише за позначкою `private`, тож
+        # імовірно живий без неї — це дати й нотатки живої людини на сторінці.
+        if (by and not dy and not p.private
+                and by >= date.today().year - LIVING_WINDOW
+                and not any(f.type == "burial" for f in p.facts)):
+            r.add("WARN", "maybe_living", pid,
+                  f"народжений {by}, смерті немає, а private: false — якщо живий, "
+                  f"позначити private: true")
         if by and dy and by > dy:
             r.add("ERROR", "chronology", pid, f"народження {by} пізніше за смерть {dy}")
         elif by and dy and dy - by > MAX_LIFESPAN:

@@ -1,0 +1,42 @@
+---
+title: Граф родини
+---
+
+# Граф родини
+
+Усі **{{ counts.persons }}** осіб канону як граф: вузол — особа, ребро — батьківський чи
+подружній зв'язок. Пунктир — гіпотеза, напівпрозоре ребро — слабка цитата
+(`speculative`), червоний бордюр — суперечливі дані (`disputed`).
+
+<div id="nysh-graph-controls">
+  <div class="control-row">
+    <label for="nysh-year-slider">Рік: <strong id="nysh-year-display">{{ year_max }}</strong></label>
+    <input type="range" id="nysh-year-slider" min="{{ year_min }}" max="{{ year_max }}" value="{{ year_max }}" step="1">
+  </div>
+  <div class="control-row">
+    <label><input type="checkbox" id="nysh-toggle-hypothesis" checked> Гіпотетичні зв'язки</label>
+    <label><input type="checkbox" id="nysh-toggle-private" checked> Приватні особи</label>
+    <label><input type="checkbox" id="nysh-toggle-candidates" checked> Кандидати</label>
+    <button type="button" id="nysh-reset-zoom">Скинути зум</button>
+  </div>
+</div>
+
+<svg id="nysh-family-graph" data-graph-url="assets/graph.json"></svg>
+
+<div id="nysh-event-track"></div>
+
+<div id="nysh-graph-legend">
+  <span class="legend-item"><svg width="34" height="6"><line x1="0" y1="3" x2="34" y2="3" stroke="currentColor" stroke-width="2"/></svg> підтверджено</span>
+  <span class="legend-item"><svg width="34" height="6"><line x1="0" y1="3" x2="34" y2="3" stroke="currentColor" stroke-width="2" stroke-dasharray="4 3"/></svg> гіпотеза</span>
+  <span class="legend-item"><span class="dot disputed"></span> суперечливо</span>
+  <span class="legend-item"><span class="dot speculative"></span> слабка цитата</span>
+</div>
+
+<div id="nysh-tooltip" class="nysh-tooltip" style="display:none"></div>
+
+## Як читати граф
+
+- **Колір вузла** — гілка: зв'язна частина графа, корінь якої — найстарша особа без батьків.
+- **Товщина ребра** — сила найслабшої цитати факту: `direct` товсте, `speculative` тонке.
+- **Розмір вузла** — кількість фактів особи.
+- **Слайдер року** лишає тих, хто жив у цей рік.

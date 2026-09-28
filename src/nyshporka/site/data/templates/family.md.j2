@@ -1,0 +1,79 @@
+---
+title: Родина {{ family.id }}
+---
+
+# Родина `{{ family.id }}`
+
+## Подружжя
+
+{% if family.husband -%}
+- **Чоловік:** [{{ person_names[family.husband] }}](../persons/{{ family.husband }}.md)
+{% endif -%}
+{% if family.wife -%}
+- **Дружина:** [{{ person_names[family.wife] }}](../persons/{{ family.wife }}.md)
+{% endif %}
+
+{% if family.children -%}
+## Діти
+
+{% for cid in family.children -%}
+- [{{ person_names[cid] }}](../persons/{{ cid }}.md) — `{{ cid }}`
+{% endfor %}
+{%- endif %}
+
+{% if family.hypothetical_husband or family.hypothetical_wife or family.hypothetical_children -%}
+## Гіпотетичні члени
+
+!!! note "Не верифіковано джерелом"
+    Зв'язок виведено непрямо. Підтверджуючого документа з прямою згадкою ще нема.
+
+{% if family.hypothetical_husband -%}
+- **Гіп. чоловік:** [{{ person_names[family.hypothetical_husband] }}](../persons/{{ family.hypothetical_husband }}.md)
+{% endif -%}
+{% if family.hypothetical_wife -%}
+- **Гіп. дружина:** [{{ person_names[family.hypothetical_wife] }}](../persons/{{ family.hypothetical_wife }}.md)
+{% endif -%}
+{% for cid in family.hypothetical_children -%}
+- **Гіп. дитина:** [{{ person_names[cid] }}](../persons/{{ cid }}.md) — `{{ cid }}`
+{% endfor %}
+{%- endif %}
+
+{% if family.facts -%}
+## Події
+
+{% for f in family.facts -%}
+- {{ fact_summary(f, place_names) }}
+{% endfor %}
+{%- endif %}
+
+{% if documents %}
+## Документи
+
+{% for d in documents if d.is_img %}
+[![{{ d.caption }}]({{ d.url }})]({{ d.url }})
+*{{ d.caption }}*
+
+{% endfor %}
+{% set pdfs = documents | selectattr('is_pdf') | list %}
+{% if pdfs %}
+**Скани-першоджерела (PDF):**
+
+{% for d in pdfs %}
+- 📄 [{{ d.caption }}]({{ d.url }})
+{% endfor %}
+{% endif %}
+{% endif %}
+
+{% if family.aliases -%}
+**Альтернативні ID:** {{ family.aliases | join(", ") }}
+{%- endif %}
+
+{% if family.notes -%}
+## Нотатки
+
+{{ family.notes }}
+{%- endif %}
+
+{% for s in all_sources -%}
+[^{{ s.id }}]: {{ s.title if s.withheld else "[" ~ s.title ~ "](../sources/" ~ s.id ~ ".md)" }}
+{% endfor %}

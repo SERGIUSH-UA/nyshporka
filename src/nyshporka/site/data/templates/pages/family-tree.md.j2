@@ -1,0 +1,56 @@
+---
+title: Дерево родини
+---
+
+# Дерево родини
+
+Усе дерево канону: **{{ counts.persons }}** осіб, **{{ counts.families }}** родин. Покоління ростуть згори
+вниз; клік на особі показує її предків і нащадків, повторний клік — деталі.
+
+
+<div id="nysh-tree-app" data-tree-url="assets/tree.json" data-geojson-url="assets/places.geojson">
+  <div class="nysh-tree-header">
+    <div class="nysh-tree-breadcrumbs" id="nysh-breadcrumbs">
+      <span class="bc-item bc-current">Усе дерево</span>
+    </div>
+    <div class="nysh-tree-modeswitch">
+      <button type="button" data-mode="overview" class="active">Усе дерево</button>
+      <button type="button" data-mode="focus" disabled>Фокус</button>
+      <button type="button" id="nysh-reset-zoom" title="Скинути зум">⤢</button>
+    </div>
+  </div>
+
+  <div class="nysh-tree-grid">
+    <div class="nysh-tree-pane" id="nysh-tree-pane">
+      <svg id="nysh-tree-svg"></svg>
+      <div class="nysh-tree-loading">Завантаження…</div>
+    </div>
+
+    <aside class="nysh-side-pane" id="nysh-details-pane">
+      <div class="nysh-empty">Виберіть особу у дереві</div>
+    </aside>
+
+    <aside class="nysh-side-pane" id="nysh-map-pane">
+      <div id="nysh-tree-map" class="nysh-tree-map"></div>
+    </aside>
+
+    <div class="nysh-bottom-pane" id="nysh-timeline-pane">
+      <div id="nysh-tree-timeline"></div>
+    </div>
+  </div>
+
+  <div class="nysh-tree-legend">
+    <span class="legend-item"><span class="dot legend-confirmed"></span> підтверджено</span>
+    <span class="legend-item"><span class="dash legend-hypothesis"></span> гіпотеза</span>
+    <span class="legend-item"><span class="dot legend-disputed"></span> суперечливо</span>
+    <span class="legend-item"><span class="dot legend-private"></span> приватна</span>
+    <span class="legend-item"><span class="badge legend-photo">📷</span> з фото</span>
+  </div>
+</div>
+
+
+## Як читати
+
+- **Пунктир** — гіпотетичний (виведений) зв'язок, суцільна лінія — підтверджений джерелом.
+- **Приватні особи** — без імен і фото, роки округлено до десятиліття.
+- **Клік на особу** — фокус: її предки й нащадки. Повторний клік — деталі справа.

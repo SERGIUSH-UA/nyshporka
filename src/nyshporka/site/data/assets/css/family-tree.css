@@ -1,0 +1,394 @@
+/* Multi-pane tree visualization. */
+
+#nysh-tree-app {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin: 0.5rem 0 1.5rem;
+}
+
+/* Header */
+.nysh-tree-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  background: var(--md-default-fg-color--lightest, #f5f5f7);
+  border-radius: 8px;
+}
+
+.nysh-tree-breadcrumbs {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  font-size: 0.95rem;
+}
+.bc-item { padding: 0.15rem 0.5rem; border-radius: 4px; }
+.bc-item.bc-current { font-weight: 600; }
+button.bc-item, button.bc-home {
+  background: none;
+  border: 1px solid transparent;
+  color: var(--md-accent-fg-color, #3949ab);
+  cursor: pointer;
+}
+button.bc-item:hover, button.bc-home:hover {
+  background: rgba(57, 73, 171, 0.08);
+  border-color: rgba(57, 73, 171, 0.3);
+}
+.bc-sep { color: #999; padding: 0 0.15rem; }
+
+.nysh-tree-modeswitch {
+  display: flex; gap: 0.5rem;
+}
+.nysh-tree-modeswitch button {
+  padding: 0.35rem 0.8rem;
+  background: #fff;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+.nysh-tree-modeswitch button:hover:not(:disabled) {
+  border-color: #3949ab;
+  color: #3949ab;
+}
+.nysh-tree-modeswitch button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.nysh-tree-modeswitch button.active {
+  background: #3949ab;
+  color: #fff;
+  border-color: #3949ab;
+}
+
+/* Grid: дерево займає всю висоту головного рядка, праворуч стек
+   details+map (на середніх екранах), нижче — timeline. */
+.nysh-tree-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(300px, 1fr);
+  grid-template-rows: minmax(280px, 1fr) minmax(240px, 1fr) 120px;
+  grid-template-areas:
+    "tree details"
+    "tree map"
+    "timeline timeline";
+  gap: 0.75rem;
+  height: min(80vh, 820px);
+}
+@media (min-width: 1400px) {
+  .nysh-tree-grid {
+    grid-template-columns: minmax(0, 1.6fr) 360px minmax(300px, 0.9fr);
+    grid-template-rows: minmax(0, 1fr) 120px;
+    grid-template-areas:
+      "tree details map"
+      "timeline timeline timeline";
+    height: min(80vh, 820px);
+  }
+}
+@media (max-width: 900px) {
+  .nysh-tree-grid {
+    grid-template-columns: 1fr;
+    grid-template-rows: 60vh 280px 280px 100px;
+    grid-template-areas:
+      "tree"
+      "details"
+      "map"
+      "timeline";
+    height: auto;
+  }
+}
+
+.nysh-tree-pane {
+  grid-area: tree;
+  position: relative;
+  background: linear-gradient(to bottom, #fafbff 0%, #f0f1f6 100%);
+  border-radius: 8px;
+  border: 1px solid #e0e2e8;
+  overflow: hidden;
+  min-height: 0;
+}
+#nysh-tree-svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+  cursor: grab;
+}
+#nysh-tree-svg:active { cursor: grabbing; }
+.nysh-tree-loading {
+  position: absolute;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  color: #666;
+  font-style: italic;
+}
+
+.nysh-side-pane {
+  background: #fff;
+  border-radius: 8px;
+  border: 1px solid #e0e2e8;
+  padding: 0.75rem;
+  overflow: auto;
+}
+#nysh-details-pane { grid-area: details; }
+#nysh-map-pane { grid-area: map; padding: 0; }
+.nysh-tree-map { width: 100%; height: 100%; min-height: 240px; border-radius: 8px; }
+
+.nysh-bottom-pane {
+  grid-area: timeline;
+  background: #fff;
+  border-radius: 8px;
+  border: 1px solid #e0e2e8;
+  padding: 0.5rem 0.75rem;
+}
+
+.nysh-empty {
+  color: #888;
+  font-style: italic;
+  padding: 1rem;
+  text-align: center;
+}
+.nysh-error {
+  padding: 1rem;
+  color: #c62828;
+  background: #fde8e8;
+  border-radius: 6px;
+}
+
+/* Tree nodes */
+.nysh-tree-node .person-card {
+  filter: drop-shadow(0 1px 2px rgba(0,0,0,0.08));
+  transition: filter 0.15s, transform 0.15s;
+}
+.nysh-tree-node:hover .person-card {
+  filter: drop-shadow(0 2px 6px rgba(0,0,0,0.18));
+}
+.nysh-tree-node.selected .person-card {
+  stroke-width: 3 !important;
+  filter: drop-shadow(0 0 6px rgba(57,73,171,0.4));
+}
+.nysh-tree-node.year-dimmed { opacity: 0.18; }
+.nysh-tree-node.rel-dim { opacity: 0.25; }
+.nysh-tree-node.rel-parent .person-card { stroke: #48c; stroke-width: 2.5; }
+.nysh-tree-node.rel-child .person-card { stroke: #0a8; stroke-width: 2.5; }
+.nysh-tree-node.rel-spouse .person-card { stroke: #e88; stroke-width: 2.5; }
+.nysh-tree-node.rel-sibling .person-card { stroke: #fa3; stroke-width: 2.5; }
+
+.nysh-tree-node text.name {
+  font-size: 12px;
+  font-weight: 600;
+  fill: #222;
+  pointer-events: none;
+}
+.nysh-tree-node text.years {
+  font-size: 10px;
+  fill: #666;
+  pointer-events: none;
+}
+.nysh-tree-node text.pid {
+  font-size: 9px;
+  fill: #999;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  pointer-events: none;
+}
+.nysh-tree-node.private text.name { font-style: italic; fill: #777; }
+
+.nysh-tree-node .badge { font-size: 11px; }
+.nysh-tree-node .badge-disputed { fill: #e44; }
+.nysh-tree-node .badge-private { fill: #888; }
+.nysh-tree-node .badge-rich { fill: #f80; }
+
+.nysh-tree-node .avatar text.avatar-initials {
+  font-size: 13px;
+  font-weight: 600;
+  fill: #333;
+  pointer-events: none;
+}
+
+/* Edges */
+.nysh-tree-edge { transition: opacity 0.15s; }
+.nysh-tree-edge.rel-dim { opacity: 0.12 !important; }
+.nysh-tree-edge.edge-spouse { stroke-linecap: round; }
+
+/* Details pane */
+.details-header {
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-start;
+  margin-bottom: 0.75rem;
+}
+.details-photo, .details-photo-placeholder {
+  width: 72px; height: 72px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: #f0f0f5;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1.5rem; font-weight: 600;
+  color: #888;
+  flex-shrink: 0;
+}
+.details-name h3 { margin: 0; font-size: 1.1rem; line-height: 1.2; }
+.details-meta { font-size: 0.85rem; color: #666; margin-top: 0.25rem; }
+.details-meta code { background: #f0f1f6; padding: 1px 4px; border-radius: 3px; font-size: 0.8rem; }
+.details-flags { margin-top: 0.35rem; }
+.flag {
+  font-size: 0.75rem;
+  padding: 1px 6px;
+  border-radius: 10px;
+  background: #f0f0f5;
+  margin-right: 0.25rem;
+}
+.flag-disputed { background: #ffe8e8; color: #c62828; }
+.flag-private { background: #f4f4f4; color: #666; }
+.flag-root { background: #e8f5e8; color: #2e7d32; }
+
+.details-stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+  padding: 0.5rem;
+  background: #f9fafd;
+  border-radius: 6px;
+}
+.details-stats > div {
+  text-align: center;
+}
+.details-stats b {
+  display: block;
+  font-size: 1.1rem;
+  color: #3949ab;
+}
+.details-stats span {
+  font-size: 0.75rem;
+  color: #666;
+}
+
+.details-rel { margin-bottom: 0.75rem; }
+.details-rel h4 {
+  margin: 0 0 0.35rem;
+  font-size: 0.85rem;
+  color: #888;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.rel-list { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+.rel-link {
+  display: inline-block;
+  padding: 0.25rem 0.5rem;
+  background: #f4f5fa;
+  border-radius: 4px;
+  text-decoration: none;
+  font-size: 0.85rem;
+  color: #222;
+}
+.rel-link:hover { background: #e0e3f0; }
+.rel-link.rel-private { font-style: italic; color: #888; }
+.rel-link small { color: #888; margin-left: 0.25rem; }
+
+.details-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 1rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid #eee;
+}
+.action-focus {
+  padding: 0.4rem 0.9rem;
+  background: #3949ab;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+.action-focus:hover { background: #2c3993; }
+.action-page {
+  padding: 0.4rem 0.9rem;
+  border: 1px solid #3949ab;
+  color: #3949ab;
+  border-radius: 6px;
+  text-decoration: none;
+  font-size: 0.85rem;
+}
+
+/* Map popup tweaks */
+.popup-events {
+  font-size: 0.8rem;
+  margin: 0.3rem 0;
+  color: #444;
+}
+
+/* Timeline */
+#nysh-tree-timeline { width: 100%; height: 80px; }
+.nysh-tl-svg { display: block; }
+.tl-event { transition: r 0.15s; }
+.tl-event:hover { r: 7; }
+
+/* Tooltip */
+.nysh-tree-tooltip {
+  position: absolute;
+  z-index: 9999;
+  background: #fff;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  padding: 0.5rem 0.65rem;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.15);
+  font-size: 0.85rem;
+  max-width: 320px;
+  pointer-events: none;
+}
+.nysh-tree-tooltip code {
+  background: #f0f1f6; padding: 1px 4px; border-radius: 3px;
+  font-size: 0.75rem;
+}
+.tip-hint {
+  margin-top: 0.35rem;
+  font-size: 0.7rem;
+  color: #888;
+}
+
+/* Legend */
+.nysh-tree-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  font-size: 0.85rem;
+  padding: 0.5rem;
+  color: #666;
+}
+.legend-item { display: inline-flex; align-items: center; gap: 0.35rem; }
+.legend-item .dot {
+  display: inline-block; width: 10px; height: 10px; border-radius: 50%;
+}
+.legend-item .dash {
+  display: inline-block; width: 24px; height: 0;
+  border-top: 2px dashed #888;
+}
+.legend-confirmed { background: #3949ab; }
+.legend-disputed { background: #e44; }
+.legend-private { background: #aaa; border: 1px dashed #777; }
+.legend-photo { background: #f0f0f5; padding: 1px 4px; border-radius: 3px; }
+
+/* Dark mode */
+[data-md-color-scheme="slate"] .nysh-tree-header { background: rgba(255,255,255,0.05); }
+[data-md-color-scheme="slate"] .nysh-tree-pane {
+  background: linear-gradient(to bottom, #1f2128 0%, #14151b 100%);
+  border-color: #333;
+}
+[data-md-color-scheme="slate"] .nysh-side-pane,
+[data-md-color-scheme="slate"] .nysh-bottom-pane {
+  background: #1f2128;
+  border-color: #333;
+}
+[data-md-color-scheme="slate"] .nysh-tree-node .person-card { fill: #2a2c34; }
+[data-md-color-scheme="slate"] .nysh-tree-node text.name { fill: #eaeaea; }
+[data-md-color-scheme="slate"] .nysh-tree-node text.years { fill: #aaa; }
+[data-md-color-scheme="slate"] .details-stats { background: #14151b; }
+[data-md-color-scheme="slate"] .rel-link { background: #2a2c34; color: #eaeaea; }
+[data-md-color-scheme="slate"] .rel-link:hover { background: #3a3c44; }
+[data-md-color-scheme="slate"] .nysh-tree-tooltip {
+  background: #1f2128; color: #eaeaea; border-color: #444;
+}

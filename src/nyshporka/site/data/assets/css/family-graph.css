@@ -1,0 +1,194 @@
+/* Force-directed граф родини з канону. */
+
+#nysh-graph-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.75rem 0;
+  border-bottom: 1px solid var(--md-default-fg-color--lightest);
+  margin-bottom: 0.75rem;
+}
+
+#nysh-graph-controls .control-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  align-items: center;
+}
+
+#nysh-graph-controls label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.9rem;
+}
+
+#nysh-year-slider {
+  flex: 1;
+  min-width: 240px;
+  max-width: 480px;
+}
+
+#nysh-reset-zoom {
+  padding: 0.25rem 0.75rem;
+  border: 1px solid var(--md-default-fg-color--lighter);
+  background: transparent;
+  color: var(--md-default-fg-color);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+#nysh-reset-zoom:hover {
+  background: var(--md-default-fg-color--lightest);
+}
+
+#nysh-family-graph {
+  display: block;
+  width: 100%;
+  height: 700px;
+  border: 1px solid var(--md-default-fg-color--lightest);
+  border-radius: 4px;
+  background: var(--md-default-bg-color);
+}
+
+#nysh-event-track {
+  margin-top: 0.5rem;
+  width: 100%;
+  min-height: 60px;
+}
+
+#nysh-graph-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.25rem;
+  padding: 0.5rem 0;
+  font-size: 0.85rem;
+  color: var(--md-default-fg-color--light);
+}
+
+#nysh-graph-legend .legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+#nysh-graph-legend .dot {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  vertical-align: middle;
+}
+#nysh-graph-legend .dot.disputed {
+  background: #36c;
+  border: 2px solid #e44;
+}
+#nysh-graph-legend .dot.candidate {
+  background: transparent;
+  border: 2px dashed #999;
+}
+#nysh-graph-legend .dot.speculative {
+  background: #888;
+  opacity: 0.45;
+  border: 1px solid #888;
+}
+
+#nysh-graph-legend .rel-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  vertical-align: middle;
+  margin-right: 0.25rem;
+}
+
+.nysh-tooltip {
+  position: absolute;
+  pointer-events: none;
+  background: var(--md-default-bg-color);
+  color: var(--md-default-fg-color);
+  border: 1px solid var(--md-default-fg-color--lighter);
+  border-radius: 4px;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.85rem;
+  line-height: 1.4;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  max-width: 320px;
+  z-index: 1000;
+}
+.nysh-tooltip code {
+  font-size: 0.8em;
+  opacity: 0.7;
+}
+
+#nysh-family-graph .nysh-node {
+  transition: stroke-width 0.15s ease, opacity 0.15s ease;
+}
+#nysh-family-graph .nysh-node:hover {
+  stroke-width: 3 !important;
+}
+
+/* Підсвітка родинного кола при наведенні на вузол. */
+#nysh-family-graph .nysh-node.dimmed {
+  opacity: 0.12;
+}
+#nysh-family-graph .nysh-link.dimmed {
+  stroke-opacity: 0.06 !important;
+}
+#nysh-family-graph .nysh-node.focus {
+  stroke: #000;
+  stroke-width: 3.5 !important;
+}
+#nysh-family-graph .nysh-node.rel-parent {
+  stroke: #48c;
+  stroke-width: 3 !important;
+}
+#nysh-family-graph .nysh-node.rel-child {
+  stroke: #0a8;
+  stroke-width: 3 !important;
+}
+#nysh-family-graph .nysh-node.rel-spouse {
+  stroke: #e88;
+  stroke-width: 3 !important;
+}
+#nysh-family-graph .nysh-node.rel-sibling {
+  stroke: #fa3;
+  stroke-width: 3 !important;
+}
+
+/* Tooltip: список родинного кола. */
+.nysh-tooltip .rel-list {
+  margin-top: 0.4rem;
+  padding-top: 0.4rem;
+  border-top: 1px solid var(--md-default-fg-color--lightest);
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+.nysh-tooltip .rel-list div {
+  margin: 0.15rem 0;
+}
+.nysh-tooltip .rel-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 0.4rem;
+  vertical-align: middle;
+}
+
+#nysh-event-track svg circle.event {
+  transition: r 0.15s ease;
+}
+#nysh-event-track svg circle.event:hover {
+  r: 7;
+}
+
+@media (max-width: 720px) {
+  #nysh-family-graph {
+    height: 500px;
+  }
+  #nysh-graph-controls .control-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}

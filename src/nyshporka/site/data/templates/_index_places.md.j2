@@ -1,0 +1,35 @@
+---
+title: Місця
+---
+
+# Місця ({{ places | length }})
+
+Усього **{{ places | length }}** місць у каноні. Перейти до групи або глянути [мапу](../places-map.md).
+
+<div class="nysh-jumpbar" markdown>
+{% for g in groups -%}
+[{{ g.label }}]({{ "#region-" ~ g.id }}){ .nysh-jumpchip } {% if not loop.last %}{% endif %}
+{%- endfor %}
+</div>
+
+{% for g in groups %}
+
+## {{ g.label }} ({{ g.members | length }}) { #region-{{ g.id }} }
+
+<div class="nysh-cards" markdown>
+{% for p in g.members %}
+<div class="nysh-card" markdown>
+
+**[{{ p.name }}]({{ p.id }}.md)**{% if p.has_coords %} 🗺️{% endif %}
+
+<span class="nysh-card__place">{{ p.admin | join(' → ') }}</span>
+{% if p.persons_count -%}
+<span class="nysh-card__dates">👥 {{ p.persons_count }} {{ 'особа' if p.persons_count == 1 else 'осіб' }}</span>
+{%- endif %}
+<span class="nysh-card__id">`{{ p.id }}`</span>
+
+</div>
+{% endfor %}
+</div>
+
+{% endfor %}

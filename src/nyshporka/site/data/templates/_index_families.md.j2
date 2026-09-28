@@ -1,0 +1,57 @@
+---
+title: Родини
+---
+
+# Родини ({{ families | length }})
+
+Усього в каноні — **{{ families | length }}** родин. Кожна — це задокументований шлюб (або гіпотетичний — пара плюс мінімум одна дитина). Перейти за літерою прізвища пара-пивота (зазвичай чоловіка), або розгорнути «За поколіннями» внизу.
+
+<div class="nysh-jumpbar" markdown>
+{% for lt in letters -%}
+[{{ lt }}](#fam-{{ lt | lower | replace('—', 'other') }}){ .nysh-jumpchip } {% if not loop.last %}{% endif %}
+{%- endfor %}
+</div>
+
+{% for lt in letters %}
+
+## {{ lt }} { #fam-{{ lt | lower | replace('—', 'other') }} }
+
+<div class="nysh-cards" markdown>
+{% for f in grouped[lt] %}
+<div class="nysh-card{% if f.is_hypothetical %} nysh-card--private{% endif %}" markdown>
+
+**[{{ f.husband_name or f.hypothetical_husband_name or "_невідомий_" }}{% if f.husband_year or f.wife_year %}{% endif %}](.{{ "/" }}{{ f.id }}.md)**{% if f.husband_year %} <span class="nysh-card__dates">{{ f.husband_year }}</span>{% endif %}
+
+<span class="nysh-card__place">
+× {{ f.wife_name or f.hypothetical_wife_name or "_невідома_" }}{% if f.wife_year %} ({{ f.wife_year }}){% endif %}
+</span>
+{% if f.children_count or f.hypothetical_children_count -%}
+<span class="nysh-card__dates">
+{%- if f.children_count %}👶 {{ f.children_count }}{% endif -%}
+{%- if f.hypothetical_children_count %} + {{ f.hypothetical_children_count }} гіп.{% endif -%}
+</span>
+{%- endif %}
+<span class="nysh-card__id">`{{ f.id }}`</span>
+
+</div>
+{% endfor %}
+</div>
+
+{% endfor %}
+
+---
+
+## За поколіннями
+
+Хронологічний розріз — за роком народження найстаршого з подружжя.
+
+{% for gen in by_generation %}
+<details class="nysh-generation" markdown>
+<summary><strong>{{ gen.title }}</strong> — {{ gen.members | length }} родин</summary>
+
+{% for f in gen.members -%}
+- **[{{ f.husband_name or f.hypothetical_husband_name or "_невідомий_" }}]({{ f.id }}.md)**{% if f.husband_year %} ({{ f.husband_year }}){% endif %} × {{ f.wife_name or f.hypothetical_wife_name or "_невідома_" }}{% if f.wife_year %} ({{ f.wife_year }}){% endif %}{% if f.children_count or f.hypothetical_children_count %} · 👶 {{ f.children_count }}{% if f.hypothetical_children_count %}+{{ f.hypothetical_children_count }}гіп{% endif %}{% endif %} · `{{ f.id }}`
+{% endfor %}
+
+</details>
+{% endfor %}

@@ -1,0 +1,126 @@
+/* Mobile overrides — централізований оверлей для екранів <768px.
+   Підключений останнім у mkdocs.yml `extra_css`, тому виграє у каскаді
+   без правок family-tree.css/family-graph.css/places-map.css. */
+
+/* ───── §1. Глобальні таблиці й типографіка ───── */
+@media (max-width: 768px) {
+  /* У нашій версії Material таблиці НЕ обгорнуті у .md-typeset__table —
+     робимо саму <table> scroll-контейнером з горизонтальним overflow. */
+  .md-typeset table:not([class]) {
+    display: block;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    max-width: 100%;
+    width: 100%;
+    font-size: 0.82rem;
+  }
+  .md-typeset table:not([class]) th,
+  .md-typeset table:not([class]) td {
+    padding: 0.4rem 0.5rem;
+    word-break: break-word;
+  }
+  /* Fallback на випадок майбутнього оновлення Material 9.6+, де
+     wrapper з'являється — також робимо його прокручуваним. */
+  .md-typeset__table {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    max-width: 100%;
+  }
+  /* Footnote-маркер — більший touch-target. */
+  .md-typeset .footnote-ref {
+    padding: 0 4px;
+  }
+  /* Картинки без max-width у Markdown — safety net. */
+  .md-typeset img {
+    max-width: 100%;
+    height: auto;
+  }
+}
+
+/* ───── §2. Family-tree pane (<600px) ───── */
+@media (max-width: 600px) {
+  /* Grid: дерево займає більший фіксований простір, details/map/timeline
+     стають auto-висотою з власним внутрішнім скролом. */
+  .nysh-tree-grid {
+    grid-template-rows: 55vh auto auto auto;
+  }
+  #nysh-details-pane,
+  #nysh-map-pane {
+    max-height: 320px;
+  }
+  .nysh-tree-map {
+    min-height: 200px;
+  }
+
+  /* Touch-friendly кнопки (Apple HIG: 44px min).
+     touch-action: manipulation прибирає 300ms tap delay на iOS Safari —
+     без нього хедер часто «з'їдав» тап на breadcrumb-кнопці. */
+  .nysh-tree-modeswitch button,
+  .action-focus,
+  .action-page,
+  button.bc-item,
+  button.bc-home {
+    min-height: 44px;
+    padding: 0.55rem 1rem;
+    font-size: 0.95rem;
+    touch-action: manipulation;
+  }
+  span.bc-item {
+    min-height: 32px;
+    padding: 0.4rem 0.6rem;
+  }
+  /* Хедер дерева на вузьких екранах — у дві колонки, breadcrumbs повна
+     ширина, modeswitch під ним. Інакше «Усе дерево» затисне і modeswitch
+     накриває tap-зону. */
+  .nysh-tree-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .nysh-tree-breadcrumbs {
+    width: 100%;
+    row-gap: 0.35rem;
+  }
+  .nysh-tree-modeswitch {
+    flex-wrap: wrap;
+  }
+
+  /* Details stats на 2 колонки замість 4 (інакше тісно). */
+  .details-stats {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  /* SVG: панорамування/zoom не конфліктує зі скролом сторінки. */
+  #nysh-tree-svg {
+    touch-action: none;
+  }
+
+  /* Tooltip не виходить за viewport. */
+  .nysh-tree-tooltip {
+    max-width: calc(100vw - 32px);
+  }
+}
+
+/* ───── §3. Family-graph + загальний tooltip ───── */
+@media (max-width: 768px) {
+  #nysh-family-graph {
+    touch-action: none;
+  }
+  .nysh-tooltip {
+    max-width: calc(100vw - 32px);
+  }
+}
+
+@media (max-width: 480px) {
+  #nysh-family-graph {
+    height: 420px;
+  }
+  #nysh-year-slider {
+    min-width: 0;
+    width: 100%;
+    max-width: 100%;
+  }
+  #nysh-reset-zoom {
+    min-height: 44px;
+    padding: 0.55rem 1rem;
+  }
+}

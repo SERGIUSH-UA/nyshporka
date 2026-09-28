@@ -151,6 +151,15 @@ def test_evidence_path_and_manifest_are_checked(family: Path) -> None:
     assert "manifest_hash" in _codes(C.check(family, hash_evidence=True), "ERROR")
 
 
+def test_a_probably_living_person_without_private_is_flagged(family: Path) -> None:
+    _write(family, "persons", _person("I9003", "Петро", "M", born="1990", parent_family="F9001"))
+    rep = C.check(family)
+    assert "maybe_living" in _codes(rep, "WARN")
+    _write(family, "persons", _person("I9003", "Петро", "M", born="1990",
+                                      parent_family="F9001", private=True))
+    assert "maybe_living" not in _codes(C.check(family), "WARN")
+
+
 def test_regions_are_required_only_when_coverage_uses_them(family: Path) -> None:
     from nyshporka.models import CoverageSpan
 
@@ -219,6 +228,44 @@ def test_index_normalises_and_fills_cited_by(family: Path) -> None:
     assert data[got.path]["cited_by"] == ["I9001.md", "I9003.md"]
     assert env.data["evidence"]["unreferenced"] == [other.path]
     assert (family / "data" / "derived" / "nyshporka.sqlite").is_file()
+
+
+def test_precommit_blocks_a_full_sheet_and_a_broken_staged_card(family: Path) -> None:
+    """🔴 Лише те, що комітиться: старий борг в інших картках коміт не блокує."""
+    import shutil
+    import subprocess
+
+    from nyshporka.canon import hook as H
+
+    if shutil.which("git") is None:
+        pytest.skip("git недоступний")
+
+    def git(*args: str) -> None:
+        subprocess.run(["git", *args], cwd=family, check=True, capture_output=True)
+
+    git("init", "-q")
+    git("config", "user.email", "t")
+    git("config", "user.name", "t")
+    # Старий борг: зламана картка, яку в цьому коміті ніхто не чіпає.
+    _write(family, "persons", _person("I9005", "Борг", parent_family="F9999"))
+    git("add", "-A")
+    git("commit", "-qm", "base")
+    assert H.problems(family) == [], "нічого не застейджено — нічого не блокує"
+
+    sheet = family / "data" / "source" / "citations" / "test" / "sheet.png"
+    sheet.parent.mkdir(parents=True)
+    _png(sheet, size=(2600, 2600), noise=True)
+    _write(family, "persons", _person("I9003", "Петро", "M", born="1830",
+                                      parent_family="F9404"))
+    git("add", "-A")
+    found = H.problems(family)
+    assert any("sheet.png" in p for p in found)
+    assert any("F9404" in p for p in found)
+    assert not any("F9999" in p for p in found), "борг незастейдженої картки не блокує"
+
+    target = H.install(family)
+    assert "nyshporka canon precommit" in target.read_text(encoding="utf-8")
+    assert H.install(family) == target, "свій хук перевстановлюється"
 
 
 def test_ops_on_a_space_without_canon(space: Path) -> None:

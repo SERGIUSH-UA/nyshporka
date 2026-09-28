@@ -1,0 +1,57 @@
+---
+title: Джерела
+---
+
+# Джерела ({{ sources | length }})
+
+Усього **{{ sources | length }}** джерел у каноні. Перейти за типом або глянути «Найцитованіші» внизу.
+
+<div class="nysh-jumpbar" markdown>
+{% for g in groups -%}
+[{{ g.label }}](#src-{{ g.id }}){ .nysh-jumpchip } {% if not loop.last %}{% endif %}
+{%- endfor %}
+</div>
+
+## 🏆 Найцитованіші (топ-10)
+
+<div class="nysh-cards" markdown>
+{% for s in top %}
+<div class="nysh-card" markdown>
+
+**[{{ s.title }}]({{ s.id }}.md)**
+
+<span class="nysh-card__place">{{ s.type_label }}{% if s.authority %} · {{ s.authority }}{% endif %}</span>
+<span class="nysh-card__dates">📚 {{ s.citations_count }} цитувань</span>
+<span class="nysh-card__id">`{{ s.id }}`</span>
+
+</div>
+{% endfor %}
+</div>
+
+---
+
+{% for g in groups %}
+
+## {{ g.label }} ({{ g.members | length }}) { #src-{{ g.id }} }
+
+<div class="nysh-cards" markdown>
+{% for s in g.members %}
+<div class="nysh-card{% if s.citations_count == 0 %} nysh-card--private{% endif %}" markdown>
+
+**[{{ s.title }}]({{ s.id }}.md)**{% if s.url %} 🔗{% endif %}
+
+{% if s.authority -%}
+<span class="nysh-card__place">{{ s.authority }}</span>
+{% endif -%}
+{% if s.citations_count -%}
+<span class="nysh-card__dates">📚 {{ s.citations_count }} {% if s.citations_count == 1 %}цитування{% else %}цитувань{% endif %}</span>
+{%- else -%}
+<span class="nysh-card__dates">— ще не цитоване</span>
+{%- endif %}
+<span class="nysh-card__id">`{{ s.id }}`</span>
+
+</div>
+{% endfor %}
+</div>
+
+{% endfor %}

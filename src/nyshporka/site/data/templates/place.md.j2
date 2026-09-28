@@ -1,0 +1,48 @@
+---
+title: {{ place.name }}
+---
+
+# {{ place.name }}
+
+## Інфобокс
+
+| | |
+|---|---|
+| **ID** | `{{ place.id }}` |
+{% if place.coords -%}
+| **Координати** | {{ "%.4f, %.4f" | format(place.coords[0], place.coords[1]) }} |
+{% endif -%}
+{% if place.osm_id -%}
+| **OSM** | [{{ place.osm_id }}](https://www.openstreetmap.org/relation/{{ place.osm_id }}) |
+{% endif -%}
+{% if place.admin -%}
+| **Адмін** | {{ place.admin | join(" → ") }} |
+{% endif %}
+
+{% if place.name_variants -%}
+## Варіанти назви
+
+{% for lang, name in place.name_variants.items() -%}
+- _{{ lang }}_: {{ name }}
+{% endfor %}
+{%- endif %}
+
+{% if related_persons -%}
+## Згадані особи
+
+{% for entry in related_persons -%}
+- [{{ entry.name }}](../persons/{{ entry.id }}.md) — {{ entry.context }}
+{% endfor %}
+{%- endif %}
+
+{% if place.period_notes -%}
+## Періодизація
+
+{{ place.period_notes }}
+{%- endif %}
+
+{% if place.notes -%}
+## Нотатки
+
+{{ place.notes }}
+{%- endif %}

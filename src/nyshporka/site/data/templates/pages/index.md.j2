@@ -1,0 +1,31 @@
+---
+title: {{ title }}
+---
+
+# {{ title }}
+
+{% if description %}{{ description }}
+
+{% endif %}
+| | |
+|---|---|
+| [Особи](persons/index.md) | **{{ counts.persons }}** |
+| [Родини](families/index.md) | **{{ counts.families }}** |
+| [Місця](places/index.md) | **{{ counts.places }}** |
+| [Джерела](sources/index.md) | **{{ counts.sources }}** |
+| Фактів із цитатою | **{{ counts.facts_cited }}** з {{ counts.facts }} |
+
+Дерево — [тут](family-tree.md), граф зв'язків — [тут](family-graph.md), мапа місць —
+[тут](places-map.md).
+
+{% if public %}
+!!! info "Відкрита версія"
+    Живих і тих, хто пов'язаний із живими, тут немає: ні сторінок, ні імен у дереві, ні сканів.
+{% else %}
+!!! warning "Приватна версія"
+    Живі особи показані з датами до десятиліття, без фото й нотаток. Для публікації збирайте
+    відкриту версію: `nysh site build --public`.
+{% endif %}
+
+Кожен факт веде до джерела, а джерело — до доказу-вирізки там, де вона є. Зібрано з канону
+роду Нишпоркою {{ built }}.

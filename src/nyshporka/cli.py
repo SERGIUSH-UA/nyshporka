@@ -2237,6 +2237,34 @@ def canon_new_id_cmd(
     console.print(env.data["id"])
 
 
+@canon_app.command("hook")
+def canon_hook_cmd(
+    install: bool = typer.Option(False, "--install", help="поставити git pre-commit у простір"),
+) -> None:
+    """Git pre-commit: аркуш понад 2 МБ у доказах і помилки в картках, що комітяться."""
+    from nyshporka.canon import hook as H
+    from nyshporka.core.workspace import workspace
+
+    if not install:
+        console.print("[muted]--install поставить хук у .git/hooks/pre-commit простору[/muted]")
+        return
+    try:
+        target = H.install(workspace().root)
+    except H.HookError as exc:
+        console.print(f"[warn]![/warn] {exc}")
+        raise typer.Exit(code=1) from exc
+    console.print(f"✅ встановлено: {target}")
+
+
+@canon_app.command("precommit", hidden=True)
+def canon_precommit_cmd() -> None:
+    """Те, що кличе git pre-commit (див. `nysh canon hook`)."""
+    from nyshporka.canon import hook as H
+    from nyshporka.core.workspace import workspace
+
+    raise typer.Exit(code=H.main(workspace().root))
+
+
 @canon_app.command("import")
 def canon_import_cmd(
     file: str = typer.Argument(..., help="файл .ged"),
@@ -2271,6 +2299,65 @@ def canon_import_cmd(
                   f"{d['families']} · місць {d['places']} · живих {d['private']}"
                   f" · файл → {d['copied_to']}")
     _notes(env)
+
+
+site_app = typer.Typer(help="Сайт роду з канону: зібрати теку зі статикою.",
+                       no_args_is_help=True)
+app.add_typer(site_app, name="site")
+
+
+@site_app.command("build")
+def site_build_cmd(
+    public: bool = typer.Option(False, "--public",
+                                help="відкрита версія: без живих, зі сторожем витоків"),
+    out: str = typer.Option("", "--out", "-o", help="тека збірки"),
+    force: bool = typer.Option(False, "--force", help="перезаписати чужу непорожню теку"),
+    no_html: bool = typer.Option(False, "--no-html", help="лише сирці MkDocs"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
+) -> None:
+    """Зібрати сайт роду: сторінки осіб, родин, місць, джерел, дерево, граф, мапа.
+
+    Приватна версія — для себе й родини (живі з датами до десятиліття).
+    Відкрита (`--public`) — для публікації: живих немає, а готовий HTML
+    перевіряє сторож; знайшов ім'я прихованого — HTML видаляється.
+    """
+    from nyshporka import ops as O
+
+    env = O.call("site.build", {"public": public, "out": out, "force": force,
+                                "html": not no_html})
+    if _answer(env, as_json):
+        return
+    d = env.data
+    c = d["counts"]
+    console.print(f"✅ {'відкрита' if d['public'] else 'приватна'} версія · осіб {c['persons']} · "
+                  f"родин {c['families']} · місць {c['places']} · джерел {c['sources']}"
+                  + (f" · приховано {d['hidden']}" if d["public"] else ""))
+    console.print(f"   {d['html'] or d['out']}")
+    _notes(env)
+
+
+@site_app.command("serve")
+def site_serve_cmd(
+    public: bool = typer.Option(False, "--public", help="відкрита версія"),
+    port: int = typer.Option(8765, "--port", help="порт на 127.0.0.1"),
+) -> None:
+    """Зібрати й показати сайт локально (лише 127.0.0.1)."""
+    import subprocess
+    import sys
+
+    from nyshporka import ops as O
+    from nyshporka.site.build import mkdocs_available
+
+    if not mkdocs_available():
+        console.print("[warn]![/warn] потрібен MkDocs: pip install nyshporka[site]")
+        raise typer.Exit(code=1)
+    env = O.call("site.build", {"public": public, "html": False})
+    if _answer(env, False):
+        return
+    cfg = Path(env.data["out"]) / "mkdocs.yml"
+    console.print(f"http://127.0.0.1:{port}/ — Ctrl+C, щоб зупинити")
+    subprocess.run([sys.executable, "-m", "mkdocs", "serve", "-f", str(cfg),
+                    "-a", f"127.0.0.1:{port}"], check=False)
 
 
 evidence_app = typer.Typer(help="Докази канону: кроп у постійний стор.",

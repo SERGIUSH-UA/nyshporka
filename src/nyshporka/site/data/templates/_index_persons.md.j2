@@ -1,0 +1,53 @@
+---
+title: Особи
+---
+
+# Особи ({{ persons | length }})
+
+Усього в каноні — **{{ persons | length }}** осіб. Перейти за літерою прізвища, або розгорнути «За поколіннями» внизу для хронологічного огляду.
+
+<div class="nysh-jumpbar" markdown>
+{% for lt in letters -%}
+[{{ lt }}](#{{ lt | lower | replace('—', 'other') }}){ .nysh-jumpchip } {% if not loop.last %}{% endif %}
+{%- endfor %}
+</div>
+
+{% for lt in letters %}
+
+## {{ lt }} { #{{ lt | lower | replace('—', 'other') }} }
+
+<div class="nysh-cards" markdown>
+{% for p in grouped[lt] %}
+<div class="nysh-card{% if p.private %} nysh-card--private{% endif %}" markdown>
+
+**[{{ p.primary_name }}]({{ p.id }}.md)**
+{% if p.birth or p.death -%}
+<span class="nysh-card__dates">{{ p.birth or "?" }}{% if p.death %} – †{{ p.death }}{% elif p.birth %} – ?{% endif %}</span>
+{% endif -%}
+{% if p.birth_place_name -%}
+<span class="nysh-card__place">📍 {{ p.birth_place_name }}</span>
+{% endif -%}
+<span class="nysh-card__id">`{{ p.id }}`</span>
+
+</div>
+{% endfor %}
+</div>
+
+{% endfor %}
+
+---
+
+## За поколіннями
+
+Хронологічний розріз тих самих осіб — за роком народження. Особи без дати народження зведені в окрему групу.
+
+{% for gen in by_generation %}
+<details class="nysh-generation" markdown>
+<summary><strong>{{ gen.title }}</strong> — {{ gen.members | length }} осіб</summary>
+
+{% for p in gen.members -%}
+- **[{{ p.primary_name }}]({{ p.id }}.md)** · {{ p.birth or "?" }}{% if p.death %} – †{{ p.death }}{% endif %}{% if p.birth_place_name %} · 📍 {{ p.birth_place_name }}{% endif %} · `{{ p.id }}`
+{% endfor %}
+
+</details>
+{% endfor %}

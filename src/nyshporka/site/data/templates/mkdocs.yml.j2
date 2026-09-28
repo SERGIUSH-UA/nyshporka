@@ -1,0 +1,96 @@
+# Згенеровано `nysh site build` — правки тут перетре наступна збірка.
+# Назву, пороги приватності, групи місць і власні сторінки задає
+# data/site/site.yml; власні сторінки лежать у data/site/overlay/.
+site_name: {{ title | tojson }}
+site_description: {{ description | tojson }}
+use_directory_urls: false
+docs_dir: docs
+site_dir: html
+
+theme:
+  name: material
+  language: {{ language }}
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.indexes
+    - navigation.top
+    - search.suggest
+    - toc.follow
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/brightness-7
+        name: Темна тема
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/brightness-4
+        name: Світла тема
+  font: false
+
+markdown_extensions:
+  - admonition
+  - footnotes
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.superfences
+
+plugins:
+  - search:
+      lang: {{ search_langs | tojson }}
+  - roamlinks
+
+hooks:
+  - {{ hooks_path | tojson }}
+
+extra_css:
+  - https://unpkg.com/leaflet@1.9.4/dist/leaflet.css
+  - assets/css/theme.css
+  - assets/css/paper-texture.css
+  - assets/css/places-map.css
+  - assets/css/family-graph.css
+  - assets/css/family-tree.css
+  - assets/css/mobile.css
+{% for css in extra_css %}
+  - {{ css | tojson }}
+{% endfor %}
+
+extra_javascript:
+  - https://unpkg.com/leaflet@1.9.4/dist/leaflet.js
+  - assets/js/places-map.js
+  - https://d3js.org/d3.v7.min.js
+  - assets/js/family-graph.js
+  - https://unpkg.com/@dagrejs/graphlib@2.2.4/dist/graphlib.min.js
+  - https://unpkg.com/@dagrejs/dagre@1.1.4/dist/dagre.min.js
+  - path: assets/js/tree/index.js
+    type: module
+
+nav:
+  - Головна: index.md
+{% for item in nav_before %}
+  - {{ item.title | tojson }}: {{ item.path | tojson }}
+{% endfor %}
+  - Особи:
+      - persons/index.md
+  - Родини:
+      - families/index.md
+  - Дерево: family-tree.md
+  - Граф: family-graph.md
+  - Місця:
+      - places/index.md
+      - Мапа: places-map.md
+  - Джерела:
+      - sources/index.md
+{% for item in nav_after %}
+  - {{ item.title | tojson }}: {{ item.path | tojson }}
+{% endfor %}
