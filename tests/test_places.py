@@ -172,6 +172,20 @@ def test_locate_without_modern_place_is_ambiguous_not_guessed(catalog):
     assert len(loc["candidates"]) == 3
 
 
+def test_locate_name_follows_the_same_oblast_and_raion_policy(catalog):
+    """Точка за голою назвою (підказка з допису, а не картка газетира)."""
+    loc = Q.locate_name("Маньківка", "Вінницька область", "Бершадський")
+    assert loc["qid"] == "Q3" and loc["how"] == "unique"
+    # область без району — два кандидати, і це сказано, а не приховано
+    assert Q.locate_name("Маньківка", "Вінницька")["how"] == "ambiguous"
+    # без області — точки немає зовсім
+    bare = Q.locate_name("Маньківка")
+    assert bare["how"] == "ambiguous" and bare["lat"] is None
+    # та сама назва в іншій області — нічого, а не чужа точка
+    assert Q.locate_name("Капітанівка", "Черкаська") is None
+    assert Q.locate_name("Капітанівка", "Кіровоградська")["qid"] == "Q6"
+
+
 def test_place_card_carries_location_and_places_coverage(catalog):
     ans = Q.place_card("lypo_001.xml")
     card = ans.rows[0]

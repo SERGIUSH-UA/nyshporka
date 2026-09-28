@@ -31,7 +31,7 @@ from nyshporka.catalog.store import (
 
 __all__ = ["Answer", "CatalogMissing", "Coverage", "church_card", "churches_near",
            "confusers", "find_churches", "find_places", "link_churches_to_places",
-           "locate", "locate_all", "place_card", "places_for_fond", "places_near",
+           "locate", "locate_all", "locate_name", "place_card", "places_for_fond", "places_near",
            "siblings", "uezd_known"]
 
 
@@ -883,6 +883,23 @@ def locate(card: str) -> dict[str, Any] | None:
     out = _locate_row(place, idx) if place else None
     _LOCATE_CACHE[card] = (stamp, out)
     return out
+
+
+def locate_name(name: str, oblast: str = "", raion: str = "") -> dict[str, Any] | None:
+    """Точка для села за назвою — та сама політика, що в `locate()` для картки.
+
+    Область — жорсткий фільтр (однойменних сіл по країні десятки: «Новоселиця» —
+    29), район обирає серед однойменних в області. Без області точка лише при
+    єдиному кандидаті. `None` — збігу немає або пака немає.
+    """
+    try:
+        idx = _modern_index()
+    except CatalogMissing:
+        return None
+    parts = [f"{raion.split()[0]} р-н" if raion.strip() else "",
+             f"{oblast.split()[0]} обл" if oblast.strip() else ""]
+    return _locate_row({"village_uk": name,
+                        "modern_place": ", ".join(p for p in parts if p)}, idx)
 
 
 _PAREN_RE = re.compile(r"\(([^)]*)\)")
