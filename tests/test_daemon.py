@@ -868,3 +868,31 @@ def test_the_page_token_never_leaves_under_another_name(client: TestClient) -> N
     res = client.get("/", headers={"Host": "evil.example"})
     assert res.status_code == 403
     assert TOKEN not in res.text
+
+
+
+def test_a_short_op_runs_off_the_event_loop(client: TestClient,
+                                            monkeypatch: pytest.MonkeyPatch) -> None:
+    """🔴 Аудит 29.09.2026: коротка операція тримала весь демон.
+
+    `call_op` асинхронний, а тіло операції (мережа в `update.check`, обхід
+    диска, читання паків) кликалось у ньому напряму: поки воно йшло, жоден
+    інший запит не отримував відповіді.
+    """
+    import asyncio
+
+    real = O.call
+    where: list[bool] = []
+
+    def spy(name, payload=None):
+        try:
+            asyncio.get_running_loop()
+            where.append(True)
+        except RuntimeError:
+            where.append(False)
+        return real(name, payload)
+
+    monkeypatch.setattr(O, "call", spy)
+    r = client.post("/api/op/workspace.info", json={})
+    assert r.status_code == 200
+    assert where == [False], "операція крутилась просто в циклі подій"

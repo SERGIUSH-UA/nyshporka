@@ -251,3 +251,32 @@ async def test_other_pages_are_another_reading_not_the_first_one(bus, fake_read)
 
     retry = await W._start_read(bus, None, {**base, "pages": "1-10"})
     assert retry.id == a.id, "ретрай того самого запиту мав дати те саме завдання"
+
+
+@pytest.mark.asyncio
+async def test_the_plan_is_counted_off_the_event_loop(bus, tmp_path, monkeypatch):
+    """🔴 Аудит 29.09.2026: план читання заморожував увесь демон.
+
+    `R.plan` запускає підпроцес на кожен пакет маніфесту (імпорт torch — до
+    120 с) і розкладає PDF у кадри. У циклі подій це означало, що жоден інший
+    запит — перелік робіт, скасування — не отримував відповіді.
+    """
+    from nyshporka.htr import run as R
+
+    where: list[bool] = []
+
+    def fake_plan(case_dir, **kw):
+        try:
+            asyncio.get_running_loop()
+            where.append(True)
+        except RuntimeError:
+            where.append(False)
+        return _FakePlan(tmp_path)
+
+    async def no_run(*a, **kw):
+        return None
+
+    monkeypatch.setattr(R, "plan", fake_plan)
+    monkeypatch.setattr(W, "_run_read", no_run)
+    await W._start_read(bus, None, {"case_dir": "x", "case_key": "904-24-4"})
+    assert where == [False], "план рахувався просто в циклі подій"

@@ -377,36 +377,49 @@ async def _start_read(bus: JobBus, ws: Workspace,
     Так «чим будемо читати і скільки це кадрів» відомо до старту, а не через
     годину — і завдання, приречене впасти на відсутній моделі, у чергу взагалі
     не потрапляє.
+
+    🔴 Сам план рахується в потоці, а не в циклі подій (аудит 29.09.2026).
+    `R.plan` запускає підпроцес на кожен пакет маніфесту (імпорт torch — до
+    120 с кожен) і розкладає PDF у кадри; у циклі подій це заморожувало ВЕСЬ
+    демон: жоден запит, навіть перелік робіт чи скасування, не отримував
+    відповіді, і вкладка виглядала мертвою. Постановка в чергу лишається в
+    циклі — лок черги прив'язаний до нього.
     """
     from nyshporka.htr import run as R
-
-    plan = R.plan(payload.get("case_dir") or "",
-                  out_dir=payload.get("out_dir") or "",
-                  script=str(payload.get("script") or ""),
-                  second_voice=bool(payload.get("second_voice", True)),
-                  # 🔴 `model` форма надсилала й раніше, але сюди він не доходив:
-                  # поле на екрані було, а прогін ішов бойовою моделлю
-                  model=str(payload.get("model") or ""),
-                  also=[str(v) for v in payload.get("also") or [] if str(v).strip()])
-    # 🔴 Шифра береться З опису, коли її не передали. Прогін без шифри стає в
-    # реєстрі «нічиїм»: він є, текст є, а до якої справи належить — невідомо,
-    # і зшивати це потім доводиться правкою JSON руками. З консолі шифру ніхто
-    # не вводить (форма читання питає лише теку), тож без цього кожен запуск
-    # кнопкою давав нічию — при тому, що опис лежить у тій самій теці.
-    #
-    # ⚠ Через спільний `case_key_for`, а не через власну гілку. Доти командний
-    # рядок був розумніший за застосунок: після опису він пробував ще резолвер
-    # за шляхом, а браузерний шлях — ні. Тобто найчастіший вхід мав найгіршу
-    # прив'язку саме там, де його найважче помітити.
-    case_key = str(payload.get("case_key") or "") or R.case_key_for(plan.case_dir)[0]
 
     limit = max(0, int(payload.get("limit") or 0))
     pages = str(payload.get("pages") or "")
     workers = max(1, min(8, int(payload.get("workers") or 1)))
-    cmds, notes = plan.shards(
-        workers, device=str(payload.get("device") or ""),
-        case_key=case_key, limit=limit, pages=pages,
-        seg_height=max(0, int(payload.get("seg_height") or 0)))
+
+    def _prepare() -> tuple[Any, str, list[list[str]], list[str]]:
+        plan = R.plan(payload.get("case_dir") or "",
+                      out_dir=payload.get("out_dir") or "",
+                      script=str(payload.get("script") or ""),
+                      second_voice=bool(payload.get("second_voice", True)),
+                      # 🔴 `model` форма надсилала й раніше, але сюди він не
+                      # доходив: поле на екрані було, а прогін ішов бойовою моделлю
+                      model=str(payload.get("model") or ""),
+                      also=[str(v) for v in payload.get("also") or [] if str(v).strip()])
+        # 🔴 Шифра береться З опису, коли її не передали. Прогін без шифри стає
+        # в реєстрі «нічиїм»: він є, текст є, а до якої справи належить —
+        # невідомо, і зшивати це потім доводиться правкою JSON руками. З консолі
+        # шифру ніхто не вводить (форма читання питає лише теку), тож без цього
+        # кожен запуск кнопкою давав нічию — при тому, що опис лежить у тій
+        # самій теці.
+        #
+        # ⚠ Через спільний `case_key_for`, а не через власну гілку. Доти
+        # командний рядок був розумніший за застосунок: після опису він пробував
+        # ще резолвер за шляхом, а браузерний шлях — ні. Тобто найчастіший вхід
+        # мав найгіршу прив'язку саме там, де його найважче помітити.
+        case_key = (str(payload.get("case_key") or "")
+                    or R.case_key_for(plan.case_dir)[0])
+        cmds, notes = plan.shards(
+            workers, device=str(payload.get("device") or ""),
+            case_key=case_key, limit=limit, pages=pages,
+            seg_height=max(0, int(payload.get("seg_height") or 0)))
+        return plan, case_key, cmds, notes
+
+    plan, case_key, cmds, notes = await asyncio.to_thread(_prepare)
 
     title = f"{plan.case_dir.name}: {plan.frames} кадрів, {plan.model.name}"
     if len(plan.voices) > 1:
