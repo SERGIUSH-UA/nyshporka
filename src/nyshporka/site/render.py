@@ -78,8 +78,10 @@ def build(
     hidden: set[str] | frozenset[str] = frozenset(),
     drop_source_types: set[str] | frozenset[str] = frozenset(),
     source_filter: Callable[[Source], bool] | None = None,
+    public: bool | None = None,
+    gallery: str = "refs",
 ) -> RenderReport:
-    """`hidden` вмикає відкриту збірку (report/public.py): цих осіб на сайті немає
+    """`public` (або непорожній `hidden`) вмикає відкриту збірку (report/public.py): цих осіб на сайті немає
     зовсім — ні сторінки, ні рядка в індексах, ні імені у вузлі дерева, ні сканів.
     Джерела, які цитують лише вони, і типи з `drop_source_types` (усні свідчення)
     не публікуються. Посилання на прихованих у ЧУЖИХ сторінках прибирає вже
@@ -87,7 +89,7 @@ def build(
     cfg = cfg or SiteConfig()
     canonical = project_root / "data" / "canonical"
     hidden = frozenset(hidden)
-    public = bool(hidden)
+    public = bool(hidden) if public is None else public
     env = environment(templates_dirs or [])
     citing: dict[str, set[str]] = {}
 
@@ -121,6 +123,11 @@ def build(
             f for f in families
             if not _family_members(f) or _family_members(f) - hidden
         ]
+        # 🔴 Родина, де прихований хоч один член, лишається (опублікований член
+        # на неї посилається), але без подій: точна дата шлюбу прихованої
+        # людини — те саме, що її рік народження.
+        families = [f.model_copy(update={"facts": []}) if _family_members(f) & hidden else f
+                    for f in families]
         citing = _citing_ids(persons_raw, families)
         kept: list[Source] = []
         for s in sources:
@@ -135,6 +142,13 @@ def build(
                 kept.append(s)
         sources = kept
     published_sources = {s.id for s in sources}
+    if public:
+        # Місце, яке згадують лише приховані (адреса живої людини), не
+        # публікується зовсім.
+        used_places = {f.place_id for p in shown for f in p.facts if f.place_id}
+        used_places |= {f.place_id for fam in families for f in fam.facts if f.place_id}
+        places = [pl for pl in places if pl.id in used_places]
+        place_names = {pl.id: pl.name for pl in places}
 
     # Очистити автогенеровані каталоги.
     for sub in ("persons", "families", "places", "sources"):
@@ -145,11 +159,21 @@ def build(
 
     # Доказ-вирізки документів (data/source/citations) → map page_id -> [docs]
     # + копія файлів у docs/assets/citations/, щоб сайт їх віддавав.
-    allowed = (
-        {p.id for p in shown} | {f.id for f in families} | {pl.id for pl in places}
-        | published_sources
-    ) if public else None
-    citation_docs = _load_citation_docs(project_root, docs_dir, allowed=allowed)
+    if public:
+        # 🔴 Відкрита версія бере скани лише з ЖИВИХ посилань карток і лише ті,
+        # на які не посилається жодна прихована картка. `cited_by` маніфесту
+        # тут не важить: його дописують, але ніщо не прибирає, і застарілий
+        # запис уже виносив назовні метрику живої людини.
+        published = ({p.id for p in shown} | {f.id for f in families
+                                              if not _family_members(f) & hidden}
+                     | {pl.id for pl in places} | published_sources)
+        citation_docs = _public_citation_docs(project_root, docs_dir, published)
+    elif gallery == "refs":
+        everyone = ({p.id for p in persons_raw} | {f.id for f in families}
+                    | {pl.id for pl in places} | published_sources)
+        citation_docs = _public_citation_docs(project_root, docs_dir, everyone)
+    else:
+        citation_docs = _load_citation_docs(project_root, docs_dir)
 
     # Persons.
     persons = [redact_person(p) for p in shown]
@@ -461,6 +485,9 @@ def build(
         if public:
             # Кожна точка мапи несе ПОІМЕННИЙ список осіб — прихованих звідти геть.
             gj = json.loads(geojson_src.read_text(encoding="utf-8"))
+            kept_places = {pl.id for pl in places}
+            gj["features"] = [f for f in gj.get("features", [])
+                              if (f.get("properties") or {}).get("id") in kept_places]
             for feat in gj.get("features", []):
                 props = feat.get("properties") or {}
                 if isinstance(props.get("persons"), list):
@@ -508,7 +535,14 @@ def build(
     coverage_src = project_root / "data" / "derived" / "coverage.json"
     if coverage_src.exists():
         assets_dir.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(coverage_src, assets_dir / "coverage.json")
+        if public:
+            cov = json.loads(coverage_src.read_text(encoding="utf-8"))
+            cov["sources"] = [s for s in cov.get("sources", [])
+                              if s.get("id") in published_sources]
+            (assets_dir / "coverage.json").write_text(json.dumps(cov, ensure_ascii=False),
+                                                     encoding="utf-8")
+        else:
+            shutil.copy2(coverage_src, assets_dir / "coverage.json")
 
     return RenderReport(
         persons=len(persons),
@@ -695,6 +729,47 @@ def _load_citation_docs(
             seen.add(e["url"])
             uniq.append(e)
         by_page[pid] = sorted(uniq, key=lambda e: e["filename"])
+    return by_page
+
+
+def _public_citation_docs(project_root: Path, docs_dir: Path,
+                          published: set[str]) -> dict[str, list[dict[str, Any]]]:
+    """Галерея відкритої версії: скан → сторінки, чиї КАРТКИ на нього посилаються.
+
+    Скан публікується, лише якщо всі картки, що на нього посилаються,
+    опубліковані. Одна прихована серед них — і скан лишається вдома: на ньому
+    та сама людина, яку сторінка ховає.
+    """
+    from nyshporka.canon.check import evidence_refs
+
+    canonical = project_root / "data" / "canonical"
+    owners: dict[str, set[str]] = {}
+    for card in canonical.glob("*/*.md"):
+        for ref in evidence_refs(card.read_text(encoding="utf-8")):
+            owners.setdefault(ref, set()).add(card.stem)
+    citations_root = project_root / "data" / "source" / "citations"
+    by_page: dict[str, list[dict[str, Any]]] = {}
+    for ref, who in sorted(owners.items()):
+        if not who <= published:
+            continue
+        src = project_root / ref
+        ext = src.suffix.lower()
+        if not src.is_file() or not (ext == ".pdf" or ext in _DOC_IMG_EXT):
+            continue
+        try:
+            rel = src.relative_to(citations_root)
+        except ValueError:
+            continue          # першоджерело з data/raw на сайт не копіюється
+        dest = docs_dir / "assets" / "citations" / rel
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dest)
+        entry = {"url": "../assets/citations/" + rel.as_posix(),
+                 "caption": "Документ", "is_pdf": ext == ".pdf",
+                 "is_img": ext in _DOC_IMG_EXT, "filename": src.name}
+        for page in who:
+            by_page.setdefault(page, []).append(entry)
+    for page, lst in by_page.items():
+        by_page[page] = sorted(lst, key=lambda e: e["filename"])
     return by_page
 
 
@@ -889,78 +964,50 @@ def _fact_context(fact_type: str) -> str:
     }.get(fact_type, fact_type)
 
 
-def _redact_graph(raw: dict[str, Any], hidden: set[str] | frozenset[str] = frozenset()) -> dict[str, Any]:
-    """Підготувати graph.json до публікації в docs/: приватні особи редаговані.
+#: Що лишається у вузлі прихованої чи приватної особи: лише структура дерева.
+#: Білий перелік, а не чорний: нове поле вузла, додане колись у reindex, не
+#: витече само — його треба буде дозволити тут явно.
+_NODE_KEEP = {"id", "parent_ids", "child_ids", "spouse_ids", "parent_family_id",
+              "spouse_family_ids", "generation", "branch_id", "era_index", "is_root",
+              "private", "ancestor_count", "descendant_count"}
+_PRIVATE_NAME = "(приватна особа)"
 
-    `hidden` (відкрита збірка) редагує так само ще й тих, хто не позначений
-    `private`, але на відкритий сайт не йде."""
-    nodes = []
-    for n in raw.get("nodes", []):
-        if n.get("private") or n.get("id") in hidden:
-            nodes.append(
-                {
-                    **n,
-                    "name": "(приватна особа)",
-                    "birth": n.get("birth_decade"),
-                    "death": n.get("death_decade"),
-                    "fact_count": 0,
-                }
-            )
-        else:
-            nodes.append(n)
-    events = raw.get("events", [])
-    if hidden:
-        events = [e for e in events if not (isinstance(e, dict) and e.get("person_id") in hidden)]
-    return {
-        "nodes": nodes,
-        "links": raw.get("links", []),
-        "events": events,
-    }
+
+def _anon(n: dict[str, Any], hidden: set[str] | frozenset[str]) -> dict[str, Any]:
+    """Приватний у приватній версії — з десятиліттям; прихований — без жодного року."""
+    out = {k: v for k, v in n.items() if k in _NODE_KEEP}
+    keep_decade = n.get("id") not in hidden
+    out.update({"name": _PRIVATE_NAME, "initials": "?", "photo_url": None, "has_photo": False,
+                "photo_stale_risk": False, "fact_count": 0,
+                "birth": n.get("birth_decade") if keep_decade else None,
+                "death": n.get("death_decade") if keep_decade else None})
+    return out
+
+
+def _redact_graph(raw: dict[str, Any], hidden: set[str] | frozenset[str] = frozenset()) -> dict[str, Any]:
+    """graph.json для сайту: приватні й приховані — вузли без імені й років."""
+    private = {n["id"] for n in raw.get("nodes", []) if n.get("private")} | set(hidden)
+    nodes = [_anon(n, hidden) if n.get("id") in private else n for n in raw.get("nodes", [])]
+    events = [e for e in raw.get("events", [])
+              if not (isinstance(e, dict) and e.get("person_id") in private)]
+    return {"nodes": nodes, "links": raw.get("links", []), "events": events}
 
 
 def _redact_tree_graph(raw: dict[str, Any], hidden: set[str] | frozenset[str] = frozenset()) -> dict[str, Any]:
-    """Public-варіант tree.json.
-
-    Приватним особам обнуляємо: name → '(приватна особа)', initials → '?',
-    photo_url → None, has_photo → False, точні роки → десятиліття,
-    fact_count → 0. Топологію (parent_ids/child_ids/spouse_ids) лишаємо —
-    приватна особа просто фігурує без імені, інакше граф розривається.
-
-    Події (events) приватних осіб не лишаються в публічному timeline.
-    """
-    private_ids = {n["id"] for n in raw.get("nodes", []) if n.get("private")} | set(hidden)
-
-    nodes = []
-    for n in raw.get("nodes", []):
-        if n["id"] in private_ids:
-            nodes.append(
-                {
-                    **n,
-                    "name": "(приватна особа)",
-                    "initials": "?",
-                    "photo_url": None,
-                    "has_photo": False,
-                    "photo_stale_risk": False,
-                    "birth": n.get("birth_decade"),
-                    "death": n.get("death_decade"),
-                    "fact_count": 0,
-                }
-            )
-        else:
-            nodes.append(n)
-
-    events = [
-        e for e in raw.get("events", []) if e.get("person_id") not in private_ids
-    ]
-
+    """tree.json для сайту: приватні й приховані — вузли без імені й років,
+    родини з ними — без року шлюбу, їхні події — геть. Топологія лишається,
+    інакше дерево розривається."""
+    private = {n["id"] for n in raw.get("nodes", []) if n.get("private")} | set(hidden)
+    nodes = [_anon(n, hidden) if n["id"] in private else n for n in raw.get("nodes", [])]
+    families = []
+    for f in raw.get("families", []):
+        members = {f.get(k) for k in ("husband_id", "wife_id", "hypothetical_husband_id",
+                                      "hypothetical_wife_id")}
+        members |= set(f.get("children_ids") or []) | set(f.get("hypothetical_children_ids") or [])
+        families.append({**f, "marriage_year": None} if members & private else f)
+    events = [e for e in raw.get("events", []) if e.get("person_id") not in private]
     meta = dict(raw.get("meta") or {})
     meta["redacted"] = True
-
-    return {
-        "meta": meta,
-        "generations": raw.get("generations", {"min": 0, "max": 0}),
-        "nodes": nodes,
-        "links": raw.get("links", []),
-        "families": raw.get("families", []),
-        "events": events,
-    }
+    return {"meta": meta, "generations": raw.get("generations", {"min": 0, "max": 0}),
+            "nodes": nodes, "links": raw.get("links", []), "families": families,
+            "events": events}

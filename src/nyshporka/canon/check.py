@@ -476,7 +476,12 @@ def _evidence(c: Canon, r: Report, hash_evidence: bool) -> None:
     except (OSError, json.JSONDecodeError) as exc:
         r.add("ERROR", "manifest", _rel(root, man), f"маніфест не читається: {exc}")
         return
+    if isinstance(records, list):
+        records = {str(r.get("secured_to") or i): r for i, r in enumerate(records)
+                   if isinstance(r, dict)}
     for key, rec in records.items():
+        if not isinstance(rec, dict):
+            continue
         target = rec.get("secured_to") or key
         f = root / target
         if not f.is_file():

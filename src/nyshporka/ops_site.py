@@ -35,6 +35,11 @@ def site_build(a: SiteBuildArgs) -> Envelope:
     from nyshporka.site.config import ConfigError
 
     root = workspace().root
+    if a.public and not a.html:
+        # Сирці відкритої версії без HTML сторож не перевіряє — і саме їх
+        # потім збирають і викладають іншим інструментом.
+        return fail("відкрита версія збирається лише з HTML: без нього сторож не має "
+                    "що перевірити")
     try:
         rep = B.build(root, public=a.public, out=Path(a.out).expanduser() if a.out else None,
                       force=a.force, html=a.html)
@@ -52,6 +57,9 @@ def site_build(a: SiteBuildArgs) -> Envelope:
     if rep.ambiguous:
         env.warn("namesakes", f"тезки прихованих і опублікованих ({len(rep.ambiguous)}): "
                               f"їхні імена пробою не стали — перегляньте сторінки оком")
+    if rep.skipped:
+        env.warn("overlay_skipped", f"у відкриту версію не пішли файли з overlay, крім сторінок "
+                                    f".md ({len(rep.skipped)}): {', '.join(rep.skipped[:5])}")
     if not a.public:
         env.warn("private_build", "приватна версія: живі тут є (з датами до десятиліття). "
                                   "Для публікації — nysh site build --public")

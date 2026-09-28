@@ -6,7 +6,8 @@
    діти раніше за батьків), тож на ERROR збірка зупиняється.
 2. **індекс** — дерево, граф і мапа читають `data/derived/*.json`.
 3. **сирці** в `<тека>/docs`: ресурси пакета → сторінки-оглядини → сторінки
-   канону → власні сторінки з `data/site/overlay/` (вони перемагають).
+   канону → власні сторінки з `data/site/overlay/` (вони перемагають; у
+   відкриту версію — лише `.md`).
 4. **відкрита версія**: чистка markdown і подій дерева від прихованих.
 5. **`mkdocs build`** у `<тека>/html`.
 6. **відкрита версія**: `guard_site` по готовому HTML. Знайшов ім'я чи ID
@@ -51,6 +52,7 @@ class SiteReport:
     withheld_sources: int = 0
     dropped_lines: int = 0
     overlaid: list[str] = field(default_factory=list)
+    skipped: list[str] = field(default_factory=list)
     ambiguous: list[str] = field(default_factory=list)
     leaks: list[str] = field(default_factory=list)
     html: Path | None = None
@@ -60,7 +62,7 @@ class SiteReport:
         return {"out": str(self.out), "public": self.public, "counts": self.counts,
                 "hidden": self.hidden, "withheld_sources": self.withheld_sources,
                 "dropped_lines": self.dropped_lines, "overlaid": self.overlaid,
-                "ambiguous": self.ambiguous, "leaks": self.leaks,
+                "ambiguous": self.ambiguous, "leaks": self.leaks, "skipped": self.skipped,
                 "html": str(self.html) if self.html else None,
                 "canon_warnings": self.warnings}
 
@@ -87,6 +89,9 @@ def _prepare_out(out: Path, force: bool) -> Path:
         shutil.rmtree(docs)
     docs.mkdir(parents=True)
     (out / MARK).write_text("збірка nysh site build — вміст перезаписується\n", encoding="utf-8")
+    # Приватна збірка несе повне дерево живих; у git-просторі `git add .` не має
+    # її підхопити.
+    (out / ".gitignore").write_text("*\n", encoding="utf-8")
     return docs
 
 
@@ -100,7 +105,6 @@ def _years(persons: list[Any]) -> tuple[int, int]:
 def build(root: Path, *, public: bool = False, out: Path | None = None,
           force: bool = False, html: bool = True) -> SiteReport:
     from nyshporka.canon import check as C
-    from nyshporka.canon import evidence as E
     from nyshporka.storage.reindex import reindex
 
     cfg = CFG.load(root)
@@ -114,7 +118,6 @@ def build(root: Path, *, public: bool = False, out: Path | None = None,
         raise SiteError(f"у каноні {checked.count('ERROR')} помилок — сайт брехав би. "
                         f"Спершу nysh canon check")
     reindex(root)
-    E.refresh_cited_by(root, checked.canon.files)
 
     out = out or default_out(root, public)
     docs = _prepare_out(out, force)
@@ -145,7 +148,8 @@ def build(root: Path, *, public: bool = False, out: Path | None = None,
     rendered = render_build(
         root, docs_dir=docs, cfg=cfg, templates_dirs=templates_dirs,
         hidden=hidden, drop_source_types=set(cfg.drop_source_types) if public else set(),
-        source_filter=(lambda s: title_guard.hits(s.title)) if public else None)
+        source_filter=(lambda s: title_guard.hits(s.title)) if public else None,
+        public=public)
     rep.hidden = len(hidden)
     rep.withheld_sources = len(rendered.withheld_sources)
 
@@ -178,6 +182,11 @@ def build(root: Path, *, public: bool = False, out: Path | None = None,
         for f in sorted(overlay.rglob("*")):
             if f.is_file():
                 rel = f.relative_to(overlay)
+                # 🔴 У відкриту версію — лише сторінки: текст у них чиститься
+                # від прихованих, а PDF, фото чи таблицю перевірити нічим.
+                if public and f.suffix.lower() != ".md":
+                    rep.skipped.append(rel.as_posix())
+                    continue
                 (docs / rel).parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(f, docs / rel)
                 rep.overlaid.append(rel.as_posix())

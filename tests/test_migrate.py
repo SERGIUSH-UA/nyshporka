@@ -52,8 +52,19 @@ def test_a_new_workspace_is_stamped(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(W, "remember", lambda ws: None)
     root = wizard.create(tmp_path / "новий", name="н")
     assert M.pending(root, __version__) == []
-    rec = json.loads((root / M.RECORD).read_text(encoding="utf-8"))
-    assert rec["history"][0]["how"] == "new-workspace"
+    assert M.record(root)["history"][0]["how"] == "new-workspace"
+
+
+def test_the_record_lives_on_the_machine_not_in_the_workspace(space: Path, tmp_path: Path) -> None:
+    """🔴 Копія простору на новій машині мусить нагадати знову: кроки про конфіг
+    агента, скіли й пам'ять — про машину, а не про теку."""
+    O.call("migrate.done", {})
+    assert not list(space.rglob("*migrat*.json")), "запис не має жити в теці простору"
+    import shutil
+
+    copy = tmp_path / "копія"
+    shutil.copytree(space, copy)
+    assert [m.version for m in M.pending(copy, "0.19.0")] == ["0.19"]
 
 
 def test_scan_finds_a_stale_thesis_but_not_a_quoted_one(tmp_path: Path) -> None:
@@ -62,10 +73,30 @@ def test_scan_finds_a_stale_thesis_but_not_a_quoted_one(tmp_path: Path) -> None:
     note.write_text(
         "Канону в пакеті немає, родовід веде людина.\n"
         "Не повторювати тезу «канону в пакеті немає».\n"
-        "Агент кличе nysh_search_run.\n", encoding="utf-8")
+        "Агент кличе nysh_search_run.\n"
+        "Запусти `nysh mcp serve` на старті.\n"
+        "Змінна NYSH_NO_CATALOG=1 вимикає каталог.\n"
+        "Без --status аркуш лягає partial за замовчуванням, а не full.\n"
+        "Канону немає в пакеті.\n", encoding="utf-8")
     hits = M.scan([tmp_path / "memory"], M.load_all())
-    assert [(h.line, h.stale) for h in hits] == [(1, "no-canon"), (3, "mcp")]
+    assert [(h.line, h.stale) for h in hits] == [
+        (1, "no-canon"), (3, "mcp"), (4, "mcp"), (7, "no-canon")], (
+        "цитата в «» — не теза; команда в бектиках — теза; змінна оточення й нова "
+        "правда про partial — не тези")
     assert all(h.now for h in hits)
+
+
+def test_default_scan_reads_only_this_projects_memory(space: Path) -> None:
+    import re
+
+    projects = Path.home() / ".claude" / "projects"
+    mine = projects / re.sub(r"[^A-Za-z0-9]", "-", str(space.resolve())) / "memory"
+    other = projects / "E--Projects-Other" / "memory"
+    for d in (mine, other):
+        d.mkdir(parents=True)
+        (d / "n.md").write_text("кличе nysh mcp serve\n", encoding="utf-8")
+    paths = M.default_scan_paths(space)
+    assert mine in paths and other not in paths
 
 
 def test_status_runs_live_checks(space: Path) -> None:

@@ -139,8 +139,13 @@ def _is_note_context(line: bytes) -> bool:
 
 # ── імпорт ───────────────────────────────────────────────────────────────────
 def canon_is_empty(canonical: Path) -> bool:
-    return not any((canonical / k).glob("*.md")
-                   for k in ("persons", "families") if (canonical / k).is_dir())
+    """Жодної картки — ні особи, ні родини, ні місця, ні джерела.
+
+    🔴 Усі чотири теки: імпорт нумерує місця й джерела з одиниці, і ручна
+    картка місця з координатами інакше мовчки ставала першим місцем дерева.
+    """
+    return not any(any((canonical / k).glob("*.md"))
+                   for k in ("persons", "families", "places", "sources"))
 
 
 def import_file(root: Path, ged_path: Path, opts: Options | None = None, *,

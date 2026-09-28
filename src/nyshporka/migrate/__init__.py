@@ -14,10 +14,12 @@
   виконаним», а «зараз зелене»);
 * **що вирішує людина.**
 
-Пройдену міграцію простір запам'ятовує (`config/agent-migrations.json`); поки
-не позначено, `workspace.info` і дашборд нагадують `nysh migrate`. Новий
-простір позначається пройденим до поточної версії одразу: переходити йому нема
-з чого.
+Пройдену міграцію запам'ятовує МАШИНА для кожного простору (стан користувача,
+поле `agent_migrations`), а не сам простір: частина кроків — про цю машину
+(конфіг агента, скіли, пам'ять), і копія простору на новій машині мусить
+нагадати про них знову. Поки не позначено, нагадують `workspace.info`,
+дашборд і кожна команда `nysh`. Новий простір позначається пройденим одразу:
+переходити йому нема з чого.
 """
 from __future__ import annotations
 
@@ -32,7 +34,10 @@ from typing import Any
 import frontmatter
 
 DATA = Path(__file__).resolve().parent / "data"
-RECORD = Path("config") / "agent-migrations.json"
+#: Поле стану користувача: {шлях простору: {"done": [...], "history": [...]}}.
+STATE_KEY = "agent_migrations"
+#: Вимикач нагадування в CLI — для тестів і скриптів, що розбирають вивід.
+ENV_NO_NAG = "NYSHPORKA_NO_MIGRATION_NAG"
 #: Файли, довші за це, на застарілі тези не скануються: пам'ять і нотатки —
 #: кілобайти, а мегабайти — це дані, не знання агента.
 MAX_SCAN_BYTES = 2 * 1024 * 1024
@@ -97,17 +102,20 @@ def get(version: str) -> Migration | None:
 
 
 # ── запис про пройдене ───────────────────────────────────────────────────────
+def _key(root: Path) -> str:
+    return str(root.resolve())
+
+
 def record(root: Path) -> dict[str, Any]:
-    path = root / RECORD
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {"done": [], "history": []}
-    return data if isinstance(data, dict) else {"done": [], "history": []}
+    from nyshporka.core.workspace import state_all
+
+    all_ = state_all().get(STATE_KEY)
+    got = all_.get(_key(root)) if isinstance(all_, dict) else None
+    return got if isinstance(got, dict) else {"done": [], "history": []}
 
 
 def mark_done(root: Path, versions: Iterable[str], *, how: str = "agent") -> list[str]:
-    from nyshporka.utils.atomic import write_json
+    from nyshporka.core.workspace import state_all, state_set
 
     data = record(root)
     done = {version_key(v) for v in data.get("done") or []}
@@ -121,7 +129,10 @@ def mark_done(root: Path, versions: Iterable[str], *, how: str = "agent") -> lis
             done.add(version_key(v))
             added.append(v)
     if added:
-        write_json(root / RECORD, data)
+        all_ = state_all().get(STATE_KEY)
+        all_ = dict(all_) if isinstance(all_, dict) else {}
+        all_[_key(root)] = data
+        state_set(**{STATE_KEY: all_})
     return added
 
 
@@ -221,9 +232,16 @@ def _canon_present(root: Path) -> CheckResult:
 
 
 def _hook_installed(root: Path) -> CheckResult:
+    import subprocess
+
+    from nyshporka.canon.hook import hooks_dir
+
     if not (root / ".git").exists():
         return CheckResult("n/a", "простір не є git-репозиторієм")
-    hook = root / ".git" / "hooks" / "pre-commit"
+    try:
+        hook = hooks_dir(root) / "pre-commit"
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return CheckResult("n/a", "git недоступний")
     try:
         text = hook.read_text(encoding="utf-8", errors="replace")
     except OSError:
@@ -277,14 +295,19 @@ class Hit:
 
 
 def default_scan_paths(root: Path) -> list[Path]:
-    """Де живе знання агента: пам'ять, CLAUDE.md/AGENTS.md, правлені руками скіли.
+    """Де живе знання агента: пам'ять цього проєкту, CLAUDE.md/AGENTS.md,
+    правлені руками скіли.
 
     Скіли, покладені пакетом і не правлені, не скануються: їх оновлює
     `nysh skills install`, і застаріле в них лікується оновленням, а не рукою.
     """
     home = Path.home() / ".claude"
     out: list[Path] = []
-    out += sorted(home.glob("projects/*/memory"))
+    # Пам'ять лише ЦЬОГО проєкту: теки Claude Code названі шляхом проєкту, де
+    # кожен не-латинський знак став «-». Чужі проєкти — не наша справа.
+    for base in dict.fromkeys([Path.cwd(), root]):
+        slug = re.sub(r"[^A-Za-z0-9]", "-", str(base.resolve()))
+        out.append(home / "projects" / slug / "memory")
     for base in dict.fromkeys([Path.cwd(), root]):
         out += [base / "CLAUDE.md", base / "AGENTS.md", base / ".claude" / "CLAUDE.md"]
     out.append(home / "CLAUDE.md")
@@ -317,7 +340,9 @@ def _files(paths: Iterable[Path]) -> Iterable[Path]:
 
 
 #: Пари лапок, у яких теза ЦИТУЄТЬСЯ, а не стверджується.
-_QUOTES = (("«", "»"), ("“", "”"), ('"', '"'))
+#: ASCII-лапки й бектики — ні: непарна `"` глушила б решту рядка, а в
+#: бектиках у нотатках стоїть команда, яку агент ВИКОНУЄ, тобто теза.
+_QUOTES = (("«", "»"), ("“", "”"))
 
 
 def _quoted(line: str, pos: int) -> bool:

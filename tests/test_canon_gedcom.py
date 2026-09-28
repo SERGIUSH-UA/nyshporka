@@ -126,3 +126,18 @@ def test_trust_tree_and_dry_run_via_the_op(space: Path, ged: Path) -> None:
     assert env.ok and env.data["written"]
     ivan = read_person(space / "data" / "canonical" / "persons" / f"{person_id(1)}.md")
     assert ivan.facts[0].status == "confirmed"
+
+
+def test_import_refuses_even_when_only_a_place_card_exists(space: Path, ged: Path) -> None:
+    """🔴 Імпорт нумерує місця з одиниці: ручна картка місця інакше ставала першим
+    місцем дерева й губила координати."""
+    from nyshporka.ids import place_id
+    from nyshporka.models import Place
+    from nyshporka.storage.files import write_entity
+
+    card = space / "data" / "canonical" / "places" / f"{place_id(1)}.md"
+    card.parent.mkdir(parents=True)
+    write_entity(card, Place(id=place_id(1), name="Ручне", coords=(48.0, 28.0)))
+    with pytest.raises(G.GedcomError, match="вже є"):
+        G.import_file(space, ged)
+    assert "Ручне" in card.read_text(encoding="utf-8")

@@ -13,6 +13,7 @@
 """
 from __future__ import annotations
 
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -42,9 +43,16 @@ def _git(root: Path, *args: str) -> bytes:
     return subprocess.run(["git", *args], cwd=root, capture_output=True, check=True).stdout
 
 
-def staged(root: Path, prefix: str) -> list[str]:
-    raw = _git(root, "diff", "--cached", "--name-only", "--diff-filter=AMR", "-z", "--", prefix)
+def staged(root: Path, prefix: str, kinds: str = "AMR") -> list[str]:
+    raw = _git(root, "diff", "--cached", "--name-only", f"--diff-filter={kinds}", "-z", "--",
+               prefix)
     return [n for n in raw.decode("utf-8").split("\0") if n]
+
+
+def hooks_dir(root: Path) -> Path:
+    """Куди git ставить хуки (враховує `core.hooksPath` і worktree)."""
+    hooks = Path(_git(root, "rev-parse", "--git-path", "hooks").decode().strip())
+    return hooks if hooks.is_absolute() else root / hooks
 
 
 def problems(root: Path) -> list[str]:
@@ -57,24 +65,27 @@ def problems(root: Path) -> list[str]:
             out.append(f"{size / 1048576:5.1f} МБ  {name} — це аркуш, а не вирізка рядка "
                        f"(nysh evidence add кладе сірий JPEG до 2 МБ)")
     cards = {Path(n).stem for n in staged(root, CANONICAL) if n.endswith(".md")}
-    if cards:
+    # Видалена картка сама помилки не дає — її дають ті, хто на неї посилається.
+    gone = {Path(n).stem for n in staged(root, CANONICAL, "D") if n.endswith(".md")}
+    if cards or gone:
         from nyshporka.canon.check import check
 
         rep = check(root)
         for issue in rep.issues:
+            if issue.severity != "ERROR":
+                continue
             owner = Path(issue.where).stem if "/" in issue.where else issue.where
-            if issue.severity == "ERROR" and owner in cards:
+            if owner in cards or any(re.search(rf"(?<!\w){re.escape(g)}(?!\w)", issue.text)
+                                     for g in gone):
                 out.append(f"{issue.where}: {issue.text}")
     return out
 
 
 def install(root: Path) -> Path:
     try:
-        hooks = Path(_git(root, "rev-parse", "--git-path", "hooks").decode().strip())
+        target = hooks_dir(root) / "pre-commit"
     except (subprocess.CalledProcessError, FileNotFoundError) as exc:
         raise HookError("простір не є git-репозиторієм — хуку нема куди стати") from exc
-    hook = (root / hooks) if not hooks.is_absolute() else hooks
-    target = hook / "pre-commit"
     if target.exists():
         text = target.read_text(encoding="utf-8", errors="replace")
         if not any(m in text for m in MARKERS):

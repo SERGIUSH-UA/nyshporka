@@ -92,24 +92,38 @@ def _sync_skills() -> None:
         # з того, що помічник «не знає» щойно оголошеного скіла.
         err_console.print("[muted]щоб помічник побачив нове, почніть із ним "
                           "нову сесію[/muted]")
-    if got:
-        # Оновлені скіли — ознака оновленого пакета; міграція агента — те, чого
-        # скіли самі не переносять (пам'ять, нотатки, конфіг агента).
-        try:
-            from nyshporka import __version__
-            from nyshporka import migrate as M
-            from nyshporka.core.workspace import workspace
-
-            if M.pending(workspace().root, __version__):
-                err_console.print("[muted]є міграція агента на цю версію: "
-                                  "nysh migrate[/muted]")
-        except Exception:
-            pass
 
 
 #: Команди, перед якими скіли не чіпаються: їхній процес живе довго або
 #: спілкується протоколом, і побічна робота на старті тут недоречна.
 _NO_SKILL_SYNC_FOR = frozenset({"mcp", "serve"})
+
+#: Де нагадування про міграцію агента зайве: сама міграція, створення простору.
+_NO_MIGRATION_NAG_FOR = frozenset({"migrate", "init", "mcp", "serve", "version"})
+
+
+def _nag_migration(sub: str) -> None:
+    """Один рядок у stderr, доки простір на цій машині не пройшов міграцію агента.
+
+    🔴 У КОЖНІЙ команді, а не лише в `workspace.info`: агент, що одразу кличе
+    `nysh search`, інакше не дізнався б, що половина його звичок застаріла.
+    """
+    import os
+
+    from nyshporka import migrate as M
+
+    if sub in _NO_MIGRATION_NAG_FOR or os.environ.get(M.ENV_NO_NAG):
+        return
+    try:
+        from nyshporka import __version__
+        from nyshporka.core.workspace import workspace
+
+        todo = M.pending(workspace().root, __version__)
+    except Exception:
+        return
+    if todo:
+        err_console.print(f"[warn]⚠ Нишпорку оновлено до {__version__}: частина порад, які "
+                          f"знає помічник, застаріла — nysh migrate[/warn]")
 
 
 @app.callback()
@@ -135,17 +149,18 @@ def _global_options(
     побудована ціла гілка поведінки агента («знайдено здогадом — перепитай
     людину»). Змінну читає драбина простору, і лише вона.
     """
-    if (ctx.invoked_subcommand or "") not in _NO_SKILL_SYNC_FOR:
+    sub = ctx.invoked_subcommand or ""
+    if sub not in _NO_SKILL_SYNC_FOR:
         _sync_skills()
-    if not workspace:
-        return
-    from nyshporka.core.workspace import WorkspaceError, use
+    if workspace:
+        from nyshporka.core.workspace import WorkspaceError, use
 
-    try:
-        use(workspace)
-    except WorkspaceError as exc:
-        console.print(f"[err]{exc}[/err]")
-        raise typer.Exit(code=2) from None
+        try:
+            use(workspace)
+        except WorkspaceError as exc:
+            console.print(f"[err]{exc}[/err]")
+            raise typer.Exit(code=2) from None
+    _nag_migration(sub)
 
 
 def _need(section: str) -> None:
@@ -2427,23 +2442,26 @@ def site_serve_cmd(
     public: bool = typer.Option(False, "--public", help="відкрита версія"),
     port: int = typer.Option(8765, "--port", help="порт на 127.0.0.1"),
 ) -> None:
-    """Зібрати й показати сайт локально (лише 127.0.0.1)."""
-    import subprocess
-    import sys
+    """Зібрати й показати сайт у браузері на цій машині (лише 127.0.0.1).
+
+    Показує рівно те, що зібрано й перевірено, — ту саму теку, яку викладають.
+    """
+    import functools
+    import http.server
 
     from nyshporka import ops as O
-    from nyshporka.site.build import mkdocs_available
 
-    if not mkdocs_available():
-        console.print("[warn]![/warn] потрібен MkDocs: pip install nyshporka[site]")
-        raise typer.Exit(code=1)
-    env = O.call("site.build", {"public": public, "html": False})
+    env = O.call("site.build", {"public": public})
     if _answer(env, False):
         return
-    cfg = Path(env.data["out"]) / "mkdocs.yml"
+    html = env.data["html"]
+    handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=html)
     console.print(f"http://127.0.0.1:{port}/ — Ctrl+C, щоб зупинити")
-    subprocess.run([sys.executable, "-m", "mkdocs", "serve", "-f", str(cfg),
-                    "-a", f"127.0.0.1:{port}"], check=False)
+    import contextlib
+
+    with (http.server.ThreadingHTTPServer(("127.0.0.1", port), handler) as srv,
+          contextlib.suppress(KeyboardInterrupt)):
+        srv.serve_forever()
 
 
 evidence_app = typer.Typer(help="Докази канону: кроп у постійний стор.",

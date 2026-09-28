@@ -18,6 +18,8 @@
 """
 from __future__ import annotations
 
+import contextlib
+import html
 import json
 import re
 from pathlib import Path
@@ -33,20 +35,37 @@ LIVING = "_приватна особа_"
 BOUNDARY = r"(?<![0-9A-Za-zА-Яа-яЇїІіЄєҐґЀ-ӿ])"
 
 
+_APOSTROPHES = str.maketrans({"\u2019": "'", "\u02bc": "'", "`": "'", "\u00b4": "'",
+                              "\u2018": "'"})
+_MARKUP = re.compile(r"<[^>]+>|\*\*|__|(?<!\w)[*_](?!\s)|(?<!\s)[*_](?!\w)|\[|\]\([^)]*\)")
+
+
+def normalize(text: str) -> str:
+    """Текст для пошуку імен: без HTML і markdown-розмітки, з одним апострофом.
+
+    🪤 Ім'я, яке людина бачить однаково, у файлі буває різним: `**Оксана**
+    Тестова`, `[Оксана](…) Тестова`, `Мар&#39;яна`, «Мар’яна». Порівнювати треба
+    те, що побачить читач, а не байти.
+    """
+    text = html.unescape(text).translate(_APOSTROPHES)
+    text = _MARKUP.sub("", text)
+    return re.sub(r"\s+", " ", text)
+
+
 class Scrubber:
     """Чи згадує текст когось із прихованих — за дослівними формами імен."""
 
     def __init__(self, probes: dict[str, list[str]] | None = None) -> None:
-        parts = [re.escape(text) for values in (probes or {}).values()
+        parts = [re.escape(normalize(text)) for values in (probes or {}).values()
                  for text in values if text]
         self._re = (re.compile(BOUNDARY + "(?:" + "|".join(parts) + ")", re.IGNORECASE)
                     if parts else None)
 
     def hits(self, text: str | None) -> bool:
-        return bool(text and self._re and self._re.search(text))
+        return self.first(text) is not None
 
     def first(self, text: str | None) -> str | None:
-        m = self._re.search(text) if (text and self._re) else None
+        m = self._re.search(normalize(text)) if (text and self._re) else None
         return m.group(0) if m else None
 
 
@@ -69,7 +88,7 @@ class NameGuard:
         hit = self._literal.first(text)
         if hit:
             return hit
-        m = self._stems.search(text) if self._stems else None
+        m = self._stems.search(normalize(text)) if self._stems else None
         return m.group(0) if m else None
 
     def hits(self, text: str | None) -> bool:
@@ -92,9 +111,14 @@ def stem_probes(persons: list[Person], hidden: set[str]) -> tuple[re.Pattern[str
         for n in p.names:
             if not (n.given and n.surname) or len(n.given.strip()) < 3 or len(n.surname.strip()) < 4:
                 continue
-            part = re.escape(_stem(n.given)) + r"\w*\s+(?:\w+\s+)?" + re.escape(_stem(n.surname)) + r"\w*"
-            one = re.compile(BOUNDARY + part, re.IGNORECASE)
-            if any(one.search(f) for f in shown_forms):
+            given = re.escape(_stem(normalize(n.given)))
+            surname = re.escape(_stem(normalize(n.surname)))
+            # Лише «Ім'я [по батькові] Прізвище». Зворотний порядок основами
+            # ловив «(родина) <Прізвище>-их» із заголовка + ім'я опублікованої особи;
+            # його покриває дослівна форма в `literal_probes`.
+            part = given + r"\w*\s+(?:\w+\s+)?" + surname + r"\w*"
+            if any(re.compile(BOUNDARY + part, re.IGNORECASE).search(normalize(f))
+                   for f in shown_forms):
                 ambiguous.append(f"{n.given} {n.surname}")
                 continue
             parts.append(part)
@@ -117,6 +141,10 @@ def literal_probes(persons: list[Person], hidden: set[str]) -> tuple[dict[str, l
         if p.id not in hidden:
             continue
         forms = [n.form for n in p.names if n.form and " " in n.form.strip()]
+        # «Прізвище Ім'я» — лише коли ім'я справжнє (з великої): «жена», «сын»
+        # у картці — опис, а не ім'я, і проба з ним ловила б чужі рядки.
+        forms += [f"{n.surname} {n.given}" for n in p.names
+                  if n.given and n.surname and n.given[:1].isupper()]
         ambiguous.update(f for f in forms if f.strip() in shown)
         probes[p.id] = list(dict.fromkeys(f for f in forms if f.strip() not in shown))
     return probes, sorted(ambiguous)
@@ -165,7 +193,12 @@ def hidden_ids(persons: list[Person], cfg: SiteConfig,
             if died >= cfg.died_after:
                 out.add(p.id)
             continue
-        if _year(p, "burial") is not None:
+        buried = _year(p, "burial")
+        if buried is not None:
+            # Поховання без запису смерті — та сама смерть: недавнє означає
+            # живих найближчих, як і `died_after`.
+            if buried >= cfg.died_after:
+                out.add(p.id)
             continue
         b = born(p)
         if b is not None:
@@ -288,6 +321,11 @@ def guard_site(site: Path, hidden: set[str], withheld: set[str],
         if f.suffix not in (".html", ".json", ".geojson", ".xml"):
             continue
         text = f.read_text(encoding="utf-8", errors="ignore")
+        if f.suffix in (".json", ".geojson"):
+            # 🪤 Пошуковий індекс MkDocs пише кирилицю як `\uXXXX`: без
+            # розкодування сторож не бачив у ньому жодного імені.
+            with contextlib.suppress(ValueError):
+                text = json.dumps(json.loads(text), ensure_ascii=False)
         rel = f.relative_to(site).as_posix()
         name = guard.first(text)
         if name:

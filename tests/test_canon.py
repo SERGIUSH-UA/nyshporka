@@ -268,6 +268,36 @@ def test_precommit_blocks_a_full_sheet_and_a_broken_staged_card(family: Path) ->
     assert H.install(family) == target, "свій хук перевстановлюється"
 
 
+def test_a_manifest_written_as_a_list_is_checked_not_crashed(family: Path) -> None:
+    E.manifest_path(family).parent.mkdir(parents=True, exist_ok=True)
+    E.manifest_path(family).write_text(json.dumps([
+        {"secured_to": "data/source/citations/test/gone.jpg", "cited_by": []}]),
+        encoding="utf-8")
+    assert "manifest_missing" in _codes(C.check(family), "ERROR")
+
+
+def test_precommit_blocks_deleting_a_card_others_point_to(family: Path) -> None:
+    import shutil
+    import subprocess
+
+    from nyshporka.canon import hook as H
+
+    if shutil.which("git") is None:
+        pytest.skip("git недоступний")
+
+    def git(*args: str) -> None:
+        subprocess.run(["git", *args], cwd=family, check=True, capture_output=True)
+
+    git("init", "-q")
+    git("config", "user.email", "t")
+    git("config", "user.name", "t")
+    git("add", "-A")
+    git("commit", "-qm", "base")
+    git("rm", "-q", "data/canonical/families/F9001.md")
+    found = H.problems(family)
+    assert any("F9001" in p for p in found), "видалення родини, на яку посилаються, пройшло"
+
+
 def test_ops_on_a_space_without_canon(space: Path) -> None:
     env = O.call("canon.check", {})
     assert env.ok and env.data["loaded"] == {}
