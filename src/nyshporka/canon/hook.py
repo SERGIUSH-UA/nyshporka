@@ -31,7 +31,8 @@ root="$(git rev-parse --show-toplevel)"
 py="$root/.venv/Scripts/python.exe"
 [ -x "$py" ] || py="$root/.venv/bin/python"
 [ -x "$py" ] || py=python
-exec "$py" -m nyshporka canon precommit
+# Нагадування про міграцію агента в коміті — шум, а не допомога.
+NYSHPORKA_NO_MIGRATION_NAG=1 exec "$py" -m nyshporka canon precommit
 """
 
 
