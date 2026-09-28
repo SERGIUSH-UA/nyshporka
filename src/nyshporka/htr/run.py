@@ -509,17 +509,21 @@ def plan(case_dir: str | Path, *, out_dir: str | Path = "", script: str = "",
         raise ReadError(f"середовище рушіїв не готове ({why}) — `nysh htr install`")
 
     ws = workspace()
+    # 🔴 Не `case.name`: у двох фондах є `spr-145`, і друга писала б поверх першої.
+    from nyshporka.htr.runname import run_name
+
+    stem = run_name(case, case_key_for(case)[0])
     if model:
         weights, scr = resolve_model(model)
         voice = None
         trust, why = "fixed", f"письмо моделі {weights.name}"
-        default_out = ws.htr_reports / f"{case.name}-{model_tag(weights)}"
+        default_out = ws.htr_reports / f"{stem}-{model_tag(weights)}"
     else:
         guess = guess_script_full(case, script)
         scr = guess.script if guess.script in ("latin", "cyrillic") else "cyrillic"
         weights, voice = pick_model(scr, second_voice=second_voice)
         trust, why = guess.trust, guess.why
-        default_out = ws.htr_reports / case.name
+        default_out = ws.htr_reports / stem
     extra = resolve_voices(also, main=weights, have=[voice] if voice else [])
     runner = Path(__file__).resolve().parent / "runner.py"
     out = Path(out_dir) if out_dir else default_out
@@ -537,7 +541,7 @@ def plan(case_dir: str | Path, *, out_dir: str | Path = "", script: str = "",
         # туди своє.
         from nyshporka.htr import seg as SEG
 
-        found = SEG.inspect(case, base_out=ws.htr_reports / case.name,
+        found = SEG.inspect(case, base_out=ws.htr_reports / stem,
                             derived=ws.derived)
         seg_why, seg_ready = found.why, found.usable
         if found.usable and found.path is not None:

@@ -323,7 +323,9 @@ def build(case_dir: str | Path, *, backend: str = "ssh", target: str = "",
     # результат мусить лягти за іменем оригіналу. Тег до нього дописує саме
     # складач — інакше викликач, що задав `out_dir` руками, його обійшов би, і
     # перечитування затерло б тексти першого прогону.
-    stem = out_name or case.name
+    from nyshporka.htr.runname import run_name
+
+    stem = out_name or run_name(case, key)
     base_out = workspace().htr_reports / stem
     out = Path(out_dir) if out_dir else (
         base_out.with_name(f"{stem}-{model_tag(weights)}") if reread else base_out)

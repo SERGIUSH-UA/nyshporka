@@ -254,9 +254,20 @@ class CaseRef:
     frames_expected: int = 0
 
 
-def case_name(frames_dir: Path) -> str:
-    """Ім'я справи. Кадри в `pages/` — справа зветься іменем батьківської теки."""
-    return frames_dir.parent.name if frames_dir.name == "pages" else frames_dir.name
+def case_name(frames_dir: Path, case_key: str = "") -> str:
+    """Ім'я прогону справи (тека результату). Кадри в `pages/` — батьківська тека.
+
+    🔴 Не просто ім'я теки: `CDIAK/2/145` і `CDIAK/224/145` обидві лежать у
+    `spr-145`, і друга писала б поверх першої. Правило — `htr.runname.run_name`.
+    """
+    from nyshporka.htr.runname import run_name
+
+    return run_name(frames_dir, case_key)
+
+
+def _shrink_dir(frames_dir: Path, case_key: str = "") -> Path:
+    """Куди стискати кадри справи — за ТИМ САМИМ іменем, що й результат."""
+    return F.shrink_dir_for(frames_dir, name=case_name(frames_dir, case_key))
 
 
 def _index() -> Any:
@@ -355,14 +366,14 @@ def already_read(out_dir: Path, *, model: str, frames: int) -> str:
     return ""
 
 
-def _run_ids(plan: Any, frames_dir: Path) -> set[str]:
+def _run_ids(plan: Any, frames_dir: Path, case_key: str = "") -> set[str]:
     """Ідентифікатори, під якими міг лягти цей самий захід.
 
     Їх два, бо на машину їде або сама тека кадрів, або її стиснута копія, — а
     котра саме, стає відомо лише після звірки кадрів.
     """
     return {plan.run_id,
-            ST.run_id_for(F.shrink_dir_for(frames_dir).resolve(),
+            ST.run_id_for(_shrink_dir(frames_dir, case_key or plan.case_key).resolve(),
                           model=plan.model.name, script=plan.script,
                           backend=plan.backend)}
 
@@ -489,7 +500,7 @@ def _prepare(res: GoResult, case: str, say: EventFn, owner: contextlib.ExitStack
             return PL.build(
                 frames_dir, backend=backend, case_key=key,
                 second_voice=second_voice, also=list(with_voices), model=model,
-                out_name=case_name(ref.frames_dir),
+                out_name=case_name(ref.frames_dir, key),
                 max_price_usd_h=max_price, **kw)
         except PL.PlanError as exc:
             raise GoRefused(str(exc)) from None
@@ -588,8 +599,8 @@ def _prepare(res: GoResult, case: str, say: EventFn, owner: contextlib.ExitStack
     notes: list[str] = []
     pack = ref.frames_dir
     if rep.heavy:
-        dst = F.shrink_dir_for(ref.frames_dir)
-        why = (f"кадри завеликі (медіана {rep.median_mb:.1f} МБ)"
+        dst = _shrink_dir(ref.frames_dir, key)
+        why =(f"кадри завеликі (медіана {rep.median_mb:.1f} МБ)"
                if rep.median_mb > F.SHRINK_MEDIAN_MB else
                f"{len(rep.alien)} кадрів у форматі, якого читач на машині не "
                f"бере (напр. {rep.alien[0]})")
@@ -746,7 +757,8 @@ def _go(res: GoResult, cases: tuple[str, ...], say: EventFn,
             return PL.build(
                 Path(live.case_dir), backend=backend, script=script,
                 case_key=case_key or live.case_key, second_voice=second_voice,
-                also=list(with_voices), model=model, out_name=case_name(origin),
+                also=list(with_voices), model=model,
+                out_name=case_name(origin, case_key or live.case_key),
                 source_dir=live.source_dir or "", max_price_usd_h=max_price)
         except PL.PlanError as exc:
             raise GoRefused(str(exc)) from None

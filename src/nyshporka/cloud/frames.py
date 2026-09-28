@@ -209,18 +209,21 @@ class ShrinkResult:
             if self.src_bytes and self.dst_bytes else 0.0
 
 
-def shrink_dir_for(case_dir: Path | str) -> Path:
+def shrink_dir_for(case_dir: Path | str, name: str = "") -> Path:
     """Куди стискати кадри: `<похідні>/cloud/frames/<ім'я справи>`.
 
     🔴 Ім'я теки = ім'я справи, бо план бере з нього ім'я прогону й теку
     результату. Стиснуте в `frames-<щось>` дало б прогін із чужим іменем, і
     текст ліг би не поруч зі справою, а в теку, якої ніхто не шукатиме.
+
+    `name` — ім'я прогону з `htr.runname.run_name`: без нього дві справи з
+    однаковою текою (`spr-145` у двох фондах) стискались би в одну.
     """
     from nyshporka.core.workspace import workspace
 
     d = Path(case_dir)
-    name = d.parent.name if d.name == "pages" else d.name
-    return workspace().derived / "cloud" / "frames" / name
+    stem = name or (d.parent.name if d.name == "pages" else d.name)
+    return workspace().derived / "cloud" / "frames" / stem
 
 
 #: Паспорт стиснутої копії: чия вона.
