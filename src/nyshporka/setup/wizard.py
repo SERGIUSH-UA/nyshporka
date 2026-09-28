@@ -125,7 +125,8 @@ def create(root: str | Path | None = None, *, name: str = "",
     for sub in ("data/raw", "data/derived", "data/pages", "reports", "config"):
         (target / sub).mkdir(parents=True, exist_ok=True)
     marker = target / MARKER
-    if not marker.is_file():
+    fresh = not marker.is_file()
+    if fresh:
         # 🔴 Пресет записується іменем, а не розгорнутим переліком: тоді секція,
         # додана в майбутній версії, приїде до цього простору сама. Застиглий
         # перелік лишив би людину без неї, і дізнатись про це було б нізвідки.
@@ -154,5 +155,11 @@ def create(root: str | Path | None = None, *, name: str = "",
     # ⚠ Саме тут, а не в `use()`: її кличе кожен запуск із `--workspace` і кожен
     # тест. Писати стан там означало б, що прапорець «на один запуск» мовчки
     # стає липким і перевизначає всі наступні команди.
+    if fresh:
+        # Новий простір не має чого мігрувати: усе, що знає пакет, для нього
+        # чинне з першого дня.
+        from nyshporka import __version__, migrate
+
+        migrate.stamp_new(target, __version__)
     remember(use(target))
     return target

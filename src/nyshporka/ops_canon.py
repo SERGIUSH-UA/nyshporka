@@ -5,10 +5,9 @@
 навколо правки: що зламали, що перебудувати, який ID вільний, куди покласти
 кроп так, щоб цитата не провисла.
 
-🔴 Усі — `agent=False` з тієї самої причини, що й `ops_records`: перелік
-MCP-tool'ів має стелю (`mcp.server.TOOL_LIMIT`). Агентові, який правит канон,
-MCP і не потрібен — у нього вже є доступ до файлів, а операції доступні як
-`nysh canon …` і `nysh op canon.check --args '{…}'`.
+🔴 Усі — `agent=False` з тієї самої причини, що й `ops_records`: стартовий перелік агента (`nysh ops --agent`)
+тримається коротким. Операції доступні як `nysh canon …` і
+`nysh op canon.check --args '{…}'`.
 """
 from __future__ import annotations
 

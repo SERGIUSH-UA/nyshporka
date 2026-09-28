@@ -82,8 +82,8 @@ def _sync_skills() -> None:
             continue
         tail = f", лишено правлених руками: {kept}" if kept else ""
         # 🔴 У stderr. Ця замітка йде ПЕРЕД виводом будь-якої команди, а stdout
-        # у `nysh op … --json` читає програма, у `nysh mcp serve` — клієнт
-        # JSON-RPC; один людський рядок попереду ламав розбір обом.
+        # у `nysh op … --json` читає програма; один людський рядок попереду
+        # ламав би їй розбір.
         err_console.print(f"[muted]скіли оновлено до {__version__} у {dest} "
                           f"(файлів: {moved}{tail})[/muted]")
         # 🔴 Помічник читає скіли на СТАРТІ сесії: оновлені файли вже лежать,
@@ -92,6 +92,19 @@ def _sync_skills() -> None:
         # з того, що помічник «не знає» щойно оголошеного скіла.
         err_console.print("[muted]щоб помічник побачив нове, почніть із ним "
                           "нову сесію[/muted]")
+    if got:
+        # Оновлені скіли — ознака оновленого пакета; міграція агента — те, чого
+        # скіли самі не переносять (пам'ять, нотатки, конфіг агента).
+        try:
+            from nyshporka import __version__
+            from nyshporka import migrate as M
+            from nyshporka.core.workspace import workspace
+
+            if M.pending(workspace().root, __version__):
+                err_console.print("[muted]є міграція агента на цю версію: "
+                                  "nysh migrate[/muted]")
+        except Exception:
+            pass
 
 
 #: Команди, перед якими скіли не чіпаються: їхній процес живе довго або
@@ -2301,6 +2314,78 @@ def canon_import_cmd(
     _notes(env)
 
 
+@app.command("migrate")
+def migrate_cmd(
+    paths: list[str] = typer.Argument(None, help="з --scan: теки чи файли для перевірки"),
+    show: str = typer.Option("", "--show", help="надрукувати міграцію цієї версії"),
+    scan: bool = typer.Option(False, "--scan",
+                              help="шукати застарілі тези в пам'яті й нотатках агента"),
+    done: bool = typer.Option(False, "--done", help="позначити пройденою (усі або --version)"),
+    version: str = typer.Option("", "--version", help="лише ця версія міграції"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
+) -> None:
+    """Міграція агента після оновлення пакета: що змінилось і що зробити.
+
+    Без прапорців — непройдені міграції з живою перевіркою кожного кроку.
+    `--show 0.19` — текст міграції; `--scan` — застарілі тези в пам'яті агента,
+    CLAUDE.md і правлених скілах; `--done` — позначити пройденою.
+    """
+    from rich.markup import escape
+
+    from nyshporka import migrate as M
+    from nyshporka import ops as O
+
+    if show:
+        m = M.get(show)
+        if m is None:
+            console.print(f"[warn]![/warn] міграції {show} немає; є: "
+                          f"{', '.join(x.version for x in M.load_all())}")
+            raise typer.Exit(code=1)
+        console.print(m.body, markup=False, highlight=False)
+        console.print("\n[bold]Застарілі тези[/bold] (nysh migrate --scan):")
+        for s in m.stale:
+            console.print(f"  • {s.id}: {s.now}", markup=False, highlight=False)
+        return
+    if scan:
+        env = O.call("migrate.scan", {"paths": paths or [], "version": version})
+        if _answer(env, as_json):
+            return
+        hits = env.data["hits"]
+        for h in hits:
+            console.print(f"{h['path']}:{h['line']} [{h['stale']}]", markup=False)
+            console.print(f"    {h['text']}", markup=False, highlight=False)
+            console.print(f"    → {h['now']}", markup=False, highlight=False)
+        console.print(f"\n{'✅ застарілих тез немає' if not hits else f'⚠ знайдено {len(hits)}'}"
+                      f" · прочесано {len(env.data['scanned'])} місць")
+        _notes(env)
+        return
+    if done:
+        env = O.call("migrate.done", {"version": version})
+        if _answer(env, as_json):
+            return
+        marked = env.data["marked"]
+        console.print(f"✅ позначено: {', '.join(marked)}" if marked else "нічого не позначено")
+        _notes(env)
+        return
+    env = O.call("migrate.status", {})
+    if _answer(env, as_json):
+        return
+    d = env.data
+    if not d["pending"]:
+        console.print(f"✅ простір мігровано до {d['package']} — переходити нема з чого")
+        return
+    mark = {"ok": "[green]✓[/green]", "todo": "[yellow]○[/yellow]", "n/a": "[dim]–[/dim]"}
+    for m in d["pending"]:
+        console.print(f"\n[bold]{m['version']}[/bold] — {escape(m['title'])}  "
+                      f"[dim](nysh migrate --show {m['version']})[/dim]")
+        for s in m["steps"]:
+            who = " [dim](з людиною)[/dim]" if s["human"] else ""
+            console.print(f"  {mark[s['state']]} {escape(s['do'])}{who}")
+            if s["detail"]:
+                console.print(f"      [dim]{escape(s['detail'])}[/dim]")
+    console.print("\n[dim]пройшли — nysh migrate --done[/dim]")
+
+
 site_app = typer.Typer(help="Сайт роду з канону: зібрати теку зі статикою.",
                        no_args_is_help=True)
 app.add_typer(site_app, name="site")
@@ -2997,76 +3082,23 @@ def skills_install(
     console.print(f"  [muted]видно агентові {where}; перезапустіть сесію[/muted]")
 
 
-mcp_app = typer.Typer(help="[застаріле, зникне в 0.19] MCP-сервер для агента. "
-                           "Агентові досить командного рядка: `nysh op <ім'я>` "
-                           "дістає всі операції.",
-                      no_args_is_help=True)
-app.add_typer(mcp_app, name="mcp")
-
-#: 🔴 MCP показував менше половини операцій, і саме тих, що потрібні для
-#: віддачі в Супрягу, там не було: агент однаково йшов у командний рядок. Друга
-#: поверхня — друге місце, де інструкції розходяться з дійсністю.
-MCP_ZASTARILO = ("⚠ `nysh mcp` застаріло й зникне в 0.19. Агентові досить "
-                 "командного рядка: `nysh op <ім'я>` дістає всі операції.")
+#: 🔴 MCP-сервер прибрано в 0.19. Команда лишилась як вказівник: конфіг агента
+#: (`.mcp.json`, `claude mcp add`), прописаний раніше, і далі кличе
+#: `nysh mcp serve` — без неї агент бачив би «No such command» і не знав, куди
+#: йти. Порядок переходу — міграція агента 0.19 (`nysh migrate`).
+MCP_ZNYKLO = ("MCP-сервер Нишпорки прибрано в 0.19. Агентові — командний рядок: "
+              "`nysh op <ім'я> --args '<json>'` дістає всі операції, `nysh ops` їх "
+              "перелічує. Прибрати сервер із конфігу агента: `claude mcp remove "
+              "nyshporka` або рядок `nyshporka` у `.mcp.json`. Решта кроків — "
+              "`nysh migrate`.")
 
 
-def _mcp_zastarilo() -> None:
-    # stderr: у `mcp serve` stdout належить JSON-RPC.
-    err_console.print(f"[warn]{MCP_ZASTARILO}[/warn]")
-
-
-@mcp_app.command("serve")
-def mcp_serve() -> None:
-    """Підняти MCP-сервер по stdio (так його запускає агент). Застаріле."""
-    from nyshporka.mcp import serve
-
-    _mcp_zastarilo()
-    raise typer.Exit(code=serve())
-
-
-@mcp_app.command("tools")
-def mcp_tools() -> None:
-    """Що саме бачить агент. Застаріле."""
-    from nyshporka.mcp import tool_definitions
-
-    _mcp_zastarilo()
-    defs = tool_definitions()
-    for d in defs:
-        console.print(f"  [bold]{d['name']:<22}[/bold] {d['description']}")
-    console.print(f"\n[muted]усього {len(defs)}[/muted]")
-
-
-@mcp_app.command("install")
-def mcp_install(
-    target: str = typer.Option(".mcp.json", help="куди дописати конфіг"),
-    show: bool = typer.Option(False, "--show", help="лише показати, не писати"),
-) -> None:
-    """Прописати сервер у `.mcp.json` проєкту. Застаріле."""
-    import json as _json
-
-    from nyshporka.mcp import mcp_config
-
-    _mcp_zastarilo()
-    cfg = mcp_config()
-    if show:
-        console.print_json(data=cfg)
-        return
-    path = Path(target)
-    existing: dict[str, Any] = {}
-    if path.is_file():
-        try:
-            existing = _json.loads(path.read_text(encoding="utf-8"))
-        except ValueError:
-            console.print(f"[warn]![/warn] {path} не є JSON — не чіпаю його")
-            raise typer.Exit(code=1) from None
-    # Дописуємо, а не заміщаємо: у файлі можуть бути чужі сервери, і затерти їх
-    # означало б зламати налаштування, які людина робила руками.
-    servers = dict(existing.get("mcpServers") or {})
-    servers.update(cfg["mcpServers"])
-    existing["mcpServers"] = servers
-    path.write_text(_json.dumps(existing, ensure_ascii=False, indent=2) + "\n",
-                    encoding="utf-8")
-    console.print(f"✓ {path}: додано сервер «nyshporka»")
+@app.command("mcp", hidden=True, context_settings={"allow_extra_args": True,
+                                                   "ignore_unknown_options": True})
+def mcp_gone() -> None:
+    """Прибрано в 0.19 — друкує, куди перейти."""
+    err_console.print(f"[warn]{MCP_ZNYKLO}[/warn]")
+    raise typer.Exit(code=2)
 
 
 def main() -> None:

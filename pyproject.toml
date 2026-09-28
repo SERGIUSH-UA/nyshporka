@@ -75,10 +75,8 @@ dependencies = [
 
 [project.optional-dependencies]
 # Браузерна консоль (демон + фронт) — набір «Основа», який ставить кожен
-# інсталятор. Транспорт MCP їде ТУТ, а не лише в `agent`: інакше людина, що
-# поставила Нишпорку з `.exe`, дістає від `nysh mcp install` сервер, який не
-# стартує (подробиці над `agent` нижче). Пін той самий, що там.
-app = ["fastapi>=0.115", "uvicorn[standard]>=0.32", "mcp>=1.2,<2", "anyio>=4.1"]
+# інсталятор.
+app = ["fastapi>=0.115", "uvicorn[standard]>=0.32"]
 # Завантажувачі з архівів: дзеркала плівок, ARCHIUM, Synology, каталоги.
 archives = [
   "httpx[socks]>=0.27",
@@ -138,17 +136,6 @@ rent = ["gpuhire[vast,r2]>=0.2.3"]
 # (`nysh htr install` ставить torch і strhub туди), тож у пакет тут їде лише
 # те, чим трен вивозять на свою машину по SSH. Розмітка працює і без цього.
 train = ["nyshporka[cloud]"]
-# Агентна поверхня. Окремий extra лишається для того, хто ставить пакет без
-# застосунку (бібліотекою чи для CI), — але з набором «Основа» він їде ЗАВЖДИ:
-# див. `app` вище. 🔴 Доти транспорт MCP не входив у жоден набір інсталятора, і
-# `nysh mcp install` на установці з `.exe` прописував агентові сервер, який
-# `nysh mcp serve` не піднімав (код 2, «потрібен пакет mcp»). Людина бачила
-# «Нишпорка не підключилась» — там, де їй бракувало трьох мегабайтів залежності.
-# Приймач: `test_app_extra_carries_the_agent_transport`.
-# 🔴 Пін `<2`: `mcp` 2.0 — інший SDK (inputSchema→input_schema, mimeType→mime_type,
-# зникли декоратори `@server.list_tools()`). Код у `nyshporka/mcp/` написаний під 1.x,
-# тож без стелі свіжа інсталяція тягне 2.x і `nysh mcp serve` не стартує.
-agent = ["mcp>=1.2,<2", "anyio>=4.1"]
 # Виписка в Ексель. Окремо, бо CSV/TSV пишуться стандартною бібліотекою й
 # відкриваються тим самим Екселем: `openpyxl` купує аркуші, автофільтр і
 # закріплену шапку, а не саму можливість забрати дані.
@@ -161,7 +148,7 @@ site = ["mkdocs-material>=9.5", "mkdocs-roamlinks-plugin>=0.3"]
 # застосунок, збирач сайту не потрібен — його ставить лише CI і той, хто
 # правит документацію.
 docs = ["mkdocs-material>=9.5"]
-all = ["nyshporka[app,archives,cfshield,htr,agent,cloud,train,xlsx,gedcom]"]
+all = ["nyshporka[app,archives,cfshield,htr,cloud,train,xlsx,gedcom]"]
 
 [project.urls]
 Homepage = "https://github.com/SERGIUSH-UA/nyshporka"
@@ -322,8 +309,7 @@ disable_error_code = ["attr-defined", "arg-type", "assignment", "unused-ignore",
 # Пакети без анотацій, на які ми не впливаємо.
 [[tool.mypy.overrides]]
 module = ["frontmatter.*", "unidecode.*", "yaml.*", "pypdfium2.*", "fitz.*", "ged4py.*", "mkdocs.*", "material.*",
-          "mkdocs_roamlinks_plugin.*",
-          "mcp.*", "anyio.*"]
+          "mkdocs_roamlinks_plugin.*"]
 ignore_missing_imports = true
 
 # 🔴 Світ СЕРЕДОВИЩА РУШІЇВ. Ці модулі не «забули поставити» — їх тут не буде
@@ -353,13 +339,6 @@ ignore_missing_imports = true
 [[tool.mypy.overrides]]
 module = ["curl_cffi.*"]
 ignore_missing_imports = true
-
-# Транспорт MCP живе в extras і в dev-оточенні не стоїть; його декоратори
-# нетипізовані. Функції всередині `serve()` — тонкі обгортки над уже
-# перевіреними `tool_definitions()` і `call_tool()`, які типізуються повністю.
-[[tool.mypy.overrides]]
-module = ["nyshporka.mcp.server"]
-disallow_untyped_decorators = false
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

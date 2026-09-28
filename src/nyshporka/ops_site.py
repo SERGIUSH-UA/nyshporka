@@ -1,7 +1,7 @@
 """⚙️🌐 Сайт роду з канону: зібрати теку зі статикою.
 
-🔴 `agent=False` — та сама стеля MCP, що й для `ops_canon`; агентові вистачає
-`nysh site build`. Викладати сайт пакет не вміє й не буде: куди — GitHub Pages,
+🔴 `agent=False` — стартовий перелік агента (`nysh ops --agent`) тримається
+коротким; агентові вистачає `nysh site build`. Викладати сайт пакет не вміє й не буде: куди — GitHub Pages,
 Cloudflare Pages, власний сервер — вирішує людина.
 """
 from __future__ import annotations

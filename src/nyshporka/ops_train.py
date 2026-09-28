@@ -1,9 +1,8 @@
 """🧪 Операції лабораторії — розмітка й навчання Писаря.
 
-🔴 Усі — `section="lab"`, `agent=False`. Не «поки що»: перелік MCP-tool'ів має
-стелю, за якою модель перестає читати описи, і лабораторні дії туди не йдуть
-ніколи (`core/ops.py`). Агентові вистачає командного рядка: `nysh train …` і
-`nysh op train.<ім'я> --describe`.
+🔴 Усі — `section="lab"`, `agent=False`: у стартовий перелік агента (`nysh ops --agent`) лабораторні дії
+не йдуть ніколи (`core/ops.py`). Агентові вистачає командного рядка:
+`nysh train …` і `nysh op train.<ім'я> --describe`.
 """
 from __future__ import annotations
 

@@ -154,21 +154,6 @@ def test_view_returns_a_data_url_for_the_browser(run) -> None:
     assert "image" not in s.as_dict(), "картинка не має дублюватись у полях"
 
 
-def test_mcp_sends_the_image_as_an_image_not_as_text() -> None:
-    """🔴 Модель не вміє «подивитись» на base64-рядок.
-
-    Якщо картинка їде текстом, звірка оком перетворюється на ще один переказ
-    того, що вже сказала машина.
-    """
-    from nyshporka.core.envelope import ok
-    from nyshporka.mcp.server import _pop_image
-
-    env = ok({"line": 3, "image": "data:image/png;base64,QUJD"})
-    got = _pop_image(env)
-    assert got == ("QUJD", "image/png")
-    assert "image" not in env.data, "картинка лишилась ще й у JSON"
-
-
 def test_page_text_actually_carries_the_text(run) -> None:
     """🔴 Відповідь була `ok`, а тексту в ній не було зовсім.
 

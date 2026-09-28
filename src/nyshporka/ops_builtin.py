@@ -45,6 +45,9 @@ def workspace_info(_: NoArgs) -> Envelope:
     if not ws.data.is_dir():
         env.warn("empty_workspace",
                  "у просторі ще немає теки data — це новий простір")
+    from nyshporka import migrate
+
+    migrate.nag(env, ws.root)
     return env
 
 
@@ -182,6 +185,9 @@ def home_pulse(a: PulseArgs) -> Envelope:
     registry = _pulse_registry(env)
     data["registry"] = registry
     data["canon"] = _pulse_canon(env)
+    from nyshporka import migrate
+
+    migrate.nag(env, ws.root)
     data["profile"] = _pulse_profile(env)
     data["reading"] = _pulse_reading(env) if "htr" in on else None
     data["search"] = _pulse_search() if "research" in on else None

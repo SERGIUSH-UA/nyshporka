@@ -15,6 +15,7 @@ from nyshporka import ops_canon as _canon  # noqa: F401  (те саме: реє�
 from nyshporka import ops_case as _case  # noqa: F401  (те саме: реєстрація)
 from nyshporka import ops_catalog as _catalog  # noqa: F401  (те саме: реєстрація)
 from nyshporka import ops_library as _library  # noqa: F401  (те саме: реєстрація)
+from nyshporka import ops_migrate as _migrate  # noqa: F401  (те саме: реєстрація)
 from nyshporka import ops_pick as _pick  # noqa: F401  (те саме: реєстрація)
 from nyshporka import ops_records as _records  # noqa: F401  (те саме: реєстрація)
 from nyshporka import ops_share as _share  # noqa: F401  (те саме: реєстрація)
