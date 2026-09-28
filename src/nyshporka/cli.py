@@ -33,7 +33,8 @@ from nyshporka.core import morph
 _PAGE_TYPES_HELP = ("birth | marriage | death | confession | revision | census | "
                     "index | title | cover | flyleaf | blank | illegible | mixed | other")
 _PAGE_STATUS_HELP = ("full — перелік прізвищ повний · partial — бачив, перелік "
-                     "неповний · skipped · unreadable")
+                     "неповний (типово; для blank/cover/flyleaf — full) · "
+                     "skipped · unreadable")
 _PAGE_METHOD_HELP = "visual | htr | ocr | hybrid | text"
 _ROLES_HELP = ("child | father | mother | godfather | godmother | groom | bride | "
                "groom_father | groom_mother | bride_father | bride_mother | "
@@ -1736,7 +1737,7 @@ def pages_note_cmd(
     places: str = typer.Option("", "--places", help="кома-список місць, як у джерелі"),
     years: str = typer.Option("", "--years", help="кома-список років: 1858,1859"),
     sheet: str = typer.Option("", "--sheet", help="архівний аркуш: 31зв-32"),
-    status: str = typer.Option("full", "--status", help=_PAGE_STATUS_HELP),
+    status: str = typer.Option(None, "--status", help=_PAGE_STATUS_HELP),
     method: str = typer.Option("visual", "--method", help=_PAGE_METHOD_HELP),
     comment: str = typer.Option("", "--comment",
                                  help="що на сторінці й чому це не те, що шукали"),

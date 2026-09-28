@@ -2554,8 +2554,11 @@ class PageNoteArgs(BaseModel):
     places: str = Field(default="")
     years: str = Field(default="", description="кома-список років: 1858,1859")
     sheet: str = Field(default="", description="архівний аркуш: 31зв-32")
-    status: Literal["full", "partial", "skipped", "unreadable"] = Field(
-        default="full", description="наскільки повно виписано")
+    # Без значення — `partial` (для blank/cover/flyleaf — `full`): «повний»
+    # має бути свідомим твердженням, а не тим, що лягло само.
+    status: Literal["full", "partial", "skipped", "unreadable"] | None = Field(
+        default=None, description="наскільки повно виписано; без значення — "
+                                  "partial (blank/cover/flyleaf — full)")
     method: Literal["visual", "htr", "ocr", "hybrid", "text"] = Field(
         default="visual", description="чим читали")
     comment: str = Field(default="")
@@ -2577,24 +2580,24 @@ def pages_note(a: PageNoteArgs) -> Envelope:
     from pydantic import ValidationError
 
     from nyshporka.pagestore import store
-    from nyshporka.pagestore.models import PageNote
+    from nyshporka.pagestore.models import NO_NAMES_TYPES, PageNote
 
     def _csv(v: str) -> list[str]:
         return [x.strip() for x in v.split(",") if x.strip()]
 
     try:
         ref = store.resolve_case(a.case)
-        note = PageNote(
-            scan=a.scan, page_type=a.page_type,
-            surnames=_csv(a.surnames), places=_csv(a.places),
-            years=[int(y) for y in _csv(a.years)], sheet=a.sheet,
-            status=a.status, method=a.method,
-            comment=a.comment, agent=a.agent)
+        note = PageNote.model_validate({
+            "scan": a.scan, "page_type": a.page_type,
+            "surnames": _csv(a.surnames), "places": _csv(a.places),
+            "years": [int(y) for y in _csv(a.years)], "sheet": a.sheet,
+            "status": a.status, "method": a.method,
+            "comment": a.comment, "agent": a.agent})
     except (ValidationError, ValueError) as exc:
         return fail(str(exc))
     report = store.annotate_pages(ref, [note])
     env = ok({"case": ref.key, "shifra": ref.shifra, **report.as_dict()})
-    if a.status == "full" and not note.surnames:
+    if note.status == "full" and not note.surnames             and note.page_type not in NO_NAMES_TYPES:
         env.warn("full_without_surnames",
                  "status=full означає «виписано всі прізвища сторінки», а їх "
                  "тут жодного. Якщо сторінка не порожня — це має бути partial")
@@ -2639,7 +2642,7 @@ def pages_note_batch(a: PageNoteBatchArgs) -> Envelope:
     from pydantic import ValidationError
 
     from nyshporka.pagestore import store
-    from nyshporka.pagestore.models import PageNote
+    from nyshporka.pagestore.models import NO_NAMES_TYPES, PageNote
 
     try:
         ref = store.resolve_case(a.case)
@@ -2686,7 +2689,8 @@ def pages_note_batch(a: PageNoteBatchArgs) -> Envelope:
                  f"({', '.join(off_disk[:5])}{'…' if len(off_disk) > 5 else ''}). "
                  f"Ключ мусить збігатися з іменем файлу, інакше сторінка "
                  f"лишиться в черзі на перегляд")
-    full_blank = [n.scan for n in notes if n.status == "full" and not n.surnames]
+    full_blank = [n.scan for n in notes if n.status == "full" and not n.surnames
+                  and n.page_type not in NO_NAMES_TYPES]
     if full_blank:
         env.warn("full_without_surnames",
                  f"{len(full_blank)} сторінок занесено як «виписано всі "

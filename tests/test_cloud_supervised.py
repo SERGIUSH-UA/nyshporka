@@ -360,8 +360,27 @@ def test_unclear_detach_leaves_the_run_accountable(
     assert "rent status" in res.why, "людині сказано, чим перевірити машину"
     st = ST.load(res.run_id)
     assert st is not None and st.supervisor, "захід лишається підзвітним"
-    assert st.phase == "failed"
+    assert st.phase == "running", "закрита фаза ховає захід від наступного go"
     assert any(i.get("kind") == "detach_unclear" for i in st.incidents)
+
+    # 🔴 Повтор — звична дія після відмови. Наглядач мовчить, а мовчання — не
+    # «заходу немає»: другої машини під ту саму справу не беремо.
+    fake_gpurunner.set(estimate=ESTIMATE)
+    again = _go(case)
+    assert again.verdict == "refused", again.why
+    assert len([c for c in fake_gpurunner.called("htr", "supervise")
+                if "--detach" in c]) == 1, "другий наглядач пішов орендувати"
+
+    # Людина перевірила оренду й закрила захід сама — справа звільняється.
+    from typer.testing import CliRunner
+
+    from nyshporka.cloud import cli as C
+
+    got = CliRunner().invoke(C.app, ["stop", res.run_id, "--force"])
+    assert got.exit_code in (0, 2), got.output
+    closed = ST.load(res.run_id)
+    assert closed is not None and closed.phase == "failed"
+    assert SUP.find_live([res.run_id]) is None
 
 
 # ── повторний виклик і стан ──────────────────────────────────────────────────
@@ -528,6 +547,26 @@ def test_prepare_refuses_to_rent_a_machine(space: Path, monkeypatch) -> None:
     assert got.exit_code == 2, got.output
     assert backend.acquired == 0, "машини навіть не торкнулись"
     assert "cloud go" in got.output, "людині сказано, як зробити те, що вона хотіла"
+
+
+def test_start_refuses_to_rent_a_machine(space: Path, monkeypatch) -> None:
+    """🔴 `start` на орендному бекенді брав машину без кошторису, стелі
+    автозапуску й `--confirm`, а гасив її лише таймер самознищення — до
+    дев'яти оплачених годин. Оренду веде `go` (аудит 29.09.2026)."""
+    from typer.testing import CliRunner
+
+    from nyshporka.cloud import cli as C
+    from nyshporka.cloud import registry as REG
+
+    backend = Rent(space / "box", FakeSession(space / "box"))
+    backend.id = "vast"
+    monkeypatch.setattr(REG, "load", lambda: REG.Registry(backends={"vast": backend}))
+    monkeypatch.setattr(RUN, "_backend", lambda name: backend)
+
+    got = CliRunner().invoke(C.app, ["start", str(space), "-b", "vast"])
+    assert got.exit_code == 2, got.output
+    assert backend.acquired == 0, "машини навіть не торкнулись"
+    assert "cloud go" in got.output
 
 
 # ── згортання відчепленого заходу ────────────────────────────────────────────

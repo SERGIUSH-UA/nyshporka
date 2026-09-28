@@ -182,6 +182,20 @@ def test_s3_name_recovers_the_original_frame_name() -> None:
     assert s3_name(FRAME_1) == "image00001_oeO4F2Z.jpg"
 
 
+def test_s3_name_refuses_a_name_that_leaves_the_case_folder() -> None:
+    r"""🔴 Шлях s3 приходить із HTML сайту й стає іменем файла кадру.
+
+    `rpartition("/")` не зрізає `\`, тож без гарда `..\..\x` на Windows
+    записав би тіло відповіді за межі теки справи (аудит 29.09.2026).
+    """
+    import base64
+
+    for evil in (r"s3://b/f/..\..\..\raw\x.jpg", "s3://b/f/C:x.jpg",
+                 "s3://b/f/con.jpg"):
+        blob = base64.urlsafe_b64encode(evil.encode()).decode().rstrip("=")
+        assert s3_name(f"https://img.example/sig/size:1/{blob}.jpg") == "", evil
+
+
 def test_s3_name_survives_a_url_that_is_not_imgproxy() -> None:
     assert s3_name("https://example.org/plain.jpg") == ""
 

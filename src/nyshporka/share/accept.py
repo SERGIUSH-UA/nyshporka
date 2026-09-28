@@ -175,8 +175,11 @@ def look(src: str, *, hash_frames: bool = False, sha256: str = "",
         got = gates.check(manifest, partial_why=_partial_note(manifest))
         verdict.refusals += got.refusals
         verdict.warnings += got.warnings
-    key = str(manifest.case.get("key_local") or "")
-    local = _local_key(manifest) or key
+    # 🔴 Лише ключ, розв'язаний ТУТ. Запасний `key_local` із пакета давав
+    # чужому пакетові самому вибрати, з якою нашою справою його звіряти:
+    # безглузда шифра плюс ключ нашої справи — і прив'язку до кадрів міряли
+    # проти теки, яку назвав відправник (аудит 29.09.2026).
+    local = _local_key(manifest)
     case_dir = align.case_dir_for(local) if local else None
     # Відбиток лежить у шапці кадрів маніфесту. Старий пакет його не має —
     # тоді прив'язка міряється як раніше, за іменами й кількістю.
@@ -545,8 +548,15 @@ def _stamp_run(run_dir: Path, m: Manifest, src: Path, *, voice: dict[str, Any],
     for field_ in ("model", "engine", "script"):
         if not meta.get(field_) and voice.get(field_):
             meta[field_] = str(voice[field_])
+    # 🔴 Ключ справи — лише наш. Чужий `case_key` пережив би `clean_meta` (він у
+    # білому списку, бо потрібен отримувачу, у якого шифра розв'язалась), і
+    # прогін з нерозв'язаною шифрою приєднався б до справи, яку назвав
+    # відправник: його сторінки рахувались би покриттям нашої справи, а нуль
+    # по ній — довіреним (аудит 29.09.2026).
     if key:
         meta["case_key"] = key
+    else:
+        meta.pop("case_key", None)
     if case_dir is not None:
         meta["case_dir"] = str(case_dir).replace("\\", "/")
     mark = {

@@ -38,6 +38,10 @@ PageType = Literal[
 # (напр. занотовано лише хіти). Merge підвищує статус, але ніколи не понижує.
 PageStatus = Literal["full", "partial", "skipped", "unreadable"]
 
+# Сторінки, на яких прізвищ не буває взагалі: порожній перелік на них і є
+# повний, тож без явного статусу вони лягають як `full`.
+NO_NAMES_TYPES = frozenset({"blank", "cover", "flyleaf"})
+
 # text — вичитка не з зображення, а з готового текстового декоду (друга гілка
 # консенсусу); знати це важливо, бо така гілка успадковує чужі помилки
 Method = Literal["visual", "htr", "ocr", "hybrid", "text"]
@@ -54,11 +58,24 @@ class PageNote(BaseModel):
     places: list[str] = Field(default_factory=list)
     years: list[int] = Field(default_factory=list)
     sheet: str = Field(default="", description="Архівний аркуш: '31зв–32' (конвенція decode_hits).")
-    status: PageStatus = "full"
+    # 🔴 Без явного статусу — `partial` (крім сторінок без імен, див.
+    # `_default_status`). Типовий `full` робив «повним» кожен аркуш, куди
+    # занесли лише хіт: реєстр зараховував його в `pages_full`, нуль по справі
+    # ставав довіреним, а злиття вже ніколи не знижує `full` (аудит 29.09.2026).
+    status: PageStatus = "partial"
     method: Method = "visual"
     comment: str = ""
     agent: str = Field(default="", description="Хто/яка сесія записала.")
     noted: _dt.date = Field(default_factory=_today)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _default_status(cls, data: Any) -> Any:
+        if isinstance(data, dict) and data.get("status") is None                 and data.get("page_type") in NO_NAMES_TYPES:
+            data = {**data, "status": "full"}
+        elif isinstance(data, dict) and "status" in data and data["status"] is None:
+            data = {k: v for k, v in data.items() if k != "status"}
+        return data
 
     @field_validator("scan")
     @classmethod

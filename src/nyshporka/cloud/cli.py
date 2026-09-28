@@ -467,7 +467,27 @@ def cmd_start(
     """
     from nyshporka.cloud import plan as PL
     from nyshporka.cloud import run as RUN
+    from nyshporka.cloud.base import bills
+    from nyshporka.cloud.run import _backend
 
+    try:
+        billed = bills(_backend(backend))
+    except CloudError as exc:
+        console.print(f"[err]{exc}[/err]")
+        raise typer.Exit(code=1) from None
+    if billed:
+        # 🔴 `start` на орендному бекенді брав машину в обхід усіх грошових
+        # запобіжників: ні кошторису, ні стелі автозапуску, ні `--confirm`, а
+        # `--wait` не гасив її й не дивився на бюджет. Межею лишався лише
+        # таймер самознищення — до дев'яти оплачених годин (аудит 29.09.2026).
+        # Оренду веде `go`: там і рішення людини, і гасіння.
+        console.print(
+            f"[err]«{backend}» орендує машини, а `start` запускає захід на ТІЙ, "
+            f"що вже є, — без кошторису, стелі й гасіння. Оренду веде "
+            f"`go`.[/err]")
+        console.print(f"[muted]прочитати справу: nysh cloud go {case_dir} "
+                      f"--backend {backend}[/muted]")
+        raise typer.Exit(code=2)
     try:
         p = PL.build(case_dir, backend=backend, target=host, script=script,
                      case_key=case_key, second_voice=not one_voice, also=with_,
@@ -674,6 +694,27 @@ def _detached_only(st: RunState, what: str) -> None:
     raise typer.Exit(code=2)
 
 
+def _close_if_silent(st: RunState) -> None:
+    """Закрити запис, наглядач якого так і не озвався, — після `--force`.
+
+    🔴 Запис невдалого старту лишається відкритим, щоб наступний `go` не взяв
+    другої машини. Але якщо наглядача насправді не було, питати про стан
+    нікого, і без цього виходу справа трималась би ним вічно. `--force` — це
+    рішення людини, якій щойно сказано перевірити `rent status`; поки наглядач
+    відповідає, запис закриє його власний підсумок, а не ми.
+    """
+    from nyshporka.cloud import supervised as SUP
+
+    try:
+        silent = not SUP.state_of(st)
+    except SUP.SupervisorMissing:
+        return
+    if silent and st.phase not in ("done", "failed"):
+        st.note("closed_by_human", f"наглядач {st.supervisor} мовчить; "
+                                   f"запис закрито `stop --force`")
+        st.enter("failed", why="закрито людиною: наглядач мовчав")
+
+
 def _stop_detached(st: RunState, *, force: bool) -> None:
     """Згорнути відчеплений захід — і сказати правду про машину.
 
@@ -693,6 +734,8 @@ def _stop_detached(st: RunState, *, force: bool) -> None:
                       f"чергу, тож згортається ВЕСЬ захід[/warn]",
                       highlight=False)
     res = SUP.stop(st, force=force)
+    if force:
+        _close_if_silent(st)
     if res.ok and not res.killed:
         console.print(f"✅ {st.run_id}: наглядач {st.supervisor} згортає захід "
                       f"— забере прочитане, звірить і погасить машину сам")
