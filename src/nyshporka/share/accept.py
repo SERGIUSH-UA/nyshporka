@@ -19,6 +19,8 @@
 """
 from __future__ import annotations
 
+import os
+import shutil
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -280,17 +282,86 @@ def _clashes(htr_root: Path, incoming: list[str]) -> tuple[list[str], list[str]]
     return sorted(own), sorted(theirs)
 
 
-def _clear_run(run_dir: Path) -> None:
-    """Прибрати файли раніше прийнятого прогону перед заміною на новий.
+#: Скільки разів перечекати зайняту теку на Windows: антивірус, індексатор чи
+#: в'ювер тримає дескриптор усередині, і перейменування падає PermissionError.
+_RENAME_TRIES = 5
+_RENAME_PAUSE = 0.2
 
-    Лише те, що могло приїхати пакетом (текст, мета, геометрія): інакше
-    `--force` лишав би сторінки старого пакета поруч із новими, і тека
-    стала б сумішшю двох чужих прочитань під позначкою одного.
+#: Префікс тимчасової теки приймання поруч із прогонами. Крапка — бо імена з
+#: крапкою на початку стор не вважає прогонами (`htr_store._case_dir`), а
+#: самі прогони лежать у ній на глибині 2, куди `*/_htr_meta.json` не сягає.
+_STAGE_PREFIX = ".nysh-import-"
+
+
+def _rename_dir(src: Path, dest: Path) -> None:
+    """`os.rename` теки з перечікуванням зайнятого дескриптора (Windows)."""
+    for attempt in range(_RENAME_TRIES):
+        try:
+            os.rename(src, dest)
+            return
+        except PermissionError:
+            if attempt == _RENAME_TRIES - 1:
+                raise
+            time.sleep(_RENAME_PAUSE)
+
+
+def _is_packed(name: str) -> bool:
+    """Чи файл того роду, що приїжджає пакетом (текст, мета, геометрія)."""
+    return (name == bundle.META_NAME or name.endswith(".txt")
+            or name.endswith(".lines.json"))
+
+
+def _carry_extras(old: Path, new: Path) -> None:
+    """Перенести з відсунутої старої теки те, що НЕ приїхало пакетом.
+
+    Заміна прогону міняє лише текст, мету й геометрію — як і доти
+    (`--force` не лишає сторінок старого пакета поруч із новими). Решта, що
+    людина чи інструменти поклали в теку після приймання, переїжджає в нову.
     """
-    for pat in (bundle.PACKED_TEXT, bundle.PACKED_GEOMETRY, bundle.META_NAME):
-        for f in run_dir.glob(pat):
-            if f.is_file():
-                f.unlink()
+    for item in old.iterdir():
+        if item.is_file() and _is_packed(item.name):
+            continue
+        target = new / item.name
+        if not target.exists():
+            _rename_dir(item, target)
+
+
+def _swap_in(stage: Path, staged: list[Path], htr_root: Path,
+             previous: dict[str, Path]) -> tuple[list[Path], bool]:
+    """Поставити підготовлені теки на місце. → (теки, чи все стару прибрано).
+
+    Стара тека (раніше прийнятий прогін) спершу відсувається всередину
+    `stage`, потім нова стає на її ім'я; не вдалось — стара повертається.
+    Отже на місці прогону в будь-яку мить або стара тека зі своєю
+    позначкою, або нова зі своєю, і ніколи — текст без позначки.
+    """
+    placed: list[Path] = []
+    clean = True
+    for d in staged:
+        dest = htr_root / d.name
+        old = previous.get(d.name.casefold())
+        aside: Path | None = None
+        if old is not None and old.is_dir():
+            aside = stage / ".old" / old.name
+            aside.parent.mkdir(parents=True, exist_ok=True)
+            _rename_dir(old, aside)
+        try:
+            if dest.exists():
+                # Тека з'явилась після перевірки зіткнень — чужого поверх
+                # не кладемо (POSIX `rename` мовчки зайняв би порожню теку).
+                raise FileExistsError(f"{dest} з'явилась під час приймання")
+            _rename_dir(d, dest)
+        except OSError:
+            if aside is not None and old is not None:
+                _rename_dir(aside, old)
+            raise
+        if aside is not None:
+            try:
+                _carry_extras(aside, dest)
+            except OSError:
+                clean = False
+        placed.append(dest)
+    return placed, clean
 
 
 def accept(src: str, *, hash_frames: bool = False, force: bool = False,
@@ -327,8 +398,7 @@ def accept(src: str, *, hash_frames: bool = False, force: bool = False,
         raise AcceptError(
             f"прогони з такими іменами вже прийнято раніше: {', '.join(theirs)}. "
             f"Замінити новим пакетом: --force")
-    for name in theirs:
-        _clear_run(htr_root / name)
+    previous = {name.casefold(): htr_root / name for name in theirs}
 
     # 🔴 Другий білий список — на прийманні: лише названі прогони, лише
     # текст і мета. Геометрія приїжджає окремим пакетом і лягає лише при
@@ -336,24 +406,40 @@ def accept(src: str, *, hash_frames: bool = False, force: bool = False,
     # Пакет схеми 1 ніс геометрію всередині, і для нього вона лишається.
     allowed = {bundle.META_NAME}
     old_schema = seen.manifest.schema < bundle.SCHEMA and seen.alignment.can_crop
-    dirs = bundle.extract(
-        seen.path, htr_root, runs=set(runs),
-        keep=lambda n: (n in allowed or n.endswith(".txt")
-                        or (old_schema and n.endswith(".lines.json"))))
-    if not dirs:
-        raise AcceptError("у пакеті не виявилось жодного прогону")
-
     key = _local_key(seen.manifest)
     case_dir = align.case_dir_for(key) if key else None
     content = str(seen.manifest.decode.get("content_sha256") or "")
     voices = {str(v.get("run")): v for v in seen.manifest.voices}
-    for d in dirs:
-        # 🔴 Позначки — ЛИШЕ на теки, які щойно лягли з пакета. Доти штампи
-        # обходили ще й «голоси» `<прогін>-*`, тобто сусідні ВЛАСНІ прогони
-        # людини: вони діставали чужу шифру й позначку «прийнято з пакета».
-        _stamp_run(d, seen.manifest, seen.path, voice=voices.get(d.name) or {},
-                   key=key, case_dir=case_dir, content=content,
-                   alignment=seen.alignment.label)
+
+    # 🔴 Розпакування, позначка й заміна — у тимчасовій сусідній теці, а на
+    # місце прогону тека стає ОДНИМ перейменуванням. Доти старе стиралось,
+    # новий текст лягав просто в `reports/htr/<прогін>/`, а позначка `shared`
+    # ставилась останньою: обрив між цими кроками (Ctrl+C, повний диск)
+    # лишав чужий текст без позначки — він читався як власна робота людини, а
+    # повторний `import --force` відмовляв «вони ВАШІ» (аудит 29.09.2026).
+    htr_root.mkdir(parents=True, exist_ok=True)
+    stage = htr_root / f"{_STAGE_PREFIX}{os.getpid()}-{time.time_ns()}"
+    clean = True
+    try:
+        staged = bundle.extract(
+            seen.path, stage, runs=set(runs),
+            keep=lambda n: (n in allowed or n.endswith(".txt")
+                            or (old_schema and n.endswith(".lines.json"))))
+        if not staged:
+            raise AcceptError("у пакеті не виявилось жодного прогону")
+        for d in staged:
+            # 🔴 Позначки — ЛИШЕ на теки, які щойно лягли з пакета. Доти штампи
+            # обходили ще й «голоси» `<прогін>-*`, тобто сусідні ВЛАСНІ прогони
+            # людини: вони діставали чужу шифру й позначку «прийнято з пакета».
+            _stamp_run(d, seen.manifest, seen.path, voice=voices.get(d.name) or {},
+                       key=key, case_dir=case_dir, content=content,
+                       alignment=seen.alignment.label)
+        dirs, clean = _swap_in(stage, staged, htr_root, previous)
+    finally:
+        # Не вдалось перенести з відсунутої теки щось, що не з пакета, — тоді
+        # вона лишається в `stage`: це чиясь робота, і стирати її не нам.
+        if clean:
+            shutil.rmtree(stage, ignore_errors=True)
     stamped_key = len(dirs) if key else 0
     stamped_dir = len(dirs) if case_dir is not None else 0
 

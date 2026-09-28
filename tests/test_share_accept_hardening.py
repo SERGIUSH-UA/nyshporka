@@ -400,3 +400,78 @@ def test_tally_z_linyvoho_perehliadu(tmp_path: Path) -> None:
     raw = {"r": {"0001.txt": "a\nб\n".encode(), "0002.txt": b"  \n"}}
     assert bundle.tally(bundle.decoded(raw), {"r": "m"}) == {
         "pages": 2, "lines": 2, "chars": 2, "blank_pages": 1}
+
+
+# ── B13: обрив приймання не лишає чужого тексту без позначки ────────────────
+# Аудит 29.09.2026: `_clear_run` → `extract` → `_stamp_run` просто в теці
+# прогону; обрив між кроками лишав текст без `shared`, і він читався як свій.
+
+def _obryv(*_: Any, **__: Any) -> None:
+    raise KeyboardInterrupt("обрив посеред приймання")
+
+
+def _leftovers(root: Path) -> list[str]:
+    return [p.name for p in root.iterdir() if p.name.startswith(".")]
+
+
+def test_obryv_novoho_pryimannia_nichoho_ne_lyshaie(space: Path, tmp_path: Path,
+                                                    monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(accept, "_stamp_run", _obryv)
+    with pytest.raises(KeyboardInterrupt):
+        accept.accept(str(handmade(tmp_path / "p.nyshtext")))
+    root = _htr(space)
+    assert not (root / "spr-8433").exists(), "текст без позначки «чуже» ліг на місце"
+    assert not _leftovers(root)
+
+
+def test_obryv_zaminy_lyshaie_staryi_i_force_pratsiuie(space: Path, tmp_path: Path,
+                                                       monkeypatch: pytest.MonkeyPatch) -> None:
+    accept.accept(str(handmade(tmp_path / "a.nyshtext", pages=5)))
+    run = _htr(space) / "spr-8433"
+    b = handmade(tmp_path / "b.nyshtext", pages=3)
+
+    with monkeypatch.context() as mp:
+        mp.setattr(accept, "_stamp_run", _obryv)
+        with pytest.raises(KeyboardInterrupt):
+            accept.accept(str(b), force=True)
+    meta = json.loads((run / bundle.META_NAME).read_text(encoding="utf-8"))
+    assert meta["shared"]["bundle"] == "a.nyshtext"
+    assert len(list(run.glob("*.txt"))) == 5
+    assert not _leftovers(_htr(space))
+
+    # Повтор після обриву — чужий прогін лишився чужим, а не «вашим».
+    accept.accept(str(b), force=True)
+    assert len(list(run.glob("*.txt"))) == 3
+
+
+def test_zbii_perejmenuvannia_povertaie_staryi(space: Path, tmp_path: Path,
+                                               monkeypatch: pytest.MonkeyPatch) -> None:
+    accept.accept(str(handmade(tmp_path / "a.nyshtext", pages=5)))
+    root = _htr(space)
+    real = accept.os.rename
+
+    def rename(src: Any, dest: Any) -> None:
+        if Path(dest) == root / "spr-8433" and Path(src).parent.name != ".old":
+            raise OSError("диск відпав")
+        real(src, dest)
+
+    monkeypatch.setattr(accept.os, "rename", rename)
+    with pytest.raises(OSError, match="диск відпав"):
+        accept.accept(str(handmade(tmp_path / "b.nyshtext", pages=3)), force=True)
+    meta = json.loads((root / "spr-8433" / bundle.META_NAME).read_text(encoding="utf-8"))
+    assert meta["shared"]["bundle"] == "a.nyshtext"
+    assert len(list((root / "spr-8433").glob("*.txt"))) == 5
+    assert not _leftovers(root)
+
+
+def test_zamina_zberihaie_ne_paketne(space: Path, tmp_path: Path) -> None:
+    """Заміна міняє текст, мету й геометрію; решта в теці лишається."""
+    accept.accept(str(handmade(tmp_path / "a.nyshtext", pages=5)))
+    run = _htr(space) / "spr-8433"
+    (run / "notatky.md").write_text("моє", encoding="utf-8")
+    (run / "0001.lines.json").write_text("{}", encoding="utf-8")
+    accept.accept(str(handmade(tmp_path / "b.nyshtext", pages=3)), force=True)
+    assert (run / "notatky.md").read_text(encoding="utf-8") == "моє"
+    assert not (run / "0001.lines.json").exists()
+    assert len(list(run.glob("*.txt"))) == 3
+    assert not _leftovers(_htr(space))
