@@ -206,6 +206,27 @@ def test_density_is_unknown_until_there_is_enough_to_measure(tmp_path: Path) -> 
     assert F.lines_per_page(tmp_path) == 40.0
 
 
+# ── важкі, але вже робочої висоти ────────────────────────────────────────────
+def test_heavy_frames_of_working_height_are_not_shrunk_again(
+        tmp_path: Path, monkeypatch) -> None:
+    """🔴 Медіана понад поріг ще не означає, що стискання щось дасть: тека, яку
+    завантажувач сам звів до робочої висоти, перекодовувалась у копію того
+    самого обсягу (29.09.2026 — 6.4 ГБ «×1 за обсягом» на майже повному диску).
+    Стискати треба лише тоді, коли є кадр, вищий за робочу висоту."""
+    monkeypatch.setattr(F, "SHRINK_MEDIAN_MB", -1.0)
+    monkeypatch.setattr(F, "FIT_HEIGHT", 90)
+    for i in range(3):
+        _jpeg(tmp_path / f"{i:04d}.jpg", (120, 90))
+    rep = F.check_frames(tmp_path)
+    assert rep.over_height == 0
+    assert not rep.heavy, "усі кадри вже робочої висоти — копія нічого не дасть"
+
+    _jpeg(tmp_path / "0003.jpg", (60, 91))
+    rep = F.check_frames(tmp_path)
+    assert rep.over_height == 1
+    assert rep.heavy, "є вищий кадр — стискати"
+
+
 # ── формат, якого машина не бере ─────────────────────────────────────────────
 def test_tiff_is_named_and_converted_before_the_road(tmp_path: Path) -> None:
     """🔴 TIFF локальне читання розуміє, а хмарний захід пакує лише JPEG і PNG.

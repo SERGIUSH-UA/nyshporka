@@ -51,6 +51,13 @@ CLOUD_READY_EXT = {".jpg", ".jpeg", ".png"}
 TARGET_HEIGHT = 3100
 JPEG_QUALITY = 90
 
+#: Кадр не вищий за це вже має робочу висоту, і стискати його нема чого, хоч
+#: би скільки він важив. 🔴 Без цієї межі тека, яку завантажувач сам звів до
+#: 3100 (сірий JPEG ~3 МБ на розвороті), перекодовувалась у копію того самого
+#: обсягу: 29.09.2026 два томи дали 6.4 ГБ копій «×1 за обсягом» на диску,
+#: де лишалось 8 ГБ.
+FIT_HEIGHT = TARGET_HEIGHT
+
 #: Скільки хвоста файла читати в пошуках маркера кінця.
 _TAIL_BYTES = 8192
 
@@ -78,10 +85,18 @@ class FramesReport:
     #: лише JPEG і PNG — тож такий кадр мовчки випадає зі знаменника, і
     #: половина справи виглядає прочитаною повністю.
     alien: list[str] = field(default_factory=list)
+    #: Скільки кадрів вищі за робочу висоту (`FIT_HEIGHT`). `None` — висоти
+    #: не міряно; тоді стискання вирішує сама медіана, як раніше.
+    over_height: int | None = None
 
     @property
     def heavy(self) -> bool:
-        return self.median_mb > SHRINK_MEDIAN_MB or bool(self.alien)
+        if self.alien:
+            return True
+        if self.median_mb <= SHRINK_MEDIAN_MB:
+            return False
+        # важкі, але всі вже робочої висоти — перекодування нічого не дасть
+        return self.over_height is None or self.over_height > 0
 
     def as_dict(self) -> dict[str, Any]:
         return {"n": self.n, "total_mb": self.total_mb,
@@ -89,7 +104,7 @@ class FramesReport:
                 "bad_count": len(self.bad),
                 "still_writing_min": self.still_writing_min,
                 "alien": self.alien[:50], "alien_count": len(self.alien),
-                "heavy": self.heavy}
+                "over_height": self.over_height, "heavy": self.heavy}
 
 
 def _pil() -> Any:
@@ -146,6 +161,7 @@ def check_frames(case_dir: Path | str, *, now: float | None = None) -> FramesRep
     bad: list[str] = [f"{name}: є в {FS_SIDECAR}, на диску немає"
                       for name in sorted(set(sidecar) - on_disk)]
     sizes: list[int] = []
+    over_height = 0
     newest = 0.0
     for f in frames:
         stat = f.stat()
@@ -172,6 +188,8 @@ def check_frames(case_dir: Path | str, *, now: float | None = None) -> FramesRep
             continue
         try:
             with image.open(f) as im:
+                if im.size[1] > FIT_HEIGHT:
+                    over_height += 1
                 im.verify()
         except Exception as exc:    # будь-яка відмова розбору = битий кадр
             bad.append(f"{f.name}: не розбирається ({type(exc).__name__})")
@@ -183,7 +201,8 @@ def check_frames(case_dir: Path | str, *, now: float | None = None) -> FramesRep
                if age is not None and age < STILL_WRITING_SEC else None)
     return FramesReport(n=len(frames), total_mb=round(total, 1),
                         median_mb=round(median, 2), bad=bad,
-                        still_writing_min=writing, alien=alien)
+                        still_writing_min=writing, alien=alien,
+                        over_height=over_height)
 
 
 # ── стискання ────────────────────────────────────────────────────────────────

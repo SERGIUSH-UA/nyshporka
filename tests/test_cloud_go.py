@@ -622,6 +622,7 @@ def test_heavy_frames_travel_shrunk_but_the_meta_names_the_originals(
     session = Box1(space / "box", [NAMES])
     case, _backend, _ = _wire(space, monkeypatch, session)
     monkeypatch.setattr(F, "SHRINK_MEDIAN_MB", -1.0)
+    monkeypatch.setattr(F, "FIT_HEIGHT", 0)
 
     res = _go(case)
     assert res.verdict == "ok"
