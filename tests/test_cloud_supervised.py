@@ -549,6 +549,26 @@ def test_prepare_refuses_to_rent_a_machine(space: Path, monkeypatch) -> None:
     assert "cloud go" in got.output, "людині сказано, як зробити те, що вона хотіла"
 
 
+def test_start_refuses_to_rent_a_machine(space: Path, monkeypatch) -> None:
+    """🔴 `start` на орендному бекенді брав машину без кошторису, стелі
+    автозапуску й `--confirm`, а гасив її лише таймер самознищення — до
+    дев'яти оплачених годин. Оренду веде `go` (аудит 29.09.2026)."""
+    from typer.testing import CliRunner
+
+    from nyshporka.cloud import cli as C
+    from nyshporka.cloud import registry as REG
+
+    backend = Rent(space / "box", FakeSession(space / "box"))
+    backend.id = "vast"
+    monkeypatch.setattr(REG, "load", lambda: REG.Registry(backends={"vast": backend}))
+    monkeypatch.setattr(RUN, "_backend", lambda name: backend)
+
+    got = CliRunner().invoke(C.app, ["start", str(space), "-b", "vast"])
+    assert got.exit_code == 2, got.output
+    assert backend.acquired == 0, "машини навіть не торкнулись"
+    assert "cloud go" in got.output
+
+
 # ── згортання відчепленого заходу ────────────────────────────────────────────
 def test_stop_asks_the_supervisor_to_finish_not_to_die(
         space: Path, monkeypatch, fake_gpurunner) -> None:

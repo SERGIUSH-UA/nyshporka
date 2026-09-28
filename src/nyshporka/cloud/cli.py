@@ -467,7 +467,27 @@ def cmd_start(
     """
     from nyshporka.cloud import plan as PL
     from nyshporka.cloud import run as RUN
+    from nyshporka.cloud.base import bills
+    from nyshporka.cloud.run import _backend
 
+    try:
+        billed = bills(_backend(backend))
+    except CloudError as exc:
+        console.print(f"[err]{exc}[/err]")
+        raise typer.Exit(code=1) from None
+    if billed:
+        # 🔴 `start` на орендному бекенді брав машину в обхід усіх грошових
+        # запобіжників: ні кошторису, ні стелі автозапуску, ні `--confirm`, а
+        # `--wait` не гасив її й не дивився на бюджет. Межею лишався лише
+        # таймер самознищення — до дев'яти оплачених годин (аудит 29.09.2026).
+        # Оренду веде `go`: там і рішення людини, і гасіння.
+        console.print(
+            f"[err]«{backend}» орендує машини, а `start` запускає захід на ТІЙ, "
+            f"що вже є, — без кошторису, стелі й гасіння. Оренду веде "
+            f"`go`.[/err]")
+        console.print(f"[muted]прочитати справу: nysh cloud go {case_dir} "
+                      f"--backend {backend}[/muted]")
+        raise typer.Exit(code=2)
     try:
         p = PL.build(case_dir, backend=backend, target=host, script=script,
                      case_key=case_key, second_voice=not one_voice, also=with_,
