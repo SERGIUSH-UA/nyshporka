@@ -43,13 +43,10 @@ def summary() -> dict[str, Any]:
     except Exception as exc:
         return _absent(f"простір не визначено ({type(exc).__name__})")
     if not path.is_file():
-        # ⚠ Порада тут не називає команди, і це навмисно: у публічному
-        # застосунку її немає. Базу роду збирає дослідницький конвеєр
-        # (`storage.reindex`), а консоль її лише читає — тож «наберіть X»
-        # відправило б людину шукати те, чого в її збірці не існує.
         return _absent(
-            "канону в цьому просторі немає: базу роду збирають із карток "
-            "`data/canonical/**`, і поки їх не зібрано, показувати нема чого")
+            "бази роду ще немає: її збирає `nysh canon index` із карток "
+            "`data/canonical/**`. Порожній канон засівають із GEDCOM "
+            "(`nysh canon import`) або першою карткою особи")
     try:
         con = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
         con.row_factory = sqlite3.Row

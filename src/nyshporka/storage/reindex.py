@@ -230,7 +230,13 @@ def reindex(project_root: Path) -> ReindexReport:
         encoding="utf-8",
     )
 
-    registry = load_regions(project_root)
+    # Реєстр регіонів — надбудова для карти покриття, а не умова індексу:
+    # у свіжому просторі його немає, і база роду мусить зібратися й без нього.
+    # Спан із кодом регіону при цьому впаде нижче з поясненням — кодів нема де
+    # перевірити.
+    regions_file = project_root / "data" / "canonical" / "regions.yml"
+    registry = (load_regions(project_root) if regions_file.is_file()
+                else RegionRegistry(version=1, year_min=0, year_max=0, governorates=[]))
     coverage_path = derived / "coverage.json"
     coverage_path.write_text(
         json.dumps(_build_coverage(sources, registry), ensure_ascii=False, indent=2),

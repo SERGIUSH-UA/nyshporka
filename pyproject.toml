@@ -153,11 +153,13 @@ agent = ["mcp>=1.2,<2", "anyio>=4.1"]
 # відкриваються тим самим Екселем: `openpyxl` купує аркуші, автофільтр і
 # закріплену шапку, а не саму можливість забрати дані.
 xlsx = ["openpyxl>=3.1"]
+# Засівання канону з GEDCOM (`nysh canon import`) — разова дія, тому не в ядрі.
+gedcom = ["ged4py>=0.5"]
 # Сайт документації. 🔴 В `all` НЕ входить: генеалогові, який ставить
 # застосунок, збирач сайту не потрібен — його ставить лише CI і той, хто
 # правит документацію.
 docs = ["mkdocs-material>=9.5"]
-all = ["nyshporka[app,archives,cfshield,htr,agent,cloud,train,xlsx]"]
+all = ["nyshporka[app,archives,cfshield,htr,agent,cloud,train,xlsx,gedcom]"]
 
 [project.urls]
 Homepage = "https://github.com/SERGIUSH-UA/nyshporka"
@@ -317,7 +319,7 @@ disable_error_code = ["attr-defined", "arg-type", "assignment", "unused-ignore",
 
 # Пакети без анотацій, на які ми не впливаємо.
 [[tool.mypy.overrides]]
-module = ["frontmatter.*", "unidecode.*", "yaml.*", "pypdfium2.*", "fitz.*",
+module = ["frontmatter.*", "unidecode.*", "yaml.*", "pypdfium2.*", "fitz.*", "ged4py.*",
           "mcp.*", "anyio.*"]
 ignore_missing_imports = true
 

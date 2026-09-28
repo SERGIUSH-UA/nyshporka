@@ -2157,6 +2157,151 @@ def export_case_cmd(
     _notes(env)
 
 
+canon_app = typer.Typer(
+    help="Канон роду: перевірка, індекс, наступний ID. Картки правлять файлами.",
+    no_args_is_help=True)
+app.add_typer(canon_app, name="canon")
+
+
+@canon_app.command("check")
+def canon_check_cmd(
+    hash_: bool = typer.Option(False, "--hash", help="перерахувати sha256 доказів"),
+    show_info: bool = typer.Option(False, "--info", help="показати й довідкові рядки"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
+) -> None:
+    """Чи цілий канон після правки. Код 1, якщо є помилки.
+
+    Схема кожної картки, зв'язки особа ↔ родина в обидва боки, хронологія,
+    існування місць і джерел, докази на диску й у маніфесті.
+    """
+    from rich.markup import escape
+
+    from nyshporka import ops as O
+
+    env = O.call("canon.check", {"hash": hash_})
+    if as_json:
+        _answer(env, True)
+        if env.ok and env.data.get("errors"):
+            raise typer.Exit(code=1)
+        return
+    if _answer(env, False):
+        return
+    d = env.data
+    colour = {"ERROR": "red", "WARN": "yellow", "INFO": "dim"}
+    for it in d["issues"]:
+        if it["severity"] == "INFO" and not show_info:
+            continue
+        console.print(f"[{colour[it['severity']]}]{it['severity']:5}[/] "
+                      f"{escape(it['where'])} · {escape(it['text'])}")
+    loaded = " · ".join(f"{k} {v}" for k, v in d["loaded"].items())
+    console.print(f"\n{'✅' if not d['errors'] else '⛔'} помилок {d['errors']} · "
+                  f"попереджень {d['warnings']} · довідок {d['info']}"
+                  f"{'' if show_info else ' (--info)'} · {loaded}")
+    _notes(env)
+    if d["errors"]:
+        raise typer.Exit(code=1)
+
+
+@canon_app.command("index")
+def canon_index_cmd(
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
+) -> None:
+    """Перебудувати базу роду (`data/derived`) з карток канону."""
+    from nyshporka import ops as O
+
+    env = O.call("canon.index", {})
+    if _answer(env, as_json):
+        return
+    d = env.data
+    console.print(f"✅ осіб {d['persons']} · родин {d['families']} · місць {d['places']} · "
+                  f"джерел {d['sources']} · фактів {d['facts']} → {d['sqlite']}")
+    ev = d["evidence"]
+    if ev["records"]:
+        console.print(f"[dim]доказів у маніфесті {ev['records']} · дописано посилань "
+                      f"{ev['added']}[/dim]")
+    _notes(env)
+
+
+@canon_app.command("new-id")
+def canon_new_id_cmd(
+    kind: str = typer.Argument(..., help="person | family | place"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
+) -> None:
+    """Наступний вільний ID. Нічого не резервує — пишіть картку одразу."""
+    from nyshporka import ops as O
+
+    env = O.call("canon.new_id", {"kind": kind})
+    if _answer(env, as_json):
+        return
+    console.print(env.data["id"])
+
+
+@canon_app.command("import")
+def canon_import_cmd(
+    file: str = typer.Argument(..., help="файл .ged"),
+    source_id: str = typer.Option("S_GEDCOM", "--source-id", help="ID картки джерела"),
+    title: str = typer.Option("", "--title", help="назва джерела"),
+    authority: str = typer.Option("", "--authority", help="MyHeritage, Geni, …"),
+    alias_prefix: str = typer.Option("GED", "--alias-prefix",
+                                     help="префікс ідентифікаторів чужої програми"),
+    private_born_after: int = typer.Option(1946, "--private-born-after",
+                                           help="без смерті й народжені від цього року — живі"),
+    trust_tree: bool = typer.Option(False, "--trust-tree",
+                                    help="факти з датою чи місцем — confirmed"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="лише порахувати"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
+) -> None:
+    """Засіяти ПОРОЖНІЙ канон із GEDCOM. Злиття з наявним немає.
+
+    Факти приходять як `hypothesis` з цитатою на сам файл: дерево з іншої
+    програми — переказ джерел, а не джерело.
+    """
+    from nyshporka import ops as O
+
+    env = O.call("canon.import", {
+        "file": file, "source_id": source_id, "source_title": title,
+        "authority": authority, "alias_prefix": alias_prefix,
+        "private_born_after": private_born_after, "trust_tree": trust_tree,
+        "dry_run": dry_run})
+    if _answer(env, as_json):
+        return
+    d = env.data
+    console.print(f"{'✅' if d['written'] else '🔎'} осіб {d['persons']} · родин "
+                  f"{d['families']} · місць {d['places']} · живих {d['private']}"
+                  f" · файл → {d['copied_to']}")
+    _notes(env)
+
+
+evidence_app = typer.Typer(help="Докази канону: кроп у постійний стор.",
+                           no_args_is_help=True)
+app.add_typer(evidence_app, name="evidence")
+
+
+@evidence_app.command("add")
+def evidence_add_cmd(
+    file: str = typer.Argument(..., help="зображення-вирізка рядка"),
+    provenance: str = typer.Option(..., "--provenance", "-p",
+                                   help="архів чи зібрання латиницею: dahmo, oral, press"),
+    name: str = typer.Option("", "--name", help="ім'я в сторі; типово — як у файлу"),
+    overwrite: bool = typer.Option(False, "--overwrite",
+                                   help="замінити наявний доказ з іншим вмістом"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
+) -> None:
+    """Покласти доказ у `data/source/citations/<походження>/` сірим JPEG.
+
+    Шлях із відповіді вписується в `media[]` картки й у цитату факту.
+    """
+    from nyshporka import ops as O
+
+    env = O.call("evidence.add", {"file": file, "provenance": provenance,
+                                  "name": name, "overwrite": overwrite})
+    if _answer(env, as_json):
+        return
+    d = env.data
+    console.print(f"✅ {d['path']} · {d['size'] // 1024} КБ · sha256 {d['sha256'][:12]}…")
+    _notes(env)
+
+
 #: Колонки з прозою: у файлі вони найцінніші, на екрані розсувають рядок на
 #: півсторінки й ховають усе решта.
 _WIDE_COLUMNS = frozenset({"quote", "comment", "note", "places"})
