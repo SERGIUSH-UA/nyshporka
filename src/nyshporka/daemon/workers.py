@@ -39,6 +39,18 @@ _BUILD_GATE = asyncio.Lock()
 #: вони не діляться нічим.
 _GENERIC_GATE = asyncio.Lock()
 
+#: job_id → задача виконавця загальної операції. Задача живе рівно стільки,
+#: скільки потік із тілом операції, — тож саме вона, а не стан у черзі, каже,
+#: чи робота ще йде. Див. `_start_generic`.
+_GENERIC_RUNS: dict[str, asyncio.Task[None]] = {}
+
+#: Що сказати людині, яка скасувала загальну операцію.
+CANT_INTERRUPT = ("скасування цю операцію посередині не перериває: вона "
+                  "доробляється у фоні, і повторний запуск стане можливим, "
+                  "коли вона скінчиться")
+FINISHED_AFTER_CANCEL = ("операцію скасовано, коли вона вже йшла, і вона "
+                         "доробилась до кінця — результат нижче справжній")
+
 #: 🔴🔴 Читання йдуть ПО ОДНОМУ. Не з обережності — інакше вони одне одного
 #: завалюють.
 #:
@@ -172,13 +184,44 @@ async def _start_generic(bus: JobBus, op_name: str,
     # ⚠ Шукається активна робота, а не ключ ідемпотентності. Ключ жив би ще
     # кілька хвилин після завершення й віддавав би старий готовий запис — а
     # тиснуть цю кнопку саме тому, що щось щойно змінилось.
+    #
+    # 🔴 «Активна» — за живим потоком, а не за станом (аудит 29.09.2026).
+    # Потік Python убити нема чим, тож «Скасувати» над такою роботою
+    # перефарбовувало рядок у «скасовано», а `registry.merge` ішов далі. Гейт,
+    # що дивився лише на стан, пропускав тоді другий клік — і два злиття того
+    # самого реєстру йшли паралельно, тобто рівно те, від чого гейт ставили.
     async with _GENERIC_GATE:
         for j in bus.jobs():
-            if (j.kind == op_name and j.cfg == cfg
-                    and j.state in (JobState.QUEUED, JobState.RUNNING)):
+            if j.kind != op_name or j.cfg != cfg:
+                continue
+            if j.state in (JobState.QUEUED, JobState.RUNNING):
                 return j
+            run = _GENERIC_RUNS.get(j.id)
+            if run is not None and not run.done():
+                raise ValueError(f"попереднє «{op.summary}» ще йде: {CANT_INTERRUPT}")
         job, _ = await bus.enqueue(op_name, title=op.summary, cfg=cfg)
-    _keep(asyncio.create_task(_run_generic(bus, job, op_name, payload)))
+        # Задача заводиться під гейтом: між постановкою й реєстрацією задачі
+        # інакше було б вікно, у якому робота ще не має «живого потоку».
+        task = asyncio.create_task(_run_generic(bus, job, op_name, payload))
+        _keep(task)
+        _GENERIC_RUNS[job.id] = task
+        jid = job.id
+
+        def _gone(_t: asyncio.Task[None]) -> None:
+            _GENERIC_RUNS.pop(jid, None)
+
+        task.add_done_callback(_gone)
+
+    # 🔴 Скасування мусить сказати правду про себе. Гасителя в загальної
+    # операції немає (кооперативної зупинки тіла операцій теж: перервати
+    # злиття реєстру на випадковому кроці гірше, ніж дати йому дійти), тож
+    # «гаситель» тут лише дописує до роботи, що вона ще йде. `pick.ask`
+    # поверх цього реєструє справжнього — і той заміняє цей.
+    def _say_cant_stop() -> None:
+        note = {"code": "cant_interrupt", "text": CANT_INTERRUPT}
+        _keep(asyncio.create_task(bus.update(job.id, warnings=[*job.warnings, note])))
+
+    bus.on_stop(job.id, _say_cant_stop)
     return job
 
 
@@ -218,6 +261,9 @@ async def _run_generic(bus: JobBus, job: JobRecord, op_name: str,
         await bus.update(job.id, state=JobState.ERROR,
                          error=f"{type(exc).__name__}: {exc}")
         return
+    finally:
+        # Потік скінчився — казати «ще доробляється» більше нема про що.
+        bus.drop_stopper(job.id)
     # 🔴 Невдача операції — це невдача роботи, а не успіх із полем `ok: false`
     # усередині. Інакше в черзі вона світилась би зеленим, і причину побачив би
     # лише той, хто розгорнув результат.
@@ -225,9 +271,15 @@ async def _run_generic(bus: JobBus, job: JobRecord, op_name: str,
         await bus.update(job.id, state=JobState.ERROR, error=env.error or "не вийшло")
         return
     got = env.as_dict()
+    warnings = list(got.get("warnings") or [])
+    # 🔴 Скасована робота, що доробилась, лишається «скасованою» (див.
+    # `JobBus.update`), але її результат записується — і людина мусить знати,
+    # що це не обрізок, а повний результат (аудит 29.09.2026).
+    if bus.cancelled(job.id):
+        warnings.append({"code": "finished_after_cancel",
+                         "text": FINISHED_AFTER_CANCEL})
     await bus.update(job.id, state=JobState.DONE, result=got.get("data"),
-                     warnings=got.get("warnings") or [],
-                     next=got.get("next") or [])
+                     warnings=warnings, next=got.get("next") or [])
 
 
 async def _start_build(bus: JobBus, payload: dict[str, Any]) -> JobRecord:
