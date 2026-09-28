@@ -19,6 +19,7 @@
 """
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +29,10 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from nyshporka.core.workspace import Workspace, WorkspaceError, workspace
 from nyshporka.train import layout as L
 
+#: База за замовчуванням — БЕЗ піна: справжніх коміту й sha256 у пакеті ніхто
+#: не звіряв, а вигаданий пін гірший за відсутній. Раннер у такому разі
+#: пише в лог гучне попередження разом із sha256 того, що завантажив, — звідти
+#: пін і береться (`train.pretrained: "<repo>@<коміт>#<sha256>"` у рецепті).
 DEFAULT_BASE = "Hukyl/parseq-s-cyrillic-handwritten"
 PACKAGE_RECIPES = Path(__file__).resolve().parent / "data" / "recipes.yaml"
 
@@ -90,6 +95,27 @@ class TrainParams(BaseModel):
     #: зайнятій карті, машина без NVIDIA). Ключ наш, не раннера: локальний
     #: бекенд перекладає його на CUDA_VISIBLE_DEVICES.
     device: str = "auto"
+
+    @field_validator("pretrained")
+    @classmethod
+    def _base(cls, v: str) -> str:
+        """База з хабу пінується рядком: `<repo>@<ревізія>#<sha256>`.
+
+        🔴 Одним рядком, а не окремими ключами: `TrainParams` дзеркалить
+        валідацію джоби gpurunner (`JOB_PARAM_KEYS`), і новий ключ там
+        відмовив би. Раннер звіряє sha256 завантаженого `best.pt` ДО
+        `torch.load` (аудит 29.09.2026); тут — лише форма, щоб помилка в
+        рецепті вилізла в плані, а не після години на орендованій карті.
+        """
+        v = v.strip()
+        if v.endswith(".pt") or "#" not in v:     # файл на диску або без піна
+            return v
+        head, _, sha = v.partition("#")
+        sha = sha.strip().lower()
+        if not re.fullmatch(r"[0-9a-f]{64}", sha):
+            raise ValueError(f"pretrained: після «#» — sha256 (64 шістнадцяткові "
+                             f"знаки), а не {sha!r}")
+        return f"{head.strip()}#{sha}"
 
     @field_validator("device")
     @classmethod

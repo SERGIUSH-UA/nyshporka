@@ -163,6 +163,16 @@ class GpurunnerTrainer:
         plan.hours, plan.usd = est.hours, est.usd
         plan.notes += est.notes
         plan.notes.append("ціна — порядок величини за таблицею оренди; рахунок виставляє бекенд")
+        base = str(job.params.get("pretrained") or "")
+        if not base.endswith(".pt") and ("@" in base or "#" in base):
+            # 🔴 gpurunner везе СВОЮ копію раннера, а та піна бази не знає:
+            # рядок `repo@коміт#sha256` пішов би в `hf_hub_download` як id
+            # репозиторію й упав би вже на орендованій карті — без звірки
+            # sha256, яку пін обіцяє (аудит 29.09.2026).
+            plan.ok = False
+            plan.warnings.append(
+                "пін бази (`@ревізія#sha256`) звіряє лише раннер пакета (local, ssh); "
+                "раннер gpurunner його не знає — запустіть local/ssh або без піна")
         if (job.backend or "").lower() == "vast":
             plan.warnings.append("vast тарифікує до cancel: після fetch — обов'язково "
                                  "`nysh train stop`")
