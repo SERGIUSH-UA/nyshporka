@@ -242,6 +242,78 @@ def share_card(a: ShareCardArgs) -> Envelope:
                "path": str(K.cards_path())})
 
 
+class SharePackPrintArgs(BaseModel):
+    src: str = Field(description="тека зі сторінками NNNN.txt у порядку видання")
+    vydannia: str = Field(description="код видання латинкою: PEV, BEV, KHEV…")
+    year: int = Field(description="рік випуску")
+    title: str = Field(description="назва видання без року")
+    ocr_by: str = Field(description="звідки текстовий шар: archive.org, сайт, власний OCR")
+    ocr_layer: str = Field(default="", description="який шар: djvu, pdf-text, ocr")
+    page_unit: str = Field(default="page",
+                           description="одиниця файла: page — друкована сторінка, "
+                                       "issue — цілий номер")
+    place: list[str] = Field(default_factory=list,
+                             description="край чи губернія, які охоплює видання")
+    publisher_place: str = Field(default="", description="місто видання")
+    issues: str = Field(default="", description="JSON-файл переліку номерів: "
+                                                "[{no, first_page, pages, source_url, sha256}]")
+    out: str = Field(default="", description="куди покласти файл")
+    dry_run: bool = Field(default=False, description="показати й нічого не писати")
+    publisher: str = Field(default="", description="ваше ім'я або псевдонім")
+    contact: str = Field(default="", description="контакт; «-» — не вказувати")
+    note: str = Field(default="", description="вільна нотатка до пакета")
+    link: list[str] = Field(default_factory=list, description="«підпис=адреса»")
+    license: str = Field(default="", description="ліцензія; порожньо — з профілю")
+    source_terms: str = Field(default="", description="умови джерела текстового шару")
+
+
+@op("share.pack_print", summary="Спакувати рік друкованого видання для обміну",
+    args=SharePackPrintArgs, mutates=True, agent=False, section=SECTION,
+    next_hints=(("share.publish", "віддати пакет у пул"),))
+def share_pack_print(a: SharePackPrintArgs) -> Envelope:
+    """Рік газети чи довідника як книга пулу з ключем `VYD/<код>/<рік>`."""
+    import json
+    from pathlib import Path
+
+    from nyshporka.share import profile as P
+    from nyshporka.share.print_pack import pack_print
+    from nyshporka.share.publish import PublishError
+
+    defaults = P.pack_defaults()
+    try:
+        links = _links(a.link)
+    except ArgError as exc:
+        return fail(str(exc))
+    issues: list[dict[str, Any]] = []
+    if a.issues:
+        try:
+            raw = json.loads(Path(a.issues).read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            return fail(f"перелік номерів не прочитався: {exc}")
+        if not isinstance(raw, list):
+            return fail("перелік номерів — це список JSON")
+        issues = raw
+    try:
+        got = pack_print(Path(a.src), a.vydannia, a.year, title=a.title,
+                         ocr_by=a.ocr_by, ocr_layer=a.ocr_layer, page_unit=a.page_unit,
+                         places=list(a.place), publisher_place=a.publisher_place,
+                         issues=issues,
+                         publisher=a.publisher or defaults["publisher"],
+                         contact=_contact(a.contact, defaults["contact"]),
+                         site=defaults["site"], note=a.note, links=links,
+                         license_text=a.license or defaults["license"],
+                         source_terms=a.source_terms or defaults["source_terms"],
+                         dest=Path(a.out) if a.out else None, dry_run=a.dry_run)
+    except PublishError as exc:
+        return fail(str(exc))
+    env = ok(got)
+    for w in (got.get("gates") or {}).get("warnings") or []:
+        env.warn(str(w.get("code") or "gate"), str(w.get("text") or ""))
+    for why in (got.get("gates") or {}).get("refusals") or []:
+        env.warn("gate_refusal", str(why))
+    return env
+
+
 class ShareSetupArgs(BaseModel):
     handle: str = Field(default="", description="ваше ім'я або псевдонім у каталозі")
     contact: str = Field(default="", description="як із вами зв'язатись; це "
@@ -758,10 +830,90 @@ def share_row(a: ShareRowArgs) -> Envelope:
 
 
 class SharePullArgs(BaseModel):
-    query: str = Field(description="шифра, номер справи або назва місця")
+    query: str = Field(default="", description="шифра, номер справи або назва місця")
     base: str = Field(default="", description="інша адреса каталогу")
     take: bool = Field(default=False,
                        description="не лише знайти, а й прийняти єдиний збіг")
+    vydannia: str = Field(default="",
+                          description="код друкованого видання: прийняти всі його "
+                                      "роки (або --years) одним викликом")
+    years: str = Field(default="", description="роки видання: «1880» або «1862-1905»")
+
+
+def _years(raw: str) -> tuple[int, int] | None:
+    """«1880» або «1862-1905» → межі; порожньо — `None`."""
+    raw = (raw or "").strip()
+    if not raw:
+        return None
+    lo, _, hi = raw.partition("-")
+    try:
+        a, b = int(lo), int(hi or lo)
+    except ValueError as exc:
+        raise ArgError(f"роки «{raw}»: потрібно «1880» або «1862-1905»") from exc
+    return (a, b) if a <= b else (b, a)
+
+
+def _pull_vydannia(a: SharePullArgs) -> Envelope:
+    """Усі роки видання з пулу: по одному пакету на рік, найсвіжіший.
+
+    Каталог гортається сторінками, а збіг перевіряється точним розбором
+    ключа: пошук сервера — підрядок, і «VYD/PEV» без розбору зачепив би
+    будь-який код, що починається з PEV.
+    """
+    from nyshporka import vydannia
+    from nyshporka.share import catalog as C
+    from nyshporka.share.accept import AcceptError, accept
+
+    code = a.vydannia.strip().upper()
+    if not vydannia.is_code(code):
+        return fail(f"код видання «{a.vydannia}» — лише латинка й цифри")
+    try:
+        span = _years(a.years)
+    except ArgError as exc:
+        return fail(str(exc))
+    per_year: dict[int, Any] = {}
+    offset, step = 0, 50
+    try:
+        while True:
+            found, count, _of = C.search(f"{vydannia.REPO}/{code}", a.base,
+                                         limit=step, offset=offset)
+            for r in found:
+                got = vydannia.parse(r.shifra)
+                if not got or got[0] != code:
+                    continue
+                year = got[1]
+                if span and not (span[0] <= year <= span[1]):
+                    continue
+                # Рядки йдуть від найсвіжішого, тож перший на рік і є потрібний.
+                per_year.setdefault(year, r)
+            offset += step
+            if not found or offset >= count:
+                break
+    except RuntimeError as exc:
+        return fail(str(exc))
+    data: dict[str, Any] = {"vydannia": code, "years": sorted(per_year),
+                            "catalog": C.base_url(a.base), "imported": []}
+    env = ok(data)
+    if not per_year:
+        env.warn("nothing", f"у пулі немає років видання {code}"
+                            + (f" за {a.years}" if a.years else ""))
+        return env
+    if not a.take:
+        env.suggest("share.pull", "прийняти всі знайдені роки: --take")
+        return env
+    for year in sorted(per_year):
+        r = per_year[year]
+        if not r.url:
+            env.warn("no_url", f"{code} {year}: у рядку каталогу немає адреси пакета")
+            continue
+        try:
+            got = accept(r.url, sha256=r.sha256)
+        except AcceptError as exc:
+            env.warn("import_failed", f"{code} {year}: {exc}")
+            continue
+        data["imported"].append({"year": year, "case_key": got.get("case_key"),
+                                 "pages": got.get("pages"), "runs": got.get("runs")})
+    return env
 
 
 @op("share.pull", summary="Знайти справу в каталозі пулу",
@@ -780,6 +932,11 @@ def share_pull(a: SharePullArgs) -> Envelope:
     """
     from nyshporka.share import catalog as C
 
+    if a.vydannia:
+        return _pull_vydannia(a)
+    if not a.query.strip():
+        return fail("що шукати: шифра, номер справи чи назва місця — "
+                    "або --vydannia <код> для друкованого видання")
     # 🔴 Пошук тепер серверний. Раніше сюди качався ВЕСЬ каталог, і збіг
     # шукався в пам'яті: на сотні пакетів це було дешево, на десятках тисяч
     # означало б мегабайти на кожне питання про одну справу.

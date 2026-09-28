@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
+from nyshporka import vydannia
 from nyshporka.archives.pack import active as _pack_active
 from nyshporka.core.workspace import workspace
 from nyshporka.library import (
@@ -219,6 +220,13 @@ def _refuse_legacy_file(repo: str, fond: str, opys: str | None, spr: str,
 def resolve_case(value: str) -> CaseRef:
     """Будь-який людський ідентифікатор справи → CaseRef. ValueError якщо не вийшло."""
     v = (value or "").strip()
+    pub = vydannia.parse(v)
+    if pub is not None:
+        # Друковане видання: шифри архіву немає, і бібліотека справ про нього
+        # нічого не знає, тож ключ і є шифра (`nyshporka.vydannia`).
+        code, year = pub
+        k = vydannia.key(code, year)
+        return CaseRef(key=k, repo=vydannia.REPO, fond=code, spr=str(year), shifra=k)
     parsed: tuple[str, str, str | None, str] | None = None
     m = _KEY_RE.match(v)
     if m:

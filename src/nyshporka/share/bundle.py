@@ -822,6 +822,9 @@ def readme(manifest: Manifest) -> str:
     """
     d = manifest.decode
     models = ", ".join(manifest.models()) or "не названо"
+    pub = (manifest.extra or {}).get("publication")
+    if isinstance(pub, dict):
+        return _readme_print(manifest, pub)
     lines = [
         f"# {manifest.shifra or 'Прочитане'}",
         "",
@@ -877,5 +880,54 @@ def readme(manifest: Manifest) -> str:
         lines.append("")
     lic = manifest.license.get("text") or "не вказано"
     lines += [f"Ліцензія тексту: {lic}. Зображення в пакет не входять.",
+              f"Зібрано: {manifest.tool or 'Нишпорка'}, {manifest.created}."]
+    return "\n".join(lines) + "\n"
+
+
+def _readme_print(manifest: Manifest, pub: dict[str, Any]) -> str:
+    """README пакета друкованого видання: номери з адресами першоджерела."""
+    ocr = pub.get("ocr") if isinstance(pub.get("ocr"), dict) else {}
+    unit = "номер цілком" if pub.get("page_unit") == "issue" else "друкована сторінка"
+    lines = [
+        f"# {manifest.case.get('title') or manifest.shifra}",
+        "",
+        "Текстовий шар друкованого видання. Зображень тут немає: сторінки",
+        "звіряють із першоджерелом за адресами нижче.",
+        "",
+        "## Що в теках",
+        "",
+        f"- `{RUNS_SUB}/<прогін>/NNNN.txt` — одиниця тексту: {unit}, у порядку видання.",
+        f"- `{MANIFEST_NAME}` — ключ видання, перелік номерів (`extra.publication`).",
+        "",
+        "## Звідки текст",
+        "",
+        f"- текстовий шар: {ocr.get('by') or 'не названо'}"
+        + (f" ({ocr['layer']})" if ocr.get("layer") else ""),
+        f"- одиниць тексту: {manifest.pages}, рядків: {manifest.decode.get('lines') or 0}",
+        "",
+        "Текст машинний: цифри, дати й прізвища звіряють із зображенням у",
+        "першоджерелі, а не приймають як факт.",
+        "",
+    ]
+    issues = [r for r in pub.get("issues") or [] if isinstance(r, dict)]
+    if issues:
+        lines += ["## Номери", ""]
+        for r in issues:
+            where = f" — {r['source_url']}" if r.get("source_url") else ""
+            first = f", з одиниці {r['first_page']}" if r.get("first_page") else ""
+            lines.append(f"- №{r.get('no', '?')}{first}{where}")
+        lines.append("")
+    lines += ["## Покласти в Нишпорку", "",
+              "```", f"nysh share import <цей файл{SUFFIX}>", "```", ""]
+    if manifest.note:
+        lines += ["## Від того, хто зібрав", "", manifest.note, ""]
+    if manifest.links:
+        lines += ["## Посилання", ""]
+        lines += [f"- [{x.get('label') or x.get('url')}]({x.get('url')})"
+                  for x in manifest.links]
+        lines.append("")
+    lic = manifest.license.get("text") or "не вказано"
+    terms = manifest.license.get("source_terms")
+    lines += [f"Ліцензія: {lic}." + (f" Умови джерела: {terms}." if terms else ""),
               f"Зібрано: {manifest.tool or 'Нишпорка'}, {manifest.created}."]
     return "\n".join(lines) + "\n"

@@ -189,6 +189,60 @@ def pack_cmd(
     _notes(env)
 
 
+@app.command("pack-print")
+def pack_print_cmd(
+    src: str = typer.Argument(..., help="тека зі сторінками NNNN.txt у порядку видання"),
+    vydannia: str = typer.Option(..., "--vydannia", help="код видання латинкою: PEV, BEV…"),
+    year: int = typer.Option(..., "--year", help="рік випуску"),
+    title: str = typer.Option(..., "--title", help="назва видання без року"),
+    ocr_by: str = typer.Option(..., "--ocr-by",
+                               help="звідки текстовий шар: archive.org, сайт, власний OCR"),
+    ocr_layer: str = typer.Option("", "--ocr-layer", help="djvu, pdf-text, ocr"),
+    page_unit: str = typer.Option("page", "--page-unit",
+                                  help="page — файл = сторінка; issue — файл = номер"),
+    place: list[str] = typer.Option([], "--place", help="край чи губернія (можна кілька)"),
+    publisher_place: str = typer.Option("", "--city", help="місто видання"),
+    issues: str = typer.Option("", "--issues", help="JSON-файл переліку номерів"),
+    out: str = typer.Option("", "--out", "-o", help="куди покласти файл"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="показати й нічого не писати"),
+    publisher: str = typer.Option("", "--as", help="ваше ім'я або псевдонім"),
+    contact: str = typer.Option("", "--contact", help="контакт; «-» — не вказувати"),
+    note: str = typer.Option("", "--note", help="вільна нотатка до пакета"),
+    link: list[str] = typer.Option([], "--link", help="«підпис=адреса»"),
+    license_: str = typer.Option("", "--license", help="ліцензія; порожньо — з профілю"),
+    source_terms: str = typer.Option("", "--source-terms",
+                                     help="умови джерела текстового шару"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
+) -> None:
+    """Спакувати рік друкованого видання (газета, довідник) як книгу пулу.
+
+    Ключ у пулі — `VYD/<код>/<рік>`; віддається тим самим `nysh share publish`.
+    """
+    from nyshporka import ops as O
+
+    env = O.call("share.pack_print", {
+        "src": src, "vydannia": vydannia, "year": year, "title": title,
+        "ocr_by": ocr_by, "ocr_layer": ocr_layer, "page_unit": page_unit,
+        "place": list(place), "publisher_place": publisher_place, "issues": issues,
+        "out": out, "dry_run": dry_run, "publisher": publisher, "contact": contact,
+        "note": note, "link": list(link), "license": license_,
+        "source_terms": source_terms})
+    if _answer(env, as_json):
+        return
+    d = env.data or {}
+    dec = (d.get("manifest") or {}).get("decode") or {}
+    console.print(f"видання: [bold]{_e(d.get('case_key'))}[/bold] · одиниць "
+                  f"{_e(dec.get('pages'))} · рядків {_e(dec.get('lines'))}")
+    _show_gates(d.get("gates") or {})
+    if d.get("dry_run"):
+        console.print(f"поїхало б: файлів {d['files']} · {_mb(d['bytes_raw'])} до стиску")
+        console.print("[dim]нічого не записано (--dry-run)[/dim]")
+    else:
+        console.print(f"пакет: [bold]{_e(d['path'])}[/bold] · {_mb(d['bytes'])}")
+        console.print("\n[dim]віддати: nysh share publish <файл>[/dim]")
+    _notes(env)
+
+
 @app.command("card")
 def card_cmd(
     case: str = typer.Argument(..., help="шифра або ключ справи"),
@@ -598,20 +652,40 @@ def geometry_cmd(
 
 @app.command("pull")
 def pull_cmd(
-    query: str = typer.Argument(..., help="шифра, номер справи або назва місця"),
+    query: str = typer.Argument("", help="шифра, номер справи або назва місця"),
     base: str = typer.Option("", "--base", help="інша адреса каталогу"),
     take: bool = typer.Option(False, "--take",
-                              help="прийняти, якщо збіг рівно один"),
+                              help="прийняти, якщо збіг рівно один; з --vydannia — "
+                                   "усі знайдені роки"),
+    vydannia: str = typer.Option("", "--vydannia",
+                                 help="код друкованого видання (PEV, BEV, KHEV…): "
+                                      "усі його роки одним викликом"),
+    years: str = typer.Option("", "--years", help="роки видання: «1880» або «1862-1905»"),
     as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
-    """Знайти справу в каталозі пулу — і за потреби одразу прийняти."""
+    """Знайти справу в каталозі пулу — і за потреби одразу прийняти.
+
+    Друковане видання: `nysh share pull --vydannia PEV --take` бере всі роки
+    одним викликом; перелік видань — nyshporka.online/supriaha/vydannia.
+    """
     from nyshporka import ops as O
 
     _kliuch_abo_vkhid(as_json)
-    env = O.call("share.pull", {"query": query, "base": base, "take": take})
+    env = O.call("share.pull", {"query": query, "base": base, "take": take,
+                                "vydannia": vydannia, "years": years})
     if _answer(env, as_json):
         return
     d = env.data or {}
+    if vydannia:
+        yrs = d.get("years") or []
+        console.print(f"видання [bold]{_e(d.get('vydannia'))}[/bold] у пулі: "
+                      f"років {len(yrs)}"
+                      + (f" ({yrs[0]}–{yrs[-1]})" if yrs else ""))
+        for i in d.get("imported") or []:
+            console.print(f"  ← {_e(i.get('year'))}: {_e(i.get('pages'))} стор. · "
+                          f"{_e(i.get('case_key'))}")
+        _notes(env)
+        return
     console.print(f"каталог: {_e(d.get('catalog'))} · пакетів {_e(d.get('of'))} · "
                   f"збігів [bold]{_e(d.get('count'))}[/bold]")
     for r in (d.get("found") or [])[:20]:
