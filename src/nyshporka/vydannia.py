@@ -51,3 +51,12 @@ def parse(value: str) -> tuple[str, int] | None:
     if not m:
         return None
     return m.group(1).upper(), int(m.group(2))
+
+
+_SERIES_RE = re.compile(r"^VYD\s*[/ ]\s*([A-Za-z][A-Za-z0-9_]{1,23})\s*/?$", re.IGNORECASE)
+
+
+def parse_series(value: str) -> str | None:
+    """`VYD/PEV` → `"PEV"`: усі роки видання як одна область пошуку."""
+    m = _SERIES_RE.match((value or "").strip())
+    return m.group(1).upper() if m else None

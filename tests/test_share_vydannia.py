@@ -146,3 +146,24 @@ def test_pull_vydannia_bere_po_odnomu_paketu_na_rik(space: Path, monkeypatch) ->
     assert env.data["years"] == [1880, 1881]
     assert taken == ["u80", "u81b"]
     assert json.dumps(env.data, ensure_ascii=False)
+
+
+def test_seriia_vydannia_ie_oblastiu_poshuku(space: Path, monkeypatch) -> None:
+    from nyshporka import htr_store as S
+    from nyshporka.share.accept import accept
+
+    monkeypatch.setattr(S, "HTR_ROOT", space / "reports" / "htr")
+    monkeypatch.setattr(S, "_RUNS_CACHE", None)
+
+    assert vydannia.parse_series("VYD/PEV") == "PEV"
+    assert vydannia.parse_series("VYD/PEV/1880") is None
+    for rik in (1880, 1881):
+        src = space / f"s{rik}"
+        src.mkdir()
+        (src / "0001.txt").write_text("священникъ Григорій Вишневецкій, строка\n",
+                                      encoding="utf-8")
+        got = pack_print(src, "PEV", rik, title="ПЕВ", ocr_by="archive.org",
+                         dest=space / f"p{rik}.nyshtext")
+        accept(got["path"])
+    scope = S.runs_for_scope("VYD/PEV")
+    assert sorted(r["name"] for r in scope["rows"]) == ["vyd_pev_1880", "vyd_pev_1881"]

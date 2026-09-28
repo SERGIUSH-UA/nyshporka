@@ -700,7 +700,15 @@ def runs_for_scope(scope: str) -> dict[str, Any]:
         # означають усі справи серії. Доти доводилось ганяти справи по одній
         # (перевірка живим пошуком 08.09). Збіг — за хвостом шифри прогону,
         # тож «230-1» не тягне «230-10».
-        series = _series_rows(rows, want)
+        from nyshporka import vydannia
+
+        code = vydannia.parse_series(want)
+        if code:
+            # Усі роки друкованого видання: `VYD/PEV` — як «904-24» для фонду.
+            head = f"{vydannia.REPO}/{code}/"
+            series = [r for r in rows if key_of(r).startswith(head)]
+        else:
+            series = _series_rows(rows, want)
         if not series:
             raise
         keys = sorted({(r.get("case_key") or "").strip() for r in series})
