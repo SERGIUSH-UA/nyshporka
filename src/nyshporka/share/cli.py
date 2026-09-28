@@ -62,6 +62,8 @@ def _show_card(card: dict[str, Any], indent: str = "  ") -> None:
         console.print(f"{indent}місця: {_e('; '.join(card['places']))}")
     if card.get("doc_type"):
         console.print(f"{indent}жанр: {_e(card['doc_type'])}")
+    if card.get("frames"):
+        console.print(f"{indent}кадрів: {card['frames']}")
 
 
 # Прапорці картки однакові в `pack`, `suggest` і `card` — одна довідка.
@@ -69,10 +71,12 @@ _TITLE_HELP = "назва справи для картки в пулі (запа
 _YEARS_HELP = "роки справи: «1795» або «1795-1797»"
 _PLACE_HELP = "місце, яке охоплює справа (можна кілька разів)"
 _GENRE_HELP = "жанр: birth, marriage, death, confession, revision, clergy_list, other…"
+_FRAMES_HELP = ("скільки кадрів має справа, коли на диску їх немає (PDF, прибрані "
+                "після читання): число з каталогу чи опису; 0 — стерти")
 
 
 def _card_args(title: str | None, years: str | None, place: list[str] | None,
-               genre: str | None) -> dict[str, Any]:
+               genre: str | None, frames: int | None = None) -> dict[str, Any]:
     out: dict[str, Any] = {}
     if title is not None:
         out["title"] = title
@@ -82,6 +86,8 @@ def _card_args(title: str | None, years: str | None, place: list[str] | None,
         out["place"] = list(place)
     if genre is not None:
         out["genre"] = genre
+    if frames is not None:
+        out["frames"] = frames
     return out
 
 
@@ -119,6 +125,7 @@ def pack_cmd(
     years: str | None = typer.Option(None, "--years", help=_YEARS_HELP),
     place: list[str] = typer.Option([], "--place", help=_PLACE_HELP),
     genre: str | None = typer.Option(None, "--genre", help=_GENRE_HELP),
+    frames: int | None = typer.Option(None, "--frames", help=_FRAMES_HELP),
     skip_run: list[str] = typer.Option([], "--skip-run",
                                        help="прогін, який НЕ пакувати (можна кілька)"),
     as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
@@ -138,7 +145,7 @@ def pack_cmd(
         "publisher": publisher, "contact": contact, "site": site, "note": note,
         "link": list(link), "extra": list(extra), "license": license_,
         "source_terms": source_terms, "archive_name": archive_name,
-        "skip_run": list(skip_run), **_card_args(title, years, place, genre)})
+        "skip_run": list(skip_run), **_card_args(title, years, place, genre, frames)})
     if _answer(env, as_json):
         return
     d = env.data or {}
@@ -189,6 +196,7 @@ def card_cmd(
     years: str | None = typer.Option(None, "--years", help=_YEARS_HELP),
     place: list[str] = typer.Option([], "--place", help=_PLACE_HELP),
     genre: str | None = typer.Option(None, "--genre", help=_GENRE_HELP),
+    frames: int | None = typer.Option(None, "--frames", help=_FRAMES_HELP),
     clear: bool = typer.Option(False, "--clear", help="прибрати картку цілком"),
     as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
@@ -201,7 +209,7 @@ def card_cmd(
     from nyshporka import ops as O
 
     env = O.call("share.card", {"case": case, "clear": clear,
-                                **_card_args(title, years, place, genre)})
+                                **_card_args(title, years, place, genre, frames)})
     if _answer(env, as_json):
         return
     d = env.data or {}

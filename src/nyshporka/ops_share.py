@@ -89,7 +89,8 @@ def _card(a: Any) -> dict[str, Any]:
     return K.normalize(
         title=getattr(a, "title", None), years=getattr(a, "years", None),
         places=list(places) if places else None,
-        doc_type=getattr(a, "genre", None))
+        doc_type=getattr(a, "genre", None),
+        frames=getattr(a, "frames", None))
 
 
 def _contact(value: str, default: str) -> str:
@@ -107,6 +108,10 @@ class _CardFields(BaseModel):
     genre: str | None = Field(default=None,
                               description="жанр картки: birth, marriage, death, "
                                           "confession, revision, clergy_list, other…")
+    frames: int | None = Field(default=None,
+                               description="скільки кадрів має справа, коли на диску "
+                                           "їх немає (PDF, прибрані після читання, "
+                                           "читано з чужого); 0 — стерти")
 
 
 class SharePackArgs(_CardFields):

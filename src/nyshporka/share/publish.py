@@ -573,6 +573,13 @@ def build_manifest(scope: str, *,
         lic["source_terms"] = source_terms
     if not frames:
         frames_block = _znamennyk_z_pasporta(frames_block, home)
+    if not frames_block.get("total") and key:
+        # Паспорт мовчить, а бібліотека знає сторінки PDF — це й є кадри
+        # справи, читаної з PDF. `listed` лишається нулем: зображень, до яких
+        # прив'язувати текст, на диску немає.
+        n = align.library_frames(key)
+        if n > 0:
+            frames_block = {**frames_block, "total": n, "on_disk": 0}
     case = _opys_z_progoniv(_normalize_shifra(_case_block(info, home), key), info)
     if archive_name.strip():
         # Архіву немає в довіднику — назву дає людина. Сервер покаже її на
@@ -617,6 +624,13 @@ def build_manifest(scope: str, *,
     if kartka:
         case = K.apply(case, kartka)
         nazva = str(case.get("title") or "")
+    if kartka.get("frames"):
+        # Число, назване людиною, — з каталогу чи опису, — сильніше за будь-який
+        # здогад. Але не менше, ніж кадрів справді лежить: тоді воно хибне.
+        n = int(kartka["frames"])
+        listed = int(frames_block.get("listed") or 0)
+        if n >= listed:
+            frames_block = {**frames_block, "total": n, "on_disk": listed}
     # Робочий запис паспорта про жанр (`record_type`) — вільний текст
     # дослідника, і в картку він іде лише очищеним, як і назва.
     if case.get("record_type"):

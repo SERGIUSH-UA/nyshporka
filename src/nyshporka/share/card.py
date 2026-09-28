@@ -28,8 +28,13 @@ from typing import Any
 
 CARDS_NAME = "cards.json"
 
-#: Поля картки, які можна задати. Кожне лягає в `case` маніфесту.
-FIELDS = ("title", "years", "places", "doc_type")
+#: Поля картки, які можна задати. Кожне, крім `frames`, лягає в `case`
+#: маніфесту; `frames` — знаменник у `frames.total`.
+FIELDS = ("title", "years", "places", "doc_type", "frames")
+
+#: Стеля знаменника: найбільші зведені томи — кілька тисяч кадрів, а число з
+#: п'ятьма нулями — це вже помилка набору, а не справа.
+MAX_FRAMES = 20000
 
 #: Стеля довжини назви: картка — не місце для абзацу.
 MAX_TITLE = 300
@@ -93,7 +98,8 @@ def parse_years(raw: str) -> list[int]:
 
 def normalize(*, title: str | None = None, years: str | None = None,
               places: list[str] | None = None,
-              doc_type: str | None = None) -> dict[str, Any]:
+              doc_type: str | None = None,
+              frames: int | None = None) -> dict[str, Any]:
     """Перевірити поля картки. `None` — поле не задавали; `""`/`[]` — стерти."""
     out: dict[str, Any] = {}
     if title is not None:
@@ -125,6 +131,11 @@ def normalize(*, title: str | None = None, years: str | None = None,
                 raise CardError(f"жанр «{doc_type}» невідомий; є: "
                                 + ", ".join(f"{k} ({v})" for k, v in known.items()))
         out["doc_type"] = code
+    if frames is not None:
+        n = int(frames)
+        if n < 0 or n > MAX_FRAMES:
+            raise CardError(f"кадрів {n} — поза межами 0–{MAX_FRAMES}; 0 стирає поле")
+        out["frames"] = n or ""
     return out
 
 

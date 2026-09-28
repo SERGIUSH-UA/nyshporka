@@ -91,7 +91,9 @@ def _gate_denominator(m: Manifest, v: Verdict, *, partial_why: str) -> None:
     if frames <= 0:
         v.warn("frames_unknown",
                "кадрів справи не названо, тож покриття не порахувати: "
-               "отримувач не зможе відрізнити повний декод від уривка")
+               "отримувач не зможе відрізнити повний декод від уривка. "
+               "Кадрів на диску немає (PDF, прибрані після читання) — назвіть "
+               "число з каталогу чи опису: nysh share card <справа> --frames N")
         return
     frac = pages / frames
     if frac < MIN_COVERAGE and not partial_why:

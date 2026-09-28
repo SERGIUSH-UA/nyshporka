@@ -366,6 +366,36 @@ def case_home_for(case_key: str, opys: str = "") -> Path | None:
     return None
 
 
+def library_frames(case_key: str) -> int:
+    """Скільки кадрів знає про справу бібліотека — навіть коли зображень немає.
+
+    🔴 Справа, прочитана з PDF, кадрів-зображень на диску не має, і
+    `case_dir_for` її не бачить. А бібліотека рахує сторінки PDF як кадри
+    (`library._count_case`) — саме заради того, щоб PDF-справа не ставала
+    невідрізненною від голої картки опису. Без цього числа пакет їхав із
+    «кадрів не названо»: 28.09.2026 так у пулі стояли всі 46 справ одного
+    видавця, читані з PDF.
+    """
+    key = (case_key or "").strip()
+    if not key:
+        return 0
+    try:
+        from nyshporka.library import load_library
+
+        rows = load_library()
+    except Exception:
+        return 0
+    best = 0
+    for row in rows:
+        if not _row_matches(row, key):
+            continue
+        try:
+            best = max(best, int(row.get("frames") or 0))
+        except (TypeError, ValueError):
+            continue
+    return best
+
+
 def case_dir_for(case_key: str) -> Path | None:
     """Тека кадрів цієї справи на ЦІЙ машині — або нічого.
 

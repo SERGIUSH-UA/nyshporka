@@ -232,6 +232,57 @@ def test_kartka_operatsiieiu(space: Path) -> None:
     assert env.data["card"] == {}
 
 
+# ── Кадри, яких на диску немає ──────────────────────────────────────────────
+# 28.09.2026 у пулі стояли 46 справ одного видавця з «кадрів не названо»: читав
+# із PDF, зображень у теці немає, і знаменника не мав звідки взятися.
+
+def _bez_kadriv(space: Path, monkeypatch: Any, library: int = 0) -> Any:
+    from nyshporka.share import align
+    from nyshporka.share import publish as PUB
+
+    run = make_run(_root(space), "spr-2149", pages=4)
+    monkeypatch.setattr(PUB, "resolve_runs", lambda scope, **kw: (
+        [run], {"key": "DAZHO/1/2149", "shifra": "ДАЖО 1-77-2149"}))
+    monkeypatch.setattr(align, "library_frames", lambda key: library)
+    return PUB
+
+
+def test_kartka_nazyvaie_kadry(space: Path, monkeypatch: Any) -> None:
+    from nyshporka.share import card as K
+
+    PUB = _bez_kadriv(space, monkeypatch)
+    got = PUB.pack("DAZHO/1/2149", geometry=False, partial_why="лише Пряжів",
+                   card_fields=K.normalize(frames=310))
+    fr = got["manifest"]["frames"]
+    assert fr["total"] == 310 and fr["on_disk"] == 0
+    assert fr["listed"] == 0, "прив'язувати текст нема до чого — listed лишається нулем"
+    assert not any(w["code"] == "frames_unknown" for w in got["gates"]["warnings"])
+    assert K.get("DAZHO/1/2149")["frames"] == 310, "число запам'ятовується, як і назва"
+
+
+def test_pdf_z_biblioteky_daie_znamennyk(space: Path, monkeypatch: Any) -> None:
+    PUB = _bez_kadriv(space, monkeypatch, library=4)
+    got = PUB.pack("DAZHO/1/2149", geometry=False, dry_run=True)
+    assert got["manifest"]["frames"]["total"] == 4
+
+
+def test_bez_chysla_poperedzhennia_kazhe_yak(space: Path, monkeypatch: Any) -> None:
+    PUB = _bez_kadriv(space, monkeypatch)
+    got = PUB.pack("DAZHO/1/2149", geometry=False, dry_run=True)
+    tekst = next(w["text"] for w in got["gates"]["warnings"] if w["code"] == "frames_unknown")
+    assert "--frames" in tekst, "попередження мусить казати, як виправити"
+
+
+def test_kadry_kartky_mezhi() -> None:
+    from nyshporka.share import card as K
+
+    with pytest.raises(K.CardError, match="межами"):
+        K.normalize(frames=-1)
+    with pytest.raises(K.CardError, match="межами"):
+        K.normalize(frames=K.MAX_FRAMES + 1)
+    assert K.normalize(frames=0) == {"frames": ""}, "0 стирає поле"
+
+
 # ── C14: застарілий geom-файл ────────────────────────────────────────────────
 
 def test_bez_heometrii_staryi_geom_prybyraietsia(space: Path, monkeypatch: Any) -> None:
