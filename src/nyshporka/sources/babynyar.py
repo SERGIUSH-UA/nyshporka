@@ -55,6 +55,7 @@ from nyshporka.sources.base import (
 from nyshporka.sources.cfclient import CfClient, ShieldError
 from nyshporka.sources.http import Fetcher, HttpError
 from nyshporka.utils.atomic import atomic_write_bytes
+from nyshporka.utils.fsname import UnsafeName, safe_filename
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -271,7 +272,14 @@ def s3_name(url: str) -> str:
         return ""
     if "://" not in path:
         return ""
-    return path.rstrip("/").rpartition("/")[2]
+    # 🔴 Ім'я йде в шлях запису кадру, а шлях s3 приходить із HTML сайту.
+    # `rpartition("/")` не зрізає `\`, тож `..\..\x` на Windows вивів би
+    # запис за межі теки справи. Недовірене ім'я — без хвоста: кадр ляже як
+    # `0001.jpg`, звірка з сайтом лишиться за порядком сторінки.
+    try:
+        return safe_filename(path.rstrip("/").rpartition("/")[2])
+    except UnsafeName:
+        return ""
 
 
 @lru_cache(maxsize=8)
