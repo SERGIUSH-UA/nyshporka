@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 from nyshporka.utils.atomic import CorruptFileError, read_json
 
@@ -35,7 +36,7 @@ def _norm(path: str | Path) -> str:
     return s[:-len("/pages")] if s.endswith("/pages") else s
 
 
-def _meta(out_dir: Path) -> dict:
+def _meta(out_dir: Path) -> dict[str, Any]:
     try:
         raw = read_json(out_dir / META_NAME, default={})
     except CorruptFileError:
@@ -43,7 +44,7 @@ def _meta(out_dir: Path) -> dict:
     return raw if isinstance(raw, dict) else {}
 
 
-def _belongs_elsewhere(meta: dict, frames_dir: Path, case_key: str) -> bool:
+def _belongs_elsewhere(meta: dict[str, Any], frames_dir: Path, case_key: str) -> bool:
     """Чи довела мета, що теку зайняла ІНША справа. Немає доказу — `False`.
 
     Ключ справи вирішує, коли він є з обох боків. Без ключа судить тека кадрів

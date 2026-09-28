@@ -1866,7 +1866,7 @@ def build_library() -> list[CaseEntry]:
                     entry.repo, entry.fond, opys_here, entry.spr,
                     shifra=_shifra(entry.repo, entry.fond, opys_here, entry.spr),
                     holder_shifra=entry.shifra, holder_key=entry.key)
-                parsed = (entry.repo, entry.fond, opys_here, entry.spr)
+                parsed = (entry.repo or "", entry.fond or "", opys_here, entry.spr or "")
             v_new, v_old = _sidecar_village(rel), _sidecar_village(entry.path)
             if other_opys or (v_new and v_old and v_new != v_old):
                 pass  # → нижче створиться свій запис

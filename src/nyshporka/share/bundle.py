@@ -886,7 +886,8 @@ def readme(manifest: Manifest) -> str:
 
 def _readme_print(manifest: Manifest, pub: dict[str, Any]) -> str:
     """README пакета друкованого видання: номери з адресами першоджерела."""
-    ocr = pub.get("ocr") if isinstance(pub.get("ocr"), dict) else {}
+    raw_ocr = pub.get("ocr")
+    ocr: dict[str, Any] = raw_ocr if isinstance(raw_ocr, dict) else {}
     unit = "номер цілком" if pub.get("page_unit") == "issue" else "друкована сторінка"
     lines = [
         f"# {manifest.case.get('title') or manifest.shifra}",

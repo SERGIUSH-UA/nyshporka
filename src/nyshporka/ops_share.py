@@ -909,13 +909,13 @@ def _pull_vydannia(a: SharePullArgs) -> Envelope:
             env.warn("no_url", f"{code} {year}: у рядку каталогу немає адреси пакета")
             continue
         try:
-            got = accept(r.url, sha256=r.sha256, force=a.force)
+            taken = accept(r.url, sha256=r.sha256, force=a.force)
         except AcceptError as exc:
             env.warn("import_failed", f"{code} {year}: {exc}"
                      + ("" if a.force else " (оновити взяте: --force)"))
             continue
-        data["imported"].append({"year": year, "case_key": got.get("case_key"),
-                                 "pages": got.get("pages"), "runs": got.get("runs")})
+        data["imported"].append({"year": year, "case_key": taken.get("case_key"),
+                                 "pages": taken.get("pages"), "runs": taken.get("runs")})
     return env
 
 
