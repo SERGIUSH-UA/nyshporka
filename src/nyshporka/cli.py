@@ -2850,6 +2850,8 @@ def skills_install(
     force: bool = typer.Option(False, "--force",
                                help="перезаписати навіть правлене руками"),
     only: str = typer.Option("", "--only", help="лише ці скіли, через кому"),
+    prune: bool = typer.Option(False, "--prune",
+                               help="прибрати скіли, яких у пакеті вже немає"),
 ) -> None:
     """Покласти скіли туди, де їх бачить агент.
 
@@ -2873,7 +2875,7 @@ def skills_install(
                       f"  (є: {', '.join(sorted(known))})")
         raise typer.Exit(code=1)
 
-    out = S.install(dest, version=__version__, force=force, names=names)
+    out = S.install(dest, version=__version__, force=force, names=names, prune=prune)
     if not out:
         console.print("[warn]![/warn] нічого не встановлено")
         raise typer.Exit(code=1)
@@ -2882,7 +2884,8 @@ def skills_install(
     for o in out:
         tally[o.verdict] = tally.get(o.verdict, 0) + 1
     word = {"new": "нових", "updated": "оновлено", "same": "без змін",
-            "kept": "лишено (правлено руками)"}
+            "kept": "лишено (правлено руками)", "orphan": "сиріт",
+            "pruned": "прибрано сиріт"}
     parts = [f"{word[k]} {v}" for k, v in tally.items() if k in word]
     console.print(f"✓ {dest} — " + " · ".join(parts))
 
@@ -2892,6 +2895,14 @@ def skills_install(
     if kept := [o.rel for o in out if o.verdict == "kept"]:
         console.print("  [muted]не чіпав (є ваші правки; --force перезапише):[/muted]")
         for rel in kept:
+            console.print(f"    {rel}")
+
+    # Сирота — скіл, якого в пакеті вже немає: агент вантажить його нарівні з
+    # чинними. Називаємо поіменно й кажемо, як прибрати.
+    if orphans := [o.rel for o in out if o.verdict == "orphan"]:
+        console.print("  [warn]![/warn] [muted]у пакеті вже немає (агент їх досі бачить; "
+                      "--prune прибере незмінені):[/muted]")
+        for rel in orphans:
             console.print(f"    {rel}")
 
     where = "у будь-якому проєкті" if user else "у цьому проєкті"

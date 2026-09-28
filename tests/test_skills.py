@@ -125,6 +125,37 @@ def test_only_installs_the_named_skill(pack: Path, tmp_path: Path) -> None:
     assert not (dest / "other").exists()
 
 
+def test_a_skill_gone_from_the_package_is_reported_then_pruned(
+        pack: Path, tmp_path: Path) -> None:
+    """🔴 Знятий із пакета скіл лишався в теці агента й радив зняте.
+
+    Звітується завжди, прибирається лише з `prune` і лише незмінений: правлений
+    руками — чужа робота, навіть коли пакет від скіла відмовився.
+    """
+    import shutil
+
+    dest = tmp_path / "dest"
+    S.install(dest, version="1.0")
+    shutil.rmtree(pack / "other")
+    (dest / "probe" / "SKILL.md").write_text("своє\n", encoding="utf-8")
+
+    out = {o.rel: o.verdict for o in S.install(dest, version="1.1")}
+    assert out["other/SKILL.md"] == "orphan"
+    assert (dest / "other" / "SKILL.md").is_file(), "без --prune нічого не зноситься"
+
+    (dest / "other" / "references" / "TABLE.md").write_text("правив\n", encoding="utf-8")
+    out = {o.rel: o.verdict for o in S.install(dest, version="1.1", prune=True)}
+    assert out["other/SKILL.md"] == "pruned"
+    assert out["other/references/TABLE.md"] == "orphan", "правлене руками лишається"
+    assert not (dest / "other" / "SKILL.md").exists()
+    assert (dest / "other" / "references" / "TABLE.md").is_file()
+    files = json.loads((dest / S.LEDGER).read_text(encoding="utf-8"))["files"]
+    assert "other/SKILL.md" not in files
+
+    assert "other/SKILL.md" not in {o.rel for o in S.install(dest, version="1.1")}, (
+        "прибраний сирота з обліку зник і більше не звітується")
+
+
 def test_package_ships_its_skills(tmp_path: Path) -> None:
     """Скіли, які пакет несе насправді, а не в підкладеній фікстурі.
 

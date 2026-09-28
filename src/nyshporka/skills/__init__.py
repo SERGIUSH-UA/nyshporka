@@ -181,12 +181,13 @@ class Outcome:
 
     #: Куди лягло (відносно `dest`).
     rel: str
-    #: `new` · `updated` · `same` · `kept` (правлено руками, не чіпаємо)
+    #: `new` · `updated` · `same` · `kept` (правлено руками, не чіпаємо) ·
+    #: `orphan` (клали ми, у пакеті вже немає) · `pruned` (сироту прибрано)
     verdict: str
 
 
 def install(dest: Path, *, version: str, force: bool = False,
-            names: tuple[str, ...] = ()) -> list[Outcome]:
+            names: tuple[str, ...] = (), prune: bool = False) -> list[Outcome]:
     """Покласти скіли в теку, яку читає агент.
 
     🔴 Правлений руками файл не перезаписується без `force`. Скіл — це текст,
@@ -232,11 +233,36 @@ def install(dest: Path, *, version: str, force: bool = False,
                 shutil.copy2(src, dst)
                 out.append(Outcome(rel, "updated"))
 
+    # 🔴 Сироти: файли, які клали МИ, а в пакеті їх уже немає (скіл
+    # перейменовано чи знято). Лишені, вони вантажаться агентом нарівні з
+    # чинними й радять те, чого пакет більше не робить. Звітуються завжди;
+    # прибираються лише з `prune` і лише незмінені — правлене руками чуже.
+    # При `--only` сиріт не шукаємо: решта пакета тоді не перелічена.
+    orphans: set[str] = set()
+    if not names:
+        for rel, digest in known.items():
+            if rel in fresh:
+                continue
+            dst = dest / rel
+            if not dst.is_file():
+                orphans.add(rel)
+                continue
+            if prune and (force or sha256(dst) == digest):
+                dst.unlink()
+                parent = dst.parent
+                while parent != dest and parent.is_dir() and not any(parent.iterdir()):
+                    parent.rmdir()
+                    parent = parent.parent
+                out.append(Outcome(rel, "pruned"))
+                orphans.add(rel)
+            else:
+                out.append(Outcome(rel, "orphan"))
+
     kept = {o.rel for o in out if o.verdict == "kept"}
     # 🔴 Облік ЗЛИВАЄТЬСЯ з попереднім, а не переписується з нуля: при
     # `--only X` у `fresh` лише X, і решта скілів випадала з обліку — далі
     # `sync` бачив їх як «ніколи не клали» й не оновлював уже ніколи.
-    files = {k: v for k, v in known.items() if k not in kept}
+    files = {k: v for k, v in known.items() if k not in kept and k not in orphans}
     files.update({k: v for k, v in fresh.items() if k not in kept})
     from nyshporka.utils.atomic import atomic_write_text
 
