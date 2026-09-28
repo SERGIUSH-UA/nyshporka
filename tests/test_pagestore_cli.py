@@ -83,6 +83,30 @@ def test_a_batch_keeps_the_valid_notes_when_one_is_broken(case):
     assert after["noted"] == 2, "валідні анотації не лягли"
 
 
+def test_a_note_without_a_status_is_not_full(case):
+    """🔴 «Повний» — свідоме твердження, а не те, що лягло само.
+
+    Типовий `full` робив повним кожен аркуш, куди агент заніс лише хіт: реєстр
+    рахував його в `pages_full`, нуль по справі ставав довіреним, а злиття
+    вже ніколи не знижує `full` (аудит 29.09.2026). Сторінка без імен за своєю
+    природою (blank/cover/flyleaf) — виняток: порожній перелік на ній і є повний.
+    """
+    r = _run("pages", "note", "DAHMO/315/8433", "0106.jpg", "--type", "birth",
+             "--surnames", "Ковальський", "--json")
+    assert r.exit_code == 0, r.output
+    r = _run("pages", "note", "DAHMO/315/8433", "0107.jpg", "--type", "blank",
+             "--json")
+    assert r.exit_code == 0, r.output
+    assert "full_without_surnames" not in r.output, "порожня сторінка — не вада"
+    batch = json.dumps([{"scan": "0108.jpg", "page_type": "birth",
+                         "surnames": ["Ковальський"]}], ensure_ascii=False)
+    assert _run("pages", "note-batch", "DAHMO/315/8433", "--json",
+                stdin=batch).exit_code == 0
+
+    got = _data(_run("pages", "status", "DAHMO/315/8433", "--json"))
+    assert got["by_status"] == {"partial": 2, "full": 1}, got["by_status"]
+
+
 def test_a_key_that_does_not_match_the_scan_on_disk_is_reported(case):
     """🔴 Ключ без розширення проходить валідацію моделі й НЕ матчиться зі
     сканом — сторінка, яку вже дивились оком, лишається в черзі на рендер.
