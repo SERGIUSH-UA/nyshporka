@@ -347,3 +347,56 @@ def test_kryvyi_vidbytok_ne_valyt_zvirku(slots: Any) -> None:
             "slots": [{"at": 0.5, "n": 2, "phash": "0" * 36, "sha256": "a"}]}
     zbihlos, zvireno = FP.compare(mine, {"version": 1, "frames": 3, "slots": slots})
     assert zbihlos == zvireno == 0
+
+
+# ── B12: ворота не тримають у пам'яті більше, ніж стеля тексту ──────────────
+# Аудит 29.09.2026: tar.gz із нулів на ~4 МБ (64 файли по 64 МБ) проходив усі
+# старі стелі, а ворота тримали його текст двічі — байтами й рядками.
+
+def test_tekst_ponad_stelu_pamiati_vidmova(space: Path, tmp_path: Path,
+                                           monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(bundle, "MAX_TEXT_BYTES", 4096)
+    zeros = {f"runs/spr-8433/{i:04d}.txt": bytes(3000) for i in range(10, 14)}
+    pack = handmade(tmp_path / "p.nyshtext", extra_members=zeros)
+    with pytest.raises(accept.AcceptError, match="тримають у пам'яті"):
+        accept.look(str(pack))
+    with pytest.raises(bundle.BundleError):
+        bundle.read_texts(pack, bundle.inventory(pack))
+
+
+def test_stelia_tekstu_ne_chipaie_zvychainyi_paket(space: Path, tmp_path: Path,
+                                                  monkeypatch: pytest.MonkeyPatch) -> None:
+    pack = handmade(tmp_path / "p.nyshtext", pages=3)
+    texts = _texts(3)
+    monkeypatch.setattr(bundle, "MAX_TEXT_BYTES", sum(len(b) for b in texts.values()))
+    got = bundle.read_texts(pack, bundle.inventory(pack))
+    assert got == {"spr-8433": texts}
+
+
+def test_teksty_chytaiutsia_odnym_prokhodom_u_poriadku_arkhivu(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """🔴 Перемежані голоси: стрибок назад у gzip — розпакування з початку."""
+    pack = tmp_path / "p.nyshtext"
+    with tarfile.open(pack, "w:gz") as tar:
+        _add(tar, bundle.MANIFEST_NAME, b"{}")
+        for i in range(1, 4):
+            for run in ("a", "b"):
+                _add(tar, f"runs/{run}/{i:04d}.txt", f"{run}{i}".encode())
+    inv = bundle.inventory(pack)
+    offsets: list[int] = []
+    real = tarfile.TarFile.extractfile
+
+    def spy(self: tarfile.TarFile, member: Any) -> Any:
+        offsets.append(member.offset)
+        return real(self, member)
+
+    monkeypatch.setattr(tarfile.TarFile, "extractfile", spy)
+    got = bundle.read_texts(pack, inv)
+    assert offsets == sorted(offsets) and len(offsets) == 6
+    assert got["b"]["0002.txt"] == b"b2" and got["a"]["0003.txt"] == b"a3"
+
+
+def test_tally_z_linyvoho_perehliadu(tmp_path: Path) -> None:
+    raw = {"r": {"0001.txt": "a\nб\n".encode(), "0002.txt": b"  \n"}}
+    assert bundle.tally(bundle.decoded(raw), {"r": "m"}) == {
+        "pages": 2, "lines": 2, "chars": 2, "blank_pages": 1}

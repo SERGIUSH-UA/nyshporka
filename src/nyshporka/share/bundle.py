@@ -29,7 +29,7 @@ import json
 import re
 import tarfile
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -297,7 +297,8 @@ def _run_stats(run_dir: Path) -> tuple[int, int, int]:
     return pages, lines, chars
 
 
-def tally(pages: dict[str, dict[str, str]], models: dict[str, str]) -> dict[str, int]:
+def tally(pages: Mapping[str, Mapping[str, str]],
+          models: Mapping[str, str]) -> dict[str, int]:
     """Знаменник пакета з САМИХ текстів: `{прогін: {сторінка: текст}}`.
 
     Один підрахунок на обидва кінці — пакувальник рахує з диска, приймач із
@@ -518,6 +519,16 @@ MAX_MEMBERS = 200_000
 MAX_MEMBER_BYTES = 64 << 20
 MAX_TOTAL_BYTES = 4 << 30
 MAX_MANIFEST_BYTES = 16 << 20
+#: Стеля ТЕКСТУ, який ворота тримають у пам'яті (`read_texts`).
+#:
+#: 🔴 Окрема від `MAX_TOTAL_BYTES`, бо та міряна під ДИСК: 4 ГіБ на диску —
+#: дрібниця, а 4 ГіБ байтів у пам'яті плюс їхня копія рядками — це вже понад
+#: 8 ГБ ОЗП. Аудит 29.09.2026: tar.gz із нулів на ~4 МБ (64 файли по 64 МБ,
+#: у межах усіх старих стель) клав `nysh share inspect` на машині з 16 ГБ.
+#: 256 МБ — із запасом ×5 на найбільшу справу, яку ми бачили (3772 аркуші,
+#: два голоси — десятки мегабайтів тексту), і водночас сума, яку витримає
+#: будь-який ноутбук, де запускають Нишпорку.
+MAX_TEXT_BYTES = 256 << 20
 #: Стеля завантаження пакета за адресою.
 MAX_DOWNLOAD_BYTES = 2 << 30
 
@@ -677,22 +688,52 @@ def inventory(path: Path) -> Inventory:
 
 def read_texts(path: Path, inv: Inventory,
                runs: list[str] | None = None) -> dict[str, dict[str, bytes]]:
-    """Сирі байти сторінок пакета: `{прогін: {сторінка: байти}}` — для воріт."""
+    """Сирі байти сторінок пакета: `{прогін: {сторінка: байти}}` — для воріт.
+
+    🔴 Сумарно не більше `MAX_TEXT_BYTES`, і стеля рахується ПО ПРОЧИТАНОМУ,
+    а не по заяві заголовка: відмова — `BundleError` до того, як зайвий
+    байт ліг у пам'ять (аудит 29.09.2026).
+
+    🔴 Один прохід у порядку АРХІВУ, а не прогонів. Члени шукаються за
+    зсувом у tar; обхід «прогін за прогоном» на пакеті, де сторінки двох
+    голосів перемежані, стрибав назад, а стрибок назад у gzip — це
+    розпакування з початку файлу, тобто квадратичний час на чужому пакеті.
+    """
+    cap = MAX_TEXT_BYTES
     want = set(runs) if runs is not None else set(inv.runs)
     out: dict[str, dict[str, bytes]] = {r: {} for r in inv.runs if r in want}
+    todo: dict[int, tuple[str, str]] = {
+        member.offset: (run, fname)
+        for run, files in inv.runs.items() if run in want
+        for fname, member in files.items() if fname.endswith(".txt")}
+    if not todo:
+        return out
+    held = 0
     try:
         with _open(path) as tar:
-            for run, files in inv.runs.items():
-                if run not in want:
+            for member in tar:
+                slot = todo.pop(member.offset, None)
+                if slot is None or not member.isfile():
                     continue
-                for fname, member in files.items():
-                    if not fname.endswith(".txt"):
-                        continue
-                    src = tar.extractfile(member)
-                    out[run][fname] = src.read() if src is not None else b""
+                if held + member.size > cap:
+                    raise BundleError(_text_cap_why(cap))
+                src = tar.extractfile(member)
+                blob = src.read(cap - held + 1) if src is not None else b""
+                held += len(blob)
+                if held > cap:
+                    raise BundleError(_text_cap_why(cap))
+                run, fname = slot
+                out[run][fname] = blob
+                if not todo:
+                    break
     except (tarfile.TarError, EOFError, OSError, zlib_error()) as exc:
         raise BundleError(f"пакет не прочитався: {exc}") from exc
     return out
+
+
+def _text_cap_why(cap: int) -> str:
+    return (f"текст голосів у пакеті понад {cap >> 20} МБ — більше, ніж ворота "
+            f"тримають у пам'яті; справжня справа важить у рази менше")
 
 
 def text_hash(texts: dict[str, bytes]) -> str:
@@ -707,9 +748,30 @@ def text_hash(texts: dict[str, bytes]) -> str:
     return h.hexdigest()
 
 
-def decoded(texts: dict[str, dict[str, bytes]]) -> dict[str, dict[str, str]]:
-    return {run: {n: b.decode("utf-8", errors="replace") for n, b in pages.items()}
-            for run, pages in texts.items()}
+class _Decoded(Mapping[str, str]):
+    """Сторінки прогону як текст — декодуються при зверненні, по одній."""
+
+    def __init__(self, raw: dict[str, bytes]) -> None:
+        self._raw = raw
+
+    def __getitem__(self, name: str) -> str:
+        return self._raw[name].decode("utf-8", errors="replace")
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._raw)
+
+    def __len__(self) -> int:
+        return len(self._raw)
+
+
+def decoded(texts: dict[str, dict[str, bytes]]) -> dict[str, Mapping[str, str]]:
+    """Тексти для `tally` — без другої копії всього пакета рядками.
+
+    🔴 Лінивий перегляд, а не словник рядків: повна копія подвоювала пам'ять
+    воріт (аудит 29.09.2026), хоча `tally` дивиться на сторінку раз і далі
+    її не тримає.
+    """
+    return {run: _Decoded(pages) for run, pages in texts.items()}
 
 
 def members(path: Path) -> list[tuple[str, str]]:
