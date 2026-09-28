@@ -84,3 +84,61 @@ def test_a_broken_log_does_not_kill_the_search(space) -> None:
     assert T.of("DAHMO/315/8433") == []
     _note("DAHMO/315/8433", "Сікорський", ["pysar"])
     assert len(T.of("DAHMO/315/8433")) == 1
+
+
+def _unreadable(monkeypatch: pytest.MonkeyPatch, target: Path) -> None:
+    """Файл є, але читання відмовляє — як під антивірусом на Windows."""
+    real = Path.read_text
+
+    def fake(self: Path, *a, **kw):  # type: ignore[no-untyped-def]
+        if Path(self) == target:
+            raise PermissionError(13, "зайнято іншим процесом", str(self))
+        return real(self, *a, **kw)
+
+    monkeypatch.setattr(Path, "read_text", fake)
+
+
+def test_an_unreadable_log_is_not_wiped_by_the_next_sweep(space, monkeypatch) -> None:
+    """🔴 Аудит 29.09.2026: зайнятий у мить читання файл ставав `{}`, і запис
+    одного свіпу перезаписував слід усіх справ."""
+    from nyshporka.search import trace as T
+
+    _note("DAHMO/315/1", "Сікорський", ["pysar"])
+    before = T.path().read_bytes()
+    with monkeypatch.context() as m:
+        _unreadable(m, T.path())
+        _note("DAHMO/315/2", "Ковальський", ["pysar"])
+    assert T.path().read_bytes() == before
+    assert [x["q"] for x in T.of("DAHMO/315/1")] == ["Сікорський"]
+
+
+def test_a_corrupt_log_is_set_aside_not_overwritten(space) -> None:
+    """Побитий слід не губиться: його копія лягає поруч `.corrupt-<час>`."""
+    from nyshporka.search import trace as T
+
+    T.path().parent.mkdir(parents=True, exist_ok=True)
+    T.path().write_text('{"DAHMO/315/1": [{"q": "Сік"}], зіпсовано', encoding="utf-8")
+    _note("DAHMO/315/2", "Ковальський", ["pysar"])
+    aside = list(T.path().parent.glob(T.path().name + ".corrupt-*"))
+    assert len(aside) == 1
+    assert "зіпсовано" in aside[0].read_text(encoding="utf-8")
+
+
+def test_a_sweep_writes_under_the_lock_with_a_private_tmp(space, monkeypatch) -> None:
+    """Два свіпи паралельно: запис під локом і через tmp із pid у назві."""
+    import os
+
+    from nyshporka.search import trace as T
+    from nyshporka.utils import atomic as A
+
+    seen: list[tuple[str, bool]] = []
+    real = A._replace
+
+    def spy(tmp: Path, path: Path) -> None:
+        seen.append((tmp.name, path.with_name(path.name + ".lock").exists()))
+        real(tmp, path)
+
+    monkeypatch.setattr(A, "_replace", spy)
+    _note("DAHMO/315/1", "Сікорський", ["pysar"])
+    assert seen == [(f"{T.FILE}.{os.getpid()}.tmp", True)]
+    assert not T.path().with_name(T.FILE + ".lock").exists()

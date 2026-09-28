@@ -943,3 +943,73 @@ def test_teka_chuzhoho_boksu_ne_oznaka_a_prybranyi_stejdzhynh_oznaka(space: Path
     assert S.same_frames("D:/стейджинг/x_stage", "", r"d:\стейджинг\x_stage", "CDIAK/224/946")
     assert not S.same_frames("D:/стейджинг/x_stage", "DAHMO/315/1", "D:/стейджинг/x_stage",
                              "CDIAK/224/946")
+
+
+@pytest.fixture
+def bare_space(tmp_path: Path):
+    """Лише робочий простір — журналу вердиктів більше нічого не треба."""
+    from nyshporka.core import workspace as W
+
+    (tmp_path / "nyshporka.toml").write_text("[workspace]\nschema = 1\n", encoding="utf-8")
+    W.reset()
+    W.use(W.Workspace(root=tmp_path, name="тест", origin="test"))
+    yield tmp_path
+    W.reset()
+
+
+def _verdict(v: str) -> dict[str, dict[str, str]]:
+    return {"проба|0004.jpg|3": {"verdict": v, "note": "", "by": "тест"}}
+
+
+@pytest.mark.parametrize("broken", ["corrupt", "unreadable"])
+def test_a_broken_verdicts_journal_is_not_wiped(bare_space: Path, monkeypatch: pytest.MonkeyPatch,
+                                                broken: str) -> None:
+    """🔴 Аудит 29.09.2026: побитий чи зайнятий у мить читання журнал ставав `{}`,
+    і вердикт однієї справи перезаписував вердикти ВСІХ. Тепер запис відмовляє,
+    а файл лишається як був."""
+    from nyshporka.search import textops as T
+    from nyshporka.utils.atomic import CorruptFileError
+
+    p = T._verdicts_path()
+    if broken == "corrupt":
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text('{"DAHMO/315/1": {"a|b|1": {"verdict": "hit"}}, зіпсовано',
+                     encoding="utf-8")
+    else:
+        T._verdicts_save("DAHMO/315/1", _verdict("hit"))
+        real = Path.read_text
+
+        def fake(self: Path, *a, **kw):  # type: ignore[no-untyped-def]
+            if Path(self) == p:
+                raise PermissionError(13, "зайнято іншим процесом", str(self))
+            return real(self, *a, **kw)
+
+        monkeypatch.setattr(Path, "read_text", fake)
+    before = p.read_bytes()
+    with pytest.raises(CorruptFileError):
+        T._verdicts_save("DAHMO/315/2", _verdict("noise"))
+    assert p.read_bytes() == before
+
+
+def test_verdicts_are_written_under_the_lock_with_a_private_tmp(
+        bare_space: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Фіксований `verdicts.tmp` два імпорти перетирали одне одному, а без лока
+    другий губив записи першого."""
+    import os
+
+    from nyshporka.search import textops as T
+    from nyshporka.utils import atomic as A
+
+    seen: list[tuple[str, bool]] = []
+    real = A._replace
+
+    def spy(tmp: Path, path: Path) -> None:
+        seen.append((tmp.name, path.with_name(path.name + ".lock").exists()))
+        real(tmp, path)
+
+    monkeypatch.setattr(A, "_replace", spy)
+    T._verdicts_save("DAHMO/315/1", _verdict("hit"))
+    T._verdicts_save("DAHMO/315/2", _verdict("noise"))
+    assert seen == [(f"{T.VERDICTS_FILE}.{os.getpid()}.tmp", True)] * 2
+    assert T.verdicts_load("DAHMO/315/1")["проба|0004.jpg|3"]["verdict"] == "hit"
+    assert T.verdicts_load("DAHMO/315/2")["проба|0004.jpg|3"]["verdict"] == "noise"
