@@ -2571,12 +2571,12 @@ def pages_note(a: PageNoteArgs) -> Envelope:
 
     try:
         ref = store.resolve_case(a.case)
-        note = PageNote(
-            scan=a.scan, page_type=a.page_type,
-            surnames=_csv(a.surnames), places=_csv(a.places),
-            years=[int(y) for y in _csv(a.years)], sheet=a.sheet,
-            status=a.status, method=a.method,
-            comment=a.comment, agent=a.agent)
+        note = PageNote.model_validate({
+            "scan": a.scan, "page_type": a.page_type,
+            "surnames": _csv(a.surnames), "places": _csv(a.places),
+            "years": [int(y) for y in _csv(a.years)], "sheet": a.sheet,
+            "status": a.status, "method": a.method,
+            "comment": a.comment, "agent": a.agent})
     except (ValidationError, ValueError) as exc:
         return fail(str(exc))
     report = store.annotate_pages(ref, [note])
