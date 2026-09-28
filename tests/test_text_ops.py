@@ -882,3 +882,64 @@ def test_frames_match_meta_refuses_a_run_whose_frames_are_gone(case_space: Path)
     S._RUNS_CACHE = None
     bad, why = S.frames_match_meta("проба")
     assert not bad and "кадрів немає" in why, why
+
+
+def _twin(space: Path, run: str, case_dir: Path, key: str, model: str) -> None:
+    d = space / "reports" / "htr" / run
+    d.mkdir(parents=True)
+    (d / "0001.txt").write_text("рядок\n", encoding="utf-8")
+    (d / "_htr_meta.json").write_text(json.dumps({
+        "model": model, "script": "cyrillic", "case_dir": str(case_dir),
+        "case_key": key, "pages": {"0001.jpg": {"lines": 1, "orient": 0}},
+    }), encoding="utf-8")
+
+
+def test_teka_poza_koreniamy_spravy_tezh_spilni_kadry(space: Path, tmp_path: Path) -> None:
+    """Зменшена копія для хмари й стейджинг лежать поза `data/raw`, але це теки
+    ЦІЄЇ машини: Писар і Дяк там читали ті самі кадри. Вимога «лише під
+    коренями» губила в'юверу другий голос у 59 тек живого простору."""
+    from nyshporka import htr_store as S
+    from nyshporka.search import textops as T
+
+    copy = tmp_path / "derived" / "cloud" / "frames" / "spr-9"
+    copy.mkdir(parents=True)
+    _twin(space, "spr-9", copy, "DAHMO/315/9", "pysar_cyr_v17.pt")
+    _twin(space, "spr-9-diak_v4", copy, "", "diak_cyr_v4.mlmodel")
+    S._CACHE.clear()
+    S._RUNS_CACHE = None
+
+    assert S.frames_dir_key(copy) != ""
+    names = {r["name"] for r in T.scope_runs("spr-9")["rows"]}
+    assert names == {"spr-9", "spr-9-diak_v4"}, names
+
+
+def test_ta_sama_teka_z_chuzhym_kliuchem_ne_pobratym(space: Path, tmp_path: Path) -> None:
+    """Теку стейджингу буває перевикористано під іншу справу: спільна тека, але
+    ключі справи суперечать — це не два голоси однієї книги."""
+    from nyshporka import htr_store as S
+    from nyshporka.search import textops as T
+
+    stage = tmp_path / "stage" / "flat"
+    stage.mkdir(parents=True)
+    _twin(space, "a-315-8433", stage, "DAHMO/315/8433", "pysar_cyr_v17.pt")
+    _twin(space, "b-196-712", stage, "DAHMO/196/712", "diak_cyr_v4.mlmodel")
+    S._CACHE.clear()
+    S._RUNS_CACHE = None
+
+    assert not S.same_frames(stage, "DAHMO/315/8433", stage, "DAHMO/196/712")
+    names = [r["name"] for r in T.scope_runs("a-315-8433")["rows"]]
+    assert names == ["a-315-8433"], names
+
+
+def test_teka_chuzhoho_boksu_ne_oznaka_a_prybranyi_stejdzhynh_oznaka(space: Path) -> None:
+    """Хмарний слот і тека чужого Linux-боксу — не доказ спільних кадрів. А
+    прибраний стейджинг цієї машини (шлях з літерою диска) — доказ: два голоси
+    читали ті самі кадри й після того, як теку прибрали (28.09: 10 пар проти 2)."""
+    from nyshporka import htr_store as S
+
+    assert S.frames_dir_key("/tmp/htrcase/pages_dl_11") == ""
+    assert S.frames_dir_key("/workspace/frames/spr-1") == ""
+    assert S.frames_dir_key("D:/стейджинг/os946_stage") != ""
+    assert S.same_frames("D:/стейджинг/x_stage", "", r"d:\стейджинг\x_stage", "CDIAK/224/946")
+    assert not S.same_frames("D:/стейджинг/x_stage", "DAHMO/315/1", "D:/стейджинг/x_stage",
+                             "CDIAK/224/946")

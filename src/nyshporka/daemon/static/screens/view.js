@@ -389,8 +389,11 @@ function viewAltReset() {
   if (!box) return;
   const mine = (VS.all || []).find((r) => r.name === VS.run) || {};
   const twin = (VS.all || []).find(
-    // frames_key, не case_dir: хмарний слот /tmp/htrcase/… спільний для різних справ
+    // frames_key, не case_dir: хмарний слот /tmp/htrcase/… спільний для різних
+    // справ; і ключі справи не мусять суперечити — тека стейджингу буває
+    // перевикористана під іншу справу (htr_store.same_frames)
     (r) => r.name !== VS.run && r.frames_key && r.frames_key === mine.frames_key
+      && !(r.case_canon && mine.case_canon && r.case_canon !== mine.case_canon)
       && r.engine_id && r.engine_id !== mine.engine_id);
   VS.alt = twin || null;
   box.innerHTML = twin

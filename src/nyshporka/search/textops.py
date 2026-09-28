@@ -71,13 +71,14 @@ def scope_runs(scope: str) -> dict[str, Any]:
     if sc.get("kind") == "run" and sc["rows"]:
         me = sc["rows"][0]
         key = (me.get("case_key") or "").strip()
-        # 🔴 тека кадрів — ознака побратима лише в просторі: хмарний слот
-        # `/tmp/htrcase/…` спільний для різних справ (`frames_dir_key`)
-        cd = S.frames_dir_key(me.get("case_dir"))
+        # 🔴 тека кадрів — ознака побратима лише на цій машині й лише при
+        # ключах, що не суперечать: хмарний слот `/tmp/htrcase/…` і тека
+        # стейджингу бувають спільні для різних справ (`same_frames`)
         others = [r for r in S.list_cases()
                   if r.get("name") != me.get("name")
                   and ((key and (r.get("case_key") or "").strip() == key)
-                       or (cd and S.frames_dir_key(r.get("case_dir")) == cd))]
+                       or S.same_frames(me.get("case_dir"), me.get("case_canon") or "",
+                                        r.get("case_dir"), r.get("case_canon") or ""))]
         sc = {**sc, "rows": [me, *others]}
     return sc
 
@@ -225,9 +226,10 @@ def _geometry_size(run: str, page: str) -> list[int] | None:
     if "-" in run:
         base = run.rsplit("-", 1)[0]
         bmeta, mine = S.load_meta(base) or {}, S.load_meta(run) or {}
-        mine_dir = S.frames_dir_key(mine.get("case_dir"))
-        same = (mine.get("case_key") and mine.get("case_key") == bmeta.get("case_key")) or \
-               (mine_dir and mine_dir == S.frames_dir_key(bmeta.get("case_dir")))
+        mk, bk = (mine.get("case_key") or "").strip(), (bmeta.get("case_key") or "").strip()
+        same = (mk and mk == bk) or S.same_frames(
+            mine.get("case_dir"), S._canon_case_key(mk), bmeta.get("case_dir"),
+            S._canon_case_key(bk))
         if same:
             geom = S.page_lines(base, page) or {}
             size = geom.get("size")
