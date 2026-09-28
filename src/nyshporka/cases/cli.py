@@ -84,8 +84,19 @@ def cmd_build(
         console.print(f"[muted]бібліотеку перебудовано: {len(entries)} справ{tail}[/muted]")
     res = db.build_index()
     tail = (f" · свідомо нічиїх: {res['decided']}" if res.get("decided") else "")
-    console.print(f"✅ реєстр: [bold]{res['cases']}[/bold] справ · "
+    bad = res.get("unreadable") or []
+    mark = "⚠" if bad else "✅"
+    console.print(f"{mark} реєстр: [bold]{res['cases']}[/bold] справ · "
                   f"нерозв'язаних прогонів: {res['orphans']}{tail} · {res['path']}")
+    if bad:
+        # 🔴 Аудит 29.09.2026: битий файл шару раніше зникав мовчки, і реєстр
+        # казав «пошуку не було» там, де він був. Кажемо вголос і поіменно.
+        console.print(f"[warn]⚠ реєстр НЕПОВНИЙ: не прочитано файлів — {len(bad)}. "
+                      f"Справи з них стоять як необроблені.[/warn]")
+        for b in bad[:10]:
+            console.print(f"   [warn]·[/warn] {b.get('path')} — {b.get('why')}")
+        if len(bad) > 10:
+            console.print(f"   [muted]… і ще {len(bad) - 10}[/muted]")
 
 
 @app.command("list")

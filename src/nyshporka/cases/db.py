@@ -97,7 +97,11 @@ def build_index(db_path: Path | None = None,
     # мітку «після», ми оголосили б реєстр свіжим саме тоді, коли він уже ні —
     # помилка в небезпечному напрямку. «До» дає щонайбільше зайву перезбірку.
     pulse_at_start = _pulse_seq()
-    rows, orphans = collect_rows(index)
+    # 🔴 Нечитані файли шарів збираються й віддаються вгору (аудит 29.09.2026):
+    # збірка на них не падає, але реєстр без них неповний, і мовчати про це
+    # означало б видати неповний зріз за відповідь.
+    unreadable: list[dict[str, str]] = []
+    rows, orphans = collect_rows(index, unreadable=unreadable)
     tmp = path.with_suffix(".sqlite.tmp")
     if tmp.exists():
         tmp.unlink()
@@ -132,13 +136,34 @@ def build_index(db_path: Path | None = None,
             # `staleness(quick=True)` за один `stat` каже «точно застарів»,
             # не обходячи 840 файлів.
             ("pulse", str(pulse_at_start)),
+            # Нечитані файли — у мету, щоб про неповний зріз казав не лише
+            # вивід збірки, а й кожне читання реєстру (`staleness`).
+            ("unreadable", json.dumps(unreadable, ensure_ascii=False)),
         ])
         con.commit()
     finally:
         con.close()
     tmp.replace(path)
     return {"cases": len(rows), "orphans": len(orphans) - decided,
-            "decided": decided, "path": str(path)}
+            "decided": decided, "path": str(path), "unreadable": unreadable}
+
+
+def _unreadable_reason(meta: dict[str, Any]) -> str:
+    """Причина «зріз неповний» з мети збірки; порожньо, якщо все прочитано.
+
+    Перебудова цього не лікує — лікує виправлення файла, тому порада в тексті
+    називає файл, а не лише команду (аудит 29.09.2026).
+    """
+    try:
+        bad = json.loads(meta.get("unreadable") or "[]")
+    except ValueError:
+        return "перелік нечитаних файлів збірки пошкоджено"
+    if not bad:
+        return ""
+    first = bad[0].get("path", "?") if isinstance(bad[0], dict) else str(bad[0])
+    more = f" і ще {len(bad) - 1}" if len(bad) > 1 else ""
+    return (f"при збірці не прочитано файлів: {len(bad)} ({first}{more}) — "
+            f"реєстр неповний, виправте файл і перезберіть")
 
 
 #: Поріг гео-фільтра (`rapidfuzz.ratio` по коренях нормалізованих форм).
@@ -411,6 +436,7 @@ def staleness(db_path: Path | None = None, *, quick: bool = False) -> dict[str, 
         return {"built": built_raw, "stale": True, "reasons": ["час збірки не читається"]}
     if built.tzinfo is None:
         built = built.replace(tzinfo=UTC)
+    incomplete = _unreadable_reason(meta)
 
     if quick:
         try:
@@ -427,7 +453,13 @@ def staleness(db_path: Path | None = None, *, quick: bool = False) -> dict[str, 
         # мовчки читався б як «нічого не міняли».
         if now != at_build:
             return {"built": built_raw, "stale": True, "unknown": False,
-                    "reasons": ["у просторі щось міняли після збірки"]}
+                    "reasons": ["у просторі щось міняли після збірки",
+                                *([incomplete] if incomplete else [])]}
+        if incomplete:
+            # Неповний зріз — не «не знаю», а відома вада, і каже про неї
+            # мета, а не час файлів.
+            return {"built": built_raw, "stale": True, "unknown": False,
+                    "reasons": [incomplete]}
         # мітки збіглись — це не доказ свіжості, а лише «через застосунок
         # нічого не міняли»
         return {"built": built_raw, "stale": False, "unknown": True, "reasons": []}
@@ -441,7 +473,7 @@ def staleness(db_path: Path | None = None, *, quick: bool = False) -> dict[str, 
     # Ворота, які завжди червоні, вимикають — і тоді вони не ловлять нічого.
     built = built + timedelta(seconds=1)
 
-    reasons: list[str] = []
+    reasons: list[str] = [incomplete] if incomplete else []
     for label, target in (
         ("каталог справ", ROOT / "data" / "derived" / "case_library.json"),
         ("пошук роду", ROOT / "data" / "clan_hunt" / "state.json"),

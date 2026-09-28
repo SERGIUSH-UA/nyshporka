@@ -35,6 +35,7 @@ from nyshporka.library import (
     _REPO_LABEL,
     ROOT,
     _mk_key,
+    _pdf_pages,
     _sidecar_opys,
     candidate_keys,
     claim_collision,
@@ -111,17 +112,48 @@ def _volume(pages: dict[str, Any]) -> tuple[int, int, int]:
     return chars, lines, blank
 
 
-def _iter_htr_runs() -> Iterator[tuple[str, dict[str, Any]]]:
-    """(ім'я прогону, мета) для кожної теки з `_htr_meta.json`."""
+#: Файл шару, який збірка не змогла прочитати: `{"path": …, "why": …}`.
+Unreadable = dict[str, str]
+
+
+def _note_unreadable(sink: list[Unreadable] | None, path: Any, why: object) -> None:
+    """Записати нечитаний файл шару — щоб збірка сказала про нього вголос.
+
+    🔴 Аудит 29.09.2026: тут стояло `except Exception: continue`, і битий файл
+    просто зникав. Реєстр після цього відповідав «ока не було», «пошуку не
+    було» — а один пошкоджений `clan_hunt/state.json` давав `fuzzy_stage=none`
+    УСІМ справам. Мовчки неповний реєстр виглядає як відповідь, тож він гірший
+    за відсутній. Збірку один файл не валить, але й не проходить непоміченим.
+    """
+    if sink is None:
+        return
+    try:
+        rel = str(os.path.relpath(path, ROOT)).replace("\\", "/")
+    except ValueError:
+        rel = str(path)
+    reason = f"{type(why).__name__}: {why}" if isinstance(why, BaseException) else str(why)
+    sink.append({"path": rel, "why": reason})
+
+
+def _iter_htr_runs(unreadable: list[Unreadable] | None = None,
+                   ) -> Iterator[tuple[str, dict[str, Any]]]:
+    """(ім'я прогону, мета) для кожної теки з `_htr_meta.json`.
+
+    Нечитана мета йде в `unreadable`, а не в тишу: інакше прогін зникає, і
+    справа стоїть у реєстрі «без декоду» (аудит 29.09.2026).
+    """
     if not HTR_ROOT.is_dir():
         return
     for meta_path in sorted(HTR_ROOT.glob("*/_htr_meta.json")):
         try:
             meta = json.loads(meta_path.read_text(encoding="utf-8"))
-        except Exception:
+        except Exception as exc:
+            _note_unreadable(unreadable, meta_path, exc)
             continue
-        if isinstance(meta, dict):
-            yield meta_path.parent.name, meta
+        if not isinstance(meta, dict):
+            _note_unreadable(unreadable, meta_path, "мета не є JSON-об'єктом")
+            continue
+        yield meta_path.parent.name, meta
 
 
 def _engine_of(meta: dict[str, Any]) -> str:
@@ -187,39 +219,63 @@ def _ordered_cases(index: LibraryIndex,
 #: rel-шлях (normcase) → кадрів. Заповнюється зі спільного обходу; шляхи поза
 #: `data/raw` (архівний том, оголошений корінь) сюди не потрапляють і рахуються
 #: прямим читанням теки.
-_FRAMES_INDEX: dict[str, int] = {}
+_FRAMES_INDEX: dict[str, tuple[int, bool]] = {}
 
 
-def _frames_index(scans: list[Any]) -> dict[str, int]:
-    out: dict[str, int] = {}
+def _material_frames(n_img: int, pdf_paths: list[Any]) -> tuple[int, bool]:
+    """(кадрів, чи число точне) для теки з `n_img` кадрами й такими PDF.
+
+    🔴 Аудит 29.09.2026: для справи-PDF тут рахувався один кадр на ФАЙЛ, тож
+    прогін, що зупинився на 50-й сторінці з 300, виглядав повним (50 ≥ 1).
+    Тепер знаменник — сторінки PDF, порахувані тим самим `library._pdf_pages`,
+    що й бібліотека (одна правда про обсяг справи, а не дві).
+
+    Кадри є — рахуємо кадри, як бібліотека (`imgs or pdfs`): саме їх читає
+    рушій. Сторінок PDF порахувати не вдалось (битий файл, немає читача, тека
+    понад стелю) — лишається файловий лік, але з позначкою «неточне»: занижене
+    число краще за нуль, але повноти прогону воно не доводить.
+    """
+    if n_img:
+        return n_img, True
+    if not pdf_paths:
+        return 0, True
+    pages = _pdf_pages(list(pdf_paths))
+    return (pages, True) if pages else (len(pdf_paths), False)
+
+
+def _frames_index(scans: list[Any]) -> dict[str, tuple[int, bool]]:
+    out: dict[str, tuple[int, bool]] = {}
     for s in scans:
         try:
             rel = str(s.path.relative_to(ROOT)).replace("\\", "/")
         except ValueError:
             continue
-        out[os.path.normcase(rel)] = s.n_img + s.n_pdf
+        out[os.path.normcase(rel)] = _material_frames(s.n_img, list(s.pdf_paths))
     return out
 
 
-def _count_frames(rel: str | None) -> int:
-    """Кадри (або PDF) прямо в теці; для файла-PDF — 1.
+def _count_frames_exact(rel: str | None) -> tuple[int, bool]:
+    """(кадрів, чи число точне) прямо в теці; для файла-PDF — його сторінки.
 
     ⏱ Спершу дивиться в індекс спільного обходу (`_FRAMES_INDEX`) — саме там
     лежить переважна більшість запитів. Прямий `scandir` лишається для шляхів
     поза `data/raw`: оголошені корені на архівному диску в обхід не входять.
     """
     if not rel:
-        return 0
+        return 0, True
     hit = _FRAMES_INDEX.get(os.path.normcase(str(rel).replace("\\", "/")))
     if hit is not None:
         return hit
     p = ROOT / rel
     if p.is_file():
-        return 1 if p.suffix.lower() in _IMG_EXT | {".pdf"} else 0
+        suf = p.suffix.lower()
+        if suf == ".pdf":
+            return _material_frames(0, [p])
+        return (1 if suf in _IMG_EXT else 0), True
     if not p.is_dir():
-        return 0
-    n = 0
-    want = _IMG_EXT | {".pdf"}
+        return 0, True
+    n_img = 0
+    pdfs: list[Any] = []
     try:
         with os.scandir(p) as it:
             for f in it:
@@ -230,11 +286,33 @@ def _count_frames(rel: str | None) -> int:
                     continue
                 low = f.name.lower()
                 dot = low.rfind(".")
-                if dot >= 0 and low[dot:] in want:
-                    n += 1
+                ext = low[dot:] if dot >= 0 else ""
+                if ext in _IMG_EXT:
+                    n_img += 1
+                elif ext == ".pdf":
+                    pdfs.append(p / f.name)
     except OSError:
-        return n
-    return n
+        pass
+    return _material_frames(n_img, pdfs)
+
+
+def _count_frames(rel: str | None) -> int:
+    """Кадри в теці (для справи-PDF — сторінки), див. `_count_frames_exact`."""
+    return _count_frames_exact(rel)[0]
+
+
+def _frames_uncertain(row_paths: list[str | None]) -> bool:
+    """Чи немає в справи точного знаменника для покриття прогону.
+
+    Так — коли матеріал є лише у PDF, чиїх сторінок порахувати не вдалось, і
+    жодна інша тека справи не дає точного числа. Тоді прогін не можна
+    оголошувати повним: «прочитано 50 з 1 файла» нічого не доводить
+    (аудит 29.09.2026).
+    """
+    counts = [_count_frames_exact(p) for p in row_paths if p]
+    if any(n and exact for n, exact in counts):
+        return False
+    return any(n and not exact for n, exact in counts)
 
 
 def _best_frames(row_paths: list[str | None]) -> int:
@@ -267,7 +345,10 @@ def _unfiled_material(index: LibraryIndex, known: set[str],
             continue
         if any(rel.startswith(k + "/") for k in known):
             continue                      # підтека вже врахованої справи/збірки
-        frames = scan.n_img + scan.n_pdf
+        # Сторінки PDF, а не число файлів — та сама міра, що й у справ
+        # (аудит 29.09.2026).
+        frames = (_material_frames(scan.n_img, list(scan.pdf_paths))[0]
+                  if scan.has_material() else 0)
         if frames:
             seen.add(rel)
             out.append((rel, frames))
@@ -332,23 +413,52 @@ def _to_year(v: Any) -> int | None:
     return int(s) if s.isdigit() else None
 
 
-def _clan_runs() -> dict[str, dict[str, Any]]:
-    try:
-        runs = json.loads(CLAN_STATE.read_text(encoding="utf-8")).get("runs", {})
-        return dict(runs)
-    except Exception:
+def _clan_runs(unreadable: list[Unreadable] | None = None) -> dict[str, dict[str, Any]]:
+    """Прогони пошуку роду з `clan_hunt/state.json`.
+
+    Файла немає — пошуку ще не було, це чесний порожній стан. Файл є, але не
+    читається — це вже не «пошуку не було», а «не знаю», і збірка мусить про
+    це сказати (аудит 29.09.2026).
+    """
+    if not CLAN_STATE.is_file():
         return {}
+    try:
+        state = json.loads(CLAN_STATE.read_text(encoding="utf-8"))
+        runs = state.get("runs", {}) if isinstance(state, dict) else None
+        if not isinstance(runs, dict):
+            raise ValueError("немає словника `runs`")
+    except Exception as exc:
+        _note_unreadable(unreadable, CLAN_STATE, exc)
+        return {}
+    # Окремий битий запис не мусить гасити решту прогонів.
+    out: dict[str, dict[str, Any]] = {}
+    for name, run in runs.items():
+        if isinstance(run, dict):
+            out[name] = run
+        else:
+            _note_unreadable(unreadable, CLAN_STATE, f"запис `{name}` не є об'єктом")
+    return out
 
 
-def _pages_counts() -> dict[str, tuple[int, int]]:
-    """key справи → (сторінок занесено, з них `full`) зі сховища `data/pages/**`."""
+def _pages_counts(unreadable: list[Unreadable] | None = None,
+                  ) -> dict[str, tuple[int, int]]:
+    """key справи → (сторінок занесено, з них `full`) зі сховища `data/pages/**`.
+
+    Нечитаний файл сховища йде в `unreadable`: інакше справа стоїть «око не
+    бачило» там, де аркуші переглянуто (аудит 29.09.2026).
+    """
     out: dict[str, tuple[int, int]] = {}
     if not PAGES_ROOT.is_dir():
         return out
     for f in sorted(PAGES_ROOT.glob("*/*.json")):
         try:
             data = json.loads(f.read_text(encoding="utf-8"))
-        except Exception:
+        except Exception as exc:
+            _note_unreadable(unreadable, f, exc)
+            continue
+        if not isinstance(data, dict):
+            # ⚠ Раніше `data.get` на списку валив УСЮ збірку.
+            _note_unreadable(unreadable, f, "файл сховища не є JSON-об'єктом")
             continue
         key = str(data.get("case") or data.get("key") or "").strip()
         if not key:
@@ -438,9 +548,18 @@ def _canon_counts() -> dict[str, dict[str, Any]]:
 _COVERAGE_OK = 0.99
 
 
-def _htr_stage(row: CaseRow) -> str:
+def _htr_stage(row: CaseRow, frames_known: bool = True) -> str:
+    """Стан декоду справи.
+
+    `frames_known=False` — матеріал лише у PDF, чиїх сторінок не порахувати:
+    знаменника немає, тож повноти прогону не доведено, і стан `partial`, а не
+    «готово» (аудит 29.09.2026). Хибне «не дочитано» коштує зайвої перевірки,
+    хибне «готово» — непрочитаних аркушів, яких ніхто вже не шукатиме.
+    """
     if not (row.htr_pysar or row.htr_diak or row.htr_skryba):
         return "none"
+    if not frames_known:
+        return "partial"
     if row.frames and row.htr_pages_max < row.frames * _COVERAGE_OK:
         return "partial"
     if row.htr_pysar and (row.htr_diak or row.htr_skryba):
@@ -463,8 +582,14 @@ def _fuzzy_stage(row: CaseRow) -> str:
     return "reviewed" if row.fuzzy_reviewed else "scanned"
 
 
-def collect_rows(index: LibraryIndex | None = None) -> tuple[list[CaseRow], list[Any]]:
+def collect_rows(index: LibraryIndex | None = None, *,
+                 unreadable: list[Unreadable] | None = None,
+                 ) -> tuple[list[CaseRow], list[Any]]:
     """Зібрати реєстр. Повертає (рядки справ, нерозв'язані прив'язки прогонів).
+
+    `unreadable` — куди скласти файли шарів, які не вдалось прочитати (шлях +
+    причина). Збірка на них не падає, але викликач мусить про них сказати:
+    без цього реєстр мовчки неповний (аудит 29.09.2026).
 
     ⏱ Дерево `data/raw` читається раз на всю збірку (`_raw_scans`), і той самий
     зріз живить три місця, які раніше обходили його кожне своїми `glob`-ами:
@@ -659,7 +784,7 @@ def collect_rows(index: LibraryIndex | None = None) -> tuple[list[CaseRow], list
     run_meta_hint: dict[str, tuple[str, str]] = {}
 
     # ── HTR ─────────────────────────────────────────────────────────────────
-    for name, meta in _iter_htr_runs():
+    for name, meta in _iter_htr_runs(unreadable):
         run_meta_hint[name] = (str(meta.get("case_dir") or ""),
                                str(meta.get("case_key") or ""))
         link = resolve_run(name, str(meta.get("case_dir") or ""), idx,
@@ -702,7 +827,7 @@ def collect_rows(index: LibraryIndex | None = None) -> tuple[list[CaseRow], list
                 setattr(row, f"htr_{voice}_model", model)
 
     # ── fuzzy-пошук роду ────────────────────────────────────────────────────
-    for name, run in _clan_runs().items():
+    for name, run in _clan_runs(unreadable).items():
         hint_dir, hint_key = run_meta_hint.get(name, ("", ""))
         link = resolve_run(name, hint_dir, idx, meta_key=hint_key)
         if not link.key or link.key not in rows:
@@ -749,7 +874,7 @@ def collect_rows(index: LibraryIndex | None = None) -> tuple[list[CaseRow], list
         canon_row.canon_source_id = canon_row.canon_source_id or sids[0]
 
     # ── око ─────────────────────────────────────────────────────────────────
-    for key, (noted, full) in _pages_counts().items():
+    for key, (noted, full) in _pages_counts(unreadable).items():
         seen_row = rows.get(key)
         if seen_row:
             seen_row.pages_noted, seen_row.pages_full = noted, full
@@ -812,9 +937,18 @@ def collect_rows(index: LibraryIndex | None = None) -> tuple[list[CaseRow], list
                                 geo["alt_names"])
 
     for row in rows.values():
+        frames_known = True
+        if row.htr_runs and row.path:
+            # ⏱ Лише для справ із прогоном: знаменник потрібен тільки там, де
+            # є що з ним порівнювати. Сторінки PDF рахує той самий кешований
+            # читач, що й бібліотека; якщо опис справ збирався без нього,
+            # файловий лік («1 кадр») тут підміняється справжніми сторінками.
+            paths: list[str | None] = [row.path, *row.extra_paths]
+            frames_known = not _frames_uncertain(paths)
+            row.frames = max(row.frames, _best_frames(paths))
         if row.frames and row.htr_pages_max and row.htr_pages_max < row.frames * _COVERAGE_OK:
             row.state = "partial"
-        row.htr_stage = _htr_stage(row)
+        row.htr_stage = _htr_stage(row, frames_known)
         row.fuzzy_stage = _fuzzy_stage(row)
 
     return sorted(rows.values(), key=lambda r: (r.repo_label or "", r.fond or "",

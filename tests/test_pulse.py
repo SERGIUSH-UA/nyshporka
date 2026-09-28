@@ -143,9 +143,9 @@ def test_build_records_the_mark_taken_before_collecting(space, monkeypatch):
 
     real = _C.collect_rows
 
-    def collect_and_beat(index=None):
+    def collect_and_beat(index=None, **kw):
         P.beat("щось.змінилось", "під час збірки")
-        return real(index)
+        return real(index, **kw)
 
     monkeypatch.setattr(_DB, "collect_rows", collect_and_beat)
     _DB.build_index(db_path=space / "idx.sqlite")
