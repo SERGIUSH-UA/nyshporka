@@ -548,11 +548,17 @@ def crawl(source: str = typer.Argument("archium", help="id джерела"),
                       f"його каталог доступний одразу[/warn]")
         raise typer.Exit(code=0)
 
-    def progress(done: int = 0, total: int = 0, note: str = "", **_: Any) -> None:
-        console.print(f"  [muted]{done}/{total} фондів · {note}[/muted]", end="\r")
+    def progress(done: int = 0, total: int = 0, note: str = "", unit: str = "",
+                 **_: Any) -> None:
+        console.print(f"  [muted]{done}/{total} {unit or 'фонд'} · {note}[/muted]",
+                      end="\r")
 
     stats = src.crawl(tuple(g.strip() for g in groups.split(",") if g.strip()) or None,
                       on_progress=progress, resume=not fresh)
+    if stats.get("summary"):
+        # Джерело, чий каталог не складається з фондів і описів, звітує своїми словами.
+        console.print(f"\n✓ {stats['summary']}")
+        return
     console.print(f"\n✓ фондів {stats['fonds']} (пропущено готових "
                   f"{stats['skipped']}) · описів {stats['inventories']} · "
                   f"справ {stats['cases']}")

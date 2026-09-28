@@ -55,6 +55,7 @@ def _builtin(workspace: Path | None = None) -> list[Source]:
     from nyshporka.sources.duck import DuckSource
     from nyshporka.sources.fsfilm import FilmMirrorSource
     from nyshporka.sources.ia import IaSource
+    from nyshporka.sources.inventarium import InventariumSource
     from nyshporka.sources.ridni import RidniSource
     from nyshporka.sources.volok import VolokSource
 
@@ -96,6 +97,9 @@ def _builtin(workspace: Path | None = None) -> list[Source]:
     # книжки — і пошук по їхньому ТЕКСТУ з листом і кропом кожного збігу.
     # Шукає лише точне слово, тож на зірку й OR відмовляє, а не віддає нуль.
     out.append(IaSource(workspace))
+    # 🏚 Інвентаріум: волонтерський розпис маєткових інвентарів за селом — з
+    # номером сторінки всередині книги. Шукає по знімку `nysh crawl inventarium`.
+    out.append(cast("Source", InventariumSource(workspace)))
     return out
 
 
