@@ -347,3 +347,131 @@ def test_kryvyi_vidbytok_ne_valyt_zvirku(slots: Any) -> None:
             "slots": [{"at": 0.5, "n": 2, "phash": "0" * 36, "sha256": "a"}]}
     zbihlos, zvireno = FP.compare(mine, {"version": 1, "frames": 3, "slots": slots})
     assert zbihlos == zvireno == 0
+
+
+# ── B12: ворота не тримають у пам'яті більше, ніж стеля тексту ──────────────
+# Аудит 29.09.2026: tar.gz із нулів на ~4 МБ (64 файли по 64 МБ) проходив усі
+# старі стелі, а ворота тримали його текст двічі — байтами й рядками.
+
+def test_tekst_ponad_stelu_pamiati_vidmova(space: Path, tmp_path: Path,
+                                           monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(bundle, "MAX_TEXT_BYTES", 4096)
+    zeros = {f"runs/spr-8433/{i:04d}.txt": bytes(3000) for i in range(10, 14)}
+    pack = handmade(tmp_path / "p.nyshtext", extra_members=zeros)
+    with pytest.raises(accept.AcceptError, match="тримають у пам'яті"):
+        accept.look(str(pack))
+    with pytest.raises(bundle.BundleError):
+        bundle.read_texts(pack, bundle.inventory(pack))
+
+
+def test_stelia_tekstu_ne_chipaie_zvychainyi_paket(space: Path, tmp_path: Path,
+                                                  monkeypatch: pytest.MonkeyPatch) -> None:
+    pack = handmade(tmp_path / "p.nyshtext", pages=3)
+    texts = _texts(3)
+    monkeypatch.setattr(bundle, "MAX_TEXT_BYTES", sum(len(b) for b in texts.values()))
+    got = bundle.read_texts(pack, bundle.inventory(pack))
+    assert got == {"spr-8433": texts}
+
+
+def test_teksty_chytaiutsia_odnym_prokhodom_u_poriadku_arkhivu(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """🔴 Перемежані голоси: стрибок назад у gzip — розпакування з початку."""
+    pack = tmp_path / "p.nyshtext"
+    with tarfile.open(pack, "w:gz") as tar:
+        _add(tar, bundle.MANIFEST_NAME, b"{}")
+        for i in range(1, 4):
+            for run in ("a", "b"):
+                _add(tar, f"runs/{run}/{i:04d}.txt", f"{run}{i}".encode())
+    inv = bundle.inventory(pack)
+    offsets: list[int] = []
+    real = tarfile.TarFile.extractfile
+
+    def spy(self: tarfile.TarFile, member: Any) -> Any:
+        offsets.append(member.offset)
+        return real(self, member)
+
+    monkeypatch.setattr(tarfile.TarFile, "extractfile", spy)
+    got = bundle.read_texts(pack, inv)
+    assert offsets == sorted(offsets) and len(offsets) == 6
+    assert got["b"]["0002.txt"] == b"b2" and got["a"]["0003.txt"] == b"a3"
+
+
+def test_tally_z_linyvoho_perehliadu(tmp_path: Path) -> None:
+    raw = {"r": {"0001.txt": "a\nб\n".encode(), "0002.txt": b"  \n"}}
+    assert bundle.tally(bundle.decoded(raw), {"r": "m"}) == {
+        "pages": 2, "lines": 2, "chars": 2, "blank_pages": 1}
+
+
+# ── B13: обрив приймання не лишає чужого тексту без позначки ────────────────
+# Аудит 29.09.2026: `_clear_run` → `extract` → `_stamp_run` просто в теці
+# прогону; обрив між кроками лишав текст без `shared`, і він читався як свій.
+
+def _obryv(*_: Any, **__: Any) -> None:
+    raise KeyboardInterrupt("обрив посеред приймання")
+
+
+def _leftovers(root: Path) -> list[str]:
+    return [p.name for p in root.iterdir() if p.name.startswith(".")]
+
+
+def test_obryv_novoho_pryimannia_nichoho_ne_lyshaie(space: Path, tmp_path: Path,
+                                                    monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(accept, "_stamp_run", _obryv)
+    with pytest.raises(KeyboardInterrupt):
+        accept.accept(str(handmade(tmp_path / "p.nyshtext")))
+    root = _htr(space)
+    assert not (root / "spr-8433").exists(), "текст без позначки «чуже» ліг на місце"
+    assert not _leftovers(root)
+
+
+def test_obryv_zaminy_lyshaie_staryi_i_force_pratsiuie(space: Path, tmp_path: Path,
+                                                       monkeypatch: pytest.MonkeyPatch) -> None:
+    accept.accept(str(handmade(tmp_path / "a.nyshtext", pages=5)))
+    run = _htr(space) / "spr-8433"
+    b = handmade(tmp_path / "b.nyshtext", pages=3)
+
+    with monkeypatch.context() as mp:
+        mp.setattr(accept, "_stamp_run", _obryv)
+        with pytest.raises(KeyboardInterrupt):
+            accept.accept(str(b), force=True)
+    meta = json.loads((run / bundle.META_NAME).read_text(encoding="utf-8"))
+    assert meta["shared"]["bundle"] == "a.nyshtext"
+    assert len(list(run.glob("*.txt"))) == 5
+    assert not _leftovers(_htr(space))
+
+    # Повтор після обриву — чужий прогін лишився чужим, а не «вашим».
+    accept.accept(str(b), force=True)
+    assert len(list(run.glob("*.txt"))) == 3
+
+
+def test_zbii_perejmenuvannia_povertaie_staryi(space: Path, tmp_path: Path,
+                                               monkeypatch: pytest.MonkeyPatch) -> None:
+    accept.accept(str(handmade(tmp_path / "a.nyshtext", pages=5)))
+    root = _htr(space)
+    real = accept.os.rename
+
+    def rename(src: Any, dest: Any) -> None:
+        if Path(dest) == root / "spr-8433" and Path(src).parent.name != ".old":
+            raise OSError("диск відпав")
+        real(src, dest)
+
+    monkeypatch.setattr(accept.os, "rename", rename)
+    with pytest.raises(OSError, match="диск відпав"):
+        accept.accept(str(handmade(tmp_path / "b.nyshtext", pages=3)), force=True)
+    meta = json.loads((root / "spr-8433" / bundle.META_NAME).read_text(encoding="utf-8"))
+    assert meta["shared"]["bundle"] == "a.nyshtext"
+    assert len(list((root / "spr-8433").glob("*.txt"))) == 5
+    assert not _leftovers(root)
+
+
+def test_zamina_zberihaie_ne_paketne(space: Path, tmp_path: Path) -> None:
+    """Заміна міняє текст, мету й геометрію; решта в теці лишається."""
+    accept.accept(str(handmade(tmp_path / "a.nyshtext", pages=5)))
+    run = _htr(space) / "spr-8433"
+    (run / "notatky.md").write_text("моє", encoding="utf-8")
+    (run / "0001.lines.json").write_text("{}", encoding="utf-8")
+    accept.accept(str(handmade(tmp_path / "b.nyshtext", pages=3)), force=True)
+    assert (run / "notatky.md").read_text(encoding="utf-8") == "моє"
+    assert not (run / "0001.lines.json").exists()
+    assert len(list(run.glob("*.txt"))) == 3
+    assert not _leftovers(_htr(space))

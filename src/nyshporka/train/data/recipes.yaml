@@ -48,6 +48,11 @@ recipes:
       profile: true
       charset_mode: extend
       charset_extra: "ѲѳѢѣЪъЫы"
+      # База трену — `pretrained`. Без піна раннер бере поточну голову
+      # репозиторію й лише попереджає, що ваги не звірені (у лозі — sha256
+      # завантаженого файлу). Запінувати: коміт і sha256 з того рядка логу,
+      #   pretrained: "Hukyl/parseq-s-cyrillic-handwritten@<коміт>#<sha256>"
+      # — тоді best.pt з іншим sha256 не завантажиться в трен узагалі.
     base: "Hukyl/parseq-s-cyrillic-handwritten"
 
   # 🏆 Той самий баланс, але без надлишку: епоха коротша втричі — за ті самі

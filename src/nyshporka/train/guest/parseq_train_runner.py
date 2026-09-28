@@ -162,8 +162,16 @@ def _extract_inputs():
                 subprocess.run(["tar", "xzf", str(t), "-C", str(EXTRACT)], check=True)
             except Exception as exc:
                 how = f"tarfile (tar не вийшов: {type(exc).__name__})"
+                # nyshporka (аудит 29.09.2026): фільтр "data" не пускає
+                # абсолютні шляхи, `..`, посилання назовні й спецфайли. Python
+                # без нього (3.11 до 3.11.4) — відмова, а не розпакування без
+                # гарду.
+                if not hasattr(tarfile, "data_filter"):
+                    raise RuntimeError(
+                        f"{t.name}: tar не вийшов, а tarfile цього Python не має "
+                        f"фільтра data — розпакувати безпечно нічим") from exc
                 with tarfile.open(t) as tf:
-                    tf.extractall(EXTRACT)
+                    tf.extractall(EXTRACT, filter="data")
             _log(f"extracted {t.name} -> {EXTRACT} за {time.time() - t0:.0f}s ({how})")
         roots.insert(0, EXTRACT)
     return roots
@@ -416,10 +424,66 @@ def _load_resume(params, roots):
             f"resume=true, але {RESUME_NAME} не знайдено під {roots}. "
             f"Залий вихід попереднього прогону окремим датасетом "
             f"(-p resume_dataset=<slug>)")
-    payload = torch.load(path, map_location="cpu", weights_only=False)
+    # nyshporka (аудит 29.09.2026): `weights_only=True`. Чекпойнт шукається
+    # під УСІМ входом, а не лише в датасеті resume, і `weights_only=False`
+    # виконав би будь-який pickle, що ліг туди під цим іменем. Повний стан, який
+    # пише цей самий раннер (стани оптимізатора, планувальника, скейлера,
+    # числа, рядки, списки), вантажиться й так — перевірено на torch 2.13.
+    import pickle
+    try:
+        payload = torch.load(path, map_location="cpu", weights_only=True)
+    except pickle.UnpicklingError as exc:
+        raise RuntimeError(
+            f"{path}: не чистий чекпойнт (є об'єкти поза тензорами й словниками) — "
+            f"продовження з нього відхилено: {exc}") from exc
     _log(f"resume <- {path} (епох пройдено {payload.get('epoch')}, "
          f"best_val_cer={payload.get('best_cer')})")
     return payload
+
+
+def _hub_spec(spec):
+    # nyshporka: база з хабу пінується в самому рядку `pretrained` —
+    # `<repo>[@<ревізія>][#<sha256>]`. Окремих ключів немає навмисно: перелік
+    # параметрів дзеркалить валідацію джоби gpurunner, і новий ключ там дав би
+    # відмову. В id репозиторію HF ні `@`, ні `#` не буває.
+    rest, _, sha = spec.partition("#")
+    repo, _, rev = rest.partition("@")
+    sha = sha.strip().lower()
+    if sha and (len(sha) != 64 or any(c not in "0123456789abcdef" for c in sha)):
+        raise RuntimeError(f"pretrained: після «#» — sha256 (64 шістнадцяткові "
+                           f"знаки), а не {sha!r}")
+    return repo.strip(), (rev.strip() or None), sha
+
+
+def _sha256_file(path):
+    import hashlib
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _hub_base(spec):
+    # nyshporka (аудит 29.09.2026): ваги з хабу — pickle третьої особи, і
+    # SECURITY.md обіцяє приймати їх лише зі збігом sha256. Без ревізії
+    # `hf_hub_download` бере поточну голову репозиторію: той самий рецепт
+    # завтра тягнув би інший файл. Звірка — ДО `torch.load`, не після.
+    from huggingface_hub import hf_hub_download
+    repo, rev, want = _hub_spec(spec)
+    ckpt = Path(hf_hub_download(repo, "best.pt", revision=rev))
+    got = _sha256_file(ckpt)
+    if want and got != want:
+        raise RuntimeError(
+            f"pretrained: sha256 best.pt з {repo}@{rev or 'main'} = {got}, а "
+            f"рецепт пінує {want} — ваги не ті, трен не стартує")
+    if not want:
+        # Не відмова: так працював кожен рецепт до піна, і тихо зламати
+        # чужий трен гірше. Але й не вдавати, що ваги звірені.
+        _log("⚠⚠⚠ pretrained: sha256 НЕ запіновано — ваги з хабу не звірені. "
+             f"Запінувати: pretrained=\"{repo}@{rev or ckpt.parent.name}#{got}\"")
+    _log(f"pretrained <- hub {repo}@{rev or 'main'} sha256={got}")
+    return ckpt
 
 
 def _load_pretrained(params, roots):
@@ -436,9 +500,7 @@ def _load_pretrained(params, roots):
         ckpt = pts[0]
         _log(f"pretrained <- local {ckpt}")
     else:
-        from huggingface_hub import hf_hub_download
-        ckpt = Path(hf_hub_download(spec, "best.pt"))
-        _log(f"pretrained <- hub {spec}")
+        ckpt = _hub_base(spec)
     payload = torch.load(ckpt, map_location="cpu", weights_only=True)
     cfg = dict(_default_config())
     cfg.update(payload.get("config", {}) or {})
