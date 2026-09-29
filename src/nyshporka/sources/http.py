@@ -185,10 +185,31 @@ class HttpError(RuntimeError):
     """
 
     def __init__(self, message: str, *, status: int | None = None,
-                 body: str = "") -> None:
+                 body: str = "", retry_after: float | None = None) -> None:
         super().__init__(message)
         self.status = status
         self.body = body
+        #: Скільки секунд сервер просив зачекати (`Retry-After` на 429).
+        #: `None` — не казав. Без цього «спробуйте пізніше» не має дати.
+        self.retry_after = retry_after
+
+
+def retry_after_of(r: Any) -> float | None:
+    """`Retry-After` у секундах: число або HTTP-дата. Нечитне — `None`."""
+    raw = str(getattr(r, "headers", {}).get("Retry-After") or "").strip()
+    if not raw:
+        return None
+    try:
+        return max(0.0, float(raw))
+    except ValueError:
+        pass
+    from email.utils import parsedate_to_datetime
+
+    try:
+        when = parsedate_to_datetime(raw)
+    except (TypeError, ValueError):
+        return None
+    return max(0.0, when.timestamp() - time.time())
 
 
 def _body_of(r: Any, limit: int = 2000) -> str:
@@ -420,7 +441,8 @@ class Fetcher:
                 # це відповідь, а не збій, і шість спроб на неї лише
                 # розтягують очікування там, де відповідь уже відома.
                 if r.status_code == 429 and not self.retry_429:
-                    raise HttpError(f"{url}: HTTP 429", status=429, body=_body_of(r))
+                    raise HttpError(f"{url}: HTTP 429", status=429, body=_body_of(r),
+                                    retry_after=retry_after_of(r))
                 if r.status_code != 429 and r.status_code < 500:
                     # 🔴 Статусна помилка виходить звідси як `HttpError`, а не
                     # як `httpx.HTTPStatusError`. Усі споживачі ловлять

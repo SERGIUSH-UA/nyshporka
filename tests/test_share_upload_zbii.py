@@ -214,7 +214,8 @@ def test_khid_zalyvky(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     upload.publish(paket, base="https://nyshporka.online/v1", auth="k", say=khid.append)
     assert khid[0].startswith("заливаю текст:") and "МБ" in khid[0]
     assert khid[1].startswith("✓ текст за")
-    assert khid[-1] == "пул перевіряє пакет…"
+    assert khid[-2] == "пул перевіряє пакет…"
+    assert khid[-1].startswith("етапи: читання пакета")
 
 
 def test_puls_poky_zalyvaie(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -464,3 +465,69 @@ def test_zlamanyi_vyvid_khodu_ne_obryvaie_zalyvku(monkeypatch: pytest.MonkeyPatc
     assert polozheno == [b"bytes"], "байти мусять доїхати, хоч вивід і зламаний"
     assert got.get("ready") is True
     assert zvity == [], "збою заливки не було — і звіту про нього теж"
+
+
+# ── хронометраж і стеля ─────────────────────────────────────────────────────
+
+def test_etapy_zaliyvky_zamiriani(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """🔴 «Повільно» мусить мати адресу: кожен етап — секунди й байти.
+
+    Звіт користувача 29.09.2026: 176 с між справами проти 3,5 с раніше, і з
+    журналу не видно, чи то реєстрація, байти чи перевірка пулом.
+    """
+    paket, _ = _pidhotuvaty(monkeypatch, tmp_path)
+    monkeypatch.setattr(upload, "_put", lambda url, blob: None)
+
+    got = upload.publish(paket, base="https://nyshporka.online/v1", auth="k")
+
+    etapy = {r["etap"]: r for r in got["etapy"]}
+    assert list(etapy) == ["manifest", "register", "put_text", "complete"]
+    assert etapy["put_text"]["bytes"] == len(b"bytes")
+    assert all(isinstance(r["sec"], float) for r in got["etapy"])
+
+
+def test_etapy_ye_i_u_vidmovi(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    paket, _ = _pidhotuvaty(monkeypatch, tmp_path)
+
+    def _put(url: str, blob: bytes) -> None:
+        raise upload.UploadError("сховище не прийняло байти: ReadTimeout")
+
+    monkeypatch.setattr(upload, "_put", _put)
+    with pytest.raises(upload.UploadError) as ei:
+        upload.publish(paket, base="https://nyshporka.online/v1", auth="k")
+    assert [(r["etap"], r.get("failed", False)) for r in ei.value.etapy] == [
+        ("manifest", False), ("register", False), ("put_text", True)]
+
+
+def test_stelia_pulu_kazhe_koly_povtoryty(monkeypatch: pytest.MonkeyPatch) -> None:
+    """🔴 429 — не відмова воріт: пул каже, КОЛИ пробувати, і це мусить дійти до людини."""
+    from nyshporka.share import catalog
+    from nyshporka.sources.http import HttpError
+
+    class _F:
+        def post(self, url: str, json_body: Any) -> Any:
+            raise HttpError(f"{url}: HTTP 429", status=429,
+                            body='{"detail": "стеля заливок"}', retry_after=900.0)
+
+    monkeypatch.setattr(catalog, "_fetcher", lambda url, auth="", accept_json=True: _F())
+    with pytest.raises(upload.UploadError) as ei:
+        upload._request("POST", "https://nyshporka.online/v1/contributions", auth="k")
+    assert ei.value.status == 429 and ei.value.retry_after == 900.0
+    assert "15 хв" in str(ei.value) and "повторіть після" in str(ei.value)
+
+
+def test_retry_after_chyslo_i_data() -> None:
+    import time
+    from email.utils import formatdate
+
+    from nyshporka.sources.http import retry_after_of
+
+    class _R:
+        def __init__(self, v: str) -> None:
+            self.headers = {"Retry-After": v}
+
+    assert retry_after_of(_R("900")) == 900.0
+    za_hvylynu = retry_after_of(_R(formatdate(time.time() + 60, usegmt=True)))
+    assert za_hvylynu is not None and 50 < za_hvylynu <= 61
+    assert retry_after_of(_R("колись")) is None
+    assert retry_after_of(_R("")) is None

@@ -14,7 +14,8 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -45,11 +46,62 @@ class UploadError(RuntimeError):
     """
 
     def __init__(self, message: str, *, status: int | None = None,
-                 klas: str = "", chomu: str = "") -> None:
+                 klas: str = "", chomu: str = "",
+                 retry_after: float | None = None) -> None:
         super().__init__(message)
         self.status = status
         self.klas = klas
         self.chomu = chomu
+        #: Секунди, які пул просив зачекати (429). `None` — не казав.
+        self.retry_after = retry_after
+        #: Хронометраж етапів до збою (див. `_Etapy`).
+        self.etapy: list[dict[str, Any]] = []
+
+
+class _Etapy:
+    """Хронометраж заливки: етап, секунди, байти, код відмови.
+
+    🔴 Навіщо: інтервал між прийнятими справами (176 с проти 3,5 с раніше,
+    звіт користувача 29.09.2026) не каже, ДЕ пішов час — у пакуванні, у
+    реєстрації, у байтах чи в перевірці пулом. Без поетапного заміру
+    «повільно» не має адреси. Підписаних посилань тут немає — лише назви
+    етапів і числа, тож рядок можна показувати й копіювати.
+    """
+
+    def __init__(self) -> None:
+        self.rows: list[dict[str, Any]] = []
+
+    @contextmanager
+    def __call__(self, etap: str, nbytes: int = 0) -> Iterator[None]:
+        import time
+
+        row: dict[str, Any] = {"etap": etap}
+        if nbytes:
+            row["bytes"] = nbytes
+        start = time.monotonic()
+        try:
+            yield
+        except UploadError as exc:
+            row["status"] = exc.status
+            row["failed"] = True
+            raise
+        except BaseException:
+            row["failed"] = True
+            raise
+        finally:
+            row["sec"] = round(time.monotonic() - start, 2)
+            self.rows.append(row)
+
+    def summary(self) -> str:
+        """«реєстрація 0.4 с · текст 1.2 с · …» — один рядок для людини."""
+        return " · ".join(f"{_ETAP_NAZVY.get(r['etap'], r['etap'])} {r['sec']:.1f} с"
+                          for r in self.rows)
+
+
+_ETAP_NAZVY = {"manifest": "читання пакета", "register": "реєстрація",
+               "put_text": "текст", "put_text_server": "текст через сервер",
+               "put_geom": "геометрія", "complete": "перевірка пулом",
+               "attach_geom": "довезення геометрії"}
 
 
 #: Класи збою заливки. 🔴 Розрізняються, бо порада різна: «повторіть» на
@@ -103,7 +155,8 @@ def _request(method: str, url: str, *, body: Any = None, auth: str = "") -> dict
     except HttpError as exc:
         # Причина — з тіла відповіді: пул називає, котрі ворота не пустили
         # пакет, і голе «HTTP 400» людині нічого не каже.
-        raise UploadError(catalog.reason(exc), status=exc.status) from exc
+        raise UploadError(_z_chekanniam(catalog.reason(exc), exc.retry_after),
+                          status=exc.status, retry_after=exc.retry_after) from exc
     except catalog.PoolError as exc:
         raise UploadError(str(exc)) from exc
     text = resp.text if hasattr(resp, "text") else str(resp)
@@ -116,8 +169,37 @@ def _request(method: str, url: str, *, body: Any = None, auth: str = "") -> dict
     return got
 
 
+def _z_chekanniam(tekst: str, retry_after: float | None) -> str:
+    """Додати до відмови, КОЛИ пробувати знову, якщо пул це сказав.
+
+    🔴 «Зачекайте чверть години» без годинника змушує людину пам'ятати
+    момент відмови; агент і сценарій черги не пам'ятають його взагалі й
+    повторюють одразу — і дістають ту саму відмову.
+    """
+    if retry_after is None:
+        return tekst
+    import time
+
+    koly = time.strftime("%H:%M", time.localtime(time.time() + retry_after))
+    return f"{tekst}\nпул просить зачекати {retry_after / 60:.0f} хв — повторіть після {koly}"
+
+
 def publish(path: Path, *, base: str = "", auth: str = "",
             say: Callable[[str], None] | None = None) -> dict[str, Any]:
+    """Див. `_publish`; тут — хронометраж етапів у відповіді й у відмові."""
+    etapy = _Etapy()
+    try:
+        got = _publish(path, base=base, auth=auth, say=say, etapy=etapy)
+    except UploadError as exc:
+        exc.etapy = etapy.rows
+        raise
+    if etapy.rows:
+        _tykhyi(say)(f"етапи: {etapy.summary()}")
+    return {**got, "etapy": etapy.rows}
+
+
+def _publish(path: Path, *, base: str, auth: str,
+             say: Callable[[str], None] | None, etapy: _Etapy) -> dict[str, Any]:
     """Віддати зібраний пакет у пул.
 
     Повертає відповідь сервера. Повторний виклик із тим самим змістом
@@ -159,13 +241,17 @@ def publish(path: Path, *, base: str = "", auth: str = "",
             f"https://…{catalog.TRUSTED_DOMAIN}. Для свого сервера назвіть його "
             f"явно: {catalog.ENV_TRUST}=https://хост[:порт] (лише HTTPS)")
     try:
-        manifest = bundle.read_manifest(path)
+        with etapy("manifest"):
+            manifest = bundle.read_manifest(path)
     except (OSError, ValueError, bundle.BundleError, EOFError) as exc:
         raise UploadError(f"не прочитати пакет {path.name}: {exc}") from exc
 
-    got = _request("POST", f"{home}/contributions", body=manifest.as_json(), auth=tok)
+    with etapy("register"):
+        got = _request("POST", f"{home}/contributions", body=manifest.as_json(), auth=tok)
     if got.get("duplicate"):
-        return _public(_attach_geometry(got, path, home=home, tok=tok, manifest=manifest))
+        with etapy("attach_geom"):
+            return _public(_attach_geometry(got, path, home=home, tok=tok,
+                                            manifest=manifest))
 
     upload = got.get("upload") or {}
     if not upload.get("text") or not got.get("contribution"):
@@ -182,7 +268,8 @@ def publish(path: Path, *, base: str = "", auth: str = "",
     try:
         tekst = path.read_bytes()
         try:
-            _zalyty(upload["text"], tekst, "текст", kazhy)
+            with etapy("put_text", len(tekst)):
+                _zalyty(upload["text"], tekst, "текст", kazhy)
         except UploadError as exc:
             if exc.klas not in _ZAPASNYI_KLASY:
                 raise
@@ -191,9 +278,10 @@ def publish(path: Path, *, base: str = "", auth: str = "",
             # каже, що зламано на шляху людини до сховища.
             kazhy("пряме сховище недоступне — заливаю текст через сервер Супряги…")
             try:
-                prijniato = _zalyty(f"{home}/contributions/{vnesok}/text", tekst,
-                                    "текст через сервер", kazhy,
-                                    put=lambda url, blob: _zapasnyi_put(url, blob, tok))
+                with etapy("put_text_server", len(tekst)):
+                    prijniato = _zalyty(f"{home}/contributions/{vnesok}/text", tekst,
+                                        "текст через сервер", kazhy,
+                                        put=lambda url, blob: _zapasnyi_put(url, blob, tok))
             except UploadError as zapas:
                 raise UploadError(f"{exc}\nзапасний шлях через сервер теж не вдався: "
                                   f"{zapas}", status=exc.status, klas=exc.klas,
@@ -212,11 +300,14 @@ def publish(path: Path, *, base: str = "", auth: str = "",
         geom = bundle.geom_path(path)
         if upload.get("geom") and _geom_fresh(path, geom) and not cherez_server:
             etap = "put_geom"
-            _zalyty(upload["geom"], geom.read_bytes(), "геометрію", kazhy)
+            blob = geom.read_bytes()
+            with etapy("put_geom", len(blob)):
+                _zalyty(upload["geom"], blob, "геометрію", kazhy)
 
         etap = "complete"
         kazhy("пул перевіряє пакет…")
-        done = _request("POST", f"{home}/contributions/{vnesok}/complete", auth=tok)
+        with etapy("complete"):
+            done = _request("POST", f"{home}/contributions/{vnesok}/complete", auth=tok)
     except UploadError as exc:
         # Відмову самого пулу (ворота, стеля) сервер уже знає й записав, і
         # повтор тут не допоможе — тому й підказки повторити немає.

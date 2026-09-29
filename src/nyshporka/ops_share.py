@@ -511,11 +511,24 @@ def share_publish(a: SharePublishArgs) -> Envelope:
         got = publish(Path(a.path), base=a.base, say=_khid)
     except UploadError as exc:
         env = fail(str(exc))
+        # 🔴 Машинні поля відмови: стеля пулу (429) — «зачекати до», відмова
+        # воріт (4xx) — «виправити пакет», обрив — «повторити». Сценарій черги
+        # інакше розрізняв би їх за текстом або не розрізняв зовсім.
+        env.data = {"status": exc.status, "klas": exc.klas, "etapy": exc.etapy,
+                    "rate_limited": exc.status == 429}
+        if exc.retry_after is not None:
+            import time
+
+            env.data["retry_after"] = round(exc.retry_after)
+            env.data["next_attempt_at"] = time.strftime(
+                "%Y-%m-%dT%H:%M:%S%z", time.localtime(time.time() + exc.retry_after))
         # Підказка «далі» — лише там, де повтор справді допоможе. На сталому
         # збої будь-яка автоматична дія веде по колу.
         if exc.klas == TYMCHASOVYI:
             env.suggest("share.publish",
                         "той самий пакет пізніше — внесок уже заведено, другого не буде")
+        elif exc.status == 429:
+            env.suggest("share.publish", "той самий пакет після next_attempt_at")
         return env
     env = ok(got)
     if got.get("via_server"):
