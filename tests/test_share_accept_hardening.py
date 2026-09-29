@@ -336,6 +336,36 @@ def test_zavantazhene_ne_zbihaietsia_z_katalohom(space: Path, tmp_path: Path,
     assert got.is_file()
 
 
+@pytest.mark.parametrize(("url", "kliuch", "yde"), [
+    ("https://api.nyshporka.online/v1/d/b/dahmo/315-1-8433/1/text.nyshtext", "tok", True),
+    # Без ключа — анонімно, як і досі: пул віддає пакет і так.
+    ("https://api.nyshporka.online/v1/d/b/dahmo/315-1-8433/1/text.nyshtext", "", False),
+    # Старий рядок каталогу — прямо на байтове сховище: туди ключ не їде.
+    ("https://cdn.nyshporka.online/b/dahmo/315-1-8433/1/text.nyshtext", "tok", False),
+    # Чужий сервер з тим самим шляхом — теж ні.
+    ("https://x.example/v1/d/b/dahmo/315-1-8433/1/text.nyshtext", "tok", False),
+])
+def test_kliuch_lyshe_na_vydachu_pulu(url: str, kliuch: str, yde: bool, tmp_path: Path,
+                                      monkeypatch: pytest.MonkeyPatch) -> None:
+    """Завантаження з ключем пул записує на особу; ключ — лише на `/v1/d/` пулу."""
+    import nyshporka.share.upload as U
+    import nyshporka.sources.http as H
+
+    real = handmade(tmp_path / "p.nyshtext")
+    bachyv: list[dict[str, str]] = []
+
+    def _download(self: Any, url: str, dest: Path, **_: Any) -> int:
+        bachyv.append(dict(self._headers))
+        dest.write_bytes(real.read_bytes())
+        return dest.stat().st_size
+
+    monkeypatch.delenv(H.ENV_OFFLINE, raising=False)
+    monkeypatch.setattr(H.Fetcher, "download", _download)
+    monkeypatch.setattr(U, "token", lambda: kliuch)
+    accept.fetch(url, tmp_path / "in")
+    assert (bachyv[0].get("Authorization") == "Bearer tok") is yde
+
+
 @pytest.mark.parametrize("slots", [["x"], [{"phash": 5, "at": 0.5}], [{"phash": "ab"}],
                                    [{"at": [1], "phash": "ab"}], "ne-spysok"])
 def test_kryvyi_vidbytok_ne_valyt_zvirku(slots: Any) -> None:

@@ -147,7 +147,7 @@ def fetch(src: str, dest_dir: Path, *, sha256: str = "") -> Path:
         # Свій рядок, а не браузерний: качається пакет із нашого ж сховища,
         # і в його логах клієнт мусить бути відрізнимий від людини. Докладно
         # — у `share/upload.py`.
-        Fetcher(headers={"User-Agent": app_ua()}).download(
+        Fetcher(headers={"User-Agent": app_ua(), **_kliuch_vydachi(src)}).download(
             src, tmp, max_bytes=bundle.MAX_DOWNLOAD_BYTES)
     except (HttpError, OSError) as exc:
         tmp.unlink(missing_ok=True)
@@ -158,6 +158,30 @@ def fetch(src: str, dest_dir: Path, *, sha256: str = "") -> Path:
                           f"(sha256) — пакет підмінений або обірваний")
     tmp.replace(dest)
     return dest
+
+
+def _kliuch_vydachi(src: str) -> dict[str, str]:
+    """Ключ Супряги на завантаження — лише адресі видачі пулу (`/v1/d/`).
+
+    Без ключа пул не знає, ЧИЄ це завантаження: бачить клієнта й версію, а
+    автор справи — лише «хтось качав». З ключем завантаження стає особою в
+    обліку. Качати можна й без нього: ключа нема — заголовка нема, і пул
+    віддає пакет так само.
+
+    🔴 Лише `/v1/d/`, а не будь-яка довірена адреса: старі рядки каталогу
+    ведуть прямо на `cdn.` — це байтове сховище, ключ йому ні до чого, а
+    чужий `Authorization` сховище може прочитати як спробу підпису. Далі 302
+    на `cdn.` ключ теж не їде: httpx знімає його при переході на інший хост.
+    """
+    from urllib.parse import urlsplit
+
+    from nyshporka.share.catalog import may_send_key
+    from nyshporka.share.upload import token
+
+    if "/v1/d/" not in urlsplit(src).path or not may_send_key(src):
+        return {}
+    kliuch = token()
+    return {"Authorization": f"Bearer {kliuch}"} if kliuch else {}
 
 
 #: Скільки останніх ланок адреси йде в ім'я збереженого файлу. Чотири — щоб
