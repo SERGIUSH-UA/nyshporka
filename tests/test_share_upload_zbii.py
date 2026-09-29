@@ -127,6 +127,11 @@ def _pidhotuvaty(monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
         return {"ready": True, "status": "nove"}
 
     monkeypatch.setattr(upload, "_request", _request)
+    # 🔴 Запасний шлях теж підмінено: інакше кожен тест із відмовою 403 слав
+    # справжній PUT на nyshporka.online (журнал сервера 29.09: 35 запитів
+    # `…/contributions/1337/text`). За замовчуванням — «пул без запасного»;
+    # тест, якому важливий успіх, підміняє його сам.
+    monkeypatch.setattr(upload, "_zapasnyi_put", lambda url, blob, tok: False)
     zvity: list[tuple[Any, ...]] = []
     monkeypatch.setattr(upload, "_zvit_pro_zbii",
                         lambda home, tok, vnesok, etap, prychyna: zvity.append(

@@ -1,7 +1,7 @@
 # Як працювати
 
 <p align="center">
-  <img alt="Нишпорка читає рукопис із лупою" src="assets/maskot-pratsiuie.webp" width="220" height="206">
+  <img alt="Нишпорка читає рукопис із лупою" src="../assets/maskot-pratsiuie.webp" width="220" height="206">
 </p>
 
 Нишпорку поставлено, помічника підключено ([якщо ні](install.md)). Далі
