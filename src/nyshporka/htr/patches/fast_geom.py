@@ -21,6 +21,8 @@
 """
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 import shapely
 from shapely import geometry as geom
@@ -290,6 +292,27 @@ def _warn_version_drift() -> None:
                   f"nyshporka.htr.patches.fast_geom_verify 5", flush=True)
 
 
+#: Скільки разів швидкий шлях упав, а рядок довела оригінальна функція kraken.
+#: 🔴 Не нуль означає ваду патча, а не kraken: оригінал на тому самому вході
+#: пройшов. Без запасного шляху такий рядок kraken мовчки викидав
+#: («Polygonizer failed», `blla.py`: рядок без полігона не потрапляє в
+#: сторінку), і відрізнити «патч зламав» від «kraken не впорався» було нічим
+#: (звіт користувача 29.09.2026: 90 таких подій на справі 693).
+FALLBACKS: dict[str, int] = {"calc_roi": 0, "boundary_tracing": 0}
+
+
+def _with_fallback(fast: Any, orig: Any, name: str) -> Any:
+    def call(*args: Any, **kwargs: Any) -> Any:
+        try:
+            return fast(*args, **kwargs)
+        except Exception:
+            FALLBACKS[name] += 1
+            return orig(*args, **kwargs)
+
+    call.__name__ = getattr(fast, "__name__", name)
+    return call
+
+
 def install(verbose: bool = False) -> bool:
     """Підмінити гарячі функції в модулі kraken.
 
@@ -310,9 +333,11 @@ def install(verbose: bool = False) -> bool:
             f"fast_geom: у kraken.lib.segmentation немає {missing} — "
             f"версія пакета розійшлася з патчем (звірено на {TESTED_KRAKEN})")
     kseg._calc_roi_orig = kseg._calc_roi
-    kseg._calc_roi = calc_roi_fast
+    kseg._calc_roi = _with_fallback(calc_roi_fast, kseg._calc_roi_orig, "calc_roi")
     kseg._boundary_tracing_orig = kseg.boundary_tracing
-    kseg.boundary_tracing = boundary_tracing_fast
+    kseg.boundary_tracing = _with_fallback(boundary_tracing_fast,
+                                           kseg._boundary_tracing_orig,
+                                           "boundary_tracing")
     kseg._rotate_orig = kseg._rotate
     kseg._rotate = rotate_fast
     kseg._fast_geom_installed = True

@@ -104,6 +104,7 @@ import time
 import unicodedata
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 #: Змінні, якими BLAS/OpenMP визначають ширину своїх пулів. Читаються ОДИН РАЗ
 #: при завантаженні бібліотеки, тож виставляти їх треба до `import numpy`.
@@ -2343,6 +2344,59 @@ def _reset_vram_peak(device: str) -> None:
         pass
 
 
+class GeomWatch:
+    """Рядки, які kraken викинув на сторінці: «Polygonizer failed».
+
+    🔴 Це не косметичне попередження, а втрачений рядок: `blla.py` кладе
+    рядок у сторінку лише з полігоном, і базова лінія без нього зникає разом
+    із текстом. У лозі ж стояло «failed on line 0» без кадру — лінії
+    полігонізуються поодинці, тож індекс завжди нуль, — і зіставити 90 таких
+    подій зі сторінками було нічим (звіт користувача 29.09.2026). Тут вони
+    збираються на час сторінки й лягають у її мету з назвою кадру.
+    """
+
+    PREFIX = "Polygonizer failed"
+
+    def __init__(self) -> None:
+        import logging
+
+        class _H(logging.Handler):
+            def emit(h, rec: logging.LogRecord) -> None:
+                msg = rec.getMessage()
+                if msg.startswith(self.PREFIX):
+                    self.why.append(msg.split(": ", 1)[-1][:160])
+
+        self.why: list[str] = []
+        self.rescued = 0
+        self._fb0 = 0
+        logging.getLogger("kraken").addHandler(_H(logging.WARNING))
+
+    @staticmethod
+    def _fallbacks() -> int:
+        fg = sys.modules.get("fast_geom")
+        return sum(getattr(fg, "FALLBACKS", {}).values()) if fg else 0
+
+    def start(self) -> None:
+        self.why = []
+        self._fb0 = self._fallbacks()
+
+    def page(self) -> dict[str, Any]:
+        """Поля мети сторінки. Порожньо, коли втрат і рятунків немає.
+
+        Лічба — за всі проходи сторінки (орієнтації, перепуск стелі), тож це
+        верхня межа втрачених рядків фінального проходу, а не точне число.
+        """
+        rescued = self._fallbacks() - self._fb0
+        out: dict[str, Any] = {}
+        if self.why:
+            out["geom_lost"] = len(self.why)
+            out["geom_why"] = list(dict.fromkeys(self.why))[:3]
+            out["needs_review"] = True
+        if rescued:
+            out["geom_rescued"] = rescued
+        return out
+
+
 def page_memory(device: str) -> dict[str, int]:
     """Скільки пам'яті сторінка реально взяла: пік VRAM і RSS процесу, МБ.
 
@@ -3461,6 +3515,8 @@ def _main_case(args: argparse.Namespace, cache: dict | None = None) -> int:
     print(f"[htr-run] моделі завантажено за {time.time() - t0:.0f} с", flush=True)
 
     done = skipped = failed = enhanced_n = ceiling_n = 0
+    geom_watch = GeomWatch()
+    geom_lost_pages = 0
     # скільки рядків голосу впало через маску основного тексту (див. side у
     # `ocr_page_parseq`) — друкується в підсумку, бо тиха втрата гірша за втрату
     side_lost: dict[str, int] = {}
@@ -3557,6 +3613,7 @@ def _main_case(args: argparse.Namespace, cache: dict | None = None) -> int:
         # попередньої, а вони збіглися б за довжиною з її рядками лише випадково —
         # тобто помилка була б рідкою й тихою, найгіршого сорту
         ocr_page_parseq.boxes = []
+        geom_watch.start()
         try:
             seg_ceiling.reset()
             res = process_page(src, segmenter, rec_model, device,
@@ -3629,6 +3686,7 @@ def _main_case(args: argparse.Namespace, cache: dict | None = None) -> int:
             continue
         sec = round(time.time() - t, 1)
         mem = page_memory(device)
+        geom = geom_watch.page()
         if device.startswith("cuda") and not args.keep_cache:
             # 🔴 Віддати кеш карті після КОЖНОЇ сторінки, а не лише після
             # сегментації під локом: із засівом сегментації (готовий кеш) ту
@@ -3725,7 +3783,20 @@ def _main_case(args: argparse.Namespace, cache: dict | None = None) -> int:
             **({"contrast": res["contrast"]} if res.get("contrast") is not None else {}),
             # пам'ять сторінки — щільність справи, виміряна, а не вгадана
             **mem,
+            # рядки, викинуті полігонізатором kraken, і врятовані запасним шляхом
+            **geom,
+            # 🔴 Порожня сторінка має причину: «рядки знайдено, але kraken їх
+            # викинув» — це збій і привід перечитати, «рядків не знайдено» —
+            # імовірно чистий аркуш, але це ще не підтвердження людиною
+            # (підтверджене — `pages note --type blank`). Без поля три порожні
+            # txt у справі не відрізнити одне від одного (звіт 29.09.2026).
+            **({"empty": "geom_lost" if geom.get("geom_lost") else "no_lines"}
+               if not res["lines"] else {}),
         }
+        if geom.get("geom_lost"):
+            geom_lost_pages += 1
+            print(f"[geom] ⚠ {src.name}: kraken не взяв до {geom['geom_lost']} рядк. "
+                  f"({geom['geom_why'][0]})", flush=True)
         if res.get("enhanced"):
             enhanced_n += 1
         if src.name in meta["failed"]:
@@ -3742,6 +3813,12 @@ def _main_case(args: argparse.Namespace, cache: dict | None = None) -> int:
              **mem)
 
     meta["done"] = True
+    # Сторінки, де kraken викинув рядки, — до ока (поле `needs_review` у мети
+    # сторінки); у підсумку — число, щоб не вичитувати його з логу.
+    meta["geom_lost_pages"] = geom_lost_pages
+    if geom_lost_pages:
+        print(f"[geom] ⚠ на {geom_lost_pages} сторінках kraken викинув рядки "
+              f"(needs_review у мети)", flush=True)
     save_meta(force=True)
     total_min = (time.time() - t0) / 60
     per = f" · {60 * total_min / done:.1f} с/стор" if done else ""
