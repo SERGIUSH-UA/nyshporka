@@ -544,8 +544,34 @@ def _rent() -> Check:
                  "перевірити ключ і баланс: `nysh cloud rent status`")
 
 
+def _library() -> Check:
+    """Чи не суперечить архів запису в каталозі справ його ж шифрі.
+
+    🔴 Такий запис лишився від давнього правила тек, що вгадувало архів за
+    номером (до 0.18.13), і нічим себе не видає: облік справи лежить під
+    ключем чужого архіву, а пул про неї питають під чужим ключем.
+    """
+    from nyshporka.core.workspace import WorkspaceError, workspace
+    from nyshporka.pagestore.store import library_conflicts
+
+    try:
+        workspace()
+    except WorkspaceError:
+        return Check("Каталог справ", "warn", "простір не визначено")
+    bad = library_conflicts()
+    if not bad:
+        return Check("Каталог справ", "ok", "архів кожного запису збігається з його шифрою")
+    pryklady = "; ".join(f"{c['key']} ↔ «{c['shifra']}»" for c in bad[:3])
+    tail = f" і ще {len(bad) - 3}" if len(bad) > 3 else ""
+    return Check("Каталог справ", "warn",
+                 f"{len(bad)} записів, де архів ключа суперечить шифрі: {pryklady}{tail}",
+                 "перезібрати каталог: `nysh cases build`; що лишилось — виправити "
+                 "паспорт справи: `nysh case <тека> --shifra \"<архів фонд-опис-справа>\"`. "
+                 "Облік, записаний під старим ключем, перенести в новий файл")
+
+
 CHECKS = (_version, _skills, _python, _workspace, _cloud_sync, _disk, _profile,
-          _decode_visible, _shared_keys, _torch, _engines, _models, _rent)
+          _library, _decode_visible, _shared_keys, _torch, _engines, _models, _rent)
 
 #: Перевірки, які мають сенс лише при ввімкненій секції. 🔴 Не косметика:
 #: «⚠ рушії не встановлені» на машині того, хто прийшов подивитись каталог

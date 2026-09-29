@@ -320,7 +320,14 @@ def resolve_case(value: str, *, claim: bool = True) -> CaseRef:
         # ДАВО/ДАВіО-плутанина: лейбл шифри каже одне, тека диска — інше.
         # Якщо по (fond, spr) у бібліотеці рівно один запис — його ключ канонічний,
         # інакше нотатки тієї самої справи розповзуться по двох файлах.
+        # 🔴 Лише в межах ТОГО САМОГО архіву (`same_as`). Номери фондів і справ
+        # повторюються між архівами, і без цього обмеження запис іншого архіву
+        # з тим самим фондом і справою мовчки підміняв архів, названий людиною
+        # (звіт користувача 29.09.2026: «ДАХмО 315-1-8345» → `DAVIO/315/8345`).
+        # Суперечливі записи бібліотеки показує `library_conflicts`.
+        pk = _pack_active()
         same = [e for e in lib if e.get("fond") == fond and e.get("spr") == spr
+                and pk.same_archive(e.get("repo"), repo)
                 and not opys_conflict(opys, e.get("opys"))]
         if len(same) == 1:
             entry = same[0]
@@ -336,6 +343,28 @@ def resolve_case(value: str, *, claim: bool = True) -> CaseRef:
         path=entry.get("path") or entry.get("raw_path") or "",
         frames=entry.get("frames"),
     )
+
+
+def library_conflicts(lib: list[dict[str, Any]] | None = None) -> list[dict[str, str]]:
+    """Записи бібліотеки, чий архів суперечить архіву їхньої ж шифри.
+
+    Такий запис резолвер більше не підставляє замість названого архіву, але
+    й сам він не лікується: облік, уже записаний під його ключем, лежить у
+    файлі чужого архіву. Показуються, щоб їх виправили (`nysh doctor`).
+    Шифра без архіву чи з невідомим архівом — не суперечність, а незнання.
+    """
+    pk = _pack_active()
+    labels = _label2repo()
+    out: list[dict[str, str]] = []
+    for e in load_library() if lib is None else lib:
+        ms = _SHIFRA_RE.match(str(e.get("shifra") or "").strip())
+        z_shyfry = labels.get(ms.group(1).casefold()) if ms and ms.group(1) else None
+        repo = str(e.get("repo") or "")
+        if z_shyfry and repo and not pk.same_archive(z_shyfry, repo):
+            out.append({"key": str(e.get("key") or ""), "repo": repo,
+                        "shifra": str(e.get("shifra") or ""), "shifra_repo": z_shyfry,
+                        "path": str(e.get("path") or e.get("raw_path") or "")})
+    return out
 
 
 def case_path(ref: CaseRef) -> Path:
