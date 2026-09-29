@@ -75,3 +75,6 @@ install/nyshporka-catalog-*.zip
 # не їде; ворота приватних даних тому й пропускають git-ігнороване.
 /ДОРОБКА.md
 /ДОРОБКА-*
+
+# облік `nysh skills install` — локальний, у колесо не їде
+.claude/skills/.nysh-skills.json
