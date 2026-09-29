@@ -309,3 +309,28 @@ def test_storinky_spravy_z_naipovnishoho_holosu(space: Path, monkeypatch: Any) -
     monkeypatch.setattr("nyshporka.htr_store.list_cases", lambda: rows)
     got = S.nepodileni()
     assert [(r["pages"], r["status"]) for r in got] == [(89, S.GOTOVA)]
+
+
+def test_ready_zvuzhuie_i_perelik_i_pidsumok(space: Path, monkeypatch: Any) -> None:
+    """🔴 `ready` звужує ВСЮ відповідь, а не лише чергу пакування.
+
+    Інакше `rows`, `count` і `summary` описують інший набір, ніж просили, і
+    агент, що читає JSON, бере «без кадрів» за готову (звіт користувача
+    29.09.2026: `count=11`, з них один «без кадрів»).
+    """
+    from nyshporka import ops as O
+
+    rows = [{"case_key": "DAHMO/315/1", "shifra": "ДАХмО 315-1-1", "pages": 3,
+             "frames": 3, "model": "m", "title": "", "status": S.GOTOVA},
+            {"case_key": "DAHMO/315/2", "shifra": "ДАХмО 315-1-2", "pages": 2,
+             "frames": 0, "model": "m", "title": "", "status": S.BEZ_KADRIV}]
+    monkeypatch.setattr(S, "nepodileni", lambda: rows)
+
+    d = O.call("share.suggest", {"ready": True}).data
+    assert [r["case_key"] for r in d["rows"]] == ["DAHMO/315/1"]
+    assert d["count"] == 1
+    assert d["summary"].get(S.BEZ_KADRIV, 0) == 0
+    assert d["total"] == 2, "скільки неподіленого загалом — теж видно"
+
+    d = O.call("share.suggest", {}).data
+    assert d["count"] == 2

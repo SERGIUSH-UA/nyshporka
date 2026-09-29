@@ -397,6 +397,12 @@ def suggest_cmd(
         console.print(f"більше не питаю про «{_e(skip)}» · лишилось {d.get('left')}")
         _notes(env)
         return
+    total = d.get("total", len(rows))
+    if not rows and ready and total:
+        console.print(f"готових до віддачі немає · неподіленого {total} "
+                      "([dim]nysh share suggest[/dim] — усі зі статусами)")
+        _notes(env)
+        return
     if not rows:
         # 🔴 «Нічого не лишилось» — не те саме, що «усе в Супрязі»: справа
         # могла бути лише спакована локально або відкладена відмовою.
@@ -408,21 +414,20 @@ def suggest_cmd(
 
     zriz = d.get("pool_snapshot")
     pidsumok = " · ".join(f"{k} {v}" for k, v in (d.get("summary") or {}).items() if v)
-    console.print(f"[bold]{len(rows)}[/bold] прочитаних справ ще не в Супрязі · {pidsumok}")
+    skilky = (f"[bold]{len(rows)}[/bold] готових до віддачі з {total} неподіленого"
+              if ready else f"[bold]{len(rows)}[/bold] прочитаних справ ще не в Супрязі")
+    console.print(f"{skilky} · {pidsumok}")
     console.print("[dim]" + (f"звірено зі зрізом пулу від {_e(zriz)}" if zriz else
                              "зрізу пулу немає — звірено лише з журналом пакувань; "
                              "точніше: nysh share sync") + "[/dim]\n")
-    from nyshporka.share.suggest import READY_STATUSES
-
-    shown = [r for r in rows if not ready or r.get("status") in READY_STATUSES]
-    for r in shown[:limit]:
+    for r in rows[:limit]:
         console.print(f"  {_e(r.get('status', '')):<17} "
                       f"{_e(r['shifra'] or r['case_key']):<28} "
                       f"{r['pages']:>5}/{r['frames'] or '—':<5} · {_e(r['model'] or '—')}")
         if r.get("title"):
             console.print(f"  {'':<17} [dim]{_e(r['title'])}[/dim]")
-    if len(shown) > limit:
-        console.print(f"[dim]… і ще {len(shown) - limit} (--limit N)[/dim]")
+    if len(rows) > limit:
+        console.print(f"[dim]… і ще {len(rows) - limit} (--limit N)[/dim]")
 
     packed = d.get("packed") or []
     if packed:

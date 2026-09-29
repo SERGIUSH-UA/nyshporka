@@ -116,3 +116,54 @@ def test_the_label_names_the_case_for_a_human(space) -> None:
     assert "ДАХмО 315-1-100" in got
     assert "2/3" in got
     assert str(os.getpid()) in got
+
+
+_HAMMER = r"""
+import json, os, sys
+from pathlib import Path
+from nyshporka.core import workspace as W
+W.use(W.Workspace(root=Path(sys.argv[1]), name="t", origin="test"))
+from nyshporka.htr import runs as R
+me, errors, lost = os.getpid(), [], 0
+for _ in range(int(sys.argv[2])):
+    for step in (lambda: R.register(me, case="spr-1", shard="1/2"),
+                 R.alive,
+                 lambda: R.register(2**22 + 7, case="dead", created=1.0),
+                 R.alive):
+        try:
+            step()
+        except Exception as e:
+            errors.append(repr(e))
+    try:
+        if me not in [r.pid for r in R.alive()]:
+            lost += 1
+    except Exception as e:
+        errors.append(repr(e))
+print(json.dumps({"errors": errors[:3], "n_errors": len(errors), "lost": lost}))
+"""
+
+
+def test_parallel_shards_neither_crash_nor_lose_each_other(space) -> None:
+    """🔴 Два шарди однієї справи стартують разом і обидва пишуть реєстр.
+
+    Без замка на всю операцію «прочитав → змінив → записав» на Windows другий
+    падав на `replace()` з WinError 5 (звіт користувача 28.09.2026, справа
+    127-1015-473), а там, де не падав, затирав запис першого: живий прогін
+    зникав з реєстру, і чужа справа могла стати поруч. Мертвий запис у циклі —
+    щоб `alive()` теж писав, як у бою.
+    """
+    import json
+    import subprocess
+    import sys
+
+    procs = [subprocess.Popen([sys.executable, "-c", _HAMMER, str(space), "60"],
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                              text=True, encoding="utf-8")
+             for _ in range(3)]
+    got = []
+    for p in procs:
+        out, err = p.communicate(timeout=120)
+        assert p.returncode == 0, err
+        got.append(json.loads(out.strip().splitlines()[-1]))
+    assert [g["n_errors"] for g in got] == [0, 0, 0], [g["errors"] for g in got]
+    assert [g["lost"] for g in got] == [0, 0, 0]

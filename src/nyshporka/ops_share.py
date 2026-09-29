@@ -424,18 +424,19 @@ def share_suggest(a: ShareSuggestArgs) -> Envelope:
 
     from nyshporka.share import pool
 
-    rows = S.nepodileni()
+    vsi = S.nepodileni()
+    # 🔴 `ready` звужує всю відповідь: `rows`, `count` і `summary` мусять
+    # описувати той самий набір, інакше агент бере «без кадрів» за готову.
+    rows = [r for r in vsi if r.get("status") in S.READY_STATUSES] if a.ready else vsi
     zriz = pool.meta()
-    data: dict[str, Any] = {"rows": rows, "count": len(rows),
+    data: dict[str, Any] = {"rows": rows, "count": len(rows), "total": len(vsi),
                             "summary": S.pidsumok(rows),
                             "pool_snapshot": str((zriz or {}).get("taken_at") or "")}
     env = ok(data)
-    if not rows:
+    if not vsi:
         return env
 
     cherha = [r for r in rows if not a.take or a.take in (r["case_key"], r["shifra"])]
-    if a.ready:
-        cherha = [r for r in cherha if r.get("status") in S.READY_STATUSES]
     if a.take and not cherha:
         return fail(f"у переліку неподіленого немає «{a.take}»")
     if not (a.take or a.all):

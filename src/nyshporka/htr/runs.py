@@ -16,26 +16,40 @@
 реєстр розрізняє прогони за справою, а не за самим фактом існування: другий
 шард тієї самої теки проходить, чужа справа — ні.
 
-⚠ Вікно гонки тут є й лишається свідомо: між перевіркою і записом минають
-мілісекунди, і два прогони, стартовані в ту саму мить, обидва пройдуть. Ціна
-помилки в цей бік — те, що було й доти; ціна замка на кожен старт — ще один
-шар, який доводиться знімати руками, коли він застряг. Від справжнього
-одночасного заходу на карту захищає лок сегментації, і він лишається на місці.
+🔴 Кожна операція над файлом — «прочитав → змінив → записав» під замком
+`runs.lock`. Без нього шарди, що стартують разом, на Windows падали на
+`replace()` з WinError 5, а там, де не падали, затирали записи одне одного:
+живий прогін зникав із реєстру (звіт користувача 28.09.2026). Замок живе мить
+операції й тримається дескриптором, тож процес, що впав, його не лишає.
+
+⚠ Вікно між `others()` і `register()` лишається свідомо: два прогони, стартовані
+в ту саму мить, обидва пройдуть перевірку. Ціна помилки в цей бік — те, що було
+й доти; замок на весь старт довелося б знімати руками, коли він застрягне. Від
+справжнього одночасного заходу на карту захищає лок сегментації.
 """
 from __future__ import annotations
 
 import json
 import os
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from nyshporka.core.lock import process_alive, process_started
 from nyshporka.core.workspace import workspace
+from nyshporka.core.xrate import _locked
 
 #: Поруч із локом карти: та сама тека, той самий життєвий цикл.
 FILE = "runs.json"
+#: Скільки чекати сусіда, що саме пише реєстр. Операція триває мілісекунди;
+#: довше — це вже не черга, а завислий процес, і краще впасти з назвою файла.
+LOCK_TIMEOUT = 30.0
+#: Повтори `replace()` на Windows: антивірус чи індексатор може на мить відкрити
+#: свіжий файл без спільного доступу. Від сусіда-писаря береже замок, не вони.
+REPLACE_TRIES = 5
 
 
 @dataclass(frozen=True)
@@ -77,12 +91,29 @@ def _read(p: Path) -> list[dict[str, Any]]:
     return got if isinstance(got, list) else []
 
 
+@contextmanager
+def _transaction() -> Iterator[Path]:
+    """Реєстр під замком на всю операцію; віддає шлях до файла."""
+    p = path()
+    with _locked(p.with_suffix(".lock"), timeout=LOCK_TIMEOUT):
+        yield p
+
+
 def _write(p: Path, rows: list[dict[str, Any]]) -> None:
+    """Лише всередині `_transaction()`."""
     p.parent.mkdir(parents=True, exist_ok=True)
     tmp = p.with_suffix(f".{os.getpid()}.tmp")
     tmp.write_text(json.dumps(rows, ensure_ascii=False, indent=1) + "\n",
                    encoding="utf-8", newline="\n")
-    tmp.replace(p)
+    for i in range(REPLACE_TRIES):
+        try:
+            tmp.replace(p)
+            return
+        except PermissionError:
+            if i == REPLACE_TRIES - 1:
+                tmp.unlink(missing_ok=True)
+                raise
+            time.sleep(0.05 * (i + 1))
 
 
 def _row(d: dict[str, Any]) -> Live | None:
@@ -107,20 +138,20 @@ def alive() -> list[Live]:
     ⚠ «Не знаю» (немає psutil) трактується як ЖИВИЙ. Помилка в цей бік коштує
     зайвого попередження, у протилежний — завалених прогонів.
     """
-    p = path()
-    rows = _read(p)
-    keep: list[dict[str, Any]] = []
-    out: list[Live] = []
-    for d in rows:
-        row = _row(d)
-        if row is None:
-            continue
-        if process_alive(row.pid, row.created) is False:
-            continue
-        keep.append(d)
-        out.append(row)
-    if len(keep) != len(rows):
-        _write(p, keep)
+    with _transaction() as p:
+        rows = _read(p)
+        keep: list[dict[str, Any]] = []
+        out: list[Live] = []
+        for d in rows:
+            row = _row(d)
+            if row is None:
+                continue
+            if process_alive(row.pid, row.created) is False:
+                continue
+            keep.append(d)
+            out.append(row)
+        if len(keep) != len(rows):
+            _write(p, keep)
     return out
 
 
@@ -140,10 +171,11 @@ def register(pid: int, *, case: str, case_key: str = "", shard: str = "",
     """
     if created is None:
         created = process_started() if pid == os.getpid() else _created_of(pid)
-    rows = [d for d in _read(path()) if int(d.get("pid") or 0) != pid]
-    rows.append({"pid": pid, "created": created, "case": case,
-                 "case_key": case_key, "shard": shard, "since": time.time()})
-    _write(path(), rows)
+    with _transaction() as p:
+        rows = [d for d in _read(p) if int(d.get("pid") or 0) != pid]
+        rows.append({"pid": pid, "created": created, "case": case,
+                     "case_key": case_key, "shard": shard, "since": time.time()})
+        _write(p, rows)
 
 
 def _created_of(pid: int) -> float:
@@ -157,8 +189,8 @@ def _created_of(pid: int) -> float:
 
 def drop(pid: int) -> None:
     """Прибрати запис. Тихо: прогін міг і не реєструватись."""
-    p = path()
-    rows = _read(p)
-    keep = [d for d in rows if int(d.get("pid") or 0) != pid]
-    if len(keep) != len(rows):
-        _write(p, keep)
+    with _transaction() as p:
+        rows = _read(p)
+        keep = [d for d in rows if int(d.get("pid") or 0) != pid]
+        if len(keep) != len(rows):
+            _write(p, keep)
