@@ -88,7 +88,7 @@ def test_cases_take_znaie_znamennyk(tmp_path: Path) -> None:
                        spr="1", source=_Archium(3, 3, []))
     m = _meta(case)
     assert m["complete"] is True and m["frames_promised"] == 3
-    assert [f["file"] for f in m["files"]][0] == "pages/0001_f1001.jpg"
+    assert m["files"][0]["file"] == "pages/0001_f1001.jpg"
     assert len(got.files) == 3 and m["spr"] == "1"
 
 
