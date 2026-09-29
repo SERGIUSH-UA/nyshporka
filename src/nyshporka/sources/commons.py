@@ -138,8 +138,12 @@ class CommonsSource:
             raise SourceError(f"назва файла на Commons не годиться для диска: {exc}") from exc
         res = FetchResult(dest=dest)
         if out.is_file() and out.stat().st_size == want and want:
-            res.skipped = 1
-            res.frames = int(ii.get("pagecount") or 1)
+            # 🔴 Одиниці — сторінки, як і в маніфесті: приймач повноти рахує
+            # `frames + skipped`. Доти тут стояло `skipped = 1` (файл) поруч із
+            # `frames = pagecount`, і повторне завантаження цілого файла давало
+            # «узято сторінок + 1» — тобто `partial` і код виходу 1.
+            res.skipped = int(ii.get("pagecount") or 1)
+            res.frames = 0
             res.bytes = want
             return res
 

@@ -146,6 +146,62 @@ def provenance(*, source: str, ref: str = "", url: str = "",
     return out
 
 
+#: Скільки збоїв завантаження класти в паспорт поіменно. Решта — числом.
+FETCH_ERRORS_KEPT = 50
+_KADR = (".jpg", ".jpeg", ".png", ".tif", ".tiff", ".pdf", ".djvu")
+
+
+def frame_files(case_dir: Path, dest: Path) -> list[dict[str, Any]]:
+    """Файли кадрів у `dest` — шляхом від теки справи, з розміром і `sha256`.
+
+    Порядок — за іменем: саме так його бачать раннер і пакувальник.
+    """
+    out: list[dict[str, Any]] = []
+    for p in sorted(dest.iterdir()) if dest.is_dir() else []:
+        if not p.is_file() or p.suffix.lower() not in _KADR:
+            continue
+        rel = p.relative_to(case_dir).as_posix() if p.is_relative_to(case_dir) else p.name
+        many = p.suffix.lower() in (".pdf", ".djvu")
+        out.append({"file": rel, "pagecount": page_count(p) if many else 1,
+                    "size": p.stat().st_size, "sha256": sha256_of(p)})
+    return out
+
+
+def record_fetch(case_dir: Path, res: Any, *, source: str, ref: str, url: str = "",
+                 want: int | None = None, why: str = "",
+                 extra: dict[str, Any] | None = None) -> Any:
+    """Один паспорт завантаження для всіх входів: `nysh get`, `cases take`, демон.
+
+    🔴 Доти кожен вхід писав своє: `nysh get` — «обіцяно / взято» без хешів і
+    збоїв, `cases take` — хеші без знаменника, а при збої не писав нічого,
+    демон — нічого взагалі. Повнота теки залежала від того, якою командою її
+    качали, а частково взяті кадри лишались без жодного паспорта (звіт
+    користувача 29.09.2026).
+
+    🔴 Пишеться ДО рішення «успіх чи збій»: неповна тека з паспортом, що
+    каже «неповна, ось збої», — корисна; без паспорта — невідомого походження.
+
+    Повертає вердикт `completeness`, щоб викликач вирішив сам.
+    """
+    from nyshporka.sources.base import completeness
+
+    verdict = completeness(res, want)
+    passport = provenance(source=source, ref=ref, url=url, promised=want,
+                          got=verdict.got, why=why)
+    passport.update({
+        # «повна» — лише коли число зійшлося І джерело не звітувало збоїв
+        "complete": verdict.state == "complete" and not res.errors,
+        "fetch_state": verdict.state,
+        "frames_new": res.frames, "frames_reused": res.skipped,
+        "fetch_errors": list(res.errors[:FETCH_ERRORS_KEPT]),
+        "fetch_errors_n": len(res.errors),
+        "files": frame_files(case_dir, Path(res.dest)),
+    })
+    passport.update(extra or {})
+    patch_meta(case_dir, passport)
+    return verdict
+
+
 def write_meta(case_dir: Path, *, archive: str, fond: str, opys: str, spr: str,
                files: list[dict[str, Any]], source: str, title: str = "",
                year: str = "", extra: dict[str, Any] | None = None) -> Path:
@@ -179,9 +235,14 @@ def from_commons(case_dir: Path, file_name: str, *, archive: str, fond: str,
     guard_inventory(case_dir, opys)
     case_dir.mkdir(parents=True, exist_ok=True)
 
-    res = src.fetch(f"file:{file_name}", case_dir, on_progress=on_progress)
-    if res.errors:
-        raise AcquireError("; ".join(res.errors))
+    ref = f"file:{file_name}"
+    url = f"https://commons.wikimedia.org/wiki/File:{file_name}"
+    res = src.fetch(ref, case_dir, on_progress=on_progress)
+    verdict = record_fetch(case_dir, res, source="commons", ref=ref, url=url,
+                           want=_want_of(src, ref), why=why)
+    if res.errors or verdict.state in ("partial", "empty"):
+        raise AcquireError("; ".join([x for x in (verdict.message(res),) if x]
+                                     + res.errors))
 
     got = case_dir / file_name.replace("/", "_")
     if not got.is_file():
@@ -189,13 +250,9 @@ def from_commons(case_dir: Path, file_name: str, *, archive: str, fond: str,
 
     files = [{"file": got.name, "pagecount": page_count(got),
               "size": got.stat().st_size, "sha256": sha256_of(got),
-              "source_url": f"https://commons.wikimedia.org/wiki/File:{file_name}"}]
+              "source_url": url}]
     write_meta(case_dir, archive=archive, fond=fond, opys=opys, spr=spr,
-               files=files, source="Wikimedia Commons", title=title, year=year,
-               extra=provenance(
-                   source="commons", ref=f"file:{file_name}",
-                   url=f"https://commons.wikimedia.org/wiki/File:{file_name}",
-                   why=why))
+               files=files, source="Wikimedia Commons", title=title, year=year)
     return Acquired(case_dir=case_dir, files=files, skipped=res.skipped)
 
 
@@ -230,21 +287,30 @@ def from_archium(case_dir: Path, viewer: str, *, archive: str, fond: str,
     pages_dir = case_dir / "pages"
     pages_dir.mkdir(parents=True, exist_ok=True)
 
-    res = src.fetch(f"file:{ident}", pages_dir, on_progress=on_progress)
-    if res.errors:
-        raise AcquireError("; ".join(res.errors[:3]))
+    ref = f"file:{ident}"
+    res = src.fetch(ref, pages_dir, on_progress=on_progress)
+    verdict = record_fetch(case_dir, res, source=getattr(src, "id", "archium"), ref=ref,
+                           url=viewer, want=_want_of(src, ref), why=why,
+                           extra={"viewer_id": ident, "viewer_url": viewer})
+    if res.errors or verdict.state in ("partial", "empty"):
+        raise AcquireError("; ".join([x for x in (verdict.message(res),) if x]
+                                     + res.errors[:3]))
 
-    files = [{"file": f"pages/{p.name}", "pagecount": 1,
-              "size": p.stat().st_size, "sha256": sha256_of(p)}
-             for p in sorted(pages_dir.glob("*.jpg"))]
-    if not files:
-        raise AcquireError(f"кадрів не завантажено: {pages_dir}")
-
+    files = frame_files(case_dir, pages_dir)
     write_meta(case_dir, archive=archive, fond=fond, opys=opys, spr=spr,
                files=files, source="ARCHIUM", title=title, year=year,
-               extra={"viewer_id": ident, "viewer_url": viewer,
-                      "n_pages": len(files),
-                      **provenance(source=getattr(src, "id", "archium"),
-                                   ref=f"file:{ident}", url=viewer,
-                                   got=len(files), why=why)})
+               extra={"n_pages": len(files)})
     return Acquired(case_dir=case_dir, files=files, skipped=res.skipped)
+
+
+def _want_of(src: Any, ref: str) -> int | None:
+    """Знаменник із маніфесту джерела; не вдалося — `None` («не знаємо»).
+
+    Окремий запит, бо `fetch` числа не повертає. Збій маніфесту не валить
+    уже зроблене завантаження: паспорт тоді чесно скаже `unknown`.
+    """
+    try:
+        frames = src.manifest(ref).frames
+    except Exception:
+        return None
+    return int(frames) if frames is not None else None

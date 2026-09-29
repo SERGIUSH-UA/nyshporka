@@ -406,12 +406,21 @@ async def _run_acquire(bus: JobBus, src: Any, job: JobRecord, dest: Path,
         await bus.update(job.id, state=JobState.ERROR,
                          error=f"{type(exc).__name__}: {exc}")
         return
-    from nyshporka.sources.base import completeness
-
     # 🔴 Той самий приймач, що в `nysh get` (аудит 29.09.2026): доти DONE
     # ставилось усьому, крім «самі збої й жодного кадру», — нуль кадрів без
     # збою чи 10 кадрів із 300 висіли в черзі завершеною роботою.
-    verdict = completeness(res, total)
+    # 🔴 Паспорт теки — той самий, що пише `nysh get` (`record_fetch`): доти
+    # завантаження через застосунок лишало кадри без жодного запису «звідки,
+    # скільки, чи повно».
+    from nyshporka.cases.acquire import record_fetch
+    from nyshporka.sources.base import completeness
+
+    try:
+        verdict = await asyncio.to_thread(
+            record_fetch, Path(res.dest), res, source=str(getattr(src, "id", "")),
+            ref=ref, want=total)
+    except OSError:
+        verdict = completeness(res, total)
     said = verdict.message(res)
     why = "; ".join(x for x in (said, *res.errors[:3]) if x) if not verdict.ok else ""
     await bus.update(

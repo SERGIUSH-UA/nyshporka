@@ -494,20 +494,16 @@ def get(source: str = typer.Argument(..., help="id джерела"),
     #
     # 🔴 Просити діапазон — не те саме, що просити все: там знаменником стає
     # сам діапазон, а не обсяг справи.
-    from nyshporka.sources.base import completeness
-
     want = (rng[1] - rng[0] + 1) if rng else man.frames
-    verdict = completeness(res, want)
-    got = verdict.got
 
     # 🔴 Той самий приймач лягає на диск, а не лише на екран. Числа «обіцяно /
     # взято» живуть рівно одну сесію, а тека лишається — і без них наступний,
-    # хто її відкриє, не має способу дізнатись, чи вона повна.
-    from nyshporka.cases.acquire import patch_meta, provenance
+    # хто її відкриє, не має способу дізнатись, чи вона повна. Паспорт один на
+    # всі входи (`record_fetch`): збої, хеші, нові й уже наявні кадри.
+    from nyshporka.cases.acquire import record_fetch
+    from nyshporka.sources.base import completeness
 
-    passport = provenance(source=src.id, ref=ref, url=str(man.meta.get("url") or ""),
-                          promised=want, got=got, why=why)
-    passport["title"] = man.title
+    passport: dict[str, Any] = {"title": man.title}
     if rng:
         passport["frames_range"] = f"{rng[0]}-{rng[1]}"
     claimed = man.meta.get("shifra") or {}
@@ -518,9 +514,12 @@ def get(source: str = typer.Argument(..., help="id джерела"),
         # приписує теці чужу справу.
         passport["shifra_claimed"] = claimed
     try:
-        patch_meta(res.dest, passport)
+        verdict = record_fetch(res.dest, res, source=src.id, ref=ref,
+                               url=str(man.meta.get("url") or ""), want=want, why=why,
+                               extra=passport)
     except OSError as exc:      # диск є, кадри лягли — паспорт не критичний
         console.print(f"[warn]⚠ паспорт не записався: {exc}[/warn]")
+        verdict = completeness(res, want)
 
     # Приймач один на термінал і чергу демона — `sources.base.completeness`.
     if verdict.state == "unknown":
