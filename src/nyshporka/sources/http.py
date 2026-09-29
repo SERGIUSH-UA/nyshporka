@@ -59,6 +59,91 @@ def app_ua() -> str:
     ua = f"nyshporka/{__version__} (+{HOMEPAGE})"
     return f"{ua} {contact}" if contact else ua
 
+#: Скільки чекати на з'єднання по IPv4, перш ніж спробувати звичайний шлях.
+IPV4_CONNECT_S = 15.0
+
+#: Процес уже бачив, що IPv4 не з'єднується, а звичайний шлях — так. Далі
+#: IPv4 першим не пробується: кожна спроба коштувала б зайвого відмовлення.
+_IPV4_NE_PRATSIUIE = False
+
+
+def _sertyfikat(exc: Exception) -> bool:
+    nyzh = str(exc).lower()
+    return "certificate_verify_failed" in nyzh or "certificate verify failed" in nyzh
+
+
+def transport(proxy: str | None = None) -> Any:
+    """Транспорт httpx: спершу IPv4, звичайний шлях — запасний.
+
+    🔴 28.09.2026 у людини кожне нове з'єднання Нишпорки висіло ~43 с: DNS
+    віддає Cloudflare (і пул, і сховище) по дві IPv6-адреси, Windows пробує
+    їх першими, а IPv6 у тій мережі мертвий — дві адреси по ~21 с таймауту
+    SYN, і лише тоді IPv4. Три з'єднання на внесок (PUT тексту, PUT
+    геометрії, `complete`) давали 129 с на справу будь-якого розміру, хоча
+    сам пул відповідав за секунду. Браузер цього не бачить — він перемикається
+    за частки секунди (Happy Eyeballs), httpx — ні.
+
+    IPv4 першим, бо без нього нині не живе жоден сайт, з яким говорить
+    Нишпорка. Запасний шлях — для мережі лише з IPv6: там прив'язка до
+    0.0.0.0 відмовляє одразу (`getaddrinfo`), а не таймаутом.
+    """
+    import urllib.request
+
+    import httpx
+
+    # Проксі з оточення чи з налаштувань системи httpx підхоплює лише тоді,
+    # коли транспорт не задано. Тоді й не задаємо: з'єднання однаково йде до
+    # проксі, а не до IPv6-адрес сховища.
+    if proxy is None and {"https", "http", "all"} & set(urllib.request.getproxies()):
+        return None
+
+    class _SpershuIpv4(httpx.BaseTransport):
+        def __init__(self) -> None:
+            self._v4: httpx.HTTPTransport | None = None
+            self._zvychainyi: httpx.HTTPTransport | None = None
+
+        def handle_request(self, request: httpx.Request) -> httpx.Response:
+            global _IPV4_NE_PRATSIUIE
+            if not _IPV4_NE_PRATSIUIE:
+                if self._v4 is None:
+                    self._v4 = httpx.HTTPTransport(local_address="0.0.0.0", proxy=proxy)
+                # Коротший ліміт на з'єднання лише для IPv4-спроби: мертвий
+                # IPv4 не мусить тримати людину всі п'ять хвилин PUT.
+                orig = request.extensions.get("timeout")
+                if orig is not None:
+                    limit_z = orig.get("connect")
+                    if limit_z is None or limit_z > IPV4_CONNECT_S:
+                        request.extensions["timeout"] = {**orig, "connect": IPV4_CONNECT_S}
+                try:
+                    return self._v4.handle_request(request)
+                except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
+                    # Перехоплений HTTPS однаковий на будь-якому шляху —
+                    # запасний лише затримав би людину й сховав причину.
+                    if _sertyfikat(exc):
+                        raise
+                finally:
+                    if orig is not None:
+                        request.extensions["timeout"] = orig
+                # До з'єднання не пішло жодного байта, тож повтор безпечний.
+                if self._zvychainyi is None:
+                    self._zvychainyi = httpx.HTTPTransport(proxy=proxy)
+                # Упав і він — віддаємо його помилку: саме її дав би httpx без
+                # цієї обгортки, і за нею класифікують збій (`_klas_obryvu`).
+                resp = self._zvychainyi.handle_request(request)
+                _IPV4_NE_PRATSIUIE = True
+                return resp
+            if self._zvychainyi is None:
+                self._zvychainyi = httpx.HTTPTransport(proxy=proxy)
+            return self._zvychainyi.handle_request(request)
+
+        def close(self) -> None:
+            for t in (self._v4, self._zvychainyi):
+                if t is not None:
+                    t.close()
+
+    return _SpershuIpv4()
+
+
 #: Пауза між запитами до одного хоста. Не оптимізується.
 DEFAULT_DELAY = 0.35
 DEFAULT_TIMEOUT = 60.0
@@ -200,7 +285,7 @@ class Fetcher:
         import httpx
 
         c = httpx.Client(headers=self._headers, timeout=self.timeout,
-                         follow_redirects=True, proxy=proxy_url())
+                         follow_redirects=True, transport=transport(proxy_url()))
         try:
             yield c
         finally:

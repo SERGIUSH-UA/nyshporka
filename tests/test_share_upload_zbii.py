@@ -29,7 +29,7 @@ def test_put_povtoriuie_obryv(monkeypatch: pytest.MonkeyPatch) -> None:
             raise httpx.ReadError("connection reset")
         return httpx.Response(200)
 
-    monkeypatch.setattr(httpx, "put", _put)
+    monkeypatch.setattr(upload, "_syrovyi_put", _put)
     upload._put("https://r2.example/k?X-Amz-SignedHeaders=host", b"x")
     assert len(sproby) == 3
 
@@ -42,7 +42,7 @@ def test_put_kazhe_prychynu_bez_posylannia(monkeypatch: pytest.MonkeyPatch) -> N
         sproby.append(1)
         raise httpx.ConnectError(f"[SSL: CERTIFICATE_VERIFY_FAILED] for {u}")
 
-    monkeypatch.setattr(httpx, "put", _put)
+    monkeypatch.setattr(upload, "_syrovyi_put", _put)
     with pytest.raises(upload.UploadError) as ei:
         upload._put(url, b"x")
     assert "CERTIFICATE_VERIFY_FAILED" in str(ei.value), "причина мусить дійти до людини"
@@ -69,7 +69,7 @@ def test_klas_obryvu(monkeypatch: pytest.MonkeyPatch, vyniatok: Exception,
 
 
 def test_put_403_tse_nasha_vada(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(httpx, "put", lambda u, **kw: httpx.Response(
+    monkeypatch.setattr(upload, "_syrovyi_put", lambda u, **kw: httpx.Response(
         403, text="<Error><Code>AccessDenied</Code></Error>"))
     with pytest.raises(upload.UploadError) as ei:
         upload._put("https://r2.example/k", b"x")
@@ -83,7 +83,7 @@ def test_put_kod_s3_i_bez_povtoru_na_4xx(monkeypatch: pytest.MonkeyPatch) -> Non
         sproby.append(1)
         return httpx.Response(403, text="<Error><Code>SignatureDoesNotMatch</Code></Error>")
 
-    monkeypatch.setattr(httpx, "put", _put)
+    monkeypatch.setattr(upload, "_syrovyi_put", _put)
     with pytest.raises(upload.UploadError) as ei:
         upload._put("https://r2.example/k", b"x")
     assert "SignatureDoesNotMatch" in str(ei.value)
@@ -97,7 +97,7 @@ def test_put_cherez_proksi_nyshporky(monkeypatch: pytest.MonkeyPatch) -> None:
         seen.update(kw)
         return httpx.Response(200)
 
-    monkeypatch.setattr(httpx, "put", _put)
+    monkeypatch.setattr(upload, "_syrovyi_put", _put)
     monkeypatch.setenv("NYSHPORKA_PROXY_URL", "socks5://127.0.0.1:1080")
     upload._put("https://r2.example/k", b"x")
     assert seen["proxy"] == "socks5://127.0.0.1:1080"
@@ -401,7 +401,7 @@ def test_zapasnyi_put_kody(monkeypatch: pytest.MonkeyPatch, status: int, vyhid: 
         seen.update(kw.get("headers") or {})
         return httpx.Response(status, json={})
 
-    monkeypatch.setattr(httpx, "put", _put)
+    monkeypatch.setattr(upload, "_syrovyi_put", _put)
     assert upload._zapasnyi_put("https://p/v1/contributions/1/text", b"x", "k") is vyhid
     assert seen["Authorization"] == "Bearer k"
 

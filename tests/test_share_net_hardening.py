@@ -332,7 +332,7 @@ def test_pidpysani_posylannia_ne_v_vidpovidi(monkeypatch: pytest.MonkeyPatch,
     def _boom(url: str, **_: Any) -> Any:
         raise httpx.ConnectError(f"cannot connect to {url}")
 
-    monkeypatch.setattr(httpx, "put", _boom)
+    monkeypatch.setattr(upload, "_syrovyi_put", _boom)
     monkeypatch.setattr(upload, "PUT_PAUZY", (0.0, 0.0))
     with pytest.raises(upload.UploadError) as ei:
         upload._put("https://r2.example/b?X-Amz-" + "Signature=SEKRET", b"x")
@@ -458,7 +458,7 @@ def test_umovnyi_put_lyshe_za_pidpysom(monkeypatch: pytest.MonkeyPatch, signed: 
         seen.update(kw.get("headers") or {})
         return httpx.Response(status)
 
-    monkeypatch.setattr(httpx, "put", _put)
+    monkeypatch.setattr(upload, "_syrovyi_put", _put)
     url = f"https://r2.example/k?X-Amz-SignedHeaders={signed.replace(';', '%3B')}"
     if raises:
         with pytest.raises(upload.UploadError):

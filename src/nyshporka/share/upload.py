@@ -278,8 +278,8 @@ def _zapasnyi_put(url: str, blob: bytes, tok: str) -> bool:
         if sproba:
             time.sleep(PUT_PAUZY[sproba - 1])
         try:
-            resp = httpx.put(url, content=blob, headers=headers, timeout=300.0,
-                             proxy=proxy_url())
+            resp = _syrovyi_put(url, content=blob, headers=headers, timeout=300.0,
+                                proxy=proxy_url())
         except httpx.TransportError as exc:
             ostannia = f"{type(exc).__name__}: {exc}"
             continue
@@ -503,6 +503,21 @@ def _attach_geometry(got: dict[str, Any], path: Path, *, home: str, tok: str,
     return {**got, **done, "geometry_attached": True}
 
 
+def _syrovyi_put(url: str, *, content: bytes, headers: dict[str, str],
+                 timeout: float, proxy: str | None) -> Any:
+    """Один PUT через транспорт «спершу IPv4» (`sources.http.transport`).
+
+    Не `httpx.put`: той транспорту не приймає, а саме на з'єднанні зі
+    сховищем 28.09.2026 губилось по ~43 с на кожен файл.
+    """
+    import httpx
+
+    from nyshporka.sources.http import transport
+
+    with httpx.Client(transport=transport(proxy), timeout=timeout) as c:
+        return c.put(url, content=content, headers=headers)
+
+
 def _signed_headers(url: str) -> set[str]:
     """Заголовки, які накриває підпис presigned-посилання (`X-Amz-SignedHeaders`)."""
     from urllib.parse import parse_qs, urlsplit
@@ -549,8 +564,8 @@ def _put(url: str, blob: bytes) -> None:
             # 🔴 Через той самий проксі, що й решта запитів Нишпорки. Без
             # нього в людини, якій мережа доступна лише тунелем, реєстрація
             # проходила, а байти — ні.
-            resp = httpx.put(url, content=blob, headers=headers, timeout=300.0,
-                             proxy=proxy_url())
+            resp = _syrovyi_put(url, content=blob, headers=headers, timeout=300.0,
+                                proxy=proxy_url())
         except httpx.TransportError as exc:
             ostannia = f"{type(exc).__name__}: {_bez_posylannia(str(exc), url)}"
             klas, chomu = _klas_obryvu(exc)
