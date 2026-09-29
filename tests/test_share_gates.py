@@ -105,6 +105,35 @@ def test_no_refs_warns_but_does_not_block() -> None:
     assert any(code == "no_refs" for code, _ in v.warnings)
 
 
+def _no_refs_text(m) -> str:
+    return next(t for code, t in gates.check(m).warnings if code == "no_refs")
+
+
+def test_no_refs_does_not_advise_the_link_already_given() -> None:
+    """🔴 Порада мусить бути виконуваною: `--link` уже в пакеті — не радити його знову.
+
+    Звіт користувача 29.09.2026: 24 пакети з посиланням на ARCHIUM у `links`
+    і порожнім `refs` отримували «додайте --link», а виконана порада
+    попередження не прибирала. Людина, що бачить вічне хибне попередження,
+    перестає читати й справжні.
+    """
+    m = good()
+    m.refs = []
+    m.links = [{"label": "Скани", "url": "https://example.org/scans/1"}]
+    text = _no_refs_text(m)
+    assert "--link" not in text
+    assert "example.org" in text, "назвати, яке саме посилання не розпізнано"
+
+    m.links = [{"label": "Скани ARCHIUM",
+                "url": "https://archium.cdiak.archives.gov.ua/file-viewer/35112/"}]
+    text = _no_refs_text(m)
+    assert "ARCHIUM" in text or "archium" in text
+    assert "pack" in text, "відомий хост стає джерелом при перепакуванні"
+
+    m.links = []
+    assert "--link" in _no_refs_text(m), "без посилань порада лишається"
+
+
 def test_unknown_frame_count_warns_about_the_denominator() -> None:
     m = good()
     m.frames["total"] = 0

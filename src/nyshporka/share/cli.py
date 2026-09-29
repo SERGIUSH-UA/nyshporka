@@ -426,6 +426,10 @@ def suggest_cmd(
                       f"{r['pages']:>5}/{r['frames'] or '—':<5} · {_e(r['model'] or '—')}")
         if r.get("title"):
             console.print(f"  {'':<17} [dim]{_e(r['title'])}[/dim]")
+        if r.get("pool_mine") is False and r.get("pool_pages"):
+            chyi = ", ".join(r.get("pool_publishers") or []) or "без підпису"
+            console.print(f"  {'':<17} [dim]у пулі вже є чуже прочитання: "
+                          f"{r['pool_pages']} стор. ({_e(chyi)})[/dim]")
     if len(rows) > limit:
         console.print(f"[dim]… і ще {len(rows) - limit} (--limit N)[/dim]")
 

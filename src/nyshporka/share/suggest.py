@@ -97,15 +97,50 @@ def _u_puli(case_key: str) -> str | None:
 
     if pool.meta() is None:
         return None
+    key = _pool_key(case_key)
+    # 🔴 «Не розібрали шифру» — це «не знаємо», а не «у пулі немає»:
+    # друге рахувало б справу готовою до віддачі наосліп.
+    return None if key is None else pool.known(key)
+
+
+def _pool_key(case_key: str) -> str | None:
+    """Ключ пулу справи; `None` — шифра не розібралась."""
+    from nyshporka.share import pool
+
     try:
         from nyshporka.pagestore import resolve_case
 
         ref = resolve_case(case_key)
     except Exception:
-        # 🔴 «Не розібрали шифру» — це «не знаємо», а не «у пулі немає»:
-        # друге рахувало б справу готовою до віддачі наосліп.
         return None
-    return pool.known(pool.quad_key(ref.repo, ref.fond, ref.opys or "", ref.spr))
+    return pool.quad_key(ref.repo, ref.fond, ref.opys or "", ref.spr)
+
+
+def _komirka(case_key: str) -> Any:
+    """Що пул знає про книгу незалежно від того, чия вона (`PoolCell | None`)."""
+    from nyshporka.share import pool
+
+    key = _pool_key(case_key)
+    return None if key is None else pool.by_key(key)
+
+
+def _u_puli_poruch(case_key: str, stan: str | None) -> dict[str, Any]:
+    """Присутність книги в пулі — поруч зі `pool`, а не замість нього.
+
+    🔴 `pool` відповідає на «чи віддавати своє», і чужий внесок там — `none`.
+    Для «чи читати взагалі» цього мало: чужа книга в пулі виглядала б
+    відсутньою. Тому окремо: скільки внесків і сторінок, чиї, чи є серед них
+    ваш. `None` у полях — зрізу немає або шифра не розібралась: не питали.
+    Присутність ≠ повне покриття: сторінки пулу порівнюються з кадрами.
+    """
+    if stan is None:
+        return {"pool_n": None, "pool_pages": None, "pool_mine": None,
+                "pool_publishers": None}
+    cell = _komirka(case_key)
+    if cell is None:
+        return {"pool_n": 0, "pool_pages": 0, "pool_mine": None, "pool_publishers": []}
+    return {"pool_n": cell.n, "pool_pages": cell.pages, "pool_mine": cell.mine,
+            "pool_publishers": list(cell.publishers)}
 
 
 def _synonimy(repo: str) -> list[str]:
@@ -193,6 +228,7 @@ def nepodileni() -> list[dict[str, Any]]:
             "model": row.get("model") or "",
             "updated": row.get("updated") or "",
             "pool": stan,
+            **_u_puli_poruch(key, stan),
             "status": BEZ_RAMOK if stan == "text" else _status(pages, frames),
         })
     out.sort(key=lambda r: str(r["updated"]), reverse=True)

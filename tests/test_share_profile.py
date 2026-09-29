@@ -334,3 +334,31 @@ def test_ready_zvuzhuie_i_perelik_i_pidsumok(space: Path, monkeypatch: Any) -> N
 
     d = O.call("share.suggest", {}).data
     assert d["count"] == 2
+
+
+def test_chuzha_knyha_v_puli_vydna(space: Path, monkeypatch: Any) -> None:
+    """🔴 Книга, яку в пул уже віддав хтось інший, не виглядає відсутньою.
+
+    `pool` лишається відповіддю на «чи віддавати своє» (`none`), але поруч
+    видно, що пул справу має: скільки внесків, сторінок і від кого. Інакше
+    той, хто вирішує «читати чи ні», бачить «у пулі немає» там, де там уже
+    26 сторінок з рамками (звіт користувача 29.09.2026, ДАХмО 315-1-159).
+    """
+    from nyshporka.share.pool import PoolCell
+
+    monkeypatch.setattr("nyshporka.htr_store.list_cases",
+                        lambda: [_ryadok("DAHMO/315/1", "ДАХмО 315-1-1"),
+                                 _ryadok("DAHMO/315/2", "ДАХмО 315-1-2")])
+    monkeypatch.setattr("nyshporka.share.pool.meta", lambda: {"taken_at": "x"})
+    monkeypatch.setattr(S, "_u_puli", lambda key: "none")
+    chuzha = PoolCell(n=1, pages=26, geom=True, publishers=("інший",), mine=False)
+    monkeypatch.setattr(S, "_komirka", lambda key: chuzha if key == "DAHMO/315/1" else None)
+
+    got = {r["case_key"]: r for r in S.nepodileni()}
+
+    r = got["DAHMO/315/1"]
+    assert r["pool"] == "none", "для «віддавати своє» відповідь та сама"
+    assert (r["pool_n"], r["pool_pages"], r["pool_mine"]) == (1, 26, False)
+    assert r["pool_publishers"] == ["інший"]
+    r = got["DAHMO/315/2"]
+    assert (r["pool_n"], r["pool_pages"], r["pool_mine"]) == (0, 0, None)
