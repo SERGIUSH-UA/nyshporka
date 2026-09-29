@@ -801,7 +801,7 @@ def _canon_case_key(value: str) -> str:
     try:
         from nyshporka.pagestore.store import resolve_case
 
-        return resolve_case(value).key or value
+        return resolve_case(value, claim=False).key or value
     except Exception:
         return value
 

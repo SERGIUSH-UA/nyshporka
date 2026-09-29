@@ -50,7 +50,7 @@ def scope(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
     ref = CaseRef(key=KEY, repo="DAHMO", fond="R-100", spr="7", opys="1",
                   shifra="ДАХмО R-100-1-7", path="data/raw/dahmo_R-100/spr-7")
 
-    def _resolve(v: str) -> CaseRef:
+    def _resolve(v: str, *, claim: bool = True) -> CaseRef:
         # Лише тестова справа: чужий ключ резолвер не сміє звести до неї,
         # інакше прив'язка «деінде» тихо стала б прив'язкою сюди.
         if v in (KEY, "ДАХмО R-100-1-7"):

@@ -75,7 +75,8 @@ def resolve_runs(scope: str, *,
             # відмовили б через нього ВСЬОМУ пакету. Такий голос не їде.
             if v not in dirs and (v / bundle.META_NAME).is_file():
                 dirs.append(v)
-    dirs, skipped = choose_voices(dirs, str(got.get("key") or ""), skip=skip)
+    dirs, skipped = choose_voices(dirs, str(got.get("key") or ""), skip=skip,
+                                  own=[str(r.get("name") or "") for r in rows])
     got["skipped_runs"] = skipped
     if not dirs:
         why = "; ".join(f"{s['run']}: {s['why']}" for s in skipped)
@@ -95,7 +96,8 @@ def _meta_of(d: Path) -> dict[str, Any]:
 
 
 def choose_voices(dirs: list[Path], key: str, *,
-                  skip: tuple[str, ...] | list[str] = ()) -> tuple[list[Path], list[dict[str, str]]]:
+                  skip: tuple[str, ...] | list[str] = (),
+                  own: tuple[str, ...] | list[str] = ()) -> tuple[list[Path], list[dict[str, str]]]:
     """Які прогони справи — голоси пакета, а які лишаються вдома. І чому.
 
     🔴 «Усі теки з ключем справи» — не те саме, що «прочитання справи». На
@@ -116,6 +118,15 @@ def choose_voices(dirs: list[Path], key: str, *,
     частинах справи (сторінки не вкладені) лишаються обидва.
 
     `skip` — імена прогонів, які людина чи агент прибрали явно.
+
+    `own` — прогони, які відбір справи (`runs_for_scope`) уже визнав за цю
+    справу: за прив'язкою `cases bind` чи за текою кадрів. 🔴 `case_key` у
+    меті — шифра паспорта НА МИТЬ прогону, і після `nysh case --shifra` він
+    застаріває. 29.09 сімнадцять справ Нікополя, переведених з оп. 1 на оп. 3,
+    так відмовили цілком: «прогін іншої справи (ДАДнО 193-1-201)», а
+    `cases bind` не допомагав, бо тут його ніхто не питав. Ключ мети лишається
+    сторожем лише для решти — сусідів за префіксом (`voice_dirs`), і сусід, що
+    читав ту саму теку кадрів або прив'язаний до справи, — теж свій.
     """
     from nyshporka import htr_store as S
 
@@ -123,6 +134,10 @@ def choose_voices(dirs: list[Path], key: str, *,
     keep: list[tuple[Path, dict[str, Any], set[str]]] = []
     want = S._canon_case_key(key) if key else ""
     skip_set = {str(s).strip() for s in skip if str(s).strip()}
+    own_set = {n for n in own if n}
+    bound = S._bound_runs() if want else {}
+    own_frames = {S.frames_dir_key(_meta_of(d).get("case_dir"))
+                  for d in dirs if d.name in own_set} - {""}
     for d in dirs:
         meta = _meta_of(d)
         if d.name in skip_set:
@@ -136,10 +151,15 @@ def choose_voices(dirs: list[Path], key: str, *,
             skipped.append({"run": d.name, "why": "вимірювальний прогін "
                                                   "(control_run), а не прочитання"})
             continue
-        own = str(meta.get("case_key") or "")
-        if want and own and S._canon_case_key(own) != want:
+        its = str(meta.get("case_key") or "")
+        if d.name in bound:
+            ours = S._canon_case_key(bound[d.name] or "") == want
+        else:
+            ours = (d.name in own_set
+                    or S.frames_dir_key(meta.get("case_dir")) in own_frames)
+        if want and its and not ours and S._canon_case_key(its) != want:
             skipped.append({"run": d.name,
-                            "why": f"прогін іншої справи ({own})"})
+                            "why": f"прогін іншої справи ({its})"})
             continue
         pages = {p.name for p in d.glob(bundle.PACKED_TEXT)}
         keep.append((d, meta, pages))

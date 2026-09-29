@@ -219,8 +219,14 @@ def _refuse_legacy_file(repo: str, fond: str, opys: str | None, spr: str,
 
 
 # ── резолюція справи ─────────────────────────────────────────────────────────
-def resolve_case(value: str) -> CaseRef:
-    """Будь-який людський ідентифікатор справи → CaseRef. ValueError якщо не вийшло."""
+def resolve_case(value: str, *, claim: bool = True) -> CaseRef:
+    """Будь-який людський ідентифікатор справи → CaseRef. ValueError якщо не вийшло.
+
+    `claim=False` — лише назвати ключ, не записуючи колізію опису в реєстр
+    (`opys_keys.json`). Так нормалізується ключ з мети прогону: там шифра
+    паспорта на мить прогону, і після виправлення опису (`nysh case --shifra`)
+    стара шифра заводила б у реєстр справу, якої на диску немає.
+    """
     v = (value or "").strip()
     pub = vydannia.parse(v)
     if pub is not None:
@@ -303,9 +309,12 @@ def resolve_case(value: str) -> CaseRef:
         # уже тримає «224-2-49»). Узяти чужий запис за свій означало б показати
         # чужу шифру/обсяг і писати облік у файл чужої книги. Заводимо власний
         # ключ з описом і НЕ успадковуємо нічого від знайденого запису.
-        key = claim_collision(
-            repo, fond, opys, spr, holder_shifra=str(entry.get("shifra") or ""),
-            holder_key=str(entry.get("key") or "")) or key
+        if claim:
+            key = claim_collision(
+                repo, fond, opys, spr, holder_shifra=str(entry.get("shifra") or ""),
+                holder_key=str(entry.get("key") or "")) or key
+        else:
+            key = f"{repo}/{fond}-{opys}/{spr}"
         entry = None
     if entry is None:
         # ДАВО/ДАВіО-плутанина: лейбл шифри каже одне, тека диска — інше.

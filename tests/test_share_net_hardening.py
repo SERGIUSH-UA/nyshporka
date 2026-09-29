@@ -346,7 +346,7 @@ def test_kliuch_z_opysom_zvodytsia(space: Path, monkeypatch: pytest.MonkeyPatch)
     from nyshporka.pagestore.store import CaseRef
 
     S._canon_case_key.cache_clear()
-    monkeypatch.setattr("nyshporka.pagestore.store.resolve_case", lambda v: CaseRef(
+    monkeypatch.setattr("nyshporka.pagestore.store.resolve_case", lambda v, **_: CaseRef(
         key="CDIAK/127/1071", repo="CDIAK", fond="127", spr="1071", opys="1012",
         shifra="ЦДІАК 127-1012-1071", path=""))
     try:

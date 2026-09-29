@@ -121,3 +121,54 @@ def test_key_without_opys_still_resolves_the_holder(space: Path) -> None:
 # заводить робочий простір, якого тут немає (`nysh_skills`, `overrides.json`,
 # `case_index.sqlite` тощо), а функції — ті самі, що вже звірені вище й у
 # `test_opys_own_key.py`. Прямий модульний тест на слуг — окремим заходом.
+
+
+# ── Шифру справи виправили після прочитання ─────────────────────────────────
+
+def test_run_of_a_case_whose_opys_was_corrected_still_packs(space: Path) -> None:
+    """Раннер пише в `case_key` мети шифру паспорта НА МИТЬ прогону. Людина
+    виправила опис (`nysh case --shifra`) — прогін лишається прочитанням ЦІЄЇ
+    справи, а не «іншої» (29.09: сімнадцять справ Нікополя, оп. 1 → оп. 3)."""
+    from _share import make_run
+
+    from nyshporka.core import opys_keys as K
+    from nyshporka.share.publish import choose_voices
+
+    folder = _folder(space, "dadno_193/spr-201", shifra="ДАДнО 193-3-201", opis="3")
+    _rebuild()
+    root = space / "reports" / "htr"
+    run = make_run(root, "1885-spr201", case_key="ДАДнО 193-1-201")
+    voice = make_run(root, "1885-spr201-diak", case_key="ДАДнО 193-1-201",
+                     model="diak.mlmodel")
+    other = make_run(root, "1885-spr201-01-00886", case_key="DAHMO/315/886")
+    for d in (run, voice):
+        _meta(d, case_dir=str(folder))
+
+    got, skipped = choose_voices([run, voice, other], "DADNO/193/201", own=[run.name])
+
+    assert got == [run, voice], skipped
+    assert [s["run"] for s in skipped] == [other.name], "сусід іншої справи не їде"
+    assert not K.has("DADNO", "193", "1", "201"),         "стара шифра з мети не заводить привидної справи в реєстрі ключів"
+
+
+def _meta(d: Path, **extra: Any) -> None:
+    from nyshporka.share import bundle
+
+    p = d / bundle.META_NAME
+    m = json.loads(p.read_text(encoding="utf-8"))
+    m.update(extra)
+    p.write_text(json.dumps(m, ensure_ascii=False), encoding="utf-8")
+
+
+def test_normalising_a_stale_meta_key_writes_nothing(space: Path) -> None:
+    """Нормалізація ключа з мети — читання: колізію в реєстр вона не пише,
+    а ключ справи іншого опису називає так само, як набрана руками шифра."""
+    from nyshporka import htr_store as H
+    from nyshporka.core import opys_keys as K
+
+    _folder(space, "dadno_193/spr-202", shifra="ДАДнО 193-3-202", opis="3")
+    _rebuild()
+    H._canon_case_key.cache_clear()
+
+    assert H._canon_case_key("ДАДнО 193-1-202") == "DADNO/193-1/202"
+    assert not K.has("DADNO", "193", "1", "202")
