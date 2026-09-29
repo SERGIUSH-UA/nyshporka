@@ -551,6 +551,84 @@ def _device_slug(device: str) -> str:
     return re.sub(r"[^A-Za-z0-9]+", "", device) or "cuda"
 
 
+#: Секунди поточної сторінки за етапами; скидаються перед кожною сторінкою.
+#: 🔴 Навіщо: «карта ледь зайнята» людина читала як «читає процесором», хоча
+#: на карті йшли і мережа сегментації, і sato, і розпізнавання — просто
+#: недовго (звіт користувача 29.09.2026). Час по етапах із позначкою, де
+#: кожен рахується, відповідає на це числом, а не здогадом.
+#: Етапи вкладені: `segment` містить `seg_net` (а той — `gpu_wait`), `sato` і
+#: `polygon`; `ocr` містить `segment`. Кеш сегментації дає `segment` ≈ 0.
+STAGES: dict[str, float] = {}
+
+
+def _timed(fn: Any, name: str) -> Any:
+    def call(*a: Any, **kw: Any) -> Any:
+        t = time.perf_counter()
+        try:
+            return fn(*a, **kw)
+        finally:
+            STAGES[name] = STAGES.get(name, 0.0) + time.perf_counter() - t
+
+    # 🔴 Спільний словник атрибутів: `ocr_page` пише собі `boxes`/`polys`, а
+    # `_geom_of` читає їх через глобальне ім'я — тобто з обгортки.
+    if hasattr(fn, "__dict__"):
+        call.__dict__ = fn.__dict__
+    call.__name__ = getattr(fn, "__name__", name)
+    call.__doc__ = getattr(fn, "__doc__", None)
+    return call
+
+
+def install_stage_timers() -> None:
+    """Обгорнути етапи сторінки таймерами. Ставиться ПІСЛЯ решти патчів,
+    щоб міряти те, що справді виконується (sato на карті, лок, fast_geom)."""
+    from kraken import blla
+    from skimage import filters as skf
+
+    if getattr(blla, "_stage_timers", False):
+        return
+    blla.compute_segmentation_map = _timed(blla.compute_segmentation_map, "seg_net")
+    blla.calculate_polygonal_environment = _timed(blla.calculate_polygonal_environment,
+                                                  "polygon")
+    skf.sato = _timed(skf.sato, "sato")
+    Segmenter.segment = _timed(Segmenter.segment, "segment")
+    g = globals()
+    g["ocr_page"] = _timed(g["ocr_page"], "ocr")
+    blla._stage_timers = True
+
+
+def page_stages(sec: float) -> dict[str, float]:
+    """Етапи сторінки для мети: виміряні плюс похідні `recognize` і `other`.
+
+    `recognize` = `ocr` − `segment` (розпізнавання рядків моделлю);
+    `other` = час сторінки − `ocr` (відкриття, контраст, орієнтація, запис).
+    """
+    out = {k: round(v, 2) for k, v in STAGES.items()}
+    if "ocr" in STAGES:
+        out["recognize"] = round(max(0.0, STAGES["ocr"] - STAGES.get("segment", 0.0)), 2)
+        out["other"] = round(max(0.0, sec - STAGES["ocr"]), 2)
+    return out
+
+
+def stages_summary(total: dict[str, float], pages: int, device: str,
+                   gpu_sato: bool) -> str:
+    """Середня сторінка за етапами з позначкою, де кожен рахується."""
+    if not pages or not total:
+        return ""
+    dev = "карта" if device.startswith("cuda") else "процесор"
+
+    def s(k: str) -> str:
+        return f"{total.get(k, 0.0) / pages:.1f} с"
+
+    bits = [f"сегментація {s('segment')} (мережа {s('seg_net')} · {dev}"]
+    if "gpu_wait" in total:
+        bits[-1] += f", з неї чекання карти {s('gpu_wait')}"
+    bits[-1] += (f"; sato {s('sato')} · {'карта' if gpu_sato else 'процесор'}"
+                 f"; полігони {s('polygon')} · процесор)")
+    bits.append(f"розпізнавання {s('recognize')} · {dev}")
+    bits.append(f"решта {s('other')} · процесор")
+    return "середня сторінка: " + " · ".join(bits)
+
+
 def install_gpu_lock(lock_path: Path, device: str, keep_cache: bool = False) -> None:
     """Серіалізувати між воркерами лише GPU-фазу сегментації.
 
@@ -567,7 +645,9 @@ def install_gpu_lock(lock_path: Path, device: str, keep_cache: bool = False) -> 
     ctx = _file_lock_ctx(lock_path)
 
     def locked(*a, **kw):
+        t = time.perf_counter()
         with ctx():
+            STAGES["gpu_wait"] = STAGES.get("gpu_wait", 0.0) + time.perf_counter() - t
             try:
                 return orig(*a, **kw)
             finally:
@@ -3496,6 +3576,7 @@ def _main_case(args: argparse.Namespace, cache: dict | None = None) -> int:
         print(f"[htr-run] GPU-фаза під локом {Path(args.gpu_lock).name}", flush=True)
         if cache is not None:
             cache["gpu_lock"] = True
+    install_stage_timers()
     # Орієнтація перевіряється лише на явну вимогу. Дефолт «сторінки рівні»
     # обраний заміром, а не з обережності: на ДАВО 904-24-24 детектори дали 53
     # спрацювання з 476 сторінок і жодного правильного — 51 спростував
@@ -3517,6 +3598,8 @@ def _main_case(args: argparse.Namespace, cache: dict | None = None) -> int:
     done = skipped = failed = enhanced_n = ceiling_n = 0
     geom_watch = GeomWatch()
     geom_lost_pages = 0
+    stages_total: dict[str, float] = {}
+    stages_pages = 0
     # скільки рядків голосу впало через маску основного тексту (див. side у
     # `ocr_page_parseq`) — друкується в підсумку, бо тиха втрата гірша за втрату
     side_lost: dict[str, int] = {}
@@ -3614,6 +3697,7 @@ def _main_case(args: argparse.Namespace, cache: dict | None = None) -> int:
         # тобто помилка була б рідкою й тихою, найгіршого сорту
         ocr_page_parseq.boxes = []
         geom_watch.start()
+        STAGES.clear()
         try:
             seg_ceiling.reset()
             res = process_page(src, segmenter, rec_model, device,
@@ -3687,6 +3771,11 @@ def _main_case(args: argparse.Namespace, cache: dict | None = None) -> int:
         sec = round(time.time() - t, 1)
         mem = page_memory(device)
         geom = geom_watch.page()
+        stages = page_stages(sec)
+        if stages:
+            stages_pages += 1
+            for k, v in stages.items():
+                stages_total[k] = stages_total.get(k, 0.0) + v
         if device.startswith("cuda") and not args.keep_cache:
             # 🔴 Віддати кеш карті після КОЖНОЇ сторінки, а не лише після
             # сегментації під локом: із засівом сегментації (готовий кеш) ту
@@ -3785,6 +3874,8 @@ def _main_case(args: argparse.Namespace, cache: dict | None = None) -> int:
             **mem,
             # рядки, викинуті полігонізатором kraken, і врятовані запасним шляхом
             **geom,
+            # секунди сторінки за етапами (див. `STAGES`)
+            **({"stages": stages} if stages else {}),
             # 🔴 Порожня сторінка має причину: «рядки знайдено, але kraken їх
             # викинув» — це збій і привід перечитати, «рядків не знайдено» —
             # імовірно чистий аркуш, але це ще не підтвердження людиною
@@ -3816,6 +3907,11 @@ def _main_case(args: argparse.Namespace, cache: dict | None = None) -> int:
     # Сторінки, де kraken викинув рядки, — до ока (поле `needs_review` у мети
     # сторінки); у підсумку — число, щоб не вичитувати його з логу.
     meta["geom_lost_pages"] = geom_lost_pages
+    if stages_pages:
+        meta["stages_total"] = {k: round(v, 1) for k, v in stages_total.items()}
+        meta["stages_pages"] = stages_pages
+        print(f"[stages] {stages_summary(stages_total, stages_pages, device, bool(args.gpu_sato))}",
+              flush=True)
     if geom_lost_pages:
         print(f"[geom] ⚠ на {geom_lost_pages} сторінках kraken викинув рядки "
               f"(needs_review у мети)", flush=True)
