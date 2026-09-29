@@ -24,6 +24,7 @@ import json
 import re
 import time
 from collections import Counter
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -645,8 +646,135 @@ def _query_is_profile(q: str) -> bool:
     return all(any(s and s in w for s in subs) for w in want)
 
 
-def find(q: str, scope: str = "", *, thresh: int = 78, limit: int = 40,
+def find(q: str, scope: str | Sequence[str] = "", *, thresh: int = 78, limit: int = 40,
          context: int = 1) -> dict[str, Any]:
+    """Пошук роду в області: одна справа, прогін, серія або кілька справ.
+
+    🔴 Серія й перелік розкладаються на справи, а не шукаються одним заходом.
+    Якорі (вікно років справи) і самоперевірка (аркуші, виписані оком)
+    існують лише для однієї справи, тож спільний захід мовчки лишав без них
+    усю серію, а знаменник «кадрів ?» не казав, яка справа прочитана не вся.
+    Кожна справа тепер отримує повний пошук і свій запис у журналі заходу.
+    """
+    from nyshporka import htr_store as S
+
+    if scope:
+        sc = S.runs_for_scope(scope)
+        if sc["kind"] == "cases":
+            return _find_many(q, sc, thresh=thresh, limit=limit, context=context)
+    return _find_one(q, scope if isinstance(scope, str) else "", thresh=thresh,
+                     limit=limit, context=context)
+
+
+def _find_many(q: str, sc: dict[str, Any], *, thresh: int, limit: int,
+               context: int) -> dict[str, Any]:
+    """`find` по кожній справі області й зведення.
+
+    Прогін без ключа справи шукається сам по собі: викинути його з серії
+    означало б нуль по тексту, якого ніхто не прошукав.
+    """
+    keys = [str(k) for k in (sc.get("keys") or []) if k]
+    keyed = set(keys)
+    loose = [str(r["name"]) for r in sc["rows"]
+             if not str(r.get("case_canon") or "").strip()
+             or str(r.get("case_canon")) not in keyed]
+    one: list[tuple[str, dict[str, Any]]] = []
+    for k in keys + loose:
+        got = _find_one(q, k, thresh=thresh, limit=limit, context=context)
+        if got.get("error"):
+            return {"error": f"«{k}»: {got['error']}"}
+        one.append((k, got))
+    return _merge_finds(q, sc, one, limit=limit)
+
+
+def _merge_finds(q: str, sc: dict[str, Any], one: list[tuple[str, dict[str, Any]]],
+                 *, limit: int) -> dict[str, Any]:
+    """Звести відповіді по справах в одну — з переліком справ у журналі."""
+    def top(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        return sorted(items, key=lambda h: -float(h.get("score") or 0))[:limit]
+
+    # Шифра з рядка переліку: резолвер без запису в бібліотеці не знає опису
+    # («РГІА 592-?-941»), а паспорт прийнятого пакета його знає.
+    by_key: dict[str, str] = {}
+    for row in sc["rows"]:
+        k0 = str(row.get("case_canon") or row.get("name") or "")
+        if row.get("shifra"):
+            by_key.setdefault(k0, str(row["shifra"]))
+    hits: list[dict[str, Any]] = []
+    anchors: list[dict[str, Any]] = []
+    cases: list[dict[str, Any]] = []
+    for k, r in one:
+        led = r["ledger"]
+        shifra = by_key.get(k) or r.get("shifra") or ""
+        for h in r.get("hits") or []:
+            hits.append({**h, "case_key": r.get("case_key") or k,
+                         "shifra": shifra or h.get("shifra") or ""})
+        anc = r.get("anchor") or {}
+        for h in anc.get("hits") or []:
+            anchors.append({**h, "case_key": r.get("case_key") or k})
+        chans = {c["id"]: c for c in led["channels"]}
+        cases.append({
+            "key": r.get("case_key") or "", "scope": k, "shifra": shifra,
+            "total": int(r.get("total") or 0), "anchor": int(anc.get("total") or 0),
+            "pages": led.get("pages_scoped"), "frames": led.get("frames"),
+            "decoded": led.get("decoded"), "runs": led.get("runs"),
+            "shared": bool(led.get("shared")),
+            "channels": {cid: bool(c.get("ran")) for cid, c in chans.items()}})
+    leds = [r["ledger"] for _, r in one]
+
+    def total_of(field: str) -> int | None:
+        vals = [x.get(field) for x in leds]
+        return None if any(v is None for v in vals) else sum(int(v or 0) for v in vals)
+
+    def chan(cid: str, label: str) -> dict[str, Any]:
+        got = [c for x in leds for c in x["channels"] if c["id"] == cid]
+        ran = [c for c in got if c.get("ran")]
+        out: dict[str, Any] = {"id": cid, "label": label, "ran": bool(ran),
+                               "of_cases": len(one), "ran_cases": len(ran)}
+        if cid in ("surname", "anchor"):
+            out["hits"] = sum(int(c.get("hits") or 0) for c in got)
+        if cid == "selfcheck":
+            out.update(eye=sum(int(c.get("eye") or 0) for c in ran),
+                       found=sum(int(c.get("found") or 0) for c in ran),
+                       shown=sum(int(c.get("shown") or 0) for c in ran),
+                       missed=[m for c in ran for m in (c.get("missed") or [])])
+        if not ran:
+            out["why"] = next((str(c.get("why")) for c in got if c.get("why")), "")
+        return out
+
+    shared_runs = [x["shared"] for x in leds if x.get("shared")]
+    shared = ({"runs": sum(s["runs"] for s in shared_runs),
+               "of_runs": sum(int(x.get("runs") or 0) for x in leds),
+               "pages": sum(int(s.get("pages") or 0) for s in shared_runs),
+               "from": sorted({w for s in shared_runs for w in s.get("from") or []})}
+              if shared_runs else None)
+    ledger = {
+        "frames": total_of("frames"), "decoded": total_of("decoded"),
+        "runs": sum(int(x.get("runs") or 0) for x in leds),
+        "in_store": sum(int(x.get("in_store") or 0) for x in leds),
+        "shared": shared,
+        "unindexed": sum(int(x.get("unindexed") or 0) for x in leds),
+        "voices": sorted({v for x in leds for v in x.get("voices") or []}),
+        "scripts": sorted({v for x in leds for v in x.get("scripts") or []}),
+        "backend": leds[0].get("backend") if leds else None, "cache": None,
+        "rules_stale": any(x.get("rules_stale") for x in leds),
+        "short_stems": sorted({v for x in leds for v in x.get("short_stems") or []}),
+        "pages_scoped": total_of("pages_scoped"),
+        "channels": [chan("surname", "прізвище"), chan("anchor", "якорі"),
+                     chan("latin", "латинський голос"),
+                     chan("selfcheck", "самоперевірка на аркушах, виписаних оком")],
+        "searched_before": [], "cases": cases}
+    return {"q": q, "scope": "cases", "case_key": "", "shifra": sc.get("shifra") or "",
+            "hits": top(hits), "total": sum(c["total"] for c in cases),
+            "stems": one[0][1].get("stems") if one else [],
+            "stems_dropped": sorted({s for _, r in one for s in r.get("stems_dropped") or []}),
+            "anchor": {"on": any(c["anchor"] for c in cases), "hits": top(anchors),
+                       "total": sum(c["anchor"] for c in cases)},
+            "selfcheck": None, "ledger": ledger}
+
+
+def _find_one(q: str, scope: str = "", *, thresh: int = 78, limit: int = 40,
+              context: int = 1) -> dict[str, Any]:
     """Пошук усіма каналами пакета з журналом заходу.
 
     🔴 Журнал — не прикраса. «Шукай ще» доти означало імпровізацію, бо жоден

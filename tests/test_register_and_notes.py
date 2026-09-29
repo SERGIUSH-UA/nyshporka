@@ -63,7 +63,7 @@ def space(tmp_path: Path, monkeypatch):
     ):
         monkeypatch.setattr(mod, attr, value)
     L.load_library.cache_clear() if hasattr(L.load_library, "cache_clear") else None
-    for fn in ("_opys_merged", "_master_index", "_wikisource_meta", "_describe_index"):
+    for fn in ("_opys_merged", "_master_index", "_wikisource_meta", "_lookup_for"):
         got = getattr(L, fn, None)
         if got is not None and hasattr(got, "cache_clear"):
             got.cache_clear()

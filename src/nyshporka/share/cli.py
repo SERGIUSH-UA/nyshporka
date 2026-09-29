@@ -674,24 +674,47 @@ def pull_cmd(
                                       "усі його роки одним викликом"),
     years: str = typer.Option("", "--years", help="роки видання: «1880» або «1862-1905»"),
     force: bool = typer.Option(False, "--force",
-                               help="з --vydannia: перекласти вже взяті роки новішими; "
-                                    "ворота діють як завжди (прийняти попри них — "
-                                    "share import <адреса> --force)"),
+                               help="з --vydannia чи серією: перекласти вже взяте "
+                                    "новішим; ворота діють як завжди (прийняти попри "
+                                    "них — share import <адреса> --force)"),
+    repo: str = typer.Option("", "--repo", help="серія: архів («RGIA», «ДАХмО»)"),
+    fond: str = typer.Option("", "--fond", help="серія: фонд; з --take — уся серія"),
+    opys: str = typer.Option("", "--opys", help="серія: опис; порожньо — усі описи"),
     as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Знайти справу в каталозі пулу — і за потреби одразу прийняти.
 
-    Друковане видання: `nysh share pull --vydannia PEV --take` бере всі роки
-    одним викликом; перелік видань — nyshporka.online/supriaha/vydannia.
+    Без запиту — огляд пулу за серіями (архів · фонд · опис). Серія:
+    `nysh share pull --repo RGIA --fond 592 --opys 25 --take` бере всі її
+    справи одним викликом. Друковане видання: `--vydannia PEV --take`.
+    Прийняте одразу йде в текстовий стор.
     """
     from nyshporka import ops as O
 
     _kliuch_abo_vkhid(as_json)
     env = O.call("share.pull", {"query": query, "base": base, "take": take,
-                                "vydannia": vydannia, "years": years, "force": force})
+                                "vydannia": vydannia, "years": years, "force": force,
+                                "repo": repo, "fond": fond, "opys": opys})
     if _answer(env, as_json):
         return
     d = env.data or {}
+    if "series" in d:
+        console.print(f"каталог: {_e(d.get('catalog'))} · пакетів [bold]"
+                      f"{_e(d.get('count'))}[/bold]")
+        for g in d["series"]:
+            opys_s = f"-{g['opys']}" if g.get("opys") else ""
+            name = f"{g['repo']} {g['fond']}{opys_s}"
+            console.print(f"  {_e(name):<18} "
+                          f"справ {g['cases']:>4} · стор. {g['pages']:>7}"
+                          + (f" · {_e(g['years'])}" if g.get("years") else "")
+                          + f" · {_e(', '.join(g.get('publishers') or []) or '—')}")
+        imp = d.get("imported") or []
+        if imp:
+            runs = sum(len(i.get("runs") or []) for i in imp)
+            console.print(f"\nприйнято справ [bold]{len(imp)}[/bold] · прогонів {runs}"
+                          + (f" · у сторі {d['indexed']}" if "indexed" in d else ""))
+        _notes(env)
+        return
     if vydannia:
         yrs = d.get("years") or []
         console.print(f"видання [bold]{_e(d.get('vydannia'))}[/bold] у пулі: "

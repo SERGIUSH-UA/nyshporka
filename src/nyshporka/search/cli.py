@@ -21,13 +21,20 @@ def _mb(n: int) -> str:
     return f"{n / 1e6:.0f} МБ" if n < 2e9 else f"{n / 1e9:.1f} ГБ"
 
 
+def _scope(case: list[str]) -> str | list[str]:
+    """Повторений `--case` → перелік; один чи жодного — рядок, як досі."""
+    got = [c for c in case if c.strip()]
+    return got if len(got) > 1 else (got[0] if got else "")
+
+
 @app.command("state")
 def state_cmd(
     verify: bool = typer.Option(False, "--verify",
                                 help="звірити блоби кандидатів із чинним кодом "
                                      "(приймач після обірваної перебудови)"),
     sample: int = typer.Option(3, "--sample", help="сторінок на прогін для --verify; 0 — усі"),
-    case: str = typer.Option("", "--case", help="звіряти лише цю справу або прогін"),
+    case: list[str] = typer.Option([], "--case",
+                                   help="звіряти лише цю справу або прогін; можна кілька разів або серію («RGIA 592-25»)"),
     as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Скільки прогонів у сторі, скільки застаріло, скільки важить.
@@ -37,7 +44,7 @@ def state_cmd(
     """
     from nyshporka import ops as O
 
-    env = O.call("text.state", {"verify": verify, "sample": sample, "case": case})
+    env = O.call("text.state", {"verify": verify, "sample": sample, "case": _scope(case)})
     v = (env.data or {}).get("verify") if env.ok else None
     bad = bool(v and v["differ"])
     if _answer(env, as_json):
@@ -66,7 +73,8 @@ def state_cmd(
 
 @app.command("index")
 def index_cmd(
-    case: str = typer.Option("", "--case", help="лише ця справа або прогін"),
+    case: list[str] = typer.Option([], "--case",
+                                   help="лише ця справа або прогін; можна кілька разів або серію («RGIA 592-25»)"),
     rebuild: bool = typer.Option(False, "--rebuild", help="перебудувати й свіже"),
     accept_rules: bool = typer.Option(False, "--accept-rules",
                                       help="прийняти чинний відбиток правил без перебудови"),
@@ -76,7 +84,8 @@ def index_cmd(
     лише те, що перечитали."""
     from nyshporka import ops as O
 
-    env = O.call("text.index", {"case": case, "rebuild": rebuild, "accept_rules": accept_rules})
+    env = O.call("text.index", {"case": _scope(case), "rebuild": rebuild,
+                                "accept_rules": accept_rules})
     if _answer(env, as_json):
         return
     d = env.data
@@ -88,7 +97,8 @@ def index_cmd(
 @app.command("grep")
 def grep_cmd(
     pattern: str = typer.Argument(..., help="регекс Python, кирилиця як у тексті"),
-    case: str = typer.Option("", "--case", help="лише ця справа або прогін"),
+    case: list[str] = typer.Option([], "--case",
+                                   help="лише ця справа або прогін; можна кілька разів або серію («RGIA 592-25»)"),
     context: int = typer.Option(1, "--context", help="рядків сусідства"),
     limit: int = typer.Option(100, "--limit", help="скільки показати"),
     case_sensitive: bool = typer.Option(False, "--case-sensitive",
@@ -107,7 +117,7 @@ def grep_cmd(
     """
     from nyshporka import ops as O
 
-    env = O.call("text.grep", {"pattern": pattern, "case": case, "context": context,
+    env = O.call("text.grep", {"pattern": pattern, "case": _scope(case), "context": context,
                                "limit": limit, "ignore_case": not case_sensitive,
                                "where": where, "extra": ";".join(extra)})
     if _answer(env, as_json):
@@ -332,7 +342,9 @@ def whatis_cmd(
 @app.command("find")
 def find_cmd(
     q: str = typer.Argument(..., help="прізвище або слово"),
-    case: str = typer.Option("", "--case", help="справа, шифра або прогін; порожньо — усе"),
+    case: list[str] = typer.Option([], "--case",
+                                   help="справа, шифра або прогін; можна кілька разів або серію («RGIA 592-25»); "
+                                        "порожньо — усе"),
     thresh: int = typer.Option(78, "--thresh", help="поріг схожості 50-100"),
     limit: int = typer.Option(40, "--limit", help="скільки показати"),
     context: int = typer.Option(1, "--context", help="рядків сусідства"),
@@ -341,13 +353,15 @@ def find_cmd(
     """Знайти рід усіма каналами разом. Нуль друкується лише з журналом заходу."""
     from nyshporka import ops as O
 
-    env = O.call("text.find", {"q": q, "case": case, "thresh": thresh, "limit": limit,
+    env = O.call("text.find", {"q": q, "case": _scope(case), "thresh": thresh, "limit": limit,
                                "context": context})
     if _answer(env, as_json):
         return
     d = env.data
     for h in d.get("hits") or []:
         head = f"{h.get('name')} · {h.get('page')} · рядок {h.get('line_no')}"
+        if d.get("scope") == "cases" and (h.get("shifra") or h.get("case_key")):
+            head = f"{h.get('shifra') or h['case_key']} · {head}"
         why = str(h.get("stem_origin") or "q")
         if why != "q":
             label = {"folk": "побутове", "given": "довідник імен",
@@ -399,10 +413,23 @@ def find_cmd(
                 nums = f" око {ch['eye']} · знайдено {ch['found']} · подано {ch['shown']}"
                 if ch.get("missed"):
                     nums += f" · [warn]пропущено {len(ch['missed'])}[/warn]"
+            if ch.get("of_cases") and ch.get("ran_cases") != ch["of_cases"]:
+                nums += f" (у {ch['ran_cases']} із {ch['of_cases']} справ)"
             parts.append(f"[bold]{ch['id']}[/bold] ✓{nums}")
         else:
             parts.append(f"[muted]{ch['id']} ✗[/muted]")
     console.print("[bold]канали:[/bold] " + " · ".join(parts))
+    cases = led.get("cases") or []
+    if cases:
+        # Серія — це перелік справ, а не одна велика: знаменник і нуль
+        # називаються по кожній, інакше справа без прочитаного ховається в сумі.
+        with_hits = [c for c in cases if c["total"] or c["anchor"]]
+        console.print(f"[bold]справ:[/bold] {len(cases)} · з хітами {len(with_hits)} · "
+                      f"без жодного {len(cases) - len(with_hits)}")
+        for c in sorted(with_hits, key=lambda c: -(c["total"] + c["anchor"])):
+            console.print(f"  {c['shifra'] or c['key'] or c['scope']}: прізвище {c['total']}"
+                          f" · якорі {c['anchor']} · сторінок {c['pages'] if c['pages'] is not None else '?'}"
+                          f" · кадрів {c['frames'] if c['frames'] is not None else '?'}")
     if d.get("stems_dropped"):
         console.print(f"[muted]фрагменти профілю не шукались окремо (склейки в кандидатах): "
                       f"{', '.join(d['stems_dropped'])}[/muted]")

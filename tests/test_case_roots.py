@@ -187,7 +187,7 @@ def test_an_adopted_folder_shows_up_before_data_raw_exists(
     monkeypatch.setattr(L, "LIBRARY_PATH", root / "data" / "derived" / "case_library.json")
     monkeypatch.setattr(L, "VERDICTS_PATH", root / "data" / "spotter" / "case_verdicts.json")
     for fn in ("load_library", "_opys_merged", "_master_index",
-               "_wikisource_meta", "_describe_index"):
+               "_wikisource_meta", "_lookup_for"):
         got = getattr(L, fn, None)
         if got is not None and hasattr(got, "cache_clear"):
             got.cache_clear()

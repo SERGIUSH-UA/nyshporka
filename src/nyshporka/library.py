@@ -2053,22 +2053,65 @@ def load_library() -> list[dict[str, Any]]:
     return list(cases) if isinstance(cases, list) else []
 
 
-@lru_cache(maxsize=1)
-def _describe_index() -> tuple[float, dict[str, Any], dict[str, Any]]:
-    """(mtime, path→entry, key→entry) з case_library.json — для describe_case."""
+@dataclass(frozen=True)
+class LibraryLookup:
+    """Бібліотека, розкладена для пошуку за ключем, (фонд, справа) і шляхом.
+
+    🔴 Записи спільні для всіх, хто взяв індекс, — лише на читання. Кому
+    треба змінити запис, копіює його (`dict(e)`).
+    """
+
+    by_key: dict[str, dict[str, Any]]
+    by_fond_spr: dict[tuple[str, str], tuple[dict[str, Any], ...]]
+    by_path: dict[str, dict[str, Any]]
+
+    @classmethod
+    def build(cls, entries: list[dict[str, Any]]) -> LibraryLookup:
+        by_key: dict[str, dict[str, Any]] = {}
+        groups: dict[tuple[str, str], list[dict[str, Any]]] = {}
+        by_path: dict[str, dict[str, Any]] = {}
+        for e in entries:
+            if e.get("key"):
+                # перший виграє — як `next(...)` у резолвері до індексу
+                by_key.setdefault(str(e["key"]), e)
+            groups.setdefault((str(e.get("fond") or ""), str(e.get("spr") or "")),
+                              []).append(e)
+            for p in (e.get("path"), e.get("raw_path")):
+                if p:
+                    by_path[str(p).replace("\\", "/").rstrip("/")] = e
+        return cls(by_key=by_key,
+                   by_fond_spr={k: tuple(v) for k, v in groups.items()},
+                   by_path=by_path)
+
+    def same_fond_spr(self, fond: str, spr: str) -> tuple[dict[str, Any], ...]:
+        return self.by_fond_spr.get((str(fond), str(spr)), ())
+
+
+def library_lookup(loader: Any = None) -> LibraryLookup:
+    """Індекс бібліотеки; перечитується, лише коли файл змінився.
+
+    🔴 Резолвер справи кличуть на кожен прогін простору, і доти кожен виклик
+    читав і розбирав case_library.json заново: 3302 прогони × 27 мс = 45 с на
+    будь-якій команді з `--case` (замір 30.09.2026). Штамп — шлях, mtime і
+    розмір файла, тож перебудова бібліотеки (`write_library`, атомарна
+    заміна) видна одразу, і в довгоживучому процесі теж.
+
+    `loader` — функція, що дає записи; модуль, який тримає своє ім'я
+    `load_library` (`pagestore.store`), передає його, щоб підміна в тестах
+    діяла. Сама функція — частина ключа кешу.
+    """
+    load = loader or load_library
     try:
-        mtime = LIBRARY_PATH.stat().st_mtime
+        st = LIBRARY_PATH.stat()
+        stamp = (st.st_mtime_ns, st.st_size)
     except OSError:
-        return (0.0, {}, {})
-    by_path: dict[str, dict[str, Any]] = {}
-    by_key: dict[str, dict[str, Any]] = {}
-    for e in load_library():
-        for p in (e.get("path"), e.get("raw_path")):
-            if p:
-                by_path[str(p).replace("\\", "/").rstrip("/")] = e
-        if e.get("key"):
-            by_key[e["key"]] = e
-    return (mtime, by_path, by_key)
+        stamp = (-1, -1)
+    return _lookup_for(load, str(LIBRARY_PATH), *stamp)
+
+
+@lru_cache(maxsize=4)
+def _lookup_for(load: Any, path: str, mtime_ns: int, size: int) -> LibraryLookup:
+    return LibraryLookup.build(load())
 
 
 @lru_cache(maxsize=1)
@@ -2119,18 +2162,12 @@ def dejunction(path: str) -> str | None:
 def describe_case(path: str) -> dict[str, Any] | None:
     """Знайти опис справи за шляхом входу (для збагачення пікера консолі).
 
-    Кеш скидається коли case_library.json перезаписано (звірка mtime).
+    Кеш скидається коли case_library.json перезаписано (`library_lookup`).
     """
-    if not path:
+    if not path or not LIBRARY_PATH.exists():
         return None
-    try:
-        cur_mtime = LIBRARY_PATH.stat().st_mtime
-    except OSError:
-        return None
-    mtime, by_path, by_key = _describe_index()
-    if mtime != cur_mtime:
-        _describe_index.cache_clear()
-        mtime, by_path, by_key = _describe_index()
+    lk = library_lookup()
+    by_path, by_key = lk.by_path, lk.by_key
     rel = str(path).replace("\\", "/").rstrip("/")
     # абсолютний шлях → rel від кореня, якщо можливо
     if rel not in by_path:
@@ -2147,7 +2184,7 @@ def describe_case(path: str) -> dict[str, Any] | None:
         return dict(by_path[rel])
     parsed = parse_case_code(rel) or parse_case_code(path)
     if parsed:
-        return next((by_key[k] for k in candidate_keys(parsed) if k in by_key), None)
+        return next((dict(by_key[k]) for k in candidate_keys(parsed) if k in by_key), None)
     return None
 
 

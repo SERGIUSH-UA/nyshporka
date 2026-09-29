@@ -22,7 +22,7 @@ import json
 import math
 import os
 import re
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -324,6 +324,12 @@ def shared_of(meta: dict[str, Any]) -> str:
     return str(mark.get("from") or "").strip() or "?"
 
 
+def _shared_shifra(meta: dict[str, Any]) -> str:
+    """Шифра з паспорта прийнятого пакета; порожньо — свій прогін."""
+    mark = meta.get("shared")
+    return str(mark.get("shifra") or "").strip() if isinstance(mark, dict) else ""
+
+
 def run_engine_ids(meta: dict[str, Any]) -> list[str]:
     """всі рушії прогону: другий голос пише обидві моделі одним полем.
 
@@ -495,7 +501,9 @@ def _runs_stamp() -> tuple[int, int, int, str]:
                                   os.stat(os.path.join(e.path, "_htr_meta.json")).st_mtime_ns)
             except OSError:
                 continue
-    return (n, newest, newest_meta, _library_stamp())
+    # Бібліотека й реєстр колізій опису: від них залежать шифра й канонічний
+    # ключ рядка (`case_canon`), який кеш тримає на диску.
+    return (n, newest, newest_meta, "|".join(_canon_stamp()))
 
 
 def _library_stamp() -> str:
@@ -559,7 +567,10 @@ def list_cases() -> list[dict[str, Any]]:
             "case_dir": meta.get("case_dir") or "",
             # спільні кадри рахуються лише за текою в просторі — див. `frames_dir_key`
             "frames_key": frames_dir_key(meta.get("case_dir") or ""),
-            "shifra": (case or {}).get("shifra") or "",
+            # Прийнятий із пулу прогін справи в бібліотеці часто не має (кадрів
+            # нема), але шифру несе паспорт пакета — без неї серія
+            # («RGIA 592-25») не бачила жодного такого прогону.
+            "shifra": (case or {}).get("shifra") or _shared_shifra(meta),
             "title": (case or {}).get("title") or "",
             # 🔴 Шифра З мети, а не з бібліотеки. Це різні числа: `shifra` вище —
             # прикраса переліку, яку дав резолвер, а `case_key` — те, що прогін
@@ -622,7 +633,7 @@ def _runs_cache_path() -> Path:
 #: рядку інакше не з'явилось би доти, доки мета не зміниться, — і читач бачив би
 #: рядки без нього як рядки, у яких це поле порожнє. Різниця між «немає» і
 #: «порожньо» тут не косметична: саме нею позначається чужий прогін.
-ROW_SCHEMA = 4
+ROW_SCHEMA = 5
 
 
 def _runs_cache_read(lib: str = "") -> dict[str, dict[str, Any]]:
@@ -704,7 +715,7 @@ def unique_pages(rows: list[dict[str, Any]]) -> int:
     return sum(groups.values())
 
 
-def runs_for_scope(scope: str) -> dict[str, Any]:
+def runs_for_scope(scope: str | Sequence[str]) -> dict[str, Any]:
     """Прогони, у яких шукати: `scope` — справа, прогін або порожньо (весь корпус).
 
     🔴 Одна функція на чисельник і знаменник. Доти, доки область пошуку
@@ -721,7 +732,15 @@ def runs_for_scope(scope: str) -> dict[str, Any]:
 
     ValueError — якщо рядок не впізнано ні як прогін, ні як справу; текст
     відмови нормативний (перелік прийнятних форм дає `pagestore.resolve_case`).
+
+    Кілька областей (список) — їх об'єднання, `kind="cases"`; `parts` каже,
+    що дала кожна, щоб знаменник можна було назвати по справах.
     """
+    if not isinstance(scope, str):
+        wants = list(dict.fromkeys(w.strip() for w in scope if w and w.strip()))
+        if len(wants) <= 1:
+            return runs_for_scope(wants[0] if wants else "")
+        return _union_scope(wants)
     rows = list_cases()
     want = (scope or "").strip()
     if not want:
@@ -733,6 +752,10 @@ def runs_for_scope(scope: str) -> dict[str, Any]:
         name = r.get("name")
         if name in bound:
             return _canon_case_key(bound[name] or "")
+        # Рядок переліку вже несе канонічний ключ; рахувати його вдруге на
+        # кожен прогін простору — те, що коштувало 45 с на команду.
+        if "case_canon" in r:
+            return str(r.get("case_canon") or "")
         return _canon_case_key((r.get("case_key") or "").strip())
 
     by_name = [r for r in rows if r.get("name") == want]
@@ -765,7 +788,9 @@ def runs_for_scope(scope: str) -> dict[str, Any]:
             series = _series_rows(rows, want)
         if not series:
             raise
-        keys = sorted({(r.get("case_key") or "").strip() for r in series})
+        # Канонічні ключі: за ними область розкладається на справи
+        # (`textops.find`), і шифра в меті не дає тієї самої справи двічі.
+        keys = sorted({k for k in (key_of(r) for r in series) if k})
         return {"rows": series, "kind": "cases", "key": "", "shifra": want,
                 "keys": keys}
     mine = [r for r in rows if key_of(r) == ref.key]
@@ -779,7 +804,29 @@ def runs_for_scope(scope: str) -> dict[str, Any]:
     return {"rows": mine, "kind": "case", "key": ref.key, "shifra": ref.shifra}
 
 
-@functools.lru_cache(maxsize=4096)
+def _union_scope(wants: list[str]) -> dict[str, Any]:
+    """Об'єднання кількох областей. Нерозпізнана — відмова з її ж текстом:
+    мовчки пропустити одну з названих справ означало б нуль про неї без
+    жодного прогону."""
+    rows: dict[str, dict[str, Any]] = {}
+    keys: set[str] = set()
+    parts: list[dict[str, Any]] = []
+    for w in wants:
+        try:
+            one = runs_for_scope(w)
+        except ValueError as exc:
+            raise ValueError(f"«{w}»: {exc}") from exc
+        for r in one["rows"]:
+            rows.setdefault(str(r.get("name")), r)
+        got = set(one.get("keys") or ()) | ({one["key"]} if one.get("key") else set())
+        keys |= got
+        parts.append({"scope": w, "kind": one["kind"], "key": one.get("key") or "",
+                      "shifra": one.get("shifra") or "",
+                      "runs": [r.get("name") for r in one["rows"]]})
+    return {"rows": list(rows.values()), "kind": "cases", "key": "",
+            "shifra": "; ".join(wants), "keys": sorted(keys), "parts": parts}
+
+
 def _canon_case_key(value: str) -> str:
     """Ключ справи з мети прогону — канонічним ключем, навіть коли там шифра.
 
@@ -798,12 +845,38 @@ def _canon_case_key(value: str) -> str:
     """
     if not value:
         return value
+    return _canon_cached(value, _canon_stamp())
+
+
+def _canon_stamp() -> tuple[str, str]:
+    """Від чого залежить канонічний ключ: бібліотека й реєстр колізій опису.
+
+    🔴 Кеш без штампа в довгоживучому процесі (в'ювер, MCP, демон) віддавав
+    ключ, порахований до перебудови бібліотеки чи до `nysh case --shifra`.
+    """
+    from nyshporka.core import opys_keys
+
+    ok = ""
+    with contextlib.suppress(Exception):
+        p = opys_keys.path()
+        if p is not None:
+            st = p.stat()
+            ok = f"{st.st_mtime_ns:x}-{st.st_size:x}"
+    return (_library_stamp(), ok)
+
+
+@functools.lru_cache(maxsize=16384)
+def _canon_cached(value: str, stamp: tuple[str, str]) -> str:
     try:
         from nyshporka.pagestore.store import resolve_case
 
         return resolve_case(value, claim=False).key or value
     except Exception:
         return value
+
+
+#: Тести й перебудови скидають кеш так само, як до штампа.
+_canon_case_key.cache_clear = _canon_cached.cache_clear  # type: ignore[attr-defined]
 
 
 def _bound_runs() -> dict[str, str | None]:
@@ -860,12 +933,25 @@ def _series_rows(rows: list[dict[str, Any]], want: str) -> list[dict[str, Any]]:
     for r in rows:
         sh = str(r.get("shifra") or "").strip()
         tail = sh.split()[-1].replace("/", "-") if sh else ""
-        if not (tail and (tail == head or tail.startswith(head + "-"))):
+        if tail:
+            if not (tail == head or tail.startswith(head + "-")):
+                continue
+        elif not _key_tail(r).startswith(head + "-"):
+            # Без шифри — за ключем справи («DAHMO/230-1/130» → «230-1-130»).
+            # Лише як префікс серії: ключ, де опис до нього не входить, не
+            # відрізнить «фонд 315 опис 1» від «фонд 315 справа 1».
             continue
         if repo and not _row_in_archive(r, repo):
             continue
         out.append(r)
     return out
+
+
+def _key_tail(row: dict[str, Any]) -> str:
+    """«Фонд[-опис]-справа» з канонічного ключа рядка; порожньо — ключа нема."""
+    key = str(row.get("case_canon") or row.get("case_key") or "").strip()
+    parts = key.split("/")
+    return f"{parts[1]}-{parts[2]}" if len(parts) == 3 and parts[1] and parts[2] else ""
 
 
 def _row_in_archive(row: dict[str, Any], repo: str) -> bool:

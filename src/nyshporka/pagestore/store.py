@@ -34,6 +34,7 @@ from nyshporka.library import (
     _norm_spr,
     claim_collision,
     find_by_address,
+    library_lookup,
     load_library,
     opys_conflict,
     opys_in_case_key,
@@ -280,15 +281,17 @@ def resolve_case(value: str, *, claim: bool = True) -> CaseRef:
             f"Приймаю: {_ACCEPTED_FORMATS}")
 
     repo, fond, opys, spr = parsed
-    lib = load_library()
+    # Індекс, а не список: резолвер кличуть на кожен прогін простору
+    # (`htr_store.runs_for_scope`), і читання бібліотеки на кожен виклик
+    # коштувало 45 с на команду (`library.library_lookup`).
+    lib = library_lookup(load_library)
     # Фонди з описом у ключі: без опису запит неоднозначний за побудовою
     # («ANRM 211-1-140» с. Парково vs «ANRM 211-3-140» Кишинівський собор).
     # Мовчки взяти перший-ліпший = дописати аркуші в чужу справу, тому — помилка
     # з переліком того, що реально є на диску.
     if opys_in_key(repo, fond) and not opys and not str(spr).startswith("@"):
-        cands = sorted({str(e["opys"]) for e in lib
-                        if e.get("repo") == repo and e.get("fond") == fond
-                        and e.get("spr") == spr and e.get("opys")})
+        cands = sorted({str(e["opys"]) for e in lib.same_fond_spr(fond, spr)
+                        if e.get("repo") == repo and e.get("opys")})
         if len(cands) == 1:
             opys = cands[0]
         else:
@@ -302,7 +305,7 @@ def resolve_case(value: str, *, claim: bool = True) -> CaseRef:
     if not key:
         raise ValueError(f"не зібрав ключ зі «{value}» (repo={repo} fond={fond} spr={spr})")
 
-    entry = next((e for e in lib if e.get("key") == key), None)
+    entry = lib.by_key.get(key)
     if entry is not None and opys_conflict(opys, entry.get("opys")):
         # 🔴 Ключ без опису знайшов справу, але її опис НАЗВАНИЙ і РІЗНИТЬСЯ —
         # це фізично інша книга (напр. «ЦДІАК 224-1-49» набрано, а плаский ключ
@@ -326,8 +329,8 @@ def resolve_case(value: str, *, claim: bool = True) -> CaseRef:
         # (звіт користувача 29.09.2026: «ДАХмО 315-1-8345» → `DAVIO/315/8345`).
         # Суперечливі записи бібліотеки показує `library_conflicts`.
         pk = _pack_active()
-        same = [e for e in lib if e.get("fond") == fond and e.get("spr") == spr
-                and pk.same_archive(e.get("repo"), repo)
+        same = [e for e in lib.same_fond_spr(fond, spr)
+                if pk.same_archive(e.get("repo"), repo)
                 and not opys_conflict(opys, e.get("opys"))]
         if len(same) == 1:
             entry = same[0]

@@ -167,6 +167,22 @@ def _isolate_from_the_machine(monkeypatch: pytest.MonkeyPatch,
 
 
 @pytest.fixture(autouse=True)
+def _boot_workspace_after_reset() -> None:
+    """Простір, скинутий попереднім тестом, — назад на завантажувальний.
+
+    🔴 Сто з лишком фікстур закінчуються `W.reset()`, і тест, що йшов після
+    такої в тому самому процесі й покладався на простір збирання, падав
+    «робочий простір не знайдено» (`test_train_base_pin` після
+    `test_scope_honours_bind`, 30.09.2026). Зелений чи червоний результат
+    вирішував порядок файлів у воркері xdist, а не код. Повертається лише
+    порожній override: простір, поставлений ширшою фікстурою (`scope="module"`),
+    не зачіпається — див. застереження в шапці.
+    """
+    if W._override is None:
+        W.use(W.Workspace(root=_BOOT, name="збирання", origin="test"))
+
+
+@pytest.fixture(autouse=True)
 def _own_derived_files(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Сховище сторінок і файли бібліотеки — свої в кожного тесту.
 
@@ -187,7 +203,7 @@ def _own_derived_files(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setattr(L, "LIBRARY_PATH", derived / "case_library.json")
     monkeypatch.setattr(L, "VERDICTS_PATH", tmp_path / "data" / "spotter" / "case_verdicts.json")
     monkeypatch.setattr(L, "SCAN_TARGETS_PATH", tmp_path / "data" / "spotter" / "scan_targets.json")
-    L._describe_index.cache_clear()
+    L._lookup_for.cache_clear()
 
 
 @pytest.fixture(autouse=True)

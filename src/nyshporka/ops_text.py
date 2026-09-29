@@ -21,6 +21,13 @@ from nyshporka.core.ops import op
 SECTION = "research"
 
 
+
+#: Область тексту: одна справа, шифра, серія, прогін — або перелік із них
+#: (`htr_store.runs_for_scope`). Рядок лишається рядком: старі виклики не
+#: змінюються.
+CaseScope = str | list[str]
+
+
 class TextStateArgs(BaseModel):
     verify: bool = Field(default=False,
                          description="звірити блоби кандидатів із чинним кодом — приймач "
@@ -28,9 +35,9 @@ class TextStateArgs(BaseModel):
     sample: int = Field(default=3, ge=0,
                         description="скільки сторінок кожного прогону звіряти (перша, "
                                     "остання й між ними); 0 — усі")
-    case: str = Field(default="",
-                      description="звіряти лише прогони цієї справи або цей прогін; "
-                                  "порожньо — усе")
+    case: CaseScope = Field(default="",
+                            description="звіряти лише прогони цієї справи (серії, "
+                                        "переліку) або цей прогін; порожньо — усе")
 
 
 @op("text.state", summary="Скільки прочитаного лежить у текстовому сторі",
@@ -131,8 +138,9 @@ RULES_STALE_MSG = ("відбиток правил склейки кандида�
 
 
 class TextIndexArgs(BaseModel):
-    case: str = Field(default="",
-                      description="лише прогони цієї справи або цей прогін; порожньо — усе")
+    case: CaseScope = Field(default="",
+                            description="лише прогони цієї справи (серії, переліку) або "
+                                        "цей прогін; порожньо — усе")
     rebuild: bool = Field(default=False,
                           description="перебудувати й свіже (після зміни правил розбору)")
     accept_rules: bool = Field(default=False,
@@ -195,8 +203,9 @@ def _warn_cuts(env: Envelope, layered: dict[str, Any]) -> None:
 
 class TextGrepArgs(BaseModel):
     pattern: str = Field(description="регекс Python; кирилиця як у тексті")
-    case: str = Field(default="",
-                      description="лише в цій справі або прогоні; порожньо — усе прочитане")
+    case: CaseScope = Field(default="",
+                            description="лише в цій справі (серії, переліку) або прогоні; "
+                                        "порожньо — усе прочитане")
     context: int = Field(default=1, ge=0, le=6, description="рядків сусідства")
     limit: int = Field(default=100, ge=1, le=2000)
     ignore_case: bool = Field(default=True)
@@ -435,7 +444,9 @@ def text_whatis(a: TextWhatisArgs) -> Envelope:
 # ── етап 3: find — усі канали разом, зі знаменником і журналом ───────────────
 class TextFindArgs(BaseModel):
     q: str = Field(description="прізвище або слово")
-    case: str = Field(default="", description="справа, шифра або прогін; порожньо — усе прочитане")
+    case: CaseScope = Field(default="",
+                            description="справа, шифра, серія («RGIA 592-25»), перелік "
+                                        "справ або прогін; порожньо — усе прочитане")
     thresh: int = Field(default=78, ge=50, le=100)
     limit: int = Field(default=40, ge=1, le=5000)
     context: int = Field(default=1, ge=0, le=6)

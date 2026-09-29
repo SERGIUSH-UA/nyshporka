@@ -13,6 +13,7 @@
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, fields
 from pathlib import Path
 from typing import Any
@@ -481,3 +482,35 @@ def summarize(rows: list[Row]) -> dict[str, Any]:
         "fonds": sorted(({"fond": k, "cases": v} for k, v in fonds.items()),
                         key=lambda x: -int(x["cases"])),
     }
+
+
+def series_of(rows: list[Row]) -> list[dict[str, Any]]:
+    """Зведення рядків по серіях (архів · фонд · опис): справ, пакетів,
+    сторінок, роки, хто вніс. Справа — четвірка ключа, тож два пакети однієї
+    книги рахуються однією справою."""
+    from nyshporka.share.pool import quad_key
+
+    out: dict[tuple[str, str, str], dict[str, Any]] = {}
+    for r in rows:
+        slot = out.setdefault((r.repo.upper(), r.fond, r.opys), {
+            "repo": r.repo.upper(), "fond": r.fond, "opys": r.opys, "cases": set(),
+            "packages": 0, "pages": 0, "years": set(), "publishers": set()})
+        slot["cases"].add(quad_key(r.repo, r.fond, r.opys, r.spr) or r.shifra)
+        slot["packages"] += 1
+        slot["pages"] += as_int(r.pages)
+        for y in re.findall(r"(?<!\d)1[5-9]\d\d(?!\d)", r.years or ""):
+            slot["years"].add(int(y))
+        if r.publisher:
+            slot["publishers"].add(r.publisher)
+    return sorted(
+        ({**v, "cases": len(v["cases"]),
+          "years": _span(v["years"]),
+          "publishers": sorted(v["publishers"])} for v in out.values()),
+        key=lambda x: (x["repo"], x["fond"], x["opys"]))
+
+
+def _span(years: set[int]) -> str:
+    if not years:
+        return ""
+    lo, hi = min(years), max(years)
+    return str(lo) if lo == hi else f"{lo}–{hi}"

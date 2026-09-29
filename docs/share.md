@@ -26,11 +26,14 @@ nysh share publish data/share/outbox/DAHMO_315-1-1234.nyshtext
 
 ```sh
 nysh share pull "ДАХмО 315-1-1234" --take         # знайти в пулі й прийняти
-nysh text index
+nysh share pull --repo RGIA --fond 592 --opys 25 --take   # уся серія одним викликом
 ```
 
-Прийняті прогони лягають туди ж, де своє прочитане, тож `nysh text find`,
-`grep` і `ctx` бачать їх одразу.
+Прийняті прогони лягають туди ж, де своє прочитане, і одразу йдуть у
+текстовий стор, тож `nysh text find`, `grep` і `ctx` бачать їх без окремого
+`text index`. Шукати можна по серії так само, як по справі:
+`nysh text find <прізвище> --case "RGIA 592-25"`; кілька справ — повторити
+`--case`.
 
 !!! tip "Якщо ділитесь через агента"
     Скіл `share-case` веде агента цим самим шляхом і стереже місця, що
@@ -251,8 +254,11 @@ nysh share geometry <….geom.nyshtext>    # докласти рамки ряд�
 ## Пул
 
 ```sh
+nysh share pull                     # огляд пулу: архів · фонд · опис, справ і сторінок
 nysh share pull "Слобідка"          # що є в каталозі
 nysh share pull "ДАХмО 315-1-1234" --take
+nysh share pull --repo RGIA --fond 592           # серія: що в ній є
+nysh share pull --repo RGIA --fond 592 --take    # і прийняти всю
 nysh share stats --catalog          # хто скільки вніс
 nysh share sync --repo DAHMO --fond 315   # зріз для колонки «пул» у `cases fond`
 ```
