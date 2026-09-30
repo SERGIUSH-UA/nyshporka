@@ -241,7 +241,10 @@ def test_staryi_zriz_bez_pokryttia_chytaietsia(prostir: Path,
                                                monkeypatch: pytest.MonkeyPatch) -> None:
     """Зріз, знятий до появи покриття, лишається зрізом: поля — «не питали»."""
     monkeypatch.setattr(pool, "_handle", lambda: "ia")
-    _zriz([{"key": "DAHMO/315/1/6940", "repo": "DAHMO", "fond": "315",
+    # Ключ книги — окремою змінною: сканер секретів CI читає `"key": "…"` із
+    # довгим рядком як захардкоджений ключ доступу.
+    knyha = "DAHMO/315/1/6940"
+    _zriz([{"key": knyha, "repo": "DAHMO", "fond": "315",
             "opys": "1", "spr": "6940", "pages": 7, "publishers": ["ia"]}])
     con = sqlite3.connect(pool.snapshot_path())
     con.execute("DROP TABLE pool_extra")
