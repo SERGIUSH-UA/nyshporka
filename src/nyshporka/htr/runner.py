@@ -2531,8 +2531,10 @@ class GeomWatch:
 
     @staticmethod
     def _fallbacks() -> int:
-        fg = sys.modules.get("fast_geom")
-        return sum(getattr(fg, "FALLBACKS", {}).values()) if fg else 0
+        # fast_seam відступає на оригінальний `vec_lines` цілою сторінкою —
+        # це теж рятунок патчем геометрії, і мовчати про нього не можна
+        return sum(sum(getattr(sys.modules.get(m), "FALLBACKS", {}).values())
+                   for m in ("fast_geom", "fast_seam"))
 
     def start(self) -> None:
         self.why = []

@@ -140,6 +140,8 @@ def main() -> int:
     print(f"  збігів: {s['same']}   розбіжностей: {s['diff']} "
           f"(з них інша форма масиву: {s['shape_diff']})")
     print(f"  макс. відхилення координати: {s['max_dev']:.0f} px")
+    from fast_geom import RAY_STATS
+    print(f"  променів {RAY_STATS['rays']}, з них повним перетином {RAY_STATS['full']}")
     print(f"  час: оригінал {s['t_orig']:.1f} с → швидка {s['t_fast']:.1f} с "
           f"= ×{s['t_orig']/max(s['t_fast'],1e-9):.2f}")
     bt = s.get("_bt") or {"calls": 0, "same": 0, "diff": 0, "t_orig": 0, "t_fast": 0}

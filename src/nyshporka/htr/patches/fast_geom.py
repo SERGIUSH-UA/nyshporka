@@ -74,6 +74,105 @@ def _closest_coord(pt, inter):
                     f'object: {inter.wkt}')
 
 
+#: Вікно параметра вздовж променя, у якому перетини вважаються «так само
+#: близькими»: похибка звичайної арифметики тут ~1e-13, вікно на сім порядків
+#: ширше. Усе, що потрапило у вікно, віддається GEOS, і найближче обирає він.
+RAY_T_WINDOW = 1e-6
+#: Запас на межах відрізків (параметри t, u) і на проєкціях — теж із великим
+#: запасом проти похибки: зайвий кандидат коштує мікросекунди, пропущений —
+#: інший контур рядка.
+RAY_EPS = 1e-7
+
+#: Скільки променів пішли повним перетином (паралельний сегмент, нуль збігів).
+RAY_STATS = {"rays": 0, "full": 0}
+
+
+def _ray_hits(starts: np.ndarray, ends: np.ndarray, rays: np.ndarray,
+              boundary: Any) -> list[Any]:
+    """`shapely.intersection(rays, boundary)` там, де це важить, — біля початку променя.
+
+    Далі від перетину береться лише точка, найближча до початку променя
+    (`_closest_coord`). Межа ж — обведення сусідніх рядків, сотні й тисячі
+    сегментів, і GEOS перетинав кожен промінь з усією межею: ~4 мс на рядок,
+    найдорожче місце полігонізації після шва (01.10.2026).
+
+    Тут numpy відбирає для кожного променя сегменти межі, що дають найближчий
+    перетин (усі, що потрапили у вікно `RAY_T_WINDOW` від найближчого), і
+    GEOS перетинає промінь лише з ними — з ТИМИ САМИМИ сегментами, тож
+    координата точки та сама. Промінь, біля якого є паралельний сегмент або
+    не знайшлось жодного перетину, йде повним перетином, як раніше.
+    """
+    n = len(starts)
+    RAY_STATS["rays"] += n
+    parts = shapely.get_parts(boundary)
+    xy, part = shapely.get_coordinates(parts, return_index=True)
+    same = part[1:] == part[:-1]
+    A, B = xy[:-1][same], xy[1:][same]           # сегменти межі в їхньому порядку
+    if not len(A) or not n:
+        RAY_STATS["full"] += n
+        return list(shapely.intersection(rays, boundary))
+
+    # ── 1. кандидати за проєкцією на вісь, поперечну до променів ────────────
+    d = ends - starts
+    dm = d.mean(axis=0)
+    nrm = np.array([-dm[1], dm[0]]) / max(float(np.hypot(*dm)), 1e-12)
+    rs, re = starts @ nrm, ends @ nrm
+    r_lo, r_hi = np.minimum(rs, re), np.maximum(rs, re)
+    sa, sb = A @ nrm, B @ nrm
+    s_lo, s_hi = np.minimum(sa, sb), np.maximum(sa, sb)
+    pad = 1e-6 * (1.0 + float(np.abs(xy).max()))
+    order = np.argsort(r_lo, kind="stable")
+    lo_sorted = r_lo[order]
+    w = float((r_hi - r_lo).max())
+    first = np.searchsorted(lo_sorted, s_lo - w - pad, side="left")
+    last = np.searchsorted(lo_sorted, s_hi + pad, side="right")
+    cnt = last - first
+    seg_i = np.repeat(np.arange(len(A)), cnt)
+    ray_i = order[np.repeat(first, cnt) + (np.arange(cnt.sum()) - np.repeat(np.cumsum(cnt) - cnt, cnt))]
+    keep = (r_hi[ray_i] >= s_lo[seg_i] - pad) & (r_lo[ray_i] <= s_hi[seg_i] + pad)
+    seg_i, ray_i = seg_i[keep], ray_i[keep]
+
+    # ── 2. точний параметричний перетин відрізків ───────────────────────────
+    P, r = starts[ray_i], d[ray_i]
+    Aa, s = A[seg_i], B[seg_i] - A[seg_i]
+    q = Aa - P
+    den = r[:, 0] * s[:, 1] - r[:, 1] * s[:, 0]
+    scale = np.hypot(r[:, 0], r[:, 1]) * np.hypot(s[:, 0], s[:, 1])
+    parallel = np.abs(den) <= 1e-9 * np.maximum(scale, 1e-300)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        t = (q[:, 0] * s[:, 1] - q[:, 1] * s[:, 0]) / den
+        u = (q[:, 0] * r[:, 1] - q[:, 1] * r[:, 0]) / den
+    hit = ~parallel & (t >= -RAY_EPS) & (t <= 1 + RAY_EPS) & (u >= -RAY_EPS) & (u <= 1 + RAY_EPS)
+    # паралельний сегмент поруч із променем — можливе накладання, тобто інший
+    # тип перетину (лінія, колекція); такий промінь лишаємо GEOS повністю
+    near_par = parallel & (np.abs(q[:, 0] * r[:, 1] - q[:, 1] * r[:, 0])
+                           <= 1e-6 * np.maximum(np.hypot(r[:, 0], r[:, 1]), 1e-300))
+    full = np.zeros(n, dtype=bool)
+    full[ray_i[near_par]] = True
+
+    t_min = np.full(n, np.inf)
+    np.minimum.at(t_min, ray_i[hit], t[hit])
+    full |= ~np.isfinite(t_min)
+    sel = hit & (t <= t_min[ray_i] + RAY_T_WINDOW) & ~full[ray_i]
+
+    out: list[Any] = [None] * n
+    if sel.any():
+        rs_ = ray_i[sel]
+        o = np.argsort(rs_, kind="stable")      # сегменти групуються за променем,
+        rs_, ss_ = rs_[o], seg_i[sel][o]        # усередині — в порядку межі
+        segs = shapely.linestrings(np.stack([A[ss_], B[ss_]], axis=1))
+        uniq, grp = np.unique(rs_, return_inverse=True)
+        multi = shapely.multilinestrings(segs, indices=grp)
+        for k, g in zip(uniq, shapely.intersection(rays[uniq], multi)):
+            out[int(k)] = g
+    idx_full = np.flatnonzero(full)
+    RAY_STATS["full"] += len(idx_full)
+    if len(idx_full):
+        for k, g in zip(idx_full, shapely.intersection(rays[idx_full], boundary)):
+            out[int(k)] = g
+    return out
+
+
 def calc_roi_fast(line, bounds, baselines, suppl_obj, p_dir):
     """Заміна `kraken.lib.segmentation._calc_roi` з тим самим виходом."""
     from kraken.lib.segmentation import _ray_intersect_boundaries
@@ -129,8 +228,8 @@ def calc_roi_fast(line, bounds, baselines, suppl_obj, p_dir):
     bt_arr = np.asarray(bottom_bounds_intersects, dtype=float)
     up_seg = shapely.linestrings(np.stack([ip_line, up_arr], axis=1))
     bt_seg = shapely.linestrings(np.stack([ip_line, bt_arr], axis=1))
-    inter_a = shapely.intersection(up_seg, side_a)
-    inter_b = shapely.intersection(bt_seg, side_b)
+    inter_a = _ray_hits(ip_line, up_arr, up_seg, side_a)
+    inter_b = _ray_hits(ip_line, bt_arr, bt_seg, side_b)
 
     env_up = [_closest_coord(p, ia) for p, ia in zip(ip_line, inter_a)]
     env_bottom = [_closest_coord(p, ib) for p, ib in zip(ip_line, inter_b)]
