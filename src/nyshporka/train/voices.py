@@ -135,7 +135,7 @@ def run_model(name: str, model: str, *, voice_id: str = "", device: str = "cuda:
     cmd = [str(py), str(infer), "--model", str(path), "--lines", str(reg.crops_of(spec)),
            "--out", str(out), "--device", device]
     res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
-                         errors="replace")
+                         errors="replace", env=E.foreign_env())
     if res.returncode != 0:
         raise VoiceError(f"інфер упав (rc={res.returncode}): {(res.stderr or '')[-600:]}")
     rep = VoiceReport(set=name, voice=vid)

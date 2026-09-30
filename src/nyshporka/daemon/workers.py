@@ -613,14 +613,14 @@ async def _run_read(bus: JobBus, job: JobRecord, plan: Any, case_key: str,
 async def _run_read_locked(bus: JobBus, job: JobRecord, plan: Any, case_key: str,
                            cmds: list[list[str]], *, partial: bool = False) -> None:
     """Тіло читання під уже взятим гейтом карти."""
-    import os
 
     from nyshporka.core.jobs import JobState, Progress
     from nyshporka.core.progress import split
     from nyshporka.htr import run as R
+    from nyshporka.htr.env import foreign_env
 
-    env = {**os.environ, **R.shard_env(len(cmds)),
-           "PYTHONUNBUFFERED": "1", "PYTHONIOENCODING": "utf-8"}
+    env = foreign_env({**R.shard_env(len(cmds)), "PYTHONUNBUFFERED": "1",
+                       "PYTHONIOENCODING": "utf-8"})
     procs = [await asyncio.create_subprocess_exec(
         *cmd, stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.STDOUT, env=env) for cmd in cmds]
@@ -790,6 +790,10 @@ def _terminate(proc: asyncio.subprocess.Process) -> None:
     """
     if proc.returncode is not None:
         return
+    # Діти раннера (його робочий процес) самі не зникають — гасимо все дерево.
+    from nyshporka.htr.session import kill_tree
+
+    _keep(asyncio.create_task(asyncio.to_thread(kill_tree, proc.pid)))
     try:
         proc.terminate()
     except ProcessLookupError:

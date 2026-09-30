@@ -153,10 +153,13 @@ class LocalTrainer:
                                     encoding="utf-8")
         log = st.out_dir() / STDOUT_LOG
         cmd = command(py, st.params_path())
-        kw: dict[str, Any] = {"cwd": str(run_dir), "stdin": subprocess.DEVNULL}
+        from nyshporka.htr.env import foreign_env
+
+        kw: dict[str, Any] = {"cwd": str(run_dir), "stdin": subprocess.DEVNULL,
+                              "env": foreign_env()}
         if str(params.get("device") or "auto") == "cpu":
             # Карту ховаємо від процесу цілком: раннер сам бере cuda, якщо її видно.
-            kw["env"] = {**os.environ, "CUDA_VISIBLE_DEVICES": ""}
+            kw["env"] = foreign_env({"CUDA_VISIBLE_DEVICES": ""})
         if os.name == "nt":
             # getattr, а не пряме звертання: обидва прапорці є лише у Windows,
             # і mypy на Linux відмовляє на самому імені.

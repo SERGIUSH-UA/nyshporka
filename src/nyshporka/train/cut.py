@@ -226,8 +226,10 @@ def _guest_cut(python: Path, image: Path, orient: int, seg_files: list[Path],
     for f in seg_files:
         cmd += ["--seg", str(f)]
     try:
+        from nyshporka.htr.env import foreign_env
+
         res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
-                             errors="replace", timeout=600)
+                             errors="replace", timeout=600, env=foreign_env())
     except (OSError, subprocess.TimeoutExpired) as exc:
         return {"ok": False, "why": f"гість не запустився: {exc}"}
     last = (res.stdout or "").strip().splitlines()

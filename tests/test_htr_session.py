@@ -118,3 +118,56 @@ def test_odyn_protses_bere_lok_z_planu(case) -> None:
     S.read_case(plan)
 
     assert plan.asked[0]["gpu_lock"] == str(plan.gpu_lock)
+
+
+def test_dytyna_ne_uspadkovuie_chuzhoho_pythonhome(case, monkeypatch: pytest.MonkeyPatch) -> None:
+    """🔴 `uv run` ставить `PYTHONHOME` на свій Python; інтерпретатор рушіїв
+    іншої версії з ним падає на `import re`, і назовні це було «середовище
+    рушіїв не готове» при повному середовищі (30.09.2026)."""
+    from nyshporka.htr.env import foreign_env
+
+    monkeypatch.setenv("PYTHONHOME", "C:/chuzhyi/python")
+    monkeypatch.setenv("VIRTUAL_ENV", "C:/chuzhyi/.venv")
+    monkeypatch.setenv("NYSH_TEST_KEEP", "1")
+    env = foreign_env({"OMP_NUM_THREADS": "2"})
+    assert "PYTHONHOME" not in env and "VIRTUAL_ENV" not in env
+    assert env["NYSH_TEST_KEEP"] == "1" and env["OMP_NUM_THREADS"] == "2"
+
+    d, out = case
+    code = ("import os, sys, pathlib; out = pathlib.Path(sys.argv[1])\n"
+            "home = os.environ.get('PYTHONHOME', '')\n"
+            "for n in (1, 2, 3):\n"
+            "    (out / f'{n:04d}.txt').write_text(home, encoding='utf-8')\n")
+    S.read_case(_Plan(d, out, code))
+    assert (out / "0001.txt").read_text(encoding="utf-8") == ""
+
+
+ONUK = ("import subprocess, sys, pathlib\n"
+        "out = pathlib.Path(sys.argv[1])\n"
+        "(out / '0001.txt').write_text('x', encoding='utf-8')\n"
+        "kid = subprocess.Popen([sys.executable, '-c', "
+        "'import os, sys, time, pathlib; "
+        "pathlib.Path(sys.argv[1], \"onuk.pid\").write_text(str(os.getpid())); "
+        "[(print(\"page\", flush=True), time.sleep(0.2)) for _ in range(3000)]', "
+        "str(out)])\n"
+        "kid.wait()\n")
+
+
+def test_zupynka_hasyt_i_robochyi_protses_ranera(case, monkeypatch: pytest.MonkeyPatch) -> None:
+    """🔴 Раннер читає руками свого робочого процесу. Погасивши лише батька,
+    «зупинити зараз» дочитувало справу до кінця: онук тримав канал виводу й
+    карту (живий прогін 30.09.2026)."""
+    import time
+
+    psutil = pytest.importorskip("psutil")
+    monkeypatch.setattr(S, "STOP_POLL_SEC", 0.1)
+    d, out = case
+    t0 = time.monotonic()
+    got = S.read_case(_Plan(d, out, ONUK),
+                      should_stop=lambda: (out / "onuk.pid").exists())
+
+    assert got.stopped and time.monotonic() - t0 < 60, "онук читав далі"
+    pid = int((out / "onuk.pid").read_text())
+    time.sleep(0.5)
+    assert not psutil.pid_exists(pid) or psutil.Process(pid).status() == "zombie"
+

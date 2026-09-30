@@ -62,11 +62,35 @@ class EnvReport:
     problems: tuple[str, ...] = ()
 
 
+#: Змінні, якими батьківський Python каже дитині, ДЕ її стандартна бібліотека.
+#: Для чужого інтерпретатора вони брехня.
+_PARENT_PYTHON_VARS = ("PYTHONHOME", "PYTHONPATH", "PYTHONSTARTUP", "PYTHONEXECUTABLE",
+                       "__PYVENV_LAUNCHER__", "VIRTUAL_ENV", "UV_INTERNAL__PYTHONHOME")
+
+
+def foreign_env(extra: dict[str, str] | None = None) -> dict[str, str]:
+    """Оточення для процесу в ІНШОМУ інтерпретаторі — середовищі рушіїв.
+
+    🔴 `uv run` ставить `PYTHONHOME` на свій Python, і дитина його успадковує.
+    Інтерпретатор рушіїв іншої версії (3.11 проти 3.13) тоді бере чужу
+    стандартну бібліотеку й падає ще на `import re` («SRE module mismatch»).
+    Назовні це виглядало як «середовище рушіїв не готове (бракує: kraken…)» —
+    при тому, що все стояло (знайдено живим прогоном черги 30.09.2026).
+    """
+    import os
+
+    env = {k: v for k, v in os.environ.items() if k not in _PARENT_PYTHON_VARS}
+    env.setdefault("PYTHONIOENCODING", "utf-8")
+    env.update(extra or {})
+    return env
+
+
 def _probe(py: Path, code: str, timeout: int = 120) -> str | None:
     """Виконати рядок у чужому інтерпретаторі; None — якщо не вийшло."""
     try:
         r = subprocess.run([str(py), "-c", code], capture_output=True, text=True,
-                           timeout=timeout, encoding="utf-8", errors="replace")
+                           timeout=timeout, encoding="utf-8", errors="replace",
+                           env=foreign_env())
     except (OSError, subprocess.SubprocessError):
         return None
     return r.stdout.strip() if r.returncode == 0 else None

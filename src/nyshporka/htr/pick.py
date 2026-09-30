@@ -114,19 +114,25 @@ def guess_script_for_dir(case_dir: str | Path, hint: str = "") -> ScriptGuess:
     if hint in ("latin", "cyrillic", "mixed"):
         return ScriptGuess(hint, "письмо вказали ви", "fixed")
 
+    # ARCHIUM кладе кадри в `pages/`, а опис справи — на рівень вище. Питати
+    # саму `pages` означало «опису немає» для кожної такої справи (знайдено
+    # живим прогоном черги 30.09.2026).
+    d = Path(str(case_dir))
+    teky = [d, d.parent] if d.name.lower() == "pages" else [d]
     info: dict[str, Any] | None = None
-    try:
-        from nyshporka.library import describe_case
+    for teka in teky:
+        try:
+            from nyshporka.library import describe_case
 
-        info = describe_case(str(case_dir))
-    except Exception:
-        info = None
-    if info:
-        got = guess_script(info)
-        if got.trust != "unknown":
-            return got
+            info = describe_case(str(teka))
+        except Exception:
+            info = None
+        if info:
+            got = guess_script(info)
+            if got.trust != "unknown":
+                return got
 
-    name = Path(str(case_dir)).name.lower()
+    name = teky[-1].name.lower()
     if any(k in name for k in ("kostel", "parafial", "notar", "f792", "latin",
                                "oblat", "grod")):
         return ScriptGuess("latin", f"з імені теки «{name}» — і це лише здогад",

@@ -10,6 +10,7 @@
 """
 from __future__ import annotations
 
+import contextlib
 import queue
 import subprocess
 import threading
@@ -85,13 +86,10 @@ def read_case(plan: Any, *, case_key: str = "", workers: int = 1, device: str = 
     plan.out_dir.mkdir(parents=True, exist_ok=True)
 
     # Кілька процесів ділять ядра: без цього кожен бере під BLAS усі.
-    env: dict[str, str] | None = None
-    if len(cmds) > 1:
-        import os
+    from nyshporka.htr.env import foreign_env
+    from nyshporka.htr.run import shard_env
 
-        from nyshporka.htr.run import shard_env
-
-        env = {**os.environ, **shard_env(len(cmds))}
+    env = foreign_env(shard_env(len(cmds)) if len(cmds) > 1 else None)
     lines: queue.Queue[str | None] = queue.Queue()
     procs: list[Any] = []
     stopped = False
@@ -149,11 +147,48 @@ def _pump(proc: Any, lines: queue.Queue[str | None]) -> None:
 
 
 def _terminate(proc: Any) -> None:
-    """Попросити, зачекати, вбити. Прочитані сторінки вже на диску."""
+    """Погасити раннер разом із його дітьми. Прочитані сторінки вже на диску."""
     if proc.poll() is not None:
         return
-    proc.terminate()
+    kill_tree(int(proc.pid))
     try:
         proc.wait(timeout=KILL_AFTER_SEC)
     except subprocess.TimeoutExpired:
         proc.kill()
+
+
+def kill_tree(pid: int, grace: float = KILL_AFTER_SEC) -> None:
+    """Погасити процес і ВСІХ його нащадків: попросити, зачекати, вбити.
+
+    🔴 Раннер читає не сам: його наглядач (`--supervise`) запускає робочий
+    процес, а той тримає карту й пише в той самий канал виводу. `terminate()`
+    гасив лише наглядача — робочий читав далі, канал не закривався, і
+    «зупинити зараз» дочитувало справу до кінця (знайдено живим прогоном
+    черги 30.09.2026: після зупинки прочитано ще 23 сторінки).
+    """
+    import os
+
+    try:
+        import psutil
+    except ImportError:
+        psutil = None  # type: ignore[assignment]
+    if psutil is not None:
+        try:
+            root = psutil.Process(pid)
+            family = [*root.children(recursive=True), root]
+        except psutil.Error:
+            return
+        for p in family:
+            with contextlib.suppress(psutil.Error):
+                p.terminate()
+        _gone, alive = psutil.wait_procs(family, timeout=grace)
+        for p in alive:
+            with contextlib.suppress(psutil.Error):
+                p.kill()
+        return
+    if os.name == "nt":
+        subprocess.run(["taskkill", "/T", "/F", "/PID", str(pid)],
+                       capture_output=True, check=False)
+        return
+    with contextlib.suppress(OSError):
+        os.kill(pid, 9)
