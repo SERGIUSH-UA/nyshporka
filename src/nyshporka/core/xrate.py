@@ -48,6 +48,7 @@ N-го попереднього, тож у будь-якому вікні три
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import sys
@@ -136,13 +137,21 @@ def _locked(path: Path, timeout: float = 300.0) -> Iterator[None]:
     path.parent.mkdir(parents=True, exist_ok=True)
     # ⚠ Без `with` навмисно: файл мусить лишатись відкритим, доки триває лок,
     # тобто до виходу з цього менеджера; закриває його `finally` нижче.
-    fh = open(path, "a+b")  # noqa: SIM115
+    # Без буфера: запис першого байта мусить або статись, або відмовити ОДРАЗУ,
+    # а не лишитись у буфері й вистрілити на `close()`.
+    fh = open(path, "a+b", buffering=0)  # noqa: SIM115
     try:
         # У msvcrt локується діапазон байтів, тож у файлі має бути що локувати:
         # на порожньому файлі lock проходить у всіх одночасно й нічого не боронить.
         if os.fstat(fh.fileno()).st_size == 0:
-            fh.write(b"L")
-            fh.flush()
+            # 🔴 Перший байт пишуть наввипередки: два процеси бачать порожній
+            # файл, один устигає записати й узяти лок — і запис другого в той
+            # самий, уже залочений, байт Windows відбиває як `PermissionError`.
+            # Це не збій, а знак, що байт уже є: далі звичайне чекання на лок.
+            # Доти три шарди, що стартували разом, падали на цьому раз на
+            # чотири запуски.
+            with contextlib.suppress(OSError):
+                fh.write(b"L")
         fh.seek(0)
         deadline = time.monotonic() + timeout
         delay = 0.005
