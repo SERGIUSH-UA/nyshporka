@@ -287,3 +287,41 @@ def test_ordered_case_with_broken_passport_is_reported(space: Path) -> None:
     assert "data/raw/daoo/spr-2/_source.json" in paths, got
     assert "data/raw/daoo/spr-3/_source.json" in paths, got
     assert any(r.path == "data/raw/daoo/spr-1" and r.state == "ordered" for r in rows)
+
+
+def test_offloaded_case_is_archived_not_ordered(space: Path) -> None:
+    """Справа, чиї кадри знято після звірки з копією, — `archived`, а не «замовлено».
+
+    30.09.2026 після вивантаження ANRM на Drive 154 справи стали `ordered`:
+    паспорт є, кадрів немає — реєстр читав це як «ще не завантажено».
+    Позначка буває і в теці справи, і на рівень нижче (`pages/`).
+    """
+    from nyshporka.cases.collect import collect_rows
+
+    raw = space / "data" / "raw" / "daoo"
+    restore = 'rclone copy "gdrive:scans-archive/raw/daoo/spr-1" "E:/x/spr-1"'
+    cases = (
+        ("spr-1", "", {"restore": restore, "drive_path": "scans-archive/raw/daoo/spr-1"}, {}),
+        ("spr-2", "pages", {"drive_path": "scans-archive/raw/daoo/spr-2/pages"}, {}),
+        ("spr-3", None, None, {}),
+        ("spr-4", None, None, {"commons_url": "https://commons.wikimedia.org/wiki/File:X.pdf",
+                               "purged_commons_verified": {"date": "2026-09-27"}}),
+    )
+    for name, marker_in, marker, extra in cases:
+        d = raw / name
+        d.mkdir(parents=True)
+        (d / "_source.json").write_text(json.dumps(
+            {"shifra": f"ДАОО 37-1-{name[-1]}", "title": "Метрична книга", **extra},
+            ensure_ascii=False), encoding="utf-8")
+        if marker_in is not None:
+            (d / marker_in).mkdir(exist_ok=True)
+            (d / marker_in / "_offloaded.json").write_text(json.dumps(marker), encoding="utf-8")
+    _library()
+    rows, _ = collect_rows()
+    got = {r.path: (r.state, r.archived_to) for r in rows}
+    assert got["data/raw/daoo/spr-1"] == ("archived", restore)
+    assert got["data/raw/daoo/spr-2"] == ("archived",
+                                          "Google Drive: scans-archive/raw/daoo/spr-2/pages")
+    assert got["data/raw/daoo/spr-3"] == ("ordered", "")
+    assert got["data/raw/daoo/spr-4"] == (
+        "archived", "Wikimedia Commons: https://commons.wikimedia.org/wiki/File:X.pdf")

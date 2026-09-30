@@ -103,7 +103,7 @@ def cmd_build(
 def cmd_list(
     q: str = typer.Option("", "--q", help="Підрядок: шифра, назва, місце, шлях"),
     repo: str = typer.Option("", "--repo", help="Архів: DAHMO / DAVO / ANRM …"),
-    state: str = typer.Option("", "--state", help="ordered | partial | on_disk"),
+    state: str = typer.Option("", "--state", help="ordered | archived | partial | on_disk"),
     htr: str = typer.Option("", "--htr", help="none | partial | pysar | diak | both"),
     fuzzy: str = typer.Option("", "--fuzzy", help="none | scanned | swept | reviewed"),
     year: str = typer.Option("", "--year", help="Рік або діапазон: 1846 / 1840-1860"),
@@ -200,6 +200,10 @@ def cmd_show(
     console.print(f"  диск: {r.get('state')} · кадрів {r.get('frames')} · {r.get('path') or '—'}")
     if r.get("extra_paths"):
         console.print(f"        + {len(r['extra_paths'])} додаткових тек")
+    if r.get("state") == "archived":
+        # rich-розмітку не пускаємо: у команді відновлення бувають `[`
+        console.print("  кадри на копії: " + (r.get("archived_to")
+                      or "[err]куди знято — не записано[/err]"), markup=not r.get("archived_to"))
     voices = []
     for voice, label in (("pysar", "Писар"), ("diak", "Дяк"), ("skryba", "Скриба")):
         if r.get(f"htr_{voice}"):
@@ -332,6 +336,7 @@ def cmd_stats(as_json: bool = typer.Option(False, "--json", help="машинни
     console.print(f"  справ: {s['cases']} · кадрів на диску: {s['frames']:,}"
                   .replace(",", " "))
     console.print(f"  замовлено (картка без кадрів): {s['ordered']} · "
+                  f"архівовано (кадри на копії): {s.get('archived', 0)} · "
                   f"декод обірвано: {s['partial']}")
     console.print(f"  без декоду: {s['htr_none']} справ / "
                   f"{s['htr_frames_left']:,} кадрів".replace(",", " "))

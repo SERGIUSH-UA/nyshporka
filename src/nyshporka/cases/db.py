@@ -37,6 +37,7 @@ CREATE TABLE cases (
     guberniya TEXT, place_id TEXT, geo_blob TEXT,
     parish TEXT, script TEXT, desc_source TEXT,
     path TEXT, extra_paths TEXT, state TEXT, frames INTEGER, expected INTEGER,
+    archived_to TEXT,
     htr_pysar INTEGER, htr_pysar_model TEXT, htr_pysar_pages INTEGER,
     htr_diak INTEGER, htr_diak_model TEXT, htr_diak_pages INTEGER,
     htr_skryba INTEGER, htr_skryba_model TEXT, htr_skryba_pages INTEGER,
@@ -561,6 +562,7 @@ def stats(db_path: Path | None = None) -> dict[str, Any]:
             "cases": one(f"SELECT count(*) FROM cases {c}"),
             "frames": one(f"SELECT coalesce(sum(frames), 0) FROM cases {c}"),
             "ordered": one(f"SELECT count(*) FROM cases {c} AND state = 'ordered'"),
+            "archived": one(f"SELECT count(*) FROM cases {c} AND state = 'archived'"),
             "partial": one(f"SELECT count(*) FROM cases {c} AND state = 'partial'"),
             "htr_none": one(f"SELECT count(*) FROM cases {c} AND htr_stage = 'none'"),
             "htr_frames_left": one(

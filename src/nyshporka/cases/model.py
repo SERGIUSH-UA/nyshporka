@@ -11,7 +11,10 @@ from dataclasses import dataclass, field
 #: Стан матеріалу на диску. `ordered` — картка справи (`_source.json`) без жодного
 #: кадру: справу знайдено й описано, але не завантажено. Такі теки не потрапляли
 #: в бібліотеку взагалі (вона вимагає зображень), тож «замовлене» було невидиме.
-STATES = ("ordered", "partial", "on_disk")
+#: `archived` — кадри були, але їх знято з диска після звірки з копією (Google
+#: Drive тощо); у теці лишились паспорт і позначка `_offloaded.json` з командою
+#: повернення. Без окремого стану така справа читалась би як «ще не завантажено».
+STATES = ("ordered", "archived", "partial", "on_disk")
 
 #: Три голоси HTR за іменем моделі. Письмо каже префікс, не розширення:
 #: `skryba_*.mlmodel` — латинка, `diak_*.mlmodel` — кирилиця, обидва kraken.
@@ -75,6 +78,10 @@ class CaseRow:
     state: str = "ordered"
     frames: int = 0
     expected: int | None = None    # скільки кадрів обіцяє сайдкар (`frames`)
+    #: Для `archived`: де лежить копія й як повернути кадри — команда `restore`
+    #: з `_offloaded.json` або адреса Commons із паспорта. Порожньо при
+    #: `archived` означає «кадри зняли, а куди — не записали»: це вада, не норма.
+    archived_to: str = ""
 
     # ── HTR (reports/htr/*/_htr_meta.json) ──────────────────────────────────
     htr_pysar: bool = False

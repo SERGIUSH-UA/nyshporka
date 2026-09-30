@@ -236,6 +236,69 @@ def _ordered_cases(index: LibraryIndex,
     return out
 
 
+#: Позначка вивантаження: кадри знято після звірки з копією, паспорт лишився.
+OFFLOAD_MARKER = "_offloaded.json"
+#: Поле паспорта, яке ставить чистка «копія живе на Wikimedia Commons».
+COMMONS_PURGE_FIELD = "purged_commons_verified"
+
+
+def _read_json(p: Path) -> dict[str, Any]:
+    try:
+        d = json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    return d if isinstance(d, dict) else {}
+
+
+def _where_from_marker(marker: Path) -> str:
+    m = _read_json(marker)
+    if m.get("restore"):
+        return str(m["restore"])
+    if m.get("drive_path"):
+        return f"Google Drive: {m['drive_path']}"
+    return ""
+
+
+def _where_from_passport(d: Path) -> str | None:
+    """Адреса Commons із паспорта, якщо кадри знято під чистку «є на Commons».
+    None — паспорт такої позначки не має."""
+    for name in ("_source.json", "source.json"):
+        meta = _read_json(d / name)
+        if COMMONS_PURGE_FIELD in meta:
+            url = next((str(meta[k]) for k in ("commons_url", "commons_file", "url")
+                        if meta.get(k) and "commons" in str(meta[k]).lower()), "")
+            return f"Wikimedia Commons: {url}" if url else "Wikimedia Commons"
+    return None
+
+
+def _archived(paths: list[str | None]) -> str | None:
+    """Де копія кадрів справи, якщо їх знято з диска; None — не знімали.
+
+    Ознаки дві: позначка `_offloaded.json` у теці справи або на рівень нижче
+    (`pages/`, плівки) і поле `purged_commons_verified` у паспорті. Питається
+    лише для справ без кадрів, тож обхід дешевий: кілька сотень тек, а не
+    дерево `data/raw`. Повертає рядок відновлення; порожній рядок — ознака є,
+    а куди поклали, не записано.
+    """
+    for rel in paths:
+        if not rel:
+            continue
+        d = ROOT / rel
+        if not d.is_dir():
+            continue
+        try:
+            subs = [p for p in d.iterdir() if p.is_dir()]
+        except OSError:
+            subs = []
+        for marker in [d / OFFLOAD_MARKER, *(s / OFFLOAD_MARKER for s in subs)]:
+            if marker.is_file():
+                return _where_from_marker(marker)
+        where = _where_from_passport(d)
+        if where is not None:
+            return where
+    return None
+
+
 #: rel-шлях (normcase) → кадрів. Заповнюється зі спільного обходу; шляхи поза
 #: `data/raw` (архівний том, оголошений корінь) сюди не потрапляють і рахуються
 #: прямим читанням теки.
@@ -967,6 +1030,11 @@ def collect_rows(index: LibraryIndex | None = None, *,
             paths: list[str | None] = [row.path, *row.extra_paths]
             frames_known = not _frames_uncertain(paths)
             row.frames = max(row.frames, _best_frames(paths))
+        if not row.frames and row.state == "ordered":
+            where = _archived([row.path, *row.extra_paths])
+            if where is not None:
+                row.state = "archived"
+                row.archived_to = where
         if row.frames and row.htr_pages_max and row.htr_pages_max < row.frames * _COVERAGE_OK:
             row.state = "partial"
         row.htr_stage = _htr_stage(row, frames_known)
