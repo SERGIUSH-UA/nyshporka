@@ -147,6 +147,10 @@ def choose_voices(dirs: list[Path], key: str, *,
             skipped.append({"run": d.name, "why": "чужий прийнятий прогін — його "
                                                   "віддає автор, не ви"})
             continue
+        if meta.get("superseded"):
+            skipped.append({"run": d.name, "why": "прогін збірної теки, розкладеної "
+                                                  "на справи"})
+            continue
         if meta.get("control_run"):
             skipped.append({"run": d.name, "why": "вимірювальний прогін "
                                                   "(control_run), а не прочитання"})

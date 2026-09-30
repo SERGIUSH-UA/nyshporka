@@ -754,6 +754,23 @@ def _sidecar_village(rel: str | None) -> str:
         return ""
 
 
+def split_into(rel: str) -> list[str]:
+    """Ключі справ, на які теку розкладено (`nysh cases split`); порожньо — не розкладено.
+
+    🔴 Без цього розкладена тека лишалась би записом під ключем першої справи,
+    а нова тека тієї справи стала б її «другим ракурсом»: кадрів у справі —
+    як у всій збірці, і вона вічно «прочитана частково».
+    """
+    f = ROOT / rel / "_source.json"
+    if not f.is_file():
+        return []
+    try:
+        got = json.loads(f.read_text(encoding="utf-8")).get("split_into")
+    except Exception:
+        return []
+    return [str(k) for k in got] if isinstance(got, list) else []
+
+
 @lru_cache(maxsize=4096)
 def _sidecar_case(rel: str) -> tuple[str, str, str | None, str] | None:
     """(repo, fond, opys, spr) з `_source.json`/`meta.json` теки — коли ім'я мовчить."""
@@ -1833,6 +1850,10 @@ def build_library() -> list[CaseEntry]:
 
     # 3) теки сканів на диску
     for rel, imgs, pdfs in _scan_disk_cases():
+        if split_into(rel):
+            # Збірну теку розкладено на справи: її кадри тепер рахуються в
+            # теках частин, а сама вона справою не є (`cases.split`).
+            continue
         frames = imgs or pdfs
         entry = by_raw.get(rel)
         parsed = parse_case_path(rel)

@@ -44,6 +44,7 @@ from nyshporka.library import (
     opys_conflict,
     parse_source_id,
     skip_slugs,
+    split_into,
 )
 
 HTR_ROOT = ROOT / "reports" / "htr"
@@ -155,6 +156,10 @@ def _iter_htr_runs(unreadable: list[Unreadable] | None = None,
             continue
         if not isinstance(meta, dict):
             _note_unreadable(unreadable, meta_path, "мета не є JSON-об'єктом")
+            continue
+        if meta.get("superseded"):
+            # Прогін збірної теки, розкладеної на справи: його сторінки вже
+            # лежать прогонами частин, і порахований ще раз він подвоїв би їх.
             continue
         yield meta_path.parent.name, meta
 
@@ -360,6 +365,8 @@ def _unfiled_material(index: LibraryIndex, known: set[str],
             continue
         if any(rel.startswith(k + "/") for k in known):
             continue                      # підтека вже врахованої справи/збірки
+        if split_into(rel):
+            continue                      # розкладено на справи — кадри враховані там
         # Сторінки PDF, а не число файлів — та сама міра, що й у справ
         # (аудит 29.09.2026).
         frames = (_material_frames(scan.n_frames, list(scan.pdf_paths))[0]

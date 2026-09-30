@@ -549,12 +549,20 @@ def list_cases() -> list[dict[str, Any]]:
             continue
         hit = entries.get(name)
         if hit and hit.get("stamp") == mstamp and isinstance(hit.get("row"), dict):
-            out.append(dict(hit["row"]))
+            if not hit["row"].get("superseded"):
+                out.append(dict(hit["row"]))
             continue
         changed = True
         meta = load_meta(name)
         if not meta:
             entries.pop(name, None)
+            continue
+        if meta.get("superseded"):
+            # 🔴 Прогін збірної теки, розкладеної на справи (`cases.split`): його
+            # сторінки лежать прогонами частин. У переліку він дав би кожен
+            # хіт пошуку двічі й перекрив би знаменник справи. Відсів тут — від
+            # нього успадковують пошук, віддача, пара голосів і покриття.
+            entries[name] = {"stamp": mstamp, "row": {"name": name, "superseded": True}}
             continue
         case = None
         # Шифра — прикраса переліку: прогін без розв'язаної справи лишається

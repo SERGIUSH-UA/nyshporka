@@ -577,6 +577,41 @@ def add_records(ref: CaseRef, records: list[Record], replace: bool = False) -> M
     return report
 
 
+def move_pages(src: CaseRef, dst: CaseRef, scans: list[str]) -> dict[str, int]:
+    """Перенести нотатки й записи названих кадрів з однієї справи в іншу.
+
+    Потрібне розбивці збірної теки: нотатки всіх її справ лежали у файлі
+    першої. 🔴 Спершу запис у нову справу, потім прибирання зі старої — обрив
+    між ними лишає дубль, який повтор зведе, а не втрату.
+
+    Запис переходить, лише коли ВСІ його кадри названо: запис через межу
+    справ лишається, де був, і це видно у звіті розбивки числом.
+    """
+    want = {str(s).casefold() for s in scans}
+    sp, dp = case_path(src), case_path(dst)
+    if not want or not sp.is_file() or sp == dp:
+        return {"pages": 0, "records": 0}
+    cf = load_case(src)
+    if cf is None:
+        return {"pages": 0, "records": 0}
+    notes = [n for k, n in cf.pages.items() if k.casefold() in want]
+    recs = [r for r in cf.records
+            if r.scans and all(s.casefold() in want for s in r.scans)]
+    if not notes and not recs:
+        return {"pages": 0, "records": 0}
+    if notes:
+        annotate_pages(dst, notes)
+    if recs:
+        add_records(dst, recs)
+    rids = {r.rid for r in recs}
+    with _lock(sp):
+        cf = load_case(src) or cf
+        cf.pages = {k: n for k, n in cf.pages.items() if k.casefold() not in want}
+        cf.records = [r for r in cf.records if r.rid not in rids]
+        _write(sp, cf)
+    return {"pages": len(notes), "records": len(recs)}
+
+
 # ── статус: «чи рендерити цю сторінку?» ──────────────────────────────────────
 def _disk_scans(ref: CaseRef) -> list[str]:
     if not ref.path:

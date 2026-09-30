@@ -91,6 +91,8 @@ def in_name(name: str) -> Span | None:
 
 def of_passport(meta: dict[str, Any], *names: str) -> Span | None:
     """Діапазон теки за її паспортом і іменами, під якими вона ходить."""
+    if meta.get("split_into"):
+        return None             # уже розкладено на справи
     got = in_shifra(str(meta.get("shifra") or ""))
     if got is not None:
         return got
@@ -122,5 +124,6 @@ def of_dir(case_dir: Path, *names: str) -> Span | None:
 
 def fix(path: str) -> str:
     """Що робити зі збірною текою."""
-    return (f'розкладіть кадри по теках справ і заведіть кожну своєю шифрою; '
+    return (f'розкласти на справи: nysh cases split "{path}" --dry-run '
+            f'--part "<справа>=<перший файл>..<останній файл>" …; '
             f'якщо це одна справа: nysh case "{path}" --one-case')

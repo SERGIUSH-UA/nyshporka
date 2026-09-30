@@ -1651,6 +1651,56 @@ def cases_list_cmd(
                       f"{'; '.join(env.stale.reasons[:2])} — nysh cases build[/muted]")
 
 
+@cases_app.command("split")
+def cases_split_cmd(
+    case_dir: str = typer.Argument(..., help="збірна тека — кадри кількох справ"),
+    part: list[str] = typer.Option(
+        [], "--part",
+        help="«<справа>=<перший файл>..<останній файл>»; кадри поза справами — «-=…»"),
+    map_file: str = typer.Option("", "--map", help="файл карти JSON замість --part"),
+    dry: bool = typer.Option(False, "--dry-run", help="лише показати, що буде зроблено"),
+    copy: bool = typer.Option(False, "--copy",
+                              help="копіювати кадри, якщо жорстке посилання не створюється"),
+    undo: bool = typer.Option(False, "--undo", help="зняти розбивку цієї теки"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
+) -> None:
+    """Розкласти збірну теку на справи.
+
+    Межі справ називаєте ви — іменами файлів. Нічого не видаляється: теки
+    справ — жорсткі посилання на ті самі кадри, стара тека лишається.
+    """
+    from rich.markup import escape as _e
+
+    from nyshporka import ops as O
+    from nyshporka.cli_emit import answer, notes
+
+    env = O.call("cases.split", {"case_dir": case_dir, "parts": part, "map_file": map_file,
+                                 "dry_run": dry, "copy_frames": copy, "undo": undo})
+    if answer(env, as_json):
+        return
+    d = env.data or {}
+    if undo:
+        console.print(f"розбивку знято: {_e(str(d.get('case_dir')))} · прибрано "
+                      f"прогонів: {len(d.get('runs_removed') or [])}")
+        for row in d.get("kept") or []:
+            console.print(f"  [warn]{_e(row)}[/warn]")
+        notes(env)
+        return
+    console.print(f"[bold]{_e(str(d.get('case_dir')))}[/bold] — {d.get('frames')} кадрів"
+                  + (" · проба, нічого не змінено" if d.get("dry_run") else " · розкладено"))
+    for p in d.get("parts") or []:
+        name = p["shifra"] or "поза справами"
+        console.print(f"  {_e(name):<26} кадри {p['from']}–{p['to']} "
+                      f"({p['frames']}): {_e(p['first'])} … {_e(p['last'])}")
+        if p.get("dir"):
+            console.print(f"    [muted]→ {_e(p['dir'])}"
+                          + (f" · нотаток сторінок: {p['notes']}" if p.get("notes") else "")
+                          + "[/muted]")
+        for old, new in (p.get("runs") or {}).items():
+            console.print(f"    [muted]прогін {_e(old)} → {_e(new)}[/muted]")
+    notes(env)
+
+
 @cases_app.command("chain")
 def cases_chain_cmd(
     show_all: bool = typer.Option(False, "--all",

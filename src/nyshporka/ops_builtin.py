@@ -2437,6 +2437,61 @@ def cases_bind(a: BindArgs) -> Envelope:
     return env
 
 
+class CasesSplitArgs(BaseModel):
+    case_dir: str = Field(description="збірна тека — кадри кількох справ")
+    parts: list[str] = Field(
+        default_factory=list,
+        description="частини: «<справа>=<перший файл>..<останній файл>», справа — "
+                    "номер у тому самому описі або повна шифра; кадри поза "
+                    "справами — «-=…»")
+    map_file: str = Field(default="", description="файл карти JSON замість parts: "
+                                                  "[{\"spr\", \"first\", \"last\"}, …]")
+    dry_run: bool = Field(default=False, description="лише показати, що буде зроблено")
+    copy_frames: bool = Field(
+        default=False,
+        description="копіювати кадри, якщо жорстке посилання не створюється (інший "
+                    "том): місце на диску подвоїться")
+    undo: bool = Field(default=False, description="зняти розбивку цієї теки")
+
+
+@op("cases.split", summary="Розкласти збірну теку на справи",
+    args=CasesSplitArgs, mutates=True, agent=False)
+def cases_split(a: CasesSplitArgs) -> Envelope:
+    """Зробити з теки, де кадри кількох справ, кілька справ — кожну зі своєю
+    текою, паспортом, прогонами й нотатками.
+
+    🔴 Межі справ називає людина — іменами файлів. Машина їх не вгадує: текст,
+    покладений під сусідню справу, гірший за збірну теку.
+
+    Нічого не видаляється: теки частин — жорсткі посилання на ті самі файли,
+    стара тека й старий прогін лишаються з позначкою. Зняти — `undo`.
+    """
+    from nyshporka.cases import split as SPL
+    from nyshporka.core.workspace import workspace
+
+    try:
+        if a.undo:
+            return ok(SPL.undo(a.case_dir))
+        specs = ([SPL.parse_part(p) for p in a.parts] if a.parts
+                 else SPL.load_map(a.map_file) if a.map_file else [])
+        if a.dry_run:
+            pl = SPL.plan(a.case_dir, specs)
+            env = ok({**pl.as_json(workspace().root), "dry_run": True})
+            for code, text in pl.warnings:
+                env.warn(code, text)
+            return env
+        pl = SPL.plan(a.case_dir, specs)
+        got = SPL.split(a.case_dir, specs, copy=a.copy_frames)
+    except SPL.SplitError as exc:
+        return fail(str(exc))
+    env = ok(got)
+    for code, text in pl.warnings:
+        env.warn(code, text)
+    for note in (got.get("index") or {}).get("notes") or []:
+        env.warn("index", note)
+    return env
+
+
 class CasesChainArgs(BaseModel):
     all: bool = Field(default=False,
                       description="показати й теки без обриву: не читані, "

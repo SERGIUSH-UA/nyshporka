@@ -29,6 +29,7 @@ LOADER_ONLY = "loader_only"          # є паспорт завантаженн�
 NO_PASSPORT = "no_passport"          # кадри є, шифри взяти нізвідки
 NOT_IN_LIBRARY = "not_in_library"    # шифра є, каталог справ зібрано раніше
 BUNDLE_FOLDER = "bundle_folder"      # у теці кадри кількох справ
+SPLIT = "split"                      # збірну теку розкладено на справи
 ORPHAN_RUN = "orphan_run"            # прогін без справи
 
 #: Стани, що обривом не є: справа в обліку, питання лише в читанні.
@@ -43,6 +44,7 @@ BREAKS = (OUTSIDE_ROOTS, BUNDLE_FOLDER, LOADER_ONLY, NO_PASSPORT, NOT_IN_LIBRARY
 NAZVY = {
     OUTSIDE_ROOTS: "тека поза коренями справ",
     BUNDLE_FOLDER: "збірна тека: кадри кількох справ",
+    SPLIT: "розкладено на справи",
     LOADER_ONLY: "є паспорт завантаження, справу не зареєстровано",
     NO_PASSPORT: "кадри без шифри справи",
     NOT_IN_LIBRARY: "шифра є, у каталозі справ теки немає",
@@ -175,6 +177,10 @@ def judge(case_dir: Path, *, frames: int = 0,
     # кількох книг під шифрою однієї.
     from nyshporka.cases import span as SP
 
+    if meta.get("split_into"):
+        return mk(link=SPLIT,
+                  why="теку розкладено на справи: "
+                      + ", ".join(str(k) for k in meta["split_into"]))
     zbirna = SP.of_passport(meta, abs_dir.name,
                             abs_dir.parent.name if abs_dir.name == "pages" else "")
     if zbirna is not None:
