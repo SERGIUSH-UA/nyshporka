@@ -1322,6 +1322,18 @@ def _bookkeeping(run_name: str) -> list[str]:
         if not env.ok:
             notes.append(f"індекс тексту не догнано ({env.error}) — виконайте "
                          f"`nysh text index`")
+        # 🔴 Голоси — сестринські теки `<прогін>-<тег>`, і область «справа за
+        # іменем прогону» їх не дає: Дяк лишався поза пошуком (живий прогін
+        # черги 30.09.2026 — обидві справи без другого голосу в сторі).
+        if run_name:
+            from nyshporka import htr_store as S
+            from nyshporka.cloud.verify import voice_dirs
+            from nyshporka.search import store as ST
+
+            if ST.exists():
+                voices = [d.name for d in voice_dirs(S.HTR_ROOT / run_name)]
+                if voices:
+                    list(ST.ensure_all(voices))
     except Exception as exc:
         notes.append(f"індекс тексту не догнано ({type(exc).__name__}: {exc}) "
                      f"— виконайте `nysh text index`")

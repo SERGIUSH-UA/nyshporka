@@ -171,3 +171,31 @@ def test_zupynka_hasyt_i_robochyi_protses_ranera(case, monkeypatch: pytest.Monke
     time.sleep(0.5)
     assert not psutil.pid_exists(pid) or psutil.Process(pid).status() == "zombie"
 
+
+
+def test_oblik_indeksuie_i_holosy(case, monkeypatch: pytest.MonkeyPatch) -> None:
+    """🔴 Голос Дяка — сестринська тека `<прогін>-diak_v4`. Облік після
+    читання давав у стор лише головну, і другий голос лишався поза пошуком
+    (живий прогін черги 30.09.2026)."""
+    from nyshporka import htr_store as HS
+    from nyshporka import ops as O
+    from nyshporka.cases import db
+    from nyshporka.cloud import go as GO
+    from nyshporka.search import store as ST
+
+    _d, out = case
+    monkeypatch.setattr(HS, "HTR_ROOT", out.parent)
+    (out.parent / "skany-diak_v4").mkdir(parents=True)
+    monkeypatch.setattr(db, "rebuild", lambda **kw: {})
+
+    class _Env:
+        ok = True
+        error = ""
+
+    monkeypatch.setattr(O, "call", lambda name, args: _Env())
+    monkeypatch.setattr(ST, "exists", lambda: True)
+    indexed: list[list[str]] = []
+    monkeypatch.setattr(ST, "ensure_all", lambda runs, **kw: indexed.append(list(runs)) or iter(()))
+
+    assert GO._bookkeeping("skany") == []
+    assert indexed == [["skany-diak_v4"]]
