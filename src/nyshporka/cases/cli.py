@@ -767,8 +767,14 @@ def cmd_take(key: str = typer.Argument(..., help="DAHMO/230/43 або DAHMO/230/
         if plan["mirror"]:
             console.print(f"  {plan['mirror']}")
         if plan["film"]:
-            console.print(f"  [muted]nysh browse fsfilm {plan['film']}[/muted]")
-            console.print(f"  [muted]nysh get fsfilm {plan['film']} --out <тека>[/muted]")
+            # 🔴 Дзеркало плівок адресується шляхом у дереві регіону, а не
+            # номером: `nysh get fsfilm <номер>` відповідав «регіону немає».
+            console.print("  [muted]шлях у дзеркалі плівок: nysh browse fsfilm → регіон → тека; "
+                          "далі nysh get fsfilm <регіон>/<шлях> --out <тека>[/muted]")
+            chym = (f"--dgs {plan['dgs']}" if plan.get("dgs")
+                    else f"--film {plan['film']}")
+            console.print(f"  [muted]кадри цієї плівки вже на диску: nysh case <тека> "
+                          f"--shifra \"{label}\" {chym}[/muted]")
         raise typer.Exit(2)
 
     console.print(f"[muted]канал: {plan['channel']} — {plan['why']}[/muted]")

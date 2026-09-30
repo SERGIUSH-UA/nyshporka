@@ -51,7 +51,7 @@ from nyshporka.sources.base import (
     SourceError,
     SourceScope,
 )
-from nyshporka.sources.http import Fetcher, HttpError
+from nyshporka.sources.http import Fetcher, HttpError, TooLarge
 from nyshporka.utils.atomic import atomic_write_bytes
 from nyshporka.utils.fsname import UnsafeName, safe_filename
 
@@ -249,7 +249,10 @@ class FilmMirrorSource:
                 time.time() - cached.stat().st_mtime < SOURCES_TTL:
             self._sources = json.loads(cached.read_text(encoding="utf-8"))
             return self._sources
-        html = self.http.get(SPA_URL).text
+        try:
+            html = self.http.get(SPA_URL).text
+        except HttpError as exc:
+            raise SourceError(_dzerkalo_movchyt("перелік регіонів", exc)) from exc
         self._sources = parse_sources(html)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         cached.write_text(json.dumps(self._sources, ensure_ascii=False),
@@ -274,8 +277,13 @@ class FilmMirrorSource:
             blob.unlink()
         if refresh or not blob.exists():
             src = self.source(slug)
-            buf = io.BytesIO(self.http.get(src["url"],
-                                           max_bytes=MAX_TREE_GZ_BYTES).content)
+            try:
+                buf = io.BytesIO(self.http.get(src["url"],
+                                               max_bytes=MAX_TREE_GZ_BYTES).content)
+            except HttpError as exc:
+                if isinstance(exc, TooLarge):
+                    raise           # завеликий блоб — не мовчання дзеркала, а підкинутий файл
+                raise SourceError(_dzerkalo_movchyt(f"дерево регіону {slug}", exc)) from exc
             self.cache_dir.mkdir(parents=True, exist_ok=True)
             tmp = blob.with_name(blob.name + ".part")
             try:
@@ -544,6 +552,7 @@ class FilmMirrorSource:
                         misses = 0
                     except (HttpError, OSError) as exc:
                         res.errors.append(f"{name}: {exc}")
+                        res.blame(exc)
                         misses += 1
                         if misses >= 10:
                             res.errors.append(
@@ -553,3 +562,17 @@ class FilmMirrorSource:
                 if on_progress:
                     on_progress(done=done, total=total, unit="кадр")
         return res
+
+
+def _dzerkalo_movchyt(shcho: str, exc: Exception) -> str:
+    """Чому дзеркало не віддало перелік чи дерево — словами, з наступним кроком.
+
+    🔴 Це стороннє дзеркало, а не FamilySearch: його відмова нічого не каже про
+    доступність плівки на самому FamilySearch, і плутати їх — закривати
+    напрям, якого не перевіряли.
+    """
+    from nyshporka.sources.base import CAUSE_TEXT, cause_of
+
+    return (f"дзеркало плівок не віддало {shcho}: {CAUSE_TEXT[cause_of(exc)]}. "
+            f"Це стороннє дзеркало, не FamilySearch — про саму плівку його відмова "
+            f"нічого не каже. Перевірити з іншої мережі: NYSHPORKA_PROXY_URL")

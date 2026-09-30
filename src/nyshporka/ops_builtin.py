@@ -2083,6 +2083,47 @@ def page_view(a: ViewArgs) -> Envelope:
     return env
 
 
+def _local_fs_copy(env: Envelope, case_dir: str, sidecar: dict[str, Any]) -> None:
+    """Що лежить у теці, яку назвали локальною копією плівки FamilySearch.
+
+    🔴 Завантажувача з FamilySearch у пакеті немає й не буде — але кадри,
+    скачані людиною раніше, лежать у неї на диску, і взяти їх під облік треба
+    так, щоб було видно, наскільки копія повна й чи впізнають її кадри в
+    чужій зйомці тієї самої плівки (звіт користувача 29.09.2026).
+    """
+    from nyshporka.cases.register import case_path
+    from nyshporka.share import align
+
+    d = case_path(case_dir)
+    teka = align._frames_dir(d) or d
+    frames = align.frames_of(teka)
+    with_apid = sum(1 for f in frames if f.get("apid"))
+    fs_meta = (teka / align.FS_META).is_file()
+    expected = 0
+    try:
+        from nyshporka.fonds.registry import expected_frames
+        from nyshporka.share.opys import registry_row
+
+        row = registry_row(str(sidecar.get("shifra") or ""))
+        expected = int(expected_frames(row) or 0) if row else 0
+    except Exception:
+        expected = 0
+    env.data["local_copy"] = {"dgs": str(sidecar["dgs"]), "frames": len(frames),
+                              "fs_meta": fs_meta, "with_apid": with_apid,
+                              "expected": expected}
+    if not frames:
+        env.warn("no_frames", "у теці немає кадрів — брати під облік нічого")
+    elif expected and len(frames) < expected:
+        env.warn("local_copy_partial",
+                 f"у теці {len(frames)} кадрів, а реєстр опису чекає {expected} — "
+                 f"копія неповна; при віддачі в Супрягу це уривок")
+    if frames and not with_apid:
+        env.warn("no_frame_ids",
+                 "id кадрів FamilySearch у теці немає (`_fs_meta.json`), тож чужий "
+                 "текст тієї самої плівки ляже на ці кадри лише за відбитком "
+                 "зйомки або за іменами файлів")
+
+
 # ── завести справу руками ────────────────────────────────────────────────────
 class CaseRegisterArgs(BaseModel):
     case_dir: str = Field(description="тека зі сканами")
@@ -2109,6 +2150,11 @@ class CaseRegisterArgs(BaseModel):
         default="",
         description="номер плівки (DGS), коли шифру ще не встановлено: тека "
                     "опишеться тим, що відомо, і не вигадуватиме шифри")
+    dgs: str = Field(
+        default="",
+        description="номер групи зображень FamilySearch (DGS), якщо кадри в теці "
+                    "взято з неї — локальна копія, скачана раніше: лягає в "
+                    "паспорт як джерело сканів. «-» — стерти")
     adopt: bool = Field(
         default=False,
         description="взяти теку під облік, якщо вона лежить поза простором: "
@@ -2139,10 +2185,12 @@ def case_register(a: CaseRegisterArgs) -> Envelope:
         out = describe(a.case_dir, shifra=a.shifra, title=a.title,
                        doc_type=a.doc_type, year_from=a.year_from,
                        year_to=a.year_to, place=a.place, note=a.note,
-                       repo_hint=a.repo, film=a.film)
+                       repo_hint=a.repo, film=a.film, dgs=a.dgs)
     except RegisterError as exc:
         return fail(str(exc))
     env = ok({"case_dir": a.case_dir, "sidecar": out})
+    if out.get("dgs") and a.dgs:
+        _local_fs_copy(env, a.case_dir, out)
     # 🔴 Тека поза простором — мовчазна поразка всього подальшого. Опис у ній
     # запишеться, ✅ покажеться, а збірка бібліотеки її не побачить: сканується
     # лише `data/raw` (і оголошені корені справ). Далі кожен крок падав окремо

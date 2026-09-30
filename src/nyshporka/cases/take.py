@@ -106,6 +106,9 @@ def _plan_from(repo: str, fond: str, opys: str, spr: str, letter: str,
         "channel": channel, "ref": archium or name,
         "case_dir": str(case_dir_for(repo, fond, spr, letter)),
         "film": film, "mirror": mirror,
+        # DGS окремо від номера плівки: це різні числа FamilySearch, і порада
+        # «взяти локальну копію під облік» мусить назвати саме те, що є.
+        "dgs": str(row.get("fs_dgs") or "").strip(),
         # 🔴 Номер справи, відновлений інтерполяцією, мусить їхати разом із
         # планом: узяти можна, вірити шифрі — ні, доки її не звірили оком.
         "shifra_needs_eye": row.get("num_src") == "interp",

@@ -208,6 +208,9 @@ def record_fetch(case_dir: Path, res: Any, *, source: str, ref: str, url: str = 
         "frames_new": res.frames, "frames_reused": res.skipped,
         "fetch_errors": list(res.errors[:FETCH_ERRORS_KEPT]),
         "fetch_errors_n": len(res.errors),
+        # Причина → скільки кадрів: «хост лежить» і «кадрів там немає» — різні
+        # відповіді на «чому тека неповна».
+        "fetch_causes": dict(getattr(res, "causes", None) or {}),
         "files": frame_files(case_dir, Path(res.dest), source=source),
     })
     passport.update(extra or {})

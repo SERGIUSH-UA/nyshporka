@@ -430,7 +430,7 @@ def _no_dir_reason(case_dir: str | Path, resolved: Path) -> str:
 def describe(case_dir: str | Path, *, shifra: str = "", title: str = "",
              doc_type: str = "", year_from: int | str | None = None,
              year_to: int | str | None = None, place: str = "", note: str = "",
-             repo_hint: str = "", film: str = "") -> dict[str, Any]:
+             repo_hint: str = "", film: str = "", dgs: str = "") -> dict[str, Any]:
     """Записати або доповнити опис справи в її теці. Повертає готовий сайдкар.
 
     Порожнє поле не затирає наявне: правка одного заголовка не має стирати
@@ -460,6 +460,11 @@ def describe(case_dir: str | Path, *, shifra: str = "", title: str = "",
     elif old.get("shifra"):
         sh = parse_shifra(str(old["shifra"]), repo_hint=repo_hint)
     film = " ".join((film or "").split())
+    dgs = " ".join((dgs or "").split())
+    if dgs and not dgs.isdigit() and not _erase(dgs):
+        raise RegisterError(
+            f"«{dgs}» не номер групи зображень FamilySearch: чекаю лише цифри "
+            f"(DGS, з адреси …/film/<номер>). Номер мікрофільму — це `--film`.")
     if sh is None and not (film or old.get("film")):
         raise RegisterError(
             "у теці ще немає опису, тож потрібна шифра: саме вона робить теку "
@@ -470,6 +475,13 @@ def describe(case_dir: str | Path, *, shifra: str = "", title: str = "",
     out: dict[str, Any] = dict(old)
     if film:
         out["film"] = film
+    # 🔴 DGS і номер мікрофільму — різні числа FamilySearch, і в паспорті вони
+    # окремими полями: за DGS пул склеює зйомки однієї книги, і номер плівки,
+    # записаний на його місце, приписав би теці чужу зйомку.
+    if _erase(dgs):
+        out.pop("dgs", None)
+    elif dgs:
+        out["dgs"] = dgs
     if sh is None:
         # Стан заявлений, а не пропущений: без цього поля наступна сесія читає
         # теку без шифри як «забули описати» й описує її навмання.

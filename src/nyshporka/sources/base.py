@@ -181,6 +181,56 @@ class FetchResult:
     #: бо помилка робить теку неповною й код виходу ненульовим — а тут файл
     #: ліг цілим, просто шукати в ньому регексом не вийде.
     notes: list[str] = field(default_factory=list)
+    #: Чому не взялись кадри — причина → скільки (`cause_of`). 🔴 Окремо від
+    #: текстів `errors`: «кадру там немає», «відмовлено в доступі», «відсікає за
+    #: темпом» і «хост лежить» вимагають різних дій, а з рядка «HTTP 403» це
+    #: мусив вичитувати той, хто щойно поставив застосунок.
+    causes: dict[str, int] = field(default_factory=dict)
+
+    def blame(self, exc: BaseException) -> str:
+        """Записати причину збою одного кадру; повертає її код."""
+        cause = cause_of(exc)
+        self.causes[cause] = self.causes.get(cause, 0) + 1
+        return cause
+
+    def why(self) -> str:
+        """Причини одним рядком для людини — від найчастішої. Порожньо, якщо збоїв не було."""
+        rows = sorted(self.causes.items(), key=lambda kv: -kv[1])
+        return "; ".join(f"{CAUSE_TEXT.get(c, c)} — {n}" for c, n in rows)
+
+
+#: Причини, які джерело справді може відрізнити за відповіддю.
+NOT_FOUND = "not_found"
+DENIED = "denied"
+RATE_LIMITED = "rate_limited"
+HOST_DOWN = "host_down"
+LOCAL = "local"
+OTHER = "other"
+
+CAUSE_TEXT = {
+    NOT_FOUND: "джерело таких кадрів не має (404): адреса застаріла або кадр прибрано",
+    DENIED: "джерело відмовило в доступі (401/403): без входу чи з цієї мережі не віддає",
+    RATE_LIMITED: "джерело відсікає за темпом (429): зачекати й повторити",
+    HOST_DOWN: "хост не відповідає (обрив, тайм-аут, 5xx): лежить або відсік за адресою",
+    LOCAL: "не записалось на диск",
+    OTHER: "інша відмова джерела",
+}
+
+
+def cause_of(exc: BaseException) -> str:
+    """Причина збою завантаження за тим, що відповіло джерело."""
+    status = getattr(exc, "status", None)
+    if isinstance(exc, OSError) and status is None and not hasattr(exc, "body"):
+        return LOCAL
+    if status is None or int(status) >= 500:
+        return HOST_DOWN
+    if int(status) == 404:
+        return NOT_FOUND
+    if int(status) in (401, 403):
+        return DENIED
+    if int(status) == 429:
+        return RATE_LIMITED
+    return OTHER
 
 
 @dataclass(frozen=True)

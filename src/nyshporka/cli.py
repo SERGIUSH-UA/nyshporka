@@ -523,6 +523,10 @@ def get(source: str = typer.Argument(..., help="id джерела"),
 
     # Приймач один на термінал і чергу демона — `sources.base.completeness`.
     _dali_pislia_zavantazhennia(res.dest)
+    if res.causes:
+        from rich.markup import escape as _esc
+
+        console.print(f"[warn]чому не взялось:[/warn] {_esc(res.why())}")
 
     if verdict.state == "unknown":
         # ⚠ Мовчазний «✓» тут був би найгіршим із варіантів: він читається як
@@ -1198,6 +1202,9 @@ def case_cmd(
     note: str = typer.Option("", "--note", help="примітка до справи"),
     film: str = typer.Option("", "--film",
                              help="номер плівки, коли шифру ще не встановлено"),
+    dgs: str = typer.Option("", "--dgs",
+                            help="номер групи зображень FamilySearch (DGS), якщо "
+                                 "кадри в теці — з неї: джерело сканів у паспорті"),
     adopt: bool = typer.Option(False, "--adopt",
                                help="взяти теку під облік, якщо вона лежить "
                                     "поза простором"),
@@ -1220,6 +1227,7 @@ def case_cmd(
     env = O.call("case.register", {
         "case_dir": case_dir, "shifra": shifra, "title": title,
         "doc_type": doc_type, "place": place, "note": note, "film": film,
+        "dgs": dgs,
         "year_from": year_from or None, "year_to": year_to or None,
         "adopt": adopt})
     _answer(env)
@@ -1233,6 +1241,14 @@ def case_cmd(
         console.print(f"   [muted]{sc.get('place') or ''} "
                       f"{sc.get('year_from') or ''}"
                       f"{'-' + str(sc['year_to']) if sc.get('year_to') else ''}[/muted]")
+    kopiia = env.data.get("local_copy") or {}
+    if kopiia:
+        console.print(f"   [muted]локальна копія FamilySearch DGS {kopiia['dgs']}: "
+                      f"кадрів у теці {kopiia['frames']}"
+                      + (f", із id кадру FS — {kopiia['with_apid']}"
+                         if kopiia.get("fs_meta") else ", `_fs_meta.json` немає")
+                      + (f"; реєстр опису чекає {kopiia['expected']}"
+                         if kopiia.get("expected") else "") + "[/muted]")
     _notes(env)
 
 

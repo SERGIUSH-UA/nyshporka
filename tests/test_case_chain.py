@@ -337,3 +337,54 @@ def test_operatsiia_viddaie_znamennyk(space: Path) -> None:
 
     vsi = O.call("cases.chain", {"all": True})
     assert sorted(r["link"] for r in vsi.data["rows"]) == sorted([C.LOADER_ONLY, C.NO_RUN])
+
+
+# ── локальна копія плівки FamilySearch ────────────────────────────────────────
+
+def test_lokalna_kopiia_fs_pid_oblik(space: Path) -> None:
+    """🔴 Кадри, скачані колись, беруться під облік із DGS як джерелом сканів.
+
+    Завантажувача з FamilySearch у пакеті немає, тож інакше такій теці нема як
+    сказати, звідки вона, — і в пакеті обміну вона їхала б без джерела.
+    """
+    import json
+
+    from nyshporka import ops as O
+    from nyshporka.share import align
+    from nyshporka.share import publish as PUB
+
+    d = _kadry(space / "data" / "raw" / "dahmo_315" / "spr-8433", n=3)
+    (d / align.FS_META).write_text(json.dumps({
+        "0001": {"apid": "TH-1-1"}, "0002": {"apid": "TH-1-2"}}), encoding="utf-8")
+
+    env = O.call("case.register", {"case_dir": str(d), "shifra": "ДАХмО 315-1-8433",
+                                   "dgs": "004123456"})
+
+    assert env.ok, env.error
+    assert env.data["sidecar"]["dgs"] == "004123456"
+    assert env.data["local_copy"] == {"dgs": "004123456", "frames": 3, "fs_meta": True,
+                                      "with_apid": 2, "expected": 0}
+    assert {"source": "fs", "ref": "dgs:004123456"}.items() <= PUB._refs_from_sidecar(d)[0].items()
+
+
+def test_lokalna_kopiia_bez_id_kadriv_poperedzhaie(space: Path) -> None:
+    from nyshporka import ops as O
+
+    d = _kadry(space / "data" / "raw" / "dahmo_315" / "spr-8433")
+    env = O.call("case.register", {"case_dir": str(d), "shifra": "ДАХмО 315-1-8433",
+                                   "dgs": "4123456"})
+
+    assert any(w.code == "no_frame_ids" for w in env.warnings)
+    assert env.data["local_copy"]["fs_meta"] is False
+
+
+def test_dgs_lyshe_tsyfry_i_okremo_vid_plivky(space: Path) -> None:
+    """DGS і номер мікрофільму — різні числа: у паспорті вони не зливаються."""
+    d = _kadry(space / "data" / "raw" / "dahmo_315" / "spr-8433")
+
+    with pytest.raises(R.RegisterError, match="--film"):
+        R.describe(d, shifra="ДАХмО 315-1-8433", dgs="film 2102930")
+
+    got = R.describe(d, shifra="ДАХмО 315-1-8433", film="2102930", dgs="5601994")
+    assert (got["film"], got["dgs"]) == ("2102930", "5601994")
+    assert "dgs" not in R.describe(d, dgs="-")

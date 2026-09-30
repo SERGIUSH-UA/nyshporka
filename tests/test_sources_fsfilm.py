@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import shutil
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -327,3 +328,87 @@ def test_blob_z_merezhi_kachaietsia_zi_steleiu(
     with pytest.raises(TooLarge):
         src.tree("moldova")
     assert not blob.exists()
+
+
+# ── чому дзеркало не віддало — причиною, а не рядком «HTTP 403» ───────────────
+
+REF = f"moldova/{PARENT}/2086525"
+
+
+def _z_vidpoviddiu(src: FilmMirrorSource, handler: Any) -> None:
+    import httpx
+
+    from nyshporka.sources.http import Fetcher
+
+    src.http = Fetcher(delay=0.0, attempts=1,
+                       client=httpx.Client(transport=httpx.MockTransport(handler)))
+
+
+@pytest.mark.parametrize(("status", "cause"), [
+    (404, "not_found"), (403, "denied"), (401, "denied"), (429, "rate_limited"),
+    (503, "host_down")])
+def test_prychyna_vidmovy_kadru(src: FilmMirrorSource, tmp_path: Path,
+                                status: int, cause: str) -> None:
+    """🔴 «Кадрів там немає», «не пускає» і «хост лежить» — різні дії для людини."""
+    import httpx
+
+    _z_vidpoviddiu(src, lambda req: httpx.Response(status))
+
+    res = src.fetch(REF, tmp_path / "out", frames=(1, 3))
+
+    assert res.frames == 0 and res.causes == {cause: 3}
+    assert "3" in res.why()
+
+
+def test_obryv_ziednannia_tse_khost_a_ne_kadr(src: FilmMirrorSource, tmp_path: Path) -> None:
+    import httpx
+
+    def _obryv(req: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("refused")
+
+    _z_vidpoviddiu(src, _obryv)
+    res = src.fetch(REF, tmp_path / "out", frames=(1, 2))
+
+    assert res.causes == {"host_down": 2}
+
+
+def test_vzyati_kadry_bez_prychyn(src: FilmMirrorSource, tmp_path: Path) -> None:
+    import httpx
+
+    _z_vidpoviddiu(src, lambda req: httpx.Response(200, content=b"JPEG"))
+    res = src.fetch(REF, tmp_path / "out", frames=(1, 2))
+
+    assert res.frames == 2 and res.causes == {} and res.why() == ""
+    # Повтор нічого не качає: кадри з тим самим іменем уже лежать.
+    znovu = src.fetch(REF, tmp_path / "out", frames=(1, 2))
+    assert (znovu.frames, znovu.skipped) == (0, 2)
+
+
+def test_dzerkalo_movchyt_tse_vidmova_z_prychynoiu(src: FilmMirrorSource) -> None:
+    """🔴 Збій мережі на дереві регіону — відмова словами, а не трасування.
+
+    І вона каже, що це стороннє дзеркало: про плівку на FamilySearch його
+    відмова нічого не доводить.
+    """
+    import httpx
+
+    (src.cache_dir / "moldova.json.gz").unlink()
+    src._trees.clear()
+    _z_vidpoviddiu(src, lambda req: httpx.Response(403))
+
+    with pytest.raises(SourceError, match="не FamilySearch") as ei:
+        src.tree("moldova")
+    assert "401/403" in str(ei.value)
+
+
+def test_prychyna_liahaie_v_pasport(tmp_path: Path) -> None:
+    import json
+
+    from nyshporka.cases.acquire import record_fetch
+    from nyshporka.sources.base import FetchResult
+
+    res = FetchResult(dest=tmp_path, errors=["0001.jpg: HTTP 403"], causes={"denied": 1})
+    record_fetch(tmp_path, res, source="fsfilm", ref="moldova/x", want=1)
+
+    meta = json.loads((tmp_path / "meta.json").read_text(encoding="utf-8"))
+    assert meta["fetch_causes"] == {"denied": 1} and meta["fetch_state"] == "empty"
