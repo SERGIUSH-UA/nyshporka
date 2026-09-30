@@ -1,5 +1,8 @@
 """Спільне читання справи: одна функція для `nysh read` і черги справ.
 
+⚠ Дитина друкує латинкою: її stdout на Windows без UTF-8 — cp1252, і кирилиця
+в `print` валила б саму дитину, а не те, що тут перевіряється.
+
 ⚠ Раннер підмінено малим справжнім процесом: перевіряється обв'язка — запуск,
 реєстр живих прогонів, зупинка на прохання, повнота з диска, — а не рушій.
 """
@@ -50,12 +53,12 @@ PYSHE = ("import sys, pathlib\n"
          "out = pathlib.Path(sys.argv[1])\n"
          "for n in (1, 2, 3):\n"
          "    (out / f'{n:04d}.txt').write_text('x', encoding='utf-8')\n"
-         "    print('сторінка', n, flush=True)\n")
+         "    print('page', n, flush=True)\n")
 
 VYSNE = ("import sys, time, pathlib\n"
          "out = pathlib.Path(sys.argv[1])\n"
          "(out / '0001.txt').write_text('x', encoding='utf-8')\n"
-         "print('перша', flush=True)\n"
+         "print('first', flush=True)\n"
          "time.sleep(120)\n")
 
 
@@ -68,7 +71,7 @@ def test_dochytane_tse_povno_i_reiestr_chystyi(case) -> None:
                       on_event=lambda ev, human: seen.append(human or ""))
 
     assert got.ok and (got.done, got.missing, got.stopped) == (3, 0, False)
-    assert "сторінка 3" in seen
+    assert "page 3" in seen
     assert R.alive() == []
 
 
