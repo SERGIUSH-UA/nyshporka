@@ -609,6 +609,49 @@ def _znamennyk_z_pasporta(frames_block: dict[str, Any],
     return frames_block
 
 
+def znamennyk_spravy(key: str, shifra: str = "") -> dict[str, Any]:
+    """Скільки кадрів має справа і ЗВІДКИ це число — те саме, що візьме пакування.
+
+    🔴 Одна відповідь на три місця. Пакувальник шукає число в п'яти джерелах,
+    а перелік неподіленого дивився лише в бібліотеку: справа з числом у
+    паспорті чи в картці стояла там «без кадрів», хоча пакувалась, і навпаки —
+    картка не казала, чи число взагалі є, доки пакування не відмовляло.
+
+    `total` — 0, коли числа немає ніде; `unknown` — причина з картки, якщо
+    людина її назвала.
+    """
+    from nyshporka.fonds.registry import _PARTIAL_RATIO, expected_frames
+    from nyshporka.share import card as K
+
+    out: dict[str, Any] = {"total": 0, "source": "", "unknown": ""}
+    if not key:
+        return out
+    kartka = K.get(key)
+    out["unknown"] = str(kartka.get("frames_unknown") or "")
+    case_dir = align.case_dir_for(key)
+    na_dysku = len(align.frames_sorted(case_dir)) if case_dir else 0
+    total, source = na_dysku, ("кадри на диску" if na_dysku else "")
+    if not total:
+        home = align.case_home_for(key)
+        total = int(_znamennyk_z_pasporta({"total": 0}, home).get("total") or 0)
+        source = "паспорт теки" if total else ""
+    if not total:
+        total = align.library_frames(key)
+        source = "бібліотека" if total else ""
+    row = opys.registry_row(shifra) if shifra else None
+    want = expected_frames(row) if row else 0
+    if want and total < want * _PARTIAL_RATIO:
+        total, source = want, "реєстр опису"
+    try:
+        z_kartky = int(kartka.get("frames") or 0)
+    except (TypeError, ValueError):
+        z_kartky = 0
+    if z_kartky and z_kartky >= na_dysku:
+        total, source = z_kartky, "картка"
+    out.update(total=total, source=source)
+    return out
+
+
 def build_manifest(scope: str, *,
                    hash_frames: bool = False,
                    publisher: str = "", contact: str = "", site: str = "",
@@ -739,6 +782,11 @@ def build_manifest(scope: str, *,
         listed = int(frames_block.get("listed") or 0)
         if n >= listed:
             frames_block = {**frames_block, "total": n, "on_disk": listed}
+    # Причина, з якої числа кадрів немає, живе в картці — щоб її бачило кожне
+    # пакування цієї справи (пачкою, автовіддача), а не лише те, де її назвали.
+    extra = dict(extra or {})
+    if kartka.get("frames_unknown") and not extra.get(FRAMES_UNKNOWN):
+        extra[FRAMES_UNKNOWN] = str(kartka["frames_unknown"])
     # Робочий запис паспорта про жанр (`record_type`) — вільний текст
     # дослідника, і в картку він іде лише очищеним, як і назва.
     if case.get("record_type"):

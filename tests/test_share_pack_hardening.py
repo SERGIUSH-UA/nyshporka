@@ -370,3 +370,64 @@ def test_operatsiia_pakuvannia_nese_prychynu(space: Path, monkeypatch: Any) -> N
     ok = O.call("share.pack", {"case": "DAZHO/1/2149", "geometry": False,
                                "frames_unknown": "PDF без числа сторінок"})
     assert ok.ok, ok.error
+
+
+# ── Одне число кадрів на картку, пакування й перелік неподіленого ─────────────
+
+def test_kartka_pokazuie_chyslo_kadriv_odrazu(space: Path, monkeypatch: Any) -> None:
+    """🔴 Про брак числа людина дізнається на картці, а не на відмові пакування."""
+    from nyshporka import ops as O
+
+    _bez_kadriv(space, monkeypatch)
+    bez = O.call("share.card", {"case": "DAZHO/1/2149", "title": "Сповідні розписи"})
+    assert bez.ok and bez.data["frames"]["total"] == 0
+    assert any(w.code == "frames_unknown" for w in bez.warnings)
+
+    z = O.call("share.card", {"case": "DAZHO/1/2149", "frames": 310})
+    assert (z.data["frames"]["total"], z.data["frames"]["source"]) == (310, "картка")
+    assert not any(w.code == "frames_unknown" for w in z.warnings)
+
+
+def test_kartka_bere_chyslo_z_biblioteky(space: Path, monkeypatch: Any) -> None:
+    """Число, яке пакування знайде саме, картка показує з назвою джерела."""
+    from nyshporka import ops as O
+
+    _bez_kadriv(space, monkeypatch, library=249)
+    got = O.call("share.card", {"case": "DAZHO/1/2149"})
+    assert (got.data["frames"]["total"], got.data["frames"]["source"]) == (249, "бібліотека")
+    assert not got.warnings
+
+
+def test_prychyna_z_kartky_diie_na_kozhne_pakuvannia(space: Path, monkeypatch: Any) -> None:
+    """🔴 Названа один раз на картці — діє й на пакування пачкою, і на автовіддачу.
+
+    Інакше `suggest --all` і автовіддача, які прапорця `--frames-unknown` не
+    мають, відмовляли б по справі, про яку людина вже все сказала.
+    """
+    from nyshporka import ops as O
+    from nyshporka.share import card as K
+
+    PUB = _bez_kadriv(space, monkeypatch)
+    got = O.call("share.card", {"case": "DAZHO/1/2149",
+                                "frames_unknown": "скани знищено,  опису немає"})
+    assert not any(w.code == "frames_unknown" for w in got.warnings)
+    assert K.get("DAZHO/1/2149")["frames_unknown"] == "скани знищено, опису немає"
+
+    pak = PUB.pack("DAZHO/1/2149", geometry=False)
+    assert pak["manifest"]["extra"]["frames_unknown"] == "скани знищено, опису немає"
+
+    O.call("share.card", {"case": "DAZHO/1/2149", "frames_unknown": ""})
+    with pytest.raises(PUB.PublishError, match="--frames"):
+        PUB.pack("DAZHO/1/2149", geometry=False)
+
+
+def test_prychyna_z_pakuvannia_zapamiatovuietsia(space: Path, monkeypatch: Any) -> None:
+    from nyshporka import ops as O
+    from nyshporka.share import card as K
+
+    _bez_kadriv(space, monkeypatch)
+    ok = O.call("share.pack", {"case": "DAZHO/1/2149", "geometry": False,
+                               "frames_unknown": "PDF без числа сторінок"})
+    assert ok.ok, ok.error
+    assert K.get("DAZHO/1/2149")["frames_unknown"] == "PDF без числа сторінок"
+    assert O.call("share.pack", {"case": "DAZHO/1/2149", "geometry": False}).ok

@@ -362,3 +362,27 @@ def test_chuzha_knyha_v_puli_vydna(space: Path, monkeypatch: Any) -> None:
     assert r["pool_publishers"] == ["інший"]
     r = got["DAHMO/315/2"]
     assert (r["pool_n"], r["pool_pages"], r["pool_mine"]) == (0, 0, None)
+
+
+def test_perelik_bere_te_same_chyslo_shcho_pakuvannia(space: Path, monkeypatch: Any) -> None:
+    """🔴 Справа з числом кадрів у картці — не «без кадрів».
+
+    Перелік дивився лише в бібліотеку, а пакування — у п'ять джерел: справа,
+    яка пакувалась, стояла тут «без кадрів» і в чергу готових не потрапляла.
+    """
+    from nyshporka.share import card as K
+
+    rows = [_ryadok("DAHMO/315/5", "ДАХмО 315-1-5", pages=10, frames=0),
+            _ryadok("DAHMO/315/6", "ДАХмО 315-1-6", pages=10, frames=0),
+            _ryadok("DAHMO/315/7", "ДАХмО 315-1-7", pages=10, frames=0)]
+    monkeypatch.setattr("nyshporka.htr_store.list_cases", lambda: rows)
+    K.set_fields("DAHMO/315/5", K.normalize(frames=10))
+    K.set_fields("DAHMO/315/6", K.normalize(frames_unknown="скани знищено"))
+
+    got = {r["case_key"]: r for r in S.nepodileni()}
+
+    assert (got["DAHMO/315/5"]["frames"], got["DAHMO/315/5"]["status"]) == (10, S.GOTOVA)
+    assert got["DAHMO/315/6"]["status"] == S.BEZ_KADRIV
+    assert got["DAHMO/315/6"]["frames_unknown"] == "скани знищено"
+    assert (got["DAHMO/315/7"]["status"], got["DAHMO/315/7"]["frames_unknown"]) == (
+        S.BEZ_KADRIV, "")

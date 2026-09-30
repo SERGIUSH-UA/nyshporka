@@ -221,12 +221,24 @@ def nepodileni() -> list[dict[str, Any]]:
             continue
         pages = naibilshe.get(key, int(row.get("pages_done") or 0))
         frames = int(row.get("frames") or 0)
+        nevidomo = ""
+        if not frames:
+            # 🔴 Те саме число, що візьме пакування (`publish.znamennyk_spravy`),
+            # а не лише бібліотека: справа з числом у паспорті чи в картці
+            # стояла тут «без кадрів» і в чергу готових не потрапляла.
+            from nyshporka.share.publish import znamennyk_spravy
+
+            kadry = znamennyk_spravy(key, shifra)
+            frames, nevidomo = int(kadry["total"] or 0), str(kadry["unknown"] or "")
         out.append({
             "case_key": key,
             "shifra": shifra,
             "title": row.get("title") or "",
             "pages": pages,
             "frames": frames,
+            # Причина з картки, чому числа кадрів немає: така справа пакується,
+            # але «готовою» не вважається — покриття не порахувати.
+            "frames_unknown": nevidomo,
             "model": row.get("model") or "",
             "updated": row.get("updated") or "",
             "pool": stan,

@@ -28,9 +28,13 @@ from typing import Any
 
 CARDS_NAME = "cards.json"
 
-#: Поля картки, які можна задати. Кожне, крім `frames`, лягає в `case`
-#: маніфесту; `frames` — знаменник у `frames.total`.
-FIELDS = ("title", "years", "places", "doc_type", "frames")
+#: Поля картки, які можна задати. `frames` — знаменник у `frames.total`,
+#: `frames_unknown` — чому його немає (`extra.frames_unknown`); решта лягає в
+#: `case` маніфесту.
+FIELDS = ("title", "years", "places", "doc_type", "frames", "frames_unknown")
+
+#: Стеля пояснення, чому число кадрів невідоме: речення, а не історія справи.
+MAX_WHY = 200
 
 #: Стеля знаменника: найбільші зведені томи — кілька тисяч кадрів, а число з
 #: п'ятьма нулями — це вже помилка набору, а не справа.
@@ -99,7 +103,8 @@ def parse_years(raw: str) -> list[int]:
 def normalize(*, title: str | None = None, years: str | None = None,
               places: list[str] | None = None,
               doc_type: str | None = None,
-              frames: int | None = None) -> dict[str, Any]:
+              frames: int | None = None,
+              frames_unknown: str | None = None) -> dict[str, Any]:
     """Перевірити поля картки. `None` — поле не задавали; `""`/`[]` — стерти."""
     out: dict[str, Any] = {}
     if title is not None:
@@ -136,6 +141,11 @@ def normalize(*, title: str | None = None, years: str | None = None,
         if n < 0 or n > MAX_FRAMES:
             raise CardError(f"кадрів {n} — поза межами 0–{MAX_FRAMES}; 0 стирає поле")
         out["frames"] = n or ""
+    if frames_unknown is not None:
+        why = " ".join(str(frames_unknown).split())
+        if len(why) > MAX_WHY:
+            raise CardError(f"пояснення довше за {MAX_WHY} символів")
+        out["frames_unknown"] = why
     return out
 
 

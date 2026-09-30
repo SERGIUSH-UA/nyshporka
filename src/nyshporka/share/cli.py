@@ -67,6 +67,8 @@ def _show_card(card: dict[str, Any], indent: str = "  ") -> None:
         console.print(f"{indent}жанр: {_e(card['doc_type'])}")
     if card.get("frames"):
         console.print(f"{indent}кадрів: {_e(card['frames'])}")
+    if card.get("frames_unknown"):
+        console.print(f"{indent}кадрів не названо: {_e(card['frames_unknown'])}")
 
 
 # Прапорці картки однакові в `pack`, `suggest` і `card` — одна довідка.
@@ -76,10 +78,13 @@ _PLACE_HELP = "місце, яке охоплює справа (можна кіл
 _GENRE_HELP = "жанр: birth, marriage, death, confession, revision, clergy_list, other…"
 _FRAMES_HELP = ("скільки кадрів має справа, коли на диску їх немає (PDF, прибрані "
                 "після читання): число з каталогу чи опису; 0 — стерти")
+_FRAMES_UNKNOWN_HELP = ("чому число кадрів справи невідоме — коли --frames назвати "
+                        "нема з чого; «» — стерти")
 
 
 def _card_args(title: str | None, years: str | None, place: list[str] | None,
-               genre: str | None, frames: int | None = None) -> dict[str, Any]:
+               genre: str | None, frames: int | None = None,
+               frames_unknown: str | None = None) -> dict[str, Any]:
     out: dict[str, Any] = {}
     if title is not None:
         out["title"] = title
@@ -91,6 +96,8 @@ def _card_args(title: str | None, years: str | None, place: list[str] | None,
         out["genre"] = genre
     if frames is not None:
         out["frames"] = frames
+    if frames_unknown is not None:
+        out["frames_unknown"] = frames_unknown
     return out
 
 
@@ -106,9 +113,8 @@ def pack_cmd(
                                           "зате прив'язка стане точною"),
     partial: str = typer.Option("", "--partial",
                                 help="чому прочитано не всю справу"),
-    frames_unknown: str = typer.Option(
-        "", "--frames-unknown",
-        help="чому число кадрів справи невідоме (коли --frames назвати нема з чого)"),
+    frames_unknown: str | None = typer.Option(None, "--frames-unknown",
+                                              help=_FRAMES_UNKNOWN_HELP),
     dry_run: bool = typer.Option(False, "--dry-run",
                                  help="показати, що поїде, і не писати нічого"),
     publisher: str = typer.Option("", "--as", help="ваше ім'я або псевдонім"),
@@ -148,11 +154,11 @@ def pack_cmd(
     env = O.call("share.pack", {
         "case": case, "out": out, "geometry": geometry,
         "hash_frames": hash_frames, "partial": partial, "dry_run": dry_run,
-        "frames_unknown": frames_unknown,
         "publisher": publisher, "contact": contact, "site": site, "note": note,
         "link": list(link), "extra": list(extra), "license": license_,
         "source_terms": source_terms, "archive_name": archive_name,
-        "skip_run": list(skip_run), **_card_args(title, years, place, genre, frames)})
+        "skip_run": list(skip_run),
+        **_card_args(title, years, place, genre, frames, frames_unknown)})
     if _answer(env, as_json):
         return
     d = env.data or {}
@@ -258,6 +264,8 @@ def card_cmd(
     place: list[str] = typer.Option([], "--place", help=_PLACE_HELP),
     genre: str | None = typer.Option(None, "--genre", help=_GENRE_HELP),
     frames: int | None = typer.Option(None, "--frames", help=_FRAMES_HELP),
+    frames_unknown: str | None = typer.Option(None, "--frames-unknown",
+                                              help=_FRAMES_UNKNOWN_HELP),
     clear: bool = typer.Option(False, "--clear", help="прибрати картку цілком"),
     as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
@@ -270,7 +278,8 @@ def card_cmd(
     from nyshporka import ops as O
 
     env = O.call("share.card", {"case": case, "clear": clear,
-                                **_card_args(title, years, place, genre, frames)})
+                                **_card_args(title, years, place, genre, frames,
+                                             frames_unknown)})
     if _answer(env, as_json):
         return
     d = env.data or {}
@@ -280,6 +289,12 @@ def card_cmd(
     else:
         console.print("  [muted]картки немає — назву й решту пакувальник бере з "
                       "паспорта теки й реєстру опису[/muted]")
+    kadry = d.get("frames") or {}
+    if kadry.get("total"):
+        console.print(f"  кадрів справи: {_e(kadry['total'])} "
+                      f"[muted]({_e(kadry.get('source'))})[/muted]")
+    elif kadry.get("unknown"):
+        console.print(f"  кадрів справи: невідомо — {_e(kadry['unknown'])}")
     _notes(env)
 
 

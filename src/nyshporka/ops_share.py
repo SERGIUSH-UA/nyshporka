@@ -90,7 +90,8 @@ def _card(a: Any) -> dict[str, Any]:
         title=getattr(a, "title", None), years=getattr(a, "years", None),
         places=list(places) if places else None,
         doc_type=getattr(a, "genre", None),
-        frames=getattr(a, "frames", None))
+        frames=getattr(a, "frames", None),
+        frames_unknown=getattr(a, "frames_unknown", None))
 
 
 def _contact(value: str, default: str) -> str:
@@ -112,6 +113,10 @@ class _CardFields(BaseModel):
                                description="скільки кадрів має справа, коли на диску "
                                            "їх немає (PDF, прибрані після читання, "
                                            "читано з чужого); 0 — стерти")
+    frames_unknown: str | None = Field(
+        default=None,
+        description="чому число кадрів справи невідоме — лише коли його справді "
+                    "взяти нізвідки; інакше назвіть число полем frames")
 
 
 class SharePackArgs(_CardFields):
@@ -126,10 +131,6 @@ class SharePackArgs(_CardFields):
                                           "зате прив'язка стане точною")
     partial: str = Field(default="", description="пояснення, чому прочитано не "
                                                  "всю справу; знімає ворота знаменника")
-    frames_unknown: str = Field(default="",
-                                description="чому число кадрів справи невідоме — "
-                                            "коли його справді взяти нізвідки; "
-                                            "інакше назвіть його полем frames")
     dry_run: bool = Field(default=False,
                           description="показати, що поїде, і нічого не писати")
     publisher: str = Field(default="", description="ваше ім'я або псевдонім")
@@ -186,9 +187,7 @@ def share_pack(a: SharePackArgs) -> Envelope:
                    contact=_contact(a.contact, defaults["contact"]),
                    site=a.site or defaults["site"], note=a.note,
                    links=links,
-                   extra={**extra, **({"partial": a.partial} if a.partial else {}),
-                          **({"frames_unknown": a.frames_unknown.strip()}
-                             if a.frames_unknown.strip() else {})},
+                   extra={**extra, **({"partial": a.partial} if a.partial else {})},
                    license_text=a.license or defaults["license"],
                    source_terms=a.source_terms or defaults["source_terms"],
                    archive_name=a.archive_name, skip_runs=list(a.skip_run),
@@ -246,8 +245,21 @@ def share_card(a: ShareCardArgs) -> Envelope:
     except K.CardError as exc:
         return fail(str(exc))
     card = K.set_fields(key, fields) if fields else K.get(key)
-    return ok({"case_key": key, "shifra": shifra, "card": card,
-               "path": str(K.cards_path())})
+    # 🔴 Число кадрів картка показує ОДРАЗУ — те саме, яке візьме пакування, і
+    # звідки воно. Доти про брак числа людина дізнавалась лише тоді, коли
+    # пакування відмовляло, тобто після того, як вважала картку готовою.
+    from nyshporka.share.publish import znamennyk_spravy
+
+    kadry = znamennyk_spravy(key, shifra)
+    env = ok({"case_key": key, "shifra": shifra, "card": card,
+              "frames": kadry, "path": str(K.cards_path())})
+    if not kadry["total"] and not kadry["unknown"]:
+        env.warn("frames_unknown",
+                 "числа кадрів справи немає ні на диску, ні в паспорті, ні в "
+                 "бібліотеці, ні в реєстрі опису — без нього справа не спакується. "
+                 "Назвіть його: --frames N (з каталогу чи опису); якщо взяти "
+                 "нізвідки: --frames-unknown \"чому\"")
+    return env
 
 
 class SharePackPrintArgs(BaseModel):
