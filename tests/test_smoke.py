@@ -32,13 +32,34 @@ def test_version_matches_package_metadata():
     метадані колеса. Тепер джерело одне (`[tool.hatch.version]`), і цей тест —
     приймач того, що воно й лишилось одним.
     """
-    from importlib.metadata import PackageNotFoundError, version
+    import json
+    import tomllib
+    from importlib.metadata import PackageNotFoundError, distribution
+    from pathlib import Path
+
+    # Джерело одне — це й перевіряється завжди, незалежно від того, що стоїть.
+    root = Path(__file__).resolve().parents[1]
+    meta = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
+    assert "version" not in meta["project"], "друга версія в [project] розійдеться з першою"
+    assert "version" in meta["project"].get("dynamic", [])
+    assert meta["tool"]["hatch"]["version"]["path"] == "src/nyshporka/__init__.py"
 
     try:
-        installed = version("nyshporka")
+        dist = distribution("nyshporka")
     except PackageNotFoundError:          # запуск із дерева без установки
         pytest.skip("пакет не встановлений — звіряти нема з чим")
-    assert installed == __version__
+    # ⚠ Встановлення в режимі розробки (`uv sync`, `pip install -e`) пише
+    # метадані раз, у мить встановлення: код потім читається з дерева, а версія
+    # в метаданих лишається тією, що була. Після кожного релізу вона відстає, і
+    # тест червонів на кожній машині розробника — доки червоне не перестали
+    # читати. Застарілий знімок тут не вада пакета, а стан машини: про нього
+    # кажемо, але провалом не рахуємо. Колесо (CI, PyPI) звіряється суворо.
+    direct = dist.read_text("direct_url.json") or "{}"
+    editable = bool(json.loads(direct).get("dir_info", {}).get("editable"))
+    if editable and dist.version != __version__:
+        pytest.skip(f"метадані встановлення в режимі розробки від {dist.version}, "
+                    f"код — {__version__}: перевстановіть середовище (`uv sync`)")
+    assert dist.version == __version__
 
 
 def test_info_reports_missing_extras_with_the_fix():
