@@ -100,7 +100,9 @@ nysh cases list
    паспорта справа зникає з реєстру, і наступна сесія вважає, що її немає;
 4. у теку справи кладеться `_offloaded.json`: `drive_path`, `restore` (готова
    команда повернення), `files` (ім'я, розмір, sha256). Для Commons замість
-   цього в паспорті стоїть `purged_commons_verified` і адреса файла;
+   цього в паспорті стоїть `purged_commons_verified` і адреса файла; для
+   справи, яку качалка перекачує з джерела за номером скана, — `pages_dropped`
+   з `how_to_restore`;
 5. `nysh cases build`.
 
 **Приймач:** `nysh cases show <справа>` каже `диск: archived` і рядок

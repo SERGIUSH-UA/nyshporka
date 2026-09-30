@@ -306,6 +306,8 @@ def test_offloaded_case_is_archived_not_ordered(space: Path) -> None:
         ("spr-3", None, None, {}),
         ("spr-4", None, None, {"commons_url": "https://commons.wikimedia.org/wiki/File:X.pdf",
                                "purged_commons_verified": {"date": "2026-09-27"}}),
+        ("spr-5", None, None, {"source": {"url": "https://sadowe.genealodzy.pl/id1703-sy51-se"},
+                               "pages_dropped": {"how_to_restore": "skanoteka_download.py"}}),
     )
     for name, marker_in, marker, extra in cases:
         d = raw / name
@@ -325,3 +327,44 @@ def test_offloaded_case_is_archived_not_ordered(space: Path) -> None:
     assert got["data/raw/daoo/spr-3"] == ("ordered", "")
     assert got["data/raw/daoo/spr-4"] == (
         "archived", "Wikimedia Commons: https://commons.wikimedia.org/wiki/File:X.pdf")
+    assert got["data/raw/daoo/spr-5"] == (
+        "archived", "skanoteka_download.py · https://sadowe.genealodzy.pl/id1703-sy51-se")
+
+
+def test_archived_case_keeps_its_htr_runs(space: Path) -> None:
+    """Прогін справи, чиї кадри вивантажено, лишається за нею.
+
+    Бібліотека бачить лише справи з кадрами, і після вивантаження прогін із
+    точним `case_key` мети йшов у «нічиї»: картка ANRM 5-2-442 казала
+    «HTR: —» при повному тексті (30.09.2026). Друга справа перевіряє прив'язку
+    лише за текою (`case_dir` без ключа).
+    """
+    from nyshporka.cases.collect import collect_rows
+
+    raw = space / "data" / "raw" / "daoo"
+    for n in ("1", "2"):
+        d = raw / f"spr-{n}"
+        d.mkdir(parents=True)
+        (d / "_source.json").write_text(json.dumps(
+            {"shifra": f"ДАОО 37-1-{n}", "title": "Метрична книга"}, ensure_ascii=False),
+            encoding="utf-8")
+        (d / "_offloaded.json").write_text('{"restore": "rclone copy x y"}', encoding="utf-8")
+    _library()
+    key_of = {r.path: r.key for r in collect_rows()[0]}
+    k1 = key_of["data/raw/daoo/spr-1"]
+    for run, case_dir, case_key in (("run-a", "data/raw/daoo/spr-1", k1),
+                                    ("run-b", "data/raw/daoo/spr-2", "")):
+        d = space / "reports" / "htr" / run
+        d.mkdir(parents=True)
+        (d / "_htr_meta.json").write_text(json.dumps({
+            "version": 1, "case_dir": case_dir, "case_key": case_key,
+            "model": "pysar_cyr_v17.pt", "updated": "2026-09-30T10:00:00",
+            "pages": {"0001.jpg": {"chars": 100, "lines": 10}},
+        }), encoding="utf-8")
+    rows, orphans = collect_rows()
+    by_path = {r.path: r for r in rows}
+    for p, run in (("data/raw/daoo/spr-1", "run-a"), ("data/raw/daoo/spr-2", "run-b")):
+        r = by_path[p]
+        assert r.state == "archived"
+        assert r.htr_runs == [run] and r.htr_stage == "pysar", (p, r.htr_runs, r.htr_stage)
+    assert not [o for o in orphans if o["run"] in ("run-a", "run-b")], orphans

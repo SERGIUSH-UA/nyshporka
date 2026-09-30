@@ -5,6 +5,7 @@ r"""Збірка реєстру: опис бібліотеки + чотири ш
 """
 from __future__ import annotations
 
+import copy
 import json
 import os
 import re
@@ -259,8 +260,13 @@ def _where_from_marker(marker: Path) -> str:
     return ""
 
 
+#: Поле паспорта «кадри знято, відтворюються з джерела» (качалки, що вміють
+#: перекачати справу за номером скана, як Skanoteka): `how_to_restore` усередині.
+DROPPED_FIELD = "pages_dropped"
+
+
 def _where_from_passport(d: Path) -> str | None:
-    """Адреса Commons із паспорта, якщо кадри знято під чистку «є на Commons».
+    """Звідки повернути кадри, якщо паспорт каже, що їх знято.
     None — паспорт такої позначки не має."""
     for name in ("_source.json", "source.json"):
         meta = _read_json(d / name)
@@ -268,14 +274,20 @@ def _where_from_passport(d: Path) -> str | None:
             url = next((str(meta[k]) for k in ("commons_url", "commons_file", "url")
                         if meta.get(k) and "commons" in str(meta[k]).lower()), "")
             return f"Wikimedia Commons: {url}" if url else "Wikimedia Commons"
+        if DROPPED_FIELD in meta:
+            dropped = meta[DROPPED_FIELD] if isinstance(meta[DROPPED_FIELD], dict) else {}
+            src = meta.get("source") if isinstance(meta.get("source"), dict) else {}
+            parts = [str(dropped.get("how_to_restore") or ""), str(src.get("url") or "")]
+            return " · ".join(p for p in parts if p)
     return None
 
 
 def _archived(paths: list[str | None]) -> str | None:
     """Де копія кадрів справи, якщо їх знято з диска; None — не знімали.
 
-    Ознаки дві: позначка `_offloaded.json` у теці справи або на рівень нижче
-    (`pages/`, плівки) і поле `purged_commons_verified` у паспорті. Питається
+    Ознаки три: позначка `_offloaded.json` у теці справи або на рівень нижче
+    (`pages/`, плівки); поле `purged_commons_verified` у паспорті; поле
+    `pages_dropped` у паспорті (кадри відтворюються з джерела). Питається
     лише для справ без кадрів, тож обхід дешевий: кілька сотень тек, а не
     дерево `data/raw`. Повертає рядок відновлення; порожній рядок — ознака є,
     а куди поклали, не записано.
@@ -667,6 +679,37 @@ def _fuzzy_stage(row: CaseRow) -> str:
     return "reviewed" if row.fuzzy_reviewed else "scanned"
 
 
+def _with_cards(idx: LibraryIndex, rows: dict[str, CaseRow]) -> LibraryIndex:
+    """Індекс для прив'язки прогонів: бібліотека плюс картки реєстру, яких вона
+    не знає, — замовлені, архівовані (кадри на копії), заведені з паспорта.
+
+    🔴 Бібліотека бачить лише справи з кадрами. Справа, чиї кадри вивантажено
+    на копію, з неї випадала, і прогін із точним `case_key` мети та
+    `case_dir` на теку справи ставав «нічиїм»: картка казала «HTR: —» при
+    повному тексті, тобто той самий хибний «декоду немає» (30.09.2026, ANRM
+    5-2-442 і ще сотня справ ANRM після вивантаження на Drive).
+
+    Доповнюються лише точні ключі й шляхи. Розбір імені прогону (`lookup`)
+    карток не бачить навмисно: нова картка з тим самим номером справи
+    зробила б неоднозначним збіг, який сьогодні однозначний, і прогін, що
+    зараз прив'язаний, став би нічиїм.
+    """
+    extra = [r for r in rows.values() if r.key not in idx.by_key]
+    if not extra:
+        return idx
+    out = copy.copy(idx)
+    out.by_key = dict(idx.by_key)
+    out.by_path = dict(idx.by_path)
+    for r in extra:
+        out.by_key[r.key] = {"key": r.key, "repo": r.repo, "fond": r.fond,
+                             "opys": r.opys, "spr": r.spr,
+                             "desc_source": r.desc_source, "frames": r.frames}
+        for p in (r.path, *r.extra_paths):
+            if p:
+                out.by_path.setdefault(str(p).replace("\\", "/").rstrip("/"), r.key)
+    return out
+
+
 def collect_rows(index: LibraryIndex | None = None, *,
                  unreadable: list[Unreadable] | None = None,
                  ) -> tuple[list[CaseRow], list[Any]]:
@@ -855,6 +898,7 @@ def collect_rows(index: LibraryIndex | None = None, *,
         )
 
     orphans: list[Any] = []
+    ridx = _with_cards(idx, rows)
 
     # 🔴 Прогін пошуку роду й HTR-прогін — одна Й та сама тека `reports/htr/<run>`,
     # тож і справа в них мусить бути одна. Доти HTR-гілка резолвилась із `case_dir`
@@ -871,7 +915,7 @@ def collect_rows(index: LibraryIndex | None = None, *,
     for name, meta in _iter_htr_runs(unreadable):
         run_meta_hint[name] = (str(meta.get("case_dir") or ""),
                                str(meta.get("case_key") or ""))
-        link = resolve_run(name, str(meta.get("case_dir") or ""), idx,
+        link = resolve_run(name, str(meta.get("case_dir") or ""), ridx,
                            meta_key=str(meta.get("case_key") or ""))
         if link.resolved_by == "vydannia":
             # Газета чи довідник — не справа архіву: у реєстрі справ їй немає
@@ -913,7 +957,7 @@ def collect_rows(index: LibraryIndex | None = None, *,
     # ── fuzzy-пошук роду ────────────────────────────────────────────────────
     for name, run in _clan_runs(unreadable).items():
         hint_dir, hint_key = run_meta_hint.get(name, ("", ""))
-        link = resolve_run(name, hint_dir, idx, meta_key=hint_key)
+        link = resolve_run(name, hint_dir, ridx, meta_key=hint_key)
         if not link.key or link.key not in rows:
             orphans.append({"run": name, "case_dir": "", "pages": run.get("pages_decoded"),
                             "model": run.get("model") or "", "source": "clan_hunt",
