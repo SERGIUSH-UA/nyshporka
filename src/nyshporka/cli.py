@@ -522,6 +522,8 @@ def get(source: str = typer.Argument(..., help="id джерела"),
         verdict = completeness(res, want)
 
     # Приймач один на термінал і чергу демона — `sources.base.completeness`.
+    _dali_pislia_zavantazhennia(res.dest)
+
     if verdict.state == "unknown":
         # ⚠ Мовчазний «✓» тут був би найгіршим із варіантів: він читається як
         # доведена повнота. Нуль без знаменника не є доказом повноти.
@@ -1503,6 +1505,30 @@ def review_cmd(
                 console=console)
 
 
+def _dali_pislia_zavantazhennia(dest: Any) -> None:
+    """Сказати, що кадри на диску — ще не справа в обліку.
+
+    🔴 Завантаження закінчувалось словом «готово», а тека без шифри не
+    потрапляла ні в каталог, ні в читання, ні у віддачу — і ніде не було
+    сказано чому (звіт користувача 29.09.2026: двадцять справ із `meta.json`
+    завантажувача й без реєстрації). Порада стоїть тут, бо саме тут людина ще
+    пам'ятає, яку справу качала.
+    """
+    from rich.markup import escape
+
+    try:
+        from nyshporka.cases.chain import after_fetch
+
+        lanka = after_fetch(Path(dest))
+    except Exception:       # порада не має права зламати завантаження
+        return
+    if lanka is None:
+        return
+    console.print("[warn]⚠ кадри на диску, але справу ще не зареєстровано:[/warn] "
+                  f"[muted]{escape(lanka.why)}[/muted]")
+    console.print(f"  далі: {escape(lanka.fix)}")
+
+
 cases_app = typer.Typer(help="Реєстр справ: що є, що прочитано, що прошукано.",
                         no_args_is_help=True)
 app.add_typer(cases_app, name="cases")
@@ -1615,6 +1641,68 @@ def cases_list_cmd(
     if env.stale and env.stale.is_stale:
         console.print(f"[warn]⚠ зріз застарів[/warn] [muted]"
                       f"{'; '.join(env.stale.reasons[:2])} — nysh cases build[/muted]")
+
+
+@cases_app.command("chain")
+def cases_chain_cmd(
+    show_all: bool = typer.Option(False, "--all",
+                                  help="показати й теки без обриву"),
+    quick: bool = typer.Option(False, "--quick",
+                               help="без обходу диска — лише те, що реєстр уже знає"),
+    limit: int = typer.Option(12, "--limit", help="скільки тек показати на ланку"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
+) -> None:
+    """Де обірвано ланцюг справи: скани → паспорт → каталог → прогін.
+
+    Для кожної теки зі сканами каже, на якій ланці вона стоїть, і дає команду,
+    що веде далі. `meta.json` завантажувача — запис про завантаження, а не
+    паспорт справи: тека з ним і без шифри в каталог не потрапляє.
+    """
+    from rich.markup import escape
+
+    from nyshporka import ops as O
+    from nyshporka.cases import chain as C
+
+    env = O.call("cases.chain", {"all": show_all, "walk": not quick})
+    if as_json:
+        console.print_json(data=env.data if env.ok else {"error": env.error})
+        raise typer.Exit(code=0 if env.ok else 1)
+    if not env.ok:
+        console.print(f"[warn]⚠ {escape(str(env.error))}[/warn]")
+        raise typer.Exit(code=1)
+    data = env.data
+    lich = data["summary"]
+    by_link: dict[str, list[dict[str, Any]]] = {}
+    for r in data["rows"]:
+        by_link.setdefault(r["link"], []).append(r)
+    order = (*C.BREAKS, C.NO_RUN, C.PARTIAL_RUN, C.OK)
+    for link in order:
+        rows = by_link.get(link) or []
+        if not rows:
+            continue
+        mark = "[warn]✗[/warn]" if link in C.BREAKS else "·"
+        console.print(f"\n{mark} [bold]{C.NAZVY[link]}[/bold] — {lich[link]}")
+        for r in rows[:limit]:
+            odyn = "стор." if link == C.ORPHAN_RUN else "кадр."
+            kadry = f" · {r['frames']} {odyn}" if r["frames"] else ""
+            console.print(f"  {escape(r['path'])}{kadry}")
+            if r["why"]:
+                console.print(f"     [muted]{escape(r['why'])}[/muted]")
+            if r["fix"]:
+                console.print(f"     → {escape(r['fix'])}")
+        if len(rows) > limit:
+            console.print(f"  [muted]… і ще {len(rows) - limit} (--limit N, --json)[/muted]")
+    # Знаменник: скільки тек пройдено і скільки з них дійшли до каталогу.
+    cili = data["folders"] - sum(lich[k] for k in C.BREAKS if k != C.ORPHAN_RUN)
+    zvidky = "обхід диска" if data["walked"] else "реєстр, без обходу диска"
+    console.print(f"\nтек із матеріалом: [bold]{data['folders']}[/bold] ({zvidky}) · "
+                  f"дійшли до каталогу: {cili} · обривів: {data['broken']}")
+    if not show_all and not data["broken"]:
+        console.print("✅ ланцюг цілий: кожна тека зі сканами має справу")
+    if not show_all:
+        console.print(f"[muted]не читано: {lich[C.NO_RUN]} · частково: "
+                      f"{lich[C.PARTIAL_RUN]} · прочитано: {lich[C.OK]} "
+                      f"(перелік: --all)[/muted]")
 
 
 @cases_app.command("bind")

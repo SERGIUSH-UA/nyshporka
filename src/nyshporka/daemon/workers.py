@@ -423,6 +423,17 @@ async def _run_acquire(bus: JobBus, src: Any, job: JobRecord, dest: Path,
         verdict = completeness(res, total)
     said = verdict.message(res)
     why = "; ".join(x for x in (said, *res.errors[:3]) if x) if not verdict.ok else ""
+    # Кадри на диску — ще не справа в обліку: без шифри тека не потрапить ні
+    # в каталог, ні в читання. Кажемо одразу, з командою (`cases.chain`).
+    dali = ""
+    try:
+        from nyshporka.cases.chain import after_fetch
+
+        lanka = await asyncio.to_thread(after_fetch, Path(res.dest))
+        if lanka is not None:
+            dali = f"справу ще не зареєстровано ({lanka.why}) — {lanka.fix}"
+    except Exception:
+        dali = ""
     await bus.update(
         job.id,
         state=JobState.DONE if verdict.ok else JobState.ERROR,
@@ -431,6 +442,7 @@ async def _run_acquire(bus: JobBus, src: Any, job: JobRecord, dest: Path,
                 "skipped": res.skipped, "bytes": res.bytes,
                 "errors": len(res.errors), "promised": verdict.want,
                 "got": verdict.got, "complete": verdict.state,
+                "next": dali,
                 # «Повноту не доведено» — не збій, але й не мовчазний успіх.
                 "note": said if verdict.ok else ""},
         # ⚠ Джерело буває без знаменника (Commons не знає числа сторінок

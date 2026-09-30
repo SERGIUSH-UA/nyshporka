@@ -570,8 +570,48 @@ def _library() -> Check:
                  "Облік, записаний під старим ключем, перенести в новий файл")
 
 
+def _chain() -> Check:
+    """Чи не лежать завантажені теки без реєстрації.
+
+    🔴 Завантажувач лишає в теці `meta.json` — запис про завантаження. Паспорт
+    справи (`_source.json`) пише лише реєстрація, і без шифри тека не
+    потрапляє ні в каталог, ні в читання, ні у віддачу. Це рівно те, на чому
+    спіткнувся сторонній користувач із двадцятьма справами (29.09.2026), і
+    жодна перевірка цього не казала.
+
+    Диск тут не обходиться: доктора гукають часто, зокрема головна застосунку.
+    Береться те, що реєстр справ уже знає як матеріал без справи. Решта тек без
+    шифри й нічиї прогони — довідкою, не попередженням: у дослідницькому
+    просторі це звичайний стан, а не поломка.
+    """
+    from nyshporka.cases import chain as C
+
+    name = "Ланцюг справи"
+    rows = C.quick()
+    if rows is None:
+        return Check(name, "ok", "реєстр справ ще не зібрано",
+                     "зібрати: `nysh cases build`")
+    lich = C.summary(rows)
+    dovidka = (f"тек без шифри: {lich[C.NO_PASSPORT]}, прогонів без справи: "
+               f"{lich[C.ORPHAN_RUN]}")
+    zavantazheni = [r for r in rows if r.link == C.LOADER_ONLY]
+    if not zavantazheni:
+        return Check(name, "ok", f"завантажених тек без реєстрації немає · {dovidka}",
+                     "перелік по теках: `nysh cases chain`")
+    pryklady = "; ".join(r.path for r in zavantazheni[:3])
+    tail = f" і ще {len(zavantazheni) - 3}" if len(zavantazheni) > 3 else ""
+    return Check(
+        name, "warn",
+        f"{len(zavantazheni)} завантажених тек без реєстрації — у каталог і в "
+        f"читання вони не потраплять: {pryklady}{tail} · {dovidka}",
+        "дати кожній шифру: `nysh case <тека> --shifra \"<архів фонд-опис-справа>\"` "
+        "(`meta.json` у теці — запис про завантаження, не паспорт справи); "
+        "перелік із готовими командами: `nysh cases chain`")
+
+
 CHECKS = (_version, _skills, _python, _workspace, _cloud_sync, _disk, _profile,
-          _library, _decode_visible, _shared_keys, _torch, _engines, _models, _rent)
+          _library, _chain, _decode_visible, _shared_keys, _torch, _engines, _models,
+          _rent)
 
 #: Перевірки, які мають сенс лише при ввімкненій секції. 🔴 Не косметика:
 #: «⚠ рушії не встановлені» на машині того, хто прийшов подивитись каталог

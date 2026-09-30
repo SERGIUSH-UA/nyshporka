@@ -2368,6 +2368,50 @@ def cases_bind(a: BindArgs) -> Envelope:
     return env
 
 
+class CasesChainArgs(BaseModel):
+    all: bool = Field(default=False,
+                      description="показати й теки без обриву: не читані, "
+                                  "прочитані частково, прочитані")
+    walk: bool = Field(default=True,
+                       description="обійти диск (бачить теки, покладені після "
+                                   "збірки реєстру); без обходу — лише те, що "
+                                   "реєстр уже знає")
+
+
+# `agent=False`: стартовий перелік агента має стелю, а сюди він приходить за
+# порадою — з `nysh get`, з доктора чи зі скіла — і кличе `nysh cases chain`.
+@op("cases.chain", summary="Де обірвано ланцюг «скани → паспорт → каталог → прогін»",
+    args=CasesChainArgs, mutates=False, agent=False)
+def cases_chain(a: CasesChainArgs) -> Envelope:
+    """Для кожної теки зі сканами — ланка, на якій вона стоїть, і команда.
+
+    🔴 Навіщо окрема операція: кожна ланка мовчить про сусідню. Завантажена
+    тека без шифри не потрапляє в каталог, прогін по ній стає нічиїм, віддати
+    її нічим — і жодне з цих місць не каже, що причина одна й лежить на початку.
+    """
+    from nyshporka.cases import chain as C
+
+    if a.walk:
+        rows = C.walk()
+    else:
+        got = C.quick()
+        if got is None:
+            return fail("реєстру справ ще немає — зберіть його: `nysh cases build`")
+        rows = got
+    lich = C.summary(rows)
+    pokaz = rows if a.all else [r for r in rows if r.broken]
+    env = ok({"rows": [r.as_json() for r in pokaz], "summary": lich,
+              "folders": sum(1 for r in rows if r.link != C.ORPHAN_RUN),
+              "broken": sum(1 for r in rows if r.broken),
+              "walked": a.walk, "names": C.NAZVY})
+    if lich[C.LOADER_ONLY] or lich[C.OUTSIDE_ROOTS]:
+        env.warn("unregistered_downloads",
+                 f"завантажених тек без реєстрації: "
+                 f"{lich[C.LOADER_ONLY] + lich[C.OUTSIDE_ROOTS]} — у каталог і в "
+                 "читання вони не потраплять, доки справі не дати шифру")
+    return env
+
+
 class CasesBuildArgs(BaseModel):
     rescan: bool = Field(default=True,
                          description="перечитати ще й диск — потрібно, коли "
