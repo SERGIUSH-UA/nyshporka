@@ -589,6 +589,9 @@ def install_stage_timers() -> None:
     blla.compute_segmentation_map = _timed(blla.compute_segmentation_map, "seg_net")
     blla.calculate_polygonal_environment = _timed(blla.calculate_polygonal_environment,
                                                   "polygon")
+    if hasattr(blla, "polygonize_page"):
+        # fast_seam полігонізує сторінку пакетом, минаючи функцію вище
+        blla.polygonize_page = _timed(blla.polygonize_page, "polygon")
     skf.sato = _timed(skf.sato, "sato")
     Segmenter.segment = _timed(Segmenter.segment, "segment")
     g = globals()
@@ -3121,6 +3124,11 @@ def main() -> int:
                     help="порядок читання kraken матрицею numpy замість кубічного "
                          "циклу Python (матриця порядку та сама — див. "
                          "fast_order_verify.py). Дефолт ON, вимикач --no-fast-order")
+    ap.add_argument("--fast-seam", action=argparse.BooleanOptionalAction,
+                    default=True,
+                    help="шви рядків kraken пакетом на сторінку (контури ті "
+                         "самі до пікселя — див. fast_seam_verify.py). Дефолт "
+                         "ON, вимикач --no-fast-seam")
     ap.add_argument("--seg-resize", action=argparse.BooleanOptionalAction,
                     default=True,
                     help="один LANCZOS-ресайз кадру в compute_segmentation_map "
@@ -3544,6 +3552,16 @@ def _main_case(args: argparse.Namespace, cache: dict | None = None) -> int:
             install_fast_order(verbose=True)
         else:
             print("[htr-run] ⚠ порядок читання kraken без прискорення (--no-fast-order)",
+                  flush=True)
+        if args.fast_seam:
+            # Шви рядків пакетом на сторінку: цикл по стовпчиках один на всі
+            # рядки замість одного на кожен (01.10.2026: ×4 на шві, 4–15%
+            # усього `vec_lines`; контури ті самі до пікселя).
+            sys.path.insert(0, str(_PATCHES_DIR))
+            from fast_seam import install as install_fast_seam
+            install_fast_seam(verbose=True)
+        else:
+            print("[htr-run] ⚠ шви рядків kraken без прискорення (--no-fast-seam)",
                   flush=True)
         if args.seg_resize:
             # ⚠ ДО `install_gpu_lock` нижче: лок обгортає те, що лежить у
