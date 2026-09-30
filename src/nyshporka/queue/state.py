@@ -197,6 +197,10 @@ def find(q: dict[str, Any], ref: str) -> dict[str, Any] | None:
                  _norm((it.get("ref") or {}).get("dir")))
         if want in names:
             return it
+    # Ключ справи без опису — теж ім'я, якщо воно вказує на одну справу черги.
+    aka = [it for it in items if _norm((it.get("ref") or {}).get("aka")) == want]
+    if len(aka) == 1:
+        return aka[0]
     tails = [it for it in items
              if _norm((it.get("ref") or {}).get("dir")).endswith("/" + want)]
     return tails[0] if len(tails) == 1 else None

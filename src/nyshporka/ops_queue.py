@@ -91,7 +91,10 @@ def queue_status(a: QueueStatusArgs) -> Envelope:
         "rows": rows, "count": len(rows),
         "summary": {name: sum(1 for it in q["items"] if it.get("state") == name)
                     for name in Q.NAZVY},
+        # Справи, чиїх кадрів ще немає на диску: скільки в них сторінок, невідомо,
+        # і нуль на їхньому місці читався б як «майже все зроблено».
         "left": {"cases": len(live), "pages": pages_left,
+                 "unknown": sum(1 for r in live if not r.get("frames")),
                  "sec_per_page": sec,
                  "eta_sec": round(pages_left * sec) if sec is not None else None},
         "runner": {**(q.get("runner") or {}), "alive": alive,
@@ -164,14 +167,29 @@ def _resolve(ref: str) -> tuple[str, dict[str, str], dict[str, Any]]:
 
     teka = _P(plan["case_dir"])
     kadry = align._frames_dir(teka) if teka.is_dir() else None
-    return (str(plan["key"]), {"key": str(plan["key"])},
+    # 🔴 Адреса справи в черзі несе ОПИС. Ключ справи (`CDIAK/224/124`) його
+    # не має, і взяття за ним бере опис за замовчуванням: людина назвала
+    # 224-2-124, а черга взяла 224-1-124 — іншу книгу з тим самим номером
+    # (знайдено живим прогоном 30.09.2026).
+    full = "/".join(str(plan.get(k) or "") for k in ("repo", "fond", "opys", "spr"))
+    adresa = full if plan.get("opys") and "//" not in full else str(plan["key"])
+    return (adresa, {"key": adresa, "aka": str(plan["key"])},
             {"kind": "key", "case_dir": plan["case_dir"], "channel": plan["channel"],
              "channel_why": plan["why"], "title": plan["title"],
              # Кадри вже лежать — черга їх не качатиме, і каналу їй не треба.
              "frames_on_disk": count_frames(kadry) if kadry else 0,
+             "opys_clash": _opys_clash(plan),
              "opys": plan.get("opys") or "",
              "opys_assumed": bool(plan.get("opys_assumed")),
              "shifra_needs_eye": bool(plan.get("shifra_needs_eye"))})
+
+
+def _opys_clash(plan: dict[str, Any]) -> str:
+    """Чи не зайнята тека справи справою іншого опису (`stages.opys_clash`)."""
+    from nyshporka.queue import stages as ST
+
+    teka = Path(str(plan["case_dir"]))
+    return ST.opys_clash(ST.Where(teka, None, 0, str(plan.get("key") or ""), plan))
 
 
 def _pool_note(key: str) -> dict[str, Any]:

@@ -21,6 +21,7 @@ REG: Any = None
 
 SHIFRA = "ДАХмО 315-1-8433"
 KEY = "DAHMO/315/8433"
+FULL = "DAHMO/315/1/8433"      # адреса з описом — нею справа зветься в черзі
 
 
 @pytest.fixture
@@ -140,8 +141,8 @@ def test_status_pokazuie_etapy_i_zalyshok(space: Path, chytach: Chytach) -> None
 
     row = env.data["rows"][0]
     assert (row["frames"], row["pages"], row["state"]) == (4, 0, Q.QUEUED)
-    assert env.data["left"] == {"cases": 1, "pages": 4, "sec_per_page": None,
-                                "eta_sec": None}
+    assert env.data["left"] == {"cases": 1, "pages": 4, "unknown": 0,
+                                "sec_per_page": None, "eta_sec": None}
 
 
 # ── паспорт ──────────────────────────────────────────────────────────────────
@@ -643,17 +644,24 @@ class Dzherelo:
 
         self.take = take
         self.dir = space / "data" / "raw" / "dahmo_315" / "spr-8433"
+        self.asked: list[str] = []
         self.plan: dict[str, Any] = {
-            "key": KEY, "case_dir": str(self.dir), "channel": "archium", "ref": "x",
+            "key": KEY, "repo": "DAHMO", "fond": "315", "opys": "1", "spr": "8433",
+            "case_dir": str(self.dir), "channel": "archium", "ref": "x",
             "why": "переглядач архіву", "title": "Метрична книга", "film": "",
             "shifra_needs_eye": False}
         self.fail: tuple[str, dict[str, Any]] | None = None
         self.calls = 0
-        monkeypatch.setattr(take, "plan", lambda key: dict(self.plan))
+        monkeypatch.setattr(take, "plan", self.plan_for)
         monkeypatch.setattr(take, "take", self.do)
+
+    def plan_for(self, key: str) -> dict[str, Any]:
+        self.asked.append(key)
+        return dict(self.plan)
 
     def do(self, key: str, **kw: Any) -> dict[str, Any]:
         self.calls += 1
+        self.took = key
         if self.fail:
             text, meta = self.fail
             self.dir.mkdir(parents=True, exist_ok=True)
@@ -665,7 +673,8 @@ class Dzherelo:
         (self.dir / "meta.json").write_text(json.dumps(
             {"fetch_state": "complete", "fetched_by": "archium", "shifra": SHIFRA}),
             encoding="utf-8")
-        kw["on_progress"](3, 3)
+        # Рівно так кличе джерело: іменованими, з одиницею виміру.
+        kw["on_progress"](done=3, total=3, unit="кадр")
         return {"pages": 3, "files": 3}
 
 
@@ -678,13 +687,97 @@ def test_sprava_z_reiestru_opysu_sama_bere_kadry(space: Path, chytach: Chytach,
                                                  dzherelo: Dzherelo) -> None:
     env = _add(KEY)
     row = env.data["rows"][0]
-    assert (row["kind"], row["channel"], row["id"]) == ("key", "archium", KEY)
+    assert (row["kind"], row["channel"], row["id"]) == ("key", "archium", FULL)
 
     _run()
 
     assert dzherelo.calls == 1 and _one()["state"] == Q.DONE
     assert [r["stage"] for r in Q.read_journal()][:1] == ["fetch"]
     assert Q.read_pulse() == {}, "пульс лишився після виконавця"
+
+
+def test_obirvane_vziattia_ne_vydaietsia_za_kadry_liudyny(space: Path, chytach: Chytach,
+                                                        dzherelo: Dzherelo) -> None:
+    """🔴 Паспорт завантаження пишеться наприкінці, тож обірване взяття лишає
+    кілька кадрів без нього — як тека, яку поклала людина. Черга мусить
+    пам'ятати, що почала качати сама, і докачати, а не читати уривок."""
+    from nyshporka import ops as O
+
+    _add(KEY)
+
+    def _killed(key: str, **kw: Any) -> dict[str, Any]:
+        dzherelo.dir.mkdir(parents=True, exist_ok=True)
+        (dzherelo.dir / "0001.jpg").write_bytes(b"x")
+        raise RuntimeError("процес убито посеред качання")
+
+    real = dzherelo.take.take
+    dzherelo.take.take = _killed
+    try:
+        _run()
+    finally:
+        dzherelo.take.take = real
+    assert _one()["evidence"].get("fetch_started")
+    assert chytach.calls == [], "уривок із одного кадру пішов у читання"
+    assert O.call("queue.status", {}).data["rows"][0]["stages"][0]["state"] == "todo"
+
+    assert O.call("queue.retry", {"ref": KEY}).ok
+    _run()
+
+    assert dzherelo.calls == 1 and _one()["state"] == Q.DONE
+    assert len(chytach.calls) == 1
+
+
+def test_kadry_pokladeni_liudynoiu_ne_kachaiutsia(space: Path, chytach: Chytach,
+                                                 dzherelo: Dzherelo) -> None:
+    frames(space, "dahmo_315/spr-8433", 3)
+    REG.describe(dzherelo.dir, shifra=SHIFRA)
+    _add(KEY)
+
+    _run()
+
+    assert dzherelo.calls == 0 and _one()["state"] == Q.DONE
+
+
+def test_opys_nazvanyi_liudynoiu_ne_hubytsia(space: Path, chytach: Chytach,
+                                            dzherelo: Dzherelo) -> None:
+    """🔴 Ключ справи опису не несе, і взяття за ним бере опис за замовчуванням.
+    Черга мусить пам'ятати адресу з описом: інакше названа 224-2-124 стає
+    224-1-124 — іншою книгою з тим самим номером."""
+    from nyshporka import ops as O
+
+    dzherelo.plan.update(opys="2")
+    _add("ДАХмО 315-2-8433")
+
+    item = Q.load()["items"][0]
+    assert item["id"] == "DAHMO/315/2/8433" and item["ref"]["key"] == "DAHMO/315/2/8433"
+    _run()
+
+    assert dzherelo.took == "DAHMO/315/2/8433", "кадри взято за ключем без опису"
+    assert all(k in ("ДАХмО 315-2-8433", "DAHMO/315/2/8433") for k in dzherelo.asked)
+    # Назвати справу в черзі можна й ключем без опису — поки він однозначний.
+    assert O.call("queue.drop", {"ref": KEY}).ok
+
+
+def test_teka_zainiata_spravoiu_inshoho_opysu(space: Path, chytach: Chytach,
+                                             dzherelo: Dzherelo) -> None:
+    """🔴 Тека `spr-N` опису не несе. Кадри справи опису 1, що вже лежать у
+    ній, для справи опису 2 — чужа книга, а не «кадри вже на диску»."""
+    from nyshporka import ops as O
+
+    d = frames(space, "dahmo_315/spr-8433", 3)
+    (d / "meta.json").write_text(json.dumps(
+        {"fetch_state": "complete", "fetched_by": "archium", "inv": "1"}), encoding="utf-8")
+    dzherelo.plan.update(opys="2")
+
+    env = O.call("queue.add", {"refs": ["ДАХмО 315-2-8433"]})
+    assert "опису 1" in env.data["rows"][0]["opys_clash"]
+    _run()
+
+    stan = _one()
+    assert (stan["state"], stan["stage"], stan["code"]) == (Q.BLOCKED, "fetch",
+                                                          "opys_conflict")
+    assert "опису 1" in stan["why"] and "queue drop" in stan["fix"]
+    assert dzherelo.calls == 0 and chytach.calls == [], "чужу книгу прочитано під цією шифрою"
 
 
 def test_khost_lezhyt_povtoryt_sam(space: Path, chytach: Chytach,

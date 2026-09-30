@@ -103,8 +103,10 @@ function queueEta(left) {
     const m = Math.floor((sec % 3600) / 60);
     when = `≈ ${h ? `${h} ${t('queue.h')} ` : ''}${m} ${t('queue.m')}`;
   }
+  const unknown = left.unknown
+    ? ` (${t('queue.left.unknown').replace('{n}', left.unknown)})` : '';
   return t('queue.left').replace('{c}', left.cases).replace('{p}', left.pages || 0)
-    + ` · ${when}`;
+    + `${unknown} · ${when}`;
 }
 
 function queueRunner(data) {

@@ -131,14 +131,18 @@ def _judge(w: Where) -> Any:
 
 
 def case_key(item: dict[str, Any], w: Where) -> str:
-    """Ключ справи: з реєстру опису, з каталогу або з паспорта теки."""
+    """Ключ справи: з каталогу, з реєстру опису або з паспорта теки.
+
+    Каталог — перший: лише він знає, чи входить опис у ключ саме цієї справи.
+    """
+    if w.case_dir is not None and w.case_dir.is_dir():
+        got = _judge(w).key
+        if got:
+            return str(got)
     if w.key:
         return w.key
     if w.case_dir is None:
         return ""
-    got = _judge(w).key
-    if got:
-        return str(got)
     from nyshporka.htr.run import case_key_for
 
     return case_key_for(w.case_dir)[0]
@@ -165,13 +169,49 @@ def _loader_meta(case_dir: Path | None) -> dict[str, Any]:
     return raw if isinstance(raw, dict) else {}
 
 
+def opys_clash(w: Where) -> str:
+    """Чому тека справи не її: у ній уже лежить справа ІНШОГО опису. Порожньо — її.
+
+    🔴 Тека зветься за номером справи без опису (`spr-124`), а номери між
+    описами повторюються. Кадри 224-1-124, що вже лежать у теці, для справи
+    224-2-124 — не «кадри вже на диску», а чужа книга під її іменем.
+    """
+    from nyshporka.cases import acquire as A
+
+    opys = str(w.plan.get("opys") or "")
+    if not opys or w.case_dir is None or not w.case_dir.is_dir():
+        return ""
+    try:
+        A.guard_inventory(w.case_dir, opys)
+    except A.AcquireError as exc:
+        return str(exc)
+    return ""
+
+
 def fetch_done(item: dict[str, Any], ctx: Ctx) -> bool:
     w = where(item)
-    if not w.frames:
+    if not w.frames or opys_clash(w):
         return False
     state = str(_loader_meta(w.case_dir).get("fetch_state") or "")
+    if state:
+        return state == "complete"
     # Кадри без паспорта завантажувача поклала людина — качати нічого.
-    return state in ("", "complete")
+    # 🔴 Але не тоді, коли їх почала класти сама черга: паспорт завантаження
+    # пишеться наприкінці, і взяття, обірване посередині, лишає кілька кадрів
+    # без нього — рівно той самий вигляд. Знайдено живим прогоном 30.09.2026:
+    # справа з одним кадром із чотирнадцяти пішла б у читання як повна.
+    return not (item.get("evidence") or {}).get("fetch_started")
+
+
+def _remember(item: dict[str, Any], **evidence: Any) -> None:
+    """Записати в справу черги те, що мусить пережити обрив посеред етапу."""
+    from nyshporka.queue import state as Q
+
+    item.setdefault("evidence", {}).update(evidence)
+    with Q.edit() as q:
+        for it in q["items"]:
+            if it["id"] == item["id"] and it.get("state") != Q.DROPPED:
+                it.setdefault("evidence", {}).update(evidence)
 
 
 def fetch_run(item: dict[str, Any], ctx: Ctx) -> Outcome:
@@ -185,6 +225,10 @@ def fetch_run(item: dict[str, Any], ctx: Ctx) -> Outcome:
         return failed("no_registry_row", str(exc),
                       "справи немає в реєстрі опису — додайте теку з кадрами: "
                       "nysh queue add <тека>")
+    chuzha = opys_clash(where(item))
+    if chuzha:
+        return blocked("opys_conflict", chuzha,
+                       f'зняти цю справу з черги: nysh queue drop "{_name(item)}"')
     if plan.get("shifra_needs_eye") and not (item.get("opts") or {}).get("shifra_ok"):
         return blocked(
             "shifra_needs_eye",
@@ -195,9 +239,15 @@ def fetch_run(item: dict[str, Any], ctx: Ctx) -> Outcome:
         return blocked("no_channel", str(plan.get("why") or "каналу взяття немає"),
                        f'покладіть кадри в теку й додайте її: nysh queue add <тека>; '
                        f'цю зняти: nysh queue drop "{_name(item)}"')
+    from nyshporka.queue.state import now
+
+    _remember(item, fetch_started=now())
+
+    def _progress(done: int = 0, total: int = 0, **_: Any) -> None:
+        ctx.progress(int(done), int(total), "кадри")
+
     try:
-        got = take.take(key, reindex=False,
-                        on_progress=lambda i, n: ctx.progress(i, n, "кадри"))
+        got = take.take(key, reindex=False, on_progress=_progress)
     except take.TakeError as exc:
         meta = _loader_meta(Path(plan["case_dir"]))
         causes = dict(meta.get("fetch_causes") or {})
@@ -243,9 +293,21 @@ def passport_run(item: dict[str, Any], ctx: Ctx) -> Outcome:
 
 # ── 3. каталог ───────────────────────────────────────────────────────────────
 def catalog_done(item: dict[str, Any], ctx: Ctx) -> bool:
+    from nyshporka import library as L
     from nyshporka.cases import chain as C
 
-    return bool(_judge(where(item)).link != C.NOT_IN_LIBRARY)
+    w = where(item)
+    lanka = _judge(w)
+    if lanka.link == C.NOT_IN_LIBRARY:
+        return False
+    # Каталог міг зібратись, поки кадри ще качались: запис є, а кадрів у ньому
+    # — скільки лежало тоді. Знаменник покриття з такого запису бреше.
+    if not L.LIBRARY_PATH.exists() or not lanka.key:
+        return True
+    entry = L.library_lookup().by_key.get(lanka.key)
+    if entry is None or str(getattr(entry, "path", "") or "") != lanka.path:
+        return True
+    return int(getattr(entry, "frames", 0) or 0) == w.frames
 
 
 def catalog_run(item: dict[str, Any], ctx: Ctx) -> Outcome:
@@ -437,7 +499,8 @@ def read_run(item: dict[str, Any], ctx: Ctx) -> Outcome:
                        second_voice=not opts.get("one_voice"),
                        also=tuple(opts.get("with") or ()))
     except HR.ReadError as exc:
-        return blocked("read_refused", str(exc), f'nysh read "{w.frames_dir}" --dry-run')
+        return blocked("read_refused", str(exc),
+                       f'усунути причину й повторити: nysh queue retry "{name}"')
     if plan.script_trust == "unknown" and not opts.get("script"):
         return blocked(
             "script_unsure",

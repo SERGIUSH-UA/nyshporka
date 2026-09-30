@@ -43,8 +43,10 @@ def _show(d: dict[str, Any]) -> None:
         ("зроблено", (d.get("summary") or {}).get("done"))) if v)
     console.print(f"[bold]{summary}[/bold]")
     if left.get("cases"):
+        bez = (f" (без {left['unknown']} справ, чиїх кадрів ще не взято)"
+               if left.get("unknown") else "")
         console.print(f"[muted]лишилось: справ {left['cases']}, сторінок "
-                      f"{left.get('pages', 0)} · {_eta(left.get('eta_sec'))}[/muted]")
+                      f"{left.get('pages', 0)}{bez} · {_eta(left.get('eta_sec'))}[/muted]")
     if runner.get("alive"):
         pulse = runner.get("pulse") or {}
         hid = (f" · {pulse.get('what', '')} {pulse.get('i')}/{pulse.get('n')}"
@@ -124,7 +126,9 @@ def add(
             continue
         console.print(f" {'+' if r['added'] else '?'} [bold]{_e(r['id'])}[/bold]"
                       + (f" — {_e(r['title'])}" if r.get("title") else ""))
-        if r.get("kind") == "key" and r.get("frames_on_disk"):
+        if r.get("opys_clash"):
+            console.print(f"     [warn]{_e(r['opys_clash'])}[/warn]")
+        elif r.get("kind") == "key" and r.get("frames_on_disk"):
             console.print(f"     [muted]кадри вже на диску: {r['frames_on_disk']} · "
                           f"{_e(r.get('case_dir') or '')}[/muted]")
         elif r.get("kind") == "key":
