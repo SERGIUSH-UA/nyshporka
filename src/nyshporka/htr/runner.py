@@ -3082,6 +3082,11 @@ def main() -> int:
                     help="_calc_roi через STRtree + векторизований shapely "
                          "(вихід побітово той самий — див. fast_geom_verify.py). "
                          "Дефолт ON, вимикач --no-fast-geom")
+    ap.add_argument("--fast-order", action=argparse.BooleanOptionalAction,
+                    default=True,
+                    help="порядок читання kraken матрицею numpy замість кубічного "
+                         "циклу Python (матриця порядку та сама — див. "
+                         "fast_order_verify.py). Дефолт ON, вимикач --no-fast-order")
     ap.add_argument("--seg-resize", action=argparse.BooleanOptionalAction,
                     default=True,
                     help="один LANCZOS-ресайз кадру в compute_segmentation_map "
@@ -3484,6 +3489,15 @@ def _main_case(args: argparse.Namespace, cache: dict | None = None) -> int:
             install_fast_geom(verbose=True)
         else:
             print("[htr-run] ⚠ геометрія kraken без прискорення (--no-fast-geom)",
+                  flush=True)
+        if args.fast_order:
+            # 🔴 Щільна таблиця на 800 рядків — ~340 с сторінки в `_reading_order`
+            # (ДАКрО ф.60 спр.32, 30.09.2026): кубічний перебір на чистому Python.
+            sys.path.insert(0, str(_PATCHES_DIR))
+            from fast_order import install as install_fast_order
+            install_fast_order(verbose=True)
+        else:
+            print("[htr-run] ⚠ порядок читання kraken без прискорення (--no-fast-order)",
                   flush=True)
         if args.seg_resize:
             # ⚠ ДО `install_gpu_lock` нижче: лок обгортає те, що лежить у
