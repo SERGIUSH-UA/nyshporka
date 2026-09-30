@@ -34,13 +34,34 @@ from shapely.ops import nearest_points, unary_union
 _TREE_CACHE: dict = {"baselines": None, "suppl": None, "lines": None, "tree": None}
 
 
+#: Готові `LineString` за об'єктом-джерелом: {id: (джерело, лінія)}.
+#: `vec_lines` дає кожному рядку НОВИЙ список `suppl_obj`, але з тих самих
+#: об'єктів — базових ліній решти сторінки. Лінії з них будувались на кожен
+#: рядок наново: n² конструкторів на сторінку, ~1 с на чотири сторінки
+#: (профіль 01.10.2026). Джерело тримається в записі, тож його id не може
+#: дістатись іншому об'єкту, поки запис живий (звірка через `is`).
+_LINE_CACHE: dict[int, tuple[Any, Any]] = {}
+_LINE_CACHE_MAX = 20_000
+
+
+def _line_of(a: Any) -> Any:
+    hit = _LINE_CACHE.get(id(a))
+    if hit is not None and hit[0] is a:
+        return hit[1]
+    if len(_LINE_CACHE) >= _LINE_CACHE_MAX:
+        _LINE_CACHE.clear()
+    ln = geom.LineString(a)
+    _LINE_CACHE[id(a)] = (a, ln)
+    return ln
+
+
 def _adj_lines_tree(baselines, suppl_obj):
     c = _TREE_CACHE
     if (c["baselines"] is baselines and c["suppl"] is suppl_obj
             and c["lines"] is not None):
         return c["lines"], c["tree"]
     adj = list(baselines) + list(suppl_obj)
-    lines = np.array([geom.LineString(a) for a in adj], dtype=object)
+    lines = np.array([_line_of(a) for a in adj], dtype=object)
     tree = shapely.STRtree(lines) if len(lines) else None
     c.update(baselines=baselines, suppl=suppl_obj, lines=lines, tree=tree)
     return lines, tree
@@ -231,9 +252,48 @@ def calc_roi_fast(line, bounds, baselines, suppl_obj, p_dir):
     inter_a = _ray_hits(ip_line, up_arr, up_seg, side_a)
     inter_b = _ray_hits(ip_line, bt_arr, bt_seg, side_b)
 
-    env_up = [_closest_coord(p, ia) for p, ia in zip(ip_line, inter_a)]
-    env_bottom = [_closest_coord(p, ib) for p, ib in zip(ip_line, inter_b)]
+    env_up = _closest_coords(ip_line, inter_a)
+    env_bottom = _closest_coords(ip_line, inter_b)
     return (np.array(env_up, dtype='uint'), np.array(env_bottom, dtype='uint'))
+
+
+def _closest_coords(pts: np.ndarray, inters: Any) -> list[Any]:
+    """`[_closest_coord(p, g) for p, g in zip(pts, inters)]` без циклу Python
+    на кожен промінь (23 тис. викликів на чотири сторінки, ~1.2 с).
+
+    🔴 Тип чисел — частина результату, а не косметика: далі стоїть
+    `np.array(..., dtype='uint')`, і від'ємна координата як Python float
+    падає `OverflowError`, а як `np.float64` — тихо загортається. Тому,
+    як в оригіналі: `Point` → Python float (`coords[0]`), `MultiPoint` →
+    `np.float64` (`tuple(xy[k])`). Решта типів і порожні перетини — самою
+    `_closest_coord`, у порядку променів, тож виняток той самий і той перший.
+    """
+    g = np.asarray(inters, dtype=object)
+    n = len(g)
+    out: list[Any] = [None] * n
+    if not n:
+        return out
+    tid = shapely.get_type_id(g)
+    empty = shapely.is_empty(g)
+    is_pt = (tid == 0) & ~empty
+    is_mp = (tid == 4) & ~empty
+    if is_pt.any():
+        k = np.flatnonzero(is_pt)
+        for i, xy in zip(k.tolist(), shapely.get_coordinates(g[k]).tolist()):
+            out[i] = tuple(xy)
+    if is_mp.any():
+        k = np.flatnonzero(is_mp)
+        xy, grp = shapely.get_coordinates(g[k], return_index=True)
+        p = np.asarray(pts, dtype=float)[k][grp]
+        d = ((xy - p) ** 2).sum(axis=1)
+        # перший мінімум у кожній групі, як `np.argmin` по точках однієї геометрії
+        o = np.lexsort((np.arange(len(d)), d, grp))
+        first = o[np.r_[True, grp[o][1:] != grp[o][:-1]]]
+        for j in first.tolist():
+            out[int(k[grp[j]])] = tuple(xy[j])
+    for i in np.flatnonzero(~(is_pt | is_mp)).tolist():
+        out[i] = _closest_coord(pts[i], g[i])
+    return out
 
 
 # ── обхід контуру (Moore) ────────────────────────────────────────────────────
