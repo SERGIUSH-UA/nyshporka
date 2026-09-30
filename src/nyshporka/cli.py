@@ -1590,9 +1590,11 @@ app.add_typer(train_app, name="train")
 # 🤝 Обмін прочитаним між дослідниками (Супряга). Секція та сама, що й у
 # читання: пакет несе рівно те, що дав рушій, і без прочитаного тут нема чого
 # віддавати.
+from nyshporka.queue.cli import app as queue_app  # noqa: E402
 from nyshporka.share.cli import app as share_app  # noqa: E402
 
 app.add_typer(share_app, name="share")
+app.add_typer(queue_app, name="queue")
 
 
 @cases_app.command("build")

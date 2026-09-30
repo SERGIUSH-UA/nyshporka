@@ -609,16 +609,53 @@ def _chain() -> Check:
         "перелік із готовими командами: `nysh cases chain`")
 
 
+def _queue() -> Check:
+    """Чи не стоїть черга справ: обірваний виконавець або справи, що чекають людину.
+
+    Черга нічого не каже сама — її ставлять на ніч. Уранці перше, що людина
+    відкриває, — доктор або головна застосунку, і «три справи чекають вашого
+    рішення» мусить бути видно там, а не лише в `nysh queue`.
+    """
+    from nyshporka.queue import state as Q
+
+    name = "Черга справ"
+    try:
+        q = Q.load()
+    except Q.QueueError as exc:
+        return Check(name, "warn", str(exc))
+    items = [it for it in q["items"] if it.get("state") != Q.DROPPED]
+    if not items:
+        return Check(name, "ok", "черга порожня")
+    alive = Q.runner_alive()
+    skilky = {s: sum(1 for it in items if it.get("state") == s) for s in Q.NAZVY}
+    live = sum(skilky[s] for s in Q.LIVE)
+    pidsumok = f"у черзі {live}, зроблено {skilky[Q.DONE]}"
+    obirvani = [str(it["id"]) for it in items if it.get("state") == Q.RUNNING]
+    if obirvani and not alive:
+        return Check(name, "warn",
+                     f"виконавця обірвано на справі «{obirvani[0]}» · {pidsumok}",
+                     "продовжити з того самого етапу: `nysh queue run`")
+    chekaie = skilky[Q.BLOCKED] + skilky[Q.FAILED]
+    if chekaie:
+        return Check(name, "warn",
+                     f"справ чекає вашого рішення: {chekaie} · {pidsumok}",
+                     "причина й команда для кожної: `nysh queue`")
+    if live and not alive:
+        return Check(name, "ok", f"{pidsumok} · виконавець не запущений",
+                     "вести чергу: `nysh queue run`")
+    return Check(name, "ok", pidsumok + (" · виконавець працює" if alive else ""))
+
+
 CHECKS = (_version, _skills, _python, _workspace, _cloud_sync, _disk, _profile,
-          _library, _chain, _decode_visible, _shared_keys, _torch, _engines, _models,
-          _rent)
+          _library, _chain, _queue, _decode_visible, _shared_keys, _torch, _engines,
+          _models, _rent)
 
 #: Перевірки, які мають сенс лише при ввімкненій секції. 🔴 Не косметика:
 #: «⚠ рушії не встановлені» на машині того, хто прийшов подивитись каталог
 #: справ, — це порада полагодити те, чого він не ставив і не збирався. Доктор
 #: мусить казати про готовність до тієї роботи, яку тут справді роблять.
 SECTION_OF_CHECK = {_torch: "htr", _engines: "htr", _models: "htr",
-                    _rent: "htr", _profile: "research"}
+                    _rent: "htr", _profile: "research", _queue: "htr"}
 
 
 def _active_sections() -> frozenset[str] | None:

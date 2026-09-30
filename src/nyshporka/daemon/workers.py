@@ -94,6 +94,8 @@ def _read_gate() -> asyncio.Semaphore:
 #: Підпис завдання, яке стоїть у черзі за картою. Окремою константою — його
 #: шукає приймач, а людина читає з нього, ЧОМУ нічого не відбувається.
 WAITING_FOR_GPU = "чекає на карту"
+#: Як часто читання з екрана дивиться, чи звільнили карту термінал або черга справ.
+FOREIGN_POLL_SEC = 15.0
 
 
 def _keep(task: asyncio.Task[Any]) -> None:
@@ -580,6 +582,19 @@ async def _run_read(bus: JobBus, job: JobRecord, plan: Any, case_key: str,
         # вона тримає.
         if bus.cancelled(job.id):
             return
+        # 🔴 Гейт бачить лише читання цього застосунку. Термінал (`nysh read`)
+        # і черга справ (`nysh queue run`) ідуть повз нього, а карта в усіх
+        # одна: без цього чекання читання з екрана стартувало поверх нічної
+        # черги, і обидва міряли вільну пам'ять карти як свою.
+        from nyshporka.htr import runs as live
+
+        sprava = Path(str(getattr(plan, "case_dir", "") or "")).name
+        while sprava and (busy := await asyncio.to_thread(live.others, sprava)):
+            await bus.update(
+                job.id, title=f"{was_title} · {WAITING_FOR_GPU}: {busy[0].label()}")
+            await asyncio.sleep(FOREIGN_POLL_SEC)
+            if bus.cancelled(job.id):
+                return
         await bus.update(job.id, state=JobState.RUNNING, title=was_title)
         # 🔴 Виняток тут (немає інтерпретатора, зайнятий диск, збій звірки
         # повноти) інакше лишав завдання `running` назавжди: стопера ще немає,
@@ -618,6 +633,17 @@ async def _run_read_locked(bus: JobBus, job: JobRecord, plan: Any, case_key: str
             _terminate(p)
 
     bus.on_stop(job.id, _stop_all)
+
+    # У спільний реєстр живих прогонів — щоб термінал і черга справ бачили, що
+    # карту читає застосунок. Запис мертвого процесу реєстр прибирає сам.
+    from nyshporka.htr import runs as live
+
+    for k, p in enumerate(procs):
+        with contextlib.suppress(OSError):
+            await asyncio.to_thread(
+                live.register, p.pid, case=Path(str(plan.case_dir)).name,
+                case_key=case_key,
+                shard=f"{k + 1}/{len(procs)}" if len(procs) > 1 else "")
 
     # 🔴 Хвіст людського виводу зберігається окремо, і З номером шарда. Коли
     # прогін падає, у завданні лишається код повернення — а причина написана

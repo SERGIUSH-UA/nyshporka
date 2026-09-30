@@ -84,6 +84,14 @@ def read_case(plan: Any, *, case_key: str = "", workers: int = 1, device: str = 
                            gpu_sato=gpu_sato, seg_height=seg_height)
     plan.out_dir.mkdir(parents=True, exist_ok=True)
 
+    # Кілька процесів ділять ядра: без цього кожен бере під BLAS усі.
+    env: dict[str, str] | None = None
+    if len(cmds) > 1:
+        import os
+
+        from nyshporka.htr.run import shard_env
+
+        env = {**os.environ, **shard_env(len(cmds))}
     lines: queue.Queue[str | None] = queue.Queue()
     procs: list[Any] = []
     stopped = False
@@ -91,7 +99,8 @@ def read_case(plan: Any, *, case_key: str = "", workers: int = 1, device: str = 
         for k, cmd in enumerate(cmds):
             proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
                                     stderr=subprocess.STDOUT, text=True,
-                                    encoding="utf-8", errors="replace", bufsize=1)
+                                    encoding="utf-8", errors="replace", bufsize=1,
+                                    env=env)
             procs.append(proc)
             # ⚠ Реєструємо ДОЧІРНІЙ pid, а не свій: помирає першим саме він, і
             # по ньому ж видно, чи робота ще йде.

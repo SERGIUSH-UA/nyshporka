@@ -90,6 +90,48 @@ async def test_the_waiting_job_says_what_it_waits_for(bus, monkeypatch):
     await asyncio.gather(t1, t2)
 
 
+@pytest.mark.asyncio
+async def test_a_terminal_or_queue_run_holds_the_card_too(bus, tmp_path, monkeypatch):
+    """🔴 Гейт застосунку бачить лише свої читання, а карта одна на всіх.
+
+    Термінал (`nysh read`) і черга справ (`nysh queue run`) пишуть себе в
+    спільний реєстр живих прогонів. Поки там є чужа справа, читання з екрана
+    чекає й каже, на що саме.
+    """
+    import os
+    from pathlib import Path
+    from types import SimpleNamespace
+
+    from nyshporka.core import workspace as WS
+    from nyshporka.htr import runs as live
+
+    (tmp_path / "nyshporka.toml").write_text("[workspace]\nschema = 1\n", encoding="utf-8")
+    WS.use(WS.Workspace(root=tmp_path, name="тест", origin="test"))
+    started: list[str] = []
+
+    async def fake_body(_bus, job, *a, **kw):
+        started.append(job.title)
+
+    monkeypatch.setattr(W, "_run_read_locked", fake_body)
+    monkeypatch.setattr(W, "FOREIGN_POLL_SEC", 0.01)
+    live.register(os.getpid(), case="nichna-sprava", case_key="ДАХмО 315-1-77")
+    try:
+        job, _ = await bus.enqueue("read", title="з екрана")
+        plan = SimpleNamespace(case_dir=Path("data/raw/f/spr-1"))
+        task = asyncio.create_task(W._run_read(bus, job, plan, "", []))
+        await asyncio.sleep(0.08)
+
+        assert started == [], "читання з екрана пішло поверх чужого прогону"
+        title = bus.get(job.id).title
+        assert W.WAITING_FOR_GPU in title and "ДАХмО 315-1-77" in title
+        assert bus.get(job.id).state == JobState.QUEUED
+    finally:
+        live.drop(os.getpid())
+    await asyncio.wait_for(task, timeout=5)
+    assert started == ["з екрана"]
+    WS.reset()
+
+
 def test_the_card_lock_really_reaches_the_command(tmp_path, monkeypatch) -> None:
     """🔴 Приймач дивиться на КОМАНДУ, а не на шлях, який сам же й склав.
 
