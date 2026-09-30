@@ -2155,6 +2155,10 @@ class CaseRegisterArgs(BaseModel):
         description="номер групи зображень FamilySearch (DGS), якщо кадри в теці "
                     "взято з неї — локальна копія, скачана раніше: лягає в "
                     "паспорт як джерело сканів. «-» — стерти")
+    one_case: bool = Field(
+        default=False,
+        description="тека — одна справа, хоч шифра чи ім'я схожі на діапазон "
+                    "справ («…926-929»): зняти позначку збірної теки")
     adopt: bool = Field(
         default=False,
         description="взяти теку під облік, якщо вона лежить поза простором: "
@@ -2185,10 +2189,20 @@ def case_register(a: CaseRegisterArgs) -> Envelope:
         out = describe(a.case_dir, shifra=a.shifra, title=a.title,
                        doc_type=a.doc_type, year_from=a.year_from,
                        year_to=a.year_to, place=a.place, note=a.note,
-                       repo_hint=a.repo, film=a.film, dgs=a.dgs)
+                       repo_hint=a.repo, film=a.film, dgs=a.dgs,
+                       one_case=a.one_case)
     except RegisterError as exc:
         return fail(str(exc))
     env = ok({"case_dir": a.case_dir, "sidecar": out})
+    from nyshporka.cases import span as SP
+    from nyshporka.cases.register import case_path as _case_path
+
+    zbirna = SP.of_dir(_case_path(a.case_dir))
+    if zbirna is not None:
+        env.data["span"] = zbirna.as_json()
+        env.warn("span", f"{zbirna.why}. Ключ справи — за першою з них, тож "
+                         f"віддавати й читати таку теку як одну справу не можна. "
+                         f"{SP.fix(a.case_dir)}")
     if out.get("dgs") and a.dgs:
         _local_fs_copy(env, a.case_dir, out)
     # 🔴 Тека поза простором — мовчазна поразка всього подальшого. Опис у ній

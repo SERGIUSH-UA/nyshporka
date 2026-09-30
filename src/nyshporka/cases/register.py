@@ -430,7 +430,8 @@ def _no_dir_reason(case_dir: str | Path, resolved: Path) -> str:
 def describe(case_dir: str | Path, *, shifra: str = "", title: str = "",
              doc_type: str = "", year_from: int | str | None = None,
              year_to: int | str | None = None, place: str = "", note: str = "",
-             repo_hint: str = "", film: str = "", dgs: str = "") -> dict[str, Any]:
+             repo_hint: str = "", film: str = "", dgs: str = "",
+             one_case: bool = False) -> dict[str, Any]:
     """Записати або доповнити опис справи в її теці. Повертає готовий сайдкар.
 
     Порожнє поле не затирає наявне: правка одного заголовка не має стирати
@@ -494,6 +495,22 @@ def describe(case_dir: str | Path, *, shifra: str = "", title: str = "",
         out["fond"] = sh.fond
         out["opys"] = sh.opys
         out["spr"] = sh.spr
+        if shifra:
+            # 🔴 «592-25-926-929» зводиться до шифри першої справи, і хвіст
+            # діапазону доти просто зникав: тека чотирьох справ ставала
+            # справою 926 без жодного сліду. Тепер він лягає окремим полем.
+            from nyshporka.cases import span as SP
+
+            got = SP.in_shifra(T.strip_invisible(shifra))
+            if got is not None and not one_case:
+                out[SP.SPR_TO] = str(got.spr_to)
+            else:
+                out.pop(SP.SPR_TO, None)
+    if one_case:
+        from nyshporka.cases import span as SP
+
+        out[SP.ONE_CASE] = True
+        out.pop(SP.SPR_TO, None)
     for key, val in (("title", title), ("doc_type", doc_type), ("place", place),
                      ("note", note)):
         if _erase(val):

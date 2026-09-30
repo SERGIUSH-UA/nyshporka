@@ -399,7 +399,7 @@ def suggest_cmd(
     """Що прочитано, але ще не віддано.
 
     Без аргументів — перелік зі статусами: готова, у пулі без рамок,
-    неповна, без кадрів. Що вже віддано, вирішує зріз пулу
+    неповна, без кадрів, збірна. Що вже віддано, вирішує зріз пулу
     (`nysh share sync`); без зрізу — журнал пакувань. `--all` пакує все;
     далі кожен пакет віддається командою `publish`.
     """
@@ -445,6 +445,8 @@ def suggest_cmd(
                       f"{r['pages']:>5}/{r['frames'] or '—':<5} · {_e(r['model'] or '—')}")
         if r.get("title"):
             console.print(f"  {'':<17} [dim]{_e(r['title'])}[/dim]")
+        if r.get("span_why"):
+            console.print(f"  {'':<17} [warn]{_e(r['span_why'])}[/warn]")
         if r.get("pool_mine") is False and r.get("pool_pages"):
             chyi = ", ".join(r.get("pool_publishers") or []) or "без підпису"
             # Присутня — ще не повна: з кадрами видно, уривок це чи справа.

@@ -1035,9 +1035,7 @@ def read(
     викликом — тобто рівно та людина, якій найбільше треба стиснути прогін під
     слабку карту, важелів не мала.
     """
-    import subprocess
-
-    from nyshporka.core.progress import split
+    from nyshporka.htr import session as S
     from nyshporka.htr.run import ReadError
     from nyshporka.htr.run import plan as make_plan
 
@@ -1094,6 +1092,12 @@ def read(
             case_key = _from_path(str(p.case_dir), LibraryIndex()) or ""
         except Exception:
             case_key = ""
+        if not case_key:
+            # Каталог теки ще не бачив, а паспорт у ній уже лежить: шифра з
+            # нього подорожує разом із кадрами.
+            from nyshporka.htr.run import case_key_for
+
+            case_key = case_key_for(p.case_dir)[0]
         if case_key:
             console.print(f"  [muted]шифра: {case_key}[/muted]")
         else:
@@ -1115,11 +1119,12 @@ def read(
     # `nysh read` (чи термінал плюс застосунок) заходили на карту разом — рівно
     # той звіт, з якого почалась ця правка. Черга демона сюди не дістає: вона
     # не бачить прогонів командного рядка, а карта в них спільна.
-    cmd = p.command(case_key=case_key, limit=limit, pages=pages, shard=shard,
-                    gpu_lock=gpu_lock or str(p.gpu_lock or ""),
-                    gpu_sato=gpu_sato, seg_height=seg_height)
+    opts: dict[str, Any] = {
+        "case_key": case_key, "limit": limit, "pages": pages, "shard": shard,
+        "gpu_lock": gpu_lock, "gpu_sato": gpu_sato, "seg_height": seg_height}
     if dry:
-        console.print("  [muted]" + " ".join(cmd) + "[/muted]")
+        for cmd in S.commands(p, **opts)[0]:
+            console.print("  [muted]" + " ".join(cmd) + "[/muted]")
         return
 
     # 🔴 Черга для командного рядка. Лок карти серіалізує лише фазу
@@ -1139,41 +1144,16 @@ def read(
                       "вистачить, `--force`[/muted]")
         raise typer.Exit(code=1)
 
-    p.out_dir.mkdir(parents=True, exist_ok=True)
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
-                            stderr=subprocess.STDOUT, text=True,
-                            encoding="utf-8", errors="replace", bufsize=1)
-    assert proc.stdout is not None
-    # ⚠ Реєструємо ДОЧІРНІЙ pid, а не свій: помирає першим саме він, і по
-    # ньому ж видно, чи робота ще йде. Запис знімається в `finally` — інакше
-    # Ctrl+C лишав би справу «зайнятою» до перевірки живості.
-    R.register(proc.pid, case=p.case_dir.name, case_key=case_key, shard=shard)
-    try:
-        for line in proc.stdout:
-            ev, human = split(line.rstrip())
-            if ev is not None and ev.n:
-                console.print(
-                    f"  [muted]{ev.i}/{ev.n} ({ev.pct:.0f}%) {ev.item}[/muted]",
-                    end="\r")
-            elif human:
-                console.print(f"  [muted]{human}[/muted]")
-        rc = proc.wait()
-    finally:
-        R.drop(proc.pid)
+    def _say(ev: Any, human: str | None) -> None:
+        if ev is not None and ev.n:
+            console.print(
+                f"  [muted]{ev.i}/{ev.n} ({ev.pct:.0f}%) {ev.item}[/muted]",
+                end="\r")
+        elif human:
+            console.print(f"  [muted]{human}[/muted]")
 
-    # 🔴 Приймач повноти — диск, а не код повернення: при шардингу тиха втрата
-    # сторінок дає rc=0 і порожній перелік збоїв.
-    from nyshporka.htr.run import count_frames
-
-    # ⚠ `done`, а не `pages`: так зветься прапорець `--pages`, і однойменна
-    # локальна змінна затінювала його рівно в тому місці, де рахується повнота.
-    done = len(list(p.out_dir.glob("*.txt")))
-    # 🔴 Приймач «усі кадри мають текст» дійсний лише для повного прогону.
-    # Частковий (--limit / --pages / --shard) прочитав менше навмисно, і
-    # рахувати різницю як утрату означало б лякати червоним там, де все гаразд;
-    # а звикнувши до червоного, його перестають читати й на справжній утраті.
-    partial = bool(limit or pages or shard)
-    missing = 0 if partial else max(0, count_frames(p.case_dir) - done)
+    got = S.read_case(p, on_event=_say, **opts)
+    rc, done, missing, partial = got.rc, got.done, got.missing, got.partial
     console.print(f"\n{'✅' if rc == 0 and not missing else '🔴'} "
                   f"сторінок з текстом: {done} з {p.frames}"
                   + (f" · без тексту: {missing}" if missing else "")
@@ -1205,6 +1185,9 @@ def case_cmd(
     dgs: str = typer.Option("", "--dgs",
                             help="номер групи зображень FamilySearch (DGS), якщо "
                                  "кадри в теці — з неї: джерело сканів у паспорті"),
+    one_case: bool = typer.Option(False, "--one-case",
+                                  help="тека — одна справа, хоч шифра чи ім'я "
+                                       "схожі на діапазон справ"),
     adopt: bool = typer.Option(False, "--adopt",
                                help="взяти теку під облік, якщо вона лежить "
                                     "поза простором"),
@@ -1227,7 +1210,7 @@ def case_cmd(
     env = O.call("case.register", {
         "case_dir": case_dir, "shifra": shifra, "title": title,
         "doc_type": doc_type, "place": place, "note": note, "film": film,
-        "dgs": dgs,
+        "dgs": dgs, "one_case": one_case,
         "year_from": year_from or None, "year_to": year_to or None,
         "adopt": adopt})
     _answer(env)

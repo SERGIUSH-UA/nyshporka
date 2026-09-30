@@ -81,7 +81,9 @@ GOTOVA = "готова"
 BEZ_RAMOK = "у пулі без рамок"
 NEPOVNA = "неповна"
 BEZ_KADRIV = "без кадрів"
-STATUSY = (GOTOVA, BEZ_RAMOK, NEPOVNA, BEZ_KADRIV)
+#: Тека кількох справ під ключем першої: віддавати її однією справою не можна.
+ZBIRNA = "збірна"
+STATUSY = (GOTOVA, BEZ_RAMOK, NEPOVNA, BEZ_KADRIV, ZBIRNA)
 #: Що можна віддати без `--partial` і без ручної роботи.
 READY_STATUSES = (GOTOVA, BEZ_RAMOK)
 
@@ -161,6 +163,18 @@ def _ye_ramky(run_name: str) -> bool:
         return False
     d = workspace().htr_reports / run_name
     return d.is_dir() and next(d.glob(PACKED_GEOMETRY), None) is not None
+
+
+def _zbirna(row: dict[str, Any], runs: list[str]) -> Any:
+    """Діапазон справ у теці цього прогону — за паспортом теки й іменами."""
+    from nyshporka.cases import span as SP
+    from nyshporka.core.workspace import workspace
+
+    rel = str(row.get("case_dir") or "")
+    names = (str(row.get("case_key") or ""), *runs)
+    if rel:
+        return SP.of_dir(workspace().root / rel, *names)
+    return SP.of_passport({}, *names)
 
 
 def _status(pages: int, frames: int) -> str:
@@ -245,6 +259,14 @@ def nepodileni() -> list[dict[str, Any]]:
             **_u_puli_poruch(key, stan),
             "status": BEZ_RAMOK if stan == "text" else _status(pages, frames),
         })
+        zbirna = _zbirna(row, progony.get(key, []))
+        if zbirna is not None:
+            # 🔴 «Не пропонувати як одну справу за першим числом» (звіт
+            # користувача 29.09.2026): текст кількох книг ліг би в пул під
+            # шифрою однієї.
+            out[-1]["status"] = ZBIRNA
+            out[-1]["span"] = zbirna.as_json()
+            out[-1]["span_why"] = zbirna.why
     out.sort(key=lambda r: str(r["updated"]), reverse=True)
     out.sort(key=lambda r: STATUSY.index(r["status"]))
     return out

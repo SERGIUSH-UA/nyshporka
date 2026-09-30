@@ -839,6 +839,19 @@ def _geometry_pages(run_dirs: list[Path]) -> int:
 FRAMES_UNKNOWN = "frames_unknown"
 
 
+def _zbirna_teka(key: str, run_dirs: list[Path]) -> str:
+    """Чому цю теку не можна спакувати однією справою; порожньо — можна."""
+    from nyshporka.cases import span as SP
+
+    names = [d.name for d in run_dirs]
+    case_dir = align.case_dir_for(key) if key else None
+    got = (SP.of_dir(case_dir, *names) if case_dir is not None
+           else SP.of_passport({}, *names))
+    if got is None:
+        return ""
+    return f"збірна тека: {got.why}. {SP.fix(str(case_dir or names[0]))}"
+
+
 def pack(scope: str, dest: Path | None = None, *, geometry: bool = True,
          hash_frames: bool = False, partial_why: str = "",
          dry_run: bool = False, **meta: Any) -> dict[str, Any]:
@@ -891,6 +904,12 @@ def pack(scope: str, dest: Path | None = None, *, geometry: bool = True,
             "--frames N (або `nysh share card <справа> --frames N`). Якщо числа "
             "справді взяти нізвідки: --frames-unknown \"чому\"")
         out["pack_refusals"] = [bez_znamennyka]
+    # 🔴 Збірна тека не пакується як одна справа: у каталог пулу поїхала б
+    # шифра першої з кадрами й текстом усіх. Відмова тут, а не у воротах —
+    # ворота імпортує пул, і теки на диску він не бачить.
+    zbirna = _zbirna_teka(details.get("key") or "", run_dirs)
+    if zbirna:
+        out.setdefault("pack_refusals", []).append(zbirna)
     if dry_run:
         out["files_list"] = [f["arc"] for f in sketch["files"]]
         if geometry and geom_sketch:
@@ -902,6 +921,8 @@ def pack(scope: str, dest: Path | None = None, *, geometry: bool = True,
         raise PublishError("ворота не пропустили пакет:\n" + gates.describe(verdict))
     if bez_znamennyka:
         raise PublishError(bez_znamennyka)
+    if zbirna:
+        raise PublishError(zbirna)
 
     if card_fields and remember and details["key"]:
         # Задане на пакуванні живе й далі: наступне пакування (автовіддача,
