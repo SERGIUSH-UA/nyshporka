@@ -126,6 +126,10 @@ class SharePackArgs(_CardFields):
                                           "зате прив'язка стане точною")
     partial: str = Field(default="", description="пояснення, чому прочитано не "
                                                  "всю справу; знімає ворота знаменника")
+    frames_unknown: str = Field(default="",
+                                description="чому число кадрів справи невідоме — "
+                                            "коли його справді взяти нізвідки; "
+                                            "інакше назвіть його полем frames")
     dry_run: bool = Field(default=False,
                           description="показати, що поїде, і нічого не писати")
     publisher: str = Field(default="", description="ваше ім'я або псевдонім")
@@ -182,7 +186,9 @@ def share_pack(a: SharePackArgs) -> Envelope:
                    contact=_contact(a.contact, defaults["contact"]),
                    site=a.site or defaults["site"], note=a.note,
                    links=links,
-                   extra={**extra, **({"partial": a.partial} if a.partial else {})},
+                   extra={**extra, **({"partial": a.partial} if a.partial else {}),
+                          **({"frames_unknown": a.frames_unknown.strip()}
+                             if a.frames_unknown.strip() else {})},
                    license_text=a.license or defaults["license"],
                    source_terms=a.source_terms or defaults["source_terms"],
                    archive_name=a.archive_name, skip_runs=list(a.skip_run),
@@ -200,6 +206,8 @@ def share_pack(a: SharePackArgs) -> Envelope:
     # жодного сліду, що справжнє пакування не пройде.
     for why in gates.get("refusals") or []:
         env.warn("gate_refusal", str(why))
+    for why in got.get("pack_refusals") or []:
+        env.warn("pack_refusal", str(why))
     return env
 
 

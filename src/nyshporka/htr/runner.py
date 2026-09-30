@@ -2090,6 +2090,29 @@ def _read_prev_meta(path: Path) -> dict | None:
     return {}
 
 
+def run_config(args: Any, device: str, shard_n: int) -> dict[str, Any]:
+    """З чим ішов цей процес: шард, пачки, пристрій, ядра й потоки.
+
+    🔴 Час за етапами (`stages_total`) без цього нічого не каже: «сегментація
+    чекала карту 40% часу» — це про три шарди на одній карті чи про один? Заміри
+    з різних машин і різних запусків можна зіставити лише тоді, коли поруч із
+    ними лежить конфігурація (звіт користувача 29.09.2026: виграш від двох
+    шардів у нього лишився невиміряним саме через це).
+    """
+    return {
+        "shard": str(getattr(args, "shard", "") or ""),
+        "shards": int(shard_n),
+        "batch": int(getattr(args, "batch", 0) or 0),
+        "voice_batch": int(getattr(args, "voice_batch", 0) or 0),
+        "device": str(device),
+        "gpu_sato": bool(getattr(args, "gpu_sato", False)),
+        "cores": usable_cores(),
+        "cores_seen": int(os.cpu_count() or 0),
+        "threads": str(_SELF_LIMITED_TO if _SELF_LIMITED_TO is not None
+                       else os.environ.get("OMP_NUM_THREADS") or ""),
+    }
+
+
 def merge_meta(out_dir: Path, base: dict) -> None:
     """Звести `_htr_meta.part*.json` шардів у спільний `_htr_meta.json`.
 
@@ -2110,6 +2133,12 @@ def merge_meta(out_dir: Path, base: dict) -> None:
         pages.update(prev.get("pages") or {})
         started = prev.get("started") or started
         done_all = True
+        # Час за етапами й конфігурація живуть у партах: кожен шард міряє свої
+        # сторінки. У спільну мету вони йдуть сумою — інакше прогін шардами
+        # лишався б без замірів узагалі.
+        stages: dict[str, float] = {}
+        stages_pages = 0
+        configs: list[dict] = []
         parts = sorted(out_dir.glob("_htr_meta.part*.json"))
         for part in parts:
             try:
@@ -2118,6 +2147,12 @@ def merge_meta(out_dir: Path, base: dict) -> None:
                 done_all = False
                 continue
             pages.update(d.get("pages") or {})
+            if isinstance(d.get("stages_total"), dict):
+                for k, v in d["stages_total"].items():
+                    stages[k] = stages.get(k, 0.0) + float(v or 0)
+                stages_pages += int(d.get("stages_pages") or 0)
+            if isinstance(d.get("run_config"), dict):
+                configs.append(d["run_config"])
             for f in d.get("failed") or []:
                 if f not in failed:
                     failed.append(f)
@@ -2146,6 +2181,12 @@ def merge_meta(out_dir: Path, base: dict) -> None:
         merged = {**base, **carried, "started": started, "pages": pages,
                   "failed": failed, "done": done_all and bool(parts),
                   "updated": datetime.now().isoformat(timespec="seconds")}
+        if stages_pages:
+            merged["stages_total"] = {k: round(v, 1) for k, v in stages.items()}
+            merged["stages_pages"] = stages_pages
+        if configs:
+            merged["run_config"] = {**configs[0], "shard": "",
+                                    "parts": sorted(c.get("shard") or "" for c in configs)}
         atomic_write(merged_path,
                      json.dumps(merged, ensure_ascii=False, indent=1) + "\n")
 
@@ -3388,6 +3429,7 @@ def _main_case(args: argparse.Namespace, cache: dict | None = None) -> int:
         if shard_n > 1 and (force or saves % 5 == 0):
             merge_meta(out_dir, meta_base)
 
+    meta["run_config"] = run_config(args, device, shard_n)
     n = len(pages_all)
     shard_note = f" · шард {shard_k + 1}/{shard_n}" if shard_n > 1 else ""
     script_note = {"latin": "латинка", "cyrillic": "кирилиця",

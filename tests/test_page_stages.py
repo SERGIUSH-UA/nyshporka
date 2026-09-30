@@ -63,3 +63,38 @@ def test_pidsumok_kazhe_de_rakhuietsia() -> None:
     assert "розпізнавання 2.0 с · карта" in s
     assert "sato 1.0 с · процесор" in R.stages_summary(total, 2, "cuda:0", gpu_sato=False)
     assert R.stages_summary({}, 0, "cpu", gpu_sato=False) == ""
+
+
+# ── з чим ішов прогін — поруч із замірами ─────────────────────────────────────
+
+def test_konfihuratsiia_prohonu() -> None:
+    """Заміри етапів без конфігурації не зіставити між машинами й запусками."""
+    import argparse
+
+    args = argparse.Namespace(shard="2/3", batch=32, voice_batch=8, gpu_sato=True)
+    got = R.run_config(args, "cuda:0", 3)
+
+    assert (got["shard"], got["shards"], got["batch"], got["voice_batch"]) == ("2/3", 3, 32, 8)
+    assert got["device"] == "cuda:0" and got["gpu_sato"] is True
+    assert got["cores"] >= 1 and got["cores_seen"] >= got["cores"]
+
+
+def test_zvedena_meta_sumuie_etapy_shardiv(tmp_path) -> None:
+    """🔴 Прогін шардами лишався без замірів: вони жили лише в партах."""
+    import json
+
+    for k, (segment, pages) in enumerate(((10.0, 4), (14.5, 6)), 1):
+        (tmp_path / f"_htr_meta.part{k}.json").write_text(json.dumps({
+            "pages": {f"000{k}.jpg": {}}, "done": True,
+            "stages_total": {"segment": segment, "recognize": 1.0},
+            "stages_pages": pages,
+            "run_config": {"shard": f"{k}/2", "shards": 2, "batch": 32}}),
+            encoding="utf-8")
+
+    R.merge_meta(tmp_path, {"model": "m"})
+
+    meta = json.loads((tmp_path / "_htr_meta.json").read_text(encoding="utf-8"))
+    assert meta["stages_total"] == {"segment": 24.5, "recognize": 2.0}
+    assert meta["stages_pages"] == 10
+    assert meta["run_config"]["parts"] == ["1/2", "2/2"] and meta["run_config"]["shards"] == 2
+

@@ -6,6 +6,8 @@ r"""`nysh text` — текстовий стор: стан, збірка, рег�
 """
 from __future__ import annotations
 
+from typing import Any
+
 import typer
 
 from nyshporka import brand
@@ -159,6 +161,18 @@ def grep_cmd(
         console.print(f"[muted]декод: показано {len(hits)} із {env.data.get('total', len(hits))} · "
                       f"прогонів {cov.get('runs')} · {how} "
                       f"{cov.get('pages_scanned')} із {cov.get('pages')}[/muted]")
+    _reach_line(cov)
+
+
+def _reach_line(block: dict[str, Any]) -> None:
+    """Рядок «охоплено: …» — звідки взято область пошуку (`search.reach`)."""
+    from rich.markup import escape
+
+    from nyshporka.search import reach as R
+
+    text = R.line(block.get("reach") or {})
+    if text:
+        console.print(f"[muted]{escape(text)}[/muted]")
 
 
 # ── етап 2: контекст, кроп, голоси, покриття, картка ─────────────────────────
@@ -389,6 +403,7 @@ def find_cmd(
                   f"сторінок без дублів голосів {led.get('pages_scoped')} · "
                   f"голоси: {', '.join(led.get('voices') or []) or '—'} · письмо: "
                   f"{', '.join(led.get('scripts') or []) or '?'}")
+    _reach_line(led)
     sh = led.get("shared")
     if sh:
         console.print(f"[warn]з них чужий декод:[/warn] прогонів {sh['runs']} із "

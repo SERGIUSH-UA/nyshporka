@@ -1766,6 +1766,13 @@ def search_run(a: SearchArgs) -> Envelope:
                                # немає, зате поруч стоять наші імена» — це інша
                                # відповідь, ніж «немає нічого».
                                "anchor": res.get("anchor") or {"on": False}}})
+        if scope_kind == "all" or not (res.get("hits") or []):
+            # Звідки взято область: без цього «прочесано N прогонів» не каже,
+            # що лишилось поза пошуком (`search.reach`).
+            from nyshporka import htr_store as _S
+            from nyshporka.search import reach as _R
+
+            env.data["coverage"]["reach"] = _R.reach(len(_S.list_cases()))
         _warn_anchors(env, res.get("anchor") or {})
         # 🧾 Чим цю справу вже шукали. Мовчати про це означає давати людині
         # починати з нуля там, де робота зроблена, — або, гірше, вважати

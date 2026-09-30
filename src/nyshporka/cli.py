@@ -1476,6 +1476,13 @@ def search_cmd(
             console.print(f"[muted]{name}: {info.get('total', 0)} · справ "
                           f"{cov.get('cases')}[/muted]")
     console.print(f"[muted]показано {len(hits)} із {env.data.get('total', len(hits))}[/muted]")
+    from nyshporka.search import reach as _reach
+
+    okhopleno = _reach.line((env.data.get("coverage") or {}).get("reach") or {})
+    if okhopleno:
+        from rich.markup import escape
+
+        console.print(f"[muted]{escape(okhopleno)}[/muted]")
     if hits:
         console.print("[muted]подивитись оком: гортач у `nysh serve` — і брати "
                       "line_index, не line_no[/muted]")

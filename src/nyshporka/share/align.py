@@ -103,10 +103,18 @@ def frames_of(case_dir: Path, *, hash_frames: bool = False) -> list[dict[str, An
     case_dir = Path(case_dir)
     if not case_dir.is_dir():
         return []
+    from nyshporka.core import framename
+
     fs = _fs_sidecar(case_dir)
+    source = _fetched_from(case_dir)
     out: list[dict[str, Any]] = []
     for n, path in enumerate(frames_sorted(case_dir), 1):
         row: dict[str, Any] = {"n": n, "name": path.name}
+        # id кадру в джерелі — той самий у кожного, хто качав цю справу звідти,
+        # хоч би як він потім назвав файли.
+        src = framename.parse(path.name, source).src
+        if src:
+            row["src"] = src
         with contextlib.suppress(OSError):
             row["bytes"] = path.stat().st_size
         side = fs.get(path.stem) or {}
@@ -121,11 +129,25 @@ def frames_of(case_dir: Path, *, hash_frames: bool = False) -> list[dict[str, An
     return out
 
 
+def _fetched_from(case_dir: Path) -> str:
+    """З якого джерела завантажено теку — з її паспорта; невідомо — порожньо."""
+    from nyshporka.cases.register import read_sidecar
+
+    try:
+        return str(read_sidecar(Path(case_dir)).get("fetched_from") or "")
+    except Exception:
+        return ""
+
+
 def summary(frames: list[dict[str, Any]]) -> dict[str, Any]:
     """Шапка переліку кадрів для маніфесту."""
-    return {"total": len(frames), "listed": len(frames),
-            "with_sha256": sum(1 for f in frames if f.get("sha256")),
-            "with_apid": sum(1 for f in frames if f.get("apid"))}
+    out = {"total": len(frames), "listed": len(frames),
+           "with_sha256": sum(1 for f in frames if f.get("sha256")),
+           "with_apid": sum(1 for f in frames if f.get("apid"))}
+    with_src = sum(1 for f in frames if f.get("src"))
+    if with_src:
+        out["with_src"] = with_src
+    return out
 
 
 # ── вимірювання прив'язки ────────────────────────────────────────────────────
@@ -235,6 +257,7 @@ def grade(theirs: list[dict[str, Any]], case_dir: Path | None, *,
             return got
 
     for field, why in (("apid", "ідентифікатори кадрів FamilySearch"),
+                       ("src", "ідентифікатори кадрів у джерелі"),
                        ("sha256", "хеші кадрів")):
         a, b = _keyset(theirs, field), _keyset(ours, field)
         both = a & b
@@ -326,6 +349,24 @@ def _frames_dir(p: Path) -> Path | None:
         if d.is_dir() and any(is_frame(x) for x in d.iterdir()):
             return d
     return None
+
+
+def page_names(theirs: list[dict[str, Any]], case_dir: Path | None) -> dict[str, str]:
+    """Ім'я кадру донора → ім'я ТОГО САМОГО кадру на цій машині. Порожньо — не доведено.
+
+    🔴 Лише за id кадру в джерелі й лише коли збіглися ВСІ кадри з обох
+    боків, по одному на id. За позицією й за схожістю імен не зіставляється
+    нічого: збіг кількості доводить лише кількість, а текст, покладений на
+    сусідній аркуш, гірший за текст без аркуша — він виглядає прив'язаним.
+    """
+    if case_dir is None:
+        return {}
+    ours = frames_of(case_dir)
+    a = {str(f["src"]): str(f["name"]) for f in theirs if f.get("src") and f.get("name")}
+    b = {str(f["src"]): str(f["name"]) for f in ours if f.get("src")}
+    if not a or len(a) != len(theirs) or len(b) != len(ours) or set(a) != set(b):
+        return {}
+    return {a[s]: b[s] for s in a}
 
 
 def case_home_for(case_key: str, opys: str = "") -> Path | None:

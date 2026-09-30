@@ -548,6 +548,13 @@ def _accept_seen(seen: Look, src: str, *, force: bool, replace: bool,
     case_dir = align.case_dir_for(key) if key else None
     content = str(seen.manifest.decode.get("content_sha256") or "")
     voices = {str(v.get("run")): v for v in seen.manifest.voices}
+    # 🔴 Сторінки пакета названі іменами кадрів ДОНОРА. Якщо та сама справа на
+    # цій машині лежить під іншими іменами, текст не знаходив свого скана: він
+    # був у прогоні, а аркуш до нього показати було нічим. Імена переводяться
+    # на місцеві лише там, де тотожність кадрів доведена id джерела.
+    names = (align.page_names(seen.frames, case_dir)
+             if seen.alignment.label == align.EXACT else {})
+    names = {a: b for a, b in names.items() if a != b}
 
     # 🔴 Розпакування, позначка й заміна — у тимчасовій сусідній теці, а на
     # місце прогону тека стає ОДНИМ перейменуванням. Доти старе стиралось,
@@ -571,7 +578,7 @@ def _accept_seen(seen: Look, src: str, *, force: bool, replace: bool,
             # людини: вони діставали чужу шифру й позначку «прийнято з пакета».
             _stamp_run(d, seen.manifest, seen.path, voice=voices.get(d.name) or {},
                        key=key, case_dir=case_dir, content=content,
-                       alignment=seen.alignment.label)
+                       alignment=seen.alignment.label, names=names)
         dirs, clean = _swap_in(stage, staged, htr_root, previous)
     finally:
         # Не вдалось перенести з відсунутої теки щось, що не з пакета, — тоді
@@ -602,6 +609,8 @@ def _accept_seen(seen: Look, src: str, *, force: bool, replace: bool,
         "case_key": key,
         "pages": seen.manifest.pages,
         "alignment": seen.alignment.as_json(),
+        # Скільки сторінок перейшло на імена місцевих кадрів (за id джерела).
+        "renamed": len(names),
         "stamped_key": stamped_key,
         "stamped_case_dir": stamped_dir,
         "proof": proof,
@@ -696,8 +705,19 @@ def _accept_geometry_at(path: Path, src: str, *, force: bool, reindex: bool,
                 f"прив'язані до пікселів чужої зйомки й на ваших кадрах різали б "
                 f"не ті рядки. Покласти попри це: --force")
 
-    poverkh = sorted(f"{run}/{name}" for run, name in lezhyt
-                     if (htr_root / run / name).is_file())
+    # Текст цього прогону міг лягти під іменами місцевих кадрів — тоді й рамки
+    # лягають під ними ж.
+    stems: dict[str, dict[str, str]] = {}
+    for r in runs:
+        got = (read_meta(htr_root / r).get("shared") or {}).get("page_stems")
+        stems[r] = {str(a): str(b) for a, b in got.items()} if isinstance(got, dict) else {}
+
+    def _misceve(run: str, name: str) -> str:
+        stem = name[: -len(".lines.json")]
+        return f"{stems[run].get(stem, stem)}.lines.json"
+
+    poverkh = sorted(f"{run}/{_misceve(run, name)}" for run, name in lezhyt
+                     if (htr_root / run / _misceve(run, name)).is_file())
     if poverkh and not force:
         raise AcceptError(
             f"геометрія для цих сторінок уже є ({len(poverkh)}, напр. "
@@ -706,10 +726,19 @@ def _accept_geometry_at(path: Path, src: str, *, force: bool, reindex: bool,
     # 🔴 Другий білий список — тут, на прийманні. Пакувальник кладе в
     # geom-пакет лише `*.lines.json`, але чужому tar це не зобов'язання:
     # підкинутий `_htr_meta.json` перетер би позначку походження тексту.
-    dirs = bundle.extract(path, htr_root, runs=set(runs),
-                          keep=lambda n: n.endswith(".lines.json"))
-    if not dirs:
-        raise AcceptError("геометрія не лягла: у пакеті не виявилось прогонів")
+    stage = htr_root / f"{_STAGE_PREFIX}{os.getpid()}-{time.time_ns()}"
+    try:
+        staged = bundle.extract(path, stage, runs=set(runs),
+                                keep=lambda n: n.endswith(".lines.json"))
+        if not staged:
+            raise AcceptError("геометрія не лягла: у пакеті не виявилось прогонів")
+        dirs = []
+        for d in staged:
+            for f in sorted(d.iterdir()):
+                f.replace(htr_root / d.name / _misceve(d.name, f.name))
+            dirs.append(htr_root / d.name)
+    finally:
+        shutil.rmtree(stage, ignore_errors=True)
 
     indexed = _reindex(dirs) if reindex else []
 
@@ -754,9 +783,34 @@ def _reindex(dirs: list[Path]) -> list[str]:
     return list(ST.ensure_all([d.name for d in dirs], force=True))
 
 
+def _rename_pages(run_dir: Path, names: dict[str, str]) -> dict[str, str]:
+    """Перевести файли сторінок на імена місцевих кадрів. Повертає стем → стем.
+
+    Два проходи через тимчасові імена: відповідність — перестановка, і ім'я,
+    яке одна сторінка звільняє, інша може в ту ж мить займати.
+    """
+    stems = {Path(a).stem: Path(b).stem for a, b in names.items()}
+    stems = {a: b for a, b in stems.items() if a != b}
+    moved: list[tuple[Path, Path]] = []
+    for a, b in stems.items():
+        for suffix in _PAGE_SUFFIXES:
+            src = run_dir / f"{a}{suffix}"
+            if src.is_file():
+                tmp = run_dir / f".nysh-rename-{len(moved)}{suffix}"
+                src.rename(tmp)
+                moved.append((tmp, run_dir / f"{b}{suffix}"))
+    for tmp, dst in moved:
+        tmp.replace(dst)
+    return stems
+
+
+#: Файли однієї сторінки прогону: текст і рамки рядків.
+_PAGE_SUFFIXES = (".txt", ".lines.json")
+
+
 def _stamp_run(run_dir: Path, m: Manifest, src: Path, *, voice: dict[str, Any],
                key: str, case_dir: Path | None, content: str,
-               alignment: str) -> None:
+               alignment: str, names: dict[str, str] | None = None) -> None:
     """Підготувати мету прийнятого прогону: чистка, шифра, тека кадрів, позначка.
 
     Один прохід на теку, а не три штампи поспіль: кожен із них окремо
@@ -796,7 +850,10 @@ def _stamp_run(run_dir: Path, m: Manifest, src: Path, *, voice: dict[str, Any],
         meta.pop("case_key", None)
     if case_dir is not None:
         meta["case_dir"] = str(case_dir).replace("\\", "/")
-    mark = {
+    stems = _rename_pages(run_dir, names or {})
+    if names and isinstance(meta.get("pages"), dict):
+        meta["pages"] = {names.get(str(k), str(k)): v for k, v in meta["pages"].items()}
+    mark: dict[str, Any] = {
         "from": str((m.publisher or {}).get("handle") or ""),
         "contact": str((m.publisher or {}).get("contact") or ""),
         "bundle": src.name,
@@ -807,6 +864,16 @@ def _stamp_run(run_dir: Path, m: Manifest, src: Path, *, voice: dict[str, Any],
         "content_sha256": content,
         "alignment": alignment,
         "at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+        # Знаменник автора пакета й причина, з якої прочитано не все. Доти
+        # вони лишались у пакеті-доказі: уривок на 14% після прийому нічим не
+        # відрізнявся від прочитаної справи.
+        "pages": m.pages,
+        "frames": m.frames_total,
+        "partial": _partial_note(m),
+        # Стем сторінки в пакеті → стем на цій машині. Геометрія, що доїде
+        # другим пакетом, названа так само, як був названий текст, і мусить
+        # лягти під ті самі нові імена (`accept_geometry`).
+        "page_stems": stems,
     }
     meta["shared"] = {k: v for k, v in mark.items() if v}
     write_json(path, meta)

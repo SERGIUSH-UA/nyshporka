@@ -16,6 +16,9 @@ from _share import make_run
 
 from nyshporka.share import bundle, opys
 
+#: Кадрів у тестовій справі немає — пакування мусить про це сказати вголос.
+BEZ_KADRIV = {"frames_unknown": "тестова справа без кадрів"}
+
 
 @pytest.fixture
 def space(tmp_path: Path) -> Any:
@@ -132,7 +135,7 @@ def test_pakuvannia_nese_vidkynuti_prohony(space: Path, monkeypatch: Any) -> Non
         "shifra": "ДАХмО 315-1-8433"})
     monkeypatch.setattr("nyshporka.cloud.verify.voice_dirs", lambda d: [zamir])
 
-    got = PUB.pack("DAHMO/315/8433", geometry=False)
+    got = PUB.pack("DAHMO/315/8433", geometry=False, extra=BEZ_KADRIV)
     assert got["runs"] == ["spr-8433"]
     assert got["skipped_runs"][0]["run"] == "spr-8433-skryba"
     with tarfile.open(got["path"]) as tar:
@@ -178,12 +181,12 @@ def test_kartka_z_pakuvannia_zapamiatovuietsia(space: Path, monkeypatch: Any) ->
     fields = K.normalize(title="Сповідні розписи Слобідки", years="1795-1797",
                          places=["Слобідка"], doc_type="confession")
 
-    got = PUB.pack("DAHMO/315/8433", geometry=False, card_fields=fields)
+    got = PUB.pack("DAHMO/315/8433", geometry=False, card_fields=fields, extra=BEZ_KADRIV)
     case = got["manifest"]["case"]
     assert case["title"] == "Сповідні розписи Слобідки"
     assert case["years"] == [1795, 1797] and case["doc_type"] == "confession"
 
-    again = PUB.pack("DAHMO/315/8433", geometry=False)
+    again = PUB.pack("DAHMO/315/8433", geometry=False, extra=BEZ_KADRIV)
     assert again["manifest"]["case"]["title"] == "Сповідні розписи Слобідки", \
         "наступне пакування мусить узяти ту саму картку"
 
@@ -291,10 +294,10 @@ def test_bez_heometrii_staryi_geom_prybyraietsia(space: Path, monkeypatch: Any) 
     run = make_run(_root(space), "spr-8433", geometry=True)
     monkeypatch.setattr(PUB, "resolve_runs", lambda scope, **kw: (
         [run], {"key": "", "shifra": "ДАХмО 315-1-8433"}))
-    z = PUB.pack("ДАХмО 315-1-8433", geometry=True)
+    z = PUB.pack("ДАХмО 315-1-8433", geometry=True, extra=BEZ_KADRIV)
     geom = Path(z["geom"]["path"])
     assert geom.is_file()
-    PUB.pack("ДАХмО 315-1-8433", geometry=False)
+    PUB.pack("ДАХмО 315-1-8433", geometry=False, extra=BEZ_KADRIV)
     assert not geom.exists(), "рамки старого пакування поїхали б до нового тексту"
 
 
@@ -311,3 +314,59 @@ def test_geom_inshoho_tekstu_ne_zalyvaietsia(space: Path, tmp_path: Path) -> Non
     m.decode["content_sha256"] = "b" * 64
     bundle.write(bundle.geom_path(text), m, [run], patterns=bundle.PACKED_GEOM)
     assert not upload._geom_fresh(text, bundle.geom_path(text))
+
+
+# ── Число кадрів при пакуванні ────────────────────────────────────────────────
+
+def test_bez_chysla_kadriv_paket_ne_zbyraietsia(space: Path, monkeypatch: Any) -> None:
+    """🔴 Ворота таке пускають із попередженням; той, хто пакує зараз, — ні.
+
+    Отримувач пакета без числа кадрів не відрізнить прочитану справу від
+    уривка (звіт користувача 29.09.2026). Відмова — на пакуванні, а не у
+    воротах: ними судить і пул, а старі клієнти мусять заливати далі.
+    """
+    PUB = _bez_kadriv(space, monkeypatch)
+
+    with pytest.raises(PUB.PublishError, match="--frames-unknown"):
+        PUB.pack("DAZHO/1/2149", geometry=False)
+
+    proba = PUB.pack("DAZHO/1/2149", geometry=False, dry_run=True)
+    assert "--frames N" in proba["pack_refusals"][0]
+    assert proba["gates"]["passed"] is True, "ворота не міняються"
+
+
+def test_nevidome_chyslo_kadriv_nazvane_vholos(space: Path, monkeypatch: Any) -> None:
+    PUB = _bez_kadriv(space, monkeypatch)
+
+    got = PUB.pack("DAZHO/1/2149", geometry=False,
+                   extra={"frames_unknown": "скани знищено, опису немає"})
+
+    assert "pack_refusals" not in got
+    assert got["manifest"]["extra"]["frames_unknown"] == "скани знищено, опису немає"
+    assert Path(got["path"]).is_file()
+
+
+def test_nazvane_chyslo_kadriv_znimaie_vidmovu(space: Path, monkeypatch: Any) -> None:
+    from nyshporka.share import card as K
+
+    PUB = _bez_kadriv(space, monkeypatch)
+    got = PUB.pack("DAZHO/1/2149", geometry=False, partial_why="лише Пряжів",
+                   card_fields=K.normalize(frames=310))
+
+    assert "pack_refusals" not in got and Path(got["path"]).is_file()
+
+
+def test_operatsiia_pakuvannia_nese_prychynu(space: Path, monkeypatch: Any) -> None:
+    from nyshporka import ops as O
+
+    _bez_kadriv(space, monkeypatch)
+    vidmova = O.call("share.pack", {"case": "DAZHO/1/2149", "geometry": False})
+    assert not vidmova.ok and "--frames" in str(vidmova.error)
+
+    proba = O.call("share.pack", {"case": "DAZHO/1/2149", "geometry": False,
+                                  "dry_run": True})
+    assert any(w.code == "pack_refusal" for w in proba.warnings)
+
+    ok = O.call("share.pack", {"case": "DAZHO/1/2149", "geometry": False,
+                               "frames_unknown": "PDF без числа сторінок"})
+    assert ok.ok, ok.error

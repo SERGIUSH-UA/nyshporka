@@ -787,6 +787,10 @@ def _geometry_pages(run_dirs: list[Path]) -> int:
                default=0)
 
 
+#: Поле `extra` маніфесту: чому число кадрів справи невідоме.
+FRAMES_UNKNOWN = "frames_unknown"
+
+
 def pack(scope: str, dest: Path | None = None, *, geometry: bool = True,
          hash_frames: bool = False, partial_why: str = "",
          dry_run: bool = False, **meta: Any) -> dict[str, Any]:
@@ -825,6 +829,20 @@ def pack(scope: str, dest: Path | None = None, *, geometry: bool = True,
         # бо це запит у мережу. Лише підказки, заливку вони не зупиняють.
         "opys_check": opys_check.check(m.case, network=dry_run),
     }
+    # 🔴 Пакет без числа кадрів справи не збирається мовчки. Ворота його
+    # пускають із попередженням (і пускатимуть: ними судить і пул, а старі
+    # клієнти мусять заливати далі) — але отримувач такого пакета не відрізнить
+    # прочитану справу від уривка. Тож той, хто пакує ЗАРАЗ, мусить або назвати
+    # число, або сказати вголос, що його немає й чому (звіт користувача
+    # 29.09.2026).
+    bez_znamennyka = ""
+    if m.frames_total <= 0 and not str(m.extra.get(FRAMES_UNKNOWN) or "").strip():
+        bez_znamennyka = (
+            "кадрів справи не названо — без цього числа отримувач не відрізнить "
+            "прочитану справу від уривка. Назвіть його з каталогу чи опису: "
+            "--frames N (або `nysh share card <справа> --frames N`). Якщо числа "
+            "справді взяти нізвідки: --frames-unknown \"чому\"")
+        out["pack_refusals"] = [bez_znamennyka]
     if dry_run:
         out["files_list"] = [f["arc"] for f in sketch["files"]]
         if geometry and geom_sketch:
@@ -834,6 +852,8 @@ def pack(scope: str, dest: Path | None = None, *, geometry: bool = True,
         return out
     if not verdict.passed:
         raise PublishError("ворота не пропустили пакет:\n" + gates.describe(verdict))
+    if bez_znamennyka:
+        raise PublishError(bez_znamennyka)
 
     if card_fields and remember and details["key"]:
         # Задане на пакуванні живе й далі: наступне пакування (автовіддача,

@@ -151,19 +151,32 @@ FETCH_ERRORS_KEPT = 50
 _KADR = (".jpg", ".jpeg", ".png", ".tif", ".tiff", ".pdf", ".djvu")
 
 
-def frame_files(case_dir: Path, dest: Path) -> list[dict[str, Any]]:
+def frame_files(case_dir: Path, dest: Path, *, source: str = "") -> list[dict[str, Any]]:
     """Файли кадрів у `dest` — шляхом від теки справи, з розміром і `sha256`.
 
     Порядок — за іменем: саме так його бачать раннер і пакувальник.
+
+    `n` — номер кадру у справі, `src` — id того самого кадру в джерелі; обидва
+    лише там, де ім'я їх несе (`core.framename`). 🔴 Окремими полями, бо це
+    різні числа: «кадр 37» і «кадр 351120 на сайті архіву» — і ще третє,
+    `pagecount`: кадр не дорівнює сторінці PDF, а сторінка — аркушу справи.
     """
+    from nyshporka.core import framename
+
     out: list[dict[str, Any]] = []
     for p in sorted(dest.iterdir()) if dest.is_dir() else []:
         if not p.is_file() or p.suffix.lower() not in _KADR:
             continue
         rel = p.relative_to(case_dir).as_posix() if p.is_relative_to(case_dir) else p.name
         many = p.suffix.lower() in (".pdf", ".djvu")
-        out.append({"file": rel, "pagecount": page_count(p) if many else 1,
-                    "size": p.stat().st_size, "sha256": sha256_of(p)})
+        row: dict[str, Any] = {"file": rel, "pagecount": page_count(p) if many else 1,
+                               "size": p.stat().st_size, "sha256": sha256_of(p)}
+        kadr = framename.parse(p.name, source)
+        if kadr.n is not None:
+            row["n"] = kadr.n
+        if kadr.src:
+            row["src"] = kadr.src
+        out.append(row)
     return out
 
 
@@ -195,7 +208,7 @@ def record_fetch(case_dir: Path, res: Any, *, source: str, ref: str, url: str = 
         "frames_new": res.frames, "frames_reused": res.skipped,
         "fetch_errors": list(res.errors[:FETCH_ERRORS_KEPT]),
         "fetch_errors_n": len(res.errors),
-        "files": frame_files(case_dir, Path(res.dest)),
+        "files": frame_files(case_dir, Path(res.dest), source=source),
     })
     passport.update(extra or {})
     patch_meta(case_dir, passport)

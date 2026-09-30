@@ -101,6 +101,15 @@ def find_page(conn: Any, run: str, page: str) -> str | None:
     pages = [str(pg) for (pg,) in conn.execute(
         "select p.page from pages p join runs r on r.id=p.run_id where r.run=? "
         "order by p.id", (run,))]
+    # 🔴 Спершу номер кадру У СПРАВІ, де ім'я його несе окремо від id джерела
+    # (`0037_f351120`): остання група цифр такого імені — id кадру на сайті
+    # архіву, і «скан 37» справи з ARCHIUM доти не знаходився взагалі.
+    if not want[1]:
+        from nyshporka.core import framename
+
+        for pg in pages:
+            if framename.parse(pg).n == want[0]:
+                return pg
     for pg in pages:
         if _page_key(pg) == want:
             return pg
@@ -893,6 +902,10 @@ def _find_one(q: str, scope: str = "", *, thresh: int = 78, limit: int = 40,
               "short_stems": short,
               "pages_scoped": res.get("pages"), "channels": channels,
               "searched_before": TRACE.of(key) if key else []}
+    if sc["kind"] == "all":
+        from nyshporka.search import reach as _R
+
+        ledger["reach"] = _R.reach(len(rows))
     return {"q": q, "scope": sc["kind"], "case_key": key, "shifra": res.get("scope_shifra") or "",
             "hits": res.get("hits") or [], "total": res.get("total"),
             "stems": res.get("stems"), "stems_dropped": res.get("stems_dropped") or [],

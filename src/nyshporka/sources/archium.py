@@ -41,6 +41,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
 
 from nyshporka.archives.pack import Site
+from nyshporka.core import framename
 from nyshporka.sources.base import (
     FetchResult,
     Hit,
@@ -949,7 +950,7 @@ class ArchiumSource:
                 # Ім'я несе І номер сторінки, І id кадру: за сторінкою читають
                 # по порядку, за id знаходять той самий кадр на сайті, коли
                 # прочитане треба звірити з оригіналом.
-                dst = dest / f"{page:04d}_f{image_id}.jpg"
+                dst = dest / f"{framename.build(page, image_id)}.jpg"
                 if dst.exists() and dst.stat().st_size > 0:
                     res.skipped += 1
                 else:

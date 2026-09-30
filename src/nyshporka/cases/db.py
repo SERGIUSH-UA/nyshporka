@@ -401,6 +401,18 @@ def kind_counts(db_path: Path | None = None) -> dict[str, int]:
         con.close()
 
 
+def read_counts(db_path: Path | None = None) -> dict[str, int]:
+    """Скільки справ у реєстрі й скільки з них без жодного прогону."""
+    con = _connect(db_path)
+    try:
+        row = con.execute(
+            "SELECT count(*), coalesce(sum(CASE WHEN coalesce(htr_stage, 'none') = 'none' "
+            "THEN 1 ELSE 0 END), 0) FROM cases WHERE kind = 'case'").fetchone()
+    finally:
+        con.close()
+    return {"cases": int(row[0] or 0), "unread": int(row[1] or 0)}
+
+
 def orphan_runs(db_path: Path | None = None) -> list[dict[str, Any]]:
     con = _connect(db_path)
     try:

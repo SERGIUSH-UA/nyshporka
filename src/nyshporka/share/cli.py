@@ -106,6 +106,9 @@ def pack_cmd(
                                           "зате прив'язка стане точною"),
     partial: str = typer.Option("", "--partial",
                                 help="чому прочитано не всю справу"),
+    frames_unknown: str = typer.Option(
+        "", "--frames-unknown",
+        help="чому число кадрів справи невідоме (коли --frames назвати нема з чого)"),
     dry_run: bool = typer.Option(False, "--dry-run",
                                  help="показати, що поїде, і не писати нічого"),
     publisher: str = typer.Option("", "--as", help="ваше ім'я або псевдонім"),
@@ -145,6 +148,7 @@ def pack_cmd(
     env = O.call("share.pack", {
         "case": case, "out": out, "geometry": geometry,
         "hash_frames": hash_frames, "partial": partial, "dry_run": dry_run,
+        "frames_unknown": frames_unknown,
         "publisher": publisher, "contact": contact, "site": site, "note": note,
         "link": list(link), "extra": list(extra), "license": license_,
         "source_terms": source_terms, "archive_name": archive_name,

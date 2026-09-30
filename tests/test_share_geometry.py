@@ -17,6 +17,9 @@ from _share import make_run, manifest_for
 
 from nyshporka.share import accept, bundle, journal
 
+#: Кадрів у тестовій справі немає — пакування мусить про це сказати вголос.
+BEZ_KADRIV = {"frames_unknown": "тестова справа без кадрів"}
+
 
 @pytest.fixture
 def space(tmp_path: Path) -> Any:
@@ -71,7 +74,7 @@ def test_pack_pyshe_dva_faily(space: Path, monkeypatch: Any) -> None:
     monkeypatch.setattr(PUB, "resolve_runs",
                         lambda scope, **kw: ([run], {"key": "", "shifra": "ДАХмО 315-1-8433"}))
 
-    got = PUB.pack("ДАХмО 315-1-8433")
+    got = PUB.pack("ДАХмО 315-1-8433", extra=BEZ_KADRIV)
     assert Path(got["path"]).is_file()
     assert Path(got["geom"]["path"]).is_file()
     assert Path(got["geom"]["path"]).name.endswith(bundle.GEOM_SUFFIX)
@@ -93,8 +96,8 @@ def test_bez_heometrii_tekst_toy_samyi(space: Path, monkeypatch: Any) -> None:
     monkeypatch.setattr(PUB, "resolve_runs",
                         lambda scope, **kw: ([run], {"key": "", "shifra": "ДАХмО 315-1-8433"}))
 
-    z = PUB.pack("ДАХмО 315-1-8433", geometry=True)
-    bez = PUB.pack("ДАХмО 315-1-8433", geometry=False)
+    z = PUB.pack("ДАХмО 315-1-8433", geometry=True, extra=BEZ_KADRIV)
+    bez = PUB.pack("ДАХмО 315-1-8433", geometry=False, extra=BEZ_KADRIV)
     assert bez.get("geom") is None
     assert bez["geometry_on_disk"], "на диску вона є — просто не пакувалась"
     assert (z["manifest"]["decode"]["content_sha256"]

@@ -277,6 +277,11 @@ def text_grep(a: TextGrepArgs) -> Envelope:
                      "prefiltered": res["prefiltered"], "literals": res["literals"],
                      "scope": scope["kind"], "case": scope["key"],
                      "shifra": scope["shifra"]}}
+    if scope["kind"] == "all" or not res["hits"]:
+        from nyshporka import htr_store as _S
+        from nyshporka.search import reach as _R
+
+        data["coverage"]["reach"] = _R.reach(len(_S.list_cases()))
     if layered is not None:
         data["layers"] = {"hits": layered["hits"], "total": layered["total"],
                           "coverage": layered["layers"]}
