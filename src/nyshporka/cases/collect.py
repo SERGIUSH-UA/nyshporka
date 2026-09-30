@@ -11,6 +11,7 @@ import os
 import re
 import sqlite3
 from collections import defaultdict
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -276,7 +277,8 @@ def _where_from_passport(d: Path) -> str | None:
             return f"Wikimedia Commons: {url}" if url else "Wikimedia Commons"
         if DROPPED_FIELD in meta:
             dropped = meta[DROPPED_FIELD] if isinstance(meta[DROPPED_FIELD], dict) else {}
-            src = meta.get("source") if isinstance(meta.get("source"), dict) else {}
+            raw_src = meta.get("source")
+            src = raw_src if isinstance(raw_src, dict) else {}
             parts = [str(dropped.get("how_to_restore") or ""), str(src.get("url") or "")]
             return " · ".join(p for p in parts if p)
     return None
