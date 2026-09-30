@@ -52,6 +52,7 @@ import './screens/eye.js';
 import './screens/view.js';
 import './screens/read.js';
 import './screens/runs.js';
+import './screens/queue.js';
 import './screens/export.js';
 import './screens/sets.js';
 import './screens/label.js';

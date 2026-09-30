@@ -168,6 +168,9 @@ SCREENS: dict[str, str] = {
     # саме тому, хто читає скани й ще не брався за пошук прізвища. У
     # дослідницькій секції він зник би з набору «аматор».
     "runs": "htr",
+    # Черга справ — поруч із читанням: це те саме читання, лише кількох справ
+    # поспіль і з рештою кроків навколо нього.
+    "queue": "htr",
     "view": "htr",
     "search": "research",
     "sift": "research",
@@ -250,6 +253,13 @@ OP_SCREEN: dict[str, str] = {
     "read.plan": "read",
     "read.start": "read",
     "runs.list": "runs",
+    "queue.status": "queue",
+    "queue.add": "queue",
+    "queue.retry": "queue",
+    "queue.set": "queue",
+    "queue.drop": "queue",
+    "queue.stop": "queue",
+    "queue.start": "queue",
     # 🔴 Прив'язка нічийного прогону — на «Прогонах», а не в «Моїх справах»:
     # питання «чия це робота» ставить саме той, хто дивиться на перелік
     # прогонів і бачить справу без шифри.

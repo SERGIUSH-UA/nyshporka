@@ -23,14 +23,14 @@ let SECTIONS = { sections: [], screens: {}, op_screen: {}, presets: {},
 
 /** Порядок кнопок у шапці. Екрани, яких тут немає, кнопки не отримують. */
 const NAV_ORDER = ['home', 'profile', 'sources', 'geog', 'fonds', 'library', 'frames', 'cases', 'newcase',
-  'read', 'runs', 'view', 'eye', 'search', 'sift', 'export', 'sets', 'label', 'jobs'];
+  'read', 'queue', 'runs', 'view', 'eye', 'search', 'sift', 'export', 'sets', 'label', 'jobs'];
 
 /** Ключ i18n для кнопки екрана. Підпис «Завести справу» вже є в словнику. */
 const NAV_LABEL = {
   home: 'nav.home', profile: 'nav.profile', sources: 'nav.sources', geog: 'nav.geog', fonds: 'nav.fonds',
   library: 'nav.library', frames: 'nav.frames', cases: 'nav.cases', newcase: 'nav.newcase', read: 'nav.read', runs: 'nav.runs', view: 'nav.view',
   eye: 'nav.eye', search: 'nav.search', sift: 'nav.sift', export: 'nav.export',
-  sets: 'nav.sets', label: 'nav.label', jobs: 'nav.jobs',
+  sets: 'nav.sets', label: 'nav.label', jobs: 'nav.jobs', queue: 'nav.queue',
 };
 
 /** Чи ввімкнена секція цього екрана. Невідомий екран не блокуємо. */
@@ -140,7 +140,7 @@ function icon(name) {
  * «за архівами» й «за повітами» стають одне під одним — тобто обмеження,
  * поставлене заради довжини рядка, з'їдає екран, на якому тексту майже немає.
  */
-const WIDE_SCREENS = ['home', 'fonds', 'library', 'runs'];
+const WIDE_SCREENS = ['home', 'fonds', 'library', 'runs', 'queue'];
 
 let CURRENT = '';
 export const currentScreen = () => CURRENT;

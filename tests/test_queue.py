@@ -471,6 +471,39 @@ def test_start_na_porozhnii_cherzi_vidmovliaie(space: Path) -> None:
     assert not env.ok and "немає справ" in env.error
 
 
+def test_start_pidnimaie_toho_samoho_vykonavtsia_vidcheplenym(
+        etapy: Etapy, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Кнопка «Запустити» піднімає `nysh queue run` — той самий виконавець, що
+    в терміналі, — відчепленим від застосунку й з виводом у файл."""
+    import subprocess
+    import sys
+
+    from nyshporka import ops as O
+    from nyshporka.core.workspace import workspace
+
+    seen: list[tuple[list[str], dict[str, Any]]] = []
+
+    class _Proc:
+        pid = 4242
+
+    def _popen(cmd: list[str], **kw: Any) -> Any:
+        seen.append((cmd, kw))
+        return _Proc()
+
+    monkeypatch.setattr(subprocess, "Popen", _popen)
+    _add("s1")
+
+    env = O.call("queue.start", {"share": True})
+
+    assert env.ok and env.data["started"] is True and env.data["pid"] == 4242
+    cmd, kw = seen[0]
+    assert cmd == [sys.executable, "-m", "nyshporka", "queue", "run", "--share"]
+    assert kw["cwd"] == str(workspace().root), "простір виконавець бере з робочої теки"
+    assert kw["stdin"] == subprocess.DEVNULL
+    assert kw.get("start_new_session") or kw.get("creationflags"), "процес не відчеплено"
+    assert env.data["log"].endswith("run.log") and (Q.home() / "run.log").exists()
+
+
 def test_status_kazhe_pro_obirvanoho_vykonavtsia(etapy: Etapy) -> None:
     from nyshporka import ops as O
 

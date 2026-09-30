@@ -518,6 +518,7 @@ screen_glyphs:
   newcase: "➕"
   read: "🖋"
   runs: "📜"
+  queue: "🚦"
   view: "📄"
   eye: "👁"
   search: "🔎"
@@ -555,6 +556,7 @@ screen_icons:
   newcase: plus
   read: quill
   runs: list
+  queue: skip
   view: page
   eye: eye
   search: search

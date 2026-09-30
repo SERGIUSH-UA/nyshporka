@@ -127,6 +127,28 @@ globalThis.fetch = async (url) => {
                             pages_done: 2, frames: 2 }],
                    shown: 1, total: 1, everything: 1, orphans: 0,
                    page: 0, page_size: 25, pages: 1 },
+    'queue.status': {
+      rows: [
+        { id: 'DAHMO/315/8433', state: 'blocked', state_text: 'чекає вас',
+          stage: 'pool', code: 'pool_needs_decision', frames: 408, pages: 0,
+          why: 'у пулі вже є прочитання: 290 стор. із 408 кадрів',
+          fix: 'nysh queue set "DAHMO/315/8433" --pool take',
+          stages: [{ stage: 'fetch', title: 'кадри', state: 'done' },
+                   { stage: 'pool', title: 'пул', state: 'todo' },
+                   { stage: 'share', title: 'віддача', state: 'skip' }] },
+        { id: 'DAHMO/315/8434', state: 'running', state_text: 'у роботі',
+          stage: 'read', code: '', frames: 120, pages: 40, why: '', fix: '',
+          stages: [{ stage: 'read', title: 'читання', state: 'todo' }] },
+        { id: 'DAHMO/315/8435', state: 'blocked', state_text: 'чекає вас',
+          stage: 'read', code: 'incomplete', frames: 50, pages: 48,
+          why: 'прочитано 48 із 50', fix: '', stages: [] },
+      ],
+      left: { cases: 1, pages: 80, sec_per_page: 12.0, eta_sec: 960 },
+      runner: { alive: true, pid: 4242,
+                pulse: { item: 'DAHMO/315/8434', stage: 'read', i: 41, n: 120,
+                         what: 'сторінки' } },
+      stop: '', summary: {},
+    },
     'cases.list': { cases: [{ key: '@disk/x', kind: 'unfiled', path: 'x',
                               frames: 7 }],
                     shown: 1, total: 1, registry: true, page: 0,
@@ -503,6 +525,20 @@ out.zeroHitsDrawn = zero.includes('<table>');
 out.zeroHitsMaskot = zero.includes('maskot');
 globalThis.__NO_HITS = false;
 globalThis.__FORM = null;
+
+// ── «Черга справ»: причина, рішення кнопками, хід поточної справи ──────────
+await SCREENS.queue();
+await new Promise((r) => setTimeout(r, 30));
+const qhtml = document.getElementById('view').innerHTML || '';
+out.queueShowsWhy = qhtml.includes('у пулі вже є прочитання');
+out.queueOffersDecision = qhtml.includes('data-act="queue.pool"')
+  && qhtml.includes('data-arg="take"') && qhtml.includes('data-arg="read"');
+out.queuePartialForm = qhtml.includes('data-act="queue.partial"');
+out.queueShowsPulse = qhtml.includes('41/120');
+out.queueRunnerControls = qhtml.includes('data-act="queue.stop"')
+  && !qhtml.includes('data-act="queue.start"');
+out.queueEta = qhtml.includes('16');
+out.queueRunningNotDroppable = !/8434[\s\S]{0,900}data-act="queue.drop"[^>]*8434/.test(qhtml);
 
 // ── «Роботи»: маскот працює, поки робота жива ──────────────────────────────
 const nowS = Date.now() / 1000;
@@ -929,3 +965,17 @@ def test_home_escapes_what_should_have_been_a_number(probe) -> None:
     """
     assert probe["homeXssRaw"] is False, "рядок із відповіді став розміткою"
     assert probe["homeXssShown"], "екрановане значення не показалось зовсім"
+
+
+def test_the_queue_screen_shows_why_and_offers_the_decision(probe) -> None:
+    """🔴 Справа, що чекає людину, мусить показати причину й дати рішення
+    кнопкою: у застосунку людина прапорців `nysh queue set` не знає."""
+    assert probe.get("queueShowsWhy") is True, "причини зупинки на екрані немає"
+    assert probe.get("queueOffersDecision") is True, "рішення про пул — лише текстом"
+    assert probe.get("queuePartialForm") is True, "неповне читання нема як прийняти"
+    assert probe.get("queueShowsPulse") is True, "хід поточної справи не видно"
+    assert probe.get("queueRunnerControls") is True, (
+        "при живому виконавці мусить бути «зупинити», а не «запустити»")
+    assert probe.get("queueEta") is True, "оцінки часу немає"
+    assert probe.get("queueRunningNotDroppable") is True, (
+        "справу, яку зараз веде виконавець, пропонують зняти")
