@@ -1,4 +1,8 @@
-"""🏷 Картка справи для пулу: назва, роки, місця й жанр, задані людиною чи агентом.
+"""🏷 Картка справи для пулу: назва, роки, місця, жанр і де кадри — задані людиною чи агентом.
+
+`scans` — хто тримає кадри, з яких читано (приватна колекція, сайт
+дослідника). Текст у пулі без цього поля не каже, куди йти по зображення,
+коли зйомки немає ні в FamilySearch, ні в Commons.
 
 Картку в пулі пакувальник складає сам — з паспорта теки, реєстру опису й
 бібліотеки (`share/opys.py`). Цього не завжди досить: паспорт тримає робочу
@@ -29,9 +33,14 @@ from typing import Any
 CARDS_NAME = "cards.json"
 
 #: Поля картки, які можна задати. `frames` — знаменник у `frames.total`,
-#: `frames_unknown` — чому його немає (`extra.frames_unknown`); решта лягає в
+#: `frames_unknown` — чому його немає (`extra.frames_unknown`), `scans` — хто
+#: тримає кадри цієї зйомки (першим у `links`, з `role: scans`); решта лягає в
 #: `case` маніфесту.
-FIELDS = ("title", "years", "places", "doc_type", "frames", "frames_unknown")
+FIELDS = ("title", "years", "places", "doc_type", "frames", "frames_unknown", "scans")
+
+#: Позначка посилання «де кадри» серед `links` маніфесту — за нею пул показує
+#: його окремо від реєстрових «справа є ще там».
+SCANS_ROLE = "scans"
 
 #: Стеля пояснення, чому число кадрів невідоме: речення, а не історія справи.
 MAX_WHY = 200
@@ -100,11 +109,38 @@ def parse_years(raw: str) -> list[int]:
     return [lo, hi]
 
 
+def parse_scans(raw: str) -> dict[str, str]:
+    """«Зйомка М. Коваля=https://…» → `{"label", "url"}`; голе посилання — без підпису.
+
+    Підпис відділяється лише тоді, коли праворуч від першого `=` стоїть
+    адреса: інакше запит у самій адресі (`?groupId=…`) різав би її навпіл.
+    """
+    text = " ".join(str(raw or "").split())
+    if text.lower().startswith(("http://", "https://")):
+        return {"label": "", "url": text}
+    label, sep, url = text.partition("=")
+    label, url = label.strip(), url.strip()
+    if not sep or not url.lower().startswith(("http://", "https://")):
+        raise CardError(f"кадри «{raw}»: потрібно «підпис=https://…» або саме посилання")
+    if len(label) > MAX_PLACE:
+        raise CardError(f"підпис до кадрів довший за {MAX_PLACE} символів")
+    return {"label": label, "url": url}
+
+
+def scans_link(card: dict[str, Any]) -> list[dict[str, str]]:
+    """Посилання «де кадри» з картки — для `links` маніфесту, або порожньо."""
+    s = card.get("scans")
+    if not isinstance(s, dict) or not s.get("url"):
+        return []
+    return [{"label": str(s.get("label") or ""), "url": str(s["url"]), "role": SCANS_ROLE}]
+
+
 def normalize(*, title: str | None = None, years: str | None = None,
               places: list[str] | None = None,
               doc_type: str | None = None,
               frames: int | None = None,
-              frames_unknown: str | None = None) -> dict[str, Any]:
+              frames_unknown: str | None = None,
+              scans: str | None = None) -> dict[str, Any]:
     """Перевірити поля картки. `None` — поле не задавали; `""`/`[]` — стерти."""
     out: dict[str, Any] = {}
     if title is not None:
@@ -146,6 +182,8 @@ def normalize(*, title: str | None = None, years: str | None = None,
         if len(why) > MAX_WHY:
             raise CardError(f"пояснення довше за {MAX_WHY} символів")
         out["frames_unknown"] = why
+    if scans is not None:
+        out["scans"] = parse_scans(scans) if str(scans).strip() else ""
     return out
 
 

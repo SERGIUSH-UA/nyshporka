@@ -940,6 +940,11 @@ def readme(manifest: Manifest) -> str:
         lines += [f"- [{x.get('label') or x.get('url')}]({x.get('url')})"
                   for x in manifest.links]
         lines.append("")
+    tryma = [x for x in manifest.links if x.get("role") == "scans"]
+    if tryma:
+        x = tryma[0]
+        lines += [f"Кадри, з яких читано, тримає: [{x.get('label') or x.get('url')}]"
+                  f"({x.get('url')}) — по зображення туди.", ""]
     lic = manifest.license.get("text") or "не вказано"
     lines += [f"Ліцензія тексту: {lic}. Зображення в пакет не входять.",
               f"Зібрано: {manifest.tool or 'Нишпорка'}, {manifest.created}."]

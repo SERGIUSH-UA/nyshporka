@@ -91,7 +91,8 @@ def _card(a: Any) -> dict[str, Any]:
         places=list(places) if places else None,
         doc_type=getattr(a, "genre", None),
         frames=getattr(a, "frames", None),
-        frames_unknown=getattr(a, "frames_unknown", None))
+        frames_unknown=getattr(a, "frames_unknown", None),
+        scans=getattr(a, "scans", None))
 
 
 def _contact(value: str, default: str) -> str:
@@ -117,6 +118,10 @@ class _CardFields(BaseModel):
         default=None,
         description="чому число кадрів справи невідоме — лише коли його справді "
                     "взяти нізвідки; інакше назвіть число полем frames")
+    scans: str | None = Field(
+        default=None,
+        description="хто тримає кадри, з яких читано: «підпис=адреса» "
+                    "(приватна колекція, сайт дослідника); «» — стерти")
 
 
 class SharePackArgs(_CardFields):

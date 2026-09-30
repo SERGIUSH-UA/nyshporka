@@ -806,11 +806,16 @@ def build_manifest(scope: str, *,
         text_pages=counted["pages"])
     if described:
         case["details"] = described
+    # «Де кадри» з картки — першим: це власник САМЕ ЦІЄЇ зйомки, і воно
+    # мусить їхати з кожним пакуванням, а не лише з тим, де його назвали.
+    scans = K.scans_link(kartka)
+    taken = {s["url"] for s in scans}
+    own = scans + [x for x in (links or []) if x.get("url") not in taken]
     m = Manifest(
         case=case,
-        refs=_merge_refs(_refs_from_sidecar(home), _refs_from_links(list(links or []))),
+        refs=_merge_refs(_refs_from_sidecar(home), _refs_from_links(own)),
         frames=frames_block, decode=decode, publisher=pub, note=note,
-        links=_with_registry(list(links or []), str(case.get("shifra") or "")),
+        links=_with_registry(own, str(case.get("shifra") or "")),
         extra=dict(extra or {}), license=lic,
         tool=bundle._tool_version(), created=time.strftime("%Y-%m-%dT%H:%M:%S%z"))
     details = {"skipped_runs": list(info.get("skipped_runs") or []),

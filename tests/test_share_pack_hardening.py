@@ -235,6 +235,51 @@ def test_kartka_operatsiieiu(space: Path) -> None:
     assert env.data["card"] == {}
 
 
+def test_kartka_nazyvaie_khto_trymaie_kadry(space: Path, monkeypatch: Any) -> None:
+    """Текст, читаний із приватної колекції, мусить казати, куди йти по кадри.
+
+    30.09.2026: у пулі лежали десятки справ, прочитаних із кадрів дослідника,
+    яких немає ні в FamilySearch, ні в Commons, — і пакет цього не називав.
+    """
+    from nyshporka.share import card as K
+    from nyshporka.share import publish as PUB
+
+    run = make_run(_root(space), "spr-8433")
+    monkeypatch.setattr(PUB, "resolve_runs", lambda scope, **kw: (
+        [run], {"key": "DAHMO/315/8433", "shifra": "ДАХмО 315-1-8433"}))
+    fields = K.normalize(scans="Колекція дослідника=https://example.org/kolektsiia")
+    got = PUB.pack("DAHMO/315/8433", geometry=False, card_fields=fields, extra=BEZ_KADRIV,
+                   links=[{"label": "ще", "url": "https://example.org/inshe"}])
+    links = got["manifest"]["links"]
+    assert links[0] == {"label": "Колекція дослідника",
+                        "url": "https://example.org/kolektsiia", "role": "scans"}
+    assert links[1]["url"] == "https://example.org/inshe"
+
+    again = PUB.pack("DAHMO/315/8433", geometry=False, extra=BEZ_KADRIV)
+    assert again["manifest"]["links"][0]["role"] == "scans", \
+        "власник кадрів їде з кожним пакуванням, а не лише з тим, де його назвали"
+
+    K.set_fields("DAHMO/315/8433", K.normalize(scans=""))
+    assert "scans" not in K.get("DAHMO/315/8433")
+
+
+@pytest.mark.parametrize("raw, want", [
+    ("https://example.org/a?x=1", {"label": "", "url": "https://example.org/a?x=1"}),
+    ("Підпис=https://example.org/a?x=1", {"label": "Підпис", "url": "https://example.org/a?x=1"}),
+])
+def test_kadry_kartky_rozbir(raw: str, want: dict[str, str]) -> None:
+    from nyshporka.share import card as K
+
+    assert K.normalize(scans=raw)["scans"] == want
+
+
+def test_kadry_kartky_bez_adresy() -> None:
+    from nyshporka.share import card as K
+
+    with pytest.raises(K.CardError, match="посилання"):
+        K.normalize(scans="колекція дослідника")
+
+
 # ── Кадри, яких на диску немає ──────────────────────────────────────────────
 # 28.09.2026 у пулі стояли 46 справ одного видавця з «кадрів не названо»: читав
 # із PDF, зображень у теці немає, і знаменника не мав звідки взятися.

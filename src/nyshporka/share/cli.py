@@ -69,6 +69,10 @@ def _show_card(card: dict[str, Any], indent: str = "  ") -> None:
         console.print(f"{indent}кадрів: {_e(card['frames'])}")
     if card.get("frames_unknown"):
         console.print(f"{indent}кадрів не названо: {_e(card['frames_unknown'])}")
+    scans = card.get("scans")
+    if isinstance(scans, dict) and scans.get("url"):
+        label = f"{scans['label']} — " if scans.get("label") else ""
+        console.print(f"{indent}кадри: {_e(label)}{_e(scans['url'])}")
 
 
 # Прапорці картки однакові в `pack`, `suggest` і `card` — одна довідка.
@@ -80,11 +84,14 @@ _FRAMES_HELP = ("скільки кадрів має справа, коли на 
                 "після читання): число з каталогу чи опису; 0 — стерти")
 _FRAMES_UNKNOWN_HELP = ("чому число кадрів справи невідоме — коли --frames назвати "
                         "нема з чого; «» — стерти")
+_SCANS_HELP = ("хто тримає кадри, з яких читано: «підпис=адреса» (приватна колекція, "
+               "сайт дослідника); «» — стерти")
 
 
 def _card_args(title: str | None, years: str | None, place: list[str] | None,
                genre: str | None, frames: int | None = None,
-               frames_unknown: str | None = None) -> dict[str, Any]:
+               frames_unknown: str | None = None,
+               scans: str | None = None) -> dict[str, Any]:
     out: dict[str, Any] = {}
     if title is not None:
         out["title"] = title
@@ -98,6 +105,8 @@ def _card_args(title: str | None, years: str | None, place: list[str] | None,
         out["frames"] = frames
     if frames_unknown is not None:
         out["frames_unknown"] = frames_unknown
+    if scans is not None:
+        out["scans"] = scans
     return out
 
 
@@ -138,6 +147,7 @@ def pack_cmd(
     place: list[str] = typer.Option([], "--place", help=_PLACE_HELP),
     genre: str | None = typer.Option(None, "--genre", help=_GENRE_HELP),
     frames: int | None = typer.Option(None, "--frames", help=_FRAMES_HELP),
+    scans: str | None = typer.Option(None, "--scans", help=_SCANS_HELP),
     skip_run: list[str] = typer.Option([], "--skip-run",
                                        help="прогін, який НЕ пакувати (можна кілька)"),
     as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
@@ -158,7 +168,7 @@ def pack_cmd(
         "link": list(link), "extra": list(extra), "license": license_,
         "source_terms": source_terms, "archive_name": archive_name,
         "skip_run": list(skip_run),
-        **_card_args(title, years, place, genre, frames, frames_unknown)})
+        **_card_args(title, years, place, genre, frames, frames_unknown, scans)})
     if _answer(env, as_json):
         return
     d = env.data or {}
@@ -266,10 +276,11 @@ def card_cmd(
     frames: int | None = typer.Option(None, "--frames", help=_FRAMES_HELP),
     frames_unknown: str | None = typer.Option(None, "--frames-unknown",
                                               help=_FRAMES_UNKNOWN_HELP),
+    scans: str | None = typer.Option(None, "--scans", help=_SCANS_HELP),
     clear: bool = typer.Option(False, "--clear", help="прибрати картку цілком"),
     as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
-    """Картка справи для пулу: назва, роки, місця, жанр — задані вами.
+    """Картка справи для пулу: назва, роки, місця, жанр, де кадри — задані вами.
 
     Без прапорців — показати, що задано. Порожнє значення (`--title ""`)
     стирає одне поле, `--clear` — усю картку. Задане діє на кожне наступне
@@ -279,7 +290,7 @@ def card_cmd(
 
     env = O.call("share.card", {"case": case, "clear": clear,
                                 **_card_args(title, years, place, genre, frames,
-                                             frames_unknown)})
+                                             frames_unknown, scans)})
     if _answer(env, as_json):
         return
     d = env.data or {}
