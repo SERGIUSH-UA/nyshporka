@@ -56,6 +56,10 @@ class UploadError(RuntimeError):
         self.retry_after = retry_after
         #: Хронометраж етапів до збою (див. `_Etapy`).
         self.etapy: list[dict[str, Any]] = []
+        #: Відмови воріт пулу з кодом правила й полем маніфесту, і номер
+        #: політики воріт — коли пул їх назвав. Текст для людини — у повідомленні.
+        self.details: list[dict[str, Any]] = []
+        self.policy: str = ""
 
 
 class _Etapy:
@@ -155,8 +159,12 @@ def _request(method: str, url: str, *, body: Any = None, auth: str = "") -> dict
     except HttpError as exc:
         # Причина — з тіла відповіді: пул називає, котрі ворота не пустили
         # пакет, і голе «HTTP 400» людині нічого не каже.
-        raise UploadError(_z_chekanniam(catalog.reason(exc), exc.retry_after),
-                          status=exc.status, retry_after=exc.retry_after) from exc
+        vidmova = UploadError(_z_chekanniam(catalog.reason(exc), exc.retry_after),
+                              status=exc.status, retry_after=exc.retry_after)
+        mashynne = catalog.refusal(exc)
+        vidmova.details = mashynne.get("details") or []
+        vidmova.policy = mashynne.get("policy") or ""
+        raise vidmova from exc
     except catalog.PoolError as exc:
         raise UploadError(str(exc)) from exc
     text = resp.text if hasattr(resp, "text") else str(resp)
@@ -249,6 +257,16 @@ def _publish(path: Path, *, base: str, auth: str,
     with etapy("register"):
         got = _request("POST", f"{home}/contributions", body=manifest.as_json(), auth=tok)
     if got.get("duplicate"):
+        if got.get("rejudge") and got.get("contribution"):
+            # 🔴 Пул відхиляв цей текст ІНШИМИ воротами, ніж має зараз, і
+            # байти в нього лежать. Без цього кроку пакет, відхилений через
+            # ваду воріт, лишався відхиленим і після її виправлення: дубль
+            # посилань не видає, а вердикт ніхто не переглядав.
+            _tykhyi(say)("пул відхиляв цей текст старими воротами — перевіряє наново…")
+            with etapy("complete"):
+                done = _request("POST", f"{home}/contributions/{got['contribution']}"
+                                        "/complete", auth=tok)
+            return _public({**got, **done, "duplicate": False, "rejudged": True})
         with etapy("attach_geom"):
             return _public(_attach_geometry(got, path, home=home, tok=tok,
                                             manifest=manifest))
@@ -313,6 +331,15 @@ def _publish(path: Path, *, base: str, auth: str,
         # повтор тут не допоможе — тому й підказки повторити немає.
         if exc.status is not None and exc.status < 500:
             raise
+        if etap == "complete":
+            # 🔴 Обрив на `complete` не каже, чи пул устиг прийняти внесок:
+            # відповідь могла загубитись уже після прийняття. Звіт про збій і
+            # «повторіть» на прийнятий внесок — неправда, тож спершу питаємо.
+            stan = _stan_vnesku(home, tok, vnesok)
+            if stan is not None and stan.get("ready"):
+                kazhy("відповідь пулу загубилась, але внесок прийнято")
+                return _public({**got, **stan, "confirmed_by_state": True,
+                                **({"via_server": True} if cherez_server else {})})
         # Обрив до пулу чи його 5xx — тимчасове; сховище клас назвало саме.
         klas = exc.klas or TYMCHASOVYI
         _zvit_pro_zbii(home, tok, vnesok, etap, f"[{klas}] {exc}")
@@ -478,6 +505,22 @@ def _zvit_pro_zbii(home: str, tok: str, vnesok: Any, etap: str, prychyna: str) -
     except Exception:
         # Звіт про збій сам не падає.
         pass
+
+
+def _stan_vnesku(home: str, tok: str, vnesok: Any) -> dict[str, Any] | None:
+    """Спитати пул, що сталося з внеском. `None` — не вдалося дізнатись.
+
+    Одна коротка спроба: це звірка після обриву, і вона не має права тримати
+    людину довше за сам обрив. Старий пул маршруту не знає (404/405) — тоді
+    теж `None`, і все йде, як ішло до появи цієї звірки.
+    """
+    try:
+        fetcher = catalog._fetcher(home, timeout=10.0, attempts=1, auth=tok,
+                                   accept_json=True)
+        got = json.loads(fetcher.get(f"{home}/contributions/{vnesok}").text)
+    except Exception:
+        return None
+    return got if isinstance(got, dict) else None
 
 
 def _kod_os(exc: OSError) -> str:

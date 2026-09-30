@@ -135,12 +135,14 @@ def _u_puli_poruch(case_key: str, stan: str | None) -> dict[str, Any]:
     """
     if stan is None:
         return {"pool_n": None, "pool_pages": None, "pool_mine": None,
-                "pool_publishers": None}
+                "pool_publishers": None, "pool_frames": None, "pool_coverage": None}
     cell = _komirka(case_key)
     if cell is None:
-        return {"pool_n": 0, "pool_pages": 0, "pool_mine": None, "pool_publishers": []}
+        return {"pool_n": 0, "pool_pages": 0, "pool_mine": None, "pool_publishers": [],
+                "pool_frames": None, "pool_coverage": None}
     return {"pool_n": cell.n, "pool_pages": cell.pages, "pool_mine": cell.mine,
-            "pool_publishers": list(cell.publishers)}
+            "pool_publishers": list(cell.publishers),
+            "pool_frames": cell.frames, "pool_coverage": cell.coverage}
 
 
 def _synonimy(repo: str) -> list[str]:

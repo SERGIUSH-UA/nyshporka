@@ -516,6 +516,11 @@ def share_publish(a: SharePublishArgs) -> Envelope:
         # інакше розрізняв би їх за текстом або не розрізняв зовсім.
         env.data = {"status": exc.status, "klas": exc.klas, "etapy": exc.etapy,
                     "rate_limited": exc.status == 429}
+        # Котре правило воріт і про яке поле маніфесту — кодом, а не текстом.
+        if exc.details:
+            env.data["refusals"] = exc.details
+        if exc.policy:
+            env.data["policy"] = exc.policy
         if exc.retry_after is not None:
             import time
 

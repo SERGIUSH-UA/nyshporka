@@ -578,6 +578,8 @@ def row_status(row: dict[str, Any],
         "pool_n": None if pool is None else (cell.n if cell else 0),
         "pool_pages": None if pool is None else (cell.pages if cell else 0),
         "pool_mine": None if (pool is None or cell is None) else cell.mine,
+        "pool_frames": None if (pool is None or cell is None) else cell.frames,
+        "pool_coverage": None if (pool is None or cell is None) else cell.coverage,
     }
 
 

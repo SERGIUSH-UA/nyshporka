@@ -258,18 +258,17 @@ def _look_at(path: Path, *, hash_frames: bool, texts: bool, downloaded: bool) ->
         raise AcceptError(f"не прочитати пакет {path.name}: {exc}") from exc
     verdict = gates.Verdict()
     for why in inv.problems[:20]:
-        verdict.refuse(f"вада пакета: {why}")
+        verdict.refuse(f"вада пакета: {why}", rule="bundle_defect")
     if len(inv.problems) > 20:
-        verdict.refuse(f"… і ще {len(inv.problems) - 20} вад пакета")
+        verdict.refuse(f"… і ще {len(inv.problems) - 20} вад пакета",
+                       rule="bundle_defect")
     if texts:
         try:
             _measure(path, inv, manifest, verdict)
         except bundle.BundleError as exc:
             raise AcceptError(f"не прочитати пакет {path.name}: {exc}") from exc
     else:
-        got = gates.check(manifest, partial_why=_partial_note(manifest))
-        verdict.refusals += got.refusals
-        verdict.warnings += got.warnings
+        verdict.extend(gates.check(manifest, partial_why=_partial_note(manifest)))
     # 🔴 Лише ключ, розв'язаний ТУТ. Запасний `key_local` із пакета давав
     # чужому пакетові самому вибрати, з якою нашою справою його звіряти:
     # безглузда шифра плюс ключ нашої справи — і прив'язку до кадрів міряли
@@ -303,25 +302,25 @@ def _measure(path: Path, inv: bundle.Inventory, m: Manifest, v: gates.Verdict) -
                f"{', '.join(chuzhi[:5])} — вони не розкладаються")
     nemaie = sorted(r for r in voices if r not in inv.runs)
     if nemaie:
-        v.refuse(f"маніфест називає голоси, яких у пакеті немає: {', '.join(nemaie[:5])}")
+        v.refuse(f"маніфест називає голоси, яких у пакеті немає: {', '.join(nemaie[:5])}",
+                 rule="voices_missing", field="voices")
     raw = bundle.read_texts(path, inv, runs=[r for r in voices if r in inv.runs])
     for voice in m.voices:
         run = str(voice.get("run") or "")
         claim = str(voice.get("content_sha256") or "")
         if claim and run in raw and bundle.text_hash(raw[run]) != claim:
             v.refuse(f"голос {run}: хеш змісту не збігається з тим, що заявляє "
-                     f"маніфест — тексти в пакеті не ті")
+                     f"маніфест — тексти в пакеті не ті",
+                     rule="content_hash", field="voices.content_sha256")
     counted = bundle.tally(bundle.decoded(raw), voices)
     zaiava = m.pages
     if zaiava > counted["pages"]:
         v.refuse(f"маніфест заявляє {zaiava} прочитаних сторінок, а в пакеті "
-                 f"їх {counted['pages']}")
+                 f"їх {counted['pages']}", rule="pages_overclaimed", field="decode.pages")
     # Далі ворота бачать ВИМІРЯНЕ: той самий маніфест, але з числами з диска.
     probe = copy.copy(m)
     probe.decode = {**m.decode, **counted}
-    got = gates.check(probe, partial_why=_partial_note(m))
-    v.refusals += got.refusals
-    v.warnings += got.warnings
+    v.extend(gates.check(probe, partial_why=_partial_note(m)))
 
 
 def _partial_note(m: Manifest) -> str:

@@ -531,3 +531,162 @@ def test_retry_after_chyslo_i_data() -> None:
     assert za_hvylynu is not None and 50 < za_hvylynu <= 61
     assert retry_after_of(_R("колись")) is None
     assert retry_after_of(_R("")) is None
+
+
+# ── обрив на complete: спершу спитати пул ─────────────────────────────────────
+
+def _obryv() -> None:
+    raise upload.UploadError("ReadTimeout")
+
+
+def test_obryv_complete_a_vnesok_pryiniato(monkeypatch: pytest.MonkeyPatch,
+                                           tmp_path: Path) -> None:
+    """🔴 Відповідь загубилась ПІСЛЯ прийняття — це успіх, а не збій.
+
+    Доти клієнт слав пулу звіт «заливання впало» й радив повторити — про
+    внесок, який уже лежав у каталозі.
+    """
+    paket, zvity = _pidhotuvaty(monkeypatch, tmp_path, complete=_obryv)
+    monkeypatch.setattr(upload, "_put", lambda url, blob: None)
+    pytaly: list[Any] = []
+
+    def _stan(home: str, tok: str, vnesok: Any) -> dict[str, Any]:
+        pytaly.append(vnesok)
+        return {"contribution": vnesok, "ready": True, "status": "nove"}
+
+    monkeypatch.setattr(upload, "_stan_vnesku", _stan)
+    got = upload.publish(paket, base="https://nyshporka.online/v1", auth="k")
+
+    assert pytaly == [1337]
+    assert zvity == []
+    assert got["outcome"] == upload.VIDDANO and got["confirmed_by_state"] is True
+    assert "upload" not in got
+
+
+@pytest.mark.parametrize("stan", [None, {"ready": False, "status": "nove"}])
+def test_obryv_complete_bez_pidtverdzhennia(monkeypatch: pytest.MonkeyPatch,
+                                            tmp_path: Path, stan: Any) -> None:
+    """Пул не відповів або внесок не прийнято — звіт і «повторіть», як раніше."""
+    paket, zvity = _pidhotuvaty(monkeypatch, tmp_path, complete=_obryv)
+    monkeypatch.setattr(upload, "_put", lambda url, blob: None)
+    monkeypatch.setattr(upload, "_stan_vnesku", lambda home, tok, vnesok: stan)
+
+    with pytest.raises(upload.UploadError) as ei:
+        upload.publish(paket, base="https://nyshporka.online/v1", auth="k")
+
+    assert zvity and zvity[0][1] == "complete"
+    assert "Повторіть" in str(ei.value)
+
+
+def test_stan_ne_pytaietsia_pry_zboi_put(monkeypatch: pytest.MonkeyPatch,
+                                         tmp_path: Path) -> None:
+    """Звірка стану — лише про `complete`: байти не доїхали, тож питати нічого."""
+    paket, zvity = _pidhotuvaty(monkeypatch, tmp_path)
+
+    def _put(url: str, blob: bytes) -> None:
+        raise upload.UploadError("ReadTimeout", klas=upload.TYMCHASOVYI)
+
+    monkeypatch.setattr(upload, "_put", _put)
+    pytaly: list[Any] = []
+    monkeypatch.setattr(upload, "_stan_vnesku",
+                        lambda home, tok, vnesok: pytaly.append(vnesok))
+    with pytest.raises(upload.UploadError):
+        upload.publish(paket, base="https://nyshporka.online/v1", auth="k")
+
+    assert pytaly == [] and zvity
+
+
+# ── пересуд і машинна частина відмови ─────────────────────────────────────────
+
+def test_vidkhylenyi_starymy_vorotamy_peresudzhuietsia(monkeypatch: pytest.MonkeyPatch,
+                                                       tmp_path: Path) -> None:
+    """🔴 Пул просить пересуд — клієнт кличе `complete`, а не каже «відхилено».
+
+    Три справи ДАЖО, відхилені 27.09.2026 через ваду воріт, не проходили й
+    після її виправлення: дубль не видає посилань, а вердикт ніхто не переглядав.
+    """
+    from nyshporka.share import bundle, catalog
+
+    paket = tmp_path / "p.nyshtext"
+    paket.write_bytes(b"bytes")
+    monkeypatch.setattr(bundle, "read_manifest", lambda p: _Manifest())
+    monkeypatch.setattr(catalog, "may_send_key", lambda home, explicit=False: True)
+    klyky: list[str] = []
+
+    def _request(method: str, url: str, **kw: Any) -> dict[str, Any]:
+        klyky.append(url.rsplit("/v1", 1)[1])
+        if url.endswith("/contributions"):
+            return {"duplicate": True, "contribution": 77, "ready": False,
+                    "status": "vidkhyleno", "mine": True, "rejudge": True}
+        return {"ready": True, "status": "nove", "contribution": 77}
+
+    monkeypatch.setattr(upload, "_request", _request)
+    got = upload.publish(paket, base="https://nyshporka.online/v1", auth="k")
+
+    assert klyky == ["/contributions", "/contributions/77/complete"]
+    assert got["outcome"] == upload.VIDDANO and got["rejudged"] is True
+
+
+def test_vidkhylenyi_tymy_samymy_vorotamy_ne_peresudzhuietsia(
+        monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from nyshporka.share import bundle, catalog
+
+    paket = tmp_path / "p.nyshtext"
+    paket.write_bytes(b"bytes")
+    monkeypatch.setattr(bundle, "read_manifest", lambda p: _Manifest())
+    monkeypatch.setattr(catalog, "may_send_key", lambda home, explicit=False: True)
+    klyky: list[str] = []
+
+    def _request(method: str, url: str, **kw: Any) -> dict[str, Any]:
+        klyky.append(url)
+        return {"duplicate": True, "contribution": 77, "ready": False,
+                "status": "vidkhyleno", "mine": True}
+
+    monkeypatch.setattr(upload, "_request", _request)
+    got = upload.publish(paket, base="https://nyshporka.online/v1", auth="k")
+
+    assert len(klyky) == 1
+    assert got["outcome"] == upload.VIDKHYLENO
+
+
+def test_vidmova_vorit_nese_kod_pravyla(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Котре правило й про яке поле — полями помилки, а не лише текстом."""
+    import json
+
+    from nyshporka.share import catalog
+    from nyshporka.sources.http import HttpError
+
+    tilo = json.dumps({"detail": {
+        "text": "Ворота не пустили пакет.", "refusals": ["це уривок"], "policy": "1.1",
+        "details": [{"rule": "partial_unexplained", "field": "extra.partial",
+                     "text": "це уривок"}]}})
+
+    class _F:
+        def post(self, url: str, json_body: Any) -> Any:
+            raise HttpError(f"{url}: HTTP 400", status=400, body=tilo)
+
+    monkeypatch.setattr(catalog, "_fetcher", lambda url, auth="", accept_json=True: _F())
+    with pytest.raises(upload.UploadError) as ei:
+        upload._request("POST", "https://nyshporka.online/v1/contributions/7/complete",
+                        auth="k")
+
+    assert ei.value.details == [{"rule": "partial_unexplained",
+                                 "field": "extra.partial", "text": "це уривок"}]
+    assert ei.value.policy == "1.1"
+    assert "✗ це уривок" in str(ei.value)
+
+
+def test_vidmova_staroho_pulu_bez_kodiv(monkeypatch: pytest.MonkeyPatch) -> None:
+    from nyshporka.share import catalog
+    from nyshporka.sources.http import HttpError
+
+    class _F:
+        def post(self, url: str, json_body: Any) -> Any:
+            raise HttpError(f"{url}: HTTP 400", status=400,
+                            body='{"detail": {"text": "ні", "refusals": ["a"]}}')
+
+    monkeypatch.setattr(catalog, "_fetcher", lambda url, auth="", accept_json=True: _F())
+    with pytest.raises(upload.UploadError) as ei:
+        upload._request("POST", "https://nyshporka.online/v1/contributions", auth="k")
+
+    assert ei.value.details == [] and ei.value.policy == ""

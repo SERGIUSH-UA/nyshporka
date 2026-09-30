@@ -34,6 +34,15 @@ MAX_BLANK_FRAC = 0.80
 #: Коротший рядок за це — не текст, а сміття сегментації.
 MIN_LINE_CHARS = 5
 
+#: Номер правил воріт. Піднімається, коли змінюється те, що ворота ПУСКАЮТЬ
+#: (нова відмова, інший поріг, знята відмова), — не на правку тексту.
+#:
+#: 🔴 Пул зберігає відмову разом із цим номером і пересуджує пакет, коли номер
+#: відтоді змінився. Без нього пакет, відхилений через ваду воріт, лишався
+#: відхиленим і після її виправлення: вердикт по тих самих байтах вважався
+#: остаточним (звіт користувача 29.09.2026, три справи ДАЖО).
+POLICY = 1
+
 
 @dataclass
 class Verdict:
@@ -41,19 +50,32 @@ class Verdict:
 
     refusals: list[str] = field(default_factory=list)
     warnings: list[tuple[str, str]] = field(default_factory=list)
+    #: Ті самі відмови з кодом правила й полем маніфесту — для агента й
+    #: сценарію. `refusals` лишається списком рядків: його читають старі
+    #: клієнти пулу.
+    refusal_details: list[dict[str, str]] = field(default_factory=list)
 
     @property
     def passed(self) -> bool:
         return not self.refusals
 
-    def refuse(self, why: str) -> None:
+    def refuse(self, why: str, *, rule: str, field: str = "") -> None:
         self.refusals.append(why)
+        self.refusal_details.append({"rule": rule, "field": field, "text": why})
 
     def warn(self, code: str, why: str) -> None:
         self.warnings.append((code, why))
 
+    def extend(self, other: Verdict) -> None:
+        """Долити чужий вердикт: відмови разом із їхніми кодами."""
+        self.refusals += other.refusals
+        self.refusal_details += other.refusal_details
+        self.warnings += other.warnings
+
     def as_json(self) -> dict[str, Any]:
         return {"passed": self.passed, "refusals": list(self.refusals),
+                "refusal_details": [dict(d) for d in self.refusal_details],
+                "policy": POLICY,
                 "warnings": [{"code": c, "text": t} for c, t in self.warnings]}
 
 
@@ -81,11 +103,13 @@ def _gate_denominator(m: Manifest, v: Verdict, *, partial_why: str) -> None:
     """Скільки кадрів має справа й скільки з них прочитано."""
     if not m.decode:
         v.refuse("у маніфесті немає блоку `decode` — пакет не називає, скільки "
-                 "прочитано; без цього чужий нуль нічого не означає")
+                 "прочитано; без цього чужий нуль нічого не означає",
+                 rule="no_decode", field="decode")
         return
     pages = m.pages
     if pages <= 0:
-        v.refuse("у пакеті нуль прочитаних сторінок — нема чого передавати")
+        v.refuse("у пакеті нуль прочитаних сторінок — нема чого передавати",
+                 rule="no_pages", field="decode.pages")
         return
     frames = m.frames_total
     if frames <= 0:
@@ -100,7 +124,8 @@ def _gate_denominator(m: Manifest, v: Verdict, *, partial_why: str) -> None:
         v.refuse(
             f"прочитано {pages} сторінок із {frames} кадрів ({frac:.0%}) — це "
             f"уривок, а розданий без застереження він читається як прочитана "
-            f"справа. Пояснити й пустити: --partial \"чому саме стільки\"")
+            f"справа. Пояснити й пустити: --partial \"чому саме стільки\"",
+            rule="partial_unexplained", field="extra.partial")
     elif frac < 1.0:
         v.warn("partial",
                f"прочитано {pages} з {frames} кадрів ({frac:.0%})"
@@ -111,14 +136,17 @@ def _gate_model(m: Manifest, v: Verdict) -> None:
     """Чим читали. Без цього декод неможливо ні відтворити, ні оцінити."""
     voices = m.voices
     if not voices:
-        v.refuse("у маніфесті немає жодного голосу — невідомо, що саме в пакеті")
+        v.refuse("у маніфесті немає жодного голосу — невідомо, що саме в пакеті",
+                 rule="no_voices", field="voices")
         return
     unnamed = [x.get("run") or "?" for x in voices if not str(x.get("model") or "").strip()]
     if unnamed:
         v.refuse(f"прогін без назви моделі: {', '.join(unnamed)}. Модель — це не "
-                 f"підпис, а єдиний спосіб зрозуміти, чому текст саме такий")
+                 f"підпис, а єдиний спосіб зрозуміти, чому текст саме такий",
+                 rule="model_unnamed", field="voices.model")
     if not str(m.case.get("shifra") or "").strip():
-        v.refuse("пакет без шифри справи — його нема куди покласти в отримувача")
+        v.refuse("пакет без шифри справи — його нема куди покласти в отримувача",
+                 rule="no_shifra", field="case.shifra")
 
 
 def _gate_emptiness(m: Manifest, v: Verdict) -> None:
@@ -126,15 +154,17 @@ def _gate_emptiness(m: Manifest, v: Verdict) -> None:
     lines = as_count(m.decode.get("lines"))
     chars = as_count(m.decode.get("chars"))
     if lines <= 0:
-        v.refuse("у пакеті нуль рядків тексту")
+        v.refuse("у пакеті нуль рядків тексту", rule="no_lines", field="decode.lines")
         return
     if chars / lines < MIN_LINE_CHARS:
         v.refuse(f"середній рядок — {chars / lines:.1f} символа: це не текст, а "
-                 f"сміття сегментації. Перечитати справу перед тим, як ділитись")
+                 f"сміття сегментації. Перечитати справу перед тим, як ділитись",
+                 rule="short_lines", field="decode.chars")
     blank = as_count(m.decode.get("blank_pages"))
     if m.pages and blank / m.pages > MAX_BLANK_FRAC:
         v.refuse(f"порожніх сторінок {blank} із {m.pages} — рушій радше не взяв "
-                 f"письмо, ніж прочитав порожні аркуші")
+                 f"письмо, ніж прочитав порожні аркуші",
+                 rule="blank_pages", field="decode.blank_pages")
 
 
 def _gate_identity(m: Manifest, v: Verdict) -> None:
@@ -193,7 +223,8 @@ def _known_archive(repo: str) -> bool:
 def _gate_license(m: Manifest, v: Verdict) -> None:
     if not str(m.license.get("text") or "").strip():
         v.refuse("не вказано ліцензію тексту. Без неї отримувач не знає, що з "
-                 "цим можна робити: --license CC0-1.0")
+                 "цим можна робити: --license CC0-1.0",
+                 rule="no_license", field="license.text")
 
 
 def _gate_payload(m: Manifest, v: Verdict) -> None:
@@ -203,14 +234,16 @@ def _gate_payload(m: Manifest, v: Verdict) -> None:
     leaked = [k for k in META_STRIPPED if k in m.decode or k in m.case]
     if leaked:
         v.refuse(f"у маніфесті лишились поля машини, на якій читали: "
-                 f"{', '.join(leaked)}")
+                 f"{', '.join(leaked)}", rule="machine_fields", field="case")
     private = sorted(_private_keys(m.case))
     if private:
         v.refuse(f"в описі справи робочі нотатки дослідника: {', '.join(private)}. "
-                 "Опис збирається білим списком полів (`share.opys`)")
+                 "Опис збирається білим списком полів (`share.opys`)",
+                 rule="private_keys", field="case")
     if "[[" in json.dumps(m.case, ensure_ascii=False):
         v.refuse("в описі справи посилання на особу дерева (`[[…]]`) — "
-                 "це нотатка дослідження, а не опис справи")
+                 "це нотатка дослідження, а не опис справи",
+                 rule="tree_links", field="case")
 
 
 #: Поля паспорта й сховища сторінок, де лежать нотатки про рід.

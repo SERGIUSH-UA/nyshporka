@@ -428,8 +428,14 @@ def suggest_cmd(
             console.print(f"  {'':<17} [dim]{_e(r['title'])}[/dim]")
         if r.get("pool_mine") is False and r.get("pool_pages"):
             chyi = ", ".join(r.get("pool_publishers") or []) or "без підпису"
+            # Присутня — ще не повна: з кадрами видно, уривок це чи справа.
+            obsiah = f"{r['pool_pages']} стор."
+            if r.get("pool_frames"):
+                obsiah += f" із {r['pool_frames']} кадрів"
+                if r.get("pool_coverage") is not None:
+                    obsiah += f" ({r['pool_coverage']:.0%})"
             console.print(f"  {'':<17} [dim]у пулі вже є чуже прочитання: "
-                          f"{r['pool_pages']} стор. ({_e(chyi)})[/dim]")
+                          f"{obsiah} ({_e(chyi)})[/dim]")
     if len(rows) > limit:
         console.print(f"[dim]… і ще {len(rows) - limit} (--limit N)[/dim]")
 

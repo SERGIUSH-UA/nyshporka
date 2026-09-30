@@ -198,3 +198,78 @@ def test_state_of_rozriznyaie_heometriiu() -> None:
     assert pool.state_of(None) == "none"
     assert pool.state_of(pool.PoolCell(n=1)) == "text"
     assert pool.state_of(pool.PoolCell(n=1, geom=True)) == "text+geom"
+
+
+# ── 5. присутня ≠ повна; чия книга — каже пул ─────────────────────────────────
+
+def _zriz_z_keys(monkeypatch: pytest.MonkeyPatch, rows: list[dict[str, Any]],
+                 **scope: str) -> None:
+    monkeypatch.setattr(pool, "_rows_from_keys", lambda base, repo, fond: (rows, "keys"))
+    pool.sync(**scope)
+
+
+def test_pokryttia_i_kadry_z_pulu(prostir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """🔴 Три сторінки з п'ятисот і прочитана справа мусять виглядати по-різному."""
+    monkeypatch.setattr(pool, "_handle", lambda: "ia")
+    _zriz_z_keys(monkeypatch, [
+        {"repo": "DAHMO", "fond": "315", "opys": "1", "spr": "159", "n": 1,
+         "pages": 26, "geom": True, "publishers": ["khtos"], "updated": "",
+         "frames": 520, "coverage": 0.05, "mine": False}])
+
+    cell = pool.by_key("DAHMO/315/1/159")
+
+    assert cell is not None
+    assert (cell.frames, cell.coverage, cell.mine) == (520, 0.05, False)
+
+
+def test_mii_vnesok_kazhe_pul_a_ne_pidpys(prostir: Path,
+                                          monkeypatch: pytest.MonkeyPatch) -> None:
+    """Підпис порожній або інший — а книга своя: пул знає власника за ключем."""
+    monkeypatch.setattr(pool, "_handle", lambda: "ia")
+    _zriz_z_keys(monkeypatch, [
+        {"repo": "DAHMO", "fond": "315", "opys": "1", "spr": "8345", "n": 1,
+         "pages": 535, "publishers": [""], "mine": True},
+        {"repo": "DAHMO", "fond": "315", "opys": "1", "spr": "8346", "n": 1,
+         "pages": 10, "publishers": ["ia"], "mine": False}])
+
+    assert pool.by_key("DAHMO/315/1/8345").mine is True
+    assert pool.by_key("DAHMO/315/1/8346").mine is False
+    assert pool.known("DAHMO/315/1/8345") == "text"
+
+
+def test_staryi_zriz_bez_pokryttia_chytaietsia(prostir: Path,
+                                               monkeypatch: pytest.MonkeyPatch) -> None:
+    """Зріз, знятий до появи покриття, лишається зрізом: поля — «не питали»."""
+    monkeypatch.setattr(pool, "_handle", lambda: "ia")
+    _zriz([{"key": "DAHMO/315/1/6940", "repo": "DAHMO", "fond": "315",
+            "opys": "1", "spr": "6940", "pages": 7, "publishers": ["ia"]}])
+    con = sqlite3.connect(pool.snapshot_path())
+    con.execute("DROP TABLE pool_extra")
+    con.commit()
+    con.close()
+    pool.invalidate()
+
+    cell = pool.by_key("DAHMO/315/1/6940")
+
+    assert cell is not None and cell.pages == 7
+    assert cell.frames is None and cell.coverage is None
+    assert cell.mine is True, "без відповіді пулу — за підписом, як раніше"
+    assert pool.by_fond("DAHMO", "315")
+
+
+def test_chastkovyi_zriz_ne_hubyt_pokryttia_reshty(prostir: Path,
+                                                   monkeypatch: pytest.MonkeyPatch) -> None:
+    """`sync --fond` дописує зріз — покриття інших фондів лишається при них."""
+    _zriz_z_keys(monkeypatch, [
+        {"repo": "DAHMO", "fond": "315", "opys": "1", "spr": "159", "n": 1,
+         "pages": 26, "publishers": [], "frames": 520, "coverage": 0.05, "mine": False}],
+        repo="DAHMO", fond="315")
+    _zriz_z_keys(monkeypatch, [
+        {"repo": "DAHMO", "fond": "230", "opys": "1", "spr": "24", "n": 1,
+         "pages": 400, "publishers": [], "frames": 400, "coverage": 1.0, "mine": True}],
+        repo="DAHMO", fond="230")
+
+    stara = pool.by_key("DAHMO/315/1/159")
+
+    assert stara is not None and (stara.frames, stara.coverage) == (520, 0.05)
+    assert pool.by_key("DAHMO/230/1/24").coverage == 1.0

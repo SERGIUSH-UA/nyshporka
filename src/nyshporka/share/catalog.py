@@ -305,6 +305,30 @@ def reason(exc: Exception) -> str:
     return head + "\n".join(parts)
 
 
+def refusal(exc: Exception) -> dict[str, Any]:
+    """Машинна частина відмови воріт: `{"details": [...], "policy": ...}`.
+
+    Поруч із текстом для людини (`reason`) пул кладе в `detail` перелік
+    `details` — код правила, поле маніфесту, текст — і номер політики воріт.
+    Старий пул цих полів не має: тоді порожньо.
+    """
+    import json
+
+    try:
+        detail = json.loads(str(getattr(exc, "body", "") or "")).get("detail")
+    except (ValueError, AttributeError):
+        return {}
+    if not isinstance(detail, dict):
+        return {}
+    out: dict[str, Any] = {}
+    details = [d for d in detail.get("details") or [] if isinstance(d, dict)]
+    if details:
+        out["details"] = details
+    if detail.get("policy"):
+        out["policy"] = str(detail["policy"])
+    return out
+
+
 def _fetcher(url: str, *, timeout: float = POOL_TIMEOUT,
              attempts: int = POOL_ATTEMPTS, auth: str | None = None,
              accept_json: bool = False) -> Any:

@@ -156,3 +156,59 @@ def test_describe_lists_every_reason_separately() -> None:
     m.license = {}
     text = gates.describe(gates.check(m))
     assert text.count("✗") >= 2
+
+
+# ── коди відмов і номер політики ──────────────────────────────────────────────
+
+def test_vidmova_nese_kod_pravyla_i_pole() -> None:
+    """🔴 Агент і сценарій черги розрізняють відмови кодом, а не текстом.
+
+    Звіт користувача 29.09.2026: пул відповідав 400, і що саме виправляти —
+    `--partial` чи щось інше — можна було зрозуміти лише з українського речення.
+    """
+    m = good()
+    m.frames["total"] = 300
+    v = gates.check(m)
+
+    assert [(d["rule"], d["field"]) for d in v.refusal_details] == [
+        ("partial_unexplained", "extra.partial")]
+    assert v.refusal_details[0]["text"] == v.refusals[0]
+
+
+def test_kozhna_vidmova_maie_kod() -> None:
+    """Скільки відмов рядками — стільки ж із кодом: жодна не лишилась безіменною."""
+    m = good()
+    m.decode["voices"] = [{**VOICE, "model": ""}]
+    m.case["shifra"] = ""
+    m.license = {}
+    m.case["note"] = "робоча нотатка"
+    v = gates.check(m)
+
+    assert len(v.refusals) >= 4
+    assert [d["text"] for d in v.refusal_details] == v.refusals
+    assert {d["rule"] for d in v.refusal_details} >= {
+        "model_unnamed", "no_shifra", "no_license", "private_keys"}
+    assert all(d["rule"] for d in v.refusal_details)
+
+
+def test_as_json_nese_polityku_i_staryi_perelik() -> None:
+    """`refusals` лишається списком рядків — його читають старі клієнти пулу."""
+    m = good()
+    m.frames["total"] = 300
+    got = gates.check(m).as_json()
+
+    assert got["policy"] == gates.POLICY
+    assert all(isinstance(r, str) for r in got["refusals"])
+    assert got["refusal_details"][0]["rule"] == "partial_unexplained"
+
+
+def test_extend_perenosyt_kody() -> None:
+    """Вердикт приймача складається з двох — коди не губляться дорогою."""
+    m = good()
+    m.frames["total"] = 300
+    v = gates.Verdict()
+    v.refuse("вада пакета: x", rule="bundle_defect")
+    v.extend(gates.check(m))
+
+    assert [d["rule"] for d in v.refusal_details] == ["bundle_defect", "partial_unexplained"]
+    assert len(v.refusals) == 2

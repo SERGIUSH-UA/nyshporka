@@ -61,6 +61,12 @@ class PoolCell:
     #: Людина без `handle` не має права бачити «не ваш» там, де невідомо.
     mine: bool | None = None
     updated: str = ""
+    #: Кадрів справи й частка прочитаного за найповнішим внеском. `None` — пул
+    #: цього не сказав (старий зріз, старий сервер, знаменник невідомий).
+    #: 🔴 Книга в пулі ще не означає, що вона там ПОВНА: три сторінки з
+    #: п'ятисот без цих полів виглядали так само, як прочитана справа.
+    frames: int | None = None
+    coverage: float | None = None
 
 
 # ── адреси ────────────────────────────────────────────────────────────────────
@@ -195,15 +201,39 @@ def stale() -> bool:
 
 def _cell(row: sqlite3.Row, handle: str) -> PoolCell:
     pubs = tuple(json.loads(row["publishers"] or "[]"))
+    # 🔴 Відповідь пулу, якщо вона є: він знає власника за ключем. Збіг
+    # псевдоніма з публічним підписом — лише запасний шлях: підпис буває
+    # порожнім або іншим, і власна книга тоді читалась «не ваша».
+    # `None`, коли немає ні того, ні псевдоніма: «не ваш» і «невідомо» — різні речі.
+    if row["mine"] is not None:
+        mine: bool | None = bool(row["mine"])
+    else:
+        mine = (handle in pubs) if handle else None
     return PoolCell(
         n=int(row["n"] or 0),
         pages=int(row["pages"] or 0),
         geom=bool(row["geom"]),
         publishers=pubs,
-        # 🔴 `None`, коли псевдоніма немає: «не ваш» і «невідомо» — різні речі.
-        mine=(handle in pubs) if handle else None,
+        mine=mine,
         updated=str(row["updated"] or ""),
+        frames=int(row["frames"]) if row["frames"] else None,
+        coverage=float(row["coverage"]) if row["coverage"] is not None else None,
     )
+
+
+def _select(con: sqlite3.Connection) -> str:
+    """`SELECT … FROM pool` з доважком покриття, якщо зріз його має.
+
+    Зріз, знятий до появи `pool_extra`, читається як раніше: поля покриття в
+    ньому — «не питали», а не привід вважати зріз відсутнім.
+    """
+    cols = "pool.key, repo, fond, opys, spr, n, pages, geom, publishers, updated"
+    ye = con.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' "
+                     "AND name = 'pool_extra'").fetchone()
+    if not ye:
+        return f"SELECT {cols}, NULL AS frames, NULL AS coverage, NULL AS mine FROM pool"
+    return (f"SELECT {cols}, e.frames AS frames, e.coverage AS coverage, e.mine AS mine "
+            "FROM pool LEFT JOIN pool_extra e ON e.key = pool.key")
 
 
 def _handle() -> str:
@@ -244,8 +274,7 @@ def by_fond(repo: str, fond: str) -> dict[tuple[str, str, str], PoolCell] | None
     try:
         for kod in kody:
             rows = con.execute(
-                "SELECT opys, spr, n, pages, geom, publishers, updated "
-                "FROM pool WHERE repo = ? AND fond = ?", (kod, key[1])).fetchall()
+                _select(con) + " WHERE repo = ? AND fond = ?", (kod, key[1])).fetchall()
             for r in rows:
                 spr = str(r["spr"] or "")
                 i = len(spr)
@@ -275,8 +304,7 @@ def by_key(key: str) -> PoolCell | None:
     try:
         for kod in synonyms(head):
             row = con.execute(
-                "SELECT opys, spr, n, pages, geom, publishers, updated "
-                "FROM pool WHERE key = ?", (f"{kod}/{tail}",)).fetchone()
+                _select(con) + " WHERE pool.key = ?", (f"{kod}/{tail}",)).fetchone()
             if row:
                 return _cell(row, _handle())
     except sqlite3.Error:
@@ -365,6 +393,10 @@ _DDL = (
     " n INTEGER, pages INTEGER, geom INTEGER, publishers TEXT, updated TEXT)",
     "CREATE INDEX pool_fond ON pool (repo, fond)",
     "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT)",
+    # Окремою таблицею, а не колонками `pool`: розкладка `pool` лишається та
+    # сама, тож зріз читають і старші версії, і `SCHEMA` не росте.
+    "CREATE TABLE pool_extra ("
+    " key TEXT PRIMARY KEY, frames INTEGER, coverage REAL, mine INTEGER)",
 )
 
 
@@ -438,6 +470,13 @@ def _int(value: Any) -> int:
         return int(value or 0)
     except (TypeError, ValueError):
         return 0
+
+
+def _float(value: Any) -> float | None:
+    try:
+        return None if value is None else float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 #: Позначка повного зрізу в `meta.scope`.
@@ -520,7 +559,7 @@ def sync(base: str = "", *, repo: str = "", fond: str = "") -> dict[str, Any]:
     # 🔴 Частковий зріз ДОПИСУЄТЬСЯ до наявного, а не замінює його. Інакше
     # `sync --fond 315` стирав усі інші фонди, і вони читались «у пулі
     # немає» — хоч про них просто не питали.
-    stari = [] if novi == [ALL] else _old_rows_outside(novi)
+    stari, stari_extra = ([], []) if novi == [ALL] else _old_rows_outside(novi)
     bulo = [] if novi == [ALL] else [s for s in scope() if s not in novi]
     pokryttia = [ALL] if ALL in bulo else bulo + novi
     old_meta = meta() or {}
@@ -534,6 +573,8 @@ def sync(base: str = "", *, repo: str = "", fond: str = "") -> dict[str, Any]:
             con.execute(ddl)
         for old in stari:
             con.execute("INSERT OR REPLACE INTO pool VALUES (?,?,?,?,?,?,?,?,?,?)", old)
+        for old in stari_extra:
+            con.execute("INSERT OR REPLACE INTO pool_extra VALUES (?,?,?,?)", old)
         for r in rows:
             key = str(r.get("key") or quad_key(
                 str(r.get("repo") or ""), str(r.get("fond") or ""),
@@ -550,6 +591,12 @@ def sync(base: str = "", *, repo: str = "", fond: str = "") -> dict[str, Any]:
                  json.dumps(list(pubs) if isinstance(pubs, list) else [],
                             ensure_ascii=False),
                  str(r.get("updated") or "")))
+            if any(k in r for k in ("frames", "coverage", "mine")):
+                mine = r.get("mine")
+                con.execute(
+                    "INSERT OR REPLACE INTO pool_extra VALUES (?,?,?,?)",
+                    (key, _int(r.get("frames")) or None, _float(r.get("coverage")),
+                     None if mine is None else (1 if mine else 0)))
         now = datetime.now(UTC).isoformat(timespec="seconds")
         # Вік зрізу — вік НАЙСТАРШОЇ його частини: освіжений фонд не робить
         # свіжими решту, а показ «зрізу годину» над ними був би неправдою.
@@ -582,17 +629,22 @@ def _in_scope(row: dict[str, Any], items: list[str]) -> bool:
     return any(s in (ALL, r, f"{r}/{f}", f"*/{f}") for s in items)
 
 
-def _old_rows_outside(items: list[str]) -> list[tuple[Any, ...]]:
-    """Рядки наявного зрізу поза новим охопленням — вони лишаються як були."""
+def _old_rows_outside(
+        items: list[str]) -> tuple[list[tuple[Any, ...]], list[tuple[Any, ...]]]:
+    """Рядки наявного зрізу поза новим охопленням — вони лишаються як були.
+
+    Друге — їхній доважок покриття (`pool_extra`), де він був.
+    """
     con = _connect()
     if con is None or meta() is None:
-        return []
+        return [], []
     try:
-        rows = con.execute(
-            "SELECT key, repo, fond, opys, spr, n, pages, geom, publishers, updated "
-            "FROM pool").fetchall()
+        rows = con.execute(_select(con)).fetchall()
     except sqlite3.Error:
-        return []
+        return [], []
     finally:
         con.close()
-    return [tuple(r) for r in rows if not _in_scope(dict(r), items)]
+    lyshyty = [r for r in rows if not _in_scope(dict(r), items)]
+    extra = [(r["key"], r["frames"], r["coverage"], r["mine"]) for r in lyshyty
+             if not (r["frames"] is None and r["coverage"] is None and r["mine"] is None)]
+    return [tuple(r)[:10] for r in lyshyty], extra
