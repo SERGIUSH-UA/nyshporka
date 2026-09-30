@@ -662,17 +662,49 @@ def install_gpu_lock(lock_path: Path, device: str, keep_cache: bool = False) -> 
 
 
 # ── OCR ──────────────────────────────────────────────────────────────────────
-def load_recognizer(model: str, engine: str, device: str):
+def load_recognizer(model: str, engine: str, device: str, half: bool = False):
     """Розпізнавач для рушія. Для parseq — та сама завантажувалка, що в
     `pysar_lines_infer.load_pysar` (гіперпараметри беруться з чекпойнта, інакше
     `load_state_dict` тихо лишає половину ваг випадковими), імпортована, а не
-    скопійована — щоб формат чекпойнта описувався в одному місці."""
+    скопійована — щоб формат чекпойнта описувався в одному місці.
+
+    `half` — ваги PARSeq у fp16 (див. `--pysar-fp16`); вхід батча приводиться
+    до типу ваг у місці декоду (`_weights_dtype`)."""
     if engine == "kraken":
         from kraken.lib import models as kmodels
         return kmodels.load_any(model, device=device)
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     from pysar_lines_infer import load_pysar
-    return load_pysar(Path(model), device)
+    net, hw = load_pysar(Path(model), device)
+    return (net.half() if half else net), hw
+
+
+def _weights_dtype(model):
+    """Тип ваг моделі — до нього приводиться вхідний батч."""
+    return next(model.parameters()).dtype
+
+
+def pysar_fp16_wanted(mode: str, device: str) -> tuple[bool, str]:
+    """Чи читати Писаря в fp16 на цій карті: (так/ні, причина для лога).
+
+    `auto` вмикає лише там, де є тензорні ядра: Volta і новіші (compute
+    capability ≥ 7.0), крім GTX 16xx — це Turing без тензорних ядер. Заміряно
+    30.09.2026: RTX 3060 fp32 → fp16 ×2.7 (52 → 141 рядок/с на всю карту),
+    GTX 1650 — утричі ПОВІЛЬНІШЕ. Pascal (GTX 10xx) у fp16 ще гірший.
+    """
+    if mode == "off" or not device.startswith("cuda"):
+        return False, "вимкнено" if mode == "off" else "не cuda"
+    if mode == "on":
+        return True, "примусово"
+    import torch
+    idx = int(device.split(":")[1]) if ":" in device else 0
+    name = torch.cuda.get_device_name(idx)
+    major, minor = torch.cuda.get_device_capability(idx)
+    if major < 7:
+        return False, f"{name}: sm_{major}{minor} без тензорних ядер"
+    if "GTX 16" in name:
+        return False, f"{name}: Turing без тензорних ядер"
+    return True, f"{name}: sm_{major}{minor}"
 
 
 #: Паддінг кропа для kraken-голосу. 16 — рідний дефолт `rpred`, і саме він
@@ -1145,7 +1177,7 @@ def _beam_hypotheses(model, tensors, device: str, beam: int,
     out: list[list[str]] = []
     for j in range(0, len(tensors), batch):
       with torch.no_grad():
-        x = torch.stack(tensors[j:j + batch]).to(device)
+        x = torch.stack(tensors[j:j + batch]).to(device, dtype=_weights_dtype(model))
         n = x.shape[0]
         mem0 = core.encode(x)
         dim = mem0.shape[-1]
@@ -1162,7 +1194,8 @@ def _beam_hypotheses(model, tensors, device: str, beam: int,
             k = i + 1
             dec = core.decode(tgt[:, :k], mem, msk[:k, :k],
                               tgt_query=pq[:, i:k], tgt_query_mask=msk[i:k, :k])
-            lp = core.head(dec).squeeze(1).log_softmax(-1)
+            # `.float()`: у fp16 `-1e9` нижче переповнюється в -inf
+            lp = core.head(dec).squeeze(1).float().log_softmax(-1)
             # завершена гіпотеза далі тягне лише EOS із нульовою ціною — інакше
             # короткі рядки штрафувались би за кожен зайвий крок і витіснялись
             frozen = torch.full_like(lp, -1e9)
@@ -1723,9 +1756,9 @@ def ocr_page_parseq(im: Image.Image, segmenter, rec, device: str,
     _kept_crops: list = []
     kept: list[int] = []                      # глобальні індекси кропів, що вижили
     for j in range(0, len(tensors), batch):
-        x = torch.stack(tensors[j:j + batch]).to(device)
+        x = torch.stack(tensors[j:j + batch]).to(device, dtype=_weights_dtype(model))
         with torch.no_grad():
-            probs = model(x).softmax(-1)
+            probs = model(x).float().softmax(-1)
         preds, per_tok = model.tokenizer.decode(probs)
         # Обидва з одного `decode` — різна довжина означала б ваду рушія, і
         # тихо обрізати її не можна: сторінка мовчки лишилась би без хвоста.
@@ -1774,9 +1807,10 @@ def ocr_page_parseq(im: Image.Image, segmenter, rec, device: str,
                 for c in crops]
             full = []
             for j in range(0, len(etens), batch):
-                x = torch.stack(etens[j:j + batch]).to(device)
+                x = torch.stack(etens[j:j + batch]).to(device,
+                                                       dtype=_weights_dtype(emodel))
                 with torch.no_grad():
-                    p = emodel(x).softmax(-1)
+                    p = emodel(x).float().softmax(-1)
                 preds, _ = emodel.tokenizer.decode(p)
                 full += [clean_pysar_text(unicodedata.normalize("NFC", str(t or "")))
                          for t in preds]
@@ -3140,6 +3174,14 @@ def main() -> int:
                          "як два базові прогони збіглися 9 з 9. Ручка лишена "
                          "вимкненою й задокументована, щоб цей висновок не "
                          "виводили заново")
+    ap.add_argument("--pysar-fp16", choices=("auto", "on", "off"), default="auto",
+                    help="Писар (PARSeq) у половинній точності. auto — лише на "
+                         "картах із тензорними ядрами (sm ≥ 7.0, не GTX 16xx). "
+                         "Заміряно 30.09.2026: RTX 3060 ×2.7 на розпізнаванні, "
+                         "GTX 1650 утричі повільніше. Якість: 3151 з 3152 "
+                         "рядків корпусу дослівно як у fp32; на таблиці "
+                         "оцінок 792 з 800 — різняться лише клітинки з "
+                         "цифрами (1-5 симв.). Точність пишеться в мету")
     ap.add_argument("--seg-height", type=int, default=0,
                     help="висота ресайзу сторінки для сегментера (0 = рідна "
                          "1800). 🔴 ПЕРЕЗАМІРЯНО 05.09.2026 на Tesla V100, "
@@ -3370,6 +3412,10 @@ def _main_case(args: argparse.Namespace, cache: dict | None = None) -> int:
                   # і без цього поля два прогони Дяка по одній справі були б
                   # непорівнянними мовчки
                   "voice_batch": max(1, int(args.voice_batch)),
+                  # точність Писаря — з тієї ж причини: fp16 дає інший текст
+                  # на частці рядків (див. `pysar_fp16_wanted`)
+                  "pysar_fp16": (engine == "parseq"
+                                 and pysar_fp16_wanted(args.pysar_fp16, device)[0]),
                   # 🧵 те саме міркування, що й з контрастом: злиття міняє самі
                   # рядки, тож два прогони однією моделлю по одній справі дадуть
                   # різний текст і різну їх кількість. Без запису в меті
@@ -3514,8 +3560,13 @@ def _main_case(args: argparse.Namespace, cache: dict | None = None) -> int:
         # стеля рядків — своя в кожної справи (сусід міг підняти її на попередній)
         seg_ceiling.set_ceiling(args.max_endpoints)
     from kraken.kraken import SEGMENTATION_DEFAULT_MODEL
-    rec_model = _cached(cache, ("rec", args.model, device),
-                        lambda: load_recognizer(args.model, engine, device))
+    half = False
+    if engine == "parseq":
+        half, why = pysar_fp16_wanted(args.pysar_fp16, device)
+        if not warm:
+            print(f"[htr-run] Писар у {'fp16' if half else 'fp32'} ({why})", flush=True)
+    rec_model = _cached(cache, ("rec", args.model, device, half),
+                        lambda: load_recognizer(args.model, engine, device, half))
     globals()["VOICE_BATCH"] = max(1, int(args.voice_batch))
     # ── ансамбль і beam: додаткові виходи з однієї сегментації ───────────────
     # 🤝 Голос може бути іншого рушія, ніж основна модель: `.mlmodel` (Дяк,
@@ -3550,8 +3601,8 @@ def _main_case(args: argparse.Namespace, cache: dict | None = None) -> int:
                     lambda p=p: load_kraken_voice(str(p), device))))
             else:
                 extra_recs.append((tag, "parseq", _cached(
-                    cache, ("rec", str(p), device),
-                    lambda p=p: load_recognizer(str(p), "parseq", device))))
+                    cache, ("rec", str(p), device, half),
+                    lambda p=p: load_recognizer(str(p), "parseq", device, half))))
             side_dirs[tag] = out_dir.parent / f"{out_dir.name}-{tag}"
             side_scripts[tag] = model_script(str(p), vengine)
         if args.beam > 1:
