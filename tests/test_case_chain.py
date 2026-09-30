@@ -58,6 +58,7 @@ def space(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(htr_store, "runs_by_case_dir", lambda: {})
     yield tmp_path
     K.reset()
+    W.reset()
 
 
 def _kadry(d: Path, n: int = 3) -> Path:

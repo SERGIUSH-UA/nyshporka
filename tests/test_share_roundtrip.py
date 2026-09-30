@@ -85,6 +85,13 @@ def pul(monkeypatch: pytest.MonkeyPatch) -> Pul:
     return p
 
 
+@pytest.fixture(autouse=True)
+def _prostir_nazad():
+    """Простір цього тесту не переживає тест: наступний дістав би теку, якої вже немає."""
+    yield
+    W.reset()
+
+
 def _prostir(root: Path) -> Path:
     W.use(W.Workspace(root=root, name=root.name, origin="test"))
     return root
