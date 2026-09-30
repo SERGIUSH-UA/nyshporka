@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import asdict, dataclass
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -158,13 +159,13 @@ def judge(case_dir: Path, *, frames: int = 0,
     abs_dir = case_path(case_dir)
     rel = _rel(abs_dir)
     name, meta = sidecar_of(abs_dir)
-    base = {"path": rel, "frames": frames, "sidecar": name}
+    mk = partial(Lanka, path=rel, frames=frames, sidecar=name)
     cmd, note = _register_cmd(rel, meta)
 
     if not reachable(abs_dir):
-        return Lanka(link=OUTSIDE_ROOTS, **base,
-                     why="тека лежить поза коренями справ — каталог її не обходить",
-                     fix=f"{cmd} --adopt{note}")
+        return mk(link=OUTSIDE_ROOTS,
+                  why="тека лежить поза коренями справ — каталог її не обходить",
+                  fix=f"{cmd} --adopt{note}")
 
     parsed = L.parse_case_path(rel)
     if not parsed:
@@ -174,33 +175,33 @@ def judge(case_dir: Path, *, frames: int = 0,
         # відрізняють поля `record_fetch`. Книжка з бібліотеки (`book`) —
         # теж завантаження, але справою її ніхто не називав.
         if name == "meta.json" and _is_case_download(meta):
-            return Lanka(link=LOADER_ONLY, **base,
-                         why=("у теці лише `meta.json` завантажувача — це запис про "
-                              "завантаження, а не паспорт справи (`_source.json`)"),
-                         fix=f"{cmd}{note}")
+            return mk(link=LOADER_ONLY,
+                      why=("у теці лише `meta.json` завантажувача — це запис про "
+                           "завантаження, а не паспорт справи (`_source.json`)"),
+                      fix=f"{cmd}{note}")
         why = (f"у `{name}` немає шифри" if name
                else "паспорта немає, а з імені теки шифру не зібрати")
-        return Lanka(link=NO_PASSPORT, **base, why=why, fix=f"{cmd}{note}")
+        return mk(link=NO_PASSPORT, why=why, fix=f"{cmd}{note}")
 
     keys = L.candidate_keys(parsed)
     lk = L.library_lookup() if L.LIBRARY_PATH.exists() else None
     found = lk is not None and (rel in lk.by_path or any(k in lk.by_key for k in keys))
     key = next((k for k in keys if lk is not None and k in lk.by_key), keys[0] if keys else "")
     if not found:
-        return Lanka(link=NOT_IN_LIBRARY, **base, key=key,
-                     why="ключ справи збирається, але каталог справ зібрано до появи теки",
-                     fix="nysh cases build --rescan")
+        return mk(link=NOT_IN_LIBRARY, key=key,
+                  why="ключ справи збирається, але каталог справ зібрано до появи теки",
+                  fix="nysh cases build --rescan")
     if runs is None:
-        return Lanka(link=OK, **base, key=key)
+        return mk(link=OK, key=key)
     # ARCHIUM кладе кадри в `pages/`: прогін знає теку з нею, каталог — без.
     moi = (runs.get(str(abs_dir)) or []) + (runs.get(str(abs_dir / "pages")) or [])
     if not moi:
-        return Lanka(link=NO_RUN, **base, key=key, fix=f'nysh read "{rel}"')
+        return mk(link=NO_RUN, key=key, fix=f'nysh read "{rel}"')
     pages = max(int(r.get("pages_done") or 0) for r in moi)
     if frames and pages / frames < _COVERAGE_OK:
-        return Lanka(link=PARTIAL_RUN, **base, key=key,
-                     why=f"прочитано {pages} із {frames}", fix=f'nysh read "{rel}"')
-    return Lanka(link=OK, **base, key=key)
+        return mk(link=PARTIAL_RUN, key=key,
+                  why=f"прочитано {pages} із {frames}", fix=f'nysh read "{rel}"')
+    return mk(link=OK, key=key)
 
 
 # ── увесь простір ─────────────────────────────────────────────────────────────
