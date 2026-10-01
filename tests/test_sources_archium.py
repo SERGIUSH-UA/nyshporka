@@ -51,6 +51,21 @@ def test_fond_page_gives_inventories(fond_html: str) -> None:
     assert "1795-1921" in invs[0].label
 
 
+def test_inventory_without_case_count_is_not_a_crash() -> None:
+    """Опис без кількості справ: число невідоме, а не падіння всього фонду.
+
+    Розмітка — дослівно з ЦДІАК ф.114 (01.10.2026), де такий опис ронив
+    `nysh browse archium-cdiak fond:114` з ValueError.
+    """
+    html = ('<h1 class="head-title">Фонд</h1>'
+            '<div class="thin-row"><div class="left"><a href="/inventories/911/">Опис 1</a></div>'
+            '<div class="right">1810\n                    ,  справи</div></div>'
+            '<div class="thin-row"><div class="left"><a href="/inventories/912/">Опис 2</a></div>'
+            '<div class="right">1795 - 1803, 1 418 справ</div></div>')
+    _, invs = A.parse_inventories(html)
+    assert [(n.ref, n.frames) for n in invs] == [("inv:911", None), ("inv:912", 1418)]
+
+
 def test_inventory_gives_cases_with_sheet_counts(inventory_view: str) -> None:
     cases = A.parse_cases(inventory_view)
     assert len(cases) == 25

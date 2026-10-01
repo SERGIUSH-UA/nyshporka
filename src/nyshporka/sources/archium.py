@@ -64,7 +64,10 @@ _PAGE_RE = re.compile(r"[?&]Page=(\d+)")
 _FILE_ID_RE = re.compile(r"/files/(\d+)/")
 _INV_ID_RE = re.compile(r"/inventories/(\d+)/")
 _FOND_ID_RE = re.compile(r"/fonds/(\d+)/")
-_COUNT_RE = re.compile(r"([\d ]+)\s*справ")
+#: 🔴 Число мусить починатися з цифри. Опис без кількості справ на сторінці
+#: фонду виглядає як «1810 ,  справи» — і `[\d ]+` брав самі пробіли, `int("")`
+#: валив увесь `browse` фонду (ЦДІАК ф.114, 01.10.2026).
+_COUNT_RE = re.compile(r"(\d[\d ]*)\s*справ")
 _DATES_RE = re.compile(r"(\d{4}\s*[-–]\s*\d{4}|\d{4})")
 #: (id кадру, номер сторінки). Порядок сторінок дає `alt`, а не числовий id —
 #: id у переглядачі перемішані.
