@@ -14,6 +14,7 @@ import contextlib
 import queue
 import subprocess
 import threading
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -29,6 +30,49 @@ EventFn = Callable[[Event | None, str | None], None]
 StopFn = Callable[[], bool]
 
 
+@dataclass
+class Pace:
+    """Темп МАШИНИ за цей запуск — те, що можна порівнювати між людьми.
+
+    🔴 Рядок раннера «… с/стор» — це один шард і разом із завантаженням
+    моделей. При трьох шардах кожен пише своє, і жодне не є темпом машини, а
+    на трьох аркушах зразка завантаження з'їдає половину. Тут — від початку
+    першої сторінки до кінця останньої, усіма шардами разом.
+    """
+
+    shards: int = 1
+    pages: int = 0
+    lines: int = 0
+    voices: int = 0
+    hw: str = ""
+    first_start: float = 0.0
+    last_end: float = 0.0
+
+    def page(self, ev: Event, now: float) -> None:
+        """Одна прочитана сторінка (подія раннера з полем `lines`)."""
+        if ev.phase != "htr" or "lines" not in ev.extra:
+            return
+        sec = float(ev.extra.get("sec") or 0.0)
+        if not self.pages:
+            self.first_start = now - sec
+        self.pages += 1
+        self.lines += int(ev.extra.get("lines") or 0)
+        self.voices = int(ev.extra.get("voices") or self.voices)
+        self.hw = str(ev.extra.get("hw") or self.hw)
+        self.last_end = now
+
+    @property
+    def sec_per_page(self) -> float:
+        return (self.last_end - self.first_start) / self.pages if self.pages else 0.0
+
+    def line(self) -> str:
+        if not self.pages:
+            return ""
+        return (f"темп: {self.sec_per_page:.1f} с/стор · {self.pages} стор · "
+                f"{self.lines / self.pages:.0f} рядк/стор · голосів {self.voices or '?'} · "
+                f"шардів {self.shards} · {self.hw or 'пристрій невідомий'}")
+
+
 @dataclass(frozen=True)
 class ReadResult:
     """Чим скінчилось читання — з диска, а не з коду повернення."""
@@ -40,6 +84,7 @@ class ReadResult:
     partial: bool      # читали частину навмисно (--limit / --pages / --shard)
     stopped: bool      # зупинено на прохання, а не дочитано
     notes: tuple[str, ...] = ()
+    pace: Pace | None = None
 
     @property
     def ok(self) -> bool:
@@ -92,6 +137,7 @@ def read_case(plan: Any, *, case_key: str = "", workers: int = 1, device: str = 
     env = foreign_env(shard_env(len(cmds)) if len(cmds) > 1 else None)
     lines: queue.Queue[str | None] = queue.Queue()
     procs: list[Any] = []
+    pace = Pace(shards=len(cmds))
     stopped = False
     try:
         for k, cmd in enumerate(cmds):
@@ -114,8 +160,12 @@ def read_case(plan: Any, *, case_key: str = "", workers: int = 1, device: str = 
                 line = ""
             if line is None:
                 live -= 1
-            elif line and on_event is not None:
-                on_event(*split(line))
+            elif line:
+                ev, human = split(line)
+                if ev is not None:
+                    pace.page(ev, time.monotonic())
+                if on_event is not None:
+                    on_event(ev, human)
             if not stopped and should_stop is not None and should_stop():
                 stopped = True
                 for proc in procs:
@@ -134,7 +184,7 @@ def read_case(plan: Any, *, case_key: str = "", workers: int = 1, device: str = 
     partial = bool(limit or pages or shard)
     missing = 0 if partial else max(0, count_frames(plan.case_dir) - done)
     return ReadResult(rc=rc, done=done, frames=int(plan.frames), missing=missing,
-                      partial=partial, stopped=stopped, notes=tuple(notes))
+                      partial=partial, stopped=stopped, notes=tuple(notes), pace=pace)
 
 
 def _pump(proc: Any, lines: queue.Queue[str | None]) -> None:

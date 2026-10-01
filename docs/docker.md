@@ -10,7 +10,7 @@
 |---|---|---|
 | NVIDIA RTX 20xx–40xx, GTX 16xx, V100, T4, A-серія | `ghcr.io/sergiush-ua/nyshporka:cuda` | ~10–20 с |
 | NVIDIA RTX 50xx, H100 | `ghcr.io/sergiush-ua/nyshporka:cuda128` | ~10–20 с |
-| без NVIDIA, зокрема Mac на M-чипі | `ghcr.io/sergiush-ua/nyshporka:latest` | ~20 с – 2 хв, залежно від ядер |
+| без NVIDIA, зокрема Mac на M-чипі | `ghcr.io/sergiush-ua/nyshporka:latest` | ~20 с – 1 хв, залежно від ядер і щільності сторінки |
 
 !!! warning "Mac на Apple Silicon читає лише процесором"
     Docker на Mac не має доступу до відеочипа Apple, тож образ працює на
@@ -51,8 +51,9 @@ docker run --rm -v "$PWD/nysh:/srv/nysh" ghcr.io/sergiush-ua/nyshporka \
     read /srv/nysh/work/data/raw/sample-315-159 --rerun --out /srv/nysh/work/sample-out
 ```
 
-Текст лягає поруч у `*.txt`. Рядок `✓ готово: … с/стор` наприкінці читання
-показує швидкість вашої машини.
+Текст лягає поруч у `*.txt`. Наприкінці читання є рядок
+`⏱ темп: … с/стор · … рядк/стор · голосів … · шардів … · <пристрій>` —
+це темп вашої машини, і саме його можна порівнювати з чужими замірами.
 
 ## Застосунок у браузері
 

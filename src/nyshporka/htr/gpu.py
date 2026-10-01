@@ -28,7 +28,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 #: Що дописується до кожної відмови: CPU — це повільно, але робочо.
-CPU_NOTE = "лишаю CPU-збірку (читання піде ~2 хв/стор замість ~20 с)"
+CPU_NOTE = "лишаю CPU-збірку (читання піде ~20 с – 1 хв/стор замість ~10–15 с на карті)"
 
 #: Форма, у якій `nvidia-smi` віддає compute capability. Усе інше — не число.
 _CAPABILITY = re.compile(r"^\d+\.\d+$")

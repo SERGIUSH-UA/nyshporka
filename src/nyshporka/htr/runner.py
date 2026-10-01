@@ -641,6 +641,51 @@ def stages_summary(total: dict[str, float], pages: int, device: str,
     return "середня сторінка: " + " · ".join(bits)
 
 
+def _cpu_name() -> str:
+    """Модель процесора тим ім'ям, яке людина впізнає («Intel(R) Core(TM) i7-…»)."""
+    import platform
+    import subprocess
+
+    try:
+        if sys.platform.startswith("linux"):
+            for line in Path("/proc/cpuinfo").read_text(encoding="utf-8").splitlines():
+                if line.lower().startswith("model name"):
+                    return line.split(":", 1)[1].strip()
+        elif sys.platform == "darwin":
+            got = subprocess.run(["sysctl", "-n", "machdep.cpu.brand_string"],
+                                 capture_output=True, text=True, timeout=5)
+            if got.stdout.strip():
+                return got.stdout.strip()
+        elif sys.platform == "win32":
+            import winreg
+
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
+                                r"HARDWARE\DESCRIPTION\System\CentralProcessor\0") as k:
+                return str(winreg.QueryValueEx(k, "ProcessorNameString")[0]).strip()
+    except Exception:
+        pass
+    # ⚠ Linux на arm (Docker на Mac) моделі в /proc/cpuinfo не пише — тоді
+    # лишається архітектура, і разом із числом потоків це вже щось.
+    return platform.processor() or platform.machine() or "процесор"
+
+
+def machine_label(device: str) -> str:
+    """На чому йшло читання — для рядка підсумку.
+
+    🔴 Без цього «19 с/стор» від однієї людини й «14 с» від іншої нема з чим
+    порівняти: невідомо, карта це чи процесор, і який. Так 01.10.2026 заміри з
+    чату не лягли поруч ні між собою, ні з нашими.
+    """
+    if device.startswith("cuda"):
+        try:
+            import torch
+
+            return torch.cuda.get_device_name(torch.device(device))
+        except Exception:
+            return device
+    return f"{_cpu_name()}, {os.cpu_count() or '?'} потоків"
+
+
 def install_gpu_lock(lock_path: Path, device: str, keep_cache: bool = False) -> None:
     """Серіалізувати між воркерами лише GPU-фазу сегментації.
 
@@ -3433,7 +3478,7 @@ def _main_case(args: argparse.Namespace, cache: dict | None = None) -> int:
     import torch
     device = args.device
     if device.startswith("cuda") and not torch.cuda.is_available():
-        print("[htr-run] CUDA недоступна — падаю на cpu (буде ~2 хв/стор)", flush=True)
+        print("[htr-run] CUDA недоступна — падаю на cpu (~20 с – 1 хв/стор)", flush=True)
         device = "cpu"
 
     shard_k, shard_n = parse_shard(args.shard)
@@ -3794,6 +3839,9 @@ def _main_case(args: argparse.Namespace, cache: dict | None = None) -> int:
     print(f"[htr-run] моделі завантажено за {time.time() - t0:.0f} с", flush=True)
 
     done = skipped = failed = enhanced_n = ceiling_n = 0
+    lines_done = 0
+    hw = machine_label(device)
+    voices_n = 1 + len(extra_recs)
     geom_watch = GeomWatch()
     geom_lost_pages = 0
     stages_total: dict[str, float] = {}
@@ -4098,7 +4146,9 @@ def _main_case(args: argparse.Namespace, cache: dict | None = None) -> int:
             meta["failed"].remove(src.name)
         done += 1
         save_meta()
+        lines_done += len(res["lines"])
         emit(prog, "htr", i=i, n=n, page=src.name, lines=len(res["lines"]),
+             hw=hw, voices=voices_n,
              orient=res["orient"], conf=res["conf"], sec=sec,
              guarded=res.get("guarded", False),
              # стан 180°-гарда в UI: без нього «чому сторінка 48 с, а сусідня 21»
@@ -4135,8 +4185,15 @@ def _main_case(args: argparse.Namespace, cache: dict | None = None) -> int:
     # справа тихо втратила частину рядків, і в меті це виглядало б нормою
     ceil_note = (f" · стеля піднята на {ceiling_n} з {done}"
                  if ceiling_n else "")
+    # 🔴 На чому й на чому саме — у тому ж рядку: цей рядок люди пересилають
+    # як замір, і без пристрою, голосів і щільності він ні з чим не порівнюється.
+    # Темп машини при кількох шардах тут НЕ видно (кожен шард пише свій) —
+    # його друкує `nysh read` наприкінці.
+    shard_note = f"шард {args.shard} · " if args.shard else ""
+    dens = f" · {lines_done / done:.0f} рядк/стор" if done else ""
     print(f"[htr-run] ✓ готово: {done} розпізнано · {skipped} скіп · {failed} збоїв "
           f"· {total_min:.1f} хв{per}{enh_note}{ceil_note}", flush=True)
+    print(f"[htr-run]   {shard_note}{hw} · голосів {voices_n}{dens}", flush=True)
     # 💾 що дав кеш — числом, а не «десь швидше»: без цього рядка неможливо
     # відрізнити «кеш працює» від «кеш мовчки промахується на кожному кадрі»
     if segmenter.dir is not None:

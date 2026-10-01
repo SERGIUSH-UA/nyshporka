@@ -58,8 +58,12 @@ jobs:
       # воріт і збірки. Без очікування збірка впала б на `pip install`.
       - name: чекаю версію на PyPI
         run: |
+          # 🔴 Простий індекс, а не JSON API: ставить `uv` саме з нього, а
+          # оновлюється він пізніше. На 0.21.2 JSON уже віддав версію, а
+          # збірка amd64 за мить дістала «no version of nyshporka==0.21.2».
           for i in $(seq 1 60); do
-            curl -fsS "https://pypi.org/pypi/nyshporka/${{ steps.ver.outputs.v }}/json" >/dev/null && exit 0
+            curl -fsS -H "Cache-Control: no-cache" https://pypi.org/simple/nyshporka/ \
+              | grep -q "nyshporka-${{ steps.ver.outputs.v }}-py3-none-any.whl" && exit 0
             sleep 30
           done
           echo "nyshporka ${{ steps.ver.outputs.v }} не з'явилась на PyPI за 30 хв" && exit 1
