@@ -245,6 +245,23 @@ def preset_now(recorded: str = "") -> str:
     return recorded or "catalog"
 
 
+def has_rent() -> bool:
+    """Чи стоїть плагін оренди (extra `rent`, пакет `gpuhire`) у цьому середовищі.
+
+    🔴 Оренди немає в жодному наборі, тож без цієї ознаки оновлення її не
+    бачило: `pip install --upgrade` лишав старий плагін, а `uv tool install
+    --force` перезбирав середовище без нього — `nysh cloud go` після
+    оновлення зникав.
+    """
+    from importlib.metadata import PackageNotFoundError, distribution
+
+    try:
+        distribution("gpuhire")
+    except PackageNotFoundError:
+        return False
+    return True
+
+
 def tool_env() -> bool:
     """Чи запущено з середовища інструмента uv (`uv tool install`, `.exe`, скрипти).
 
@@ -299,6 +316,8 @@ def command(preset: str = "") -> list[str]:
     info = install_info()
     got = preset or preset_now(info.get("preset", ""))
     spec = install_target(got)
+    if has_rent():
+        spec = (spec[:-1] + ",rent]") if spec.endswith("]") else spec + "[rent]"
     if not tool_env():
         return [sys.executable, "-m", "pip", "install", "--upgrade", spec]
     uv = info.get("uv") or "uv"

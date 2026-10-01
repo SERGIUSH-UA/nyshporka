@@ -16,6 +16,12 @@ import pytest
 from nyshporka.setup import update as U
 
 
+@pytest.fixture(autouse=True)
+def _no_rent_plugin(monkeypatch):
+    """Плагін оренди в середовищі розробки стоїть; тести набору його не бачать."""
+    monkeypatch.setattr(U, "has_rent", lambda: False)
+
+
 def test_a_newer_release_is_recognised_as_newer():
     assert U.Release("0.6.3", "0.6.4").newer
     assert U.Release("0.6.3", "0.7.0").newer
@@ -378,3 +384,13 @@ def test_update_that_cannot_run_here_names_the_line_and_runs_nothing(monkeypatch
     assert got.exit_code == 1, got.output
     assert "nyshporka[app,archives]" in got.output
     assert "не ставлю" in got.output
+
+
+def test_the_rent_plugin_survives_an_update(monkeypatch):
+    """🔴 Оренди немає в жодному наборі — без цього оновлення її знімало або
+    лишало старою (`uv tool install --force` перезбирає середовище)."""
+    monkeypatch.setattr(U, "has_htr", lambda: True)
+    monkeypatch.setattr(U, "tool_env", lambda: True)
+    monkeypatch.setattr(U, "has_rent", lambda: True)
+    assert U.command("researcher")[-1].endswith(",rent]")
+    assert U.command("lab")[-1] == "nyshporka[app,archives,htr,train,rent]"
