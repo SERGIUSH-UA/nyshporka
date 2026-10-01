@@ -642,9 +642,15 @@ def _prepare(res: GoResult, case: str, say: EventFn, owner: contextlib.ExitStack
     # робочій теці, де опису немає, — тож другий здогад чесно каже «не знаю» і
     # валить справу вже ПІСЛЯ стискання. Спіймано 21.09.2026 на живому заході:
     # `DAHMO/196-8/22` випала з черги, хоч письмо було визначене з першого разу.
+    # Щільність — із прочитаного, а нечитана справа — з сегментації вибірки
+    # кадрів: від неї темп, вибір машини й ціна, і припущені 60 рядків
+    # помилялись удвічі в обидва боки (сповідки 18, формуляри 250).
+    lines = F.lines_per_page(plan.out_dir)
+    if lines is None:
+        lines = F.lines_per_page_probe(pack, on_line=lambda s: say("density", s))
     plan = build(pack, script=plan.script,
                  source_dir=ref.frames_dir if pack != ref.frames_dir else "",
-                 lines_per_page=F.lines_per_page(plan.out_dir), pages_left=left)
+                 lines_per_page=lines, pages_left=left)
     for w in plan.warnings:
         notes.append(w)
         res.notes.append(w)

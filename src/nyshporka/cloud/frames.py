@@ -485,3 +485,87 @@ def lines_per_page(out_dir: Path | str, *, sample: int = 200) -> float | None:
     if len(counts) < DENSITY_MIN_PAGES:
         return None
     return float(statistics.median(counts))
+
+
+#: Скільки кадрів сегментувати, щоб оцінити щільність нечитаної справи.
+#: Заміри 01.10.2026: ±4–7 % на рівномірних книгах, −30 % на збірній сповідці
+#: (щільні блоки підряд) — проти припущених 60 рядків, що помилялись удвічі.
+DENSITY_PROBE_SAMPLE = 40
+#: Стеля часу гостя: на карті ~1 хв, на процесорі вибірка менша, але повільніша.
+DENSITY_PROBE_TIMEOUT = 900
+
+
+def _probe_cache(frames: list[Path], d: Path) -> Path:
+    import hashlib
+
+    from nyshporka.core.workspace import workspace
+
+    newest = max((f.stat().st_mtime for f in frames), default=0.0)
+    key = hashlib.sha1(f"{d.resolve()}|{len(frames)}|{newest:.0f}".encode()).hexdigest()[:16]
+    return workspace().derived / "cloud" / "density" / f"{key}.json"
+
+
+def lines_per_page_probe(frames_dir: Path | str, *, sample: int = DENSITY_PROBE_SAMPLE,
+                         on_line: Any = None) -> float | None:
+    """Рядків на сторінку НЕЧИТАНОЇ справи — з сегментації вибірки кадрів.
+
+    `None` — оцінити нічим (немає середовища рушіїв, гість упав): кошторис
+    тоді лишається на припущенні, як доти. Повертається СЕРЕДНЄ, а не медіана:
+    час заходу — сума рядків, і на збірній сповідці (медіана 18, середнє 33)
+    медіана занизила б його майже вдвічі. Результат кешується в похідних
+    даних простору за текою, числом кадрів і часом найновішого — повторний
+    `--dry-run` і справжній запуск не сегментують удруге.
+    """
+    import json
+    import subprocess
+
+    d = Path(frames_dir)
+    if not d.is_dir():
+        return None
+    frames = [p for p in d.iterdir() if p.is_file()
+              and p.suffix.lower() in (".jpg", ".jpeg", ".png", ".tif", ".tiff")]
+    if not frames:
+        return None
+    cache = _probe_cache(frames, d)
+    with contextlib.suppress(OSError, ValueError):
+        got = json.loads(cache.read_text(encoding="utf-8"))
+        if got.get("ok") and got.get("lines_mean"):
+            return float(got["lines_mean"])
+    try:
+        from nyshporka.htr.env import foreign_env, venv_python
+        from nyshporka.setup.doctor import engine_venv
+
+        py = venv_python(engine_venv())
+    except Exception:
+        return None
+    if not py.exists():
+        return None
+    guest = Path(__file__).resolve().parents[1] / "htr" / "density_probe.py"
+    if on_line:
+        on_line(f"щільність невідома — сегментую {sample} кадрів вибірки (~1 хв на карті)")
+    try:
+        res = subprocess.run([str(py), str(guest), str(d), "--sample", str(sample)],
+                             capture_output=True, text=True, encoding="utf-8",
+                             errors="replace", timeout=DENSITY_PROBE_TIMEOUT,
+                             env=foreign_env())
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    lines = (res.stdout or "").strip().splitlines()
+    try:
+        got = json.loads(lines[-1]) if lines else {}
+    except ValueError:
+        got = {}
+    if not isinstance(got, dict) or not got.get("ok") or not got.get("lines_mean"):
+        if on_line:
+            why = got.get("why") if isinstance(got, dict) else ""
+            on_line(f"⚠ вибірка не вдалась ({why or (res.stderr or '')[-200:]}) — "
+                    f"щільність лишається припущеною")
+        return None
+    with contextlib.suppress(OSError):
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        cache.write_text(json.dumps({**got, "frames_dir": str(d)}, ensure_ascii=False),
+                         encoding="utf-8")
+    if on_line:
+        on_line(f"вибірка {got['n']} кадрів: {got['lines_mean']:g} рядк/стор у середньому "
+                f"(медіана {got['lines_median']:g}), {got.get('sec')} с на {got.get('device')}")
+    return float(got["lines_mean"])

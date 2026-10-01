@@ -46,7 +46,7 @@ LOCAL_MODULES = {"pysar_lines_infer", "gpu_sato", "fast_geom", "seg_ceiling",
 GUEST_FILES = ["runner.py", "pysar_lines_infer.py",
                "patches/gpu_sato.py", "patches/fast_geom.py",
                "patches/seg_ceiling.py", "patches/seg_resize.py",
-               "patches/fast_order.py", "patches/fast_seam.py",
+               "patches/fast_order.py", "patches/fast_seam.py", "density_probe.py",
                # Верифікатори — теж гості: вони ганяють стару й нову версію
                # пліч-о-пліч на живій сегментації, тобто всередині того самого
                # середовища. Доказ рівності, знятий деінде, нічого не доводить.
