@@ -26,6 +26,7 @@ import statistics
 import sys
 import time
 from pathlib import Path
+from typing import Any
 
 FRAME_EXT = (".jpg", ".jpeg", ".png", ".tif", ".tiff")
 #: Ширше за висоту більше ніж стільки — не сторінка (етикетка, смуга).
@@ -46,6 +47,38 @@ def sample_frames(case_dir: Path, n: int) -> list[Path]:
         return body
     step = len(body) / n
     return [body[int(i * step)] for i in range(n)]
+
+
+def count_lines(frames: list[Path], model: Any, device: str, *, blla: Any, kseg: Any,
+                release: Any, open_image: Any) -> list[int]:
+    """Рядків на кожному кадрі-сторінці; після кожного кадру пам'ять карти віддається.
+
+    🔴 Без `release` кеш алокатора torch тримає блоки під КОЖНУ нову форму
+    входу, а форма тут своя на кожному розвороті (ширина 3905…4111 при висоті
+    3100). 02.10.2026, ЦДІАК 127-1016-247 на GTX 1650 (4 ГБ): за шість кадрів
+    зарезервовано 5.7 ГБ, тобто більше за саму карту. Windows (WDDM) кладе
+    надлишок у RAM процесу, і замір ріс до 8–12 ГБ, поки не клав систему. З
+    віддачею після кожного кадру ті самі кадри тримаються в 1.4 ГБ.
+    """
+    counts: list[int] = []
+    for f in frames:
+        with open_image(f) as raw:
+            w, h = raw.size
+            if not h or w / h > MAX_ASPECT:
+                continue
+            im = raw.convert("RGB")
+        rets = blla.compute_segmentation_map(im, None, model, device)
+        cls = rets["cls_map"]
+        st_sep = cls["aux"]["_start_separator"]
+        end_sep = cls["aux"]["_end_separator"]
+        counts.append(sum(
+            len(kseg.vectorize_lines(rets["heatmap"][(st_sep, end_sep, idx), :, :],
+                                     text_direction="horizontal",
+                                     max_endpoints=MAX_ENDPOINTS))
+            for idx in cls["baselines"].values()))
+        del rets, cls, im
+        release()
+    return counts
 
 
 def main() -> int:
@@ -77,22 +110,14 @@ def main() -> int:
             install_gpu_sato((1, 3), device=device)
         n = a.sample if device.startswith("cuda") else min(a.sample, CPU_SAMPLE)
         model = vgsl.TorchVGSLModel.load_model(resources.files("kraken").joinpath("blla.mlmodel"))
-        counts: list[int] = []
-        for f in sample_frames(Path(a.case_dir), n):
-            with Image.open(f) as raw:
-                w, h = raw.size
-                if not h or w / h > MAX_ASPECT:
-                    continue
-                im = raw.convert("RGB")
-            rets = blla.compute_segmentation_map(im, None, model, device)
-            cls = rets["cls_map"]
-            st_sep = cls["aux"]["_start_separator"]
-            end_sep = cls["aux"]["_end_separator"]
-            counts.append(sum(
-                len(kseg.vectorize_lines(rets["heatmap"][(st_sep, end_sep, idx), :, :],
-                                         text_direction="horizontal",
-                                         max_endpoints=MAX_ENDPOINTS))
-                for idx in cls["baselines"].values()))
+
+        def release() -> None:
+            if device.startswith("cuda"):
+                torch.cuda.empty_cache()
+
+        counts = count_lines(sample_frames(Path(a.case_dir), n), model, device,
+                             blla=blla, kseg=kseg, release=release,
+                             open_image=Image.open)
     except Exception as exc:  # відповідь мусить бути завжди — хост чекає JSON
         print(json.dumps({"ok": False, "why": f"{type(exc).__name__}: {exc}"[:300]}))
         return 1

@@ -81,3 +81,43 @@ def test_sample_skips_covers_and_spreads_evenly(tmp_path: Path) -> None:
     assert names[0] == "0003.jpg" and "0099.jpg" not in names and "0097.jpg" not in names
     assert len(set(names)) == 40
     assert len(G.sample_frames(_frames(tmp_path / "small", 10), 40)) == 10
+
+
+def test_the_card_memory_is_released_after_every_frame(tmp_path: Path) -> None:
+    """🔴 02.10.2026, ЦДІАК 127-1016-247: кожен розворот має свою ширину, і кеш
+    алокатора torch тримав блоки під кожну — 5.7 ГБ зарезервованого на 4-ГБ
+    карті за шість кадрів, а замір ріс до 8–12 ГБ RAM. Карта віддається після
+    КОЖНОГО кадру-сторінки."""
+    released: list[int] = []
+
+    class _Img:
+        def __init__(self, size):
+            self.size = size
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def convert(self, mode):
+            return self
+
+    sizes = {"a": (3905, 3100), "label": (9000, 1800), "b": (4111, 3100)}
+    rets = {"cls_map": {"aux": {"_start_separator": 0, "_end_separator": 1},
+                        "baselines": {"default": 2}},
+            "heatmap": {}}
+
+    class _Heat(dict):
+        def __getitem__(self, key):
+            return key
+
+    rets["heatmap"] = _Heat()
+    blla = types.SimpleNamespace(compute_segmentation_map=lambda im, _m, model, dev: rets)
+    kseg = types.SimpleNamespace(
+        vectorize_lines=lambda h, text_direction, max_endpoints: [1] * 7)
+    got = G.count_lines([Path(k) for k in sizes], object(), "cuda:0", blla=blla, kseg=kseg,
+                        release=lambda: released.append(1),
+                        open_image=lambda f: _Img(sizes[Path(f).name]))
+    assert got == [7, 7]
+    assert len(released) == 2, "етикетку не сегментуємо, а після кожної сторінки — віддати"
