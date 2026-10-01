@@ -1248,6 +1248,11 @@ def _beam_hypotheses(model, tensors, device: str, beam: int,
 # результати = вічний промах для обох (див. `Segmenter._file`).
 SEG_CACHE_VERSION = 1
 
+#: Висота входу бойової моделі сегментації kraken (`blla.mlmodel`).
+SEG_NET_HEIGHT = 1800
+#: Нижче цієї висоти стеля входу не стискає: далі рядки зливаються.
+SEG_MIN_HEIGHT = 900
+
 #: Версія kraken іде В ключ кешу: підмінені гарячі функції сегментації
 #: (`scripts/KRAKEN_PATCHES.md`) прив'язані до 7.0.2, і на іншій версії полігони
 #: рядків можуть відрізнятись — а такий промах був би тихим.
@@ -1501,8 +1506,14 @@ class Segmenter:
     def __init__(self, model_path: str, device: str, seg_height: int = 0,
                  cache_dir: Path | None = None, key: dict | None = None,
                  write: bool = True, merge: dict | None = None,
-                 autocast: bool = False):
+                 autocast: bool = False, max_mpx: float = 0.0):
         self._path, self._device, self._h = model_path, device, seg_height
+        #: Стеля входу мережі, Мп (0 — без стелі); див. `_page_height`.
+        self._max_mpx = float(max_mpx or 0)
+        #: Висота входу саме цієї сторінки, коли її зменшила стеля (0 — ні).
+        self._page_h = 0
+        #: Що зробила стеля з останньою сторінкою — для мети (None — нічого).
+        self.page_cap: dict | None = None
         self.dir, self._key, self._write = cache_dir, key or {}, write
         # Половинна точність на форварді сегментера (`torch.autocast`). Kraken
         # приймає її параметром `blla.segment(autocast=…)`, а ми досі передавали
@@ -1519,6 +1530,25 @@ class Segmenter:
         self._merge = merge or {}
         self.merged_lines = 0
         self.merged_pages = 0
+
+    def _page_height(self, im: Image.Image) -> int:
+        """Висота входу мережі для цієї сторінки, коли стеля її зменшує; 0 — ні.
+
+        Kraken зводить кадр до висоти входу моделі (1800), зберігаючи пропорції,
+        тож пам'ять сегментатора росте з ШИРИНОЮ кадру, а не з числом рядків:
+        ~0.5 ГБ на мегапіксель входу. Кадр-смуга 7461×1802 (корінець, ANRM
+        134-249, 01.10.2026) з вісьмома рядками взяв 6.8 ГБ проти 2.2 ГБ
+        звичайної сторінки — і регулятор флоту тримав під нього запас увесь
+        захід. Понад стелю висота входу зменшується так, щоб площа дорівнювала
+        стелі; сторінки під стелею не змінюються ні на біт.
+        """
+        if not self._max_mpx:
+            return 0
+        base = self._h or SEG_NET_HEIGHT
+        w, h = im.size
+        if not h or base * base * w / h <= self._max_mpx * 1e6:
+            return 0
+        return max(SEG_MIN_HEIGHT, min(base, int((self._max_mpx * 1e6 * h / w) ** 0.5)))
 
     # модель вантажиться на першому промаху, не на старті
     def _net(self):
@@ -1555,7 +1585,9 @@ class Segmenter:
             k["ceiling"] = seg_ceiling.ceiling()
         except Exception:
             pass
-        k["seg_height"] = self._h
+        # стеля входу — інша нарізка, тож і ключ інший; сторінки під стелею
+        # лишаються під старим ключем, і наявний кеш не знецінюється
+        k["seg_height"] = self._page_h or self._h
         # 🔴 Ключ дописується ЛИШЕ коли autocast увімкнено. Безумовний рядок
         # змінив би ключ усім наявним записам — а їх понад сто тисяч, і жоден
         # більше не влучив би. Половинна точність дає інший форвард, тож свій
@@ -1617,18 +1649,32 @@ class Segmenter:
 
     def segment(self, im: Image.Image, stem: str = "", orient: int = 0,
                 enhanced: str = ""):
-        if stem:
-            got = self.load(stem, orient, enhanced)
-            if got is not None:
-                self.hits += 1
-                return self._post(got)
-        from kraken import blla
-        seg = blla.segment(im, model=self._net(), device=self._device,
-                           autocast=self._autocast)
-        self.misses += 1
-        if stem:
-            self.save(stem, orient, enhanced, seg)
-        return self._post(seg)
+        self._page_h = self._page_height(im)
+        self.page_cap = ({"from": [int(im.size[0]), int(im.size[1])],
+                          "height": self._page_h, "max_mpx": self._max_mpx}
+                         if self._page_h else None)
+        try:
+            if stem:
+                got = self.load(stem, orient, enhanced)
+                if got is not None:
+                    self.hits += 1
+                    return self._post(got)
+            from kraken import blla
+            net = self._net()
+            spec = net.input
+            if self._page_h:
+                net.input = (spec[0], spec[1], self._page_h, spec[3])
+            try:
+                seg = blla.segment(im, model=net, device=self._device,
+                                   autocast=self._autocast)
+            finally:
+                net.input = spec
+            self.misses += 1
+            if stem:
+                self.save(stem, orient, enhanced, seg)
+            return self._post(seg)
+        finally:
+            self._page_h = 0
 
 
 def resolve_case_key(case_dir: Path, run_name: str = "",
@@ -3192,6 +3238,11 @@ def main() -> int:
                          "рядків корпусу дослівно як у fp32; на таблиці "
                          "оцінок 792 з 800 — різняться лише клітинки з "
                          "цифрами (1-5 симв.). Точність пишеться в мету")
+    ap.add_argument("--seg-max-mpx", type=float, default=8.0,
+                    help="стеля входу сегментатора, Мп (0 — без стелі). Ширший "
+                         "кадр (смуга, корінець; при висоті 1800 — ширше 2.5:1) "
+                         "сегментується зі зменшеною висотою: пам'ять росте з "
+                         "площею входу, ~0.5 ГБ/Мп. Сторінки під стелею — без змін")
     ap.add_argument("--seg-height", type=int, default=0,
                     help="висота ресайзу сторінки для сегментера (0 = рідна "
                          "1800). 🔴 ПЕРЕЗАМІРЯНО 05.09.2026 на Tesla V100, "
@@ -3667,7 +3718,7 @@ def _main_case(args: argparse.Namespace, cache: dict | None = None) -> int:
         cache_dir=seg_cache,
         key={"sato": args.sato_sigmas, "kraken": KRAKEN_PIN_VERSION,
              "max_endpoints": args.max_endpoints},
-        merge=merge_cfg, autocast=args.seg_autocast)
+        merge=merge_cfg, autocast=args.seg_autocast, max_mpx=args.seg_max_mpx)
     if cache is not None and cache.get("seg_model") is not None:
         # модель сегментації — та сама на всю чергу; тека кешу — своя в справи
         segmenter._model = cache["seg_model"]
@@ -4007,6 +4058,8 @@ def _main_case(args: argparse.Namespace, cache: dict | None = None) -> int:
             # з тим, скільки шардів тоді працювало: на RTX 3060 темп упав після
             # п'ятого шарда (30.09.2026), і з мети не видно, який етап подорожчав.
             "at": round(time.time(), 1),
+            # сегментатор читав сторінку зі зменшеною висотою входу (стеля Мп)
+            **({"seg_capped": segmenter.page_cap} if segmenter.page_cap else {}),
             # 🔴 Порожня сторінка має причину: «рядки знайдено, але kraken їх
             # викинув» — це збій і привід перечитати, «рядків не знайдено» —
             # імовірно чистий аркуш, але це ще не підтвердження людиною
