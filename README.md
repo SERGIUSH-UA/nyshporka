@@ -186,6 +186,11 @@ curl -LsSf https://raw.githubusercontent.com/SERGIUSH-UA/nyshporka/main/install/
 **перезапустіть комп'ютер**. (Тим, хто ставив інсталятором, це не потрібно:
 ярлики працюють одразу.)
 
+**Docker, без установки в систему.** Готовий образ із рушіями й вагами:
+`docker run --rm ghcr.io/sergiush-ua/nyshporka doctor`; для карти NVIDIA — тег
+`:cuda` і `--gpus all`. Докладно —
+[**«Нишпорка в Docker»**](https://nyshporka.online/docs/docker/).
+
 **Якщо Python або `uv` уже є:**
 
 ```bash
