@@ -181,8 +181,12 @@ def take(key: str, *, force: bool = False, reindex: bool = True,
     write_library(entries)
     db.build_index()
     out["reindexed"] = True
-    out["in_library"] = any(
-        str(e.fond) == fond and str(e.spr) == spr
-        and (e.repo or "").upper() == repo for e in entries)
+    mine = [e for e in entries
+            if str(e.fond) == fond and str(e.spr) == spr
+            and (e.repo or "").upper() == repo]
+    out["in_library"] = bool(mine)
+    # Письмо — лише з паспорта справи (`script`/`langs`), не з жанру й років:
+    # підказка «далі» інакше радила б рушій навмання.
+    out["script"] = next((e.script for e in mine if e.script), "")
     _ = force  # перезапис вирішує сам `acquire`: він звіряє sha256 файлів
     return out

@@ -269,10 +269,11 @@ DROPPED_FIELD = "pages_dropped"
 def _where_from_passport(d: Path) -> str | None:
     """Звідки повернути кадри, якщо паспорт каже, що їх знято.
     None — паспорт такої позначки не має."""
-    for name in ("_source.json", "source.json"):
+    # `meta.json` — паспорт `cases take`; Commons-чистка ставить позначку саме туди
+    for name in ("_source.json", "source.json", "meta.json"):
         meta = _read_json(d / name)
         if COMMONS_PURGE_FIELD in meta:
-            url = next((str(meta[k]) for k in ("commons_url", "commons_file", "url")
+            url = next((str(meta[k]) for k in ("commons_url", "commons_file", "url", "fetched_url")
                         if meta.get(k) and "commons" in str(meta[k]).lower()), "")
             return f"Wikimedia Commons: {url}" if url else "Wikimedia Commons"
         if DROPPED_FIELD in meta:
@@ -768,6 +769,16 @@ def collect_rows(index: LibraryIndex | None = None, *,
                 repo = _CYR_REPO.get(repo, repo)
                 parsed = (repo, m.group(1).lstrip("0"), m.group(2).lstrip("0"),
                           m.group(3).lstrip("0"))
+        if not parsed and meta.get("archive") and meta.get("fond") and meta.get("spr"):
+            # 🔴 `meta.json` від `cases take` шифри рядком не несе — лише поля.
+            # Без цієї гілки справа, з якої зняли кадри (Commons-чистка лишає
+            # саме цей паспорт), зникала з реєстру: 01.10.2026 так випали
+            # ДАХмО R-6380-1-215 і 1-225 разом зі своїми прогонами.
+            from nyshporka.library import _norm_fond, _sidecar_opys
+            repo = str(meta["archive"]).strip().upper()
+            parsed = (_CYR_REPO.get(repo, repo), str(_norm_fond(str(meta["fond"]))),
+                      str(_sidecar_opys(meta) or ""),
+                      str(meta["spr"]).lstrip("0"))
         if not parsed:
             continue
         # 🔴 Ключ будує `_mk_key`, а не f-рядок: у фондах із `_OPYS_IN_KEY`

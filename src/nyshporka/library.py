@@ -339,8 +339,11 @@ def find_by_address(addr: Address) -> list[dict[str, Any]]:
             continue
         out.append(e)
     return out
-# dahmo_315, а також із суфіксом джерела/рендера: dahmo_315_fs, dahmo_230_pages
-_SLUG_FOND_RE = re.compile(r"^([a-z]+)_(\d+)(?:[_-][a-z0-9]+)*$")
+# dahmo_315, а також із суфіксом джерела/рендера: dahmo_315_fs, dahmo_230_pages.
+# Радянський фонд — з літерою й дефісом: `dahmo_R-6380` (так теку називає
+# `cases take`). Без цієї гілки тека не розбиралась зовсім, а паспорт `meta.json`
+# шифри рядком не несе — справа лягала на диск, але бібліотека її не бачила.
+_SLUG_FOND_RE = re.compile(r"^([a-z]+)_([A-Za-z]-\d+|\d+)(?:[_-][a-z0-9]+)*$")
 _SPR_DIR_RE = re.compile(r"spr[-_]?0*(\w+?)$", re.IGNORECASE)    # spr-8433 / spr-199a
 # опис у назві теки: `op2-spr-148` = опис 2 (інакше візьметься дефолт і буде хибним)
 _OP_PREFIX_RE = re.compile(r"(?:^|[-_])op(\d+)", re.IGNORECASE)
@@ -647,7 +650,7 @@ def parse_case_path(rel: str) -> tuple[str, str, str | None, str] | None:
     guessed = False
     m = _SLUG_FOND_RE.match(slug)
     if m:
-        repo, fond = _canon_repo(m.group(1)), _norm_spr(m.group(2))
+        repo, fond = _canon_repo(m.group(1)), _norm_fond(m.group(2))
     elif slug.split("_")[0].isalpha():
         word = slug.split("_")[0]
         repo = _canon_repo(word)
@@ -662,7 +665,7 @@ def parse_case_path(rel: str) -> tuple[str, str, str | None, str] | None:
         for seg in parts[:-1]:
             ms = _SLUG_FOND_RE.match(seg)
             if ms:
-                repo, fond = _canon_repo(ms.group(1)), fond or _norm_spr(ms.group(2))
+                repo, fond = _canon_repo(ms.group(1)), fond or _norm_fond(ms.group(2))
                 break
     last = parts[-1]
     stem = re.sub(r"\.(pdf|jpe?g|png)$", "", last, flags=re.IGNORECASE)

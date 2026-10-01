@@ -331,6 +331,29 @@ def test_offloaded_case_is_archived_not_ordered(space: Path) -> None:
         "archived", "skanoteka_download.py · https://sadowe.genealodzy.pl/id1703-sy51-se")
 
 
+def test_commons_purged_take_passport_stays_archived(space: Path) -> None:
+    """Справа з `cases take`, з якої Commons-чистка зняла PDF, — `archived`.
+
+    01.10.2026 ДАХмО R-6380-1-215 і 1-225 випали з реєстру після чистки: паспорт
+    `meta.json` від `take` шифри рядком не несе (лише `archive/fond/inv/spr`),
+    а позначку `purged_commons_verified` чистка пише саме в нього.
+    """
+    from nyshporka.cases.collect import collect_rows
+
+    d = space / "data" / "raw" / "dahmo_R-6380" / "spr-215"
+    d.mkdir(parents=True)
+    url = "https://commons.wikimedia.org/wiki/File:X.pdf"
+    (d / "meta.json").write_text(json.dumps({
+        "archive": "DAHMO", "fond": "R-6380", "inv": "1", "spr": "215",
+        "title": "Книга РАЦС", "fetched_url": url,
+        "purged_commons_verified": {"date": "2026-10-01"}}, ensure_ascii=False),
+        encoding="utf-8")
+    _library()
+    got = {r.path: (r.state, r.archived_to, r.fond, r.spr) for r in collect_rows()[0]}
+    assert got["data/raw/dahmo_R-6380/spr-215"] == (
+        "archived", f"Wikimedia Commons: {url}", "R-6380", "215")
+
+
 def test_archived_case_keeps_its_htr_runs(space: Path) -> None:
     """Прогін справи, чиї кадри вивантажено, лишається за нею.
 

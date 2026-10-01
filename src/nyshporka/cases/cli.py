@@ -809,4 +809,17 @@ def cmd_take(key: str = typer.Argument(..., help="DAHMO/230/43 або DAHMO/230/
     if got["shifra_needs_eye"]:
         console.print("  [err]звірити шифру оком[/err] — номер відновлено, "
                       "див. meta.json → shifra_needs_eye")
-    console.print("  HTR-прогін (письмо за жанром: родовідні 1802 — латинка/Скриба)")
+    # 🔴 Письмо не вгадується тут з жанру: незмінний рядок «родовідні 1802 —
+    # латинка/Скриба» друкувався під кожною справою, зокрема під кириличними
+    # книгами РАЦС 1930-х, і радив не той рушій.
+    script = got.get("script") or ""
+    if script in ("cyrillic", "latin"):
+        console.print(f"  HTR-прогін: nysh read {got['case_dir']} --script {script} "
+                      f"(письмо з паспорта справи)")
+    elif script == "mixed":
+        console.print(f"  HTR-прогін: письмо мішане — nysh read {got['case_dir']} "
+                      f"--script cyrillic --with latin")
+    else:
+        console.print("  HTR-прогін: письма паспорт не називає — подивитись кадр і "
+                      "задати --script cyrillic (Писар+Дяк) або latin (Скриба); "
+                      "не певні — --with latin третім голосом")
