@@ -996,6 +996,10 @@ def read(
     pages: str = typer.Option("", "--pages", help="діапазони кадрів: 1-50,60"),
     shard: str = typer.Option("", "--shard",
                               help="«k/n» — цей процес бере кожен n-й кадр"),
+    workers: int = typer.Option(
+        1, "--workers", "-j", min=1,
+        help="скільки шардів читає справу на одній карті (2–3 на 8 ГБ): поки "
+             "один рахує процесором, інший зайнятий карткою; без карти — один"),
     gpu_lock: str = typer.Option("", "--gpu-lock",
                                  help="спільний файл-лок GPU; обов'язковий при --shard"),
     gpu_sato: bool = typer.Option(True, "--gpu-sato/--no-gpu-sato",
@@ -1119,9 +1123,22 @@ def read(
     # `nysh read` (чи термінал плюс застосунок) заходили на карту разом — рівно
     # той звіт, з якого почалась ця правка. Черга демона сюди не дістає: вона
     # не бачить прогонів командного рядка, а карта в них спільна.
+    if workers > 1 and shard:
+        console.print("[err]--workers і --shard разом не працюють:[/err] "
+                      "--workers сам розкладає справу на шарди")
+        raise typer.Exit(code=2)
+    # 🔴 Шарди мають сенс лише на карті: на процесорі вони б'ються за ті самі
+    # ядра (`Plan.shards` тоді згортає їх до одного й каже чому). Карту питаємо
+    # драйвер, як скрізь, — torch у цьому процесі може й не стояти.
+    device = ""
+    if workers > 1:
+        from nyshporka.htr import gpu as G
+
+        device = "cuda" if G.detect_card() is not None else ""
     opts: dict[str, Any] = {
         "case_key": case_key, "limit": limit, "pages": pages, "shard": shard,
-        "gpu_lock": gpu_lock, "gpu_sato": gpu_sato, "seg_height": seg_height}
+        "gpu_lock": gpu_lock, "gpu_sato": gpu_sato, "seg_height": seg_height,
+        "workers": workers, "device": device}
     if dry:
         for cmd in S.commands(p, **opts)[0]:
             console.print("  [muted]" + " ".join(cmd) + "[/muted]")
@@ -1153,6 +1170,8 @@ def read(
             console.print(f"  [muted]{human}[/muted]")
 
     got = S.read_case(p, on_event=_say, **opts)
+    for note in got.notes:
+        console.print(f"  [muted]{note}[/muted]")
     rc, done, missing, partial = got.rc, got.done, got.missing, got.partial
     console.print(f"\n{'✅' if rc == 0 and not missing else '🔴'} "
                   f"сторінок з текстом: {done} з {p.frames}"
