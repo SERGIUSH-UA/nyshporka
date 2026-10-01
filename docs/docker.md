@@ -43,6 +43,17 @@ docker run --rm --gpus all -v "$PWD/nysh:/srv/nysh" \
     ghcr.io/sergiush-ua/nyshporka:cuda read /srv/nysh/work/scans/<справа>
 ```
 
+!!! warning "Windows: поточна тека пишеться інакше"
+    `$PWD` — це Linux, macOS і PowerShell. У `cmd.exe` змінна не підставляється,
+    і Docker отримує буквально `$PWD/nysh`. Там пишіть `%cd%`:
+
+    ```bat
+    docker run --rm -v "%cd%\nysh:/srv/nysh" ghcr.io/sergiush-ua/nyshporka doctor
+    ```
+
+    У PowerShell — `${PWD}`: `-v "${PWD}\nysh:/srv/nysh"`. Або просто повний
+    шлях: `-v "C:\nysh:/srv/nysh"`.
+
 Без сканів можна спробувати на вкладеній зразковій справі (три аркуші):
 
 ```sh
