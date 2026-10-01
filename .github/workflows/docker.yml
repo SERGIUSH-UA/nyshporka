@@ -84,11 +84,18 @@ jobs:
       # процесорі — це перевіряє рушії й ваги, а не саму карту.
       - name: пробне читання
         run: |
-          docker run --rm local/nyshporka doctor
-          docker run --rm --entrypoint sh local/nyshporka -c '
+          docker volume create smoke
+          docker run --rm -v smoke:/srv/nysh local/nyshporka doctor
+          # Другий контейнер на тому самому томі: стан користувача мусив
+          # пережити перший, інакше новий простір просить `nysh migrate`.
+          docker run --rm -v smoke:/srv/nysh local/nyshporka doctor 2>&1 | tee /tmp/second.log
+          if grep -q "nysh migrate" /tmp/second.log; then
+            echo "стан користувача не пережив контейнер" && exit 1
+          fi
+          docker run --rm -v smoke:/srv/nysh --entrypoint sh local/nyshporka -c '
             set -e
             nysh-entrypoint sample
-            nysh read /srv/nyshporka/data/raw/sample-315-159 --limit 1 --rerun --out /tmp/smoke
+            nysh read /srv/nysh/work/data/raw/sample-315-159 --limit 1 --rerun --out /tmp/smoke
             test -s /tmp/smoke/0001.txt
             head -5 /tmp/smoke/0001.txt'
 

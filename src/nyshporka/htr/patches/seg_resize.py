@@ -37,8 +37,13 @@ logger = logging.getLogger(__name__)
 #: (`seg_resize_verify`). Це патч чужого коду: інша версія kraken може змінити
 #: сам ланцюг трансформів, і розбіжність буде тихою — інша нарізка рядків без
 #: помилки в лозі. Тому — гучне попередження й гард імен.
-TESTED_KRAKEN = "7.0.2"
-TESTED_TORCHVISION = "0.28.0"
+#:
+#: torchvision — кілька версій: 0.25 ставить `nysh htr install` (kraken 7.0.2
+#: тримає torch ≤ 2.10), 0.28 стоїть у старших середовищах. Обидві звірено
+#: на тих самих п'яти кадрах ДАОО ф.37 спр.1347: вхід мережі побайтно, рядки
+#: тотожні.
+TESTED_KRAKEN = ("7.0.2",)
+TESTED_TORCHVISION = ("0.25.0", "0.28.0")
 
 
 def _warn_version_drift() -> None:
@@ -49,8 +54,8 @@ def _warn_version_drift() -> None:
             have = md.version(pkg)
         except Exception:
             continue
-        if have.split("+")[0] != tested:
-            print(f"[seg-resize] ⚠ {pkg} {have}, а патч звірений на {tested}. "
+        if have.split("+")[0] not in tested:
+            print(f"[seg-resize] ⚠ {pkg} {have}, а патч звірений на {', '.join(tested)}. "
                   f"Перезвір: <інтерпретатор рушіїв> -m "
                   f"nyshporka.htr.patches.seg_resize_verify <тека справи> 5",
                   flush=True)
@@ -157,7 +162,7 @@ def install(verbose: bool = False) -> bool:
     if missing:
         raise RuntimeError(
             f"seg_resize: у kraken.blla немає {missing} — версія пакета "
-            f"розійшлася з патчем (звірено на {TESTED_KRAKEN})")
+            f"розійшлася з патчем (звірено на {', '.join(TESTED_KRAKEN)})")
     blla._compute_segmentation_map_orig = blla.compute_segmentation_map
     blla.compute_segmentation_map = compute_segmentation_map_once
     blla._seg_resize_installed = True

@@ -23,29 +23,32 @@
 
 ## Запуск
 
-Усе дослідження живе в теці `/srv/nyshporka` всередині контейнера. Змонтуйте
-туди свою теку, інакше прочитане зникне разом із контейнером. При першому
-запуску там з'явиться робочий простір.
+Змонтуйте свою теку в `/srv/nysh`, інакше прочитане зникне разом із
+контейнером. При першому запуску в ній з'являться дві підтеки:
+
+- `work` — робочий простір: скани, прочитаний текст, реєстри;
+- `home` — налаштування Нишпорки: ключ доступу до застосунку, каталог справ,
+  позначки оновлень.
 
 ```sh
 # перевірити, що все на місці
-docker run --rm -v "$PWD/nysh:/srv/nyshporka" ghcr.io/sergiush-ua/nyshporka doctor
+docker run --rm -v "$PWD/nysh:/srv/nysh" ghcr.io/sergiush-ua/nyshporka doctor
 
-# прочитати справу: скани кладете в nysh/scans/<справа>
-docker run --rm -v "$PWD/nysh:/srv/nyshporka" ghcr.io/sergiush-ua/nyshporka \
-    read /srv/nyshporka/scans/<справа>
+# прочитати справу: скани кладете в nysh/work/scans/<справа>
+docker run --rm -v "$PWD/nysh:/srv/nysh" ghcr.io/sergiush-ua/nyshporka \
+    read /srv/nysh/work/scans/<справа>
 
 # те саме на карті NVIDIA
-docker run --rm --gpus all -v "$PWD/nysh:/srv/nyshporka" \
-    ghcr.io/sergiush-ua/nyshporka:cuda read /srv/nyshporka/scans/<справа>
+docker run --rm --gpus all -v "$PWD/nysh:/srv/nysh" \
+    ghcr.io/sergiush-ua/nyshporka:cuda read /srv/nysh/work/scans/<справа>
 ```
 
 Без сканів можна спробувати на вкладеній зразковій справі (три аркуші):
 
 ```sh
-docker run --rm -v "$PWD/nysh:/srv/nyshporka" ghcr.io/sergiush-ua/nyshporka sample
-docker run --rm -v "$PWD/nysh:/srv/nyshporka" ghcr.io/sergiush-ua/nyshporka \
-    read /srv/nyshporka/data/raw/sample-315-159 --rerun --out /srv/nyshporka/sample-out
+docker run --rm -v "$PWD/nysh:/srv/nysh" ghcr.io/sergiush-ua/nyshporka sample
+docker run --rm -v "$PWD/nysh:/srv/nysh" ghcr.io/sergiush-ua/nyshporka \
+    read /srv/nysh/work/data/raw/sample-315-159 --rerun --out /srv/nysh/work/sample-out
 ```
 
 Текст лягає поруч у `*.txt`. Рядок `✓ готово: … с/стор` наприкінці читання
@@ -54,14 +57,14 @@ docker run --rm -v "$PWD/nysh:/srv/nyshporka" ghcr.io/sergiush-ua/nyshporka \
 ## Застосунок у браузері
 
 ```sh
-docker run --rm -it -p 127.0.0.1:8788:8788 -v "$PWD/nysh:/srv/nyshporka" \
+docker run --rm -it -p 127.0.0.1:8788:8788 -v "$PWD/nysh:/srv/nysh" \
     ghcr.io/sergiush-ua/nyshporka \
     serve --host 0.0.0.0 --confirm-host 0.0.0.0 --confirm-public --no-browser
 ```
 
 Далі відкрийте http://127.0.0.1:8788/ і введіть код сполучення з термінала.
-Код видно лише з `-it`. Без нього ключ доступу дістається так:
-`docker exec <контейнер> sh -c 'cat ~/.config/nyshporka/serve/*.key'`.
+Код видно лише з `-it`. Без нього введіть ключ доступу: він лежить у вашій
+теці, `nysh/home/config/nyshporka/serve/*.key`, і між запусками не міняється.
 
 `--host 0.0.0.0` тут потрібен лише для того, щоб Docker міг передати порт у
 контейнер. Назовні машини застосунок не видно, бо порт прив'язано до

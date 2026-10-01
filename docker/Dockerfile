@@ -28,10 +28,20 @@ ENV UV_NO_CACHE=1 \
     UV_PYTHON_DOWNLOADS=never \
     VIRTUAL_ENV=/opt/nysh/app \
     PATH=/opt/nysh/app/bin:$PATH \
-    NYSHPORKA_WORKSPACE=/srv/nyshporka \
     NYSHPORKA_HTR_VENV=/opt/nysh/htr \
     XDG_CACHE_HOME=/opt/nysh/cache \
     PYTHONUNBUFFERED=1
+
+# 🔴 Людина монтує ОДНУ теку, /srv/nysh, і в ній живе все, що має пережити
+# контейнер: простір (work) і стан користувача (home) — позначка пройдених
+# міграцій, ключ `nysh serve`, каталог справ. Доти стан лежав у шарі
+# контейнера й зникав з кожним `--rm`: простір щоразу просив `nysh migrate`,
+# а ключ доступу до застосунку мінявся на кожному запуску.
+# Ваги (XDG_CACHE_HOME) — в образі: вони приходять з ним і з ним оновлюються.
+ENV NYSHPORKA_WORKSPACE=/srv/nysh/work \
+    XDG_STATE_HOME=/srv/nysh/home/state \
+    XDG_CONFIG_HOME=/srv/nysh/home/config \
+    XDG_DATA_HOME=/srv/nysh/home/data
 
 RUN test -n "$NYSH_VERSION" || (echo "потрібен --build-arg NYSH_VERSION" && exit 1) \
  && uv venv /opt/nysh/app --python 3.11 \
@@ -45,7 +55,7 @@ RUN mkdir -p /tmp/ws && cd /tmp/ws \
  && NYSHPORKA_WORKSPACE=/tmp/ws nysh init /tmp/ws --yes --preset researcher \
  && UV_TORCH_BACKEND=${TORCH} NYSHPORKA_WORKSPACE=/tmp/ws nysh htr install --no-cuda \
  && NYSHPORKA_WORKSPACE=/tmp/ws nysh models get \
- && rm -rf /tmp/ws
+ && rm -rf /tmp/ws /srv/nysh
 
 COPY docker/entrypoint.sh /usr/local/bin/nysh-entrypoint
 RUN chmod +x /usr/local/bin/nysh-entrypoint
@@ -54,8 +64,8 @@ LABEL org.opencontainers.image.source="https://github.com/SERGIUSH-UA/nyshporka"
       org.opencontainers.image.description="Нишпорка: пошук і читання архівних справ" \
       org.opencontainers.image.licenses="AGPL-3.0-or-later"
 
-VOLUME /srv/nyshporka
-WORKDIR /srv/nyshporka
+VOLUME /srv/nysh
+WORKDIR /srv/nysh
 EXPOSE 8788
 ENTRYPOINT ["nysh-entrypoint"]
 CMD ["doctor"]

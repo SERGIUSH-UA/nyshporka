@@ -622,7 +622,11 @@ def stages_summary(total: dict[str, float], pages: int, device: str,
     """Середня сторінка за етапами з позначкою, де кожен рахується."""
     if not pages or not total:
         return ""
-    dev = "карта" if device.startswith("cuda") else "процесор"
+    on_card = device.startswith("cuda")
+    dev = "карта" if on_card else "процесор"
+    # Патч sato ставиться лише на карті (та сама умова, що при встановленні
+    # патча): прапорець без карти не переносить sato нікуди.
+    sato_where = "карта" if gpu_sato and on_card else "процесор"
 
     def s(k: str) -> str:
         return f"{total.get(k, 0.0) / pages:.1f} с"
@@ -630,7 +634,7 @@ def stages_summary(total: dict[str, float], pages: int, device: str,
     bits = [f"сегментація {s('segment')} (мережа {s('seg_net')} · {dev}"]
     if "gpu_wait" in total:
         bits[-1] += f", з неї чекання карти {s('gpu_wait')}"
-    bits[-1] += (f"; sato {s('sato')} · {'карта' if gpu_sato else 'процесор'}"
+    bits[-1] += (f"; sato {s('sato')} · {sato_where}"
                  f"; полігони {s('polygon')} · процесор)")
     bits.append(f"розпізнавання {s('recognize')} · {dev}")
     bits.append(f"решта {s('other')} · процесор")

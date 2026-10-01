@@ -63,6 +63,9 @@ def test_pidsumok_kazhe_de_rakhuietsia() -> None:
     assert "розпізнавання 2.0 с · карта" in s
     assert "sato 1.0 с · процесор" in R.stages_summary(total, 2, "cuda:0", gpu_sato=False)
     assert R.stages_summary({}, 0, "cpu", gpu_sato=False) == ""
+    # Без карти патч sato не ставиться, хоч прапорець і стоїть за замовчуванням.
+    on_cpu = R.stages_summary(total, 2, "cpu", gpu_sato=True)
+    assert "sato 1.0 с · процесор" in on_cpu and "розпізнавання 2.0 с · процесор" in on_cpu
 
 
 # ── з чим ішов прогін — поруч із замірами ─────────────────────────────────────
