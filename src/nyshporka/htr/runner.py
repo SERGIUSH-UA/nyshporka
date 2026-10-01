@@ -385,6 +385,11 @@ def enhance_image(im: Image.Image, mode: str) -> Image.Image:
         return im
     from skimage.exposure import equalize_adapthist
 
+    # `fast_clahe` (патч, `--fast-clahe`) — та сама функція з інтерполяцією на
+    # карті, результат до біта той самий; без патча — skimage
+    fc = sys.modules.get("fast_clahe")
+    if fc is not None and fc.STATE.get("device"):
+        equalize_adapthist = fc.equalize_adapthist_fast
     g = np.asarray(im.convert("L"), dtype=np.float32) / 255.0
     g = equalize_adapthist(g, kernel_size=(g.shape[0] // 8, g.shape[1] // 8),
                            clip_limit=0.02)
@@ -3172,6 +3177,11 @@ def main() -> int:
                     help="порядок читання kraken матрицею numpy замість кубічного "
                          "циклу Python (матриця порядку та сама — див. "
                          "fast_order_verify.py). Дефолт ON, вимикач --no-fast-order")
+    ap.add_argument("--fast-clahe", action=argparse.BooleanOptionalAction,
+                    default=True,
+                    help="CLAHE блідих сторінок з інтерполяцією на карті (результат "
+                         "той самий до біта — див. fast_clahe_verify.py). Дефолт "
+                         "ON на cuda, вимикач --no-fast-clahe")
     ap.add_argument("--fast-seam", action=argparse.BooleanOptionalAction,
                     default=True,
                     help="шви рядків kraken пакетом на сторінку (контури ті "
@@ -3606,6 +3616,12 @@ def _main_case(args: argparse.Namespace, cache: dict | None = None) -> int:
         else:
             print("[htr-run] ⚠ порядок читання kraken без прискорення (--no-fast-order)",
                   flush=True)
+        if args.fast_clahe and device.startswith("cuda"):
+            # CLAHE вицвілих сторінок: інтерполяція на карті (01.10.2026: 15 %
+            # часу шарда на блідих справах; результат до біта той самий)
+            sys.path.insert(0, str(_PATCHES_DIR))
+            from fast_clahe import install as install_fast_clahe
+            install_fast_clahe(device, verbose=True)
         if args.fast_seam:
             # Шви рядків пакетом на сторінку: цикл по стовпчиках один на всі
             # рядки замість одного на кожен (01.10.2026: ×4 на шві, 4–15%
