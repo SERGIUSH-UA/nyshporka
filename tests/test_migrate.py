@@ -37,11 +37,12 @@ def test_every_shipped_migration_parses_and_checks_exist() -> None:
 def test_an_old_workspace_has_the_migration_pending_until_done(space: Path) -> None:
     assert [m.version for m in M.pending(space, "0.19.0")] == ["0.19"]
     assert [m.version for m in M.pending(space, "0.20.0")] == ["0.19", "0.20"]
+    assert [m.version for m in M.pending(space, "0.21.0")] == ["0.19", "0.20", "0.21"]
     assert M.pending(space, "0.18.14") == [], "новіша за пакет міграція не показується"
     env = O.call("workspace.info", {})
     assert any(w.code == "agent_migration" for w in env.warnings)
     done = O.call("migrate.done", {})
-    assert done.ok and done.data["marked"] == ["0.19", "0.20"]
+    assert done.ok and done.data["marked"] == ["0.19", "0.20", "0.21"]
     assert M.pending(space, "0.19.0") == [] and M.pending(space, "0.20.0") == []
     assert not any(w.code == "agent_migration" for w in O.call("workspace.info", {}).warnings)
 
