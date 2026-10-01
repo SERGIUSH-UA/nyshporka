@@ -403,10 +403,38 @@ def _find_live(plan: Any, frames_dir: Path) -> tuple[ST.RunState | None,
             own = st
             break
     out = str(plan.out_dir).replace("\\", "/").rstrip("/").lower()
-    clash = next((s for s in ST.live() if s.run_id not in ids and s.out_dir
-                  and str(s.out_dir).replace("\\", "/").rstrip("/").lower() == out),
-                 None)
+    clash = None
+    for s in ST.live():
+        if (s.run_id in ids or not s.out_dir
+                or str(s.out_dir).replace("\\", "/").rstrip("/").lower() != out):
+            continue
+        s = _settled(s)
+        if s.phase in ("done", "failed") and not s.needs_release:
+            continue
+        clash = s
+        break
     return own, clash
+
+
+def _settled(st: ST.RunState) -> ST.RunState:
+    """Запис від'єднаного заходу — з підсумком наглядача, якщо той уже доповів.
+
+    🔴 Від'єднаний захід свій запис не оновлює: він лишається знімком хвилини
+    відчеплення й каже «running» і про роботу, що скінчилась годину тому.
+    Оновлював його лише `nysh cloud state`, тож новий захід тієї самої справи
+    іншою моделлю відмовляв: «у теку вже пише інший захід» — хоча машину давно
+    погашено (01.10.2026: 12 таких записів, повторне читання ДАВіО 474-103
+    Писарем не стартувало). Тут питаємо наглядача так само, як `cloud state`.
+    """
+    if not st.supervisor or st.phase in ("done", "failed"):
+        return st
+    from nyshporka.cloud import supervised as SUP
+
+    try:
+        data = SUP.state_of(st)
+    except SUP.SupervisorMissing:
+        return st
+    return SUP.absorb(st, data) if data and SUP.finished(data) else st
 
 
 # ── захід ────────────────────────────────────────────────────────────────────
