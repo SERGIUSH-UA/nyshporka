@@ -45,7 +45,13 @@ ENV NYSHPORKA_WORKSPACE=/srv/nysh/work \
 
 RUN test -n "$NYSH_VERSION" || (echo "потрібен --build-arg NYSH_VERSION" && exit 1) \
  && uv venv /opt/nysh/app --python 3.11 \
- && uv pip install "nyshporka[app,archives]==${NYSH_VERSION}"
+ && for i in 1 2 3 4 5 6 7 8 9 10; do \
+      uv pip install "nyshporka[app,archives]==${NYSH_VERSION}" && break; \
+      [ "$i" = 10 ] && exit 1; \
+      echo "колеса ${NYSH_VERSION} цей вузол PyPI ще не бачить — повтор за 30 с"; sleep 30; \
+    done
+# ⚠ Повтор не зайвий: на 0.21.3 перевірка в workflow уже бачила колесо в
+# простому індексі, а `uv` у збірці за секунду дістав інший вузол CDN без нього.
 
 # Рушії — в окремому середовищі, як і на звичайній машині (пін kraken 7.0.2
 # не має права потрапити в застосунок). Колесо torch обирає `uv` за TORCH:
