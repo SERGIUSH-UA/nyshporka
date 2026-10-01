@@ -17,6 +17,8 @@
 
 ## [Unreleased]
 
+## [0.21.2] — 2026-10-01
+
 ### Додано
 
 - **Образ Docker на GHCR** (`ghcr.io/sergiush-ua/nyshporka`): застосунок, рушії
