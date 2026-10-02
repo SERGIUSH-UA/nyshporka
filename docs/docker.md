@@ -8,7 +8,7 @@
 
 | машина | образ | швидкість аркуша |
 |---|---|---|
-| NVIDIA RTX 20xx–40xx, GTX 16xx, V100, T4, A-серія | `ghcr.io/sergiush-ua/nyshporka:cuda` | ~10–20 с |
+| NVIDIA RTX 20xx–40xx, GTX 9xx/10xx/16xx, V100, T4, A-серія | `ghcr.io/sergiush-ua/nyshporka:cuda` | ~10–20 с |
 | NVIDIA RTX 50xx, H100 | `ghcr.io/sergiush-ua/nyshporka:cuda128` | ~10–20 с |
 | без NVIDIA, зокрема Mac на M-чипі | `ghcr.io/sergiush-ua/nyshporka:latest` | ~20 с – 1 хв, залежно від ядер і щільності сторінки |
 

@@ -183,14 +183,13 @@ def _unidentified(case_dir: Path) -> str:
 
 
 def _oldest_card() -> float | None:
-    """Найстаріша архітектура карти, під яку маніфест рушіїв має колесо torch."""
+    """Найстаріша архітектура карти, яку маніфест рушіїв дозволяє орендувати."""
     try:
         from nyshporka.htr import manifest as M
 
-        floors = [float(row["min_capability"]) for row in M.active().cuda_matrix]
+        return M.active().rent_floor()
     except Exception:
         return None
-    return min(floors) if floors else None
 
 
 def _rents(backend: str) -> bool:

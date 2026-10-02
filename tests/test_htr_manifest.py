@@ -92,6 +92,8 @@ def test_every_patch_has_a_verifier(man):
 
 # ── вибір колеса torch ───────────────────────────────────────────────────────
 @pytest.mark.parametrize("cap, tag", [
+    ("5.2", "cu126"),   # GTX 9xx
+    ("6.1", "cu126"),   # GTX 10xx: колесо cu126 несе sm_61
     ("7.5", "cu126"),   # GTX 16xx / RTX 20xx
     ("8.6", "cu126"),   # RTX 30xx
     ("8.9", "cu126"),   # RTX 40xx
@@ -102,7 +104,7 @@ def test_cuda_tag_follows_the_card(man, cap, tag):
     assert man.cuda_tag(cap) == tag
 
 
-@pytest.mark.parametrize("cap", ["", "6.1", "99.9", None, "abc"])
+@pytest.mark.parametrize("cap", ["", "3.5", "99.9", None, "abc"])
 def test_unknown_card_stays_on_cpu(man, cap):
     """🔴 Карта поза межами → лишаємось на CPU, а не ставимо навмання.
 
@@ -110,6 +112,11 @@ def test_unknown_card_stays_on_cpu(man, cap):
     користувач бачить це вже після півгодини установки.
     """
     assert man.cuda_tag(cap) is None
+
+
+def test_rent_floor_skips_own_card_only_rows(man):
+    """Pascal читає на власній карті, але орендувати його наглядач не має."""
+    assert man.rent_floor() == 7.0
 
 
 def test_cuda_index_is_built_from_the_tag(man):
@@ -120,7 +127,8 @@ def test_cuda_index_is_built_from_the_tag(man):
     ("8.6", "581.15", ("cu126", "ok")),        # RTX 3050 з репорту issue #7
     ("8.6", "", ("cu126", "ok")),              # драйвер невідомий — не привід відмовляти
     ("", "581.15", (None, "no_capability")),
-    ("6.1", "581.15", (None, "out_of_range")),
+    ("6.1", "561.09", ("cu126", "ok")),        # GTX 1050 Ti з чату
+    ("3.5", "581.15", (None, "out_of_range")),
     ("8.6", "460.89", (None, "driver_old:527.41")),
 ])
 def test_cuda_pick_says_not_only_what_but_why(man, cap, driver, expect):

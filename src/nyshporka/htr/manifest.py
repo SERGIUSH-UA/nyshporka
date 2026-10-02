@@ -157,6 +157,16 @@ class Manifest:
             return str(row["tag"]), "ok"
         return None, "out_of_range"
 
+    def rent_floor(self) -> float | None:
+        """Найстаріша карта, яку варто ОРЕНДУВАТИ під читання.
+
+        Рядки з `rent: "no"` (Maxwell, Pascal) читають на власній карті, але
+        на ринку така машина повільніша за дешевшу новішу.
+        """
+        floors = [float(r["min_capability"]) for r in self.cuda_matrix
+                  if str(r.get("rent", "")).lower() != "no"]
+        return min(floors) if floors else None
+
     def cuda_tag(self, capability: str) -> str | None:
         """Compute capability картки → тег колеса torch (`cu126`), без причини."""
         return self.cuda_pick(capability)[0]

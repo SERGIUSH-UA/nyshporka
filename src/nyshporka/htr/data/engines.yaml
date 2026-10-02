@@ -73,8 +73,15 @@ runtime:
     # — 525.60.13, тож число тут консервативне). Нижче цієї межі колесо стає й
     # мовчить до першого прогону, а тоді падає «CUDA driver version is
     # insufficient» — це відмова не про карту, і сказати про неї треба тут.
+    #
+    # Maxwell і Pascal (GTX 9xx/10xx, sm_50–sm_61) — те саме колесо cu126: його
+    # набір архітектур `sm_50 sm_60 sm_61 sm_70 … sm_90` (звірено
+    # `torch.cuda.get_arch_list()` на 2.13.0+cu126; між версіями набір лише
+    # скорочується). cu128 Pascal уже не несе. `rent: "no"` — лише для власної
+    # карти: орендувати таку машину під читання наглядач не бере.
     cuda_index: "https://download.pytorch.org/whl/{tag}"
     cuda_matrix:
+      - {min_capability: "5.0", max_capability: "6.9", tag: "cu126", min_driver: "527.41", rent: "no"}
       - {min_capability: "7.0", max_capability: "8.9", tag: "cu126", min_driver: "527.41"}
       - {min_capability: "9.0", max_capability: "12.9", tag: "cu128", min_driver: "527.41"}
     # 🔴 Mac з процесором Intel (issue #10): PyTorch не випускає колес для
