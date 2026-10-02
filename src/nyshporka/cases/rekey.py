@@ -124,6 +124,28 @@ def _read(p: Path) -> Any:
 
 #: Карта, за якою перекладає цей перенос (`plan` ставить її перед обходом).
 _MOVES: dict[str, str] = {}
+#: (архів, фонд, справа) → ключ, якщо справа з невідомим описом його дістала:
+#: у бібліотеці тепер рівно одна справа з цим номером, і опис у неї відомий.
+_UPGRADE: dict[tuple[str, str, str], str] = {}
+
+
+def _upgrades(entries: list[dict[str, Any]]) -> dict[tuple[str, str, str], str]:
+    """Ключі з `_`, яким паспорт уже дописав опис.
+
+    🔴 Лише однозначне: справа з таким номером у бібліотеці одна, і справи з
+    невідомим описом поруч не лишилось. Інакше `_` — це досі окрема справа.
+    """
+    groups: dict[tuple[str, str, str], list[casekey.CaseKey]] = {}
+    for e in entries:
+        ck = casekey.parse(e.get("key"))
+        if ck is not None and not ck.bundle:
+            groups.setdefault((ck.repo, ck.fond, ck.spr), []).append(ck)
+    out: dict[tuple[str, str, str], str] = {}
+    for rfs, cks in groups.items():
+        keys = {c.key for c in cks}
+        if len(keys) == 1 and all(c.opys_known for c in cks):
+            out[rfs] = keys.pop()
+    return out
 
 
 def _new_key(old: str, **fields: Any) -> str | None:
@@ -140,7 +162,28 @@ def _new_key(old: str, **fields: Any) -> str | None:
         got = _MOVES.get(norm) if norm else None
     if got is None:
         got = legacy.current_key(s, **fields)
-    return got if casekey.parse(got) is not None else None
+    return _lift(got) if casekey.parse(got) is not None else None
+
+
+def _lift(key: str) -> str:
+    """Ключ з `_` → ключ з описом, якщо паспорт його вже дав (`_UPGRADE`)."""
+    ck = casekey.parse(key)
+    if ck is None or ck.bundle or ck.opys_known:
+        return key
+    return _UPGRADE.get((ck.repo, ck.fond, ck.spr), key)
+
+
+def _fresh_library() -> list[Any]:
+    """Бібліотека з поточних паспортів: перенос мусить бачити щойно дописаний опис.
+
+    Розбір паспорта кешується на процес (`library._sidecar_case`), і без скидання
+    довгоживучий процес (застосунок) переносив би за паспортом, яким той був.
+    """
+    from nyshporka.library import _sidecar_case, _sidecar_village, build_library
+
+    _sidecar_case.cache_clear()
+    _sidecar_village.cache_clear()
+    return build_library()
 
 
 # ── план ─────────────────────────────────────────────────────────────────────
@@ -153,18 +196,24 @@ def plan(*, entries: list[dict[str, Any]] | None = None) -> Plan:
     from dataclasses import asdict
 
     from nyshporka.core.workspace import workspace
-    from nyshporka.library import build_library
 
     ws = workspace()
     root = ws.root
     if entries is None:
-        entries = [asdict(e) for e in build_library()]
+        entries = [asdict(e) for e in _fresh_library()]
     moves, shared = legacy.moves_from_entries(entries, legacy.registry_set(root))
+    _UPGRADE.clear()
+    _UPGRADE.update(_upgrades(entries))
     # Записана раніше карта (попередній перенос) — головна: на ній уже стоять
-    # перенесені записи, і нова збірка бібліотеки її не переписує.
-    written = legacy.MOVES
-    if (root / written).is_file():
-        moves = {**moves, **(_read(root / written).get("moves") or {})}
+    # перенесені записи, і нова збірка бібліотеки її не переписує. Виняток —
+    # ціль `_`, якій паспорт відтоді дав опис: вона піднімається, і сам
+    # `_`-ключ теж іде в карту.
+    f = root / legacy.MOVES
+    for old, was in ((_read(f).get("moves") or {}) if f.is_file() else {}).items():
+        now = _lift(was)
+        moves[old] = now
+        if now != was:
+            moves[was] = now
     pl = Plan(root=root, moves=dict(moves), shared=shared, keys_before=ws.keys)
     _MOVES.clear()
     _MOVES.update(moves)
@@ -329,7 +378,7 @@ def apply(pl: Plan | None = None) -> dict[str, Any]:
     from dataclasses import asdict
 
     from nyshporka.core import workspace as W
-    from nyshporka.library import LIBRARY_PATH, build_library, write_library
+    from nyshporka.library import LIBRARY_PATH, write_library
 
     ws = W.workspace()
     root = ws.root
@@ -338,7 +387,7 @@ def apply(pl: Plan | None = None) -> dict[str, Any]:
         raise RekeyError(
             f"у сховище сторінок просто зараз пишуть ({', '.join(locks[:3])}). "
             f"Перенос — коли інші сесії й застосунок зупинено.")
-    built = build_library()
+    built = _fresh_library()
     entries = [asdict(e) for e in built]
     if pl is None:
         pl = plan(entries=entries)
@@ -384,7 +433,7 @@ def apply(pl: Plan | None = None) -> dict[str, Any]:
         "_comment": ("Старий ключ справи (до 0.22) → новий, з описом. Пише "
                      "`nysh cases rekey --apply`; не правиться руками й не видаляється: "
                      "старі ключі живуть у нотатках і чужих повідомленнях."),
-        "made": stamp, "moves": {**pl.moves, **old_mv}},
+        "made": stamp, "moves": {**old_mv, **pl.moves}},
         ensure_ascii=False, indent=1, sort_keys=True), encoding="utf-8")
     legacy.reset()
 

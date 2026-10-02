@@ -202,3 +202,31 @@ def test_a_fresh_lock_stops_the_move(old_space: Path) -> None:
     with pytest.raises(RK.RekeyError, match="пишуть"):
         RK.apply()
     assert not (old_space / "data/cases/rekey").exists()
+
+
+def test_a_passport_that_names_the_opys_moves_the_record_on_the_next_run(
+        old_space: Path) -> None:
+    """Справа без опису переїжджає під `_`; дописали опис у паспорт — наступний
+    перенос веде облік під ключ з описом, а старий `_`-ключ і далі знаходить її."""
+    from nyshporka.cases import register as R
+    from nyshporka.cases import rekey as RK
+    from nyshporka.core import legacy_key
+    from nyshporka.library import build_library, write_library
+
+    d = frames(old_space, "daoo_37/spr-1235")
+    write_library(build_library())
+    _json(old_space / "data/derived/search_log.json", {
+        "DAOO/37/1235": [{"q": "Коваль", "models": ["pysar"], "channels": []}]})
+    RK.apply()
+    assert list(_read(old_space, "data/derived/search_log.json")) == ["DAOO/37/_/1235"]
+
+    R.describe(d, shifra="ДАОО 37-5-1235")
+    write_library(build_library())
+    pl = RK.plan()
+    assert ("DAOO/37/_/1235", "DAOO/37/5/1235") in pl.stores["data/derived/search_log.json"]
+    RK.apply()
+    assert list(_read(old_space, "data/derived/search_log.json")) == ["DAOO/37/5/1235"]
+    legacy_key.reset()
+    assert legacy_key.current_key("DAOO/37/_/1235") == "DAOO/37/5/1235"
+    assert legacy_key.current_key("DAOO/37/1235") == "DAOO/37/5/1235"
+

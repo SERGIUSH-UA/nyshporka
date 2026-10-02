@@ -195,8 +195,12 @@ def current_key(value: str, *, repo: str | None = None, fond: str | None = None,
     from nyshporka.core import casekey
 
     s = str(value or "").strip()
-    if not s or casekey.parse(s) is not None:
+    ck = casekey.parse(s)
+    if not s or (ck is not None and (ck.opys_known or ck.bundle)):
         return s
+    if ck is not None:
+        # Ключ з невідомим описом, якому перенос уже знайшов опис.
+        return moves().get(s, s)
     moved = translate(s)
     if moved:
         return moved
