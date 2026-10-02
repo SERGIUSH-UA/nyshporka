@@ -32,12 +32,14 @@
 """
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import re
 import shutil
 import time
 import zipfile
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -90,6 +92,10 @@ class Plan:
     stuck: dict[str, list[str]] = field(default_factory=dict)
     #: справи, чий опис невідомий (`_`) — переїхали, але опису не мають
     unknown: list[str] = field(default_factory=list)
+    #: кілька записаних ключів сходяться в один: файл → [«a + b → c»]
+    joined: dict[str, list[str]] = field(default_factory=dict)
+    #: файл обліку називає опис, якого справа в бібліотеці не має
+    opys_hint: list[str] = field(default_factory=list)
     keys_before: int = 1
 
     @property
@@ -110,6 +116,8 @@ class Plan:
             "pages": [vars(m) for m in self.pages],
             "stores": {k: [list(x) for x in v] for k, v in sorted(self.stores.items())},
             "stuck": {k: v for k, v in sorted(self.stuck.items())},
+            "joined": {k: v for k, v in sorted(self.joined.items())},
+            "opys_hint": self.opys_hint,
             "unknown_opys": self.unknown,
         }
 
@@ -122,6 +130,15 @@ def _read(p: Path) -> Any:
     return json.loads(p.read_text(encoding="utf-8"))
 
 
+def _read_store(p: Path) -> Any:
+    """Сховище для плану: битий файл — зрозуміла відмова, а не трасування."""
+    try:
+        return _read(p)
+    except (OSError, ValueError) as exc:
+        raise RekeyError(f"{p}: не читається ({exc}). Перенос не почато — полагодьте "
+                         f"файл і повторіть.") from None
+
+
 #: Карта, за якою перекладає цей перенос (`plan` ставить її перед обходом).
 _MOVES: dict[str, str] = {}
 #: (архів, фонд, справа) → ключ, якщо справа з невідомим описом його дістала:
@@ -129,22 +146,37 @@ _MOVES: dict[str, str] = {}
 _UPGRADE: dict[tuple[str, str, str], str] = {}
 
 
-def _upgrades(entries: list[dict[str, Any]]) -> dict[tuple[str, str, str], str]:
+def _upgrades(entries: list[dict[str, Any]],
+              extra: Sequence[str] = ()) -> dict[tuple[str, str, str], str]:
     """Ключі з `_`, яким паспорт уже дописав опис.
 
     🔴 Лише однозначне: справа з таким номером у бібліотеці одна, і справи з
     невідомим описом поруч не лишилось. Інакше `_` — це досі окрема справа.
     """
     groups: dict[tuple[str, str, str], list[casekey.CaseKey]] = {}
-    for e in entries:
-        ck = casekey.parse(e.get("key"))
-        if ck is not None and not ck.bundle:
+    for k in [*(e.get("key") for e in entries), *extra]:
+        ck = casekey.parse(k)
+        if ck is not None:
+            # і збірки: `ANRM/211/@x`, записана до 0.22 без опису, — це та сама
+            # збірка, що тепер `ANRM/211/11/@x`, коли інших з цією назвою нема
             groups.setdefault((ck.repo, ck.fond, ck.spr), []).append(ck)
     out: dict[tuple[str, str, str], str] = {}
     for rfs, cks in groups.items():
         keys = {c.key for c in cks}
         if len(keys) == 1 and all(c.opys_known for c in cks):
             out[rfs] = keys.pop()
+    return out
+
+
+def _bundle_keys(p: Path) -> list[str]:
+    """Збірки простору (їх тримає `overrides.json`, не бібліотека) — новими ключами."""
+    if not p.is_file():
+        return []
+    out = []
+    for k in (_read_store(p).get("bundles") or {}):
+        new = legacy.current_key(str(k))
+        if casekey.parse(new) is not None:
+            out.append(new)
     return out
 
 
@@ -168,7 +200,7 @@ def _new_key(old: str, **fields: Any) -> str | None:
 def _lift(key: str) -> str:
     """Ключ з `_` → ключ з описом, якщо паспорт його вже дав (`_UPGRADE`)."""
     ck = casekey.parse(key)
-    if ck is None or ck.bundle or ck.opys_known:
+    if ck is None or ck.opys_known:
         return key
     return _UPGRADE.get((ck.repo, ck.fond, ck.spr), key)
 
@@ -203,13 +235,19 @@ def plan(*, entries: list[dict[str, Any]] | None = None) -> Plan:
         entries = [asdict(e) for e in _fresh_library()]
     moves, shared = legacy.moves_from_entries(entries, legacy.registry_set(root))
     _UPGRADE.clear()
-    _UPGRADE.update(_upgrades(entries))
+    _UPGRADE.update(_upgrades(entries, _bundle_keys(root / "data" / "cases" / "overrides.json")))
     # Записана раніше карта (попередній перенос) — головна: на ній уже стоять
     # перенесені записи, і нова збірка бібліотеки її не переписує. Виняток —
     # ціль `_`, якій паспорт відтоді дав опис: вона піднімається, і сам
     # `_`-ключ теж іде в карту.
     f = root / legacy.MOVES
+    live = {str(e.get("key")) for e in entries if e.get("key")}
     for old, was in ((_read(f).get("moves") or {}) if f.is_file() else {}).items():
+        if old in live:
+            # Ключ, з якого справа колись переїхала, знову належить живій справі
+            # (з'явилась справжня книга того опису) — її облік лишається її.
+            moves.pop(old, None)
+            continue
         now = _lift(was)
         moves[old] = now
         if now != was:
@@ -252,6 +290,10 @@ def _plan_pages(pl: Plan, pages_root: Path) -> None:
             continue
         ck = casekey.parse(new)
         assert ck is not None
+        said = casekey.norm_part(d.get("opys")) if d.get("opys") else ""
+        if not kind and said and said != ck.opys and not ck.bundle:
+            pl.opys_hint.append(f"{_rel(pl.root, f)}: файл називає опис {said}, а справа "
+                                f"переїжджає як {new}")
         name = f"{casekey.stem(ck)}.{kind}.json" if kind else f"{casekey.stem(ck)}.json"
         dst = f.parent / name
         src_r, dst_r = _rel(pl.root, f), _rel(pl.root, dst)
@@ -271,28 +313,37 @@ def _plan_pages(pl: Plan, pages_root: Path) -> None:
 def _plan_dict(pl: Plan, p: Path, *, inner: str = "") -> None:
     if not p.is_file():
         return
-    data = _read(p)
+    data = _read_store(p)
     d = data.get(inner) if inner else data
     if not isinstance(d, dict):
         return
     out: list[tuple[str, str]] = []
+    into: dict[str, list[str]] = {}
     for k in d:
         if k.startswith("_"):
             continue
         new = _new_key(k)
         if new is None:
             pl.stuck.setdefault(_rel(pl.root, p), []).append(k)
-        elif new != k:
+            continue
+        into.setdefault(new, []).append(k)
+        if new != k:
             out.append((k, new))
             pl.moves.setdefault(k, new)
     if out:
         pl.stores[_rel(pl.root, p)] = out
+    how = ("чинний — пізніший за датою, інший лягає поруч у `superseded`"
+           if inner == "verdicts" else "зливаються")
+    for new, olds in into.items():
+        if len(olds) > 1:
+            pl.joined.setdefault(_rel(pl.root, p), []).append(
+                f"{' + '.join(olds)} → {new} ({how})")
 
 
 def _plan_overrides(pl: Plan, p: Path) -> None:
     if not p.is_file():
         return
-    data = _read(p)
+    data = _read_store(p)
     out: list[tuple[str, str]] = []
     for run, v in (data.get("runs") or {}).items():
         k = str((v or {}).get("key") or "")
@@ -319,25 +370,76 @@ def _plan_queue(pl: Plan, p: Path) -> None:
     if not p.is_file():
         return
     out: list[tuple[str, str]] = []
-    for it in _read(p).get("items") or []:
+    data = _read_store(p)
+    for it in data.get("items") or []:
         ref = it.get("ref") or {}
         for k in (str(it.get("id") or ""), str(ref.get("key") or "")):
-            if not k or "/" not in k or not casekey.is_legacy(k):
-                continue
-            new = _new_key(k)
-            if new and new != k:
+            new = _queue_key(k)
+            if new != k:
                 out.append((k, new))
         if "aka" in ref:
             out.append((f"ref.aka {ref['aka']}", "прибирається"))
+    for item_id in _queue_dups(data):
+        pl.stuck.setdefault(_rel(pl.root, p), []).append(
+            f"{item_id}: у черзі двічі — лишиться перший")
     if out:
         pl.stores[_rel(pl.root, p)] = sorted(set(out))
+
+
+def _queue_key(k: str) -> str:
+    """Ключ справи в черзі після переносу. Не ключ (тека, хвіст теки) — як є."""
+    if not k or "/" not in k or (casekey.parse(k) is None and not casekey.is_legacy(k)):
+        return k
+    return _new_key(k) or k
+
+
+def _queue_id(it: dict[str, Any]) -> str:
+    return _queue_key(str(it.get("id") or ""))
+
+
+def _queue_dups(data: dict[str, Any]) -> list[str]:
+    """Ідентифікатори черги, що після переносу зійдуться (старий і новий ключ)."""
+    seen: set[str] = set()
+    dups: list[str] = []
+    for it in data.get("items") or []:
+        k = _queue_id(it)
+        if k and k in seen:
+            dups.append(k)
+        seen.add(k)
+    return dups
 
 
 _PROFILE_LINE = re.compile(r"^(\s+)([^\s:#][^:#]*?)(\s*:\s*)(\S.*)$")
 
 
 def _profile_lines(text: str) -> list[tuple[int, str, str]]:
-    """Рядки секції `cases:` профілів записів: (номер рядка, ключ, новий ключ)."""
+    """Рядки секції `cases:` профілів записів: (номер рядка, ключ, новий ключ).
+
+    Новий ключ, що вже стоїть у секції (або двоє старих сходяться в один), —
+    поза списком: YAML із двома однаковими ключами тихо бере останній.
+    Такі рядки лишаються як є, і план показує їх як непереведені.
+    """
+    got = _profile_all(text)
+    have = {k for _, k, _ in got}
+    out: list[tuple[int, str, str]] = []
+    taken: set[str] = set()
+    for i, k, new in got:
+        if new == k:
+            continue
+        if new in have or new in taken:
+            continue
+        taken.add(new)
+        out.append((i, k, new))
+    return out
+
+
+def _profile_clashes(text: str) -> list[str]:
+    ok = {i for i, _, _ in _profile_lines(text)}
+    return [f"{k}: «{new}» уже є в секції" for i, k, new in _profile_all(text)
+            if new != k and i not in ok]
+
+
+def _profile_all(text: str) -> list[tuple[int, str, str]]:
     out: list[tuple[int, str, str]] = []
     inside = False
     for i, line in enumerate(text.splitlines()):
@@ -353,7 +455,7 @@ def _profile_lines(text: str) -> list[tuple[int, str, str]]:
             continue
         k = m.group(2).strip().strip("'\"")
         new = _new_key(k)
-        if new and new != k:
+        if new:
             out.append((i, k, new))
     return out
 
@@ -361,16 +463,26 @@ def _profile_lines(text: str) -> list[tuple[int, str, str]]:
 def _plan_profiles(pl: Plan, p: Path) -> None:
     if not p.is_file():
         return
-    got = _profile_lines(p.read_text(encoding="utf-8"))
+    text = p.read_text(encoding="utf-8")
+    got = _profile_lines(text)
     if got:
         pl.stores[_rel(pl.root, p)] = [(k, new) for _, k, new in got]
+    for clash in _profile_clashes(text):
+        pl.stuck.setdefault(_rel(pl.root, p), []).append(clash)
 
 
 # ── перенос ──────────────────────────────────────────────────────────────────
 def _fresh_locks(pages_root: Path) -> list[str]:
+    """Свіжі локи сховищ, які перенос переписує: хтось пише просто зараз."""
+    from nyshporka.core.workspace import workspace
+
+    data = workspace().data
     now = time.time()
-    return [p.name for p in pages_root.glob("*/*.lock")
-            if now - p.stat().st_mtime < _FRESH_LOCK]
+    found = [*pages_root.glob("*/*.lock")] if pages_root.is_dir() else []
+    for sub in ("derived", "spotter", "share", "cases", "queue"):
+        if (data / sub).is_dir():
+            found += (data / sub).glob("*.lock")
+    return [p.name for p in found if now - p.stat().st_mtime < _FRESH_LOCK]
 
 
 def apply(pl: Plan | None = None) -> dict[str, Any]:
@@ -382,11 +494,7 @@ def apply(pl: Plan | None = None) -> dict[str, Any]:
 
     ws = W.workspace()
     root = ws.root
-    locks = _fresh_locks(ws.pages) if ws.pages.is_dir() else []
-    if locks:
-        raise RekeyError(
-            f"у сховище сторінок просто зараз пишуть ({', '.join(locks[:3])}). "
-            f"Перенос — коли інші сесії й застосунок зупинено.")
+    _refuse_busy(ws.pages)
     built = _fresh_library()
     entries = [asdict(e) for e in built]
     if pl is None:
@@ -394,10 +502,19 @@ def apply(pl: Plan | None = None) -> dict[str, Any]:
     if pl.empty:
         return {"stamp": "", "backup": "", "pages": 0, "stores": {}, "stuck": pl.stuck,
                 "unknown_opys": len(pl.unknown), "problems": [], "noop": True}
+    pages_rel = _rel(root, ws.pages) + "/" if ws.pages.is_relative_to(root) else ""
+    blocked = {k: v for k, v in pl.stuck.items() if pages_rel and k.startswith(pages_rel)}
+    if blocked:
+        # 🔴 Після переносу старі імена файлів сторінок ніхто не читає, тож
+        # файл, який перенос не перевів, — це облік, що зникає з виду.
+        lines = "; ".join(f"{k}: {', '.join(v)}" for k, v in sorted(blocked.items())[:5])
+        raise RekeyError(
+            f"файлів сховища сторінок, яких перенос не переведе: {len(blocked)} ({lines}). "
+            f"Після переносу їх ніхто не читатиме — спершу розберіть їх руками "
+            f"(злийте з файлом, що вже є, чи виправте ключ), потім повторіть.")
     before = _census(root, ws.pages)
-    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-    home = root / REKEY_DIR / stamp
-    home.mkdir(parents=True, exist_ok=True)
+    home = _new_home(root)
+    stamp = home.name
     backup = home / "backup.zip"
     from nyshporka.cases.db import DB_PATH
 
@@ -409,48 +526,99 @@ def apply(pl: Plan | None = None) -> dict[str, Any]:
         for rel in keep:
             if (root / rel).is_file():
                 z.write(root / rel, rel)
-    created: list[str] = []
-    journal = {"stamp": stamp, "keys_before": pl.keys_before, "backup": _rel(root, backup),
-               "kept": keep, "created": created, "plan": pl.as_dict(), "done": False}
-    (home / "journal.json").write_text(json.dumps(journal, ensure_ascii=False, indent=1),
-                                       encoding="utf-8")
-
-    _apply_pages(pl, root, created)
-    _apply_dict(root, root / "data" / "spotter" / "case_verdicts.json", inner="verdicts")
-    _apply_dict(root, root / "data" / "derived" / "verdicts.json")
-    _apply_dict(root, root / "data" / "derived" / "search_log.json")
-    _apply_dict(root, ws.share / "cards.json")
-    _apply_overrides(root / "data" / "cases" / "overrides.json")
-    _apply_queue(root / "data" / "queue" / "queue.json")
-    _apply_profiles(ws.config / "records_profiles.yaml")
-
     mv_path = root / legacy.MOVES
-    old_mv = (_read(mv_path).get("moves") or {}) if mv_path.is_file() else {}
-    if not mv_path.is_file():
-        created.append(_rel(root, mv_path))
-    mv_path.parent.mkdir(parents=True, exist_ok=True)
-    mv_path.write_text(json.dumps({
-        "_comment": ("Старий ключ справи (до 0.22) → новий, з описом. Пише "
-                     "`nysh cases rekey --apply`; не правиться руками й не видаляється: "
-                     "старі ключі живуть у нотатках і чужих повідомленнях."),
-        "made": stamp, "moves": {**old_mv, **pl.moves}},
-        ensure_ascii=False, indent=1, sort_keys=True), encoding="utf-8")
-    legacy.reset()
+    # Що перенос створить — відомо до запису, і в журналі воно лежить ДО
+    # першого записаного файла: збій посередині інакше лишав би нові файли,
+    # про які відкат не знає, поруч зі старими з архіву.
+    created = sorted({m.dst for m in pl.pages if not (root / m.dst).is_file()}
+                     | {_rel(root, p) for p in (mv_path, LIBRARY_PATH, DB_PATH)
+                        if not p.is_file() and p.is_relative_to(root)})
+    journal: dict[str, Any] = {
+        "stamp": stamp, "keys_before": pl.keys_before, "backup": _rel(root, backup),
+        "kept": keep, "created": created, "plan": pl.as_dict(), "done": False}
+    _write_journal(home, journal)
 
-    write_library(built)
-    W.set_keys_version(casekey.KEYS_VERSION)
+    try:
+        overlap = _apply_pages(pl, root)
+        _apply_dict(root, root / "data" / "spotter" / "case_verdicts.json", inner="verdicts")
+        _apply_dict(root, root / "data" / "derived" / "verdicts.json")
+        _apply_dict(root, root / "data" / "derived" / "search_log.json")
+        _apply_dict(root, ws.share / "cards.json")
+        _apply_overrides(root / "data" / "cases" / "overrides.json")
+        _apply_queue(root / "data" / "queue" / "queue.json")
+        _apply_profiles(ws.config / "records_profiles.yaml")
+        legacy.record_moves(root, pl.moves, made=stamp)
+        write_library(built)
+        W.set_keys_version(casekey.KEYS_VERSION)
+    except Exception as exc:
+        journal["failed"] = f"{type(exc).__name__}: {exc}"
+        _write_journal(home, journal)
+        try:
+            rollback(stamp, force=True)
+        except Exception as again:
+            raise RekeyError(
+                f"перенос зупинився на півдорозі ({exc}), і відкат теж не вдався "
+                f"({again}). Нічого не пишіть у простір; повторіть відкат: "
+                f"nysh cases rekey --rollback --stamp {stamp}") from exc
+        raise RekeyError(f"перенос зупинився на півдорозі ({exc}); простір повернуто "
+                         f"як був (архів {_rel(root, backup)}).") from exc
     from nyshporka.cases import db
 
     db.build_index()
     after = _census(root, ws.pages)
-    problems = verify(before, after)
-    journal.update(done=True, census_before=before, census_after=after, problems=problems)
-    (home / "journal.json").write_text(json.dumps(journal, ensure_ascii=False, indent=1),
-                                       encoding="utf-8")
+    problems = verify(before, after, overlap)
+    written = sorted({m.dst for m in pl.pages} | set(pl.stores) | {_rel(root, mv_path)})
+    journal.update(done=True, done_at=time.time(), census_before=before,
+                   census_after=after, overlap=overlap, problems=problems,
+                   written={rel: _sha(root / rel) for rel in written})
+    _write_journal(home, journal)
     return {"stamp": stamp, "backup": _rel(root, backup), "pages": len(pl.pages),
             "stores": {k: len(v) for k, v in pl.stores.items()},
             "stuck": pl.stuck, "unknown_opys": len(pl.unknown),
             "census_before": before, "census_after": after, "problems": problems}
+
+
+def _refuse_busy(pages_root: Path) -> None:
+    locks = _fresh_locks(pages_root)
+    if locks:
+        raise RekeyError(
+            f"у сховища обліку просто зараз пишуть ({', '.join(locks[:3])}). "
+            f"Перенос і відкат — коли інші сесії й застосунок зупинено.")
+
+
+def _new_home(root: Path) -> Path:
+    """Тека цього переносу. Своя навіть для двох переносів в одну мить.
+
+    🔴 Два переноси в одну секунду ділили теку, і архів другого затирав архів
+    першого — тобто єдину копію простору до 0.22.
+    """
+    base = root / REKEY_DIR
+    base.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
+    for n in range(100):
+        home = base / (stamp if n == 0 else f"{stamp}-{n}")
+        try:
+            home.mkdir()
+            return home
+        except FileExistsError:
+            continue
+    raise RekeyError(f"не вдалось завести теку переносу в {_rel(root, base)}")
+
+
+def _write_journal(home: Path, journal: dict[str, Any]) -> None:
+    from nyshporka.utils.atomic import atomic_write_text
+
+    atomic_write_text(home / "journal.json", json.dumps(journal, ensure_ascii=False, indent=1))
+
+
+def _sha(p: Path) -> str:
+    return hashlib.sha256(p.read_bytes()).hexdigest() if p.is_file() else ""
+
+
+def _rid(r: dict[str, Any]) -> str:
+    """Тотожність запису: `rid`, а без нього — увесь запис (не губити безіменні)."""
+    rid = r.get("rid")
+    return f"rid:{rid}" if rid else json.dumps(r, ensure_ascii=False, sort_keys=True)
 
 
 def _merge_case(dst: dict[str, Any], src: dict[str, Any]) -> dict[str, Any]:
@@ -465,17 +633,23 @@ def _merge_case(dst: dict[str, Any], src: dict[str, Any]) -> dict[str, Any]:
             continue
         merged = _merge_note(PageNote.model_validate(pages[scan]), PageNote.model_validate(raw))
         pages[scan] = merged.model_dump(mode="json")
-    recs = {str(r.get("rid")): r for r in (dst.get("records") or []) if isinstance(r, dict)}
+    recs = {_rid(r): r for r in (dst.get("records") or []) if isinstance(r, dict)}
     for r in src.get("records") or []:
         if isinstance(r, dict):
-            recs.setdefault(str(r.get("rid")), r)
+            recs.setdefault(_rid(r), r)
     out = {**src, **dst, "pages": dict(sorted(pages.items())), "records": list(recs.values())}
     return out
 
 
-def _apply_pages(pl: Plan, root: Path, created: list[str]) -> None:
+def _apply_pages(pl: Plan, root: Path) -> dict[str, int]:
+    """Перенести файли сторінок. Вертає, скільки аркушів і записів злилось у спільні.
+
+    Аркуш, що лежав в обох файлах однієї справи, після злиття — один (нотатки
+    зведено), тож самоперевірка рахує «не менше, ніж до» за вирахуванням цих.
+    """
     from nyshporka.utils.atomic import atomic_write_text
 
+    overlap = {"page_notes": 0, "records": 0}
     # Злиття — у порядку плану: кілька старих файлів можуть сходитись в один.
     for m in pl.pages:
         src, dst = root / m.src, root / m.dst
@@ -485,14 +659,18 @@ def _apply_pages(pl: Plan, root: Path, created: list[str]) -> None:
         if not m.companion and ck is not None and ck.opys_known and not d.get("opys"):
             d["opys"] = ck.opys
         if dst != src and dst.is_file():
-            d = _merge_case(_read(dst), d)
+            cur = _read(dst)
+            overlap["page_notes"] += len(set(cur.get("pages") or {}) & set(d.get("pages") or {}))
+            overlap["records"] += len(
+                {_rid(r) for r in cur.get("records") or [] if isinstance(r, dict)}
+                & {_rid(r) for r in d.get("records") or [] if isinstance(r, dict)})
+            d = _merge_case(cur, d)
             d["key"] = m.new_key
-        elif dst != src:
-            created.append(m.dst)
         dst.parent.mkdir(parents=True, exist_ok=True)
         atomic_write_text(dst, json.dumps(d, ensure_ascii=False, indent=1) + "\n")
         if dst != src:
             src.unlink()
+    return overlap
 
 
 def _merge_value(store: str, a: Any, b: Any) -> Any:
@@ -507,9 +685,20 @@ def _merge_value(store: str, a: Any, b: Any) -> Any:
         return out
     if isinstance(a, dict) and isinstance(b, dict):
         if store.endswith("case_verdicts.json"):
-            # вердикт справи — один; лишається пізніший за датою
-            return a if str(a.get("date") or "") >= str(b.get("date") or "") else b
-        return {**b, **a}
+            # Вердикт справи — один: чинним лишається пізніший за датою, а
+            # інший не зникає — лягає поруч (`superseded`), бо це теж рішення людини.
+            win, lose = (a, b) if str(a.get("date") or "") >= str(b.get("date") or "") \
+                else (b, a)
+            if win == lose:
+                return win
+            prev = [x for x in (win.get("superseded") or []) if isinstance(x, dict)]
+            lost = {k: v for k, v in lose.items() if k != "superseded"}
+            return {**win, "superseded": [*prev, lost, *(lose.get("superseded") or [])]}
+        both = {**b, **a}
+        for k in a.keys() & b.keys():
+            if isinstance(a[k], (list, dict)) and isinstance(b[k], type(a[k])):
+                both[k] = _merge_value(store, a[k], b[k])
+        return both
     return a
 
 
@@ -544,7 +733,11 @@ def _apply_overrides(p: Path) -> None:
         if k:
             v["key"] = _new_key(k) or k
     if isinstance(data.get("bundles"), dict):
-        data["bundles"] = {(_new_key(k) or k): v for k, v in data["bundles"].items()}
+        out: dict[str, Any] = {}
+        for k, v in data["bundles"].items():
+            new = _new_key(k) or k
+            out[new] = _merge_value(str(p), out[new], v) if new in out else v
+        data["bundles"] = out
     write_json(p, data, indent=1)
     from nyshporka.cases.resolve import _run_overrides, load_overrides
 
@@ -558,13 +751,21 @@ def _apply_queue(p: Path) -> None:
     if not p.is_file():
         return
     data = _read(p)
+    items: list[dict[str, Any]] = []
+    seen: set[str] = set()
     for it in data.get("items") or []:
         ref = it.setdefault("ref", {})
         for holder, field_ in ((it, "id"), (ref, "key")):
             k = str(holder.get(field_) or "")
-            if k and "/" in k and casekey.is_legacy(k):
-                holder[field_] = _new_key(k) or k
+            if k:
+                holder[field_] = _queue_key(k)
         ref.pop("aka", None)
+        k = str(it.get("id") or "")
+        if k and k in seen:
+            continue        # той самий елемент під старим і новим ключем — план це назвав
+        seen.add(k)
+        items.append(it)
+    data["items"] = items
     write_json(p, data, indent=1)
 
 
@@ -615,37 +816,84 @@ def _census(root: Path, pages_root: Path) -> dict[str, Any]:
     return out
 
 
-def verify(before: dict[str, Any], after: dict[str, Any]) -> list[str]:
+def verify(before: dict[str, Any], after: dict[str, Any],
+           overlap: dict[str, int] | None = None) -> list[str]:
     """Що в переносі пішло не так. Порожньо — облік цілий.
 
-    Людська праця не губиться: нотаток аркушів і записів після переносу не
-    менше, ніж до (злиття двох файлів однієї справи дає не менше нотаток,
-    ніж у більшому з них). Старих ключів у сховищі сторінок не лишається.
+    Людська праця не губиться: нотаток аркушів і записів після переносу стільки
+    ж, скільки до, мінус ті, що лежали в ОБОХ файлах однієї справи й злились у
+    одну (`overlap` — їх рахує сам перенос). Старих ключів у сховищі сторінок
+    не лишається.
     """
     problems: list[str] = []
+    overlap = overlap or {}
     for k in ("page_notes", "records", "line_verdicts_items"):
-        if after.get(k, 0) < before.get(k, 0):
-            problems.append(f"{k}: було {before.get(k)}, стало {after.get(k)}")
+        want = before.get(k, 0) - overlap.get(k, 0)
+        if after.get(k, 0) < want:
+            problems.append(f"{k}: було {before.get(k)}, злилось {overlap.get(k, 0)}, "
+                            f"стало {after.get(k)}")
     if after.get("legacy_page_keys"):
         problems.append(f"у сховищі сторінок лишились старі ключі: "
                         f"{after['legacy_page_keys']}")
     return problems
 
 
-def rollback(stamp: str | None = None) -> dict[str, Any]:
-    """Повернути простір до стану перед переносом `stamp` (останнім, якщо не названо)."""
+def _changed_since(root: Path, pages_root: Path, journal: dict[str, Any]) -> list[str]:
+    """Файли, змінені після переносу: їх відкат затер би чи лишив без пари."""
+    if not journal.get("done"):
+        return []
+    out = [rel for rel, sha in (journal.get("written") or {}).items()
+           if _sha(root / rel) != sha]
+    done_at = float(journal.get("done_at") or 0)
+    known = set(journal.get("written") or {})
+    if done_at and pages_root.is_dir():
+        out += [_rel(root, f) for f in pages_root.glob("*/*.json")
+                if _rel(root, f) not in known and f.stat().st_mtime > done_at]
+    return sorted(out)
+
+
+def rollback(stamp: str | None = None, *, force: bool = False) -> dict[str, Any]:
+    """Повернути простір до стану перед переносом `stamp` (останнім чинним, якщо не названо).
+
+    🔴 Відкат повертає файли з архіву, тож усе, що записано ПІСЛЯ переносу, він
+    затирає. Тому: відкочений перенос удруге не відкочується; давніший — лише
+    після пізніших; а коли файли переносу відтоді змінювались, відкат
+    відмовляє з переліком (`force` — свідомо затерти).
+    """
     from nyshporka.core import workspace as W
 
     ws = W.workspace()
     root = ws.root
     base = root / REKEY_DIR
-    homes = sorted(p for p in base.iterdir() if p.is_dir()) if base.is_dir() else []
+    homes = sorted(p for p in base.iterdir()
+                   if p.is_dir() and (p / "journal.json").is_file()) if base.is_dir() else []
+    journals = {p.name: _read(p / "journal.json") for p in homes}
+    active = [p for p in homes if not journals[p.name].get("rolled_back")]
     if stamp:
-        homes = [p for p in homes if p.name == stamp]
-    if not homes:
-        raise RekeyError(f"переносу {stamp or ''} для відкату немає ({_rel(root, base)})")
-    home = homes[-1]
-    journal = _read(home / "journal.json")
+        pick = [p for p in homes if p.name == stamp]
+        if not pick:
+            raise RekeyError(f"переносу {stamp} для відкату немає ({_rel(root, base)})")
+        home = pick[0]
+        if journals[stamp].get("rolled_back"):
+            raise RekeyError(f"перенос {stamp} уже відкочено "
+                             f"({journals[stamp]['rolled_back']})")
+        later = [p.name for p in active if p.name > stamp]
+        if later:
+            raise RekeyError(f"після {stamp} були ще переноси ({', '.join(later)}) — "
+                             f"спершу відкотіть їх")
+    elif active:
+        home = active[-1]
+    else:
+        raise RekeyError(f"переносу для відкату немає ({_rel(root, base)})")
+    journal = journals[home.name]
+    if not force:
+        _refuse_busy(ws.pages)
+        changed = _changed_since(root, ws.pages, journal)
+        if changed:
+            shown = ", ".join(changed[:5]) + (" …" if len(changed) > 5 else "")
+            raise RekeyError(
+                f"після переносу {home.name} змінено файлів: {len(changed)} ({shown}). "
+                f"Відкат затре цю роботу. Свідомо — `--rollback --force`.")
     for rel in journal.get("created") or []:
         p = root / rel
         if p.is_file():
@@ -656,7 +904,7 @@ def rollback(stamp: str | None = None) -> dict[str, Any]:
             dst.parent.mkdir(parents=True, exist_ok=True)
             with z.open(name) as src, dst.open("wb") as out:
                 shutil.copyfileobj(src, out)
-    W.reset()
+    W.refresh_keys()
     legacy.reset()
     journal["rolled_back"] = datetime.now(UTC).isoformat(timespec="seconds")
     (home / "journal.json").write_text(json.dumps(journal, ensure_ascii=False, indent=1),
@@ -672,13 +920,15 @@ def report(pl: Plan) -> str:
     if pl.empty:
         w("Простір уже на ключах з описом; переносити нічого.\n")
         return buf.getvalue()
-    w(f"Ключі простору: версія {pl.keys_before} → {casekey.KEYS_VERSION}.\n")
+    if pl.keys_before < casekey.KEYS_VERSION:
+        w(f"Ключі простору: версія {pl.keys_before} → {casekey.KEYS_VERSION}.\n")
     w(f"Карта переїзду: {len(pl.moves)} старих ключів.\n")
     merges = [m for m in pl.pages if m.merge]
     w(f"Сховище сторінок: {len(pl.pages)} файлів"
       + (f", з них {len(merges)} зливаються з наявним обліком" if merges else "") + ".\n")
     for m in pl.pages[:10]:
-        w(f"  {m.src} → {m.dst}{'  (злиття)' if m.merge else ''}\n")
+        where = f"{m.src} → {m.dst}" if m.src != m.dst else m.src
+        w(f"  {where}  ({m.old_key or '—'} → {m.new_key}){'  злиття' if m.merge else ''}\n")
     if len(pl.pages) > 10:
         w(f"  … і ще {len(pl.pages) - 10}\n")
     for store, items in sorted(pl.stores.items()):
@@ -694,6 +944,18 @@ def report(pl: Plan) -> str:
         w(f"⚠ Не переводиться ({sum(len(v) for v in pl.stuck.values())}) — лишиться як є:\n")
         for store, keys in sorted(pl.stuck.items()):
             w(f"  {store}: {', '.join(keys[:5])}{' …' if len(keys) > 5 else ''}\n")
+    for store, lines in sorted(pl.joined.items()):
+        what = ("вердикти однієї справи" if store.endswith("case_verdicts.json")
+                else "записи однієї справи")
+        w(f"⚠ {store}: {what} під кількома ключами зливаються в один ({len(lines)}):\n")
+        for line in lines[:5]:
+            w(f"  {line}\n")
+    if pl.opys_hint:
+        w(f"⚠ Файли обліку називають опис, якого справа не має ({len(pl.opys_hint)}). "
+          f"Якщо опис правильний — допишіть його в паспорт теки, і наступний "
+          f"`rekey --apply` перенесе облік:\n")
+        for line in pl.opys_hint[:5]:
+            w(f"  {line}\n")
     if pl.unknown:
         w(f"Справ без опису (ключ з «_»): {len(pl.unknown)} — переїдуть так; опис "
           f"дописується в паспорт, і наступний `rekey --apply` перенесе їхній облік.\n")

@@ -104,6 +104,32 @@ def moves_from_entries(entries: list[dict[str, Any]],
     return out, shared
 
 
+def record_moves(root: Path, new: dict[str, str], *, made: str) -> None:
+    """Дописати в записану карту: старий ключ → новий.
+
+    Ланцюжки зводяться (`A→B`, потім `B→C` дає `A→C`), петлі прибираються.
+    Пишуть перенос обліку і перебудова бібліотеки, коли справа змінила ключ.
+    """
+    from nyshporka.utils.atomic import atomic_write_text
+
+    f = root / MOVES
+    data = json.loads(f.read_text(encoding="utf-8")) if f.is_file() else {}
+    mv = dict((data or {}).get("moves") or {})
+    for old, now in new.items():
+        for k, v in list(mv.items()):
+            if v == old:
+                mv[k] = now
+        mv[old] = now
+    mv = {k: v for k, v in mv.items() if k != v}
+    f.parent.mkdir(parents=True, exist_ok=True)
+    atomic_write_text(f, json.dumps({
+        "_comment": ("Старий ключ справи → новий. Пишуть `nysh cases rekey --apply` і "
+                     "перебудова бібліотеки (справа змінила ключ). Не правиться руками й "
+                     "не видаляється: старі ключі живуть у нотатках і чужих повідомленнях."),
+        "made": made, "moves": mv}, ensure_ascii=False, indent=1, sort_keys=True))
+    reset()
+
+
 def _stamp(root: Path) -> tuple[Any, ...]:
     from nyshporka.library import LIBRARY_PATH
 
@@ -196,10 +222,11 @@ def current_key(value: str, *, repo: str | None = None, fond: str | None = None,
 
     s = str(value or "").strip()
     ck = casekey.parse(s)
-    if not s or (ck is not None and (ck.opys_known or ck.bundle)):
+    if not s or (ck is not None and ck.opys_known):
         return s
     if ck is not None:
-        # Ключ з невідомим описом, якому перенос уже знайшов опис.
+        # Ключ з невідомим описом (і збірка без опису), якому перенос уже
+        # знайшов опис.
         return moves().get(s, s)
     moved = translate(s)
     if moved:
@@ -224,10 +251,19 @@ def rekeyed(d: dict[str, Any]) -> dict[str, Any]:
     До переносу обліку сховища (вердикти, журнал пошуку, картки) тримають
     старі ключі, а читачі питають новими. Двоє старих під одним новим — перший
     лишається (перенос зливає їх, а читання до переносу показує першого).
+
+    🔴 Запис, що вже стоїть під новим ключем, сильніший за перекладений зі
+    старого: це пізніше рішення людини, і старий рядок поруч його не перекриває.
     """
     out: dict[str, Any] = {}
+    later: list[tuple[str, Any]] = []
     for k, v in d.items():
         nk = k if str(k).startswith("_") else current_key(str(k))
+        if nk == k:
+            out[nk] = v
+        else:
+            later.append((nk, v))
+    for nk, v in later:
         out.setdefault(nk, v)
     return out
 

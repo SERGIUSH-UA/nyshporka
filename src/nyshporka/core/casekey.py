@@ -225,10 +225,13 @@ def compatible(a: object, b: object) -> bool:
 def stem(ck: CaseKey) -> str:
     """Ім'я файла справи в сховищі сторінок: `315-1-8433` · `37-_-1235` · `211-@fuzovka`.
 
+    Збірка з названим описом — `211-11-@ispovidi`: збірки з однаковою назвою в
+    різних описах — різні справи, і файл у них теж свій.
+
     Лише для запису. Читаючи, файл ідентифікують за полем `key` усередині, а не
     за іменем: фонд `R-6129` уже має дефіс, і ім'я на частини не розкладається.
     """
-    if ck.bundle:
+    if ck.bundle and not ck.opys_known:
         return f"{ck.fond}-{ck.spr}"
     return f"{ck.fond}-{ck.opys}-{ck.spr}"
 
@@ -239,11 +242,16 @@ class LegacyKeysError(RuntimeError):
 
 
 def keys_current() -> bool:
-    """Чи простір уже на ключах з описом. Без простору — так (нічого переносити)."""
-    try:
-        from nyshporka.core.workspace import workspace
+    """Чи простір уже на ключах з описом. Без простору — так (нічого переносити).
 
-        return workspace().keys >= KEYS_VERSION
+    Версія читається з маркера на диску (`workspace.keys_now`), а не з кешу
+    процесу: перенос чи відкат у сусідньому терміналі мусить бути видно
+    застосунку й демону без перезапуску.
+    """
+    try:
+        from nyshporka.core.workspace import keys_now
+
+        return keys_now() >= KEYS_VERSION
     except Exception:       # простору немає — і старих ключів у ньому теж
         return True
 

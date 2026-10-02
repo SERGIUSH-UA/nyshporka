@@ -99,6 +99,10 @@ def note(key: str, *, q: str, thresh: int, hits: int, pages: int,
     """Записати, чим саме прочісували цю справу. Без ключа — не пишемо нічого."""
     if not key:
         return
+    from nyshporka.core import legacy_key
+
+    # Один ключ на справу: старий рядок з пам'яті агента — та сама справа.
+    key = legacy_key.current_key(key) or key
     row = {"q": q, "thresh": thresh, "hits": hits, "pages": pages,
            "models": sorted(set(models)), "channels": channels,
            "when": date.today().isoformat()}

@@ -197,6 +197,10 @@ def resolve_case(value: str) -> CaseRef:
             ck = casekey.parse(moved)
         elif old and old[0] != "?":
             ck = casekey.CaseKey(old[0], old[1], old[2] or casekey.UNKNOWN, old[3])
+    if ck is not None and not ck.opys_known:
+        # Ключ без опису (`_`, збірка без опису), якому перенос обліку вже
+        # знайшов опис: облік лежить під тим ключем.
+        ck = casekey.parse(legacy.current_key(ck.key)) or ck
     if ck is not None:
         # 🔴 Код зводиться до канонічного, як і в сусідній гілці шифри. Голий
         # `.upper()` означав, що ключ `DAVIO/…` шукав файл у `data/pages/DAVIO/`,
@@ -266,9 +270,13 @@ def resolve_case(value: str) -> CaseRef:
         # Названий опис мусить збігтися або бути невідомим у записі.
         # Суперечливі записи бібліотеки показує `library_conflicts`.
         pk = _pack_active()
+        # Опису не названо — тоді це опис за замовчуванням фонду, і книга
+        # іншого опису під нього не підходить (ДАХмО 230: оп.3 спр.13 — не оп.1).
+        want = _norm_spr(opys or (default_opys(repo, fond) if not casekey.is_bundle(spr)
+                                  else ""))
         same = [e for e in lib.same_fond_spr(fond, spr)
                 if pk.same_archive(e.get("repo"), repo)
-                and not (opys and e.get("opys") and _norm_spr(e["opys"]) != _norm_spr(opys))]
+                and not (want and e.get("opys") and _norm_spr(e["opys"]) != want)]
         if len(same) == 1:
             entry = same[0]
             repo = str(entry["repo"])

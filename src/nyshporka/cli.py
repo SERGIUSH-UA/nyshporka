@@ -1633,10 +1633,13 @@ def cases_build(
     Команди для цього довго не існувало, хоч усі повідомлення на неї посилались.
     """
     from nyshporka.cases import db
+    from nyshporka.library import renamed_report
 
     res = db.rebuild(rescan=rescan)
     if res["rescanned"]:
         console.print(f"[muted]бібліотеку перезібрано: {res['entries']} справ[/muted]")
+    for line in renamed_report():
+        console.print(f"[warn]{line}[/warn]")
     console.print(f"✅ реєстр: [bold]{res['cases']}[/bold] справ · "
                   f"нерозв'язаних прогонів: {res.get('orphans', 0)} · {res['path']}")
 
@@ -1646,6 +1649,8 @@ def cmd_rekey(
     do: bool = typer.Option(False, "--apply", help="перенести (з архівом для відкату)"),
     back: bool = typer.Option(False, "--rollback", help="відкотити останній перенос"),
     stamp: str = typer.Option("", "--stamp", help="який перенос відкотити (тека в data/cases/rekey/)"),
+    force: bool = typer.Option(False, "--force",
+                               help="відкотити, хоч після переносу файли змінювались"),
     as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Перенести облік простору на ключі з описом (`REPO/фонд/опис/справа`).
@@ -1665,7 +1670,7 @@ def cmd_rekey(
 
     try:
         if back:
-            got = RK.rollback(stamp or None)
+            got = RK.rollback(stamp or None, force=force)
             if as_json:
                 console.print_json(json.dumps(got, ensure_ascii=False))
                 return
@@ -1677,14 +1682,25 @@ def cmd_rekey(
             if as_json:
                 console.print_json(json.dumps(got, ensure_ascii=False))
                 return
+            if got.get("noop"):
+                console.print("Простір уже на ключах з описом; переносити нічого.")
+                return
             mark = "⚠" if got["problems"] else "✅"
             console.print(f"{mark} перенесено: файлів сторінок {got['pages']}, сховищ "
                           f"{len(got['stores'])}; архів — {got['backup']}")
+            stuck = got.get("stuck") or {}
+            if stuck:
+                console.print(f"  [warn]не переведено ({sum(len(v) for v in stuck.values())})"
+                              f" — лишилось як є:[/warn]")
+                for store, keys in sorted(stuck.items()):
+                    console.print(f"  [warn]  {store}: {', '.join(keys[:5])}"
+                                  f"{' …' if len(keys) > 5 else ''}[/warn]", markup=True)
             for p in got["problems"]:
                 console.print(f"  [warn]{p}[/warn]")
             if got["problems"]:
                 console.print(f"  [warn]відкат: nysh cases rekey --rollback --stamp "
                               f"{got['stamp']}[/warn]")
+                raise typer.Exit(1)
             return
         pl = RK.plan()
     except RK.RekeyError as exc:

@@ -14,7 +14,7 @@ import pytest
 
 from nyshporka.pagestore.store import CaseRef
 
-KEY = "DAHMO/R-100/7"
+KEY = "DAHMO/R-100/1/7"
 RUNS = [
     # переїхала тека: ключа в меті немає, шлях мертвий
     {"name": "проба-фонд-Р", "case_key": "", "case_dir": "D:/gone/R-100-1-7",

@@ -1807,8 +1807,68 @@ def build_library() -> list[CaseEntry]:
     return entries
 
 
+#: Що змінило ключ у останній перебудові: старий → новий (`write_library`).
+LAST_RENAMED: dict[str, str] = {}
+
+
+def _renamed(entries: list[CaseEntry]) -> dict[str, str]:
+    """Справи, чий ключ змінився від попередньої бібліотеки: старий → новий.
+
+    Тотожність — тека справи: та сама тека під іншим ключем означає, що
+    паспорт назвав інший опис. Старий ключ, який і далі належить живій справі,
+    не переїжджає — це вже інша книга.
+    """
+    try:
+        old = read_json(LIBRARY_PATH, default={})
+    except CorruptFileError:
+        return {}
+    prev: dict[str, str] = {}
+    for c in (old.get("cases") if isinstance(old, dict) else None) or []:
+        k = str((c or {}).get("key") or "") if isinstance(c, dict) else ""
+        if _ck.parse(k) is None:
+            continue
+        for p in (c.get("path"), c.get("raw_path")):
+            if p:
+                prev.setdefault(str(p).replace("\\", "/").rstrip("/"), k)
+    live = {e.key for e in entries if e.key}
+    out: dict[str, str] = {}
+    for e in entries:
+        for p in (e.path, e.raw_path):
+            was = prev.get(str(p).replace("\\", "/").rstrip("/")) if p else None
+            if was and e.key and was != e.key and was not in live:
+                out[was] = e.key
+                break
+    return out
+
+
+def renamed_report() -> list[str]:
+    """Рядки для людини про справи, що змінили ключ в останній перебудові."""
+    if not LAST_RENAMED:
+        return []
+    out = [f"⚠ справ змінили ключ (паспорт назвав інший опис): {len(LAST_RENAMED)}"]
+    out += [f"  {old} → {new}" for old, new in list(LAST_RENAMED.items())[:10]]
+    out.append("  облік під старим ключем перенесе `nysh cases rekey --apply`")
+    return out
+
+
 def write_library(entries: list[CaseEntry]) -> Path:
-    """Записати бібліотеку у data/derived/case_library.json."""
+    """Записати бібліотеку у data/derived/case_library.json.
+
+    Справа, що змінила ключ (у паспорті виправили опис), іде в карту переїзду
+    простору (`core.legacy_key.record_moves`): облік під старим ключем потім
+    переносить `nysh cases rekey --apply`. Лише на перенесеному просторі — до
+    переносу карту рахує сам перенос.
+    """
+    from datetime import UTC, datetime
+
+    from nyshporka.core import legacy_key
+
+    LAST_RENAMED.clear()
+    if _ck.keys_current():
+        LAST_RENAMED.update(_renamed(entries))
+        if LAST_RENAMED:
+            legacy_key.record_moves(ROOT, LAST_RENAMED,
+                                    made=datetime.now(UTC).isoformat(timespec="seconds"))
     payload = {
         "_comment": ("Бібліотека архівних справ (канон ∪ диск). Опис статичний — "
                      "перебудова: `nysh cases build` або кнопка 🔄 у консолі. "
@@ -1857,6 +1917,11 @@ def set_verdict(key: str, verdict: str | None, note: str = "",
     if verdict and verdict not in VERDICT_KINDS:
         raise ValueError(f"невідомий вердикт: {verdict}")
     _ck.require_current("вердикт справи")
+    from nyshporka.core import legacy_key
+
+    # Старий ключ з нотаток чи пам'яті агента — та сама справа, а не новий рядок
+    # поруч, якого ніхто не прочитає.
+    key = legacy_key.current_key(key) or key
     data = load_verdicts()
     if verdict:
         data[key] = {"verdict": verdict, "note": note or "",
@@ -1937,14 +2002,18 @@ class LibraryLookup:
     def find(self, repo: str, fond: str, opys: str | None,
              spr: str) -> dict[str, Any] | None:
         """Запис справи за четвіркою; правило — `_same_case` збірки бібліотеки."""
-        key = _mk_key(repo, fond, spr, opys or default_opys(repo, fond))
+        want = _norm_spr(opys or default_opys(repo, fond))
+        key = _mk_key(repo, fond, spr, want or None)
         if key and key in self.by_key:
             return self.by_key[key]
         cands = [e for e in self.same_fond_spr(fond, spr) if e.get("repo") == repo]
-        if opys:
-            loose = [e for e in cands if not e.get("opys")]
-            return loose[0] if len(loose) == 1 else None
-        return cands[0] if len(cands) == 1 else None
+        if not want:
+            return cands[0] if len(cands) == 1 else None
+        hit = [e for e in cands if _norm_spr(e.get("opys")) == want]
+        if hit:
+            return hit[0]
+        loose = [e for e in cands if not e.get("opys")]
+        return loose[0] if len(loose) == 1 else None
 
 
 def library_lookup(loader: Any = None) -> LibraryLookup:

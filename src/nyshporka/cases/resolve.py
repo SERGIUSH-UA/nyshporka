@@ -271,6 +271,10 @@ def bind_run(run: str, key: str, why: str = "") -> dict[str, Any]:
     if not key:
         raise ValueError("ключ справи обов'язковий")
     casekey.require_current("прив'язка прогону до справи")
+    from nyshporka.core import legacy_key
+
+    # Старий ключ — та сама справа; записаний як є, він знову чекав би переносу.
+    key = legacy_key.current_key(key) or key
     data = dict(load_overrides())
     runs = dict(data.get("runs") or {})
     runs[run] = {"key": key, **({"why": why} if why else {})}

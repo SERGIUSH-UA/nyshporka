@@ -120,6 +120,9 @@ class Workspace:
     #: — простір, заведений до опису в ключі: читається як 1. Простір, зібраний
     #: прямо в коді (тести, `use()`), — поточний: старих ключів у ньому немає.
     keys: int = 2
+    #: (mtime_ns, розмір) маркера, з якого прочитано `keys`; `None` — простір
+    #: зібрано в коді, і його `keys` — остаточна відповідь (`keys_now`).
+    marker_stamp: tuple[int, int] | None = None
 
     # дані дослідження
     @property
@@ -282,7 +285,16 @@ def _build(root: Path, origin: str) -> Workspace:
     return Workspace(root=root, name=str(cfg.get("name") or ""),
                      extra_case_roots=extra, origin=origin,
                      preset=preset, listed_sections=listed,
-                     sections_problem=problem, keys=_keys_version(cfg))
+                     sections_problem=problem, keys=_keys_version(cfg),
+                     marker_stamp=_stamp_of(root / MARKER))
+
+
+def _stamp_of(marker: Path) -> tuple[int, int] | None:
+    try:
+        st = marker.stat()
+    except OSError:
+        return None
+    return (st.st_mtime_ns, st.st_size)
 
 
 def _keys_version(cfg: dict[str, Any]) -> int:
@@ -676,6 +688,40 @@ def set_sections(active: Iterable[str]) -> frozenset[str]:
     return resolved
 
 
+def keys_now() -> int:
+    """Версія ключів простору з маркера НА ДИСКУ.
+
+    🔴 `Workspace.keys` резолвиться раз за процес, а перенос (`nysh cases rekey`)
+    і відкат ідуть з іншого термінала. Демон, що пам'ятав `keys = 2` після
+    відкату, писав би нові імена файлів у простір, який повернувся на старі.
+    Тому маркер, що змінився від резолву, перечитується. Простір, зібраний у
+    коді (тести, майстер до запису маркера), — свій `keys`.
+    """
+    ws = workspace()
+    if ws.marker_stamp is None:
+        return ws.keys
+    now = _stamp_of(ws.marker)
+    if now is None or now == ws.marker_stamp:
+        return ws.keys
+    return _marker_keys(str(ws.marker), *now)
+
+
+@lru_cache(maxsize=4)
+def _marker_keys(path: str, mtime_ns: int, size: int) -> int:
+    return _keys_version(_read_marker(Path(path)))
+
+
+def refresh_keys() -> None:
+    """Перечитати версію ключів з маркера (маркер щойно повернуто з архіву)."""
+    global _override
+    if _override is not None and _override.marker_stamp is not None:
+        _override = replace(_override, keys=_keys_version(_read_marker(_override.marker)),
+                            marker_stamp=_stamp_of(_override.marker))
+    elif _override is not None:
+        _override = replace(_override, keys=_keys_version(_read_marker(_override.marker)))
+    _cached.cache_clear()
+
+
 def set_keys_version(version: int) -> None:
     """Записати версію ключів справ у маркер простору (`cases.rekey`, майстер)."""
     global _override
@@ -684,7 +730,9 @@ def set_keys_version(version: int) -> None:
     text = marker.read_text(encoding="utf-8") if marker.is_file() else "[workspace]\n"
     _write_marker(marker, _marker_set(text, "keys", f"keys = {int(version)}"))
     if _override is not None:
-        _override = replace(_override, keys=int(version))
+        _override = replace(_override, keys=int(version),
+                            marker_stamp=(_stamp_of(marker) if _override.marker_stamp
+                                          is not None else None))
     _cached.cache_clear()
 
 

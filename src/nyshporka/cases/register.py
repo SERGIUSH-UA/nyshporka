@@ -468,7 +468,18 @@ def describe(case_dir: str | Path, *, shifra: str = "", title: str = "",
     tmp = d / (SIDECAR + ".tmp")
     tmp.write_text(json.dumps(out, ensure_ascii=False, indent=1), encoding="utf-8")
     tmp.replace(d / SIDECAR)
+    _passport_changed()
     return out
+
+
+def _passport_changed() -> None:
+    """Паспорт переписано: розбір паспортів кешується на процес, і застосунок
+    інакше збирав би бібліотеку за паспортом, яким той був (опис, виправлений
+    тут, у ключ справи не потрапляв)."""
+    from nyshporka import library as L
+
+    L._sidecar_case.cache_clear()
+    L._sidecar_village.cache_clear()
 
 
 def forget(case_dir: str | Path) -> bool:
@@ -481,4 +492,5 @@ def forget(case_dir: str | Path) -> bool:
     if not f.is_file():
         return False
     f.unlink()
+    _passport_changed()
     return True

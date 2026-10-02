@@ -76,6 +76,10 @@ def cmd_build(
         entries = build_library()
         write_library(entries)
         console.print(f"[muted]бібліотеку перебудовано: {len(entries)} справ[/muted]")
+        from nyshporka.library import renamed_report
+
+        for line in renamed_report():
+            console.print(f"[warn]{line}[/warn]")
     res = db.build_index()
     tail = (f" · свідомо нічиїх: {res['decided']}" if res.get("decided") else "")
     bad = res.get("unreadable") or []

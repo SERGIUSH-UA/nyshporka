@@ -173,6 +173,11 @@ def stamp(text: str) -> float:
 
 
 def new_item(item_id: str, ref: dict[str, str], opts: dict[str, Any]) -> dict[str, Any]:
+    from nyshporka.core.casekey import require_current
+
+    # Нова справа черги несе ключ справи — до переносу обліку він ліг би поруч
+    # зі старими. Хід уже доданих справ (демон) не стримується.
+    require_current("справа в черзі")
     return {"id": item_id, "ref": ref, "opts": opts, "added": now(),
             "state": QUEUED, "stage": "", "code": "", "why": "", "fix": "",
             "attempts": {}, "not_before": "", "evidence": {}}
