@@ -36,7 +36,7 @@ def store(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
 def test_yavnyi_arkhiv_ne_pidminiaietsia(store: Any, monkeypatch: Any, vvid: str) -> None:
     monkeypatch.setattr(store, "load_library", lambda: [SUPERECHLYVYI])
     ref = store.resolve_case(vvid)
-    assert (ref.repo, ref.key) == ("DAHMO", "DAHMO/315/8345")
+    assert (ref.repo, ref.key) == ("DAHMO", "DAHMO/315/1/8345")
 
 
 def test_synonim_toho_samoho_arkhivu_pratsiuie(store: Any, monkeypatch: Any) -> None:

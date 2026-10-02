@@ -21,6 +21,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from nyshporka.core import casekey
 from nyshporka.core.envelope import CoverageItem, Envelope, fail, ok
 from nyshporka.core.ops import NoArgs, op
 
@@ -420,7 +421,7 @@ def fond_rows(a: FondRowsArgs) -> Envelope:
                     # із джерелом `repo`/`fond`, а не в браузері: складений на
                     # тому боці, він розійшовся б із бібліотечним тихо, і
                     # кнопка «показати в бібліотеці» відкривала б порожньо.
-                    "key": f"{f['repo']}/{f['fond']}/{r.get('spr')}",
+                    "key": casekey.make(f["repo"], f["fond"], r.get("opys"), r.get("spr")) or "",
                     "repo": f["repo"], "fond": f["fond"],
                     "year_from": r.get("year_from"), "year_to": r.get("year_to"),
                     "folios": r.get("folios"), "fs_film": r.get("fs_film"),
@@ -544,7 +545,7 @@ def fond_case(a: FondCaseArgs) -> Envelope:
     st = R.row_status(row, live, R.conflicts_index(a.fond), frames)
     env = ok({"row": row, "status": st, "registry": str(path),
               "fond": f["label"], "repo": f["repo"],
-              "key": f"{f['repo']}/{f['fond']}/{row.get('spr')}",
+              "key": casekey.make(f["repo"], f["fond"], row.get("opys"), row.get("spr")) or "",
               "expected_frames": R.expected_frames(row) or None})
     if st.get("disk_mismatch"):
         env.warn("disk_mismatch",

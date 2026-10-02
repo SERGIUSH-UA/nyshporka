@@ -323,7 +323,7 @@ function libRow(r, layers) {
       <button class="ctl-sm" data-act="lib.find" data-arg="${esc(r.key)}"
         title="${esc(t('lib.act.find'))}">${ic('search', 'ic-o ic-sm')}</button>
       ${r.fond ? `<button class="ctl-sm" data-act="lib.opys"
-        data-arg="${esc(`${r.repo}/${r.fond}/${r.spr}`)}"
+        data-arg="${esc(r.key)}"
         title="${esc(t('lib.act.opys'))}">${ic('archive-box', 'ic-o ic-sm')}</button>` : ''}
       <button class="ctl-sm" data-act="lib.verdict" data-arg="${esc(r.key)}"
         title="${esc(t('lib.verdict.set'))}">${ic('pencil-line', 'ic-o ic-sm')}</button>
@@ -464,8 +464,11 @@ Object.assign(ACTIONS, {
    * реєстрами, які тримаються на одному ключі.
    */
   'lib.opys': (_ev, elm) => {
-    const [repo, fond, spr] = String(elm.dataset.arg).split('/');
-    return goto('fonds', { repo, fond, spr });
+    // Ключ справи — `REPO/фонд/опис/справа`; опис `_` — не встановлено.
+    const parts = String(elm.dataset.arg).split('/');
+    if (parts.length !== 4) return undefined;
+    const [repo, fond, opys, spr] = parts;
+    return goto('fonds', { repo, fond, opys: opys === '_' ? '' : opys, spr });
   },
 
   /** 🔎 Пошук у межах цієї справи. */

@@ -652,7 +652,7 @@ def test_find_on_a_run_name_searches_and_reports_the_whole_case(case_space: Path
     assert not got.get("error"), got
     led = got["ledger"]
     assert led["runs"] == 2 and led["in_store"] == 2
-    assert got["case_key"] == "DAHMO/315/8433"
+    assert got["case_key"] == "DAHMO/315/1/8433"
     assert {h["name"] for h in got["hits"]} >= {"проба", "проба-diak_v4"}
     ids = {ch["id"]: ch for ch in led["channels"]}
     assert "selfcheck" in ids and "шифр" not in (ids["selfcheck"]["why"] or "")
@@ -731,7 +731,7 @@ def test_a_fond_or_opys_is_a_scope_too(case_space: Path) -> None:
     from nyshporka.search import textops as T
 
     sc = S.runs_for_scope("315-1")
-    assert sc["kind"] == "cases" and len(sc["rows"]) == 2 and sc["keys"] == ["DAHMO/315/8433"]
+    assert sc["kind"] == "cases" and len(sc["rows"]) == 2 and sc["keys"] == ["DAHMO/315/1/8433"]
     assert len(S.runs_for_scope("ДАХмО 315-1")["rows"]) == 2
     with pytest.raises(ValueError):
         S.runs_for_scope("315-10")

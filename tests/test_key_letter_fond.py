@@ -1,8 +1,9 @@
 """Ключ, який пакет друкує, пакет і приймає — зокрема з літерним фондом.
 
-`cases.list` віддає ключ радянського фонду як `DAHMO/R-100/7`, а трисегментний
-розбір ключа знав фонд лише як `\\d+`: той самий рядок, поданий назад у
-`--case`, відмовлявся словами «не розпізнав справу» (issue #21).
+`cases.list` віддавав ключ радянського фонду як `DAHMO/R-100/7`, а розбір ключа
+знав фонд лише як `\\d+`: той самий рядок, поданий назад у `--case`,
+відмовлявся словами «не розпізнав справу» (issue #21). Тепер ключ —
+`DAHMO/R-100/1/7`, а стара форма лишається читаною.
 """
 from __future__ import annotations
 
@@ -11,16 +12,17 @@ from typing import Any
 
 import pytest
 
-from nyshporka.library import _mk_key, split_fond_opys
+from nyshporka.core import casekey
+from nyshporka.library import _mk_key
 
 LIB = [
-    {"key": "DAHMO/R-100/7", "repo": "DAHMO", "fond": "R-100", "opys": "1",
+    {"key": "DAHMO/R-100/1/7", "repo": "DAHMO", "fond": "R-100", "opys": "1",
      "spr": "7", "shifra": "ДАХмО R-100-1-7"},
-    {"key": "DAVIO/R-6129-24/5", "repo": "DAVIO", "fond": "R-6129", "opys": "24",
+    {"key": "DAVIO/R-6129/24/5", "repo": "DAVIO", "fond": "R-6129", "opys": "24",
      "spr": "5", "shifra": "ДАВіО R-6129-24-5"},
-    {"key": "DAHMO/315/8433", "repo": "DAHMO", "fond": "315", "opys": "1",
+    {"key": "DAHMO/315/1/8433", "repo": "DAHMO", "fond": "315", "opys": "1",
      "spr": "8433", "shifra": "ДАХмО 315-1-8433"},
-    {"key": "ANRM/211-3/140", "repo": "ANRM", "fond": "211", "opys": "3",
+    {"key": "ANRM/211/3/140", "repo": "ANRM", "fond": "211", "opys": "3",
      "spr": "140", "shifra": "ANRM 211-3-140"},
 ]
 
@@ -40,31 +42,38 @@ def store(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
     return S
 
 
-@pytest.mark.parametrize(("part", "want"), [
-    ("315", ("315", None)),
-    ("211-3", ("211", "3")),
-    ("R-100", ("R-100", None)),
-    ("R-6129-24", ("R-6129", "24")),
-    ("Р-6129-24", ("R-6129", "24")),     # кирилична «Р»
+@pytest.mark.parametrize(("old", "want"), [
+    ("DAHMO/315/7", ("DAHMO", "315", None, "7")),
+    ("ANRM/211-3/140", ("ANRM", "211", "3", "140")),
+    ("DAHMO/R-100/7", ("DAHMO", "R-100", None, "7")),
+    ("DAVIO/R-6129-24/5", ("DAVIO", "R-6129", "24", "5")),
+    ("DAVIO/Р-6129-24/5", ("DAVIO", "R-6129", "24", "5")),     # кирилична «Р»
 ])
-def test_split_fond_opys_keeps_letter_prefix_with_the_fond(
-        part: str, want: tuple[str, str | None]) -> None:
-    assert split_fond_opys(part) == want
+def test_an_old_key_keeps_the_letter_prefix_with_the_fond(
+        old: str, want: tuple[str, str, str | None, str]) -> None:
+    assert casekey.parse_legacy(old) == want
 
 
-@pytest.mark.parametrize("key", ["DAHMO/R-100/7", "DAVIO/R-6129-24/5",
-                                 "DAHMO/315/8433", "ANRM/211-3/140"])
+@pytest.mark.parametrize("key", ["DAHMO/R-100/1/7", "DAVIO/R-6129/24/5",
+                                 "DAHMO/315/1/8433", "ANRM/211/3/140"])
 def test_key_printed_by_the_package_is_accepted_back(store: Any, key: str) -> None:
     assert store.resolve_case(key).key == key
 
 
+@pytest.mark.parametrize(("old", "key"), [("DAHMO/R-100/7", "DAHMO/R-100/1/7"),
+                                          ("DAVIO/R-6129-24/5", "DAVIO/R-6129/24/5"),
+                                          ("ANRM/211-3/140", "ANRM/211/3/140")])
+def test_an_old_key_leads_to_the_same_case(store: Any, old: str, key: str) -> None:
+    assert store.resolve_case(old).key == key
+
+
 def test_letter_fond_key_parts(store: Any) -> None:
-    ref = store.resolve_case("DAHMO/R-100/7")
-    assert (ref.repo, ref.fond, ref.spr) == ("DAHMO", "R-100", "7")
+    ref = store.resolve_case("DAHMO/R-100/1/7")
+    assert (ref.repo, ref.fond, ref.opys, ref.spr) == ("DAHMO", "R-100", "1", "7")
 
 
 def test_cyrillic_prefix_in_key_is_the_same_fond(store: Any) -> None:
-    assert store.resolve_case("DAHMO/Р-100/7").key == "DAHMO/R-100/7"
+    assert store.resolve_case("DAHMO/Р-100/1/7").key == "DAHMO/R-100/1/7"
 
 
 def test_bundle_key_still_parses(store: Any) -> None:
@@ -76,14 +85,12 @@ def test_bundle_key_still_parses(store: Any) -> None:
     ("DAVIO", "R-6129", "5", "24"),
     ("ANRM", "211", "140", "3"),
 ])
-def test_mk_key_round_trips_through_split(repo: str, fond: str, spr: str,
+def test_mk_key_round_trips_through_parse(repo: str, fond: str, spr: str,
                                           opys: str | None) -> None:
     key = _mk_key(repo, fond, spr, opys)
-    assert key
-    fond_part = key.split("/")[1]
-    got_fond, got_opys = split_fond_opys(fond_part)
-    assert got_fond == fond
-    assert got_opys == (opys if "-" in fond_part[len(fond):] else None)
+    ck = casekey.parse(key)
+    assert ck is not None
+    assert (ck.repo, ck.fond, ck.opys, ck.spr) == (repo, fond, opys or casekey.UNKNOWN, spr)
 
 
 def test_fond_registry_key_with_letter_fond() -> None:
@@ -91,7 +98,9 @@ def test_fond_registry_key_with_letter_fond() -> None:
 
     assert parse_key("DAVIO/R-6129/24/5") == ("DAVIO", "R-6129", "24", "5", "")
     assert parse_key("ДАВіО Р-6129-24-5") == ("DAVIO", "R-6129", "24", "5", "")
+    # опису не названо — опис за замовчуванням фонду з паку; немає й його — порожньо
     assert parse_key("DAHMO/230/43") == ("DAHMO", "230", "1", "43", "")
+    assert parse_key("CDIAK/2/43") == ("CDIAK", "2", "", "43", "")
 
 
 @pytest.mark.parametrize("ref, spr, want", [

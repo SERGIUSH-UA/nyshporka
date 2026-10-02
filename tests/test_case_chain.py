@@ -27,7 +27,7 @@ R: Any = None
 def space(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """Порожній простір; заморожені на імпорті шляхи підмінено поіменно
     (той самий каркас, що в `test_opys_own_key.space`)."""
-    from nyshporka.core import opys_keys as K
+    from nyshporka.core import legacy_key as K
     from nyshporka.core import workspace as W
 
     W.use(W.Workspace(root=tmp_path, name="тест", origin="test"))

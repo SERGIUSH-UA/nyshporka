@@ -204,6 +204,6 @@ def test_an_adopted_folder_shows_up_before_data_raw_exists(
         "не відтворюється, бо тека дістає ненульовий індекс")
 
     lib = L.build_library()
-    assert [e.key for e in lib] == ["DAHMO/315/159"], (
+    assert [e.key for e in lib] == ["DAHMO/315/1/159"], (
         f"оголошена тека не дійшла до бібліотеки: {[e.key for e in lib]}")
     assert lib[0].frames == 3

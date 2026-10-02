@@ -27,7 +27,7 @@ import sys
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
     from nyshporka.htr.env import EnvReport
@@ -385,44 +385,40 @@ def _decode_visible() -> Check:
     return Check("Декоди видимі для grep", "ok", "простір поза git-репозиторієм")
 
 
-def _shared_keys() -> Check:
-    """Чи не лежать дві справи РІЗНИХ описів під одним ключем.
+def _case_keys() -> Check:
+    """Ключі справ: простір переїхав на опис у ключі, і в яких справ опис невідомий.
 
-    🔴 Опис — фізично інший підрозділ фонду: «ДАДнО 193-1-213» і «193-3-213» —
-    різні книги. Ключ без опису їх не розрізняє, і тоді облік прочитаного,
-    прив'язки прогонів і шифра в Супрязі однієї книги лягають на іншу — тихо.
-    Реєстрація дає другій справі власний ключ, але лише якщо її заводять уже
-    поруч із першою; теки, описані раніше чи завантажувачем, ловить ця перевірка.
+    🔴 Невідомий опис (`_` у ключі) — не помилка, а незнання, але з наслідком:
+    така справа не пакується в Супрягу, а дві книги того самого номера з різних
+    описів, обидві без опису, лягли б під один ключ. Тож їх видно поіменно.
     """
+    from nyshporka.core import casekey
     from nyshporka.library import load_library
 
-    name = "Справи різних описів"
+    name = "Ключі справ"
+    if not casekey.keys_current():
+        return Check(name, "warn",
+                     "простір ще на старих ключах справ (без опису) — запис у сховище "
+                     "сторінок відкладено",
+                     "`nysh cases rekey` покаже, що зміниться; `nysh cases rekey "
+                     "--apply` перенесе облік з архівом для відкату")
     try:
         lib = load_library()
     except Exception as exc:
         return Check(name, "warn", f"бібліотека не читається: {exc}")
     if not lib:
         return Check(name, "ok", "бібліотеку ще не зібрано")
-    by_key: dict[str, list[dict[str, Any]]] = {}
-    for e in lib:
-        by_key.setdefault(str(e.get("key") or ""), []).append(e)
-    shared = []
-    for key, group in sorted(by_key.items()):
-        opysy = {str(e.get("opys") or "").strip() for e in group} - {""}
-        if key and len(opysy) > 1:
-            shared.append((key, group))
-    if not shared:
-        return Check(name, "ok", f"{len(by_key)} ключів — жоден не тримає справ різних описів")
-    head = "; ".join(
-        f"{key}: " + ", ".join(sorted(str(e.get("shifra") or "?") for e in group))
-        for key, group in shared[:3])
-    more = f" і ще {len(shared) - 3}" if len(shared) > 3 else ""
+    unknown = [e for e in lib if (ck := casekey.parse(e.get("key"))) is not None
+               and not ck.bundle and not ck.opys_known]
+    if not unknown:
+        return Check(name, "ok", f"{len(lib)} справ — опис відомий у кожної")
+    head = ", ".join(str(e.get("shifra") or e.get("key")) for e in unknown[:3])
+    more = f" і ще {len(unknown) - 3}" if len(unknown) > 3 else ""
     return Check(
         name, "warn",
-        f"{len(shared)} ключів тримають справи різних описів — {head}{more}",
-        "зареєструйте теку другої справи ще раз (`nysh case <тека> --shifra "
-        "\"<шифра з описом>\"`) — вона отримає власний ключ з описом, а перша "
-        "лишиться під своїм")
+        f"{len(unknown)} справ без опису ({head}{more})",
+        "допишіть опис у паспорт (`nysh case <тека> --shifra \"<шифра з описом>\"`), "
+        "потім `nysh cases rekey --apply` перенесе облік під ключ з описом")
 
 
 def _version() -> Check:
@@ -647,7 +643,7 @@ def _queue() -> Check:
 
 
 CHECKS = (_version, _skills, _python, _workspace, _cloud_sync, _disk, _profile,
-          _library, _chain, _queue, _decode_visible, _shared_keys, _torch, _engines,
+          _library, _chain, _queue, _decode_visible, _case_keys, _torch, _engines,
           _models, _rent)
 
 #: Перевірки, які мають сенс лише при ввімкненій секції. 🔴 Не косметика:

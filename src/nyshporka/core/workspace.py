@@ -116,6 +116,10 @@ class Workspace:
     listed_sections: tuple[str, ...] | None = None
     #: Чому профіль секцій не прочитався. Показує `doctor` і банер демона.
     sections_problem: str = ""
+    #: Версія ключів справ (`core.casekey.KEYS_VERSION`). Маркер без поля `keys`
+    #: — простір, заведений до опису в ключі: читається як 1. Простір, зібраний
+    #: прямо в коді (тести, `use()`), — поточний: старих ключів у ньому немає.
+    keys: int = 2
 
     # дані дослідження
     @property
@@ -278,7 +282,20 @@ def _build(root: Path, origin: str) -> Workspace:
     return Workspace(root=root, name=str(cfg.get("name") or ""),
                      extra_case_roots=extra, origin=origin,
                      preset=preset, listed_sections=listed,
-                     sections_problem=problem)
+                     sections_problem=problem, keys=_keys_version(cfg))
+
+
+def _keys_version(cfg: dict[str, Any]) -> int:
+    """Версія ключів із маркера. Поля немає або воно негодяще — 1 (старі ключі).
+
+    🔴 Помилка в бік «старі» безпечна: запис відмовить і назве команду переносу,
+    яка на просторі без старих ключів лише поставить позначку. Помилка в бік
+    «нові» тихо писала б нові ключі поруч зі старими.
+    """
+    try:
+        return max(1, int(cfg.get("keys") or 1))
+    except (TypeError, ValueError):
+        return 1
 
 
 def _mtime(path: Path) -> float:
@@ -657,6 +674,18 @@ def set_sections(active: Iterable[str]) -> frozenset[str]:
     _override = replace(ws, preset=name, listed_sections=listed, sections_problem="")
     _cached.cache_clear()
     return resolved
+
+
+def set_keys_version(version: int) -> None:
+    """Записати версію ключів справ у маркер простору (`cases.rekey`, майстер)."""
+    global _override
+    ws = workspace()
+    marker = ws.marker
+    text = marker.read_text(encoding="utf-8") if marker.is_file() else "[workspace]\n"
+    _write_marker(marker, _marker_set(text, "keys", f"keys = {int(version)}"))
+    if _override is not None:
+        _override = replace(_override, keys=int(version))
+    _cached.cache_clear()
 
 
 def _write_marker(marker: Path, text: str) -> None:

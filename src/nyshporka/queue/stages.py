@@ -133,7 +133,7 @@ def _judge(w: Where) -> Any:
 def case_key(item: dict[str, Any], w: Where) -> str:
     """Ключ справи: з каталогу, з реєстру опису або з паспорта теки.
 
-    Каталог — перший: лише він знає, чи входить опис у ключ саме цієї справи.
+    Каталог — перший: лише він знає справу, чий опис узято з паспорта теки.
     """
     if w.case_dir is not None and w.case_dir.is_dir():
         got = _judge(w).key
@@ -169,28 +169,9 @@ def _loader_meta(case_dir: Path | None) -> dict[str, Any]:
     return raw if isinstance(raw, dict) else {}
 
 
-def opys_clash(w: Where) -> str:
-    """Чому тека справи не її: у ній уже лежить справа ІНШОГО опису. Порожньо — її.
-
-    🔴 Тека зветься за номером справи без опису (`spr-124`), а номери між
-    описами повторюються. Кадри 224-1-124, що вже лежать у теці, для справи
-    224-2-124 — не «кадри вже на диску», а чужа книга під її іменем.
-    """
-    from nyshporka.cases import acquire as A
-
-    opys = str(w.plan.get("opys") or "")
-    if not opys or w.case_dir is None or not w.case_dir.is_dir():
-        return ""
-    try:
-        A.guard_inventory(w.case_dir, opys)
-    except A.AcquireError as exc:
-        return str(exc)
-    return ""
-
-
 def fetch_done(item: dict[str, Any], ctx: Ctx) -> bool:
     w = where(item)
-    if not w.frames or opys_clash(w):
+    if not w.frames:
         return False
     state = str(_loader_meta(w.case_dir).get("fetch_state") or "")
     if state:
@@ -225,10 +206,6 @@ def fetch_run(item: dict[str, Any], ctx: Ctx) -> Outcome:
         return failed("no_registry_row", str(exc),
                       "справи немає в реєстрі опису — додайте теку з кадрами: "
                       "nysh queue add <тека>")
-    chuzha = opys_clash(where(item))
-    if chuzha:
-        return blocked("opys_conflict", chuzha,
-                       f'зняти цю справу з черги: nysh queue drop "{_name(item)}"')
     if plan.get("shifra_needs_eye") and not (item.get("opts") or {}).get("shifra_ok"):
         return blocked(
             "shifra_needs_eye",

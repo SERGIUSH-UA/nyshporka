@@ -563,7 +563,7 @@ def row_status(row: dict[str, Any],
     # сховища сторінок (`84a`) — і без цього переводу колонка мовчки порожня
     # саме на літерних справах. Виміряно на ДАХмО 315-1-84а: у пулі текст є,
     # у таблиці не показувався.
-    from nyshporka.library import _LETTER_TO_LAT
+    from nyshporka.core.casekey import _LETTER_TO_LAT
 
     pool_key = (key[0], key[1], _LETTER_TO_LAT.get(key[2], key[2]))
     cell = None if pool is None else pool.get(pool_key)
@@ -845,8 +845,12 @@ def surname_list(fond_id: str, limit: int = 400) -> list[str]:
 # ── одна справа ───────────────────────────────────────────────────────────────
 
 def parse_key(key: str) -> tuple[str, str, str, str, str]:
-    """`DAHMO/230/43` або `ДАХмО 230-1-43` → (repo, fond, opys, spr_int, letter)."""
-    from nyshporka.library import _norm_fond
+    """`DAHMO/230/1/43` або `ДАХмО 230-1-43` → (repo, fond, opys, spr_int, letter).
+
+    Опису не названо (`DAHMO/230/43`) — опис за замовчуванням фонду з паку;
+    без нього опис порожній, і вирішує той, хто питав.
+    """
+    from nyshporka.library import _norm_fond, default_opys
 
     m = _key_re().match(key.strip())
     if not m:
@@ -859,7 +863,8 @@ def parse_key(key: str) -> tuple[str, str, str, str, str]:
     # реєстру залежно від того, звідки прийшов виклик.
     repo = {"ДАХМО": "DAHMO", "ЦДІАК": "CDIAK", "ДАВІО": "DAVIO",
             "ДАВО": "DAVIO"}.get(repo, repo)
-    return (repo, str(_norm_fond(m.group(2))), (m.group(3) or "1"), m.group(4),
+    fond = str(_norm_fond(m.group(2)))
+    return (repo, fond, (m.group(3) or default_opys(repo, fond) or ""), m.group(4),
             (m.group(5) or "").lower())
 
 

@@ -38,7 +38,8 @@ SCREENS.fonds = async () => {
   const seed = ST.fonds;
   if (seed) {
     const hit = fonds.find((f) => f.repo === seed.repo && f.fond === seed.fond);
-    FD = { ...FD, fond: (hit || {}).id || FD.fond, spr: seed.spr || '', page: 0 };
+    FD = { ...FD, fond: (hit || {}).id || FD.fond, opys: seed.opys || '',
+      spr: seed.spr || '', page: 0 };
     ST.fonds = null;      // засів одноразовий: інакше він держав би екран
   }
   if (!FD.fond && fonds.length) FD.fond = fonds[0].id;

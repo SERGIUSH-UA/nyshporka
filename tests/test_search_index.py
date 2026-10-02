@@ -271,7 +271,7 @@ def test_a_case_key_reaches_the_run_a_folder_name_never_would(space) -> None:
     got = S.runs_for_scope("DAHMO/315/159")
     assert got["kind"] == "case"
     assert [r["name"] for r in got["rows"]] == ["проба-дяк"]
-    assert got["key"] == "DAHMO/315/159"
+    assert got["key"] == "DAHMO/315/1/159"
 
 
 def test_an_unknown_scope_is_refused_by_name(space) -> None:

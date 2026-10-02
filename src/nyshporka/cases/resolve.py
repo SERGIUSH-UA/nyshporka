@@ -23,15 +23,15 @@ from functools import lru_cache
 from typing import Any
 
 from nyshporka.cases.model import RunLink
+from nyshporka.core import casekey
+from nyshporka.core import legacy_key as legacy
 from nyshporka.library import (
     ROOT,
     _archium_parse,
-    _norm_fond,
+    default_opys,
     dejunction,
     load_library,
-    opys_in_key,
     parse_case_code,
-    split_fond_opys,
 )
 from nyshporka.utils.atomic import CorruptFileError, read_json, write_json
 
@@ -166,52 +166,51 @@ class LibraryIndex:
         return self._pick(self._by_spr.get(spr, []), repo)
 
     def canonical(self, key: str) -> str | None:
-        """Шифра в будь-якій формі → ключ бібліотеки, або None.
-
-        🔴 `DAHMO/315/1/8591` і `DAHMO/315/8591` — та сама справа, але `by_key`
-        знає лише одну форму. 10.09.2026 план приніс форму з описом, і ремонт
-        `case_dir` мовчки пропустив прогін 8591, а резолвер відкинув ключ мети.
+        """Ключ (новий чи старий) → ключ бібліотеки, або None.
 
         Суворіше за `lookup`, бо тут ключ уже названий, а не вгаданий з імені:
-        архів мусить збігтися, а форма з описом падає на пару «фонд + справа»
-        лише там, де опису бібліотека не знає. Інакше `DAVO/904/24/25` тихо
-        став би справою 25 іншого опису того самого фонду.
+        архів мусить збігтися, а названий опис — бути тим самим або невідомим
+        у бібліотеці. Інакше `DAVIO/904/24/25` тихо став би справою 25 іншого
+        опису того самого фонду. Старий ключ (до 0.22) іде через карту
+        переїзду; лише справу, якої карта не знає, шукаємо за полями.
         """
         if not key:
             return None
         if key in self.by_key:
             return key
-        parts = [p for p in str(key).strip().strip("/").split("/") if p]
-        if len(parts) == 4:
-            repo, fond, opys, spr = parts
-        elif len(parts) == 3:
-            repo, fond, spr = parts
-            opys = ""
+        ck = casekey.parse(key)
+        if ck is not None:
+            if ck.bundle:
+                return None                 # збірка — ключ не нормалізується
+            repo, f, o, s = ck.repo, ck.fond, (ck.opys if ck.opys_known else ""), ck.spr
         else:
-            return None
-        if "@" in f"{opys}{spr}":
-            return None                     # збірка — ключ не нормалізується
-        f, o, s = _norm(fond), _norm(opys), _norm(spr)
+            moved = legacy.translate(key)
+            if moved:
+                return moved if moved in self.by_key else None
+            old = casekey.parse_legacy(key)
+            if not old or old[0] == "?":
+                return None
+            repo, f, o, s = old[0], old[1], old[2] or "", old[3]
+        f, o, s = _norm(f) or "", _norm(o) or "", _norm(s) or ""
         if not (f and s):
             return None
 
         def same_repo(keys: list[str]) -> list[str]:
             return [k for k in keys if (self.by_key[k].get("repo") or "") == repo]
 
-        if o:
-            hit = self._pick(same_repo(self._by_fos.get((f, o, s), [])), repo)
+        want = o or _norm(default_opys(repo, f))
+        if want:
+            hit = self._pick(same_repo(self._by_fos.get((f, want, s), [])), repo)
             if hit:
                 return hit
-            loose = [k for k in same_repo(self._by_fs.get((f, s), []))
-                     if not _norm(self.by_key[k].get("opys"))]
-            return self._pick(loose, repo)
         keys = same_repo(self._by_fs.get((f, s), []))
-        different_opys = len({_norm(self.by_key[k].get("opys")) for k in keys}) > 1
-        if len(set(keys)) > 1 and (opys_in_key(repo, _norm_fond(fond)) or different_opys):
-            # 🔴 Фонд, де опис входить у ключ: без опису шифра — це кілька
-            # РІЗНИХ книг (ANRM 211-1-140 і 211-3-140), а не дублікати однієї.
-            # «Сильніший опис» тут приписав би прогін чужій справі; сховище
-            # сторінок на тій самій формі відмовляє — і тут теж.
+        if o:
+            loose = [k for k in keys if not _norm(self.by_key[k].get("opys"))]
+            return self._pick(loose, repo)
+        # 🔴 Опису не названо, а в бібліотеці кілька справ цього номера в різних
+        # описах — це РІЗНІ книги (ANRM 211-1-140 і 211-3-140), не дублікати.
+        # «Сильніший опис» тут приписав би прогін чужій справі.
+        if len({_norm(self.by_key[k].get("opys")) for k in keys}) > 1:
             return None
         return self._pick(keys, repo)
 
@@ -271,6 +270,7 @@ def bind_run(run: str, key: str, why: str = "") -> dict[str, Any]:
         raise ValueError(f"ім'я прогону негодяще: {run!r}")
     if not key:
         raise ValueError("ключ справи обов'язковий")
+    casekey.require_current("прив'язка прогону до справи")
     data = dict(load_overrides())
     runs = dict(data.get("runs") or {})
     runs[run] = {"key": key, **({"why": why} if why else {})}
@@ -456,6 +456,8 @@ def resolve_run(name: str, case_dir: str = "", index: LibraryIndex | None = None
                 _depth: int = 0, meta_key: str = "") -> RunLink:
     """Прогін → `RunLink`. `key=None` означає «не прив'язався» і це видимий стан."""
     idx = index or LibraryIndex()
+    # Ключ мети буває до 0.22 — тоді він переводиться за картою переїзду.
+    meta_key = legacy.current_key(meta_key) if meta_key else meta_key
     ov = _run_overrides().get(name)
     if ov is not None:                                   # 1) рішення людини
         return RunLink(run=name, key=ov.get("key") or None, resolved_by="override",
@@ -500,12 +502,13 @@ def resolve_run(name: str, case_dir: str = "", index: LibraryIndex | None = None
 
 
 def _same_fond(key: str, meta_key: str) -> bool:
-    """Чи той самий архів і фонд у двох ключах (`DAHMO/315/599`, `CDIAK/127-1016/599`)."""
+    """Чи той самий архів і фонд у двох ключах (`DAHMO/315/1/599`, `CDIAK/127/1016/599`)."""
     def rf(k: str) -> tuple[str, str] | None:
-        parts = [x for x in str(k).strip().strip("/").split("/") if x]
-        if len(parts) < 3:
-            return None
-        return parts[0].upper(), split_fond_opys(parts[1])[0]
+        ck = casekey.parse(k)
+        if ck is not None:
+            return ck.repo, ck.fond
+        old = casekey.parse_legacy(k)
+        return (old[0], old[1]) if old else None
     a, b = rf(key), rf(meta_key)
     return a is None or b is None or a == b
 

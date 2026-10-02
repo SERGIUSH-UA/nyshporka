@@ -117,6 +117,6 @@ jobs:
           from nyshporka.archives import active
           p = active()
           assert p.repo_label('DAHMO') == 'ДАХмО', p.repositories
-          assert p.opys_in_key('ANRM', '211')
+          assert p.default_opys('CDIAK', '127') == '1076', p.fonds
           print('пак прочитано зі встановленого пакета:', len(p.fonds), 'фондів')
           "

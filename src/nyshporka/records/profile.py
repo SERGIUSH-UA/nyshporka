@@ -116,7 +116,9 @@ def resolve_name(explicit: str | None = None,
     if explicit:
         return explicit
     if case_key:
-        bound = (raw.get("cases") or {}).get(case_key)
+        from nyshporka.core import legacy_key
+
+        bound = legacy_key.get(raw.get("cases") or {}, case_key)
         if bound:
             return str(bound)
     fallback = raw.get("fallback")

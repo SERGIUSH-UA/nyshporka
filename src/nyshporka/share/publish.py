@@ -186,9 +186,9 @@ def choose_voices(dirs: list[Path], key: str, *,
 def _case_block(scope_info: dict[str, Any], case_dir: Path | None) -> dict[str, Any]:
     """Шифра й опис справи — з паспорта теки, а не з нашого ключа.
 
-    🔴 `key_local` їде довідково й ніколи як ідентичність: він збирається з
-    імені теки й версії паку, тож в іншого дослідника та сама справа дістане
-    інший ключ (`align` пояснює, чому).
+    🔴 `key_local` їде довідково й ніколи як ідентичність: опис у ньому може
+    бути припущеним (опис за замовчуванням фонду) чи невідомим (`_`), тож в
+    іншого дослідника та сама справа дістане інший ключ (`align` пояснює).
     """
     from nyshporka.cases.register import parse_shifra, read_sidecar
 
@@ -267,44 +267,6 @@ def _normalize_shifra(case: dict[str, Any], key: str) -> dict[str, Any]:
     return out
 
 
-_EXPLICIT_OPYS = re.compile(r"^[^/]+/([^/-]+)-([^/]+)/")
-
-
-def _opys_z_progoniv(case: dict[str, Any], info: dict[str, Any]) -> dict[str, Any]:
-    """Опис справи — з прогонів, коли вони називають його явно.
-
-    🔴 У фондах, де опис не входить до ключа (ЦДІАК 127), справи різних
-    описів з тим самим номером мають ОДИН ключ: «127-1076-1664» і
-    «127-1078-1664» — обидві `CDIAK/127/1664`. Резолвер за ключем вгадує
-    опис, і прогін з опису 1078 поїхав би в каталог під шифрою 1076, тобто
-    під чужою справою. Прогін же пам'ятає опис явно — у своїй меті чи в
-    прив'язці («CDIAK/127-1078/1664»). Паспорт теки сильніший: якщо він
-    називає інший опис, нічого не міняється, а розбіжність ловить засів.
-    """
-    from nyshporka import htr_store as S
-
-    bound = S._bound_runs()
-    fond = str(case.get("fond") or "")
-    found: set[str] = set()
-    for r in info.get("rows") or []:
-        raw = str(bound.get(str(r.get("name")), None) or r.get("case_key") or "")
-        m = _EXPLICIT_OPYS.match(raw)
-        if m and m.group(1) == fond:
-            found.add(m.group(2))
-    if len(found) != 1:
-        return case
-    opys = found.pop()
-    if str(case.get("opys") or "") == opys or case.get("shifra_pasport"):
-        return case
-    from nyshporka.library import _shifra
-
-    out = {**case, "opys": opys,
-           "shifra": _shifra(case.get("repo"), case.get("fond"), opys, case.get("spr"))}
-    if case.get("shifra") and case["shifra"] != out["shifra"]:
-        out["shifra_rezolver"] = case["shifra"]
-    return out
-
-
 def _teky_pasportu(case_dir: Path | None) -> list[Path]:
     """Тека справи й теки, з яких її сторінки відрендерено (`rendered_from`).
 
@@ -343,7 +305,6 @@ def _ref_z_adresy(url: str) -> dict[str, str] | None:
     `source_url` паспорта їхав як `url`, якого пул не приймає, і скани
     губились дорогою.
     """
-    import re
     from urllib.parse import unquote, urlparse
 
     url = str(url or "").strip()
@@ -471,7 +432,7 @@ def _letter_variants(letter: str) -> list[str]:
     `_norm_spr` зводить кириличну літеру до латинської, і другий перелік
     розійшовся б із першим при першому ж доданому рядку.
     """
-    from nyshporka.library import _LETTER_TO_LAT
+    from nyshporka.core.casekey import _LETTER_TO_LAT
 
     if not letter:
         return [""]
@@ -555,20 +516,6 @@ def _znamennyk(frames_block: dict[str, Any],
         # `listed` лишається кадрами на диску: за ним іде прив'язка тексту.
         return {**frames_block, "total": want, "on_disk": have}
     return frames_block
-
-
-def _opys_hint(info: dict[str, Any]) -> str:
-    """Опис справи з `case_key` прогонів — коли ключ бібліотеки його не несе."""
-    from nyshporka.library import split_fond_opys
-
-    for r in info.get("rows") or []:
-        parts = str(r.get("case_key") or "").split("/")
-        if len(parts) == 3:
-            # Літерний фонд (`R-6129`) — один сегмент, а не фонд із описом.
-            _fond, opys = split_fond_opys(parts[1])
-            if opys:
-                return opys
-    return ""
 
 
 def _znamennyk_z_pasporta(frames_block: dict[str, Any],
@@ -680,7 +627,7 @@ def build_manifest(scope: str, *,
     frames = align.frames_of(case_dir, hash_frames=hash_frames) if case_dir else []
     # Тека справи — паспорт — буває й без кадрів (прибрані після читання).
     # Кадри й відбиток — лише з `case_dir`; опис, посилання й знаменник — звідси.
-    home = align.case_home_for(key, _opys_hint(info)) if key else None
+    home = align.case_home_for(key) if key else None
     voices = [bundle.voice_of(d) for d in run_dirs]
     voices = [v for v in voices if v.pages]
     if not voices:
@@ -735,7 +682,7 @@ def build_manifest(scope: str, *,
         n = align.library_frames(key)
         if n > 0:
             frames_block = {**frames_block, "total": n, "on_disk": 0}
-    case = _opys_z_progoniv(_normalize_shifra(_case_block(info, home), key), info)
+    case = _normalize_shifra(_case_block(info, home), key)
     if archive_name.strip():
         # Архіву немає в довіднику — назву дає людина. Сервер покаже її на
         # картці, доки архів не з'явиться в довіднику пакета.

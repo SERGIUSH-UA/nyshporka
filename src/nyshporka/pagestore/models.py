@@ -257,7 +257,7 @@ class CaseFile(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     version: int = 1
-    key: str = Field(description="Канонічний ключ 'DAHMO/315/8433' (repo/fond/spr, як у бібліотеці).")
+    key: str = Field(description="Канонічний ключ 'DAHMO/315/1/8433' (repo/fond/opys/spr, як у бібліотеці).")
     repo: str
     fond: str
     spr: str

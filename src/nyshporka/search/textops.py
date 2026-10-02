@@ -71,13 +71,17 @@ def scope_runs(scope: str) -> dict[str, Any]:
     sc = S.runs_for_scope(scope)
     if sc.get("kind") == "run" and sc["rows"]:
         me = sc["rows"][0]
-        key = (me.get("case_key") or "").strip()
+        key = str(me.get("case_canon") or "").strip() or S._canon_case_key(
+            (me.get("case_key") or "").strip())
         # 🔴 тека кадрів — ознака побратима лише на цій машині й лише при
         # ключах, що не суперечать: хмарний слот `/tmp/htrcase/…` і тека
-        # стейджингу бувають спільні для різних справ (`same_frames`)
+        # стейджингу бувають спільні для різних справ (`same_frames`).
+        # Ключі — канонічні: мета пише і шифру, і ключ до 0.22.
         others = [r for r in S.list_cases()
                   if r.get("name") != me.get("name")
-                  and ((key and (r.get("case_key") or "").strip() == key)
+                  and ((key and (str(r.get("case_canon") or "").strip()
+                                 or S._canon_case_key((r.get("case_key") or "").strip()))
+                        == key)
                        or S.same_frames(me.get("case_dir"), me.get("case_canon") or "",
                                         r.get("case_dir"), r.get("case_canon") or ""))]
         sc = {**sc, "rows": [me, *others]}
@@ -932,7 +936,9 @@ def verdicts_load(key: str) -> dict[str, dict[str, Any]]:
         data = json.loads(_verdicts_path().read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
-    got = data.get(key) if isinstance(data, dict) else None
+    from nyshporka.core import legacy_key
+
+    got = legacy_key.get(data, key) if isinstance(data, dict) else None
     return dict(got) if isinstance(got, dict) else {}
 
 
@@ -955,9 +961,11 @@ def _verdicts_save(key: str, items: dict[str, dict[str, Any]]) -> None:
     назвою `verdicts.tmp` вони ще й перетирали одне одному (у `write_json` —
     pid у назві й повтор заміни на зайнятій цілі).
     """
+    from nyshporka.core.casekey import require_current
     from nyshporka.pagestore.store import _lock
     from nyshporka.utils.atomic import CorruptFileError, read_json, write_json
 
+    require_current("вердикти рядків гортача")
     p = _verdicts_path()
     with _lock(p):
         data = read_json(p, default={})

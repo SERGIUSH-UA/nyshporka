@@ -65,4 +65,4 @@ def test_fond_196_splits_opys_1_and_8(lib) -> None:
     """ДАХмО ф.196 спр.712 існує в оп.1 і оп.8 — два різні ключі."""
     a = lib._mk_key("DAHMO", "196", "712", "1")
     b = lib._mk_key("DAHMO", "196", "712", "8")
-    assert a == "DAHMO/196-1/712" and b == "DAHMO/196-8/712"
+    assert a == "DAHMO/196/1/712" and b == "DAHMO/196/8/712"

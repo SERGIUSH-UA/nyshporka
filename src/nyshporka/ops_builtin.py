@@ -1477,7 +1477,7 @@ class SearchArgs(BaseModel):
                     "кожна зі своїм знаменником")
     case: str = Field(
         default="",
-        description="обмежити однією справою: ключ «DAHMO/315/8433», шифра "
+        description="обмежити однією справою: ключ «DAHMO/315/1/8433», шифра "
                     "«ДАХмО 315-1-8433», шлях теки або ім'я прогону")
     thresh: int = Field(default=80, ge=50, le=100)
     # 🔴 Вікно, а не рядок. Рядок-хіт не розрізняє прізвищ зі спільним коренем,
@@ -2240,14 +2240,6 @@ def case_register(a: CaseRegisterArgs) -> Envelope:
         env.warn("no_title",
                  "назви немає — у переліках справа буде «без назви», і впізнати "
                  "її за рік стане важко")
-    from nyshporka.cases.register import own_key_note
-
-    # Довідка, а не тривога: інший опис — інша справа, і вона законно дістала
-    # власний ключ. Людина мусить знати, яким ключем шукати її облік.
-    note = own_key_note(here, out)
-    if note:
-        env.data["own_key"] = note
-        env.warn("own_key", note)
     if env.data["reachable"]:
         from nyshporka.cases.register import key_mismatch
 
@@ -3626,33 +3618,24 @@ class FondArgs(BaseModel):
 # `agent=False` — довідка про фонд: потрібна раз на дослідження й читається
 # з паку архівів. У переліку tool'ів вона з'їдала б місце, яке модель мусить
 # дочитати до кінця.
-@op("archive.fond", summary="Що відомо про фонд: губернія, опис у ключі, дефолти",
+@op("archive.fond", summary="Що відомо про фонд: губернія, опис за замовчуванням",
     args=FondArgs, agent=False, section="material")
 def archive_fond(a: FondArgs) -> Envelope:
     from nyshporka.archives import active
-    from nyshporka.library import default_opys, opys_in_key
+    from nyshporka.library import default_opys
 
     pk = active()
     f = pk.fonds.get((a.repo.upper(), a.fond))
-    # 🔴 Відповідь про опис бере той самий предикат, яким збирається ключ.
-    # Читаючи натомість поле паку, команда відповідала «ні» там, де бібліотека
-    # опис включала, — а питання задають рівно перед тим, як складати ключ.
-    in_key = opys_in_key(a.repo.upper(), a.fond)
     data = {"repo": a.repo.upper(), "repo_label": pk.repo_label(a.repo),
             "fond": a.fond, "known": f is not None,
             "name": f.name if f else "", "guberniya": pk.guberniya(a.repo, a.fond),
             "default_opys": default_opys(a.repo.upper(), a.fond),
-            "opys_in_key": in_key,
             "note": f.note if f else ""}
     env = ok(data)
     if f is None:
         env.warn("unknown_fond",
                  f"фонд {a.repo.upper()} {a.fond} невідомий паку — правила за "
                  f"замовчуванням можуть не підійти")
-    elif in_key:
-        env.warn("opys_in_key",
-                 "у цьому фонді опис входить у ключ справи: без нього різні "
-                 "книги злипаються в одну")
     return env
 
 

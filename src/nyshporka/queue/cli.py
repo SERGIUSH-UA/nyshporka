@@ -126,9 +126,7 @@ def add(
             continue
         console.print(f" {'+' if r['added'] else '?'} [bold]{_e(r['id'])}[/bold]"
                       + (f" — {_e(r['title'])}" if r.get("title") else ""))
-        if r.get("opys_clash"):
-            console.print(f"     [warn]{_e(r['opys_clash'])}[/warn]")
-        elif r.get("kind") == "key" and r.get("frames_on_disk"):
+        if r.get("kind") == "key" and r.get("frames_on_disk"):
             console.print(f"     [muted]кадри вже на диску: {r['frames_on_disk']} · "
                           f"{_e(r.get('case_dir') or '')}[/muted]")
         elif r.get("kind") == "key":

@@ -202,11 +202,14 @@ def judge(case_dir: Path, *, frames: int = 0,
                else "паспорта немає, а з імені теки шифру не зібрати")
         return mk(link=NO_PASSPORT, why=why, fix=f"{cmd}{note}")
 
-    keys = L.candidate_keys(parsed)
     lk = L.library_lookup() if L.LIBRARY_PATH.exists() else None
-    found = lk is not None and (rel in lk.by_path or any(k in lk.by_key for k in keys))
-    key = next((k for k in keys if lk is not None and k in lk.by_key), keys[0] if keys else "")
-    if not found:
+    hit = None
+    if lk is not None:
+        hit = lk.by_path.get(rel) or lk.find(*parsed)
+    key = str((hit or {}).get("key") or "") or (L._mk_key(
+        parsed[0], parsed[1], parsed[3], parsed[2] or L.default_opys(parsed[0], parsed[1]))
+        or "")
+    if hit is None:
         return mk(link=NOT_IN_LIBRARY, key=key,
                   why="ключ справи збирається, але каталог справ зібрано до появи теки",
                   fix="nysh cases build --rescan")

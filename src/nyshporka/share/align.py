@@ -1,9 +1,9 @@
 """🎯 Перелік кадрів і чесна мітка прив'язки чужого тексту до своїх кадрів.
 
-Ключ справи для обміну не годиться, і це не дрібниця. Він збирається з ІМЕНІ
-ТЕКИ, версії паку архівів і переліку фондів, де опис входить у ключ
-(`library._OPYS_IN_KEY`), тож той самий `DAHMO/196/712` в іншого дослідника
-стане `DAHMO/196-1/712`. Глобального ключа справи в пакеті немає за рішенням —
+Ключ справи для обміну не годиться, і це не дрібниця. Він залежить від того,
+що знає простір: опис справи без паспорта береться з опису за замовчуванням
+фонду, а не встановлений — `_`, тож та сама книга в іншого дослідника може
+мати інший ключ. Глобального ключа справи в пакеті немає за рішенням —
 `sources/base.py`: «спроба звести їх до спільного ключа ламається на першому ж
 архіві з іншою нумерацією».
 
@@ -308,39 +308,25 @@ FRAMES_SUBDIR = "pages"
 
 
 def _key_parts(key: str) -> tuple[str, str, str, str] | None:
-    """`CDIAK/224-2/49` → `("CDIAK", "224", "2", "49")`; без опису — опис порожній."""
-    parts = key.split("/")
-    if len(parts) != 3:
-        return None
-    from nyshporka.library import split_fond_opys
+    """`CDIAK/224/2/49` → `("CDIAK", "224", "2", "49")`; опис невідомий — порожній.
 
-    repo, fond_part, spr = parts
-    # Літерний фонд (`R-6129`) — один сегмент: різання за першим дефісом давало
-    # фонд «R» з описом «6129», і пакувальник шукав паспорт у `dahmo_R/`.
-    fond, opys = split_fond_opys(fond_part)
-    return repo, fond, opys or "", spr
+    Старий ключ (до 0.22, з мети прогону чи давнього пакета) теж розбирається:
+    `CDIAK/224-2/49`, `DAVIO/R-6129-24/5` (літерний фонд — один сегмент).
+    """
+    from nyshporka.core import casekey
+
+    ck = casekey.parse(key)
+    if ck is not None:
+        return ck.repo, ck.fond, ck.opys if ck.opys_known else "", ck.spr
+    old = casekey.parse_legacy(key)
+    return (old[0], old[1], old[2] or "", old[3]) if old else None
 
 
 def _row_matches(row: dict[str, Any], key: str) -> bool:
-    """Рядок бібліотеки — саме ця справа.
+    """Рядок бібліотеки — саме ця справа (старий ключ — через карту переїзду)."""
+    from nyshporka.core import legacy_key
 
-    🔴 Ключ пакета несе опис (`CDIAK/224-2/49`), а бібліотека у фондах, де опис
-    не входить до ключа, тримає ту саму справу як `CDIAK/224/49` і опис —
-    окремим полем. Точний збіг рядків ключа тут мовчки губив справу, і пакет
-    їхав без кадрів і без посилання на скани. Опис звіряється ПОЛЕМ: під
-    `CDIAK/224/49` лежать і оп.1, і оп.2 спр.49, тож «ключ без опису» сам по
-    собі взяв би кадри чужої книги.
-    """
-    if str(row.get("key") or "") == key:
-        return True
-    want = _key_parts(key)
-    if want is None or not want[2]:
-        return False
-    repo, fond, opys, spr = want
-    return (str(row.get("repo") or "") == repo
-            and str(row.get("fond") or "") == fond
-            and str(row.get("opys") or "") == opys
-            and str(row.get("spr") or "") == spr)
+    return str(row.get("key") or "") == legacy_key.current_key(key)
 
 
 def _frames_dir(p: Path) -> Path | None:
@@ -378,7 +364,7 @@ def case_home_for(case_key: str, opys: str = "") -> Path | None:
     друге. Шукає бібліотекою, а потім за адресою з шифри (`cases take`) у
     кожному корені справ простору.
 
-    `opys` — коли ключ опису не несе (`CDIAK/127/1660`): тека чужого опису з
+    `opys` — коли ключ опису не несе (старий ключ, `_`): тека чужого опису з
     тим самим номером справи не береться.
     """
     from nyshporka.cases.register import read_sidecar
@@ -400,8 +386,10 @@ def case_home_for(case_key: str, opys: str = "") -> Path | None:
     except Exception:
         return None
     slug = f"{F.REPO_SLUG.get(repo, repo.lower())}_{fond}"
-    for base in ws.case_roots():
-        d = base / slug / f"spr-{spr}"
+    # Тека справи з описом в імені (`op3-spr-213`, так бере `cases take`) і
+    # давня, без нього (`spr-213`) — паспорт вирішує, чия вона.
+    names = ([f"op{want}-spr-{spr}"] if want else []) + [f"spr-{spr}"]
+    for d in (base / slug / name for base in ws.case_roots() for name in names):
         if not d.is_dir():
             continue
         have = _sidecar_opys(read_sidecar(d))

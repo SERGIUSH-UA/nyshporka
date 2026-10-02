@@ -64,10 +64,10 @@ def test_rezolver_chytaie_biblioteku_raz_i_bachyt_perebudovu(
 
     monkeypatch.setattr(L, "read_json", counting)
     for i in range(1, 60):
-        assert PS.resolve_case(f"DAHMO/315/{i}", claim=False).shifra == f"ДАХмО 315-1-{i}"
+        assert PS.resolve_case(f"DAHMO/315/{i}").shifra == f"ДАХмО 315-1-{i}"
     assert len(reads) == 1
     _write_library([*entries, {**_entry(60), "shifra": "ДАХмО 315-1-60 (нова)"}])
-    assert PS.resolve_case("DAHMO/315/60", claim=False).shifra == "ДАХмО 315-1-60 (нова)"
+    assert PS.resolve_case("DAHMO/315/60").shifra == "ДАХмО 315-1-60 (нова)"
     assert len(reads) == 2
 
 
@@ -84,7 +84,7 @@ def test_oblast_spravy_ne_rezolvyt_kozhen_progin(
     monkeypatch.setattr(S, "list_cases", lambda: [dict(r) for r in rows])
     calls: list[str] = []
 
-    def resolve(v: str, *, claim: bool = True) -> CaseRef:
+    def resolve(v: str) -> CaseRef:
         calls.append(v)
         return CaseRef(key="DAHMO/315/7", repo="DAHMO", fond="315", spr="7")
 

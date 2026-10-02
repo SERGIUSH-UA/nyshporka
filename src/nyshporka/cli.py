@@ -1264,11 +1264,10 @@ def archive_cmd(
     fond: str = typer.Argument(..., help="номер фонду"),
     as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
-    """Що пак знає про фонд: губернія, опис у ключі, дефолти.
+    """Що пак знає про фонд: губернія, опис за замовчуванням.
 
-    🔴 Питати це треба перед тим, як складати ключ справи. У частині фондів
-    опис входить у ключ, і без нього різні книги злипаються в одну — знайти
-    це потім можна лише за чужими сторінками у своїй справі.
+    Опис за замовчуванням іде в ключ справи, чия тека й паспорт опису не
+    називають; без нього опис такої справи — «_» (невідомий).
     """
     from nyshporka import ops as O
 
@@ -1278,8 +1277,7 @@ def archive_cmd(
     d = env.data
     console.print(f"[bold]{d['repo_label'] or d['repo']} ф.{d['fond']}[/bold] "
                   f"{d.get('name') or ''}")
-    console.print(f"  губернія: {d.get('guberniya') or '—'} · опис у ключі: "
-                  f"{'так' if d.get('opys_in_key') else 'ні'} · опис за "
+    console.print(f"  губернія: {d.get('guberniya') or '—'} · опис за "
                   f"замовчуванням: {d.get('default_opys') or '—'}")
     if d.get("note"):
         console.print(f"  [muted]{d['note']}[/muted]")
@@ -1377,7 +1375,7 @@ def search_cmd(
     q: str = typer.Argument(..., help="прізвище або слово"),
     case: str = typer.Option(
         "", "--case",
-        help="лише в цій справі: ключ «DAHMO/315/8433», шифра "
+        help="лише в цій справі: ключ «DAHMO/315/1/8433», шифра "
              "«ДАХмО 315-1-8433», шлях теки або ім'я прогону"),
     where: str = typer.Option("decode", "--where",
                               help="decode | pages | records | all"),
@@ -1641,6 +1639,61 @@ def cases_build(
         console.print(f"[muted]бібліотеку перезібрано: {res['entries']} справ[/muted]")
     console.print(f"✅ реєстр: [bold]{res['cases']}[/bold] справ · "
                   f"нерозв'язаних прогонів: {res.get('orphans', 0)} · {res['path']}")
+
+
+@cases_app.command("rekey")
+def cmd_rekey(
+    do: bool = typer.Option(False, "--apply", help="перенести (з архівом для відкату)"),
+    back: bool = typer.Option(False, "--rollback", help="відкотити останній перенос"),
+    stamp: str = typer.Option("", "--stamp", help="який перенос відкотити (тека в data/cases/rekey/)"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
+) -> None:
+    """Перенести облік простору на ключі з описом (`REPO/фонд/опис/справа`).
+
+    Без прапорців — лише план: що зміниться, що злиється, чого не перевести.
+    Нічого не пише. `--apply` переносить: спершу архів усього, що зачіпається
+    (`data/cases/rekey/<час>/backup.zip`), потім запис, перебудова бібліотеки й
+    реєстру, самоперевірка й позначка `keys = 2` у маркері простору.
+    `--rollback` повертає файли з архіву.
+
+    🔴 Переносити, коли інші сесії й застосунок зупинено: запис у сховище
+    сторінок посеред переносу ліг би під старий ключ.
+    """
+    import json
+
+    from nyshporka.cases import rekey as RK
+
+    try:
+        if back:
+            got = RK.rollback(stamp or None)
+            if as_json:
+                console.print_json(json.dumps(got, ensure_ascii=False))
+                return
+            console.print(f"✅ відкочено перенос {got['stamp']}: повернуто файлів "
+                          f"{got['restored']}, прибрано створених {got['removed']}")
+            return
+        if do:
+            got = RK.apply()
+            if as_json:
+                console.print_json(json.dumps(got, ensure_ascii=False))
+                return
+            mark = "⚠" if got["problems"] else "✅"
+            console.print(f"{mark} перенесено: файлів сторінок {got['pages']}, сховищ "
+                          f"{len(got['stores'])}; архів — {got['backup']}")
+            for p in got["problems"]:
+                console.print(f"  [warn]{p}[/warn]")
+            if got["problems"]:
+                console.print(f"  [warn]відкат: nysh cases rekey --rollback --stamp "
+                              f"{got['stamp']}[/warn]")
+            return
+        pl = RK.plan()
+    except RK.RekeyError as exc:
+        console.print(f"[warn]{exc}[/warn]")
+        raise typer.Exit(1) from None
+    if as_json:
+        console.print_json(json.dumps(pl.as_dict(), ensure_ascii=False))
+        return
+    console.print(RK.report(pl), end="", highlight=False, markup=False)
 
 
 @cases_app.command("list")

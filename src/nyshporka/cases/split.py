@@ -220,7 +220,7 @@ def plan(case_dir: str | Path, specs: list[tuple[str, str, str]]) -> Plan:
             part.spr = sh.spr
             part.shifra = sh.as_text()
             part.key = str(L._mk_key(sh.repo, sh.fond, sh.spr, sh.opys) or "")
-            part.dir = take.case_dir_for(sh.repo, sh.fond, sh.spr, "")
+            part.dir = take.case_dir_for(sh.repo, sh.fond, sh.spr, "", sh.opys or "")
         parts.append(part)
 
     free = [n for n in names if n not in taken]
@@ -302,7 +302,7 @@ def _pagestore_ref(address: str) -> Any:
     from nyshporka.pagestore import resolve_case
 
     try:
-        return resolve_case(address, claim=False)
+        return resolve_case(address)
     except Exception:
         return None
 

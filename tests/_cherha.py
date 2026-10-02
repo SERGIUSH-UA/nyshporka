@@ -16,7 +16,7 @@ import pytest
 
 def make_space(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Оголосити тимчасовий простір і перевести на нього заморожені шляхи."""
-    from nyshporka.core import opys_keys as K
+    from nyshporka.core import legacy_key as K
     from nyshporka.core import workspace as W
 
     (tmp_path / "nyshporka.toml").write_text("[workspace]\nschema = 1\n", encoding="utf-8")
@@ -48,7 +48,7 @@ def make_space(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 def drop_space() -> None:
     from nyshporka import htr_store
-    from nyshporka.core import opys_keys as K
+    from nyshporka.core import legacy_key as K
     from nyshporka.core import workspace as W
 
     htr_store._META_MEMO.clear()

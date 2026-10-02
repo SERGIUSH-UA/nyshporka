@@ -83,7 +83,9 @@ def get(case_key: str) -> dict[str, Any]:
     """Картка справи — або порожньо, якщо її не задавали."""
     if not case_key:
         return {}
-    return dict(_load_all().get(case_key) or {})
+    from nyshporka.core import legacy_key
+
+    return dict(legacy_key.get(_load_all(), case_key) or {})
 
 
 def genres() -> dict[str, str]:
@@ -193,6 +195,9 @@ def set_fields(case_key: str, fields: dict[str, Any]) -> dict[str, Any]:
 
     if not case_key:
         raise CardError("не названо справу")
+    from nyshporka.core.casekey import require_current
+
+    require_current("картка справи Супряги")
     allc = _load_all()
     card = dict(allc.get(case_key) or {})
     for k, v in fields.items():
@@ -214,8 +219,10 @@ def set_fields(case_key: str, fields: dict[str, Any]) -> dict[str, Any]:
 
 def clear(case_key: str) -> bool:
     """Прибрати картку справи цілком. Повертає, чи вона була."""
+    from nyshporka.core.casekey import require_current
     from nyshporka.utils.atomic import write_json
 
+    require_current("картка справи Супряги")
     allc = _load_all()
     if case_key not in allc:
         return False

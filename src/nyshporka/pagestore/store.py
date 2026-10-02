@@ -1,9 +1,9 @@
-"""Читання/запис сховища сторінок: `data/pages/<REPO>/<fond>-<spr>.json`.
+"""Читання/запис сховища сторінок: `data/pages/<REPO>/<fond>-<opys>-<spr>.json`.
 
 Ідіоми ті самі, що в library/decode_hits: atomic tmp+replace, людська праця
 переживає повторний запис (union-merge, статус лише підвищується), ключ справи —
-трійка repo/fond/spr без опису. Плюс lockfile — бо основний сценарій це
-паралельні агентні сесії, що пишуть в одну справу.
+`REPO/фонд/опис/справа` (`core.casekey`). Плюс lockfile — бо основний сценарій
+це паралельні агентні сесії, що пишуть в одну справу.
 """
 from __future__ import annotations
 
@@ -22,27 +22,21 @@ if TYPE_CHECKING:
 from nyshporka import vydannia
 from nyshporka.archives.pack import active as _pack_active
 from nyshporka.cases.walk import frame_names
+from nyshporka.core import casekey
+from nyshporka.core import legacy_key as legacy
 from nyshporka.core.workspace import workspace
 from nyshporka.library import (
-    _DEFAULT_OPYS,
     _REPO_LABEL,
-    FOND_TOKEN,
-    OPYS_TOKEN,
     Address,
     _mk_key,
-    _norm_fond,
     _norm_spr,
-    claim_collision,
+    default_opys,
     find_by_address,
     library_lookup,
     load_library,
-    opys_conflict,
-    opys_in_case_key,
-    opys_in_key,
     parse_address,
     parse_case_code,
     parse_source_id,
-    split_fond_opys,
 )
 from nyshporka.pagestore.models import CaseFile, PageNote, Record
 from nyshporka.utils.atomic import atomic_write_text
@@ -53,17 +47,6 @@ PAGES_ROOT = workspace().pages
 # порядок підвищення статусу: понизити повний прохід частковим не можна
 _STATUS_RANK = {"unreadable": 0, "skipped": 0, "partial": 1, "full": 2}
 
-# «DAHMO/315/8433» і «ANRM/211-3/140» — друга форма з описом у фонді (`opys_in_key`)
-# 🔴 Підкреслення в класі спр. — для збірок: `@fuzovka` і `@parkovo` проходили,
-# а `@klirovi_films` і `@kishinev_ispovedn` — ні, бо `_` у клас не входило.
-# Виглядало це не як синтаксична межа, а як «такої справи немає»: команда
-# друкувала перелік прийнятних форм, серед яких ключ і був. Спіймано 2026-08-13,
-# коли перегляд кадру збірки клірових ANRM не було куди занести.
-# 🔴 Фонд — спільна цеглина `FOND_TOKEN`, а не `\d+`: `cases.list` друкує ключ
-# `DAHMO/R-100/7` для радянського фонду, і цей регекс відмовляв на ньому —
-# рядок, виданий пакетом, не приймався назад (issue #21).
-_KEY_RE = re.compile(rf"^([A-Za-z]+)/({FOND_TOKEN}(?:-{OPYS_TOKEN})?)/([0-9A-Za-z@_]+)$",
-                     re.IGNORECASE)
 # «архів 123-1-456» / «dahmo 315-1-8433» / «315-1-8433» (без архіву — помилка)
 _SHIFRA_RE = re.compile(r"^(?:(\S+)\s+)?(\d+)\s*[-–]\s*(\d+)\s*[-–]\s*(\w+)$")
 #: 🔴 Зводиться до канонічного коду, а не до першого-ліпшого. Один архів
@@ -88,7 +71,8 @@ def _label2repo() -> dict[str, str]:
 _ACCEPTED_FORMATS = (
     "шифру «ЦДІАК 127-781-534» — архів, потім фонд, опис і справа саме в цьому "
     "порядку, розділені дефісом або скісною (тож «ЦДІАК/127/781/534» — те саме); "
-    "ключ без опису «DAHMO/315/8433»; source-id «S_<архів>_F<фонд>_D<справа>»; "
+    "ключ «DAHMO/315/1/8433» (опис невідомий — «_»); source-id "
+    "«S_<архів>_F<фонд>_D<справа>»; "
     "шлях теки «data/raw/архів_123/spr-456»"
 )
 
@@ -187,46 +171,12 @@ def _near_miss(addr: Address) -> str:
     return f" Схоже, це «{shifra}» — тоді набирай так." if shifra else ""
 
 
-def _refuse_legacy_file(repo: str, fond: str, opys: str | None, spr: str,
-                        key: str, label: str) -> None:
-    """Відмова, якщо облік цієї книги лежить під іменем без опису.
-
-    🔴 Фонд, що потрапив у `_OPYS_IN_KEY`, міняє ім'я файла сховища:
-    `196-712.json` → `196-1-712.json`. Старий файл лишається, а шукати його вже
-    ніхто не шукає: `pages status` каже «не дивились» про переглянуте, а новий
-    запис лягає окремим файлом поруч. Обидва наслідки тихі, тож — відмова з
-    назвою файлів. Файл, чиє поле `opys` каже про ІНШУ книгу, не заважає.
-    """
-    if not (opys and opys_in_key(repo, fond)) or str(spr).startswith("@"):
-        return
-    legacy = PAGES_ROOT / repo / f"{fond}-{spr}.json"
-    if not legacy.is_file():
-        return
-    try:
-        was = _norm_spr(json.loads(legacy.read_text(encoding="utf-8")).get("opys"))
-    except (OSError, ValueError, AttributeError):
-        was = None
-    if was and was != _norm_spr(opys):
-        return
-    new = PAGES_ROOT / repo / f"{fond}-{opys}-{spr}.json"
-    both = (f" Поруч уже є «{_rel(new)}» — зведіть записи в нього вручну."
-            if new.is_file() else
-            f" Перейменуйте його на «{new.name}» і поставте в ньому "
-            f"\"key\": \"{key}\", \"opys\": \"{opys}\".")
-    raise ValueError(
-        f"облік справи {label} {fond}-{opys}-{spr} лежить у «{_rel(legacy)}» — "
-        f"записаний до того, як опис увійшов у ключ фонду {label} {fond}, і під "
-        f"новим ключем не видний.{both}")
-
-
 # ── резолюція справи ─────────────────────────────────────────────────────────
-def resolve_case(value: str, *, claim: bool = True) -> CaseRef:
+def resolve_case(value: str) -> CaseRef:
     """Будь-який людський ідентифікатор справи → CaseRef. ValueError якщо не вийшло.
 
-    `claim=False` — лише назвати ключ, не записуючи колізію опису в реєстр
-    (`opys_keys.json`). Так нормалізується ключ з мети прогону: там шифра
-    паспорта на мить прогону, і після виправлення опису (`nysh case --shifra`)
-    стара шифра заводила б у реєстр справу, якої на диску немає.
+    Ключ (`DAHMO/315/1/8433`), старий ключ до 0.22 (`DAHMO/315/8433` — через
+    карту переїзду простору), адреса, шифра, ID джерела канону, шлях теки.
     """
     v = (value or "").strip()
     pub = vydannia.parse(v)
@@ -237,24 +187,28 @@ def resolve_case(value: str, *, claim: bool = True) -> CaseRef:
         k = vydannia.key(code, year)
         return CaseRef(key=k, repo=vydannia.REPO, fond=code, spr=str(year), shifra=k)
     parsed: tuple[str, str, str | None, str] | None = None
-    m = _KEY_RE.match(v)
-    if m:
-        fond_part, opys_part = split_fond_opys(m.group(2))
+    # Старий ключ — за картою переїзду: вона знає, якій справі він належав.
+    # Лише ключ, якого карта не знає, розбирається на частини.
+    ck = casekey.parse(v)
+    if ck is None and casekey.is_legacy(v):
+        moved = legacy.translate(v)
+        old = casekey.parse_legacy(v)
+        if moved:
+            ck = casekey.parse(moved)
+        elif old and old[0] != "?":
+            ck = casekey.CaseKey(old[0], old[1], old[2] or casekey.UNKNOWN, old[3])
+    if ck is not None:
         # 🔴 Код зводиться до канонічного, як і в сусідній гілці шифри. Голий
-        # `.upper()` означав, що ключ `DAVIO/904/105` шукав файл у
-        # `data/pages/DAVIO/`, тоді як 109 уже записаних аркушів лежать у
-        # `data/pages/DAVO/`. Агент, який чесно питає сховище перед тим, як
-        # відкривати скани, діставав порожньо — і передивлявся переглянуте.
-        parsed = (_label2repo().get(m.group(1).casefold(), m.group(1).upper()),
-                  str(_norm_fond(fond_part)),
-                  _norm_spr(opys_part) if opys_part else None,
-                  str(_norm_spr(m.group(3))))
+        # `.upper()` означав, що ключ `DAVIO/…` шукав файл у `data/pages/DAVIO/`,
+        # тоді як 109 уже записаних аркушів лежать у `data/pages/DAVO/`. Агент,
+        # який чесно питає сховище перед тим, як відкривати скани, діставав
+        # порожньо — і передивлявся переглянуте.
+        parsed = (_label2repo().get(ck.repo.casefold(), ck.repo), ck.fond,
+                  ck.opys if ck.opys_known else None, ck.spr)
     if parsed is None:
         # Канал адреси — того, що людина набирає, коли називає книгу. Розбір
         # спільний (`library.parse_address`), тож форми, які вже приймав реєстр
         # опису, більше не відмовляються тут.
-        # ⚠ Стоїть ПІСЛЯ ключа: тільки `_KEY_RE` знає збірки (`DAHMO/315/@fuzovka`),
-        # а `SPR_TOKEN` номера на «@» не приймає.
         addr = parse_address(v)
         if addr:
             parsed = (_repo_for_write(addr, v), addr.fond, addr.opys, addr.spr)
@@ -285,40 +239,22 @@ def resolve_case(value: str, *, claim: bool = True) -> CaseRef:
     # (`htr_store.runs_for_scope`), і читання бібліотеки на кожен виклик
     # коштувало 45 с на команду (`library.library_lookup`).
     lib = library_lookup(load_library)
-    # Фонди з описом у ключі: без опису запит неоднозначний за побудовою
-    # («ANRM 211-1-140» с. Парково vs «ANRM 211-3-140» Кишинівський собор).
-    # Мовчки взяти перший-ліпший = дописати аркуші в чужу справу, тому — помилка
-    # з переліком того, що реально є на диску.
-    if opys_in_key(repo, fond) and not opys and not str(spr).startswith("@"):
+    label = _REPO_LABEL.get(repo, repo)
+    entry = lib.by_key.get(_mk_key(repo, fond, spr, opys) or "") \
+        if casekey.is_bundle(spr) else lib.find(repo, fond, opys, spr)
+    if entry is None and not opys and not casekey.is_bundle(spr):
+        # 🔴 Опису не названо, а справ цього номера в архіві кілька — це різні
+        # книги («ANRM 211-1-140» с. Парково і «211-3-140» Кишинівський собор).
+        # Мовчки взяти першу-ліпшу = дописати аркуші в чужу справу, тому —
+        # помилка з переліком того, що є.
         cands = sorted({str(e["opys"]) for e in lib.same_fond_spr(fond, spr)
                         if e.get("repo") == repo and e.get("opys")})
-        if len(cands) == 1:
-            opys = cands[0]
-        else:
-            label = _REPO_LABEL.get(repo, repo)
-            seen = ", ".join(f"«{label} {fond}-{o}-{spr}»" for o in cands) or "жодного"
+        if len(cands) > 1:
+            seen = ", ".join(f"«{label} {fond}-{o}-{spr}»" for o in cands)
             raise ValueError(
-                f"у фонді {label} {fond} опис входить у ключ, а «{value}» його не несе. "
-                f"Уточни опис (напр. «{label} {fond}-3-{spr}» або «{repo}/{fond}-3/{spr}»). "
-                f"На диску знайдено: {seen}")
-    key = _mk_key(repo, fond, spr, opys)
-    if not key:
-        raise ValueError(f"не зібрав ключ зі «{value}» (repo={repo} fond={fond} spr={spr})")
-
-    entry = lib.by_key.get(key)
-    if entry is not None and opys_conflict(opys, entry.get("opys")):
-        # 🔴 Ключ без опису знайшов справу, але її опис НАЗВАНИЙ і РІЗНИТЬСЯ —
-        # це фізично інша книга (напр. «ЦДІАК 224-1-49» набрано, а плаский ключ
-        # уже тримає «224-2-49»). Узяти чужий запис за свій означало б показати
-        # чужу шифру/обсяг і писати облік у файл чужої книги. Заводимо власний
-        # ключ з описом і НЕ успадковуємо нічого від знайденого запису.
-        if claim:
-            key = claim_collision(
-                repo, fond, opys, spr, holder_shifra=str(entry.get("shifra") or ""),
-                holder_key=str(entry.get("key") or "")) or key
-        else:
-            key = f"{repo}/{fond}-{opys}/{spr}"
-        entry = None
+                f"справ {label} {fond}-?-{spr} кілька, у різних описах, а «{value}» "
+                f"опису не несе. Уточни опис (напр. «{label} {fond}-{cands[0]}-{spr}» "
+                f"або «{repo}/{fond}/{cands[0]}/{spr}»). Є: {seen}")
     if entry is None:
         # ДАВО/ДАВіО-плутанина: лейбл шифри каже одне, тека диска — інше.
         # Якщо по (fond, spr) у бібліотеці рівно один запис — його ключ канонічний,
@@ -327,18 +263,23 @@ def resolve_case(value: str, *, claim: bool = True) -> CaseRef:
         # повторюються між архівами, і без цього обмеження запис іншого архіву
         # з тим самим фондом і справою мовчки підміняв архів, названий людиною
         # (звіт користувача 29.09.2026: «ДАХмО 315-1-8345» → `DAVIO/315/8345`).
+        # Названий опис мусить збігтися або бути невідомим у записі.
         # Суперечливі записи бібліотеки показує `library_conflicts`.
         pk = _pack_active()
         same = [e for e in lib.same_fond_spr(fond, spr)
                 if pk.same_archive(e.get("repo"), repo)
-                and not opys_conflict(opys, e.get("opys"))]
+                and not (opys and e.get("opys") and _norm_spr(e["opys"]) != _norm_spr(opys))]
         if len(same) == 1:
             entry = same[0]
-            repo, key = entry["repo"], entry["key"]
+            repo = str(entry["repo"])
+            label = _REPO_LABEL.get(repo, repo)
     entry = entry or {}
-    opys = opys or entry.get("opys") or _DEFAULT_OPYS.get((repo, fond))
-    label = _REPO_LABEL.get(repo, repo)
-    _refuse_legacy_file(repo, fond, opys, spr, key, label)
+    # Збірка — з різних справ: опис за замовчуванням фонду її не стосується.
+    opys = entry.get("opys") or opys or (
+        None if casekey.is_bundle(spr) else default_opys(repo, fond))
+    key = str(entry.get("key") or "") or _mk_key(repo, fond, spr, opys)
+    if not key:
+        raise ValueError(f"не зібрав ключ зі «{value}» (repo={repo} fond={fond} spr={spr})")
     shifra = entry.get("shifra") or f"{label} {fond}-{opys or '?'}-{spr}"
     return CaseRef(
         key=key, repo=repo, fond=fond, spr=spr, opys=opys, shifra=shifra,
@@ -371,20 +312,43 @@ def library_conflicts(lib: list[dict[str, Any]] | None = None) -> list[dict[str,
 
 
 def case_path(ref: CaseRef) -> Path:
-    """Шлях JSON-файлу справи. Ім'я — з ключа: опис у ньому лише там, де він у ключі.
+    """Шлях JSON-файлу справи: `DAHMO/315/1/8433` → `DAHMO/315-1-8433.json`.
 
-    `DAHMO/315/8433` → `DAHMO/315-8433.json`; `ANRM/211-3/140` → `ANRM/211-3-140.json`.
+    Ім'я — з ключа (`casekey.stem`), архів — тека; збірка — фонд і назва збірки.
     """
-    if opys_in_case_key(ref.repo, ref.fond, ref.spr, ref.opys):
-        return PAGES_ROOT / ref.repo / f"{ref.fond}-{ref.opys}-{ref.spr}.json"
-    return PAGES_ROOT / ref.repo / f"{ref.fond}-{ref.spr}.json"
+    ck = casekey.parse(ref.key)
+    if ck is None:
+        raise ValueError(f"ключ справи «{ref.key}» не нової форми — облік під ним не пишеться")
+    return PAGES_ROOT / ref.repo / f"{casekey.stem(ck)}.json"
+
+
+def _legacy_path(ref: CaseRef) -> Path | None:
+    """Файл, яким справа звалась до переносу обліку; лише поки простір не переїхав."""
+    if casekey.keys_current():
+        return None
+    reg = legacy.registry_set(ROOT)
+    old = legacy.legacy_key(ref.repo, ref.fond, ref.spr, ref.opys, reg)
+    for k, new in legacy.moves().items():
+        if new == ref.key:
+            old = k
+            break
+    parsed = casekey.parse_legacy(old or "")
+    if not parsed:
+        return None
+    _, fond, opys, spr = parsed
+    name = f"{fond}-{opys}-{spr}" if opys else f"{fond}-{spr}"
+    return PAGES_ROOT / ref.repo / f"{name}.json"
 
 
 # ── читання ──────────────────────────────────────────────────────────────────
 def load_case(ref: CaseRef) -> CaseFile | None:
     p = case_path(ref)
     if not p.is_file():
-        return None
+        # До переносу облік лежить під старим іменем — читаємо його, а не «порожньо».
+        old = _legacy_path(ref)
+        if old is None or not old.is_file():
+            return None
+        p = old
     return CaseFile.model_validate_json(p.read_text(encoding="utf-8"))
 
 
@@ -482,6 +446,7 @@ def _rel(path: Path) -> str:
 
 
 def _write(path: Path, cf: CaseFile) -> None:
+    casekey.require_current("запис у сховище сторінок")
     cf.pages = dict(sorted(cf.pages.items()))
     cf.records.sort(key=lambda r: (r.scans[0] if r.scans else "", r.rid))
     payload = cf.model_dump(mode="json")
@@ -536,6 +501,7 @@ def annotate_pages(ref: CaseRef, notes: list[PageNote], replace: bool = False) -
     with _lock(path):
         cf = load_case(ref) or _empty_case(ref)
         # збагачення бібліотеки могло оновитись — освіжаємо, не чіпаючи дані
+        cf.key = ref.key
         cf.shifra, cf.title = ref.shifra or cf.shifra, ref.title or cf.title
         cf.path, cf.opys = ref.path or cf.path, ref.opys or cf.opys
         for note in notes:

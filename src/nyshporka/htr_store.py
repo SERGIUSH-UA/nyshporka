@@ -126,8 +126,10 @@ def same_frames(a_dir: str | Path | None, a_canon: str,
     fa = frames_dir_key(a_dir)
     if not fa or fa != frames_dir_key(b_dir):
         return False
-    a, b = (a_canon or "").strip().lower(), (b_canon or "").strip().lower()
-    return not (a and b and a != b)
+    from nyshporka.core.casekey import compatible
+
+    a, b = (a_canon or "").strip(), (b_canon or "").strip()
+    return not (a and b and not compatible(a, b))
 
 
 def under_raw(path: str | Path) -> Path | None:
@@ -707,7 +709,8 @@ def _runs_cache_path() -> Path:
 #: рядку інакше не з'явилось би доти, доки мета не зміниться, — і читач бачив би
 #: рядки без нього як рядки, у яких це поле порожнє. Різниця між «немає» і
 #: «порожньо» тут не косметична: саме нею позначається чужий прогін.
-ROW_SCHEMA = 5
+#: 6 — `case_canon` у формі ключа з описом (0.22).
+ROW_SCHEMA = 6
 
 
 def _runs_cache_read(lib: str = "") -> dict[str, dict[str, Any]]:
@@ -904,18 +907,13 @@ def _union_scope(wants: list[str]) -> dict[str, Any]:
 def _canon_case_key(value: str) -> str:
     """Ключ справи з мети прогону — канонічним ключем, навіть коли там шифра.
 
-    🔴 Частина старих прогонів несе в `case_key` шифру («ДАХмО 315-1-75»), а
-    не ключ, або ключ старої форми («CDIAK/127-1078/2969» там, де опис до
-    ключа фонду не входить). Звірка за рядком тоді не бачить їх при власній справі: пошук
-    `--case DAHMO/315/75` відповідав «жодного прогону», а пакувальник —
-    «прочитаного немає» на справі, прочитаній повністю.
-
-    🔴 Ключ із `/` теж нормалізується. Прогони ЦДІАК і НАРМ несли опис
-    усередині ключа (`CDIAK/127-1012/1071`), а бібліотека тримає справу як
-    `CDIAK/127/1071` — і 24 прочитані справи відповідали «прочитаного
-    немає». Замір на живому просторі: з 902 ключів змінюються рівно 11, усі
-    цього виду; ключі, де опис входить у ключ за правилом бібліотеки
-    (`DAHMO/230-1/130`), лишаються як були.
+    🔴 Мета прогону — запис на мить прогону, і переписувати її ніхто не
+    зобов'язаний: частина прогонів несе в `case_key` шифру («ДАХмО 315-1-75»),
+    частина — ключ до 0.22 («DAHMO/315/75», «CDIAK/127-1078/2969»). Звірка за
+    рядком їх не бачить при власній справі: пошук `--case` відповідав «жодного
+    прогону», а пакувальник — «прочитаного немає» на справі, прочитаній
+    повністю. Тому кожен ключ мети проходить резолвер (старий — через карту
+    переїзду простору).
     """
     if not value:
         return value
@@ -923,20 +921,18 @@ def _canon_case_key(value: str) -> str:
 
 
 def _canon_stamp() -> tuple[str, str]:
-    """Від чого залежить канонічний ключ: бібліотека й реєстр колізій опису.
+    """Від чого залежить канонічний ключ: бібліотека й карта переїзду ключів.
 
-    🔴 Кеш без штампа в довгоживучому процесі (в'ювер, MCP, демон) віддавав
-    ключ, порахований до перебудови бібліотеки чи до `nysh case --shifra`.
+    🔴 Кеш без штампа в довгоживучому процесі (в'ювер, демон) віддавав ключ,
+    порахований до перебудови бібліотеки чи до переносу обліку.
     """
-    from nyshporka.core import opys_keys
+    from nyshporka.core import legacy_key
 
-    ok = ""
+    mv = ""
     with contextlib.suppress(Exception):
-        p = opys_keys.path()
-        if p is not None:
-            st = p.stat()
-            ok = f"{st.st_mtime_ns:x}-{st.st_size:x}"
-    return (_library_stamp(), ok)
+        st = (ROOT / legacy_key.MOVES).stat()
+        mv = f"{st.st_mtime_ns:x}-{st.st_size:x}"
+    return (_library_stamp(), mv)
 
 
 @functools.lru_cache(maxsize=16384)
@@ -944,7 +940,7 @@ def _canon_cached(value: str, stamp: tuple[str, str]) -> str:
     try:
         from nyshporka.pagestore.store import resolve_case
 
-        return resolve_case(value, claim=False).key or value
+        return resolve_case(value).key or value
     except Exception:
         return value
 
@@ -1011,9 +1007,8 @@ def _series_rows(rows: list[dict[str, Any]], want: str) -> list[dict[str, Any]]:
             if not (tail == head or tail.startswith(head + "-")):
                 continue
         elif not _key_tail(r).startswith(head + "-"):
-            # Без шифри — за ключем справи («DAHMO/230-1/130» → «230-1-130»).
-            # Лише як префікс серії: ключ, де опис до нього не входить, не
-            # відрізнить «фонд 315 опис 1» від «фонд 315 справа 1».
+            # Без шифри — за ключем справи («DAHMO/230/1/130» → «230-1-130»).
+            # Лише як префікс серії: «315-1» — це фонд і опис, а не справа 1.
             continue
         if repo and not _row_in_archive(r, repo):
             continue
@@ -1022,10 +1017,17 @@ def _series_rows(rows: list[dict[str, Any]], want: str) -> list[dict[str, Any]]:
 
 
 def _key_tail(row: dict[str, Any]) -> str:
-    """«Фонд[-опис]-справа» з канонічного ключа рядка; порожньо — ключа нема."""
-    key = str(row.get("case_canon") or row.get("case_key") or "").strip()
-    parts = key.split("/")
-    return f"{parts[1]}-{parts[2]}" if len(parts) == 3 and parts[1] and parts[2] else ""
+    """«Фонд-опис-справа» з канонічного ключа рядка; порожньо — ключа нема.
+
+    Опис невідомий — «_» на його місці: така справа в серію опису не влучає.
+    """
+    from nyshporka.core import casekey
+
+    raw = str(row.get("case_canon") or row.get("case_key") or "").strip()
+    ck = casekey.parse(raw) or casekey.parse(_canon_case_key(raw))
+    if ck is None or ck.bundle:
+        return ""
+    return f"{ck.fond}-{ck.opys}-{ck.spr}"
 
 
 def _row_in_archive(row: dict[str, Any], repo: str) -> bool:
@@ -1440,7 +1442,7 @@ def voice_pair(name: str) -> str | None:
     # різниця несиметрична: у прогону, що вже несе обидва голоси, побратима
     # немає — і це правильна відповідь, а не порожнеча через недогляд.
     mine = set(run_engine_ids(meta)) or {run_engine(meta)}
-    key = (meta.get("case_key") or "").strip()
+    key = _canon_case_key((meta.get("case_key") or "").strip())
     base = str(meta.get("case_dir") or "")
     # 🔴 По рядках переліку, не по метах: перелік уже несе ключ, теку й рушії
     # кожного прогону, а читання 1326 мет на КОЖЕН прогін із хітами давало
@@ -1449,7 +1451,9 @@ def voice_pair(name: str) -> str | None:
         nm = str(other.get("name") or "")
         if not nm or nm == name:
             continue
-        same = ((key and (other.get("case_key") or "").strip() == key)
+        theirs_key = str(other.get("case_canon") or "").strip() or _canon_case_key(
+            str(other.get("case_key") or "").strip())
+        same = ((key and theirs_key == key)
                 or (base and str(other.get("case_dir") or "") == base))
         if not same:
             continue

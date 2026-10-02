@@ -27,13 +27,13 @@ def _sprava(root: Path, rel: str, n: int) -> None:
 
 @pytest.fixture
 def biblioteka(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    # Під одним ключем без опису — дві різні книги: оп.1 і оп.2 спр.49.
+    # Дві різні книги з тим самим номером: оп.1 і оп.2 спр.49.
     _sprava(tmp_path, "raw/op1-49", 3)
     _sprava(tmp_path, "raw/op2-49", 5)
     rows = [
-        {"key": "CDIAK/224/49", "repo": "CDIAK", "fond": "224", "opys": "1",
+        {"key": "CDIAK/224/1/49", "repo": "CDIAK", "fond": "224", "opys": "1",
          "spr": "49", "path": "raw/op1-49"},
-        {"key": "CDIAK/224/49", "repo": "CDIAK", "fond": "224", "opys": "2",
+        {"key": "CDIAK/224/2/49", "repo": "CDIAK", "fond": "224", "opys": "2",
          "spr": "49", "path": "raw/op2-49"},
     ]
     import nyshporka.core.workspace as ws
@@ -44,12 +44,14 @@ def biblioteka(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 def test_kliuch_z_opysom_znakhodyt_same_tsiu_knygu(biblioteka: Path) -> None:
-    got = align.case_dir_for("CDIAK/224-2/49")
-    assert got == biblioteka / "raw/op2-49/pages"
-    assert align.case_dir_for("CDIAK/224-1/49") == biblioteka / "raw/op1-49/pages"
+    assert align.case_dir_for("CDIAK/224/2/49") == biblioteka / "raw/op2-49/pages"
+    assert align.case_dir_for("CDIAK/224/1/49") == biblioteka / "raw/op1-49/pages"
+    # ключ до 0.22 (мета прогону, давній пакет) веде до тієї самої книги
+    assert align.case_dir_for("CDIAK/224-2/49") == biblioteka / "raw/op2-49/pages"
 
 
 def test_nevidomyi_opys_ne_bere_chuzhu_knygu(biblioteka: Path) -> None:
+    assert align.case_dir_for("CDIAK/224/3/49") is None
     assert align.case_dir_for("CDIAK/224-3/49") is None
 
 

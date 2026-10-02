@@ -58,7 +58,7 @@ def test_status_answers_before_anything_is_opened(case):
     r = _run("pages", "status", "DAHMO/315/8433", "--json")
     assert r.exit_code == 0, r.output
     got = _data(r)
-    assert got["key"] == "DAHMO/315/8433"
+    assert got["key"] == "DAHMO/315/1/8433"
     assert got["total_disk"] == 3 and got["noted"] == 0
 
 
@@ -150,7 +150,7 @@ def test_the_slash_form_of_a_shifra_reaches_the_same_case(case):
     пакеті один, а не чотири розбіжні копії.
     """
     got = _data(_run("pages", "status", "DAHMO/315/1/8433", "--json"))
-    assert got["key"] == "DAHMO/315/8433"
+    assert got["key"] == "DAHMO/315/1/8433"
 
 
 def test_the_refusal_names_the_rule_not_just_examples(case):

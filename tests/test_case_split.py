@@ -67,8 +67,8 @@ def zbirka(space: Path) -> Path:
 
     d = frames(space, OLD, 8)
     REG.describe(d, shifra="RGIA 592-25-926-929")
-    _run(space, RUN, d, key="RGIA/592/926")
-    _run(space, VOICE, d, key="RGIA/592/926", voice=True)
+    _run(space, RUN, d, key="RGIA/592/25/926")
+    _run(space, VOICE, d, key="RGIA/592/25/926", voice=True)
     db.rebuild(rescan=True)
     ref = PS.resolve_case("RGIA 592-25-926")
     PS.annotate_pages(ref, [
@@ -100,12 +100,12 @@ def test_proba_pokazuie_plan_i_nichoho_ne_pyshe(space: Path, zbirka: Path) -> No
     parts = env.data["parts"]
     assert [(p["spr"], p["frames"], p["from"], p["to"]) for p in parts] == [
         ("926", 3, 1, 3), ("927", 2, 4, 5), ("928", 2, 6, 7), ("-", 1, 8, 8)]
-    assert parts[1]["key"] == "RGIA/592/927" and parts[1]["shifra"] == "РДІА 592-25-927"
-    assert parts[1]["dir"] == "data/raw/rgia_592/spr-927"
-    assert parts[1]["runs"] == {RUN: "spr-927", VOICE: "spr-927-diak_v4"}
+    assert parts[1]["key"] == "RGIA/592/25/927" and parts[1]["shifra"] == "РДІА 592-25-927"
+    assert parts[1]["dir"] == "data/raw/rgia_592/op25-spr-927"
+    assert parts[1]["runs"] == {RUN: "op25-spr-927", VOICE: "op25-spr-927-diak_v4"}
     assert [p["notes"] for p in parts] == [1, 1, 1, 0]
     assert any(w.code == "references" for w in env.warnings)
-    assert not (space / "data/raw/rgia_592/spr-927").exists()
+    assert not (space / "data/raw/rgia_592/op25-spr-927").exists()
     assert not (zbirka / SPL.JOURNAL).exists()
     assert "superseded" not in json.loads(
         (space / "reports/htr" / RUN / "_htr_meta.json").read_text(encoding="utf-8"))
@@ -122,7 +122,7 @@ def test_rozkladeno_kozhna_sprava_maie_svoie(space: Path, zbirka: Path) -> None:
     got = SPL.split(zbirka, MAP)
 
     # кадри: жорсткі посилання під тими самими іменами, стара тека ціла
-    p927 = space / "data/raw/rgia_592/spr-927"
+    p927 = space / "data/raw/rgia_592/op25-spr-927"
     assert sorted(f.name for f in p927.glob("*.jpg")) == ["0004.jpg", "0005.jpg"]
     assert os.path.samefile(p927 / "0004.jpg", zbirka / "0004.jpg")
     assert len(list(zbirka.glob("*.jpg"))) == 8
@@ -136,9 +136,9 @@ def test_rozkladeno_kozhna_sprava_maie_svoie(space: Path, zbirka: Path) -> None:
 
     # каталог: три справи зі своїми кадрами; стара тека — ні запис, ні «другий ракурс»
     keys = _keys()
-    kadry = {k: keys[k]["frames"] for k in ("RGIA/592/926", "RGIA/592/927", "RGIA/592/928")}
-    assert kadry == {"RGIA/592/926": 3, "RGIA/592/927": 2, "RGIA/592/928": 2}
-    assert keys["RGIA/592/926"]["path"] == "data/raw/rgia_592/spr-926"
+    kadry = {k: keys[k]["frames"] for k in ("RGIA/592/25/926", "RGIA/592/25/927", "RGIA/592/25/928")}
+    assert kadry == {"RGIA/592/25/926": 3, "RGIA/592/25/927": 2, "RGIA/592/25/928": 2}
+    assert keys["RGIA/592/25/926"]["path"] == "data/raw/rgia_592/op25-spr-926"
     assert not any(OLD in " ".join([e.get("path") or "", *(e.get("extra_paths") or [])])
                    for e in keys.values())
     assert C.judge(zbirka).link == C.SPLIT and SP.of_dir(zbirka) is None
@@ -147,26 +147,26 @@ def test_rozkladeno_kozhna_sprava_maie_svoie(space: Path, zbirka: Path) -> None:
     # прогони: старих у переліку немає, у кожної справи — свій із голосом
     runs = _runs()
     assert RUN not in runs and VOICE not in runs
-    assert {n for n in runs} == {"spr-926", "spr-926-diak_v4", "spr-927",
-                                 "spr-927-diak_v4", "spr-928", "spr-928-diak_v4"}
-    meta = json.loads((space / "reports/htr/spr-927/_htr_meta.json").read_text(
+    assert {n for n in runs} == {"op25-spr-926", "op25-spr-926-diak_v4", "op25-spr-927",
+                                 "op25-spr-927-diak_v4", "op25-spr-928", "op25-spr-928-diak_v4"}
+    meta = json.loads((space / "reports/htr/op25-spr-927/_htr_meta.json").read_text(
         encoding="utf-8"))
-    assert (meta["case_key"], meta["frames_total"], meta["done"]) == ("RGIA/592/927", 2, True)
+    assert (meta["case_key"], meta["frames_total"], meta["done"]) == ("RGIA/592/25/927", 2, True)
     assert sorted(meta["pages"]) == ["0004.jpg", "0005.jpg"] and meta["failed"] == ["0005.jpg"]
-    assert meta["case_dir"] == "data/raw/rgia_592/spr-927"
+    assert meta["case_dir"] == "data/raw/rgia_592/op25-spr-927"
     assert "stages_total" not in meta and meta["split_from"]["run"] == RUN
-    assert sorted(p.name for p in (space / "reports/htr/spr-927").glob("0*")) == [
+    assert sorted(p.name for p in (space / "reports/htr/op25-spr-927").glob("0*")) == [
         "0004.lines.json", "0004.txt", "0005.lines.json", "0005.txt"]
-    voice = json.loads((space / "reports/htr/spr-927-diak_v4/_htr_meta.json").read_text(
+    voice = json.loads((space / "reports/htr/op25-spr-927-diak_v4/_htr_meta.json").read_text(
         encoding="utf-8"))
     assert voice["done"] == 2, "у теці голосу `done` — число сторінок"
     old = json.loads((space / "reports/htr" / RUN / "_htr_meta.json").read_text(
         encoding="utf-8"))
-    assert old["superseded"]["by"] == ["spr-926", "spr-927", "spr-928"]
+    assert old["superseded"]["by"] == ["op25-spr-926", "op25-spr-927", "op25-spr-928"]
 
     # віддача: три справи, жодної «збірної»
     rows = {r["case_key"]: r["status"] for r in SG.nepodileni()}
-    assert set(rows) == {"RGIA/592/926", "RGIA/592/927", "RGIA/592/928"}
+    assert set(rows) == {"RGIA/592/25/926", "RGIA/592/25/927", "RGIA/592/25/928"}
     assert SG.ZBIRNA not in rows.values()
 
     # сховище сторінок: нотатки — у файлах своїх справ
@@ -195,7 +195,7 @@ def test_tekstovyi_stor_ne_daie_khit_dvichi(space: Path, zbirka: Path) -> None:
     finally:
         conn.close()
     assert RUN not in names and VOICE not in names
-    assert {"spr-926", "spr-927", "spr-928"} <= names
+    assert {"op25-spr-926", "op25-spr-927", "op25-spr-928"} <= names
 
 
 def test_druha_rozbyvka_vidmovliaie(space: Path, zbirka: Path) -> None:
@@ -227,7 +227,7 @@ def test_obirvana_rozbyvka_dorobliaietsia_tiieiu_samoiu_kartoiu(
     SPL.split(zbirka, MAP)
 
     assert json.loads((zbirka / SPL.JOURNAL).read_text(encoding="utf-8"))["state"] == "done"
-    assert RUN not in _runs() and "spr-928" in _runs()
+    assert RUN not in _runs() and "op25-spr-928" in _runs()
 
 
 def test_obryv_pislia_poznachky_ne_hubyt_prohoniv(
@@ -249,10 +249,10 @@ def test_obryv_pislia_poznachky_ne_hubyt_prohoniv(
 
     journal = json.loads((zbirka / SPL.JOURNAL).read_text(encoding="utf-8"))
     assert journal["runs"] == [RUN, VOICE]
-    assert journal["parts"][1]["runs"] == {RUN: "spr-927", VOICE: "spr-927-diak_v4"}
+    assert journal["parts"][1]["runs"] == {RUN: "op25-spr-927", VOICE: "op25-spr-927-diak_v4"}
     old = json.loads((space / "reports/htr" / RUN / "_htr_meta.json").read_text(
         encoding="utf-8"))
-    assert old["superseded"]["by"] == ["spr-926", "spr-927", "spr-928"]
+    assert old["superseded"]["by"] == ["op25-spr-926", "op25-spr-927", "op25-spr-928"]
     SPL.undo(zbirka)
     assert set(_runs()) == {RUN, VOICE}
 
@@ -268,8 +268,8 @@ def test_undo_povertaie_yak_bulo(space: Path, zbirka: Path) -> None:
     got = SPL.undo(zbirka)
 
     assert not got["kept"], got["kept"]
-    assert sorted(got["runs_removed"]) == ["spr-926", "spr-926-diak_v4", "spr-927",
-                                           "spr-927-diak_v4", "spr-928", "spr-928-diak_v4"]
+    assert sorted(got["runs_removed"]) == ["op25-spr-926", "op25-spr-926-diak_v4", "op25-spr-927",
+                                           "op25-spr-927-diak_v4", "op25-spr-928", "op25-spr-928-diak_v4"]
     for spr in ("926", "927", "928"):
         assert not (space / f"data/raw/rgia_592/spr-{spr}").exists()
     assert len(list(zbirka.glob("*.jpg"))) == 8, "undo зачепив кадри старої теки"
@@ -278,23 +278,23 @@ def test_undo_povertaie_yak_bulo(space: Path, zbirka: Path) -> None:
     assert "split_into" not in side and side["spr_to"] == "929"
     assert C.judge(zbirka).link == C.BUNDLE_FOLDER
     assert set(_runs()) == {RUN, VOICE}
-    assert list(_keys()) == ["RGIA/592/926"]
+    assert list(_keys()) == ["RGIA/592/25/926"]
     cf = PS.load_case(PS.resolve_case("RGIA 592-25-926"))
     assert sorted(cf.pages) == ["0002.jpg", "0004.jpg", "0006.jpg", "0008.jpg"]
 
 
 def test_undo_ne_chipaie_zminenoho_pislia_rozbyvky(space: Path, zbirka: Path) -> None:
     SPL.split(zbirka, MAP)
-    pravka = space / "reports/htr/spr-927/0004.txt"
+    pravka = space / "reports/htr/op25-spr-927/0004.txt"
     pravka.write_text("виправлено оком\n", encoding="utf-8")
-    chuzhe = space / "data/raw/rgia_592/spr-928/notatka.txt"
+    chuzhe = space / "data/raw/rgia_592/op25-spr-928/notatka.txt"
     chuzhe.write_text("моє", encoding="utf-8")
 
     got = SPL.undo(zbirka)
 
     assert pravka.read_text(encoding="utf-8") == "виправлено оком\n"
     assert chuzhe.exists()
-    assert len(got["kept"]) == 2 and "spr-927" not in got["runs_removed"]
+    assert len(got["kept"]) == 2 and "op25-spr-927" not in got["runs_removed"]
 
 
 # ── відмови ──────────────────────────────────────────────────────────────────
@@ -336,7 +336,7 @@ def test_nomer_bez_shyfry_pasporta_vidmovliaie(space: Path) -> None:
         SPL.plan(d, [("10", "0001.jpg", "0002.jpg"), ("11", "0003.jpg", "0004.jpg")])
     pl = SPL.plan(d, [("РДІА 592-25-10", "0001.jpg", "0002.jpg"),
                       ("РДІА 592-25-11", "0003.jpg", "0004.jpg")])
-    assert [p.key for p in pl.parts] == ["RGIA/592/10", "RGIA/592/11"]
+    assert [p.key for p in pl.parts] == ["RGIA/592/25/10", "RGIA/592/25/11"]
 
 
 def test_inshyi_tom_bez_copy_vidmovliaie(space: Path, zbirka: Path,
@@ -351,7 +351,7 @@ def test_inshyi_tom_bez_copy_vidmovliaie(space: Path, zbirka: Path,
     SPL.undo(zbirka)
 
     SPL.split(zbirka, MAP, copy=True)
-    kopiia = space / "data/raw/rgia_592/spr-927/0004.jpg"
+    kopiia = space / "data/raw/rgia_592/op25-spr-927/0004.jpg"
     assert kopiia.read_bytes() == (zbirka / "0004.jpg").read_bytes()
     assert not os.path.samefile(kopiia, zbirka / "0004.jpg")
 

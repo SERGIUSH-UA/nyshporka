@@ -71,17 +71,11 @@ def cmd_build(
 ) -> None:
     """Зібрати реєстр у `data/derived/case_index.sqlite`."""
     if rescan:
-        from nyshporka.core import opys_keys
         from nyshporka.library import build_library, write_library
 
-        before = len(opys_keys.rows())
         entries = build_library()
         write_library(entries)
-        claimed = len(opys_keys.rows()) - before
-        tail = (f" · [warn]нових ключів з описом: {claimed}[/warn] "
-                f"(книга того самого номера в іншому описі — див. "
-                f"data/cases/opys_keys.json)" if claimed else "")
-        console.print(f"[muted]бібліотеку перебудовано: {len(entries)} справ{tail}[/muted]")
+        console.print(f"[muted]бібліотеку перебудовано: {len(entries)} справ[/muted]")
     res = db.build_index()
     tail = (f" · свідомо нічиїх: {res['decided']}" if res.get("decided") else "")
     bad = res.get("unreadable") or []
@@ -410,9 +404,14 @@ _REPO_SLUG = _fonds.REPO_SLUG
 def _parse_key(key: str) -> tuple[str, str, str, str, str]:
     """`DAHMO/230/43` або `ДАХмО 230-1-43` → (repo, fond, opys, spr_int, letter)."""
     try:
-        return _fonds.parse_key(key)
+        got = _fonds.parse_key(key)
     except ValueError as e:
         raise typer.BadParameter(str(e)) from e
+    if not got[2]:
+        raise typer.BadParameter(
+            f"у «{key}» немає опису, а фонд {got[0]} {got[1]} опису за замовчуванням "
+            f"не має — назвіть опис: {got[0]}/{got[1]}/<опис>/{got[3]}{got[4]}")
+    return got
 
 
 def _opys_registry_row(repo: str, fond: str, opys: str, spr: str,

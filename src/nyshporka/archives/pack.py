@@ -131,7 +131,6 @@ class Fond:
     name: str = ""
     guberniya: str = ""
     default_opys: str | None = None
-    opys_in_key: bool = False
     note: str = ""
     #: Межі описів — знання про конкретний фонд конкретного архіву, тому тут, а
     #: не в коді: номери фондів між архівами колізують, і ключ `(repo, fond)`
@@ -310,11 +309,6 @@ class ArchivesPack:
         f = self.fonds.get((str(repo or "").upper(), str(fond or "")))
         return f.default_opys if f else None
 
-    def opys_in_key(self, repo: str | None, fond: str | None) -> bool:
-        """Чи опис обов'язково входить у ключ справи цього фонду."""
-        f = self.fonds.get((str(repo or "").upper(), str(fond or "")))
-        return bool(f and f.opys_in_key)
-
     def guberniya(self, repo: str | None, fond: str | None) -> str:
         """Губернія, задана самим фондом. Порожньо, якщо фонд не з відомих.
 
@@ -446,7 +440,7 @@ def _build(raw: dict[str, Any], sources: tuple[Path, ...]) -> ArchivesPack:
             name=str(b.get("name") or ""), guberniya=str(b.get("guberniya") or ""),
             default_opys=(str(b["default_opys"]) if b.get("default_opys") is not None
                           else None),
-            opys_in_key=bool(b.get("opys_in_key")), note=str(b.get("note") or ""),
+            note=str(b.get("note") or ""),
             opys_last=bounds,
             guide_total=int(str(guide)) if str(guide or "").isdigit() else None,
             archium_fond=str(b.get("archium_fond") or ""),

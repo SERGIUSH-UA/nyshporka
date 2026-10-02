@@ -260,12 +260,31 @@ def _stale_scan(root: Path) -> CheckResult:
     return CheckResult("ok", "у пам'яті й нотатках застарілих тез не знайдено")
 
 
+def _keys_current(root: Path) -> CheckResult:
+    """Чи простір переїхав на ключі справ з описом (`nysh cases rekey --apply`)."""
+    import tomllib
+
+    from nyshporka.core.casekey import KEYS_VERSION
+
+    marker = root / "nyshporka.toml"
+    try:
+        with marker.open("rb") as fh:
+            got = int(((tomllib.load(fh) or {}).get("workspace") or {}).get("keys") or 1)
+    except (OSError, ValueError, tomllib.TOMLDecodeError):
+        got = 1
+    if got >= KEYS_VERSION:
+        return CheckResult("ok", f"ключі справ версії {got}")
+    return CheckResult("todo", "облік ще під старими ключами: nysh cases rekey, "
+                               "потім nysh cases rekey --apply")
+
+
 CHECKS: dict[str, Callable[[Path], CheckResult]] = {
     "mcp_config": _mcp_config,
     "skills_current": _skills_current,
     "canon_present": _canon_present,
     "hook_installed": _hook_installed,
     "stale_scan": _stale_scan,
+    "keys_current": _keys_current,
 }
 
 

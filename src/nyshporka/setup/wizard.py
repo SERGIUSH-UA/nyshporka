@@ -139,6 +139,8 @@ def create(root: str | Path | None = None, *, name: str = "",
             "# теки вгору. Переносити простір можна разом із ним.\n"
             "[workspace]\n"
             "schema = 1\n"
+            "# Версія ключів справ: 2 — опис у ключі (`nysh cases rekey`).\n"
+            "keys = 2\n"
             f'name = "{name or target.name}"\n'
             f"{chosen}"
             "\n"

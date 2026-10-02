@@ -1,11 +1,9 @@
-"""Ключ справи збирає тільки `_mk_key` — f-рядок повз нього заборонений.
+"""Ключ справи збирає тільки будівник (`core.casekey.make`, `library._mk_key`).
 
-Підстава — інцидент 2026-08-25. Фонд перевели на ключ-з-описом
-(`_OPYS_IN_KEY`), і збірка реєстру відв'язала від справи канон: картка
-показала «фактів 0» там, де канон цитує аркуш дослівно. Причина була не в
-міграції, а в тому, що `cases/collect.py` у трьох місцях складав ключ як
-`f"{repo}/{fond}/{spr}"` — тобто опис у ньому не з'являвся ніколи, хоч би що
-казав `_OPYS_IN_KEY`.
+Підстава — інцидент 2026-08-25: збірка реєстру відв'язала від справи канон, і
+картка показала «фактів 0» там, де канон цитує аркуш дослівно. Причина —
+`cases/collect.py` у трьох місцях складав ключ як `f"{repo}/{fond}/{spr}"`,
+тобто без опису, хоч ключ справи його несе.
 
 Помилка мовчазна за побудовою: рядок збирається успішно, просто не влучає в
 жоден запис реєстру. Тому приймач тут не на поведінку, а на форму коду.
@@ -61,43 +59,36 @@ def test_no_hand_built_case_keys() -> None:
             if HAND_BUILT.search(line):
                 findings.append(f"{path.name}:{n}: {line.strip()}")
     assert not findings, (
-        "ключ справи зібрано f-рядком повз `_mk_key` — у фондах із `_OPYS_IN_KEY` "
-        "такий ключ не несе опису й не влучає в реєстр:\n" + "\n".join(findings))
+        "ключ справи зібрано f-рядком повз `_mk_key` — такий ключ не несе "
+        "опису й не влучає в реєстр:\n" + "\n".join(findings))
 
 
-def test_opys_fond_keys_carry_opys(lib) -> None:
-    """Для фонду з `_OPYS_IN_KEY` ключ без опису й ключ З описом — різні.
+def test_every_key_carries_the_opys(lib) -> None:
+    """Опис — у ключі будь-якого фонду; невідомий — `_`, а не пропуск."""
+    _mk_key = lib._mk_key
 
-    ⚠ Цикл, а не `parametrize`: перелік фондів довелось би прочитати на
-    збиранні, тобто імпортувати `library` у шапці — рівно те, що прив'язує
-    бібліотеку до чужого простору (див. шапку файла).
+    for repo, fond in [("ANRM", "211"), ("DAHMO", "315"), ("CDIAK", "2"), ("DAOO", "37")]:
+        assert _mk_key(repo, fond, "13", "3") == f"{repo}/{fond}/3/13"
+        assert _mk_key(repo, fond, "13") == f"{repo}/{fond}/_/13"
+
+
+def test_a_case_without_opys_is_found_by_the_fond_default(lib) -> None:
+    """Справа, названа без опису, знаходиться за описом за замовчуванням фонду.
+
+    ID джерела канону (`S_<архів>_F<фонд>_D<справа>`) опису здебільшого не
+    несе — і без цього канон відв'язався б від справи («канон: фактів 0»).
     """
-    _OPYS_IN_KEY, _mk_key = lib._OPYS_IN_KEY, lib._mk_key
+    from nyshporka.archives import active
 
-    assert _OPYS_IN_KEY, "перелік фондів із описом у ключі порожній — тест сліпий"
-    for repo, fond in sorted(_OPYS_IN_KEY):
-        with_opys = _mk_key(repo, fond, "13", "3")
-        without = _mk_key(repo, fond, "13")
-        assert with_opys != without, f"{repo} ф.{fond}"
-        assert with_opys == f"{repo}/{fond}-3/13"
-
-
-def test_candidate_keys_offers_default_opys(lib) -> None:
-    """Форма без опису мусить лишатись знаходжуваною через опис за замовчуванням.
-
-    ID джерела канону (`S_<архів>_F<фонд>_D<справа>`) опису не несе — і без
-    цього кандидата канон відв'язується від справи щойно фонд переходить на
-    ключ-з-описом.
-    """
-    from nyshporka.library import _DEFAULT_OPYS, _OPYS_IN_KEY, candidate_keys
-
-    for (repo, fond), default in _DEFAULT_OPYS.items():
-        if (repo, fond) not in _OPYS_IN_KEY:
-            continue
-        keys = candidate_keys((repo, fond, None, "13"))
-        assert f"{repo}/{fond}-{default}/13" in keys, (
-            f"{repo} ф.{fond}: серед кандидатів немає форми з описом за "
-            f"замовчуванням — канон і сховище сторінок відв'яжуться")
+    pk = active()
+    fonds = [(f.repo, f.fond, f.default_opys) for f in pk.fonds.values() if f.default_opys]
+    assert fonds, "у паку немає жодного опису за замовчуванням — тест сліпий"
+    for repo, fond, default in fonds:
+        entry = {"key": lib._mk_key(repo, fond, "13", default), "repo": repo,
+                 "fond": fond, "opys": default, "spr": "13"}
+        other = {**entry, "key": lib._mk_key(repo, fond, "13", "999"), "opys": "999"}
+        lk = lib.LibraryLookup.build([other, entry])
+        assert lk.find(repo, fond, None, "13") is entry, f"{repo} ф.{fond}"
 
 
 # ── радянські фонди: літера в номері фонду ───────────────────────────────────

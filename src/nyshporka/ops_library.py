@@ -284,7 +284,7 @@ def library_list(a: LibraryArgs) -> Envelope:
 
 
 class VerdictArgs(BaseModel):
-    key: str = Field(description="ключ справи з бібліотеки, напр. DAHMO/315/8433")
+    key: str = Field(description="ключ справи з бібліотеки, напр. DAHMO/315/1/8433")
     verdict: Literal["", "no_clan", "clan_found", "recheck"] = Field(
         default="", description="порожньо — зняти вердикт")
     note: str = Field(default="", description="чим саме доведено")

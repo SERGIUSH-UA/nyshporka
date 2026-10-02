@@ -112,8 +112,11 @@ Object.assign(ACTIONS, {
 
   /** 🏛 Ця сама справа в реєстрі опису — «а що ще є в цьому фонді». */
   'geog.opys': (_ev, elm) => {
-    const [repo, fond, spr] = String(elm.dataset.arg).split('/');
-    return goto('fonds', { repo, fond, spr });
+    // Ключ справи — `REPO/фонд/опис/справа`; опис `_` — не встановлено.
+    const parts = String(elm.dataset.arg).split('/');
+    if (parts.length !== 4) return undefined;
+    const [repo, fond, opys, spr] = parts;
+    return goto('fonds', { repo, fond, opys: opys === '_' ? '' : opys, spr });
   },
 
   'geog.find': async (ev) => {

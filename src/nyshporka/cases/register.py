@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any
 
 from nyshporka import library as L
+from nyshporka.core import casekey
 from nyshporka.utils import text as T
 
 SIDECAR = "_source.json"
@@ -281,13 +282,18 @@ def key_mismatch(case_dir: Path, sidecar: dict[str, Any]) -> str:
         rel = Path(case_dir).as_posix()
     L._sidecar_case.cache_clear()       # паспорт щойно переписано
     parsed = L.parse_case_path(rel)
-    if not parsed or want in L.candidate_keys(parsed):
+    ck = casekey.parse(want)
+    if not parsed or ck is None:
         return ""
-    got = L.candidate_keys(parsed)[0]
+    repo, fond, opys, spr = parsed
+    if (repo, fond, spr) == (ck.repo, ck.fond, ck.spr) and \
+            (not opys or casekey.norm_part(opys) == ck.opys):
+        return ""
+    got = L._mk_key(repo, fond, spr, opys or L.default_opys(repo, fond))
     return (f"бібліотека покладе теку під ключ «{got}» (зібраний з імені теки), "
             f"а паспорт каже «{want}» ({sidecar.get('shifra')}). Облік прочитаного "
             f"ляже за першим. Перейменуйте теку або перенесіть її в "
-            f"`data/raw/<архів>_<фонд>/spr-<справа>`.")
+            f"`data/raw/<архів>_<фонд>/op<опис>-spr-<справа>`.")
 
 
 def _rel_to_root(case_dir: Path) -> str:
@@ -300,80 +306,6 @@ def _rel_to_root(case_dir: Path) -> str:
             os.path.abspath(workspace().root)).as_posix()
     except ValueError:
         return Path(case_dir).as_posix()
-
-
-def _other_opys_case(case_dir: Path, sidecar: dict[str, Any]) -> dict[str, Any] | None:
-    """Справа ІНШОГО опису, яка вже тримає ключ без опису, що дістався б і цій теці.
-
-    Лише тоді справі потрібен власний ключ. Та сама справа (та сама тека чи
-    той самий опис) — не колізія: третя тека для вже відомої книги не сміє
-    змінити їй ключ. Опис, невідомий у наявної справи, — теж не колізія:
-    стверджувати, що це інша книга, нема з чого (`L.opys_conflict`).
-    """
-    repo, fond, opys, spr = (sidecar.get(k) for k in ("repo", "fond", "opys", "spr"))
-    if not (sidecar.get("shifra") and repo and fond and opys and spr):
-        return None
-    if L.opys_in_key(repo, fond):
-        return None                     # фонд і так тримає опис у ключі
-    plain = L._mk_key(repo, fond, str(spr))
-    if not plain:
-        return None
-    here = _rel_to_root(case_dir)
-    try:
-        lib = L.load_library()
-    except Exception:      # бібліотека не зібрана — колізію побачить її збірка
-        return None
-    for e in lib:
-        if e.get("key") != plain:
-            continue
-        if not L.opys_conflict(opys, e.get("opys")):
-            continue
-        if here in {e.get("path"), *(e.get("extra_paths") or [])}:
-            continue
-        return e
-    return None
-
-
-def claim_own_key(case_dir: Path, sidecar: dict[str, Any]) -> bool:
-    """Дати справі ключ з описом, якщо ключ без опису вже тримає справа іншого опису.
-
-    🔴 Інший опис — фізично інший підрозділ фонду, тобто інша справа, а не
-    сумнів чи помилка. Тож жодних підтверджень: справа просто отримує власний
-    ключ (`DADNO/193-3/213`), а та, що була першою, лишається під своїм
-    (`DADNO/193/213`) — разом з усім, що на неї вже записано. Сам запис у
-    реєстр і побудова ключа — спільне правило `L.claim_collision`.
-    """
-    other = _other_opys_case(case_dir, sidecar)
-    if other is None:
-        return False
-    return L.claim_collision(
-        sidecar["repo"], sidecar["fond"], sidecar["opys"], sidecar["spr"],
-        shifra=str(sidecar.get("shifra") or ""),
-        holder_shifra=str(other.get("shifra") or ""),
-        holder_key=str(other.get("key") or "")) is not None
-
-
-def own_key_note(case_dir: Path, sidecar: dict[str, Any]) -> str:
-    """Рядок довідки, коли справа має власний ключ з описом. Інакше порожньо."""
-    from nyshporka.core import opys_keys
-
-    repo, fond, opys, spr = (sidecar.get(k) for k in ("repo", "fond", "opys", "spr"))
-    if not opys_keys.has(repo, fond, opys, spr):
-        return ""
-    key = L._mk_key(repo, fond, str(spr), str(opys))
-    plain = L._mk_key(repo, fond, str(spr))
-    other = ""
-    try:
-        for e in L.load_library():
-            if e.get("key") == plain:
-                title = f" — {e['title']}" if e.get("title") else ""
-                other = f"«{e.get('shifra') or plain}»{title}"
-                break
-    except Exception:
-        pass
-    return (f"ключ справи — «{key}»: поруч є справа того самого номера в іншому "
-            f"описі{' ' + other if other else ''}, під ключем «{plain}». Облік "
-            f"прочитаного цієї справи шукайте за «{key}».")
 
 
 #: Чим людина каже «зітри це поле».
@@ -536,9 +468,6 @@ def describe(case_dir: str | Path, *, shifra: str = "", title: str = "",
     tmp = d / (SIDECAR + ".tmp")
     tmp.write_text(json.dumps(out, ensure_ascii=False, indent=1), encoding="utf-8")
     tmp.replace(d / SIDECAR)
-    # Після запису паспорта, а не до: реєстр ключів без паспорта, що його
-    # пояснює, — рішення без підстави.
-    claim_own_key(d, out)
     return out
 
 

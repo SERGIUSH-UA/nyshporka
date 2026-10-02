@@ -33,17 +33,16 @@ from nyshporka.cases.resolve import (
     slug_case,
 )
 from nyshporka.cases.walk import IMG_EXT, frame_names
+from nyshporka.core import legacy_key as legacy
 from nyshporka.library import (
-    _DEFAULT_OPYS,
     _REPO_LABEL,
     ROOT,
     _mk_key,
+    _norm_spr,
     _pdf_pages,
     _sidecar_opys,
-    candidate_keys,
-    claim_collision,
+    default_opys,
     load_verdicts,
-    opys_conflict,
     parse_source_id,
     skip_slugs,
     split_into,
@@ -560,18 +559,13 @@ def _pages_counts(unreadable: list[Unreadable] | None = None,
             # ⚠ Раніше `data.get` на списку валив УСЮ збірку.
             _note_unreadable(unreadable, f, "файл сховища не є JSON-об'єктом")
             continue
-        key = str(data.get("case") or data.get("key") or "").strip()
-        if not key:
-            # Ім'я файла буває двох форм: `<фонд>-<спр>` і — для фондів із
-            # `_OPYS_IN_KEY` — `<фонд>-<опис>-<спр>`. Доти розбиралась лише
-            # перша, тож файл із описом в імені лишався без ключа й прочитані
-            # аркуші тихо не рахувались.
-            repo = f.parent.name.upper()
-            stem = f.stem.split("-")
-            if len(stem) == 2:
-                key = _mk_key(repo, stem[0], stem[1]) or ""
-            elif len(stem) == 3:
-                key = _mk_key(repo, stem[0], stem[2], stem[1]) or ""
+        # Справу називають поля файла, а не його ім'я: фонд `R-6129` уже має
+        # дефіс, і ім'я на частини не розкладається. Старий ключ (до переносу
+        # обліку) зводиться до нового — інакше прочитані аркуші не рахувались би.
+        key = legacy.current_key(
+            str(data.get("case") or data.get("key") or "").strip(),
+            repo=str(data.get("repo") or f.parent.name).upper(), fond=data.get("fond"),
+            opys=data.get("opys"), spr=data.get("spr"))
         pages = data.get("pages")
         if isinstance(pages, dict):
             items = list(pages.values())
@@ -713,6 +707,29 @@ def _with_cards(idx: LibraryIndex, rows: dict[str, CaseRow]) -> LibraryIndex:
     return out
 
 
+def _other_book(a: str | None, b: str | None) -> bool:
+    """Обидва описи названо, і вони різні — це дві книги, а не одна."""
+    na, nb = _norm_spr(a), _norm_spr(b)
+    return bool(na and nb and na != nb)
+
+
+def _row_for(rows: dict[str, CaseRow], repo: str | None, fond: str | None,
+             opys: str | None, spr: str | None) -> str | None:
+    """Ключ рядка тієї самої справи; правило — `library.LibraryLookup.find`."""
+    if not (repo and fond and spr):
+        return None
+    key = _mk_key(repo, fond, spr, opys or default_opys(repo, fond))
+    if key and key in rows:
+        return key
+    want = _norm_spr(spr)
+    cands = [k for k, r in rows.items() if r.kind != "bundle" and r.repo == repo
+             and str(r.fond or "") == str(fond) and _norm_spr(r.spr) == want]
+    if opys:
+        loose = [k for k in cands if not rows[k].opys]
+        return loose[0] if len(loose) == 1 else None
+    return cands[0] if len(cands) == 1 else None
+
+
 def collect_rows(index: LibraryIndex | None = None, *,
                  unreadable: list[Unreadable] | None = None,
                  ) -> tuple[list[CaseRow], list[Any]]:
@@ -781,11 +798,9 @@ def collect_rows(index: LibraryIndex | None = None, *,
                       str(meta["spr"]).lstrip("0"))
         if not parsed:
             continue
-        # 🔴 Ключ будує `_mk_key`, а не f-рядок: у фондах із `_OPYS_IN_KEY`
-        # (ДАХмО ф.230, ANRM ф.211) він несе опис, і зібраний руками ключ
-        # `REPO/фонд/спр` там не влучає в жоден рядок реєстру.
-        key = next((k for k in candidate_keys(parsed) if k in rows), None) \
-            or _mk_key(parsed[0], parsed[1], parsed[3], parsed[2])
+        key = _row_for(rows, parsed[0], parsed[1], parsed[2] or None, parsed[3]) \
+            or _mk_key(parsed[0], parsed[1], parsed[3],
+                       parsed[2] or default_opys(parsed[0], parsed[1]))
         if not key:
             continue
         if key in rows:
@@ -834,7 +849,7 @@ def collect_rows(index: LibraryIndex | None = None, *,
         parsed = parse_slug_case(rel)
         own_opys = (parsed[2] if parsed else None) or _sidecar_near(rel).get("opys")
         hit = slug_case(rel, idx)
-        if hit and hit in rows and not opys_conflict(own_opys, rows[hit].opys):
+        if hit and hit in rows and not _other_book(own_opys, rows[hit].opys):
             row = rows[hit]
             if rel != row.path and rel not in row.extra_paths:
                 row.extra_paths.append(rel)
@@ -848,19 +863,10 @@ def collect_rows(index: LibraryIndex | None = None, *,
         if parsed and parsed[1] and parsed[3]:
             repo, fond, opys, spr = parsed
             side = _sidecar_near(rel)
-            # опис довизначаємо до побудови ключа — у фондах із `_OPYS_IN_KEY`
-            # він у ключ входить, тож зібраний без нього ключ заводить другий
-            # рядок на ту саму справу.
-            opys = opys or side.get("opys") or _DEFAULT_OPYS.get((repo, fond))
-            key = next((k for k in candidate_keys((repo, fond, opys, spr)) if k in rows),
-                       None) or _mk_key(repo, fond, spr, opys)
-            if key and key in rows and opys_conflict(opys, rows[key].opys):
-                # 🔴 Кандидат знайшовся, але це ІНША книга — власний ключ,
-                # а не дописування в чужу: `claim_collision` реєструє рішення
-                # раз і назавжди (`data/cases/opys_keys.json`).
-                key = claim_collision(
-                    repo, fond, opys, spr, shifra=side.get("shifra") or "",
-                    holder_shifra=rows[key].shifra, holder_key=rows[key].key)
+            # опис довизначаємо до побудови ключа: він у ключі, тож зібраний без
+            # нього ключ заводить другий рядок на ту саму справу
+            opys = opys or side.get("opys") or default_opys(repo, fond)
+            key = _row_for(rows, repo, fond, opys, spr) or _mk_key(repo, fond, spr, opys)
             if not key:
                 continue
             if key in rows:
@@ -996,10 +1002,10 @@ def collect_rows(index: LibraryIndex | None = None, *,
         parsed = parse_source_id(sid)
         if not parsed:
             continue
-        # 🔴 ID джерела канону опису не несе, а ключ фонду з `_OPYS_IN_KEY` його
-        # вимагає — шукаємо всіма формами, інакше картка каже «канон: фактів 0»
-        # там, де канон цитує аркуш дослівно (заміряно 2026-08-25: 34 факти).
-        key = next((k for k in candidate_keys(parsed) if k in rows), None)
+        # 🔴 ID джерела канону опису здебільшого не несе — справа шукається за
+        # правилом невідомого опису, інакше картка каже «канон: фактів 0» там,
+        # де канон цитує аркуш дослівно (заміряно 2026-08-25: 34 факти).
+        key = _row_for(rows, *parsed)
         if key:
             by_case_sid[key].append(sid)
     for key, sids in by_case_sid.items():

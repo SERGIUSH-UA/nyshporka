@@ -28,6 +28,7 @@ from nyshporka.catalog.store import (
     coverage,
     open_packs,
 )
+from nyshporka.core import casekey
 
 __all__ = ["Answer", "CatalogMissing", "Coverage", "church_card", "churches_near",
            "confusers", "find_churches", "find_places", "link_churches_to_places",
@@ -307,7 +308,7 @@ def place_card(card: str, repo: str = "CDIAK") -> Answer:
         # Доти рядок картки був тупиком: видно, що справа на диску, і нічим її
         # відкрити.
         c["repo"] = repo
-        c["key"] = f"{repo}/{c['fond']}/{c['spr']}"
+        c["key"] = casekey.make(repo, c["fond"], c["opys"], c["spr"]) or ""
         c["on_disk"] = disk.get((c["fond"], c["opys"], n, letter), "")
     place["cases"] = cases
     place["n_on_disk"] = sum(1 for c in cases if c["on_disk"])

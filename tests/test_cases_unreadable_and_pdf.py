@@ -105,7 +105,7 @@ def _library() -> None:
 
 
 def _only_case(rows: list[Any]) -> Any:
-    got = [r for r in rows if r.key == "DAHMO/315/8433"]
+    got = [r for r in rows if r.key == "DAHMO/315/1/8433"]
     assert len(got) == 1, [r.key for r in rows]
     return got[0]
 

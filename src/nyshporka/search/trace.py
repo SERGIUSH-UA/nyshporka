@@ -130,7 +130,9 @@ def note(key: str, *, q: str, thresh: int, hits: int, pages: int,
 
 def of(key: str) -> list[dict[str, Any]]:
     """Чим цю справу вже шукали, від найсвіжішого."""
-    got = _read().get(key) or []
+    from nyshporka.core import legacy_key
+
+    got = legacy_key.get(_read(), key) or []
     return [x for x in got if isinstance(x, dict)]
 
 

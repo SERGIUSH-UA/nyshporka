@@ -187,20 +187,21 @@ def find(q: dict[str, Any], ref: str) -> dict[str, Any] | None:
 
     Знятих не шукає: `add` після `drop` заводить справу наново.
     """
-    want = _norm(ref)
+    from nyshporka.core import legacy_key
+
+    want = _norm(legacy_key.current_key(str(ref or "")))
     if not want:
         return None
     items: list[dict[str, Any]] = [
         it for it in q["items"] if it.get("state") != DROPPED]
+    # Обидві сторони — новим ключем: справи, заведені до переносу обліку,
+    # тримають у черзі старий (`nysh cases rekey` переводить і їх).
     for it in items:
-        names = (_norm(it.get("id")), _norm((it.get("ref") or {}).get("key")),
+        names = (_norm(legacy_key.current_key(str(it.get("id") or ""))),
+                 _norm(legacy_key.current_key(str((it.get("ref") or {}).get("key") or ""))),
                  _norm((it.get("ref") or {}).get("dir")))
         if want in names:
             return it
-    # Ключ справи без опису — теж ім'я, якщо воно вказує на одну справу черги.
-    aka = [it for it in items if _norm((it.get("ref") or {}).get("aka")) == want]
-    if len(aka) == 1:
-        return aka[0]
     tails = [it for it in items
              if _norm((it.get("ref") or {}).get("dir")).endswith("/" + want)]
     return tails[0] if len(tails) == 1 else None

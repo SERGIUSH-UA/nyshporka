@@ -17,8 +17,9 @@ r"""Бібліотека архівних справ — єдиний катал
 Статус скану (скановано/готово/не скачано) — рахується наживо у консолі
 (`nyshporka.console.helpers._case_status`), тут не зберігається.
 
-Ключ справи для дедупу/join — трійка `(repo, fond, spr)` (опис часто відсутній в імені
-теки, тож у ключ не входить; зберігається окремо як метадані).
+Ключ справи — `REPO/фонд/опис/справа` (`core.casekey`). Опис береться з імені
+теки, паспорта, каталогу чи канону, далі — опис за замовчуванням фонду з паку
+архівів; не встановлено жодним — `_`.
 """
 from __future__ import annotations
 
@@ -32,6 +33,10 @@ from pathlib import Path
 from typing import Any
 
 from nyshporka.archives.pack import active as _pack_active
+from nyshporka.core import casekey as _ck
+from nyshporka.core.casekey import FOND_TOKEN as FOND_TOKEN
+from nyshporka.core.casekey import OPYS_TOKEN as OPYS_TOKEN
+from nyshporka.core.casekey import SPR_TOKEN as SPR_TOKEN
 from nyshporka.core.workspace import workspace
 from nyshporka.models import Source
 from nyshporka.storage.files import read_source
@@ -82,8 +87,7 @@ def skip_slugs() -> frozenset[str]:
 # 🔴 Склад архівів більше не живе тут копією. Він жив — і розійшовся з паком
 # мовчки: `nysh archive` відповідав голим кодом «DAZHO» там, де бібліотека
 # показувала «ДАЖО», бо архів дописали в один словник і не дописали в другий.
-# Той самий розкол, що вже лікували на `opys_in_key`, і лікується він так само:
-# читач лишається ОДИН. Тут це пак — саме він має накладку користувача
+# Лікується це так: читач лишається ОДИН. Тут це пак — саме він має накладку користувача
 # (`<простір>/config/archives.yaml`), тобто чужий дослідник зі своїм архівом
 # додає його рядком у дані, а не правкою коду.
 _REPO_LABEL = _pack_active().repo_labels()
@@ -119,48 +123,6 @@ def _canon_repo(code: str | None) -> str:
     """Код архіву до канонічного латинського написання."""
     c = (code or "").strip().upper()
     return _repo_alias().get(c, c)
-# опис за замовчуванням для фондів, де скановані справи майже завжди одного опису
-# (ім'я теки spr-XXXX опис не несе). Довідково — canonical парсить опис з repository_ref.
-_DEFAULT_OPYS = {("DAHMO", "315"): "1", ("CDIAK", "224"): "1", ("CDIAK", "127"): "1076",
-                 ("DAHMO", "230"): "1", ("DAHMO", "196"): "1"}
-# фонди, де опис обов'язково входить у ключ справи (див. `_mk_key`): нумерація справ
-# починається з одиниці в кожному описі, тож без опису різні книги злипаються.
-# ANRM ф.211 (Кишинівська духовна консисторія): оп.1/3 — метрики, оп.5 — метрики
-# сільських церков, оп.11 — сповідні розписи; усі мають справи з малими номерами.
-# ДАХмО ф.230 (Подільське дворянське депутатське зібрання): оп.1 — протоколи й
-# списки, оп.3 — виводи дворянства; нумерація в кожному описі з одиниці, тож
-# спр.3/12/13/129 існують і там, і там. Заміряно 2026-08-25 на купленій зйомці:
-# декод оп.3 спр.13 (295 кадрів) підмішався до оп.1 спр.13 — книги на 1757
-# сторінок із 34 фактами в каноні, — і картка справи показувала числа обох.
-# ДАВіО ф.Р-6129 (колекція актових записів ЦС): опис = окрема сільрада, справи в
-# кожному з одиниці, тож «спр.5» існує стільки разів, скільки описів. Внесено
-# 2026-08-27 з ПЕРШОЮ справою фонду — доки мігрувати нічого.
-# ⚠ Архів Вінницької області стоїть під обома кодами: канонічний `DAVIO` і
-# давній `DAVO`, на якому міг лишитись чужий простір. Пропустити другий означало
-# б тихо злипнути справи різних описів рівно там, де опис і рятує.
-# ДАЖО ф.1 (Волинська духовна консисторія): десятки описів (26, 28, 56, 74, 78,
-# 86 …), кожен нумерує справи з одиниці — «1-74-42» (метрики повіту) і, скажімо,
-# «1-28-42» (консисторська справа) без опису дали б один ключ.
-# ДАЖО ф.118 (Волинська казенна палата, ревізькі казки 1795): описи 3Д, 3ДОД,
-# 2ДОД, 14 з перетинними номерами — «118-3Д-11» і «118-14-110» лежать поруч.
-# ДАВоО ф.382 (Луцька уніатська консисторія): описи 1-3 з власною нумерацією.
-# Усі три внесено 2026-09-10 з першими справами фондів на диску, до першого
-# запису в сховище сторінок, — тож мігрувати ключі не довелось.
-# ДАХмО ф.196 (суд): описи 1, 2, 4, 7, 8, 9; спр.712 є і в оп.1, і в оп.8 — дві
-# різні книги під одним ключем. Внесено 2026-09-10 з міграцією 52 файлів сховища
-# сторінок (`196-<спр>` → `196-<опис>-<спр>`) і мет; опис за замовчуванням «1»
-# (70 з 82 справ). ⚠ ДАХмО ф.315 НЕ внесено свідомо: його «колізія» в аудиті була
-# хибним розбором імен тек (`met1870-315-10037` → опис «315»), справжніх інших
-# описів на диску немає; вносити — з першою справою не з оп.1.
-# ЦДІАК ф.127 (Київська духовна консисторія): понад 950 описів, кожен нумерує
-# справи з одиниці — сповідки повіту «127-1015-597» і «127-1016-597» лягали б
-# одним ключем. Внесено 2026-10-01 з міграцією 3 файлів сховища сторінок і мет
-# прогонів (`127-<спр>` → `127-<опис>-<спр>`); опис за замовчуванням «1076».
-_OPYS_IN_KEY: set[tuple[str, str]] = {("ANRM", "211"), ("DAHMO", "230"),
-                                      ("DAVIO", "R-6129"), ("DAVO", "R-6129"),
-                                      ("DAZHO", "1"), ("DAZHO", "118"),
-                                      ("DAVOO", "382"), ("DAHMO", "196"),
-                                      ("CDIAK", "127")}
 # тип запису (normalized) → людський підпис для UI
 _RTYPE_LABEL = {
     "birth": "народження", "marriage": "шлюби", "death": "смерті",
@@ -173,7 +135,7 @@ _RTYPE_LABEL = {
 class CaseEntry:
     """Один запис бібліотеки справ."""
 
-    key: str                       # "DAHMO/315/8433" — дедуп-ключ (repo/fond/spr)
+    key: str                       # "DAHMO/315/1/8433" — ключ справи (repo/fond/opys/spr)
     repo: str | None = None        # "DAHMO"
     repo_label: str | None = None  # "ДАХмО"
     fond: str | None = None        # "315"
@@ -224,16 +186,7 @@ _ID_RE = re.compile(r"^S_([A-Z]+?)_F([А-ЯЄІЇҐA-Z]{0,2}\d+)(?:_OP(\d+))?_D(
 # із «ДАВіО Р-6129-24-5» саме «6129-24-5», тобто мовчки зливав фонд Р-6129 з фондом
 # 6129, якби той з'явився. Дефіс одразу після літер обов'язковий, тож хвіст назви
 # архіву («ДАВіО ») сюди не потрапляє.
-#: 🔴 ТРИ ЦЕГЛИНИ, з яких складаються ОБИДВА розбори шифри — і той, що шукає її
-#: в тексті (нижче), і той, що приймає людський запис (`cases.register`). Доти
-#: кожен ніс власне визначення того, як виглядає номер, і вони розійшлись:
-#: бібліотека навчилась читати «Р-6129», а реєстрація на тій самій шифрі казала
-#: «не розібрав». Розбори різні за призначенням і зводити їх в один не можна, а
-#: от відповідь на питання «що таке номер фонду» мусить бути одна.
-FOND_TOKEN = r"(?:[А-ЯЄІЇҐA-Z]{1,2}-)?\d+"      # 315 · Р-6129 · R-6129
-OPYS_TOKEN = r"\d+[а-яa-z]?"                     # 1 · 24 · 4б
-SPR_TOKEN = r"\d+[а-яa-z]?"                      # 8433 · 2а
-
+#: Цеглини номерів (фонд, опис, справа) — одні на всі розбори (`core.casekey`).
 _SHIFRA_RE = re.compile(
     rf"({FOND_TOKEN})\s*[-–]\s*(\d+)\s*[-–]\s*({SPR_TOKEN})", re.IGNORECASE)
 
@@ -367,27 +320,9 @@ _ARCHIUM_DIR_RE = re.compile(r"^(?:f\d+[_-])?spr[_-](\d+)$", re.IGNORECASE)
 _NUM_RE = re.compile(r"(\d+)")
 
 
-#: кирилична літера індексу справи → латинська (канон бібліотеки, див. `_norm_spr`)
-_LETTER_TO_LAT = {"а": "a", "б": "b", "в": "v", "г": "g", "д": "d", "е": "e"}
-
-
-def _norm_spr(s: str | None) -> str | None:
-    """Номер справи/фонду/опису без провідних нулів: `00114`→`114`, `080`→`80`.
-
-    Приймає і число: сайдкари пишуть `"inv": 1` так само часто, як `"inv": "1"`,
-    а `.strip()` на int валив збірку всієї бібліотеки через один такий файл.
-    """
-    if s is None or s == "":
-        return None
-    out = str(s).strip().lower().lstrip("0") or "0"
-    # 🔴 Літерний індекс справи приходить обома письмами: тека на диску зветься
-    # `spr-2a`, а T:-рендер тієї самої книги — `230-1-2а` кирилицею. Без зведення
-    # до одного письма це дві справи в бібліотеці: сира під ДАХмО і рендер під
-    # чужим кодом, з подвоєним числом кадрів у кожному знаменнику. Канон тут
-    # латинський — ним уже названі файли сховища сторінок (`315-7029a.json`).
-    if len(out) > 1 and out[-1] in _LETTER_TO_LAT and out[:-1].isdigit():
-        out = out[:-1] + _LETTER_TO_LAT[out[-1]]
-    return out
+#: Нормалізатори номерів живуть у `core.casekey` поруч із ключем; тут — під
+#: давніми іменами, якими їх кличе пів пакета.
+_norm_spr = _ck.norm_part
 
 
 def _sidecar_opys(m: dict[str, Any]) -> str | None:
@@ -404,186 +339,31 @@ def _sidecar_opys(m: dict[str, Any]) -> str | None:
     return _norm_spr(m.get("inv") or m.get("opys") or m.get("opis") or "")
 
 
-#: кирилична літера префікса фонду → латинська. Той самий канон, що й для індексу
-#: справи: «Р-6129» кирилицею і «R-6129» латинкою — це один фонд, а не два.
-_FOND_PREFIX_TO_LAT = {"р": "R", "п": "P", "ф": "F", "c": "C", "с": "S"}
-
-
-def _norm_fond(s: str | None) -> str | None:
-    """Номер фонду; літерний префікс радянських фондів зводиться до латинки.
-
-    `Р-6129` (кирилиця) → `R-6129`, `р-06129` → `R-6129`, `0315` → `315`.
-    Без цього той самий фонд заходив у бібліотеку двома ключами — залежно від
-    того, яким письмом його набрали в сайдкарі.
-    """
-    if s is None or s == "":
-        return None
-    raw = str(s).strip()
-    # дефіс необов'язковий: шифра пише «Р-6129», а source_id — «R6129» (дефіс у
-    # нього не вживається). Обидва мусять дати один фонд, інакше канон і реєстр
-    # розходяться на тому самому фонді.
-    m = re.match(r"^([А-ЯЄІЇҐA-Za-zа-яєіїґ]{1,2})-?(\d.*)$", raw)
-    if not m:
-        return _norm_spr(raw)
-    pref, rest = m.group(1).lower(), _norm_spr(m.group(2))
-    if not rest:
-        return _norm_spr(raw)
-    return f"{_FOND_PREFIX_TO_LAT.get(pref, pref.upper())}-{rest}"
-
-
-def opys_in_key(repo: str | None, fond: str | None) -> bool:
-    """Чи входить опис у ключ справи цього фонду.
-
-    🔴 Одна відповідь на все. Пак архівів несе власне поле `opys_in_key`, і
-    доти, доки `nysh archive` читав його, а ключі будував `_mk_key` із набору
-    нижче, обидва були «джерелом правди» й розійшлись: на ДАХмО ф.230 команда
-    відповідала «ні», а бібліотека клала справу під `DAHMO/230-1/12`. Питання
-    задають рівно перед тим, як складати ключ, тож ціна розбіжності — прив'язка,
-    яка не сходиться, і виявляється це за чужими сторінками у своїй справі.
-
-    ⚠ Відповідає саме будівник ключів, а не пак: у паку прапорець описовий, а
-    тут він виконавчий. Розійтись їм більше нема як — читач лишився один.
-    """
-    return bool(repo and fond and (repo, str(fond)) in _OPYS_IN_KEY)
-
-
-def opys_in_case_key(repo: str | None, fond: str | None, spr: str | None,
-                     opys: str | None) -> bool:
-    """Чи несе опис ключ САМЕ ЦІЄЇ справи: фонд зі списку або справа з реєстру.
-
-    Реєстр (`core.opys_keys`) — справи, що народились поруч зі справою того
-    самого номера в іншому описі. Фонд цілком у ключ-з-описом не переходить:
-    перша справа лишається під ключем без опису, і все записане на неї
-    лишається дійсним.
-    """
-    if not (opys and spr) or str(spr).startswith("@"):
-        return False
-    if opys_in_key(repo, fond):
-        return True
-    from nyshporka.core import opys_keys
-
-    return opys_keys.has(repo, fond, opys, spr)
-
-
-def opys_conflict(a: str | None, b: str | None) -> bool:
-    """Чи доведено, що це ДВІ різні книги того самого номера.
-
-    Обидва описи мусять бути ВІДОМІ, інакше довести нема з чого: тека, чий
-    паспорт мовчить про опис, — не колізія, а справа, яку ще не дописали.
-    """
-    from nyshporka.core.opys_keys import _norm
-
-    na, nb = _norm(a), _norm(b)
-    return bool(na and nb and na != nb)
-
-
-def claim_collision(repo: str | None, fond: str | None, opys: str | None,
-                    spr: str | None, *, shifra: str = "", holder_shifra: str = "",
-                    holder_key: str = "") -> str | None:
-    """Записати справу в реєстр `opys_keys` і повернути ЇЇ ключ з описом.
-
-    🔴 Власник простого ключа не чіпається: усе, що на нього вже записано
-    (сховище сторінок, мети прогонів, канон), лишається дійсним. Новоприбула
-    справа — та, що отримує ключ з описом, і рішення пишеться в
-    `data/cases/opys_keys.json` рівно один раз, назавжди.
-    """
-    if not (repo and fond and opys and spr):
-        return None
-    from nyshporka.core import opys_keys
-
-    opys_keys.add(str(repo), str(fond), str(opys), str(spr), shifra=shifra,
-                  why=f"поруч «{holder_shifra or holder_key}» — інша справа "
-                      f"того самого номера")
-    return _mk_key(repo, fond, spr, opys)
+_norm_fond = _ck.norm_fond
 
 
 def default_opys(repo: str | None, fond: str | None) -> str | None:
-    """Опис, який мається на увазі, коли його не назвали.
+    """Опис, який мається на увазі, коли його не назвали: поле `default_opys` паку.
 
-    Той самий розкол, що й з `opys_in_key`, і в тій самій команді: пак архівів
-    несе поле `default_opys`, а ключі добудовує `_DEFAULT_OPYS` нижче. На
-    ДАХмО ф.230 `nysh archive` через це відповідав «опис за замовчуванням: —»,
-    тоді як сховище сторінок мовчки підставляло «1».
-
-    Порядок саме такий: спершу той набір, яким справді добудовується ключ,
-    і лише потім довідка паку — інакше відповідь знову описувала б не те, що
-    станеться.
+    🔴 Читач один — пак архівів (з накладкою простору). Доки поруч стояв
+    власний словник у коді, вони розходились: `nysh archive` відповідав
+    «опис за замовчуванням: —», а ключі мовчки добудовувались «1».
     """
     if not (repo and fond):
         return None
-    got = _DEFAULT_OPYS.get((repo, str(fond)))
-    if got:
-        return got
     try:
-        from nyshporka.archives import active
-
-        return active().default_opys(repo, str(fond)) or None
-    except Exception:      # пак не критичний для ключа
+        return _pack_active().default_opys(repo, str(fond)) or None
+    except Exception:      # пак не критичний для ключа: без нього опис невідомий
         return None
 
 
 def _mk_key(repo: str | None, fond: str | None, spr: str | None,
             opys: str | None = None) -> str | None:
-    """Дедуп-ключ справи. Опис входить у ключ для фондів з `_OPYS_IN_KEY` і для
-    справ із реєстру простору (`opys_in_case_key`).
+    """Ключ справи `REPO/фонд/опис/справа` (`core.casekey.make`).
 
-    Трійка repo/fond/spr унікальна не всюди: у ANRM ф.211 описи 1/3/5/11 нумерують
-    справи кожен з одиниці, тож «211-1-140» (с. Парково) і «211-3-140» (Кишинівський
-    собор) — різні книги, які без опису злипаються в один ключ і один файл
-    `data/pages/ANRM/211-140.json`. Розширювати правило на всі фонди не можна:
-    там опис часто невідомий, і ключ поплив би між збірками.
-    Збірки (`spr` на `@`) опису не мають ніколи — інакше відв'яжуться оверрайди.
+    Опис невідомий — `_`. Збірки (`spr` на `@`) опису не мають ніколи.
     """
-    if not (repo and fond and spr):
-        return None
-    if opys_in_case_key(repo, fond, spr, opys):
-        return f"{repo}/{fond}-{opys}/{spr}"
-    return f"{repo}/{fond}/{spr}"
-
-
-#: фонд ключа з необов'язковим описом: `315` · `211-3` · `R-6129` · `R-6129-24`
-_FOND_OPYS_RE = re.compile(rf"^({FOND_TOKEN})(?:-({OPYS_TOKEN}))?$", re.IGNORECASE)
-
-
-def split_fond_opys(fond_part: str) -> tuple[str, str | None]:
-    """`211-3` → («211», «3»); `315` → («315», None). Зворотне до `_mk_key`.
-
-    🔴 Літерний фонд — один сегмент, а не фонд з описом: `R-6129-24` →
-    («R-6129», «24»). Доти рядок різався за першим дефісом, і ключ
-    `DAHMO/R-100/7`, надрукований самим `cases.list`, ставав фондом «R» з
-    описом «100» — пакет не приймав власного виводу (issue #21).
-    """
-    m = _FOND_OPYS_RE.match(fond_part.strip())
-    if m:
-        return str(_norm_fond(m.group(1))), m.group(2)
-    if "-" in fond_part:
-        f, _, o = fond_part.partition("-")
-        return f, (o or None)
-    return fond_part, None
-
-
-def candidate_keys(parsed: tuple[str, str, str | None, str] | None) -> list[str]:
-    """Ключі-кандидати для пошуку в бібліотеці: з описом і без.
-
-    Опис у розібраному коді буває невідомий (ім'я теки його не несе), а запис
-    бібліотеки для `_OPYS_IN_KEY`-фонду вже з описом — і навпаки. Шукати треба
-    обома формами, інакше та сама справа двоїться на диску й у каталозі.
-    """
-    if not parsed:
-        return []
-    repo, fond, opys, spr = parsed
-    # 🔴 Опис за замовчуванням — теж кандидат, і без нього форма без опису
-    # перестає знаходити справу, щойно фонд потрапляє в `_OPYS_IN_KEY`.
-    # Заміряно 2026-08-25: ID джерела канону має вигляд `S_<архів>_F<фонд>_D<справа>`
-    # і опису не несе, тож `parse_source_id` віддає opys=None — кандидатом був
-    # лише ключ без опису, якого після переходу фонду на ключ-з-описом уже не
-    # існує, і картка справи показувала «канон: фактів 0» там, де канон цитує
-    # аркуш дослівно.
-    default_opys = _DEFAULT_OPYS.get((repo, fond))
-    out = [_mk_key(repo, fond, spr, opys), _mk_key(repo, fond, spr)]
-    if not opys and default_opys:
-        out.insert(1, _mk_key(repo, fond, spr, default_opys))
-    return [k for i, k in enumerate(out) if k and k not in out[:i]]
+    return _ck.make(repo, fond, opys, spr)
 
 
 @lru_cache(maxsize=1)
@@ -855,8 +635,7 @@ def _case_from_sheet_index(m: dict[str, Any], d: Path) -> tuple[str, str | None,
 
     Плівка сама по собі справою не є: `2086507_1864` несе спр.242-249, а
     `2256454_full` — спр.273/274/275. Брати першу-ліпшу з `sheet_index` означає
-    назвати теку чужою шифрою — рівно та тиха підміна, від якої лікує
-    `_OPYS_IN_KEY`. Тому справа приймається, лише якщо накриває ≥80% кадрів
+    назвати теку чужою шифрою, тобто тихо підмінити книгу. Тому справа приймається, лише якщо накриває ≥80% кадрів
     (вирізка `harvest` під одну справу), інакше тека лишається плівкою без шифри.
 
     «Л.» у покажчику дзеркала = номер кадру плівки, не фоліація аркуша — саме
@@ -1738,7 +1517,7 @@ def _source_to_entry(src: Source) -> CaseEntry | None:
         return None
     repo, fond, opys, spr = parsed
     spr = _spr_from_ref(src.repository_ref, spr)
-    opys = opys or _opys_from_ref(src.repository_ref) or _DEFAULT_OPYS.get((repo, fond))
+    opys = opys or _opys_from_ref(src.repository_ref) or default_opys(repo, fond)
     key = _mk_key(repo, fond, spr, opys)
     if not key:
         return None
@@ -1812,11 +1591,40 @@ def _load_curated() -> dict[str, dict[str, Any]]:
 
 # ── build ─────────────────────────────────────────────────────────────────────
 
+def _same_case(by_rfs: dict[tuple[str, str, str], list[CaseEntry]], repo: str,
+               fond: str, opys: str | None, spr: str) -> CaseEntry | None:
+    """Запис бібліотеки тієї самої справи: той самий архів, фонд, справа й опис.
+
+    Опис теки — названий або, коли тека мовчить, опис за замовчуванням фонду.
+    Йому підходить запис того самого опису або єдиний запис, чий опис
+    невідомий. 🔴 Запис ІНШОГО опису — ніколи, навіть єдиний: тека
+    `dahmo_230/spr-12` без опису в імені — це 230-1-12 за замовчуванням фонду, а
+    не «ще один ракурс» справи 230-3-12, хоч та й була б єдиною з номером 12.
+    Лише коли опису немає ні в теці, ні у фонду, справа приймається за єдиним
+    записом із таким номером.
+    """
+    cands = by_rfs.get((repo, fond, spr)) or []
+    if not cands:
+        return None
+    want = _norm_spr(opys or default_opys(repo, fond))
+    if not want:
+        return cands[0] if len(cands) == 1 else None
+    hit = [e for e in cands if _norm_spr(e.opys) == want]
+    if hit:
+        return hit[0]
+    loose = [e for e in cands if not e.opys]
+    return loose[0] if len(loose) == 1 else None
+
+
 def build_library() -> list[CaseEntry]:
-    """Зібрати бібліотеку: канон ∪ диск, злиття за ключем (repo/fond/spr)."""
+    """Зібрати бібліотеку: канон ∪ диск, злиття за справою (архів, фонд, опис, справа)."""
     by_key: dict[str, CaseEntry] = {}
     by_raw: dict[str, CaseEntry] = {}
-    orphans: list[CaseEntry] = []  # канон без парсабельного ключа не буває, але про запас
+    by_rfs: dict[tuple[str, str, str], list[CaseEntry]] = {}
+    disk: list[CaseEntry] = []
+
+    def index(e: CaseEntry) -> None:
+        by_rfs.setdefault((e.repo or "", e.fond or "", e.spr or ""), []).append(e)
 
     # 1) канонічні джерела
     for md in sorted(SOURCES_DIR.glob("S_*.md")):
@@ -1833,6 +1641,8 @@ def build_library() -> list[CaseEntry]:
             by_key[entry.key] = entry
         if entry.raw_path:
             by_raw[entry.raw_path] = by_key[entry.key]
+    for e in by_key.values():
+        index(e)
 
     # 2) канонічний raw_path під data/raw — головний: пінимо до скану диска, інакше
     #    сусідня тека з тим самим ключем перебиває оголошене джерело (інцидент: ф.357
@@ -1866,7 +1676,15 @@ def build_library() -> list[CaseEntry]:
         entry = by_raw.get(rel)
         parsed = parse_case_path(rel)
         if entry is None and parsed:
-            entry = next((by_key[k] for k in candidate_keys(parsed) if k in by_key), None)
+            # 🔴 Опис теки — з імені, а коли ім'я мовчить (`dadno_193/spr-213`), з
+            # паспорта. Без паспорта тека справи 193-3-213 приставала б до
+            # справи 193-1-213 як «другий ракурс», хоча інший опис — інша книга.
+            opys_here = parsed[2]
+            if not opys_here:
+                side = _sidecar_case(rel)
+                if side and side[1] == parsed[1] and side[3] == parsed[3]:
+                    opys_here = side[2]
+            entry = _same_case(by_rfs, parsed[0], parsed[1], opys_here, parsed[3])
         if entry is not None:
             entry.on_disk = True
             if not entry.path:
@@ -1878,36 +1696,12 @@ def build_library() -> list[CaseEntry]:
                 continue
             if rel == entry.path:
                 continue
-            # Дві теки на один ключ — не завжди одне й те саме. Заводимо окремий запис,
-            # коли це різний матеріал:
-            #  · різний опис — 211-**5**-75 і 211-**13**-75 просто ділять ключ без опису;
-            #  · різне село — том метрик повіту нарізаний по селах, і вирізка Царевки
-            #    не є «іншим ракурсом» вирізки Фузовки, а окремим входом прогону.
-            # Решта (справа на двох плівках, `_reshoot`, сторінкові рендери) — extra_paths.
-            # 🔴 Опис теки — з імені, а коли ім'я мовчить (`dadno_193/spr-213`), з
-            # паспорта. Доти паспорт тут не питався, і тека справи 193-3-213
-            # мовчки дописувалась до справи 193-1-213 як «другий ракурс» — хоча
-            # інший опис це фізично інша книга.
-            opys_here = parsed[2] if parsed else None
-            if parsed and not opys_here:
-                side = _sidecar_case(rel)
-                if side and side[1] == parsed[1] and side[3] == parsed[3]:
-                    opys_here = side[2]
-            other_opys = opys_conflict(opys_here, entry.opys)
-            if other_opys:
-                # 🔴 Ключ, порахований нижче (`_mk_key`), несе опис ЛИШЕ якщо
-                # реєстр про цю четвірку вже знає — інакше він вийде тим самим,
-                # яким володіє `entry`, і друга справа стане сиротою під чужим
-                # ключем. Тому колізія реєструється ТУТ, до підрахунку.
-                claim_collision(
-                    entry.repo, entry.fond, opys_here, entry.spr,
-                    shifra=_shifra(entry.repo, entry.fond, opys_here, entry.spr),
-                    holder_shifra=entry.shifra, holder_key=entry.key)
-                parsed = (entry.repo or "", entry.fond or "", opys_here, entry.spr or "")
+            # Дві теки однієї справи — не завжди один матеріал: том метрик повіту
+            # нарізаний по селах, і вирізка Царевки не є «іншим ракурсом» вирізки
+            # Фузовки, а окремим входом прогону. Решта (справа на двох плівках,
+            # `_reshoot`, сторінкові рендери) — extra_paths.
             v_new, v_old = _sidecar_village(rel), _sidecar_village(entry.path)
-            if other_opys or (v_new and v_old and v_new != v_old):
-                pass  # → нижче створиться свій запис
-            else:
+            if not (v_new and v_old and v_new != v_old):
                 # Опис знає, як правило, лише один зі шляхів: тека `spr-24a` його
                 # не несе, а T:-рендер тієї самої книги зветься `230-1-24a`.
                 # Без цього шифра лишалась «ДАХмО 230-24a» — без опису, і справа
@@ -1931,15 +1725,10 @@ def build_library() -> list[CaseEntry]:
         repo, fond, opys, spr = parsed
         fb = _fallback_name(rel, parsed)
         # опис із каталогу авторитетніший за дефолт фонду (ім'я теки його не несе);
-        # за каталогом — паспорт теки: без нього тека `spr-213` з паспортом оп. 3
-        # лягала б поруч зі справою оп. 1 без опису, тобто як та сама книга
+        # за каталогом — паспорт теки
         side = _sidecar_case(rel) if not opys else None
         side_opys = side[2] if side and side[1] == fond and side[3] == spr else None
-        opys = (opys or fb.get("opys_hint") or side_opys
-                or _DEFAULT_OPYS.get((repo, fond)))
-        # ⚠️ ключ рахується після доповнення опису: для `_OPYS_IN_KEY`-фондів опис
-        # у ключі, і порахований до цього рядка ключ був би без опису (два різні
-        # описи злиплися б в один запис бібліотеки).
+        opys = opys or fb.get("opys_hint") or side_opys or default_opys(repo, fond)
         key = _mk_key(repo, fond, spr, opys)
         if not key:
             continue          # без ключа запис ніде не знайдеться
@@ -1957,12 +1746,20 @@ def build_library() -> list[CaseEntry]:
             path=rel, raw_path=rel, on_disk=True, frames=frames,
             desc_source=fb["desc_source"], tag=_tag_from_path(rel),
         )
-        if key in by_key:
-            orphans.append(new)
-        else:
-            by_key[key] = new
+        disk.append(new)
+        index(new)
 
-    entries = list(by_key.values()) + orphans
+    # Ключ — після всіх злиттів: запис канону міг дістати опис від теки.
+    # Записи з однаковим ключем (вирізки різних сіл одного тому) лишаються
+    # окремими входами; сам ключ належить першому (`LibraryLookup`).
+    entries: list[CaseEntry] = []
+    twins: list[CaseEntry] = []
+    seen: set[str] = set()
+    for e in [*by_key.values(), *disk]:
+        e.key = _mk_key(e.repo, e.fond, e.spr, e.opys) or e.key
+        (twins if e.key in seen else entries).append(e)
+        seen.add(e.key)
+    entries += twins
 
     # 3b) теки в data/raw не знайшлось → вхід = raw_path канону як є (першоджерело-PDF
     #     у data/source/archives тощо). Краще, ніж лишити справу зовсім без входу.
@@ -2048,7 +1845,10 @@ def load_verdicts() -> dict[str, Any]:
     data = read_json(VERDICTS_PATH, default={"verdicts": {}})
     if not isinstance(data, dict):
         raise CorruptFileError(VERDICTS_PATH, "у корені не об'єкт")
-    return dict(data.get("verdicts") or {})
+    from nyshporka.core import legacy_key
+
+    # До переносу обліку ключі тут старі; читачі питають новими.
+    return legacy_key.rekeyed(dict(data.get("verdicts") or {}))
 
 
 def set_verdict(key: str, verdict: str | None, note: str = "",
@@ -2056,6 +1856,7 @@ def set_verdict(key: str, verdict: str | None, note: str = "",
     """Виставити/зняти ручний вердикт справи (verdict=None або "" знімає)."""
     if verdict and verdict not in VERDICT_KINDS:
         raise ValueError(f"невідомий вердикт: {verdict}")
+    _ck.require_current("вердикт справи")
     data = load_verdicts()
     if verdict:
         data[key] = {"verdict": verdict, "note": note or "",
@@ -2079,7 +1880,18 @@ def load_library() -> list[dict[str, Any]]:
     """
     data = read_json(LIBRARY_PATH, default={})
     cases = data.get("cases") if isinstance(data, dict) else None
-    return list(cases) if isinstance(cases, list) else []
+    if not isinstance(cases, list):
+        return []
+    # Бібліотека, збудована до 0.22, несе старі ключі. Новий ключ рахується з
+    # полів того самого запису, а старий лишається поруч (`legacy_key`): з нього
+    # будується карта переїзду, доки облік не перенесено.
+    for e in cases:
+        k = e.get("key")
+        if isinstance(e, dict) and k and _ck.is_legacy(k):
+            e["legacy_key"] = k
+            e["key"] = _mk_key(e.get("repo"), e.get("fond"), e.get("spr"),
+                               e.get("opys")) or k
+    return list(cases)
 
 
 @dataclass(frozen=True)
@@ -2093,6 +1905,8 @@ class LibraryLookup:
     by_key: dict[str, dict[str, Any]]
     by_fond_spr: dict[tuple[str, str], tuple[dict[str, Any], ...]]
     by_path: dict[str, dict[str, Any]]
+    #: усі записи в порядку бібліотеки — і ті, що ділять ключ із першим
+    entries: tuple[dict[str, Any], ...] = ()
 
     @classmethod
     def build(cls, entries: list[dict[str, Any]]) -> LibraryLookup:
@@ -2110,10 +1924,27 @@ class LibraryLookup:
                     by_path[str(p).replace("\\", "/").rstrip("/")] = e
         return cls(by_key=by_key,
                    by_fond_spr={k: tuple(v) for k, v in groups.items()},
-                   by_path=by_path)
+                   by_path=by_path, entries=tuple(entries))
 
     def same_fond_spr(self, fond: str, spr: str) -> tuple[dict[str, Any], ...]:
+        """Записи з тим самим фондом і справою — у БУДЬ-ЯКОМУ архіві й описі.
+
+        Для звірки архіву (один архів під двома кодами) і для переліку
+        описів у відмові; справу за цим не вибирають.
+        """
         return self.by_fond_spr.get((str(fond), str(spr)), ())
+
+    def find(self, repo: str, fond: str, opys: str | None,
+             spr: str) -> dict[str, Any] | None:
+        """Запис справи за четвіркою; правило — `_same_case` збірки бібліотеки."""
+        key = _mk_key(repo, fond, spr, opys or default_opys(repo, fond))
+        if key and key in self.by_key:
+            return self.by_key[key]
+        cands = [e for e in self.same_fond_spr(fond, spr) if e.get("repo") == repo]
+        if opys:
+            loose = [e for e in cands if not e.get("opys")]
+            return loose[0] if len(loose) == 1 else None
+        return cands[0] if len(cands) == 1 else None
 
 
 def library_lookup(loader: Any = None) -> LibraryLookup:
@@ -2196,7 +2027,7 @@ def describe_case(path: str) -> dict[str, Any] | None:
     if not path or not LIBRARY_PATH.exists():
         return None
     lk = library_lookup()
-    by_path, by_key = lk.by_path, lk.by_key
+    by_path = lk.by_path
     rel = str(path).replace("\\", "/").rstrip("/")
     # абсолютний шлях → rel від кореня, якщо можливо
     if rel not in by_path:
@@ -2213,7 +2044,8 @@ def describe_case(path: str) -> dict[str, Any] | None:
         return dict(by_path[rel])
     parsed = parse_case_code(rel) or parse_case_code(path)
     if parsed:
-        return next((dict(by_key[k]) for k in candidate_keys(parsed) if k in by_key), None)
+        hit = lk.find(*parsed)
+        return dict(hit) if hit else None
     return None
 
 

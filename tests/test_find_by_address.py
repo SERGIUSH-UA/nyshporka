@@ -91,7 +91,7 @@ def test_an_unreadable_page_store_is_not_reported_as_nothing_noted(space, monkey
     monkeypatch.setattr(S, "PAGES_ROOT", space / "data" / "pages")
     pages = space / "data" / "pages" / "DAHMO"
     pages.mkdir(parents=True)
-    (pages / "315-8433.json").write_text("{битий", encoding="utf-8")
+    (pages / "315-1-8433.json").write_text("{битий", encoding="utf-8")
     got = _call("315-1-8433")
     row = got["data"]["address"]["local"][0]
     assert row["noted"] is None, row

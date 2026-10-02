@@ -476,7 +476,9 @@ def _same_case(meta: dict[str, Any] | None, base: Path) -> bool:
     if not meta:
         return False
     other = S.load_meta(base.name) or {}
-    key, okey = (meta.get("case_key") or "").strip(), (other.get("case_key") or "").strip()
+    # Канонічні ключі: мета пише і шифру паспорта, і ключ до 0.22.
+    key = S._canon_case_key((meta.get("case_key") or "").strip())
+    okey = S._canon_case_key((other.get("case_key") or "").strip())
     cd, ocd = (meta.get("case_dir") or "").strip(), (other.get("case_dir") or "").strip()
     return bool((key and key == okey) or (cd and cd == ocd))
 

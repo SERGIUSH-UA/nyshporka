@@ -61,7 +61,9 @@ def _belongs_elsewhere(meta: dict[str, Any], frames_dir: Path, case_key: str) ->
     have = _canon(str(meta.get("case_key") or ""))
     want = _canon(str(case_key or ""))
     if have and want:
-        return have != want
+        from nyshporka.core.casekey import compatible
+
+        return not compatible(have, want)
     if not norm or "/cloud/frames/" in norm:
         return False
     return norm != _norm(frames_dir)

@@ -1,7 +1,7 @@
 """🏛 Пак архівів мусить відтворювати чинні константи дослівно.
 
 Ці словники керують тим, як справа отримує ключ, шифру й географію. Помилка тут
-не падає: вона тихо злипає дві різні книги в одну (якщо загубити `opys_in_key`),
+не падає: вона тихо кладе справу під чужий опис (якщо загубити опис за замовчуванням),
 або вимиває половину фондів зі зрізу по губернії, або робить теку описів
 «справою». Тому нижче — дослівні копії того, що було в коді, і звірка з паком.
 """
@@ -23,10 +23,12 @@ LEGACY_REPO_LABEL = {
     "DAHMO": "ДАХмО", "CDIAK": "ЦДІАК", "DAVO": "ДАВіО", "DAVIO": "ДАВіО",
     "ANRM": "ANRM", "BNRM": "BNRM", "DACHVO": "ДАЧвО", "DAOO": "ДАОО",
 }
+#: З 0.22 опис за замовчуванням іде в КЛЮЧ справи, тож тут — і ті два фонди,
+#: чий дефолт доти жив окремим словником у коді (ДАХмО 196 і 230).
 LEGACY_DEFAULT_OPYS = {
     ("DAHMO", "315"): "1", ("CDIAK", "224"): "1", ("CDIAK", "127"): "1076",
+    ("DAHMO", "196"): "1", ("DAHMO", "230"): "1",
 }
-LEGACY_OPYS_IN_KEY = {("ANRM", "211")}
 LEGACY_SKIP_SLUGS = {
     "davo_opysy", "dahmo_319_f65_opisy", "bev_pdh", "kev_pdh",
     "khev_pdh", "eev_pdh", "_console_pages",
@@ -65,18 +67,18 @@ def test_default_opys_matches_legacy(pk):
     assert not extra, f"нові дефолтні описи без підстави: {extra}"
 
 
-def test_opys_in_key_matches_legacy(pk):
-    """🔴 Найдорожча помилка паку: втратити цей прапорець.
+def test_an_old_overlay_with_opys_in_key_still_loads(tmp_path):
+    """Накладка простору, писана до 0.22, могла нести `opys_in_key: true`.
 
-    Без нього «ANRM 211-1-140» (метрики с. Парково) і «ANRM 211-3-140»
-    (Кишинівський кафедральний собор) дають один ключ — і аркуші однієї книги
-    мовчки дописуються в іншу.
+    Опис тепер у ключі кожної справи, тож прапорець нічого не означає — але
+    чужий простір зі старою накладкою мусить відкриватись, а не падати.
     """
-    got = {f.key for f in pk.fonds.values() if f.opys_in_key}
-    assert got == LEGACY_OPYS_IN_KEY
-    assert pk.opys_in_key("ANRM", "211")
-    assert not pk.opys_in_key("DAHMO", "315")
-
+    over = tmp_path / "archives.yaml"
+    over.write_text("fonds:\n  - {repo: ANRM, fond: '211', opys_in_key: true}\n",
+                    encoding="utf-8")
+    pk = P.load(extra=over)
+    assert pk.default_opys("ANRM", "211") is None
+    assert not hasattr(pk, "opys_in_key")
 
 def test_skip_slugs_match_legacy(pk):
     assert set(pk.skip_slugs) == LEGACY_SKIP_SLUGS
@@ -100,13 +102,12 @@ def test_unknown_repo_returns_its_own_code(pk):
 
 def test_unknown_fond_is_silent_not_wrong(pk):
     assert pk.default_opys("XYZ", "1") is None
-    assert not pk.opys_in_key("XYZ", "1")
     assert pk.guberniya("XYZ", "1") == ""
 
 
 def test_repo_code_is_case_insensitive(pk):
     assert pk.repo_label("dahmo") == pk.repo_label("DAHMO") == "ДАХмО"
-    assert pk.opys_in_key("anrm", "211")
+    assert pk.default_opys("dahmo", "315") == "1"
 
 
 # ── розширення користувачем ──────────────────────────────────────────────────
@@ -131,7 +132,7 @@ def test_user_overlay_adds_without_erasing_builtin(tmp_path):
     assert "my_scratch" in pk.skip_slugs
     # і жодне вбудоване не зникло
     assert pk.repo_label("DAHMO") == "ДАХмО"
-    assert pk.opys_in_key("ANRM", "211")
+    assert pk.default_opys("CDIAK", "127") == "1076"
     assert "bev_pdh" in pk.skip_slugs
 
 
@@ -180,17 +181,6 @@ def test_pack_file_is_tracked_by_git():
         f"{rel} не відстежується git — пакет поїде в реліз без свого ж паку. "
         f"Перевір `.gitignore`: шаблони даних мають бути прив'язані до кореня."
     )
-
-
-def test_opys_in_key_fonds_explain_themselves(pk):
-    """Прапорець, що змінює ключ справи, мусить нести підставу.
-
-    Через півроку «чому саме цей фонд» уже не відновити, а зняти прапорець
-    легко — наслідки будуть тихі.
-    """
-    for f in pk.fonds.values():
-        if f.opys_in_key:
-            assert f.note.strip(), f"{f.key}: opys_in_key без пояснення"
 
 
 # ── майданчики архівів ───────────────────────────────────────────────────────
@@ -307,32 +297,22 @@ def test_adding_one_bound_does_not_wipe_the_rest_of_the_fond(tmp_path) -> None:
 
 
 # ── довідка про фонд і будівник ключів мусять казати те саме ────────────────
-def test_the_fond_card_answers_with_the_key_builder_not_beside_it() -> None:
-    """🔴 Два «джерела правди» на одне питання розійшлись — і мовчки.
+def test_every_fond_keeps_the_opys_in_the_key() -> None:
+    """🔴 Опис — у ключі справи будь-якого фонду, без списку «особливих».
 
-    `nysh archive` читав поле паку, а ключі складала бібліотека зі свого
-    набору. На ДАХмО ф.230 команда відповідала «опис у ключі: ні», тоді як
-    бібліотека клала справу під `DAHMO/230-1/12`. Питання задають рівно перед
-    тим, як складати ключ, тож ціна розбіжності — прив'язка, яка не сходиться,
-    а помічають її за чужими сторінками у своїй справі.
-
-    ⚠ Перевіряється не збіг із паком, а збіг відповіді з тим, що справді
-    станеться з ключем: саме він виконавчий.
+    Доти опис потрапляв у ключ лише у фондах зі списку, і довідка
+    `nysh archive` відповідала на питання, яке тепер не стоїть: ключ
+    `DAHMO/230/3/13` і `DAHMO/315/3/159` будуються однаково.
     """
     from nyshporka import ops as O
-    from nyshporka.library import _mk_key, opys_in_key
+    from nyshporka.library import _mk_key
 
     for repo, fond, spr in [("DAHMO", "230", "13"), ("ANRM", "211", "140"),
                             ("DAHMO", "315", "159"), ("CDIAK", "224", "711")]:
+        assert _mk_key(repo, fond, spr, "3") == f"{repo}/{fond}/3/{spr}"
         env = O.call("archive.fond", {"repo": repo, "fond": fond})
         assert env.ok, env.error
-        said = bool(env.data["opys_in_key"])
-        # Той самий опис, поданий будівникові: чи потрапить він у ключ.
-        built = _mk_key(repo, fond, spr, "3") or ""
-        really = f"{fond}-3/" in built
-        assert said == really == opys_in_key(repo, fond), (
-            f"{repo} {fond}: команда каже «{said}», ключ виходить «{built}» — "
-            f"саме так довідка й будівник розходились")
+        assert "opys_in_key" not in env.data
 
 
 def test_the_default_opys_answer_matches_what_the_key_will_use() -> None:
@@ -341,7 +321,8 @@ def test_the_default_opys_answer_matches_what_the_key_will_use() -> None:
     from nyshporka import ops as O
     from nyshporka.library import default_opys
 
-    for repo, fond in [("DAHMO", "230"), ("DAHMO", "315"), ("CDIAK", "224")]:
+    for repo, fond in [("DAHMO", "230"), ("DAHMO", "315"), ("CDIAK", "224"),
+                       ("ANRM", "211")]:
         env = O.call("archive.fond", {"repo": repo, "fond": fond})
         assert env.ok, env.error
         assert env.data["default_opys"] == default_opys(repo, fond), (
@@ -356,7 +337,7 @@ def test_the_library_reads_the_pack_instead_of_its_own_copy(pk) -> None:
     Розбіжність тиха в найгіршому місці: `nysh archive` відповідав голим кодом
     «DAZHO» там, де картка справи показувала «ДАЖО», бо архів дописали в один
     словник і забули про другий. Той самий клас розколу, що вже лікували на
-    `opys_in_key`, і приймач тут той самий: читач мусить бути ОДИН.
+    описі за замовчуванням, і приймач тут той самий: читач мусить бути ОДИН.
     """
     from nyshporka.library import _REPO_LABEL
 

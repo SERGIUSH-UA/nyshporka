@@ -121,8 +121,8 @@ def test_teka_z_pasportom_dokhodyt_do_kintsia(space: Path, chytach: Chytach) -> 
     _run()
 
     stan = _one()
-    assert stan["state"] == Q.DONE and stan["id"] == KEY
-    assert len(chytach.calls) == 1 and chytach.calls[0]["case_key"] == KEY
+    assert stan["state"] == Q.DONE and stan["id"] == FULL
+    assert len(chytach.calls) == 1 and chytach.calls[0]["case_key"] == FULL
     assert chytach.books == ["spr-8433"]
     assert [r["stage"] for r in Q.read_journal()] == ["catalog", "read", "books"]
     # Другий захід нічого не переробляє: усе видно з диска.
@@ -557,7 +557,7 @@ def test_z_poznachkoiu_viddaie_odyn_raz(space: Path, chytach: Chytach,
     stan = _one()
     assert viddacha.names() == ["share.pack:dry", "share.pack", "share.publish"]
     assert stan["state"] == Q.DONE and stan["evidence"]["shared"]["sha256"] == "cd" * 32
-    assert viddacha.calls[1][1] == {"case": KEY, "partial": ""}
+    assert viddacha.calls[1][1] == {"case": FULL, "partial": ""}
     with Q.edit() as q:
         Q.settle(q["items"][0], Q.QUEUED)
     _run()
@@ -633,7 +633,7 @@ def test_uryvok_yide_z_prychynoiu(space: Path, chytach: Chytach, viddacha: Vidda
 
     _run()
 
-    assert viddacha.calls[-2][1] == {"case": KEY, "partial": "кадри 3-4 зіпсовані"}
+    assert viddacha.calls[-2][1] == {"case": FULL, "partial": "кадри 3-4 зіпсовані"}
 
 
 # ── справа з реєстру опису: кадри ────────────────────────────────────────────
@@ -646,7 +646,7 @@ class Dzherelo:
         self.dir = space / "data" / "raw" / "dahmo_315" / "spr-8433"
         self.asked: list[str] = []
         self.plan: dict[str, Any] = {
-            "key": KEY, "repo": "DAHMO", "fond": "315", "opys": "1", "spr": "8433",
+            "key": "DAHMO/315/1/8433", "repo": "DAHMO", "fond": "315", "opys": "1", "spr": "8433",
             "case_dir": str(self.dir), "channel": "archium", "ref": "x",
             "why": "переглядач архіву", "title": "Метрична книга", "film": "",
             "shifra_needs_eye": False}
@@ -656,8 +656,13 @@ class Dzherelo:
         monkeypatch.setattr(take, "take", self.do)
 
     def plan_for(self, key: str) -> dict[str, Any]:
+        from nyshporka.core import casekey
+
         self.asked.append(key)
-        return dict(self.plan)
+        got = dict(self.plan)
+        # Як справжній план: ключ рахується з опису, а не стоїть сам по собі.
+        got["key"] = casekey.make(got["repo"], got["fond"], got["opys"], got["spr"])
+        return got
 
     def do(self, key: str, **kw: Any) -> dict[str, Any]:
         self.calls += 1
@@ -740,8 +745,7 @@ def test_kadry_pokladeni_liudynoiu_ne_kachaiutsia(space: Path, chytach: Chytach,
 
 def test_opys_nazvanyi_liudynoiu_ne_hubytsia(space: Path, chytach: Chytach,
                                             dzherelo: Dzherelo) -> None:
-    """🔴 Ключ справи опису не несе, і взяття за ним бере опис за замовчуванням.
-    Черга мусить пам'ятати адресу з описом: інакше названа 224-2-124 стає
+    """🔴 Названий опис доїжджає до взяття: інакше названа 224-2-124 стала б
     224-1-124 — іншою книгою з тим самим номером."""
     from nyshporka import ops as O
 
@@ -754,30 +758,25 @@ def test_opys_nazvanyi_liudynoiu_ne_hubytsia(space: Path, chytach: Chytach,
 
     assert dzherelo.took == "DAHMO/315/2/8433", "кадри взято за ключем без опису"
     assert all(k in ("ДАХмО 315-2-8433", "DAHMO/315/2/8433") for k in dzherelo.asked)
-    # Назвати справу в черзі можна й ключем без опису — поки він однозначний.
-    assert O.call("queue.drop", {"ref": KEY}).ok
+    # Ключ без опису — справа опису за замовчуванням фонду (315-1-8433), не ця.
+    assert not O.call("queue.drop", {"ref": KEY}).ok
+    assert O.call("queue.drop", {"ref": "DAHMO/315/2/8433"}).ok
 
 
-def test_teka_zainiata_spravoiu_inshoho_opysu(space: Path, chytach: Chytach,
-                                             dzherelo: Dzherelo) -> None:
+def test_teka_zainiata_spravoiu_inshoho_opysu(space: Path) -> None:
     """🔴 Тека `spr-N` опису не несе. Кадри справи опису 1, що вже лежать у
-    ній, для справи опису 2 — чужа книга, а не «кадри вже на диску»."""
-    from nyshporka import ops as O
+    ній, для справи опису 2 — чужа книга: та бере власну теку `op2-spr-N`, а
+    тека опису 1 лишається за своєю справою."""
+    from nyshporka.cases import take
 
     d = frames(space, "dahmo_315/spr-8433", 3)
     (d / "meta.json").write_text(json.dumps(
         {"fetch_state": "complete", "fetched_by": "archium", "inv": "1"}), encoding="utf-8")
-    dzherelo.plan.update(opys="2")
 
-    env = O.call("queue.add", {"refs": ["ДАХмО 315-2-8433"]})
-    assert "опису 1" in env.data["rows"][0]["opys_clash"]
-    _run()
-
-    stan = _one()
-    assert (stan["state"], stan["stage"], stan["code"]) == (Q.BLOCKED, "fetch",
-                                                          "opys_conflict")
-    assert "опису 1" in stan["why"] and "queue drop" in stan["fix"]
-    assert dzherelo.calls == 0 and chytach.calls == [], "чужу книгу прочитано під цією шифрою"
+    assert take.case_dir_for("DAHMO", "315", "8433", "", "1") == d
+    assert take.case_dir_for("DAHMO", "315", "8433", "", "2") == d.parent / "op2-spr-8433"
+    # Нова справа, якої на диску ще немає, — одразу в теку з описом.
+    assert take.case_dir_for("DAHMO", "315", "9000", "", "1").name == "op1-spr-9000"
 
 
 def test_khost_lezhyt_povtoryt_sam(space: Path, chytach: Chytach,
