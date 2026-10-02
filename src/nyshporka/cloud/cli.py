@@ -23,6 +23,8 @@ fetch | verify | stop`, а для оренди — `nysh cloud go` і `nysh clou
 """
 from __future__ import annotations
 
+from typing import Any
+
 import typer
 from rich.markup import escape
 

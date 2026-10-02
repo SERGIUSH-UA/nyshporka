@@ -19,14 +19,8 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from test_cloud_supervised import (  # noqa: F401 — фікстури
-    ESTIMATE,
-    _go,
-    _second_case,
-    _wire,
-    fake_gpurunner,
-    space,
-)
+import test_cloud_supervised as _S
+from test_cloud_supervised import ESTIMATE, _go, _second_case, _wire
 
 from nyshporka.cloud import batch as BT
 from nyshporka.cloud import money as M
@@ -34,6 +28,10 @@ from nyshporka.cloud import state as ST
 from nyshporka.cloud import supervised as SUP
 
 pytest.importorskip("PIL.Image")
+
+# Фікстури наглядача — ті самі, що в його тестах.
+space = _S.space
+fake_gpurunner = _S.fake_gpurunner
 
 
 def _leg(name: str, frames: int, lines: float | None = None,
