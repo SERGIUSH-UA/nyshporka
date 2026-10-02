@@ -298,3 +298,50 @@ def test_doctor_names_unknown_opys_and_an_unmoved_workspace(space: Path) -> None
     assert got.level == "warn" and "1 справ без опису" in got.detail, got.detail
     W.use(replace(W.workspace(), keys=1))
     assert "старих ключах" in D._case_keys().detail
+
+
+# ── справа, з якої кадри знято ───────────────────────────────────────────────
+def _passport_file(d: Path, shifra: str, **extra: Any) -> None:
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "_source.json").write_text(json.dumps({"shifra": shifra, **extra},
+                                               ensure_ascii=False), encoding="utf-8")
+
+
+def test_a_case_whose_frames_were_dropped_keeps_its_passport_opys(space: Path) -> None:
+    """Справу прочитано, кадри знято (`pages_dropped`), докази лишились копією
+    в сторі цитат — без паспорта. Справа — тека з паспортом, з його описом;
+    копія доказів — її другий шлях, а не окрема справа з `_`."""
+    home = space / "data" / "raw" / "cdiak_2" / "spr-43"
+    _passport_file(home, "ЦДІАК 2-1-43", pages_dropped={"when": "2026-09-23"})
+    copy = _folder(space, "_citations/cdiak_2/spr-43")
+    entries = _rebuild()
+    got = [e for e in entries if e.spr == "43"]
+    assert [e.key for e in got] == ["CDIAK/2/1/43"], [e.key for e in got]
+    assert got[0].path == home.relative_to(space).as_posix()
+    assert copy.relative_to(space).as_posix() in got[0].extra_paths
+
+
+def test_an_offloaded_case_is_still_a_case(space: Path) -> None:
+    home = space / "data" / "raw" / "dahmo_315" / "spr-8433"
+    _passport_file(home, "ДАХмО 315-1-8433")
+    (home / "_offloaded.json").write_text("{}", encoding="utf-8")
+    assert [e.key for e in _rebuild()] == ["DAHMO/315/1/8433"]
+
+
+def test_a_bare_card_without_frames_is_not_a_case(space: Path) -> None:
+    """Порожня тека з паспортом, але без позначки знятих кадрів, — картка
+    опису, а не справа: позначка мусить бути явною."""
+    _passport_file(space / "data" / "raw" / "dahmo_315" / "spr-8433", "ДАХмО 315-1-8433")
+    assert _rebuild() == []
+
+
+def test_a_second_folder_with_a_passport_gives_the_case_its_opys(space: Path) -> None:
+    """Першою обхід бачить копію без паспорта (справа без опису), другою —
+    теку з паспортом: опис з паспорта переходить справі, а не губиться."""
+    copy = _folder(space, "cdiak_2_render/spr-43")
+    _passport_file(space / "data" / "raw" / "_kept" / "cdiak_2" / "spr-43", "ЦДІАК 2-1-43",
+              pages_dropped={"when": "2026-09-23"})
+    got = [e for e in _rebuild() if e.spr == "43"]
+    assert [e.key for e in got] == ["CDIAK/2/1/43"], [e.key for e in got]
+    assert got[0].path == copy.relative_to(space).as_posix()
+    assert got[0].shifra == "ЦДІАК 2-1-43"

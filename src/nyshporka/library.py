@@ -926,6 +926,38 @@ def _scan_roots() -> list[Path]:
     return [r for r in roots if r.exists()]
 
 
+#: Ознаки теки, з якої кадри знято свідомо (`cases.collect`: `OFFLOAD_MARKER`,
+#: `DROPPED_FIELD`, `COMMONS_PURGE_FIELD`). Копія тут, а не імпорт: `cases`
+#: тягне за собою половину пакета, а бібліотеку збирають і без нього.
+_OFFLOAD_MARKER = "_offloaded.json"
+_FRAMES_GONE_FIELDS = ("pages_dropped", "purged_commons_verified")
+
+
+def _frames_removed(d: Path, dirs: tuple[str, ...] = ()) -> bool:
+    """Тека без кадрів — справа, з якої кадри знято після прочитання чи звірки.
+
+    🔴 Обхід бере лише теки з кадрами, і така справа зникала з бібліотеки
+    разом зі своїм паспортом. Справою тоді ставала копія доказів у сторі
+    цитат (ті самі ім'я й номер, але без паспорта): ЦДІАК ф.2 — 18 справ, чий
+    паспорт каже оп.1, дістали ключ з `_`, а цитування замовнику
+    (`_split.json` лежить при паспорті) вело в теку без нього.
+    Порожня тека-картка опису такою не є: позначка мусить бути явною.
+    """
+    if (d / _OFFLOAD_MARKER).is_file() or any((d / s / _OFFLOAD_MARKER).is_file() for s in dirs):
+        return True
+    for name in ("_source.json", "meta.json"):
+        f = d / name
+        if not f.is_file():
+            continue
+        try:
+            m = json.loads(f.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if isinstance(m, dict) and any(k in m for k in _FRAMES_GONE_FIELDS):
+            return True
+    return False
+
+
 def _scan_disk_cases(limit: int = 4000) -> list[tuple[str, int, int]]:
     """Теки коренів справ (1-4 рівні) з зображеннями/PDF → [(шлях, images, pdfs)].
 
@@ -962,9 +994,9 @@ def _scan_disk_cases(limit: int = 4000) -> list[tuple[str, int, int]]:
         # на свою теку сканів і бачить «✅ взято під облік» над порожньою
         # бібліотекою.
         if os.path.normcase(str(base)) != raw_key and base not in seen:
-            imgs, pdfs = _count_case_from_scan(
-                scan_dir(base, base.parent, (base.name,), 1))
-            if imgs or pdfs:
+            root_scan = scan_dir(base, base.parent, (base.name,), 1)
+            imgs, pdfs = _count_case_from_scan(root_scan)
+            if imgs or pdfs or (root_scan.n_files and _frames_removed(base, root_scan.dirs)):
                 seen.add(base)
                 out.append((str(base).replace("\\", "/"), imgs, pdfs))
         for scan in walk_root(base, max_depth=4, skip_slugs=skip_slugs()):
@@ -972,7 +1004,7 @@ def _scan_disk_cases(limit: int = 4000) -> list[tuple[str, int, int]]:
             if d in seen or d.name.startswith("_"):
                 continue
             imgs, pdfs = _count_case_from_scan(scan)
-            if imgs or pdfs:
+            if imgs or pdfs or (scan.n_files and _frames_removed(d, scan.dirs)):
                 seen.add(d)
                 # 🔴 без `resolve()`. Тека справи буває junction'ом на
                 # архівний диск; резолвінг підмінив би шлях ціллю — і вся
@@ -1675,15 +1707,15 @@ def build_library() -> list[CaseEntry]:
         frames = imgs or pdfs
         entry = by_raw.get(rel)
         parsed = parse_case_path(rel)
+        # 🔴 Опис теки — з імені, а коли ім'я мовчить (`dadno_193/spr-213`), з
+        # паспорта. Без паспорта тека справи 193-3-213 приставала б до
+        # справи 193-1-213 як «другий ракурс», хоча інший опис — інша книга.
+        opys_here = parsed[2] if parsed else None
+        if parsed and not opys_here:
+            side = _sidecar_case(rel)
+            if side and side[1] == parsed[1] and side[3] == parsed[3]:
+                opys_here = side[2]
         if entry is None and parsed:
-            # 🔴 Опис теки — з імені, а коли ім'я мовчить (`dadno_193/spr-213`), з
-            # паспорта. Без паспорта тека справи 193-3-213 приставала б до
-            # справи 193-1-213 як «другий ракурс», хоча інший опис — інша книга.
-            opys_here = parsed[2]
-            if not opys_here:
-                side = _sidecar_case(rel)
-                if side and side[1] == parsed[1] and side[3] == parsed[3]:
-                    opys_here = side[2]
             entry = _same_case(by_rfs, parsed[0], parsed[1], opys_here, parsed[3])
         if entry is not None:
             entry.on_disk = True
@@ -1705,13 +1737,14 @@ def build_library() -> list[CaseEntry]:
                 # Опис знає, як правило, лише один зі шляхів: тека `spr-24a` його
                 # не несе, а T:-рендер тієї самої книги зветься `230-1-24a`.
                 # Без цього шифра лишалась «ДАХмО 230-24a» — без опису, і справа
-                # не знаходилась пошуком за «230-1-24».
-                if parsed and parsed[2] and not entry.opys:
+                # не знаходилась пошуком за «230-1-24». Те саме з паспортом:
+                # копія доказів без паспорта, а тека з паспортом — друга.
+                if parsed and opys_here and not entry.opys:
                     # ⚠️ Шифру переписуємо, лише якщо вона машинна (зібрана з
                     # тих самих полів). Людська з сайдкара чи канону сильніша —
                     # там опис міг бути свідомо іншим.
                     machine = _shifra(entry.repo, entry.fond, None, entry.spr)
-                    entry.opys = parsed[2]
+                    entry.opys = opys_here
                     if entry.shifra == machine:
                         entry.shifra = _shifra(entry.repo, entry.fond,
                                                entry.opys, entry.spr)
