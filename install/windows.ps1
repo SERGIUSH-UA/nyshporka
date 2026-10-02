@@ -138,6 +138,11 @@ function Say($text, $colour = 'White') { Write-Host $text -ForegroundColor $colo
 # Рушії читання потрібні кожному набору з розділом «Читання» (`core.sections`:
 # усі, крім `catalog`).
 $WantEngines = (-not $NoEngines) -and ($Preset -ne 'catalog')
+# 🔴 Середовище рушіїв, вказане змінною, — чуже: людина зібрала його сама й
+# могла тримати там свій torch. `nysh htr install` доставив би туди бракуюче й
+# переставив би CPU-torch на CUDA, тож інсталятор його не чіпає взагалі.
+$EnginesForeign = [bool]$env:NYSHPORKA_HTR_VENV
+if ($EnginesForeign) { $WantEngines = $false }
 
 # Слід, який лишається на машині. Накопичується ПО ХОДУ, а не вгадується
 # потім: тека інструментів налаштовується (`UV_TOOL_BIN_DIR`, `XDG_BIN_HOME`),
@@ -243,7 +248,9 @@ if ($DryRun) {
         Say "                   показує, інакше під процесор (~2.5–4 ГБ, у теці простору)"
         Say "моделі письма      nysh models get (~130 МБ, sha256 звіряється)"
     } else {
-        Say "рушії читання      не ставляться ($(if ($NoEngines) { '-NoEngines' } else { "набір $Preset" }))"
+        $why = if ($EnginesForeign) { "свої, NYSHPORKA_HTR_VENV=$env:NYSHPORKA_HTR_VENV" }
+               elseif ($NoEngines) { '-NoEngines' } else { "набір $Preset" }
+        Say "рушії читання      не ставляться ($why)"
     }
     if ($NoCatalog) {
         Say "довідники          не ставляться (-NoCatalog / NYSH_NO_CATALOG=1)"
@@ -503,6 +510,10 @@ function Install-Engines {
 }
 
 $EnginesOk = $false
+if ($EnginesForeign) {
+    Say ""
+    Say "ℹ рушії читання вказано змінною NYSHPORKA_HTR_VENV — не чіпаю: $env:NYSHPORKA_HTR_VENV" DarkGray
+}
 if ($WantEngines) {
     $EnginesOk = Install-Engines -Nysh $nysh
     if ($EnginesOk) { Say "✓ рушії читання й моделі письма" Green }
@@ -729,7 +740,7 @@ Say ""
 Say "Далі:" Cyan
 Say "  nysh serve            відкрити застосунок у браузері"
 Say "  nysh look <тека>      подивитись, що за скани"
-if ($Preset -ne 'catalog' -and -not $EnginesOk) {
+if ($Preset -ne 'catalog' -and -not $EnginesOk -and -not $EnginesForeign) {
     Say "  nysh htr install      зібрати рушії читання (torch під вашу карту)"
     Say "  nysh models get       завантажити моделі письма"
 }

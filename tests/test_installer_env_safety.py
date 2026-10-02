@@ -1278,6 +1278,9 @@ def test_ps1_engines_are_wired_before_doctor_and_skip_catalog() -> None:
     text = ps1_text()
     assert re.search(r"^\s*\[switch\]\$NoEngines,", text, re.M)
     assert "$WantEngines = (-not $NoEngines) -and ($Preset -ne 'catalog')" in text
+    # Чуже середовище рушіїв (змінна) інсталятор не чіпає взагалі.
+    assert "if ($EnginesForeign) { $WantEngines = $false }" in text
+    assert "$EnginesForeign = [bool]$env:NYSHPORKA_HTR_VENV" in text
     init = text.index("$rc = Invoke-Logged $nysh init --yes --preset $Preset")
     call = text.index("$EnginesOk = Install-Engines -Nysh $nysh", init)
     doctor = text.index("$null = Invoke-Logged $nysh doctor", call)
