@@ -96,6 +96,16 @@ jobs:
           if grep -q "nysh migrate" /tmp/second.log; then
             echo "стан користувача не пережив контейнер" && exit 1
           fi
+          # Монтування: іменований том — мовчки; без монтування — попередження;
+          # стара тека /srv/nyshporka — відмова з кодом 2, а не тихий тимчасовий том.
+          if grep -q "не змонтовано" /tmp/second.log; then
+            echo "іменований том прийнято за тимчасовий" && exit 1
+          fi
+          docker run --rm local/nyshporka version 2>&1 | tee /tmp/anon.log
+          grep -q "не змонтовано" /tmp/anon.log || { echo "без монтування — без попередження"; exit 1; }
+          mkdir -p /tmp/oldpath
+          rc=0; docker run --rm -v /tmp/oldpath:/srv/nyshporka local/nyshporka version || rc=$?
+          [ "$rc" = 2 ] || { echo "/srv/nyshporka не зупинило запуск (код $rc)"; exit 1; }
           docker run --rm -v smoke:/srv/nysh --entrypoint sh local/nyshporka -c '
             set -e
             nysh-entrypoint sample
