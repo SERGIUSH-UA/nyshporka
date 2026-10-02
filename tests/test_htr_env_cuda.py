@@ -32,9 +32,14 @@ class Fake:
         self.asked_driver = 0
         self._sees = list(sees)
         self._fails = fails
+        # Що поставив крок ② з PyPI (Windows: CPU-колесо без мітки).
+        self.installed = {"torch": "2.10.0", "torchvision": "0.25.0"}
 
         def probe(_py: Path, code: str, **_kw: object) -> str:
-            # Єдина проба, що лишилась у цій гілці, — «чи бачить torch карту».
+            # Версії, що вже стоять, — під них пінується колесо під карту.
+            if "importlib.metadata" in code:
+                return next((v for d, v in self.installed.items() if repr(d) in code), "")
+            # Решта проб — лише «чи бачить torch карту».
             assert "cuda.is_available" in code, f"зайва проба torch: {code}"
             return self._sees.pop(0)
 
@@ -70,6 +75,21 @@ def test_cpu_wheel_does_not_hide_the_card(monkeypatch, man, capsys):
     assert _index(fake.cmds[0]).endswith("/cu126")
     out = capsys.readouterr().out
     assert "RTX 3050" in out and "підхопилась" in out
+
+
+def test_cuda_wheel_keeps_the_version_kraken_resolved(monkeypatch, man):
+    """🔴 Колесо під карту — тієї ж версії, що вже стоїть.
+
+    Без піну `--reinstall torch torchvision` з CUDA-індексу брав найновіше:
+    02.10.2026 замість 2.10.0 приїхала 2.14.1+cu126 при `torch<=2.10` у kraken
+    7.0.2. Локальна мітка відкидається — `==2.10.0` бере і `2.10.0+cu126`.
+    """
+    fake = Fake(monkeypatch, sees=["False", "True"], card=RTX_3050)
+    fake.installed = {"torch": "2.10.0+cpu", "torchvision": "0.25.0+cpu"}
+    env._ensure_cuda(Path("venv"), man)
+    cmd = fake.cmds[0]
+    assert "torch==2.10.0" in cmd and "torchvision==0.25.0" in cmd, cmd
+    assert "torch" not in cmd, "лишилось непіноване ім'я"
 
 
 def test_wheel_that_installed_but_did_not_help_is_not_success(monkeypatch, man, capsys):

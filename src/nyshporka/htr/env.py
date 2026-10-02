@@ -370,6 +370,23 @@ def setup(venv: Path, *, man: M.Manifest | None = None, with_cuda: bool = True,
     return inspect(venv, man)
 
 
+def _pinned_torch(py: Path, man: M.Manifest) -> list[str]:
+    """torch і torchvision під карту — ТИХ САМИХ версій, що вже стоять.
+
+    🔴 Без піну `--reinstall torch torchvision` з CUDA-індексу бере найновіше, і
+    обмеження kraken 7.0.2 (`torch<=2.10`) резолвер уже не бачить: заміряно
+    02.10.2026 — на місце 2.10.0, яку поставив крок ②, приїхала 2.14.1+cu126,
+    `uv pip check` — «incompatible». Патчі сегментації звірені на тому, що
+    резолвить kraken, тож колесо під карту має бути тією самою версією.
+    Локальна мітка (`+cpu`) відкидається: `==2.10.0` бере й `2.10.0+cu126`.
+    """
+    out: list[str] = []
+    for dist in man.torch_default:
+        have = _version_of(py, dist).split("+", 1)[0]
+        out.append(f"{dist}=={have}" if have else dist)
+    return out
+
+
 def _ensure_cuda(venv: Path, man: M.Manifest, uv: str = "uv", force_tag: str = "") -> None:
     """Доставити CUDA-збірку torch за карткою, яку показує ДРАЙВЕР, не torch.
 
@@ -410,7 +427,7 @@ def _ensure_cuda(venv: Path, man: M.Manifest, uv: str = "uv", force_tag: str = "
     print(f"③ доставляю torch під карту ({what} → {tag})…")
     try:
         _run([uv, "pip", "install", "--python", str(py), "--reinstall",
-              *man.torch_default, "--index-url", man.cuda_index_url(tag)])
+              *_pinned_torch(py, man), "--index-url", man.cuda_index_url(tag)])
     except subprocess.CalledProcessError:
         # ⚠ Не трасою назовні: набір CUDA-індексів PyTorch зсувається від релізу
         # до релізу, а матриця з версією torch ніяк не звірена — тобто колеса
