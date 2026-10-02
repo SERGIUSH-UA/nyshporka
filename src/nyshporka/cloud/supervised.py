@@ -359,6 +359,29 @@ def _json_line(text: str) -> dict[str, Any]:
 
 
 # ── захід ───────────────────────────────────────────────────────────────────
+@dataclass(frozen=True)
+class Prepared:
+    """Захід, складений і порахований, але ще не пущений.
+
+    🔴 Окремо від старту, бо в партії рішення про гроші одне на всі черги: його
+    можна винести лише тоді, коли кошторис кожної черги вже на руках.
+    """
+
+    session: str
+    plan_path: Path
+    env: dict[str, str]
+    gr: list[str]
+    est: M.Estimate
+    #: Прогноз вартості; `None` — наглядач його не назвав.
+    cost: float | None
+    fork_low: float | None
+    fork_high: float | None
+    #: Стеля часу з прогнозу (або явна). Без прогнозу — `MAX_HOURS_CAP`.
+    hours: float
+    #: Архів ассетів, з яким складено план, — партія везе той самий на всі черги.
+    assets: Path
+
+
 def launch(convoy: Convoy, res: GoResult, say: Callable[..., None], *,
            budget: float | None = None, max_hours: float | None = None,
            max_rents: int = 0,
@@ -374,6 +397,42 @@ def launch(convoy: Convoy, res: GoResult, say: Callable[..., None], *,
     """
     from nyshporka.cloud.go import GoRefused
 
+    p = prepare(convoy, res, say, max_hours=max_hours, transport=transport,
+                max_usd_per_1000=max_usd_per_1000, params=params)
+    if p.cost is None and budget is None:
+        raise GoRefused("кошторису немає: наглядач не назвав ні вартості, ні "
+                        "ціни з годинами. Назвіть стелю витрат самі: `--budget`.")
+    res.fork_low, res.fork_high = p.fork_low, p.fork_high
+    high = budget if budget is not None else res.fork_high
+    assert high is not None
+    res.budget_usd, res.max_hours = round(high, 2), p.hours
+
+    ceiling = M.autostart_ceiling()
+    decision = M.decide_launch(high, p.est.balance_usd, ceiling, confirm)
+    res.decision = decision.why
+    fork = (f"${res.fork_low:.2f}–${res.fork_high:.2f}"
+            if res.fork_high is not None else "вилки немає (кошторис невідомий)")
+    say("money", f"вилка {fork} · бюджет заходу ${high:.2f} · стеля часу "
+                 f"{p.hours:g} год · рішення: {decision.why}")
+    if dry_run:
+        res.verdict = "dry_run"
+        res.why = f"сухий прогін: оренди не було; план {p.plan_path}"
+        return
+    if not decision.launch:
+        raise GoRefused(decision.why, verdict=decision.kind)
+    start(p, convoy, res, say, budget=high, max_hours=p.hours, max_rents=max_rents)
+
+
+def prepare(convoy: Convoy, res: GoResult, say: Callable[..., None], *,
+            max_hours: float | None = None, transport: str = "auto",
+            max_usd_per_1000: float = 0.0, params: Sequence[str] = (),
+            assets: Path | None = None) -> Prepared:
+    """Скласти план заходу й спитати кошторис — нічого не орендуючи.
+
+    `assets` — уже зібраний архів (партія збирає його один раз на всі черги).
+    """
+    from nyshporka.cloud.go import GoRefused
+
     try:
         gr = gpurunner_cmd()
     except SupervisorMissing as exc:
@@ -385,13 +444,14 @@ def launch(convoy: Convoy, res: GoResult, say: Callable[..., None], *,
     # 1. ассети: бойові ваги + скрипти цього раннера
     models = [plan.model, *( [plan.voice] if plan.voice else [] ),
               *list(plan.extra_voices or ())]
-    items = assets_inputs(models)
-    stem = "_".join(p.stem for p in models)
-    try:
-        assets = build_assets(items, _workdir() / "assets", stem=stem)
-    except SupervisorMissing as exc:
-        raise GoRefused(str(exc)) from None
-    say("assets", f"ассети: {assets.name}")
+    if assets is None:
+        items = assets_inputs(models)
+        stem = "_".join(p.stem for p in models)
+        try:
+            assets = build_assets(items, _workdir() / "assets", stem=stem)
+        except SupervisorMissing as exc:
+            raise GoRefused(str(exc)) from None
+        say("assets", f"ассети: {assets.name}")
 
     # 2. план наглядача
     work = _workdir() / "runs" / session
@@ -525,39 +585,35 @@ def launch(convoy: Convoy, res: GoResult, say: Callable[..., None], *,
         raise GoRefused(est.human(), verdict="market_empty")
 
     cost = est.cost
-    if cost is None and budget is None:
-        raise GoRefused("кошторису немає: наглядач не назвав ні вартості, ні "
-                        "ціни з годинами. Назвіть стелю витрат самі: `--budget`.")
+    low = high = None
     if cost is not None:
-        res.fork_low, res.fork_high = M.budget_fork(
-            cost, density_known=est.lines_per_page is not None)
-    high = budget if budget is not None else res.fork_high
-    assert high is not None
+        low, high = M.budget_fork(cost, density_known=est.lines_per_page is not None)
     hours = max_hours if max_hours is not None else (
         M.max_hours_for(est.hours) if est.hours is not None else MAX_HOURS_CAP)
-    res.budget_usd, res.max_hours = round(high, 2), hours
+    return Prepared(session=session, plan_path=plan_path, env=env, gr=list(gr),
+                    est=est, cost=cost, fork_low=low, fork_high=high, hours=hours,
+                    assets=assets)
 
-    ceiling = M.autostart_ceiling()
-    decision = M.decide_launch(high, est.balance_usd, ceiling, confirm)
-    res.decision = decision.why
-    fork = (f"${res.fork_low:.2f}–${res.fork_high:.2f}"
-            if res.fork_high is not None else "вилки немає (кошторис невідомий)")
-    say("money", f"вилка {fork} · бюджет заходу ${high:.2f} · стеля часу "
-                 f"{hours:g} год · рішення: {decision.why}")
-    if dry_run:
-        res.verdict = "dry_run"
-        res.why = f"сухий прогін: оренди не було; план {plan_path}"
-        return
-    if not decision.launch:
-        raise GoRefused(decision.why, verdict=decision.kind)
 
+def start(p: Prepared, convoy: Convoy, res: GoResult, say: Callable[..., None], *,
+          budget: float, max_hours: float, max_rents: int = 0,
+          batch: str = "") -> None:
+    """Віддати складений захід відчепленому наглядачеві.
+
+    `res` несе вилку й бюджет, які ляжуть у запис кожної справи; `batch` — id
+    партії, якщо черга їде в ній.
+    """
+    from nyshporka.cloud.go import GoRefused
+
+    session, plan_path, env, gr = p.session, p.plan_path, p.env, p.gr
+    high, hours = budget, max_hours
     # 6. наглядач у фон
     res.rented = True
     # 🔴 Запис ПЕРЕД стартом, а не після. Між пуском наглядача й записом стану
     # ми можемо померти (Ctrl+C, обрив, повний диск) — і тоді захід іде, а для
     # нас його не існує: наступна команда тієї самої справи чесно візьме ДРУГУ
     # машину під ту саму роботу. Невдалий старт прибирає запис за собою.
-    _remember(convoy, res, session=session, plan_path=plan_path)
+    _remember(convoy, res, session=session, plan_path=plan_path, batch=batch)
     launched = _run([*gr, "htr", "supervise", "--plan", str(plan_path),
                      "--detach", "--session", session,
                      # 🔴 Повна точність, а не `:.2f`/`:.0f` (аудит 29.09.2026):
@@ -645,7 +701,7 @@ def _patch_plan(plan_path: Path, convoy: Convoy) -> None:
 
 
 def _remember(convoy: Convoy, res: GoResult, *, session: str,
-              plan_path: Path) -> None:
+              plan_path: Path, batch: str = "") -> None:
     """Записати захід так, щоб `nysh cloud state|stop` знали, кого питати.
 
     🔴 Запис на КОЖНУ справу, а не один на захід. Ідентифікатор справи
@@ -669,7 +725,7 @@ def _remember(convoy: Convoy, res: GoResult, *, session: str,
             source_dir=str(plan.source_dir or ""),
             siblings=[i for i in ids if i != plan.run_id],
             fork_low=res.fork_low, fork_high=res.fork_high,
-            budget_usd=res.budget_usd, max_hours=res.max_hours)
+            budget_usd=res.budget_usd, max_hours=res.max_hours, batch=batch)
         st.note("detach", f"наглядач {session}"
                           + (f", разом із {len(ids) - 1} іншими справами"
                              if len(ids) > 1 else ""))

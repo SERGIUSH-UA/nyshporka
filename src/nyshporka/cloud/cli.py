@@ -514,10 +514,16 @@ def cmd_state(
     run_id: str = typer.Argument("", help="ім'я заходу; порожньо — незавершений"),
     as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
     all_runs: bool = typer.Option(False, "--all", help="усі заходи простору"),
+    batch: str = typer.Option("", "--batch",
+                              help="партія (`go --boxes`): стан кожної черги й підсумок"),
 ) -> None:
     """Що зараз із заходом. Дані беруться з диска машини, не з лога."""
     from nyshporka.cloud import run as RUN
     from nyshporka.cloud import state as ST
+
+    if batch:
+        _state_batch(batch, as_json=as_json)
+        return
 
     if all_runs:
         rows = ST.all_runs()
@@ -583,6 +589,52 @@ def cmd_state(
         # перетворилась би на `pip install "nyshporka"`, тобто на команду,
         # яка ставить усе, крім потрібного.
         console.print(f"  [muted]{escape(st.why)}[/muted]", highlight=False)
+
+
+def _need_batch(batch_id: str) -> Any:
+    from nyshporka.cloud import batch as BT
+
+    rec = BT.load(batch_id)
+    if rec is None:
+        known = ", ".join(r.batch_id for r in BT.all_batches()[:5]) or "жодної"
+        console.print(f"[err]партії «{escape(batch_id)}» немає; останні: "
+                      f"{escape(known)}[/err]")
+        raise typer.Exit(code=2)
+    return rec
+
+
+def _state_batch(batch_id: str, *, as_json: bool) -> None:
+    """Стан партії: кожну чергу питаємо в її наглядача, гроші сумуємо."""
+    from nyshporka.cloud import batch as BT
+    from nyshporka.cloud import supervised as SUP
+
+    rec = _need_batch(batch_id)
+    try:
+        rows = BT.queue_states(rec)
+    except SUP.SupervisorMissing as exc:
+        console.print(f"[err]спитати наглядачів нічим: {escape(str(exc))}[/err]")
+        raise typer.Exit(code=2) from None
+    total = BT.summary(rows)
+    if as_json:
+        console.print_json(data={**rec.as_dict(), "summary": total,
+                                 "states": [d for _q, d in rows]})
+        return
+    console.print(f"[bold]{rec.batch_id}[/bold] · стеля ${rec.budget_total or 0:.2f} · "
+                  f"витрачено ${total['spent_usd']:.2f} (по {total['spent_known']} з "
+                  f"{total['queues']} черг) · живих машин {total['live']}")
+    for q, data in rows:
+        if not q.get("started"):
+            console.print(f"  ✗ черга {q['queue']}: не стартувала — "
+                          f"{escape(str(q.get('why') or ''))}", highlight=False)
+            continue
+        done = sum(int(c.get("pages_done") or 0) for c in data.get("cases") or []
+                   if isinstance(c, dict))
+        verdict = data.get("verdict") or data.get("phase") or "наглядач мовчить"
+        console.print(f"  · черга {q['queue']} · {q['session']} · {verdict} · "
+                      f"{done}/{q.get('pages')} стор · справ {len(q.get('cases') or [])}",
+                      highlight=False)
+    console.print(f"[muted]згорнути всю партію: nysh cloud stop --batch "
+                  f"{rec.batch_id}[/muted]")
 
 
 def _state_detached(st: RunState, *, as_json: bool) -> None:
@@ -715,7 +767,7 @@ def _close_if_silent(st: RunState) -> None:
         st.enter("failed", why="закрито людиною: наглядач мовчав")
 
 
-def _stop_detached(st: RunState, *, force: bool) -> None:
+def _stop_detached(st: RunState, *, force: bool, quiet_siblings: bool = False) -> None:
     """Згорнути відчеплений захід — і сказати правду про машину.
 
     🔴 Типово ми просимо зупинити РОБОТУ, а не вбиваємо наглядача: побачивши,
@@ -725,7 +777,7 @@ def _stop_detached(st: RunState, *, force: bool) -> None:
     """
     from nyshporka.cloud import supervised as SUP
 
-    if st.siblings:
+    if st.siblings and not quiet_siblings:
         # 🔴 Наглядач і машина в партії одні на всіх. Не сказавши цього, ми
         # дали б людині погасити роботу, про яку вона зараз не думає.
         console.print(f"[warn]⚠ цей захід везе ще {len(st.siblings)} "
@@ -757,6 +809,26 @@ def _stop_detached(st: RunState, *, force: bool) -> None:
                       f"питає провайдера напряму й бачить навіть те, про що ми "
                       f"не знаємо; погасити можна там-таки в кабінеті[/err]")
     raise typer.Exit(code=0 if res.ok else 2)
+
+
+def _stop_batch(batch_id: str, *, force: bool) -> None:
+    """Згорнути кожну пущену чергу партії — тим самим шляхом, що й одну."""
+    from nyshporka.cloud import state as ST
+
+    rec = _need_batch(batch_id)
+    failed = 0
+    for q in rec.queues:
+        if not q.get("started") or not q.get("run_ids"):
+            continue
+        st = ST.load(q["run_ids"][0])
+        if st is None or not st.supervisor:
+            continue
+        console.print(f"черга {q['queue']} · {st.supervisor}")
+        try:
+            _stop_detached(st, force=force, quiet_siblings=True)
+        except typer.Exit as exc:
+            failed += int(bool(exc.exit_code))
+    raise typer.Exit(code=2 if failed else 0)
 
 
 @app.command("fetch")
@@ -825,6 +897,8 @@ def cmd_stop(
     run_id: str = typer.Argument("", help="ім'я заходу; порожньо — незавершений"),
     force: bool = typer.Option(False, "--force",
                                help="кинути захід, не звіряючи"),
+    batch: str = typer.Option("", "--batch",
+                              help="згорнути ВСІ черги партії (`go --boxes`)"),
 ) -> None:
     """Зупинити роботу й відпустити машину.
 
@@ -832,6 +906,10 @@ def cmd_stop(
     дія, але між ними лежить єдина точка, у якій ще можна врятувати роботу.
     """
     from nyshporka.cloud import run as RUN
+
+    if batch:
+        _stop_batch(batch, force=force)
+        return
 
     st = _need_run(run_id)
     if st.supervisor:
@@ -843,6 +921,28 @@ def cmd_stop(
         console.print(f"[err]{exc}[/err]")
         raise typer.Exit(code=2) from None
     console.print(f"✅ {st.run_id} закрито")
+
+
+def _print_batch(res: Any) -> None:
+    """Партія поіменно: людина бачить, яка машина що везе й за скільки."""
+    for q in res.queues:
+        low, high = (q.get("fork_usd") or [None, None])[:2]
+        fork = f"${low:.2f}–${high:.2f}" if low is not None and high is not None else "—"
+        state = ("▶" if q.get("started") else
+                 ("·" if res.verdict == "dry_run" else "✗"))
+        console.print(f"  {state} черга {q['queue']}: {len(q['cases'])} справ · "
+                      f"{q['pages']} стор · вилка {fork} · бюджет "
+                      f"{_usd(q.get('budget_usd'))} · стеля {q['max_hours']:g} год",
+                      highlight=False)
+        if q.get("why"):
+            console.print(f"    [err]{escape(str(q['why']))}[/err]", highlight=False)
+    console.print(f"  партія   : вилка {_usd(res.fork_low)}–{_usd(res.fork_high)} · "
+                  f"стеля {_usd(res.budget_usd)}")
+    for note in res.notes:
+        console.print(f"[warn]⚠ {escape(note)}[/warn]", highlight=False)
+    if res.batch_id:
+        console.print(f"[muted]стан: nysh cloud state --batch {res.batch_id} · "
+                      f"згорнути: nysh cloud stop --batch {res.batch_id}[/muted]")
 
 
 # ── захід однією командою ────────────────────────────────────────────────────
@@ -918,6 +1018,11 @@ def cmd_go(
         help="параметр роботи для машини, `ключ=значення` (напр. "
              "`shards=6`, `max_endpoints=600`). Наш обчислений параметр "
              "ваш перекриває"),
+    boxes: int = typer.Option(
+        1, "--boxes",
+        help="партія: розкласти справи на стільки черг, по машині на чергу, з "
+             "ОДНИМ рішенням про гроші на всю партію. Машина — на ~10–15 тис. "
+             "сторінок (3–4 год роботи)"),
     tick: float = typer.Option(60.0, "--tick", help="як часто питати машину, секунд"),
     as_json: bool = typer.Option(
         False, "--json", help="останнім рядком — один JSON-об'єкт із підсумком"),
@@ -940,7 +1045,10 @@ def cmd_go(
     Коди виходу: 0 готово (або пущено відчеплено) · 2 відмова до оренди ·
     3 збій · 4 неповно · 5 стеля грошей · 6 ринок порожній · 7 стеля годин ·
     8 бракує балансу · 9 машину НЕ погашено · 10 потрібен --confirm ·
-    130 перервано.
+    11 партія пущена не вся · 130 перервано.
+
+    `--boxes N` — партія на N машин: вилка й рішення одні на всю партію,
+    стан — `nysh cloud state --batch <id>`, згорнути — `nysh cloud stop --batch`.
     """
     import json as _json
 
@@ -972,7 +1080,7 @@ def cmd_go(
                 rotate_landscape=rotate_landscape, thin=thin,
                 transport={"store": "r2"}.get(transport, transport),
                 max_usd_per_1000=max_usd_per_1000, params=param,
-                on_event=on_event,
+                boxes=boxes, on_event=on_event,
                 tick_sec=max(1.0, tick))
     if as_json:
         # `print`, а не rich: один рядок без переносів і розфарбування — його
@@ -982,6 +1090,9 @@ def cmd_go(
     mark = {"ok": "✅", "dry_run": "·", "detached": "▶"}.get(res.verdict, "🔴")
     console.print(f"\n{mark} [bold]{res.verdict}[/bold]"
                   + (f" — {escape(res.why)}" if res.why else ""), highlight=False)
+    if res.queues:
+        _print_batch(res)
+        raise typer.Exit(code=res.exit_code)
     if res.verdict == "detached":
         # Тут «витрачено» ще не існує: наглядач тільки пішов по машину. Замість
         # нулів, які читаються як «безплатно», — чим питати й чим спиняти.

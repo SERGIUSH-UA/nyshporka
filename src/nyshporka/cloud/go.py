@@ -67,7 +67,11 @@ EXIT_CODES: dict[str, int] = {
     "release_failed": 9,
     # Машину лишено живою навмисно: на ній прочитане, яке не вдалось забрати.
     "unfetched": 9,
-    "needs_confirm": 10, "cancelled": 130}
+    "needs_confirm": 10,
+    # Партія на кілька машин пустила НЕ всі черги: пущені йдуть і підзвітні
+    # (`nysh cloud state --batch`), решта — у `queues[].why`.
+    "partial_start": 11,
+    "cancelled": 130}
 
 #: Скільки опитувань поспіль машина може мовчати, перш ніж це збій. Свіжий бокс
 #: і тихий канал мовчать хвилинами, і гасити на першому ж — рівно той рефлекс,
@@ -99,12 +103,14 @@ class GoRefused(CloudError):
 
 
 class Busy(GoRefused):
-    """Справу вже веде інший захід — і це стосується ВСІЄЇ партії.
+    """Справу вже веде інший захід.
 
-    🔴 Машина в заході одна. Відкинути зайняту справу й поїхати з рештою
-    означало б узяти другу машину під роботу, яка вже оплачується, — тож така
-    відмова піднімається до самого верху, а не лишається в переліку
-    відкинутих.
+    Одна справа — відмова (код 2): друга машина під ту саму роботу коштує
+    стільки ж, скільки перша. У черзі зайнята справа ВИПАДАЄ, а решта їде:
+    її машина вже оплачується, і нова її не бере. Доти одна зайнята справа
+    валила всю чергу, і що довша черга, то вірогідніше вона не їхала
+    взагалі — тобто довгу чергу, найдешевшу форму заходу, карали найбільше.
+    Якщо зайняті ВСІ справи, відмова лишається.
     """
 
 
@@ -143,6 +149,10 @@ class GoResult:
     #: її значення; кілька — верхні `run_id`/`case_dir`/`out_dir` порожні, бо
     #: «перша справа» на їхньому місці читалась би як відповідь про весь захід.
     cases: list[CaseResult] = field(default_factory=list)
+    #: Партія на кілька машин (`--boxes`): її id і черги — по наглядачу на
+    #: машину. Порожньо — захід на одну машину.
+    batch_id: str = ""
+    queues: list[dict[str, Any]] = field(default_factory=list)
 
     @property
     def exit_code(self) -> int:
@@ -166,7 +176,9 @@ class GoResult:
                 "adopted": self.adopted,
                 "dry_run": self.dry_run, "notes": list(self.notes),
                 "cases": [c.as_dict() for c in self.cases],
-                "run_ids": [c.run_id for c in self.cases if c.run_id]}
+                "run_ids": [c.run_id for c in self.cases if c.run_id],
+                "batch_id": self.batch_id,
+                "queues": [dict(q) for q in self.queues]}
 
 
 @dataclass
@@ -448,12 +460,16 @@ def go(case: str | Sequence[str], *, backend: str = "vast",
        allow_partial: bool = False, rotate_landscape: bool = False,
        thin: bool = False, transport: str = "auto",
        max_usd_per_1000: float = 0.0, params: Sequence[str] = (),
+       boxes: int = 1,
        on_event: EventFn | None = None, tick_sec: float = 60.0) -> GoResult:
     """Прочитати справу (або кілька) на орендованій машині від початку до кінця.
 
     Кілька справ їдуть ОДНІЄЮ чергою на одну машину: холодний старт коштує
     ~5 хвилин оренди плюс час на ринку, і платити його за кожну справу окремо
     немає за що. Тонкий шлях (`thin`) веде лише одну.
+
+    `boxes` > 1 — партія: справи діляться на стільки черг, по машині на чергу,
+    з ОДНИМ рішенням про гроші на всю партію (`cloud.batch`).
 
     Не кидає: відмови, збої й Ctrl+C лягають у `GoResult.verdict`, бо викликач
     (командний рядок, агент) мусить дістати ОДИН підсумок на будь-якому шляху —
@@ -481,7 +497,7 @@ def go(case: str | Sequence[str], *, backend: str = "vast",
             allow_partial=allow_partial, rotate_landscape=rotate_landscape,
             thin=thin, transport=transport,
             max_usd_per_1000=max_usd_per_1000, params=tuple(params),
-            tick_sec=tick_sec)
+            boxes=boxes, tick_sec=tick_sec)
     except GoRefused as exc:
         res.verdict, res.why = exc.verdict, str(exc)
     except RUN.CeilingHit as exc:
@@ -790,7 +806,7 @@ def _go(res: GoResult, cases: tuple[str, ...], say: EventFn,
         second_voice: bool, script: str, model: str, case_key: str, rerun: bool,
         allow_partial: bool, rotate_landscape: bool, thin: bool,
         transport: str, max_usd_per_1000: float, params: tuple[str, ...],
-        tick_sec: float) -> None:
+        boxes: int, tick_sec: float) -> None:
     from nyshporka.cloud import plan as PL
 
     # 0. стелі. 🔴 Нуль і від'ємне — відмова ДО всього (аудит 29.09.2026).
@@ -803,6 +819,11 @@ def _go(res: GoResult, cases: tuple[str, ...], say: EventFn,
         if value is not None and not value > 0:
             raise GoRefused(f"{flag} мусить бути додатним числом, а не {value:g}. "
                             f"Без стелі — просто не передавайте прапорець.")
+    if boxes < 1:
+        raise GoRefused(f"--boxes мусить бути від 1, а не {boxes}")
+    if thin and boxes > 1:
+        raise GoRefused("тонкий шлях веде одну справу на одній машині — "
+                        "`--boxes` лише на наглядацькому шляху, без `--thin`")
 
     # 0. бекенд
     try:
@@ -843,6 +864,7 @@ def _go(res: GoResult, cases: tuple[str, ...], say: EventFn,
             f"у теки — шифру візьме бібліотека.")
     legs: list[CV.Leg] = []
     dropped: list[tuple[str, str]] = []
+    busy: list[str] = []
     for arg in cases:
         try:
             leg, live = _prepare(res, arg, say, owner, backend=backend,
@@ -853,22 +875,24 @@ def _go(res: GoResult, cases: tuple[str, ...], say: EventFn,
                                  allow_partial=allow_partial,
                                  rotate_landscape=rotate_landscape,
                                  dry_run=dry_run, thin=thin, batch=len(cases) > 1)
-        except Busy:
-            # 🔴 Зайнята справа спиняє ВЕСЬ захід: машина одна, і поїхати з
-            # рештою означало б узяти другу під роботу, що вже оплачується.
-            raise
         except GoRefused as exc:
             if len(cases) == 1:
                 raise
+            if isinstance(exc, Busy):
+                busy.append(str(exc))
             dropped.append((arg, str(exc)))
             say("warning", f"⚠ {arg}: {exc} — справа випадає, решта їде")
             continue
         if live is not None:
             if len(cases) > 1:
-                raise Busy(
-                    f"{arg}: захід {live.run_id} уже йде. Партію з підхопленням "
-                    f"не поєднуємо — повторіть команду для цієї справи окремо, "
-                    f"і вона підхопить свою машину")
+                # Підхоплення — дія над ОДНІЄЮ машиною; у черзі зайнята справа
+                # просто випадає: її машина вже оплачується, нова її не бере.
+                why = (f"захід {live.run_id} уже йде — справа випадає; "
+                       f"підхопити його: окрема команда для цієї справи")
+                busy.append(why)
+                dropped.append((arg, why))
+                say("warning", f"⚠ {arg}: {why}")
+                continue
             plan = build_for(live)
             res.adopted = True
             # Підхоплений захід теж мусить мати запис справи: агент читає
@@ -886,8 +910,9 @@ def _go(res: GoResult, cases: tuple[str, ...], say: EventFn,
     for arg, why in dropped:
         res.notes.append(f"{arg}: {why}")
     if not legs:
-        raise GoRefused("жодна справа заходу не поїхала: "
-                        + "; ".join(f"{arg} — {why}" for arg, why in dropped))
+        cls = Busy if busy else GoRefused
+        raise cls("жодна справа заходу не поїхала: "
+                  + "; ".join(f"{arg} — {why}" for arg, why in dropped))
     try:
         convoy = CV.of(legs, dropped)
     except CV.ConvoyError as exc:
@@ -917,6 +942,14 @@ def _go(res: GoResult, cases: tuple[str, ...], say: EventFn,
     if not thin:
         from nyshporka.cloud import supervised as SUP
 
+        if boxes > 1 and len(convoy.legs) > 1:
+            from nyshporka.cloud import batch as BT
+
+            BT.launch(convoy, res, say, boxes=boxes, budget=budget,
+                      max_hours=max_hours, max_rents=max_rents, confirm=confirm,
+                      dry_run=dry_run, transport=transport,
+                      max_usd_per_1000=max_usd_per_1000, params=params)
+            return
         SUP.launch(convoy, res, say, budget=budget, max_hours=max_hours,
                    max_rents=max_rents, confirm=confirm, dry_run=dry_run, transport=transport,
                    max_usd_per_1000=max_usd_per_1000, params=params)
