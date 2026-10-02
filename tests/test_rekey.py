@@ -352,8 +352,38 @@ def test_queue_items_that_meet_under_one_key_are_named_and_kept_once(
     _json(old_space / "data/queue/queue.json", q)
     assert any("двічі" in s for s in RK.plan().stuck["data/queue/queue.json"])
     RK.apply()
-    assert [it["id"] for it in _read(old_space, "data/queue/queue.json")["items"]] == [
-        "CDIAK/224/1/49"]
+    items = _read(old_space, "data/queue/queue.json")["items"]
+    assert [it["id"] for it in items] == ["CDIAK/224/1/49"]
+    # лишився той, що вже стояв під новим ключем
+    assert "aka" not in items[0]["ref"] and items[0]["ref"]["key"] == "CDIAK/224/1/49"
+
+
+def test_a_dropped_twin_in_the_queue_is_history_not_a_clash(old_space: Path) -> None:
+    """Знята справа під старим ключем і виконана під новим (так буває в живому просторі: 224-124):
+    перенос не викидає виконану й не зве це дублем."""
+    from nyshporka.cases import rekey as RK
+
+    q = _read(old_space, "data/queue/queue.json")
+    q["items"][0]["state"] = "dropped"
+    q["items"].append({"id": "CDIAK/224/1/49", "ref": {"key": "CDIAK/224/1/49"},
+                       "state": "done"})
+    _json(old_space / "data/queue/queue.json", q)
+    assert "data/queue/queue.json" not in RK.plan().stuck
+    RK.apply()
+    got = [(it["id"], it["state"]) for it in _read(old_space, "data/queue/queue.json")["items"]]
+    assert got == [("CDIAK/224/1/49", "dropped"), ("CDIAK/224/1/49", "done")]
+
+
+def test_live_twins_keep_the_one_already_under_the_new_key(old_space: Path) -> None:
+    from nyshporka.cases import rekey as RK
+
+    q = _read(old_space, "data/queue/queue.json")
+    q["items"].append({"id": "CDIAK/224/1/49", "ref": {"key": "CDIAK/224/1/49"},
+                       "state": "done"})
+    _json(old_space / "data/queue/queue.json", q)
+    RK.apply()
+    got = [(it["id"], it["state"]) for it in _read(old_space, "data/queue/queue.json")["items"]]
+    assert got == [("CDIAK/224/1/49", "done")]
 
 
 def test_a_profile_key_that_already_exists_is_not_doubled(old_space: Path) -> None:

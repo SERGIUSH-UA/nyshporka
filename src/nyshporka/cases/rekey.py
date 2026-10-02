@@ -381,7 +381,7 @@ def _plan_queue(pl: Plan, p: Path) -> None:
             out.append((f"ref.aka {ref['aka']}", "прибирається"))
     for item_id in _queue_dups(data):
         pl.stuck.setdefault(_rel(pl.root, p), []).append(
-            f"{item_id}: у черзі двічі — лишиться перший")
+            f"{item_id}: у черзі двічі — лишиться той, що вже під новим ключем")
     if out:
         pl.stores[_rel(pl.root, p)] = sorted(set(out))
 
@@ -397,16 +397,39 @@ def _queue_id(it: dict[str, Any]) -> str:
     return _queue_key(str(it.get("id") or ""))
 
 
+def _queue_live(it: dict[str, Any]) -> bool:
+    """Елемент черги ще в роботі. Знятий — історія: черга шукає за id лише живі
+    (`queue.state.find`, `queue.runner`), тож знятий дубль нікому не заважає."""
+    return it.get("state") != "dropped"
+
+
 def _queue_dups(data: dict[str, Any]) -> list[str]:
-    """Ідентифікатори черги, що після переносу зійдуться (старий і новий ключ)."""
+    """Живі справи черги, що після переносу зійдуться під одним ключем."""
     seen: set[str] = set()
     dups: list[str] = []
     for it in data.get("items") or []:
         k = _queue_id(it)
-        if k and k in seen:
+        if not (k and _queue_live(it)):
+            continue
+        if k in seen:
             dups.append(k)
         seen.add(k)
     return dups
+
+
+def _queue_keep(items: list[dict[str, Any]], was: list[str]) -> list[dict[str, Any]]:
+    """Із живих елементів з одним id лишається один: той, що вже стояв під новим
+    ключем (його вели після переносу), інакше перший. Зняті лишаються всі."""
+    best: dict[str, int] = {}
+    for i, it in enumerate(items):
+        k = str(it.get("id") or "")
+        if not (k and _queue_live(it)):
+            continue
+        j = best.get(k)
+        if j is None or (was[i] == k and was[j] != k):
+            best[k] = i
+    return [it for i, it in enumerate(items)
+            if not (_queue_live(it) and it.get("id") and best.get(str(it["id"])) != i)]
 
 
 _PROFILE_LINE = re.compile(r"^(\s+)([^\s:#][^:#]*?)(\s*:\s*)(\S.*)$")
@@ -751,21 +774,17 @@ def _apply_queue(p: Path) -> None:
     if not p.is_file():
         return
     data = _read(p)
-    items: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    for it in data.get("items") or []:
+    items: list[dict[str, Any]] = list(data.get("items") or [])
+    was = [str(it.get("id") or "") for it in items]
+    for it in items:
         ref = it.setdefault("ref", {})
         for holder, field_ in ((it, "id"), (ref, "key")):
             k = str(holder.get(field_) or "")
             if k:
                 holder[field_] = _queue_key(k)
         ref.pop("aka", None)
-        k = str(it.get("id") or "")
-        if k and k in seen:
-            continue        # той самий елемент під старим і новим ключем — план це назвав
-        seen.add(k)
-        items.append(it)
-    data["items"] = items
+    # та сама жива справа під старим і новим ключем — план це назвав
+    data["items"] = _queue_keep(items, was)
     write_json(p, data, indent=1)
 
 
