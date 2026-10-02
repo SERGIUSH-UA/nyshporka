@@ -158,7 +158,14 @@ def vytiahnuty_kadry(case_dir: Path, width: int = DEFAULT_WIDTH) -> int:
     перестиснення, тобто без втрати дрібного скоропису; інша сторінка
     рендериться на `width` пікселів. Наявні кадри не переписуються: обірване
     розгортання дочитується, а не починається наново.
+
+    🔴 Кадр бере час зміни свого PDF, а не мить розгортання. Ворота хмари
+    (`cloud.frames.check_frames`) питають за часом кадрів, чи тека ще
+    качається, і щойно розгорнута справа виглядала б недокачаною ще п'ять
+    хвилин. Питання ж про джерело: докачано PDF — докачано й кадри.
     """
+    import os
+
     import pypdfium2 as pdfium
 
     from nyshporka.utils.atomic import atomic_write_bytes
@@ -171,6 +178,7 @@ def vytiahnuty_kadry(case_dir: Path, width: int = DEFAULT_WIDTH) -> int:
     zapysano = 0
     no = 0
     for path in pdfs:
+        mtime = path.stat().st_mtime
         doc = pdfium.PdfDocument(str(path))
         try:
             for index in range(len(doc)):
@@ -179,6 +187,7 @@ def vytiahnuty_kadry(case_dir: Path, width: int = DEFAULT_WIDTH) -> int:
                 if dest.exists():
                     continue
                 atomic_write_bytes(dest, _storinka_jpeg(doc[index], width))
+                os.utime(dest, (mtime, mtime))
                 zapysano += 1
         finally:
             doc.close()

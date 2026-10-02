@@ -300,6 +300,21 @@ def _index() -> Any:
         return None
 
 
+def _kadry_z_pdf(d: Path) -> None:
+    """Справа-PDF: розгорнути в кадри тут, а не аж у плані.
+
+    План (`plan.py`) розгортає PDF і сам, але до нього справа не доходила:
+    тека, де лежить лише PDF, для воріт нижче — «кадрів на диску немає», і
+    захід відмовляв, не дійшовши до плану. Розгортання те саме, тож нумерація
+    кадрів збігається з тією, яку доводить переглядач.
+    """
+    from nyshporka.cloud.verify import frames_in
+    from nyshporka.htr import pdfpage
+
+    if not frames_in(d) and pdfpage.case_pdfs(d):
+        pdfpage.vytiahnuty_kadry(d)
+
+
 def resolve_case(arg: str) -> CaseRef:
     """Тека кадрів або шифра → `CaseRef`."""
     from nyshporka.cloud.verify import frames_in
@@ -309,6 +324,7 @@ def resolve_case(arg: str) -> CaseRef:
         d = given.resolve()
         if not frames_in(d) and (d / "pages").is_dir():
             d = d / "pages"
+        _kadry_z_pdf(d)
         key, expected = "", 0
         index = _index()
         if index is not None:
@@ -347,6 +363,7 @@ def resolve_case(arg: str) -> CaseRef:
         base = case_path(str(raw))
         for d in (base, base / "pages"):
             if d.is_dir():
+                _kadry_z_pdf(d)
                 n = len(frames_in(d))
                 # Найбільша тека, а не перша: зменшені копії та уривки лежать
                 # під тією самою шифрою, і читати треба повну.
