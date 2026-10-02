@@ -53,6 +53,9 @@ def old_space(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
               [{"rid": "r1", "kind": "birth", "scans": ["0001.jpg"]}])
     case_file("DAHMO/315-1-8433.json", "DAHMO/315/1/8433", "1", "8433",
               {"0002.jpg": note("0002.jpg", "Ковальский")})
+    # супутній файл справи (вичитка села простору): ім'я йде за файлом справи
+    _json(root / "data/pages/DAHMO/315-8433.overrides.json",
+          {"version": 1, "key": "DAHMO/315/8433", "overrides": [{"act": "a1"}]})
     # власник старого ключа без опису — книга оп.1; книга оп.2 мала ключ з описом
     case_file("CDIAK/224-49.json", "CDIAK/224/49", "1", "49",
               {"0001.jpg": note("0001.jpg", "Петренко")})
@@ -131,7 +134,9 @@ def test_apply_moves_every_store_and_loses_nothing(old_space: Path) -> None:
 
     pages = old_space / "data/pages"
     assert sorted(p.name for p in pages.glob("*/*.json")) == [
-        "224-1-49.json", "224-2-49.json", "315-1-8433.json"]
+        "224-1-49.json", "224-2-49.json", "315-1-8433.json", "315-1-8433.overrides.json"]
+    ovr = _read(old_space, "data/pages/DAHMO/315-1-8433.overrides.json")
+    assert ovr == {"version": 1, "key": "DAHMO/315/1/8433", "overrides": [{"act": "a1"}]}
     merged = _read(old_space, "data/pages/DAHMO/315-1-8433.json")
     assert merged["key"] == "DAHMO/315/1/8433"
     assert set(merged["pages"]) == {"0001.jpg", "0002.jpg"}, "злиття загубило аркуш"

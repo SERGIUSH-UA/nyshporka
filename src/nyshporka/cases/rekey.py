@@ -65,6 +65,15 @@ class PageMove:
     old_key: str
     new_key: str
     merge: bool = False          # у `dst` уже є облік — зливаються
+    #: Супутній файл справи (`315-8433.overrides.json` — вичитка села простору):
+    #: його ім'я йде за іменем файла справи, а сам він обліком сторінок не є.
+    companion: str = ""
+
+
+def _companion(name: str) -> str:
+    """`315-8433.overrides.json` → `overrides`; файл справи (`315-8433.json`) → `""`."""
+    stem = name[:-len(".json")] if name.endswith(".json") else name
+    return stem.partition(".")[2]
 
 
 @dataclass
@@ -178,8 +187,7 @@ def _plan_pages(pl: Plan, pages_root: Path) -> None:
         return
     taken: dict[str, str] = {}
     for f in sorted(pages_root.glob("*/*.json")):
-        if f.name.endswith(".overrides.json"):
-            continue        # не облік сховища сторінок (вичитка села простору)
+        kind = _companion(f.name)
         try:
             d = _read(f)
         except (OSError, ValueError):
@@ -195,12 +203,17 @@ def _plan_pages(pl: Plan, pages_root: Path) -> None:
             continue
         ck = casekey.parse(new)
         assert ck is not None
-        dst = f.parent.parent / f.parent.name / f"{casekey.stem(ck)}.json"
+        name = f"{casekey.stem(ck)}.{kind}.json" if kind else f"{casekey.stem(ck)}.json"
+        dst = f.parent / name
         src_r, dst_r = _rel(pl.root, f), _rel(pl.root, dst)
         if src_r == dst_r and old == new:
             continue
         merge = (dst.is_file() and dst != f) or dst_r in taken
-        pl.pages.append(PageMove(src_r, dst_r, old, new, merge))
+        if merge and kind:
+            # Супутній файл зливати нема як: його будову знає простір, не пакет.
+            pl.stuck.setdefault(src_r, []).append(f"{old}: «{dst_r}» уже є")
+            continue
+        pl.pages.append(PageMove(src_r, dst_r, old, new, merge, kind))
         taken[dst_r] = src_r
         if old and old != new:
             pl.moves.setdefault(old, new)
@@ -420,7 +433,7 @@ def _apply_pages(pl: Plan, root: Path, created: list[str]) -> None:
         d = _read(src)
         d["key"] = m.new_key
         ck = casekey.parse(m.new_key)
-        if ck is not None and ck.opys_known and not d.get("opys"):
+        if not m.companion and ck is not None and ck.opys_known and not d.get("opys"):
             d["opys"] = ck.opys
         if dst != src and dst.is_file():
             d = _merge_case(_read(dst), d)
@@ -525,7 +538,7 @@ def _census(root: Path, pages_root: Path) -> dict[str, Any]:
                            "legacy_page_keys": 0}
     if pages_root.is_dir():
         for f in pages_root.glob("*/*.json"):
-            if f.name.endswith(".overrides.json"):
+            if _companion(f.name):
                 continue
             try:
                 d = _read(f)

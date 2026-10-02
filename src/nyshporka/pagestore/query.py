@@ -18,6 +18,7 @@ if TYPE_CHECKING:
 
 from rapidfuzz import fuzz
 
+from nyshporka.core import legacy_key
 from nyshporka.pagestore import store
 from nyshporka.records import names
 from nyshporka.search import rank
@@ -33,12 +34,15 @@ def _iter_files(case_key: str | None = None) -> Iterator[Path]:
     root = store.PAGES_ROOT
     if not root.is_dir():
         return
+    # Ключі — новою формою з обох боків: людина набирає й старий ключ, а файл
+    # до переносу обліку тримає старий (`nysh cases rekey`).
+    want = legacy_key.current_key(case_key) if case_key is not None else None
     for p in sorted(root.glob("*/*.json")):
         if p.name.endswith(".tmp"):
             continue
-        if case_key is not None:
+        if want is not None:
             idx = _index(p)
-            if idx and idx["key"] == case_key:
+            if idx and legacy_key.current_key(str(idx["key"] or "")) == want:
                 yield p
         else:
             yield p
