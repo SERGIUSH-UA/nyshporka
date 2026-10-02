@@ -78,3 +78,22 @@ def test_resolver_accepts_meta_key_in_another_form(monkeypatch: pytest.MonkeyPat
                        meta_key="DAHMO/315/1/8591")
     assert link.key == "DAHMO/315/8591"
     assert link.resolved_by == "meta_key"
+
+
+def test_guess_does_not_override_the_meta_key_of_a_missing_case(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    """🔴 Ключ мети названо, але його справи в бібліотеці немає (кадри знято).
+    Номер 599 у бібліотеці «єдиний» — проте це справа іншого архіву, і прогін
+    `spr-599` не має права стати її декодом."""
+    monkeypatch.setattr(resolve, "_run_overrides", lambda: {})
+    idx = LibraryIndex([_row("CDIAK/127-1016/599", opys="1016", fond="127")])
+    link = resolve_run("spr-599", "T:/archive/dahmo_315_fs/spr-599", idx,
+                       meta_key="DAHMO/315/599")
+    assert link.key is None
+
+
+def test_guess_of_the_same_fond_is_kept(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(resolve, "_run_overrides", lambda: {})
+    idx = LibraryIndex([_row("DAHMO/315/599", opys="1")])
+    link = resolve_run("spr-599", "", idx, meta_key="DAHMO/315/2/599")
+    assert link.key == "DAHMO/315/599"

@@ -31,6 +31,7 @@ from nyshporka.library import (
     load_library,
     opys_in_key,
     parse_case_code,
+    split_fond_opys,
 )
 from nyshporka.utils.atomic import CorruptFileError, read_json, write_json
 
@@ -485,6 +486,32 @@ def resolve_run(name: str, case_dir: str = "", index: LibraryIndex | None = None
     hit = _from_path(case_dir, idx)                      # 3) шлях із мети прогону
     if hit:
         return RunLink(run=name, key=hit, resolved_by="case_dir", case_dir=case_dir)
+    # 🔴 Ключ мети названо, але справи в бібліотеці немає (кадри знято, лишився
+    # паспорт). Тоді здогад нижче не має права суперечити йому архівом чи
+    # фондом: прогін `spr-599` з `case_key: DAHMO/315/599` інакше тихо ставав
+    # справою ЦДІАК 127-1016-599 — «єдиним» номером 599 у бібліотеці — і нова,
+    # ще не читана справа значилась прочитаною (виміряно 01.10.2026).
+    link = _guess_run(name, case_dir, idx, _depth)
+    if link.key and meta_key and not _same_fond(link.key, meta_key):
+        return RunLink(run=name, key=None, resolved_by="none", case_dir=case_dir,
+                       note=f"здогад {link.key} суперечить ключу мети {meta_key}, "
+                            f"а його справи в бібліотеці немає")
+    return link
+
+
+def _same_fond(key: str, meta_key: str) -> bool:
+    """Чи той самий архів і фонд у двох ключах (`DAHMO/315/599`, `CDIAK/127-1016/599`)."""
+    def rf(k: str) -> tuple[str, str] | None:
+        parts = [x for x in str(k).strip().strip("/").split("/") if x]
+        if len(parts) < 3:
+            return None
+        return parts[0].upper(), split_fond_opys(parts[1])[0]
+    a, b = rf(key), rf(meta_key)
+    return a is None or b is None or a == b
+
+
+def _guess_run(name: str, case_dir: str, idx: LibraryIndex, _depth: int) -> RunLink:
+    """Кроки 3–5 резолвера: шифра в імені прогону, самотній номер, базовий прогін."""
     for cand in name_candidates(name):                   # 3) шифра в імені прогону
         hit = idx.lookup(cand)
         if hit:
