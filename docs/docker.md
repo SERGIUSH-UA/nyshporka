@@ -4,6 +4,11 @@
 є застосунок, рушії читання (kraken і PARSeq) і ваги трьох моделей. Нічого
 доставляти не треба.
 
+!!! tip "Windows з карткою NVIDIA — простіше без Docker"
+    Інсталятор [`nyshporka-setup.exe`](https://github.com/SERGIUSH-UA/nyshporka/releases/latest/download/nyshporka-setup.exe)
+    сам питає драйвер, яка карта стоїть, і ставить рушії під неї — без WSL,
+    без Docker Desktop і без образу на 12 ГБ.
+
 ## Який образ брати
 
 | машина | образ | швидкість аркуша |
@@ -19,7 +24,18 @@
 
 Для образів `cuda` потрібен драйвер NVIDIA на машині. На Linux — ще
 [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html).
-На Windows досить Docker Desktop із WSL 2.
+На Windows — Docker Desktop із WSL 2, **версії 4.31 або новіший**: драйвер
+NVIDIA від 555 у старішому Docker Desktop не стартує (`Error 500: named symbol not
+found`).
+
+!!! note "Перше завантаження `:cuda` довге"
+    Образ важить близько 12 ГБ (сам torch із CUDA — близько 4 ГБ одним
+    шаром). Після `Download complete` Docker ще розпаковує, і рядок
+    `Extracting` може кілька хвилин стояти без руху. Дочекайтесь
+    `Status: Downloaded newer image` — далі запуск займає секунди.
+
+Що не так з картою, каже `doctor`: рядок «Прискорення (GPU)» називає, чого
+бракує — тегу `:cuda`, прапорця `--gpus all` чи новішого Docker Desktop.
 
 ## Запуск
 

@@ -31,6 +31,7 @@ from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
     from nyshporka.htr.env import EnvReport
+    from nyshporka.htr.gpu import Card
 
 Level = Literal["ok", "warn", "fail"]
 
@@ -172,6 +173,9 @@ def _torch() -> Check:
         from nyshporka.htr import manifest as _M
 
         card = gpu.detect_card()
+        image = os.environ.get(ENV_DOCKER_IMAGE, "")
+        if image:
+            return _torch_in_docker(image, card, rep.torch, rep.python)
         tag, reason = _M.active().cuda_pick(card.capability if card else "",
                                             card.driver if card else "")
         seen = card.label() if card else "карти драйвер не показує"
@@ -183,6 +187,65 @@ def _torch() -> Check:
     bits = [card.name if card else "", f"torch {rep.torch}",
             f"sm_{rep.capability}" if rep.capability else ""]
     return Check("Прискорення (GPU)", "ok", " · ".join(b for b in bits if b))
+
+
+#: Варіант Docker-образу (`cpu`, `cu126`, `cu128`); ставить `docker/Dockerfile`.
+ENV_DOCKER_IMAGE = "NYSH_DOCKER_IMAGE"
+
+#: Підпис відмови CUDA, коли Docker Desktop старший за 4.31 не прокидає
+#: `libnvdxgdmal.so.1`, без якої драйвер NVIDIA від 555 у WSL2 не працює.
+_WSL_OLD_TOOLKIT = ("named symbol not found", "Error 500")
+
+
+def _cuda_init_error(python: Path | None) -> str:
+    """Останній рядок відмови `torch.cuda.init()` у середовищі рушіїв, або ''."""
+    import subprocess
+
+    if not python:
+        return ""
+    try:
+        r = subprocess.run([str(python), "-c", "import torch; torch.cuda.init()"],
+                           capture_output=True, text=True, timeout=120,
+                           encoding="utf-8", errors="replace")
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    lines = [ln.strip() for ln in (r.stderr or "").splitlines() if ln.strip()]
+    return lines[-1] if r.returncode and lines else ""
+
+
+def _torch_in_docker(image: str, card: Card | None, torch_v: str,
+                     python: Path | None) -> Check:
+    """CUDA недоступна в контейнері: порада про КОМАНДУ ЗАПУСКУ, а не про пакет.
+
+    🔴 Звичайна порада тут хибна: `nysh htr install` переставив би torch у
+    шарі контейнера, який зникне з `--rm`, а причина завжди зовні — тег образу,
+    прапорець `--gpus all` чи сам Docker. Чат 02.10.2026: людина з GTX 1050 Ti
+    пройшла всі три по черзі, і doctor жодного разу не назвав, котра з них.
+    """
+    name = "Прискорення (GPU)"
+    seen = card.label() if card is not None else "карти контейнер не бачить"
+    detail = f"torch {torch_v} у рушіях, CUDA недоступна · {seen}"
+    if image == "cpu":
+        if card is not None:
+            return Check(name, "warn", detail,
+                         "цей образ процесорний — для карти беріть "
+                         "ghcr.io/sergiush-ua/nyshporka:cuda (RTX 50xx — :cuda128) "
+                         "і запускайте з --gpus all")
+        return Check(name, "warn", detail,
+                     "образ процесорний; якщо на машині є карта NVIDIA — образ :cuda "
+                     "з --gpus all (на Mac карта Docker недоступна взагалі)")
+    if card is None:
+        return Check(name, "warn", detail,
+                     "додайте до docker run --gpus all (Windows — Docker Desktop на "
+                     "WSL 2; Linux — NVIDIA Container Toolkit)")
+    err = _cuda_init_error(python)
+    if any(sig in err for sig in _WSL_OLD_TOOLKIT):
+        return Check(name, "warn", f"{detail} · {err}",
+                     "Docker Desktop старший за 4.31 несумісний із драйвером NVIDIA "
+                     "від 555 — оновіть Docker Desktop (або драйвер не новіший за 552.44)")
+    return Check(name, "warn", f"{detail} · {err}" if err else detail,
+                 "карту видно, а CUDA не стартує — оновіть Docker Desktop і драйвер "
+                 "NVIDIA; не допомогло — issue з виводом цього рядка")
 
 
 #: Змінна середовища для тих, хто тримає рушії деінде.

@@ -1196,3 +1196,89 @@ def test_ps1_catalog_is_wired_with_opt_out_before_the_advice() -> None:
     fetch = text.index("} elseif (Install-CatalogFromRelease -Nysh $nysh) {", no_cat)
     advice = text.index("довідників поруч немає", fetch)
     assert seed < no_cat < fetch < advice
+
+
+# ── рушії читання в інсталяторі ──────────────────────────────────────────────
+_PS_ENGINES_DRIVER = r"""
+$ErrorActionPreference = 'Stop'
+$src = [IO.File]::ReadAllText($env:PS1_PATH)
+$e = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseInput($src, [ref]$null, [ref]$e)
+$fn = $ast.FindAll({ param($n)
+    $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+    $n.Name -eq 'Install-Engines' }, $true) | Select-Object -First 1
+if (-not $fn) { 'NO-FUNCTION'; exit 3 }
+. ([scriptblock]::Create($fn.Extent.Text))
+
+function Say($t, $c = 'White') { Write-Host $t }
+function Invoke-Logged {
+    param([string]$Exe, [Parameter(ValueFromRemainingArguments)] [object[]]$Arguments)
+    $cmd = "$Arguments"
+    Add-Content -LiteralPath $env:FAKE_NYSH_LOG -Value $cmd
+    if ($env:FAKE_THROW -eq $cmd) { throw 'збій посеред кроку' }
+    if ($env:FAKE_FAIL -eq $cmd) { return 1 }
+    return 0
+}
+
+$r = Install-Engines -Nysh 'nysh'
+"RESULT:$(@($r).Count):$($r.GetType().Name):$r"
+"""
+
+
+def _run_ps_engines(tmp_path: Path, **env_extra: str) -> dict[str, str]:
+    import os
+    import subprocess
+
+    ps = _powershell()
+    driver = tmp_path / "engines.ps1"
+    driver.write_text(_PS_ENGINES_DRIVER, encoding="utf-8-sig")
+    log = tmp_path / "nysh.log"
+    env = dict(os.environ)
+    env.update({"PS1_PATH": str(PS1), "FAKE_NYSH_LOG": str(log), **env_extra})
+    proc = subprocess.run(
+        [ps, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+         "-File", str(driver)],
+        capture_output=True, timeout=120, env=env)
+    out = proc.stdout.decode("utf-8", errors="replace")
+    m = re.search(r"RESULT:(\d+):(\w+):(\w+)", out)
+    assert proc.returncode == 0 and m, (
+        f"драйвер не дійшов до відповіді (код {proc.returncode}):\n{out}\n"
+        f"{proc.stderr.decode('utf-8', errors='replace')}")
+    # 🔴 Відповідь — ОДИН Boolean; зайвий об'єкт у конвеєрі зробив би з
+    # `$false` непорожній масив, тобто істину для `if`.
+    assert (m.group(1), m.group(2)) == ("1", "Boolean"), out
+    calls = log.read_text(encoding="utf-8").split() if log.exists() else []
+    return {"result": m.group(3), "out": out, "calls": " ".join(calls)}
+
+
+def test_ps1_engines_installs_engines_then_models(tmp_path: Path) -> None:
+    got = _run_ps_engines(tmp_path)
+    assert got["result"] == "True"
+    assert got["calls"] == "htr install models get"
+
+
+def test_ps1_engines_failure_does_not_stop_the_models(tmp_path: Path) -> None:
+    """Рушії не зібрались — ваги однаково качаються, а відповідь `$false`."""
+    got = _run_ps_engines(tmp_path, FAKE_FAIL="htr install")
+    assert got["result"] == "False"
+    assert got["calls"] == "htr install models get"
+    assert "nysh htr install" in got["out"], "немає поради, як повторити"
+
+
+def test_ps1_engines_exception_never_escapes(tmp_path: Path) -> None:
+    """🔴 Збій посеред кроку не валить установлення: застосунок уже стоїть."""
+    got = _run_ps_engines(tmp_path, FAKE_THROW="htr install")
+    assert got["result"] == "False"
+    assert "повторити" in got["out"]
+
+
+def test_ps1_engines_are_wired_before_doctor_and_skip_catalog() -> None:
+    """Рушії — після `nysh init` і перед `doctor`, щоб його лампочки бачили їх;
+    набір `catalog` і `-NoEngines` їх не ставлять."""
+    text = ps1_text()
+    assert re.search(r"^\s*\[switch\]\$NoEngines,", text, re.M)
+    assert "$WantEngines = (-not $NoEngines) -and ($Preset -ne 'catalog')" in text
+    init = text.index("$rc = Invoke-Logged $nysh init --yes --preset $Preset")
+    call = text.index("$EnginesOk = Install-Engines -Nysh $nysh", init)
+    doctor = text.index("$null = Invoke-Logged $nysh doctor", call)
+    assert init < call < doctor

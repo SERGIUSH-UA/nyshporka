@@ -55,6 +55,10 @@ param(
     # поруч (офлайн-машина; свій пак поставлять окремо `nysh catalog install
     # --from`). Те саме робить змінна `NYSH_NO_CATALOG=1`, як в `unix.sh`.
     [switch]$NoCatalog,
+    # Не доставляти рушії читання й моделі письма (`nysh htr install`,
+    # `nysh models get`) — для того, хто поставить їх пізніше сам. Набір
+    # `catalog` їх не ставить і без цього прапорця.
+    [switch]$NoEngines,
     # Запуск із майстра `.exe`: консоль зникає разом зі скриптом, тож помилку
     # треба показати вікном, яке переживе консоль.
     [switch]$Wizard
@@ -130,6 +134,10 @@ if (-not $Source) {
 }
 
 function Say($text, $colour = 'White') { Write-Host $text -ForegroundColor $colour }
+
+# Рушії читання потрібні кожному набору з розділом «Читання» (`core.sections`:
+# усі, крім `catalog`).
+$WantEngines = (-not $NoEngines) -and ($Preset -ne 'catalog')
 
 # Слід, який лишається на машині. Накопичується ПО ХОДУ, а не вгадується
 # потім: тека інструментів налаштовується (`UV_TOOL_BIN_DIR`, `XDG_BIN_HOME`),
@@ -230,6 +238,13 @@ if ($DryRun) {
     Say "слід інсталятора   $(Join-Path $Home_ 'install-info.ini')"
     Say "                   $(Join-Path $Home_ 'install-trace.txt')"
     Say "простір досліджень тека, яку назве «nysh init»"
+    if ($WantEngines) {
+        Say "рушії читання      nysh htr install — torch під відеокарту NVIDIA, якщо драйвер її"
+        Say "                   показує, інакше під процесор (~2.5–4 ГБ, у теці простору)"
+        Say "моделі письма      nysh models get (~130 МБ, sha256 звіряється)"
+    } else {
+        Say "рушії читання      не ставляться ($(if ($NoEngines) { '-NoEngines' } else { "набір $Preset" }))"
+    }
     if ($NoCatalog) {
         Say "довідники          не ставляться (-NoCatalog / NYSH_NO_CATALOG=1)"
     } else {
@@ -450,6 +465,48 @@ $rc = Invoke-Logged $nysh init --yes --preset $Preset
 # 🔴 Простір мусить постати. Без нього застосунок не має де жити, і мовчазний
 # провал тут дав би «встановлено» на порожньому місці.
 if ($rc -ne 0) { throw "не вдалося створити робочий простір (nysh повернув $rc)" }
+
+# ── 4½. рушії читання й моделі письма ────────────────────────────────────────
+# 🔴 Доти інсталятор лишав їх людині рядком «Далі: nysh models get», а torch під
+# карту — команді `nysh htr install`, про яку треба було знати. Звіт у чаті
+# 02.10.2026: людина з GTX 1050 Ti пішла в Docker, бо не знала, що нативна
+# установка сама підбирає колесо під карту, — і вечір пішов на образ у 12 ГБ і
+# сумісність Docker Desktop з драйвером. Тепер карту питає `nvidia-smi` тут же.
+# 🔴 Жоден збій тут не валить установлення: застосунок уже стоїть, каталоги
+# працюють, а рушії можна доставити пізніше тією самою командою. Тому все під
+# try, відповідь — $true/$false, і функція не пише в конвеєр нічого іншого.
+function Install-Engines {
+    param([Parameter(Mandatory)][string] $Nysh)
+    $ok = $true
+    try {
+        Say ""
+        Say "⬇ рушії читання (torch під вашу карту, ~2.5–4 ГБ — кілька хвилин)…" DarkGray
+        $rc = Invoke-Logged $Nysh htr install
+        if ($rc -ne 0) {
+            Say "⚠ рушії читання не зібрались (nysh повернув $rc) — повторити: nysh htr install" Yellow
+            $ok = $false
+        }
+        # Ваги — незалежно від рушіїв: вони спільні на машину й знадобляться,
+        # щойно рушії доставлять.
+        Say "⬇ моделі письма…" DarkGray
+        $rc = Invoke-Logged $Nysh models get
+        if ($rc -ne 0) {
+            Say "⚠ моделі письма не завантажились (nysh повернув $rc) — повторити: nysh models get" Yellow
+            $ok = $false
+        }
+    } catch {
+        Say "⚠ рушії читання не доставлено: $($_.Exception.Message)" Yellow
+        Say "  повторити: nysh htr install, потім nysh models get" DarkGray
+        $ok = $false
+    }
+    return $ok
+}
+
+$EnginesOk = $false
+if ($WantEngines) {
+    $EnginesOk = Install-Engines -Nysh $nysh
+    if ($EnginesOk) { Say "✓ рушії читання й моделі письма" Green }
+}
 
 # ⚠ А ось код виходу `doctor` навмисно НЕ перевіряється — рівно як `|| true` в
 # `unix.sh`. Він віддає 1 на будь-якому `fail`, а `fail` — це, зокрема, «менше
@@ -672,7 +729,10 @@ Say ""
 Say "Далі:" Cyan
 Say "  nysh serve            відкрити застосунок у браузері"
 Say "  nysh look <тека>      подивитись, що за скани"
-Say "  nysh models get       завантажити моделі письма"
+if ($Preset -ne 'catalog' -and -not $EnginesOk) {
+    Say "  nysh htr install      зібрати рушії читання (torch під вашу карту)"
+    Say "  nysh models get       завантажити моделі письма"
+}
 Say "  nysh doctor           перевірити те, що ламається тихо"
 
 # 🔴 Успіх кажемо ЯВНО. `powershell -File` коду виходу останньої рідної команди

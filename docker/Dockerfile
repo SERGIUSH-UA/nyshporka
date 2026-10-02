@@ -24,6 +24,10 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends git gcc libc6-dev libgl1 libglib2.0-0 \
  && rm -rf /var/lib/apt/lists/*
 
+# Варіант образу — щоб doctor радив тег і `--gpus all`, а не `nysh htr install`
+# у шарі, який зникне разом із контейнером (`setup/doctor.py`).
+ENV NYSH_DOCKER_IMAGE=${TORCH}
+
 ENV UV_NO_CACHE=1 \
     UV_PYTHON_DOWNLOADS=never \
     VIRTUAL_ENV=/opt/nysh/app \

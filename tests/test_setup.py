@@ -620,3 +620,57 @@ def test_pak_bilshyi_za_rozmir_z_manifestu_obryvaietsia(tmp_path, monkeypatch) -
         packs.fetch(pack)
     assert len(served) < 10, "качання не обірвалось на стелі"
     assert not list(tmp_path.iterdir())
+
+
+# ── прискорення в Docker: порада про команду запуску ─────────────────────────
+
+def _docker(monkeypatch, image: str, card, err: str = "") -> object:
+    from nyshporka.htr import gpu
+
+    _engine_state(monkeypatch, torch="2.10.0+cu126", cuda=False)
+    monkeypatch.setenv(doctor.ENV_DOCKER_IMAGE, image)
+    monkeypatch.setattr(gpu, "detect_card", lambda *a, **k: card)
+    monkeypatch.setattr(doctor, "_cuda_init_error", lambda _py: err)
+    return doctor._torch()
+
+
+def _card():
+    from nyshporka.htr import gpu
+
+    return gpu.Card(name="NVIDIA GeForce GTX 1050 Ti", capability="6.1", driver="561.09")
+
+
+def test_docker_cpu_image_with_a_card_names_the_cuda_tag(monkeypatch) -> None:
+    got = _docker(monkeypatch, "cpu", _card())
+    assert got.level == "warn" and ":cuda" in got.fix and "--gpus all" in got.fix
+    assert "htr install" not in got.fix, "у контейнері порада зникла б з --rm"
+
+
+def test_docker_cuda_image_without_gpus_flag(monkeypatch) -> None:
+    got = _docker(monkeypatch, "cu126", None)
+    assert "--gpus all" in got.fix and "htr install" not in got.fix
+
+
+def test_docker_old_desktop_with_driver_555_is_named(monkeypatch) -> None:
+    """🔴 Чат 02.10.2026: `Error 500: named symbol not found` — це Docker
+    Desktop старший за 4.31, а не карта і не образ."""
+    got = _docker(monkeypatch, "cu126", _card(),
+                  err="RuntimeError: Unexpected error from cudaGetDeviceCount(). "
+                      "Error 500: named symbol not found")
+    assert "Docker Desktop" in got.fix and "4.31" in got.fix
+    assert "named symbol" in got.detail
+
+
+def test_docker_other_cuda_failure_keeps_the_error(monkeypatch) -> None:
+    got = _docker(monkeypatch, "cu126", _card(), err="RuntimeError: щось інше")
+    assert "щось інше" in got.detail and "4.31" not in got.fix
+
+
+def test_outside_docker_the_advice_is_unchanged(monkeypatch) -> None:
+    from nyshporka.htr import gpu
+
+    _engine_state(monkeypatch, torch="2.10.0+cpu", cuda=False)
+    monkeypatch.delenv(doctor.ENV_DOCKER_IMAGE, raising=False)
+    monkeypatch.setattr(gpu, "detect_card", lambda *a, **k: _card())
+    got = doctor._torch()
+    assert "htr install" in got.fix and "cu126" in got.fix

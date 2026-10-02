@@ -174,8 +174,10 @@ begin
     True, False);
   PresetPage.Add('Каталоги архівів: де шукати метрики свого села.' + #13#10 +
     'Легкий набір, без рушіїв читання.');
+  // Рушії читання й моделі цей варіант доставляє сам (`windows.ps1`, крок 4½),
+  // а torch підбирає під відеокарту NVIDIA, якщо драйвер її показує.
   PresetPage.Add('Каталоги + читання рукопису й пошук у прочитаному.' + #13#10 +
-    'Тягне torch: близько 2.5 ГБ і кілька хвилин.');
+    'Рушії читання під вашу відеокарту: 2.5–4 ГБ і кілька хвилин.');
   PresetPage.SelectedValueIndex := PRESET_CATALOG;
 end;
 
@@ -200,6 +202,14 @@ begin
   end
   else if PresetPage.SelectedValueIndex = PRESET_RESEARCHER then
     Result := 'researcher';
+end;
+
+// Тихий режим без рушіїв: `/ENGINES=no` (димовий прогін, офлайн-машина).
+function EnginesFlag(): String;
+begin
+  Result := '';
+  if WizardSilent and (Lowercase(ExpandConstant('{param:engines|yes}')) = 'no') then
+    Result := ' -NoEngines';
 end;
 
 function InfoFile(): String;
@@ -234,6 +244,7 @@ begin
             ' -Version {#AppVersion}' +
             ' -Home_ "' + ExpandConstant('{app}') + '"' +
             ' -NoLauncher' +
+            EnginesFlag() +
             ' -Wizard';
   // Слід ПОПЕРЕДНЬОЇ відмови не має видаватись за теперішню.
   DeleteFile(ExpandConstant('{app}\install-error.txt'));
