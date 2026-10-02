@@ -36,6 +36,25 @@ CPU_SAMPLE = 12
 #: Стеля кінців скелета — як у перепуску раннера: густа сторінка рахується
 #: повністю, а не обрізаною на 200 рядках.
 MAX_ENDPOINTS = 1600
+#: Масштаби ridge-фільтра — як `--sato-sigmas` раннера. Рідні kraken'івські
+#: (1,3,5,7,9) дають ІНШЕ число рядків: 02.10.2026 на 127-1016-247 кадр 0040 —
+#: 158 проти 114, кадр 0080 — 376 проти 421. Без карти замір їх і брав, тож
+#: щільність розходилась із тим, що потім рахує раннер.
+SATO_SIGMAS = (1, 3)
+
+
+def install_sato(skf: Any, device: str, *, install_gpu: Any) -> None:
+    """Sato з масштабами раннера: на карті — `gpu_sato`, без неї — skimage."""
+    if device.startswith("cuda"):
+        install_gpu(SATO_SIGMAS, device=device)
+        return
+    orig = skf.sato
+
+    def patched(image: Any, sigmas: tuple[int, ...] = SATO_SIGMAS, black_ridges: bool = True,
+                mode: str | None = None, cval: float = 0) -> Any:
+        return orig(image, sigmas=sigmas, black_ridges=black_ridges, mode=mode, cval=cval)
+
+    skf.sato = patched
 
 
 def sample_frames(case_dir: Path, n: int) -> list[Path]:
@@ -96,18 +115,18 @@ def main() -> int:
         from kraken.lib import segmentation as kseg
         from kraken.lib import vgsl
         from PIL import Image
+        from skimage import filters as skf
 
         sys.path.insert(0, str(Path(__file__).resolve().parent / "patches"))
         import fast_geom
         import seg_resize
+        from gpu_sato import install_gpu_sato
 
         fast_geom.install()
         seg_resize.install()
         cuda = torch.cuda.is_available()
         device = a.device or ("cuda:0" if cuda else "cpu")
-        if device.startswith("cuda"):
-            from gpu_sato import install_gpu_sato
-            install_gpu_sato((1, 3), device=device)
+        install_sato(skf, device, install_gpu=install_gpu_sato)
         n = a.sample if device.startswith("cuda") else min(a.sample, CPU_SAMPLE)
         model = vgsl.TorchVGSLModel.load_model(resources.files("kraken").joinpath("blla.mlmodel"))
 

@@ -121,3 +121,24 @@ def test_the_card_memory_is_released_after_every_frame(tmp_path: Path) -> None:
                         open_image=lambda f: _Img(sizes[Path(f).name]))
     assert got == [7, 7]
     assert len(released) == 2, "етикетку не сегментуємо, а після кожної сторінки — віддати"
+
+
+def test_without_a_card_the_probe_counts_with_the_runner_sigmas() -> None:
+    """02.10.2026, 127-1016-247: без карти замір брав рідні sigmas kraken
+    (1,3,5,7,9) і рахував 158 рядків там, де раннер зі своїми (1,3) бачить 114."""
+    import re
+
+    src = (Path(G.__file__).parent / "runner.py").read_text(encoding="utf-8")
+    default = re.search(r'"--sato-sigmas", default="([^"]*)"', src)
+    assert default and tuple(int(p) for p in default.group(1).split(",")) == G.SATO_SIGMAS
+
+    seen: list[tuple] = []
+    skf = types.SimpleNamespace(sato=lambda image, sigmas=(1, 3, 5, 7, 9), **kw:
+                                seen.append(tuple(sigmas)))
+    G.install_sato(skf, "cpu", install_gpu=lambda *a, **kw: pytest.fail("карти немає"))
+    skf.sato("heat", black_ridges=False, mode="constant")   # так кличе kraken
+    assert seen == [G.SATO_SIGMAS]
+
+    gpu: list[tuple] = []
+    G.install_sato(skf, "cuda:0", install_gpu=lambda s, device: gpu.append((s, device)))
+    assert gpu == [(G.SATO_SIGMAS, "cuda:0")]
