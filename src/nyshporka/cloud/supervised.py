@@ -631,7 +631,12 @@ def _patch_plan(plan_path: Path, convoy: Convoy) -> None:
             # позиція — надійний запасний ключ.
             leg = convoy.legs[i]
         if leg is not None:
-            case["case_dir"] = str(leg.source)
+            from nyshporka.cloud.verify import frames_in
+            from nyshporka.htr_store import lasting_case_dir
+
+            # Тимчасова тека (стейджинг агента) помре — у мету йде тека справи.
+            case["case_dir"] = lasting_case_dir(
+                leg.source, leg.plan.case_key, [f.name for f in frames_in(leg.source)])
     hooks = post_fetch_hooks([leg.name for leg in convoy.legs])
     if hooks:
         data["post_fetch"] = hooks

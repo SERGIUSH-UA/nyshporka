@@ -159,6 +159,72 @@ def under_raw(path: str | Path) -> Path | None:
     return None
 
 
+def lasting_case_dir(case_dir: str | Path, case_key: str = "",
+                     names: Sequence[str] = ()) -> str:
+    """Тека кадрів для мети прогону — та, що переживе прибирання.
+
+    🔴 Мета запам'ятовує теку, з якої читали. Коли це тимчасовий стейджинг
+    (scratchpad агента, `stage84/…/pages`), після прибирання поле веде в
+    нікуди: 02.10.2026 таких мет 107, найсвіжіші — хмарні 74/84 ЦДІАК ф.2
+    (23.09) і локальний ANRM 208-1183 (08.09). Тому тека поза сховищем справ
+    (`under_raw`) підміняється текою справи з бібліотеки — але лише якщо в
+    ній лежить КОЖЕН кадр `names`: стейджинг буває рендером PDF з іншими
+    іменами, і тоді кроп брався б з чужого аркуша. Кращої немає — лишається
+    дана.
+    """
+    given = str(case_dir or "")
+    if not given or under_raw(given) is not None or not case_key:
+        return given
+    try:
+        from nyshporka.cases.resolve import LibraryIndex
+        from nyshporka.library import load_library
+
+        idx = LibraryIndex(load_library())
+        entry = idx.by_key.get(idx.canonical(case_key) or case_key) or {}
+    except Exception:
+        return given
+    for rel in (entry.get("path"), entry.get("raw_path"),
+                *(entry.get("extra_paths") or [])):
+        d = under_raw(str(rel)) if rel else None
+        if d is None or not d.is_dir():
+            continue
+        # кадри справи бувають і в самій теці, і в її `pages/`
+        for cand in (d, d / "pages"):
+            if cand.is_dir() and all((cand / n).is_file() for n in names):
+                return str(cand).replace("\\", "/")
+    return given
+
+
+def relink_lasting(out_dir: Path, case_key: str = "") -> int:
+    """Переписати в меті прогону (і його голосів) тимчасову теку на постійну.
+
+    Стара тека лишається в `case_dir_was`. Повертає число переписаних мет.
+    """
+    from nyshporka.cloud.verify import META_NAME, voice_dirs
+    from nyshporka.utils.atomic import CorruptFileError, read_json, write_json
+
+    touched = 0
+    for d in (Path(out_dir), *voice_dirs(Path(out_dir))):
+        path = d / META_NAME
+        try:
+            meta = read_json(path, default=None)
+        except CorruptFileError:
+            continue
+        if not isinstance(meta, dict):
+            continue
+        cur = str(meta.get("case_dir") or "")
+        key = case_key or str(meta.get("case_key") or "")
+        best = lasting_case_dir(cur, key, list(meta.get("pages") or {}))
+        if best == cur:
+            continue
+        meta["case_dir_was"] = cur
+        meta["case_dir"] = best
+        meta["case_dir_note"] = "тимчасова тека прогону → тека справи з бібліотеки"
+        write_json(path, meta)
+        touched += 1
+    return touched
+
+
 # ── довідники ────────────────────────────────────────────────────────────────
 _CASE_DIR_MEMO: dict[tuple[str, str], Path] = {}
 

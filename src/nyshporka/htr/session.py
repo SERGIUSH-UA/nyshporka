@@ -177,6 +177,12 @@ def read_case(plan: Any, *, case_key: str = "", workers: int = 1, device: str = 
         for proc in procs:
             R.drop(proc.pid)
 
+    # Читали з тимчасової теки — мета має вести на теку справи, а не в нікуди.
+    from nyshporka.htr_store import relink_lasting
+
+    with contextlib.suppress(Exception):
+        relink_lasting(plan.out_dir, case_key)
+
     done = len(list(plan.out_dir.glob("*.txt")))
     # 🔴 «Усі кадри мають текст» дійсне лише для повного прогону. Частковий
     # прочитав менше навмисно, і рахувати різницю як утрату означало б лякати

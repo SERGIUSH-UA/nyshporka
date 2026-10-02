@@ -722,6 +722,23 @@ def _prepare(res: GoResult, case: str, say: EventFn, owner: contextlib.ExitStack
             res.notes.append(price)
             say("warning", price)
 
+    # 🔴 Тека поза сховищем справ (стейджинг агента) помре після прибирання, а з
+    # нею — шлях у меті. Тоді мета бере теку справи з бібліотеки; якщо й там
+    # таких кадрів немає, кажемо про це ДО оренди, а не після.
+    from nyshporka.cloud.verify import frames_in
+    from nyshporka.htr_store import lasting_case_dir, under_raw
+
+    if under_raw(ref.frames_dir) is None and lasting_case_dir(
+            ref.frames_dir, plan.case_key or ref.key,
+            [f.name for f in frames_in(ref.frames_dir)]) == str(ref.frames_dir):
+        note = (f"кадри лежать поза сховищем справ ({ref.frames_dir}), і в "
+                f"бібліотеці тих самих кадрів немає: коли цю теку приберуть, мета "
+                f"прогону вестиме в нікуди. Заведіть справу (`nysh case`) і "
+                f"читайте з неї")
+        notes.append(note)
+        res.notes.append(note)
+        say("warning", f"⚠ {note}")
+
     return CV.Leg(ref=ref, plan=plan, pack=pack, source=ref.frames_dir,
                   frames=rep, seed=seg_seed, coverage=coverage, resume=seed,
                   notes=tuple(notes)), None

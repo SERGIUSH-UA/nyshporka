@@ -1158,7 +1158,12 @@ def fetch(st: ST.RunState, *, on_line: Any = None) -> Path:
     finally:
         local_tar.unlink(missing_ok=True)
     stamp_case_key(out_dir, st.case_key)
-    stamp_case_dir(out_dir, st.source_dir or st.case_dir)
+    from nyshporka.cloud.verify import frames_in
+    from nyshporka.htr_store import lasting_case_dir
+
+    src = st.source_dir or st.case_dir
+    stamp_case_dir(out_dir, lasting_case_dir(src, st.case_key,
+                                             [f.name for f in frames_in(Path(src))] if src else []))
     ST.save(st)
     _say_why_nothing_was_read(out_dir, say)
     return out_dir
