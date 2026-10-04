@@ -578,7 +578,8 @@ def _accept_seen(seen: Look, src: str, *, force: bool, replace: bool,
             # людини: вони діставали чужу шифру й позначку «прийнято з пакета».
             _stamp_run(d, seen.manifest, seen.path, voice=voices.get(d.name) or {},
                        key=key, case_dir=case_dir, content=content,
-                       alignment=seen.alignment.label, names=names)
+                       alignment=seen.alignment.label, names=names,
+                       frames=seen.frames)
         dirs, clean = _swap_in(stage, staged, htr_root, previous)
     finally:
         # Не вдалось перенести з відсунутої теки щось, що не з пакета, — тоді
@@ -804,13 +805,35 @@ def _rename_pages(run_dir: Path, names: dict[str, str]) -> dict[str, str]:
     return stems
 
 
+def _page_src(m: Manifest, frames: list[dict[str, Any]],
+              names: dict[str, str]) -> dict[str, str]:
+    """Сторінка (наше ім'я) → id скана в джерелі — для джерел, які вміють
+    показати окремий скан (Сканотека: `185R` → скан 185, права сторінка).
+
+    Лише для таких: в інших джерел id кадру вже є в імені файла чи в нашому
+    переліку кадрів, і мета на 2000 сторінок розрослась би без потреби.
+    """
+    from nyshporka.core import skanoteka
+
+    if not any(isinstance(r, dict) and r.get("source") == skanoteka.SOURCE
+               for r in m.refs or []):
+        return {}
+    out: dict[str, str] = {}
+    for f in frames:
+        name, src = str(f.get("name") or ""), str(f.get("src") or "")
+        if name and src:
+            out[names.get(name, name)] = src
+    return out
+
+
 #: Файли однієї сторінки прогону: текст і рамки рядків.
 _PAGE_SUFFIXES = (".txt", ".lines.json")
 
 
 def _stamp_run(run_dir: Path, m: Manifest, src: Path, *, voice: dict[str, Any],
                key: str, case_dir: Path | None, content: str,
-               alignment: str, names: dict[str, str] | None = None) -> None:
+               alignment: str, names: dict[str, str] | None = None,
+               frames: list[dict[str, Any]] | None = None) -> None:
     """Підготувати мету прийнятого прогону: чистка, шифра, тека кадрів, позначка.
 
     Один прохід на теку, а не три штампи поспіль: кожен із них окремо
@@ -874,6 +897,10 @@ def _stamp_run(run_dir: Path, m: Manifest, src: Path, *, voice: dict[str, Any],
         # другим пакетом, названа так само, як був названий текст, і мусить
         # лягти під ті самі нові імена (`accept_geometry`).
         "page_stems": stems,
+        # Звідки скани: без цього прийнятий текст не мав куди послати людину
+        # звіряти сторінку з оригіналом, хоч пакет це знав.
+        "refs": [r for r in (m.refs or []) if isinstance(r, dict)],
+        "page_src": _page_src(m, frames or [], names or {}),
     }
     meta["shared"] = {k: v for k, v in mark.items() if v}
     write_json(path, meta)

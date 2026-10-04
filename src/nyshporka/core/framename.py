@@ -30,6 +30,8 @@ _LEAF = re.compile(r"^n(\d+)$")
 #: Джерела, чию форму імені впізнаємо лише за назвою джерела.
 BY_STEM = "babynyar"
 BY_LEAF = "ia"
+#: Сканотека ПТГ: `185_R` — права половина розвороту, скан 185 (`core.skanoteka`).
+BY_SPREAD = "skanoteka"
 
 
 @dataclass(frozen=True)
@@ -68,4 +70,11 @@ def parse(name: str, source: str = "") -> Frame:
         m = _LEAF.match(stem)
         if m:
             return Frame(int(m.group(1)), m.group(1).lstrip("0") or "0")
+    if source == BY_SPREAD:
+        from nyshporka.core import skanoteka
+
+        got = skanoteka.page_scan(stem)
+        if got:
+            # Номер скана — не номер сторінки справи (розворот дає дві), тож `n` порожнє.
+            return Frame(None, skanoteka.src_of(*got))
     return Frame()

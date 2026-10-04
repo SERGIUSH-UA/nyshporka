@@ -212,7 +212,24 @@ def ctx(scope: str, page: str, line: int | None = None, *, window: int = 4,
             "aligned": aligned, "years": list(years), "eye": eye,
             "geo_next": succ.get(line) if line else None,
             "geo_prev": pred.get(line) if line else None,
+            "scan_link": _scan_link(str(voices[0]["run"]), page_name),
             "window": out_lines}
+
+
+def _scan_link(run: str, page: str) -> dict[str, str] | None:
+    """Де ця сторінка в джерелі сканів — для звірки оком і цитати.
+
+    Поки що вміє Сканотеку ПТГ: розворот, розрізаний на дві сторінки, має
+    в джерелі один номер скана, і без переведення назад людина не знайде
+    сторінку, яку бачить у декоді (`core.skanoteka`). Помилка тут не валить
+    відповідь: посилання — довідка, а не умова.
+    """
+    try:
+        from nyshporka.core import skanoteka
+
+        return skanoteka.page_link(run, page)
+    except Exception:
+        return None
 
 
 # ── кроп ─────────────────────────────────────────────────────────────────────
@@ -409,6 +426,7 @@ def crop(scope: str, page: str, line: int, *, with_next: bool = True, wide: bool
         return {"run": run, "page": pg, "line": line, "next": nxt_no, "prev": prev_no,
                 "joined": joined,
                 "frame": frame, "frame_source": frame_source,
+                "scan_link": _scan_link(run, pg),
                 "orient": int(orient), "scale_k": round(k, 3),
                 "scale": scale,
                 "box": list(box), "out": str(dst), "width": piece.width,
@@ -1080,6 +1098,7 @@ def sheet(q: str, scope: str, *, thresh: int = 78, limit: int = 60, crops: int =
                       "after": (h.get("context") or {}).get("after") or [],
                       "alt": (h.get("alt") or {}).get("line") or "",
                       "rank_why": h.get("rank_why") or "", "img": img,
+                      "scan_link": _scan_link(run, page),
                       "verdict": prev.get("verdict") or "", "note": prev.get("note") or ""})
     led = got["ledger"]
     html_doc = _render_sheet(q, got, cards, led, serve_port=serve_port)
@@ -1126,6 +1145,10 @@ def _render_sheet(q: str, got: dict[str, Any], cards: list[dict[str, Any]],
         why = f' <span class="why">↓ {_esc(c["rank_why"])}</span>' if c["rank_why"] else ""
         full = (f'<a class="full" href="{_esc(_page_link(c["run"], c["page"], c["line"], serve_port))}"'
                 f' target="nysh">сторінка цілком ↗</a>')
+        sl = c.get("scan_link") or {}
+        if sl.get("url"):
+            full += (f' · <a class="full" href="{_esc(sl["url"])}" target="_blank" rel="noopener"'
+                     f' title="{_esc(sl.get("cite", ""))}">скан {_esc(sl.get("scan", ""))} у джерелі ↗</a>')
         sel = opts.replace(f'value="{c["verdict"]}"', f'value="{c["verdict"]}" selected') \
             if c["verdict"] else opts
         parts.append(f'''<section class="card" data-key="{_esc(c["key"])}" data-run="{_esc(c["run"])}"

@@ -327,6 +327,12 @@ def _ref_z_adresy(url: str) -> dict[str, str] | None:
     archium = re.search(r"archium\.[\w.-]+/file-viewer/(\d+)", url, re.IGNORECASE)
     if archium:
         return {"source": "archium", "ref": f"file:{archium.group(1)}", "url": url}
+    # Сканотека ПТГ: одиниця фонду (`id1703-sy160-se`) у будь-якій із її баз.
+    from nyshporka.core import skanoteka
+
+    unit = skanoteka.from_url(url)
+    if unit is not None:
+        return {"source": skanoteka.SOURCE, "ref": unit.ref, "url": unit.url}
     return None
 
 
@@ -391,9 +397,14 @@ def _refs_from_sidecar(case_dir: Path | None) -> list[dict[str, str]]:
         for f in side.get("files") or []:
             if isinstance(f, dict):
                 z_adresy(f.get("source_url"))
-        for key in ("source_url", "duck_url"):
-            if side.get(key) and not z_adresy(side[key]):
-                add("url", str(side[key]), str(side[key]))
+        # Паспорт, де джерело описано блоком (`"source": {"name", "url", ...}`),
+        # як пише завантажувач Сканотеки. Доти такий паспорт не давав жодного
+        # посилання: читались лише плоскі `source_url` / `duck_url`.
+        nested = side.get("source")
+        nested_url = str(nested.get("url") or "") if isinstance(nested, dict) else ""
+        for url in (side.get("source_url"), nested_url, side.get("duck_url")):
+            if url and not z_adresy(url):
+                add("url", str(url), str(url))
                 break
     return out
 

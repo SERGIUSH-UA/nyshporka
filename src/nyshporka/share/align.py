@@ -107,12 +107,20 @@ def frames_of(case_dir: Path, *, hash_frames: bool = False) -> list[dict[str, An
 
     fs = _fs_sidecar(case_dir)
     source = _fetched_from(case_dir)
+    spreads = _skanoteka_map(case_dir)
     out: list[dict[str, Any]] = []
     for n, path in enumerate(frames_sorted(case_dir), 1):
         row: dict[str, Any] = {"n": n, "name": path.name}
         # id кадру в джерелі — той самий у кожного, хто качав цю справу звідти,
-        # хоч би як він потім назвав файли.
-        src = framename.parse(path.name, source).src
+        # хоч би як він потім назвав файли. Карта Сканотеки, коли вона є,
+        # важить більше за форму імені: вона записана при різанні розворотів.
+        hit = spreads.get(path.name)
+        if hit is not None:
+            from nyshporka.core import skanoteka
+
+            src = skanoteka.src_of(*hit)
+        else:
+            src = framename.parse(path.name, source).src
         if src:
             row["src"] = src
         with contextlib.suppress(OSError):
@@ -130,13 +138,42 @@ def frames_of(case_dir: Path, *, hash_frames: bool = False) -> list[dict[str, An
 
 
 def _fetched_from(case_dir: Path) -> str:
-    """З якого джерела завантажено теку — з її паспорта; невідомо — порожньо."""
-    from nyshporka.cases.register import read_sidecar
+    """З якого джерела завантажено теку — з її паспорта; невідомо — порожньо.
 
-    try:
-        return str(read_sidecar(Path(case_dir)).get("fetched_from") or "")
-    except Exception:
-        return ""
+    Паспорт завантажувача Сканотеки поля `fetched_from` не пише, зате несе
+    адресу одиниці в `source.url` — за нею джерело й упізнається.
+    """
+    from nyshporka.cases.register import read_sidecar
+    from nyshporka.core import skanoteka
+
+    for d in _passport_dirs(Path(case_dir)):
+        try:
+            side = read_sidecar(d)
+        except Exception:
+            continue
+        if side.get("fetched_from"):
+            return str(side["fetched_from"])
+        if skanoteka.unit_of(side) is not None:
+            return skanoteka.SOURCE
+    return ""
+
+
+def _passport_dirs(case_dir: Path) -> list[Path]:
+    """Тека кадрів і, коли це `pages/`, сама справа: паспорт лежить там."""
+    if case_dir.name.lower() == FRAMES_SUBDIR:
+        return [case_dir, case_dir.parent]
+    return [case_dir]
+
+
+def _skanoteka_map(case_dir: Path) -> dict[str, tuple[str, str]]:
+    """Карта «сторінка → скан, бік» Сканотеки поруч із кадрами або при паспорті."""
+    from nyshporka.core import skanoteka
+
+    for d in _passport_dirs(Path(case_dir)):
+        got = skanoteka.read_map(d)
+        if got:
+            return got
+    return {}
 
 
 def summary(frames: list[dict[str, Any]]) -> dict[str, Any]:
