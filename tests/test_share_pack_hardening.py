@@ -401,6 +401,48 @@ def test_nazvane_chyslo_kadriv_znimaie_vidmovu(space: Path, monkeypatch: Any) ->
     assert "pack_refusals" not in got and Path(got["path"]).is_file()
 
 
+# 04.10.2026: у теці справи лежав розділ однієї церкви (85 кадрів), а прогін ішов
+# по всій книзі (282 сторінки) — у пул поїхало «85 кадрів» і покриття 330 %.
+
+def _chastyna_kadriv(space: Path, monkeypatch: Any, na_dysku: int) -> Any:
+    from nyshporka.share import align
+
+    PUB = _bez_kadriv(space, monkeypatch)
+    teka = space / "kadry-chastyny"
+    teka.mkdir()
+    for i in range(1, na_dysku + 1):
+        (teka / f"{i:04d}.jpg").write_bytes(b"\xff\xd8")
+    monkeypatch.setattr(align, "case_dir_for", lambda key: teka)
+    return PUB
+
+
+def test_kadriv_menshe_za_prochytane_ne_znamennyk(space: Path, monkeypatch: Any) -> None:
+    PUB = _chastyna_kadriv(space, monkeypatch, na_dysku=2)
+
+    proba = PUB.pack("DAZHO/1/2149", geometry=False, dry_run=True)
+
+    fr = proba["manifest"]["frames"]
+    assert fr["total"] == 0, "2 кадри при 4 сторінках — не знаменник"
+    assert fr["listed"] == 2, "прив'язка тексту до наявних кадрів лишається"
+    vidmova = proba["pack_refusals"][0]
+    assert "лише 2 кадрів" in vidmova and "не менше 4" in vidmova
+    with pytest.raises(PUB.PublishError, match="тека тримає частину справи"):
+        PUB.pack("DAZHO/1/2149", geometry=False)
+
+
+@pytest.mark.parametrize("nazvano, vidmova", [(310, False), (3, True)])
+def test_nazvane_chyslo_menshe_za_prochytane_tezh_ne_beretsia(
+        space: Path, monkeypatch: Any, nazvano: int, vidmova: bool) -> None:
+    from nyshporka.share import card as K
+
+    PUB = _chastyna_kadriv(space, monkeypatch, na_dysku=2)
+    proba = PUB.pack("DAZHO/1/2149", geometry=False, dry_run=True,
+                     card_fields=K.normalize(frames=nazvano))
+
+    assert ("pack_refusals" in proba) is vidmova
+    assert proba["manifest"]["frames"]["total"] == (0 if vidmova else nazvano)
+
+
 def test_operatsiia_pakuvannia_nese_prychynu(space: Path, monkeypatch: Any) -> None:
     from nyshporka import ops as O
 
