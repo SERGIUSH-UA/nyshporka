@@ -289,9 +289,10 @@ def load_meta(name: str) -> dict[str, Any] | None:
     return dict(meta)
 
 
-#: Розширення моделі → рушій (дзеркало `scripts/htr_case_run._ENGINE_BY_SUFFIX`;
-#: продубльовано, бо той скрипт живе в іншому venv і імпортувати його не можна).
-_ENGINE_BY_SUFFIX = {".mlmodel": "kraken", ".pt": "parseq",
+#: Розширення моделі → рушій (дзеркало `htr/runner._ENGINE_BY_SUFFIX`;
+#: продубльовано, бо раннер живе в іншому venv і імпортувати його не можна).
+#: `.safetensors` — PP-OCRv6 (Дяк-Літописець, Скриба PPv3), читає kraken.
+_ENGINE_BY_SUFFIX = {".mlmodel": "kraken", ".safetensors": "kraken", ".pt": "parseq",
                      ".ckpt": "parseq", ".pth": "parseq"}
 
 

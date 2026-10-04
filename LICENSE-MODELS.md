@@ -6,10 +6,16 @@ AGPL не підпадають**: це окремі файли, яких у па
 
 ## Умови
 
-Ваги **Писар** (`pysar_cyr_*.pt`), **Дяк** (`diak_cyr_*.mlmodel`) і **Скриба**
-(`skryba_f792_*.mlmodel`), викладені в релізах цього репозиторію, поширюються за
+Ваги **Писар** (`pysar_cyr_*.pt`), **Дяк** (`diak_cyr_*.mlmodel`), **Дяк-Літописець**
+(`diak_cyr_*.safetensors`), **Скриба** (`skryba_f792_*.mlmodel`) і **Скриба PP**
+(`skryba_pp_*.safetensors`), викладені в релізах цього репозиторію, поширюються за
 [**Creative Commons Attribution-ShareAlike 4.0 International**][cc]
 (CC BY-SA 4.0).
+
+Дяк-Літописець і Скриба PP дотреновані від базової моделі
+[**PP-OCRv6 (medium)**][ppocr] для kraken (Benjamin Kiessling,
+doi:10.5281/zenodo.21788410), що поширюється за [Apache License 2.0][apache].
+Її атрибуція й текст ліцензії їдуть разом із цими вагами.
 
 Коротко, і це не заміна тексту ліцензії:
 
@@ -22,7 +28,7 @@ AGPL не підпадають**: це окремі файли, яких у па
 
 Атрибуція в такому вигляді достатня:
 
-> Ваги Нишпорки (Писар v17) © Serhii Dalishchynskyi, CC BY-SA 4.0 —
+> Ваги Нишпорки (Писар v19) © Serhii Dalishchynskyi, CC BY-SA 4.0 —
 > https://github.com/SERGIUSH-UA/nyshporka
 
 ## Чому окремо від коду
@@ -42,3 +48,5 @@ AGPL написана під вихідний код, і на бінарних �
 жодного з документів.
 
 [cc]: https://creativecommons.org/licenses/by-sa/4.0/deed.uk
+[ppocr]: https://doi.org/10.5281/zenodo.21788410
+[apache]: https://www.apache.org/licenses/LICENSE-2.0
