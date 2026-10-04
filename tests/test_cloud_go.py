@@ -57,7 +57,7 @@ class Box1(FakeSession):
         self.cmds.append(cmd)
         if "import kraken" in cmd:
             ok = self.engine or self.prepared
-            return Completed(rc=0, out=f"OK 2.4.0 {self.cuda}" if ok
+            return Completed(rc=0, out=f"OK 7.1.1 2.4.0 {self.cuda}" if ok
                              else "No module named kraken")
         if " venv " in cmd:
             self.prepared = True

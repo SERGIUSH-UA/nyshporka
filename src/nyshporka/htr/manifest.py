@@ -15,6 +15,13 @@ import yaml
 
 BUILTIN = Path(__file__).resolve().parent / "data" / "engines.yaml"
 
+#: Розширення ваг за рушієм. `.safetensors` — PP-OCRv6 (kraken ≥ 7.1).
+#: 🔴 Єдине місце, де перелічено розширення моделей: досі `.pt`/`.mlmodel`
+#: стояли копіями в п'яти модулях, і нове розширення там мовчки не бачилось.
+MODEL_SUFFIXES_KRAKEN = (".mlmodel", ".safetensors")
+MODEL_SUFFIXES_PARSEQ = (".pt", ".ckpt", ".pth")
+MODEL_SUFFIXES = MODEL_SUFFIXES_KRAKEN + MODEL_SUFFIXES_PARSEQ
+
 #: Межа між іменем пакета й рештою pip-специфікації.
 #: `@` тут перший навмисно: у формі PEP 508 (`strhub @ git+https://…`) ім'я
 #: стоїть ЛІВОРУЧ від нього, і різати спершу за версією означало б віддати
@@ -38,7 +45,7 @@ def _version(text: str) -> tuple[int, ...]:
 
 
 def dist_name(spec: str) -> str:
-    """Ім'я пакета з pip-специфікації: `kraken==7.0.2` → `kraken`.
+    """Ім'я пакета з pip-специфікації: `kraken==7.1.1` → `kraken`.
 
     🔴 Різати мусить ОДНА функція. Доти цей вираз стояв копією в
     `env.inspect`, а `env.setup` замість нього шукав ім'я підрядком — і саме
@@ -61,8 +68,14 @@ class Engine:
     label: str
     kind: str          # kraken | parseq
     script: str        # latin | cyrillic
-    model_glob: str
+    model_glob: str    # перший із `model_globs` — для контракту й старих читачів
     note: str = ""
+    #: Усі шаблони імені. Рушій kraken має два формати ваг (`.mlmodel` і
+    #: `.safetensors`), а письмо однакове — тому шаблонів кілька, а не рушіїв.
+    model_globs: tuple[str, ...] = ()
+
+    def globs(self) -> tuple[str, ...]:
+        return self.model_globs or ((self.model_glob,) if self.model_glob else ())
 
 
 @dataclass(frozen=True)
@@ -97,6 +110,8 @@ class Manifest:
     #: Intel Mac: звідки брати інтерпретатор і torch, коли PyPI їх не має.
     conda_channel: str = ""
     conda_packages: tuple[str, ...] = ()
+    #: Еталонні піни torch (те, що резолвить kraken) — для хмарного боксу.
+    torch_reference: tuple[str, ...] = ()
 
     # ── питання до маніфесту ─────────────────────────────────────────────────
     def engine_for_model(self, filename: str) -> Engine | None:
@@ -112,16 +127,16 @@ class Manifest:
 
         name = Path(filename).name
         for e in self.engines:
-            if fnmatch(name, e.model_glob):
+            if any(fnmatch(name, g) for g in e.globs()):
                 return e
         return None
 
     def kind_for_suffix(self, suffix: str) -> str | None:
         """Рушій за самим лише розширенням — коли ім'я нічого не каже."""
         s = suffix.lower()
-        if s in (".mlmodel",):
+        if s in MODEL_SUFFIXES_KRAKEN:
             return "kraken"
-        if s in (".pt", ".ckpt", ".pth"):
+        if s in MODEL_SUFFIXES_PARSEQ:
             return "parseq"
         return None
 
@@ -205,6 +220,16 @@ class Manifest:
         return out
 
 
+def _engine(e: dict[str, Any]) -> Engine:
+    raw_glob = e.get("model_glob") or ""
+    globs = tuple(str(g) for g in raw_glob) if isinstance(raw_glob, list) else (
+        (str(raw_glob),) if raw_glob else ())
+    return Engine(id=str(e.get("id") or ""), label=str(e.get("label") or ""),
+                  kind=str(e.get("kind") or ""), script=str(e.get("script") or ""),
+                  model_glob=globs[0] if globs else "", note=str(e.get("note") or ""),
+                  model_globs=globs)
+
+
 def _build(raw: dict[str, Any]) -> Manifest:
     rt = raw.get("runtime") or {}
     torch = rt.get("torch") or {}
@@ -219,14 +244,11 @@ def _build(raw: dict[str, Any]) -> Manifest:
                             "note": str(v.get("note") or "")}
                            for v in (rt.get("vcs_packages") or [])),
         torch_default=tuple(str(p) for p in (torch.get("default") or [])),
+        torch_reference=tuple(str(p) for p in (torch.get("reference") or [])),
         cuda_index=str(torch.get("cuda_index") or ""),
         cuda_matrix=tuple({str(k): str(v) for k, v in (row or {}).items()}
                           for row in (torch.get("cuda_matrix") or [])),
-        engines=tuple(Engine(
-            id=str(e.get("id") or ""), label=str(e.get("label") or ""),
-            kind=str(e.get("kind") or ""), script=str(e.get("script") or ""),
-            model_glob=str(e.get("model_glob") or ""), note=str(e.get("note") or ""))
-            for e in (raw.get("engines") or [])),
+        engines=tuple(_engine(e) for e in (raw.get("engines") or [])),
         patches=tuple(Patch(
             id=str(p.get("id") or ""), module=str(p.get("module") or ""),
             verify=str(p.get("verify") or ""), tested_on=str(p.get("tested_on") or ""),

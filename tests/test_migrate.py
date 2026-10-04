@@ -44,12 +44,13 @@ def test_an_old_workspace_has_the_migration_pending_until_done(space: Path) -> N
                                                                "0.23.3"]
     assert [m.version for m in M.pending(space, "0.23.4")][-2:] == ["0.23.3", "0.23.4"]
     assert [m.version for m in M.pending(space, "0.23.5")][-1] == "0.23.5"
+    assert [m.version for m in M.pending(space, "0.24.0")][-1] == "0.24"
     assert M.pending(space, "0.18.14") == [], "новіша за пакет міграція не показується"
     env = O.call("workspace.info", {})
     assert any(w.code == "agent_migration" for w in env.warnings)
     done = O.call("migrate.done", {})
     assert done.ok and done.data["marked"] == ["0.19", "0.20", "0.21", "0.22", "0.23", "0.23.3",
-                                               "0.23.4", "0.23.5"]
+                                               "0.23.4", "0.23.5", "0.24"]
     assert M.pending(space, "0.19.0") == [] and M.pending(space, "0.20.0") == []
     assert not any(w.code == "agent_migration" for w in O.call("workspace.info", {}).warnings)
 
@@ -145,3 +146,32 @@ def test_cli_show_and_scan(space: Path) -> None:
     assert res.exit_code == 1
     res = runner.invoke(app, ["migrate", "--scan", str(space)])
     assert res.exit_code == 0
+
+
+def test_engines_check_sees_an_outdated_engine(space: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Крок `engines` 0.24: застарілий kraken — `todo` з командою, свіжий — `ok`."""
+    from nyshporka.htr import env as E
+
+    assert M.run_check("engines_current", space).state == "n/a"
+    monkeypatch.setattr(E, "venv_python", lambda venv: Path(__file__))
+    monkeypatch.setattr(E, "inspect", lambda venv, man=None: E.EnvReport(
+        ok=False, kraken="7.0.2", stale=("kraken",)))
+    got = M.run_check("engines_current", space)
+    assert got.state == "todo" and "nysh htr install" in got.detail
+    monkeypatch.setattr(E, "inspect", lambda venv, man=None: E.EnvReport(
+        ok=True, kraken="7.1.1", torch="2.14.0"))
+    assert M.run_check("engines_current", space).state == "ok"
+
+
+def test_models_check_ignores_superseded_packs(space: Path, tmp_path: Path,
+                                               monkeypatch: pytest.MonkeyPatch) -> None:
+    """Крок `models` 0.24: бракує лише чинних ваг; замінених качати не треба."""
+    from nyshporka.setup import packs
+
+    monkeypatch.setattr(packs, "target_dir", lambda kind: tmp_path / "packs")
+    got = M.run_check("models_current", space)
+    assert got.state == "todo"
+    current = {p.id for p in packs.catalog() if p.kind == "model" and not p.superseded}
+    old = {p.id for p in packs.catalog() if p.superseded}
+    assert current and all(i in got.detail for i in current)
+    assert not any(i in got.detail for i in old)

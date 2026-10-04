@@ -1,6 +1,6 @@
 """Один ресайз кадру замість двох у `kraken.blla.compute_segmentation_map`.
 
-Що робить стоковий kraken 7.0.2 (`blla.py:101-106`): будує ланцюг трансформів
+Що робить стоковий kraken 7.x (`blla.py:101-106`): будує ланцюг трансформів
 (режим → LANCZOS-ресайз до висоти сегментера → паддінг → тензор → інверсія),
 відрізає його на `PILToTensor` і застосовує голову ланцюга до кадру, щоб
 отримати `scal_im` (масштабоване сіре зображення для геометрії), а потім
@@ -38,12 +38,13 @@ logger = logging.getLogger(__name__)
 #: сам ланцюг трансформів, і розбіжність буде тихою — інша нарізка рядків без
 #: помилки в лозі. Тому — гучне попередження й гард імен.
 #:
-#: torchvision — кілька версій: 0.25 ставить `nysh htr install` (kraken 7.0.2
-#: тримає torch ≤ 2.10), 0.28 стоїть у старших середовищах. Обидві звірено
-#: на тих самих п'яти кадрах ДАОО ф.37 спр.1347: вхід мережі побайтно, рядки
-#: тотожні.
-TESTED_KRAKEN = ("7.0.2",)
-TESTED_TORCHVISION = ("0.25.0", "0.28.0")
+#: torchvision — кілька версій: 0.29.1 ставить `nysh htr install` на kraken
+#: 7.1.1, а 0.25 і 0.28 лишаються в середовищах, оновлених на місці (torch там
+#: не перекачується). 0.25 і 0.28 звірено на п'яти кадрах ДАОО ф.37 спр.1347
+#: (вхід мережі побайтно, рядки тотожні), 0.29.1 — звіркою родоводу
+#: 7.0.2 ↔ 7.1.1 (`kraken_lineage_verify`).
+TESTED_KRAKEN = ("7.0.2", "7.1.1")
+TESTED_TORCHVISION = ("0.25.0", "0.28.0", "0.29.1")
 
 
 def _warn_version_drift() -> None:
@@ -80,7 +81,7 @@ def split_transforms(transforms):
 def compute_segmentation_map_once(im, mask: Optional[Any] = None, model=None,
                                   device: str = "cpu",
                                   autocast: bool = False) -> dict[str, Any]:
-    """Копія `blla.compute_segmentation_map` (kraken 7.0.2) з одним ресайзом."""
+    """Копія `blla.compute_segmentation_map` (kraken 7.0.2 = 7.1.1) з одним ресайзом."""
     import numpy as np
     import torch
     import torch.nn.functional as F

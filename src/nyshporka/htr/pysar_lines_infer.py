@@ -23,11 +23,16 @@ strhub'ом, не kraken'ом (memory ``parseq-train-job-and-cyrillic-consensus`
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import time
 import unicodedata
 from pathlib import Path
 from typing import Any
+
+# 🔴 Власні triton-ядра torch 2.14 (`torch._native`) — вимкнено до `import torch`:
+# без gcc їхня збірка роняє кожен рядок. Причина й замір — у `runner.py`.
+os.environ.setdefault("TORCH_DISABLE_NATIVE_JIT", "1")
 
 # 🔴 Символи, яких у рукописі XIX ст. не буває фізично, — службові маркери
 # конфлікту з LLM-злиття (`‹26|20›`). Одного разу вони протекли у трен-корпус

@@ -52,7 +52,7 @@ _LOCK = threading.Lock()
 
 @dataclass(frozen=True)
 class FileType:
-    """Рядок фільтра діалогу: «Ваги рушія» — `*.mlmodel`, `*.pt`."""
+    """Рядок фільтра діалогу: «Ваги рушія» — `*.mlmodel`, `*.safetensors`, `*.pt`."""
 
     label: str
     patterns: tuple[str, ...]

@@ -77,11 +77,13 @@ def test_info_reports_missing_extras_with_the_fix():
         assert label in res.stdout
     from importlib.util import find_spec
 
-    for module, extra in (("fastapi", "app"), ("aiolimiter", "archives"),
-                          ("torch", "htr")):
+    for module, extra in (("fastapi", "app"), ("aiolimiter", "archives")):
         if find_spec(module) is None:
             assert f"[{extra}]" in res.stdout, (
                 f"порада для «{extra}» втратила назву extra — команда не працює")
+    # HTR — не extra, а окреме середовище рушіїв: лагодить його `nysh htr install`.
+    htr = next(ln for ln in res.stdout.splitlines() if "HTR" in ln)
+    assert "немає" not in htr or "nysh htr install" in htr, htr
 
 
 def test_info_never_advertises_an_extra_that_does_not_exist():

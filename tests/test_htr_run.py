@@ -92,6 +92,74 @@ def test_second_voice_is_a_different_engine(space: Path) -> None:
     assert none is None
 
 
+def test_pp_voice_is_found_and_the_newest_generation_wins(space: Path) -> None:
+    """Дяк-Літописець (`.safetensors`, PP-OCRv6) — нове покоління Дяка.
+
+    Доти `local_models` бачив лише `.pt`/`.mlmodel`, тож ваги PP лежали поруч і
+    не існували для вибору: читання мовчки йшло старим голосом.
+    """
+    _weights(space, "pysar_cyr_v18.pt", "diak_cyr_v4.mlmodel", "diak_cyr_v6.safetensors")
+    _, voice = R.pick_model("cyrillic", second_voice=True)
+    assert voice is not None and voice.name == "diak_cyr_v6.safetensors"
+
+
+def test_production_names_the_voice_too(space: Path) -> None:
+    """Голос — теж рішення дослідника, а не наслідок номера версії."""
+    _weights(space, "pysar_cyr_v18.pt", "diak_cyr_v4.mlmodel", "diak_cyr_v6.safetensors")
+    (space / R.PRODUCTION_NAME).write_text(json.dumps({"production": {
+        "cyrillic": {"model": "pysar_cyr_v18.pt", "voice": "diak_cyr_v4.mlmodel"}}}),
+        encoding="utf-8")
+    main, voice = R.pick_model("cyrillic", second_voice=True)
+    assert main.name == "pysar_cyr_v18.pt"
+    assert voice is not None and voice.name == "diak_cyr_v4.mlmodel"
+
+
+def test_production_picks_a_new_family_over_a_bigger_number(space: Path) -> None:
+    """🔴 Номер між родинами не порівнюється: `skryba_pp_v3` — нове покоління,
+    а за номером його обійшла б `skryba_f792_v6`."""
+    _weights(space, "skryba_f792_v6.mlmodel", "skryba_pp_v3.safetensors")
+    (space / R.PRODUCTION_NAME).write_text(json.dumps({"production": {
+        "latin": {"model": "skryba_pp_v3.safetensors"}}}), encoding="utf-8")
+    main, _ = R.pick_model("latin")
+    assert main.name == "skryba_pp_v3.safetensors"
+
+
+def test_superseded_pack_reads_until_the_new_one_arrives(space: Path, tmp_path: Path,
+                                                         monkeypatch) -> None:
+    """🔴 Оновлений застосунок читає й без нових ваг — старими, якщо вони вже є.
+
+    Замінений пак не качається за замовчуванням (новий користувач не платить
+    за ваги, якими ніхто не читає), але той, у кого він уже лежить, не має
+    лишитись «читати нічим», доки нові не довантажені. Щойно новий є — він
+    перший, хоч номер у нього менший.
+    """
+    from nyshporka.setup import packs
+
+    cache = tmp_path / "_cache"
+    cache.mkdir()
+    old = packs.Pack(id="skryba-f792-v6", kind="model", filename="skryba_f792_v6.mlmodel",
+                     sha256="x", size=1, release="weights-v1", script="latin",
+                     engine="kraken", superseded=True)
+    new = packs.Pack(id="skryba-pp-v3", kind="model", filename="skryba_pp_v3.safetensors",
+                     sha256="y", size=1, release="weights-v2", script="latin",
+                     engine="kraken")
+    present = {"skryba-f792-v6"}
+    monkeypatch.setattr(packs, "catalog", lambda: [old, new])
+    monkeypatch.setattr(packs, "verify", lambda p: p.id in present)
+    monkeypatch.setattr(packs, "path_of", lambda p: cache / p.filename)
+
+    main, _ = R.pick_model("latin")
+    assert main.name == "skryba_f792_v6.mlmodel"
+
+    present.add("skryba-pp-v3")
+    main, _ = R.pick_model("latin")
+    assert main.name == "skryba_pp_v3.safetensors"
+    # і за замовчуванням качається лише нове
+    assert [p.id for p in packs.missing()] == []
+    present.discard("skryba-pp-v3")
+    assert [p.id for p in packs.missing()] == ["skryba-pp-v3"]
+
+
 def test_no_weights_is_a_message_not_a_crash(space: Path) -> None:
     with pytest.raises(R.ReadError, match="моделі письма"):
         R.pick_model("cyrillic")

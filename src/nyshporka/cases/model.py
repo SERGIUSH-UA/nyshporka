@@ -17,7 +17,8 @@ from dataclasses import dataclass, field
 STATES = ("ordered", "archived", "partial", "on_disk")
 
 #: Три голоси HTR за іменем моделі. Письмо каже префікс, не розширення:
-#: `skryba_*.mlmodel` — латинка, `diak_*.mlmodel` — кирилиця, обидва kraken.
+#: `skryba_*` — латинка, `diak_*` — кирилиця, обидва kraken (`.mlmodel` або
+#: `.safetensors`).
 VOICES = ("pysar", "diak", "skryba")
 
 

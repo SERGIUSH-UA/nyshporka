@@ -40,7 +40,7 @@
 
     ```
     nysh train cut <прогін> --name <набір> --pick 6 --domain "метрична книга"
-    nysh train voices --set <набір> --from-run <прогін>-diak_v4
+    nysh train voices --set <набір> --from-run <прогін>-diak_v6
     nysh train plan --recipe own
     nysh train build --name v1 --recipe own
     nysh train start --corpus v1 --dry-run              # план: години, карта, команда

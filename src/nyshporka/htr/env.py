@@ -60,6 +60,9 @@ class EnvReport:
     capability: str = ""
     missing: tuple[str, ...] = ()
     problems: tuple[str, ...] = ()
+    #: Стоїть, але не тієї версії, що закріплена в маніфесті (`==`). Не
+    #: «зламано», а «застаріло»: `setup()` оновлює це на місці.
+    stale: tuple[str, ...] = ()
 
 
 #: Змінні, якими батьківський Python каже дитині, ДЕ її стандартна бібліотека.
@@ -81,6 +84,8 @@ def foreign_env(extra: dict[str, str] | None = None) -> dict[str, str]:
 
     env = {k: v for k, v in os.environ.items() if k not in _PARENT_PYTHON_VARS}
     env.setdefault("PYTHONIOENCODING", "utf-8")
+    # власні triton-ядра torch 2.14 без gcc роняють читання — див. `runner.py`
+    env.setdefault("TORCH_DISABLE_NATIVE_JIT", "1")
     env.update(extra or {})
     return env
 
@@ -98,6 +103,17 @@ def _probe(py: Path, code: str, timeout: int = 120) -> str | None:
 
 def _version_of(py: Path, dist: str) -> str:
     return _probe(py, f"import importlib.metadata as m; print(m.version({dist!r}))") or ""
+
+
+#: «torch рахує на карті» — справжнім ядром, а не `is_available()`.
+#: 🔴 `is_available()` каже True і тоді, коли в колесі немає ядер під цю карту:
+#: колесо torch 2.14 з PyPI на Linux зібране під CUDA 13 (cu130), де найдавніша
+#: архітектура — sm_75: V100 (sm_70) і GTX 10xx (sm_61) лишаються без ядер.
+#: Тоді крок під карту пропускався, а читання падало аж на прогоні з «no kernel
+#: image is available» (Vast V100, 04.10.2026: torch 2.14.0+cu130, усі `nysh
+#: read` — rc=1 при GPU 0%).
+CUDA_WORKS = ("import torch; print(torch.cuda.is_available() and "
+              "float((torch.ones(4, device='cuda') * 2).sum()) == 8.0)")
 
 
 def inspect(venv: Path, man: M.Manifest | None = None) -> EnvReport:
@@ -126,21 +142,31 @@ def inspect(venv: Path, man: M.Manifest | None = None) -> EnvReport:
 
     kraken = _version_of(py, "kraken")
     torch_v = _probe(py, "import torch; print(torch.__version__)") or ""
-    cuda = _probe(py, "import torch; print(torch.cuda.is_available())") == "True"
+    cuda = _probe(py, CUDA_WORKS) == "True"
     cap = _probe(py, "import torch; print('%d.%d' % torch.cuda.get_device_capability(0))") \
         if cuda else ""
 
     problems: list[str] = []
-    want = next((s.split("==")[1] for s in man.packages
-                 if s.startswith("kraken==")), "")
-    if kraken and want and kraken != want:
+    stale: list[str] = []
+    for spec in man.packages:
+        if "==" not in spec:
+            continue
+        dist, want = M.dist_name(spec), spec.split("==", 1)[1].strip()
+        have = kraken if dist == "kraken" else _version_of(py, dist)
+        if have and have != want:
+            stale.append(dist)
+    want_k = next((s.split("==")[1] for s in man.packages
+                   if s.startswith("kraken==")), "")
+    if kraken and want_k and kraken != want_k:
         problems.append(
-            f"kraken {kraken}, а патчі сегментації звірені на {want} — "
-            f"розбіжність буде тихою: інші полігони рядків, тобто інший текст")
+            f"kraken {kraken}, а патчі сегментації звірені на {want_k} — "
+            f"розбіжність буде тихою: інші полігони рядків, тобто інший текст. "
+            f"`nysh htr install` оновить середовище на місці")
 
     return EnvReport(ok=not missing and not problems, python=py, kraken=kraken,
                      torch=torch_v, cuda=cuda, capability=cap or "",
-                     missing=tuple(missing), problems=tuple(problems))
+                     missing=tuple(missing), problems=tuple(problems),
+                     stale=tuple(stale))
 
 
 class ToolMissing(RuntimeError):
@@ -158,8 +184,8 @@ def intel_mac() -> bool:
     """Mac з процесором Intel — або Python під Rosetta на Apple Silicon.
 
     🔴 Issue #10. PyTorch перестав випускати колеса для macOS x86_64 після
-    torch 2.2.2 / torchvision 0.17.2, а `kraken==7.0.2` — пін під патчі, який
-    знімати не можна, — вимагає torch ≥ 2.4. З PyPI цю пару не скласти ніколи,
+    torch 2.2.2 / torchvision 0.17.2, а `kraken==7.1.1` — пін під патчі, який
+    знімати не можна, — вимагає torch ≥ 2.9. З PyPI цю пару не скласти ніколи,
     тож тут середовище створюється інакше: інтерпретатор і torch беруться з
     conda-forge (`Manifest.conda_*`), а решта ставиться pip'ом, як усюди.
 
@@ -307,13 +333,26 @@ def _from_install_info(name: str) -> str:
 
 
 def _run(cmd: list[str], env: dict[str, str] | None = None) -> None:
+    """Команда установки — в оточенні без змінних батьківського Python.
+
+    🔴 Python у venv, створеному uv на Windows, сам ставить собі `PYTHONHOME`.
+    `uv pip install` передає його далі, і пакет без колеса під Windows
+    (`coremltools`, залежність kraken) збирався інтерпретатором 3.11 зі
+    стандартною бібліотекою 3.12/3.13 застосунку: `SyntaxError` у `typing.py`,
+    і свіже `nysh htr install` падало (пісочниця оновлення, 04.10.2026).
+    """
     print("  $ " + " ".join(cmd))
-    subprocess.run(cmd, check=True, env=env)
+    subprocess.run(cmd, check=True, env=env if env is not None else foreign_env())
 
 
 def setup(venv: Path, *, man: M.Manifest | None = None, with_cuda: bool = True,
           uv: str = "uv", force_tag: str = "") -> EnvReport:
-    """Створити або доповнити середовище. Ідемпотентно: наявне не чіпається."""
+    """Створити, доповнити або оновити на місці. Ідемпотентно.
+
+    Наявне й правильне не чіпається; відсутнє ставиться; закріплене (`==`)
+    іншої версії — оновлюється в тому самому venv. Нового середовища поруч зі
+    старим не з'являється ніколи: це був би другий torch на 2.5–4 ГБ.
+    """
     man = man or M.active()
     _need_tool(uv, "ним створюється й наповнюється середовище рушіїв",
                "Windows: winget install astral-sh.uv · "
@@ -339,8 +378,13 @@ def setup(venv: Path, *, man: M.Manifest | None = None, with_cuda: bool = True,
         _run([uv, "venv", str(venv), "--python", man.python])
 
     rep = inspect(venv, man)
-    if rep.missing:
-        print(f"② ставлю: {', '.join(rep.missing)}")
+    need = [*rep.missing, *rep.stale]
+    if need:
+        if rep.stale:
+            print(f"② оновлюю на місці: {', '.join(rep.stale)}"
+                  + (f"; ставлю: {', '.join(rep.missing)}" if rep.missing else ""))
+        else:
+            print(f"② ставлю: {', '.join(rep.missing)}")
         # 🔴 За КЛЮЧЕМ, а не підрядком. Доти рядок звучав
         # `if any(m in s for m in rep.missing)` і мовчки викидав усе, чиє ім'я
         # не є підрядком власної специфікації, — тобто рівно git-залежності:
@@ -348,14 +392,21 @@ def setup(venv: Path, *, man: M.Manifest | None = None, with_cuda: bool = True,
         # ставився ніколи, `pip` виходив із нуля, а `doctor` слав по колу назад
         # у цю саму команду.
         plan = man.install_specs()
-        specs = [plan[m] for m in rep.missing if m in plan]
-        unknown = [m for m in rep.missing if m not in plan]
+        unknown = [m for m in need if m not in plan]
         if unknown:
             # Пакет, якого бракує, але ставити його нема чим. Мовчати про це
             # найгірше: далі буде «поставив» і те саме «бракує» — без причини.
             print(f"⚠ у маніфесті немає, чим ставити: {', '.join(unknown)}")
-        if specs:
-            _run([uv, "pip", "install", "--python", str(venv_python(venv)), *specs])
+        if any(m in plan for m in need):
+            # 🔴 У резолвер іде ВЕСЬ маніфест, а не лише відсутнє. `uv pip install`
+            # не зважає на обмеження вже встановлених пакетів, яких немає в
+            # запиті: доставлений окремо `nltk` підняв `click` до 8.5, хоча
+            # kraken 7.1.1 тримає `click<8.3` (спіймано 04.10.2026 сухим прогоном).
+            # Задоволене uv не чіпає, тож зайвого це не ставить — зокрема torch:
+            # якщо наявний у межах kraken, він лишається, і оновлення kraken
+            # коштує десятки МБ, а не 2.5 ГБ нового колеса.
+            _run([uv, "pip", "install", "--python", str(venv_python(venv)),
+                  *plan.values()])
         else:
             # ⚠ `uv pip install` без жодного пакета виходить ненульовим кодом,
             # а `_run` іде з `check=True` — тобто порожній список ронив команду
@@ -374,8 +425,8 @@ def _pinned_torch(py: Path, man: M.Manifest) -> list[str]:
     """torch і torchvision під карту — ТИХ САМИХ версій, що вже стоять.
 
     🔴 Без піну `--reinstall torch torchvision` з CUDA-індексу бере найновіше, і
-    обмеження kraken 7.0.2 (`torch<=2.10`) резолвер уже не бачить: заміряно
-    02.10.2026 — на місце 2.10.0, яку поставив крок ②, приїхала 2.14.1+cu126,
+    обмеження kraken (`torch<=2.14` у 7.1.1) резолвер уже не бачить: заміряно
+    02.10.2026 — на місце версії, яку поставив крок ②, приїхала 2.14.1+cu126,
     `uv pip check` — «incompatible». Патчі сегментації звірені на тому, що
     резолвить kraken, тож колесо під карту має бути тією самою версією.
     Локальна мітка (`+cpu`) відкидається: `==2.10.0` бере й `2.10.0+cu126`.
@@ -406,7 +457,7 @@ def _ensure_cuda(venv: Path, man: M.Manifest, uv: str = "uv", force_tag: str = "
         # `nvidia-smi` тут означало б друкувати «карти не видно» на кожному Mac.
         print(f"✓ macOS: {gpu.CPU_NOTE}")
         return
-    if _probe(py, "import torch; print(torch.cuda.is_available())") == "True":
+    if _probe(py, CUDA_WORKS) == "True":
         print("✓ torch уже бачить карту")
         return
 
@@ -437,7 +488,7 @@ def _ensure_cuda(venv: Path, man: M.Manifest, uv: str = "uv", force_tag: str = "
               f"  Ймовірно, під цю версію torch колеса {tag} на індексі вже немає: "
               f"спробуйте інший тег через `nysh htr install --cuda …`")
         return
-    if _probe(py, "import torch; print(torch.cuda.is_available())") == "True":
+    if _probe(py, CUDA_WORKS) == "True":
         print(f"✓ карта підхопилась ({tag})")
     else:
         print(f"⚠ колесо {tag} стало, але torch усе одно не бачить карту — {gpu.CPU_NOTE}.\n"
@@ -464,7 +515,8 @@ def write_contract(path: Path, venv: Path, *, model_path: Path | None = None,
         "capability": rep.capability,
         "model_path": str(model_path) if model_path else "",
         "engines": [{"id": e.id, "kind": e.kind, "script": e.script,
-                     "model_glob": e.model_glob} for e in man.engines],
+                     "model_glob": e.model_glob, "model_globs": list(e.globs())}
+                    for e in man.engines],
         "patches": [{"id": p.id, "tested_on": p.tested_on} for p in man.patches],
         "missing": list(rep.missing),
         "problems": list(rep.problems),

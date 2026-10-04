@@ -430,8 +430,8 @@ def rotate_fast(image, angle, center, scale, cval=0, order=0,
 #: Це патч чужого коду: інша версія kraken може змінити семантику підмінених
 #: функцій, і розбіжність буде тихою — той самий скан дасть інші полігони рядків,
 #: тобто інший текст, без жодної помилки в лозі. Тому — гучне попередження.
-TESTED_KRAKEN = "7.0.2"
-TESTED_SHAPELY = "2.1.2"
+TESTED_KRAKEN = ("7.0.2", "7.1.1")
+TESTED_SHAPELY = ("2.1.2",)
 
 
 def _warn_version_drift() -> None:
@@ -442,11 +442,11 @@ def _warn_version_drift() -> None:
             have = md.version(pkg)
         except Exception:
             continue
-        if have != tested:
+        if have not in tested:
             # ⚠ Верифікатор лежить поруч, у самому пакеті. Порада вказувала на
             # `scripts/`, тобто на розташування, якого тут немає, — і людина,
             # яка побачила це попередження, не могла його перевірити.
-            print(f"[fast-geom] ⚠ {pkg} {have}, а патчі звірені на {tested}. "
+            print(f"[fast-geom] ⚠ {pkg} {have}, а патчі звірені на {', '.join(tested)}. "
                   f"Перезвір: <інтерпретатор рушіїв> -m "
                   f"nyshporka.htr.patches.fast_geom_verify 5", flush=True)
 
@@ -490,7 +490,7 @@ def install(verbose: bool = False) -> bool:
     if missing:
         raise RuntimeError(
             f"fast_geom: у kraken.lib.segmentation немає {missing} — "
-            f"версія пакета розійшлася з патчем (звірено на {TESTED_KRAKEN})")
+            f"версія пакета розійшлася з патчем (звірено на {', '.join(TESTED_KRAKEN)})")
     kseg._calc_roi_orig = kseg._calc_roi
     kseg._calc_roi = _with_fallback(calc_roi_fast, kseg._calc_roi_orig, "calc_roi")
     kseg._boundary_tracing_orig = kseg.boundary_tracing

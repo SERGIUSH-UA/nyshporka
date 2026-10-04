@@ -24,7 +24,6 @@ from nyshporka.htr import env
 from nyshporka.htr import manifest as M
 
 ROOT = Path(__file__).resolve().parents[1]
-INTEL_MAC_MARKER = "platform_system != 'Darwin' or platform_machine != 'x86_64'"
 
 
 def _pretend(monkeypatch: pytest.MonkeyPatch, *, platform: str, machine: str) -> None:
@@ -46,12 +45,12 @@ def test_intel_mac_is_the_interpreter_not_the_metal(monkeypatch, platform, machi
 
 
 def test_manifest_carries_a_conda_recipe_that_fits_kraken() -> None:
-    """🔴 Без блоку conda Intel Mac лишається без torch; стеля 2.10 — межа kraken 7.0.2."""
+    """🔴 Без блоку conda Intel Mac лишається без torch; межі 2.9…2.14 — межі kraken 7.1.1."""
     man = M.load()
     assert man.conda_channel == "conda-forge"
     torch_spec = next((p for p in man.conda_packages if p.startswith("pytorch")), "")
     assert torch_spec, "у conda-рецепті немає pytorch"
-    assert ">=2.4" in torch_spec and "<=2.10" in torch_spec, torch_spec
+    assert ">=2.9" in torch_spec and "<=2.14" in torch_spec, torch_spec
     assert any(p.startswith("torchvision") for p in man.conda_packages)
 
 
@@ -109,17 +108,24 @@ def test_macos_skips_the_cuda_step(monkeypatch, tmp_path, capsys) -> None:
     assert "CPU" in capsys.readouterr().out
 
 
-def test_htr_extra_is_empty_on_intel_mac_instead_of_fatal() -> None:
-    """🔴 Extra `htr` без маркера валив `pip install 'nyshporka[app,archives,htr]'`
-    і `nysh update` ЦІЛКОМ — разом із консоллю й архівами, яким torch не
-    потрібен. Рушії живуть в окремому середовищі, тож у самому пакеті torch на
-    такій машині нема за що триматись."""
+def test_htr_extra_carries_no_torch_into_the_app() -> None:
+    """🔴 Extra `htr` порожній: torch живе лише в середовищі рушіїв.
+
+    Доти тут стояли torch, torchvision і timm — у середовищі ЗАСТОСУНКУ, де в
+    читанні вони не беруть участі. Кожен, хто ставив набір із читанням, тримав
+    два torch по 2.5–4 ГБ, а на Intel Mac сама вимога без маркера платформи
+    валила `pip install 'nyshporka[app,archives,htr]'` і `nysh update` цілком.
+    Extra лишається (старі команди мусять резолвитись), але порожнім.
+    """
     meta = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
-    htr = meta["project"]["optional-dependencies"]["htr"]
-    assert htr, "extra `htr` спорожнів зовсім — інсталятор ставитиме невідомо що"
-    for spec in htr:
-        assert INTEL_MAC_MARKER in spec, (
-            f"{spec}: без маркера платформи ця вимога валить установку на Intel Mac")
+    extras = meta["project"]["optional-dependencies"]
+    assert "htr" in extras, "extra `htr` зник — `nyshporka[...,htr]` у старих командах не резолвився б"
+    assert extras["htr"] == [], extras["htr"]
+    heavy = ("torch", "torchvision", "timm", "kraken")
+    for name, specs in extras.items():
+        for spec in specs:
+            dist = spec.split(";")[0].split("[")[0].split(">")[0].split("=")[0].split("<")[0].strip()
+            assert dist not in heavy, f"extra `{name}` тягне {dist} у середовище застосунку"
 
 
 def test_unix_installer_warns_intel_mac_about_the_separate_step() -> None:

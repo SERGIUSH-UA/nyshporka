@@ -67,6 +67,17 @@ if args[:2] == ["htr", "plan"]:
         print("--seed-seg потребує сховища: склад на машині з'являється "
               "аж після оренди", file=sys.stderr)
         sys.exit(2)
+    # Як справжній наглядач ≥ 0.6: вимоги рушіїв — з архіву ассетів у план.
+    params = opts("-p")
+    if opt("--assets") and not cfg.get("old_supervisor"):
+        import tarfile
+        with tarfile.open(opt("--assets")) as tf:
+            try:
+                reqs = tf.extractfile("scripts/engine_requirements.txt").read().decode()
+            except KeyError:
+                reqs = ""
+        if reqs:
+            params.append("engine_requirements=" + reqs)
     out.write_text(json.dumps({
         "cases": [{"case_dir": c,
                    "case_key": keys[i] if keys else "",
@@ -75,7 +86,7 @@ if args[:2] == ["htr", "plan"]:
                    "out_dir": opt("--out-root")} for i, c in enumerate(cases)],
         "model": opt("--model"), "voices": opt("--voices"),
         "assets": opt("--assets"), "disk_gb": opt("--disk"),
-        "transport": opt("--transport", "auto"), "params": opts("-p"),
+        "transport": opt("--transport", "auto"), "params": params,
     }, ensure_ascii=False), encoding="utf-8")
     sys.exit(0)
 
@@ -177,8 +188,23 @@ def _go(case: Path | str | list[str], **kw: Any) -> GO.GoResult:
 
 
 def _plan_of(fake: Any) -> dict[str, Any]:
+    """План, як його склав фейк, — без службових вимог рушіїв серед `-p`."""
     call = fake.called("htr", "plan")[0]
-    return json.loads(Path(call[call.index("--out") + 1]).read_text("utf-8"))
+    plan = json.loads(Path(call[call.index("--out") + 1]).read_text("utf-8"))
+    plan["params"] = [p for p in plan["params"] if not p.startswith("engine_requirements=")]
+    return plan
+
+
+def test_an_old_supervisor_is_refused_before_any_rent(space: Path, monkeypatch,
+                                                      fake_gpurunner) -> None:
+    """🔴 Наглядач, що не везе середовища рушіїв, лишив би бокс зі старим kraken —
+    і раннер на ньому не стартував би вже після оплаченого холодного старту."""
+    fake_gpurunner.set(old_supervisor=True)
+    case, _ = _wire(space, monkeypatch)
+    res = _go(case, script="cyrillic", dry_run=True)
+    assert res.verdict == "refused" and "застарий" in res.why, res.why
+    assert not fake_gpurunner.called("htr", "preflight"), "дійшло до передпольоту"
+    assert not fake_gpurunner.called("htr", "supervise"), "дійшло до оренди"
 
 
 # ── архів ассетів ────────────────────────────────────────────────────────────
@@ -773,7 +799,8 @@ def _seed_ready(space: Path, case: Path, *, covered: int | None = None) -> Path:
     d.mkdir(parents=True, exist_ok=True)
     for f in frames[:covered if covered is not None else len(frames)]:
         with gzip.open(d / f"{f.stem}.c400.seg.json.gz", "wt", encoding="utf-8") as fh:
-            json.dump({"key": dict(SEG.EXPECTED_KEY), "lines": []}, fh)
+            json.dump({"key": {**SEG.EXPECTED_KEY, "kraken": SEG.EXPECTED_LINEAGE[0]},
+                       "lines": []}, fh)
     return d
 
 

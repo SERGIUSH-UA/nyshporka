@@ -45,6 +45,12 @@ class Pack:
     script: str = ""     # для моделей: письмо (latin / cyrillic)
     engine: str = ""     # kraken | parseq
     note: str = ""
+    #: Пак попереднього покоління. Не качається за замовчуванням — новий
+    #: користувач не платить за ваги, якими вже ніхто не читає, — але якщо він
+    #: УЖЕ лежить у людини, то лишається кандидатом нижчого пріоритету. Так
+    #: оновлений застосунок читає й тоді, коли нові ваги ще не довантажені
+    #: (офлайн, обірване `nysh models get`): гірше, але не «читати нічим».
+    superseded: bool = False
 
     @property
     def url(self) -> str:
@@ -123,8 +129,11 @@ def installed() -> list[str]:
     return [p.id for p in catalog() if verify(p)]
 
 
-def missing(kind: str = "") -> list[Pack]:
-    return [p for p in catalog() if (not kind or p.kind == kind) and not verify(p)]
+def missing(kind: str = "", *, include_superseded: bool = False) -> list[Pack]:
+    """Чого бракує. Замінені паки сюди не входять: їх ніхто не мусить качати."""
+    return [p for p in catalog()
+            if (not kind or p.kind == kind) and (include_superseded or not p.superseded)
+            and not verify(p)]
 
 
 #: Запас над розміром пака з маніфесту: розмір там може бути округлений.
@@ -201,8 +210,10 @@ def as_dict() -> dict[str, Any]:
         rows.append({
             "id": p.id, "kind": p.kind, "label": p.label or p.id,
             "size": p.size, "script": p.script, "engine": p.engine,
+            "superseded": p.superseded,
             "state": ("ok" if verify(p)
-                      else "broken" if path.exists() else "absent"),
+                      else "broken" if path.exists()
+                      else "superseded" if p.superseded else "absent"),
             "path": str(path),
         })
     return {"dir": str(target_dir("model").parent), "packs": rows}

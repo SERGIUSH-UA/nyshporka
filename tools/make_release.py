@@ -12,11 +12,15 @@ sha256 робить `nysh models get` мертвим за побудовою: п
 Тому послідовність саме така: спершу порахувати з РЕАЛЬНИХ файлів, потім
 викласти ті самі файли. Порахувати «з майбутніх» неможливо, і це добре.
 
-    python tools/make_release.py <тека з вагами> [--release weights-v1] [--dry-run]
+    python tools/make_release.py <тека з вагами> [--release weights-v2] [--dry-run]
 
-Далі — викласти файли ассетами релізу з тим самим тегом:
+Далі — викласти файли ассетами релізу з тим самим тегом; точну команду з
+переліком файлів скрипт друкує сам.
 
-    gh release create weights-v1 <тека>/*.pt <тека>/*.mlmodel
+🔴 Замінені паки (`superseded`) скрипт не чіпає: їхні файли лежать у своєму
+релізі, і старі версії застосунку качають їх звідти. Переписаний тег чи хеш
+зламав би завантаження і в старих версіях, і в новій, яка бере замінений пак
+як запасний.
 """
 from __future__ import annotations
 
@@ -47,11 +51,17 @@ def main() -> int:
     ap.add_argument("--release", default="", help="тег релізу (типово — з маніфесту)")
     ap.add_argument("--dry-run", action="store_true", help="лише показати, не писати")
     args = ap.parse_args()
+    # Обидва потоки — UTF-8 до першого друку: консоль Windows у cp1252 роняла
+    # скрипт на першому ж рядку з кирилицею (раннер CI).
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            reconfigure(encoding="utf-8")
 
     data = json.loads(MANIFEST.read_text(encoding="utf-8"))
-    packs = data.get("packs") or []
+    packs = [p for p in data.get("packs") or [] if not p.get("superseded")]
     if not packs:
-        print("🔴 у маніфесті немає паків", file=sys.stderr)
+        print("🔴 у маніфесті немає чинних паків", file=sys.stderr)
         return 2
 
     missing: list[str] = []

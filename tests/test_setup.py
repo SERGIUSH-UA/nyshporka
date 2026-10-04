@@ -223,8 +223,10 @@ def test_state_separates_absent_from_broken(tmp_path, monkeypatch) -> None:
     """«Немає» лікується завантаженням, «зіпсоване» — повторним; плутати їх
     означає радити не те."""
     monkeypatch.setattr(packs, "target_dir", lambda kind: tmp_path)
-    state = packs.as_dict()
-    assert {r["state"] for r in state["packs"]} == {"absent"}
+    rows = packs.as_dict()["packs"]
+    # Замінений пак, якого немає, — не «бракує»: качати його ніхто не мусить.
+    assert {r["state"] for r in rows if not r["superseded"]} == {"absent"}
+    assert {r["state"] for r in rows if r["superseded"]} <= {"superseded"}
     first = packs.catalog()[0]
     (tmp_path / first.filename).write_bytes("недокачано".encode())
     assert any(r["state"] == "broken" for r in packs.as_dict()["packs"])

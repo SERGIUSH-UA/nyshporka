@@ -169,7 +169,7 @@ def _engine_of(meta: dict[str, Any]) -> str:
     model = str(meta.get("model") or "")
     if ".pt" in model:
         return "parseq"
-    if ".mlmodel" in model:
+    if ".mlmodel" in model or ".safetensors" in model:
         return "kraken"
     return str(meta.get("engine") or "")
 

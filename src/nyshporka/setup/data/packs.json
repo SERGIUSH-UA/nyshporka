@@ -25,6 +25,42 @@
  "schema": 1,
  "packs": [
   {
+   "id": "pysar-cyr-v19",
+   "kind": "model",
+   "label": "Писар v19 — кирилиця",
+   "filename": "pysar_cyr_v19.pt",
+   "sha256": "aa5f212b91d7930fa37e1c072d036d85546b2ae6ba615e8b937a8eb072dcf84c",
+   "size": 97008757,
+   "release": "weights-v2",
+   "script": "cyrillic",
+   "engine": "parseq",
+   "note": "канцелярія, метрики, сповідки, списи душ XVIII-XIX ст."
+  },
+  {
+   "id": "diak-cyr-v6",
+   "kind": "model",
+   "label": "Дяк-Літописець — кирилиця, другий голос",
+   "filename": "diak_cyr_v6.safetensors",
+   "sha256": "5e3a87f45ae10b8e8b1da52e1c894962275bc8730c997345139281ff7267ab62",
+   "size": 63781228,
+   "release": "weights-v2",
+   "script": "cyrillic",
+   "engine": "kraken",
+   "note": "PP-OCRv6: читає ті самі кропи, що й Писар, і помиляється інакше — витягує прізвища, яких Писар не бачить"
+  },
+  {
+   "id": "skryba-pp-v3",
+   "kind": "model",
+   "label": "Скриба PPv3 — латинка",
+   "filename": "skryba_pp_v3.safetensors",
+   "sha256": "16b994b505e29333ec67ace1f1cbca7ec4dde3422041e96c707dce6825ed21a3",
+   "size": 63779644,
+   "release": "weights-v2",
+   "script": "latin",
+   "engine": "kraken",
+   "note": "PP-OCRv6: нотаріальні, гродські й костельні книги"
+  },
+  {
    "id": "pysar-cyr-v17",
    "kind": "model",
    "label": "Писар v17 — кирилиця",
@@ -34,7 +70,8 @@
    "release": "weights-v1",
    "script": "cyrillic",
    "engine": "parseq",
-   "note": "канцелярія, метрики, сповідки XVIII-XIX ст."
+   "note": "канцелярія, метрики, сповідки XVIII-XIX ст.",
+   "superseded": true
   },
   {
    "id": "diak-cyr-v4",
@@ -46,7 +83,8 @@
    "release": "weights-v1",
    "script": "cyrillic",
    "engine": "kraken",
-   "note": "CTC: калічить локально, зберігаючи корінь — витягує те, де Писар підставив правдоподібне чуже слово"
+   "note": "CTC: калічить локально, зберігаючи корінь — витягує те, де Писар підставив правдоподібне чуже слово",
+   "superseded": true
   },
   {
    "id": "skryba-f792-v6",
@@ -58,7 +96,8 @@
    "release": "weights-v1",
    "script": "latin",
    "engine": "kraken",
-   "note": "нотаріальні й костельні книги"
+   "note": "нотаріальні й костельні книги",
+   "superseded": true
   }
  ]
 }

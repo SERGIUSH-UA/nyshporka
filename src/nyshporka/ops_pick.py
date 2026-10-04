@@ -160,7 +160,7 @@ class PickAskArgs(BaseModel):
     start: str = Field(default="", description="звідки почати")
     name: str = Field(default="", description="запропоноване ім'я файлу (для save)")
     patterns: list[str] = Field(
-        default_factory=list, description="маски файлів: [\"*.mlmodel\", \"*.pt\"]")
+        default_factory=list, description="маски файлів: [\"*.mlmodel\", \"*.safetensors\", \"*.pt\"]")
     label: str = Field(default="файли", description="підпис фільтра у вікні")
 
 
