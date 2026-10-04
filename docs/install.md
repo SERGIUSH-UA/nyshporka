@@ -142,7 +142,7 @@ nysh init                      # створити робочу теку
 nysh doctor                    # перевірити машину
 nysh serve                     # відкрити застосунок у браузері
 nysh htr install               # середовище для моделей читання, разово
-nysh models get                # моделі читання, ~130 МБ, разово
+nysh models get                # моделі читання, ~225 МБ, разово
 ```
 
 Однорядковий інсталятор для Windows без Python — у PowerShell:
