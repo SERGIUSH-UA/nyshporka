@@ -40,8 +40,8 @@ def genre(side: dict[str, Any], title: str = "") -> tuple[str, list[str]]:
     Картка тримає ОДИН код зі словника жанрів пакета (`record_type_labels`),
     а метрична книга дає три — народження, шлюби, смерті. Вибрати з них
     один означало б записати зведену метрику як «народження», тож для
-    повної трійки є свій код `metric`; інша суміш коду не дає. Перелік
-    типів їде окремо.
+    повної трійки є свій код `metric`, для двох частин із трьох —
+    `metric_partial`; інша суміш коду не дає. Перелік типів їде окремо.
     """
     from nyshporka.library import _infer_record_types
 
@@ -49,6 +49,8 @@ def genre(side: dict[str, Any], title: str = "") -> tuple[str, list[str]]:
     types = [str(t) for t in _infer_record_types(raw, str(side.get("title") or ""), title)]
     if set(types) == METRIC_TYPES:
         return "metric", types
+    if len(types) == 2 and set(types) <= METRIC_TYPES:
+        return "metric_partial", types
     return (types[0] if len(types) == 1 else ""), types
 
 

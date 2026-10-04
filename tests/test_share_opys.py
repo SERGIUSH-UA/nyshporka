@@ -63,9 +63,13 @@ def test_metryka_maie_svii_kod() -> None:
 
 
 def test_chastkova_metryka_bez_koda_metric() -> None:
-    """Лише народження — це `birth`; дві частини з трьох коду не дають."""
+    """Лише народження — це `birth`; дві частини з трьох — `metric_partial`."""
     assert opys.genre({"title": "Метрична книга, частина про народження"})[0] == "birth"
-    assert opys.genre({"title": "Метрична книга: народження і шлюби"})[0] == ""
+    assert opys.genre({"title": "Метрична книга: народження і шлюби"})[0] == "metric_partial"
+    assert opys.genre({"title": "Метрична книга євреїв. Народження, смерть"})[0] \
+        == "metric_partial"
+    # Частина метрики плюс інший жанр — не метрика, коду немає.
+    assert opys.genre({"title": "Шлюби й сповідні розписи"})[0] == ""
     # Хрещення — це народження: книга хрещень не метрика з трьох частин.
     assert opys.genre({"title": "Метричні записи про хрещення"})[0] == "birth"
     assert opys.genre({"title": "Метрична книга: хрещення, шлюби, смерті"})[0] == "metric"
