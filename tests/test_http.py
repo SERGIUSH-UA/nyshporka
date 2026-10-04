@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 import pytest
 
@@ -275,7 +275,7 @@ def test_get_na_429_chekaie_retry_after(naps: list[float]) -> None:
     f = H.Fetcher(base="https://приклад", delay=0.0)
 
     class _R(_Resp):
-        headers = {"Retry-After": "20"}
+        headers: ClassVar[dict[str, str]] = {"Retry-After": "20"}
 
     client = _Client([_R(429), _Resp(200, text="ок")])
     assert f.get("/шлях", client=client).text == "ок"

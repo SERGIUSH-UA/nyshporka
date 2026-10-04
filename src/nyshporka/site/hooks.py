@@ -21,7 +21,9 @@ def _known(docs_dir: str) -> set[str]:
     return {p.stem for p in Path(docs_dir).rglob("*.md")}
 
 
-@event_priority(100)  # type: ignore[untyped-decorator]  # mkdocs без типів (extra site)
+# Без extra `site` mkdocs нетипізований (декоратор `Any`), з ним — типізований:
+# `unused-ignore` тримає перевірку зеленою в обох середовищах.
+@event_priority(100)  # type: ignore[untyped-decorator, unused-ignore]
 def on_page_markdown(markdown: str, *, page: Any, config: Any, files: Any, **kwargs: Any) -> str:
     global _KNOWN
     if _KNOWN is None:
