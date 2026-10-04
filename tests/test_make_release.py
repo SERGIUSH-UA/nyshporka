@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -21,8 +22,10 @@ def _packs() -> list[dict]:
 
 
 def _run(*args: str) -> subprocess.CompletedProcess[str]:
+    # Консоль як на раннері Windows (cp1252): скрипт мусить друкувати кирилицю й там.
+    env = {**os.environ, "PYTHONIOENCODING": "cp1252", "PYTHONUTF8": "0"}
     return subprocess.run([sys.executable, str(SCRIPT), *args], capture_output=True,
-                          text=True, encoding="utf-8", check=False)
+                          text=True, encoding="utf-8", errors="replace", check=False, env=env)
 
 
 def test_release_needs_only_current_packs(tmp_path: Path) -> None:

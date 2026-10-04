@@ -51,6 +51,12 @@ def main() -> int:
     ap.add_argument("--release", default="", help="тег релізу (типово — з маніфесту)")
     ap.add_argument("--dry-run", action="store_true", help="лише показати, не писати")
     args = ap.parse_args()
+    # Обидва потоки — UTF-8 до першого друку: консоль Windows у cp1252 роняла
+    # скрипт на першому ж рядку з кирилицею (раннер CI).
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            reconfigure(encoding="utf-8")
 
     data = json.loads(MANIFEST.read_text(encoding="utf-8"))
     packs = [p for p in data.get("packs") or [] if not p.get("superseded")]
