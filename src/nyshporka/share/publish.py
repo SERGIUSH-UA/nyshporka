@@ -327,6 +327,12 @@ def _ref_z_adresy(url: str) -> dict[str, str] | None:
     archium = re.search(r"archium\.[\w.-]+/file-viewer/(\d+)", url, re.IGNORECASE)
     if archium:
         return {"source": "archium", "ref": f"file:{archium.group(1)}", "url": url}
+    # Сканотека ПТГ: одиниця фонду (`id1703-sy160-se`) у будь-якій із її баз.
+    from nyshporka.core import skanoteka
+
+    unit = skanoteka.from_url(url)
+    if unit is not None:
+        return {"source": skanoteka.SOURCE, "ref": unit.ref, "url": unit.url}
     return None
 
 
@@ -391,9 +397,17 @@ def _refs_from_sidecar(case_dir: Path | None) -> list[dict[str, str]]:
         for f in side.get("files") or []:
             if isinstance(f, dict):
                 z_adresy(f.get("source_url"))
-        for key in ("source_url", "duck_url"):
-            if side.get(key) and not z_adresy(side[key]):
-                add("url", str(side[key]), str(side[key]))
+        # Паспорт, де джерело описано блоком (`"source": {"name", "url", ...}`),
+        # як пише завантажувач Сканотеки. Доти такий паспорт не давав жодного
+        # посилання: читались лише плоскі `source_url` / `duck_url`.
+        # Паспорт завантаження `nysh get` (`fetched_url`): лише відомий хост
+        # сканів — адресою «звідки качали» невідомий хост ще не стає джерелом.
+        z_adresy(side.get("fetched_url"))
+        nested = side.get("source")
+        nested_url = str(nested.get("url") or "") if isinstance(nested, dict) else ""
+        for url in (side.get("source_url"), nested_url, side.get("duck_url")):
+            if url and not z_adresy(url):
+                add("url", str(url), str(url))
                 break
     return out
 
@@ -515,6 +529,27 @@ def _znamennyk(frames_block: dict[str, Any],
     if want and have < want * _PARTIAL_RATIO:
         # `listed` лишається кадрами на диску: за ним іде прив'язка тексту.
         return {**frames_block, "total": want, "on_disk": have}
+    return frames_block
+
+
+def _ne_menshe_za_prochytane(frames_block: dict[str, Any],
+                             storinok: int) -> dict[str, Any]:
+    """Знаменник, менший за прочитані сторінки, — не знаменник.
+
+    Сторінка — це кадр (розворот теж один кадр), тож справа не може мати
+    кадрів менше, ніж із неї прочитано. 04.10.2026 три книги ДАСО 743-5
+    поїхали з «85 кадрів» при 282 сторінках: у теці справи лежав лише
+    розділ однієї церкви, а прогін ішов по всій плівці. Картка Супряги
+    показала покриття 330 %, і сервер такого числа не перебиває.
+
+    Число скидається, а не підганяється під сторінки: скільки кадрів у
+    цілій справі, звідси не видно. `listed` лишається — за ним прив'язка
+    тексту й відбиток. Далі пакування просить назвати число (див. відмову
+    `bez_znamennyka`).
+    """
+    total = int(frames_block.get("total") or 0)
+    if 0 < total < storinok:
+        return {**frames_block, "total": 0}
     return frames_block
 
 
@@ -733,6 +768,7 @@ def build_manifest(scope: str, *,
         listed = int(frames_block.get("listed") or 0)
         if n >= listed:
             frames_block = {**frames_block, "total": n, "on_disk": listed}
+    frames_block = _ne_menshe_za_prochytane(frames_block, int(counted["pages"]))
     # Причина, з якої числа кадрів немає, живе в картці — щоб її бачило кожне
     # пакування цієї справи (пачкою, автовіддача), а не лише те, де її назвали.
     extra = dict(extra or {})
@@ -859,6 +895,17 @@ def pack(scope: str, dest: Path | None = None, *, geometry: bool = True,
             "прочитану справу від уривка. Назвіть його з каталогу чи опису: "
             "--frames N (або `nysh share card <справа> --frames N`). Якщо числа "
             "справді взяти нізвідки: --frames-unknown \"чому\"")
+        na_dysku = int(m.frames.get("listed") or 0)
+        if 0 < na_dysku < m.pages:
+            # Кадри на диску є, але їх менше, ніж прочитано (`_ne_menshe_za_prochytane`):
+            # загальна порада «назвіть з каталогу» тут не пояснює, що сталося.
+            bez_znamennyka = (
+                f"прочитано {m.pages} сторінок, а в теці справи лише {na_dysku} "
+                f"кадрів — тека тримає частину справи (решту кадрів прибрано чи "
+                f"розкладено по інших теках), тож знаменником це число бути не може. "
+                f"Назвіть кадри цілої справи: --frames N, не менше {m.pages} (або "
+                f"`nysh share card <справа> --frames N`). Якщо числа взяти нізвідки: "
+                f"--frames-unknown \"чому\"")
         out["pack_refusals"] = [bez_znamennyka]
     # 🔴 Збірна тека не пакується як одна справа: у каталог пулу поїхала б
     # шифра першої з кадрами й текстом усіх. Відмова тут, а не у воротах —

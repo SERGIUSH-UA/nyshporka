@@ -338,7 +338,8 @@ def test_render_cache_does_not_confuse_two_folders(pdf_run, tmp_path) -> None:
     first = V.shot(run, page, region="page").png
     assert len(V._RENDER_CACHE) == 1
     key = next(iter(V._RENDER_CACHE))
-    assert len(key) == 3 and key[2], "у ключі кешу немає теки справи"
+    assert len(key) == 4 and key[2], "у ключі кешу немає теки справи"
+    assert key[3], "у ключі кешу немає ширини: кроп дістав би сторінку перегляду"
     assert first == V.shot(run, page, region="page").png
 
 

@@ -634,6 +634,34 @@ def _library() -> Check:
                  "Облік, записаний під старим ключем, перенести в новий файл")
 
 
+def _cloud_pdfs() -> Check:
+    """Чи є PDF справ, сторінок яких остання перебудова не порахувала.
+
+    🔴 Такий файл вивантажено в хмару (OneDrive / iCloud «лише онлайн»), і
+    реєстр його не відкриває: відкриття стягнуло б його цілком (сторонній
+    користувач, жовтень 2026: 15 PDF, 2,9 ГБ, перебудова висіла годинами).
+    Знаменник справи тоді неточний, а людина цього не бачить. Читається
+    перелік, записаний перебудовою: обходу диска тут немає.
+    """
+    from nyshporka import pdfcount
+    from nyshporka.core.workspace import WorkspaceError, workspace
+
+    name = "PDF справ у хмарі"
+    try:
+        workspace()
+    except WorkspaceError:
+        return Check(name, "ok", "простір не визначено")
+    got = pdfcount.cloud_report()
+    if got is None:
+        return Check(name, "ok", "реєстр ще не перебудовувався з цією перевіркою")
+    if not got["files"]:
+        return Check(name, "ok", f"усі PDF пораховано (перебудова {got['at']})")
+    return Check(name, "warn",
+                 f"{pdfcount.describe(got['files'])} (перебудова {got['at']})",
+                 "позначити теки «Always Keep on This Device» або "
+                 "`nysh cases build --fetch-cloud`")
+
+
 def _chain() -> Check:
     """Чи не лежать завантажені теки без реєстрації.
 
@@ -711,7 +739,7 @@ def _queue() -> Check:
 
 
 CHECKS = (_version, _skills, _python, _workspace, _cloud_sync, _disk, _profile,
-          _library, _chain, _queue, _decode_visible, _case_keys, _torch, _engines,
+          _library, _cloud_pdfs, _chain, _queue, _decode_visible, _case_keys, _torch, _engines,
           _models, _rent)
 
 #: Перевірки, які мають сенс лише при ввімкненій секції. 🔴 Не косметика:

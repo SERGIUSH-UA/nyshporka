@@ -391,3 +391,93 @@ def test_archived_case_keeps_its_htr_runs(space: Path) -> None:
         assert r.state == "archived"
         assert r.htr_runs == [run] and r.htr_stage == "pysar", (p, r.htr_runs, r.htr_stage)
     assert not [o for o in orphans if o["run"] in ("run-a", "run-b")], orphans
+
+
+# ── 3. PDF у хмарі: перебудова не стягує й не висить ──────────────────────
+
+
+@pytest.fixture
+def cloud_pdf(monkeypatch):
+    """Кожен PDF — хмарна заглушка, а відкрити його означало б стягнути."""
+    from nyshporka import pdfcount as PC
+
+    monkeypatch.setattr(PC, "cloud_placeholder", lambda st: True)
+    real = PC._open_count
+    opened: list[str] = []
+
+    def spy(path: str) -> int:
+        opened.append(path)
+        return real(path)
+
+    monkeypatch.setattr(PC, "_open_count", spy)
+    return opened
+
+
+def test_cloud_pdf_is_skipped_and_denominator_marked_unknown(space: Path, cloud_pdf) -> None:
+    """🔴 Перебудова не відкриває хмарний PDF, а справа стає «знаменник неточний».
+
+    Сторонній користувач (macOS, жовтень 2026): 15 PDF у OneDrive, 2,9 ГБ —
+    перебудова висіла, поки хмара віддавала файли лише заради числа сторінок.
+    """
+    from nyshporka.cases import db
+    from nyshporka.cases.collect import collect_rows
+
+    _case(space, pdf_pages=5)
+    _run(space, "spr-8433", [f"{i:04d}.jpg" for i in range(1, 6)])
+    res = db.rebuild()
+    assert cloud_pdf == [], "хмарний PDF відкрито — перебудова стягувала б його"
+    assert res["cloud"]["files"] == 1
+    row = _only_case(collect_rows()[0])
+    assert row.htr_stage == "partial", "без числа сторінок повноти не доведено"
+
+
+def test_cli_build_names_cloud_pdfs_and_fetch_counts_them(space: Path, cloud_pdf) -> None:
+    """`nysh cases build` каже про хмарні PDF; `--fetch-cloud` рахує їх один раз."""
+    from typer.testing import CliRunner
+
+    from nyshporka.cases.collect import collect_rows
+    from nyshporka.cli import app
+
+    _case(space, pdf_pages=5)
+    out = CliRunner().invoke(app, ["cases", "build"])
+    assert out.exit_code == 0, out.output
+    assert "--fetch-cloud" in out.output and "справа" in out.output
+    assert cloud_pdf == []
+
+    out = CliRunner().invoke(app, ["cases", "build", "--fetch-cloud"])
+    assert out.exit_code == 0, out.output
+    assert "--fetch-cloud" not in out.output
+    assert len(cloud_pdf) == 1
+    assert _only_case(collect_rows()[0]).frames == 5
+
+    # Далі — з кешу: заглушка вже не завада й не відкривається.
+    out = CliRunner().invoke(app, ["cases", "build"])
+    assert "--fetch-cloud" not in out.output
+    assert len(cloud_pdf) == 1
+
+
+def test_pdf_parts_named_p01_are_summed(tmp_path: Path) -> None:
+    """`справа_p01…_pNN` — частини, а не копії тому.
+
+    Без `p` у шаблоні частини 13 файлів (12 × 200 + 75) давали 275 кадрів
+    замість 2475: повністю прочитана справа виглядала прочитаною на 11%.
+    """
+    import pypdfium2 as pdfium
+
+    from nyshporka.library import _pdf_pages
+
+    paths = []
+    for i, n in enumerate((2, 2, 1), 1):
+        doc = pdfium.PdfDocument.new()
+        for _ in range(n):
+            doc.new_page(100, 100)
+        p = tmp_path / f"справа_p{i:02d}.pdf"
+        doc.save(str(p))
+        doc.close()
+        paths.append(p)
+    assert _pdf_pages(paths) == 5
+    # Контроль: однакові копії тому без позначки частини рахуються раз.
+    import shutil
+
+    copies = [shutil.copy(paths[0], tmp_path / name) for name in ("том.pdf", "том-копія.pdf")]
+    assert _pdf_pages([Path(c) for c in copies]) == 2

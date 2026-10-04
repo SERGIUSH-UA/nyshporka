@@ -68,6 +68,48 @@ def test_klas_obryvu(monkeypatch: pytest.MonkeyPatch, vyniatok: Exception,
     assert upload._klas_obryvu(vyniatok)[0] == klas
 
 
+@pytest.mark.parametrize("vidmovy, sprob, pomylka", [
+    (1, 2, None),                      # разовий RST — другий раз лягло
+    (2, 2, upload.BLOKUVANNIA),        # повторився — це вже блокування
+])
+def test_put_vidkynute_zyednannia_vdruhe(monkeypatch: pytest.MonkeyPatch, vidmovy: int,
+                                         sprob: int, pomylka: str | None) -> None:
+    for name in ("NYSHPORKA_PROXY_URL", "HTTPS_PROXY", "https_proxy"):
+        monkeypatch.delenv(name, raising=False)
+    sproby: list[int] = []
+
+    def _put(u: str, **kw: Any) -> Any:
+        sproby.append(1)
+        if len(sproby) <= vidmovy:
+            raise httpx.ConnectError("[WinError 10061] No connection could be made")
+        return httpx.Response(200)
+
+    monkeypatch.setattr(upload, "_syrovyi_put", _put)
+    if pomylka is None:
+        upload._put("https://r2.example/k", b"x")
+    else:
+        with pytest.raises(upload.UploadError) as ei:
+            upload._put("https://r2.example/k", b"x")
+        assert ei.value.klas == pomylka
+    assert len(sproby) == sprob
+
+
+def test_put_nerozviazne_imia_bez_povtoru(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in ("NYSHPORKA_PROXY_URL", "HTTPS_PROXY", "https_proxy"):
+        monkeypatch.delenv(name, raising=False)
+    sproby: list[int] = []
+
+    def _put(u: str, **kw: Any) -> Any:
+        sproby.append(1)
+        raise httpx.ConnectError("[Errno 11001] getaddrinfo failed")
+
+    monkeypatch.setattr(upload, "_syrovyi_put", _put)
+    with pytest.raises(upload.UploadError) as ei:
+        upload._put("https://r2.example/k", b"x")
+    assert ei.value.klas == upload.BLOKUVANNIA
+    assert len(sproby) == 1, "ім'я, яке ріже фільтр, за дві секунди не знайдеться"
+
+
 def test_put_403_tse_nasha_vada(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(upload, "_syrovyi_put", lambda u, **kw: httpx.Response(
         403, text="<Error><Code>AccessDenied</Code></Error>"))

@@ -435,7 +435,10 @@ def get(source: str = typer.Argument(..., help="id джерела"),
         frames: str = typer.Option("", "--frames",
                                    help="діапазон кадрів «12-80»; порожньо = всі"),
         why: str = typer.Option("", "--why",
-                                help="навіщо ця справа — лягає в паспорт теки")) -> None:
+                                help="навіщо ця справа — лягає в паспорт теки"),
+        whole: bool = typer.Option(False, "--whole",
+                                   help="не різати розвороти на сторінки (джерела, що "
+                                        "ріжуть розвороти по згину: skanoteka)")) -> None:
     """Завантажити справу або плівку.
 
     Спершу друкується маніфест і лише потім починається качання: справа буває
@@ -452,6 +455,15 @@ def get(source: str = typer.Argument(..., help="id джерела"),
 
     _need("material")
     src = _pick(source)
+    import inspect
+
+    # Різ розвороту вміє не кожне джерело: прапорець без дії гірший за відмову —
+    # людина думала б, що кадри лишились цілими.
+    splits = "split" in inspect.signature(src.fetch).parameters
+    if whole and not splits:
+        console.print(f"[err]--whole: джерело «{src.id}» розворотів не ріже — "
+                      f"кадри й так лягають цілими[/err]")
+        raise typer.Exit(code=2)
     rng: tuple[int, int] | None = None
     if frames:
         try:
@@ -482,7 +494,8 @@ def get(source: str = typer.Argument(..., help="id джерела"),
             console.print(f"  [muted]{done}/{total} ({pct}%)[/muted]", end="\r")
 
     try:
-        res = src.fetch(ref, out, frames=rng, on_progress=progress)
+        kw: dict[str, Any] = {"split": False} if whole else {}
+        res = src.fetch(ref, out, frames=rng, on_progress=progress, **kw)
     except SourceError as exc:
         # Та сама відмова, що й на маніфесті: джерело може відмовити й посеред
         # завантаження (мережа, обрізаний перелік файлів), і це текст, а не
@@ -517,6 +530,8 @@ def get(source: str = typer.Argument(..., help="id джерела"),
     from nyshporka.sources.base import completeness
 
     passport: dict[str, Any] = {"title": man.title}
+    if splits:
+        passport["spreads_split"] = not whole
     if rng:
         passport["frames_range"] = f"{rng[0]}-{rng[1]}"
     claimed = man.meta.get("shifra") or {}
@@ -1651,6 +1666,11 @@ app.add_typer(queue_app, name="queue")
 def cases_build(
     rescan: bool = typer.Option(True, "--rescan/--no-rescan",
                                 help="перечитати ще й диск (нові теки)"),
+    fetch_cloud: bool = typer.Option(
+        False, "--fetch-cloud",
+        help="стягнути PDF, вивантажені в хмару (OneDrive / iCloud «лише онлайн»), "
+             "щоб порахувати їх сторінки; число запам'ятовується, і вдруге файл "
+             "не відкривається"),
 ) -> None:
     """Зібрати реєстр справ.
 
@@ -1661,14 +1681,17 @@ def cases_build(
     \f
     Команди для цього довго не існувало, хоч усі повідомлення на неї посилались.
     """
+    from nyshporka import pdfcount
     from nyshporka.cases import db
     from nyshporka.library import renamed_report
 
-    res = db.rebuild(rescan=rescan)
+    res = db.rebuild(rescan=rescan, fetch_cloud=fetch_cloud)
     if res["rescanned"]:
         console.print(f"[muted]бібліотеку перезібрано: {res['entries']} справ[/muted]")
     for line in renamed_report():
         console.print(f"[warn]{line}[/warn]")
+    if res["cloud"]["skipped"]:
+        console.print(f"[warn]⚠ {pdfcount.describe(res['cloud']['skipped'])}[/warn]")
     console.print(f"✅ реєстр: [bold]{res['cases']}[/bold] справ · "
                   f"нерозв'язаних прогонів: {res.get('orphans', 0)} · {res['path']}")
 

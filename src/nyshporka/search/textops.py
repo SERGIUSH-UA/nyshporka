@@ -212,7 +212,24 @@ def ctx(scope: str, page: str, line: int | None = None, *, window: int = 4,
             "aligned": aligned, "years": list(years), "eye": eye,
             "geo_next": succ.get(line) if line else None,
             "geo_prev": pred.get(line) if line else None,
+            "scan_link": _scan_link(str(voices[0]["run"]), page_name),
             "window": out_lines}
+
+
+def _scan_link(run: str, page: str) -> dict[str, str] | None:
+    """Де ця сторінка в джерелі сканів — для звірки оком і цитати.
+
+    Поки що вміє Сканотеку ПТГ: розворот, розрізаний на дві сторінки, має
+    в джерелі один номер скана, і без переведення назад людина не знайде
+    сторінку, яку бачить у декоді (`core.skanoteka`). Помилка тут не валить
+    відповідь: посилання — довідка, а не умова.
+    """
+    try:
+        from nyshporka.core import skanoteka
+
+        return skanoteka.page_link(run, page)
+    except Exception:
+        return None
 
 
 # ── кроп ─────────────────────────────────────────────────────────────────────
@@ -350,12 +367,35 @@ def crop(scope: str, page: str, line: int, *, with_next: bool = True, wide: bool
             joined.append(prev.no)
     size = _geometry_size(run, pg)
     got = S.resolve_scan_how(run, pg)
-    if got is None:
-        return {"error": f"кадру для {run} · {pg} на цій машині немає: мета веде в "
-                         f"нікуди, реєстр справ теки не знає"}
-    src, orient, frame_source = got
-    with Image.open(src) as raw:
-        im = _rotated(raw.convert("RGB"), int(orient))
+    if got is not None:
+        src, orient, frame_source = got
+        frame = str(src)
+        with Image.open(src) as raw:
+            base = raw.convert("RGB")
+    else:
+        # 🔴 Справа-PDF: хмарний прогін розгортав PDF у кадри на орендованому
+        # боксі, тож кадрів на диску немає, а `page.view` ту саму сторінку
+        # рендерив із PDF. Кроп відповідав «кадру немає», і гортач (`text sheet`)
+        # ішов без кропів якраз на найбільших справах (відгук стороннього
+        # користувача, жовтень 2026). Тепер шлях спільний із переглядом:
+        # відповідність кадр → сторінка доводиться в `pdfpage.mapping`, а не
+        # вгадується. Рендер — у ширину геометрії рушія до повороту, тож рамки
+        # лягають без перерахунку.
+        from nyshporka.htr import view as V
+
+        meta_orient = int(((S.load_meta(run) or {}).get("pages") or {})
+                          .get(pg, {}).get("orient") or 0)
+        width = None
+        if size and size[0]:
+            width = size[1] if meta_orient % 180 else size[0]
+        try:
+            base, orient, pdf, index = V.pdf_page(run, pg, width=width)
+        except V.ViewError as exc:
+            return {"error": f"кадру для {run} · {pg} на цій машині немає, і з PDF "
+                             f"справи його не відтворити: {exc}"}
+        frame, frame_source = f"{pdf} · с.{index + 1}", "pdf"
+    with base:
+        im = _rotated(base, int(orient))
         k = 1.0
         if size and size[0]:
             if (im.width > im.height) != (size[0] > size[1]):
@@ -385,7 +425,8 @@ def crop(scope: str, page: str, line: int, *, with_next: bool = True, wide: bool
         piece.save(dst)
         return {"run": run, "page": pg, "line": line, "next": nxt_no, "prev": prev_no,
                 "joined": joined,
-                "frame": str(src), "frame_source": frame_source,
+                "frame": frame, "frame_source": frame_source,
+                "scan_link": _scan_link(run, pg),
                 "orient": int(orient), "scale_k": round(k, 3),
                 "scale": scale,
                 "box": list(box), "out": str(dst), "width": piece.width,
@@ -1057,6 +1098,7 @@ def sheet(q: str, scope: str, *, thresh: int = 78, limit: int = 60, crops: int =
                       "after": (h.get("context") or {}).get("after") or [],
                       "alt": (h.get("alt") or {}).get("line") or "",
                       "rank_why": h.get("rank_why") or "", "img": img,
+                      "scan_link": _scan_link(run, page),
                       "verdict": prev.get("verdict") or "", "note": prev.get("note") or ""})
     led = got["ledger"]
     html_doc = _render_sheet(q, got, cards, led, serve_port=serve_port)
@@ -1103,6 +1145,10 @@ def _render_sheet(q: str, got: dict[str, Any], cards: list[dict[str, Any]],
         why = f' <span class="why">↓ {_esc(c["rank_why"])}</span>' if c["rank_why"] else ""
         full = (f'<a class="full" href="{_esc(_page_link(c["run"], c["page"], c["line"], serve_port))}"'
                 f' target="nysh">сторінка цілком ↗</a>')
+        sl = c.get("scan_link") or {}
+        if sl.get("url"):
+            full += (f' · <a class="full" href="{_esc(sl["url"])}" target="_blank" rel="noopener"'
+                     f' title="{_esc(sl.get("cite", ""))}">скан {_esc(sl.get("scan", ""))} у джерелі ↗</a>')
         sel = opts.replace(f'value="{c["verdict"]}"', f'value="{c["verdict"]}" selected') \
             if c["verdict"] else opts
         parts.append(f'''<section class="card" data-key="{_esc(c["key"])}" data-run="{_esc(c["run"])}"

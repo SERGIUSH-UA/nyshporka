@@ -661,7 +661,7 @@ def stats(db_path: Path | None = None) -> dict[str, Any]:
         con.close()
 
 
-def rebuild(*, rescan: bool = True) -> dict[str, Any]:
+def rebuild(*, rescan: bool = True, fetch_cloud: bool = False) -> dict[str, Any]:
     """Перезібрати реєстр цілком: опис справ на диску, тоді сам зріз.
 
     🔴 Два кроки, а не один, і саме тому вони тут разом. `build_index()` лише
@@ -672,17 +672,26 @@ def rebuild(*, rescan: bool = True) -> dict[str, Any]:
     дав рівно таку картину, тож окремих «зберу лише індекс» бути не повинно.
 
     `rescan=False` лишається для випадку, коли диск щойно перечитали.
-    """
-    entries = 0
-    if rescan:
-        from nyshporka.library import build_library, write_library
 
-        rows = build_library()
-        write_library(rows)
-        entries = len(rows)
-    res = build_index()
+    `fetch_cloud` дозволяє стягнути PDF, які хмара вивантажила («лише
+    онлайн»): без нього їх сторінки беруться лише з кешу, а непораховані йдуть
+    у `cloud` відповіді (див. `pdfcount`).
+    """
+    from nyshporka import pdfcount
+
+    entries = 0
+    with pdfcount.session(fetch=fetch_cloud) as sess:
+        if rescan:
+            from nyshporka.library import build_library, write_library
+
+            rows = build_library()
+            write_library(rows)
+            entries = len(rows)
+        res = build_index()
     _note_history()
-    return {"entries": entries, "rescanned": rescan, **res}
+    return {"entries": entries, "rescanned": rescan, **res,
+            "cloud": {"files": len(sess.skipped), "bytes": sess.nbytes,
+                      "skipped": dict(sess.skipped)}}
 
 
 def _note_history() -> None:
