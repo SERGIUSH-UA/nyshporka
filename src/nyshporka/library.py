@@ -754,36 +754,6 @@ def _external_files(d: Path) -> int:
     return n
 
 
-@lru_cache(maxsize=8192)
-def _pdf_pages_cached(path: str, size: int, mtime: int) -> int:
-    """Сторінок у PDF. 0 = порахувати не вийшло (кличний код лишає файловий лік).
-
-    Ключ кешу несе розмір і mtime, тож дописаний чи перекачаний файл перечитується
-    сам. `pypdfium2` — оголошена залежність пакета (легша й з дозвільною ліцензією),
-    `fitz` лишається запасним, бо стоїть у споживачів.
-    """
-    try:
-        import pypdfium2 as pdfium
-    except ImportError:
-        try:
-            import fitz
-        except ImportError:
-            return 0
-        try:
-            with fitz.open(path) as doc:
-                return int(doc.page_count)
-        except Exception:
-            return 0
-    try:
-        doc = pdfium.PdfDocument(path)
-        try:
-            return len(doc)
-        finally:
-            doc.close()
-    except Exception:
-        return 0
-
-
 def _pdf_pages(paths: list[Path]) -> int:
     """Сторінок у теці; 0 — якщо не вийшло. Стеля файлів боронить від періодики.
 
@@ -800,24 +770,38 @@ def _pdf_pages(paths: list[Path]) -> int:
 
     Частини й повний том — це два представлення однієї справи, тому береться
     більше з них, а не сума. Копії (однакове число сторінок) рахуються раз.
+
+    🔴 Частина — це й `_p01`: `справа_p01.pdf … _p13.pdf` (12 × 200 + 75 стор.)
+    без `p` у шаблоні йшли як «копії одного тому», і реєстр давав 275 кадрів
+    замість 2475 — повністю прочитана справа виглядала прочитаною на 11%
+    (відгук стороннього користувача, жовтень 2026). `pdfpage.mapping` ті самі
+    файли складав підряд, тобто два місця коду мали різне уявлення про частину.
+
+    Сторінки рахує `pdfcount` — з кешем на диску, і хмарну заглушку він не
+    відкриває (див. там). Не пораховано бодай один файл — 0 для всієї теки:
+    сума без нього була б хибним знаменником, а не заниженим. Цикл при цьому
+    йде до кінця, щоб перебудова назвала ВСІ пропущені хмарні файли.
     """
+    from nyshporka import pdfcount
+
     if not paths or len(paths) > _PDF_PROBE_LIMIT:
         return 0
-    part_re = re.compile(r"(^|[ _.\-])(ч|part|pt)\s*\.?\s*\d+", re.IGNORECASE)
+    part_re = re.compile(r"(^|[ _.\-])(ч|part|pt|p)\s*\.?\s*\d+", re.IGNORECASE)
     parts = 0
     singles: list[int] = []
+    failed = False
     for p in paths:
         try:
-            st = p.stat()
-        except OSError:
-            return 0
-        n = _pdf_pages_cached(str(p), st.st_size, int(st.st_mtime))
-        if not n:
-            return 0
+            n = pdfcount.pages(p)
+        except pdfcount.PdfCountError:
+            failed = True
+            continue
         if part_re.search(p.stem):
             parts += n
         else:
             singles.append(n)
+    if failed:
+        return 0
     whole = max(singles) if singles else 0
     if parts and whole:
         return max(parts, whole)

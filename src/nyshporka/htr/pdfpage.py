@@ -79,16 +79,16 @@ def case_pdfs(case_dir: Path) -> list[Path]:
 
 
 def page_counts(pdfs: list[Path]) -> list[int]:
-    import pypdfium2 as pdfium
+    """Сторінок у кожному PDF; не вийшло — виняток (`pdfcount.PdfCountError`).
 
-    out = []
-    for p in pdfs:
-        doc = pdfium.PdfDocument(str(p))
-        try:
-            out.append(len(doc))
-        finally:
-            doc.close()
-    return out
+    Через спільний лічильник із кешем на диску: `mapping()` кличуть на кожен
+    показ сторінки, і без кешу 1200-сторінковий PDF відкривався щоразу заново.
+    Хмарний файл тут стягується (`fetch=True`): людина попросила саме цю
+    справу, і показати її без вмісту файла нічим.
+    """
+    from nyshporka import pdfcount
+
+    return [pdfcount.pages(p, fetch=True) for p in pdfs]
 
 
 def mapping(case_dir: Path, frames: list[str],

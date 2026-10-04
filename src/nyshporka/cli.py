@@ -1622,6 +1622,11 @@ app.add_typer(queue_app, name="queue")
 def cases_build(
     rescan: bool = typer.Option(True, "--rescan/--no-rescan",
                                 help="перечитати ще й диск (нові теки)"),
+    fetch_cloud: bool = typer.Option(
+        False, "--fetch-cloud",
+        help="стягнути PDF, вивантажені в хмару (OneDrive / iCloud «лише онлайн»), "
+             "щоб порахувати їх сторінки; число запам'ятовується, і вдруге файл "
+             "не відкривається"),
 ) -> None:
     """Зібрати реєстр справ.
 
@@ -1632,14 +1637,17 @@ def cases_build(
     \f
     Команди для цього довго не існувало, хоч усі повідомлення на неї посилались.
     """
+    from nyshporka import pdfcount
     from nyshporka.cases import db
     from nyshporka.library import renamed_report
 
-    res = db.rebuild(rescan=rescan)
+    res = db.rebuild(rescan=rescan, fetch_cloud=fetch_cloud)
     if res["rescanned"]:
         console.print(f"[muted]бібліотеку перезібрано: {res['entries']} справ[/muted]")
     for line in renamed_report():
         console.print(f"[warn]{line}[/warn]")
+    if res["cloud"]["skipped"]:
+        console.print(f"[warn]⚠ {pdfcount.describe(res['cloud']['skipped'])}[/warn]")
     console.print(f"✅ реєстр: [bold]{res['cases']}[/bold] справ · "
                   f"нерозв'язаних прогонів: {res.get('orphans', 0)} · {res['path']}")
 

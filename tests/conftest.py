@@ -204,6 +204,12 @@ def _own_derived_files(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setattr(L, "VERDICTS_PATH", tmp_path / "data" / "spotter" / "case_verdicts.json")
     monkeypatch.setattr(L, "SCAN_TARGETS_PATH", tmp_path / "data" / "spotter" / "scan_targets.json")
     L._lookup_for.cache_clear()
+    # Кеш сторінок PDF теж живе в похідних простору: без цього тест, що
+    # перевіряє «файл не відкривався», міг би отримати число з кешу сусіда.
+    from nyshporka import pdfcount as PC
+
+    monkeypatch.setattr(PC, "_cache_path", lambda: derived / PC.FILE)
+    PC._reset()
 
 
 @pytest.fixture(autouse=True)

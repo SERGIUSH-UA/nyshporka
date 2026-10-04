@@ -117,36 +117,17 @@ def _pdf_pages(paths: list[Path]) -> int | None:
     """Сумарна кількість сторінок. None — якщо порахувати не вийшло.
 
     None тут не помилка, а чесне «не знаю»: оцінка часу без нього просто не
-    показується, тоді як вигадане число зіпсувало б планування.
+    показується, тоді як вигадане число зіпсувало б планування. Хмарний файл
+    («лише онлайн») заради оцінки не стягується — теж None (`pdfcount`).
     """
+    from nyshporka import pdfcount
+
     if not paths or len(paths) > PDF_PROBE_LIMIT:
         return None
     try:
-        import pypdfium2 as pdfium
-    except ImportError:
-        try:
-            import fitz
-        except ImportError:
-            return None
-        total = 0
-        for pdf in paths:
-            try:
-                with fitz.open(pdf) as doc:
-                    total += doc.page_count
-            except Exception:
-                return None
-        return total
-    total = 0
-    for pdf in paths:
-        try:
-            doc = pdfium.PdfDocument(pdf)
-            try:
-                total += len(doc)
-            finally:
-                doc.close()
-        except Exception:
-            return None
-    return total
+        return sum(pdfcount.pages(p) for p in paths)
+    except pdfcount.PdfCountError:
+        return None
 
 
 def inspect(raw: str | Path) -> Shape:
