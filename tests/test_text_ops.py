@@ -1013,3 +1013,123 @@ def test_verdicts_are_written_under_the_lock_with_a_private_tmp(
     assert seen == [(f"{T.VERDICTS_FILE}.{os.getpid()}.tmp", True)] * 2
     assert T.verdicts_load("DAHMO/315/1")["проба|0004.jpg|3"]["verdict"] == "hit"
     assert T.verdicts_load("DAHMO/315/2")["проба|0004.jpg|3"]["verdict"] == "noise"
+
+
+# ── кроп зі справи-PDF: кадрів на диску немає ─────────────────────────────
+
+
+def _pdf_case(root: Path, monkeypatch: pytest.MonkeyPatch, orient: int) -> str:
+    """Прогін, кадри якого розгорнуто з PDF на орендованому боксі й не збережено.
+
+    Рушій бачив кадр 1400×1000 (уже повернутий на `orient` проти годинникової)
+    із чорною смугою в рамці рядка. У PDF ця сторінка лежить неповернутою, тож
+    кроп мусить повернути рендер так само, як раннер, — інакше смуга опиниться
+    деінде, а в кропі буде біле поле.
+    """
+    from PIL import Image
+
+    from nyshporka.core import workspace as W
+
+    (root / "nyshporka.toml").write_text("[workspace]\nschema = 1\n", encoding="utf-8")
+    W.reset()
+    W.use(W.Workspace(root=root, name="тест", origin="test"))
+    seen = Image.new("RGB", (1400, 1000), "white")
+    seen.paste((10, 10, 10), (200, 100, 600, 300))
+    turn = {0: None, 90: Image.Transpose.ROTATE_270}[orient]   # назад до сторінки PDF
+    page = seen.transpose(turn) if turn is not None else seen
+    case = root / "data" / "raw" / "pdf-справа"
+    case.mkdir(parents=True)
+    Image.new("RGB", page.size, "white").save(case / "справа.pdf", save_all=True,
+                                              append_images=[page])
+    run = root / "reports" / "htr" / "pdfrun"
+    run.mkdir(parents=True)
+    (run / "0002.txt").write_text("смуга\n", encoding="utf-8")
+    (run / "0002.lines.json").write_text(json.dumps(
+        {"size": [1400, 1000], "boxes": [[200, 100, 600, 300]]}), encoding="utf-8")
+    (run / "_htr_meta.json").write_text(json.dumps({
+        "model": "pysar_cyr_v17.pt", "script": "cyrillic", "case_dir": str(case),
+        "frames_total": 2, "pages": {"0002.jpg": {"lines": 1, "orient": orient}},
+    }), encoding="utf-8")
+
+    from nyshporka import htr_store as S
+    from nyshporka.htr import view as V
+    from nyshporka.search import store as ST
+
+    monkeypatch.setattr(S, "ROOT", root)
+    monkeypatch.setattr(S, "HTR_ROOT", root / "reports" / "htr")
+    monkeypatch.setattr(S, "_case_roots", lambda: [root / "data" / "raw"])
+    S._CACHE.clear()
+    S._RUNS_CACHE = None
+    V._RENDER_CACHE.clear()
+    list(ST.ensure_all(["pdfrun"]))
+    return "pdfrun"
+
+
+@pytest.mark.parametrize("orient", [0, 90])
+def test_crop_renders_the_line_from_the_case_pdf(tmp_path: Path, monkeypatch, orient: int) -> None:
+    """`text crop` для справи-PDF: та сама сторінка, що в `page.view`, і той самий поворот.
+
+    Відгук стороннього користувача (жовтень 2026): кроп відповідав «кадру на
+    цій машині немає», хоч `page.view` ту саму сторінку показував.
+    """
+    from PIL import Image, ImageStat
+
+    from nyshporka.core import workspace as W
+    from nyshporka.search import textops as T
+
+    run = _pdf_case(tmp_path, monkeypatch, orient)
+    try:
+        got = T.crop(run, "2", 1, with_next=False, pad=0, out=tmp_path / "c.png")
+        assert not got.get("error"), got
+        assert got["frame_source"] == "pdf" and "справа.pdf · с.2" in got["frame"]
+        assert got["scale_k"] == 1.0 and got["box"] == [200, 100, 600, 300]
+        with Image.open(tmp_path / "c.png") as im:
+            assert ImageStat.Stat(im.convert("L")).mean[0] < 40, "у кропі не смуга"
+
+        # Перегляд повертає так само: смуга там, куди вказує рамка.
+        from nyshporka.htr import view as V
+
+        page = V._page_image(run, "0002.jpg")
+        k = page.width / 1400
+        band = page.crop(tuple(int(v * k) for v in (200, 100, 600, 300)))
+        assert ImageStat.Stat(band.convert("L")).mean[0] < 40, "перегляд повернув не туди"
+    finally:
+        W.reset()
+
+
+def test_crop_without_frame_or_pdf_names_the_reason(tmp_path: Path, monkeypatch) -> None:
+    from nyshporka.core import workspace as W
+    from nyshporka.search import textops as T
+
+    run = _pdf_case(tmp_path, monkeypatch, 0)
+    (tmp_path / "data" / "raw" / "pdf-справа" / "справа.pdf").unlink()
+    try:
+        got = T.crop(run, "2", 1, out=tmp_path / "c.png")
+        assert "немає PDF" in got["error"], got
+    finally:
+        W.reset()
+
+
+def test_view_turns_a_run_scan_like_the_runner(tmp_path: Path, monkeypatch) -> None:
+    """Скан прогону на диску з `orient` 90: перегляд повертає ПРОТИ годинникової,
+    як `runner.rotated`, і смуга стоїть там, куди вказує рамка рушія."""
+    from PIL import Image, ImageStat
+
+    from nyshporka.core import workspace as W
+    from nyshporka.htr import view as V
+
+    run = _pdf_case(tmp_path, monkeypatch, 90)
+    case = tmp_path / "data" / "raw" / "pdf-справа"
+    seen = Image.new("RGB", (1400, 1000), "white")
+    seen.paste((10, 10, 10), (200, 100, 600, 300))
+    seen.transpose(Image.Transpose.ROTATE_270).save(case / "0002.png")
+    meta = json.loads((tmp_path / "reports" / "htr" / run / "_htr_meta.json").read_text("utf-8"))
+    meta["pages"] = {"0002.png": meta["pages"]["0002.jpg"]}
+    (tmp_path / "reports" / "htr" / run / "_htr_meta.json").write_text(json.dumps(meta), "utf-8")
+    try:
+        page = V._page_image(run, "0002.png")
+        assert page.size == (1400, 1000)
+        band = page.crop((200, 100, 600, 300))
+        assert ImageStat.Stat(band.convert("L")).mean[0] < 40, "перегляд повернув не туди"
+    finally:
+        W.reset()
