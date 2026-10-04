@@ -57,6 +57,7 @@ def _builtin(workspace: Path | None = None) -> list[Source]:
     from nyshporka.sources.ia import IaSource
     from nyshporka.sources.inventarium import InventariumSource
     from nyshporka.sources.ridni import RidniSource
+    from nyshporka.sources.skanoteka import SkanotekaSource
     from nyshporka.sources.volok import VolokSource
 
     out: list[Source] = [LocalSource()]
@@ -100,6 +101,11 @@ def _builtin(workspace: Path | None = None) -> list[Source]:
     # 🏚 Інвентаріум: волонтерський розпис маєткових інвентарів за селом — з
     # номером сторінки всередині книги. Шукає по знімку `nysh crawl inventarium`.
     out.append(cast("Source", InventariumSource(workspace)))
+    # 📚 Сканотека ПТГ: повні скани судових і нотаріальних книг (зокрема ЦДІАК
+    # ф.2 — київських гродських), яких немає ні на Commons, ні в ARCHIUM.
+    # Кадр — розворот, тож джерело ріже його по згину й пише карту сканів: без
+    # неї сторінку декоду не повернути до номера скана в джерелі.
+    out.append(cast("Source", SkanotekaSource(workspace)))
     return out
 
 

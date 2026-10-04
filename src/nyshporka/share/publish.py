@@ -400,6 +400,9 @@ def _refs_from_sidecar(case_dir: Path | None) -> list[dict[str, str]]:
         # Паспорт, де джерело описано блоком (`"source": {"name", "url", ...}`),
         # як пише завантажувач Сканотеки. Доти такий паспорт не давав жодного
         # посилання: читались лише плоскі `source_url` / `duck_url`.
+        # Паспорт завантаження `nysh get` (`fetched_url`): лише відомий хост
+        # сканів — адресою «звідки качали» невідомий хост ще не стає джерелом.
+        z_adresy(side.get("fetched_url"))
         nested = side.get("source")
         nested_url = str(nested.get("url") or "") if isinstance(nested, dict) else ""
         for url in (side.get("source_url"), nested_url, side.get("duck_url")):
