@@ -108,6 +108,7 @@ def frames_of(case_dir: Path, *, hash_frames: bool = False) -> list[dict[str, An
     fs = _fs_sidecar(case_dir)
     source = _fetched_from(case_dir)
     spreads = _skanoteka_map(case_dir)
+    cuts = _skanoteka_boxes(case_dir) if spreads else {}
     out: list[dict[str, Any]] = []
     for n, path in enumerate(frames_sorted(case_dir), 1):
         row: dict[str, Any] = {"n": n, "name": path.name}
@@ -123,6 +124,10 @@ def frames_of(case_dir: Path, *, hash_frames: bool = False) -> list[dict[str, An
             src = framename.parse(path.name, source).src
         if src:
             row["src"] = src
+        if path.name in cuts:
+            # Де пройшов різ розвороту: без цього «той самий кадр» за `src`
+            # міг бути іншими пікселями (`page_names`).
+            row["box"] = cuts[path.name]
         with contextlib.suppress(OSError):
             row["bytes"] = path.stat().st_size
         side = fs.get(path.stem) or {}
@@ -163,6 +168,16 @@ def _passport_dirs(case_dir: Path) -> list[Path]:
     if case_dir.name.lower() == FRAMES_SUBDIR:
         return [case_dir, case_dir.parent]
     return [case_dir]
+
+
+def _skanoteka_boxes(case_dir: Path) -> dict[str, list[int]]:
+    from nyshporka.core import skanoteka
+
+    for d in _passport_dirs(Path(case_dir)):
+        got = skanoteka.page_boxes(d)
+        if got:
+            return got
+    return {}
 
 
 def _skanoteka_map(case_dir: Path) -> dict[str, tuple[str, str]]:
@@ -389,7 +404,22 @@ def page_names(theirs: list[dict[str, Any]], case_dir: Path | None) -> dict[str,
     b = {str(f["src"]): str(f["name"]) for f in ours if f.get("src")}
     if not a or len(a) != len(theirs) or len(b) != len(ours) or set(a) != set(b):
         return {}
+    # 🔴 Той самий `src` при іншому різі розвороту — інші пікселі: рамки рядків
+    # донора лягли б зі зсувом. Межі звіряються, коли їх знають обидва боки;
+    # допуск — кілька пікселів оригіналу (той самий різ на тих самих байтах дає 0).
+    a_box = {str(f["src"]): f.get("box") for f in theirs if f.get("src")}
+    b_box = {str(f["src"]): f.get("box") for f in ours if f.get("src")}
+    for s in a:
+        x, y = a_box.get(s), b_box.get(s)
+        if (isinstance(x, list) and isinstance(y, list) and len(x) == len(y)
+                and max(abs(int(i) - int(j)) for i, j in zip(x, y, strict=True)) > CUT_TOLERANCE):
+            return {}
     return {a[s]: b[s] for s in a}
+
+
+#: Допуск розбіжності меж різу (пікселі оригіналу скана). Той самий різ на тих
+#: самих байтах дає нуль; дві редакції детектора згину розходились на 38-56 px.
+CUT_TOLERANCE = 4
 
 
 def case_home_for(case_key: str, opys: str = "") -> Path | None:

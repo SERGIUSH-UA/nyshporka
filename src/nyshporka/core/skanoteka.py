@@ -13,8 +13,9 @@
 звірити згадку з оригіналом, знає лише номер скана в Сканотеці. Без
 зворотного переведення посилання на знахідку не відкрити й не перевірити.
 
-⚠ Ім'я `_split.json` збігається з журналом `nysh cases split`. Карта
-впізнається за вмістом (`read_map`), і `cases split` чужу карту не чіпає.
+Пакет пише карту в `_skanoteka.json`. ⚠ Перший завантажувач (поза пакетом)
+писав `_split.json` — те саме ім'я, що в журналу `nysh cases split`; така карта
+читається й далі, впізнається за вмістом, і `cases split` її не чіпає.
 """
 from __future__ import annotations
 
@@ -28,7 +29,11 @@ from urllib.parse import parse_qs, urlparse
 NAME = "Skanoteka ПТГ"
 SOURCE = "skanoteka"
 HOSTS = ("skanoteka", "sadowe", "notariaty", "meldunkowe")
-MAP_NAME = "_split.json"
+#: Карта сканів, яку пише джерело пакета (`sources.skanoteka`).
+MAP_NAME = "_skanoteka.json"
+#: Те саме ім'я, що й у журналу `nysh cases split`, — так карту писав перший
+#: завантажувач (поза пакетом). Читається, щоб старі теки не втратили зв'язку.
+LEGACY_MAP = "_split.json"
 
 SIDE = {"L": "ліва сторінка", "R": "права сторінка", "-": "кадр цілий"}
 
@@ -104,7 +109,8 @@ def unit_of(side: dict[str, Any]) -> Unit | None:
     urls = []
     if isinstance(src, dict):
         urls += [src.get("url"), src.get("unit_url")]
-    urls.append(side.get("source_url"))
+    # `fetched_url` — паспорт завантаження (`cases.acquire.record_fetch`).
+    urls += [side.get("source_url"), side.get("fetched_url")]
     for url in urls:
         got = from_url(str(url or ""))
         if got is not None:
@@ -112,17 +118,33 @@ def unit_of(side: dict[str, Any]) -> Unit | None:
     return None
 
 
-def read_map(case_dir: Path) -> dict[str, tuple[str, str]]:
-    """Карта сторінок справи: ім'я сторінки → (скан, бік). Не карта — порожньо.
+def read_map_raw(case_dir: Path) -> dict[str, Any] | None:
+    """Карта сканів теки як вона є (`_skanoteka.json`, інакше старий `_split.json`).
 
     Впізнається за вмістом, а не за іменем файла: `_split.json` пише й
     `nysh cases split` (журнал розбивки теки на справи).
     """
-    try:
-        data = json.loads((Path(case_dir) / MAP_NAME).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {}
-    if not is_map(data):
+    for name in (MAP_NAME, LEGACY_MAP):
+        try:
+            data = json.loads((Path(case_dir) / name).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if is_map(data):
+            return dict(data)
+    return None
+
+
+def write_map(case_dir: Path, data: dict[str, Any]) -> None:
+    """Записати карту атомарно — обрив посеред запису не має лишити її битою."""
+    from nyshporka.utils.atomic import write_json
+
+    write_json(Path(case_dir) / MAP_NAME, data, indent=1)
+
+
+def read_map(case_dir: Path) -> dict[str, tuple[str, str]]:
+    """Карта сторінок справи: ім'я сторінки → (скан, бік). Карти немає — порожньо."""
+    data = read_map_raw(case_dir)
+    if data is None:
         return {}
     out: dict[str, tuple[str, str]] = {}
     for key, rec in data["frames"].items():
@@ -132,6 +154,29 @@ def read_map(case_dir: Path) -> dict[str, tuple[str, str]]:
         for name, page in (rec.get("pages") or {}).items():
             side = str((page or {}).get("side") or "-") if isinstance(page, dict) else "-"
             out[str(name)] = (scan, side if side in SIDE else "-")
+    return out
+
+
+def page_boxes(case_dir: Path) -> dict[str, list[int]]:
+    """Межі кожної сторінки в скані джерела (`[x0, y0, x1, y1]`, пікселі оригіналу).
+
+    🔴 Ім'я й `src` (`185R`) кажуть, ЯКИЙ це бік скана, але не де пройшов різ.
+    Дві редакції детектора згину на тому самому скані 185 ЦДІАК 2-1-160 різали
+    на x=2878 і x=2916: ті самі імена, а права сторінка зсунута на ~25 px. Без
+    меж різу така пара пройшла б як «той самий кадр», і чужі рамки рядків
+    лягли б зі зсувом (`share.align.page_names`).
+    """
+    data = read_map_raw(case_dir)
+    if data is None:
+        return {}
+    out: dict[str, list[int]] = {}
+    for rec in data["frames"].values():
+        if not isinstance(rec, dict):
+            continue
+        for name, page in (rec.get("pages") or {}).items():
+            box = page.get("box") if isinstance(page, dict) else None
+            if isinstance(box, list) and len(box) == 4:
+                out[str(name)] = [int(v) for v in box]
     return out
 
 
