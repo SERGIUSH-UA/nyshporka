@@ -1081,7 +1081,7 @@ def test_the_missing_segmentation_is_a_warning_in_the_notes_not_a_line_in_a_log(
 
     src = P(GO.__file__).read_text(encoding="utf-8")
     i = src.index("cache = SEG.inspect(")
-    window = src[i:i + 1400]
+    window = src[i:i + 2600]
     assert "_SEG_PRICE.format(" in window
     assert re.search(r"notes\.append\(price\)", window), "нотатка заходу"
     assert re.search(r"res\.notes\.append\(price\)", window), "і підсумок"

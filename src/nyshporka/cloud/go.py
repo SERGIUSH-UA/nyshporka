@@ -800,11 +800,24 @@ def _prepare(res: GoResult, case: str, say: EventFn, owner: contextlib.ExitStack
     seg_seed: Path | None = None
     coverage = 0.0
     seg_base = plan.base_out or plan.out_dir
-    cache = SEG.inspect(ref.frames_dir, SEG.frames_of(pack), base_out=seg_base)
+    # 🔴 Кеш адресується текою ОРИГІНАЛІВ, а на машину може їхати стиснута
+    # копія. Тоді геометрію мусить підтвердити хоча б один звірений кадр:
+    # «нема з чим звірити» тут не «придатно», а рядки не з тих місць (рев'ю
+    # 04.10.2026). Ті самі кадри — геометрія та сама за побудовою.
+    cache = SEG.inspect(ref.frames_dir, SEG.frames_of(pack), base_out=seg_base,
+                        require_geometry=pack != ref.frames_dir)
     # Нова справа без жодного читання — звичайний стан, а не втрата: про неї
     # мовчимо. Говоримо, коли попереднє читання БУЛО або кеш знайшовся.
     read_before = plan.base_out is not None or before.got > 0
-    if read_before or cache.path is not None:
+    if thin and cache.usable:
+        # Тонкий шлях везе на машину текст, а не кеш сегментації: «✓» тут
+        # обіцяв би економію, якої не буде.
+        note = (f"готова сегментація є ({cache.why}), але тонкий шлях її не везе "
+                f"— захід приблизно вдвічі дорожчий. Із засівом — без `--thin`")
+        notes.append(note)
+        res.notes.append(note)
+        say("warning", f"⚠ {note}")
+    elif read_before or cache.path is not None:
         say("plan", f"{'✓' if cache.usable else '⚠'} сегментація: {cache.why}")
         if cache.usable and cache.path is not None:
             seg_seed, coverage = cache.path, cache.coverage

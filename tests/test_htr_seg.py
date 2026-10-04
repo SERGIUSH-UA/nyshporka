@@ -208,3 +208,46 @@ def test_a_sidecar_without_a_size_is_not_a_check(tmp_path: Path) -> None:
     got = S.inspect(case, frames, base_out=out, derived=derived)
     assert not got.usable, "розбіжність за шостим кадром мусила спрацювати"
     assert "іншого розміру" in got.why
+
+
+# ── стиснута копія: «нема з чим звірити» — не «придатно» ─────────────────────
+def test_a_shrunk_copy_needs_at_least_one_checked_frame(tmp_path: Path) -> None:
+    """🔴 Рев'ю 04.10.2026: кеш оригіналів (локальне читання) і порожня тека
+    прогону — звірка не порівнювала нічого й казала «придатно». На стиснутій
+    копії це рядки не з тих місць без жодної помилки."""
+    from nyshporka.htr.run import seg_cache_dir
+
+    case = tmp_path / "spr-3"
+    case.mkdir()
+    frames = [_frame(case / f"{i:04d}.jpg") for i in range(3)]
+    shrunk = tmp_path / "shrunk"
+    shrunk.mkdir()
+    packed = [_frame(shrunk / f.name, (800, 1200)) for f in frames]
+    derived = tmp_path / "derived"
+    _cache(seg_cache_dir(case, derived), [f.stem for f in frames])
+
+    got = S.inspect(case, packed, base_out=tmp_path / "out", derived=derived,
+                    require_geometry=True)
+    assert not got.usable and "звірити нема з чим" in got.why
+    # ті самі кадри, що й у кеші, — вимоги немає, засів лишається
+    assert S.inspect(case, frames, base_out=tmp_path / "out", derived=derived).usable
+
+
+def test_a_shrunk_copy_with_matching_sidecars_is_seeded(tmp_path: Path) -> None:
+    """Кеш, знятий із ТІЄЇ САМОЇ стиснутої копії (хмарний прогін), підтверджується
+    сайдкарами й їде засівом."""
+    from nyshporka.htr.run import seg_cache_dir
+
+    case = tmp_path / "spr-4"
+    case.mkdir()
+    shrunk = tmp_path / "shrunk"
+    shrunk.mkdir()
+    packed = [_frame(shrunk / f"{i:04d}.jpg", (800, 1200)) for i in range(3)]
+    out = tmp_path / "out"
+    for f in packed:
+        _lines_json(out, f.stem, (800, 1200))
+    derived = tmp_path / "derived"
+    _cache(seg_cache_dir(case, derived), [f.stem for f in packed])
+
+    got = S.inspect(case, packed, base_out=out, derived=derived, require_geometry=True)
+    assert got.usable, got.why

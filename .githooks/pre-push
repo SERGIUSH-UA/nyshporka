@@ -9,13 +9,27 @@
 
 zero=0000000000000000000000000000000000000000
 rc=0
-py=$(command -v python || command -v python3 || command -v py)
+# Python, який справді запускається: на Windows `python` буває заглушкою
+# Microsoft Store, що лише відкриває магазин і виходить з помилкою.
+py=""
+for c in python3 python py; do
+  if command -v "$c" >/dev/null 2>&1 && "$c" -c "import sys" >/dev/null 2>&1; then
+    py=$c
+    break
+  fi
+done
 
 while read -r local_ref local_sha remote_ref remote_sha; do
   case "$remote_ref" in
     refs/tags/v*)
       [ "$local_sha" = "$zero" ] && continue   # тег видаляють — перевіряти нічого
       tag=${remote_ref#refs/tags/}
+      if [ -z "$py" ]; then
+        echo "перевірка релізу $tag: не знайдено робочого Python (python3/python/py) —" \
+             "поставте його в PATH або свідомо: git push --no-verify" >&2
+        rc=1
+        continue
+      fi
       echo "перевірка релізу $tag…"
       "$py" tools/release_check.py "$tag" --ref "$local_sha" --quiet || rc=1
       ;;

@@ -112,12 +112,19 @@ def key_problem(files: Sequence[Path]) -> str:
     return ""
 
 
-def geometry_problem(frames: Sequence[Path], base_out: Path) -> str:
+def geometry_problem(frames: Sequence[Path], base_out: Path, *,
+                     require: bool = False) -> str:
     """Кадри, які поїдуть читатись, мусять мати розмір, який бачив перший прогін.
 
     🔴 Це і є той запобіжник, заради якого існує модуль: кеш, знятий із
     оригіналів, у прогоні по стиснутій копії дає кропи не з тих місць, і
     жоден лічильник цього не покаже.
+
+    `require` — звірити хоча б ОДИН кадр, інакше відмова. Потрібно, коли
+    читатимуться не ті кадри, з яких знято кеш (стиснута копія): без жодного
+    `.lines.json` із розміром «проблем не знайдено» означало б «не дивились»
+    (рев'ю 04.10.2026 — засів хмари на будь-якій справі зробив цю дірку
+    досяжною).
     """
     from PIL import Image
 
@@ -146,6 +153,10 @@ def geometry_problem(frames: Sequence[Path], base_out: Path) -> str:
         checked += 1
         if checked >= GEOMETRY_SAMPLE:
             break
+    if require and not checked:
+        return ("розмір кадрів, з яких знято кеш, звірити нема з чим (у "
+                f"{base_out} немає `.lines.json` із розміром), а читатиметься "
+                "стиснута копія — кеш може дати рядки не з тих місць")
     return ""
 
 
@@ -161,7 +172,8 @@ def frames_of(case_dir: Path) -> list[Path]:
 
 
 def inspect(case_dir: Path, frames: Sequence[Path] | None = None, *,
-            base_out: Path, derived: Path | None = None) -> SegCache:
+            base_out: Path, derived: Path | None = None,
+            require_geometry: bool = False) -> SegCache:
     """Найкраща придатна сегментація для цих кадрів — або чому її немає.
 
     `case_dir` — тека справи, за якою адресується локальний кеш; `frames` —
@@ -189,6 +201,6 @@ def inspect(case_dir: Path, frames: Sequence[Path] | None = None, *,
     if problem := key_problem(files):
         return SegCache(d, n, covered, False,
                         f"кеш знятий з іншими параметрами нарізки ({problem}) — не влучить")
-    if problem := geometry_problem(frames, base_out):
+    if problem := geometry_problem(frames, base_out, require=require_geometry):
         return SegCache(d, n, covered, False, problem)
     return SegCache(d, n, covered, True, f"{covered}/{n} кадрів ({100 * covered / n:.0f}%)")
