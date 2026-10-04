@@ -183,3 +183,11 @@ def test_torch_native_triton_ops_are_off_before_torch_loads(monkeypatch) -> None
     assert env.foreign_env()["TORCH_DISABLE_NATIVE_JIT"] == "1"
     monkeypatch.setenv("TORCH_DISABLE_NATIVE_JIT", "0")
     assert env.foreign_env()["TORCH_DISABLE_NATIVE_JIT"] == "0", "явне рішення — сильніше"
+
+
+def test_pp_batch_budget_is_per_shard_not_a_share_of_the_card() -> None:
+    """🔴 Частка карти множилась на число шардів: 20% на кожен — і на V100 16 ГБ
+    шард із двома PP-голосами тримав 3.4 ГБ, а регулятор садив менше шардів.
+    Стала 768 МБ: 4 шарди разом 7561 → 6535 МБ, швидкість та сама."""
+    assert 256 <= R.PP_VRAM_MB <= 1024
+    assert "PP_VRAM_SHARE" not in RUNNER_SRC

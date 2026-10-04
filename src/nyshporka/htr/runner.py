@@ -839,9 +839,13 @@ PP_BATCH = 16
 #: Пік VRAM PP-OCRv6 на 1000 px сумарної ширини пачки в масштабі моделі (рядок
 #: доповнюється до найширшого в пачці): той самий замір — 44…53 МБ.
 PP_MB_PER_KPX = 0.055 * 1000
-#: Скільки VRAM дати одній пачці, МБ; 0 — частка карти (`PP_VRAM_SHARE`).
-PP_VRAM_MB = 0
-PP_VRAM_SHARE = 0.2
+#: Скільки VRAM дати одній пачці PP, МБ — стала, а не частка карти. 🔴 Частка
+#: (була 20%) — це 20% НА КОЖЕН шард: на V100 16 ГБ пачка могла брати 3.2 ГБ у
+#: кожному з шардів, і регулятор флоту садив менше шардів. Замір 04.10.2026
+#: (V100, 10 сторінок, три моделі): 1 шард — пік 3385 → 3025 МБ, 4 шарди разом —
+#: 7561 → 6535 МБ, розпізнавання 3.94 → 4.08 с/стор, стіна 4 шардів та сама.
+#: На 4-ГБ домашній карті 768 ≈ колишні 20% (820 МБ). Ручка — `--pp-vram-mb`.
+PP_VRAM_MB = 768
 #: 🔴 Чому бюджет пам'яті, а не лише число рядків. Пачка з 16 найширших рядків
 #: коштує +1.57 ГБ, і на 4 ГБ поруч із Писарем `reserved` росло до 5.5 ГБ:
 #: Windows пускає CUDA у спільну системну пам'ять, і прохід мережі сповзав у
@@ -900,7 +904,7 @@ def load_pp(model: str, device: str) -> tuple:
         cfg = RecognitionInferenceConfig(accelerator="gpu", device=[idx],
                                          batch_size=PP_BATCH, num_line_workers=0)
         total_mb = torch.cuda.get_device_properties(idx).total_memory / 2**20
-        mb = PP_VRAM_MB or max(256.0, PP_VRAM_SHARE * total_mb)
+        mb = max(256.0, min(float(PP_VRAM_MB), 0.5 * total_mb))
         budget_px = mb / PP_MB_PER_KPX * 1000
     else:
         cfg = RecognitionInferenceConfig(accelerator="cpu", batch_size=PP_BATCH,
@@ -3483,9 +3487,8 @@ def main() -> int:
                     help="точність основи PP-моделі на карті; fp16 на справжніх сторінках "
                          "повільніший (нові ширини рядків), лише для заміру")
     ap.add_argument("--pp-vram-mb", type=int, default=PP_VRAM_MB,
-                    help="скільки VRAM дати одній пачці PP-OCRv6, МБ; 0 — "
-                         f"{int(PP_VRAM_SHARE * 100)}%% карти (пачка закривається "
-                         "раніше, ніж вилізе за фізичну пам'ять)")
+                    help="скільки VRAM дати одній пачці PP-OCRv6 у шарді, МБ (пачка "
+                         "закривається раніше, ніж вилізе за бюджет)")
     ap.add_argument("--allow-any-kraken", action="store_true",
                     help=argparse.SUPPRESS)   # лише для `kraken_lineage_verify`
     ap.add_argument("--seg-cache", action=argparse.BooleanOptionalAction,
