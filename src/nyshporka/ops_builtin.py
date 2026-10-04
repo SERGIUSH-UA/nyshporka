@@ -2248,13 +2248,21 @@ def case_register(a: CaseRegisterArgs) -> Envelope:
             env.warn("key_mismatch", why)
     if a.reindex:
         try:
+            from nyshporka import pdfcount
             from nyshporka.library import _sidecar_case, build_library, write_library
 
             # паспорт щойно переписано, а розбір шляху кешує прочитаний
             _sidecar_case.cache_clear()
-            entries = build_library()
+            # 🔴 Перезбірка тут цілком, а не «дописати одну справу»: окремий
+            # шлях дублював би правила бібліотеки, і два місця розійшлися б у
+            # тому, що таке справа. Чекати мережу вона більше не може: PDF
+            # рахуються з кешу, а хмарні без числа не відкриваються (`pdfcount`).
+            with pdfcount.session() as sess:
+                entries = build_library()
             write_library(entries)
             env.data["library"] = len(entries)
+            if sess.skipped:
+                env.warn("cloud_pdf", pdfcount.describe(sess.skipped))
         except Exception as exc:
             env.warn("reindex_failed",
                      f"опис записано, але бібліотеку не перезібрано "

@@ -320,16 +320,22 @@ async def _run_build(bus: JobBus, job: JobRecord, rescan: bool) -> None:
     await bus.update(job.id, state=JobState.RUNNING)
 
     def work() -> dict[str, Any]:
+        from nyshporka import pdfcount
+
         out: dict[str, Any] = {}
-        if rescan:
-            from nyshporka.library import build_library, write_library
+        with pdfcount.session() as sess:
+            if rescan:
+                from nyshporka.library import build_library, write_library
 
-            entries = build_library()
-            write_library(entries)
-            out["library"] = len(entries)
-        from nyshporka.cases import db
+                entries = build_library()
+                write_library(entries)
+                out["library"] = len(entries)
+            from nyshporka.cases import db
 
-        return {**out, **db.build_index()}
+            out.update(db.build_index())
+        out["cloud"] = {"files": len(sess.skipped), "bytes": sess.nbytes,
+                        "skipped": dict(sess.skipped)}
+        return out
 
     try:
         res = await asyncio.to_thread(work)
@@ -338,7 +344,13 @@ async def _run_build(bus: JobBus, job: JobRecord, rescan: bool) -> None:
                          error=f"{type(exc).__name__}: {exc}")
         return
     n = int(res.get("cases") or 0)
-    await bus.update(job.id, state=JobState.DONE, result=res,
+    warnings: list[dict[str, str]] = []
+    if res["cloud"]["skipped"]:
+        from nyshporka import pdfcount
+
+        warnings.append({"code": "cloud_pdf",
+                         "text": pdfcount.describe(res["cloud"]["skipped"])})
+    await bus.update(job.id, state=JobState.DONE, result=res, warnings=warnings,
                      progress=Progress(i=n, n=n, done=n, basis="справа"))
 
 
