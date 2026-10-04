@@ -350,12 +350,35 @@ def crop(scope: str, page: str, line: int, *, with_next: bool = True, wide: bool
             joined.append(prev.no)
     size = _geometry_size(run, pg)
     got = S.resolve_scan_how(run, pg)
-    if got is None:
-        return {"error": f"кадру для {run} · {pg} на цій машині немає: мета веде в "
-                         f"нікуди, реєстр справ теки не знає"}
-    src, orient, frame_source = got
-    with Image.open(src) as raw:
-        im = _rotated(raw.convert("RGB"), int(orient))
+    if got is not None:
+        src, orient, frame_source = got
+        frame = str(src)
+        with Image.open(src) as raw:
+            base = raw.convert("RGB")
+    else:
+        # 🔴 Справа-PDF: хмарний прогін розгортав PDF у кадри на орендованому
+        # боксі, тож кадрів на диску немає, а `page.view` ту саму сторінку
+        # рендерив із PDF. Кроп відповідав «кадру немає», і гортач (`text sheet`)
+        # ішов без кропів якраз на найбільших справах (відгук стороннього
+        # користувача, жовтень 2026). Тепер шлях спільний із переглядом:
+        # відповідність кадр → сторінка доводиться в `pdfpage.mapping`, а не
+        # вгадується. Рендер — у ширину геометрії рушія до повороту, тож рамки
+        # лягають без перерахунку.
+        from nyshporka.htr import view as V
+
+        meta_orient = int(((S.load_meta(run) or {}).get("pages") or {})
+                          .get(pg, {}).get("orient") or 0)
+        width = None
+        if size and size[0]:
+            width = size[1] if meta_orient % 180 else size[0]
+        try:
+            base, orient, pdf, index = V.pdf_page(run, pg, width=width)
+        except V.ViewError as exc:
+            return {"error": f"кадру для {run} · {pg} на цій машині немає, і з PDF "
+                             f"справи його не відтворити: {exc}"}
+        frame, frame_source = f"{pdf} · с.{index + 1}", "pdf"
+    with base:
+        im = _rotated(base, int(orient))
         k = 1.0
         if size and size[0]:
             if (im.width > im.height) != (size[0] > size[1]):
@@ -385,7 +408,7 @@ def crop(scope: str, page: str, line: int, *, with_next: bool = True, wide: bool
         piece.save(dst)
         return {"run": run, "page": pg, "line": line, "next": nxt_no, "prev": prev_no,
                 "joined": joined,
-                "frame": str(src), "frame_source": frame_source,
+                "frame": frame, "frame_source": frame_source,
                 "orient": int(orient), "scale_k": round(k, 3),
                 "scale": scale,
                 "box": list(box), "out": str(dst), "width": piece.width,

@@ -60,17 +60,49 @@ class Shot:
                 "height": self.height, "text": self.text, "note": self.note}
 
 
+def turn(im: Any, orient: int) -> Any:
+    """Повернути так, як повертав раннер перед читанням: `orient` градусів
+    ПРОТИ годинникової (`Image.ROTATE_*`, див. `runner.rotated`).
+
+    🔴 Сторінку прогону тут повертало `im.rotate(-orient)`, тобто ЗА
+    годинниковою. На сторінці з `orient` 90 чи 270 це давало аркуш догори
+    дриґом відносно того, що бачив рушій, і рамки рядків лягали на чужі
+    місця. Помітили, коли кроп (`text crop`) став брати сторінку з того
+    самого рендера, що й перегляд: кроп повертав як раннер, а перегляд навпаки.
+    """
+    from PIL import Image
+
+    how = {90: Image.Transpose.ROTATE_90, 180: Image.Transpose.ROTATE_180,
+           270: Image.Transpose.ROTATE_270}.get(int(orient or 0) % 360)
+    return im.transpose(how) if how is not None else im
+
+
 def _open_rotated(src: Path, orient: int) -> Any:
+    """Кадр, повернутий на `orient` ЗА годинниковою — конвенція мети нарізки
+    лабораторії трену (`train.cut.page_image`), а НЕ мети прогону.
+
+    ⚠ Мета прогону пише кут проти годинникової (`runner.rotated`); сторінку
+    прогону повертає `turn`.
+    """
     from PIL import Image
 
     with Image.open(src) as raw:
         im = raw.convert("RGB")
+    # 🔴 Той самий кут, яким користувався OCR. Рамки рядків лежать у
+    # координатах повернутого зображення; показати неповернуте означає
+    # покласти рамку на чуже місце — і виглядатиме це як «модель марить».
     if orient:
-        # 🔴 Той самий кут, яким користувався OCR. Рамки рядків лежать у
-        # координатах повернутого зображення; показати неповернуте означає
-        # покласти рамку на чуже місце — і виглядатиме це як «модель марить».
         im = im.rotate(-orient, expand=True)
     return im
+
+
+def _open_run_scan(src: Path, orient: int) -> Any:
+    """Скан сторінки прогону, повернутий так, як його читав раннер."""
+    from PIL import Image
+
+    with Image.open(src) as raw:
+        im = raw.convert("RGB")
+    return turn(im, orient)
 
 
 #: Останні відрендерені сторінки: (run, page) → PNG.
@@ -79,18 +111,19 @@ def _open_rotated(src: Path, orient: int) -> Any:
 #: 1200 аркушів коштує близько шести секунд. Без кешу перегляд двадцяти рядків
 #: перетворюється на дві хвилини очікування, і ним просто не користуються.
 #: Розмір навмисно малий: сторінка важить мегабайти.
-_RENDER_CACHE: dict[tuple[str, str, str], bytes] = {}
+_RENDER_CACHE: dict[tuple[str, str, str, int], bytes] = {}
 _RENDER_CACHE_MAX = 4
 
 
-def _cached_render(run: str, page: str, case_dir: str,
+def _cached_render(run: str, page: str, case_dir: str, width: int,
                    make: Callable[[], bytes]) -> bytes:
     # 🔴 Тека — частина ключа. Справа часто лежить у кількох теках (оригінали,
     # зменшені копії для хмари, посторінковий рендер), і `_page_image` пробує їх
     # по черзі. Без теки в ключі друга ітерація дістала б із кешу сторінку
     # першої теки — тобто рівно те, від чого захищається весь цей модуль:
-    # чужий аркуш під правильним підписом.
-    key = (run, page, case_dir)
+    # чужий аркуш під правильним підписом. Ширина — теж: кроп просить сторінку
+    # у розмірі геометрії рушія, перегляд — у своєму.
+    key = (run, page, case_dir, width)
     hit = _RENDER_CACHE.get(key)
     if hit is not None:
         return hit
@@ -133,16 +166,32 @@ def _page_image(run: str, page: str) -> Any:
     рендера на вимогу гортач сліпий саме на найбільших справах — тих, які
     взагалі мають сенс читати машиною.
     """
+    from nyshporka import htr_store as S
+
+    got = S.resolve_scan(run, page)
+    if got is not None:
+        src, orient = got
+        return _open_run_scan(src, orient)
+    im, orient, _pdf, _index = pdf_page(run, page)
+    return turn(im, orient)
+
+
+def pdf_page(run: str, page: str, *, width: int | None = None
+             ) -> tuple[Any, int, Path, int]:
+    """Сторінка справи-PDF, що відповідає кадру прогону, — НЕПОВЕРНУТА.
+
+    Повертає (зображення, `orient` з мети, файл PDF, індекс сторінки з нуля).
+    Поворот лишається викликачеві: перегляд і кроп повертають по-своєму
+    (кроп ще звіряє орієнтацію з геометрією), а рендер у них спільний.
+    `width` — ширина рендера; кроп просить ширину геометрії рушія, тож рамки
+    лягають без перерахунку масштабу.
+    """
     from PIL import Image
 
     from nyshporka import htr_store as S
     from nyshporka.htr import pdfpage as P
 
-    got = S.resolve_scan(run, page)
-    if got is not None:
-        src, orient = got
-        return _open_rotated(src, orient)
-
+    w = int(width or P.DEFAULT_WIDTH)
     meta = S.load_meta(run) or {}
     frames = list(meta.get("pages") or {})
     # Скільки кадрів мала справа, а не скільки прочитано. Частковий прогін без
@@ -162,10 +211,12 @@ def _page_image(run: str, page: str) -> Any:
         tried += 1
 
         def make(d: Path = case_dir) -> bytes:
-            return P.render(d, frames, page, total=total)
+            return P.render(d, frames, page, width=w, total=total)
 
         try:
-            png = _cached_render(run, page, str(case_dir), make)
+            png = _cached_render(run, page, str(case_dir), w, make)
+            no = P.frame_number(page)
+            path, index = P.mapping(case_dir, frames, total).locate(int(no or 0))
         except P.PdfPageError as exc:
             why.append(f"{case_dir.name}: {exc}")
             continue                      # інша тека — інша спроба
@@ -174,7 +225,7 @@ def _page_image(run: str, page: str) -> Any:
             continue
         with Image.open(io.BytesIO(png)) as raw:
             im = raw.convert("RGB")
-        return im.rotate(-orient, expand=True) if orient else im
+        return im, orient, path, index
 
     if not tried:
         raise ViewError(
