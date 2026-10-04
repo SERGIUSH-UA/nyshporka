@@ -66,6 +66,9 @@ def test_chastkova_metryka_bez_koda_metric() -> None:
     """Лише народження — це `birth`; дві частини з трьох коду не дають."""
     assert opys.genre({"title": "Метрична книга, частина про народження"})[0] == "birth"
     assert opys.genre({"title": "Метрична книга: народження і шлюби"})[0] == ""
+    # Хрещення — це народження: книга хрещень не метрика з трьох частин.
+    assert opys.genre({"title": "Метричні записи про хрещення"})[0] == "birth"
+    assert opys.genre({"title": "Метрична книга: хрещення, шлюби, смерті"})[0] == "metric"
 
 
 @pytest.mark.parametrize("title, code", [
