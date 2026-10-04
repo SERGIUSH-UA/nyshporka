@@ -39,14 +39,21 @@ def genre(side: dict[str, Any], title: str = "") -> tuple[str, list[str]]:
 
     Картка тримає ОДИН код зі словника жанрів пакета (`record_type_labels`),
     а метрична книга дає три — народження, шлюби, смерті. Вибрати з них
-    один означало б записати зведену метрику як «народження», тож код
-    ставиться лише тоді, коли тип однозначний; перелік їде окремо.
+    один означало б записати зведену метрику як «народження», тож для
+    повної трійки є свій код `metric`; інша суміш коду не дає. Перелік
+    типів їде окремо.
     """
     from nyshporka.library import _infer_record_types
 
     raw = str(side.get("doc_type") or side.get("record_type") or "")
     types = [str(t) for t in _infer_record_types(raw, str(side.get("title") or ""), title)]
+    if set(types) == METRIC_TYPES:
+        return "metric", types
     return (types[0] if len(types) == 1 else ""), types
+
+
+#: Три частини метричної книги. Разом вони — жанр `metric`.
+METRIC_TYPES = frozenset({"birth", "marriage", "death"})
 
 
 #: Ознаки того, що в полі `title` паспорта стоїть робоча нотатка, а не назва

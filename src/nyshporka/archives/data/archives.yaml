@@ -440,3 +440,14 @@ record_type_labels:
   clergy_list: клірові
   finding_aid: опис фонду
   other: інше
+  # Жанр КАРТКИ, а не тип запису: книга з народженнями, шлюбами й смертями
+  # разом. Окремі типи її записів лишаються birth/marriage/death.
+  metric: метрична книга
+  marriage_search: шлюбні обшуки
+  directory: довідкові видання
+  court: судові справи
+  estate: станові справи
+  visitation: візитації
+  inventory: інвентарі
+  census: переписи
+  service_record: формулярні списки

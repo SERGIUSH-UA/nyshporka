@@ -53,11 +53,45 @@ def test_record_type_daie_kod_zhanru() -> None:
     assert types == ["revision"]
 
 
-def test_metryka_bez_odnoho_kodu() -> None:
-    """Зведена метрика — три типи; вибрати один означало б збрехати в картці."""
+def test_metryka_maie_svii_kod() -> None:
+    """Зведена метрика — три типи; картка дістає `metric`, а не перший з них."""
     code, types = opys.genre({"record_type": "Метрична книга"})
-    assert code == ""
+    assert code == "metric"
     assert set(types) == {"birth", "marriage", "death"}
+    assert opys.genre({"title": "Церковно-метрична книга про народження, шлюб, смерть"})[0] \
+        == "metric"
+
+
+def test_chastkova_metryka_bez_koda_metric() -> None:
+    """Лише народження — це `birth`; дві частини з трьох коду не дають."""
+    assert opys.genre({"title": "Метрична книга, частина про народження"})[0] == "birth"
+    assert opys.genre({"title": "Метрична книга: народження і шлюби"})[0] == ""
+
+
+@pytest.mark.parametrize("title, code", [
+    ("Шлюбні обшуки Летичівського повіту", "marriage_search"),
+    ("Книга брачных обысков", "marriage_search"),
+    ("Адрес-календарь Подольской губернии", "directory"),
+    ("Памятная книжка Подольской епархии", "directory"),
+    ("Месяцеслов на 1819 год", "directory"),
+    ("Акти Радомисльського духовного суду, 1773", "court"),
+    ("Родовідна книга дворян Подільської губернії", "estate"),
+    ("Wizyta Roczna Humańskiego Dekanatu", "visitation"),
+    ("Інвентар маєтку Чернелівка", "inventory"),
+    ("Перепис населення 1897", "census"),
+    ("Формулярні списки священнослужителів", "service_record"),
+    ("Подольские епархиальные ведомости, 1862", "gazette"),
+])
+def test_novi_zhanry(title: str, code: str) -> None:
+    assert opys.genre({"title": title})[0] == code
+
+
+@pytest.mark.parametrize("title", [
+    "Постанови консисторії", "Переписка консисторії з благочинним",
+])
+def test_ne_zhanr_za_chastynoiu_slova(title: str) -> None:
+    """«Постанова» не станова справа, «переписка» — не перепис."""
+    assert opys.genre({"title": title})[0] == ""
 
 
 # ── паспорт ──────────────────────────────────────────────────────────────────

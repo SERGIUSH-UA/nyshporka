@@ -277,6 +277,14 @@ _COVERAGE_RECORD_TYPES = [
     {"id": "gazette", "label": "Єпарх. відомості"},
     {"id": "clergy_list", "label": "Клірові"},
     {"id": "finding_aid", "label": "Описи/каталоги"},
+    {"id": "marriage_search", "label": "Шлюбні обшуки"},
+    {"id": "directory", "label": "Довідкові видання"},
+    {"id": "court", "label": "Судові справи"},
+    {"id": "estate", "label": "Станові справи"},
+    {"id": "visitation", "label": "Візитації"},
+    {"id": "inventory", "label": "Інвентарі"},
+    {"id": "census", "label": "Переписи"},
+    {"id": "service_record", "label": "Формулярні списки"},
     {"id": "other", "label": "Інше"},
 ]
 

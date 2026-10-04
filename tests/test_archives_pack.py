@@ -45,6 +45,10 @@ LEGACY_RTYPE_LABEL = {
     "birth": "народження", "marriage": "шлюби", "death": "смерті",
     "confession": "сповідні", "revision": "ревізькі", "gazette": "єпарх. відомості",
     "clergy_list": "клірові", "finding_aid": "опис фонду", "other": "інше",
+    "metric": "метрична книга", "marriage_search": "шлюбні обшуки",
+    "directory": "довідкові видання", "court": "судові справи",
+    "estate": "станові справи", "visitation": "візитації", "inventory": "інвентарі",
+    "census": "переписи", "service_record": "формулярні списки",
 }
 
 
