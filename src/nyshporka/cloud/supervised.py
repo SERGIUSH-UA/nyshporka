@@ -619,7 +619,7 @@ def prepare(convoy: Convoy, res: GoResult, say: Callable[..., None], *,
         raise GoRefused(
             "наглядач хмарних прогонів застарий: план не везе на машину середовище "
             "рушіїв (kraken з маніфесту), і раннер на боксі не стартував би. "
-            "Оновіть: `nysh update` (пакет оренди `gpuhire` ≥ 0.6) і повторіть.")
+            "Оновіть: `nysh update` (пакет оренди `gpuhire` ≥ 0.6.1) і повторіть.")
 
     # 3. правки, яких наглядач знати не може
     _patch_plan(plan_path, convoy)
