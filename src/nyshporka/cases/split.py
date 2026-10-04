@@ -111,6 +111,24 @@ def _read_json(path: Path) -> dict[str, Any]:
     return raw if isinstance(raw, dict) else {}
 
 
+def _read_journal(path: Path) -> dict[str, Any]:
+    """Журнал розбивки — або відмова, якщо під тим самим іменем лежить чужий файл.
+
+    🔴 `_split.json` пише й завантажувач Сканотеки ПТГ: карту «сторінка →
+    скан, бік» для розворотів, розрізаних по згину (`core.skanoteka`). Це
+    єдиний зв'язок сторінки декоду з номером скана в джерелі. `--undo` на
+    такій теці видалив би його як «свій журнал».
+    """
+    from nyshporka.core import skanoteka
+
+    data = _read_json(path)
+    if skanoteka.is_map(data):
+        raise SplitError(f"{path.name} у цій теці — карта сканів Сканотеки ПТГ "
+                         f"(сторінка → скан), а не журнал розбивки. Розкладати "
+                         f"чи знімати розбивку тут нема чого; файл не чіпаю: {path}")
+    return data
+
+
 # ── карта ────────────────────────────────────────────────────────────────────
 def parse_part(spec: str) -> tuple[str, str, str]:
     """`"926=0001.jpg..0120.jpg"` → `("926", "0001.jpg", "0120.jpg")`."""
@@ -389,7 +407,7 @@ def split(case_dir: str | Path, specs: list[tuple[str, str, str]], *,
     root = workspace().root
     here = case_path(case_dir)
     journal = here / JOURNAL
-    old = _read_json(journal)
+    old = _read_journal(journal)
     # 🔴 Журнал питається ДО плану: після обриву теки частин уже лежать, і план
     # за іншою картою побачив би в них «чуже» — тобто назвав би не ту причину.
     if old.get("state") == "done":
@@ -653,7 +671,7 @@ def undo(case_dir: str | Path) -> dict[str, Any]:
 
     d = case_path(case_dir)
     root = workspace().root
-    journal = _read_json(d / JOURNAL)
+    journal = _read_journal(d / JOURNAL)
     if not journal:
         raise SplitError(f"розбивки в теці немає (файла {JOURNAL} не знайдено): {d}")
     frames_dir = align._frames_dir(d) or d

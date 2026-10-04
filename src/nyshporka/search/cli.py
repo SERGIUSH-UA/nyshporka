@@ -186,6 +186,8 @@ def ctx_cmd(
     as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Контекст рядка: сторінка, усі голоси, сусіди за геометрією, роки, око."""
+    from rich.markup import escape
+
     from nyshporka import ops as O
 
     env = O.call("text.ctx", {"case": case, "page": page, "line": line or None,
@@ -202,6 +204,8 @@ def ctx_cmd(
         e = d["eye"]
         console.print(f"[muted]око: {'дивилось' if e.get('noted') else 'не дивилось'}"
                       f"{' · ' + str(e.get('status')) if e.get('noted') else ''}[/muted]")
+    if d.get("scan_link"):
+        console.print(f"[muted]скан у джерелі: {escape(d['scan_link']['cite'])}[/muted]")
     for it in d["window"]:
         mark = "[warn]»[/warn]" if it.get("mark") else " "
         geo = ""
@@ -230,6 +234,8 @@ def crop_cmd(
     as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Кроп рядка з кадру за рамкою рушія — з поворотом і масштабом, як бачив рушій."""
+    from rich.markup import escape
+
     from nyshporka import ops as O
 
     env = O.call("text.crop", {"case": case, "page": page, "line": line,
@@ -249,6 +255,8 @@ def crop_cmd(
     console.print(f"    [warn]»[/warn] {d['text']}")
     if d.get("next_text"):
         console.print(f"      [muted]↓ {d['next_text']}[/muted]")
+    if d.get("scan_link"):
+        console.print(f"[muted]скан у джерелі: {escape(d['scan_link']['cite'])}[/muted]")
     _notes(env)
 
 
