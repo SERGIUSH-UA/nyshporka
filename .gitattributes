@@ -7,3 +7,6 @@ tests/data/merge_fond/** -text
 
 # Скрипт входу контейнера виконує sh у Linux: CRLF там ламає перший же рядок.
 docker/*.sh text eol=lf
+
+# Хуки виконує sh: CRLF дав би «: not found».
+.githooks/* text eol=lf

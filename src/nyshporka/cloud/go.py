@@ -581,10 +581,10 @@ class _Density:
             say("density", f"щільність {lines:g} рядк/стор — медіана {len(seen)} "
                            f"вибірок цього заходу з опису {'/'.join(series)}")
             return lines
-        lines = probe()
-        if lines is not None:
-            seen.append(lines)
-        return lines
+        got = probe()
+        if got is not None:
+            seen.append(got)
+        return got
 
 
 def _prepare(res: GoResult, case: str, say: EventFn, owner: contextlib.ExitStack, *,

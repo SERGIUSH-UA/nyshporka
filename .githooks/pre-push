@@ -1,0 +1,26 @@
+#!/bin/sh
+# Тег релізу (v*) іде на GitHub лише після tools/release_check.py.
+#
+# Ворота в release.yml ловлять те саме, але вже ПІСЛЯ пушу тега — і тоді
+# тег доводиться знімати й ставити наново. Тут відмова до того, як тег
+# кудись поїхав. Обійти свідомо: git push --no-verify.
+#
+# Увімкнути на машині (раз):  git config core.hooksPath .githooks
+
+zero=0000000000000000000000000000000000000000
+rc=0
+py=$(command -v python || command -v python3 || command -v py)
+
+while read -r local_ref local_sha remote_ref remote_sha; do
+  case "$remote_ref" in
+    refs/tags/v*)
+      [ "$local_sha" = "$zero" ] && continue   # тег видаляють — перевіряти нічого
+      tag=${remote_ref#refs/tags/}
+      echo "перевірка релізу $tag…"
+      "$py" tools/release_check.py "$tag" --ref "$local_sha" --quiet || rc=1
+      ;;
+  esac
+done
+
+[ $rc -ne 0 ] && echo "тег не запушено. Виправити й переставити тег, або свідомо: git push --no-verify" >&2
+exit $rc

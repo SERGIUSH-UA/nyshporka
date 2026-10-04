@@ -39,6 +39,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          # Уся історія з тегами: `release_check.py` порівнює реліз із
+          # попереднім тегом (що змінилось, чи не правлено випущену міграцію).
+          fetch-depth: 0
       # ⚠ Точний тег, а не `@v10`: з v8 setup-uv не публікує мажорних тегів.
       # 🔴 Кеш тут свідомо НЕ вмикається: з v10 `enable-cache: auto` вимикає його
       # на tag push — захист від отруєного кешу рівно там, де збірка їде на PyPI.
@@ -68,6 +72,10 @@ jobs:
       # як колесо поїхало на PyPI.
       - name: нотатка для людини є
         run: uv run python tools/release_notes.py "${GITHUB_REF_NAME}" > /dev/null
+      # 🧾 Версія, журнал, міграція агента — те саме, що хук `pre-push` на теги
+      # (`.githooks/pre-push`). Тут — для машини, де хук не ввімкнено.
+      - name: нічого не забуто
+        run: uv run python tools/release_check.py "${GITHUB_REF_NAME}" --ref "${GITHUB_SHA}"
 
   build:
     name: зібрати
