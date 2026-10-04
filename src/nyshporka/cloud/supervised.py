@@ -209,8 +209,10 @@ def engine_requirements_file() -> Path:
 
     from nyshporka.htr import manifest as HM
 
+    man = HM.active()
+    # torch — еталонні піни: бокс поставить їх колесом з індексу під свою карту
     lines = ["# середовище рушіїв Нишпорки — з htr/data/engines.yaml",
-             *HM.active().pip_specs()]
+             *man.pip_specs(), *man.torch_reference]
     text = "\n".join(lines) + "\n"
     digest = hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
     out = Path(tempfile.gettempdir()) / "nyshporka-engine" / f"requirements_{digest}.txt"

@@ -100,6 +100,19 @@ def test_wheel_that_installed_but_did_not_help_is_not_success(monkeypatch, man, 
     assert "не бачить карту" in out and "issue" in out
 
 
+def test_card_without_kernels_in_the_wheel_gets_the_card_wheel(monkeypatch, man, capsys):
+    """🔴 Колесо torch 2.14 з PyPI на Linux — cu130: GTX 1080 воно бачить
+    (`is_available()` = True), а ядер під sm_61 у ньому немає. Проба мусить
+    запустити ядро, інакше крок під карту пропускався б, а читання падало б аж
+    на прогоні («no kernel image is available»)."""
+    assert "device='cuda'" in env.CUDA_WORKS, "проба має рахувати на карті"
+    gtx_1080 = env.gpu.Card(name="NVIDIA GeForce GTX 1080", capability="6.1", driver="581.15")
+    fake = Fake(monkeypatch, sees=["False", "True"], card=gtx_1080)
+    env._ensure_cuda(Path("venv"), man)
+    assert len(fake.cmds) == 1 and _index(fake.cmds[0]).endswith("/cu126")
+    assert "підхопилась" in capsys.readouterr().out
+
+
 def test_working_gpu_is_left_alone(monkeypatch, man, capsys):
     fake = Fake(monkeypatch, sees=["True"], card=RTX_3050)
     env._ensure_cuda(Path("venv"), man)

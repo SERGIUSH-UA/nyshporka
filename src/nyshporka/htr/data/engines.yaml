@@ -63,6 +63,12 @@ runtime:
     # ~77 рядків): i7-9750H 6 ядер — 61 с/стор, GTX 1650 — 14 с, текст
     # тотожний. Люди в чаті: i7-6700 — 19 с, M4 у 3 шарди — 14–16 с.
     default: ["torch", "torchvision"]
+    # Еталонна збірка — те, що резолвить kraken 7.1.1 на свіжій машині
+    # (`torch<=2.14` → 2.14.0). Середовище, оновлене на місці, лишає свій torch у
+    # межах kraken (не перекачує 2.5 ГБ); хмарний бокс ставить рівно цю — колесом
+    # з індексу під свою карту (cu126 / cu128, як у `cuda_matrix` нижче), поверх
+    # закешованого образу.
+    reference: ["torch==2.14.0", "torchvision==0.29.1"]
     # Прискорення докладається окремим кроком за реальною картою. Індекс
     # обирається за compute capability, а не зашивається: cu126 під sm_75
     # (GTX 16xx / RTX 20xx) на новіших картах не працює взагалі.
@@ -147,6 +153,20 @@ patches:
     tested_on: "kraken==7.1.1"
     requires_cuda: true
     gain: "CLAHE блідих сторінок ×1.9 (інтерполяція відображень на карті)"
+  # Дві нижче — не підміна коду kraken, а перетворення завантаженої PP-моделі
+  # (`.safetensors`) у раннері. Вимикачі — `--no-pp-fuse`, `--pp-precision fp32`.
+  - id: pp_fuse
+    module: nyshporka.htr.patches.pp_fuse
+    verify: nyshporka.htr.patches.pp_fuse_verify
+    tested_on: "kraken==7.1.1"
+    requires_cuda: false
+    gain: "PP-читання −9…−17% (BatchNorm і гілки RepDWConv злито у згортки; текст побітово той самий)"
+  - id: pp_fp16
+    module: nyshporka.htr.patches.pp_fp16
+    verify: nyshporka.htr.patches.pp_fp16_verify
+    tested_on: "kraken==7.1.1"
+    requires_cuda: true
+    gain: "PP-читання −44% на V100 (основа у fp16, stem3 у fp32; вмикається калібруванням на карті)"
 
 # ── рушії ────────────────────────────────────────────────────────────────────
 # 🔴 Розширення моделі каже РУШІЙ, а префікс імені — ПИСЬМО. `.mlmodel` буває

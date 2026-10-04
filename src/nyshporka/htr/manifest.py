@@ -110,6 +110,8 @@ class Manifest:
     #: Intel Mac: звідки брати інтерпретатор і torch, коли PyPI їх не має.
     conda_channel: str = ""
     conda_packages: tuple[str, ...] = ()
+    #: Еталонні піни torch (те, що резолвить kraken) — для хмарного боксу.
+    torch_reference: tuple[str, ...] = ()
 
     # ── питання до маніфесту ─────────────────────────────────────────────────
     def engine_for_model(self, filename: str) -> Engine | None:
@@ -242,6 +244,7 @@ def _build(raw: dict[str, Any]) -> Manifest:
                             "note": str(v.get("note") or "")}
                            for v in (rt.get("vcs_packages") or [])),
         torch_default=tuple(str(p) for p in (torch.get("default") or [])),
+        torch_reference=tuple(str(p) for p in (torch.get("reference") or [])),
         cuda_index=str(torch.get("cuda_index") or ""),
         cuda_matrix=tuple({str(k): str(v) for k, v in (row or {}).items()}
                           for row in (torch.get("cuda_matrix") or [])),

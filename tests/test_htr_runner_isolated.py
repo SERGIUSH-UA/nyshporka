@@ -37,7 +37,8 @@ ENGINE_ENV = {
 
 #: Сусідні файли, що вантажаться за шляхом (той самий трюк, що й патчі).
 LOCAL_MODULES = {"pysar_lines_infer", "gpu_sato", "fast_geom", "seg_ceiling",
-                 "seg_resize", "fast_order", "fast_seam", "fast_clahe", "runner"}
+                 "seg_resize", "fast_order", "fast_seam", "fast_clahe", "runner",
+                 "pp_fuse", "pp_fp16"}
 
 #: 🔴 Перелік явний, а не `rglob`. У теці живуть модулі двох ярусів: ці їдуть
 #: у середовище рушіїв, а `env.py`/`manifest.py` навпаки — керують ним іззовні,
@@ -48,6 +49,8 @@ GUEST_FILES = ["runner.py", "pysar_lines_infer.py",
                "patches/seg_ceiling.py", "patches/seg_resize.py",
                "patches/fast_order.py", "patches/fast_seam.py", "density_probe.py",
                "patches/fast_clahe.py", "patches/fast_clahe_verify.py",
+               "patches/pp_fuse.py", "patches/pp_fuse_verify.py",
+               "patches/pp_fp16.py", "patches/pp_fp16_verify.py",
                # Верифікатори — теж гості: вони ганяють стару й нову версію
                # пліч-о-пліч на живій сегментації, тобто всередині того самого
                # середовища. Доказ рівності, знятий деінде, нічого не доводить.

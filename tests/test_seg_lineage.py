@@ -125,3 +125,94 @@ def test_pp_voice_is_wired_like_the_kraken_voice() -> None:
     assert R._ENGINE_BY_SUFFIX[".safetensors"] == "ppocr"
     assert R._META_ENGINE["ppocr"] == "kraken", "мета мусить казати рушій, який знає стор"
     assert "num_line_workers=0" in RUNNER_SRC
+
+
+class _Half:
+    """Підроблений `pp_fp16`: калібрування з заданими часами, облік викликів."""
+
+    def __init__(self, ms32: float, ms16: float, fail: bool = False) -> None:
+        self.times, self.fail = (ms32, ms16), fail
+        self.calibrated = 0
+        self.enabled = 0
+
+    def calibrate(self, rec, device, **kw):  # type: ignore[no-untyped-def]
+        self.calibrated += 1
+        if self.fail:
+            raise RuntimeError("cuDNN впав")
+        return self.times
+
+    @staticmethod
+    def worth_it(ms32: float, ms16: float) -> bool:
+        return ms16 <= 0.8 * ms32
+
+    def enable_fp16(self, rec):  # type: ignore[no-untyped-def]
+        self.enabled += 1
+        return rec
+
+
+def _half(monkeypatch, precision: str, half: _Half) -> None:
+    import sys
+
+    monkeypatch.setitem(sys.modules, "pp_fp16", half)
+    monkeypatch.setattr(R, "PP_PRECISION", precision)
+    monkeypatch.setattr(R, "_PP_HALF_TIMES", {})
+
+
+def test_fp16_is_chosen_by_the_card_and_measured_once(monkeypatch, capsys) -> None:
+    """V100: fp16 удвічі швидший → вмикається; друга PP-модель прогону (голос
+    поруч з основною) карту вдруге не калібрує — рішення про карту, не модель."""
+    half = _Half(12.4, 6.9)
+    _half(monkeypatch, "auto", half)
+    R._pp_half(object(), "cuda:0", 3, 96)
+    R._pp_half(object(), "cuda:0", 3, 96)
+    assert (half.calibrated, half.enabled) == (1, 2)
+    assert "fp16" in capsys.readouterr().out
+
+
+def test_fp16_slower_on_the_card_stays_fp32(monkeypatch, capsys) -> None:
+    """GTX 1650 без тензорних ядер: fp16 утричі повільніший → лишається fp32."""
+    half = _Half(107.7, 347.0)
+    _half(monkeypatch, "auto", half)
+    R._pp_half(object(), "cuda:0", 3, 96)
+    assert half.enabled == 0
+    assert "fp32" in capsys.readouterr().out
+
+
+def test_forced_fp16_skips_calibration_and_failure_reads_fp32(monkeypatch, capsys) -> None:
+    half = _Half(1.0, 1.0)
+    _half(monkeypatch, "fp16", half)
+    R._pp_half(object(), "cuda:0", 3, 96)
+    assert (half.calibrated, half.enabled) == (0, 1)
+    broken = _Half(1.0, 1.0, fail=True)
+    _half(monkeypatch, "auto", broken)
+    R._pp_half(object(), "cuda:0", 3, 96)          # не падає: прискорювач, не умова
+    assert broken.enabled == 0
+    assert "читаю у fp32" in capsys.readouterr().out
+
+
+def test_fp32_and_cpu_never_touch_precision() -> None:
+    """`--pp-precision fp32` і CPU не кличуть латку взагалі."""
+    assert 'if device.startswith("cuda") and PP_PRECISION != "fp32":' in RUNNER_SRC
+    assert '"--pp-precision", choices=("auto", "fp32", "fp16")' in RUNNER_SRC
+
+
+def test_torch_native_triton_ops_are_off_before_torch_loads(monkeypatch) -> None:
+    """🔴 torch 2.14 на Linux підміняє `bmm` зовнішнього добутку власним
+    triton-ядром, а triton без gcc не збирає свій C-модуль: падала КОЖНА
+    сторінка (Vast V100, 04.10.2026). Вимикач читається при реєстрації
+    операцій, тож стоїть до першого `import torch` — і в раннері, і в Писарі,
+    і в оточенні кожного підпроцесу рушіїв."""
+    import re
+
+    from nyshporka.htr import env
+
+    switch = 'os.environ.setdefault("TORCH_DISABLE_NATIVE_JIT", "1")'
+    for name in ("runner.py", "pysar_lines_infer.py"):
+        src = (Path(R.__file__).parent / name).read_text(encoding="utf-8")
+        assert switch in src, name
+        first = re.search(r"^\s*(import torch|from torch)", src, re.M)
+        assert first and src.index(switch) < first.start(), f"{name}: вимикач після torch"
+    monkeypatch.delenv("TORCH_DISABLE_NATIVE_JIT", raising=False)
+    assert env.foreign_env()["TORCH_DISABLE_NATIVE_JIT"] == "1"
+    monkeypatch.setenv("TORCH_DISABLE_NATIVE_JIT", "0")
+    assert env.foreign_env()["TORCH_DISABLE_NATIVE_JIT"] == "0", "явне рішення — сильніше"

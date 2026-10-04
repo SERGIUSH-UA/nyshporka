@@ -84,6 +84,8 @@ def foreign_env(extra: dict[str, str] | None = None) -> dict[str, str]:
 
     env = {k: v for k, v in os.environ.items() if k not in _PARENT_PYTHON_VARS}
     env.setdefault("PYTHONIOENCODING", "utf-8")
+    # власні triton-ядра torch 2.14 без gcc роняють читання — див. `runner.py`
+    env.setdefault("TORCH_DISABLE_NATIVE_JIT", "1")
     env.update(extra or {})
     return env
 
@@ -101,6 +103,17 @@ def _probe(py: Path, code: str, timeout: int = 120) -> str | None:
 
 def _version_of(py: Path, dist: str) -> str:
     return _probe(py, f"import importlib.metadata as m; print(m.version({dist!r}))") or ""
+
+
+#: «torch рахує на карті» — справжнім ядром, а не `is_available()`.
+#: 🔴 `is_available()` каже True і тоді, коли в колесі немає ядер під цю карту:
+#: колесо torch 2.14 з PyPI на Linux зібране під CUDA 13 (cu130), де найдавніша
+#: архітектура — sm_75: V100 (sm_70) і GTX 10xx (sm_61) лишаються без ядер.
+#: Тоді крок під карту пропускався, а читання падало аж на прогоні з «no kernel
+#: image is available» (Vast V100, 04.10.2026: torch 2.14.0+cu130, усі `nysh
+#: read` — rc=1 при GPU 0%).
+CUDA_WORKS = ("import torch; print(torch.cuda.is_available() and "
+              "float((torch.ones(4, device='cuda') * 2).sum()) == 8.0)")
 
 
 def inspect(venv: Path, man: M.Manifest | None = None) -> EnvReport:
@@ -129,7 +142,7 @@ def inspect(venv: Path, man: M.Manifest | None = None) -> EnvReport:
 
     kraken = _version_of(py, "kraken")
     torch_v = _probe(py, "import torch; print(torch.__version__)") or ""
-    cuda = _probe(py, "import torch; print(torch.cuda.is_available())") == "True"
+    cuda = _probe(py, CUDA_WORKS) == "True"
     cap = _probe(py, "import torch; print('%d.%d' % torch.cuda.get_device_capability(0))") \
         if cuda else ""
 
@@ -436,7 +449,7 @@ def _ensure_cuda(venv: Path, man: M.Manifest, uv: str = "uv", force_tag: str = "
         # `nvidia-smi` тут означало б друкувати «карти не видно» на кожному Mac.
         print(f"✓ macOS: {gpu.CPU_NOTE}")
         return
-    if _probe(py, "import torch; print(torch.cuda.is_available())") == "True":
+    if _probe(py, CUDA_WORKS) == "True":
         print("✓ torch уже бачить карту")
         return
 
@@ -467,7 +480,7 @@ def _ensure_cuda(venv: Path, man: M.Manifest, uv: str = "uv", force_tag: str = "
               f"  Ймовірно, під цю версію torch колеса {tag} на індексі вже немає: "
               f"спробуйте інший тег через `nysh htr install --cuda …`")
         return
-    if _probe(py, "import torch; print(torch.cuda.is_available())") == "True":
+    if _probe(py, CUDA_WORKS) == "True":
         print(f"✓ карта підхопилась ({tag})")
     else:
         print(f"⚠ колесо {tag} стало, але torch усе одно не бачить карту — {gpu.CPU_NOTE}.\n"

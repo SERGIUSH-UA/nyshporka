@@ -201,6 +201,17 @@ def _limit_own_threads(argv: list[str] | None = None) -> int | None:
 
 _SELF_LIMITED_TO = _limit_own_threads()
 
+#: 🔴 Власні ядра torch на triton (`torch._native`, з torch 2.14) — вимкнено, і
+#: саме тут, до першого `import torch`: вимикач читається, коли torch реєструє
+#: операції. На Linux із triton torch 2.14 підміняє `bmm` зовнішнього добутку
+#: своїм triton-ядром, а triton перед першим запуском збирає C-модуль драйвера.
+#: Без gcc падала КОЖНА сторінка — «Failed to find C compiler» (Vast V100, образ
+#: pytorch runtime, 04.10.2026); `TORCHDYNAMO_DISABLE` не рятує, бо це не
+#: `torch.compile`. На Windows і macOS triton немає, і там і так іде звичайне
+#: ядро CUDA — вимикач робить Linux таким самим. Явне рішення запускача
+#: поважається.
+os.environ.setdefault("TORCH_DISABLE_NATIVE_JIT", "1")
+
 import numpy as np  # noqa: E402  — лише ПІСЛЯ ліміту потоків
 from PIL import Image  # noqa: E402
 
@@ -837,6 +848,43 @@ PP_VRAM_SHARE = 0.2
 #: RAM — та сама сторінка читалась то 9, то 96 с (224-1-1112, 04.10.2026).
 #: Помилки при цьому немає, є лише час, тому межа мусить стояти до проходу.
 PP_CANVAS_MPX = 40.0
+#: Злиття BatchNorm і гілок RepDWConv у PP-моделі (`patches/pp_fuse.py`): текст
+#: побітово той самий, читання на 11–13% швидше. Вимикач — `--no-pp-fuse`.
+PP_FUSE = True
+#: Точність основи PP-моделі на карті (`patches/pp_fp16.py`): `auto` — fp16,
+#: якщо калібрування на ЦІЙ карті дало виграш від 20% (V100 −44%; на GTX 1650
+#: без тензорних ядер fp16 утричі повільніший), `fp32` — завжди повна, `fp16` —
+#: завжди половинна. На CPU — завжди fp32. Виставляється з `--pp-precision`.
+PP_PRECISION = "auto"
+#: Калібрування fp32/fp16 на пристрій, мс — раз на процес.
+_PP_HALF_TIMES: dict[str, tuple[float, float]] = {}
+
+
+def _pp_half(rec, device: str, channels: int, height: int) -> None:  # type: ignore[no-untyped-def]
+    """Увімкнути fp16 основи за `PP_PRECISION`; збій — лише попередження."""
+    try:
+        if str(_PATCHES_DIR) not in sys.path:
+            sys.path.insert(0, str(_PATCHES_DIR))
+        import pp_fp16
+
+        note = ""
+        if PP_PRECISION == "auto":
+            # рішення — про карту, а не про модель: друга PP-модель прогону
+            # (голос поруч з основною) калібрування не повторює
+            if device not in _PP_HALF_TIMES:
+                _PP_HALF_TIMES[device] = pp_fp16.calibrate(rec, device, channels=channels,
+                                                           height=height)
+            ms32, ms16 = _PP_HALF_TIMES[device]
+            if not pp_fp16.worth_it(ms32, ms16):
+                print(f"[htr-run] PP-точність: fp32 (fp16 на цій карті {ms16:.1f} мс "
+                      f"проти {ms32:.1f})", flush=True)
+                return
+            note = f" (калібрування: {ms16:.1f} мс проти {ms32:.1f} у fp32)"
+        pp_fp16.enable_fp16(rec)
+        print(f"[htr-run] PP-точність: fp16 основа{note}", flush=True)
+    except Exception as exc:  # прискорювач, а не умова роботи
+        print(f"[htr-run] ⚠ fp16 для PP-моделі не ввімкнено ({type(exc).__name__}: "
+              f"{exc}) — читаю у fp32", flush=True)
 
 
 def load_pp(model: str, device: str) -> tuple:
@@ -869,6 +917,18 @@ def load_pp(model: str, device: str) -> tuple:
         cfg = RecognitionInferenceConfig(accelerator="cpu", batch_size=PP_BATCH,
                                          num_line_workers=0)
     task.net.prepare_for_inference(cfg)
+    if PP_FUSE:
+        try:
+            if str(_PATCHES_DIR) not in sys.path:
+                sys.path.insert(0, str(_PATCHES_DIR))
+            import pp_fuse
+            pp_fuse.fuse_ppocr(task.net.nn)
+        except Exception as exc:  # прискорювач, а не умова роботи
+            print(f"[htr-run] ⚠ злиття BN у PP-моделі не вдалося ({type(exc).__name__}: "
+                  f"{exc}) — читаю без нього", flush=True)
+    if device.startswith("cuda") and PP_PRECISION != "fp32":
+        _b, ch, h, _w = [*task.net.input, 0, 0, 0, 0][:4]
+        _pp_half(task.net.nn, device, int(ch) or 3, int(h) or 96)
     return task.net, cfg, budget_px
 
 
@@ -3428,6 +3488,12 @@ def main() -> int:
     ap.add_argument("--pp-batch", type=int, default=PP_BATCH,
                     help="розмір пачки PP-OCRv6 (`.safetensors`: Дяк-Літописець, "
                          "Скриба-PP); рядки в пачці сортуються за шириною")
+    ap.add_argument("--pp-fuse", action=argparse.BooleanOptionalAction, default=PP_FUSE,
+                    help="злиття BatchNorm і гілок RepDWConv у PP-моделі перед читанням "
+                         "(текст той самий, на 11–13%% швидше)")
+    ap.add_argument("--pp-precision", choices=("auto", "fp32", "fp16"), default=PP_PRECISION,
+                    help="точність основи PP-моделі на карті: auto — fp16, якщо "
+                         "калібрування на цій карті дало виграш від 20%%; на CPU — fp32")
     ap.add_argument("--pp-vram-mb", type=int, default=PP_VRAM_MB,
                     help="скільки VRAM дати одній пачці PP-OCRv6, МБ; 0 — "
                          f"{int(PP_VRAM_SHARE * 100)}%% карти (пачка закривається "
@@ -3964,6 +4030,8 @@ def _main_case(args: argparse.Namespace, cache: dict | None = None) -> int:
     globals()["VOICE_BATCH"] = max(1, int(args.voice_batch))
     globals()["PP_BATCH"] = max(1, int(args.pp_batch))
     globals()["PP_VRAM_MB"] = max(0, int(args.pp_vram_mb))
+    globals()["PP_FUSE"] = bool(args.pp_fuse)
+    globals()["PP_PRECISION"] = str(args.pp_precision)
     if engine == "ppocr" and not warm:
         print(f"[htr-run] PP-OCRv6: кропи пачками до {PP_BATCH} рядків у межах бюджету "
               f"VRAM, за шириною, без процесів-нарізувачів", flush=True)

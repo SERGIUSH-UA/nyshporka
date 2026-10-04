@@ -86,7 +86,8 @@ def test_kraken_is_pinned_exactly(man):
 def test_every_patch_has_a_verifier(man):
     """Патч чужої бібліотеки без верифікатора — це надія, а не інженерія."""
     assert {p.id for p in man.patches} == {
-        "gpu_sato", "fast_geom", "seg_resize", "fast_order", "fast_seam", "fast_clahe"}, (
+        "gpu_sato", "fast_geom", "seg_resize", "fast_order", "fast_seam", "fast_clahe",
+        "pp_fuse", "pp_fp16"}, (
         "маніфест мусить перелічувати ВСІ патчі швидкості, а не частину")
     pin = next(s for s in man.packages if s.startswith("kraken=="))
     for p in man.patches:
@@ -443,3 +444,15 @@ def test_old_kraken_is_upgraded_in_place_not_beside(tmp_path, monkeypatch):
     # `click` до 8.5 при `click<8.3` у kraken 7.1.1).
     for spec in M.active().install_specs().values():
         assert spec in pip[0], f"{spec} не потрапив у резолвер"
+
+
+def test_the_cloud_box_gets_the_reference_torch(man):
+    """Хмарний бокс ставить рівно ту збірку torch, що резолвить kraken на свіжій
+    машині, — інакше хмара й дім рахували б різними torch. Індекс під карту бокс
+    обирає сам; піни везе файл вимог в архіві ассетів."""
+    from nyshporka.cloud import supervised as SV
+
+    assert [s.split("==")[0] for s in man.torch_reference] == ["torch", "torchvision"]
+    text = SV.engine_requirements_file().read_text(encoding="utf-8")
+    for spec in (*man.pip_specs(), *man.torch_reference):
+        assert spec in text.splitlines(), spec
