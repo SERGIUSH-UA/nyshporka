@@ -333,8 +333,16 @@ def _from_install_info(name: str) -> str:
 
 
 def _run(cmd: list[str], env: dict[str, str] | None = None) -> None:
+    """Команда установки — в оточенні без змінних батьківського Python.
+
+    🔴 Python у venv, створеному uv на Windows, сам ставить собі `PYTHONHOME`.
+    `uv pip install` передає його далі, і пакет без колеса під Windows
+    (`coremltools`, залежність kraken) збирався інтерпретатором 3.11 зі
+    стандартною бібліотекою 3.12/3.13 застосунку: `SyntaxError` у `typing.py`,
+    і свіже `nysh htr install` падало (пісочниця оновлення, 04.10.2026).
+    """
     print("  $ " + " ".join(cmd))
-    subprocess.run(cmd, check=True, env=env)
+    subprocess.run(cmd, check=True, env=env if env is not None else foreign_env())
 
 
 def setup(venv: Path, *, man: M.Manifest | None = None, with_cuda: bool = True,

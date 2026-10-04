@@ -161,3 +161,21 @@ def test_manual_tag_skips_detection(monkeypatch, man, capsys):
     assert fake.asked_driver == 0
     assert _index(fake.cmds[0]).endswith("/cu128")
     assert "вручну" in capsys.readouterr().out
+
+
+def test_install_commands_drop_the_parent_python(monkeypatch) -> None:
+    """Python у venv від uv на Windows сам ставить собі PYTHONHOME. Установка рушіїв
+    не має його передавати: пакет без колеса збирався б чужою stdlib і падав."""
+    seen: dict[str, dict[str, str]] = {}
+
+    def run(cmd, check, env):  # type: ignore[no-untyped-def]
+        seen["env"] = env
+        return subprocess.CompletedProcess(cmd, 0)
+
+    monkeypatch.setenv("PYTHONHOME", r"C:\py312")
+    monkeypatch.setenv("UV_INTERNAL__PYTHONHOME", r"C:\py312")
+    monkeypatch.setenv("__PYVENV_LAUNCHER__", r"C:\app\Scripts\python.exe")
+    monkeypatch.setattr(env.subprocess, "run", run)
+    env._run(["uv", "pip", "install", "kraken"])
+    assert not {"PYTHONHOME", "UV_INTERNAL__PYTHONHOME", "__PYVENV_LAUNCHER__"} & set(seen["env"])
+    assert seen["env"].get("PATH") == __import__("os").environ.get("PATH")
