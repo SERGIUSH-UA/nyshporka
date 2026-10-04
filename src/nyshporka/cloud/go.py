@@ -150,6 +150,11 @@ class GoResult:
     #: її значення; кілька — верхні `run_id`/`case_dir`/`out_dir` порожні, бо
     #: «перша справа» на їхньому місці читалась би як відповідь про весь захід.
     cases: list[CaseResult] = field(default_factory=list)
+    #: Справи, названі людиною, що НЕ поїхали: `{"case": …, "why": …}`.
+    #: 🔴 Окремо від `cases[]`, але завжди поруч: 23.09.2026 захід отримав 12
+    #: справ і спланував 8, а читач `cases[]` бачив вісім і не знав, що чотири
+    #: випали (реєстр ніс старі лічильники кадрів перерізаних книг).
+    dropped: list[dict[str, str]] = field(default_factory=list)
     #: Партія на кілька машин (`--boxes`): її id і черги — по наглядачу на
     #: машину. Порожньо — захід на одну машину.
     batch_id: str = ""
@@ -178,6 +183,7 @@ class GoResult:
                 "dry_run": self.dry_run, "notes": list(self.notes),
                 "cases": [c.as_dict() for c in self.cases],
                 "run_ids": [c.run_id for c in self.cases if c.run_id],
+                "dropped": [dict(d) for d in self.dropped],
                 "batch_id": self.batch_id,
                 "queues": [dict(q) for q in self.queues]}
 
@@ -712,7 +718,9 @@ def _prepare(res: GoResult, case: str, say: EventFn, owner: contextlib.ExitStack
     if ref.frames_expected and rep.n < ref.frames_expected and not allow_partial:
         raise GoRefused(
             f"кадрів {rep.n}, а бібліотека знає {ref.frames_expected} — "
-            f"завантаження не дійшло? Частину справи — лише з `--allow-partial`.")
+            f"завантаження не дійшло? Або книгу перерізали після завантаження, а "
+            f"реєстр несе старе число — тоді `nysh cases build` і повторити. "
+            f"Частину справи — лише з `--allow-partial`.")
 
     notes: list[str] = []
     pack = ref.frames_dir
@@ -780,13 +788,23 @@ def _prepare(res: GoResult, case: str, say: EventFn, owner: contextlib.ExitStack
                     f"лише зі своїх точок. Дочитати вдома — `nysh read "
                     f"{ref.frames_dir}`; везти все — просто далі")
 
-    # 5. перечитування: готова сегментація першого прогону їде на машину
+    # 5. готова сегментація попереднього прогону їде на машину
+    # 🔴 Не лише при перечитуванні ІНШОЮ моделлю. Догін, повтор після обриву,
+    # перечитування новою БОЙОВОЮ моделлю в ту саму теку — це той самий прогін
+    # за планом (`base_out` порожній), а кадри й нарізка ті самі. Доти засів
+    # стояв під `base_out`, і всі ці заходи сегментували справу вдруге, тобто
+    # коштували вдвічі (23.09.2026: п'ять перезапусків, поки обхід знайшовся в
+    # `gpurunner htr plan --seed-seg`).
+    from nyshporka.htr import seg as SEG
+
     seg_seed: Path | None = None
     coverage = 0.0
-    if plan.base_out is not None:
-        from nyshporka.htr import seg as SEG
-
-        cache = SEG.inspect(ref.frames_dir, SEG.frames_of(pack), base_out=plan.base_out)
+    seg_base = plan.base_out or plan.out_dir
+    cache = SEG.inspect(ref.frames_dir, SEG.frames_of(pack), base_out=seg_base)
+    # Нова справа без жодного читання — звичайний стан, а не втрата: про неї
+    # мовчимо. Говоримо, коли попереднє читання БУЛО або кеш знайшовся.
+    read_before = plan.base_out is not None or before.got > 0
+    if read_before or cache.path is not None:
         say("plan", f"{'✓' if cache.usable else '⚠'} сегментація: {cache.why}")
         if cache.usable and cache.path is not None:
             seg_seed, coverage = cache.path, cache.coverage
@@ -800,7 +818,7 @@ def _prepare(res: GoResult, case: str, say: EventFn, owner: contextlib.ExitStack
             # Друге, чого бракувало, — ЩО РОБИТИ. Кеш першого прогону лежить у
             # чекпоінтах сховища, і рятунок тепер приносить його додому разом із
             # текстом; доти він його викидав, тому шукати на диску було марно.
-            price = _SEG_PRICE.format(where=plan.base_out)
+            price = _SEG_PRICE.format(where=seg_base)
             notes.append(price)
             res.notes.append(price)
             say("warning", price)
@@ -978,6 +996,13 @@ def _go(res: GoResult, cases: tuple[str, ...], say: EventFn,
             legs.append(leg)
     for arg, why in dropped:
         res.notes.append(f"{arg}: {why}")
+    res.dropped = [{"case": arg, "why": why} for arg, why in dropped]
+    if dropped and legs:
+        # Попередження по справі тонуть серед рядків підготовки дванадцяти
+        # справ, тож підсумок — окремим рядком перед кошторисом.
+        pages = sum(leg.plan.frames for leg in legs)
+        say("warning", f"⚠ поїде {len(legs)} з {len(cases)} справ ({pages} стор.); "
+                       f"випали: {', '.join(arg for arg, _ in dropped)}")
     if not legs:
         cls = Busy if busy else GoRefused
         raise cls("жодна справа заходу не поїхала: "

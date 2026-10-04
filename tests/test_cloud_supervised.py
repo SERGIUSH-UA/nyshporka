@@ -839,6 +839,29 @@ def test_a_thin_cache_never_makes_the_fleet_denser(space: Path, monkeypatch,
     assert _plan_of(fake_gpurunner)["cases"][0]["seed_seg"], "сам засів лишається"
 
 
+def test_the_same_model_is_seeded_too(space: Path, monkeypatch, fake_gpurunner) -> None:
+    """🔴 Догін, повтор після обриву, нова бойова модель у ту саму теку — це не
+    «перечитування» за планом, але сегментація та сама. Доти засів жив лише під
+    перечитуванням ІНШОЮ моделлю, і всі ці заходи коштували вдвічі
+    (23.09.2026: п'ять перезапусків до обходу через `gpurunner htr plan`)."""
+    case, _ = _wire(space, monkeypatch)
+    seed = _seed_ready(space, case)
+
+    _go(case, dry_run=True)
+    assert _plan_of(fake_gpurunner)["cases"][0]["seed_seg"] == str(seed)
+
+
+def test_a_fresh_case_without_a_cache_says_nothing_about_the_price(
+        space: Path, monkeypatch, fake_gpurunner) -> None:
+    """Справа, яку ніхто не читав, сегментується вперше — це не втрата, і ціна
+    «вдвічі дорожче» тут була б неправдою на кожній новій справі."""
+    case, _ = _wire(space, monkeypatch)
+
+    got = _go(case, dry_run=True)
+    assert not _plan_of(fake_gpurunner)["cases"][0]["seed_seg"]
+    assert not any("ВДВІЧІ" in n for n in got.notes), got.notes
+
+
 def test_without_a_bucket_the_reread_goes_unseeded_and_says_the_price(
         space: Path, monkeypatch, fake_gpurunner) -> None:
     """🔴 Сховища немає — це не привід відмовляти, але й не привід мовчати.
@@ -980,6 +1003,11 @@ def test_an_already_read_case_drops_out_and_the_rest_still_go(
     assert got.verdict == "dry_run", got.why
     assert [c.case_dir for c in got.cases] == [str(second)]
     assert any("уже прочитано" in n for n in got.notes), got.notes
+    # 🔴 Читач `--json` бачить випалу справу полем, а не лише в тексті нотаток:
+    # 23.09.2026 черга з 12 справ спланувала 8, і в `cases[]` про решту не було
+    # ні слова.
+    assert [d["case"] for d in got.as_dict()["dropped"]] == [str(first)]
+    assert "уже прочитано" in got.dropped[0]["why"]
 
 
 def test_a_batch_where_everything_is_already_read_is_refused(
