@@ -147,3 +147,136 @@ def test_get_zi_steleiu_viddaie_zvychainu_vidpovid() -> None:
     client = _mock_client(gzip.compress(raw), {"Content-Encoding": "gzip"})
     r = H.Fetcher(client=client, delay=0.0).get("https://x/t", max_bytes=1000)
     assert r.content == raw and r.json() == {"a": "дерево"}
+
+
+# ── 04.10.2026: дочитування через Range і пауза за Retry-After ──────────────
+
+_FILE = bytes(range(256)) * 40                      # 10 240 байт «справи»
+
+
+def _range_server(script: list[str], seen: list[dict[str, str]]) -> Any:
+    """Сервер справи за сценарієм: кожен запит бере наступний крок.
+
+    `break` — віддати половину й обірвати з'єднання; `ok` — повно, з
+    урахуванням `Range`; `ignore` — повно з початку, `Range` не помітити;
+    `429:<с>` — блок із `Retry-After`; `404` — відмова.
+    """
+    import httpx
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        seen.append(dict(req.headers))
+        step = script[min(len(seen) - 1, len(script) - 1)]
+        start = 0
+        rng = req.headers.get("Range")
+        if rng and step != "ignore":
+            start = int(rng.split("=")[1].split("-")[0])
+        if step.startswith("429"):
+            return httpx.Response(429, headers={"Retry-After": step.split(":")[1]},
+                                  content=b"slow down")
+        if step == "404":
+            return httpx.Response(404, content=b"not found")
+        body = _FILE[start:]
+        code = 206 if start else 200
+        hdr = ({"Content-Range": f"bytes {start}-{len(_FILE) - 1}/{len(_FILE)}"}
+               if start else {})
+        if step == "break":
+            half = body[: len(body) // 2]
+
+            def obryv():  # type: ignore[no-untyped-def]
+                yield half
+                raise httpx.ReadError("з'єднання обірвано")
+            return httpx.Response(code, headers=hdr, content=obryv())
+        return httpx.Response(code, headers=hdr, content=body)
+
+    return httpx.Client(transport=httpx.MockTransport(handler))
+
+
+@pytest.fixture()
+def naps(monkeypatch) -> list[float]:
+    slept: list[float] = []
+    monkeypatch.setattr(H.time, "sleep", slept.append)
+    return slept
+
+
+def test_obryv_poseredyni_doTCHYTUIETSIA_a_ne_pochynaietsia_z_nulia(
+        tmp_path: Path, naps: list[float]) -> None:
+    """🔴 Справа 2.4 ГБ, з'єднання від 0.8 МБ/с: обрив посередині — звичайна
+    подія. Доти він стирав `.part`, і гігабайт узятого пропадав."""
+    seen: list[dict[str, str]] = []
+    dest = tmp_path / "справа.pdf"
+    got = H.Fetcher(delay=0.0).download("https://x/f.pdf", dest,
+                                        client=_range_server(["break", "ok"], seen),
+                                        max_bytes=len(_FILE), chunk=512)
+    assert got == len(_FILE) and dest.read_bytes() == _FILE
+    assert "range" not in seen[0]
+    assert seen[1].get("range") == f"bytes={len(_FILE) // 2}-", \
+        "друга спроба не дочитувала, а качала знову"
+
+
+def test_part_poperednoho_zapusku_doTCHYTUIETSIA(tmp_path: Path, naps: list[float]) -> None:
+    """Обірваний запуск лишає `.part` — наступний запуск продовжує з нього."""
+    dest = tmp_path / "справа.pdf"
+    dest.with_name(dest.name + ".part").write_bytes(_FILE[:3000])
+    seen: list[dict[str, str]] = []
+    H.Fetcher(delay=0.0).download("https://x/f.pdf", dest,
+                                  client=_range_server(["ok"], seen), max_bytes=len(_FILE))
+    assert seen[0].get("range") == "bytes=3000-"
+    assert dest.read_bytes() == _FILE
+
+
+def test_server_bez_range_daie_tsilyi_fail_a_ne_skleiku(tmp_path: Path,
+                                                         naps: list[float]) -> None:
+    """200 на запит із `Range` — файл з початку; дописати його до `.part`
+    означало б дублювати перші байти."""
+    dest = tmp_path / "справа.pdf"
+    dest.with_name(dest.name + ".part").write_bytes(_FILE[:3000])
+    H.Fetcher(delay=0.0).download("https://x/f.pdf", dest,
+                                  client=_range_server(["ignore"], []), max_bytes=len(_FILE))
+    assert dest.read_bytes() == _FILE
+
+
+def test_429_chekaie_rivno_retry_after(tmp_path: Path, naps: list[float]) -> None:
+    """🔴 Wikimedia блокує на 600 с, і кожна спроба в блоці його продовжує:
+    свій відступ 1–60 с тут лише поглиблює яму."""
+    dest = tmp_path / "справа.pdf"
+    H.Fetcher(delay=0.0).download("https://x/f.pdf", dest,
+                                  client=_range_server(["429:30", "ok"], []))
+    assert naps == [30 + H.RETRY_AFTER_PAD_S]
+    assert dest.read_bytes() == _FILE
+
+
+def test_dovhyi_retry_after_ce_pomylka_z_chyslom_a_part_lyshaietsia(
+        tmp_path: Path, naps: list[float]) -> None:
+    """Годину мовчки не чекаємо: людина бачить, скільки просить сервер, а
+    взяте лишається для повторного запуску."""
+    dest = tmp_path / "справа.pdf"
+    part = dest.with_name(dest.name + ".part")
+    part.write_bytes(_FILE[:3000])
+    with pytest.raises(H.HttpError) as e:
+        H.Fetcher(delay=0.0).download("https://x/f.pdf", dest,
+                                      client=_range_server(["429:3600"], []))
+    assert e.value.status == 429 and e.value.retry_after == 3600
+    assert part.read_bytes() == _FILE[:3000], "узяте стерто"
+    assert naps == []
+
+
+def test_vidmova_404_stiraie_part(tmp_path: Path, naps: list[float]) -> None:
+    """Остаточна відмова: дочитувати нічого, недокачок не лишаємо."""
+    dest = tmp_path / "справа.pdf"
+    part = dest.with_name(dest.name + ".part")
+    part.write_bytes(b"x" * 10)
+    with pytest.raises(H.HttpError) as e:
+        H.Fetcher(delay=0.0).download("https://x/f.pdf", dest,
+                                      client=_range_server(["404"], []))
+    assert e.value.status == 404 and not part.exists() and not dest.exists()
+
+
+def test_get_na_429_chekaie_retry_after(naps: list[float]) -> None:
+    f = H.Fetcher(base="https://приклад", delay=0.0)
+
+    class _R(_Resp):
+        headers = {"Retry-After": "20"}
+
+    client = _Client([_R(429), _Resp(200, text="ок")])
+    assert f.get("/шлях", client=client).text == "ок"
+    assert naps == [20 + H.RETRY_AFTER_PAD_S]

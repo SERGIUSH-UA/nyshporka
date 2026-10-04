@@ -212,6 +212,23 @@ def retry_after_of(r: Any) -> float | None:
     return max(0.0, when.timestamp() - time.time())
 
 
+#: Найдовше, скільки клієнт сам чекає на `Retry-After`. Довше — `HttpError` із
+#: цим числом: годинна пауза мусить бути видна людині, а не мовчазна.
+RETRY_AFTER_MAX_S = 900.0
+#: Запас понад `Retry-After`: годинники клієнта й сервера не збігаються до
+#: секунди, а спроба на межі блоку його подовжує.
+RETRY_AFTER_PAD_S = 15.0
+
+
+def _range_start(raw: Any) -> int | None:
+    """Початок діапазону з `Content-Range: bytes 100-199/1000`. Нечитне — `None`."""
+    tekst = str(raw or "").strip()
+    if not tekst.lower().startswith("bytes "):
+        return None
+    pochatok = tekst[6:].split("-", 1)[0].strip()
+    return int(pochatok) if pochatok.isdigit() else None
+
+
 def _body_of(r: Any, limit: int = 2000) -> str:
     """Тіло відповіді для звіту про помилку — обрізане й без падінь."""
     try:
@@ -355,55 +372,124 @@ class Fetcher:
         наступний запуск порахує завантаженим, а виявиться це через тижні —
         коли по ньому вже щось вирішили.
 
-        ⚠ Повторів тут немає навмисно: половину великого файла не «повторюють»,
-        її дочитують, а це інша задача (Range-запити). Обірване завантаження
-        видно за розміром — його звіряє той, хто кликав.
+        🔴 Обрив ДОЧИТУЄТЬСЯ, а не починається спочатку. Заміряно 04.10.2026 на
+        Commons: справа 2.4 ГБ, швидкість окремого з'єднання від 0.8 до 26 МБ/с,
+        і на такому файлі обрив посередині — звичайна подія. Доти будь-який збій
+        стирав `.part`, тож гігабайт уже взятого пропадав, а повторний запуск
+        починав з нуля. Тепер `.part` лишається, наступна спроба (і наступний
+        запуск) просить сервер `Range: bytes=<взято>-`. Стирається він лише
+        там, де дочитувати нічого: остаточна відмова (404, 403), перевищена
+        стеля, або сервер `Range` не зрозумів і віддав файл з початку.
+
+        🔴 На 429 пауза — рівно стільки, скільки сервер просив у `Retry-After`.
+        Wikimedia на серію швидких повторів відповідає блоком на 600 с, і кожна
+        спроба всередині блоку його продовжує: свої 1–60 с відступу тут лише
+        поглиблюють яму. Просить довше за `RETRY_AFTER_MAX_S` — `HttpError` з
+        цим числом у `retry_after`, а не годинне мовчазне очікування.
+
+        ⚠ Повільне з'єднання тут не рветься заради швидшого. Це спокуса, і вона
+        перевірена: перепідключення кожні кілька секунд Wikimedia читає як
+        зловживання й дає той самий блок на 600 с.
 
         🔴 Будь-яка відмова виходить як `HttpError`, а не сирий виняток httpx:
         споживачі ловлять `(HttpError, OSError)`, і 404 на одному файлі інакше
         валив увесь цикл завантаження — та сама вада, що вже була в `_send`.
 
         `max_bytes` — стеля: файл від незнайомця (пакет обміну) не має права
-        заповнити диск. Перевищення обриває качання й прибирає `.part`.
+        заповнити диск. Перевищення обриває качання й прибирає `.part`. Вона ж
+        відсіює `.part`, довший за весь файл, — від іншої версії, дочитувати
+        його не можна.
         """
         import httpx
 
         part = dest.with_name(dest.name + ".part")
         dest.parent.mkdir(parents=True, exist_ok=True)
-        if self.limiter is not None:
-            self.limiter.acquire(url)
-        got = 0
-        try:
-            if client is not None:
-                got = self._stream_into(client, url, part, on_chunk, chunk, max_bytes)
+        if max_bytes and part.exists() and part.stat().st_size > max_bytes:
+            part.unlink()
+        last, status, body = "", None, ""
+        for attempt in range(1, self.attempts + 1):
+            if self.limiter is not None:
+                self.limiter.acquire(url)
+            wait = min(60.0, 2 ** (attempt - 1))
+            try:
+                if client is not None:
+                    got = self._stream_into(client, url, part, on_chunk, chunk, max_bytes)
+                else:
+                    with self.client() as c:
+                        got = self._stream_into(c, url, part, on_chunk, chunk, max_bytes)
+            except httpx.HTTPStatusError as exc:
+                resp = exc.response
+                code = int(getattr(resp, "status_code", 0) or 0)
+                have = part.stat().st_size if part.exists() else 0
+                if code == 416 and have and have == max_bytes:
+                    # Узяте вже ціле: попередній запуск обірвався між
+                    # останнім байтом і перейменуванням.
+                    part.replace(dest)
+                    return have
+                if code == 416:
+                    # Сервер не має такого діапазону — `.part` не від цього
+                    # файла. Наступна спроба почне з нуля.
+                    part.unlink(missing_ok=True)
+                elif code != 429 and code < 500:
+                    part.unlink(missing_ok=True)
+                    raise HttpError(f"{url}: HTTP {code}", status=code,
+                                    body=_body_of(resp)) from exc
+                if code == 429:
+                    ra = retry_after_of(resp)
+                    if ra is not None and ra > RETRY_AFTER_MAX_S:
+                        raise HttpError(
+                            f"{url}: HTTP 429, сервер просить зачекати {ra:.0f} с. "
+                            f"Узяте ({have} байт) лежить у {part.name} — повторний "
+                            f"запуск після паузи дочитає", status=429,
+                            body=_body_of(resp), retry_after=ra) from exc
+                    if ra is not None:
+                        wait = ra + RETRY_AFTER_PAD_S
+                last, status, body = f"HTTP {code}", code, _body_of(resp)
+            except TooLarge:
+                part.unlink(missing_ok=True)
+                raise
+            except httpx.HTTPError as exc:
+                # Обрив з'єднання посеред потоку — узяте лишається в `.part`.
+                last = f"{type(exc).__name__}: {exc}"
             else:
-                with self.client() as c:
-                    got = self._stream_into(c, url, part, on_chunk, chunk, max_bytes)
-        except httpx.HTTPStatusError as exc:
-            part.unlink(missing_ok=True)
-            code = exc.response.status_code
-            raise HttpError(f"{url}: HTTP {code}", status=code,
-                            body=_body_of(exc.response)) from exc
-        except httpx.HTTPError as exc:
-            part.unlink(missing_ok=True)
-            raise HttpError(f"{url}: {type(exc).__name__}: {exc}") from exc
-        except HttpError:
-            part.unlink(missing_ok=True)
-            raise
-        part.replace(dest)
-        return got
+                part.replace(dest)
+                return got
+            if attempt < self.attempts:
+                time.sleep(wait)
+        have = part.stat().st_size if part.exists() else 0
+        raise HttpError(
+            f"{url}: {last} після {self.attempts} спроб. Узяте ({have} байт) "
+            f"лежить у {part.name} — повторний запуск дочитає з того самого місця",
+            status=status, body=body)
 
     def _stream_into(self, c: Any, url: str, part: Path,
                      on_chunk: Callable[[int], None] | None, chunk: int,
                      max_bytes: int = 0) -> int:
-        got = 0
-        with c.stream("GET", url) as r:
-            if int(getattr(r, "status_code", 200) or 200) >= 400:
+        import httpx
+
+        have = part.stat().st_size if part.exists() else 0
+        ctx = (c.stream("GET", url, headers={"Range": f"bytes={have}-"}) if have
+               else c.stream("GET", url))
+        with ctx as r:
+            code = int(getattr(r, "status_code", 200) or 200)
+            if code >= 400:
                 # Тіло відмови — у звіт (`HttpError.body`): потокова відповідь
                 # без `read()` його не віддає.
                 r.read()
             r.raise_for_status()
-            with open(part, "wb") as fh:
+            if have and code == 206:
+                start = _range_start(getattr(r, "headers", {}).get("Content-Range"))
+                if start != have:
+                    # Діапазон не той, що просили, — дописувати його в кінець
+                    # означало б склеїти файл зі шматків у хибному порядку.
+                    part.unlink(missing_ok=True)
+                    raise httpx.RemoteProtocolError(
+                        f"Content-Range починається з {start}, а просили з {have}")
+            elif have:
+                # 200 на запит із `Range`: сервер віддає файл з початку.
+                have = 0
+            got = have
+            with open(part, "ab" if have else "wb") as fh:
                 for block in r.iter_bytes(chunk):
                     got += len(block)
                     if max_bytes and got > max_bytes:
@@ -427,6 +513,7 @@ class Fetcher:
         status: int | None = None
         body = ""
         for attempt in range(1, self.attempts + 1):
+            wait = min(60.0, 2 ** (attempt - 1))
             # 🔴 Тікет береться на кожну спробу, включно з повторами: для
             # сервера ретрай — такий самий запит, і саме серія повторів після
             # 429 найлегше перетворює ввічливого клієнта на заблокованого.
@@ -461,8 +548,19 @@ class Fetcher:
                     return r
                 last = f"HTTP {r.status_code}"
                 status, body = r.status_code, _body_of(r)
+                if r.status_code == 429:
+                    # 🔴 Сервер сам сказав, скільки чекати. Свій відступ
+                    # (1–60 с) коротший за блок, і кожна спроба всередині
+                    # блоку його продовжує (Wikimedia, 04.10.2026: 600 с).
+                    ra = retry_after_of(r)
+                    if ra is not None and ra > RETRY_AFTER_MAX_S:
+                        raise HttpError(
+                            f"{url}: HTTP 429, сервер просить зачекати {ra:.0f} с",
+                            status=429, body=body, retry_after=ra)
+                    if ra is not None:
+                        wait = ra + RETRY_AFTER_PAD_S
             if attempt < self.attempts:
-                time.sleep(min(60.0, 2 ** (attempt - 1)))
+                time.sleep(wait)
         raise HttpError(
             f"{url}: {last} після {self.attempts} спроб. "
             f"⚠ Це може бути і відсічка за темпом, і те, що хост лежить, — "

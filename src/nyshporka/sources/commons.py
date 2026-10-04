@@ -35,6 +35,16 @@ if TYPE_CHECKING:
 BASE = "https://commons.wikimedia.org"
 
 
+def _sha1_of(path: Path) -> str:
+    import hashlib
+
+    h = hashlib.sha1()
+    with open(path, "rb") as fh:
+        for block in iter(lambda: fh.read(1 << 24), b""):
+            h.update(block)
+    return h.hexdigest()
+
+
 class CommonsSource:
     """Завантаження справи з Commons. Каталог веде збирач реєстру."""
 
@@ -81,7 +91,7 @@ class CommonsSource:
         return ident
 
     def _info(self, name: str) -> dict[str, Any]:
-        url = ("/w/api.php?action=query&prop=imageinfo&iiprop=url|size|mime"
+        url = ("/w/api.php?action=query&prop=imageinfo&iiprop=url|size|mime|sha1"
                f"&titles={quote('File:' + name)}&format=json&formatversion=2")
         try:
             data = json.loads(self.http.get(url).text)
@@ -170,6 +180,19 @@ class CommonsSource:
                 f"{name}: отримано {got} байт замість {want} — файл неповний, "
                 f"тож у теку справи він не ліг")
             return res
+        # 🔴 Розмір сходиться і в склеєного з хибних шматків файла: тепер
+        # завантаження дочитується через `Range`, і шматок від іншої версії
+        # файла на Commons дав би правильну довжину й биті сторінки. Commons
+        # каже свій SHA-1 — з ним і звіряємо.
+        want_sha1 = str(ii.get("sha1") or "").lower()
+        if want_sha1:
+            got_sha1 = _sha1_of(out)
+            if got_sha1 != want_sha1:
+                out.unlink(missing_ok=True)
+                res.errors.append(
+                    f"{name}: SHA-1 {got_sha1} не збігається з тим, що каже Commons "
+                    f"({want_sha1}) — файл битий, у теку справи він не ліг")
+                return res
         res.frames = int(ii.get("pagecount") or 1)
         res.bytes = got
         return res
