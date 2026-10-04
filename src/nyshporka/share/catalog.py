@@ -533,6 +533,45 @@ def series_of(rows: list[Row]) -> list[dict[str, Any]]:
         key=lambda x: (x["repo"], x["fond"], x["opys"]))
 
 
+def _model_stem(name: str) -> str:
+    """`pysar_cyr_v19.pt`, `…/pysar_cyr_v19.pt`, `PYSAR_CYR_V19` → `pysar_cyr_v19`."""
+    return Path(name.strip().replace("\\", "/")).stem.lower()
+
+
+def model_rank(row: Row) -> tuple[int, int]:
+    """(скільки бойових моделей, скільки попереднього покоління) у пакеті.
+
+    Покоління — з переліку паків ваг, що їде з пакетом: модель чинного паку
+    бойова, модель заміненого (`superseded`) — попередня. Не з `PRODUCTION.json`
+    людини: там лише те, що вона вже завантажила, і той, хто ще не зробив
+    `nysh models get`, брав би з пулу старіше прочитання за наявності нового.
+    Модель поза переліком (власна, стороння) не важить нічого.
+    """
+    from nyshporka.setup import packs
+
+    gen: dict[str, int] = {}
+    for p in packs.catalog():
+        if p.kind == "model":
+            gen[_model_stem(p.filename)] = 1 if p.superseded else 2
+    have = {_model_stem(m) for m in (row.models or "").split(",") if m.strip()}
+    marks = [gen.get(m, 0) for m in have]
+    return marks.count(2), marks.count(1)
+
+
+def best_per_case(rows: list[Row]) -> list[Row]:
+    """На справу — один пакет: найновіші бойові моделі, без них — попередні.
+
+    Серед рівних за моделями лишається порядок каталогу (від найсвіжішого),
+    тож стабільне сортування за спаданням рангу дає саме це правило.
+    """
+    from nyshporka.share.pool import quad_key
+
+    out: dict[str, Row] = {}
+    for r in sorted(rows, key=model_rank, reverse=True):
+        out.setdefault(quad_key(r.repo, r.fond, r.opys, r.spr) or r.shifra, r)
+    return list(out.values())
+
+
 def _span(years: set[int]) -> str:
     if not years:
         return ""

@@ -1088,11 +1088,10 @@ def _pull_series(a: SharePullArgs) -> Envelope:
     if not a.fond.strip():
         return fail("прийняти можна серію фонду: назвіть --fond (архів сам — "
                     "це весь його вміст у пулі)")
-    # Рядки йдуть від найсвіжішого, тож перший на справу — потрібний пакет.
-    per_case: dict[str, Any] = {}
-    for r in rows:
-        per_case.setdefault(quad_key(r.repo, r.fond, r.opys, r.spr) or r.shifra, r)
-    data["imported"] = _take_many(env, [(r.shifra, r) for r in per_case.values()],
+    # На справу — пакет із найновішими бойовими моделями, без них — з
+    # попередніми; серед рівних — найсвіжіший. Доти брався просто найсвіжіший,
+    # і пізніше викладене прочитання старими вагами витісняло нове.
+    data["imported"] = _take_many(env, [(r.shifra, r) for r in C.best_per_case(rows)],
                                   replace=a.force)
     return env
 
@@ -1168,10 +1167,13 @@ def share_pull(a: SharePullArgs) -> Envelope:
     вона діставалась би без токена застосунку, і пульс «дані змінились» не
     бився б після прийняття.
 
-    🔴 Вільний запит приймається лише на ОДНОМУ збігу. Та сама книга буває в
-    пулі кількома пакетами (різні моделі, різні зйомки), і вибір між ними —
-    рішення людини, а не найперший рядок. Серію людина називає явно
-    (`repo`/`fond`/`opys`, `_pull_series`): там на справу береться найсвіжіший.
+    🔴 Вільний запит приймається лише на ОДНІЙ справі. Та сама книга буває в
+    пулі кількома пакетами (різні моделі, різні зйомки): тоді береться пакет із
+    найновішими бойовими моделями, без них — з попередніми, серед рівних —
+    найсвіжіший (`catalog.best_per_case`), а решту названо в попередженні.
+    Збіг кількох РІЗНИХ справ — двозначність, і вибір лишається за людиною.
+    Серію людина називає явно (`repo`/`fond`/`opys`, `_pull_series`): там те
+    саме правило діє на кожну справу.
     """
     from nyshporka.share import catalog as C
 
@@ -1213,12 +1215,20 @@ def share_pull(a: SharePullArgs) -> Envelope:
     if not a.take:
         env.suggest("share.import", "прийняти знайдений пакет")
     if a.take:
-        if len(found) != 1:
+        best = C.best_per_case(found)
+        if len(best) != 1 or count > len(found):
             env.warn("ambiguous",
-                     f"збігів {len(found)} — прийняти можна лише однозначний; "
-                     f"візьміть адресу потрібного рядка й: nysh share import <url>")
+                     f"збігів {count} різних справ — прийняти можна лише одну; "
+                     f"уточніть запит або візьміть адресу рядка: "
+                     f"nysh share import <url>")
             env.suggest("share.import", "прийняти потрібний рядок за його адресою")
             return env
+        if len(found) > 1:
+            env.warn("best_package",
+                     f"справа є в пулі {len(found)} пакетами — взято прочитаний "
+                     f"моделями {best[0].models or '—'}; інший пакет: "
+                     f"nysh share import <url>")
+        found = [best[0]]
         url = found[0].url
         if not url:
             env.warn("no_url", "у рядку каталогу немає адреси пакета")
