@@ -163,6 +163,17 @@ def _global_options(
     _nag_migration(sub)
 
 
+def _engine_env_here() -> bool:
+    """Чи є в цьому просторі середовище рушіїв читання (його оновлює `htr install`)."""
+    try:
+        from nyshporka.htr.env import venv_python
+        from nyshporka.setup.doctor import engine_venv
+
+        return venv_python(engine_venv()).is_file()
+    except Exception:
+        return False
+
+
 def _need(section: str) -> None:
     """Відмовити, якщо секція вимкнена у профілі простору.
 
@@ -206,16 +217,19 @@ def info() -> None:
     console.print(brand.banner(__version__))
     console.print(f"  python  {platform.python_version()} ({sys.platform})")
 
-    # Важкі extras перевіряються наявністю, а не імпортом у момент старту:
-    # тягнути torch заради рядка «встановлено» коштувало б секунд на кожен запуск.
+    # Важкі extras перевіряються наявністю, а не імпортом у момент старту.
+    # 🔴 HTR — за середовищем рушіїв, а не за torch поруч із застосунком: той
+    # у читанні не бере участі, і з 0.24 extra `htr` його вже не ставить.
     from importlib.util import find_spec
+
+    from nyshporka.setup.update import has_htr
 
     for label, module, extra in (
         ("консоль", "fastapi", "app"),
         ("архіви", "aiolimiter", "archives"),
-        ("HTR", "torch", "htr"),
+        ("HTR", "", "htr"),
     ):
-        have = find_spec(module) is not None
+        have = has_htr() if extra == "htr" else find_spec(module) is not None
         # 🔴 `\[` — екранування для rich. Без нього `[app]` з'їдається як
         # розмітка, і порада перетворюється на «pip install nyshporka», тобто
         # рівно ту команду, яка extra не ставить. Порада, що не працює, гірша
@@ -225,11 +239,10 @@ def info() -> None:
         if extra == "htr" and not have:
             from nyshporka.htr.env import intel_mac
 
-            # Intel Mac: torch поруч із застосунком не стане ніколи (PyPI без
-            # колес x86_64), і порада вище вела б у відмову резолвера. Рушії
-            # там збираються окремим кроком з conda-forge.
-            if intel_mac():
-                mark = "[muted]окремим кроком: nysh htr install (з conda-forge)[/muted]"
+            # Рушії — окреме середовище поруч із простором; extra тут нічого
+            # не ставить. На Intel Mac воно збирається з conda-forge.
+            mark = ("[muted]окремим кроком: nysh htr install (з conda-forge)[/muted]"
+                    if intel_mac() else "[muted]немає — nysh htr install[/muted]")
         console.print(f"  {label:8s} {mark}")
 
 
@@ -725,6 +738,9 @@ def update(
                    "запущено цю команду, зайнятий до її завершення")
         console.print(f"[warn]не ставлю: {escape(why)}[/warn]\n"
                       "  закрийте застосунок і виконайте рядок вище в новому вікні термінала")
+        if _engine_env_here():
+            console.print("  далі тим самим вікном: [bold]nysh htr install[/bold] — оновить "
+                          "рушії читання на місці, якщо нова збірка підняла їхній пін")
         if sys.platform == "win32" and U.tool_env():
             console.print("[muted]без термінала — новий nyshporka-setup.exe поверх цього: "
                           "простір, моделі й довідники лишаються[/muted]")
@@ -741,6 +757,19 @@ def update(
                       "повторіть[/warn]")
         raise typer.Exit(code=rc)
     console.print(f"✅ {rel.latest}")
+    # 🔴 Рушії читання живуть в окремому середовищі, і оновлення застосунку їх
+    # не чіпає. Нова збірка може підняти їхній пін (0.25: kraken 7.0.2 → 7.1.1),
+    # а на старому раннер не стартує — тож одразу кличемо `htr install` УЖЕ
+    # НОВОЇ збірки: він оновить середовище на місці або скаже, що все на місці.
+    if _engine_env_here():
+        import shutil
+
+        new_nysh = shutil.which("nysh")
+        if new_nysh:
+            console.print("[muted]оновлюю рушії читання на місці: nysh htr install[/muted]")
+            subprocess.call([new_nysh, "htr", "install"])
+        else:
+            console.print("далі: [bold]nysh htr install[/bold] — оновить рушії читання на місці")
     # 🔴 Скіли не їдуть разом із пакетом: вони лежать копією в теці агента.
     # Перекладає їх НАСТУПНИЙ запуск уже нової збірки (`_sync_skills`), а не
     # цей процес — він старий. Тому називаємо, коли це станеться, а не радимо
@@ -2817,8 +2846,8 @@ def htr_install(
 ) -> None:
     """Зібрати середовище рушіїв — окремий інтерпретатор поруч із простором.
 
-    🔴 Окремий не для краси: сегментація йде на `kraken==7.0.2` з двома
-    патчами приватних функцій, доведеними рівними оригіналу саме на цій версії.
+    🔴 Окремий не для краси: сегментація йде на `kraken==7.1.1` з патчами
+    приватних функцій, доведеними рівними оригіналу саме на цій версії.
     Інша версія дала б тиху розбіжність — ті самі скани, інші полігони рядків,
     інший текст, без помилки в лозі. Тримати такий пін в основному середовищі
     означало б нав'язати його всьому, що там є.
@@ -2872,7 +2901,7 @@ def models_list() -> None:
 
     state = packs.as_dict()
     manifest = _M.active()
-    mark = {"ok": "✅", "absent": "▫️", "broken": "🔴"}
+    mark = {"ok": "✅", "absent": "▫️", "broken": "🔴", "superseded": "·"}
     for p in state["packs"]:
         size = f"{p['size'] / 2**20:.0f} МБ" if p["size"] else "?"
         # 🔴 Рушій визначається за іменем файлу через маніфест, а не за полем
@@ -2907,7 +2936,10 @@ def models_get(
         console.print(f"[err]немає пака «{which}»[/err]")
         console.print("[muted]є: " + ", ".join(p.id for p in known) + "[/muted]")
         raise typer.Exit(code=1)
-    want = [p for p in known if not which or p.id == which]
+    # Замінені паки (попереднє покоління ваг) — лише на явне прохання за id:
+    # «усі, яких бракує» означає бойові, а не всю історію.
+    want = ([p for p in known if p.id == which] if which
+            else [p for p in known if not p.superseded])
     want = [p for p in want if not packs.verify(p)]
     if not want:
         console.print("✅ усе на місці")

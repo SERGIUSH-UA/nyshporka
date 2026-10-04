@@ -41,14 +41,16 @@ def test_same_suffix_can_mean_two_scripts(man):
     кириличну модель. Помилка не падає й не просаджує впевненість — текст
     виходить сміттям, схожим на погані скани.
     """
-    by_suffix = [e for e in man.engines if e.model_glob.endswith(".mlmodel")]
+    by_suffix = [e for e in man.engines if any(g.endswith(".mlmodel") for g in e.globs())]
     assert {e.script for e in by_suffix} == {"latin", "cyrillic"}
 
 
 @pytest.mark.parametrize("filename, engine_id", [
     ("skryba_f792_v6.mlmodel", "skryba"),
+    ("skryba_pp_v3.safetensors", "skryba"),
     ("pysar_cyr_v17.pt", "pysar"),
     ("diak_cyr_v4.mlmodel", "diak"),
+    ("diak_cyr_v6.safetensors", "diak"),
 ])
 def test_model_name_resolves_to_engine(man, filename, engine_id):
     e = man.engine_for_model(filename)
@@ -60,8 +62,11 @@ def test_unknown_model_name_is_silent_not_guessed(man):
     assert man.engine_for_model("something_else.mlmodel") is None
     # але розширення саме по собі рушій називає — це інше питання
     assert man.kind_for_suffix(".mlmodel") == "kraken"
+    assert man.kind_for_suffix(".safetensors") == "kraken"
     assert man.kind_for_suffix(".pt") == "parseq"
     assert man.kind_for_suffix(".bin") is None
+    # але `.safetensors` без відомого префікса письма не називає
+    assert man.engine_for_model("litopysets_cyr_v1.safetensors") is None
 
 
 def test_parseq_dependencies_are_declared(man):
@@ -75,12 +80,17 @@ def test_parseq_dependencies_are_declared(man):
 def test_kraken_is_pinned_exactly(man):
     """Пін критичний: патчі підмінюють приватні функції саме цієї версії."""
     pins = [s for s in man.packages if s.startswith("kraken")]
-    assert pins == ["kraken==7.0.2"]
+    assert pins == ["kraken==7.1.1"]
 
 
 def test_every_patch_has_a_verifier(man):
     """Патч чужої бібліотеки без верифікатора — це надія, а не інженерія."""
-    assert man.patches
+    assert {p.id for p in man.patches} == {
+        "gpu_sato", "fast_geom", "seg_resize", "fast_order", "fast_seam", "fast_clahe"}, (
+        "маніфест мусить перелічувати ВСІ патчі швидкості, а не частину")
+    pin = next(s for s in man.packages if s.startswith("kraken=="))
+    for p in man.patches:
+        assert p.tested_on == pin, f"{p.id}: звірено на {p.tested_on}, а пін — {pin}"
     for p in man.patches:
         assert p.verify, f"{p.id}: немає верифікатора"
         assert p.tested_on, f"{p.id}: не сказано, на якій версії звірено"
@@ -181,7 +191,7 @@ def test_patches_readme_travelled_with_them():
     """Три пастки кожного патча описані поруч із кодом, а не в чужому репо."""
     readme = PATCHES_DIR / "README.md"
     assert readme.is_file()
-    assert "7.0.2" in readme.read_text(encoding="utf-8")
+    assert "7.1.1" in readme.read_text(encoding="utf-8")
 
 
 # ── контракт середовища ──────────────────────────────────────────────────────
@@ -238,6 +248,9 @@ def test_inspector_flags_wrong_kraken_version_as_a_silent_risk(tmp_path, monkeyp
     rep = env.inspect(tmp_path)
     assert not rep.ok
     assert any("тихою" in p for p in rep.problems), rep.problems
+    # і не лише діагноз: середовище позначене як те, що оновлюється на місці
+    assert "kraken" in rep.stale, rep.stale
+    assert any("nysh htr install" in p for p in rep.problems), rep.problems
 
 
 def test_contract_roundtrip_and_schema_guard(tmp_path):
@@ -364,7 +377,9 @@ def test_a_git_dependency_actually_reaches_pip(tmp_path, monkeypatch):
     assert pip, "pip не викликано взагалі"
     assert url in pip[0], (
         f"git-залежність не доїхала в pip: {pip[0]}. Саме так PARSeq і зникав")
-    assert "kraken==7.0.2" not in pip[0], "поставилось зайве — kraken на місці"
+    # Наявне не переставляється: у запиті весь маніфест (щоб резолвер бачив
+    # обмеження вже встановленого), але без `--reinstall` — задоволене uv не чіпає.
+    assert "--reinstall" not in pip[0], pip[0]
 
 
 def test_nothing_installable_does_not_run_pip_empty_handed(tmp_path, monkeypatch):
@@ -393,3 +408,38 @@ def test_the_real_manifest_installs_parseq_by_its_own_name(tmp_path, monkeypatch
 
     pip = [c for c in calls if "install" in c]
     assert pip and any("parseq" in a for a in pip[0]), pip
+
+
+def test_old_kraken_is_upgraded_in_place_not_beside(tmp_path, monkeypatch):
+    """🔴 Підняття піна kraken без цього лишало людей у циклі.
+
+    `setup()` ставив лише ВІДСУТНЄ, а kraken 7.0.2 — присутній, тож `nysh htr
+    install` казав «пакети на місці», `doctor` — «kraken не той», і людина
+    ходила по колу. Тепер застаріле оновлюється в тому самому venv: нового
+    середовища поруч немає (це був би другий torch на 2.5–4 ГБ).
+    """
+    import shutil
+
+    venv = tmp_path / "venv"
+    py = env.venv_python(venv)
+    py.parent.mkdir(parents=True, exist_ok=True)
+    py.write_text("", encoding="utf-8")
+    monkeypatch.setattr(shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(env, "inspect", lambda *a, **k: env.EnvReport(
+        ok=False, kraken="7.0.2", stale=("kraken",)))
+    calls: list[list[str]] = []
+    monkeypatch.setattr(env, "_run", lambda cmd, **k: calls.append([str(c) for c in cmd]))
+
+    env.setup(venv, with_cuda=False)
+
+    assert not [c for c in calls if "venv" in c], "створено нове середовище поруч зі старим"
+    pip = [c for c in calls if "install" in c]
+    assert pip, "застарілий kraken не оновлено"
+    pin = next(s for s in M.active().packages if s.startswith("kraken=="))
+    assert pin in pip[0], pip[0]
+    assert "--reinstall" not in pip[0], "torch і решта не мають переставлятись"
+    # 🔴 Увесь маніфест у запиті: доставлений окремо пакет інакше підтягнув би
+    # залежність поза межами вже встановленого kraken (так `nltk` піднімав
+    # `click` до 8.5 при `click<8.3` у kraken 7.1.1).
+    for spec in M.active().install_specs().values():
+        assert spec in pip[0], f"{spec} не потрапив у резолвер"

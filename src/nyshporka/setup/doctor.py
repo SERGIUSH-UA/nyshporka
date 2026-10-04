@@ -265,14 +265,19 @@ def engine_venv() -> Path:
     вдруге, або відмовитись від застосунку. Тому: спершу змінна середовища,
     далі відома тека, яка справді існує, і лише як дефолт — наша назва.
     """
-    import os
-
     from nyshporka.core.workspace import workspace
 
     override = os.environ.get(ENV_ENGINE_VENV)
     if override:
         return Path(override)
-    root = workspace().root
+    return engine_venv_in(workspace().root)
+
+
+def engine_venv_in(root: Path) -> Path:
+    """Те саме, що `engine_venv`, для простору за коренем (без активного простору)."""
+    override = os.environ.get(ENV_ENGINE_VENV)
+    if override:
+        return Path(override)
     for name in _ENGINE_VENV_NAMES:
         if (root / name).is_dir():
             return root / name
@@ -300,7 +305,7 @@ def _engines() -> Check:
     """Середовище рушіїв — окремий інтерпретатор.
 
     Те, що встановлена сама Нишпорка, про нього не каже нічого: там свій пін
-    `kraken==7.0.2` під патчі й свій torch.
+    `kraken==7.1.1` під патчі й свій torch.
     """
     rep = _engine_report()
     if rep is None:

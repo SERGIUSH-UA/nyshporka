@@ -278,6 +278,33 @@ def _keys_current(root: Path) -> CheckResult:
                                "потім nysh cases rekey --apply")
 
 
+def _engines_current(root: Path) -> CheckResult:
+    """Чи середовище рушіїв простору стоїть на піні маніфесту (kraken тощо)."""
+    from nyshporka.htr import env as E
+    from nyshporka.setup.doctor import engine_venv_in
+
+    venv = engine_venv_in(root)
+    if not E.venv_python(venv).is_file():
+        return CheckResult("n/a", "середовища рушіїв у цьому просторі немає")
+    rep = E.inspect(venv)
+    if rep.stale or rep.missing:
+        what = ", ".join([*rep.stale, *rep.missing])
+        return CheckResult("todo", f"застаріло або бракує: {what} (kraken {rep.kraken or '?'}) "
+                                   f"— nysh htr install оновить на місці")
+    return CheckResult("ok", f"kraken {rep.kraken} · torch {rep.torch or '?'}")
+
+
+def _models_current(root: Path) -> CheckResult:
+    """Чи завантажені всі бойові паки ваг (замінені — не рахуються)."""
+    from nyshporka.setup import packs
+
+    need = packs.missing("model")
+    if need:
+        return CheckResult("todo", "бракує ваг: " + ", ".join(p.id for p in need)
+                                   + " — nysh models get")
+    return CheckResult("ok", "бойові ваги на місці")
+
+
 CHECKS: dict[str, Callable[[Path], CheckResult]] = {
     "mcp_config": _mcp_config,
     "skills_current": _skills_current,
@@ -285,6 +312,8 @@ CHECKS: dict[str, Callable[[Path], CheckResult]] = {
     "hook_installed": _hook_installed,
     "stale_scan": _stale_scan,
     "keys_current": _keys_current,
+    "engines_current": _engines_current,
+    "models_current": _models_current,
 }
 
 

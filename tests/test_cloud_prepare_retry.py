@@ -30,7 +30,7 @@ class _Box:
         if "command -v uv" in cmd:
             return Completed(rc=0, out="yes")
         if "import kraken" in cmd:
-            return Completed(rc=0, out="OK 2.4.0 True")
+            return Completed(rc=0, out="OK 7.1.1 2.4.0 True")
         if " pip install " in cmd and self.drops > 0:
             self.drops -= 1
             return Completed(rc=-1, out="Downloading nvidia-cudnn-cu12 (674.0MiB)", err="")

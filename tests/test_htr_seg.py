@@ -31,7 +31,8 @@ def _cache(d: Path, stems: list[str], *, key: dict | None = None) -> Path:
     """Тека кешу з правдоподібними `*.seg.json.gz`, як їх пише раннер."""
     d.mkdir(parents=True, exist_ok=True)
     for stem in stems:
-        blob = {"key": key or dict(S.EXPECTED_KEY), "lines": [[0, 0, 100, 40]]}
+        blob = {"key": key or {**S.EXPECTED_KEY, "kraken": S.EXPECTED_LINEAGE[0]},
+                "lines": [[0, 0, 100, 40]]}
         with gzip.open(d / f"{stem}.c400.seg.json.gz", "wt", encoding="utf-8") as fh:
             json.dump(blob, fh)
     return d
@@ -124,7 +125,7 @@ def test_a_cache_with_other_slicing_params_is_refused(tmp_path: Path) -> None:
     frames = [_frame(case / f"{i:04d}.jpg") for i in range(3)]
     derived = tmp_path / "derived"
     _cache(seg_cache_dir(case, derived), [f.stem for f in frames],
-           key={**S.EXPECTED_KEY, "sato": "1,5"})
+           key={**S.EXPECTED_KEY, "kraken": S.EXPECTED_LINEAGE[0], "sato": "1,5"})
 
     got = S.inspect(case, frames, base_out=tmp_path / "out", derived=derived)
     assert not got.usable and "sato" in got.why

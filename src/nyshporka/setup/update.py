@@ -214,15 +214,30 @@ def latest(timeout: float = TIMEOUT) -> Release:
 
 
 def has_htr() -> bool:
-    """Чи стоять рушії читання В ЦЬОМУ середовищі (extra `htr`).
+    """Чи читає ця людина рукописи: є середовище рушіїв (або старий слід — torch).
 
     🔴 Питається стан, а не запис. Слід інсталятора фіксує набір НА МОМЕНТ
     УСТАНОВЛЕННЯ, а частини доставляють потім — і оновлення за старим записом
-    зняло б у такої людини torch на 2.5 ГБ. Помилка мовчазна: застосунок
+    зняло б у такої людини розділ «Читання». Помилка мовчазна: застосунок
     оновився, «Читання» просто зникло.
+
+    🔴 Ознака — середовище рушіїв, а не torch поруч із застосунком. До 0.24
+    extra `htr` ставив torch і в середовище застосунку, де він у читанні не
+    бере участі (читає torch рушіїв, `doctor._torch`), — тобто кожен, хто
+    читав, тримав ДВА torch по 2.5–4 ГБ. Тепер extra порожній, а torch у
+    застосунку лишається ознакою лише для тих, у кого він ще стоїть зі старої
+    установки.
     """
     from importlib.util import find_spec
 
+    try:
+        from nyshporka.htr.env import venv_python
+        from nyshporka.setup.doctor import engine_venv
+
+        if venv_python(engine_venv()).is_file():
+            return True
+    except Exception:
+        pass                    # простору немає — питаємо старий слід
     try:
         return find_spec("torch") is not None
     except (ImportError, ValueError):

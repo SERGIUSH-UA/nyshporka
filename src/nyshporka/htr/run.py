@@ -238,8 +238,9 @@ def model_dirs() -> list[Path]:
 #: Файл, у якому дослідник називає бойові ваги за письмом.
 PRODUCTION_NAME = "PRODUCTION.json"
 
-#: Хвіст версії в імені: `pysar_cyr_v17.pt`, `skryba_f792_v6.mlmodel`.
-_VER_RE = re.compile(r"_v(\d+)[a-z]*\.(?:pt|mlmodel)$", re.IGNORECASE)
+#: Хвіст версії в імені: `pysar_cyr_v17.pt`, `skryba_f792_v6.mlmodel`,
+#: `diak_cyr_v6.safetensors`.
+_VER_RE = re.compile(r"_v(\d+)[a-z]*\.(?:pt|mlmodel|safetensors)$", re.IGNORECASE)
 
 
 def production_choice() -> dict[str, str]:
@@ -270,6 +271,32 @@ def production_choice() -> dict[str, str]:
     return {}
 
 
+def production_voice() -> dict[str, str]:
+    """Письмо → ім'я другого голосу, як його назвав дослідник (`voice`).
+
+    Поле необов'язкове: без нього голосом стає найвища версія kraken-моделі
+    того самого письма. Його поява — це рішення про Дяка-Літописця: він
+    випущений як нове покоління Дяка (`diak_cyr_v6`), і «найвища версія» його й
+    так обере, але рішення людини має бути записане, а не випливати з номера.
+    """
+    import json
+
+    for d in model_dirs():
+        p = d / PRODUCTION_NAME
+        if not p.is_file():
+            continue
+        try:
+            raw = json.loads(p.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        out = {str(script): str(row["voice"])
+               for script, row in (raw.get("production") or {}).items()
+               if isinstance(row, dict) and row.get("voice")}
+        if out:
+            return out
+    return {}
+
+
 def _version_of(path: Path) -> int:
     m = _VER_RE.search(path.name)
     return int(m.group(1)) if m else -1
@@ -292,7 +319,9 @@ def local_models() -> list[Path]:
         return []
     if not d.is_dir():
         return []
-    return sorted(p for p in d.iterdir() if p.suffix in {".pt", ".mlmodel"})
+    from nyshporka.htr import manifest as M
+
+    return sorted(p for p in d.iterdir() if p.suffix.lower() in M.MODEL_SUFFIXES)
 
 
 def pick_model(script: str, *, second_voice: bool = False) -> tuple[Path, Path | None]:
@@ -308,18 +337,18 @@ def pick_model(script: str, *, second_voice: bool = False) -> tuple[Path, Path |
     from nyshporka.setup import packs
 
     man = M.active()
-    # (шлях, письмо, рушій) — паки й локальні ваги в одному переліку.
-    cands: list[tuple[Path, str, str]] = []
+    # (шлях, письмо, рушій, замінений) — паки й локальні ваги в одному переліку.
+    cands: list[tuple[Path, str, str, bool]] = []
     for pack in packs.catalog():
         if packs.verify(pack):
-            cands.append((packs.path_of(pack), pack.script, pack.engine))
-    seen = {p for p, _, _ in cands}
+            cands.append((packs.path_of(pack), pack.script, pack.engine, pack.superseded))
+    seen = {c[0] for c in cands}
     for path in local_models():
         if path in seen:
             continue
         eng = man.engine_for_model(path.name)
         if eng is not None:
-            cands.append((path, eng.script, eng.kind))
+            cands.append((path, eng.script, eng.kind, False))
 
     if not cands:
         raise ReadError(
@@ -327,15 +356,20 @@ def pick_model(script: str, *, second_voice: bool = False) -> tuple[Path, Path |
             "власні ваги у `<простір>/data/spotter/models`. Без ваг читати "
             "нічим: рушій є, читати нема чим.")
 
-    # Порядок вибору: назване дослідником → найвища версія → решта. Сортуємо
-    # спадно, тож перший підхожий кандидат і є найкращий із наявних.
+    # Порядок вибору: назване дослідником → не замінений пак → найвища версія.
+    # Сортуємо спадно, тож перший підхожий кандидат і є найкращий із наявних.
+    # 🔴 «Не замінений» стоїть ПЕРЕД версією, бо номер між родинами не
+    # порівнюється: `skryba_pp_v3` — нове покоління, а за номером програвала б
+    # `skryba_f792_v6`.
     named = production_choice()
-    cands.sort(key=lambda c: (c[0].name == named.get(c[1], ""), _version_of(c[0])),
+    named_voice = production_voice()
+    cands.sort(key=lambda c: (c[0].name in (named.get(c[1], ""), named_voice.get(c[1], "")),
+                              not c[3], _version_of(c[0])),
                reverse=True)
 
     main: Path | None = None
     voice: Path | None = None
-    for path, scr, kind in cands:
+    for path, scr, kind, _old in cands:
         if scr != script:
             continue
         if kind == "parseq" and main is None:
@@ -346,7 +380,7 @@ def pick_model(script: str, *, second_voice: bool = False) -> tuple[Path, Path |
     if main is None:
         main, voice = voice, None
     if main is None:
-        have_str = ", ".join(sorted({f"{p.name} ({s})" for p, s, _ in cands}))
+        have_str = ", ".join(sorted({f"{c[0].name} ({c[1]})" for c in cands}))
         raise ReadError(
             f"немає моделі для письма «{script}». Є: {have_str}. "
             f"Довантажити: `nysh models get`.")
@@ -422,7 +456,9 @@ def resolve_voices(specs: Sequence[str], *, main: Path,
     specs = [s.strip() for s in specs if s and s.strip()]
     if not specs:
         return ()
-    if main.suffix.lower() != ".pt":
+    from nyshporka.htr import manifest as M
+
+    if M.active().kind_for_suffix(main.suffix) != "parseq":
         raise ReadError(
             f"додатковий голос можна дати лише кириличному прогону (основа PARSeq), "
             f"а основна модель тут — {main.name}. Для латинської справи це окремий "
@@ -709,7 +745,10 @@ def model_candidates() -> list[dict[str, str]]:
         seen.add(p)
         out.append({"id": pack.id, "filename": p.name, "path": str(p),
                     "script": pack.script, "engine": pack.engine,
-                    "source": "пак", "state": "ok" if ready else "не завантажено",
+                    "source": "пак",
+                    "state": ("ok" if ready else
+                              "замінено новим поколінням" if pack.superseded else
+                              "не завантажено"),
                     "version": str(_version_of(p)),
                     "production": str(p.name == named.get(pack.script, ""))})
     for p in local_models():

@@ -26,7 +26,7 @@ from typing import Any
 
 import numpy as np
 
-TESTED_KRAKEN = "7.0.2"
+TESTED_KRAKEN = ("7.0.2", "7.1.1")
 MASK_VAL = 99999
 
 #: Скільки разів швидкий шлях поступився оригіналу через виняток.
@@ -442,8 +442,8 @@ def install(verbose: bool = False) -> bool:
     # 🔴 Тут не попередження, як у fast_geom, а відмова: патч несе дослівні
     # копії `vec_lines`, `_extract_patch` і `_calc_seam`, і на іншій версії
     # kraken він тихо повернув би стару поведінку поверх нової.
-    if ver != TESTED_KRAKEN:
-        print(f"[fast-seam] ⚠ kraken {ver} ≠ перевіреного {TESTED_KRAKEN} — "
+    if ver not in TESTED_KRAKEN:
+        print(f"[fast-seam] ⚠ kraken {ver} поза перевіреними {', '.join(TESTED_KRAKEN)} — "
               "шов лишається оригінальним", flush=True)
         return False
     blla._vec_lines_orig = blla.vec_lines

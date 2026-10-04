@@ -53,7 +53,7 @@ class FakeSession:
         if "nproc=" in cmd and "cgroup" in cmd:
             return Completed(rc=0, out=PROBE_OUT)
         if "import kraken" in cmd:
-            return Completed(rc=0, out="OK 2.4.0 True")
+            return Completed(rc=0, out="OK 7.1.1 2.4.0 True")
         if "tar -xf" in cmd:
             self._extract()
             return Completed(rc=0, out=f"landed={self._count('case', '.jpg')}")
@@ -625,3 +625,22 @@ def test_the_page_counter_does_not_expand_a_glob(wired, monkeypatch) -> None:
     cmd = next(c for c in seen if "echo pages=" in c)
     assert re.search(r"\S*\*\.txt(?!')", cmd) is None, cmd
     assert "find " in cmd and "-name '*.txt'" in cmd
+
+
+def test_a_host_built_for_an_old_kraken_is_rebuilt_not_trusted() -> None:
+    """🔴 «Імпортується» ≠ «готове»: хост, зібраний під старий пін kraken,
+    імпортується так само, і без звірки версії `nysh cloud run` пішов би на ньому
+    читати — а раннер там не стартує."""
+    from nyshporka.cloud import run as CR
+
+    class _Sess:
+        def resolve(self, p: str) -> str:
+            return p
+
+        def run(self, cmd: str, timeout: float = 0.0):
+            class _R:
+                out = "OK 7.0.2 2.10.0 True"
+            return _R()
+
+    got = CR.engine_state(_Sess(), "work/run")  # type: ignore[arg-type]
+    assert not got.ready and "7.0.2" in got.detail

@@ -26,7 +26,7 @@ from typing import Any
 
 import numpy as np
 
-TESTED_KRAKEN = "7.0.2"
+TESTED_KRAKEN = ("7.0.2", "7.1.1")
 
 #: Скільки разів швидкий шлях поступився оригіналу через виняток.
 FALLBACKS = {"reading_order": 0}
@@ -108,7 +108,7 @@ def install(verbose: bool = False) -> bool:
     if not hasattr(kseg, "_reading_order"):
         raise RuntimeError(
             "fast_order: у kraken.lib.segmentation немає `_reading_order` — версія "
-            f"пакета розійшлася з патчем (звірено на {TESTED_KRAKEN})")
+            f"пакета розійшлася з патчем (звірено на {', '.join(TESTED_KRAKEN)})")
     kseg._reading_order_orig = kseg._reading_order
     kseg._reading_order = _with_fallback(reading_order_fast, kseg._reading_order_orig)
     kseg._fast_order_installed = True

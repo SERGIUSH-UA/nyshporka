@@ -53,7 +53,10 @@ GUEST_FILES = ["runner.py", "pysar_lines_infer.py",
                # середовища. Доказ рівності, знятий деінде, нічого не доводить.
                "patches/gpu_sato_verify.py", "patches/fast_geom_verify.py",
                "patches/seg_resize_verify.py", "patches/fast_order_verify.py",
-               "patches/fast_seam_verify.py"]
+               "patches/fast_seam_verify.py",
+               # Звірка родоводу ганяє раннер у ДВОХ середовищах рушіїв і сама
+               # живе під будь-яким Python — лише stdlib, без пакета.
+               "patches/kraken_lineage_verify.py"]
 
 FILES = [HTR / rel for rel in GUEST_FILES]
 

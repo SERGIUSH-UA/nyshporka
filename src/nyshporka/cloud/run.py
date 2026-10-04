@@ -186,16 +186,29 @@ class EngineState:
 
 def engine_state(session: Session, remote_dir: str) -> EngineState:
     """Перевірити середовище рушіїв на машині — одним заходом."""
+    from nyshporka.htr import manifest as HM
+
     py = f"{PurePosixPath(session.resolve(remote_dir)).parent}/{VENV_SUB}/bin/python"
-    code = ("import kraken, torch, PIL, numpy;"
-            "print('OK', torch.__version__, torch.cuda.is_available())")
+    code = ("import kraken, torch, PIL, numpy, importlib.metadata as m;"
+            "print('OK', m.version('kraken'), torch.__version__, torch.cuda.is_available())")
     got = session.run(
         f"{shlex.quote(py)} -c {shlex.quote(code)} 2>&1 || true",
         timeout=300.0)
     if "OK" in got.out:
         said = got.out.strip().split()
-        return EngineState(ready=True, python=py, detail=got.out.strip(),
-                           cuda=(said[-1].lower() == "true") if said else None)
+        cuda = (said[-1].lower() == "true") if said else None
+        # 🔴 «Імпортується» ≠ «готове»: машина, зібрана під старий пін kraken,
+        # імпортується так само, а раннер на ній не стартує (або, на версії без
+        # гарда, нарізав би рядки інакше). Застаріле збирається наново —
+        # `prepare` оновлює те саме середовище, не ставить друге.
+        want = next((s.split("==", 1)[1] for s in HM.active().packages
+                     if s.startswith("kraken==")), "")
+        at = said.index("OK") if "OK" in said else -1
+        have = said[at + 1] if 0 <= at < len(said) - 1 else ""
+        if want and have != want:
+            return EngineState(ready=False, python=py, cuda=cuda,
+                               detail=f"kraken {have or '?'}, а треба {want} — середовище застаріло")
+        return EngineState(ready=True, python=py, detail=got.out.strip(), cuda=cuda)
     return EngineState(ready=False, python=py,
                        detail=got.out.strip()[:300] or "середовища немає")
 

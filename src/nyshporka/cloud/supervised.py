@@ -171,7 +171,53 @@ def assets_inputs(models: Sequence[Path]) -> list[tuple[str, Path]]:
     items.append((f"{ARC_SCRIPTS}/{LINES_MODULE}", htr / LINES_MODULE))
     items += [(f"{ARC_SCRIPTS}/patches/{p.name}", p)
               for p in sorted((htr / "patches").glob("*.py"))]
+    items.append((f"{ARC_SCRIPTS}/{ENGINE_REQUIREMENTS}", engine_requirements_file()))
     return items
+
+
+#: Вимоги середовища рушіїв у архіві ассетів (читає `gpurunner htr plan`).
+ENGINE_REQUIREMENTS = "engine_requirements.txt"
+
+
+def _plan_carries_engine(plan_path: Path) -> bool:
+    """Чи склав наглядач план, що везе на бокс середовище рушіїв з маніфесту."""
+    try:
+        plan = json.loads(plan_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    params = plan.get("params") or {}
+    if isinstance(params, dict):
+        reqs = str(params.get("engine_requirements") or "")
+    else:   # перелік `ключ=значення` — так план пишуть і прості збірки наглядача
+        reqs = next((str(p).split("=", 1)[1] for p in params
+                     if str(p).startswith("engine_requirements=")), "")
+    return any(line.strip().startswith("kraken==") for line in reqs.splitlines())
+
+
+def engine_requirements_file() -> Path:
+    """Вимоги середовища рушіїв із маніфесту — файлом, що їде поруч із раннером.
+
+    🔴 Одне джерело пінів. Доти бокс ставив власний перелік наглядача
+    (`kraken==7.0.2`, PARSeq без коміту) — тобто хмара читала іншим
+    середовищем, ніж машина людини, і розходження ловилось лише текстом
+    (0.42% CER між хмарою й домом). Тепер раннер їде разом із тим, чим його
+    рахувати, і архів, узятий через місяці, ставить саме свої піни.
+    Ім'я файлу на диску — за хешем вмісту, тож хеш архіву змінюється лише
+    тоді, коли змінились самі піни.
+    """
+    import tempfile
+
+    from nyshporka.htr import manifest as HM
+
+    lines = ["# середовище рушіїв Нишпорки — з htr/data/engines.yaml",
+             *HM.active().pip_specs()]
+    text = "\n".join(lines) + "\n"
+    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
+    out = Path(tempfile.gettempdir()) / "nyshporka-engine" / f"requirements_{digest}.txt"
+    if not out.is_file():
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(text, encoding="utf-8")
+    return out
 
 
 def runner_path() -> Path:
@@ -561,6 +607,17 @@ def prepare(convoy: Convoy, res: GoResult, say: Callable[..., None], *,
         no_seed()
         if _run(make_cmd(seeded=False), env=env).returncode or not plan_path.is_file():
             raise GoRefused(f"план заходу не склався — див. вивід вище; тека {work}")
+
+    # 🔴 Наглядач мусить везти на бокс середовище рушіїв з нашого маніфесту.
+    # Старий (gpuhire < 0.6) файла вимог в ассетах не бачить, бокс поставив би
+    # власний пін kraken, і раннер там не стартував би — після оплаченого
+    # холодного старту. Перевіряється сама можливість, а не номер версії:
+    # наглядач буває й чужою збіркою з PATH.
+    if not _plan_carries_engine(plan_path):
+        raise GoRefused(
+            "наглядач хмарних прогонів застарий: план не везе на машину середовище "
+            "рушіїв (kraken з маніфесту), і раннер на боксі не стартував би. "
+            "Оновіть: `nysh update` (пакет оренди `gpuhire` ≥ 0.6) і повторіть.")
 
     # 3. правки, яких наглядач знати не може
     _patch_plan(plan_path, convoy)

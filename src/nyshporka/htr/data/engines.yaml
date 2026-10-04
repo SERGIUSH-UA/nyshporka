@@ -19,11 +19,15 @@ runtime:
 
   packages:
     # 🔴 ПІН НАВМИСНИЙ І ЗНІМАТИ ЙОГО НЕ МОЖНА. Сегментація йде на kraken із
-    # двома патчами приватних функцій `kraken.lib.segmentation`, доведеними
-    # рівними оригіналу саме на 7.0.2. Інша версія дала б ТИХУ розбіжність:
-    # ті самі скани → інші полігони рядків → інший текст, без помилки в лозі.
-    # Піднімати — лише разом із перезапуском обох верифікаторів.
-    - "kraken==7.0.2"
+    # патчами приватних функцій (`patches:` нижче), доведеними рівними
+    # оригіналу саме на цій версії. Інша версія дала б ТИХУ розбіжність: ті
+    # самі скани → інші полігони рядків → інший текст, без помилки в лозі.
+    # Піднімати — лише разом із перезапуском усіх верифікаторів патчів і
+    # `kraken_lineage_verify` (він вирішує, чи переживе кеш сегментації).
+    # 7.1.1 — бо моделі PP-OCRv6 (`.safetensors`: Дяк-Літописець, Скриба-PP)
+    # вантажить лише kraken ≥ 7.1; код, який підміняють патчі, у 7.0.2 і 7.1.1
+    # побайтово той самий.
+    - "kraken==7.1.1"
     # Нижче — те, без чого не вантажиться Писар (PARSeq). Саме їх бракувало.
     - "timm>=1.0"
     - "nltk>=3.9"
@@ -88,51 +92,79 @@ runtime:
       - {min_capability: "7.0", max_capability: "8.9", tag: "cu126", min_driver: "527.41"}
       - {min_capability: "9.0", max_capability: "12.9", tag: "cu128", min_driver: "527.41"}
     # 🔴 Mac з процесором Intel (issue #10): PyTorch не випускає колес для
-    # macOS x86_64 з torch 2.2.2, а kraken 7.0.2 вимагає ≥ 2.4 — з PyPI цю
+    # macOS x86_64 з torch 2.2.2, а kraken 7.1.1 вимагає ≥ 2.9 — з PyPI цю
     # пару не скласти ніколи. Її збирає conda-forge (pytorch osx-64 є й далі),
     # тож там середовище створює micromamba, а не `uv venv`: інтерпретатор і
-    # torch — звідси, решта пакетів — pip'ом, як усюди. Стеля 2.10 — верхня
-    # межа самого kraken 7.0.2. Приймач — `uv pip compile` під
-    # x86_64-apple-darwin: з підміненим torch решта 84 пакетів резолвиться.
+    # torch — звідси, решта пакетів — pip'ом, як усюди. Межі 2.9…2.14 — межі
+    # самого kraken 7.1.1. Приймач — CI `intel-mac.yml`.
     conda:
       channel: conda-forge
-      packages: ["pytorch>=2.4,<=2.10", "torchvision"]
+      packages: ["pytorch>=2.9,<=2.14", "torchvision"]
 
 # ── патчі гарячих функцій kraken ─────────────────────────────────────────────
 # Разом дають 32.7 → 14.8 с/стор при побітово тому самому виході. Це патч ЧУЖОЇ
 # бібліотеки, тому кожен має верифікатор, який ганяє стару й нову версію
-# пліч-о-пліч на живій сегментації і звіряє САМІ масиви.
+# пліч-о-пліч на живій сегментації і звіряє САМІ масиви. Окремо від них —
+# `kraken_lineage_verify`: той самий раннер у двох середовищах (стара й нова
+# версія kraken), побайтово сегментація й тексти. Лише після нього пара версій
+# іде в `runner.SEG_LINEAGE`, і кеш сегментації переживає оновлення.
+# `seg_ceiling` тут не стоїть: це не прискорення, а керована стеля рядків
+# (`--max-endpoints`), і її поведінку покриває саме звірка родоводу.
 patches:
   - id: gpu_sato
     module: nyshporka.htr.patches.gpu_sato
     verify: nyshporka.htr.patches.gpu_sato_verify
-    tested_on: "kraken==7.0.2"
+    tested_on: "kraken==7.1.1"
     requires_cuda: true
     gain: "×1.51 на сторінку (ridge-фільтр skimage.filters.sato → torch на карті)"
   - id: fast_geom
     module: nyshporka.htr.patches.fast_geom
     verify: nyshporka.htr.patches.fast_geom_verify
-    tested_on: "kraken==7.0.2"
+    tested_on: "kraken==7.1.1"
     requires_cuda: false
     gain: "×1.36 на сторінку (_calc_roi через STRtree, boundary_tracing скалярами)"
   - id: seg_resize
     module: nyshporka.htr.patches.seg_resize
     verify: nyshporka.htr.patches.seg_resize_verify
-    tested_on: "kraken==7.0.2"
+    tested_on: "kraken==7.1.1"
     requires_cuda: false
     gain: "−0.3…−0.5 с/стор на 16-Мпікс кадрах (один LANCZOS-ресайз замість двох)"
+  - id: fast_order
+    module: nyshporka.htr.patches.fast_order
+    verify: nyshporka.htr.patches.fast_order_verify
+    tested_on: "kraken==7.1.1"
+    requires_cuda: false
+    gain: "щільні таблиці: порядок читання 222 → 0.5 с (матриця numpy замість кубічного циклу)"
+  - id: fast_seam
+    module: nyshporka.htr.patches.fast_seam
+    verify: nyshporka.htr.patches.fast_seam_verify
+    tested_on: "kraken==7.1.1"
+    requires_cuda: false
+    gain: "етап polygon −21…−25% (шви рядків пакетом на сторінку)"
+  - id: fast_clahe
+    module: nyshporka.htr.patches.fast_clahe
+    verify: nyshporka.htr.patches.fast_clahe_verify
+    tested_on: "kraken==7.1.1"
+    requires_cuda: true
+    gain: "CLAHE блідих сторінок ×1.9 (інтерполяція відображень на карті)"
 
 # ── рушії ────────────────────────────────────────────────────────────────────
 # 🔴 Розширення моделі каже РУШІЙ, а префікс імені — ПИСЬМО. `.mlmodel` буває
 # двох письм, і сплутати їх легко: невідповідність рушія письму дає тихе сміття
 # без падіння впевненості.
+#
+# Рушій kraken має два формати ваг: `.mlmodel` (VGSL, старі Скриба й Дяк —
+# читаються `load_any` + `predict_string`, як були) і `.safetensors` (PP-OCRv6,
+# kraken ≥ 7.1 — Дяк-Літописець і Скриба-PP; читаються `kraken.tasks`). 🔴 Стару
+# `.mlmodel` через `kraken.tasks` читати не можна: на тих самих кропах CER 43.3%
+# замість 20.1% — шлях 7.1 інакше готує кроп для старих моделей.
 engines:
   - id: skryba
     label: Скриба
     kind: kraken
     script: latin
-    model_glob: "skryba_*.mlmodel"
-    note: латинка — нотаріальні й костельні книги
+    model_glob: ["skryba_*.mlmodel", "skryba_*.safetensors"]
+    note: латинка — нотаріальні й костельні книги (Скриба-PP — на базі PP-OCRv6)
 
   - id: pysar
     label: Писар
@@ -145,9 +177,10 @@ engines:
     label: Дяк
     kind: kraken
     script: cyrillic
-    model_glob: "diak_*.mlmodel"
+    model_glob: ["diak_*.mlmodel", "diak_*.safetensors"]
     note: |
-      другий голос: CTC прив'язаний до пікселів і калічить локально, тоді як
+      Дяк-Літописець (`diak_cyr_v6.safetensors`) — нове покоління на базі
+      PP-OCRv6. Другий голос: CTC прив'язаний до пікселів і калічить локально, тоді як
       PARSeq має внутрішню мовну модель і підставляє правдоподібне слово.
 
 # ── базові моделі ────────────────────────────────────────────────────────────

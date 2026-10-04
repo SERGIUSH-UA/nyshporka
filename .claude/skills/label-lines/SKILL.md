@@ -81,7 +81,7 @@ nysh train view strip --set <набір> --page 0012 --lines 0-8 --out <scratch>
 ## Фаза 0-біс. Другий голос
 
 ```bash
-nysh train voices --set <набір> --from-run <прогін>-diak_v4     # гілка другого голосу
+nysh train voices --set <набір> --from-run <прогін>-diak_v6     # гілка другого голосу
 nysh train voices --set <набір> --models pysar_cyr_v16.pt        # інфер іншими вагами
 ```
 

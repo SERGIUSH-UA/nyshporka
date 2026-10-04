@@ -36,6 +36,15 @@ if TYPE_CHECKING:  # pragma: no cover — лише для перевірки т�
 #: буде рахунок за роботу, яку ми думали, що не робимо.
 EXPECTED_KEY = {"sato": "1,3", "max_endpoints": 400, "seg_height": 0}
 
+#: Родовід сегментації, який бере чинний раннер (поле `kraken` у ключі кешу).
+#: Це не версія встановленого kraken, а найстаріша версія з побайтово тією
+#: самою сегментацією — `runner.SEG_LINEAGE`, де кожну пару доведено
+#: `kraken_lineage_verify`. Тест тримає ці два місця однаковими.
+#: 🔴 До 0.24 планувальник версію kraken не звіряв зовсім: кеш іншої версії
+#: він називав придатним, раннер на ньому промахувався, і справа
+#: сегментувалась наново за гроші, яких кошторис не показував.
+EXPECTED_LINEAGE = ("7.0.2",)
+
 #: Скільки кадрів звіряти з `.lines.json` першого прогону. П'ять, а не всі:
 #: розбіжність геометрії — це властивість ТЕКИ (стиснули або ні), а не
 #: окремого кадру, тож перший же промах її показує.
@@ -107,6 +116,8 @@ def key_problem(files: Sequence[Path]) -> str:
         except (OSError, ValueError):
             return f"{f.name} не читається"
         wrong = {k: key.get(k) for k, v in EXPECTED_KEY.items() if key.get(k) != v}
+        if key.get("kraken") not in EXPECTED_LINEAGE:
+            wrong["kraken"] = key.get("kraken")
         if wrong:
             return ", ".join(f"{k}={v!r}" for k, v in wrong.items())
     return ""

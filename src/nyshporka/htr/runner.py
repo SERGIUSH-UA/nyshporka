@@ -260,8 +260,15 @@ GUARD_FLIP_RATE = 0.05
 # ── рушії ────────────────────────────────────────────────────────────────────
 #: Розширення моделі → рушій. Окремого `--engine` свідомо немає: модель і рушій
 #: нерозривні, а зайвий прапорець дав би змогу зібрати неможливу комбінацію.
-_ENGINE_BY_SUFFIX = {".mlmodel": "kraken", ".pt": "parseq",
-                     ".ckpt": "parseq", ".pth": "parseq"}
+_ENGINE_BY_SUFFIX = {".mlmodel": "kraken", ".safetensors": "ppocr",
+                     ".pt": "parseq", ".ckpt": "parseq", ".pth": "parseq"}
+
+#: Рушій у меті прогону. PP-OCRv6 (`.safetensors`) — це той самий kraken з
+#: іншим форматом ваг, і споживачі мети (стор, реєстр справ, гард змішування)
+#: знають лише `kraken` і `parseq`. Окремий маршрут `ppocr` живе тільки тут:
+#: старій `.mlmodel` шлях `kraken.tasks` псує текст (CER 43.3% замість 20.1%
+#: на тих самих кропах), а PP-моделі шлях `load_any` не відкриває зовсім.
+_META_ENGINE = {"ppocr": "kraken"}
 
 #: Письмо, яке модель реально вміє. Потрібне для мети прогону й для попередження
 #: в консолі: kraken-Скриба на кирилиці дає тихе сміття без падіння conf
@@ -296,7 +303,8 @@ def detect_engine(model: str) -> str:
     if engine is None:
         raise SystemExit(
             f"[htr-run] невідомий тип моделі «{suf}» ({Path(model).name}). "
-            f"Очікую .mlmodel (kraken/Скриба) або .pt (PARSeq/Писар)")
+            f"Очікую .mlmodel (kraken: Скриба, Дяк), .safetensors (PP-OCRv6: "
+            f"Дяк-Літописець, Скриба-PP) або .pt (PARSeq/Писар)")
     return engine
 
 
@@ -306,7 +314,7 @@ def model_script(model: str, engine: str) -> str:
     for prefix, script in _SCRIPT_BY_PREFIX:
         if prefix in low:
             return script
-    return "latin" if engine == "kraken" else "unknown"
+    return "latin" if engine in ("kraken", "ppocr") else "unknown"
 
 
 def emit(enabled: bool, phase: str, **kw) -> None:
@@ -730,6 +738,8 @@ def load_recognizer(model: str, engine: str, device: str, half: bool = False):
     if engine == "kraken":
         from kraken.lib import models as kmodels
         return kmodels.load_any(model, device=device)
+    if engine == "ppocr":
+        return load_pp(model, device)
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     from pysar_lines_infer import load_pysar
     net, hw = load_pysar(Path(model), device)
@@ -808,6 +818,171 @@ def load_kraken_voice(model: str, device: str) -> tuple:
                               pad=(KRAKEN_VOICE_PAD, 0), valid_norm=False,
                               force_binarization=False)
     return net, tr, ch
+
+
+#: Пачка PP-моделі — стеля РЯДКІВ за прохід мережі. Понад 8 темп майже не
+#: росте (замір 04.10.2026, GTX 1650, найширші рядки 224-1-1112: пачка 1 —
+#: 0.56 с/рядок, 8 — 0.26, 16 — 0.27), а пам'ять росте лінійно. Виставляється з
+#: `main` за `--pp-batch`.
+PP_BATCH = 16
+#: Пік VRAM PP-OCRv6 на 1000 px сумарної ширини пачки в масштабі моделі (рядок
+#: доповнюється до найширшого в пачці): той самий замір — 44…53 МБ.
+PP_MB_PER_KPX = 0.055 * 1000
+#: Скільки VRAM дати одній пачці, МБ; 0 — частка карти (`PP_VRAM_SHARE`).
+PP_VRAM_MB = 0
+PP_VRAM_SHARE = 0.2
+#: 🔴 Чому бюджет пам'яті, а не лише число рядків. Пачка з 16 найширших рядків
+#: коштує +1.57 ГБ, і на 4 ГБ поруч із Писарем `reserved` росло до 5.5 ГБ:
+#: Windows пускає CUDA у спільну системну пам'ять, і прохід мережі сповзав у
+#: RAM — та сама сторінка читалась то 9, то 96 с (224-1-1112, 04.10.2026).
+#: Помилки при цьому немає, є лише час, тому межа мусить стояти до проходу.
+PP_CANVAS_MPX = 40.0
+
+
+def load_pp(model: str, device: str) -> tuple:
+    """PP-OCRv6 (`.safetensors`, kraken ≥ 7.1) → `(модель, конфіг, бюджет px)`.
+
+    🔴 `num_line_workers=0` обов'язковий. Дефолт kraken — 2 процеси-нарізувачі,
+    і кожен отримує кадр на кожен виклик: заміряно 05.09.2026 — учетверо
+    ПОВІЛЬНІШЕ, а не швидше. Нарізати тут нічого: кропи вже готові.
+
+    🔴 Підготовка — ОДИН раз. `RecognitionTaskModel.predict` кличе
+    `prepare_for_inference` на кожен виклик, а та щоразу будує новий Lightning
+    `Fabric` і переносить модель на пристрій. Тому тут вона кличеться сама, а
+    читання йде через `predict` самої мережі, де підготовки немає.
+    """
+    from kraken.configs import RecognitionInferenceConfig
+    from kraken.tasks import RecognitionTaskModel
+
+    task = RecognitionTaskModel.load_model(model)
+    budget_px = float("inf")
+    if device.startswith("cuda"):
+        import torch
+
+        idx = int(device.split(":")[1]) if ":" in device else 0
+        cfg = RecognitionInferenceConfig(accelerator="gpu", device=[idx],
+                                         batch_size=PP_BATCH, num_line_workers=0)
+        total_mb = torch.cuda.get_device_properties(idx).total_memory / 2**20
+        mb = PP_VRAM_MB or max(256.0, PP_VRAM_SHARE * total_mb)
+        budget_px = mb / PP_MB_PER_KPX * 1000
+    else:
+        cfg = RecognitionInferenceConfig(accelerator="cpu", batch_size=PP_BATCH,
+                                         num_line_workers=0)
+    task.net.prepare_for_inference(cfg)
+    return task.net, cfg, budget_px
+
+
+def _pp_scaled_width(crop, height: int) -> float:
+    """Ширина рядка в масштабі моделі: рядок масштабується до її висоти."""
+    w, h = crop.size
+    return w * height / max(1, h)
+
+
+def _pp_groups(crops: list, order: list[int], height: int,
+               budget_px: float) -> list[list[int]]:
+    """Кропи (у порядку `order`, за зростанням ширини) → пачки, по прогону мережі.
+
+    Пачка закривається, коли б наступний рядок перевищив стелю рядків
+    (`PP_BATCH`), бюджет пам'яті (рядків × найширший у масштабі моделі —
+    доповнення йде до найширшого) або стелю полотна (найширший × сума висот).
+    Рядок, що сам по собі за бюджетом, іде окремою пачкою, а не губиться.
+    """
+    cap_px = PP_CANVAS_MPX * 1e6
+    groups: list[list[int]] = []
+    cur: list[int] = []
+    sum_h = 0
+    wmax = 0.0
+    wraw = 0
+    for i in order:
+        w, h = crops[i].size
+        sw = _pp_scaled_width(crops[i], height)
+        nw, nraw = max(wmax, sw), max(wraw, w)
+        if cur and (len(cur) >= PP_BATCH or nw * (len(cur) + 1) > budget_px
+                    or nraw * (sum_h + h) > cap_px):
+            groups.append(cur)
+            cur, sum_h, wmax, wraw = [], 0, 0.0, 0
+            nw, nraw = sw, w
+        cur.append(i)
+        sum_h += h
+        wmax, wraw = nw, nraw
+    if cur:
+        groups.append(cur)
+    return groups
+
+
+def pp_read_crops(pp: tuple, crops: list) -> list[tuple[str, float]]:
+    """Прочитати готові кропи PP-моделлю → `(текст, conf)` у порядку `crops`.
+
+    Кропи складаються в стовпчик на полотно, кожен — своїм bbox-рядком; kraken
+    вирізає bbox точним `im.crop` (7.1.1, `extract_polygons`, гілка bbox), тож
+    модель бачить рівно ті пікселі, що й Писар. Так само ріже корпус трену
+    (`train/cut.py`: `extract_polygons` з випрямленням рядка). Для RGB-моделі
+    bbox і baselines готуються однаково (центрова нормалізація — лише для
+    одноканальних), тож рядок іде тим самим шляхом, що в трені.
+
+    Пачки — за шириною в масштабі моделі (рішення 04.10.2026 «оптимізувати»,
+    п.1): рядок доповнюється до найширшого в пачці, тож одна шапка таблиці
+    робила дорогою всю пачку. Одне полотно = одна пачка = один прохід мережі.
+    Вихід повертається у вихідний порядок. Збій пачки (OOM) не гасить її
+    рядки: вона перечитується по одному кропу — та сама засада, що в
+    `_decode_in_batches`.
+    """
+    import torch
+    from kraken.containers import BBoxLine, Segmentation
+
+    net, cfg, budget_px = pp
+    height = int(net.input[2]) or 96
+    out: list[tuple[str, float]] = [("", 0.0)] * len(crops)
+    order = sorted((i for i, c in enumerate(crops) if c.width > 0 and c.height > 0),
+                   key=lambda i: _pp_scaled_width(crops[i], height))
+
+    def read(idxs: list[int]) -> list[tuple[str, float]]:
+        w = max(crops[i].width for i in idxs)
+        cv = Image.new("RGB", (w, sum(crops[i].height for i in idxs)), (0, 0, 0))
+        lines, y = [], 0
+        for k, i in enumerate(idxs):
+            c = crops[i]
+            cv.paste(c.convert("RGB"), (0, y))
+            lines.append(BBoxLine(id=f"l{k}", bbox=(0, y, c.width, y + c.height)))
+            y += c.height
+        seg = Segmentation(type="bbox", imagename="crops", text_direction="horizontal-lr",
+                           script_detection=False, lines=lines)
+        cfg.batch_size = len(idxs)            # уся пачка — один прохід мережі
+        recs = list(net.predict(im=cv, segmentation=seg))
+        if len(recs) != len(idxs):
+            raise RuntimeError(f"PP віддав {len(recs)} рядків із {len(idxs)}")
+        res = []
+        for r in recs:
+            text = unicodedata.normalize("NFC", str(r.prediction or "")).strip()
+            cs = [float(x) for x in (r.confidences or [])]
+            res.append((text, float(np.mean(cs)) if cs else 0.0))
+        return res
+
+    cuda = torch.cuda.is_available()
+    for grp in _pp_groups(crops, order, height, budget_px):
+        try:
+            got = read(grp)
+        except Exception:
+            if cuda:
+                torch.cuda.empty_cache()
+            got = []
+            for i in grp:
+                try:
+                    got += read([i])
+                except Exception:
+                    got.append(("", 0.0))
+        for i, r in zip(grp, got, strict=True):
+            out[i] = r
+    if cuda:
+        # пачки різної форми фрагментують кеш алокатора; без цього `reserved`
+        # росте від сторінки до сторінки, доки не вилізе за фізичну VRAM
+        torch.cuda.empty_cache()
+    return out
+
+
+def pp_decode_crops(pp: tuple, crops: list) -> list[str]:
+    """Голос PP-моделі: лише тексти, порядок і довжина = як у `crops`."""
+    return [t for t, _ in pp_read_crops(pp, crops)]
 
 
 def _decode_in_batches(items: list, batch: int, run_batch, run_one,
@@ -1307,15 +1482,39 @@ SEG_NET_HEIGHT = 1800
 #: Нижче цієї висоти стеля входу не стискає: далі рядки зливаються.
 SEG_MIN_HEIGHT = 900
 
-#: Версія kraken іде В ключ кешу: підмінені гарячі функції сегментації
-#: (`scripts/KRAKEN_PATCHES.md`) прив'язані до 7.0.2, і на іншій версії полігони
-#: рядків можуть відрізнятись — а такий промах був би тихим.
+#: Встановлена версія kraken.
 try:
     from importlib.metadata import version as _pkg_version
 
     KRAKEN_PIN_VERSION = _pkg_version("kraken")
 except Exception:
     KRAKEN_PIN_VERSION = "?"
+
+#: Версії kraken, на яких раннер працює взагалі. Патчі підмінюють приватні
+#: функції бібліотеки, і на неперевіреній версії розбіжність була б тихою —
+#: інші полігони рядків, тобто інший текст. Оновлення на місці: `nysh htr install`.
+SUPPORTED_KRAKEN = ("7.1.1",)
+
+#: Родовід сегментації: версія kraken → найстаріша версія з ПОБАЙТОВО тією самою
+#: сегментацією. У поле `kraken` ключа кешу йде родовід, а не сира версія:
+#: інакше кожне оновлення kraken знецінювало б увесь кеш (понад сто тисяч
+#: кадрів), навіть коли сегментація не змінилась. І навпаки — запис нової
+#: версії влучає в раннер старої (бокс зі старим наглядачем, друга машина).
+#:
+#: 🔴 Пара потрапляє сюди ЛИШЕ після `patches/kraken_lineage_verify`: той
+#: самий раннер у двох середовищах, побайтово полігони, рамки й тексти.
+#: 7.0.2 ↔ 7.1.1 (torch 2.13 ↔ 2.14, 04.10.2026): 28 кеш-блобів із 28 і 5719
+#: рядків трьох моделей (Писар v18 і Дяк v4 по 2811, Скриба v6 — 97) тотожні:
+#: таблиці зі стелею й перепуском, розвороти 30 Мпікс, CLAHE, `--no-gpu-sato`, CPU.
+#: Невідома версія — сама собою: промах кешу безпечний, хибне влучання — ні.
+SEG_LINEAGE = {"7.0.2": "7.0.2", "7.1.1": "7.0.2"}
+SEG_KRAKEN = SEG_LINEAGE.get(KRAKEN_PIN_VERSION, KRAKEN_PIN_VERSION)
+
+
+def _made_by() -> dict:
+    """Чим справді порахована сегментація — поза ключем, для слідства."""
+    t = sys.modules.get("torch")
+    return {"kraken": KRAKEN_PIN_VERSION, "torch": str(getattr(t, "__version__", ""))}
 
 
 def _seg_to_blob(seg) -> dict:
@@ -1684,7 +1883,8 @@ class Segmenter:
             tmp = f.with_suffix(f".{os.getpid()}.tmp")
             with gzip.open(tmp, "wt", encoding="utf-8") as fh:
                 json.dump({"key": {**self._full_key(), "enhanced": enhanced},
-                           "seg": _seg_to_blob(seg)}, fh, ensure_ascii=False)
+                           "seg": _seg_to_blob(seg), "made_by": _made_by()},
+                          fh, ensure_ascii=False)
             os.replace(tmp, f)
             self.written += 1
         except Exception:
@@ -1901,6 +2101,8 @@ def ocr_page_parseq(im: Image.Image, segmenter, rec, device: str,
     for tag, eengine, erec in extra_recs:
         if eengine == "kraken":
             full = kraken_decode_crops(erec, crops, VOICE_BATCH)
+        elif eengine == "ppocr":
+            full = pp_decode_crops(erec, crops)
         else:
             emodel, (eh, ew) = erec
             etens = tensors if (eh, ew) == (h, w) else [
@@ -1938,12 +2140,51 @@ def ocr_page_parseq(im: Image.Image, segmenter, rec, device: str,
     return lines, avg
 
 
+def ocr_page_pp(im: Image.Image, segmenter, rec, seg_ctx: dict | None = None
+                ) -> tuple[list[str], float]:
+    """Сегментація kraken'ом → кропи Писаря → PP-OCRv6 пачками.
+
+    🔴 Не `rpred`: PP-модель училась на кропах `extract_polygons` — тих самих,
+    що бере Писар, — і саме на них заміряна (holdout ф.792: CER 13.6% через цю
+    функцію при 13.5% на машині трену). Швидкості це не купує: модель більша
+    за Скрибу v6, і на 792-1-43 (51 рядок/стор, GTX 1650, кеш сегментації)
+    розпізнавання 3.7 с/стор проти 2.0 у Скриби v6 через `rpred`.
+    Рамки, полігони й кропи вирівняні з рядками так само, як у PARSeq-гілці:
+    порожні прочитання випадають, і рамка йде разом зі своїм рядком.
+    """
+    ctx = seg_ctx or {}
+    seg = segmenter.segment(im, ctx.get("stem", ""), ctx.get("orient", 0),
+                            ctx.get("enhanced", ""))
+    crops = _line_crops(im, seg)
+    boxes = list(getattr(_line_crops, "boxes", []) or [])
+    polys = list(getattr(_line_crops, "polys", []) or [])
+    ocr_page_pp.size = [int(im.width), int(im.height)]
+    lines: list[str] = []
+    confs: list[float] = []
+    kb: list = []
+    kp: list = []
+    kc: list = []
+    for g, (text, conf) in enumerate(pp_read_crops(rec, crops)):
+        if text:
+            lines.append(text)
+            confs.append(conf)
+            kb.append(boxes[g] if g < len(boxes) else None)
+            kp.append(polys[g] if g < len(polys) else None)
+            kc.append(crops[g])
+    ocr_page_pp.boxes = kb
+    ocr_page_pp.polys = kp
+    ocr_page_pp.crops = kc
+    return lines, (float(np.mean(confs)) if confs else 0.0)
+
+
 def ocr_page(im: Image.Image, segmenter, rec_model, device: str,
              engine: str = "kraken", batch: int = 32,
              seg_ctx: dict | None = None) -> tuple[list[str], float]:
     """Розпізнати сторінку → (рядки NFC, середній посимвольний conf)."""
     if engine == "parseq":
         return ocr_page_parseq(im, segmenter, rec_model, device, batch, seg_ctx)
+    if engine == "ppocr":
+        return ocr_page_pp(im, segmenter, rec_model, seg_ctx)
     from kraken import rpred
 
     ctx = seg_ctx or {}
@@ -1990,7 +2231,7 @@ def _geom_of(engine: str) -> dict:
     Прочитавши атрибут у кінці, можна взяти рамки іншого повороту — з тією ж
     кількістю рядків, тобто повз гард довжин, і мовчки.
     """
-    src_fn = ocr_page_parseq if engine == "parseq" else ocr_page
+    src_fn = {"parseq": ocr_page_parseq, "ppocr": ocr_page_pp}.get(engine, ocr_page)
     return {"boxes": getattr(src_fn, "boxes", None),
             "polys": getattr(src_fn, "polys", None),
             "size": getattr(src_fn, "size", None)}
@@ -3047,6 +3288,8 @@ def guard_ok(out_dir: Path, engine: str, model: str, force: bool) -> bool:
         prev_engine = d.get("engine") or prev_engine
     if prev_engine is None and prev_model:
         prev_engine = _ENGINE_BY_SUFFIX.get(Path(prev_model).suffix.lower())
+    prev_engine = _META_ENGINE.get(prev_engine, prev_engine) if prev_engine else prev_engine
+    engine = _META_ENGINE.get(engine, engine)
     if prev_engine is None or prev_engine == engine:
         if prev_model and Path(prev_model).name != Path(model).name:
             print(f"[htr-run] ⚠ у теці вже є сторінки від «{prev_model}», "
@@ -3182,6 +3425,15 @@ def main() -> int:
                          "1 = текст тотожний окремому прогону тієї моделі "
                          "(режим звірки з rpred); 16/32 — той самий час, "
                          "лише більше пам'яті")
+    ap.add_argument("--pp-batch", type=int, default=PP_BATCH,
+                    help="розмір пачки PP-OCRv6 (`.safetensors`: Дяк-Літописець, "
+                         "Скриба-PP); рядки в пачці сортуються за шириною")
+    ap.add_argument("--pp-vram-mb", type=int, default=PP_VRAM_MB,
+                    help="скільки VRAM дати одній пачці PP-OCRv6, МБ; 0 — "
+                         f"{int(PP_VRAM_SHARE * 100)}%% карти (пачка закривається "
+                         "раніше, ніж вилізе за фізичну пам'ять)")
+    ap.add_argument("--allow-any-kraken", action="store_true",
+                    help=argparse.SUPPRESS)   # лише для `kraken_lineage_verify`
     ap.add_argument("--seg-cache", action=argparse.BooleanOptionalAction,
                     default=True,
                     help="💾 кеш сегментації у data/derived/htr_seg (дефолт ON). "
@@ -3466,6 +3718,12 @@ def _main_case(args: argparse.Namespace, cache: dict | None = None) -> int:
             and cache is None):
         return supervise(args, case_dir, out_dir)
 
+    if KRAKEN_PIN_VERSION not in SUPPORTED_KRAKEN and not args.allow_any_kraken:
+        print(f"[htr-run] ✖ kraken {KRAKEN_PIN_VERSION}: раннер і його патчі звірено "
+              f"лише на {', '.join(SUPPORTED_KRAKEN)} — на іншій версії рядки "
+              f"могли б нарізатись інакше без жодної помилки. Оновити середовище "
+              f"рушіїв на місці: `nysh htr install`", flush=True)
+        return 2
     engine = detect_engine(args.model)
     script = args.script if args.script != "auto" else model_script(args.model, engine)
     if args.min_conf is None:
@@ -3523,7 +3781,7 @@ def _main_case(args: argparse.Namespace, cache: dict | None = None) -> int:
                   "model": Path(args.model).name, "device": device,
                   # рушій і письмо — щоб пошук/консоль могли сказати, чим
                   # прочитана сторінка, коли на одну справу є кілька прогонів
-                  "engine": engine, "script": script,
+                  "engine": _META_ENGINE.get(engine, engine), "script": script,
                   # прогін із піднятим контрастом — окремий артефакт; без цього
                   # поля неможливо сказати, чому в двох теках різний декод
                   "enhance": args.enhance,
@@ -3704,6 +3962,11 @@ def _main_case(args: argparse.Namespace, cache: dict | None = None) -> int:
     rec_model = _cached(cache, ("rec", args.model, device, half),
                         lambda: load_recognizer(args.model, engine, device, half))
     globals()["VOICE_BATCH"] = max(1, int(args.voice_batch))
+    globals()["PP_BATCH"] = max(1, int(args.pp_batch))
+    globals()["PP_VRAM_MB"] = max(0, int(args.pp_vram_mb))
+    if engine == "ppocr" and not warm:
+        print(f"[htr-run] PP-OCRv6: кропи пачками до {PP_BATCH} рядків у межах бюджету "
+              f"VRAM, за шириною, без процесів-нарізувачів", flush=True)
     # ── ансамбль і beam: додаткові виходи з однієї сегментації ───────────────
     # 🤝 Голос може бути іншого рушія, ніж основна модель: `.mlmodel` (Дяк,
     # Скриба) декодується з тих самих кропів через `kraken_decode_crops`. Це не
@@ -3722,7 +3985,8 @@ def _main_case(args: argparse.Namespace, cache: dict | None = None) -> int:
             p = Path(spec)
             if not p.is_file():
                 # ім'я без розширення: пробуємо обидва рушії, .pt першим
-                for cand in (mdir / spec, mdir / f"{spec}.pt", mdir / f"{spec}.mlmodel"):
+                for cand in (mdir / spec, mdir / f"{spec}.pt", mdir / f"{spec}.mlmodel",
+                             mdir / f"{spec}.safetensors"):
                     if cand.is_file():
                         p = cand
                         break
@@ -3735,6 +3999,10 @@ def _main_case(args: argparse.Namespace, cache: dict | None = None) -> int:
                 extra_recs.append((tag, "kraken", _cached(
                     cache, ("voice", str(p), device),
                     lambda p=p: load_kraken_voice(str(p), device))))
+            elif vengine == "ppocr":
+                extra_recs.append((tag, "ppocr", _cached(
+                    cache, ("pp", str(p), device),
+                    lambda p=p: load_pp(str(p), device))))
             else:
                 extra_recs.append((tag, "parseq", _cached(
                     cache, ("rec", str(p), device, half),
@@ -3750,6 +4018,11 @@ def _main_case(args: argparse.Namespace, cache: dict | None = None) -> int:
         print(f"[htr-run] додаткові виходи з тієї самої сегментації: {voices}"
               f"{f' + beam{args.beam}' if args.beam > 1 else ''} → "
               f"{', '.join(d.name for d in side_dirs.values())}", flush=True)
+        if any(e == "ppocr" for _, e, _ in extra_recs):
+            budget = next(e[2] for _, k, e in extra_recs if k == "ppocr")
+            print(f"[htr-run] 🤝 PP-голос: пачки до {PP_BATCH} рядків · бюджет "
+                  f"{budget * PP_MB_PER_KPX / 1000:.0f} МБ VRAM · за шириною, "
+                  f"без процесів-нарізувачів", flush=True)
         if any(e == "kraken" for _, e, _ in extra_recs):
             print(f"[htr-run] 🤝 kraken-голос: pad={KRAKEN_VOICE_PAD}, батч="
                   f"{VOICE_BATCH}"
@@ -3781,7 +4054,7 @@ def _main_case(args: argparse.Namespace, cache: dict | None = None) -> int:
     segmenter = Segmenter(
         SEGMENTATION_DEFAULT_MODEL, device, seg_height=args.seg_height,
         cache_dir=seg_cache,
-        key={"sato": args.sato_sigmas, "kraken": KRAKEN_PIN_VERSION,
+        key={"sato": args.sato_sigmas, "kraken": SEG_KRAKEN,
              "max_endpoints": args.max_endpoints},
         merge=merge_cfg, autocast=args.seg_autocast, max_mpx=args.seg_max_mpx)
     if cache is not None and cache.get("seg_model") is not None:
@@ -4232,7 +4505,9 @@ def _main_case(args: argparse.Namespace, cache: dict | None = None) -> int:
             # були зіпсовані на порожньому місці. Тепер шлях спільний із
             # kraken-голосом ансамблю (`load_kraken_voice`), тож розійтись їм
             # більше нема де.
-            voice = load_kraken_voice(args.rescue, device)
+            rescue_engine = detect_engine(args.rescue)
+            voice = (load_pp(args.rescue, device) if rescue_engine == "ppocr"
+                     else load_kraken_voice(args.rescue, device))
             n_read = n_pg = 0
             for pd in sorted(p for p in rescue_dir.iterdir() if p.is_dir()):
                 nl_f = pd / "_n_lines.txt"
@@ -4255,9 +4530,9 @@ def _main_case(args: argparse.Namespace, cache: dict | None = None) -> int:
                 # `idxs` і `crops_` наповнюються парою, тож розбіжність тут
                 # означала б, що текст ляже на чужий номер рядка — саме та
                 # тиха підміна, від якої рятувальний прохід і рятує.
-                for idx, txt in zip(idxs, kraken_decode_crops(voice, crops_,
-                                                              VOICE_BATCH),
-                                    strict=True):
+                read = (pp_decode_crops(voice, crops_) if rescue_engine == "ppocr"
+                        else kraken_decode_crops(voice, crops_, VOICE_BATCH))
+                for idx, txt in zip(idxs, read, strict=True):
                     body[idx] = txt.replace("\n", " ").strip()
                     if body[idx]:
                         n_read += 1
