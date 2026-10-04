@@ -154,19 +154,20 @@ patches:
     requires_cuda: true
     gain: "CLAHE блідих сторінок ×1.9 (інтерполяція відображень на карті)"
   # Дві нижче — не підміна коду kraken, а перетворення завантаженої PP-моделі
-  # (`.safetensors`) у раннері. Вимикачі — `--no-pp-fuse`, `--pp-precision fp32`.
+  # (`.safetensors`) у раннері. `pp_fuse` увімкнено, вимикач — `--no-pp-fuse`;
+  # `pp_fp16` — лише з `--pp-precision fp16`, для заміру.
   - id: pp_fuse
     module: nyshporka.htr.patches.pp_fuse
     verify: nyshporka.htr.patches.pp_fuse_verify
     tested_on: "kraken==7.1.1"
     requires_cuda: false
-    gain: "PP-читання −9…−17% (BatchNorm і гілки RepDWConv злито у згортки; текст побітово той самий)"
+    gain: "розпізнавання −7% на V100 (BatchNorm і гілки RepDWConv злито у згортки; текст побітово той самий)"
   - id: pp_fp16
     module: nyshporka.htr.patches.pp_fp16
     verify: nyshporka.htr.patches.pp_fp16_verify
     tested_on: "kraken==7.1.1"
     requires_cuda: true
-    gain: "PP-читання −44% на V100 (основа у fp16, stem3 у fp32; вмикається калібруванням на карті)"
+    gain: "НЕМАЄ на справжніх сторінках: у 5.5 раза повільніше за fp32 (нова ширина рядка — новий вибір ядер); лише для заміру"
 
 # ── рушії ────────────────────────────────────────────────────────────────────
 # 🔴 Розширення моделі каже РУШІЙ, а префікс імені — ПИСЬМО. `.mlmodel` буває

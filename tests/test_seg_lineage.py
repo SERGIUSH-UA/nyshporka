@@ -128,72 +128,39 @@ def test_pp_voice_is_wired_like_the_kraken_voice() -> None:
 
 
 class _Half:
-    """Підроблений `pp_fp16`: калібрування з заданими часами, облік викликів."""
+    """Підроблений `pp_fp16`: облік викликів, або збій."""
 
-    def __init__(self, ms32: float, ms16: float, fail: bool = False) -> None:
-        self.times, self.fail = (ms32, ms16), fail
-        self.calibrated = 0
+    def __init__(self, fail: bool = False) -> None:
+        self.fail = fail
         self.enabled = 0
 
-    def calibrate(self, rec, device, **kw):  # type: ignore[no-untyped-def]
-        self.calibrated += 1
+    def enable_fp16(self, rec):  # type: ignore[no-untyped-def]
         if self.fail:
             raise RuntimeError("cuDNN впав")
-        return self.times
-
-    @staticmethod
-    def worth_it(ms32: float, ms16: float) -> bool:
-        return ms16 <= 0.8 * ms32
-
-    def enable_fp16(self, rec):  # type: ignore[no-untyped-def]
         self.enabled += 1
         return rec
 
 
-def _half(monkeypatch, precision: str, half: _Half) -> None:
+def test_pp_reads_fp32_unless_asked(monkeypatch) -> None:
+    """🔴 fp16 на справжніх сторінках у 5.5 раза повільніший (V100: 19.8 проти
+    3.6 с/стор на розпізнавання) — кожна нова ширина рядка коштує вибору ядер.
+    Тож дефолт — fp32, а латка кличеться лише з `--pp-precision fp16`."""
+    assert R.PP_PRECISION == "fp32"
+    assert 'if device.startswith("cuda") and PP_PRECISION == "fp16":' in RUNNER_SRC
+    assert '"--pp-precision", choices=("fp32", "fp16")' in RUNNER_SRC
+    assert "calibrate" not in RUNNER_SRC, "калібрування на одній пачці бреше — його немає"
+
+
+def test_fp16_on_request_and_failure_reads_fp32(monkeypatch, capsys) -> None:
     import sys
 
+    half = _Half()
     monkeypatch.setitem(sys.modules, "pp_fp16", half)
-    monkeypatch.setattr(R, "PP_PRECISION", precision)
-    monkeypatch.setattr(R, "_PP_HALF_TIMES", {})
-
-
-def test_fp16_is_chosen_by_the_card_and_measured_once(monkeypatch, capsys) -> None:
-    """V100: fp16 удвічі швидший → вмикається; друга PP-модель прогону (голос
-    поруч з основною) карту вдруге не калібрує — рішення про карту, не модель."""
-    half = _Half(12.4, 6.9)
-    _half(monkeypatch, "auto", half)
-    R._pp_half(object(), "cuda:0", 3, 96)
-    R._pp_half(object(), "cuda:0", 3, 96)
-    assert (half.calibrated, half.enabled) == (1, 2)
-    assert "fp16" in capsys.readouterr().out
-
-
-def test_fp16_slower_on_the_card_stays_fp32(monkeypatch, capsys) -> None:
-    """GTX 1650 без тензорних ядер: fp16 утричі повільніший → лишається fp32."""
-    half = _Half(107.7, 347.0)
-    _half(monkeypatch, "auto", half)
-    R._pp_half(object(), "cuda:0", 3, 96)
-    assert half.enabled == 0
-    assert "fp32" in capsys.readouterr().out
-
-
-def test_forced_fp16_skips_calibration_and_failure_reads_fp32(monkeypatch, capsys) -> None:
-    half = _Half(1.0, 1.0)
-    _half(monkeypatch, "fp16", half)
-    R._pp_half(object(), "cuda:0", 3, 96)
-    assert (half.calibrated, half.enabled) == (0, 1)
-    broken = _Half(1.0, 1.0, fail=True)
-    _half(monkeypatch, "auto", broken)
-    R._pp_half(object(), "cuda:0", 3, 96)          # не падає: прискорювач, не умова
-    assert broken.enabled == 0
+    R._pp_half(object())
+    assert half.enabled == 1
+    monkeypatch.setitem(sys.modules, "pp_fp16", _Half(fail=True))
+    R._pp_half(object())                       # не падає: прискорювач, не умова
     assert "читаю у fp32" in capsys.readouterr().out
-
-
-def test_fp32_and_cpu_never_touch_precision() -> None:
-    """`--pp-precision fp32` і CPU не кличуть латку взагалі."""
-    assert 'if device.startswith("cuda") and PP_PRECISION != "fp32":' in RUNNER_SRC
-    assert '"--pp-precision", choices=("auto", "fp32", "fp16")' in RUNNER_SRC
 
 
 def test_torch_native_triton_ops_are_off_before_torch_loads(monkeypatch) -> None:

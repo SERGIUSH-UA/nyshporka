@@ -849,42 +849,31 @@ PP_VRAM_SHARE = 0.2
 #: Помилки при цьому немає, є лише час, тому межа мусить стояти до проходу.
 PP_CANVAS_MPX = 40.0
 #: Злиття BatchNorm і гілок RepDWConv у PP-моделі (`patches/pp_fuse.py`): текст
-#: побітово той самий, читання на 11–13% швидше. Вимикач — `--no-pp-fuse`.
+#: побітово той самий, розпізнавання −7% (V100, 10 сторінок). Вимикач — `--no-pp-fuse`.
 PP_FUSE = True
-#: Точність основи PP-моделі на карті (`patches/pp_fp16.py`): `auto` — fp16,
-#: якщо калібрування на ЦІЙ карті дало виграш від 20% (V100 −44%; на GTX 1650
-#: без тензорних ядер fp16 утричі повільніший), `fp32` — завжди повна, `fp16` —
-#: завжди половинна. На CPU — завжди fp32. Виставляється з `--pp-precision`.
-PP_PRECISION = "auto"
-#: Калібрування fp32/fp16 на пристрій, мс — раз на процес.
-_PP_HALF_TIMES: dict[str, tuple[float, float]] = {}
+#: Точність основи PP-моделі на карті (`patches/pp_fp16.py`), `--pp-precision`.
+#: 🔴 Дефолт — fp32. fp16 на справжніх сторінках у 5.5 раза ПОВІЛЬНІШИЙ (V100,
+#: 10 сторінок, сегментація з кешу: розпізнавання 19.8 проти 3.6 с/стор): кожна
+#: нова ширина рядка — новий вибір ядер cuDNN для половинної точності, а
+#: ширина в кожній пачці інша. Окремий прохід по тих самих формах (замір
+#: однієї пачки) показує навпаки виграш — тому fp16 лише явно, для заміру.
+PP_PRECISION = "fp32"
 
 
-def _pp_half(rec, device: str, channels: int, height: int) -> None:  # type: ignore[no-untyped-def]
-    """Увімкнути fp16 основи за `PP_PRECISION`; збій — лише попередження."""
+def _pp_half(rec) -> None:  # type: ignore[no-untyped-def]
+    """Увімкнути fp16 основи (лише `--pp-precision fp16`); збій — лише попередження."""
     try:
         if str(_PATCHES_DIR) not in sys.path:
             sys.path.insert(0, str(_PATCHES_DIR))
         import pp_fp16
 
-        note = ""
-        if PP_PRECISION == "auto":
-            # рішення — про карту, а не про модель: друга PP-модель прогону
-            # (голос поруч з основною) калібрування не повторює
-            if device not in _PP_HALF_TIMES:
-                _PP_HALF_TIMES[device] = pp_fp16.calibrate(rec, device, channels=channels,
-                                                           height=height)
-            ms32, ms16 = _PP_HALF_TIMES[device]
-            if not pp_fp16.worth_it(ms32, ms16):
-                print(f"[htr-run] PP-точність: fp32 (fp16 на цій карті {ms16:.1f} мс "
-                      f"проти {ms32:.1f})", flush=True)
-                return
-            note = f" (калібрування: {ms16:.1f} мс проти {ms32:.1f} у fp32)"
         pp_fp16.enable_fp16(rec)
-        print(f"[htr-run] PP-точність: fp16 основа{note}", flush=True)
+        print("[htr-run] PP-точність: fp16 основа (на справжніх сторінках повільніше "
+              "за fp32 — лише для заміру)", flush=True)
     except Exception as exc:  # прискорювач, а не умова роботи
         print(f"[htr-run] ⚠ fp16 для PP-моделі не ввімкнено ({type(exc).__name__}: "
               f"{exc}) — читаю у fp32", flush=True)
+
 
 
 def load_pp(model: str, device: str) -> tuple:
@@ -926,9 +915,8 @@ def load_pp(model: str, device: str) -> tuple:
         except Exception as exc:  # прискорювач, а не умова роботи
             print(f"[htr-run] ⚠ злиття BN у PP-моделі не вдалося ({type(exc).__name__}: "
                   f"{exc}) — читаю без нього", flush=True)
-    if device.startswith("cuda") and PP_PRECISION != "fp32":
-        _b, ch, h, _w = [*task.net.input, 0, 0, 0, 0][:4]
-        _pp_half(task.net.nn, device, int(ch) or 3, int(h) or 96)
+    if device.startswith("cuda") and PP_PRECISION == "fp16":
+        _pp_half(task.net.nn)
     return task.net, cfg, budget_px
 
 
@@ -3491,9 +3479,9 @@ def main() -> int:
     ap.add_argument("--pp-fuse", action=argparse.BooleanOptionalAction, default=PP_FUSE,
                     help="злиття BatchNorm і гілок RepDWConv у PP-моделі перед читанням "
                          "(текст той самий, на 11–13%% швидше)")
-    ap.add_argument("--pp-precision", choices=("auto", "fp32", "fp16"), default=PP_PRECISION,
-                    help="точність основи PP-моделі на карті: auto — fp16, якщо "
-                         "калібрування на цій карті дало виграш від 20%%; на CPU — fp32")
+    ap.add_argument("--pp-precision", choices=("fp32", "fp16"), default=PP_PRECISION,
+                    help="точність основи PP-моделі на карті; fp16 на справжніх сторінках "
+                         "повільніший (нові ширини рядків), лише для заміру")
     ap.add_argument("--pp-vram-mb", type=int, default=PP_VRAM_MB,
                     help="скільки VRAM дати одній пачці PP-OCRv6, МБ; 0 — "
                          f"{int(PP_VRAM_SHARE * 100)}%% карти (пачка закривається "
