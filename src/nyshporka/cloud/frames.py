@@ -487,6 +487,62 @@ def lines_per_page(out_dir: Path | str, *, sample: int = 200) -> float | None:
     return float(statistics.median(counts))
 
 
+#: Менше стількох прочитаних сусідів по опису — щільності з них не називаємо.
+DENSITY_MIN_NEIGHBOURS = 2
+
+
+def series_of(case_key: str) -> tuple[str, str, str] | None:
+    """`DARO/R-740/2/58` → `("DARO", "R-740", "2")`. Ключ без опису — `None`."""
+    parts = (case_key or "").strip().split("/")
+    if len(parts) != 4 or not all(parts):
+        return None
+    return parts[0].upper(), parts[1], parts[2]
+
+
+def neighbour_lines_per_page(case_key: str, *, db_path: Path | None = None
+                             ) -> tuple[float, int] | None:
+    """Щільність НЕЧИТАНОЇ справи з прочитаних справ того самого опису.
+
+    Повертає `(рядків на сторінку, скільки сусідів)`; `None` — сусідів менше
+    `DENSITY_MIN_NEIGHBOURS` або реєстру немає. Береться медіана по справах їхніх
+    СЕРЕДНІХ (рядки рушія / сторінки з реєстру справ, обидва з одного прогону) —
+    те саме середнє, що дає вибірка. Жодного обходу файлів: лише реєстр.
+
+    Заміряно 04.10.2026 на 125 справах, де є і вибірка, і сусіди: медіана
+    розбіжності з вибіркою 8 %, заниження не глибше −26 %, але тонка справа
+    іншого жанру в густому описі отримує щільність опису (+200…400 %). Тому
+    сусіди — лише для партії: там гроші рахуються за максимумом по справах, і
+    завищена нетипова справа його не піднімає.
+    """
+    import sqlite3
+
+    from nyshporka.cases import db as CDB
+
+    try:
+        con = CDB._connect(db_path)
+    except (FileNotFoundError, sqlite3.Error):
+        return None
+    try:
+        row = con.execute("SELECT repo, fond, opys FROM cases WHERE key = ?",
+                          (case_key,)).fetchone()
+        series = ((str(row["repo"]).upper(), str(row["fond"]), str(row["opys"]))
+                  if row is not None and row["opys"] else series_of(case_key))
+        if series is None:
+            return None
+        rows = con.execute(
+            "SELECT htr_lines_max AS l, htr_pages_max AS p FROM cases "
+            "WHERE upper(repo) = ? AND fond = ? AND opys = ? AND key <> ? "
+            "AND htr_pages_max >= ? AND htr_lines_max > 0",
+            (*series, case_key, DENSITY_MIN_PAGES)).fetchall()
+    except sqlite3.Error:
+        return None
+    finally:
+        con.close()
+    if len(rows) < DENSITY_MIN_NEIGHBOURS:
+        return None
+    return round(statistics.median(r["l"] / r["p"] for r in rows), 1), len(rows)
+
+
 #: Скільки кадрів сегментувати, щоб оцінити щільність нечитаної справи.
 #: Заміри 01.10.2026: ±4–7 % на рівномірних книгах, −30 % на збірній сповідці
 #: (щільні блоки підряд) — проти припущених 60 рядків, що помилялись удвічі.

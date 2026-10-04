@@ -33,6 +33,7 @@
 from __future__ import annotations
 
 import contextlib
+import statistics
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field, replace
@@ -537,12 +538,62 @@ def go(case: str | Sequence[str], *, backend: str = "vast",
     return res
 
 
+class _Density:
+    """Щільність справ ОДНОГО заходу: власне читання → сусіди → вибірка.
+
+    🔴 Вибірка — ~85 с карти на справу, і партія з 25 нечитаних метрик ДАРО
+    Р-740 стояла на ній 35 хв із 50 підготовки (03.10.2026), хоча 22 книги
+    того самого опису вже були прочитані. Тому в партії спершу питаються
+    сусіди по опису, а серія без сусідів міряється не далі
+    `PROBES_PER_SERIES` разів — решта справ серії бере медіану виміряного.
+
+    Одиночна справа сусідів НЕ питає: її щільність іде в кошторис напряму, а
+    нетипова тонка книга в густому описі отримала б від сусідів учетверо
+    завищений бюджет. Півтори хвилини вибірки там дешевші.
+    """
+
+    PROBES_PER_SERIES = 3
+
+    def __init__(self, batch: bool) -> None:
+        self.batch = batch
+        self.probed: dict[tuple[str, str, str], list[float]] = {}
+
+    def of(self, out_dir: Path, pack: Path, key: str, say: EventFn) -> float | None:
+        own = F.lines_per_page(out_dir)
+        if own is not None:
+            return own
+
+        def probe() -> float | None:
+            return F.lines_per_page_probe(pack, on_line=lambda s: say("density", s))
+
+        series = F.series_of(key) if self.batch else None
+        if series is None:
+            return probe()
+        near = F.neighbour_lines_per_page(key)
+        if near is not None:
+            lines, n = near
+            say("density", f"щільність {lines:g} рядк/стор — медіана {n} прочитаних "
+                           f"справ опису {'/'.join(series)}, вибірки не треба")
+            return lines
+        seen = self.probed.setdefault(series, [])
+        if len(seen) >= self.PROBES_PER_SERIES:
+            lines = round(statistics.median(seen), 1)
+            say("density", f"щільність {lines:g} рядк/стор — медіана {len(seen)} "
+                           f"вибірок цього заходу з опису {'/'.join(series)}")
+            return lines
+        lines = probe()
+        if lines is not None:
+            seen.append(lines)
+        return lines
+
+
 def _prepare(res: GoResult, case: str, say: EventFn, owner: contextlib.ExitStack, *,
              backend: str, script: str, model: str, case_key: str,
              second_voice: bool, with_voices: tuple[str, ...],
              max_price: float | None, rerun: bool, allow_partial: bool,
              rotate_landscape: bool, dry_run: bool, thin: bool,
-             batch: bool) -> tuple[CV.Leg | None, ST.RunState | None]:
+             batch: bool, density: _Density | None = None
+             ) -> tuple[CV.Leg | None, ST.RunState | None]:
     """Підготувати ОДНУ справу заходу: від теки кадрів до готового до відправки.
 
     Повертає `(справа заходу, живий захід)`. Другий елемент непорожній лише
@@ -703,12 +754,11 @@ def _prepare(res: GoResult, case: str, say: EventFn, owner: contextlib.ExitStack
     # робочій теці, де опису немає, — тож другий здогад чесно каже «не знаю» і
     # валить справу вже ПІСЛЯ стискання. Спіймано 21.09.2026 на живому заході:
     # `DAHMO/196-8/22` випала з черги, хоч письмо було визначене з першого разу.
-    # Щільність — із прочитаного, а нечитана справа — з сегментації вибірки
-    # кадрів: від неї темп, вибір машини й ціна, і припущені 60 рядків
-    # помилялись удвічі в обидва боки (сповідки 18, формуляри 250).
-    lines = F.lines_per_page(plan.out_dir)
-    if lines is None:
-        lines = F.lines_per_page_probe(pack, on_line=lambda s: say("density", s))
+    # Щільність — із прочитаного, а нечитана справа — із сусідів по опису чи
+    # сегментації вибірки кадрів: від неї темп, вибір машини й ціна, і
+    # припущені 60 рядків помилялись удвічі в обидва боки (сповідки 18,
+    # формуляри 250).
+    lines = (density or _Density(batch)).of(plan.out_dir, pack, key, say)
     plan = build(pack, script=plan.script,
                  source_dir=ref.frames_dir if pack != ref.frames_dir else "",
                  lines_per_page=lines, pages_left=left)
@@ -882,6 +932,7 @@ def _go(res: GoResult, cases: tuple[str, ...], say: EventFn,
     legs: list[CV.Leg] = []
     dropped: list[tuple[str, str]] = []
     busy: list[str] = []
+    density = _Density(batch=len(cases) > 1)
     for arg in cases:
         try:
             leg, live = _prepare(res, arg, say, owner, backend=backend,
@@ -891,7 +942,8 @@ def _go(res: GoResult, cases: tuple[str, ...], say: EventFn,
                                  max_price=max_price, rerun=rerun,
                                  allow_partial=allow_partial,
                                  rotate_landscape=rotate_landscape,
-                                 dry_run=dry_run, thin=thin, batch=len(cases) > 1)
+                                 dry_run=dry_run, thin=thin, batch=len(cases) > 1,
+                                 density=density)
         except GoRefused as exc:
             if len(cases) == 1:
                 raise
