@@ -32,18 +32,30 @@ Kraken приймає `blla.segment(autocast=…)`, а ми досі перед�
 from __future__ import annotations
 
 import inspect
+import sys
 from pathlib import Path
 
 from nyshporka.htr.runner import Segmenter
 
+_ABSENT = object()
 RUNNER_SRC = Path(__file__).resolve().parents[1] / "src" / "nyshporka" / "htr" / "runner.py"
 
 
 def _key(**kwargs) -> dict:
-    seg = Segmenter("model.mlmodel", "cuda:0",
-                    key={"sato": "1,3", "kraken": "7.0.2", "max_endpoints": 400},
-                    **kwargs)
-    return seg._full_key()
+    # Латка стелі додає в ключ `ceiling`, коли її вже завантажено в процес. Під
+    # xdist це залежить від сусіда по воркеру, тож тут її немає явно.
+    saved = sys.modules.get("seg_ceiling", _ABSENT)
+    sys.modules["seg_ceiling"] = None  # type: ignore[assignment]
+    try:
+        seg = Segmenter("model.mlmodel", "cuda:0",
+                        key={"sato": "1,3", "kraken": "7.0.2", "max_endpoints": 400},
+                        **kwargs)
+        return seg._full_key()
+    finally:
+        if saved is _ABSENT:
+            sys.modules.pop("seg_ceiling", None)
+        else:
+            sys.modules["seg_ceiling"] = saved  # type: ignore[assignment]
 
 
 def test_off_by_default_and_key_unchanged() -> None:
