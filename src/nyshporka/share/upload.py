@@ -703,7 +703,13 @@ def _put(url: str, blob: bytes) -> None:
         except httpx.TransportError as exc:
             ostannia = f"{type(exc).__name__}: {_bez_posylannia(str(exc), url)}"
             klas, chomu = _klas_obryvu(exc)
-            if klas != TYMCHASOVYI:
+            # 🔴 Відкинуте з'єднання — блокування лише з другого разу. 04.10.2026
+            # у внеску 2198 одне-єдине 10061 упало між двома прямими заливками
+            # з тієї ж адреси за ті самі пів хвилини; без повтору текст пішов
+            # через сервер, а людина дістала пораду шукати фаєрвол.
+            povtoryty = klas == TYMCHASOVYI or (
+                klas == BLOKUVANNIA and not sproba and _vidkynuto(exc))
+            if not povtoryty:
                 # Сталий збій повтор не виправить — не тримаємо людину.
                 break
             continue
@@ -752,14 +758,28 @@ def _klas_obryvu(exc: Exception) -> tuple[str, str]:
             zadano_proksi and isinstance(exc, httpx.ConnectError)):
         return PROKSI, ("проксі, заданий на цій машині, не пускає до сховища; "
                         "перевірте NYSHPORKA_PROXY_URL чи HTTPS_PROXY")
-    if isinstance(exc, httpx.ConnectError) and any(m in nyzh for m in (
+    if isinstance(exc, httpx.ConnectError) and (_vidkynuto(exc) or any(m in nyzh for m in (
             "getaddrinfo", "11001", "name or service not known",
-            "nodename nor servname", "10061", "connection refused", "10013")):
+            "nodename nor servname", "10013"))):
         return BLOKUVANNIA, ("адреса сховища (r2.cloudflarestorage.com) недосяжна з "
                              "цієї мережі, хоча сайт Супряги відповідає — схоже на "
                              "блокування фаєрволом, батьківським контролем чи "
                              "провайдером")
     return TYMCHASOVYI, ""
+
+
+def _vidkynuto(exc: Exception) -> bool:
+    """Чи адреса відкинула з'єднання (RST), а не просто не знайшлась.
+
+    Нерозв'язне ім'я тримається, доки його ріже фільтр, а одиночний RST
+    дає й перепідключення VPN чи антивірус, що перезапускає мережевий
+    захист, — тому на ньому `_put` пробує вдруге, перш ніж кликати блокування.
+    """
+    import httpx
+
+    nyzh = str(exc).lower()
+    return isinstance(exc, httpx.ConnectError) and (
+        "10061" in nyzh or "connection refused" in nyzh)
 
 
 def _bez_posylannia(tekst: str, url: str) -> str:
