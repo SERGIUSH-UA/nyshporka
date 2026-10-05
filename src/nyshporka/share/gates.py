@@ -205,7 +205,8 @@ def _no_refs_text(m: Manifest) -> str:
                 "є»). Якщо скани саме звідти — перепакуйте: nysh share pack "
                 f"<справа> --link \"{known[0]}\", і воно стане джерелом")
     return (f"{lead}: посилання {urls[0]} у пакеті є, але цей хост не входить до "
-            "відомих джерел сканів (FamilySearch, Wikimedia Commons, ARCHIUM, Skanoteka ПТГ). "
+            "відомих джерел сканів (FamilySearch, Wikimedia Commons, ARCHIUM, Skanoteka ПТГ, "
+            "Szukaj w Archiwach). "
             "Адреса лишиться в пакеті, а в каталозі пулу скани не покажуться; "
             "інше посилання на той самий хост цього не змінить")
 

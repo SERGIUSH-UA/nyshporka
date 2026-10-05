@@ -333,6 +333,14 @@ def _ref_z_adresy(url: str) -> dict[str, str] | None:
     unit = skanoteka.from_url(url)
     if unit is not None:
         return {"source": skanoteka.SOURCE, "ref": unit.ref, "url": unit.url}
+    # Szukaj w Archiwach (державні архіви Польщі): зйомка — одиниця порталу.
+    # Адреса окремого скана (`/skan/-/skan/<hash>`) одиниці не називає.
+    szukaj = re.search(r"szukajwarchiwach\.gov\.pl/jednostka/-/jednostka/(\d+)",
+                       url, re.IGNORECASE)
+    if szukaj:
+        ident = szukaj.group(1)
+        return {"source": "szukaj", "ref": f"jednostka:{ident}",
+                "url": f"https://www.szukajwarchiwach.gov.pl/jednostka/-/jednostka/{ident}"}
     return None
 
 

@@ -33,3 +33,14 @@ def test_archium() -> None:
     got = _refs_from_links([{"label": "ARCHIUM", "url": url}])
     # Та сама форма, що з сайдкара (`viewer_id`) — інакше дві зйомки не склеїти.
     assert got == [{"source": "archium", "ref": "file:119094", "url": url}]
+
+
+def test_szukaj_w_archiwach() -> None:
+    """Державні архіви Польщі: одиниця порталу — зйомка; адреса окремого скана — ні."""
+    url = "https://www.szukajwarchiwach.gov.pl/jednostka/-/jednostka/39373977/str/1/1#tabSkany"
+    got = _refs_from_links([
+        {"label": "скани", "url": url},
+        {"label": "скан", "url": "https://www.szukajwarchiwach.gov.pl/skan/-/skan/ab12cd"},
+    ])
+    assert got == [{"source": "szukaj", "ref": "jednostka:39373977",
+                    "url": "https://www.szukajwarchiwach.gov.pl/jednostka/-/jednostka/39373977"}]
