@@ -232,6 +232,7 @@ def build(case_dir: str | Path, *, backend: str = "ssh", target: str = "",
     from nyshporka.htr.run import (
         ReadError,
         case_key_for,
+        foreign_reading,
         guess_script_full,
         model_tag,
         pick_model,
@@ -326,9 +327,18 @@ def build(case_dir: str | Path, *, backend: str = "ssh", target: str = "",
 
     stem = out_name or run_name(case, key)
     base_out = workspace().htr_reports / stem
+    warnings: list[str] = []
+    # 🔴 Головну теку зайняло читання ІНШОГО письма — цей прогін іде в свою,
+    # навіть коли модель бойова для свого письма (`foreign_reading`).
+    other = "" if (reread or out_dir) else foreign_reading(base_out, weights)
+    if other:
+        reread = True
     out = Path(out_dir) if out_dir else (
         base_out.with_name(f"{stem}-{model_tag(weights)}") if reread else base_out)
-    warnings: list[str] = []
+    if other:
+        warnings.append(
+            f"у {base_out.name} лежить читання іншого письма ({other}) — цей "
+            f"прогін ляже окремо, в {out.name}; перше не чіпається")
     if not key:
         # 🔴 «Шифри немає» і «шифру ще не встановлено» — різні стани, і докір
         # доречний лише в першому. Другий заявлений у паспорті теки (плівка

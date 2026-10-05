@@ -307,7 +307,7 @@ def _index() -> Any:
         return None
 
 
-def _kadry_z_pdf(d: Path) -> None:
+def _kadry_z_pdf(d: Path, on_line: Any = None) -> None:
     """Справа-PDF: розгорнути в кадри тут, а не аж у плані.
 
     План (`plan.py`) розгортає PDF і сам, але до нього справа не доходила:
@@ -319,11 +319,11 @@ def _kadry_z_pdf(d: Path) -> None:
     from nyshporka.htr import pdfpage
 
     if not frames_in(d) and pdfpage.case_pdfs(d):
-        pdfpage.vytiahnuty_kadry(d)
+        pdfpage.vytiahnuty_kadry(d, on_line=on_line)
 
 
-def resolve_case(arg: str) -> CaseRef:
-    """Тека кадрів або шифра → `CaseRef`."""
+def resolve_case(arg: str, on_line: Any = None) -> CaseRef:
+    """Тека кадрів або шифра → `CaseRef`. `on_line` — рядки розгортання PDF."""
     from nyshporka.cloud.verify import frames_in
 
     given = Path(arg).expanduser()
@@ -331,7 +331,7 @@ def resolve_case(arg: str) -> CaseRef:
         d = given.resolve()
         if not frames_in(d) and (d / "pages").is_dir():
             d = d / "pages"
-        _kadry_z_pdf(d)
+        _kadry_z_pdf(d, on_line)
         key, expected = "", 0
         index = _index()
         if index is not None:
@@ -370,7 +370,7 @@ def resolve_case(arg: str) -> CaseRef:
         base = case_path(str(raw))
         for d in (base, base / "pages"):
             if d.is_dir():
-                _kadry_z_pdf(d)
+                _kadry_z_pdf(d, on_line)
                 n = len(frames_in(d))
                 # Найбільша тека, а не перша: зменшені копії та уривки лежать
                 # під тією самою шифрою, і читати треба повну.
@@ -478,7 +478,7 @@ def go(case: str | Sequence[str], *, backend: str = "vast",
        budget: float | None = None,
        max_hours: float | None = None, max_price: float | None = None,
        max_rents: int = 0,
-       confirm: bool = False, dry_run: bool = False,
+       confirm: bool = False, dry_run: bool = False, stage: bool = False,
        with_voices: list[str] | tuple[str, ...] = (), second_voice: bool = True,
        script: str = "", model: str = "", case_key: str = "", rerun: bool = False,
        allow_partial: bool = False, rotate_landscape: bool = False,
@@ -515,7 +515,7 @@ def go(case: str | Sequence[str], *, backend: str = "vast",
     try:
         _go(res, cases, say, owner, backend=backend, budget=budget,
             max_hours=max_hours, max_rents=max_rents,
-            max_price=max_price, confirm=confirm, dry_run=dry_run,
+            max_price=max_price, confirm=confirm, dry_run=dry_run, stage=stage,
             with_voices=tuple(with_voices), second_voice=second_voice,
             script=script, model=model, case_key=case_key, rerun=rerun,
             allow_partial=allow_partial, rotate_landscape=rotate_landscape,
@@ -556,13 +556,34 @@ class _Density:
     Одиночна справа сусідів НЕ питає: її щільність іде в кошторис напряму, а
     нетипова тонка книга в густому описі отримала б від сусідів учетверо
     завищений бюджет. Півтори хвилини вибірки там дешевші.
+
+    ⚡ У партії вибірка — 20 кадрів одним гостем на всі справи
+    (`F.ProbeSession`), і серія зупиняється вже на ДВОХ вибірках, якщо вони
+    розходяться не більше ніж на `SERIES_AGREE`. Партія ДАЖО 1-78 з трьох
+    однотипних книг (75.8 / 83 / 86.5 рядк/стор) міряла всі три по 40 кадрів
+    окремими процесами — 4.3 хв на те, що дві вибірки по 20 кажуть за ~45 с
+    (05.10.2026). Після заходу гостя треба закрити: `close()`.
     """
 
     PROBES_PER_SERIES = 3
+    #: Дві вибірки серії, що розходяться не більше ніж на стільки (від більшої),
+    #: — серія однорідна, третя нічого не додасть.
+    SERIES_AGREE = 0.15
 
     def __init__(self, batch: bool) -> None:
         self.batch = batch
         self.probed: dict[tuple[str, str, str], list[float]] = {}
+        self.session: F.ProbeSession | None = None
+
+    def close(self) -> None:
+        if self.session is not None:
+            self.session.close()
+            self.session = None
+
+    def _settled(self, seen: list[float]) -> bool:
+        if len(seen) >= self.PROBES_PER_SERIES:
+            return True
+        return len(seen) >= 2 and (max(seen) - min(seen)) <= self.SERIES_AGREE * max(seen)
 
     def of(self, out_dir: Path, pack: Path, key: str, say: EventFn) -> float | None:
         own = F.lines_per_page(out_dir)
@@ -570,7 +591,13 @@ class _Density:
             return own
 
         def probe() -> float | None:
-            return F.lines_per_page_probe(pack, on_line=lambda s: say("density", s))
+            on_line = lambda s: say("density", s)   # noqa: E731
+            if not self.batch:
+                return F.lines_per_page_probe(pack, on_line=on_line)
+            if self.session is None:
+                self.session = F.ProbeSession()
+            return F.lines_per_page_probe(pack, sample=F.DENSITY_BATCH_SAMPLE,
+                                          on_line=on_line, session=self.session)
 
         series = F.series_of(key) if self.batch else None
         if series is None:
@@ -582,7 +609,7 @@ class _Density:
                            f"справ опису {'/'.join(series)}, вибірки не треба")
             return lines
         seen = self.probed.setdefault(series, [])
-        if len(seen) >= self.PROBES_PER_SERIES:
+        if self._settled(seen):
             lines = round(statistics.median(seen), 1)
             say("density", f"щільність {lines:g} рядк/стор — медіана {len(seen)} "
                            f"вибірок цього заходу з опису {'/'.join(series)}")
@@ -612,7 +639,7 @@ def _prepare(res: GoResult, case: str, say: EventFn, owner: contextlib.ExitStack
     """
     from nyshporka.cloud import plan as PL
 
-    ref = resolve_case(case)
+    ref = resolve_case(case, on_line=lambda s: say("frames", s))
     key = case_key or ref.key
     if not batch:
         res.case_dir, res.case_key = str(ref.frames_dir), key
@@ -901,6 +928,7 @@ def _go(res: GoResult, cases: tuple[str, ...], say: EventFn,
         owner: contextlib.ExitStack, *,
         backend: str, budget: float | None, max_hours: float | None, max_price: float | None,
         max_rents: int, confirm: bool, dry_run: bool, with_voices: tuple[str, ...],
+        stage: bool = False,
         second_voice: bool, script: str, model: str, case_key: str, rerun: bool,
         allow_partial: bool, rotate_landscape: bool, thin: bool,
         transport: str, max_usd_per_1000: float, params: tuple[str, ...],
@@ -964,6 +992,7 @@ def _go(res: GoResult, cases: tuple[str, ...], say: EventFn,
     dropped: list[tuple[str, str]] = []
     busy: list[str] = []
     density = _Density(batch=len(cases) > 1)
+    owner.callback(density.close)
     for arg in cases:
         try:
             leg, live = _prepare(res, arg, say, owner, backend=backend,
@@ -1007,6 +1036,8 @@ def _go(res: GoResult, cases: tuple[str, ...], say: EventFn,
             return
         if leg is not None:
             legs.append(leg)
+    # Гість вибірки тримає модель на карті — далі він не потрібен.
+    density.close()
     for arg, why in dropped:
         res.notes.append(f"{arg}: {why}")
     res.dropped = [{"case": arg, "why": why} for arg, why in dropped]
@@ -1054,11 +1085,12 @@ def _go(res: GoResult, cases: tuple[str, ...], say: EventFn,
 
             BT.launch(convoy, res, say, boxes=boxes, budget=budget,
                       max_hours=max_hours, max_rents=max_rents, confirm=confirm,
-                      dry_run=dry_run, transport=transport,
+                      dry_run=dry_run, stage=stage, transport=transport,
                       max_usd_per_1000=max_usd_per_1000, params=params)
             return
         SUP.launch(convoy, res, say, budget=budget, max_hours=max_hours,
-                   max_rents=max_rents, confirm=confirm, dry_run=dry_run, transport=transport,
+                   max_rents=max_rents, confirm=confirm, dry_run=dry_run, stage=stage,
+                   transport=transport,
                    max_usd_per_1000=max_usd_per_1000, params=params)
         return
 

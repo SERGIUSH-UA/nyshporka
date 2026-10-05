@@ -303,6 +303,53 @@ def test_rereading_with_a_named_model_goes_to_its_own_folder(space: Path, tmp_pa
     assert "--models" not in cmd
 
 
+# ── головна тека належить першому читанню (05.10.2026) ─────────────────────
+def _read_case(space: Path, tmp_path: Path, monkeypatch, first_model: str) -> Path:
+    """Справа, головну теку якої вже прочитала `first_model`."""
+    import json
+    import types
+
+    from nyshporka.core.workspace import workspace
+    from nyshporka.htr import env as E
+    from nyshporka.setup import doctor as doc
+
+    _weights(space, "skryba_f792_v6.mlmodel", "pysar_cyr_v17.pt", "diak_cyr_v4.mlmodel")
+    case = tmp_path / "op6-spr-79"
+    case.mkdir()
+    (case / "0001.jpg").write_bytes(b"\0")
+    monkeypatch.setattr(doc, "engine_venv", lambda: tmp_path / "venv")
+    monkeypatch.setattr(E, "inspect", lambda venv: types.SimpleNamespace(
+        ok=True, python=tmp_path / "python.exe", problems=[], missing=[]))
+    main = workspace().htr_reports / "op6-spr-79"
+    main.mkdir(parents=True)
+    (main / "_htr_meta.json").write_text(json.dumps({"model": first_model}), encoding="utf-8")
+    return case
+
+
+def test_latin_never_lands_on_a_cyrillic_folder(space: Path, tmp_path: Path,
+                                                monkeypatch) -> None:
+    """🔴 Бойова латинка без `--model` лягала в головну теку поверх Писаря, і
+    раннер мовчки відкладав кириличний текст у `_prev_`."""
+    case = _read_case(space, tmp_path, monkeypatch, "pysar_cyr_v17.pt")
+    p = R.plan(case, script="latin")
+    assert p.model.name == "skryba_f792_v6.mlmodel"
+    assert p.out_dir.name == "op6-spr-79-skryba_v6"
+
+
+def test_a_newer_version_of_the_same_script_rereads_in_place(space: Path, tmp_path: Path,
+                                                             monkeypatch) -> None:
+    case = _read_case(space, tmp_path, monkeypatch, "pysar_cyr_v16.pt")
+    assert R.plan(case, script="cyrillic").out_dir.name == "op6-spr-79"
+
+
+def test_a_script_word_names_its_production_model(space: Path) -> None:
+    """`--model latin` — як `--with latin`: бойова модель письма."""
+    _weights(space, "skryba_f792_v6.mlmodel", "pysar_cyr_v17.pt")
+    path, script = R.resolve_model("latin")
+    assert (path.name, script) == ("skryba_f792_v6.mlmodel", "latin")
+    assert R.resolve_model("cyrillic")[1] == "cyrillic"
+
+
 # ── гард теки для застосунку (аудит 29.09.2026) ─────────────────────────────
 def test_app_reads_only_from_case_roots(space: Path, tmp_path: Path) -> None:
     """Шлях із браузера — лише з коренів справ; термінал гарду не має.

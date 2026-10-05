@@ -423,12 +423,18 @@ def model_tag(model: str | Path) -> str:
 def resolve_model(spec: str) -> tuple[Path, str]:
     """Явно названа модель → (шлях до ваг, письмо).
 
-    `spec` — шлях до файла або ім'я ваг у теках моделей (`model_dirs`). Письмо
-    бере маніфест рушіїв за префіксом імені, а не здогад із теки справи: для
+    `spec` — шлях до файла, ім'я ваг у теках моделей (`model_dirs`) або письмо
+    (`latin`, `cyrillic`) — тоді це бойова модель письма, як у `--with`. Доти
+    `--model latin` відмовляв «модель не знайдена», хоч `--with latin` і
+    довідка обгортки хмарного заходу це слово приймали (05.10.2026). Письмо бере
+    маніфест рушіїв за префіксом імені, а не здогад із теки справи: для
     перечитування іншою моделлю саме модель і є рішенням людини про письмо.
     """
     from nyshporka.htr import manifest as M
 
+    if spec.strip().lower() in ("latin", "cyrillic"):
+        path, _voice = pick_model(spec.strip().lower())
+        return path.resolve(), spec.strip().lower()
     path = Path(spec).expanduser()
     if not path.is_file():
         hits = [d / spec for d in model_dirs() if (d / spec).is_file()]
@@ -440,6 +446,31 @@ def resolve_model(spec: str) -> tuple[Path, str]:
     if eng is None:
         raise ReadError(f"{path.name}: маніфест рушіїв не знає такої моделі — письмо невідоме")
     return path.resolve(), eng.script
+
+
+def foreign_reading(out_dir: Path, weights: Path) -> str:
+    """Модель ІНШОГО письма, чиє читання вже лежить у `out_dir`; "" — немає.
+
+    🔴 Головна тека справи належить її першому читанню. Доти теку обирало
+    лише питання «чи названа модель відрізняється від бойової», а вміст теки
+    ніхто не питав: `--model skryba_pp_v3 --script latin` — бойова латинка,
+    отже «звичайний прогін», — ліг у головну теку `op6-spr-79` поверх
+    кириличного Писаря, і раннер мовчки відклав його в `_prev_`, де той
+    випав із реєстру (05.10.2026). Нова версія моделі ТОГО САМОГО письма —
+    звичайне перечитування в ту саму теку, як і було.
+    """
+    from nyshporka.cloud.verify import read_meta
+    from nyshporka.htr import manifest as M
+
+    name = Path(str(read_meta(Path(out_dir)).get("model") or "")).name
+    if not name or name == Path(weights).name:
+        return ""
+    man = M.active()
+    have = man.engine_for_model(name)
+    want = man.engine_for_model(Path(weights).name)
+    if have is not None and want is not None and have.script == want.script:
+        return ""
+    return name
 
 
 def resolve_voices(specs: Sequence[str], *, main: Path,
@@ -580,6 +611,9 @@ def plan(case_dir: str | Path, *, out_dir: str | Path = "", script: str = "",
         weights, voice = pick_model(scr, second_voice=second_voice)
         trust, why = guess.trust, guess.why
         default_out = ws.htr_reports / stem
+        if foreign_reading(default_out, weights):
+            # Головна тека вже зайнята читанням іншого письма — не чіпаємо її.
+            default_out = ws.htr_reports / f"{stem}-{model_tag(weights)}"
     extra = resolve_voices(also, main=weights, have=[voice] if voice else [])
     runner = Path(__file__).resolve().parent / "runner.py"
     out = Path(out_dir) if out_dir else default_out

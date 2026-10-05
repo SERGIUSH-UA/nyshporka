@@ -970,7 +970,11 @@ def cmd_go(
         help="дозвіл ЛЮДИНИ на захід понад стелю автозапуску"),
     dry_run: bool = typer.Option(
         False, "--dry-run",
-        help="усе, крім оренди: кадри, стискання, план, кошторис, рішення"),
+        help="усе, крім оренди й заливки: кадри, стискання, план, кошторис, рішення"),
+    stage: bool = typer.Option(
+        False, "--stage",
+        help="з --dry-run: ще й залити кадри й ассети та пройти передполіт — план "
+             "стане придатним для `gpurunner htr supervise --plan … --machine …`"),
     rerun: bool = typer.Option(
         False, "--rerun",
         help="справу вже прочитано цією моделлю — перечитати. ⚠ У хмарі це "
@@ -1076,7 +1080,7 @@ def cmd_go(
 
     res = GO.go(case, backend=backend, budget=budget, max_hours=max_hours,
                 max_price=max_price, max_rents=max_rents, confirm=confirm, dry_run=dry_run,
-                with_voices=with_, second_voice=not one_voice, script=script,
+                stage=stage, with_voices=with_, second_voice=not one_voice, script=script,
                 model=model,
                 case_key=case_key, rerun=rerun, allow_partial=allow_partial,
                 rotate_landscape=rotate_landscape, thin=thin,

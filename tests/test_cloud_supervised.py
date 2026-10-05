@@ -53,6 +53,9 @@ def opts(name):
 
 
 if args[:2] == ["htr", "plan"]:
+    if "--no-upload" in args and cfg.get("no_upload_unknown"):
+        print("No such option: --no-upload", file=sys.stderr)
+        sys.exit(2)
     out = Path(opt("--out"))
     out.parent.mkdir(parents=True, exist_ok=True)
     cases, keys = opts("--case"), opts("--case-key")
@@ -87,6 +90,7 @@ if args[:2] == ["htr", "plan"]:
         "model": opt("--model"), "voices": opt("--voices"),
         "assets": opt("--assets"), "disk_gb": opt("--disk"),
         "transport": opt("--transport", "auto"), "params": params,
+        **({"staged": False} if "--no-upload" in args else {}),
     }, ensure_ascii=False), encoding="utf-8")
     sys.exit(0)
 
@@ -369,8 +373,87 @@ def test_preflight_failure_stops_before_rent(
     res = _go(case)
 
     assert res.verdict == "refused" and res.exit_code == 2
-    assert not fake_gpurunner.called("htr", "supervise"), \
-        "після провального передполіту навіть кошторису не питають"
+    assert not [c for c in fake_gpurunner.called("htr", "supervise") if "--detach" in c], \
+        "після провального передполіту наглядача не пускають"
+
+
+# ── кошторис ДО заливки ──────────────────────────────────────────────────────
+def _plans(fake: Any) -> list[bool]:
+    """Кожен виклик складача: True — доставлений план, False — для кошторису."""
+    return ["--no-upload" not in c for c in fake.called("htr", "plan")]
+
+
+def _order(fake: Any) -> list[str]:
+    out = []
+    for c in fake.calls:
+        if c[:2] == ["htr", "plan"]:
+            out.append("plan" if "--no-upload" not in c else "plan-estimate")
+        elif c[:2] == ["htr", "preflight"]:
+            out.append("preflight")
+        elif c[:2] == ["htr", "supervise"]:
+            out.append("estimate" if "--dry-run" in c else "detach")
+    return out
+
+
+def test_a_dry_run_uploads_nothing(space: Path, monkeypatch, fake_gpurunner) -> None:
+    """🔴 05.10.2026: сухий прогін партії ДАЖО 1-78 95 с заливав 2 ГБ кадрів і
+    ассетів у сховище, перш ніж назвати ціну."""
+    case, _ = _wire(space, monkeypatch)
+    res = _go(case, dry_run=True)
+
+    assert res.verdict == "dry_run" and res.fork_low == 0.40
+    assert _order(fake_gpurunner) == ["plan-estimate", "estimate"]
+    assert "не заливались" in res.why
+
+
+def test_a_staged_dry_run_delivers_the_plan(space: Path, monkeypatch, fake_gpurunner) -> None:
+    """`--stage`: план сухого прогону придатний для `supervise --machine`."""
+    case, _ = _wire(space, monkeypatch)
+    res = _go(case, dry_run=True, stage=True)
+
+    assert res.verdict == "dry_run"
+    assert _order(fake_gpurunner) == ["plan", "preflight", "estimate"]
+
+
+def test_the_start_uploads_after_the_estimate(space: Path, monkeypatch,
+                                              fake_gpurunner) -> None:
+    case, _ = _wire(space, monkeypatch)
+    res = _go(case)
+
+    assert res.verdict == "detached", res.why
+    assert _order(fake_gpurunner) == ["plan-estimate", "estimate", "plan", "preflight",
+                                      "detach"]
+    # Доставлений план — тією самою командою, лише без `--no-upload`.
+    first, second = fake_gpurunner.called("htr", "plan")
+    assert [a for a in first if a != "--no-upload"] == second
+    plan = json.loads(Path(second[second.index("--out") + 1]).read_text("utf-8"))
+    assert "staged" not in plan
+    assert all(c["case_dir"] for c in plan["cases"]), "доставлений план теж поправлено"
+
+
+def test_a_refused_launch_uploads_nothing(space: Path, monkeypatch, fake_gpurunner) -> None:
+    """Рішення «не стартувати» (понад стелю без `--confirm`) — без жодного байта аплінка."""
+    case, _ = _wire(space, monkeypatch)
+    fake_gpurunner.set(estimate={**ESTIMATE, "best": {**ESTIMATE["best"], "cost": 4.0}})
+    res = _go(case)
+
+    assert res.verdict == "needs_confirm"
+    assert _plans(fake_gpurunner) == [False]
+
+
+def test_an_old_supervisor_uploads_first_but_still_works(
+        space: Path, monkeypatch, fake_gpurunner) -> None:
+    """Наглядач без `--no-upload`: як доти (заливка до кошторису), з поясненням."""
+    case, _ = _wire(space, monkeypatch)
+    fake_gpurunner.set(estimate=ESTIMATE, no_upload_unknown=True)
+    said: list[str] = []
+    res = GO.go(str(case), backend="fake", script="cyrillic",
+                on_event=lambda kind, text, **kw: said.append(text))
+
+    assert res.verdict == "detached", res.why
+    assert _order(fake_gpurunner) == ["plan-estimate", "plan", "preflight", "estimate",
+                                      "detach"]
+    assert any("gpuhire" in s and "ДО кошторису" in s for s in said)
 
 
 def test_unclear_detach_leaves_the_run_accountable(

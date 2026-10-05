@@ -147,7 +147,62 @@ def mapping(case_dir: Path, frames: list[str],
     return Mapping(pdfs=tuple(pdfs), counts=tuple(counts), frames=expect)
 
 
-def vytiahnuty_kadry(case_dir: Path, width: int = DEFAULT_WIDTH) -> int:
+#: Менше стількох сторінок розгортаються в одному процесі: старт робітника
+#: (~0.3 с) тоді дорожчий за виграш.
+PARALLEL_MIN = 24
+
+
+def _jobs() -> int:
+    """Скільки процесів рендерить. Мінус два ядра — машина лишається живою."""
+    import os
+
+    return max(1, min(6, (os.cpu_count() or 2) - 2))
+
+
+def _pending(case_dir: Path, pdfs: list[Path]) -> list[tuple[str, int, str, float]]:
+    """Що ще не розгорнуто: `(PDF, сторінка з нуля, кадр, час PDF)` у порядку справи."""
+    counts = page_counts(pdfs)
+    digits = max(4, len(str(sum(counts))))
+    out: list[tuple[str, int, str, float]] = []
+    no = 0
+    for path, n in zip(pdfs, counts, strict=True):
+        mtime = path.stat().st_mtime
+        for index in range(n):
+            no += 1
+            dest = case_dir / f"{no:0{digits}d}.jpg"
+            if not dest.exists():
+                out.append((str(path), index, str(dest), mtime))
+    return out
+
+
+def _render_tasks(tasks: list[tuple[str, int, str, float]], width: int) -> int:
+    """Розгорнути сторінки в кадри — в ЦЬОМУ процесі. Повертає, скільки записано."""
+    import os
+
+    import pypdfium2 as pdfium
+
+    from nyshporka.utils.atomic import atomic_write_bytes
+
+    done = 0
+    docs: dict[str, Any] = {}
+    try:
+        for pdf, index, dest, mtime in tasks:
+            if Path(dest).exists():
+                continue
+            doc = docs.get(pdf)
+            if doc is None:
+                doc = docs[pdf] = pdfium.PdfDocument(pdf)
+            atomic_write_bytes(Path(dest), _storinka_jpeg(doc[index], width))
+            os.utime(dest, (mtime, mtime))
+            done += 1
+    finally:
+        for doc in docs.values():
+            doc.close()
+    return done
+
+
+def vytiahnuty_kadry(case_dir: Path, width: int = DEFAULT_WIDTH, *, jobs: int = 0,
+                     on_line: Any = None) -> int:
     """Розгорнути PDF справи в кадри `0001.jpg…` поруч. Повертає, скільки записано.
 
     🔴 Нумерація — рівно та, що доводить `mapping`: щільна `1..N` підряд по
@@ -163,39 +218,71 @@ def vytiahnuty_kadry(case_dir: Path, width: int = DEFAULT_WIDTH) -> int:
     (`cloud.frames.check_frames`) питають за часом кадрів, чи тека ще
     качається, і щойно розгорнута справа виглядала б недокачаною ще п'ять
     хвилин. Питання ж про джерело: докачано PDF — докачано й кадри.
+
+    ⚡ Рендер іде в кількох ПРОЦЕСАХ (`jobs`, 0 — за ядрами): pdfium не
+    потокобезпечний навіть на різних документах, а одна сторінка JPEG 2000
+    рендериться ~0.6–0.8 с. Заміряно 05.10.2026: ДАЖО 1-78-965 і 966 (329 і
+    383 стор.) розгортались в один потік 212 і 208 с — половина всієї
+    підготовки хмарного заходу. Робітник, що впав, нічого не ламає: його
+    сторінки дорендерюються тут же, в цьому процесі.
     """
-    import os
-
-    import pypdfium2 as pdfium
-
-    from nyshporka.utils.atomic import atomic_write_bytes
+    import subprocess
+    import sys
+    import time
 
     pdfs = case_pdfs(case_dir)
     if not pdfs:
         return 0
-    total = sum(page_counts(pdfs))
-    digits = max(4, len(str(total)))
-    zapysano = 0
-    no = 0
-    for path in pdfs:
-        mtime = path.stat().st_mtime
-        doc = pdfium.PdfDocument(str(path))
-        try:
-            for index in range(len(doc)):
-                no += 1
-                dest = case_dir / f"{no:0{digits}d}.jpg"
-                if dest.exists():
-                    continue
-                atomic_write_bytes(dest, _storinka_jpeg(doc[index], width))
-                os.utime(dest, (mtime, mtime))
-                zapysano += 1
-        finally:
-            doc.close()
-    return zapysano
+    tasks = _pending(case_dir, pdfs)
+    if not tasks:
+        return 0
+    say = on_line or (lambda _s: None)
+    workers = min(jobs if jobs > 0 else _jobs(), max(1, len(tasks) // PARALLEL_MIN))
+    t0 = time.perf_counter()
+    say(f"розгортаю PDF у кадри: {len(tasks)} стор."
+        + (f" у {workers} процесах" if workers > 1 else ""))
+    if workers > 1:
+        import json
+
+        # Суцільні шматки, а не через одну: кожен робітник відкриває свої PDF
+        # один раз і йде по них підряд.
+        size = -(-len(tasks) // workers)
+        procs = []
+        for k in range(workers):
+            chunk = tasks[k * size:(k + 1) * size]
+            if not chunk:
+                continue
+            proc = subprocess.Popen(
+                [sys.executable, "-m", "nyshporka.htr.pdfpage", "--width", str(width)],
+                stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace")
+            procs.append(proc)
+            assert proc.stdin is not None
+            proc.stdin.write(json.dumps(chunk))
+            proc.stdin.close()
+        for proc in procs:
+            assert proc.stderr is not None
+            err = proc.stderr.read()
+            if proc.wait() and err.strip():
+                say(f"⚠ робітник розгортання впав ({err.strip()[-200:]}) — дорендерюю тут")
+    # Що лишилось (один процес, малий PDF або робітник, що впав) — тут.
+    _render_tasks(tasks, width)
+    written = sum(1 for _pdf, _i, dest, _m in tasks if Path(dest).exists())
+    say(f"розгорнуто {written} кадрів за {time.perf_counter() - t0:.0f} с")
+    return written
 
 
 def _storinka_jpeg(page: Any, width: int) -> bytes:
-    """JPEG сторінки: вбудований як є, коли він там один, інакше рендер."""
+    """JPEG сторінки: вбудований як є, коли він там один, інакше рендер на `width`.
+
+    📏 Ширина, а не власна роздільність скану, — свідомо. Скан у JPEG 2000
+    (ДАЖО 1-78-965, розворот 3908×3131) рендериться в 2000×1624, і А/Б на 20
+    сторінках тієї справи (05.10.2026, Писар v19 + Дяк-Літописець) різниці
+    з кадром 3800×3100 не показав: згода голосів 0.680 проти 0.672, рядків
+    ≥0.8 — 55.7 проти 55.0 %, пік карти той самий (сегментатор усе одно
+    зводить кадр до 1800), а сторінка вищої роздільності читалась на 19 %
+    довше й важила вдвічі більше в заливці.
+    """
     import pypdfium2 as pdfium
 
     images = list(page.get_objects(filter=[pdfium.raw.FPDF_PAGEOBJ_IMAGE],
@@ -234,3 +321,20 @@ def render(case_dir: Path, frames: list[str], page: str,
     buf = io.BytesIO()
     pil.convert("RGB").save(buf, format="PNG", optimize=True)
     return buf.getvalue()
+
+
+def _worker(argv: list[str]) -> int:
+    """Робітник `vytiahnuty_kadry`: завдання — JSON зі stdin."""
+    import json
+    import sys
+
+    width = int(argv[argv.index("--width") + 1]) if "--width" in argv else DEFAULT_WIDTH
+    tasks = [tuple(t) for t in json.loads(sys.stdin.read() or "[]")]
+    _render_tasks(tasks, width)  # type: ignore[arg-type]
+    return 0
+
+
+if __name__ == "__main__":
+    import sys
+
+    sys.exit(_worker(sys.argv[1:]))

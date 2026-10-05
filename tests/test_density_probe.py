@@ -142,3 +142,113 @@ def test_without_a_card_the_probe_counts_with_the_runner_sigmas() -> None:
     gpu: list[tuple] = []
     G.install_sato(skf, "cuda:0", install_gpu=lambda s, device: gpu.append((s, device)))
     assert gpu == [(G.SATO_SIGMAS, "cuda:0")]
+
+
+def test_a_smaller_cached_sample_does_not_answer_for_a_bigger_one(tmp_path: Path,
+                                                                  engines) -> None:
+    d = _frames(tmp_path / "spr-12")
+    assert F.lines_per_page_probe(d, sample=20) == 33.3
+    assert F.lines_per_page_probe(d, sample=20) == 33.3
+    assert len(engines) == 1
+    assert F.lines_per_page_probe(d, sample=40) == 33.3
+    assert len(engines) == 2, "20-кадрова партійна вибірка не заміняє 40-кадрову"
+    assert F.lines_per_page_probe(d, sample=20) == 33.3
+    assert len(engines) == 2, "а 40-кадрова відповідає й за 20"
+
+
+FAKE_SERVE = r"""
+import json, sys
+print("kraken: шум до готовності", flush=True)
+print(json.dumps({"ready": True, "device": "cpu", "sec": 0.1}), flush=True)
+n = 0
+for line in sys.stdin:
+    req = json.loads(line)
+    n += 1
+    print("шум між відповідями", flush=True)
+    print(json.dumps({"ok": True, "n": req["sample"], "lines_mean": 10.0 * n,
+                      "lines_median": 1.0, "device": "cpu", "sec": 0.1,
+                      "dir": req["dir"]}), flush=True)
+"""
+
+
+def test_one_guest_answers_the_whole_batch(tmp_path: Path, monkeypatch) -> None:
+    """Імпорти й модель — один раз: другий замір іде тим самим процесом."""
+    import sys
+
+    guest = tmp_path / "guest.py"
+    guest.write_text(FAKE_SERVE, encoding="utf-8")
+    monkeypatch.setattr("nyshporka.setup.doctor.engine_venv", lambda: tmp_path)
+    monkeypatch.setattr("nyshporka.htr.env.venv_python", lambda v: Path(sys.executable))
+    monkeypatch.setattr(F, "_guest", lambda: guest)
+    monkeypatch.setattr(F, "_probe_cache",
+                        lambda frames, d: tmp_path / "cache" / f"{d.name}.json")
+    session = F.ProbeSession()
+    try:
+        a = F.lines_per_page_probe(_frames(tmp_path / "a"), sample=20, session=session)
+        b = F.lines_per_page_probe(_frames(tmp_path / "b"), sample=20, session=session)
+    finally:
+        session.close()
+    assert (a, b) == (10.0, 20.0), "лічильник гостя — отже процес той самий"
+
+
+def test_a_dead_guest_leaves_the_assumption(tmp_path: Path, monkeypatch) -> None:
+    import sys
+
+    guest = tmp_path / "guest.py"
+    guest.write_text("import sys; print('CUDA error', file=sys.stderr); sys.exit(3)",
+                     encoding="utf-8")
+    monkeypatch.setattr("nyshporka.setup.doctor.engine_venv", lambda: tmp_path)
+    monkeypatch.setattr("nyshporka.htr.env.venv_python", lambda v: Path(sys.executable))
+    monkeypatch.setattr(F, "_guest", lambda: guest)
+    monkeypatch.setattr(F, "_probe_cache",
+                        lambda frames, d: tmp_path / "cache" / f"{d.name}.json")
+    session = F.ProbeSession()
+    said: list[str] = []
+    assert F.lines_per_page_probe(_frames(tmp_path / "a"), session=session,
+                                  on_line=said.append) is None
+    assert F.lines_per_page_probe(_frames(tmp_path / "b"), session=session) is None
+    assert session.dead and any("вибірка не вдалась" in s for s in said)
+
+
+def test_threaded_vectorizing_counts_the_same(tmp_path: Path) -> None:
+    """Пул потоків векторизації не міняє ні чисел, ні їхнього порядку."""
+    class _Img:
+        def __init__(self, size):
+            self.size = size
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def convert(self, mode):
+            return self
+
+    lines = {"a": 3, "b": 11, "c": 7, "d": 5}
+
+    class _Heat:
+        def __init__(self, name):
+            self.name = name
+
+        def __getitem__(self, key):
+            return self.name
+
+    def seg(im, _m, model, dev):
+        return {"cls_map": {"aux": {"_start_separator": 0, "_end_separator": 1},
+                            "baselines": {"default": 2}}, "heatmap": _Heat(im.name)}
+
+    class _Named(_Img):
+        def __init__(self, name):
+            super().__init__((3000, 3100))
+            self.name = name
+
+    blla = types.SimpleNamespace(compute_segmentation_map=seg)
+    kseg = types.SimpleNamespace(
+        vectorize_lines=lambda h, text_direction, max_endpoints: [1] * lines[h])
+    frames = [Path(k) for k in lines]
+    kw = dict(blla=blla, kseg=kseg, release=lambda: None,
+              open_image=lambda f: _Named(Path(f).name))
+    seq = G.count_lines(frames, object(), "cuda:0", **kw)
+    par = G.count_lines(frames, object(), "cuda:0", jobs=3, **kw)
+    assert seq == par == [3, 11, 7, 5]

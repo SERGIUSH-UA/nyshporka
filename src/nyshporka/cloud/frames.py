@@ -547,8 +547,15 @@ def neighbour_lines_per_page(case_key: str, *, db_path: Path | None = None
 #: Заміри 01.10.2026: ±4–7 % на рівномірних книгах, −30 % на збірній сповідці
 #: (щільні блоки підряд) — проти припущених 60 рядків, що помилялись удвічі.
 DENSITY_PROBE_SAMPLE = 40
+#: Вибірка справи в ПАРТІЇ. Гроші партії рахуються за максимумом по справах,
+#: а вибір машини — за типовою щільністю, тож точність окремої справи там
+#: важить менше. Замір 05.10.2026 (ДАЖО 1-78, три книги): 20 кадрів дають
+#: ±1…17 % від 40-кадрової оцінки за половину часу.
+DENSITY_BATCH_SAMPLE = 20
 #: Стеля часу гостя: на карті ~1 хв, на процесорі вибірка менша, але повільніша.
 DENSITY_PROBE_TIMEOUT = 900
+#: Скільки чекати, поки гість-сеанс завантажить рушій і модель.
+DENSITY_READY_TIMEOUT = 300
 
 
 def _probe_cache(frames: list[Path], d: Path) -> Path:
@@ -561,8 +568,126 @@ def _probe_cache(frames: list[Path], d: Path) -> Path:
     return workspace().derived / "cloud" / "density" / f"{key}.json"
 
 
+def _guest() -> Path:
+    return Path(__file__).resolve().parents[1] / "htr" / "density_probe.py"
+
+
+class ProbeSession:
+    """Гість вибірки, що живе на всю партію: імпорти й модель — один раз.
+
+    🔴 Доти кожна справа партії піднімала свій процес: 7.6 с імпортів torch і
+    kraken плюс 1.5 с моделі на кожну — на трьох справах ДАЖО 1-78 це 27 с
+    одного й того самого (05.10.2026). Сеанс відповідає рядком JSON на запит;
+    усе інше, що він друкує (kraken і torch балакучі), відкидається за `dir`.
+    Збій сеансу — не збій заходу: справа лишається з припущеною щільністю.
+    """
+
+    def __init__(self) -> None:
+        self._proc: Any = None
+        self._lines: Any = None
+        self._err: list[str] = []
+        self.dead = ""
+
+    def _start(self, py: Path, guest: Path, env: dict[str, str]) -> None:
+        import queue
+        import subprocess
+
+        self._proc = subprocess.Popen(
+            [str(py), str(guest), "--serve"], stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            encoding="utf-8", errors="replace", env=env)
+        self._lines = queue.Queue()
+
+        def pump(stream: Any, sink: Any) -> None:
+            for line in stream:
+                sink(line)
+            sink(None)
+
+        err = self._err
+
+        def keep_err(line: str | None) -> None:
+            if line is not None:
+                err.append(line)
+                del err[:-20]
+
+        threading.Thread(target=pump, args=(self._proc.stdout, self._lines.put),
+                         daemon=True).start()
+        threading.Thread(target=pump, args=(self._proc.stderr, keep_err),
+                         daemon=True).start()
+
+    def _answer(self, timeout: float, want: Any) -> dict[str, Any] | None:
+        import json
+        import queue
+
+        deadline = time.monotonic() + timeout
+        while True:
+            left = deadline - time.monotonic()
+            if left <= 0:
+                return None
+            try:
+                line = self._lines.get(timeout=left)
+            except queue.Empty:
+                return None
+            if line is None:
+                return None
+            line = line.strip()
+            if not line.startswith("{"):
+                continue
+            try:
+                got = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(got, dict) and want(got):
+                return got
+
+    def ask(self, py: Path, guest: Path, env: dict[str, str], d: Path,
+            sample: int) -> dict[str, Any]:
+        import json
+
+        if self.dead:
+            return {"ok": False, "why": self.dead}
+        if self._proc is None:
+            self._start(py, guest, env)
+            ready = self._answer(DENSITY_READY_TIMEOUT, lambda g: "ready" in g)
+            if not ready or not ready.get("ready"):
+                why = (ready or {}).get("why") or "".join(self._err)[-200:] or \
+                    "гість вибірки не відповів"
+                self._fail(why)
+                return {"ok": False, "why": self.dead}
+        try:
+            assert self._proc.stdin is not None
+            self._proc.stdin.write(json.dumps({"dir": str(d), "sample": sample}) + "\n")
+            self._proc.stdin.flush()
+        except OSError as exc:
+            self._fail(f"гість вибірки впав: {exc}")
+            return {"ok": False, "why": self.dead}
+        got = self._answer(DENSITY_PROBE_TIMEOUT, lambda g: g.get("dir") == str(d))
+        if got is None:
+            self._fail(f"гість вибірки мовчить понад {DENSITY_PROBE_TIMEOUT} с")
+            return {"ok": False, "why": self.dead}
+        return got
+
+    def _fail(self, why: str) -> None:
+        self.dead = why
+        self.close()
+
+    def close(self) -> None:
+        proc, self._proc = self._proc, None
+        if proc is None:
+            return
+        with contextlib.suppress(OSError, ValueError):
+            if proc.stdin is not None:
+                proc.stdin.close()
+        try:
+            proc.wait(timeout=20)
+        except Exception:
+            with contextlib.suppress(OSError):
+                proc.kill()
+
+
 def lines_per_page_probe(frames_dir: Path | str, *, sample: int = DENSITY_PROBE_SAMPLE,
-                         on_line: Any = None) -> float | None:
+                         on_line: Any = None,
+                         session: ProbeSession | None = None) -> float | None:
     """Рядків на сторінку НЕЧИТАНОЇ справи — з сегментації вибірки кадрів.
 
     `None` — оцінити нічим (немає середовища рушіїв, гість упав): кошторис
@@ -570,7 +695,11 @@ def lines_per_page_probe(frames_dir: Path | str, *, sample: int = DENSITY_PROBE_
     час заходу — сума рядків, і на збірній сповідці (медіана 18, середнє 33)
     медіана занизила б його майже вдвічі. Результат кешується в похідних
     даних простору за текою, числом кадрів і часом найновішого — повторний
-    `--dry-run` і справжній запуск не сегментують удруге.
+    `--dry-run` і справжній запуск не сегментують удруге. Кеш меншої вибірки
+    (партійної) більшу не заміняє.
+
+    `session` — гість, що живе на всю партію (`ProbeSession`); без нього —
+    окремий процес на цей один замір.
     """
     import json
     import subprocess
@@ -585,7 +714,9 @@ def lines_per_page_probe(frames_dir: Path | str, *, sample: int = DENSITY_PROBE_
     cache = _probe_cache(frames, d)
     with contextlib.suppress(OSError, ValueError):
         got = json.loads(cache.read_text(encoding="utf-8"))
-        if got.get("ok") and got.get("lines_mean"):
+        # Записи до 05.10.2026 поля `sample` не мають — усі вони з 40 кадрів.
+        if got.get("ok") and got.get("lines_mean") and \
+                int(got.get("sample") or DENSITY_PROBE_SAMPLE) >= sample:
             return float(got["lines_mean"])
     try:
         from nyshporka.htr.env import foreign_env, venv_python
@@ -596,31 +727,38 @@ def lines_per_page_probe(frames_dir: Path | str, *, sample: int = DENSITY_PROBE_
         return None
     if not py.exists():
         return None
-    guest = Path(__file__).resolve().parents[1] / "htr" / "density_probe.py"
+    guest = _guest()
     if on_line:
-        on_line(f"щільність невідома — сегментую {sample} кадрів вибірки (~1 хв на карті)")
-    try:
-        res = subprocess.run([str(py), str(guest), str(d), "--sample", str(sample)],
-                             capture_output=True, text=True, encoding="utf-8",
-                             errors="replace", timeout=DENSITY_PROBE_TIMEOUT,
-                             env=foreign_env())
-    except (OSError, subprocess.TimeoutExpired):
-        return None
-    lines = (res.stdout or "").strip().splitlines()
-    try:
-        got = json.loads(lines[-1]) if lines else {}
-    except ValueError:
-        got = {}
+        # ~1 с на кадр на GTX 1650 з потоками векторизації (05.10.2026).
+        on_line(f"щільність невідома — сегментую {sample} кадрів вибірки "
+                f"(~{sample} с на карті)")
+    if session is not None:
+        got = session.ask(py, guest, foreign_env(), d, sample)
+        err = ""
+    else:
+        try:
+            res = subprocess.run([str(py), str(guest), str(d), "--sample", str(sample)],
+                                 capture_output=True, text=True, encoding="utf-8",
+                                 errors="replace", timeout=DENSITY_PROBE_TIMEOUT,
+                                 env=foreign_env())
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+        lines = (res.stdout or "").strip().splitlines()
+        try:
+            got = json.loads(lines[-1]) if lines else {}
+        except ValueError:
+            got = {}
+        err = res.stderr or ""
     if not isinstance(got, dict) or not got.get("ok") or not got.get("lines_mean"):
         if on_line:
             why = got.get("why") if isinstance(got, dict) else ""
-            on_line(f"⚠ вибірка не вдалась ({why or (res.stderr or '')[-200:]}) — "
+            on_line(f"⚠ вибірка не вдалась ({why or err[-200:]}) — "
                     f"щільність лишається припущеною")
         return None
     with contextlib.suppress(OSError):
         cache.parent.mkdir(parents=True, exist_ok=True)
-        cache.write_text(json.dumps({**got, "frames_dir": str(d)}, ensure_ascii=False),
-                         encoding="utf-8")
+        cache.write_text(json.dumps({**got, "sample": sample, "frames_dir": str(d)},
+                                    ensure_ascii=False), encoding="utf-8")
     if on_line:
         on_line(f"вибірка {got['n']} кадрів: {got['lines_mean']:g} рядк/стор у середньому "
                 f"(медіана {got['lines_median']:g}), {got.get('sec')} с на {got.get('device')}")

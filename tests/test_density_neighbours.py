@@ -65,11 +65,21 @@ def test_no_registry_no_opys_no_answer(tmp_path: Path) -> None:
 def probes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> list[Path]:
     """Реєстр R740 як бойовий, вибірка підмінена: кожна дає 50 + номер виклику."""
     monkeypatch.setattr(CDB, "DB_PATH", _registry(tmp_path / "r.sqlite", R740))
-    calls: list[Path] = []
+    class _Calls(list):
+        values: list[float]
+        kinds: list[tuple[int, object]]
 
-    def fake_probe(pack, *, on_line=None):
+    calls = _Calls()
+    values: list[float] = []
+
+    def fake_probe(pack, *, on_line=None, sample=F.DENSITY_PROBE_SAMPLE, session=None):
         calls.append(Path(pack))
-        return 50.0 + len(calls)
+        kinds.append((sample, session))
+        return values[len(calls) - 1] if len(values) >= len(calls) else 50.0 + len(calls)
+
+    kinds: list[tuple[int, object]] = []
+    calls.values = values
+    calls.kinds = kinds
 
     monkeypatch.setattr(F, "lines_per_page_probe", fake_probe)
     return calls
@@ -86,18 +96,44 @@ def test_a_batch_with_read_neighbours_never_probes(tmp_path: Path, probes) -> No
     assert any("медіана 3 прочитаних справ" in s for s in said)
 
 
-def test_a_series_without_neighbours_is_probed_three_times(tmp_path: Path, probes) -> None:
+def test_a_mixed_series_is_probed_three_times(tmp_path: Path, probes) -> None:
+    probes.values.extend([40.0, 80.0, 60.0])
     d = G._Density(batch=True)
     got = [d.of(tmp_path / "out", tmp_path / f"spr-{i}", f"DAKO/280/2/{i}",
                 lambda kind, s: None) for i in range(5)]
     assert len(probes) == 3
-    assert got == [51.0, 52.0, 53.0, 52.0, 52.0]
+    assert got == [40.0, 80.0, 60.0, 60.0, 60.0]
+
+
+def test_two_agreeing_probes_settle_the_series(tmp_path: Path, probes) -> None:
+    """ДАЖО 1-78, 05.10.2026: три однотипні книги дали 75.8 / 83 / 86.5 — третя
+    вибірка нічого не додала, а коштувала хвилину з чвертю."""
+    probes.values.extend([75.8, 83.0])
+    d = G._Density(batch=True)
+    got = [d.of(tmp_path / "out", tmp_path / f"spr-{i}", f"DAZHO/1/78/{i}",
+                lambda kind, s: None) for i in range(4)]
+    assert len(probes) == 2
+    assert got == [75.8, 83.0, 79.4, 79.4]
+
+
+def test_a_batch_probes_twenty_frames_in_one_guest(tmp_path: Path, probes) -> None:
+    probes.values.extend([40.0, 80.0])
+    d = G._Density(batch=True)
+    for i in range(2):
+        d.of(tmp_path / "out", tmp_path / f"spr-{i}", f"DAKO/280/2/{i}", lambda kind, s: None)
+    samples = {k[0] for k in probes.kinds}
+    sessions = {id(k[1]) for k in probes.kinds}
+    assert samples == {F.DENSITY_BATCH_SAMPLE}
+    assert len(sessions) == 1 and probes.kinds[0][1] is not None, "один гість на партію"
+    d.close()
+    assert d.session is None
 
 
 def test_a_single_case_is_probed_even_with_neighbours(tmp_path: Path, probes) -> None:
     got = G._Density(batch=False).of(tmp_path / "out", tmp_path / "spr-70",
                                      "DARO/R-740/2/70", lambda kind, s: None)
     assert got == 51.0 and len(probes) == 1
+    assert probes.kinds == [(F.DENSITY_PROBE_SAMPLE, None)], "одиночна — 40 кадрів, без сеансу"
 
 
 def test_own_reading_beats_neighbours(tmp_path: Path, probes) -> None:
