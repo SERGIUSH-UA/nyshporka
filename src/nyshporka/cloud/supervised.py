@@ -36,7 +36,7 @@ import subprocess
 import sys
 import tarfile
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -428,12 +428,17 @@ class Prepared:
     hours: float
     #: Архів ассетів, з яким складено план, — партія везе той самий на всі черги.
     assets: Path
+    #: Команда складача плану (з рішенням про засів), якою план ДОСТАВЛЯЄТЬСЯ.
+    plan_cmd: tuple[str, ...] = ()
+    #: Чи залиті кадри й ассети. `False` — план складено для кошторису
+    #: (`htr plan --no-upload`); `start` доставить його сам.
+    staged: bool = True
 
 
 def launch(convoy: Convoy, res: GoResult, say: Callable[..., None], *,
            budget: float | None = None, max_hours: float | None = None,
            max_rents: int = 0,
-           confirm: bool = False, dry_run: bool = False,
+           confirm: bool = False, dry_run: bool = False, stage: bool = False,
            transport: str = "auto", max_usd_per_1000: float = 0.0,
            params: Sequence[str] = ()) -> None:
     """Підготувати захід і віддати його відчепленому наглядачеві.
@@ -445,8 +450,12 @@ def launch(convoy: Convoy, res: GoResult, say: Callable[..., None], *,
     """
     from nyshporka.cloud.go import GoRefused
 
+    # 🔴 Кошторис — ДО заливки: на ньому вирішується, чи стартувати взагалі, а
+    # заливка партії — гігабайти аплінка (`stage`). Сухий прогін не заливає
+    # нічого, якщо людина не попросила доставити план наперед (`--stage`).
     p = prepare(convoy, res, say, max_hours=max_hours, transport=transport,
-                max_usd_per_1000=max_usd_per_1000, params=params)
+                max_usd_per_1000=max_usd_per_1000, params=params,
+                stage=dry_run and stage)
     if p.cost is None and budget is None:
         raise GoRefused("кошторису немає: наглядач не назвав ні вартості, ні "
                         "ціни з годинами. Назвіть стелю витрат самі: `--budget`.")
@@ -464,7 +473,10 @@ def launch(convoy: Convoy, res: GoResult, say: Callable[..., None], *,
                  f"{p.hours:g} год · рішення: {decision.why}")
     if dry_run:
         res.verdict = "dry_run"
-        res.why = f"сухий прогін: оренди не було; план {p.plan_path}"
+        res.why = (f"сухий прогін: оренди не було; план {p.plan_path}" if p.staged else
+                   f"сухий прогін: оренди не було, кадри не заливались "
+                   f"({convoy.total_mb / 1000:.1f} ГБ поїдуть на старті); план для "
+                   f"кошторису {p.plan_path}")
         return
     if not decision.launch:
         raise GoRefused(decision.why, verdict=decision.kind)
@@ -474,10 +486,18 @@ def launch(convoy: Convoy, res: GoResult, say: Callable[..., None], *,
 def prepare(convoy: Convoy, res: GoResult, say: Callable[..., None], *,
             max_hours: float | None = None, transport: str = "auto",
             max_usd_per_1000: float = 0.0, params: Sequence[str] = (),
-            assets: Path | None = None) -> Prepared:
+            assets: Path | None = None, stage: bool = False) -> Prepared:
     """Скласти план заходу й спитати кошторис — нічого не орендуючи.
 
     `assets` — уже зібраний архів (партія збирає його один раз на всі черги).
+
+    `stage=False` (типово) — план лише для кошторису: кадри й ассети НЕ
+    заливаються, передполіт не йде (посилання ще нікуди не ведуть). Доставляє
+    план `start` → `stage()`. 🔴 Доти кошторис стояв ПІСЛЯ заливки: партія
+    ДАЖО 1-78 (три справи, 2 ГБ) 95 с везла кадри в сховище, перш ніж назвати
+    ціну, — і везла б так само, якби рішенням було «не стартувати»
+    (05.10.2026). `stage=True` — як доти: план одразу доставлений, придатний
+    для `gpurunner htr supervise --plan … --machine …`.
     """
     from nyshporka.cloud.go import GoRefused
 
@@ -597,9 +617,32 @@ def prepare(convoy: Convoy, res: GoResult, say: Callable[..., None], *,
         # засіву виглядає як безплатна.
         no_seed()
         seeded = False
+    upload_known = [True]
+
+    def run_plan(base: list[str]) -> bool:
+        """Скласти план командою `base` — доставленим (`stage`) або для кошторису."""
+        plan_path.unlink(missing_ok=True)
+        if stage or not upload_known[0]:
+            return not _run(base, env=env).returncode and plan_path.is_file()
+        got = _run([*base, "--no-upload"], env=env, capture=True)
+        out = f"{got.stderr or ''}\n{got.stdout or ''}"
+        if got.returncode and "--no-upload" in out:
+            # Наглядач старший за план без заливки — їдемо як доти, але кажемо,
+            # чому кошторис знову чекає на аплінк.
+            upload_known[0] = False
+            say("warning", "⚠ наглядач не вміє складати план без заливки (gpuhire "
+                           "застарий) — кадри заливаються ДО кошторису. Оновіть: "
+                           "`nysh update`")
+            return not _run(base, env=env).returncode and plan_path.is_file()
+        if got.returncode:
+            say("warning", out.strip()[-1500:])
+        return not got.returncode and plan_path.is_file()
+
     cmd = make_cmd(seeded=seeded)
-    say("plan", "складаємо план і веземо кадри в сховище наглядача")
-    if _run(cmd, env=env).returncode or not plan_path.is_file():
+    say("plan", "складаємо план і веземо кадри в сховище наглядача" if stage else
+                f"складаємо план для кошторису — кадри ({convoy.total_mb / 1000:.1f} ГБ) "
+                f"не заливаємо, поїдуть на старті")
+    if not run_plan(cmd):
         if not seeded or transport != "auto":
             raise GoRefused(f"план заходу не склався — див. вивід вище; тека {work}")
         # Сховища немає, а транспорт людина не називала — не відмовляємо, а
@@ -607,27 +650,19 @@ def prepare(convoy: Convoy, res: GoResult, say: Callable[..., None], *,
         # сегментацію (замір 9.1 → 18.4 с/стор). Повтор безплатний: перевірка
         # транспорту в наглядача стоїть до будь-якої заливки.
         no_seed()
-        if _run(make_cmd(seeded=False), env=env).returncode or not plan_path.is_file():
+        cmd = make_cmd(seeded=False)
+        if not run_plan(cmd):
             raise GoRefused(f"план заходу не склався — див. вивід вище; тека {work}")
-
-    # 🔴 Наглядач мусить везти на бокс середовище рушіїв з нашого маніфесту.
-    # Старий (gpuhire < 0.6) файла вимог в ассетах не бачить, бокс поставив би
-    # власний пін kraken, і раннер там не стартував би — після оплаченого
-    # холодного старту. Перевіряється сама можливість, а не номер версії:
-    # наглядач буває й чужою збіркою з PATH.
-    if not _plan_carries_engine(plan_path):
-        raise GoRefused(
-            "наглядач хмарних прогонів застарий: план не везе на машину середовище "
-            "рушіїв (kraken з маніфесту), і раннер на боксі не стартував би. "
-            "Оновіть: `nysh update` (пакет оренди `gpuhire` ≥ 0.6.1) і повторіть.")
+    staged = stage or not upload_known[0]
+    _check_engine(plan_path)
 
     # 3. правки, яких наглядач знати не може
     _patch_plan(plan_path, convoy)
 
-    # 4. передполіт: живі посилання й доступне сховище — ДО оренди
-    if _run([*gr, "htr", "preflight", str(plan_path)], env=env).returncode:
-        raise GoRefused("передполіт не пройшов (посилання або сховище) — "
-                        "див. вивід вище; оренди не було")
+    # 4. передполіт: живі посилання й доступне сховище — ДО оренди. План для
+    # кошторису його не проходить за побудовою: посилання ведуть у порожнечу.
+    if staged:
+        _preflight(gr, plan_path, env)
 
     # 5. кошторис — у того самого наглядача, який потім спиниться на бюджеті
     dry = _run([*gr, "htr", "supervise", "--plan", str(plan_path),
@@ -651,7 +686,56 @@ def prepare(convoy: Convoy, res: GoResult, say: Callable[..., None], *,
         M.max_hours_for(est.hours) if est.hours is not None else MAX_HOURS_CAP)
     return Prepared(session=session, plan_path=plan_path, env=env, gr=list(gr),
                     est=est, cost=cost, fork_low=low, fork_high=high, hours=hours,
-                    assets=assets)
+                    assets=assets, plan_cmd=tuple(cmd), staged=staged)
+
+
+def _check_engine(plan_path: Path) -> None:
+    """🔴 Наглядач мусить везти на бокс середовище рушіїв з нашого маніфесту.
+
+    Старий (gpuhire < 0.6) файла вимог в ассетах не бачить, бокс поставив би
+    власний пін kraken, і раннер там не стартував би — після оплаченого
+    холодного старту. Перевіряється сама можливість, а не номер версії:
+    наглядач буває й чужою збіркою з PATH.
+    """
+    from nyshporka.cloud.go import GoRefused
+
+    if not _plan_carries_engine(plan_path):
+        raise GoRefused(
+            "наглядач хмарних прогонів застарий: план не везе на машину середовище "
+            "рушіїв (kraken з маніфесту), і раннер на боксі не стартував би. "
+            "Оновіть: `nysh update` (пакет оренди `gpuhire` ≥ 0.6.1) і повторіть.")
+
+
+def _preflight(gr: Sequence[str], plan_path: Path, env: dict[str, str]) -> None:
+    from nyshporka.cloud.go import GoRefused
+
+    if _run([*gr, "htr", "preflight", str(plan_path)], env=env).returncode:
+        raise GoRefused("передполіт не пройшов (посилання або сховище) — "
+                        "див. вивід вище; оренди не було")
+
+
+def stage(p: Prepared, convoy: Convoy, say: Callable[..., None]) -> Prepared:
+    """Доставити план, складений для кошторису: залити кадри й ассети, передполіт.
+
+    Тією самою командою складача, що й план для кошторису (рішення про засів
+    уже ухвалене), тож справи, імена й засів ті самі. Залитого раніше
+    наглядач не заливає вдруге (`already_in_bucket`): повторний старт тієї
+    самої справи везе лише змінене.
+    """
+    from nyshporka.cloud.go import GoRefused
+
+    if p.staged:
+        return p
+    say("plan", f"заливаємо кадри ({convoy.total_mb / 1000:.1f} ГБ) і ассети в "
+                f"сховище наглядача; залите раніше вдруге не їде")
+    p.plan_path.unlink(missing_ok=True)
+    if _run(list(p.plan_cmd), env=p.env).returncode or not p.plan_path.is_file():
+        raise GoRefused(f"план заходу не доставився — див. вивід вище; тека "
+                        f"{p.plan_path.parent}; оренди не було")
+    _check_engine(p.plan_path)
+    _patch_plan(p.plan_path, convoy)
+    _preflight(p.gr, p.plan_path, p.env)
+    return replace(p, staged=True)
 
 
 def start(p: Prepared, convoy: Convoy, res: GoResult, say: Callable[..., None], *,
@@ -664,6 +748,9 @@ def start(p: Prepared, convoy: Convoy, res: GoResult, say: Callable[..., None], 
     """
     from nyshporka.cloud.go import GoRefused
 
+    # План для кошторису доставляється тут, ПІСЛЯ рішення про гроші й до запису
+    # заходу: збій заливки — відмова без оренди, і записувати нема що.
+    p = stage(p, convoy, say)
     session, plan_path, env, gr = p.session, p.plan_path, p.env, p.gr
     high, hours = budget, max_hours
     # 6. наглядач у фон

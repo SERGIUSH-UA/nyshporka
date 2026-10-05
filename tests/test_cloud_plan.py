@@ -450,6 +450,55 @@ def test_naming_the_production_model_is_an_ordinary_run(space: Path, monkeypatch
     assert got.out_dir.name == case.name and got.base_out is None
 
 
+def _over_a_reading(space: Path, monkeypatch, first_model: str) -> Path:
+    """Справа, головну теку якої вже прочитала `first_model`; ваги — справжні імена."""
+    import json
+
+    from nyshporka.core.workspace import workspace
+    from nyshporka.htr import run as R
+
+    case = _wire_case(space, monkeypatch, name="op6-spr-79")
+    weights = {"latin": space / "skryba_pp_v3.safetensors",
+               "cyrillic": space / "pysar_cyr_v19.pt"}
+    for w in weights.values():
+        w.write_bytes(b"\0")
+    monkeypatch.setattr(R, "pick_model",
+                        lambda script, second_voice=True: (weights[script], None))
+    main = workspace().htr_reports / "op6-spr-79"
+    main.mkdir(parents=True)
+    (main / "_htr_meta.json").write_text(json.dumps({"model": first_model}), encoding="utf-8")
+    return case
+
+
+@pytest.mark.parametrize("model", ["skryba_pp_v3.safetensors", "latin", ""])
+def test_the_production_latin_does_not_overwrite_a_cyrillic_folder(
+        space: Path, monkeypatch, model: str) -> None:
+    """🔴 05.10.2026: `--model skryba_pp_v3.safetensors --script latin` — бойова
+    латинка, отже «звичайний прогін», — ліг у `op6-spr-79` поверх Писаря, і
+    раннер відклав кириличний текст у `_prev_`, де той випав із реєстру."""
+    from nyshporka.cloud import plan as PL
+    from nyshporka.htr import run as R
+
+    case = _over_a_reading(space, monkeypatch, "pysar_cyr_v19.pt")
+    if model.endswith(".safetensors"):
+        monkeypatch.setattr(R, "resolve_model",
+                            lambda spec: (space / "skryba_pp_v3.safetensors", "latin"))
+    got = PL.build(case, script="latin", model=model)
+    assert got.out_dir.name == "op6-spr-79-skryba_pp_v3"
+    assert got.base_out is not None and got.base_out.name == "op6-spr-79", \
+        "засів сегментації — з теки першого читання"
+    assert any("іншого письма" in w for w in got.warnings)
+
+
+def test_the_same_script_still_rereads_in_place(space: Path, monkeypatch) -> None:
+    """Нова бойова версія того самого письма — перечитування в ту саму теку."""
+    from nyshporka.cloud import plan as PL
+
+    case = _over_a_reading(space, monkeypatch, "pysar_cyr_v17.pt")
+    got = PL.build(case, script="cyrillic")
+    assert got.out_dir.name == "op6-spr-79" and got.base_out is None
+
+
 def test_model_and_with_together_are_refused(space: Path, monkeypatch) -> None:
     """Додатковий голос читає ті самі рядки основної моделі, а `--model` міняє
     саму основну. Разом це означало б неясно що — відмовляємо до оренди."""

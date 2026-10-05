@@ -107,3 +107,61 @@ def test_khmara_bere_spravu_pdf_za_shyfroiu(tmp_path: Path, monkeypatch) -> None
     assert ref.frames_dir == d
     assert ref.frames_expected == 3
     assert len(list(d.glob("*.jpg"))) == 3
+
+
+# ── роздільність і швидкість розгортання ────────────────────────────────────
+def _pdf_zi_skanom_ne_jpeg(path: Path, storinok: int, px: tuple[int, int],
+                           pt: tuple[int, int]) -> None:
+    """PDF, де скан — не JPEG (бітмапа без DCT), як JPEG 2000 у ДАЖО 1-78."""
+    doc = pdfium.PdfDocument.new()
+    for i in range(storinok):
+        page = doc.new_page(*pt)
+        img = pdfium.PdfImage.new(doc)
+        img.set_bitmap(pdfium.PdfBitmap.from_pil(Image.new("RGB", px, (100 + i, 120, 140))))
+        img.set_matrix(pdfium.PdfMatrix().scale(*pt))
+        page.insert_obj(img)
+        page.gen_content()
+    doc.save(str(path))
+    doc.close()
+
+
+def test_kilka_procesiv_ta_sama_numeratsiia(tmp_path: Path, monkeypatch) -> None:
+    """Робітники ділять сторінки, але кадр N — це сторінка N, байти як є, час PDF."""
+    import os
+
+    jpegs = _pdf_zi_skanamy(tmp_path / "a.pdf", 4)
+    _pdf_zi_skanom_ne_jpeg(tmp_path / "b.pdf", 3, (800, 600), (400, 300))
+    davno = 1_700_000_000.0
+    os.utime(tmp_path / "a.pdf", (davno, davno))
+    monkeypatch.setattr(pdfpage, "PARALLEL_MIN", 2)
+    said: list[str] = []
+    assert pdfpage.vytiahnuty_kadry(tmp_path, jobs=3, on_line=said.append) == 7
+    assert sorted(p.name for p in tmp_path.glob("*.jpg")) == [f"{i:04d}.jpg" for i in range(1, 8)]
+    assert (tmp_path / "0003.jpg").read_bytes() == jpegs[2]
+    assert (tmp_path / "0004.jpg").stat().st_mtime == davno
+    with Image.open(tmp_path / "0006.jpg") as im:
+        assert im.size[0] == pdfpage.DEFAULT_WIDTH
+    assert any("у 3 процесах" in s for s in said)
+    assert not any("впав" in s for s in said), "робітники справді працювали"
+
+
+def test_robitnyk_vpav_storinky_dorendereni(tmp_path: Path, monkeypatch) -> None:
+    """Робітник без пакета, без пам'яті, без чого завгодно — справа однаково ціла."""
+    import subprocess
+
+    _pdf_zi_skanamy(tmp_path / "a.pdf", 6)
+
+    class Dead:
+        def __init__(self, *a, **kw) -> None:
+            self.stdin = io.StringIO()
+            self.stderr = io.StringIO("ModuleNotFoundError: nyshporka")
+
+        def wait(self) -> int:
+            return 1
+
+    monkeypatch.setattr(subprocess, "Popen", Dead)
+    monkeypatch.setattr(pdfpage, "PARALLEL_MIN", 2)
+    said: list[str] = []
+    assert pdfpage.vytiahnuty_kadry(tmp_path, jobs=2, on_line=said.append) == 6
+    assert len(list(tmp_path.glob("*.jpg"))) == 6
+    assert any("впав" in s for s in said)
