@@ -127,10 +127,13 @@ def provenance(*, source: str, ref: str = "", url: str = "",
     """
     from nyshporka import __version__
 
+    # 🔴 Адреса, прочитана з файла з кінцями рядків Windows, несе `\r`: джерело
+    # його прощає, а паспорт зберігав — і наступний запит за `fetched_ref`
+    # Commons відкидав як «недопустимі символи в назві» (23 паспорти, 05.10.2026).
     out: dict[str, Any] = {
         "fetched": datetime.now(UTC).isoformat(timespec="seconds"),
         "fetched_by": f"nyshporka/{__version__}",
-        "fetched_from": source, "fetched_ref": ref}
+        "fetched_from": source, "fetched_ref": ref.strip()}
     if url:
         out["fetched_url"] = url
     if promised is not None:

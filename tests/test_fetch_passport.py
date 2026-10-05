@@ -43,6 +43,15 @@ def test_pasport_nese_znamennyk_zboi_i_kheshi(tmp_path: Path) -> None:
     assert all(len(f["sha256"]) == 64 for f in m["files"])
 
 
+def test_adresa_v_pasporti_bez_kintsia_riadka_crlf(tmp_path: Path) -> None:
+    from nyshporka.cases.acquire import record_fetch
+
+    _kadry(tmp_path, 1)
+    res = FetchResult(dest=tmp_path, frames=1)
+    record_fetch(tmp_path, res, source="commons", ref="file:ДАРО Р-740-2-503.pdf\r", want=1)
+    assert _meta(tmp_path)["fetched_ref"] == "file:ДАРО Р-740-2-503.pdf"
+
+
 def test_chyslo_zijshlos_ale_zboi_ne_povna(tmp_path: Path) -> None:
     from nyshporka.cases.acquire import record_fetch
 

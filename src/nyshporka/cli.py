@@ -454,6 +454,7 @@ def get(source: str = typer.Argument(..., help="id джерела"),
     from nyshporka.sources.base import SourceError
 
     _need("material")
+    ref = ref.strip()       # адреса з файла CRLF несе `\r` — див. `provenance`
     src = _pick(source)
     import inspect
 
