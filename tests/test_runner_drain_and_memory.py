@@ -134,10 +134,17 @@ def test_page_memory_is_what_the_page_needed_not_what_the_allocator_kept() -> No
     """🔴🔴 23.09.2026: після однієї сторінки на 437 рядків кожна наступна,
     навіть на 27 рядків, «брала» 5.2 ГБ — міряли `max_memory_reserved`, тобто
     утримане алокатором. Регулятор на цьому зливав шарди."""
-    import inspect
-
-    src = inspect.getsource(R.page_memory)
-    assert 'out["vram_peak_mb"] = int(torch.cuda.max_memory_allocated' in src
+    torch = pytest.importorskip("torch")
+    mp = pytest.MonkeyPatch()
+    try:
+        mp.setattr(torch.cuda, "max_memory_allocated", lambda *a, **k: 1300 * 2**20)
+        mp.setattr(torch.cuda, "max_memory_reserved", lambda *a, **k: 5200 * 2**20)
+        R._reset_vram_peak("cpu")
+        mem = R.page_memory("cuda:0")
+    finally:
+        mp.undo()
+    assert mem["vram_peak_mb"] == 1300
+    assert mem["vram_reserved_mb"] == 5200
 
 
 def test_the_cache_is_released_after_every_page() -> None:
