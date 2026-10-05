@@ -1457,3 +1457,112 @@ def test_a_zero_or_negative_ceiling_is_refused_before_anything(
     assert "додатним" in res.why
     assert not fake_gpurunner.called("htr", "supervise"), "наглядача навіть не питали"
     assert not res.rented
+
+
+# ── лише датацентри ──────────────────────────────────────────────────────────
+def test_datacenter_only_reaches_the_supervisor_as_a_param(space: Path, monkeypatch,
+                                                           fake_gpurunner) -> None:
+    case, _ = _wire(space, monkeypatch)
+    fake_gpurunner.set(estimate={**ESTIMATE, "datacenter_only": True})
+    res = _go(case, dry_run=True, datacenter_only=True)
+    assert res.verdict != "refused", res.why
+    assert "datacenter_only=true" in _plan_of(fake_gpurunner)["params"]
+
+
+def test_a_supervisor_that_does_not_echo_the_filter_is_refused(
+        space: Path, monkeypatch, fake_gpurunner) -> None:
+    """🔴 Старий наглядач ручки не знає й мовчки орендував би домашній хост."""
+    case, _ = _wire(space, monkeypatch)
+    res = _go(case, datacenter_only=True)          # ESTIMATE без відлуння
+    assert res.verdict == "refused" and "датацентр" in res.why
+    assert not [c for c in fake_gpurunner.called("htr", "supervise")
+                if "--dry-run" not in c], "до оренди не дійшло"
+
+
+def test_a_users_param_wins_over_the_flag(space: Path, monkeypatch,
+                                          fake_gpurunner) -> None:
+    case, _ = _wire(space, monkeypatch)
+    _go(case, dry_run=True, datacenter_only=True, params=["datacenter_only=false"])
+    params = _plan_of(fake_gpurunner)["params"]
+    assert [p for p in params if p.startswith("datacenter_only")] == [
+        "datacenter_only=false"]
+
+
+@pytest.mark.parametrize(("params", "want"), [
+    (["datacenter_only=true"], True), (["datacenter_only=так"], True),
+    (["datacenter_only=true", "datacenter_only=0"], False), ([], False),
+])
+def test_wants_datacenter_reads_the_last_word(params: list[str], want: bool) -> None:
+    assert SUP.wants_datacenter(params) is want
+
+
+def test_thin_path_carries_the_filter_into_the_need(space: Path, monkeypatch,
+                                                   fake_gpurunner) -> None:
+    """Тонкий шлях `-p` не приймає — фільтр їде полем потреби бекенду."""
+    case, backend = _wire(space, monkeypatch)
+    needs: list = []
+    real = backend.estimate
+
+    def estimate(need, **kw):
+        needs.append(need)
+        return real(need, **kw)
+
+    backend.estimate = estimate
+    res = _go(case, thin=True, dry_run=True, datacenter_only=True)
+    assert res.verdict != "refused", res.why
+    assert needs and all(n.datacenter_only for n in needs)
+    assert not fake_gpurunner.calls
+
+
+# ── ручки оренди: режим, підлога, закріплена машина ─────────────────────────
+def test_rent_knobs_reach_the_supervisor_as_params(space: Path, monkeypatch,
+                                                   fake_gpurunner) -> None:
+    case, _ = _wire(space, monkeypatch)
+    fake_gpurunner.set(estimate={**ESTIMATE, "machine_id": 150661})
+    res = _go(case, dry_run=True, pace="cheap", min_pph=1500, machine=150661)
+    assert res.verdict != "refused", res.why
+    params = _plan_of(fake_gpurunner)["params"]
+    assert {"pace=cheap", "min_pages_per_hour=1500", "machine_id=150661"} <= set(params)
+
+
+def test_a_supervisor_that_does_not_pin_the_machine_is_refused(
+        space: Path, monkeypatch, fake_gpurunner) -> None:
+    case, _ = _wire(space, monkeypatch)
+    res = _go(case, machine=150661)                 # ESTIMATE без відлуння машини
+    assert res.verdict == "refused" and "150661" in res.why
+    assert not [c for c in fake_gpurunner.called("htr", "supervise")
+                if "--dry-run" not in c], "до оренди не дійшло"
+
+
+def test_unknown_pace_is_refused_before_anything(space: Path, monkeypatch,
+                                                 fake_gpurunner) -> None:
+    case, _ = _wire(space, monkeypatch)
+    res = _go(case, dry_run=True, pace="turbo")
+    assert res.verdict == "refused" and "fast або cheap" in res.why
+    assert not fake_gpurunner.calls
+
+
+def test_thin_path_refuses_pace_but_pins_the_machine(space: Path, monkeypatch,
+                                                     fake_gpurunner) -> None:
+    case, backend = _wire(space, monkeypatch)
+    res = _go(case, thin=True, dry_run=True, pace="cheap")
+    assert res.verdict == "refused" and "--pace" in res.why
+    targets: list[str] = []
+    real = backend.estimate
+
+    def estimate(need, **kw):
+        targets.append(kw.get("target", ""))
+        return real(need, **kw)
+
+    backend.estimate = estimate
+    res = _go(case, thin=True, dry_run=True, machine=150661)
+    assert res.verdict != "refused", res.why
+    assert targets and set(targets) == {"machine:150661"}
+
+
+@pytest.mark.parametrize(("params", "want"), [
+    (["machine_id=150661"], 150661), (["machine_id=1", "machine_id=2"], 2),
+    (["machine_id=abc"], 0), ([], 0),
+])
+def test_pinned_machine_reads_the_last_word(params: list[str], want: int) -> None:
+    assert SUP.pinned_machine(params) == want

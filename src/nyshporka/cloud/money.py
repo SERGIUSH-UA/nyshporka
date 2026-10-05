@@ -145,7 +145,7 @@ def parse_estimate(raw: object) -> Estimate:
         raw={k: raw[k] for k in ESTIMATE_KEYS if k in raw})
 
 
-def ask_estimate(backend: object, need: object) -> Estimate | None:
+def ask_estimate(backend: object, need: object, *, target: str = "") -> Estimate | None:
     """Спитати в бекенда кошторис. `None` — бекенд кошторисів не дає.
 
     Метод `estimate(need) -> dict` необов'язковий і кличеться через `getattr`:
@@ -156,7 +156,8 @@ def ask_estimate(backend: object, need: object) -> Estimate | None:
     fn = getattr(backend, "estimate", None)
     if not callable(fn):
         return None
-    return parse_estimate(fn(need))
+    # `target` — лише коли заданий: старі бекенди його не приймають.
+    return parse_estimate(fn(need, target=target) if target else fn(need))
 
 
 def budget_fork(cost: float, *, density_known: bool) -> tuple[float, float]:

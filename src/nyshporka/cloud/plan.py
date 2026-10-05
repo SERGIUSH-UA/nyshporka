@@ -78,6 +78,8 @@ class CloudPlan:
     budget_usd: float | None = None
     max_hours: float | None = None
     max_price_usd_h: float | None = None
+    #: Лише машини датацентрів (`nysh cloud go --datacenter-only`).
+    datacenter_only: bool = False
     #: Виміряна щільність письма цієї справи (рядків на сторінку), якщо вона
     #: вже частково прочитана. Поправка до кошторису, не вимога.
     lines_per_page: float | None = None
@@ -123,7 +125,8 @@ class CloudPlan:
                     max_price_usd_h=self.max_price_usd_h,
                     prefer_cores=useful_cores(pages),
                     lines_per_page=self.lines_per_page,
-                    min_compute_cap=_oldest_card() if self.fresh_machine else None)
+                    min_compute_cap=_oldest_card() if self.fresh_machine else None,
+                    datacenter_only=self.datacenter_only)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -144,6 +147,7 @@ class CloudPlan:
             "hours": self.hours, "cost": self.cost,
             "budget_usd": self.budget_usd, "max_hours": self.max_hours,
             "max_price_usd_h": self.max_price_usd_h,
+            "datacenter_only": self.datacenter_only,
             "lines_per_page": self.lines_per_page,
             "source_dir": str(self.source_dir) if self.source_dir else "",
             "base_out": str(self.base_out) if self.base_out else "",
