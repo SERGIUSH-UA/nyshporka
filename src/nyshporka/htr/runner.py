@@ -636,6 +636,214 @@ def page_stages(sec: float) -> dict[str, float]:
     return out
 
 
+#: Пік VRAM поточної сторінки за етапами, МБ (`max_memory_allocated` під час
+#: етапу, разом із вагами моделей у пам'яті). Скидається перед сторінкою.
+#: 🔴 Навіщо: мета знала лише пік ВСІЄЇ сторінки, і він на 1 018 сторінках
+#: DAZHO 1-78-1037 (05.10.2026) стояв 2 115–2 199 МБ — однаково для сторінки на
+#: 5 рядків і на 183. Чий це пік, сегментатора чи розпізнавання, з такого числа
+#: не видно, а саме від цього залежить, скільки шардів уміщає карта: пік під
+#: локом карти буває один на всіх, пік без лока складається з сусідніми.
+STAGE_VRAM: dict[str, int] = {}
+#: Пік сторінки поза вікнами етапів (байти): етап скидає лічильник піку torch,
+#: і без цього накопичувача пік сторінки зводився б до піку останнього етапу.
+_PAGE_VRAM: dict[str, int] = {"alloc": 0, "reserved": 0}
+#: Пристрій, на якому міряти пам'ять етапів; порожньо — не міряти (процесор).
+_VRAM_DEVICE: list[str] = [""]
+#: Віддавати кеш алокатора після КОЖНОГО етапу на карті (`--keep-cache` — ні).
+#: 🔴 05.10.2026, 1×V100, 8 шардів: після мережі сегментації виділено лише
+#: ваги (sato бачить 351 МБ), але звільнене лишалось у кеші процесу до кінця
+#: сторінки — ще ~8 с полігонів і розпізнавання. nvidia-smi показував 3–4
+#: процеси одночасно по 2.2–2.7 ГБ, і регулятор, бачачи 95% карти, звужував
+#: флот 8 → 6, хоча реально виділеного там не було.
+_EMPTY_AFTER_STAGE: list[bool] = [True]
+#: Сторінка в роботі — для рядка `[htr-oom]`.
+CURRENT_PAGE: list[str] = [""]
+#: Пауза перед повтором після OOM, с: пік сусіднього шарда за цей час минає.
+OOM_RETRY_SLEEP = 1.0
+#: Рядкові кропи поточної сторінки: найширший і найвищий, пікселі кропа.
+PAGE_LINES: dict[str, int] = {}
+
+
+def is_cuda_oom(exc: BaseException) -> bool:
+    """Чи це нестача пам'яті КАРТИ. `MemoryError` процесора сюди не входить:
+    повтор його не лікує, і регулятор флоту рахує його інакше."""
+    if type(exc).__name__ == "OutOfMemoryError":
+        return True
+    msg = str(exc)
+    return ("CUDA out of memory" in msg or "CUBLAS_STATUS_ALLOC_FAILED" in msg
+            or "CUDNN_STATUS_ALLOC_FAILED" in msg)
+
+
+def _oom_stage(exc: BaseException) -> str:
+    return str(getattr(exc, "_htr_stage", "") or "page")
+
+
+def oom_line(stage: str, outcome: str) -> str:
+    """Рядок про OOM для наглядача флоту: етап, сторінка, пам'ять процесу й карти.
+
+    🔴 Формат розбирає регулятор (`_pump` у gpurunner): `ключ=значення` через
+    пробіл. Слів «out of memory» тут навмисно немає — за ними старий регулятор
+    рахує OOM і назавжди стискає флот, а відновлений пік (`outcome=retry`)
+    сторінку не губить. `outcome=fail` — повтор не допоміг, сторінка впала.
+    """
+    bits = [f"stage={stage}", f"page={CURRENT_PAGE[0] or '?'}", f"outcome={outcome}"]
+    dev = _VRAM_DEVICE[0]
+    if dev:
+        try:
+            import torch
+
+            free, total = torch.cuda.mem_get_info(torch.device(dev))
+            bits += [f"alloc_mb={int(torch.cuda.memory_allocated(dev) / 2**20)}",
+                     f"reserved_mb={int(torch.cuda.memory_reserved(dev) / 2**20)}",
+                     f"free_mb={int(free / 2**20)}", f"total_mb={int(total / 2**20)}"]
+        except Exception:
+            pass
+    if PAGE_LINES:
+        bits.append(f"wmax={PAGE_LINES.get('wmax', 0)}")
+    return "[htr-oom] " + " ".join(bits)
+
+
+def vram_rest(device: str) -> dict[str, int]:
+    """Скільки процес тримає на карті у спокої — після сторінки, кеш уже віддано.
+
+    Без контексту CUDA (його регулятор додає сам). За цим числом регулятор
+    флоту рахує, скільки процесів кожної ролі влізе: сегментатор без моделей
+    розпізнавання тримає менше за читача, а nvidia-smi у контейнері Vast не
+    каже, котрий процес чий.
+    """
+    if not device.startswith("cuda"):
+        return {}
+    try:
+        import torch
+
+        return {"vram_rest_mb": int(torch.cuda.memory_reserved(device) / 2**20)}
+    except Exception:
+        return {}
+
+
+def _vram_fold(dev: str) -> None:
+    import torch
+
+    _PAGE_VRAM["alloc"] = max(_PAGE_VRAM["alloc"], int(torch.cuda.max_memory_allocated(dev)))
+    _PAGE_VRAM["reserved"] = max(_PAGE_VRAM["reserved"],
+                                 int(torch.cuda.max_memory_reserved(dev)))
+
+
+def _vram_stage(fn: Any, name: str, retry: bool = False) -> Any:
+    """Обгортка етапу на карті: пік VRAM етапу в `STAGE_VRAM`, етап — на OOM.
+
+    `retry` — на OOM віддати кеш, перечекати пік сусіда й повторити етап ОДИН
+    раз. Лише для етапів, чий вхід — готовий масив і повтор нічого не псує
+    (мережа сегментації, sato, CLAHE). Під локом карти обгортка стоїть
+    ВСЕРЕДИНІ лока, тож повтор теж іде під ним. Другий OOM летить далі, до
+    повтору сторінки в циклі.
+    """
+    def call(*a: Any, **kw: Any) -> Any:
+        dev = _VRAM_DEVICE[0]
+        if not dev:
+            return fn(*a, **kw)
+        import torch
+
+        _vram_fold(dev)
+        torch.cuda.reset_peak_memory_stats(dev)
+        try:
+            try:
+                return fn(*a, **kw)
+            except Exception as exc:
+                if not is_cuda_oom(exc):
+                    raise
+                if not hasattr(exc, "_htr_stage"):
+                    exc._htr_stage = name
+                if not retry:
+                    raise
+                print(oom_line(name, "retry"), flush=True)
+                torch.cuda.empty_cache()
+                time.sleep(OOM_RETRY_SLEEP)
+                try:
+                    return fn(*a, **kw)
+                except Exception as exc2:
+                    if is_cuda_oom(exc2) and not hasattr(exc2, "_htr_stage"):
+                        exc2._htr_stage = name
+                    raise
+        finally:
+            STAGE_VRAM[name] = max(STAGE_VRAM.get(name, 0),
+                                   int(torch.cuda.max_memory_allocated(dev) / 2**20))
+            # скільки етап лишив у кеші процесу — те, що бачить nvidia-smi
+            STAGE_VRAM[name + "_resv"] = max(STAGE_VRAM.get(name + "_resv", 0),
+                                             int(torch.cuda.memory_reserved(dev) / 2**20))
+            # і скільки кеш сягав ПОСЕРЕДИНІ етапу: пачки голосу різної ширини
+            # роздувають його вище за виділене (05.10.2026: читачі по 1.9–2.9 ГБ
+            # у nvidia-smi при 745 МБ виділеного на PP-голосі)
+            STAGE_VRAM[name + "_resv_peak"] = max(
+                STAGE_VRAM.get(name + "_resv_peak", 0),
+                int(torch.cuda.max_memory_reserved(dev) / 2**20))
+            _vram_fold(dev)
+            if _EMPTY_AFTER_STAGE[0]:
+                torch.cuda.empty_cache()
+
+    if hasattr(fn, "__dict__"):
+        call.__dict__ = fn.__dict__
+    call.__name__ = getattr(fn, "__name__", name)
+    call.__doc__ = getattr(fn, "__doc__", None)
+    return call
+
+
+def call_with_oom_retry(run: Any, device: str) -> Any:
+    """Сторінка, що впала на OOM карти, читається ще раз — один.
+
+    Пік сусіднього шарда минає за секунду, і сторінка, яку він «задавив», на
+    повторі проходить. Доти вона йшла у `failed` до догону, а наглядач рахував
+    її OOM як привід назавжди зменшити флот (05.10.2026: один такий рядок
+    зупинив 1×V100 на 6 шардах при 11 вільних ядрах).
+    """
+    try:
+        return run()
+    except Exception as exc:
+        if not (device.startswith("cuda") and is_cuda_oom(exc)):
+            raise
+        print(oom_line(_oom_stage(exc), "retry"), flush=True)
+        import torch
+
+        torch.cuda.empty_cache()
+        time.sleep(OOM_RETRY_SLEEP)
+        try:
+            return run()
+        except Exception as exc2:
+            if is_cuda_oom(exc2):
+                print(oom_line(_oom_stage(exc2), "fail"), flush=True)
+            raise
+
+
+def install_vram_stages(device: str, keep_cache: bool = False) -> None:
+    """Пік VRAM по етапах + повтор після OOM там, де він безпечний.
+
+    Ставиться ПІСЛЯ патчів етапів (sato на карті, `seg_resize`) і ДО лока
+    карти й таймерів: обгортка має опинитись під локом, а міряти те, що справді
+    виконується.
+    """
+    if not device.startswith("cuda"):
+        return
+    from kraken import blla
+    from skimage import filters as skf
+
+    _VRAM_DEVICE[0] = device
+    _EMPTY_AFTER_STAGE[0] = not keep_cache
+    if getattr(blla, "_vram_stages", False):
+        return
+    blla.compute_segmentation_map = _vram_stage(blla.compute_segmentation_map,
+                                                "seg_net", retry=True)
+    skf.sato = _vram_stage(skf.sato, "sato", retry=True)
+    fc = sys.modules.get("fast_clahe")
+    if fc is not None and fc.STATE.get("device"):
+        fc.equalize_adapthist_fast = _vram_stage(fc.equalize_adapthist_fast, "clahe",
+                                                 retry=True)
+    g = globals()
+    g["kraken_decode_crops"] = _vram_stage(g["kraken_decode_crops"], "recog_kraken")
+    g["pp_read_crops"] = _vram_stage(g["pp_read_crops"], "recog_pp")
+    g["_parseq_decode"] = _vram_stage(g["_parseq_decode"], "recog_pysar")
+    blla._vram_stages = True
+
+
 def stages_summary(total: dict[str, float], pages: int, device: str,
                    gpu_sato: bool) -> str:
     """Середня сторінка за етапами з позначкою, де кожен рахується."""
@@ -706,7 +914,7 @@ def machine_label(device: str) -> str:
 
 
 def install_gpu_lock(lock_path: Path, device: str, keep_cache: bool = False) -> None:
-    """Серіалізувати між воркерами лише GPU-фазу сегментації.
+    """Серіалізувати між воркерами лише GPU-фазу сегментації — forward мережі.
 
     `blla.segment` = короткий forward сегментера на GPU (пік 2.2 ГБ VRAM при
     висоті 1800) + довга CPU-геометрія (векторизація, полігони, seam-carving).
@@ -714,27 +922,37 @@ def install_gpu_lock(lock_path: Path, device: str, keep_cache: bool = False) -> 
     паралельні шарди молотять CPU-частину одночасно, а піки VRAM не збігаються
     і в 4 ГБ GTX 1650 вміщається 3 воркери замість одного. Без лока три
     одночасні forward'и = 6.6 ГБ = OOM.
+
+    ⚠ Лише forward, і це заміряно, а не за звичкою (05.10.2026, 1×V100, 56
+    сторінок DAZHO 1-78-1037, пік етапу разом із вагами): мережа сегментації
+    2134 МБ, CLAHE 901, PP-голос 745, sato 351, Писар 348. sato піку не має
+    взагалі (рівень ваг), а заведений під лок разом із CLAHE підняв чекання
+    карти з 0.2 до 1.2 с на сторінку вже на п'яти шардах — на більшому флоті лок
+    став би стелею темпу. Середні піки (CLAHE, голоси) враховує регулятор флоту
+    часткою процесів, що в піку одночасно.
     """
     from kraken import blla
 
-    orig = blla.compute_segmentation_map
     ctx = _file_lock_ctx(lock_path)
 
-    def locked(*a, **kw):
-        t = time.perf_counter()
-        with ctx():
-            STAGES["gpu_wait"] = STAGES.get("gpu_wait", 0.0) + time.perf_counter() - t
-            try:
-                return orig(*a, **kw)
-            finally:
-                # empty_cache віддає пам'ять ОС — це і тримає піки шардів
-                # роз'єднаними, і водночас змушує наступну алокацію йти в драйвер
-                # замість кешу. `--keep-cache` дає зміряти, що з двох дорожче.
-                if device.startswith("cuda") and not keep_cache:
-                    import torch
-                    torch.cuda.empty_cache()
+    def under_lock(orig):
+        def locked(*a, **kw):
+            t = time.perf_counter()
+            with ctx():
+                STAGES["gpu_wait"] = STAGES.get("gpu_wait", 0.0) + time.perf_counter() - t
+                try:
+                    return orig(*a, **kw)
+                finally:
+                    # empty_cache віддає пам'ять ОС — це і тримає піки шардів
+                    # роз'єднаними, і водночас змушує наступну алокацію йти в
+                    # драйвер замість кешу. `--keep-cache` дає зміряти, що з двох
+                    # дорожче.
+                    if device.startswith("cuda") and not keep_cache:
+                        import torch
+                        torch.cuda.empty_cache()
+        return locked
 
-    blla.compute_segmentation_map = locked
+    blla.compute_segmentation_map = under_lock(blla.compute_segmentation_map)
 
 
 # ── OCR ──────────────────────────────────────────────────────────────────────
@@ -1014,7 +1232,9 @@ def pp_read_crops(pp: tuple, crops: list) -> list[tuple[str, float]]:
     for grp in _pp_groups(crops, order, height, budget_px):
         try:
             got = read(grp)
-        except Exception:
+        except Exception as exc:
+            if cuda and is_cuda_oom(exc):
+                print(oom_line("recog_pp", "split"), flush=True)
             if cuda:
                 torch.cuda.empty_cache()
             got = []
@@ -1121,8 +1341,15 @@ def kraken_decode_crops(voice: tuple, crops: list, batch: int = 1) -> list[str]:
         lens = torch.tensor([x.shape[-1] for x in tt])
         padded = torch.stack([
             torch.nn.functional.pad(x, (0, wmax - x.shape[-1])) for x in tt])
-        with torch.no_grad():
-            res = net.predict_string(padded, lens)
+        try:
+            with torch.no_grad():
+                res = net.predict_string(padded, lens)
+        except Exception as exc:
+            # кошик перечитається по одному (`_decode_in_batches`) — для
+            # наглядача це відновлений пік, а не загублена сторінка
+            if is_cuda_oom(exc):
+                print(oom_line("recog_kraken", "split"), flush=True)
+            raise
         return [_norm(s) for s in res]
 
     def after_batch_error() -> None:
@@ -1981,6 +2208,11 @@ class Segmenter:
             return self._post(seg)
         finally:
             self._page_h = 0
+            # буфери нарізки звільняються лише тут, після геометрії — без цього
+            # вони висіли б у кеші процесу всю фазу розпізнавання
+            if _VRAM_DEVICE[0] and _EMPTY_AFTER_STAGE[0]:
+                import torch
+                torch.cuda.empty_cache()
 
 
 def resolve_case_key(case_dir: Path, run_name: str = "",
@@ -2044,6 +2276,51 @@ def seg_cache_dir_for(case_dir: Path, root: Path) -> Path:
 _SAFE_SLUG = __import__("re").compile(r"[^\w.\-]+", __import__("re").UNICODE)
 
 
+def _parseq_decode(model, tensors: list, device: str, batch: int) -> list[tuple]:
+    """PARSeq пачками → `[(текст, ймовірності токенів)]` у порядку `tensors`.
+
+    OOM пачки — пачка навпіл, аж до одного рядка; лише OOM на одному рядку
+    летить далі (до повтору сторінки). Вхід PARSeq фіксованого розміру, тож пам'ять
+    пачки від ширини рядка не залежить — OOM тут дає лише чужий пік на карті,
+    і половина пачки його переживає.
+    """
+    import torch
+
+    def run(chunk: list) -> list[tuple]:
+        x = torch.stack(chunk).to(device, dtype=_weights_dtype(model))
+        with torch.no_grad():
+            probs = model(x).float().softmax(-1)
+        preds, per_tok = model.tokenizer.decode(probs)
+        # Обидва з одного `decode` — різна довжина означала б ваду рушія, і
+        # тихо обрізати її не можна: сторінка мовчки лишилась би без хвоста.
+        return list(zip(preds, per_tok, strict=True))
+
+    def run_split(chunk: list) -> list[tuple]:
+        try:
+            return run(chunk)
+        except Exception as exc:
+            if not is_cuda_oom(exc) or len(chunk) <= 1:
+                raise
+            print(oom_line("recog_pysar", "split"), flush=True)
+            torch.cuda.empty_cache()
+            half = len(chunk) // 2
+            return run_split(chunk[:half]) + run_split(chunk[half:])
+
+    out: list[tuple] = []
+    for j in range(0, len(tensors), batch):
+        out += run_split(tensors[j:j + batch])
+    return out
+
+
+def _note_line_extent(crops: list) -> None:
+    """Найширший і найвищий кроп сторінки — у `PAGE_LINES` (мета й рядок OOM)."""
+    ws = [int(c.width) for c in crops if c is not None]
+    hs = [int(c.height) for c in crops if c is not None]
+    if ws:
+        PAGE_LINES["wmax"] = max(PAGE_LINES.get("wmax", 0), max(ws))
+        PAGE_LINES["hmax"] = max(PAGE_LINES.get("hmax", 0), max(hs))
+
+
 def ocr_page_parseq(im: Image.Image, segmenter, rec, device: str,
                     batch: int = 32, seg_ctx: dict | None = None
                     ) -> tuple[list[str], float]:
@@ -2071,6 +2348,7 @@ def ocr_page_parseq(im: Image.Image, segmenter, rec, device: str,
     seg = segmenter.segment(im, ctx.get("stem", ""), ctx.get("orient", 0),
                             ctx.get("enhanced", ""))
     crops = _line_crops(im, seg)
+    _note_line_extent(crops)
     # рамки — з того самого фільтра, що й кропи (див. `_line_crops`)
     ocr_page_parseq.boxes = list(getattr(_line_crops, "boxes", []) or [])
     ocr_page_parseq.polys = list(getattr(_line_crops, "polys", []) or [])
@@ -2110,27 +2388,19 @@ def ocr_page_parseq(im: Image.Image, segmenter, rec, device: str,
     # сегментації. Пам'ять не додається: кропи вже живі, тут лише посилання.
     _kept_crops: list = []
     kept: list[int] = []                      # глобальні індекси кропів, що вижили
-    for j in range(0, len(tensors), batch):
-        x = torch.stack(tensors[j:j + batch]).to(device, dtype=_weights_dtype(model))
-        with torch.no_grad():
-            probs = model(x).float().softmax(-1)
-        preds, per_tok = model.tokenizer.decode(probs)
-        # Обидва з одного `decode` — різна довжина означала б ваду рушія, і
-        # тихо обрізати її не можна: сторінка мовчки лишилась би без хвоста.
-        for _k, (text, p) in enumerate(zip(preds, per_tok, strict=True)):
-            # NFC — щоб combining-діакритика не ламала fuzzy-пошук (як у kraken-гілці);
-            # clean_pysar_text прибирає маркери конфлікту ‹|›, які модель v5b
-            # успадкувала з забрудненого корпусу і вставляє прямо в текст справи
-            text = clean_pysar_text(unicodedata.normalize("NFC", str(text or "")))
-            if text:
-                g = j + _k                    # глобальний індекс кропа
-                lines.append(text)
-                kept.append(g)
-                _kept_boxes.append(_all_boxes[g] if g < len(_all_boxes) else None)
-                _kept_polys.append(_all_polys[g] if g < len(_all_polys) else None)
-                _kept_crops.append(crops[g] if g < len(crops) else None)
-                if p is not None and getattr(p, "numel", lambda: 0)():
-                    confs.append(float(p.mean()))
+    for g, (text, p) in enumerate(_parseq_decode(model, tensors, device, batch)):
+        # NFC — щоб combining-діакритика не ламала fuzzy-пошук (як у kraken-гілці);
+        # clean_pysar_text прибирає маркери конфлікту ‹|›, які модель v5b
+        # успадкувала з забрудненого корпусу і вставляє прямо в текст справи
+        text = clean_pysar_text(unicodedata.normalize("NFC", str(text or "")))
+        if text:
+            lines.append(text)
+            kept.append(g)
+            _kept_boxes.append(_all_boxes[g] if g < len(_all_boxes) else None)
+            _kept_polys.append(_all_polys[g] if g < len(_all_polys) else None)
+            _kept_crops.append(crops[g] if g < len(crops) else None)
+            if p is not None and getattr(p, "numel", lambda: 0)():
+                confs.append(float(p.mean()))
     ocr_page_parseq.boxes = _kept_boxes
     ocr_page_parseq.polys = _kept_polys
     ocr_page_parseq.crops = _kept_crops
@@ -2162,15 +2432,8 @@ def ocr_page_parseq(im: Image.Image, segmenter, rec, device: str,
                     (np.asarray(c.convert("RGB").resize((ew, eh), Image.LANCZOS),
                                 dtype="float32") / 255.0 - 0.5) / 0.5).permute(2, 0, 1)
                 for c in crops]
-            full = []
-            for j in range(0, len(etens), batch):
-                x = torch.stack(etens[j:j + batch]).to(device,
-                                                       dtype=_weights_dtype(emodel))
-                with torch.no_grad():
-                    p = emodel(x).float().softmax(-1)
-                preds, _ = emodel.tokenizer.decode(p)
-                full += [clean_pysar_text(unicodedata.normalize("NFC", str(t or "")))
-                         for t in preds]
+            full = [clean_pysar_text(unicodedata.normalize("NFC", str(t or "")))
+                    for t, _ in _parseq_decode(emodel, etens, device, batch)]
         side[tag] = [full[g] if g < len(full) else "" for g in kept]
         n_lost = sum(1 for i, t in enumerate(full)
                      if t.strip() and i not in kept_set)
@@ -2208,6 +2471,7 @@ def ocr_page_pp(im: Image.Image, segmenter, rec, seg_ctx: dict | None = None
     seg = segmenter.segment(im, ctx.get("stem", ""), ctx.get("orient", 0),
                             ctx.get("enhanced", ""))
     crops = _line_crops(im, seg)
+    _note_line_extent(crops)
     boxes = list(getattr(_line_crops, "boxes", []) or [])
     polys = list(getattr(_line_crops, "polys", []) or [])
     ocr_page_pp.size = [int(im.width), int(im.height)]
@@ -2233,6 +2497,14 @@ def ocr_page(im: Image.Image, segmenter, rec_model, device: str,
              engine: str = "kraken", batch: int = 32,
              seg_ctx: dict | None = None) -> tuple[list[str], float]:
     """Розпізнати сторінку → (рядки NFC, середній посимвольний conf)."""
+    if SEGMENT_ONLY[0]:
+        # сегментатор: нарізка лягає в кеш (`Segmenter.save`), розпізнавання
+        # робить читач. Шлях до нарізки — той самий, що в читача (`process_page`:
+        # контраст, поворот), інакше ключ кешу розійшовся б і читач різав би сам
+        ctx = seg_ctx or {}
+        segmenter.segment(im, ctx.get("stem", ""), ctx.get("orient", 0),
+                          ctx.get("enhanced", ""))
+        return [], 0.0
     if engine == "parseq":
         return ocr_page_parseq(im, segmenter, rec_model, device, batch, seg_ctx)
     if engine == "ppocr":
@@ -2808,6 +3080,71 @@ def drain_requested(out_dir: Path, shard_k: int) -> bool:
 _QUEUE_DIR: Path | None = None
 
 
+# ── сегментатори: геометрія сторінки окремими процесами ──────────────────────
+# 🔴 Шард рахує сторінку суто послідовно: сегментація (мережа на карті 0.8 с +
+# геометрія на процесорі ~5 с, здебільшого пітонівські цикли під GIL) → потім
+# розпізнавання. На 1×V100 (05.10.2026, DAZHO 1-78-1037) флот із 6 шардів тримав
+# 6 ядер із 17: більше шардів не вміщала пам'ять карти, а кожен шард несе в ній
+# усі моделі розпізнавання. Сегментатор (`--segment-only`) несе лише мережу
+# сегментації, рахує геометрію наперед і кладе нарізку в кеш сегментації, а
+# читач бере її звідти готовою — вільні ядра стають темпом.
+#: Заявки сегментаторів: `<out>/_segq/_claims/<stem>.claim` (той самий `O_EXCL`).
+SEGQ_DIR = "_segq"
+#: Скільки читач чекає на сторінку, яку зараз ріже живий сегментатор, с.
+#: Далі бере її сам: завислий сегментатор не сміє зупинити читання.
+SEGQ_WAIT_S = 120.0
+#: Процес лише сегментує (`--segment-only`): `ocr_page` повертається після нарізки.
+SEGMENT_ONLY: list[bool] = [False]
+
+
+def page_feed(pages_all: list[Path], deferred: list[tuple[int, Path]],
+              pause: float = 0.5):
+    """Сторінки читача: спершу весь список, потім відкладені — доки є такі.
+
+    Тіло циклу саме вирішує, чи відкласти сторінку ще раз (`deferred`). Між
+    кругами відкладених — пауза: нарізка, на яку чекаємо, приходить за секунди.
+    """
+    yield from enumerate(pages_all, 1)
+    while deferred:
+        batch = list(deferred)
+        deferred.clear()
+        yield from batch
+        if deferred:
+            time.sleep(pause)
+
+
+def segment_only_refusal(args: argparse.Namespace, claim_mode: bool) -> str:
+    """Чому сегментатор не може працювати з цими ручками; порожньо — може.
+
+    Кожна відмова — про тихий холостий хід: без кешу нарізку нема куди класти,
+    без клеймів сегментатор і читачі ділили б сторінки наосліп, а з перевіркою
+    орієнтації читач ріже кілька поворотів, яких сегментатор не вгадає.
+    """
+    if not args.seg_cache:
+        return "--segment-only без кешу сегментації: нарізку нема куди класти"
+    if not claim_mode:
+        return "--segment-only потребує --shard k/n і --claim (спільні з читачами клейми)"
+    if args.orient_check:
+        return ("--segment-only з --orient-check: читач перебирає повороти, "
+                "сегментатор їх не вгадає")
+    return ""
+
+
+def seg_in_progress(out_dir: Path, stem: str, cached) -> bool:
+    """Чи ріже цю сторінку ЗАРАЗ живий сегментатор (нарізки ще немає).
+
+    `cached(stem)` — чи лежить нарізка в кеші. Сторінка, на якій сегментатор
+    упав (`<stem>.failed`), чекання не варта: читач ріже її сам.
+    """
+    d = out_dir / SEGQ_DIR
+    c = d / CLAIMS_DIR / f"{stem}.claim"
+    if not c.exists() or (d / f"{stem}.failed").exists():
+        return False
+    if cached(stem) or (out_dir / f"{stem}.txt").exists():
+        return False
+    return _claim_held(c)
+
+
 # ── адаптивна стеля сегментації ──────────────────────────────────────────────
 # 🔴 Сторінка, що вперлась у стелю (дефолт 200 рядків), читається ДВІЧІ:
 # сегментація й обидва голоси наново з піднятою стелею. На сповіді 1802 р.
@@ -2885,6 +3222,9 @@ def _rss_mb() -> tuple[float | None, float | None]:
 
 
 def _reset_vram_peak(device: str) -> None:
+    STAGE_VRAM.clear()
+    PAGE_LINES.clear()
+    _PAGE_VRAM["alloc"] = _PAGE_VRAM["reserved"] = 0
     if not device.startswith("cuda"):
         return
     try:
@@ -2972,10 +3312,19 @@ def page_memory(device: str) -> dict[str, int]:
         try:
             import torch
 
-            out["vram_peak_mb"] = int(torch.cuda.max_memory_allocated(device) / 2**20)
-            out["vram_reserved_mb"] = int(torch.cuda.max_memory_reserved(device) / 2**20)
+            # етапи скидають лічильник піку torch (`_vram_stage`), тож пік
+            # сторінки — більший із накопиченого між етапами й поточного
+            alloc = max(_PAGE_VRAM["alloc"], int(torch.cuda.max_memory_allocated(device)))
+            resv = max(_PAGE_VRAM["reserved"], int(torch.cuda.max_memory_reserved(device)))
+            out["vram_peak_mb"] = int(alloc / 2**20)
+            out["vram_reserved_mb"] = int(resv / 2**20)
         except Exception:
             pass
+        if STAGE_VRAM:
+            out["vram_stages"] = dict(STAGE_VRAM)
+    if PAGE_LINES:
+        out["line_wmax_px"] = PAGE_LINES.get("wmax", 0)
+        out["line_hmax_px"] = PAGE_LINES.get("hmax", 0)
     rss, peak = _rss_mb()
     if rss is not None:
         out["rss_mb"] = int(rss)
@@ -3636,6 +3985,11 @@ def main() -> int:
     ap.add_argument("--gpu-lock", default="",
                     help="файл міжпроцесного лока GPU-фази сегментації; "
                          "обов'язковий при --shard на одній карті")
+    ap.add_argument("--segment-only", action="store_true",
+                    help="сегментатор: лише нарізка сторінок у кеш сегментації "
+                         "(<out>/_segq/_claims), без моделей розпізнавання й без "
+                         "тексту. Читачі тієї самої справи беруть нарізку готовою. "
+                         "Потребує кешу сегментації і --shard k/n з --claim")
     ap.add_argument("--supervise", type=int, default=2,
                     help="скільки додаткових спроб робити, якщо після прогону на "
                          "диску лишились кадри без тексту (дефолт 2, 0 — вимкнути). "
@@ -3759,6 +4113,92 @@ def _cached(cache: dict | None, key: tuple, make):
     return cache[key]
 
 
+def segment_only_loop(args: argparse.Namespace, pages_all: list[Path], out_dir: Path,
+                      segmenter, device: str, engine: str, shard_k: int, prog,
+                      guard_state: dict, seg_ceiling, cache: dict | None = None) -> int:
+    """Сегментатор: один прохід по справі, нарізка кожної вільної сторінки в кеш.
+
+    Сторінку бере лише тоді, коли в неї немає тексту, нарізки й клейма читача.
+    Між своєю заявкою і клеймом читача є вікно: читач, що встиг заклеймити
+    сторінку першим, ріже її сам, а сегментатор свою заявку знімає — інакше
+    читач, який прийшов пізніше, чекав би на нарізку, якої ніхто не робить.
+    Тексту, мети й подій `htr` сегментатор не пише: облік сторінок веде читач.
+    """
+    segq = out_dir / SEGQ_DIR
+    reader_claims = out_dir / CLAIMS_DIR
+
+    def cached(stem: str) -> bool:
+        f = segmenter._file(stem, max(0, args.force_orient))
+        return f is not None and f.is_file()
+
+    n = len(pages_all)
+    cut = failed = 0
+    drained = False
+    t_all = time.time()
+    print(f"[seg-only] сегментатор шард {shard_k + 1}: {n} кадрів, нарізка в "
+          f"{segmenter.dir}", flush=True)
+    for i, src in enumerate(pages_all, 1):
+        stem = src.stem
+        if drain_requested(out_dir, shard_k):
+            print(f"[seg-only] 🚰 шард {shard_k + 1}: злив — нових сторінок не беру",
+                  flush=True)
+            drained = True
+            break
+        if ((out_dir / f"{stem}.txt").exists() or cached(stem)
+                or (reader_claims / f"{stem}.claim").exists()
+                or (segq / f"{stem}.failed").exists()):
+            continue
+        if not claim_page(segq, stem, args.shard):
+            continue
+        if (reader_claims / f"{stem}.claim").exists():
+            (segq / CLAIMS_DIR / f"{stem}.claim").unlink(missing_ok=True)
+            continue
+        shared = shared_ceiling(out_dir)
+        if shared > args.max_endpoints:
+            args.max_endpoints = shared
+            seg_ceiling.set_ceiling(shared)
+        t = time.time()
+        _reset_vram_peak(device)
+        CURRENT_PAGE[0] = src.name
+        STAGES.clear()
+        try:
+            seg_ceiling.reset()
+            call_with_oom_retry(
+                lambda src=src: process_page(src, segmenter, None, device, args.min_conf,
+                                     args.min_chars, args.sure_conf, None, guard_state,
+                                     args.guard_warmup, engine, args.batch,
+                                     args.force_orient, args.enhance),
+                device)
+        except KeyboardInterrupt:
+            raise
+        except Exception as exc:
+            failed += 1
+            # читач не чекатиме на цю сторінку (`seg_in_progress`) і поріже сам
+            atomic_write(segq / f"{stem}.failed", f"{type(exc).__name__}: {exc}\n")
+            print(f"[seg-only] ✗ {src.name}: {type(exc).__name__}: {exc}", flush=True)
+            if device.startswith("cuda"):
+                import torch
+                torch.cuda.empty_cache()
+            continue
+        cut += 1
+        sec = round(time.time() - t, 1)
+        mem = page_memory(device)
+        if device.startswith("cuda") and not args.keep_cache:
+            import torch
+            torch.cuda.empty_cache()
+        emit(prog, "seg", i=i, n=n, page=src.name, sec=sec,
+             stages=page_stages(sec), **vram_rest(device), **mem)
+    took = time.time() - t_all
+    print(f"[seg-only] шард {shard_k + 1}: нарізано {cut}, збоїв {failed} за "
+          f"{took:.0f} с", flush=True)
+    emit(prog, "seg_done", pages=cut, failed=failed, sec=round(took, 1))
+    if cache is not None:
+        cache["seg_model"] = segmenter._model
+        if drained:
+            cache["drained"] = True
+    return 0
+
+
 def _main_case(args: argparse.Namespace, cache: dict | None = None) -> int:
     """Одна справа. `cache` — моделі й патчі, спільні для черги (`run_queue`)."""
     case_dir = Path(args.case_dir)
@@ -3771,8 +4211,12 @@ def _main_case(args: argparse.Namespace, cache: dict | None = None) -> int:
     # рекурсію: воркер бачить прапорець, але вже не делегує
     # У черзі голови немає: процес живе через справи, а його смерть і завислі
     # сторінки веде бокс-раннер (вотчдог, карантин, догін по диску).
+    # ✂ Сегментатор — без голови: голова перезапускає воркер, поки на диску є
+    # кадри без ТЕКСТУ, а сегментатор тексту не пише — він крутився б до стелі
+    # перезапусків і виходив із «неповно» (05.10.2026: наглядач прочитав п'ять
+    # таких виходів як смерть флоту й погасив робочий бокс).
     if (args.supervise > 0 and not os.environ.get("NYSHPORKA_HTR_CHILD")
-            and cache is None):
+            and cache is None and not getattr(args, "segment_only", False)):
         return supervise(args, case_dir, out_dir)
 
     if KRAKEN_PIN_VERSION not in SUPPORTED_KRAKEN and not args.allow_any_kraken:
@@ -3798,6 +4242,13 @@ def _main_case(args: argparse.Namespace, cache: dict | None = None) -> int:
 
     shard_k, shard_n = parse_shard(args.shard)
     claim_mode = bool(args.claim) and shard_n > 1
+    if args.segment_only:
+        why = segment_only_refusal(args, claim_mode)
+        if why:
+            print(f"[seg-only] ✖ {why}", flush=True)
+            emit(prog, "done", pages=0, skipped=0, failed=0, error=why)
+            return 2
+        SEGMENT_ONLY[0] = True
     try:
         pages_all = select_pages(case_dir, args.pages, args.limit, shard_k, shard_n,
                                  claim=claim_mode)
@@ -4016,8 +4467,14 @@ def _main_case(args: argparse.Namespace, cache: dict | None = None) -> int:
         half, why = pysar_fp16_wanted(args.pysar_fp16, device)
         if not warm:
             print(f"[htr-run] Писар у {'fp16' if half else 'fp32'} ({why})", flush=True)
-    rec_model = _cached(cache, ("rec", args.model, device, half),
-                        lambda: load_recognizer(args.model, engine, device, half))
+    if args.segment_only:
+        # сегментатор не тримає в карті жодної моделі розпізнавання — у цьому
+        # й весь сенс: спокій процесу = контекст CUDA + мережа сегментації
+        args.models, args.beam = "", 1
+        rec_model = None
+    else:
+        rec_model = _cached(cache, ("rec", args.model, device, half),
+                            lambda: load_recognizer(args.model, engine, device, half))
     globals()["VOICE_BATCH"] = max(1, int(args.voice_batch))
     globals()["PP_BATCH"] = max(1, int(args.pp_batch))
     globals()["PP_VRAM_MB"] = max(0, int(args.pp_vram_mb))
@@ -4141,6 +4598,9 @@ def _main_case(args: argparse.Namespace, cache: dict | None = None) -> int:
     # Ім'я включає ПРИСТРІЙ: на багатокартковому боксі шарди розкладені по
     # cuda:0..N, і спільний лок на всіх серіалізував би карти між собою, тобто
     # зводив би багатокартковість нанівець.
+    # пік VRAM по етапах і повтор після OOM — ДО лока: обгортка має лягти
+    # під нього, щоб повтор пікового етапу теж ішов під локом
+    install_vram_stages(device, keep_cache=args.keep_cache)
     if not args.gpu_lock and shard_n > 1 and device.startswith("cuda"):
         args.gpu_lock = str(out_dir / f"_gpu.{_device_slug(device)}.lock")
         print(f"[htr-run] лок GPU-фази виведено сам: {Path(args.gpu_lock).name} "
@@ -4169,6 +4629,10 @@ def _main_case(args: argparse.Namespace, cache: dict | None = None) -> int:
         if orient_net is not None:
             print("[htr-run] орієнтація: CNN-класифікатор", flush=True)
     print(f"[htr-run] моделі завантажено за {time.time() - t0:.0f} с", flush=True)
+
+    if args.segment_only:
+        return segment_only_loop(args, pages_all, out_dir, segmenter, device, engine,
+                                 shard_k, prog, guard_state, seg_ceiling, cache)
 
     done = skipped = failed = enhanced_n = ceiling_n = 0
     lines_done = 0
@@ -4223,7 +4687,16 @@ def _main_case(args: argparse.Namespace, cache: dict | None = None) -> int:
     # 🚰 Злитий шард виходить свідомо, а недочитане доберуть сусіди. Тому
     # вердикт повноти в кінці виносить не він (див. `drained` нижче).
     drained = False
-    for i, src in enumerate(pages_all, 1):
+    # ✂ Сторінки, які зараз ріже сегментатор (`--segment-only`), відкладаються:
+    # читач бере наступну, а до відкладеної вертається, коли нарізка ляже в кеш.
+    deferred: list[tuple[int, Path]] = []
+    deferred_since: dict[str, float] = {}
+
+    def seg_cached(stem: str) -> bool:
+        f = segmenter._file(stem, max(0, args.force_orient))
+        return f is not None and f.is_file()
+
+    for i, src in page_feed(pages_all, deferred):
         stem = src.stem
         txt_path = out_dir / f"{stem}.txt"
         if txt_path.exists() and src.name in already:
@@ -4251,6 +4724,13 @@ def _main_case(args: argparse.Namespace, cache: dict | None = None) -> int:
                   flush=True)
             drained = True
             break
+        if claim_mode and seg_in_progress(out_dir, stem, seg_cached):
+            first = deferred_since.setdefault(stem, time.time())
+            if time.time() - first < SEGQ_WAIT_S:
+                deferred.append((i, src))
+                continue
+            print(f"[htr-run] ✂ {src.name}: сегментатор ріже її понад "
+                  f"{SEGQ_WAIT_S:.0f} с — ріжу сам", flush=True)
         if claim_mode and not claim_page(out_dir, stem, args.shard):
             continue
         # консоль має знати, на чому саме шард завис: вотчдог бачить лише тишу,
@@ -4258,6 +4738,8 @@ def _main_case(args: argparse.Namespace, cache: dict | None = None) -> int:
         emit(prog, "page_start", i=i, n=n, page=src.name)
         t = time.time()
         _reset_vram_peak(device)
+        CURRENT_PAGE[0] = src.name
+        seg_hits0 = segmenter.hits
         # стелю міг уже підняти сусідній шард — читаємо з нею, а не вдвічі
         shared = shared_ceiling(out_dir)
         if shared > args.max_endpoints:
@@ -4278,11 +4760,13 @@ def _main_case(args: argparse.Namespace, cache: dict | None = None) -> int:
         STAGES.clear()
         try:
             seg_ceiling.reset()
-            res = process_page(src, segmenter, rec_model, device,
-                               args.min_conf, args.min_chars, args.sure_conf,
-                               orient_net, guard_state, args.guard_warmup,
-                               engine, args.batch, args.force_orient,
-                               args.enhance)
+            res = call_with_oom_retry(
+                lambda src=src: process_page(src, segmenter, rec_model, device,
+                                     args.min_conf, args.min_chars, args.sure_conf,
+                                     orient_net, guard_state, args.guard_warmup,
+                                     engine, args.batch, args.force_orient,
+                                     args.enhance),
+                device)
             # 🔴 Побічні голоси й кропи знімаються ЗАРАЗ, разом із результатом:
             # перепуск стелі нижче кличе `process_page` удруге й перезаписує
             # атрибути функції, а якщо другий результат відкинуто — тека голосу
@@ -4298,11 +4782,13 @@ def _main_case(args: argparse.Namespace, cache: dict | None = None) -> int:
                 ceiling_hits += 1
                 seg_ceiling.set_ceiling(args.ceiling_retry)
                 try:
-                    res2 = process_page(src, segmenter, rec_model, device,
-                                        args.min_conf, args.min_chars,
-                                        args.sure_conf, orient_net, guard_state,
-                                        args.guard_warmup, engine, args.batch,
-                                        args.force_orient, args.enhance)
+                    res2 = call_with_oom_retry(
+                        lambda src=src: process_page(src, segmenter, rec_model, device,
+                                             args.min_conf, args.min_chars,
+                                             args.sure_conf, orient_net, guard_state,
+                                             args.guard_warmup, engine, args.batch,
+                                             args.force_orient, args.enhance),
+                        device)
                 except Exception as exc:
                     print(f"[seg-ceiling] ✗ {src.name}: перепуск не вдався "
                           f"({type(exc).__name__}) — лишаю перший результат",
@@ -4487,7 +4973,10 @@ def _main_case(args: argparse.Namespace, cache: dict | None = None) -> int:
              # і «чому темп упаде згодом» не пояснити нічим, крім читання меты
              guard={"checks": guard_state["checks"], "flips": guard_state["flips"],
                     "warmup": args.guard_warmup},
-             **mem)
+             # ✂ нарізка взялась із кешу (сегментатор чи засів) — з частки таких
+             # сторінок регулятор вирішує, чи бракує сегментаторів
+             **({"seg_hit": segmenter.hits > seg_hits0} if segmenter.dir else {}),
+             **vram_rest(device), **mem)
 
     meta["done"] = True
     # Сторінки, де kraken викинув рядки, — до ока (поле `needs_review` у мети
