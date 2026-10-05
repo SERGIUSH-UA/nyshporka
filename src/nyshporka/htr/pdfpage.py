@@ -330,7 +330,7 @@ def _worker(argv: list[str]) -> int:
 
     width = int(argv[argv.index("--width") + 1]) if "--width" in argv else DEFAULT_WIDTH
     tasks = [tuple(t) for t in json.loads(sys.stdin.read() or "[]")]
-    _render_tasks(tasks, width)  # type: ignore[arg-type]
+    _render_tasks(tasks, width)
     return 0
 
 

@@ -1098,12 +1098,12 @@ def _go(res: GoResult, cases: tuple[str, ...], say: EventFn,
         # Ручки оренди наглядач читає з `-p`; людське `-p …` того самого ключа
         # перемагає (наші йдуть лише туди, де людина нічого не задала).
         given = {p.split("=", 1)[0].strip() for p in params}
-        for key, value in (("datacenter_only", "true" if datacenter_only else ""),
-                           ("pace", pace),
-                           ("min_pages_per_hour", f"{min_pph:g}" if min_pph else ""),
-                           ("machine_id", str(int(machine)) if machine else "")):
-            if value and key not in given:
-                params = (*params, f"{key}={value}")
+        for knob, setting in (("datacenter_only", "true" if datacenter_only else ""),
+                              ("pace", pace),
+                              ("min_pages_per_hour", f"{min_pph:g}" if min_pph else ""),
+                              ("machine_id", str(int(machine)) if machine else "")):
+            if setting and knob not in given:
+                params = (*params, f"{knob}={setting}")
 
         if boxes > 1 and len(convoy.legs) > 1:
             from nyshporka.cloud import batch as BT
