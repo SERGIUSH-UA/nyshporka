@@ -1444,6 +1444,14 @@ def search_cmd(
     anchors: bool = typer.Option(
         False, "--anchors",
         help="ще й канал імен: ім'я + по батькові роду поруч. Потребує --case"),
+    record: bool = typer.Option(
+        False, "--record",
+        help="ще й канал запису: ознаки роду з різних колонок одного запису. "
+             "Потребує --case"),
+    family: str = typer.Option(
+        "", "--family",
+        help="чий рід: ім'я профілю (`nysh profile`); порожньо — рід, "
+             "написанням якого є запит"),
     selfcheck: bool = typer.Option(
         False, "--selfcheck",
         help="поміряти, чи бачить пошук аркуші, де прізвище виписане оком. "
@@ -1468,7 +1476,8 @@ def search_cmd(
                                 "context": context, "thresh": thresh,
                                 "limit": limit, "given": given, "folk": folk,
                                 "rank": rank, "profile": use_profile,
-                                "anchors": anchors,
+                                "anchors": anchors, "record": record,
+                                "family": family,
                                 "selfcheck": selfcheck})
     if _answer(env, as_json):
         return
@@ -1524,6 +1533,9 @@ def search_cmd(
         console.print(f"[accent]⚓[/accent]  {h.get('name')} · {h.get('page')} · "
                       f"рядок {h.get('line_no')} · [warn]{h.get('matched')}[/warn]")
         console.print(f"    [muted]{h.get('line')}[/muted]")
+    from nyshporka.search.cli import print_records
+
+    print_records((env.data.get("coverage", {}).get("record") or {}).get("hits") or [])
     # 🔴 Знаменник друкується завжди, і найважливіший він саме при нулі:
     # без нього «не знайшлось» читається як «цього не існує».
     _notes(env)

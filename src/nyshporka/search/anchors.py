@@ -56,6 +56,9 @@ class Person:
     patronymic: str = ""
     born: int | None = None
     died: int | None = None
+    #: Прізвище людини, коли воно НЕ прізвище роду: дівоче в дружини, рід
+    #: матері. Каналу запису воно дає ще одну ознаку тієї самої родини.
+    surname: str = ""
 
     @property
     def dated(self) -> bool:
@@ -93,6 +96,9 @@ def people(prof: Any = None) -> list[Person]:
 
     ⚠ Профіль перекриває канон за іменем: те, що дослідник виписав руками, він
     виписав, подивившись на документ.
+
+    🔴 Канон — лише для роду самого простору (`profile.is_home`). Інша родина
+    з того самого файла має тільки свій `kin`: люди канону їй чужі.
     """
     if prof is None:
         try:
@@ -106,7 +112,7 @@ def people(prof: Any = None) -> list[Person]:
     # зливав їх в одну особу: по батькові другого разом із його вікном років
     # зникало з якорів (рецензія 08.09, третій раунд).
     out: dict[tuple[str, str], Person] = {}
-    for p in _from_canon():
+    for p in (_from_canon(prof) if _home(prof) else []):
         out.setdefault(_person_key(p), p)
     for p in _from_profile(prof):
         out[_person_key(p)] = p
@@ -118,6 +124,18 @@ def _person_key(p: Person) -> tuple[str, str]:
             norm_patronymic(p.patronymic) or p.patronymic.lower())
 
 
+def _home(prof: Any) -> bool:
+    """Профіль без імені (тести, заготовки) вважається родом простору."""
+    if prof is None or not getattr(prof, "name", ""):
+        return True
+    try:
+        from nyshporka.core.profile import is_home
+
+        return is_home(prof)
+    except Exception:
+        return True
+
+
 def _from_profile(prof: Any) -> list[Person]:
     out: list[Person] = []
     for raw in (getattr(prof, "kin", ()) or ()):
@@ -126,11 +144,12 @@ def _from_profile(prof: Any) -> list[Person]:
         out.append(Person(given=str(raw.get("given") or ""),
                           patronymic=str(raw.get("patronymic") or ""),
                           born=_int(raw.get("born")),
-                          died=_int(raw.get("died"))))
+                          died=_int(raw.get("died")),
+                          surname=str(raw.get("surname") or "")))
     return out
 
 
-def _from_canon() -> list[Person]:
+def _from_canon(prof: Any = None) -> list[Person]:
     """Особи канону, якщо він у цьому просторі є. Немає — порожньо, не помилка.
 
     ⚠ По батькові беремо розбором рядка імені (`split_name`): у канонічній
@@ -145,7 +164,7 @@ def _from_canon() -> list[Person]:
         root = workspace().canonical / "persons"
         if not root.is_dir():
             return []
-        subs = _surname_substrings()
+        subs = _surname_substrings(prof)
         out: list[Person] = []
         for path in sorted(root.glob("*.md")):
             try:
@@ -167,12 +186,14 @@ def _from_canon() -> list[Person]:
         return []
 
 
-def _surname_substrings() -> tuple[str, ...]:
+def _surname_substrings(prof: Any = None) -> tuple[str, ...]:
     """Підрядки прізвища роду з профілю — щоб воно не стало «по батькові»."""
     try:
-        from nyshporka.core.profile import active
+        if prof is None:
+            from nyshporka.core.profile import active
 
-        return tuple(normalize_archival(s) for s in (active().substrings or ()) if s)
+            prof = active()
+        return tuple(normalize_archival(s) for s in (prof.substrings or ()) if s)
     except Exception:
         return ()
 

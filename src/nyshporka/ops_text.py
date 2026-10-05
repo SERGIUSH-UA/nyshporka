@@ -455,6 +455,9 @@ class TextFindArgs(BaseModel):
     thresh: int = Field(default=78, ge=50, le=100)
     limit: int = Field(default=40, ge=1, le=5000)
     context: int = Field(default=1, ge=0, le=6)
+    family: str = Field(default="",
+                        description="чий рід: ім'я профілю з `config/research_profile.yaml`. "
+                                    "Порожньо — рід, написанням якого є запит")
 
 
 @op("text.find", summary="Знайти рід усіма каналами разом — зі знаменником і журналом заходу",
@@ -463,15 +466,20 @@ def text_find(a: TextFindArgs) -> Envelope:
     """🔴 Нуль тут не друкується без журналу: скільки кадрів, скільки прочитано,
     скільки в сторі, якими голосами, які канали ганяли й що бачить око.
 
-    Канали: прізвище всіма написаннями профілю (ціле слово + корінь, склейки
+    Канали: прізвище всіма написаннями роду (ціле слово + корінь, склейки
     через рядок і колонку вже в кандидатах стору), якорі імен роду у вікні
-    років справи, самоперевірка на аркушах, які око вже виписало. Латинський
-    голос окремої команди не потребує: стор тримає всі прогони справи.
+    років справи, запис (ознаки родини з різних колонок одного запису),
+    самоперевірка на аркушах, які око вже виписало. Латинський голос окремої
+    команди не потребує: стор тримає всі прогони справи.
+
+    Рід — будь-який профіль файла: названий `family` або той, написанням якого
+    є запит.
     """
     from nyshporka.search import textops as T
 
     try:
-        res = T.find(a.q, a.case, thresh=a.thresh, limit=a.limit, context=a.context)
+        res = T.find(a.q, a.case, thresh=a.thresh, limit=a.limit, context=a.context,
+                     family=a.family)
     except ValueError as exc:
         return fail(str(exc))
     if res.get("error"):
@@ -496,7 +504,13 @@ def text_find(a: TextFindArgs) -> Envelope:
     elif sc and sc.get("missed"):
         env.warn("selfcheck_missed",
                  f"око бачило прізвище на аркушах, яких пошук не підняв: {sc['missed']}")
-    if not res.get("hits") and not (res.get("anchor") or {}).get("hits"):
+    rec = next((ch for ch in led["channels"] if ch["id"] == "record"), None)
+    if rec and rec.get("ran") and rec.get("common"):
+        env.warn("record_common",
+                 f"ознаки, які запис звичайного розміру в цій справі зустрічає "
+                 f"випадково частіше, ніж через раз, майже нічого не важать: "
+                 f"{', '.join(rec['common'])}")
+    if not res.get("hits") and not (res.get("anchor") or {}).get("hits")             and not (res.get("record") or {}).get("hits"):
         env.warn("zero_with_denominator",
                  f"не знайшлось — кадрів {led.get('frames') or '?'}, прочитано "
                  f"{led.get('decoded') or '?'}, у сторі прогонів {led.get('in_store')} із "

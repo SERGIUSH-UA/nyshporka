@@ -360,6 +360,24 @@ def whatis_cmd(
 
 
 
+def print_records(hits: list[dict[str, Any]], *, series: bool = False) -> None:
+    """🏠 Записи окремим блоком: кожен — бал, сторінка, смуга й ознаки з рядками.
+
+    Ознаки друкуються поіменно, з рядком, звідки кожна: запис складено з
+    різних колонок, і око має бачити, що саме зійшлося, а не лише бал.
+    """
+    for h in hits:
+        head = f"{h.get('name')} · {h.get('page')}"
+        if series and (h.get("shifra") or h.get("case_key")):
+            head = f"{h.get('shifra') or h['case_key']} · {head}"
+        where = (f"смуга y {h['band'][0]}–{h['band'][1]}" if h.get("by_geometry")
+                 else "[warn]по сторінці — геометрії немає[/warn]")
+        console.print(f"[accent]🏠[/accent] [bold]{h.get('score')}[/bold]  {head} · {where}")
+        for m in h.get("marks") or []:
+            console.print(f"      [warn]{m.get('term')}[/warn] ← {m.get('token')} · "
+                          f"рядок {m.get('line_no')} · [muted]{m.get('line')}[/muted]")
+
+
 # ── етап 3: find ─────────────────────────────────────────────────────────────
 @app.command("find")
 def find_cmd(
@@ -370,13 +388,16 @@ def find_cmd(
     thresh: int = typer.Option(78, "--thresh", help="поріг схожості 50-100"),
     limit: int = typer.Option(40, "--limit", help="скільки показати"),
     context: int = typer.Option(1, "--context", help="рядків сусідства"),
+    family: str = typer.Option("", "--family",
+                               help="чий рід: ім'я профілю (`nysh profile`); порожньо — "
+                                    "рід, написанням якого є запит"),
     as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Знайти рід усіма каналами разом. Нуль друкується лише з журналом заходу."""
     from nyshporka import ops as O
 
     env = O.call("text.find", {"q": q, "case": _scope(case), "thresh": thresh, "limit": limit,
-                               "context": context})
+                               "context": context, "family": family})
     if _answer(env, as_json):
         return
     d = env.data
@@ -403,6 +424,8 @@ def find_cmd(
         console.print(f"[accent]⚓[/accent]  {h.get('name')} · {h.get('page')} · рядок "
                       f"{h.get('line_no')} · [warn]{h.get('matched')}[/warn]")
         console.print(f"    [muted]{h.get('line')}[/muted]")
+    print_records((d.get("record") or {}).get("hits") or [], series=d.get("scope") == "cases")
+    fam = d.get("family") or {}
     led = d["ledger"]
     console.print("")
     console.print(f"[bold]знаменник:[/bold] кадрів {led.get('frames') if led.get('frames') is not None else '?'} · "
@@ -412,6 +435,8 @@ def find_cmd(
                   f"голоси: {', '.join(led.get('voices') or []) or '—'} · письмо: "
                   f"{', '.join(led.get('scripts') or []) or '?'}")
     _reach_line(led)
+    if fam:
+        console.print(f"[bold]рід:[/bold] {fam.get('display')} · профіль «{fam.get('name')}»")
     sh = led.get("shared")
     if sh:
         console.print(f"[warn]з них чужий декод:[/warn] прогонів {sh['runs']} із "
@@ -436,6 +461,8 @@ def find_cmd(
                 nums = f" око {ch['eye']} · знайдено {ch['found']} · подано {ch['shown']}"
                 if ch.get("missed"):
                     nums += f" · [warn]пропущено {len(ch['missed'])}[/warn]"
+            if ch["id"] == "record" and ch.get("eye_denom"):
+                nums += f" · око {len(ch.get('eye_found') or [])}/{ch['eye_denom']}"
             if ch.get("of_cases") and ch.get("ran_cases") != ch["of_cases"]:
                 nums += f" (у {ch['ran_cases']} із {ch['of_cases']} справ)"
             parts.append(f"[bold]{ch['id']}[/bold] ✓{nums}")
@@ -446,12 +473,13 @@ def find_cmd(
     if cases:
         # Серія — це перелік справ, а не одна велика: знаменник і нуль
         # називаються по кожній, інакше справа без прочитаного ховається в сумі.
-        with_hits = [c for c in cases if c["total"] or c["anchor"]]
+        with_hits = [c for c in cases if c["total"] or c["anchor"] or c.get("record")]
         console.print(f"[bold]справ:[/bold] {len(cases)} · з хітами {len(with_hits)} · "
                       f"без жодного {len(cases) - len(with_hits)}")
         for c in sorted(with_hits, key=lambda c: -(c["total"] + c["anchor"])):
             console.print(f"  {c['shifra'] or c['key'] or c['scope']}: прізвище {c['total']}"
-                          f" · якорі {c['anchor']} · сторінок {c['pages'] if c['pages'] is not None else '?'}"
+                          f" · якорі {c['anchor']} · записи {c.get('record', 0)}"
+                          f" · сторінок {c['pages'] if c['pages'] is not None else '?'}"
                           f" · кадрів {c['frames'] if c['frames'] is not None else '?'}")
     if d.get("stems_dropped"):
         console.print(f"[muted]фрагменти профілю не шукались окремо (склейки в кандидатах): "

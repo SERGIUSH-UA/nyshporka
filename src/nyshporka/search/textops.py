@@ -666,29 +666,35 @@ def whatis(scope: str) -> dict[str, Any]:
 # ── find: усі канали разом ───────────────────────────────────────────────────
 #: Стем коротший за стільки літер названий у журналі окремо.
 SHORT_STEM = 6
+#: Чому канали роду не ганяли, коли запит не про рід.
+_NOT_FAMILY = ("запит не про жоден рід із профілів простору — люди роду тут ні до "
+               "чого; назвати рід явно: `--family <профіль>`, перелік: `nysh profile`")
 
 
-def _query_is_profile(q: str) -> bool:
-    """Чи запит є написанням прізвища профілю — стемом, не схожістю."""
+def _query_is_profile(q: str, fam: Any = None) -> bool:
+    """Чи запит є написанням прізвища роду — стемом, не схожістю.
+
+    `fam` — рід, про який питаємо; без нього — рід, який підібрав запит серед
+    усіх профілів файла (`profile.family_for_query`).
+    """
     from nyshporka import htr_store as S
 
     try:
         from nyshporka.core import profile as PROF
 
-        forms, whose = PROF.forms_for_query(q)
+        if fam is None:
+            fam = PROF.family_for_query(q)
+        if fam is None:
+            return False
+        forms, whose = PROF.forms_for_query(q, prof=fam)
     except Exception:
         return False
     if not whose:
         return False
     want = {S._norm(w) for w in S._TOKEN_RE.findall(q)}
     have = {S._norm(f) for f in forms} | {S._norm(whose)}
-    subs: set[str] = set()
-    try:
-        prof = PROF.active()
-        have |= {S._norm(x) for x in (prof.all_spellings() or [])}
-        subs = {S._norm(x) for x in (prof.substrings or ()) if x}
-    except Exception:
-        pass
+    have |= {S._norm(x) for x in (fam.all_spellings() or [])}
+    subs = {S._norm(x) for x in (fam.substrings or ()) if x}
     if not want:
         return False
     if want <= {h for h in have if h}:
@@ -701,7 +707,7 @@ def _query_is_profile(q: str) -> bool:
 
 
 def find(q: str, scope: str | Sequence[str] = "", *, thresh: int = 78, limit: int = 40,
-         context: int = 1) -> dict[str, Any]:
+         context: int = 1, family: str = "") -> dict[str, Any]:
     """Пошук роду в області: одна справа, прогін, серія або кілька справ.
 
     🔴 Серія й перелік розкладаються на справи, а не шукаються одним заходом.
@@ -715,13 +721,14 @@ def find(q: str, scope: str | Sequence[str] = "", *, thresh: int = 78, limit: in
     if scope:
         sc = S.runs_for_scope(scope)
         if sc["kind"] == "cases":
-            return _find_many(q, sc, thresh=thresh, limit=limit, context=context)
+            return _find_many(q, sc, thresh=thresh, limit=limit, context=context,
+                              family=family)
     return _find_one(q, scope if isinstance(scope, str) else "", thresh=thresh,
-                     limit=limit, context=context)
+                     limit=limit, context=context, family=family)
 
 
 def _find_many(q: str, sc: dict[str, Any], *, thresh: int, limit: int,
-               context: int) -> dict[str, Any]:
+               context: int, family: str = "") -> dict[str, Any]:
     """`find` по кожній справі області й зведення.
 
     Прогін без ключа справи шукається сам по собі: викинути його з серії
@@ -734,7 +741,7 @@ def _find_many(q: str, sc: dict[str, Any], *, thresh: int, limit: int,
              or str(r.get("case_canon")) not in keyed]
     one: list[tuple[str, dict[str, Any]]] = []
     for k in keys + loose:
-        got = _find_one(q, k, thresh=thresh, limit=limit, context=context)
+        got = _find_one(q, k, thresh=thresh, limit=limit, context=context, family=family)
         if got.get("error"):
             return {"error": f"«{k}»: {got['error']}"}
         one.append((k, got))
@@ -756,6 +763,7 @@ def _merge_finds(q: str, sc: dict[str, Any], one: list[tuple[str, dict[str, Any]
             by_key.setdefault(k0, str(row["shifra"]))
     hits: list[dict[str, Any]] = []
     anchors: list[dict[str, Any]] = []
+    records: list[dict[str, Any]] = []
     cases: list[dict[str, Any]] = []
     for k, r in one:
         led = r["ledger"]
@@ -766,10 +774,15 @@ def _merge_finds(q: str, sc: dict[str, Any], one: list[tuple[str, dict[str, Any]
         anc = r.get("anchor") or {}
         for h in anc.get("hits") or []:
             anchors.append({**h, "case_key": r.get("case_key") or k})
+        rec = r.get("record") or {}
+        for h in rec.get("hits") or []:
+            records.append({**h, "case_key": r.get("case_key") or k,
+                            "shifra": shifra or h.get("shifra") or ""})
         chans = {c["id"]: c for c in led["channels"]}
         cases.append({
             "key": r.get("case_key") or "", "scope": k, "shifra": shifra,
             "total": int(r.get("total") or 0), "anchor": int(anc.get("total") or 0),
+            "record": int(rec.get("total") or 0),
             "pages": led.get("pages_scoped"), "frames": led.get("frames"),
             "decoded": led.get("decoded"), "runs": led.get("runs"),
             "shared": bool(led.get("shared")),
@@ -785,7 +798,7 @@ def _merge_finds(q: str, sc: dict[str, Any], one: list[tuple[str, dict[str, Any]
         ran = [c for c in got if c.get("ran")]
         out: dict[str, Any] = {"id": cid, "label": label, "ran": bool(ran),
                                "of_cases": len(one), "ran_cases": len(ran)}
-        if cid in ("surname", "anchor"):
+        if cid in ("surname", "anchor", "record"):
             out["hits"] = sum(int(c.get("hits") or 0) for c in got)
         if cid == "selfcheck":
             out.update(eye=sum(int(c.get("eye") or 0) for c in ran),
@@ -815,6 +828,7 @@ def _merge_finds(q: str, sc: dict[str, Any], one: list[tuple[str, dict[str, Any]
         "short_stems": sorted({v for x in leds for v in x.get("short_stems") or []}),
         "pages_scoped": total_of("pages_scoped"),
         "channels": [chan("surname", "прізвище"), chan("anchor", "якорі"),
+                     chan("record", "запис"),
                      chan("latin", "латинський голос"),
                      chan("selfcheck", "самоперевірка на аркушах, виписаних оком")],
         "searched_before": [], "cases": cases}
@@ -824,11 +838,14 @@ def _merge_finds(q: str, sc: dict[str, Any], one: list[tuple[str, dict[str, Any]
             "stems_dropped": sorted({s for _, r in one for s in r.get("stems_dropped") or []}),
             "anchor": {"on": any(c["anchor"] for c in cases), "hits": top(anchors),
                        "total": sum(c["anchor"] for c in cases)},
+            "record": {"on": any(r.get("record", {}).get("on") for _, r in one),
+                       "hits": top(records), "total": sum(c["record"] for c in cases)},
+            "family": next((r.get("family") for _, r in one if r.get("family")), None),
             "selfcheck": None, "ledger": ledger}
 
 
 def _find_one(q: str, scope: str = "", *, thresh: int = 78, limit: int = 40,
-              context: int = 1) -> dict[str, Any]:
+              context: int = 1, family: str = "") -> dict[str, Any]:
     """Пошук усіма каналами пакета з журналом заходу.
 
     🔴 Журнал — не прикраса. «Шукай ще» доти означало імпровізацію, бо жоден
@@ -841,11 +858,27 @@ def _find_one(q: str, scope: str = "", *, thresh: int = 78, limit: int = 40,
     from nyshporka.search import trace as TRACE
 
     in_case = bool(scope)
-    # 🔴 Запит «про профіль» — лише коли він СТЕМОМ збігається з формою профілю,
-    # а не схожий на 85: сусідній рід із тим самим коренем схожий на 85, і профіль
-    # підмішував 26 форм роду в пошук конфузера (рецензія 08.09). Якорі — теж
-    # лише для профільного запиту: кін чужому прізвищу ні до чого.
-    about_profile = _query_is_profile(q)
+    from nyshporka.core import profile as PROF
+
+    # 🏠 Чий рід. Названий явно (`--family`) — той; ні — той профіль файла,
+    # написанням якого є запит. Доти пошук знав лише активний профіль, і родина,
+    # заведена другим профілем (замовлення, сусідній рід), шукалась голим
+    # словом: без написань, без людей-якорів, без каналу запису.
+    fam = None
+    if family:
+        try:
+            fam = PROF.resolve(family)
+        except PROF.ProfileError as exc:
+            return {"error": str(exc)}
+    else:
+        with contextlib.suppress(Exception):
+            fam = PROF.family_for_query(q)
+    # 🔴 Запит «про рід» — лише коли він СТЕМОМ збігається з формою роду, а не
+    # схожий на 85: сусідній рід із тим самим коренем схожий на 85, і профіль
+    # підмішував 26 форм роду в пошук конфузера (рецензія 08.09). Якорі й запис —
+    # теж лише для запиту про рід: люди роду чужому прізвищу ні до чого. Рід,
+    # названий явно, — про рід за означенням: людина сама сказала чий.
+    about_profile = fam is not None and (bool(family) or _query_is_profile(q, fam))
     # 🔴 Ім'я прогону як область означає СПРАВУ цього прогону: пошук іде по всіх
     # її голосах, і журнал рахує ті самі прогони, що й пошук. Доти пошук брав
     # один прогін, а журнал — усі голоси справи, і нуль по Писарю читався як
@@ -861,10 +894,13 @@ def _find_one(q: str, scope: str = "", *, thresh: int = 78, limit: int = 40,
                 search_scope = str(sc["key"])
     res = S.search(q, name=search_scope or None, thresh=thresh, limit=limit,
                    context=context, given=True, folk=False, rank=True,
-                   profile=about_profile, anchors=in_case and about_profile)
+                   profile=about_profile, anchors=in_case and about_profile,
+                   family=fam.name if (about_profile and fam is not None) else "",
+                   record=in_case and about_profile)
     if res.get("error") and not res.get("hits"):
         return {"error": str(res["error"])}
     anchor: dict[str, Any] = res.get("anchor") or {"on": False}
+    record: dict[str, Any] = res.get("record") or {"on": False}
     key = str(res.get("scope_key") or sc.get("key") or "")
     rows: list[dict[str, Any]] = list(sc["rows"])
     voices = sorted({str(x) for r in rows for x in (r.get("engine_ids") or [])})
@@ -906,9 +942,20 @@ def _find_one(q: str, scope: str = "", *, thresh: int = 78, limit: int = 40,
          "ran": bool(anchor.get("on")) and bool(anchor.get("given")) and bool(anchor.get("patronymic")),
          "hits": int(anchor.get("total") or 0),
          "why": ("потребує справи (--case): вікно якорів береться з її років" if not in_case
-                 else "запит не про рід профілю — кін профілю тут ні до чого" if not about_profile
+                 else _NOT_FAMILY if not about_profile
                  else ("у профілі й каноні немає пари ім'я + по батькові у вікні "
                        f"{anchor.get('years') or 'справи'}" if anchor.get("on") else ""))},
+        {"id": "record",
+         "label": "запис: ознаки родини в межах одного запису, через усі колонки",
+         "ran": bool(record.get("on")) and bool(record.get("terms")),
+         "hits": int(record.get("total") or 0),
+         "geo_pages": int(record.get("geo_pages") or 0),
+         "common": list(record.get("common") or []),
+         "why": ("потребує справи (--case): ознаки людей звужуються роками справи"
+                 if not in_case else _NOT_FAMILY if not about_profile
+                 else ("у роду менше двох ознак у вікні "
+                       f"{record.get('years') or 'справи'}: заповніть `kin` профілю"
+                       if record.get("on") and not record.get("terms") else ""))},
         {"id": "latin", "label": "латинський голос (Скриба) у тій самій області",
          "ran": has_latin,
          "why": "" if has_latin
@@ -926,6 +973,14 @@ def _find_one(q: str, scope: str = "", *, thresh: int = 78, limit: int = 40,
                          "ran": bool(rep.measured), "why": rep.why or "",
                          "eye": rep.eye, "found": len(rep.found), "shown": len(rep.shown),
                          "missed": rep.missed})
+        # 🏠 Той самий знаменник ока міряє й канал запису: аркуш, який око бачило,
+        # а прізвищний свіп не підняв, запис може підняти — і навпаки.
+        if rep.measured and record.get("on"):
+            rec_pages = {SC._pid(str(h.get("page") or "")) for h in record.get("hits") or []}
+            for ch in channels:
+                if ch["id"] == "record":
+                    ch["eye_found"] = sorted(set(rep.denom) & rec_pages)
+                    ch["eye_denom"] = len(rep.denom)
     # ⚠ Короткий стем із гнізда імен («anna») `partial_ratio` знаходить усередині
     # будь-якого слова — 1171 хітів на 128 сторінках (рецензія 08.09, третій раунд).
     short = sorted({str(s) for s in (res.get("stems") or []) if len(str(s)) < SHORT_STEM})
@@ -954,7 +1009,8 @@ def _find_one(q: str, scope: str = "", *, thresh: int = 78, limit: int = 40,
     return {"q": q, "scope": sc["kind"], "case_key": key, "shifra": res.get("scope_shifra") or "",
             "hits": res.get("hits") or [], "total": res.get("total"),
             "stems": res.get("stems"), "stems_dropped": res.get("stems_dropped") or [],
-            "anchor": anchor, "selfcheck": selfcheck, "ledger": ledger}
+            "anchor": anchor, "record": record, "family": res.get("family"),
+            "selfcheck": selfcheck, "ledger": ledger}
 
 
 

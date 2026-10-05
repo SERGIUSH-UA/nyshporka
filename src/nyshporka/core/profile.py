@@ -367,13 +367,79 @@ def active() -> ResearchProfile:
     return resolve()
 
 
+def is_home(prof: ResearchProfile) -> bool:
+    """Чи це рід самого простору — той, що стоїть у `fallback`.
+
+    🔴 Канон простору описує ЙОГО рід. Інший профіль у тому самому файлі — це
+    інша родина (замовлення, сусідній рід), і люди канону їй не родичі: їхні
+    імена в якорях чужої родини знаходили б наш рід під виглядом її.
+    """
+    try:
+        return prof.name == str(_raw().get("fallback") or "")
+    except ProfileError:
+        return False
+
+
+def all_profiles() -> list[ResearchProfile]:
+    """Усі профілі файла, розв'язані. Побитий профіль пропускається — він не
+    повинен вимикати пошук по решті; про нього скаже `nysh profile`."""
+    out: list[ResearchProfile] = []
+    try:
+        names = list((_raw().get("profiles") or {}).keys())
+    except ProfileError:
+        return out
+    for n in names:
+        try:
+            out.append(resolve(str(n)))
+        except ProfileError:
+            continue
+    return out
+
+
 #: Наскільки запит має бути схожий на написання профілю, щоб вважатись ним.
 #: Високо навмисно: розширювати запит написаннями ЧУЖОГО прізвища — це шум,
 #: якого людина не просила, і знаменник тоді бреше в обидва боки.
 QUERY_IS_MINE = 85
 
 
-def forms_for_query(q: str) -> tuple[list[str], str]:
+def _spellings_norm(prof: ResearchProfile) -> list[str]:
+    from nyshporka.utils.translit import normalize_archival
+
+    forms = sorted({normalize_archival(f) for f in prof.all_spellings() if f})
+    return [f for f in forms if len(f) >= 3]
+
+
+def family_for_query(q: str) -> ResearchProfile | None:
+    """Чий рід цей запит: профіль файла, написанням якого він є, або нічий.
+
+    🔴 Файл тримає кілька родів (`profiles`), а пошук доти знав лише активний —
+    тож родина замовлення, заведена другим профілем, ніколи не діставала ні
+    своїх написань, ні своїх людей-якорів. Тепер запит шукає свій рід серед
+    усіх. Поріг той самий, що й для активного (`QUERY_IS_MINE`); двоє
+    претендентів — бере ближчий, на рівних — рід простору.
+    """
+    from rapidfuzz import fuzz
+
+    from nyshporka.utils.translit import normalize_archival
+
+    want = normalize_archival(q or "")
+    if not want:
+        return None
+    best: tuple[float, int, ResearchProfile] | None = None
+    for prof in all_profiles():
+        forms = _spellings_norm(prof)
+        if not forms:
+            continue
+        score = max(fuzz.ratio(want, f) for f in forms)
+        if score < QUERY_IS_MINE:
+            continue
+        cand = (score, 1 if is_home(prof) else 0, prof)
+        if best is None or cand[:2] > best[:2]:
+            best = cand
+    return best[2] if best else None
+
+
+def forms_for_query(q: str, prof: ResearchProfile | None = None) -> tuple[list[str], str]:
     """Написання профілю, якщо запит — це прізвище саме цього профілю.
 
     🔴 Профіль знає 10-13 написань, а людина набирає одне. Доти жодне з них у
@@ -401,6 +467,10 @@ def forms_for_query(q: str) -> tuple[list[str], str]:
 
     Повертає `(нормалізовані написання, як звати профіль)`; чужий запит або
     відсутній профіль дають порожньо, і це не помилка.
+
+    `prof` — рід, названий явно (`--family`): тоді його написання беруться
+    без звірки запиту, бо людина сама сказала, чий це рід. Без нього рід
+    шукається серед усіх профілів файла (`family_for_query`).
     """
     from rapidfuzz import fuzz
 
@@ -409,15 +479,17 @@ def forms_for_query(q: str) -> tuple[list[str], str]:
     want = normalize_archival(q or "")
     if not want:
         return [], ""
+    if prof is not None:
+        forms = _spellings_norm(prof)
+        return (forms, prof.display or prof.name) if forms else ([], "")
     try:
-        prof = active()
+        prof = family_for_query(q)
     except Exception:
         return [], ""
-    forms = sorted({normalize_archival(f) for f in prof.all_spellings() if f})
-    forms = [f for f in forms if len(f) >= 3]
-    if not forms:
+    if prof is None:
         return [], ""
-    if max(fuzz.ratio(want, f) for f in forms) < QUERY_IS_MINE:
+    forms = _spellings_norm(prof)
+    if not forms or max(fuzz.ratio(want, f) for f in forms) < QUERY_IS_MINE:
         return [], ""
     return forms, prof.display or prof.name
 

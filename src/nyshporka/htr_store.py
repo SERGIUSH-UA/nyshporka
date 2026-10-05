@@ -1603,7 +1603,8 @@ def search(q: str, name: str | None = None, thresh: int = 78,
            limit: int = 200, context: int = 0, *,
            given: bool = True, folk: bool = False,
            rank: bool = True, profile: bool = True,
-           anchors: bool = False) -> dict[str, Any]:
+           anchors: bool = False, family: str = "",
+           record: bool = False) -> dict[str, Any]:
     """Fuzzy-пошук по текстах прогонів. `name=None` — по всіх справах.
 
     `context` — скільки рядків сусідства додати до кожного хіта (0 = без них).
@@ -1620,6 +1621,11 @@ def search(q: str, name: str | None = None, thresh: int = 78,
     про це прізвище.
     `anchors` — ще й канал імен: рядки, де ім'я й по батькові роду стоять поруч.
     Окремим списком, не домішується до прізвищних хітів.
+    `family` — чий рід шукаємо, ім'я профілю з файла. Порожньо — рід, написанням
+    якого є запит (`profile.family_for_query`), серед усіх профілів, не лише
+    активного. Від роду беруться написання, правила рангу, якорі й ознаки запису.
+    `record` — канал запису (`search.record`): ознаки родини, зведені в межах
+    одного запису через усі колонки. Як і якорі — лише в межах справи.
 
     🔴 Контекст рахується лише для показаних хітів, після зрізу за `limit`.
     Інакше на справі з тисячею збігів кожен пошук читав би тисячу сторінок
@@ -1641,10 +1647,19 @@ def search(q: str, name: str | None = None, thresh: int = 78,
     # набирає одну; доти жодна з решти в пошук не потрапляла. Два з семи
     # реальних спотворень декоду переходять поріг ЛИШЕ завдяки їм.
     whose = ""
-    if profile:
-        from nyshporka.core import profile as PROF
+    fam = None
+    from nyshporka.core import profile as PROF
 
-        forms, whose = PROF.forms_for_query(q)
+    if family:
+        try:
+            fam = PROF.resolve(family)
+        except PROF.ProfileError as exc:
+            return {"hits": [], "cases": 0, "error": str(exc)}
+    elif profile:
+        with contextlib.suppress(Exception):
+            fam = PROF.family_for_query(q)
+    if profile or family:
+        forms, whose = PROF.forms_for_query(q, prof=fam if family else None)
         if forms:
             stems, origin = NAMES.add_stems(stems, origin, forms,
                                             NAMES.ORIGIN_PROFILE)
@@ -1700,7 +1715,7 @@ def search(q: str, name: str | None = None, thresh: int = 78,
     # рід лишались би на верхівці, а знахідка — за межею показаного: замір
     # приватного конвеєра дає 60 сильних кандидатів, у яких три верхні місця за
     # балом займає рубрика книги, а самого роду немає жодного.
-    rul = RANK.rules() if rank else RANK.EMPTY
+    rul = RANK.rules(fam) if rank else RANK.EMPTY
     ranked = RANK.mark(raw_hits, rul)
     raw_hits.sort(key=RANK.sort_key)
     shown = raw_hits[:limit]
@@ -1768,7 +1783,8 @@ def search(q: str, name: str | None = None, thresh: int = 78,
         stale_before = TRACE.stale(scope["key"], models)
         TRACE.note(scope["key"], q=q, thresh=thresh, hits=len(raw_hits),
                    pages=unique_pages(rows), models=models,
-                   channels=["surname"] + (["anchor"] if anchors else []))
+                   channels=["surname"] + (["anchor"] if anchors else [])
+                   + (["record"] if record else []))
     # ⚓ Другий канал іде ОКРЕМИМ списком, а не домішується до першого. Прізвищний
     # нуль мусить лишитись прізвищним нулем: «не знайшлось прізвища, зате поруч
     # стоять наші імена» — це дві різні відповіді, і зливати їх означає втратити
@@ -1778,12 +1794,29 @@ def search(q: str, name: str | None = None, thresh: int = 78,
         from nyshporka.search import anchors as A
 
         y1, y2 = case_years(scope["key"]) if scope["key"] else (None, None)
-        keys = A.keys(y1, y2)
+        keys = A.keys(y1, y2, prof=fam)
         found = [] if keys.empty else anchor_hits(rows, keys)
         anchor.update({"hits": found[:limit], "total": len(found),
                        "given": list(keys.given), "patronymic": list(keys.patronymic),
                        "people": keys.people, "undated": keys.undated,
                        "years": list(keys.years) if keys.years else []})
+    # 🏠 Третій канал — теж окремим списком і з тієї самої причини. Він дивиться
+    # не на рядок, а на запис: ознаки родини з різних колонок одного запису.
+    rec: dict[str, Any] = {"on": bool(record)}
+    if record:
+        from nyshporka.search import record as REC
+
+        y1, y2 = case_years(scope["key"]) if scope["key"] else (None, None)
+        ts = REC.terms(fam, q, y1, y2)
+        got_rec = REC.scan(rows, ts, limit=limit)
+        by_run = {r["name"]: r for r in rows}
+        for h in got_rec["hits"]:
+            row = by_run.get(h["name"]) or {}
+            h["case_key"] = (row.get("case_key") or "").strip()
+            h["shifra"] = row.get("shifra") or ""
+        rec.update(got_rec)
+        rec.update({"people": ts.people, "undated": ts.undated,
+                    "years": list(ts.years) if ts.years else []})
     return {"hits": shown, "total": len(raw_hits), "cases": got["scanned"],
             "stems": stems, "stems_asked": asked,
             "stems_added": [s for s in stems if origin.get(s) != NAMES.ORIGIN_QUERY],
@@ -1795,7 +1828,9 @@ def search(q: str, name: str | None = None, thresh: int = 78,
             "rank_dead": list(rul.dead), "rank_broken": list(rul.broken),
             # Чиї написання підмішано. Порожньо — профіль не впізнав запит
             # своїм, і це теж відповідь: шукали лише набраним.
-            "profile_of": whose, "anchor": anchor,
+            "profile_of": whose, "anchor": anchor, "record": rec,
+            "family": ({"name": fam.name, "display": fam.display or fam.name}
+                       if fam is not None else None),
             # Чим цю справу вже шукали. `stale` — записи іншими моделями: вони
             # виглядають як зроблена робота, а зроблені гіршим рушієм.
             "searched_before": before, "searched_stale": stale_before,

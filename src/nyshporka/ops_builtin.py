@@ -1553,6 +1553,18 @@ class SearchArgs(BaseModel):
         default=False,
         description="ще й канал імен: рядки, де ім'я й по батькові роду стоять "
                     "поруч. Потребує `kin` у профілі й обов'язково --case")
+    # 🏠 Третій канал: ознаки родини в межах одного запису, через колонки. Теж
+    # вимкнений і теж лише в справі — з тих самих причин, що й якорі.
+    record: bool = Field(
+        default=False,
+        description="ще й канал запису: ім'я, по батькові й прізвище людей роду "
+                    "в межах одного запису, з різних колонок. Потребує `kin` у "
+                    "профілі й обов'язково --case")
+    # 🏠 Будь-яка родина з файла профілів, а не лише активна.
+    family: str = Field(
+        default="",
+        description="чий рід: ім'я профілю з `config/research_profile.yaml`. "
+                    "Порожньо — рід, написанням якого є запит")
     # 🎯 Третє число знаменника. Прапорцем, а не окремою операцією: агентних
     # інструментів у пакеті стеля, і правило пакета — групувати дії полем, а не
     # плодити tool на кожну. Заразом число опиняється в тому самому конверті,
@@ -1617,11 +1629,12 @@ def _search_every_area(a: SearchArgs) -> Envelope:
     окремим по кожній області.
 
     Фільтри, що діють лише в одній області (`role`, `rtype`, `anchors`,
-    `selfcheck`), тут не пропускаються: вони змусили б дві інші області
-    відмовити, і `all` перетворився б на найдовший спосіб дістати помилку.
+    `record`, `selfcheck`), тут не пропускаються: вони змусили б дві інші
+    області відмовити, і `all` перетворився б на найдовший спосіб дістати помилку.
     """
     narrow = [n for n, v in (("role", a.role), ("rtype", a.rtype),
-                             ("anchors", a.anchors), ("selfcheck", a.selfcheck))
+                             ("anchors", a.anchors), ("record", a.record),
+                             ("selfcheck", a.selfcheck))
               if v]
     if narrow:
         return fail(f"{', '.join(narrow)} діє лише в своїй області, а where=all "
@@ -1692,6 +1705,12 @@ def search_run(a: SearchArgs) -> Envelope:
     if a.anchors and a.where != "decode":
         return fail(f"канал імен читає текст прогонів, а шукаємо в «{a.where}». "
                     f"Постав where=decode або прибери anchors")
+    if a.record and a.where != "decode":
+        return fail(f"канал запису читає текст і геометрію прогонів, а шукаємо в "
+                    f"«{a.where}». Постав where=decode або прибери record")
+    if a.record and not a.case:
+        return fail("канал запису працює в межах справи: ознаки людей звужуються "
+                    "її роками. Дай --case (ключ, шифру або ім'я прогону)")
     if a.selfcheck and not a.case:
         return fail("самоперевірка міряє recall у межах справи: дай --case")
     if a.selfcheck and a.where != "decode":
@@ -1715,7 +1734,8 @@ def search_run(a: SearchArgs) -> Envelope:
             res = htr_store.search(a.q, name=a.case or None, thresh=a.thresh,
                                    limit=a.limit, context=a.context,
                                    given=a.given, folk=a.folk, rank=a.rank,
-                                   profile=a.profile, anchors=a.anchors)
+                                   profile=a.profile, anchors=a.anchors,
+                                   family=a.family, record=a.record)
         except ValueError as exc:
             # Область пошуку не впізнано. Відмова тут нормативна (перелік
             # прийнятних форм), і вона краща за мовчазний пошук по всьому
@@ -1765,7 +1785,10 @@ def search_run(a: SearchArgs) -> Envelope:
                                # ⚓ Другий канал рахується ОКРЕМО: «прізвища
                                # немає, зате поруч стоять наші імена» — це інша
                                # відповідь, ніж «немає нічого».
-                               "anchor": res.get("anchor") or {"on": False}}})
+                               "anchor": res.get("anchor") or {"on": False},
+                               # 🏠 Третій канал — так само окремо.
+                               "record": res.get("record") or {"on": False},
+                               "family": res.get("family")}})
         if scope_kind == "all" or not (res.get("hits") or []):
             # Звідки взято область: без цього «прочесано N прогонів» не каже,
             # що лишилось поза пошуком (`search.reach`).
