@@ -349,6 +349,26 @@ def post_fetch_hooks(run_names: Sequence[str] | str) -> list[dict[str, Any]]:
               for name in names)]
 
 
+def pinned_machine(params: Sequence[str]) -> int:
+    """Закріплена машина заходу (`-p machine_id=…`, останнє входження); 0 — ринок."""
+    value = ""
+    for item in params:
+        key, _, raw = item.partition("=")
+        if key.strip() == "machine_id":
+            value = raw.strip()
+    return int(value) if value.isdigit() else 0
+
+
+def wants_datacenter(params: Sequence[str]) -> bool:
+    """Чи просить захід лише датацентри (`-p datacenter_only=…`, останнє входження)."""
+    value = ""
+    for item in params:
+        key, _, raw = item.partition("=")
+        if key.strip() == "datacenter_only":
+            value = raw.strip().lower()
+    return value in ("1", "true", "yes", "on", "так")
+
+
 def estimate_from(payload: dict[str, Any]) -> M.Estimate:
     """Кошторис наглядача (`htr supervise --dry-run --json`) → наш `Estimate`."""
     raw_best = payload.get("best")
@@ -672,6 +692,20 @@ def prepare(convoy: Convoy, res: GoResult, say: Callable[..., None], *,
         tail = (dry.stderr or dry.stdout or "").strip()[-300:]
         raise GoRefused(f"сухий прогін не дав кошторису (код {dry.returncode}): "
                         f"{tail}")
+    pinned = pinned_machine(params)
+    if pinned and payload.get("machine_id") != pinned:
+        raise GoRefused(
+            f"наглядач хмарних прогонів не закріплює машину {pinned} — оновіть пакет "
+            f"оренди: `nysh update` (gpuhire ≥ 0.6.3) і повторіть, або приберіть "
+            f"`--machine`. Оренди не було.")
+    if wants_datacenter(params) and payload.get("datacenter_only") is not True:
+        # Можливість, а не номер версії (як `_check_engine`): наглядач, що ручки
+        # не знає, мовчки орендував би саме той домашній хост, від якого людина
+        # відгороджувалась. Оренди ще не було.
+        raise GoRefused(
+            "наглядач хмарних прогонів не знає вибору лише датацентрів — оновіть "
+            "пакет оренди: `nysh update` (gpuhire ≥ 0.6.3) і повторіть, або "
+            "приберіть `--datacenter-only`.")
     est = estimate_from(payload)
     res.estimate = est.as_dict()
     say("estimate", est.human(), **est.as_dict())

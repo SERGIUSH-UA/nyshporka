@@ -484,7 +484,8 @@ def go(case: str | Sequence[str], *, backend: str = "vast",
        allow_partial: bool = False, rotate_landscape: bool = False,
        thin: bool = False, transport: str = "auto",
        max_usd_per_1000: float = 0.0, params: Sequence[str] = (),
-       boxes: int = 1,
+       boxes: int = 1, datacenter_only: bool = False, pace: str = "",
+       min_pph: float = 0.0, machine: int = 0,
        on_event: EventFn | None = None, tick_sec: float = 60.0) -> GoResult:
     """Прочитати справу (або кілька) на орендованій машині від початку до кінця.
 
@@ -521,7 +522,8 @@ def go(case: str | Sequence[str], *, backend: str = "vast",
             allow_partial=allow_partial, rotate_landscape=rotate_landscape,
             thin=thin, transport=transport,
             max_usd_per_1000=max_usd_per_1000, params=tuple(params),
-            boxes=boxes, tick_sec=tick_sec)
+            boxes=boxes, datacenter_only=datacenter_only, pace=pace,
+            min_pph=min_pph, machine=machine, tick_sec=tick_sec)
     except GoRefused as exc:
         res.verdict, res.why = exc.verdict, str(exc)
     except RUN.CeilingHit as exc:
@@ -932,7 +934,8 @@ def _go(res: GoResult, cases: tuple[str, ...], say: EventFn,
         second_voice: bool, script: str, model: str, case_key: str, rerun: bool,
         allow_partial: bool, rotate_landscape: bool, thin: bool,
         transport: str, max_usd_per_1000: float, params: tuple[str, ...],
-        boxes: int, tick_sec: float) -> None:
+        boxes: int, tick_sec: float, datacenter_only: bool = False,
+        pace: str = "", min_pph: float = 0.0, machine: int = 0) -> None:
     from nyshporka.cloud import plan as PL
 
     # 0. стелі. 🔴 Нуль і від'ємне — відмова ДО всього (аудит 29.09.2026).
@@ -1067,6 +1070,18 @@ def _go(res: GoResult, cases: tuple[str, ...], say: EventFn,
             "`-p` працює лише на наглядацькому шляху: тонкий складає команду "
             "раннера сам і параметрів роботи не передає. Приберіть `--thin` "
             "або `-p`.")
+    pace = (pace or "").strip().lower()
+    if pace and pace not in ("fast", "cheap"):
+        raise GoRefused(f"`--pace {pace}`: можна лише fast або cheap")
+    if thin and (pace or min_pph):
+        # Тонкий шлях вибирає машину плагіном за ціллю за замовчуванням і
+        # підлоги темпу не знає — мовчки прийняти ручку означало б дати
+        # людині думати, що вона діє.
+        raise GoRefused("`--pace` і `--min-pph` діють лише на наглядацькому шляху — "
+                        "приберіть `--thin` або ці ручки.")
+    if machine and boxes > 1:
+        raise GoRefused("`--machine` закріплює ОДНУ машину, а партія на кілька "
+                        "машин (`--boxes`) їх потребує кілька.")
     if thin and len(convoy.legs) > 1:
         # 🔴 Відмова, а не мовчазне «візьму першу»: тонкий шлях тримає ОДНЕ
         # з'єднання, один віддалений каталог і один pid. Оренди ще не було,
@@ -1079,6 +1094,16 @@ def _go(res: GoResult, cases: tuple[str, ...], say: EventFn,
     # 4а. наглядацький шлях: далі захід веде відчеплений наглядач, а ми виходимо
     if not thin:
         from nyshporka.cloud import supervised as SUP
+
+        # Ручки оренди наглядач читає з `-p`; людське `-p …` того самого ключа
+        # перемагає (наші йдуть лише туди, де людина нічого не задала).
+        given = {p.split("=", 1)[0].strip() for p in params}
+        for key, value in (("datacenter_only", "true" if datacenter_only else ""),
+                           ("pace", pace),
+                           ("min_pages_per_hour", f"{min_pph:g}" if min_pph else ""),
+                           ("machine_id", str(int(machine)) if machine else "")):
+            if value and key not in given:
+                params = (*params, f"{key}={value}")
 
         if boxes > 1 and len(convoy.legs) > 1:
             from nyshporka.cloud import batch as BT
@@ -1098,8 +1123,13 @@ def _go(res: GoResult, cases: tuple[str, ...], say: EventFn,
     # каталог, один pid. Партія сюди не заходить — її спинили ще в `go`.
     leg = convoy.one
     plan, seed = leg.plan, leg.resume
+    if datacenter_only:
+        plan = replace(plan, datacenter_only=True)
+    if machine:
+        # Плагін оренди розуміє адресу `machine:<id>` — лише ця машина.
+        plan = replace(plan, target=f"machine:{int(machine)}")
 
-    est = M.ask_estimate(b, plan.need)
+    est = M.ask_estimate(b, plan.need, target=plan.target)
     if est is not None:
         res.estimate = est.as_dict()
         say("estimate", est.human(), **est.as_dict())

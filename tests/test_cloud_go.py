@@ -1203,3 +1203,86 @@ def test_an_unpacked_result_during_salvage_keeps_the_box_too(space: Path,
 
     assert res.verdict == "unfetched" and res.exit_code == 9, res.why
     assert backend.released == [], "машину НЕ погашено"
+
+
+# ── проміжне сховище (R2) ────────────────────────────────────────────────────
+SECRET_TEXT = "r2-secret-0123456789"
+
+
+def _storage(backend: Any, problems: list[str] | None = None) -> list[dict[str, Any]]:
+    """Бекенд, що вміє сховище: записує, що йому дали, й відповідає `problems`."""
+    seen: list[dict[str, Any]] = []
+    state = {"configured": False, "bucket": "gpurunner-htr", "endpoint": ""}
+
+    def storage_status() -> dict[str, Any]:
+        return dict(state)
+
+    def storage_login(key: str, secret: str, **kw: Any) -> dict[str, Any]:
+        seen.append({"key": key, "secret": secret, **kw})
+        state.update(configured=True, bucket=kw.get("bucket") or state["bucket"],
+                     endpoint="https://acc.r2.cloudflarestorage.com")
+        return {**state, "problems": list(problems or []), "ready": not problems}
+
+    backend.storage_status = storage_status
+    backend.storage_login = storage_login
+    backend.storage_check = lambda: {**state, "problems": list(problems or []),
+                                     "ready": not problems}
+    return seen
+
+
+def test_storage_takes_keys_from_the_environment_and_never_prints_them(
+        cli, monkeypatch) -> None:
+    runner, app, backend = cli
+    seen = _storage(backend)
+    monkeypatch.setenv("R2_ACCESS_KEY_ID", KEY_TEXT)
+    monkeypatch.setenv("R2_SECRET_ACCESS_KEY", SECRET_TEXT)
+    got = runner.invoke(app, ["rent", "storage", "--account", "acc", "--bucket", "mine"])
+    assert got.exit_code == 0, got.output
+    assert seen == [{"key": KEY_TEXT, "secret": SECRET_TEXT, "account": "acc",
+                     "endpoint": "", "bucket": "mine"}]
+    assert KEY_TEXT not in got.output and SECRET_TEXT not in got.output
+    assert "сховище працює" in got.output
+
+
+def test_storage_asks_hidden_when_the_environment_is_empty(cli, monkeypatch) -> None:
+    runner, app, backend = cli
+    seen = _storage(backend)
+    monkeypatch.delenv("R2_ACCESS_KEY_ID", raising=False)
+    monkeypatch.delenv("R2_SECRET_ACCESS_KEY", raising=False)
+    got = runner.invoke(app, ["rent", "storage", "--account", "acc"],
+                        input=f"{KEY_TEXT}\n{SECRET_TEXT}\n")
+    assert seen[-1]["key"] == KEY_TEXT and seen[-1]["secret"] == SECRET_TEXT
+    assert SECRET_TEXT not in got.output, "прихований запит нічого не відлунює"
+
+
+def test_a_broken_bucket_is_a_failure_with_the_reason(cli, monkeypatch) -> None:
+    runner, app, backend = cli
+    _storage(backend, problems=[f"бакет «mine» недоступний ({SECRET_TEXT})"])
+    monkeypatch.setenv("R2_ACCESS_KEY_ID", KEY_TEXT)
+    monkeypatch.setenv("R2_SECRET_ACCESS_KEY", SECRET_TEXT)
+    got = runner.invoke(app, ["rent", "storage", "--account", "acc", "--bucket", "mine"])
+    assert got.exit_code == 1 and "недоступний" in got.output
+    assert SECRET_TEXT not in got.output, "секрет вирізано навіть із чужого тексту"
+
+
+def test_storage_without_arguments_only_shows(cli) -> None:
+    runner, app, backend = cli
+    seen = _storage(backend)
+    got = runner.invoke(app, ["rent", "storage"])
+    assert got.exit_code == 0 and "сховища немає" in got.output and seen == []
+    status = runner.invoke(app, ["rent", "status"])
+    assert "сховище: немає" in status.output
+
+
+def test_storage_check_needs_no_keys(cli, monkeypatch) -> None:
+    runner, app, backend = cli
+    seen = _storage(backend)
+    monkeypatch.delenv("R2_ACCESS_KEY_ID", raising=False)
+    got = runner.invoke(app, ["rent", "storage", "--check"])
+    assert got.exit_code == 0 and seen == []
+
+
+def test_an_old_rent_package_cannot_set_up_storage(cli) -> None:
+    runner, app, _ = cli
+    got = runner.invoke(app, ["rent", "storage", "--account", "acc"])
+    assert got.exit_code == 1 and "0.6.3" in got.output

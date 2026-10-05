@@ -1024,6 +1024,24 @@ def cmd_go(
         help="параметр роботи для машини, `ключ=значення` (напр. "
              "`shards=6`, `max_endpoints=600`). Наш обчислений параметр "
              "ваш перекриває"),
+    pace: str = typer.Option(
+        "", "--pace",
+        help="`fast` (типово) — лише машина, що дає ціль темпу, інакше захід чекає "
+             "ринку; `cheap` — без цілі: найдешевший захід у межах стелі тисячі "
+             "сторінок і годин"),
+    min_pph: float = typer.Option(
+        0.0, "--min-pph",
+        help="підлога темпу, стор/год; діє з `--pace cheap`"),
+    machine: int = typer.Option(
+        0, "--machine",
+        help="орендувати саме цю машину (machine_id з `gpurunner vast offers` або "
+             "з реєстру машин): порівняти два прогони на тому самому залізі, взяти "
+             "перевірений хост. Ціль темпу на неї не діє, гроші й години — діють"),
+    datacenter_only: bool = typer.Option(
+        False, "--datacenter-only",
+        help="орендувати лише машини датацентрів, без домашніх хостів: менше "
+             "обривів посеред заходу, але й машин на ринку в рази менше — "
+             "частіше доведеться чекати"),
     boxes: int = typer.Option(
         1, "--boxes",
         help="партія: розкласти справи на стільки черг, по машині на чергу, з "
@@ -1086,7 +1104,8 @@ def cmd_go(
                 rotate_landscape=rotate_landscape, thin=thin,
                 transport={"store": "r2"}.get(transport, transport),
                 max_usd_per_1000=max_usd_per_1000, params=param,
-                boxes=boxes, on_event=on_event,
+                boxes=boxes, datacenter_only=datacenter_only, pace=pace,
+                min_pph=min_pph, machine=machine, on_event=on_event,
                 tick_sec=max(1.0, tick))
     if as_json:
         # `print`, а не rich: один рядок без переносів і розфарбування — його
@@ -1193,6 +1212,13 @@ def rent_status(
         raise typer.Exit(code=view.exit_code)
     console.print(f"[bold]{backend}[/bold]")
     _print_account(view)
+    store = getattr(b, "storage_status", None)
+    if callable(store):
+        got = store()
+        console.print(
+            f"сховище: бакет «{escape(str(got.get('bucket')))}»" if got.get("configured")
+            else "сховище: немає — кадри їдуть прямо на машину "
+                 "(`nysh cloud rent storage`)", highlight=False)
     raise typer.Exit(code=view.exit_code)
 
 
@@ -1387,6 +1413,94 @@ def rent_login(
     _print_account(view)
     console.print("[muted]далі — сухий прогін без оренди: nysh cloud go "
                   "<справа> із прапорцем сухого прогону[/muted]")
+
+
+@rent_app.command("storage")
+def rent_storage(
+    backend: str = typer.Option("vast", "--backend", "-b", help="бекенд оренди"),
+    account: str = typer.Option(
+        "", "--account", help="ідентифікатор акаунта Cloudflare (32 знаки, видно "
+                              "в кабінеті праворуч, «Account ID»)"),
+    endpoint: str = typer.Option(
+        "", "--endpoint", help="повна адреса S3-сховища замість --account"),
+    bucket: str = typer.Option("", "--bucket", help="бакет (типово `gpurunner-htr`)"),
+    check: bool = typer.Option(
+        False, "--check", help="лише перевірити вже збережений доступ"),
+) -> None:
+    """Проміжне сховище (Cloudflare R2) для хмарних заходів — за бажанням.
+
+    Без сховища кадри їдуть з дому прямо на машину, і кожна переоренда
+    (машина впала, хост відвалився) везе їх з дому вдруге, а свіжі чекпоінти
+    приходять додому раз на 5 хв. Зі сховищем кадри заливаються один раз,
+    чекпоінти лягають туди кожні 2 хв, а нова машина підхоплює роботу з них
+    сама — навіть коли ваш комп'ютер вимкнено.
+
+    Ключі (`R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`) беруться з середовища,
+    а немає — питаються прихованим запитом. 🔴 Нишпорка їх не зберігає й не
+    друкує: вони йдуть бекенду оренди. Без параметрів — показати, що налаштовано.
+    """
+    import os
+
+    b = _rent_backend(backend)
+    show = getattr(b, "storage_status", None)
+    login = getattr(b, "storage_login", None)
+    if not callable(show) or not callable(login):
+        console.print(f"[err]бекенд «{backend}» не вміє налаштовувати сховище — оновіть "
+                      f"пакет оренди: `nysh update` (gpuhire ≥ 0.6.3)[/err]")
+        raise typer.Exit(code=1)
+    if not (account or endpoint or bucket or check):
+        view = show()
+        if view.get("configured"):
+            console.print(f"✅ сховище: бакет «{escape(str(view.get('bucket')))}» · "
+                          f"{escape(str(view.get('endpoint')))}", highlight=False)
+            console.print("[muted]перевірити доступ — `nysh cloud rent storage "
+                          "--check`[/muted]")
+        else:
+            console.print("сховища немає — кадри їдуть прямо на машину. Налаштувати: "
+                          "`nysh cloud rent storage --account <Account ID> "
+                          "--bucket <бакет>`")
+        return
+    from nyshporka.cloud.base import CloudError
+
+    key = secret = ""
+    if not check:
+        key = (os.environ.get("R2_ACCESS_KEY_ID", "").strip()
+               or str(typer.prompt("ключ доступу токена R2 (Access Key ID)",
+                                   hide_input=True)).strip())
+        secret = (os.environ.get("R2_SECRET_ACCESS_KEY", "").strip()
+                  or str(typer.prompt("секрет токена R2 (Secret Access Key)",
+                                      hide_input=True)).strip())
+    verify = getattr(b, "storage_check", None)
+    try:
+        if check and callable(verify):
+            raw = verify()
+        elif check:
+            console.print("[err]бекенд не вміє перевіряти сховище окремо — оновіть "
+                          "`nysh update`[/err]")
+            raise typer.Exit(code=1)
+        else:
+            raw = login(key, secret, account=account, endpoint=endpoint, bucket=bucket)
+    except CloudError as exc:
+        text = str(exc)
+        for s in (key, secret):
+            if s:
+                text = text.replace(s, "***")
+        console.print(f"[err]{escape(text)}[/err]", highlight=False)
+        raise typer.Exit(code=1) from None
+    problems = [str(p) for p in (raw.get("problems") or [])]
+    for s in (key, secret):
+        if s:
+            problems = [p.replace(s, "***") for p in problems]
+    where = f"бакет «{raw.get('bucket')}» · {raw.get('endpoint')}"
+    if problems:
+        console.print(f"[err]🔴 доступ збережено, але захід ним скористатись не "
+                      f"зможе ({escape(where)}):[/err]", highlight=False)
+        for p in problems:
+            console.print(f"[err]  · {escape(p)}[/err]", highlight=False)
+        raise typer.Exit(code=1)
+    console.print(f"✅ сховище працює: {escape(where)}", highlight=False)
+    console.print("[muted]наступний `nysh cloud go` повезе кадри через нього сам "
+                  "(`--transport auto`)[/muted]")
 
 
 @rent_app.command("ceiling")
