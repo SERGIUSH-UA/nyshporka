@@ -828,12 +828,24 @@ def _foreign_origin(origin: str | None, fetch_site: str | None, raw_host: str) -
     return ""
 
 
-def _host_names_connection(raw_host: str, server_addr: str) -> bool:
+def in_container() -> bool:
+    """Чи демон працює в нашому Docker-образі (`NYSH_DOCKER_IMAGE` ставить Dockerfile)."""
+    return bool(os.environ.get("NYSH_DOCKER_IMAGE"))
+
+
+def _host_names_connection(raw_host: str, server_addr: str, *,
+                           published: bool = False) -> bool:
     """Чи `Host` мережевого запиту називає адресу, на яку з'єднання прийшло.
 
     Або ім'я цієї машини. Переліку інтерфейсів на старті тут немає свідомо: він
     неповний і старіє (VPN, DHCP), а адреса з'єднання — завжди правда. Від
     перев'язування імені це захищає так само: чужий сайт шле своє ім'я.
+
+    `published` — демон у контейнері за `-p 127.0.0.1:порт:8788`. Браузер хоста
+    шле `Host: 127.0.0.1`, а з'єднання приходить на адресу контейнера
+    (172.17.0.2), тож строга звірка відбивала 403 рівно той шлях, який радить
+    документація. Свої імена петлі чужий сайт у `Host` не поставить, а ключ
+    допуску з цього з'єднання все одно питається.
     """
     if not raw_host:
         return False
@@ -843,6 +855,8 @@ def _host_names_connection(raw_host: str, server_addr: str) -> bool:
         return False
     if not name:
         return False
+    if published and name in _OWN_NAMES:
+        return True
     try:
         return ipaddress.ip_address(name) == ipaddress.ip_address(server_addr)
     except ValueError:
@@ -862,6 +876,7 @@ def _install_gate(app: Any, *, access_key: str, tls: bool, static_dir: Path,
     OPTIONS і довге очікування `/api/jobs/wait` проходять через них так само.
     """
     cookie_want = _cookie_value(access_key)
+    published = in_container()
     fails: dict[str, tuple[int, float]] = {}
     fail_lock = asyncio.Lock()
 
@@ -931,12 +946,13 @@ def _install_gate(app: Any, *, access_key: str, tls: bool, static_dir: Path,
             cookie_ok = any(_same(value, cookie_want) for value in _read_cookies(
                 headers.get("cookie", ""), _cookie_name(port, tls=tls)))
             if scope["type"] == "websocket":
-                if cookie_ok and _host_names_connection(raw_host, server_addr):
+                if cookie_ok and _host_names_connection(raw_host, server_addr,
+                                                        published=published):
                     await self._inner(scope, receive, send)
                 else:
                     await send({"type": "websocket.close", "code": 1008})
                 return
-            if not _host_names_connection(raw_host, server_addr):
+            if not _host_names_connection(raw_host, server_addr, published=published):
                 await json_response(
                     envelope(f"мережевий запит мусить звертатись на адресу, на яку "
                              f"прийшов ({server_addr}), а прийшов з іменем "
@@ -1239,16 +1255,31 @@ def _print_network_banner(out: Any, host: str, port: int, *, scheme: str, pair_c
     def say(text: str) -> None:
         out.print(text, emoji=False, highlight=False)
 
-    addrs = _interface_addresses() if host in WILDCARDS else [host]
     say("  [warn]мережевий режим: пристрої пускаються лише з допуском[/warn]")
+    # 🔴 У контейнері інтерфейси — це 172.17.0.x, які з Windows і macOS не
+    # відкриваються (ERR_CONNECTION_TIMED_OUT). Людина клікала надруковане
+    # посилання з кодом і впиралась у таймаут, тож тут — лише адреса з `-p`.
+    container = in_container()
+    if container:
+        addrs = ["127.0.0.1"]
+        say("  відкрийте в браузері на своєму комп'ютері:")
+    else:
+        addrs = _interface_addresses() if host in WILDCARDS else [host]
+        say("  з інших пристроїв мережі відкрийте:")
     for addr in addrs:
         link = f"{scheme}://{_url_host(addr)}:{port}/"
         if show_secret:
             link += f"#pair={pair_code}"
         say(f"  [accent]{escape(link)}[/accent]")
+    if container:
+        say(f"  [muted]{port} — порт із -p 127.0.0.1:{port}:{port}; якщо перед ним "
+            f"стоїть інший, підставте його[/muted]")
     if show_secret:
         say(f"  [muted]код сполучення в посиланні діє {PAIR_TTL_SEC // 60} хв і "
             f"один раз[/muted]")
+    elif container:
+        say("  [muted]код сполучення не друкується: контейнер запущено без -it — "
+            "введіть ключ із файла нижче[/muted]")
     else:
         say("  [muted]код сполучення не друкується: вивід іде не в термінал[/muted]")
     say(f"  [muted]ключ для ручного вводу: {escape(str(key_path))}[/muted]")

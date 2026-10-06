@@ -113,6 +113,11 @@ jobs:
             test -s /tmp/smoke/0001.txt
             head -5 /tmp/smoke/0001.txt'
 
+      # Застосунок мусить відкриватись з браузера хоста командою з документації:
+      # 0.24.2 вийшла з посиланням на адресу контейнера й 403 на 127.0.0.1.
+      - name: застосунок у браузері
+        run: bash docker/smoke_serve.sh local/nyshporka smoke
+
       - name: публікація
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin

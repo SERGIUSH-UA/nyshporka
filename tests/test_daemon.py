@@ -607,6 +607,91 @@ def test_ipv6_link_survives_rich_markup(tmp_path: Path) -> None:
     assert "http://[fd00:ab::5]:8790/#pair=PAIR" in buf.getvalue()
 
 
+#: Адреса контейнера в мережі Docker і шлюз, з якого туди приходить проброшений порт.
+BRIDGE = "172.17.0.2"
+BRIDGE_PEER = ("172.17.0.1", 50000)
+
+
+def _container_banner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *,
+                      pair_code: str = "PAIR", show_secret: bool = True) -> str:
+    """Банер `nysh serve --host 0.0.0.0` так, як його друкує наш образ."""
+    import io
+
+    from rich.console import Console
+
+    from nyshporka.daemon import app as A
+
+    monkeypatch.setenv("NYSH_DOCKER_IMAGE", "cpu")
+    monkeypatch.setattr(A, "_interface_addresses", lambda: [BRIDGE])
+    buf = io.StringIO()
+    A._print_network_banner(Console(file=buf, width=200), "0.0.0.0", 8788,
+                            scheme="http", pair_code=pair_code,
+                            key_path=tmp_path / "k.key", show_secret=show_secret,
+                            rotated=False, tls=False)
+    return buf.getvalue()
+
+
+def test_container_banner_links_the_published_port_not_the_bridge(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """🔴 Посилання з кодом вело на 172.17.0.2 — з Windows це таймаут."""
+    text = _container_banner(tmp_path, monkeypatch)
+    assert "http://127.0.0.1:8788/#pair=PAIR" in text
+    assert BRIDGE not in text
+
+
+def test_container_banner_without_tty_names_the_key_not_the_bridge(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Без `-it` коду немає — людині лишаються адреса з `-p` і ключ із файла."""
+    text = _container_banner(tmp_path, monkeypatch, show_secret=False)
+    assert "http://127.0.0.1:8788/" in text
+    assert "#pair=" not in text
+    assert "-it" in text
+    assert BRIDGE not in text
+
+
+def test_container_pair_link_from_the_banner_opens_the_console(
+        ws: Workspace, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """🔴 Увесь шлях людини з `docs/docker.md`: посилання з термінала → допуск → консоль.
+
+    Браузер хоста відкриває надруковане посилання як є, а з'єднання доходить
+    до адреси контейнера. Обидві половини вади (посилання на міст і 403 на
+    петлю) окремо тести вже ловлять — цей ловить їхній стик.
+    """
+    import re
+    from urllib.parse import urlsplit
+
+    # Ворота питають про контейнер, коли складається застосунок, — як в образі,
+    # де змінна є від старту процесу.
+    monkeypatch.setenv("NYSH_DOCKER_IMAGE", "cpu")
+    app = _lan_app(ws)
+    text = _container_banner(tmp_path, monkeypatch,
+                             pair_code=app.state.pair_code)  # type: ignore[attr-defined]
+    found = re.search(r"(http://\S+)/#pair=(\S+)", text)
+    assert found, text
+    origin, code = found.group(1), found.group(2)
+    # TestClient дістане й 172.17.0.2, а браузер хоста — ні: тут мережі Docker
+    # немає, тож досяжність посилання задає сама умова.
+    assert urlsplit(origin).hostname == "127.0.0.1", origin
+    own = {"Host": urlsplit(origin).netloc, "Origin": origin}
+    lan = TestClient(app, base_url=f"http://{BRIDGE}:8788",  # type: ignore[arg-type]
+                     client=BRIDGE_PEER)
+    assert lan.get("/", headers=own).status_code == 200          # сторінка допуску
+    assert lan.post("/api/access", json={"code": code}, headers=own).status_code == 200
+    assert lan.get("/api/health", headers=own).status_code == 200
+
+
+def test_loopback_host_on_a_network_connection_stays_refused_outside_a_container(
+        ws: Workspace, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Послаблення — лише в образі: на звичайній машині мережеве з'єднання з
+    `Host: 127.0.0.1` не має звідки взятись, тож звірка лишається строгою."""
+    monkeypatch.delenv("NYSH_DOCKER_IMAGE", raising=False)
+    lan = _lan(_lan_app(ws))
+    lan.post("/api/access", json={"key": ACCESS})
+    assert lan.get("/api/health").status_code == 200
+    for own in ("127.0.0.1:8788", "localhost:8788"):
+        assert lan.get("/api/health", headers={"Host": own}).status_code == 403, own
+
+
 def test_access_key_is_written_where_hard_links_are_not_supported(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from nyshporka.daemon import app as A
@@ -640,6 +725,21 @@ def test_network_host_header_must_name_the_connection_address(ws: Workspace) -> 
     lan = _lan(_lan_app(ws))
     lan.post("/api/access", json={"key": ACCESS})
     assert lan.get("/api/health").status_code == 200
+    for bad in ("evil.example", "0.0.0.0", "192.168.1.51"):
+        assert lan.get("/api/health", headers={"Host": bad}).status_code == 403, bad
+
+
+def test_container_lets_the_published_loopback_port_through_the_gate(
+        ws: Workspace, monkeypatch: pytest.MonkeyPatch) -> None:
+    """🔴 `-p 127.0.0.1:8788:8788`: браузер шле `Host: 127.0.0.1`, а з'єднання
+    приходить на адресу контейнера — строга звірка відбивала це 403."""
+    monkeypatch.setenv("NYSH_DOCKER_IMAGE", "cpu")
+    lan = TestClient(_lan_app(ws), base_url=f"http://{BRIDGE}:8788",  # type: ignore[arg-type]
+                     client=BRIDGE_PEER)
+    own = {"Host": "127.0.0.1:8788"}
+    assert lan.get("/api/health", headers=own).status_code == 401
+    assert lan.post("/api/access", json={"key": ACCESS}, headers=own).status_code == 200
+    assert lan.get("/api/health", headers=own).status_code == 200
     for bad in ("evil.example", "0.0.0.0", "192.168.1.51"):
         assert lan.get("/api/health", headers={"Host": bad}).status_code == 403, bad
 
