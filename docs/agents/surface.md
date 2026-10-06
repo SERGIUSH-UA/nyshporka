@@ -132,7 +132,7 @@ serve`» — чесно, але дізнається про це той, хто 
 
 | операція | команда | що прочитати |
 |---|---|---|
-| `catalog.search` | `nysh op catalog.search` | **`coverage`** і попередження: у яких каталогах шукали. Шифра в запиті («127-1078-1662») веде адресним маршрутом: `address` у відповіді, `address_route` у попередженнях, каталоги при цьому НЕ прочісувались |
+| `catalog.search` | `nysh op catalog.search` | **`coverage`** і попередження: у яких каталогах шукали. Без `source` іменні бази (`martyrolog`) не питаються — `coverage.not_asked`; з `source=martyrolog` покриття бази по архівах — `coverage.basis[].by_archive`. Шифра в запиті («127-1078-1662») веде адресним маршрутом: `address` у відповіді, `address_route` у попередженнях, каталоги при цьому НЕ прочісувались |
 | `catalog.browse` | `nysh op catalog.browse` | — |
 | `catalog.manifest` | `nysh op catalog.manifest` | обсяг у байтах: справа буває 30 ГБ |
 | `geog.find`, `geog.card` | `nysh op geog.find` · `nysh op geog.card` | де є метрики села по **всіх** фондах, а не лише в православному розділі; картка несе `location` (точка з пака `places`, `how=ambiguous` — однойменних в області кілька) |

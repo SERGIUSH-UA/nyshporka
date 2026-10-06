@@ -524,7 +524,7 @@ def read_run(item: dict[str, Any], ctx: Ctx) -> Outcome:
 
     ctx.say(f"{plan.frames} кадрів · письмо {plan.script} · {plan.model.name}"
             + "".join(f" + {v.name}" for v in plan.voices))
-    if plan.bokovi:
+    if getattr(plan, "bokovi", ""):
         ctx.say(f"⚠ {plan.bokovi}")
 
     def _event(ev: Any, human: str | None) -> None:
