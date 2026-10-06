@@ -69,10 +69,12 @@ function srcTable(rows) {
 /** Що джерело вміє — знаками, бо їх читають краєм ока. */
 function srcCaps(caps) {
   const bits = [];
-  if (caps.includes('search')) bits.push(`<span title="${esc(t('sources.cap.search'))}">🔎</span>`);
-  if (caps.includes('browse')) bits.push(`<span title="${esc(t('sources.cap.browse'))}">🌳</span>`);
-  if (caps.includes('fetch')) bits.push(`<span title="${esc(t('sources.cap.fetch'))}">⬇</span>`);
-  return bits.join(' ');
+  // Значки з набору, в один рядок: емодзі стояли стовпчиком і малювались
+  // кожна система по-своєму.
+  const one = (cap, name) => (caps.includes(cap)
+    ? `<span title="${esc(t(`sources.cap.${cap}`))}">${ic(name, 'ic-o ic-sm')}</span>` : '');
+  bits.push(one('search', 'search'), one('browse', 'list'), one('fetch', 'download'));
+  return `<span class="caps">${bits.join('')}</span>`;
 }
 
 /**

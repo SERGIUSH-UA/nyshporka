@@ -170,7 +170,7 @@ function collectOpen(empty) {
  * без реєстру порожній, не показував способу цей реєстр завести.
  */
 function collectBlock(empty) {
-  return `<details class="collect"${collectOpen(empty)}><summary>🧾 ${t('fonds.collect')}</summary>
+  return `<details class="collect"${collectOpen(empty)}><summary>${t('fonds.collect')}</summary>
     <p class="muted">${t('fonds.collect.why')}</p>
     <form class="row" data-act="fond.collect">
       <input name="repo" id="fd-repo" placeholder="${t('fonds.collect.repo')}" size="8">

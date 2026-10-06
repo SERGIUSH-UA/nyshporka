@@ -638,3 +638,16 @@ details.jobs-done > summary { cursor: pointer; color: var(--fg-3); }
 #view td.acts button.ctl-sm { border-color: transparent; background: transparent;
   padding: .25rem .35rem; }
 #view td.acts button.ctl-sm:hover { border-color: var(--line-3); background: var(--s-2); }
+
+/* Можливості джерела — значки в один рядок. */
+.caps { display: inline-flex; gap: .35rem; white-space: nowrap; }
+
+/* Другий ряд фільтрів — під розкриттям; вибраний фільтр відкриває його сам. */
+details.more-filters { margin: .3rem 0 .6rem; }
+details.more-filters > summary { cursor: pointer; color: var(--fg-3); font-size: .9rem; }
+
+/* Посилання — кольором теми, без підкреслення; підкреслення при наведенні.
+   Доти в консолі для них не було правила, і посилання на плівки FS стояли
+   синім браузерним кольором посеред теплої палітри. */
+#view a { color: var(--link); text-decoration: none; }
+#view a:hover { text-decoration: underline; }

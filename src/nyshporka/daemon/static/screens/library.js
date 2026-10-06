@@ -120,13 +120,16 @@ async function libLoad(full = false) {
              title="${esc(t('lib.q.why'))}">
       ${libFacetSelects(d)}
     </div>
-    <div class="row">
+    <details class="more-filters"${libMoreActive() ? ' open' : ''}>
+      <summary>${t('lib.more')}</summary>
+      <div class="row">
       ${libStageSelects(d)}
       <label class="lbl-mini"><input type="checkbox" id="lib-disk"
         data-act="lib.filter"${LIB.on_disk ? ' checked' : ''}> ${t('lib.ondisk')}</label>
       <label class="lbl-mini"><input type="checkbox" id="lib-curated"
         data-act="lib.filter"${LIB.curated ? ' checked' : ''}> ${t('lib.curated')}</label>
-    </div>
+      </div>
+    </details>
     <div id="lib-warn">${libKeyChip()}${renderWarnings(env)}</div>
     <p class="muted" id="lib-count">${libCount(d)}</p>
     <table><thead><tr>
@@ -139,6 +142,18 @@ async function libLoad(full = false) {
       || skelRows(6, 8)}</tbody></table>
     <div id="lib-pager">${pager(d)}</div>`);
   _libFacets = true;
+}
+
+/**
+ * Чи вибрано щось у другому ряду фільтрів.
+ *
+ * Другий ряд (стани обробки, вердикт, «на диску», «відібрані») згорнуто: два
+ * ряди з восьми полів стояли над таблицею постійно. Але вибраний фільтр не
+ * ховається ніколи — інакше видача звужена, а чим, не видно.
+ */
+function libMoreActive() {
+  return Boolean(LIB.htr || LIB.fuzzy || LIB.status || LIB.verdict
+    || LIB.curated || LIB.on_disk);
 }
 
 /**
@@ -161,7 +176,7 @@ function libSummary(s) {
   } else {
     bits.push(`<span class="dim">${t('lib.sum.nolayers')}</span>`);
   }
-  if (s.no_clan) bits.push(`🚫 ${esc(s.no_clan)} ${t('lib.sum.noclan')}`);
+  if (s.no_clan) bits.push(`${ic('x-circle', 'ic-sm')} ${esc(s.no_clan)} ${t('lib.sum.noclan')}`);
   return `<p class="lib-sum">${bits.filter(Boolean).join(' · ')}</p>`;
 }
 
