@@ -465,11 +465,16 @@ class Store:
         return [t for t, _ in hits[:limit]]
 
     def stats(self) -> dict[str, Any]:
-        """Прогрес, темп і CER першого голосу проти ручних міток.
+        """Прогрес, темп і CER кожного голосу та злиття проти ручних міток.
 
-        `cer_draft` — найдешевший вимірювач якості злиття/голосу: символьна
-        відстань між тим, що рушій (або арбітри) дали, і тим, що написала
-        людина, по рядках зі статусом `ok`.
+        CER — символьна відстань між тим, що рушій (або арбітри) дали, і тим,
+        що написала людина, по рядках зі статусом `ok`: найдешевший вимірювач
+        якості злиття чи голосу.
+
+        🔴 `cer_by_voice` і `cer_merge`, а не лише `cer_draft`: `cer_draft` —
+        перший непорожній голос за порядком `drafts`, а злиття дописується в
+        кінець переліку, тож питання «наскільки добре злиття» `cer_draft` не
+        відповідало ніколи, хоч саме за ним вирішують, чи йде злиття в корпус.
         """
         pages = self.pages()
         done = self.reg.marks(self.name)
@@ -481,15 +486,25 @@ class Store:
         total = sum(len(v) for v in pages.values())
         left = total - len(done)
         dist = chars = 0
+        ids = [d.id for d in self.spec.drafts]
+        v_dist = [0] * len(ids)
+        v_chars = [0] * len(ids)
         for (pg, i), m in done.items():
             if m.get("status") != "ok" or not m.get("text"):
                 continue
+            truth = str(m["text"])
             d = self.drafts(pg).get(i, [])
+            for pos, line in enumerate(d[:len(ids)]):
+                if line:
+                    v_dist[pos] += Levenshtein.distance(line, truth)
+                    v_chars[pos] += len(truth)
             first = next((x for x in d if x), "")
             if not first:
                 continue
-            dist += Levenshtein.distance(first, str(m["text"]))
-            chars += len(str(m["text"]))
+            dist += Levenshtein.distance(first, truth)
+            chars += len(truth)
+        by_voice = {vid: {"cer": round(v_dist[k] / v_chars[k], 3), "chars": v_chars[k]}
+                    for k, vid in enumerate(ids) if v_chars[k]}
         return {"name": self.name, "n_total": total, "n_pages": len(pages),
                 "n_done": len(done), "n_left": left,
                 "by_status": dict(by_status), "by_kind": dict(by_kind),
@@ -498,6 +513,8 @@ class Store:
                 "chars": sum(len(m.get("text") or "") for m in done.values()
                              if m.get("status") == "ok"),
                 "cer_draft": round(dist / chars, 3) if chars else None,
+                "cer_by_voice": by_voice,
+                "cer_merge": (by_voice.get(S.MERGE_ID) or {}).get("cer"),
                 "cer_lines": sum(1 for m in done.values() if m.get("status") == "ok")}
 
 

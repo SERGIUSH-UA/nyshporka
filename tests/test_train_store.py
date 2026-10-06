@@ -205,3 +205,23 @@ def test_page_image_size_is_numbers_only(space: W.Workspace, monkeypatch: pytest
     meta_f.write_text(json.dumps(meta), encoding="utf-8")
     assert st.page_image("0001", 1800)["size"] == [PAGE_W, PAGE_H]
     assert st.page_image("0002", 1800)["size"] == [300, 200]
+
+
+def test_stats_measures_each_voice_and_the_merge(space: W.Workspace,
+                                                 monkeypatch: pytest.MonkeyPatch) -> None:
+    """🔴 CER злиття — окремо: `cer_draft` бере перший голос, а злиття — останнє.
+
+    Скіл розмітки радить міряти CER злиття проти ручних міток, а міряв він
+    перший голос рушія.
+    """
+    st = ST.Store("demo", ws=space)
+    st.save("0001", 0, "Николай Ивановъ", "ok")
+    st.save("0001", 1, "Марѳа Васильева", "ok")
+    monkeypatch.setattr(st.spec, "drafts", [S.Draft(id="pysar", dir="drafts/pysar"),
+                                            S.Draft(id=S.MERGE_ID, dir="drafts/merge")])
+    monkeypatch.setattr(st, "drafts", lambda _pg: {0: ["Никола Ивановь", "Николай Ивановъ"],
+                                                   1: ["Марфа Васильева", "Марѳа Васильева"]})
+    d = st.stats()
+    assert d["cer_merge"] == 0.0
+    assert d["cer_by_voice"]["pysar"]["cer"] > 0
+    assert d["cer_draft"] == d["cer_by_voice"]["pysar"]["cer"], "стара форма — перший голос"
