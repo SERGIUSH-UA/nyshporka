@@ -210,7 +210,7 @@ class TextGrepArgs(BaseModel):
     limit: int = Field(default=100, ge=1, le=2000)
     ignore_case: bool = Field(default=True)
     where: str = Field(default="decode",
-                       description="decode | canon | opys | notes | all — або кілька через кому")
+                       description="decode | canon | opys | notes | pages | all — або кілька через кому")
     extra: str = Field(default="", description="ще теки/файли окремим шаром «dir», через «;»")
 
 

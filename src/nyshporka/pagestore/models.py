@@ -251,6 +251,119 @@ class Record(BaseModel):
         return self
 
 
+#: Типи записів нотатника справи. `note` — особисте («тут жив мій дід») і не
+#: віддається НІКОЛИ; решта — загальне знання про справу, корисне кожному, хто
+#: її відкриє, і їде в пул лише з явною позначкою `share`.
+NoteKind = Literal["about", "catalog-error", "copy", "reading", "note"]
+SHAREABLE_KINDS = frozenset({"about", "catalog-error", "copy", "reading"})
+NoteReader = Literal["agent", "human", "agent+human"]
+CatalogField = Literal["title", "years", "shifra", "extent", "other"]
+CopyRelation = Literal["copy", "draft", "duplicate", "continuation", "original", "other"]
+
+
+def _utcnow() -> str:
+    return _dt.datetime.now(_dt.UTC).replace(microsecond=0).isoformat()
+
+
+def _new_uid() -> str:
+    import uuid
+
+    return uuid.uuid4().hex
+
+
+class NoteLine(BaseModel):
+    """Рядок прогону, до якого прив'язано звірене читання."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    run: str
+    line_no: int = Field(ge=1, description="номер рядка сторінки з 1, як у `text ctx`")
+    #: Рамка в координатах копії кадру, яку бачив рушій (`.lines.json`), —
+    #: та сама, з якої ріже `text crop`. Без рамки запис лишається текстовим.
+    bbox: list[int] | None = None
+
+
+class NoteWas(BaseModel):
+    """Що на цьому рядку прочитав рушій до звірки."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    run: str = ""
+    text: str
+
+
+class NoteOrigin(BaseModel):
+    """Звідки прийшов чужий запис: пул, хто віддав, як ліг на наші кадри."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    pool: str = Field(default="", description="адреса пулу")
+    by: str = Field(default="", description="хто віддав (ім'я в пулі)")
+    pool_id: str = ""
+    #: `exact` — рамка лягає на наші кадри; решта — лише текст сторінки.
+    alignment: str = "text-only"
+    pulled: str = Field(default_factory=_utcnow)
+
+
+class CaseNote(BaseModel):
+    """Один запис нотатника справи.
+
+    🔴 Журнал лише дописується. Виправлення — новий запис із `supersedes`,
+    відкликання — новий запис із `retracts`; чинний стан дає згортка
+    (`notebook.live`). Так двоє дослідників, що пишуть в одну справу, не
+    затирають одне одного, а пул може прийняти відкликання вже відданого.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    uid: str = Field(default_factory=_new_uid)
+    kind: NoteKind
+    share: bool = False
+    author: str = Field(default="", description="хто записав; у пул НЕ їде")
+    reader: NoteReader = "agent"
+    model: str = Field(default="", description="модель агента, якщо читав агент")
+    created: str = Field(default_factory=_utcnow)
+    supersedes: str = ""
+    retracts: str = ""
+    text: str = ""
+    # reading
+    page: str = ""
+    line: NoteLine | None = None
+    was: NoteWas | None = None
+    confidence: Literal["high", "medium", "low"] | None = None
+    uncertain: list[str] = Field(default_factory=list)
+    # catalog-error
+    field: CatalogField | None = None
+    archive_says: str = ""
+    actually: str = ""
+    # copy
+    other: str = Field(default="", description="ключ або шифра іншої справи")
+    relation: CopyRelation | None = None
+    # чужий запис з пулу
+    origin: NoteOrigin | None = None
+
+    @model_validator(mode="after")
+    def _kind_fields(self) -> CaseNote:
+        if self.kind == "note" and self.share:
+            raise ValueError("особистий запис (`note`) не віддається в пул ніколи; "
+                             "загальне знання про справу пиши як about / "
+                             "catalog-error / copy / reading")
+        if self.retracts:
+            return self                     # відкликання не несе змісту
+        need: dict[str, tuple[str, ...]] = {
+            "about": ("text",), "note": ("text",),
+            "reading": ("page", "text"),
+            "catalog-error": ("field",),
+            "copy": ("other",),
+        }
+        missing = [f for f in need[self.kind] if not getattr(self, f)]
+        if missing:
+            raise ValueError(f"запис «{self.kind}» без {', '.join(missing)}")
+        if self.kind == "catalog-error" and not (self.actually or self.text):
+            raise ValueError("помилка опису без того, як насправді: --actually або --text")
+        return self
+
+
 class CaseFile(BaseModel):
     """Уміст `data/pages/<REPO>/<fond>-<spr>.json` — сторінки + записи однієї справи."""
 
@@ -267,6 +380,10 @@ class CaseFile(BaseModel):
     path: str = Field(default="", description="Rel-шлях теки сканів (збагачення з бібліотеки).")
     pages: dict[str, PageNote] = Field(default_factory=dict)
     records: list[Record] = Field(default_factory=list)
+    #: Нотатник справи. 🔴 Порожній у файл не пишеться (`store._write`): справа
+    #: без нотаток лишається байт у байт тією самою, і її читає й старий пакет,
+    #: модель якого полів поза переліком не пускає.
+    notes: list[CaseNote] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _sync_scan_keys(self) -> CaseFile:

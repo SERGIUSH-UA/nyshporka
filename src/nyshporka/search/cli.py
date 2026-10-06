@@ -106,7 +106,7 @@ def grep_cmd(
     case_sensitive: bool = typer.Option(False, "--case-sensitive",
                                         help="розрізняти великі й малі літери"),
     where: str = typer.Option("decode", "--where",
-                              help="decode | canon | opys | notes | all, або через кому"),
+                              help="decode | canon | opys | notes | pages (сховище сторінок і нотатник справи) | all, або через кому"),
     extra: list[str] = typer.Option([], "--dir",
                                     help="ще тека або файл — окремим шаром «dir»"),
     as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
@@ -216,7 +216,24 @@ def ctx_cmd(
         console.print(f"{mark} {it['no']:3}  {it['text']}{geo}")
         for voice, text in (it.get("voices") or {}).items():
             console.print(f"       [muted]{voice}: {text}[/muted]")
+        for r in it.get("notebook") or []:
+            console.print(f"       [ok]👁 нотатник: {escape(r['text'])}[/ok]"
+                          f" [muted]{escape(_who(r))}[/muted]")
+    shown = {r["uid"] for it in d["window"] for r in it.get("notebook") or []}
+    rest = [r for r in d.get("notebook") or [] if r["uid"] not in shown]
+    if rest:
+        console.print("[muted]нотатник сторінки (інша нарізка або поза вікном):[/muted]")
+        for r in rest:
+            console.print(f"  👁 {r.get('run') or '?'} р.{r.get('line_no') or '?'}: "
+                          f"{escape(r['text'])} [muted]{escape(_who(r))}[/muted]")
     _notes(env)
+
+
+def _who(r: dict[str, Any]) -> str:
+    """Хто звіряв: чужий дослідник із пулу, модель або людина."""
+    if r.get("by"):
+        return f"з пулу: {r['by']}"
+    return r.get("model") or r.get("reader") or ""
 
 
 @app.command("crop")
@@ -425,6 +442,10 @@ def find_cmd(
                       f"{h.get('line_no')} · [warn]{h.get('matched')}[/warn]")
         console.print(f"    [muted]{h.get('line')}[/muted]")
     print_records((d.get("record") or {}).get("hits") or [], series=d.get("scope") == "cases")
+    for h in (d.get("notebook") or {}).get("hits") or []:
+        was = f" [muted](рушій: {h['was']})[/muted]" if h.get("was") else ""
+        console.print(f"[ok]👁[/ok]  нотатник · {h.get('page')} · рядок {h.get('line_no') or '?'}"
+                      f" · {h.get('text')}{was} [muted]{_who(h)}[/muted]")
     fam = d.get("family") or {}
     led = d["ledger"]
     console.print("")

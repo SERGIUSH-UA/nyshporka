@@ -2022,6 +2022,12 @@ def roots_remove_cmd(
 pages_app = typer.Typer(help="Облік переглянутого оком.", no_args_is_help=True)
 app.add_typer(pages_app, name="pages")
 
+# 📓 Нотатник справи: звірене оком, опис, помилки опису, копії — у тому самому
+# файлі сховища сторінок. Загальне знання їде в пул окремо від тексту.
+from nyshporka.pagestore.cli import app as note_app  # noqa: E402
+
+app.add_typer(note_app, name="note")
+
 
 @pages_app.command("status")
 def pages_status_cmd(

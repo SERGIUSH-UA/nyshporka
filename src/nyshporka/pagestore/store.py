@@ -38,11 +38,15 @@ from nyshporka.library import (
     parse_case_code,
     parse_source_id,
 )
-from nyshporka.pagestore.models import CaseFile, PageNote, Record
+from nyshporka.pagestore.models import CaseFile, CaseNote, PageNote, Record
 from nyshporka.utils.atomic import atomic_write_text
 
 ROOT = workspace().root
 PAGES_ROOT = workspace().pages
+
+#: Формат файла справи. 2 — з нотатником (`notes`). Файл без нотаток пишеться
+#: як 1: його без змін читає й пакет, що нотатника ще не знає.
+FILE_VERSION = 2
 
 # порядок підвищення статусу: понизити повний прохід частковим не можна
 _STATUS_RANK = {"unreadable": 0, "skipped": 0, "partial": 1, "full": 2}
@@ -357,7 +361,13 @@ def load_case(ref: CaseRef) -> CaseFile | None:
         if old is None or not old.is_file():
             return None
         p = old
-    return CaseFile.model_validate_json(p.read_text(encoding="utf-8"))
+    raw = p.read_text(encoding="utf-8")
+    ver = re.search(r'"version"\s*:\s*(\d+)', raw[:200])
+    if ver and int(ver.group(1)) > FILE_VERSION:
+        raise ValueError(
+            f"{_rel(p)} записано новішою версією nyshporka (формат {ver.group(1)}, "
+            f"ця версія знає до {FILE_VERSION}) — онови пакет: nysh update")
+    return CaseFile.model_validate_json(raw)
 
 
 def _empty_case(ref: CaseRef) -> CaseFile:
@@ -457,7 +467,17 @@ def _write(path: Path, cf: CaseFile) -> None:
     casekey.require_current("запис у сховище сторінок")
     cf.pages = dict(sorted(cf.pages.items()))
     cf.records.sort(key=lambda r: (r.scans[0] if r.scans else "", r.rid))
-    payload = cf.model_dump(mode="json")
+    cf.version = FILE_VERSION if cf.notes else 1
+    payload = cf.model_dump(mode="json", exclude=None if cf.notes else {"notes"})
+    if cf.notes:
+        # Запис нотатника несе десяток полів, із яких заповнено два-три; порожні
+        # у файлі лише роздували б діф у git. Ідентичність і час — завжди: їхні
+        # «типові» значення фабричні, і зрівняння з ними нічого не каже.
+        payload["notes"] = [
+            {"uid": n.uid, "kind": n.kind, "created": n.created,
+             **n.model_dump(mode="json", exclude_defaults=True,
+                            exclude={"uid", "kind", "created"})}
+            for n in cf.notes]
     # 🔴 Аудит 29.09.2026: тут стояв голий `tmp.replace(path)` зі спільним
     # `.json.tmp`. На Windows заміна падає з PermissionError, поки файл справи
     # тримає читач (збірка реєстру, підсумки, в'ювер), — і запис обривався,
@@ -551,6 +571,37 @@ def add_records(ref: CaseRef, records: list[Record], replace: bool = False) -> M
     return report
 
 
+def add_notes(ref: CaseRef, notes: list[CaseNote]) -> MergeReport:
+    """Дописати записи в нотатник справи.
+
+    🔴 Лише дописування: наявний запис не змінюється й не видаляється.
+    Повторний запис того самого `uid` (повтор `pull`, двічі імпортована тека)
+    — не дубль, а пропуск: він іде в `merged`, і вміст лишається першим.
+    """
+    path = case_path(ref)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    report = MergeReport(path=_rel(path))
+    with _lock(path):
+        cf = load_case(ref) or _empty_case(ref)
+        have = {n.uid for n in cf.notes}
+        known = have | {n.uid for n in notes}
+        for n in notes:
+            target = n.supersedes or n.retracts
+            if target and target not in known:
+                report.errors.append({"uid": n.uid, "error":
+                                      f"запису {target} у нотатнику справи немає"})
+                continue
+            if n.uid in have:
+                report.merged.append(n.uid)
+                continue
+            cf.notes.append(n)
+            have.add(n.uid)
+            report.added.append(n.uid)
+        if report.added:
+            _write(path, cf)
+    return report
+
+
 def move_pages(src: CaseRef, dst: CaseRef, scans: list[str]) -> dict[str, int]:
     """Перенести нотатки й записи названих кадрів з однієї справи в іншу.
 
@@ -571,17 +622,25 @@ def move_pages(src: CaseRef, dst: CaseRef, scans: list[str]) -> dict[str, int]:
     notes = [n for k, n in cf.pages.items() if k.casefold() in want]
     recs = [r for r in cf.records
             if r.scans and all(s.casefold() in want for s in r.scans)]
-    if not notes and not recs:
+    # Читання рядка прив'язане до кадру, тож їде разом із ним. Ключ — стем:
+    # у прогоні сторінка зветься «0031», у сховищі — «0031.JPG».
+    stems = {Path(s).stem.casefold() for s in want}
+    reads = [n for n in cf.notes if n.page and Path(n.page).stem.casefold() in stems]
+    if not notes and not recs and not reads:
         return {"pages": 0, "records": 0}
     if notes:
         annotate_pages(dst, notes)
     if recs:
         add_records(dst, recs)
+    if reads:
+        add_notes(dst, reads)
     rids = {r.rid for r in recs}
+    uids = {n.uid for n in reads}
     with _lock(sp):
         cf = load_case(src) or cf
         cf.pages = {k: n for k, n in cf.pages.items() if k.casefold() not in want}
         cf.records = [r for r in cf.records if r.rid not in rids]
+        cf.notes = [n for n in cf.notes if n.uid not in uids]
         _write(sp, cf)
     return {"pages": len(notes), "records": len(recs)}
 

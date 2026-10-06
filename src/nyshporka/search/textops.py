@@ -199,6 +199,7 @@ def ctx(scope: str, page: str, line: int | None = None, *, window: int = 4,
     key = str(sc.get("key") or "")
     years = S.case_years(key) if key else (None, None)
     eye: dict[str, Any] | None = None
+    notebook: list[dict[str, Any]] = []
     if key:
         with contextlib.suppress(Exception):
             from nyshporka.pagestore import store as PS
@@ -206,14 +207,45 @@ def ctx(scope: str, page: str, line: int | None = None, *, window: int = 4,
             ref = PS.resolve_case(key)
             st = PS.case_status(ref, scans=[page_name])
             eye = (st.get("scans") or [{}])[0]
+            notebook = _notebook_readings(ref, page_name)
+    # Звірене оком читання стає поряд із рядком лише на ТІЙ САМІЙ нарізці:
+    # номер рядка має сенс тільки в прогоні, на який його записано. Решта
+    # лишається окремим блоком зі своїм прогоном і номером.
+    runs_same_cut = {v["run"] for v in voices if len(v["lines"]) == n}
+    for it in out_lines:
+        mine = [r for r in notebook if r.get("run") in runs_same_cut
+                and r.get("line_no") == it["no"]]
+        if mine:
+            it["notebook"] = mine
     return {"scope": sc["kind"], "case_key": key, "shifra": sc.get("shifra") or "",
             "page": page_name, "line": line, "lines_total": n,
             "voices": [{"run": v["run"], "voice": v["voice"]} for v in voices],
             "aligned": aligned, "years": list(years), "eye": eye,
+            "notebook": notebook,
             "geo_next": succ.get(line) if line else None,
             "geo_prev": pred.get(line) if line else None,
             "scan_link": _scan_link(str(voices[0]["run"]), page_name),
             "window": out_lines}
+
+
+def _notebook_readings(ref: Any, page: str) -> list[dict[str, Any]]:
+    """Звірені оком читання сторінки з нотатника справи — свої й чужі."""
+    from nyshporka.pagestore import notebook as NB
+    from nyshporka.pagestore import store as PS
+
+    cf = PS.load_case(ref)
+    if cf is None:
+        return []
+    out: list[dict[str, Any]] = []
+    for n in NB.readings_for(cf.notes, page):
+        out.append({"uid": n.uid, "text": n.text,
+                    "run": n.line.run if n.line else "",
+                    "line_no": n.line.line_no if n.line else None,
+                    "was": n.was.text if n.was else "",
+                    "reader": n.reader, "model": n.model,
+                    "by": n.origin.by if n.origin else "",
+                    "confidence": n.confidence})
+    return out
 
 
 def _scan_link(run: str, page: str) -> dict[str, str] | None:
@@ -798,7 +830,7 @@ def _merge_finds(q: str, sc: dict[str, Any], one: list[tuple[str, dict[str, Any]
         ran = [c for c in got if c.get("ran")]
         out: dict[str, Any] = {"id": cid, "label": label, "ran": bool(ran),
                                "of_cases": len(one), "ran_cases": len(ran)}
-        if cid in ("surname", "anchor", "record"):
+        if cid in ("surname", "anchor", "record", "notebook"):
             out["hits"] = sum(int(c.get("hits") or 0) for c in got)
         if cid == "selfcheck":
             out.update(eye=sum(int(c.get("eye") or 0) for c in ran),
@@ -830,7 +862,9 @@ def _merge_finds(q: str, sc: dict[str, Any], one: list[tuple[str, dict[str, Any]
         "channels": [chan("surname", "прізвище"), chan("anchor", "якорі"),
                      chan("record", "запис"),
                      chan("latin", "латинський голос"),
-                     chan("selfcheck", "самоперевірка на аркушах, виписаних оком")],
+                     chan("selfcheck", "самоперевірка на аркушах, виписаних оком"),
+                     chan("notebook", "нотатник справи: звірене оком (у знаменник "
+                                      "не йде, нуля не дає)")],
         "searched_before": [], "cases": cases}
     return {"q": q, "scope": "cases", "case_key": "", "shifra": sc.get("shifra") or "",
             "hits": top(hits), "total": sum(c["total"] for c in cases),
@@ -841,6 +875,11 @@ def _merge_finds(q: str, sc: dict[str, Any], one: list[tuple[str, dict[str, Any]
             "record": {"on": any(r.get("record", {}).get("on") for _, r in one),
                        "hits": top(records), "total": sum(c["record"] for c in cases)},
             "family": next((r.get("family") for _, r in one if r.get("family")), None),
+            "notebook": {"on": True, "total": sum(len((r.get("notebook") or {}).get("hits")
+                                                      or []) for _, r in one),
+                         "hits": [{**h, "case_key": r.get("case_key") or k}
+                                  for k, r in one
+                                  for h in (r.get("notebook") or {}).get("hits") or []]},
             "selfcheck": None, "ledger": ledger}
 
 
@@ -981,6 +1020,15 @@ def _find_one(q: str, scope: str = "", *, thresh: int = 78, limit: int = 40,
                 if ch["id"] == "record":
                     ch["eye_found"] = sorted(set(rep.denom) & rec_pages)
                     ch["eye_denom"] = len(rep.denom)
+    notebook: dict[str, Any] = {"on": False, "hits": [], "total": 0}
+    if in_case and key:
+        notebook = _notebook_find(key, list(res.get("stems") or []), thresh=thresh)
+        channels.append({
+            "id": "notebook",
+            "label": "нотатник справи: звірене оком (у знаменник не йде, нуля не дає)",
+            "ran": bool(notebook["readings"]), "hits": notebook["total"],
+            "readings": notebook["readings"],
+            "why": "" if notebook["readings"] else "у нотатнику справи звірених рядків немає"})
     # ⚠ Короткий стем із гнізда імен («anna») `partial_ratio` знаходить усередині
     # будь-якого слова — 1171 хітів на 128 сторінках (рецензія 08.09, третій раунд).
     short = sorted({str(s) for s in (res.get("stems") or []) if len(str(s)) < SHORT_STEM})
@@ -1010,7 +1058,46 @@ def _find_one(q: str, scope: str = "", *, thresh: int = 78, limit: int = 40,
             "hits": res.get("hits") or [], "total": res.get("total"),
             "stems": res.get("stems"), "stems_dropped": res.get("stems_dropped") or [],
             "anchor": anchor, "record": record, "family": res.get("family"),
-            "selfcheck": selfcheck, "ledger": ledger}
+            "notebook": notebook, "selfcheck": selfcheck, "ledger": ledger}
+
+
+def _notebook_find(key: str, stems: list[str], *, thresh: int) -> dict[str, Any]:
+    """Звірені оком читання справи, у яких є шукане, — свої й з пулу.
+
+    🔴 Окремий канал, а не голос: око читало вибрані рядки, тож відсутність
+    збігу тут нічого не каже про справу. Збіг показується разом із тим, що на
+    цьому рядку прочитав рушій (`was`) — видно, що саме рушій покрутив і чому
+    основний канал рядок пропустив.
+    """
+    from rapidfuzz import fuzz
+
+    from nyshporka import htr_store as S
+    from nyshporka.pagestore import notebook as NB
+    from nyshporka.pagestore import store as PS
+
+    out: dict[str, Any] = {"on": True, "hits": [], "total": 0, "readings": 0}
+    try:
+        cf = PS.load_case(PS.resolve_case(key))
+    except ValueError:
+        return out
+    if cf is None or not stems:
+        return out
+    reads = [n for n in NB.live(cf.notes) if n.kind == "reading"]
+    out["readings"] = len(reads)
+    for n in reads:
+        words = [S._norm(w) for w in S._TOKEN_RE.findall(n.text)]
+        best = max((fuzz.partial_ratio(s, w) for s in stems for w in words
+                    if len(w) >= min(len(s), 3)), default=0)
+        if best >= thresh:
+            out["hits"].append({
+                "uid": n.uid, "page": n.page, "text": n.text, "score": round(best),
+                "run": n.line.run if n.line else "",
+                "line_no": n.line.line_no if n.line else None,
+                "was": n.was.text if n.was else "",
+                "by": n.origin.by if n.origin else "",
+                "reader": n.reader, "model": n.model})
+    out["total"] = len(out["hits"])
+    return out
 
 
 
@@ -1357,7 +1444,7 @@ def verdicts_import(path: str | Path, scope: str, *, q: str = "", agent: str = "
 # ── етап 6: регекс по шарах поза декодом ─────────────────────────────────────
 #: Шари простору й де вони лежать. «Нотатки» — усе під `reports/`, КРІМ теки
 #: прогонів: та тримає понад мільйон файлів, і обхід її коштує хвилини.
-LAYERS = ("canon", "opys", "notes")
+LAYERS = ("canon", "opys", "notes", "pages")
 
 #: Стеля обходу текстів OCR описів у `data/derived/*opys*`.
 #:
@@ -1399,6 +1486,13 @@ def layer_files(layer: str) -> tuple[list[Path], list[str]]:
                     if len(found) > OPYS_FILE_CAP:
                         cuts.append(f"{d.name}: файлів {len(found)},"
                                     f" прочесано {OPYS_FILE_CAP}")
+    elif layer == "pages":
+        # Сховище сторінок разом із нотатником справи: коментарі аркушів,
+        # звірені оком рядки, помилки опису, копії. Одна справа — один файл.
+        from nyshporka.pagestore import store as PS
+
+        if PS.PAGES_ROOT.is_dir():
+            out += sorted(PS.PAGES_ROOT.glob("*/*.json"))
     elif layer == "notes":
         rep = ws.reports
         if rep.is_dir():
