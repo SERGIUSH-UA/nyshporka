@@ -106,6 +106,11 @@ h2 { margin: 0 0 1rem; font-size: 1.45rem; }
 .row .pf { flex: 1 1 14rem; }
 .row .pf input { flex: 1 1 auto; }
 .row .lbl-mini { align-self: center; flex: 0 0 auto; }
+/* Підпис, що обгортає поле («Архів <select>»), — гнучкий елемент рядка: інакше
+   поле всередині бралось завширшки з рядок і вилазило за праву межу. */
+.row .lbl-mini:has(> select) { flex: 1 1 14rem; display: flex; gap: .4rem;
+  align-items: center; min-width: 0; }
+.row .lbl-mini > select { flex: 1 1 auto; min-width: 0; width: auto; }
 
 /* ── Таблиця видачі ─────────────────────────────────────────────────────────
    Своя, а не спільна: у консолі таблиці різні на кожній вкладці, і зведення їх
