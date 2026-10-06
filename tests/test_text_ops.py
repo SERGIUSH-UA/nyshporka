@@ -766,6 +766,79 @@ def test_series_keeps_to_the_archive_named_in_the_query() -> None:
     assert names("НЕВІДОМИЙ 1") == []                    # невідомий архів — не «будь-який»
 
 
+def test_series_with_archive_takes_cases_with_worded_shifra(case_space: Path) -> None:
+    """🔴 Серія «архів + фонд + опис» береться за ключем справи, а не за хвостом шифри.
+
+    06.10.2026 «ІА 630-1» відмовляла «не розпізнав справу» на 24 прочитаних
+    справах: бібліотека пише їхню шифру «ІА ф.630 оп.1 спр.94», хвіст «спр.94»
+    не влучав у серію, а до ключа черга не доходила. Справи реєстру опису без
+    прогону називаються числом — у знаменник вони не входять.
+    """
+    from nyshporka import htr_store as S
+    from nyshporka import ops as O
+    from nyshporka.fonds import registry as R
+    from nyshporka.library import build_library, write_library
+    from nyshporka.search import textops as T
+
+    d = case_space / "data" / "raw" / "dahmo_315"
+    # паспорт — як у справ ІА: шифра словами, справа полем `sprava`
+    (d / "spr-8433" / "_source.json").write_text(json.dumps({
+        "shifra": "ДАХмО ф.315 оп.1 спр.8433", "fond": 315, "opys": 1,
+        "sprava": "8433", "title": "Метричні книги, 1850", "years": "1850"},
+        ensure_ascii=False), encoding="utf-8")
+    write_library(build_library())
+    (d / "f315_opys_merged.tsv").write_text(
+        "opys\tspr_int\tspr_letter\ttitle\n1\t8433\t\t\n1\t8434\t\t\n2\t9\t\t\n",
+        encoding="utf-8")
+    R.invalidate()
+    S._CACHE.clear()
+    S._RUNS_CACHE = None
+    S._canon_case_key.cache_clear()
+    assert all(r["shifra"] == "ДАХмО ф.315 оп.1 спр.8433" for r in S.list_cases()), [r["shifra"] for r in S.list_cases()]
+
+    for want in ("ДАХмО 315-1", "DAHMO 315-1", "ДАХмО/315/1"):
+        sc = S.runs_for_scope(want)
+        assert sc["kind"] == "cases" and len(sc["rows"]) == 2, (want, sc)
+        assert sc["keys"] == ["DAHMO/315/1/8433"], want
+        assert sc["series"]["listed"] == 2 and sc["series"]["read"] == 1, want
+        assert sc["series"]["unread"] == ["DAHMO/315/1/8434"], want
+
+    got = T.find("Ковальскій", "ДАХмО 315-1", limit=10)
+    assert not got.get("error") and got["hits"], got.get("error")
+    assert got["ledger"]["runs"] == 2 and len(got["ledger"]["cases"]) == 1
+    assert got["ledger"]["series"]["unread"] == ["DAHMO/315/1/8434"]
+    env = O.call("text.find", {"q": "Ковальскій", "case": "ДАХмО 315-1", "limit": 10})
+    assert env.ok, env
+    warn = [w for w in env.warnings if w.code == "series_unread"]
+    assert warn and "не прочитано тут 1" in warn[0].text, [w.code for w in env.warnings]
+
+    # Опис, у якому нічого не прочитано, — відмова про серію, а не про справу.
+    with pytest.raises(ValueError, match="не прочитано жодної справи"):
+        S.runs_for_scope("ДАХмО 315-2")
+
+
+def test_series_without_archive_names_the_archives_it_spans() -> None:
+    """Серія без архіву, що влучила в кілька архівів, — відмова з формами серії."""
+    from nyshporka import htr_store as S
+
+    rows = [{"name": "a", "shifra": "ЦДІАК 1-1-5", "case_key": "CDIAK/1/1/5"},
+            {"name": "b", "shifra": "ДАЖО 1-1-42", "case_key": "DAZHO/1/1/42"}]
+    with pytest.raises(ValueError, match="кілька архівів") as e:
+        S._series_archive_check("1-1", rows)
+    assert "«ЦДІАК 1-1»" in str(e.value) and "«ДАЖО 1-1»" in str(e.value)
+    S._series_archive_check("ЦДІАК 1-1", rows)            # з архівом — питання нема
+    S._series_archive_check("1-1", rows[:1])              # один архів — питання нема
+
+
+def test_two_numbers_hint_names_the_series_form(space: Path) -> None:
+    """«630-1» лишається відмовою, але підказка називає форму серії з архівом."""
+    from nyshporka import htr_store as S
+
+    with pytest.raises(ValueError, match="Два числа неоднозначні") as e:
+        S.runs_for_scope("630-1")
+    assert "«АРХІВ 630-1»" in str(e.value)
+
+
 def test_crop_can_take_the_previous_line_for_a_hyphen_tail(space: Path) -> None:
     from nyshporka.search import textops as T
 

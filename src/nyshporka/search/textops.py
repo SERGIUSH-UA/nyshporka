@@ -911,7 +911,10 @@ def _merge_finds(q: str, sc: dict[str, Any], one: list[tuple[str, dict[str, Any]
                      chan("selfcheck", "самоперевірка на аркушах, виписаних оком"),
                      chan("notebook", "нотатник справи: звірене оком (у знаменник "
                                       "не йде, нуля не дає)")],
-        "searched_before": [], "cases": cases}
+        "searched_before": [], "cases": cases,
+        # Серія опису проти реєстру опису (`htr_store._series_scope`): скільки
+        # справ там є і яких тут не прочитано — у суму вище вони не входять.
+        "series": sc.get("series")}
     return {"q": q, "scope": "cases", "case_key": "", "shifra": sc.get("shifra") or "",
             "hits": top(hits), "total": sum(c["total"] for c in cases),
             "stems": one[0][1].get("stems") if one else [],

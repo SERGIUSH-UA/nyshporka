@@ -872,6 +872,28 @@ def fond_id_of(repo: str, fond: str) -> str:
     return f"{REPO_SLUG.get(repo.upper(), repo.lower())}_{fond}"
 
 
+def opys_keys(repo: str, fond: str, opys: str) -> list[str] | None:
+    """Ключі справ опису за реєстром опису; `None` — реєстру фонду на диску немає.
+
+    `None` і `[]` різні відповіді: перше — «скільки справ в описі, не знаємо»,
+    друге — реєстр є, а цього опису в ньому немає.
+    """
+    from nyshporka.core import casekey
+
+    fond_id = fond_id_of(repo, fond)
+    if not fond_path(fond_id).exists():
+        return None
+    want = casekey._norm_opys(opys)
+    out: list[str] = []
+    for r in load_rows(fond_id):
+        if casekey._norm_opys(r.get("opys")) != want:
+            continue
+        k = casekey.make(repo, fond, r.get("opys"), r.get("spr") or r.get("spr_int"))
+        if k and k not in out:
+            out.append(k)
+    return out
+
+
 def registry_row(repo: str, fond: str, opys: str, spr: str,
                  letter: str = "") -> tuple[dict[str, Any] | None, Path]:
     """Нормалізований рядок однієї справи + шлях реєстру (для повідомлень)."""

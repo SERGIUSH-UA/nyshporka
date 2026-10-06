@@ -489,6 +489,21 @@ def text_find(a: TextFindArgs) -> Envelope:
     for ch in led["channels"]:
         if not ch["ran"] and ch.get("why"):
             env.warn(f"channel_{ch['id']}_off", f"канал «{ch['label']}» не ганяли: {ch['why']}")
+    ser = led.get("series") or {}
+    if ser:
+        # 🔴 Справи опису без жодного прогону в знаменник не входять — і мусять
+        # бути названі числом, інакше нуль по серії читається як нуль по опису.
+        head = f"{ser.get('label') or ser['repo']} {ser['fond']}-{ser['opys']}"
+        if ser.get("listed") is None:
+            env.warn("series_no_registry",
+                     f"реєстру опису {head} на машині немає — скільки справ в описі, "
+                     f"невідомо; шукано в прочитаних тут {ser['read']}")
+        elif ser.get("unread"):
+            miss = ser["unread"]
+            env.warn("series_unread",
+                     f"в описі {head} за реєстром справ {ser['listed']}, не прочитано тут "
+                     f"{len(miss)} — у пошук і знаменник не входять: "
+                     + ", ".join(miss[:10]) + (" …" if len(miss) > 10 else ""))
     if led.get("unindexed"):
         env.warn("partial_store", f"{led['unindexed']} прогонів поза стором")
         env.suggest("text.index", "догнати стор")

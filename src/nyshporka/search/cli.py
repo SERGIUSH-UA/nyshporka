@@ -497,6 +497,15 @@ def find_cmd(
         with_hits = [c for c in cases if c["total"] or c["anchor"] or c.get("record")]
         console.print(f"[bold]справ:[/bold] {len(cases)} · з хітами {len(with_hits)} · "
                       f"без жодного {len(cases) - len(with_hits)}")
+        ser = led.get("series") or {}
+        if ser:
+            listed = ser.get("listed")
+            unread = len(ser.get("unread") or [])
+            console.print(f"[bold]серія[/bold] {ser.get('label') or ser['repo']} "
+                          f"{ser['fond']}-{ser['opys']}: "
+                          f"прочитаних тут {ser['read']} · у реєстрі опису "
+                          f"{listed if listed is not None else '? (реєстру немає)'}"
+                          + (f" · [warn]не прочитано {unread}[/warn]" if unread else ""))
         for c in sorted(with_hits, key=lambda c: -(c["total"] + c["anchor"])):
             console.print(f"  {c['shifra'] or c['key'] or c['scope']}: прізвище {c['total']}"
                           f" · якорі {c['anchor']} · записи {c.get('record', 0)}"

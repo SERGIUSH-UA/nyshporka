@@ -918,13 +918,29 @@ def runs_for_scope(scope: str | Sequence[str]) -> dict[str, Any]:
             series = [r for r in rows if key_of(r).startswith(head)]
         else:
             series = _series_rows(rows, want)
+            if series:
+                _series_archive_check(want, series)
         if not series:
+            repo, parts = _series_head(want) if not code else ("", [])
+            if repo and len(parts) == 2:
+                # Серію названо з архівом, а прочитаного в ній немає: відмова
+                # резолвера справи («не розпізнав») тут бреше про форму запиту.
+                info = _series_scope(want, [], [])
+                listed = (info or {}).get("listed")
+                raise ValueError(
+                    f"серія «{want}»: на цій машині не прочитано жодної справи "
+                    f"цього опису" + (f" (у реєстрі опису справ {listed})"
+                                      if listed else "")) from None
             raise
         # Канонічні ключі: за ними область розкладається на справи
         # (`textops.find`), і шифра в меті не дає тієї самої справи двічі.
         keys = sorted({k for k in (key_of(r) for r in series) if k})
-        return {"rows": series, "kind": "cases", "key": "", "shifra": want,
-                "keys": keys}
+        out = {"rows": series, "kind": "cases", "key": "", "shifra": want, "keys": keys}
+        if not code:
+            info = _series_scope(want, series, keys)
+            if info:
+                out["series"] = info
+        return out
     mine = [r for r in rows if key_of(r) == ref.key]
     if not mine and ref.path:
         # Прогін, який не несе ключа в собі, ще може вказувати на ту саму теку.
@@ -1056,19 +1072,29 @@ def _series_rows(rows: list[dict[str, Any]], want: str) -> list[dict[str, Any]]:
             return []
     out: list[dict[str, Any]] = []
     for r in rows:
-        sh = str(r.get("shifra") or "").strip()
-        tail = sh.split()[-1].replace("/", "-") if sh else ""
-        if tail:
-            if not (tail == head or tail.startswith(head + "-")):
-                continue
-        elif not _key_tail(r).startswith(head + "-"):
-            # Без шифри — за ключем справи («DAHMO/230/1/130» → «230-1-130»).
-            # Лише як префікс серії: «315-1» — це фонд і опис, а не справа 1.
+        tail = _row_tail(r)
+        # Лише як префікс серії: «315-1» — це фонд і опис, а не справа 1.
+        if not tail or not (tail == head or tail.startswith(head + "-")):
             continue
         if repo and not _row_in_archive(r, repo):
             continue
         out.append(r)
     return out
+
+
+def _row_tail(row: dict[str, Any]) -> str:
+    """«Фонд-опис-справа» прогону: з ключа справи, а без опису в ключі — з шифри.
+
+    🔴 Ключ першим. Доти першою йшла шифра, і з неї брався останній токен —
+    а бібліотека пише шифру й як «ІА ф.630 оп.1 спр.94». Хвіст «спр.94» не
+    влучав у жодну серію, до ключа черга не доходила, і серія «ІА 630-1»
+    відмовляла на 24 прочитаних справах (06.10.2026). Шифра лишається запасом
+    для прогонів без ключа чи з ключем без опису (прийняте з пулу).
+    """
+    tail = _key_tail(row)
+    if tail and "-_-" not in tail:
+        return tail
+    return _shifra_tail(str(row.get("shifra") or "")) or tail
 
 
 def _key_tail(row: dict[str, Any]) -> str:
@@ -1085,6 +1111,20 @@ def _key_tail(row: dict[str, Any]) -> str:
     return f"{ck.fond}-{ck.opys}-{ck.spr}"
 
 
+def _shifra_tail(shifra: str) -> str:
+    """«Фонд-опис-справа» з шифри в будь-якій людській формі: «ДАХмО 315-1-8433»,
+    «ІА ф.630 оп.1 спр.94», «1-3-9». Розбір — той самий, що в реєстрації справи,
+    зведення частин — те саме, що в ключі (`casekey.make_key`)."""
+    from nyshporka.cases.register import _SHIFRA_RE as _REG_SHIFRA
+    from nyshporka.core import casekey
+
+    m = _REG_SHIFRA.search(shifra.strip()) if shifra.strip() else None
+    if not m:
+        return ""
+    return (f"{casekey.norm_fond(m.group('fond'))}-{casekey._norm_opys(m.group('opys'))}"
+            f"-{casekey.norm_part(m.group('spr'))}")
+
+
 def _row_in_archive(row: dict[str, Any], repo: str) -> bool:
     """Чи прогін належить архіву: за ключем справи, а без ключа — за шифрою.
 
@@ -1093,13 +1133,90 @@ def _row_in_archive(row: dict[str, Any], repo: str) -> bool:
     """
     from nyshporka.archives import active
 
+    own = _row_archive(row)
+    return bool(own) and active().same_archive(own, repo)
+
+
+def _row_archive(row: dict[str, Any]) -> str:
+    """Канонічний код архіву прогону: з ключа справи, без ключа — з шифри.
+    Порожньо — архів не встановлюється."""
+    from nyshporka.archives import active
+
     pack = active()
-    key = (row.get("case_key") or "").strip()
-    own = key.split("/", 1)[0] if key else ""
+    key = str(row.get("case_canon") or row.get("case_key") or "").strip()
+    own = key.split("/", 1)[0] if "/" in key else ""
     if not own:
         parts = str(row.get("shifra") or "").strip().split()
         own = pack.resolve_code(parts[0]) if len(parts) > 1 else ""
-    return bool(own) and pack.same_archive(own, repo)
+    return pack.canon_repo(own) if own else ""
+
+
+def _series_head(want: str) -> tuple[str, list[str]]:
+    """Серія запиту → (архів, [фонд, опис…]). Архів порожній — не названо."""
+    from nyshporka.archives import active
+
+    text = want.replace("\\", "/").strip()
+    m = _SERIES_RE.search(text)
+    if not m:
+        return "", []
+    word = text[:m.start()].strip(" /-_.,:;")
+    repo = active().resolve_code(word) if word and _LETTERS_ONLY.match(word) else ""
+    return repo, m.group(1).replace("/", "-").split("-")
+
+
+def _series_scope(want: str, series: list[dict[str, Any]],
+                  keys: list[str]) -> dict[str, Any] | None:
+    """Серія «архів + фонд + опис» проти реєстру опису: скільки справ там є і
+    яких із них на цій машині не прочитано.
+
+    🔴 Знаменник серії рахує прочитане, а не опис. «Не знайшлось у 20 справах»
+    звучить як відповідь про опис і тоді, коли в описі їх 60, — тому справи
+    реєстру без жодного прогону називаються числом. Реєстру фонду немає —
+    `listed=None`: «скільки справ в описі, невідомо», а не «усі прочитані».
+    Лише для фонду з описом: серія самого фонду описів не перелічує.
+    """
+    from nyshporka.archives import active
+    from nyshporka.core import casekey
+    from nyshporka.fonds import registry as R
+
+    repo, parts = _series_head(want)
+    if len(parts) != 2:
+        return None
+    if not repo:
+        archives = {a for a in (_row_archive(r) for r in series) if a}
+        if len(archives) != 1:
+            return None
+        repo = archives.pop()
+    repo = active().canon_repo(repo)
+    fond, opys = parts
+    listed = R.opys_keys(repo, fond, opys)
+    have = {(ck.fond, ck.opys, ck.spr) for ck in map(casekey.parse, keys) if ck}
+    unread = [k for k in (listed or [])
+              if (ck := casekey.parse(k)) and (ck.fond, ck.opys, ck.spr) not in have]
+    return {"repo": repo, "label": active().repo_label(repo), "fond": fond, "opys": opys,
+            "read": len(keys),
+            "listed": None if listed is None else len(listed), "unread": unread}
+
+
+def _series_archive_check(want: str, series: list[dict[str, Any]]) -> None:
+    """Серія без архіву, що влучила в кілька архівів, — відмова з переліком форм.
+
+    Номери фондів і описів повторюються між архівами: «630-1» без архіву, що
+    зібрав справи двох архівів, давав би знаменник про суміш, який звучить як
+    відповідь про один опис (той самий урок, що «IRNBUV/1» 13.09.2026).
+    """
+    from nyshporka.archives import active
+
+    repo, parts = _series_head(want)
+    if repo or not parts:
+        return
+    archives = sorted({a for a in (_row_archive(r) for r in series) if a})
+    if len(archives) > 1:
+        pack = active()
+        head = "-".join(parts)
+        forms = ", ".join(f"«{pack.repo_label(a)} {head}»" for a in archives)
+        raise ValueError(
+            f"серія «{want}» без архіву влучає в кілька архівів — назви архів: {forms}")
 
 
 def case_pages(name: str) -> dict[str, Any] | None:
