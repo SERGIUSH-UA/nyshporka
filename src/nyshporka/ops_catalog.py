@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import contextlib
+import re
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -1001,11 +1002,44 @@ def _hit_rows(hits: list[Any]) -> list[dict[str, Any]]:
 class ParishFindArgs(BaseModel):
     q: str = Field(description="назва села або містечка")
     also: list[str] = Field(default_factory=list,
-                            description="додаткові написання: історична назва, "
-                                        "російська форма — форми сучасної назви "
-                                        "будуються самі")
+                            description="додаткові написання, яких немає в "
+                                        "газетирах: історична назва, форма мови "
+                                        "діловодства. Форми сучасної назви, "
+                                        "російська й польська назви й "
+                                        "перейменування з газетирів додаються самі")
     books: bool = Field(default=True,
                         description="одразу взяти перелік книг кожної парафії")
+
+
+#: Латинська літера — покажчик таку форму відкидає відмовою.
+_LATIN = re.compile(r"[A-Za-zÀ-ɏ]")
+
+
+def _place_forms(q: str, also: list[str]) -> tuple[list[str], list[str], list[str]]:
+    """Форми назви для покажчика: правила, довідники, людина.
+
+    (усі форми, форми з газетирів, які газетири відповіли). Покажчик звіряє
+    назву буквально, тож кожне написання — окремий запит; форми з газетирів
+    проходять ті самі правила (`name_forms`), що й назва людини.
+    """
+    from nyshporka.sources.duck import name_forms
+
+    try:
+        from nyshporka.catalog.query import name_variants
+
+        extra, asked = name_variants(q)
+    except Exception:            # битий пак не валить пошук парафії
+        extra, asked = [], []
+    # 🔴 Покажчик приймає лише кирилицю: латинська форма (польська назва з
+    # газетира) дає 400 на весь запит. Тож латинські форми газетира сюди не
+    # йдуть — вони лишаються в `extra` для людини й інших каталогів.
+    cyr = [e for e in extra if not _LATIN.search(e)]
+    forms: list[str] = []
+    for f in [*name_forms(q), *(x for e in cyr for x in name_forms(e)),
+              *(f.strip() for f in also if f.strip())]:
+        if f.casefold() not in {x.casefold() for x in forms}:
+            forms.append(f)
+    return forms, extra, asked
 
 
 @op("parish.find", summary="Чиї парафії в цьому селі — і які книги кожної з них",
@@ -1023,9 +1057,9 @@ def parish_find(a: ParishFindArgs) -> Envelope:
     Тому форми будуються самі, а історичну назву подають через `also`.
     """
     from nyshporka.sources.base import SourceError
-    from nyshporka.sources.duck import AUTHORS_CEILING, name_forms
+    from nyshporka.sources.duck import AUTHORS_CEILING
 
-    forms = name_forms(a.q) + [f for f in a.also if f.strip()]
+    forms, from_books, asked = _place_forms(a.q, a.also)
     src = _duck()
     found: dict[str, Any] = {}
     try:
@@ -1040,7 +1074,8 @@ def parish_find(a: ParishFindArgs) -> Envelope:
     except SourceError as exc:
         return fail(str(exc))
 
-    data: dict[str, Any] = {"forms": forms,
+    data: dict[str, Any] = {"forms": forms, "forms_from_gazetteer": from_books,
+                            "gazetteers": asked,
                             "parishes": [_parish_row(p) for p in found.values()],
                             "books": {}}
     cut_books: dict[str, tuple[str, ...]] = {}
@@ -1068,7 +1103,9 @@ def parish_find(a: ParishFindArgs) -> Envelope:
         env.warn("nothing_found",
                  f"парафій під назвами {', '.join(forms)} у покажчику немає — "
                  "спробуй історичну назву через `also`; це межа покажчика, а не "
-                 "відповідь про архів")
+                 "відповідь про архів"
+                 + ("" if asked else ". Газетирів на машині немає, тож форми "
+                    "назви з довідників не додано (`nysh catalog install`)"))
     elif len(found) > 1:
         env.warn("many_confessions",
                  f"парафій {len(found)} — це РІЗНІ конфесії одного поселення, і "
@@ -1219,23 +1256,26 @@ def parish_mentions(a: ParishMentionsArgs) -> Envelope:
     вона будується сама, історична подається через `also`.
     """
     from nyshporka.sources.base import SourceError
-    from nyshporka.sources.duck import CEILING, name_forms
+    from nyshporka.sources.duck import CEILING
 
-    forms = name_forms(a.q) + [f for f in a.also if f.strip()]
+    forms, from_books, asked = _place_forms(a.q, a.also)
     src = _duck()
     seen: dict[str, Any] = {}
     capped: list[str] = []
     try:
         for form in forms:
-            rows = src.find_files(place=form)
-            if len(rows) >= CEILING:
-                capped.append(form)
+            # Стеля 50 і тут: вікна років добирають решту, а що й вікнами
+            # лишилось обрізаним — названо.
+            rows, cut = src.find_files_split(place=form)
+            if cut:
+                capped.append(f"{form} ({', '.join(cut)})")
             for h in rows:
                 seen.setdefault(h.ref, h)
     except SourceError as exc:
         return fail(str(exc))
 
-    env = ok({"forms": forms, "cases": _hit_rows(list(seen.values()))})
+    env = ok({"forms": forms, "forms_from_gazetteer": from_books,
+              "gazetteers": asked, "cases": _hit_rows(list(seen.values()))})
     env.covered_by(_duck_coverage())
     if capped:
         env.warn("ceiling",

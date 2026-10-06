@@ -268,3 +268,41 @@ def test_geog_near_stays_out_of_the_agent_budget_and_on_the_geog_screen():
 
     assert "geog.near" not in {o.name for o in O.REGISTRY.for_agent()}
     assert S_.OP_SCREEN.get("geog.near") == "geog"
+
+
+# ── форми назви для пошуку парафії ──────────────────────────────────────────
+
+def test_name_variants_bring_translations_and_renames_of_a_unique_place(catalog):
+    """🔴 Покажчик звіряє назву буквально: російська, польська форма й
+    перейменування мусять іти в пошук самі, а не лише через `also` людини."""
+    forms, asked = Q.name_variants("Шумилів")
+    assert asked == ["geog", "places"]
+    assert {"Шумилов", "Szumiłów", "Озірна"} <= set(forms)
+    assert "Шумилів" not in forms, "сама назва — не інша форма"
+    assert all(", с" not in f for f in forms), "позначка «, с.» знімається"
+
+
+def test_name_variants_of_namesakes_skip_renames(catalog):
+    """Однойменних кілька: колишня назва одного з них повела б у чуже село."""
+    forms, _ = Q.name_variants("Маньківка")
+    assert forms == ["Маньковка"]
+
+
+def test_name_variants_without_packs_say_so(catalog):
+    for dom in ("geog", "places"):
+        for p in S.installed(dom):
+            p.path.unlink()
+    S.invalidate()
+    assert Q.name_variants("Шумилів") == ([], [])
+
+
+def test_parish_search_uses_gazetteer_forms(catalog):
+    """`parish.find` питає покажчик і формами з газетирів."""
+    from nyshporka.ops_catalog import _place_forms
+
+    forms, extra, asked = _place_forms("Шумилів", [])
+    assert "Озірна" in extra and asked
+    assert "Шумилов" in forms and "Озірна" in forms
+    # Покажчик відкидає латинку відмовою на ВЕСЬ запит: польська назва лишається
+    # в довідці, але в запит не йде.
+    assert "Szumiłów" in extra and "Szumiłów" not in forms

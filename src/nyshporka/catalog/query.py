@@ -223,6 +223,105 @@ def find_places(q: str, limit: int = 40, uezd: str = "", fond: str = "",
     return Answer(rows=out[:limit], coverage=cov)
 
 
+#: Наскільки форма однойменного поселення мусить бути схожа на назву (за
+#: транслітерацією), щоб іти в пошук: «Horodkiwka» 90, «Chałaimgródek» 36.
+SIMILAR = 70
+
+#: Позначка типу поселення в кінці назви: «Мястковка, м.», «…, с.».
+_KIND_TAIL = re.compile(r",\s*(м-ко|м|с|сл|мст|смт|сел|х)\.?\s*$", re.IGNORECASE)
+
+
+def name_variants(q: str) -> tuple[list[str], list[str]]:
+    """Інші написання поселення з довідників: (назви, які довідники відповіли).
+
+    Газетир каталогу ЦДІАК тримає пару «українська / російська» на кожне
+    поселення, пак `places` — українську, російську, польську назви й
+    псевдоніми (зокрема перейменування). Пошук парафії в покажчику звіряє
+    назву буквально, тож «Мястковка» в заголовку парафії не знаходилась за
+    «М'ястківка», хоч обидві форми лежали в довідниках поруч.
+
+    🔴 Лише поселення з ТОЧНО такою назвою (будь-якою з його форм): фаззі-
+    сусід дав би чуже село. Переклади назви (рос., пол.) беруться завжди —
+    це те саме слово. Перейменування й інші псевдоніми — лише коли поселення з
+    такою назвою в паку ОДНЕ: у Городківок кілька, і колишня назва однієї з
+    них («Халаїмгородок») повела б пошук у чуже село. Уточнення в дужках і
+    позначки на кшталт «, м.» знімаються.
+    Довідника немає — він не в другому значенні, і нуль форм тоді не означає,
+    що інших назв немає.
+    """
+    nq = _norm(q)
+    if not nq:
+        return [], []
+    asked: list[str] = []
+    #: (форма, чи це перейменування/псевдонім, а не переклад тієї самої назви)
+    found: list[tuple[Any, bool]] = []
+    cards = 0                       # однойменні поселення в газетирі ЦДІАК
+
+    try:
+        packs = open_packs("geog")
+    except CatalogMissing:
+        packs = []
+    try:
+        for _pid, con in packs:
+            for r in con.execute("SELECT village_uk, village_ru, norm_uk FROM places "
+                                 "WHERE norm_uk = ? OR norm_ru = ?", [nq, nq]):
+                cards += 1
+                # Збіг лише російською формою — українська назва картки інша,
+                # тобто це перейменування, а не переклад.
+                found += [(r["village_uk"], r["norm_uk"] != nq),
+                          (r["village_ru"], False)]
+        if packs:
+            asked.append("geog")
+    finally:
+        close_all(packs)
+
+    try:
+        rows = _modern_index().get(nq, [])
+        asked.append("places")
+    except CatalogMissing:
+        rows = []
+    qids = list(dict.fromkeys(d["qid"] for d in rows if d.get("qid")))
+    for d in rows:
+        found += [(d.get("name_uk"), d.get("norm_uk") != nq), (d.get("name_ru"), False)]
+    if qids:
+        try:
+            packs = open_packs("places")
+        except CatalogMissing:
+            packs = []
+        try:
+            for _pid, con in packs:
+                for qid in qids:
+                    for r in con.execute("SELECT name_pl, aliases FROM modern "
+                                         "WHERE qid = ?", [qid]):
+                        found.append((r["name_pl"], False))
+                        found += [(a, True) for a in (r["aliases"] or "").split("|")]
+        finally:
+            close_all(packs)
+
+    # Одне поселення — беремо все, зокрема перейменування. Кілька однойменних —
+    # псевдоніми не беремо зовсім, а переклади лише схожі на саму назву: і
+    # польська, і російська назва буває колишньою назвою одного з них.
+    many = cards > 1 or len(qids) > 1
+    if many:
+        from rapidfuzz import fuzz
+
+        from nyshporka.utils.translit import normalize_for_matching as tr
+
+        base = tr(q)
+    out: list[str] = []
+    for raw, alias in found:
+        v = " ".join(str(raw or "").split())
+        if not v or "(" in v:
+            continue                  # «Городківка (Бердичівський район)»
+        v = _KIND_TAIL.sub("", v).strip(" ,.")
+        if len(v) < 4 or _norm(v) == nq or v.casefold() in {x.casefold() for x in out}:
+            continue
+        if many and (alias or fuzz.ratio(tr(v), base) < SIMILAR):
+            continue
+        out.append(v)
+    return out, asked
+
+
 def uezd_known(uezd: str) -> bool:
     """Чи є в газетирі хоч одне поселення цього повіту чи губернії.
 

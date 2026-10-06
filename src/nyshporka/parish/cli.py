@@ -32,12 +32,22 @@ def _cases(rows: list[dict[str, Any]], limit: int) -> None:
         typer.echo(f"   … ще {len(rows) - limit} (усі — у --json)")
 
 
+def _gazetteer_line(data: dict) -> None:  # type: ignore[type-arg]
+    """Які форми назви прийшли з газетирів — або що газетирів немає."""
+    extra = data.get("forms_from_gazetteer") or []
+    if extra:
+        typer.echo(f"   з газетирів: {', '.join(extra)}")
+    elif not data.get("gazetteers"):
+        typer.echo("   газетирів на машині немає — інших форм назви не додано "
+                   "(`nysh catalog install`)")
+
+
 @app.command("find")
 def cmd_find(
     village: str = typer.Argument(..., help="назва села або містечка"),
     also: list[str] = typer.Option([], "--also",
-                                   help="інше написання: історична назва, "
-                                        "форма мови діловодства"),
+                                   help="інше написання, якого немає в газетирах: "
+                                        "історична назва, форма мови діловодства"),
     books: bool = typer.Option(True, "--books/--no-books",
                                help="одразу взяти книги кожної парафії"),
     limit: int = typer.Option(20, "--limit", help="скільки показати"),
@@ -55,6 +65,7 @@ def cmd_find(
         return
     data = env.data or {}
     typer.echo(f"🏘 {village} — шукали як: {', '.join(data.get('forms') or [])}")
+    _gazetteer_line(data)
     parishes = data.get("parishes") or []
     typer.echo(f"\n⛪ парафій: {len(parishes)}")
     for p in parishes:
@@ -163,6 +174,7 @@ def cmd_mentions(
     data = env.data or {}
     rows = data.get("cases") or []
     typer.echo(f"🗂 {village} — шукали як: {', '.join(data.get('forms') or [])}")
+    _gazetteer_line(data)
     typer.echo(f"   згадок: {len(rows)}\n")
     _cases(rows, limit)
     _notes(env)
