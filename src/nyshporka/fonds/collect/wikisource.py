@@ -14,7 +14,8 @@
 
 Код архіву — `codes.wikisource`, далі `codes.commons` («Архів:» на Вікіджерелах
 і на Commons — один волонтерський проєкт з однаковими кодами), далі підпис
-архіву в паку (`label`: ДАЖО, ДАХмО, ЦДІАК — саме так проєкт їх і пише). Це не
+архіву в паку (`label`: ДАЖО, ДАХмО, ЦДІАК — саме так проєкт їх і пише), далі
+його псевдоніми («ІР НБУВ» при підписі «ІРНБУВ»). Це не
 мовчазний здогад: план перевіряє, що під кодом є сторінки, і без них називає
 перебрані коди — тоді архів зветься там інакше, і треба `codes.wikisource`.
 
@@ -346,9 +347,12 @@ class WikisourceCollector:
         pack = active()
         r = pack.repositories.get(str(repo or "").upper())
         label = (str(getattr(r, "label", "") or ""),) if r else ()
+        # Псевдоніми — останніми: підпис паку буває без пробілу («ІРНБУВ»), а
+        # проєкт пише «ІР НБУВ», і саме так його знають псевдоніми архіву.
+        aliases = tuple(str(a) for a in (getattr(r, "aliases", ()) or ())) if r else ()
         out: list[str] = []
         for c in (*pack.codes_for(repo, "wikisource"), *pack.codes_for(repo, "commons"),
-                  *label):
+                  *label, *aliases):
             if c and c not in out:
                 out.append(c)
         return tuple(out)

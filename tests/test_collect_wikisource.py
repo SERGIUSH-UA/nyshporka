@@ -304,3 +304,27 @@ def test_the_collector_is_registered() -> None:
     from nyshporka.fonds.collect.registry import load
 
     assert load().get("wikisource") is not None
+
+
+def test_an_alias_finds_the_archive_spelled_otherwise(monkeypatch: pytest.MonkeyPatch,
+                                                      tmp_path: Path) -> None:
+    """Підпис паку «ІРНБУВ», а проєкт пише «ІР НБУВ» — так його знає псевдонім."""
+    from nyshporka import archives
+
+    class _Repo:
+        label = "ІРНБУВ"
+        aliases = ("ІР НБУВ", "Інститут рукопису НБУВ")
+
+    class _Pack:
+        repositories: ClassVar[dict[str, object]] = {"IRNBUV": _Repo()}
+
+        def codes_for(self, repo: str, system: str) -> tuple[str, ...]:
+            return ()
+
+    monkeypatch.setattr(archives, "active", lambda: _Pack())
+    pages = {"Архів:ІР НБУВ/6/1": "{|\n|-\n| 29-35\n| Інвентар маєтку\n| 1845\n| 67\n|}\n"}
+    coll = _coll(_Api(pages))
+    p = coll.plan(Target(repo="IRNBUV", fond="6"))
+    assert p.ready and p.opys == ("1",)
+    res = coll.collect(Target(repo="IRNBUV", fond="6"), dest=tmp_path)
+    assert res.rows == 1 and "ІР НБУВ" in res.notes[0]
