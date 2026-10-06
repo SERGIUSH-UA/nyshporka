@@ -272,6 +272,56 @@ def test_pull_serii_ne_bere_prochytane_tut(space: Any, monkeypatch: pytest.Monke
     assert sorted(taken) == ["u2", "u3"]
 
 
+def test_pull_odniiei_spravy_zviriaie_z_prochytanym_tut(
+        space: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """🔴 `share pull "<шифра>" --take` звіряє з прочитаним так само, як серія,
+    але відмовою з назвами прогонів: своє — ніколи, навіть із --force;
+    прийняте раніше — лише з --force; безключовий прогін — «можливо прочитано»."""
+    from nyshporka import htr_store as S
+    from nyshporka import ops_share
+    from nyshporka.share import accept as A
+    from nyshporka.share import catalog as C
+
+    def row(spr: str) -> C.Row:
+        return C.Row(shifra=f"DAHMO 315-1-{spr}", repo="DAHMO", fond="315", opys="1",
+                     spr=spr, url=f"u{spr}", sha256=f"u{spr}", pages="10", years="1900")
+
+    k1, k2 = ops_share._row_key(row("1")), ops_share._row_key(row("2"))
+    monkeypatch.setattr(S, "local_reads", lambda: {
+        k1: {"own": ["spr-1"], "taken": []}, k2: {"own": [], "taken": ["DAHMO_315-1-2"]},
+        "": {"own": ["kostel-315-1-10-1847"], "taken": []}})
+    taken: list[tuple[str, bool]] = []
+
+    def accept(url: str, sha256: str = "", force: bool = False,
+               replace: bool = False) -> dict[str, Any]:
+        taken.append((url, replace))
+        return {"case_key": url, "pages": 10, "runs": [f"run_{url}"]}
+
+    monkeypatch.setattr(A, "accept", accept)
+    monkeypatch.setattr(ops_share, "_index_taken", lambda env, runs: None)
+
+    def pull(spr: str, force: bool = False) -> Any:
+        one = [row(spr)]
+        monkeypatch.setattr(C, "search", lambda q, base="", *, limit=50, offset=0:
+                            (one, 1, 4))
+        return ops_share.share_pull(ops_share.SharePullArgs(
+            query=f"315-1-{spr}", take=True, force=force))
+
+    for force in (False, True):
+        env = pull("1", force=force)
+        assert not env.ok and "spr-1" in str(env.error), env
+    env = pull("2")
+    assert not env.ok and "DAHMO_315-1-2" in str(env.error) and "--force" in str(env.error)
+    env = pull("10")
+    assert not env.ok and "kostel-315-1-10-1847" in str(env.error)
+    assert "share import u10" in str(env.error)
+    assert taken == []
+
+    assert pull("2", force=True).ok
+    assert pull("3").ok
+    assert taken == [("u2", True), ("u3", False)]
+
+
 def test_local_reads_bere_kliuch_pryiniatoho_z_shyfry(
         space: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     """Прийняте старшою версією лежить без ключа в меті — справу впізнає шифра

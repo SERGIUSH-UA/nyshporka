@@ -950,8 +950,9 @@ class SharePullArgs(BaseModel):
                                       "роки (або --years) одним викликом")
     years: str = Field(default="", description="роки видання: «1880» або «1862-1905»")
     force: bool = Field(default=False,
-                        description="з --vydannia чи серією: перекласти вже взяте "
-                                    "новішими пакетами; ворота при цьому діють як завжди")
+                        description="з --take: перекласти вже взяте новішими "
+                                    "пакетами (одна справа, серія чи видання); "
+                                    "ворота при цьому діють як завжди")
     repo: str = Field(default="", description="архів серії (код чи назва): «RGIA», «ДАХмО»")
     fond: str = Field(default="", description="фонд серії; з --take — прийняти всю серію")
     opys: str = Field(default="", description="опис серії; порожньо — усі описи фонду")
@@ -981,6 +982,32 @@ def _row_key(r: Any) -> str:
     return quad_key(r.repo, r.fond, r.opys, r.spr)
 
 
+def _seen_here(local: dict[str, dict[str, list[str]]], r: Any, *, replace: bool
+               ) -> tuple[str, list[str]]:
+    """Чим справа рядка каталогу вже є на цій машині: `(стан, прогони)`.
+
+    Стан: `own` — своє прочитання; `taken` — прийняте раніше (лише без
+    `replace`); `maybe` — прогін без ключа справи несе її шифру в імені;
+    порожньо — справи тут немає, можна брати.
+
+    🔴 Одне рішення на серію й на одну справу. Доти звірку мала лише серія, а
+    `share pull "<шифра>" --take` від дубля боронив тільки збіг імені прогону в
+    `accept`: своя `spr-8734` і пулова `DAHMO_315-1-8734` імен не ділять, і
+    одна справа лягала дублем поверх власного прочитання.
+    """
+    from nyshporka import htr_store as S
+
+    key = _row_key(r)
+    have = (local.get(key) or {}) if key else {}
+    if have.get("own"):
+        return "own", [*have.get("own", []), *have.get("taken", [])]
+    if have.get("taken") and not replace:
+        return "taken", list(have["taken"])
+    if not have and (like := S.unkeyed_like(local, r.fond, r.opys, r.spr)):
+        return "maybe", like
+    return "", []
+
+
 def _missing_locally(env: Envelope, items: list[tuple[str, Any]], *, replace: bool
                      ) -> list[tuple[str, Any]]:
     """Відсіяти справи, які на цій машині вже прочитано, — до завантаження.
@@ -999,20 +1026,17 @@ def _missing_locally(env: Envelope, items: list[tuple[str, Any]], *, replace: bo
     maybe: list[dict[str, Any]] = []
     for label, r in items:
         key = _row_key(r)
-        have = (local.get(key) or {}) if key else {}
-        if have.get("own"):
-            own += 1
-        elif have.get("taken") and not replace:
-            taken += 1
-        elif not have and (like := S.unkeyed_like(local, r.fond, r.opys, r.spr)):
-            maybe.append({"label": label, "case_key": key, "runs": like,
+        state, runs = _seen_here(local, r, replace=replace)
+        if state == "maybe":
+            maybe.append({"label": label, "case_key": key, "runs": runs,
                           "url": r.url})
             continue
-        else:
+        if not state:
             keep.append((label, r))
             continue
-        skipped.append({"label": label, "case_key": key,
-                        "runs": [*have.get("own", []), *have.get("taken", [])]})
+        own += state == "own"
+        taken += state == "taken"
+        skipped.append({"label": label, "case_key": key, "runs": runs})
     (env.data or {})["skipped_local"] = skipped
     (env.data or {})["skipped_maybe"] = maybe
     if skipped:
@@ -1222,6 +1246,30 @@ def _pull_vydannia(a: SharePullArgs) -> Envelope:
     return env
 
 
+def _single_seen_here(r: Any, *, replace: bool) -> str:
+    """Причина не брати одну справу вільного запиту; порожньо — брати.
+
+    🔴 Та сама звірка, що й у серії (`_seen_here`), але відмова, а не пропуск:
+    людина назвала саме цю справу, і мовчки не взяти її було б гірше, ніж
+    сказати, чим вона тут уже є. Своє — не береться навіть із `--force`.
+    """
+    from nyshporka import htr_store as S
+
+    state, runs = _seen_here(S.local_reads(), r, replace=replace)
+    names = ", ".join(runs[:5]) + (" …" if len(runs) > 5 else "")
+    if state == "own":
+        return (f"{r.shifra} уже прочитано на цій машині вашим прогоном: {names}. "
+                f"Чужий пакет поверх власного прочитання не береться")
+    if state == "taken":
+        return (f"{r.shifra} уже прийнято з пулу раніше: {names}. "
+                f"Перекласти новішим пакетом: --force")
+    if state == "maybe":
+        return (f"{r.shifra}, можливо, вже прочитано: прогони без ключа справи мають "
+                f"у назві її шифру — {names}. Прив'язати прогін: nysh cases bind; "
+                f"взяти попри це: nysh share import {r.url}")
+    return ""
+
+
 @op("share.pull", summary="Знайти справу в каталозі пулу",
     args=SharePullArgs, mutates=True, agent=False, section=SECTION, private=True)
 def share_pull(a: SharePullArgs) -> Envelope:
@@ -1298,11 +1346,13 @@ def share_pull(a: SharePullArgs) -> Envelope:
         if not url:
             env.warn("no_url", "у рядку каталогу немає адреси пакета")
             return env
+        if why := _single_seen_here(found[0], replace=a.force):
+            return fail(why)
         from nyshporka.share.accept import AcceptError, accept
 
         try:
             # Байти звіряються з тим, що обіцяє рядок каталогу.
-            data["imported"] = accept(url, sha256=found[0].sha256)
+            data["imported"] = accept(url, sha256=found[0].sha256, replace=a.force)
         except AcceptError as exc:
             return fail(str(exc))
         _after_import(env, data["imported"])

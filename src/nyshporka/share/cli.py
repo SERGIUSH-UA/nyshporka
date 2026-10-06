@@ -712,9 +712,10 @@ def pull_cmd(
                                       "усі його роки одним викликом"),
     years: str = typer.Option("", "--years", help="роки видання: «1880» або «1862-1905»"),
     force: bool = typer.Option(False, "--force",
-                               help="з --vydannia чи серією: перекласти вже взяте "
-                                    "новішим; ворота діють як завжди (прийняти попри "
-                                    "них — share import <адреса> --force)"),
+                               help="з --take: перекласти вже взяте новішим (одна "
+                                    "справа, серія чи видання); своє прочитання не "
+                                    "береться й так; ворота діють як завжди (прийняти "
+                                    "попри них — share import <адреса> --force)"),
     repo: str = typer.Option("", "--repo", help="серія: архів («RGIA», «ДАХмО»)"),
     fond: str = typer.Option("", "--fond", help="серія: фонд; з --take — уся серія"),
     opys: str = typer.Option("", "--opys", help="серія: опис; порожньо — усі описи"),
