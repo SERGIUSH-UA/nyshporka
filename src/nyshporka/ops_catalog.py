@@ -872,7 +872,14 @@ def registry_build(a: BuildArgs) -> Envelope:
         args = CollectArgs(collector=c.id, repo=a.repo, fond=a.fond,
                            opys=a.opys, refresh=a.refresh, dry_run=False,
                            fond_id=a.fond_id, merge=False)
-        plan = registry_plan(args)
+        # 🔴 Функції, а не `ops.call`: виняток одного збирача (мережа впала
+        # посеред плану) летів би крізь увесь `build` — файли попередніх
+        # джерел уже записані, а зведення не відбувалось.
+        try:
+            plan = registry_plan(args)
+        except Exception as exc:
+            skipped.append({"collector": c.id, "why": f"{type(exc).__name__}: {exc}"})
+            continue
         if not plan.ok:
             skipped.append({"collector": c.id, "why": plan.error})
             continue
@@ -883,11 +890,23 @@ def registry_build(a: BuildArgs) -> Envelope:
             skipped.append({"collector": c.id,
                             "why": pd.get("why") or "джерело не готове"})
             continue
-        got = registry_collect(args)
+        try:
+            got = registry_collect(args)
+        except Exception as exc:
+            skipped.append({"collector": c.id, "why": f"{type(exc).__name__}: {exc}"})
+            continue
         if not got.ok:
             skipped.append({"collector": c.id, "why": got.error})
             continue
         gd = got.data or {}
+        if not gd.get("rows"):
+            # Нуль рядків — не «зібрано з джерела»: у знаменнику «опис
+            # зібрано з N джерел» таке джерело означало б, що воно опис бачило.
+            blind = "; ".join(str(b.get("why") or "") for b in gd.get("blind") or []
+                              if isinstance(b, dict))
+            skipped.append({"collector": c.id,
+                            "why": "0 рядків" + (f": {blind}" if blind else "")})
+            continue
         took.append({"collector": c.id, "rows": gd.get("rows") or 0,
                      "out": str(gd.get("out") or "")})
     progress.report(total, total, "джерел")

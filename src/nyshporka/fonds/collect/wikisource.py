@@ -7,7 +7,7 @@
 
 🔴 **Навіщо окремий збирач.** Зведений покажчик прив'язує до парафії лише частину
 щорічної серії книг консисторії, а роки його «справ» бувають не роками томів.
-Заміряно на замовленні порталу (06.10.2026): серія метрик повіту — щорічні томи
+Заміряно 06.10.2026: серія метрик повіту — щорічні томи
 1795–1862, поділені за абеткою сіл; покажчик дав 16 томів із ~60, і «онлайн
 немає» стояло там, де потрібний том лежав на FamilySearch. Повний перелік із
 плівками був на сторінці опису у Вікіджерелах — і брався руками.
@@ -81,6 +81,9 @@ _NUM_HEADS = {"№", "n", "номер справи", "№ справи", "№ с
 _SPR_LINK_RE = re.compile(r"^\[\[/([^/\]|]+)/?(?:\|[^\]]*)?\]\]$")
 _COMMONS_RE = re.compile(r"\[\[\s*c:\s*[Ff]ile\s*:\s*([^\]|]+)")
 _FS_DGS_RE = re.compile(r"imageGroupNumbers=([0-9_]+[A-Za-z0-9:_-]*)")
+#: Посилання на плівку FamilySearch іншими адресами: `/search/film/<DGS>`,
+#: `/film/<DGS>`, `/dgs/<DGS>`.
+_FS_PATH_RE = re.compile(r"/(?:search/film|film|dgs)/(\d+)")
 _TAG_RE = re.compile(r"<[^>]*>")
 
 
@@ -96,15 +99,16 @@ def _nbsp(s: str) -> str:
 def _cell(raw: str) -> str:
     """Комірка без атрибутів: `style="…" | текст` → `текст`.
 
-    ⚠ Атрибут відрізається лише тоді, коли одинарна `|` стоїть поза `[[…]]`: у
-    посиланні `[[/2а/|2а]]` вертикальна риска — частина комірки.
+    ⚠ Атрибут відрізається лише тоді, коли одинарна `|` стоїть поза `[[…]]` і
+    `{{…}}`: у посиланні `[[/2а/|2а]]` і в шаблоні `{{FS|dgs=…|item=2}}`
+    вертикальна риска — частина комірки.
     """
     s = _nbsp(raw).strip()
     depth = 0
     for i, ch in enumerate(s):
-        if s.startswith("[[", i):
+        if s.startswith(("[[", "{{"), i):
             depth += 1
-        elif s.startswith("]]", i) and depth:
+        elif s.startswith(("]]", "}}"), i) and depth:
             depth -= 1
         elif ch == "|" and depth == 0 and "=" in s[:i]:
             return s[i + 1:].strip()
@@ -218,7 +222,14 @@ def _spr_cell(cell: str) -> str:
 
 
 def _dgs(cell: str) -> str:
-    m = _FS_DGS_RE.search(cell or "")
+    """Номер плівки FamilySearch (DGS) з комірки чи поля картки, або порожньо.
+
+    🔴 Лише з адреси, що несе саме DGS, або з комірки, яка вся є числом.
+    Довільне довге число з посилання — не плівка: в ark-адресі образу
+    (`…/ark:/61903/3:1:…?i=12&cat=1938521`) це номер запису каталогу, і
+    справа отримала б чужу плівку, яка до того ж перекривала б таблицю.
+    """
+    m = _FS_DGS_RE.search(cell or "") or _FS_PATH_RE.search(cell or "")
     if m:
         return m.group(1)
     bare = re.fullmatch(r"[\s\[\]]*([0-9]{6,})[\s\[\]]*", cell or "")
@@ -297,10 +308,8 @@ def parse_case_page(txt: str) -> dict[str, str] | None:
     commons = cm.group(1).strip() if cm else ""
     if not commons and field(txt, "link_commons"):
         commons = re.sub(r"^[Ff]ile\s*:\s*", "", field(txt, "link_commons"))
-    fs = field(txt, "link_FS")
-    fm = re.search(r"/(?:film|dgs)/(\d+)", fs) or re.search(r"(\d{6,})", fs)
     return {"title": field(txt, "назва"), "year_from": yf, "year_to": yt,
-            "commons_file": commons, "fs_film": fm.group(1) if fm else ""}
+            "commons_file": commons, "fs_film": _dgs(field(txt, "link_FS"))}
 
 
 def merge_case(row: dict[str, str], card: dict[str, str]) -> None:
@@ -319,6 +328,15 @@ def merge_case(row: dict[str, str], card: dict[str, str]) -> None:
 
 
 # ── збирач ───────────────────────────────────────────────────────────────────
+class WikisourceError(RuntimeError):
+    """Вікіджерела відповіли не відповіддю: збій, помилка API, неповна пачка.
+
+    🔴 Саме виняток, а не порожньо: порожня відповідь читалась як «сторінок
+    немає» чи «опис не транскрибовано», а злиття реєстру викидало старі рядки
+    опису, якого цей запуск нібито торкнувся.
+    """
+
+
 class WikisourceCollector:
     """Перелік справ фонду зі сторінок опису «Архів:» на Вікіджерелах."""
 
@@ -360,10 +378,26 @@ class WikisourceCollector:
     def _api(self, http: Any, params: dict[str, str]) -> dict[str, Any]:
         q = {"format": "json", "formatversion": "2", **params}
         url = "/w/api.php?" + "&".join(f"{k}={quote(str(v))}" for k, v in q.items())
+        return self._json(http.get(url))
+
+    @staticmethod
+    def _json(r: Any) -> dict[str, Any]:
+        """Тіло відповіді API як JSON; збій чи `error` — `WikisourceError`."""
+        status = int(getattr(r, "status_code", 200) or 200)
+        text = str(getattr(r, "text", "") or "")
         try:
-            data: dict[str, Any] = json.loads(getattr(http.get(url), "text", "") or "{}")
+            data = json.loads(text)
         except ValueError:
-            return {}
+            raise WikisourceError(
+                f"Вікіджерела відповіли не JSON (HTTP {status}): "
+                f"{' '.join(text.split())[:120]}") from None
+        if not isinstance(data, dict):
+            raise WikisourceError(f"Вікіджерела відповіли не об'єктом (HTTP {status})")
+        err = data.get("error")
+        if err:
+            e = err if isinstance(err, dict) else {"info": str(err)}
+            raise WikisourceError(f"помилка API Вікіджерел: {e.get('code', '')} "
+                                  f"{e.get('info', '')}".strip())
         return data
 
     def _titles(self, http: Any, code: str, fond: str) -> list[str]:
@@ -410,6 +444,10 @@ class WikisourceCollector:
 
         🔴 Саме POST: півсотні кириличних назв не влазять у адресу (414 на URL
         понад ~8 КБ), і це виглядало б як «сторінок немає».
+
+        🔴 Кожна запитана назва мусить повернутись — текстом або позначкою
+        «сторінки немає». Інакше `WikisourceError`: опис без тексту лягав би в
+        «не транскрибовано», а злиття стирало б його рядки з реєстру.
         """
         out: dict[str, str] = {}
         total = math.ceil(len(titles) / BATCH)
@@ -417,21 +455,44 @@ class WikisourceCollector:
             if on_progress is not None:
                 on_progress(done=n, total=total, unit="пачка",
                             note=f"сторінок {len(out)} із {len(titles)}")
-            r = http.post("/w/api.php", data={
-                "action": "query", "prop": "revisions", "rvprop": "content",
-                "rvslots": "main", "titles": "|".join(titles[i:i + BATCH]),
-                "format": "json", "formatversion": "2"})
-            try:
-                data = json.loads(getattr(r, "text", "") or "{}")
-            except ValueError:
-                continue
-            for p in data.get("query", {}).get("pages", []):
-                revs = p.get("revisions") or []
-                if revs:
-                    main = (revs[0].get("slots") or {}).get("main") or {}
-                    out[str(p.get("title") or "")] = str(main.get("content") or "")
+            out.update(self._batch(http, titles[i:i + BATCH]))
         if on_progress is not None:
             on_progress(done=total, total=total, unit="пачка")
+        return out
+
+    def _batch(self, http: Any, titles: list[str]) -> dict[str, str]:
+        """Одна пачка назв — з продовженнями (`continue`), доки API їх дає."""
+        base = {"action": "query", "prop": "revisions", "rvprop": "content",
+                "rvslots": "main", "titles": "|".join(titles),
+                "format": "json", "formatversion": "2"}
+        out: dict[str, str] = {}
+        seen: set[str] = set()
+        alias: dict[str, str] = {}
+        cont: dict[str, str] = {}
+        for _ in range(len(titles) + 2):
+            data = self._json(http.post("/w/api.php", data={**base, **cont}))
+            q = data.get("query") or {}
+            for nm in q.get("normalized") or []:
+                alias[str(nm.get("from") or "")] = str(nm.get("to") or "")
+            for pg in q.get("pages") or []:
+                title = str(pg.get("title") or "")
+                revs = pg.get("revisions") or []
+                if revs:
+                    main = (revs[0].get("slots") or {}).get("main") or {}
+                    out[title] = str(main.get("content") or "")
+                    seen.add(title)
+                elif pg.get("missing") or pg.get("invalid"):
+                    seen.add(title)
+            more = data.get("continue")
+            if not isinstance(more, dict) or not more:
+                break
+            cont = {str(k): str(v) for k, v in more.items()}
+        lost = [t for t in titles if alias.get(t, t) not in seen]
+        if lost:
+            raise WikisourceError(
+                f"Вікіджерела не віддали {len(lost)} із {len(titles)} сторінок "
+                f"пачки ({', '.join(lost[:3])}…) — опис не зібрано, щоб не "
+                f"видати неповний перелік за повний")
         return out
 
     def _scope(self, http: Any, target: Target
@@ -458,8 +519,11 @@ class WikisourceCollector:
                      f"читався б як «опису немає»."))
         try:
             code, opysy, cases = self._scope(self._http(), target)
-        except OSError as exc:
-            return Plan(collector=self.id, ready=False, why=str(exc))
+        except (OSError, RuntimeError) as exc:
+            # `HttpError` і `WikisourceError` — обидва RuntimeError. Збій
+            # мережі — «не готові», а не виняток, що валить `registry build`.
+            return Plan(collector=self.id, ready=False,
+                        why=f"Вікіджерела не відповіли: {exc}")
         if not code:
             tried = ", ".join(self._codes(target.repo))
             return Plan(collector=self.id, ready=False,
@@ -469,15 +533,32 @@ class WikisourceCollector:
                              f"або архів зветься інакше — тоді `codes.wikisource` у "
                              f"config/archives.yaml"))
         found = tuple(sorted({*opysy, *(c[0] for c in cases)}))
+        absent = self._absent(target, found)
+        if target.opys and not found:
+            return Plan(collector=self.id, ready=False,
+                        why=(f"описів {', '.join(absent)} ф.{target.fond} у Вікіджерелах "
+                             f"під кодом {code} немає — інші описи цього фонду там "
+                             f"є. Нуль тут означав би «справ немає», а це не так"))
         n = 1 + math.ceil(len(opysy) / BATCH) + math.ceil(len(cases) / BATCH)
         return Plan(collector=self.id, ready=True, opys=found, requests=n,
-                    eta_sec=n * SEC_PER_REQ)
+                    eta_sec=n * SEC_PER_REQ,
+                    why=(f"описів {', '.join(absent)} у Вікіджерелах немає"
+                         if absent else ""))
+
+    @staticmethod
+    def _absent(target: Target, found: tuple[str, ...]) -> tuple[str, ...]:
+        """Запитані описи, яких серед сторінок фонду немає."""
+        return tuple(o for o in (target.opys or ()) if o not in found)
 
     def collect(self, target: Target, *, dest: Path,
                 on_progress: ProgressFn | None = None,
                 refresh: bool = False, dry_run: bool = False) -> CollectResult:
         http = self._http()
         code, opysy, cases = self._scope(http, target)
+        if not code:
+            raise WikisourceError(
+                f"сторінок фонду {target.fond} у Вікіджерелах не знайдено — див. "
+                f"`nysh registry plan`")
         texts = self._texts(http, [*opysy.values(), *(c[2] for c in cases)], on_progress)
 
         reg: dict[tuple[str, str, str], dict[str, str]] = {}
@@ -536,6 +617,12 @@ class WikisourceCollector:
             blind.append(Blind(
                 kind="not_a_card", count=not_cards,
                 why="підсторінки справ без шаблону картки або з нерозбірним номером"))
+        absent = self._absent(target, wanted)
+        if absent:
+            blind.append(Blind(
+                kind="opys_absent", count=len(absent),
+                why=(f"описів {', '.join(absent[:5])} у Вікіджерелах немає — цей "
+                     f"збирач про них нічого не каже, нуль тут не «справ немає»")))
         non_numeric = [o for o in wanted if not o.isdigit()]
         if non_numeric:
             blind.append(Blind(

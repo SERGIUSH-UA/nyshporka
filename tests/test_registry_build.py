@@ -174,3 +174,37 @@ def test_nothing_collected_is_said_out_loud(space, monkeypatch) -> None:
     assert seen["merges"] == 0, "зводити нічого, а зведення відбулось"
     codes = {w.code for w in env.warnings}
     assert "nothing_collected" in codes, codes
+
+
+class _Падучий(_Збирач):
+    """Збирач, у якого посеред плану впала мережа."""
+
+    def plan(self, _target: Any) -> Any:
+        raise RuntimeError("ConnectError")
+
+
+def test_a_collector_that_raises_does_not_sink_the_build(space, monkeypatch) -> None:
+    """🔴 Виняток одного збирача летів крізь увесь build: файли інших уже
+    записані, а зведення не відбувалось."""
+    good = _Збирач("добрий", ready=True, rows=42)
+    boom = _Падучий("падучий", ready=True)
+    seen = _stub(monkeypatch, good, boom, merged=42)
+
+    env = O.call("registry.build", {"repo": "ДАХмО", "fond": "230"})
+
+    assert env.ok, env.error
+    assert seen["merges"] == 1, "зведення мусить відбутись"
+    (sk,) = env.data["skipped"]
+    assert sk["collector"] == "падучий" and "ConnectError" in sk["why"]
+
+
+def test_zero_rows_is_not_counted_as_a_source(space, monkeypatch) -> None:
+    """Джерело, що дало 0 рядків, не входить у «зібрано з N джерел»."""
+    good = _Збирач("добрий", ready=True, rows=42)
+    empty = _Збирач("порожній", ready=True, rows=0)
+    _stub(monkeypatch, good, empty, merged=42)
+
+    env = O.call("registry.build", {"repo": "ДАХмО", "fond": "230"})
+
+    assert [x["collector"] for x in env.data["took"]] == ["добрий"]
+    assert [x["collector"] for x in env.data["skipped"]] == ["порожній"]

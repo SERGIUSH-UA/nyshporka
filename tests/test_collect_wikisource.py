@@ -3,7 +3,7 @@
 🔴 Заради чого збирач: зведений покажчик дає лише частину щорічної серії книг
 консисторії, і «онлайн немає» ставало там, де том лежав на FamilySearch.
 Повний перелік із плівками — на сторінці опису у Вікіджерелах. Головний
-приймач нижче — справа 1018 ДАЖО ф.1 оп.78: рік 1824 і плівка 119553279.
+приймач нижче — справа з колонкою FS: рік і плівка доходять до реєстру фонду.
 
 Розбір таблиці — чисті функції; мережа — двійник із записаними відповідями.
 Кожен формат таблиці колись коштував мовчазної втрати, а не падіння.
@@ -30,11 +30,11 @@ def test_fs_column_with_an_explanation_in_the_header_is_read() -> None:
     """🔴 «Посилання на FamilySearch<br/>для відсутніх справ»: точний аліас цю
     колонку не впізнавав, і плівки зникали мовчки — саме вони кажуть «онлайн»."""
     rows = {r["spr_raw"]: r for r in W.parse_opys_page(DAZHO)}
-    assert rows["1018"]["fs_film"] == "119553279"
-    assert (rows["1018"]["year_from"], rows["1018"]["year_to"]) == ("1824", "1824")
-    assert rows["1018"]["folios"] == "908"
-    assert rows["1018"]["uezd"] == "Острозький"
-    assert rows["1018"]["title"].endswith("Села А-К · Острозький пов.")
+    assert rows["1023"]["fs_film"] == "100000123"
+    assert (rows["1023"]["year_from"], rows["1023"]["year_to"]) == ("1826", "1826")
+    assert rows["1023"]["folios"] == "712"
+    assert rows["1023"]["uezd"] == "Острозький"
+    assert rows["1023"]["title"].endswith("Села А-К · Острозький пов.")
     assert rows["1009"]["fs_film"] == "", "порожня комірка FS — порожньо, не сусіднє"
 
 
@@ -129,24 +129,24 @@ def test_years_are_min_max_and_folios_the_first_number() -> None:
 
 def test_case_card_fills_the_gaps_but_never_erases() -> None:
     """🔴 Картка без `link_FS` не затирає плівку з таблиці."""
-    row = {"title": "", "year_from": "", "year_to": "", "fs_film": "119553279",
+    row = {"title": "", "year_from": "", "year_to": "", "fs_film": "100000123",
            "commons_file": ""}
-    card = W.parse_case_page("{{Архіви/справа\n| назва = Метрична книга\n| рік = 1824\n"
-                             "| link_commons = [[c:File:ДАЖО 1-78-1018.pdf]]\n}}\n")
+    card = W.parse_case_page("{{Архіви/справа\n| назва = Метрична книга\n| рік = 1826\n"
+                             "| link_commons = [[c:File:ДАЖО 1-78-1023.pdf]]\n}}\n")
     assert card is not None
     W.merge_case(row, card)
-    assert row["fs_film"] == "119553279"
-    assert (row["title"], row["year_from"]) == ("Метрична книга", "1824")
-    assert row["commons_file"] == "ДАЖО 1-78-1018.pdf" and row["src"] == "both"
+    assert row["fs_film"] == "100000123"
+    assert (row["title"], row["year_from"]) == ("Метрична книга", "1826")
+    assert row["commons_file"] == "ДАЖО 1-78-1023.pdf" and row["src"] == "both"
     assert W.parse_case_page("просто текст") is None
 
 
 def test_pages_are_classified_within_the_fond_only() -> None:
-    titles = ["Архів:ДАЖО/1/78", "Архів:ДАЖО/1/78/1018", "Архів:ДАЖО/1/78/198а",
+    titles = ["Архів:ДАЖО/1/78", "Архів:ДАЖО/1/78/1023", "Архів:ДАЖО/1/78/198а",
               "Архів:ДАЖО/1/Л2"]
     opysy, cases = W.WikisourceCollector.classify(titles, "ДАЖО", "1")
     assert set(opysy) == {"78", "Л2"}
-    assert {c[1] for c in cases} == {"1018", "198а"}
+    assert {c[1] for c in cases} == {"1023", "198а"}
 
 
 # ── збирач із двійником мережі ───────────────────────────────────────────────
@@ -211,8 +211,8 @@ def pack(monkeypatch: pytest.MonkeyPatch) -> None:
 
 PAGES = {
     "Архів:ДАЖО/1/78": DAZHO,
-    "Архів:ДАЖО/1/78/1018": ("{{Архіви/справа\n| назва = Метричні книги\n| рік = 1824\n"
-                             "| link_commons = [[c:File:ДАЖО 1-78-1018.pdf]]\n}}\n"),
+    "Архів:ДАЖО/1/78/1023": ("{{Архіви/справа\n| назва = Метричні книги\n| рік = 1826\n"
+                             "| link_commons = [[c:File:ДАЖО 1-78-1023.pdf]]\n}}\n"),
     "Архів:ДАЖО/1/78/1150": ("{{Архіви/справа\n| назва = Справа лише з картки\n"
                              "| рік = 1870\n| link_FS = https://www.familysearch.org/"
                              "search/film/104123456\n}}\n"),
@@ -229,9 +229,9 @@ def test_collect_writes_what_merge_reads(tmp_path: Path, pack: None) -> None:
     fields, rows = T.read_tsv(res.out)
     assert tuple(fields) == W.FIELDS
     by = {(r["opys"], r["spr_raw"]): r for r in rows}
-    r1018 = by[("78", "1018")]
-    assert (r1018["year_from"], r1018["fs_film"], r1018["src"]) == ("1824", "119553279", "both")
-    assert r1018["commons_file"] == "ДАЖО 1-78-1018.pdf"
+    r1023 = by[("78", "1023")]
+    assert (r1023["year_from"], r1023["fs_film"], r1023["src"]) == ("1826", "100000123", "both")
+    assert r1023["commons_file"] == "ДАЖО 1-78-1023.pdf"
     assert by[("78", "1150")]["fs_film"] == "104123456", "справа лише з картки теж іде"
     assert not [r for r in rows if r["title"] == "Чужа справа"], "фонд 10 — не фонд 1"
     from urllib.parse import parse_qs, urlparse
@@ -286,7 +286,7 @@ def test_unknown_archive_is_refused_not_guessed(monkeypatch: pytest.MonkeyPatch)
 
 def test_merge_turns_the_film_into_an_online_copy(tmp_path: Path, pack: None,
                                                   monkeypatch: pytest.MonkeyPatch) -> None:
-    """Приймач усього: після злиття справа 1018 має плівку в реєстрі фонду."""
+    """Приймач усього: після злиття справа 1023 має плівку в реєстрі фонду."""
     from nyshporka.fonds.merge.run import merge_fond
 
     reg = tmp_path / "registry"
@@ -295,9 +295,9 @@ def test_merge_turns_the_film_into_an_online_copy(tmp_path: Path, pack: None,
     out = tmp_path / "f1_opys_merged.tsv"
     merge_fond(Target(repo="DAZHO", fond="1"), dest=reg, out=out)
     _, rows = T.read_tsv(out)
-    (row,) = [r for r in rows if r.get("opys") == "78" and r.get("spr_int") == "1018"]
-    assert row["fs_dgs"] == "119553279" or row.get("fs_film") == "119553279"
-    assert re.search(r"imageGroupNumbers=119553279", row.get("fs_url", ""))
+    (row,) = [r for r in rows if r.get("opys") == "78" and r.get("spr_int") == "1023"]
+    assert row["fs_dgs"] == "100000123" or row.get("fs_film") == "100000123"
+    assert re.search(r"imageGroupNumbers=100000123", row.get("fs_url", ""))
 
 
 def test_the_collector_is_registered() -> None:
@@ -328,3 +328,118 @@ def test_an_alias_finds_the_archive_spelled_otherwise(monkeypatch: pytest.Monkey
     assert p.ready and p.opys == ("1",)
     res = coll.collect(Target(repo="IRNBUV", fond="6"), dest=tmp_path)
     assert res.rows == 1 and "ІР НБУВ" in res.notes[0]
+
+
+# ── збій — не нуль ───────────────────────────────────────────────────────────
+class _Lame(_Api):
+    """Двійник, у якого тексти віддає не API, а щось інше (503, помилка, обрізка)."""
+
+    def __init__(self, pages: dict[str, str], body: str = "", drop: int = 0,
+                 cont: bool = False) -> None:
+        super().__init__(pages)
+        self.body, self.drop, self.cont = body, drop, cont
+        self.posts = 0
+
+    def post(self, url: str, data: dict[str, str] | None = None,
+             json: object = None) -> _Resp:
+        import json as _j
+
+        self.posts += 1
+        if self.body:
+            return _Resp(self.body)
+        titles = [t for t in (data or {})["titles"].split("|") if t in self.pages]
+        if self.cont and "rvcontinue" not in (data or {}):
+            # Перша відповідь — лише половина текстів і `continue` на решту.
+            half = titles[: len(titles) // 2]
+            pages = [{"title": t, "revisions": [{"slots": {"main": {
+                "content": self.pages[t]}}}]} for t in half]
+            pages += [{"title": t} for t in titles[len(half):]]
+            return _Resp(_j.dumps({"continue": {"rvcontinue": "x", "continue": "||"},
+                                   "query": {"pages": pages}}))
+        if self.cont:
+            titles = titles[len(titles) // 2:]
+        titles = titles[: len(titles) - self.drop]
+        pages = [{"title": t, "revisions": [{"slots": {"main": {
+            "content": self.pages[t]}}}]} for t in titles]
+        return _Resp(_j.dumps({"query": {"pages": pages}}))
+
+
+def _rows78(path: Path) -> list[dict[str, str]]:
+    _, rows = T.read_tsv(path)
+    return [r for r in rows if r["opys"] == "78"]
+
+
+@pytest.mark.parametrize("lame", [
+    _Lame(PAGES, body="<html><body>503 Service Unavailable</body></html>"),
+    _Lame(PAGES, body='{"error": {"code": "maxlag", "info": "Waiting"}}'),
+    _Lame(PAGES, drop=1),
+], ids=["503-html", "api-error", "lost-page"])
+def test_failure_does_not_erase_the_collected_opys(tmp_path: Path, pack: None,
+                                                    lame: _Lame) -> None:
+    """🔴 Збій на другому прогоні стирав рядки опису: опис без тексту йшов у
+    «не транскрибовано», а злиття викидало його старі рядки як «торкнуті»."""
+    target = Target(repo="DAZHO", fond="1", opys=("78",))
+    first = _coll(_Api(PAGES)).collect(target, dest=tmp_path)
+    before = _rows78(first.out)
+    assert before
+    with pytest.raises(W.WikisourceError):
+        _coll(lame).collect(target, dest=tmp_path)
+    assert _rows78(first.out) == before
+
+
+def test_continuation_is_followed(tmp_path: Path, pack: None) -> None:
+    """Відповідь, що вперлась у ліміт розміру, дочитується за `continue`."""
+    api = _Lame(PAGES, cont=True)
+    res = _coll(api).collect(Target(repo="DAZHO", fond="1", opys=("78",)), dest=tmp_path)
+    assert api.posts == 2
+    assert {r["spr_raw"] for r in _rows78(res.out)} >= {"1023", "1150"}
+
+
+def test_plan_network_failure_is_not_ready(pack: None,
+                                           monkeypatch: pytest.MonkeyPatch) -> None:
+    """`HttpError` — RuntimeError, а не OSError: план падав винятком і валив
+    увесь `registry build`."""
+    from nyshporka.sources.http import HttpError
+
+    def boom(*_a: object, **_k: object) -> list[str]:
+        raise HttpError("uk.wikisource.org: ConnectError")
+
+    monkeypatch.setattr(W.WikisourceCollector, "_titles", boom)
+    p = _coll(_Api(PAGES)).plan(Target(repo="DAZHO", fond="1"))
+    assert not p.ready and "не відповіли" in p.why
+
+
+def test_plan_api_error_is_not_a_zero(pack: None) -> None:
+    class _Err(_Api):
+        def get(self, url: str) -> _Resp:
+            return _Resp('{"error": {"code": "readonly", "info": "maintenance"}}')
+
+    p = _coll(_Err(PAGES)).plan(Target(repo="DAZHO", fond="1"))
+    assert not p.ready and "readonly" in p.why, "збій API — не «опис не транскрибовано»"
+
+
+def test_absent_opys_is_named_not_a_silent_zero(tmp_path: Path, pack: None) -> None:
+    p = _coll(_Api(PAGES)).plan(Target(repo="DAZHO", fond="1", opys=("999",)))
+    assert not p.ready and "999" in p.why
+    part = Target(repo="DAZHO", fond="1", opys=("78", "999"))
+    p = _coll(_Api(PAGES)).plan(part)
+    assert p.ready and "999" in p.why
+    res = _coll(_Api(PAGES)).collect(part, dest=tmp_path)
+    absent = {b.kind: b for b in res.blind}["opys_absent"]
+    assert absent.count == 1 and "999" in absent.why
+
+
+def test_fs_film_only_from_an_address_that_carries_it() -> None:
+    """🔴 `cat=` в ark-адресі — номер каталогу, не плівка; картка ставила його
+    понад плівкою з таблиці."""
+    ark = ("{{Архіви/справа\n| назва = Метрична книга\n| link_FS = https://www."
+           "familysearch.org/ark:/61903/3:1:3QS7-L9M3-1234?i=12&cat=1938521\n}}\n")
+    card = W.parse_case_page(ark)
+    assert card is not None and card["fs_film"] == ""
+    assert W._dgs("https://www.familysearch.org/search/film/104123456") == "104123456"
+    assert W._dgs("https://www.familysearch.org/ark:/61903/3:1:X?cat=1938521") == ""
+
+
+def test_template_cell_with_pipes_is_kept_whole() -> None:
+    assert W._cell("{{FS|dgs=104123456|item=2}}") == "{{FS|dgs=104123456|item=2}}"
+    assert W._cell('style="x" | текст') == "текст"
