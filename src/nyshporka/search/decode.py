@@ -385,8 +385,12 @@ def sweep(stems: list[str], runs: list[str], *, thresh: int = 78,
     scanned = 0
     missing = 0
     total = len(runs)
+    cancelled = False
     for i, run in enumerate(runs, 1):
         if cancel and cancel():
+            # Обрізаний свіп мусить сказати про себе: без прапорця перелік
+            # перших N прогонів виглядав би відповіддю по всіх.
+            cancelled = True
             break
         if progress:
             progress(i, total, run)
@@ -419,7 +423,7 @@ def sweep(stems: list[str], runs: list[str], *, thresh: int = 78,
                          "stem": stems[si] if si < len(stems) else "",
                          "score": round(sc)})
     return {"hits": hits, "scanned": scanned, "runs": total,
-            "unindexed": missing}
+            "unindexed": missing, "cancelled": cancelled}
 
 
 # ── чому свіп лишається однопроцесним ────────────────────────────────────────

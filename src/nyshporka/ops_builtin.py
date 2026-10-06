@@ -9,6 +9,7 @@
 """
 from __future__ import annotations
 
+import contextlib
 import threading
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
@@ -1486,10 +1487,10 @@ def _warn_search(env: Envelope, res: dict[str, Any]) -> None:
     ranked = res.get("ranked") or {}
     if any(ranked.values()):
         env.warn("ranked_down",
-                 f"опущено вниз: чужим словом пояснюється краще — "
-                 f"{ranked.get('confuser', 0)}, під правилом профілю — "
-                 f"{ranked.get('rank_down', 0)}. Вони НЕ зникли: дивись хвіст "
-                 f"видачі й поле rank_why")
+                 f"частину збігів опущено в кінець видачі: схожих на інше слово — "
+                 f"{ranked.get('confuser', 0)}, під правилом профілю роду — "
+                 f"{ranked.get('rank_down', 0)}. Вони не зникли: стоять унизу, і "
+                 f"біля кожного написано, чому опущено (`rank_why`)")
     added = list(res.get("stems_added") or [])
     if not added:
         return
@@ -1780,6 +1781,19 @@ def _search_every_area(a: SearchArgs) -> Envelope:
 @op("search.run", summary="Знайти прізвище в тому, що вже прочитано",
     args=SearchArgs, mutates=False, section="research")
 def search_run(a: SearchArgs) -> Envelope:
+    """Знайти прізвище в прочитаному, виписаному чи розібраному — див. `_search_run`.
+
+    Пошук по прочитаному машиною бере ОДИН перелік прогонів на весь запит
+    (`htr_store.one_listing`): доти він питав його 34 рази, по секунді кожен.
+    """
+    from nyshporka import htr_store
+
+    snapshot = htr_store.one_listing() if a.where == "decode" else contextlib.nullcontext()
+    with snapshot:
+        return _search_run(a)
+
+
+def _search_run(a: SearchArgs) -> Envelope:
     """🔴 Нуль завжди зі знаменником.
 
     Порожній результат від пошуку по декоду означає «в цих N прогонах не
@@ -1861,6 +1875,9 @@ def search_run(a: SearchArgs) -> Envelope:
         blind = int(res.get("unindexed") or 0)
         scope_kind = str(res.get("scope") or "all")
         env = ok({"hits": res.get("hits") or [],
+                  # Скільки знайшлось усього, до зрізу за `limit`: «показано 100
+                  # із 2 300» і «знайшлось 100» — різні відповіді.
+                  "total": int(res.get("total") or len(res.get("hits") or [])),
                   "coverage": {"runs": scanned, "pages": pages,
                                "thresh": a.thresh,
                                # Чим саме звужено пошук — щоб знаменник можна
@@ -1919,6 +1936,13 @@ def search_run(a: SearchArgs) -> Envelope:
         if res.get("error"):
             env.warn("bad_query", str(res["error"]))
         _warn_search(env, res)
+        if res.get("stopped"):
+            # 🔴 Спинений свіп — неповна відповідь, і нуль із нього нічого не
+            # доводить. Мовчки він виглядав би так само, як повний.
+            env.warn("search_stopped",
+                     f"пошук спинено посеред роботи: прочесано {scanned} прогонів "
+                     f"із {res.get('runs_total') or '?'} — перелік неповний, і нуль "
+                     f"із нього нічого не доводить", ALERT)
         if blind:
             env.warn("partial_index",
                      f"{blind} прогонів поза пошуком: їхній текст ще не "

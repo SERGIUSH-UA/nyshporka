@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import threading
 import time
 import weakref
 from pathlib import Path
@@ -202,9 +203,10 @@ async def _start_generic(bus: JobBus, op_name: str,
             if run is not None and not run.done():
                 raise ValueError(f"попереднє «{op.summary}» ще йде: {CANT_INTERRUPT}")
         job, _ = await bus.enqueue(op_name, title=op.summary, cfg=cfg)
+        stop_ev = threading.Event()
         # Задача заводиться під гейтом: між постановкою й реєстрацією задачі
         # інакше було б вікно, у якому робота ще не має «живого потоку».
-        task = asyncio.create_task(_run_generic(bus, job, op_name, payload))
+        task = asyncio.create_task(_run_generic(bus, job, op_name, payload, stop_ev))
         _keep(task)
         _GENERIC_RUNS[job.id] = task
         jid = job.id
@@ -223,12 +225,21 @@ async def _start_generic(bus: JobBus, op_name: str,
         note = {"code": "cant_interrupt", "text": CANT_INTERRUPT}
         _keep(asyncio.create_task(bus.update(job.id, warnings=[*job.warnings, note])))
 
-    bus.on_stop(job.id, _say_cant_stop)
+    # Операція, що сама питає «чи не просили спинитись» (`progress.stopped`),
+    # отримує справжнього гасителя; решта — чесне «перервати не можна».
+    bus.on_stop(job.id, stop_ev.set if op_name in STOPPABLE_OPS else _say_cant_stop)
     return job
 
 
+#: Загальні операції, що вміють спинитись посеред роботи: між кроками вони
+#: питають `progress.stopped()`. Пошук по корпусу — хвилини, і перервати його
+#: безпечно: він нічого не пише, крім кешу, який дописується блоками цілком.
+STOPPABLE_OPS = frozenset({"search.sweep"})
+
+
 async def _run_generic(bus: JobBus, job: JobRecord, op_name: str,
-                       payload: dict[str, Any]) -> None:
+                       payload: dict[str, Any],
+                       stop_ev: threading.Event | None = None) -> None:
     from nyshporka import ops as O
     from nyshporka.core import progress
     from nyshporka.core.jobs import JobState, Progress
@@ -254,7 +265,7 @@ async def _run_generic(bus: JobBus, job: JobRecord, op_name: str,
                 job.id, progress=Progress(i=i, n=n, basis=note or "кроків")))))
 
     def _work() -> Any:
-        with progress.sink(_tick):
+        with progress.sink(_tick), progress.stop_scope(stop_ev):
             return O.call(op_name, dict(payload or {}))
 
     try:
@@ -277,7 +288,9 @@ async def _run_generic(bus: JobBus, job: JobRecord, op_name: str,
     # 🔴 Скасована робота, що доробилась, лишається «скасованою» (див.
     # `JobBus.update`), але її результат записується — і людина мусить знати,
     # що це не обрізок, а повний результат (аудит 29.09.2026).
-    if bus.cancelled(job.id):
+    if bus.cancelled(job.id) and op_name not in STOPPABLE_OPS:
+        # Операція, що вміє спинитись, сама каже в своїх попередженнях, що
+        # відповідь обрізана; решта доробила до кінця — і це треба сказати.
         warnings.append({"code": "finished_after_cancel",
                          "text": FINISHED_AFTER_CANCEL})
     await bus.update(job.id, state=JobState.DONE, result=got.get("data"),

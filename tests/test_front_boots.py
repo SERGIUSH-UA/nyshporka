@@ -521,7 +521,8 @@ globalThis.__FORM = { where: 'pages', q: 'Вишневецький', case: '' };
 await ACTIONS['search.run']({ preventDefault() {}, target: document.createElement('form') });
 await new Promise((r) => setTimeout(r, 40));
 const zero = document.getElementById('hits').innerHTML || '';
-out.zeroHitsDrawn = zero.includes('<table>');
+// Нульова видача — рядок із числом і знаменник; таблиці з порожнім тілом немає.
+out.zeroHitsDrawn = zero.includes('search-count');
 out.zeroHitsMaskot = zero.includes('maskot');
 globalThis.__NO_HITS = false;
 globalThis.__FORM = null;

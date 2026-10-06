@@ -1386,6 +1386,13 @@ def _sweep_put(conn: sqlite3.Connection, key: str, got: dict[int, list[SweepRow]
         return False
 
 
+#: Фази свіпу для поступу. Людина бачить їх у черзі робіт: «індекс нових
+#: прогонів 3 із 8» і «блоки корпусу 12 із 40» — дві різні роботи, і одне
+#: «прогін 0 із 0» на обидві виглядало як зависання (холодний прохід 07.10.2026).
+PHASE_INDEX = "індекс нових прогонів"
+PHASE_SWEEP = "блоки корпусу"
+
+
 def sweep(stems: list[str], runs: list[str], *, thresh: int = 78,
           build_budget: int = 0,
           progress: Callable[[int, int, str], None] | None = None,
@@ -1415,8 +1422,16 @@ def sweep(stems: list[str], runs: list[str], *, thresh: int = 78,
         stale = [r for r in runs if st[r] and known.get(r) != st[r]]
         if 0 < len(stale) <= max(0, build_budget):
             for i, r in enumerate(stale, 1):
+                if cancel and cancel():
+                    # Спинили посеред індексування: прочісувати нічого не
+                    # починаємо — відповідь була б на індексі, що сам не знає,
+                    # скільки в ньому бракує.
+                    return {"hits": [], "scanned": 0, "runs": len(runs),
+                            "unindexed": len(runs), "backend": "store", "cached": 0,
+                            "computed": 0, "cancelled": True,
+                            "rules_stale": rules_stale(conn)}
                 if progress:
-                    progress(i, len(stale), r)
+                    progress(i, len(stale), PHASE_INDEX)
                 try:
                     index_run(conn, r)
                 except sqlite3.OperationalError as exc:
@@ -1457,7 +1472,7 @@ def sweep(stems: list[str], runs: list[str], *, thresh: int = 78,
         cancelled = False
         for bi, block in enumerate(blocks, 1):
             if progress:
-                progress(bi, len(blocks), f"блок {bi}/{len(blocks)}")
+                progress(bi, len(blocks), PHASE_SWEEP)
             got = _sweep_block(conn, stems, block, thresh, cancel=cancel)
             if got is None:
                 cancelled = True

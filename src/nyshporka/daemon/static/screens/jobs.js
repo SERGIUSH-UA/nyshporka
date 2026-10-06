@@ -6,7 +6,7 @@ import { esc, el, setView, busy, failure, boxError, busyForm,
   renderWarnings, renderCoverage, curGen, alive } from '../core/view.js';
 import { SCREENS, ACTIONS } from '../core/registry.js';
 import { SECTIONS, NAV_LABEL, show, renderNav,
-  refreshJobs } from '../core/nav.js';
+  refreshJobs, goto } from '../core/nav.js';
 import { ST } from '../core/state.js';
 import { ic, eng } from '/ui/icons.js';
 import { swapHtml, skelRows, skelCards } from '/ui/dom.js';
@@ -27,6 +27,9 @@ SCREENS.jobs = async () => {
 };
 
 Object.assign(ACTIONS, {
+  /** Завершений пошук — показати його видачу на «Пошуку», а не числом тут. */
+  'jobs.search': (_ev, elm) => goto('search', { job: elm.dataset.job }),
+
   'jobs.forget': async () => {
     const res = await fetch('/api/jobs/forget',
       { method: 'POST', headers: { 'X-Nysh-Token': TOKEN } });

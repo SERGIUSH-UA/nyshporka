@@ -19,6 +19,8 @@ SCREENS.search = async () => {
   // Справа з бібліотеки: пошук у її межах — інше питання, ніж пошук по всьому
   // прочитаному, і знаменник у відповіді буде інший.
   const only = (ST.search || {}).case || '';
+  // Прийшли з «Робіт» по завершений пошук — показати саме його.
+  const fromJob = (ST.search || {}).job || '';
   ST.search = null;
   setView(`
     <h2>${t('nav.search')}</h2>
@@ -37,9 +39,59 @@ SCREENS.search = async () => {
     <div id="prof-hint"></div>
     <div id="hits"><div class="search-idle">${maskot('lupa', 130)}</div></div>
     <div id="search-index"></div>`);
+  // Спершу — свій пошук, що йде чи щойно скінчився: його запит у полі важливіший
+  // за прізвище з профілю, яке підставляє `profileHint` у порожнє поле.
+  if (fromJob) await ACTIONS['search.last'](null, { dataset: { job: fromJob } });
+  else if (!only) await resumeSweep();
   await profileHint();
   if (!only) await searchIndexState();
 };
+
+/**
+ * 🔁 Повернувся на «Пошук» — бачиш свій пошук.
+ *
+ * 🔴 Пошук по всьому прочитаному — фонова робота, і доти вона жила лише в
+ * циклі опитування на цьому екрані: варто було піти й повернутись, як рядок
+ * поступу зникав, у полі знову стояло прізвище з профілю, а результат лишався
+ * в роботі, якої «Роботи» не показують (холодний прохід 07.10.2026: «готово»
+ * через 24 хв, результату ніде). Тепер екран знаходить останній пошук сам:
+ * той, що йде, — показує його поступ і чекає; завершений за півдоби — дає
+ * показати.
+ */
+async function resumeSweep() {
+  const job = await lastSweep();
+  if (!job) return;
+  const q = (job.cfg || {}).q || '';
+  const input = el('view').querySelector('input[name="q"]');
+  if (input) input.value = q;
+  if (!FINAL_STATES.includes(job.state)) {
+    const env = await pollSweep(job.id);
+    if (env && env.ok) renderHits(env, q, 'decode');
+    else if (env) boxError('hits', env);
+    return;
+  }
+  const box = el('hits');
+  if (!box || job.state !== 'done') return;
+  const n = ((job.result || {}).hits || []).length;
+  box.innerHTML = `<p class="muted">${esc(t('search.last')
+    .replace('{q}', q).replace('{t}', hhmmOf(job.updated)).replace('{n}', n))}
+    <button class="ctl-sm" data-act="search.last" data-job="${esc(job.id)}">${
+  t('search.last.show')}</button></p>`;
+}
+
+/** Останній пошук по всьому прочитаному за півдоби — або нічого. */
+async function lastSweep() {
+  try {
+    const res = await fetch('/api/jobs');
+    if (!res.ok) return null;
+    const now = Date.now() / 1000;
+    return ((await res.json()).jobs || [])
+      .filter((j) => j.kind === 'search.sweep' && now - (j.updated || 0) < 43200)
+      .sort((a, b) => (b.updated || 0) - (a.updated || 0))[0] || null;
+  } catch { return null; }
+}
+
+const hhmmOf = (sec) => (sec ? new Date(sec * 1000).toTimeString().slice(0, 5) : '');
 
 /**
  * Написання з профілю — під полем пошуку.
@@ -116,23 +168,43 @@ async function searchIndexState() {
 async function sweepJob(q) {
   const started = await callOp('search.sweep', { q, limit: 100, context: 1 });
   if (!started.ok) return started;
-  const id = (started.data || {}).job_id || '';
-  const box = el('hits');
+  return pollSweep((started.data || {}).job_id || '');
+}
+
+/**
+ * Чекати пошук, показуючи, ЩО саме він робить.
+ *
+ * 🔴 Фаза — частина поступу. «Прогін 0 із 0» висіло, поки пошук індексував
+ * нові прогони чи прочісував блоки корпусу, — і виглядало як зависання. Тепер
+ * рядок каже фазу словами від сервера («індекс нових прогонів 3 із 8», «блоки
+ * корпусу 12 із 40»), а до першого числа — «готуємо пошук».
+ */
+async function pollSweep(id) {
   for (;;) {
     const res = await fetch('/api/jobs');
     const data = await res.json().catch(() => ({}));
     const job = (data.jobs || []).find((x) => x.id === id);
     if (!job) return { ok: false, error: t('search.sweep.lost') };
-    if (box) {
-      const p = job.progress || {};
-      box.innerHTML = `<div class="warn next">
-        <button data-act="jobs.cancel" data-job="${esc(id)}">${t('jobs.cancel')}</button>
-        <span>${esc(t('search.sweep.going')
-          .replace('{i}', p.i || 0).replace('{n}', p.n || 0))}</span></div>`;
-    }
+    // Людина пішла з екрана — опитувати далі нема для кого; повернувшись, вона
+    // приєднається знову (`resumeSweep`).
+    const box = el('hits');
+    if (!box) return null;
+    const p = job.progress || {};
+    const what = p.n
+      ? t('search.sweep.going').replace('{what}', p.basis || '')
+        .replace('{i}', p.i || 0).replace('{n}', p.n)
+      : t('search.sweep.prep');
+    box.innerHTML = `<div class="warn next">
+      <button data-act="jobs.cancel" data-job="${esc(id)}">${t('jobs.cancel')}</button>
+      <span>${esc(what)}</span></div>`;
     if (FINAL_STATES.includes(job.state)) {
+      if (job.state === 'cancelled') {
+        // Спинили — це не збій і не відповідь: обрізаний свіп нічого не
+        // доводить, тож і показувати з нього нічого.
+        return { ok: false, error: t('search.stopped') };
+      }
       if (job.state !== 'done') {
-        return { ok: false, error: job.error || job.state };
+        return { ok: false, error: job.error || t('job.failed') };
       }
       // 🔴 Застереження роботи не губляться: саме в них живе знаменник —
       // скільки прогонів прочесано й скільки лишилось поза індексом.
@@ -140,6 +212,85 @@ async function sweepJob(q) {
     }
     await new Promise((r) => setTimeout(r, 900));
   }
+}
+
+/**
+ * Видача пошуку — один шлях для нового пошуку, відновленого й показаного з
+ * «Робіт». Два шляхи малювання того самого розходились би: колонки в одному,
+ * знаменник в іншому.
+ */
+function renderHits(env, q, where) {
+  const hits = env.data.hits || [];
+  const cov = env.data.coverage || {};
+  // Хіти лишаються під рукою: розбір відкривається з них, а не переповторює
+  // пошук — інакше два екрани показували б різні набори того самого запиту.
+  ST.sift = { hits: hits.filter((h) => h.name && h.page), i: 0,
+           q, crop: null, ctx: null };
+  const total = Number(env.data.total ?? hits.length);
+  const head = where === 'records' ? t('search.col.role') : t('search.col.page');
+  const box = el('hits');
+  if (!box) return;
+  box.innerHTML = `
+    ${renderWarnings(env)}
+    <p class="muted search-count">${esc((total > hits.length ? t('search.count.cut') : t('search.count'))
+  .replace('{n}', hits.length).replace('{all}', total))}</p>
+    ${ST.sift.hits.length
+      ? `<p><button data-act="sift.open">${ic('crop-check', 'ic-sm')}
+           ${t('sift.open')}</button></p>` : ''}
+    ${hits.length ? `<table><thead><tr><th>${t('search.col.case')}</th><th>${head}</th>
+      <th>${t('search.col.text')}</th><th class="num">${t('search.col.score')}</th><th></th>
+    </tr></thead><tbody>${hits.map((h) => {
+      // 🔴 records-хіт — інша форма, не підмножина decode/pages-хіта: там
+      // немає `page`/`scan` (однина) взагалі, замість `matched`/`line`/
+      // `text`/`surname` — `name`/`role`/`date`, а `scans` (множина) буває
+      // або локальним файлом справи, або зовнішньою цитатою (посилання на
+      // джерело запису, занесеного напряму через `records add` без скана).
+      // Плутати два рендери під один шаблон означало для records-режиму
+      // порожні колонки на кожному хіті без винятку — issue #4.
+      const isRec = where === 'records';
+      const where_col = isRec ? (h.role || '') : (h.page || h.scan || '');
+      // 🔴 Місце йде в контекст нарівні з іменем. Однофамільця від
+      // односельця відрізняє саме воно: прізвище в парафії повторюється
+      // частіше, ніж здається, і рядок без місця лишає хіт нерозрізненим —
+      // тобто повертає рівно ту роботу, заради якої пошук і кликали.
+      const ctx = isRec
+        ? [h.name, h.date, h.place].filter(Boolean).join(' · ')
+        : (h.matched || h.line || h.text || h.surname || '');
+      // ✎ веде на «Око» голим іменем файлу (див. `PageNote.scan`); цитата
+      // без скана — це URL чи інший шлях зі скісною, і показувати кнопку,
+      // яка там гарантовано впаде валідацією, гірше за її відсутність.
+      const scan0 = isRec ? ((h.scans && h.scans[0]) || '') : (h.scan || h.page || '');
+      // ⚠ Перевірка повторює валідатор `PageNote.scan` ЦІЛКОМ, а не
+      // наполовину: він відкидає і шлях, і провідну крапку. Неповна копія
+      // тут гірша за її відсутність — кнопка малюється, а падає вже після
+      // кліку, тобто помилку видно там, де її причини не видно.
+      const scan0Local = scan0 && !/^\.|[\\/]/.test(scan0);
+      return `<tr>
+      <td class="mono">${esc(h.shifra || h.case_key || h.case || '')}</td>
+      <td class="mono">${esc(where_col)}</td>
+      <td>${esc(String(ctx).slice(0, 120))}</td>
+      <td class="num">${esc(h.score ?? '')}</td>
+      <td class="acts">${/* 🔴 Виявити ≠ перевірити: машина подає кандидата, вирішує око.
+               Доти хіт був рядком таблиці — щоб глянути на нього, треба було
+               переписати прогін і сторінку в гортач руками, а це та сама
+               дія, заради якої пошук і робився. */''}
+        ${!isRec && h.name && h.page
+          ? `<button class="ctl-sm" data-act="hit.eye" data-run="${esc(h.name)}"
+               data-page="${esc(h.page)}"
+               data-line="${esc(h.line_index ?? '')}"
+               title="${t('hit.eye')}">${ic('eye', 'ic-o ic-sm')}</button>` : ''}
+        ${(h.key || h.shifra) && scan0Local
+          ? `<button class="ctl-sm" data-act="hit.note" data-case="${esc(h.key || h.shifra)}"
+               data-scan="${esc(scan0)}"
+               title="${t('hit.note')}">${ic('pencil-line', 'ic-o ic-sm')}</button>` : ''}
+      </td>
+    </tr>`;
+    }).join('')}</tbody></table>` : ''}
+    ${cov.runs !== undefined
+      ? `<p class="muted">${t('search.coverage')}: ${cov.runs} ${t('search.runs')}, ${cov.pages} ${t('common.pages')}</p>`
+      : cov.cases !== undefined
+        ? `<p class="muted">${t('search.coverage')}: ${cov.cases} ${t('search.cases')}</p>`
+        : ''}`;
 }
 
 Object.assign(ACTIONS, {
@@ -210,69 +361,21 @@ Object.assign(ACTIONS, {
     if (seq !== SEQ.search) return;
     if (!env) return undefined;                // роботу спинили
     if (!env.ok) return boxError('hits', env);
-    const hits = env.data.hits || [];
-    const cov = env.data.coverage || {};
-    // Хіти лишаються під рукою: розбір відкривається з них, а не переповторює
-    // пошук — інакше два екрани показували б різні набори того самого запиту.
-    ST.sift = { hits: hits.filter((h) => h.name && h.page), i: 0,
-             q: String(fd.get('q') || ''), crop: null, ctx: null };
-    el('hits').innerHTML = `
-      ${renderWarnings(env)}
-      ${ST.sift.hits.length
-        ? `<p><button data-act="sift.open">${ic('crop-check', 'ic-sm')}
-             ${t('sift.open')}</button></p>` : ''}
-      <table><tbody>${hits.map((h) => {
-        // 🔴 records-хіт — інша форма, не підмножина decode/pages-хіта: там
-        // немає `page`/`scan` (однина) взагалі, замість `matched`/`line`/
-        // `text`/`surname` — `name`/`role`/`date`, а `scans` (множина) буває
-        // або локальним файлом справи, або зовнішньою цитатою (посилання на
-        // джерело запису, занесеного напряму через `records add` без скана).
-        // Плутати два рендери під один шаблон означало для records-режиму
-        // порожні колонки на кожному хіті без винятку — issue #4.
-        const isRec = where === 'records';
-        const where_col = isRec ? (h.role || '') : (h.page || h.scan || '');
-        // 🔴 Місце йде в контекст нарівні з іменем. Однофамільця від
-        // односельця відрізняє саме воно: прізвище в парафії повторюється
-        // частіше, ніж здається, і рядок без місця лишає хіт нерозрізненим —
-        // тобто повертає рівно ту роботу, заради якої пошук і кликали.
-        const ctx = isRec
-          ? [h.name, h.date, h.place].filter(Boolean).join(' · ')
-          : (h.matched || h.line || h.text || h.surname || '');
-        // ✎ веде на «Око» голим іменем файлу (див. `PageNote.scan`); цитата
-        // без скана — це URL чи інший шлях зі скісною, і показувати кнопку,
-        // яка там гарантовано впаде валідацією, гірше за її відсутність.
-        const scan0 = isRec ? ((h.scans && h.scans[0]) || '') : (h.scan || h.page || '');
-        // ⚠ Перевірка повторює валідатор `PageNote.scan` ЦІЛКОМ, а не
-        // наполовину: він відкидає і шлях, і провідну крапку. Неповна копія
-        // тут гірша за її відсутність — кнопка малюється, а падає вже після
-        // кліку, тобто помилку видно там, де її причини не видно.
-        const scan0Local = scan0 && !/^\.|[\\/]/.test(scan0);
-        return `<tr>
-        <td class="mono">${esc(h.shifra || h.case_key || h.case || '')}</td>
-        <td class="mono">${esc(where_col)}</td>
-        <td>${esc(String(ctx).slice(0, 120))}</td>
-        <td class="num">${esc(h.score ?? '')}</td>
-        <td>${/* 🔴 Виявити ≠ перевірити: машина подає кандидата, вирішує око.
-                 Доти хіт був рядком таблиці — щоб глянути на нього, треба було
-                 переписати прогін і сторінку в гортач руками, а це та сама
-                 дія, заради якої пошук і робився. */''}
-          ${!isRec && h.name && h.page
-            ? `<button data-act="hit.eye" data-run="${esc(h.name)}"
-                 data-page="${esc(h.page)}"
-                 data-line="${esc(h.line_index ?? '')}"
-                 title="${t('hit.eye')}">👁</button>` : ''}
-          ${(h.key || h.shifra) && scan0Local
-            ? `<button data-act="hit.note" data-case="${esc(h.key || h.shifra)}"
-                 data-scan="${esc(scan0)}"
-                 title="${t('hit.note')}">✎</button>` : ''}
-        </td>
-      </tr>`;
-      }).join('')}</tbody></table>
-      ${cov.runs !== undefined
-        ? `<p class="muted">${t('search.coverage')}: ${cov.runs} ${t('search.runs')}, ${cov.pages} ${t('common.pages')}</p>`
-        : cov.cases !== undefined
-          ? `<p class="muted">${t('search.coverage')}: ${cov.cases} ${t('search.cases')}</p>`
-          : ''}`;
+    renderHits(env, String(fd.get('q') || ''), where);
+    return undefined;
+  },
+
+  /** Показати завершений пошук — з «Пошуку» чи з «Робіт». */
+  'search.last': async (_ev, elm) => {
+    const res = await fetch('/api/jobs');
+    const job = res.ok
+      ? ((await res.json()).jobs || []).find((j) => j.id === elm.dataset.job) : null;
+    if (!job || !job.result) return boxError('hits', { ok: false, error: t('search.sweep.lost') });
+    const input = el('view').querySelector('input[name="q"]');
+    if (input) input.value = (job.cfg || {}).q || '';
+    renderHits({ ok: true, data: job.result, warnings: job.warnings || [] },
+      (job.cfg || {}).q || '', 'decode');
+    return undefined;
   },
 
   // 🔴 Хіт — це кандидат, а не висновок: дивиться око. Доти, щоб глянути на

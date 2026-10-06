@@ -380,6 +380,9 @@ function doneBlock(done) {
       <span class="muted">${esc(jobState(j.state))}</span>
       ${j.error ? `<div class="err-line">${esc(j.error)}</div>` : ''}
       ${jobResult(j)}
+      ${j.kind === 'search.sweep' && j.state === 'done'
+    ? `<button class="ctl-sm" data-act="jobs.search" data-job="${esc(j.id)}">${
+      t('jobs.search.show')}</button>` : ''}
       ${jobNotes(j)}
     </div>`).join('');
   return `<details class="jobs-done"${failed ? ' open' : ''}>

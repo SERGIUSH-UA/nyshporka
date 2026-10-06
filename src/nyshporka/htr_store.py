@@ -23,6 +23,7 @@ import math
 import os
 import re
 from collections.abc import Iterator, Sequence
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
 
@@ -585,10 +586,40 @@ def _library_stamp() -> str:
         return ""
 
 
+#: Знімок переліку прогонів на один запит — див. `one_listing`.
+_LISTING: ContextVar[list[dict[str, Any]] | None] = ContextVar("htr_listing", default=None)
+
+
+@contextlib.contextmanager
+def one_listing() -> Iterator[None]:
+    """Один перелік прогонів на весь запит.
+
+    🔴 Кеш `list_cases()` чесний, але сам штамп — це обхід кореня прогонів:
+    близько секунди на великому просторі. Пошук по корпусу питав перелік 34
+    рази (вікна контексту, другий голос, знаменник) — 33 с із 105 (замір
+    07.10.2026). Один запит — один момент диска: частини однієї відповіді й не
+    мають бачити різних станів прогонів.
+
+    ⚠ Лише для читання. Те, що саме пише прогони, сюди не заходить: між його
+    кроками перелік справді змінюється, і знімок збрехав би саме там.
+    """
+    if _LISTING.get() is not None:
+        yield
+        return
+    tok = _LISTING.set(list_cases())
+    try:
+        yield
+    finally:
+        _LISTING.reset(tok)
+
+
 def list_cases() -> list[dict[str, Any]]:
     """Прогони з reports/htr/* — для списку в'ювера. Назва справи — з бібліотеки."""
     global _RUNS_CACHE
 
+    snap = _LISTING.get()
+    if snap is not None:
+        return snap
     stamp = _runs_stamp()
     if _RUNS_CACHE is not None and _RUNS_CACHE[0] == stamp:
         return _RUNS_CACHE[1]
@@ -1857,6 +1888,7 @@ def search(q: str, name: str | None = None, thresh: int = 78,
         if forms:
             stems, origin = NAMES.add_stems(stems, origin, forms,
                                             NAMES.ORIGIN_PROFILE)
+    from nyshporka.core import progress as P
     from nyshporka.search import decode as D
 
     scope = runs_for_scope(name or "")
@@ -1898,12 +1930,15 @@ def search(q: str, name: str | None = None, thresh: int = 78,
         stems, dropped = ST.whole_stems(
             stems, keep=[s for s in stems if origin.get(s) != NAMES.ORIGIN_PROFILE])
         try:
-            got = ST.sweep(stems, names, thresh=thresh, build_budget=budget)
+            got = ST.sweep(stems, names, thresh=thresh, build_budget=budget,
+                           progress=P.report, cancel=P.stopped)
         except RuntimeError as exc:
             backend, backend_why = "gzip", str(exc)
-            got = D.sweep(stems, names, thresh=thresh, build_budget=budget)
+            got = D.sweep(stems, names, thresh=thresh, build_budget=budget,
+                          cancel=P.stopped)
     else:
-        got = D.sweep(stems, names, thresh=thresh, build_budget=budget)
+        got = D.sweep(stems, names, thresh=thresh, build_budget=budget,
+                      cancel=P.stopped)
     raw_hits = got["hits"]
     # 🔴 Ранг ставиться ДО зрізу за `limit`. Інакше службовий формуляр і сусідній
     # рід лишались би на верхівці, а знахідка — за межею показаного: замір
@@ -2038,6 +2073,9 @@ def search(q: str, name: str | None = None, thresh: int = 78,
             # різні числа доти, доки індекс не догнав корпус, і нуль на
             # частковому індексі означає зовсім не те, що нуль на повному.
             "runs_total": got["runs"], "unindexed": got["unindexed"],
+            # 🔴 Пошук спинили посеред роботи: перелік і знаменник обрізані.
+            # Без цього прапорця частковий свіп виглядав би повною відповіддю.
+            "stopped": bool(got.get("cancelled")),
             # Чим прочесано: стор чи gzip-індекс. Нуль на частковому сторі й
             # нуль на повному gzip-індексі — різні відповіді.
             "backend": backend, "backend_why": backend_why,
