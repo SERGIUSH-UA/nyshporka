@@ -29,22 +29,41 @@ from typing import Any
 SCHEMA = 1
 
 
+#: Рівні попередження для консолі — див. `Warning_`.
+ALERT, NOTE, AGENT = "alert", "note", "agent"
+
+
 @dataclass(frozen=True)
 class Warning_:
+    """Попередження конверта.
+
+    `level` каже консолі, як показати його ЛЮДИНІ; агент і термінал отримують
+    усі однаково. 🔴 Доти рівня не було, і консоль малювала кожну нотатку
+    жовтою плашкою: на головному екрані їх стояло сім, серед них — фраза до
+    агента («що ти знаєш про Нишпорку») і хибне «читання не запуститься».
+
+        alert   без дії людини щось зламається або висновок буде хибним
+        note    облік, знаменник, порада — згорнутим рядком «Примітки»
+        agent   лише агентові й терміналу; консоль не показує
+    """
+
     code: str
     text: str
+    level: str = NOTE
 
     def as_dict(self) -> dict[str, str]:
-        return {"code": self.code, "text": self.text}
+        return {"code": self.code, "text": self.text, "level": self.level}
 
 
 @dataclass(frozen=True)
 class NextStep:
     op: str
     why: str
+    #: `agent` — порада лише агентові; консоль кнопки не показує.
+    level: str = NOTE
 
     def as_dict(self) -> dict[str, str]:
-        return {"op": self.op, "why": self.why}
+        return {"op": self.op, "why": self.why, "level": self.level}
 
 
 @dataclass(frozen=True)
@@ -101,8 +120,13 @@ class Envelope:
     next: list[NextStep] = field(default_factory=list)
     coverage: list[CoverageItem] = field(default_factory=list)
 
-    def warn(self, code: str, text: str) -> Envelope:
-        self.warnings.append(Warning_(code, text))
+    def warn(self, code: str, text: str, level: str = "") -> Envelope:
+        """Попередження. Рівень за замовчуванням — примітка (`Warning_`).
+
+        Тривогою (`ALERT`) позначати лише те, без чого людина отримає поламку
+        чи хибний висновок: кожна зайва тривога вчить не читати жодної.
+        """
+        self.warnings.append(Warning_(code, text, level or NOTE))
         return self
 
     def covered_by(self, items: list[CoverageItem]) -> Envelope:
@@ -116,8 +140,8 @@ class Envelope:
         self.coverage.extend(items)
         return self
 
-    def suggest(self, op: str, why: str) -> Envelope:
-        self.next.append(NextStep(op, why))
+    def suggest(self, op: str, why: str, level: str = "") -> Envelope:
+        self.next.append(NextStep(op, why, level or NOTE))
         return self
 
     def stale_because(self, reasons: list[str], fix: str = "") -> Envelope:

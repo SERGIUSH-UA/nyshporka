@@ -322,5 +322,5 @@ def library_verdict(a: VerdictArgs) -> Envelope:
     if a.verdict == "no_clan" and not a.pages:
         env.warn("no_denominator",
                  "«роду немає» без числа переглянутих аркушів — наступна сесія "
-                 "прочитає це як доведений нуль")
+                 "прочитає це як доведений нуль", "alert")
     return env

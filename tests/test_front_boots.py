@@ -552,6 +552,32 @@ await new Promise((r) => setTimeout(r, 30));
 const doneJobs = document.getElementById('jobs').innerHTML || '';
 out.jobsDoneDrawn = doneJobs.includes('прогін');
 out.jobsDoneMaskot = doneJobs.includes('maskot');
+// ── попередження: тривога плашкою, примітка згорнуто, агентське — ніде ────
+// 🔴 Доти кожне попередження конверта було жовтою плашкою: на головному
+// екрані їх стояло сім, серед них фраза до агента.
+const V = await import('./core/view.js');
+const wenv = { warnings: [
+  { code: 'a', text: 'ТРИВОГА', level: 'alert' },
+  { code: 'n', text: 'ПРИМІТКА' },
+  { code: 'g', text: 'АГЕНТОВІ', level: 'agent' },
+  { code: 'e', text: '', level: 'alert' }],
+  next: [{ op: 'migrate.status', why: 'ПОРАДА_АГЕНТОВІ', level: 'agent' },
+    { op: 'nema.takoi', why: 'КОМАНДА_ТЕРМІНАЛУ' }] };
+const wh = V.renderWarnings(wenv);
+out.warnAlertPlaque = /class="warn">⚠ ТРИВОГА/.test(wh);
+out.warnNoteFolded = /<details class="notes">[\s\S]*ПРИМІТКА/.test(wh)
+  && !/class="warn">⚠ ПРИМІТКА/.test(wh);
+out.warnAgentHidden = !wh.includes('АГЕНТОВІ') && !wh.includes('ПОРАДА_АГЕНТОВІ');
+out.warnNoEmptyPlaque = (wh.match(/class="warn">/g) || []).length === 1;
+out.warnCliHintFolded = /<details class="notes">[\s\S]*КОМАНДА_ТЕРМІНАЛУ/.test(wh);
+out.warnQuietNoAlert = !V.hasAlerts({ warnings: [{ text: 'x' }] })
+  && V.hasAlerts({ warnings: [{ text: 'x', level: 'alert' }] });
+globalThis.__JOBS = [{ id: 'j2', kind: 'search', title: 'ПОШУК', state: 'done', updated: nowS,
+  warnings: [{ code: 'short', text: 'ЗАКОРОТКИЙ' }] }];
+await SCREENS.jobs();
+await new Promise((r) => setTimeout(r, 30));
+const jw = document.getElementById('jobs').innerHTML || '';
+out.jobNoteFolded = jw.includes('ЗАКОРОТКИЙ') && !/class="warn">⚠ ЗАКОРОТКИЙ/.test(jw);
 globalThis.__JOBS = [];
 
 console.log('@@' + JSON.stringify(out));
@@ -979,3 +1005,15 @@ def test_the_queue_screen_shows_why_and_offers_the_decision(probe) -> None:
     assert probe.get("queueEta") is True, "оцінки часу немає"
     assert probe.get("queueRunningNotDroppable") is True, (
         "справу, яку зараз веде виконавець, пропонують зняти")
+
+
+def test_warnings_by_level(probe) -> None:
+    """Плашкою — лише тривога; примітка згорнута; агентське консоль не показує."""
+    for key in ("warnAlertPlaque", "warnNoteFolded", "warnAgentHidden",
+                "warnNoEmptyPlaque", "warnCliHintFolded", "warnQuietNoAlert"):
+        assert probe.get(key) is True, key
+
+
+def test_job_notes_are_folded_not_plaques(probe) -> None:
+    """«Закороткий запит» на завершеній роботі — примітка, не жовта плашка."""
+    assert probe.get("jobNoteFolded") is True

@@ -611,3 +611,11 @@ header .lang:first-of-type { margin-left: auto; }
   .lb-head .lb-keys { display: none; }
   #view .lb-bottom .lb-do { flex: 1 1 40%; padding: .8rem .5rem; font-size: 1.05rem; }
 }
+
+/* ℹ Примітки — облік, знаменники, поради: згорнутим рядком, без плашки.
+   Плашка (.warn) лишається лише тривогам — див. view.splitWarnings. */
+details.notes { margin: .4rem 0; color: var(--fg-3); font-size: .9rem; }
+details.notes > summary { cursor: pointer; opacity: .75; list-style: none; }
+details.notes > summary::-webkit-details-marker { display: none; }
+details.notes[open] > summary { opacity: 1; }
+details.notes > p { margin: .3rem 0 .3rem 1.2rem; }

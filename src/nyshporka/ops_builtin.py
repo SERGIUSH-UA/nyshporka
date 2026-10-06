@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 from pydantic import BaseModel, Field
 
 from nyshporka.core import morph
-from nyshporka.core.envelope import Envelope, fail, ok
+from nyshporka.core.envelope import ALERT, NOTE, Envelope, fail, ok
 from nyshporka.core.ops import NoArgs, op
 
 if TYPE_CHECKING:
@@ -328,8 +328,11 @@ def _pulse_machine() -> dict[str, Any]:
     checks = [c for c in checks if not c.name.startswith("Профіль")]
     worst = ("fail" if any(c.level == "fail" for c in checks)
              else "warn" if any(c.level == "warn" for c in checks) else "ok")
-    out = {"ok": True, "level": worst, "ready": worst == "ok",
-           "bad": [c.name for c in checks if c.level != "ok"]}
+    # 🔴 «Готова» — коли нічого не зламано, а не коли все зелене. Жовтий пункт
+    # («про новішу версію не питали») ставив ⚠ на «Машина читає рукопис» тій
+    # машині, яка щойно читала справу; подробиці лишаються в «Перевірці».
+    out = {"ok": True, "level": worst, "ready": worst != "fail",
+           "bad": [c.name for c in checks if c.level == "fail"]}
     _MACHINE.update(at=now, data=out)
     return out
 
@@ -864,7 +867,8 @@ def catalog_search(a: CatalogSearchArgs) -> Envelope:
     not_asked: list[dict[str, str]] = []
     if not a.source:
         not_asked = [{"source": s.id, "why": f"лише явно: --source {s.id}"}
-                     for s in picked if getattr(s, "explicit_only", False)]
+                     for s in picked
+                     if s is not None and getattr(s, "explicit_only", False)]
         picked = [s for s in picked if not getattr(s, "explicit_only", False)]
     # Адреса справи — інше питання, ніж слово із заголовка, і відповідь на нього
     # знають інші місця. Якщо там порожньо, запит іде текстом як і раніше: рядок
@@ -1070,7 +1074,10 @@ def _warn_once(env: Envelope, *, hits: list[dict[str, object]],
         parts.append(f"нуль у {len(searched)} джерелах, і кожен доводить своє — "
                      f"{means}")
     if parts:
-        env.warn(code, " · ".join(parts))
+        # Обрізана видача й нуль без частини знаменника міняють висновок —
+        # це тривога. Повний нуль зі знаменником — відповідь, а не поламка.
+        env.warn(code, " · ".join(parts),
+                 ALERT if code != "zero_with_denominator" else NOTE)
 
 
 class FondCardArgs(BaseModel):
@@ -2144,7 +2151,7 @@ def _local_fs_copy(env: Envelope, case_dir: str, sidecar: dict[str, Any]) -> Non
                               "fs_meta": fs_meta, "with_apid": with_apid,
                               "expected": expected}
     if not frames:
-        env.warn("no_frames", "у теці немає кадрів — брати під облік нічого")
+        env.warn("no_frames", "у теці немає кадрів — брати під облік нічого", ALERT)
     elif expected and len(frames) < expected:
         env.warn("local_copy_partial",
                  f"у теці {len(frames)} кадрів, а реєстр опису чекає {expected} — "
@@ -2378,13 +2385,17 @@ def setup_check(_: NoArgs) -> Envelope:
     except Exception:
         has_sample = False          # простору ще немає — питання передчасне
     env = ok({"checks": checks, "level": worst,
-              "ready": worst == "ok",
+              # Готова — коли нічого не зламано; жовте видно в переліку нижче.
+              "ready": worst != "fail",
               "sample_case": has_sample,
               "sample_available": S.sample_dir() is not None})
-    if worst != "ok":
+    # 🔴 Лише справжня поламка. Доти будь-який жовтий пункт («про новішу
+    # версію не питали») давав «читання не запуститься» — на машині, яка
+    # щойно читала справу.
+    if worst == "fail":
         env.warn("not_ready",
                  "читання рукопису на цій машині поки не запуститься — нижче "
-                 "написано, чого бракує і чим це ставиться")
+                 "написано, чого бракує і чим це ставиться", ALERT)
     if not has_sample and env.data["sample_available"]:
         env.warn("no_sample",
                  "зразкову справу ще не розгорнуто — `nysh sample` покладе в "
@@ -3198,11 +3209,11 @@ def htr_case_info(a: CaseInfoArgs) -> Envelope:
     if not card.get("frames"):
         env.warn("no_frames",
                  "у теці немає жодного кадру — читати нема чого. Перевірте "
-                 "шлях: перегляд і читання не рекурсивні")
+                 "шлях: перегляд і читання не рекурсивні", ALERT)
     if card.get("script") == "unknown":
         env.warn("script_unknown",
                  "письмо невідоме, і це повна відповідь, а не порожня: "
-                 "мовчазний здогад «кирилиця» дав би сміття, схоже на текст")
+                 "мовчазний здогад «кирилиця» дав би сміття, схоже на текст", ALERT)
     elif card.get("script_trust") == "folder":
         env.warn("script_guessed", card.get("script_why") or "")
     if card.get("script") == "mixed":
@@ -3222,8 +3233,10 @@ def htr_case_info(a: CaseInfoArgs) -> Envelope:
             continue
         eid = str(gap.get("engine") or "")
         why = str(gap.get("why") or gap.get("text") or "")
+        # Рушій не того письма дає тихе сміття — тривога; бракує рушія — примітка.
         env.warn(str(gap.get("kind") or "gap"),
-                 f"{names.get(eid, eid)}: {why}" if eid else why)
+                 f"{names.get(eid, eid)}: {why}" if eid else why,
+                 ALERT if gap.get("kind") == "mismatch" else NOTE)
     if not card.get("found"):
         env.suggest("case.register",
                     "описати теку — без шифри прогін не прив'яжеться до справи")

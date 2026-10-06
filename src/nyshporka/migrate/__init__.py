@@ -160,8 +160,8 @@ def nag(env: Any, root: Path) -> None:
         env.warn("agent_migration",
                  f"пакет оновлено до {__version__}, а простір не пройшов міграцію агента "
                  f"({', '.join(m.version for m in todo)}): частина того, що ти знаєш про "
-                 f"Нишпорку, могла застаріти — `nysh migrate`")
-        env.suggest("migrate.status", f"що змінилось у {last} і що зробити")
+                 f"Нишпорку, могла застаріти — `nysh migrate`", "agent")
+        env.suggest("migrate.status", f"що змінилось у {last} і що зробити", "agent")
 
 
 def stamp_new(root: Path, current: str) -> None:

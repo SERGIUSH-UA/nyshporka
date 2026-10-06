@@ -43,7 +43,7 @@ def migrate_status(_a: NoArgs) -> Envelope:
     if todo:
         env.warn("agent_migration", f"простір не мігровано до {todo[-1].version}: "
                                     f"прочитати `nysh migrate --show {todo[-1].version}`, "
-                                    f"пройти кроки, `nysh migrate --done`")
+                                    f"пройти кроки, `nysh migrate --done`", "agent")
     return env
 
 

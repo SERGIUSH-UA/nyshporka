@@ -46,7 +46,39 @@ const safeHref = (u) => {
 
 const el = (id) => document.getElementById(id);
 
-/** Попередження конверта — на екран завжди. Саме тут живе «нуль зі знаменником». */
+/**
+ * Попередження за рівнем (`level` із сервера): тривога, примітка, для агента.
+ *
+ * 🔴 Доти кожне попередження конверта ставало жовтою плашкою, і на головному
+ * екрані їх стояло сім — облік, поради новачкові, фраза до агента. Плашка, яка
+ * горить завжди, вчить не читати жодної. Тепер плашкою — лише тривога; решта
+ * — один згорнутий рядок «Примітки», а агентське консоль не показує зовсім.
+ * Без рівня (старий сервер, робота з журналу) — примітка.
+ */
+function splitWarnings(list) {
+  const alerts = [];
+  const notes = [];
+  for (const w of list || []) {
+    const level = w.level || 'note';
+    if (level === 'agent' || !String(w.text || '').trim()) continue;
+    (level === 'alert' ? alerts : notes).push(String(w.text));
+  }
+  return { alerts, notes };
+}
+
+/** Примітки — одним згорнутим рядком. */
+function notesBlock(notes) {
+  if (!notes.length) return '';
+  return `<details class="notes"><summary>ℹ ${t('notes.title')} (${notes.length})</summary>
+    ${notes.map((n) => `<p>${n}</p>`).join('')}</details>`;
+}
+
+/** Чи є в конверті те, що людина мусить побачити негайно. */
+function hasAlerts(env) {
+  return Boolean((env.stale && env.stale.is) || splitWarnings(env.warnings).alerts.length);
+}
+
+/** Попередження конверта: тривоги плашками, решта — згорнутими примітками. */
 function renderWarnings(env) {
   const bits = [];
   if (env.stale && env.stale.is) {
@@ -56,10 +88,11 @@ function renderWarnings(env) {
     bits.push(`<div class="warn stale">⚠ ${esc(env.stale.reasons.join('; '))}
       <button data-act="cases.build">${t('cases.build')}</button></div>`);
   }
-  for (const w of env.warnings || []) {
-    bits.push(`<div class="warn">⚠ ${esc(w.text)}</div>`);
-  }
-  return bits.join('') + renderNext(env);
+  const { alerts, notes } = splitWarnings(env.warnings);
+  for (const a of alerts) bits.push(`<div class="warn">⚠ ${esc(a)}</div>`);
+  const next = renderNext(env);
+  return bits.join('') + next.rows
+    + notesBlock([...notes.map(esc), ...next.notes]);
 }
 
 /**
@@ -79,8 +112,9 @@ function renderWarnings(env) {
  * людини те, що система вже знає про її наступний крок.
  */
 function renderNext(env) {
-  const steps = env.next || [];
-  if (!steps.length) return '';
+  const steps = (env.next || []).filter((n) => (n.level || 'note') !== 'agent');
+  const notes = [];
+  if (!steps.length) return { rows: '', notes };
   const here = (location.hash || '').slice(1);
   const rows = steps.map((n) => {
     const scr = screenOfOp(n.op);
@@ -89,13 +123,16 @@ function renderNext(env) {
     // застережень — тобто відбирає увагу рівно в тих, які щось означають.
     // Засіб, про який вона каже, і так на цьому екрані.
     if (scr && scr === here) return '';
-    const label = scr ? t(`nav.${scr}`) : n.op;
-    const btn = scr
-      ? `<button data-act="next" data-arg="${esc(n.op)}">${esc(label)} →</button>`
-      : `<span class="mono">${esc(n.op)}</span>`;
-    return `<div class="warn next">${btn} <span>${esc(n.why)}</span></div>`;
+    // Порада без екрана — команда терміналу: людині з консолі її нема куди
+    // натиснути, тож вона йде в примітки, а не окремою смугою.
+    if (!scr) {
+      notes.push(`<span class="mono">${esc(n.op)}</span> — ${esc(n.why)}`);
+      return '';
+    }
+    return `<div class="warn next"><button data-act="next" data-arg="${esc(n.op)}">`
+      + `${esc(t(`nav.${scr}`))} →</button> <span>${esc(n.why)}</span></div>`;
   });
-  return rows.join('');
+  return { rows: rows.join(''), notes };
 }
 
 /**
@@ -208,4 +245,5 @@ function maskot(pose, width = 150, cls = '') {
 }
 
 export { esc, safeHref, el, renderWarnings, renderCoverage, setView, busy,
+  splitWarnings, notesBlock, hasAlerts,
   failure, boxError, busyForm, alive, maskot, MASKOT };

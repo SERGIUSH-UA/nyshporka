@@ -1,7 +1,8 @@
 /** Секції, шапка, перехід між екранами й черга робіт. */
 import { t, LANG } from './strings.js';
 import { callOp, FINAL_STATES } from './net.js';
-import { esc, el, setView, curGen, bumpGen, alive, maskot } from './view.js';
+import { esc, el, setView, curGen, bumpGen, alive, maskot,
+  splitWarnings, notesBlock } from './view.js';
 import { SCREENS, OP_SCREEN } from './registry.js';
 import { ST } from './state.js';
 import { ic } from '/ui/icons.js';
@@ -263,22 +264,28 @@ function jobState(state) {
  * 1142» на просто «готово».
  */
 function jobNotes(j) {
-  const notes = (j.warnings || []).map(
-    (w) => `<div class="warn">⚠ ${esc(w.text || '')}</div>`);
+  // Тривоги — плашкою, решта — згорнутими примітками (`view.splitWarnings`).
+  const { alerts, notes: quiet } = splitWarnings(j.warnings);
+  const notes = alerts.map((a) => `<div class="warn">⚠ ${esc(a)}</div>`);
   // 🔴 І кнопка, а не лише текст. Довга робота часто не остання в ланцюжку
   // («зібране лягло окремим файлом; звести джерела в реєстр»), і поки поради
   // йшли самим текстом із командою терміналу, вони називали наступний крок
   // тому, хто працює з браузера й набирати команду нема куди. Попередження без
   // виходу перестає бути попередженням.
+  const extra = quiet.map(esc);
   for (const n of j.next || []) {
+    if ((n.level || 'note') === 'agent') continue;
     const scr = OP_SCREEN[n.op];
-    const label = scr ? t(NAV_LABEL[scr] || scr) : n.op;
-    const btn = scr
-      ? `<button data-act="nav" data-arg="${esc(scr)}">${esc(label)} →</button>`
-      : `<span class="mono">${esc(n.op)}</span>`;
-    notes.push(`<div class="warn next">${btn} <span>${esc(n.why || '')}</span></div>`);
+    // Порада без екрана — команда терміналу: у примітки, не окремою смугою.
+    if (!scr) {
+      extra.push(`<span class="mono">${esc(n.op)}</span> — ${esc(n.why || '')}`);
+      continue;
+    }
+    const label = t(NAV_LABEL[scr] || scr);
+    notes.push(`<div class="warn next"><button data-act="nav" data-arg="${esc(scr)}">`
+      + `${esc(label)} →</button> <span>${esc(n.why || '')}</span></div>`);
   }
-  return notes.join('');
+  return notes.join('') + notesBlock(extra);
 }
 
 /**

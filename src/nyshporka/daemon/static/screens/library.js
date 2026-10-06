@@ -16,7 +16,7 @@
 import { t } from '../core/strings.js';
 import { callOp } from '../core/net.js';
 import { esc, el, setView, busy, failure, boxError, renderWarnings,
-  curGen, alive } from '../core/view.js';
+  curGen, alive, hasAlerts } from '../core/view.js';
 import { SCREENS, ACTIONS, PAGERS } from '../core/registry.js';
 import { show, goto } from '../core/nav.js';
 import { ST } from '../core/state.js';
@@ -422,7 +422,9 @@ Object.assign(ACTIONS, {
     // вердикт удруге. А без `lv-hits` поведінка ще й розходилась залежно від
     // стану DOM.
     const box = el('lv-hits');
-    if (box && (env.warnings || []).length) {
+    // Панель підтвердження — лише на тривогу: примітка не варта того, щоб
+    // зупиняти людину посеред переліку.
+    if (box && hasAlerts(env)) {
       box.innerHTML = `<div class="warn">✅ ${esc(elm.dataset.arg)}</div>`
         + renderWarnings(env)
         + `<p><button data-act="nav" data-arg="library">${t('lib.cancel')}</button></p>`;

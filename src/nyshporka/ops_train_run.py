@@ -177,7 +177,7 @@ def train_start(a: StartArgs) -> Envelope:
         return env
     if a.dry_run or not a.yes or not plan.ok:
         if not plan.ok:
-            env.warn("not_ready", "шлях обчислень не готовий — див. попередження вище")
+            env.warn("not_ready", "шлях обчислень не готовий — див. попередження вище", "alert")
         else:
             env.warn("confirm", f"це план; запустити: nysh train start --corpus {a.corpus} "
                                 f"--compute {trainer.kind} --yes")
