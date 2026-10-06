@@ -907,8 +907,12 @@ def registry_build(a: BuildArgs) -> Envelope:
             skipped.append({"collector": c.id,
                             "why": "0 рядків" + (f": {blind}" if blind else "")})
             continue
+        # 🔴 Сліпі місця джерела їдуть разом із ним: «описів 999 у
+        # Вікіджерелах немає» чи «опис без таблиці» інакше лишались у
+        # конверті окремого `collect`, а `build` казав лише «зібрано».
         took.append({"collector": c.id, "rows": gd.get("rows") or 0,
-                     "out": str(gd.get("out") or "")})
+                     "out": str(gd.get("out") or ""),
+                     "blind": [b for b in gd.get("blind") or [] if isinstance(b, dict)]})
     progress.report(total, total, "джерел")
 
     data: dict[str, Any] = {"took": took, "skipped": skipped,
@@ -940,6 +944,10 @@ def registry_build(a: BuildArgs) -> Envelope:
     # «такої справи в архіві не існує».
     for s in skipped:
         env.warn("source_skipped", f"{s['collector']}: {s['why']}")
+    for t in took:
+        for b in t["blind"]:
+            env.warn(f"blind_{b.get('kind')}",
+                     f"{t['collector']}: {b.get('count')}: {b.get('why')}")
     env.warn("built",
              f"опис зібрано з {len(took)} джерел ({', '.join(x['collector'] for x in took)})"
              + (f", пропущено {len(skipped)}" if skipped else "")

@@ -208,3 +208,31 @@ def test_zero_rows_is_not_counted_as_a_source(space, monkeypatch) -> None:
 
     assert [x["collector"] for x in env.data["took"]] == ["добрий"]
     assert [x["collector"] for x in env.data["skipped"]] == ["порожній"]
+
+
+class _Сліпий(_Збирач):
+    """Збирач, що дав рядки, але назвав опис, якого в нього немає."""
+
+    def collect(self, _target: Any, *, dest: Any, **_kw: Any) -> Any:
+        base = super().collect(_target, dest=dest, **_kw)
+        d = base.as_dict()
+
+        class _R:
+            blind: tuple[Any, ...] = ()
+            kept = 0
+
+            def as_dict(self) -> dict[str, Any]:
+                return {**d, "blind": [{"kind": "opys_absent", "count": 1,
+                                        "why": "описів 999 у Вікіджерелах немає",
+                                        "where": ""}]}
+        return _R()
+
+
+def test_blind_spots_reach_the_build(space, monkeypatch) -> None:
+    """«Опису немає в джерелі» не губиться, коли джерело дало інші рядки."""
+    _stub(monkeypatch, _Сліпий("вікі", ready=True, rows=6), merged=6)
+
+    env = O.call("registry.build", {"repo": "ДАХмО", "fond": "230"})
+
+    said = {w.code: w.text for w in env.warnings}
+    assert "blind_opys_absent" in said and "999" in said["blind_opys_absent"], said
