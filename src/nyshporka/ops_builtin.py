@@ -624,6 +624,10 @@ def sources_list(_: NoArgs) -> Envelope:
             undeclared.append(s.id)
         rows.append({"id": s.id, "label": s.label, "caps": sorted(s.caps),
                      "catalog": _catalog_basis(s),
+                     # Іменна база загальним пошуком не питається — лише
+                     # `--source`. Без позначки агент, що йде за переліком
+                     # джерел, чекав би її в загальному `find`.
+                     "explicit_only": bool(getattr(s, "explicit_only", False)),
                      # 🔴 Про що джерело, де його межі й що доводить його нуль.
                      # Доти маршрут складався з таблиці класів у тексті, і
                      # джерело без картки випадало з нього мовчки.
@@ -687,8 +691,11 @@ def material_look(a: LookArgs) -> Envelope:
 
 
 class CatalogSearchArgs(BaseModel):
-    q: str = Field(description="назва села, прізвище чи слово із заголовка справи")
-    source: str = Field(default="", description="одне джерело; порожньо = усі, що вміють шукати")
+    q: str = Field(description="назва села, прізвище чи слово із заголовка справи; "
+                               "для іменної бази — «прізвище [ім'я [по батькові]]»")
+    source: str = Field(default="", description=(
+        "одне джерело; порожньо = усі, що вміють шукати, КРІМ іменних баз "
+        "(`explicit_only`, напр. `martyrolog`) — ті лише явно"))
     limit: int = Field(default=30, ge=1, le=200)
     by_address: bool = Field(
         default=True,

@@ -259,7 +259,9 @@ def sources(as_json: bool = typer.Option(False, "--json",
         return
     for row in env.data.get("sources") or []:
         caps = ", ".join(row.get("caps") or []) or "—"
-        console.print(f"  [bold]{row['id']:<10}[/bold] {row['label']}")
+        console.print(f"  [bold]{row['id']:<10}[/bold] {row['label']}"
+                      + (f" [warn](лише --source {row['id']})[/warn]"
+                         if row.get("explicit_only") else ""))
         console.print(f"  {'':<10} [muted]уміє: {caps}[/muted]")
         about = row.get("about")
         if about is None:
@@ -346,7 +348,8 @@ def _print_address(addr: Any) -> None:
 @app.command()
 def find(q: str = typer.Argument(..., help="село, прізвище, слово із заголовка "
                                            "або шифра справи"),
-         source: str = typer.Option("", "--source", help="лише це джерело"),
+         source: str = typer.Option("", "--source", help=(
+             "лише це джерело; іменні бази (martyrolog) — тільки так")),
          text: bool = typer.Option(False, "--text",
                                    help="шукати текстом, навіть якщо запит "
                                         "схожий на шифру"),
@@ -1080,7 +1083,9 @@ def read(
         help="стартувати, навіть якщо інша справа вже читається"),
     rerun: bool = typer.Option(
         False, "--rerun",
-        help="справу вже прочитано ЦІЄЮ моделлю — однаково перечитати"),
+        help=("запустити, хоч справу вже прочитано ЦІЄЮ моделлю: раннер дочитає "
+              "сторінки без тексту, готові не перечитує. Перечитати все — "
+              "окрема тека (--out) або інша модель (--model)")),
     dry: bool = typer.Option(False, "--dry-run", help="лише показати план"),
 ) -> None:
     """Прочитати справу рукописним рушієм.
@@ -1128,7 +1133,9 @@ def read(
         from nyshporka.cloud.go import already_read
 
         if why := already_read(p.out_dir, model=p.model.name, frames=p.frames):
-            console.print(f"[err]{why}. Перечитати — `--rerun`[/err]")
+            console.print(f"[err]{why}. Перечитати наново — окремою текою "
+                          f"(`--out <тека>`) або іншою моделлю (`--model`); "
+                          f"`--rerun` у цю теку дочитає лише сторінки без тексту[/err]")
             raise typer.Exit(code=1)
     if p.seg_why:
         # Перечитування без кешу коштує вдвічі дорожче (18.4 проти 9.1 с/стор),
