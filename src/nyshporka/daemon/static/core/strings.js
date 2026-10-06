@@ -4,7 +4,7 @@
 // ── i18n ─────────────────────────────────────────────────────────────────────
 const STRINGS = {
   uk: {
-    'nav.home': 'Дослідження', 'nav.sources': 'Каталоги', 'nav.cases': 'Приймальня',
+    'nav.home': 'Огляд', 'nav.sources': 'Каталоги', 'nav.cases': 'Приймальня',
     'nav.search': 'Пошук', 'nav.jobs': 'Роботи',
     'nav.geog': 'Газетир', 'nav.fonds': 'Описи фондів',
     'nav.newcase': 'Завести справу', 'nav.settings': 'Налаштування',
@@ -225,7 +225,7 @@ const STRINGS = {
     'orth.uk': 'укр.',
     'orth.pl': 'лат.',
     // ── дашборд наповненого простору ──
-    'dash.title': 'Дослідження',
+    'dash.title': 'Огляд',
     'step.title': 'З чого почати',
     'step.go': 'зробити →',
     'step.machine': 'Машина читає рукопис',
@@ -869,7 +869,7 @@ const STRINGS = {
     'common.page': 'сторінка',
   },
   en: {
-    'nav.home': 'Research', 'nav.sources': 'Catalogues', 'nav.cases': 'Intake',
+    'nav.home': 'Overview', 'nav.sources': 'Catalogues', 'nav.cases': 'Intake',
     'nav.search': 'Search', 'nav.jobs': 'Jobs',
     'nav.geog': 'Gazetteer', 'nav.fonds': 'Finding aids',
     'nav.newcase': 'New case', 'nav.settings': 'Settings',
@@ -1087,7 +1087,7 @@ const STRINGS = {
     'orth.uk': 'Ukrainian',
     'orth.pl': 'Latin',
     // ââ dashboard of a workspace that already has material ââ
-    'dash.title': 'Research',
+    'dash.title': 'Overview',
     'step.title': 'Where to begin',
     'step.go': 'do it →',
     'step.machine': 'This machine reads handwriting',
