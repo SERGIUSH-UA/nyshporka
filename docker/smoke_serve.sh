@@ -27,7 +27,7 @@ docker run -d -t --name "$name" -p "127.0.0.1:$port:8788" -v "$volume:/srv/nysh"
 
 code=000
 for _ in $(seq 1 90); do
-    code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$port/" || true)
+    code=$(curl -s --max-time 10 -o /dev/null -w '%{http_code}' "http://127.0.0.1:$port/" || true)
     [ "$code" != 000 ] && break
     sleep 1
 done
@@ -45,11 +45,11 @@ link=$(grep -Eo "http://127\.0\.0\.1:$port/#pair=[A-Za-z0-9_-]+" "$log" | tail -
 pair=${link##*#pair=}
 
 origin="http://127.0.0.1:$port"
-code=$(curl -s -c "$jar" -o /dev/null -w '%{http_code}' -H "Origin: $origin" \
+code=$(curl -s --max-time 10 -c "$jar" -o /dev/null -w '%{http_code}' -H "Origin: $origin" \
     -H 'Content-Type: application/json' -d "{\"code\":\"$pair\"}" "$origin/api/access")
 [ "$code" = 200 ] || fail "допуск кодом із посилання відповів $code"
-code=$(curl -s -b "$jar" -o /dev/null -w '%{http_code}' "$origin/api/health")
+code=$(curl -s --max-time 10 -b "$jar" -o /dev/null -w '%{http_code}' "$origin/api/health")
 [ "$code" = 200 ] || fail "з допуском /api/health відповів $code"
-code=$(curl -s -o /dev/null -w '%{http_code}' -H 'Host: evil.example' "$origin/api/health")
+code=$(curl -s --max-time 10 -o /dev/null -w '%{http_code}' -H 'Host: evil.example' "$origin/api/health")
 [ "$code" = 403 ] || fail "чужий Host пройшов ворота ($code)"
 echo "✅ застосунок відкривається з хоста: посилання → допуск → консоль"
