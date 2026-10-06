@@ -746,6 +746,12 @@ def pull_cmd(
                           f"справ {g['cases']:>4} · стор. {g['pages']:>7}"
                           + (f" · {_e(g['years'])}" if g.get("years") else "")
                           + f" · {_e(', '.join(g.get('publishers') or []) or '—')}")
+        if d.get("local"):
+            loc = d["local"]
+            console.print(f"\nна цій машині вже прочитано справ {loc['have']}"
+                          + (f" · можливо прочитано (прогін без ключа) {loc['maybe']}"
+                             if loc.get("maybe") else "")
+                          + f" · бракує [bold]{loc['missing']}[/bold] — їх і візьме --take")
         imp = d.get("imported") or []
         if imp:
             runs = sum(len(i.get("runs") or []) for i in imp)

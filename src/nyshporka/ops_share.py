@@ -975,6 +975,60 @@ def _all_rows(query: str, base: str) -> list[Any]:
             return out
 
 
+def _row_key(r: Any) -> str:
+    from nyshporka.share.pool import quad_key
+
+    return quad_key(r.repo, r.fond, r.opys, r.spr)
+
+
+def _missing_locally(env: Envelope, items: list[tuple[str, Any]], *, replace: bool
+                     ) -> list[tuple[str, Any]]:
+    """Відсіяти справи, які на цій машині вже прочитано, — до завантаження.
+
+    🔴 Своє прочитання не береться ніколи, навіть із `--force`: серія з пулу
+    містить і пакети самої людини, і без звірки за ключем вони лягали дублем
+    поряд зі своїм прогоном під іншим ім'ям — удвічі більший стор і кожен хіт
+    пошуку двічі. Раніше прийняте — лише з `replace` (`--force`).
+    """
+    from nyshporka import htr_store as S
+
+    local = S.local_reads()
+    keep: list[tuple[str, Any]] = []
+    own = taken = 0
+    skipped: list[dict[str, Any]] = []
+    maybe: list[dict[str, Any]] = []
+    for label, r in items:
+        key = _row_key(r)
+        have = (local.get(key) or {}) if key else {}
+        if have.get("own"):
+            own += 1
+        elif have.get("taken") and not replace:
+            taken += 1
+        elif not have and (like := S.unkeyed_like(local, r.fond, r.opys, r.spr)):
+            maybe.append({"label": label, "case_key": key, "runs": like,
+                          "url": r.url})
+            continue
+        else:
+            keep.append((label, r))
+            continue
+        skipped.append({"label": label, "case_key": key,
+                        "runs": [*have.get("own", []), *have.get("taken", [])]})
+    (env.data or {})["skipped_local"] = skipped
+    (env.data or {})["skipped_maybe"] = maybe
+    if skipped:
+        env.warn("skipped_local",
+                 f"{len(skipped)} справ уже прочитано на цій машині — не беру: "
+                 f"своїх {own}, прийнятих раніше {taken}"
+                 + (" (оновити прийняте новішим: --force)" if taken else ""))
+    if maybe:
+        names = "; ".join(f"{m['label']} ← {', '.join(m['runs'][:3])}" for m in maybe[:10])
+        env.warn("skipped_maybe",
+                 f"{len(maybe)} справ, можливо, вже прочитано: прогони без ключа справи "
+                 f"мають у назві її шифру — не беру. {names}. Прив'язати прогін: "
+                 f"nysh cases bind; взяти попри це: nysh share import <адреса>")
+    return keep
+
+
 def _take_many(env: Envelope, items: list[tuple[str, Any]], *, replace: bool
                ) -> list[dict[str, Any]]:
     """Прийняти рядки каталогу по одному; відмова одного не рве решту.
@@ -988,7 +1042,7 @@ def _take_many(env: Envelope, items: list[tuple[str, Any]], *, replace: bool
 
     taken: list[dict[str, Any]] = []
     notes = 0
-    for label, r in items:
+    for label, r in _missing_locally(env, items, replace=replace):
         if not r.url:
             env.warn("no_url", f"{label}: у рядку каталогу немає адреси пакета")
             continue
@@ -1083,7 +1137,18 @@ def _pull_series(a: SharePullArgs) -> Envelope:
         return env
     if not a.take:
         if a.fond:
-            env.suggest("share.pull", "прийняти всю серію: --take")
+            # Звірка до прийому: скільки з серії вже прочитано тут — щоб
+            # «прийняти всю серію» означало відоме число справ, а не здогад.
+            from nyshporka import htr_store as S
+
+            local = S.local_reads()
+            best = C.best_per_case(rows)
+            have = sum(1 for r in best if _row_key(r) and _row_key(r) in local)
+            maybe = sum(1 for r in best if not (_row_key(r) and _row_key(r) in local)
+                        and S.unkeyed_like(local, r.fond, r.opys, r.spr))
+            data["local"] = {"have": have, "maybe": maybe,
+                             "missing": len(best) - have - maybe}
+            env.suggest("share.pull", "прийняти справи серії, яких тут немає: --take")
         return env
     if not a.fond.strip():
         return fail("прийняти можна серію фонду: назвіть --fond (архів сам — "

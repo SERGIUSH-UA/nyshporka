@@ -793,6 +793,60 @@ def unique_pages(rows: list[dict[str, Any]]) -> int:
     return sum(groups.values())
 
 
+def local_reads() -> dict[str, dict[str, list[str]]]:
+    """Прочитане на цій машині за канонічним ключем справи: своє й прийняте.
+
+    `{ключ: {"own": [прогони], "taken": [прогони]}}`. Ключ — той самий, яким
+    `runs_for_scope` збирає справу: прив'язка людини (`cases.bind`) понад мету
+    прогону. Прогін без ключа сюди не входить — чия це справа, невідомо.
+
+    🔴 Звірка з пулом іде за КЛЮЧЕМ справи, а не за іменем прогону. Своя справа
+    лежить тут як `spr-8734`, у пулі — як `DAHMO_315-1-8734`; захист прийому від
+    зіткнення імен їх не бачить, і серія з пулу клала дубль поверх прочитаного.
+    """
+    bound = _bound_runs()
+    out: dict[str, dict[str, list[str]]] = {}
+    for r in list_cases():
+        name = str(r.get("name") or "")
+        if name in bound:
+            key = _canon_case_key(bound[name] or "")
+        else:
+            key = str(r.get("case_canon") or "") or _canon_case_key(
+                (r.get("case_key") or "").strip())
+            if not key and r.get("shared") and r.get("shifra"):
+                # Прийняте старшими версіями лежить без ключа в меті, але
+                # шифру несе паспорт пакета — інакше серія з пулу брала б ту
+                # саму справу вдруге (06.10.2026: 59 справ ДАЖО 1-78).
+                with contextlib.suppress(Exception):
+                    key = _canon_case_key(str(r["shifra"]))
+        if not key:
+            # Ключа нема — справу видно лише за іменем теки (`unkeyed_like`).
+            out.setdefault("", {"own": [], "taken": []})[
+                "taken" if r.get("shared") else "own"].append(name)
+            continue
+        slot = out.setdefault(key, {"own": [], "taken": []})
+        slot["taken" if r.get("shared") else "own"].append(name)
+    return out
+
+
+def unkeyed_like(local: dict[str, dict[str, list[str]]], fond: str, opys: str,
+                 spr: str) -> list[str]:
+    """Прогони без ключа справи, чиє ім'я несе «фонд-опис-справа».
+
+    🔴 Запасна звірка для `local_reads`: прогін без ключа (`kostel-685-3-106-1847`,
+    тека з чужого scratchpad) за ключем не видно, і серія з пулу клала б поверх
+    нього дубль. Збіг за іменем — не доказ, тому він лише ЗУПИНЯЄ прийом, а не
+    вирішує, що справа прочитана: вирішує людина (`share import` або `cases bind`).
+    """
+    if not (fond and spr):
+        return []
+    sep = r"[-_]"
+    body = sep.join(re.escape(x) for x in (fond, opys, spr) if x)
+    pat = re.compile(rf"(?<![0-9a-z]){body}(?![0-9a-zа-я])", re.IGNORECASE)
+    slot = local.get("") or {}
+    return [n for n in (*slot.get("own", []), *slot.get("taken", [])) if pat.search(n)]
+
+
 def runs_for_scope(scope: str | Sequence[str]) -> dict[str, Any]:
     """Прогони, у яких шукати: `scope` — справа, прогін або порожньо (весь корпус).
 

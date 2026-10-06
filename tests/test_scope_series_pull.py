@@ -222,3 +222,68 @@ def test_pull_bez_zapytu_ohliad_a_ne_pomylka(space: Any, monkeypatch: pytest.Mon
     assert env.ok and env.data["series"][0]["cases"] == 1
     assert not ops_share.share_pull(ops_share.SharePullArgs(take=True)).ok
     assert not ops_share.share_pull(ops_share.SharePullArgs(query="x", fond="592")).ok
+
+
+def test_pull_serii_ne_bere_prochytane_tut(space: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """🔴 Звірка за КЛЮЧЕМ справи до завантаження: своє прочитання під іншим
+    іменем прогону не береться ніколи, навіть із --force; прийняте раніше —
+    лише з --force; решта береться."""
+    from nyshporka import htr_store as S
+    from nyshporka import ops_share
+    from nyshporka.share import accept as A
+    from nyshporka.share import catalog as C
+
+    def row(spr: str) -> C.Row:
+        return C.Row(shifra=f"DAHMO 315-1-{spr}", repo="DAHMO", fond="315", opys="1",
+                     spr=spr, url=f"u{spr}", sha256=f"u{spr}", pages="10", years="1900")
+
+    rows = [row("1"), row("2"), row("3"), row("10")]
+    monkeypatch.setattr(C, "search", lambda q, base="", *, limit=50, offset=0:
+                        (rows[offset:offset + limit], len(rows), 4))
+    k1, k2 = ops_share._row_key(rows[0]), ops_share._row_key(rows[1])
+    # прогін без ключа справи: шифра лише в імені теки — «можливо прочитано»;
+    # «315-1-1» у ньому не має зачепити справу 1, а «315-1-10» — так
+    monkeypatch.setattr(S, "local_reads", lambda: {
+        k1: {"own": ["spr-1"], "taken": []}, k2: {"own": [], "taken": ["DAHMO_315-1-2"]},
+        "": {"own": ["kostel-315-1-10-1847"], "taken": []}})
+    taken: list[str] = []
+
+    def accept(url: str, sha256: str = "", force: bool = False,
+               replace: bool = False) -> dict[str, Any]:
+        taken.append(url)
+        return {"case_key": url, "pages": 10, "runs": [f"run_{url}"]}
+
+    monkeypatch.setattr(A, "accept", accept)
+    monkeypatch.setattr(ops_share, "_index_taken", lambda env, runs: None)
+
+    env = ops_share.share_pull(ops_share.SharePullArgs(repo="DAHMO", fond="315"))
+    assert env.data["local"] == {"have": 2, "maybe": 1, "missing": 1}
+    assert taken == []
+
+    env = ops_share.share_pull(ops_share.SharePullArgs(repo="DAHMO", fond="315", take=True))
+    assert taken == ["u3"]
+    assert {s["case_key"] for s in env.data["skipped_local"]} == {k1, k2}
+    assert [m["runs"] for m in env.data["skipped_maybe"]] == [["kostel-315-1-10-1847"]]
+    assert {w.code for w in env.warnings} >= {"skipped_local", "skipped_maybe"}
+
+    taken.clear()
+    ops_share.share_pull(ops_share.SharePullArgs(repo="DAHMO", fond="315", take=True,
+                                                 force=True))
+    assert sorted(taken) == ["u2", "u3"]
+
+
+def test_local_reads_bere_kliuch_pryiniatoho_z_shyfry(
+        space: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Прийняте старшою версією лежить без ключа в меті — справу впізнає шифра
+    паспорта пакета, інакше серія з пулу брала б її вдруге."""
+    S = space
+    _write_library([_entry(7)])
+    rows = [{"name": "op-7", "case_key": "", "case_canon": "", "shared": "Comme il faut",
+             "shifra": "ДАХмО 315-1-7", "case_dir": ""},
+            {"name": "own-8", "case_key": "", "case_canon": "", "shared": "",
+             "shifra": "ДАХмО 315-1-8", "case_dir": ""}]
+    monkeypatch.setattr(S, "list_cases", lambda: [dict(r) for r in rows])
+    got = S.local_reads()
+    key = S._canon_case_key("ДАХмО 315-1-7")
+    assert key and got[key] == {"own": [], "taken": ["op-7"]}
+    assert got[""] == {"own": ["own-8"], "taken": []}
