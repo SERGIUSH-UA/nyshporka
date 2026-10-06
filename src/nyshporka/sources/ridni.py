@@ -27,6 +27,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -172,6 +173,33 @@ def split_query(q: str) -> tuple[str, str]:
     return _clean(head), _clean(tail).lower()
 
 
+#: Закінчення прикметника, що відрізняють «Острозький» від «Острозького».
+_ADJ_END = re.compile(r"(ого|ому|ий|ій|им|ім|ої|ою|ая|а|е|і|у)$")
+
+
+def _stem(word: str) -> str:
+    """Основа слова без відмінкового закінчення прикметника."""
+    w = word.lower().strip(" .,;")
+    s = _ADJ_END.sub("", w)
+    return s if len(s) >= 3 else w
+
+
+def _narrowed(narrow: str, book: Book) -> bool:
+    """Чи лежить книга в названому повіті чи губернії.
+
+    🔴 За основою, а не підрядком: каталог пише повіт то в називному
+    («Канівський»), то в родовому («Острозького»), і «Острозький» не входить
+    в «Острозького» — звуження давало тихий нуль на книгах, які є. Слова
+    «повіт», «губернія» самі нічого не звужують.
+    """
+    if not narrow:
+        return True
+    words = [_stem(w) for w in narrow.split()
+             if not w.lower().startswith(("пов", "губ"))]
+    place = f"{book.county} {book.gubernia}".lower()
+    return all(w in place for w in words if w)
+
+
 class RidniSource:
     """Каталог `ridni.org`. Живий запит, каталогу на диску немає."""
 
@@ -261,9 +289,7 @@ class RidniSource:
         books = self.books(name)
         if not books:
             return []
-        keep = [b for b in books
-                if not narrow or narrow in b.county.lower()
-                or narrow in b.gubernia.lower()]
+        keep = [b for b in books if _narrowed(narrow, b)]
         # ⚠ Каталог тримає ту саму книгу двічі, коли парафія має приписні села:
         # рядок повторюється на кожне з них. У видачі це виглядало б як дві
         # різні справи з однією шифрою — тобто як подвоєний знаменник.

@@ -234,3 +234,55 @@ def test_html_answer_is_refusal_not_silence() -> None:
     api = _Api(raw="<!DOCTYPE html><html>")
     with pytest.raises(SourceError):
         _src(api).parishes("Н.")
+
+
+def test_split_names_windows_still_at_the_ceiling() -> None:
+    """Вікно, що й само вперлось у стелю, називається — перелік там неповний."""
+    def answer(body: dict[str, object]) -> list[dict[str, object]]:
+        if body.get("year_from") == "1801":
+            return [{"full_code": f"АРХ-1-1-w{i}"} for i in range(CEILING)]
+        if "year_from" in body:
+            return []
+        return [{"full_code": f"АРХ-1-1-{i}"} for i in range(CEILING)]
+
+    hits, cut = _src(_Api(search=answer)).find_files_split(author="Церква")
+    assert cut == ("1801–1830",)
+    assert len(hits) == 2 * CEILING
+
+
+def test_window_sum_over_ceiling_is_not_a_truncation() -> None:
+    """Сума вікон понад 50 — не обрізка: обрізане лише вікно, що само вперлось.
+
+    Доти «коло» кричало про стелю щоразу, коли вікна разом давали 50 справ.
+    """
+    def answer(body: dict[str, object]) -> list[dict[str, object]]:
+        if "year_from" not in body:
+            return [{"full_code": f"АРХ-1-1-{i}"} for i in range(CEILING)]
+        return [{"full_code": f"АРХ-1-1-{body['year_from']}-{i}"} for i in range(20)]
+
+    src = _src(_Api(search=answer))
+    hits = src.near("48.1", "28.2", radius_m=25000, split_years=True)
+    assert len(hits) > CEILING and src.last_cut == ()
+
+
+def test_parish_books_at_the_ceiling_are_split_and_named(monkeypatch: pytest.MonkeyPatch) -> None:
+    """🔴 Перелік книг парафії теж має стелю 50: доти він мовчки обрізався."""
+    from nyshporka import ops_catalog as OC
+    from nyshporka.sources.duck import Parish
+
+    def answer(body: dict[str, object]) -> list[dict[str, object]]:
+        if body.get("year_from") == "1831":
+            return [{"full_code": f"АРХ-1-1-w{i}"} for i in range(CEILING)]
+        if "year_from" in body:
+            return []
+        return [{"full_code": f"АРХ-1-1-{i}"} for i in range(CEILING)]
+
+    src = _src(_Api(search=answer))
+    monkeypatch.setattr(src, "parishes", lambda _form: [Parish(id="1", title="Церква с. Х")])
+    monkeypatch.setattr(OC, "_duck", lambda: src)
+
+    env = OC.parish_find(OC.ParishFindArgs(q="Хутірка"))
+
+    assert len(env.data["books"]["Церква с. Х"]) == 2 * CEILING
+    said = {w.code: w.text for w in env.warnings}
+    assert "books_truncated" in said and "1831–1860" in said["books_truncated"]

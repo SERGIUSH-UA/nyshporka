@@ -203,6 +203,8 @@ class DuckSource:
     id = "duck"
     label = "Duck Inspector (зведений покажчик)"
     caps = frozenset({"search"})
+    #: Вікна років, що лишились обрізаними на останньому `near(split_years=True)`.
+    last_cut: tuple[str, ...] = ()
     about = SourceAbout(
         answers="що взагалі існує про село чи у фонді — оцифроване чи ні",
         gives="справи за заголовком із шифрою й роками; сторінку покажчика",
@@ -480,6 +482,32 @@ class DuckSource:
             raise SourceError("покажчик відповів не переліком справ")
         return [h for h in (self._hit(x) for x in rows) if h is not None]
 
+    def find_files_split(self, **kw: Any) -> tuple[list[Hit], tuple[str, ...]]:
+        """`find_files` з обходом стелі вікнами років — і що лишилось обрізаним.
+
+        🔴 Стеля видачі — 50 без пагінації: рівно 50 означає «обрізано», а не
+        «знайдено». Тоді той самий запит повторюється вікнами `YEAR_WINDOWS`, і
+        видача зводиться за кодом справи. Другим значенням іде перелік вікон, що
+        й самі вперлись у стелю, — там перелік досі неповний. Якщо в стелю
+        вперся суцільний запит, справи без років понад перші 50 вікна років не
+        повертають: це теж треба казати.
+        """
+        first = self.find_files(**kw)
+        if len(first) < CEILING:
+            return first, ()
+        if kw.get("year_from") or kw.get("year_to"):
+            return first, (f"{kw.get('year_from') or '…'}–{kw.get('year_to') or '…'}",)
+        seen: dict[str, Hit] = {h.ref: h for h in first}
+        narrow = {k: v for k, v in kw.items() if k not in ("year_from", "year_to")}
+        cut: list[str] = []
+        for y1, y2 in YEAR_WINDOWS:
+            got = self.find_files(year_from=str(y1), year_to=str(y2), **narrow)
+            if len(got) >= CEILING:
+                cut.append(f"{y1}–{y2}")
+            for h in got:
+                seen.setdefault(h.ref, h)
+        return list(seen.values()), tuple(cut)
+
     def near(self, lat: str, lng: str, *, radius_m: int,
              split_years: bool = False, **rest: Any) -> list[Hit]:
         """Справи в колі навколо точки, з обходом стелі за потреби.
@@ -489,16 +517,11 @@ class DuckSource:
         координатами в гео-пошук не потрапляє ніколи. Нуль тут не є нулем
         архіву, і звітувати ним не можна.
         """
-        first = self.find_files(lat=lat, lng=lng, radius_m=radius_m, **rest)
-        if not split_years or len(first) < CEILING or rest.get("year_from"):
-            return first
-        seen: dict[str, Hit] = {h.ref: h for h in first}
-        narrow = {k: v for k, v in rest.items() if k not in ("year_from", "year_to")}
-        for y1, y2 in YEAR_WINDOWS:
-            for h in self.find_files(lat=lat, lng=lng, radius_m=radius_m,
-                                     year_from=str(y1), year_to=str(y2), **narrow):
-                seen.setdefault(h.ref, h)
-        return list(seen.values())
+        if not split_years:
+            return self.find_files(lat=lat, lng=lng, radius_m=radius_m, **rest)
+        hits, self.last_cut = self.find_files_split(
+            lat=lat, lng=lng, radius_m=radius_m, **rest)
+        return hits
 
     def case_card(self, full_code: str) -> dict[str, Any]:
         """Картка справи: роки, теги, ПАРАФІЇ всередині, всі онлайн-копії.

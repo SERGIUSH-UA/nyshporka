@@ -742,6 +742,25 @@ def test_namesake_villages_are_narrowed_here_because_the_server_will_not(ridni_r
     assert src.search("Шупики, Полтавський", limit=10) == []
 
 
+def test_county_matches_in_any_case_form(ridni_rows):
+    """🪤 Каталог пише повіт то в називному, то в родовому відмінку.
+
+    Звуження підрядком не бачило «Острозький» в «Острозького», і книги, які
+    є, давали тихий нуль.
+    """
+    from nyshporka.sources.ridni import F_COUNTY
+
+    rows = [list(r) for r in ridni_rows]
+    for r in rows:
+        r[F_COUNTY] = "Канівського"
+    src, _ = _ridni(rows)
+    assert src.search("Шупики, Канівський", limit=10), "називний проти родового"
+    assert src.search("Шупики, Канівського повіту", limit=10)
+    assert src.search("Шупики, Полтавський", limit=10) == []
+    src, _ = _ridni(ridni_rows)                       # у каталозі — називний
+    assert src.search("Шупики, Канівського", limit=10), "родовий проти називного"
+
+
 def test_a_village_attached_to_another_parish_says_so(ridni_rows):
     """🔑 Книга ЧУЖОЇ парафії, до якої село приписане, — окремий канал.
 

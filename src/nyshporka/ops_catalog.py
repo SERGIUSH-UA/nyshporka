@@ -22,7 +22,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from nyshporka.core import casekey
-from nyshporka.core.envelope import CoverageItem, Envelope, fail, ok
+from nyshporka.core.envelope import ALERT, CoverageItem, Envelope, fail, ok
 from nyshporka.core.ops import NoArgs, op
 
 # 🔴 усі операції цього модуля — `agent=False`, і це не забудькуватість.
@@ -1043,14 +1043,26 @@ def parish_find(a: ParishFindArgs) -> Envelope:
     data: dict[str, Any] = {"forms": forms,
                             "parishes": [_parish_row(p) for p in found.values()],
                             "books": {}}
+    cut_books: dict[str, tuple[str, ...]] = {}
     if a.books:
         try:
             for p in found.values():
-                data["books"][p.title] = _hit_rows(src.find_files(author=p.title))
+                # 🔴 Перелік книг парафії теж має стелю 50: рівно 50 — це
+                # обрізка, а не всі книги, тож запит розбивається роками.
+                hits, cut = src.find_files_split(author=p.title)
+                data["books"][p.title] = _hit_rows(hits)
+                if cut:
+                    cut_books[p.title] = cut
         except SourceError as exc:
             return fail(str(exc))
 
     env = ok(data)
+    for title, cut in cut_books.items():
+        env.warn("books_truncated",
+                 f"книги парафії «{title}» впираються в стелю покажчика навіть "
+                 f"вікнами років ({', '.join(cut)}): перелік неповний, а справи "
+                 f"без років понад перші 50 не видно — звужувати тегом чи роками",
+                 ALERT)
     env.covered_by(_duck_coverage())
     if not found:
         env.warn("nothing_found",
@@ -1155,8 +1167,9 @@ def parish_near(a: ParishNearArgs) -> Envelope:
     from nyshporka.sources.base import SourceError
     from nyshporka.sources.duck import CEILING
 
+    src = _duck()
     try:
-        hits = _duck().near(str(a.lat), str(a.lng), radius_m=int(a.km * 1000),
+        hits = src.near(str(a.lat), str(a.lng), radius_m=int(a.km * 1000),
                             split_years=True, tags=tuple(a.tags),
                             year_from=a.year_from, year_to=a.year_to)
     except SourceError as exc:
@@ -1177,10 +1190,12 @@ def parish_near(a: ParishNearArgs) -> Envelope:
     env.warn("geo_denominator",
              "гео-пошук бачить лише справи, прив'язані до парафії з "
              "координатами: нуль тут не є нулем архіву")
-    if len(hits) >= CEILING and not a.year_from:
+    cut = tuple(getattr(src, "last_cut", ()) or ())
+    if cut:
         env.warn("ceiling",
                  f"навіть із розбиттям по роках видача впирається в стелю "
-                 f"{CEILING} — звужуй радіус або роки, перелік неповний")
+                 f"{CEILING} у вікнах {', '.join(cut)} — звужуй радіус або роки, "
+                 f"перелік неповний", ALERT)
     return env
 
 
