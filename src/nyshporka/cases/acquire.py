@@ -238,8 +238,8 @@ def write_meta(case_dir: Path, *, archive: str, fond: str, opys: str, spr: str,
     return patch_meta(case_dir, patch)
 
 
-def from_commons(case_dir: Path, file_name: str, *, archive: str, fond: str,
-                 opys: str, spr: str, title: str = "", year: str = "",
+def from_commons(case_dir: Path, file_name: str | list[str], *, archive: str,
+                 fond: str, opys: str, spr: str, title: str = "", year: str = "",
                  why: str = "", on_progress: ProgressFn | None = None,
                  source: Any = None) -> Acquired:
     """Завантажити справу з Commons у теку справи й описати її.
@@ -247,32 +247,55 @@ def from_commons(case_dir: Path, file_name: str, *, archive: str, fond: str,
     Приймач — не «файл є», а виміряне: розмір звіряє саме джерело, а сторінки
     й `sha256` рахуються з диска. Обіцянка каталогу тут не доказ: обірвана
     закачка під правильним іменем лягла б в облік як повна справа.
+
+    Справа в кількох томах (`file_name` — перелік) лягає в ОДНУ теку: кожен том
+    качається й звіряється окремо, паспорт перелічує всі файли, а знаменник
+    «обіцяно / взято» — сума томів. Том, що не взявся, валить справу цілком:
+    половина справи з паспортом «повна» гірша за явну відмову.
     """
     from nyshporka.sources.commons import CommonsSource
 
+    names = [file_name] if isinstance(file_name, str) else list(file_name)
+    if not names:
+        raise AcquireError("не названо жодного файла Commons")
     src = source or CommonsSource()
     guard_inventory(case_dir, opys)
     case_dir.mkdir(parents=True, exist_ok=True)
 
-    ref = f"file:{file_name}"
-    url = f"https://commons.wikimedia.org/wiki/File:{file_name}"
-    res = src.fetch(ref, case_dir, on_progress=on_progress)
-    verdict = record_fetch(case_dir, res, source="commons", ref=ref, url=url,
-                           want=_want_of(src, ref), why=why)
-    if res.errors or verdict.state in ("partial", "empty"):
-        raise AcquireError("; ".join([x for x in (verdict.message(res),) if x]
-                                     + res.errors))
+    files: list[dict[str, Any]] = []
+    skipped = 0
+    promised: int | None = 0
+    got_n = 0
+    for name in names:
+        ref = f"file:{name}"
+        url = f"https://commons.wikimedia.org/wiki/File:{name}"
+        res = src.fetch(ref, case_dir, on_progress=on_progress)
+        want = _want_of(src, ref)
+        verdict = record_fetch(case_dir, res, source="commons", ref=ref, url=url,
+                               want=want, why=why)
+        if res.errors or verdict.state in ("partial", "empty"):
+            raise AcquireError("; ".join(
+                [f"том «{name}»" if len(names) > 1 else ""]
+                + [x for x in (verdict.message(res),) if x] + res.errors).lstrip("; "))
+        got = case_dir / name.replace("/", "_")
+        if not got.is_file():
+            raise AcquireError(f"після завантаження файла немає: {got}")
+        files.append({"file": got.name, "pagecount": page_count(got),
+                      "size": got.stat().st_size, "sha256": sha256_of(got),
+                      "source_url": url})
+        skipped += res.skipped
+        promised = None if (promised is None or want is None) else promised + want
+        got_n += int(getattr(verdict, "got", 0) or 0)
 
-    got = case_dir / file_name.replace("/", "_")
-    if not got.is_file():
-        raise AcquireError(f"після завантаження файла немає: {got}")
-
-    files = [{"file": got.name, "pagecount": page_count(got),
-              "size": got.stat().st_size, "sha256": sha256_of(got),
-              "source_url": url}]
+    extra: dict[str, Any] | None = None
+    if len(names) > 1:
+        # `record_fetch` писав паспорт тому; справа — це сума томів.
+        extra = {"frames_promised": promised, "frames_got": got_n,
+                 "fetched_parts": [f"file:{n}" for n in names]}
     write_meta(case_dir, archive=archive, fond=fond, opys=opys, spr=spr,
-               files=files, source="Wikimedia Commons", title=title, year=year)
-    return Acquired(case_dir=case_dir, files=files, skipped=res.skipped)
+               files=files, source="Wikimedia Commons", title=title, year=year,
+               extra=extra)
+    return Acquired(case_dir=case_dir, files=files, skipped=skipped)
 
 
 def from_archium(case_dir: Path, viewer: str, *, archive: str, fond: str,

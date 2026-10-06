@@ -135,3 +135,39 @@ def test_commons_povtornyi_file_ne_robyt_nepovnym(tmp_path: Path,
     res = src.fetch("file:Spr.pdf", tmp_path)
     assert (res.frames, res.skipped) == (0, 7)
     assert completeness(res, 7).state == "complete"
+
+
+class _Commons:
+    id = "commons"
+
+    def __init__(self, pages: dict[str, int]) -> None:
+        self.pages = pages
+
+    def manifest(self, ref: str) -> Manifest:
+        return Manifest(source="commons", ref=ref, title="t",
+                        frames=self.pages[ref.removeprefix("file:")])
+
+    def fetch(self, ref: str, dest: Path, *, frames: Any = None,
+              on_progress: Any = None) -> FetchResult:
+        name = ref.removeprefix("file:")
+        (dest / name).write_bytes(name.encode())
+        return FetchResult(dest=dest, frames=self.pages[name])
+
+
+def test_commons_spravu_v_dvokh_tomakh_kladut_v_odnu_teku(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """🔴 Обидва томи — в одну теку, паспорт перелічує обидва, а знаменник —
+    сума томів, а не останній із них (ДАХмО 315-1-7300: 1512 + 1480)."""
+    from nyshporka.cases import acquire as A
+
+    pages = {"X Частина 1.pdf": 1512, "X Частина 2.pdf": 1480}
+    monkeypatch.setattr(A, "page_count", lambda p: pages[p.name])
+    case = tmp_path / "op1-spr-7300"
+    got = A.from_commons(case, list(pages), archive="DAHMO", fond="315", opys="1",
+                         spr="7300", source=_Commons(pages))
+    m = _meta(case)
+    assert [f["file"] for f in m["files"]] == list(pages)
+    assert [f["pagecount"] for f in m["files"]] == [1512, 1480]
+    assert (m["frames_promised"], m["frames_got"]) == (2992, 2992)
+    assert m["fetched_parts"] == [f"file:{n}" for n in pages]
+    assert len(got.files) == 2

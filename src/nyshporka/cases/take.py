@@ -20,6 +20,7 @@
 """
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -132,6 +133,7 @@ def _plan_from(repo: str, fond: str, opys: str, spr: str, letter: str,
     mirror = str(row.get("mirror_url") or "").strip()
     channel = "archium" if archium else ("commons" if name else "")
     return {
+        "parts": commons_volumes(row) if channel == "commons" else [],
         "key": _mk_key(repo, fond, f"{spr}{letter}", opys) or "", "repo": repo,
         "fond": fond,
         "opys": opys, "spr": f"{spr}{letter}",
@@ -147,6 +149,30 @@ def _plan_from(repo: str, fond: str, opys: str, spr: str, letter: str,
         "shifra_needs_eye": row.get("num_src") == "interp",
         "why": _why(channel, film, mirror),
     }
+
+
+def commons_volumes(row: dict[str, Any]) -> list[str]:
+    """Файли Commons, з яких складається справа: усі томи або один файл.
+
+    🔴 Справа у двох томах («Частина 1», «Частина 2») — один рядок реєстру з
+    `commons_kind=volumes`, а `commons_title` у ньому — лише найбільший том. Доти
+    `take` брав саме його, і половина справи лишалась на Commons, хоча реєстр
+    знав обидва томи (06.10.2026, ДАХмО 315-1-7300: 1512 сторінок із 2992).
+    `variants` — це різні файли ОДНОГО змісту, тож береться найбільший, як і
+    рахує обсяг `aggregate_commons`.
+    """
+    name = str(row.get("commons_title") or "").strip()
+    if str(row.get("commons_kind") or "") != "volumes":
+        return [name] if name else []
+    try:
+        parts = json.loads(str(row.get("commons_parts") or "") or "[]")
+    except ValueError:
+        return [name] if name else []
+    vols = [str(p.get("file") or "") for p in parts
+            if isinstance(p, dict) and p.get("sum") and p.get("file")]
+    # Порядок томів — за назвою: «Частина 1» лягає раніше за «Частину 2», і
+    # кадри, розгорнуті з теки, ідуть у порядку справи.
+    return sorted(vols) or ([name] if name else [])
 
 
 def _why(channel: str, film: str, mirror: str) -> str:
@@ -191,7 +217,7 @@ def take(key: str, *, force: bool = False, reindex: bool = True,
                                  title=p["title"], year=year,
                                  on_progress=on_progress)
         else:
-            got = A.from_commons(case_dir, p["ref"], archive=repo, fond=fond,
+            got = A.from_commons(case_dir, p["parts"] or p["ref"], archive=repo, fond=fond,
                                  opys=opys, spr=spr, title=p["title"],
                                  year=year, on_progress=on_progress)
     except A.AcquireError as exc:

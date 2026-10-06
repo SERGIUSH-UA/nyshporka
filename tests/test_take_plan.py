@@ -139,3 +139,29 @@ def test_a_key_without_opys_is_told_apart(key, named):
 def test_the_assumed_opys_is_named_in_words():
     text = T.OPYS_ASSUMED.format(repo="DADNO", fond="193", opys="1", spr="213")
     assert "взято 1" in text and "DADNO/193/<опис>/213" in text
+
+
+# ── справа в кількох томах Commons ───────────────────────────────────────────
+def _parts(*items):
+    import json
+    return json.dumps([{"file": f, "size": s, "pages": 1, "url": "", "sum": summed}
+                       for f, s, summed in items], ensure_ascii=False)
+
+
+def test_both_volumes_of_one_case_are_taken(space):
+    """🔴 Справа у двох томах бралась половиною: `commons_title` — лише
+    найбільший том, а реєстр знав обидва (ДАХмО 315-1-7300, 06.10.2026)."""
+    row = _row(commons_title="X Частина 1.pdf", commons_kind="volumes",
+               commons_parts=_parts(("X Частина 1.pdf", 9, True),
+                                    ("X Частина 2.pdf", 8, True)))
+    p = T._plan_from("DAHMO", "315", "1", "7300", "", row)
+    assert p["parts"] == ["X Частина 1.pdf", "X Частина 2.pdf"]
+
+
+def test_variants_of_one_content_give_only_the_biggest_file(space):
+    """Різні файли ОДНОГО змісту — не томи: брати один, як і рахує обсяг."""
+    row = _row(commons_title="X.pdf", commons_kind="variants",
+               commons_parts=_parts(("X.pdf", 9, True), ("X витяг.pdf", 1, False)))
+    assert T._plan_from("DAHMO", "315", "1", "1", "", row)["parts"] == ["X.pdf"]
+    assert T._plan_from("DAHMO", "315", "1", "1", "",
+                        _row(commons_title="X.pdf"))["parts"] == ["X.pdf"]
