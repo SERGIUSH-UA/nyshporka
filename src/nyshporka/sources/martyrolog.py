@@ -168,7 +168,8 @@ def parse_results(body: str) -> ResultPage:
 
     🔴 Сторінка без «Результатів пошуку» і без «пошук не дав результатів» — це
     НЕ нуль, а змінена розмітка: віддати тут `[]` означало б доповісти «такої
-    особи в базі немає» з розбору, який нічого не прочитав.
+    особи в базі немає» з розбору, який нічого не прочитав. Те саме — коли
+    сайт назвав число знайдених, а рядків не розібрано жодного.
     """
     if _ZERO in body:
         return ResultPage(total=0, rows=[], pages=0)
@@ -192,6 +193,10 @@ def parse_results(body: str) -> ResultPage:
         rn = _text(it.group("rn")).removeprefix("р.н.").strip()
         rows.append(Row(id=it.group("id"), name=_text(it.group("name"), sep=""),
                         born=_blank(rn), archive=archive, archive_id=archive_id))
+    if total and not rows:
+        raise SourceError(f"база каже «знайдено {total}», а рядків видачі не "
+                          f"розібрано жодного — розмітка рядків змінилась, і нуль "
+                          f"із неї був би вигаданим")
     pages = max((int(p) for p in _PAGE_LINK.findall(block)), default=1)
     return ResultPage(total=total, rows=rows, pages=max(pages, 1),
                       by_archive=by_archive)
@@ -346,6 +351,8 @@ class MartyrologSource:
         p = 1
         while len(rows) < min(limit, first.total) and p < first.pages:
             p += 1
+            # Порожня наступна сторінка вже відмовляє в `parse_results`
+            # (`total` є, рядків немає) — обрізка не видасться за весь перелік.
             rows += parse_results(self.page(self._query(ln, fn, sn, p=p))).rows
         return ResultPage(total=first.total, rows=rows[:limit], pages=first.pages,
                           by_archive=first.by_archive)
@@ -371,9 +378,15 @@ class MartyrologSource:
         return dict(self._coverage)
 
     def catalog_source(self) -> tuple[str, dict[str, Any]]:
-        """Живий запит; обсяг бази — з лічильників сайту, якщо вже їх бачили."""
+        """Живий запит; обсяг бази — з лічильників сайту, якщо вже їх бачили.
+
+        🔴 `by_archive` — знаменник нуля: покриття нерівне на два порядки, і
+        «немає» в архіві з кількома сотнями осіб важить інакше, ніж у тому,
+        що дав десятки тисяч.
+        """
         total = sum(self._coverage.values()) or None
         return "live", {"taken": "", "rows": total, "host": HOST,
+                        "by_archive": dict(self._coverage) or None,
                         "scope": "особи, репресовані 1920–1950-х, у 27 архівах"}
 
     def search(self, q: str, *, limit: int = 30) -> list[Hit]:
@@ -388,7 +401,7 @@ class MartyrologSource:
         """
         ln, _fn, _sn = split_query(q)
         if not ln:
-            return []
+            return Hits()
         res = self.results(q, limit=limit)
         if not res.rows:
             return Hits()

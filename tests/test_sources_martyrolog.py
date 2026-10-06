@@ -67,7 +67,7 @@ class _Site:
         if "id=93267" in url:
             return _R(_page("card_93267"))
         if "id=" in url:
-            return _R(_page("card_80346"))
+            return _R(_page("card_113944"))
         if "p=3" in url:
             return _R(_page("list_p3"))
         if "p=2" in url:
@@ -125,9 +125,9 @@ def test_card_gives_case_shifra_and_fields() -> None:
 
 
 def test_card_with_letter_prefixed_fond() -> None:
-    c = parse_card(_page("card_80346"), "80346")
-    assert c.shifra == "ф. Р-7641, оп. 3, спр. 468"
-    assert c.get("Стаття звинувачення") == "54-10 УК УССР"
+    c = parse_card(_page("card_113944"), "113944")
+    assert c.shifra == "ф. Р-7641, оп. 5, спр. 709"
+    assert c.get("Вирок") == "8 р. ВТТ" and c.archive == "ДА Сумської області"
 
 
 def test_sidebar_counts_add_up_to_the_announced_total() -> None:
@@ -152,9 +152,9 @@ def test_search_opens_each_card_and_says_it_is_truncated() -> None:
     h = hits[0]
     assert h.source == "martyrolog" and h.ref == "person:115638"
     assert h.url.endswith("um.php?id=115638")
-    # Двійник на цю адресу віддає картку 80346 — шифра береться з картки.
-    assert h.shifra == "ДА Сумської області ф. Р-7641, оп. 3, спр. 468"
-    assert h.fond == "Р-7641" and h.years == "1894–?"
+    # Двійник на цю адресу віддає картку 113944 — шифра береться з картки.
+    assert h.shifra == "ДА Сумської області ф. Р-7641, оп. 5, спр. 709"
+    assert h.fond == "Р-7641" and h.years == "1895–?"
     # Знаменник: показано 4 з 139, і по яких архівах решта.
     cut = getattr(hits, "truncated", "")
     assert "4 з 139" in cut and "ЦДАГОУ 29" in cut
@@ -256,3 +256,43 @@ def test_general_find_does_not_ask_the_person_base(monkeypatch: pytest.MonkeyPat
                                            by_address=False))
     assert asked == ["Шевчук"]
     assert env.data["coverage"]["searched"] == ["martyrolog"]
+
+
+def test_rows_markup_change_is_not_a_zero() -> None:
+    """🔴 Сайт назвав «знайдено 139», а рядків не розібрано — це змінена
+    розмітка рядків, а не «такої особи в базі немає»."""
+    body = _page("list_p1").replace('class="rn"', 'class="birth"')
+    with pytest.raises(SourceError):
+        parse_results(body)
+
+
+def test_coverage_by_archive_reaches_the_envelope(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Покриття бази по архівах — знаменник «немає»; доти його не бачив ні
+    агент, ні термінал."""
+    from nyshporka import ops_builtin as OB
+
+    src = _src(_Site())
+
+    class _Reg:
+        def get(self, sid: str) -> object:
+            return src if sid == "martyrolog" else None
+
+        def with_cap(self, _cap: str) -> list[object]:
+            return [src]
+
+        def all(self) -> list[object]:
+            return [src]
+
+    monkeypatch.setattr(OB, "_registry", lambda: _Reg())
+    env = OB.catalog_search(OB.CatalogSearchArgs(q="Шевчук", source="martyrolog", limit=2))
+    (basis,) = env.data["coverage"]["basis"]
+    per = basis["by_archive"]
+    assert len(per) == 27 and sum(per.values()) == 170468
+    said = " ".join(w.text for w in env.warnings)
+    assert "фонд цілком" not in said, "порада про фонд — не для бази осіб"
+
+
+def test_empty_query_returns_hits() -> None:
+    from nyshporka.sources.base import Hits
+
+    assert isinstance(_src(_Site()).search("  "), Hits)

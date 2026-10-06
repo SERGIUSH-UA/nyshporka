@@ -392,6 +392,15 @@ def find(q: str = typer.Argument(..., help="село, прізвище, слов
     console.print(f"\n[muted]знайдено {len(hits)} · шукали в: "
                   + escape(f"{', '.join(cov.get('searched') or []) or '—'}"
                            + (f" ({basis})" if basis else "")) + "[/muted]")
+    # Покриття іменної бази по архівах — число, без якого «немає» не сказати.
+    for b in cov.get("basis") or []:
+        per = b.get("by_archive") or {}
+        if per:
+            spread = ", ".join(f"{k} {v}" for k, v in sorted(
+                per.items(), key=lambda kv: -int(kv[1])))
+            console.print(escape(f"  покриття {b['source']}: {sum(per.values())} "
+                                 f"осіб у {len(per)} архівах — {spread}"),
+                          style="muted")
     # 🔴 Що доводить нуль кожного джерела. «Немає в назвах альбомів» і «немає в
     # тексті книг» — однаковий 0 у лічильнику й різні висновки у звіті. На
     # повний нуль той самий перелік уже стоїть у попередженні нижче, тож рядки

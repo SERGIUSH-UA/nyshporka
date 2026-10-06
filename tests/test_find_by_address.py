@@ -157,3 +157,12 @@ def test_archium_finds_a_case_by_its_numbers(tmp_path: Path):
     got = src.find_case("230", "1", "43")
     assert len(got) == 1 and got[0].ref == "file:555"
     assert src.find_case("230", "1", "9999") == []
+
+
+def test_a_person_base_is_not_a_gap_in_the_address_answer(space):
+    """Іменна база (`explicit_only`) про справу за шифрою не знає й загальним
+    пошуком не питається — у `unavailable` вона стояла з хибною причиною
+    «шукає лише за текстом заголовка»."""
+    got = _call("315-1-8433")
+    why = {u["source"] for u in got["data"]["coverage"]["unavailable"]}
+    assert "martyrolog" not in why, why

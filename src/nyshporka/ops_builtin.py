@@ -815,6 +815,10 @@ def _address_answer(a: CatalogSearchArgs, addr: Any) -> Envelope | None:
     for src in picked:
         if src is None:
             continue
+        if not a.source and getattr(src, "explicit_only", False):
+            # Іменна база про справи за шифрою не знає й загальним пошуком не
+            # питається — її відсутність тут не прогалина знаменника.
+            continue
         if not supports(src, "address"):
             # 🔴 Названо причину, а не пропущено мовчки. Покажчик шукає живим
             # запитом лише по назві справи, тож спитати його про шифру нічим —
@@ -979,8 +983,12 @@ def catalog_search(a: CatalogSearchArgs) -> Envelope:
                 entry.update(kind="зібраний на місці", taken=str(meta.get("taken") or ""),
                              rows=meta.get("rows"), regions=meta.get("regions") or None)
             elif kind == "live":
-                # Обсяг живої бази — теж знаменник, коли джерело його знає.
+                # Обсяг живої бази — теж знаменник, коли джерело його знає; для
+                # іменної бази — ще й по архівах (`by_archive`), бо покриття
+                # нерівне, і нуль у різних архівах доводить різне.
                 entry.update(kind="живий запит", rows=meta.get("rows"))
+                if meta.get("by_archive"):
+                    entry["by_archive"] = dict(meta["by_archive"])
             else:
                 # Каталогу немає, а джерело все одно шукало: ARCHIUM без зрізу йде
                 # живим пошуком сайту. Мовчання про це ховало, на чому стоїть нуль.
@@ -1106,8 +1114,12 @@ def _warn_once(env: Envelope, *, hits: list[dict[str, object]],
         where = "; ".join(
             f"{t['source']} ({t.get('why') or 'стеля ' + str(t['ceiling'])})"
             for t in truncated)
-        parts.append(f"видача обрізана — перелік неповний: {where}. "
-                     f"Звужуй запит або бери фонд цілком")
+        # Порада про фонд — лише для обрізки за стелею: джерело, що саме
+        # пояснило обрізку (`why`), уже сказало, як звузити, і «бери фонд
+        # цілком» для бази осіб безглузде.
+        own = all(t.get("why") for t in truncated)
+        parts.append(f"видача обрізана — перелік неповний: {where}"
+                     + ("" if own else ". Звужуй запит або бери фонд цілком"))
     if unavailable and not hits:
         code = code or "partial_denominator"
         where = "; ".join(f"{u['source']}: {u['why']}" for u in unavailable)
