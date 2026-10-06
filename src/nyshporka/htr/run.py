@@ -73,6 +73,10 @@ class Plan:
     #: здогад з імені теки — а це різниця між прочитаною книгою й текою
     #: правдоподібного сміття.
     script_trust: str = "unknown"
+    #: Що зроблено з боковими кадрами PDF (`htr.bokovi`): рядок для людини,
+    #: порожньо — нічого. 🔴 Мусить дійти до людини й агента: без нього
+    #: виправлення йшло мовчки, і ніхто не знав, яку справу дочитувати.
+    bokovi: str = ""
     script_why: str = ""
 
     #: 🔴 Файл-лок GPU — властивість теки виходу, а не аргумент виклику.
@@ -145,7 +149,8 @@ class Plan:
                 "model": self.model.name, "voice": self.voice.name if self.voice else "",
                 "voices": [v.name for v in self.voices],
                 "script": self.script, "frames": self.frames,
-                "script_trust": self.script_trust, "script_why": self.script_why}
+                "script_trust": self.script_trust, "script_why": self.script_why,
+                "bokovi": self.bokovi}
 
     # ── шарди ────────────────────────────────────────────────────────────────
     def shards(self, workers: int = 1, *, device: str = "", dynamic: bool = True,
@@ -570,12 +575,13 @@ def plan(case_dir: str | Path, *, out_dir: str | Path = "", script: str = "",
     if not case.is_dir():
         raise ReadError(f"теки немає: {case}")
     frames = count_frames(case)
+    bokom = ""
     if frames:
-        # Кадри, які версія до 0.27 розгорнула з повернутих сторінок PDF боком.
-        from nyshporka.htr import pdfpage
+        # Кадри, які версія до 0.27 розгорнула з повернутих сторінок PDF боком,
+        # і прочитане з них: відкладається, і читання дочитує ці сторінки.
+        from nyshporka.htr import bokovi
 
-        if pdfpage.case_pdfs(case):
-            pdfpage.vytiahnuty_kadry(case, lyshe_bokovi=True)
+        bokom = bokovi.rozvernuty(case).message()
     if not frames:
         # 🔴 Справа з Commons приходить одним PDF, і `look` бачив «один PDF, 321
         # стор.», а `read` казав «зображень немає» — людині лишалось розбирати
@@ -662,7 +668,7 @@ def plan(case_dir: str | Path, *, out_dir: str | Path = "", script: str = "",
                 frames=frames, python=rep.python, runner=runner, voice=voice,
                 extra_voices=extra, seg_cache=seg, gpu_lock=lock_dir / "gpu.lock",
                 script_trust=trust, script_why=why, seg_why=seg_why,
-                seg_ready=seg_ready)
+                seg_ready=seg_ready, bokovi=bokom)
 
 
 def shard_env(workers: int, *, cores: int = 0) -> dict[str, str]:

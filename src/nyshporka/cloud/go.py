@@ -320,8 +320,13 @@ def _kadry_z_pdf(d: Path, on_line: Any = None) -> None:
 
     if not pdfpage.case_pdfs(d):
         return
-    # Кадри є — лише бокові з версії до 0.27 (`pdfpage._pending`).
-    pdfpage.vytiahnuty_kadry(d, on_line=on_line, lyshe_bokovi=bool(frames_in(d)))
+    if frames_in(d):
+        # Кадри є — лише бокові з версії до 0.27 і прочитане з них.
+        from nyshporka.htr import bokovi
+
+        bokovi.rozvernuty(d, on_line=on_line)
+        return
+    pdfpage.vytiahnuty_kadry(d, on_line=on_line)
 
 
 def resolve_case(arg: str, on_line: Any = None) -> CaseRef:

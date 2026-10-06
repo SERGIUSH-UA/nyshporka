@@ -94,11 +94,10 @@ def test_bokovyi_kadr_staroi_versii_rozghortaietsia_nanovo(tmp_path: Path) -> No
     """
     syryi = _bokovyi_pdf(tmp_path / "a.pdf")
     (tmp_path / "0001.jpg").write_bytes(syryi)
-    ryadky: list[str] = []
-    assert pdfpage.vytiahnuty_kadry(tmp_path, on_line=ryadky.append) == 1
+
+    assert pdfpage.vytiahnuty_kadry(tmp_path) == 1
     w, h = Image.open(tmp_path / "0001.jpg").size
     assert h > w, f"кадр мусить стояти прямо, а маємо {w}×{h}"
-    assert any("боком" in r for r in ryadky), "людині сказано, що перечитати"
     # Виправлений кадр — уже не відбиток вади: повтор нічого не робить.
     assert pdfpage.vytiahnuty_kadry(tmp_path) == 0
 
@@ -242,3 +241,42 @@ def test_robitnyk_vpav_storinky_dorendereni(tmp_path: Path, monkeypatch) -> None
     assert pdfpage.vytiahnuty_kadry(tmp_path, jobs=2, on_line=said.append) == 6
     assert len(list(tmp_path.glob("*.jpg"))) == 6
     assert any("впав" in s for s in said)
+
+
+def test_prochytane_z_bokovoho_kadru_vidkladaietsia(tmp_path: Path, monkeypatch) -> None:
+    """🔴 Розгорнути кадр — пів справи: текст, рамки й кеш сегментації,
+    зняті з бокового кадру, лишались би, і «Читати» не перечитало б нічого."""
+    import json
+
+    from nyshporka.htr import bokovi
+
+    case = tmp_path / "sprava"
+    case.mkdir()
+    syryi = _bokovyi_pdf(case / "a.pdf")
+    (case / "0001.jpg").write_bytes(syryi)
+    run = tmp_path / "progin"
+    run.mkdir()
+    (run / "0001.txt").write_text("три рядки", encoding="utf-8")
+    (run / "0001.lines.json").write_text("[]", encoding="utf-8")
+    (run / "_htr_meta.json").write_text(json.dumps(
+        {"done": True, "pages": {"0001.jpg": {"lines": 3}}}), encoding="utf-8")
+    seg = tmp_path / "seg"
+    seg.mkdir()
+    (seg / "0001.o0.c400.seg.json.gz").write_bytes(b"x")
+    (seg / "0002.o0.c400.seg.json.gz").write_bytes(b"x")
+    monkeypatch.setattr(bokovi, "_runs_of", lambda _c, _r: [run])
+    monkeypatch.setattr(bokovi, "_local_seg", lambda _c, _r: [seg])
+
+    said: list[str] = []
+    rep = bokovi.rozvernuty(case, on_line=said.append)
+
+    assert rep.frames == ["0001.jpg"] and rep.runs == ["progin"] and rep.pages_aside == 1
+    assert not (run / "0001.txt").exists() and (run / "_bokom" / "0001.txt").exists()
+    assert (run / "_bokom" / "0001.lines.json").exists()
+    meta = json.loads((run / "_htr_meta.json").read_text(encoding="utf-8"))
+    assert meta["pages"] == {} and meta["done"] is False
+    assert not (seg / "0001.o0.c400.seg.json.gz").exists()
+    assert (seg / "0002.o0.c400.seg.json.gz").exists(), "чужу сторінку не чіпати"
+    assert said and "дочитає" in said[0]
+    # Повтор: кадр уже прямий — нічого не робиться й нічого не кажеться.
+    assert bokovi.rozvernuty(case).message() == ""

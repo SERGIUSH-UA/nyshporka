@@ -1114,6 +1114,8 @@ def read(
                   f"письмо {p.script} · {p.model.name}"
                   + "".join(f" + {v.name}" for v in p.voices))
     console.print(f"  [muted]{p.out_dir}[/muted]")
+    if p.bokovi:
+        console.print(f"  ⚠ {p.bokovi}", style="warn", markup=False)
     # 🔴 Вже прочитане цією моделлю не перечитується мовчки: прогін коштує
     # ночі, а на диску вже лежить те саме. Судить мета поруч із текстом, а не
     # реєстр: реєстр міг не побачити прогону, що скінчився хвилину тому.

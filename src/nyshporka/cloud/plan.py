@@ -248,12 +248,13 @@ def build(case_dir: str | Path, *, backend: str = "ssh", target: str = "",
     if not case.is_dir():
         raise PlanError(f"теки немає: {case}")
     frames = frames_in(case)
+    bokom = ""
     if frames:
-        # Кадри, які версія до 0.27 розгорнула з повернутих сторінок PDF боком.
-        from nyshporka.htr import pdfpage
+        # Кадри, які версія до 0.27 розгорнула з повернутих сторінок PDF боком,
+        # і прочитане з них (`htr.bokovi`).
+        from nyshporka.htr import bokovi
 
-        if pdfpage.case_pdfs(case):
-            pdfpage.vytiahnuty_kadry(case, lyshe_bokovi=True)
+        bokom = bokovi.rozvernuty(case).message()
     if not frames:
         # Та сама справа-PDF, що й у локальному читанні (`htr/run.py:plan`):
         # розгортаємо в кадри тут, у доведеній нумерації. Вбудовані JPEG
@@ -337,7 +338,7 @@ def build(case_dir: str | Path, *, backend: str = "ssh", target: str = "",
 
     stem = out_name or run_name(case, key)
     base_out = workspace().htr_reports / stem
-    warnings: list[str] = []
+    warnings: list[str] = [bokom] if bokom else []
     # 🔴 Головну теку зайняло читання ІНШОГО письма — цей прогін іде в свою,
     # навіть коли модель бойова для свого письма (`foreign_reading`).
     other = "" if (reread or out_dir) else foreign_reading(base_out, weights)

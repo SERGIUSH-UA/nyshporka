@@ -257,7 +257,8 @@ def _render_tasks(tasks: list[Task], width: int) -> int:
 
 
 def vytiahnuty_kadry(case_dir: Path, width: int = DEFAULT_WIDTH, *, jobs: int = 0,
-                     on_line: Any = None, lyshe_bokovi: bool = False) -> int:
+                     on_line: Any = None, lyshe_bokovi: bool = False,
+                     vypravleni: list[str] | None = None) -> int:
     """Розгорнути PDF справи в кадри `0001.jpg…` поруч. Повертає, скільки записано.
 
     🔴 Нумерація — рівно та, що доводить `mapping`: щільна `1..N` підряд по
@@ -284,7 +285,8 @@ def vytiahnuty_kadry(case_dir: Path, width: int = DEFAULT_WIDTH, *, jobs: int = 
     сторінки дорендерюються тут же, в цьому процесі.
 
     `lyshe_bokovi` — для теки, де кадри вже є: лише переписати бокові, а
-    відсутніх не дорендерювати. Кадри там могли прийти й не з цього PDF
+    відсутніх не дорендерювати. `vypravleni` дістає імена переписаних
+    бокових кадрів — прочитане з них відкладає `htr.bokovi`. Кадри там могли прийти й не з цього PDF
     (плівка FS поруч із PDF Commons), і повне розгортання задвоїло б справу.
     """
     import subprocess
@@ -333,9 +335,12 @@ def vytiahnuty_kadry(case_dir: Path, width: int = DEFAULT_WIDTH, *, jobs: int = 
     _render_tasks(tasks, width)
     written = sum(1 for _pdf, _i, dest, _m, _s in tasks if Path(dest).exists())
     say(f"розгорнуто {written} кадрів за {time.perf_counter() - t0:.0f} с")
-    if bokom:
-        say(f"⚠ {bokom} кадрів лежали боком — їх розгорнула версія до 0.27; "
-            f"розгорнуто наново. Прочитане з цих сторінок раніше варто перечитати")
+    if bokom and vypravleni is not None:
+        # Розгорнутий наново кадр уже не той, що був: розмір інший за розмір
+        # сирого образу. Що з ним робити далі (прочитане, кеш) — `htr.bokovi`.
+        vypravleni += [Path(dest).name for _p, _i, dest, _m, stale in tasks
+                       if stale and Path(dest).is_file()
+                       and Path(dest).stat().st_size != stale]
     return written
 
 
