@@ -282,12 +282,19 @@ def _storinka_jpeg(page: Any, width: int) -> bytes:
     ≥0.8 — 55.7 проти 55.0 %, пік карти той самий (сегментатор усе одно
     зводить кадр до 1800), а сторінка вищої роздільності читалась на 19 %
     довше й важила вдвічі більше в заливці.
+
+    🔴 Байти як є — лише коли PDF кладе образ без повороту: сторінка без
+    `/Rotate` і матриця без обертання чи дзеркала. Фото з телефона лежить у
+    PDF боком (4032×3024), а прямо його ставить `/Rotate 90` сторінки; сирі
+    байти дали б рушію аркуш на боці. Так ДАК 312-1-51, 53, 55, 57
+    (05.10.2026) прочитались по 3–9 рядків на сторінку замість ~60. Рендер
+    `/Rotate` враховує.
     """
     import pypdfium2 as pdfium
 
     images = list(page.get_objects(filter=[pdfium.raw.FPDF_PAGEOBJ_IMAGE],
                                    max_depth=1))
-    if len(images) == 1:
+    if len(images) == 1 and _bez_povorotu(page, images[0]):
         try:
             if images[0].get_filters() == ["DCTDecode"]:
                 raw = bytes(images[0].get_data(decode_simple=True))
@@ -300,6 +307,17 @@ def _storinka_jpeg(page: Any, width: int) -> bytes:
     buf = io.BytesIO()
     pil.convert("RGB").save(buf, format="JPEG", quality=92)
     return buf.getvalue()
+
+
+def _bez_povorotu(page: Any, image: Any) -> bool:
+    """Чи кладе PDF образ на сторінку прямо: без `/Rotate`, повороту й дзеркала."""
+    try:
+        if page.get_rotation() % 360:
+            return False
+        a, b, c, d, _e, _f = image.get_matrix().get()
+    except Exception:
+        return False
+    return b == 0 and c == 0 and a > 0 and d > 0
 
 
 def render(case_dir: Path, frames: list[str], page: str,

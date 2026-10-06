@@ -44,6 +44,31 @@ def test_kadry_z_pdf_bez_perestysnennia(tmp_path: Path) -> None:
     assert m.locate(3) == (tmp_path / "a.pdf", 2)
 
 
+def test_povernuta_storinka_renderytsia_a_ne_bokom(tmp_path: Path) -> None:
+    """Фото з телефона лежить у PDF боком, прямо його ставить `/Rotate 90`.
+
+    ДАК 312-1-51: сирі байти дали рушію аркуш на боці — 3 рядки на сторінку.
+    """
+    buf = io.BytesIO()
+    Image.new("RGB", (600, 400), (120, 120, 120)).save(buf, format="JPEG")
+    doc = pdfium.PdfDocument.new()
+    page = doc.new_page(600, 400)
+    img = pdfium.PdfImage.new(doc)
+    img.load_jpeg(io.BytesIO(buf.getvalue()), inline=True)
+    img.set_matrix(pdfium.PdfMatrix().scale(600, 400))
+    page.insert_obj(img)
+    page.gen_content()
+    page.set_rotation(90)
+    doc.save(str(tmp_path / "a.pdf"))
+    doc.close()
+
+    assert pdfpage.vytiahnuty_kadry(tmp_path) == 1
+    kadr = (tmp_path / "0001.jpg").read_bytes()
+    assert kadr != buf.getvalue(), "повернуту сторінку не можна віддавати сирими байтами"
+    w, h = Image.open(io.BytesIO(kadr)).size
+    assert h > w, f"кадр мусить стояти, як у PDF (портрет), а маємо {w}×{h}"
+
+
 def test_dochytuie_a_ne_pochynaie_znovu(tmp_path: Path) -> None:
     _pdf_zi_skanamy(tmp_path / "a.pdf", 2)
     (tmp_path / "0001.jpg").write_bytes(b"vzhe")
