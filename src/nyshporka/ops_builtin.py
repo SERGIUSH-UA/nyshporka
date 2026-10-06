@@ -3425,7 +3425,7 @@ def read_plan(a: ReadArgs) -> Envelope:
     except ReadError as exc:
         return fail(str(exc))
     env = ok({"plan": p.as_dict()})
-    if p.bokovi:
+    if getattr(p, "bokovi", ""):
         # Кадри PDF, що лежали боком, розгорнуто наново, а прочитане з них
         # відкладено: «Читати» дочитає ці сторінки (`htr.bokovi`).
         env.warn("pdf_sideways_fixed", p.bokovi, ALERT)
