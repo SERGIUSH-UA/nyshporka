@@ -549,6 +549,64 @@ def _skills() -> Check:
                  "лишиться як є")
 
 
+def _skill_listing() -> Check:
+    """Чи бачить агент описи скілів Нишпорки — чи їх відкинув бюджет переліку.
+
+    🔴 Скіл без опису агент сам не обирає, а Claude Code відкидає описи
+    найрідше вживаних скілів, коли перелік більший за бюджет (1% вікна). Щойно
+    оновлені скіли Нишпорки — саме найрідше вживані. Деталі й джерела —
+    `skills.listing`. Налаштувань людини не правимо: лише кажемо, що змінити.
+    """
+    from nyshporka.skills import listing as L
+
+    lst = L.measure()
+    if not any(e.ours for e in lst.entries):
+        return Check("Перелік скілів", "ok", "скілів Нишпорки в переліку немає")
+    total, ours = lst.total, lst.ours
+
+    def n(x: int) -> str:
+        return f"{x:,}".replace(",", " ")
+
+    head = f"≈ {n(total)} симв. описів у {len(lst.entries)} скілах, з них Нишпорки ≈ {n(ours)}"
+    top = lst.foreign_top()
+    names = ", ".join(f"{e.name} ({n(e.chars)})" for e in top)
+    raise_budget = ("`\"skillListingBudgetFraction\": 0.03` у ~/.claude/settings.json "
+                    "(більше вікна під перелік)")
+    fix = ("у Claude Code: `/skills` → непотрібним Space до `name-only` чи `off`"
+           + (f" (найбільші сторонні: {names})" if names else "")
+           + f"; або {raise_budget}. Точно бачить `/context` (рядок Skills) і "
+           "`/doctor` Claude Code")
+    why = ("Тоді Claude Code відкидає описи найрідше вживаних скілів — нові скіли "
+           "Нишпорки першими, і агент не бачить, коли їх кликати")
+    if lst.fixed_budget:
+        b = lst.fixed_budget
+        if total <= b:
+            return Check("Перелік скілів", "ok",
+                         f"{head} — у бюджеті {n(b)} (SLASH_COMMAND_TOOL_CHAR_BUDGET)")
+        return Check("Перелік скілів", "warn",
+                     f"{head} — більше за бюджет {n(b)} "
+                     f"(SLASH_COMMAND_TOOL_CHAR_BUDGET). {why}", fix)
+    small, big = lst.budgets()[L.WINDOWS[0]], lst.budgets()[L.WINDOWS[-1]]
+    if total <= small:
+        return Check("Перелік скілів", "ok",
+                     f"{head} — вміщається навіть у вікні 200K (бюджет ≈ {n(small)})")
+    tail = (f"у вікні 1M (≈ {n(big)}) вміщається" if total <= big
+            else f"не вміщається й у вікні 1M (≈ {n(big)})")
+    if ours > small:
+        # Самі скіли Нишпорки більші за бюджет: сторонні тут ні до чого, і
+        # вимикати їх — не порада. Лишається більше вікна під перелік.
+        return Check("Перелік скілів", "warn",
+                     f"{head} — самі скіли Нишпорки більші за бюджет переліку "
+                     f"моделі з вікном 200K (≈ {n(small)}); {tail}. {why}. "
+                     f"Оцінка: вбудовані скіли Claude Code не враховано",
+                     f"для моделі з вікном 200K — {raise_budget}; "
+                     f"точно бачить `/context` (рядок Skills)")
+    return Check("Перелік скілів", "warn",
+                 f"{head} — більше за бюджет переліку для вікна 200K (≈ {n(small)}); "
+                 f"{tail}. {why}. Оцінка: вбудовані скіли Claude Code не враховано",
+                 fix)
+
+
 #: Бекенд оренди, про який доктор каже окремим словом: на нього веде типове
 #: `nysh cloud go`, тож «його немає» — це відповідь на питання, яке поставлять.
 RENT_DEFAULT = "vast"
@@ -738,7 +796,7 @@ def _queue() -> Check:
     return Check(name, "ok", pidsumok + (" · виконавець працює" if alive else ""))
 
 
-CHECKS = (_version, _skills, _python, _workspace, _cloud_sync, _disk, _profile,
+CHECKS = (_version, _skills, _skill_listing, _python, _workspace, _cloud_sync, _disk, _profile,
           _library, _cloud_pdfs, _chain, _queue, _decode_visible, _case_keys, _torch, _engines,
           _models, _rent)
 
