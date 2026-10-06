@@ -201,7 +201,7 @@ def test_advised_flags_exist_too() -> None:
                 if flag not in known:
                     # Шлях від кореня, а не `path.name`: файлів `cli.py` у
                     # пакеті сім, і саме одне ім'я змушувало шукати вручну.
-                    bad.append(f"{path.relative_to(SRC.parent)}: nysh {cmd} {flag}")
+                    bad.append(f"{path.relative_to(ROOT)}: nysh {cmd} {flag}")
     assert not bad, f"порада з неіснуючим прапорцем: {sorted(set(bad))}"
 
 
