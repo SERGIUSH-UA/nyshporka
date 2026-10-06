@@ -44,16 +44,14 @@
   .vitannia { flex-direction: column; text-align: center; }
 }
 
-/* Лічильник роботи в черзі — сидить на кнопці «Роботи».
-   ⚠ Обводка кольором тла, а не самий від'ємний відступ: значок стоїть ПОЗА
-   кнопкою (він іде після неї в розмітці), тож без неї рамка кнопки просвічувала
-   крізь бейдж і той виглядав обрізаним. Підйом угору — щоб він сів на кут, а не
-   перекривав підпис. */
+/* Лічильник роботи в черзі — поруч із кнопкою «Роботи», по центру рядка.
+   ⚠ Без підйому вгору: смуга підвкладок має `overflow-y: hidden` (інакше
+   прокрутка вбік давала б вертикальний повзунок), і піднятий бейдж зрізався
+   зверху (холодний прохід 07.10.2026: «лічильник обрізаний»). */
 #jobcount:not(:empty) {
   background: var(--accent-fill); color: var(--accent-ink); border-radius: var(--r-pill);
   padding: 0 .4rem; font-size: .7rem; font-weight: 700; line-height: 1.4;
-  margin-left: -.6rem; position: relative; top: -.5rem;
-  box-shadow: 0 0 0 2px var(--bg);
+  margin-left: -.8rem; align-self: center;
 }
 /* Мова й налаштування — праворуч, поряд із перемикачем теми. */
 .lang { margin-left: auto; background: none; border: 0; cursor: pointer;
@@ -656,3 +654,11 @@ details.more-filters > summary { cursor: pointer; color: var(--fg-3); font-size:
    синім браузерним кольором посеред теплої палітри. */
 #view a { color: var(--link); text-decoration: none; }
 #view a:hover { text-decoration: underline; }
+
+/* Бібліотека: рядок розгортає деталі з підписаними діями. */
+#view tr.lib-row { cursor: pointer; }
+#view tr.lib-row:hover > td { background: color-mix(in srgb, var(--honey) 6%, transparent); }
+#view tr.lib-more > td { background: var(--s-2); padding: .6rem .8rem; }
+#view tr.lib-more p { margin: .2rem 0; }
+.row-actions { display: flex; flex-wrap: wrap; gap: .4rem; }
+

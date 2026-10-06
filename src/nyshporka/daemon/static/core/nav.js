@@ -374,8 +374,21 @@ function caseLink(j) {
     t('jobs.case')}</button>` : '';
 }
 
-/** Година роботи для рядка: «19:38». */
-const hhmm = (sec) => (sec ? new Date(sec * 1000).toTimeString().slice(0, 5) : '');
+/**
+ * Коли робота завершилась: «19:38» сьогодні, «06.10 22:20» — раніше.
+ *
+ * 🔴 Сама година змішувала вчорашнє з сьогоднішнім: півдоби завершених робіт
+ * перетинає північ (холодний прохід 07.10.2026).
+ */
+function hhmm(sec) {
+  if (!sec) return '';
+  const d = new Date(sec * 1000);
+  const time = d.toTimeString().slice(0, 5);
+  if (d.toDateString() === new Date().toDateString()) return time;
+  const dd = String(d.getDate()).padStart(2, '0');
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  return `${dd}.${mm} ${time}`;
+}
 
 /**
  * Завершене — рядками під одним розкриттям, збої названо в заголовку.

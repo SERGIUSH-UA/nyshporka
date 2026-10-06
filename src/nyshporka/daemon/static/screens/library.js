@@ -43,6 +43,9 @@ let _libSeq = 0;
 /** Фасети малюються раз на вхід: їхні числа не залежать від фільтра. */
 let _libFacets = false;
 
+/** Рядки поточної сторінки за ключем — з них розгортаються деталі (`lib.more`). */
+let LIB_ROWS = new Map();
+
 /** Скільки сторінок під поточним фільтром — щоб «далі» не везла за край. */
 let LIB_PAGES = 1;
 
@@ -85,6 +88,7 @@ async function libLoad(full = false) {
   const rows = d.cases || [];
   const layers = (d.summary || {}).has_layers;
   LIB_PAGES = d.pages || 1;
+  LIB_ROWS = new Map(rows.map((r) => [r.key, r]));
 
   if (!full) {
     // Каркас на місці — міняється лише вміст. `swapHtml` тримає висоту
@@ -303,11 +307,17 @@ function libWork(r, layers) {
   if (fz !== 'none') {
     const open = Math.max((r.fuzzy_hits || 0) - (r.fuzzy_reviewed || 0), 0);
     bits.push(`<span title="${esc(t(`lib.fuzzy.${fz}`))}">${
-      { scanned: '🔎', swept: '🔎', reviewed: '🏁' }[fz] || '🔎'}</span>${
+      ic(fz === 'reviewed' ? 'flag' : 'search', 'ic-sm')}</span>${
       open ? `<b class="open">${open}</b>` : ''}`);
   }
-  if (r.canon_facts) bits.push(`📖${esc(r.canon_facts)}`);
-  if (r.pages_noted) bits.push(`🗒${esc(r.pages_noted)}`);
+  if (r.canon_facts) {
+    bits.push(`<span title="${esc(t('lib.work.canon'))}">${ic('book-open', 'ic-sm')}${
+      esc(r.canon_facts)}</span>`);
+  }
+  if (r.pages_noted) {
+    bits.push(`<span title="${esc(t('lib.work.noted'))}">${ic('note', 'ic-sm')}${
+      esc(r.pages_noted)}</span>`);
+  }
   return bits.join(' ');
 }
 
@@ -320,7 +330,7 @@ function libRow(r, layers) {
     ? `<span class="badge ${r.verdict === 'clan_found' ? 'known' : ''}"
          title="${esc(r.verdict_note || '')}">${esc(t(`lib.verdict.${r.verdict}`))}</span>`
     : '';
-  return `<tr>
+  return `<tr class="lib-row" data-act="lib.more" data-arg="${esc(r.key)}">
     <td class="mono">${disk} ${esc(r.shifra || r.key || '')}</td>
     <td>${esc((r.title || '').slice(0, 80))}</td>
     <td class="num">${esc(years)}</td>
@@ -345,6 +355,34 @@ function libRow(r, layers) {
         title="${esc(t('lib.verdict.set'))}">${ic('pencil-line', 'ic-o ic-sm')}</button>
     </td>
   </tr>`;
+}
+
+/**
+ * Деталі справи під її рядком: повна назва, тека й ті самі дії — з підписами.
+ *
+ * 🔴 Доти клік по рядку не робив нічого, а дії стояли шістьма значками, чий
+ * зміст видно лише в підказці при наведенні — тобто ніде на телефоні
+ * (холодний прохід 07.10.2026: «прочитати» знайшлось лише в підказці). Значки
+ * в рядку лишаються для тих, хто їх знає; тут — те саме словами.
+ */
+function libMore(r) {
+  const btn = (act, arg, label) => `<button class="ctl-sm" data-act="${act}"
+    data-arg="${esc(arg)}">${label}</button>`;
+  const years = [r.year_from, r.year_to].filter(Boolean).join('–');
+  return `<tr class="lib-more"><td colspan="8">
+    <p><b>${esc(r.title || r.shifra || r.key || '')}</b>
+      ${years ? `<span class="muted"> · ${esc(years)}</span>` : ''}
+      ${r.place ? `<span class="muted"> · ${esc(r.place)}</span>` : ''}</p>
+    <p class="muted mono">${esc(r.key || '')}${r.path ? ` · ${esc(r.path)}` : ''}</p>
+    ${r.verdict_note ? `<p class="muted">${esc(r.verdict_note)}</p>` : ''}
+    <p class="row-actions">
+      ${r.path ? btn('lib.frames', r.path, `${ic('image', 'ic-sm')} ${t('lib.btn.frames')}`) : ''}
+      ${r.path ? btn('lib.read', r.path, `${ic('quill', 'ic-sm')} ${t('lib.btn.read')}`) : ''}
+      ${btn('lib.runs', r.key, `${ic('list', 'ic-sm')} ${t('lib.btn.runs')}`)}
+      ${btn('lib.find', r.key, `${ic('search', 'ic-sm')} ${t('lib.btn.find')}`)}
+      ${r.fond ? btn('lib.opys', r.key, `${ic('archive-box', 'ic-sm')} ${t('lib.btn.opys')}`) : ''}
+      ${btn('lib.verdict', r.key, `${ic('pencil-line', 'ic-sm')} ${t('lib.btn.verdict')}`)}
+    </p></td></tr>`;
 }
 
 /**
@@ -412,6 +450,18 @@ Object.assign(ACTIONS, {
 
 
   'lib.verdict': (_ev, elm) => libVerdictForm(elm.dataset.arg),
+
+  /** Розгорнути чи згорнути деталі справи під її рядком. */
+  'lib.more': (_ev, elm) => {
+    const next = elm.nextElementSibling;
+    if (next && next.classList && next.classList.contains('lib-more')) {
+      next.remove();
+      return undefined;
+    }
+    const r = LIB_ROWS.get(elm.dataset.arg);
+    if (r) elm.insertAdjacentHTML('afterend', libMore(r));
+    return undefined;
+  },
 
   'lib.verdict.save': async (_ev, elm) => {
     const kind = (el('lv-kind') || {}).value || '';

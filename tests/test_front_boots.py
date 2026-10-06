@@ -593,6 +593,8 @@ out.jobsLiveCardFirst = jl.indexOf('ЖИВЕ') >= 0 && jl.indexOf('ЖИВЕ') < 
 out.jobsDoneFolded = doneAt >= 0 && jl.indexOf('ГОТОВЕ') > doneAt
   && !/data-job="d1"/.test(jl);
 out.jobsFailNamed = /<details class="jobs-done" open>/.test(jl) && jl.includes('ПРИЧИНА');
+// Стан збою — словом, а не сирим кодом `error`.
+out.jobsErrorWorded = !/>\s*error\s*</.test(jl);
 globalThis.__JOBS = [];
 
 // ── картка справи: «Додати голос», «Змінити», форма схована під час читання ──
@@ -1084,7 +1086,7 @@ def test_job_notes_are_folded_not_plaques(probe) -> None:
 
 def test_jobs_live_first_finished_folded(probe) -> None:
     """Живе — карткою зі «Спинити»; завершене згорнуте; збій видно одразу."""
-    for key in ("jobsLiveCardFirst", "jobsDoneFolded", "jobsFailNamed"):
+    for key in ("jobsLiveCardFirst", "jobsDoneFolded", "jobsFailNamed", "jobsErrorWorded"):
         assert probe.get(key) is True, key
 
 
