@@ -69,6 +69,58 @@ def test_povernuta_storinka_renderytsia_a_ne_bokom(tmp_path: Path) -> None:
     assert h > w, f"кадр мусить стояти, як у PDF (портрет), а маємо {w}×{h}"
 
 
+def _bokovyi_pdf(path: Path) -> bytes:
+    """PDF з однією сторінкою-фото, поставленою прямо `/Rotate 90`; сирий JPEG."""
+    buf = io.BytesIO()
+    Image.new("RGB", (600, 400), (120, 120, 120)).save(buf, format="JPEG")
+    doc = pdfium.PdfDocument.new()
+    page = doc.new_page(600, 400)
+    img = pdfium.PdfImage.new(doc)
+    img.load_jpeg(io.BytesIO(buf.getvalue()), inline=True)
+    img.set_matrix(pdfium.PdfMatrix().scale(600, 400))
+    page.insert_obj(img)
+    page.gen_content()
+    page.set_rotation(90)
+    doc.save(str(path))
+    doc.close()
+    return buf.getvalue()
+
+
+def test_bokovyi_kadr_staroi_versii_rozghortaietsia_nanovo(tmp_path: Path) -> None:
+    """🔴 Версія до 0.27 поклала сирі байти повернутої сторінки — аркуш боком.
+
+    Наявні кадри не переписуються, тож без цього «перечитайте після
+    оновлення» читало б ті самі бокові кадри.
+    """
+    syryi = _bokovyi_pdf(tmp_path / "a.pdf")
+    (tmp_path / "0001.jpg").write_bytes(syryi)
+    ryadky: list[str] = []
+    assert pdfpage.vytiahnuty_kadry(tmp_path, on_line=ryadky.append) == 1
+    w, h = Image.open(tmp_path / "0001.jpg").size
+    assert h > w, f"кадр мусить стояти прямо, а маємо {w}×{h}"
+    assert any("боком" in r for r in ryadky), "людині сказано, що перечитати"
+    # Виправлений кадр — уже не відбиток вади: повтор нічого не робить.
+    assert pdfpage.vytiahnuty_kadry(tmp_path) == 0
+
+
+def test_chuzhyi_kadr_ne_perepysuietsia(tmp_path: Path) -> None:
+    """Кадр, що не є сирим образом сторінки, поклав не цей код — не чіпати."""
+    _bokovyi_pdf(tmp_path / "a.pdf")
+    chuzhyi = io.BytesIO()
+    Image.new("RGB", (600, 400), (10, 10, 10)).save(chuzhyi, format="JPEG")
+    (tmp_path / "0001.jpg").write_bytes(chuzhyi.getvalue())
+    assert pdfpage.vytiahnuty_kadry(tmp_path) == 0
+    assert (tmp_path / "0001.jpg").read_bytes() == chuzhyi.getvalue()
+
+
+def test_lyshe_bokovi_ne_dorendeniuie_vidsutni(tmp_path: Path) -> None:
+    """Тека з кадрами: інші кадри могли прийти не з цього PDF — не задвоювати."""
+    _pdf_zi_skanamy(tmp_path / "a.pdf", 2)
+    (tmp_path / "0001.jpg").write_bytes(b"vzhe")
+    assert pdfpage.vytiahnuty_kadry(tmp_path, lyshe_bokovi=True) == 0
+    assert not (tmp_path / "0002.jpg").exists()
+
+
 def test_dochytuie_a_ne_pochynaie_znovu(tmp_path: Path) -> None:
     _pdf_zi_skanamy(tmp_path / "a.pdf", 2)
     (tmp_path / "0001.jpg").write_bytes(b"vzhe")

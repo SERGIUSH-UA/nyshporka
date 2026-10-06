@@ -248,6 +248,12 @@ def build(case_dir: str | Path, *, backend: str = "ssh", target: str = "",
     if not case.is_dir():
         raise PlanError(f"теки немає: {case}")
     frames = frames_in(case)
+    if frames:
+        # Кадри, які версія до 0.27 розгорнула з повернутих сторінок PDF боком.
+        from nyshporka.htr import pdfpage
+
+        if pdfpage.case_pdfs(case):
+            pdfpage.vytiahnuty_kadry(case, lyshe_bokovi=True)
     if not frames:
         # Та сама справа-PDF, що й у локальному читанні (`htr/run.py:plan`):
         # розгортаємо в кадри тут, у доведеній нумерації. Вбудовані JPEG

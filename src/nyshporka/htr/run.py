@@ -570,6 +570,12 @@ def plan(case_dir: str | Path, *, out_dir: str | Path = "", script: str = "",
     if not case.is_dir():
         raise ReadError(f"теки немає: {case}")
     frames = count_frames(case)
+    if frames:
+        # Кадри, які версія до 0.27 розгорнула з повернутих сторінок PDF боком.
+        from nyshporka.htr import pdfpage
+
+        if pdfpage.case_pdfs(case):
+            pdfpage.vytiahnuty_kadry(case, lyshe_bokovi=True)
     if not frames:
         # 🔴 Справа з Commons приходить одним PDF, і `look` бачив «один PDF, 321
         # стор.», а `read` казав «зображень немає» — людині лишалось розбирати

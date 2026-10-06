@@ -159,24 +159,78 @@ def _jobs() -> int:
     return max(1, min(6, (os.cpu_count() or 2) - 2))
 
 
-def _pending(case_dir: Path, pdfs: list[Path]) -> list[tuple[str, int, str, float]]:
-    """Що ще не розгорнуто: `(PDF, сторінка з нуля, кадр, час PDF)` у порядку справи."""
+#: Завдання розгортання: PDF, сторінка з нуля, кадр, час PDF і розмір бокового
+#: кадру старої версії, який треба переписати (0 — кадру ще немає).
+Task = tuple[str, int, str, float, int]
+
+
+def _pending(case_dir: Path, pdfs: list[Path]) -> list[Task]:
+    """Що ще не розгорнуто — і що розгорнуто боком: завдання в порядку справи.
+
+    🔴 Наявний кадр переписується лише тоді, коли він байт у байт є сирим
+    образом повернутої сторінки: так його поклали версії до виправлення
+    `/Rotate` (`_storinka_jpeg`). Тоді рушій читав аркуш на боці — 3–9 рядків
+    замість ~60, і сама лише нова версія цього не виправила б: наявні кадри
+    не переписуються. Кадр, що не збігається з образом, лишається як є —
+    його поклав не цей код.
+    """
     counts = page_counts(pdfs)
     digits = max(4, len(str(sum(counts))))
-    out: list[tuple[str, int, str, float]] = []
+    out: list[Task] = []
     no = 0
     for path, n in zip(pdfs, counts, strict=True):
         mtime = path.stat().st_mtime
+        existing: list[tuple[int, Path]] = []
         for index in range(n):
             no += 1
             dest = case_dir / f"{no:0{digits}d}.jpg"
             if not dest.exists():
-                out.append((str(path), index, str(dest), mtime))
+                out.append((str(path), index, str(dest), mtime, 0))
+            else:
+                existing.append((index, dest))
+        if existing:
+            out += [(str(path), index, str(dest), mtime, size)
+                    for index, dest, size in _bokovi(path, existing)]
+    out.sort(key=lambda t: t[2])
     return out
 
 
-def _render_tasks(tasks: list[tuple[str, int, str, float]], width: int) -> int:
-    """Розгорнути сторінки в кадри — в ЦЬОМУ процесі. Повертає, скільки записано."""
+def _bokovi(pdf: Path, existing: list[tuple[int, Path]]) -> list[tuple[int, Path, int]]:
+    """Наявні кадри, що лежать сирим образом повернутої сторінки, і їхній розмір."""
+    import pypdfium2 as pdfium
+
+    out: list[tuple[int, Path, int]] = []
+    try:
+        doc = pdfium.PdfDocument(str(pdf))
+    except Exception:
+        return out
+    try:
+        for index, dest in existing:
+            page = doc[index]
+            images = list(page.get_objects(filter=[pdfium.raw.FPDF_PAGEOBJ_IMAGE],
+                                           max_depth=1))
+            if len(images) != 1 or _bez_povorotu(page, images[0]):
+                continue
+            try:
+                if images[0].get_filters() != ["DCTDecode"]:
+                    continue
+                raw = bytes(images[0].get_data(decode_simple=True))
+            except Exception:
+                continue
+            size = dest.stat().st_size
+            if size == len(raw) and dest.read_bytes() == raw:
+                out.append((index, dest, size))
+    finally:
+        doc.close()
+    return out
+
+
+def _render_tasks(tasks: list[Task], width: int) -> int:
+    """Розгорнути сторінки в кадри — в ЦЬОМУ процесі. Повертає, скільки записано.
+
+    Наявний кадр пропускається, крім бокового (`stale` — його розмір): той
+    переписується, поки на диску лежить саме він, а не вже виправлений.
+    """
     import os
 
     import pypdfium2 as pdfium
@@ -186,8 +240,9 @@ def _render_tasks(tasks: list[tuple[str, int, str, float]], width: int) -> int:
     done = 0
     docs: dict[str, Any] = {}
     try:
-        for pdf, index, dest, mtime in tasks:
-            if Path(dest).exists():
+        for pdf, index, dest, mtime, stale in tasks:
+            target = Path(dest)
+            if target.exists() and (not stale or target.stat().st_size != stale):
                 continue
             doc = docs.get(pdf)
             if doc is None:
@@ -202,7 +257,7 @@ def _render_tasks(tasks: list[tuple[str, int, str, float]], width: int) -> int:
 
 
 def vytiahnuty_kadry(case_dir: Path, width: int = DEFAULT_WIDTH, *, jobs: int = 0,
-                     on_line: Any = None) -> int:
+                     on_line: Any = None, lyshe_bokovi: bool = False) -> int:
     """Розгорнути PDF справи в кадри `0001.jpg…` поруч. Повертає, скільки записано.
 
     🔴 Нумерація — рівно та, що доводить `mapping`: щільна `1..N` підряд по
@@ -212,7 +267,9 @@ def vytiahnuty_kadry(case_dir: Path, width: int = DEFAULT_WIDTH, *, jobs: int = 
     Сторінка-скан із ОДНИМ вбудованим JPEG віддає його байти як є — без
     перестиснення, тобто без втрати дрібного скоропису; інша сторінка
     рендериться на `width` пікселів. Наявні кадри не переписуються: обірване
-    розгортання дочитується, а не починається наново.
+    розгортання дочитується, а не починається наново. Виняток — кадр, що лежить
+    сирим образом повернутої сторінки (`_pending`): його розгорнула версія до
+    0.27 боком, і він рендериться наново.
 
     🔴 Кадр бере час зміни свого PDF, а не мить розгортання. Ворота хмари
     (`cloud.frames.check_frames`) питають за часом кадрів, чи тека ще
@@ -225,6 +282,10 @@ def vytiahnuty_kadry(case_dir: Path, width: int = DEFAULT_WIDTH, *, jobs: int = 
     383 стор.) розгортались в один потік 212 і 208 с — половина всієї
     підготовки хмарного заходу. Робітник, що впав, нічого не ламає: його
     сторінки дорендерюються тут же, в цьому процесі.
+
+    `lyshe_bokovi` — для теки, де кадри вже є: лише переписати бокові, а
+    відсутніх не дорендерювати. Кадри там могли прийти й не з цього PDF
+    (плівка FS поруч із PDF Commons), і повне розгортання задвоїло б справу.
     """
     import subprocess
     import sys
@@ -234,9 +295,12 @@ def vytiahnuty_kadry(case_dir: Path, width: int = DEFAULT_WIDTH, *, jobs: int = 
     if not pdfs:
         return 0
     tasks = _pending(case_dir, pdfs)
+    if lyshe_bokovi:
+        tasks = [t for t in tasks if t[4]]
     if not tasks:
         return 0
     say = on_line or (lambda _s: None)
+    bokom = sum(1 for t in tasks if t[4])
     workers = min(jobs if jobs > 0 else _jobs(), max(1, len(tasks) // PARALLEL_MIN))
     t0 = time.perf_counter()
     say(f"розгортаю PDF у кадри: {len(tasks)} стор."
@@ -267,8 +331,11 @@ def vytiahnuty_kadry(case_dir: Path, width: int = DEFAULT_WIDTH, *, jobs: int = 
                 say(f"⚠ робітник розгортання впав ({err.strip()[-200:]}) — дорендерюю тут")
     # Що лишилось (один процес, малий PDF або робітник, що впав) — тут.
     _render_tasks(tasks, width)
-    written = sum(1 for _pdf, _i, dest, _m in tasks if Path(dest).exists())
+    written = sum(1 for _pdf, _i, dest, _m, _s in tasks if Path(dest).exists())
     say(f"розгорнуто {written} кадрів за {time.perf_counter() - t0:.0f} с")
+    if bokom:
+        say(f"⚠ {bokom} кадрів лежали боком — їх розгорнула версія до 0.27; "
+            f"розгорнуто наново. Прочитане з цих сторінок раніше варто перечитати")
     return written
 
 
@@ -317,7 +384,7 @@ def _bez_povorotu(page: Any, image: Any) -> bool:
         a, b, c, d, _e, _f = image.get_matrix().get()
     except Exception:
         return False
-    return b == 0 and c == 0 and a > 0 and d > 0
+    return bool(b == 0 and c == 0 and a > 0 and d > 0)
 
 
 def render(case_dir: Path, frames: list[str], page: str,

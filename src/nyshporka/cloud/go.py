@@ -318,8 +318,10 @@ def _kadry_z_pdf(d: Path, on_line: Any = None) -> None:
     from nyshporka.cloud.verify import frames_in
     from nyshporka.htr import pdfpage
 
-    if not frames_in(d) and pdfpage.case_pdfs(d):
-        pdfpage.vytiahnuty_kadry(d, on_line=on_line)
+    if not pdfpage.case_pdfs(d):
+        return
+    # Кадри є — лише бокові з версії до 0.27 (`pdfpage._pending`).
+    pdfpage.vytiahnuty_kadry(d, on_line=on_line, lyshe_bokovi=bool(frames_in(d)))
 
 
 def resolve_case(arg: str, on_line: Any = None) -> CaseRef:
