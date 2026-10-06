@@ -48,10 +48,12 @@ def test_tree_links_and_contacts_are_refused() -> None:
     assert "contact" in _rules({"kind": "about", "text": "тел. +380 67 123 45 67"})
 
 
-def test_the_engine_reading_is_checked_too() -> None:
+def test_tree_links_are_refused_even_in_a_reading() -> None:
+    """Текст документа не перевіряється на «родинне», але посилання на особу
+    дерева в документі бути не може — це завжди нотатка дослідника."""
     entry = {"kind": "reading", "page": "0031", "text": "Прухницкая",
-             "was": {"text": "мій дід Пухтицкій"}}
-    assert _rules(entry) == ["personal"]
+             "was": {"text": "див. [[Іван Коваль]]"}}
+    assert _rules(entry) == ["tree_links"]
 
 
 def test_research_fields_never_ride_along() -> None:
@@ -60,3 +62,43 @@ def test_research_fields_never_ride_along() -> None:
 
 def test_a_retraction_always_passes() -> None:
     assert check_note({"retracts": "abc", "kind": "note"}).passed
+
+
+@pytest.mark.parametrize("source", [
+    "правнук его Иван 5 лет",
+    "Отец наш Феодор просит",
+    "сестра моя Анна свидѣтельствую",
+    "братія наша и мой сын Петро",
+])
+def test_a_verified_reading_is_the_documents_own_words(source: str) -> None:
+    """🔴 Звірене читання — текст ДОКУМЕНТА: ревізії, прохання, свідчення."""
+    assert check_note({"kind": "reading", "page": "0031", "text": source,
+                       "was": {"text": source}}).passed
+
+
+@pytest.mark.parametrize("text", [
+    "Mój dziadek mieszkał w tej wsi",
+    "my great-grandfather was baptised here",
+    "тут жив мій син Петро",
+    "запис про мою дружину",
+])
+def test_family_notes_in_other_languages_and_kin(text: str) -> None:
+    assert _rules({"kind": "about", "text": text}) == ["personal"]
+
+
+def test_sheet_numbers_are_not_a_phone_but_a_labelled_number_is() -> None:
+    assert check_note({"kind": "about", "text": "аркуші 093 125 12 11 переплутані"}).passed
+    assert _rules({"kind": "about", "text": "тел. 093 125 12 11"}) == ["contact"]
+
+
+@pytest.mark.parametrize("entry", [
+    {"kind": "catalog-error", "field": {"a": 1}, "actually": "x"},
+    {"kind": "copy", "other": "x", "relation": ["a"]},
+    {"kind": "reading", "page": "мій прадід Іван", "text": "x"},
+    {"kind": "reading", "page": "0031", "text": "x", "line": {"run": "r", "line_no": "3"}},
+    {"kind": "about", "text": "x", "model": "my grandfather phone"},
+    {"kind": "about", "text": 5},
+])
+def test_malformed_fields_are_refused_by_name(entry: dict) -> None:
+    """Об'єкт замість рядка клав сторінку книги в 500 (перевірка 0.26.0)."""
+    assert "shape" in _rules(entry)

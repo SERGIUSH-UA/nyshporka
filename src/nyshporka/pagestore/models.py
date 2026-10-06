@@ -256,6 +256,8 @@ class Record(BaseModel):
 #: її відкриє, і їде в пул лише з явною позначкою `share`.
 NoteKind = Literal["about", "catalog-error", "copy", "reading", "note"]
 SHAREABLE_KINDS = frozenset({"about", "catalog-error", "copy", "reading"})
+NOTE_NEVER_SHARED = ("особистий запис (`note`) не віддається в пул ніколи; загальне знання "
+                     "про справу пиши як about / catalog-error / copy / reading")
 NoteReader = Literal["agent", "human", "agent+human"]
 CatalogField = Literal["title", "years", "shifra", "extent", "other"]
 CopyRelation = Literal["copy", "draft", "duplicate", "continuation", "original", "other"]
@@ -345,9 +347,11 @@ class CaseNote(BaseModel):
     @model_validator(mode="after")
     def _kind_fields(self) -> CaseNote:
         if self.kind == "note" and self.share:
-            raise ValueError("особистий запис (`note`) не віддається в пул ніколи; "
-                             "загальне знання про справу пиши як about / "
-                             "catalog-error / copy / reading")
+            # 🔴 Не відмова, а зняття позначки: файл, де така пара вже лежить
+            # (0.26.0 пропускав її через `note share`), мусить читатись — інакше
+            # не відкривається вся справа. Відмову людині дають команди
+            # (`NOTE_NEVER_SHARED`), а модель лише гарантує, що особисте не поїде.
+            self.share = False
         if self.retracts:
             return self                     # відкликання не несе змісту
         need: dict[str, tuple[str, ...]] = {

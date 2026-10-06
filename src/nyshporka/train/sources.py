@@ -206,7 +206,8 @@ def read_peter(spec: SourceSpec) -> Items:
 # ── вбудовані джерела простору ───────────────────────────────────────────────
 def read_gt(reg: S.Registry, *, include_unsure: bool = False,
             script: str = "cyrillic",
-            origins: tuple[str, ...] = ("run",)) -> Items:
+            origins: tuple[str, ...] = ("run",),
+            skip_cases: frozenset[str] = frozenset()) -> Items:
     """Ручні мітки наборів із роллю `train`, статус `ok` (і `unsure` за бажанням).
 
     `origins` — які набори брати: типово лише нарізку прогонів; набори з
@@ -223,6 +224,9 @@ def read_gt(reg: S.Registry, *, include_unsure: bool = False,
         if spec.role != "train" or (script and spec.script != script):
             continue
         if spec.origin not in origins:
+            continue
+        if spec.case and skip_cases and _case_key(spec.case) in skip_cases:
+            it.notes.append(f"{name}: справа {spec.case} — у holdout, її рядки в трен не йдуть")
             continue
         for (page, idx), rec in reg.marks(name).items():
             status = str(rec.get("status") or "")
@@ -245,10 +249,33 @@ def read_gt(reg: S.Registry, *, include_unsure: bool = False,
     return it
 
 
+def _case_key(case: str) -> str:
+    """Канонічний ключ справи; не розв'язалась — як записано."""
+    try:
+        from nyshporka.pagestore import store as PS
+
+        return str(PS.resolve_case(case).key)
+    except Exception:
+        return case.strip()
+
+
 def read_notes(reg: S.Registry, *, include_unsure: bool = False,
                script: str = "cyrillic") -> Items:
-    """Пари «кроп ↔ звірене оком» із наборів нотатника (`notebook`, `pool`)."""
-    return read_gt(reg, include_unsure=include_unsure, script=script, origins=NOTE_ORIGINS)
+    """Пари «кроп ↔ звірене оком» із наборів нотатника (`notebook`, `pool`).
+
+    🔴 Справи, з яких зроблено holdout, сюди не йдуть: звірені рядки тієї самої
+    справи в трені — витік, і holdout перестає міряти незнайоме.
+    """
+    holdout: set[str] = set()
+    for name in reg.names(hidden=True):
+        try:
+            spec = reg.load(name)
+        except S.SetError:
+            continue
+        if spec.role == "holdout" and spec.case:
+            holdout.add(_case_key(spec.case))
+    return read_gt(reg, include_unsure=include_unsure, script=script, origins=NOTE_ORIGINS,
+                   skip_cases=frozenset(holdout))
 
 
 def read_pseudo(reg: S.Registry, opts: PseudoOpts, *, manual: set[str],

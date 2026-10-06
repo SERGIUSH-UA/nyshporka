@@ -661,6 +661,18 @@ def _merge_case(dst: dict[str, Any], src: dict[str, Any]) -> dict[str, Any]:
         if isinstance(r, dict):
             recs.setdefault(_rid(r), r)
     out = {**src, **dst, "pages": dict(sorted(pages.items())), "records": list(recs.values())}
+    # Нотатник справи — журнал за uid: зливається об'єднанням, у порядку появи.
+    # Доти брався лише з одного файла, і записи другого губились без сліду
+    # (перевірка випуску 0.26.0).
+    notes: dict[str, Any] = {}
+    for n in [*(dst.get("notes") or []), *(src.get("notes") or [])]:
+        if isinstance(n, dict) and n.get("uid"):
+            notes.setdefault(str(n["uid"]), n)
+    if notes:
+        out["notes"] = list(notes.values())
+        out["version"] = max(int(dst.get("version") or 1), int(src.get("version") or 1), 2)
+    else:
+        out.pop("notes", None)
     return out
 
 
@@ -672,7 +684,7 @@ def _apply_pages(pl: Plan, root: Path) -> dict[str, int]:
     """
     from nyshporka.utils.atomic import atomic_write_text
 
-    overlap = {"page_notes": 0, "records": 0}
+    overlap = {"page_notes": 0, "records": 0, "case_notes": 0}
     # Злиття — у порядку плану: кілька старих файлів можуть сходитись в один.
     for m in pl.pages:
         src, dst = root / m.src, root / m.dst
@@ -687,6 +699,9 @@ def _apply_pages(pl: Plan, root: Path) -> dict[str, int]:
             overlap["records"] += len(
                 {_rid(r) for r in cur.get("records") or [] if isinstance(r, dict)}
                 & {_rid(r) for r in d.get("records") or [] if isinstance(r, dict)})
+            overlap["case_notes"] += len(
+                {str(n.get("uid")) for n in cur.get("notes") or [] if isinstance(n, dict)}
+                & {str(n.get("uid")) for n in d.get("notes") or [] if isinstance(n, dict)})
             d = _merge_case(cur, d)
             d["key"] = m.new_key
         dst.parent.mkdir(parents=True, exist_ok=True)
@@ -804,7 +819,7 @@ def _apply_profiles(p: Path) -> None:
 def _census(root: Path, pages_root: Path) -> dict[str, Any]:
     """Скільки людської праці лежить у сховищах — до і після переносу."""
     out: dict[str, Any] = {"pages_files": 0, "page_notes": 0, "records": 0,
-                           "legacy_page_keys": 0}
+                           "case_notes": 0, "legacy_page_keys": 0}
     if pages_root.is_dir():
         for f in pages_root.glob("*/*.json"):
             if _companion(f.name):
@@ -816,6 +831,7 @@ def _census(root: Path, pages_root: Path) -> dict[str, Any]:
             out["pages_files"] += 1
             out["page_notes"] += len(d.get("pages") or {})
             out["records"] += len(d.get("records") or [])
+            out["case_notes"] += len(d.get("notes") or [])
             out["legacy_page_keys"] += int(casekey.parse(d.get("key")) is None)
     for name, p, inner in (
             ("case_verdicts", root / "data" / "spotter" / "case_verdicts.json", "verdicts"),
@@ -846,7 +862,7 @@ def verify(before: dict[str, Any], after: dict[str, Any],
     """
     problems: list[str] = []
     overlap = overlap or {}
-    for k in ("page_notes", "records", "line_verdicts_items"):
+    for k in ("page_notes", "records", "case_notes", "line_verdicts_items"):
         want = before.get(k, 0) - overlap.get(k, 0)
         if after.get(k, 0) < want:
             problems.append(f"{k}: було {before.get(k)}, злилось {overlap.get(k, 0)}, "

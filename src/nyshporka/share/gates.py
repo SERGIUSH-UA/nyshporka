@@ -270,33 +270,100 @@ def _private_keys(node: Any) -> set[str]:
 #: Типи записів нотатника, які взагалі можуть їхати. `note` — особисте.
 NOTE_KINDS_SHARED = frozenset({"about", "catalog-error", "copy", "reading"})
 
-#: Текстові поля запису нотатника, які читає людина в пулі.
+#: Текстові поля, які пише САМ дослідник (його слова про справу).
 NOTE_TEXT_FIELDS = ("text", "archive_says", "actually", "other")
+
+#: Допустимі значення полів-переліків. 🔴 Перевіряються й тут: шаблон сторінки
+#: книги будує з них назви, і об'єкт замість рядка клав сторінку в 500
+#: (перевірка випуску 0.26.0).
+NOTE_FIELDS = frozenset({"title", "years", "shifra", "extent", "other"})
+NOTE_RELATIONS = frozenset({"copy", "draft", "duplicate", "continuation", "original", "other"})
+NOTE_CONFIDENCE = frozenset({"high", "medium", "low"})
+NOTE_READERS = frozenset({"agent", "human", "agent+human"})
+#: Сторінка й модель друкуються на сторінці книги — лише проста форма.
+_NOTE_PAGE_RE = re.compile(r"^[\w.\-]{1,64}$")
+_NOTE_MODEL_RE = re.compile(r"^[\w.\-:/@+]{0,64}$")
+NOTE_MAX_TEXT = 4000
 
 #: Назви родичів, які разом із присвійним займенником роблять запис особистим.
 _KIN = (r"(?:пра)*(?:дід\w{0,3}|діду\w*|баб\w{0,4}|бабус\w*|батьк\w*|батьков\w*|"
         r"тато|тата|татом|татові|мама|мами|мамі|маму|мамою|мати|матір\w*|матері|"
         r"предк\w*|предок|пращур\w*|рід|роду|родом|родин\w*|сім'\w+|сімʼ\w+|"
         r"дядьк\w*|дядь\w*|тітк\w*|тіт\w{0,2}|сестр\w*|брат\w{0,3}|"
-        r"дед\w{0,3}|бабушк\w*|отец|отца|мать|матери)")
-_MY = (r"(?:мій|моя|моє|мої|мого|моєї|моїй|моєму|моїх|моїм|"
-       r"наш|наша|наше|наші|нашого|нашої|наших|нашим|нашому|"
-       r"мой|моё|мои|моего|моей|моих)")
+        r"син\w{0,2}|дочк\w*|доньк\w*|донеч\w*|чолов\w*|дружин\w*|онук\w*|внук\w*|"
+        r"дед\w{0,3}|бабушк\w*|отец|отца|мать|матери|сын\w{0,2}|дочь|муж\w{0,2}|жена|"
+        # польська
+        r"(?:pra)*dziad\w*|(?:pra)*babc\w*|(?:pra)*bab\w{0,3}|ojc\w*|ojciec|matk\w*|"
+        r"syn\w{0,2}|córk\w*|brat\w{0,2}|siostr\w*|rodzin\w*|ród|rodu|przodk\w*|"
+        # англійська
+        r"(?:great-)*grand(?:father|mother|parents?)|father|mother|son|daughter|"
+        r"family|ancestors?)")
+_MY = (r"(?:мій|моя|моє|мої|мого|моєї|моїй|моєму|моїх|моїм|мою|"
+       r"наш|наша|наше|наші|нашого|нашої|наших|нашим|нашому|нашу|"
+       r"мой|моё|мои|моего|моей|моих|"
+       r"mój|moja|moje|mojego|mojej|moich|nasz|nasza|nasze|naszego|naszej|naszych|"
+       r"my|our)")
 #: 🔴 Займенник і родич — у будь-якому порядку й через одне слово: «мій дід»,
-#: «прабаба моя», «мого прадіда». Самий родич без займенника — опис джерела
-#: («дід записаний у ревізії»), і його ворота пропускають. Виняток —
-#: «прадід»/«прабаба» і далі вгору: в описі справи цих слів не буває, а в
-#: родинній нотатці вони стоять і без займенника («це прабаба Миколи»).
+#: «прабаба моя», «мого прадіда», «mój dziadek», «my grandfather». Самий родич
+#: без займенника — опис джерела («дід записаний у ревізії»), і його ворота
+#: пропускають. Виняток — «прадід»/«прабаба» і далі вгору: в описі справи цих
+#: слів не буває, а в родинній нотатці вони стоять і без займенника.
 _PERSONAL_RE = re.compile(
     rf"(?<!\w){_MY}(?:\s+\S+)?\s+{_KIN}(?!\w)|(?<!\w){_KIN}\s+(?:\S+\s+)?{_MY}(?!\w)"
-    r"|(?<!\w)пра(?:пра)*(?:дід|діду|баб|дед|бабушк|онук|внук)\w*",
+    r"|(?<!\w)пра(?:пра)*(?:дід|діду|баб|дед|бабушк|онук)\w*"
+    r"|(?<!\w)pra(?:pra)*(?:dziad|babc|bab)\w*",
     re.IGNORECASE)
 _EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
-#: 🔴 Лише форма телефону, а не «десять цифр підряд»: роки й шифри через
-#: дефіс («1850-1860 1870», «904-24-54») дали б хибну відмову.
+#: 🔴 Телефон — лише з ознакою телефону: «+380 …» або «тел./моб./viber …» перед
+#: номером. Голі групи цифр — це номери аркушів і справ («аркуші 093 125 12 11»),
+#: і саме їх 0.26.0 відмовляв як телефон.
 _PHONE_RE = re.compile(
-    r"(?<![\w-])(?:\+\d{1,3}[\s-]?\(?\d{2,3}\)?|\(?0\d{2}\)?)"
-    r"[\s-]?\d{3}[\s-]?\d{2}[\s-]?\d{2}(?![\w-])")
+    r"\+\d{1,3}[\s\-()]*\d{2,3}[\s\-()]*\d{3}[\s-]?\d{2}[\s-]?\d{2}(?!\d)"
+    r"|(?:тел\.?|телефон\w*|моб\.?|мобільн\w*|tel\.?|phone|viber|вайбер|whatsapp)"
+    r"[\s:.\-]{0,4}\(?\d[\d\s\-()]{7,}\d",
+    re.IGNORECASE)
+
+
+def _shape(entry: dict[str, Any], v: Verdict) -> None:
+    """Форма полів: типи й переліки, які шаблон сторінки книги бере за даність."""
+    def bad(name: str, why: str) -> None:
+        v.refuse(f"поле «{name}»: {why}", rule="shape", field=name)
+
+    for name in (*NOTE_TEXT_FIELDS, "page", "model", "created", "uid", "supersedes"):
+        val = entry.get(name)
+        if val is not None and not isinstance(val, str):
+            bad(name, "має бути рядком")
+        elif isinstance(val, str) and len(val) > NOTE_MAX_TEXT:
+            bad(name, f"довше {NOTE_MAX_TEXT} знаків")
+    for name, allowed in (("field", NOTE_FIELDS), ("relation", NOTE_RELATIONS),
+                          ("confidence", NOTE_CONFIDENCE), ("reader", NOTE_READERS)):
+        val = entry.get(name)
+        if val is not None and (not isinstance(val, str) or val not in allowed):
+            bad(name, f"одне з {', '.join(sorted(allowed))}")
+    page = entry.get("page")
+    if isinstance(page, str) and page and not _NOTE_PAGE_RE.match(page):
+        bad("page", "ім'я сторінки — латиниця, цифри, крапка, дефіс")
+    model = entry.get("model")
+    if isinstance(model, str) and not _NOTE_MODEL_RE.match(model):
+        bad("model", "ім'я моделі — без пробілів і довше 64 знаків не буває")
+    unc = entry.get("uncertain")
+    if unc is not None and not (isinstance(unc, list)
+                                and all(isinstance(x, str) and len(x) <= 200 for x in unc)
+                                and len(unc) <= 50):
+        bad("uncertain", "перелік слів")
+    line = entry.get("line")
+    if line is not None:
+        ok_line = (isinstance(line, dict) and isinstance(line.get("run", ""), str)
+                   and isinstance(line.get("line_no"), int) and line["line_no"] >= 1
+                   and (line.get("bbox") is None
+                        or (isinstance(line["bbox"], list) and len(line["bbox"]) == 4
+                            and all(isinstance(x, (int, float)) for x in line["bbox"]))))
+        if not ok_line:
+            bad("line", "{run, line_no ≥ 1, bbox із 4 чисел}")
+    was = entry.get("was")
+    if was is not None and not (isinstance(was, dict)
+                                and isinstance(was.get("text", ""), str)):
+        bad("was", "{run, text}")
 
 
 def check_note(entry: dict[str, Any]) -> Verdict:
@@ -305,6 +372,12 @@ def check_note(entry: dict[str, Any]) -> Verdict:
     🔴 Причина відмови названа поштучно, з підказкою, куди перенести
     особисте: загальне знання про справу людина хоче віддати, і голе «не
     пройшло» змусило б її або здатись, або вгадувати.
+
+    🔴 Звірене читання (`reading`) — дослівний текст ДОКУМЕНТА, а не слова
+    дослідника: «правнук его Иван», «Отец наш Феодор», «сестра моя Анна
+    свидѣтельствую» — звичайні рядки ревізій, прохань і свідчень. Тому
+    правила «родинне» й «телефон» до тексту читання не застосовуються; до
+    решти полів запису — так.
     """
     v = Verdict()
     if entry.get("retracts"):
@@ -318,19 +391,24 @@ def check_note(entry: dict[str, Any]) -> Verdict:
     if private:
         v.refuse(f"у записі робочі поля дослідника: {', '.join(private)}",
                  rule="private_keys", field="entry")
-    text = " ".join(str(entry.get(f) or "") for f in NOTE_TEXT_FIELDS)
+    _shape(entry, v)
+    own = [f for f in NOTE_TEXT_FIELDS if not (kind == "reading" and f == "text")]
+    words = " ".join(str(entry.get(f) or "") for f in own)
+    source = str(entry.get("text") or "") if kind == "reading" else ""
     was = entry.get("was")
     if isinstance(was, dict):
-        text += " " + str(was.get("text") or "")
-    if "[[" in text:
+        source += " " + str(was.get("text") or "")
+    shown = " ".join([words, source, str(entry.get("page") or ""),
+                      str(entry.get("model") or "")])
+    if "[[" in shown:
         v.refuse("у записі посилання на особу дерева (`[[…]]`) — це нотатка "
                  "дослідження, а не знання про справу", rule="tree_links", field="text")
-    if m := _PERSONAL_RE.search(text):
+    if m := _PERSONAL_RE.search(words):
         v.refuse(f"«{m.group(0)}» — це про вашу родину, а не про справу. Таке "
                  "пишіть окремим домашнім записом (`--kind note`), а в пул — лише "
                  "те, що корисне кожному, хто відкриє цю справу",
                  rule="personal", field="text")
-    if _EMAIL_RE.search(text) or _PHONE_RE.search(text):
+    if _EMAIL_RE.search(shown) or _PHONE_RE.search(words):
         v.refuse("у записі адреса пошти чи телефон", rule="contact", field="text")
     return v
 

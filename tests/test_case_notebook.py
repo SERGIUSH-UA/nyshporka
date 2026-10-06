@@ -33,9 +33,55 @@ def _raw(ref: S.CaseRef) -> dict:
 
 
 # ── модель ───────────────────────────────────────────────────────────────────
-def test_a_personal_note_cannot_be_marked_for_the_pool() -> None:
-    with pytest.raises(ValidationError, match="не віддається"):
-        CaseNote(kind="note", text="тут жив мій дід", share=True)
+def test_a_personal_note_never_carries_the_share_mark() -> None:
+    """Модель знімає позначку, а не відмовляє: файл, де така пара вже лежить
+    (0.26.0 пропускав її через `note share`), мусить читатись."""
+    assert CaseNote(kind="note", text="тут жив мій дід", share=True).share is False
+
+
+def test_a_case_with_a_broken_personal_entry_still_loads() -> None:
+    ref = _ref()
+    S.add_notes(ref, [CaseNote(kind="about", text="опис")])
+    p = S.case_path(ref)
+    raw = json.loads(p.read_text(encoding="utf-8"))
+    raw["notes"].append({"uid": "b" * 32, "kind": "note", "created": "2026-10-06T00:00:00+00:00",
+                         "text": "тут жив мій дід", "share": True})
+    p.write_text(json.dumps(raw, ensure_ascii=False), encoding="utf-8")
+    cf = S.load_case(ref)
+    assert [n.share for n in cf.notes] == [False, False]
+    assert NB.outgoing(cf) == []
+
+
+def test_splitting_moves_a_whole_chain_and_keeps_a_retraction_retracted() -> None:
+    src, dst = _ref(), S.CaseRef(key="DAVO/904/24/55", repo="DAVO", fond="904",
+                                  spr="55", opys="24")
+    S.annotate_pages(src, [PageNote(scan="0031.jpg", page_type="birth")])
+    wrong = CaseNote(kind="reading", page="0031", text="Хибно")
+    gone = CaseNote(kind="reading", retracts=wrong.uid)
+    a = CaseNote(kind="reading", page="0031", text="Петро")
+    b = CaseNote(kind="reading", page="0031", text="Петро Іванів", supersedes=a.uid)
+    mixed1 = CaseNote(kind="reading", page="0031", text="Іван")
+    mixed2 = CaseNote(kind="reading", page="0040", text="Іван Петрів", supersedes=mixed1.uid)
+    S.add_notes(src, [wrong, gone, a, b, mixed1, mixed2])
+    got = S.move_pages(src, dst, ["0031.jpg"])
+    assert got["notes"] == 4 and got["notes_kept"] == 1
+    moved = S.load_case(dst).notes
+    assert [n.text for n in NB.live(moved)] == ["Петро Іванів"], \
+        "відкликане ожило або заміна загубилась"
+    left = S.load_case(src).notes
+    assert {n.uid for n in left} == {mixed1.uid, mixed2.uid}, "ланцюжок через межу справ лишається"
+
+
+def test_rekey_merge_keeps_the_notes_of_both_files() -> None:
+    from nyshporka.cases.rekey import _merge_case
+
+    a = {"version": 2, "key": "K", "pages": {}, "records": [],
+         "notes": [{"uid": "a", "kind": "about", "text": "a"}]}
+    b = {"version": 1, "key": "K", "pages": {}, "records": [],
+         "notes": [{"uid": "b", "kind": "about", "text": "b"},
+                   {"uid": "a", "kind": "about", "text": "a"}]}
+    got = _merge_case(b, a)
+    assert [n["uid"] for n in got["notes"]] == ["b", "a"] and got["version"] == 2
 
 
 @pytest.mark.parametrize(("kw", "missing"), [

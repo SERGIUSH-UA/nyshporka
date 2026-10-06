@@ -73,6 +73,10 @@ def note_add(a: NoteAddArgs) -> Envelope:
     if a.kind == "reading":
         return fail("читання рядка пишеться через `note read`: йому потрібні "
                     "прогін, сторінка й номер рядка")
+    if a.kind == "note" and a.share:
+        from nyshporka.pagestore.models import NOTE_NEVER_SHARED
+
+        return fail(NOTE_NEVER_SHARED)
     try:
         ref = _ref(a.case)
         n = CaseNote.model_validate({
@@ -80,10 +84,28 @@ def note_add(a: NoteAddArgs) -> Envelope:
             "archive_says": a.archive_says, "actually": a.actually,
             "other": a.other, "relation": a.relation or None, "page": a.page,
             "share": a.share, "reader": a.reader, "model": a.model,
-            "author": a.author, "supersedes": a.supersedes})
+            "author": a.author, "supersedes": _full_uid(ref, a.supersedes)})
     except (ValidationError, ValueError) as exc:
         return fail(str(exc))
     return _written(ref, store.add_notes(ref, [n]), [n])
+
+
+def _full_uid(ref: Any, prefix: str) -> str:
+    """Префікс uid (як друкує `note list`) → повний uid свого запису справи.
+
+    Порожньо — порожньо. Немає або неоднозначно — `ValueError` з поясненням.
+    """
+    prefix = prefix.strip()
+    if not prefix:
+        return ""
+    from nyshporka.pagestore import store
+
+    cf = store.load_case(ref)
+    hit = [n.uid for n in (cf.notes if cf else []) if n.uid.startswith(prefix)]
+    if len(hit) != 1:
+        raise ValueError(f"запису «{prefix}» у нотатнику справи "
+                         + ("немає" if not hit else "не один — дайте довший префікс"))
+    return hit[0]
 
 
 def _written(ref: Any, report: Any, notes: list[Any]) -> Envelope:
@@ -148,8 +170,8 @@ def note_read(a: NoteReadArgs) -> Envelope:
             "confidence": a.confidence or None,
             "uncertain": [w.strip() for w in a.uncertain.split(",") if w.strip()],
             "share": a.share, "reader": a.reader, "model": a.model,
-            "author": a.author, "supersedes": a.supersedes})
-    except ValidationError as exc:
+            "author": a.author, "supersedes": _full_uid(ref, a.supersedes)})
+    except (ValidationError, ValueError) as exc:
         return fail(str(exc))
     env = _written(ref, store.add_notes(ref, [n]), [n])
     if env.ok and got["bbox"] is None:
@@ -261,6 +283,18 @@ def _rewrite(case: str, uids: list[str], make: Any, *, skip: Any,
         if chain:
             made = made.model_copy(update={"uid": _new_uid(), "created": _utcnow(),
                                            "supersedes": n.uid})
+        # 🔴 `model_copy` валідаторів не кличе: особистий запис із позначкою
+        # «до віддачі» лягав у файл, і після цього справа не читалась зовсім
+        # (перевірка випуску 0.26.0). Тому кожен змінений запис проходить
+        # модель заново — відмова тут, а не в наступному читанні.
+        if made.kind == "note" and made.share:
+            from nyshporka.pagestore.models import NOTE_NEVER_SHARED
+
+            return fail(f"{n.uid[:8]}: {NOTE_NEVER_SHARED}")
+        try:
+            made = type(made).model_validate(made.model_dump())
+        except ValueError as exc:
+            return fail(f"{n.uid[:8]}: {exc}")
         new.append(made)
     if missing:
         return fail(f"чинних своїх записів не знайдено (або префікс неоднозначний): "
@@ -332,14 +366,31 @@ def note_push(a: NotePushArgs) -> Envelope:
     tok = upload.token()
     if not tok:
         return fail("немає ключа Супряги: nysh share login")
-    try:
-        got = upload._request("POST", f"{catalog.base_url(a.base)}/notes",
-                              body=body, auth=tok)
-    except upload.UploadError as exc:
-        return fail(str(exc))
+    # 🔴 Пачками: пул приймає до 500 записів за запит і відмовляє ЦІЛОМУ запиту,
+    # якщо їх більше. Справа з сотнями звірених рядків інакше не віддавалась би
+    # зовсім. Переглянуті аркуші — лише з першою пачкою.
+    got: dict[str, Any] = {}
+    for i in range(0, max(len(entries), 1), PUSH_BATCH):
+        part = {**body, "entries": entries[i:i + PUSH_BATCH],
+                "pages": body["pages"] if i == 0 else []}
+        try:
+            one = upload._request("POST", f"{catalog.base_url(a.base)}/notes",
+                                  body=part, auth=tok)
+        except upload.UploadError as exc:
+            if not got:
+                return fail(str(exc))
+            got.setdefault("failed_batches", []).append(str(exc))
+            continue
+        for k, v in one.items():
+            if isinstance(v, list):
+                got[k] = list(got.get(k) or []) + v
+            elif k not in got:
+                got[k] = v
     crops = _send_crops(cf, got.get("need_crop") or [], base=catalog.base_url(a.base),
                         tok=tok)
     env = ok({**data, "pool": got, "crops": crops})
+    for f in got.get("failed_batches") or []:
+        env.warn("batch_failed", f"частина записів не пішла: {f}")
     for r in refused + list(got.get("refused") or []):
         why = r.get("why") or [r.get("text", "")]
         env.warn("gate", f"{str(r.get('uid', ''))[:8]}: {why[0] if why else ''}")
@@ -358,6 +409,9 @@ def note_push(a: NotePushArgs) -> Envelope:
 TRAINING_NOTICE = ("звірені рядки їдуть разом із кропом рядка; власник Нишпорки може "
                    "використати їх для навчання моделей розпізнавання. На сторінці "
                    "книги кропи не показуються й іншим не віддаються")
+
+#: Записів в одному запиті `note push`: пул приймає до 500.
+PUSH_BATCH = 400
 
 #: Стеля кропа: пул більшого не прийме.
 CROP_MAX_BYTES = 256 * 1024
@@ -442,13 +496,19 @@ def note_pull(a: NotePullArgs) -> Envelope:
                                      f"&shifra={quote(ref.shifra)}", auth=upload.token())
     except upload.UploadError as exc:
         return fail(str(exc))
+    cf = store.load_case(ref)
+    have = {n.uid for n in cf.notes} if cf else set()
     notes, bad = [], []
     for e in got.get("entries") or []:
+        if not isinstance(e, dict):
+            continue
         try:
-            notes.append(CaseNote.model_validate(_from_pool(e, base)))
+            notes.append(CaseNote.model_validate(_from_pool(e, base, known=have)))
         except ValueError as exc:
             bad.append(f"{str(e.get('uid', ''))[:8]}: {exc}")
     report = store.add_notes(ref, notes) if notes else None
+    if report is not None:
+        bad += [f"{str(x.get('uid', ''))[:8]}: {x.get('error')}" for x in report.errors]
     env = ok({"case": ref.key, "shifra": ref.shifra, "book": got.get("book"),
               "received": len(notes), "added": report.added if report else [],
               "known": report.merged if report else [],
@@ -458,11 +518,21 @@ def note_pull(a: NotePullArgs) -> Envelope:
     return env
 
 
-def _from_pool(e: dict[str, Any], base: str) -> dict[str, Any]:
-    """Запис пулу → наш запис: поля білого списку + походження + прив'язка."""
+def _from_pool(e: dict[str, Any], base: str, *,
+               known: set[str] | None = None) -> dict[str, Any]:
+    """Запис пулу → наш запис: поля білого списку + походження + прив'язка.
+
+    🔴 Пул віддає порожні поля як `null` (`"supersedes": null`), а модель їх не
+    приймає — тож порожнє відкидається. І заміна лишається лише тоді, коли
+    замінений запис уже лежить у нас: пул віддає тільки чинні записи, без
+    предків, і заміна невідомого означала б відмову всього запису.
+    """
     from nyshporka.pagestore.notebook import WIRE_FIELDS
 
-    out = {k: e[k] for k in WIRE_FIELDS if k in e}
+    out = {k: e[k] for k in WIRE_FIELDS if e.get(k) not in (None, "", [], {})}
+    if out.get("supersedes") and out["supersedes"] not in (known or set()):
+        out.pop("supersedes")
+    out.pop("retracts", None)
     alignment = "text-only"
     line = out.get("line") if isinstance(out.get("line"), dict) else None
     if line and line.get("run"):

@@ -172,3 +172,52 @@ def test_the_root_cli_does_not_load_the_page_store_on_import():
     res = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
                          encoding="utf-8", check=True)
     assert res.stdout.strip().splitlines()[-1] == "[]", res.stdout
+
+
+def test_pull_takes_entries_as_the_live_pool_sends_them(case, monkeypatch):
+    """🔴 Живий пул шле порожні поля як null і заміни невідомих нам записів —
+    0.26.0 відкидав через це кожен запис (перевірка випуску)."""
+    from nyshporka.share import upload
+
+    entry = {"id": 9, "by": "igor_m", "uid": "e" * 32, "kind": "about",
+             "created": "2026-10-06T00:00:00+00:00", "text": "Метрика 1834–1836",
+             "supersedes": "0" * 32, "retracts": None, "model": None, "at": "x"}
+    plain = {**entry, "uid": "d" * 32, "supersedes": None}
+    monkeypatch.setattr(upload, "_request",
+                        lambda *a, **k: {"book": "x", "entries": [entry, plain]})
+    got = _run("note", "pull", CASE)
+    assert sorted(got["added"]) == ["d" * 32, "e" * 32]
+    texts = [n["text"] for n in _run("note", "list", CASE, "--from", "pool")["notes"]]
+    assert texts == ["Метрика 1834–1836", "Метрика 1834–1836"]
+
+
+def test_sharing_a_personal_entry_is_refused_and_the_case_stays_readable(case):
+    uid = _run("note", "add", CASE, "--kind", "note", "--text", "тут жив мій дід")["notes"][0]["uid"]
+    assert "не віддається" in _fail("note", "share", CASE, uid[:8])
+    assert len(_run("note", "list", CASE)["notes"]) == 1
+
+
+def test_supersedes_takes_the_short_prefix_list_prints(case):
+    uid = _run("note", "add", CASE, "--kind", "about", "--text", "v1")["notes"][0]["uid"]
+    got = _run("note", "add", CASE, "--kind", "about", "--text", "v2", "--supersedes", uid[:8])
+    assert got["notes"][0]["supersedes"] == uid
+    assert [n["text"] for n in _run("note", "list", CASE)["notes"]] == ["v2"]
+
+
+def test_push_goes_in_batches(case, monkeypatch):
+    from nyshporka import ops_notebook as ON
+    from nyshporka.share import upload
+
+    for i in range(5):
+        _run("note", "add", CASE, "--kind", "about", "--text", f"опис {i}", "--share")
+    calls: list[int] = []
+
+    def fake(method, url, *, body=None, auth=""):
+        calls.append(len(body["entries"]))
+        return {"book": "x", "accepted": [e["uid"] for e in body["entries"]], "need_crop": []}
+
+    monkeypatch.setattr(ON, "PUSH_BATCH", 2)
+    monkeypatch.setattr(upload, "_request", fake)
+    monkeypatch.setattr(upload, "token", lambda: "t0k")
+    got = _run("note", "push", CASE, "--no-pages")
+    assert calls == [2, 2, 1] and len(got["pool"]["accepted"]) == 5

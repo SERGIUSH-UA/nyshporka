@@ -628,24 +628,68 @@ def move_pages(src: CaseRef, dst: CaseRef, scans: list[str]) -> dict[str, int]:
     # Читання рядка прив'язане до кадру, тож їде разом із ним. Ключ — стем:
     # у прогоні сторінка зветься «0031», у сховищі — «0031.JPG».
     stems = {Path(s).stem.casefold() for s in want}
-    reads = [n for n in cf.notes if n.page and Path(n.page).stem.casefold() in stems]
+    reads, kept = _notes_to_move(cf.notes, stems)
     if not notes and not recs and not reads:
-        return {"pages": 0, "records": 0}
+        return {"pages": 0, "records": 0, "notes": 0, "notes_kept": kept}
     if notes:
         annotate_pages(dst, notes)
     if recs:
         add_records(dst, recs)
+    moved: set[str] = set()
     if reads:
-        add_notes(dst, reads)
+        rep = add_notes(dst, reads)
+        # 🔴 Зі старої справи прибирається лише те, що в новій справді лягло:
+        # відмовлений запис, прибраний «про всяк випадок», зникав з обох файлів.
+        moved = set(rep.added) | set(rep.merged)
     rids = {r.rid for r in recs}
-    uids = {n.uid for n in reads}
+    uids = moved
     with _lock(sp):
         cf = load_case(src) or cf
         cf.pages = {k: n for k, n in cf.pages.items() if k.casefold() not in want}
         cf.records = [r for r in cf.records if r.rid not in rids]
         cf.notes = [n for n in cf.notes if n.uid not in uids]
         _write(sp, cf)
-    return {"pages": len(notes), "records": len(recs)}
+    return {"pages": len(notes), "records": len(recs), "notes": len(uids),
+            "notes_kept": kept}
+
+
+def _notes_to_move(notes: list[CaseNote], stems: set[str]) -> tuple[list[CaseNote], int]:
+    """Записи нотатника, що їдуть разом із названими кадрами, — ЛАНЦЮЖКАМИ.
+
+    🔴 Ланцюжок (запис, його заміни й відкликання) переїжджає цілим або лишається
+    цілим. Порізаний по межі справ він ламався: відкликання без сторінки
+    лишалось у старій справі, і відкликане читання оживало в новій; заміна, чий
+    попередник лишився, не лягала в нову справу зовсім (перевірка випуску 0.26.0).
+    Ланцюжок, що зачіпає сторінки обох справ, лишається, де був, — і це число
+    повертається, а не губиться.
+    """
+    parent = {n.uid: n.uid for n in notes}
+
+    def root(u: str) -> str:
+        while parent[u] != u:
+            parent[u] = parent[parent[u]]
+            u = parent[u]
+        return u
+
+    for n in notes:
+        for link in (n.supersedes, n.retracts):
+            if link and link in parent:
+                parent[root(n.uid)] = root(link)
+    groups: dict[str, list[CaseNote]] = {}
+    for n in notes:
+        groups.setdefault(root(n.uid), []).append(n)
+    out: list[CaseNote] = []
+    kept = 0
+    for members in groups.values():
+        pages = [Path(m.page).stem.casefold() for m in members if m.page]
+        if not pages or not any(p in stems for p in pages):
+            continue
+        if all(p in stems for p in pages):
+            out += members
+        else:
+            kept += 1
+    order = {n.uid: i for i, n in enumerate(notes)}
+    return sorted(out, key=lambda n: order[n.uid]), kept
 
 
 # ── статус: «чи рендерити цю сторінку?» ──────────────────────────────────────

@@ -144,7 +144,7 @@ def test_pool_rows_become_a_pool_set_with_a_cursor(space: Path) -> None:
     assert got["cut"] == 1 and got["marked"] == 1
     reg = S.registry()
     spec = reg.load("pool-dazho-1-73-492")
-    assert (spec.origin, spec.cursor) == ("pool", 7)
+    assert spec.origin == "pool"
     assert reg.marks(spec.name)[("p0531", 152)]["by"] == "pool:igor_m"
     assert N.pool_cursor() == 7
 
@@ -196,3 +196,67 @@ def test_from_pool_without_owner_rights_says_so(space: Path, monkeypatch) -> Non
     monkeypatch.setattr(upload, "_request", nope)
     env = O.call("train.from_pool", {})
     assert not env.ok and "власника" in env.error
+
+
+def test_a_retracted_reading_leaves_the_set(space: Path) -> None:
+    from nyshporka.train import sets as S
+    from nyshporka.train import sources as SRC
+
+    uid = _read("Хибно прочитане")
+    first = _run("train", "from-notes", CASE)
+    _run("note", "retract", CASE, uid[:8])
+    again = _run("train", "from-notes", CASE)
+    assert again["withdrawn"] == 1
+    assert S.registry().marks(first["set"])[("0004", 2)]["status"] == "skip"
+    assert SRC.read_notes(S.registry()).rows == [], "відкликане не мусить іти в корпус"
+
+
+def _jpeg() -> bytes:
+    from PIL import Image
+
+    buf = io.BytesIO()
+    Image.new("L", (300, 40), 0).save(buf, "JPEG")
+    return buf.getvalue()
+
+
+def _row(cid: int, uid: str, book: str = "dazho-1-73-492") -> dict:
+    return {"cid": cid, "id": cid, "uid": uid, "book": book, "shifra": "ДАЖО",
+            "key": "DAZHO/1/73/492", "page": "p0531", "line": {"line_no": cid},
+            "text": f"рядок {cid}", "by": "igor_m"}
+
+
+def test_the_pool_cursor_stops_before_a_failed_crop(space: Path) -> None:
+    from nyshporka.train import notes as N
+
+    def fetch(uid: str) -> bytes:
+        if uid == "a" * 32:
+            raise OSError("обрив")
+        return _jpeg()
+
+    rows = [_row(1, "a" * 32), _row(2, "b" * 32), _row(3, "c" * 32, book="other")]
+    got = N.from_pool(rows, fetch)
+    assert got["cursor"] == 0 and N.pool_cursor() == 0, "збій на рядку 1 мусить повторитись"
+    again = N.from_pool([_row(1, "a" * 32)], lambda uid: _jpeg())
+    assert again["cursor"] == 1
+
+
+def test_a_line_withdrawn_in_the_pool_leaves_the_set(space: Path) -> None:
+    from nyshporka.train import notes as N
+    from nyshporka.train import sets as S
+
+    N.from_pool([_row(5, "f" * 32)], lambda uid: _jpeg())
+    got = N.from_pool([], lambda uid: _jpeg(), dead=["f" * 32])
+    assert got["withdrawn"] == 1
+    assert S.registry().marks("pool-dazho-1-73-492")[("p0531", 4)]["status"] == "skip"
+
+
+def test_a_holdout_case_never_feeds_the_notes_source(space: Path) -> None:
+    from nyshporka.train import sets as S
+    from nyshporka.train import sources as SRC
+
+    _read()
+    _run("train", "from-notes", CASE)
+    reg = S.registry()
+    reg.save(S.SetSpec(name="ho", case="ДАХмО 315-1-8433", role="holdout"))
+    it = SRC.read_notes(reg)
+    assert it.rows == [] and any("holdout" in n for n in it.notes)

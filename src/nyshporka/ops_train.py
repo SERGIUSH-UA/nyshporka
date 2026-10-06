@@ -674,6 +674,7 @@ def train_from_pool(a: FromPoolArgs) -> Envelope:
     base = catalog.base_url(a.base)
     after = N.pool_cursor() if a.since < 0 else a.since
     rows: list[dict[str, Any]] = []
+    dead: list[str] = []
     while True:
         try:
             got = upload._request("GET", f"{base}/admin/notes/crops?after={after}"
@@ -685,15 +686,17 @@ def train_from_pool(a: FromPoolArgs) -> Envelope:
             return fail(str(exc))
         batch = [r for r in got.get("rows") or [] if isinstance(r, dict)]
         rows += batch
+        dead = [str(u) for u in got.get("dead") or []]
         if len(batch) < a.limit:
             break
-        after = max(int(r.get("id") or 0) for r in batch)
+        after = max(int(r.get("cid") or r.get("id") or 0) for r in batch)
 
     def fetch(uid: str) -> bytes:
         return upload._get_bytes(f"{base}/admin/notes/crops/{uid}.jpg", auth=tok)
 
-    rep = N.from_pool(rows, fetch)
+    rep = N.from_pool(rows, fetch, dead=dead)
     env = ok(rep)
     if rep["failed"]:
-        env.warn("failed", f"{len(rep['failed'])} записів не взято — причини в `failed`")
+        env.warn("failed", f"{len(rep['failed'])} записів не взято — причини в `failed`; "
+                           "курсор став перед першим із них, тож повтор їх візьме")
     return env
