@@ -2024,7 +2024,7 @@ app.add_typer(pages_app, name="pages")
 
 # 📓 Нотатник справи: звірене оком, опис, помилки опису, копії — у тому самому
 # файлі сховища сторінок. Загальне знання їде в пул окремо від тексту.
-from nyshporka.pagestore.cli import app as note_app  # noqa: E402
+from nyshporka.note.cli import app as note_app  # noqa: E402
 
 app.add_typer(note_app, name="note")
 

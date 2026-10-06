@@ -136,13 +136,39 @@ def test_pull_marks_foreign_entries_and_drops_their_frame_box(case, monkeypatch)
     assert _run("note", "push", CASE, "--dry-run", "--no-pages")["entries"] == 0
 
 
-def test_import_eye_folder(case, tmp_path):
-    from tests.test_case_notebook import EYE_SAMPLE
+EYE_FILE = """\n# claude_eye — p0531 — звірено оком 2026-09-23
+# коригує: Писар DAZHO-1-73-492-pages
 
+[рядок 153] Андрей Терешкевъ(?) Грисюкъ 25
+  примітка: не «Гришкунь».
+"""
+
+
+def test_import_eye_folder(case, tmp_path):
     eye = tmp_path / "DAZHO-1-73-492-pages-claude_eye"
     eye.mkdir()
-    (eye / "p0531.txt").write_text(EYE_SAMPLE, encoding="utf-8")
+    (eye / "p0531.txt").write_text(EYE_FILE, encoding="utf-8")
     got = _run("note", "import-eye", str(eye), "--case", CASE, "--model", "claude-opus-5-5")
     assert (got["readings"], got["private"], got["added"]) == (1, 1, 2)
     assert _run("note", "import-eye", str(eye), "--case", CASE)["added"] == 0
     assert all(not n["share"] for n in _run("note", "list", CASE)["notes"])
+
+
+def test_the_root_cli_does_not_load_the_page_store_on_import():
+    """🔴 `nysh version` на машині без простору мусить працювати.
+
+    Сховище сторінок і бібліотека шукають простір уже на імпорті. Група команд
+    нотатника, підключена з `pagestore`, тягнула їх при старті кореневого CLI —
+    і чиста машина падала, не дійшовши до першої команди (CI релізу 0.25.0).
+    Тут, де простір знаходиться, `test_smoke` цього не бачить, тож перевіряється
+    сам ланцюжок імпортів в окремому процесі.
+    """
+    import subprocess
+    import sys
+
+    code = ("import sys, nyshporka.cli; "
+            "print([m for m in ('nyshporka.pagestore', 'nyshporka.library') "
+            "if m in sys.modules])")
+    res = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
+                         encoding="utf-8", check=True)
+    assert res.stdout.strip().splitlines()[-1] == "[]", res.stdout
