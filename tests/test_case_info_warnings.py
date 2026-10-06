@@ -37,3 +37,13 @@ def test_a_gap_names_the_engine_and_says_why(monkeypatch: pytest.MonkeyPatch) ->
     got = _warnings(monkeypatch, card)
     assert [w.text for w in got] == ["Дяк: цим рушієм справу ще не читали"]
     assert all(w.text.strip() for w in got), "порожня плашка ⚠ без слова"
+
+
+def test_no_note_where_the_card_offers_add_voice(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Модель для рушія є — на картці кнопка «Додати голос», примітка її не дублює."""
+    card = _card(covered={"pysar": {"model": "pysar_cyr_v19.pt"}},
+                 gaps=[{"kind": "missing", "engine": "diak",
+                        "why": "цим рушієм справу ще не читали"}],
+                 models={"pysar": "pysar_cyr_v19.pt", "diak": "diak_cyr_v6.safetensors"})
+    assert _warnings(monkeypatch, card) == []
+

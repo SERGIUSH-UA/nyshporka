@@ -3308,7 +3308,11 @@ def htr_case_info(a: CaseInfoArgs) -> Envelope:
     names = {str(e.get("id")): str(e.get("label") or e.get("id"))
              for e in card.get("engines") or []}
     for gap in card.get("gaps") or []:
-        if gap.get("kind") == "missing" and not card.get("covered"):
+        # Рушія бракує, а модель для нього є — на картці стоїть кнопка
+        # «Додати голос», і примітка поруч лише повторювала б її.
+        if gap.get("kind") == "missing" and (
+                not card.get("covered")
+                or str(gap.get("engine") or "") in (card.get("models") or {})):
             continue
         eid = str(gap.get("engine") or "")
         why = str(gap.get("why") or gap.get("text") or "")

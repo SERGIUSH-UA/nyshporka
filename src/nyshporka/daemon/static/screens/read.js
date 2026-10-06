@@ -1,7 +1,7 @@
 /** 🖋 Читання справи рушієм. */
 
 import { t } from '../core/strings.js';
-import { callOp, FINAL_STATES } from '../core/net.js';
+import { callOp, FINAL_STATES, TOKEN } from '../core/net.js';
 import { esc, el, setView, boxError, busyForm,
   renderWarnings, curGen, alive } from '../core/view.js';
 import { SCREENS, ACTIONS } from '../core/registry.js';
@@ -162,7 +162,38 @@ function nowItem(j) {
   return `<b>${esc(what)}</b>
     ${jobProgress(j)}
     ${j.error ? `<div class="warn err">${esc(j.error)}</div>` : ''}
-    <button data-act="jobs.cancel" data-job="${esc(j.id)}">${t('jobs.cancel')}</button>`;
+    <button data-act="jobs.cancel" data-job="${esc(j.id)}">${t('jobs.cancel')}</button>
+    <button data-act="read.change" data-job="${esc(j.id)}">${t('read.change')}</button>`;
+}
+
+/** Модель → рушій за префіксом імені ваг, як у маніфесті. */
+const engineOf = (model) => (/^pysar/.test(model) ? 'pysar'
+  : /^diak/.test(model) ? 'diak' : /^skryba/.test(model) ? 'skryba' : '');
+
+/**
+ * Розкласти голоси запуску: що йде спільним проходом, а що — окремим прогоном.
+ *
+ * Справу цим письмом уже почали (основний рушій має сторінки) — тоді кожен
+ * голос, якого бракує, іде окремим прогоном своєю моделлю: так він дістанеться
+ * ВСІМ сторінкам, а не лише недочитаним (див. `addVoiceButtons`).
+ */
+function splitVoices(c, args) {
+  const models = c.models || {};
+  const done = c.covered || {};
+  const mainEng = (args.script || c.script) === 'latin' ? 'skryba' : 'pysar';
+  const started = Number((done[mainEng] || {}).pages_done || 0) > 0;
+  const extra = [];
+  if (!started) return { args, extra };
+  const out = { ...args };
+  if (out.second_voice && models.diak) {
+    out.second_voice = false;
+    extra.push(models.diak);
+  }
+  if ((out.also || []).includes('latin') && models.skryba) {
+    out.also = [];
+    extra.push(models.skryba);
+  }
+  return { args: out, extra };
 }
 
 /**
@@ -200,21 +231,44 @@ function coverCell(c) {
   if (!ids.length) return `<span class="muted">${t('read.never')}</span>`;
   return ids.map((id) => `${eng(id)} <span class="mono">${esc(done[id].model || '')}</span>
     <span class="dim">${esc(done[id].pages_done || 0)} ${t('common.pages')}</span>`)
-    .join(' · ');
+    .join(' · ') + addVoiceButtons(c);
+}
+
+/**
+ * ➕ «Додати голос» — рушій, якого цій справі бракує, окремим прогоном.
+ *
+ * 🔴 Окремим, а не перезапуском із галочкою: рушій при відновленні пропускає
+ * сторінки, які вже є, тож доданий перезапуском голос дістався б лише решті, і
+ * про це ніщо не сказало б. Окремий прогін моделлю голосу лягає в ту саму
+ * теку голосу й доповнює рівно те, чого бракує (`pick.engine_models`).
+ */
+function addVoiceButtons(c) {
+  const models = c.models || {};
+  const names = Object.fromEntries((c.engines || []).map((e) => [e.id, e.label]));
+  const missing = (c.gaps || []).filter((g) => g.kind === 'missing' && models[g.engine]);
+  if (!missing.length) return '';
+  return `<div class="row-actions">${missing.map((g) => `<button class="ctl-sm"
+    data-act="read.addvoice" data-arg="${esc(models[g.engine])}">${ic('plus', 'ic-sm')}
+    ${t('read.addvoice')}: ${esc(names[g.engine] || g.engine)}</button>`).join(' ')}</div>`;
 }
 
 /** Форма запуску: просте зверху, важелі під розкриттям. */
 function readForm(c) {
   const engines = (c.engines || []).map((e) => e.label).filter(Boolean);
+  // «Змінити» живе читання: галочки — як у нього, а не за замовчуванням.
+  const prev = RD.prev || null;
+  const second = prev ? prev.second : true;
+  const alsoLatin = prev ? prev.latin : c.script === 'mixed';
   return `<form data-act="read.plan">
+    ${prev ? `<p class="muted">${t('read.change.why')}</p>` : ''}
     <div class="row">
-      <label><input type="checkbox" name="second_voice" value="1" checked>
+      <label><input type="checkbox" name="second_voice" value="1"${second ? ' checked' : ''}>
         ${t('read.voice.on')}</label>
       <span class="muted">${t('read.voice.why')}</span>
     </div>
     ${c.script === 'latin' ? '' : `<div class="row">
       <label><input type="checkbox" name="also_latin" value="1"
-        ${c.script === 'mixed' ? 'checked' : ''}> ${t('read.also.latin')}</label>
+        ${alsoLatin ? 'checked' : ''}> ${t('read.also.latin')}</label>
       <span class="muted">${t('read.also.why')}</span>
     </div>`}
     <details><summary>${t('read.expert')}</summary>
@@ -286,6 +340,9 @@ Object.assign(ACTIONS, {
         out_dir: String(fd.get('out_dir') || ''),
         model: String(fd.get('model') || ''),
       } };
+    const split = splitVoices(RD.card || {}, RD.args);
+    RD.args = split.args;
+    RD.extra = split.extra;
     el('hits').innerHTML = `<p class="muted">${t('common.loading')}</p>`;
     const env = await callOp('read.plan', RD.args);
     unlock();
@@ -301,6 +358,9 @@ Object.assign(ACTIONS, {
     ? `<tr><td>${t('read.voice')}</td><td class="mono">${esc(p.voices.join(' + '))}</td></tr>`
     : ''}
         <tr><td>→</td><td class="mono">${esc(p.out_dir)}</td></tr>
+        ${(RD.extra || []).length ? `<tr><td>${t('read.voice')}</td><td>
+          <span class="mono">${esc(RD.extra.join(' + '))}</span>
+          <span class="muted">— ${t('read.extra.why')}</span></td></tr>` : ''}
       </tbody></table>
       <button data-act="read.go">${t('read.go')}</button>`;
     return undefined;
@@ -334,8 +394,43 @@ Object.assign(ACTIONS, {
     // 🔴 Прогін триває годинами — і саме тому людину не можна викидати з
     // картки, яку вона щойно налаштувала. Поступ і «Спинити» стають на картці
     // (`readNow`), а план запуску прибирається: він уже виконується.
+    for (const model of RD.extra || []) {
+      // eslint-disable-next-line no-await-in-loop
+      await callOp('read.start', { case_dir: RD.case_dir, model, second_voice: false });
+    }
+    RD.extra = [];
+    RD.prev = null;
     el('hits').innerHTML = '';
-    return readNow();
+    return readCard();
+  },
+
+  /** ➕ Голос, якого бракує, — окремим прогоном своєю моделлю. */
+  'read.addvoice': async (_ev, elm) => {
+    const env = await callOp('read.start',
+      { case_dir: RD.case_dir, model: elm.dataset.arg, second_voice: false });
+    if (!env.ok) {
+      el('card').insertAdjacentHTML('afterbegin', `<div class="warn err">${esc(env.error)}</div>`);
+      return undefined;
+    }
+    return readCard();
+  },
+
+  /**
+   * ✎ «Змінити» живе читання: спинити й відкрити ту саму форму з його
+   * налаштуваннями — письмо, другий рушій, латинка третім голосом.
+   */
+  'read.change': async (_ev, elm) => {
+    const res = await fetch('/api/jobs');
+    const job = res.ok
+      ? ((await res.json()).jobs || []).find((j) => j.id === elm.dataset.job) : null;
+    const cfg = (job || {}).cfg || {};
+    const voices = (cfg.voices || []).map(engineOf);
+    await fetch(`/api/jobs/${encodeURIComponent(elm.dataset.job)}/cancel`,
+      { method: 'POST', headers: { 'X-Nysh-Token': TOKEN } });
+    RD = { ...RD, script: cfg.script || RD.script,
+      prev: { second: voices.includes('diak'),
+        latin: cfg.script !== 'latin' && voices.includes('skryba') } };
+    return readCard();
   },
 
   /** 🖼 Подивитись аркуші перед тим, як віддавати ніч. */

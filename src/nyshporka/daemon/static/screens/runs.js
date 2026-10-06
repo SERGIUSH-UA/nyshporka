@@ -138,8 +138,8 @@ function runsMatch(r) {
   const ids = r.engine_ids && r.engine_ids.length
     ? r.engine_ids : [r.engine_id].filter(Boolean);
   if (RUNS.engine && !ids.includes(RUNS.engine)) return false;
-  if (RUNS.state === 'done' && !r.done) return false;
-  if (RUNS.state === 'going' && r.done) return false;
+  if (RUNS.state === 'done' && !runDone(r)) return false;
+  if (RUNS.state === 'going' && runDone(r)) return false;
   if (RUNS.state === 'orphan' && r.case_key) return false;
   if (RUNS.q) {
     const hay = [r.name, r.shifra, r.title, r.model, r.case_dir]
@@ -170,6 +170,18 @@ function runsGroup(runs) {
   return [...by.values()].sort((a, b) => (b.updated || '').localeCompare(a.updated || ''));
 }
 
+/**
+ * Прогін дочитано — за ДИСКОМ: текст є для всіх кадрів справи.
+ *
+ * 🔴 Позначка `done` у меті прогону буває хибною: прогін із 1764 сторінками з
+ * 1764 стояв «не дочитано», бо раннер не дописав фінал. Приймач повноти — диск,
+ * а не самозвіт (так само рахує `htr.run.completeness`).
+ */
+function runDone(r) {
+  const n = Number(r.frames || 0);
+  return Boolean(r.done || (n && Number(r.pages_done || 0) >= n));
+}
+
 function runsRow(r) {
   // 🔴 Бейджі всіх рушіїв прогону. Прогін двома голосами пише обидві моделі
   // одним полем через «+», і показавши лише перший, ми сказали б, що письмо
@@ -177,7 +189,7 @@ function runsRow(r) {
   const ids = r.engine_ids && r.engine_ids.length
     ? r.engine_ids : [r.engine_id].filter(Boolean);
   const badges = ids.map((x) => eng(x, false, LANG)).join('');
-  const state = r.done
+  const state = runDone(r)
     ? `<span class="run-state">✅ ${t('runs.st.done')}</span>`
     : `<span class="run-state">◐ ${t('runs.st.going')}</span>`;
   // 🔴 Відсоток лише зі справжнім знаменником. Немає кадрів справи — друкуємо
@@ -197,7 +209,9 @@ function runsRow(r) {
     <td class="num">${esc(r.pages_done || 0)}${n ? ` / ${esc(n)}` : ''} ${fail}</td>
     ${cov}
     <td class="mono dim">${esc((r.updated || '').slice(0, 10))}</td>
-    <td><button class="ctl-sm" data-act="runs.open" data-arg="${esc(r.name)}"
+    <td class="acts">${!runDone(r) && r.case_dir ? `<button class="ctl-sm" data-act="runs.resume"
+      data-arg="${esc(r.case_dir)}" title="${esc(t('runs.resume.why'))}">${ic('quill', 'ic-o ic-sm')}
+      ${t('runs.resume')}</button>` : ''}<button class="ctl-sm" data-act="runs.open" data-arg="${esc(r.name)}"
       title="${esc(t('runs.open'))}">${ic('page', 'ic-o ic-sm')}</button></td>
   </tr>`;
 }
@@ -339,6 +353,8 @@ Object.assign(ACTIONS, {
 
   /** 📚 Ця сама справа в бібліотеці — з групи прогонів. */
   'runs.lib': (_ev, elm) => goto('library', { key: elm.dataset.arg }),
+  /** Дочитати — там, де читання запускають і де видно його хід. */
+  'runs.resume': (_ev, elm) => goto('read', { case_dir: elm.dataset.arg }),
 
   /**
    * 🔗 Прив'язати нічийний прогін до справи — мишкою, а не командою.

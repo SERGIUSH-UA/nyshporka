@@ -190,7 +190,7 @@ globalThis.fetch = async (url) => {
     'page.lines': { has: true, size: [100, 60],
                     polys: [[[1, 1], [9, 1], [9, 5], [1, 5]], null] },
     'page.view': { image: 'data:image/png;base64,AA', line: 0, text: 'рядок' },
-    'htr.case_info': { found: true, case_dir: 'c', shifra: 'А 1-1-2',
+    'htr.case_info': globalThis.__CASE_INFO || { found: true, case_dir: 'c', shifra: 'А 1-1-2',
                        title: 'книга', frames: 12, script: 'cyrillic',
                        script_why: 'письмо записане в опису справи',
                        script_trust: 'fixed',
@@ -293,7 +293,7 @@ globalThis.fetch = async (url) => {
   }[name] || {};
   // Перелік робіт — з глобального прапорця: екран «Роботи» малюється по-різному,
   // поки щось виконується і коли все скінчилось.
-  if (String(url).includes('/api/jobs?')) {
+  if (String(url).includes('/api/jobs?') || String(url).endsWith('/api/jobs')) {
     return { ok: true, status: 200,
       json: async () => ({ seq: 1, jobs: globalThis.__JOBS || [] }) };
   }
@@ -593,6 +593,30 @@ out.jobsDoneFolded = doneAt >= 0 && jl.indexOf('ГОТОВЕ') > doneAt
   && !/data-job="d1"/.test(jl);
 out.jobsFailNamed = /<details class="jobs-done" open>/.test(jl) && jl.includes('ПРИЧИНА');
 globalThis.__JOBS = [];
+
+// ── картка справи: «Додати голос», «Змінити», форма схована під час читання ──
+globalThis.__CASE_INFO = { found: true, case_dir: 'c', shifra: 'А 1-1-2', title: 'книга',
+  frames: 12, script: 'cyrillic', script_why: 'x', script_trust: 'fixed',
+  engines: [{ id: 'pysar', label: 'Писар' }, { id: 'diak', label: 'Дяк' }],
+  covered: { pysar: { model: 'pysar_cyr_v19.pt', pages_done: 5 } },
+  gaps: [{ kind: 'missing', engine: 'diak', why: 'x' }],
+  models: { pysar: 'pysar_cyr_v19.pt', diak: 'diak_cyr_v6.safetensors' } };
+ST.read = { case_dir: 'c' };
+await SCREENS.read();
+await new Promise((r) => setTimeout(r, 40));
+const rc = document.getElementById('card').innerHTML || '';
+out.readAddVoice = /data-act="read.addvoice" data-arg="diak_cyr_v6.safetensors"/.test(rc);
+globalThis.__JOBS = [{ id: 'r1', kind: 'read', state: 'running', updated: nowS,
+  title: 'c: 12 кадрів, pysar_cyr_v19.pt', progress: { i: 6, n: 12 },
+  cfg: { case_dir: 'c', script: 'cyrillic', voices: ['pysar_cyr_v19.pt'] } }];
+ST.read = { case_dir: 'c' };
+await SCREENS.read();
+await new Promise((r) => setTimeout(r, 40));
+const rn = document.getElementById('read-now').innerHTML || '';
+out.readNowChange = /data-act="read.change" data-job="r1"/.test(rn)
+  && /data-act="jobs.cancel" data-job="r1"/.test(rn);
+globalThis.__JOBS = [];
+globalThis.__CASE_INFO = null;
 
 console.log('@@' + JSON.stringify(out));
 // 🔴 Вихід явний. Застосунок навмисно тримає вічний цикл спостереження за
@@ -1037,3 +1061,9 @@ def test_jobs_live_first_finished_folded(probe) -> None:
     """Живе — карткою зі «Спинити»; завершене згорнуте; збій видно одразу."""
     for key in ("jobsLiveCardFirst", "jobsDoneFolded", "jobsFailNamed"):
         assert probe.get(key) is True, key
+
+
+def test_case_card_offers_add_voice_and_change(probe) -> None:
+    """Голос, якого бракує, — кнопкою; живе читання — «Змінити» поруч зі «Спинити»."""
+    assert probe.get("readAddVoice") is True
+    assert probe.get("readNowChange") is True

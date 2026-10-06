@@ -202,6 +202,37 @@ def covered(runs: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     return got
 
 
+def engine_models(script: str) -> dict[str, str]:
+    """Рушій → ім'я бойових ваг, якими його голос дочитується окремим прогоном.
+
+    Потрібне кнопці «Додати голос»: окремий прогін моделлю голосу лягає в ту
+    саму теку, що й голос спільного проходу (`run.model_tag`), і пропускає вже
+    прочитані сторінки — тобто доповнює рівно те, чого бракує. Вибір ваг той
+    самий, що й у плані читання (`run.pick_model`), а не другий перелік тут.
+    Немає ваг чи маніфесту — порожньо: кнопки не буде, а не буде відмови.
+    """
+    from nyshporka.htr import manifest as M
+    from nyshporka.htr.run import pick_model
+
+    out: dict[str, str] = {}
+    scripts = ("latin", "cyrillic") if script == "mixed" else (script,)
+    for s in scripts:
+        if s not in ("latin", "cyrillic"):
+            continue
+        try:
+            man = M.active()
+            main, voice = pick_model(s, second_voice=True)
+        except Exception:
+            continue
+        for path in (main, voice):
+            if path is None:
+                continue
+            eng = man.engine_for_model(path.name)
+            if eng is not None:
+                out.setdefault(eng.id, path.name)
+    return out
+
+
 def gaps(script: str, done: dict[str, dict[str, Any]]) -> list[dict[str, str]]:
     """Чого бракує й що зайве — трьома різними відповідями, не однією.
 
@@ -293,4 +324,5 @@ def case_info(case_dir: str, *, script_hint: str = "") -> dict[str, Any]:
         "runs": runs,
         "covered": done,
         "gaps": gaps(guess.script, done),
+        "models": engine_models(guess.script),
     }
