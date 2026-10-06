@@ -179,7 +179,7 @@ function runsRow(r) {
   const badges = ids.map((x) => eng(x, false, LANG)).join('');
   const state = r.done
     ? `<span class="run-state">✅ ${t('runs.st.done')}</span>`
-    : `<span class="run-state">▶ ${t('runs.st.going')}</span>`;
+    : `<span class="run-state">◐ ${t('runs.st.going')}</span>`;
   // 🔴 Відсоток лише зі справжнім знаменником. Немає кадрів справи — друкуємо
   // самі сторінки: покриття, порахане від себе самого, завжди дорівнює 100%
   // і читається як «прочитано все».

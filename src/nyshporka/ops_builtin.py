@@ -3211,8 +3211,19 @@ def htr_case_info(a: CaseInfoArgs) -> Envelope:
                  "закриває один прохід: кириличний прогін із латинською моделлю "
                  "третім голосом (`also: [\"latin\"]`, у формі — «латинкою теж»); "
                  "її текст ляже в сусідню теку")
+    # 🔴 Розрив несе пояснення в `why` і рушій в `engine`; поля `text` у нього
+    # немає, і картка показувала порожні жовті плашки «⚠» без жодного слова.
+    # «Цим рушієм ще не читали» для справи, яку не читали зовсім, лише
+    # повторює рядок «уже прочитано: ще не читали» — по плашці на рушій.
+    names = {str(e.get("id")): str(e.get("label") or e.get("id"))
+             for e in card.get("engines") or []}
     for gap in card.get("gaps") or []:
-        env.warn(str(gap.get("kind") or "gap"), str(gap.get("text") or ""))
+        if gap.get("kind") == "missing" and not card.get("covered"):
+            continue
+        eid = str(gap.get("engine") or "")
+        why = str(gap.get("why") or gap.get("text") or "")
+        env.warn(str(gap.get("kind") or "gap"),
+                 f"{names.get(eid, eid)}: {why}" if eid else why)
     if not card.get("found"):
         env.suggest("case.register",
                     "описати теку — без шифри прогін не прив'яжеться до справи")

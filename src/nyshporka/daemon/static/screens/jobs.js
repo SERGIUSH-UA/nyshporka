@@ -52,7 +52,9 @@ Object.assign(ACTIONS, {
       const env = await res.json().catch(() => ({}));
       const why = res.status === 401 ? t('err.access')
         : res.status === 403 ? t('err.token') : (env.detail || `HTTP ${res.status}`);
-      const box = el('jobs');
+      // Кнопка стоїть і в переліку робіт, і на картці справи — відмову видно
+      // там, де натиснули.
+      const box = el('jobs') || elm.parentElement;
       if (box) box.insertAdjacentHTML('afterbegin',
         `<div class="warn err">${esc(why)}</div>`);
       return;

@@ -240,7 +240,7 @@ export function jobChip(j) {
  * заздалегідь, скільки їх буде). Порожній знаменник тут — те саме, що нуль без
  * знаменника в пошуку: число, яке виглядає як відповідь і нею не є.
  */
-function jobProgress(j) {
+export function jobProgress(j) {
   const p = j.progress || {};
   if (!p.n) return '';
   return `<progress value="${p.i}" max="${p.n}"></progress>

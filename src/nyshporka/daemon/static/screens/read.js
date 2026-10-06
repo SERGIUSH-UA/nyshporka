@@ -1,11 +1,11 @@
 /** 🖋 Читання справи рушієм. */
 
 import { t } from '../core/strings.js';
-import { callOp } from '../core/net.js';
+import { callOp, FINAL_STATES } from '../core/net.js';
 import { esc, el, setView, boxError, busyForm,
   renderWarnings, curGen, alive } from '../core/view.js';
 import { SCREENS, ACTIONS } from '../core/registry.js';
-import { show, goto, onJob, jobChip } from '../core/nav.js';
+import { show, goto, onJob, jobProgress } from '../core/nav.js';
 import { ST } from '../core/state.js';
 import { ic, eng } from '/ui/icons.js';
 import { attachCombobox } from '/ui/combobox.js';
@@ -13,6 +13,8 @@ import { pathField } from '../core/paths.js';
 
 /** Тека, для якої показана картка. Живе між входами: справа не міняється. */
 let RD = { case_dir: '', script: '', card: null };
+/** Відписки від живих читань картки — знімаються при кожному перемальовуванні. */
+let NOW_UNSUB = [];
 
 /**
  * 🖋 Читання — єдиний екран, де людина віддає машині ніч.
@@ -105,8 +107,62 @@ async function readCard() {
       <tr><td>${t('read.done')}</td><td>${coverCell(c)}</td></tr>
     </tbody></table>
     ${renderWarnings(env)}
-    ${readForm(c)}`;
+    <div id="read-now"></div>
+    <div id="read-form">${readForm(c)}</div>`;
+  await readNow();
   return undefined;
+}
+
+const normPath = (s) => String(s || '').replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+
+/**
+ * ▶ Що зараз читається з цієї справи — тут же, де запуск.
+ *
+ * 🔴 Поступ і «Спинити» живуть на картці справи, а не на окремому екрані.
+ * Доти після «Читати» лишався лише напис «триває 12%» без кнопки, і зникав,
+ * щойно людина виходила з картки: повернувшись, вона бачила форму запуску
+ * знову й ставила друге читання тієї самої справи в чергу за першим
+ * (тестувальник 06.10.2026: кирилиця й латинка, обидві «чекали на карту»).
+ * Тому, поки справа читається, форма схована — щоб читати інакше, спершу
+ * спинити.
+ */
+async function readNow() {
+  NOW_UNSUB.forEach((f) => f());
+  NOW_UNSUB = [];
+  const box = el('read-now');
+  if (!box) return;
+  let jobs = [];
+  try {
+    const res = await fetch('/api/jobs');
+    if (res.ok) jobs = (await res.json()).jobs || [];
+  } catch { /* без переліку робіт картка лишається як була */ }
+  const mine = new Set([normPath(RD.case_dir), normPath((RD.card || {}).case_dir)]);
+  const now = jobs.filter((j) => j.kind === 'read' && !FINAL_STATES.includes(j.state)
+    && mine.has(normPath((j.cfg || {}).case_dir)));
+  const form = el('read-form');
+  if (form) form.hidden = now.length > 0;
+  if (!now.length) { box.innerHTML = ''; return; }
+  box.innerHTML = `<h3>${t('read.now')}</h3>
+    ${now.map((j) => `<div class="job" id="now-${esc(j.id)}">${nowItem(j)}</div>`).join('')}
+    <p class="muted">${t('read.now.busy')}</p>`;
+  for (const j of now) {
+    NOW_UNSUB.push(onJob(j.id, (fresh) => {
+      if (FINAL_STATES.includes(fresh.state)) { readCard(); return; }
+      const item = el(`now-${fresh.id}`);
+      if (item) item.innerHTML = nowItem(fresh);
+    }));
+  }
+}
+
+/** Рядок живого читання: чим, що з ним зараз і кнопка «Спинити». */
+function nowItem(j) {
+  // Заголовок роботи — «тека: N кадрів, модель … · чекає на карту: хто»;
+  // тека вже стоїть у картці, тож лишаємо решту.
+  const what = String(j.title || '').split(': ').slice(1).join(': ') || j.title || '';
+  return `<b>${esc(what)}</b>
+    ${jobProgress(j)}
+    ${j.error ? `<div class="warn err">${esc(j.error)}</div>` : ''}
+    <button data-act="jobs.cancel" data-job="${esc(j.id)}">${t('jobs.cancel')}</button>`;
 }
 
 /**
@@ -269,24 +325,17 @@ Object.assign(ACTIONS, {
       if (!confirm(why)) return undefined;
     }
     const env = await callOp('read.start', RD.args || { case_dir: RD.case_dir });
-    const box = el('read-job') || el('view');
     if (!env.ok) {
+      const box = el('hits') || el('view');
       if (box) box.insertAdjacentHTML('afterbegin',
         `<div class="warn err">${esc(env.error)}</div>`);
       return undefined;
     }
     // 🔴 Прогін триває годинами — і саме тому людину не можна викидати з
-    // картки, яку вона щойно налаштувала: повернутись до тих самих параметрів
-    // нічим. Стан пишеться поруч із кнопкою, а перелік робіт лишається для
-    // тих, хто справді пішов дивитись чергу.
-    const id = (env.data || {}).job_id;
-    if (box) {
-      box.insertAdjacentHTML('afterbegin',
-        `<p id="read-job" class="muted">${jobChip({ state: 'queued', progress: {} })}</p>`);
-      const chip = el('read-job');
-      onJob(id, (j) => { if (chip) chip.innerHTML = jobChip(j); });
-    }
-    return undefined;
+    // картки, яку вона щойно налаштувала. Поступ і «Спинити» стають на картці
+    // (`readNow`), а план запуску прибирається: він уже виконується.
+    el('hits').innerHTML = '';
+    return readNow();
   },
 
   /** 🖼 Подивитись аркуші перед тим, як віддавати ніч. */
