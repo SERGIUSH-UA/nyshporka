@@ -99,12 +99,38 @@ SCREENS.home = async () => {
         <div><h2>${t('home.title')}</h2><p>${t('home.hello')}</p></div></div>
       ${renderWarnings(env)}
       ${doors()}
-      ${onboarding(PULSE)}
+      ${stepsBox(PULSE)}
       <p class="muted mono">${esc(ws.root || '')}</p>`);
-    return;
+  } else {
+    setView(dashboard(env, PULSE));
   }
-  setView(dashboard(env, PULSE));
+  // Без `await`: екран уже намальовано, і чекати на цей рядок нема чого.
+  machineLater(gen);
 };
+
+
+/**
+ * 🖥 Крок «Машина читає рукопис» доїжджає окремим запитом.
+ *
+ * 🔴 Перевірка машини запускає інтерпретатор рушіїв з torch з десяток разів —
+ * на великому просторі це 12 с із 14, які головна стояла сірими смугами
+ * (замір 06.10.2026). Решта зрізу коштує частки секунди, тож дашборд
+ * малюється одразу, а чекліст перемальовується, коли відповідь прийшла.
+ *
+ * ⚠ Доки відповіді нема, крок не показується зовсім, а не стоїть червоним:
+ * «ще не перевірено» не має права виглядати як «машина не готова». Відмова
+ * самої операції — так само: про машину вона нічого не каже.
+ */
+async function machineLater(gen) {
+  const env = await callOp('home.machine', {});
+  if (!alive(gen) || !PULSE) return;
+  PULSE.machine = env.ok ? (env.data || {}) : {};
+  const box = el('dash-steps');
+  if (box) swapHtml(box, onboarding(PULSE));
+}
+
+/** Місце чекліста — з іменем, щоб пізня відповідь про машину знала, що міняти. */
+const stepsBox = (d) => `<div id="dash-steps">${onboarding(d)}</div>`;
 
 
 /**
@@ -163,7 +189,7 @@ function dashboard(env, d) {
   return `<div class="dash-top"><div><h2>${t('dash.title')}</h2>
     ${headline(d, ws)}</div>${maskot('lupa', 92)}</div>
     ${renderWarnings(env)}
-    ${onboarding(d)}
+    ${stepsBox(d)}
     ${tiles(d)}
     ${progressSection(d)}
     ${canonSection(d)}

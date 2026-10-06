@@ -9,6 +9,7 @@
 """
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
 
@@ -189,11 +190,30 @@ def home_pulse(a: PulseArgs) -> Envelope:
 
     migrate.nag(env, ws.root)
     data["profile"] = _pulse_profile(env)
-    data["reading"] = _pulse_reading(env) if "htr" in on else None
-    data["search"] = _pulse_search() if "research" in on else None
+    # Перелік прогонів — один на зріз: його питають і читання, і пошук, а
+    # кожне питання — це обхід кореня прогонів заради штампа кешу.
+    runs = None
+    if on & {"htr", "research"}:
+        from nyshporka import htr_store
+
+        try:
+            runs = htr_store.list_cases()
+        except Exception:
+            runs = None      # `_pulse_reading` спитає сам і назве причину
+    data["reading"] = _pulse_reading(env, runs) if "htr" in on else None
+    data["search"] = (_pulse_search([str(r["name"]) for r in runs] if runs is not None
+                                    else None)
+                      if "research" in on else None)
     data["eye"] = _pulse_eye(registry, env) if "research" in on else None
     data["jobs"] = _pulse_jobs()
-    data["machine"] = _pulse_machine()
+    # 🔴 Перевірки машини в зрізі НЕМАЄ — по неї головна ходить окремо
+    # (`home.machine`), уже намалювавши дашборд. Доктор запускає інтерпретатор
+    # рушіїв з torch з десяток разів: на великому просторі це 12 с із 14 холодного зрізу,
+    # і стільки ж знову щоп'ять хвилин, коли спливає кеш. Усі ці секунди
+    # людина дивилась на сірі смуги заради одного рядка чекліста, який до
+    # того ж прихований, коли все зелене. `pending`, а не `ok: False`: «ще не
+    # перевірено» не має права виглядати як «машина не готова».
+    data["machine"] = {"pending": True}
 
     # 🔴 Журнал поповнюється тут, а не в диспетчері мутацій: зріз щойно
     # порахований, тож рядок коштує нуль додаткових запитів. Умова —
@@ -202,6 +222,30 @@ def home_pulse(a: PulseArgs) -> Envelope:
     # однакових точок.
     data["history"] = _pulse_history(data, history, a)
     return env
+
+
+#: Один огляд машини за раз. Дві вкладки, відкриті поспіль, інакше запустили б
+#: два доктори паралельно — удвічі більше процесів torch на тому самому
+#: питанні; другий запит чекає першого й бере вже покладене в кеш.
+_MACHINE_GATE = threading.Lock()
+
+
+@op("home.machine", summary="Чи ця машина готова читати рукопис — крок чекліста головної",
+    agent=False)
+def home_machine(_: NoArgs) -> Envelope:
+    """Крок «Машина читає рукопис» — окремо від зрізу `home.pulse`.
+
+    🔴 Окремо, бо це єдина частина головної, що коштує секунди (доктор питає
+    інтерпретатор рушіїв), а показує вона один рядок. Доки вона сиділа в зрізі,
+    дашборд чекав на неї цілком. Тепер екран малюється одразу, а цей рядок
+    доїжджає, коли готовий; кеш на процес (`_pulse_machine`) лишається тим
+    самим, тож теплий виклик коштує мілісекунди.
+
+    `agent=False` з тієї ж причини, що й у `home.pulse`: агентові це питання
+    точніше відповідає `setup.check`.
+    """
+    with _MACHINE_GATE:
+        return ok(_pulse_machine())
 
 
 def _pulse_registry(env: Envelope) -> dict[str, Any]:
@@ -337,14 +381,16 @@ def _pulse_machine() -> dict[str, Any]:
     return out
 
 
-def _pulse_reading(env: Envelope) -> dict[str, Any]:
+def _pulse_reading(env: Envelope,
+                   runs: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     """Прогони: скільки, чим, як швидко — і скільки різних сторінок прочитано."""
     from nyshporka import htr_store
 
-    try:
-        runs = htr_store.list_cases()
-    except Exception as exc:
-        return {"ok": False, "why": f"{type(exc).__name__}: {exc}"}
+    if runs is None:
+        try:
+            runs = htr_store.list_cases()
+        except Exception as exc:
+            return {"ok": False, "why": f"{type(exc).__name__}: {exc}"}
     orphans = sum(1 for r in runs if not r.get("case_key"))
     by_engine: dict[str, int] = {}
     by_model: dict[str, int] = {}
@@ -378,11 +424,11 @@ def _pulse_reading(env: Envelope) -> dict[str, Any]:
     }
 
 
-def _pulse_search() -> dict[str, Any]:
+def _pulse_search(runs: list[str] | None = None) -> dict[str, Any]:
     from nyshporka.search import decode as D
 
     try:
-        return {"ok": True, **D.stats()}
+        return {"ok": True, **D.stats(runs)}
     except Exception as exc:
         return {"ok": False, "why": f"{type(exc).__name__}: {exc}"}
 

@@ -18,7 +18,9 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -120,6 +122,34 @@ def where(item: dict[str, Any]) -> Where:
     return Where(case_dir, frames_dir, frames, key, plan)
 
 
+#: Прогони за теками, зняті один раз на запит стану черги (`one_moment`).
+#: Поза ним — `None`, і кожен `_judge` питає диск наживо, як і виконавець.
+_RUNS_NOW: ContextVar[dict[str, list[dict[str, Any]]] | None] = ContextVar(
+    "queue_runs_now", default=None)
+
+
+@contextmanager
+def one_moment() -> Iterator[None]:
+    """Один знімок прогонів на весь перелік справ черги.
+
+    🔴 Стан черги питає ланку кожної справи на кількох етапах, і кожне питання
+    будувало мапу прогонів наново — на великому просторі по 0.3 с, тож екран «Черга»
+    коштував секунди на кожні кілька справ і повторював це на кожному
+    опитуванні (замір 06.10.2026). Одна відповідь — один момент диска: етапи
+    однієї відповіді й не мають бачити різних станів прогонів.
+
+    ⚠ Лише для читання стану. Виконавець сюди не заходить: між його етапами
+    прогони справді змінюються, і знімок збрехав би саме там.
+    """
+    from nyshporka import htr_store as S
+
+    tok = _RUNS_NOW.set(S.runs_by_case_dir())
+    try:
+        yield
+    finally:
+        _RUNS_NOW.reset(tok)
+
+
 def _judge(w: Where) -> Any:
     """Ланка справи (`cases.chain`) — із прогонами й числом кадрів."""
     from nyshporka import htr_store as S
@@ -127,7 +157,9 @@ def _judge(w: Where) -> Any:
 
     assert w.case_dir is not None
     C._forget_caches()
-    return C.judge(w.case_dir, frames=w.frames, runs=S.runs_by_case_dir())
+    runs = _RUNS_NOW.get()
+    return C.judge(w.case_dir, frames=w.frames,
+                   runs=runs if runs is not None else S.runs_by_case_dir())
 
 
 def case_key(item: dict[str, Any], w: Where) -> str:

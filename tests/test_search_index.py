@@ -109,6 +109,38 @@ def test_a_reread_run_rebuilds_its_own_index(space) -> None:
     assert not first.is_file(), "старий індекс лишився на диску"
 
 
+def test_the_index_count_drops_the_moment_a_run_is_reread(space) -> None:
+    """🔴 Знаменник «зібрано N із M» звіряє штамп кожного прогону наживо.
+
+    Відколи наявність індексу береться одним переліком теки, а не `is_file()`
+    на кожен прогін (головна, 06.10.2026), спокуса піти далі —
+    рахувати «є хоч якийсь файл цього прогону». Тоді дочитана справа зі старим
+    індексом рахувалась би зібраною, і пошук мовчки не бачив би нових сторінок.
+    """
+    from nyshporka.search import decode as D
+
+    got = D.stats()
+    assert (got["runs"], got["indexed"], got["stale"], got["bytes"]) == (1, 0, 1, 0)
+
+    assert D.ensure("проба")
+    got = D.stats()
+    assert (got["indexed"], got["stale"]) == (1, 0)
+    assert got["bytes"] == D.index_path("проба").stat().st_size
+
+    run = space / "reports" / "htr" / "проба"
+    (run / "0003.txt").write_text("ще одна сторінка\n", encoding="utf-8")
+    meta = run / "_htr_meta.json"
+    data = json.loads(meta.read_text(encoding="utf-8"))
+    data["pages"]["0003.jpg"] = {"lines": 1}
+    meta.write_text(json.dumps(data), encoding="utf-8")
+
+    got = D.stats()
+    assert (got["indexed"], got["stale"]) == (0, 1), \
+        "дочитаний прогін зі старим індексом рахується зібраним"
+    assert got["bytes"] > 0, "старий індекс лежить на диску — його розмір видно"
+    assert D.stats(["проба"])["indexed"] == 0, "переданий перелік рахується інакше"
+
+
 def test_search_names_what_stayed_outside_it(space) -> None:
     """🔴 Нуль на частковому індексі — не той самий нуль, що на повному.
 

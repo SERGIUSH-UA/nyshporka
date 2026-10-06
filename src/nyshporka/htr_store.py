@@ -745,9 +745,24 @@ def _runs_cache_write(entries: dict[str, dict[str, Any]], lib: str = "") -> None
 def runs_by_case_dir() -> dict[str, list[dict[str, Any]]]:
     """Мапа resolved-case_dir → прогони цієї теки. Для масового збагачення пікера
     файлового браузера (десятки тек за один запит) — щоб не пере-читувати всі
-    `_htr_meta.json` per-тека (`list_cases()` уже це робить один раз)."""
+    `_htr_meta.json` per-тека (`list_cases()` уже це робить один раз).
+
+    ⏱ Мапа пам'ятається, доки `list_cases()` віддає ТОЙ САМИЙ перелік: він
+    перезбирається за власним штампом (`_runs_stamp`), щойно прогін з'явився
+    чи змінився, — і тоді перебудовується й мапа. Без цього кожен виклик
+    наново рахував `abspath` для всіх прогонів: на просторі з 4774 прогонами це 0.3 с, а
+    стан черги кличе мапу на кожен етап кожної справи, тож екран «Черга»
+    стояв секундами (замір 06.10.2026). ⚠ Мапа спільна — викликач її не править.
+    """
+    global _RUNS_BY_DIR
+
+    rows = list_cases()
+    root = str(ROOT)
+    memo = _RUNS_BY_DIR
+    if memo is not None and memo[0] is rows and memo[1] == root:
+        return memo[2]
     out: dict[str, list[dict[str, Any]]] = {}
-    for c in list_cases():
+    for c in rows:
         # abspath, не resolve: ключ мусить збігатися з тим, що дає `under_raw`,
         # інакше junction-справи (ф.196 на T:) не матчились би з пікером
         try:
@@ -755,7 +770,14 @@ def runs_by_case_dir() -> dict[str, list[dict[str, Any]]]:
         except OSError:
             continue
         out.setdefault(key, []).append(c)
+    # Сам перелік тримається в пам'яті поруч: порівняння `is` інакше могло б
+    # збігтись із новим списком, що зайняв адресу зібраного сміттям старого.
+    _RUNS_BY_DIR = (rows, root, out)
     return out
+
+
+#: Остання мапа `runs_by_case_dir()`: (перелік, з якого зібрана, корінь, мапа).
+_RUNS_BY_DIR: tuple[list[dict[str, Any]], str, dict[str, list[dict[str, Any]]]] | None = None
 
 
 def find_runs_for_case(case: str) -> list[dict[str, Any]]:

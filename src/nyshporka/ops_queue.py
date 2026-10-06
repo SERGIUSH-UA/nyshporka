@@ -8,6 +8,7 @@
 """
 from __future__ import annotations
 
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +22,18 @@ SECTION = "htr"
 
 def _rows(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Рядки черги для показу: стан із файла, етапи й сторінки — з диска."""
+    from nyshporka.queue import stages as ST
+    from nyshporka.queue import state as Q
+
+    # Один знімок прогонів на всю відповідь (`stages.one_moment`): без нього
+    # кожен етап кожної справи будував мапу прогонів наново. Знімок — лише
+    # коли є кого перечитувати з диска: зроблені й зняті його не питають.
+    live = any(it.get("state") not in (Q.DONE, Q.DROPPED) for it in items)
+    with ST.one_moment() if live else nullcontext():
+        return _rows_now(items)
+
+
+def _rows_now(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     from nyshporka.cloud.verify import texts_in
     from nyshporka.queue import stages as ST
     from nyshporka.queue import state as Q

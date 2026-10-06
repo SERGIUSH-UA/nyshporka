@@ -37,6 +37,7 @@ from __future__ import annotations
 import gzip
 import hashlib
 import os
+import stat
 import threading
 from bisect import bisect_right
 from collections.abc import Callable, Iterator
@@ -78,14 +79,22 @@ def stamp_of(run: str) -> str:
     ⚠ Саме `stat`, а не перелік `*.txt`: перелік означав би обхід теки на
     кожен прогін, тобто тисячу обходів на одне питання «чи зібрано індекс», —
     і питати про стан індексу стало б дорожче, ніж шукати.
+
+    ⚠ Мета питається ОДНИМ `stat`, а не `is_file()` і ще раз `stat()`: той
+    самий виклик відповідає і «чи це файл», і «який штамп». Головна питає штамп
+    кожного прогону на кожне відкриття, тож зайвий `stat` множився на 4774
+    прогони великого простору (замір 06.10.2026).
     """
-    d = _run_dir(run)
+    from nyshporka import htr_store as S
+
+    d = S._case_dir(run)
     if d is None:
         return ""
-    meta = d / "_htr_meta.json"
     try:
-        m = meta.stat()
-        return f"{m.st_mtime_ns:x}-{m.st_size:x}-{d.stat().st_mtime_ns:x}"
+        m = os.stat(d / "_htr_meta.json")
+        if not stat.S_ISREG(m.st_mode):
+            return ""
+        return f"{m.st_mtime_ns:x}-{m.st_size:x}-{os.stat(d).st_mtime_ns:x}"
     except OSError:
         return ""
 
@@ -115,7 +124,12 @@ def index_path(run: str, stamp: str = "") -> Path:
     санітизації не треба: якби воно було небезпечним, теки прогону не існувало б.
     """
     st = stamp or stamp_of(run)
-    return index_dir() / f"{run}.{_digest(st)}.v{VERSION}.idx.gz"
+    return index_dir() / _index_name(run, st)
+
+
+def _index_name(run: str, stamp: str) -> str:
+    """Ім'я файлу індексу — одне правило для шляху й для звірки з переліком теки."""
+    return f"{run}.{_digest(stamp)}.v{VERSION}.idx.gz"
 
 
 def is_fresh(run: str) -> bool:
@@ -217,25 +231,47 @@ def read(run: str) -> tuple[list[str], list[int], list[tuple[str, int]]] | None:
     return norms, starts, lines
 
 
-def stats() -> dict[str, Any]:
+def stats(runs: list[str] | None = None) -> dict[str, Any]:
     """Скільки прогонів зібрано й скільки лишилось — знаменник для екрана.
 
     🔴 «Зібрано 40 із 1142» і «зібрано все» — різні відповіді на питання «чому
     пошук такий довгий», і без першої людина чекає, не знаючи чого.
+
+    `runs` — імена прогонів, якщо викликач уже має перелік (головна бере його
+    один раз на зріз); без нього перелік береться тут.
+
+    🔴 Наявність індексу звіряється з ОДНИМ переліком теки індексів, а не
+    `is_file()` на кожен прогін. Це те саме питання («чи лежить файл із цим
+    штампом»), поставлене в той самий момент, але на просторі з 4774 прогонами
+    поштучні `stat` коштували секунду на кожне відкриття головної (06.10.2026).
+    Штамп кожного прогону при цьому береться наживо (`stamp_of`) — переліком
+    його не замінити, бо саме він ловить дочитану справу.
     """
     from nyshporka import htr_store as S
 
-    try:
-        runs = [c["name"] for c in S.list_cases()]
-    except Exception:
-        runs = []
+    if runs is None:
+        try:
+            runs = [c["name"] for c in S.list_cases()]
+        except Exception:
+            runs = []
     d = index_dir()
-    fresh = sum(1 for r in runs if is_fresh(r))
-    size = 0
-    if d.is_dir():
-        size = sum(x.stat().st_size for x in d.glob(f"*.v{VERSION}.idx.gz"))
+    have: dict[str, int] = {}
+    tail = f".v{VERSION}.idx.gz"
+    try:
+        with os.scandir(d) as it:
+            for e in it:
+                if e.name.endswith(tail) and e.is_file():
+                    # ⚠ Розмір із запису теки: на Windows він приходить разом
+                    # із переліком, без окремого виклику. Індекс пишеться в
+                    # `.part` і підміняється цілим, тож відкритого на запис
+                    # файлу з таким іменем не буває, і розмір у переліку не
+                    # відстає від справжнього.
+                    have[e.name] = e.stat().st_size
+    except OSError:
+        pass
+    fresh = sum(1 for r in runs if (st := stamp_of(r)) and _index_name(r, st) in have)
     return {"runs": len(runs), "indexed": fresh, "stale": len(runs) - fresh,
-            "bytes": size, "dir": str(d)}
+            "bytes": sum(have.values()), "dir": str(d)}
 
 
 def ensure_all(runs: list[str], *,

@@ -145,6 +145,59 @@ def test_status_pokazuie_etapy_i_zalyshok(space: Path, chytach: Chytach) -> None
                                 "sec_per_page": None, "eta_sec": None}
 
 
+def test_status_bere_odyn_znimok_prohoniv(space: Path, chytach: Chytach,
+                                          monkeypatch: pytest.MonkeyPatch) -> None:
+    """🔴 Стан черги будує мапу прогонів раз на відповідь, а не на кожен етап.
+
+    Доти ланку кожної справи питали кілька етапів, і кожне питання будувало мапу
+    наново: на просторі з 4774 прогонами по 0.3 с, тож екран «Черга» стояв секунди
+    на кожні кілька справ і повторював це на кожному опитуванні (06.10.2026).
+    Етапи при цьому мусять показувати те саме, що й без знімка.
+    """
+    from nyshporka import htr_store as S
+    from nyshporka import ops as O
+
+    _add(_sprava(space, n=3))
+    d2 = frames(space, "dahmo_315/spr-8434", 2)
+    REG.describe(d2, shifra="ДАХмО 315-1-8434")
+    _add(d2)
+    items = [it for it in Q.load()["items"] if it["state"] in Q.LIVE]
+    assert len(items) == 2
+    nazhyvo = [[s["state"] for s in ST.progress_of(it)] for it in items]
+
+    calls: list[int] = []
+    real = S.runs_by_case_dir
+
+    def counted() -> Any:
+        calls.append(1)
+        return real()
+
+    monkeypatch.setattr(S, "runs_by_case_dir", counted)
+    env = O.call("queue.status", {})
+    assert env.ok, env.error
+    assert calls == [1], f"мапу прогонів будовано {len(calls)} разів на одну відповідь"
+    assert [[s["state"] for s in r["stages"]] for r in env.data["rows"]] == nazhyvo
+
+
+def test_mapa_prohoniv_ne_perezhyvaie_novoho_prohonu(space: Path) -> None:
+    """Пам'ять мапи прогонів живе рівно доти, доки не змінився перелік прогонів."""
+    from nyshporka import htr_store as S
+
+    d = _sprava(space, n=2)
+    write_run(S.HTR_ROOT / "spr-8433", d)
+    # Перший перелік у свіжому просторі може сам дописати бібліотеку, а вона —
+    # частина штампа переліку; тож тотожність міряється з другого виклику.
+    S.runs_by_case_dir()
+    persha = S.runs_by_case_dir()
+    assert S.runs_by_case_dir() is persha, "незмінний перелік будує мапу наново"
+
+    d2 = frames(space, "dahmo_315/spr-8434", 2)
+    write_run(S.HTR_ROOT / "spr-8434", d2)
+    druha = S.runs_by_case_dir()
+    assert any(r.get("name") == "spr-8434" for rs in druha.values() for r in rs), \
+        "новий прогін не потрапив у мапу — вона пережила зміну переліку"
+
+
 # ── паспорт ──────────────────────────────────────────────────────────────────
 
 def test_bez_shyfry_chekaie_liudynu_i_yde_dali_pislia_neii(space: Path,

@@ -780,29 +780,71 @@ def totals() -> dict[str, Any]:
 
     Читає файли, а не моделі: сховище дописується різними версіями застосунку,
     і сувора валідація тут перетворила б зведення на відмову через одну картку.
+
+    ⏱ Внесок кожного файлу пам'ятається за його штампом (mtime + розмір) і
+    перечитується, щойно файл змінився. Головна питає це зведення на кожне
+    відкриття, а розбір ~900 файлів великого простору коштував третину секунди щоразу
+    (замір 06.10.2026). `stat` лишається на кожен файл — без нього кеш не знав
+    би про правку, і число на плитці відставало б від сховища мовчки.
     """
+    global _TOTALS_MEMO
+
     out: dict[str, Any] = {"files": 0, "pages": 0, "full": 0,
                            "records": 0, "by_status": {}}
     if not PAGES_ROOT.is_dir():
         return out
+    # Нова пам'ять на кожен виклик, а не правка спільної: два одночасні виклики
+    # з потоків демона інакше прибирали б один в одного з-під рук; і файли,
+    # яких більше немає, з неї випадають самі.
+    memo: dict[str, tuple[tuple[int, int], dict[str, Any] | None]] = {}
     for f in sorted(PAGES_ROOT.glob("*/*.json")):
         try:
-            data = json.loads(f.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
+            st_ = f.stat()
+        except OSError:
+            continue
+        key, stamp = str(f), (st_.st_mtime_ns, st_.st_size)
+        hit = _TOTALS_MEMO.get(key)
+        if hit is not None and hit[0] == stamp:
+            part = hit[1]
+        else:
+            try:
+                part = _file_totals(json.loads(f.read_text(encoding="utf-8")))
+            except OSError:
+                continue          # не прочитався — спитаємо наступного разу
+            except ValueError:
+                part = None       # битий JSON — битий, доки файл не змінять
+        memo[key] = (stamp, part)
+        if part is None:
             continue
         out["files"] += 1
-        pages = data.get("pages")
-        items = (list(pages.values()) if isinstance(pages, dict)
-                 else pages if isinstance(pages, list) else [])
-        out["pages"] += len(items)
-        for p in items:
-            if not isinstance(p, dict):
-                continue
-            st = str(p.get("status") or "")
-            if st:
-                out["by_status"][st] = out["by_status"].get(st, 0) + 1
-            if st == "full":
-                out["full"] += 1
-        recs = data.get("records")
-        out["records"] += len(recs) if isinstance(recs, list) else 0
+        out["pages"] += part["pages"]
+        out["full"] += part["full"]
+        out["records"] += part["records"]
+        for s, n in part["by_status"].items():
+            out["by_status"][s] = out["by_status"].get(s, 0) + n
+    _TOTALS_MEMO = memo
     return out
+
+
+#: Внесок файлів сховища в `totals()`: шлях → (штамп, внесок або `None` для битого).
+_TOTALS_MEMO: dict[str, tuple[tuple[int, int], dict[str, Any] | None]] = {}
+
+
+def _file_totals(data: dict[str, Any]) -> dict[str, Any]:
+    """Скільки аркушів, повних, записів і яких статусів в одному файлі сховища."""
+    part: dict[str, Any] = {"pages": 0, "full": 0, "records": 0, "by_status": {}}
+    pages = data.get("pages")
+    items = (list(pages.values()) if isinstance(pages, dict)
+             else pages if isinstance(pages, list) else [])
+    part["pages"] = len(items)
+    for p in items:
+        if not isinstance(p, dict):
+            continue
+        st = str(p.get("status") or "")
+        if st:
+            part["by_status"][st] = part["by_status"].get(st, 0) + 1
+        if st == "full":
+            part["full"] += 1
+    recs = data.get("records")
+    part["records"] = len(recs) if isinstance(recs, list) else 0
+    return part
