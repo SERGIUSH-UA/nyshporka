@@ -42,9 +42,11 @@ def _builtin(workspace: Path | None = None) -> list[Collector]:
     from nyshporka.fonds.collect.babynyar import BabynYarCollector
     from nyshporka.fonds.collect.commons import CommonsCollector
     from nyshporka.fonds.collect.duck import DuckCollector
+    from nyshporka.fonds.collect.wikisource import WikisourceCollector
 
     out: list[Collector] = [ArchiumCollector(workspace), BabynYarCollector(workspace),
-                            CommonsCollector(workspace), DuckCollector(workspace)]
+                            CommonsCollector(workspace), DuckCollector(workspace),
+                            WikisourceCollector(workspace)]
     return out
 
 

@@ -609,7 +609,7 @@ class CollectorsArgs(BaseModel):
 
 
 class CollectArgs(BaseModel):
-    collector: str = Field(..., description="id збирача: archium | babynyar | commons | duck")
+    collector: str = Field(..., description="id збирача: archium | babynyar | commons | duck | wikisource")
     repo: str = Field(..., description="код архіву: CDIAK, ДАХмО…")
     fond: str = Field(..., description="номер фонду")
     opys: str = Field("", description="описи через кому; порожньо — всі")
