@@ -633,16 +633,21 @@ async def _run_read_locked(bus: JobBus, job: JobRecord, plan: Any, case_key: str
 
     env = foreign_env({**R.shard_env(len(cmds)), "PYTHONUNBUFFERED": "1",
                        "PYTHONIOENCODING": "utf-8"})
+    from nyshporka.core.proctree import contain
+
     procs = [await asyncio.create_subprocess_exec(
         *cmd, stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.STDOUT, env=env) for cmd in cmds]
+    # Кожен шард із нащадками — одне ціле (`core.proctree`): зупинка гасить
+    # усіх, а падіння застосунку не лишає сиріт, які тримали б карту.
+    trees = [contain(p.pid) for p in procs]
+    pumps: list[asyncio.Task[None]] = []
 
     # 🔴 «Спинити» має спиняти всі процеси. Доти стопер замикався на один — із
     # шардами це лишило б N−1 читати справу далі, годинами тримаючи карту, при
     # тому що завдання вже позначене скасованим.
     def _stop_all() -> None:
-        for p in procs:
-            _terminate(p)
+        _keep(asyncio.create_task(_stop_reading(bus, job.id, procs, trees, pumps)))
 
     bus.on_stop(job.id, _stop_all)
 
@@ -677,6 +682,10 @@ async def _run_read_locked(bus: JobBus, job: JobRecord, plan: Any, case_key: str
                 break
             line = raw.decode("utf-8", "replace").rstrip()
             ev, human = split(line)
+            if ev is not None and bus.cancelled(job.id):
+                # Спиненому прогресу не дописуємо: рядок, що росте під
+                # «спинено», читається як «не спинилось».
+                continue
             if ev is not None:
                 st[k] = {"i": ev.i, "n": ev.n, "done": ev.done,
                          "skipped": ev.skipped, "failed": ev.failed}
@@ -699,9 +708,18 @@ async def _run_read_locked(bus: JobBus, job: JobRecord, plan: Any, case_key: str
                 tail.append(human if len(cmds) == 1 else f"w{k + 1}| {human}")
                 del tail[:-40]
 
-    await asyncio.gather(*(pump(k, p) for k, p in enumerate(procs)))
+    pumps.extend(asyncio.create_task(pump(k, p)) for k, p in enumerate(procs))
+    got = await asyncio.gather(*pumps, return_exceptions=True)
+    # Канал, обірваний зупинкою (`_stop_reading`), — не збій; решта винятків
+    # летить далі, як і до того.
+    for res in got:
+        if isinstance(res, BaseException) and not isinstance(res, asyncio.CancelledError):
+            raise res
     codes = [await p.wait() for p in procs]
     bus.drop_stopper(job.id)
+    for tree in trees:
+        if tree is not None:
+            tree.close()
     # Остання подія могла не пройти тротлінг — дописуємо підсумок.
     await bus.update(job.id, progress=Progress(
         i=sum(s["i"] for s in st), n=sum(s["n"] for s in st),
@@ -793,32 +811,44 @@ async def _autoshare(case_key: str) -> dict[str, Any] | None:
     return {**data, "warnings": notes} if notes else data
 
 
-def _terminate(proc: asyncio.subprocess.Process) -> None:
-    """Спинити раннер: спершу ввічливо, за 5 с — силою.
+#: Скільки чекати, доки канал виводу закриється після зупинки. Довше — значить
+#: його тримає процес поза деревом, і чекати на нього означало б не віддати
+#: карту наступному читанню.
+STOP_DRAIN_SEC = 15.0
 
-    ⚠ На Windows `terminate()` це `TerminateProcess`, тобто діти раннера
-    (шарди) можуть пережити батька; ловить їх власний watchdog раннера, а тут
-    важливо не лишити головний процес, який тримає відеокарту.
+
+async def _stop_reading(bus: JobBus, job_id: str,
+                        procs: list[asyncio.subprocess.Process], trees: list[Any],
+                        pumps: list[asyncio.Task[None]]) -> None:
+    """Спинити читання: усе дерево кожного шарда, і сказати, якщо не вийшло.
+
+    🔴 Корінь НЕ гаситься першим. Доти тут ішло `proc.terminate()` одразу за
+    запуском `kill_tree` у потоці: наглядач гинув раніше, ніж потік знімав його
+    дітей, `psutil` не знаходив батька — і робочий процес читав далі. У людини
+    06.10.2026 «спинено» дочитало ще 15 сторінок і не пустило до карти
+    наступне читання.
     """
-    if proc.returncode is not None:
-        return
-    # Діти раннера (його робочий процес) самі не зникають — гасимо все дерево.
     from nyshporka.htr.session import kill_tree
 
-    _keep(asyncio.create_task(asyncio.to_thread(kill_tree, proc.pid)))
-    try:
-        proc.terminate()
-    except ProcessLookupError:
-        return
-
-    async def _kill_later() -> None:
-        try:
-            await asyncio.wait_for(proc.wait(), timeout=5.0)
-        except TimeoutError:
-            with contextlib.suppress(ProcessLookupError):
-                proc.kill()
-
-    _keep(asyncio.create_task(_kill_later()))
+    # Спершу дерево через батька — поки батько живий. Job Object лише слідом:
+    # нащадок, народжений до `contain`, у нього не потрапив, а погашений
+    # об'єктом корінь уже не видав би його `kill_tree`.
+    survivors: list[int] = []
+    for p in procs:
+        if p.returncode is None:
+            survivors += await asyncio.to_thread(kill_tree, p.pid)
+    for tree in trees:
+        if tree is not None:
+            tree.kill()
+    live = [t for t in pumps if not t.done()]
+    if live:
+        _done, hung = await asyncio.wait(live, timeout=STOP_DRAIN_SEC)
+        for t in hung:
+            t.cancel()
+    if survivors:
+        await bus.update(job_id, error=(
+            f"не вдалося зупинити процеси {', '.join(map(str, survivors))} — "
+            f"завершіть їх у диспетчері задач, інакше вони тримають карту"))
 
 
 def _safe(ref: str) -> str:

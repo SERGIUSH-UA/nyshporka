@@ -19,6 +19,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from nyshporka.core.proctree import contain
 from nyshporka.core.progress import Event, split
 
 #: Як часто питати «чи не просили зупинитись», поки раннер мовчить.
@@ -137,6 +138,7 @@ def read_case(plan: Any, *, case_key: str = "", workers: int = 1, device: str = 
     env = foreign_env(shard_env(len(cmds)) if len(cmds) > 1 else None)
     lines: queue.Queue[str | None] = queue.Queue()
     procs: list[Any] = []
+    trees: list[Any] = []
     pace = Pace(shards=len(cmds))
     stopped = False
     try:
@@ -146,6 +148,9 @@ def read_case(plan: Any, *, case_key: str = "", workers: int = 1, device: str = 
                                     encoding="utf-8", errors="replace", bufsize=1,
                                     env=env)
             procs.append(proc)
+            # Читання з нащадками — одне ціле: зупинка гасить усіх, а смерть
+            # цього процесу (Ctrl+C, закритий термінал) не лишає сиріт на карті.
+            trees.append(contain(int(proc.pid)))
             # ⚠ Реєструємо ДОЧІРНІЙ pid, а не свій: помирає першим саме він, і
             # по ньому ж видно, чи робота ще йде.
             R.register(proc.pid, case=plan.case_dir.name, case_key=case_key,
@@ -168,14 +173,19 @@ def read_case(plan: Any, *, case_key: str = "", workers: int = 1, device: str = 
                     on_event(ev, human)
             if not stopped and should_stop is not None and should_stop():
                 stopped = True
-                for proc in procs:
-                    _terminate(proc)
+                for proc, tree in zip(procs, trees, strict=False):
+                    _terminate(proc, tree)
         rc = max((int(p.wait() or 0) for p in procs), default=0)
     finally:
         # Знімається і при Ctrl+C: інакше справа лишалась би «зайнятою» до
         # перевірки живості.
         for proc in procs:
             R.drop(proc.pid)
+        # ⚠ Закриття дескриптора гасить живих членів — і це те, що треба:
+        # сюди приходять і по Ctrl+C, і по винятку, коли раннер ще читає.
+        for tree in trees:
+            if tree is not None:
+                tree.close()
 
     # Читали з тимчасової теки — мета має вести на теку справи, а не в нікуди.
     from nyshporka.htr_store import relink_lasting
@@ -202,25 +212,41 @@ def _pump(proc: Any, lines: queue.Queue[str | None]) -> None:
         lines.put(None)
 
 
-def _terminate(proc: Any) -> None:
-    """Погасити раннер разом із його дітьми. Прочитані сторінки вже на диску."""
+def _terminate(proc: Any, tree: Any = None) -> None:
+    """Погасити раннер разом із його дітьми. Прочитані сторінки вже на диску.
+
+    `tree` — Job Object процесу (`core.proctree`). Він іде ПІСЛЯ `kill_tree`:
+    нащадок, народжений до `contain`, в об'єкт не потрапив, і погашений
+    об'єктом корінь уже не видав би його через себе.
+    """
+    if proc.poll() is None:
+        kill_tree(int(proc.pid))
+    if tree is not None:
+        tree.kill()
     if proc.poll() is not None:
         return
-    kill_tree(int(proc.pid))
     try:
         proc.wait(timeout=KILL_AFTER_SEC)
     except subprocess.TimeoutExpired:
         proc.kill()
 
 
-def kill_tree(pid: int, grace: float = KILL_AFTER_SEC) -> None:
+def kill_tree(pid: int, grace: float = KILL_AFTER_SEC) -> list[int]:
     """Погасити процес і ВСІХ його нащадків: попросити, зачекати, вбити.
+
+    Повертає pid тих, хто пережив і прохання, і вбивство, — про них треба
+    сказати людині, а не мовчати.
 
     🔴 Раннер читає не сам: його наглядач (`--supervise`) запускає робочий
     процес, а той тримає карту й пише в той самий канал виводу. `terminate()`
     гасив лише наглядача — робочий читав далі, канал не закривався, і
     «зупинити зараз» дочитувало справу до кінця (знайдено живим прогоном
     черги 30.09.2026: після зупинки прочитано ще 23 сторінки).
+
+    🔴 Дерево знімається ДО першого вбивства, і корінь не можна гасити раніше
+    за цю функцію: на Windows убитий батько не забирає дітей, а `psutil` уже не
+    знайде їх через батька, якого немає (застосунок, 06.10.2026: «спинено», а
+    прогін дочитав ще 15 сторінок).
     """
     import os
 
@@ -233,7 +259,7 @@ def kill_tree(pid: int, grace: float = KILL_AFTER_SEC) -> None:
             root = psutil.Process(pid)
             family = [*root.children(recursive=True), root]
         except psutil.Error:
-            return
+            return []
         for p in family:
             with contextlib.suppress(psutil.Error):
                 p.terminate()
@@ -241,10 +267,14 @@ def kill_tree(pid: int, grace: float = KILL_AFTER_SEC) -> None:
         for p in alive:
             with contextlib.suppress(psutil.Error):
                 p.kill()
-        return
+        if not alive:
+            return []
+        _gone, alive = psutil.wait_procs(alive, timeout=grace)
+        return [p.pid for p in alive]
     if os.name == "nt":
         subprocess.run(["taskkill", "/T", "/F", "/PID", str(pid)],
                        capture_output=True, check=False)
-        return
+        return []
     with contextlib.suppress(OSError):
         os.kill(pid, 9)
+    return []
