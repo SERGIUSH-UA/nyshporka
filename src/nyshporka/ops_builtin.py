@@ -858,6 +858,14 @@ def catalog_search(a: CatalogSearchArgs) -> Envelope:
     picked = [reg.get(a.source)] if a.source else reg.with_cap("search")
     if a.source and picked[0] is None:
         return fail(f"джерела {a.source!r} немає")
+    #: Джерела, які загальний пошук не питає (`explicit_only`): іменна база
+    #: відповідає про ЛЮДЕЙ, і назва села, підставлена як прізвище, ловила б
+    #: чужих. Вони не в знаменнику й не в нулях — лише названі тут.
+    not_asked: list[dict[str, str]] = []
+    if not a.source:
+        not_asked = [{"source": s.id, "why": f"лише явно: --source {s.id}"}
+                     for s in picked if getattr(s, "explicit_only", False)]
+        picked = [s for s in picked if not getattr(s, "explicit_only", False)]
     # Адреса справи — інше питання, ніж слово із заголовка, і відповідь на нього
     # знають інші місця. Якщо там порожньо, запит іде текстом як і раніше: рядок
     # може бути лише СХОЖИЙ на шифру (дата «1858-03-14»), і відповідати на нього
@@ -921,7 +929,8 @@ def catalog_search(a: CatalogSearchArgs) -> Envelope:
                 entry.update(kind="зібраний на місці", taken=str(meta.get("taken") or ""),
                              rows=meta.get("rows"), regions=meta.get("regions") or None)
             elif kind == "live":
-                entry.update(kind="живий запит")
+                # Обсяг живої бази — теж знаменник, коли джерело його знає.
+                entry.update(kind="живий запит", rows=meta.get("rows"))
             else:
                 # Каталогу немає, а джерело все одно шукало: ARCHIUM без зрізу йде
                 # живим пошуком сайту. Мовчання про це ховало, на чому стоїть нуль.
@@ -948,7 +957,7 @@ def catalog_search(a: CatalogSearchArgs) -> Envelope:
     env = ok({"q": a.q, "hits": shown, "fonds": _by_fond(shown),
               "coverage": {"searched": searched, "unavailable": unavailable,
                            "basis": basis, "truncated": truncated,
-                           "zeros": zeros}})
+                           "zeros": zeros, "not_asked": not_asked}})
     if addr is not None:
         # Запит читається як шифра, але такої справи не знайшлось ні в
         # бібліотеці, ні в реєстрі опису, ні в каталогах, які вміють по шифрі.

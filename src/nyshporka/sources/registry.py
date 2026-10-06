@@ -56,6 +56,7 @@ def _builtin(workspace: Path | None = None) -> list[Source]:
     from nyshporka.sources.fsfilm import FilmMirrorSource
     from nyshporka.sources.ia import IaSource
     from nyshporka.sources.inventarium import InventariumSource
+    from nyshporka.sources.martyrolog import MartyrologSource
     from nyshporka.sources.ridni import RidniSource
     from nyshporka.sources.skanoteka import SkanotekaSource
     from nyshporka.sources.volok import VolokSource
@@ -106,6 +107,10 @@ def _builtin(workspace: Path | None = None) -> list[Source]:
     # Кадр — розворот, тож джерело ріже його по згину й пише карту сканів: без
     # неї сторінку декоду не повернути до номера скана в джерелі.
     out.append(cast("Source", SkanotekaSource(workspace)))
+    # 🕯 «Український мартиролог ХХ ст.» (ДАС): іменна база репресованих
+    # 1920–1950-х із шифрою архівно-слідчої справи. База ОСІБ, тож загальний
+    # пошук по каталогах її не питає — лише `--source martyrolog`.
+    out.append(cast("Source", MartyrologSource(workspace)))
     return out
 
 

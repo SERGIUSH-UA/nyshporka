@@ -133,6 +133,7 @@
 | rusneb.ru | 403 | відкривається, ріже за географією | не пробувано |
 | cn.archives.gov.ua (PDF) | 403 | ✅ `fetch()` зсередини сторінки архіву після відкриття головної | — |
 | hungaricana.hu | 403 | ✅ | — |
+| archives.gov.ua/um.php («Український мартиролог») | 403 Akamai для `curl` і `httpx`; ✅ `curl_cffi` з відбитком Chrome (джерело `martyrolog`, 06.10.2026) | — | — |
 | litopys.org.ua | помилка сертифіката | ✅ з `ignore_https_errors` | — |
 | szukajwarchiwach.gov.pl | 403 з українських IP | 403 з українських IP | ✅ проксі з ЄС (28.09.2026): блокування за країною, не за клієнтом |
 | rcin.org.pl | заслін JavaScript | ✅ сторінка + ZIP через завантаження браузера | — |

@@ -343,8 +343,9 @@ def supports(src: object, cap: Capability) -> bool:
 #:     fulltext     текст самого документа (OCR, текстовий шар)
 #:     sheet_place  місце в поаркушевому покажчику плівки
 #:     settlement   село, до якого каталог прив'язав книгу
+#:     person_name  прізвище й ім'я особи в іменній базі
 MatchOn = Literal["title", "annotation", "fond_title", "fulltext", "sheet_place",
-                  "settlement"]
+                  "settlement", "person_name"]
 
 #: Як звіряється слово.
 #:

@@ -401,6 +401,10 @@ def find(q: str = typer.Argument(..., help="село, прізвище, слов
         for z in cov.get("zeros") or []:
             console.print(f"[muted]  0 · {escape(z['source'])}: "
                           f"{escape(z['means'])}[/muted]")
+    # Не опитані навмисно — не нуль, а інше питання (іменна база осіб).
+    for n in cov.get("not_asked") or []:
+        console.print(f"[muted]  не питали · {escape(n['source'])}: "
+                      f"{escape(n['why'])}[/muted]")
     # 🔴 всі попередження конверта, а не лише про недоступні джерела. Саме тут
     # їде різниця між «не знайшлось» і «не знайшлось у зрізі піврічної давнини»,
     # і показувати її вибірково — те саме, що не показувати.
