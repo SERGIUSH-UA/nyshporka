@@ -241,14 +241,34 @@ def test_frontmatter_is_valid_yaml() -> None:
         assert data.get("description"), f"{sk.name}: порожній опис"
 
 
-def test_description_stays_readable() -> None:
-    """Опис лишається тригером, а не процедурою.
+#: Стеля опису одного скіла: що робить і коли кликати, без правил процедури.
+DESC_MAX = 420
+#: Стеля суми описів усіх скілів пакета. Claude Code дає переліку скілів 1%
+#: вікна (≈ 8 000 символів на вікні 200K) на ВСІ скіли машини й при
+#: переповненні відкидає описи найрідше вживаних — щойно оновлених скілів
+#: Нишпорки першими (`skills.listing`).
+DESC_TOTAL_MAX = 6500
 
-    ⚠ Поріг тут не про технічну межу читалки (вона невідома), а про жанр: опис,
-    який не влазить у 1000 символів, майже завжди означає, що в нього поклали
-    інструкцію замість переліку випадків, коли скіл кликати.
+
+def _desc(sk: S.Skill) -> str:
+    text = sk.card.read_text(encoding="utf-8")
+    return str(__import__("yaml").safe_load(text.split("---", 2)[1])["description"])
+
+
+def test_description_stays_a_trigger() -> None:
+    """Опис — що робить скіл і коли його кликати; правила живуть у тілі.
+
+    Опис довший за стелю майже завжди означає, що в нього поклали інструкцію
+    замість переліку випадків, коли скіл кликати, — і він з'їдає місце в
+    переліку скілів, за яким агент обирає скіл.
     """
-    for sk in S.available():
-        text = sk.card.read_text(encoding="utf-8")
-        desc = str(__import__("yaml").safe_load(text.split("---", 2)[1])["description"])
-        assert len(desc) <= 1000, f"{sk.name}: опис {len(desc)} символів"
+    long = [f"{sk.name}: {len(_desc(sk))}" for sk in S.available()
+            if len(_desc(sk)) > DESC_MAX]
+    assert not long, f"описи довші за {DESC_MAX}: {long}"
+
+
+def test_descriptions_fit_the_listing_budget() -> None:
+    total = sum(len(_desc(sk)) for sk in S.available())
+    assert total <= DESC_TOTAL_MAX, (
+        f"описи скілів разом {total} символів — більше за {DESC_TOTAL_MAX}: "
+        f"на вікні 200K вони витісняли б одне одного з переліку")
