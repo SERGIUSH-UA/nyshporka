@@ -348,11 +348,23 @@ Object.assign(ACTIONS, {
     unlock();
     if (!env.ok) return boxError('hits', env);
     const p = env.data.plan || {};
+    // Дяк піде окремим прогоном (`splitVoices`) — примітка «другого голосу
+    // немає» про цей запуск була б неправдою.
+    if ((RD.extra || []).length) {
+      env.warnings = (env.warnings || []).filter((w) => w.code !== 'single_voice');
+    }
+    const nothing = (env.warnings || []).some((w) => w.code === 'nothing_to_read');
+    const model = String(p.model || '').split(/[\\/]/).pop();
+    const reread = nothing && env.data.prev_model && env.data.prev_model !== model;
+    // Читати нічого, але голос іде окремим прогоном — кнопка лишається, і
+    // запустить лише його (`read.go`).
+    RD.nothing = nothing;
+    const go = !nothing || (RD.extra || []).length;
     el('hits').innerHTML = `
       ${renderWarnings(env)}
       <table><tbody>
         <tr><td>${t('read.frames')}</td><td class="num">${esc(p.frames)}</td></tr>
-        <tr><td>${t('read.script')}</td><td>${esc(p.script)}</td></tr>
+        <tr><td>${t('read.script')}</td><td>${esc(t(`read.script.${p.script}`) || p.script)}</td></tr>
         <tr><td>${t('read.model')}</td><td class="mono">${esc(p.model)}</td></tr>
         ${(p.voices || []).length
     ? `<tr><td>${t('read.voice')}</td><td class="mono">${esc(p.voices.join(' + '))}</td></tr>`
@@ -362,7 +374,9 @@ Object.assign(ACTIONS, {
           <span class="mono">${esc(RD.extra.join(' + '))}</span>
           <span class="muted">— ${t('read.extra.why')}</span></td></tr>` : ''}
       </tbody></table>
-      <button data-act="read.go">${t('read.go')}</button>`;
+      ${go ? `<button data-act="read.go">${t('read.go')}</button>` : ''}
+      ${reread ? `<button data-act="read.addvoice" data-arg="${esc(model)}">${
+        t('read.reread')} ${esc(model)}</button>` : ''}`;
     return undefined;
   },
 
@@ -384,7 +398,9 @@ Object.assign(ACTIONS, {
       // eslint-disable-next-line no-alert
       if (!confirm(why)) return undefined;
     }
-    const env = await callOp('read.start', RD.args || { case_dir: RD.case_dir });
+    // Читати нічого — основний прогін не ставимо зовсім, лише окремі голоси.
+    const env = RD.nothing ? { ok: true }
+      : await callOp('read.start', RD.args || { case_dir: RD.case_dir });
     if (!env.ok) {
       const box = el('hits') || el('view');
       if (box) box.insertAdjacentHTML('afterbegin',

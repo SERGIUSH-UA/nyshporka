@@ -3394,6 +3394,7 @@ def read_plan(a: ReadArgs) -> Envelope:
     except ReadError as exc:
         return fail(str(exc))
     env = ok({"plan": p.as_dict()})
+    _plan_existing(env, p)
     if not a.script:
         # Здогад про письмо слабкий за побудовою — з імені теки нічого не
         # видно. Мовчазний здогад тут дав би тихе сміття.
@@ -3418,6 +3419,46 @@ def read_plan(a: ReadArgs) -> Envelope:
                  "другого голосу немає — читатиме один рушій. Другий помиляється "
                  "інакше й витягує те, де перший підставив правдоподібне слово")
     return env
+
+
+def _plan_existing(env: Envelope, p: Any) -> None:
+    """Що вже лежить у теці, куди ляже текст, — і що з цим зробить запуск.
+
+    🔴 Раннер у теці з текстом не перечитує, а доганяє: нова версія моделі того
+    самого рушія дочитує лише відсутні сторінки (корпус змішаний, пошук не
+    ламається), бо перечитувати справу щоразу задорого. Рішення свідоме, але
+    його не було видно: «Читати» на повністю прочитаній справі не робило
+    нічого й нічого не казало. Тепер план називає число сторінок із текстом і
+    модель, що їх дала, а екран пропонує перечитати новою моделлю окремою
+    текою, якщо саме цього хочуть.
+    """
+    from nyshporka.cloud.verify import read_meta
+    from nyshporka.htr.run import completeness
+
+    try:
+        comp = completeness(p.case_dir, p.out_dir)
+        prev = Path(str(read_meta(Path(p.out_dir)).get("model") or "")).name
+    except Exception:
+        return
+    done, frames = int(str(comp["pages"])), int(str(comp["frames"]))
+    model = p.model.name
+    env.data.update(done_pages=done, prev_model=prev)
+    if not done:
+        return
+    if frames and done >= frames:
+        tail = (f" Перечитати моделлю {model} можна окремою текою."
+                if prev and prev != model else "")
+        env.warn("nothing_to_read",
+                 f"усі {frames} сторінок уже мають текст ({prev or 'модель невідома'}) — "
+                 f"цей запуск нічого не прочитає.{tail}", ALERT)
+    elif prev and prev != model:
+        env.warn("catch_up_mixed",
+                 f"уже є {done} сторінок моделлю {prev}: {model} дочитає лише решту "
+                 f"({frames - done}), тож корпус буде змішаний — той самий рушій, "
+                 f"пошук не ламається")
+    else:
+        env.warn("catch_up",
+                 f"уже прочитано {done} з {frames} — запуск дочитає решту")
 
 
 @op("read.start", summary="Прочитати справу рукописним рушієм", args=ReadArgs,
