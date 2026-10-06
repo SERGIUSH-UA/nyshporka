@@ -131,6 +131,8 @@ repositories:
     country: UA
     codes:
       babynyar: "38"
+      duck: ДАЖО
+      commons: ДАЖО
 
   DACHO:
     label: ДАЧО
@@ -213,6 +215,8 @@ repositories:
     country: UA
     codes:
       babynyar: "16"
+      duck: ДАК
+      commons: ДАК
   DAKO:
     label: ДАКО
     name: Державний архів Київської області
