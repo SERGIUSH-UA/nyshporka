@@ -1015,6 +1015,36 @@ class ParishFindArgs(BaseModel):
 _LATIN = re.compile(r"[A-Za-zÀ-ɏ]")
 
 
+#: Скільки парафій Шадих показувати поруч із парафіями покажчика.
+SZADY_SHOWN = 5
+#: Найнижчий бал збігу назви в базі Шади (кирилиця проти польської латинки
+#: дає ~75 на тій самій назві: «Липовеньке» → Lipoweńkie).
+SZADY_MIN_SCORE = 70
+
+
+def _szady(q: str) -> tuple[list[dict[str, Any]], bool]:
+    """Парафії ~1772 з газетира Шади за назвою села — і чи є сам газетир.
+
+    Польські й уніатські парафії XVIII ст. лежать у базі Шади польською назвою
+    з варіантами й деканатом. Покажчику ці назви не віддаються (латинку він
+    відкидає), але людині й агентові вони — окремий канал книг (`church.card`).
+    """
+    try:
+        from nyshporka.catalog.query import CatalogMissing, find_churches
+
+        rows = find_churches(q, limit=SZADY_SHOWN * 2).rows
+    except CatalogMissing:
+        return [], False
+    except Exception:            # битий пак не валить пошук парафії
+        return [], False
+    keep = [r for r in rows if int(r.get("score") or 0) >= SZADY_MIN_SCORE]
+    return [{"ob_id": r.get("ob_id"), "name": r.get("name") or "",
+             "name_v": r.get("name_v") or "", "deanery": r.get("deanery") or "",
+             "confession": r.get("confession") or "",
+             "voivodeship": r.get("voivodeship_uk") or r.get("voivodeship") or ""}
+            for r in keep[:SZADY_SHOWN]], True
+
+
 def _place_forms(q: str, also: list[str]) -> tuple[list[str], list[str], list[str]]:
     """Форми назви для покажчика: правила, довідники, людина.
 
@@ -1074,9 +1104,13 @@ def parish_find(a: ParishFindArgs) -> Envelope:
     except SourceError as exc:
         return fail(str(exc))
 
+    szady, szady_ok = _szady(a.q)
+    if szady_ok:
+        asked = [*asked, "churches"]
     data: dict[str, Any] = {"forms": forms, "forms_from_gazetteer": from_books,
                             "gazetteers": asked,
                             "parishes": [_parish_row(p) for p in found.values()],
+                            "szady": szady,
                             "books": {}}
     cut_books: dict[str, tuple[str, ...]] = {}
     if a.books:
@@ -1111,6 +1145,10 @@ def parish_find(a: ParishFindArgs) -> Envelope:
                  f"парафій {len(found)} — це РІЗНІ конфесії одного поселення, і "
                  "книги їхні лежать у різних справах; тег конфесії буває хибний, "
                  "тож вір назві парафії")
+    if szady:
+        env.suggest("church.card", f"парафія ~1772 з бази Шади "
+                                   f"({szady[0]['name']}, ob_id {szady[0]['ob_id']}): "
+                                   f"присвята, сусіди й де її книги")
     env.suggest("parish.near", "подивитись, що є по сусідніх селах кола")
     return env
 

@@ -72,6 +72,13 @@ def cmd_find(
         typer.echo(f"  · {p.get('title')}")
         typer.echo(f"    книг {p.get('cases')}; "
                    f"теги {', '.join(p.get('tags') or []) or '—'}")
+    szady = data.get("szady") or []
+    if szady:
+        typer.echo(f"\n🏛 база Шади (~1772): {len(szady)}")
+        for c in szady:
+            alt = f" (вар. {c['name_v']})" if c.get("name_v") else ""
+            typer.echo(f"  · {c['name']}{alt} · деканат {c.get('deanery') or '—'}"
+                       f" · `nysh church card {c['ob_id']}`")
     for title, rows in (data.get("books") or {}).items():
         typer.echo(f"\n📕 {str(title)[:70]} → {len(rows)} справ")
         _cases(rows, limit)

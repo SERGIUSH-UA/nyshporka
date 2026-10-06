@@ -306,3 +306,24 @@ def test_parish_search_uses_gazetteer_forms(catalog):
     # Покажчик відкидає латинку відмовою на ВЕСЬ запит: польська назва лишається
     # в довідці, але в запит не йде.
     assert "Szumiłów" in extra and "Szumiłów" not in forms
+
+
+def test_parish_find_shows_szady_parishes(catalog, monkeypatch):
+    """Польські й уніатські парафії ~1772 з бази Шади — окремим блоком: покажчику
+    їхні латинські назви не віддаються, а людині це окремий канал книг."""
+    from nyshporka import ops_catalog as OC
+
+    asked: list[str] = []
+
+    class _Duck:
+        def parishes(self, form: str) -> list:
+            asked.append(form)
+            return []
+
+    monkeypatch.setattr(OC, "_duck", lambda: _Duck())
+    env = OC.parish_find(OC.ParishFindArgs(q="Шумилів", books=False))
+    names = [c["name"] for c in env.data["szady"]]
+    assert "Szumiłów" in names and "churches" in env.data["gazetteers"]
+    assert not any(any("a" <= ch.lower() <= "z" for ch in f) for f in asked), \
+        "латинка в покажчик не йде"
+    assert any(s.op == "church.card" for s in env.next)
