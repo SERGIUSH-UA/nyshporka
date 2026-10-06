@@ -103,4 +103,4 @@ def notes(env: Any, indent: str = "") -> None:
         seen = "; ".join(c.human() for c in env.coverage)
         console.print(f"{indent}[muted]🔎 шукали в: {_plain(seen)}[/muted]")
     for n in env.next:
-        console.print(f"{indent}[accent]→ далі:[/accent] [muted]{n.op} — {_plain(n.why)}[/muted]")
+        console.print(f"{indent}[accent]→ далі:[/accent] [muted]{_plain(n.human())}[/muted]")

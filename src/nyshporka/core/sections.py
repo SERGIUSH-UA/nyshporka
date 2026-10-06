@@ -219,6 +219,8 @@ OP_SCREEN: dict[str, str] = {
     # material
     "sources.list": "sources",
     "catalog.search": "sources",
+    "catalog.sweep": "sources",
+    "catalog.crawl": "sources",
     "catalog.browse": "sources",
     "catalog.manifest": "sources",
     "acquire.start": "sources",

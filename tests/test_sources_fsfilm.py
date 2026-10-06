@@ -158,6 +158,50 @@ def test_search_walks_the_sheet_index(src: FilmMirrorSource) -> None:
     assert h.acquirable
 
 
+def test_search_reads_the_region_index_not_the_tree(src: FilmMirrorSource) -> None:
+    """🔴 Пошук розгортав дерева всіх регіонів: 4,4 ГБ і 12 с щоразу (07.10.2026).
+
+    Дерево розгортається один раз — на побудову покажчика-супутника — і не
+    тримається; далі пошук читає лише супутника.
+    """
+    from nyshporka.sources.fsfilm import INDEX_SUFFIX
+
+    first = src.search("Ракулешты")
+    idx = src.cache_dir / f"moldova{INDEX_SUFFIX}"
+    assert idx.is_file(), "супутника не збудовано"
+    assert not src._trees, "пошук тримає розгорнуте дерево"
+
+    built = idx.stat().st_mtime_ns
+    import nyshporka.sources.fsfilm as F
+
+    def _no(*_a: object, **_k: object) -> None:
+        raise AssertionError("дерево розгорнуто вдруге")
+
+    orig = F._decode_tree
+    F._decode_tree = _no  # type: ignore[assignment]
+    try:
+        again = src.search("Ракулешты")
+    finally:
+        F._decode_tree = orig
+    assert [h.ref for h in again] == [h.ref for h in first]
+    assert idx.stat().st_mtime_ns == built
+
+
+def test_a_fresher_tree_rebuilds_the_index(src: FilmMirrorSource) -> None:
+    """Оновлене дерево (`tree(refresh=True)`) не сміє шукатись по старому супутнику."""
+    import os
+
+    from nyshporka.sources.fsfilm import INDEX_SUFFIX
+
+    src.search("Ракулешты")
+    idx = src.cache_dir / f"moldova{INDEX_SUFFIX}"
+    old = idx.stat().st_mtime_ns
+    blob = src.cache_dir / "moldova.json.gz"
+    os.utime(blob, ns=(old + 10**9, old + 10**9))
+    src.search("Ракулешты")
+    assert idx.stat().st_mtime_ns > old
+
+
 def test_search_is_insensitive_to_yo(src: FilmMirrorSource) -> None:
     """У покажчику «ё» пишуть і як «е» — це один і той самий населений пункт."""
     assert src.search("Оргеев", regions=["moldova"])

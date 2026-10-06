@@ -584,7 +584,14 @@ def _catalog_basis(src: Any) -> dict[str, Any]:
     fn = getattr(src, "catalog_source", None)
     searchable = "search" in getattr(src, "caps", ())
     out: dict[str, Any] = {"searchable": searchable, "kind": "none",
-                           "taken": "", "rows": None, "scope": "", "fix": ""}
+                           "taken": "", "rows": None, "scope": "", "fix": "",
+                           # Без каталогу шукає живим запитом сайту, а не
+                           # відмовляє — тож «нема на чому» про нього неправда.
+                           "live": bool(getattr(src, "live_fallback", False)),
+                           # Каталог збирається кнопкою (`catalog.crawl`): обхід
+                           # є, а файла від автора списку не треба.
+                           "crawlable": (hasattr(src, "crawl")
+                                         and not hasattr(src, "import_list"))}
     if fn is None:
         return out
     try:
@@ -946,15 +953,22 @@ def catalog_search(a: CatalogSearchArgs) -> Envelope:
     basis: list[dict[str, Any]] = []
     #: Хто дав нуль і що саме цей нуль доводить.
     zeros: list[dict[str, str]] = []
-    for src in picked:
-        if src is None or not supports(src, "search"):
+    asked = [s for s in picked if s is not None and supports(s, "search")]
+    answers = _ask_sources(asked, a.q, a.limit)
+    stopped = False
+    for src, got in zip(asked, answers, strict=True):
+        if got is None:
+            # Спинили раніше, ніж джерело відповіло. Це не нуль і не відмова
+            # джерела — його просто не дочекались, і знаменник мусить це знати.
+            stopped = True
+            unavailable.append({"source": src.id,
+                                "why": "пошук спинено раніше, ніж джерело відповіло"})
             continue
-        try:
-            found = src.search(a.q, limit=a.limit)
-        except SourceError as exc:
+        found, exc = got
+        if isinstance(exc, SourceError):
             unavailable.append({"source": src.id, "why": str(exc)})
             continue
-        except Exception as exc:  # мережа, розмітка, побитий кеш
+        if exc is not None:  # мережа, розмітка, побитий кеш
             unavailable.append({"source": src.id, "why": f"{type(exc).__name__}: {exc}"})
             continue
         searched.append(src.id)
@@ -1032,8 +1046,155 @@ def catalog_search(a: CatalogSearchArgs) -> Envelope:
         env.warn("address_not_found",
                  f"«{a.q}» схоже на шифру, але такої справи немає ні в "
                  f"бібліотеці, ні в реєстрі опису — шукали текстом")
+    if stopped:
+        env.data["stopped"] = True
+        env.warn("catalog_stopped",
+                 "пошук спинено: джерела, що не встигли відповісти, не опитано — "
+                 "їхнього нуля тут немає", level=ALERT)
     _warn_once(env, hits=hits, searched=searched,
                unavailable=unavailable, truncated=truncated)
+    return env
+
+
+def _ask_sources(srcs: list[Any], q: str,
+                 limit: int) -> list[tuple[Any, BaseException | None] | None]:
+    """Спитати всі джерела ОДНОЧАСНО; відповіді — у порядку `srcs`.
+
+    🔴 Поспіль пошук тривав суму всіх джерел: 55 с на «Липовеньке», з них 38 —
+    Internet Archive, який навмисно ходить чергою (три запити на три секунди
+    на всю машину), і 14 — перше читання дерев плівок FS. Разом він триває
+    стільки, скільки найповільніше джерело, а черги до сайтів лишаються
+    своїми: обмежувач запитів міжпроцесний, файловим замком, тож потоки його
+    не обходять.
+
+    🔴 Порядок відповіді — порядок джерел, а не порядок, у якому вони
+    відповіли. Видача ріжеться стелею `limit`, і інакше той самий запит давав
+    би різні знахідки залежно від того, чий сервер сьогодні швидший.
+
+    ⚠ Кожне джерело — у власній копії контексту: простір, приймач поступу й
+    знімки переліків живуть у контекстних змінних, а голий потік їх не бачить.
+    Поступ звітує лише цей потік, бо приймач черги чекає саме його.
+
+    `None` у відповіді — джерело, якого не дочекались, бо пошук спинили.
+    """
+    import concurrent.futures as cf
+    import contextvars
+
+    from nyshporka.core import progress as P
+
+    if not srcs:
+        return []
+    out: list[tuple[Any, BaseException | None] | None] = [None] * len(srcs)
+    pool = cf.ThreadPoolExecutor(max_workers=len(srcs),
+                                 thread_name_prefix="catalog-search")
+    futs = {pool.submit(contextvars.copy_context().run, s.search, q, limit=limit): i
+            for i, s in enumerate(srcs)}
+    pending = set(futs)
+    try:
+        while pending:
+            done, pending = cf.wait(pending, timeout=0.5,
+                                    return_when=cf.FIRST_COMPLETED)
+            for f in done:
+                exc = f.exception()
+                out[futs[f]] = (None, exc) if exc is not None else (f.result(), None)
+            if pending:
+                # Хто ще не відповів — поіменно: «7 із 9» без імен не каже,
+                # чого саме чекаємо, і хвилина Internet Archive виглядає як
+                # зависання всього пошуку.
+                waiting = sorted(str(getattr(srcs[futs[f]], "label", "") or srcs[futs[f]].id)
+                                 for f in pending)
+                P.report(len(srcs) - len(pending), len(srcs),
+                         "чекаємо: " + ", ".join(waiting))
+                if P.stopped():
+                    break
+    finally:
+        # Не чекати недоопитаних: спинене джерело доробить у фоні, і його
+        # відповідь просто нікуди не піде.
+        pool.shutdown(wait=False, cancel_futures=True)
+    return out
+
+
+# `agent=False`, як у `search.sweep`: черга живе в процесі застосунку, а агент
+# має той самий пошук синхронно — `catalog.search`.
+@op("catalog.sweep", summary="Де взагалі є щось про моє село — робота в черзі",
+    args=CatalogSearchArgs, mutates=False, long=True, agent=False, section="material")
+def catalog_sweep(a: CatalogSearchArgs) -> Envelope:
+    """Той самий пошук по каталогах, але роботою з поступом по джерелах.
+
+    🔴 Навіщо друга операція. Пошук триває стільки, скільки найповільніше
+    джерело, а Internet Archive ходить чергою до archive.org — пів хвилини й
+    довше. Синхронний запит усі ці секунди показував «Хвилинку…», і відрізнити
+    повільне джерело від зависання було нічим. Робота каже, кого ще чекаємо, і
+    її можна спинити.
+
+    ⚠ Тіло — той самий `catalog_search`: дві реалізації одного пошуку давали б
+    різні відповіді залежно від того, звідки спитали.
+    """
+    return catalog_search(a)
+
+
+class CrawlArgs(BaseModel):
+    source: str = Field(description="id джерела, чий каталог зібрати обходом")
+    fresh: bool = Field(default=False, description="почати наново, а не продовжити")
+
+
+class _CrawlStopped(Exception):
+    """Обхід спинено між кроками — після того, як джерело записало свій стан."""
+
+
+@op("catalog.crawl", summary="Зібрати каталог джерела — робота в черзі",
+    args=CrawlArgs, mutates=True, long=True, agent=False, section="material")
+def catalog_crawl(a: CrawlArgs) -> Envelope:
+    """Зібрати каталог обходом сайту — те саме, що `nysh crawl`, але кнопкою.
+
+    🔴 Доти перелік джерел казав людині з браузера «обходу немає — пошук
+    недоступний» і показував команду терміналу. Набирати її нема куди, тож
+    джерело лишалось сліпим назавжди — рівно для того, хто терміналом не
+    користується.
+
+    🔴 Спинити можна, і це безпечно: джерело кличе приймач поступу ПІСЛЯ того,
+    як записало пройдений фонд чи опис, тож зупинка з приймача не рве
+    недописаний рядок. Наступний запуск продовжує з місця зупинки.
+
+    ⚠ Каталог, що приходить файлом від автора списку (`import_list`), кнопкою
+    не збирається: файл лежить у людини, а не на сайті.
+    """
+    from nyshporka.core import progress as P
+    from nyshporka.sources.base import SourceError
+
+    src = _registry().get(a.source)
+    if src is None:
+        return fail(f"джерела {a.source!r} немає")
+    if hasattr(src, "import_list"):
+        return fail(f"каталог «{src.label}» не обходиться, а кладеться файлом від "
+                    f"автора списку: `nysh crawl {src.id} --from <файл>`")
+    if not hasattr(src, "crawl"):
+        return fail(f"джерело «{src.label}» обходу не потребує — шукає одразу")
+
+    def tick(done: int = 0, total: int = 0, note: str = "", unit: str = "",
+             **_: Any) -> None:
+        P.report(done, total, " · ".join(x for x in (unit, note) if x))
+        if P.stopped():
+            raise _CrawlStopped
+
+    try:
+        stats = src.crawl(None, on_progress=tick, resume=not a.fresh)
+    except _CrawlStopped:
+        env = ok({"source": src.id, "stopped": True})
+        env.warn("crawl_stopped",
+                 "обхід спинено — каталог зібрано не до кінця; «Зібрати» ще раз "
+                 "докінчить його", level=ALERT)
+        return env
+    except SourceError as exc:
+        return fail(str(exc))
+    env = ok({"source": src.id, **stats})
+    if stats.get("short"):
+        # Неповний опис — частина відповіді: без цього рядка каталог виглядав
+        # би повним, і нуль пошуку по ньому читався б як «справи немає».
+        env.warn("crawl_short",
+                 f"описів, що віддали менше справ, ніж обіцяє сам сайт: "
+                 f"{stats['short']}; наступне «Зібрати» перечитає лише їх",
+                 level=ALERT)
     return env
 
 

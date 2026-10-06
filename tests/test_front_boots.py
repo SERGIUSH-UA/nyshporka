@@ -108,7 +108,12 @@ globalThis.__EMPTY_SPACE = false;
 globalThis.__NO_PROFILE = false;
 const FRAMES = [{ id: 'a.jpg', label: 'a.jpg', kind: 'image' },
                 { id: 'b.jpg', label: 'b.jpg', kind: 'image' }];
-globalThis.fetch = async (url) => {
+globalThis.fetch = async (url, opts) => {
+  // Які операції екран справді покликав і з чим — щоб перевіряти не лише
+  // намальоване, а й запит, що пішов на сервер.
+  if (String(url).includes('/api/op/')) {
+    (globalThis.__OPS ||= []).push([String(url).split('/api/op/')[1], (opts || {}).body || '']);
+  }
   // 🔴 Довге очікування черги мусить висіти, як на справжньому сервері. Якщо
   // відповідати миттєво, вічний цикл спостерігача перетворюється на щільний
   // потік мікрозадач: макрозадачі (таймери) не отримують ходу взагалі, і
@@ -120,6 +125,7 @@ globalThis.fetch = async (url) => {
                      runs: [{ name: 'прогін', engine_id: 'pysar',
                               pages_done: 2, alt: '' }] },
     'case.frame': { width: 9, height: 9, bytes: 9, image: 'data:image/jpeg;base64,AA' },
+    'catalog.sweep': { job_id: 'cs1' },
     'library.list': { cases: [], built: true, summary: {}, facets: {},
                       total: 0, page: 0, page_size: 50, pages: 0 },
     'runs.list': { runs: [{ name: 'прогін', case_dir: 'c', engine_id: 'pysar',
@@ -182,8 +188,11 @@ globalThis.fetch = async (url) => {
                      rows: 9020, scope: '', fix: '' } },
         { id: 'x', label: 'Ікс', caps: ['search'],
           catalog: { searchable: true, kind: 'none', taken: '', rows: null,
-                     scope: '', fix: 'nysh crawl x' } }],
-      shown: 2, searchable: 2, with_catalog: 1 },
+                     scope: '', fix: 'nysh crawl x', crawlable: true } },
+        { id: 'y', label: 'Ігрек', caps: ['search'],
+          catalog: { searchable: true, kind: 'none', taken: '', rows: null,
+                     scope: '', fix: 'nysh crawl y', live: true, crawlable: true } }],
+      shown: 3, searchable: 3, with_catalog: 1 },
     'page.text': { name: 'прогін', engine_id: 'pysar', model: 'pysar_cyr_v4.pt',
                    pages: [{ page: 'a.jpg', lines: 2 }, { page: 'b.jpg', lines: 2 }],
                    lines: ['перший рядок', 'другий рядок'] },
@@ -435,7 +444,12 @@ for (const name of ['cases', 'fonds', 'sources', 'read', 'search', 'settings',
     out.fondsShowsSummary = html.includes('зі сканом') && html.includes('обрізано');
   }
   // Каталоги мусять назвати, на чому шукали, до будь-якого запиту.
-  if (name === 'sources') out.sourcesShowBasis = html.includes('nysh crawl x');
+  if (name === 'sources') {
+    out.sourcesShowBasis = html.includes('каталог не зібрано')
+      && html.includes('data-act="sources.crawl" data-arg="x"');
+    out.sourcesNoCommand = !html.includes('nysh crawl');
+    out.sourcesLiveIsNotBlind = html.includes('живий пошук сайту');
+  }
   // Картка справи мусить назвати причину письма, а не саме лише письмо.
   if (name === 'read') out.readShowsWhy = html.includes('опису справи');
   // Пошук мусить сказати, скільки прогонів поза індексом, до запиту.
@@ -644,6 +658,25 @@ await new Promise((r) => setTimeout(r, 30));
 out.jobsReadToCase = /data-act="jobs.case" data-arg="c"/.test(document.getElementById('jobs').innerHTML || '');
 globalThis.__JOBS = [];
 globalThis.__CASE_INFO = null;
+
+// ── порада «Каталоги →» з картки села: екран відкривається з селом і шукає ──
+{
+  const { OP_SCREEN } = await import('./core/registry.js');
+  OP_SCREEN['catalog.search'] = 'sources';
+  globalThis.__OPS = [];
+  globalThis.__FORM = { q: 'Липовеньке' };
+  globalThis.__JOBS = [{ id: 'cs1', kind: 'catalog.sweep', state: 'done', updated: nowS,
+    cfg: { q: 'Липовеньке' }, warnings: [],
+    result: { hits: [{ source: 'archium', title: 'КНИГА ЛИПОВЕНЬКОГО' }], fonds: [],
+              coverage: { searched: ['archium'] } } }];
+  await ACTIONS.next(null, { dataset: { arg: 'catalog.search', seed: '{"q":"Липовеньке"}' } });
+  await new Promise((r) => setTimeout(r, 60));
+  const sweep = globalThis.__OPS.find(([n]) => n === 'catalog.sweep');
+  out.seedRunsSearch = !!sweep && String(sweep[1]).includes('Липовеньке');
+  out.seedShowsHits = (document.getElementById('hits').innerHTML || '').includes('КНИГА ЛИПОВЕНЬКОГО');
+  globalThis.__FORM = null;
+  globalThis.__JOBS = [];
+}
 
 console.log('@@' + JSON.stringify(out));
 // 🔴 Вихід явний. Застосунок навмисно тримає вічний цикл спостереження за
@@ -907,11 +940,34 @@ def test_catalogues_name_what_they_searched_before_the_query(probe) -> None:
     """🔴 «Нічого не знайшлось» без переліку оглянутого не є відповіддю.
 
     Джерело, яке вміє шукати й не має каталогу, мусить бути назване поіменно —
-    разом із командою, якою це лікується, — до пошуку, а не після одинадцяти
-    секунд очікування.
+    разом зі способом це полагодити, — до пошуку, а не після одинадцяти секунд
+    очікування. Спосіб — кнопка «Зібрати каталог», а не команда терміналу:
+    людині з браузера набирати її нема куди (холодний прохід 07.10.2026).
     """
     assert probe.get("sourcesShowBasis"), (
-        "екран каталогів не назвав джерело без обходу й спосіб це полагодити")
+        "екран каталогів не назвав джерело без обходу й кнопку, що це лікує")
+    assert probe.get("sourcesNoCommand"), "людині показано команду терміналу"
+
+
+def test_a_next_step_with_a_query_opens_the_screen_searching_it(probe) -> None:
+    """🔴 «Каталоги →» з картки села відкривали порожнє поле (07.10.2026).
+
+    Порада знала село, а людина набирала його вдруге. Тепер кнопка несе запит
+    (`data-seed`), екран ставить його в поле й одразу шукає — роботою в черзі.
+    """
+    assert probe.get("seedRunsSearch"), "екран не запустив пошук із запитом поради"
+    assert probe.get("seedShowsHits"), "видача пошуку з поради не намалювалась"
+
+
+def test_live_fallback_is_not_called_blind(probe) -> None:
+    """🔴 ARCHIUM без каталогу шукає живим пошуком сайту.
+
+    Перелік джерел казав про нього «пошук недоступний» — поруч зі знахідками з
+    того самого джерела. Нуль і знахідки від джерела, названого сліпим, людина
+    не має як зважити.
+    """
+    assert probe.get("sourcesLiveIsNotBlind"), (
+        "джерело з живим пошуком назване таким, що шукати не може")
 
 
 def test_the_read_card_names_why_it_thinks_so(probe) -> None:

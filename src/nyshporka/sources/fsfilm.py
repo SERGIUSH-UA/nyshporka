@@ -194,6 +194,26 @@ def film_entries(tree: dict[str, Any], path: str, film: str) -> list[dict[str, A
     return out
 
 
+#: Покажчик-супутник регіону поруч із його деревом (`<регіон>.json.gz`).
+INDEX_SUFFIX = ".index.tsv.gz"
+INDEX_COLS = ("region", "film", "path", "delo", "soder", "name", "listy",
+              "start", "end", "end_inferred", "frames")
+
+
+def _decode_tree(blob: Path) -> dict[str, Any]:
+    """Дерево регіону з кешованого блоба — без запису в екземпляр."""
+    data = json.loads(_gunzip_capped(blob.read_bytes(),
+                                     MAX_TREE_JSON_BYTES).decode("utf-8"))
+    tree: dict[str, Any] = data["tree"]
+    tree["_rootId"] = data.get("rootId", "")
+    return tree
+
+
+def _flat(v: Any) -> str:
+    """Табуляція й переводи рядка в полі розірвали б TSV — рядок зсунувся б."""
+    return " ".join(str(v or "").split())
+
+
 def _fold(s: str) -> str:
     return s.casefold().replace("ё", "е").replace("є", "е").replace("i", "и")
 
@@ -291,12 +311,50 @@ class FilmMirrorSource:
                 tmp.replace(blob)
             finally:
                 tmp.unlink(missing_ok=True)
-        data = json.loads(_gunzip_capped(blob.read_bytes(),
-                                         MAX_TREE_JSON_BYTES).decode("utf-8"))
-        tree: dict[str, Any] = data["tree"]
-        tree["_rootId"] = data.get("rootId", "")
+        tree = _decode_tree(blob)
         self._trees[slug] = tree
         return tree
+
+    def _region_index(self, slug: str) -> Path | None:
+        """Покажчик-супутник регіону: лише поаркушеві записи, стиснутим TSV.
+
+        🔴 Пошук розгортав дерева всіх кешованих регіонів цілком: 28 дерев —
+        40 МБ на диску, 4,4 ГБ у пам'яті процесу й 12 с на кожен пошук (замір
+        07.10.2026). Шукає ж він лише назви з поаркушевого покажчика, а той є в
+        одному регіоні з двадцяти восьми. Тож дерево розгортається ОДИН раз —
+        коли воно новіше за супутника, — і зразу відпускається; далі пошук
+        читає кілька мегабайтів рядків.
+
+        Супутник лежить поруч із деревом і перебудовується сам, щойно дерево
+        оновили (`tree(refresh=True)` пише новий файл). Регіону без кешованого
+        дерева — `None`.
+        """
+        blob = self.cache_dir / f"{slug}.json.gz"
+        if not blob.is_file() or not blob.stat().st_size:
+            return None
+        idx = self.cache_dir / f"{slug}{INDEX_SUFFIX}"
+        if idx.is_file() and idx.stat().st_mtime_ns >= blob.stat().st_mtime_ns:
+            return idx
+        # ⚠ Не через `tree()`: той тримає дерево в екземплярі, і пошук по всіх
+        # регіонах тримав би їх усі разом — рівно ті гігабайти.
+        tree = self._trees.get(slug) or _decode_tree(blob)
+        buf = io.StringIO()
+        w = csv.writer(buf, delimiter="\t", lineterminator="\n")
+        w.writerow(INDEX_COLS)
+        for path, nd in tree.items():
+            if not isinstance(nd, dict) or not nd.get("folder_meta"):
+                continue
+            for film in nd["folder_meta"]:
+                for r in film_entries(tree, path.rstrip("/"), film):
+                    if r["start"] is None or not r["name"]:
+                        continue
+                    w.writerow([slug, film, r["path"], _flat(r["delo"]), _flat(r["soder"]),
+                                _flat(r["name"]), _flat(r["listy"]), r["start"],
+                                "" if r["end"] is None else r["end"],
+                                int(bool(r["end_inferred"])), r["frames"] or ""])
+        del tree
+        atomic_write_bytes(idx, gzip.compress(buf.getvalue().encode("utf-8")))
+        return idx
 
     # ── адресація ────────────────────────────────────────────────────────────
 
@@ -378,30 +436,27 @@ class FilmMirrorSource:
         out: list[Hit] = []
         for slug in slugs:
             try:
-                tree = self.tree(slug)
-            except (SourceError, OSError, ValueError):
+                idx = self._region_index(slug)
+            except (SourceError, OSError, ValueError, KeyError):
                 continue
-            for path, nd in tree.items():
-                if not isinstance(nd, dict) or not nd.get("folder_meta"):
-                    continue
-                for film in nd["folder_meta"]:
-                    for r in film_entries(tree, path.rstrip("/"), film):
-                        if r["start"] is None or not r["name"]:
-                            continue
-                        if needle not in _fold(r["name"]):
-                            continue
-                        out.append(Hit(
-                            source=self.id,
-                            ref=f"{slug}/{r['path']}",
-                            title=f"{r['name']} · {r['listy']}",
-                            years=r["soder"],
-                            place=r["name"],
-                            shifra=r["delo"],
-                            frames=r["frames"] or None,
-                            acquirable=True,
-                            note=f"плівка {film}, регіон {slug}"))
-                        if len(out) >= limit:
-                            return out
+            if idx is None:
+                continue
+            with gzip.open(idx, "rt", encoding="utf-8", newline="") as fh:
+                for row in csv.DictReader(fh, delimiter="\t"):
+                    if needle not in _fold(row["name"]):
+                        continue
+                    out.append(Hit(
+                        source=self.id,
+                        ref=f"{slug}/{row['path']}",
+                        title=f"{row['name']} · {row['listy']}",
+                        years=row["soder"],
+                        place=row["name"],
+                        shifra=row["delo"],
+                        frames=int(row["frames"]) if row["frames"].isdigit() else None,
+                        acquirable=True,
+                        note=f"плівка {row['film']}, регіон {slug}"))
+                    if len(out) >= limit:
+                        return out
         return out
 
     # ── вкладений покажчик ───────────────────────────────────────────────────

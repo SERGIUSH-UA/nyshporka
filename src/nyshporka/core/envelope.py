@@ -61,9 +61,22 @@ class NextStep:
     why: str
     #: `agent` — порада лише агентові; консоль кнопки не показує.
     level: str = NOTE
+    #: З чим іти далі: кнопка консолі відкриває екран уже з цим запитом.
+    #: 🔴 Доти «Каталоги →» з картки села відкривали порожнє поле, і назву села
+    #: людина набирала вдруге — хоча відповідь, що радила крок, її знала.
+    args: dict[str, Any] | None = field(default=None, hash=False, compare=False)
 
-    def as_dict(self) -> dict[str, str]:
-        return {"op": self.op, "why": self.why, "level": self.level}
+    def as_dict(self) -> dict[str, Any]:
+        out: dict[str, Any] = {"op": self.op, "why": self.why, "level": self.level}
+        if self.args:
+            out["args"] = dict(self.args)
+        return out
+
+    def human(self) -> str:
+        """Рядком для терміналу й агента — з аргументами, якщо вони є."""
+        tail = (" (" + ", ".join(f"{k}={v!r}" for k, v in self.args.items()) + ")"
+                if self.args else "")
+        return f"{self.op}{tail} — {self.why}"
 
 
 @dataclass(frozen=True)
@@ -140,8 +153,9 @@ class Envelope:
         self.coverage.extend(items)
         return self
 
-    def suggest(self, op: str, why: str, level: str = "") -> Envelope:
-        self.next.append(NextStep(op, why, level or NOTE))
+    def suggest(self, op: str, why: str, level: str = "",
+                args: dict[str, Any] | None = None) -> Envelope:
+        self.next.append(NextStep(op, why, level or NOTE, dict(args) if args else None))
         return self
 
     def stale_because(self, reasons: list[str], fix: str = "") -> Envelope:
@@ -203,7 +217,7 @@ class Envelope:
             # результат як негатив, а негатив закриває напрям пошуку.
             lines.append("🔎 шукали в: "
                          + "; ".join(c.human() for c in self.coverage))
-        lines += [f"→ далі: {n.op} — {n.why}" for n in self.next]
+        lines += [f"→ далі: {n.human()}" for n in self.next]
         return "\n".join(lines)
 
 

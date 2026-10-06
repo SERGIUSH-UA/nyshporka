@@ -29,6 +29,7 @@ SCREENS.jobs = async () => {
 Object.assign(ACTIONS, {
   /** Завершений пошук — показати його видачу на «Пошуку», а не числом тут. */
   'jobs.search': (_ev, elm) => goto('search', { job: elm.dataset.job }),
+  'jobs.sources': (_ev, elm) => goto('sources', { job: elm.dataset.job }),
   /** Читання — на картку справи, де його можна змінити чи доповнити голосом. */
   'jobs.case': (_ev, elm) => goto('read', { case_dir: elm.dataset.arg }),
 

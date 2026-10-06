@@ -60,7 +60,7 @@ SCREENS.geog = async () => {
     <div id="churchhits"></div>
     <h3>${t('catalog.title')}</h3>
     <table><tbody>${ok.map((x) => `<tr>
-      <td class="mono">${esc(x.pack_id)}</td>
+      <td>${x.archive_label ? `<b>${esc(x.archive_label)}</b> ` : ''}<span class="mono muted">${esc(x.pack_id)}</span></td>
       <td>${x.taken ? `зріз ${esc(x.taken)}` : ''}</td>
       <td class="muted">${esc(x.note || '')}</td>
     </tr>`).join('')}</tbody></table>
@@ -137,6 +137,7 @@ Object.assign(ACTIONS, {
       ${renderWarnings(env)}
       ${places.length ? '' : `<p><b>${t('geog.nothing')}</b></p>`}
       <table><tbody>${places.map((pl) => `<tr>
+        <td>${esc(pl.archive_label || '')}</td>
         <td>${esc(pl.institution || '')}</td>
         <td><b>${esc(pl.village_uk)}</b><br>
             <span class="muted">${esc(pl.village_ru || '')}</span></td>
@@ -242,6 +243,7 @@ Object.assign(ACTIONS, {
         ${t('geog.after')}: ${esc(pl.uezd_gub || '—')} ·
         ${t('geog.modern')}: ${esc(pl.modern_place || '—')}
         ${pl.church ? ` · ${t('geog.church')}: ${esc(pl.church)}` : ''}
+        ${pl.archive_label ? ` · ${t('geog.archive')}: <b>${esc(pl.archive_label)}</b>` : ''}
       </p>
       ${renderWarnings(env)}
       ${pl.location && pl.location.lat != null ? `<p class="muted">📍 ${Number(pl.location.lat).toFixed(4)}, ${Number(pl.location.lng).toFixed(4)}
@@ -251,7 +253,7 @@ Object.assign(ACTIONS, {
       <p><b>${cases.length}</b> ${t('geog.cases')}, ${t('geog.ondisk')} <b>${pl.n_on_disk || 0}</b></p>
       <table><tbody>${cases.map((c) => `<tr>
         <td>${c.on_disk ? '✓' : '·'}</td>
-        <td class="mono">${esc(c.shifra)}</td>
+        <td class="mono"><span class="muted">${esc(c.archive_label || '')}</span> ${esc(c.shifra)}</td>
         <td>${c.year_from ? `${esc(c.year_from)}–${esc(c.year_to)}` : ''}</td>
         <td>${esc(c.doc_type || '')}</td>
         <td class="muted">${esc(c.parish || '')}</td>

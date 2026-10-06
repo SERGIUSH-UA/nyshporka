@@ -2,7 +2,7 @@
 import { t, LANG } from './strings.js';
 import { callOp, FINAL_STATES } from './net.js';
 import { esc, el, setView, curGen, bumpGen, alive, maskot,
-  splitWarnings, notesBlock } from './view.js';
+  splitWarnings, notesBlock, seedAttr } from './view.js';
 import { SCREENS, OP_SCREEN } from './registry.js';
 import { ST } from './state.js';
 import { ic } from '/ui/icons.js';
@@ -282,7 +282,9 @@ function jobNotes(j) {
       continue;
     }
     const label = t(NAV_LABEL[scr] || scr);
-    notes.push(`<div class="warn next"><button data-act="nav" data-arg="${esc(scr)}">`
+    // Та сама дія, що в поради конверта (`next`), — щоб і тут кнопка несла
+    // запит на екран, а не відкривала його порожнім.
+    notes.push(`<div class="warn next"><button data-act="next" data-arg="${esc(n.op)}"${seedAttr(n)}>`
       + `${esc(label)} →</button> <span>${esc(n.why || '')}</span></div>`);
   }
   return notes.join('') + notesBlock(extra);
@@ -316,7 +318,7 @@ function jobResult(j) {
 }
 
 /** Поля, чий нуль не є новиною: він означає «нічого такого не траплялось». */
-const ZERO_IS_NOISE = ['kept', 'skipped', 'errors', 'failed'];
+const ZERO_IS_NOISE = ['kept', 'skipped', 'errors', 'failed', 'short'];
 
 async function refreshJobs() {
   const res = await fetch(`/api/jobs?since=${cursor}`);
@@ -391,6 +393,23 @@ function hhmm(sec) {
 }
 
 /**
+ * «Показати результат» — для пошуків, чия відповідь живе на їхньому екрані.
+ *
+ * Спинений пошук по каталогах теж має відповідь (ті джерела, що встигли),
+ * тож кнопка є і в нього; спинений пошук по прочитаному не доводить нічого.
+ */
+function showResult(j) {
+  const label = t('jobs.search.show');
+  if (j.kind === 'search.sweep' && j.state === 'done') {
+    return `<button class="ctl-sm" data-act="jobs.search" data-job="${esc(j.id)}">${label}</button>`;
+  }
+  if (j.kind === 'catalog.sweep' && j.result) {
+    return `<button class="ctl-sm" data-act="jobs.sources" data-job="${esc(j.id)}">${label}</button>`;
+  }
+  return '';
+}
+
+/**
  * Завершене — рядками під одним розкриттям, збої названо в заголовку.
  *
  * Збій не ховається: число стоїть у самому заголовку, а рядок збою червоний.
@@ -407,9 +426,7 @@ function doneBlock(done) {
       ${j.error ? `<div class="err-line">${esc(j.error)}</div>` : ''}
       ${jobResult(j)}
       ${caseLink(j)}
-      ${j.kind === 'search.sweep' && j.state === 'done'
-    ? `<button class="ctl-sm" data-act="jobs.search" data-job="${esc(j.id)}">${
-      t('jobs.search.show')}</button>` : ''}
+      ${showResult(j)}
       ${jobNotes(j)}
     </div>`).join('');
   return `<details class="jobs-done"${failed ? ' open' : ''}>

@@ -156,6 +156,23 @@ class GeogCardArgs(BaseModel):
                             description="показати схожі назви, які плутає фаззі")
 
 
+#: Тип поселення в кінці рядка газетира: «с.», «сл.», «м-ко», «м.», «х.», «мст.»
+#: — із зірочкою чи без, бо зріз несе позначки укладача («Чайківка, с.*»).
+_SETTLEMENT_TAIL = re.compile(r"\s+(с|c|сл|м|м-ко|мст|х)\.?\*?$")
+
+
+def _place_word(place: dict[str, Any]) -> str:
+    """Назва села для пошуку в чужих каталогах — без типу й без варіантів.
+
+    🔴 Газетир пише «Вірмени (Армяни), с.», а каталоги шукають підрядком
+    заголовка: з типом і дужками такий запит не збігся б ні з чим, і порада
+    «пошукати, де їх узяти» привела б до нуля, якого ніхто не шукав.
+    """
+    raw = str(place.get("village_uk") or "")
+    word = re.split(r"[,(]", raw, maxsplit=1)[0]
+    return _SETTLEMENT_TAIL.sub("", word.strip().rstrip("*").strip())
+
+
 @op("geog.card", summary="Картка поселення: церква, усі справи, що з них у нас є",
     args=GeogCardArgs, mutates=False, agent=False, section="material")
 def geog_card(a: GeogCardArgs) -> Envelope:
@@ -198,7 +215,8 @@ def geog_card(a: GeogCardArgs) -> Envelope:
     if n_all and not int(place.get("n_on_disk") or 0):
         env.suggest("catalog.search",
                     f"жодної з {n_all} справ цього поселення в нас немає — "
-                    f"пошукати, де їх узяти")
+                    f"пошукати, де їх узяти",
+                    args={"q": _place_word(place)})
     loc = place.get("location")
     if loc and loc.get("lat") is not None:
         if loc.get("how") == "ambiguous":
@@ -291,10 +309,12 @@ def catalog_packs(_: NoArgs) -> Envelope:
     (перше встановленням, друге — повторним), і плутати їх означає радити не те.
     """
     from nyshporka.catalog import store
+    from nyshporka.catalog.query import pack_archive
 
     packs = store.installed()
     rows = [{"pack_id": p.pack_id, "domain": p.domain, "taken": p.taken,
              "rows": p.rows, "size": p.size, "note": p.note,
+             "archive_label": pack_archive(p.pack_id)[1],
              "state": "ok" if p.ok else "broken", "problem": p.problem}
             for p in packs]
     env = ok({"packs": rows, "dir": str(store.catalog_dir()),

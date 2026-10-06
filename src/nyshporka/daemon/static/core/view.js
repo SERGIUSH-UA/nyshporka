@@ -111,6 +111,17 @@ function renderWarnings(env) {
  * лише для агента), лишається текстом. Сховати її означало б приховати від
  * людини те, що система вже знає про її наступний крок.
  */
+/**
+ * З чим іти на наступний екран — атрибутом кнопки поради.
+ *
+ * 🔴 Порада, що знає запит («пошукати, де взяти справи Липовенького»), а
+ * кнопка відкриває порожнє поле, змушує набирати вдруге те, що система вже
+ * сказала. Екран сам вирішує, що робити з запитом (`ST[екран]`).
+ */
+function seedAttr(n) {
+  return n && n.args ? ` data-seed="${esc(JSON.stringify(n.args))}"` : '';
+}
+
 function renderNext(env) {
   const steps = (env.next || []).filter((n) => (n.level || 'note') !== 'agent');
   const notes = [];
@@ -129,7 +140,7 @@ function renderNext(env) {
       notes.push(`<span class="mono">${esc(n.op)}</span> — ${esc(n.why)}`);
       return '';
     }
-    return `<div class="warn next"><button data-act="next" data-arg="${esc(n.op)}">`
+    return `<div class="warn next"><button data-act="next" data-arg="${esc(n.op)}"${seedAttr(n)}>`
       + `${esc(t(`nav.${scr}`))} →</button> <span>${esc(n.why)}</span></div>`;
   });
   return { rows: rows.join(''), notes };
@@ -245,5 +256,5 @@ function maskot(pose, width = 150, cls = '') {
 }
 
 export { esc, safeHref, el, renderWarnings, renderCoverage, setView, busy,
-  splitWarnings, notesBlock, hasAlerts,
+  splitWarnings, notesBlock, hasAlerts, seedAttr,
   failure, boxError, busyForm, alive, maskot, MASKOT };

@@ -64,7 +64,37 @@ def _tag(row: dict[str, Any], pack_id: str) -> dict[str, Any]:
     """Позначити рядок джерелом. Без цього він — твердження без автора."""
     row["origin"] = "own" if pack_id == "own" else "catalog"
     row["pack_id"] = pack_id
+    repo, label = pack_archive(pack_id)
+    if repo and not row.get("repo"):
+        row["repo"] = repo
+    if label:
+        # 🔴 Чий це архів — словами, у самому рядку. Доти його видно було
+        # лише з імені паку («geog-cdiak») у переліку довідників унизу екрана,
+        # і шифра в картці села виглядала як адреса без архіву.
+        row["archive_label"] = label
     return row
+
+
+def pack_archive(pack_id: str) -> tuple[str, str]:
+    """Архів паку з його імені: `geog-cdiak` → (`CDIAK`, «ЦДІАК»).
+
+    Пак без архіву в імені (церкви Шади, точки Wikidata) — порожньо: вигадати
+    йому архів означало б приписати чужим даним адресу, якої вони не мають.
+
+    ⚠ Без кешу навмисно: перелік архівів доповнюється з консолі
+    (`archive.add`), а запит до нього коштує десятки мікросекунд.
+    """
+    parts = str(pack_id or "").split("-")
+    if len(parts) < 2:
+        return "", ""
+    code = parts[1].upper()
+    try:
+        from nyshporka.archives import active
+
+        repo = active().repositories.get(code)
+    except Exception:
+        return "", ""
+    return (code, repo.label or code) if repo is not None else ("", "")
 
 
 def _norm(s: str) -> str:

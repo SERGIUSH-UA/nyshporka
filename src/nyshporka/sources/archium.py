@@ -358,6 +358,10 @@ class ArchiumSource:
     id = "archium"
     label = "ARCHIUM (ДАХмО)"
     caps = frozenset({"search", "browse", "manifest", "fetch", "address"})
+    #: Без каталогу шукає живим пошуком сайту (`_live_hits`), а не відмовляє.
+    #: Перелік джерел мусить це знати: інакше він казав «пошук недоступний»
+    #: поруч зі знахідками з того самого джерела.
+    live_fallback = True
 
     @property
     def about(self) -> SourceAbout:

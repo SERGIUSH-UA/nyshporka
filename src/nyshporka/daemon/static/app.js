@@ -26,7 +26,7 @@ import { LANG, setLang, t } from './core/strings.js';
 import { esc, el, setView, curGen, alive } from './core/view.js';
 import { ACTIONS, KEYS, SCREENS, PAGERS, screenOfOp } from './core/registry.js';
 import { ST } from './core/state.js';
-import { SECTIONS, loadSections, renderNav, groupScreens, show,
+import { SECTIONS, loadSections, renderNav, groupScreens, show, goto,
   refreshJobs, watchJobs, setGroup, currentScreen } from './core/nav.js';
 
 // 🔴 Міст до файлової системи ставиться ДО екранів: він реєструє дію кнопки
@@ -72,7 +72,11 @@ Object.assign(ACTIONS, {
    */
   next: (_ev, elm) => {
     const scr = screenOfOp(elm.dataset.arg);
-    return scr ? show(scr) : undefined;
+    if (!scr) return undefined;
+    // Порада, що знає запит, відкриває екран уже з ним (`data-seed`).
+    let seed;
+    try { seed = elm.dataset.seed ? JSON.parse(elm.dataset.seed) : undefined; } catch { seed = undefined; }
+    return seed ? goto(scr, seed) : show(scr);
   },
 
   /**
