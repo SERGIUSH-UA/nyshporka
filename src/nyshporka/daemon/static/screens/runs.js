@@ -105,7 +105,7 @@ async function runsLoad(full = false) {
   const opt = (v, label, cur) =>
     `<option value="${esc(v)}"${v === cur ? ' selected' : ''}>${esc(label)}</option>`;
 
-  setView(`<h2>${ic('list')} ${t('runs.title')}</h2>
+  setView(`<h2>${t('runs.title')}</h2>
     <p class="muted">${t('runs.why')}</p>
     <div class="row">
       <input id="runs-q" type="search" placeholder="${esc(t('runs.q'))}"
@@ -274,7 +274,7 @@ function runsOrphanHtml(g, gi = 0) {
     (BIND_CASES || []).map((c) => `<option value="${esc(c.key)}">${
       esc([c.shifra, c.title].filter(Boolean).join(' — '))}</option>`).join('')}</datalist>`;
   return `<section class="run-group orphan">
-    <h3>⚠ ${t('runs.orphan.title')}</h3>
+    <h3>${t('runs.orphan.title')}</h3>
     <p class="warn">${t('runs.orphan.why')}</p>
     <p class="muted">${t('runs.bind.pick')}</p>
     ${list}

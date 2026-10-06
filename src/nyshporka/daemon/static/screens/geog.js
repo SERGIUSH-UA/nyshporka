@@ -51,7 +51,7 @@ SCREENS.geog = async () => {
       <button type="submit">${t('geog.find')}</button>
     </form>
     <div id="geoghits"></div>
-    <h3>⛪ ${t('church.title')}</h3>
+    <h3>${t('church.title')}</h3>
     <p class="muted">${t('church.why')}</p>
     <form class="row" data-act="church.find">
       <input name="q" placeholder="${t('church.q')}">
@@ -175,7 +175,7 @@ Object.assign(ACTIONS, {
     const c = env.data.center || {};
     const rows = env.data.places || [];
     setView(`
-      <h2>🗺 ${t('geog.near.title')}</h2>
+      <h2>${t('geog.near.title')}</h2>
       <p class="muted">📍 ${esc(c.how || '')} · ${c.km} ${t('church.km')} · ${rows.length} · ${t('geog.cases')}: <b>${env.data.n_cases || 0}</b></p>
       ${renderWarnings(env)}
       <table><tbody>${rows.map((p) => `<tr>
@@ -203,9 +203,9 @@ Object.assign(ACTIONS, {
     const env = await callOp('church.card', { ob_id: Number(elm.dataset.arg), km: 10 });
     if (!env.ok) return failure(env);
     const c = env.data.church;
-    if (!c) return setView(`<h2>⛪ ${t('church.title')}</h2>${renderWarnings(env)}${renderCoverage(env)}`);
+    if (!c) return setView(`<h2>${t('church.title')}</h2>${renderWarnings(env)}${renderCoverage(env)}`);
     setView(`
-      <h2>⛪ ${esc(c.name)} <span class="muted">${c.name_v ? `(${esc(c.name_v)})` : ''}</span></h2>
+      <h2>${esc(c.name)} <span class="muted">${c.name_v ? `(${esc(c.name_v)})` : ''}</span></h2>
       <p class="muted">
         ${t('church.title_of')}: <b>${esc(c.title_uk || c.title || '—')}</b> ·
         ${t('church.deanery')}: ${esc(c.deanery || '—')} · ${esc(c.voivodeship_uk || c.voivodeship || '')} ·
@@ -216,8 +216,8 @@ Object.assign(ACTIONS, {
         ${c.lat != null ? ` · ${Number(c.lat).toFixed(4)}, ${Number(c.lng).toFixed(4)}` : ''}
       </p>
       ${renderWarnings(env)}
-      ${(c.places || []).length ? `<h3>🗺 ${t('church.places')}</h3>${renderPlaces(c.places)}` : ''}
-      ${(c.nearby || []).length ? `<h3>⛪ ${t('church.nearby')}</h3>
+      ${(c.places || []).length ? `<h3>${t('church.places')}</h3>${renderPlaces(c.places)}` : ''}
+      ${(c.nearby || []).length ? `<h3>${t('church.nearby')}</h3>
         <table><tbody>${c.nearby.map((x) => `<tr>
           <td class="num">${esc(x.km)} ${t('church.km')}</td>
           <td><b>${esc(x.name)}</b></td>
@@ -236,7 +236,7 @@ Object.assign(ACTIONS, {
     if (!pl) return setView(`<h2>${t('geog.title')}</h2>${renderWarnings(env)}${renderCoverage(env)}`);
     const cases = pl.cases || [];
     setView(`
-      <h2>🗺 ${esc(pl.village_uk)} <span class="muted">(${esc(pl.village_ru || '')})</span></h2>
+      <h2>${esc(pl.village_uk)} <span class="muted">(${esc(pl.village_ru || '')})</span></h2>
       <p class="muted">
         ${t('geog.hist')}: ${esc(pl.hist_place || '—')} ·
         ${t('geog.after')}: ${esc(pl.uezd_gub || '—')} ·
@@ -264,13 +264,13 @@ Object.assign(ACTIONS, {
             title="${esc(t('geog.act.opys'))}">${ic('archive-box', 'ic-o ic-sm')}</button>` : ''}
         </td>
       </tr>`).join('')}</tbody></table>
-      ${(pl.siblings || []).length ? `<h3>🕍 ${t('geog.siblings')}</h3>
+      ${(pl.siblings || []).length ? `<h3>${t('geog.siblings')}</h3>
         <table><tbody>${pl.siblings.map((x) => `<tr>
           <td>${esc(x.institution || '')}</td><td>${esc(x.village_uk)}</td>
           <td class="num">${x.n_cases || 0}</td>
           <td><button data-act="geog.card" data-arg="${esc(x.card)}">${t('view.open')}</button></td>
         </tr>`).join('')}</tbody></table>` : ''}
-      ${(pl.confusers || []).length ? `<h3>⚠ ${t('geog.confusers')}</h3>
+      ${(pl.confusers || []).length ? `<h3>${t('geog.confusers')}</h3>
         <table><tbody>${pl.confusers.map((x) => `<tr>
           <td class="num">${esc(x.score)}</td><td>${esc(x.village_uk)}</td>
           <td class="muted">${esc(x.uezd_gub || '')}</td>

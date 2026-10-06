@@ -59,7 +59,7 @@ SCREENS.view = async () => {
   const gen = curGen();
   const v = ST.view || {};
   setView(`
-    <h2>${ic('page')} ${t('nav.view')}</h2>
+    <h2>${t('nav.view')}</h2>
     <p class="muted">${t('view.eye')}</p>
     <form class="row" data-act="view.open">
       <input name="run" placeholder="${t('view.run')}" value="${esc(v.run || '')}"

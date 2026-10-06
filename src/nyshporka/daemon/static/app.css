@@ -61,7 +61,11 @@
 .lang + .lang { margin-left: 0; }
 .lang:hover { color: var(--fg); }
 
-main { padding: 1.2rem; max-width: 62rem; margin: 0 auto; }
+main { padding: 1.2rem; max-width: 62rem; margin: 0 auto; width: 100%;
+  box-sizing: border-box; }
+/* 🔴 `width: 100%` — щоб лівий край не стрибав між екранами. `#app` —
+   флекс-колонка, і `margin: auto` стискав `main` до вмісту: екран із короткою
+   формою («Око», «Аркуші») ставав вужчим і зсувався до центру. */
 /* 🔴 Табличні екрани — на всю ширину. Обмеження вище стоїть заради
    ТЕКСТУ: довгий рядок на весь монітор читати важче, і саме тому воно
    лишається для пояснень, форм і порожніх станів. Але реєстр опису має
@@ -619,3 +623,18 @@ details.notes > summary { cursor: pointer; opacity: .75; list-style: none; }
 details.notes > summary::-webkit-details-marker { display: none; }
 details.notes[open] > summary { opacity: 1; }
 details.notes > p { margin: .3rem 0 .3rem 1.2rem; }
+
+/* ⏳ «Роботи»: завершене — рядками під одним розкриттям. */
+details.jobs-done { margin-top: 1rem; }
+details.jobs-done > summary { cursor: pointer; color: var(--fg-3); }
+.job-row { padding: .35rem 0; border-bottom: 1px solid var(--line); }
+.job-row > b { font-weight: 600; margin: 0 .4rem; }
+.job-row.failed > b { color: var(--err-2, var(--warn-fg)); }
+.job-row .err-line { color: var(--err-2, var(--warn-fg)); font-size: .9rem; margin-left: 3.2rem; }
+.job-row > .muted.mono, .job-row > details.notes { margin-left: 3.2rem; }
+
+/* Кнопки дій у рядку таблиці — тихі значки: рамка лише при наведенні.
+   Шість обрамлених кнопок на кожному рядку бібліотеки важили більше за дані. */
+#view td.acts button.ctl-sm { border-color: transparent; background: transparent;
+  padding: .25rem .35rem; }
+#view td.acts button.ctl-sm:hover { border-color: var(--line-3); background: var(--s-2); }

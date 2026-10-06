@@ -578,6 +578,20 @@ await SCREENS.jobs();
 await new Promise((r) => setTimeout(r, 30));
 const jw = document.getElementById('jobs').innerHTML || '';
 out.jobNoteFolded = jw.includes('ЗАКОРОТКИЙ') && !/class="warn">⚠ ЗАКОРОТКИЙ/.test(jw);
+// Живе — карткою зі «Спинити»; завершене — під одним розкриттям, збої в заголовку.
+globalThis.__JOBS = [
+  { id: 'l1', kind: 'read', title: 'ЖИВЕ', state: 'running', updated: nowS, progress: { i: 3, n: 9 } },
+  { id: 'd1', kind: 'read', title: 'ГОТОВЕ', state: 'done', updated: nowS },
+  { id: 'e1', kind: 'read', title: 'ВПАЛО', state: 'error', error: 'ПРИЧИНА', updated: nowS }];
+await SCREENS.jobs();
+await new Promise((r) => setTimeout(r, 30));
+const jl = document.getElementById('jobs').innerHTML || '';
+const doneAt = jl.indexOf('<details class="jobs-done"');
+out.jobsLiveCardFirst = jl.indexOf('ЖИВЕ') >= 0 && jl.indexOf('ЖИВЕ') < doneAt
+  && /data-act="jobs.cancel" data-job="l1"/.test(jl);
+out.jobsDoneFolded = doneAt >= 0 && jl.indexOf('ГОТОВЕ') > doneAt
+  && !/data-job="d1"/.test(jl);
+out.jobsFailNamed = /<details class="jobs-done" open>/.test(jl) && jl.includes('ПРИЧИНА');
 globalThis.__JOBS = [];
 
 console.log('@@' + JSON.stringify(out));
@@ -1017,3 +1031,9 @@ def test_warnings_by_level(probe) -> None:
 def test_job_notes_are_folded_not_plaques(probe) -> None:
     """«Закороткий запит» на завершеній роботі — примітка, не жовта плашка."""
     assert probe.get("jobNoteFolded") is True
+
+
+def test_jobs_live_first_finished_folded(probe) -> None:
+    """Живе — карткою зі «Спинити»; завершене згорнуте; збій видно одразу."""
+    for key in ("jobsLiveCardFirst", "jobsDoneFolded", "jobsFailNamed"):
+        assert probe.get(key) is True, key

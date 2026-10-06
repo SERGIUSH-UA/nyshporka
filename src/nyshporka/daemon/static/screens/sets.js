@@ -26,7 +26,7 @@ let _runCb = null;
 SCREENS.sets = async () => {
   const gen = curGen();
   setView(`
-    <h2>${ic('folder-open')} ${t('nav.sets')}</h2>
+    <h2>${t('nav.sets')}</h2>
     <p class="muted">${t('sets.why')}</p>
     <div id="sets-list"></div>
     <div class="dash-two">

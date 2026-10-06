@@ -37,7 +37,7 @@ SCREENS.settings = async () => {
     const screens = (s.screens || []).map((x) => esc(t(NAV_LABEL[x] || x))).join(' · ');
     // Знак секції — той самий, що в переліку `nysh sections`: два обличчя одного
     // застосунку не мають виглядати як два різні продукти.
-    const g = ((env.data.glyphs || {}).sections || {})[s.id] || '';
+    const g = ((env.data.icons || {}).sections || {})[s.id] || '';
     let control;
     if (s.required) {
       control = `<span class="muted">${t('sect.always')}</span>`;
@@ -48,14 +48,14 @@ SCREENS.settings = async () => {
         data-on="${s.active ? '1' : ''}">${s.active ? t('sect.off') : t('sect.on')}</button>`;
     }
     return `<tr>
-      <td>${s.active ? '✅' : (s.visible ? '⬜' : '▫️')}</td>
-      <td><b>${g ? esc(g) + ' ' : ''}${esc(label)}</b><br><span class="muted">${esc(why)}</span>
+      <td>${s.active ? ic('check-circle', 'ic-sm') : ''}</td>
+      <td><b>${g ? ic(g, 'ic-sm') + ' ' : ''}${esc(label)}</b><br><span class="muted">${esc(why)}</span>
           ${screens ? `<br><span class="muted mono">${screens}</span>` : ''}</td>
       <td class="num">${s.ops}</td>
       <td>${control}</td>
     </tr>`;
   }).join('');
-  setView(`<h2>⚙ ${t('sect.title')}</h2>
+  setView(`<h2>${t('sect.title')}</h2>
     <p class="muted">${t('sect.why')}</p>
     ${renderWarnings(env)}
     <p>${t('sect.preset')}:
@@ -113,7 +113,7 @@ async function renderRoots() {
       : `<button data-act="roots.forget" data-arg="${esc(r.path)}"
            >${t('roots.forget')}</button>`}</td>
   </tr>`).join('');
-  box.innerHTML = `<h3>🌳 ${t('roots.title')}</h3>
+  box.innerHTML = `<h3>${t('roots.title')}</h3>
     <p class="muted">${t('roots.why')}</p>
     ${renderWarnings(env)}
     <table><tbody>${rows}</tbody></table>

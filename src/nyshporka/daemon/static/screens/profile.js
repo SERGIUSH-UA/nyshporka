@@ -40,7 +40,7 @@ SCREENS.profile = async () => {
   if (!alive(gen)) return;
   if (!env.ok) return failure(env);
   PS = env.data;
-  setView(`<h2>${ic('target', 'ic-sm')} ${t('prof.title')}</h2>
+  setView(`<h2>${t('prof.title')}</h2>
     <p class="muted">${t('prof.why')}</p>
     ${renderWarnings(env)}
     <div id="prof-card">${card(PS)}</div>

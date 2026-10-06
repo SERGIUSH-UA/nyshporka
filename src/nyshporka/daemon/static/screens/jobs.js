@@ -22,7 +22,6 @@ SCREENS.jobs = async () => {
   // доводилось шукати серед десятка однакових рядків — тобто екран, який має
   // відповідати «що зі мною зараз», відповідав «що тут колись бувало».
   setView(`<h2>${t('jobs.title')}</h2>
-    <p><button data-act="jobs.forget">${t('jobs.forget')}</button></p>
     <div id="jobs"></div>`);
   await refreshJobs();
 };

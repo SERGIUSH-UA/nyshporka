@@ -102,7 +102,7 @@ async function libLoad(full = false) {
     return;
   }
 
-  const head = `<h2>${ic('books')} ${t('lib.title')}</h2>
+  const head = `<h2>${t('lib.title')}</h2>
     <p class="muted">${t('lib.why')}</p>`;
 
   if (!d.built) {
@@ -310,7 +310,8 @@ function libRow(r, layers) {
     <td>${esc((r.title || '').slice(0, 80))}</td>
     <td class="num">${esc(years)}</td>
     <td>${esc((r.place || '').slice(0, 30))}</td>
-    <td class="num">${esc(r.frames || 0)}</td>
+    <td class="num">${r.frames ? esc(r.frames)
+    : `<span class="dim" title="${esc(t('lib.noframes'))}">—</span>`}</td>
     <td class="work">${libWork(r, layers)}</td>
     <td>${v}</td>
     <td class="acts">
@@ -340,7 +341,7 @@ function libRow(r, layers) {
  * машина не має права не пустити її рішення, — але мовчки це не проходить.
  */
 function libVerdictForm(key) {
-  setView(`<h2>${ic('pencil-line')} ${esc(key)}</h2>
+  setView(`<h2>${esc(key)}</h2>
     <div class="row"><select id="lv-kind">
       <option value="">${esc(t('lib.verdict.clear'))}</option>
       <option value="no_clan">${esc(t('lib.verdict.no_clan'))}</option>

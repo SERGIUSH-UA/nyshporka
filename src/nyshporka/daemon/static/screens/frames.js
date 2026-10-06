@@ -52,7 +52,7 @@ SCREENS.frames = async () => {
   const seed = (ST.frames || {}).case || FS.case || '';
   ST.frames = null;
   setView(`
-    <h2>${ic('image')} ${t('frames.title')}</h2>
+    <h2>${t('frames.title')}</h2>
     <p class="muted">${t('frames.why')}</p>
     <form class="row" data-act="frames.open">
       ${pathField({ name: 'case', mode: 'dir', purpose: 'frames.case',

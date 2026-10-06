@@ -141,7 +141,7 @@ function icon(name) {
  * «за архівами» й «за повітами» стають одне під одним — тобто обмеження,
  * поставлене заради довжини рядка, з'їдає екран, на якому тексту майже немає.
  */
-const WIDE_SCREENS = ['home', 'fonds', 'library', 'runs', 'queue'];
+const WIDE_SCREENS = ['home', 'fonds', 'library', 'runs', 'queue', 'cases', 'sets'];
 
 let CURRENT = '';
 export const currentScreen = () => CURRENT;
@@ -341,16 +341,53 @@ async function refreshJobs() {
   const live = jobs.filter((j) => j.state === 'running' || j.state === 'queued').length;
   const head = live ? `<div class="jobs-busy">${maskot('pratsiuie', 110)}
     <p>${esc(t('jobs.busy').replace('{n}', live))}</p></div>` : '';
-  box.innerHTML = head + (jobs.length ? jobs.map((j) => `
+  // 🔴 Живе — повними картками з поступом і «Спинити»; завершене — рядками в
+  // одному згорнутому блоці. Доти все стояло суцільним списком карток за
+  // півдоби, і своє живе читання доводилось шукати серед проб письма й
+  // пошуків, кожен зі своїми примітками.
+  const isLive = (j) => j.state === 'running' || j.state === 'queued';
+  const liveJobs = jobs.filter(isLive);
+  const done = jobs.filter((j) => !isLive(j))
+    .sort((a, b) => (b.updated || 0) - (a.updated || 0));
+  const cards = liveJobs.map((j) => `
     <div class="job">
       <b>${esc(j.title || j.kind)}</b> <span class="muted">${esc(jobState(j.state))}</span>
       ${jobProgress(j)}
       ${j.error ? `<div class="warn err">${esc(j.error)}</div>` : ''}
       ${jobNotes(j)}
+      <button data-act="jobs.cancel" data-job="${esc(j.id)}">${t('jobs.cancel')}</button>
+    </div>`).join('');
+  box.innerHTML = head + (cards || `<p class="muted">${t('jobs.none')}</p>`)
+    + doneBlock(done);
+}
+
+/** Година роботи для рядка: «19:38». */
+const hhmm = (sec) => (sec ? new Date(sec * 1000).toTimeString().slice(0, 5) : '');
+
+/**
+ * Завершене — рядками під одним розкриттям, збої названо в заголовку.
+ *
+ * Збій не ховається: число стоїть у самому заголовку, а рядок збою червоний.
+ * Результат і примітки — під рядком, як і були, але вже не займають екран.
+ */
+function doneBlock(done) {
+  if (!done.length) return '';
+  const failed = done.filter((j) => j.state === 'error').length;
+  const rows = done.map((j) => `
+    <div class="job-row${j.state === 'error' ? ' failed' : ''}">
+      <span class="mono dim">${esc(hhmm(j.updated))}</span>
+      <b>${esc(j.title || j.kind)}</b>
+      <span class="muted">${esc(jobState(j.state))}</span>
+      ${j.error ? `<div class="err-line">${esc(j.error)}</div>` : ''}
       ${jobResult(j)}
-      ${j.state === 'running' || j.state === 'queued'
-        ? `<button data-act="jobs.cancel" data-job="${esc(j.id)}">${t('jobs.cancel')}</button>` : ''}
-    </div>`).join('') : `<p class="muted">${t('jobs.none')}</p>`);
+      ${jobNotes(j)}
+    </div>`).join('');
+  return `<details class="jobs-done"${failed ? ' open' : ''}>
+    <summary>${t('jobs.done.title')} (${done.length}${failed
+    ? ` · ${t('jobs.done.failed')} ${failed}` : ''})</summary>
+    ${rows}
+    <p><button class="ctl-sm" data-act="jobs.forget">${t('jobs.forget')}</button></p>
+  </details>`;
 }
 
 /** Довге очікування на сервері: одне з'єднання замість опитувань щосекунди. */

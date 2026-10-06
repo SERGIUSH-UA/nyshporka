@@ -41,7 +41,7 @@ SCREENS.label = async () => {
   if (seed.set) LB.set = seed.set;
   ST.label = null;
   setView(`
-    <h2>${ic('pencil-line')} ${t('nav.label')}</h2>
+    <h2>${t('nav.label')}</h2>
     <p class="muted">${t('label.why')}</p>
     <form class="row lb-pick" data-act="label.start">
       <select name="set" id="lb-set"></select>

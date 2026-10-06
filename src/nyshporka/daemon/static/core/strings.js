@@ -502,6 +502,7 @@ const STRINGS = {
     'lib.sum.nolayers': 'реєстру справ не збирали — даних про роботу над '
       + 'справами немає',
     'lib.act.frames': 'Подивитись аркуші справи',
+    'lib.noframes': 'кадрів на диску немає — зняті заради місця або ще не завантажені',
     'lib.act.read': 'Прочитати цю справу рушієм',
     'lib.act.runs': 'Прогони цієї справи',
     'lib.act.find': 'Шукати в межах цієї справи',
@@ -797,6 +798,7 @@ const STRINGS = {
     'jobs.res.hits': 'знахідок',
     'jobs.cancel': 'Спинити',
     'jobs.forget': 'Прибрати завершені',
+    'jobs.done.title': 'Завершені', 'jobs.done.failed': 'збоїв',
     'nav.sets': 'Набори', 'nav.label': 'Розмітка',
     'sets.why': 'Набір — сторінки однієї справи, нарізані на кропи рядків із прогону. Голоси рушія й злиття арбітрів лягають поруч, ручні мітки — у lines.jsonl. Числа тут — з диска, а не з самозвіту.',
     'sets.none': 'Наборів ще немає — наріжте перший із прогону.',
@@ -1361,6 +1363,7 @@ const STRINGS = {
     'lib.sum.nolayers': 'the case registry has not been built — nothing to say '
       + 'about work done on the cases',
     'lib.act.frames': 'Look at the sheets of this case',
+    'lib.noframes': 'no frames on disk — offloaded to save space or not downloaded yet',
     'lib.act.read': 'Read this case with an engine',
     'lib.act.runs': 'Runs of this case',
     'lib.act.find': 'Search within this case',
@@ -1656,6 +1659,7 @@ const STRINGS = {
     'jobs.res.hits': 'hits',
     'jobs.cancel': 'Stop',
     'jobs.forget': 'Clear finished',
+    'jobs.done.title': 'Finished', 'jobs.done.failed': 'failed',
     'nav.sets': 'Sets', 'nav.label': 'Labelling',
     'sets.why': 'A set is pages of one case cut into line crops from a run. Engine voices and the arbiters’ merge sit next to them; hand labels go to lines.jsonl. Numbers here come from disk, not from self-reports.',
     'sets.none': 'No sets yet — cut the first one from a run.',

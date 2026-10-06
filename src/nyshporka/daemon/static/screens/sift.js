@@ -36,7 +36,7 @@ SCREENS.sift = async () => {
   if (!ST.sift.hits.length) {
     // Нема чого розбирати — це «ще не передали», а не «нічого не знайшлось»:
     // сюди потрапляють до пошуку. Тому маскот із мапою — куди йти далі.
-    setView(`<h2>${ic('crop-check')} ${t('sift.title')}</h2>
+    setView(`<h2>${t('sift.title')}</h2>
       <div class="porozhno">${maskot('mapa', 130)}<p>${t('sift.empty')}</p>
         <button type="submit" data-act="nav" data-arg="search">${t('nav.search')}</button></div>`);
     return;
@@ -61,7 +61,7 @@ function siftDraw() {
   const lit = h.matched
     ? line.replace(esc(h.matched), `<mark>${esc(h.matched)}</mark>`)
     : line;
-  setView(`<h2>${ic('crop-check')} ${t('sift.title')}</h2>
+  setView(`<h2>${t('sift.title')}</h2>
     <div class="row">
       <button data-act="sift.step" data-arg="-1"${ST.sift.i ? '' : ' disabled'}>
         ${ic('arrow-left', 'ic-sm')} ${t('sift.prev')}</button>

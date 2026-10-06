@@ -57,23 +57,24 @@ SCREENS.cases = async () => {
   const c = d.counts || {};
   PAGES = d.pages || 1;
   setView(`
-    <h2>${t('nav.cases')} <button data-act="cases.build"
-      title="${t('cases.build.why')}">🔄 ${t('cases.build')}</button></h2>
-    <p class="muted">${t('intake.why')}</p>
+    <h2>${t('nav.cases')}</h2>
+    <p class="muted">${t('intake.why')}
+      <button class="ctl-sm" data-act="cases.build"
+        title="${t('cases.build.why')}">${ic('refresh', 'ic-sm')} ${t('cases.build')}</button></p>
     ${renderWarnings(env)}
     ${intakeCount(d, c)}
     ${rows.length ? `<table><thead><tr>
       <th></th><th>тека</th><th class="num">${t('common.frames')}</th><th></th>
       </tr></thead><tbody>
     ${rows.map((r) => `<tr>
-      <td title="${esc(t(`intake.kind.${r.kind}`))}">${r.kind === 'bundle' ? '🗃' : '📄'}</td>
+      <td title="${esc(t(`intake.kind.${r.kind}`))}">${ic(r.kind === 'bundle' ? 'archive-box' : 'page', 'ic-o ic-sm')}</td>
       <td class="mono">${esc(r.path || r.key)}</td>
       <td class="num">${esc(r.frames || 0)}</td>
-      <td>${r.path
-        ? `<button data-act="intake.frames" data-arg="${esc(r.path)}"
-             title="${t('lib.act.frames')}">🖼</button>
-           <button data-act="case.edit" data-arg="${esc(r.path)}"
-             title="${t('intake.describe')}">✏</button>`
+      <td class="acts">${r.path
+        ? `<button class="ctl-sm" data-act="intake.frames" data-arg="${esc(r.path)}"
+             title="${t('lib.act.frames')}">${ic('image', 'ic-o ic-sm')}</button>
+           <button class="ctl-sm" data-act="case.edit" data-arg="${esc(r.path)}"
+             title="${t('intake.describe')}">${ic('pencil-line', 'ic-o ic-sm')}</button>`
         : `<span class="muted" title="${t('cases.nodir')}">—</span>`}</td>
     </tr>`).join('')}
     </tbody></table>

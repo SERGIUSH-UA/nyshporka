@@ -69,10 +69,12 @@ async function profileHint() {
   if (input && !input.value) input.value = d.display || '';
   const sp = d.spellings || [];
   if (!sp.length) return;
-  box.innerHTML = `<p class="muted">${t('search.forms')} (${sp.length}):</p>
-    <div class="prof-forms">${sp.slice(0, 40).map((x) =>
+  // Згорнуто: стіна з десятків написань стояла між полем запиту й видачею.
+  // Число в заголовку — усі написання, і розкриття показує всі, а не перші 40.
+  box.innerHTML = `<details class="notes"><summary>${t('search.forms')} (${sp.length})</summary>
+    <div class="prof-forms">${sp.map((x) =>
       `<button class="chip" data-act="search.form" data-arg="${esc(x)}"
-        >${esc(x)}</button>`).join('')}</div>`;
+        >${esc(x)}</button>`).join('')}</div></details>`;
 }
 
 /**
