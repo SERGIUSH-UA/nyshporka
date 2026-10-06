@@ -229,9 +229,16 @@ function coverCell(c) {
   const done = c.covered || {};
   const ids = Object.keys(done);
   if (!ids.length) return `<span class="muted">${t('read.never')}</span>`;
-  return ids.map((id) => `${eng(id)} <span class="mono">${esc(done[id].model || '')}</span>
-    <span class="dim">${esc(done[id].pages_done || 0)} ${t('common.pages')}</span>`)
-    .join(' · ') + addVoiceButtons(c);
+  const models = c.models || {};
+  return ids.map((id) => {
+    const had = done[id].model || '';
+    // Справу читала старша модель, ніж бойова зараз: сказати це тут, де
+    // вирішують, чи перечитувати, а не лишати людину вгадувати з імені файлу.
+    const older = models[id] && had && had !== models[id]
+      ? ` <span class="muted">(${esc(t('read.older').replace('{m}', models[id]))})</span>` : '';
+    return `${eng(id)} <span class="mono">${esc(had)}</span>
+    <span class="dim">${esc(done[id].pages_done || 0)} ${t('common.pages')}</span>${older}`;
+  }).join(' · ') + addVoiceButtons(c);
 }
 
 /**
@@ -261,11 +268,11 @@ function readForm(c) {
   const alsoLatin = prev ? prev.latin : c.script === 'mixed';
   return `<form data-act="read.plan">
     ${prev ? `<p class="muted">${t('read.change.why')}</p>` : ''}
-    <div class="row">
+    ${c.script === 'latin' ? '' : `<div class="row">
       <label><input type="checkbox" name="second_voice" value="1"${second ? ' checked' : ''}>
         ${t('read.voice.on')}</label>
       <span class="muted">${t('read.voice.why')}</span>
-    </div>
+    </div>`}
     ${c.script === 'latin' ? '' : `<div class="row">
       <label><input type="checkbox" name="also_latin" value="1"
         ${alsoLatin ? 'checked' : ''}> ${t('read.also.latin')}</label>
@@ -301,6 +308,60 @@ function readForm(c) {
     </details>
     <div class="row"><button type="submit">${t('read.plan')}</button></div>
   </form>`;
+}
+
+/**
+ * План запуску — для кожного шляху однаковий: «Що робитимемо», «Додати
+ * голос», «Перечитати окремою текою». 🔴 Доти «Додати голос» запускав одразу,
+ * а «Читати» — через план, і людина не знала, яка кнопка що зробить
+ * (холодний прохід 07.10.2026). Тепер кожен запуск спершу показує план.
+ */
+async function showPlan() {
+  el('hits').innerHTML = `<p class="muted">${t('common.loading')}</p>`;
+  const env = await callOp('read.plan', RD.args);
+  if (!env.ok) return boxError('hits', env);
+  const p = env.data.plan || {};
+  // Дяк піде окремим прогоном (`splitVoices`) — примітка «другого голосу
+  // немає» про цей запуск була б неправдою.
+  if ((RD.extra || []).length) {
+    env.warnings = (env.warnings || []).filter((w) => w.code !== 'single_voice');
+  }
+  const nothing = (env.warnings || []).some((w) => w.code === 'nothing_to_read');
+  const model = String(p.model || '').split(/[\\/]/).pop();
+  const reread = nothing && env.data.prev_model && env.data.prev_model !== model;
+  // Читати нічого, але голос іде окремим прогоном — кнопка лишається, і
+  // запустить лише його (`read.go`).
+  RD.nothing = nothing;
+  const go = !nothing || (RD.extra || []).length;
+  el('hits').innerHTML = `
+    ${renderWarnings(env)}
+    <table><tbody>
+      <tr><td>${t('read.frames')}</td><td class="num">${esc(p.frames)}</td></tr>
+      <tr><td>${t('read.script')}</td><td>${esc(t(`read.script.${p.script}`) || p.script)}</td></tr>
+      <tr><td>${t('read.model')}</td><td>${modelLabel(p.model)}</td></tr>
+      ${(p.voices || []).length
+  ? `<tr><td>${t('read.voice')}</td><td>${p.voices.map(modelLabel).join(' + ')}</td></tr>`
+  : ''}
+      <tr><td>→</td><td class="mono">${esc(p.out_dir)}</td></tr>
+      ${(RD.extra || []).length ? `<tr><td>${t('read.voice')}</td><td>
+        ${RD.extra.map(modelLabel).join(' + ')}
+        <span class="muted">— ${t('read.extra.why')}</span></td></tr>` : ''}
+    </tbody></table>
+    ${go ? `<button id="read-go" data-act="read.go">${t('read.go')}</button>` : ''}
+    ${reread ? `<button data-act="read.addvoice" data-arg="${esc(model)}">${
+      t('read.reread')} ${esc(model)}</button>` : ''}`;
+  // Кнопка «Читати» буває нижче краю екрана — показати її, а не ховати.
+  const goBtn = el('read-go');
+  if (goBtn && goBtn.scrollIntoView) goBtn.scrollIntoView({ block: 'nearest' });
+  return undefined;
+}
+
+/** Модель людською мовою: «Писар · pysar_cyr_v19.pt». */
+function modelLabel(path) {
+  const name = String(path || '').split(/[\\/]/).pop();
+  const names = Object.fromEntries(((RD.card || {}).engines || []).map((e) => [e.id, e.label]));
+  const who = names[engineOf(name)] || t(`read.engine.${engineOf(name)}`);
+  return `${who && !who.startsWith('read.') ? `${esc(who)} · ` : ''}<span class="mono">${esc(name)}</span>`;
 }
 
 Object.assign(ACTIONS, {
@@ -343,40 +404,8 @@ Object.assign(ACTIONS, {
     const split = splitVoices(RD.card || {}, RD.args);
     RD.args = split.args;
     RD.extra = split.extra;
-    el('hits').innerHTML = `<p class="muted">${t('common.loading')}</p>`;
-    const env = await callOp('read.plan', RD.args);
+    await showPlan();
     unlock();
-    if (!env.ok) return boxError('hits', env);
-    const p = env.data.plan || {};
-    // Дяк піде окремим прогоном (`splitVoices`) — примітка «другого голосу
-    // немає» про цей запуск була б неправдою.
-    if ((RD.extra || []).length) {
-      env.warnings = (env.warnings || []).filter((w) => w.code !== 'single_voice');
-    }
-    const nothing = (env.warnings || []).some((w) => w.code === 'nothing_to_read');
-    const model = String(p.model || '').split(/[\\/]/).pop();
-    const reread = nothing && env.data.prev_model && env.data.prev_model !== model;
-    // Читати нічого, але голос іде окремим прогоном — кнопка лишається, і
-    // запустить лише його (`read.go`).
-    RD.nothing = nothing;
-    const go = !nothing || (RD.extra || []).length;
-    el('hits').innerHTML = `
-      ${renderWarnings(env)}
-      <table><tbody>
-        <tr><td>${t('read.frames')}</td><td class="num">${esc(p.frames)}</td></tr>
-        <tr><td>${t('read.script')}</td><td>${esc(t(`read.script.${p.script}`) || p.script)}</td></tr>
-        <tr><td>${t('read.model')}</td><td class="mono">${esc(p.model)}</td></tr>
-        ${(p.voices || []).length
-    ? `<tr><td>${t('read.voice')}</td><td class="mono">${esc(p.voices.join(' + '))}</td></tr>`
-    : ''}
-        <tr><td>→</td><td class="mono">${esc(p.out_dir)}</td></tr>
-        ${(RD.extra || []).length ? `<tr><td>${t('read.voice')}</td><td>
-          <span class="mono">${esc(RD.extra.join(' + '))}</span>
-          <span class="muted">— ${t('read.extra.why')}</span></td></tr>` : ''}
-      </tbody></table>
-      ${go ? `<button data-act="read.go">${t('read.go')}</button>` : ''}
-      ${reread ? `<button data-act="read.addvoice" data-arg="${esc(model)}">${
-        t('read.reread')} ${esc(model)}</button>` : ''}`;
     return undefined;
   },
 
@@ -398,6 +427,11 @@ Object.assign(ACTIONS, {
       // eslint-disable-next-line no-alert
       if (!confirm(why)) return undefined;
     }
+    // Відгук одразу: запуск рахує план ще раз, і без цього рядка кнопка
+    // виглядала так, ніби натискання нікуди не дійшло.
+    const btn = el('read-go');
+    if (btn) btn.disabled = true;
+    el('hits').insertAdjacentHTML('beforeend', `<p class="muted">${t('read.starting')}</p>`);
     // Читати нічого — основний прогін не ставимо зовсім, лише окремі голоси.
     const env = RD.nothing ? { ok: true }
       : await callOp('read.start', RD.args || { case_dir: RD.case_dir });
@@ -422,13 +456,9 @@ Object.assign(ACTIONS, {
 
   /** ➕ Голос, якого бракує, — окремим прогоном своєю моделлю. */
   'read.addvoice': async (_ev, elm) => {
-    const env = await callOp('read.start',
-      { case_dir: RD.case_dir, model: elm.dataset.arg, second_voice: false });
-    if (!env.ok) {
-      el('card').insertAdjacentHTML('afterbegin', `<div class="warn err">${esc(env.error)}</div>`);
-      return undefined;
-    }
-    return readCard();
+    RD = { ...RD, extra: [],
+      args: { case_dir: RD.case_dir, model: elm.dataset.arg, second_voice: false, also: [] } };
+    return showPlan();
   },
 
   /**

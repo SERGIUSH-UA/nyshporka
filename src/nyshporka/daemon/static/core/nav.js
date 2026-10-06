@@ -356,9 +356,22 @@ async function refreshJobs() {
       ${j.error ? `<div class="warn err">${esc(j.error)}</div>` : ''}
       ${jobNotes(j)}
       <button data-act="jobs.cancel" data-job="${esc(j.id)}">${t('jobs.cancel')}</button>
+      ${caseLink(j)}
     </div>`).join('');
   box.innerHTML = head + (cards || `<p class="muted">${t('jobs.none')}</p>`)
     + doneBlock(done);
+}
+
+/**
+ * Читання веде на картку своєї справи — там «Змінити», «Додати голос» і хід.
+ *
+ * 🔴 Доти в рядку читання на «Роботах» була лише «Спинити», і перемкнути письмо
+ * звідси було нікуди (холодний прохід 07.10.2026: глухий кут).
+ */
+function caseLink(j) {
+  const dir = j.kind === 'read' ? (j.cfg || {}).case_dir : '';
+  return dir ? `<button class="ctl-sm" data-act="jobs.case" data-arg="${esc(dir)}">${
+    t('jobs.case')}</button>` : '';
 }
 
 /** Година роботи для рядка: «19:38». */
@@ -380,6 +393,7 @@ function doneBlock(done) {
       <span class="muted">${esc(jobState(j.state))}</span>
       ${j.error ? `<div class="err-line">${esc(j.error)}</div>` : ''}
       ${jobResult(j)}
+      ${caseLink(j)}
       ${j.kind === 'search.sweep' && j.state === 'done'
     ? `<button class="ctl-sm" data-act="jobs.search" data-job="${esc(j.id)}">${
       t('jobs.search.show')}</button>` : ''}

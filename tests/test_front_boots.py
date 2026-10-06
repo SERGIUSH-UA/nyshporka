@@ -616,6 +616,30 @@ await new Promise((r) => setTimeout(r, 40));
 const rn = document.getElementById('read-now').innerHTML || '';
 out.readNowChange = /data-act="read.change" data-job="r1"/.test(rn)
   && /data-act="jobs.cancel" data-job="r1"/.test(rn);
+// «Додати голос» показує план, а не запускає одразу.
+await ACTIONS['read.addvoice'](null, { dataset: { arg: 'diak_cyr_v6.safetensors' } });
+await new Promise((r) => setTimeout(r, 30));
+out.addVoiceShowsPlan = (document.getElementById('hits').innerHTML || '').includes('id="read-go"');
+// Стара модель названа: прочитано v19, бойова — інша.
+globalThis.__JOBS = [];
+globalThis.__CASE_INFO = { ...globalThis.__CASE_INFO,
+  covered: { pysar: { model: 'pysar_cyr_v4.pt', pages_done: 5 } } };
+ST.read = { case_dir: 'c' };
+await SCREENS.read();
+await new Promise((r) => setTimeout(r, 40));
+out.olderModelNamed = (document.getElementById('card').innerHTML || '').includes('бойова зараз: pysar_cyr_v19.pt');
+// Латинка: галочки другого рушія немає.
+globalThis.__CASE_INFO = { ...globalThis.__CASE_INFO, script: 'latin' };
+ST.read = { case_dir: 'c' };
+await SCREENS.read();
+await new Promise((r) => setTimeout(r, 40));
+out.latinNoSecondVoice = !(document.getElementById('read-form').innerHTML || '').includes('name="second_voice"');
+// «Роботи»: читання веде на картку справи.
+globalThis.__JOBS = [{ id: 'r9', kind: 'read', state: 'running', updated: nowS,
+  title: 'c: 12 кадрів', progress: {}, cfg: { case_dir: 'c' } }];
+await SCREENS.jobs();
+await new Promise((r) => setTimeout(r, 30));
+out.jobsReadToCase = /data-act="jobs.case" data-arg="c"/.test(document.getElementById('jobs').innerHTML || '');
 globalThis.__JOBS = [];
 globalThis.__CASE_INFO = null;
 
@@ -1068,3 +1092,10 @@ def test_case_card_offers_add_voice_and_change(probe) -> None:
     """Голос, якого бракує, — кнопкою; живе читання — «Змінити» поруч зі «Спинити»."""
     assert probe.get("readAddVoice") is True
     assert probe.get("readNowChange") is True
+
+
+def test_every_launch_goes_through_the_plan_and_says_what_it_reads(probe) -> None:
+    """«Додати голос» — через план; стара модель названа; латинка без другого
+    рушія; читання на «Роботах» веде на картку справи."""
+    for key in ("addVoiceShowsPlan", "olderModelNamed", "latinNoSecondVoice", "jobsReadToCase"):
+        assert probe.get(key) is True, key

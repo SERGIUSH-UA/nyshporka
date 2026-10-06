@@ -601,7 +601,7 @@ def plan(case_dir: str | Path, *, out_dir: str | Path = "", script: str = "",
         raise ReadError(f"у теці {case} немає зображень сторінок")
 
     venv = doc.engine_venv()
-    rep = E.inspect(venv)
+    rep = E.inspect_cached(venv)
     if not rep.ok or rep.python is None:
         why = "; ".join(rep.problems) or (
             f"бракує: {', '.join(rep.missing)}" if rep.missing else "не зібране")

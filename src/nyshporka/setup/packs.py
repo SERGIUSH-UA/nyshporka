@@ -116,8 +116,25 @@ def verify(pack: Pack) -> bool:
     if not pack.sha256 or not pack.size:
         return False
     p = path_of(pack)
-    return p.is_file() and p.stat().st_size == pack.size and \
-        sha256_of(p) == pack.sha256
+    try:
+        st = p.stat()
+    except OSError:
+        return False
+    if st.st_size != pack.size:
+        return False
+    # ⏱ Хеш файлу рахується раз на його стан (розмір + час зміни), а не на кожне
+    # питання: план читання питав про шість паків щоразу — секунда на кнопку.
+    # Підмінений чи дописаний файл міняє час зміни, і хеш рахується наново.
+    key = (str(p), st.st_size, st.st_mtime_ns, pack.sha256)
+    got = _VERIFIED.get(key)
+    if got is None:
+        got = sha256_of(p) == pack.sha256
+        _VERIFIED[key] = got
+    return got
+
+
+#: Звірені паки: (шлях, розмір, час зміни, очікуваний хеш) → чи збігся хеш.
+_VERIFIED: dict[tuple[str, int, int, str], bool] = {}
 
 
 def installed() -> list[str]:

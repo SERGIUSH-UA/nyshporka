@@ -25,6 +25,7 @@ import os
 import shutil
 import subprocess
 import sys
+import threading
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -117,6 +118,12 @@ CUDA_WORKS = ("import torch; print(torch.cuda.is_available() and "
 
 
 def inspect(venv: Path, man: M.Manifest | None = None) -> EnvReport:
+    """Що є в середовищі — без спроб щось лагодити. Огляди йдуть по одному."""
+    with _INSPECT_LOCK:
+        return _inspect(venv, man)
+
+
+def _inspect(venv: Path, man: M.Manifest | None = None) -> EnvReport:
     """Що є в середовищі — без спроб щось лагодити.
 
     Розділення огляду й полагодження тут не косметичне: `doctor` мусить уміти
@@ -163,10 +170,88 @@ def inspect(venv: Path, man: M.Manifest | None = None) -> EnvReport:
             f"розбіжність буде тихою: інші полігони рядків, тобто інший текст. "
             f"`nysh htr install` оновить середовище на місці")
 
-    return EnvReport(ok=not missing and not problems, python=py, kraken=kraken,
-                     torch=torch_v, cuda=cuda, capability=cap or "",
-                     missing=tuple(missing), problems=tuple(problems),
-                     stale=tuple(stale))
+    rep = EnvReport(ok=not missing and not problems, python=py, kraken=kraken,
+                    torch=torch_v, cuda=cuda, capability=cap or "",
+                    missing=tuple(missing), problems=tuple(problems),
+                    stale=tuple(stale))
+    # Свіжий вдалий огляд — найкраща відповідь і для плану читання: діагностика
+    # головної (`home.machine`) так заздалегідь прогріває `inspect_cached`, і
+    # перше «Що робитимемо» за сесію не чекає десяти процесів.
+    if rep.ok:
+        import time
+
+        _INSPECTED[str(venv)] = ((*_venv_stamp(venv), hash(tuple(man.packages))),
+                                 time.monotonic(), rep)
+    return rep
+
+
+#: Один огляд середовища за раз на процес — див. `inspect_cached`.
+_INSPECT_LOCK = threading.RLock()
+#: Огляди середовища для плану читання: venv → (штамп, коли знято, звіт).
+_INSPECTED: dict[str, tuple[tuple[int, ...], float, EnvReport]] = {}
+#: Скільки живе огляд навіть за незмінного штампа: карта чи драйвер можуть
+#: змінитись без жодного файлу в середовищі.
+INSPECT_TTL_SEC = 600.0
+
+
+def _venv_stamp(venv: Path) -> tuple[int, ...]:
+    """Час зміни інтерпретатора, теки пакетів і `pyvenv.cfg`.
+
+    Встановлення, оновлення чи видалення пакета міняє теку пакетів (там
+    з'являються й зникають теки `*.dist-info`), тож штамп ловить саме те, що
+    перевіряє огляд.
+    """
+    site = venv / "Lib" / "site-packages"
+    if not site.is_dir():
+        site = next(iter(sorted((venv / "lib").glob("python*/site-packages"))), site)
+    out: list[int] = []
+    for p in (venv_python(venv), site, venv / "pyvenv.cfg"):
+        try:
+            out.append(p.stat().st_mtime_ns)
+        except OSError:
+            out.append(0)
+    return tuple(out)
+
+
+def inspect_cached(venv: Path, man: M.Manifest | None = None) -> EnvReport:
+    """Той самий огляд, що `inspect`, але раз на стан середовища.
+
+    🔴 Огляд — десять окремих процесів чужого інтерпретатора (імпорт torch,
+    спроба ядра на карті): 11 с із 13.6, які коштувала кнопка «Що робитимемо»,
+    і ще стільки ж — «Читати» (холодний прохід 07.10.2026: картка 15 с стояла
+    на «Хвилинку…», і людина не бачила, що читання пішло). План питає одне й
+    те саме щоразу; відповідь міняється, лише коли міняється середовище.
+
+    ⚠ Тільки для плану. Діагностика (`nysh doctor`, `nysh htr env`) кличе
+    `inspect` напряму: там питання саме в тому, яке середовище ЗАРАЗ.
+    """
+    import time
+
+    asked = man
+    man = man or M.active()
+    key = str(venv)
+    stamp = (*_venv_stamp(venv), hash(tuple(man.packages)))
+
+    def _hit() -> EnvReport | None:
+        got = _INSPECTED.get(key)
+        if got is not None and got[0] == stamp and time.monotonic() - got[1] < INSPECT_TTL_SEC:
+            return got[2]
+        return None
+
+    rep = _hit()
+    if rep is not None:
+        return rep
+    # 🔴 Під замком: огляд, що вже йде (діагностика головної прогріває кеш у
+    # фоні), треба дочекатись і взяти, а не запускати поруч другий — це
+    # подвійні десять процесів torch і ті самі 11 с для людини.
+    with _INSPECT_LOCK:
+        rep = _hit()
+        if rep is not None:
+            return rep
+        # Невдалий огляд не кешується (див. `inspect`): людина лагодить
+        # середовище й тисне знову, і відповідь мусить бути свіжою. Замок
+        # повторно входимий — `inspect` бере той самий.
+        return inspect(venv, asked) if asked is not None else inspect(venv)
 
 
 class ToolMissing(RuntimeError):
