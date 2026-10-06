@@ -25,7 +25,12 @@ from nyshporka.train import sets as S
 from nyshporka.train.recipes import PseudoOpts
 from nyshporka.train.text import is_babble, strip_conflict_marks, unify_i
 
-BUILTIN = ("gt", "pseudo")
+BUILTIN = ("gt", "pseudo", "notes")
+
+#: Походження наборів джерела `notes`: звірені оком рядки нотатника справи —
+#: свої (`notebook`) і поширені іншими в Супрягу (`pool`). Окремим джерелом, а не
+#: в `gt`: це рядки, де модель помилилась, тож у рецепті їм потрібна своя вага.
+NOTE_ORIGINS = ("notebook", "pool")
 
 
 class SourceError(ValueError):
@@ -200,8 +205,13 @@ def read_peter(spec: SourceSpec) -> Items:
 
 # ── вбудовані джерела простору ───────────────────────────────────────────────
 def read_gt(reg: S.Registry, *, include_unsure: bool = False,
-            script: str = "cyrillic") -> Items:
-    """Ручні мітки наборів із роллю `train`, статус `ok` (і `unsure` за бажанням)."""
+            script: str = "cyrillic",
+            origins: tuple[str, ...] = ("run",)) -> Items:
+    """Ручні мітки наборів із роллю `train`, статус `ok` (і `unsure` за бажанням).
+
+    `origins` — які набори брати: типово лише нарізку прогонів; набори з
+    нотатника справи читає джерело `notes` (`read_notes`).
+    """
     it = Items()
     missing: collections.Counter[str] = collections.Counter()
     for name in reg.names(hidden=True):
@@ -211,6 +221,8 @@ def read_gt(reg: S.Registry, *, include_unsure: bool = False,
             it.notes.append(f"{name}: {exc}")
             continue
         if spec.role != "train" or (script and spec.script != script):
+            continue
+        if spec.origin not in origins:
             continue
         for (page, idx), rec in reg.marks(name).items():
             status = str(rec.get("status") or "")
@@ -231,6 +243,12 @@ def read_gt(reg: S.Registry, *, include_unsure: bool = False,
                         + ", ".join(f"{k}×{v}" for k, v in sorted(missing.items()))
                         + " — перерізати з прогону (nysh train cut)")
     return it
+
+
+def read_notes(reg: S.Registry, *, include_unsure: bool = False,
+               script: str = "cyrillic") -> Items:
+    """Пари «кроп ↔ звірене оком» із наборів нотатника (`notebook`, `pool`)."""
+    return read_gt(reg, include_unsure=include_unsure, script=script, origins=NOTE_ORIGINS)
 
 
 def read_pseudo(reg: S.Registry, opts: PseudoOpts, *, manual: set[str],

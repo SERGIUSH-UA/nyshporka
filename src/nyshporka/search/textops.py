@@ -301,6 +301,83 @@ def _geometry_size(run: str, page: str) -> list[int] | None:
     return None
 
 
+class FrameError(RuntimeError):
+    """Кадру сторінки на цій машині немає — з причиною для людини."""
+
+
+def engine_frame(run: str, page: str) -> dict[str, Any]:
+    """Кадр сторінки таким, яким його бачив рушій: повернутий, у масштабі рамок.
+
+    Рамки рядків лежать у координатах тієї копії кадру, яку бачив рушій
+    (повернутої на `orient` з мети й у розмірі `size` з `.lines.json`). Кадр на
+    диску буває більший і неповернутий. Повертає `image` (RGB, повернуте),
+    `k` — множник рамки до пікселів цього зображення, `orient`, `frame` і
+    `frame_source` (`meta|registry|pdf`). Спільне для кропа пошуку й нарізки
+    навчальних пар із нотатника (`train.notes`).
+    """
+    from PIL import Image
+
+    from nyshporka import htr_store as S
+
+    size = _geometry_size(run, page)
+    got = S.resolve_scan_how(run, page)
+    if got is not None:
+        src, orient, frame_source = got
+        frame = str(src)
+        with Image.open(src) as raw:
+            base = raw.convert("RGB")
+    else:
+        # 🔴 Справа-PDF: хмарний прогін розгортав PDF у кадри на орендованому
+        # боксі, тож кадрів на диску немає, а `page.view` ту саму сторінку
+        # рендерив із PDF. Кроп відповідав «кадру немає», і гортач (`text sheet`)
+        # ішов без кропів якраз на найбільших справах (відгук стороннього
+        # користувача, жовтень 2026). Тепер шлях спільний із переглядом:
+        # відповідність кадр → сторінка доводиться в `pdfpage.mapping`, а не
+        # вгадується. Рендер — у ширину геометрії рушія до повороту, тож рамки
+        # лягають без перерахунку.
+        from nyshporka.htr import view as V
+
+        meta_orient = int(((S.load_meta(run) or {}).get("pages") or {})
+                          .get(page, {}).get("orient") or 0)
+        width = None
+        if size and size[0]:
+            width = size[1] if meta_orient % 180 else size[0]
+        try:
+            base, orient, pdf, index = V.pdf_page(run, page, width=width)
+        except V.ViewError as exc:
+            raise FrameError(f"кадру для {run} · {page} на цій машині немає, і з PDF "
+                             f"справи його не відтворити: {exc}") from exc
+        frame, frame_source = f"{pdf} · с.{index + 1}", "pdf"
+    im = _rotated(base, int(orient))
+    if im is not base:
+        base.close()            # без повороту `_rotated` віддає той самий об'єкт
+    k = 1.0
+    if size and size[0]:
+        if (im.width > im.height) != (size[0] > size[1]):
+            im = im.transpose(Image.Transpose.ROTATE_270)
+        k = im.width / float(size[0])
+    return {"image": im, "k": k, "orient": int(orient), "frame": frame,
+            "frame_source": frame_source}
+
+
+def line_image(run: str, page: str, bbox: Sequence[float]) -> Any:
+    """Рядок за рамкою рушія — PIL-зображення без полів і без сусідів.
+
+    Для навчальної пари: кроп мусить бути саме тим рядком, який звірено, а не
+    смугою з наступним, як у кропа пошуку (`crop(with_next=True)`).
+    """
+    fr = engine_frame(run, page)
+    im, k = fr["image"], fr["k"]
+    x0, y0, x1, y1 = (float(v) * k for v in bbox)
+    box = (max(0, int(x0)), max(0, int(y0)), min(im.width, round(x1)),
+           min(im.height, round(y1)))
+    if box[2] <= box[0] or box[3] <= box[1]:
+        raise FrameError(f"рамка {list(bbox)} поза кадром {run} · {page}")
+    piece = im.crop(box)
+    im.close()
+    return piece
+
+
 def crop(scope: str, page: str, line: int, *, with_next: bool = True, wide: bool = False,
          pad: int = 12, scale: float = 1.0, out: str | Path | None = None,
          with_prev: bool = False) -> dict[str, Any]:
@@ -316,8 +393,6 @@ def crop(scope: str, page: str, line: int, *, with_next: bool = True, wide: bool
     переноситься. `wide` — на всю ширину сторінки.
     """
     from PIL import Image
-
-    from nyshporka import htr_store as S
 
     sc = scope_runs(scope)
     rows = sc["rows"]
@@ -397,42 +472,13 @@ def crop(scope: str, page: str, line: int, *, with_next: bool = True, wide: bool
         if prev and pbox is not None and near(pbox):
             boxes.append(pbox)
             joined.append(prev.no)
-    size = _geometry_size(run, pg)
-    got = S.resolve_scan_how(run, pg)
-    if got is not None:
-        src, orient, frame_source = got
-        frame = str(src)
-        with Image.open(src) as raw:
-            base = raw.convert("RGB")
-    else:
-        # 🔴 Справа-PDF: хмарний прогін розгортав PDF у кадри на орендованому
-        # боксі, тож кадрів на диску немає, а `page.view` ту саму сторінку
-        # рендерив із PDF. Кроп відповідав «кадру немає», і гортач (`text sheet`)
-        # ішов без кропів якраз на найбільших справах (відгук стороннього
-        # користувача, жовтень 2026). Тепер шлях спільний із переглядом:
-        # відповідність кадр → сторінка доводиться в `pdfpage.mapping`, а не
-        # вгадується. Рендер — у ширину геометрії рушія до повороту, тож рамки
-        # лягають без перерахунку.
-        from nyshporka.htr import view as V
-
-        meta_orient = int(((S.load_meta(run) or {}).get("pages") or {})
-                          .get(pg, {}).get("orient") or 0)
-        width = None
-        if size and size[0]:
-            width = size[1] if meta_orient % 180 else size[0]
-        try:
-            base, orient, pdf, index = V.pdf_page(run, pg, width=width)
-        except V.ViewError as exc:
-            return {"error": f"кадру для {run} · {pg} на цій машині немає, і з PDF "
-                             f"справи його не відтворити: {exc}"}
-        frame, frame_source = f"{pdf} · с.{index + 1}", "pdf"
-    with base:
-        im = _rotated(base, int(orient))
-        k = 1.0
-        if size and size[0]:
-            if (im.width > im.height) != (size[0] > size[1]):
-                im = im.transpose(Image.Transpose.ROTATE_270)
-            k = im.width / float(size[0])
+    try:
+        fr = engine_frame(run, pg)
+    except FrameError as exc:
+        return {"error": str(exc)}
+    im, k, orient = fr["image"], fr["k"], fr["orient"]
+    frame, frame_source = fr["frame"], fr["frame_source"]
+    with im:
         x0 = float(min(b[0] for b in boxes) - pad)
         y0 = float(min(b[1] for b in boxes) - pad)
         x1 = float(max(b[2] for b in boxes) + pad)

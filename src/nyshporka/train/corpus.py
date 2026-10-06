@@ -145,6 +145,8 @@ def plan(recipe: Recipe, *, only: list[str] | None = None, include_unsure: bool 
         if sid == "gt":
             it = SRC.read_gt(reg, include_unsure=include_unsure)
             manual = {str(p) for p, _ in SRC.read_gt(reg, include_unsure=True).rows}
+        elif sid == "notes":
+            it = SRC.read_notes(reg, include_unsure=include_unsure)
         elif sid == "pseudo":
             if not manual:
                 manual = {str(p) for p, _ in SRC.read_gt(reg, include_unsure=True).rows}
@@ -158,6 +160,12 @@ def plan(recipe: Recipe, *, only: list[str] | None = None, include_unsure: bool 
             it = SRC.read_external(spec)
         notes[sid] = it.notes
         if not it.rows:
+            if sid == "notes":
+                # Наборів нотатника в більшості просторів немає, і це норма, а не
+                # вада рецепта: попередження на кожному плані привчило б його не
+                # читати.
+                notes[sid].append("наборів із нотатника немає — nysh train from-notes <справа>")
+                continue
             warnings.append(f"[{sid}] 0 рядків — джерела нема на диску або воно порожнє")
             continue
         # 🔴 Дедуплікація за шляхом: мітки append-only, і повторна розмітка

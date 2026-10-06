@@ -652,6 +652,41 @@ def _syrovyi_put(url: str, *, content: bytes, headers: dict[str, str],
         return c.put(url, content=content, headers=headers)
 
 
+def _put_bytes(url: str, blob: bytes, *, auth: str,
+               content_type: str = "application/octet-stream") -> int:
+    """PUT малих байтів на сервер пулу з ключем (кроп звіреного рядка).
+
+    Повертає код відповіді; відмову (4xx/5xx) показує `UploadError` з текстом
+    пулу. Без повторів: кроп — десятки кілобайтів, і повтор зробить `note push`.
+    """
+    from nyshporka.sources.http import app_ua, proxy_url
+
+    headers = {"Authorization": f"Bearer {auth}", "User-Agent": app_ua(),
+               "Content-Type": content_type}
+    try:
+        resp = _syrovyi_put(url, content=blob, headers=headers, timeout=60.0,
+                            proxy=proxy_url())
+    except Exception as exc:  # обрив мережі: OSError або httpx.HTTPError
+        raise UploadError(f"кроп не відправився: {exc}") from exc
+    if resp.status_code >= 400:
+        raise UploadError(f"пул не прийняв кроп: {resp.status_code} {resp.text[:200]}",
+                          status=resp.status_code)
+    return int(resp.status_code)
+
+
+def _get_bytes(url: str, *, auth: str, max_bytes: int = 1 << 20) -> bytes:
+    """Байти з пулу з ключем (кроп для трену власника)."""
+    from nyshporka.sources.http import HttpError
+
+    try:
+        resp = catalog._fetcher(url, auth=auth).get(url, max_bytes=max_bytes)
+    except HttpError as exc:
+        raise UploadError(catalog.reason(exc), status=exc.status) from exc
+    except catalog.PoolError as exc:
+        raise UploadError(str(exc)) from exc
+    return bytes(resp.content)
+
+
 def _signed_headers(url: str) -> set[str]:
     """Заголовки, які накриває підпис presigned-посилання (`X-Amz-SignedHeaders`)."""
     from urllib.parse import parse_qs, urlsplit

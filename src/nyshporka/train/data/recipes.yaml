@@ -18,6 +18,7 @@ recipes:
     note: "свої мітки ~10% батчів, злиття арбітрів ~8%, решта — зовнішні корпуси"
     mix:
       gt:     {cap: 0, share: "10%"}
+      notes:  {cap: 0, rep: 1}   # звірене оком із нотатника справи (nysh train from-notes)
       pseudo: {cap: 0, share: "8%"}
       peter:  {cap: 0, rep: 6}
       rukopys: {cap: 12000, rep: 1}
@@ -62,6 +63,7 @@ recipes:
     note: "як domain, але зовнішні корпуси врізані до 4000 рядків кожен"
     mix:
       gt:     {cap: 0, share: "13%"}
+      notes:  {cap: 0, rep: 1}   # звірене оком із нотатника справи (nysh train from-notes)
       pseudo: {cap: 0, share: "10%"}
       peter:  {cap: 0, rep: 2}
       rukopys: {cap: 4000, rep: 1}
@@ -85,6 +87,7 @@ recipes:
     note: "тільки свої набори: мітки ×4, злиття ×1; для першого досліду на своєму почерку"
     mix:
       gt:     {cap: 0, rep: 4}
+      notes:  {cap: 0, rep: 1}   # звірене оком із нотатника справи (nysh train from-notes)
       pseudo: {cap: 0, rep: 1}
     val:
       quota_chars: {gt: 2000}

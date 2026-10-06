@@ -51,6 +51,10 @@ MERGE_ID = "merge"
 STATUSES = ("ok", "skip", "unsure")
 KINDS = ("hand", "print", "mixed")
 ROLES = ("train", "holdout")
+#: Звідки набір: `run` — нарізка прогону з розміткою оком; `notebook` — звірені
+#: оком рядки свого нотатника справи; `pool` — рядки, поширені іншими в Супрягу
+#: (лише власнику проєкту). Корпус бере їх різними джерелами (`sources.py`).
+ORIGINS = ("run", "notebook", "pool")
 CONFS = ("high", "med", "low")
 
 #: `line_007.png`, `line_0123.png` — ширина індексу не фіксується: нарізка
@@ -125,6 +129,9 @@ class SetSpec:
     hidden: bool = False
     note: str = ""
     version: int = 1
+    origin: str = "run"
+    #: Для `pool`: останній id запису пулу, уже взятий у набір.
+    cursor: int = 0
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -135,6 +142,9 @@ class SetSpec:
             "drafts": [d.as_dict() for d in self.drafts],
             "glossary": self.glossary, "skip_names": list(self.skip_names),
             "hidden": self.hidden, "note": self.note,
+            # Типові значення не пишуться: старі набори лишаються байт у байт.
+            **({"origin": self.origin} if self.origin != "run" else {}),
+            **({"cursor": self.cursor} if self.cursor else {}),
         }
 
     @classmethod
@@ -153,6 +163,8 @@ class SetSpec:
             skip_names=[str(x) for x in (d.get("skip_names") or [])],
             hidden=bool(d.get("hidden", False)), note=str(d.get("note") or ""),
             version=int(d.get("version") or 1),
+            origin=str(d.get("origin") or "run"),
+            cursor=int(d.get("cursor") or 0),
         )
 
     def voices(self) -> list[Draft]:
@@ -254,6 +266,8 @@ class Registry:
             raise SetError(f"неприпустиме ім'я набору: {spec.name!r}")
         if spec.role not in ROLES:
             raise SetError(f"role має бути одним з {ROLES}, дано {spec.role!r}")
+        if spec.origin not in ORIGINS:
+            raise SetError(f"origin має бути одним з {ORIGINS}, дано {spec.origin!r}")
         p = self.spec_path(spec.name)
         p.parent.mkdir(parents=True, exist_ok=True)
         write_json(p, spec.as_dict())

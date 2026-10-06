@@ -538,3 +538,43 @@ def promote_cmd(
         return
     console.print(f"🏆 {env.data['model']}  [muted]{env.data['production']}[/muted]")
     _notes(env)
+
+
+@app.command("from-notes")
+def from_notes_cmd(
+    case: str = typer.Argument(..., help="справа, чиї звірені оком рядки взяти"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
+) -> None:
+    """Набір із звірених оком рядків нотатника справи: кроп ↔ звірене.
+
+    Корпус бере такі набори окремим джерелом `notes` (рецепт, `nysh train plan`).
+    """
+    from nyshporka import ops as O
+
+    env = O.call("train.from_notes", {"case": case})
+    if _answer(env, as_json):
+        return
+    d = env.data
+    console.print(f"набір [bold]{d['set']}[/bold]: звірених рядків {d['readings']}, "
+                  f"з рамкою {d['with_box']}, вирізано {d['cut']}, нових міток {d['marked']}")
+    _notes(env)
+
+
+@app.command("from-pool")
+def from_pool_cmd(
+    since: int = typer.Option(-1, "--since", help="id пулу, після якого брати; "
+                                                  "типово — з курсора наборів"),
+    base: str = typer.Option("", "--base", help="інша домівка пулу"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
+) -> None:
+    """Набори з рядків, поширених іншими в Супрягу. Лише для власника проєкту."""
+    from nyshporka import ops as O
+
+    env = O.call("train.from_pool", {"since": since, "base": base})
+    if _answer(env, as_json):
+        return
+    d = env.data
+    console.print(f"з пулу записів {d['rows']}, вирізано {d['cut']}, нових міток {d['marked']}")
+    for name, s in d["sets"].items():
+        console.print(f"  {name}: {s['rows']} (нових {s['new']}), курсор {s['cursor']}")
+    _notes(env)

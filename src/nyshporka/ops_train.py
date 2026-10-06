@@ -614,3 +614,86 @@ def train_suggest(a: SuggestArgs) -> Envelope:
         return ok({"items": _store(a.name).suggest(a.q, max(1, min(20, a.limit)))})
     except S.SetError as exc:
         return fail(str(exc))
+
+
+# ── навчальні пари з нотатника справи ────────────────────────────────────────
+class FromNotesArgs(BaseModel):
+    case: str = Field(description="справа, чиї звірені оком рядки взяти")
+
+
+@op("train.from_notes", summary="Набір із звірених оком рядків нотатника справи",
+    args=FromNotesArgs, mutates=True, agent=False, section=SECTION)
+def train_from_notes(a: FromNotesArgs) -> Envelope:
+    """Свої записи `reading` справи → набір `notes-<справа>` (кроп ↔ звірене).
+
+    🔴 Окреме джерело корпусу (`notes`), а не `gt`: рядки відібрані там, де
+    модель помилилась. Кроп ріжеться з власного кадру за рамкою рушія; кадру
+    немає — запис названо у відповіді, а не загублено.
+    """
+    from nyshporka.train import notes as N
+
+    try:
+        got = N.from_notes(a.case)
+    except (ValueError, N.NotesError) as exc:
+        return fail(str(exc))
+    env = ok(got)
+    if not got["readings"]:
+        env.warn("no_readings", "у нотатнику справи звірених рядків немає — "
+                                "nysh note read <справа> <сторінка> --line N --text …")
+    if got["no_box"]:
+        env.warn("no_box", f"{len(got['no_box'])} записів без рамки рядка (прогін без "
+                           "геометрії) — у набір не пішли")
+    if got["no_frame"]:
+        env.warn("no_frame", f"{len(got['no_frame'])} записів без кадру на цій машині — "
+                             "у набір не пішли")
+    return env
+
+
+class FromPoolArgs(BaseModel):
+    base: str = Field(default="", description="інша домівка пулу")
+    since: int = Field(default=-1, description="id, після якого брати; -1 — з курсора наборів")
+    limit: int = Field(default=500, ge=1, le=2000, description="записів за один запит")
+
+
+@op("train.from_pool", summary="Набори з рядків, поширених іншими в Супрягу (власник)",
+    args=FromPoolArgs, mutates=True, long=True, agent=False, section=SECTION,
+    private=True)
+def train_from_pool(a: FromPoolArgs) -> Envelope:
+    """Звірені рядки з кропами з пулу → набори `pool-<книга>`. Лише власнику.
+
+    Поширити звірений рядок у Супрягу = погодитись, що власник проєкту візьме
+    його в трен; іншим пул кропів не віддає. Без адмінського ключа пул
+    відповідає 404 — і команда каже це словами.
+    """
+    from nyshporka.share import catalog, upload
+    from nyshporka.train import notes as N
+
+    tok = upload.token()
+    if not tok:
+        return fail("немає ключа Супряги: nysh share login")
+    base = catalog.base_url(a.base)
+    after = N.pool_cursor() if a.since < 0 else a.since
+    rows: list[dict[str, Any]] = []
+    while True:
+        try:
+            got = upload._request("GET", f"{base}/admin/notes/crops?after={after}"
+                                         f"&limit={a.limit}", auth=tok)
+        except upload.UploadError as exc:
+            if exc.status == 404:
+                return fail("пул не дає перелік кропів цьому ключу: він лише для "
+                            "власника проєкту")
+            return fail(str(exc))
+        batch = [r for r in got.get("rows") or [] if isinstance(r, dict)]
+        rows += batch
+        if len(batch) < a.limit:
+            break
+        after = max(int(r.get("id") or 0) for r in batch)
+
+    def fetch(uid: str) -> bytes:
+        return upload._get_bytes(f"{base}/admin/notes/crops/{uid}.jpg", auth=tok)
+
+    rep = N.from_pool(rows, fetch)
+    env = ok(rep)
+    if rep["failed"]:
+        env.warn("failed", f"{len(rep['failed'])} записів не взято — причини в `failed`")
+    return env

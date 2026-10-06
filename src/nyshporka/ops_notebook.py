@@ -310,13 +310,18 @@ def note_push(a: NotePushArgs) -> Envelope:
     pages = NB.pages_digest(cf) if a.pages else []
     body = {"wire": NB.WIRE_VERSION, "key": ref.key, "shifra": ref.shifra,
             "entries": entries, "pages": pages}
+    with_crop = sum(1 for w in entries if w.get("kind") == "reading"
+                    and isinstance(w.get("line"), dict) and w["line"].get("bbox"))
     data: dict[str, Any] = {"case": ref.key, "shifra": ref.shifra,
                             "entries": len(entries), "pages": len(pages),
+                            "with_crop": with_crop,
                             "refused": refused, "dry_run": a.dry_run}
     if a.dry_run:
         env = ok({**data, "body": body})
         for r in refused:
             env.warn("gate", f"{r['uid'][:8]} ({r['kind']}): {r['why'][0]}")
+        if with_crop:
+            env.warn("training", TRAINING_NOTICE)
         return env
     if not entries and not pages:
         env = ok(data)
@@ -332,11 +337,77 @@ def note_push(a: NotePushArgs) -> Envelope:
                               body=body, auth=tok)
     except upload.UploadError as exc:
         return fail(str(exc))
-    env = ok({**data, "pool": got})
+    crops = _send_crops(cf, got.get("need_crop") or [], base=catalog.base_url(a.base),
+                        tok=tok)
+    env = ok({**data, "pool": got, "crops": crops})
     for r in refused + list(got.get("refused") or []):
         why = r.get("why") or [r.get("text", "")]
         env.warn("gate", f"{str(r.get('uid', ''))[:8]}: {why[0] if why else ''}")
+    if crops["sent"] or crops["no_frame"]:
+        env.warn("training", TRAINING_NOTICE)
+    if crops["no_frame"]:
+        env.warn("no_frame", f"{len(crops['no_frame'])} звірених рядків поїхали без кропу: "
+                             "кадру на цій машині немає")
+    for f in crops["failed"]:
+        env.warn("crop_failed", f"{f['uid'][:8]}: {f['why']}")
     return env
+
+
+#: Що людина погоджується віддати, поширюючи звірений рядок. 🔴 Кажеться
+#: щоразу, коли кроп їде, а не лише в документації: згода дається дією.
+TRAINING_NOTICE = ("звірені рядки їдуть разом із кропом рядка; власник Нишпорки може "
+                   "використати їх для навчання моделей розпізнавання. На сторінці "
+                   "книги кропи не показуються й іншим не віддаються")
+
+#: Стеля кропа: пул більшого не прийме.
+CROP_MAX_BYTES = 256 * 1024
+CROP_MAX_WIDTH = 2000
+
+
+def crop_jpeg(n: Any) -> bytes:
+    """Сірий JPEG рядка за рамкою рушія — у межах стелі пулу."""
+    import io
+
+    from nyshporka.search import textops as T
+
+    piece = T.line_image(n.line.run, n.page, n.line.bbox).convert("L")
+    if piece.width > CROP_MAX_WIDTH:
+        piece = piece.resize((CROP_MAX_WIDTH,
+                              max(1, round(piece.height * CROP_MAX_WIDTH / piece.width))))
+    for q in (85, 70, 55, 40):
+        buf = io.BytesIO()
+        piece.save(buf, "JPEG", quality=q, optimize=True)
+        if buf.tell() <= CROP_MAX_BYTES:
+            return buf.getvalue()
+    raise ValueError("кроп не вміщається в 256 КБ навіть на найнижчій якості")
+
+
+def _send_crops(cf: Any, need: list[Any], *, base: str, tok: str) -> dict[str, Any]:
+    """Кропи тих звірених рядків, яких пул ще не має (`need_crop` у відповіді)."""
+    from nyshporka.search import textops as T
+    from nyshporka.share import upload
+
+    want = {str(u) for u in need}
+    out: dict[str, Any] = {"sent": 0, "no_frame": [], "failed": []}
+    for n in cf.notes:
+        if n.uid not in want or n.kind != "reading" or n.line is None or not n.line.bbox:
+            continue
+        try:
+            blob = crop_jpeg(n)
+        except T.FrameError:
+            out["no_frame"].append(n.uid)
+            continue
+        except ValueError as exc:
+            out["failed"].append({"uid": n.uid, "why": str(exc)})
+            continue
+        try:
+            upload._put_bytes(f"{base}/notes/{n.uid}/crop", blob, auth=tok,
+                              content_type="image/jpeg")
+        except upload.UploadError as exc:
+            out["failed"].append({"uid": n.uid, "why": str(exc)})
+            continue
+        out["sent"] += 1
+    return out
 
 
 class NotePullArgs(BaseModel):
