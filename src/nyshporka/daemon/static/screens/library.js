@@ -169,8 +169,12 @@ function libMoreActive() {
  */
 function libSummary(s) {
   const bits = [
-    `${ic('books', 'ic-sm')} ${esc(s.all ?? 0)} ${t('lib.sum.all')}`,
+    // Справи, а не теки: одна справа буває кількома теками (фрагменти плівки).
+    `${ic('books', 'ic-sm')} ${esc(s.all ?? 0)} ${t('lib.sum.all')}${
+      s.folders > s.all ? ` <span class="dim">(${esc(s.folders)} ${t('lib.sum.folders')})</span>` : ''}`,
     s.on_disk != null ? `${ic('disk', 'ic-sm')} ${esc(s.on_disk)} ${t('lib.sum.disk')}` : '',
+    s.offloaded ? `<span title="${esc(t('lib.noframes'))}">${esc(s.offloaded)} ${
+      t('lib.sum.offloaded')}</span>` : '',
   ];
   if (s.has_layers) {
     bits.push(
@@ -336,7 +340,8 @@ function libRow(r, layers) {
     <td class="num">${esc(years)}</td>
     <td>${esc((r.place || '').slice(0, 30))}</td>
     <td class="num">${r.frames ? esc(r.frames)
-    : `<span class="dim" title="${esc(t('lib.noframes'))}">—</span>`}</td>
+    : `<span class="dim" title="${esc(t('lib.noframes'))}">${
+      r.state === 'archived' ? t('lib.offloaded') : '—'}</span>`}</td>
     <td class="work">${libWork(r, layers)}</td>
     <td>${v}</td>
     <td class="acts">

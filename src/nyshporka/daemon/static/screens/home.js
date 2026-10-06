@@ -250,8 +250,13 @@ function tiles(d) {
   out.push(tile('frames', 'image', t('dash.tile.frames'), reg.frames,
     'library', { hist: 'frames' }));
   if (screenOn('runs') && rd.ok) {
+    // 🔴 Не «із N кадрів на диску»: прочитано й те, що потім зняли з диска
+    // заради місця, тож «прочитано 739 798 із 298 273» виглядало як помилка
+    // (холодний прохід 07.10.2026). Знаменник тут — справи, а не кадри.
+    const readCases = Number(reg.cases || 0) - Number(reg.htr_none || 0);
     out.push(tile('read', 'quill', t('dash.tile.read'), rd.pages,
-      'runs', { hist: 'htr_pages', of: reg.frames }));
+      'runs', { hist: 'htr_pages',
+        note: reg.built ? t('dash.read.in').replace('{n}', num(readCases)) : '' }));
   }
   if (canon.present) {
     out.push(tile('canon', 'books', t('dash.tile.canon'), canon.persons,

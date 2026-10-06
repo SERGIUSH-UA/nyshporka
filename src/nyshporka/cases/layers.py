@@ -135,6 +135,12 @@ def entries() -> list[dict[str, Any]]:
             if v is None and row.get(k) is not None:
                 continue
             row[k] = v
+        # 🔴 «На диску» — лише там, де кадри справді є. Реєстр знає стан справи
+        # (`archived` — кадри зняті заради місця), а бібліотека ставила позначку,
+        # знайшовши саму теку: 1271 справа з 2512 «на диску» не мала жодного
+        # кадру (перевірка 07.10.2026).
+        if got.get("state") == "archived" and not int(row.get("frames") or 0):
+            row["on_disk"] = False
         v = verdicts.get(key) or {}
         row["verdict"] = v.get("verdict") or ""
         row["verdict_note"] = v.get("note") or ""
@@ -199,17 +205,35 @@ def summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
     досягнення, а означало б, що зріз не збирали.
     """
     got = has_layers()
-    n = len(rows)
+    # 🔴 Справи, а не рядки. Одна справа буває кількома теками (плівку
+    # розкладено на фрагменти, зйомка по двох селах), і кожна тека — свій рядок:
+    # «2512 справ» при 2385 різних справах — це теки (перевірка 07.10.2026).
+    # Кадри рахуються по всіх теках, решта — по справі один раз.
+    folders = len(rows)
+    by_key: dict[str, dict[str, Any]] = {}
+    disk_keys: set[str] = set()
+    for r in rows:
+        k = str(r.get("key") or "") or f"row:{id(r)}"
+        by_key.setdefault(k, r)
+        if r.get("on_disk") and int(r.get("frames") or 0) > 0:
+            disk_keys.add(k)
+    cases = list(by_key.values())
     out: dict[str, Any] = {
-        "all": n,
-        "on_disk": sum(1 for r in rows if r.get("on_disk")),
-        "named": sum(1 for r in rows if r.get("title")),
-        "curated": sum(1 for r in rows if r.get("curated")),
+        "all": len(cases),
+        "folders": folders,
+        "on_disk": len(disk_keys),
+        # Знято з диска: реєстр бачив справу, а кадрів на руках зараз немає.
+        "offloaded": (sum(1 for k, r in by_key.items()
+                          if r.get("state") == "archived" and k not in disk_keys)
+                      if got else None),
+        "named": sum(1 for r in cases if r.get("title")),
+        "curated": sum(1 for r in cases if r.get("curated")),
         "frames": sum(int(r.get("frames") or 0) for r in rows),
-        "verdict_any": sum(1 for r in rows if r.get("verdict")),
-        "no_clan": sum(1 for r in rows if r.get("verdict") == "no_clan"),
+        "verdict_any": sum(1 for r in cases if r.get("verdict")),
+        "no_clan": sum(1 for r in cases if r.get("verdict") == "no_clan"),
         "has_layers": got,
     }
+    rows = cases
     if not got:
         out.update({"no_htr": None, "no_fuzzy": None, "hits_open": None,
                     "read": None})

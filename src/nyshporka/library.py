@@ -1729,7 +1729,9 @@ def build_library() -> list[CaseEntry]:
         if entry is None and parsed:
             entry = _same_case(by_rfs, parsed[0], parsed[1], opys_here, parsed[3])
         if entry is not None:
-            entry.on_disk = True
+            # Тека є — ще не означає «на диску»: кадри з неї могли зняти заради
+            # місця (`_offloaded.json`, `pages_dropped`), і тоді позначка брехала.
+            entry.on_disk = entry.on_disk or bool(frames)
             if not entry.path:
                 entry.path = rel
                 entry.frames = frames
