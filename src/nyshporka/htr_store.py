@@ -935,7 +935,8 @@ def runs_for_scope(scope: str | Sequence[str]) -> dict[str, Any]:
         # Канонічні ключі: за ними область розкладається на справи
         # (`textops.find`), і шифра в меті не дає тієї самої справи двічі.
         keys = sorted({k for k in (key_of(r) for r in series) if k})
-        out = {"rows": series, "kind": "cases", "key": "", "shifra": want, "keys": keys}
+        out: dict[str, Any] = {"rows": series, "kind": "cases", "key": "", "shifra": want,
+                               "keys": keys}
         if not code:
             info = _series_scope(want, series, keys)
             if info:
