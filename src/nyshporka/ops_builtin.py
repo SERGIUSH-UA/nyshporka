@@ -1331,6 +1331,7 @@ def cases_list(a: CasesArgs) -> Envelope:
         return fail(f"реєстр справ недоступний ({type(exc).__name__}: {exc})"
                     ).suggest("cases.build", "зібрати реєстр справ")
     pages = (total + size - 1) // size if size else 0
+    _bundle_subdirs(rows)
     try:
         counts = db.kind_counts()
     except Exception:
@@ -1348,6 +1349,38 @@ def cases_list(a: CasesArgs) -> Envelope:
     if st.get("stale"):
         env.stale_because(st.get("reasons") or [], fix="nysh cases build")
     return env
+
+
+def _bundle_subdirs(rows: list[dict[str, Any]]) -> None:
+    """Збірці без кадрів — скільки в ній тек.
+
+    🔴 Збірка тримає не кадри, а підтеки (фрагменти плівок, справи), і реєстр
+    рахує кадри лише верхнього рівня. «0 кадрів» на десятках рядків
+    «Приймальні» читалось як «порожня тека», хоча в одній лежало 97 фрагментів.
+    Один перелік однієї теки на рядок сторінки — не обхід: вглиб не йдемо.
+    """
+    from nyshporka.core.workspace import workspace
+
+    root = None
+    for r in rows:
+        if r.get("kind") != "bundle" or r.get("frames") or not r.get("path"):
+            continue
+        if root is None:
+            try:
+                root = workspace().root
+            except Exception:
+                return
+        d = Path(str(r["path"]))
+        d = d if d.is_absolute() else Path(root) / d
+        if not d.is_dir():
+            # Збірка записана, а теки немає (знята з диска чи не завантажена):
+            # «0» сказав би «порожня», а не «відсутня».
+            r["missing"] = True
+            continue
+        try:
+            r["subdirs"] = sum(1 for p in d.iterdir() if p.is_dir())
+        except OSError:
+            continue
 
 
 # ── пошук по прочитаному ─────────────────────────────────────────────────────

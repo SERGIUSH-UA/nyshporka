@@ -69,7 +69,7 @@ SCREENS.cases = async () => {
     ${rows.map((r) => `<tr>
       <td title="${esc(t(`intake.kind.${r.kind}`))}">${ic(r.kind === 'bundle' ? 'archive-box' : 'page', 'ic-o ic-sm')}</td>
       <td class="mono">${esc(r.path || r.key)}</td>
-      <td class="num">${esc(r.frames || 0)}</td>
+      <td class="num">${intakeSize(r)}</td>
       <td class="acts">${r.path
         ? `<button class="ctl-sm" data-act="intake.frames" data-arg="${esc(r.path)}"
              title="${t('lib.act.frames')}">${ic('image', 'ic-o ic-sm')}</button>
@@ -81,6 +81,22 @@ SCREENS.cases = async () => {
     ${pager(d)}`
       : `<p><b>${t('intake.empty')}</b></p>`}`);
 };
+
+/**
+ * Що в теці: кадри, а для збірки без кадрів — скільки в ній тек.
+ *
+ * «0 кадрів» на збірці читалось як «порожня», хоча в ній лежать десятки
+ * фрагментів плівок; а на збірці, чиєї теки на диску немає, — як «порожня»,
+ * хоча її просто нема.
+ */
+function intakeSize(r) {
+  if (r.frames) return esc(r.frames);
+  if (r.missing) return `<span class="dim" title="${esc(t('intake.missing'))}">—</span>`;
+  if (r.subdirs) {
+    return `<span class="dim" title="${esc(t('intake.kind.bundle'))}">${esc(r.subdirs)} ${t('intake.subdirs')}</span>`;
+  }
+  return '0';
+}
 
 /**
  * 🔴 Знаменник обома боками межі.
