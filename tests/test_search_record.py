@@ -2,8 +2,8 @@
 
 🔴 Заради чого: метрика — таблиця. Ім'я дитини в одній колонці, батьки в
 другій, кума в третій, і рушій читає їх окремими рядками. Коли прізвище батька
-скалічене («Цально»), рядковий пошук запису не бачить, а ознаки з сусідніх
-колонок того самого запису — бачать (Р-740-2-63, кадр 119).
+скалічене до невпізнання, рядковий пошук запису не бачить, а ознаки з
+сусідніх колонок того самого запису — бачать.
 
 🔴 Друге: ознаки зводяться в межах ЗАПИСУ, а не сторінки. На сторінці чотири-
 вісім записів, і зведене по сторінці з'єднує чужих людей.
@@ -28,43 +28,43 @@ profiles:
       paradigm: adj_skyi
       stems:
         uk: Сікор
-  tsynko:
+  kovalenko:
     surname:
-      display: Цинько
+      display: Коваленко
       paradigm: noun_ko
       stems:
-        uk: Циньк
-        ru_prereform: Цыньк
+        uk: Коваленк
+        ru_prereform: Коваленк
     kin:
-      - {given: Галактіон, patronymic: Іванов, born: 1822, died: 1895}
-      - {given: Прокопій, patronymic: Галактіонов, born: 1847, died: 1923}
-      - {given: Васса, patronymic: Антонова, born: 1851}
-      - {given: Северіан, patronymic: Прокопієв, born: 1870}
+      - {given: Митрофан, patronymic: Іванов, born: 1822, died: 1895}
+      - {given: Тимофій, patronymic: Митрофанов, born: 1847, died: 1923}
+      - {given: Фекла, patronymic: Харитонова, born: 1851}
+      - {given: Пантелеймон, patronymic: Тимофієв, born: 1870}
 """
 
 W = 2000
 # (текст, рамка). Розворот: ім'я дитини, батьки, кума — три колонки одного
 # запису на висоті 100–260; нижче, на 1500+, — інший запис.
 PAGE_1 = [
-    ("Северіанъ", (300, 100, 500, 160)),
-    ("Крестьянинъ Прошеній Гамастіановъ Цально", (600, 100, 1100, 160)),
-    ("и законная жена его Васса Антонова", (600, 170, 1100, 230)),
-    ("Стефанида Ѳеодорова Цинькова", (1150, 190, 1600, 250)),
+    ("Пантелеймонъ", (300, 100, 500, 160)),
+    ("Крестьянинъ Тиросій Миграфановъ Кадано", (600, 100, 1100, 160)),
+    ("и законная жена его Фекла Харитонова", (600, 170, 1100, 230)),
+    ("Стефанида Ѳеодорова Коваленкова", (1150, 190, 1600, 250)),
     ("Священникъ Стефанъ Доброчинскій", (1650, 120, 1990, 180)),
     ("Іоаннъ Петровъ Ковальчукъ", (600, 1500, 1100, 1560)),
     ("Марія Даниловна", (600, 1570, 1100, 1630)),
 ]
 # Ті самі дві ознаки, але в різних записах: далеко одна від одної.
 PAGE_2 = [
-    ("Северіанъ", (300, 100, 500, 160)),
+    ("Пантелеймонъ", (300, 100, 500, 160)),
     ("Крестьянинъ Іоаннъ Петровъ", (600, 100, 1100, 160)),
     ("Священникъ Стефанъ Доброчинскій", (1650, 120, 1990, 180)),
-    ("Васса", (300, 1800, 500, 1860)),
+    ("Фекла", (300, 1800, 500, 1860)),
     ("Крестьянинъ Андрей Ѳомичъ", (600, 1800, 1100, 1860)),
 ]
-# Одне слово, схоже і на ім'я Галактіон, і на по батькові Галактіонов.
+# Одне слово, схоже і на ім'я Митрофан, і на по батькові Митрофанов.
 PAGE_3 = [
-    ("Крестьянинъ Галактіоновъ", (600, 100, 1100, 160)),
+    ("Крестьянинъ Митрофановъ", (600, 100, 1100, 160)),
     ("Священникъ Стефанъ Доброчинскій", (1650, 120, 1990, 180)),
 ]
 
@@ -104,8 +104,8 @@ def space(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
                {"0001": PAGE_1, "0002": PAGE_2, "0003": PAGE_3, **filler}, geo=True)
     # Голос без геометрії: та сама сторінка 0001, дві ознаки; і сторінка, де три.
     _write_run(tmp_path, "голий", {
-        "0001": [("Северіанъ Ковальчукъ", None), ("Васса Петрова", None)],
-        "0005": [("Северіанъ", None), ("Васса Антонова", None), ("Прокопій", None)],
+        "0001": [("Пантелеймонъ Ковальчукъ", None), ("Фекла Петрова", None)],
+        "0005": [("Пантелеймонъ", None), ("Фекла Харитонова", None), ("Тимофій", None)],
         **{n: [(t, None) for t, _b in lines] for n, lines in filler.items()},
     }, geo=False)
 
@@ -127,12 +127,12 @@ def test_the_query_finds_its_family_among_all_profiles(space: Path) -> None:
     """🔴 Доти пошук знав лише `fallback` — родина другим профілем шукалась голим словом."""
     from nyshporka.core import profile as P
 
-    assert P.family_for_query("Цинько").name == "tsynko"
-    assert P.family_for_query("Цынька").name == "tsynko"
+    assert P.family_for_query("Коваленко").name == "kovalenko"
+    assert P.family_for_query("Коваленка").name == "kovalenko"
     assert P.family_for_query("Сікорський").name == "rid"
     assert P.family_for_query("Ковальчук") is None
-    forms, whose = P.forms_for_query("Цинько")
-    assert whose == "Цинько" and "cinkova" in forms
+    forms, whose = P.forms_for_query("Коваленко")
+    assert whose == "Коваленко" and "kovalenkova" in forms
 
 
 def test_the_home_canon_is_not_kin_of_another_family(space: Path,
@@ -145,9 +145,9 @@ def test_the_home_canon_is_not_kin_of_another_family(space: Path,
                         lambda prof=None: [A.Person(given="Ѳеодоръ", patronymic="Ѳеодоровъ",
                                                     born=1762)])
     home = {p.given for p in A.people(P.resolve("rid"))}
-    other = {p.given for p in A.people(P.resolve("tsynko"))}
+    other = {p.given for p in A.people(P.resolve("kovalenko"))}
     assert "Ѳеодоръ" in home
-    assert "Ѳеодоръ" not in other and "Северіан" in other
+    assert "Ѳеодоръ" not in other and "Пантелеймон" in other
 
 
 # ── запис ────────────────────────────────────────────────────────────────────
@@ -155,41 +155,41 @@ def test_the_surname_channel_misses_the_record(space: Path) -> None:
     """Приймач фікстури: прізвище батька скалічене, рядком запис не знаходиться."""
     from nyshporka import htr_store as S
 
-    got = S.search("Цинько", name="метрика", thresh=80, profile=False)
-    assert not any(h["page"] == "0001.jpg" and "Цально" in h["line"] for h in got["hits"])
+    got = S.search("Коваленко", name="метрика", thresh=80, profile=False)
+    assert not any(h["page"] == "0001.jpg" and "Кадано" in h["line"] for h in got["hits"])
 
 
 def test_the_record_comes_from_the_columns_of_one_record(space: Path) -> None:
     """🔴 Заради чого канал: ім'я дитини, мати й кума з трьох колонок одного запису."""
     from nyshporka import htr_store as S
 
-    got = S.search("Цинько", name="метрика", thresh=80, family="tsynko", record=True)
+    got = S.search("Коваленко", name="метрика", thresh=80, family="kovalenko", record=True)
     rec = got["record"]
     assert rec["on"] and rec["hits"], rec
     top = rec["hits"][0]
     assert top["page"] == "0001.jpg" and top["by_geometry"] is True
     terms = {m["term"] for m in top["marks"]}
-    assert {"Северіан", "Васса", "Антонова"} <= terms
+    assert {"Пантелеймон", "Фекла", "Харитонова"} <= terms
     # смуга — висота запису, а не вся сторінка: запис нижче туди не входить
     assert top["band"][1] < 1500
-    assert got["family"] == {"name": "tsynko", "display": "Цинько"}
+    assert got["family"] == {"name": "kovalenko", "display": "Коваленко"}
 
 
 def test_signs_of_different_records_are_not_joined(space: Path) -> None:
-    """🔴 Северіан угорі сторінки й Васса в іншому записі внизу — не родина."""
+    """🔴 Пантелеймон угорі сторінки й Фекла в іншому записі внизу — не родина."""
     from nyshporka import htr_store as S
 
-    got = S.search("Цинько", name="метрика", family="tsynko", record=True)
+    got = S.search("Коваленко", name="метрика", family="kovalenko", record=True)
     assert not [h for h in got["record"]["hits"] if h["page"] == "0002.jpg"]
 
 
 def test_a_bare_name_is_not_a_patronymic(space: Path) -> None:
-    """«Іоаннъ» — це Іван, але ім'я, а не «Ивановъ»: по батькові Галактіона
+    """«Іоаннъ» — це Іван, але ім'я, а не «Ивановъ»: по батькові Митрофана
     Івановича воно не ознака, хоч стоїть у кожному записі книги."""
     from nyshporka.core import profile as P
     from nyshporka.search import record as R
 
-    ts = R.terms(P.resolve("tsynko"), "Цинько")
+    ts = R.terms(P.resolve("kovalenko"), "Коваленко")
     memo: dict = {}
     from rapidfuzz import fuzz
 
@@ -200,10 +200,10 @@ def test_a_bare_name_is_not_a_patronymic(space: Path) -> None:
 
 
 def test_one_word_is_one_sign(space: Path) -> None:
-    """«Галактіоновъ» схожий і на ім'я, і на по батькові — але це одне слово."""
+    """«Митрофановъ» схожий і на ім'я, і на по батькові — але це одне слово."""
     from nyshporka import htr_store as S
 
-    got = S.search("Цинько", name="метрика", family="tsynko", record=True)
+    got = S.search("Коваленко", name="метрика", family="kovalenko", record=True)
     assert not [h for h in got["record"]["hits"] if h["page"] == "0003.jpg"]
 
 
@@ -212,7 +212,7 @@ def test_without_geometry_the_page_needs_one_sign_more(space: Path) -> None:
     і запис позначено як зведений по сторінці."""
     from nyshporka import htr_store as S
 
-    got = S.search("Цинько", name="голий", family="tsynko", record=True)
+    got = S.search("Коваленко", name="голий", family="kovalenko", record=True)
     pages = {h["page"]: h for h in got["record"]["hits"]}
     assert "0001.jpg" not in pages
     assert "0005.jpg" in pages and pages["0005.jpg"]["by_geometry"] is False
@@ -226,10 +226,10 @@ def test_the_signs_of_a_family(space: Path) -> None:
     assert ts.empty
     from nyshporka.core import profile as P
 
-    ts = R.terms(P.resolve("tsynko"), "Цинько")
+    ts = R.terms(P.resolve("kovalenko"), "Коваленко")
     labels = [t.label for t in ts.terms]
-    assert labels[0] == "Цинько" and "Северіан" in labels and "Галактіонов" in labels
-    assert "Галактіон" in labels  # ім'я живе, поки людина жива: років справи немає
+    assert labels[0] == "Коваленко" and "Пантелеймон" in labels and "Митрофанов" in labels
+    assert "Митрофан" in labels  # ім'я живе, поки людина жива: років справи немає
 
 
 def test_years_narrow_the_signs(space: Path) -> None:
@@ -237,25 +237,25 @@ def test_years_narrow_the_signs(space: Path) -> None:
     from nyshporka.core import profile as P
     from nyshporka.search import record as R
 
-    ts = R.terms(P.resolve("tsynko"), "Цинько", 1922, 1929)
+    ts = R.terms(P.resolve("kovalenko"), "Коваленко", 1922, 1929)
     labels = {t.label for t in ts.terms}
-    assert "Галактіон" not in labels          # помер 1895
-    assert "Галактіонов" in labels            # його діти ще живі
-    assert "Северіан" in labels
+    assert "Митрофан" not in labels          # помер 1895
+    assert "Митрофанов" in labels            # його діти ще живі
+    assert "Пантелеймон" in labels
 
 
 # ── пошук цілком ─────────────────────────────────────────────────────────────
 def test_find_names_the_family_and_the_record_channel(space: Path) -> None:
     from nyshporka.search import textops as T
 
-    got = T.find("Цинько", "метрика", family="tsynko")
+    got = T.find("Коваленко", "метрика", family="kovalenko")
     assert not got.get("error"), got
     ids = {ch["id"]: ch for ch in got["ledger"]["channels"]}
     assert ids["record"]["ran"] and ids["record"]["hits"] >= 1
     assert got["record"]["hits"][0]["page"] == "0001.jpg"
-    assert got["family"]["name"] == "tsynko"
+    assert got["family"]["name"] == "kovalenko"
 
-    whole = T.find("Цинько", "", family="tsynko")
+    whole = T.find("Коваленко", "", family="kovalenko")
     ids = {ch["id"]: ch for ch in whole["ledger"]["channels"]}
     # поза справою ознаки людей нема чим звузити — канал мовчить і каже чому
     assert not ids["record"]["ran"] and "--case" in ids["record"]["why"]
@@ -272,16 +272,16 @@ def test_find_off_family_says_how_to_name_one(space: Path) -> None:
 def test_unknown_family_is_refused(space: Path) -> None:
     from nyshporka.search import textops as T
 
-    got = T.find("Цинько", "метрика", family="немає")
+    got = T.find("Коваленко", "метрика", family="немає")
     assert "немає профілю" in got.get("error", "")
 
 
 def test_search_run_refuses_record_without_a_case(space: Path) -> None:
     from nyshporka.ops_builtin import SearchArgs, search_run
 
-    env = search_run(SearchArgs(q="Цинько", record=True))
+    env = search_run(SearchArgs(q="Коваленко", record=True))
     assert not env.ok and "справи" in env.error
-    env = search_run(SearchArgs(q="Цинько", where="all", record=True))
+    env = search_run(SearchArgs(q="Коваленко", where="all", record=True))
     assert not env.ok and "record" in env.error
 
 
