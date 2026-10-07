@@ -539,8 +539,8 @@ def test_the_refusal_names_the_latin_letters_it_saw() -> None:
 def test_adding_an_archive_survives_a_comma_in_its_name(tmp_path) -> None:
     """🔴🔴 Найдорожча вада кнопки «додати архів», якби її не спіймали.
 
-    Значення підставлялось у YAML як є, тож «Archiwum Główne Akt Dawnych,
-    Warszawa» робило накладку нечитабельною. А `_read` на помилці розбору
+    Значення підставлялось у YAML як є, тож «Archiwum Narodowe w Krakowie,
+    Kraków» робило накладку нечитабельною. А `_read` на помилці розбору
     віддає ПОРОЖНЬО — тобто пак ставав порожнім УВЕСЬ, і після цього не
     заводилась жодна шифра, навіть вбудованих архівів. Кома в назві архіву не
     екзотика; ціна їй була б рівно та вада, проти якої писалась уся ця правка,
@@ -551,9 +551,9 @@ def test_adding_an_archive_survives_a_comma_in_its_name(tmp_path) -> None:
     from nyshporka.core import workspace as W
 
     W.use(W.Workspace(root=tmp_path, name="тест", origin="test"))
-    P.add_repository("AGAD", "AGAD", "Archiwum Główne Akt Dawnych, Warszawa", "PL")
+    P.add_repository("ANK", "ANK", "Archiwum Narodowe w Krakowie, Kraków", "PL")
 
-    assert parse_shifra("AGAD 1-2-3").repo == "AGAD"
+    assert parse_shifra("ANK 1-2-3").repo == "ANK"
     # І головне: вбудовані архіви живі. Саме це ламалось непомітно.
     assert parse_shifra("ДАХмО 315-1-8433").repo == "DAHMO"
 
@@ -586,7 +586,7 @@ def test_a_broken_overlay_is_rolled_back_not_left_broken(tmp_path, monkeypatch) 
     from nyshporka.core import workspace as W
 
     W.use(W.Workspace(root=tmp_path, name="тест", origin="test"))
-    P.add_repository("AGAD", "AGAD", "Archiwum", "PL")
+    P.add_repository("ANK", "ANK", "Archiwum", "PL")
     was = P.overlay_path().read_text(encoding="utf-8")
 
     # Імітуємо запис, що ламає YAML, — так, як це зробила б будь-яка майбутня
@@ -623,11 +623,11 @@ def test_an_archive_added_now_is_visible_to_every_reader_now(tmp_path) -> None:
     from nyshporka.pagestore.store import _label2repo
 
     W.use(W.Workspace(root=tmp_path, name="тест", origin="test"))
-    assert _canon_repo("AGAD") == "AGAD", "код невідомого архіву лишається як є"
-    P.add_repository("AGAD", "AGAD", "Archiwum Główne Akt Dawnych", "PL")
+    assert _canon_repo("ANK") == "ANK", "код невідомого архіву лишається як є"
+    P.add_repository("ANK", "ANK", "Archiwum Narodowe w Krakowie", "PL")
 
-    assert _label2repo().get("agad") == "AGAD", "сховище сторінок не бачить нового архіву"
-    assert _canon_repo("agad") == "AGAD", "бібліотека не бачить нового архіву"
+    assert _label2repo().get("ank") == "ANK", "сховище сторінок не бачить нового архіву"
+    assert _canon_repo("ank") == "ANK", "бібліотека не бачить нового архіву"
 
 
 @pytest.mark.parametrize("shape", [

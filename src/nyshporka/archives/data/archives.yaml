@@ -111,6 +111,14 @@ repositories:
     label: BNRM
     name: Biblioteca Naţională a Republicii Moldova
     country: MD
+  AGAD:
+    label: AGAD
+    # Шифра Метрики Коронної: zespół 4, seria 1 (Księgi Wpisów), справа — номер
+    # книги: «AGAD 4-1-183» = MK 183. Скани книг MK — сервер архіву
+    # agadd2.home.net.pl/metrykalia (джерело зйомки `agad:mk:<книга>`).
+    name: Archiwum Główne Akt Dawnych w Warszawie
+    country: PL
+    aliases: [АГАД, Головний архів давніх актів]
   IRNBUV:
     label: ІРНБУВ
     name: Інститут рукопису Національної бібліотеки України імені В. І. Вернадського
