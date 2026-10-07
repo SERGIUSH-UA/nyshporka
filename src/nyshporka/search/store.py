@@ -66,10 +66,12 @@ import contextlib
 import functools
 import hashlib
 import inspect
+import io
 import json
 import re
 import sqlite3
 import time
+import tokenize
 import zlib
 from bisect import bisect_right
 from collections.abc import Callable, Iterator
@@ -249,6 +251,25 @@ def exists() -> bool:
     return path().is_file()
 
 
+def _code_text(fn: Callable[..., Any]) -> str:
+    """Текст функції без коментарів і порожніх рядків — тіло відбитка правил.
+
+    🔴 Не `ast.dump`: його вивід залежить від версії Python (поля вузлів
+    міняються між мінорними), і той самий код у venv на 3.12 і 3.13 давав два
+    різні відбитки. Заміряно 07.10.2026: стор показував «3346 прогонів зібрані
+    ІНШИМ правилом склейки» при тотожному коді, бо наглядач хмари індексує під
+    3.12, а venv проєкту дослідження — під 3.13. Коментар tokenize знаходить однаково в усіх
+    версіях, тож правка коментаря, як і раніше, перебудови не вимагає.
+    """
+    src = inspect.getsource(fn)
+    lines = src.splitlines()
+    for tok in tokenize.generate_tokens(io.StringIO(src).readline):
+        if tok.type == tokenize.COMMENT:
+            row, col = tok.start
+            lines[row - 1] = lines[row - 1][:col]
+    return "\n".join(ln.rstrip() for ln in lines if ln.strip())
+
+
 @functools.lru_cache(maxsize=1)
 def rules_hash() -> str:
     """Відбиток правил, з яких зроблені кандидати в блобах.
@@ -264,8 +285,6 @@ def rules_hash() -> str:
     доіндексація 234 прогонів проставила їм відбиток, якого немає в жодної
     версії коду, і стор виглядав змішаним при тотожних кандидатах.
     """
-    import ast
-
     from nyshporka import htr_store as S
     from nyshporka.utils import translit as T
 
@@ -274,17 +293,18 @@ def rules_hash() -> str:
     # її зміна мусить робити кандидатів застарілими.
     for fn in (S.page_candidates_full, T.normalize_archival, successors, _geo_cands):
         try:
-            # AST без коментарів: правка коментаря не має вимагати перебудови.
-            parts.append(ast.dump(ast.parse(inspect.getsource(fn))))
-        except (OSError, TypeError, SyntaxError):
+            # Без коментарів: правка коментаря не має вимагати перебудови.
+            parts.append(_code_text(fn))
+        except (OSError, TypeError, SyntaxError, tokenize.TokenError):
             parts.append(f"{fn.__module__}.{fn.__name__}")
     parts += [str(S.LINE_BREAK_WINDOW), str(COL_GAP), str(SUCC_REACH), str(MARK)]
     # 🔴 Префікс версії САМОГО відбитка. Спосіб рахувати (джерело → AST)
     # змінився в минулому коміті, і живий стор на 6.5 ГБ став «застарілим за
     # правилами» без жодної зміни правил (рецензія 08.09, третій раунд). Зміна
     # способу тепер видима як така, а дослідник приймає відбиток без
-    # перебудови: `nysh text index --accept-rules`.
-    return "v2:" + hashlib.blake2b("\n".join(parts).encode("utf-8"), digest_size=8).hexdigest()
+    # перебудови: `nysh text index --accept-rules`. v3 — текст без коментарів
+    # замість `ast.dump`, що залежав від версії Python (див. `_code_text`).
+    return "v3:" + hashlib.blake2b("\n".join(parts).encode("utf-8"), digest_size=8).hexdigest()
 
 
 def rules_stale(conn: sqlite3.Connection) -> bool:

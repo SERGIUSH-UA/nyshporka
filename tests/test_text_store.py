@@ -283,7 +283,7 @@ def test_rules_fingerprint_is_versioned_and_can_be_accepted(space: Path) -> None
     from nyshporka.cli import app
     from nyshporka.search import store as ST
 
-    assert ST.rules_hash().startswith("v2:")
+    assert ST.rules_hash().startswith("v3:")
     list(ST.ensure_all(["проба"]))
     conn = ST.connect()
     conn.execute("update meta set value='старий' where key='rules'")
@@ -295,6 +295,41 @@ def test_rules_fingerprint_is_versioned_and_can_be_accepted(space: Path) -> None
     res = runner.invoke(app, ["text", "index", "--accept-rules"])
     assert res.exit_code == 0, res.output
     assert ST.stats()["rules_stale"] is False
+
+
+def test_rules_fingerprint_reads_code_text_not_the_interpreter(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """🔴 Відбиток правил — від тексту коду, а не від версії Python.
+
+    `ast.dump` міняє вивід між мінорними версіями: той самий код під 3.12 і
+    3.13 давав два відбитки, і стор 07.10.2026 показував «3346 прогонів
+    зібрані ІНШИМ правилом склейки» при тотожних правилах. Тут: коментарі й
+    порожні рядки відбитка не міняють, зміна коду — міняє, а підміна
+    `ast.dump` (як інша версія інтерпретатора) — ні.
+    """
+    import ast
+    import importlib.util
+
+    from nyshporka.search import store as ST
+
+    def load(name: str, src: str):
+        f = tmp_path / f"{name}.py"
+        f.write_text(src, encoding="utf-8")
+        spec = importlib.util.spec_from_file_location(name, f)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod.rule
+
+    plain = load("r_plain", "def rule(x):\n    return x.strip() + '#'\n")
+    noted = load("r_noted", "def rule(x):  # склейка\n\n    # нормалізація\n"
+                            "    return x.strip() + '#'  # кінець\n")
+    other = load("r_other", "def rule(x):\n    return x.strip() + '#!'\n")
+    assert ST._code_text(plain) == ST._code_text(noted)
+    assert ST._code_text(plain) != ST._code_text(other)
+
+    before = ST.rules_hash.__wrapped__()
+    monkeypatch.setattr(ast, "dump", lambda *a, **k: "інша версія Python")
+    assert ST.rules_hash.__wrapped__() == before
 
 
 def test_a_rebuild_killed_halfway_is_visible_run_by_run(space: Path) -> None:
