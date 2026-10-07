@@ -85,6 +85,21 @@ def test_a_reread_run_is_reindexed_by_stamp(space: Path) -> None:
     assert st["pages"] == 3 and st["indexed"] == 1
 
 
+def test_index_progress_counts_only_what_it_builds(space: Path) -> None:
+    """🔴 Свіжі прогони в знаменнику поступу давали консолі оцінку «лишилось»
+    годинами: темп міряли на справжній збірці, а множили на всі прогони."""
+    import shutil
+
+    from nyshporka.search import store as ST
+
+    list(ST.ensure_all(["проба"]))
+    shutil.copytree(space / "reports" / "htr" / "проба", space / "reports" / "htr" / "друга")
+    seen: list[tuple[int, int, str]] = []
+    got = list(ST.ensure_all(["проба", "друга"], progress=lambda i, n, r: seen.append((i, n, r))))
+    assert sorted(got) == ["друга", "проба"], "свіжий прогін теж віддається викликачу"
+    assert seen == [(1, 1, "друга")], f"поступ іде по свіжих: {seen}"
+
+
 def test_grep_reads_cyrillic_as_written_and_carries_context(space: Path) -> None:
     """Регекс іде по сирому тексту, не по латинізованій нормі."""
     from nyshporka.search import store as ST

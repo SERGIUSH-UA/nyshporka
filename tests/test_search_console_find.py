@@ -31,6 +31,8 @@ def reg(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
          "ДАВіО ф.127 оп.1 спр.7: Сповідні відомості", "pysar"),
         # не прочитана — у підказки межі не йде: шукати в ній нема в чому
         ("DAVO/904/24/3", "ДАВіО", "904", "24", "ДАВіО 904-24-3", "", "none"),
+        # фонд із літерою: розбір серії в пошуку його не бере
+        ("DAVO/R-6129/24/1", "ДАВіО", "R-6129", "24", "ДАВіО R-6129-24-1", "", "pysar"),
     ]
     for key, lab, f, o, sh, title, stage in rows:
         con.execute("INSERT INTO cases (key, kind, repo_label, fond, opys, shifra, title,"
@@ -55,7 +57,22 @@ def test_scopes_go_from_fond_to_case_and_only_read_ones(reg: Path) -> None:
     vals = {x["value"]: x for x in d["items"]}
     assert vals["ДАВіО 904"]["cases"] == 2, "непрочитана справа порахована"
     assert vals["ДАВіО 904-24"]["label"] == "ДАВіО ф.904 оп.24"
-    assert "ДАВіО 904-24-3" not in vals, "справа без прочитаного в підказках межі"
+    assert "DAVO/904/24/3" not in vals, "справа без прочитаного в підказках межі"
+    assert all("head" not in x for x in d["items"])
+
+
+def test_scopes_offer_only_what_the_search_accepts(reg: Path) -> None:
+    """🔴 Обрана підказка давала «не розпізнав справу»: справа йшла шифрою, яку
+    резолвер не розбирає, а фонд із літерою — серією, якої пошук не впізнає."""
+    from nyshporka import htr_store as S
+
+    vals = {x["value"]: x for x in _scopes()["items"]}
+    assert vals["DAVO/R-6129/24/1"]["label"] == "ДАВіО R-6129-24-1", "справа — ключем"
+    assert "ДАВіО R-6129" not in vals and "ДАВіО R-6129-24" not in vals
+    for v, x in vals.items():
+        if x["kind"] != "case":
+            repo, parts = S._series_head(v)
+            assert repo and "-".join(parts) in v, v
 
 
 def test_fonds_sort_as_numbers(reg: Path) -> None:
@@ -152,3 +169,33 @@ def test_index_button_builds_only_the_missing_store_runs(monkeypatch: pytest.Mon
     env = search_index(IndexArgs())
     assert env.ok and env.data["built"] == 1 and env.data["backend"] == "store"
     assert seen["runs"] == ["r1", "r2"] and not seen.get("force") and "reset_rules" not in seen
+
+
+@pytest.mark.parametrize("where", ["pages", "records"])
+def test_written_out_search_over_a_series_says_why_not(monkeypatch: pytest.MonkeyPatch,
+                                                       where: str) -> None:
+    """Межа «фонд/опис» із «виписаним» радила прив'язати прогін (`cases bind`) —
+    дію, яка тут нічого не змінює."""
+    from nyshporka import htr_store as S
+    from nyshporka.ops_builtin import SearchArgs, search_run
+
+    monkeypatch.setattr(S, "runs_for_scope", lambda _s: {
+        "rows": [{"name": "r1"}], "kind": "cases", "key": "", "shifra": "ДАХмО 315-1",
+        "keys": ["DAHMO/315/1/1"]})
+    env = search_run(SearchArgs(q="Ярошинський", where=where, case="ДАХмО 315-1"))
+    assert not env.ok
+    assert "фонд чи опис" in str(env.error) and "bind" not in str(env.error)
+
+
+def test_home_counts_the_index_the_search_uses(monkeypatch: pytest.MonkeyPatch) -> None:
+    """«Огляд» рахував старий погонний індекс (87 / 4860), а пошук і кнопка
+    «Зібрати індекс» — текстовий стор (4844 / 4860)."""
+    from nyshporka.ops_builtin import _pulse_search
+    from nyshporka.search import decode as D
+    from nyshporka.search import store as ST
+
+    monkeypatch.setattr(ST, "exists", lambda: True)
+    monkeypatch.setattr(ST, "stale_count", lambda runs, *_a: 1)
+    monkeypatch.setattr(D, "stats", lambda *_a: {"runs": 3, "indexed": 0, "stale": 3})
+    got = _pulse_search(["a", "b", "c"])
+    assert (got["runs"], got["indexed"], got["stale"], got["backend"]) == (3, 2, 1, "store")

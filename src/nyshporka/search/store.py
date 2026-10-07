@@ -630,16 +630,23 @@ def ensure_all(runs: list[str], *, force: bool = False, reset_rules: bool = Fals
         rules_now = rules_hash()
         by_rules = {r[0]: (r[1] or "") for r in
                     conn.execute("select run, coalesce(rules,'') from runs")}
-        total = len(runs)
-        for i, run in enumerate(runs, 1):
-            if progress:
-                progress(i, total, run)
-            P.report(i, total, "прогонів")
+        # 🔴 Поступ — лише по тих, кого справді збираємо. Свіжі проскакують за
+        # мілісекунди, і в одному знаменнику з ними оцінка «лишилось ≈» на
+        # консолі виходила годинами там, де робота триває хвилини (16
+        # застарілих із 4860 стояли першими й задавали темп на всі 4860).
+        todo: list[str] = []
+        for run in runs:
             st = stamp_of(run)
             if st and known.get(run) == st and by_rules.get(run) == rules_now \
                     and not force:
                 yield run
                 continue
+            todo.append(run)
+        total = len(todo)
+        for i, run in enumerate(todo, 1):
+            if progress:
+                progress(i, total, run)
+            P.report(i, total, "прогонів")
             try:
                 if index_run(conn, run) > 0:
                     built += 1

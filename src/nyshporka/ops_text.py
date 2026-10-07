@@ -613,21 +613,44 @@ def search_scopes(a: ScopesArgs) -> Envelope:
             # спр.8413: Клірові…») — у підказці вона стоїть поруч і вдруге
             # лише відсуває назву за край.
             title = _TITLE_SHIFRA.sub("", " ".join(str(r.get("title") or "").split()))
-            cases.append({"value": shifra, "kind": "case", "cases": 1,
+            # Значення — ключ справи: шифру з літерою чи з власною розміткою
+            # («ДАВіО ф.474 оп.1 спр.84») резолвер не розбирає, а ключ — завжди.
+            cases.append({"value": str(r.get("key") or "").strip() or shifra,
+                          "kind": "case", "cases": 1,
                           "label": f"{shifra} — {title[:70]}" if title else shifra})
     items: list[dict[str, Any]] = (
         [{"value": f"{lab} {f}", "kind": "fond", "cases": n,
-          "label": f"{lab} ф.{f}"}
+          "label": f"{lab} ф.{f}", "head": f}
          for (lab, f), n in sorted(fonds.items(), key=lambda kv: _natural(kv[0]))]
         + [{"value": f"{lab} {f}-{o}", "kind": "opys", "cases": n,
-            "label": f"{lab} ф.{f} оп.{o}"}
+            "label": f"{lab} ф.{f} оп.{o}", "head": f"{f}-{o}"}
            for (lab, f, o), n in sorted(series.items(), key=lambda kv: _natural(kv[0]))]
         + sorted(cases, key=lambda c: _natural((c["value"],))))
     want = " ".join(a.q.casefold().split())
     if want:
         items = [x for x in items
                  if want in x["label"].casefold() or want in x["value"].casefold()]
+    items = [{k: v for k, v in x.items() if k != "head"} for x in _searchable(items)]
     return ok({"items": items[:a.limit], "total": len(items), "registry": True})
+
+
+def _searchable(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Лише фонди й описи, які пошук справді прийме як межу.
+
+    🔴 Серію пошук впізнає за числовим хвостом шифри, тож фонд із літерою
+    («ДАВіО R-6129», «MNK 90») давав відмову «не розпізнав справу» вже після
+    того, як людина обрала його з підказки. Підказка — те, на чому пошук не
+    падає; тому кожну серію звіряємо тим самим `runs_for_scope`.
+    """
+    from nyshporka import vydannia
+    from nyshporka.htr_store import series_form_ok
+
+    # Перевіряється ФОРМА значення, а не прогони: серії взято з реєстру, тож
+    # прочитане в них є. Прогін пошуком через `runs_for_scope` коштував 13 с
+    # на 140 серіях — забагато для підказки під час набору.
+    return [x for x in items
+            if x["kind"] == "case" or series_form_ok(x["value"], x["head"])
+            or vydannia.parse_series(x["value"])]
 
 
 # ── етап 4: гортач і вердикти ────────────────────────────────────────────────

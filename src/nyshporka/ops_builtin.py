@@ -440,10 +440,26 @@ def _last_runs(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def _pulse_search(runs: list[str] | None = None) -> dict[str, Any]:
+    """Індекс пошуку для «Огляду» — той самий, що на екрані «Пошук».
+
+    🔴 Тут рахувався старий погонний індекс, а пошук іде текстовим стором:
+    «Огляд» писав «індекс 87 / 4860», крок «Зібрати індекс» лишався червоним
+    назавжди, бо кнопка збирає стор (`search.state` виправили раніше, сюди
+    виправлення не дійшло).
+    """
     from nyshporka.search import decode as D
+    from nyshporka.search import store as ST
 
     try:
-        return {"ok": True, **D.stats(runs)}
+        if ST.exists():
+            if runs is None:
+                from nyshporka import htr_store
+
+                runs = [str(c["name"]) for c in htr_store.list_cases()]
+            stale = ST.stale_count(runs)
+            return {"ok": True, "runs": len(runs), "indexed": len(runs) - stale,
+                    "stale": stale, "backend": "store"}
+        return {"ok": True, **D.stats(runs), "backend": "decode"}
     except Exception as exc:
         return {"ok": False, "why": f"{type(exc).__name__}: {exc}"}
 
@@ -2350,6 +2366,13 @@ def _search_run(a: SearchArgs) -> Envelope:
             scope = htr_store.runs_for_scope(case_key)
         except ValueError as exc:
             return fail(str(exc))
+        if scope["kind"] == "cases":
+            # Серія ключа справи не має, і порада «прив'яжи прогін» тут
+            # посилала людину робити те, що нічого не змінить.
+            return fail(
+                f"«{a.case}» — фонд чи опис, а виписане шукається в межах однієї "
+                f"справи або по всьому виписаному. Для фонду чи опису шукай у "
+                f"прочитаному (where=decode) або прибери межу")
         if not scope["key"]:
             return fail(
                 f"«{a.case}» — прогін без ключа справи, а виписане ключується "

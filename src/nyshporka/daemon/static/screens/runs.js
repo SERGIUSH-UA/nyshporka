@@ -191,6 +191,10 @@ export function runState(r) {
 }
 
 function runDone(r) {
+  // Стан ставить сервер (`mark_run_states`) — з прапорцем `done` мети, якого
+  // «Огляд» не отримує; без цього прогін, позначений дочитаним при неповних
+  // кадрах, на «Огляді» був «не дочитано», а в «Прогонах» — «готово».
+  if (r.state) return r.state === 'done';
   const n = Number(r.frames || 0);
   return Boolean(r.done || (n && Number(r.pages_done || 0) >= n));
 }
