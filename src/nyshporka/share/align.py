@@ -450,7 +450,7 @@ def case_home_for(case_key: str, opys: str = "") -> Path | None:
         return None
     repo, fond, opys_key, spr = parts
     want = _norm_spr(opys_key or opys.strip())
-    got = _library_home(key, want)
+    got = _library_home(key, want or "")
     if got is not None:
         return got
     try:

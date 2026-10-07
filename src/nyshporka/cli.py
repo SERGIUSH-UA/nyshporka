@@ -503,7 +503,7 @@ def get(source: str = typer.Argument(..., help="id джерела"),
             console.print("[err]--frames очікує «12-80»[/err]")
             raise typer.Exit(code=2) from None
     try:
-        man = (src.manifest(ref, from_zip=from_zip) if from_zip is not None  # type: ignore[call-arg]
+        man = (src.manifest(ref, from_zip=from_zip) if from_zip is not None
                else src.manifest(ref))
     except SourceError as exc:
         console.print(f"[err]{exc}[/err]")
