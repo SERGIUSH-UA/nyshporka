@@ -259,6 +259,19 @@ SIMILAR = 70
 
 #: Позначка типу поселення в кінці назви: «Мястковка, м.», «…, с.».
 _KIND_TAIL = re.compile(r",\s*(м-ко|м|с|сл|мст|смт|сел|х)\.?\s*$", re.IGNORECASE)
+#: Друга назва в дужках: одне-три слова, кожне з великої літери, без цифр
+#: («Армяни», «Мала Березна»). «(Бердичівський район)», «(с.)», «(частина
+#: м-ка Степанці)» — уточнення, а не назва.
+_ALT_NAME = re.compile(r"^[A-ZА-ЯІЇЄҐ][^\s\d(),;]*(?:\s+[A-ZА-ЯІЇЄҐ][^\s\d(),;]*){0,2}$")
+
+
+def _forms(raw: str) -> tuple[str, list[str]]:
+    """«Вірмени (Армяни), с.» → («Вірмени», ["Армяни"]): назва й другі назви з дужок."""
+    v = " ".join(str(raw or "").split())
+    head = _KIND_TAIL.sub("", re.split(r"[(;]", v, maxsplit=1)[0]).strip(" ,.")
+    head = _KIND_TAIL.sub("", head).strip(" ,.")
+    alts = [a.strip() for a in re.findall(r"\(([^()]*)\)", v)]
+    return head, [a for a in alts if _ALT_NAME.match(a)]
 
 
 def name_variants(q: str) -> tuple[list[str], list[str]]:
@@ -274,8 +287,10 @@ def name_variants(q: str) -> tuple[list[str], list[str]]:
     сусід дав би чуже село. Переклади назви (рос., пол.) беруться завжди —
     це те саме слово. Перейменування й інші псевдоніми — лише коли поселення з
     такою назвою в паку ОДНЕ: у Городківок кілька, і колишня назва однієї з
-    них («Халаїмгородок») повела б пошук у чуже село. Уточнення в дужках і
-    позначки на кшталт «, м.» знімаються.
+    них («Халаїмгородок») повела б пошук у чуже село. Позначки на кшталт
+    «, м.» знімаються, а друга назва в дужках («Вірмени (Армяни), с.») —
+    окрема форма: і запит «Армяни», і запит «Вірмени» знаходять цю картку.
+    Уточнення в дужках («(Бердичівський район)») формою не стає.
     Довідника немає — він не в другому значенні, і нуль форм тоді не означає,
     що інших назв немає.
     """
@@ -293,13 +308,24 @@ def name_variants(q: str) -> tuple[list[str], list[str]]:
         packs = []
     try:
         for _pid, con in packs:
-            for r in con.execute("SELECT village_uk, village_ru, norm_uk FROM places "
-                                 "WHERE norm_uk = ? OR norm_ru = ?", [nq, nq]):
+            # Друга назва в дужках входить у `norm_uk` склеєною з першою
+            # («вірмени армяни»), тож точна звірка її не бачить: кандидати —
+            # підрядком, а рішення — за формами картки.
+            for r in con.execute("SELECT village_uk, village_ru, norm_uk, norm_ru "
+                                 "FROM places WHERE norm_uk = ? OR norm_ru = ? "
+                                 "OR norm_uk LIKE ? OR norm_ru LIKE ?",
+                                 [nq, nq, f"%{nq}%", f"%{nq}%"]):
+                uk, uk_alts = _forms(r["village_uk"])
+                ru, ru_alts = _forms(r["village_ru"])
+                own = {_norm(f) for f in (uk, ru, *uk_alts, *ru_alts) if f}
+                if nq not in own and nq not in (r["norm_uk"], r["norm_ru"]):
+                    continue
                 cards += 1
-                # Збіг лише російською формою — українська назва картки інша,
-                # тобто це перейменування, а не переклад.
-                found += [(r["village_uk"], r["norm_uk"] != nq),
-                          (r["village_ru"], False)]
+                # Збіг не українською назвою — українська назва картки інша,
+                # тобто це перейменування, а не переклад. Друга назва з дужок —
+                # завжди псевдонім.
+                found += [(uk, _norm(uk) != nq), (ru, False),
+                          *((a, True) for a in (*uk_alts, *ru_alts))]
         if packs:
             asked.append("geog")
     finally:
