@@ -219,6 +219,21 @@ async function pollSweep(id) {
  * «Робіт». Два шляхи малювання того самого розходились би: колонки в одному,
  * знаменник в іншому.
  */
+/**
+ * Із чого складається «знайдено» — за видом збігу.
+ *
+ * 🔴 296 тис. на «Ярошинський» читались як «прізвище майже всюди», а
+ * чотири п'ятих із них — стем усередині довших слів (злиплі ім'я й прізвище,
+ * чужі прізвища з тим самим хвостом). Число без розкладу — не відповідь.
+ */
+function matchSplit(m) {
+  if (!m) return '';
+  const bits = ['exact', 'variant', 'ending', 'inside']
+    .filter((k) => Number(m[k] || 0))
+    .map((k) => `${t(`search.match.${k}.n`)} ${Number(m[k]).toLocaleString('uk')}`);
+  return bits.length ? `: ${esc(bits.join(' · '))}` : '';
+}
+
 function renderHits(env, q, where) {
   const hits = env.data.hits || [];
   const cov = env.data.coverage || {};
@@ -233,7 +248,7 @@ function renderHits(env, q, where) {
   box.innerHTML = `
     ${renderWarnings(env)}
     <p class="muted search-count">${esc((total > hits.length ? t('search.count.cut') : t('search.count'))
-  .replace('{n}', hits.length).replace('{all}', total))}</p>
+  .replace('{n}', hits.length).replace('{all}', total))}${matchSplit(env.data.matches)}</p>
     ${ST.sift.hits.length
       ? `<p><button data-act="sift.open">${ic('crop-check', 'ic-sm')}
            ${t('sift.open')}</button></p>` : ''}
@@ -269,7 +284,9 @@ function renderHits(env, q, where) {
       <td class="mono">${esc(h.shifra || h.case_key || h.case || '')}</td>
       <td class="mono">${esc(where_col)}</td>
       <td>${esc(String(ctx).slice(0, 120))}</td>
-      <td class="num">${esc(h.score ?? '')}</td>
+      <td class="num">${esc(h.score ?? '')}${h.match
+    ? `<br><span class="tag" title="${esc(t(`search.match.${h.match}.why`))}">${
+      esc(t(`search.match.${h.match}`))}</span>` : ''}</td>
       <td class="acts">${/* 🔴 Виявити ≠ перевірити: машина подає кандидата, вирішує око.
                Доти хіт був рядком таблиці — щоб глянути на нього, треба було
                переписати прогін і сторінку в гортач руками, а це та сама

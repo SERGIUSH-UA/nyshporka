@@ -725,6 +725,22 @@ globalThis.__CASE_INFO = null;
   globalThis.__CASE_CHECK = null;
 }
 
+// ── видача пошуку: вид збігу біля рядка й розклад числа «знайдено» ──
+{
+  globalThis.__JOBS = [{ id: 's11', kind: 'search.sweep', state: 'done', updated: nowS,
+    cfg: { q: 'Ярошинський' }, warnings: [],
+    result: { total: 7, matches: { exact: 1, variant: 2, ending: 0, inside: 4 },
+              hits: [{ name: 'p', page: 'a.jpg', score: 91, match: 'variant',
+                       matched: 'Paroszynskiin', shifra: 'А 1-1-1' }] } }];
+  await ACTIONS['search.last'](null, { dataset: { job: 's11' } });
+  await new Promise((r) => setTimeout(r, 30));
+  const sh = document.getElementById('hits').innerHTML || '';
+  out.searchMatchSplit = sh.includes('точних 1') && sh.includes('у довшому слові 4')
+    && !sh.includes('з іншим закінченням 0');
+  out.searchMatchTag = sh.includes('схоже слово');
+  globalThis.__JOBS = [];
+}
+
 console.log('@@' + JSON.stringify(out));
 // 🔴 Вихід явний. Застосунок навмисно тримає вічний цикл спостереження за
 // чергою робіт: у браузері він блокується на сервері до 25 с, а тут заглушка
@@ -1039,6 +1055,16 @@ def test_not_a_case_can_be_set_aside_and_brought_back(probe) -> None:
     """Книга чи газета, якій шифри не буде, не висить серед нових тек вічно."""
     assert probe.get("intakeAside"), "немає «Не справа» чи «Повернути»"
     assert probe.get("intakeNoBundles"), "збірки (уже описане) знову серед нових тек"
+
+
+def test_search_says_what_each_hit_is_and_what_the_total_is_made_of(probe) -> None:
+    """🔴 «Показано 100 із 296 тис.», усі зі схожістю 100 (07.10.2026).
+
+    Біля рядка — вид збігу (точно / схоже слово / інше закінчення / у довшому
+    слові), у заголовку — з чого складається загальне число.
+    """
+    assert probe.get("searchMatchSplit"), "число «знайдено» без розкладу за видом"
+    assert probe.get("searchMatchTag"), "біля рядка не сказано, який це збіг"
 
 
 def test_live_fallback_is_not_called_blind(probe) -> None:

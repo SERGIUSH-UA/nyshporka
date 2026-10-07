@@ -1946,6 +1946,8 @@ def search(q: str, name: str | None = None, thresh: int = 78,
     # балом займає рубрика книги, а самого роду немає жодного.
     rul = RANK.rules(fam) if rank else RANK.EMPTY
     ranked = RANK.mark(raw_hits, rul)
+    # Вид збігу — до сортування: він і порядок, і розклад числа «знайдено».
+    matches = RANK.classify(raw_hits, thresh)
     raw_hits.sort(key=RANK.sort_key)
     shown = raw_hits[:limit]
 
@@ -2047,6 +2049,10 @@ def search(q: str, name: str | None = None, thresh: int = 78,
         rec.update({"people": ts.people, "undated": ts.undated,
                     "years": list(ts.years) if ts.years else []})
     return {"hits": shown, "total": len(raw_hits), "cases": got["scanned"],
+            # 🔴 Із чого складається «знайдено»: 296 тис. на «Ярошинський»
+            # виглядали як відповідь, а дві третини з них — стем усередині
+            # чужих слів. Число без розкладу читається як «майже всюди».
+            "matches": matches,
             "stems": stems, "stems_asked": asked,
             "stems_added": [s for s in stems if origin.get(s) != NAMES.ORIGIN_QUERY],
             "folk": bool(folk), "thresh": thresh,

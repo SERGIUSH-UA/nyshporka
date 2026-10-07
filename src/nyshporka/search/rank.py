@@ -166,12 +166,105 @@ def _put(h: dict[str, Any], kind: str, why: str) -> None:
     h["rank_penalty"] = PENALTY[kind]
 
 
-def sort_key(h: dict[str, Any]) -> tuple[int, float]:
-    """Порядок видачі: спершу чисті, всередині кожного класу — за балом.
+#: Як стем ліг на слово — від найсильнішого до найслабшого.
+#:
+#:     exact    слово й є стем
+#:     variant  схоже слово тієї ж міри (`ratio` понад поріг)
+#:     ending   стем — початок довшого слова: інший відмінок чи закінчення
+#:     inside   стем усередині довшого слова: злиплі рушієм ім'я й прізвище
+#:              або чуже прізвище з тим самим хвостом
+MATCH_KINDS = ("exact", "variant", "ending", "inside")
+#: Варіант і інше закінчення — один щабель: «Ярошинського» (стем + відмінок) не
+#: слабший за «Ярошенський» (схоже слово), і порівнює їх уже бал.
+_MATCH_ORDER = {"exact": 0, "variant": 1, "ending": 1, "inside": 2}
+
+#: Літери, якими латинка пише йотований початок («Ja-», «Ju-», «Ie-»), а
+#: нормалізація кирилиці з'їдає («Ярошинський» → `arosinskii`). Такий збіг зі
+#: зсувом на одну літеру — те саме слово, а не стем усередині чужого.
+_IOTATED = frozenset("ji")
+
+
+def match_kind(stem: str, norm: str, thresh: int) -> str:
+    """Вид збігу нормалізованого слова зі стемом (`MATCH_KINDS`).
+
+    Див. `judge` — там і бал, який до цього виду пасує.
+    """
+    return judge(stem, norm, thresh)[0]
+
+
+def judge(stem: str, norm: str, thresh: int) -> tuple[str, float | None]:
+    """Вид збігу і бал СЛОВА (`None` — лишити бал вікна, але не вище 99).
+
+    🔴 Навіщо, коли бал уже є. Бал — це схожість стема з НАЙКРАЩИМ ВІКНОМ
+    слова (`partial_ratio`), і він дає 100 будь-якому довшому слову, що містить
+    стем: «Pan Paroszynskiin» на запит «Ярошинський» ставав першим, а 182 тис.
+    із 296 тис. збігів виявились стемом усередині чужих слів (замір 07.10.2026).
+
+    ⚠ Це впорядкування, а не відсів: злипле рушієм «Олександрярошинський» —
+    теж «inside», і саме так рід трапляється в декоді. Тому вид лише ставить
+    збіг нижче, а не викидає його (див. модульний докстрінг).
+
+    🔴 І бал теж. 100 тут означало «стем знайдено в якомусь вікні слова», тож
+    «Pan Paroszynskiin» мав ту саму сотню, що й «Ярошинський». Тепер 100 —
+    лише точний збіг; варіант має схожість ЦІЛОГО слова (у «Paroszynskiin» —
+    91: правдоподібне перекручення «Jaroszynski», J→P); у закінчення й злиплого
+    слова лишається бал вікна, але не вище 99.
+    """
+    from rapidfuzz import fuzz
+
+    if norm == stem:
+        return "exact", 100.0
+    whole = fuzz.ratio(stem, norm)
+    if whole >= thresh:
+        return "variant", whole
+    if len(norm) > len(stem):
+        al = fuzz.partial_ratio_alignment(stem, norm)
+        start = al.dest_start if al is not None else -1
+        if start == 0 or (start == 1 and norm[0] in _IOTATED):
+            return "ending", None
+    return "inside", None
+
+
+def classify(hits: list[dict[str, Any]], thresh: int, *,
+             key: str = "norm") -> dict[str, int]:
+    """Позначити кожен хіт видом збігу (`match`) і порахувати їх.
+
+    ⚠ Рахується на парі (стем, слово), а не на хіті: у видачі на 300 тис.
+    рядків різних пар утричі менше, і саме вони коштують.
+    """
+    seen: dict[tuple[str, str], tuple[str, float | None]] = {}
+    counts = dict.fromkeys(MATCH_KINDS, 0)
+    for h in hits:
+        norm = str(h.get(key) or "")
+        stem = str(h.get("stem") or "")
+        if not norm or not stem:
+            continue
+        pair = (stem, norm)
+        got = seen.get(pair)
+        if got is None:
+            got = seen[pair] = judge(stem, norm, thresh)
+        kind, whole = got
+        h["match"] = kind
+        if whole is not None:
+            h["score"] = round(whole)
+        elif h.get("score") is not None:
+            h["score"] = min(int(h["score"]), 99)
+        counts[kind] += 1
+    return counts
+
+
+def sort_key(h: dict[str, Any]) -> tuple[int, int, float]:
+    """Порядок видачі: спершу чисті, далі за видом збігу, далі за балом.
 
     🔴 Одна точка на всі області пошуку. Доти сортування було просто `-score`,
     і найгучніші хіти справи регулярно виявлялись службовим формуляром: замір
     приватного конвеєра — 60 сильних кандидатів, з них 26 рубрика «домашнія»,
     19 сусідній рід, роду НУЛЬ, і всі три верхні місця за балом займала рубрика.
+
+    Вид збігу (`match`) — між класом рангу й балом: бал 100 у стема всередині
+    чужого слова не сильніший за 90 у самого слова. Хіт без виду (області, де
+    його не рахують) стоїть як «точний», тобто порядок там не змінюється.
     """
-    return (int(h.get("rank_penalty") or 0), -float(h.get("score") or 0))
+    return (int(h.get("rank_penalty") or 0),
+            _MATCH_ORDER.get(str(h.get("match") or "exact"), 0),
+            -float(h.get("score") or 0))

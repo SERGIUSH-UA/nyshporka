@@ -1105,6 +1105,8 @@ def _find_one(q: str, scope: str = "", *, thresh: int = 78, limit: int = 40,
         ledger["reach"] = _R.reach(len(rows))
     return {"q": q, "scope": sc["kind"], "case_key": key, "shifra": res.get("scope_shifra") or "",
             "hits": res.get("hits") or [], "total": res.get("total"),
+            # Розклад «знайдено» за видом збігу (`rank.MATCH_KINDS`).
+            "matches": res.get("matches") or {},
             "stems": res.get("stems"), "stems_dropped": res.get("stems_dropped") or [],
             "anchor": anchor, "record": record, "family": res.get("family"),
             "notebook": notebook, "selfcheck": selfcheck, "ledger": ledger}

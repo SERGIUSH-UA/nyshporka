@@ -2214,6 +2214,8 @@ def _search_run(a: SearchArgs) -> Envelope:
                   # Скільки знайшлось усього, до зрізу за `limit`: «показано 100
                   # із 2 300» і «знайшлось 100» — різні відповіді.
                   "total": int(res.get("total") or len(res.get("hits") or [])),
+                  # Розклад «знайдено» за видом збігу (`rank.MATCH_KINDS`).
+                  "matches": res.get("matches") or {},
                   "coverage": {"runs": scanned, "pages": pages,
                                "thresh": a.thresh,
                                # Чим саме звужено пошук — щоб знаменник можна
