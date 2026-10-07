@@ -42,7 +42,8 @@ MIN_HOURS = 4.0
 #: Ключі кошторису бекенда, які ми читаємо. Будь-якого може не бути.
 ESTIMATE_KEYS = ("empty", "reason", "candidates", "gpu", "num_gpus", "cores",
                  "price_usd_h", "pages_per_hour", "hours", "cost_usd",
-                 "usd_per_1000", "balance_usd", "lines_per_page")
+                 "usd_per_1000", "balance_usd", "lines_per_page", "quota",
+                 "target_pph", "target_here")
 
 
 def as_number(value: object) -> float | None:
@@ -80,6 +81,14 @@ class Estimate:
     #: лише воно дозволяє звузити вилку — бекенд, що щільність проігнорував,
     #: рахував на типову, і вужча вилка на його числі була б самообманом.
     lines_per_page: float | None = None
+    #: Провайдер відмовив у ПОШУКУ (денна квота рядків Vast): `limit`,
+    #: `remaining`, `retry_after`, `reset_at` (епоха). Тоді `empty` теж стоїть,
+    #: але ринок ніхто не дивився — і це інший вирок, ніж «ринок порожній».
+    quota: dict[str, Any] | None = None
+    #: Ціль темпу наглядача: у сторінках ЕТАЛОННОГО матеріалу за годину і та
+    #: сама ціль, перерахована на матеріал цієї черги.
+    target_pph: float | None = None
+    target_here: float | None = None
     raw: dict[str, Any] = field(default_factory=dict)
 
     @property
@@ -103,13 +112,18 @@ class Estimate:
                 "pages_per_hour": self.pages_per_hour, "hours": self.hours,
                 "cost_usd": self.cost, "usd_per_1000": self.usd_per_1000,
                 "balance_usd": self.balance_usd,
-                "lines_per_page": self.lines_per_page}
+                "lines_per_page": self.lines_per_page,
+                **({"quota": self.quota} if self.quota else {}),
+                **({"target_pph": self.target_pph, "target_here": self.target_here}
+                   if self.target_pph else {})}
 
     def human(self) -> str:
         """Один рядок для людини. Невідоме так і називається."""
         def usd(v: float | None, fmt: str = "{:.2f}") -> str:
             return "невідомо" if v is None else "$" + fmt.format(v)
 
+        if self.quota:
+            return quota_text(self.quota)
         if self.empty:
             return f"ринок порожній: {self.reason or 'жодна пропозиція не пройшла'}"
         card = (f"{self.gpu}" + (f"×{self.num_gpus}" if self.num_gpus else "")
@@ -117,6 +131,10 @@ class Estimate:
         cores = f"{round(self.cores, 1):g} ядер" if self.cores else "ядра невідомі"
         pph = (f"~{self.pages_per_hour:.0f} стор/год"
                if self.pages_per_hour else "темп невідомий")
+        if self.target_pph:
+            pph += f" (ціль {self.target_pph:.0f} стор/год еталонного матеріалу"
+            pph += (f" = {self.target_here:.0f} на цій черзі)" if self.target_here
+                    else ")")
         hours = f"~{self.hours:.1f} год" if self.hours is not None else "час невідомий"
         return (f"{card} · {cores} · {usd(self.price_usd_h, '{:.3f}')}/год · "
                 f"{pph} · {hours} · прогноз {usd(self.cost)} · "
@@ -142,7 +160,23 @@ def parse_estimate(raw: object) -> Estimate:
         usd_per_1000=as_number(raw.get("usd_per_1000")),
         balance_usd=as_number(raw.get("balance_usd")),
         lines_per_page=as_number(raw.get("lines_per_page")),
+        quota=raw["quota"] if isinstance(raw.get("quota"), dict) else None,
+        target_pph=as_number(raw.get("target_pph")) or None,
+        target_here=as_number(raw.get("target_here")) or None,
         raw={k: raw[k] for k in ESTIMATE_KEYS if k in raw})
+
+
+def quota_text(quota: dict[str, Any]) -> str:
+    """Рядок про вичерпану квоту пошуку — з часом скидання за місцевим годинником."""
+    from datetime import datetime
+
+    limit = as_number(quota.get("limit"))
+    reset = as_number(quota.get("reset_at"))
+    when = (f"; скидання о {datetime.fromtimestamp(reset).strftime('%H:%M')}"
+            if reset else "")
+    size = f" ({limit:.0f} рядків на добу)" if limit else ""
+    return (f"квота пошуку Vast вичерпана{size} — ринок не дивився{when}. Стелі "
+            f"ціни, годин і число машин тут не допоможуть: повторити після скидання")
 
 
 def ask_estimate(backend: object, need: object, *, target: str = "") -> Estimate | None:

@@ -349,6 +349,16 @@ def post_fetch_hooks(run_names: Sequence[str] | str) -> list[dict[str, Any]]:
               for name in names)]
 
 
+def _rent_floor() -> float | None:
+    """Найстаріша архітектура карти, яку маніфест рушіїв дозволяє орендувати."""
+    try:
+        from nyshporka.htr import manifest as HM
+
+        return HM.active().rent_floor()
+    except Exception:
+        return None
+
+
 def pinned_machine(params: Sequence[str]) -> int:
     """Закріплена машина заходу (`-p machine_id=…`, останнє входження); 0 — ринок."""
     value = ""
@@ -386,6 +396,9 @@ def estimate_from(payload: dict[str, Any]) -> M.Estimate:
         "usd_per_1000": best.get("usd_per_1000"),
         "balance_usd": payload.get("credit"),
         "lines_per_page": payload.get("lines_per_page"),
+        "quota": payload.get("quota"),
+        "target_pph": best.get("target_pph"),
+        "target_here": best.get("target_here"),
     })
 
 
@@ -604,6 +617,13 @@ def prepare(convoy: Convoy, res: GoResult, say: Callable[..., None], *,
         typical = convoy.lines_per_page_typical or convoy.lines_per_page
         if typical:
             computed.append(f"lines_per_page={typical}")
+        # 🔴 Мінімум архітектури карти з маніфесту рушіїв (`rent_floor`). Тонкий
+        # шлях ніс його в `Need`, а керований наглядачеві не передавав зовсім —
+        # і 06.10.2026 той узяв два GTX 1080 (6.1) при мінімумі 7.0: інстанси
+        # висіли в loading, OCR не почався. Наглядач читає ручку з `-p`.
+        floor = _rent_floor()
+        if floor:
+            computed.append(f"min_compute_cap={floor:g}")
         if seeded and convoy.dense_fleet:
             # 🔴 Флот один на всю чергу, тож щільніший ставимо лише коли
             # засіяні ВСІ справи й засів справді їде: сторінка без кешу рахує
@@ -709,6 +729,8 @@ def prepare(convoy: Convoy, res: GoResult, say: Callable[..., None], *,
     est = estimate_from(payload)
     res.estimate = est.as_dict()
     say("estimate", est.human(), **est.as_dict())
+    if est.quota:
+        raise GoRefused(est.human(), verdict="search_quota")
     if est.empty:
         raise GoRefused(est.human(), verdict="market_empty")
 
@@ -979,6 +1001,18 @@ def _my_case(st: ST.RunState, data: dict[str, Any]) -> dict[str, Any] | None:
     return rows[0] if len(rows) == 1 else None
 
 
+def _epoch(value: object) -> float:
+    """ISO-час наглядача → епоха; не час — 0."""
+    from datetime import datetime
+
+    if not isinstance(value, str) or not value:
+        return 0.0
+    try:
+        return datetime.fromisoformat(value).timestamp()
+    except ValueError:
+        return 0.0
+
+
 def absorb(st: ST.RunState, data: dict[str, Any]) -> ST.RunState:
     """Перенести підсумок наглядача в наш запис заходу.
 
@@ -993,9 +1027,20 @@ def absorb(st: ST.RunState, data: dict[str, Any]) -> ST.RunState:
     raw_budget = data.get("budget")
     budget: dict[str, Any] = raw_budget if isinstance(raw_budget, dict) else {}
     spent = M.as_number(budget.get("spent_usd"))
+    # 🔴 Часи оренди — з наглядача (gpuhire ≥ 0.6.5 віддає `budget.rent_started`
+    # і `rent_ended`, UTC). Доти тут стояли мить відчеплення й мить забору, а
+    # без `spent_usd` — нулі: тривалість оренди з запису справи не читалась.
+    started_at = _epoch(budget.get("rent_started"))
+    ended_at = _epoch(budget.get("rent_ended"))
+    if started_at:
+        st.rent_started = started_at
+        st.run_started = st.run_started or started_at
+    if ended_at:
+        st.rent_ended = ended_at
     if spent is not None:
         # Лічильник оренди веде наглядач, і його число — єдине справжнє: своєї
-        # машини ми тут не бачили жодної секунди.
+        # машини ми тут не бачили жодної секунди. Старий наглядач часів не
+        # віддає — тоді лишається наближення: відчеплення й забір.
         st.rent_started = st.rent_started or st.started
         st.rent_ended = st.rent_ended or time.time()
         st.box = {**st.box, "price_usd_h": 0.0, "spent_usd": spent}
@@ -1024,9 +1069,15 @@ def state_of(st: ST.RunState) -> dict[str, Any]:
     """
     if not st.supervisor:
         return {}
+    return state_of_session(st.supervisor)
+
+
+def state_of_session(session: str) -> dict[str, Any]:
+    """Стан наглядача за ІМЕНЕМ сесії — незалежно від того, куди тепер вказує
+    запис справи (див. `batch.queue_states`)."""
     gr = gpurunner_cmd()
-    done = _run([*gr, "htr", "state", "--session", st.supervisor, "--json"],
-                env=_env(st.supervisor, gr[0] if len(gr) == 1 else sys.executable),
+    done = _run([*gr, "htr", "state", "--session", session, "--json"],
+                env=_env(session, gr[0] if len(gr) == 1 else sys.executable),
                 capture=True)
     return _json_out(done.stdout or "")
 

@@ -133,3 +133,14 @@ def test_a_dry_run_writes_nothing(
                        fond_id="198", dry_run=True)
     assert res.rows > 0
     assert not list(tmp_path.iterdir()), "суха спроба лишила файли"
+
+
+def test_a_supplementary_opys_does_not_replace_the_main_one() -> None:
+    """🔴 ДАКО віддає «Опис 174 · 1782-1919» і «Опис 174 (додатк.) · 1782-1918».
+    Обидва зводились до «174», і в словнику описів додатковий витісняв
+    основний: замість 422 справ збиралось 72 (06.10.2026)."""
+    labels = ["Опис 174 · 1782-1919", "Опис 174 (додатк.) · 1782-1918"]
+    keys = [ArchiumCollector._opys_no(x) for x in labels]
+    assert keys == ["174", "174дод"]
+    assert ArchiumCollector._opys_no("Опис 2-а") == "2-а"
+    assert ArchiumCollector._opys_no("Фонд 3") == ""

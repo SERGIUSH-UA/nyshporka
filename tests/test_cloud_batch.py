@@ -261,3 +261,28 @@ def test_unknown_batch_is_named(space: Path, fake_gpurunner) -> None:
 
     got = CliRunner().invoke(C.app, ["state", "--batch", "batch-нема"])
     assert got.exit_code == 2 and "немає" in got.output
+
+
+def test_a_retry_does_not_rewrite_the_old_batch(space: Path, monkeypatch,
+                                                fake_gpurunner) -> None:
+    """🔴 Повторний захід тих самих справ переписує `supervisor` у записі справи
+    (ідентифікатор детермінований). 06.10.2026 стара партія після retry почала
+    показувати 607 кадрів НОВОЇ сесії при своїх нулі — витрати й сторінки
+    склалися б двічі. Наглядача питаємо за сесією, записаною в партії."""
+    cases = _cases(space, monkeypatch, 3)
+    got = _go(cases, boxes=2, confirm=True)
+    rec = BT.load(got.batch_id)
+    assert rec is not None
+    first = rec.queues[0]["session"]
+    st = ST.load(rec.queues[0]["run_ids"][0])
+    assert st is not None
+    st.supervisor = "htr-retry-session"          # як після повторного запуску
+    ST.save(st)
+    asked: list[str] = []
+    monkeypatch.setattr(SUP, "state_of_session",
+                        lambda s: asked.append(s) or {"session": s, "phase": "finished"})
+
+    rows = BT.queue_states(rec)
+    assert asked[0] == first, "стару партію спитали про чужу сесію"
+    assert "htr-retry-session" not in asked
+    assert rows[0][1]["retried_by"] == "htr-retry-session"

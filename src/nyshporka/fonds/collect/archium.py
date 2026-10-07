@@ -265,9 +265,18 @@ class ArchiumCollector:
 
     @staticmethod
     def _opys_no(label: str) -> str:
-        """«Опис 1» дає «1». Порожньо — цей вузол описом не є."""
-        m = re.search(r"Опис\s*([\w-]+)", label)
-        return m.group(1) if m else ""
+        """«Опис 1» дає «1», «Опис 174 (додатк.)» — «174дод». Порожньо — не опис.
+
+        🔴 Уточнення в дужках — частина номера. ДАКО віддає два вузли, «Опис 174
+        · 1782-1919» і «Опис 174 (додатк.) · 1782-1918»; обидва зводились до
+        «174», і в словнику описів додатковий витісняв основний: замість 422
+        справ основного опису збиралось 72 додаткового (06.10.2026).
+        """
+        m = re.search(r"Опис\s*([\w-]+)(?:\s*\(\s*([^\W\d_]+))?", label)
+        if not m:
+            return ""
+        qualifier = (m.group(2) or "").lower()[:3]
+        return m.group(1) + qualifier
 
     @staticmethod
     def _quality(rows: list[dict[str, Any]]) -> dict[str, int]:

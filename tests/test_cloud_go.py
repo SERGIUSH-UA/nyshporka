@@ -225,6 +225,24 @@ def test_estimate_keeps_the_unknown_unknown() -> None:
     assert priced.cost == pytest.approx(0.6), "ціна × години самого бекенда"
 
 
+def test_search_quota_is_named_not_called_an_empty_market() -> None:
+    """06.10.2026: вичерпана денна квота пошуку Vast друкувалась «ринок
+    порожній» — і людина шукала, яку стелю підняти."""
+    est = M.parse_estimate({"empty": True, "reason": "x",
+                            "quota": {"limit": 20000, "reset_at": 1.8e9}})
+    assert est.quota and "квота пошуку" in est.human()
+    assert "ринок порожній" not in est.human()
+    assert est.as_dict()["quota"]["limit"] == 20000
+
+
+def test_the_pace_target_is_shown_with_its_units() -> None:
+    """«Ціль 8000» у логах і «4970» у виборі виглядали розбіжністю: це та сама
+    ціль в еталонних сторінках і перерахована на матеріал черги."""
+    est = M.parse_estimate({"gpu": "V100", "pages_per_hour": 6000.0,
+                            "target_pph": 8000.0, "target_here": 4970.0})
+    assert "ціль 8000 стор/год еталонного матеріалу = 4970 на цій черзі" in est.human()
+
+
 def test_the_autostart_ceiling_lives_next_to_the_hosts(space: Path) -> None:
     """Стеля лежить у тому самому файлі, що машини й сховище, — і жоден із
     трьох записів не стирає сусідів."""

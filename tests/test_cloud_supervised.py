@@ -366,6 +366,37 @@ def test_empty_market_is_not_a_crash(space: Path, monkeypatch, fake_gpurunner) -
     assert "дорожче" in res.why
 
 
+def test_exhausted_search_quota_is_not_called_an_empty_market(
+        space: Path, monkeypatch, fake_gpurunner) -> None:
+    """🔴 06.10.2026 вичерпана денна квота пошуку Vast друкувалась як «ринок
+    порожній» — і людина шукала, яку стелю підняти. Ринок ніхто не дивився."""
+    import time as _t
+
+    case, _ = _wire(space, monkeypatch)
+    fake_gpurunner.set(estimate={
+        "empty": True, "reason": "квота", "credit": 25.0,
+        "quota": {"limit": 20000, "remaining": 0, "retry_after": 8181,
+                  "reset_at": _t.time() + 8181}})
+    res = _go(case)
+
+    assert res.verdict == "search_quota" and res.exit_code == 12, res.why
+    assert "квота пошуку" in res.why and "ринок порожній" not in res.why
+    assert not [c for c in fake_gpurunner.called("htr", "supervise") if "--detach" in c]
+
+
+def test_the_engine_card_floor_reaches_the_supervisor(
+        space: Path, monkeypatch, fake_gpurunner) -> None:
+    """🔴 Мінімум архітектури з маніфесту рушіїв керованим шляхом не їхав:
+    наглядач 06.10.2026 узяв два GTX 1080 (6.1), OCR не почався."""
+    from nyshporka.htr import manifest as HM
+
+    case, _ = _wire(space, monkeypatch)
+    _go(case, dry_run=True)
+    floor = HM.active().rent_floor()
+    assert floor, "у маніфесті немає мінімуму оренди — тест нічого не доводить"
+    assert f"min_compute_cap={floor:g}" in _plan_of(fake_gpurunner)["params"]
+
+
 def test_preflight_failure_stops_before_rent(
         space: Path, monkeypatch, fake_gpurunner) -> None:
     case, _ = _wire(space, monkeypatch)
@@ -846,6 +877,11 @@ def test_the_script_of_the_plan_always_reaches_the_box(space: Path, monkeypatch,
     assert "script=latin" in _plan_of(fake_gpurunner)["params"]
 
 
+def _no_floor(params: list[str]) -> list[str]:
+    """Параметри без мінімуму архітектури карти — його кладемо завжди (з маніфесту)."""
+    return [p for p in params if not p.startswith("min_compute_cap=")]
+
+
 def test_a_user_param_overrides_the_one_we_computed(space: Path, monkeypatch,
                                                     fake_gpurunner) -> None:
     """Наш параметр — здогад, людський — рішення. Наглядач збирає `-p` у
@@ -853,7 +889,7 @@ def test_a_user_param_overrides_the_one_we_computed(space: Path, monkeypatch,
     їх перекриває, а не навпаки."""
     case, _ = _wire(space, monkeypatch)
     _go(case, script="cyrillic", dry_run=True, params=["script=mixed", "shards=6"])
-    params = _plan_of(fake_gpurunner)["params"]
+    params = _no_floor(_plan_of(fake_gpurunner)["params"])
     assert params == ["script=mixed", "shards=6"], (
         "обчислений параметр не сміє дублювати людський: у словнику виграв би "
         "один із них, і який саме — залежало б від порядку")
@@ -864,7 +900,7 @@ def test_params_travel_in_the_order_they_were_given(space: Path, monkeypatch,
     case, _ = _wire(space, monkeypatch)
     _go(case, script="cyrillic", dry_run=True,
         params=["shards=6", "max_endpoints=600", "vram_gb_per_shard=3.0"])
-    params = _plan_of(fake_gpurunner)["params"]
+    params = _no_floor(_plan_of(fake_gpurunner)["params"])
     assert params[0] == "script=cyrillic"
     assert params[1:] == ["shards=6", "max_endpoints=600", "vram_gb_per_shard=3.0"]
 
@@ -1222,6 +1258,22 @@ def test_absorb_takes_this_cases_row_not_the_largest(space: Path, monkeypatch) -
     ]}
     got = SUP.absorb(st, data)
     assert got.pages_done == 12, "узято чужий лічильник"
+
+
+def test_absorb_takes_rent_times_from_the_supervisor(space: Path) -> None:
+    """06.10.2026: у керованих заходів `rent_started/rent_ended/run_started` = 0
+    або мить відчеплення й забору — тривалість оренди з запису не читалась."""
+    from nyshporka.cloud import state as ST
+
+    st = ST.RunState(run_id="r1", case_dir=str(space / "перша"),
+                     out_dir=str(space / "out" / "перша"), backend="fake",
+                     supervisor="htr-q2", frames_total=100)
+    data = {"verdict": "ok", "budget": {
+        "rent_started": "2026-10-06T21:00:00+00:00",
+        "rent_ended": "2026-10-06T21:15:00+00:00"}}
+    got = SUP.absorb(st, data)
+    assert got.rent_ended - got.rent_started == 900
+    assert got.run_started == got.rent_started
 
 
 def test_the_script_survives_the_shrink(space: Path, monkeypatch, fake_gpurunner) -> None:

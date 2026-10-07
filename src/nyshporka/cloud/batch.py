@@ -288,7 +288,15 @@ def launch(convoy: Convoy, res: GoResult, say: Callable[..., None], *,
 
 # ── стан партії ──────────────────────────────────────────────────────────────
 def queue_states(rec: BatchRecord) -> list[tuple[dict[str, Any], dict[str, Any]]]:
-    """Стан кожної пущеної черги — у її наглядача, не в нашому записі."""
+    """Стан кожної пущеної черги — у її наглядача, не в нашому записі.
+
+    🔴 Наглядача питаємо за сесією, ЗАПИСАНОЮ в партії, а не за поточним
+    записом справи. Ідентифікатор справи детермінований, і повторний захід
+    тих самих справ переписує в ньому `supervisor` на нову сесію — тож стара
+    партія почала показувати сторінки й гроші нової (06.10.2026: скасований
+    GTX-прогін «прочитав» 607 кадрів чужої сесії, а його власний стан — 0).
+    Повтор позначається `retried_by`, історичні витрати не переприв'язуються.
+    """
     from nyshporka.cloud import state as ST
     from nyshporka.cloud import supervised as SUP
 
@@ -297,7 +305,13 @@ def queue_states(rec: BatchRecord) -> list[tuple[dict[str, Any], dict[str, Any]]
         data: dict[str, Any] = {}
         if q.get("started") and q.get("run_ids"):
             st = ST.load(q["run_ids"][0])
-            if st is not None and st.supervisor:
+            session = str(q.get("session") or "")
+            if session:
+                data = SUP.state_of_session(session)
+                if st is not None and st.supervisor and st.supervisor != session:
+                    data = {**data, "retried_by": st.supervisor}
+            elif st is not None and st.supervisor:
+                # Запис партії старший за поле `session` — інакше спитати нічим.
                 data = SUP.state_of(st)
         out.append((q, data))
     return out

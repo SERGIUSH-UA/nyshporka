@@ -632,9 +632,11 @@ def _state_batch(batch_id: str, *, as_json: bool) -> None:
         done = sum(int(c.get("pages_done") or 0) for c in data.get("cases") or []
                    if isinstance(c, dict))
         verdict = data.get("verdict") or data.get("phase") or "наглядач мовчить"
+        again = (f" · справи потім перечитала {data['retried_by']}"
+                 if data.get("retried_by") else "")
         console.print(f"  · черга {q['queue']} · {q['session']} · {verdict} · "
-                      f"{done}/{q.get('pages')} стор · справ {len(q.get('cases') or [])}",
-                      highlight=False)
+                      f"{done}/{q.get('pages')} стор · справ {len(q.get('cases') or [])}"
+                      f"{escape(again)}", highlight=False)
     console.print(f"[muted]згорнути всю партію: nysh cloud stop --batch "
                   f"{rec.batch_id}[/muted]")
 

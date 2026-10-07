@@ -72,6 +72,9 @@ EXIT_CODES: dict[str, int] = {
     # Партія на кілька машин пустила НЕ всі черги: пущені йдуть і підзвітні
     # (`nysh cloud state --batch`), решта — у `queues[].why`.
     "partial_start": 11,
+    # 🔴 Не `market_empty`: провайдер відмовив у ПОШУКУ до скидання денної
+    # квоти рядків (06.10.2026), ринок ніхто не дивився. Лікується часом.
+    "search_quota": 12,
     "cancelled": 130}
 
 #: Скільки опитувань поспіль машина може мовчати, перш ніж це збій. Свіжий бокс
@@ -1151,6 +1154,8 @@ def _go(res: GoResult, cases: tuple[str, ...], say: EventFn,
     if est is not None:
         res.estimate = est.as_dict()
         say("estimate", est.human(), **est.as_dict())
+        if est.quota:
+            raise GoRefused(est.human(), verdict="search_quota")
         if est.empty:
             raise GoRefused(est.human(), verdict="market_empty")
     cost = est.cost if est is not None else None
