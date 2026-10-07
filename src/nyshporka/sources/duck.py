@@ -35,6 +35,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -67,6 +68,12 @@ FUZZ_MIN = 0.45
 YEAR_WINDOWS: tuple[tuple[int, int], ...] = (
     (1700, 1800), (1801, 1830), (1831, 1860),
     (1861, 1890), (1891, 1920), (1921, 1960))
+
+
+def _in_windows(years: str, windows: list[tuple[int, int]]) -> bool:
+    """Чи перший рік справи лежить у котромусь із цих вікон."""
+    m = re.search(r"1[6-9]\d\d|20\d\d", years or "")
+    return bool(m) and any(y1 <= int(m.group()) <= y2 for y1, y2 in windows)
 
 
 @dataclass(frozen=True)
@@ -500,12 +507,22 @@ class DuckSource:
         seen: dict[str, Hit] = {h.ref: h for h in first}
         narrow = {k: v for k, v in kw.items() if k not in ("year_from", "year_to")}
         cut: list[str] = []
+        capped: list[tuple[int, int]] = []
+        by_window: set[str] = set()
         for y1, y2 in YEAR_WINDOWS:
             got = self.find_files(year_from=str(y1), year_to=str(y2), **narrow)
             if len(got) >= CEILING:
                 cut.append(f"{y1}–{y2}")
+                capped.append((y1, y2))
             for h in got:
                 seen.setdefault(h.ref, h)
+                by_window.add(h.ref)
+        # 🔴 Справа суцільної видачі, якої не повернуло жодне вікно, — без
+        # років або поза вікнами. Таких може бути й більше за ті, що влізли в
+        # перші 50, а вікна їх не дістануть: перелік неповний, і без позначки
+        # про це мовчали б і `books_truncated`, і `ceiling`.
+        if any(h.ref not in by_window and not _in_windows(h.years, capped) for h in first):
+            cut.append(f"без років чи поза {YEAR_WINDOWS[0][0]}–{YEAR_WINDOWS[-1][1]}")
         return list(seen.values()), tuple(cut)
 
     def near(self, lat: str, lng: str, *, radius_m: int,

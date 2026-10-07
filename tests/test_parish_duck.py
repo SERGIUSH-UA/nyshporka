@@ -243,7 +243,8 @@ def test_split_names_windows_still_at_the_ceiling() -> None:
             return [{"full_code": f"АРХ-1-1-w{i}"} for i in range(CEILING)]
         if "year_from" in body:
             return []
-        return [{"full_code": f"АРХ-1-1-{i}"} for i in range(CEILING)]
+        return [{"full_code": f"АРХ-1-1-{i}", "years": [{"start_year": 1810}]}
+                for i in range(CEILING)]
 
     hits, cut = _src(_Api(search=answer)).find_files_split(author="Церква")
     assert cut == ("1801–1830",)
@@ -257,12 +258,29 @@ def test_window_sum_over_ceiling_is_not_a_truncation() -> None:
     """
     def answer(body: dict[str, object]) -> list[dict[str, object]]:
         if "year_from" not in body:
-            return [{"full_code": f"АРХ-1-1-{i}"} for i in range(CEILING)]
+            return [{"full_code": f"АРХ-1-1-{y}-{i}"}
+                    for y in ("1700", "1801", "1831") for i in range(20)][:CEILING]
         return [{"full_code": f"АРХ-1-1-{body['year_from']}-{i}"} for i in range(20)]
 
     src = _src(_Api(search=answer))
     hits = src.near("48.1", "28.2", radius_m=25000, split_years=True)
     assert len(hits) > CEILING and src.last_cut == ()
+
+
+def test_undated_cases_over_the_ceiling_are_named() -> None:
+    """🔴 Суцільна видача вперлась у стелю, а частину її справ не повернуло
+    жодне вікно років — вони без років (чи поза вікнами), і таких може бути
+    більше, ніж влізло в перші 50. Мовчки це звучало як повний перелік."""
+    def answer(body: dict[str, object]) -> list[dict[str, object]]:
+        if body.get("year_from") == "1831":
+            return [{"full_code": f"АРХ-1-1-d{i}"} for i in range(30)]
+        if "year_from" in body:
+            return []
+        return ([{"full_code": f"АРХ-1-1-u{i}"} for i in range(20)]
+                + [{"full_code": f"АРХ-1-1-d{i}"} for i in range(30)])
+
+    hits, cut = _src(_Api(search=answer)).find_files_split(author="Церква")
+    assert len(hits) == 50 and len(cut) == 1 and "без років" in cut[0]
 
 
 def test_parish_books_at_the_ceiling_are_split_and_named(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -275,7 +293,8 @@ def test_parish_books_at_the_ceiling_are_split_and_named(monkeypatch: pytest.Mon
             return [{"full_code": f"АРХ-1-1-w{i}"} for i in range(CEILING)]
         if "year_from" in body:
             return []
-        return [{"full_code": f"АРХ-1-1-{i}"} for i in range(CEILING)]
+        return [{"full_code": f"АРХ-1-1-{i}", "years": [{"start_year": 1840}]}
+                for i in range(CEILING)]
 
     src = _src(_Api(search=answer))
     monkeypatch.setattr(src, "parishes", lambda _form: [Parish(id="1", title="Церква с. Х")])
