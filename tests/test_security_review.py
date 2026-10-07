@@ -109,5 +109,5 @@ def test_long_op_requires_token() -> None:
         (root / "nyshporka.toml").write_text("[workspace]\nschema = 1\n", encoding="utf-8")
         ws = Workspace(root=root, name="тест", origin="test")
         client = TestClient(create_app(ws, token="t0k"), base_url="http://127.0.0.1:8788")
-        r = client.post("/api/op/search.sweep", json={"q": "Іваненко"})
+        r = client.post("/api/op/search.find", json={"q": "Іваненко"})
         assert r.status_code == 403, "довга операція стала в чергу без токена"

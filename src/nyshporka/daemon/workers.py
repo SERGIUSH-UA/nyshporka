@@ -236,7 +236,7 @@ async def _start_generic(bus: JobBus, op_name: str,
 #: безпечно: він нічого не пише, крім кешу, який дописується блоками цілком.
 #: Пошук по каталогах просто перестає чекати джерела; обхід каталогу
 #: спиняється після записаного кроку й продовжується наступним запуском.
-STOPPABLE_OPS = frozenset({"search.sweep", "catalog.sweep", "catalog.crawl"})
+STOPPABLE_OPS = frozenset({"search.find", "catalog.sweep", "catalog.crawl"})
 
 
 async def _run_generic(bus: JobBus, job: JobRecord, op_name: str,

@@ -683,3 +683,7 @@ details.more-filters > summary { cursor: pointer; color: var(--fg-3); font-size:
 .intake-aside { margin-top: 1.2rem; }
 .tag { font-size: .78rem; padding: 0 .35rem; border: 1px solid var(--line);
   border-radius: 4px; color: var(--fg-3); margin-left: .3rem; white-space: nowrap; }
+
+/* ── Пошук: журнал «де й чим шукали» ───────────────────────────────────── */
+.search-ledger ul.search-channels { margin: .3rem 0 0; padding-left: 1.1rem; }
+.search-ledger ul.search-channels li { margin: .15rem 0; }

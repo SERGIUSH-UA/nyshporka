@@ -23,8 +23,11 @@ let SECTIONS = { sections: [], screens: {}, op_screen: {}, presets: {},
   preset: null, glyphs: {} };
 
 /** Порядок кнопок у шапці. Екрани, яких тут немає, кнопки не отримують. */
-const NAV_ORDER = ['home', 'profile', 'sources', 'geog', 'fonds', 'library', 'frames', 'cases',
-  'read', 'queue', 'runs', 'view', 'eye', 'search', 'sift', 'export', 'sets', 'label', 'jobs'];
+// 🔴 «Пошук» — одразу після «Огляду»: заради нього застосунок і ставлять. І
+// «Розбір» перед «Оком»: «Дослідження» відкривалось на «Оці», тобто на обліку
+// переглянутого, а не на роботі з кандидатами (холодний прохід 07.10.2026).
+const NAV_ORDER = ['home', 'search', 'profile', 'sources', 'geog', 'fonds', 'library', 'frames',
+  'cases', 'read', 'queue', 'runs', 'view', 'sift', 'eye', 'export', 'sets', 'label', 'jobs'];
 
 /**
  * Екрани-кроки без власної вкладки → вкладка, яку підсвічувати.
@@ -413,7 +416,7 @@ function hhmm(sec) {
  */
 function showResult(j) {
   const label = t('jobs.search.show');
-  if (j.kind === 'search.sweep' && j.state === 'done') {
+  if ((j.kind === 'search.sweep' || j.kind === 'search.find') && j.result) {
     return `<button class="ctl-sm" data-act="jobs.search" data-job="${esc(j.id)}">${label}</button>`;
   }
   if (j.kind === 'catalog.sweep' && j.result) {

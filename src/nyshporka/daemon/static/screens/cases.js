@@ -2,7 +2,7 @@
 
 import { t, LANG } from '../core/strings.js';
 import { TOKEN, callOp, SEQ } from '../core/net.js';
-import { esc, el, setView, busy, failure, boxError, busyForm,
+import { esc, el, setView, busy, failure, boxError, busyForm, fld,
   renderWarnings, renderCoverage, curGen, alive } from '../core/view.js';
 import { SCREENS, ACTIONS } from '../core/registry.js';
 import { SECTIONS, NAV_LABEL, show, renderNav, goto,
@@ -148,11 +148,6 @@ function repoOptions(picked) {
     `<option value="${esc(val)}"${val === (picked || '') ? ' selected' : ''}>${esc(label)}</option>`;
   return [opt('', t('case.repo.any')),
           ...rows.map((r) => opt(r.code, r.name ? `${r.label} — ${r.name}` : r.label))].join('');
-}
-
-/** Поле з підписом над ним; `cls` — ширина («narrow» для років). */
-function fld(label, control, cls = '') {
-  return `<label class="fld${cls ? ` ${cls}` : ''}"><span class="fld-l">${esc(label)}</span>${control}</label>`;
 }
 
 let CHECK_TIMER = null;

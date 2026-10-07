@@ -1734,7 +1734,7 @@ def _bundle_subdirs(rows: list[dict[str, Any]]) -> None:
 
 # ── пошук по прочитаному ─────────────────────────────────────────────────────
 @op("search.state", summary="Чи зібрано індекс прочитаного",
-    mutates=False, agent=False, section="research")
+    mutates=False, agent=False, section="core")
 def search_state(_: NoArgs) -> Envelope:
     """Знаменник екрана пошуку — до запиту, а не після.
 
@@ -1761,7 +1761,7 @@ class IndexArgs(BaseModel):
 
 
 @op("search.index", summary="Зібрати індекс прочитаного — щоб пошук був швидким",
-    args=IndexArgs, mutates=True, long=True, agent=False, section="research")
+    args=IndexArgs, mutates=True, long=True, agent=False, section="core")
 def search_index(a: IndexArgs) -> Envelope:
     """Індекс декоду: один раз довго, далі щоразу швидко.
 
@@ -2019,38 +2019,9 @@ class SearchArgs(BaseModel):
                     "оком у сховищі сторінок. Потребує --case")
 
 
-class SweepArgs(BaseModel):
-    q: str = Field(description="прізвище або слово")
-    thresh: int = Field(default=80, ge=50, le=100)
-    context: int = Field(default=1, ge=0, le=3)
-    limit: int = Field(default=100, ge=1, le=500)
-    given: bool = Field(default=True)
-    folk: bool = Field(default=False)
-    rank: bool = Field(default=True)
-    profile: bool = Field(default=True)
-
-
-# `agent=False`: агентові довга робота через чергу недоступна — черга живе в
-# процесі застосунку. Йому лишається `search.run`, і це правильно: він працює
-# у межах справи, а не чеше корпус.
-@op("search.sweep", summary="Прочесати все прочитане — робота в черзі",
-    args=SweepArgs, mutates=False, long=True, agent=False, section="research")
-def search_sweep(a: SweepArgs) -> Envelope:
-    """Той самий пошук, що `search.run`, але як робота з видимим поступом.
-
-    🔴 Навіщо друга операція, коли пошук уже є. Різниця не в тому, що робиться,
-    а скільки це триває: у межах справи пошук — це частка секунди, по всьому
-    корпусу — хвилини. Дві хвилини синхронного запиту виглядають у браузері
-    рівно як зависання: сторінка не відповідає й не каже, чому.
-
-    ⚠ Тіло — той самий `htr_store.search`. Другої реалізації пошуку немає й
-    бути не може: розійшовшись, вони давали б різні відповіді на те саме
-    питання залежно від того, звідки спитали.
-    """
-    return search_run(SearchArgs(q=a.q, where="decode", case="",
-                                 thresh=a.thresh, context=a.context,
-                                 limit=a.limit, given=a.given, folk=a.folk,
-                                 rank=a.rank, profile=a.profile))
+# ⚠ Тут жила `search.sweep` — той самий `search.run` по всьому корпусу роботою
+# в черзі. Консоль тепер шукає `search.find` (= `text.find`, команда агента),
+# тож друга обгортка над тим самим двигуном лише розходилась би з першою.
 
 
 #: Області пошуку прізвища — і порядок, у якому їх обходить `where=all`.
@@ -2115,7 +2086,7 @@ def _search_every_area(a: SearchArgs) -> Envelope:
 
 
 @op("search.run", summary="Знайти прізвище в тому, що вже прочитано",
-    args=SearchArgs, mutates=False, section="research")
+    args=SearchArgs, mutates=False, section="core")
 def search_run(a: SearchArgs) -> Envelope:
     """Знайти прізвище в прочитаному, виписаному чи розібраному — див. `_search_run`.
 

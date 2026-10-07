@@ -11,11 +11,12 @@ index`), а сам пошук прізвища йде через `search.run`, �
 """
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from pydantic import BaseModel, Field
 
-from nyshporka.core.envelope import Envelope, fail, ok
+from nyshporka.core.envelope import AGENT, ALERT, Envelope, fail, ok
 from nyshporka.core.ops import op
 
 SECTION = "research"
@@ -460,8 +461,10 @@ class TextFindArgs(BaseModel):
                                     "Порожньо — рід, написанням якого є запит")
 
 
+# `section="core"`: це й пошук консолі (`search.find`), а він в основі — див.
+# `core.sections.SCREENS`.
 @op("text.find", summary="Знайти рід усіма каналами разом — зі знаменником і журналом заходу",
-    args=TextFindArgs, mutates=False, agent=False, section=SECTION)
+    args=TextFindArgs, mutates=False, agent=False, section="core")
 def text_find(a: TextFindArgs) -> Envelope:
     """🔴 Нуль тут не друкується без журналу: скільки кадрів, скільки прочитано,
     скільки в сторі, якими голосами, які канали ганяли й що бачить око.
@@ -485,10 +488,19 @@ def text_find(a: TextFindArgs) -> Envelope:
     if res.get("error"):
         return fail(str(res["error"]))
     env = ok(res)
+    if res.get("stopped"):
+        env.warn("search_stopped",
+                 "пошук спинено: прочесано не все, тож нуль чи неповний перелік "
+                 "тут нічого не доводить — запустіть ще раз, щоб знати напевно",
+                 level=ALERT)
     led = res["ledger"]
     for ch in led["channels"]:
         if not ch["ran"] and ch.get("why"):
-            env.warn(f"channel_{ch['id']}_off", f"канал «{ch['label']}» не ганяли: {ch['why']}")
+            fix = f"; {ch['fix']}" if ch.get("fix") else ""
+            # `AGENT`: людина бачить ту саму причину в журналі «Де й чим
+            # шукали» — без команди терміналу, яку їй нема куди набрати.
+            env.warn(f"channel_{ch['id']}_off",
+                     f"канал «{ch['label']}» не ганяли: {ch['why']}{fix}", level=AGENT)
     ser = led.get("series") or {}
     if ser:
         # 🔴 Справи опису без жодного прогону в знаменник не входять — і мусять
@@ -532,6 +544,90 @@ def text_find(a: TextFindArgs) -> Envelope:
                  f"{led.get('runs')}, голоси: {', '.join(led.get('voices') or []) or '—'}")
     return env
 
+
+
+
+# 🔴 Консоль шукає ТІЄЮ САМОЮ командою, що й агент (дослідник 07.10.2026:
+# «чому агенти шукають готовою командою, а консоль чимось своїм?»). Доти
+# консольний пошук ішов через `search.run` — той самий двигун, але без
+# каналів роду, без журналу знаменника, без самоперевірки й з іншим порогом:
+# людина на той самий запит діставала біднішу відповідь, ніж агент.
+# Окрема операція лише тому, що довга: це `text.find` роботою в черзі.
+@op("search.find", summary="Знайти в прочитаному — та сама команда, що `text.find`, роботою в черзі",
+    args=TextFindArgs, mutates=False, long=True, agent=False, section="core")
+def search_find(a: TextFindArgs) -> Envelope:
+    return text_find(a)
+
+
+#: Шифра на початку назви справи: «ДАХмО ф.315 оп.1 спр.8413:».
+_TITLE_SHIFRA = re.compile(r"^\S+\s+ф\.\s*\S+\s+оп\.\s*\S+\s+спр\.\s*\S+?:\s*")
+
+
+def _natural(parts: tuple[str, ...]) -> tuple[Any, ...]:
+    """«ф.127» перед «ф.1040»: числа в шифрі порівнюються як числа."""
+    out: list[Any] = []
+    for p in parts:
+        out += [(0, int(x)) if x.isdigit() else (1, x.casefold())
+                for x in re.split(r"(\d+)", p) if x]
+    return tuple(out)
+
+
+class ScopesArgs(BaseModel):
+    q: str = Field(default="", description="що набрано в полі «Де»")
+    limit: int = Field(default=40, ge=1, le=200)
+
+
+@op("search.scopes", summary="Де шукати: фонди, описи й справи, у яких є прочитане",
+    args=ScopesArgs, mutates=False, agent=False, section="core")
+def search_scopes(a: ScopesArgs) -> Envelope:
+    """Підказки поля «Де» — лише з того, у чому справді є прочитане.
+
+    🔴 Межу пошуку людина руками не набере: «ДАВіО 904-24» чи шифру справи
+    треба знати напам'ять, а помилка в ній дає відмову або чужу область.
+    Тут — фонди, описи й справи бібліотеки з числом прочитаних справ, у
+    порядку від ширшого до вужчого. Значення — те, що приймає межа
+    `text.find` (`htr_store.runs_for_scope`).
+    """
+    from nyshporka.cases import db as CDB
+
+    try:
+        rows = CDB.query_rows(kind="case")
+    except FileNotFoundError:
+        return ok({"items": [], "registry": False})
+    fonds: dict[tuple[str, str], int] = {}
+    series: dict[tuple[str, str, str], int] = {}
+    cases: list[dict[str, Any]] = []
+    for r in rows:
+        if str(r.get("htr_stage") or "none") == "none":
+            continue
+        lab = str(r.get("repo_label") or r.get("repo") or "").strip()
+        fond = str(r.get("fond") or "").strip()
+        opys = str(r.get("opys") or "").strip()
+        if lab and fond:
+            fonds[(lab, fond)] = fonds.get((lab, fond), 0) + 1
+            if opys:
+                series[(lab, fond, opys)] = series.get((lab, fond, opys), 0) + 1
+        shifra = str(r.get("shifra") or "").strip()
+        if shifra:
+            # Назва часто починається з тієї самої шифри («ДАХмО ф.315 оп.1
+            # спр.8413: Клірові…») — у підказці вона стоїть поруч і вдруге
+            # лише відсуває назву за край.
+            title = _TITLE_SHIFRA.sub("", " ".join(str(r.get("title") or "").split()))
+            cases.append({"value": shifra, "kind": "case", "cases": 1,
+                          "label": f"{shifra} — {title[:70]}" if title else shifra})
+    items: list[dict[str, Any]] = (
+        [{"value": f"{lab} {f}", "kind": "fond", "cases": n,
+          "label": f"{lab} ф.{f}"}
+         for (lab, f), n in sorted(fonds.items(), key=lambda kv: _natural(kv[0]))]
+        + [{"value": f"{lab} {f}-{o}", "kind": "opys", "cases": n,
+            "label": f"{lab} ф.{f} оп.{o}"}
+           for (lab, f, o), n in sorted(series.items(), key=lambda kv: _natural(kv[0]))]
+        + sorted(cases, key=lambda c: _natural((c["value"],))))
+    want = " ".join(a.q.casefold().split())
+    if want:
+        items = [x for x in items
+                 if want in x["label"].casefold() or want in x["value"].casefold()]
+    return ok({"items": items[:a.limit], "total": len(items), "registry": True})
 
 
 # ── етап 4: гортач і вердикти ────────────────────────────────────────────────

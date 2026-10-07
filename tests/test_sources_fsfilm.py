@@ -195,11 +195,15 @@ def test_a_fresher_tree_rebuilds_the_index(src: FilmMirrorSource) -> None:
 
     src.search("Ракулешты")
     idx = src.cache_dir / f"moldova{INDEX_SUFFIX}"
-    old = idx.stat().st_mtime_ns
+    # ⚠ Час зміни виставляється руками: на Windows дві побудови в межах одного
+    # тіку годинника мають однаковий `st_mtime_ns`, і тест падав би навмання.
+    now = idx.stat().st_mtime_ns
+    old = now - 20 * 10**9
+    os.utime(idx, ns=(old, old))
     blob = src.cache_dir / "moldova.json.gz"
-    os.utime(blob, ns=(old + 10**9, old + 10**9))
+    os.utime(blob, ns=(old + 10**9, old + 10**9))   # дерево новіше за супутника
     src.search("Ракулешты")
-    assert idx.stat().st_mtime_ns > old
+    assert idx.stat().st_mtime_ns > old + 10**9, "супутника не перебудовано"
 
 
 def test_search_is_insensitive_to_yo(src: FilmMirrorSource) -> None:

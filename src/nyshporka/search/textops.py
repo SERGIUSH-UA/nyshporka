@@ -746,7 +746,10 @@ def whatis(scope: str) -> dict[str, Any]:
 SHORT_STEM = 6
 #: Чому канали роду не ганяли, коли запит не про рід.
 _NOT_FAMILY = ("запит не про жоден рід із профілів простору — люди роду тут ні до "
-               "чого; назвати рід явно: `--family <профіль>`, перелік: `nysh profile`")
+               "чого")
+#: Порада до `_NOT_FAMILY` — окремо: агентові й терміналу вона потрібна, а людині
+#: в консолі показувати команду, яку нема куди набрати, не можна.
+_NOT_FAMILY_FIX = "назвати рід явно: `--family <профіль>`, перелік: `nysh profile`"
 
 
 def _query_is_profile(q: str, fam: Any = None) -> bool:
@@ -1029,7 +1032,7 @@ def _find_one(q: str, scope: str = "", *, thresh: int = 78, limit: int = 40,
         {"id": "anchor", "label": "якорі: ім'я + по батькові роду у вікні років",
          "ran": bool(anchor.get("on")) and bool(anchor.get("given")) and bool(anchor.get("patronymic")),
          "hits": int(anchor.get("total") or 0),
-         "why": ("потребує справи (--case): вікно якорів береться з її років" if not in_case
+         "why": ("лише в межах однієї справи: вікно якорів береться з її років" if not in_case
                  else _NOT_FAMILY if not about_profile
                  else ("у профілі й каноні немає пари ім'я + по батькові у вікні "
                        f"{anchor.get('years') or 'справи'}" if anchor.get("on") else ""))},
@@ -1039,7 +1042,7 @@ def _find_one(q: str, scope: str = "", *, thresh: int = 78, limit: int = 40,
          "hits": int(record.get("total") or 0),
          "geo_pages": int(record.get("geo_pages") or 0),
          "common": list(record.get("common") or []),
-         "why": ("потребує справи (--case): ознаки людей звужуються роками справи"
+         "why": ("лише в межах однієї справи: ознаки людей звужуються її роками"
                  if not in_case else _NOT_FAMILY if not about_profile
                  else ("у роду менше двох ознак у вікні "
                        f"{record.get('years') or 'справи'}: заповніть `kin` профілю"
@@ -1049,6 +1052,12 @@ def _find_one(q: str, scope: str = "", *, thresh: int = 78, limit: int = 40,
          "why": "" if has_latin
                 else "у області немає прогону латинкою: польський текст читати Скрибою"},
     ]
+    for ch in channels:
+        why = str(ch.get("why") or "")
+        if why == _NOT_FAMILY:
+            ch["fix"] = _NOT_FAMILY_FIX
+        elif why.startswith("лише в межах однієї справи"):
+            ch["fix"] = "назвати справу: `--case <справа>`"
     selfcheck: dict[str, Any] | None = None
     if in_case and key:
         # Один пошук: самоперевірка рахує по сторінках усіх хітів, які пошук
@@ -1105,6 +1114,8 @@ def _find_one(q: str, scope: str = "", *, thresh: int = 78, limit: int = 40,
         ledger["reach"] = _R.reach(len(rows))
     return {"q": q, "scope": sc["kind"], "case_key": key, "shifra": res.get("scope_shifra") or "",
             "hits": res.get("hits") or [], "total": res.get("total"),
+            # Спинений пошук — неповна відповідь, і вона мусить про це казати.
+            "stopped": bool(res.get("stopped")),
             # Розклад «знайдено» за видом збігу (`rank.MATCH_KINDS`).
             "matches": res.get("matches") or {},
             "stems": res.get("stems"), "stems_dropped": res.get("stems_dropped") or [],

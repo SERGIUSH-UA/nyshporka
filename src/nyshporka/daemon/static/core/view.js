@@ -255,6 +255,17 @@ function maskot(pose, width = 150, cls = '') {
     + ` alt="" width="${width}" height="${h}" loading="lazy" decoding="async">`;
 }
 
-export { esc, safeHref, el, renderWarnings, renderCoverage, setView, busy,
+/**
+ * Поле форми з підписом НАД ним; `cls` — ширина («narrow» для років).
+ *
+ * 🔴 Підписом поля не може бути підказка в ньому: вона зникає, щойно поле
+ * заповнене, і в заповненій формі не видно, що де (холодний прохід
+ * 07.10.2026: «1854» і «1854» без «від» і «до»).
+ */
+function fld(label, control, cls = '') {
+  return `<label class="fld${cls ? ` ${cls}` : ''}"><span class="fld-l">${esc(label)}</span>${control}</label>`;
+}
+
+export { esc, safeHref, el, renderWarnings, renderCoverage, setView, busy, fld,
   splitWarnings, notesBlock, hasAlerts, seedAttr,
   failure, boxError, busyForm, alive, maskot, MASKOT };

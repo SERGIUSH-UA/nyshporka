@@ -258,7 +258,10 @@ def test_find_names_the_family_and_the_record_channel(space: Path) -> None:
     whole = T.find("Коваленко", "", family="kovalenko")
     ids = {ch["id"]: ch for ch in whole["ledger"]["channels"]}
     # поза справою ознаки людей нема чим звузити — канал мовчить і каже чому
-    assert not ids["record"]["ran"] and "--case" in ids["record"]["why"]
+    # Причина — людськими словами, порада з командою — окремо (`fix`): консоль
+    # показує лише першу, агент отримує обидві.
+    assert not ids["record"]["ran"] and "однієї справи" in ids["record"]["why"]
+    assert "--case" in ids["record"]["fix"] and "--case" not in ids["record"]["why"]
 
 
 def test_find_off_family_says_how_to_name_one(space: Path) -> None:
@@ -266,7 +269,8 @@ def test_find_off_family_says_how_to_name_one(space: Path) -> None:
 
     got = T.find("Ковальчук", "метрика")
     ids = {ch["id"]: ch for ch in got["ledger"]["channels"]}
-    assert not ids["record"]["ran"] and "--family" in ids["record"]["why"]
+    assert not ids["record"]["ran"] and "--family" in ids["record"]["fix"]
+    assert "--family" not in ids["record"]["why"], "людині показано команду терміналу"
 
 
 def test_unknown_family_is_refused(space: Path) -> None:

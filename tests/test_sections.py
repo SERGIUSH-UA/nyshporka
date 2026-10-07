@@ -146,14 +146,14 @@ def test_running_app_sees_a_profile_changed_from_outside(space: Path) -> None:
 
     client = TestClient(create_app(W.workspace(), token="t0ken"),
                         base_url="http://127.0.0.1:8788")
-    assert "search.run" in {o["name"] for o in client.get("/api/ops").json()["ops"]}
+    assert "pages.status" in {o["name"] for o in client.get("/api/ops").json()["ops"]}
 
     # Правку робить хтось інший — прямо у файлі, повз цей процес.
     (space / "nyshporka.toml").write_text(
         '[workspace]\npreset = "catalog"\n', encoding="utf-8")
 
     names = {o["name"] for o in client.get("/api/ops").json()["ops"]}
-    assert "search.run" not in names, "живий застосунок не побачив зміни профілю"
+    assert "pages.status" not in names, "живий застосунок не побачив зміни профілю"
     res = client.post("/api/op/read.start", json={},
                       headers={"X-Nysh-Token": "t0ken"})
     assert res.status_code == 404
@@ -183,7 +183,7 @@ def test_disabled_section_refuses_in_the_registry(space: Path) -> None:
     from nyshporka.core import workspace as W
 
     W.set_sections(["core"])
-    env = O.call("search.run", {"q": "Іванов"})
+    env = O.call("pages.status", {"case": "А 1-1-1"})
     assert not env.ok
     assert "nysh sections enable research" in env.error
 
@@ -237,7 +237,7 @@ def test_http_hides_disabled_ops_and_lists_sections(space: Path) -> None:
 
     names = {o["name"] for o in client.get("/api/ops").json()["ops"]}
     assert "catalog.search" in names
-    assert "search.run" not in names, "операція вимкненої секції лишилась у списку"
+    assert "pages.status" not in names, "операція вимкненої секції лишилась у списку"
 
     data = client.get("/api/sections").json()["data"]
     by_id = {s["id"]: s for s in data["sections"]}

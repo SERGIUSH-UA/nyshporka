@@ -27,7 +27,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) =>
  * Начепити комбобокс на існуючий <input>.
  * @param {HTMLInputElement} input
  * @param {{items?: string[], limit?: number, openOnFocus?: boolean,
- *          commitOnTab?: boolean, empty?: string,
+ *          commitOnTab?: boolean, empty?: string, free?: boolean,
  *          onPick?: (v: string) => void}} [opts]
  * @returns {{setItems(a: string[]): void, open(): void, close(): void, destroy(): void}}
  */
@@ -41,6 +41,12 @@ export function attachCombobox(input, opts = {}) {
   const onFocus = opts.openOnFocus !== false;
   const onTab   = opts.commitOnTab === true;
   const emptyTx = opts.empty ?? 'нічого не знайшлось';
+  // 🔴 Вільне поле (підказки — лише поміч, а не перелік дозволеного): коли
+  // набране не збігається з жодною підказкою, список ЗАКРИВАЄТЬСЯ. Напис
+  // «нічого не знайшлось» лишався відкритим поверх форми й перекривав кнопку
+  // «Знайти» (жива перевірка пошуку, 07.10.2026) — людина набрала село, якого
+  // серед написань роду немає, і не могла натиснути пошук.
+  const free    = opts.free === true;
 
   let raw = [], low = [];   // елементи та їхня згорнута копія (згортаємо РАЗ)
   let rows = [];            // видимі індекси в raw
@@ -145,6 +151,7 @@ export function attachCombobox(input, opts = {}) {
   function show() {
     if (input.disabled || !raw.length) return;
     render();
+    if (free && !rows.length) return;
     pop.hidden = false; open = true;
     input.setAttribute('aria-expanded', 'true');
     place();
@@ -181,7 +188,12 @@ export function attachCombobox(input, opts = {}) {
     if (opts.onPick) opts.onPick(v);
   }
 
-  const onInput   = () => { if (firingOwn) return; if (open) render(); else show(); };
+  const onInput   = () => {
+    if (firingOwn) return;
+    if (!open) { show(); return; }
+    render();
+    if (free && !rows.length) hide();
+  };
   const onFocusIn = () => { if (onFocus) show(); };
 
   const onKey = (e) => {
@@ -233,7 +245,14 @@ export function attachCombobox(input, opts = {}) {
     setItems(a) {
       raw = Array.isArray(a) ? a : [];
       low = raw.map(fold);
-      if (open) render();
+      // 🔴 Підказки з сервера приходять ПІСЛЯ набору. Якщо список у цю мить
+      // закритий (у вільному полі старі підказки не збіглись і він сховався),
+      // нові мусять його відкрити, поки людина в полі: інакше «224» набрано,
+      // а «ЦДІАК ф.224» так і не показано (жива перевірка 07.10.2026).
+      if (open) {
+        render();
+        if (free && !rows.length) hide();
+      } else if (document.activeElement === input) show();
     },
     open: show,
     close: hide,

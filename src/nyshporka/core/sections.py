@@ -172,7 +172,10 @@ SCREENS: dict[str, str] = {
     # поспіль і з рештою кроків навколо нього.
     "queue": "htr",
     "view": "htr",
-    "search": "research",
+    # 🔴 «Пошук» — в основі: заради нього застосунок і ставлять («Нишпорка» —
+    # той, хто шукає). У «Дослідженні» його не було в пресеті `amateur`, який
+    # читає рукописи, — тобто прочитане не було чим шукати.
+    "search": "core",
     "sift": "research",
     "eye": "research",
     "export": "research",
@@ -272,11 +275,12 @@ OP_SCREEN: dict[str, str] = {
     "page.text": "view",
     "page.lines": "view",
     "page.view": "view",
-    # research
+    # пошук — в основі (див. `SCREENS`)
     "search.run": "search",
+    "search.find": "search",
+    "search.scopes": "search",
     "search.index": "search",
     "search.state": "search",
-    "search.sweep": "search",
     "text.grep": "search",
     "text.index": "search",
     "text.state": "search",

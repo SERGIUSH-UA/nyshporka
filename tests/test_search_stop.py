@@ -18,7 +18,6 @@ from nyshporka.core import progress as P
 from nyshporka.core.envelope import ALERT, ok
 from nyshporka.core.jobs import JobBus, JobState
 
-
 # ── сигнал зупинки ───────────────────────────────────────────────────────────
 
 def test_stopped_is_false_without_a_scope_and_follows_the_event() -> None:
@@ -66,7 +65,7 @@ async def _run(tmp_path, monkeypatch, op_name: str) -> tuple[JobBus, Any, list[s
 
 
 async def test_search_sweep_really_stops(tmp_path, monkeypatch) -> None:
-    bus, job, seen = await _run(tmp_path, monkeypatch, "search.sweep")
+    _bus, job, seen = await _run(tmp_path, monkeypatch, "search.find")
     assert seen == ["stopped"], "пошук не спинився — дочекався кінця"
     assert job.state == JobState.CANCELLED
     assert not any(w.get("code") == "cant_interrupt" for w in job.warnings)

@@ -126,6 +126,9 @@ globalThis.fetch = async (url, opts) => {
                               pages_done: 2, alt: '' }] },
     'case.frame': { width: 9, height: 9, bytes: 9, image: 'data:image/jpeg;base64,AA' },
     'catalog.sweep': { job_id: 'cs1' },
+    'search.find': { job_id: 'sf1' },
+    'search.scopes': { items: [{ value: 'ДАВіО 904', label: 'ДАВіО ф.904', kind: 'fond', cases: 50 }],
+                       total: 1, registry: true },
     'case.check': globalThis.__CASE_CHECK || { shifra: null, shifra_error: '', dir: null },
     'library.list': { cases: [], built: true, summary: {}, facets: {},
                       total: 0, page: 0, page_size: 50, pages: 0 },
@@ -741,6 +744,70 @@ globalThis.__CASE_INFO = null;
   globalThis.__JOBS = [];
 }
 
+// ── «Пошук» — команда агента (`search.find` = `text.find`) з полями для людини ──
+{
+  await SCREENS.search();
+  await new Promise((r) => setTimeout(r, 40));
+  const form = document.getElementById('view').innerHTML || '';
+  out.findFieldsLabelled = form.includes('<span class="fld-l">Що шукаємо</span>')
+    && form.includes('<span class="fld-l">Де</span>')
+    && form.includes('name="thresh"');
+  globalThis.__OPS = [];
+  globalThis.__FORM = { where: 'decode', q: 'Вишневецький', case: 'ДАВіО ф.904 · 50 справ', thresh: '78' };
+  globalThis.__JOBS = [{ id: 'sf1', kind: 'search.find', state: 'done', updated: nowS,
+    cfg: { q: 'Вишневецький' }, warnings: [],
+    result: { q: 'Вишневецький', total: 1, matches: { exact: 1 }, stems: ['a', 'b'],
+      family: { name: 'rid', display: 'Вишневецькі' }, shifra: 'ДАВіО 904',
+      hits: [{ name: 'p', page: 'a.jpg', score: 100, match: 'exact', matched: 'Вишневецький' }],
+      anchor: { hits: [{ name: 'p', page: 'b.jpg', matched: 'Іван Петрович' }] },
+      record: { hits: [] },
+      ledger: { runs: 3, pages_scoped: 40, voices: ['pysar'],
+        channels: [{ id: 'surname', ran: true, hits: 1 },
+                   { id: 'record', ran: false, why: 'лише в межах однієї справи' }] } } }];
+  await ACTIONS['search.run']({ preventDefault() {}, target: document.createElement('form') });
+  await new Promise((r) => setTimeout(r, 60));
+  const call = globalThis.__OPS.find(([n]) => n === 'search.find');
+  out.findIsAgentCommand = !!call && String(call[1]).includes('"case":"ДАВіО 904"')
+    && String(call[1]).includes('"thresh":78')
+    && !globalThis.__OPS.some(([n]) => n === 'search.run');
+  const fh = document.getElementById('hits').innerHTML || '';
+  out.findShowsLedger = fh.includes('Де й чим шукали') && fh.includes('лише в межах однієї справи')
+    && fh.includes('Межа: ДАВіО 904');
+  out.findShowsFamily = fh.includes('Рід: Вишневецькі');
+  out.findShowsAnchors = fh.includes('Імена роду поруч') && fh.includes('Іван Петрович');
+  globalThis.__FORM = null;
+  globalThis.__JOBS = [];
+}
+
+// ── комбобокс вільного поля: набране поза підказками не лишає списку поверх форми ──
+{
+  const { attachCombobox } = await import('./ui/combobox.js');
+  const freeIn = document.createElement('input');
+  attachCombobox(freeIn, { items: ['Вишневецький'], free: true });
+  const freePop = document.body.children[document.body.children.length - 1];
+  freeIn.value = 'Липовеньке';
+  freeIn.fire('input', {});
+  out.comboFreeClosed = freePop.hidden === true;
+  const strictIn = document.createElement('input');
+  attachCombobox(strictIn, { items: ['Вишневецький'] });
+  const strictPop = document.body.children[document.body.children.length - 1];
+  strictIn.value = 'Липовеньке';
+  strictIn.fire('input', {});
+  out.comboStrictSaysNothing = strictPop.hidden === false
+    && String(strictPop.innerHTML).includes('cb-empty');
+  // Підказки з сервера прийшли після набору — список, що сховався, відкривається.
+  const lateIn = document.createElement('input');
+  const lateApi = attachCombobox(lateIn, { items: ['ANRM ф.211'], free: true });
+  const latePop = document.body.children[document.body.children.length - 1];
+  lateIn.value = '224';
+  lateIn.fire('input', {});
+  const hiddenFirst = latePop.hidden === true;
+  document.activeElement = lateIn;
+  lateApi.setItems(['ЦДІАК ф.224 · 114 справ']);
+  out.comboLateItemsOpen = hiddenFirst && latePop.hidden === false;
+  document.activeElement = null;
+}
+
 console.log('@@' + JSON.stringify(out));
 // 🔴 Вихід явний. Застосунок навмисно тримає вічний цикл спостереження за
 // чергою робіт: у браузері він блокується на сервері до 25 с, а тут заглушка
@@ -1065,6 +1132,29 @@ def test_search_says_what_each_hit_is_and_what_the_total_is_made_of(probe) -> No
     """
     assert probe.get("searchMatchSplit"), "число «знайдено» без розкладу за видом"
     assert probe.get("searchMatchTag"), "біля рядка не сказано, який це збіг"
+
+
+def test_console_search_is_the_agent_command_for_a_person(probe) -> None:
+    """🔴 «Чому агенти шукають готовою командою, а консоль чимось своїм?»
+
+    Консоль шле `search.find` (= `text.find`) з межею з підказки — підпис
+    підказки перекладено в значення межі, поріг той самий, що в агента. Під
+    видачею — журнал: межа, прогони, канали з причиною, чому якийсь не ганяли.
+    """
+    assert probe.get("findFieldsLabelled"), "поля пошуку без підписів"
+    assert probe.get("findIsAgentCommand"), "консоль шукає не командою агента"
+    assert probe.get("findShowsLedger"), "немає журналу «де й чим шукали»"
+    assert probe.get("findShowsFamily"), "не сказано, чий рід і скількома написаннями"
+    assert probe.get("findShowsAnchors"), "канал імен роду не показано"
+
+
+def test_a_free_field_does_not_cover_the_form_with_an_empty_list(probe) -> None:
+    """🔴 Жива перевірка 07.10.2026: «Липовеньке» в полі «Що» — і напис
+    «нічого не знайшлось» лишився відкритим поверх кнопки «Знайти»."""
+    assert probe.get("comboFreeClosed"), "вільне поле лишило порожній список відкритим"
+    assert probe.get("comboStrictSaysNothing"), "поле-перелік перестало казати «нічого»"
+    assert probe.get("comboLateItemsOpen"), (
+        "підказки з сервера прийшли, а список, що сховався, так і не відкрився")
 
 
 def test_live_fallback_is_not_called_blind(probe) -> None:
