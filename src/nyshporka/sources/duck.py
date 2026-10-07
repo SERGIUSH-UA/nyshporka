@@ -73,7 +73,9 @@ YEAR_WINDOWS: tuple[tuple[int, int], ...] = (
 def _in_windows(years: str, windows: list[tuple[int, int]]) -> bool:
     """Чи перший рік справи лежить у котромусь із цих вікон."""
     m = re.search(r"1[6-9]\d\d|20\d\d", years or "")
-    return bool(m) and any(y1 <= int(m.group()) <= y2 for y1, y2 in windows)
+    if m is None:
+        return False
+    return any(y1 <= int(m.group()) <= y2 for y1, y2 in windows)
 
 
 @dataclass(frozen=True)
