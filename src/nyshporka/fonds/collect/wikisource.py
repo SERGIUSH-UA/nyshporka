@@ -594,12 +594,21 @@ class WikisourceCollector:
         wanted = tuple(sorted({*opysy, *(c[0] for c in cases)}))
         out = dest / self.filename
         void_path = dest / "wikisource_void.tsv"
+        # 🔴 Сторінка опису без розібраної таблиці — не «справ немає»: таблицю
+        # перенесли, переверстали чи ще не дописали. Опис, який уже зібрано
+        # раніше, тоді лишається як був — інакше повторне збирання стирало
+        # перелік, а `no_table` поруч казало, що нуль нічого не означає.
+        held = set(empty) & {str(r.get("opys") or "") for r in T.read_tsv(out)[1]}
+        if held:
+            rows = [r for r in rows if r.get("opys") not in held]
+            voids = [r for r in voids if r.get("opys") not in held]
+        touched = tuple(o for o in wanted if o not in held)
         kept = 0
         extra: tuple[Path, ...] = ()
         if not dry_run:
-            kept = T.merge_into(out, FIELDS, rows, touched=wanted)
+            kept = T.merge_into(out, FIELDS, rows, touched=touched)
             if voids:
-                T.merge_into(void_path, FIELDS, voids, touched=wanted)
+                T.merge_into(void_path, FIELDS, voids, touched=touched)
                 extra = (void_path,)
 
         blind: list[Blind] = []
@@ -612,7 +621,9 @@ class WikisourceCollector:
             blind.append(Blind(
                 kind="no_table", count=len(empty),
                 why=(f"сторінки описів без таблиці справ ({', '.join(empty[:5])}): "
-                     f"опис ще не транскрибовано — нуль тут не означає «справ немає»")))
+                     f"опис ще не транскрибовано — нуль тут не означає «справ немає»"
+                     + (f"; раніше зібраний перелік опису {', '.join(sorted(held))} "
+                        f"лишено як був" if held else ""))))
         if not_cards:
             blind.append(Blind(
                 kind="not_a_card", count=not_cards,
@@ -631,7 +642,7 @@ class WikisourceCollector:
                      f"описом фонду")))
         return CollectResult(
             collector=self.id, out=out, extra=extra, rows=len(rows), kept=kept,
-            opys_seen=wanted, opys_collected=wanted,
+            opys_seen=wanted, opys_collected=touched,
             quality=self._quality(rows), blind=tuple(blind),
             notes=(f"код архіву у Вікіджерелах: {code}",) if code else ())
 

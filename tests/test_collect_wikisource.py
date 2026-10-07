@@ -387,6 +387,21 @@ def test_failure_does_not_erase_the_collected_opys(tmp_path: Path, pack: None,
     assert _rows78(first.out) == before
 
 
+def test_opys_page_without_table_keeps_the_rows_collected_before(tmp_path: Path,
+                                                                 pack: None) -> None:
+    """🔴 Таблицю опису перенесли чи переверстали — сторінка без таблиці. Повторне
+    збирання стирало рядки опису, а `no_table` поруч казало, що нуль нічого не
+    означає."""
+    target = Target(repo="DAZHO", fond="1", opys=("78",))
+    first = _coll(_Api(PAGES)).collect(target, dest=tmp_path)
+    before = _rows78(first.out)
+    assert before
+    pages = {**PAGES, "Архів:ДАЖО/1/78": "== Справи ==\nтаблицю перенесено на підсторінки\n"}
+    res = _coll(_Api(pages)).collect(target, dest=tmp_path)
+    assert _rows78(res.out) == before
+    assert any(b.kind == "no_table" and "лишено" in b.why for b in res.blind)
+
+
 def test_continuation_is_followed(tmp_path: Path, pack: None) -> None:
     """Відповідь, що вперлась у ліміт розміру, дочитується за `continue`."""
     api = _Lame(PAGES, cont=True)
