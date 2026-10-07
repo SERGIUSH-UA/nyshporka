@@ -134,6 +134,64 @@ function repoOptions(picked) {
           ...rows.map((r) => opt(r.code, r.name ? `${r.label} — ${r.name}` : r.label))].join('');
 }
 
+/** Поле з підписом над ним; `cls` — ширина («narrow» для років). */
+function fld(label, control, cls = '') {
+  return `<label class="fld${cls ? ` ${cls}` : ''}"><span class="fld-l">${esc(label)}</span>${control}</label>`;
+}
+
+let CHECK_TIMER = null;
+
+/**
+ * Слухати форму: шифра, архів і тека перевіряються, поки їх набирають.
+ *
+ * ⚠ З затримкою: запит на кожну літеру — це десяток відповідей, що приходять
+ * не по черзі, і остання показана могла б бути не від останнього набраного.
+ */
+function watchForm() {
+  const form = el('case-form');
+  if (!form || !form.addEventListener) return;
+  const later = () => {
+    clearTimeout(CHECK_TIMER);
+    CHECK_TIMER = setTimeout(checkForm, 350);
+  };
+  form.addEventListener('input', later);
+  form.addEventListener('change', later);
+  checkForm();
+}
+
+/**
+ * 🔎 Як прочиталась шифра і чи тека в просторі — до «Зберегти».
+ *
+ * 🔴 Шифра показується РОЗІБРАНОЮ: архів повною назвою, фонд, опис, справа.
+ * Набране «ANRM 2-1-1741» і «2-1-1741» з архівом у селекті виглядали однаково
+ * правильно, і чи впізнано архів, людина дізнавалась із відмови після
+ * збереження.
+ */
+async function checkForm() {
+  const form = el('case-form');
+  if (!form || !form.querySelector) return;
+  const val = (name) => {
+    const x = form.querySelector(`[name="${name}"]`);
+    return x ? String(x.value || '') : '';
+  };
+  const seq = ++SEQ.casecheck;
+  const env = await callOp('case.check',
+    { case_dir: val('case_dir'), shifra: val('shifra'), repo: val('repo') });
+  if (seq !== SEQ.casecheck || !env.ok) return;
+  const d = env.data || {};
+  const read = el('shifra-read');
+  if (read) {
+    const s = d.shifra;
+    read.innerHTML = s
+      ? `✓ <b>${esc(s.label)}</b>${s.name ? ` — ${esc(s.name)}` : ''} · ${t('case.fond')} <b>${
+        esc(s.fond)}</b> · ${t('case.opys')} <b>${esc(s.opys)}</b> · ${t('case.spr')} <b>${esc(s.spr)}</b>`
+      : (d.shifra_error ? `<span class="warn-inline">${esc(d.shifra_error)}</span>` : '');
+  }
+  // Позначка «показувати там, де лежить» — лише для теки поза простором.
+  const box = el('adopt-box');
+  if (box) box.hidden = !(d.dir && d.dir.outside);
+}
+
 SCREENS.newcase = async () => {
   const sc = (EDIT && EDIT.sidecar) || {};
   const v = (k) => esc(sc[k] === null || sc[k] === undefined ? '' : sc[k]);
@@ -155,29 +213,28 @@ SCREENS.newcase = async () => {
     // самим «з шифри», тобто рівно тим станом, проти якого він і зроблений.
     if (env.ok) REPOS = env.data;
   }
+  // 🔴 Кожне поле — з підписом над ним. Доти підписом була сама підказка в
+  // полі, і вона зникала, щойно поле заповнене: у формі, відкритій на правку,
+  // стояли «ANRM 2-1-1741», «газета», «1854», «1854» — і котре з двох «1854»
+  // «від», а котре «до», не казало ніщо (холодний прохід 07.10.2026).
   setView(`
-    <h2>${EDIT ? t('case.edit') : t('case.title')}</h2>
-    <p class="muted">${t('case.why')}</p>
+    <h2>${t('case.title')}</h2>
     ${EDIT ? `<div class="warn">${t('case.editing')} <b class="mono">${dir}</b>
        · ${esc(EDIT.scans)} ${t('common.frames')}<br>
-       <span class="muted">${t('case.keep')}</span></div>` : ''}
-    <form data-act="case.save">
-      <div class="row">${pathField({ name: 'case_dir', mode: 'dir',
+       <span class="muted">${t('case.keep')}</span></div>`
+    : `<p class="muted">${t('case.why')}</p>`}
+    <form data-act="case.save" id="case-form">
+      <div class="row">${fld(t('case.dir'), pathField({ name: 'case_dir', mode: 'dir',
         purpose: 'case.dir', value: EDIT ? EDIT.case_dir : '',
-        ph: t('case.dir'), autofocus: !EDIT })}</div>
-      ${EDIT ? '' : `<p class="muted">${t('case.dirhint')}</p>`}
+        ph: t('case.dir.ph'), autofocus: !EDIT }))}</div>
+      ${EDIT ? '' : `<p class="muted fld-hint">${t('case.dirhint')}</p>`}
       <div class="row">
-        <input name="shifra" placeholder="${t('case.shifra')}: ДАХмО 315-1-8433"
-          value="${v('shifra')}">
-        <input name="doc_type" placeholder="${t('case.type')}: метрична"
-          value="${v('doc_type')}">
+        ${fld(t('case.shifra'), `<input name="shifra" placeholder="ДАХмО 315-1-8433"
+          value="${v('shifra')}">`)}
+        ${fld(t('case.repo'), `<select name="repo">${repoOptions(sc.repo)}</select>`)}
+        <button type="button" class="fld-btn" data-act="case.repo.toggle">${t('case.repo.add')}</button>
       </div>
-      <div class="row">
-        <label class="lbl-mini">${t('case.repo')}
-          <select name="repo">${repoOptions(sc.repo)}</select></label>
-        <button type="button" data-act="case.repo.toggle">${t('case.repo.add')}</button>
-      </div>
-      <p class="muted">${t('case.repo.why')}</p>
+      <p id="shifra-read" class="muted fld-hint"></p>
       <div id="repo-add" hidden>
         <p class="muted">${t('case.repo.add.why')}</p>
         <div class="row">
@@ -188,24 +245,33 @@ SCREENS.newcase = async () => {
         </div>
         <div id="repo-hits"></div>
       </div>
-      <div class="row"><input name="title" placeholder="${t('case.name')}"
-        value="${v('title')}" ${EDIT ? 'autofocus' : ''}></div>
+      <div class="row">${fld(t('case.name'), `<input name="title"
+        placeholder="${t('case.name.ph')}" value="${v('title')}" ${EDIT ? 'autofocus' : ''}>`)}</div>
       <div class="row">
-        <input name="place" placeholder="${t('case.place')}" value="${v('place')}">
-        <input name="year_from" placeholder="${t('case.years')}: 1858" size="6"
-          value="${v('year_from')}">
-        <input name="year_to" placeholder="1860" size="6" value="${v('year_to')}">
+        ${fld(t('case.type'), `<input name="doc_type" placeholder="${t('case.type.ph')}"
+          value="${v('doc_type')}">`)}
+        ${fld(t('case.place'), `<input name="place" placeholder="${t('case.place.ph')}"
+          value="${v('place')}">`)}
       </div>
-      <div class="row"><input name="note" placeholder="${t('case.note')}"
-        value="${v('note')}"></div>
-      <div class="row"><label><input type="checkbox" name="adopt" value="1">
-        ${t('case.adopt')}</label></div>
-      <p class="muted">${t('case.adopt.why')}</p>
+      <div class="row">
+        ${fld(t('case.year_from'), `<input name="year_from" placeholder="1858" inputmode="numeric"
+          value="${v('year_from')}">`, 'narrow')}
+        ${fld(t('case.year_to'), `<input name="year_to" placeholder="1860" inputmode="numeric"
+          value="${v('year_to')}">`, 'narrow')}
+      </div>
+      <div class="row">${fld(t('case.note'), `<input name="note"
+        placeholder="${t('case.note.ph')}" value="${v('note')}">`)}</div>
+      <div id="adopt-box" hidden>
+        <div class="warn"><label><input type="checkbox" name="adopt" value="1">
+          ${t('case.adopt')}</label><br>
+          <span class="muted">${t('case.adopt.why')}</span></div>
+      </div>
       <div class="row"><button type="submit">${t('case.save')}</button>
         ${EDIT ? `<button type="button" data-act="case.fresh">${t('case.fresh')}</button>`
-          : ''}</div>
+    : ''}</div>
     </form>
     <div id="hits"></div>`);
+  watchForm();
   EDIT = null;
 };
 

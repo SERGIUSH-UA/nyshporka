@@ -126,6 +126,7 @@ globalThis.fetch = async (url, opts) => {
                               pages_done: 2, alt: '' }] },
     'case.frame': { width: 9, height: 9, bytes: 9, image: 'data:image/jpeg;base64,AA' },
     'catalog.sweep': { job_id: 'cs1' },
+    'case.check': globalThis.__CASE_CHECK || { shifra: null, shifra_error: '', dir: null },
     'library.list': { cases: [], built: true, summary: {}, facets: {},
                       total: 0, page: 0, page_size: 50, pages: 0 },
     'runs.list': { runs: [{ name: 'прогін', case_dir: 'c', engine_id: 'pysar',
@@ -678,6 +679,29 @@ globalThis.__CASE_INFO = null;
   globalThis.__JOBS = [];
 }
 
+// ── опис справи: підписи полів, розібрана шифра, «показувати там, де лежить» ──
+{
+  globalThis.__CASE_CHECK = { shifra: { label: 'ДАХмО', name: 'Державний архів Хмельницької області',
+    fond: '315', opys: '1', spr: '8433' }, shifra_error: '', dir: { outside: false } };
+  await SCREENS.newcase();
+  await new Promise((r) => setTimeout(r, 40));
+  const form = document.getElementById('view').innerHTML || '';
+  out.caseFieldsLabelled = form.includes('<span class="fld-l">Рік від</span>')
+    && form.includes('<span class="fld-l">Рік до</span>')
+    && form.includes('<span class="fld-l">Шифра</span>');
+  out.caseHeadingIsTab = /<h2>Опис справи<\/h2>/.test(form);
+  const read = document.getElementById('shifra-read').innerHTML || '';
+  out.caseShifraParsed = read.includes('Державний архів Хмельницької області')
+    && read.includes('<b>315</b>') && read.includes('<b>8433</b>');
+  out.caseAdoptHiddenInside = document.getElementById('adopt-box').hidden === true;
+  globalThis.__CASE_CHECK = { shifra: null, shifra_error: 'не розібрав шифру', dir: { outside: true } };
+  await SCREENS.newcase();
+  await new Promise((r) => setTimeout(r, 40));
+  out.caseAdoptShownOutside = document.getElementById('adopt-box').hidden === false;
+  out.caseShifraErrorShown = (document.getElementById('shifra-read').innerHTML || '').includes('не розібрав шифру');
+  globalThis.__CASE_CHECK = null;
+}
+
 console.log('@@' + JSON.stringify(out));
 // 🔴 Вихід явний. Застосунок навмисно тримає вічний цикл спостереження за
 // чергою робіт: у браузері він блокується на сервері до 25 с, а тут заглушка
@@ -957,6 +981,29 @@ def test_a_next_step_with_a_query_opens_the_screen_searching_it(probe) -> None:
     """
     assert probe.get("seedRunsSearch"), "екран не запустив пошук із запитом поради"
     assert probe.get("seedShowsHits"), "видача пошуку з поради не намалювалась"
+
+
+def test_the_case_form_labels_every_field(probe) -> None:
+    """🔴 Підказка в полі зникає, щойно поле заповнене (холодний прохід 07.10.2026).
+
+    У формі, відкритій на правку, стояли «1854» і «1854» — котре «від», а котре
+    «до», не казало ніщо. І заголовок «Змінити опис справи» стояв під вкладкою
+    «Завести справу»: тепер обидва — «Опис справи».
+    """
+    assert probe.get("caseFieldsLabelled"), "поля форми опису без підписів"
+    assert probe.get("caseHeadingIsTab"), "заголовок форми не збігається з вкладкою"
+
+
+def test_the_case_form_shows_the_shifra_parsed(probe) -> None:
+    """Чи впізнано архів, людина бачить до «Зберегти», а не з відмови після."""
+    assert probe.get("caseShifraParsed"), "шифру не показано розібраною"
+    assert probe.get("caseShifraErrorShown"), "причину, чому шифра не читається, не показано"
+
+
+def test_adopt_is_offered_only_for_a_folder_outside(probe) -> None:
+    """Позначка для теки поза простором читалась як «завести справу» — і стояла завжди."""
+    assert probe.get("caseAdoptHiddenInside"), "позначку показано для теки в просторі"
+    assert probe.get("caseAdoptShownOutside"), "позначку сховано для теки поза простором"
 
 
 def test_live_fallback_is_not_called_blind(probe) -> None:

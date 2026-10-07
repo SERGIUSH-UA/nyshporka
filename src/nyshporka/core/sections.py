@@ -215,6 +215,7 @@ OP_SCREEN: dict[str, str] = {
     "cases.build": "cases",
     "case.show": "cases",
     "case.register": "newcase",
+    "case.check": "newcase",
     "material.look": "newcase",
     # material
     "sources.list": "sources",

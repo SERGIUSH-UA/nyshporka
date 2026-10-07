@@ -109,6 +109,17 @@ h2 { margin: 0 0 1rem; font-size: 1.45rem; }
 .row .lbl-mini:has(> select) { flex: 1 1 14rem; display: flex; gap: .4rem;
   align-items: center; min-width: 0; }
 .row .lbl-mini > select { flex: 1 1 auto; min-width: 0; width: auto; }
+/* Поле з підписом над ним (форма опису справи). Підказка в полі — лише
+   приклад: вона зникає, щойно поле заповнене, і два «1854» поруч не казали,
+   котре з них «від». Колонкою, тож розміри полів вище тут не діють. */
+.row .fld { flex: 1 1 14rem; display: flex; flex-direction: column; gap: .2rem; min-width: 0; }
+.row .fld.narrow { flex: 0 1 7rem; }
+.row .fld input, .row .fld select, .row .fld .pf { flex: 0 0 auto; width: 100%; min-width: 0; }
+/* Поле шляху всередині підпису — знову рядок «поле + кнопка». */
+.row .fld .pf > input { flex: 1 1 auto; width: auto; }
+.fld-l { font-size: .8rem; color: var(--fg-3); }
+.row .fld-btn { align-self: flex-end; }
+.fld-hint { margin: -.6rem 0 1rem; font-size: .87rem; }
 
 /* ── Таблиця видачі ─────────────────────────────────────────────────────────
    Своя, а не спільна: у консолі таблиці різні на кожній вкладці, і зведення їх

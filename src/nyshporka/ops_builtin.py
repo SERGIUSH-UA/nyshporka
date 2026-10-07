@@ -2894,6 +2894,52 @@ class CaseShowArgs(BaseModel):
     case_dir: str = Field(description="тека зі сканами")
 
 
+class CaseCheckArgs(BaseModel):
+    case_dir: str = Field(default="", description="тека зі сканами; порожньо — не перевіряти")
+    shifra: str = Field(default="", description="шифра, як її набрала людина")
+    repo: str = Field(default="", description="архів окремо, коли його немає в шифрі")
+
+
+# `agent=False`, `private=True` — з тієї самої причини, що в `case.show`: це
+# підживлення форми, а `case_dir` береться як є.
+@op("case.check", summary="Як прочиталась шифра і де лежить тека — до збереження",
+    args=CaseCheckArgs, agent=False, private=True)
+def case_check(a: CaseCheckArgs) -> Envelope:
+    """Розібрати шифру й теку, нічого не записуючи.
+
+    🔴 Форма показувала шифру лише так, як її набрали. Чи впізнано архів, де
+    фонд, а де справа — людина дізнавалась після «Зберегти», з відмови, або не
+    дізнавалась зовсім: «ANRM 2-1-1741» і «2-1-1741» з архівом у селекті
+    виглядали однаково правильними (холодний прохід 07.10.2026).
+
+    🔴 Позначка «взяти теку під облік» має сенс лише для теки поза простором,
+    і показувати її завжди означало пропонувати всім дію, потрібну одиницям, —
+    вона читалась як «завести справу». Тож форма питає тут, де лежить тека.
+    """
+    from nyshporka.archives.pack import active
+    from nyshporka.cases.register import RegisterError, case_path, parse_shifra, reachable
+
+    out: dict[str, Any] = {"shifra": None, "shifra_error": "", "dir": None}
+    if a.shifra.strip():
+        try:
+            sh = parse_shifra(a.shifra, repo_hint=a.repo)
+        except RegisterError as exc:
+            out["shifra_error"] = str(exc)
+        else:
+            repo = active().repositories.get(sh.repo)
+            out["shifra"] = {"repo": sh.repo,
+                             "label": active().repo_label(sh.repo),
+                             "name": getattr(repo, "name", "") or "",
+                             "fond": sh.fond, "opys": sh.opys, "spr": sh.spr,
+                             "text": sh.as_text()}
+    if a.case_dir.strip():
+        d = case_path(a.case_dir)
+        exists = d.is_dir()
+        out["dir"] = {"path": str(d), "exists": exists,
+                      "outside": bool(exists and not reachable(d))}
+    return ok(out)
+
+
 # `agent=False` — це підживлення форми, а не дія дослідження: агент читає опис
 # через `cases.list` і `pages.status`, де він іде разом зі станом обробки.
 # `private=True`: `case_dir` береться як є, тож без токена це читання опису з

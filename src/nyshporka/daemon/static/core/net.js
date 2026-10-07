@@ -49,6 +49,6 @@ function normErr(env, status) {
  * Гірше за косметику: `SIFT` при цьому вже перезаписаний свіжим, тож таблиця
  * показує одне, а «Розбір знахідок» відкриває інше.
  */
-const SEQ = { search: 0, geog: 0, fond: 0 };
+const SEQ = { search: 0, geog: 0, fond: 0, casecheck: 0 };
 
 export { TOKEN, FINAL_STATES, callOp, normErr, SEQ };
