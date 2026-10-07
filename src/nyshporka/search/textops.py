@@ -799,13 +799,17 @@ def find(q: str, scope: str | Sequence[str] = "", *, thresh: int = 78, limit: in
     """
     from nyshporka import htr_store as S
 
-    if scope:
-        sc = S.runs_for_scope(scope)
-        if sc["kind"] == "cases":
-            return _find_many(q, sc, thresh=thresh, limit=limit, context=context,
-                              family=family)
-    return _find_one(q, scope if isinstance(scope, str) else "", thresh=thresh,
-                     limit=limit, context=context, family=family)
+    # 🔴 Один перелік прогонів на весь захід. Серія розкладається на справи, і
+    # кожна питала перелік знову: на фонді зі 109 справ — 524 обходи кореня
+    # прогонів, 46 с із 189 (замір 07.10.2026).
+    with S.one_listing():
+        if scope:
+            sc = S.runs_for_scope(scope)
+            if sc["kind"] == "cases":
+                return _find_many(q, sc, thresh=thresh, limit=limit, context=context,
+                                  family=family)
+        return _find_one(q, scope if isinstance(scope, str) else "", thresh=thresh,
+                         limit=limit, context=context, family=family)
 
 
 def _find_many(q: str, sc: dict[str, Any], *, thresh: int, limit: int,
@@ -820,20 +824,43 @@ def _find_many(q: str, sc: dict[str, Any], *, thresh: int, limit: int,
     loose = [str(r["name"]) for r in sc["rows"]
              if not str(r.get("case_canon") or "").strip()
              or str(r.get("case_canon")) not in keyed]
+    from nyshporka.core import progress as P
+
     one: list[tuple[str, dict[str, Any]]] = []
-    for k in keys + loose:
-        got = _find_one(q, k, thresh=thresh, limit=limit, context=context, family=family)
+    items = keys + loose
+    stopped = False
+    for i, k in enumerate(items, 1):
+        if P.stopped():
+            stopped = True
+            break
+        # Поступ — по справах серії. Внутрішній («блоки корпусу 1 із 1») для
+        # кожної справи свій і лише перебивав би цей: стояло б «1 із 1» на
+        # весь фонд (холодний прохід 07.10.2026: 151 с на одному рядку).
+        P.report(i, len(items), "справи серії")
+        with P.sink(None):
+            got = _find_one(q, k, thresh=thresh, limit=limit, context=context,
+                            family=family)
         if got.get("error"):
             return {"error": f"«{k}»: {got['error']}"}
         one.append((k, got))
-    return _merge_finds(q, sc, one, limit=limit)
+        if got.get("stopped"):
+            stopped = True
+            break
+    merged = _merge_finds(q, sc, one, limit=limit)
+    merged["stopped"] = stopped
+    return merged
 
 
 def _merge_finds(q: str, sc: dict[str, Any], one: list[tuple[str, dict[str, Any]]],
                  *, limit: int) -> dict[str, Any]:
     """Звести відповіді по справах в одну — з переліком справ у журналі."""
+    from nyshporka.search import rank as RANK
+
     def top(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        return sorted(items, key=lambda h: -float(h.get("score") or 0))[:limit]
+        # Той самий порядок, що в одній справі (`rank.sort_key`): клас рангу,
+        # вид збігу, бал. Сортування самим балом повертало на верхівку серії
+        # «100» стема всередині чужого слова.
+        return sorted(items, key=RANK.sort_key)[:limit]
 
     # Шифра з рядка переліку: резолвер без запису в бібліотеці не знає опису
     # («РГІА 592-?-941»), а паспорт прийнятого пакета його знає.
@@ -920,6 +947,8 @@ def _merge_finds(q: str, sc: dict[str, Any], one: list[tuple[str, dict[str, Any]
         "series": sc.get("series")}
     return {"q": q, "scope": "cases", "case_key": "", "shifra": sc.get("shifra") or "",
             "hits": top(hits), "total": sum(c["total"] for c in cases),
+            "matches": {kind: sum(int((r.get("matches") or {}).get(kind) or 0) for _, r in one)
+                        for kind in RANK.MATCH_KINDS},
             "stems": one[0][1].get("stems") if one else [],
             "stems_dropped": sorted({s for _, r in one for s in r.get("stems_dropped") or []}),
             "anchor": {"on": any(c["anchor"] for c in cases), "hits": top(anchors),

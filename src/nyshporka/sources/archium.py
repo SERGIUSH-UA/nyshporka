@@ -50,6 +50,8 @@ from nyshporka.sources.base import (
     Node,
     ProgressFn,
     SourceError,
+    crawl_complete,
+    mark_crawl,
 )
 from nyshporka.sources.http import Fetcher, HttpError, offline
 from nyshporka.utils.atomic import atomic_write_bytes
@@ -495,7 +497,8 @@ class ArchiumSource:
                 # нього перелік джерел казав «зібрано на місці» — і не казав,
                 # скільки там справ, тобто нуль пошуку лишався без ваги.
                 "rows": _tsv_rows(path, st.st_mtime_ns, st.st_size),
-                "taken": _dt.date.fromtimestamp(st.st_mtime).isoformat()}
+                "taken": _dt.date.fromtimestamp(st.st_mtime).isoformat(),
+                "complete": crawl_complete(path)}
         got = self._bundled_for_site()
         if got is None:
             return "none", {}
@@ -841,6 +844,9 @@ class ArchiumSource:
         # і викидати зібране заради охайності означало б платити двічі.
         new_file = not cat.exists() or not resume
         stats = {"fonds": 0, "inventories": 0, "cases": 0, "skipped": len(done)}
+        # Позначка «не завершено» — ДО першого рядка: обірваний обхід мусить
+        # лишити саме її (`base.crawl_complete`).
+        mark_crawl(cat, complete=False)
         with cat.open("w" if new_file else "a", encoding="utf-8", newline="") as fh:
             w = csv.DictWriter(fh, fieldnames=self.CATALOG_FIELDS, delimiter="\t",
                                extrasaction="ignore")
@@ -879,6 +885,10 @@ class ArchiumSource:
                     if on_progress:
                         on_progress(done=i, total=len(fonds), unit="фонд",
                                     note=f"справ зібрано {stats['cases']}")
+        # Завершено — лише весь звичний обсяг; обхід кількох груп (`--groups`)
+        # не робить каталог повним.
+        if groups is None:
+            mark_crawl(cat, complete=True)
         return stats
 
     # ── справа ───────────────────────────────────────────────────────────────

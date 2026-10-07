@@ -170,6 +170,33 @@ def _norm_path(p: str) -> str:
     return str(p or "").replace("\\", "/").rstrip("/").lower()
 
 
+#: Прочитані картки осіб: шлях → (час зміни, розмір, особа або None).
+_PERSONS: dict[str, tuple[int, int, Any]] = {}
+
+
+def _person(path: Any, read: Any) -> Any:
+    """Картка особи — розібрана один раз, доки файл не змінився.
+
+    🔴 Самоперевірка кличеться на кожну справу серії, і кожна перечитувала
+    весь канон: на фонді зі 109 справ — 42 837 розборів YAML, 89 с із 189
+    (замір 07.10.2026). Ключ — час зміни й розмір: правку картки видно одразу.
+    """
+    try:
+        st = path.stat()
+    except OSError:
+        return None
+    key = str(path)
+    got = _PERSONS.get(key)
+    if got is not None and got[0] == st.st_mtime_ns and got[1] == st.st_size:
+        return got[2]
+    try:
+        person = read(path)
+    except Exception:
+        person = None
+    _PERSONS[key] = (st.st_mtime_ns, st.st_size, person)
+    return person
+
+
 def canon_pages(q: str, ref: Any, thresh: int = 80) -> set[str]:
     """Аркуші справи, які канон цитує для осіб із цим прізвищем.
 
@@ -206,9 +233,8 @@ def canon_pages(q: str, ref: Any, thresh: int = 80) -> set[str]:
 
     out: set[str] = set()
     for path in sorted((root / "persons").glob("*.md")):
-        try:
-            person = read_person(path)
-        except Exception:
+        person = _person(path, read_person)
+        if person is None:
             continue
         surnames = [str(getattr(nm, "surname", "") or "") for nm in person.names]
         if not any(s and fuzz.ratio(normalize_archival(s), want) >= thresh for s in surnames):

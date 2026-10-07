@@ -781,3 +781,47 @@ def test_real_pages_share_one_machine_wide_queue(monkeypatch: pytest.MonkeyPatch
     http = B.BabynYarSource()._cf()
     assert http.limiter is not None and http.limiter.key == B.RATE_KEY
     assert (http.limiter.max_events, http.delay) == (B.RATE_MAX, 0.0)
+
+
+# ── завершеність обходу ──────────────────────────────────────────────────────
+
+def test_a_finished_crawl_marks_the_catalog_complete(tmp_path: Path) -> None:
+    from nyshporka.sources.base import crawl_complete
+
+    src = BabynYarSource(tmp_path, client=_Cf(_crawl_answers()))
+    src.crawl(None)
+    assert crawl_complete(tmp_path / src.CATALOG_REL) is True
+    assert src.catalog_source()[1]["complete"] is True
+
+
+def test_a_stopped_crawl_leaves_the_catalog_marked_incomplete(tmp_path: Path) -> None:
+    """🔴 Спинений обхід доти виглядав як повний каталог «власний обхід, N справ»."""
+    from nyshporka.sources.base import crawl_complete
+
+    class _Stop(Exception):
+        pass
+
+    def stop(**_k: object) -> None:
+        raise _Stop
+
+    src = BabynYarSource(tmp_path, client=_Cf(_crawl_answers()))
+    with pytest.raises(_Stop):
+        src.crawl(None, on_progress=stop)
+    assert crawl_complete(tmp_path / src.CATALOG_REL) is False
+    assert src.catalog_source()[1]["complete"] is False
+
+
+def test_crawling_some_archives_does_not_claim_the_whole_site(tmp_path: Path) -> None:
+    from nyshporka.sources.base import crawl_complete
+
+    src = BabynYarSource(tmp_path, client=_Cf(_crawl_answers()))
+    src.crawl(("34",))
+    assert crawl_complete(tmp_path / src.CATALOG_REL) is False
+
+
+def test_a_catalog_from_before_the_marker_is_unknown_not_incomplete(tmp_path: Path) -> None:
+    from nyshporka.sources.base import crawl_complete
+
+    cat = tmp_path / "cases.tsv"
+    cat.write_text("a\n", encoding="utf-8")
+    assert crawl_complete(cat) is None

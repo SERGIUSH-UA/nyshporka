@@ -615,6 +615,8 @@ def _catalog_basis(src: Any) -> dict[str, Any]:
         return out
     out["kind"] = kind
     out["taken"] = str(info.get("taken") or "")
+    # Обхід спинили чи він обірвався — каталог неповний (`base.crawl_complete`).
+    out["partial"] = info.get("complete") is False
     rows = info.get("rows")
     out["rows"] = int(rows) if isinstance(rows, int) else None
     regions = info.get("regions") or []
@@ -967,6 +969,8 @@ def catalog_search(a: CatalogSearchArgs) -> Envelope:
     basis: list[dict[str, Any]] = []
     #: Хто дав нуль і що саме цей нуль доводить.
     zeros: list[dict[str, str]] = []
+    #: Джерела з каталогом, зібраним не до кінця (обхід спинили чи обірвався).
+    partial: list[str] = []
     asked = [s for s in picked if s is not None and supports(s, "search")]
     answers = _ask_sources(asked, a.q, a.limit)
     stopped = False
@@ -1018,6 +1022,9 @@ def catalog_search(a: CatalogSearchArgs) -> Envelope:
                 # губило рівно той перелік регіонів, яким обмежено його нуль.
                 entry.update(kind="зібраний на місці", taken=str(meta.get("taken") or ""),
                              rows=meta.get("rows"), regions=meta.get("regions") or None)
+                if meta.get("complete") is False:
+                    entry["partial"] = True
+                    partial.append(src.id)
             elif kind == "live":
                 # Обсяг живої бази — теж знаменник, коли джерело його знає; для
                 # іменної бази — ще й по архівах (`by_archive`), бо покриття
@@ -1065,6 +1072,13 @@ def catalog_search(a: CatalogSearchArgs) -> Envelope:
         env.warn("catalog_stopped",
                  "пошук спинено: джерела, що не встигли відповісти, не опитано — "
                  "їхнього нуля тут немає", level=ALERT)
+    if partial:
+        # 🔴 Неповний каталог — та сама вада, що обрізана видача: перелік і нуль
+        # із нього нічого не доводять про те, чого обхід не дійшов.
+        env.warn("partial_catalog",
+                 "каталог зібрано не до кінця (обхід спинили чи він обірвався): "
+                 + ", ".join(partial) + " — знахідки звідти неповні, а нуль нічого "
+                 "не доводить; «Оновити каталог» докінчить обхід", level=ALERT)
     _warn_once(env, hits=hits, searched=searched,
                unavailable=unavailable, truncated=truncated)
     return env

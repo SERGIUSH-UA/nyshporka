@@ -1391,6 +1391,7 @@ def _sweep_put(conn: sqlite3.Connection, key: str, got: dict[int, list[SweepRow]
 #: «прогін 0 із 0» на обидві виглядало як зависання (холодний прохід 07.10.2026).
 PHASE_INDEX = "індекс нових прогонів"
 PHASE_SWEEP = "блоки корпусу"
+PHASE_PAGES = "сторінки корпусу"
 
 
 def sweep(stems: list[str], runs: list[str], *, thresh: int = 78,
@@ -1473,7 +1474,13 @@ def sweep(stems: list[str], runs: list[str], *, thresh: int = 78,
         for bi, block in enumerate(blocks, 1):
             if progress:
                 progress(bi, len(blocks), PHASE_SWEEP)
-            got = _sweep_block(conn, stems, block, thresh, cancel=cancel)
+            # Один блок — поступ зсередини нього (сторінки кандидатів): інакше на
+            # весь пошук стояло «блоки корпусу 1 із 1».
+            inner = None
+            if progress and len(blocks) == 1:
+                def inner(i: int, n: int, _w: str) -> None:
+                    progress(i, n, PHASE_PAGES)
+            got = _sweep_block(conn, stems, block, thresh, progress=inner, cancel=cancel)
             if got is None:
                 cancelled = True
                 break

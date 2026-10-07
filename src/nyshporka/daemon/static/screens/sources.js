@@ -247,6 +247,12 @@ function srcBasis(c) {
     || t('sources.bundled');
   const bits = [what];
   if (c.taken) bits.push(`${t('sources.taken')} ${esc(c.taken)}`);
+  // Обхід спинили чи він обірвався — сказати це в самому рядку джерела, поруч
+  // із кнопкою, що докінчує обхід.
+  if (c.partial) {
+    return `<span class="muted">${bits.join(' · ')}</span>
+      <br><span class="warn-inline">${t('sources.partial')}</span>`;
+  }
   if (c.rows) bits.push(`${esc(c.rows)} ${t('sources.rows')}`);
   if (c.scope) bits.push(esc(c.scope));
   return `<span class="muted">${bits.join(' · ')}</span>`;

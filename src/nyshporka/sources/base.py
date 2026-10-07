@@ -293,6 +293,47 @@ class SourceError(RuntimeError):
     """Джерело не змогло виконати запит — із поясненням для людини."""
 
 
+# ── завершеність обходу ──────────────────────────────────────────────────────
+#
+# 🔴 Каталог, зібраний обходом, виглядав повним, навіть коли обхід спинили чи
+# він обірвався: файл є, справи в ньому є — «власний обхід, N справ». Пошук по
+# ньому мовчав про пропущені фонди, а нуль читався як «справи немає». Тому
+# обхід пише позначку поруч із каталогом: на старті «не завершено», після
+# останнього кроку — «завершено». Зупинка, Ctrl-C чи збій лишають першу.
+#
+# ⚠ Каталог без позначки (зібраний до неї) — «невідомо», а не «неповний»:
+# назвати неповним те, про що не знаємо, означало б зіпсувати знаменник у
+# протилежний бік.
+
+def crawl_marker(catalog: Path) -> Path:
+    """Файл позначки поруч із каталогом обходу."""
+    return Path(catalog).with_name("crawl.json")
+
+
+def mark_crawl(catalog: Path, *, complete: bool) -> None:
+    """Записати, завершено обхід чи ні — атомарно."""
+    import datetime as _dt
+    import json
+
+    from nyshporka.utils.atomic import atomic_write_bytes
+
+    payload = {"complete": complete,
+               "at": _dt.datetime.now(_dt.UTC).isoformat(timespec="seconds")}
+    atomic_write_bytes(crawl_marker(catalog), json.dumps(payload).encode("utf-8"))
+
+
+def crawl_complete(catalog: Path) -> bool | None:
+    """Чи дійшов обхід до кінця: `True`, `False` або `None` — невідомо."""
+    import json
+
+    try:
+        got = json.loads(crawl_marker(catalog).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    v = got.get("complete") if isinstance(got, dict) else None
+    return v if isinstance(v, bool) else None
+
+
 @runtime_checkable
 class Source(Protocol):
     """Контракт джерела. Реалізація оголошує, що вміє, через `caps`.

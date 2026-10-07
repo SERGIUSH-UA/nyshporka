@@ -259,3 +259,30 @@ def test_both_jobs_are_stoppable_in_the_console() -> None:
     from nyshporka.daemon.workers import STOPPABLE_OPS
 
     assert {"catalog.sweep", "catalog.crawl"} <= STOPPABLE_OPS
+
+
+# ── неповний каталог ─────────────────────────────────────────────────────────
+
+class _Partial(_Src):
+    def catalog_source(self) -> tuple[str, dict[str, Any]]:
+        return "workspace", {"rows": 10, "taken": "2026-10-07", "complete": False}
+
+
+def test_a_partial_catalog_is_named_in_the_list_and_in_the_search(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    """🔴 Недообійдений каталог виглядав повним: нуль із нього читався як «немає»."""
+    assert _catalog_basis(_Partial("babynyar"))["partial"] is True
+    env = _search(monkeypatch, _Partial("babynyar", hits=0), _Src("duck"))
+    basis = {b["source"]: b for b in env.data["coverage"]["basis"]}
+    assert basis["babynyar"].get("partial") is True
+    assert {w.code: w.level for w in env.warnings}.get("partial_catalog") == "alert"
+
+
+def test_a_complete_or_unknown_catalog_raises_no_alarm(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _Unknown(_Src):
+        def catalog_source(self) -> tuple[str, dict[str, Any]]:
+            return "workspace", {"rows": 10, "complete": None}
+
+    assert _catalog_basis(_Unknown("archium"))["partial"] is False
+    env = _search(monkeypatch, _Unknown("archium"))
+    assert "partial_catalog" not in {w.code for w in env.warnings}

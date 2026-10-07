@@ -51,6 +51,8 @@ from nyshporka.sources.base import (
     SourceAbout,
     SourceError,
     SourceScope,
+    crawl_complete,
+    mark_crawl,
 )
 from nyshporka.sources.cfclient import CfClient, ShieldError
 from nyshporka.sources.http import Fetcher, HttpError
@@ -586,7 +588,8 @@ class BabynYarSource:
             "taken": _dt.date.fromtimestamp(st.st_mtime).isoformat(),
             # Скільки описів у каталозі неповні: без цього числа нуль пошуку
             # по такому опису читався б як «справи немає».
-            "short": len(self._read_state().get("descs_short") or {})}
+            "short": len(self._read_state().get("descs_short") or {}),
+            "complete": crawl_complete(path)}
 
     def _catalog_rows(self) -> Iterator[dict[str, str]]:
         kind, info = self.catalog_source()
@@ -733,6 +736,8 @@ class BabynYarSource:
                  "skipped": 0, "short": 0}
         known = self._known_ids(cat) if resume and cat.exists() else set()
         new_file = not resume or not cat.exists() or cat.stat().st_size == 0
+        # Позначка «не завершено» — ДО першого рядка (`base.crawl_complete`).
+        mark_crawl(cat, complete=False)
         with cat.open("w" if new_file else "a", encoding="utf-8", newline="") as fh:
             w = csv.DictWriter(fh, fieldnames=self.CATALOG_FIELDS, delimiter="\t",
                                extrasaction="ignore")
@@ -761,6 +766,9 @@ class BabynYarSource:
                     on_progress(done=i, total=len(plan), unit="опис",
                                 note=f"справ зібрано {stats['cases']}{tail}")
         stats["short"] = len(short)
+        # Завершено — лише весь майданчик, а не названі архіви (`groups`).
+        if not want:
+            mark_crawl(cat, complete=True)
         return stats
 
     def _read_state(self) -> dict[str, Any]:
