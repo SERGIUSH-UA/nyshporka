@@ -108,3 +108,27 @@ def test_kod_os_bez_shliakhu() -> None:
     got = _kod_os(exc)
     assert got.startswith("PermissionError errno=13")
     assert "imia" not in got and "paket" not in got
+
+
+def test_teka_bez_kadriv_za_shliakhom_biblioteky(tmp_path: Path,
+                                                  monkeypatch: pytest.MonkeyPatch) -> None:
+    """Тека з іменем не за домовленістю (`agad_4/1-183`): кадри знято - паспорт
+    і знаменник беруться за шляхом бібліотеки, а не губляться."""
+    from nyshporka.share.publish import _znamennyk_z_pasporta
+
+    d = tmp_path / "data" / "raw" / "agad_4" / "1-183"
+    d.mkdir(parents=True)
+    (d / "_source.json").write_text(json.dumps({"opys": "1", "frames_got": 514}),
+                                    encoding="utf-8")
+    rows = [{"key": "AGAD/4/1/183", "repo": "AGAD", "fond": "4", "opys": "1",
+             "spr": "183", "path": "data/raw/agad_4/1-183", "frames": 0}]
+    import nyshporka.core.workspace as ws
+    import nyshporka.library as lib
+    monkeypatch.setattr(ws, "workspace", lambda: SimpleNamespace(
+        root=tmp_path, case_roots=lambda: [tmp_path / "data" / "raw"]))
+    monkeypatch.setattr(lib, "load_library", lambda: rows)
+
+    assert align.case_dir_for("AGAD/4/1/183") is None, "кадрів немає"
+    assert align.case_home_for("AGAD/4/1/183") == d
+    assert align.case_home_for("AGAD/4/2/183") is None, "чужий опис"
+    assert _znamennyk_z_pasporta({"total": 0, "listed": 0}, d)["total"] == 514

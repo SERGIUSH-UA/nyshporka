@@ -73,3 +73,37 @@ def test_odne_pravylo_dlia_link_i_pasporta() -> None:
         "url": "https://www.familysearch.org/search/film/004123456"}
     assert _ref_z_adresy("https://archium.dahmo.gov.ua/file-viewer/51068/")["ref"] == "file:51068"  # type: ignore[index]
     assert _ref_z_adresy("https://example.org/scan.pdf") is None
+
+
+AGAD_DIR = "http://agadd2.home.net.pl/metrykalia/MK/0183/dirindex.html"
+
+
+def test_agad_kadr_i_perelik_dayut_odnu_knygu() -> None:
+    """Сервер сканів AGAD: тека, перелік і кадр книги - та сама зйомка `mk:183`."""
+    want = {"source": "agad", "ref": "mk:183", "url": AGAD_DIR}
+    assert _ref_z_adresy(AGAD_DIR) == want
+    assert _ref_z_adresy("http://agadd2.home.net.pl/metrykalia/MK/0183/") == want
+    assert _ref_z_adresy(
+        "http://agadd2.home.net.pl/metrykalia/MK/0183/PL_1_4_1-183_0258.jpg") == want
+    assert _refs_from_links([{"url": AGAD_DIR, "role": "scans"}]) == [want]
+
+
+def test_agad_chuzhyi_khost_i_bez_knygy() -> None:
+    assert _ref_z_adresy("http://agadd2.home.net.pl/metrykalia/MK/") is None
+    assert _ref_z_adresy("http://agadd2.home.net.pl/metrykalia/MK/0000/") is None
+    assert _ref_z_adresy("https://agad.gov.pl/metrykalia/MK/0183/") is None
+
+
+def test_agad_z_pasporta_fetched_url(tmp_path: Path) -> None:
+    """Паспорт завантаження книги MK: адреса сервера в `fetched_url`."""
+    _json(tmp_path / "_source.json", {"fetched_url": AGAD_DIR, "frames_got": 514})
+    assert _refs_from_sidecar(tmp_path) == [
+        {"source": "agad", "ref": "mk:183", "url": AGAD_DIR}]
+
+
+def test_agad_ref_nazad() -> None:
+    from nyshporka.core import agad
+
+    assert agad.from_ref("mk:183") == agad.Book(183)
+    assert agad.from_ref("agad:mk:183").url == AGAD_DIR  # type: ignore[union-attr]
+    assert agad.from_ref("mk:0") is None and agad.from_ref("file:183") is None

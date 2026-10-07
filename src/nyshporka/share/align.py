@@ -450,6 +450,9 @@ def case_home_for(case_key: str, opys: str = "") -> Path | None:
         return None
     repo, fond, opys_key, spr = parts
     want = _norm_spr(opys_key or opys.strip())
+    got = _library_home(key, want)
+    if got is not None:
+        return got
     try:
         from nyshporka.core.workspace import workspace
         from nyshporka.fonds import registry as F
@@ -467,6 +470,42 @@ def case_home_for(case_key: str, opys: str = "") -> Path | None:
         if want and have and have != want:
             continue
         return d
+    return None
+
+
+def _library_home(key: str, want_opys: str) -> Path | None:
+    """Тека справи за шляхом бібліотеки — коли кадрів у ній уже немає.
+
+    🔴 Бібліотека знає шлях справи й тоді, коли кадри знято: тека з паспортом
+    лишається. Без цього кроку тека з іменем не за домовленістю
+    (`agad_4/1-183` замість `op1-spr-183`) губилась, щойно кадри знімали, і
+    пакет переставав збиратися: «числа кадрів немає ніде», хоча паспорт його
+    знає (07.10.2026, MK 180–189).
+    """
+    from nyshporka.cases.register import read_sidecar
+    from nyshporka.library import _norm_spr
+
+    try:
+        from nyshporka.core.workspace import workspace
+        from nyshporka.library import load_library
+
+        root = workspace().root
+        rows = load_library()
+    except Exception:
+        return None
+    for row in rows:
+        if not _row_matches(row, key):
+            continue
+        have = _norm_spr(str(row.get("opys") or ""))
+        if want_opys and have and have != want_opys:
+            continue
+        for rel in [row.get("path"), *(row.get("extra_paths") or [])]:
+            if not rel:
+                continue
+            p = Path(rel)
+            p = p if p.is_absolute() else root / p
+            if p.is_dir() and read_sidecar(p):
+                return p
     return None
 
 

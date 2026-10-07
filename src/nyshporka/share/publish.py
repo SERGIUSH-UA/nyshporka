@@ -340,6 +340,12 @@ def _ref_z_adresy(url: str) -> dict[str, str] | None:
     sz_unit = szukaj.from_url(url)
     if sz_unit is not None:
         return {"source": szukaj.SOURCE, "ref": sz_unit.ref, "url": sz_unit.url}
+    # Сервер сканів AGAD: зйомка — книга Метрики Коронної (`mk:183`).
+    from nyshporka.core import agad
+
+    book = agad.from_url(url)
+    if book is not None:
+        return {"source": agad.SOURCE, "ref": book.ref, "url": book.url}
     return None
 
 
