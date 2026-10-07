@@ -454,7 +454,11 @@ def get(source: str = typer.Argument(..., help="id джерела"),
                                 help="навіщо ця справа — лягає в паспорт теки"),
         whole: bool = typer.Option(False, "--whole",
                                    help="не різати розвороти на сторінки (джерела, що "
-                                        "ріжуть розвороти по згину: skanoteka)")) -> None:
+                                        "ріжуть розвороти по згину: skanoteka, szukaj)"),
+        from_zip: Path | None = typer.Option(None, "--from-zip",
+                                             help="розкласти архів, уже скачаний у "
+                                                  "браузері, замість мережі (szukaj: "
+                                                  "«Pobierz (xml)»)")) -> None:
     """Завантажити справу або плівку.
 
     Спершу друкується маніфест і лише потім починається качання: справа буває
@@ -481,6 +485,15 @@ def get(source: str = typer.Argument(..., help="id джерела"),
         console.print(f"[err]--whole: джерело «{src.id}» розворотів не ріже — "
                       f"кадри й так лягають цілими[/err]")
         raise typer.Exit(code=2)
+    # Так само з архівом: джерело, що не вміє його розкласти, мовчки пішло б у
+    # мережу — і людина вважала б, що кадри взято з її файла.
+    zipped = "from_zip" in inspect.signature(src.fetch).parameters
+    if from_zip is not None and not zipped:
+        console.print(f"[err]--from-zip: джерело «{src.id}» архівів не розкладає[/err]")
+        raise typer.Exit(code=2)
+    if from_zip is not None and not from_zip.is_file():
+        console.print(f"[err]--from-zip: файла немає — {from_zip}[/err]")
+        raise typer.Exit(code=2)
     rng: tuple[int, int] | None = None
     if frames:
         try:
@@ -490,7 +503,8 @@ def get(source: str = typer.Argument(..., help="id джерела"),
             console.print("[err]--frames очікує «12-80»[/err]")
             raise typer.Exit(code=2) from None
     try:
-        man = src.manifest(ref)
+        man = (src.manifest(ref, from_zip=from_zip) if from_zip is not None  # type: ignore[call-arg]
+               else src.manifest(ref))
     except SourceError as exc:
         console.print(f"[err]{exc}[/err]")
         raise typer.Exit(code=1) from None
@@ -512,6 +526,8 @@ def get(source: str = typer.Argument(..., help="id джерела"),
 
     try:
         kw: dict[str, Any] = {"split": False} if whole else {}
+        if from_zip is not None:
+            kw["from_zip"] = from_zip
         res = src.fetch(ref, out, frames=rng, on_progress=progress, **kw)
     except SourceError as exc:
         # Та сама відмова, що й на маніфесті: джерело може відмовити й посеред

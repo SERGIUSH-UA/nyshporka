@@ -59,6 +59,7 @@ def _builtin(workspace: Path | None = None) -> list[Source]:
     from nyshporka.sources.martyrolog import MartyrologSource
     from nyshporka.sources.ridni import RidniSource
     from nyshporka.sources.skanoteka import SkanotekaSource
+    from nyshporka.sources.szukaj import SzukajSource
     from nyshporka.sources.volok import VolokSource
 
     out: list[Source] = [LocalSource()]
@@ -107,6 +108,10 @@ def _builtin(workspace: Path | None = None) -> list[Source]:
     # Кадр — розворот, тож джерело ріже його по згину й пише карту сканів: без
     # неї сторінку декоду не повернути до номера скана в джерелі.
     out.append(cast("Source", SkanotekaSource(workspace)))
+    # 🇵🇱 Szukaj w Archiwach: портал державних архівів Польщі (гродські книги
+    # Холмщини, Перемишль, Люблін). З українських IP закритий — тому кеш
+    # маніфесту в просторі й розклад zip, скачаного в браузері.
+    out.append(cast("Source", SzukajSource(workspace)))
     # 🕯 «Український мартиролог ХХ ст.» (ДАС): іменна база репресованих
     # 1920–1950-х із шифрою архівно-слідчої справи. База ОСІБ, тож загальний
     # пошук по каталогах її не питає — лише `--source martyrolog`.

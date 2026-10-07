@@ -171,21 +171,25 @@ def _passport_dirs(case_dir: Path) -> list[Path]:
 
 
 def _skanoteka_boxes(case_dir: Path) -> dict[str, list[int]]:
-    from nyshporka.core import skanoteka
+    from nyshporka.core import skanoteka, szukaj
 
     for d in _passport_dirs(Path(case_dir)):
-        got = skanoteka.page_boxes(d)
+        got = skanoteka.page_boxes(d) or szukaj.page_boxes(d)
         if got:
             return got
     return {}
 
 
 def _skanoteka_map(case_dir: Path) -> dict[str, tuple[str, str]]:
-    """Карта «сторінка → скан, бік» Сканотеки поруч із кадрами або при паспорті."""
-    from nyshporka.core import skanoteka
+    """Карта «сторінка → скан, бік» поруч із кадрами або при паспорті.
+
+    Дві карти однієї форми: Сканотеки (`_skanoteka.json`) і Szukaj w Archiwach
+    (`_szukaj.json`) — обидва джерела ріжуть розвороти тим самим детектором.
+    """
+    from nyshporka.core import skanoteka, szukaj
 
     for d in _passport_dirs(Path(case_dir)):
-        got = skanoteka.read_map(d)
+        got = skanoteka.read_map(d) or szukaj.read_map(d)
         if got:
             return got
     return {}

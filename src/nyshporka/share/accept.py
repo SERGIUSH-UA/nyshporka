@@ -813,9 +813,9 @@ def _page_src(m: Manifest, frames: list[dict[str, Any]],
     Лише для таких: в інших джерел id кадру вже є в імені файла чи в нашому
     переліку кадрів, і мета на 2000 сторінок розрослась би без потреби.
     """
-    from nyshporka.core import skanoteka
+    from nyshporka.core import skanoteka, szukaj
 
-    if not any(isinstance(r, dict) and r.get("source") == skanoteka.SOURCE
+    if not any(isinstance(r, dict) and r.get("source") in (skanoteka.SOURCE, szukaj.SOURCE)
                for r in m.refs or []):
         return {}
     out: dict[str, str] = {}
