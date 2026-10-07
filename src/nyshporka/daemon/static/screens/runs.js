@@ -177,6 +177,19 @@ function runsGroup(runs) {
  * 1764 стояв «не дочитано», бо раннер не дописав фінал. Приймач повноти — диск,
  * а не самозвіт (так само рахує `htr.run.completeness`).
  */
+/**
+ * Стан прогону словом: готово · читається зараз · не дочитано.
+ *
+ * 🔴 Стан рахує сервер (`htr_store.mark_run_states`): «читається» — лише
+ * коли прогін є в реєстрі живих читань. Доти недочитаний прогін скрізь стояв
+ * під «◐», значком поступу, — і спинений годину тому виглядав як той, що йде.
+ */
+export function runState(r) {
+  if (runDone(r)) return `<span class="run-state">✅ ${t('runs.st.done')}</span>`;
+  if (r.state === 'reading') return `<span class="run-state">▶ ${t('runs.st.reading')}</span>`;
+  return `<span class="run-state" title="${esc(t('runs.st.going.why'))}">⏸ ${t('runs.st.going')}</span>`;
+}
+
 function runDone(r) {
   const n = Number(r.frames || 0);
   return Boolean(r.done || (n && Number(r.pages_done || 0) >= n));
@@ -189,9 +202,7 @@ function runsRow(r) {
   const ids = r.engine_ids && r.engine_ids.length
     ? r.engine_ids : [r.engine_id].filter(Boolean);
   const badges = ids.map((x) => eng(x, false, LANG)).join('');
-  const state = runDone(r)
-    ? `<span class="run-state">✅ ${t('runs.st.done')}</span>`
-    : `<span class="run-state">◐ ${t('runs.st.going')}</span>`;
+  const state = runState(r);
   // 🔴 Відсоток лише зі справжнім знаменником. Немає кадрів справи — друкуємо
   // самі сторінки: покриття, порахане від себе самого, завжди дорівнює 100%
   // і читається як «прочитано все».
@@ -209,7 +220,7 @@ function runsRow(r) {
     <td class="num">${esc(r.pages_done || 0)}${n ? ` / ${esc(n)}` : ''} ${fail}</td>
     ${cov}
     <td class="mono dim">${esc((r.updated || '').slice(0, 10))}</td>
-    <td class="acts">${!runDone(r) && r.case_dir ? `<button class="ctl-sm" data-act="runs.resume"
+    <td class="acts">${!runDone(r) && r.state !== 'reading' && r.case_dir ? `<button class="ctl-sm" data-act="runs.resume"
       data-arg="${esc(r.case_dir)}" title="${esc(t('runs.resume.why'))}">${ic('quill', 'ic-o ic-sm')}
       ${t('runs.resume')}</button>` : ''}<button class="ctl-sm" data-act="runs.open" data-arg="${esc(r.name)}"
       title="${esc(t('runs.open'))}">${ic('page', 'ic-o ic-sm')}</button></td>

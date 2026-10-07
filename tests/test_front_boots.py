@@ -301,8 +301,12 @@ globalThis.fetch = async (url, opts) => {
       reading: { ok: true, runs: 6, pages: 600, orphans: 1, sec_median: 12.5,
                  by_engine: [{ code: 'pysar', n: 5 }],
                  by_model: [{ code: 'pysar_cyr_v17.pt', n: 5 }],
-                 last: [{ name: 'прогін', shifra: 'А 1-1-2', pages: 3,
-                          model: 'pysar_cyr_v17.pt', updated: '2026-08-25T10:00:00' }] },
+                 last: [{ name: 'прогін', shifra: 'А 1-1-2', pages: 3, frames: 11,
+                          state: 'stopped', case_dir: 'data/raw/a',
+                          model: 'pysar_cyr_v17.pt', updated: '2026-08-25T10:00:00' },
+                        { name: 'прогін2', shifra: 'А 1-1-3', pages: 9, frames: 9,
+                          state: 'done', model: 'pysar_cyr_v17.pt',
+                          updated: '2026-08-25T09:00:00' }] },
       search: { ok: true, runs: 6, indexed: 5, stale: 1 },
       eye: { built: true, pages: 40, pages_full: 9, files: 3, records: 11,
              by_status: { full: 9, partial: 31 }, cases: 3, in_registry: 38,
@@ -525,6 +529,9 @@ out.homeFullTiles = full.includes('class="tile"');
 out.homeFullChart = full.includes('ch-steps') || full.includes('ch-bars');
 out.homeFullCanon = full.includes('Факти за типом');
 out.homeFullDoors = full.includes('data-act="home.scans"');
+// Спинений прогін названо станом і дано «Дочитати»; дочитаний — «готово».
+out.homeRunStopped = full.includes('не дочитано')
+  && /data-act="runs.resume" data-arg="data\/raw\/a"/.test(full) && full.includes('готово');
 globalThis.__XSS = true;
 const xss = await drawHome();
 globalThis.__XSS = false;
@@ -806,6 +813,20 @@ globalThis.__CASE_INFO = null;
   lateApi.setItems(['ЦДІАК ф.224 · 114 справ']);
   out.comboLateItemsOpen = hiddenFirst && latePop.hidden === false;
   document.activeElement = null;
+}
+
+// ── написання роду ховаються під чужим запитом ──
+{
+  await SCREENS.search();
+  await new Promise((r) => setTimeout(r, 40));
+  const qIn = document.getElementById('view').querySelector('input[name="q"]');
+  const hint = document.getElementById('prof-hint');
+  qIn.value = 'Вишневецький';
+  qIn.fire('input', {});
+  const shownForFamily = hint.hidden === false;
+  qIn.value = 'Ярошинський';
+  qIn.fire('input', {});
+  out.formsHiddenForOthers = shownForFamily && hint.hidden === true;
 }
 
 console.log('@@' + JSON.stringify(out));
@@ -1155,6 +1176,16 @@ def test_a_free_field_does_not_cover_the_form_with_an_empty_list(probe) -> None:
     assert probe.get("comboStrictSaysNothing"), "поле-перелік перестало казати «нічого»"
     assert probe.get("comboLateItemsOpen"), (
         "підказки з сервера прийшли, а список, що сховався, так і не відкрився")
+
+
+def test_overview_names_a_stopped_run(probe) -> None:
+    """🔴 Холодний прохід 07.10.2026: «Останні прогони» — спинений без позначки."""
+    assert probe.get("homeRunStopped"), "спинений прогін на «Огляді» без стану й «Дочитати»"
+
+
+def test_family_spellings_hide_under_someone_elses_query(probe) -> None:
+    """🔴 Під «Ярошинським» блок «Написання з профілю (45)» підказував чужі слова."""
+    assert probe.get("formsHiddenForOthers"), "написання роду видно під чужим запитом"
 
 
 def test_live_fallback_is_not_called_blind(probe) -> None:

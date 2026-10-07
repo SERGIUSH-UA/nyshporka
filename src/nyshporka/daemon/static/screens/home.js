@@ -28,6 +28,7 @@ import { ic, eng } from '/ui/icons.js';
 import { swapHtml, skelRows, skelCards } from '/ui/dom.js';
 import { attachCombobox } from '/ui/combobox.js';
 import { spark, bars as rawBars, meter, steps, histogram, num } from '/ui/chart.js';
+import { runState } from './runs.js';
 
 
 /**
@@ -435,7 +436,9 @@ function readingSection(d) {
     ? `<div><h4>${t('dash.reading.last')}</h4><table><tbody>${
       r.last.map((x) => `<tr>
         <td class="mono">${esc(x.shifra || x.name || '')}</td>
-        <td>${num(x.pages)}</td>
+        <td>${num(x.pages)}${x.frames ? ` <span class="muted">${t('dash.reading.of')} ${num(x.frames)}</span>` : ''}</td>
+        <td>${runState({ ...x, pages_done: x.pages })}${x.state === 'stopped' && x.case_dir
+    ? ` <button class="ctl-sm" data-act="runs.resume" data-arg="${esc(x.case_dir)}">${t('runs.resume')}</button>` : ''}</td>
         <td class="mono muted">${esc(x.model || '')}</td>
         <td class="muted">${esc(when(x.updated))}</td></tr>`).join('')
     }</tbody></table></div>`

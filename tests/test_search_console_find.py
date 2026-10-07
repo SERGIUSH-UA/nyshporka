@@ -103,3 +103,52 @@ def test_search_lives_in_core_with_its_ops() -> None:
     from nyshporka.daemon.workers import STOPPABLE_OPS
 
     assert "search.find" in STOPPABLE_OPS
+
+
+# ── «Зібрати індекс»: той індекс, яким пошук справді шукає ──────────────────
+
+def test_state_reports_the_store_when_search_uses_it(monkeypatch: pytest.MonkeyPatch) -> None:
+    """🔴 Екран писав «поза пошуком 4 745 із 4 832» за старим індексом, а пошук
+    ішов через стор, де свіжі 4 830 (холодний прохід 07.10.2026)."""
+    from nyshporka.ops_builtin import search_state
+    from nyshporka.search import decode as D
+    from nyshporka.search import store as ST
+
+    monkeypatch.setattr(ST, "exists", lambda: True)
+    monkeypatch.setattr(ST, "stats", lambda: {"runs": 10, "indexed": 9, "stale": 1, "bytes": 1})
+    monkeypatch.setattr(D, "stats", lambda: {"runs": 10, "indexed": 0, "stale": 10, "bytes": 1})
+    d = search_state(None).data  # type: ignore[arg-type]
+    assert d["backend"] == "store" and d["stale"] == 1
+
+
+def test_state_falls_back_to_the_old_index_without_a_store(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    from nyshporka.ops_builtin import search_state
+    from nyshporka.search import decode as D
+    from nyshporka.search import store as ST
+
+    monkeypatch.setattr(ST, "exists", lambda: False)
+    monkeypatch.setattr(D, "stats", lambda: {"runs": 10, "indexed": 4, "stale": 6, "bytes": 1})
+    d = search_state(None).data  # type: ignore[arg-type]
+    assert d["backend"] == "decode" and d["stale"] == 6
+
+
+def test_index_button_builds_only_the_missing_store_runs(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Лише відсутні прогони — без перебудови правил усього корпусу (години)."""
+    from nyshporka import htr_store as S
+    from nyshporka.ops_builtin import IndexArgs, search_index
+    from nyshporka.search import store as ST
+
+    seen: dict[str, Any] = {}
+
+    def fake_ensure(runs: list[str], **kw: Any) -> Any:
+        seen.update(kw, runs=runs)
+        return iter(["r2"])
+
+    monkeypatch.setattr(S, "list_cases", lambda: [{"name": "r1"}, {"name": "r2"}])
+    monkeypatch.setattr(ST, "exists", lambda: True)
+    monkeypatch.setattr(ST, "ensure_all", fake_ensure)
+    monkeypatch.setattr(ST, "stats", lambda: {"runs": 2, "indexed": 2, "stale": 0, "bytes": 1})
+    env = search_index(IndexArgs())
+    assert env.ok and env.data["built"] == 1 and env.data["backend"] == "store"
+    assert seen["runs"] == ["r1", "r2"] and not seen.get("force") and "reset_rules" not in seen

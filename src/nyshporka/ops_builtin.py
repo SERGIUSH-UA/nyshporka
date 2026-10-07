@@ -418,11 +418,25 @@ def _pulse_reading(env: Envelope,
         "by_engine": _tally(by_engine),
         "by_model": _tally(by_model),
         "sec_median": round(sorted(speeds)[len(speeds) // 2], 2) if speeds else None,
-        "last": [{"name": r.get("name"), "shifra": r.get("shifra"),
-                  "case_key": r.get("case_key"), "pages": r.get("pages_done"),
-                  "model": r.get("model"), "updated": r.get("updated")}
-                 for r in runs[:5]],
+        "last": _last_runs(runs[:5]),
     }
+
+
+def _last_runs(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Останні прогони для «Огляду» — зі станом і знаменником.
+
+    🔴 Без стану спинений прогін на «Огляді» виглядав так само, як дочитаний:
+    шифра, сторінки, модель, час (холодний прохід 07.10.2026).
+    """
+    from nyshporka import htr_store
+
+    last = [dict(r) for r in rows]
+    htr_store.mark_run_states(last)
+    return [{"name": r.get("name"), "shifra": r.get("shifra"),
+             "case_key": r.get("case_key"), "case_dir": r.get("case_dir"),
+             "pages": r.get("pages_done"), "frames": r.get("frames"),
+             "state": r.get("state"), "model": r.get("model"),
+             "updated": r.get("updated")} for r in last]
 
 
 def _pulse_search(runs: list[str] | None = None) -> dict[str, Any]:
@@ -1743,9 +1757,18 @@ def search_state(_: NoArgs) -> Envelope:
     вже застереження, тобто після того, як людина зачекала й повірила нулю.
     """
     from nyshporka.search import decode as D
+    from nyshporka.search import store as ST
 
+    # 🔴 Звітувати про той індекс, яким пошук СПРАВДІ користується. Доти тут
+    # рахувався старий погонний індекс (`decode_index`), а пошук давно йшов
+    # через текстовий стор: екран писав «поза пошуком 4 745 прогонів із 4 832»
+    # (холодний прохід 07.10.2026: «індекс 2 % прогонів») при свіжих 4 830 у
+    # сторі — і пропонував годинами збирати індекс, яким пошук не користується.
     try:
-        st = D.stats()
+        if ST.exists():
+            st = {**ST.stats(), "backend": "store"}
+        else:
+            st = {**D.stats(), "backend": "decode"}
     except Exception as exc:
         return fail(f"стан індексу недоступний ({type(exc).__name__}: {exc})")
     env = ok(st)
@@ -1776,8 +1799,26 @@ def search_index(a: IndexArgs) -> Envelope:
     """
     from nyshporka import htr_store
     from nyshporka.search import decode as D
+    from nyshporka.search import store as ST
 
     runs = [c["name"] for c in htr_store.list_cases()]
+    # 🔴 Збирається текстовий стор — той, яким шукає `text.find` (і агент, і
+    # консоль). Лише прогони, яких у ньому бракує: перебудова правил склейки
+    # для всього корпусу — години, і це рішення агента (`nysh text index
+    # --rebuild`), а не кнопки.
+    if ST.exists() or not D.stats()["indexed"]:
+        built = sum(1 for _ in ST.ensure_all(runs, force=a.rebuild))
+        st = {**ST.stats(), "backend": "store"}
+        env = ok({"built": built, **st})
+        if st["stale"]:
+            env.warn("some_not_indexed",
+                     f"{st['stale']} прогонів лишились поза пошуком — найчастіше "
+                     f"це теки без жодного `.txt`")
+        if ST.LOCKED_SKIPPED:
+            env.warn("locked_skipped",
+                     f"{len(ST.LOCKED_SKIPPED)} прогонів пропущено: індекс зайнятий "
+                     f"іншою роботою — спробуйте пізніше")
+        return env
     if a.rebuild:
         for r in runs:
             try:
@@ -2462,6 +2503,9 @@ def runs_list(a: RunsArgs) -> Envelope:
     if size:
         start = a.page * size
         runs = runs[start:start + size]
+    # Стан — лише показаним: реєстр живих читань питається раз на сторінку.
+    runs = [dict(r) for r in runs]
+    htr_store.mark_run_states(runs)
     env = ok({"runs": runs, "shown": len(runs), "total": total,
               "everything": everything, "orphans": orphans,
               "page": a.page, "page_size": size,

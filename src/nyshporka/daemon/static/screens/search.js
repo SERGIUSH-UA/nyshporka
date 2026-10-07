@@ -169,6 +169,16 @@ async function profileHint() {
     <div class="prof-forms">${sp.map((x) =>
       `<button class="chip" data-act="search.form" data-arg="${esc(x)}"
         >${esc(x)}</button>`).join('')}</div></details>`;
+  // 🔴 Написання роду — лише поки шукають рід. Під «Ярошинським» чи назвою
+  // села цей блок підказував чужі слова й читався як «шукаю ще й ці»
+  // (холодний прохід 07.10.2026).
+  const own = new Set([d.display || '', ...sp].map((x) => x.toLocaleLowerCase('uk')));
+  const sync = () => {
+    const q = String((input && input.value) || '').trim().toLocaleLowerCase('uk');
+    box.hidden = Boolean(q) && !own.has(q);
+  };
+  sync();
+  if (input && input.addEventListener) input.addEventListener('input', sync);
 }
 
 /**
@@ -191,6 +201,36 @@ async function searchIndexState() {
        <button data-act="search.index">${t('search.index.go')}</button></div>`
     : `<p class="muted">${esc(t('search.index.ready')
         .replace('{all}', d.runs).replace('{mb}', mb.toFixed(0)))}</p>`;
+}
+
+/**
+ * Хід збирання індексу — з оцінкою, скільки лишилось.
+ *
+ * 🔴 Оцінка — з РЕАЛЬНОГО темпу цієї роботи, а не з константи: швидкість
+ * залежить від машини, диска й розміру прогонів, і вигадане «≈ 20 хв» було б
+ * тією самою відповіддю без знаменника. Поки темп не видно (перші кілька
+ * прогонів), так і сказано.
+ */
+function indexChip(j, pace) {
+  if (FINAL_STATES.includes(j.state)) return jobChip(j);
+  const p = j.progress || {};
+  const now = Date.now() / 1000;
+  if (p.i && pace.t === undefined) { pace.t = now; pace.i = p.i; }
+  let eta = t('search.index.eta.wait');
+  if (pace.t !== undefined && p.n && p.i - pace.i >= 3) {
+    const left = ((now - pace.t) / (p.i - pace.i)) * (p.n - p.i);
+    eta = t('search.index.eta').replace('{t}', spanOf(left));
+  }
+  return `<p class="muted">${jobChip(j)} ${p.n ? `${esc(p.i)} / ${esc(p.n)} · ` : ''}${esc(eta)}</p>`;
+}
+
+/** Тривалість словами: «40 с», «12 хв», «2 год 15 хв». */
+function spanOf(sec) {
+  const s = Math.max(0, Math.round(sec));
+  if (s < 90) return `${s} ${t('time.sec')}`;
+  const m = Math.round(s / 60);
+  if (m < 90) return `${m} ${t('time.min')}`;
+  return `${Math.floor(m / 60)} ${t('time.hour')} ${m % 60} ${t('time.min')}`;
 }
 
 /** Пошуки цього екрана: нова команда й ще не забрані старі. */
@@ -473,9 +513,10 @@ Object.assign(ACTIONS, {
     }
     const id = (env.data || {}).job_id;
     if (box) {
-      box.innerHTML = jobChip({ state: 'queued', progress: {} });
+      const pace = {};
+      box.innerHTML = indexChip({ state: 'queued', progress: {} }, pace);
       onJob(id, (j) => {
-        box.innerHTML = jobChip(j);
+        box.innerHTML = indexChip(j, pace);
         if (j.state === 'done') show('search');
       });
     }

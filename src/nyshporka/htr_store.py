@@ -613,6 +613,38 @@ def one_listing() -> Iterator[None]:
         _LISTING.reset(tok)
 
 
+#: Стан прогону для людини: дочитано · читається зараз · не дочитано.
+RUN_DONE, RUN_READING, RUN_STOPPED = "done", "reading", "stopped"
+
+
+def mark_run_states(rows: list[dict[str, Any]]) -> None:
+    """Поставити кожному прогону стан (`state`) — один раз на перелік.
+
+    🔴 Доти екрани знали лише «дочитано чи ні», і недочитаний прогін скрізь
+    звучав як «◐ триває» — зокрема той, що його спинили годину тому
+    (холодний прохід 07.10.2026: «Останні прогони» на «Огляді» без позначки
+    «спинено»). «Читається» тепер — лише коли прогін є в реєстрі живих
+    читань (`htr.runs`): той бачить і консоль, і термінал, і чергу справ.
+
+    ⚠ «Спинили» від «обірвалось» дані не відрізняють — обидва лишають
+    недочитаний прогін без живого процесу. Тому стан один, `stopped`, а
+    екран каже «не дочитано» й радить «Дочитати».
+    """
+    live: set[str] = set()
+    with contextlib.suppress(Exception):
+        from nyshporka.htr import runs as LIVE
+
+        live = {r.case for r in LIVE.alive() if r.case}
+    for r in rows:
+        n = int(r.get("frames") or 0)
+        done = bool(r.get("done")) or (n > 0 and int(r.get("pages_done") or 0) >= n)
+        if done:
+            r["state"] = RUN_DONE
+            continue
+        case = Path(str(r.get("case_dir") or "")).name
+        r["state"] = RUN_READING if case and case in live else RUN_STOPPED
+
+
 def list_cases() -> list[dict[str, Any]]:
     """Прогони з reports/htr/* — для списку в'ювера. Назва справи — з бібліотеки."""
     global _RUNS_CACHE
