@@ -1027,7 +1027,7 @@ def absorb(st: ST.RunState, data: dict[str, Any]) -> ST.RunState:
     raw_budget = data.get("budget")
     budget: dict[str, Any] = raw_budget if isinstance(raw_budget, dict) else {}
     spent = M.as_number(budget.get("spent_usd"))
-    # 🔴 Часи оренди — з наглядача (gpuhire ≥ 0.6.5 віддає `budget.rent_started`
+    # 🔴 Часи оренди — з наглядача (gpuhire ≥ 0.7 віддає `budget.rent_started`
     # і `rent_ended`, UTC). Доти тут стояли мить відчеплення й мить забору, а
     # без `spent_usd` — нулі: тривалість оренди з запису справи не читалась.
     started_at = _epoch(budget.get("rent_started"))
