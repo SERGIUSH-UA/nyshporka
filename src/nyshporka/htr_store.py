@@ -1250,6 +1250,17 @@ def _series_head(want: str) -> tuple[str, list[str]]:
     return repo, m.group(1).replace("/", "-").split("-")
 
 
+def series_form_ok(want: str, head: str) -> bool:
+    """Чи прочитає пошук `want` як серію `head` («фонд» чи «фонд-опис») з архівом.
+
+    Розбір серії бере лише числовий хвіст шифри, тож «ДАВіО R-6129-24» він
+    читає як «6129-24» без архіву, а «MNK 90» — з архівом, якого пак не знає.
+    Обидва дають відмову, хоча прочитане в них є.
+    """
+    repo, parts = _series_head(want)
+    return bool(repo) and "-".join(parts) == head.replace("/", "-")
+
+
 def _series_scope(want: str, series: list[dict[str, Any]],
                   keys: list[str]) -> dict[str, Any] | None:
     """Серія «архів + фонд + опис» проти реєстру опису: скільки справ там є і
@@ -2044,10 +2055,14 @@ def search(q: str, name: str | None = None, thresh: int = 78,
         # запит, і кожен свіп підтверджував би сам себе.
         before = TRACE.of(scope["key"])
         stale_before = TRACE.stale(scope["key"], models)
-        TRACE.note(scope["key"], q=q, thresh=thresh, hits=len(raw_hits),
-                   pages=unique_pages(rows), models=models,
-                   channels=["surname"] + (["anchor"] if anchors else [])
-                   + (["record"] if record else []))
+        # 🔴 Спинений свіп справу не прочесав: його нуль записався б як «шукали
+        # по всіх сторінках», затер би повний запис того самого запиту, і
+        # `coverage --unsearched` сховав би справу.
+        if not got.get("cancelled"):
+            TRACE.note(scope["key"], q=q, thresh=thresh, hits=len(raw_hits),
+                       pages=unique_pages(rows), models=models,
+                       channels=["surname"] + (["anchor"] if anchors else [])
+                       + (["record"] if record else []))
     # ⚓ Другий канал іде ОКРЕМИМ списком, а не домішується до першого. Прізвищний
     # нуль мусить лишитись прізвищним нулем: «не знайшлось прізвища, зате поруч
     # стоять наші імена» — це дві різні відповіді, і зливати їх означає втратити

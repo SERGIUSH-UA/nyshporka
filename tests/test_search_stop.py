@@ -108,6 +108,34 @@ def test_search_wires_progress_and_stop_into_the_store_sweep(monkeypatch) -> Non
     assert res.get("stopped") is True, "спинений свіп загубив свою позначку"
 
 
+@pytest.mark.parametrize("cancelled", [True, False])
+def test_a_stopped_case_search_leaves_no_searched_trace(monkeypatch, cancelled) -> None:
+    """🔴 Спинений свіп справу не прочесав. Його слід «0 знахідок по всіх
+    сторінках» затирав повний запис того самого запиту, і `coverage
+    --unsearched` ховав справу як шукану."""
+    from nyshporka import htr_store as S
+    from nyshporka.search import decode as D
+    from nyshporka.search import store as ST
+    from nyshporka.search import trace as TRACE
+
+    noted: list[str] = []
+    monkeypatch.setattr(S, "runs_for_scope", lambda _n: {
+        "rows": [{"name": "r1", "pages_done": 10, "frames": 10}], "kind": "case",
+        "key": "DAHMO/315/1/1", "shifra": "ДАХмО 315-1-1"})
+    monkeypatch.setattr(ST, "exists", lambda: True)
+    monkeypatch.setattr(ST, "stale_count", lambda *_a, **_k: 0)
+    monkeypatch.setattr(D, "is_fresh", lambda _r: True)
+    monkeypatch.setattr(ST, "sweep", lambda *_a, **_k: {
+        "hits": [], "scanned": 1, "runs": 1, "unindexed": 0, "backend": "store",
+        "cancelled": cancelled})
+    monkeypatch.setattr(TRACE, "of", lambda _k: [])
+    monkeypatch.setattr(TRACE, "stale", lambda _k, _m: [])
+    monkeypatch.setattr(TRACE, "note", lambda key, **_kw: noted.append(key))
+    S.search("Ярошинський", name="DAHMO/315/1/1", context=0, rank=False,
+             profile=False, given=False)
+    assert noted == ([] if cancelled else ["DAHMO/315/1/1"])
+
+
 # ── один перелік прогонів на пошук ───────────────────────────────────────────
 
 def test_one_listing_walks_the_runs_root_once(monkeypatch) -> None:
