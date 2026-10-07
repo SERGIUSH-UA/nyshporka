@@ -253,6 +253,53 @@ def bundles() -> dict[str, dict[str, Any]]:
     return dict(load_overrides().get("bundles") or {})
 
 
+def set_aside() -> dict[str, dict[str, Any]]:
+    """Теки, відкладені дослідником як «не справа»: шлях → `{why, at}`.
+
+    🔴 Книга, газета, корпус для навчання — матеріал, якому архівної шифри не
+    буде ніколи. Без цього рішення вони вічно стояли серед «нових тек» поруч
+    із тим, що справді чекає опису (холодний прохід 07.10.2026: ~120 випусків
+    однієї газети), і список переставав бути переліком справ до роботи.
+    Рішення людини, тож живе тут, поруч зі збірками й прив'язками прогонів, і
+    перебудова реєстру його не змиває. Шлях — тека або її батьківська тека:
+    відкладене ціле накриває й те, що в ньому з'явиться потім.
+    """
+    return dict(load_overrides().get("set_aside") or {})
+
+
+def aside_for(rel: str, aside: dict[str, Any]) -> tuple[str, str] | None:
+    """Чи відкладено теку `rel` (саму або під відкладеною) → (ключ, причина)."""
+    for p, v in aside.items():
+        base = str(p).rstrip("/")
+        if rel == base or rel.startswith(base + "/"):
+            why = str((v or {}).get("why") or "") if isinstance(v, dict) else ""
+            return base, why
+    return None
+
+
+def put_aside(paths: list[str], why: str = "", *, undo: bool = False) -> dict[str, Any]:
+    """Відкласти теки як «не справа» або повернути їх до нових тек."""
+    import datetime as _dt
+
+    data = dict(load_overrides())
+    aside = dict(data.get("set_aside") or {})
+    for p in paths:
+        key = str(p).rstrip("/")
+        if undo:
+            aside.pop(key, None)
+        else:
+            aside[key] = {"why": why, "at": _dt.date.today().isoformat()}
+    if aside:
+        data["set_aside"] = aside
+    else:
+        data.pop("set_aside", None)
+    write_json(OVERRIDES_PATH, data, indent=1)
+    load_overrides.cache_clear()
+    _run_overrides.cache_clear()
+    return {"paths": [str(p).rstrip("/") for p in paths], "undo": undo,
+            "path": str(OVERRIDES_PATH)}
+
+
 def bind_run(run: str, key: str, why: str = "") -> dict[str, Any]:
     """Прив'язати прогін до справи руками — і записати чому.
 

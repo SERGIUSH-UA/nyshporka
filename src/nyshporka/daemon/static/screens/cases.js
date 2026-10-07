@@ -4,7 +4,7 @@ import { t, LANG } from '../core/strings.js';
 import { TOKEN, callOp, SEQ } from '../core/net.js';
 import { esc, el, setView, busy, failure, boxError, busyForm,
   renderWarnings, renderCoverage, curGen, alive } from '../core/view.js';
-import { SCREENS, ACTIONS, PAGERS } from '../core/registry.js';
+import { SCREENS, ACTIONS } from '../core/registry.js';
 import { SECTIONS, NAV_LABEL, show, renderNav, goto,
   refreshJobs, onJob, jobChip } from '../core/nav.js';
 import { ST } from '../core/state.js';
@@ -12,7 +12,6 @@ import { ic, eng } from '/ui/icons.js';
 import { swapHtml, skelRows, skelCards } from '/ui/dom.js';
 import { attachCombobox } from '/ui/combobox.js';
 import { pathField } from '../core/paths.js';
-import { pager, step } from '/ui/pager.js';
 
 
 
@@ -26,97 +25,114 @@ import { pager, step } from '/ui/pager.js';
  */
 let EDIT = null;
 
-/** Сторінка приймальні. Переживає вихід з екрана — як фільтр бібліотеки. */
-let PAGE = 0;
-/** Скільки їх усього. Тримається тут, щоб «далі» не везла за край. */
-let PAGES = 1;
-
 /**
- * 📥 Приймальня — матеріал на диску, який ще нічим не є.
+ * 📥 Нові теки — матеріал на диску, якого Нишпорка ще не знає як справу.
  *
- * 🔴 Екран показує рівно те, чого немає в бібліотеці: теки без шифри
- * (`unfiled`) і збірки, всередині яких лежить багато справ (`bundle`). Доти він
- * віддавав ті самі рядки, що й бібліотека, лише без фільтрів і без сторінок —
- * тобто виглядав її гіршою копією, і питання «а чим вони відрізняються» не мало
- * відповіді, яку видно очима.
+ * 🔴 Екран звався «Приймальня», і навіщо він, не розумів навіть дослідник,
+ * що працює із застосунком від початку (07.10.2026). У даних було три
+ * причини: поруч із неописаними теками стояли збірки — уже описані групування
+ * з прогонами, з якими тут нема чого робити (звідси «дві однакові» теки й
+ * рядок «— —»); випуски однієї газети йшли сотнею рядків; а книгу чи корпус,
+ * яким шифри не буде ніколи, не було як прибрати.
  *
- * Межа проста й вона про ключ: у бібліотеки одиниця обліку — справа з шифрою
- * (`repo/fond/spr`), і саме на цьому ключі тримаються всі її знаменники. Тека
- * без шифри ключа не має, тож у бібліотеці її не було й не буде — але вона є на
- * диску, і поки її не описали, вона невидима для всього іншого.
+ * Тепер тут рівно одне питання — «що на диску ще не стало справою» — і три
+ * відповіді на нього: «Аркуші» (подивитись), «Описати» (дати шифру, і тека
+ * стає справою в бібліотеці), «Не справа» (книга, газета, опис фонду —
+ * відкласти, щоб не заважало; повертається одним натисканням).
+ *
+ * Групи — за першою текою під коренем справ, тобто за тим, звідки матеріал:
+ * «bov» — це 67 випусків однієї газети, а не 67 різних питань.
  */
 SCREENS.cases = async () => {
   const gen = curGen();
   busy();
-  const env = await callOp('cases.list',
-    { kind: 'unfiled,bundle', page: PAGE, page_size: 50 });
+  const env = await callOp('intake.list', {});
   if (!alive(gen)) return;
   if (!env.ok) return failure(env);
   const d = env.data;
-  const rows = d.cases || [];
   const c = d.counts || {};
-  PAGES = d.pages || 1;
+  const waiting = d.waiting || [];
   setView(`
     <h2>${t('nav.cases')}</h2>
-    <p class="muted">${t('intake.why')}
-      <button class="ctl-sm" data-act="cases.build"
-        title="${t('cases.build.why')}">${ic('refresh', 'ic-sm')} ${t('cases.build')}</button></p>
+    <p class="muted">${t('intake.why')}</p>
+    <div class="row">
+      <button type="button" data-act="intake.other">${ic('pencil-line', 'ic-sm')} ${t('intake.other')}</button>
+      <button type="button" class="ctl-sm" data-act="cases.build"
+        title="${t('cases.build.why')}">${ic('refresh', 'ic-sm')} ${t('cases.build')}</button>
+    </div>
     ${renderWarnings(env)}
     ${intakeCount(d, c)}
-    ${rows.length ? `<table><thead><tr>
-      <th></th><th>тека</th><th class="num">${t('common.frames')}</th><th></th>
-      </tr></thead><tbody>
-    ${rows.map((r) => `<tr>
-      <td title="${esc(t(`intake.kind.${r.kind}`))}">${ic(r.kind === 'bundle' ? 'archive-box' : 'page', 'ic-o ic-sm')}</td>
-      <td class="mono">${esc(r.path || r.key)}</td>
-      <td class="num">${intakeSize(r)}</td>
-      <td class="acts">${r.path
-        ? `<button class="ctl-sm" data-act="intake.frames" data-arg="${esc(r.path)}"
-             title="${t('lib.act.frames')}">${ic('image', 'ic-o ic-sm')}</button>
-           <button class="ctl-sm" data-act="case.edit" data-arg="${esc(r.path)}"
-             title="${t('intake.describe')}">${ic('pencil-line', 'ic-o ic-sm')}</button>`
-        : `<span class="muted" title="${t('cases.nodir')}">—</span>`}</td>
-    </tr>`).join('')}
-    </tbody></table>
-    ${pager(d)}`
-      : `<p><b>${t('intake.empty')}</b></p>`}`);
+    ${waiting.length
+    ? `<div class="intake">${waiting.map((g, i) => intakeGroup(g, `w${i}`)).join('')}</div>`
+    : `<p><b>${t('intake.empty')}</b></p>`}
+    ${asideBlock(d.aside || [])}`);
 };
 
-/**
- * Що в теці: кадри, а для збірки без кадрів — скільки в ній тек.
- *
- * «0 кадрів» на збірці читалось як «порожня», хоча в ній лежать десятки
- * фрагментів плівок; а на збірці, чиєї теки на диску немає, — як «порожня»,
- * хоча її просто нема.
- */
-function intakeSize(r) {
-  if (r.frames) return esc(r.frames);
-  if (r.missing) return `<span class="dim" title="${esc(t('intake.missing'))}">—</span>`;
-  if (r.subdirs) {
-    return `<span class="dim" title="${esc(t('intake.kind.bundle'))}">${esc(r.subdirs)} ${t('intake.subdirs')}</span>`;
-  }
-  return '0';
-}
-
-/**
- * 🔴 Знаменник обома боками межі.
- *
- * Приймальня без числа бібліотеки виглядає як увесь простір, і навпаки. Саме
- * тому тут стоїть і те, і те: «стільки неописаного, стільки описаного» — і
- * друге число водночас є кнопкою туди.
- */
+/** Знаменник обома боками: стільки чекає опису, стільки вже справ. */
 function intakeCount(d, c) {
-  const described = Number(c.case || 0);
-  const bits = [];
-  if (d.total !== null && d.total !== undefined) {
-    bits.push(`<b>${esc(d.total)}</b> ${t('intake.undescribed')}`);
-  }
-  if (Number(c.bundle || 0)) bits.push(`${esc(c.bundle)} ${t('intake.bundles')}`);
-  const lib = described
-    ? ` · <button data-act="nav" data-arg="library">${esc(described)}
+  if (!d.registry) return '';
+  const bits = [`<b>${esc(c.waiting || 0)}</b> ${t('intake.undescribed')}`];
+  if (c.waiting_frames) bits.push(`${esc(c.waiting_frames)} ${t('common.frames')}`);
+  const lib = Number(c.described || 0)
+    ? ` · <button data-act="nav" data-arg="library">${esc(c.described)}
         ${t('intake.described')} →</button>` : '';
   return `<p class="muted">${bits.join(' · ')}${lib}</p>`;
 }
+
+/**
+ * Група: рядок «звідки» з числами й діями, під ним — теки (згорнуто, якщо
+ * їх більше однієї). Група з однієї теки — це сама тека.
+ */
+function intakeGroup(g, id) {
+  const folders = g.folders || [];
+  const one = folders.length === 1 ? folders[0] : null;
+  const title = (one && one.title) || (folders.find((f) => f.title) || {}).title || '';
+  const head = `<div class="intake-h">
+    <span class="intake-n"><b>${esc(g.label || g.parent)}</b>
+      ${title ? `<span class="muted"> — ${esc(title)}</span>` : ''}
+      ${one && one.note ? `<span class="tag">${esc(one.note)}</span>` : ''}</span>
+    <span class="muted mono">${one ? '' : `${esc(folders.length)} ${t('intake.subdirs')} · `}${
+  esc(g.frames)} ${t('common.frames')}</span>
+    <span class="acts" id="ia-${id}">
+      ${one ? folderActs(one) : `<button class="ctl-sm" data-act="intake.toggle" data-arg="${id}">${
+        t('intake.show')}</button>`}
+      ${g.aside_key ? `<button class="ctl-sm" data-act="intake.aside.ask" data-arg="${id}"
+        data-path="${esc(g.aside_key)}" title="${esc(t('intake.aside.why'))}">${t('intake.aside')}</button>` : ''}
+    </span>
+  </div>`;
+  if (one) return `<div class="intake-g">${head}</div>`;
+  return `<div class="intake-g">${head}
+    <table id="ig-${id}" hidden><tbody>${folders.map((f) => `<tr>
+      <td class="mono">${esc(f.path.slice((g.parent || '').length + 1) || f.name)}</td>
+      <td>${esc(f.title || '')}${f.note ? ` <span class="tag">${esc(f.note)}</span>` : ''}</td>
+      <td class="num">${esc(f.frames)}</td>
+      <td class="acts">${folderActs(f)}</td>
+    </tr>`).join('')}</tbody></table></div>`;
+}
+
+/** Дві дії над текою — підписані, а не самими значками. */
+function folderActs(f) {
+  return `<button class="ctl-sm" data-act="intake.frames" data-arg="${esc(f.path)}">${
+    ic('image', 'ic-o ic-sm')} ${t('intake.frames')}</button>
+    <button class="ctl-sm" data-act="case.edit" data-arg="${esc(f.path)}"
+      title="${esc(t('intake.describe.why'))}">${ic('pencil-line', 'ic-o ic-sm')} ${t('intake.describe')}</button>`;
+}
+
+/** Відкладене — згорнуто, з причиною й «Повернути». */
+function asideBlock(groups) {
+  if (!groups.length) return '';
+  const n = groups.reduce((s, g) => s + (g.folders || []).length, 0);
+  return `<details class="intake-aside"><summary>${t('intake.aside.title')} (${esc(n)})</summary>
+    <table><tbody>${groups.map((g) => `<tr>
+      <td><b>${esc(g.label || g.parent)}</b>${g.why ? ` <span class="muted">— ${esc(g.why)}</span>` : ''}</td>
+      <td class="num">${esc((g.folders || []).length)} ${t('intake.subdirs')}</td>
+      <td class="acts"><button class="ctl-sm" data-act="intake.unaside"
+        data-path="${esc(g.aside_key || g.parent)}">${t('intake.unaside')}</button></td>
+    </tr>`).join('')}</tbody></table></details>`;
+}
+
+/** Що це за матеріал — варіанти причини «не справа». */
+const ASIDE_WHY = ['book', 'press', 'opys', 'train', 'other'];
 
 /**
  * Перелік архівів, які застосунок знає. Тримається між показами екрана: він
@@ -275,14 +291,55 @@ SCREENS.newcase = async () => {
   EDIT = null;
 };
 
-PAGERS.cases = (delta) => {
-  PAGE = step(PAGE, delta, PAGES);
-  return show('cases');
-};
-
 Object.assign(ACTIONS, {
   /** 🖼 Подивитись, ЩО це, перш ніж описувати: без кадрів опис — вгадування. */
   'intake.frames': (_ev, elm) => goto('frames', { case: elm.dataset.arg }),
+
+  /** Розгорнути теки групи. */
+  'intake.toggle': (_ev, elm) => {
+    const tb = el(`ig-${elm.dataset.arg}`);
+    if (!tb) return;
+    tb.hidden = !tb.hidden;
+    elm.textContent = t(tb.hidden ? 'intake.show' : 'intake.hide');
+  },
+
+  /** Описати теку, якої в переліку немає (поза простором, щойно скопійовану). */
+  'intake.other': async () => {
+    EDIT = null;
+    await show('newcase');
+  },
+
+  /**
+   * «Не справа» — спершу спитати, що це, і лише тоді відкласти.
+   *
+   * Причина не прикраса: через пів року «відкладено» без «що це» не відрізнити
+   * від «відкладено помилково», і повертати доведеться наосліп.
+   */
+  'intake.aside.ask': (_ev, elm) => {
+    const box = el(`ia-${elm.dataset.arg}`);
+    if (!box) return;
+    box.innerHTML = `<select id="iw-${esc(elm.dataset.arg)}">${ASIDE_WHY.map((k) =>
+      `<option value="${esc(t(`intake.why.${k}`))}">${esc(t(`intake.why.${k}`))}</option>`).join('')}</select>
+      <button class="ctl-sm" data-act="intake.aside.do" data-arg="${esc(elm.dataset.arg)}"
+        data-path="${esc(elm.dataset.path)}">${t('intake.aside.do')}</button>
+      <button class="ctl-sm" data-act="intake.aside.cancel">${t('intake.cancel')}</button>`;
+  },
+
+  'intake.aside.cancel': () => show('cases'),
+
+  'intake.aside.do': async (_ev, elm) => {
+    const sel = el(`iw-${elm.dataset.arg}`);
+    const env = await callOp('intake.aside',
+      { paths: [elm.dataset.path], why: sel ? sel.value : '' });
+    if (!env.ok) return failure(env);
+    return show('cases');
+  },
+
+  'intake.unaside': async (_ev, elm) => {
+    const env = await callOp('intake.aside', { paths: [elm.dataset.path], undo: true });
+    if (!env.ok) return failure(env);
+    return show('cases');
+  },
 
   'cases.build': async () => {
     const env = await callOp('cases.build', { rescan: true });

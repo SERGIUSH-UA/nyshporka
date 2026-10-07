@@ -27,9 +27,11 @@ from nyshporka.cases.geo import (
 from nyshporka.cases.model import CaseRow
 from nyshporka.cases.resolve import (
     LibraryIndex,
+    aside_for,
     bundles,
     parse_slug_case,
     resolve_run,
+    set_aside,
     slug_case,
 )
 from nyshporka.cases.walk import IMG_EXT, frame_names
@@ -421,6 +423,10 @@ def _best_frames(row_paths: list[str | None]) -> int:
     покриття декоду виходило безглуздим, а «декод обірвано» — випадковим.
     """
     return max((_count_frames(p) for p in row_paths if p), default=0)
+
+
+#: Що в полі шляху збірки означає «теки немає», а не шлях.
+_NO_PATH = frozenset({"", "-", "—", "–"})
 
 
 def _unfiled_material(index: LibraryIndex, known: set[str],
@@ -822,7 +828,11 @@ def collect_rows(index: LibraryIndex | None = None, *,
 
     # ── збірки: одиниці роботи, які архівною справою не є ───────────────────
     for key, b in bundles().items():
-        rel = str(b.get("path") or "")
+        rel = str(b.get("path") or "").strip()
+        # Тире замість шляху — «теки немає» (збірку замовлено, а не завантажено).
+        # Узяте як шлях, воно ставало рядком «— —» у переліках.
+        if rel in _NO_PATH:
+            rel = ""
         frames = 0
         d = ROOT / rel if rel else None
         if d is not None and d.is_dir():
@@ -840,6 +850,7 @@ def collect_rows(index: LibraryIndex | None = None, *,
     # ── матеріал на диску, який не звівся до справи ─────────────────────────
     known_paths = set(idx.by_path)
     known_paths.update(r.path for r in rows.values() if r.path)
+    aside = set_aside()
     for rel, frames in _unfiled_material(idx, known_paths, scans):
         # Спершу пробуємо звести теку до вже відомої справи: рендери й зменшені
         # копії (`dahmo_315_pages/spr-7864`) — це той самий матеріал, а не новий.
@@ -904,14 +915,18 @@ def collect_rows(index: LibraryIndex | None = None, *,
         side = _sidecar_near(rel)
         film = str(side.get("film") or "").strip()
         stated = bool(side.get("unidentified"))
+        # Відкладене дослідником як «не справа» (книга, газета, набір) — окремим
+        # видом: воно не чекає опису, і серед нових тек йому не місце.
+        put = aside_for(rel, aside)
         rows[key] = CaseRow(
-            key=key, kind="unfiled",
+            key=key, kind="material" if put else "unfiled",
             shifra=(f"плівка {film}" if stated and film else
                     "шифру ще не встановлено" if stated else f"без шифри · {name}"),
             repo=repo or None, repo_label=repo or None,
             title=side.get("title", ""), path=rel, frames=frames, state="on_disk",
             desc_source=side.get("desc_source", "disk"),
-            why=(str(side.get("note") or "").strip()
+            why=(f"відкладено як не справа{': ' + put[1] if put[1] else ''}" if put
+                 else str(side.get("note") or "").strip()
                  or "шифру ще не встановлено — заявлено в паспорті теки" if stated
                  else "матеріал на диску без шифри справи — сайдкар не несе фонд/справу"),
         )

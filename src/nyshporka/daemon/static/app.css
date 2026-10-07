@@ -673,3 +673,13 @@ details.more-filters > summary { cursor: pointer; color: var(--fg-3); font-size:
 #view tr.lib-more p { margin: .2rem 0; }
 .row-actions { display: flex; flex-wrap: wrap; gap: .4rem; }
 
+
+/* ── Нові теки: група «звідки» з діями, під нею теки ───────────────────── */
+.intake-g { border-bottom: 1px solid var(--line); padding: .45rem 0; }
+.intake-h { display: flex; flex-wrap: wrap; gap: .4rem .8rem; align-items: center; }
+.intake-n { flex: 1 1 18rem; min-width: 0; }
+.intake-h .acts { display: flex; flex-wrap: wrap; gap: .3rem; }
+.intake-g table { margin-top: .4rem; }
+.intake-aside { margin-top: 1.2rem; }
+.tag { font-size: .78rem; padding: 0 .35rem; border: 1px solid var(--line);
+  border-radius: 4px; color: var(--fg-3); margin-left: .3rem; white-space: nowrap; }

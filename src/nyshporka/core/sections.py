@@ -213,6 +213,8 @@ OP_SCREEN: dict[str, str] = {
     "job.query": "jobs",
     "cases.list": "cases",
     "cases.build": "cases",
+    "intake.list": "cases",
+    "intake.aside": "cases",
     "case.show": "cases",
     "case.register": "newcase",
     "case.check": "newcase",

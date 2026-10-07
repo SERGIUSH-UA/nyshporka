@@ -156,6 +156,17 @@ globalThis.fetch = async (url, opts) => {
                          what: 'сторінки' } },
       stop: '', summary: {},
     },
+    'intake.list': { registry: true,
+      waiting: [
+        { parent: 'data/raw/gazeta', label: 'gazeta', frames: 9, aside_key: 'data/raw/gazeta',
+          folders: [{ path: 'data/raw/gazeta/1854/n1', name: 'n1', frames: 4, title: '', note: '' },
+                    { path: 'data/raw/gazeta/1854/n2', name: 'n2', frames: 5, title: '', note: '' }] },
+        { parent: 'data/raw/kn', label: 'kn', frames: 3, aside_key: 'data/raw/kn',
+          folders: [{ path: 'data/raw/kn', name: 'kn', frames: 3, title: 'КНИГА', note: 'плівка 77' }] }],
+      aside: [{ parent: 'data/raw/old', label: 'old', frames: 1, aside_key: 'data/raw/old',
+                why: 'газета чи журнал',
+                folders: [{ path: 'data/raw/old/a', name: 'a', frames: 1, title: '', note: '' }] }],
+      counts: { waiting: 3, waiting_frames: 12, aside: 1, described: 3 } },
     'cases.list': { cases: [{ key: '@disk/x', kind: 'unfiled', path: 'x',
                               frames: 7 }],
                     shown: 1, total: 1, registry: true, page: 0,
@@ -435,7 +446,19 @@ for (const name of ['cases', 'fonds', 'sources', 'read', 'search', 'settings',
   out[`drew_${name}`] = html.length;
   // Знаменник приймальні: число описаних справ мусить бути видним, інакше
   // «192 теки» читаються як увесь простір.
-  if (name === 'cases') out.intakeHasLibraryLink = html.includes('data-arg="library"');
+  if (name === 'cases') {
+    out.intakeHasLibraryLink = html.includes('data-arg="library"');
+    // Група «звідки» — одним рядком з числом тек, а не сотнею рядків.
+    out.intakeGrouped = html.includes('<b>gazeta</b>') && html.includes('2 тек');
+    // Тека групи з однієї — сама тека, з підписаними діями й рішенням із паспорта.
+    out.intakeOneFolder = html.includes('data-act="case.edit" data-arg="data/raw/kn"')
+      && html.includes('плівка 77') && html.includes('КНИГА');
+    // «Не справа» — на групу цілком; відкладене — згорнуто з «Повернути».
+    out.intakeAside = html.includes('data-act="intake.aside.ask"')
+      && html.includes('data-path="data/raw/gazeta"')
+      && /data-act="intake.unaside"\s+data-path="data\/raw\/old"/.test(html);
+    out.intakeNoBundles = !html.includes('збірк');
+  }
   // Опис мусить назвати фонд і його обсяг до будь-якого запиту. Раніше
   // ознакою була кнопка в таблиці фондів; тепер фонд обирають пікером, і
   // видимою частиною є його підпис — «А ф.1 — 9 справ».
@@ -1004,6 +1027,18 @@ def test_adopt_is_offered_only_for_a_folder_outside(probe) -> None:
     """Позначка для теки поза простором читалась як «завести справу» — і стояла завжди."""
     assert probe.get("caseAdoptHiddenInside"), "позначку показано для теки в просторі"
     assert probe.get("caseAdoptShownOutside"), "позначку сховано для теки поза простором"
+
+
+def test_new_folders_are_grouped_by_where_they_came_from(probe) -> None:
+    """🔴 Сотня випусків однієї газети — одне питання, а не сто (07.10.2026)."""
+    assert probe.get("intakeGrouped"), "теки не згруповано за джерелом"
+    assert probe.get("intakeOneFolder"), "тека-одинак не показана як тека з діями"
+
+
+def test_not_a_case_can_be_set_aside_and_brought_back(probe) -> None:
+    """Книга чи газета, якій шифри не буде, не висить серед нових тек вічно."""
+    assert probe.get("intakeAside"), "немає «Не справа» чи «Повернути»"
+    assert probe.get("intakeNoBundles"), "збірки (уже описане) знову серед нових тек"
 
 
 def test_live_fallback_is_not_called_blind(probe) -> None:

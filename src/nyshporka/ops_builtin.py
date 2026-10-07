@@ -1532,6 +1532,174 @@ def cases_list(a: CasesArgs) -> Envelope:
     return env
 
 
+#: Чим підписано рядок теки без шифри, коли паспорт про неї мовчить.
+_NO_SHIFRA_PREFIX = "без шифри"
+
+
+def _case_roots_rel() -> set[str]:
+    """Корені справ відносно простору: їх цілими не відкладають."""
+    import os
+
+    from nyshporka import library as L
+    from nyshporka.core.workspace import workspace
+
+    out = {"data/raw"}
+    try:
+        for r in workspace().case_roots():
+            rel = os.path.relpath(r, L.ROOT).replace("\\", "/")
+            if not rel.startswith(".."):
+                out.add(rel)
+    except Exception:
+        pass
+    return out
+
+
+def _intake_root(path: str, roots: set[str]) -> str:
+    """Найглибший корінь справ, під яким лежить тека, або порожньо."""
+    under = [r for r in roots if path.startswith(r + "/")]
+    return max(under, key=len) if under else ""
+
+
+def _intake_group(path: str, roots: set[str]) -> str:
+    """Група нової теки — перша тека під коренем справ: «звідки цей матеріал».
+
+    🔴 Не найближча батьківська тека. Нею групувались би лише випуски одного
+    року газети, а «звідки» (`bov` — «Бессарабские областные ведомости») так і
+    розсипалось би десятком груп по одній теці.
+    """
+    root = _intake_root(path, roots)
+    if not root:
+        return path.rsplit("/", 1)[0] if "/" in path else path
+    return f"{root}/{path[len(root) + 1:].split('/', 1)[0]}"
+
+
+def _intake_label(group: str, roots: set[str]) -> str:
+    """Підпис групи без кореня справ: «bov», а не «data/raw/bov»."""
+    root = _intake_root(group, roots)
+    return group[len(root) + 1:] if root and root == "data/raw" else group
+
+
+@op("intake.list", summary="Нові теки: матеріал на диску без шифри — групами",
+    mutates=False, agent=False)
+def intake_list(_: NoArgs) -> Envelope:
+    """Що на диску ще не стало справою — згруповано за батьківською текою.
+
+    🔴 Екран звався «Приймальня», і що на ньому, не розумів навіть той, хто
+    працює із застосунком від початку (дослідник, 07.10.2026). Причин три, і
+    всі в даних: поруч із неописаними теками стояли збірки — уже описані
+    групування, до яких прив'язано прогони, — і з ними там не було чого
+    робити; випуски однієї газети йшли сотнею окремих рядків; а книгу чи
+    корпус, яким шифри не буде ніколи, не було як прибрати. Тепер тут лише
+    теки без опису, групами, а «не справа» відкладається (`intake.aside`) і
+    стоїть окремо, згорнуто, з можливістю повернути.
+    """
+    from nyshporka.cases import db
+    from nyshporka.cases import resolve as R
+
+    try:
+        rows = db.query_rows(kind="unfiled,material")
+        counts = db.kind_counts()
+    except FileNotFoundError:
+        env = ok({"waiting": [], "aside": [], "counts": {}, "registry": False})
+        env.warn("no_registry_yet",
+                 "реєстру справ ще немає — його збирають після того, як у "
+                 "просторі з'явиться перша тека")
+        env.stale_because(["реєстр ще не збирали"], fix="nysh cases build")
+        return env
+    # Рішення з `overrides.json` накладаються й на зріз, зібраний ДО них: так
+    # щойно відкладене не повертається в перелік, якщо реєстр перезбирали
+    # раніше, ніж людина натиснула.
+    aside = R.set_aside()
+    roots = _case_roots_rel()
+    groups: dict[tuple[str, str], dict[str, Any]] = {}
+    for r in rows:
+        path = str(r.get("path") or "")
+        if not path:
+            continue
+        hit = R.aside_for(path, aside)
+        state = "aside" if hit else "waiting"
+        parent = hit[0] if hit else _intake_group(path, roots)
+        g = groups.setdefault((state, parent), {
+            "parent": parent, "label": _intake_label(parent, roots),
+            "folders": [], "frames": 0, "why": hit[1] if hit else ""})
+        note = str(r.get("shifra") or "")
+        g["folders"].append({
+            "path": path, "name": path.rsplit("/", 1)[-1],
+            "frames": int(r.get("frames") or 0),
+            "title": str(r.get("title") or ""),
+            # «плівка 2086525» чи «шифру ще не встановлено» — рішення з паспорта
+            # теки; «без шифри · <ім'я>» нічого не додає до імені теки поруч.
+            "note": "" if note.startswith(_NO_SHIFRA_PREFIX) else note})
+        g["frames"] += int(r.get("frames") or 0)
+    waiting: list[dict[str, Any]] = []
+    put: list[dict[str, Any]] = []
+    for (state, _key), g in sorted(groups.items(), key=lambda kv: kv[0][1]):
+        g["folders"].sort(key=lambda f: f["path"])
+        # Група — тека під коренем справ, тож відкласти її цілком безпечно;
+        # корінь цілком не відкладається ніколи (див. `intake.aside`).
+        g["aside_key"] = g["parent"] if g["parent"] not in roots else None
+        (put if state == "aside" else waiting).append(g)
+    env = ok({"waiting": waiting, "aside": put, "registry": True,
+              "counts": {"waiting": sum(len(g["folders"]) for g in waiting),
+                         "waiting_frames": sum(g["frames"] for g in waiting),
+                         "aside": sum(len(g["folders"]) for g in put),
+                         "described": int(counts.get("case") or 0)}})
+    try:
+        st = db.staleness()
+    except Exception:
+        st = {}
+    if st.get("stale"):
+        env.stale_because(st.get("reasons") or [], fix="nysh cases build")
+    return env
+
+
+class IntakeAsideArgs(BaseModel):
+    paths: list[str] = Field(description="теки (відносно простору), які відкласти чи повернути")
+    why: str = Field(default="", description="що це: книга, газета, набір для навчання…")
+    undo: bool = Field(default=False, description="повернути до нових тек")
+
+
+@op("intake.aside", summary="Відкласти теку як «не справа» — або повернути до нових тек",
+    args=IntakeAsideArgs, mutates=True, agent=False)
+def intake_aside(a: IntakeAsideArgs) -> Envelope:
+    """Рішення дослідника: ця тека — не архівна справа й опису не чекає.
+
+    🔴 Записується в ручні рішення реєстру (`overrides.json`), а не в теку:
+    чужий паспорт справи (`_source.json`) від цього не змінюється, а збірка
+    реєстру виводить із того самого запису те саме. Рядки реєстру правляться
+    одразу (`db.mark_kind`) — перезбірка тривала б 13 с.
+    """
+    from pathlib import PurePosixPath
+
+    from nyshporka import library as L
+    from nyshporka.cases import db
+    from nyshporka.cases import resolve as R
+
+    paths: list[str] = []
+    for raw in a.paths:
+        p = str(raw or "").replace("\\", "/").strip().rstrip("/")
+        pp = PurePosixPath(p)
+        if not p or pp.is_absolute() or ":" in p or ".." in pp.parts:
+            return fail(f"тека «{raw}» — не шлях усередині простору")
+        if p in _case_roots_rel():
+            return fail(f"«{p}» — корінь справ; відкласти його цілком означало б "
+                        f"сховати весь неописаний матеріал")
+        if not a.undo and not (L.ROOT / p).is_dir():
+            return fail(f"теки «{p}» на диску немає")
+        paths.append(p)
+    if not paths:
+        return fail("не названо жодної теки")
+    why = " ".join(a.why.split())
+    R.put_aside(paths, why, undo=a.undo)
+    if a.undo:
+        n = db.mark_kind(paths, frm="material", to="unfiled",
+                         why="матеріал на диску без шифри справи")
+    else:
+        n = db.mark_kind(paths, frm="unfiled", to="material",
+                         why=f"відкладено як не справа{': ' + why if why else ''}")
+    return ok({"paths": paths, "undo": a.undo, "folders": n})
+
+
 def _bundle_subdirs(rows: list[dict[str, Any]]) -> None:
     """Збірці без кадрів — скільки в ній тек.
 

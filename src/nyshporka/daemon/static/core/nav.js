@@ -23,8 +23,18 @@ let SECTIONS = { sections: [], screens: {}, op_screen: {}, presets: {},
   preset: null, glyphs: {} };
 
 /** Порядок кнопок у шапці. Екрани, яких тут немає, кнопки не отримують. */
-const NAV_ORDER = ['home', 'profile', 'sources', 'geog', 'fonds', 'library', 'frames', 'cases', 'newcase',
+const NAV_ORDER = ['home', 'profile', 'sources', 'geog', 'fonds', 'library', 'frames', 'cases',
   'read', 'queue', 'runs', 'view', 'eye', 'search', 'sift', 'export', 'sets', 'label', 'jobs'];
+
+/**
+ * Екрани-кроки без власної вкладки → вкладка, яку підсвічувати.
+ *
+ * 🔴 «Опис справи» стояв окремою вкладкою поруч із «Приймальнею», і дві
+ * вкладки про одне («тека без шифри → дати їй шифру») читались як дві різні
+ * дії. Тепер опис відкривається з «Нових тек» («Описати»), з бібліотеки й з
+ * «Огляду», а вкладка лишилась одна.
+ */
+const STEP_OF = { newcase: 'cases' };
 
 /** Ключ i18n для кнопки екрана. Підпис «Завести справу» вже є в словнику. */
 const NAV_LABEL = {
@@ -111,7 +121,10 @@ function renderNav() {
 
   if (!subs) return;
   const icons = (SECTIONS.icons && SECTIONS.icons.screens) || {};
-  const here = (location.hash || '').slice(1);
+  // Форма опису — крок «Нових тек», а не окрема вкладка: поки вона відкрита,
+  // підсвічено те, звідки до неї прийшли.
+  const raw = (location.hash || '').slice(1);
+  const here = STEP_OF[raw] || raw;
   subs.innerHTML = groupScreens(GROUP).map((s) => {
     // 🔴 Значок малюється одразу з відомим числом. Він живе лише в підсмузі
     // розділу «core», тож при поверненні з іншого розділу з'являвся порожнім

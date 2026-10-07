@@ -245,9 +245,16 @@ def test_every_screen_is_reachable_and_belongs_to_a_section() -> None:
 
     # `settings` — свідомий виняток: до нього ведуть шестерня в шапці й екран
     # вимкненої секції, а місця в основному переліку він не займає.
+    # Екрани-кроки (`STEP_OF`: форма опису — крок «Нових тек») вкладки не мають,
+    # але кожен мусить назвати вкладку, яку підсвічує, — і та мусить існувати.
+    steps = dict(re.findall(r"(\w+):\s*'(\w+)'",
+                            js.split("const STEP_OF")[1].split("};")[0]))
+    assert not (set(steps.values()) - order), \
+        f"крок підсвічує неіснуючу вкладку: {sorted(set(steps.values()) - order)}"
+    free = {"settings"} | set(steps)
     assert not (order - screens), f"кнопка без екрана: {sorted(order - screens)}"
-    assert not (screens - order - {"settings"}), \
-        f"екран без кнопки: {sorted(screens - order - {'settings'})}"
+    assert not (screens - order - free), \
+        f"екран без кнопки: {sorted(screens - order - free)}"
     assert not (order - labels), f"кнопка без підпису: {sorted(order - labels)}"
     assert not (order - set(S.SCREENS)), \
         f"екран без секції: {sorted(order - set(S.SCREENS))}"

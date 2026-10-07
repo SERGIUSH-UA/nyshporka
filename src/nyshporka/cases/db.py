@@ -387,6 +387,37 @@ def query_page(*, page: int = 0, page_size: int = 50, uezd: str = "",
         con.close()
 
 
+def mark_kind(paths: list[str], *, frm: str, to: str, why: str,
+              db_path: Path | None = None) -> int:
+    """Перевести теки (і все під ними) з виду `frm` у `to` — без перезбірки.
+
+    🔴 Рішення людини мусить бути видно одразу: перезбірка реєстру — це
+    13 с на просторі на 2500 справ, і після «відкласти» тека висіла б у
+    переліку, ніби натискання не спрацювало. Тож рядки правляться на місці, а
+    наступна збірка виводить те саме з `overrides.json` (`resolve.set_aside`).
+
+    ⚠ Префікс звіряється `substr`, а не `LIKE`: у іменах тек повно `_`, а для
+    `LIKE` це будь-який символ — `book_olds/%` зачепив би й сусідню теку.
+    """
+    path = Path(db_path or DB_PATH)
+    if not path.is_file():
+        return 0
+    con = sqlite3.connect(path)
+    try:
+        n = 0
+        for p in paths:
+            base = str(p).rstrip("/")
+            cur = con.execute(
+                "UPDATE cases SET kind = ?, why = ? WHERE kind = ? AND "
+                "(path = ? OR substr(path, 1, ?) = ?)",
+                (to, why, frm, base, len(base) + 1, base + "/"))
+            n += cur.rowcount
+        con.commit()
+    finally:
+        con.close()
+    return n
+
+
 def kind_counts(db_path: Path | None = None) -> dict[str, int]:
     """Скільки чого в реєстрі: `case` / `bundle` / `unfiled`.
 

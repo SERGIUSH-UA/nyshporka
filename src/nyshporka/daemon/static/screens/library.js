@@ -387,6 +387,7 @@ function libMore(r) {
       ${btn('lib.find', r.key, `${ic('search', 'ic-sm')} ${t('lib.btn.find')}`)}
       ${r.fond ? btn('lib.opys', r.key, `${ic('archive-box', 'ic-sm')} ${t('lib.btn.opys')}`) : ''}
       ${btn('lib.verdict', r.key, `${ic('pencil-line', 'ic-sm')} ${t('lib.btn.verdict')}`)}
+      ${r.path ? btn('case.edit', r.path, `${ic('page', 'ic-sm')} ${t('lib.btn.describe')}`) : ''}
     </p></td></tr>`;
 }
 
