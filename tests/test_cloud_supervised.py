@@ -1566,3 +1566,27 @@ def test_thin_path_refuses_pace_but_pins_the_machine(space: Path, monkeypatch,
 ])
 def test_pinned_machine_reads_the_last_word(params: list[str], want: int) -> None:
     assert SUP.pinned_machine(params) == want
+
+
+def test_rotate_landscape_turns_light_frames_too(space: Path, monkeypatch,
+                                                 fake_gpurunner) -> None:
+    """🔴 `--rotate-landscape` діяв лише при стисканні ВАЖКИХ кадрів: легкі
+    альбомні кадри їхали на машину боком, і рушій читав аркуш на боці."""
+    from nyshporka.cloud import frames as F
+
+    case, _ = _wire(space, monkeypatch)
+    turned: list[bool] = []
+    real = F.shrink
+
+    def spy(src, dst, **kw):
+        turned.append(bool(kw.get("rotate_landscape")))
+        return real(src, dst, **kw)
+
+    monkeypatch.setattr(F, "shrink", spy)
+    assert not F.check_frames(case).heavy, "кадри тесту легкі"
+    got = _go(case, script="latin", dry_run=True, rotate_landscape=True)
+    assert got.verdict == "dry_run", got.why
+    assert turned == [True], "легкі кадри мусять пройти поворот"
+    turned.clear()
+    _go(case, script="latin", dry_run=True)
+    assert turned == [], "без прохання легкі кадри не чіпаються"

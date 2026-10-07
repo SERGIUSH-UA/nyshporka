@@ -760,12 +760,18 @@ def _prepare(res: GoResult, case: str, say: EventFn, owner: contextlib.ExitStack
 
     notes: list[str] = []
     pack = ref.frames_dir
-    if rep.heavy:
+    # 🔴 Поворот просили — копія потрібна й легким кадрам: доти `--rotate-landscape`
+    # діяв лише всередині стискання важких, і легкі альбомні кадри їхали на
+    # машину боком без жодного слова.
+    if rep.heavy or rotate_landscape:
         dst = _shrink_dir(ref.frames_dir, key)
-        why =(f"кадри завеликі (медіана {rep.median_mb:.1f} МБ)"
-               if rep.median_mb > F.SHRINK_MEDIAN_MB else
-               f"{len(rep.alien)} кадрів у форматі, якого читач на машині не "
-               f"бере (напр. {rep.alien[0]})")
+        if not rep.heavy:
+            why = "поворот альбомних кадрів (`--rotate-landscape`)"
+        elif rep.median_mb > F.SHRINK_MEDIAN_MB:
+            why = f"кадри завеликі (медіана {rep.median_mb:.1f} МБ)"
+        else:
+            why = (f"{len(rep.alien)} кадрів у форматі, якого читач на машині не "
+                   f"бере (напр. {rep.alien[0]})")
         say("shrink", f"{why} — переводимо в сірий JPEG висотою "
                       f"{F.TARGET_HEIGHT} у {dst}; оригінали не чіпаються")
         got = F.shrink(ref.frames_dir, dst, rotate_landscape=rotate_landscape,
