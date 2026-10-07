@@ -315,9 +315,9 @@ def stats_cmd(
         console.print(f"темп: медіана {d['median_secs']} с/рядок · ще ~{d['eta_min']} хв")
     by_voice = d.get("cer_by_voice") or {}
     if by_voice:
-        console.print(f"CER проти людини на {d['cer_lines']} рядках:")
+        console.print(f"CER проти людини (ok-рядків {d['cer_lines']}):")
         for vid, v in by_voice.items():
-            console.print(f"  {vid:<14} {v['cer']:.3f}"
+            console.print(f"  {vid:<14} {v['cer']:.3f} на {v.get('lines', '?')} рядках"
                           + ("  ← злиття" if vid == "merge" else ""))
     elif d["cer_draft"] is not None:
         console.print(f"CER голосу проти людини: {d['cer_draft']:.3f} на {d['cer_lines']} рядках")

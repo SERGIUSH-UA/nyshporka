@@ -220,8 +220,11 @@ def test_stats_measures_each_voice_and_the_merge(space: W.Workspace,
     monkeypatch.setattr(st.spec, "drafts", [S.Draft(id="pysar", dir="drafts/pysar"),
                                             S.Draft(id=S.MERGE_ID, dir="drafts/merge")])
     monkeypatch.setattr(st, "drafts", lambda _pg: {0: ["Никола Ивановь", "Николай Ивановъ"],
-                                                   1: ["Марфа Васильева", "Марѳа Васильева"]})
+                                                   1: ["Марфа Васильева", ""]})
     d = st.stats()
     assert d["cer_merge"] == 0.0
+    # Злиття мало чернетку лише на одному рядку з двох — знаменник його власний.
+    assert d["cer_by_voice"][S.MERGE_ID]["lines"] == 1
+    assert d["cer_by_voice"]["pysar"]["lines"] == 2 and d["cer_lines"] == 2
     assert d["cer_by_voice"]["pysar"]["cer"] > 0
     assert d["cer_draft"] == d["cer_by_voice"]["pysar"]["cer"], "стара форма — перший голос"

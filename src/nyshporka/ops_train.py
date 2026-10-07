@@ -584,7 +584,8 @@ def train_stats(a: StatsArgs) -> Envelope:
 
     `cer_merge` понад ~0.10 означає, що арбітри працювали погано і корпус із
     такого злиття гірший за відсутній. `cer_by_voice` — те саме по кожному
-    голосу; `cer_draft` — перший непорожній голос (стара форма поля).
+    голосу, з власним знаменником `lines` (на скількох рядках голос щось
+    прочитав); `cer_draft` — перший непорожній голос (стара форма поля).
     """
     from nyshporka.train import sets as S
 
@@ -596,6 +597,10 @@ def train_stats(a: StatsArgs) -> Envelope:
     if d["cer_draft"] is not None and d["cer_lines"] < 20:
         env.warn("cer_small", f"CER голосу міряно лише на {d['cer_lines']} рядках — "
                               f"на такому числі він ще нічого не доводить")
+    merge = (d.get("cer_by_voice") or {}).get(S.MERGE_ID) or {}
+    if merge and d["cer_lines"] >= 20 and int(merge.get("lines") or 0) < 20:
+        env.warn("cer_small", f"CER злиття міряно лише на {merge.get('lines')} рядках з "
+                              f"{d['cer_lines']} — на такому числі він ще нічого не доводить")
     return env
 
 

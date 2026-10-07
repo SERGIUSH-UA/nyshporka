@@ -489,6 +489,7 @@ class Store:
         ids = [d.id for d in self.spec.drafts]
         v_dist = [0] * len(ids)
         v_chars = [0] * len(ids)
+        v_lines = [0] * len(ids)
         for (pg, i), m in done.items():
             if m.get("status") != "ok" or not m.get("text"):
                 continue
@@ -498,12 +499,17 @@ class Store:
                 if line:
                     v_dist[pos] += Levenshtein.distance(line, truth)
                     v_chars[pos] += len(truth)
+                    v_lines[pos] += 1
             first = next((x for x in d if x), "")
             if not first:
                 continue
             dist += Levenshtein.distance(first, truth)
             chars += len(truth)
-        by_voice = {vid: {"cer": round(v_dist[k] / v_chars[k], 3), "chars": v_chars[k]}
+        # 🔴 Знаменник — свій у кожного голосу: голос міряється лише там, де
+        # він щось прочитав, а злиття часто має чернетку не на всіх рядках.
+        # Спільне «на N рядках» видавало CER на десятку рядків за CER на сотні.
+        by_voice = {vid: {"cer": round(v_dist[k] / v_chars[k], 3), "chars": v_chars[k],
+                          "lines": v_lines[k]}
                     for k, vid in enumerate(ids) if v_chars[k]}
         return {"name": self.name, "n_total": total, "n_pages": len(pages),
                 "n_done": len(done), "n_left": left,
