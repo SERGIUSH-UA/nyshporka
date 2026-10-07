@@ -506,7 +506,7 @@ def read_run(item: dict[str, Any], ctx: Ctx) -> Outcome:
     try:
         plan = HR.plan(w.frames_dir, script=str(opts.get("script") or ""),
                        second_voice=not opts.get("one_voice"),
-                       also=tuple(opts.get("with") or ()))
+                       also=tuple(opts.get("with") or ()), fix_sideways=True)
     except HR.ReadError as exc:
         return blocked("read_refused", str(exc),
                        f'усунути причину й повторити: nysh queue retry "{name}"')

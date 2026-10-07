@@ -416,7 +416,18 @@ def _quoted(line: str, pos: int) -> bool:
 
 
 def scan(paths: Iterable[Path], migrations: Iterable[Migration]) -> list[Hit]:
-    rules = [(m.version, s) for m in migrations for s in m.stale]
+    """Застарілі тези у файлах.
+
+    🔴 Теза з тим самим `id` у пізнішій міграції заміняє ранішу. Міграцію
+    випущеної версії правити не можна (простір, що її пройшов, правки не
+    побачить), а хибний шаблон у ній ловив би чинні рядки щоразу — тож
+    виправлення живе в міграції наступної версії під тим самим `id`.
+    """
+    latest: dict[str, tuple[str, Stale]] = {}
+    for m in sorted(migrations, key=lambda m: m.key):
+        for s in m.stale:
+            latest[s.id] = (m.version, s)
+    rules = list(latest.values())
     hits: list[Hit] = []
     for f in dict.fromkeys(_files(paths)):
         try:

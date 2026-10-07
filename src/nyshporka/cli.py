@@ -1110,7 +1110,7 @@ def read(
     try:
         p = make_plan(case_dir, out_dir=out, script=script,
                       second_voice=not one_voice, model=model, seg_cache=seg_cache,
-                      also=with_)
+                      also=with_, fix_sideways=not dry)
     except ReadError as exc:
         console.print(f"[err]{exc}[/err]")
         raise typer.Exit(code=1) from None

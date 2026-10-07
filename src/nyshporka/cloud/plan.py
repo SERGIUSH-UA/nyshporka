@@ -250,11 +250,11 @@ def build(case_dir: str | Path, *, backend: str = "ssh", target: str = "",
     frames = frames_in(case)
     bokom = ""
     if frames:
-        # Кадри, які версія до 0.27 розгорнула з повернутих сторінок PDF боком,
-        # і прочитане з них (`htr.bokovi`).
+        # Кадри, які версія до 0.27 розгорнула з повернутих сторінок PDF боком:
+        # план лише каже про них, розгортає захід (`cloud.go._kadry_z_pdf`).
         from nyshporka.htr import bokovi
 
-        bokom = bokovi.rozvernuty(case).message()
+        bokom = bokovi.rozvernuty(case, plan=True).message()
     if not frames:
         # Та сама справа-PDF, що й у локальному читанні (`htr/run.py:plan`):
         # розгортаємо в кадри тут, у доведеній нумерації. Вбудовані JPEG

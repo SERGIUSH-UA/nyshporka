@@ -265,7 +265,7 @@ def test_prochytane_z_bokovoho_kadru_vidkladaietsia(tmp_path: Path, monkeypatch)
     (seg / "0001.o0.c400.seg.json.gz").write_bytes(b"x")
     (seg / "0002.o0.c400.seg.json.gz").write_bytes(b"x")
     monkeypatch.setattr(bokovi, "_runs_of", lambda _c, _r: [run])
-    monkeypatch.setattr(bokovi, "_local_seg", lambda _c, _r: [seg])
+    monkeypatch.setattr(bokovi, "_local_seg", lambda *_a: [seg])
 
     said: list[str] = []
     rep = bokovi.rozvernuty(case, on_line=said.append)
@@ -280,3 +280,78 @@ def test_prochytane_z_bokovoho_kadru_vidkladaietsia(tmp_path: Path, monkeypatch)
     assert said and "дочитає" in said[0]
     # Повтор: кадр уже прямий — нічого не робиться й нічого не кажеться.
     assert bokovi.rozvernuty(case).message() == ""
+
+
+def _sprava_z_progonom(tmp_path: Path) -> tuple[Path, Path, bytes]:
+    import json
+
+    case = tmp_path / "sprava"
+    case.mkdir()
+    syryi = _bokovyi_pdf(case / "a.pdf")
+    (case / "0001.jpg").write_bytes(syryi)
+    run = tmp_path / "progin"
+    run.mkdir()
+    (run / "0001.txt").write_text("три рядки", encoding="utf-8")
+    (run / "_htr_meta.json").write_text(json.dumps(
+        {"done": True, "pages": {"0001.jpg": {"lines": 3}}}), encoding="utf-8")
+    return case, run, syryi
+
+
+def test_plan_lyshe_kazhe_i_nichoho_ne_minaie(tmp_path: Path, monkeypatch) -> None:
+    """🔴 `nysh read --dry-run` і `read.plan` — подивитись, а не погодитись:
+    план, що розгортав кадри й відкладав прочитане, вибивав сторінки з
+    пошуку до перечитування."""
+    from nyshporka.htr import bokovi
+
+    case, run, syryi = _sprava_z_progonom(tmp_path)
+    monkeypatch.setattr(bokovi, "_runs_of", lambda _c, _r: [run])
+    monkeypatch.setattr(bokovi, "_local_seg", lambda *_a: [])
+
+    rep = bokovi.rozvernuty(case, plan=True)
+
+    assert (case / "0001.jpg").read_bytes() == syryi, "план переписав кадр"
+    assert (run / "0001.txt").exists() and not (run / "_bokom").exists()
+    assert rep.pages_aside == 1 and "запуск читання розгорне" in rep.message()
+
+
+def test_ne_vidklaly_prochytane_kadr_lyshaietsia_bokom(tmp_path: Path, monkeypatch) -> None:
+    """🔴 Переписаний кадр уже не впізнати як боковий. Якщо прочитане з нього
+    не відкладено, кадр мусить лишитись боком — інакше текст бокового аркуша
+    назавжди рахується прочитаним."""
+    from nyshporka.htr import bokovi
+    from nyshporka.utils import atomic
+
+    case, run, syryi = _sprava_z_progonom(tmp_path)
+    monkeypatch.setattr(bokovi, "_runs_of", lambda _c, _r: [run])
+    monkeypatch.setattr(bokovi, "_local_seg", lambda *_a: [])
+
+    def zamok(*_a, **_k):
+        raise PermissionError("файл зайнятий")
+
+    monkeypatch.setattr(atomic, "atomic_write_text", zamok)
+    rep = bokovi.rozvernuty(case)
+
+    assert (case / "0001.jpg").read_bytes() == syryi
+    assert rep.kept == ["0001.jpg"] and "лишено боком" in rep.message()
+    monkeypatch.undo()
+    monkeypatch.setattr(bokovi, "_runs_of", lambda _c, _r: [run])
+    monkeypatch.setattr(bokovi, "_local_seg", lambda *_a: [])
+    again = bokovi.rozvernuty(case)
+    assert again.frames == ["0001.jpg"], "наступний запуск мусить упізнати кадр"
+
+
+def test_progin_znakhodytsia_za_inshym_napysanniam_shliakhu(tmp_path: Path,
+                                                          monkeypatch) -> None:
+    """🔴 Прогін записано під шляхом junction, а план кличе з розкритим —
+    пошук за одним написанням казав «прочитаного немає»."""
+    from nyshporka import htr_store as S
+    from nyshporka.htr import bokovi
+
+    case, run, _syryi = _sprava_z_progonom(tmp_path)
+    inshyi = str(case.parent / "insha" / ".." / case.name)
+    monkeypatch.setattr(S, "find_runs_for_case", lambda _c: [])
+    monkeypatch.setattr(S, "runs_by_case_dir", lambda: {inshyi: [{"name": "progin"}]})
+    monkeypatch.setattr(S, "_case_dir", lambda name: run if name == "progin" else None)
+
+    rep = bokovi.Bokovi()
+    assert bokovi._runs_of(case, rep) == [run] and not rep.problems

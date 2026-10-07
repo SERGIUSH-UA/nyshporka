@@ -73,8 +73,8 @@ class Plan:
     #: здогад з імені теки — а це різниця між прочитаною книгою й текою
     #: правдоподібного сміття.
     script_trust: str = "unknown"
-    #: Що зроблено з боковими кадрами PDF (`htr.bokovi`): рядок для людини,
-    #: порожньо — нічого. 🔴 Мусить дійти до людини й агента: без нього
+    #: Бокові кадри PDF (`htr.bokovi`): що знайдено (план) чи зроблено
+    #: (запуск) — рядок для людини, порожньо — нічого. 🔴 Мусить дійти до людини й агента: без нього
     #: виправлення йшло мовчки, і ніхто не знав, яку справу дочитувати.
     bokovi: str = ""
     script_why: str = ""
@@ -534,7 +534,7 @@ def seg_cache_dir(case_dir: Path, derived: Path) -> Path:
 def plan(case_dir: str | Path, *, out_dir: str | Path = "", script: str = "",
          second_voice: bool = True, model: str = "",
          seg_cache: str | Path = "", also: Sequence[str] = (),
-         zone: bool = False) -> Plan:
+         zone: bool = False, fix_sideways: bool = False) -> Plan:
     """Зібрати план прогону або пояснити, чого бракує.
 
     `model` — перечитати справу ЯВНО названою моделлю (напр. Скрибою, коли
@@ -554,6 +554,10 @@ def plan(case_dir: str | Path, *, out_dir: str | Path = "", script: str = "",
     розгортається в кадри). Командний рядок (`nysh read <тека>`) гарду не
     ставить навмисно: там теку називає сама людина у своєму терміналі
     (аудит 29.09.2026 — доти гард, описаний у `under_raw`, на черзі не стояв).
+
+    `fix_sideways` — розгорнути бокові кадри PDF і відкласти прочитане з них
+    (`htr.bokovi`). Лише для запуску: без нього план тільки каже, скільки
+    кадрів лежить боком, — `--dry-run` і `read.plan` нічого не змінюють.
     """
     from nyshporka.core.workspace import workspace
     from nyshporka.htr import env as E
@@ -578,10 +582,11 @@ def plan(case_dir: str | Path, *, out_dir: str | Path = "", script: str = "",
     bokom = ""
     if frames:
         # Кадри, які версія до 0.27 розгорнула з повернутих сторінок PDF боком,
-        # і прочитане з них: відкладається, і читання дочитує ці сторінки.
+        # і прочитане з них: на запуску відкладається, і читання дочитує ці
+        # сторінки; план лише каже про них.
         from nyshporka.htr import bokovi
 
-        bokom = bokovi.rozvernuty(case).message()
+        bokom = bokovi.rozvernuty(case, plan=not fix_sideways).message()
     if not frames:
         # 🔴 Справа з Commons приходить одним PDF, і `look` бачив «один PDF, 321
         # стор.», а `read` казав «зображень немає» — людині лишалось розбирати

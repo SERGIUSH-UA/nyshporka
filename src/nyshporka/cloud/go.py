@@ -307,7 +307,7 @@ def _index() -> Any:
         return None
 
 
-def _kadry_z_pdf(d: Path, on_line: Any = None) -> None:
+def _kadry_z_pdf(d: Path, on_line: Any = None, *, dry: bool = False) -> None:
     """Справа-PDF: розгорнути в кадри тут, а не аж у плані.
 
     План (`plan.py`) розгортає PDF і сам, але до нього справа не доходила:
@@ -324,13 +324,18 @@ def _kadry_z_pdf(d: Path, on_line: Any = None) -> None:
         # Кадри є — лише бокові з версії до 0.27 і прочитане з них.
         from nyshporka.htr import bokovi
 
-        bokovi.rozvernuty(d, on_line=on_line)
+        rep = bokovi.rozvernuty(d, on_line=None if dry else on_line, plan=dry)
+        if dry and on_line is not None and rep.message():
+            on_line(f"⚠ {rep.message()}")
         return
     pdfpage.vytiahnuty_kadry(d, on_line=on_line)
 
 
-def resolve_case(arg: str, on_line: Any = None) -> CaseRef:
-    """Тека кадрів або шифра → `CaseRef`. `on_line` — рядки розгортання PDF."""
+def resolve_case(arg: str, on_line: Any = None, *, dry: bool = False) -> CaseRef:
+    """Тека кадрів або шифра → `CaseRef`. `on_line` — рядки розгортання PDF.
+
+    `dry` (`--dry-run`): бокові кадри PDF лише назвати, не розгортати.
+    """
     from nyshporka.cloud.verify import frames_in
 
     given = Path(arg).expanduser()
@@ -338,7 +343,7 @@ def resolve_case(arg: str, on_line: Any = None) -> CaseRef:
         d = given.resolve()
         if not frames_in(d) and (d / "pages").is_dir():
             d = d / "pages"
-        _kadry_z_pdf(d, on_line)
+        _kadry_z_pdf(d, on_line, dry=dry)
         key, expected = "", 0
         index = _index()
         if index is not None:
@@ -377,7 +382,7 @@ def resolve_case(arg: str, on_line: Any = None) -> CaseRef:
         base = case_path(str(raw))
         for d in (base, base / "pages"):
             if d.is_dir():
-                _kadry_z_pdf(d, on_line)
+                _kadry_z_pdf(d, on_line, dry=dry)
                 n = len(frames_in(d))
                 # Найбільша тека, а не перша: зменшені копії та уривки лежать
                 # під тією самою шифрою, і читати треба повну.
@@ -648,7 +653,7 @@ def _prepare(res: GoResult, case: str, say: EventFn, owner: contextlib.ExitStack
     """
     from nyshporka.cloud import plan as PL
 
-    ref = resolve_case(case, on_line=lambda s: say("frames", s))
+    ref = resolve_case(case, on_line=lambda s: say("frames", s), dry=dry_run)
     key = case_key or ref.key
     if not batch:
         res.case_dir, res.case_key = str(ref.frames_dir), key

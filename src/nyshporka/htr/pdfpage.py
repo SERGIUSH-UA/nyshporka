@@ -225,6 +225,18 @@ def _bokovi(pdf: Path, existing: list[tuple[int, Path]]) -> list[tuple[int, Path
     return out
 
 
+def bokovi_kadry(case_dir: Path) -> list[str]:
+    """Імена наявних кадрів, що лежать боком (сирий образ повернутої сторінки).
+
+    Лише дивиться, нічого не пише: план читання каже про них людині, а
+    розгортає їх запуск (`htr.bokovi.rozvernuty`).
+    """
+    pdfs = case_pdfs(case_dir)
+    if not pdfs:
+        return []
+    return [Path(t[2]).name for t in _pending(case_dir, pdfs) if t[4]]
+
+
 def _render_tasks(tasks: list[Task], width: int) -> int:
     """Розгорнути сторінки в кадри — в ЦЬОМУ процесі. Повертає, скільки записано.
 
@@ -258,7 +270,8 @@ def _render_tasks(tasks: list[Task], width: int) -> int:
 
 def vytiahnuty_kadry(case_dir: Path, width: int = DEFAULT_WIDTH, *, jobs: int = 0,
                      on_line: Any = None, lyshe_bokovi: bool = False,
-                     vypravleni: list[str] | None = None) -> int:
+                     vypravleni: list[str] | None = None,
+                     tilky: set[str] | None = None) -> int:
     """Розгорнути PDF справи в кадри `0001.jpg…` поруч. Повертає, скільки записано.
 
     🔴 Нумерація — рівно та, що доводить `mapping`: щільна `1..N` підряд по
@@ -288,6 +301,8 @@ def vytiahnuty_kadry(case_dir: Path, width: int = DEFAULT_WIDTH, *, jobs: int = 
     відсутніх не дорендерювати. `vypravleni` дістає імена переписаних
     бокових кадрів — прочитане з них відкладає `htr.bokovi`. Кадри там могли прийти й не з цього PDF
     (плівка FS поруч із PDF Commons), і повне розгортання задвоїло б справу.
+    `tilky` — переписати лише ці бокові кадри (імена): решту `htr.bokovi`
+    лишає боком, бо прочитане з них відкласти не вдалось.
     """
     import subprocess
     import sys
@@ -299,6 +314,8 @@ def vytiahnuty_kadry(case_dir: Path, width: int = DEFAULT_WIDTH, *, jobs: int = 
     tasks = _pending(case_dir, pdfs)
     if lyshe_bokovi:
         tasks = [t for t in tasks if t[4]]
+    if tilky is not None:
+        tasks = [t for t in tasks if not t[4] or Path(t[2]).name in tilky]
     if not tasks:
         return 0
     say = on_line or (lambda _s: None)
