@@ -60,6 +60,10 @@ class Contained:
 
 
 def _kernel32() -> Any:
+    # Саме `sys.platform`: інакше mypy на Linux не знає `WinDLL`, а на Windows
+    # називає позначку `type: ignore` зайвою.
+    if sys.platform != "win32":
+        raise OSError("Job Object є лише на Windows")
     import ctypes
     from ctypes import wintypes
 
