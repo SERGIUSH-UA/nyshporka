@@ -51,6 +51,7 @@ def test_same_suffix_can_mean_two_scripts(man):
     ("pysar_cyr_v17.pt", "pysar"),
     ("diak_cyr_v4.mlmodel", "diak"),
     ("diak_cyr_v6.safetensors", "diak"),
+    ("logofet_ro_v2.safetensors", "diak"),
 ])
 def test_model_name_resolves_to_engine(man, filename, engine_id):
     e = man.engine_for_model(filename)
