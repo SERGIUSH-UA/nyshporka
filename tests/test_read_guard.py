@@ -15,6 +15,7 @@
 """
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 from typing import Any
@@ -54,6 +55,7 @@ def space(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
                                              encoding="utf-8")
     W.reset()
     W.use(W.Workspace(root=tmp_path, name="тест", origin="test"))
+    monkeypatch.setenv("GPURUNNER_DATA_DIR", str(tmp_path / "gpurunner"))
 
     case = tmp_path / "skany_a"
     case.mkdir()
@@ -64,6 +66,19 @@ def space(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(HR, "plan", lambda d, **_: _Plan(Path(d).resolve(), out))
     yield tmp_path
     W.reset()
+
+
+def _cloud_case(space: Path, *, phase: str = "running", verdict=None,
+                status: str = "running", done: int = 1, total: int = 2) -> None:
+    folder = space / "gpurunner" / "htr"
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "htr-cloud.json").write_text(json.dumps({
+        "session": "htr-cloud", "phase": phase, "verdict": verdict,
+        "updated": "2026-10-09T09:02:29+00:00",
+        "cases": [{"case_key": "DAHO/31/141/139", "status": status,
+                   "pages_done": done, "n_pages_expected": total,
+                   "detail": "чекає забору"}],
+    }), encoding="utf-8")
 
 
 @pytest.fixture
@@ -137,6 +152,51 @@ def test_a_free_card_starts_at_once(space, started) -> None:
     res = runner.invoke(app, ["read", str(space / "skany_a")])
     assert res.exit_code == 0, res.output
     assert started
+
+
+def test_an_active_cloud_case_stops_the_local_start(space, started,
+                                                    monkeypatch) -> None:
+    """🔴 Локальний реєстр порожній, але ця справа вже на орендованій машині."""
+    from nyshporka.cases import resolve
+
+    monkeypatch.setattr(resolve, "_from_path", lambda *_: "DAHO/31/141/139")
+    _cloud_case(space, done=1788, total=1788)
+
+    res = runner.invoke(app, ["read", str(space / "skany_a")])
+
+    assert res.exit_code == 1
+    assert "вже активна" in res.output and "1788/1788" in res.output
+    assert not started, "локальний дубль пішов поверх живого наглядача"
+
+
+def test_a_finished_cloud_case_requires_explicit_rerun(space, started,
+                                                       monkeypatch) -> None:
+    """Повний результат ще може чекати забору, хоча сесія вже завершилась."""
+    from nyshporka.cases import resolve
+
+    monkeypatch.setattr(resolve, "_from_path", lambda *_: "DAHO/31/141/139")
+    _cloud_case(space, phase="finished", verdict="ok", status="done",
+                done=1788, total=1788)
+
+    refused = runner.invoke(app, ["read", str(space / "skany_a")])
+    assert refused.exit_code == 1 and "вже прочитана" in refused.output
+    assert not started
+
+    allowed = runner.invoke(app, ["read", str(space / "skany_a"), "--rerun"])
+    assert allowed.exit_code == 0, allowed.output
+    assert started
+
+
+def test_dry_run_may_inspect_an_active_cloud_case(space, started,
+                                                  monkeypatch) -> None:
+    from nyshporka.cases import resolve
+
+    monkeypatch.setattr(resolve, "_from_path", lambda *_: "DAHO/31/141/139")
+    _cloud_case(space)
+
+    res = runner.invoke(app, ["read", str(space / "skany_a"), "--dry-run"])
+    assert res.exit_code == 0, res.output
+    assert not started
 
 
 def test_the_run_is_dropped_from_the_registry_after_it_ends(space,
