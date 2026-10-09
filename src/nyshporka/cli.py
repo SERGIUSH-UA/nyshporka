@@ -1191,6 +1191,28 @@ def read(
             console.print("  [warn]шифри немає: бібліотека цієї теки не знає — "
                           "прив'язка триматиметься на імені прогону[/warn]")
 
+    # 🔴 Локальні й орендовані прогони мають різні реєстри. Сам лок карти бачить
+    # лише процеси цього комп'ютера, а `already_read` вище — лише тексти, які вже
+    # приїхали на диск. Через цю щілину локально вдруге стартувала справа, яку
+    # живий наглядач уже дочитав до 1788/1788 і тримав на боксі перед забором
+    # (09.10.2026). Питаємо JSON-контракт УСІХ сесій, не старий запис справи:
+    # повторний хмарний захід може переписати `supervisor` у ньому.
+    if case_key and not dry:
+        from nyshporka.cloud.guard import conflict as cloud_conflict
+
+        remote = cloud_conflict(case_key)
+        if remote is not None and (remote.active or not rerun):
+            action = ("дочекайтесь або згорніть хмарний захід"
+                      if remote.active else
+                      "спершу заберіть хмарний результат; свідомий повтор — `--rerun`")
+            console.print(
+                f"[err]справа вже {'активна' if remote.active else 'прочитана'} "
+                f"у хмарі: {remote.label()}[/err]")
+            if remote.detail:
+                console.print(f"  [muted]{remote.detail}[/muted]")
+            console.print(f"[muted]{action}: `nysh cloud state --all`[/muted]")
+            raise typer.Exit(code=1)
+
     # 🔴 Питаємо пул ДО того, як витратити гроші. У цьому й уся Супряга:
     # людина не мусить про неї думати, а прогін, який уже хтось зробив, не
     # мусить робитись удруге. Стоїть поряд із `already_read` вище й з тієї
