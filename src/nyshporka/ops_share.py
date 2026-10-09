@@ -497,6 +497,9 @@ def share_suggest(a: ShareSuggestArgs) -> Envelope:
 class SharePublishArgs(BaseModel):
     path: str = Field(description="зібраний пакет .nyshtext")
     base: str = Field(default="", description="інша адреса пулу")
+    replaces: int | None = Field(default=None,
+                                 description="номер власного внеску, який цей заступить")
+    why: str = Field(default="", description="чому заміна — побачить модератор")
 
 
 @op("share.publish", summary="Віддати зібраний пакет у пул",
@@ -533,7 +536,10 @@ def share_publish(a: SharePublishArgs) -> Envelope:
         sys.stderr.flush()
 
     try:
-        got = publish(Path(a.path), base=a.base, say=_khid)
+        if a.replaces is not None and not a.why.strip():
+            return fail("заміна без причини не приймається: додайте --why «чому»")
+        got = publish(Path(a.path), base=a.base, say=_khid,
+                      replaces=a.replaces, why=a.why.strip())
     except UploadError as exc:
         env = fail(str(exc))
         # 🔴 Машинні поля відмови: стеля пулу (429) — «зачекати до», відмова
@@ -566,8 +572,13 @@ def share_publish(a: SharePublishArgs) -> Envelope:
                  "пряме сховище з цієї мережі недоступне — текст залито через "
                  "сервер Супряги; геометрію (рамки рядків) не залито")
     vyhid = str(got.get("outcome") or "")
-    if vyhid == VZHE_Ye and not got.get("geometry_attached"):
-        env.warn("duplicate", "цей текст уже в пулі — нічого не заливалось")
+    if got.get("card"):
+        # Той самий текст привіз виправлену картку (`share card`): пул її
+        # застосував, передав модерації або відмовив — і людина має це знати.
+        env.warn(f"card_{got['card']}", str(got.get("text") or ""))
+    elif vyhid == VZHE_Ye and not got.get("geometry_attached"):
+        env.warn("duplicate", str(got.get("text") or "цей текст уже в пулі")
+                 + " — нічого не заливалось")
     elif vyhid not in (VIDDANO, VZHE_Ye):
         # Відхилений чи не прийнятий дубль — не «вже в пулі»: у каталозі його
         # немає, і людина мусить це бачити.
@@ -575,6 +586,39 @@ def share_publish(a: SharePublishArgs) -> Envelope:
     for w in got.get("warnings") or []:
         if isinstance(w, dict):
             env.warn(str(w.get("code") or "gate"), str(w.get("text") or ""))
+    return env
+
+
+class ShareWithdrawArgs(BaseModel):
+    contribution: int = Field(description="номер власного внеску в Супрязі")
+    why: str = Field(description="чому — побачить модератор, а через рік і ви самі")
+    base: str = Field(default="", description="інша адреса пулу")
+
+
+@op("share.withdraw", summary="Забрати власний внесок із Супряги",
+    args=ShareWithdrawArgs, mutates=True, agent=False, section=SECTION, private=True,
+    next_hints=(("share.publish", "залити справу під правильною шифрою"),))
+def share_withdraw(a: ShareWithdrawArgs) -> Envelope:
+    """Відкликати свій внесок: залили не ту справу, шифра хибна, віддавати не можна.
+
+    🔴 Межа — «чи взяли». Поки внеском ніхто не скористався, пул ховає його
+    одразу; перевірено чи до справи пишуть нотатки інші — запит модерації,
+    рішення прийде сповіщенням. Нічого не видаляється. Хибну шифру після
+    відкликання виправляє звичайний `share.publish` під правильною.
+    """
+    from nyshporka.share.upload import UploadError, withdraw
+
+    if not a.why.strip():
+        return fail("назвіть причину: --why «чому»")
+    try:
+        got = withdraw(a.contribution, a.why.strip(), base=a.base)
+    except UploadError as exc:
+        env = fail(str(exc))
+        env.data = {"status": exc.status}
+        return env
+    env = ok(got)
+    if got.get("pending"):
+        env.warn("withdraw_pending", str(got.get("text") or "запит чекає модерації"))
     return env
 
 
@@ -883,7 +927,59 @@ def share_sync(a: ShareSyncArgs) -> Envelope:
         got = PL.sync(a.base, repo=a.repo, fond=a.fond)
     except RuntimeError as exc:
         return fail(f"{exc} — наявний зріз лишився недоторканим")
-    return ok(got)
+    env = ok(got)
+    _vziate_zastarilo(env, a.base)
+    return env
+
+
+def _vziate_zastarilo(env: Envelope, base: str) -> None:
+    """Чи не забрав автор те, що ця машина колись узяла з пулу.
+
+    🔴 Прийняте не прибирається само й не мусить: воно лежить у просторі
+    доказом, на нього можуть спиратись цитати канону. Але людина має знати,
+    що автор текст відкликав чи приніс новий — інакше пошук роду далі йде
+    старим текстом. Тому лише попередження з порадою, без жодної дії.
+    """
+    import re
+
+    from nyshporka.share import journal
+    from nyshporka.share.upload import UploadError, stany
+
+    # Номер внеску — у самій адресі пакета: `b/<справа>/<внесок>/text.nyshtext`.
+    vziate: dict[int, dict[str, Any]] = {}
+    for r in journal.read(journal.IMPORTED):
+        m = re.search(r"/(\d+)/text\.nyshtext(?:$|\?)", str(r.get("source") or ""))
+        if m:
+            vziate.setdefault(int(m.group(1)), r)
+    if not vziate:
+        return
+    try:
+        items = stany(sorted(vziate), base=base)
+    except UploadError as exc:
+        env.warn("pulled_unchecked", f"не вдалося спитати стан узятих внесків: {exc}")
+        return
+    zastari = []
+    for i in items:
+        stan = str(i.get("state") or "")
+        if stan in ("", "chynnyi"):
+            continue
+        r = vziate.get(int(i.get("id") or 0), {})
+        sprava = str(r.get("shifra") or r.get("case_key") or "")
+        zastari.append({"contribution": i.get("id"), "case": sprava, "state": stan,
+                        "replaced_by": i.get("replaced_by")})
+        if stan == "zamineno":
+            env.warn("pulled_replaced",
+                     f"{sprava}: внесок {i.get('id')} автор замінив внеском "
+                     f"{i.get('replaced_by')} — `nysh share pull \"{sprava}\" --take --force`")
+        elif stan == "vidklykano":
+            env.warn("pulled_withdrawn",
+                     f"{sprava}: внесок {i.get('id')} автор відкликав — у пулі його більше "
+                     "немає; прийняте у вас лишається, вирішуйте, чи спиратись на нього")
+        else:
+            env.warn("pulled_hidden",
+                     f"{sprava}: внеску {i.get('id')} у каталозі пулу більше немає")
+    if isinstance(env.data, dict):
+        env.data["pulled_stale"] = zastari
 
 
 class ShareRowArgs(BaseModel):

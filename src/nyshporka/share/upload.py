@@ -177,6 +177,55 @@ def _request(method: str, url: str, *, body: Any = None, auth: str = "") -> dict
     return got
 
 
+def _adresa_reiestratsii(home: str, replaces: int | None, why: str) -> str:
+    """Адреса реєстрації; заміна власного внеску — параметрами запиту.
+
+    Параметри, а не поле маніфесту: маніфест — знімок того, що приїхало, і
+    сервер зберігає його доказом, а заміна — намір видавця на цей раз.
+    """
+    if replaces is None:
+        return f"{home}/contributions"
+    from urllib.parse import urlencode
+
+    return f"{home}/contributions?" + urlencode({"replaces": int(replaces), "why": why})
+
+
+def _tok_i_dim(base: str) -> tuple[str, str]:
+    tok = token()
+    if not tok:
+        raise UploadError(
+            "немає ключа Супряги. Увійдіть: `nysh share login` — або покладіть "
+            f"ключ у {ENV_NAME} (видається в кабінеті на nyshporka.online)")
+    home = catalog.base_url(base)
+    if not catalog.may_send_key(home, explicit=False):
+        raise UploadError(
+            f"ключ Супряги не надсилається на {home}: довірена лише "
+            f"https://…{catalog.TRUSTED_DOMAIN}. Для свого сервера назвіть його "
+            f"явно: {catalog.ENV_TRUST}=https://хост[:порт] (лише HTTPS)")
+    return tok, home
+
+
+def withdraw(contribution: int, why: str, *, base: str = "") -> dict[str, Any]:
+    """Забрати власний внесок із каталогу Супряги.
+
+    Поки внеском ніхто не скористався, пул ховає його одразу; взяли (перевірено,
+    інші пишуть до справи нотатки) — ставить запит модерації. Нічого не
+    видаляється: байти лишаються, і посилання, що вже пішло людям, працює.
+    """
+    tok, home = _tok_i_dim(base)
+    return _request("POST", f"{home}/contributions/{int(contribution)}/withdraw",
+                    body={"why": why}, auth=tok)
+
+
+def stany(ids: list[int], *, base: str = "") -> list[dict[str, Any]]:
+    """Чи чинні внески, які ця машина колись узяла з пулу."""
+    if not ids:
+        return []
+    tok, home = _tok_i_dim(base)
+    got = _request("POST", f"{home}/contributions/stan", body={"ids": ids}, auth=tok)
+    return [i for i in got.get("items") or [] if isinstance(i, dict)]
+
+
 def _z_chekanniam(tekst: str, retry_after: float | None) -> str:
     """Додати до відмови, КОЛИ пробувати знову, якщо пул це сказав.
 
@@ -193,11 +242,13 @@ def _z_chekanniam(tekst: str, retry_after: float | None) -> str:
 
 
 def publish(path: Path, *, base: str = "", auth: str = "",
-            say: Callable[[str], None] | None = None) -> dict[str, Any]:
+            say: Callable[[str], None] | None = None,
+            replaces: int | None = None, why: str = "") -> dict[str, Any]:
     """Див. `_publish`; тут — хронометраж етапів у відповіді й у відмові."""
     etapy = _Etapy()
     try:
-        got = _publish(path, base=base, auth=auth, say=say, etapy=etapy)
+        got = _publish(path, base=base, auth=auth, say=say, etapy=etapy,
+                       replaces=replaces, why=why)
     except UploadError as exc:
         exc.etapy = etapy.rows
         raise
@@ -207,7 +258,8 @@ def publish(path: Path, *, base: str = "", auth: str = "",
 
 
 def _publish(path: Path, *, base: str, auth: str,
-             say: Callable[[str], None] | None, etapy: _Etapy) -> dict[str, Any]:
+             say: Callable[[str], None] | None, etapy: _Etapy,
+             replaces: int | None = None, why: str = "") -> dict[str, Any]:
     """Віддати зібраний пакет у пул.
 
     Повертає відповідь сервера. Повторний виклик із тим самим змістом
@@ -255,7 +307,8 @@ def _publish(path: Path, *, base: str, auth: str,
         raise UploadError(f"не прочитати пакет {path.name}: {exc}") from exc
 
     with etapy("register"):
-        got = _request("POST", f"{home}/contributions", body=manifest.as_json(), auth=tok)
+        got = _request("POST", _adresa_reiestratsii(home, replaces, why),
+                       body=manifest.as_json(), auth=tok)
     if got.get("duplicate"):
         if got.get("rejudge") and got.get("contribution"):
             # 🔴 Пул відхиляв цей текст ІНШИМИ воротами, ніж має зараз, і

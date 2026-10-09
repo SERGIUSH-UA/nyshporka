@@ -489,18 +489,29 @@ def suggest_cmd(
 def publish_cmd(
     path: str = typer.Argument(..., help="зібраний пакет .nyshtext"),
     base: str = typer.Option("", "--base", help="інша адреса пулу"),
+    replaces: int | None = typer.Option(
+        None, "--replaces",
+        help="номер СВОГО внеску в тій самій справі, який цей заступить"),
+    why: str = typer.Option("", "--why", help="чому заміна (обов'язково з --replaces)"),
     as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Віддати зібраний пакет у пул.
 
     Повторний виклик із тим самим змістом безпечний: пул упізнає його за
-    хешем змісту й нічого не заливає вдруге.
+    хешем змісту й нічого не заливає вдруге. Той самий текст із виправленою
+    карткою (`share card`) оновлює картку: одразу, якщо справа лише ваша,
+    або пропозицією модерації, якщо в неї є інші автори.
+
+    `--replaces N` — нова версія власного внеску N (перечитано новою моделлю,
+    виправлено): старий зникає з каталогу лише після того, як новий
+    прийнято. Хибна шифра заміною не виправляється — `share withdraw`.
     """
     from nyshporka import ops as O
     from nyshporka.share.upload import OUTCOME_TEXT, VIDDANO, VZHE_Ye
 
     _kliuch_abo_vkhid(as_json)
-    env = O.call("share.publish", {"path": path, "base": base})
+    env = O.call("share.publish", {"path": path, "base": base,
+                                   "replaces": replaces, "why": why})
     if _answer(env, as_json):
         return
     d = env.data or {}
@@ -518,6 +529,33 @@ def publish_cmd(
     else:
         console.print(f"[warn]{OUTCOME_TEXT.get(vyhid, vyhid)}[/warn]")
     _notes(env)
+
+
+@app.command("withdraw")
+def withdraw_cmd(
+    contribution: int = typer.Argument(..., help="номер вашого внеску в Супрязі"),
+    why: str = typer.Option(..., "--why", help="чому — побачить модератор"),
+    base: str = typer.Option("", "--base", help="інша адреса пулу"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
+) -> None:
+    """Забрати свій внесок із Супряги: не та справа, хибна шифра, віддавати не можна.
+
+    Поки внеском ніхто не скористався — одразу. Перевірено чи до справи пишуть
+    нотатки інші — запит модерації, рішення прийде сповіщенням. Нічого не
+    видаляється. Хибну шифру після цього виправляє звичайний `share publish`
+    під правильною.
+    """
+    from nyshporka import ops as O
+
+    _kliuch_abo_vkhid(as_json)
+    env = O.call("share.withdraw", {"contribution": contribution, "why": why, "base": base})
+    if _answer(env, as_json):
+        return
+    d = env.data or {}
+    if d.get("withdrawn"):
+        console.print(f"[ok]внесок {_e(contribution)} відкликано[/ok] — {_e(d.get('text', ''))}")
+    else:
+        console.print(f"[warn]{_e(d.get('text') or 'запит чекає модерації')}[/warn]")
 
 
 def _kliuch_abo_vkhid(as_json: bool) -> None:
