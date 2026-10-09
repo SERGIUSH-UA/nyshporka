@@ -524,3 +524,56 @@ def test_an_unknown_model_is_refused_before_anything_moves(space: Path,
     monkeypatch.setattr(R, "resolve_model", nope)
     with pytest.raises(PL.PlanError, match="не знайдена"):
         PL.build(case, script="cyrillic", model="вигадана.pt")
+
+
+def _specialist_case(space: Path, monkeypatch, *, read_by: str = "") -> Path:
+    """Справа ф.224: бойова пара Писар v19 + Літописець, латинка — Скриба PPv3,
+    спеціаліст `pysar_x18_v1.pt`; `read_by` — модель, що вже читала головну теку."""
+    import json
+
+    from nyshporka.core.workspace import workspace
+    from nyshporka.htr import run as R
+
+    case = _wire_case(space, monkeypatch, name="op1-spr-80")
+    w = {n: space / n for n in ("pysar_cyr_v19.pt", "diak_cyr_v6.safetensors",
+                                "skryba_pp_v3.safetensors", "pysar_x18_v1.pt")}
+    for p in w.values():
+        p.write_bytes(b"\0")
+    pairs = {"cyrillic": (w["pysar_cyr_v19.pt"], w["diak_cyr_v6.safetensors"]),
+             "latin": (w["skryba_pp_v3.safetensors"], None)}
+    monkeypatch.setattr(R, "pick_model", lambda script, second_voice=True: pairs[script])
+    monkeypatch.setattr(R, "resolve_model", lambda spec: (w["pysar_x18_v1.pt"], "cyrillic"))
+    if read_by:
+        main = workspace().htr_reports / "op1-spr-80"
+        main.mkdir(parents=True)
+        (main / "_htr_meta.json").write_text(json.dumps({"model": read_by}), encoding="utf-8")
+    return case
+
+
+def test_a_specialist_keeps_both_voices(space: Path, monkeypatch) -> None:
+    """🔴 09.10.2026, рішення дослідника: спеціаліст під ф.224 («Писар XVIII») читає
+    ТРЬОМА моделями — він основний голос, Літописець і Скриба лишаються. Доти
+    будь-яка названа модель скидала голоси, а `--with` разом із `--model` відмовляв."""
+    from nyshporka.cloud import plan as PL
+
+    case = _specialist_case(space, monkeypatch)
+    got = PL.build(case, script="cyrillic", model="pysar_x18_v1.pt", also=["latin"])
+    assert got.model.name == "pysar_x18_v1.pt"
+    assert got.voice is not None and got.voice.name == "diak_cyr_v6.safetensors"
+    assert [p.name for p in got.extra_voices] == ["skryba_pp_v3.safetensors"]
+    assert got.out_dir.name == "op1-spr-80", "нечитана справа — головна тека"
+    assert got.base_out is None
+
+
+def test_a_specialist_over_a_reading_goes_beside_it(space: Path, monkeypatch) -> None:
+    """Справу вже прочитав бойовий v19: спеціаліст лягає поруч, а не відсуває
+    читання v19 у `_prev_` (звідти воно випало б із реєстру й стору)."""
+    from nyshporka.cloud import plan as PL
+
+    case = _specialist_case(space, monkeypatch, read_by="pysar_cyr_v19.pt")
+    got = PL.build(case, script="cyrillic", model="pysar_x18_v1.pt", also=["latin"])
+    assert got.out_dir.name == "op1-spr-80-pysar_x18_v1"
+    assert got.base_out is not None and got.base_out.name == "op1-spr-80", \
+        "засів сегментації — з теки першого читання"
+    assert got.voice is not None and [p.name for p in got.extra_voices] == ["skryba_pp_v3.safetensors"]
+    assert any("спеціаліст" in w for w in got.warnings)

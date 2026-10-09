@@ -303,6 +303,7 @@ def build(case_dir: str | Path, *, backend: str = "ssh", target: str = "",
     # тека дає заразом інший `run_id` (модель у нього входить) і інший префікс
     # чекпоінтів, тобто дві моделі не крадуть роботу одна в одної.
     reread = False
+    specialist = False
     if str(model or "").strip():
         try:
             named, named_script = resolve_model(str(model).strip())
@@ -312,7 +313,15 @@ def build(case_dir: str | Path, *, backend: str = "ssh", target: str = "",
         # цієї гілки `--model pysar_cyr_v17.pt` завів би теку `-pysar_v17`
         # поруч зі справжньою й перечитав би справу за гроші, нічого не
         # додавши.
-        if named != weights:
+        if named != weights and _same_engine(named, weights):
+            # 🔴 СПЕЦІАЛІСТ того самого рушія й письма (`pysar_x18_v1.pt` замість
+            # бойового Писаря на уніатському скорописі ф.224): він стає ОСНОВНИМ
+            # голосом, а другий голос і `--with` лишаються — ансамбль читає ті
+            # самі рядки PARSeq, що й за бойової моделі. Доти будь-яка названа
+            # модель скидала голоси, і спеціаліст читав справу один (09.10.2026,
+            # рішення дослідника: «читати обов'язково мають 3 моделі»).
+            specialist, weights, scr = True, named, named_script
+        elif named != weights:
             reread, weights, voice, scr = True, named, None, named_script
             if also:
                 # Ансамбль є лише в PARSeq-гілці: додаткові голоси читають ті
@@ -339,6 +348,17 @@ def build(case_dir: str | Path, *, backend: str = "ssh", target: str = "",
     stem = out_name or run_name(case, key)
     base_out = workspace().htr_reports / stem
     warnings: list[str] = [bokom] if bokom else []
+    # 🔴 Спеціаліст пише в головну теку лише тоді, коли справу ще ніхто не читав.
+    # Інакше — у сусідню `-<тег>`: читання бойовою моделлю лишається на місці, а
+    # не йде в `_prev_`, де випало б із реєстру й стору.
+    if specialist and not out_dir:
+        from nyshporka.cloud.verify import read_meta
+
+        if read_meta(base_out).get("model"):
+            reread = True
+            warnings.append(
+                f"спеціаліст {weights.name}: у {base_out.name} уже лежить читання "
+                f"іншою моделлю — цей прогін ляже поруч, у теку з тегом моделі")
     # 🔴 Головну теку зайняло читання ІНШОГО письма — цей прогін іде в свою,
     # навіть коли модель бойова для свого письма (`foreign_reading`).
     other = "" if (reread or out_dir) else foreign_reading(base_out, weights)
@@ -389,6 +409,20 @@ def build(case_dir: str | Path, *, backend: str = "ssh", target: str = "",
         source_dir=Path(source_dir) if source_dir else None,
         base_out=base_out if reread else None,
         pages_left=pages_left)
+
+
+def _same_engine(a: Path, b: Path) -> bool:
+    """Обидві моделі — той самий рушій і те саме письмо за маніфестом рушіїв.
+
+    Так відрізняється спеціаліст (інша версія Писаря на свій матеріал), що
+    може читати з голосами, від перечитування іншим рушієм чи письмом.
+    """
+    from nyshporka.htr import manifest as M
+
+    man = M.active()
+    ea, eb = man.engine_for_model(Path(a).name), man.engine_for_model(Path(b).name)
+    return (ea is not None and eb is not None
+            and ea.kind == eb.kind and ea.script == eb.script)
 
 
 def with_box(plan: CloudPlan, box: Box, *,
