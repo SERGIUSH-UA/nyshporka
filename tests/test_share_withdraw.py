@@ -126,3 +126,58 @@ def test_sync_bez_vziatoho_ne_pytaie(pool: list[dict[str, Any]],
 
     monkeypatch.setattr(upload, "_request", _ne)
     assert O.call("share.sync", {}).ok
+
+
+def test_sync_lokalnyi_shliakh_ne_nomer_vnesku(pool: list[dict[str, Any]],
+                                               monkeypatch: pytest.MonkeyPatch) -> None:
+    """`…/2024/text.nyshtext` на диску — не внесок 2024 у пулі."""
+    from nyshporka.share import pool as PL
+
+    monkeypatch.setattr(PL, "sync", lambda *a, **k: {"of": 0, "scope": "усе", "via": "keys"})
+    journal.record(journal.IMPORTED, shifra="x", source="D:/справи/2024/text.nyshtext")
+
+    def _ne(*a: Any, **k: Any) -> dict[str, Any]:
+        raise AssertionError("локальний шлях — не привід питати пул")
+
+    monkeypatch.setattr(upload, "_request", _ne)
+    assert O.call("share.sync", {}).ok
+
+
+def test_sync_bez_kliucha_i_staryi_pul_tykho(pool: list[dict[str, Any]],
+                                             monkeypatch: pytest.MonkeyPatch) -> None:
+    from nyshporka.share import pool as PL
+
+    monkeypatch.setattr(PL, "sync", lambda *a, **k: {"of": 0, "scope": "усе", "via": "keys"})
+    journal.record(journal.IMPORTED, shifra="x",
+                   source="https://cdn.nyshporka.online/b/x/11/text.nyshtext")
+
+    def _staryi(*a: Any, **k: Any) -> dict[str, Any]:
+        raise upload.UploadError("Not Found", status=404)
+
+    monkeypatch.setattr(upload, "_request", _staryi)
+    env = O.call("share.sync", {})
+    assert env.ok and not any(w.code == "pulled_unchecked" for w in env.warnings)
+
+    monkeypatch.setattr(upload, "token", lambda: "")
+    env = O.call("share.sync", {})
+    assert env.ok and not any(w.code.startswith("pulled") for w in env.warnings)
+
+
+def test_zadovha_prychyna_zaminy(pool: list[dict[str, Any]]) -> None:
+    env = O.call("share.publish", {"path": "x.nyshtext", "replaces": 7, "why": "я" * 501})
+    assert not env.ok and "500" in env.error
+
+
+def test_sync_chuzhyi_sait_ne_nomer_vnesku(pool: list[dict[str, Any]],
+                                          monkeypatch: pytest.MonkeyPatch) -> None:
+    from nyshporka.share import pool as PL
+
+    monkeypatch.setattr(PL, "sync", lambda *a, **k: {"of": 0, "scope": "усе", "via": "keys"})
+    journal.record(journal.IMPORTED, shifra="x",
+                   source="https://example.org/archive/123/text.nyshtext")
+
+    def _ne(*a: Any, **k: Any) -> dict[str, Any]:
+        raise AssertionError("чужий сайт — не привід питати пул")
+
+    monkeypatch.setattr(upload, "_request", _ne)
+    assert O.call("share.sync", {}).ok

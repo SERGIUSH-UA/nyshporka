@@ -494,6 +494,10 @@ def share_suggest(a: ShareSuggestArgs) -> Envelope:
     return env
 
 
+#: Найдовша причина заміни: вона їде параметром адреси реєстрації.
+MAX_WHY_ZAMINY = 500
+
+
 class SharePublishArgs(BaseModel):
     path: str = Field(description="зібраний пакет .nyshtext")
     base: str = Field(default="", description="інша адреса пулу")
@@ -538,6 +542,9 @@ def share_publish(a: SharePublishArgs) -> Envelope:
     try:
         if a.replaces is not None and not a.why.strip():
             return fail("заміна без причини не приймається: додайте --why «чому»")
+        if len(a.why.strip()) > MAX_WHY_ZAMINY:
+            # Причина заміни їде в адресі запиту, а довгу адресу проксі ріже (414).
+            return fail(f"причина заміни — до {MAX_WHY_ZAMINY} знаків; скоротіть --why")
         got = publish(Path(a.path), base=a.base, say=_khid,
                       replaces=a.replaces, why=a.why.strip())
     except UploadError as exc:
@@ -941,21 +948,42 @@ def _vziate_zastarilo(env: Envelope, base: str) -> None:
     старим текстом. Тому лише попередження з порадою, без жодної дії.
     """
     import re
+    from urllib.parse import urlsplit
 
     from nyshporka.share import journal
+    from nyshporka.share.catalog import TRUSTED_DOMAIN, base_url
     from nyshporka.share.upload import UploadError, stany
 
+    svii = (urlsplit(base_url(base)).hostname or "").lower()
     # Номер внеску — у самій адресі пакета: `b/<справа>/<внесок>/text.nyshtext`.
     vziate: dict[int, dict[str, Any]] = {}
     for r in journal.read(journal.IMPORTED):
-        m = re.search(r"/(\d+)/text\.nyshtext(?:$|\?)", str(r.get("source") or ""))
+        # Лише адреса пулу: у локальному шляху (`…/2024/text.nyshtext`) число
+        # перед іменем файла — не номер внеску, і попередження було б про чужий.
+        dzherelo = str(r.get("source") or "")
+        if not dzherelo.startswith(("https://", "http://")):
+            continue
+        # І лише пул: номер у чужій адресі (`…/123/text.nyshtext` на іншому
+        # сайті) — не наш внесок.
+        hist = (urlsplit(dzherelo).hostname or "").lower()
+        if not (hist in (svii, TRUSTED_DOMAIN) or hist.endswith("." + TRUSTED_DOMAIN)):
+            continue
+        m = re.search(r"/(\d+)/text\.nyshtext(?:$|\?)", dzherelo)
         if m:
             vziate.setdefault(int(m.group(1)), r)
     if not vziate:
         return
+    from nyshporka.share import upload
+
+    if not upload.token():
+        # Без ключа людина лише качає — питати стан нема чим, і це не збій.
+        return
     try:
         items = stany(sorted(vziate), base=base)
     except UploadError as exc:
+        if exc.status in (404, 405):
+            # Пул старіший за запит стану — мовчки, як і досі.
+            return
         env.warn("pulled_unchecked", f"не вдалося спитати стан узятих внесків: {exc}")
         return
     zastari = []
