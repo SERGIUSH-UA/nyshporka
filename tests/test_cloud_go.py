@@ -1014,6 +1014,26 @@ def test_go_json_prints_one_object_last(cli, space: Path, monkeypatch) -> None:
     assert backend.acquired == 0
 
 
+@pytest.mark.parametrize(("released", "shown", "absent"), [
+    (None, "невідомо", "НЕ ПОГАШЕНА"),
+    (False, "НЕ ПОГАШЕНА", "невідомо"),
+    (True, "погашена", "НЕ ПОГАШЕНА"),
+])
+def test_go_does_not_cry_unreleased_about_a_machine_nobody_took(
+        cli, space: Path, monkeypatch, released, shown, absent) -> None:
+    """🔴 `released=None` — «не знаємо». Наглядач, що не доповів про старт, міг
+    не взяти нічого, а червоне «НЕ ПОГАШЕНА» посилало людину гасити машину,
+    якої не було (звіт 10.10.2026, тричі поспіль)."""
+    runner, app, _backend = cli
+    case = _make_case(space)
+    monkeypatch.setattr(GO, "go", lambda *a, **kw: GO.GoResult(
+        verdict="refused", why="наглядач не доповів про старт", rented=True,
+        released=released))
+    got = runner.invoke(app, ["go", str(case), "--script", "cyrillic"])
+    line = next(ln for ln in got.output.splitlines() if "машина" in ln)
+    assert shown in line and absent not in line, got.output
+
+
 # ── доктор ───────────────────────────────────────────────────────────────────
 def test_doctor_reports_rent_without_touching_the_network(monkeypatch) -> None:
     from nyshporka.cloud import registry as REG

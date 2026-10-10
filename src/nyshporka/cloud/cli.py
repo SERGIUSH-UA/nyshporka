@@ -1147,8 +1147,13 @@ def cmd_go(
     if res.rented:
         console.print(f"  сторінок : {res.pages_done} з {res.pages_total}")
         console.print(f"  витрачено: {_usd(res.spent_usd)} за {res.rent_hours:.2f} год")
-        console.print("  машина   : " + ("погашена" if res.released
-                                          else "[err]НЕ ПОГАШЕНА[/err]"))
+        # 🔴 Три стани, а не два. `None` — «не знаємо»: наглядач, що не доповів
+        # про старт, міг не взяти нічого, і червоне «НЕ ПОГАШЕНА» тут посилало
+        # людину гасити машину, якої не було (звіт 10.10.2026, тричі поспіль).
+        console.print("  машина   : " + (
+            "погашена" if res.released
+            else "[err]НЕ ПОГАШЕНА[/err]" if res.released is False
+            else "[warn]невідомо[/warn] — тарифікується зараз: `nysh cloud rent status`"))
     if res.out_dir and res.verdict != "dry_run":
         console.print(f"  вихід    : {res.out_dir}")
     for note in res.notes:
