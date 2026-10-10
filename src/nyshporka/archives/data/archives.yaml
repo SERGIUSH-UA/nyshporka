@@ -119,6 +119,17 @@ repositories:
     name: Archiwum Główne Akt Dawnych w Warszawie
     country: PL
     aliases: [АГАД, Головний архів давніх актів]
+  # Державні архіви Польщі — книги в Супрязі вже є (Красноставські гродські
+  # з Любліна, метрики Павлосюва з Перемишля), а без запису тут сайт показував
+  # голий ключ і клав їх у «Інші», а не в Польщу.
+  APL:
+    label: APL
+    name: Archiwum Państwowe w Lublinie
+    country: PL
+  APPRZ:
+    label: APPrz
+    name: Archiwum Państwowe w Przemyślu
+    country: PL
   IRNBUV:
     label: ІРНБУВ
     name: Інститут рукопису Національної бібліотеки України імені В. І. Вернадського
