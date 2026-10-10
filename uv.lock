@@ -1161,7 +1161,7 @@ wheels = [
 
 [[package]]
 name = "gpuhire"
-version = "0.7.0"
+version = "0.7.4"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
@@ -1173,9 +1173,9 @@ dependencies = [
     { name = "rich" },
     { name = "typer" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/f4/97/18142e866adc393f1086ac9907d5792ff818787ec95e1103be3189a9a17d/gpuhire-0.7.0.tar.gz", hash = "sha256:e5e8e677b71b5078d46e3f5badd0cf735021760a45849275ea40df79dabf3d4e", size = 1178753, upload-time = "2026-10-08T08:18:43.464Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/16/ab/6457f5796d937486f376ab28edec510c06568a2c91ee6d4a640ab1fafdfd/gpuhire-0.7.4.tar.gz", hash = "sha256:1b19e07031a17cff3c92e60191dd99343758d992ee010a0ba7ba60c28e14fb66", size = 1202809, upload-time = "2026-10-10T09:40:20.301Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/24/b1/fe01285169bc9d38f53e0ec35bed4c52d66c61296a34db1881f472b71d97/gpuhire-0.7.0-py3-none-any.whl", hash = "sha256:607d455d3f859466da4becca04cb108ac4dbf869d5357c7ba6d8f833441c7b66", size = 845185, upload-time = "2026-10-08T08:18:41.908Z" },
+    { url = "https://files.pythonhosted.org/packages/4d/4b/5f8445da42b4cfa492461c98a9c117f02962f2c41cce366a34c06969a7b7/gpuhire-0.7.4-py3-none-any.whl", hash = "sha256:2c1d7b20036dbff135363b09679ea66e9da1c76b706e96739e4a157578cc7d49", size = 860305, upload-time = "2026-10-10T09:40:18.371Z" },
 ]
 
 [package.optional-dependencies]
@@ -2410,7 +2410,7 @@ requires-dist = [
     { name = "fastapi", marker = "extra == 'app'", specifier = ">=0.115" },
     { name = "ged4py", marker = "extra == 'all'", specifier = ">=0.5" },
     { name = "ged4py", marker = "extra == 'gedcom'", specifier = ">=0.5" },
-    { name = "gpuhire", extras = ["r2", "vast"], marker = "extra == 'rent'", specifier = ">=0.7.0" },
+    { name = "gpuhire", extras = ["r2", "vast"], marker = "extra == 'rent'", specifier = ">=0.7.4" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "httpx", extras = ["socks"], marker = "extra == 'all'", specifier = ">=0.27" },
     { name = "httpx", extras = ["socks"], marker = "extra == 'archives'", specifier = ">=0.27" },
