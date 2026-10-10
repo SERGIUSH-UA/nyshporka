@@ -75,6 +75,9 @@ EXIT_CODES: dict[str, int] = {
     # 🔴 Не `market_empty`: провайдер відмовив у ПОШУКУ до скидання денної
     # квоти рядків (06.10.2026), ринок ніхто не дивився. Лікується часом.
     "search_quota": 12,
+    # Машини є й гроші є, але кадри їхали б з дому на машину понад чверть
+    # оренди — платили б за перевезення, а не за читання. Рішення за людиною.
+    "slow_uplink": 13,
     "cancelled": 130}
 
 #: Скільки опитувань поспіль машина може мовчати, перш ніж це збій. Свіжий бокс
@@ -500,7 +503,7 @@ def go(case: str | Sequence[str], *, backend: str = "vast",
        thin: bool = False, transport: str = "auto",
        max_usd_per_1000: float = 0.0, params: Sequence[str] = (),
        boxes: int = 1, datacenter_only: bool = False, pace: str = "",
-       min_pph: float = 0.0, machine: int = 0,
+       min_pph: float = 0.0, machine: int = 0, accept_slow_delivery: bool = False,
        on_event: EventFn | None = None, tick_sec: float = 60.0) -> GoResult:
     """Прочитати справу (або кілька) на орендованій машині від початку до кінця.
 
@@ -538,7 +541,8 @@ def go(case: str | Sequence[str], *, backend: str = "vast",
             thin=thin, transport=transport,
             max_usd_per_1000=max_usd_per_1000, params=tuple(params),
             boxes=boxes, datacenter_only=datacenter_only, pace=pace,
-            min_pph=min_pph, machine=machine, tick_sec=tick_sec)
+            min_pph=min_pph, machine=machine,
+            accept_slow_delivery=accept_slow_delivery, tick_sec=tick_sec)
     except GoRefused as exc:
         res.verdict, res.why = exc.verdict, str(exc)
     except RUN.CeilingHit as exc:
@@ -956,7 +960,8 @@ def _go(res: GoResult, cases: tuple[str, ...], say: EventFn,
         allow_partial: bool, rotate_landscape: bool, thin: bool,
         transport: str, max_usd_per_1000: float, params: tuple[str, ...],
         boxes: int, tick_sec: float, datacenter_only: bool = False,
-        pace: str = "", min_pph: float = 0.0, machine: int = 0) -> None:
+        pace: str = "", min_pph: float = 0.0, machine: int = 0,
+        accept_slow_delivery: bool = False) -> None:
     from nyshporka.cloud import plan as PL
 
     # 0. стелі. 🔴 Нуль і від'ємне — відмова ДО всього (аудит 29.09.2026).
@@ -1094,12 +1099,12 @@ def _go(res: GoResult, cases: tuple[str, ...], say: EventFn,
     pace = (pace or "").strip().lower()
     if pace and pace not in ("fast", "cheap"):
         raise GoRefused(f"`--pace {pace}`: можна лише fast або cheap")
-    if thin and (pace or min_pph):
-        # Тонкий шлях вибирає машину плагіном за ціллю за замовчуванням і
-        # підлоги темпу не знає — мовчки прийняти ручку означало б дати
+    if thin and (pace or min_pph or accept_slow_delivery):
+        # Тонкий шлях вибирає машину плагіном за ціллю за замовчуванням, підлоги
+        # темпу й ціни доставки не знає — мовчки прийняти ручку означало б дати
         # людині думати, що вона діє.
-        raise GoRefused("`--pace` і `--min-pph` діють лише на наглядацькому шляху — "
-                        "приберіть `--thin` або ці ручки.")
+        raise GoRefused("`--pace`, `--min-pph` і `--accept-slow-delivery` діють лише "
+                        "на наглядацькому шляху — приберіть `--thin` або ці ручки.")
     if machine and boxes > 1:
         raise GoRefused("`--machine` закріплює ОДНУ машину, а партія на кілька "
                         "машин (`--boxes`) їх потребує кілька.")
@@ -1122,7 +1127,9 @@ def _go(res: GoResult, cases: tuple[str, ...], say: EventFn,
         for knob, setting in (("datacenter_only", "true" if datacenter_only else ""),
                               ("pace", pace),
                               ("min_pages_per_hour", f"{min_pph:g}" if min_pph else ""),
-                              ("machine_id", str(int(machine)) if machine else "")):
+                              ("machine_id", str(int(machine)) if machine else ""),
+                              ("accept_slow_delivery",
+                               "true" if accept_slow_delivery else "")):
             if setting and knob not in given:
                 params = (*params, f"{knob}={setting}")
 

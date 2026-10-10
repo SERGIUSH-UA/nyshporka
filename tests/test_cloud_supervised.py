@@ -25,6 +25,7 @@ from test_cloud_go import Rent, _make_case
 from test_cloud_run import FakeSession
 
 from nyshporka.cloud import go as GO
+from nyshporka.cloud import money as M
 from nyshporka.cloud import run as RUN
 from nyshporka.cloud import state as ST
 from nyshporka.cloud import supervised as SUP
@@ -1564,6 +1565,83 @@ def test_thin_path_carries_the_filter_into_the_need(space: Path, monkeypatch,
     assert res.verdict != "refused", res.why
     assert needs and all(n.datacenter_only for n in needs)
     assert not fake_gpurunner.calls
+
+
+# ── доставка кадрів з дому: свідомий ризик ──────────────────────────────────
+#: Кошторис наглядача для 25 ГБ на каналі 1 МБ/с (10.10.2026, сторонній
+#: користувач без сховища): машина годинами приймала б кадри, а не читала.
+SLOW_DELIVERY = {
+    "bytes": 25_000_000_000, "mb_per_sec": 1.0,
+    "source": "попередні доставки з цього комп'ютера", "hours": 6.944,
+    "read_hours": 2.5, "share": 0.735, "usd": 1.04, "max_share": 0.25,
+    "too_costly": True, "fits_bytes": 3_000_000_000, "accepted": False,
+    "human": "доставка 25.0 ГБ при ~1.0 МБ/с — ~6 год 57 хв оренди без читання "
+             "(~$1.04 за $0.150/год); читання ~2 год 30 хв, тобто на перевезення "
+             "піде 74% оплаченого часу",
+    "advice": "бакет R2 …"}
+
+
+def test_a_delivery_that_would_eat_the_rent_is_refused_before_renting(
+        space: Path, monkeypatch, fake_gpurunner) -> None:
+    case, _ = _wire(space, monkeypatch)
+    fake_gpurunner.set(estimate={**ESTIMATE, "delivery": SLOW_DELIVERY})
+    res = _go(case)
+    assert res.verdict == "slow_uplink" and res.exit_code == 13
+    assert "Оренди не було" in res.why
+    assert "nysh cloud rent storage" in res.why, "сховище — перший вихід"
+    assert "~3.0 ГБ на захід" in res.why, "порція, що вкладається, — числом"
+    assert "--accept-slow-delivery" in res.why
+    assert not [c for c in fake_gpurunner.called("htr", "supervise")
+                if "--dry-run" not in c], "до оренди не дійшло"
+    assert not res.rented
+
+
+def test_consent_to_slow_delivery_reaches_the_supervisor(
+        space: Path, monkeypatch, fake_gpurunner) -> None:
+    case, _ = _wire(space, monkeypatch)
+    fake_gpurunner.set(estimate={**ESTIMATE,
+                                 "delivery": {**SLOW_DELIVERY, "accepted": True}})
+    res = _go(case, dry_run=True, accept_slow_delivery=True)
+    assert res.verdict != "slow_uplink", res.why
+    assert "accept_slow_delivery=true" in _plan_of(fake_gpurunner)["params"]
+    assert res.estimate["delivery"]["share"] == 0.735, "агент бачить ціну доставки"
+
+
+def test_a_paid_delivery_is_in_the_budget_and_the_hours(
+        space: Path, monkeypatch, fake_gpurunner) -> None:
+    """🔴 Інакше згода вела б на бюджет чи дедлайн посеред читання: читання
+    $0.40 і 0.5 год, доставка ще $1.04 і ~7 год."""
+    case, _ = _wire(space, monkeypatch)
+    fake_gpurunner.set(estimate={**ESTIMATE,
+                                 "delivery": {**SLOW_DELIVERY, "accepted": True}})
+    res = _go(case, accept_slow_delivery=True, confirm=True)
+    assert res.verdict == "detached", res.why
+    launch = next(c for c in fake_gpurunner.called("htr", "supervise") if "--detach" in c)
+    assert float(launch[launch.index("--budget") + 1]) >= 1.44
+    assert float(launch[launch.index("--max-hours") + 1]) == M.max_hours_for(0.5) + 7
+
+
+def test_a_cheap_delivery_is_shown_not_refused(space: Path, monkeypatch,
+                                               fake_gpurunner) -> None:
+    case, _ = _wire(space, monkeypatch)
+    cheap = {**SLOW_DELIVERY, "too_costly": False, "share": 0.08}
+    fake_gpurunner.set(estimate={**ESTIMATE, "delivery": cheap})
+    res = _go(case, dry_run=True)
+    assert res.verdict == "dry_run", res.why
+    assert res.estimate["delivery"]["share"] == 0.08
+
+
+def test_thin_path_does_not_pretend_to_weigh_the_delivery(
+        space: Path, monkeypatch, fake_gpurunner) -> None:
+    case, _ = _wire(space, monkeypatch)
+    res = _go(case, thin=True, accept_slow_delivery=True)
+    assert res.verdict == "refused" and "--accept-slow-delivery" in res.why
+
+
+def test_slow_uplink_has_its_own_exit_code() -> None:
+    codes = dict(GO.EXIT_CODES)
+    mine = codes.pop("slow_uplink")
+    assert mine not in codes.values()
 
 
 # ── ручки оренди: режим, підлога, закріплена машина ─────────────────────────

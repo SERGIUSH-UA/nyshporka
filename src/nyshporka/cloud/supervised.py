@@ -402,6 +402,28 @@ def estimate_from(payload: dict[str, Any]) -> M.Estimate:
     })
 
 
+def slow_delivery_refusal(delivery: dict[str, Any]) -> str:
+    """Відмова, коли кадри їхали б з дому на машину понад межу оренди.
+
+    🔴 Година перевезення коштує стільки ж, скільки година читання, а сторінок
+    не дає. Без сховища кадри їдуть на вже орендовану машину, і на каналі
+    ~1 МБ/с вона годинами лише приймає дані (10.10.2026: сторонній користувач,
+    машина за машиною). Тому без явної згоди захід не стартує, а людина бачить
+    години, гроші й три виходи.
+    """
+    share = float(delivery.get("max_share") or 0.25)
+    fits = int(delivery.get("fits_bytes") or 0)
+    portion = (f"менші порції — за цього каналу в межу вкладається "
+               f"~{fits / 1e9:.1f} ГБ на захід; " if fits > 0 else "менші порції; ")
+    return (f"{delivery.get('human') or 'доставка кадрів на машину'} — понад "
+            f"{share:.0%} оренди: машина стояла б і платилась, приймаючи кадри, а "
+            f"не читаючи. Оренди не було. Варіанти: сховище R2 (`nysh cloud rent "
+            f"storage --account <Account ID> --bucket <бакет>`) — кадри "
+            f"заливаються туди до оренди, і машина бере їх швидко; {portion}або "
+            f"свідомо заплатити за перевезення: той самий запуск із "
+            f"`--accept-slow-delivery`.")
+
+
 #: Розфарбування rich у захопленому виводі. Без TTY його зазвичай немає, але
 #: «зазвичай» тут недостатньо: один escape-байт робить JSON нерозбірним, а
 #: нерозбірний кошторис читається як «наглядач мовчить».
@@ -733,13 +755,31 @@ def prepare(convoy: Convoy, res: GoResult, say: Callable[..., None], *,
         raise GoRefused(est.human(), verdict="search_quota")
     if est.empty:
         raise GoRefused(est.human(), verdict="market_empty")
+    delivery = payload.get("delivery")
+    if isinstance(delivery, dict) and delivery.get("bytes"):
+        res.estimate["delivery"] = delivery
+        say("warning" if delivery.get("too_costly") else "delivery",
+            str(delivery.get("human") or ""))
+        if delivery.get("too_costly") and not delivery.get("accepted"):
+            raise GoRefused(slow_delivery_refusal(delivery), verdict="slow_uplink")
 
     cost = est.cost
+    carry_h = 0.0
+    if isinstance(delivery, dict) and delivery.get("bytes"):
+        # 🔴 Доставка — теж оренда: у вилку грошей і в стелю годин. Інакше
+        # захід, що свідомо платить за перевезення, спинився б на бюджеті чи
+        # дедлайні посеред читання — заплативши за кадри в дорозі й не
+        # діставши сторінок. Години доставки не множаться на запас прогнозу:
+        # вони заміряні, а не передбачені.
+        if cost is not None:
+            cost += float(delivery.get("usd") or 0.0)
+        carry_h = float(delivery.get("hours") or 0.0)
     low = high = None
     if cost is not None:
         low, high = M.budget_fork(cost, density_known=est.lines_per_page is not None)
     hours = max_hours if max_hours is not None else (
-        M.max_hours_for(est.hours) if est.hours is not None else MAX_HOURS_CAP)
+        M.max_hours_for(est.hours) + math.ceil(carry_h) if est.hours is not None
+        else MAX_HOURS_CAP)
     return Prepared(session=session, plan_path=plan_path, env=env, gr=list(gr),
                     est=est, cost=cost, fork_low=low, fork_high=high, hours=hours,
                     assets=assets, plan_cmd=tuple(cmd), staged=staged)

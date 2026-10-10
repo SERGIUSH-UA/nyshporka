@@ -1044,6 +1044,12 @@ def cmd_go(
         help="орендувати лише машини датацентрів, без домашніх хостів: менше "
              "обривів посеред заходу, але й машин на ринку в рази менше — "
              "частіше доведеться чекати"),
+    accept_slow_delivery: bool = typer.Option(
+        False, "--accept-slow-delivery",
+        help="свідомо заплатити за перевезення: без сховища кадри їдуть з дому на "
+             "вже орендовану машину, і на повільному каналі вона годинами "
+             "приймає дані, а не читає. Понад чверть оренди захід без цього "
+             "прапорця не стартує — кошторис назве години й долари"),
     boxes: int = typer.Option(
         1, "--boxes",
         help="партія: розкласти справи на стільки черг, по машині на чергу, з "
@@ -1071,7 +1077,8 @@ def cmd_go(
     Коди виходу: 0 готово (або пущено відчеплено) · 2 відмова до оренди ·
     3 збій · 4 неповно · 5 стеля грошей · 6 ринок порожній · 7 стеля годин ·
     8 бракує балансу · 9 машину НЕ погашено · 10 потрібен --confirm ·
-    11 партія пущена не вся · 130 перервано.
+    11 партія пущена не вся · 12 квота пошуку ринку · 13 доставка кадрів з'їла
+    б понад чверть оренди · 130 перервано.
 
     `--boxes N` — партія на N машин: вилка й рішення одні на всю партію,
     стан — `nysh cloud state --batch <id>`, згорнути — `nysh cloud stop --batch`.
@@ -1107,7 +1114,8 @@ def cmd_go(
                 transport={"store": "r2"}.get(transport, transport),
                 max_usd_per_1000=max_usd_per_1000, params=param,
                 boxes=boxes, datacenter_only=datacenter_only, pace=pace,
-                min_pph=min_pph, machine=machine, on_event=on_event,
+                min_pph=min_pph, machine=machine,
+                accept_slow_delivery=accept_slow_delivery, on_event=on_event,
                 tick_sec=max(1.0, tick))
     if as_json:
         # `print`, а не rich: один рядок без переносів і розфарбування — його
