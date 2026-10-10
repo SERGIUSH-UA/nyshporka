@@ -50,6 +50,7 @@ def _builtin(workspace: Path | None = None) -> list[Source]:
     from nyshporka.archives import active
     from nyshporka.sources.archium import ArchiumSource
     from nyshporka.sources.babynyar import BabynYarSource
+    from nyshporka.sources.catagrafii import CatagrafiiSource
     from nyshporka.sources.chtyvo import ChtyvoSource
     from nyshporka.sources.commons import CommonsSource
     from nyshporka.sources.duck import DuckSource
@@ -103,6 +104,11 @@ def _builtin(workspace: Path | None = None) -> list[Source]:
     # 🏚 Інвентаріум: волонтерський розпис маєткових інвентарів за селом — з
     # номером сторінки всередині книги. Шукає по знімку `nysh crawl inventarium`.
     out.append(cast("Source", InventariumSource(workspace)))
+    # 📜 Катаграфії Бессарабії: волонтерський покажчик до ANRM ф.134 оп.2 —
+    # село → справа й аркуші → плівка FS і кадри справи на ній. Плівки фонду
+    # лежать на дзеркалі `fsfilm`, тож за номером плівки справа береться без
+    # сесії FS. Шукає по знімку `nysh crawl catagrafii`.
+    out.append(cast("Source", CatagrafiiSource(workspace)))
     # 📚 Сканотека ПТГ: повні скани судових і нотаріальних книг (зокрема ЦДІАК
     # ф.2 — київських гродських), яких немає ні на Commons, ні в ARCHIUM.
     # Кадр — розворот, тож джерело ріже його по згину й пише карту сканів: без

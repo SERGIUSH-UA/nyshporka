@@ -68,6 +68,12 @@ SOURCES: tuple[Source, ...] = (
     # тих самих описів через посередника. Цінний переліком, не заголовком.
     Source("duck", "duck.tsv", rank=45,
            why="зведений покажчик: перелік справ фонду"),
+    # 📜 Покажчик катаграфій Бессарабії (ANRM ф.134 оп.2): заголовок — дослівно
+    # з опису архіву, але переписаний волонтером, тож нижче за людські
+    # транскрипції (50) і вище за посередника (45). Цінний плівкою FS кожної
+    # справи, якої майстер-індекс FS по цьому фонду не дає.
+    Source("catagrafii", "catagrafii.tsv", rank=48,
+           why="волонтерський покажчик опису + плівка FS справи"),
     # OCR друкованого опису: єдине джерело номера тому й сторінки прочитання.
     Source("ocr", glob="ocr_opys*.tsv", glob_skip="_pages.tsv", rank=30,
            why="OCR таблиці опису"),
@@ -86,9 +92,9 @@ SOURCES: tuple[Source, ...] = (
 #: 🔴 Порядок обробки текстових джерел: слабкі → сильні. Він несе байти —
 #: черга розбіжностей будується в цьому ж порядку, тож будь-яка перестановка
 #: змінить її вміст. Ніколи не `set` і не порядок словника.
-TEXT_ORDER: tuple[str, ...] = ("fs", "ocr", "duck", "babynyar", "catalog",
-                               "ukrfamily", "legacy", "wikisource", "archium",
-                               "manual")
+TEXT_ORDER: tuple[str, ...] = ("fs", "ocr", "duck", "catagrafii", "babynyar",
+                               "catalog", "ukrfamily", "legacy", "wikisource",
+                               "archium", "manual")
 
 TITLE_RANK: dict[str, int] = {s.name: s.rank for s in SOURCES if s.rank is not None}
 

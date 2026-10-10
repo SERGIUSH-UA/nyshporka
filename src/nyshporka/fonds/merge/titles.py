@@ -162,6 +162,15 @@ def _fuse_fields(r: Row, row: dict[str, str], name: str) -> None:
             if v:
                 r[fld] = v
 
+    if name == "catagrafii":
+        # Плівка справи з покажчика катаграфій — правилом «перше непорожнє»:
+        # іде раніше за майстер-індекс FS (`fuse_fs`), бо прив'язана до справи,
+        # а не до групи плівок.
+        for fld in ("fs_film", "fs_url", "fs_frames", "fs_place", "fs_record_type"):
+            v = (row.get(fld) or "").strip()
+            if v and not r[fld]:
+                r[fld] = v
+
     if name == "duck":
         for fld in ("duck_url", "duck_online", "duck_copy_url"):
             v = (row.get(fld) or "").strip()

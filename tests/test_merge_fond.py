@@ -104,9 +104,9 @@ def test_processing_order_is_not_the_rank_order() -> None:
     ляже черга розбіжностей. Звести їх «для порядку» означає переписати обидва
     файли-виходи.
     """
-    assert TEXT_ORDER == ("fs", "ocr", "duck", "babynyar", "catalog",
-                          "ukrfamily", "legacy", "wikisource", "archium",
-                          "manual")
+    assert TEXT_ORDER == ("fs", "ocr", "duck", "catagrafii", "babynyar",
+                          "catalog", "ukrfamily", "legacy", "wikisource",
+                          "archium", "manual")
 
 
 def test_golden_columns_are_the_declared_order() -> None:

@@ -106,7 +106,10 @@ def _channels(reg: dict[Any, dict[str, Any]]) -> dict[str, int]:
         elif r.get("mirror_url"):
             out["free"] += 1
             out["mirror"] += 1
-        elif r.get("fs_dgs"):
+        elif r.get("fs_dgs") or r.get("fs_film"):
+            # 🔴 Номер плівки без DGS — той самий вільний канал, що й у стані
+            # справи (`fonds.registry`): покажчик катаграфій дає саме плівку, і
+            # без `fs_film` уся ANRM ф.134 лягала в «тільки замовлення».
             out["free"] += 1
             out["film"] += 1
         else:
