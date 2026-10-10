@@ -94,6 +94,26 @@
   .md-header__title[hidden] { display: flex !important; flex: 1; visibility: hidden; }
 }
 
+/* Мова сторінки — `<details>`, як перемикач у шапці порталу: код мови в
+   кнопці, назви мов у панелі. */
+.portal-mova { position: relative; flex: none; margin: 0 .2rem; }
+.portal-mova > summary {
+  list-style: none; cursor: pointer; padding: .4rem .55rem; border-radius: 6px;
+  font-size: .72rem; font-weight: 600; text-transform: uppercase; color: var(--pt-fg-2);
+}
+.portal-mova > summary::-webkit-details-marker { display: none; }
+.portal-mova > summary:hover { color: var(--pt-fg); background: color-mix(in srgb, var(--pt-primary) 7%, transparent); }
+.portal-mova__pan { display: none; }
+.portal-mova[open] > .portal-mova__pan {
+  display: grid; gap: .1rem; position: absolute; right: 0; top: calc(100% + .4rem); z-index: 10;
+  min-width: 9.5rem; padding: .3rem; background: var(--pt-s0);
+  border: 1px solid var(--pt-line-2); border-radius: 10px; box-shadow: 0 8px 24px rgb(0 0 0 / .12);
+}
+.portal-mova__pan a { padding: .45rem .7rem; border-radius: 6px; font-size: .75rem; color: var(--pt-fg-2); }
+.portal-mova__pan a:hover, .portal-mova__pan a[aria-current="true"] {
+  color: var(--pt-primary); background: color-mix(in srgb, var(--pt-primary) 7%, transparent);
+}
+
 /* Пошук — поле-пігулка з UI kit порталу. */
 .md-search__form {
   background: var(--pt-s3); border: 1px solid var(--pt-line-2);

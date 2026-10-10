@@ -1,7 +1,8 @@
 {#- Підвал документації — колонки порталу. Попередня/наступна сторінка
     (`navigation.footer`) лишаються, як у Material: документацію читають
-    підряд, і це найкоротша дорога до наступного кроку. -#}
-{% set portal = "https://nyshporka.online" %}
+    підряд, і це найкоротша дорога до наступного кроку. Слова й мова порталу
+    — з `partials/slova.html`, як і в шапці. -#}
+{% import "partials/slova.html" as s with context %}
 <footer class="md-footer">
   {% if page.previous_page or page.next_page %}
     <nav class="md-footer__inner md-grid" aria-label="{{ lang.t('footer') }}">
@@ -30,28 +31,28 @@
       <div class="portal-pidval__znak">
         <img src="{{ 'assets/pechatka.webp' | url }}" alt="" width="72" height="73">
         <div>
-          <div class="portal-pidval__nazva">Нишпорка Онлайн</div>
-          <p>Архіви ближче. Люди — рідніші.</p>
+          <div class="portal-pidval__nazva">{{ s.t.nyshporka_online }}</div>
+          <p>{{ s.t.slohan }}</p>
         </div>
       </div>
       <div>
-        <h2>Нишпорка</h2>
+        <h2>{{ s.t.nyshporka }}</h2>
         <ul>
-          <li><a href="{{ portal }}/zavantazhyty">Завантажити застосунок</a></li>
-          <li><a href="{{ config.repo_url }}">Код на GitHub</a></li>
+          <li><a href="{{ s.portal }}/zavantazhyty">{{ s.t.zavantazhyty }}</a></li>
+          <li><a href="{{ config.repo_url }}">{{ s.t.kod_github }}</a></li>
         </ul>
       </div>
       <div>
-        <h2>Супряга</h2>
+        <h2>{{ s.t.supriaha }}</h2>
         <ul>
-          <li><a href="{{ portal }}/supriaha">Каталог справ</a></li>
-          <li><a href="{{ portal }}/supriaha/novyny">Що нового</a></li>
+          <li><a href="{{ s.portal }}/supriaha">{{ s.t.kataloh }}</a></li>
+          <li><a href="{{ s.portal }}/supriaha/novyny">{{ s.t.shcho_novoho }}</a></li>
         </ul>
       </div>
       <div>
-        <h2>Проєкт</h2>
+        <h2>{{ s.t.proiekt }}</h2>
         <ul>
-          <li><a href="{{ portal }}/pro">Про проєкт, ліцензії й правила</a></li>
+          <li><a href="{{ s.portal }}/pro">{{ s.t.pro_pravyla }}</a></li>
           <li>{{ config.copyright }}</li>
         </ul>
       </div>

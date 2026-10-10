@@ -102,6 +102,134 @@ nav:
   - Ліцензії й приватність: signing.md
   - Для помічника й розробника: agents/index.md
 
+# 🌐 Мови (з 2026-10-10, разом із мовними версіями порталу). Перекладено лише
+# ключові сторінки — `index`, `install`, `start`, `faq`, `share`, `signing`
+# файлами поруч (`install.en.md`); решта в мовній гілці показується
+# українською з позначкою й `noindex` (див. `overrides/main.html`): це той
+# самий справжній текст, а не підміна, і пошуковик не бачить у ньому дубля.
+# Українська — в корені (`/docs/`), інші — `/docs/en/` тощо, як `/en/` на
+# порталі.
+plugins:
+  - search
+  - i18n:
+      docs_structure: suffix
+      fallback_to_default: true
+      reconfigure_material: true
+      reconfigure_search: true
+      languages:
+        - locale: uk
+          default: true
+          name: Українська
+          build: true
+        - locale: en
+          name: English
+          build: true
+          site_name: Nyshporka
+          site_description: Reads the hand. Brings back what it found.
+          nav_translations:
+            Що таке Нишпорка: What is Nyshporka
+            Поставити й підключити помічника: Install and connect the assistant
+            Як працювати: How to use it
+            Часті питання: FAQ
+            Для досвідчених: Advanced
+            Дотренувати модель: Fine-tune the model
+            Прочитати на орендованій машині: Read on a rented machine
+            Нишпорка в Docker: Nyshporka in Docker
+            Обмінятись прочитаним (Супряга): Share what you have read (Supriaha)
+            Що нового: What's new
+            Ліцензії й приватність: Licences and privacy
+            Для помічника й розробника: For the assistant and developers
+        - locale: pl
+          name: Polski
+          build: true
+          site_name: Nyshporka
+          site_description: Czyta rękopis. Przynosi to, co znalazła.
+          nav_translations:
+            Що таке Нишпорка: Czym jest Nyshporka
+            Поставити й підключити помічника: Instalacja i podłączenie asystenta
+            Як працювати: Jak pracować
+            Часті питання: Częste pytania
+            Для досвідчених: Dla zaawansowanych
+            Дотренувати модель: Douczanie modelu
+            Прочитати на орендованій машині: Odczyt na wynajętej maszynie
+            Нишпорка в Docker: Nyshporka w Dockerze
+            Обмінятись прочитаним (Супряга): Wymiana odczytanych akt (Supriaha)
+            Що нового: Co nowego
+            Ліцензії й приватність: Licencje i prywatność
+            Для помічника й розробника: Dla asystenta i programisty
+        - locale: ro
+          name: Română
+          build: true
+          site_name: Nyshporka
+          site_description: Citește manuscrisul. Aduce ce a găsit.
+          nav_translations:
+            Що таке Нишпорка: Ce este Nyshporka
+            Поставити й підключити помічника: Instalarea și conectarea asistentului
+            Як працювати: Cum se lucrează
+            Часті питання: Întrebări frecvente
+            Для досвідчених: Pentru avansați
+            Дотренувати модель: Antrenarea suplimentară a modelului
+            Прочитати на орендованій машині: Citirea pe o mașină închiriată
+            Нишпорка в Docker: Nyshporka în Docker
+            Обмінятись прочитаним (Супряга): Schimbul de dosare citite (Supriaha)
+            Що нового: Ce este nou
+            Ліцензії й приватність: Licențe și confidențialitate
+            Для помічника й розробника: Pentru asistent și dezvoltator
+        - locale: fr
+          name: Français
+          build: true
+          site_name: Nyshporka
+          site_description: Lit le manuscrit. Rapporte ce qu’elle a trouvé.
+          nav_translations:
+            Що таке Нишпорка: Qu’est-ce que Nyshporka
+            Поставити й підключити помічника: Installer et connecter l’assistant
+            Як працювати: Comment travailler
+            Часті питання: Questions fréquentes
+            Для досвідчених: Pour les utilisateurs avancés
+            Дотренувати модель: Affiner le modèle
+            Прочитати на орендованій машині: Lire sur une machine louée
+            Нишпорка в Docker: Nyshporka dans Docker
+            Обмінятись прочитаним (Супряга): Partager ce qui a été lu (Supriaha)
+            Що нового: Nouveautés
+            Ліцензії й приватність: Licences et confidentialité
+            Для помічника й розробника: Pour l’assistant et les développeurs
+        - locale: de
+          name: Deutsch
+          build: true
+          site_name: Nyshporka
+          site_description: Liest die Handschrift. Bringt zurück, was sie gefunden hat.
+          nav_translations:
+            Що таке Нишпорка: Was ist Nyshporka
+            Поставити й підключити помічника: Installieren und Assistenten verbinden
+            Як працювати: So arbeiten Sie
+            Часті питання: Häufige Fragen
+            Для досвідчених: Für Fortgeschrittene
+            Дотренувати модель: Modell nachtrainieren
+            Прочитати на орендованій машині: Auf einer gemieteten Maschine lesen
+            Нишпорка в Docker: Nyshporka in Docker
+            Обмінятись прочитаним (Супряга): Gelesenes teilen (Supriaha)
+            Що нового: Neuigkeiten
+            Ліцензії й приватність: Lizenzen und Datenschutz
+            Для помічника й розробника: Für Assistenten und Entwickler
+        - locale: ru
+          name: Русский
+          build: true
+          site_name: Нышпорка
+          site_description: Читает рукопись. Приносит найденное.
+          nav_translations:
+            Що таке Нишпорка: Что такое Нышпорка
+            Поставити й підключити помічника: Установить и подключить помощника
+            Як працювати: Как работать
+            Часті питання: Частые вопросы
+            Для досвідчених: Для опытных
+            Дотренувати модель: Дообучить модель
+            Прочитати на орендованій машині: Прочитать на арендованной машине
+            Нишпорка в Docker: Нышпорка в Docker
+            Обмінятись прочитаним (Супряга): Обмен прочитанным (Супряга)
+            Що нового: Что нового
+            Ліцензії й приватність: Лицензии и приватность
+            Для помічника й розробника: Для помощника и разработчика
+
 # Сторінки поза меню — без попередження на кожній збірці (`--strict`).
 not_in_nav: |
   agent.md

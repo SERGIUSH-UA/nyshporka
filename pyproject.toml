@@ -145,8 +145,9 @@ gedcom = ["ged4py>=0.5"]
 site = ["mkdocs-material>=9.5", "mkdocs-roamlinks-plugin>=0.3"]
 # Сайт документації. 🔴 В `all` НЕ входить: генеалогові, який ставить
 # застосунок, збирач сайту не потрібен — його ставить лише CI і той, хто
-# правит документацію.
-docs = ["mkdocs-material>=9.5"]
+# правит документацію. `mkdocs-static-i18n` — мовні версії ключових сторінок
+# (`install.en.md`), з 2026-10-10 разом із мовними версіями порталу.
+docs = ["mkdocs-material>=9.5", "mkdocs-static-i18n>=1.3"]
 all = ["nyshporka[app,archives,cfshield,htr,cloud,train,xlsx,gedcom]"]
 
 [project.urls]

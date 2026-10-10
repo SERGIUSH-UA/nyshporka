@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+{#- Мапа сайту з мовними версіями — за зразком `custom_i18n_sitemap`
+    плагіна mkdocs-static-i18n, з однією відмінністю: у мапу й у
+    `xhtml:link` іде лише СПРАВЖНІЙ переклад. Сторінка мовної гілки, що
+    показує український оригінал (перекладено лише ключові сторінки), має
+    `noindex` (див. `main.html`), і в мапі їй не місце: інакше пошуковик
+    дістав би сім адрес одного тексту. Файл у `custom_dir` — і плагін свого
+    не ставить. -#}
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">
+{%- for locale, i18n_files in i18n_alternates.items() %}
+{%- for file in i18n_files %}
+    {%- if not file.page or file.page.is_link or file.locale != locale %}
+        {%- continue %}
+    {%- endif %}
+    {%- set page_href = (file.page.canonical_url or file.page.abs_url or (config.site_url ~ file.url)) | e %}
+    <url>
+        <loc>{{ page_href }}</loc>
+    {%- if file.page.update_date %}
+        <lastmod>{{ file.page.update_date }}</lastmod>
+    {%- endif %}
+        <changefreq>daily</changefreq>
+    {%- set spravzhni = [] %}
+    {%- for i18n_locale, i18n_file in file.alternates.items() if i18n_file.locale == i18n_locale %}
+        {%- set _ = spravzhni.append(1) %}
+    {%- endfor %}
+    {%- if spravzhni | length > 1 %}
+    {%- for i18n_locale, i18n_file in file.alternates.items() if i18n_file.locale == i18n_locale %}
+        {%- if i18n_file.page and i18n_file.page.canonical_url %}
+            {%- set i18n_href = i18n_file.page.canonical_url | e %}
+        {%- elif i18n_file.url == "./" %}
+            {%- set i18n_href = config.site_url %}
+        {%- else %}
+            {%- set i18n_href = config.site_url ~ i18n_file.url %}
+        {%- endif %}
+        <xhtml:link rel="alternate" hreflang="{{ i18n_locale }}" href="{{ i18n_href }}"/>
+    {%- endfor %}
+    {%- endif %}
+    </url>
+{%- endfor %}
+{%- endfor %}
+</urlset>

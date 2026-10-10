@@ -1,27 +1,44 @@
 {#- Шапка документації — та сама, що на порталі nyshporka.online: логотип
-    Нишпорки, розділи порталу, пошук і перемикач теми.
+    Нишпорки, розділи порталу, мова, пошук і перемикач теми.
 
     Адреси порталу абсолютні: той самий збірний сайт лежить ще й на
     github.io (заглушками на нову адресу), і відносне «/supriaha» там вело б
     у нікуди. Основа — `partials/header.html` Material 9.7; з неї лишено
-    пошук, палітру й кнопку меню, а назву сторінки замінено розділами. -#}
-{% set portal = "https://nyshporka.online" %}
+    пошук, палітру й кнопку меню, а назву сторінки замінено розділами.
+
+    Мова — з плагіна mkdocs-static-i18n (`partials/slova.html`): слова й
+    префікс порталу ті самі, що на порталі, тож з `/docs/en/` розділи ведуть
+    на `/en/…`. -#}
+{% import "partials/slova.html" as s with context %}
 <header class="md-header md-header--shadow" data-md-component="header">
   <nav class="md-header__inner md-grid" aria-label="{{ lang.t('header') }}">
     <label class="md-header__button md-icon" for="__drawer">
       {% set icon = config.theme.icon.menu or "material/menu" %}
       {% include ".icons/" ~ icon ~ ".svg" %}
     </label>
-    <a href="{{ portal }}/" class="portal-logo" aria-label="Нишпорка Онлайн — на головну">
-      <img src="{{ 'assets/logo.webp' | url }}" alt="Нишпорка" width="140" height="44">
+    <a href="{{ s.portal }}/" class="portal-logo" aria-label="{{ s.t.na_holovnu }}">
+      <img src="{{ 'assets/logo.webp' | url }}" alt="{{ s.t.nyshporka }}" width="140" height="44">
     </a>
-    <div class="portal-rozdily" aria-label="Розділи порталу">
-      <a href="{{ portal }}/supriaha">Супряга</a>
-      <a href="{{ portal }}/zavantazhyty">Застосунок</a>
-      <a href="{{ config.site_url or ('.' | url) }}" aria-current="page">Документація</a>
-      <a href="{{ portal }}/pro">Про проєкт</a>
+    <div class="portal-rozdily" aria-label="{{ s.t.rozdily }}">
+      <a href="{{ s.portal }}/supriaha">{{ s.t.supriaha }}</a>
+      <a href="{{ s.portal }}/zavantazhyty">{{ s.t.zastosunok }}</a>
+      <a href="{{ config.site_url or ('.' | url) }}" aria-current="page">{{ s.t.dokumentatsiia }}</a>
+      <a href="{{ s.portal }}/pro">{{ s.t.pro_proiekt }}</a>
     </div>
     <div class="md-header__title" data-md-component="header-title" hidden></div>
+    {#- Мова: ця сама сторінка іншою мовою. Перелік — `extra.alternate`, який
+        плагін мов складає під кожну сторінку. `<details>` без JS, як на
+        порталі; назва кожної мови — нею ж самою. -#}
+    {% if config.extra.alternate is iterable %}
+      <details class="portal-mova">
+        <summary aria-label="{{ s.t.mova }}">{{ s.mova }}</summary>
+        <div class="portal-mova__pan">
+          {% for alt in config.extra.alternate %}
+            <a href="{{ alt.link | url }}" hreflang="{{ alt.lang }}" lang="{{ alt.lang }}"{% if alt.lang == s.mova %} aria-current="true"{% endif %}>{{ alt.name }}</a>
+          {% endfor %}
+        </div>
+      </details>
+    {% endif %}
     {% if "material/search" in config.plugins %}
       {% set search = config.plugins["material/search"] | attr("config") %}
       {% if search.enabled %}
