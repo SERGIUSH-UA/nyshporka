@@ -264,6 +264,10 @@ nysh models get     # ваги трьох моделей, ~225 МБ
 що звіряти при завантаженні —
 [підписування й ліцензії](https://nyshporka.online/docs/signing/).
 
+Назви «Нишпорка» і «Супряга», логотип і маскот — позначення проєкту; ліцензії
+коду й ваг прав на них не дають. Що можна без дозволу і що лише з ним —
+[`TRADEMARKS.md`](TRADEMARKS.md).
+
 Знайшли ваду або хочете допомогти — [`CONTRIBUTING.md`](CONTRIBUTING.md) і
 [Issues](https://github.com/SERGIUSH-UA/nyshporka/issues).
 
