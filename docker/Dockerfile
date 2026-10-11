@@ -18,7 +18,8 @@ ARG TORCH=cpu
 
 COPY --from=ghcr.io/astral-sh/uv:0.10.9 /uv /uvx /usr/local/bin/
 
-# git — PARSeq ставиться з репозиторію; gcc — triton компілює ядра на льоту
+# git — для `git+`-залежностей (PARSeq тепер ставиться архівом коміту, без git);
+# gcc — triton компілює ядра на льоту
 # (той самий набір доставляє хмарний бокс, `cloud/run.py`).
 RUN apt-get update \
  && apt-get install -y --no-install-recommends git gcc libc6-dev libgl1 libglib2.0-0 \

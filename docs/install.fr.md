@@ -52,8 +52,8 @@ l'étape 3).
 
 Téléchargez [Git for Windows](https://git-scm.com/downloads/win) et installez-le
 en cliquant partout sur « Next ». Sans lui, l'onglet Code de Claude Desktop ne
-s'ouvre pas, et Nyshporka en a besoin pour installer les modèles de lecture. Sur
-macOS, Git est généralement déjà présent.
+s'ouvre pas, et Codex n'a pas les fonctions Git. Nyshporka elle-même n'en a pas
+besoin. Sur macOS, Git est généralement déjà présent.
 
 ## Étape 3. Claude Desktop
 
@@ -137,6 +137,7 @@ claude
 | l'assistant : « commande `nysh` introuvable » | Fermer complètement Claude (icône près de l'horloge → Quitter) et le rouvrir. Dans le terminal — ouvrir une nouvelle fenêtre ; si cela ne suffit pas — redémarrer l'ordinateur |
 | l'onglet Code propose de changer d'offre | Il faut un abonnement Claude Pro ou Max |
 | l'assistant : « l'environnement des moteurs n'est pas prêt » | Dites-lui : « installe les moteurs de lecture et les modèles » |
+| l'assistant : « torch ne se charge pas », « Visual C++ manque » | Dites-lui : « installe les moteurs de lecture ». Nyshporka installera le composant Microsoft Visual C++ — Windows demandera l'autorisation d'administrateur, acceptez |
 | l'assistant ne voit pas le répertoire des scans | Le répertoire se trouve hors du répertoire de travail ; l'assistant doit demander la permission de le prendre en compte (`nysh roots add`). Les fichiers ne sont déplacés nulle part |
 | l'installateur s'est terminé avec « code 1 » | Regardez les dernières lignes de la sortie. Le plus souvent : un téléchargement interrompu, un manque de place ou un antivirus |
 | autre chose | [Écrire à l'auteur](https://github.com/SERGIUSH-UA/nyshporka/issues), en ajoutant mot pour mot ce qu'a écrit l'assistant |

@@ -53,7 +53,7 @@ Nyshporka se instalează **prima**, asistentul — ultimul (de ce — la pasul 3
 
 Descărcați [Git for Windows](https://git-scm.com/downloads/win) și instalați-l,
 apăsând peste tot „Next”. Fără el, în Claude Desktop nu se deschide fila
-Code, iar Nyshporka are nevoie de el ca să instaleze modelele de citire. Pe
+Code, iar Codex nu are funcțiile Git. Nyshporka însăși nu are nevoie de el. Pe
 macOS, Git există de obicei deja.
 
 ## Pasul 3. Claude Desktop
@@ -138,6 +138,7 @@ claude
 | asistentul: „comanda `nysh` nu a fost găsită” | Închideți complet Claude (pictograma de lângă ceas → Quit) și deschideți-l din nou. În terminal — deschideți o fereastră nouă; dacă nu ajută — reporniți calculatorul |
 | fila Code propune actualizarea planului | Este nevoie de un abonament Claude Pro sau Max |
 | asistentul: „mediul motoarelor nu este pregătit” | Spuneți-i: „instalează motoarele de citire și modelele” |
+| asistentul: „torch nu se încarcă”, „lipsește Visual C++” | Spuneți-i: „instalează motoarele de citire”. Nyshporka va instala componenta Microsoft Visual C++ — Windows va cere permisiunea de administrator, acceptați |
 | asistentul nu vede directorul cu scanări | Directorul se află în afara directorului de lucru; asistentul trebuie să ceară permisiunea de a-l lua în evidență (`nysh roots add`). Fișierele nu se mută nicăieri |
 | programul de instalare s-a încheiat cu „cod 1” | Uitați-vă la ultimele rânduri ale ieșirii. Cel mai des — o descărcare întreruptă, lipsă de spațiu sau un antivirus |
 | altceva | [Scrieți autorului](https://github.com/SERGIUSH-UA/nyshporka/issues), adăugând cuvânt cu cuvânt ce a scris asistentul |

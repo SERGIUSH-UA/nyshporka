@@ -50,8 +50,8 @@ Nyshporkę instaluje się **najpierw**, asystenta — na końcu (dlaczego — w 
 
 Pobierz [Git for Windows](https://git-scm.com/downloads/win) i zainstaluj,
 wszędzie klikając „Next”. Bez niego w Claude Desktop nie otwiera się zakładka
-Code, a Nyshporce jest potrzebny do zainstalowania modeli odczytu. Na macOS Git
-zwykle już jest.
+Code, a Codex nie ma funkcji Git. Samej Nyshporce nie jest potrzebny. Na macOS
+Git zwykle już jest.
 
 ## Krok 3. Claude Desktop
 
@@ -131,6 +131,7 @@ claude
 | asystent: „polecenia `nysh` nie znaleziono” | Całkowicie zamknij Claude (ikona przy zegarze → Zakończ) i otwórz ponownie. W terminalu — otwórz nowe okno; nie pomogło — uruchom ponownie komputer |
 | zakładka Code proponuje zmianę planu | Potrzebna jest subskrypcja Claude Pro lub Max |
 | asystent: „środowisko silników nie jest gotowe” | Powiedz mu: „zainstaluj silniki odczytu i modele” |
+| asystent: „torch się nie ładuje”, „brakuje Visual C++” | Powiedz mu: „zainstaluj silniki odczytu”. Nyshporka zainstaluje składnik Microsoft Visual C++ — Windows poprosi o uprawnienia administratora, zgódź się |
 | asystent nie widzi folderu ze skanami | Folder leży poza folderem roboczym; asystent powinien zapytać o zgodę na wzięcie go do ewidencji (`nysh roots add`). Pliki nigdzie nie są przenoszone |
 | instalator zakończył się „kod 1” | Zobacz ostatnie wiersze wyniku. Najczęściej — przerwane pobieranie, brak miejsca albo antywirus |
 | coś innego | [Napisz do autora](https://github.com/SERGIUSH-UA/nyshporka/issues), dodając dosłownie, co napisał asystent |

@@ -53,8 +53,9 @@ Schritt 3).
 
 Laden Sie [Git for Windows](https://git-scm.com/downloads/win) herunter und
 installieren Sie es, indem Sie überall auf „Next“ klicken. Ohne Git öffnet
-sich in Claude Desktop der Reiter Code nicht, und Nyshporka braucht es, um die
-Lesemodelle zu installieren. Unter macOS ist Git meist schon vorhanden.
+sich in Claude Desktop der Reiter Code nicht, und Codex fehlen die
+Git-Funktionen. Nyshporka selbst braucht Git nicht. Unter macOS ist Git meist
+schon vorhanden.
 
 ## Schritt 3. Claude Desktop
 
@@ -138,6 +139,7 @@ Skills), darunter OpenClaw. So legen Sie sie in seinen Ordner:
 | Assistent: „Befehl `nysh` nicht gefunden“ | Claude vollständig schließen (Symbol neben der Uhr → Beenden) und erneut öffnen. Im Terminal ein neues Fenster öffnen; hilft das nicht, den Computer neu starten |
 | Der Reiter Code bietet an, den Tarif zu wechseln | Nötig ist ein Abo Claude Pro oder Max |
 | Assistent: „Umgebung der Lese-Engines nicht bereit“ | Sagen Sie ihm: „Installiere die Lese-Engines und Modelle“ |
+| Assistent: „torch lädt nicht“, „Visual C++ fehlt“ | Sagen Sie ihm: „Installiere die Lese-Engines“. Nyshporka installiert die Komponente Microsoft Visual C++ — Windows fragt nach Administratorrechten, stimmen Sie zu |
 | Der Assistent sieht den Ordner mit den Scans nicht | Der Ordner liegt außerhalb des Arbeitsordners; der Assistent muss um Erlaubnis bitten, ihn in die Buchführung aufzunehmen (`nysh roots add`). Dateien werden nirgendwohin verschoben |
 | Das Installationsprogramm endete mit „Code 1“ | Sehen Sie sich die letzten Zeilen der Ausgabe an. Meist ist es ein abgebrochener Download, zu wenig Platz oder ein Virenschutz |
 | Etwas anderes | [Dem Autor schreiben](https://github.com/SERGIUSH-UA/nyshporka/issues) und wörtlich anfügen, was der Assistent geschrieben hat |

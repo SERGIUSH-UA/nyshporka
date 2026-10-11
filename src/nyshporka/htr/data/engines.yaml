@@ -50,7 +50,12 @@ runtime:
       # 🔴 Закріплено за комітом, а не за HEAD: інакше кожен `nysh htr install`
       # і кожен бокс у хмарі виконували б `setup.py` з поточного стану чужого
       # репозиторію — і збірка рушіїв не була б відтворюваною.
-      spec: "strhub @ git+https://github.com/baudm/parseq.git@1902db043c029a7e03a3818c616c06600af574be"
+      # 🔴 Архівом коміту, а не `git+…`: той самий код, але без git на машині.
+      # За `install.md` Git ставиться ПІСЛЯ Нишпорки (а з Codex — часом і зовсім
+      # ні), тож крок рушіїв інсталятора падав «git не знайдено» і людина бачила
+      # «⚠ рушії читання не зібрались» на щойно поставленому застосунку
+      # (Windows Sandbox, 11.10.2026). Зібрано з архіву без git: strhub 1.2.0.
+      spec: "strhub @ https://github.com/baudm/parseq/archive/1902db043c029a7e03a3818c616c06600af574be.zip"
       note: |
         Scene Text Recognition Model Hub, Apache-2.0. Використовується ЛИШЕ
         PARSeq. ⚠ Пакет містить підмодуль `models/abinet` під non-commercial

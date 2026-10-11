@@ -50,8 +50,8 @@ Nyshporka goes in **first**, the assistant last (step 3 explains why).
 
 Download [Git for Windows](https://git-scm.com/downloads/win) and install it,
 clicking “Next” all the way through. Without it, the Code tab in Claude Desktop
-will not open, and Nyshporka needs it to install the reading models. On macOS
-Git is usually already there.
+will not open, and Codex has no Git features. Nyshporka itself does not need it.
+On macOS Git is usually already there.
 
 ## Step 3. Claude Desktop
 
@@ -133,6 +133,7 @@ claude
 | the assistant: “the `nysh` command was not found” | Close Claude completely (icon next to the clock → Quit) and open it again. In the terminal, open a new window; if that does not help, restart the computer |
 | the Code tab offers to upgrade your plan | You need a Claude Pro or Max subscription |
 | the assistant: “the reading engine environment is not ready” | Tell it: “install the reading engines and models” |
+| the assistant: “torch does not load”, “Visual C++ is missing” | Tell it: “install the reading engines”. Nyshporka will install the Microsoft Visual C++ component — Windows will ask for administrator permission, agree |
 | the assistant cannot see the folder with the scans | The folder is outside the working folder; the assistant should ask permission to take it into its records (`nysh roots add`). No files are moved anywhere |
 | the installer finished with “code 1” | Look at the last lines of the output. Most often it is an interrupted download, lack of space or an antivirus |
 | something else | [Write to the author](https://github.com/SERGIUSH-UA/nyshporka/issues), adding word for word what the assistant wrote |

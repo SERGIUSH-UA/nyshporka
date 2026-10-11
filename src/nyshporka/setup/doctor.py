@@ -159,6 +159,11 @@ def _torch() -> Check:
     rep = _engine_report()
     if rep is None:
         return Check("Прискорення (GPU)", "warn", "простір не визначено")
+    if not rep.torch and rep.torch_broken:
+        # torch стоїть, але не вантажиться: «немає» тут було б неправдою, а
+        # причину й ліки вже назвав рядок про рушії — не дублюємо.
+        return Check("Прискорення (GPU)", "warn",
+                     "torch у середовищі рушіїв не вантажиться — див. «Рушії читання»")
     if not rep.torch:
         # ⚠ Шлях тут не називається: його вже назвав рядок про рушії, і той
         # самий шлях двічі поспіль читається як дві різні поломки.
@@ -324,6 +329,13 @@ def _engines() -> Check:
             why = f"{why} ({venv})"
         hint = ("nysh htr install — рушій ставиться окремо для КОЖНОГО "
                 "простору (~2.5 ГБ); ваги при цьому спільні на машину")
+        if rep.torch_broken and not rep.missing:
+            # Середовище ціле, бракує системного компонента: «~2.5 ГБ» тут
+            # налякало б даремно — качатиметься ~25 МБ інсталятора Microsoft.
+            hint = ("nysh htr install — поставить Microsoft Visual C++ Redistributable "
+                    "(Windows попросить дозволу адміністратора)"
+                    if henv.vc_runtime_missing() else
+                    "nysh htr install — перевірить і доставить середовище")
         if henv.intel_mac():
             # Intel Mac: PyPI без колес torch, тож команда збирає інакше — і
             # людині варто знати, звідки візьметься інтерпретатор і чому.

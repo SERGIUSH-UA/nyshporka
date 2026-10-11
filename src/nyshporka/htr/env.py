@@ -64,6 +64,9 @@ class EnvReport:
     #: Стоїть, але не тієї версії, що закріплена в маніфесті (`==`). Не
     #: «зламано», а «застаріло»: `setup()` оновлює це на місці.
     stale: tuple[str, ...] = ()
+    #: torch стоїть (метадані є), а `import torch` падає — чому саме. Порожньо,
+    #: коли torch вантажиться або його немає зовсім.
+    torch_broken: str = ""
 
 
 #: Змінні, якими батьківський Python каже дитині, ДЕ її стандартна бібліотека.
@@ -104,6 +107,62 @@ def _probe(py: Path, code: str, timeout: int = 120) -> str | None:
 
 def _version_of(py: Path, dist: str) -> str:
     return _probe(py, f"import importlib.metadata as m; print(m.version({dist!r}))") or ""
+
+
+def _import_failure(py: Path, module: str, timeout: int = 120) -> str:
+    """Чому `import <module>` падає в чужому інтерпретаторі — весь stderr, або ''."""
+    try:
+        r = subprocess.run([str(py), "-c", f"import {module}"], capture_output=True,
+                           text=True, timeout=timeout, encoding="utf-8",
+                           errors="replace", env=foreign_env())
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return (r.stderr or "").strip() if r.returncode else ""
+
+
+#: Бібліотеки Visual C++, без яких torch на Windows не вантажить власних DLL.
+#: `vcruntime140_1.dll` є лише в x64-збірці середовища виконання.
+_VC_DLLS = ("msvcp140.dll", "vcruntime140.dll")
+_VC_DLLS_X64 = ("vcruntime140_1.dll",)
+#: Офіційний інсталятор Microsoft; `{arch}` — x64 або arm64.
+VC_REDIST_URL = "https://aka.ms/vs/17/release/vc_redist.{arch}.exe"
+
+
+def _vc_arch() -> str:
+    import platform
+
+    return "arm64" if platform.machine().upper() == "ARM64" else "x64"
+
+
+def vc_runtime_missing() -> tuple[str, ...]:
+    """Яких бібліотек Visual C++ бракує в системі; на не-Windows — нічого.
+
+    🔴 Без них `import torch` падає «Error loading c10.dll», а пакет при цьому
+    стоїть: метадані на місці, і огляд, що питав лише метадані, казав «рушії
+    готові». Так було в чистій Windows Sandbox 11.10.2026 — `doctor` зелений,
+    читання не запускається. Звичайна машина отримує ці бібліотеки з першою ж
+    грою чи офісом, тож вада тиха: ловиться лише на свіжій системі.
+    """
+    if os.name != "nt":
+        return ()
+    sysdir = Path(os.environ.get("SYSTEMROOT") or r"C:\Windows") / "System32"
+    want = _VC_DLLS + (_VC_DLLS_X64 if _vc_arch() == "x64" else ())
+    return tuple(d for d in want if not (sysdir / d).is_file())
+
+
+def _torch_load_error(py: Path) -> str:
+    """torch стоїть, а не вантажиться: причина й ліки одним рядком."""
+    err = _import_failure(py, "torch")
+    missing = vc_runtime_missing()
+    if missing or "c10.dll" in err or "Visual C++" in err:
+        what = ", ".join(missing) or "бібліотек Visual C++"
+        return (f"torch стоїть, але не вантажиться: бракує Microsoft Visual C++ "
+                f"Redistributable ({what}). `nysh htr install` поставить його — "
+                f"Windows попросить дозволу адміністратора")
+    lines = [ln.strip() for ln in err.splitlines() if ln.strip()]
+    why = next((ln for ln in reversed(lines) if "Error" in ln), lines[-1] if lines else "")
+    return (f"torch стоїть, але не вантажиться: {why or 'причини інтерпретатор не назвав'}. "
+            f"`nysh htr install` перевірить і доставить середовище")
 
 
 #: «torch рахує на карті» — справжнім ядром, а не `is_available()`.
@@ -149,6 +208,10 @@ def _inspect(venv: Path, man: M.Manifest | None = None) -> EnvReport:
 
     kraken = _version_of(py, "kraken")
     torch_v = _probe(py, "import torch; print(torch.__version__)") or ""
+    # 🔴 Метадані torch є, а імпорт — ні: пакет стоїть, але не вантажиться.
+    # Доти цей випадок не потрапляв ні в «бракує», ні в проблеми, і звіт казав
+    # «рушії готові» там, де читання не запускалось (Windows без Visual C++).
+    torch_broken = _torch_load_error(py) if not torch_v and _version_of(py, "torch") else ""
     cuda = _probe(py, CUDA_WORKS) == "True"
     cap = _probe(py, "import torch; print('%d.%d' % torch.cuda.get_device_capability(0))") \
         if cuda else ""
@@ -169,11 +232,13 @@ def _inspect(venv: Path, man: M.Manifest | None = None) -> EnvReport:
             f"kraken {kraken}, а патчі сегментації звірені на {want_k} — "
             f"розбіжність буде тихою: інші полігони рядків, тобто інший текст. "
             f"`nysh htr install` оновить середовище на місці")
+    if torch_broken:
+        problems.append(torch_broken)
 
     rep = EnvReport(ok=not missing and not problems, python=py, kraken=kraken,
                     torch=torch_v, cuda=cuda, capability=cap or "",
                     missing=tuple(missing), problems=tuple(problems),
-                    stale=tuple(stale))
+                    stale=tuple(stale), torch_broken=torch_broken)
     # Свіжий вдалий огляд — найкраща відповідь і для плану читання: діагностика
     # головної (`home.machine`) так заздалегідь прогріває `inspect_cached`, і
     # перше «Що робитимемо» за сесію не чекає десяти процесів.
@@ -417,6 +482,81 @@ def _from_install_info(name: str) -> str:
     return got if got and Path(got).is_file() else ""
 
 
+def _ensure_vc_runtime() -> None:
+    """Доставити Microsoft Visual C++ Redistributable, якщо його бракує (Windows).
+
+    Без нього torch не вантажиться взагалі (див. `vc_runtime_missing`), тобто
+    середовище рушіїв стоїть, а читання не працює. Ставиться офіційний
+    інсталятор Microsoft — після звірки підпису. Права адміністратора просить
+    сама Windows: це системний компонент, у теку застосунку його не покласти.
+
+    ⚠ Відмова тут не валить `setup`: пакети ставляться далі, а підсумковий
+    огляд назве проблему й ліки. Приймач — НЕ код інсталятора, а повторна
+    перевірка бібліотек: «поставилось» без файлів нічого не означає.
+    """
+    missing = vc_runtime_missing()
+    if not missing:
+        return
+    url = VC_REDIST_URL.format(arch=_vc_arch())
+    print(f"② бракує Microsoft Visual C++ Redistributable ({', '.join(missing)}) — "
+          f"без нього torch не вантажиться.\n"
+          f"   Ставлю з {url}; Windows попросить дозволу адміністратора…")
+    import tempfile
+
+    exe = Path(tempfile.gettempdir()) / f"nysh-vc_redist.{_vc_arch()}.exe"
+    why = ""
+    try:
+        _download(url, exe)
+        rc = _run_signed_elevated(exe, ["/install", "/passive", "/norestart"])
+        if rc not in (0, 1638, 3010):    # 1638 — новіша версія вже стоїть; 3010 — просить перезапуск
+            why = f"інсталятор повернув {rc}"
+    except Exception as exc:  # мережа, підпис, відмова у вікні Windows
+        why = str(exc).strip().splitlines()[-1] if str(exc).strip() else type(exc).__name__
+    finally:
+        exe.unlink(missing_ok=True)
+    if vc_runtime_missing():
+        print(f"⚠ Visual C++ Redistributable не поставився{f' ({why})' if why else ''}.\n"
+              f"  Поставте вручну: {url} — і повторіть `nysh htr install`")
+    else:
+        print("✓ Visual C++ Redistributable на місці")
+
+
+def _download(url: str, target: Path) -> None:
+    import httpx
+
+    with httpx.stream("GET", url, follow_redirects=True, timeout=120) as r:
+        r.raise_for_status()
+        with target.open("wb") as fh:
+            for chunk in r.iter_bytes():
+                fh.write(chunk)
+
+
+def _run_signed_elevated(exe: Path, args: list[str]) -> int:
+    """Запустити інсталятор Microsoft від адміністратора — лише з дійсним підписом.
+
+    🔴 `PSModulePath` прибирається: Windows PowerShell 5.1, запущений із
+    PowerShell 7, успадковує його шляхи й не вантажить власний модуль безпеки —
+    `Get-AuthenticodeSignature` тоді «не знайдено», і звірка підпису падала б
+    на машині, де все гаразд (спіймано 11.10.2026).
+    """
+    q = str(exe).replace("'", "''")
+    arglist = ",".join("'" + a.replace("'", "''") + "'" for a in args)
+    script = (
+        "$ErrorActionPreference = 'Stop'; "
+        f"$s = Get-AuthenticodeSignature -LiteralPath '{q}'; "
+        "if ($s.Status -ne 'Valid' -or $s.SignerCertificate.Subject -notmatch 'O=Microsoft Corporation') "
+        "{ [Console]::Error.WriteLine('підпис інсталятора не Microsoft: ' + $s.Status); exit 2 }; "
+        f"$p = Start-Process -FilePath '{q}' -ArgumentList {arglist} -Verb RunAs -Wait -PassThru; "
+        "exit $p.ExitCode")
+    env = {k: v for k, v in os.environ.items() if k.upper() != "PSMODULEPATH"}
+    r = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script],
+                       capture_output=True, text=True, encoding="utf-8", errors="replace",
+                       env=env, timeout=1800)
+    if r.returncode == 2 or (r.returncode and r.stderr.strip()):
+        raise RuntimeError((r.stderr or "").strip() or f"код {r.returncode}")
+    return r.returncode
+
+
 def _run(cmd: list[str], env: dict[str, str] | None = None) -> None:
     """Команда установки — в оточенні без змінних батьківського Python.
 
@@ -443,11 +583,15 @@ def setup(venv: Path, *, man: M.Manifest | None = None, with_cuda: bool = True,
                "Windows: winget install astral-sh.uv · "
                "Linux/macOS: curl -LsSf https://astral.sh/uv/install.sh | sh")
     uv = _resolve_tool(uv) or uv
-    if man.vcs_packages:
-        # PARSeq (`strhub`) ставиться з репозиторію, а не з PyPI — його там немає.
-        _need_tool("git", "з нього ставиться "
-                          + ", ".join(v["name"] for v in man.vcs_packages),
+    # git потрібен лише специфікаціям `git+…`. Справжній маніфест бере PARSeq
+    # архівом коміту, тож на машині генеалога git для рушіїв не потрібен.
+    via_git = [v["name"] for v in man.vcs_packages if "git+" in v["spec"]]
+    if via_git:
+        _need_tool("git", "з нього ставиться " + ", ".join(via_git),
                    "https://git-scm.com/downloads")
+    # До довгого завантаження torch, а не після: вікно дозволу Windows людина
+    # побачить одразу, а не через десять хвилин.
+    _ensure_vc_runtime()
     py = venv_python(venv)
 
     if py.exists():

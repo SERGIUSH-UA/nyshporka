@@ -296,11 +296,35 @@ def test_setup_names_the_missing_tool_instead_of_a_traceback(tmp_path, monkeypat
     # Не лише діагноз, а й ліки: рядок мусить казати, як це полагодити.
     assert "astral.sh" in str(exc.value)
 
-    # git перевіряється теж — PARSeq ставиться з репозиторію, не з PyPI.
+    # git перевіряється теж — для специфікацій `git+…`.
     monkeypatch.setattr(shutil, "which", lambda name: None if name == "git" else "/usr/bin/uv")
+    via_git = M.Manifest(python="3.11", packages=("kraken==7.1.1",),
+                         vcs_packages=({"name": "strhub", "note": "",
+                                        "spec": "strhub @ git+https://github.com/baudm/parseq.git"},),
+                         torch_default=(), cuda_index="", cuda_matrix=())
     with pytest.raises(env.ToolMissing) as exc:
-        env.setup(tmp_path / "venv")
+        env.setup(tmp_path / "venv", man=via_git)
     assert "git" in str(exc.value) and "strhub" in str(exc.value)
+
+
+def test_real_manifest_builds_engines_without_git(tmp_path, monkeypatch):
+    """🔴 Крок рушіїв інсталятора не мусить падати на машині без git.
+
+    За `install.md` Git ставиться ПІСЛЯ Нишпорки, а з Codex — часом і зовсім ні.
+    Доки PARSeq ставився `git+…`, інсталятор щойно поставленого застосунку
+    закінчувався «⚠ рушії читання не зібрались» (Windows Sandbox, 11.10.2026).
+    """
+    import shutil
+
+    man = M.active()
+    assert not [s for s in man.pip_specs() if "git+" in s], "git-специфікація повернулась"
+    venv, calls = _fake_env(tmp_path, monkeypatch, ["strhub"])
+    monkeypatch.setattr(shutil, "which", lambda name: None if name == "git" else f"/usr/bin/{name}")
+
+    env.setup(venv, with_cuda=False)          # без ToolMissing("git…")
+
+    pip = [c for c in calls if "install" in c]
+    assert pip and any("parseq/archive/" in a for a in pip[0]), pip
 
 
 # ── що саме доїжджає в pip ───────────────────────────────────────────────────
@@ -348,6 +372,8 @@ def _fake_env(tmp_path, monkeypatch, missing):
     py.parent.mkdir(parents=True, exist_ok=True)
     py.write_text("", encoding="utf-8")
     monkeypatch.setattr(shutil, "which", lambda name: f"/usr/bin/{name}")
+    # Системний компонент Windows тут ні до чого — і не мусить качатись із тесту.
+    monkeypatch.setattr(env, "_ensure_vc_runtime", lambda: None)
     monkeypatch.setattr(env, "inspect",
                         lambda *a, **k: env.EnvReport(ok=False, missing=tuple(missing)))
     calls: list[list[str]] = []
