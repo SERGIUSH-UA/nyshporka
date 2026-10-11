@@ -103,6 +103,8 @@ dumneavoastră. Nu există telemetrie și nici conturi.
 
 ## Mai departe
 
+* [Cum funcționează](how-it-works.md) — întregul ciclu, de la „unde să caut”
+  la site-ul familiei, și cum se găsește un nume în manuscris (în ucraineană)
 * [Instalați și conectați asistentul](install.md)
 * [Cum se lucrează](start.md) — ce să cereți, cum să verificați ce s-a găsit
 * [Întrebări frecvente](faq.md)

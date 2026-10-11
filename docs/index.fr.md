@@ -103,6 +103,8 @@ n'y a ni télémétrie ni compte utilisateur.
 
 ## Pour aller plus loin
 
+* [Comment ça marche](how-it-works.md) — tout le cycle, de « où chercher » au
+  site de la famille, et comment un nom se retrouve dans un manuscrit (en ukrainien)
 * [Installer et connecter l'assistant](install.md)
 * [Comment travailler](start.md) — que demander, comment vérifier ce qui a été trouvé
 * [Questions fréquentes](faq.md)

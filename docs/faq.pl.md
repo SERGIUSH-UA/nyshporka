@@ -105,10 +105,12 @@ kroków, które ręcznie zajęłyby dni.
 ### Co robi asystent, a co Nyshporka?
 
 Odczyt rękopisu i wyszukiwanie wykonuje Nyshporka na Twoim komputerze — to nic
-nie kosztuje, poza czasem. Asystent decyduje, co robić dalej, uruchamia kroki i
-objaśnia wynik. Jedyne, co „czyta oczami” sam, to **opracowanie aktów w pola**
+nie kosztuje, poza czasem. Asystent decyduje, co robić dalej, uruchamia kroki,
+przesiewa znalezione trafienia i objaśnia wynik. Oczami czyta tylko wycinki
+wybranych miejsc, a w całości — wyłącznie przy **opracowaniu aktów w pola**
 (daty, imiona, role): to około 84 tysięcy tokenów na skan, czyli na księgę z
-dwustu kart — miliony tokenów, a przejścia potrzebne są dwa.
+dwustu kart — miliony tokenów, a przejścia potrzebne są dwa. Cały łańcuch —
+[„Jak to działa”](how-it-works.md) (po ukraińsku).
 
 ## Pieniądze i prywatność
 

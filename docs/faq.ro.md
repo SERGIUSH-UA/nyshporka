@@ -110,11 +110,12 @@ face zeci de pași care manual ar dura zile.
 
 Citirea manuscrisului și căutarea le face Nyshporka pe calculatorul
 dumneavoastră — nu costă nimic, doar timp. Asistentul decide ce urmează,
-pornește pașii și explică rezultatul. Singurul lucru pe care îl „citește cu
-ochii” el însuși este **analiza actelor pe câmpuri** (date, nume, roluri):
-asta înseamnă aproximativ 84 de mii de tokenuri pe scanare, adică pentru o
-carte de două sute de file — milioane de tokenuri, iar trecerile necesare
-sunt două.
+pornește pașii, triază potrivirile găsite și explică rezultatul. Cu ochii
+citește doar decupajele locurilor selectate, iar integral — numai la
+**analiza actelor pe câmpuri** (date, nume, roluri): asta înseamnă
+aproximativ 84 de mii de tokenuri pe scanare, adică pentru o carte de două
+sute de file — milioane de tokenuri, iar trecerile necesare sunt două. Tot
+lanțul — [„Cum funcționează”](how-it-works.md) (în ucraineană).
 
 ## Bani și confidențialitate
 

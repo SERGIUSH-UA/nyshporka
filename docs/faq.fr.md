@@ -116,10 +116,12 @@ main, prendraient des jours.
 
 La lecture du manuscrit et la recherche, c'est Nyshporka qui les fait sur votre
 ordinateur — cela ne coûte rien, seulement du temps. L'assistant décide de la
-suite, lance les étapes et explique le résultat. La seule chose qu'il « lit des
-yeux » lui-même, c'est le **dépouillement des actes en champs** (dates, noms,
+suite, lance les étapes, trie les occurrences trouvées et explique le résultat.
+Des yeux, il ne lit que les extraits des passages retenus ; en entier,
+seulement lors du **dépouillement des actes en champs** (dates, noms,
 rôles) : environ 84 mille tokens par scan, soit, pour un registre de deux cents
-feuillets, des millions de tokens — et il faut deux passages.
+feuillets, des millions de tokens — et il faut deux passages. Toute la chaîne —
+[« Comment ça marche »](how-it-works.md) (en ukrainien).
 
 ## Argent et confidentialité
 

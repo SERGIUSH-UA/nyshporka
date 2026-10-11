@@ -101,6 +101,8 @@ telemetrii ani kont.
 
 ## Dokąd dalej
 
+* [Jak to działa](how-it-works.md) — cały cykl od „gdzie szukać” do strony
+  rodu i jak odnajduje się nazwisko w rękopisie (po ukraińsku)
 * [Instalacja i podłączenie asystenta](install.md)
 * [Jak pracować](start.md) — o co prosić, jak sprawdzać znaleziska
 * [Częste pytania](faq.md)

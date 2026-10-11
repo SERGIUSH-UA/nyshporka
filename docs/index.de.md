@@ -102,6 +102,8 @@ weder Telemetrie noch Benutzerkonten.
 
 ## Wie es weitergeht
 
+* [Wie es funktioniert](how-it-works.md) — der ganze Ablauf von „wo suchen“ bis
+  zur Familienseite und wie ein Name in der Handschrift gefunden wird (auf Ukrainisch)
 * [Installieren und den Assistenten verbinden](install.md)
 * [So arbeiten Sie](start.md) — worum Sie bitten, wie Sie Gefundenes prüfen
 * [Häufige Fragen](faq.md)

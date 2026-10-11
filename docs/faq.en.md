@@ -102,10 +102,12 @@ take days by hand.
 ### What does the assistant do, and what does Nyshporka do?
 
 Reading the manuscript and searching are done by Nyshporka on your computer — that costs
-nothing but time. The assistant decides what to do next, runs the steps and
-explains the result. The only thing it “reads with its own eyes” is **breaking records down into fields**
+nothing but time. The assistant decides what to do next, runs the steps, sifts through the
+hits found and explains the result. With its own eyes it reads only crops of the
+selected places, and reads in bulk only when **breaking records down into fields**
 (dates, names, roles): that is about 84 thousand tokens per scan, so for a book of
-two hundred folios it is millions of tokens, and two passes are needed.
+two hundred folios it is millions of tokens, and two passes are needed. The whole
+chain — [“How it works”](how-it-works.md) (in Ukrainian).
 
 ## Money and privacy
 

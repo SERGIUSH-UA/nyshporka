@@ -116,11 +116,13 @@ gehen: Er macht Dutzende Schritte, die von Hand Tage dauern würden.
 
 Das Lesen der Handschrift und die Suche erledigt Nyshporka auf Ihrem Computer
 — das kostet nichts außer Zeit. Der Assistent entscheidet, was als Nächstes
-zu tun ist, startet die Schritte und erklärt das Ergebnis. Das Einzige, was
-er selbst „mit den Augen liest“, ist die **Auswertung von Akten in Felder**
+zu tun ist, startet die Schritte, sichtet die gefundenen Treffer und erklärt
+das Ergebnis. Mit eigenen Augen liest er nur Ausschnitte der ausgewählten
+Stellen, vollständig nur bei der **Auswertung von Akten in Felder**
 (Daten, Namen, Rollen): Das sind etwa 84 Tausend Tokens pro Scan, also bei
 einem Buch mit zweihundert Blättern Millionen Tokens, und es braucht zwei
-Durchgänge.
+Durchgänge. Die ganze Kette — [„Wie es funktioniert“](how-it-works.md)
+(auf Ukrainisch).
 
 ## Geld und Privatsphäre
 

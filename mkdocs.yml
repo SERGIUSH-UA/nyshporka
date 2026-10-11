@@ -90,6 +90,7 @@ markdown_extensions:
 # заглушками з `template: redirect.html` — їхні адреси роздані назовні.
 nav:
   - Що таке Нишпорка: index.md
+  - Як це влаштовано: how-it-works.md
   - Поставити й підключити помічника: install.md
   - Як працювати: start.md
   - Часті питання: faq.md
@@ -128,6 +129,7 @@ plugins:
           site_description: Reads the hand. Brings back what it found.
           nav_translations:
             Що таке Нишпорка: What is Nyshporka
+            Як це влаштовано: How it works
             Поставити й підключити помічника: Install and connect the assistant
             Як працювати: How to use it
             Часті питання: FAQ
@@ -146,6 +148,7 @@ plugins:
           site_description: Czyta rękopis. Przynosi to, co znalazła.
           nav_translations:
             Що таке Нишпорка: Czym jest Nyshporka
+            Як це влаштовано: Jak to działa
             Поставити й підключити помічника: Instalacja i podłączenie asystenta
             Як працювати: Jak pracować
             Часті питання: Częste pytania
@@ -164,6 +167,7 @@ plugins:
           site_description: Citește manuscrisul. Aduce ce a găsit.
           nav_translations:
             Що таке Нишпорка: Ce este Nyshporka
+            Як це влаштовано: Cum funcționează
             Поставити й підключити помічника: Instalarea și conectarea asistentului
             Як працювати: Cum se lucrează
             Часті питання: Întrebări frecvente
@@ -182,6 +186,7 @@ plugins:
           site_description: Lit le manuscrit. Rapporte ce qu’elle a trouvé.
           nav_translations:
             Що таке Нишпорка: Qu’est-ce que Nyshporka
+            Як це влаштовано: Comment ça marche
             Поставити й підключити помічника: Installer et connecter l’assistant
             Як працювати: Comment travailler
             Часті питання: Questions fréquentes
@@ -200,6 +205,7 @@ plugins:
           site_description: Liest die Handschrift. Bringt zurück, was sie gefunden hat.
           nav_translations:
             Що таке Нишпорка: Was ist Nyshporka
+            Як це влаштовано: Wie es funktioniert
             Поставити й підключити помічника: Installieren und Assistenten verbinden
             Як працювати: So arbeiten Sie
             Часті питання: Häufige Fragen
@@ -218,6 +224,7 @@ plugins:
           site_description: Читает рукопись. Приносит найденное.
           nav_translations:
             Що таке Нишпорка: Что такое Нышпорка
+            Як це влаштовано: Как это устроено
             Поставити й підключити помічника: Установить и подключить помощника
             Як працювати: Как работать
             Часті питання: Частые вопросы

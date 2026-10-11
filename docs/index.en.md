@@ -100,6 +100,8 @@ telemetry and no accounts.
 
 ## Where next
 
+* [How it works](how-it-works.md) — the whole cycle from “where to look” to
+  the family site, and how a surname is found in a manuscript (in Ukrainian)
 * [Install and connect an assistant](install.md)
 * [How to work](start.md) — what to ask for, how to check what has been found
 * [Frequently asked questions](faq.md)
