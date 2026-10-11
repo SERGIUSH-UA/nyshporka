@@ -131,6 +131,20 @@ def test_khid_drukuietsia_riadkom_na_spravu(pul: Pul) -> None:
     assert lines[0].endswith("(сервер 3.0 с)")
 
 
+def test_pokrokovyi_khid_zalyvky_ne_zmishuietsia_z_pachkoiu(
+        pul: Pul, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    """Від кількох воркерів «заливаю текст…» перемішалось би — у stderr лише рядок на справу."""
+    def _balakuchyi(path: Path, *, say: Any = None, **kw: Any) -> dict[str, Any]:
+        say("заливаю текст: 0.2 МБ…")
+        return pul.publish(path)
+
+    monkeypatch.setattr(U, "publish", _balakuchyi)
+    _push(cases=["A/1/1"])
+    err = capsys.readouterr().err
+    assert "заливаю текст" not in err
+    assert "✓ 1/1 ШИФРА A/1/1" in err
+
+
 def test_perelik_z_faila(pul: Pul, tmp_path: Path) -> None:
     f = tmp_path / "perelik.txt"
     f.write_text("# коментар\nA/1/1\n\n"

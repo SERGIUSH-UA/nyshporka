@@ -19,6 +19,8 @@ Windows ~2,5 с), а самі справи йдуть строго одна за
 """
 from __future__ import annotations
 
+import contextlib
+import io
 import sys
 import time
 from collections.abc import Callable
@@ -133,7 +135,11 @@ def odna(item: Item, notes: bool = False) -> Row:
         row["shifra"] = str(((d.get("manifest") or {}).get("case") or {}).get("shifra") or "")
         row["path"] = str(d.get("path") or "")
         row["stage"] = PUBLISH
-        viddano = O.call("share.publish", {"path": row["path"]})
+        # 🔴 Покроковий хід заливки («заливаю текст…», «етапи: …») тут глушиться:
+        # від кількох воркерів одразу це шість перемішаних рядків на справу. Живість
+        # пачки показує рядок на справу (`riadok`), етапи лишаються в `etapy`.
+        with contextlib.redirect_stderr(io.StringIO()):
+            viddano = O.call("share.publish", {"path": row["path"]})
         row["warnings"] += [w.as_dict() for w in viddano.warnings]
         v = viddano.data or {}
         if not viddano.ok:
