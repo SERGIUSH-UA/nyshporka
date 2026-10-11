@@ -478,7 +478,8 @@ def suggest_cmd(
             console.print(f"  {_e(row['path'])}")
         console.print("\n[dim]віддати: nysh share publish <файл>[/dim]")
     else:
-        console.print("\n[dim]спакувати все: nysh share suggest --all[/dim]")
+        console.print("\n[dim]спакувати й віддати все готове: nysh share push --ready[/dim]")
+        console.print("[dim]лише спакувати: nysh share suggest --all[/dim]")
         console.print("[dim]назва для картки: nysh share card <шифра> --title …[/dim]")
         console.print("[dim]не віддавати одну: nysh share suggest --skip <шифра> "
                       "--why <причина>[/dim]")
@@ -528,6 +529,70 @@ def publish_cmd(
         console.print(f"[muted]{OUTCOME_TEXT[vyhid]}[/muted] — нічого не заливалось")
     else:
         console.print(f"[warn]{OUTCOME_TEXT.get(vyhid, vyhid)}[/warn]")
+    _notes(env)
+
+
+@app.command("push")
+def push_cmd(
+    cases: list[str] = typer.Argument(None, help="шифри або ключі справ"),
+    ready: bool = typer.Option(False, "--ready",
+                               help="усе готове до віддачі (те, що показує suggest --ready)"),
+    from_file: str = typer.Option("", "--from",
+                                  help="файл переліку: справа на рядок або JSON-об'єкт "
+                                       "аргументів pack на рядок ({\"case\": …, "
+                                       "\"partial\": …, \"skip_run\": […]})"),
+    jobs: int = typer.Option(4, "--jobs", "-j", help="скільки справ одночасно, 1–8"),
+    notes: bool = typer.Option(False, "--notes",
+                               help="після заливки віддати й нотатник справи (note push)"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
+) -> None:
+    """Віддати пачку справ: кожну спакувати й залити, кілька одночасно.
+
+    Для десятків і сотень справ — замість `pack` + `publish` по одній. Хід
+    друкується рядком на справу; справа, що не спакувалась чи не залилась,
+    решти не зупиняє, зупиняє лише стеля пулу. Повторити ту саму команду
+    безпечно: уже віддане пул упізнає за хешем змісту й не заведе вдруге.
+    """
+    from nyshporka import ops as O
+
+    _kliuch_abo_vkhid(as_json)
+    env = O.call("share.push", {"cases": list(cases or []), "ready": ready,
+                                "from_file": from_file, "jobs": jobs, "notes": notes})
+    if _answer(env, as_json):
+        return
+    d = env.data or {}
+    if not d.get("total"):
+        console.print("готових до віддачі немає ([dim]nysh share suggest[/dim] — усі "
+                      "зі статусами)")
+        _notes(env)
+        return
+    s = d.get("summary") or {}
+    bits = [f"віддано [bold]{s.get('viddano', 0)}[/bold]"]
+    if s.get("geometry_attached"):
+        bits.append(f"дозалито геометрію {s['geometry_attached']}")
+    if s.get("vzhe_ye"):
+        bits.append(f"уже в Супрязі {s['vzhe_ye']}")
+    if d.get("failed"):
+        bits.append(f"[bad]не віддано {len(d['failed'])}[/bad]")
+    if d.get("not_started"):
+        bits.append(f"[warn]не почато {len(d['not_started'])}[/warn]")
+    if notes:
+        bits.append(f"нотатників {s.get('notes_sent', 0)}")
+    console.print(" · ".join(bits))
+    temp = f"{d.get('sec')} с, {d.get('jobs')} одночасно"
+    if d.get("per_min"):
+        temp += f", {d['per_min']} справ/хв"
+    if d.get("complete_sec_median") is not None:
+        temp += f"; перевірка на сервері ~{d['complete_sec_median']} с на справу"
+    console.print(f"[dim]{temp}[/dim]")
+    for r in d.get("rows") or []:
+        if r.get("ok"):
+            continue
+        krok = {"pack": "пакування", "publish": "заливка"}.get(str(r.get("stage")), "воркер")
+        first = (str(r.get("error") or "").strip().splitlines() or ["?"])[0]
+        console.print(f"  [bad]✗[/bad] {_e(r.get('shifra') or r.get('case'))} · {krok}: "
+                      f"{_e(first)}")
+    console.print("\n[dim]що справді в пулі: nysh share sync[/dim]")
     _notes(env)
 
 

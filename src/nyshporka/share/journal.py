@@ -56,12 +56,25 @@ def _now() -> str:
 
 
 def record(event: str, **fields: Any) -> dict[str, Any]:
-    """Дописати подію. Дозапис рядком, щоб дві сесії не перетирали одна одну."""
+    """Дописати подію. Дозапис рядком, щоб дві сесії не перетирали одна одну.
+
+    🔴 Під замком. На Windows дозапис — це «перейти в кінець» і «писати» двома
+    кроками, і два процеси, що влучили між ними, пишуть в одне місце: рядок
+    одного зникає. Пачка (`share push`) пакує кількома процесами одразу, а
+    журнал — єдиний доказ походження, повторити його нема з чого.
+
+    Файл замка — у `data/derived`, а не поруч із журналом: журнал у просторі
+    буває під git, і замок висів би там вічним невідстеженим файлом.
+    """
+    from nyshporka.core.workspace import workspace
+    from nyshporka.core.xrate import _locked
+
     row: dict[str, Any] = {"at": _now(), "event": event}
     row.update({k: v for k, v in fields.items() if v not in (None, "", [], {})})
     path = journal_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8") as fh:
+    with _locked(workspace().derived / "share" / "journal.lock", timeout=60.0), \
+            path.open("a", encoding="utf-8") as fh:
         fh.write(json.dumps(row, ensure_ascii=False) + "\n")
     return row
 

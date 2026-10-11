@@ -1,0 +1,283 @@
+"""📦 Пачка справ у Супрягу: пакування й заливка кількох справ одночасно.
+
+🔴 Не процес на справу. Сто справ, віддані циклом `nysh share pack` +
+`nysh share publish`, платять за запуск інтерпретатора на кожен крок (на
+Windows ~2,5 с), а самі справи йдуть строго одна за одною. Хоча пакування
+впирається в диск і процесор, а заливка — в мережу й сервер, і одне на друге
+не чекає. Замір 11.10.2026 (ф.224, 1 400 справ, дві такі петлі поруч): ~20 с
+на справу в петлі, третина з них — запуски; ~6 справ за хвилину.
+
+Тут кожен воркер — довгоживучий процес: пакет імпортується один раз, далі
+справа за справою `share.pack` → `share.publish`. Це ті самі операції, що
+кличе CLI, тож ворота, журнал і відповіді пулу ті самі, що й у ручній віддачі.
+
+🔴 Процеси, а не потоки: пакування — це обхід тисяч файлів прогону й gzip
+геометрії, і під одним GIL чотири потоки пакували б заледве швидше за один.
+
+Модуль навмисно не імпортує доменного коду на рівні модуля: воркер мусить
+узяти простір (`_init`) раніше, ніж щось візьме корінь.
+"""
+from __future__ import annotations
+
+import sys
+import time
+from collections.abc import Callable
+from concurrent.futures import Executor, Future, as_completed
+from typing import Any
+
+#: Скільки справ іде одночасно, коли не сказано інакше.
+JOBS = 4
+#: Стеля паралелі. Кожна заливка закінчується перевіркою пакета на сервері
+#: пулу (`complete`, ~3 с), а сервер спільний для всіх, хто віддає й шукає.
+#: Вісім одночасних від однієї людини — це вже черга для решти.
+MAX_JOBS = 8
+
+#: На якому кроці зупинилась справа.
+PACK = "pack"
+PUBLISH = "publish"
+WORKER = "worker"
+
+#: Що сталося з нотатником справи (`--notes`); решта значень — текст відмови.
+NOTES_OK = "ok"
+NOTES_NONE = "none"
+
+Item = dict[str, Any]
+Row = dict[str, Any]
+
+
+def jobs_in_range(jobs: int) -> int:
+    return max(1, min(MAX_JOBS, int(jobs or JOBS)))
+
+
+def stderr(text: str) -> None:
+    """Рядок ходу — у stderr: stdout у `--json` читає програма.
+
+    🔴 У пайпі агента на Windows stderr буває cp1251/cp1252, а «✓» і «…» там
+    немає: голий print валив би пачку на рядку про її хід.
+    """
+    enc = getattr(sys.stderr, "encoding", None) or "utf-8"
+    sys.stderr.write(text.encode(enc, "replace").decode(enc) + "\n")
+    sys.stderr.flush()
+
+
+def _init(ws: Any) -> None:
+    """Воркер працює в тому самому просторі, що й той, хто покликав пачку.
+
+    🔴 Простір передається явно, а не шукається драбиною заново: людина могла
+    назвати його прапорцем `--workspace`, а прапорець живе лише в батьківському
+    процесі. Без цього воркер пакував би справи з іншого простору.
+    """
+    from nyshporka.core.workspace import use
+
+    use(ws)
+
+
+def _protsesy(jobs: int) -> Executor:
+    import multiprocessing as mp
+    from concurrent.futures import ProcessPoolExecutor
+
+    from nyshporka.core.workspace import workspace
+
+    # `spawn` і на POSIX: `fork` процесу з живими потоками (httpx, логування)
+    # успадковує їхні замки в довільному стані.
+    return ProcessPoolExecutor(max_workers=jobs, mp_context=mp.get_context("spawn"),
+                               initializer=_init, initargs=(workspace(),))
+
+
+def _etap(etapy: Any, name: str) -> float | None:
+    for row in etapy or []:
+        if isinstance(row, dict) and row.get("etap") == name:
+            return row.get("sec")
+    return None
+
+
+def _notatnyk(case: str) -> str:
+    """`note.push` справи: `ok`, `none` (сховища сторінок немає) або текст відмови.
+
+    🔴 Справа без сховища сторінок — не збій нотатника: віддавати нема чого, і
+    в підсумку пачки вона не має стояти поруч зі справжніми відмовами.
+    """
+    from nyshporka import ops as O
+    from nyshporka.pagestore import store
+
+    try:
+        if store.load_case(store.resolve_case(case)) is None:
+            return NOTES_NONE
+    except Exception:
+        pass  # шифру розбере сама операція й назве причину
+    env = O.call("note.push", {"case": case})
+    return NOTES_OK if env.ok else (env.error or "note.push відмовив")
+
+
+def odna(item: Item, notes: bool = False) -> Row:
+    """Одна справа: `share.pack` → `share.publish` (→ `note.push`). Не кидає.
+
+    Відповідь — рядок звіту. 🔴 Справа, що не спакувалась чи не залилась, не
+    зупиняє решти: людина попросила віддати пачку, а не першу-ліпшу. Зупиняє
+    лише стеля пулу (429), і вирішує це той, хто роздає справи (`viddaty`).
+    Відмова нотатника справу невіддану не робить: текст у пулі вже лежить.
+    """
+    from nyshporka import ops as O
+    from nyshporka.share.upload import OUTCOME_TEXT, VIDDANO, VZHE_Ye
+
+    pochatok = time.monotonic()
+    row: Row = {"case": str(item.get("case") or ""), "ok": False, "stage": PACK,
+                "warnings": []}
+    try:
+        spakovano = O.call("share.pack", dict(item))
+        row["warnings"] += [w.as_dict() for w in spakovano.warnings]
+        if not spakovano.ok:
+            row["error"] = spakovano.error
+            return row
+        d = spakovano.data or {}
+        row["shifra"] = str(((d.get("manifest") or {}).get("case") or {}).get("shifra") or "")
+        row["path"] = str(d.get("path") or "")
+        row["stage"] = PUBLISH
+        viddano = O.call("share.publish", {"path": row["path"]})
+        row["warnings"] += [w.as_dict() for w in viddano.warnings]
+        v = viddano.data or {}
+        if not viddano.ok:
+            row.update(error=viddano.error, status=v.get("status"), klas=v.get("klas"),
+                       rate_limited=bool(v.get("rate_limited")))
+            if v.get("retry_after") is not None:
+                row["retry_after"] = v.get("retry_after")
+                row["next_attempt_at"] = v.get("next_attempt_at")
+            return row
+        vyhid = str(v.get("outcome") or "")
+        row.update(outcome=vyhid, contribution=v.get("contribution"),
+                   geometry_attached=bool(v.get("geometry_attached")),
+                   complete_sec=_etap(v.get("etapy"), "complete"))
+        # 🔴 «Пул відповів» ≠ «справа в каталозі»: відхилений чи не прийнятий
+        # дубль у каталозі не лежить, і рахувати його відданим не можна.
+        row["ok"] = vyhid in (VIDDANO, VZHE_Ye)
+        if not row["ok"]:
+            row["error"] = OUTCOME_TEXT.get(vyhid, vyhid or "пул не назвав, що сталося")
+        elif notes:
+            row["notes"] = _notatnyk(row["case"])
+    except Exception as exc:  # одна справа не має валити воркер і решту пачки
+        row["error"] = f"{type(exc).__name__}: {exc}"
+    finally:
+        row["sec"] = round(time.monotonic() - pochatok, 1)
+    return row
+
+
+def riadok(row: Row, n: int, total: int) -> str:
+    """Рядок ходу пачки: людина бачить кожну справу, а не мовчання на годину."""
+    from nyshporka.share.upload import VZHE_Ye
+
+    name = row.get("shifra") or row.get("case") or "?"
+    head = f"{n}/{total} {name}"
+    if row.get("ok"):
+        if row.get("geometry_attached"):
+            tail = f"дозалито геометрію до внеску {row.get('contribution')}"
+        elif row.get("outcome") == VZHE_Ye:
+            tail = "уже в Супрязі"
+        else:
+            tail = f"внесок {row.get('contribution')}"
+        # Час перевірки на сервері — видно посеред пачки, чи пул не захлинається.
+        server = (f" (сервер {row['complete_sec']} с)"
+                  if row.get("complete_sec") is not None else "")
+        return f"✓ {head} · {tail} · {row.get('sec')} с{server}"
+    krok = {PACK: "пакування", PUBLISH: "заливка"}.get(str(row.get("stage")), "воркер")
+    first = str(row.get("error") or "").strip().splitlines()
+    return f"✗ {head} · {krok}: {(first[0] if first else '?')[:200]}"
+
+
+def viddaty(items: list[Item], *, jobs: int = JOBS, notes: bool = False,
+            say: Callable[[str], None] | None = None,
+            pool: Callable[[int], Executor] | None = None) -> dict[str, Any]:
+    """Віддати пачку справ, `jobs` одночасно.
+
+    `pool(n)` — фабрика виконавця; типово процеси (`_protsesy`), тести дають
+    потоки. Порядок відповіді — порядок `items`, а не закінчення.
+
+    🔴 Стеля пулу (429) зупиняє всю пачку: решта справ однаково отримала б ту
+    саму відмову, і кожна — ще й пакування, яке нікуди не поїде. Справи, які
+    вже йдуть, доходять до кінця; ще не початі лишаються в `not_started`.
+    """
+    jobs = jobs_in_range(jobs)
+    total = len(items)
+    pochatok = time.monotonic()
+    rows: list[Row | None] = [None] * total
+    stop: Row | None = None
+    gotovo = 0
+
+    def _pryiniaty(i: int, row: Row) -> None:
+        nonlocal stop, gotovo
+        rows[i] = row
+        gotovo += 1
+        if say is not None:
+            say(riadok(row, gotovo, total))
+        if row.get("rate_limited") and stop is None:
+            stop = row
+
+    if jobs == 1 or total <= 1:
+        for i, item in enumerate(items):
+            if stop is not None:
+                break
+            _pryiniaty(i, odna(item, notes))
+    else:
+        ex = (pool or _protsesy)(min(jobs, total))
+        futs: dict[Future[Row], int] = {}
+        try:
+            futs = {ex.submit(odna, item, notes): i for i, item in enumerate(items)}
+            for f in as_completed(futs):
+                if f.cancelled():
+                    continue
+                i = futs[f]
+                try:
+                    row = f.result()
+                except Exception as exc:  # воркер упав (BrokenProcessPool, пам'ять)
+                    row = {"case": str(items[i].get("case") or ""), "ok": False,
+                           "stage": WORKER, "warnings": [],
+                           "error": f"{type(exc).__name__}: {exc}"}
+                _pryiniaty(i, row)
+                if stop is not None:
+                    for g in futs:
+                        g.cancel()
+        finally:
+            ex.shutdown(wait=True, cancel_futures=True)
+
+    done = [r for r in rows if r is not None]
+    not_started = [str(items[i].get("case") or "") for i, r in enumerate(rows) if r is None]
+    sec = round(time.monotonic() - pochatok, 1)
+    return {
+        "rows": done,
+        "total": total,
+        "jobs": jobs,
+        "summary": pidsumok(done),
+        "failed": [r["case"] for r in done if not r.get("ok")],
+        "not_started": not_started,
+        "rate_limited": ({k: stop.get(k) for k in ("error", "retry_after", "next_attempt_at")}
+                         if stop is not None else None),
+        "sec": sec,
+        "per_min": round(len(done) / sec * 60, 1) if sec > 0 else None,
+        "complete_sec_median": _mediana([r.get("complete_sec") for r in done]),
+    }
+
+
+def pidsumok(rows: list[Row]) -> dict[str, int]:
+    """Скільки чого сталося — у словах пулу, а не «успіх/невдача»."""
+    from nyshporka.share.upload import VIDDANO, VZHE_Ye
+
+    ok = [r for r in rows if r.get("ok")]
+    return {
+        "viddano": sum(1 for r in ok if r.get("outcome") == VIDDANO),
+        "geometry_attached": sum(1 for r in ok if r.get("geometry_attached")),
+        "vzhe_ye": sum(1 for r in ok if r.get("outcome") == VZHE_Ye
+                       and not r.get("geometry_attached")),
+        "pack_failed": sum(1 for r in rows if not r.get("ok") and r.get("stage") == PACK),
+        "publish_failed": sum(1 for r in rows if not r.get("ok") and r.get("stage") == PUBLISH),
+        "worker_failed": sum(1 for r in rows if r.get("stage") == WORKER),
+        "notes_sent": sum(1 for r in rows if r.get("notes") == NOTES_OK),
+        "notes_failed": sum(1 for r in rows
+                            if r.get("notes") not in (None, NOTES_OK, NOTES_NONE)),
+    }
+
+
+def _mediana(values: list[Any]) -> float | None:
+    xs = sorted(float(v) for v in values if isinstance(v, (int, float)))
+    if not xs:
+        return None
+    mid = len(xs) // 2
+    return round(xs[mid] if len(xs) % 2 else (xs[mid - 1] + xs[mid]) / 2, 2)

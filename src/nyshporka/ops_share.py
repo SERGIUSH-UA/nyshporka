@@ -596,6 +596,149 @@ def share_publish(a: SharePublishArgs) -> Envelope:
     return env
 
 
+class SharePushArgs(BaseModel):
+    cases: list[str] = Field(default_factory=list, description="шифри або ключі справ")
+    ready: bool = Field(default=False, description="усе, що `share suggest --ready` "
+                                                   "показує готовим до віддачі")
+    from_file: str = Field(default="", description="файл переліку: справа на рядок або "
+                                                   "JSON-об'єкт аргументів share.pack "
+                                                   "на рядок")
+    jobs: int = Field(default=4, description="скільки справ одночасно (1–8)")
+    notes: bool = Field(default=False, description="після заливки віддати й нотатник "
+                                                   "справи (`note push`)")
+
+
+def _push_from_file(path: str) -> list[dict[str, Any]]:
+    """Перелік із файлу: голий ключ або JSON-об'єкт аргументів `share.pack` на рядок.
+
+    JSON — для тих, хто вже вирішив щось про окремі справи: `partial` для
+    неповної, `skip_run` для зайвого голосу, `frames_unknown`. Рядки з `#` і
+    порожні пропускаються.
+    """
+    import json
+    from pathlib import Path
+
+    try:
+        text = Path(path).read_text(encoding="utf-8-sig")
+    except OSError as exc:
+        raise ArgError(f"перелік не прочитався: {exc}") from exc
+    out: list[dict[str, Any]] = []
+    for n, line in enumerate(text.splitlines(), 1):
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if not line.startswith("{"):
+            out.append({"case": line})
+            continue
+        try:
+            item = json.loads(line)
+        except ValueError as exc:
+            raise ArgError(f"{path}, рядок {n}: не JSON ({exc})") from exc
+        if not isinstance(item, dict):
+            raise ArgError(f"{path}, рядок {n}: очікувався об'єкт")
+        out.append(item)
+    return out
+
+
+@op("share.push", summary="Віддати пачку справ: спакувати й залити кілька одночасно",
+    args=SharePushArgs, mutates=True, agent=False, section=SECTION, private=True,
+    next_hints=(("share.sync", "звірити з пулом, що справді там"),))
+def share_push(a: SharePushArgs) -> Envelope:
+    """`share.pack` → `share.publish` для кожної справи, `jobs` справ одночасно.
+
+    🔴 Для десятків і сотень справ — замість петлі `nysh share pack` +
+    `nysh share publish` по одній: там кожен крок платить за запуск
+    інтерпретатора, і справи йдуть строго одна за одною (`share/batch.py`).
+
+    🔴 Перелік перевіряється цілим ДО першої заливки: хибне поле в сотому
+    рядку файла, знайдене посеред пачки, лишило б її наполовину відданою.
+    """
+    from pydantic import ValidationError
+
+    from nyshporka.core.envelope import ALERT
+    from nyshporka.share import batch as B
+    from nyshporka.share import profile as P
+    from nyshporka.share import suggest as S
+    from nyshporka.share.upload import ENV_NAME, token
+
+    try:
+        items: list[dict[str, Any]] = [{"case": c} for c in a.cases if c.strip()]
+        if a.from_file:
+            items += _push_from_file(a.from_file)
+    except ArgError as exc:
+        return fail(str(exc))
+    if a.ready:
+        items += [{"case": r["case_key"]} for r in S.nepodileni()
+                  if r.get("status") in S.READY_STATUSES]
+    if not items:
+        if a.ready and not (a.cases or a.from_file):
+            return ok(B.viddaty([], jobs=1))
+        return fail("назвіть справи, --ready (усе готове) або --from <файл переліку>")
+
+    prof = P.load()
+    cherha: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for n, item in enumerate(items, 1):
+        if item.get("dry_run"):
+            return fail(f"справа {n} ({item.get('case')}): dry_run у пачці нічого не "
+                        f"віддасть — для проби є share pack --dry-run")
+        # 🔴 Геометрія — за профілем, як у `suggest --all` і автовіддачі: хто її
+        # вимкнув, не мусить розсилати десятикратну вагу через те, що віддає пачкою.
+        item = {"geometry": prof.geometry, **item}
+        # 🔴 Невідоме поле — відмова, а не мовчазний пропуск: реєстр операцій
+        # зайві ключі ігнорує, і `skip_runs` замість `skip_run` поїхав би в
+        # пул із голосом, який людина вирішила не віддавати.
+        zaivi = sorted(set(item) - set(SharePackArgs.model_fields))
+        if zaivi:
+            return fail(f"справа {n} ({item.get('case')}): невідомі поля "
+                        f"{', '.join(zaivi)}; поля share.pack: "
+                        f"{', '.join(sorted(SharePackArgs.model_fields))}")
+        try:
+            SharePackArgs.model_validate(item)
+        except ValidationError as exc:
+            first = exc.errors()[0]
+            where = ".".join(str(p) for p in first.get("loc", ())) or "аргументи"
+            return fail(f"справа {n} ({item.get('case')}): {where}: {first.get('msg')}")
+        key = str(item["case"]).strip()
+        if key in seen:
+            continue
+        seen.add(key)
+        cherha.append(item)
+
+    if not token():
+        # Інакше кожна справа спакувалась би й упала на заливці тією самою відмовою.
+        return fail("немає ключа Супряги. Увійдіть: `nysh share login` — або покладіть "
+                    f"ключ у {ENV_NAME} (видається в кабінеті на nyshporka.online)")
+
+    got = B.viddaty(cherha, jobs=a.jobs, notes=a.notes, say=B.stderr)
+    env = ok(got)
+    if got["summary"]["notes_failed"]:
+        pohani = [r["case"] for r in got["rows"]
+                  if r.get("notes") not in (None, B.NOTES_OK, B.NOTES_NONE)]
+        env.warn("notes_failed", f"текст віддано, нотатник — ні: {', '.join(pohani[:10])}"
+                                 f"{' …' if len(pohani) > 10 else ''}. Причина — у "
+                                 f"rows[].notes; повторити: nysh note push <справа>")
+    if B.jobs_in_range(a.jobs) != a.jobs:
+        env.warn("jobs_capped", f"одночасно — від 1 до {B.MAX_JOBS} справ; узято "
+                                f"{got['jobs']}: перевірка пакета на сервері пулу "
+                                f"спільна для всіх")
+    stop = got.get("rate_limited")
+    if stop:
+        koly = stop.get("next_attempt_at") or "пізніше"
+        env.warn("rate_limited", f"стеля пулу: {stop.get('error')}. Не почато "
+                                 f"{len(got['not_started'])} справ — повторити ту саму "
+                                 f"команду після {koly}", ALERT)
+        env.suggest("share.push", f"решту після {koly}: уже віддане пул упізнає й не "
+                                  f"заведе вдруге")
+    if got["failed"]:
+        pershi = ", ".join(got["failed"][:10])
+        bilshe = f" і ще {len(got['failed']) - 10}" if len(got["failed"]) > 10 else ""
+        env.warn("not_shared", f"не віддано {len(got['failed'])}: {pershi}{bilshe}. "
+                               f"Причина кожної — у rows[].error; виправивши, повторіть "
+                               f"ці справи: уже віддане пул упізнає за хешем змісту")
+    return env
+
+
 class ShareWithdrawArgs(BaseModel):
     contribution: int = Field(description="номер власного внеску в Супрязі")
     why: str = Field(description="чому — побачить модератор, а через рік і ви самі")
