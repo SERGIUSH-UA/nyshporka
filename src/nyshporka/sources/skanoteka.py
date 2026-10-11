@@ -97,7 +97,8 @@ class SkanotekaSource:
                   "номер одиниці не обов'язково = номер справи архівного опису",
         where_class="переглядач архіву",
         scope=SourceScope(note="бази skanoteka, sadowe, notariaty, meldunkowe на "
-                               "genealodzy.pl; зокрема ЦДІАК ф.2 (sadowe, id1703)"),
+                               "genealodzy.pl; зокрема ЦДІАК ф.2 (sadowe, id1703), "
+                               "ЦДІАЛ ф.19 і ф.146 (skanoteka)"),
         match_on=(), match_how=None,
         zero_means="не шукає; одиниця або є за адресою, або сайт її не віддає",
         pitfalls=("кадр — розворот: поворот «за формою кадру» знищить обидві сторінки",
