@@ -541,7 +541,9 @@ def push_cmd(
                                   help="файл переліку: справа на рядок або JSON-об'єкт "
                                        "аргументів pack на рядок ({\"case\": …, "
                                        "\"partial\": …, \"skip_run\": […]})"),
-    jobs: int = typer.Option(4, "--jobs", "-j", help="скільки справ одночасно, 1–8"),
+    jobs: int = typer.Option(4, "--jobs", "-j",
+                             help="скільки справ пакувати одночасно, 1–8 (у пул — "
+                                  "не більше трьох)"),
     notes: bool = typer.Option(False, "--notes",
                                help="після заливки віддати й нотатник справи (note push)"),
     as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),

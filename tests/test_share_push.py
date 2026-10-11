@@ -58,6 +58,7 @@ def pul(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Pul:
     monkeypatch.setattr(U, "publish", p.publish)
     monkeypatch.setattr(U, "token", lambda: "t0k")
     monkeypatch.setattr(journal, "journal_path", lambda: tmp_path / "journal.jsonl")
+    monkeypatch.setattr(B, "CHEKATY", (0, 0))
     return p
 
 
@@ -101,6 +102,7 @@ def test_stelia_pulu_zupyniaie_pachku(pul: Pul) -> None:
     assert d["not_started"] == ["A/1/3"]
     assert d["rate_limited"]["retry_after"] == 3600
     assert d["rows"][1]["rate_limited"] is True
+    assert d["rows"][1]["retries"] == 2, "перед зупинкою 429 перечікують"
     assert "rate_limited" in [w.code for w in env.warnings]
     assert any(n.op == "share.push" for n in env.next)
 
@@ -121,6 +123,51 @@ def test_paralel_daie_toi_samyi_porjadok_i_vsi_spravy(pul: Pul) -> None:
     got = B.viddaty(items, jobs=4, pool=lambda n: ThreadPoolExecutor(max_workers=n))
     assert [r["case"] for r in got["rows"]] == [i["case"] for i in items]
     assert got["summary"]["viddano"] == 12 and not got["failed"]
+
+
+def test_v_pul_odnochasno_ne_bilshe_slotiv(pul: Pul, monkeypatch: pytest.MonkeyPatch) -> None:
+    """🔴 Пул тримає на людину три незавершені заливання — четверту відбиває 429.
+
+    Пакується `jobs` справ одразу, а заливається не більше `PUBLISH_SLOTS`.
+    """
+    import time
+
+    zaraz, naibilshe = 0, 0
+    lock = threading.Lock()
+
+    def _povilnyi(path: Path, **kw: Any) -> dict[str, Any]:
+        nonlocal zaraz, naibilshe
+        with lock:
+            zaraz += 1
+            naibilshe = max(naibilshe, zaraz)
+        time.sleep(0.05)
+        with lock:
+            zaraz -= 1
+        return pul.publish(path)
+
+    monkeypatch.setattr(U, "publish", _povilnyi)
+    items = [{"case": f"A/1/{i}"} for i in range(1, 19)]
+    got = B.viddaty(items, jobs=6, pool=lambda n: ThreadPoolExecutor(max_workers=n))
+    assert got["summary"]["viddano"] == 18
+    assert 1 < naibilshe <= B.PUBLISH_SLOTS
+
+
+def test_mynushchyi_429_perechikuietsia(pul: Pul, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Слот зайняв сусід (черга, друга сесія) — справа чекає, пачка йде далі."""
+    vidbyto: set[str] = set()
+
+    def _raz_429(path: Path, **kw: Any) -> dict[str, Any]:
+        if str(path) not in vidbyto:
+            vidbyto.add(str(path))
+            raise U.UploadError("Завершіть попередні заливання", status=429, retry_after=1200)
+        return pul.publish(path)
+
+    monkeypatch.setattr(U, "publish", _raz_429)
+    env = _push(cases=["A/1/1", "A/1/2"])
+    d = env.data
+    assert d["summary"]["viddano"] == 2 and not d["failed"] and not d["not_started"]
+    assert d["rate_limited"] is None
+    assert d["summary"]["publish_retries"] == 2
 
 
 def test_khid_drukuietsia_riadkom_na_spravu(pul: Pul) -> None:

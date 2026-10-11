@@ -29,10 +29,21 @@ from typing import Any
 
 #: Скільки справ іде одночасно, коли не сказано інакше.
 JOBS = 4
-#: Стеля паралелі. Кожна заливка закінчується перевіркою пакета на сервері
-#: пулу (`complete`, ~3 с), а сервер спільний для всіх, хто віддає й шукає.
-#: Вісім одночасних від однієї людини — це вже черга для решти.
+#: Стеля паралелі пакування: кожен воркер — процес із пакетом у пам'яті, а
+#: пакування — диск і процесор тієї самої машини.
 MAX_JOBS = 8
+#: Скільки справ одночасно ЗАЛИВАЄТЬСЯ, хоч би скільки пакувалось.
+#:
+#: 🔴 Пул тримає на людину не більше трьох незавершених заливань (від реєстрації
+#: до перевірки) і четверту відбиває 429 «Завершіть попередні заливання» з
+#: Retry-After 20 хв. Шість воркерів без цієї межі зупинили першу пачку на
+#: тридцятій справі з тисячі (11.10.2026). Межа тут — та сама, що на сервері:
+#: якщо слот займе ще хтось (черга, друга сесія), справа перечекає (`CHEKATY`).
+PUBLISH_SLOTS = 3
+#: Паузи між спробами заливки після 429, секунди (~2,5 хв разом). Незавершене
+#: заливання сусіда закінчується за секунди; якщо 429 тримається довше — це
+#: справжня стеля (година, доба), і пачка зупиняється.
+CHEKATY: tuple[float, ...] = (5, 10, 20, 30, 30, 30, 30)
 
 #: На якому кроці зупинилась справа.
 PACK = "pack"
@@ -62,16 +73,25 @@ def stderr(text: str) -> None:
     sys.stderr.flush()
 
 
-def _init(ws: Any) -> None:
+#: Слоти заливки цього процесу (`PUBLISH_SLOTS`); `None` — справи йдуть по одній.
+_SLOTY: Any = None
+
+
+def _init(ws: Any, sloty: Any = None) -> None:
     """Воркер працює в тому самому просторі, що й той, хто покликав пачку.
 
     🔴 Простір передається явно, а не шукається драбиною заново: людина могла
     назвати його прапорцем `--workspace`, а прапорець живе лише в батьківському
     процесі. Без цього воркер пакував би справи з іншого простору.
+
+    `sloty` — спільний на всі воркери семафор заливки: межу пулу тримають усі
+    процеси разом, а не кожен свою.
     """
+    global _SLOTY
     from nyshporka.core.workspace import use
 
     use(ws)
+    _SLOTY = sloty
 
 
 def _protsesy(jobs: int) -> Executor:
@@ -82,8 +102,29 @@ def _protsesy(jobs: int) -> Executor:
 
     # `spawn` і на POSIX: `fork` процесу з живими потоками (httpx, логування)
     # успадковує їхні замки в довільному стані.
-    return ProcessPoolExecutor(max_workers=jobs, mp_context=mp.get_context("spawn"),
-                               initializer=_init, initargs=(workspace(),))
+    ctx = mp.get_context("spawn")
+    return ProcessPoolExecutor(max_workers=jobs, mp_context=ctx, initializer=_init,
+                               initargs=(workspace(), ctx.BoundedSemaphore(PUBLISH_SLOTS)))
+
+
+def _zalyty(path: str, row: Row) -> Any:
+    """`share.publish` у слоті заливки; на 429 — пауза й ще раз (`CHEKATY`).
+
+    🔴 Покроковий хід заливки («заливаю текст…», «етапи: …») тут глушиться:
+    від кількох воркерів одразу це шість перемішаних рядків на справу. Живість
+    пачки показує рядок на справу (`riadok`), етапи лишаються в `etapy`.
+    """
+    from nyshporka import ops as O
+
+    for pauza in (*CHEKATY, None):
+        with _SLOTY if _SLOTY is not None else contextlib.nullcontext(),                 contextlib.redirect_stderr(io.StringIO()):
+            viddano = O.call("share.publish", {"path": path})
+        if viddano.ok or not (viddano.data or {}).get("rate_limited") or pauza is None:
+            return viddano
+        # Повтор безпечний: пул упізнає той самий зміст і не заведе другий внесок.
+        row["retries"] = int(row.get("retries") or 0) + 1
+        time.sleep(pauza)
+    return viddano
 
 
 def _etap(etapy: Any, name: str) -> float | None:
@@ -116,7 +157,8 @@ def odna(item: Item, notes: bool = False) -> Row:
 
     Відповідь — рядок звіту. 🔴 Справа, що не спакувалась чи не залилась, не
     зупиняє решти: людина попросила віддати пачку, а не першу-ліпшу. Зупиняє
-    лише стеля пулу (429), і вирішує це той, хто роздає справи (`viddaty`).
+    лише стеля пулу (429), що не минула за `CHEKATY`, і вирішує це той, хто
+    роздає справи (`viddaty`).
     Відмова нотатника справу невіддану не робить: текст у пулі вже лежить.
     """
     from nyshporka import ops as O
@@ -135,11 +177,7 @@ def odna(item: Item, notes: bool = False) -> Row:
         row["shifra"] = str(((d.get("manifest") or {}).get("case") or {}).get("shifra") or "")
         row["path"] = str(d.get("path") or "")
         row["stage"] = PUBLISH
-        # 🔴 Покроковий хід заливки («заливаю текст…», «етапи: …») тут глушиться:
-        # від кількох воркерів одразу це шість перемішаних рядків на справу. Живість
-        # пачки показує рядок на справу (`riadok`), етапи лишаються в `etapy`.
-        with contextlib.redirect_stderr(io.StringIO()):
-            viddano = O.call("share.publish", {"path": row["path"]})
+        viddano = _zalyty(row["path"], row)
         row["warnings"] += [w.as_dict() for w in viddano.warnings]
         v = viddano.data or {}
         if not viddano.ok:
@@ -197,10 +235,12 @@ def viddaty(items: list[Item], *, jobs: int = JOBS, notes: bool = False,
     `pool(n)` — фабрика виконавця; типово процеси (`_protsesy`), тести дають
     потоки. Порядок відповіді — порядок `items`, а не закінчення.
 
-    🔴 Стеля пулу (429) зупиняє всю пачку: решта справ однаково отримала б ту
-    саму відмову, і кожна — ще й пакування, яке нікуди не поїде. Справи, які
-    вже йдуть, доходять до кінця; ще не початі лишаються в `not_started`.
+    🔴 Стеля пулу (429), що не минула за `CHEKATY`, зупиняє всю пачку: решта
+    справ однаково отримала б ту саму відмову, і кожна — ще й пакування, яке
+    нікуди не поїде. Справи, які вже йдуть, доходять до кінця; ще не початі
+    лишаються в `not_started`.
     """
+    global _SLOTY
     jobs = jobs_in_range(jobs)
     total = len(items)
     pochatok = time.monotonic()
@@ -223,7 +263,14 @@ def viddaty(items: list[Item], *, jobs: int = JOBS, notes: bool = False,
                 break
             _pryiniaty(i, odna(item, notes))
     else:
-        ex = (pool or _protsesy)(min(jobs, total))
+        if pool is None:
+            ex = _protsesy(min(jobs, total))
+        else:
+            import threading
+
+            # Потоки цього процесу ділять один семафор так само, як процеси — свій.
+            _SLOTY = threading.BoundedSemaphore(PUBLISH_SLOTS)
+            ex = pool(min(jobs, total))
         futs: dict[Future[Row], int] = {}
         try:
             futs = {ex.submit(odna, item, notes): i for i, item in enumerate(items)}
@@ -243,6 +290,8 @@ def viddaty(items: list[Item], *, jobs: int = JOBS, notes: bool = False,
                         g.cancel()
         finally:
             ex.shutdown(wait=True, cancel_futures=True)
+            if pool is not None:
+                _SLOTY = None
 
     done = [r for r in rows if r is not None]
     not_started = [str(items[i].get("case") or "") for i, r in enumerate(rows) if r is None]
@@ -275,6 +324,7 @@ def pidsumok(rows: list[Row]) -> dict[str, int]:
         "pack_failed": sum(1 for r in rows if not r.get("ok") and r.get("stage") == PACK),
         "publish_failed": sum(1 for r in rows if not r.get("ok") and r.get("stage") == PUBLISH),
         "worker_failed": sum(1 for r in rows if r.get("stage") == WORKER),
+        "publish_retries": sum(int(r.get("retries") or 0) for r in rows),
         "notes_sent": sum(1 for r in rows if r.get("notes") == NOTES_OK),
         "notes_failed": sum(1 for r in rows
                             if r.get("notes") not in (None, NOTES_OK, NOTES_NONE)),

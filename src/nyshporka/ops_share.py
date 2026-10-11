@@ -603,7 +603,8 @@ class SharePushArgs(BaseModel):
     from_file: str = Field(default="", description="файл переліку: справа на рядок або "
                                                    "JSON-об'єкт аргументів share.pack "
                                                    "на рядок")
-    jobs: int = Field(default=4, description="скільки справ одночасно (1–8)")
+    jobs: int = Field(default=4, description="скільки справ пакувати одночасно (1–8); "
+                                             "у пул одночасно йдуть не більше трьох")
     notes: bool = Field(default=False, description="після заливки віддати й нотатник "
                                                    "справи (`note push`)")
 
@@ -719,9 +720,9 @@ def share_push(a: SharePushArgs) -> Envelope:
                                  f"{' …' if len(pohani) > 10 else ''}. Причина — у "
                                  f"rows[].notes; повторити: nysh note push <справа>")
     if B.jobs_in_range(a.jobs) != a.jobs:
-        env.warn("jobs_capped", f"одночасно — від 1 до {B.MAX_JOBS} справ; узято "
-                                f"{got['jobs']}: перевірка пакета на сервері пулу "
-                                f"спільна для всіх")
+        env.warn("jobs_capped", f"пакувати одночасно — від 1 до {B.MAX_JOBS} справ; "
+                                f"узято {got['jobs']}: кожна — окремий процес на цій "
+                                f"машині")
     stop = got.get("rate_limited")
     if stop:
         koly = stop.get("next_attempt_at") or "пізніше"
