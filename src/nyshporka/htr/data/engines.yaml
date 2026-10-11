@@ -50,12 +50,17 @@ runtime:
       # 🔴 Закріплено за комітом, а не за HEAD: інакше кожен `nysh htr install`
       # і кожен бокс у хмарі виконували б `setup.py` з поточного стану чужого
       # репозиторію — і збірка рушіїв не була б відтворюваною.
-      # 🔴 Архівом коміту, а не `git+…`: той самий код, але без git на машині.
-      # За `install.md` Git ставиться ПІСЛЯ Нишпорки (а з Codex — часом і зовсім
-      # ні), тож крок рушіїв інсталятора падав «git не знайдено» і людина бачила
-      # «⚠ рушії читання не зібрались» на щойно поставленому застосунку
-      # (Windows Sandbox, 11.10.2026). Зібрано з архіву без git: strhub 1.2.0.
-      spec: "strhub @ https://github.com/baudm/parseq/archive/1902db043c029a7e03a3818c616c06600af574be.zip"
+      # 🔴🔴 САМЕ `git+…`, НЕ АРХІВ КОМІТУ. У parseq `packages = ["strhub"]`, а
+      # підпакети (`strhub.models.parseq` і решта) потрапляють у колесо лише
+      # через setuptools-scm — зі списку файлів git. З архіву `…/archive/<sha>.zip`
+      # git немає, і ставиться порожній `strhub` з одним `__init__.py`: імпорт
+      # верхнього пакета проходить, а Писар падає «No module named
+      # 'strhub.models.parseq'». Так вийшло в 0.28.4 (спіймав Docker CI
+      # 11.10.2026); виправлено в 0.28.5. Тому git для рушіїв потрібен, і за
+      # `install.md` він ставиться ПЕРЕД Нишпоркою.
+      spec: "strhub @ git+https://github.com/baudm/parseq.git@1902db043c029a7e03a3818c616c06600af574be"
+      # Ціле — коли є модуль, який справді вантажить Писар, а не лише обгортка.
+      probe: "strhub.models.parseq"
       note: |
         Scene Text Recognition Model Hub, Apache-2.0. Використовується ЛИШЕ
         PARSeq. ⚠ Пакет містить підмодуль `models/abinet` під non-commercial

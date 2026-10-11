@@ -20,9 +20,17 @@ größten Teil davon der Download.
   ([Tarife](https://claude.com/pricing)). Oder ein ChatGPT-Abo — für Codex.
   Nyshporka selbst ist kostenlos: Sie zahlen nur für den Assistenten.
 
-## Schritt 1. Nyshporka installieren
+## Schritt 1. Git for Windows
 
-Nyshporka wird **zuerst** installiert, der Assistent zuletzt (warum — in
+Laden Sie [Git for Windows](https://git-scm.com/downloads/win) herunter und
+installieren Sie es, indem Sie überall auf „Next“ klicken. Ohne Git öffnet
+sich in Claude Desktop der Reiter Code nicht, und Nyshporka braucht es, um die
+Lesemodelle zu installieren. Unter macOS ist Git meist schon vorhanden.
+
+## Schritt 2. Nyshporka installieren
+
+Nyshporka wird **nach Git** installiert: ohne Git lässt sich das Lesemodul
+für Handschriften nicht installieren. Der Assistent kommt zuletzt (warum — in
 Schritt 3).
 
 === "Windows"
@@ -48,14 +56,6 @@ Schritt 3).
     ```
 
     Wenn das Skript fertig ist, schließen Sie das Terminalfenster.
-
-## Schritt 2. Git for Windows
-
-Laden Sie [Git for Windows](https://git-scm.com/downloads/win) herunter und
-installieren Sie es, indem Sie überall auf „Next“ klicken. Ohne Git öffnet
-sich in Claude Desktop der Reiter Code nicht, und Codex fehlen die
-Git-Funktionen. Nyshporka selbst braucht Git nicht. Unter macOS ist Git meist
-schon vorhanden.
 
 ## Schritt 3. Claude Desktop
 

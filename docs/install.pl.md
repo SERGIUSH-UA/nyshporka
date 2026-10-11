@@ -18,9 +18,17 @@ jedno gotowe zapytanie. Zajmuje 30–40 minut, większość czasu to pobieranie.
   ([plany](https://claude.com/pricing)). Albo subskrypcja ChatGPT — dla Codex.
   Sama Nyshporka jest bezpłatna: płacisz tylko za asystenta.
 
-## Krok 1. Zainstaluj Nyshporkę
+## Krok 1. Git for Windows
 
-Nyshporkę instaluje się **najpierw**, asystenta — na końcu (dlaczego — w kroku 3).
+Pobierz [Git for Windows](https://git-scm.com/downloads/win) i zainstaluj,
+wszędzie klikając „Next”. Bez niego w Claude Desktop nie otwiera się zakładka
+Code, a Nyshporce jest potrzebny do zainstalowania modeli odczytu. Na macOS Git
+zwykle już jest.
+
+## Krok 2. Zainstaluj Nyshporkę
+
+Nyshporkę instaluje się **po Git for Windows**: bez niego nie zainstaluje się
+program odczytu rękopisów. Asystenta — na końcu (dlaczego — w kroku 3).
 
 === "Windows"
 
@@ -45,13 +53,6 @@ Nyshporkę instaluje się **najpierw**, asystenta — na końcu (dlaczego — w 
     ```
 
     Gdy skrypt skończy, zamknij okno terminala.
-
-## Krok 2. Git for Windows
-
-Pobierz [Git for Windows](https://git-scm.com/downloads/win) i zainstaluj,
-wszędzie klikając „Next”. Bez niego w Claude Desktop nie otwiera się zakładka
-Code, a Codex nie ma funkcji Git. Samej Nyshporce nie jest potrzebny. Na macOS
-Git zwykle już jest.
 
 ## Krok 3. Claude Desktop
 

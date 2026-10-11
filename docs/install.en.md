@@ -18,9 +18,17 @@ one ready-made request. It takes 30–40 minutes, most of it downloading.
   ([plans](https://claude.com/pricing)). Or a ChatGPT subscription — for Codex.
   Nyshporka itself is free: you pay only for the assistant.
 
-## Step 1. Install Nyshporka
+## Step 1. Git for Windows
 
-Nyshporka goes in **first**, the assistant last (step 3 explains why).
+Download [Git for Windows](https://git-scm.com/downloads/win) and install it,
+clicking “Next” all the way through. Without it, the Code tab in Claude Desktop
+will not open, and Nyshporka needs it to install the reading models. On macOS
+Git is usually already there.
+
+## Step 2. Install Nyshporka
+
+Nyshporka goes in **after Git**: without it the handwriting reader will not
+install. The assistant goes last (step 3 explains why).
 
 === "Windows"
 
@@ -45,13 +53,6 @@ Nyshporka goes in **first**, the assistant last (step 3 explains why).
     ```
 
     When the script has finished, close the terminal window.
-
-## Step 2. Git for Windows
-
-Download [Git for Windows](https://git-scm.com/downloads/win) and install it,
-clicking “Next” all the way through. Without it, the Code tab in Claude Desktop
-will not open, and Codex has no Git features. Nyshporka itself does not need it.
-On macOS Git is usually already there.
 
 ## Step 3. Claude Desktop
 

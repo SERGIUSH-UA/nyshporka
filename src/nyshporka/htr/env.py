@@ -203,7 +203,9 @@ def _inspect(venv: Path, man: M.Manifest | None = None) -> EnvReport:
         if not _version_of(py, dist):
             missing.append(dist)
     for v in man.vcs_packages:
-        if _probe(py, f"import {v['name']}") is None:
+        # 🔴 Модуль із `probe`, а не голе ім'я: порожній `strhub` (з архіву
+        # коміту, 0.28.4) імпортувався, а Писар падав без `strhub.models.parseq`.
+        if _probe(py, f"import {v.get('probe') or v['name']}") is None:
             missing.append(v["name"])
 
     kraken = _version_of(py, "kraken")
@@ -583,8 +585,8 @@ def setup(venv: Path, *, man: M.Manifest | None = None, with_cuda: bool = True,
                "Windows: winget install astral-sh.uv · "
                "Linux/macOS: curl -LsSf https://astral.sh/uv/install.sh | sh")
     uv = _resolve_tool(uv) or uv
-    # git потрібен лише специфікаціям `git+…`. Справжній маніфест бере PARSeq
-    # архівом коміту, тож на машині генеалога git для рушіїв не потрібен.
+    # git потрібен специфікаціям `git+…` — зокрема PARSeq: архів коміту ставить
+    # порожній `strhub` (див. `engines.yaml`).
     via_git = [v["name"] for v in man.vcs_packages if "git+" in v["spec"]]
     if via_git:
         _need_tool("git", "з нього ставиться " + ", ".join(via_git),
@@ -634,8 +636,12 @@ def setup(venv: Path, *, man: M.Manifest | None = None, with_cuda: bool = True,
             # Задоволене uv не чіпає, тож зайвого це не ставить — зокрема torch:
             # якщо наявний у межах kraken, він лишається, і оновлення kraken
             # коштує десятки МБ, а не 2.5 ГБ нового колеса.
+            # 🔴 Пакет «не з PyPI», якого бракує, може стояти зламаним (порожній
+            # `strhub` з 0.28.4): метадані є, і без примусу uv лишив би його як є.
+            again = [a for v in man.vcs_packages if v["name"] in rep.missing
+                     for a in ("--reinstall-package", v["name"])]
             _run([uv, "pip", "install", "--python", str(venv_python(venv)),
-                  *plan.values()])
+                  *again, *plan.values()])
         else:
             # ⚠ `uv pip install` без жодного пакета виходить ненульовим кодом,
             # а `_run` іде з `check=True` — тобто порожній список ронив команду

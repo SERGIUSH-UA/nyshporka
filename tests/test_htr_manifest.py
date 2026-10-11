@@ -307,24 +307,47 @@ def test_setup_names_the_missing_tool_instead_of_a_traceback(tmp_path, monkeypat
     assert "git" in str(exc.value) and "strhub" in str(exc.value)
 
 
-def test_real_manifest_builds_engines_without_git(tmp_path, monkeypatch):
-    """🔴 Крок рушіїв інсталятора не мусить падати на машині без git.
+def test_parseq_comes_from_git_not_from_a_commit_archive(man):
+    """🔴 0.28.4: PARSeq брався архівом коміту — і ставився порожнім.
 
-    За `install.md` Git ставиться ПІСЛЯ Нишпорки, а з Codex — часом і зовсім ні.
-    Доки PARSeq ставився `git+…`, інсталятор щойно поставленого застосунку
-    закінчувався «⚠ рушії читання не зібрались» (Windows Sandbox, 11.10.2026).
+    У parseq `packages = ["strhub"]`, а підпакети в колесо додає setuptools-scm
+    зі списку файлів git. З `…/archive/<sha>.zip` ставився `strhub` з одним
+    `__init__.py`; Писар падав «No module named 'strhub.models.parseq'»
+    (Docker CI, 11.10.2026).
     """
-    import shutil
+    strhub = next(v for v in man.vcs_packages if v["name"] == "strhub")
+    assert strhub["spec"].startswith("strhub @ git+https://"), strhub["spec"]
+    assert "@1902db0" in strhub["spec"], "збірка рушіїв мусить лишатись закріпленою за комітом"
+    assert strhub["probe"] == "strhub.models.parseq"
 
-    man = M.active()
-    assert not [s for s in man.pip_specs() if "git+" in s], "git-специфікація повернулась"
+
+def test_hollow_strhub_is_reported_missing(tmp_path, monkeypatch):
+    """Обгортка `strhub` імпортується, а модуля Писаря в ній немає — це «бракує»."""
+    py = env.venv_python(tmp_path)
+    py.parent.mkdir(parents=True, exist_ok=True)
+    py.write_text("", encoding="utf-8")
+
+    def probe(_py, code, timeout=120):
+        if code == "import strhub.models.parseq":
+            return None                       # саме та діра
+        if code.startswith("import importlib.metadata"):
+            return "7.1.1"
+        return ""                             # голе `import strhub` проходить
+
+    monkeypatch.setattr(env, "_probe", probe)
+    rep = env.inspect(tmp_path)
+    assert "strhub" in rep.missing, rep.missing
+
+
+def test_broken_strhub_is_reinstalled_not_left_in_place(tmp_path, monkeypatch):
+    """Метадані порожнього strhub на місці — без примусу uv його не чіпав би."""
     venv, calls = _fake_env(tmp_path, monkeypatch, ["strhub"])
-    monkeypatch.setattr(shutil, "which", lambda name: None if name == "git" else f"/usr/bin/{name}")
 
-    env.setup(venv, with_cuda=False)          # без ToolMissing("git…")
+    env.setup(venv, with_cuda=False)
 
     pip = [c for c in calls if "install" in c]
-    assert pip and any("parseq/archive/" in a for a in pip[0]), pip
+    assert pip and "--reinstall-package" in pip[0], pip
+    assert pip[0][pip[0].index("--reinstall-package") + 1] == "strhub"
 
 
 # ── що саме доїжджає в pip ───────────────────────────────────────────────────

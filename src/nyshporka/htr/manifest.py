@@ -241,7 +241,10 @@ def _build(raw: dict[str, Any]) -> Manifest:
         packages=tuple(str(p) for p in (rt.get("packages") or [])),
         vcs_packages=tuple({"name": str(v.get("name") or ""),
                             "spec": str(v.get("spec") or ""),
-                            "note": str(v.get("note") or "")}
+                            "note": str(v.get("note") or ""),
+                            # модуль, наявність якого доводить, що пакет цілий;
+                            # порожньо — саме ім'я пакета
+                            "probe": str(v.get("probe") or "")}
                            for v in (rt.get("vcs_packages") or [])),
         torch_default=tuple(str(p) for p in (torch.get("default") or [])),
         torch_reference=tuple(str(p) for p in (torch.get("reference") or [])),
