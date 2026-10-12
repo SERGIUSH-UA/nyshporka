@@ -197,6 +197,51 @@ def draft_label(draft_id: str) -> str:
     return draft_id.replace("draft_", "")
 
 
+
+def pack_queue(pack: str, *, mode: str = "spread", limit: int = 400, include_blank: bool = False,
+               min_chars: int = MIN_CHARS, fresh: bool = False,
+               ws: Workspace | None = None) -> dict[str, Any]:
+    """Одна черга на весь пакет розмітки: рядки всіх його наборів по колу блоками.
+
+    Людина обирає пакет («XX ст. — важкі руки»), а не набір: блоки по `SPREAD_BLOCK`
+    з різних наборів ідуть по черзі, тож руки чергуються, а кожен рядок несе свій
+    набір і порядок голосів (`set`, `draft_ids`, `draft_srcs`) — їх читає екран.
+    """
+    reg = S.registry(ws)
+    names = reg.packs().get(pack) or []
+    if not names:
+        raise S.SetError(f"пакета розмітки «{pack}» немає")
+    per: list[list[dict[str, Any]]] = []
+    n_total = n_done = n_pages = 0
+    for n in names:
+        try:
+            q = Store(n, ws=ws).queue(mode, "", 2000, include_blank, min_chars=min_chars, fresh=fresh)
+        except S.SetError:
+            continue
+        for it in q["items"]:
+            it["set"] = n
+            it["draft_ids"] = q["draft_ids"]
+            it["draft_srcs"] = q["draft_srcs"]
+        per.append(q["items"])
+        n_total += q["n_total"]
+        n_done += q["n_done"]
+        n_pages += q["n_pages"]
+    n_queue = sum(len(p) for p in per)
+    items: list[dict[str, Any]] = []
+    off = 0
+    per = [p for p in per if p]
+    while per and len(items) < limit:
+        for p in list(per):
+            chunk = p[off:off + SPREAD_BLOCK]
+            if not chunk:
+                per.remove(p)
+                continue
+            items.extend(chunk)
+        off += SPREAD_BLOCK
+    return {"items": items[:limit], "mode": mode, "pack": pack, "sets": names,
+            "draft_srcs": [], "draft_ids": [], "n_pages": n_pages, "n_total": n_total,
+            "n_queue": n_queue, "n_done": n_done}
+
 class Store:
     """Один набір: кропи, голоси, мітки — усе, що потрібно вкладці."""
 

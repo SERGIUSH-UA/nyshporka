@@ -473,7 +473,8 @@ def _store(name: str) -> Any:
 
 
 class QueueArgs(BaseModel):
-    name: str = Field(description="набір")
+    name: str = Field(default="", description="набір")
+    pack: str = Field(default="", description="пакет розмітки — одна черга з усіх його наборів (замість name)")
     mode: str = Field(default="spread", description="spread | useful | page | sequential | names")
     page: str = Field(default="", description="сторінка для режиму page")
     limit: int = Field(default=400, description="стеля рядків у черзі")
@@ -492,6 +493,17 @@ def train_queue(a: QueueArgs) -> Envelope:
     """
     from nyshporka.train import sets as S
 
+    if a.pack:
+        from nyshporka.train import store as ST
+        try:
+            got = ST.pack_queue(a.pack, mode=a.mode, limit=max(1, min(2000, a.limit)),
+                                include_blank=a.include_blank, min_chars=a.min_chars, fresh=a.fresh)
+        except S.SetError as exc:
+            return fail(str(exc))
+        env = ok(got)
+        if not got["items"]:
+            env.warn("queue_empty", "у пакеті рядків не лишилось — усі розмічені, короткі або вже зведені")
+        return env
     try:
         st = _store(a.name)
         got = st.queue(a.mode, a.page, max(1, min(2000, a.limit)), a.include_blank,
@@ -507,6 +519,18 @@ def train_queue(a: QueueArgs) -> Envelope:
                                 "або порожні (увімкніть «показувати порожні»)")
     return env
 
+
+
+class PacksArgs(BaseModel):
+    pass
+
+
+@op("train.packs", summary="Пакети розмітки: людські назви черг і їхні набори",
+    args=PacksArgs, agent=False, section=SECTION)
+def train_packs(a: PacksArgs) -> Envelope:
+    """Що показати людині у виборі черги. Порожньо — пакетів у просторі немає, екран показує набори."""
+    packs = _registry().packs()
+    return ok({"packs": [{"name": k, "sets": v, "n_sets": len(v)} for k, v in sorted(packs.items())]})
 
 class LineArgs(BaseModel):
     name: str = Field(description="набір")

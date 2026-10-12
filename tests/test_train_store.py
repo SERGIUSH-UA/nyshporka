@@ -256,3 +256,30 @@ def test_queue_fresh_skips_lines_the_arbiters_merged(space: W.Workspace) -> None
     assert ("0001", 0) not in keys and ("0001", 1) not in keys, "high/med уже звели"
     assert ("0001", 5) in keys, "low — злиття не впоралось, людині варто глянути"
     assert ("0002", 0) in keys, "сторінки без злиття — уся черга"
+
+
+def test_pack_is_one_queue_over_its_sets(space: W.Workspace) -> None:
+    """Пакет розмітки — одна черга з кількох наборів: блоки по колу, рядок знає свій набір."""
+    reg = S.registry(space)
+    spec = reg.load("demo")
+    spec.pack = "XX ст. — важкі руки"
+    reg.save(spec)
+    assert reg.load("demo").pack == "XX ст. — важкі руки", "поле пакета переживає запис"
+    import shutil
+    shutil.copytree(reg.set_dir("demo"), reg.set_dir("demo2"))
+    shutil.copytree(reg.crops_of(spec), reg.crops_of(spec).parent / "demo2")
+    s2 = reg.load("demo2")
+    s2.name = "demo2"
+    reg.save(s2)
+    assert reg.packs() == {"XX ст. — важкі руки": ["demo", "demo2"]}
+    q = ST.pack_queue("XX ст. — важкі руки", ws=space)
+    sets_in = [it["set"] for it in q["items"]]
+    assert set(sets_in) == {"demo", "demo2"}
+    assert sets_in[:ST.SPREAD_BLOCK] == ["demo"] * ST.SPREAD_BLOCK
+    assert "demo2" in sets_in[ST.SPREAD_BLOCK:ST.SPREAD_BLOCK * 2], "набори чергуються блоками"
+    assert all(it["draft_ids"] == ["pysar", "diak"] for it in q["items"])
+    assert q["n_queue"] == len(q["items"]) and q["n_total"] == 26
+    with pytest.raises(S.SetError):
+        ST.pack_queue("немає такого", ws=space)
+    plain = S.SetSpec(name="x")
+    assert "pack" not in plain.as_dict(), "без пакета старі набори лишаються байт у байт"

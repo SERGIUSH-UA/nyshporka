@@ -132,6 +132,9 @@ class SetSpec:
     origin: str = "run"
     #: Для `pool`: останній id запису пулу, уже взятий у набір.
     cursor: int = 0
+    #: Пакет розмітки — людська назва черги («XX ст. — важкі руки»). Екран розмітки,
+    #: коли пакети є, показує лише їх: людина обирає одну чергу, а не набір зі шифром.
+    pack: str = ""
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -145,6 +148,7 @@ class SetSpec:
             # Типові значення не пишуться: старі набори лишаються байт у байт.
             **({"origin": self.origin} if self.origin != "run" else {}),
             **({"cursor": self.cursor} if self.cursor else {}),
+            **({"pack": self.pack} if self.pack else {}),
         }
 
     @classmethod
@@ -165,6 +169,7 @@ class SetSpec:
             version=int(d.get("version") or 1),
             origin=str(d.get("origin") or "run"),
             cursor=int(d.get("cursor") or 0),
+            pack=str(d.get("pack") or ""),
         )
 
     def voices(self) -> list[Draft]:
@@ -336,6 +341,18 @@ class Registry:
         for pg, info in pages.items():
             conf = (info or {}).get("conf") or {}
             out[str(pg)] = {str(k): str(v) for k, v in conf.items()}
+        return out
+
+    def packs(self) -> dict[str, list[str]]:
+        """{назва пакета: [набори]} — лише видимі набори з полем `pack`."""
+        out: dict[str, list[str]] = {}
+        for n in self.names():
+            try:
+                spec = self.load(n)
+            except SetError:
+                continue
+            if spec.pack:
+                out.setdefault(spec.pack, []).append(n)
         return out
 
     # -- мітки --

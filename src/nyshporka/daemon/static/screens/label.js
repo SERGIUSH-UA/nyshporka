@@ -22,6 +22,11 @@ import { ic } from '/ui/icons.js';
 
 const MODES = ['spread', 'useful', 'page', 'sequential', 'names'];
 const SPECIAL = { e: 'ѣ', t: 'ъ', i: 'і', f: 'ѳ' };
+/**
+ * Кнопки літер під полем — для телефона, де Alt+літери немає, а розкладка має або
+ * і/ї/є (українська), або ъ/ы/э (російська), і жодна — ѣ, ѳ, ѵ.
+ */
+const CHARS = ['ѣ', 'ъ', 'і', 'ї', 'ѳ', 'ѵ', 'ы', 'э', 'є', 'Ѣ', 'І', 'Ѳ'];
 /** Ширина, з якої поле фокусується саме: на телефоні клавіатура ховає кроп. */
 const DESKTOP_MIN = 821;
 /** Зсув свайпу, з якого жест рахується рішенням, а не дотиком. */
@@ -29,7 +34,7 @@ const SWIPE_PX = 60;
 
 /** Стан екрана: живе між входами, бо набір і режим людина обирає раз. */
 const LB = {
-  set: '', mode: 'spread', page: '', blank: false, minChars: 15, fresh: true,
+  set: '', pack: '', packs: [], mode: 'spread', page: '', blank: false, minChars: 15, fresh: true,
   queue: [], i: -1, srcs: [], ids: [],
   cache: new Map(), zoom: 0, panel: false, panelZoom: 1,
   t0: 0, sets: [],
@@ -48,14 +53,32 @@ SCREENS.label = async () => {
       <select name="mode" id="lb-mode">${MODES.map((m) =>
     `<option value="${m}"${m === LB.mode ? ' selected' : ''}>${t(`label.mode.${m}`)}</option>`).join('')}</select>
       <input name="page" id="lb-pagein" placeholder="${t('label.page')}" value="${esc(LB.page)}">
-      <label class="lbl-mini"><input type="checkbox" name="blank"${LB.blank ? ' checked' : ''}> ${t('label.blank')}</label>
+      <label class="lbl-mini" id="lb-blank"><input type="checkbox" name="blank"${LB.blank ? ' checked' : ''}> ${t('label.blank')}</label>
       <label class="lbl-mini">${t('label.minchars')} <input type="number" name="minchars" min="0" max="200"
         inputmode="numeric" style="width:4.5em" value="${LB.minChars}"></label>
-      <label class="lbl-mini"><input type="checkbox" name="fresh"${LB.fresh ? ' checked' : ''}> ${t('label.fresh')}</label>
+      <label class="lbl-mini" id="lb-fresh"><input type="checkbox" name="fresh"${LB.fresh ? ' checked' : ''}> ${t('label.fresh')}</label>
       <button type="submit">${t('label.start')}</button>
     </form>
     <div id="lb-stats" class="muted"></div>
     <div id="lb-work"></div>`);
+  // 🔴 Пакети розмітки — людські назви черг. Коли вони є, у виборі лише вони:
+  // сотня наборів зі шифрами (голд-сет, probe) людині, що розмічає, не потрібна.
+  const penv = await callOp('train.packs', {});
+  if (!alive(gen)) return;
+  LB.packs = (penv.ok && penv.data.packs) || [];
+  if (LB.packs.length && !seed.set) {
+    const sel = el('lb-set');
+    if (!LB.pack || !LB.packs.some((p) => p.name === LB.pack)) LB.pack = LB.packs[0].name;
+    sel.innerHTML = LB.packs.map((p) =>
+      `<option value="pack:${esc(p.name)}"${p.name === LB.pack ? ' selected' : ''}>${esc(p.name)}</option>`).join('');
+    for (const id of ['lb-mode', 'lb-pagein', 'lb-blank', 'lb-fresh']) {
+      const node = el(id);
+      if (node) { node.hidden = true; node.style.display = 'none'; }
+    }
+    LB.set = '';
+    return;
+  }
+  LB.pack = '';
   const env = await callOp('train.sets', { all: false });
   if (!alive(gen)) return;
   if (!env.ok) { boxError('lb-work', env); return; }
@@ -74,8 +97,10 @@ SCREENS.label = async () => {
 
 // ── черга ────────────────────────────────────────────────────────────────────
 async function loadQueue() {
-  const env = await callOp('train.queue', { name: LB.set, mode: LB.mode, page: LB.page,
-    include_blank: LB.blank, min_chars: LB.minChars, fresh: LB.fresh });
+  const env = LB.pack
+    ? await callOp('train.queue', { pack: LB.pack, mode: 'spread', min_chars: LB.minChars, fresh: true })
+    : await callOp('train.queue', { name: LB.set, mode: LB.mode, page: LB.page,
+      include_blank: LB.blank, min_chars: LB.minChars, fresh: LB.fresh });
   if (!env.ok) { boxError('lb-work', env); return false; }
   const d = env.data;
   LB.queue = d.items || [];
@@ -89,13 +114,16 @@ async function loadQueue() {
   return true;
 }
 
-function key(it) { return `${it.page}:${it.idx}`; }
+function key(it) { return `${it.set || ''}:${it.page}:${it.idx}`; }
+
+/** Набір рядка: у черзі пакета кожен рядок несе свій. */
+function setOf(it) { return (it && it.set) || LB.set; }
 
 /** Рядок із кешу або з сервера; кеш і є префетч. */
 async function fetchLine(it) {
   const k = key(it);
   if (!LB.cache.has(k)) {
-    LB.cache.set(k, callOp('train.line', { name: LB.set, page: it.page, idx: it.idx }));
+    LB.cache.set(k, callOp('train.line', { name: setOf(it), page: it.page, idx: it.idx }));
   }
   return LB.cache.get(k);
 }
@@ -157,6 +185,7 @@ async function showLine() {
     work.innerHTML = `<p class="muted">${LB.queue.length ? t('label.fin') : t('label.empty')}</p>`;
     return;
   }
+  if (it.draft_ids) { LB.ids = it.draft_ids; LB.srcs = it.draft_srcs || []; }
   const env = await fetchLine(it);
   if (!env.ok) { boxError('lb-work', env); return; }
   const d = env.data;
@@ -189,6 +218,8 @@ async function showLine() {
       <select id="lb-kind" title="${t('label.kind')}">${['hand', 'print', 'mixed'].map((k) =>
     `<option value="${k}"${k === kind ? ' selected' : ''}>${t(`label.kind.${k}`)}</option>`).join('')}</select>
     </div>
+    <div class="lb-chars" id="lb-chars">${CHARS.map((c) =>
+    `<button type="button" class="lb-ch" data-act="label.char" data-arg="${c}">${c}</button>`).join('')}</div>
     <div class="lb-bottom">
       <button data-act="label.save" class="lb-do">${t('label.save')}</button>
       <button data-act="label.unsure" class="lb-do">${t('label.unsure')}</button>
@@ -218,6 +249,22 @@ function applyZoom() {
   if (!img) return;
   img.style.height = LB.zoom ? `${LB.zoom}px` : '';
   img.style.width = LB.zoom ? 'auto' : '';
+  fitGesture();
+}
+
+/**
+ * 🔴 Широкий кроп гортається пальцем убік — і тоді свайп-рішення на ньому вимкнено.
+ * Раніше контейнер тримав `touch-action: pan-y`: браузер не гортав кроп горизонтально,
+ * а рух пальцем убік ішов у свайп «зберегти/пропустити» — гортання зберігало рядок
+ * (13.10.2026, дослідник на телефоні). Свайп лишається там, де гортати нема чого.
+ */
+function fitGesture() {
+  const box = el('lb-swipe');
+  const stage = el('lb-stage');
+  if (!box || !stage) return;
+  const wide = stage.scrollWidth > stage.clientWidth + 4;
+  box.style.touchAction = wide ? 'pan-x pan-y pinch-zoom' : 'pan-y';
+  box.dataset.swipe = wide ? 'off' : 'on';
 }
 
 /** Поле вводу: клавіші живуть тут, а не в глобальному роутері — він полів не чіпає. */
@@ -244,11 +291,20 @@ function bindInput(d, draft) {
     const q = inp.value;
     if (q.trim().length < 2) return;
     timer = setTimeout(async () => {
-      const env = await callOp('train.suggest', { name: LB.set, q });
+      const env = await callOp('train.suggest', { name: setOf(LB.queue[LB.i]), q });
       const dl = el('lb-sugg');
       if (env.ok && dl) dl.innerHTML = (env.data.items || []).map((s) => `<option value="${esc(s)}">`).join('');
     }, 200);
   });
+  // Курсор запам'ятовується: на телефоні дотик до кнопки літери знімає фокус з поля,
+  // і без цього літера лягала б у кінець рядка, а не туди, де людина правила.
+  const keep = () => {
+    inp.dataset.s = String(inp.selectionStart ?? inp.value.length);
+    inp.dataset.e = String(inp.selectionEnd ?? inp.dataset.s);
+  };
+  for (const e of ['keyup', 'click', 'input', 'select', 'blur']) inp.addEventListener(e, keep);
+  const chars = el('lb-chars');
+  if (chars) chars.addEventListener('mousedown', (ev) => ev.preventDefault());
   inp.dataset.draft = draft;
   // Автофокус лише на десктопі: на телефоні клавіатура вискакує і ховає кроп.
   if ((globalThis.innerWidth || 0) >= DESKTOP_MIN) inp.focus();
@@ -268,11 +324,12 @@ function bindSwipe() {
   if (!box) return;
   let x0 = null;
   box.addEventListener('pointerdown', (ev) => {
-    if (ev.pointerType === 'mouse') return;
+    if (ev.pointerType === 'mouse' || box.dataset.swipe === 'off') return;
     x0 = ev.clientX;
   });
+  box.addEventListener('pointercancel', () => { x0 = null; });
   box.addEventListener('pointerup', (ev) => {
-    if (x0 === null || ev.pointerType === 'mouse') return;
+    if (x0 === null || ev.pointerType === 'mouse' || box.dataset.swipe === 'off') { x0 = null; return; }
     const dx = ev.clientX - x0;
     x0 = null;
     if (dx > SWIPE_PX) ACTIONS['label.save']();
@@ -287,7 +344,7 @@ async function renderPanel(it) {
   box.hidden = false;
   box.innerHTML = `<p class="muted">${t('label.loading')}</p>`;
   const px = LB.panelZoom > 1 ? 3600 : 1800;
-  const env = await callOp('train.page', { name: LB.set, page: it.page, max_px: px });
+  const env = await callOp('train.page', { name: setOf(it), page: it.page, max_px: px });
   if (!env.ok) { boxError('lb-page', env); return; }
   const d = env.data;
   // Розмір і рамки йдуть у розмітку через innerHTML, а беруться з `_cut.json`
@@ -332,7 +389,7 @@ function saveCurrent(status) {
   const text = status === 'skip' ? '' : inp.value;
   const draft = inp.dataset.draft || '';
   LB.cache.delete(key(it));
-  callOp('train.save', { name: LB.set, page: it.page, idx: it.idx, text, status,
+  callOp('train.save', { name: setOf(it), page: it.page, idx: it.idx, text, status,
     kind, draft, secs: Math.round(secs * 10) / 10 }).then((env) => {
     if (!env.ok) boxError('lb-stats', env);
   });
@@ -342,7 +399,8 @@ Object.assign(ACTIONS, {
   'label.start': async (ev) => {
     ev.preventDefault();
     const fd = new FormData(ev.target);
-    LB.set = fd.get('set') || LB.set;
+    const pick = String(fd.get('set') || '');
+    if (pick.startsWith('pack:')) { LB.pack = pick.slice(5); LB.set = ''; } else if (pick) { LB.set = pick; LB.pack = ''; }
     LB.mode = fd.get('mode') || 'spread';
     LB.page = fd.get('page') || '';
     LB.blank = !!fd.get('blank');
@@ -361,6 +419,19 @@ Object.assign(ACTIONS, {
     if (inp) { inp.value = inp.dataset.draft || ''; inp.focus(); }
   },
   /** Клік по голосу — взяти саме його. */
+  'label.char': (_ev, elm) => {
+    const inp = el('lb-in');
+    if (!inp || !elm) return;
+    const ch = elm.dataset.arg || '';
+    const s = Math.min(inp.value.length, Number(inp.dataset.s ?? inp.value.length));
+    const e = Math.min(inp.value.length, Math.max(s, Number(inp.dataset.e ?? s)));
+    inp.value = inp.value.slice(0, s) + ch + inp.value.slice(e);
+    const pos = s + ch.length;
+    inp.dataset.s = String(pos);
+    inp.dataset.e = String(pos);
+    inp.focus();
+    inp.setSelectionRange(pos, pos);
+  },
   'label.use': (_ev, elm) => {
     const inp = el('lb-in');
     if (inp) { inp.value = elm.textContent; inp.focus(); }
