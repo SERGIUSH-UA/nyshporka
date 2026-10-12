@@ -48,7 +48,8 @@ def _pages(src: Path) -> list[Path]:
 
 def _issues(raw: Any) -> list[dict[str, Any]]:
     """Перелік номерів: лише відомі поля, щоб у пакет не поїхало зайве."""
-    keep = ("no", "date", "first_page", "pages", "source_url", "sha256", "note")
+    keep = ("no", "no_total", "date", "first_page", "pages", "source_url", "sha256",
+            "note")
     out: list[dict[str, Any]] = []
     for row in raw or []:
         if isinstance(row, dict):

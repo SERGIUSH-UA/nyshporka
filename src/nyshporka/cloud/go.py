@@ -422,20 +422,22 @@ def already_read(out_dir: Path, *, model: str, frames: int) -> str:
     return ""
 
 
-def _run_ids(plan: Any, frames_dir: Path, case_key: str = "") -> set[str]:
+def _run_ids(plan: Any, frames_dir: Path, case_key: str = "",
+             shrink: Path | None = None) -> set[str]:
     """Ідентифікатори, під якими міг лягти цей самий захід.
 
     Їх два, бо на машину їде або сама тека кадрів, або її стиснута копія, — а
-    котра саме, стає відомо лише після звірки кадрів.
+    котра саме, стає відомо лише після звірки кадрів. `shrink` — тека копії,
+    коли її ім'я не з бібліотеки (номер друкованого видання).
     """
+    copy = shrink or _shrink_dir(frames_dir, case_key or plan.case_key)
     return {plan.run_id,
-            ST.run_id_for(_shrink_dir(frames_dir, case_key or plan.case_key).resolve(),
-                          model=plan.model.name, script=plan.script,
+            ST.run_id_for(copy.resolve(), model=plan.model.name, script=plan.script,
                           backend=plan.backend)}
 
 
-def _find_live(plan: Any, frames_dir: Path) -> tuple[ST.RunState | None,
-                                                    ST.RunState | None]:
+def _find_live(plan: Any, frames_dir: Path, shrink: Path | None = None
+               ) -> tuple[ST.RunState | None, ST.RunState | None]:
     """(свій живий захід, чужий захід у ту саму теку виходу) — або `None`.
 
     🔴 Свій — лише за `run_id`, тобто за справою, моделлю, письмом і бекендом,
@@ -449,7 +451,7 @@ def _find_live(plan: Any, frames_dir: Path) -> tuple[ST.RunState | None,
     справа іншим письмом): два прогони в одну теку перетирають тексти один
     одного без жодної помилки.
     """
-    ids = _run_ids(plan, frames_dir)
+    ids = _run_ids(plan, frames_dir, shrink=shrink)
     own: ST.RunState | None = None
     for run_id in sorted(ids):
         st = ST.load(run_id)
@@ -504,6 +506,7 @@ def go(case: str | Sequence[str], *, backend: str = "vast",
        max_usd_per_1000: float = 0.0, params: Sequence[str] = (),
        boxes: int = 1, datacenter_only: bool = False, pace: str = "",
        min_pph: float = 0.0, machine: int = 0, accept_slow_delivery: bool = False,
+       vydannia: str = "", title: str = "", city: str = "",
        on_event: EventFn | None = None, tick_sec: float = 60.0) -> GoResult:
     """Прочитати справу (або кілька) на орендованій машині від початку до кінця.
 
@@ -523,6 +526,17 @@ def go(case: str | Sequence[str], *, backend: str = "vast",
     if not cases:
         res.verdict, res.why = "refused", "не названо жодної справи"
         return res
+    edition: dict[str, Any] | None = None
+    if script == "print":
+        try:
+            if case_key:
+                raise GoRefused("ключ номера газети — ключ видання `VYD/<код>/<рік>`, "
+                                "його дає `--vydannia`; приберіть `--case-key`")
+            cases, edition = _print_cases(cases, vydannia=vydannia, title=title, city=city,
+                                          dry_run=dry_run)
+        except GoRefused as exc:
+            res.verdict, res.why = exc.verdict, str(exc)
+            return res
 
     def say(kind: str, text: str, **data: Any) -> None:
         if on_event is not None:
@@ -542,7 +556,8 @@ def go(case: str | Sequence[str], *, backend: str = "vast",
             max_usd_per_1000=max_usd_per_1000, params=tuple(params),
             boxes=boxes, datacenter_only=datacenter_only, pace=pace,
             min_pph=min_pph, machine=machine,
-            accept_slow_delivery=accept_slow_delivery, tick_sec=tick_sec)
+            accept_slow_delivery=accept_slow_delivery, tick_sec=tick_sec,
+            edition=edition)
     except GoRefused as exc:
         res.verdict, res.why = exc.verdict, str(exc)
     except RUN.CeilingHit as exc:
@@ -641,12 +656,84 @@ class _Density:
         return got
 
 
+def _print_cases(cases: tuple[str, ...], *, vydannia: str, title: str, city: str,
+                 dry_run: bool) -> tuple[tuple[str, ...], dict[str, Any]]:
+    """🖨 Теки видання → теки номерів і запис видання для збирання років.
+
+    Людина показує теку підшивки (`<Назва>/<РІК>/<номер>`), а не тисячу тек
+    номерів. Код видання обов'язковий: він іде в ключ `VYD/<код>/<рік>`
+    назавжди, тож його не вгадують, а пропонують і просять підтвердити.
+
+    🔴 Номер їде під іменем і ключем ВИДАННЯ (`print_edition.IssueRun`), а не
+    архівної справи: шифра зі шляху давала різним газетам одного дня одну
+    справу (`CASES/1934/2/12`).
+    """
+    from nyshporka import print_edition as PE
+    from nyshporka import vydannia_issues as VI
+
+    got = PE.expand(cases)
+    if got.many:
+        where, roots = got.many[0]
+        lines = [f"  nysh cloud go --print --vydannia "
+                 f"{VI.suggest_code(Path(r).name, city)} \"{r}\"" for r in roots]
+        raise GoRefused(
+            f"у {where} {len(roots)} видань — у кожного свій код, тож женіть їх "
+            f"окремо (коди — пропозиції, місто краще додати `--city`):\n"
+            + "\n".join(lines))
+    if not got.cases:
+        raise GoRefused("у названих теках немає жодного номера видання")
+    if len(got.titles) > 1:
+        raise GoRefused(
+            f"номери з різних видань ({', '.join(got.titles)}) — один код видання "
+            f"на захід; пустіть кожне видання окремо")
+    if got.dupes:
+        a, b = got.dupes[0]
+        raise GoRefused(
+            f"той самий номер двічі ({len(got.dupes)}): «{a}» і «{b}» — та сама "
+            f"дата й номер. Лишіть одну теку або позначте додаток словом «Додаток».")
+    head = got.editions[0] if got.editions else None
+    title = title or (head.title if head else got.titles[0])
+    code = (vydannia or "").strip().upper()
+    if not code:
+        hint = VI.suggest_code(title, city)
+        raise GoRefused(
+            f"назвіть код видання: `--vydannia {hint}` (запропоновано з назви"
+            f"{' й міста' if city else '; місто краще додати — `--city`'}). Код іде в "
+            f"ключ `VYD/<код>/<рік>` назавжди, тому його підтверджує людина.")
+    from nyshporka import vydannia as V
+
+    if not V.is_code(code):
+        raise GoRefused(f"код видання «{code}» — лише латинка, цифри й `_`, від двох знаків")
+    if got.unparsed and not dry_run:
+        raise GoRefused(
+            f"теки, що не розібрались як номер ({len(got.unparsed)}): "
+            + "; ".join(got.unparsed[:3]) + (" …" if len(got.unparsed) > 3 else "")
+            + ". Назва номера — «N (НАСКРІЗНИЙ) РРРР-ММ-ДД», «N РРРР-ММ-ДД», "
+              "«N (РРРР-ММ-ДД)» або «Додаток … РРРР-ММ-ДД». Перейменуйте або приберіть їх.")
+    runs = PE.issue_runs(code, got.issues)
+    strays = [c for c in got.cases if PE.run_for(runs, c) is None]
+    if strays:
+        raise GoRefused(f"не номер видання: {strays[0]}"
+                        + (f" (і ще {len(strays) - 1})" if len(strays) > 1 else "")
+                        + " — друк читає лише теки номерів і видань")
+    return tuple(got.cases), {"code": code, "title": title, "city": city, "runs": runs}
+
+
+def _issue_run(edition: dict[str, Any] | None, case: str) -> Any:
+    """`print_edition.IssueRun` номера заходу друку; None — це не друк."""
+    if not edition:
+        return None
+    from nyshporka import print_edition as PE
+
+    return PE.run_for(edition.get("runs") or {}, case)
+
+
 def _prepare(res: GoResult, case: str, say: EventFn, owner: contextlib.ExitStack, *,
              backend: str, script: str, model: str, case_key: str,
              second_voice: bool, with_voices: tuple[str, ...],
              max_price: float | None, rerun: bool, allow_partial: bool,
              rotate_landscape: bool, dry_run: bool, thin: bool,
-             batch: bool, density: _Density | None = None
+             batch: bool, density: _Density | None = None, printed: Any = None
              ) -> tuple[CV.Leg | None, ST.RunState | None]:
     """Підготувати ОДНУ справу заходу: від теки кадрів до готового до відправки.
 
@@ -657,14 +744,23 @@ def _prepare(res: GoResult, case: str, say: EventFn, owner: contextlib.ExitStack
 
     Кидає `Busy`, коли справу веде хтось інший: така відмова стосується всього
     заходу, бо машина одна.
+
+    `printed` — номер друкованого видання (`print_edition.IssueRun`): ім'я й
+    ключ беруться з нього, а не з бібліотеки, і давніша стиснута копія та
+    адреса кадрів у сховищі — теж.
     """
     from nyshporka.cloud import plan as PL
 
     ref = resolve_case(case, on_line=lambda s: say("frames", s), dry=dry_run)
-    key = case_key or ref.key
+    key = printed.key if printed is not None else (case_key or ref.key)
+    name = printed.name if printed is not None else case_name(ref.frames_dir, key)
+    # 🖨 Номер газети, уже стиснутий давнішим заходом, стискається в ТУ САМУ
+    # теку: свіжі кадри новіші за архів у сховищі, і заливка пішла б удруге.
+    shrink_to = (((printed.stage or F.shrink_dir_for(ref.frames_dir, name=name)))
+                 if printed is not None else _shrink_dir(ref.frames_dir, key))
     if not batch:
         res.case_dir, res.case_key = str(ref.frames_dir), key
-    say("case", f"{key or case_name(ref.frames_dir)} · {ref.frames_dir}")
+    say("case", f"{key or name} · {ref.frames_dir}")
 
     def build(frames_dir: Path, **kw: Any) -> PL.CloudPlan:
         kw.setdefault("script", script)
@@ -672,8 +768,7 @@ def _prepare(res: GoResult, case: str, say: EventFn, owner: contextlib.ExitStack
             return PL.build(
                 frames_dir, backend=backend, case_key=key,
                 second_voice=second_voice, also=list(with_voices), model=model,
-                out_name=case_name(ref.frames_dir, key),
-                max_price_usd_h=max_price, **kw)
+                out_name=name, max_price_usd_h=max_price, **kw)
         except PL.PlanError as exc:
             raise GoRefused(str(exc)) from None
 
@@ -697,7 +792,7 @@ def _prepare(res: GoResult, case: str, say: EventFn, owner: contextlib.ExitStack
     if not thin:
         from nyshporka.cloud import supervised as SUP
 
-        found = SUP.find_live(_run_ids(plan, ref.frames_dir))
+        found = SUP.find_live(_run_ids(plan, ref.frames_dir, shrink=shrink_to))
         if found is not None:
             st, data = found
             if not batch:
@@ -717,7 +812,7 @@ def _prepare(res: GoResult, case: str, say: EventFn, owner: contextlib.ExitStack
                 f"Стан: `nysh cloud state {st.run_id}`; спинити: "
                 f"`nysh cloud stop {st.run_id}`.".replace("  ", " "))
 
-    live, clash = _find_live(plan, ref.frames_dir)
+    live, clash = _find_live(plan, ref.frames_dir, shrink=shrink_to)
     if clash is not None:
         raise Busy(
             f"у теку {plan.out_dir} уже пише інший захід — {clash.run_id} (та "
@@ -776,7 +871,7 @@ def _prepare(res: GoResult, case: str, say: EventFn, owner: contextlib.ExitStack
     # діяв лише всередині стискання важких, і легкі альбомні кадри їхали на
     # машину боком без жодного слова.
     if rep.heavy or rotate_landscape:
-        dst = _shrink_dir(ref.frames_dir, key)
+        dst = shrink_to
         if not rep.heavy:
             why = "поворот альбомних кадрів (`--rotate-landscape`)"
         elif rep.median_mb > F.SHRINK_MEDIAN_MB:
@@ -820,7 +915,11 @@ def _prepare(res: GoResult, case: str, say: EventFn, owner: contextlib.ExitStack
     # сегментації вибірки кадрів: від неї темп, вибір машини й ціна, і
     # припущені 60 рядків помилялись удвічі в обидва боки (сповідки 18,
     # формуляри 250).
-    lines = (density or _Density(batch)).of(plan.out_dir, pack, key, say)
+    # 🖨 Друк щільності рядків не має: рушій читає блоки, а не рядки kraken, і
+    # проба сегментації вибірки тут лише змарнувала б час цієї машини.
+    printing = plan.script == "print"
+    lines = None if printing else (density or _Density(batch)).of(
+        plan.out_dir, pack, key, say)
     plan = build(pack, script=plan.script,
                  source_dir=ref.frames_dir if pack != ref.frames_dir else "",
                  lines_per_page=lines, pages_left=left)
@@ -862,8 +961,9 @@ def _prepare(res: GoResult, case: str, say: EventFn, owner: contextlib.ExitStack
                         require_geometry=pack != ref.frames_dir)
     # Нова справа без жодного читання — звичайний стан, а не втрата: про неї
     # мовчимо. Говоримо, коли попереднє читання БУЛО або кеш знайшовся.
-    read_before = plan.base_out is not None or before.got > 0
-    if thin and cache.usable:
+    # Друк сегментації kraken не має, тож і говорити про її ціну нема чого.
+    read_before = not printing and (plan.base_out is not None or before.got > 0)
+    if thin and cache.usable and not printing:
         # Тонкий шлях везе на машину текст, а не кеш сегментації: «✓» тут
         # обіцяв би економію, якої не буде.
         note = (f"готова сегментація є ({cache.why}), але тонкий шлях її не везе "
@@ -871,7 +971,7 @@ def _prepare(res: GoResult, case: str, say: EventFn, owner: contextlib.ExitStack
         notes.append(note)
         res.notes.append(note)
         say("warning", f"⚠ {note}")
-    elif read_before or cache.path is not None:
+    elif read_before or (cache.path is not None and not printing):
         say("plan", f"{'✓' if cache.usable else '⚠'} сегментація: {cache.why}")
         if cache.usable and cache.path is not None:
             seg_seed, coverage = cache.path, cache.coverage
@@ -909,7 +1009,8 @@ def _prepare(res: GoResult, case: str, say: EventFn, owner: contextlib.ExitStack
 
     return CV.Leg(ref=ref, plan=plan, pack=pack, source=ref.frames_dir,
                   frames=rep, seed=seg_seed, coverage=coverage, resume=seed,
-                  notes=tuple(notes)), None
+                  notes=tuple(notes),
+                  reuse_key=printed.reuse_key if printed is not None else ""), None
 
 
 #: Що сказати, коли перечитування не знайшло готової сегментації.
@@ -961,7 +1062,8 @@ def _go(res: GoResult, cases: tuple[str, ...], say: EventFn,
         transport: str, max_usd_per_1000: float, params: tuple[str, ...],
         boxes: int, tick_sec: float, datacenter_only: bool = False,
         pace: str = "", min_pph: float = 0.0, machine: int = 0,
-        accept_slow_delivery: bool = False) -> None:
+        accept_slow_delivery: bool = False,
+        edition: dict[str, Any] | None = None) -> None:
     from nyshporka.cloud import plan as PL
 
     # 0. стелі. 🔴 Нуль і від'ємне — відмова ДО всього (аудит 29.09.2026).
@@ -979,6 +1081,10 @@ def _go(res: GoResult, cases: tuple[str, ...], say: EventFn,
     if thin and boxes > 1:
         raise GoRefused("тонкий шлях веде одну справу на одній машині — "
                         "`--boxes` лише на наглядацькому шляху, без `--thin`")
+    if thin and script == "print":
+        # 🖨 Тонкий шлях везе на машину раннер Нишпорки, а рушія друку в ньому
+        # немає — він живе лише в наглядача (пакет оренди).
+        raise GoRefused("друк читається лише наглядацьким шляхом — приберіть `--thin`")
 
     # 0. бекенд
     try:
@@ -1032,7 +1138,8 @@ def _go(res: GoResult, cases: tuple[str, ...], say: EventFn,
                                  allow_partial=allow_partial,
                                  rotate_landscape=rotate_landscape,
                                  dry_run=dry_run, thin=thin, batch=len(cases) > 1,
-                                 density=density)
+                                 density=density,
+                                 printed=_issue_run(edition, arg))
         except GoRefused as exc:
             if len(cases) == 1:
                 raise
@@ -1115,6 +1222,13 @@ def _go(res: GoResult, cases: tuple[str, ...], say: EventFn,
         raise GoRefused(
             f"тонкий шлях веде одну справу, а названо {len(convoy.legs)}. "
             f"Черга справ їде наглядацьким шляхом — просто без `--thin`.")
+    if edition and not dry_run:
+        # Видання записується ДО старту: гачок наглядача після забору
+        # (`nysh print assemble`) знаходить номери саме за цим записом.
+        from nyshporka import print_edition as PE
+
+        PE.record(edition["code"], title=edition["title"], city=edition["city"],
+                  issues=[(leg.name, leg.source, leg.plan.out_dir) for leg in convoy.legs])
     _fill_cases(res, convoy)
 
     # 4а. наглядацький шлях: далі захід веде відчеплений наглядач, а ми виходимо

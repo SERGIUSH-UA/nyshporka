@@ -216,7 +216,8 @@ def build(case_dir: str | Path, *, backend: str = "ssh", target: str = "",
           max_price_usd_h: float | None = None,
           lines_per_page: float | None = None,
           source_dir: str | Path = "",
-          pages_left: int | None = None) -> CloudPlan:
+          pages_left: int | None = None,
+          printed: bool = False) -> CloudPlan:
     """Скласти план без жодної мережевої дії.
 
     Кидає `PlanError` рівно там, де захід не має сенсу починати: немає кадрів,
@@ -274,6 +275,21 @@ def build(case_dir: str | Path, *, backend: str = "ssh", target: str = "",
                 f"підтеку або зберіть кадри в одну пласку теку.")
         raise PlanError(f"у теці {case} немає зображень сторінок")
 
+    if printed or script == "print":
+        # 🖨 Друк: рушій один (PaddleOCR-VL на машині), ваг тут немає й письмо
+        # не вгадується — рушій читає будь-яке. Голоси й інша модель до нього
+        # не стосуються.
+        from nyshporka.cloud import printed as PR
+
+        if str(model or "").strip() or also:
+            raise PlanError("друк читає один рушій — `--model` і `--with` з `--print` "
+                            "не йдуть")
+        return _build_print(case, frames, backend=backend, target=target,
+                            out_dir=out_dir, out_name=out_name, case_key=case_key,
+                            budget_usd=budget_usd, max_hours=max_hours,
+                            max_price_usd_h=max_price_usd_h, source_dir=source_dir,
+                            pages_left=pages_left, warnings=[bokom] if bokom else [],
+                            model_name=PR.MODEL, script=PR.SCRIPT, root=PR.out_root())
     guess = guess_script_full(case, script)
     scr = guess.script
     if scr == "unknown":
@@ -408,6 +424,38 @@ def build(case_dir: str | Path, *, backend: str = "ssh", target: str = "",
         max_price_usd_h=max_price_usd_h, lines_per_page=lines_per_page,
         source_dir=Path(source_dir) if source_dir else None,
         base_out=base_out if reread else None,
+        pages_left=pages_left)
+
+
+def _build_print(case: Path, frames: list[Path], *, backend: str, target: str,
+                 out_dir: str | Path, out_name: str, case_key: str,
+                 budget_usd: float | None, max_hours: float | None,
+                 max_price_usd_h: float | None, source_dir: str | Path,
+                 pages_left: int | None, warnings: list[str], model_name: str,
+                 script: str, root: Path) -> CloudPlan:
+    """План заходу друку: номер видання під ключем і іменем видання.
+
+    🔴 Ключ (`VYD/<код>/<рік>`) і ім'я (`<код>_<дата>_<номер>`) дає
+    `print_edition.IssueRun`, а не розбір шляху бібліотеки: той читав дату з
+    імені теки номера як фонд-опис-справу, і різні газети одного дня діставали
+    одну шифру (`CASES/1934/2/12`). Кадри, залиті колись під іншою адресою,
+    наглядач бере звідти за `--reuse-key`, а не везе вдруге.
+    """
+    from nyshporka.cloud.state import run_id_for
+
+    if not (case_key and out_name):
+        raise PlanError("номер газети їде лише з кодом видання (`nysh cloud go --print "
+                        "--vydannia <код>`): ключ і ім'я номера дає видання")
+    key, why, stem = case_key, "ключ видання", out_name
+    return CloudPlan(
+        run_id=run_id_for(case, model=model_name, script=script, backend=backend),
+        case_dir=case, out_dir=Path(out_dir) if out_dir else root / stem,
+        model=Path(model_name), voice=None, extra_voices=(), script=script,
+        frames=len(frames), bytes_in=_bytes_of(frames), backend=backend,
+        fresh_machine=_rents(backend), target=target, case_key=key, case_key_why=why,
+        warnings=warnings, budget_usd=budget_usd, max_hours=max_hours,
+        max_price_usd_h=max_price_usd_h, lines_per_page=None,
+        source_dir=Path(source_dir) if source_dir else None, base_out=None,
         pages_left=pages_left)
 
 

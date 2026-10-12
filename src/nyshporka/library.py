@@ -473,6 +473,15 @@ def parse_case_path(rel: str) -> tuple[str, str, str | None, str] | None:
                 break
     last = parts[-1]
     stem = re.sub(r"\.(pdf|jpe?g|png)$", "", last, flags=re.IGNORECASE)
+    # 🔴 Номер друкованого видання («16 (443) 1934-02-12», «Додаток … 1935-08-12»)
+    # архівною справою не є: `_SHIFRA_RE` нижче читав дату як фонд-опис-справу,
+    # і різні газети одного дня ставали однією справою `CASES/1934/2/12` (у
+    # партнера — сім пар і номер із додатком). Газета йде в реєстр роками
+    # видання (`VYD/<код>/<рік>`), а не номерами; паспорт теки — сильніший.
+    from nyshporka.vydannia_issues import is_issue_dir_name
+
+    if is_issue_dir_name(stem):
+        return _sidecar_case(rel)
     # davo-стиль повного шифру у назві теки
     md = _DAVO_DIR_RE.match(stem)
     # ⚠ Код береться через `_canon_repo`, а не літералом. Літерал обходив

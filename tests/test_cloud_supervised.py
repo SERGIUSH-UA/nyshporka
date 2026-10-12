@@ -61,9 +61,11 @@ if args[:2] == ["htr", "plan"]:
     out.parent.mkdir(parents=True, exist_ok=True)
     cases, keys = opts("--case"), opts("--case-key")
     names, seeds = opts("--name"), opts("--seed-seg")
+    reuses = opts("--reuse-key")
     # 🔴 Фейк відмовляє там само, де справжній наглядач: інакше тест на
     # порядок списків пройшов би на дублі, який цього правила не знає.
-    for label, got in (("--case-key", keys), ("--name", names), ("--seed-seg", seeds)):
+    for label, got in (("--case-key", keys), ("--name", names), ("--seed-seg", seeds),
+                       ("--reuse-key", reuses)):
         if got and len(got) != len(cases):
             print(f"{label}: {len(got)} проти {len(cases)} справ", file=sys.stderr)
             sys.exit(2)
@@ -87,11 +89,14 @@ if args[:2] == ["htr", "plan"]:
                    "case_key": keys[i] if keys else "",
                    "name": names[i] if names else "",
                    "seed_seg": seeds[i] if seeds else "",
+                   "reuse_key": reuses[i] if reuses else "",
                    "out_dir": opt("--out-root")} for i, c in enumerate(cases)],
         "model": opt("--model"), "voices": opt("--voices"),
         "assets": opt("--assets"), "disk_gb": opt("--disk"),
         "transport": opt("--transport", "auto"), "params": params,
         **({"staged": False} if "--no-upload" in args else {}),
+        # як наглядач ≥ 0.8: план друку несе позначку можливості
+        **({"print_engine": 1} if "engine=paddle_vl" in params else {}),
     }, ensure_ascii=False), encoding="utf-8")
     sys.exit(0)
 
@@ -1741,3 +1746,48 @@ def test_rotate_landscape_turns_light_frames_too(space: Path, monkeypatch,
     turned.clear()
     _go(case, script="latin", dry_run=True)
     assert turned == [], "без прохання легкі кадри не чіпаються"
+
+
+# ── захід цілком: що отримує наглядач ────────────────────────────────────────
+def test_print_go_gives_the_supervisor_the_edition_identity_and_the_old_address(
+        space: Path, monkeypatch: pytest.MonkeyPatch, fake_gpurunner: Any,
+        tmp_path: Path) -> None:
+    """Номер, залитий колись безіменною справою, їде під іменем і ключем видання,
+    кадри — з ТІЄЇ САМОЇ стиснутої копії, і наглядач дістає давнішу адресу
+    архіву. Номер без давнішого заходу — під новим іменем і без адреси."""
+    import os
+    import time
+
+    from test_print_cloud import _issue, _old_plan, _old_stage
+
+    from nyshporka import print_edition as PE
+    from nyshporka.core.workspace import workspace
+
+    PE._PLAN_KEYS.clear()
+    root = tmp_path / "Колективізоване село"
+    i3 = _issue(root, "1936", "3 (770) 1936-01-06", 2)
+    i4 = _issue(root, "1936", "4 (771) 1936-01-08", 2)
+    old = time.time() - 3600         # кадри зняті давно, а не ще качаються
+    for frame in [*i3.glob("*.jpg"), *i4.glob("*.jpg")]:
+        os.utime(frame, (old, old))
+    ws = workspace()
+    _old_plan(ws, i3, "cases/3-770-1936-01-06.tar")
+    stage = _old_stage(ws, i3)
+    backend = Rent(space / "box", FakeSession(space / "box"))
+    monkeypatch.setattr(RUN, "_backend", lambda name: backend)
+
+    # поворот — щоб і легкі кадри стискались: так видно, КУДИ
+    res = GO.go(str(root), backend="fake", script="print", vydannia="KOLSELO_PYR",
+                dry_run=True, rotate_landscape=True)
+    assert res.verdict == "dry_run", res.why
+
+    call = fake_gpurunner.called("htr", "plan")[0]
+
+    def every(flag: str) -> list[str]:
+        return [call[i + 1] for i, a in enumerate(call) if a == flag]
+
+    assert every("--name") == ["kolselo_pyr_1936-01-06_3", "kolselo_pyr_1936-01-08_4"]
+    assert every("--case-key") == ["VYD/KOLSELO_PYR/1936"] * 2
+    assert every("--reuse-key") == ["cases/3-770-1936-01-06.tar", ""]
+    assert Path(every("--case")[0]) == stage
+    assert Path(every("--case")[1]).name == "kolselo_pyr_1936-01-08_4"

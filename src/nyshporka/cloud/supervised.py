@@ -194,6 +194,46 @@ def _plan_carries_engine(plan_path: Path) -> bool:
     return any(line.strip().startswith("kraken==") for line in reqs.splitlines())
 
 
+def _plan_is_print(plan_path: Path) -> bool:
+    """Чи це план друку (`-p engine=paddle_vl`)."""
+    try:
+        plan = json.loads(plan_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    params = plan.get("params") or {}
+    if isinstance(params, dict):
+        return str(params.get("engine") or "") == "paddle_vl"
+    return any(str(p) == "engine=paddle_vl" for p in params)
+
+
+def _plan_carries_print(plan_path: Path) -> bool:
+    """Чи склав план наглядач, що вміє друк (позначка `print_engine`)."""
+    try:
+        return bool(json.loads(plan_path.read_text(encoding="utf-8")).get("print_engine"))
+    except (OSError, ValueError):
+        return False
+
+
+def print_fetch_hooks() -> list[dict[str, Any]]:
+    """Облік після забору заходу друку: роки видань, потім реєстр.
+
+    Номери лягають поза `reports/htr` (`cloud.printed.out_root`), тож
+    індексувати кожен окремо нема чого: `nysh print assemble` збирає з них роки
+    `VYD/<код>/<рік>` і сам кладе їх у текстовий стор.
+    """
+    from nyshporka.core.workspace import WorkspaceError, workspace
+
+    exe = nysh_exe()
+    if not exe:
+        return []
+    try:
+        root = str(workspace().root)
+    except WorkspaceError:
+        return []
+    return [{"cmd": [exe, "print", "assemble"], "cwd": root, "timeout_sec": 3600},
+            {"cmd": [exe, "cases", "build"], "cwd": root, "timeout_sec": 3600}]
+
+
 def engine_requirements_file() -> Path:
     """Вимоги середовища рушіїв із маніфесту — файлом, що їде поруч із раннером.
 
@@ -569,13 +609,17 @@ def prepare(convoy: Convoy, res: GoResult, say: Callable[..., None], *,
     plan = convoy.legs[0].plan
     session = session_name(convoy.legs[0].name, extra=len(convoy.legs) - 1)
     env = _env(session, gr[0] if len(gr) == 1 else sys.executable)
+    from nyshporka.cloud import printed as PR
 
-    # 1. ассети: бойові ваги + скрипти цього раннера
-    models = [plan.model, *( [plan.voice] if plan.voice else [] ),
-              *list(plan.extra_voices or ())]
+    printing = PR.is_print(plan.script)
+
+    # 1. ассети: бойові ваги + скрипти цього раннера. 🖨 Друк ваг не везе: його
+    # рушій і модель живуть на машині (пакет оренди), а не в Нишпорці.
+    models = [] if printing else [plan.model, *([plan.voice] if plan.voice else []),
+                                  *list(plan.extra_voices or ())]
     if assets is None:
         items = assets_inputs(models)
-        stem = "_".join(p.stem for p in models)
+        stem = "_".join(p.stem for p in models) or "print"
         try:
             assets = build_assets(items, _workdir() / "assets", stem=stem)
         except SupervisorMissing as exc:
@@ -608,11 +652,20 @@ def prepare(convoy: Convoy, res: GoResult, say: Callable[..., None], *,
         # самий: наглядач зв'язує ключ, ім'я та засів зі справою ЛИШЕ за
         # позицією. Порожній елемент теж передається — пропуск зсунув би
         # решту на одну позицію, і справа дістала б чужу шифру.
+        reuse = any(leg.reuse_key for leg in convoy.legs)
         for leg in convoy.legs:
             out += ["--case", str(leg.pack), "--case-key", leg.plan.case_key,
                     "--name", leg.name]
             if seeded:
                 out += ["--seed-seg", str(leg.seed) if leg.seed else ""]
+            if reuse:
+                # 🖨 Давніша адреса кадрів номера газети (`print_edition.legacy_frames`):
+                # наглядач бере її, лише коли там рівно цей архів.
+                out += ["--reuse-key", leg.reuse_key]
+        if printing:
+            # Друк читається лише конвеєром наглядача, а справа частинами туди
+            # не йде: межа частини — понад будь-який номер чи том.
+            out += ["--part-pages", str(PR.PART_PAGES)]
         out += ["--out-root", str(convoy.out_root),
                 "--model", plan.model.name, "--voices", voices,
                 "--assets", str(assets),
@@ -638,7 +691,7 @@ def prepare(convoy: Convoy, res: GoResult, say: Callable[..., None], *,
         # 🔴 Обчислені нами параметри йдуть ПЕРШИМИ, людські — після, бо
         # наглядач збирає їх у словник і останнє входження перемагає. Людина,
         # що набрала `-p lines_per_page=…`, мусить перекрити наш здогад.
-        computed = [f"script={plan.script}"]
+        computed = PR.plan_params() if printing else [f"script={plan.script}"]
         # 🔴 ТИПОВА щільність, а не максимальна: це число йде у ВИБІР МАШИНИ
         # (темп, стеля часу, ціна тисячі сторінок). Максимум по черзі означав
         # би міряти ринок по найгустішій сторінці — 23.09.2026 саме так три
@@ -646,16 +699,16 @@ def prepare(convoy: Convoy, res: GoResult, say: Callable[..., None], *,
         # Гроші так само лишаються на максимумі: вилку бюджету завищувати
         # безпечно, а стелю часу — ні.
         typical = convoy.lines_per_page_typical or convoy.lines_per_page
-        if typical:
+        if typical and not printing:
             computed.append(f"lines_per_page={typical}")
         # 🔴 Мінімум архітектури карти з маніфесту рушіїв (`rent_floor`). Тонкий
         # шлях ніс його в `Need`, а керований наглядачеві не передавав зовсім —
         # і 06.10.2026 той узяв два GTX 1080 (6.1) при мінімумі 7.0: інстанси
         # висіли в loading, OCR не почався. Наглядач читає ручку з `-p`.
-        floor = _rent_floor()
+        floor = None if printing else _rent_floor()
         if floor:
             computed.append(f"min_compute_cap={floor:g}")
-        if seeded and convoy.dense_fleet:
+        if seeded and convoy.dense_fleet and not printing:
             # 🔴 Флот один на всю чергу, тож щільніший ставимо лише коли
             # засіяні ВСІ справи й засів справді їде: сторінка без кешу рахує
             # геометрію повністю й задушила б шарди, яким дали вдвічі менше ядер.
@@ -804,6 +857,15 @@ def _check_engine(plan_path: Path) -> None:
     """
     from nyshporka.cloud.go import GoRefused
 
+    if _plan_is_print(plan_path):
+        if not _plan_carries_print(plan_path):
+            # 🖨 Старий наглядач параметр `engine` пропустив би мовчки й прогнав
+            # газети рукописним рушієм — тобто заплатили б за склеєні колонки.
+            raise GoRefused(
+                "наглядач хмарних прогонів не вміє друк: план не несе рушія друку. "
+                "Оновіть: `nysh update` (пакет оренди `gpuhire` з рушієм друку) і "
+                "повторіть. Оренди не було.")
+        return
     if not _plan_carries_engine(plan_path):
         raise GoRefused(
             "наглядач хмарних прогонів застарий: план не везе на машину середовище "
@@ -944,7 +1006,19 @@ def _patch_plan(plan_path: Path, convoy: Convoy) -> None:
             # Тимчасова тека (стейджинг агента) помре — у мету йде тека справи.
             case["case_dir"] = lasting_case_dir(
                 leg.source, leg.plan.case_key, [f.name for f in frames_in(leg.source)])
-    hooks = post_fetch_hooks([leg.name for leg in convoy.legs])
+    from nyshporka.cloud import printed as PR
+
+    printing = PR.is_print(convoy.legs[0].plan.script)
+    if printing:
+        # Видання знає номери за іменем прогону, а теку виходу дає лише план:
+        # наглядач кладе текст за власним slug-ім'ям справи.
+        from nyshporka import print_edition as PE
+
+        PE.repoint({leg.name: str(case.get("out_dir") or "")
+                    for leg, case in zip(convoy.legs, data.get("cases") or [], strict=False)
+                    if case.get("out_dir")})
+    hooks = (print_fetch_hooks() if printing
+             else post_fetch_hooks([leg.name for leg in convoy.legs]))
     if hooks:
         data["post_fetch"] = hooks
     plan_path.write_text(json.dumps(data, ensure_ascii=False, indent=1),

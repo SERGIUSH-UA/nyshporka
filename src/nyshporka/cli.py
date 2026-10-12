@@ -1655,6 +1655,100 @@ cases_app = typer.Typer(help="Реєстр справ: що є, що прочи�
                         no_args_is_help=True)
 app.add_typer(cases_app, name="cases")
 
+# 🖨 Друковані видання (газети, журнали, довідники). Читає їх лише орендована
+# машина (`nysh cloud go --print`) — тут облік, роки й віддача в Супрягу.
+print_app = typer.Typer(help="Друковані видання: роки, прочитане, пакети для Супряги.",
+                        no_args_is_help=True)
+app.add_typer(print_app, name="print")
+
+
+@print_app.command("status")
+def print_status_cmd(
+    vydannia: str = typer.Argument("", help="код видання; порожньо — усі"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
+) -> None:
+    """Що записано про видання: роки, номери, прочитані сторінки, пропуски номерів."""
+    from rich.markup import escape
+
+    from nyshporka import ops as O
+
+    env = O.call("print.status", {"vydannia": vydannia})
+    if _answer(env, as_json):
+        return
+    for ed in env.data["editions"]:
+        console.print(f"[bold]{escape(ed['code'])}[/bold] · {escape(ed['title'])}"
+                      + (f" · {escape(ed['city'])}" if ed["city"] else ""))
+        for y in ed["years"]:
+            gap = (f" · немає номерів: {len(y['missing_numbers'])}"
+                   if y["missing_numbers"] else "")
+            mark = "зібрано" if y["assembled"] else "не зібрано"
+            console.print(f"  {y['year']}: {y['issues']} номерів · прочитано "
+                          f"{y['read']}/{y['pages']} стор. · {mark}{gap}")
+    _notes(env)
+
+
+@print_app.command("assemble")
+def print_assemble_cmd(
+    vydannia: str = typer.Argument("", help="код видання; порожньо — усі"),
+    no_index: bool = typer.Option(False, "--no-index", help="не класти в текстовий стор"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
+) -> None:
+    """Зібрати роки VYD/<код>/<рік> із прочитаних номерів і покласти їх у пошук.
+
+    Після хмарного заходу наглядач кличе цю команду сам; повторний виклик безпечний.
+    """
+    from nyshporka import ops as O
+
+    env = O.call("print.assemble", {"vydannia": vydannia, "index": not no_index})
+    if _answer(env, as_json):
+        return
+    for y in env.data["years"]:
+        mark = "✅" if y["complete"] else "◐"
+        console.print(f"{mark} {y['key']}: {y['read']}/{y['pages']} стор., "
+                      f"{y['issues']} номерів → reports/htr/{y['run']}")
+    _notes(env)
+
+
+@print_app.command("pack")
+def print_pack_cmd(
+    vydannia: str = typer.Argument(..., help="код видання"),
+    year: int = typer.Option(0, "--year", help="лише цей рік"),
+    out: str = typer.Option("", "--out", "-o", help="тека для пакетів"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="показати й нічого не писати"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
+) -> None:
+    """Спакувати повні роки видання для Супряги (VYD/<код>/<рік>, перелік номерів)."""
+    from rich.markup import escape
+
+    from nyshporka import ops as O
+
+    env = O.call("print.pack", {"vydannia": vydannia, "year": year, "out": out,
+                                "dry_run": dry_run})
+    if _answer(env, as_json):
+        return
+    for p in env.data["packs"]:
+        where = escape(str(p["path"])) if p.get("path") else "пройшов ворота (сухий прогін)"
+        console.print(f"📦 {p['key']}: {p['pages']} стор. → {where}")
+    _notes(env)
+    console.print("[muted]віддати: nysh print publish " + escape(vydannia) + "[/muted]")
+
+
+@print_app.command("publish")
+def print_publish_cmd(
+    vydannia: str = typer.Argument(..., help="код видання"),
+    year: int = typer.Option(0, "--year", help="лише цей рік"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
+) -> None:
+    """Віддати повні роки видання в Супрягу (кожен рік — одна книга пулу)."""
+    from nyshporka import ops as O
+
+    env = O.call("print.publish", {"vydannia": vydannia, "year": year})
+    if _answer(env, as_json):
+        return
+    for p in env.data["published"]:
+        console.print(f"✅ {p['key']} віддано")
+    _notes(env)
+
 # 🗺 Газетир: від села до справ по всіх фондах — зворотний напрям до реєстру
 # опису. Модуль існував, але зареєстрований не був: команди `nysh geog …` не
 # існувало, хоч код і повідомлення на неї вже посилались (глухий кут у сенсі

@@ -1058,6 +1058,17 @@ def cmd_go(
     tick: float = typer.Option(60.0, "--tick", help="як часто питати машину, секунд"),
     as_json: bool = typer.Option(
         False, "--json", help="останнім рядком — один JSON-об'єкт із підсумком"),
+    printed: bool = typer.Option(
+        False, "--print",
+        help="друковане видання (газета, журнал, довідник): читає рушій друку на "
+             "орендованій машині; можна назвати теку видання — "
+             "`<Назва>/<РІК>/<N (НАСКРІЗНИЙ) РРРР-ММ-ДД>`"),
+    vydannia: str = typer.Option(
+        "", "--vydannia", help="код видання латинкою (з --print): KOLSELO_PYR — ключ "
+                               "VYD/<код>/<рік> назавжди"),
+    title: str = typer.Option("", "--title", help="назва видання (з --print); "
+                                                  "порожньо — з імені теки"),
+    city: str = typer.Option("", "--city", help="місто видання (з --print)"),
 ) -> None:
     """Прочитати справу на орендованій машині — від кадрів до погашеної оренди.
 
@@ -1105,9 +1116,14 @@ def cmd_go(
                       f"{escape(', '.join(bad))}[/err]")
         raise typer.Exit(code=2)
 
+    if printed and script and script != "print":
+        console.print("[err]`--print` читає друк — `--script` з ним не йде[/err]")
+        raise typer.Exit(code=2)
     res = GO.go(case, backend=backend, budget=budget, max_hours=max_hours,
                 max_price=max_price, max_rents=max_rents, confirm=confirm, dry_run=dry_run,
-                stage=stage, with_voices=with_, second_voice=not one_voice, script=script,
+                stage=stage, with_voices=with_, second_voice=not one_voice,
+                script="print" if printed else script,
+                vydannia=vydannia, title=title, city=city,
                 model=model,
                 case_key=case_key, rerun=rerun, allow_partial=allow_partial,
                 rotate_landscape=rotate_landscape, thin=thin,

@@ -76,7 +76,8 @@ def test_the_cloud_plan_carries_the_case_dir_not_the_staging(
     plan = tmp_path / "plan.json"
     plan.write_text(json.dumps({"cases": [{"name": "cdiak_2-spr-84"}]}), encoding="utf-8")
     leg = types.SimpleNamespace(name="cdiak_2-spr-84", source=layout["stage"],
-                                plan=types.SimpleNamespace(case_key="CDIAK/2/84"))
+                                plan=types.SimpleNamespace(case_key="CDIAK/2/84",
+                                                           script="cyrillic"))
     SV._patch_plan(plan, types.SimpleNamespace(legs=[leg]))  # type: ignore[arg-type]
     got = json.loads(plan.read_text(encoding="utf-8"))["cases"][0]["case_dir"]
     assert got == str(layout["case"]).replace("\\", "/")

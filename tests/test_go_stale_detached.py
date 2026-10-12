@@ -33,7 +33,7 @@ def world(monkeypatch: pytest.MonkeyPatch):
     asked: list[str] = []
     monkeypatch.setattr(ST, "live", lambda: list(runs))
     monkeypatch.setattr(ST, "load", lambda run_id: None)
-    monkeypatch.setattr(G, "_run_ids", lambda plan, frames_dir: {"own__1"})
+    monkeypatch.setattr(G, "_run_ids", lambda plan, frames_dir, **_: {"own__1"})
 
     def state_of(st):
         asked.append(st.run_id)
