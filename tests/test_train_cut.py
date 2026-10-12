@@ -124,6 +124,34 @@ def test_size_mismatch_refuses_to_cut(space: W.Workspace) -> None:
     assert rep.pages[0].error and "не збігається" in rep.pages[0].error
 
 
+def test_frame_in_another_scale_is_cut_in_run_coordinates(space: W.Workspace) -> None:
+    """Рушій читав кадр, зведений до робочої висоти; на диску — оригінал ×2.
+
+    Кроп мусить вийти з того самого місця й у розмірі рамки прогону: чорна
+    смуга рядка всередині, а не біле поле поруч.
+    """
+    def big(run: str, page: str) -> Image.Image:
+        return _images(run, page).resize((PAGE_W * 2, PAGE_H * 2), Image.Resampling.NEAREST)
+
+    rep = C.make_set("r1", "x2", pages=["0001"], prefer_engine=False, ws=space, image_of=big)
+    assert not rep.pages[0].error and rep.n_lines == 3
+    reg = S.registry(space)
+    spec = reg.load("x2")
+    with Image.open(reg.crop_path(spec, "0001", 2)) as im:
+        assert im.size == (PAGE_W - 40, 30)
+        assert im.getpixel((im.width // 2, im.height // 2)) == (0, 0, 0)
+    got = C.page_image("r1", reg.cut_meta(spec)["pages"]["0001"], "0001", big)
+    assert got.size == (PAGE_W, PAGE_H)
+
+
+def test_to_run_size_keeps_a_frame_of_other_proportions() -> None:
+    im = Image.new("RGB", (PAGE_W * 2, PAGE_H * 2 + 40))
+    assert C.to_run_size(im, [PAGE_W, PAGE_H]) is im
+    assert C.to_run_size(im, None) is im
+    assert C.to_run_size(Image.new("RGB", (PAGE_W * 3, PAGE_H * 3)),
+                         [PAGE_W, PAGE_H]).size == (PAGE_W, PAGE_H)
+
+
 def test_pick_pages_prefers_dense_body_and_skips_the_head() -> None:
     pages = {f"{i:04d}": {"lines": 40, "chars": 100 + i * 10} for i in range(1, 41)}
     pages["0003"] = {"lines": 5, "chars": 30}          # титулка — не кандидат

@@ -16,7 +16,9 @@
 
 🔴 Розмір зображення звіряється з `size` у `.lines.json`: рамки лежать у
 координатах того зображення, яке читав прогін, і рендер PDF іншої ширини дав
-би кроп сусіднього рядка — помилку, якої око не ловить.
+би кроп сусіднього рядка — помилку, якої око не ловить. Той самий кадр в
+іншому масштабі (рушій зводить кадр до робочої висоти, а на диску лежить
+оригінал) зводиться до `size` — пропорції при цьому мусять збігатися.
 """
 from __future__ import annotations
 
@@ -43,6 +45,10 @@ SEG_LOW_RATIO = 0.70
 MIN_LINES = 25
 #: Скільки перших кадрів пропускати при автовідборі: обкладинка, титул, опис.
 SKIP_FIRST = 8
+#: Відносний допуск на пропорцію кадру, у межах якого інший розмір — той самий
+#: знімок в іншому масштабі. Зведення до цілого пікселя дає ~1e-4; кадр,
+#: обрізаний чи взятий з іншої зйомки, розходиться на відсотки.
+ASPECT_TOL = 0.005
 
 
 class CutError(ValueError):
@@ -138,8 +144,34 @@ def page_image(run: str, cut_page: dict[str, Any], page: str, image_of: Any) -> 
     if not run and src and Path(src).is_file():
         from nyshporka.htr.view import _open_rotated
 
-        return _open_rotated(Path(src), int(cut_page.get("orient") or 0))
-    return image_of(run, image_key(cut_page, page))
+        im = _open_rotated(Path(src), int(cut_page.get("orient") or 0))
+    else:
+        im = image_of(run, image_key(cut_page, page))
+    return to_run_size(im, cut_page.get("size"))
+
+
+def to_run_size(im: Any, size: Any) -> Any:
+    """Кадр у системі координат прогону: той самий знімок, зведений до `size`.
+
+    Рушій читає кадр, зведений до робочої висоти (3100 px), і рамки
+    `.lines.json` лежать у координатах зведеного, а на диску лежить оригінал
+    6312×5025 чи 3000×4000. Без зведення нарізка відмовляла на кожному такому
+    прогоні, а аркуші з рамками для арбітрів не будувались. Інша пропорція —
+    інший кадр (обрізаний, з іншої зйомки): його не чіпаємо, і відмову дає
+    звірка розміру нижче.
+    """
+    try:
+        w, h = int(size[0]), int(size[1])
+    except (TypeError, ValueError, IndexError):
+        return im
+    if w <= 0 or h <= 0 or (im.width, im.height) == (w, h) or not im.height:
+        return im
+    want, here = w / h, im.width / im.height
+    if abs(here - want) > ASPECT_TOL * want:
+        return im
+    from PIL import Image
+
+    return im.resize((w, h), Image.Resampling.LANCZOS)
 
 
 def pick_pages(meta: dict[str, Any], n: int, *, skip_first: int = SKIP_FIRST) -> list[str]:
@@ -198,6 +230,7 @@ def cut_page_poly(im: Any, geo: dict[str, Any], out: Path) -> PageCut:
     if len(polys) != len(boxes):
         polys = [None] * len(boxes)
     size = [int(v) for v in (geo.get("size") or [im.width, im.height])]
+    im = to_run_size(im, size)
     if size != [im.width, im.height]:
         raise CutError(f"розмір зображення {[im.width, im.height]} не збігається з "
                        f"розміром у прогоні {size}: рамки не накладуться")
