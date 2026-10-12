@@ -595,16 +595,20 @@ header .lang:first-of-type { margin-left: auto; }
 .lb-head .lb-keys { margin-left: auto; font-size: .75rem; color: var(--fg-4); }
 /* 🔴 Контейнер свайпу мусить бути коробкою: до `display: contents` немає куди
    застосувати жест, і свайп був би мертвий. */
-.lb-swipe { display: block; touch-action: pan-y; }  /* JS (fitGesture) пускає pan-x, коли кроп ширший за екран */
-.lb-stage { overflow-x: auto; background: var(--paper); border: 1px solid var(--line-2);
+/* 🔴 Щипок на кропі вимкнено (pinch-zoom не в списку): він збільшував УСЮ сторінку, і вона
+   з'їжджала вбік (13.10.2026, скриншот із телефона). Розмір кропа — кнопками +/−, гортання
+   вбік — одним пальцем усередині рамки. */
+.lb-swipe { display: block; touch-action: pan-x pan-y; max-width: 100%; }
+.lb-stage { overflow-x: auto; -webkit-overflow-scrolling: touch; touch-action: pan-x pan-y;
+  max-width: 100%; box-sizing: border-box; background: var(--paper); border: 1px solid var(--line-2);
   border-radius: var(--r-m); padding: .4rem; transition: opacity .12s; }
 .lb-stage.dim { opacity: .25; }
 .lb-stage img { display: block; max-width: none; height: auto; }
-.lb-ctx { font-size: .82rem; color: var(--fg-3); margin: .4rem 0; }
+.lb-ctx { font-size: .82rem; color: var(--fg-3); margin: .4rem 0; overflow-wrap: anywhere; }
 .lb-ctx-row { display: flex; gap: .5rem; }
 .lb-ctx-row.cur { color: var(--fg); }
 .lb-voices { display: flex; flex-direction: column; gap: .15rem; margin: .3rem 0 .5rem;
-  font-size: .95rem; }
+  font-size: .95rem; overflow-wrap: anywhere; }
 .lb-vt { cursor: pointer; }
 .lb-vt:hover { text-decoration: underline dotted; }
 /* Пословна підсвітка: `new` — слова, яких немає в жодному голосі (домисел),

@@ -3,7 +3,7 @@
  *
  * Робота людини тут одна: подивитись на смужку і надрукувати те, що на ній.
  * Боксів малювати не треба — кропи вже нарізані з прогону. Тому весь екран
- * побудовано навколо швидкості: клавіатура-first на ПК, великі кнопки й свайп
+ * побудовано навколо швидкості: клавіатура-first на ПК, великі кнопки
  * на телефоні, збереження фоном без блокування переходу, префетч наступних
  * кропів, автодоповнення з уже введених фраз.
  *
@@ -29,8 +29,9 @@ const SPECIAL = { e: 'ѣ', t: 'ъ', i: 'і', f: 'ѳ' };
 const CHARS = ['ѣ', 'ъ', 'і', 'ї', 'ѳ', 'ѵ', 'ы', 'э', 'є', 'Ѣ', 'І', 'Ѳ'];
 /** Ширина, з якої поле фокусується саме: на телефоні клавіатура ховає кроп. */
 const DESKTOP_MIN = 821;
-/** Зсув свайпу, з якого жест рахується рішенням, а не дотиком. */
-const SWIPE_PX = 60;
+/** Висота кропа на телефоні: природні 50–100 px нечитні, а збільшений кроп гортається
+ *  пальцем убік. Кнопки +/− міняють її, як і на ПК. */
+const PHONE_H = 110;
 
 /** Стан екрана: живе між входами, бо набір і режим людина обирає раз. */
 const LB = {
@@ -238,7 +239,6 @@ async function showLine() {
   img.onload = () => { stage.classList.remove('dim'); applyZoom(); };
   img.src = d.image;
   bindInput(d, draft);
-  bindSwipe();
   LB.t0 = Date.now();
   prefetch();
   if (LB.panel) await renderPanel(it);
@@ -247,24 +247,10 @@ async function showLine() {
 function applyZoom() {
   const img = el('lb-img');
   if (!img) return;
-  img.style.height = LB.zoom ? `${LB.zoom}px` : '';
-  img.style.width = LB.zoom ? 'auto' : '';
-  fitGesture();
-}
-
-/**
- * 🔴 Широкий кроп гортається пальцем убік — і тоді свайп-рішення на ньому вимкнено.
- * Раніше контейнер тримав `touch-action: pan-y`: браузер не гортав кроп горизонтально,
- * а рух пальцем убік ішов у свайп «зберегти/пропустити» — гортання зберігало рядок
- * (13.10.2026, дослідник на телефоні). Свайп лишається там, де гортати нема чого.
- */
-function fitGesture() {
-  const box = el('lb-swipe');
-  const stage = el('lb-stage');
-  if (!box || !stage) return;
-  const wide = stage.scrollWidth > stage.clientWidth + 4;
-  box.style.touchAction = wide ? 'pan-x pan-y pinch-zoom' : 'pan-y';
-  box.dataset.swipe = wide ? 'off' : 'on';
+  const phone = (globalThis.innerWidth || 0) < DESKTOP_MIN;
+  const h = LB.zoom || (phone && img.naturalHeight && img.naturalHeight < PHONE_H ? PHONE_H : 0);
+  img.style.height = h ? `${h}px` : '';
+  img.style.width = h ? 'auto' : '';
 }
 
 /** Поле вводу: клавіші живуть тут, а не в глобальному роутері — він полів не чіпає. */
@@ -318,24 +304,11 @@ function insertAtCaret(inp, ch) {
   inp.selectionEnd = s + ch.length;
 }
 
-/** Свайп по смужці: вправо — зберегти, вліво — пропустити. Лише не-миша. */
-function bindSwipe() {
-  const box = el('lb-swipe');
-  if (!box) return;
-  let x0 = null;
-  box.addEventListener('pointerdown', (ev) => {
-    if (ev.pointerType === 'mouse' || box.dataset.swipe === 'off') return;
-    x0 = ev.clientX;
-  });
-  box.addEventListener('pointercancel', () => { x0 = null; });
-  box.addEventListener('pointerup', (ev) => {
-    if (x0 === null || ev.pointerType === 'mouse' || box.dataset.swipe === 'off') { x0 = null; return; }
-    const dx = ev.clientX - x0;
-    x0 = null;
-    if (dx > SWIPE_PX) ACTIONS['label.save']();
-    else if (dx < -SWIPE_PX) ACTIONS['label.skip']();
-  });
-}
+/*
+ * 🔴 Свайпу-рішення на кропі немає (13.10.2026). Він ішов через `touch-action: pan-y`:
+ * кроп не гортався пальцем убік, а рух убік зберігав або пропускав рядок. Рішення — лише
+ * кнопками; розмір кропа — +/− (щипок збільшував би всю сторінку).
+ */
 
 // ── сторінка з рамкою ────────────────────────────────────────────────────────
 async function renderPanel(it) {
@@ -436,8 +409,9 @@ Object.assign(ACTIONS, {
     const inp = el('lb-in');
     if (inp) { inp.value = elm.textContent; inp.focus(); }
   },
-  'label.zoomin': () => { LB.zoom = Math.min(400, (LB.zoom || (el('lb-img') || {}).naturalHeight || 60) * 1.25); applyZoom(); },
-  'label.zoomout': () => { LB.zoom = Math.max(24, (LB.zoom || (el('lb-img') || {}).naturalHeight || 60) / 1.25); applyZoom(); },
+  // від ПОТОЧНОЇ висоти: на телефоні кроп уже збільшений, і від природної «+» зменшував би його
+  'label.zoomin': () => { LB.zoom = Math.min(400, (LB.zoom || (el('lb-img') || {}).clientHeight || 60) * 1.25); applyZoom(); },
+  'label.zoomout': () => { LB.zoom = Math.max(24, (LB.zoom || (el('lb-img') || {}).clientHeight || 60) / 1.25); applyZoom(); },
   'label.panel': async () => {
     LB.panel = !LB.panel;
     const box = el('lb-page');
