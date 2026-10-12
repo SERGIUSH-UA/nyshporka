@@ -1499,6 +1499,27 @@ def test_a_fractional_hours_ceiling_is_not_rounded_to_zero(
     assert float(launch[launch.index("--budget") + 1]) == 0.37
 
 
+def test_the_estimate_measures_the_market_with_the_human_ceilings(
+        space: Path, monkeypatch, fake_gpurunner) -> None:
+    """🔴 Кошторис міряє ринок стелями ПЛАНУ. План складався без `--budget` і з
+    `MAX_HOURS_CAP`, тож машини оцінювались за $3 і 14 год, хоч людина назвала
+    інше, — придатні відкидались ще до оренди."""
+    case, _ = _wire(space, monkeypatch)
+    _go(case, dry_run=True, budget=7.5, max_hours=20.0)
+    call = fake_gpurunner.called("htr", "plan")[0]
+    assert float(call[call.index("--budget") + 1]) == 7.5
+    assert float(call[call.index("--max-hours") + 1]) == 20.0
+
+
+def test_without_human_ceilings_the_plan_keeps_its_defaults(
+        space: Path, monkeypatch, fake_gpurunner) -> None:
+    case, _ = _wire(space, monkeypatch)
+    _go(case, dry_run=True)
+    call = fake_gpurunner.called("htr", "plan")[0]
+    assert "--budget" not in call, "бюджет плану — типовий наглядача"
+    assert float(call[call.index("--max-hours") + 1]) == SUP.MAX_HOURS_CAP
+
+
 @pytest.mark.parametrize("kw", [{"budget": 0.0}, {"budget": -1.0},
                                 {"max_hours": 0.0}, {"max_hours": -2.0}])
 def test_a_zero_or_negative_ceiling_is_refused_before_anything(

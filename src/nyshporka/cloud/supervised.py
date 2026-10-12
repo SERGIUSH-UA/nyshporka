@@ -508,9 +508,9 @@ def launch(convoy: Convoy, res: GoResult, say: Callable[..., None], *,
     # 🔴 Кошторис — ДО заливки: на ньому вирішується, чи стартувати взагалі, а
     # заливка партії — гігабайти аплінка (`stage`). Сухий прогін не заливає
     # нічого, якщо людина не попросила доставити план наперед (`--stage`).
-    p = prepare(convoy, res, say, max_hours=max_hours, transport=transport,
-                max_usd_per_1000=max_usd_per_1000, params=params,
-                stage=dry_run and stage)
+    p = prepare(convoy, res, say, budget=budget, max_hours=max_hours,
+                transport=transport, max_usd_per_1000=max_usd_per_1000,
+                params=params, stage=dry_run and stage)
     if p.cost is None and budget is None:
         raise GoRefused("кошторису немає: наглядач не назвав ні вартості, ні "
                         "ціни з годинами. Назвіть стелю витрат самі: `--budget`.")
@@ -539,12 +539,18 @@ def launch(convoy: Convoy, res: GoResult, say: Callable[..., None], *,
 
 
 def prepare(convoy: Convoy, res: GoResult, say: Callable[..., None], *,
-            max_hours: float | None = None, transport: str = "auto",
+            budget: float | None = None, max_hours: float | None = None,
+            transport: str = "auto",
             max_usd_per_1000: float = 0.0, params: Sequence[str] = (),
             assets: Path | None = None, stage: bool = False) -> Prepared:
     """Скласти план заходу й спитати кошторис — нічого не орендуючи.
 
     `assets` — уже зібраний архів (партія збирає його один раз на всі черги).
+
+    🔴 `budget` і `max_hours` людини йдуть у САМ ПЛАН, а не лише в `start`:
+    кошторис (`supervise --dry-run`) міряє ринок стелями плану, і без них
+    машини оцінювались за типовими $3 і `MAX_HOURS_CAP` — придатні під
+    названий бюджет відкидались ще до оренди («ринок порожній»).
 
     `stage=False` (типово) — план лише для кошторису: кадри й ассети НЕ
     заливаються, передполіт не йде (посилання ще нікуди не ведуть). Доставляє
@@ -612,13 +618,16 @@ def prepare(convoy: Convoy, res: GoResult, say: Callable[..., None], *,
                 "--assets", str(assets),
                 "--expect-script", f"{RUNNER_ARCNAME}={runner_path()}",
                 "--disk", str(convoy.disk_gb()),
-                "--max-hours", str(MAX_HOURS_CAP),
+                "--max-hours", repr(float(max_hours if max_hours is not None
+                                          else MAX_HOURS_CAP)),
                 "--prefer-cores", str(PREFER_CORES),
                 # Чим везти дані: об'єктне сховище (якщо воно в людини є) або
                 # сама машина. Вирішує наглядач — він єдиний знає, що
                 # налаштовано; при засіві сховище обов'язкове.
                 "--transport", "r2" if seeded else transport,
                 "--out", str(plan_path)]
+        if budget is not None:
+            out += ["--budget", repr(float(budget))]
         if any(not leg.plan.case_key for leg in convoy.legs):
             # Шифри немає бодай у однієї справи — наглядач інакше відмовиться
             # від порожнього ключа. Прапорець заходовий, тож одна безіменна
