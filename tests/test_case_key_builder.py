@@ -129,6 +129,30 @@ def test_the_letter_prefix_does_not_fall_off_the_shifra() -> None:
     assert m2 and m2.groups() == ("315", "1", "8433")
 
 
+def test_a_letter_opys_reaches_the_catalogue(tmp_path, monkeypatch) -> None:
+    """🔴 Літерний опис («РГАДА 210-6д-199») реєстрація приймала, а бібліотека
+    брала опис як `\\d+` — справа з паспортом випадала з каталогу
+    (`cases chain`: no_passport)."""
+    import json
+
+    from nyshporka import library as L
+
+    m = L._SHIFRA_RE.search("РГАДА 210-6д-199")
+    assert m and m.groups() == ("210", "6д", "199")
+
+    case = tmp_path / "rgada_210"
+    case.mkdir()
+    (case / "_source.json").write_text(
+        json.dumps({"shifra": "РГАДА 210-6д-199"}, ensure_ascii=False), encoding="utf-8")
+    monkeypatch.setattr(L, "ROOT", tmp_path)
+    L._sidecar_case.cache_clear()
+    try:
+        got = L._sidecar_case("rgada_210")
+    finally:
+        L._sidecar_case.cache_clear()
+    assert got is not None and got[1:] == ("210", "6d", "199")
+
+
 def test_a_soviet_source_id_parses_at_all() -> None:
     """Доти ID радянського фонду не розбирався ЗОВСІМ, і картка справи казала
     «канон: фактів 0» там, де канон цитує аркуш дослівно."""
