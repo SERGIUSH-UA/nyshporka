@@ -138,7 +138,10 @@ jobs:
         run: |
           # ⚠ Чернетки відсіюємо: у власника репозиторію недороблений
           # `catalog-*` виявився б «останнім» і поїхав би в `.exe`.
-          tag=$(gh release list --limit 100 --json tagName,isDraft \
+          # 🔴 Ліміт — із запасом на роки: пак виходить рідко, а релізи коду
+          # часто, і зі стелею 100 `catalog-2026-08-17` на 0.29.0 стояв уже
+          # 98-м — ще два релізи, і `.exe` падав би «немає жодного catalog-*».
+          tag=$(gh release list --limit 1000 --json tagName,isDraft \
                 -q '[.[] | select(.isDraft | not) | .tagName
                      | select(test("^catalog-[0-9]{4}-[0-9]{2}-[0-9]{2}$"))]
                     | sort | last')
