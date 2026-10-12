@@ -31,7 +31,7 @@
     тим самим не пускає в коміт спірний факт без гіпотези.
   - **`nysh canon next`** (op `canon.next`): що людині вирішити першим —
     `awaiting` із сильним хітом, далі за вагою, з готовою командою кропу.
-  - Міграція агента 0.28.9: крок `hypotheses`, перевірка `hypotheses_linked`.
+  - Міграція агента 0.29.0: крок `hypotheses`, перевірка `hypotheses_linked`.
   - ⚠ Ламке для чужих канонів: наявний факт `disputed` без `hypothesis` тепер
     ERROR у `canon check`.
 
@@ -45,7 +45,7 @@
   (так з 0.23.2), окремі `nysh htr install` і `nysh models get` — лише після
   `uv tool install` і `unix.sh`. Бойові ваги важать ~215 МБ, а не ~130 (також
   у `windows.ps1`, `nyshporka.iss`, `setup/sample.py`). Тези для
-  `nysh migrate` — `migrate/data/0.28.9.md`.
+  `nysh migrate` — `migrate/data/0.29.0.md`.
 
 ## [0.28.8] — 2026-10-12
 

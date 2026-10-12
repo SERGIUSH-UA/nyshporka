@@ -232,7 +232,7 @@ def _canon_present(root: Path) -> CheckResult:
 
 
 def _hypotheses_linked(root: Path) -> CheckResult:
-    """З 0.28.9 факт `disputed` без картки гіпотези — помилка канону."""
+    """З 0.29.0 факт `disputed` без картки гіпотези — помилка канону."""
     if not (root / "data" / "canonical").is_dir():
         return CheckResult("n/a", "канону ще немає")
     from nyshporka.canon.check import check
