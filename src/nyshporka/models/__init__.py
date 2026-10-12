@@ -2,6 +2,7 @@ from nyshporka.models.citation import Citation
 from nyshporka.models.common import GedDate, MediaRef, NameVariant
 from nyshporka.models.fact import Fact
 from nyshporka.models.family import Family
+from nyshporka.models.hypothesis import Hit, Hypothesis
 from nyshporka.models.person import Floruit, Person
 from nyshporka.models.place import Place
 from nyshporka.models.region import Governorate, RegionRegistry, Uezd, load_regions
@@ -15,6 +16,8 @@ __all__ = [
     "Floruit",
     "GedDate",
     "Governorate",
+    "Hit",
+    "Hypothesis",
     "MediaRef",
     "NameVariant",
     "Person",

@@ -30,7 +30,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ValidationError
 
-from nyshporka.models import Family, GedDate, Person, Place, Source
+from nyshporka.models import Family, GedDate, Hypothesis, Person, Place, Source
+from nyshporka.models.hypothesis import MAX_HITS
 from nyshporka.storage.files import read_entity
 
 Severity = Literal["ERROR", "WARN", "INFO"]
@@ -40,6 +41,7 @@ KINDS: dict[str, type[BaseModel]] = {
     "families": Family,
     "places": Place,
     "sources": Source,
+    "hypotheses": Hypothesis,
 }
 
 #: Посилання в тексті картки: `[[I1234]]`, `[[S_ARCHIVE_X]]`.
@@ -92,6 +94,7 @@ class Canon:
     families: dict[str, Family] = field(default_factory=dict)
     places: dict[str, Place] = field(default_factory=dict)
     sources: dict[str, Source] = field(default_factory=dict)
+    hypotheses: dict[str, Hypothesis] = field(default_factory=dict)
     #: ID → файл, звідки його взято (для повідомлень).
     files: dict[str, Path] = field(default_factory=dict)
 
@@ -100,11 +103,13 @@ class Canon:
         return self.root / "data" / "canonical"
 
     def all_ids(self) -> set[str]:
-        return set(self.persons) | set(self.families) | set(self.places) | set(self.sources)
+        return (set(self.persons) | set(self.families) | set(self.places)
+                | set(self.sources) | set(self.hypotheses))
 
     def counts(self) -> dict[str, int]:
         return {"persons": len(self.persons), "families": len(self.families),
-                "places": len(self.places), "sources": len(self.sources)}
+                "places": len(self.places), "sources": len(self.sources),
+                "hypotheses": len(self.hypotheses)}
 
 
 @dataclass
@@ -207,6 +212,7 @@ def check(root: Path, *, hash_evidence: bool = False) -> Report:
     _chronology(canon, report)
     _refs(canon, report)
     _citations(canon, report)
+    _hypotheses(canon, report)
     _evidence(canon, report, hash_evidence)
     _regions(canon, report)
     _orphans(canon, report)
@@ -416,6 +422,112 @@ def _citations(c: Canon, r: Report) -> None:
             r.add("WARN", "weak_confirmed", owner,
                   f"{f.type}: confirmed, але цитати лише "
                   f"{sorted({ci.confidence for ci in f.citations})}")
+
+
+# ── гіпотези ─────────────────────────────────────────────────────────────────
+#: Відкрита гіпотеза, якої не торкались стільки днів, — напевно, забута.
+STALE_DAYS = 60
+
+
+def _hypotheses(c: Canon, r: Report) -> None:
+    """Кожна відкрита гіпотеза каже, що її розв'яже; кожен спірний факт — на гіпотезі.
+
+    🔴 Це правила-ERROR навмисно: правило в нотатках агент забуває через десять
+    кроків, а git-хук канону не пускає в коміт картку з помилкою. Тож спірний
+    факт без гіпотези чи гіпотеза без «що розв'яже» не лягають у канон узагалі.
+    """
+    from nyshporka.core import casekey
+
+    known = c.all_ids()
+    for hid, h in c.hypotheses.items():
+        if h.status != "closed" and not h.decides.strip():
+            r.add("ERROR", "hyp_no_decides", hid,
+                  "відкрита гіпотеза без `decides`: який документ чи рядок її розв'яже")
+        if h.status == "closed" and not (h.verdict.strip() and h.reopen_if.strip()):
+            r.add("ERROR", "hyp_no_reopen", hid,
+                  "закрита гіпотеза без `verdict` (хто й коли вирішив) або `reopen_if` "
+                  "(який новий доказ її відкриває)")
+        if h.status == "awaiting" and not h.hits:
+            r.add("ERROR", "hyp_awaiting_no_hits", hid,
+                  "чекає вердикту, але хітів немає — на що тоді дивитись людині")
+        if len(h.hits) > MAX_HITS:
+            r.add("ERROR", "hyp_too_many_hits", hid,
+                  f"{len(h.hits)} хітів, а людина розбирає не більше {MAX_HITS}: решта — "
+                  f"у звіті заходу, тут лише ті, від яких щось залежить")
+        for ref in (*h.about, *h.versus):
+            if ref not in known:
+                r.add("ERROR", "missing_ref", hid, f"посилання на {ref}, якого немає")
+        for vid in h.versus:
+            if vid in c.hypotheses and hid not in c.hypotheses[vid].versus:
+                r.add("WARN", "one_sided", hid, f"versus {vid}, а {vid} про {hid} не знає")
+        for cit in h.citations:
+            if cit.source_id not in c.sources:
+                r.add("ERROR", "missing_ref", hid, f"цитата на джерело {cit.source_id}, якого немає")
+        for hit in h.hits:
+            ck = casekey.parse(hit.case)
+            if ck is None:
+                r.add("ERROR", "hyp_bad_case", hid,
+                      f"хіт «{hit.case}»: не ключ справи (треба REPO/фонд/опис/справа)")
+            elif ck.key != hit.case:
+                r.add("ERROR", "hyp_bad_case", hid,
+                      f"хіт «{hit.case}»: ключ пишеться «{ck.key}» — інакше вердикт "
+                      f"із журналу до нього не знайдеться")
+        if h.status != "closed" and (date.today() - h.updated).days > STALE_DAYS:
+            r.add("WARN", "hyp_stale", hid,
+                  f"не оновлювалась з {h.updated} — або рухається, або чесно закривається")
+
+    for owner, f in _facts(c):
+        if f.hypothesis and f.hypothesis not in c.hypotheses:
+            r.add("ERROR", "missing_ref", owner, f"{f.type}: hypothesis {f.hypothesis} не існує")
+        elif f.status == "disputed" and not f.hypothesis:
+            r.add("ERROR", "disputed_unlinked", owner,
+                  f"{f.type}: disputed без `hypothesis` — спірний факт мусить казати, "
+                  f"чим він вирішиться")
+
+    covered = {x for h in c.hypotheses.values() for x in h.about}
+    for pid, p in c.persons.items():
+        if ((p.hypothetical_parent_family or p.hypothetical_spouse_families)
+                and pid not in covered):
+            r.add("WARN", "hypothetical_unlinked", pid,
+                  "гіпотетичний родинний зв'язок без гіпотези, що має цю особу в `about`")
+    for fid, fam in c.families.items():
+        if fam.hypothetical_children and fid not in covered:
+            r.add("WARN", "hypothetical_unlinked", fid,
+                  "гіпотетичні діти без гіпотези, що має цю родину в `about`")
+
+    _verdict_ready(c, r)
+
+
+def _verdict_ready(c: Canon, r: Report) -> None:
+    """Вердикт на хіт уже записано гортачем, а гіпотеза досі його чекає."""
+    waiting = [(hid, h) for hid, h in c.hypotheses.items() if h.status != "closed" and h.hits]
+    if not waiting:
+        return
+    path = c.root / "data" / "derived" / "verdicts.json"
+    try:
+        journal = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return
+    if not isinstance(journal, dict):
+        return
+    from nyshporka.core import legacy_key
+
+    for hid, h in waiting:
+        for hit in h.hits:
+            rows = legacy_key.get(journal, hit.case)
+            if not isinstance(rows, dict):
+                continue
+            for ck, row in rows.items():
+                parts = ck.split("|")
+                if len(parts) < 3 or Path(parts[1]).stem.lower() != hit.scan.lower():
+                    continue
+                if hit.line is not None and parts[2] != str(hit.line):
+                    continue
+                verdict = row.get("verdict") if isinstance(row, dict) else None
+                r.add("WARN", "hyp_verdict_ready", hid,
+                      f"на хіт {hit.case} {hit.scan} уже є вердикт «{verdict}» — "
+                      f"оновити гіпотезу й вирізати хіт")
+                break
 
 
 # ── докази ───────────────────────────────────────────────────────────────────

@@ -16,13 +16,14 @@ from typing import Literal
 
 from nyshporka import ids as ID
 
-Kind = Literal["person", "family", "place"]
+Kind = Literal["person", "family", "place", "hypothesis"]
 
 #: Тип → (тека канону, префікс, формувач ID).
 _KINDS = {
     "person": ("persons", "I", ID.person_id),
     "family": ("families", "F", ID.family_id),
     "place": ("places", "PL", ID.place_id),
+    "hypothesis": ("hypotheses", "H", ID.hypothesis_id),
 }
 
 

@@ -2610,7 +2610,7 @@ def canon_index_cmd(
 
 @canon_app.command("new-id")
 def canon_new_id_cmd(
-    kind: str = typer.Argument(..., help="person | family | place"),
+    kind: str = typer.Argument(..., help="person | family | place | hypothesis"),
     as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Наступний вільний ID. Нічого не резервує — пишіть картку одразу."""
@@ -2620,6 +2620,36 @@ def canon_new_id_cmd(
     if _answer(env, as_json):
         return
     console.print(env.data["id"])
+
+
+@canon_app.command("next")
+def canon_next_cmd(
+    limit: int = typer.Option(3, "--limit", "-n", help="скільки рішень показати"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
+) -> None:
+    """Що людині вирішити першим: відкриті гіпотези роду за вагою, з кропами хітів."""
+    from rich.markup import escape
+
+    from nyshporka import ops as O
+
+    env = O.call("canon.next", {"limit": limit})
+    if _answer(env, as_json):
+        return
+    d = env.data
+    console.print(f"гіпотез: чекають вердикту {d['awaiting']} · відкритих {d['open']} · "
+                  f"закритих {d['closed']}")
+    for i, h in enumerate(d["next"], 1):
+        console.print(f"\n[bold]{i}. {h['id']}[/] [dim]({h['status']}, вага {h['weight']})[/] "
+                      f"{escape(h['claim'])}")
+        console.print(f"   розв'яже: {escape(h['decides'])}")
+        for x in h["hits"]:
+            eye = " · оком" if x["eye"] else ""
+            console.print(f"   · {x['strength']}{eye}: {escape(x['case'])} {x['scan']}"
+                          f"{'' if x['line'] is None else ' р.' + str(x['line'])} "
+                          f"«{escape(x['reading'])}»")
+            if x["crop"]:
+                console.print(f"     [dim]{escape(x['crop'])}[/]")
+    _notes(env)
 
 
 @canon_app.command("hook")

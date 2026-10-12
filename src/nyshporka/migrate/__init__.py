@@ -231,6 +231,20 @@ def _canon_present(root: Path) -> CheckResult:
     return CheckResult("todo", "канону ще немає — засівати з людиною")
 
 
+def _hypotheses_linked(root: Path) -> CheckResult:
+    """З 0.28.9 факт `disputed` без картки гіпотези — помилка канону."""
+    if not (root / "data" / "canonical").is_dir():
+        return CheckResult("n/a", "канону ще немає")
+    from nyshporka.canon.check import check
+
+    rep = check(root)
+    bad = [i for i in rep.issues if i.code == "disputed_unlinked"]
+    if bad:
+        return CheckResult("todo", f"спірних фактів без гіпотези: {len(bad)} — завести "
+                                   f"картки H… (скіл keep-canon, крок 2½)")
+    return CheckResult("ok", f"гіпотез: {len(rep.canon.hypotheses)}, спірні факти прив'язані")
+
+
 def _hook_installed(root: Path) -> CheckResult:
     import subprocess
 
@@ -310,6 +324,7 @@ CHECKS: dict[str, Callable[[Path], CheckResult]] = {
     "skills_current": _skills_current,
     "canon_present": _canon_present,
     "hook_installed": _hook_installed,
+    "hypotheses_linked": _hypotheses_linked,
     "stale_scan": _stale_scan,
     "keys_current": _keys_current,
     "engines_current": _engines_current,

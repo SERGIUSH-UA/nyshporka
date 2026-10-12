@@ -17,6 +17,24 @@
 
 ## [Unreleased]
 
+### Додано
+
+- **Гіпотеза — сутність канону: `data/canonical/hypotheses/H….md`.** Модель
+  `Hypothesis` (твердження, `basis`, `decides`, `versus`, до п'яти `hits` з
+  ключем справи й силою, `verdict` і `reopen_if` для закритої), поле
+  `Fact.hypothesis`, `nysh canon new-id hypothesis`.
+  - `canon check` (ERROR): `disputed_unlinked` — факт `disputed` без
+    `hypothesis`; `hyp_no_decides`, `hyp_no_reopen`, `hyp_awaiting_no_hits`,
+    `hyp_too_many_hits`, `hyp_bad_case`. WARN: `hyp_verdict_ready` (на хіт уже є
+    вердикт у `data/derived/verdicts.json`), `hyp_stale` (60 днів),
+    `hypothetical_unlinked` (гіпотетичне ребро без гіпотези). Git-хук канону
+    тим самим не пускає в коміт спірний факт без гіпотези.
+  - **`nysh canon next`** (op `canon.next`): що людині вирішити першим —
+    `awaiting` із сильним хітом, далі за вагою, з готовою командою кропу.
+  - Міграція агента 0.28.9: крок `hypotheses`, перевірка `hypotheses_linked`.
+  - ⚠ Ламке для чужих канонів: наявний факт `disputed` без `hypothesis` тепер
+    ERROR у `canon check`.
+
 ### Змінено
 
 - **Агентові: спершу пул Супряги, потім рушій.** Правило жило лише в скілі

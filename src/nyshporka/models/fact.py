@@ -38,3 +38,6 @@ class Fact(BaseModel):
     value: str | None = None
     citations: list[Citation] = []
     status: FactStatus = "hypothesis"
+    #: Картка гіпотези (`H…`), що каже, чим цей факт вирішиться. Для `disputed`
+    #: обов'язкова: спірний факт без неї `canon check` не пропускає.
+    hypothesis: str | None = None

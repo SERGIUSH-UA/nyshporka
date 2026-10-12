@@ -24,6 +24,10 @@ def place_id(index: int) -> str:
     return f"PL{index:04d}"
 
 
+def hypothesis_id(index: int) -> str:
+    return f"H{index:04d}"
+
+
 def source_id(slug: str) -> str:
     """ID джерела — slug, бо їх мало і вони мають читатись."""
     return slug

@@ -25,6 +25,8 @@ from nyshporka.models import (
     Fact,
     Family,
     GedDate,
+    Hit,
+    Hypothesis,
     NameVariant,
     Person,
     Place,
@@ -84,7 +86,8 @@ def _codes(rep: C.Report, sev: str) -> list[str]:
 def test_a_whole_canon_has_no_errors_or_warnings(family: Path) -> None:
     rep = C.check(family)
     assert rep.ok and _codes(rep, "ERROR") == [] and _codes(rep, "WARN") == []
-    assert rep.canon.counts() == {"persons": 3, "families": 1, "places": 1, "sources": 1}
+    assert rep.canon.counts() == {"persons": 3, "families": 1, "places": 1, "sources": 1,
+                                  "hypotheses": 0}
 
 
 def test_a_broken_card_does_not_hide_the_rest(family: Path) -> None:
@@ -311,3 +314,135 @@ def test_check_op_reports_errors_as_data(family: Path) -> None:
     assert env.ok and env.data["errors"] == 1
     assert any(w.code == "canon_errors" for w in env.warnings)
     assert O.call("canon.new_id", {"kind": "person"}).data["id"] == "I9006"
+
+
+# ── гіпотези ─────────────────────────────────────────────────────────────────
+def _hyp(hid: str, status: str = "open", **kw) -> Hypothesis:
+    kw.setdefault("claim", "Петро — син Івана")
+    kw.setdefault("updated", date.today())
+    if status != "closed":
+        kw.setdefault("decides", "метрика хрещення Петра")
+    return Hypothesis(id=hid, status=status, **kw)
+
+
+def _hit(strength: str = "strong", **kw) -> Hit:
+    kw.setdefault("case", "TEST/1/2/3")
+    kw.setdefault("scan", "0007")
+    kw.setdefault("reading", "Петро Іванов")
+    return Hit(strength=strength, **kw)
+
+
+def _disputed(hypothesis: str | None = None) -> Person:
+    p = _person("I9003", "Петро", "M", born="1830", parent_family="F9001")
+    p.facts.append(Fact(type="other", value="спірне", status="disputed",
+                        hypothesis=hypothesis))
+    return p
+
+
+def test_a_disputed_fact_must_point_to_a_hypothesis(family: Path) -> None:
+    """🔴 Спірний факт без «чим вирішиться» не лягає в канон."""
+    _write(family, "persons", _disputed())
+    assert "disputed_unlinked" in _codes(C.check(family), "ERROR")
+    _write(family, "persons", _disputed("H9009"))
+    assert "missing_ref" in _codes(C.check(family), "ERROR")
+    _write(family, "hypotheses", _hyp("H9009", about=["I9003"]))
+    rep = C.check(family)
+    assert rep.ok and _codes(rep, "WARN") == []
+
+
+def test_a_hypothesis_says_what_decides_it_and_how_it_reopens(family: Path) -> None:
+    _write(family, "hypotheses", _hyp("H9001", decides=""))
+    _write(family, "hypotheses", _hyp("H9002", status="closed", verdict="людина, 2026"))
+    _write(family, "hypotheses", _hyp("H9003", status="awaiting"))
+    _write(family, "hypotheses", _hyp("H9004", hits=[_hit() for _ in range(6)]))
+    _write(family, "hypotheses", _hyp("H9005", about=["I9999"], versus=["H9998"]))
+    errors = _codes(C.check(family), "ERROR")
+    for code in ("hyp_no_decides", "hyp_no_reopen", "hyp_awaiting_no_hits",
+                 "hyp_too_many_hits", "missing_ref"):
+        assert code in errors, code
+
+
+def test_a_hit_is_written_with_a_canonical_case_key(family: Path) -> None:
+    """Ключ не в канонічній формі — вердикт із журналу до хіта не знайдеться."""
+    _write(family, "hypotheses", _hyp("H9001", hits=[_hit(case="1-2-3")]))
+    _write(family, "hypotheses", _hyp("H9002", hits=[_hit(case="TEST/1/2/207б")]))
+    issues = [i for i in C.check(family).issues if i.code == "hyp_bad_case"]
+    assert {i.where for i in issues} == {"H9001", "H9002"}
+    assert any("TEST/1/2/207b" in i.text for i in issues)
+
+
+def test_a_hypothetical_link_wants_a_hypothesis(family: Path) -> None:
+    _write(family, "persons", _person("I9006", "Можливий", born="1834",
+                                      hypothetical_parent_family="F9001"))
+    _write(family, "families", Family(id="F9001", husband="I9001", wife="I9002",
+                                      children=["I9003"], hypothetical_children=["I9006"]))
+    warned = {i.where for i in C.check(family).issues if i.code == "hypothetical_unlinked"}
+    assert warned == {"I9006", "F9001"}
+    _write(family, "hypotheses", _hyp("H9001", about=["I9006", "F9001"]))
+    assert "hypothetical_unlinked" not in _codes(C.check(family), "WARN")
+
+
+def test_a_verdict_in_the_journal_flags_a_waiting_hypothesis(family: Path) -> None:
+    _write(family, "hypotheses", _hyp("H9001", status="awaiting",
+                                      hits=[_hit(line=12), _hit(scan="0008")]))
+    journal = family / "data" / "derived" / "verdicts.json"
+    journal.parent.mkdir(parents=True, exist_ok=True)
+    journal.write_text(json.dumps({"TEST/1/2/3": {
+        "run-a|0007.jpg|11": {"verdict": "noise"},
+        "run-a|0007.jpg|12": {"verdict": "hit"}}}), encoding="utf-8")
+    ready = [i for i in C.check(family).issues if i.code == "hyp_verdict_ready"]
+    assert len(ready) == 1 and "«hit»" in ready[0].text, "рядок 11 — чужий, 0008 — без вердикту"
+
+
+def test_an_untouched_open_hypothesis_goes_stale(family: Path) -> None:
+    _write(family, "hypotheses", _hyp("H9001", updated=date(2000, 1, 1)))
+    _write(family, "hypotheses", _hyp("H9002", status="closed", verdict="людина",
+                                      reopen_if="новий документ", updated=date(2000, 1, 1)))
+    stale = {i.where for i in C.check(family).issues if i.code == "hyp_stale"}
+    assert stale == {"H9001"}, "закрита не старіє"
+
+
+def test_next_ranks_waiting_strong_and_heavy_first(family: Path) -> None:
+    from nyshporka.canon.next import next_decisions
+
+    # Важча стоїть під БІЛЬШИМ номером: порядок мусить тримати вага, а не ID.
+    _write(family, "persons", _disputed("H9004"))
+    _write(family, "hypotheses", _hyp("H9001", about=["I9001", "I9002", "I9003"]))
+    _write(family, "hypotheses", _hyp("H9002", status="awaiting", hits=[_hit("weak")]))
+    _write(family, "hypotheses", _hyp("H9003", status="awaiting", hits=[_hit("strong")]))
+    _write(family, "hypotheses", _hyp("H9004", status="awaiting", about=["I9003"],
+                                      hits=[_hit("weak", line=4), _hit("strong", line=5)]))
+    _write(family, "hypotheses", _hyp("H9005", status="closed", verdict="людина",
+                                      reopen_if="новий документ"))
+    got = next_decisions(family, limit=10)
+    assert [d["id"] for d in got["next"]] == ["H9004", "H9003", "H9002", "H9001"]
+    top = got["next"][0]
+    assert top["id"] == "H9004" and top["weight"] == 2 and top["facts"] == ["I9003:other"]
+    assert top["hits"][0]["strength"] == "strong", "сильний хіт першим"
+    assert top["hits"][0]["crop"] == 'nysh text crop "TEST/1/2/3" 0007 5'
+    assert (got["open"], got["awaiting"], got["closed"]) == (1, 3, 1)
+    env = O.call("canon.next", {"limit": 1})
+    assert env.ok and [d["id"] for d in env.data["next"]] == ["H9004"]
+    assert O.call("canon.new_id", {"kind": "hypothesis"}).data["id"] == "H9006"
+
+
+def test_precommit_blocks_a_staged_disputed_fact_without_hypothesis(family: Path) -> None:
+    import shutil
+    import subprocess
+
+    from nyshporka.canon import hook as H
+
+    if shutil.which("git") is None:
+        pytest.skip("git недоступний")
+
+    def git(*args: str) -> None:
+        subprocess.run(["git", *args], cwd=family, check=True, capture_output=True)
+
+    git("init", "-q")
+    git("config", "user.email", "t")
+    git("config", "user.name", "t")
+    git("add", "-A")
+    git("commit", "-qm", "base")
+    _write(family, "persons", _disputed())
+    git("add", "-A")
+    assert any("disputed" in p for p in H.problems(family))

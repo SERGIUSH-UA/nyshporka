@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import json
+import re
 import shutil
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -650,6 +651,8 @@ def _primary_given(p: Person) -> str:
 
 
 _DOC_IMG_EXT = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
+#: ID картки гіпотези: власник доказу в маніфесті, але без сторінки на сайті.
+_HYPOTHESIS_ID = re.compile(r"^H\d{4,}$")
 
 
 def _humanize_doc_name(stem: str) -> str:
@@ -717,6 +720,10 @@ def _load_citation_docs(
         }
         for cb in cited_by:
             pid = cb[:-3] if isinstance(cb, str) and cb.endswith(".md") else cb
+            # Картка гіпотези тримає доказ від прибирання, але сторінки на
+            # сайті не має — галерея для неї не збирається.
+            if isinstance(pid, str) and _HYPOTHESIS_ID.match(pid):
+                continue
             by_page.setdefault(pid, []).append(entry)
 
     # Дедуп за url + стабільне сортування за іменем файлу.
@@ -745,6 +752,10 @@ def _public_citation_docs(project_root: Path, docs_dir: Path,
     canonical = project_root / "data" / "canonical"
     owners: dict[str, set[str]] = {}
     for card in canonical.glob("*/*.md"):
+        # Гіпотези на сайт не йдуть: згадка доказу в картці гіпотези не має
+        # ховати скан, який публікує картка особи.
+        if card.parent.name == "hypotheses":
+            continue
         for ref in evidence_refs(card.read_text(encoding="utf-8")):
             owners.setdefault(ref, set()).add(card.stem)
     citations_root = project_root / "data" / "source" / "citations"

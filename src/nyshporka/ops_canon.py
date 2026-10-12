@@ -95,7 +95,8 @@ def canon_index(_a: NoArgs) -> Envelope:
 
 
 class NewIdArgs(BaseModel):
-    kind: Literal["person", "family", "place"] = Field(description="тип нової картки")
+    kind: Literal["person", "family", "place", "hypothesis"] = Field(
+        description="тип нової картки")
 
 
 @op("canon.new_id", summary="Наступний вільний ID для нової картки",
@@ -110,6 +111,31 @@ def canon_new_id(a: NewIdArgs) -> Envelope:
 
     root = _root()
     return ok({"kind": a.kind, "id": new_id(root / "data" / "canonical", a.kind)})
+
+
+class NextArgs(BaseModel):
+    limit: int = Field(default=3, ge=0, description="скільки рішень показати")
+
+
+@op("canon.next", summary="Що людині вирішити першим: відкриті гіпотези роду за вагою",
+    args=NextArgs, mutates=False, agent=False, gui=False, section="research")
+def canon_next(a: NextArgs) -> Envelope:
+    """Ранжування з карток `data/canonical/hypotheses`, а не з нотаток.
+
+    Кожне рішення: твердження, що його розв'яже, хіти з готовою командою кропу.
+    Людині показувати не більше трьох за раз: решта чекає, доки ці вирішено.
+    """
+    from nyshporka.canon.next import next_decisions
+
+    root = _root()
+    if not (root / "data" / "canonical").is_dir():
+        return fail("канону в просторі немає (data/canonical)")
+    got = next_decisions(root, a.limit)
+    env = ok(got)
+    if not (got["open"] or got["awaiting"] or got["closed"]):
+        env.warn("no_hypotheses", "карток гіпотез ще немає: відкрите по роду ніде не "
+                                  "записано. Як завести — скіл keep-canon, розділ «Гіпотеза»")
+    return env
 
 
 class ImportArgs(BaseModel):
