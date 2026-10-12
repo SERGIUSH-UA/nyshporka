@@ -208,13 +208,15 @@ engines:
     label: Дяк
     kind: kraken
     script: cyrillic
-    model_glob: ["diak_*.mlmodel", "diak_*.safetensors", "logofet_*.safetensors"]
+    model_glob: ["diak_*.mlmodel", "diak_*.safetensors", "logofet_*.safetensors", "regent_*.safetensors"]
     note: |
       Дяк-Літописець (`diak_cyr_v6.safetensors`) — нове покоління на базі
       PP-OCRv6. Другий голос: CTC прив'язаний до пікселів і калічить локально, тоді як
       PARSeq має внутрішню мовну модель і підставляє правдоподібне слово.
       Логофет (`logofet_*.safetensors`) — дотренований Літописець під румунську
       (молдавську) кирилицю; той самий рушій, вмикається явно (`--with`).
+      Регент (`regent_*.safetensors`) — дотренований Літописець під руський канцелярський
+      скоропис XVI–XVII ст. (гродські й замкові книги); вмикається явно (`--model`).
 
 # ── базові моделі ────────────────────────────────────────────────────────────
 base_models:
