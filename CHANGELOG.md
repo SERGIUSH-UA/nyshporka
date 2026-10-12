@@ -35,7 +35,7 @@
 ### Виправлено
 
 - **Пошук по прочитаному в Docker-образі.** `nysh text index`, `find`,
-  `crop` і `sheet` падали в усіх образах до 0.28.6 включно з
+  `crop` і `sheet` падали в кожному образі, зібраному до цього виправлення, з
   `OperationalError: unrecognized option: "contentless_delete"`: застосунок
   стояв на системному Python бази `python:3.11-slim-bookworm` із SQLite
   3.40.1, а FTS5 з `contentless_delete` вимагає 3.43. Образ тепер ставить

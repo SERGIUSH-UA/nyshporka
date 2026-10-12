@@ -117,11 +117,11 @@ Code, Codex) — на основній системі. Сам помічник �
 прочитання ні. Місток — обгортка `nysh` на основній системі: вона передає
 команди в контейнер і перекладає шляхи в обидва боки.
 
-!!! warning "Потрібен образ, новіший за 0.28.6"
-    В образах до 0.28.6 включно не працює пошук по прочитаному (`nysh text
-    find`, `crop`, `sheet`): вони падають з `unrecognized option:
-    "contentless_delete"`. Оновіть образ: `docker pull
-    ghcr.io/sergiush-ua/nyshporka:cuda` (або ваш тег).
+!!! warning "Пошук падає з contentless_delete — оновіть образ"
+    `unrecognized option: "contentless_delete"` — так падає пошук по
+    прочитаному (`nysh text find`, `crop`, `sheet`) в образі зі старою SQLite. Оновіть образ: `docker pull
+    ghcr.io/sergiush-ua/nyshporka:cuda` (або ваш тег), потім `docker rm -f
+    nysh` і знову команда з кроку 1.
 
 ### Крок 1. Контейнер, що працює постійно
 

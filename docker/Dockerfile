@@ -31,8 +31,8 @@ ENV NYSH_DOCKER_IMAGE=${TORCH}
 
 # 🔴 Python — керований uv, а не системний з бази: у bookworm SQLite 3.40, а
 # стор прочитаного (`nysh text index/find/crop/sheet`) будує FTS5 з
-# `contentless_delete`, якої нема до 3.43. Усі образи до 0.28.6 включно падали
-# на ній з `unrecognized option: "contentless_delete"` (заміряно 12.10.2026).
+# `contentless_delete`, якої нема до 3.43. Образи, зібрані до цього рядка,
+# падали на ній з `unrecognized option: "contentless_delete"` (заміряно 12.10.2026).
 # `manual` — ставиться лише явним `uv python install`, нічого не тягнеться
 # мовчки; тека — поза /srv/nysh, бо том людини її перекрив би.
 ENV UV_NO_CACHE=1 \
