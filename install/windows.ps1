@@ -246,7 +246,7 @@ if ($DryRun) {
     if ($WantEngines) {
         Say "рушії читання      nysh htr install — torch під відеокарту NVIDIA, якщо драйвер її"
         Say "                   показує, інакше під процесор (~2.5–4 ГБ, у теці простору)"
-        Say "моделі письма      nysh models get (~130 МБ, sha256 звіряється)"
+        Say "моделі письма      nysh models get (~215 МБ, sha256 звіряється)"
     } else {
         $why = if ($EnginesForeign) { "свої, NYSHPORKA_HTR_VENV=$env:NYSHPORKA_HTR_VENV" }
                elseif ($NoEngines) { '-NoEngines' } else { "набір $Preset" }
