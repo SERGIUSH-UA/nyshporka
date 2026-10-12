@@ -1118,11 +1118,14 @@ def _bound_runs() -> dict[str, str | None]:
     `None` — прогін свідомо зроблено нічиїм (`key: null`), і в жодну справу він не
     потрапляє, хоч би куди вказувала мета. Побитий `overrides.json` не ковтається:
     мовчки проігнорувати рішення людини і є та вада, яку тут лагодимо.
-    """
-    from nyshporka.cases.resolve import _run_overrides
 
-    return {name: (str(ov.get("key") or "").strip() or None)
-            for name, ov in _run_overrides().items()}
+    🔴 Прив'язка, чий ключ не є ключем справи («ДАХО 31-141-139»), сюди не
+    потрапляє — інакше прогін виходив би з області своєї справи в нікуди. Про
+    неї попереджає `cases build`; область будується з мети, як без прив'язки.
+    """
+    from nyshporka.cases.resolve import run_binds
+
+    return dict(run_binds()[0])
 
 
 _SERIES_RE = re.compile(r"(\d+(?:[-/]\d+[a-zа-я]?)*)\s*$")

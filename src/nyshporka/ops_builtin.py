@@ -2950,8 +2950,11 @@ def sample_install(a: SampleArgs) -> Envelope:
 
 class BindArgs(BaseModel):
     run: str = Field(description="ім'я теки прогону в reports/htr")
-    key: str = Field(description="ключ справи: DAHMO/315/159")
+    key: str = Field(description="ключ справи: DAHMO/315/1/159 або шифра з архівом: "
+                                 "«ДАХмО 315-1-159»")
     why: str = Field(default="", description="на чому стоїть рішення")
+    force: bool = Field(default=False,
+                        description="прив'язати до справи, якої ще немає в бібліотеці")
 
 
 # 🔴 `agent=False` — і це не економія місця в переліку, а суть операції. Вона
@@ -2973,10 +2976,17 @@ def cases_bind(a: BindArgs) -> Envelope:
     from nyshporka.cases.resolve import bind_run
 
     try:
-        got = bind_run(a.run, a.key, a.why)
+        got = bind_run(a.run, a.key, a.why, force=a.force)
     except ValueError as exc:
         return fail(str(exc))
     env = ok(got)
+    if got.get("normalized"):
+        env.warn("key_normalized",
+                 f"«{got['asked']}» записано ключем {got['key']} — перевірте, що це "
+                 f"та сама справа")
+    if not got.get("in_library", True):
+        env.warn("not_in_library",
+                 f"справи {got['key']} у бібліотеці немає — прив'язано на слово (--force)")
     if not a.why:
         env.warn("no_reason",
                  "підстава не записана — через півроку буде видно прив'язку, "

@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import re
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import lru_cache
 from typing import Any
 
@@ -248,6 +248,111 @@ def _run_overrides() -> dict[str, dict[str, Any]]:
     return out
 
 
+def _stored_key_ok(key: str) -> bool:
+    """Чи записаний у прив'язці ключ має будову ключа справи.
+
+    Лише будова, без бібліотеки: ключ нової форми (і збірка), старий ключ до
+    0.22, який переводить карта переїзду, і ключ друкованого видання.
+    """
+    from nyshporka import vydannia
+
+    return bool(casekey.parse(key) or casekey.is_legacy(key) or vydannia.parse(key))
+
+
+def run_binds() -> tuple[dict[str, str | None], dict[str, str]]:
+    """Ручні прив'язки: (придатні: ім'я → ключ або None, побиті: ім'я → що записано).
+
+    `None` серед придатних — прогін свідомо зроблено нічиїм (`key: null`).
+
+    🔴 Побита прив'язка не перебиває мету прогону. 12.10.2026 у `overrides.json`
+    лягло «ДАХО 31-141-139» замість `DAHO/31/141/139`: як рішення людини воно
+    стояло першим, перекрило правильний `case_key` з `_htr_meta.json`, і після
+    перебудови прочитана справа значилась непрочитаною — без жодного слова.
+    Такий рядок тепер пропускається, а реєстр і `cases bind` про нього кажуть.
+    """
+    src = _run_overrides()
+    # Резолвер питає це на кожен прогін реєстру. Розбір перераховується лише
+    # тоді, коли `_run_overrides` віддав новий об'єкт, тобто після його
+    # `cache_clear` — і тому окремого скидання, яке хтось забуде, тут немає.
+    if _BINDS_MEMO and _BINDS_MEMO[0][0] is src:
+        return _BINDS_MEMO[0][1]
+    good: dict[str, str | None] = {}
+    broken: dict[str, str] = {}
+    for name, ov in src.items():
+        raw = str(ov.get("key") or "").strip()
+        if not raw:
+            good[name] = None
+        elif _stored_key_ok(raw):
+            good[name] = raw
+        else:
+            broken[name] = raw
+    _BINDS_MEMO[:] = [(src, (good, broken))]
+    return good, broken
+
+
+_BINDS_MEMO: list[tuple[dict[str, dict[str, Any]], tuple[dict[str, str | None], dict[str, str]]]] = []
+
+
+def broken_binds() -> list[dict[str, str]]:
+    """Побиті прив'язки з підказкою, яким ключем їх виправити (якщо вгадується)."""
+    out = []
+    for name, raw in sorted(run_binds()[1].items()):
+        fixed, _ = normalize_key(raw)
+        out.append({"run": name, "key": raw, "fix": fixed or ""})
+    return out
+
+
+def broken_binds_report() -> list[str]:
+    """Рядки попередження для людини: що побито і якою командою виправити."""
+    lines = []
+    for b in broken_binds():
+        fix = (f"nysh cases bind {b['run']} {b['fix']} --why …" if b["fix"]
+               else f"nysh cases bind {b['run']} <АРХІВ/фонд/опис/справа> --why …")
+        lines.append(f"⚠ прив'язка прогону {b['run']} → «{b['key']}» негодяща (не ключ "
+                     f"справи) і пропущена — справа береться з мети прогону. "
+                     f"Виправити: {fix}")
+    return lines
+
+
+def normalize_key(value: str) -> tuple[str | None, str]:
+    """Ключ, як його назвала людина → (ключ нової форми або None, чому None).
+
+    Розуміє ключ (`DAHO/31/141/139`), старий ключ до 0.22, ключ видання
+    (`VYD/PEV/1880`) і шифру людським записом через ту саму адресу, що й пошук
+    (`ДАХО 31-141-139`, `ДАХмО ф.315 оп.1 спр.8433`). Шифра без архіву ключем
+    не стає: той самий фонд-опис-справа є в багатьох архівах.
+    """
+    from nyshporka import vydannia
+    from nyshporka.library import parse_address
+
+    s = str(value or "").strip()
+    if not s:
+        return None, "ключ справи порожній"
+    vyd = vydannia.parse(s)
+    if vyd:
+        return vydannia.key(*vyd), ""
+    ck = casekey.parse(s)
+    if ck is not None:
+        return legacy.current_key(ck.key), ""
+    if casekey.is_legacy(s):
+        new = legacy.current_key(s)
+        if casekey.parse(new):
+            return new, ""
+        return None, f"старий ключ «{s}» не переводиться на нову форму"
+    addr = parse_address(s)
+    if addr is not None:
+        if not addr.repo:
+            what = f"архів «{addr.repo_word}» не впізнано" if addr.repo_word \
+                else "архів не названо"
+            return None, (f"{what} — назвіть ключем: "
+                          f"<АРХІВ>/{addr.fond}/{addr.opys}/{addr.spr}")
+        made = casekey.make(addr.repo, addr.fond, addr.opys, addr.spr)
+        if made:
+            return made, ""
+    return None, (f"«{s}» не є ключем справи: потрібна форма АРХІВ/фонд/опис/справа, "
+                  f"наприклад DAHMO/315/1/8433")
+
+
 def bundles() -> dict[str, dict[str, Any]]:
     """Оголошені збірки: ключ → опис (для рядків реєстру, яких немає в бібліотеці)."""
     return dict(load_overrides().get("bundles") or {})
@@ -300,7 +405,7 @@ def put_aside(paths: list[str], why: str = "", *, undo: bool = False) -> dict[st
             "path": str(OVERRIDES_PATH)}
 
 
-def bind_run(run: str, key: str, why: str = "") -> dict[str, Any]:
+def bind_run(run: str, key: str, why: str = "", *, force: bool = False) -> dict[str, Any]:
     """Прив'язати прогін до справи руками — і записати чому.
 
     🔴 Досі це можна було зробити лише текстовим редактором у
@@ -312,17 +417,40 @@ def bind_run(run: str, key: str, why: str = "") -> dict[str, Any]:
     `why` не косметика: рішення людини сильніше за будь-який автомат, тож через
     півроку має бути видно, на чому воно стояло. Порожнє поле тут — та сама
     вигадка, що й прив'язка без підстави.
+
+    🔴 Саме тому, що це рішення найсильніше, записується лише ключ справи. Шифра
+    людським записом зводиться до ключа (`ДАХО 31-141-139` → `DAHO/31/141/139`),
+    а те, що ключем не стає, відхиляється. Доти рядок ішов у файл як є,
+    перекривав правильний ключ мети, і прочитана справа ставала непрочитаною
+    (12.10.2026). Ключ, якого немає в бібліотеці, теж відхиляється — описка в
+    номері дала б ту саму тиху підміну; `force` — для справи, ще не заведеної.
     """
     if not run or "/" in run or "\\" in run:
         raise ValueError(f"ім'я прогону негодяще: {run!r}")
-    if not key:
+    if not key or not str(key).strip():
         raise ValueError("ключ справи обов'язковий")
     casekey.require_current("прив'язка прогону до справи")
-    from nyshporka.core import legacy_key
+    from nyshporka import vydannia
 
-    # Старий ключ — та сама справа; записаний як є, він знову чекав би переносу.
-    key = legacy_key.current_key(key) or key
+    # Побитий файл прив'язок — перша відмова: з ним не записати жодного ключа.
     data = dict(load_overrides())
+    asked = str(key).strip()
+    got, why_not = normalize_key(asked)
+    if got is None:
+        raise ValueError(f"прив'язку не записано: {why_not}")
+    in_library = True
+    if not vydannia.parse(got):
+        idx = LibraryIndex()
+        lib = got if got in idx.by_key else idx.canonical(got)
+        if lib:
+            got = lib
+        elif force:
+            in_library = False
+        else:
+            raise ValueError(
+                f"справи {got} у бібліотеці немає — перевірте архів і номери. Якщо "
+                f"справу ще не заведено, заведіть її або прив'яжіть із --force")
+    key = got
     runs = dict(data.get("runs") or {})
     runs[run] = {"key": key, **({"why": why} if why else {})}
     data["runs"] = runs
@@ -333,7 +461,8 @@ def bind_run(run: str, key: str, why: str = "") -> dict[str, Any]:
     # і бачить ту саму відмову. Виглядає це як «не спрацювало».
     load_overrides.cache_clear()
     _run_overrides.cache_clear()
-    return {"run": run, "key": key, "why": why, "path": str(OVERRIDES_PATH)}
+    return {"run": run, "key": key, "why": why, "path": str(OVERRIDES_PATH),
+            "asked": asked, "normalized": asked != key, "in_library": in_library}
 
 
 def _tokens(name: str) -> list[str]:
@@ -509,10 +638,23 @@ def resolve_run(name: str, case_dir: str = "", index: LibraryIndex | None = None
     idx = index or LibraryIndex()
     # Ключ мети буває до 0.22 — тоді він переводиться за картою переїзду.
     meta_key = legacy.current_key(meta_key) if meta_key else meta_key
-    ov = _run_overrides().get(name)
-    if ov is not None:                                   # 1) рішення людини
-        return RunLink(run=name, key=ov.get("key") or None, resolved_by="override",
+    good, broken = run_binds()
+    if name in good:                                     # 1) рішення людини
+        ov = _run_overrides().get(name) or {}
+        return RunLink(run=name, key=good[name], resolved_by="override",
                        note=ov.get("why") or ov.get("label") or "", case_dir=case_dir)
+    link = _resolve_auto(name, case_dir, idx, _depth, meta_key)
+    if name in broken:
+        # Побита прив'язка не перебиває мету, але й не зникає мовчки: її видно в
+        # нотатці рядка реєстру й у попередженні `cases build`.
+        why = f"ручна прив'язка «{broken[name]}» негодяща — пропущено"
+        link = replace(link, note=f"{why}; {link.note}" if link.note else why)
+    return link
+
+
+def _resolve_auto(name: str, case_dir: str, idx: LibraryIndex, _depth: int,
+                  meta_key: str) -> RunLink:
+    """Канали 2–5 резолвера: усе, крім рішення людини."""
     # Друковане видання (`VYD/<код>/<рік>`) архівною справою не є й у бібліотеці
     # його немає. Без цієї гілки розбір імені нижче бере рік із `vyd_pev_1869`
     # за номер справи й тихо приписує газету чужій справі №1869.

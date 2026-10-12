@@ -74,20 +74,20 @@ def _names(sc: dict[str, Any]) -> set[str]:
 def test_bound_run_is_in_the_case_scope(scope: Any) -> None:
     S, R = scope
     assert _names(S.runs_for_scope("ДАХмО R-100-1-7")) == {"свій"}
-    R.bind_run("проба-фонд-Р", KEY, "теку перенесено")
+    R.bind_run("проба-фонд-Р", KEY, "теку перенесено", force=True)
     assert _names(S.runs_for_scope("ДАХмО R-100-1-7")) == {"свій", "проба-фонд-Р"}
 
 
 def test_run_scope_reports_the_bound_key(scope: Any) -> None:
     S, R = scope
-    R.bind_run("проба-фонд-Р", KEY, "теку перенесено")
+    R.bind_run("проба-фонд-Р", KEY, "теку перенесено", force=True)
     assert S.runs_for_scope("проба-фонд-Р")["key"] == KEY
 
 
 def test_override_elsewhere_beats_meta_key(scope: Any) -> None:
     """Рішення людини сильніше за ключ мети — як у `resolve_run`."""
     S, R = scope
-    R.bind_run("свій", "DAHMO/315/8433", "насправді інша книга")
+    R.bind_run("свій", "DAHMO/315/8433", "насправді інша книга", force=True)
     assert "свій" not in _names(S.runs_for_scope("ДАХмО R-100-1-7"))
 
 

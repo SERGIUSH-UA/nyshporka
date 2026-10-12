@@ -1734,12 +1734,15 @@ def cases_build(
     """
     from nyshporka import pdfcount
     from nyshporka.cases import db
+    from nyshporka.cases.resolve import broken_binds_report
     from nyshporka.library import renamed_report
 
     res = db.rebuild(rescan=rescan, fetch_cloud=fetch_cloud)
     if res["rescanned"]:
         console.print(f"[muted]бібліотеку перезібрано: {res['entries']} справ[/muted]")
     for line in renamed_report():
+        console.print(f"[warn]{line}[/warn]")
+    for line in broken_binds_report():
         console.print(f"[warn]{line}[/warn]")
     if res["cloud"]["skipped"]:
         console.print(f"[warn]⚠ {pdfcount.describe(res['cloud']['skipped'])}[/warn]")
@@ -1961,17 +1964,24 @@ def cases_chain_cmd(
 @cases_app.command("bind")
 def cases_bind_cmd(
     run: str = typer.Argument(..., help="ім'я теки прогону в reports/htr"),
-    key: str = typer.Argument(..., help="ключ справи: DAHMO/315/159"),
+    key: str = typer.Argument(..., help="ключ справи DAHMO/315/1/159 або шифра з "
+                                        "архівом «ДАХмО 315-1-159»"),
     why: str = typer.Option("", "--why", help="на чому стоїть рішення"),
+    force: bool = typer.Option(False, "--force",
+                               help="справи ще немає в бібліотеці — прив'язати на слово"),
 ) -> None:
     """Прив'язати прогін до справи руками — коли автомат не може.
 
     Найчастіший випадок: прогін зроблено в хмарі, і в його меті лишився шлях
     орендованого боксу. Декод є, а показати аркуш нічим, бо невідомо, де кадри.
+    \f
+    Ключ, що не зводиться до справи, і справа, якої немає в бібліотеці,
+    відхиляються: прив'язка перебиває ключ мети прогону, і описка в ній тихо
+    робила прочитану справу непрочитаною.
     """
     from nyshporka import ops as O
 
-    env = O.call("cases.bind", {"run": run, "key": key, "why": why})
+    env = O.call("cases.bind", {"run": run, "key": key, "why": why, "force": force})
     _answer(env)
     console.print(f"✅ {env.data['run']} → {env.data['key']}")
     _notes(env)
