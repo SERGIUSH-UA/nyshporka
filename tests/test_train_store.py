@@ -228,3 +228,31 @@ def test_stats_measures_each_voice_and_the_merge(space: W.Workspace,
     assert d["cer_by_voice"]["pysar"]["lines"] == 2 and d["cer_lines"] == 2
     assert d["cer_by_voice"]["pysar"]["cer"] > 0
     assert d["cer_draft"] == d["cer_by_voice"]["pysar"]["cer"], "стара форма — перший голос"
+
+
+def test_queue_hides_short_lines_by_the_shown_draft(space: W.Workspace) -> None:
+    """«Коротке не показувати»: поріг — довжина чернетки, яку людина бачить (перший голос)."""
+    st = ST.Store("demo", ws=space)
+    every = {(it["page"], it["idx"]) for it in st.queue("sequential")["items"]}
+    long_ = {(it["page"], it["idx"]): it["draft"] for it in st.queue("sequential", min_chars=15)["items"]}
+    assert long_ and all(len(t) >= 15 for t in long_.values())
+    assert ("0001", 2) in every and ("0001", 2) not in long_, "«2 2» — огризок"
+    assert ("0001", 7) in every and ("0001", 7) not in long_, "«Село Ходъ» коротше за поріг"
+    assert ("0001", 0) in long_
+
+
+def test_queue_fresh_skips_lines_the_arbiters_merged(space: W.Workspace) -> None:
+    reg = S.registry(space)
+    spec = reg.load("demo")
+    mdir = reg.set_dir("demo") / S.DRAFTS_DIR / S.MERGE_ID
+    mdir.mkdir(parents=True, exist_ok=True)
+    (mdir / "0001.txt").write_text("\n".join(VOICE_A["0001"]) + "\n", encoding="utf-8")
+    (mdir / S.META_FILE).write_text(json.dumps(
+        {"pages": {"0001": {"conf": {"0": "high", "1": "med", "5": "low"}}}}), encoding="utf-8")
+    spec.drafts = [S.Draft(id=S.MERGE_ID, dir=f"{S.DRAFTS_DIR}/{S.MERGE_ID}")] + list(spec.drafts)
+    reg.save(spec)
+    st = ST.Store("demo", ws=space)
+    keys = {(it["page"], it["idx"]) for it in st.queue("sequential", fresh=True)["items"]}
+    assert ("0001", 0) not in keys and ("0001", 1) not in keys, "high/med уже звели"
+    assert ("0001", 5) in keys, "low — злиття не впоралось, людині варто глянути"
+    assert ("0002", 0) in keys, "сторінки без злиття — уся черга"

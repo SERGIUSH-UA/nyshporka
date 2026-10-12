@@ -478,6 +478,8 @@ class QueueArgs(BaseModel):
     page: str = Field(default="", description="сторінка для режиму page")
     limit: int = Field(default=400, description="стеля рядків у черзі")
     include_blank: bool = Field(default=False, description="показувати порожні смужки")
+    min_chars: int = Field(default=2, description="коротші рядки (за чернеткою) не показувати")
+    fresh: bool = Field(default=False, description="пропускати рядки, які вже звели арбітри (злиття high/med)")
 
 
 @op("train.queue", summary="Черга рядків на розмітку — за розбіжністю голосів",
@@ -492,7 +494,8 @@ def train_queue(a: QueueArgs) -> Envelope:
 
     try:
         st = _store(a.name)
-        got = st.queue(a.mode, a.page, max(1, min(2000, a.limit)), a.include_blank)
+        got = st.queue(a.mode, a.page, max(1, min(2000, a.limit)), a.include_blank,
+                       min_chars=a.min_chars, fresh=a.fresh)
     except S.SetError as exc:
         return fail(str(exc))
     env = ok(got)

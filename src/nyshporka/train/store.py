@@ -281,23 +281,38 @@ class Store:
 
     # -- черга --
     def queue(self, mode: str = "spread", page: str = "", limit: int = 400,
-              include_blank: bool = False) -> dict[str, Any]:
+              include_blank: bool = False, min_chars: int = MIN_CHARS,
+              fresh: bool = False) -> dict[str, Any]:
+        """Черга рядків на розмітку.
+
+        `min_chars` — коротші за це рядки (за чернеткою, яку бачить людина: першим
+        непорожнім голосом) не показуються; огризки сегментації й одинокі цифри не
+        варті ручної розмітки. `fresh` — пропускати рядки, які вже звели арбітри
+        (злиття `high`/`med`): людина розмічає те, чого ще ніхто не читав.
+        """
         pages = self.pages()
         if not pages:
             raise S.SetError(f"у наборі «{self.name}» немає кропів — спершу `nysh train cut`")
         done = self.reg.marks(self.name)
         no_drafts = not self.spec.drafts or not self.has_drafts()
+        merged = self.reg.merge_conf(self.spec) if fresh else {}
+        floor = max(MIN_CHARS, int(min_chars or 0))
 
         def items_of(pg: str) -> list[dict[str, Any]]:
             drafts = self.drafts(pg)
+            conf = merged.get(pg) or {}
             out = []
             for i in pages[pg]:
                 if (pg, i) in done:
+                    continue
+                if conf.get(str(i)) in ("high", "med"):
                     continue
                 d = drafts.get(i, [""] * len(self.spec.drafts))
                 best = next((x for x in d if x), "")
                 if not include_blank and not no_drafts:
                     if not any(len(x.strip()) >= MIN_CHARS for x in d):
+                        continue
+                    if len(best.strip()) < floor:
                         continue
                     ink = self.ink(pg, i)
                     if ink is not None and ink < G.INK_MIN:

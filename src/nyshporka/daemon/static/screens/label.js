@@ -29,7 +29,7 @@ const SWIPE_PX = 60;
 
 /** Стан екрана: живе між входами, бо набір і режим людина обирає раз. */
 const LB = {
-  set: '', mode: 'spread', page: '', blank: false,
+  set: '', mode: 'spread', page: '', blank: false, minChars: 15, fresh: true,
   queue: [], i: -1, srcs: [], ids: [],
   cache: new Map(), zoom: 0, panel: false, panelZoom: 1,
   t0: 0, sets: [],
@@ -49,6 +49,9 @@ SCREENS.label = async () => {
     `<option value="${m}"${m === LB.mode ? ' selected' : ''}>${t(`label.mode.${m}`)}</option>`).join('')}</select>
       <input name="page" id="lb-pagein" placeholder="${t('label.page')}" value="${esc(LB.page)}">
       <label class="lbl-mini"><input type="checkbox" name="blank"${LB.blank ? ' checked' : ''}> ${t('label.blank')}</label>
+      <label class="lbl-mini">${t('label.minchars')} <input type="number" name="minchars" min="0" max="200"
+        inputmode="numeric" style="width:4.5em" value="${LB.minChars}"></label>
+      <label class="lbl-mini"><input type="checkbox" name="fresh"${LB.fresh ? ' checked' : ''}> ${t('label.fresh')}</label>
       <button type="submit">${t('label.start')}</button>
     </form>
     <div id="lb-stats" class="muted"></div>
@@ -72,7 +75,7 @@ SCREENS.label = async () => {
 // ── черга ────────────────────────────────────────────────────────────────────
 async function loadQueue() {
   const env = await callOp('train.queue', { name: LB.set, mode: LB.mode, page: LB.page,
-    include_blank: LB.blank });
+    include_blank: LB.blank, min_chars: LB.minChars, fresh: LB.fresh });
   if (!env.ok) { boxError('lb-work', env); return false; }
   const d = env.data;
   LB.queue = d.items || [];
@@ -343,6 +346,8 @@ Object.assign(ACTIONS, {
     LB.mode = fd.get('mode') || 'spread';
     LB.page = fd.get('page') || '';
     LB.blank = !!fd.get('blank');
+    LB.minChars = Math.max(0, parseInt(fd.get('minchars'), 10) || 0);
+    LB.fresh = !!fd.get('fresh');
     el('lb-work').innerHTML = `<p class="muted">${t('common.loading')}</p>`;
     if (await loadQueue()) await advance(1);
   },
