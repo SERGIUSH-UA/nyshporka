@@ -62,6 +62,7 @@ def test_an_old_workspace_has_the_migration_pending_until_done(space: Path) -> N
     assert [m.version for m in M.pending(space, "0.28.6")][-2:] == ["0.28.5", "0.28.6"]
     assert [m.version for m in M.pending(space, "0.28.7")][-2:] == ["0.28.6", "0.28.7"]
     assert [m.version for m in M.pending(space, "0.28.8")][-2:] == ["0.28.7", "0.28.8"]
+    assert [m.version for m in M.pending(space, "0.29.0")][-2:] == ["0.28.8", "0.29.0"]
     assert M.pending(space, "0.18.14") == [], "новіша за пакет міграція не показується"
     env = O.call("workspace.info", {})
     assert any(w.code == "agent_migration" for w in env.warnings)
@@ -71,7 +72,7 @@ def test_an_old_workspace_has_the_migration_pending_until_done(space: Path) -> N
                                                "0.25", "0.26", "0.26.1", "0.27",
                                                "0.27.1", "0.27.2", "0.28", "0.28.1",
                                                "0.28.2", "0.28.3", "0.28.4", "0.28.5",
-                                               "0.28.6", "0.28.7", "0.28.8"]
+                                               "0.28.6", "0.28.7", "0.28.8", "0.29.0"]
     assert M.pending(space, "0.19.0") == [] and M.pending(space, "0.20.0") == []
     assert not any(w.code == "agent_migration" for w in O.call("workspace.info", {}).warnings)
 
