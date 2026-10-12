@@ -195,6 +195,13 @@ repositories:
     label: ДАБрО
     name: Державний архів Брянської області
     country: RU
+  AVPRI:
+    # Підпис — українським перекладом, як РДІА; російське скорочення
+    # однозначне, тож стоїть псевдонімом.
+    label: АЗПРІ
+    name: Архів зовнішньої політики Російської імперії
+    country: RU
+    aliases: [АВПРИ, АВПРІ]
   CSAMM:
     label: CSAMM
     name: Chişinău State Archive of Moldova (мікрофільми)
