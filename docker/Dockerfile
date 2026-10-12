@@ -29,8 +29,16 @@ RUN apt-get update \
 # у шарі, який зникне разом із контейнером (`setup/doctor.py`).
 ENV NYSH_DOCKER_IMAGE=${TORCH}
 
+# 🔴 Python — керований uv, а не системний з бази: у bookworm SQLite 3.40, а
+# стор прочитаного (`nysh text index/find/crop/sheet`) будує FTS5 з
+# `contentless_delete`, якої нема до 3.43. Усі образи до 0.28.6 включно падали
+# на ній з `unrecognized option: "contentless_delete"` (заміряно 12.10.2026).
+# `manual` — ставиться лише явним `uv python install`, нічого не тягнеться
+# мовчки; тека — поза /srv/nysh, бо том людини її перекрив би.
 ENV UV_NO_CACHE=1 \
-    UV_PYTHON_DOWNLOADS=never \
+    UV_PYTHON_DOWNLOADS=manual \
+    UV_PYTHON_INSTALL_DIR=/opt/nysh/python \
+    UV_PYTHON_BIN_DIR=/opt/nysh/python/bin \
     VIRTUAL_ENV=/opt/nysh/app \
     PATH=/opt/nysh/app/bin:$PATH \
     NYSHPORKA_HTR_VENV=/opt/nysh/htr \
@@ -49,7 +57,9 @@ ENV NYSHPORKA_WORKSPACE=/srv/nysh/work \
     XDG_DATA_HOME=/srv/nysh/home/data
 
 RUN test -n "$NYSH_VERSION" || (echo "потрібен --build-arg NYSH_VERSION" && exit 1) \
- && uv venv /opt/nysh/app --python 3.11 \
+ && uv python install 3.11 \
+ && uv venv /opt/nysh/app --python 3.11 --managed-python \
+ && /opt/nysh/app/bin/python -c "import sqlite3; c = sqlite3.connect(':memory:'); c.execute(\"create virtual table f using fts5(t, content='', contentless_delete=1)\")" \
  && for i in 1 2 3 4 5 6 7 8 9 10; do \
       uv pip install "nyshporka[app,archives]==${NYSH_VERSION}" && break; \
       [ "$i" = 10 ] && exit 1; \
