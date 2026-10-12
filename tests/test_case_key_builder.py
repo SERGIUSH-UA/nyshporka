@@ -228,3 +228,28 @@ def test_a_path_and_a_sentence_are_not_addresses(lib) -> None:
     повнотекстовим."""
     assert lib.parse_address("data/raw/dahmo_315/spr-8433") is None
     assert lib.parse_address("Метрична книга 127-1078-1662") is None
+
+
+@pytest.mark.parametrize(("text", "want"), [
+    ("ДАХмО ф.315 оп.1 спр.8433", ("DAHMO", "315", "1", "8433")),
+    ("ДАХмО ф. 315, оп. 1, спр. 8433", ("DAHMO", "315", "1", "8433")),
+    ("ANRM Ф. 211 Оп. 3 Д. 140", ("ANRM", "211", "3", "140")),
+    ("ДАВіО ф. Р-6129 оп. 24 спр. 5", ("DAVIO", "R-6129", "24", "5")),
+    ("ДАХмО ф.230 оп.6д спр.2а", ("DAHMO", "230", "6d", "2a")),
+])
+def test_a_shifra_with_field_labels_is_an_address(lib, text, want) -> None:
+    """🔴 «ф.315 оп.1 спр.8433» приймав `nysh case`, а резолвер справи — ні, і
+    сервер Супряги, що резолвить ним, обіцяв цю форму в тексті відмови й
+    відмовляв на ній. Позначки полів тепер спільні цеглини обох розборів."""
+    a = lib.parse_address(text)
+    assert a and (a.repo, a.fond, a.opys, a.spr) == want
+
+
+@pytest.mark.parametrize("text", [
+    "127 1078 1662",          # голі номери через пробіл — повнотекстовий запит
+    "ДАХмО 315 1 8433",
+    "ф.315 оп.1",             # справи не названо
+    "Кравченко ф.315",
+])
+def test_a_space_separates_numbers_only_before_a_field_label(lib, text) -> None:
+    assert lib.parse_address(text) is None

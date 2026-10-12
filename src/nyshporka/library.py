@@ -34,8 +34,12 @@ from typing import Any
 
 from nyshporka.archives.pack import active as _pack_active
 from nyshporka.core import casekey as _ck
+from nyshporka.core.casekey import FIELD_LABEL_WORD as FIELD_LABEL_WORD
+from nyshporka.core.casekey import FOND_LABEL as FOND_LABEL
 from nyshporka.core.casekey import FOND_TOKEN as FOND_TOKEN
+from nyshporka.core.casekey import OPYS_LABEL as OPYS_LABEL
 from nyshporka.core.casekey import OPYS_TOKEN as OPYS_TOKEN
+from nyshporka.core.casekey import SPR_LABEL as SPR_LABEL
 from nyshporka.core.casekey import SPR_TOKEN as SPR_TOKEN
 from nyshporka.core.workspace import workspace
 from nyshporka.models import Source
@@ -220,11 +224,19 @@ _SHIFRA_RE = re.compile(
 #: ⚠ `^…$`, а не пошук усередині рядка: адреса — це коли рядок ЦІЛКОМ є
 #: адресою. Інакше запит «Метрична книга 127-1078-1662» перестав би бути
 #: повнотекстовим.
+#: 🔴 Позначки полів («ф.315 оп.1 спр.8433») — ті самі цеглини, що в
+#: `cases.register`. Пробіл чи кома роздільником лише перед ПОЗНАЧКОЮ: поле
+#: назване, і двозначності немає. Голі номери через пробіл («127 1078 1662»)
+#: адресою не стають — це повнотекстовий запит.
+def _addr_sep(label: str) -> str:
+    return rf"(?:\s*[-–/]\s*(?:{label})?|(?:\s*[,;]\s*|\s+){label})"
+
+
 _ADDR_RE = re.compile(
-    rf"^(?:(?P<repo>[A-Za-zА-Яа-яЄІЇҐєіїґ'’]{{2,}})\.?\s*[-–/\s]\s*)?"
-    rf"(?P<fond>{FOND_TOKEN})\s*[-–/]\s*"
-    rf"(?P<opys>{OPYS_TOKEN})\s*[-–/]\s*"
-    rf"(?P<spr>{SPR_TOKEN})$", re.IGNORECASE)
+    rf"^(?:(?P<repo>[A-Za-zА-Яа-яЄІЇҐєіїґ'’]{{2,}})\.?\s*[-–/\s,]\s*)?"
+    rf"(?:{FOND_LABEL})?(?P<fond>{FOND_TOKEN})"
+    rf"{_addr_sep(OPYS_LABEL)}(?P<opys>{OPYS_TOKEN})"
+    rf"{_addr_sep(SPR_LABEL)}(?P<spr>{SPR_TOKEN})$", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -261,7 +273,8 @@ def _repo_of_word(word: str) -> str:
 
 
 def parse_address(value: str) -> Address | None:
-    """«ЦДІАК/127/781/534» · «ЦДІАК 127-781-534» · «ДАВіО-172-4-112» · «315-1-8433».
+    """«ЦДІАК/127/781/534» · «ЦДІАК 127-781-534» · «ДАВіО-172-4-112» · «315-1-8433» ·
+    «ДАХмО ф.315 оп.1 спр.8433».
 
     Роздільники рівноправні: дефіс, тире й скісна означають те саме. Саме цього
     бракувало — шифра в усьому світі пишеться «фонд-опис-справа» в один ряд, тож

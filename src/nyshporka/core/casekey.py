@@ -28,7 +28,8 @@ import re
 from typing import NamedTuple
 
 __all__ = [
-    "FOND_TOKEN", "OPYS_TOKEN", "SPR_TOKEN", "UNKNOWN", "CaseKey", "LegacyKeysError",
+    "FIELD_LABEL_WORD", "FOND_LABEL", "FOND_TOKEN", "OPYS_LABEL", "OPYS_TOKEN", "SPR_LABEL",
+    "SPR_TOKEN", "UNKNOWN", "CaseKey", "LegacyKeysError",
     "compatible", "is_bundle", "is_legacy", "keys_current", "make", "norm_fond", "norm_part",
     "parse", "parse_legacy", "require_current", "stem",
 ]
@@ -45,6 +46,16 @@ KEYS_VERSION = 2
 FOND_TOKEN = r"(?:[А-ЯЄІЇҐA-Z]{1,2}-)?\d+"      # 315 · Р-6129 · R-6129
 OPYS_TOKEN = r"\d+[а-яa-z]?"                     # 1 · 24 · 4б
 SPR_TOKEN = r"\d+[а-яa-z]?"                      # 8433 · 2а
+
+#: Позначки полів перед номером: «ф.315 оп.1 спр.8433», «Ф. 211 Оп. 3 Д. 140»,
+#: румунське «inv.». Ті самі для всіх розборів — інакше `nysh case` приймав
+#: «ф.315 оп.1 спр.8433», а резолвер справи (і сервер Супряги за ним) — ні.
+#: Регістр — на `re.IGNORECASE` розбору.
+FOND_LABEL = r"ф\.?\s*"
+OPYS_LABEL = r"(?:оп|inv)\.?\s*"
+SPR_LABEL = r"(?:спр|д|d)\.?\s*"
+#: Будь-яка з позначок як окреме слово — щоб її не взяли за назву архіву.
+FIELD_LABEL_WORD = r"(?:ф|оп|спр|д|inv|d)"
 
 #: кирилична літера індексу справи → латинська. Канон латинський — ним названі
 #: файли сховища сторінок (`315-1-7029a.json`).
