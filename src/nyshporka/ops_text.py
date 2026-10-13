@@ -182,8 +182,10 @@ def text_index(a: TextIndexArgs) -> Envelope:
         env.warn("rules_stale", RULES_STALE_MSG)
     if ST.LOCKED_SKIPPED:
         env.warn("locked_skipped",
-                 f"{len(ST.LOCKED_SKIPPED)} прогонів пропущено: стор зайнятий іншою сесією "
-                 f"(індексація або optimize) — повторити nysh text index пізніше")
+                 f"{len(ST.LOCKED_SKIPPED)} прогонів НЕ проіндексовано: стор тримала "
+                 f"інша сесія довше за {ST.INDEX_WAIT_SEC / 60:.0f} хв (індексація чи "
+                 f"optimize) — до повтору `nysh text index` пошук їх не бачить",
+                 level=ALERT)
     if st["stale"] and not a.case:
         env.warn("some_not_indexed",
                  f"{st['stale']} прогонів лишились поза стором — найчастіше це "

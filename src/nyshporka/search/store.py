@@ -68,6 +68,7 @@ import hashlib
 import inspect
 import io
 import json
+import os
 import re
 import sqlite3
 import time
@@ -100,6 +101,16 @@ def kgram_len(stem: str) -> int:
     return 4 if len(stem) >= 8 else 3
 
 
+#: Скільки SQLite сам чекає чужий замок на запис, перш ніж відповісти «locked».
+BUSY_TIMEOUT = 60.0
+#: Скільки індексація одного прогону чекає стор, зайнятий іншою сесією
+#: (`optimize` на 37 ГБ, перебудова), перш ніж здатися. Доти не чекала зовсім:
+#: прогін мовчки йшов у `LOCKED_SKIPPED`, і справа після хмарного прогону
+#: лишалась поза пошуком (24.09.2026 — дві справи).
+INDEX_WAIT_SEC = 1800.0
+#: Що каже поступ, поки прогін чекає чужого запису.
+PHASE_WAIT = "чекаю стор: пише інша сесія"
+
 #: Мінімальний розрив між двома грамами пари: далекі докази, не сусідні.
 PAIR_GAP = 2
 #: Стільки прогонів — «суттєва збірка», після якої варто злити сегменти FTS.
@@ -117,7 +128,8 @@ PAIR_MIN_LEN = 11
 def path() -> Path:
     from nyshporka.core.workspace import workspace
 
-    return workspace().derived / FILE
+    ws = workspace()
+    return (ws.text_store_dir or ws.derived) / FILE
 
 
 # ── схема ────────────────────────────────────────────────────────────────────
@@ -159,7 +171,7 @@ def connect(*, readonly: bool = False, migrate: bool = False) -> sqlite3.Connect
     if readonly and not p.is_file():
         raise FileNotFoundError(str(p))
     p.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(p, timeout=60)
+    conn = sqlite3.connect(p, timeout=BUSY_TIMEOUT)
     conn.execute("pragma journal_mode=wal")
     conn.execute("pragma synchronous=normal")
     conn.execute("pragma cache_size=-100000")
@@ -514,7 +526,58 @@ def _delete_run(conn: sqlite3.Connection, run_id: int) -> None:
     conn.execute("delete from runs where id=?", (run_id,))
 
 
-def index_run(conn: sqlite3.Connection, run: str) -> int:
+def _locked_error(exc: sqlite3.OperationalError) -> bool:
+    msg = str(exc).lower()
+    return "locked" in msg or "busy" in msg
+
+
+def _begin_write(conn: sqlite3.Connection, *, wait: float,
+                 waiting: Callable[[], None] | None = None) -> None:
+    """Транзакція із замком на запис ОДРАЗУ (`begin immediate`).
+
+    🔴 Не простий `begin`. Відкладена транзакція спершу читала (`runs`), а
+    писати пробувала вже після чужого коміту — і SQLite у режимі WAL відповідає
+    на це «locked» одразу, без очікування `BUSY_TIMEOUT`: знімок, з якого
+    читали, застарів. Повна індексація комітить після кожного прогону, тож
+    паралельний `index --case` програвав майже завжди (тест
+    `test_index_waits_for_another_writer_instead_of_skipping`).
+
+    Замок, який чужа сесія тримає довше за `BUSY_TIMEOUT` (`optimize`,
+    перебудова), чекається повторами до `wait` секунд.
+    """
+    deadline = time.monotonic() + wait
+    while True:
+        try:
+            conn.execute("begin immediate")
+            return
+        except sqlite3.OperationalError as exc:
+            if not _locked_error(exc) or time.monotonic() >= deadline:
+                raise
+            if waiting:
+                waiting()
+            time.sleep(1.0)
+
+
+def index_run(conn: sqlite3.Connection, run: str, *, wait: float = 0.0,
+              waiting: Callable[[], None] | None = None) -> int:
+    """Проіндексувати один прогін примусово. Повертає число рядків."""
+    got = _index(conn, run, only_stale=False, wait=wait, waiting=waiting)
+    return int(got or 0)
+
+
+def index_run_if_stale(conn: sqlite3.Connection, run: str, *, wait: float = 0.0,
+                       waiting: Callable[[], None] | None = None) -> int | None:
+    """Проіндексувати прогін, якщо він ще застарілий. `None` — уже свіжий.
+
+    🔴 Свіжість перевіряється ПІД замком на запис: поки цей процес чекав, той
+    самий прогін міг проіндексувати інший (наглядач хмари й сесія агента після
+    тієї самої справи). Тоді вдруге він не збирається — запити зливаються.
+    """
+    return _index(conn, run, only_stale=True, wait=wait, waiting=waiting)
+
+
+def _index(conn: sqlite3.Connection, run: str, *, only_stale: bool, wait: float,
+           waiting: Callable[[], None] | None) -> int | None:
     """Проіндексувати один прогін. Повертає число рядків.
 
     🔴 Спершу видалення старого, потім вставка нового, і все в ОДНІЙ
@@ -531,7 +594,13 @@ def index_run(conn: sqlite3.Connection, run: str) -> int:
     meta = S.load_meta(run) or {}
     stem2page = {Path(pg).stem: pg for pg in (meta.get("pages") or {})}
     txts = sorted(d.glob("*.txt"))
-    conn.execute("begin")
+    _begin_write(conn, wait=wait, waiting=waiting)
+    if only_stale:
+        row = conn.execute("select stamp, coalesce(rules,'') from runs where run=?",
+                           (run,)).fetchone()
+        if row and stamp and row[0] == stamp and row[1] == rules_hash():
+            conn.rollback()
+            return None
     old = conn.execute("select id from runs where run=?", (run,)).fetchone()
     if old:
         _delete_run(conn, int(old[0]))
@@ -612,7 +681,8 @@ def ensure(run: str, conn: sqlite3.Connection | None = None) -> bool:
     try:
         if is_fresh(run, c):
             return True
-        return index_run(c, run) > 0
+        got = index_run_if_stale(c, run)
+        return got is None or got > 0
     finally:
         if own:
             c.close()
@@ -663,27 +733,56 @@ def ensure_all(runs: list[str], *, force: bool = False, reset_rules: bool = Fals
                 continue
             todo.append(run)
         total = len(todo)
+        gave_up = False
         for i, run in enumerate(todo, 1):
+            if gave_up:
+                # Стор тримають довше за `INDEX_WAIT_SEC`: решту не чекаємо по
+                # пів години кожен — вони названі в `LOCKED_SKIPPED`.
+                LOCKED_SKIPPED.append(run)
+                continue
             if progress:
                 progress(i, total, run)
             P.report(i, total, "прогонів")
+
+            def waiting(i: int = i) -> None:
+                if progress:
+                    progress(i, total, PHASE_WAIT)
+                P.report(i, total, PHASE_WAIT)
+
             try:
-                if index_run(conn, run) > 0:
-                    built += 1
-                    yield run
+                if force:
+                    got: int | None = index_run(conn, run, wait=INDEX_WAIT_SEC,
+                                                waiting=waiting)
+                else:
+                    got = index_run_if_stale(conn, run, wait=INDEX_WAIT_SEC,
+                                             waiting=waiting)
             except sqlite3.OperationalError as exc:
-                # Друга сесія індексує той самий стор: цей прогін пропускаємо,
-                # решта переліку не валиться; штамп скаже, що він застарілий.
-                if "locked" not in str(exc).lower():
+                if not _locked_error(exc):
                     raise
                 with contextlib.suppress(sqlite3.Error):
                     conn.rollback()
                 LOCKED_SKIPPED.append(run)
+                gave_up = True
+                continue
+            if got is None:
+                # Уже зібрав інший процес, поки ми чекали замка.
+                yield run
+            elif got > 0:
+                built += 1
+                yield run
         # `optimize` зливає ВСІ сегменти FTS під write-lock — на 6.5 ГБ це
         # не для кожного `index --case`; лише коли зібрано багато або примусово.
+        # Зайнятий стор — не причина валити вже зроблену індексацію: злиття
+        # сегментів лише прискорює, і його зробить наступна збірка.
         if force or built >= OPTIMIZE_MIN:
-            conn.execute("insert into fts(fts) values('optimize')")
-            conn.commit()
+            try:
+                conn.execute("insert into fts(fts) values('optimize')")
+                conn.commit()
+            except sqlite3.OperationalError as exc:
+                if not _locked_error(exc):
+                    raise
+                with contextlib.suppress(sqlite3.Error):
+                    conn.rollback()
     finally:
         conn.close()
 
@@ -1399,6 +1498,85 @@ def _sweep_block(conn: sqlite3.Connection, stems: list[str], run_ids: list[int],
     return out
 
 
+#: Скільки процесів чешуть блоки корпусу одночасно. Блок — це розбір блобів
+#: кандидатів у Python (GIL), тож паралелять процеси, не потоки. Один блок бере
+#: до 1.5 ГБ пам'яті (замір 13.10.2026, 60 тис. сторінок): три — 4.5 ГБ, і це
+#: стеля за замовчуванням, бо 11.10 три важкі процеси поруч уже вбила система.
+#: Свіп по корпусу з 41 блока йшов 8–17 хв в один процес.
+SWEEP_WORKERS = 3
+#: Змінна оточення, що перебиває `SWEEP_WORKERS`; `1` — по одному, як раніше.
+SWEEP_WORKERS_ENV = "NYSH_SWEEP_WORKERS"
+
+
+def sweep_workers(n_blocks: int) -> int:
+    raw = os.environ.get(SWEEP_WORKERS_ENV, "").strip()
+    try:
+        n = int(raw) if raw else SWEEP_WORKERS
+    except ValueError:
+        n = SWEEP_WORKERS
+    return max(1, min(n, n_blocks))
+
+
+def _block_init(ws: Any) -> None:
+    """Воркер працює в просторі того, хто кликав: `--workspace` живе лише в
+    батьківському процесі, і без цього воркер відкрив би чужий стор."""
+    from nyshporka.core.workspace import use
+
+    use(ws)
+
+
+def _block_job(stems: list[str], block: list[int], thresh: int
+               ) -> dict[int, list[SweepRow]] | None:
+    conn = connect(readonly=True)
+    try:
+        return _sweep_block(conn, stems, block, thresh)
+    finally:
+        conn.close()
+
+
+def _sweep_parallel(conn: sqlite3.Connection, stems: list[str], blocks: list[list[int]],
+                    thresh: int, key: str, workers: int, *,
+                    progress: Callable[[int, int, str], None] | None = None,
+                    cancel: Callable[[], bool] | None = None,
+                    ) -> tuple[list[dict[int, list[SweepRow]] | None], bool]:
+    """Блоки в `workers` процесах. Кеш кожного блока пишеться, щойно він готовий:
+    обірваний свіп не губить прочесане. Повертає результати В ПОРЯДКУ блоків —
+    той самий порядок хітів, що й у послідовного проходу."""
+    import multiprocessing as mp
+    from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
+
+    from nyshporka.core.workspace import workspace
+
+    out: list[dict[int, list[SweepRow]] | None] = [None] * len(blocks)
+    ctx = mp.get_context("spawn")
+    ex = ProcessPoolExecutor(max_workers=workers, mp_context=ctx,
+                             initializer=_block_init, initargs=(workspace(),))
+    cancelled = False
+    try:
+        futs = {ex.submit(_block_job, stems, b, thresh): i for i, b in enumerate(blocks)}
+        pending = set(futs)
+        done_n = 0
+        while pending:
+            if cancel and cancel():
+                cancelled = True
+                break
+            # Таймаут лише заради `cancel`: блок іде десятки секунд, і людина,
+            # що натиснула «стоп», не мусить чекати його кінця.
+            done, pending = wait(pending, timeout=1.0, return_when=FIRST_COMPLETED)
+            for f in done:
+                got = f.result()
+                i = futs[f]
+                out[i] = got
+                done_n += 1
+                if progress:
+                    progress(done_n, len(blocks), PHASE_SWEEP)
+                if got is not None:
+                    _sweep_put(conn, key, got)
+    finally:
+        ex.shutdown(wait=True, cancel_futures=True)
+    return out, cancelled
+
+
 def _sweep_put(conn: sqlite3.Connection, key: str, got: dict[int, list[SweepRow]]) -> bool:
     """Покласти результати блока в кеш; замок іншої сесії — просто без кешу."""
     try:
@@ -1461,11 +1639,12 @@ def sweep(stems: list[str], runs: list[str], *, thresh: int = 78,
                 if progress:
                     progress(i, len(stale), PHASE_INDEX)
                 try:
-                    index_run(conn, r)
+                    # Пошук людини не чекає пів години: лише `BUSY_TIMEOUT`.
+                    index_run_if_stale(conn, r)
                 except sqlite3.OperationalError as exc:
                     # Інша сесія тримає стор на запис: цей прогін лишається
                     # поза пошуком і йде в `unindexed`, а не валить запит.
-                    if "locked" not in str(exc).lower():
+                    if not _locked_error(exc):
                         raise
                     with contextlib.suppress(sqlite3.Error):
                         conn.rollback()
@@ -1498,6 +1677,16 @@ def sweep(stems: list[str], runs: list[str], *, thresh: int = 78,
             rows.extend(_unpack(body))
         blocks = _blocks_by_pages(conn, todo)
         cancelled = False
+        workers = sweep_workers(len(blocks))
+        if workers > 1:
+            outs, cancelled = _sweep_parallel(conn, stems, blocks, thresh, key, workers,
+                                              progress=progress, cancel=cancel)
+            for got in outs:
+                if got is None:
+                    continue
+                for lst in got.values():
+                    rows.extend(lst)
+            blocks = []
         for bi, block in enumerate(blocks, 1):
             if progress:
                 progress(bi, len(blocks), PHASE_SWEEP)

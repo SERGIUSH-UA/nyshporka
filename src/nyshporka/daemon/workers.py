@@ -335,21 +335,13 @@ async def _run_build(bus: JobBus, job: JobRecord, rescan: bool) -> None:
     await bus.update(job.id, state=JobState.RUNNING)
 
     def work() -> dict[str, Any]:
-        from nyshporka import pdfcount
+        # 🔴 Той самий `rebuild`, що й у терміналі: запити демона й сесій
+        # зливаються в одну збірку між процесами, а не лише в межах демона.
+        from nyshporka.cases import db
 
-        out: dict[str, Any] = {}
-        with pdfcount.session() as sess:
-            if rescan:
-                from nyshporka.library import build_library, write_library
-
-                entries = build_library()
-                write_library(entries)
-                out["library"] = len(entries)
-            from nyshporka.cases import db
-
-            out.update(db.build_index())
-        out["cloud"] = {"files": len(sess.skipped), "bytes": sess.nbytes,
-                        "skipped": dict(sess.skipped)}
+        out = dict(db.rebuild(rescan=rescan))
+        if rescan:
+            out["library"] = out.get("entries", 0)
         return out
 
     try:

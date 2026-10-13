@@ -232,6 +232,26 @@ def test_the_signs_of_a_family(space: Path) -> None:
     assert "Митрофан" in labels  # ім'я живе, поки людина жива: років справи немає
 
 
+def test_batch_match_gives_the_same_scores(space: Path) -> None:
+    """`match_all` — та сама звірка, що `match`, лише матрицею: бали й ознаки
+    мусять збігатися точно, інакше прискорення змінило знайдене."""
+    from rapidfuzz import fuzz
+
+    from nyshporka.core import profile as P
+    from nyshporka.search import record as R
+
+    ts = R.terms(P.resolve("kovalenko"), "Коваленко")
+    toks = ["Коваленко", "Коваленкова", "Ковалнко", "Ковалевскій", "Ковальчукъ",
+            "Пантелеймонъ", "Пантелеймона", "Пантелей", "Митрофановъ", "Митрофанова",
+            "Митрофанъ", "Митро", "Харитонова", "Харитонъ", "Іоаннъ", "Иванова",
+            "Kowalenko", "Mitrofana", "записана", "Марія", "Коваленкъ", "Ковалк"]
+    memo: dict[str, tuple[tuple[int, float], ...]] = {}
+    want = {t: R.match(fuzz, t, ts, memo) for t in toks}
+    got = R.match_all(toks, ts)
+    assert got == want
+    assert any(want.values()), "набір без жодного збігу нічого не перевіряє"
+
+
 def test_years_narrow_the_signs(space: Path) -> None:
     """Ім'я — поки людина жива; по батькові — поки живі її діти."""
     from nyshporka.core import profile as P

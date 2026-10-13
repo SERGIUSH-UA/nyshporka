@@ -692,7 +692,104 @@ def stats(db_path: Path | None = None) -> dict[str, Any]:
         con.close()
 
 
-def rebuild(*, rescan: bool = True, fetch_cloud: bool = False) -> dict[str, Any]:
+#: Скільки виклик чекає чужу збірку, перш ніж визнати замок завислим. Повна
+#: збірка поруч із важким пошуком ішла до 16 хв (13.10.2026).
+BUILD_WAIT_SEC = 3600.0
+
+
+def _build_paths() -> tuple[Path, Path, Path]:
+    """(замок збірки, замок лічильника, лічильник) — поруч із реєстром."""
+    base = Path(DB_PATH)
+    return (base.with_name(base.name + ".build.lock"),
+            base.with_name(base.name + ".queue.lock"),
+            base.with_name(base.name + ".queue.json"))
+
+
+def _queue(mutate: Any = None) -> dict[str, Any]:
+    """Лічильник запитів на збірку: прочитати (і змінити) під коротким замком."""
+    from nyshporka.core.xrate import _locked
+    from nyshporka.utils.atomic import read_json, write_json
+
+    _build_lock, qlock, qfile = _build_paths()
+    with _locked(qlock, timeout=30.0):
+        raw = read_json(qfile, default={})
+        q = dict(raw) if isinstance(raw, dict) else {}
+        q.setdefault("asked", 0)
+        q.setdefault("done", 0)
+        if mutate is not None:
+            mutate(q)
+            write_json(qfile, q)
+        return q
+
+
+def rebuild(*, rescan: bool = True, fetch_cloud: bool = False,
+            wait: float = BUILD_WAIT_SEC) -> dict[str, Any]:
+    """Перезібрати реєстр — один раз на всіх, хто попросив одночасно.
+
+    🔴 Збірку просять звідусіль: наглядач хмари після кожної справи, кожна
+    сесія агента після кожної дії, демон. 13.10.2026 три `cases build`
+    стартували разом і йшли по ~16 хв, ділячи диск між собою й із пошуком, хоча
+    корисною була лише остання. Збірка ідемпотентна, тож запити зливаються:
+
+    * кожен виклик бере номер запиту;
+    * збирає той, хто взяв замок збірки, — і ПЕРЕД читанням диска запам'ятовує
+      найбільший номер, тобто покриває всіх, хто попросив до старту;
+    * решта чекає й повертається, щойно скінчилась збірка, що СТАРТУВАЛА після
+      їхнього запиту, — з її підсумком і позначкою `coalesced`.
+
+    Чотири запити разом і десять під час збірки — дві збірки, а не чотирнадцять.
+    І жоден виклик не повертає реєстр, старіший за власний запит: збірка, що
+    вже йшла, коли його попросили, цей запит не закриває.
+
+    Зливаються лише повні збірки (`rescan`, без `fetch_cloud`): вужча збірка
+    ширшого запиту не закриває, тож вона йде, як ішла.
+    """
+    if not rescan or fetch_cloud:
+        return _rebuild_now(rescan=rescan, fetch_cloud=fetch_cloud)
+    import contextlib
+    import time
+
+    from nyshporka.core.xrate import LockTimeout, _locked
+
+    def ask(q: dict[str, Any]) -> None:
+        q["asked"] = int(q["asked"]) + 1
+
+    mine = int(_queue(ask)["asked"])
+    build_lock = _build_paths()[0]
+    deadline = time.monotonic() + wait
+    while True:
+        q = _queue()
+        if int(q["done"]) >= mine and isinstance(q.get("result"), dict):
+            return {**q["result"], "coalesced": True}
+        stack = contextlib.ExitStack()
+        try:
+            stack.enter_context(_locked(build_lock, timeout=0))
+        except LockTimeout:
+            stack.close()
+            if time.monotonic() > deadline:
+                raise LockTimeout(
+                    f"збірка реєстру зайнята іншим процесом понад {wait:.0f} с — "
+                    f"замок {build_lock}") from None
+            time.sleep(1.0)
+            continue
+        with stack:
+            # Перечитати під замком: поки ми його брали, збірку міг закінчити
+            # інший процес — тоді наш запит уже закрито.
+            q = _queue()
+            if int(q["done"]) >= mine and isinstance(q.get("result"), dict):
+                return {**q["result"], "coalesced": True}
+            upto = int(q["asked"])
+            res = _rebuild_now(rescan=rescan, fetch_cloud=fetch_cloud)
+
+            def finish(q: dict[str, Any]) -> None:
+                q["done"] = max(int(q["done"]), upto)
+                q["result"] = res
+
+            _queue(finish)
+            return res
+
+
+def _rebuild_now(*, rescan: bool = True, fetch_cloud: bool = False) -> dict[str, Any]:
     """Перезібрати реєстр цілком: опис справ на диску, тоді сам зріз.
 
     🔴 Два кроки, а не один, і саме тому вони тут разом. `build_index()` лише

@@ -1832,6 +1832,9 @@ def cases_build(
     from nyshporka.library import renamed_report
 
     res = db.rebuild(rescan=rescan, fetch_cloud=fetch_cloud)
+    if res.get("coalesced"):
+        console.print("[muted]реєстр зібрав інший процес уже після цього запиту — "
+                      "своєї збірки не запускали[/muted]")
     if res["rescanned"]:
         console.print(f"[muted]бібліотеку перезібрано: {res['entries']} справ[/muted]")
     for line in renamed_report():

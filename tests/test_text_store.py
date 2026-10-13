@@ -433,3 +433,161 @@ def test_verify_sample_takes_both_ends_and_the_middle() -> None:
     assert ST._sample([7, 8], 3) == [7, 8]
     assert ST._sample(list(range(5)), 0) == [0, 1, 2, 3, 4]
     assert ST._sample(list(range(5)), 1) == [0]
+
+
+def test_marker_moves_the_store_to_another_disk(tmp_path: Path) -> None:
+    """`text_store` у маркері виносить стор із `data/derived`; без нього — як було."""
+    from nyshporka.core import workspace as W
+    from nyshporka.search import store as ST
+
+    fast = tmp_path / "fast" / "store"
+    marker = tmp_path / "nyshporka.toml"
+    marker.write_text("[workspace]\nschema = 1\n", encoding="utf-8")
+    try:
+        W.reset()
+        W.use(tmp_path)
+        assert ST.path() == tmp_path / "data" / "derived" / ST.FILE
+        marker.write_text(f'[workspace]\nschema = 1\ntext_store = "{fast.as_posix()}"\n',
+                          encoding="utf-8")
+        W.reset()
+        W.use(tmp_path)
+        assert ST.path() == fast / ST.FILE
+        ST.connect().close()
+        assert (fast / ST.FILE).is_file()
+        assert not (tmp_path / "data" / "derived" / ST.FILE).exists()
+    finally:
+        W.reset()
+
+
+def test_parallel_blocks_give_the_same_hits(space: Path,
+                                            monkeypatch: pytest.MonkeyPatch) -> None:
+    """Блоки в кількох процесах — ті самі хіти в тому самому порядку, і кеш
+    кожного блока записаний."""
+    import shutil
+
+    from nyshporka import htr_store as S
+    from nyshporka.search import store as ST
+
+    second = space / "reports" / "htr" / "проба2"
+    shutil.copytree(space / "reports" / "htr" / "проба", second)
+    (second / "0001.txt").write_text("Липовенькій хуторъ\nЛиповецъ\n", encoding="utf-8")
+    S._CACHE.clear()
+    S._RUNS_CACHE = None
+    runs = ["проба", "проба2"]
+    assert sorted(ST.ensure_all(runs)) == runs
+    monkeypatch.setattr(ST, "TRIGRAM_SCOPE_PAGES", 1)
+    stem = S._norm("Липовеньке")
+
+    def fresh() -> dict:
+        conn = ST.connect()
+        conn.execute("delete from sweeps")
+        conn.commit()
+        conn.close()
+        return ST.sweep([stem], runs, thresh=70)
+
+    monkeypatch.setenv(ST.SWEEP_WORKERS_ENV, "1")
+    one = fresh()
+    monkeypatch.setenv(ST.SWEEP_WORKERS_ENV, "2")
+    calls: list[tuple[int, int, str]] = []
+    conn = ST.connect()
+    conn.execute("delete from sweeps")
+    conn.commit()
+    conn.close()
+    par = ST.sweep([stem], runs, thresh=70, progress=lambda i, n, w: calls.append((i, n, w)))
+    assert one["hits"] and par["hits"] == one["hits"]
+    assert par["computed"] == 2 and ST.PHASE_SWEEP in {w for *_x, w in calls}
+    again = ST.sweep([stem], runs, thresh=70)
+    assert again["cached"] == 2 and again["hits"] == one["hits"]
+
+
+def _hold_write(p: Path, secs: float, started: "threading.Event") -> None:
+    """Друга сесія: тримає замок на запис `secs` секунд і комітить."""
+    import sqlite3
+    import time
+
+    c = sqlite3.connect(p, timeout=60)
+    c.execute("begin immediate")
+    c.execute("insert or replace into meta(key, value) values('probe', 'x')")
+    started.set()
+    time.sleep(secs)
+    c.commit()
+    c.close()
+
+
+def test_index_waits_for_another_writer_instead_of_skipping(space: Path) -> None:
+    """Прогін, який інша сесія тримала на запис, доганяється, а не пропускається.
+
+    🔴 Причина пропусків: відкладена транзакція спершу читала, а писати пробувала
+    після чужого коміту — SQLite відповідає «locked» одразу, без очікування.
+    """
+    import threading
+
+    from nyshporka.search import store as ST
+
+    ST.connect().close()
+    started = threading.Event()
+    t = threading.Thread(target=_hold_write, args=(ST.path(), 1.0, started))
+    t.start()
+    assert started.wait(5)
+    built = list(ST.ensure_all(["проба"]))
+    t.join()
+    assert ST.LOCKED_SKIPPED == [] and built == ["проба"]
+    assert ST.is_fresh("проба")
+
+
+def test_run_indexed_by_another_session_is_not_rebuilt(space: Path,
+                                                       monkeypatch: pytest.MonkeyPatch
+                                                       ) -> None:
+    """Прогін, який інший процес проіндексував, поки цей чекав замка, вдруге
+    не збирається: запити на ту саму справу зливаються."""
+    from nyshporka.search import store as ST
+
+    assert list(ST.ensure_all(["проба"])) == ["проба"]
+    # Знімок «до»: стор ще не знав прогону — так його бачив процес, що чекав.
+    monkeypatch.setattr(ST, "stamps", lambda conn: {})
+    calls: list[str] = []
+    real = ST._delete_run
+    monkeypatch.setattr(ST, "_delete_run", lambda c, rid: (calls.append("x"), real(c, rid)))
+    assert list(ST.ensure_all(["проба"])) == ["проба"]
+    assert calls == [], "свіжий під замком прогін перебудовано вдруге"
+
+
+def test_long_lock_is_waited_out(space: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Замок довший за очікування SQLite (`optimize`) — прогін дочікується."""
+    import threading
+
+    from nyshporka.search import store as ST
+
+    ST.connect().close()
+    monkeypatch.setattr(ST, "BUSY_TIMEOUT", 0.2)
+    started = threading.Event()
+    t = threading.Thread(target=_hold_write, args=(ST.path(), 1.5, started))
+    t.start()
+    assert started.wait(5)
+    waits: list[str] = []
+    built = list(ST.ensure_all(["проба"], progress=lambda i, n, w: waits.append(w)))
+    t.join()
+    assert built == ["проба"] and ST.LOCKED_SKIPPED == []
+    assert ST.PHASE_WAIT in waits, "людина не бачила, що прогін чекає"
+
+
+def test_lock_beyond_the_deadline_is_named_loudly(space: Path,
+                                                   monkeypatch: pytest.MonkeyPatch) -> None:
+    """Понад `INDEX_WAIT_SEC` прогін не проіндексовано — і це гучне попередження."""
+    import threading
+
+    from nyshporka.ops_text import TextIndexArgs, text_index
+    from nyshporka.search import store as ST
+
+    ST.connect().close()
+    monkeypatch.setattr(ST, "BUSY_TIMEOUT", 0.1)
+    monkeypatch.setattr(ST, "INDEX_WAIT_SEC", 0.3)
+    started = threading.Event()
+    t = threading.Thread(target=_hold_write, args=(ST.path(), 3.0, started))
+    t.start()
+    assert started.wait(5)
+    env = text_index(TextIndexArgs(case="проба"))
+    t.join()
+    assert ST.LOCKED_SKIPPED == ["проба"]
+    w = [x for x in env.warnings if x.code == "locked_skipped"]
+    assert w and w[0].level == "alert" and "НЕ проіндексовано" in w[0].text

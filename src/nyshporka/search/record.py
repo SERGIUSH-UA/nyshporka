@@ -202,6 +202,139 @@ def match(fuzz: Any, raw: str, ts: Terms, memo: dict[str, tuple[tuple[int, float
     return got
 
 
+#: Скільки токенів у матриці `cdist` за раз: 20 тис. × дві сотні ключів ≈ 32 МБ.
+_CHUNK = 20_000
+
+#: {індекс токена: {індекс ознаки: бал}} — лише те, що дотягло до порога.
+_Got = dict[int, dict[int, float]]
+
+
+def _put(got: _Got, j: int, term: int, sc: float) -> None:
+    row = got.setdefault(j, {})
+    if sc > row.get(term, -1.0):
+        row[term] = sc
+
+
+def _sparse(process: Any, scorer: Any, toks: list[str], keys: list[str],
+            owner: list[int], cutoff: float, ok: Any, got: _Got, *, minus: float = 0.0
+            ) -> None:
+    """Бали токенів проти ключів однією матрицею; у `got` іде лише те, що
+    дотягло до `cutoff` і пройшло `ok(довжина токена, довжина ключа)`.
+
+    Ключ належить ознаці `owner[k]`; бал ознаки — найкращий серед її ключів.
+    """
+    import numpy as np
+
+    if not toks or not keys:
+        return
+    kl = np.fromiter((len(k) for k in keys), dtype=np.int32, count=len(keys))
+    for i in range(0, len(toks), _CHUNK):
+        part = toks[i:i + _CHUNK]
+        m = process.cdist(part, keys, scorer=scorer, dtype=np.float64,
+                          score_cutoff=cutoff, workers=-1)
+        tl = np.fromiter((len(t) for t in part), dtype=np.int32, count=len(part))
+        m[~ok(tl[:, None], kl[None, :])] = 0.0
+        rows, cols = np.nonzero(m)
+        for r, c, v in zip(rows.tolist(), cols.tolist(), m[rows, cols].tolist(),
+                           strict=True):
+            _put(got, i + r, owner[c], v - minus)
+
+
+def _surname_prefix(process: Any, fuzz: Any, toks: list[str], keys: list[str],
+                    owner: list[int], got: _Got) -> None:
+    """Друга половина `_surname_score` — спільний початок без двох літер.
+
+    Довжина зрізу залежить від пари, тож токени йдуть групами за довжиною:
+    у групі зріз для ключа один, і префікси групи ріжуться раз на зріз.
+    """
+    import numpy as np
+
+    by_len: dict[int, list[int]] = defaultdict(list)
+    for j, t in enumerate(toks):
+        by_len[len(t)].append(j)
+    for n, idx in by_len.items():
+        by_cut: dict[int, list[int]] = defaultdict(list)
+        for c, key in enumerate(keys):
+            k = min(n, len(key)) - 2
+            if k >= 5:
+                by_cut[k].append(c)
+        for k, cs in by_cut.items():
+            m = process.cdist([toks[j][:k] for j in idx], [keys[c][:k] for c in cs],
+                              scorer=fuzz.ratio, dtype=np.float64,
+                              score_cutoff=THR_SURNAME + 5.0, workers=-1)
+            rows, cols = np.nonzero(m)
+            for r, c, v in zip(rows.tolist(), cols.tolist(), m[rows, cols].tolist(),
+                               strict=True):
+                _put(got, idx[r], owner[cs[c]], v - 5.0)
+
+
+def _keys_of(ts: Terms, kind: str) -> tuple[list[str], list[int]]:
+    keys: list[str] = []
+    owner: list[int] = []
+    for i, t in enumerate(ts.terms):
+        if t.kind == kind:
+            keys.extend(t.keys)
+            owner.extend([i] * len(t.keys))
+    return keys, owner
+
+
+def match_all(raws: Any, ts: Terms) -> dict[str, tuple[tuple[int, float], ...]]:
+    """`match` для всіх токенів справи одразу — ті самі бали, але матрицею.
+
+    🔴 Справа на 1 370 сторінок трьома голосами — 195 тис. різних токенів і
+    208 ознак роду, тобто 40 млн порівнянь. `match` по одному з Python
+    коштував 97 с із 113 с усього `text find` по справі (замір 13.10.2026);
+    тут кожен вид ознак — одна матриця `cdist` у C на всіх ядрах, і лише по
+    РІЗНИХ нормальних формах (форм імен у кілька разів менше, ніж токенів).
+    Бали мусять збігатися з `match` точно — це приймач тесту.
+    """
+    from rapidfuzz import fuzz, process
+
+    raws = list(dict.fromkeys(raws))
+    forms = [_forms(r) for r in raws]
+
+    def uniq(vals: list[str]) -> tuple[list[str], list[int]]:
+        pos: dict[str, int] = {}
+        at = [pos.setdefault(v, len(pos)) for v in vals]
+        return list(pos), at
+
+    sur_n, sur_at = uniq([n for n, _g, _p in forms])
+    giv, giv_at = uniq([g for _n, g, _p in forms])
+    pat, pat_at = uniq([p for _n, _g, p in forms])
+    s_got: _Got = {}
+    g_got: _Got = {}
+    p_got: _Got = {}
+    keys, owner = _keys_of(ts, "surname")
+    if keys:
+        long_ = [j for j, n in enumerate(sur_n) if len(n) >= MIN_SURNAME]
+        toks = [sur_n[j] for j in long_]
+        sub: _Got = {}
+        _sparse(process, fuzz.ratio, toks, keys, owner, THR_SURNAME,
+                lambda a, b: abs(a - b) <= 4, sub)
+        _surname_prefix(process, fuzz, toks, keys, owner, sub)
+        s_got = {long_[j]: row for j, row in sub.items()}
+    keys, owner = _keys_of(ts, "given")
+    _sparse(process, fuzz.ratio, giv, keys, owner, THR_GIVEN,
+            lambda a, b: (a - b >= -GIVEN_SHORT) & (a - b <= 4), g_got)
+    keys, owner = _keys_of(ts, "patronymic")
+    _sparse(process, fuzz.ratio, pat, keys, owner, THR_PATR,
+            lambda a, b: abs(a - b) <= 4, p_got)
+    out: dict[str, tuple[tuple[int, float], ...]] = {}
+    for j, raw in enumerate(raws):
+        _n, g, p = forms[j]
+        row: dict[int, float] = {}
+        # Поріг уже в матрицях: повне слово — від 80, початок — від 85 мінус 5.
+        for term, sc in (s_got.get(sur_at[j]) or {}).items():
+            row[term] = sc
+        for term, sc in (g_got.get(giv_at[j]) or {}).items():
+            row[term] = sc
+        if p != g:
+            for term, sc in (p_got.get(pat_at[j]) or {}).items():
+                row[term] = sc
+        out[raw] = tuple(sorted(row.items()))
+    return out
+
+
 # ── сторінки й записи ────────────────────────────────────────────────────────
 @dataclass
 class Mark:
@@ -338,13 +471,13 @@ def scan(rows: list[dict[str, Any]], ts: Terms, *, limit: int = 40) -> dict[str,
     `rows` — прогони справи (усі голоси). Сторінка — кадр: голоси одного кадру
     зводяться разом, бо кадр той самий і геометрія в нього одна.
     """
-    from rapidfuzz import fuzz
-
     from nyshporka.search import store as ST
 
     pages: dict[str, Page] = {}
-    memo: dict[str, tuple[tuple[int, float], ...]] = {}
     geo: set[str] = set()
+    # (сторінка, прогін, рядок, текст, рамка, токени): ознаки ставляться
+    # другим проходом, коли всі токени справи звірено одним `match_all`.
+    seen: list[tuple[Page, str, int, str, tuple[int, int, int, int] | None, list[str]]] = []
     if ts.empty or not ST.exists():
         return {"on": not ts.empty, "hits": [], "total": 0, "pages": 0,
                 "terms": [], "common": [], "geo_pages": 0}
@@ -377,14 +510,17 @@ def scan(rows: list[dict[str, Any]], ts: Terms, *, limit: int = 40) -> dict[str,
                     pg.lines.append((run, mid, len(toks)))
                     line_words.append(len(toks))
                     words += len(toks)
-                    for tok in toks:
-                        for ti, sc in match(fuzz, tok, ts, memo):
-                            pg.marks.append(Mark(ti, sc, tok, run, no, text, box))
-                            count[ti] += 1
+                    seen.append((pg, run, no, text, box, toks))
                 if had_geo:
                     geo.add(key)
     finally:
         conn.close()
+    got = match_all((tok for *_rest, toks in seen for tok in toks), ts)
+    for pg, run, no, text, box, toks in seen:
+        for tok in toks:
+            for ti, sc in got[tok]:
+                pg.marks.append(Mark(ti, sc, tok, run, no, text, box))
+                count[ti] += 1
     freq = {i: count.get(i, 0) / max(words, 1) for i in range(len(ts.terms))}
     weigh = Weigh(freq)
     # Смуга «звичайного» розміру — лише щоб назвати людині часті ознаки.

@@ -123,6 +123,10 @@ class Workspace:
     #: (mtime_ns, розмір) маркера, з якого прочитано `keys`; `None` — простір
     #: зібрано в коді, і його `keys` — остаточна відповідь (`keys_now`).
     marker_stamp: tuple[int, int] | None = None
+    #: Тека стору тексту поза `data/derived` (маркер: `text_store`). Стор —
+    #: найбільший файл простору (десятки ГБ), і місце йому там, де швидкий диск,
+    #: а не там, де лежить репозиторій. `None` — у `derived`, як завжди.
+    text_store_dir: Path | None = None
 
     # дані дослідження
     @property
@@ -286,7 +290,9 @@ def _build(root: Path, origin: str) -> Workspace:
                      extra_case_roots=extra, origin=origin,
                      preset=preset, listed_sections=listed,
                      sections_problem=problem, keys=_keys_version(cfg),
-                     marker_stamp=_stamp_of(root / MARKER))
+                     marker_stamp=_stamp_of(root / MARKER),
+                     text_store_dir=(root / str(cfg["text_store"])
+                                     if cfg.get("text_store") else None))
 
 
 def _stamp_of(marker: Path) -> tuple[int, int] | None:
