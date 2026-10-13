@@ -857,7 +857,8 @@ def pull_cmd(
             console.print(f"\nна цій машині вже прочитано справ {loc['have']}"
                           + (f" · можливо прочитано (прогін без ключа) {loc['maybe']}"
                              if loc.get("maybe") else "")
-                          + f" · бракує [bold]{loc['missing']}[/bold] — їх і візьме --take")
+                          + (f" · бракує [bold]{loc['missing']}[/bold] — їх і візьме --take"
+                             if loc.get("missing") else " · бракує 0 — брати нічого"))
         imp = d.get("imported") or []
         if imp:
             runs = sum(len(i.get("runs") or []) for i in imp)

@@ -1451,7 +1451,10 @@ def _pull_series(a: SharePullArgs) -> Envelope:
             maybe = states.count("maybe")
             data["local"] = {"have": have, "maybe": maybe,
                              "missing": len(best) - have - maybe}
-            env.suggest("share.pull", "прийняти справи серії, яких тут немає: --take")
+            # Підказка «--take» лише коли є що брати: під «бракує 0» вона вела
+            # агента приймати серію, з якої нічого не ляже.
+            if data["local"]["missing"]:
+                env.suggest("share.pull", "прийняти справи серії, яких тут немає: --take")
         return env
     if not a.fond.strip():
         return fail("прийняти можна серію фонду: назвіть --fond (архів сам — "

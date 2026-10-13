@@ -299,9 +299,18 @@ def test_zvirka_bachyt_synonim_arkhivu(space: Any, monkeypatch: pytest.MonkeyPat
 
     env = ops_share.share_pull(ops_share.SharePullArgs(repo="DAVIO", fond="800"))
     assert env.data["local"] == {"have": 1, "maybe": 0, "missing": 1}
+    assert [n.op for n in env.next] == ["share.pull"]
 
     ops_share.share_pull(ops_share.SharePullArgs(repo="DAVIO", fond="800", take=True))
     assert taken == ["u8"], "своя 8а не береться дублем"
+
+    # Уся серія вже тут — підказки «--take» немає: брати нічого.
+    monkeypatch.setattr(S, "local_reads", lambda: {
+        "DAVO/800/1/8a": {"own": ["010800-01-00008a"], "taken": []},
+        "DAVIO/800/1/8": {"own": [], "taken": ["DAVIO_800-1-8"]}})
+    env = ops_share.share_pull(ops_share.SharePullArgs(repo="DAVIO", fond="800"))
+    assert env.data["local"] == {"have": 2, "maybe": 0, "missing": 0}
+    assert env.next == []
 
 
 def test_pull_odniiei_spravy_zviriaie_z_prochytanym_tut(
