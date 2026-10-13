@@ -346,6 +346,12 @@ def _ref_z_adresy(url: str) -> dict[str, str] | None:
     book = agad.from_url(url)
     if book is not None:
         return {"source": agad.SOURCE, "ref": book.ref, "url": book.url}
+    # Hungaricana: зйомка — том бібліотеки порталу (переглядач чи тека на CDN).
+    from nyshporka.core import hungaricana
+
+    vol = hungaricana.from_url(url)
+    if vol is not None:
+        return {"source": hungaricana.SOURCE, "ref": vol.ref, "url": vol.url}
     return None
 
 
