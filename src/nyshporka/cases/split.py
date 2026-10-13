@@ -399,8 +399,11 @@ def _same(a: Path, b: Path) -> bool:
 
 # ── розкласти ────────────────────────────────────────────────────────────────
 def split(case_dir: str | Path, specs: list[tuple[str, str, str]], *,
-          copy: bool = False) -> dict[str, Any]:
-    """Розкласти теку на справи за картою. Повертає, що зроблено."""
+          copy: bool = False, rebuild: bool = True) -> dict[str, Any]:
+    """Розкласти теку на справи за картою. Повертає, що зроблено.
+
+    `rebuild=False` — каталог справ не перебудовувати (пачка тек: один
+    `cases build` у кінці); текстовий стор оновлюється однаково."""
     from nyshporka.cases.register import case_path
     from nyshporka.core.workspace import workspace
 
@@ -440,7 +443,7 @@ def split(case_dir: str | Path, specs: list[tuple[str, str, str]], *,
             _split_run(pl, p, run, root)
     moved = _move_notes(pl)
     _mark_old(pl, root)
-    index = _reindex(pl)
+    index = _reindex(pl, rebuild=rebuild)
     done = json.loads(journal.read_text(encoding="utf-8"))
     done.update(state="done", done_at=_now())
     _write_json(journal, done)
@@ -621,24 +624,34 @@ def _forget_caches() -> None:
     S._META_MEMO.clear()
 
 
-def _reindex(pl: Plan) -> dict[str, Any]:
-    """Каталог справ і текстовий стор: старе прибрати, нове показати пошуку."""
+def _reindex(pl: Plan, *, rebuild: bool = True) -> dict[str, Any]:
+    """Каталог справ і текстовий стор: старе прибрати, нове показати пошуку.
+
+    ⏱ Перебудова каталогу — це обхід усього диска (хвилини на тисячах справ), а
+    стор чіпає лише прогони цієї теки. Пачка тек відкладає каталог
+    (`rebuild=False`) і перебудовує його один раз у кінці: інакше десять тек
+    платили десять повних обходів (14.10.2026: ~3 хв на теку).
+    """
     from nyshporka.cases import db
     from nyshporka.search import store as ST
 
     _forget_caches()
     out: dict[str, Any] = {"catalog": False, "store": 0, "notes": []}
-    try:
-        db.rebuild(rescan=True)
-        out["catalog"] = True
-    except Exception as exc:
-        out["notes"].append(f"каталог справ не перезібрався ({exc}) — nysh cases build")
+    if not rebuild:
+        out["notes"].append("каталог справ не перебудовано (відкладено) — "
+                            "після останньої теки пачки: nysh cases build")
+    else:
+        try:
+            db.rebuild(rescan=True)
+            out["catalog"] = True
+        except Exception as exc:
+            out["notes"].append(f"каталог справ не перезібрався ({exc}) — nysh cases build")
     fresh = sorted({n for p in pl.parts if not p.leftover for n in p.runs.values()})
     if not ST.exists():
         return out
     try:
         _drop_from_store(pl.runs)
-        out["store"] = sum(1 for _ in ST.ensure_all(fresh, force=True))
+        out["store"] = sum(1 for _ in ST.ensure_all(fresh, force=True, optimize=False))
     except Exception as exc:
         out["notes"].append(f"текстовий стор не оновився ({exc}) — "
                             f"nysh text index --case <справа>")
@@ -731,7 +744,8 @@ def undo(case_dir: str | Path) -> dict[str, Any]:
         db.rebuild(rescan=True)
         if ST.exists():
             _drop_from_store(gone_runs)
-            list(ST.ensure_all([str(r) for r in journal.get("runs") or []], force=True))
+            list(ST.ensure_all([str(r) for r in journal.get("runs") or []], force=True,
+                                optimize=False))
     except Exception as exc:
         notes.append(f"облік не оновився ({exc}) — nysh cases build")
     return {"case_dir": _rel(d, root), "runs_removed": gone_runs, "kept": kept,

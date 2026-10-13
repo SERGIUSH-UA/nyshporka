@@ -695,12 +695,19 @@ LOCKED_SKIPPED: list[str] = []
 
 def ensure_all(runs: list[str], *, force: bool = False, reset_rules: bool = False,
                progress: Callable[[int, int, str], None] | None = None,
+               optimize: bool | None = None,
                ) -> Iterator[str]:
     """Догнати стор по переліку прогонів, звітуючи про кожен.
 
     Генератор навмисно: перша збірка корпусу триває десятки хвилин, і той, хто
     її запустив, мусить бачити, де вона зараз. `force` перебудовує й свіже —
     після зміни правил розбору токенів чи геометрії.
+
+    `optimize` — злиття ВСІХ сегментів FTS у кінці. Типово воно йде з `force`
+    або після ≥`OPTIMIZE_MIN` зібраних прогонів. `False` — для точкової
+    переіндексації кількох прогонів (розбивка теки, прийом пакета): злиття
+    стору на десятки ГБ під write-lock коштувало хвилин на кожну теку й
+    тримало замок для сусідніх процесів (14.10.2026).
     """
     from nyshporka.core import progress as P
 
@@ -774,7 +781,7 @@ def ensure_all(runs: list[str], *, force: bool = False, reset_rules: bool = Fals
         # не для кожного `index --case`; лише коли зібрано багато або примусово.
         # Зайнятий стор — не причина валити вже зроблену індексацію: злиття
         # сегментів лише прискорює, і його зробить наступна збірка.
-        if force or built >= OPTIMIZE_MIN:
+        if optimize if optimize is not None else (force or built >= OPTIMIZE_MIN):
             try:
                 conn.execute("insert into fts(fts) values('optimize')")
                 conn.commit()

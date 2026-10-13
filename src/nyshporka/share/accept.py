@@ -781,7 +781,7 @@ def _reindex(dirs: list[Path]) -> list[str]:
         # Стору ще немає: перша ж `nysh text index` збере його разом із
         # геометрією. Заводити стор заради одного прогону — не наше рішення.
         return []
-    return list(ST.ensure_all([d.name for d in dirs], force=True))
+    return list(ST.ensure_all([d.name for d in dirs], force=True, optimize=False))
 
 
 def _rename_pages(run_dir: Path, names: dict[str, str]) -> dict[str, str]:

@@ -198,6 +198,29 @@ def test_tekstovyi_stor_ne_daie_khit_dvichi(space: Path, zbirka: Path) -> None:
     assert {"op25-spr-926", "op25-spr-927", "op25-spr-928"} <= names
 
 
+def test_bez_perebudovy_kataloh_ne_chipaie_a_stor_onovliuie(
+        space: Path, zbirka: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Пачка тек відкладає обхід диска, але пошук не сміє бачити старий прогін
+    поруч із новими: стор оновлюється однаково."""
+    from nyshporka.cases import db
+    from nyshporka.search import store as ST
+
+    calls: list[Any] = []
+    monkeypatch.setattr(db, "rebuild", lambda *a, **k: calls.append(k))
+    list(ST.ensure_all([RUN, VOICE], force=True))
+    got = SPL.split(zbirka, MAP, rebuild=False)
+
+    assert calls == []
+    assert got["index"]["catalog"] is False
+    assert any("nysh cases build" in n for n in got["index"]["notes"])
+    conn = ST.connect(readonly=True)
+    try:
+        names = set(ST.runs_named(conn))
+    finally:
+        conn.close()
+    assert RUN not in names and {"op25-spr-926", "op25-spr-928"} <= names
+
+
 def test_druha_rozbyvka_vidmovliaie(space: Path, zbirka: Path) -> None:
     SPL.split(zbirka, MAP)
 
@@ -235,7 +258,7 @@ def test_obryv_pislia_poznachky_ne_hubyt_prohoniv(
     """🔴 Обрив після того, як старий прогін позначено заміщеним: перелік
     прогонів його вже не показує, і доробка не сміє вирішити, що прогонів не
     було, — інакше `undo` не поверне позначок."""
-    def _boom(pl: Any) -> dict[str, Any]:
+    def _boom(pl: Any, **_kw: Any) -> dict[str, Any]:
         raise OSError("диск зник")
 
     real = SPL._reindex

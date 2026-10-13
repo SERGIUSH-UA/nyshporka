@@ -3010,6 +3010,10 @@ class CasesSplitArgs(BaseModel):
         description="копіювати кадри, якщо жорстке посилання не створюється (інший "
                     "том): місце на диску подвоїться")
     undo: bool = Field(default=False, description="зняти розбивку цієї теки")
+    rebuild: bool = Field(
+        default=True,
+        description="перебудувати каталог справ після розбивки; false — для пачки "
+                    "тек: каталог перебудовується один раз у кінці (nysh cases build)")
 
 
 @op("cases.split", summary="Розкласти збірну теку на справи",
@@ -3039,7 +3043,7 @@ def cases_split(a: CasesSplitArgs) -> Envelope:
                 env.warn(code, text)
             return env
         pl = SPL.plan(a.case_dir, specs)
-        got = SPL.split(a.case_dir, specs, copy=a.copy_frames)
+        got = SPL.split(a.case_dir, specs, copy=a.copy_frames, rebuild=a.rebuild)
     except SPL.SplitError as exc:
         return fail(str(exc))
     env = ok(got)

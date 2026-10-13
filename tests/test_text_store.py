@@ -85,6 +85,31 @@ def test_a_reread_run_is_reindexed_by_stamp(space: Path) -> None:
     assert st["pages"] == 3 and st["indexed"] == 1
 
 
+def test_point_reindex_does_not_merge_the_whole_store(
+        space: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """🔴 Злиття ВСІХ сегментів FTS на сторі в десятки ГБ — хвилини під
+    write-lock. Розбивка теки чи прийом пакета переіндексовують кілька
+    прогонів і без нього: 14.10.2026 кожна тека стояла ~3 хв і тримала замок."""
+    from nyshporka.search import store as ST
+
+    sql: list[str] = []
+    real = ST.connect
+
+    def _traced(*a, **k):
+        c = real(*a, **k)
+        c.set_trace_callback(sql.append)
+        return c
+
+    monkeypatch.setattr(ST, "connect", _traced)
+    assert list(ST.ensure_all(["проба"], force=True, optimize=False)) == ["проба"]
+    assert not any("optimize" in s for s in sql)
+    assert ST.is_fresh("проба")
+
+    sql.clear()
+    list(ST.ensure_all(["проба"], force=True))
+    assert any("optimize" in s for s in sql), "типова повна перебудова злиття не втратила"
+
+
 def test_index_progress_counts_only_what_it_builds(space: Path) -> None:
     """🔴 Свіжі прогони в знаменнику поступу давали консолі оцінку «лишилось»
     годинами: темп міряли на справжній збірці, а множили на всі прогони."""

@@ -1957,6 +1957,9 @@ def cases_split_cmd(
     copy: bool = typer.Option(False, "--copy",
                               help="копіювати кадри, якщо жорстке посилання не створюється"),
     undo: bool = typer.Option(False, "--undo", help="зняти розбивку цієї теки"),
+    no_rebuild: bool = typer.Option(
+        False, "--no-rebuild",
+        help="не перебудовувати каталог справ (пачка тек: один nysh cases build у кінці)"),
     as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Розкласти збірну теку на справи.
@@ -1970,7 +1973,8 @@ def cases_split_cmd(
     from nyshporka.cli_emit import answer, notes
 
     env = O.call("cases.split", {"case_dir": case_dir, "parts": part, "map_file": map_file,
-                                 "dry_run": dry, "copy_frames": copy, "undo": undo})
+                                 "dry_run": dry, "copy_frames": copy, "undo": undo,
+                                 "rebuild": not no_rebuild})
     if answer(env, as_json):
         return
     d = env.data or {}
