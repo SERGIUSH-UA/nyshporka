@@ -40,10 +40,12 @@ jobs:
         include:
           # Нативні раннери, без QEMU: під емуляцією збірка рушіїв і пробне
           # читання на arm64 тягнулись би годинами.
-          - {variant: cpu, torch: cpu, arch: amd64, runner: ubuntu-latest}
-          - {variant: cpu, torch: cpu, arch: arm64, runner: ubuntu-24.04-arm}
-          - {variant: cuda, torch: cu126, arch: amd64, runner: ubuntu-latest}
-          - {variant: cuda128, torch: cu128, arch: amd64, runner: ubuntu-latest}
+          # `cache` — рухомий тег попереднього образу цього варіанта: з нього
+          # збірка бере незмінні шари (див. крок «збірка»).
+          - {variant: cpu, torch: cpu, arch: amd64, runner: ubuntu-latest, cache: cpu-amd64}
+          - {variant: cpu, torch: cpu, arch: arm64, runner: ubuntu-24.04-arm, cache: cpu-arm64}
+          - {variant: cuda, torch: cu126, arch: amd64, runner: ubuntu-latest, cache: cuda}
+          - {variant: cuda128, torch: cu128, arch: amd64, runner: ubuntu-latest, cache: cuda128}
     steps:
       - uses: actions/checkout@v7
 
@@ -76,11 +78,26 @@ jobs:
           docker system prune -af
           df -h /
 
+      # 🔴 Без кешу кожен шар, зібраний наново, отримує новий ідентифікатор,
+      # навіть коли вміст той самий, — і в людини `docker pull` качає його знову.
+      # Тому шари беремо з попереднього образу варіанта (inline-кеш: метадані
+      # їдуть у самому образі, окремого сховища кешу на раннері не треба —
+      # місця на CUDA-раннері й так впритул). Перша збірка після зміни
+      # Dockerfile чи бази Python кешу не знайде й збере все — так і має бути.
+      # torch — за `reference` з engines.yaml: це ключ його шару (Dockerfile).
       - name: збірка
         run: |
-          docker build -f docker/Dockerfile \
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          # sed, а не yq: на arm-раннері набір утиліт інший.
+          spec=$(sed -n 's/^ *reference: *\[\(.*\)\].*/\1/p' src/nyshporka/htr/data/engines.yaml | tr -d '",')
+          echo "torch для шару: $spec"
+          case "$spec" in torch==*) ;; *) echo "reference в engines.yaml не прочитався: '$spec'"; exit 1;; esac
+          DOCKER_BUILDKIT=1 docker build -f docker/Dockerfile \
             --build-arg NYSH_VERSION=${{ steps.ver.outputs.v }} \
             --build-arg TORCH=${{ matrix.torch }} \
+            --build-arg "TORCH_SPEC=$spec" \
+            --build-arg BUILDKIT_INLINE_CACHE=1 \
+            --cache-from "$IMAGE:${{ matrix.cache }}" \
             -t local/nyshporka .
 
       # 🔴 Пробне читання до публікації: образ, який збирається, але не читає,
@@ -122,11 +139,11 @@ jobs:
 
       - name: публікація
         run: |
-          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
           v=${{ steps.ver.outputs.v }}
           if [ "${{ matrix.variant }}" = cpu ]; then
-            # Процесорний образ зводиться в один мультиархітектурний тег нижче.
-            tags="$v-cpu-${{ matrix.arch }}"
+            # Процесорний образ зводиться в один мультиархітектурний тег нижче;
+            # рухомий `cpu-<arch>` — лише джерело кешу для наступної збірки.
+            tags="$v-cpu-${{ matrix.arch }} cpu-${{ matrix.arch }}"
           else
             tags="$v-${{ matrix.variant }} ${{ matrix.variant }}"
           fi

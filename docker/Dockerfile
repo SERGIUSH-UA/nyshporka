@@ -11,9 +11,17 @@
 #   docker build -f docker/Dockerfile --build-arg TORCH=cu126 \
 #       --build-arg NYSH_VERSION=0.21.1 -t nyshporka:cuda .
 
+#
+# 🔴 Порядок шарів — від того, що міняється рідко, до того, що з кожним релізом:
+# система → Python → torch (2.5 ГБ у CUDA) → Нишпорка → рушії й ваги. Оновлення
+# образу докачує лише шари, які змінились, але змінився шар — змінились і всі
+# над ним. Доти `ARG NYSH_VERSION` стояв угорі, а torch ставився після
+# Нишпорки, тож кожен реліз перекачував людям ~4 ГБ (помітив читач у чаті
+# 12.10.2026). Щоб незмінний шар мав той самий ідентифікатор, CI збирає з
+# `--cache-from` попереднього образу (`docker.yml`).
+
 FROM python:3.11-slim-bookworm
 
-ARG NYSH_VERSION
 ARG TORCH=cpu
 
 COPY --from=ghcr.io/astral-sh/uv:0.10.9 /uv /uvx /usr/local/bin/
@@ -56,10 +64,22 @@ ENV NYSHPORKA_WORKSPACE=/srv/nysh/work \
     XDG_CONFIG_HOME=/srv/nysh/home/config \
     XDG_DATA_HOME=/srv/nysh/home/data
 
-RUN test -n "$NYSH_VERSION" || (echo "потрібен --build-arg NYSH_VERSION" && exit 1) \
- && uv python install 3.11 \
+RUN uv python install 3.11 \
  && uv venv /opt/nysh/app --python 3.11 --managed-python \
- && /opt/nysh/app/bin/python -c "import sqlite3; c = sqlite3.connect(':memory:'); c.execute(\"create virtual table f using fts5(t, content='', contentless_delete=1)\")" \
+ && /opt/nysh/app/bin/python -c "import sqlite3; c = sqlite3.connect(':memory:'); c.execute(\"create virtual table f using fts5(t, content='', contentless_delete=1)\")"
+
+# torch — окремим шаром ДО Нишпорки: це майже весь об'єм образу, а між релізами
+# він здебільшого той самий. Версію CI бере з `runtime.torch.reference` в
+# `engines.yaml` — тієї, яку резолвить kraken, — тож `nysh htr install` нижче
+# бачить її задоволеною і не чіпає. Середовище створюється тим самим викликом,
+# що й у `htr/env.py: setup`. Без TORCH_SPEC (збірка руками) крок порожній, і
+# torch приїде з рушіями, як доти.
+ARG TORCH_SPEC=""
+RUN [ -z "$TORCH_SPEC" ] || ( uv venv "$NYSHPORKA_HTR_VENV" --python 3.11 \
+ && UV_TORCH_BACKEND=${TORCH} uv pip install --python "$NYSHPORKA_HTR_VENV/bin/python" $TORCH_SPEC )
+
+ARG NYSH_VERSION
+RUN test -n "$NYSH_VERSION" || (echo "потрібен --build-arg NYSH_VERSION" && exit 1) \
  && for i in 1 2 3 4 5 6 7 8 9 10; do \
       uv pip install "nyshporka[app,archives]==${NYSH_VERSION}" && break; \
       [ "$i" = 10 ] && exit 1; \
@@ -76,7 +96,14 @@ RUN mkdir -p /tmp/ws && cd /tmp/ws \
  && NYSHPORKA_WORKSPACE=/tmp/ws nysh init /tmp/ws --yes --preset researcher \
  && UV_TORCH_BACKEND=${TORCH} NYSHPORKA_WORKSPACE=/tmp/ws nysh htr install --no-cuda \
  && NYSHPORKA_WORKSPACE=/tmp/ws nysh models get \
- && rm -rf /tmp/ws /srv/nysh
+ && cd / && rm -rf /tmp/ws /srv/nysh \
+ && if [ -n "$TORCH_SPEC" ]; then \
+      want=$(echo "$TORCH_SPEC" | tr ' ' '\n' | sed -n 's/^torch==//p'); \
+      have=$("$NYSHPORKA_HTR_VENV/bin/python" -c "import torch; print(torch.__version__.split('+')[0])"); \
+      [ "$have" = "$want" ] || { echo "рушії замінили torch $want на $have: в образі два torch, reference в engines.yaml застарів"; exit 1; }; \
+    fi
+# ⚠ Перевірка вище — бо заміна torch у цьому шарі не ламає нічого видимого:
+# образ лише мовчки товстішає на 2.5 ГБ, а оновлення знову качає все.
 
 COPY docker/entrypoint.sh /usr/local/bin/nysh-entrypoint
 RUN chmod +x /usr/local/bin/nysh-entrypoint
