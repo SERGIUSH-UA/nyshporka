@@ -242,16 +242,30 @@ def _normalize_shifra(case: dict[str, Any], key: str) -> dict[str, Any]:
 
     raw = str(case.get("shifra") or "")
     try:
-        resolve_case(raw)
-        return case
+        own = resolve_case(raw)
     except Exception:
-        pass
+        own = None
+    if own is not None and own.opys:
+        return case
     try:
         ref = resolve_case(key) if key else None
     except Exception:
         ref = None
-    if ref is None or not ref.opys:
+    if ref is None and own is not None:
+        ref = own
+    if ref is None:
         return case
+    if not ref.opys:
+        # 🔴 Опис невідомий: шифру пул розбирає лише у формі ключа
+        # (`HUNGARICANA/12/_/158`). Форму «HUNGARICANA 12-_-158» резолвер
+        # клієнта приймає, а пул — ні, і заливка падала 400 «немає ні шифри,
+        # ні архіву з номерами» (13.10.2026, перепис Закарпаття 1921).
+        if raw == ref.key:
+            return case
+        out = {**case, "shifra": ref.key}
+        if raw:
+            out["shifra_pasport"] = raw
+        return out
     from nyshporka.library import _shifra
 
     canon = _shifra(ref.repo, ref.fond, ref.opys, ref.spr)

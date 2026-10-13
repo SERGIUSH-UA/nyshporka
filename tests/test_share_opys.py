@@ -377,9 +377,29 @@ def test_nerozibrana_shyfra_staie_kanonichnoiu(raw: str, monkeypatch: pytest.Mon
 
 
 def test_rozibrana_shyfra_ne_chipaietsia(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("nyshporka.pagestore.resolve_case", lambda v: object())
+    from types import SimpleNamespace
+
+    monkeypatch.setattr("nyshporka.pagestore.resolve_case",
+                        lambda v: SimpleNamespace(opys="1", key="DAHMO/315/1/8433"))
     case = {"shifra": "ДАХмО 315-1-8433"}
     assert PUB._normalize_shifra(case, "DAHMO/315/8433") is case
+
+
+@pytest.mark.parametrize("raw", ["HUNGARICANA 12-_-158", "", "щось нерозбірне"])
+def test_opys_nevidomyi_shyfra_formoiu_kliucha(raw: str) -> None:
+    """Опис невідомий — шифра в маніфест іде формою ключа: іншу пул не розбирає.
+
+    13.10.2026 «HUNGARICANA 12-_-158» з паспорта пройшла резолвер клієнта, а
+    пул відповів 400 «немає ні шифри, ні архіву з номерами».
+    """
+    got = PUB._normalize_shifra({"shifra": raw}, "HUNGARICANA/12/_/158")
+    assert got["shifra"] == "HUNGARICANA/12/_/158"
+    assert got.get("shifra_pasport") == (raw or None)
+
+
+def test_opys_nevidomyi_kliuch_uzhe_v_shyfri() -> None:
+    case = {"shifra": "HUNGARICANA/12/_/158"}
+    assert PUB._normalize_shifra(case, "HUNGARICANA/12/_/158") is case
 
 
 def test_vikirozmitka_ne_nazva() -> None:
