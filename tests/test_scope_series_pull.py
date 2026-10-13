@@ -272,6 +272,38 @@ def test_pull_serii_ne_bere_prochytane_tut(space: Any, monkeypatch: pytest.Monke
     assert sorted(taken) == ["u2", "u3"]
 
 
+def test_zvirka_bachyt_synonim_arkhivu(space: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """🔴 Пул пише ДАВіО як `DAVIO`, простір — як `DAVO`.
+
+    13.10.2026 огляд серії ДАВіО 800-1 казав «прочитано 0 · бракує 2», хоча
+    справу 8а прочитано тут повністю, а `--take` узяв би її дублем.
+    """
+    from nyshporka import htr_store as S
+    from nyshporka import ops_share
+    from nyshporka.share import accept as A
+    from nyshporka.share import catalog as C
+
+    def row(spr: str) -> C.Row:
+        return C.Row(shifra=f"ДАВіО 800-1-{spr}", repo="DAVIO", fond="800", opys="1",
+                     spr=spr, url=f"u{spr}", sha256=f"u{spr}", pages="10", years="1848")
+
+    rows = [row("8a"), row("8")]
+    monkeypatch.setattr(C, "search", lambda q, base="", *, limit=50, offset=0:
+                        (rows[offset:offset + limit], len(rows), 2))
+    monkeypatch.setattr(S, "local_reads", lambda: {
+        "DAVO/800/1/8a": {"own": ["010800-01-00008a"], "taken": []}})
+    taken: list[str] = []
+    monkeypatch.setattr(A, "accept", lambda url, sha256="", force=False, replace=False:
+                        taken.append(url) or {"case_key": url, "pages": 10, "runs": []})
+    monkeypatch.setattr(ops_share, "_index_taken", lambda env, runs: None)
+
+    env = ops_share.share_pull(ops_share.SharePullArgs(repo="DAVIO", fond="800"))
+    assert env.data["local"] == {"have": 1, "maybe": 0, "missing": 1}
+
+    ops_share.share_pull(ops_share.SharePullArgs(repo="DAVIO", fond="800", take=True))
+    assert taken == ["u8"], "своя 8а не береться дублем"
+
+
 def test_pull_odniiei_spravy_zviriaie_z_prochytanym_tut(
         space: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     """🔴 `share pull "<шифра>" --take` звіряє з прочитаним так само, як серія,

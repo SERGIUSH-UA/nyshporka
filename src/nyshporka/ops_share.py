@@ -1264,9 +1264,18 @@ def _seen_here(local: dict[str, dict[str, list[str]]], r: Any, *, replace: bool
     одна справа лягала дублем поверх власного прочитання.
     """
     from nyshporka import htr_store as S
+    from nyshporka.share.pool import synonyms
 
     key = _row_key(r)
-    have = (local.get(key) or {}) if key else {}
+    have: dict[str, list[str]] = {}
+    if key:
+        # 🔴 Пул пише ДАВіО як `DAVIO`, простір може лишатись на `DAVO`: без
+        # синонімів своя справа 800-1-8а читалась «бракує» й бралась дублем
+        # (13.10.2026).
+        head, _, tail = key.partition("/")
+        for kod in synonyms(head):
+            for side, runs in (local.get(f"{kod}/{tail}") or {}).items():
+                have.setdefault(side, []).extend(runs)
     if have.get("own"):
         return "own", [*have.get("own", []), *have.get("taken", [])]
     if have.get("taken") and not replace:
@@ -1433,11 +1442,13 @@ def _pull_series(a: SharePullArgs) -> Envelope:
             # «прийняти всю серію» означало відоме число справ, а не здогад.
             from nyshporka import htr_store as S
 
+            # Те саме рішення, що й прийом (`_seen_here`): окремий підрахунок
+            # не знав синонімів архіву й казав «прочитано 0» на своїй справі.
             local = S.local_reads()
             best = C.best_per_case(rows)
-            have = sum(1 for r in best if _row_key(r) and _row_key(r) in local)
-            maybe = sum(1 for r in best if not (_row_key(r) and _row_key(r) in local)
-                        and S.unkeyed_like(local, r.fond, r.opys, r.spr))
+            states = [_seen_here(local, r, replace=False)[0] for r in best]
+            have = sum(1 for s in states if s in ("own", "taken"))
+            maybe = states.count("maybe")
             data["local"] = {"have": have, "maybe": maybe,
                              "missing": len(best) - have - maybe}
             env.suggest("share.pull", "прийняти справи серії, яких тут немає: --take")
