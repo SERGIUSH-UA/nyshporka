@@ -514,7 +514,12 @@ def _drop_skills(dest: Path, *, dry: bool) -> list[str]:
         return [note + (f"; {kept} правлених руками лишили б" if kept else "")]
     # Порожні теки прибираємо знизу вгору; непорожню лишає сам `rmdir` — там
     # або правлений руками скіл, або чуже, що ми туди не клали.
-    for folder in sorted((d for d in dest.rglob("*") if d.is_dir()),
+    # 🔴 Лише ТЕКИ НАШИХ ФАЙЛІВ з обліку, а не всі порожні в `dest`:
+    # `~/.agents/skills` спільна для всіх скілів Codex (14.10.2026), і чужа
+    # порожня тека-заготовка там — не наша, щоб її зносити.
+    ours = {anc for rel in files for anc in (dest / rel).parents
+            if anc != dest and dest in anc.parents}
+    for folder in sorted((d for d in ours if d.is_dir()),
                          key=lambda d: len(d.parts), reverse=True):
         with contextlib.suppress(OSError):
             folder.rmdir()

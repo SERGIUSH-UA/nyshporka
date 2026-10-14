@@ -376,6 +376,9 @@ def default_scan_paths(root: Path) -> list[Path]:
     out.append(home / "CLAUDE.md")
     out += _hand_edited_skills(home / "skills")
     out += _hand_edited_skills(root / ".claude" / "skills")
+    # Теки Codex (з 14.10.2026 `nysh skills install` кладе й туди).
+    out += _hand_edited_skills(Path.home() / ".agents" / "skills")
+    out += _hand_edited_skills(root / ".agents" / "skills")
     return [p for p in dict.fromkeys(out) if p.exists()]
 
 

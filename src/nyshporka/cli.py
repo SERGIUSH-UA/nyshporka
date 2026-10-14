@@ -3526,9 +3526,11 @@ def skills_list() -> None:
 @skills_app.command("install")
 def skills_install(
     target: str = typer.Option("", "--target",
-                               help="тека, куди класти (типово .claude/skills)"),
+                               help="одна довільна тека (замість тек агентів)"),
     user: bool = typer.Option(False, "--user",
                               help="глобально, для всіх проєктів"),
+    agent: str = typer.Option("all", "--agent",
+                              help="чиї теки: claude, codex або all (обидві)"),
     force: bool = typer.Option(False, "--force",
                                help="перезаписати навіть правлене руками"),
     only: str = typer.Option("", "--only", help="лише ці скіли, через кому"),
@@ -3538,8 +3540,10 @@ def skills_install(
     """Покласти скіли туди, де їх бачить агент.
 
     🔴 Не в робочий простір Нишпорки: простір — це тека даних, і скіл,
-    покладений туди, не побачить ніхто. Агент читає `.claude/skills/` проєкту
-    або `~/.claude/skills/` користувача, і команда кладе саме туди.
+    покладений туди, не побачить ніхто. Claude Code читає `.claude/skills/`,
+    Codex — `.agents/skills/` (у проєкті; з `--user` — у домашній теці), і
+    команда типово кладе в обидві: доти Codex не бачив жодного скіла
+    (14.10.2026). Облік `.nysh-skills.json` кожна тека веде свій.
     """
     from nyshporka import __version__
     from nyshporka import skills as S
@@ -3547,8 +3551,14 @@ def skills_install(
     if user and target:
         console.print("[warn]![/warn] --user і --target разом не мають сенсу")
         raise typer.Exit(code=1)
-    dest = (Path.home() / ".claude" / "skills" if user
-            else Path(target or ".claude/skills"))
+    if target and agent != "all":
+        console.print("[warn]![/warn] --target — одна тека; --agent тут не діє")
+        raise typer.Exit(code=1)
+    try:
+        dests = [Path(target)] if target else S.dests(agent, user=user)
+    except ValueError as exc:
+        console.print(f"[warn]![/warn] {exc}")
+        raise typer.Exit(code=1) from None
 
     names = tuple(n.strip() for n in only.split(",") if n.strip())
     known = {s.name for s in S.available()}
@@ -3557,35 +3567,36 @@ def skills_install(
                       f"  (є: {', '.join(sorted(known))})")
         raise typer.Exit(code=1)
 
-    out = S.install(dest, version=__version__, force=force, names=names, prune=prune)
-    if not out:
-        console.print("[warn]![/warn] нічого не встановлено")
-        raise typer.Exit(code=1)
-
-    tally: dict[str, int] = {}
-    for o in out:
-        tally[o.verdict] = tally.get(o.verdict, 0) + 1
     word = {"new": "нових", "updated": "оновлено", "same": "без змін",
             "kept": "лишено (правлено руками)", "orphan": "сиріт",
             "pruned": "прибрано сиріт"}
-    parts = [f"{word[k]} {v}" for k, v in tally.items() if k in word]
-    console.print(f"✓ {dest} — " + " · ".join(parts))
+    for dest in dests:
+        out = S.install(dest, version=__version__, force=force, names=names, prune=prune)
+        if not out:
+            console.print(f"[warn]![/warn] {dest}: нічого не встановлено")
+            raise typer.Exit(code=1)
 
-    # 🔴 Правлене руками називається поіменно: зведене число тут читалось би як
-    # «щось не поклалось», хоча це свідоме рішення інструмента не чіпати чужу
-    # роботу. Мовчазний пропуск був би гіршим за помилку.
-    if kept := [o.rel for o in out if o.verdict == "kept"]:
-        console.print("  [muted]не чіпав (є ваші правки; --force перезапише):[/muted]")
-        for rel in kept:
-            console.print(f"    {rel}")
+        tally: dict[str, int] = {}
+        for o in out:
+            tally[o.verdict] = tally.get(o.verdict, 0) + 1
+        parts = [f"{word[k]} {v}" for k, v in tally.items() if k in word]
+        console.print(f"✓ {dest} — " + " · ".join(parts))
 
-    # Сирота — скіл, якого в пакеті вже немає: агент вантажить його нарівні з
-    # чинними. Називаємо поіменно й кажемо, як прибрати.
-    if orphans := [o.rel for o in out if o.verdict == "orphan"]:
-        console.print("  [warn]![/warn] [muted]у пакеті вже немає (агент їх досі бачить; "
-                      "--prune прибере незмінені):[/muted]")
-        for rel in orphans:
-            console.print(f"    {rel}")
+        # 🔴 Правлене руками називається поіменно: зведене число тут читалось
+        # би як «щось не поклалось», хоча це свідоме рішення інструмента не
+        # чіпати чужу роботу. Мовчазний пропуск був би гіршим за помилку.
+        if kept := [o.rel for o in out if o.verdict == "kept"]:
+            console.print("  [muted]не чіпав (є ваші правки; --force перезапише):[/muted]")
+            for rel in kept:
+                console.print(f"    {rel}")
+
+        # Сирота — скіл, якого в пакеті вже немає: агент вантажить його нарівні
+        # з чинними. Називаємо поіменно й кажемо, як прибрати.
+        if orphans := [o.rel for o in out if o.verdict == "orphan"]:
+            console.print("  [warn]![/warn] [muted]у пакеті вже немає (агент їх досі "
+                          "бачить; --prune прибере незмінені):[/muted]")
+            for rel in orphans:
+                console.print(f"    {rel}")
 
     where = "у будь-якому проєкті" if user else "у цьому проєкті"
     console.print(f"  [muted]видно агентові {where}; перезапустіть сесію[/muted]")

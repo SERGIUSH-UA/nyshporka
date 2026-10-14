@@ -103,6 +103,40 @@ def _ledger_version(dest: Path) -> str:
     return str(data.get("version") or "")
 
 
+#: Куди скіли читає кожен агент: тека відносно проєкту й відносно домашньої.
+#:
+#: 🔴 Codex читає `.agents/skills` (проєкт) і `~/.agents/skills` (користувач),
+#: а не теки Claude. Доти `nysh skills install` клав лише в `.claude/skills`,
+#: `doctor` дивився лише туди й казав «все гаразд» — а агент Codex не бачив
+#: жодного скіла й запускав `cloud go` з пісочниці навмання (інцидент
+#: 14.10.2026: наглядача вбило разом із пісочницею, бокси горіли).
+AGENT_DIRS: dict[str, Path] = {
+    "claude": Path(".claude") / "skills",
+    "codex": Path(".agents") / "skills",
+}
+
+
+def dests(agent: str = "all", *, user: bool = False) -> list[Path]:
+    """Теки для `install`: `agent` — `claude`, `codex` чи `all`."""
+    names = list(AGENT_DIRS) if agent == "all" else [agent]
+    unknown = [n for n in names if n not in AGENT_DIRS]
+    if unknown:
+        raise ValueError(f"невідомий агент: {', '.join(unknown)} "
+                         f"(є: {', '.join(AGENT_DIRS)}, all)")
+    base = Path.home() if user else Path.cwd()
+    return [base / AGENT_DIRS[n] for n in names]
+
+
+def codex_present() -> bool:
+    """Чи є на машині Codex — щоб `doctor` питав про його теку скілів.
+
+    Ознака — його домашня тека: `CODEX_HOME`, якщо задано, інакше `~/.codex`
+    (там конфіг і сесії; без неї Codex на цій машині ще не запускався).
+    """
+    home = os.environ.get("CODEX_HOME", "").strip()
+    return Path(home).is_dir() if home else (Path.home() / ".codex").is_dir()
+
+
 def installed() -> list[tuple[Path, str]]:
     """Куди скіли вже клали і з якої версії — щоб `doctor` міг це показати.
 
@@ -111,15 +145,16 @@ def installed() -> list[tuple[Path, str]]:
     пакетом працювала за старою карткою — мовчки, бо застарілий скіл виглядає
     точно так само, як свіжий (звіт 05.09.2026).
 
-    ⚠ Дивимось обидва місця, куди кладе `nysh skills install`: теку проєкту й
-    теку користувача. Порядок той самий, у якому їх читає агент.
+    ⚠ Дивимось усі місця, куди кладе `nysh skills install`: проєкт і
+    користувач, для кожного агента (`AGENT_DIRS`).
     """
     out: list[tuple[Path, str]] = []
-    for dest in (Path.cwd() / ".claude" / "skills",
-                 Path.home() / ".claude" / "skills"):
-        got = _ledger_version(dest)
-        if got:
-            out.append((dest, got))
+    for base in (Path.cwd(), Path.home()):
+        for rel in AGENT_DIRS.values():
+            dest = base / rel
+            got = _ledger_version(dest)
+            if got:
+                out.append((dest, got))
     return out
 
 

@@ -547,9 +547,22 @@ def _skills() -> Check:
     from nyshporka import skills as S
 
     got = S.installed()
+    # 🔴 Codex читає `.agents/skills`, а не теки Claude: 14.10.2026 doctor казав
+    # «все гаразд» про скіли в `~/.claude/skills`, а агент Codex не бачив жодного
+    # і запустив `cloud go` з пісочниці. Тож коли Codex на машині є, його теку
+    # перевіряємо окремо — і застарілу, і порожню.
+    codex = S.codex_present()
+    codex_fix = "покласти для Codex: `nysh skills install --user --agent codex`"
+    codex_rel = S.AGENT_DIRS["codex"]
+    codex_got = [(d, v) for d, v in got if d.parts[-len(codex_rel.parts):] == codex_rel.parts]
     if not got:
-        return Check("Скіли агента", "ok", "не встановлені",
-                     "покласти туди, де їх бачить агент: `nysh skills install`")
+        return Check("Скіли агента", "warn" if codex else "ok",
+                     "не встановлені" + (" (є Codex — і йому теж)" if codex else ""),
+                     "покласти туди, де їх бачить агент: `nysh skills install --user`")
+    if codex and not codex_got:
+        return Check("Скіли агента", "warn",
+                     "Codex на машині є, а в `.agents/skills` і `~/.agents/skills` "
+                     "скілів немає — він їх не бачить", codex_fix)
     stale = [(d, v) for d, v in got if v != __version__]
     if not stale:
         where = ", ".join(str(d) for d, _ in got)
