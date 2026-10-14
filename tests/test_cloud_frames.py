@@ -117,7 +117,7 @@ def test_shrink_makes_grey_jpegs_of_working_height(tmp_path: Path) -> None:
 
     got = F.shrink(src, dst, target_h=100)
     assert (got.total, got.done, got.skipped) == (2, 2, 0)
-    assert sorted(p.name for p in dst.iterdir() if p.name != F.CLAIM_FILE) ==         ["0001.jpg", "0002.jpg"]
+    assert sorted(p.name for p in dst.iterdir() if p.name not in (F.CLAIM_FILE, F.FINGERPRINT_FILE)) ==         ["0001.jpg", "0002.jpg"]
     with Image.open(dst / "0001.jpg") as im:
         assert im.height == 100 and im.mode == "L"
     assert not list(src.glob("*.part")) and (src / "0002.png").exists(), \
@@ -132,13 +132,13 @@ def test_shrink_is_idempotent(tmp_path: Path) -> None:
         _jpeg(src / f"{i:04d}.jpg", (120, 200))
     F.shrink(src, dst, target_h=100)
     stamps = {p.name: p.stat().st_mtime_ns for p in dst.iterdir()
-              if p.name != F.CLAIM_FILE}
+              if p.name not in (F.CLAIM_FILE, F.FINGERPRINT_FILE)}
 
     (dst / "0001.jpg").unlink()             # ніби обірвало посередині
     again = F.shrink(src, dst, target_h=100)
     assert (again.done, again.skipped) == (1, 2)
     after = {p.name: p.stat().st_mtime_ns for p in dst.iterdir()
-             if p.name != F.CLAIM_FILE}
+             if p.name not in (F.CLAIM_FILE, F.FINGERPRINT_FILE)}
     assert after["0000.jpg"] == stamps["0000.jpg"], "готовий кадр не переписано"
     assert not list(dst.glob("*.part")), "тимчасових файлів не лишається"
 
@@ -247,7 +247,7 @@ def test_tiff_is_named_and_converted_before_the_road(tmp_path: Path) -> None:
     out = F.shrink(case, tmp_path / "ready", target_h=50)
     assert out.done == 2
     assert sorted(p.name for p in (tmp_path / "ready").iterdir()
-                  if p.name != F.CLAIM_FILE) == ["0001.jpg", "0002.jpg"], \
+                  if p.name not in (F.CLAIM_FILE, F.FINGERPRINT_FILE)) == ["0001.jpg", "0002.jpg"], \
         "на машину їде лише те, що вона читає"
 
 
@@ -319,3 +319,83 @@ def test_default_jobs_leaves_the_machine_alive(monkeypatch) -> None:
     assert F.default_jobs() == 2
     monkeypatch.setattr(F.os, "cpu_count", lambda: 1)
     assert F.default_jobs() == 1
+
+
+# ── підпис кешу: шлях не весь підпис ─────────────────────────────────────────
+def _book(d: Path, n: int, *, w: int = 120) -> Path:
+    """Книга з n кадрів; розмір кадру залежить від `w`, тож «іншу книгу» видно."""
+    d.mkdir(parents=True, exist_ok=True)
+    for i in range(1, n + 1):
+        Image.effect_noise((w, 200), 60 + i).convert("L").save(d / f"{i:04d}.jpg", "JPEG")
+    return d
+
+
+def _names(d: Path) -> list[str]:
+    return sorted(p.name for p in d.glob("*.jpg"))
+
+
+def test_replaced_content_under_same_path_invalidates_cache(tmp_path: Path) -> None:
+    """🔴 Інцидент 14.10.2026: 302 кадри старої книги, під тим самим шляхом —
+    624 нової. Старі кадри не мусять їхати на машину."""
+    src, dst = tmp_path / "op31-spr-5", tmp_path / "cache"
+    _book(src, 2)
+    F.shrink(src, dst, target_h=100)
+    old = (dst / "0001.jpg").read_bytes()
+
+    for p in src.glob("*.jpg"):
+        p.unlink()
+    _book(src, 4, w=150)                              # інша книга, той самий шлях
+    said: list[str] = []
+    got = F.shrink(src, dst, target_h=100, on_line=said.append)
+
+    assert (got.total, got.done, got.skipped) == (4, 4, 0), "жодного старого кадру"
+    assert _names(dst) == ["0001.jpg", "0002.jpg", "0003.jpg", "0004.jpg"]
+    assert (dst / "0001.jpg").read_bytes() != old
+    assert any("недійсний" in s for s in said)
+
+
+def test_same_count_but_different_sizes_is_still_a_different_book(tmp_path: Path) -> None:
+    src, dst = tmp_path / "src", tmp_path / "cache"
+    _book(src, 2)
+    F.shrink(src, dst, target_h=100)
+    for p in src.glob("*.jpg"):
+        p.unlink()
+    _book(src, 2, w=170)
+    assert F.shrink(src, dst, target_h=100).skipped == 0
+
+
+def test_unchanged_folder_keeps_using_the_cache(tmp_path: Path) -> None:
+    src, dst = tmp_path / "src", tmp_path / "cache"
+    _book(src, 3)
+    F.shrink(src, dst, target_h=100)
+    stamps = {p.name: p.stat().st_mtime_ns for p in dst.glob("*.jpg")}
+    again = F.shrink(src, dst, target_h=100)
+    assert (again.done, again.skipped) == (0, 3)
+    assert {p.name: p.stat().st_mtime_ns for p in dst.glob("*.jpg")} == stamps
+    # перенесення оригіналу копією (інші mtime) кеш не вбиває
+    for p in src.glob("*.jpg"):
+        os.utime(p, (1_000_000_000, 1_000_000_000))
+    assert F.shrink(src, dst, target_h=100).skipped == 3
+
+
+def test_legacy_cache_with_path_only_and_same_count_works_as_before(tmp_path: Path) -> None:
+    src, dst = tmp_path / "src", tmp_path / "cache"
+    _book(src, 3)
+    F.shrink(src, dst, target_h=100)
+    (dst / F.FINGERPRINT_FILE).unlink()               # кеш старого зразка
+    again = F.shrink(src, dst, target_h=100)
+    assert (again.done, again.skipped) == (0, 3)
+    assert (dst / F.FINGERPRINT_FILE).exists(), "відбиток дописано"
+    assert (dst / F.CLAIM_FILE).read_text(encoding="utf-8").strip() == str(src.resolve())
+
+
+def test_legacy_cache_with_other_frame_count_is_invalid(tmp_path: Path) -> None:
+    src, dst = tmp_path / "src", tmp_path / "cache"
+    _book(src, 2)
+    F.shrink(src, dst, target_h=100)
+    (dst / F.FINGERPRINT_FILE).unlink()
+    for p in src.glob("*.jpg"):
+        p.unlink()
+    _book(src, 5, w=150)
+    got = F.shrink(src, dst, target_h=100)
+    assert (got.done, got.skipped) == (5, 0)

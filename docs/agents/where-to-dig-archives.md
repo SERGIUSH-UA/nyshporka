@@ -145,7 +145,9 @@
 | genbaza.pl | 403 | ✅ headless Edge (11.10.2026) | — |
 | agad.gov.pl | веб-інструмент агента: сертифікат не збігається з іменем (`*.home.pl`); ✅ `curl -k` (11.10.2026) | — | — |
 | Google My Maps (`google.com/maps/d/viewer?mid=…`) | переглядач віддає лише назву карти; ✅ `curl` KML-експорту `google.com/maps/d/kml?mid=<id>&forcekml=1` — усі точки з описами (11.10.2026) | — | — |
-| vhmml.org | запис рукопису видно; зображення лише після входу на сайт | — | — |
+| vhmml.org | запис рукопису видно; зображення лише після входу на сайт; пошук Reading Room за заслоном Turnstile (12.10.2026) | — | — |
+| agadd2.home.net.pl (галереї сканів AGAD, на які ведуть інвентарі зеспол) | ✅ `curl` прямо, HTTP: `…/sygn.%20<N>/indeks.htm` → сторінка `pages/<префікс>_<NNNN>.htm` → кадр `images/<префікс>_<NNNN>.jpg`, 300 dpi (12.10.2026) | — | — |
+| skany.przemysl.ap.gov.pl (старий переглядач АП у Перемишлі) | домен не резолвиться (12.10.2026), а сторонні індекси метрик досі на нього посилаються; скани шукати в Szukaj w Archiwach | — | — |
 
 Технічне:
 - Playwright: `p.chromium.launch(headless=True, channel="msedge")`, без бандлового Chromium; User-Agent підставляти явно.

@@ -355,3 +355,32 @@ def test_progin_znakhodytsia_za_inshym_napysanniam_shliakhu(tmp_path: Path,
 
     rep = bokovi.Bokovi()
     assert bokovi._runs_of(case, rep) == [run] and not rep.problems
+
+
+def test_pidmina_pdf_pid_tym_samym_shliakhom_ne_skleiuie_knyhy(tmp_path: Path) -> None:
+    """🔴 Інцидент 14.10.2026 (кеш стискання): під тим самим іменем лягла інша
+    книга. Розгортання пропускає наявні кадри — вийшла б суміш двох книг."""
+    import pytest
+
+    _pdf_zi_skanamy(tmp_path / "a.pdf", 2)
+    assert pdfpage.vytiahnuty_kadry(tmp_path) == 2
+    (tmp_path / "a.pdf").unlink()
+    _pdf_zi_skanamy(tmp_path / "a.pdf", 4)          # інша книга, інший розмір
+    with pytest.raises(pdfpage.PdfPageError, match="не ті"):
+        pdfpage.vytiahnuty_kadry(tmp_path)
+    assert len(list(tmp_path.glob("*.jpg"))) == 2, "кадри не чіпаємо мовчки"
+
+
+def test_te_same_pdf_rozghortaietsia_dali_bez_vidmovy(tmp_path: Path) -> None:
+    _pdf_zi_skanamy(tmp_path / "a.pdf", 3)
+    pdfpage.vytiahnuty_kadry(tmp_path)
+    (tmp_path / "0003.jpg").unlink()                 # обірвано посередині
+    assert pdfpage.vytiahnuty_kadry(tmp_path) == 1
+
+
+def test_teka_z_kadramy_bez_vidbytka_ne_vidkhylaietsia(tmp_path: Path) -> None:
+    """Кадри поклав не цей код (FS, давніше розгортання): відбиток не вигадуємо."""
+    Image.new("L", (40, 60), 9).save(tmp_path / "0001.jpg", "JPEG")
+    _pdf_zi_skanamy(tmp_path / "a.pdf", 2)
+    pdfpage.vytiahnuty_kadry(tmp_path)
+    assert not (tmp_path / pdfpage.PDF_SIGNATURE_FILE).exists()

@@ -249,7 +249,55 @@ def shrink_dir_for(case_dir: Path | str, name: str = "") -> Path:
 CLAIM_FILE = "_from.txt"
 
 
-def _claim_dir(dst_dir: Path, src_dir: Path) -> None:
+#: Відбиток вмісту оригіналу, з якого складено копію (`_from.json`). Окремий
+#: файл, а не другий рядок `_from.txt`: `_from.txt` читають інші (друкарські
+#: видання беруть його цілком як шлях), і старі кеші мають лише його.
+FINGERPRINT_FILE = "_from.json"
+
+
+def source_fingerprint(files: list[Path]) -> dict[str, Any]:
+    """Дешевий відбиток теки кадрів: кількість і хеш переліку «ім'я + розмір».
+
+    🔴 Без читання байтів і БЕЗ mtime. Розмір + ім'я ловить підміну книги
+    (інший скан того самого номера ніколи не важить рівно стільки ж по всіх
+    кадрах), а mtime тека губить при кожному копіюванні на інший диск — і
+    відтворюваний кеш на години стискання інвалідувався б без причини.
+    """
+    import hashlib
+
+    h = hashlib.sha1()
+    for p in files:
+        h.update(f"{p.name}\0{p.stat().st_size}\n".encode())
+    return {"n": len(files), "sig": h.hexdigest()}
+
+
+def _read_fingerprint(dst_dir: Path) -> dict[str, Any] | None:
+    import json
+
+    try:
+        got = json.loads((dst_dir / FINGERPRINT_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return got if isinstance(got, dict) and "sig" in got else None
+
+
+def _purge_cache(dst_dir: Path) -> int:
+    """Прибрати стиснуті кадри й службові файли ЦІЄЇ копії. Повертає, скільки кадрів."""
+    from nyshporka.cloud.verify import frames_in
+
+    n = 0
+    for q in frames_in(dst_dir):
+        q.unlink(missing_ok=True)
+        n += 1
+    for q in dst_dir.glob("*.part"):
+        q.unlink(missing_ok=True)
+    (dst_dir / FINGERPRINT_FILE).unlink(missing_ok=True)
+    return n
+
+
+def _claim_dir(dst_dir: Path, src_dir: Path,
+               files: list[Path] | None = None, *,
+               on_line: Any = None) -> None:
     """Записати, чию копію тут складено, — або відмовити, якщо вона чужа.
 
     🔴 Ім'я теки справи унікальним не буває: `pages`, `spr-1`, `probe` з різних
@@ -257,6 +305,29 @@ def _claim_dir(dst_dir: Path, src_dir: Path) -> None:
     Стискання ж пропускає готове, тож друга справа мовчки дістала б кадри
     ПЕРШОЇ й поїхала читати чужу книгу під своєю шифрою. Перелік імен цього не
     ловить — саме тому копія підписана шляхом оригіналу.
+
+    🔴 Шлях — не весь підпис (інцидент 14.10.2026). `data/raw/davo_904/
+    op31-spr-5` з книгою на 302 кадри стиснули в кеш `op31-spr-5`; наступного
+    дня теку перейменували на `-6`, а під старим іменем поклали ІНШУ книгу на
+    624 сторінки. Шлях той самий → `_claim_dir` пропустив, `shrink` взяв готові
+    302 старі кадри, і на машину поїхала стара книга під новою шифрою (помітив
+    лише наглядач: «у плані 624 кадрів, бокс рахував 302»). Тому поруч зі
+    шляхом лежить відбиток вмісту оригіналу (`_from.json`: кількість кадрів і
+    хеш імен+розмірів).
+
+    Розбіжність відбитка НЕ відмова, а недійсний кеш: це відтворюваний build
+    за тим самим шляхом, тож його знесено й стиснуто наново. Відмова змушувала б
+    людину чистити теку руками, а помилка лишалась би можливою — гірше того,
+    що кеш однаково нічого не вартий. Від чужого ШЛЯХУ запобіжник лишився
+    відмовою, як було: там невідомо, чия то тека, і зносити її не наше рішення.
+    Усі наступні читачі кешу беруть його вже після `shrink`, а прогони на
+    ньому спираються лише через план, який будується з уже стиснутого.
+
+    Старий кеш без відбитка (десятки таких на диску) не ламаємо, але й не
+    довіряємо сліпо: кількість кадрів у ньому мусить збігатися з оригіналом.
+    Менше — недійсний; це перетинається з обірваним стисканням старого зразка,
+    і воно просто починається наново (дорожче, зате без чужої книги). Збіг
+    кількості приймається, відбиток дописується.
     """
     claim = dst_dir / CLAIM_FILE
     mine = str(src_dir.resolve())
@@ -272,6 +343,31 @@ def _claim_dir(dst_dir: Path, src_dir: Path) -> None:
     if not theirs:
         with contextlib.suppress(OSError):
             claim.write_text(mine, encoding="utf-8")
+    if files is None:
+        return
+    now = source_fingerprint(files)
+    have = _read_fingerprint(dst_dir)
+    if theirs:      # копія з підписом-шляхом — наша; чию тека без підпису, невідомо
+        from nyshporka.cloud.verify import frames_in
+
+        cached = len(frames_in(dst_dir))
+        if have is not None:
+            same = have.get("sig") == now["sig"] and have.get("n") == now["n"]
+            why = "вміст оригіналу змінився під тим самим шляхом"
+        else:
+            same = cached == now["n"] or cached == 0
+            why = (f"старий кеш без відбитка: у ньому {cached} кадрів, а в "
+                   f"оригіналі {now['n']}")
+        if not same:
+            gone = _purge_cache(dst_dir)
+            if on_line:
+                on_line(f"⚠ кеш стиснутих кадрів недійсний ({why}) — знесено "
+                        f"{gone} кадрів, стискаю наново")
+    import json
+
+    with contextlib.suppress(OSError):
+        (dst_dir / FINGERPRINT_FILE).write_text(
+            json.dumps(now, ensure_ascii=False), encoding="utf-8")
 
 
 def default_jobs() -> int:
@@ -330,7 +426,7 @@ def shrink(src: Path | str, dst: Path | str, *, target_h: int = TARGET_HEIGHT,
                 f"Після стискання вони стали б одним файлом — перейменуйте один.")
         stems[p.stem] = p.name
     dst_dir.mkdir(parents=True, exist_ok=True)
-    _claim_dir(dst_dir, src_dir)
+    _claim_dir(dst_dir, src_dir, files, on_line=say)
     stale = sorted(q.name for q in frames_in(dst_dir) if q.stem not in stems)
     if stale:
         # Не видаляємо: тека з таким іменем могла лишитись від ІНШОЇ справи з

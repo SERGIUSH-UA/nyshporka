@@ -22,6 +22,7 @@
 """
 from __future__ import annotations
 
+import contextlib
 import io
 import re
 from dataclasses import dataclass
@@ -268,6 +269,50 @@ def _render_tasks(tasks: list[Task], width: int) -> int:
     return done
 
 
+#: Відбиток PDF, з яких розгорнуто кадри цієї теки.
+PDF_SIGNATURE_FILE = "_pdf_from.json"
+
+
+def _pdf_signature(pdfs: list[Path]) -> list[list[Any]]:
+    return [[p.name, p.stat().st_size] for p in pdfs]
+
+
+def _check_pdf_signature(case_dir: Path, pdfs: list[Path]) -> None:
+    """Кадри в теці розгорнуто з ЦИХ PDF — або відмова.
+
+    🔴 Розгортання пропускає наявні кадри (`dest.exists()`), а номер кадру
+    не знає, з якої книги він. Підміни PDF у теці з готовими кадрами (інцидент
+    14.10.2026 з кешем стискання: під старим іменем лягла інша книга) дали б
+    суміш: перші N сторінок від старої книги, решта від нової, і жодної помилки.
+    Тому перше розгортання кладе поруч ім'я й розмір PDF, а далі розбіжність —
+    відмова, а не чистка: тека кадрів тут може бути оригіналом (кадри FS
+    поруч із PDF), і зносити її мовчки не можна. Тека без відбитка (розгорнута
+    до цієї перевірки або покладена завантажувачем) лишається недоведеною, але
+    не відхиленою — відбиток їй не дописується, бо провенанс кадрів невідомий.
+    """
+    import json
+
+    from nyshporka.cloud.verify import frames_in
+
+    now = _pdf_signature(pdfs)
+    path = case_dir / PDF_SIGNATURE_FILE
+    try:
+        had = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        had = None
+    if had is not None:
+        if had != now:
+            raise PdfPageError(
+                f"PDF у {case_dir} не ті, з яких розгорнуто наявні кадри "
+                f"(було {had}, тепер {now}). Інакше кадри старої книги склеїлись "
+                f"би з новою під однією шифрою. Приберіть кадри `*.jpg` і "
+                f"`{PDF_SIGNATURE_FILE}` та повторіть.")
+        return
+    if not frames_in(case_dir):
+        with contextlib.suppress(OSError):
+            path.write_text(json.dumps(now, ensure_ascii=False), encoding="utf-8")
+
+
 def vytiahnuty_kadry(case_dir: Path, width: int = DEFAULT_WIDTH, *, jobs: int = 0,
                      on_line: Any = None, lyshe_bokovi: bool = False,
                      vypravleni: list[str] | None = None,
@@ -311,6 +356,7 @@ def vytiahnuty_kadry(case_dir: Path, width: int = DEFAULT_WIDTH, *, jobs: int = 
     pdfs = case_pdfs(case_dir)
     if not pdfs:
         return 0
+    _check_pdf_signature(case_dir, pdfs)
     tasks = _pending(case_dir, pdfs)
     if lyshe_bokovi:
         tasks = [t for t in tasks if t[4]]
