@@ -85,7 +85,11 @@ globalThis.window = { innerWidth: 1600, innerHeight: 900, _h: {},
   removeEventListener() {} };
 globalThis.innerWidth = 1600; globalThis.innerHeight = 900;
 globalThis.location = { hash: '#home', reload() {} };
-globalThis.localStorage = { _m: {}, getItem(k) { return this._m[k] ?? null; },
+// 🔴 Мова — українська явно: приймачі нижче шукають українські написи, а без
+// збереженої мови консоль бере мову `navigator` середовища. Node 21+ має його
+// вбудованим, і на Linux-CI (LANG=en) екрани малювались англійською — 11
+// приймачів упали на воротах релізу 0.29.1, хоч на Windows з uk усе зеленіло.
+globalThis.localStorage = { _m: { 'nysh.lang': 'uk' }, getItem(k) { return this._m[k] ?? null; },
   setItem(k, v) { this._m[k] = String(v); } };
 globalThis.alert = () => {};
 globalThis.requestAnimationFrame = (fn) => setTimeout(fn, 0);
