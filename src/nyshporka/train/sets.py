@@ -135,6 +135,9 @@ class SetSpec:
     #: Пакет розмітки — людська назва черги («XX ст. — важкі руки»). Екран розмітки,
     #: коли пакети є, показує лише їх: людина обирає одну чергу, а не набір зі шифром.
     pack: str = ""
+    #: Стороннє прочитання сторінки (людина, форум, опис) — контекст арбітрові,
+    #: НЕ мітка: `{сторінка: [{"text", "part", "kind", "trust", "source"}]}`.
+    page_hints: dict[str, list[dict[str, str]]] = field(default_factory=dict)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -149,6 +152,7 @@ class SetSpec:
             **({"origin": self.origin} if self.origin != "run" else {}),
             **({"cursor": self.cursor} if self.cursor else {}),
             **({"pack": self.pack} if self.pack else {}),
+            **({"page_hints": self.page_hints} if self.page_hints else {}),
         }
 
     @classmethod
@@ -170,6 +174,9 @@ class SetSpec:
             origin=str(d.get("origin") or "run"),
             cursor=int(d.get("cursor") or 0),
             pack=str(d.get("pack") or ""),
+            page_hints={str(k): [dict(h) for h in v if isinstance(h, dict)]
+                        for k, v in (d.get("page_hints") or {}).items()
+                        if isinstance(v, list)},
         )
 
     def voices(self) -> list[Draft]:

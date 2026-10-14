@@ -227,3 +227,11 @@ def test_page_image_prefers_run_and_falls_back_to_image_of(tmp_path: Path) -> No
     C.page_image("", {"key": "0002.JPG"}, "0002", image_of)            # src немає
     C.page_image("", {"src": str(tmp_path / "nope.png")}, "0003", image_of)
     assert calls == [("r1", "0001.JPG"), ("", "0002.JPG"), ("", "0003")]
+
+
+def test_voice_name_of_added_voice_run() -> None:
+    from nyshporka.train import cut as C
+
+    assert C.model_voice("pysar_cyr_v21.pt+skryba_pp_v3") == "skryba_pp_v3"
+    assert C.model_voice("pysar_cyr_v21.pt") == "pysar_cyr_v21"
+    assert C.model_voice("") == ""

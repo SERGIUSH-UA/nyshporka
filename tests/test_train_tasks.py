@@ -258,3 +258,29 @@ def test_ops_glossary_export_import_round_trip(space: W.Workspace, monkeypatch: 
     assert env.ok and "0002" in env.data["pages"]
     env = O.call("train.view", {"name": "demo", "page": "0001", "mode": "strip", "lines": "0-1"})
     assert env.ok and env.data["image"].startswith("data:image/png")
+
+
+def test_page_hint_reaches_only_its_page_task(space: W.Workspace, tmp_path: Path) -> None:
+    from nyshporka import ops as O
+
+    rows = tmp_path / "hints.jsonl"
+    rows.write_text("\n".join(json.dumps(r, ensure_ascii=False) for r in (
+        {"page": "0002", "text": "Иван Петрович", "kind": "normalized", "trust": "confirmed",
+         "part": "перший рядок"},
+        {"page": "0009", "text": "чужа сторінка"},
+        {"page": "0001", "text": "x", "kind": "guess"},
+    )) + "\n", encoding="utf-8")
+    env = O.call("train.hint", {"name": "demo", "file": str(rows)})
+    assert env.ok and env.data["added"] == 1
+    assert {w.code for w in env.warnings} >= {"hint_unknown_page", "hint_bad_row"}
+    again = O.call("train.hint", {"name": "demo", "file": str(rows)})
+    assert again.data["added"] == 0, "повтор не дублює"
+    rep = T.export_tasks("demo", pages_per_file=1, sheets=False, ws=space)
+    by_page = {f.name: f.read_text(encoding="utf-8") for f in rep.files}
+    p1, p2 = by_page["demo_part01.txt"], by_page["demo_part02.txt"]
+    assert "СТОРОННЄ ПРОЧИТАННЯ" not in p1
+    assert "0002 (перший рядок): «Иван Петрович» [нормалізовано, підтверджено" in p2
+    assert p2.index("СТОРОННЄ ПРОЧИТАННЯ") < p2.index("Рядки:")
+    bare = T.export_tasks("demo", pages_per_file=1, sheets=False, hints=False, ws=space)
+    assert all("СТОРОННЄ ПРОЧИТАННЯ" not in f.read_text(encoding="utf-8") for f in bare.files)
+    assert O.call("train.hint", {"name": "demo", "clear": True}).data["hints"] == 0

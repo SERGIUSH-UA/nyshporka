@@ -303,6 +303,7 @@ OP_SCREEN: dict[str, str] = {
     "train.cut": "sets",
     "train.voices": "sets",
     "train.glossary": "sets",
+    "train.hint": "sets",
     "train.export": "sets",
     "train.import": "sets",
     "train.gates": "sets",

@@ -268,6 +268,81 @@ def train_glossary(a: GlossaryArgs) -> Envelope:
     return env
 
 
+# ── стороннє прочитання сторінки ─────────────────────────────────────────────
+class HintArgs(BaseModel):
+    name: str = Field(description="набір")
+    file: str = Field(default="", description="JSONL: page, text, kind, part, trust, source")
+    page: str = Field(default="", description="сторінка набору (для одного прочитання)")
+    text: str = Field(default="", description="що прочитано")
+    kind: str = Field(default="literal",
+                      description="literal | normalized | translation | interpretation")
+    part: str = Field(default="", description="яке місце сторінки прочитано")
+    trust: str = Field(default="single", description="confirmed | agreed | single | disputed")
+    source: str = Field(default="", description="звідки (без особистих даних)")
+    clear: bool = Field(default=False, description="спершу зняти всі прочитання набору")
+
+
+@op("train.hint", summary="Стороннє прочитання сторінки — контекст арбітрам, не мітка",
+    args=HintArgs, mutates=True, agent=False, section=SECTION)
+def train_hint(a: HintArgs) -> Envelope:
+    """Людина вже прочитала сторінку (форум, власник документа) — арбітр це бачить.
+
+    🔴 Це не GT: прочитання часто нормалізоване чи перекладене, буває хибне.
+    У завдання воно йде з правилом «орфографію бери з голосів, невидиме не
+    вписуй». Сторінки, якої в наборі немає, не приймаємо — інакше підказка
+    тихо не дійде до арбітра.
+    """
+    from nyshporka.train import sets as S
+    from nyshporka.train import tasks as T
+
+    reg = _registry()
+    try:
+        spec = reg.load(a.name)
+    except S.SetError as exc:
+        return fail(str(exc))
+    rows: list[dict[str, Any]] = []
+    if a.file:
+        import json
+
+        for line in Path(a.file).read_text(encoding="utf-8").splitlines():
+            if line.strip():
+                rows.append(json.loads(line))
+    elif a.page and a.text:
+        rows.append({"page": a.page, "text": a.text, "kind": a.kind, "part": a.part,
+                     "trust": a.trust, "source": a.source})
+    have = set(reg.crop_pages(spec))
+    if a.clear:
+        spec.page_hints = {}
+    added, unknown, bad = 0, [], []
+    for r in rows:
+        pg, text = str(r.get("page") or ""), str(r.get("text") or "").strip()
+        kind, trust = str(r.get("kind") or "literal"), str(r.get("trust") or "single")
+        if pg not in have:
+            unknown.append(pg)
+            continue
+        if not text or kind not in T.HINT_KINDS or trust not in T.HINT_TRUST:
+            bad.append(pg)
+            continue
+        h = {"text": text, "kind": kind, "trust": trust,
+             **{k: str(r[k]) for k in ("part", "source") if r.get(k)}}
+        cur = spec.page_hints.setdefault(pg, [])
+        if h not in cur:
+            cur.append(h)
+            added += 1
+    if rows or a.clear:
+        reg.save(spec)
+    env = ok({"set": a.name, "added": added,
+              "pages": len(spec.page_hints),
+              "hints": sum(len(v) for v in spec.page_hints.values())})
+    if unknown:
+        env.warn("hint_unknown_page", f"сторінок немає в наборі ({len(set(unknown))}): "
+                                      f"{', '.join(sorted(set(unknown))[:8])}")
+    if bad:
+        env.warn("hint_bad_row", f"порожній текст або невідомий kind/trust ({len(bad)} рядків): "
+                                 f"{', '.join(sorted(set(bad))[:8])}")
+    return env
+
+
 # ── завдання арбітрам ────────────────────────────────────────────────────────
 class ExportArgs(BaseModel):
     name: str = Field(description="набір")
@@ -277,6 +352,8 @@ class ExportArgs(BaseModel):
     drafts: str = Field(default="", description="кома-список голосів; порожньо — усі")
     out: str = Field(default="", description="куди класти; порожньо — _tasks у наборі")
     no_sheets: bool = Field(default=False, description="без аркушів із рамками")
+    no_hints: bool = Field(default=False, description="без стороннього прочитання сторінок "
+                                                      "(контрольний захід для порівняння)")
 
 
 @op("train.export", summary="Завдання арбітрам: голоси по сторінках + аркуші з рамками",
@@ -293,7 +370,7 @@ def train_export(a: ExportArgs) -> Envelope:
     try:
         rep = T.export_tasks(a.name, pages=_csv(a.pages), pages_per_file=a.pages_per_file,
                              only_missing=a.only_missing, drafts=_csv(a.drafts) or None,
-                             out=Path(a.out) if a.out else None, sheets=not a.no_sheets)
+                             out=Path(a.out) if a.out else None, sheets=not a.no_sheets, hints=not a.no_hints)
     except (S.SetError, T.TaskError) as exc:
         return fail(str(exc))
     env = ok({"set": a.name, "out": str(rep.out), "files": [str(f) for f in rep.files],

@@ -171,6 +171,36 @@ def glossary_cmd(
     _notes(env)
 
 
+@app.command("hint")
+def hint_cmd(
+    name: str = typer.Option(..., "--set", metavar="НАБІР", help="ім'я набору"),
+    file: str = typer.Option("", "--from", help="JSONL: page, text, kind, part, trust, source"),
+    page: str = typer.Option("", "--page", help="сторінка набору"),
+    text: str = typer.Option("", "--text", help="що прочитано"),
+    kind: str = typer.Option("literal", "--kind",
+                             help="literal | normalized | translation | interpretation"),
+    part: str = typer.Option("", "--part", help="яке місце сторінки"),
+    trust: str = typer.Option("single", "--trust", help="confirmed | agreed | single | disputed"),
+    clear: bool = typer.Option(False, "--clear", help="спершу зняти всі прочитання набору"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
+) -> None:
+    """Стороннє прочитання сторінки: контекст арбітрам, не мітка.
+
+    Людина вже прочитала сторінку (форум, власник документа) — у завданні
+    арбітр бачить це з видом прочитання й довірою, але орфографію бере з
+    голосів.
+    """
+    from nyshporka import ops as O
+
+    env = O.call("train.hint", {"name": name, "file": file, "page": page, "text": text,
+                                "kind": kind, "part": part, "trust": trust, "clear": clear})
+    if _answer(env, as_json):
+        return
+    d = env.data
+    console.print(f"додано {d['added']}; у наборі {d['hints']} прочитань на {d['pages']} стор.")
+    _notes(env)
+
+
 @app.command("export")
 def export_cmd(
     name: str = typer.Option(..., "--set", metavar="НАБІР", help="ім'я набору"),
@@ -180,6 +210,8 @@ def export_cmd(
     drafts: str = typer.Option("", "--drafts", help="кома-список голосів"),
     out: str = typer.Option("", "--out", help="куди класти завдання"),
     no_sheets: bool = typer.Option(False, "--no-sheets", help="без аркушів із рамками"),
+    no_hints: bool = typer.Option(False, "--no-hints",
+                                  help="без стороннього прочитання (контроль для порівняння)"),
     as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Завдання арбітрам: голоси по сторінках + аркуші з рамками.
@@ -192,7 +224,8 @@ def export_cmd(
     env = O.call("train.export", {"name": name, "pages": pages,
                                   "pages_per_file": pages_per_file,
                                   "only_missing": only_missing, "drafts": drafts,
-                                  "out": out, "no_sheets": no_sheets})
+                                  "out": out, "no_sheets": no_sheets,
+                                  "no_hints": no_hints})
     if _answer(env, as_json):
         return
     d = env.data

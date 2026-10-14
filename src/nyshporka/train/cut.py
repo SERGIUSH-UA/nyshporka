@@ -445,10 +445,19 @@ def make_set(run: str, name: str, *, pages: list[str] | None = None, pick: int =
     return rep
 
 
+def model_voice(model: str) -> str:
+    """Ім'я голосу з поля `model` мети прогону.
+
+    Прогін доданого голосу (`--with`) пише `pysar_cyr_v21.pt+skryba_pp_v3`:
+    голос — те, що після `+`. Голий `Path(...).stem` бере за суфікс
+    `.pt+skryba_pp_v3` і називає латинський голос Писарем.
+    """
+    model = model.strip().rsplit("+", 1)[-1].strip()
+    return Path(model).stem if model else ""
+
+
 def _voice_id(meta: dict[str, Any]) -> str:
-    model = str(meta.get("model") or "").strip()
-    stem = Path(model).stem if model else ""
-    return stem or "run"
+    return model_voice(str(meta.get("model") or "")) or "run"
 
 
 def _source_path(run: str, page: str, ws: Workspace) -> Path | None:

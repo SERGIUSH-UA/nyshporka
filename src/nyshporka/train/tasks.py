@@ -97,6 +97,35 @@ GLOSSARY_NOTE = """
    підставляти ЗАБОРОНЕНО, навіть якщо вона в цій справі найчастіша.
 """
 
+HINTS_NOTE = """
+★ СТОРОННЄ ПРОЧИТАННЯ СТОРІНКИ — що про цю сторінку прочитали люди поза рушієм
+   (форум, власник документа, опис). Це КОНТЕКСТ, а не мітка:
+{items}
+   Користуйся ним, щоб упізнати власну назву, яку голоси калічать, і щоб знати,
+   де на аркуші шукати. 🔴 Але: «переклад» і «нормалізовано» — НЕ текст рядка,
+   орфографію й скорочення бери з голосів і аркуша; читання бувають хибні й
+   суперечливі; слово, якого не видно на смужці, у рядок НЕ вписуй.
+"""
+
+HINT_KINDS = {"literal": "дослівно", "normalized": "нормалізовано",
+              "translation": "переклад", "interpretation": "тлумачення"}
+HINT_TRUST = {"confirmed": "підтверджено власником документа",
+              "agreed": "кілька людей згодні", "single": "одна відповідь",
+              "disputed": "є суперечка"}
+
+
+def hint_lines(spec: S.SetSpec, pages: list[str]) -> list[str]:
+    out = []
+    for pg in pages:
+        for h in spec.page_hints.get(pg, []):
+            tags = [HINT_KINDS.get(h.get("kind", ""), h.get("kind", "")),
+                    HINT_TRUST.get(h.get("trust", ""), h.get("trust", ""))]
+            part = f" ({h['part']})" if h.get("part") else ""
+            tag = ", ".join(t for t in tags if t)
+            out.append(f"   {pg}{part}: «{h.get('text', '')}»" + (f" [{tag}]" if tag else ""))
+    return out
+
+
 TAIL = """
 Поверни ЛИШЕ JSON-об'єкт {{"<id>": {{"m": "<злитий рядок>", "c": "high|med|low"}}}} — рівно {n} ключів, ті самі id, у тому ж порядку.
 
@@ -163,7 +192,7 @@ class ExportReport:
 def export_tasks(name: str, *, pages: list[str] | None = None, pages_per_file: int = 3,
                  only_missing: bool = False, drafts: list[str] | None = None,
                  out: Path | None = None, sheets: bool = True, fold: bool = True,
-                 skip_blank: bool = True, ws: Workspace | None = None,
+                 skip_blank: bool = True, hints: bool = True, ws: Workspace | None = None,
                  image_of: Any = None) -> ExportReport:
     w = ws if ws is not None else workspace()
     reg = S.registry(w)
@@ -244,6 +273,9 @@ def export_tasks(name: str, *, pages: list[str] | None = None, pages_per_file: i
         items = glossary_items(spec)
         if items:
             txt += GLOSSARY_NOTE.format(items="; ".join(items))
+        page_hints = hint_lines(spec, ch_pages) if hints else []
+        if page_hints:
+            txt += HINTS_NOTE.format(items="\n".join(page_hints))
         txt += TAIL.format(n=len(ch), rows="\n".join(row_block(r, fold) for r in ch))
         f = rep.out / f"{stem}.txt"
         f.write_text(txt, encoding="utf-8")

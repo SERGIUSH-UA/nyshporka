@@ -46,9 +46,9 @@ def _voice_id_for_run(run: str, spec: S.SetSpec) -> str:
         return run[len(base) + 1:]
     try:
         meta = C.run_meta(run)
-        model = str(meta.get("model") or "")
+        model = C.model_voice(str(meta.get("model") or ""))
         if model:
-            return Path(model).stem
+            return model
     except C.CutError:
         pass
     return run
