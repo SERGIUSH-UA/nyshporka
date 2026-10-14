@@ -210,3 +210,18 @@ def test_roaming_scan_reads_appdata(monkeypatch, tmp_path: Path) -> None:
     (tmp_path / "uv" / "python" / ".lock").write_text("", encoding="utf-8")
     assert [p.name for p in doctor._roaming_uv_pythons()] == [
         "cpython-3.12.11-windows-x86_64-none"]
+
+
+# ── майстер .exe ────────────────────────────────────────────────────────────
+
+
+def test_wizard_asks_for_the_python_folder_and_passes_it_on() -> None:
+    """Користувач `.exe` із 448 не мав де вказати теку — лишалось запускати
+    windows.ps1 руками (рішення дослідника 14.10.2026: окреме поле)."""
+    iss = (ROOT / "install" / "nyshporka.iss").read_text(encoding="utf-8-sig")
+    assert "CreateInputDirPage(PresetPage.ID" in iss
+    assert "PythonDirFlag() +" in iss and "' -PythonDir \"'" in iss
+    assert "{param:pythondir|}" in iss, "тихий режим: /PYTHONDIR="
+    for lang in ("ukrainian", "english", "polish", "romanian", "french", "german", "russian"):
+        for key in ("PyDirTitle", "PyDirSub", "PyDirDesc"):
+            assert f"\n{lang}.{key}=" in iss, f"{lang}.{key}"

@@ -138,6 +138,9 @@ ukrainian.NoErrorText=Текст помилки не зберігся. Журн�
 ukrainian.AdminHint=Якщо причина вище не названа — спробуйте запустити інсталятор правою кнопкою миші → «Запустити від імені адміністратора». Тоді все стане в профіль того облікового запису, від імені якого запущено.
 ukrainian.InstallFailed=Установлення не завершилось (код %1).
 ukrainian.NoCommand=Нишпорка встановилась, але не сказала, де опинилась команда.%nНапишіть, будь ласка, на %1
+ukrainian.PyDirTitle=Тека для Python
+ukrainian.PyDirSub=Куди Нишпорка покладе свій інтерпретатор Python.
+ukrainian.PyDirDesc=Зазвичай нічого міняти не треба. Якщо встановлення вже падало з «os error 448» (тека профілю в OneDrive чи перенаправлена), вкажіть теку поза профілем, наприклад D:\Nyshporka\python.
 english.AppComment=Reading handwritten archival records
 english.PresetTitle=What to install
 english.PresetSub=Very different people install Nyshporka.
@@ -151,6 +154,9 @@ english.NoErrorText=The error text was not saved. Log: %1
 english.AdminHint=If the cause is not named above, try starting the installer with a right click → “Run as administrator”. Everything will then go into the profile of the account it was started as.
 english.InstallFailed=Installation did not finish (code %1).
 english.NoCommand=Nyshporka was installed, but did not say where the command ended up.%nPlease write to %1
+english.PyDirTitle=Folder for Python
+english.PyDirSub=Where Nyshporka will put its Python interpreter.
+english.PyDirDesc=Usually nothing needs changing. If installation has already failed with “os error 448” (profile folder in OneDrive or redirected), choose a folder outside the profile, for example D:\Nyshporka\python.
 polish.AppComment=Odczyt rękopiśmiennych dokumentów archiwalnych
 polish.PresetTitle=Co instalujemy
 polish.PresetSub=Nyshporkę instalują bardzo różni ludzie.
@@ -164,6 +170,9 @@ polish.NoErrorText=Tekst błędu nie został zapisany. Dziennik: %1
 polish.AdminHint=Jeśli przyczyna nie jest wymieniona powyżej, uruchom instalator prawym przyciskiem myszy → „Uruchom jako administrator”. Wszystko trafi wtedy do profilu konta, z którego go uruchomiono.
 polish.InstallFailed=Instalacja nie została ukończona (kod %1).
 polish.NoCommand=Nyshporka została zainstalowana, ale nie podała, gdzie jest polecenie.%nNapisz proszę na %1
+polish.PyDirTitle=Folder na Pythona
+polish.PyDirSub=Gdzie Nyshporka umieści swój interpreter Pythona.
+polish.PyDirDesc=Zwykle nic nie trzeba zmieniać. Jeśli instalacja już kończyła się błędem „os error 448” (folder profilu w OneDrive lub przekierowany), wskaż folder poza profilem, na przykład D:\Nyshporka\python.
 romanian.AppComment=Citirea dosarelor de arhivă scrise de mână
 romanian.PresetTitle=Ce instalăm
 romanian.PresetSub=Nyshporka este instalată de oameni foarte diferiți.
@@ -177,6 +186,9 @@ romanian.NoErrorText=Textul erorii nu s-a păstrat. Jurnal: %1
 romanian.AdminHint=Dacă cauza nu este numită mai sus, încercați să porniți programul de instalare cu clic dreapta → „Executare ca administrator”. Atunci totul va merge în profilul contului cu care a fost pornit.
 romanian.InstallFailed=Instalarea nu s-a încheiat (cod %1).
 romanian.NoCommand=Nyshporka a fost instalată, dar nu a spus unde se află comanda.%nScrieți, vă rugăm, la %1
+romanian.PyDirTitle=Dosar pentru Python
+romanian.PyDirSub=Unde își va pune Nyshporka interpretorul Python.
+romanian.PyDirDesc=De obicei nu trebuie schimbat nimic. Dacă instalarea a eșuat deja cu „os error 448” (dosarul profilului în OneDrive sau redirecționat), alegeți un dosar din afara profilului, de exemplu D:\Nyshporka\python.
 french.AppComment=Lecture de dossiers d'archives manuscrits
 french.PresetTitle=Que faut-il installer
 french.PresetSub=Nyshporka est installée par des personnes très différentes.
@@ -190,6 +202,9 @@ french.NoErrorText=Le texte de l'erreur n'a pas été conservé. Journal : %1
 french.AdminHint=Si la cause n'est pas indiquée plus haut, essayez de lancer l'installeur par clic droit → « Exécuter en tant qu'administrateur ». Tout ira alors dans le profil du compte avec lequel il a été lancé.
 french.InstallFailed=L'installation ne s'est pas terminée (code %1).
 french.NoCommand=Nyshporka est installée, mais n'a pas indiqué où se trouve la commande.%nÉcrivez-nous, s'il vous plaît, à %1
+french.PyDirTitle=Dossier pour Python
+french.PyDirSub=Où Nyshporka placera son interpréteur Python.
+french.PyDirDesc=En général, rien à changer. Si l'installation a déjà échoué avec « os error 448 » (dossier de profil dans OneDrive ou redirigé), choisissez un dossier hors du profil, par exemple D:\Nyshporka\python.
 german.AppComment=Lesen handschriftlicher Archivakten
 german.PresetTitle=Was wird installiert
 german.PresetSub=Nyshporka wird von sehr unterschiedlichen Menschen installiert.
@@ -203,6 +218,9 @@ german.NoErrorText=Der Fehlertext wurde nicht gespeichert. Protokoll: %1
 german.AdminHint=Wenn die Ursache oben nicht genannt ist, starten Sie den Installer per Rechtsklick → „Als Administrator ausführen“. Dann landet alles im Profil des Kontos, unter dem er gestartet wurde.
 german.InstallFailed=Die Installation wurde nicht abgeschlossen (Code %1).
 german.NoCommand=Nyshporka wurde installiert, hat aber nicht gemeldet, wo der Befehl liegt.%nBitte schreiben Sie an %1
+german.PyDirTitle=Ordner für Python
+german.PyDirSub=Wohin Nyshporka ihren Python-Interpreter legt.
+german.PyDirDesc=Normalerweise muss nichts geändert werden. Ist die Installation bereits mit „os error 448“ gescheitert (Profilordner in OneDrive oder umgeleitet), wählen Sie einen Ordner außerhalb des Profils, z. B. D:\Nyshporka\python.
 #ifdef WITH_RU
 russian.AppComment=Чтение рукописных архивных дел
 russian.PresetTitle=Что ставим
@@ -217,6 +235,9 @@ russian.NoErrorText=Текст ошибки не сохранился. Журн�
 russian.AdminHint=Если причина выше не названа — попробуйте запустить установщик правой кнопкой мыши → «Запуск от имени администратора». Тогда всё встанет в профиль той учётной записи, от имени которой он запущен.
 russian.InstallFailed=Установка не завершилась (код %1).
 russian.NoCommand=Нышпорка установилась, но не сказала, где оказалась команда.%nНапишите, пожалуйста, на %1
+russian.PyDirTitle=Папка для Python
+russian.PyDirSub=Куда Нышпорка положит свой интерпретатор Python.
+russian.PyDirDesc=Обычно ничего менять не нужно. Если установка уже падала с «os error 448» (папка профиля в OneDrive или перенаправлена), укажите папку вне профиля, например D:\Nyshporka\python.
 #endif
 
 [Files]
@@ -276,6 +297,7 @@ Type: dirifempty; Name: "{app}\uv"
 [Code]
 var
   PresetPage: TInputOptionWizardPage;
+  PyDirPage: TInputDirWizardPage;
   ResolvedNysh: String;
 
 const
@@ -295,6 +317,38 @@ begin
   // а torch підбирає під відеокарту NVIDIA, якщо драйвер її показує.
   PresetPage.Add(CustomMessage('PresetResearcher'));
   PresetPage.SelectedValueIndex := PRESET_CATALOG;
+
+  // 🔴 Тека для Python — окремим полем (рішення дослідника 14.10.2026). Типова
+  // `{app}\python`; міняють її лише ті, у кого встановлення падало з os error
+  // 448: uv не може пройти junction у профілі, перенаправленому в OneDrive.
+  // Без поля такій людині лишалось запускати windows.ps1 руками.
+  PyDirPage := CreateInputDirPage(PresetPage.ID,
+    CustomMessage('PyDirTitle'), CustomMessage('PyDirSub'),
+    CustomMessage('PyDirDesc'), False, '');
+  PyDirPage.Add('');
+end;
+
+procedure CurPageChanged(CurPageID: Integer);
+begin
+  // `{app}` відомий лише після сторінки вибору теки, тож типове значення
+  // ставимо тут, і лише якщо людина ще нічого не вписала.
+  if (CurPageID = PyDirPage.ID) and (PyDirPage.Values[0] = '') then
+    PyDirPage.Values[0] := ExpandConstant('{app}\python');
+end;
+
+// Тека для `windows.ps1 -PythonDir`; порожньо — типова скрипта (`{app}\python`).
+// Тихий режим: `/PYTHONDIR=D:\Nyshporka\python`.
+function PythonDirFlag(): String;
+var
+  Dir: String;
+begin
+  if WizardSilent then
+    Dir := ExpandConstant('{param:pythondir|}')
+  else
+    Dir := Trim(PyDirPage.Values[0]);
+  Result := '';
+  if Dir <> '' then
+    Result := ' -PythonDir "' + Dir + '"';
 end;
 
 function SelectedPreset(): String;
@@ -372,6 +426,7 @@ begin
             ' -Home_ "' + ExpandConstant('{app}') + '"' +
             ' -NoLauncher' +
             EnginesFlag() +
+            PythonDirFlag() +
             ' -Lang ' + LangCode() +
             ' -Wizard';
   // Слід ПОПЕРЕДНЬОЇ відмови не має видаватись за теперішню.
