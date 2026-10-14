@@ -113,17 +113,18 @@ def case_dir_for(repo: str, fond: str, spr: str, letter: str, opys: str = "") ->
     return plain if not was or was == _norm_spr(opys) else own
 
 
-def plan(key: str) -> dict[str, Any]:
+def plan(key: str, commons_file: str = "") -> dict[str, Any]:
     """Що станеться, якщо взяти цю справу — без жодної мережевої дії.
 
     Окремо від самого взяття, бо відповідь «каналу немає» коштує нуль секунд, а
     дізнаватись про неї після півгодини качання — марна робота.
     """
-    return {**_plan_from(*_row(key)[:6]), "opys_assumed": not opys_named(key)}
+    return {**_plan_from(*_row(key)[:6], commons_file=commons_file),
+            "opys_assumed": not opys_named(key)}
 
 
 def _plan_from(repo: str, fond: str, opys: str, spr: str, letter: str,
-               row: dict[str, Any]) -> dict[str, Any]:
+               row: dict[str, Any], commons_file: str = "") -> dict[str, Any]:
     """Те саме, але на вже прочитаному рядку — щоб не читати реєстр двічі."""
     from nyshporka.library import _mk_key
 
@@ -132,13 +133,22 @@ def _plan_from(repo: str, fond: str, opys: str, spr: str, letter: str,
     film = str(row.get("fs_film") or row.get("fs_dgs") or "").strip()
     mirror = str(row.get("mirror_url") or "").strip()
     channel = "archium" if archium else ("commons" if name else "")
+    parts: list[str] = []
+    conflict = ""
+    if channel == "commons":
+        try:
+            parts = commons_volumes(row, commons_file)
+        except TakeError as exc:
+            # 🔴 Не кидаємо: `plan` читають і черга, і консоль, і для них це не
+            # «справи немає в реєстрі», а «каналу немає, поки людина не вибрала».
+            conflict, channel, name = str(exc), "", ""
     return {
-        "parts": commons_volumes(row) if channel == "commons" else [],
+        "parts": parts, "conflict": conflict,
         "key": _mk_key(repo, fond, f"{spr}{letter}", opys) or "", "repo": repo,
         "fond": fond,
         "opys": opys, "spr": f"{spr}{letter}",
         "title": str(row.get("title") or ""),
-        "channel": channel, "ref": archium or name,
+        "channel": channel, "ref": archium or (parts[0] if len(parts) == 1 else name),
         "case_dir": str(case_dir_for(repo, fond, spr, letter, opys)),
         "film": film, "mirror": mirror,
         # DGS окремо від номера плівки: це різні числа FamilySearch, і порада
@@ -147,11 +157,39 @@ def _plan_from(repo: str, fond: str, opys: str, spr: str, letter: str,
         # 🔴 Номер справи, відновлений інтерполяцією, мусить їхати разом із
         # планом: узяти можна, вірити шифрі — ні, доки її не звірили оком.
         "shifra_needs_eye": row.get("num_src") == "interp",
-        "why": _why(channel, film, mirror),
+        "why": conflict or _why(channel, film, mirror),
     }
 
 
-def commons_volumes(row: dict[str, Any]) -> list[str]:
+def _pick_by_years(row: dict[str, Any], files: list[str]) -> str:
+    """Єдиний файл, чиї роки в назві потрапляють у роки опису; інакше відмова."""
+    from nyshporka.fonds.merge.scans import file_years
+
+    def _y(v: Any) -> int:
+        return int(v) if str(v or "").strip().isdigit() else 0
+
+    lo = _y(row.get("year_from"))
+    hi = _y(row.get("year_to")) or lo
+    listing = "\n".join(
+        f"  {f}  (роки в назві: {', '.join(map(str, sorted(file_years(f)))) or '—'})"
+        for f in files)
+    ask = ('Назвіть файл: --commons-file "<назва або її унікальна частина>". '
+           "Файли — різні книги під однією шифрою, найбільший не обирається.")
+    if not lo:
+        raise TakeError("під цією шифрою на Commons кілька різних книг, а опис не "
+                        f"називає років справи, щоб вибрати.\n{listing}\n{ask}")
+    hit = [f for f in files if any(lo <= y <= hi for y in file_years(f))]
+    if len(hit) != 1:
+        raise TakeError(
+            f"під цією шифрою на Commons кілька різних книг; роки справи за описом "
+            f"{lo}–{hi} "
+            + ("не збігаються з жодним файлом" if not hit
+               else "збігаються з кількома файлами")
+            + f".\n{listing}\n{ask}")
+    return hit[0]
+
+
+def commons_volumes(row: dict[str, Any], commons_file: str = "") -> list[str]:
     """Файли Commons, з яких складається справа: усі томи або один файл.
 
     🔴 Справа у двох томах («Частина 1», «Частина 2») — один рядок реєстру з
@@ -160,13 +198,39 @@ def commons_volumes(row: dict[str, Any]) -> list[str]:
     знав обидва томи (06.10.2026, ДАХмО 315-1-7300: 1512 сторінок із 2992).
     `variants` — це різні файли ОДНОГО змісту, тож береться найбільший, як і
     рахує обсяг `aggregate_commons`.
+
+    🔴 `conflict` — файли під однією шифрою мають різні роки чи деканати, тобто
+    це різні книги (ДАВіО 904-31-5: файл 1873 насправді спр.6). Найбільший файл
+    тут нічого не каже: береться той, чий рік у назві збігається з роками опису,
+    а коли збігу немає чи їх кілька — `TakeError` з переліком кандидатів, бо
+    вгадана не та книга лягає під чужу шифру і виглядає правдоподібно.
+    `commons_file` — явний вибір людини (назва або унікальна частина назви).
     """
+    from nyshporka.fonds.merge.scans import is_conflict
+
     name = str(row.get("commons_title") or "").strip()
-    if str(row.get("commons_kind") or "") != "volumes":
-        return [name] if name else []
+    kind = str(row.get("commons_kind") or "")
     try:
         parts = json.loads(str(row.get("commons_parts") or "") or "[]")
     except ValueError:
+        parts = []
+    files = [str(p.get("file") or "") for p in parts
+             if isinstance(p, dict) and p.get("file")]
+    if commons_file:
+        files = files or ([name] if name else [])
+        want = commons_file.strip()
+        hit = [f for f in files if f == want] or [f for f in files if want in f]
+        if len(hit) != 1:
+            raise TakeError(
+                f"--commons-file «{want}»: "
+                + ("збігів немає" if not hit else "збігів кілька")
+                + ". Файли справи:\n" + "\n".join(f"  {f}" for f in files))
+        return hit
+    # Реєстр міг бути зібраний до появи виду `conflict`: такий рядок має
+    # `variants`, але склад файлів той самий, тож конфлікт видно і з нього.
+    if kind == "conflict" or (kind == "variants" and is_conflict(parts)):
+        return [_pick_by_years(row, files)]
+    if kind != "volumes":
         return [name] if name else []
     vols = [str(p.get("file") or "") for p in parts
             if isinstance(p, dict) and p.get("sum") and p.get("file")]
@@ -192,7 +256,8 @@ def _why(channel: str, film: str, mirror: str) -> str:
 
 
 def take(key: str, *, force: bool = False, reindex: bool = True,
-         on_progress: ProgressFn | None = None) -> dict[str, Any]:
+         on_progress: ProgressFn | None = None,
+         commons_file: str = "") -> dict[str, Any]:
     """Завантажити справу й зареєструвати її. Повертає, що саме лягло.
 
     🔴 Приймач — бібліотека, а не код завершення. Тека без `meta.json` невидима
@@ -203,7 +268,7 @@ def take(key: str, *, force: bool = False, reindex: bool = True,
     from nyshporka.cases import acquire as A
 
     repo, fond, opys, spr_i, letter, row, _ = _row(key)
-    p = {**_plan_from(repo, fond, opys, spr_i, letter, row),
+    p = {**_plan_from(repo, fond, opys, spr_i, letter, row, commons_file),
          "opys_assumed": not opys_named(key)}
     if not p["channel"]:
         raise TakeError(p["why"])

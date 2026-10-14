@@ -121,7 +121,8 @@ def _multi(reg: dict[Any, dict[str, Any]]) -> dict[str, int]:
     kinds = [r.get("commons_kind") or "" for r in reg.values()
              if str(r.get("commons_files") or "0").isdigit()
              and int(r.get("commons_files") or 0) > 1]
-    return {"volumes": kinds.count("volumes"), "variants": kinds.count("variants")}
+    return {"volumes": kinds.count("volumes"), "variants": kinds.count("variants"),
+            "conflicts": kinds.count("conflict")}
 
 
 def merge_fond(target: Target, *, dest: Path, out: Path,

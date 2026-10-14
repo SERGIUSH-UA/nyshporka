@@ -25,7 +25,7 @@ def _run(monkeypatch: pytest.MonkeyPatch, script: str) -> str:
         return {"pages": 435, "bytes": 2**20, "case_dir": _PLAN["case_dir"],
                 "in_library": True, "shifra_needs_eye": "", "script": script}
 
-    monkeypatch.setattr(T, "plan", lambda key: dict(_PLAN))
+    monkeypatch.setattr(T, "plan", lambda key, *_a: dict(_PLAN))
     monkeypatch.setattr(T, "take", fake_take)
     res = CliRunner().invoke(cli.app, ["take", "DAHMO/R-6380/1/215"])
     assert res.exit_code == 0, res.output

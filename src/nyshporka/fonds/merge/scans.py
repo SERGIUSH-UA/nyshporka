@@ -28,6 +28,38 @@ def is_volume(name: str) -> bool:
     return bool(_RE_VOLUME.search(name or ""))
 
 
+#: Шифра справи в назві файлу («904-31-5», «спр.1650»): її цифри можуть
+#: потрапити в діапазон років, тож перед пошуком років шифра вирізається.
+_RE_CIPHER = re.compile(r"\d+-\d+-\d+[а-яіїєґa-z]?|спр[\s._]*\d+[а-яіїєґa-z]?", re.IGNORECASE)
+_RE_YEAR = re.compile(r"(?<!\d)(1[5-9]\d\d)(?!\d)")
+_RE_DEANERY = re.compile(r"([^\s._,]+)[\s._]+деканат", re.IGNORECASE)
+
+
+def file_years(name: str) -> frozenset[int]:
+    """Роки в назві файлу: 4 цифри 1500–1999, шифра справи не рахується."""
+    return frozenset(int(y) for y in _RE_YEAR.findall(_RE_CIPHER.sub(" ", name or "")))
+
+
+def _deanery(name: str) -> str:
+    m = _RE_DEANERY.search(name or "")
+    return m.group(1).lower() if m else ""
+
+
+def is_conflict(parts: list[dict[str, Any]]) -> bool:
+    """🔴 Файли під однією шифрою — РІЗНІ книги, а не повтор одного змісту.
+
+    Ознака: у назвах різні роки або різні деканати. Витяг парафії чи повторна
+    заливка так не виглядають: у них роки збігаються або їх у назві немає.
+    Реальний випадок — ДАВіО 904-31-5: «1873, Вінницький деканат» (насправді
+    спр.6) і «1879, Брацлавський деканат» (справжня спр.5) лежать під однією
+    шифрою.
+    """
+    names = [str(p.get("file", "")) for p in parts]
+    years = {file_years(n) for n in names} - {frozenset()}
+    deaneries = {d for d in map(_deanery, names) if d}
+    return len(years) > 1 or len(deaneries) > 1
+
+
 def _int(v: Any) -> int:
     return int(v) if str(v).isdigit() else 0
 
@@ -49,6 +81,7 @@ def aggregate_commons(parts: list[dict[str, Any]]) -> dict[str, str]:
     # лише тоді, коли їх кілька.
     summed = vols if len(vols) > 1 else parts[:1]
     biggest = parts[0]
+    conflict = len(vols) <= 1 and len(parts) > 1 and is_conflict(parts)
     return {
         "commons_url": str(biggest.get("url", "")),
         # Назва найбільшого файлу, не першого за абеткою: саме вона називає
@@ -56,10 +89,17 @@ def aggregate_commons(parts: list[dict[str, Any]]) -> dict[str, str]:
         "commons_title": str(biggest.get("file", "")),
         "commons_files": str(len(parts)),
         "commons_size_max": str(_int(biggest.get("size")) or ""),
+        # `conflict` — різні книги під однією шифрою; вибір за роками опису
+        # робить `cases.take`, а не злиття: роки опису тут ще не відомі.
         "commons_kind": ("volumes" if len(vols) > 1
-                         else ("variants" if len(parts) > 1 else "")),
-        "commons_size": str(sum(_int(p.get("size")) for p in summed) or ""),
-        "commons_pages": str(sum(_int(p.get("pagecount")) for p in summed) or ""),
+                         else ("conflict" if conflict
+                               else ("variants" if len(parts) > 1 else ""))),
+        # При конфлікті обсяг справи невідомий: найбільший файл може бути чужою
+        # книгою, а число з нього виглядало б як обсяг справи.
+        "commons_size": ("" if conflict else
+                         str(sum(_int(p.get("size")) for p in summed) or "")),
+        "commons_pages": ("" if conflict else
+                          str(sum(_int(p.get("pagecount")) for p in summed) or "")),
         "commons_parts": (json.dumps(
             [{"file": p.get("file", ""), "size": _int(p.get("size")),
               "pages": _int(p.get("pagecount")), "url": p.get("url", ""),

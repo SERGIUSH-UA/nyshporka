@@ -165,3 +165,50 @@ def test_variants_of_one_content_give_only_the_biggest_file(space):
     assert T._plan_from("DAHMO", "315", "1", "1", "", row)["parts"] == ["X.pdf"]
     assert T._plan_from("DAHMO", "315", "1", "1", "",
                         _row(commons_title="X.pdf"))["parts"] == ["X.pdf"]
+
+
+# ── різні книги під однією шифрою ────────────────────────────────────────────
+_F73 = "ДАВіО_904-31-5._1873._Метричні_книги_костелів_Вінницького_деканату.pdf"
+_F79 = "ДАВіО_904-31-5._1879._Метричні_книги_костелів_Брацлавського_деканату.pdf"
+
+
+def _conflict_row(**kw):
+    return _row(commons_title=_F73, commons_kind="conflict",
+                commons_parts=_parts((_F73, 895, True), (_F79, 649, False)), **kw)
+
+
+def test_conflict_takes_the_file_whose_year_matches_the_description(space):
+    """🔴 Реєстр мав найбільший файл (1873, чужа книга); опис каже 1879."""
+    p = T._plan_from("DAVO", "904", "31", "5", "",
+                     _conflict_row(year_from="1879", year_to="1879"))
+    assert p["parts"] == [_F79] and p["ref"] == _F79 and p["channel"] == "commons"
+    assert p["conflict"] == ""
+
+
+def test_conflict_without_years_in_description_refuses_and_lists(space):
+    p = T._plan_from("DAVO", "904", "31", "5", "", _conflict_row(year_from=""))
+    assert p["channel"] == "" and p["parts"] == []
+    assert _F73 in p["conflict"] and _F79 in p["conflict"]
+    assert "--commons-file" in p["conflict"]
+
+
+def test_conflict_with_no_matching_year_refuses(space):
+    p = T._plan_from("DAVO", "904", "31", "5", "",
+                     _conflict_row(year_from="1890", year_to="1890"))
+    assert p["channel"] == "" and "не збігаються" in p["conflict"]
+
+
+def test_commons_file_overrides_the_choice(space):
+    p = T._plan_from("DAVO", "904", "31", "5", "", _conflict_row(year_from=""),
+                     commons_file="Вінницького")
+    assert p["parts"] == [_F73] and p["conflict"] == ""
+    bad = T._plan_from("DAVO", "904", "31", "5", "", _conflict_row(),
+                       commons_file="904-31-5")
+    assert "збігів кілька" in bad["conflict"]
+
+
+def test_a_registry_built_before_the_conflict_kind_is_still_caught(space):
+    """Старий реєстр має `variants` для тих самих файлів — вибір усе одно за роками."""
+    row = _conflict_row(year_from="1879", year_to="1879")
+    row["commons_kind"] = "variants"
+    assert T._plan_from("DAVO", "904", "31", "5", "", row)["parts"] == [_F79]

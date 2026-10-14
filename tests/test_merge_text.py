@@ -135,3 +135,30 @@ def test_parts_say_which_of_them_were_counted() -> None:
         {"file": "витяг.pdf", "size": "10", "pagecount": "30"}])
     parts = json.loads(out["commons_parts"])
     assert [p["sum"] for p in parts] == [True, False]
+
+
+# ── різні книги під однією шифрою ────────────────────────────────────────────
+_P1873 = "ДАВіО_904-31-5._1873._Метричні_книги_костелів_Вінницького_деканату.pdf"
+_P1879 = "ДАВіО_904-31-5._1879._Метричні_книги_костелів_Брацлавського_деканату.pdf"
+
+
+def test_files_with_different_years_are_a_conflict_not_variants() -> None:
+    """🔴 ДАВіО 904-31-5: файл 1873 (895 МБ) насправді спр.6, а справжня спр.5 —
+    1879 (649 МБ). «Найбільший» вибрав би чужу книгу."""
+    out = S.aggregate_commons([
+        {"file": _P1873, "size": "895", "pagecount": "300"},
+        {"file": _P1879, "size": "649", "pagecount": "322"}])
+    assert out["commons_kind"] == "conflict"
+    assert out["commons_pages"] == "" and out["commons_size"] == ""
+
+
+def test_the_case_number_is_not_read_as_a_year() -> None:
+    assert S.file_years("ДАВіО_904-31-1650. 1873.pdf") == frozenset({1873})
+    assert S.file_years("спр.1650.pdf") == frozenset()
+
+
+def test_same_year_extract_stays_variants() -> None:
+    out = S.aggregate_commons([
+        {"file": "спр.7345 1858.pdf", "size": "900", "pagecount": "3291"},
+        {"file": "спр.7345 1858 села Побірка.pdf", "size": "10", "pagecount": "30"}])
+    assert out["commons_kind"] == "variants"

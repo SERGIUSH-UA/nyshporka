@@ -741,7 +741,11 @@ def cmd_take(key: str = typer.Argument(..., help="DAHMO/230/43 або DAHMO/230/
              dry_run: bool = typer.Option(False, "--dry-run"),
              force: bool = typer.Option(False, "--force"),
              skip_build: bool = typer.Option(False, "--skip-build",
-                                             help="не перебудовувати реєстри")) -> None:
+                                             help="не перебудовувати реєстри"),
+             commons_file: str = typer.Option(
+                 "", "--commons-file",
+                 help="файл Commons, коли під шифрою лежать різні книги "
+                      "(назва або її унікальна частина)")) -> None:
     """Взяти справу в роботу: завантажити з повного джерела й зареєструвати.
 
     Один крок замість чотирьох ручних, бо саме тут народжуються теки без
@@ -764,12 +768,15 @@ def cmd_take(key: str = typer.Argument(..., help="DAHMO/230/43 або DAHMO/230/
     # було написано всередині команди, тож із браузера дістатись до нього було
     # неможливо, і рядок опису в консолі лишався тупиком.
     try:
-        plan = T.plan(key)
+        plan = T.plan(key, commons_file)
     except T.TakeError as exc:
         console.print(f"[err]{exc}[/err]")
         raise typer.Exit(1) from None
 
     label = f"{plan['repo']} {plan['fond']}-{plan['opys']}-{plan['spr']}"
+    if plan.get("conflict"):
+        console.print(f"[err]{label}: {plan['conflict']}[/err]")
+        raise typer.Exit(1)
     if not plan["channel"]:
         console.print(f"[warn]{label}: {plan['why']}[/warn]")
         if plan["mirror"]:
@@ -794,7 +801,8 @@ def cmd_take(key: str = typer.Argument(..., help="DAHMO/230/43 або DAHMO/230/
         return
 
     try:
-        got = T.take(key, force=force, reindex=not skip_build)
+        got = T.take(key, force=force, reindex=not skip_build,
+                     commons_file=commons_file)
     except T.TakeError as exc:
         console.print(f"[err]{exc}[/err]")
         raise typer.Exit(1) from None
