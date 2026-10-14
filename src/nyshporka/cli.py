@@ -794,7 +794,7 @@ def update(
                           "простір, моделі й довідники лишаються[/muted]")
         raise typer.Exit(code=1)
     try:
-        rc = subprocess.call(cmd)
+        rc = subprocess.call(cmd, env=U.command_env())
     except OSError as exc:
         console.print(f"[warn]не вдалося запустити uv ({exc}) — "
                       f"перевстановіть застосунок інсталятором[/warn]")
@@ -3091,10 +3091,11 @@ def htr_install(
         raise typer.Exit(code=2) from None
     try:
         rep = E.setup(venv, with_cuda=not no_cuda, force_tag=cuda)
-    except E.ToolMissing as exc:
+    except (E.ToolMissing, E.UntrustedMount) as exc:
         # 🔴 Не трасою стека: `uv` і `git` — не залежності пакета, тож у того,
         # хто ставив `pip install`, їх може не бути зовсім, і саме він
-        # найімовірніше опиниться тут.
+        # найімовірніше опиниться тут. Відмова 448 — та сама порада, що й в
+        # інсталятора.
         console.print(f"[err]{exc}[/err]")
         raise typer.Exit(code=2) from None
     console.print(f"\npython : {rep.python or '—'}")

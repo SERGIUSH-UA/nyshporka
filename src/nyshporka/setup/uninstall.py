@@ -211,6 +211,19 @@ def plan(*, engines: bool = False, models: bool = False, catalog: bool = False,
 
     # 3. те, що знімається лише поіменно
     venv = _engine_venv()
+    # Тека керованих інтерпретаторів Нишпорки (`python_dir`, 14.10.2026 — обхід
+    # os error 448). 🔴 Під нею живе й venv рушіїв: його Python лежить саме тут,
+    # тож без `--engines` теку лишаємо — інакше рушії, які людина свідомо
+    # залишила, перестали б запускатись.
+    pydir = Path(info["python_dir"]) if info.get("python_dir") else None
+    if pydir is not None and pydir.exists():
+        item = Item(kind="dir", what=f"інтерпретатори Нишпорки {pydir}", path=pydir,
+                    size=_size_of(pydir))
+        if venv is None or engines:
+            p.items.append(item)
+        else:
+            p.kept.append(f"інтерпретатори Нишпорки ({human(item.size)}) — {pydir}: "
+                          f"на них стоять рушії читання · --engines")
     if venv is not None:
         item = Item(kind="dir", what=f"середовище рушіїв {venv}", path=venv,
                     flag="--engines", size=_size_of(venv))
@@ -245,7 +258,8 @@ def plan(*, engines: bool = False, models: bool = False, catalog: bool = False,
     # 4. те, що не знімається ніколи, і про що треба сказати вголос
     if p.workspace is not None:
         p.kept.append(f"🔴 простір досліджень — {p.workspace} (не знімається ніколи)")
-    p.kept.append("керовані інтерпретатори uv — `uv python uninstall 3.12`")
+    if pydir is None:
+        p.kept.append("керовані інтерпретатори uv — `uv python uninstall 3.12`")
     return p
 
 
@@ -393,14 +407,14 @@ def _drop_tool(item: Item, *, dry: bool) -> list[str]:
     """`uv tool uninstall nyshporka` — тим uv, який назвав слід інсталятора."""
     import subprocess
 
-    from nyshporka.setup.update import install_info
+    from nyshporka.setup.update import command_env, install_info
 
     uv = install_info().get("uv") or "uv"
     cmd = [uv, "tool", "uninstall", "nyshporka"]
     if dry:
         return [f"зняли б: {item.what}  ({' '.join(cmd)})"]
     try:
-        rc = subprocess.call(cmd)
+        rc = subprocess.call(cmd, env=command_env())
     except OSError as exc:
         return [f"⚠ не вдалося запустити uv ({exc}) — зніміть руками: "
                 f"{' '.join(cmd)}"]

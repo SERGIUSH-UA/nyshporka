@@ -559,6 +559,38 @@ def _run_signed_elevated(exe: Path, args: list[str]) -> int:
     return r.returncode
 
 
+class UntrustedMount(RuntimeError):
+    """Windows відмовився проходити junction, який uv робить для Python (448)."""
+
+
+def _uv_env() -> dict[str, str]:
+    """Тека інтерпретаторів інсталятора — щоб venv рушіїв (інша мінорна версія,
+    `engines.yaml`) не пішов по Python у Roaming і не впав там на 448."""
+    from nyshporka.setup.update import uv_python_env
+
+    return foreign_env(uv_python_env())
+
+
+def _run_watching_448(cmd: list[str]) -> None:
+    """`uv venv` — єдиний виклик, що КАЧАЄ інтерпретатор: його stderr читаємо.
+
+    Решту (`uv pip install` на гігабайти torch) не перехоплюємо: там людина
+    дивиться на поступ наживо, а Python уже стоїть.
+    """
+    print("  $ " + " ".join(cmd))
+    r = subprocess.run(cmd, env=_uv_env(), stderr=subprocess.PIPE, text=True,
+                       encoding="utf-8", errors="replace", check=False)
+    if r.stderr:
+        sys.stderr.write(r.stderr)
+    if r.returncode:
+        from nyshporka.setup.update import untrusted_mount_hint
+
+        hint = untrusted_mount_hint(r.stderr)
+        if hint:
+            raise UntrustedMount(hint)
+        raise subprocess.CalledProcessError(r.returncode, cmd, stderr=r.stderr)
+
+
 def _run(cmd: list[str], env: dict[str, str] | None = None) -> None:
     """Команда установки — в оточенні без змінних батьківського Python.
 
@@ -569,7 +601,7 @@ def _run(cmd: list[str], env: dict[str, str] | None = None) -> None:
     і свіже `nysh htr install` падало (пісочниця оновлення, 04.10.2026).
     """
     print("  $ " + " ".join(cmd))
-    subprocess.run(cmd, check=True, env=env if env is not None else foreign_env())
+    subprocess.run(cmd, check=True, env=env if env is not None else _uv_env())
 
 
 def setup(venv: Path, *, man: M.Manifest | None = None, with_cuda: bool = True,
@@ -606,7 +638,7 @@ def setup(venv: Path, *, man: M.Manifest | None = None, with_cuda: bool = True,
         _create_conda_env(venv, man, _conda_tool())
     else:
         print(f"① створюю {venv.name} (python {man.python})…")
-        _run([uv, "venv", str(venv), "--python", man.python])
+        _run_watching_448([uv, "venv", str(venv), "--python", man.python])
 
     rep = inspect(venv, man)
     need = [*rep.missing, *rep.stale]

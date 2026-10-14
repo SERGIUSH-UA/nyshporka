@@ -58,11 +58,54 @@ class Check:
 
 
 def _python() -> Check:
+    """Версія, ЗВІДКИ взято інтерпретатор — і чи лишила невдала спроба слід.
+
+    🔴 os error 448 (14.10.2026): uv клав Python у `%APPDATA%\\uv\\python`, і
+    Windows відмовлявся проходити його junction. Інсталятор тепер ставить у
+    теку Нишпорки (`python_dir`), а невдала спроба лишає в Roaming недороблену
+    теку. Про неї кажемо, але не видаляємо: там можуть бути й інтерпретатори
+    інших програм людини.
+    """
+    from nyshporka.setup.update import install_info
+
     v = sys.version_info
     if v < (3, 11):
         return Check("Python", "fail", f"{v.major}.{v.minor} — потрібен 3.11+",
                      "інсталятор приносить свій інтерпретатор")
-    return Check("Python", "ok", f"{v.major}.{v.minor}.{v.micro}")
+    base = Path(sys.base_prefix)
+    pydir = install_info().get("python_dir", "").strip()
+    managed = bool(pydir) and _under(base, Path(pydir))
+    detail = (f"{v.major}.{v.minor}.{v.micro} · {base}"
+              + (" · керована тека Нишпорки" if managed else ""))
+    roaming = _roaming_uv_pythons() if pydir else []
+    if roaming:
+        return Check("Python", "warn",
+                     detail + f" · у {roaming[0].parent} лежать інтерпретатори uv "
+                     f"({', '.join(p.name for p in roaming)}) — імовірно, слід "
+                     "невдалої спроби з os error 448",
+                     "не видаляю сам: там можуть бути інтерпретатори інших програм. "
+                     "Якщо не ваші — `uv python uninstall <версія>` або видаліть теку "
+                     "руками")
+    return Check("Python", "ok", detail)
+
+
+def _under(path: Path, root: Path) -> bool:
+    try:
+        path.resolve().relative_to(root.resolve())
+    except (OSError, ValueError):
+        return False
+    return True
+
+
+def _roaming_uv_pythons() -> list[Path]:
+    """Інтерпретатори uv у типовій теці Windows (Roaming) — лише на Windows."""
+    if sys.platform != "win32" or not os.environ.get("APPDATA"):
+        return []
+    root = Path(os.environ["APPDATA"]) / "uv" / "python"
+    try:
+        return sorted(p for p in root.iterdir() if p.name.startswith("cpython-"))
+    except OSError:
+        return []
 
 
 def _workspace() -> Check:

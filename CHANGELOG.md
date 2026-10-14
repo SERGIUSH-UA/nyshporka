@@ -115,6 +115,23 @@
   (`CODEX_HOME` або `~/.codex`) попереджає, якщо його тека порожня чи
   застаріла, з точною командою. `_drop_skills` знімає лише теки власних
   файлів з обліку: `~/.agents/skills` спільна для всіх скілів Codex.
+- **Windows: Python — у теці Нишпорки, а не в `%APPDATA%\uv\python` (os error
+  448).** На машині з перенаправленим AppData / OneDrive `uv python install`
+  падав: uv робить у Roaming junction на мінорну версію, а Windows його не
+  проходить (ERROR_UNTRUSTED_MOUNT_POINT; astral-sh/uv#19622, #19616, фіксу в
+  uv немає). `windows.ps1` має `-PythonDir` (типово `<Home_>\python`), ставить
+  `UV_PYTHON_INSTALL_DIR` змінною процесу (не постійною — та зачепила б чужі
+  uv) і пише `python_dir=` в `install-info.ini`. Ту саму теку дістає кожен
+  виклик uv Нишпоркою: venv рушіїв (`nysh htr install`, Python 3.11 —
+  інакше інсталятор проходив, а падав `htr install`), `nysh update` і рядок
+  оновлення, `nysh uninstall` (`setup.update.uv_python_env`). Відмова з
+  «os error 448» в інсталятора й у `htr install` дає ДОСЛІВНО ту саму пораду
+  (`UNTRUSTED_MOUNT_HINT`): теку поза профілем через `-PythonDir`. `nysh
+  uninstall` знімає теку інтерпретаторів, але лишає її, поки лишаються рушії
+  (їхній Python там). `nysh doctor` («Python») показує, звідки інтерпретатор і
+  чи це тека Нишпорки, та повідомляє про залишки в `%APPDATA%\uv\python`, не
+  видаляючи їх. `unix.sh` теки не задає свідомо: там немає ні Roaming, ні
+  junction.
 
 ## [0.29.0] — 2026-10-12
 

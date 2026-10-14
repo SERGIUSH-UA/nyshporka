@@ -59,6 +59,12 @@ param(
     # `nysh models get`) — для того, хто поставить їх пізніше сам. Набір
     # `catalog` їх не ставить і без цього прапорця.
     [switch]$NoEngines,
+    # Куди uv ставить керовані інтерпретатори. Порожньо — `<Home_>\python`.
+    # 🔴 Не типовий `%APPDATA%\uv\python`: там uv робить junction на мінорну
+    # версію, і Windows з перенаправленим AppData / OneDrive відмовляється його
+    # проходити — os error 448 (14.10.2026, astral-sh/uv#19622, #19616). Якщо
+    # 448 і в теці профілю — вказати теку поза ним: `-PythonDir D:\Nyshporka\python`.
+    [string]$PythonDir = "",
     # Запуск із майстра `.exe`: консоль зникає разом зі скриптом, тож помилку
     # треба показати вікном, яке переживе консоль.
     [switch]$Wizard
@@ -72,6 +78,10 @@ $CatalogUrl = 'https://github.com/SERGIUSH-UA/nyshporka/releases'
 # рідко, звичайні релізи — щотижня, тож він з часом зсувається за першу сотню.
 $CatalogApi = 'https://api.github.com/repos/SERGIUSH-UA/nyshporka/releases?per_page=100'
 if ($env:NYSH_NO_CATALOG -eq '1') { $NoCatalog = [switch]$true }
+if (-not $PythonDir) { $PythonDir = Join-Path $Home_ 'python' }
+# Дослівно той самий текст, що `UNTRUSTED_MOUNT_HINT` у `setup/update.py`:
+# інсталятор і `nysh htr install` при 448 радять одне.
+$Untrusted448 = 'Windows не довіряє теці, куди uv ставить Python (os error 448: перенаправлений AppData чи OneDrive). Поставте Нишпорку наново з текою інтерпретаторів поза профілем: windows.ps1 -PythonDir D:\Nyshporka\python'
 
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
@@ -236,7 +246,7 @@ if ($DryRun) {
     Say ""
     if ($uvNow) { Say "uv                 уже є: $uvNow" }
     else         { Say "uv                 буде завантажено в $(Join-Path $Home_ 'uv')" }
-    Say "Python 3.12        керований, у теці uv; ні в PATH, ні в реєстрі його не буде"
+    Say "Python 3.12        керований, у $PythonDir; ні в PATH, ні в реєстрі його не буде"
     Say "Нишпорка           $(if ($Source) { $Source } else { "набір $Preset" })"
     Say "                   в ізольованому середовищі інструмента uv"
     Say "команда nysh       $(Join-Path $binGuess 'nysh.exe')"
@@ -379,16 +389,33 @@ Say "⬇ Python 3.12…" DarkGray
 # 0.8, і невідомий прапорець завалив би встановлення на другому кроці.
 $env:UV_PYTHON_INSTALL_BIN = '0'
 $env:UV_PYTHON_INSTALL_REGISTRY = '0'
+# 🔴 Тека інтерпретаторів — наша, неромінгова (див. `-PythonDir`). Змінна
+# процесу, а не постійна змінна користувача: постійна перенаправила б усі
+# `uv python install` людини в теку Нишпорки, а `nysh uninstall` зносив би
+# чужі інтерпретатори. Подальші виклики uv цього скрипта (`uv tool install`,
+# `nysh htr install`) успадковують її звідси, а сама Нишпорка після
+# встановлення бере теку з `python_dir=` в `install-info.ini`.
+# ⚠ Гілка «uv уже є» могла взяти чужий uv будь-якої версії; змінна старша за
+# junction мінорної версії, який і дає 448, тож uv, що його робить, її знає.
+$env:UV_PYTHON_INSTALL_DIR = $PythonDir
+$script:NativeTail.Clear()
 $rc = Invoke-Logged $uv python install 3.12
-if ($rc -ne 0) { throw "не вдалося встановити Python 3.12 (uv повернув $rc)" }
+if ($rc -ne 0) {
+    if (($script:NativeTail -join "`n") -match 'os error 448') { throw $Untrusted448 }
+    throw "не вдалося встановити Python 3.12 (uv повернув $rc)"
+}
 Say "✓ Python" Green
 
 # ── 3. застосунок ────────────────────────────────────────────────────────────
 # `uv tool install` кладе застосунок у власне ізольоване середовище й дає
 # консольну команду. Це саме те, що треба: жодних конфліктів із чужими пакетами.
 Say "⬇ Нишпорка ($Source)…" DarkGray
+$script:NativeTail.Clear()
 $rc = Invoke-Logged $uv tool install --python 3.12 --force $Source
-if ($rc -ne 0) { throw "не вдалося встановити $Source (uv повернув $rc)" }
+if ($rc -ne 0) {
+    if (($script:NativeTail -join "`n") -match 'os error 448') { throw $Untrusted448 }
+    throw "не вдалося встановити $Source (uv повернув $rc)"
+}
 Say "✓ Нишпорка" Green
 
 # ── 3½. де команда й чи можна її набрати ─────────────────────────────────────
@@ -454,7 +481,7 @@ Trace 'bin' $nysh
 # помилка запису не валить встановлення.
 $info = Join-Path $Home_ 'install-info.ini'
 try {
-    @('[nyshporka]', "nysh=$nysh", "uv=$uv", "preset=$Preset") |
+    @('[nyshporka]', "nysh=$nysh", "uv=$uv", "preset=$Preset", "python_dir=$PythonDir") |
         Set-Content -LiteralPath $info -Encoding Unicode
 } catch {
     Say "⚠ не вдалося записати $info — ярлики доведеться створити вручну" Yellow

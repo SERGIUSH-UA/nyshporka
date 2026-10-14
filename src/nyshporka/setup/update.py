@@ -154,6 +154,44 @@ def install_info() -> dict[str, str]:
     return {}
 
 
+#: 🔴 Текст відмови на os error 448 — ДОСЛІВНО той самий, що в
+#: `install/windows.ps1` (тест звіряє): людина, якій інсталятор пройшов, а
+#: впало `nysh htr install`, має побачити ту саму пораду, а не іншу.
+UNTRUSTED_MOUNT_HINT = (
+    "Windows не довіряє теці, куди uv ставить Python (os error 448: "
+    "перенаправлений AppData чи OneDrive). Поставте Нишпорку наново з текою "
+    "інтерпретаторів поза профілем: windows.ps1 -PythonDir D:\\Nyshporka\\python")
+
+
+def untrusted_mount_hint(output: str) -> str:
+    """Порада, якщо вивід uv — це відмова Windows проходити junction (448)."""
+    return UNTRUSTED_MOUNT_HINT if "os error 448" in (output or "") else ""
+
+
+def uv_python_env() -> dict[str, str]:
+    """Оточення для КОЖНОГО виклику uv Нишпоркою — та сама тека Python, що в інсталятора.
+
+    🔴🔴 os error 448 (ERROR_UNTRUSTED_MOUNT_POINT, 14.10.2026, французька
+    Windows): uv кладе керовані інтерпретатори в `%APPDATA%\\uv\\python`
+    (Roaming) і робить там junction на мінорну версію, а Windows відмовляється
+    його проходити (перенаправлений AppData / OneDrive; astral-sh/uv#19622,
+    #19616, фіксу в uv немає). Інсталятор тепер ставить Python у неромінгову
+    теку (`python_dir=` в `install-info.ini`), і ту саму теку мусить бачити
+    кожен наступний виклик uv: інакше інсталятор пройде, а `nysh htr install`
+    (venv рушіїв на іншій мінорній версії) чи оновлення підуть у Roaming і
+    впадуть там само.
+
+    ⚠ Явна передача, а не постійна змінна користувача: та перенаправила б УСІ
+    `uv python install` людини в теку Нишпорки, і `nysh uninstall` знісся б
+    чужі інтерпретатори разом зі своїми.
+    """
+    env = {"UV_PYTHON_INSTALL_BIN": "0", "UV_PYTHON_INSTALL_REGISTRY": "0"}
+    folder = install_info().get("python_dir", "").strip()
+    if folder:
+        env["UV_PYTHON_INSTALL_DIR"] = folder
+    return env
+
+
 #: Ключ у стані користувача: коли востаннє ПИТАЛИ pypi.org.
 STATE_CHECKED = "update_checked"
 
@@ -339,6 +377,12 @@ def command(preset: str = "") -> list[str]:
     return [uv, "tool", "install", "--python", "3.12", "--force", spec]
 
 
+def command_env() -> dict[str, str]:
+    """Оточення для `command()`: без теки інтерпретаторів `uv tool install
+    --force` поставив би Python у Roaming і впав там на 448."""
+    return {**os.environ, **uv_python_env()}
+
+
 def how_to_update(preset: str = "") -> str:
     """Рядок для людини — той самий, що виконає `nysh update`.
 
@@ -358,9 +402,21 @@ def how_to_update(preset: str = "") -> str:
     from nyshporka.htr.view import shell_arg
 
     parts = command(preset)
+    folder = uv_python_env().get("UV_PYTHON_INSTALL_DIR", "") if parts[1:2] == ["tool"] else ""
     if sys.platform == "win32":
-        return _powershell_line(parts)
-    return " ".join(shell_arg(x) for x in parts)
+        line = _powershell_line(parts)
+        if folder:
+            # Рядок, який людина копіює, мусить нести ту саму теку Python, що
+            # й `nysh update` (`command_env`) — інакше 448 повертається.
+            line = f"$env:UV_PYTHON_INSTALL_DIR={_ps_quote(folder)}; " + line
+        return line
+    line = " ".join(shell_arg(x) for x in parts)
+    return f"UV_PYTHON_INSTALL_DIR={shell_arg(folder)} {line}" if folder else line
+
+
+def _ps_quote(x: str) -> str:
+    """Одинарні лапки PowerShell: апостроф у шляху подвоюється."""
+    return "'" + x.replace("'", "''") + "'"
 
 
 def _powershell_line(parts: list[str]) -> str:
