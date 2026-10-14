@@ -692,6 +692,11 @@ def _state_detached(st: RunState, *, as_json: bool) -> None:
     box = data.get("box") if isinstance(data.get("box"), dict) else {}
     console.print(f"  фаза   : {data.get('phase') or '?'}"
                   + (f" · {data.get('verdict')}" if data.get("verdict") else ""))
+    if data.get("detached_how"):
+        how = str(data["detached_how"])
+        # setsid не переживає пісочницю агента (14.10.2026) — це видно тут же.
+        style = "warn" if "setsid" in how else "muted"
+        console.print(f"  [{style}]відчеплено: {escape(how)}[/{style}]")
     if data.get("why"):
         console.print(f"  [muted]{escape(str(data['why']))}[/muted]")
     for case in data.get("cases") or []:

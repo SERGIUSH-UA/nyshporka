@@ -982,6 +982,44 @@ def start(p: Prepared, convoy: Convoy, res: GoResult, say: Callable[..., None], 
     first = convoy.run_ids[0]
     say("detached", f"▶ {session} — стан: `nysh cloud state {first}`, "
                     f"спинити: `nysh cloud stop {first}`")
+    _tell_how_detached(session, convoy, res, say)
+
+
+#: Ознаки способу, що НЕ переживе пісочницю агента (gpurunner ≥ 0.8.1 пише
+#: спосіб у стан наглядача, `detached_how`).
+_FRAGILE_DETACH = ("setsid",)
+
+
+def _tell_how_detached(session: str, convoy: Convoy, res: GoResult,
+                       say: Callable[..., None]) -> None:
+    """Сказати, ЯК наглядача відчепили, — і чи переживе він пісочницю агента.
+
+    🔴 14.10.2026: агент Codex запустив `cloud go` з пісочниці, вердикт був
+    `detached`, а пісочниця після виклику вбила наглядача разом із собою —
+    бокси горіли без нагляду. Старт це не ловить і не може зловити: наглядач
+    живий рівно до кінця виклику. Тому спосіб відчеплення стоїть у рядку
+    `detached` і в записі заходу: setsid тут — пряме попередження. Старий
+    наглядач способу не пише — тоді мовчимо, а не вгадуємо.
+    """
+    try:
+        how = str(state_of_session(session).get("detached_how") or "")
+    except Exception:
+        return
+    if not how:
+        return
+    for run_id in convoy.run_ids:
+        st = ST.load(run_id)
+        if st is not None:
+            st.note("detached_how", how)
+            ST.save(st)
+    say("detached", f"  відчеплено: {how}")
+    if any(mark in how for mark in _FRAGILE_DETACH):
+        warn = ("⚠ наглядач відчеплений setsid: якщо цей виклик ішов із пісочниці "
+                "агента, він загине разом із нею, а машина лишиться горіти. "
+                f"Перевірте ОКРЕМИМ викликом `nysh cloud state {convoy.run_ids[0]}`; "
+                "`cloud go` запускають поза пісочницею.")
+        say("detached", warn)
+        res.why += " " + warn
 
 
 def _workdir() -> Path:

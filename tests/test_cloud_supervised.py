@@ -1825,3 +1825,60 @@ def test_print_go_gives_the_supervisor_the_edition_identity_and_the_old_address(
     assert every("--reuse-key") == ["cases/3-770-1936-01-06.tar", ""]
     assert Path(every("--case")[0]) == stage
     assert Path(every("--case")[1]).name == "kolselo_pyr_1936-01-08_4"
+
+
+# ── спосіб відчеплення ────────────────────────────────────────────────────────
+#
+# 🔴 14.10.2026: `cloud go` з пісочниці агента дав `detached`, а пісочниця після
+# виклику вбила наглядача (setsid його від неї не рятує) — бокси горіли.
+
+
+def test_detached_names_a_fragile_setsid_and_says_how_to_check(
+        space: Path, monkeypatch, fake_gpurunner) -> None:
+    case, _ = _wire(space, monkeypatch)
+    how = "відчеплено setsid — ⚠ НЕ переживе пісочницю агента"
+    fake_gpurunner.set(estimate=ESTIMATE, state={"session": "s", "phase": "starting",
+                                                  "detached_how": how})
+    res = _go(case)
+
+    assert res.verdict == "detached" and res.exit_code == 0, "вердикт і коди ті самі"
+    assert "setsid" in res.why and f"nysh cloud state {res.run_id}" in res.why
+    st = ST.load(res.run_id)
+    assert st is not None
+    assert any(i.get("kind") == "detached_how" and how in str(i.get("detail"))
+               for i in st.incidents)
+
+
+def test_detached_by_a_systemd_unit_is_not_alarming(
+        space: Path, monkeypatch, fake_gpurunner) -> None:
+    case, _ = _wire(space, monkeypatch)
+    fake_gpurunner.set(estimate=ESTIMATE, state={
+        "session": "s", "phase": "starting",
+        "detached_how": "user-юніт systemd gpurunner-htr-s.service"})
+    res = _go(case)
+
+    assert res.verdict == "detached"
+    assert "setsid" not in res.why and "пісочниц" not in res.why
+
+
+def test_an_old_supervisor_without_the_field_changes_nothing(
+        space: Path, monkeypatch, fake_gpurunner) -> None:
+    case, _ = _wire(space, monkeypatch)
+    res = _go(case)          # фейк без стану: `htr state` повертає 1
+    assert res.verdict == "detached" and res.exit_code == 0
+
+
+def test_cloud_state_shows_how_the_supervisor_was_detached(
+        space: Path, monkeypatch, fake_gpurunner) -> None:
+    from typer.testing import CliRunner
+
+    from nyshporka.cloud import cli as C
+
+    case, _ = _wire(space, monkeypatch)
+    res = _go(case)
+    fake_gpurunner.set(estimate=ESTIMATE, state={
+        "session": "s", "phase": "running", "why": "читає",
+        "detached_how": "відчеплено setsid — ⚠ НЕ переживе пісочницю агента"})
+    got = CliRunner().invoke(C.app, ["state", res.run_id])
+    assert got.exit_code == 0, got.output
+    assert "відчеплено setsid" in got.output
