@@ -577,3 +577,90 @@ def test_a_specialist_over_a_reading_goes_beside_it(space: Path, monkeypatch) ->
         "засів сегментації — з теки першого читання"
     assert got.voice is not None and [p.name for p in got.extra_voices] == ["skryba_pp_v3.safetensors"]
     assert any("спеціаліст" in w for w in got.warnings)
+
+
+# ── безшифрова тека: наглядач кладе результат у slug-теку ────────────────────
+def _keyless_case(space: Path, monkeypatch, first_model: str) -> tuple[Path, Path]:
+    """Тека з пробілами в імені; у slug-теці (куди кладе наглядач) уже лежить читання."""
+    import json
+
+    from nyshporka.core.workspace import workspace
+    from nyshporka.htr import run as R
+
+    case = _wire_case(space, monkeypatch, name="1850 UMZ Braclaw 685-3-121")
+    weights = {"latin": space / "skryba_pp_v3.safetensors",
+               "cyrillic": space / "pysar_cyr_v21.pt"}
+    for w in weights.values():
+        w.write_bytes(b"\0")
+    monkeypatch.setattr(R, "pick_model",
+                        lambda script, second_voice=True: (weights[script], None))
+    landing = workspace().htr_reports / "1850-UMZ-Braclaw-685-3-121"
+    landing.mkdir(parents=True)
+    (landing / "_htr_meta.json").write_text(json.dumps({"model": first_model}),
+                                            encoding="utf-8")
+    return case, landing
+
+
+def test_keyless_folder_does_not_overwrite_a_foreign_reading(space: Path,
+                                                             monkeypatch) -> None:
+    """🔴 14.10.2026: `--not-a-case` тека `1850 UMZ Braclaw 685-3-121`. Перевірка
+    «у головній теці чуже письмо» дивилась у теку з пробілами, якої на диску немає,
+    а наглядач клав кирилицю в slug-теку поверх латинського читання Скриби."""
+    from nyshporka.cloud import plan as PL
+
+    case, landing = _keyless_case(space, monkeypatch, "skryba_pp_v3.safetensors")
+    got = PL.build(case, script="cyrillic", out_name=case.name)
+    assert got.out_dir.name == "1850-UMZ-Braclaw-685-3-121-v21"
+    assert got.base_out == landing
+    assert any("іншого письма" in w and landing.name in w for w in got.warnings)
+
+
+def test_keyless_folder_same_script_stays_in_main(space: Path, monkeypatch) -> None:
+    from nyshporka.cloud import plan as PL
+
+    case, _ = _keyless_case(space, monkeypatch, "pysar_cyr_v19.pt")
+    got = PL.build(case, script="cyrillic", out_name=case.name)
+    assert got.out_dir.name == "1850-UMZ-Braclaw-685-3-121" and got.base_out is None
+    assert not any("іншого письма" in w for w in got.warnings)
+
+
+def test_landing_name_mirrors_the_supervisor_slug() -> None:
+    from nyshporka.htr.runname import landing_name
+
+    assert landing_name("1850 UMZ Braclaw 685-3-121") == "1850-UMZ-Braclaw-685-3-121"
+    assert landing_name("op31-spr-7") == "op31-spr-7"
+    assert landing_name("Справа 7") == "Sprava-7"
+
+
+@pytest.mark.parametrize("first_model,sibling", [("skryba_pp_v3.safetensors", True),
+                                                 ("pysar_cyr_v19.pt", False)])
+def test_keyless_folder_gets_the_previous_run_as_a_segmentation_seed(
+        space: Path, monkeypatch, first_model: str, sibling: bool) -> None:
+    """🔴 14.10.2026: 41 тека `--not-a-case` з готовим прогоном Скриби пішли на
+    машину без засіву, бо план шукав попередній прогін у теці з пробілами.
+    `cloud.go` засіває з `plan.base_out or plan.out_dir` — ця тека й має вказувати
+    на справжній прогін, чи то сестринський випадок, чи догін у головну."""
+    import gzip
+    import json
+
+    from PIL import Image
+
+    from nyshporka.cloud import plan as PL
+    from nyshporka.htr import seg as SEG
+
+    case, landing = _keyless_case(space, monkeypatch, first_model)
+    frames = sorted(case.glob("*.jpg"))
+    for f in frames:
+        Image.new("L", (10, 8)).save(f, "JPEG")
+    cache = landing / "data" / "derived" / "htr_seg" / "case"
+    cache.mkdir(parents=True)
+    key = {**SEG.EXPECTED_KEY, "kraken": SEG.EXPECTED_LINEAGE[0]}
+    for f in frames:
+        with gzip.open(cache / f"{f.stem}.seg.json.gz", "wt", encoding="utf-8") as fh:
+            json.dump({"key": key}, fh)
+        (landing / f"{f.stem}.lines.json").write_text(json.dumps({"size": [10, 8]}),
+                                                      encoding="utf-8")
+    got = PL.build(case, script="cyrillic", out_name=case.name)
+    assert (got.base_out is not None) == sibling
+    found = SEG.inspect(case, SEG.frames_of(case), base_out=got.base_out or got.out_dir)
+    assert found.usable and found.covered == 3, found.why

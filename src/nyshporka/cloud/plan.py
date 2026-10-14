@@ -362,7 +362,25 @@ def build(case_dir: str | Path, *, backend: str = "ssh", target: str = "",
     from nyshporka.htr.runname import run_name
 
     stem = out_name or run_name(case, key)
-    base_out = workspace().htr_reports / stem
+    # 🔴 Тека результату — це те, що з імені зробить наглядач (`landing_name`), а
+    # не саме ім'я. Для `spr-7` вони збігаються; для безшифрової теки
+    # `1850 UMZ Braclaw 685-3-121` наглядач кладе результат у
+    # `1850-UMZ-Braclaw-685-3-121`. Доти ми дивились у теку з пробілами, якої на
+    # диску немає, і тому для безшифрових тек (`--not-a-case`) не спрацьовували
+    # ні запобіжник «лежить читання іншого письма» (латинське читання Скриби
+    # затерлось би кирилицею), ні засів сегментації попереднього прогону
+    # (сегментація наново, ~третина часу машини) — 14.10.2026.
+    from nyshporka.cloud.verify import read_meta as _meta_of
+    from nyshporka.htr.runname import landing_name
+
+    reports = workspace().htr_reports
+    # Виняток — справа, прочитана вдома під цим самим «неслужбовим» ім'ям
+    # (кирилична тека, `nysh read`): її читання лежить у теці з іменем як є, і
+    # слід його бачити, а не платити за друге.
+    if not (_meta_of(reports / stem).get("model")
+            and not _meta_of(reports / landing_name(stem)).get("model")):
+        stem = landing_name(stem)
+    base_out = reports / stem
     warnings: list[str] = [bokom] if bokom else []
     # 🔴 Спеціаліст пише в головну теку лише тоді, коли справу ще ніхто не читав.
     # Інакше — у сусідню `-<тег>`: читання бойовою моделлю лишається на місці, а

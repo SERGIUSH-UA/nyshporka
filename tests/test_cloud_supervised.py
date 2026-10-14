@@ -1102,7 +1102,7 @@ def test_a_batch_travels_as_one_plan_to_one_supervisor(space: Path, monkeypatch,
 
     plan = _plan_of(fake_gpurunner)
     assert [c["case_dir"] for c in plan["cases"]] == [str(first), str(second)]
-    assert [c["name"] for c in plan["cases"]] == [first.name, second.name]
+    assert [c["name"] for c in plan["cases"]] == [first.name, "druha"]  # slug, як його робить наглядач
     assert all(c["case_key"] == "ARCH/1/2" for c in plan["cases"])
     # один виклик плану, один наглядач, одна машина
     assert len(fake_gpurunner.called("htr", "plan")) == 1
@@ -1277,7 +1277,7 @@ def test_bookkeeping_indexes_every_case_and_rebuilds_once(space: Path, monkeypat
     builds = [h for h in hooks if h["cmd"][1:] == ["cases", "build"]]
     indexes = [h["cmd"][-1] for h in hooks if "index" in h["cmd"]]
     assert len(builds) == 1
-    assert indexes == [first.name, second.name]
+    assert indexes == [first.name, "druha"]
 
 
 def test_absorb_takes_this_cases_row_not_the_largest(space: Path, monkeypatch) -> None:

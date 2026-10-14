@@ -12,6 +12,7 @@
 """
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +25,37 @@ def base_name(frames_dir: str | Path) -> str:
     """Ім'я справи за текою кадрів: для `…/pages` — батьківська тека."""
     d = Path(frames_dir)
     return d.parent.name if d.name == "pages" else d.name
+
+
+#: Транслітерація імені прогону — ДЗЕРКАЛО `gpurunner.htr.plan_build._TRANSLIT`.
+#: Розбіжність тут дає рівно ту ваду, заради якої функція існує: ми дивимось не в
+#: ту теку, куди наглядач кладе результат.
+_TRANSLIT = {
+    "а": "a", "б": "b", "в": "v", "г": "h", "ґ": "g", "д": "d", "е": "e",
+    "є": "ie", "ж": "zh", "з": "z", "и": "y", "і": "i", "ї": "i", "й": "i",
+    "к": "k", "л": "l", "м": "m", "н": "n", "о": "o", "п": "p", "р": "r",
+    "с": "s", "т": "t", "у": "u", "ф": "f", "х": "kh", "ц": "ts", "ч": "ch",
+    "ш": "sh", "щ": "shch", "ь": "", "ю": "iu", "я": "ia", "ы": "y", "э": "e",
+    "ъ": "", "ё": "e",
+}
+
+
+def landing_name(name: str) -> str:
+    """Ім'я теки, у яку хмарний наглядач насправді кладе результат прогону `name`.
+
+    🔴 Наглядач (`gpurunner htr plan --name`) перетворює ім'я на slug: кирилиця
+    транслітерується, пробіли й усе поза `A-Za-z0-9._-` стає дефісом. Для
+    `spr-7` це тотожність, а для безшифрової теки `1850 UMZ Braclaw 685-3-121`
+    — інша тека (`1850-UMZ-Braclaw-685-3-121`). Перевірка «у головній теці лежить
+    чуже читання» дивилась у тека-з-пробілами, якої на диску немає, тоді як
+    латинське читання лежало в slug-теці (14.10.2026): кириличний забір ліг би
+    поверх нього. Правило — дзеркало `plan_build.case_slug`.
+    """
+    out: list[str] = []
+    for ch in str(name).strip():
+        tr = _TRANSLIT.get(ch.lower())
+        out.append(ch if tr is None else (tr.upper() if ch.isupper() and tr else tr))
+    return re.sub(r"[^A-Za-z0-9._-]+", "-", "".join(out)).strip("-") or "case"
 
 
 def _case_root(frames_dir: str | Path) -> Path:
