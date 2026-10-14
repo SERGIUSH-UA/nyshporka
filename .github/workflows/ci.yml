@@ -86,7 +86,7 @@ jobs:
       - name: айдентика не протухла
         run: uv run python -m nyshporka.brand.gen --check
       - name: pytest
-        run: uv run pytest
+        run: uv run pytest -rs
 
   installable:
     name: ставиться з нуля

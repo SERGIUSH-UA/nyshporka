@@ -318,8 +318,14 @@ def test_engine_venv_is_built_on_the_interpreter_ensure_python_gave(info, monkey
     monkeypatch.setattr(E, "_resolve_tool", lambda uv: uv)
     monkeypatch.setattr(U, "ensure_python", lambda uv, v, env: given)
     monkeypatch.setattr(E, "_run_watching_448", lambda cmd: seen.append(cmd))
-    monkeypatch.setattr(E, "inspect", lambda *a, **k: (_ for _ in ()).throw(StopIteration))
-    with pytest.raises(StopIteration):
+    class Built(Exception):
+        """venv створено — далі не йдемо."""
+
+    def stop(*a, **k):
+        raise Built
+
+    monkeypatch.setattr(E, "inspect", stop)
+    with pytest.raises(Built):
         E.setup(tmp_path / "venv", with_cuda=False)
     assert seen and seen[0][1] == "venv"
     assert seen[0][-2:] == ["--python", given]
