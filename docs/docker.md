@@ -162,7 +162,8 @@ https://raw.githubusercontent.com/SERGIUSH-UA/nyshporka/main/AGENTS.md,
   під іменем `nysh` у теку команд і впише в неї ім'я контейнера й теку;
 * перевірить місток (`nysh doctor`);
 * поставить скіли з контейнера, тієї самої версії, що й Нишпорка, у
-  `nysh/work/.claude/skills`;
+  `nysh/work/.claude/skills` (Claude Code) і `nysh/work/.agents/skills`
+  (Codex);
 * запише в `nysh/work` записку собі на наступні сесії.
 
 Готово, коли `nysh doctor` відповідає з основної системи, а кожного
@@ -174,7 +175,8 @@ https://raw.githubusercontent.com/SERGIUSH-UA/nyshporka/main/AGENTS.md,
       Linux bash є в системі. Codex на Windows кличе PowerShell, і під нього
       обгортки поки немає.
     * Рядок `nysh doctor` «Скіли агента» дивиться всередину контейнера і тут
-      завжди каже «не встановлені». Скіли лежать у `nysh/work/.claude/skills`.
+      завжди каже «не встановлені». Скіли лежать у `nysh/work/.claude/skills`
+      і `nysh/work/.agents/skills`.
     * Моделі, докачані в контейнер (`nysh models get …`), живуть, доки живе
       контейнер. Після `docker rm` їх треба докачати знову.
 
