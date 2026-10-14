@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from pathlib import Path
 
 import pytest
@@ -525,7 +526,7 @@ def test_parallel_blocks_give_the_same_hits(space: Path,
     assert again["cached"] == 2 and again["hits"] == one["hits"]
 
 
-def _hold_write(p: Path, secs: float, started: "threading.Event") -> None:
+def _hold_write(p: Path, secs: float, started: threading.Event) -> None:
     """Друга сесія: тримає замок на запис `secs` секунд і комітить."""
     import sqlite3
     import time

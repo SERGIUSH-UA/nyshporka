@@ -781,7 +781,8 @@ def rebuild(*, rescan: bool = True, fetch_cloud: bool = False,
             upto = int(q["asked"])
             res = _rebuild_now(rescan=rescan, fetch_cloud=fetch_cloud)
 
-            def finish(q: dict[str, Any]) -> None:
+            def finish(q: dict[str, Any], upto: int = upto,
+                       res: dict[str, Any] = res) -> None:
                 q["done"] = max(int(q["done"]), upto)
                 q["result"] = res
 

@@ -156,7 +156,8 @@ def launch(convoy: Convoy, res: GoResult, say: Callable[..., None], *,
            max_rents: int = 0, confirm: bool = False, dry_run: bool = False,
            stage: bool = False,
            transport: str = "auto", max_usd_per_1000: float = 0.0,
-           params: Sequence[str] = ()) -> None:
+           params: Sequence[str] = (), pack_dir: str = "",
+           upload_jobs: int = 0) -> None:
     """Скласти черги, спитати кошторис кожної, ухвалити ОДНЕ рішення й пустити.
 
     🔴 Жодна черга не стартує, поки не порахована вся партія: рішення про гроші
@@ -181,7 +182,8 @@ def launch(convoy: Convoy, res: GoResult, say: Callable[..., None], *,
         say("batch", f"черга {k}: {conv.label()} · {conv.pages} стор.")
         p = SUP.prepare(conv, sub, say, max_hours=max_hours, transport=transport,
                         max_usd_per_1000=max_usd_per_1000, params=params,
-                        assets=assets, stage=dry_run and stage)
+                        assets=assets, stage=dry_run and stage,
+                        pack_dir=pack_dir, upload_jobs=upload_jobs)
         assets = p.assets
         res.notes.extend(n for n in sub.notes if n not in res.notes)
         prepared.append((conv, p, sub))

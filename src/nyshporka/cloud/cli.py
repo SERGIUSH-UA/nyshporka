@@ -1015,6 +1015,14 @@ def cmd_go(
              "значення провайдера). Щільний аркуш — сповідний розпис, клірова "
              "відомість — читається вдвічі довше за метрику, і на типовому "
              "порозі захід виглядає як «машин немає»: беріть 0.30-0.35"),
+    pack_dir: str = typer.Option(
+        "", "--pack-dir",
+        help="де складач пакує архіви кадрів перед заливкою (типово — системний "
+             "TEMP). Потрібна, коли на диску TEMP бракує місця під архів"),
+    upload_jobs: int = typer.Option(
+        0, "--upload-jobs", min=0,
+        help="скільки справ складач пакує й заливає одночасно (0 = типове "
+             "значення складача, 2). `1` — менше місця під пакування"),
     thin: bool = typer.Option(
         False, "--thin",
         help="вести захід самому, не віддаючи наглядачеві: команда триматиме "
@@ -1129,6 +1137,7 @@ def cmd_go(
                 rotate_landscape=rotate_landscape, thin=thin,
                 transport={"store": "r2"}.get(transport, transport),
                 max_usd_per_1000=max_usd_per_1000, params=param,
+                pack_dir=pack_dir, upload_jobs=upload_jobs,
                 boxes=boxes, datacenter_only=datacenter_only, pace=pace,
                 min_pph=min_pph, machine=machine,
                 accept_slow_delivery=accept_slow_delivery, on_event=on_event,

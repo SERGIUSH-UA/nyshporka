@@ -504,6 +504,7 @@ def go(case: str | Sequence[str], *, backend: str = "vast",
        allow_partial: bool = False, rotate_landscape: bool = False,
        thin: bool = False, transport: str = "auto",
        max_usd_per_1000: float = 0.0, params: Sequence[str] = (),
+       pack_dir: str = "", upload_jobs: int = 0,
        boxes: int = 1, datacenter_only: bool = False, pace: str = "",
        min_pph: float = 0.0, machine: int = 0, accept_slow_delivery: bool = False,
        vydannia: str = "", title: str = "", city: str = "",
@@ -554,6 +555,7 @@ def go(case: str | Sequence[str], *, backend: str = "vast",
             allow_partial=allow_partial, rotate_landscape=rotate_landscape,
             thin=thin, transport=transport,
             max_usd_per_1000=max_usd_per_1000, params=tuple(params),
+            pack_dir=pack_dir, upload_jobs=upload_jobs,
             boxes=boxes, datacenter_only=datacenter_only, pace=pace,
             min_pph=min_pph, machine=machine,
             accept_slow_delivery=accept_slow_delivery, tick_sec=tick_sec,
@@ -1063,7 +1065,8 @@ def _go(res: GoResult, cases: tuple[str, ...], say: EventFn,
         boxes: int, tick_sec: float, datacenter_only: bool = False,
         pace: str = "", min_pph: float = 0.0, machine: int = 0,
         accept_slow_delivery: bool = False,
-        edition: dict[str, Any] | None = None) -> None:
+        edition: dict[str, Any] | None = None,
+        pack_dir: str = "", upload_jobs: int = 0) -> None:
     from nyshporka.cloud import plan as PL
 
     # 0. стелі. 🔴 Нуль і від'ємне — відмова ДО всього (аудит 29.09.2026).
@@ -1253,12 +1256,14 @@ def _go(res: GoResult, cases: tuple[str, ...], say: EventFn,
             BT.launch(convoy, res, say, boxes=boxes, budget=budget,
                       max_hours=max_hours, max_rents=max_rents, confirm=confirm,
                       dry_run=dry_run, stage=stage, transport=transport,
-                      max_usd_per_1000=max_usd_per_1000, params=params)
+                      max_usd_per_1000=max_usd_per_1000, params=params,
+                      pack_dir=pack_dir, upload_jobs=upload_jobs)
             return
         SUP.launch(convoy, res, say, budget=budget, max_hours=max_hours,
                    max_rents=max_rents, confirm=confirm, dry_run=dry_run, stage=stage,
                    transport=transport,
-                   max_usd_per_1000=max_usd_per_1000, params=params)
+                   max_usd_per_1000=max_usd_per_1000, params=params,
+                   pack_dir=pack_dir, upload_jobs=upload_jobs)
         return
 
     # 4б. тонкий шлях веде ОДНУ справу: одне з'єднання, один віддалений

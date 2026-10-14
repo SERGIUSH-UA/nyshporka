@@ -249,7 +249,7 @@ def test_queue_fresh_skips_lines_the_arbiters_merged(space: W.Workspace) -> None
     (mdir / "0001.txt").write_text("\n".join(VOICE_A["0001"]) + "\n", encoding="utf-8")
     (mdir / S.META_FILE).write_text(json.dumps(
         {"pages": {"0001": {"conf": {"0": "high", "1": "med", "5": "low"}}}}), encoding="utf-8")
-    spec.drafts = [S.Draft(id=S.MERGE_ID, dir=f"{S.DRAFTS_DIR}/{S.MERGE_ID}")] + list(spec.drafts)
+    spec.drafts = [S.Draft(id=S.MERGE_ID, dir=f"{S.DRAFTS_DIR}/{S.MERGE_ID}"), *spec.drafts]
     reg.save(spec)
     st = ST.Store("demo", ws=space)
     keys = {(it["page"], it["idx"]) for it in st.queue("sequential", fresh=True)["items"]}

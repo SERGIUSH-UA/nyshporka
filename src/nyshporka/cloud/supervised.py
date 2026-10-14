@@ -535,7 +535,8 @@ def launch(convoy: Convoy, res: GoResult, say: Callable[..., None], *,
            max_rents: int = 0,
            confirm: bool = False, dry_run: bool = False, stage: bool = False,
            transport: str = "auto", max_usd_per_1000: float = 0.0,
-           params: Sequence[str] = ()) -> None:
+           params: Sequence[str] = (), pack_dir: str = "",
+           upload_jobs: int = 0) -> None:
     """Підготувати захід і віддати його відчепленому наглядачеві.
 
     `convoy` — справи, що їдуть разом: у кожної своя тека для машини (оригінал
@@ -550,7 +551,8 @@ def launch(convoy: Convoy, res: GoResult, say: Callable[..., None], *,
     # нічого, якщо людина не попросила доставити план наперед (`--stage`).
     p = prepare(convoy, res, say, budget=budget, max_hours=max_hours,
                 transport=transport, max_usd_per_1000=max_usd_per_1000,
-                params=params, stage=dry_run and stage)
+                params=params, stage=dry_run and stage, pack_dir=pack_dir,
+                upload_jobs=upload_jobs)
     if p.cost is None and budget is None:
         raise GoRefused("кошторису немає: наглядач не назвав ні вартості, ні "
                         "ціни з годинами. Назвіть стелю витрат самі: `--budget`.")
@@ -582,7 +584,8 @@ def prepare(convoy: Convoy, res: GoResult, say: Callable[..., None], *,
             budget: float | None = None, max_hours: float | None = None,
             transport: str = "auto",
             max_usd_per_1000: float = 0.0, params: Sequence[str] = (),
-            assets: Path | None = None, stage: bool = False) -> Prepared:
+            assets: Path | None = None, stage: bool = False,
+            pack_dir: str = "", upload_jobs: int = 0) -> Prepared:
     """Скласти план заходу й спитати кошторис — нічого не орендуючи.
 
     `assets` — уже зібраний архів (партія збирає його один раз на всі черги).
@@ -721,6 +724,13 @@ def prepare(convoy: Convoy, res: GoResult, say: Callable[..., None], *,
             out += ["-p", item]
         if plan.max_price_usd_h:
             out += ["--max-price", str(plan.max_price_usd_h)]
+        if pack_dir:
+            # Де складач пакує архіви кадрів (типово — системний TEMP). Без
+            # цього при повному диску TEMP відмова складача радить `--pack-dir`,
+            # якого в нас не було.
+            out += ["--pack-dir", str(pack_dir)]
+        if upload_jobs:
+            out += ["--upload-jobs", str(int(upload_jobs))]
         if max_usd_per_1000:
             # 🔴 Головний поріг вибору машини. Дефолт наглядача калібрований на
             # МЕТРИКАХ; щільний аркуш (сповідка, клірова) читається вдвічі

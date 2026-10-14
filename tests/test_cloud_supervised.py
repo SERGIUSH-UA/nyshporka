@@ -452,6 +452,40 @@ def test_a_staged_dry_run_delivers_the_plan(space: Path, monkeypatch, fake_gpuru
     assert _order(fake_gpurunner) == ["plan", "preflight", "estimate"]
 
 
+def test_pack_dir_and_upload_jobs_reach_the_plan_builder(
+        space: Path, monkeypatch, fake_gpurunner) -> None:
+    """Порада складача при повному TEMP — `--pack-dir`/`--upload-jobs 1`: вони
+    мусять дійти до `htr plan` і в кошторисному, і в доставленому плані."""
+    case, _ = _wire(space, monkeypatch)
+    res = _go(case, pack_dir="E:/pack", upload_jobs=1)
+
+    assert res.verdict == "detached", res.why
+    plans = fake_gpurunner.called("htr", "plan")
+    assert len(plans) == 2
+    for cmd in plans:
+        assert cmd[cmd.index("--pack-dir") + 1] == "E:/pack"
+        assert cmd[cmd.index("--upload-jobs") + 1] == "1"
+
+
+def test_batch_hands_pack_options_to_every_queue_plan(
+        space: Path, monkeypatch, fake_gpurunner) -> None:
+    case, _ = _wire(space, monkeypatch)
+    other = _second_case(space, "справа-2")
+    _go([str(case), str(other)], boxes=2, dry_run=True, pack_dir="E:/pack",
+        upload_jobs=1)
+    plans = fake_gpurunner.called("htr", "plan")
+    assert plans
+    assert all(c[c.index("--pack-dir") + 1] == "E:/pack" for c in plans)
+
+
+def test_without_pack_options_the_builder_keeps_its_defaults(
+        space: Path, monkeypatch, fake_gpurunner) -> None:
+    case, _ = _wire(space, monkeypatch)
+    _go(case)
+    for cmd in fake_gpurunner.called("htr", "plan"):
+        assert "--pack-dir" not in cmd and "--upload-jobs" not in cmd
+
+
 def test_the_start_uploads_after_the_estimate(space: Path, monkeypatch,
                                               fake_gpurunner) -> None:
     case, _ = _wire(space, monkeypatch)
