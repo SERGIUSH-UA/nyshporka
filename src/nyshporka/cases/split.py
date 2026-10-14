@@ -93,6 +93,24 @@ def _rel(p: Path, root: Path) -> str:
         return str(p).replace("\\", "/")
 
 
+def _dir_keys(*dirs: Path) -> list[str]:
+    """Ключі `runs_by_case_dir`, під якими можуть лежати прогони цих тек.
+
+    🪤 Мета прогону пише теку кадрів як її бачив той, хто читав: локальне
+    читання — шляхом через junction (`data/raw/…`), хмарний захід — уже
+    розкритим, шляхом архівного диска, куди junction веде. Мапа ключується
+    `abspath`, який junction не розкриває, тож за одним лише шляхом теки
+    прогони хмари не знаходились, і розбивка ділила кадри без тексту
+    (14.10.2026, ANRM 211-2).
+    """
+    out: list[str] = []
+    for d in dirs:
+        for p in (Path(os.path.abspath(d)), d.resolve()):
+            if str(p) not in out:
+                out.append(str(p))
+    return out
+
+
 def _now() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%S%z")
 
@@ -265,7 +283,7 @@ def plan(case_dir: str | Path, specs: list[tuple[str, str, str]]) -> Plan:
     out = Plan(case_dir=d, frames_dir=frames_dir, names=names, parts=parts,
                old_key=_old_key(d, meta), runs=[])
     by_dir = S.runs_by_case_dir()
-    mains = {str(r.get("name") or "") for key in (str(frames_dir), str(d))
+    mains = {str(r.get("name") or "") for key in _dir_keys(frames_dir, d)
              for r in by_dir.get(key) or []} - {""}
     allruns = set(mains)
     for name in sorted(mains):

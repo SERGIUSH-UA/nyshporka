@@ -690,12 +690,28 @@ def test_runs_list_sees_a_meta_edited_in_place_without_a_reset(space: Path) -> N
     assert by["проба"]["case_key"] == "DAHMO/315/2"
 
 
-def test_runs_cache_is_dropped_with_the_library(space: Path) -> None:
+def test_new_library_redecorates_rows_without_rereading_metas(space: Path, monkeypatch) -> None:
+    """Перезбірка бібліотеки не скидає кеш переліку: шифра й кадри в рядку
+    оновлюються, а мету прогону вдруге не читають. Доти кожен `nysh case`
+    коштував наступній команді перечитування всіх мет (10+ хв на 11 тис.)."""
     from nyshporka import htr_store as S
+    from nyshporka import library as L
 
-    S._runs_cache_write({"x": {"stamp": "1", "row": {"name": "x"}}}, "lib-1")
-    assert S._runs_cache_read("lib-1") == {"x": {"stamp": "1", "row": {"name": "x"}}}
-    assert S._runs_cache_read("lib-2") == {}
+    monkeypatch.setattr(L, "describe_case", lambda _p: {"shifra": "ДАХмО 315-1-1", "frames": 5})
+    monkeypatch.setattr(S, "_canon_stamp", lambda: ("lib-1", ""))
+    S._RUNS_CACHE = None
+    row = next(r for r in S.list_cases() if r["name"] == "проба")
+    assert (row["shifra"], row["frames"]) == ("ДАХмО 315-1-1", 5)
+
+    def no_meta(_name: str) -> None:
+        raise AssertionError("мету перечитано, хоча змінилась лише бібліотека")
+
+    monkeypatch.setattr(S, "load_meta", no_meta)
+    monkeypatch.setattr(L, "describe_case", lambda _p: {"shifra": "ДАХмО 315-1-2", "frames": 7})
+    monkeypatch.setattr(S, "_canon_stamp", lambda: ("lib-2", ""))
+    S._RUNS_CACHE = None
+    row = next(r for r in S.list_cases() if r["name"] == "проба")
+    assert (row["shifra"], row["frames"]) == ("ДАХмО 315-1-2", 7)
 
 
 

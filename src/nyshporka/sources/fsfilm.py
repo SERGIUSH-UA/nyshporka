@@ -82,6 +82,8 @@ def _gunzip_capped(blob: bytes, cap: int) -> bytes:
 STORAGE_BASE = "https://geno-dbase.ru/storage"
 MEDIA_PREFIX = "/media/mihailo"
 SOURCES_TTL = 24 * 3600
+#: тайм-аут єдиної спроби оновити СТАРИЙ перелік регіонів — див. `sources`
+STALE_REFRESH_S = 15.0
 
 #: «Л. 132-223», «Л. 457-…», «Л. 137».
 RANGE_RE = re.compile(r"Л\.\s*(\d+)\s*(?:[-–]\s*(\d+|…|\.\.\.)?)?")
@@ -265,13 +267,24 @@ class FilmMirrorSource:
         if self._sources is not None and not refresh:
             return self._sources
         cached = self.cache_dir / "sources.json"
-        if not refresh and cached.is_file() and \
-                time.time() - cached.stat().st_mtime < SOURCES_TTL:
+        have = cached.is_file()
+        if not refresh and have and time.time() - cached.stat().st_mtime < SOURCES_TTL:
             self._sources = json.loads(cached.read_text(encoding="utf-8"))
             return self._sources
+        # 🔴 Перелік регіонів — лише карта «регіон → сховище», і міняється він
+        # рідко, а кадри йдуть з іншого хоста. Коли старий перелік є, сайт-каталог
+        # питається ОДНІЄЮ короткою спробою: звичайний клієнт на мовчазному хості
+        # робить кілька спроб по 15 + 60 с, і `nysh get fsfilm` висів десятки
+        # хвилин, хоча сховище кадрів було живе (14.10.2026, fsfiles.ru мовчав).
+        http = self.http
+        if have and type(http) is Fetcher:
+            http = Fetcher(delay=0.0, timeout=STALE_REFRESH_S, attempts=1)
         try:
-            html = self.http.get(SPA_URL).text
+            html = http.get(SPA_URL).text
         except HttpError as exc:
+            if have:
+                self._sources = json.loads(cached.read_text(encoding="utf-8"))
+                return self._sources
             raise SourceError(_dzerkalo_movchyt("перелік регіонів", exc)) from exc
         self._sources = parse_sources(html)
         self.cache_dir.mkdir(parents=True, exist_ok=True)

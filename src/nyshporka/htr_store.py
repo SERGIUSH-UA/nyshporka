@@ -681,8 +681,18 @@ def list_cases() -> list[dict[str, Any]]:
             continue
         hit = entries.get(name)
         if hit and hit.get("stamp") == mstamp and isinstance(hit.get("row"), dict):
-            if not hit["row"].get("superseded"):
-                out.append(dict(hit["row"]))
+            row = hit["row"]
+            if not row.get("superseded") and hit.get("lib") != stamp[3]:
+                # 🔴 Змінилась бібліотека, а не мета: з неї в рядку лише шифра,
+                # назва, кадри й канонічний ключ. Перерахувати їх — мілісекунди;
+                # перечитати мету — секунди на прогін. Доти кожен `nysh case`
+                # скидав кеш цілком, і наступна команда читала ~11 тис. мет
+                # 10+ хв (14.10.2026: розбивка двох плівок — по 10 хв на кожну).
+                row = _decorate(dict(row), describe_case)
+                entries[name] = {"stamp": mstamp, "lib": stamp[3], "row": row}
+                changed = True
+            if not row.get("superseded"):
+                out.append(dict(row))
             continue
         changed = True
         meta = load_meta(name)
@@ -694,39 +704,25 @@ def list_cases() -> list[dict[str, Any]]:
             # сторінки лежать прогонами частин. У переліку він дав би кожен
             # хіт пошуку двічі й перекрив би знаменник справи. Відсів тут — від
             # нього успадковують пошук, віддача, пара голосів і покриття.
-            entries[name] = {"stamp": mstamp, "row": {"name": name, "superseded": True}}
+            entries[name] = {"stamp": mstamp, "lib": stamp[3],
+                             "row": {"name": name, "superseded": True}}
             continue
-        case = None
-        # Шифра — прикраса переліку: прогін без розв'язаної справи лишається
-        # видимим, просто без неї. Падати тут означало б сховати цілий перелік
-        # через один нерозв'язаний шлях.
-        with contextlib.suppress(Exception):
-            case = describe_case(meta.get("case_dir") or "")
-        out.append({
+        out.append(_decorate({
             "name": name,
             "case_dir": meta.get("case_dir") or "",
             # спільні кадри рахуються лише за текою в просторі — див. `frames_dir_key`
             "frames_key": frames_dir_key(meta.get("case_dir") or ""),
             # Прийнятий із пулу прогін справи в бібліотеці часто не має (кадрів
             # нема), але шифру несе паспорт пакета — без неї серія
-            # («RGIA 592-25») не бачила жодного такого прогону.
-            "shifra": (case or {}).get("shifra") or _shared_shifra(meta),
-            "title": (case or {}).get("title") or "",
+            # («RGIA 592-25») не бачила жодного такого прогону. Шифра з мети
+            # лежить окремо: поля з бібліотеки перераховує `_decorate`.
+            "shared_shifra": _shared_shifra(meta) or "",
             # 🔴 Шифра З мети, а не з бібліотеки. Це різні числа: `shifra` вище —
             # прикраса переліку, яку дав резолвер, а `case_key` — те, що прогін
             # несе В собі. Саме за ним справу впізнає будь-хто поза цим
             # простором, і саме його порожність робить прогін нічиїм: текст є,
             # а чия це справа — невідомо, і зшивати доводиться руками.
             "case_key": (meta.get("case_key") or "").strip(),
-            # Той самий ключ у канонічній формі — для звірки «чи не суперечать
-            # ключі» без `resolve_case` на кожен прогін (`same_frames`, в'ювер).
-            "case_canon": _canon_case_key((meta.get("case_key") or "").strip()),
-            # 🔴 Кадри справи — знаменник покриття, і їдуть вони поруч із
-            # чисельником навмисно. Без них лишається саме число прочитаних
-            # сторінок, а поділити його нема на що: покриття, пораховане від
-            # себе самого, завжди дорівнює 100% і читається як «прочитано
-            # все». Порожньо тут законне — опису справи може не бути.
-            "frames": int((case or {}).get("frames") or 0),
             "pages_done": len(meta.get("pages") or {}),
             "failed": len(meta.get("failed") or []),
             "done": bool(meta.get("done")),
@@ -753,8 +749,8 @@ def list_cases() -> list[dict[str, Any]]:
             # читається в рази інакше, а на процесорі — на порядок.
             "sec_median": _sec_median(meta),
             "updated": meta.get("updated") or "",
-        })
-        entries[name] = {"stamp": mstamp, "row": dict(out[-1])}
+        }, describe_case))
+        entries[name] = {"stamp": mstamp, "lib": stamp[3], "row": dict(out[-1])}
     gone = [n for n in entries if n not in seen]
     for n in gone:
         entries.pop(n, None)
@@ -763,6 +759,33 @@ def list_cases() -> list[dict[str, Any]]:
     if changed or gone:
         _runs_cache_write(entries, stamp[3])
     return out
+
+
+def _decorate(row: dict[str, Any], describe_case: Any) -> dict[str, Any]:
+    """Поля рядка, що беруться з бібліотеки справ і реєстру колізій опису.
+
+    Окремо від решти рядка навмисно: решта залежить лише від мети прогону й
+    кешується за її штампом, а ці поля старіють щоразу, коли змінюється
+    бібліотека, — і перераховуються без читання мети.
+    """
+    case = None
+    # Шифра — прикраса переліку: прогін без розв'язаної справи лишається
+    # видимим, просто без неї. Падати тут означало б сховати цілий перелік
+    # через один нерозв'язаний шлях.
+    with contextlib.suppress(Exception):
+        case = describe_case(row.get("case_dir") or "")
+    row["shifra"] = (case or {}).get("shifra") or row.get("shared_shifra") or ""
+    row["title"] = (case or {}).get("title") or ""
+    # Той самий ключ у канонічній формі — для звірки «чи не суперечать
+    # ключі» без `resolve_case` на кожен прогін (`same_frames`, в'ювер).
+    row["case_canon"] = _canon_case_key(str(row.get("case_key") or "").strip())
+    # 🔴 Кадри справи — знаменник покриття, і їдуть вони поруч із
+    # чисельником навмисно. Без них лишається саме число прочитаних
+    # сторінок, а поділити його нема на що: покриття, пораховане від
+    # себе самого, завжди дорівнює 100% і читається як «прочитано
+    # все». Порожньо тут законне — опису справи може не бути.
+    row["frames"] = int((case or {}).get("frames") or 0)
+    return row
 
 
 def _runs_cache_path() -> Path:
@@ -774,17 +797,18 @@ def _runs_cache_path() -> Path:
 #: рядки без нього як рядки, у яких це поле порожнє. Різниця між «немає» і
 #: «порожньо» тут не косметична: саме нею позначається чужий прогін.
 #: 6 — `case_canon` у формі ключа з описом (0.22).
-ROW_SCHEMA = 6
+#: 7 — `shared_shifra` і штамп бібліотеки на рядок, а не на файл (0.29).
+ROW_SCHEMA = 7
 
 
 def _runs_cache_read(lib: str = "") -> dict[str, dict[str, Any]]:
-    """Кеш по прогонах; чужа бібліотека — кеш порожній: шифра й кадри в рядках
-    беруться з неї, і після її перезбірки вони старіли, поки мета не зміниться."""
+    """Кеш по прогонах. Штамп бібліотеки — на кожному рядку (`lib`): чужа
+    бібліотека не скидає кеш, а лише перераховує поля з неї (`_decorate`)."""
     try:
         data = json.loads(_runs_cache_path().read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
-    if not isinstance(data, dict) or str(data.get("lib") or "") != lib:
+    if not isinstance(data, dict):
         return {}
     if int(data.get("row_schema") or 1) != ROW_SCHEMA:
         return {}

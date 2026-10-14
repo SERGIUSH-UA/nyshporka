@@ -460,3 +460,39 @@ def test_prychyna_liahaie_v_pasport(tmp_path: Path) -> None:
 
     meta = json.loads((tmp_path / "meta.json").read_text(encoding="utf-8"))
     assert meta["fetch_causes"] == {"denied": 1} and meta["fetch_state"] == "empty"
+
+
+def test_stale_region_list_survives_a_silent_catalogue(tmp_path: Path, monkeypatch) -> None:
+    """Сайт-каталог мовчить, а старий перелік регіонів є — команда бере його
+    після ОДНІЄЇ короткої спроби, а не висить на повторах (14.10.2026)."""
+    import json
+    import os
+
+    from nyshporka.sources import http as H
+
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    old = [{"name": "Молдова", "slug": "moldova", "root_id": "/x/", "url": "u"}]
+    (cache / "sources.json").write_text(json.dumps(old, ensure_ascii=False), encoding="utf-8")
+    os.utime(cache / "sources.json", (1, 1))          # старший за добу
+    tries: list[tuple[float, int]] = []
+
+    def silent(self: Any, url: str, *a: Any, **k: Any) -> Any:
+        tries.append((self.timeout, self.attempts))
+        raise H.HttpError("ConnectTimeout")
+
+    monkeypatch.setattr(H.Fetcher, "get", silent)
+    s = FilmMirrorSource(cache_dir=cache)
+    assert s.sources() == old
+    assert tries == [(15.0, 1)]
+
+
+def test_no_region_list_and_silent_catalogue_is_an_error(tmp_path: Path, monkeypatch) -> None:
+    from nyshporka.sources import http as H
+
+    def silent(self: Any, url: str, *a: Any, **k: Any) -> Any:
+        raise H.HttpError("ConnectTimeout")
+
+    monkeypatch.setattr(H.Fetcher, "get", silent)
+    with pytest.raises(SourceError):
+        FilmMirrorSource(cache_dir=tmp_path).sources()

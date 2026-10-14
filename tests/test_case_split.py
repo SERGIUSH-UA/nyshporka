@@ -388,3 +388,21 @@ def test_karta_z_faila(space: Path, zbirka: Path) -> None:
     assert SPL.parse_part("926 = 0001.jpg .. 0003.jpg") == MAP[0]
     with pytest.raises(SPL.SplitError, match="чекаю"):
         SPL.parse_part("926:0001-0003")
+
+
+@pytest.mark.skipif(os.name != "nt", reason="junction — лише Windows")
+def test_kliuchi_teky_cherez_junction_i_rozkryti(tmp_path: Path) -> None:
+    """Хмарний захід пише в мету розкритий шлях архівного диска, локальний — через
+    junction (data/raw/…). Розбивка мусить знаходити прогони за обома."""
+    import _winapi
+
+    from nyshporka.cases.split import _dir_keys
+
+    real = tmp_path / "archive" / "plivka"
+    real.mkdir(parents=True)
+    link = tmp_path / "raw" / "plivka"
+    link.parent.mkdir()
+    _winapi.CreateJunction(str(real), str(link))
+    keys = _dir_keys(link)
+    assert str(Path(os.path.abspath(link))) in keys
+    assert str(real.resolve()) in keys
