@@ -551,7 +551,10 @@ table.kv td { word-break: break-word; }
    заразом означало б зламати те, чого ніхто не просив. */
 header .tabs { margin-left: .8rem; }
 header .lang { margin-left: 0; }
-header .lang:first-of-type { margin-left: auto; }
+header select.lang { margin-left: auto; }
+/* Перемикач мов — випадний список, а не кнопка: мов сім, а не дві. */
+select.lang { font-size: .9rem; color: var(--fg-3); background: none; border: 0; }
+select.lang option { background: var(--bg); color: var(--fg); }
 
 /* ── Чекліст першої сесії ──────────────────────────────────────────────────
    Рядок кроку — сітка, а не таблиця: підпис «чому» під назвою мусить займати

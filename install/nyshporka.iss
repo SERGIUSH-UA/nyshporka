@@ -95,9 +95,129 @@ Compression=lzma2/max
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 LicenseFile=..\LICENSE
+; Мова майстра — за мовою інтерфейсу Windows; вікно вибору лише тоді, коли
+; такої мови тут немає.
+ShowLanguageDialog=auto
+; Картинки — з растру бренду, без тексту (майстер семимовний); збирає
+; `tools/installer_images.py`. Кілька розмірів — Inno бере свій під масштаб екрана.
+WizardImageFile=img\wizard-164x314.png,img\wizard-192x386.png,img\wizard-246x459.png,img\wizard-273x556.png,img\wizard-328x604.png,img\wizard-355x700.png,img\wizard-410x797.png
+WizardSmallImageFile=img\small-55x55.png,img\small-64x68.png,img\small-83x80.png,img\small-92x97.png,img\small-110x106.png,img\small-119x123.png,img\small-138x140.png
 
 [Languages]
+; 🌐 Ті самі мови, що на порталі й у консолі (`nyshporka-online/app/i18n.py`,
+; `KATALOHY`). Румунської серед офіційних перекладів Inno немає — файл узято
+; з неофіційних (jrsoftware/issrc, Files/Languages/Unofficial) і покладено поруч.
+; Російська перекладена, але вимкнена, як на порталі (`VYMKNENI`):
+;   iscc install\nyshporka.iss /DWITH_RU
+;
+; 🔴 Мова першою — типова, коли мову Windows не впізнано.
 Name: "ukrainian"; MessagesFile: "compiler:Languages\Ukrainian.isl"
+Name: "english"; MessagesFile: "compiler:Default.isl"
+Name: "polish"; MessagesFile: "compiler:Languages\Polish.isl"
+Name: "romanian"; MessagesFile: "lang\Romanian.isl"
+Name: "french"; MessagesFile: "compiler:Languages\French.isl"
+Name: "german"; MessagesFile: "compiler:Languages\German.isl"
+#ifdef WITH_RU
+Name: "russian"; MessagesFile: "compiler:Languages\Russian.isl"
+#endif
+
+[CustomMessages]
+; Власні написи майстра. Ярлики, завдання й «Запустити» беруть готові
+; повідомлення самих мовних файлів Inno ({cm:CreateDesktopIcon} тощо).
+; `%n` — новий рядок, `%1` — підстановка FmtMessage.
+ukrainian.AppComment=Читання рукописних архівних справ
+ukrainian.PresetTitle=Що ставимо
+ukrainian.PresetSub=Нишпорку ставлять дуже різні люди.
+ukrainian.PresetDesc=Змінити відповідь можна будь-коли командою «nysh sections» — перевстановлювати нічого не доведеться.
+ukrainian.PresetCatalog=Каталоги архівів: де шукати метрики свого села.%nЛегкий набір, без рушіїв читання.
+ukrainian.PresetResearcher=Каталоги + читання рукопису й пошук у прочитаному.%nРушії читання під вашу відеокарту: 2.5–4 ГБ і кілька хвилин.
+ukrainian.UnknownPreset=Невідомий набір «%1».%nМожна: catalog | amateur | researcher | lab
+ukrainian.Installing=Ставимо Нишпорку — це може зайняти кілька хвилин…
+ukrainian.NoPowerShell=Не вдалося запустити PowerShell. Установлення перервано.
+ukrainian.NoErrorText=Текст помилки не зберігся. Журнал: %1
+ukrainian.AdminHint=Якщо причина вище не названа — спробуйте запустити інсталятор правою кнопкою миші → «Запустити від імені адміністратора». Тоді все стане в профіль того облікового запису, від імені якого запущено.
+ukrainian.InstallFailed=Установлення не завершилось (код %1).
+ukrainian.NoCommand=Нишпорка встановилась, але не сказала, де опинилась команда.%nНапишіть, будь ласка, на %1
+english.AppComment=Reading handwritten archival records
+english.PresetTitle=What to install
+english.PresetSub=Very different people install Nyshporka.
+english.PresetDesc=You can change the answer at any time with the “nysh sections” command — nothing needs to be reinstalled.
+english.PresetCatalog=Archive catalogs: where to look for your village's registers.%nLight set, no reading engines.
+english.PresetResearcher=Catalogs + reading handwriting and searching what was read.%nReading engines for your graphics card: 2.5–4 GB and a few minutes.
+english.UnknownPreset=Unknown preset “%1”.%nAllowed: catalog | amateur | researcher | lab
+english.Installing=Installing Nyshporka — this may take a few minutes…
+english.NoPowerShell=Could not start PowerShell. Installation aborted.
+english.NoErrorText=The error text was not saved. Log: %1
+english.AdminHint=If the cause is not named above, try starting the installer with a right click → “Run as administrator”. Everything will then go into the profile of the account it was started as.
+english.InstallFailed=Installation did not finish (code %1).
+english.NoCommand=Nyshporka was installed, but did not say where the command ended up.%nPlease write to %1
+polish.AppComment=Odczyt rękopiśmiennych dokumentów archiwalnych
+polish.PresetTitle=Co instalujemy
+polish.PresetSub=Nyshporkę instalują bardzo różni ludzie.
+polish.PresetDesc=Odpowiedź można zmienić w każdej chwili poleceniem „nysh sections” — nic nie trzeba instalować od nowa.
+polish.PresetCatalog=Katalogi archiwów: gdzie szukać ksiąg metrykalnych swojej wsi.%nLekki zestaw, bez silników odczytu.
+polish.PresetResearcher=Katalogi + odczyt rękopisów i wyszukiwanie w odczytanym.%nSilniki odczytu pod Twoją kartę graficzną: 2,5–4 GB i kilka minut.
+polish.UnknownPreset=Nieznany zestaw „%1”.%nDostępne: catalog | amateur | researcher | lab
+polish.Installing=Instalujemy Nyshporkę — to może potrwać kilka minut…
+polish.NoPowerShell=Nie udało się uruchomić PowerShell. Instalacja przerwana.
+polish.NoErrorText=Tekst błędu nie został zapisany. Dziennik: %1
+polish.AdminHint=Jeśli przyczyna nie jest wymieniona powyżej, uruchom instalator prawym przyciskiem myszy → „Uruchom jako administrator”. Wszystko trafi wtedy do profilu konta, z którego go uruchomiono.
+polish.InstallFailed=Instalacja nie została ukończona (kod %1).
+polish.NoCommand=Nyshporka została zainstalowana, ale nie podała, gdzie jest polecenie.%nNapisz proszę na %1
+romanian.AppComment=Citirea dosarelor de arhivă scrise de mână
+romanian.PresetTitle=Ce instalăm
+romanian.PresetSub=Nyshporka este instalată de oameni foarte diferiți.
+romanian.PresetDesc=Răspunsul poate fi schimbat oricând cu comanda „nysh sections” — nu trebuie reinstalat nimic.
+romanian.PresetCatalog=Cataloagele arhivelor: unde să căutați registrele satului dumneavoastră.%nSet ușor, fără motoare de citire.
+romanian.PresetResearcher=Cataloage + citirea manuscriselor și căutare în ce a fost citit.%nMotoare de citire pentru placa video: 2,5–4 GB și câteva minute.
+romanian.UnknownPreset=Set necunoscut „%1”.%nPosibile: catalog | amateur | researcher | lab
+romanian.Installing=Se instalează Nyshporka — poate dura câteva minute…
+romanian.NoPowerShell=Nu s-a putut porni PowerShell. Instalarea a fost întreruptă.
+romanian.NoErrorText=Textul erorii nu s-a păstrat. Jurnal: %1
+romanian.AdminHint=Dacă cauza nu este numită mai sus, încercați să porniți programul de instalare cu clic dreapta → „Executare ca administrator”. Atunci totul va merge în profilul contului cu care a fost pornit.
+romanian.InstallFailed=Instalarea nu s-a încheiat (cod %1).
+romanian.NoCommand=Nyshporka a fost instalată, dar nu a spus unde se află comanda.%nScrieți, vă rugăm, la %1
+french.AppComment=Lecture de dossiers d'archives manuscrits
+french.PresetTitle=Que faut-il installer
+french.PresetSub=Nyshporka est installée par des personnes très différentes.
+french.PresetDesc=Vous pouvez changer cette réponse à tout moment avec la commande « nysh sections » — rien à réinstaller.
+french.PresetCatalog=Catalogues d'archives : où chercher les registres de votre village.%nVersion légère, sans moteurs de lecture.
+french.PresetResearcher=Catalogues + lecture des manuscrits et recherche dans ce qui a été lu.%nMoteurs de lecture pour votre carte graphique : 2,5–4 Go et quelques minutes.
+french.UnknownPreset=Profil inconnu « %1 ».%nPossibles : catalog | amateur | researcher | lab
+french.Installing=Installation de Nyshporka — cela peut prendre quelques minutes…
+french.NoPowerShell=Impossible de lancer PowerShell. Installation interrompue.
+french.NoErrorText=Le texte de l'erreur n'a pas été conservé. Journal : %1
+french.AdminHint=Si la cause n'est pas indiquée plus haut, essayez de lancer l'installeur par clic droit → « Exécuter en tant qu'administrateur ». Tout ira alors dans le profil du compte avec lequel il a été lancé.
+french.InstallFailed=L'installation ne s'est pas terminée (code %1).
+french.NoCommand=Nyshporka est installée, mais n'a pas indiqué où se trouve la commande.%nÉcrivez-nous, s'il vous plaît, à %1
+german.AppComment=Lesen handschriftlicher Archivakten
+german.PresetTitle=Was wird installiert
+german.PresetSub=Nyshporka wird von sehr unterschiedlichen Menschen installiert.
+german.PresetDesc=Die Antwort lässt sich jederzeit mit dem Befehl „nysh sections“ ändern — neu installieren müssen Sie nichts.
+german.PresetCatalog=Archivkataloge: wo Sie die Kirchenbücher Ihres Dorfes finden.%nLeichtes Set, ohne Leseengines.
+german.PresetResearcher=Kataloge + Handschriften lesen und im Gelesenen suchen.%nLeseengines für Ihre Grafikkarte: 2,5–4 GB und einige Minuten.
+german.UnknownPreset=Unbekanntes Set „%1“.%nMöglich: catalog | amateur | researcher | lab
+german.Installing=Nyshporka wird installiert — das kann einige Minuten dauern…
+german.NoPowerShell=PowerShell konnte nicht gestartet werden. Installation abgebrochen.
+german.NoErrorText=Der Fehlertext wurde nicht gespeichert. Protokoll: %1
+german.AdminHint=Wenn die Ursache oben nicht genannt ist, starten Sie den Installer per Rechtsklick → „Als Administrator ausführen“. Dann landet alles im Profil des Kontos, unter dem er gestartet wurde.
+german.InstallFailed=Die Installation wurde nicht abgeschlossen (Code %1).
+german.NoCommand=Nyshporka wurde installiert, hat aber nicht gemeldet, wo der Befehl liegt.%nBitte schreiben Sie an %1
+#ifdef WITH_RU
+russian.AppComment=Чтение рукописных архивных дел
+russian.PresetTitle=Что ставим
+russian.PresetSub=Нышпорку ставят очень разные люди.
+russian.PresetDesc=Изменить ответ можно в любой момент командой «nysh sections» — переустанавливать ничего не придётся.
+russian.PresetCatalog=Каталоги архивов: где искать метрики своего села.%nЛёгкий набор, без движков чтения.
+russian.PresetResearcher=Каталоги + чтение рукописей и поиск по прочитанному.%nДвижки чтения под вашу видеокарту: 2.5–4 ГБ и несколько минут.
+russian.UnknownPreset=Неизвестный набор «%1».%nМожно: catalog | amateur | researcher | lab
+russian.Installing=Ставим Нышпорку — это может занять несколько минут…
+russian.NoPowerShell=Не удалось запустить PowerShell. Установка прервана.
+russian.NoErrorText=Текст ошибки не сохранился. Журнал: %1
+russian.AdminHint=Если причина выше не названа — попробуйте запустить установщик правой кнопкой мыши → «Запуск от имени администратора». Тогда всё встанет в профиль той учётной записи, от имени которой он запущен.
+russian.InstallFailed=Установка не завершилась (код %1).
+russian.NoCommand=Нышпорка установилась, но не сказала, где оказалась команда.%nНапишите, пожалуйста, на %1
+#endif
 
 [Files]
 ; 🔴 `windows.ps1` кладеться ПОБАЙТОВО, разом із BOM. Без BOM Windows
@@ -118,14 +238,14 @@ Source: "{#CatalogZip}"; Flags: dontcopy
 Source: "..\src\nyshporka\brand\data\assets\nyshporka.ico"; DestDir: "{app}"; Flags: ignoreversion
 
 [Tasks]
-Name: "desktopicon"; Description: "Створити ярлик на робочому столі"; GroupDescription: "Додатково:"
+Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
 
 [Icons]
 ; ⚠ Ціль обчислюється на льоту: `nysh.exe` кладе uv, і тека налаштовується
 ; (`UV_TOOL_BIN_DIR`, `XDG_BIN_HOME`), тож на етапі збірки шляху не знає ніхто.
 ; Його лишає `windows.ps1` у `install-info.ini` — див. `GetNyshExe` нижче.
-Name: "{group}\{#AppName}"; Filename: "{code:GetNyshExe}"; Parameters: "serve"; WorkingDir: "{app}"; IconFilename: "{app}\nyshporka.ico"; Comment: "Читання рукописних архівних справ"
-Name: "{group}\Видалити {#AppName}"; Filename: "{uninstallexe}"
+Name: "{group}\{#AppName}"; Filename: "{code:GetNyshExe}"; Parameters: "serve"; WorkingDir: "{app}"; IconFilename: "{app}\nyshporka.ico"; Comment: "{cm:AppComment}"
+Name: "{group}\{cm:UninstallProgram,{#AppName}}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#AppName}"; Filename: "{code:GetNyshExe}"; Parameters: "serve"; WorkingDir: "{app}"; IconFilename: "{app}\nyshporka.ico"; Tasks: desktopicon
 
 [Run]
@@ -134,7 +254,7 @@ Name: "{autodesktop}\{#AppName}"; Filename: "{code:GetNyshExe}"; Parameters: "se
 ; назавжди, і виглядало б це як зависле встановлення.
 ; Браузер відкриває сам застосунок — `serve` робить це через секунду після
 ; старту, тож глушити його `--no-browser` не треба.
-Filename: "{code:GetNyshExe}"; Parameters: "serve"; WorkingDir: "{app}"; Description: "Запустити {#AppName}"; Flags: nowait postinstall skipifsilent
+Filename: "{code:GetNyshExe}"; Parameters: "serve"; WorkingDir: "{app}"; Description: "{cm:LaunchProgram,{#AppName}}"; Flags: nowait postinstall skipifsilent
 
 [UninstallDelete]
 ; 🔴 Перелік — дзеркало `HOME_OWNED` у `setup/uninstall.py`: усе, що
@@ -168,16 +288,12 @@ begin
   // кілька хвилин чекання. Типово легкий, бо найперший відвідувач приходить із
   // питанням «де метрики мого села», а не зі сканами й відеокартою.
   PresetPage := CreateInputOptionPage(wpSelectTasks,
-    'Що ставимо', 'Нишпорку ставлять дуже різні люди.',
-    'Змінити відповідь можна будь-коли командою «nysh sections» — ' +
-    'перевстановлювати нічого не доведеться.',
-    True, False);
-  PresetPage.Add('Каталоги архівів: де шукати метрики свого села.' + #13#10 +
-    'Легкий набір, без рушіїв читання.');
+    CustomMessage('PresetTitle'), CustomMessage('PresetSub'),
+    CustomMessage('PresetDesc'), True, False);
+  PresetPage.Add(CustomMessage('PresetCatalog'));
   // Рушії читання й моделі цей варіант доставляє сам (`windows.ps1`, крок 4½),
   // а torch підбирає під відеокарту NVIDIA, якщо драйвер її показує.
-  PresetPage.Add('Каталоги + читання рукопису й пошук у прочитаному.' + #13#10 +
-    'Рушії читання під вашу відеокарту: 2.5–4 ГБ і кілька хвилин.');
+  PresetPage.Add(CustomMessage('PresetResearcher'));
   PresetPage.SelectedValueIndex := PRESET_CATALOG;
 end;
 
@@ -196,8 +312,7 @@ begin
     // через хвилини чекання й уже без права на другу спробу задарма.
     if (Quiet <> 'catalog') and (Quiet <> 'amateur')
        and (Quiet <> 'researcher') and (Quiet <> 'lab') then
-      RaiseException('Невідомий набір «' + Quiet + '».' + #13#10 +
-        'Можна: catalog | amateur | researcher | lab');
+      RaiseException(FmtMessage(CustomMessage('UnknownPreset'), [Quiet]));
     Result := Quiet;
   end
   else if PresetPage.SelectedValueIndex = PRESET_RESEARCHER then
@@ -210,6 +325,18 @@ begin
   Result := '';
   if WizardSilent and (Lowercase(ExpandConstant('{param:engines|yes}')) = 'no') then
     Result := ' -NoEngines';
+end;
+
+// Код мови для `windows.ps1 -Lang` — той самий, що в консолі й на порталі.
+function LangCode(): String;
+begin
+  Result := 'uk';
+  if ActiveLanguage = 'english' then Result := 'en';
+  if ActiveLanguage = 'polish' then Result := 'pl';
+  if ActiveLanguage = 'romanian' then Result := 'ro';
+  if ActiveLanguage = 'french' then Result := 'fr';
+  if ActiveLanguage = 'german' then Result := 'de';
+  if ActiveLanguage = 'russian' then Result := 'ru';
 end;
 
 function InfoFile(): String;
@@ -245,6 +372,7 @@ begin
             ' -Home_ "' + ExpandConstant('{app}') + '"' +
             ' -NoLauncher' +
             EnginesFlag() +
+            ' -Lang ' + LangCode() +
             ' -Wizard';
   // Слід ПОПЕРЕДНЬОЇ відмови не має видаватись за теперішню.
   DeleteFile(ExpandConstant('{app}\install-error.txt'));
@@ -253,9 +381,9 @@ begin
   // і пакети — це хвилини, і смуга Inno без жодного тексту читається як
   // зависання. Власний прогрес довелося б вигадувати й синхронізувати з чужим
   // виводом; замість цього людина бачить справжній хід роботи.
-  WizardForm.StatusLabel.Caption := 'Ставимо Нишпорку — це може зайняти кілька хвилин…';
+  WizardForm.StatusLabel.Caption := CustomMessage('Installing');
   if not Exec('powershell.exe', Params, '', SW_SHOW, ewWaitUntilTerminated, Code) then
-    RaiseException('Не вдалося запустити PowerShell. Установлення перервано.');
+    RaiseException(CustomMessage('NoPowerShell'));
 
   // 🔴 Ненульовий код виходу мусить валити встановлення ГОЛОСНО. Мовчазний
   // провал дав би ярлики, які нікуди не ведуть, — а людина вважала б, що
@@ -270,24 +398,21 @@ begin
     if LoadStringFromFile(ExpandConstant('{app}\install-error.txt'), Raw) then
       Detail := Raw;
     if Trim(Detail) = '' then
-      Detail := 'Текст помилки не зберігся. Журнал: ' + ExpandConstant('{app}\install.log');
+      Detail := FmtMessage(CustomMessage('NoErrorText'), [ExpandConstant('{app}\install.log')]);
     // Спостережене 06.09.2026: у звичайного користувача відмова, від імені
     // адміністратора — успіх (політика виконання на машині). Порада стоїть
     // останньою і лише без підвищення: із підвищенням вона вже не допоможе.
     if not IsAdmin then
-      Detail := Detail + #13#10#13#10 +
-        'Якщо причина вище не названа — спробуйте запустити інсталятор правою ' +
-        'кнопкою миші → «Запустити від імені адміністратора». Тоді все стане в ' +
-        'профіль того облікового запису, від імені якого запущено.';
+      Detail := Detail + #13#10#13#10 + CustomMessage('AdminHint');
     // ⚠ `#13#10` не на початку рядка: препроцесор Inno читає такий рядок як
     // свою директиву («Unknown preprocessor directive»).
-    RaiseException('Установлення не завершилось (код ' + IntToStr(Code) + ').' + #13#10#13#10 +
-      Detail);
+    // ⚠ І не `[` на початку рядка — це вже заголовок секції.
+    Detail := FmtMessage(CustomMessage('InstallFailed'), [IntToStr(Code)]) + #13#10#13#10 + Detail;
+    RaiseException(Detail);
   end;
 
   if GetNyshExe('') = '' then
-    RaiseException('Нишпорка встановилась, але не сказала, де опинилась команда.' + #13#10 +
-      'Напишіть, будь ласка, на {#AppUrl}/issues');
+    RaiseException(FmtMessage(CustomMessage('NoCommand'), ['{#AppUrl}/issues']));
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);

@@ -1,6 +1,6 @@
 /** 🔎 Пошук у прочитаному. */
 
-import { t } from '../core/strings.js';
+import { t, LANG } from '../core/strings.js';
 import { callOp, SEQ, FINAL_STATES } from '../core/net.js';
 import { esc, el, setView, boxError, busyForm, fld,
   renderWarnings, maskot } from '../core/view.js';
@@ -333,7 +333,7 @@ function matchSplit(m) {
   if (!m) return '';
   const bits = ['exact', 'variant', 'ending', 'inside']
     .filter((k) => Number(m[k] || 0))
-    .map((k) => `${t(`search.match.${k}.n`)} ${Number(m[k]).toLocaleString('uk')}`);
+    .map((k) => `${t(`search.match.${k}.n`)} ${Number(m[k]).toLocaleString(LANG)}`);
   return bits.length ? `: ${esc(bits.join(' · '))}` : '';
 }
 
@@ -475,7 +475,7 @@ function ledgerBlock(d) {
     if (!ch.ran) {
       return `<li class="muted">— ${esc(name)}${ch.why ? `: ${esc(ch.why)}` : ''}</li>`;
     }
-    const n = ch.hits !== undefined && ch.hits !== null ? ` — ${esc(Number(ch.hits).toLocaleString('uk'))}` : '';
+    const n = ch.hits !== undefined && ch.hits !== null ? ` — ${esc(Number(ch.hits).toLocaleString(LANG))}` : '';
     return `<li>✓ ${esc(name)}${n}</li>`;
   }).join('');
   const where = d.shifra || d.case_key || t('search.scope.all');

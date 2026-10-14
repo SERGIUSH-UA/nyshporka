@@ -205,7 +205,7 @@ function runsRow(r) {
   // покрите наполовину — тобто порадили б прогнати те, що вже прогнали.
   const ids = r.engine_ids && r.engine_ids.length
     ? r.engine_ids : [r.engine_id].filter(Boolean);
-  const badges = ids.map((x) => eng(x, false, LANG)).join('');
+  const badges = ids.map((x) => eng(x, false, LANG, t(`engine.${x}.role`))).join('');
   const state = runState(r);
   // 🔴 Відсоток лише зі справжнім знаменником. Немає кадрів справи — друкуємо
   // самі сторінки: покриття, порахане від себе самого, завжди дорівнює 100%

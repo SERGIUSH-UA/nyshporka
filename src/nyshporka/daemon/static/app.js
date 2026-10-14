@@ -22,7 +22,7 @@
  * контролі, і розходились вони тихо.
  */
 import { initTheme, cycleTheme } from '/ui/theme.js';
-import { LANG, setLang, t } from './core/strings.js';
+import { LANG, LANGS, ENABLED, setLang, t } from './core/strings.js';
 import { esc, el, setView, curGen, alive } from './core/view.js';
 import { ACTIONS, KEYS, SCREENS, PAGERS, screenOfOp } from './core/registry.js';
 import { ST } from './core/state.js';
@@ -103,11 +103,26 @@ Object.assign(ACTIONS, {
   /** Тема: авто → світла → темна → авто. Значок показує поточний режим. */
   'theme.cycle': () => cycleTheme(),
 
-  'lang.toggle': () => {
-    setLang(LANG === 'uk' ? 'en' : 'uk');
+  /** Мова: перелік мов порталу, без вимкнених (`DISABLED` у strings.js). */
+  'lang.set': (_ev, elm) => {
+    if (!ENABLED.includes(elm.value) || elm.value === LANG) return;
+    setLang(elm.value);
     location.reload();
   },
 });
+
+// Перемикач мов. Перелік — із strings.js, а не з розмітки: там же лежать
+// словники, і мова без словника в перемикач не потрапить.
+function fillLangs() {
+  const sel = el('lang-sel');
+  if (!sel) return;
+  const gear = document.querySelector('header [data-arg="settings"]');
+  if (gear) gear.title = t('nav.settings');
+  sel.title = t('lang.choose');
+  sel.setAttribute('aria-label', t('lang.choose'));
+  sel.innerHTML = LANGS.filter(([c]) => ENABLED.includes(c)).map(([c, name]) =>
+    `<option value="${c}"${c === LANG ? ' selected' : ''}>${esc(name)}</option>`).join('');
+}
 
 // Одна точка входу на всі кліки й сабміти. `data-act` — єдиний спосіб повісити
 // поведінку; інлайн-onclick у розмітці немає ніде.
@@ -238,6 +253,7 @@ async function boot() {
   // налаштованості, і затримка тут дала б видимий стрибок вигляду вже після
   // того, як сторінка намальована.
   initTheme();
+  fillLangs();
   // Спершу довідка про секції, і лише потім екран: інакше перший показ ішов би
   // з порожнім переліком, тобто пускав би на екран, якого в цьому просторі немає.
   await loadSections();

@@ -52,7 +52,10 @@ def test_iss_offers_only_presets_that_exist() -> None:
     # ПРИЙМАЄ у тихому режимі (`/PRESET=`). Друге не менш важливе: білий
     # список, який розійшовся з `core.sections`, або відкине правильне ім'я,
     # або пропустить неправильне далі — у `nysh init`, на останній крок.
-    used = set(re.findall(r"Result\s*:=\s*'([a-z]+)'", text))
+    # Лише функція набору: `Result :=` є й у `LangCode()` — там коди мов.
+    fn = text[text.index("function SelectedPreset"):]
+    fn = fn[:fn.index("\nend;")]
+    used = set(re.findall(r"Result\s*:=\s*'([a-z]+)'", fn))
     used |= set(re.findall(r"Quiet\s*<>\s*'([a-z]+)'", text))
     assert used, "у майстрі не знайдено жодного набору — розбір зламався"
     assert used <= known, (
@@ -241,5 +244,117 @@ def test_iss_compiles() -> None:
             [str(iscc), "/DAppVersion=0.0.0", f"/O{out}", str(ISS)],
             capture_output=True, text=True, encoding="utf-8", errors="replace")
         assert r.returncode == 0, f"`.iss` не збирається:\n{r.stdout}\n{r.stderr}"
+        # 🌐 Мовний файл без частини повідомлень Inno не валить, а лише
+        # попереджає й показує ті рядки англійською посеред румунського майстра.
+        warns = [ln for ln in (r.stdout + r.stderr).splitlines() if ln.startswith("Warning")]
+        assert not warns, "компілятор попереджає:\n" + "\n".join(warns[:20])
     finally:
         shutil.rmtree(out, ignore_errors=True)
+
+
+# ── 🌐 мови майстра й скрипта ───────────────────────────────────────────────
+#: Ті самі мови, що на порталі й у консолі (`core/strings.js`, `LANGS`).
+LANGS = ("uk", "en", "pl", "ro", "fr", "de", "ru")
+
+
+def _iss_languages() -> list[str]:
+    """Імена мов `[Languages]` — і ввімкнених, і під `#ifdef WITH_RU`."""
+    text = iss_text()
+    section = text[text.index("[Languages]"):text.index("[CustomMessages]")]
+    return re.findall(r'^Name: "(\w+)"', section, re.M)
+
+
+def test_iss_has_every_portal_language() -> None:
+    """Майстер говорить тими самими мовами, що портал і консоль.
+
+    `LangCode()` переводить ім'я мови Inno в код для `windows.ps1 -Lang`:
+    мова без цього рядка дала б вікно PowerShell українською посеред,
+    скажімо, польського майстра.
+    """
+    names = _iss_languages()
+    assert len(names) == len(LANGS), f"мов у майстрі {names}, а треба {LANGS}"
+    text = iss_text()
+    codes = set(re.findall(r"ActiveLanguage = '\w+' then Result := '(\w+)'", text))
+    assert codes | {"uk"} == set(LANGS), f"LangCode() знає лише {sorted(codes)}"
+    assert "Romanian.isl" in text and (ROOT / "install" / "lang" / "Romanian.isl").exists(), (
+        "румунського файла мов немає серед офіційних Inno — він має лежати поруч")
+
+
+def test_iss_custom_messages_exist_in_every_language() -> None:
+    """Повідомлення без перекладу Inno показує порожнім рядком, а не українським."""
+    text = iss_text()
+    section = text[text.index("[CustomMessages]"):text.index("[Files]")]
+    keys: dict[str, set[str]] = {}
+    for lang, key in re.findall(r"^(\w+)\.(\w+)=", section, re.M):
+        keys.setdefault(lang, set()).add(key)
+    assert set(keys) == set(_iss_languages()), f"мови в [CustomMessages]: {sorted(keys)}"
+    base = keys["ukrainian"]
+    for lang, ks in keys.items():
+        assert ks == base, f"{lang}: різниця з українською {sorted(ks ^ base)}"
+    used = set(re.findall(r"CustomMessage\('(\w+)'\)|\{cm:(\w+)", text))
+    used = {a or b for a, b in used} - {"CreateDesktopIcon", "AdditionalIcons",
+                                        "UninstallProgram", "LaunchProgram"}
+    assert used <= base, f"ужито без запису в [CustomMessages]: {sorted(used - base)}"
+
+
+def test_iss_has_no_untranslated_literals() -> None:
+    """Напис, вписаний у секцію чи `[Code]` прямо, лишиться українським у всіх мовах.
+
+    Дозволено: коментарі, директиви препроцесора (бачить лише той, хто збирає),
+    `[CustomMessages]` і назва застосунку (бренд, пише себе кирилицею).
+    """
+    cyr = re.compile(r"[а-яіїєґА-ЯІЇЄҐ]")
+    text = iss_text()
+    text = text[:text.index("[CustomMessages]")] + text[text.index("[Files]"):]
+    bad = []
+    for n, line in enumerate(text.splitlines(), 1):
+        s = line.strip()
+        if not s or s.startswith((";", "//", "#")) or s.startswith("VersionInfoDescription="):
+            continue
+        code = s.split("//")[0]
+        if cyr.search(code):
+            bad.append(f"{n}: {s[:100]}")
+    assert not bad, "неперекладений напис у майстрі:\n" + "\n".join(bad)
+
+
+def _ps1_tables() -> dict[str, dict[str, str]]:
+    text = PS1.read_text(encoding="utf-8-sig")
+    block = text[text.index("$Msg = @{"):text.index("function M {")]
+    out: dict[str, dict[str, str]] = {}
+    for lang, body in re.findall(r"^    (\w+) = @\{\r?\n(.*?)^    \}", block, re.M | re.S):
+        out[lang] = {k.replace("''", "'"): v.replace("''", "'") for k, v in
+                     re.findall(r"^        '((?:[^']|'')*)' = '((?:[^']|'')*)'\r?$", body, re.M)}
+    return out
+
+
+def test_windows_ps1_messages_complete() -> None:
+    """Кожна мова скрипта має всі ключі української, з тими самими `{0}`.
+
+    🔴 Зайва фігурна дужка в тексті — не косметика: `-f` на ній кидає
+    FormatException, і установлення падає на рядку, що мав лише щось сказати.
+    """
+    tables = _ps1_tables()
+    assert set(tables) == set(LANGS), f"мови скрипта: {sorted(tables)}"
+    uk = tables["uk"]
+    assert len(uk) > 50, "таблицю повідомлень не розібрано"
+    for lang, d in tables.items():
+        assert set(d) == set(uk), f"{lang}: різниця {sorted(set(d) ^ set(uk))}"
+        for k, v in d.items():
+            assert sorted(re.findall(r"\{\d\}", v)) == sorted(re.findall(r"\{\d\}", uk[k])), (
+                f"{lang} {k}: підстановки не збігаються — {v}")
+            rest = re.sub(r"\{\d\}", "", v)
+            assert "{" not in rest and "}" not in rest, f"{lang} {k}: дужка зламає -f"
+    text = PS1.read_text(encoding="utf-8-sig")
+    used = set(re.findall(r"\bM '([\w.]+)'", text))
+    assert used and used <= set(uk), f"ужито без запису: {sorted(used - set(uk))}"
+    assert set(uk) - used == set(), f"записано, але не вжито: {sorted(set(uk) - used)}"
+
+
+def test_windows_ps1_says_nothing_in_ukrainian_directly() -> None:
+    """Кожен `Say`/`throw` іде через `M` — інакше рядок лишиться українським."""
+    cyr = re.compile(r"[а-яіїєґА-ЯІЇЄҐ]")
+    text = PS1.read_text(encoding="utf-8-sig")
+    body = text[text.index("function M {"):]
+    bad = [line.strip() for line in body.splitlines()
+           if re.match(r"\s*(Say|throw|Write-Host)\b", line) and cyr.search(line)]
+    assert not bad, "напис поза таблицею:\n" + "\n".join(bad)

@@ -1,6 +1,6 @@
 /** ⚙ Налаштування секцій. */
 
-import { t, LANG } from '../core/strings.js';
+import { t, tOr } from '../core/strings.js';
 import { TOKEN, callOp, SEQ } from '../core/net.js';
 import { esc, el, setView, busy, failure, boxError, busyForm,
   renderWarnings, renderCoverage, curGen, alive } from '../core/view.js';
@@ -32,8 +32,8 @@ SCREENS.settings = async () => {
   setSections(env.data);
   const presets = Object.keys(env.data.presets || {});
   const rows = (env.data.sections || []).map((s) => {
-    const label = LANG === 'en' ? s.label_en : s.label;
-    const why = LANG === 'en' ? s.why_en : s.why;
+    const label = tOr(`section.${s.id}.label`, s.label);
+    const why = tOr(`section.${s.id}.why`, s.why);
     const screens = (s.screens || []).map((x) => esc(t(NAV_LABEL[x] || x))).join(' · ');
     // Знак секції — той самий, що в переліку `nysh sections`: два обличчя одного
     // застосунку не мають виглядати як два різні продукти.

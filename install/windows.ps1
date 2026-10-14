@@ -67,8 +67,647 @@ param(
     [string]$PythonDir = "",
     # Запуск із майстра `.exe`: консоль зникає разом зі скриптом, тож помилку
     # треба показати вікном, яке переживе консоль.
-    [switch]$Wizard
+    [switch]$Wizard,
+    # Мова виводу: uk | en | pl | ro | fr | de | ru. Порожньо — мова Windows.
+    [string]$Lang = ''
 )
+
+# ── мова виводу ──────────────────────────────────────────────────────────────
+# 🌐 Ті самі мови, що на порталі й у консолі. Майстер `.exe` передає свою
+# (`-Lang`); запуск руками бере мову інтерфейсу Windows. Вимкнена мова
+# (`$LangsOff`, дзеркало `VYMKNENI` порталу) сама не вибирається, лише явно.
+# Мова, якої тут немає, — українська: так само, як у консолі.
+# ⚠ Тексти — для `-f`: підстановки `{0}`, `{1}`; інших фігурних дужок у них
+# бути не може (ловить `test_windows_ps1_messages_complete`).
+$Langs = @('uk', 'en', 'pl', 'ro', 'fr', 'de', 'ru')
+$LangsOff = @('ru')
+if (-not $Lang) {
+    try { $Lang = (Get-UICulture).TwoLetterISOLanguageName } catch { $Lang = 'uk' }
+    if ($LangsOff -contains $Lang) { $Lang = 'uk' }
+}
+$Lang = "$Lang".ToLowerInvariant()
+if ($Langs -notcontains $Lang) { $Lang = 'uk' }
+
+$Msg = @{
+    uk = @{
+        'brand.tag' = 'Читає рукопис. Приносить знайдене.'
+        'hdr.dir' = '  тека: {0}'
+        'dry.uv.have' = 'uv                 уже є: {0}'
+        'dry.uv.get' = 'uv                 буде завантажено в {0}'
+        'dry.python' = 'Python 3.12        керований, у {0}; ні в PATH, ні в реєстрі його не буде'
+        'dry.app' = 'Нишпорка           {0}'
+        'dry.preset' = 'набір {0}'
+        'dry.app2' = '                   в ізольованому середовищі інструмента uv'
+        'dry.cmd' = 'команда nysh       {0}'
+        'dry.trace' = 'слід інсталятора   {0}'
+        'dry.space' = 'простір досліджень тека, яку назве «nysh init»'
+        'dry.eng1' = 'рушії читання      nysh htr install — torch під відеокарту NVIDIA, якщо драйвер її'
+        'dry.eng2' = '                   показує, інакше під процесор (~2.5–4 ГБ, у теці простору)'
+        'dry.models' = 'моделі письма      nysh models get (~215 МБ, sha256 звіряється)'
+        'dry.why.own' = 'свої, NYSHPORKA_HTR_VENV={0}'
+        'dry.eng.no' = 'рушії читання      не ставляться ({0})'
+        'dry.cat.no' = 'довідники          не ставляться (-NoCatalog / NYSH_NO_CATALOG=1)'
+        'dry.cat' = 'довідники          з останнього релізу catalog-* (звірка sha256), якщо немає поруч'
+        'dry.path.no' = 'PATH користувача   не чіпається (NYSH_NO_MODIFY_PATH=1)'
+        'dry.path' = 'PATH користувача   один допис «{0}», якщо теки там ще немає'
+        'dry.done' = 'Нічого не зроблено — це -DryRun.'
+        'admin.1' = '  ⚠ Запуск із правами адміністратора. Усе стане в профіль користувача'
+        'admin.3' = '    Якщо працювати буде інший користувач — йому команда nysh і ярлики'
+        'admin.4' = '    не дістануться; встановлюйте з-під його облікового запису.'
+        'preflight' = 'Передперевірка: програми з профілю користувача ({0}) на цій машині НЕ ЗАПУСКАЮТЬСЯ — схоже на політику AppLocker/SRP або правило ASR. Нишпорка ставиться в профіль без прав адміністратора, тож тут вона не працюватиме. Варіанти: запустити інсталятор правою кнопкою миші → «Запустити від імені адміністратора» (тоді все стане в профіль адміністратора), або попросити ІТ дозволити запуск із {0} і {1}.'
+        'uv.have' = '✓ uv уже є: {0}'
+        'err.uv' = 'uv не встановився у {0}'
+        'err.python' = 'не вдалося встановити Python 3.12 (uv повернув {0})'
+        'app.get' = '⬇ Нишпорка ({0})…'
+        'err.app' = 'не вдалося встановити {0} (uv повернув {1})'
+        'app.ok' = '✓ Нишпорка'
+        'nocmd.1' = '✗ пакет установлено, але команди немає: {0}'
+        'nocmd.2' = '  надішліть, будь ласка, вивід `uv tool list` — це вада інсталятора,'
+        'nocmd.3' = '  а не вашої машини'
+        'err.nocmd' = 'nysh не знайдено після встановлення'
+        'info.fail' = '⚠ не вдалося записати {0} — ярлики доведеться створити вручну'
+        'err.init' = 'не вдалося створити робочий простір (nysh повернув {0})'
+        'eng.get' = '⬇ рушії читання (torch під вашу карту, ~2.5–4 ГБ — кілька хвилин)…'
+        'eng.fail' = '⚠ рушії читання не зібрались (nysh повернув {0}) — повторити: nysh htr install'
+        'models.get' = '⬇ моделі письма…'
+        'models.fail' = '⚠ моделі письма не завантажились (nysh повернув {0}) — повторити: nysh models get'
+        'eng.err' = '⚠ рушії читання не доставлено: {0}'
+        'eng.retry' = '  повторити: nysh htr install, потім nysh models get'
+        'eng.foreign' = 'ℹ рушії читання вказано змінною NYSHPORKA_HTR_VENV — не чіпаю: {0}'
+        'eng.ok' = '✓ рушії читання й моделі письма'
+        'cat.list' = '⚠ не вдалось прочитати перелік релізів GitHub — мережа чи ліміт API'
+        'cat.none' = '⚠ жодного релізу catalog-* не знайдено'
+        'cat.nosum' = '⚠ реліз {0}: асет без контрольної суми sha256 — качати без звірки не можна'
+        'cat.nourl' = '⚠ реліз {0}: не знайдено посилання на завантаження'
+        'cat.dl' = '⚠ не вдалось завантажити пак довідників ({0})'
+        'cat.sum' = '⚠ контрольна сума пака довідників ({0}) не збіглася — не встановлюю'
+        'cat.ok' = '✓ пак довідників {0}: встановлено (sha256 звірено)'
+        'cat.refused' = '⚠ «nysh catalog install» відмовив на паку {0}'
+        'cat.err' = '⚠ пак довідників з релізу не поставлено: {0}'
+        'cat.skip' = 'ℹ довідники не ставляться (-NoCatalog / NYSH_NO_CATALOG=1)'
+        'cat.missing' = '⚠ довідників поруч немає — пошук по каталогах архівів буде недоступний'
+        'cat.take' = '  взяти: {0}'
+        'cat.next' = '  далі:  nysh catalog install --from <завантажений zip>'
+        'desk.ok' = '✓ ярлик на робочому столі'
+        'trace.fail' = '⚠ не вдалося записати {0} — «nysh uninstall» питатиме шляхи'
+        'sum.title' = 'Змінено на цій машині:'
+        'sum.dir' = '  тека        {0}'
+        'sum.bin' = '  команда     {0}'
+        'sum.file' = '  файл        {0}'
+        'sum.path' = '  PATH        допис «{0}» у змінні середовища користувача'
+        'sum.space' = '  простір досліджень — тека, яку щойно назвав «nysh init»'
+        'sum.undo' = '  зняти все це: nysh uninstall'
+        'done' = 'Готово.'
+        'reopen.1' = '  ⚠ Закрийте це вікно й відкрийте нове — команди нижче працюють там.'
+        'reopen.2' = '    У вікнах, відкритих до встановлення, «nysh» не знайдеться.'
+        'reopen.3' = '    Якщо й у новому не знайдеться — перезапустіть комп''ютер.'
+        'next' = 'Далі:'
+        'next.serve' = '  nysh serve            відкрити застосунок у браузері'
+        'next.look' = '  nysh look <тека>      подивитись, що за скани'
+        'next.htr' = '  nysh htr install      зібрати рушії читання (torch під вашу карту)'
+        'next.models' = '  nysh models get       завантажити моделі письма'
+        'next.doctor' = '  nysh doctor           перевірити те, що ламається тихо'
+        'trap.error' = 'Помилка: {0}'
+        'trap.line' = '   (рядок {0} інсталятора)'
+        'trap.tail' = 'Останні рядки виводу:'
+        'trap.log' = 'Повний журнал: {0}'
+        'trap.title' = 'Нишпорка: установлення не завершилось'
+        'brand.name' = 'Нишпорка'
+        'lnk.desc' = 'Читання рукописних архівних справ'
+        'err.448' = 'Windows не довіряє теці, куди uv ставить Python (os error 448: перенаправлений AppData чи OneDrive). Поставте Нишпорку наново з текою інтерпретаторів поза профілем: windows.ps1 -PythonDir D:\Nyshporka\python'
+    }
+    en = @{
+        'brand.tag' = 'Reads handwriting. Brings back what it finds.'
+        'hdr.dir' = '  folder: {0}'
+        'dry.uv.have' = 'uv                 already installed: {0}'
+        'dry.uv.get' = 'uv                 will be downloaded to {0}'
+        'dry.python' = 'Python 3.12        managed, in {0}; it will not be in PATH or the registry'
+        'dry.app' = 'Nyshporka          {0}'
+        'dry.preset' = 'preset {0}'
+        'dry.app2' = '                   in uv''s isolated tool environment'
+        'dry.cmd' = 'nysh command       {0}'
+        'dry.trace' = 'installer trace    {0}'
+        'dry.space' = 'research space     folder named by “nysh init”'
+        'dry.eng1' = 'reading engines    nysh htr install — torch for an NVIDIA graphics card if the driver'
+        'dry.eng2' = '                   shows one, otherwise for the CPU (~2.5–4 GB, in the space folder)'
+        'dry.models' = 'handwriting models nysh models get (~215 MB, sha256 verified)'
+        'dry.why.own' = 'own, NYSHPORKA_HTR_VENV={0}'
+        'dry.eng.no' = 'reading engines    not installed ({0})'
+        'dry.cat.no' = 'catalogs           not installed (-NoCatalog / NYSH_NO_CATALOG=1)'
+        'dry.cat' = 'catalogs           from the latest catalog-* release (sha256 verified), if none nearby'
+        'dry.path.no' = 'user PATH          left untouched (NYSH_NO_MODIFY_PATH=1)'
+        'dry.path' = 'user PATH          one entry “{0}”, if the folder is not there yet'
+        'dry.done' = 'Nothing was done — this is -DryRun.'
+        'admin.1' = '  ⚠ Running as administrator. Everything will go into the user profile'
+        'admin.3' = '    If another user will work here, they will not get the nysh command or the'
+        'admin.4' = '    shortcuts; install from their own account.'
+        'preflight' = 'Pre-check: programs from the user profile ({0}) CANNOT RUN on this machine — it looks like an AppLocker/SRP policy or an ASR rule. Nyshporka installs into the profile without administrator rights, so it will not work here. Options: start the installer with a right click → “Run as administrator” (everything then goes into the administrator''s profile), or ask IT to allow running from {0} and {1}.'
+        'uv.have' = '✓ uv already installed: {0}'
+        'err.uv' = 'uv did not install into {0}'
+        'err.python' = 'could not install Python 3.12 (uv returned {0})'
+        'app.get' = '⬇ Nyshporka ({0})…'
+        'err.app' = 'could not install {0} (uv returned {1})'
+        'app.ok' = '✓ Nyshporka'
+        'nocmd.1' = '✗ the package is installed, but the command is missing: {0}'
+        'nocmd.2' = '  please send the output of `uv tool list` — this is an installer bug,'
+        'nocmd.3' = '  not a problem with your machine'
+        'err.nocmd' = 'nysh not found after installation'
+        'info.fail' = '⚠ could not write {0} — shortcuts will have to be created by hand'
+        'err.init' = 'could not create the workspace (nysh returned {0})'
+        'eng.get' = '⬇ reading engines (torch for your card, ~2.5–4 GB — a few minutes)…'
+        'eng.fail' = '⚠ reading engines were not built (nysh returned {0}) — retry: nysh htr install'
+        'models.get' = '⬇ handwriting models…'
+        'models.fail' = '⚠ handwriting models were not downloaded (nysh returned {0}) — retry: nysh models get'
+        'eng.err' = '⚠ reading engines were not installed: {0}'
+        'eng.retry' = '  retry: nysh htr install, then nysh models get'
+        'eng.foreign' = 'ℹ reading engines are set by NYSHPORKA_HTR_VENV — leaving them alone: {0}'
+        'eng.ok' = '✓ reading engines and handwriting models'
+        'cat.list' = '⚠ could not read the GitHub release list — network or API limit'
+        'cat.none' = '⚠ no catalog-* release found'
+        'cat.nosum' = '⚠ release {0}: asset has no sha256 checksum — will not download unverified'
+        'cat.nourl' = '⚠ release {0}: download link not found'
+        'cat.dl' = '⚠ could not download the catalog pack ({0})'
+        'cat.sum' = '⚠ checksum of the catalog pack ({0}) does not match — not installing'
+        'cat.ok' = '✓ catalog pack {0}: installed (sha256 verified)'
+        'cat.refused' = '⚠ “nysh catalog install” rejected pack {0}'
+        'cat.err' = '⚠ catalog pack from the release was not installed: {0}'
+        'cat.skip' = 'ℹ catalogs are not installed (-NoCatalog / NYSH_NO_CATALOG=1)'
+        'cat.missing' = '⚠ no catalogs nearby — searching the archive catalogs will be unavailable'
+        'cat.take' = '  get it: {0}'
+        'cat.next' = '  then:   nysh catalog install --from <downloaded zip>'
+        'desk.ok' = '✓ desktop shortcut'
+        'trace.fail' = '⚠ could not write {0} — “nysh uninstall” will ask for the paths'
+        'sum.title' = 'Changed on this machine:'
+        'sum.dir' = '  folder      {0}'
+        'sum.bin' = '  command     {0}'
+        'sum.file' = '  file        {0}'
+        'sum.path' = '  PATH        entry “{0}” in the user''s environment variables'
+        'sum.space' = '  research space — the folder “nysh init” just named'
+        'sum.undo' = '  to undo all of this: nysh uninstall'
+        'done' = 'Done.'
+        'reopen.1' = '  ⚠ Close this window and open a new one — the commands below work there.'
+        'reopen.2' = '    In windows opened before the installation, “nysh” will not be found.'
+        'reopen.3' = '    If it is not found in the new one either, restart the computer.'
+        'next' = 'Next:'
+        'next.serve' = '  nysh serve            open the app in the browser'
+        'next.look' = '  nysh look <folder>    see what the scans are'
+        'next.htr' = '  nysh htr install      build the reading engines (torch for your card)'
+        'next.models' = '  nysh models get       download the handwriting models'
+        'next.doctor' = '  nysh doctor           check what breaks silently'
+        'trap.error' = 'Error: {0}'
+        'trap.line' = '   (installer line {0})'
+        'trap.tail' = 'Last lines of output:'
+        'trap.log' = 'Full log: {0}'
+        'trap.title' = 'Nyshporka: installation did not finish'
+        'brand.name' = 'Nyshporka'
+        'lnk.desc' = 'Reading handwritten archival records'
+        'err.448' = 'Windows does not trust the folder where uv puts Python (os error 448: redirected AppData or OneDrive). Reinstall Nyshporka with the interpreter folder outside the profile: windows.ps1 -PythonDir D:\Nyshporka\python'
+    }
+    pl = @{
+        'brand.tag' = 'Czyta rękopisy. Przynosi to, co znajdzie.'
+        'hdr.dir' = '  folder: {0}'
+        'dry.uv.have' = 'uv                 już jest: {0}'
+        'dry.uv.get' = 'uv                 zostanie pobrany do {0}'
+        'dry.python' = 'Python 3.12        zarządzany, w {0}; nie trafi do PATH ani do rejestru'
+        'dry.app' = 'Nyshporka          {0}'
+        'dry.preset' = 'zestaw {0}'
+        'dry.app2' = '                   w izolowanym środowisku narzędzia uv'
+        'dry.cmd' = 'polecenie nysh     {0}'
+        'dry.trace' = 'ślad instalatora   {0}'
+        'dry.space' = 'przestrzeń badań   folder wskazany przez „nysh init”'
+        'dry.eng1' = 'silniki odczytu    nysh htr install — torch pod kartę NVIDIA, jeśli sterownik'
+        'dry.eng2' = '                   ją widzi, w przeciwnym razie pod procesor (~2,5–4 GB, w folderze przestrzeni)'
+        'dry.models' = 'modele pisma       nysh models get (~215 MB, sha256 sprawdzany)'
+        'dry.why.own' = 'własne, NYSHPORKA_HTR_VENV={0}'
+        'dry.eng.no' = 'silniki odczytu    nie są instalowane ({0})'
+        'dry.cat.no' = 'katalogi           nie są instalowane (-NoCatalog / NYSH_NO_CATALOG=1)'
+        'dry.cat' = 'katalogi           z najnowszego wydania catalog-* (sha256 sprawdzany), jeśli nie ma obok'
+        'dry.path.no' = 'PATH użytkownika   bez zmian (NYSH_NO_MODIFY_PATH=1)'
+        'dry.path' = 'PATH użytkownika   jeden wpis „{0}”, jeśli folderu jeszcze tam nie ma'
+        'dry.done' = 'Nic nie zrobiono — to jest -DryRun.'
+        'admin.1' = '  ⚠ Uruchomiono jako administrator. Wszystko trafi do profilu użytkownika'
+        'admin.3' = '    Jeśli będzie tu pracować inny użytkownik, nie dostanie polecenia nysh ani'
+        'admin.4' = '    skrótów; zainstaluj z jego konta.'
+        'preflight' = 'Kontrola wstępna: programy z profilu użytkownika ({0}) NIE URUCHAMIAJĄ SIĘ na tym komputerze — wygląda to na zasadę AppLocker/SRP lub regułę ASR. Nyshporka instaluje się w profilu bez uprawnień administratora, więc tu nie zadziała. Do wyboru: uruchom instalator prawym przyciskiem myszy → „Uruchom jako administrator” (wtedy wszystko trafi do profilu administratora) albo poproś dział IT o zezwolenie na uruchamianie z {0} i {1}.'
+        'uv.have' = '✓ uv już jest: {0}'
+        'err.uv' = 'uv nie zainstalował się w {0}'
+        'err.python' = 'nie udało się zainstalować Python 3.12 (uv zwrócił {0})'
+        'app.get' = '⬇ Nyshporka ({0})…'
+        'err.app' = 'nie udało się zainstalować {0} (uv zwrócił {1})'
+        'app.ok' = '✓ Nyshporka'
+        'nocmd.1' = '✗ pakiet zainstalowany, ale brak polecenia: {0}'
+        'nocmd.2' = '  prześlij proszę wynik `uv tool list` — to błąd instalatora,'
+        'nocmd.3' = '  a nie Twojego komputera'
+        'err.nocmd' = 'nie znaleziono nysh po instalacji'
+        'info.fail' = '⚠ nie udało się zapisać {0} — skróty trzeba będzie utworzyć ręcznie'
+        'err.init' = 'nie udało się utworzyć przestrzeni roboczej (nysh zwrócił {0})'
+        'eng.get' = '⬇ silniki odczytu (torch pod Twoją kartę, ~2,5–4 GB — kilka minut)…'
+        'eng.fail' = '⚠ silniki odczytu nie zostały zbudowane (nysh zwrócił {0}) — ponów: nysh htr install'
+        'models.get' = '⬇ modele pisma…'
+        'models.fail' = '⚠ modele pisma nie zostały pobrane (nysh zwrócił {0}) — ponów: nysh models get'
+        'eng.err' = '⚠ silniki odczytu nie zostały dostarczone: {0}'
+        'eng.retry' = '  ponów: nysh htr install, potem nysh models get'
+        'eng.foreign' = 'ℹ silniki odczytu wskazuje zmienna NYSHPORKA_HTR_VENV — nie ruszam: {0}'
+        'eng.ok' = '✓ silniki odczytu i modele pisma'
+        'cat.list' = '⚠ nie udało się odczytać listy wydań GitHub — sieć lub limit API'
+        'cat.none' = '⚠ nie znaleziono żadnego wydania catalog-*'
+        'cat.nosum' = '⚠ wydanie {0}: zasób bez sumy kontrolnej sha256 — nie wolno pobierać bez weryfikacji'
+        'cat.nourl' = '⚠ wydanie {0}: nie znaleziono linku do pobrania'
+        'cat.dl' = '⚠ nie udało się pobrać paczki katalogów ({0})'
+        'cat.sum' = '⚠ suma kontrolna paczki katalogów ({0}) się nie zgadza — nie instaluję'
+        'cat.ok' = '✓ paczka katalogów {0}: zainstalowana (sha256 sprawdzony)'
+        'cat.refused' = '⚠ „nysh catalog install” odrzucił paczkę {0}'
+        'cat.err' = '⚠ paczka katalogów z wydania nie została zainstalowana: {0}'
+        'cat.skip' = 'ℹ katalogi nie są instalowane (-NoCatalog / NYSH_NO_CATALOG=1)'
+        'cat.missing' = '⚠ brak katalogów obok — wyszukiwanie w katalogach archiwów będzie niedostępne'
+        'cat.take' = '  pobierz: {0}'
+        'cat.next' = '  potem:  nysh catalog install --from <pobrany zip>'
+        'desk.ok' = '✓ skrót na pulpicie'
+        'trace.fail' = '⚠ nie udało się zapisać {0} — „nysh uninstall” zapyta o ścieżki'
+        'sum.title' = 'Zmieniono na tym komputerze:'
+        'sum.dir' = '  folder      {0}'
+        'sum.bin' = '  polecenie   {0}'
+        'sum.file' = '  plik        {0}'
+        'sum.path' = '  PATH        wpis „{0}” w zmiennych środowiskowych użytkownika'
+        'sum.space' = '  przestrzeń badań — folder, który przed chwilą wskazał „nysh init”'
+        'sum.undo' = '  cofnąć to wszystko: nysh uninstall'
+        'done' = 'Gotowe.'
+        'reopen.1' = '  ⚠ Zamknij to okno i otwórz nowe — polecenia poniżej działają tam.'
+        'reopen.2' = '    W oknach otwartych przed instalacją „nysh” nie zostanie znalezione.'
+        'reopen.3' = '    Jeśli w nowym też nie, uruchom komputer ponownie.'
+        'next' = 'Dalej:'
+        'next.serve' = '  nysh serve            otwórz aplikację w przeglądarce'
+        'next.look' = '  nysh look <folder>    zobacz, co to za skany'
+        'next.htr' = '  nysh htr install      zbuduj silniki odczytu (torch pod Twoją kartę)'
+        'next.models' = '  nysh models get       pobierz modele pisma'
+        'next.doctor' = '  nysh doctor           sprawdź to, co psuje się po cichu'
+        'trap.error' = 'Błąd: {0}'
+        'trap.line' = '   (wiersz {0} instalatora)'
+        'trap.tail' = 'Ostatnie wiersze wyniku:'
+        'trap.log' = 'Pełny dziennik: {0}'
+        'trap.title' = 'Nyshporka: instalacja nie została ukończona'
+        'brand.name' = 'Nyshporka'
+        'lnk.desc' = 'Odczyt rękopiśmiennych dokumentów archiwalnych'
+        'err.448' = 'Windows nie ufa folderowi, w którym uv instaluje Pythona (os error 448: przekierowany AppData lub OneDrive). Zainstaluj Nyshporkę ponownie z folderem interpreterów poza profilem: windows.ps1 -PythonDir D:\Nyshporka\python'
+    }
+    ro = @{
+        'brand.tag' = 'Citește manuscrise. Aduce ce găsește.'
+        'hdr.dir' = '  dosar: {0}'
+        'dry.uv.have' = 'uv                 există deja: {0}'
+        'dry.uv.get' = 'uv                 va fi descărcat în {0}'
+        'dry.python' = 'Python 3.12        gestionat, în {0}; nu va fi nici în PATH, nici în registru'
+        'dry.app' = 'Nyshporka          {0}'
+        'dry.preset' = 'setul {0}'
+        'dry.app2' = '                   în mediul izolat al instrumentului uv'
+        'dry.cmd' = 'comanda nysh       {0}'
+        'dry.trace' = 'urma instalării    {0}'
+        'dry.space' = 'spațiu cercetare   folderul indicat de „nysh init”'
+        'dry.eng1' = 'motoare de citire  nysh htr install — torch pentru placa NVIDIA, dacă driverul'
+        'dry.eng2' = '                   o vede, altfel pentru procesor (~2,5–4 GB, în folderul spațiului)'
+        'dry.models' = 'modele de scris    nysh models get (~215 MB, sha256 verificat)'
+        'dry.why.own' = 'proprii, NYSHPORKA_HTR_VENV={0}'
+        'dry.eng.no' = 'motoare de citire  nu se instalează ({0})'
+        'dry.cat.no' = 'cataloage          nu se instalează (-NoCatalog / NYSH_NO_CATALOG=1)'
+        'dry.cat' = 'cataloage          din ultima versiune catalog-* (sha256 verificat), dacă nu există alături'
+        'dry.path.no' = 'PATH utilizator    nu se modifică (NYSH_NO_MODIFY_PATH=1)'
+        'dry.path' = 'PATH utilizator    o singură intrare „{0}”, dacă folderul nu e încă acolo'
+        'dry.done' = 'Nu s-a făcut nimic — este -DryRun.'
+        'admin.1' = '  ⚠ Rulare ca administrator. Totul va merge în profilul utilizatorului'
+        'admin.3' = '    Dacă va lucra alt utilizator, nu va primi comanda nysh și scurtăturile;'
+        'admin.4' = '    instalați din contul lui.'
+        'preflight' = 'Verificare preliminară: programele din profilul utilizatorului ({0}) NU POT RULA pe acest calculator — pare o politică AppLocker/SRP sau o regulă ASR. Nyshporka se instalează în profil fără drepturi de administrator, deci aici nu va funcționa. Variante: porniți programul de instalare cu clic dreapta → „Executare ca administrator” (atunci totul va merge în profilul administratorului) sau cereți departamentului IT să permită rularea din {0} și {1}.'
+        'uv.have' = '✓ uv există deja: {0}'
+        'err.uv' = 'uv nu s-a instalat în {0}'
+        'err.python' = 'nu s-a putut instala Python 3.12 (uv a returnat {0})'
+        'app.get' = '⬇ Nyshporka ({0})…'
+        'err.app' = 'nu s-a putut instala {0} (uv a returnat {1})'
+        'app.ok' = '✓ Nyshporka'
+        'nocmd.1' = '✗ pachetul este instalat, dar comanda lipsește: {0}'
+        'nocmd.2' = '  trimiteți, vă rugăm, rezultatul comenzii `uv tool list` — este o defecțiune a'
+        'nocmd.3' = '  programului de instalare, nu a calculatorului dumneavoastră'
+        'err.nocmd' = 'nysh nu a fost găsit după instalare'
+        'info.fail' = '⚠ nu s-a putut scrie {0} — scurtăturile trebuie create manual'
+        'err.init' = 'nu s-a putut crea spațiul de lucru (nysh a returnat {0})'
+        'eng.get' = '⬇ motoare de citire (torch pentru placa dumneavoastră, ~2,5–4 GB — câteva minute)…'
+        'eng.fail' = '⚠ motoarele de citire nu s-au construit (nysh a returnat {0}) — reîncercați: nysh htr install'
+        'models.get' = '⬇ modele de scris…'
+        'models.fail' = '⚠ modelele de scris nu s-au descărcat (nysh a returnat {0}) — reîncercați: nysh models get'
+        'eng.err' = '⚠ motoarele de citire nu au fost livrate: {0}'
+        'eng.retry' = '  reîncercați: nysh htr install, apoi nysh models get'
+        'eng.foreign' = 'ℹ motoarele de citire sunt indicate de variabila NYSHPORKA_HTR_VENV — nu le ating: {0}'
+        'eng.ok' = '✓ motoare de citire și modele de scris'
+        'cat.list' = '⚠ nu s-a putut citi lista versiunilor GitHub — rețea sau limită API'
+        'cat.none' = '⚠ nu s-a găsit nicio versiune catalog-*'
+        'cat.nosum' = '⚠ versiunea {0}: fișier fără sumă de control sha256 — nu se poate descărca fără verificare'
+        'cat.nourl' = '⚠ versiunea {0}: nu s-a găsit linkul de descărcare'
+        'cat.dl' = '⚠ nu s-a putut descărca pachetul de cataloage ({0})'
+        'cat.sum' = '⚠ suma de control a pachetului de cataloage ({0}) nu corespunde — nu instalez'
+        'cat.ok' = '✓ pachet de cataloage {0}: instalat (sha256 verificat)'
+        'cat.refused' = '⚠ „nysh catalog install” a refuzat pachetul {0}'
+        'cat.err' = '⚠ pachetul de cataloage din versiune nu a fost instalat: {0}'
+        'cat.skip' = 'ℹ cataloagele nu se instalează (-NoCatalog / NYSH_NO_CATALOG=1)'
+        'cat.missing' = '⚠ nu există cataloage alături — căutarea în cataloagele arhivelor nu va fi disponibilă'
+        'cat.take' = '  luați: {0}'
+        'cat.next' = '  apoi:  nysh catalog install --from <zip descărcat>'
+        'desk.ok' = '✓ scurtătură pe desktop'
+        'trace.fail' = '⚠ nu s-a putut scrie {0} — „nysh uninstall” va cere căile'
+        'sum.title' = 'Modificat pe acest calculator:'
+        'sum.dir' = '  folder      {0}'
+        'sum.bin' = '  comandă     {0}'
+        'sum.file' = '  fișier      {0}'
+        'sum.path' = '  PATH        intrarea „{0}” în variabilele de mediu ale utilizatorului'
+        'sum.space' = '  spațiu de cercetare — folderul indicat adineauri de „nysh init”'
+        'sum.undo' = '  anulați toate acestea: nysh uninstall'
+        'done' = 'Gata.'
+        'reopen.1' = '  ⚠ Închideți această fereastră și deschideți una nouă — comenzile de mai jos funcționează acolo.'
+        'reopen.2' = '    În ferestrele deschise înainte de instalare, „nysh” nu va fi găsit.'
+        'reopen.3' = '    Dacă nici în cea nouă nu e găsit, reporniți calculatorul.'
+        'next' = 'Mai departe:'
+        'next.serve' = '  nysh serve            deschide aplicația în browser'
+        'next.look' = '  nysh look <folder>    vezi ce scanări sunt'
+        'next.htr' = '  nysh htr install      construiește motoarele de citire (torch pentru placa dvs.)'
+        'next.models' = '  nysh models get       descarcă modelele de scris'
+        'next.doctor' = '  nysh doctor           verifică ce se strică pe tăcute'
+        'trap.error' = 'Eroare: {0}'
+        'trap.line' = '   (linia {0} a programului de instalare)'
+        'trap.tail' = 'Ultimele linii ale rezultatului:'
+        'trap.log' = 'Jurnal complet: {0}'
+        'trap.title' = 'Nyshporka: instalarea nu s-a încheiat'
+        'brand.name' = 'Nyshporka'
+        'lnk.desc' = 'Citirea dosarelor de arhivă scrise de mână'
+        'err.448' = 'Windows nu are încredere în folderul în care uv instalează Python (os error 448: AppData sau OneDrive redirecționat). Reinstalați Nyshporka cu folderul interpretoarelor în afara profilului: windows.ps1 -PythonDir D:\Nyshporka\python'
+    }
+    fr = @{
+        'brand.tag' = 'Lit les manuscrits. Rapporte ce qu''elle trouve.'
+        'hdr.dir' = '  dossier : {0}'
+        'dry.uv.have' = 'uv                 déjà présent : {0}'
+        'dry.uv.get' = 'uv                 sera téléchargé dans {0}'
+        'dry.python' = 'Python 3.12        géré, dans {0} ; absent du PATH et du registre'
+        'dry.app' = 'Nyshporka          {0}'
+        'dry.preset' = 'profil {0}'
+        'dry.app2' = '                   dans l''environnement isolé de l''outil uv'
+        'dry.cmd' = 'commande nysh      {0}'
+        'dry.trace' = 'trace installeur   {0}'
+        'dry.space' = 'espace recherche   dossier indiqué par « nysh init »'
+        'dry.eng1' = 'moteurs de lecture nysh htr install — torch pour carte NVIDIA si le pilote'
+        'dry.eng2' = '                   en signale une, sinon pour le processeur (~2,5–4 Go, dans l''espace)'
+        'dry.models' = 'modèles d''écriture nysh models get (~215 Mo, sha256 vérifié)'
+        'dry.why.own' = 'les vôtres, NYSHPORKA_HTR_VENV={0}'
+        'dry.eng.no' = 'moteurs de lecture non installés ({0})'
+        'dry.cat.no' = 'catalogues         non installés (-NoCatalog / NYSH_NO_CATALOG=1)'
+        'dry.cat' = 'catalogues         depuis la dernière version catalog-* (sha256 vérifié), si absents'
+        'dry.path.no' = 'PATH utilisateur   inchangé (NYSH_NO_MODIFY_PATH=1)'
+        'dry.path' = 'PATH utilisateur   une seule entrée « {0} », si le dossier n''y est pas encore'
+        'dry.done' = 'Rien n''a été fait — c''est -DryRun.'
+        'admin.1' = '  ⚠ Exécution en administrateur. Tout ira dans le profil de l''utilisateur'
+        'admin.3' = '    Si un autre utilisateur travaille ici, il n''aura ni la commande nysh ni'
+        'admin.4' = '    les raccourcis ; installez depuis son propre compte.'
+        'preflight' = 'Contrôle préalable : les programmes du profil utilisateur ({0}) NE S''EXÉCUTENT PAS sur cette machine — on dirait une stratégie AppLocker/SRP ou une règle ASR. Nyshporka s''installe dans le profil sans droits d''administrateur, elle ne fonctionnera donc pas ici. Options : lancer l''installeur par clic droit → « Exécuter en tant qu''administrateur » (tout ira alors dans le profil de l''administrateur), ou demander au service informatique d''autoriser l''exécution depuis {0} et {1}.'
+        'uv.have' = '✓ uv déjà présent : {0}'
+        'err.uv' = 'uv ne s''est pas installé dans {0}'
+        'err.python' = 'impossible d''installer Python 3.12 (uv a renvoyé {0})'
+        'app.get' = '⬇ Nyshporka ({0})…'
+        'err.app' = 'impossible d''installer {0} (uv a renvoyé {1})'
+        'app.ok' = '✓ Nyshporka'
+        'nocmd.1' = '✗ le paquet est installé, mais la commande est introuvable : {0}'
+        'nocmd.2' = '  envoyez-nous, s''il vous plaît, la sortie de `uv tool list` — c''est un défaut'
+        'nocmd.3' = '  de l''installeur, pas de votre machine'
+        'err.nocmd' = 'nysh introuvable après l''installation'
+        'info.fail' = '⚠ impossible d''écrire {0} — il faudra créer les raccourcis à la main'
+        'err.init' = 'impossible de créer l''espace de travail (nysh a renvoyé {0})'
+        'eng.get' = '⬇ moteurs de lecture (torch pour votre carte, ~2,5–4 Go — quelques minutes)…'
+        'eng.fail' = '⚠ les moteurs de lecture n''ont pas été construits (nysh a renvoyé {0}) — relancer : nysh htr install'
+        'models.get' = '⬇ modèles d''écriture…'
+        'models.fail' = '⚠ les modèles d''écriture n''ont pas été téléchargés (nysh a renvoyé {0}) — relancer : nysh models get'
+        'eng.err' = '⚠ les moteurs de lecture n''ont pas été livrés : {0}'
+        'eng.retry' = '  relancer : nysh htr install, puis nysh models get'
+        'eng.foreign' = 'ℹ les moteurs de lecture sont indiqués par NYSHPORKA_HTR_VENV — je n''y touche pas : {0}'
+        'eng.ok' = '✓ moteurs de lecture et modèles d''écriture'
+        'cat.list' = '⚠ impossible de lire la liste des versions GitHub — réseau ou limite d''API'
+        'cat.none' = '⚠ aucune version catalog-* trouvée'
+        'cat.nosum' = '⚠ version {0} : fichier sans somme de contrôle sha256 — téléchargement sans vérification impossible'
+        'cat.nourl' = '⚠ version {0} : lien de téléchargement introuvable'
+        'cat.dl' = '⚠ impossible de télécharger le pack de catalogues ({0})'
+        'cat.sum' = '⚠ la somme de contrôle du pack de catalogues ({0}) ne correspond pas — pas d''installation'
+        'cat.ok' = '✓ pack de catalogues {0} : installé (sha256 vérifié)'
+        'cat.refused' = '⚠ « nysh catalog install » a refusé le pack {0}'
+        'cat.err' = '⚠ le pack de catalogues de la version n''a pas été installé : {0}'
+        'cat.skip' = 'ℹ catalogues non installés (-NoCatalog / NYSH_NO_CATALOG=1)'
+        'cat.missing' = '⚠ pas de catalogues à proximité — la recherche dans les catalogues d''archives sera indisponible'
+        'cat.take' = '  à prendre : {0}'
+        'cat.next' = '  ensuite :  nysh catalog install --from <zip téléchargé>'
+        'desk.ok' = '✓ raccourci sur le bureau'
+        'trace.fail' = '⚠ impossible d''écrire {0} — « nysh uninstall » demandera les chemins'
+        'sum.title' = 'Modifié sur cette machine :'
+        'sum.dir' = '  dossier     {0}'
+        'sum.bin' = '  commande    {0}'
+        'sum.file' = '  fichier     {0}'
+        'sum.path' = '  PATH        entrée « {0} » dans les variables d''environnement de l''utilisateur'
+        'sum.space' = '  espace de recherche — le dossier que « nysh init » vient d''indiquer'
+        'sum.undo' = '  tout annuler : nysh uninstall'
+        'done' = 'Terminé.'
+        'reopen.1' = '  ⚠ Fermez cette fenêtre et ouvrez-en une nouvelle — les commandes ci-dessous y fonctionnent.'
+        'reopen.2' = '    Dans les fenêtres ouvertes avant l''installation, « nysh » restera introuvable.'
+        'reopen.3' = '    Si c''est encore le cas dans la nouvelle, redémarrez l''ordinateur.'
+        'next' = 'Ensuite :'
+        'next.serve' = '  nysh serve            ouvrir l''application dans le navigateur'
+        'next.look' = '  nysh look <dossier>   voir de quels scans il s''agit'
+        'next.htr' = '  nysh htr install      construire les moteurs de lecture (torch pour votre carte)'
+        'next.models' = '  nysh models get       télécharger les modèles d''écriture'
+        'next.doctor' = '  nysh doctor           vérifier ce qui casse en silence'
+        'trap.error' = 'Erreur : {0}'
+        'trap.line' = '   (ligne {0} de l''installeur)'
+        'trap.tail' = 'Dernières lignes de la sortie :'
+        'trap.log' = 'Journal complet : {0}'
+        'trap.title' = 'Nyshporka : l''installation ne s''est pas terminée'
+        'brand.name' = 'Nyshporka'
+        'lnk.desc' = 'Lecture de dossiers d''archives manuscrits'
+        'err.448' = 'Windows ne fait pas confiance au dossier où uv installe Python (os error 448 : AppData ou OneDrive redirigé). Réinstallez Nyshporka avec le dossier des interpréteurs hors du profil : windows.ps1 -PythonDir D:\Nyshporka\python'
+    }
+    de = @{
+        'brand.tag' = 'Liest Handschriften. Bringt mit, was sie findet.'
+        'hdr.dir' = '  Ordner: {0}'
+        'dry.uv.have' = 'uv                 schon vorhanden: {0}'
+        'dry.uv.get' = 'uv                 wird nach {0} heruntergeladen'
+        'dry.python' = 'Python 3.12        verwaltet, in {0}; weder in PATH noch in der Registrierung'
+        'dry.app' = 'Nyshporka          {0}'
+        'dry.preset' = 'Set {0}'
+        'dry.app2' = '                   in der isolierten Umgebung des Tools uv'
+        'dry.cmd' = 'Befehl nysh        {0}'
+        'dry.trace' = 'Installer-Spur     {0}'
+        'dry.space' = 'Forschungsraum     Ordner, den „nysh init“ nennt'
+        'dry.eng1' = 'Leseengines        nysh htr install — torch für NVIDIA-Grafikkarte, wenn der Treiber'
+        'dry.eng2' = '                   eine meldet, sonst für den Prozessor (~2,5–4 GB, im Raum-Ordner)'
+        'dry.models' = 'Schriftmodelle     nysh models get (~215 MB, sha256 wird geprüft)'
+        'dry.why.own' = 'eigene, NYSHPORKA_HTR_VENV={0}'
+        'dry.eng.no' = 'Leseengines        werden nicht installiert ({0})'
+        'dry.cat.no' = 'Kataloge           werden nicht installiert (-NoCatalog / NYSH_NO_CATALOG=1)'
+        'dry.cat' = 'Kataloge           aus dem letzten Release catalog-* (sha256 geprüft), falls nicht vorhanden'
+        'dry.path.no' = 'Benutzer-PATH      bleibt unberührt (NYSH_NO_MODIFY_PATH=1)'
+        'dry.path' = 'Benutzer-PATH      ein Eintrag „{0}“, falls der Ordner dort noch fehlt'
+        'dry.done' = 'Es wurde nichts getan — das ist -DryRun.'
+        'admin.1' = '  ⚠ Start mit Administratorrechten. Alles landet im Benutzerprofil'
+        'admin.3' = '    Wenn jemand anderes hier arbeitet, bekommt er weder den Befehl nysh noch'
+        'admin.4' = '    die Verknüpfungen; installieren Sie unter seinem Konto.'
+        'preflight' = 'Vorabprüfung: Programme aus dem Benutzerprofil ({0}) LASSEN SICH auf diesem Rechner NICHT STARTEN — vermutlich eine AppLocker/SRP-Richtlinie oder eine ASR-Regel. Nyshporka wird ohne Administratorrechte ins Profil installiert und würde hier nicht laufen. Möglichkeiten: den Installer per Rechtsklick → „Als Administrator ausführen“ starten (dann landet alles im Profil des Administrators) oder die IT bitten, das Ausführen aus {0} und {1} zu erlauben.'
+        'uv.have' = '✓ uv schon vorhanden: {0}'
+        'err.uv' = 'uv wurde nicht nach {0} installiert'
+        'err.python' = 'Python 3.12 konnte nicht installiert werden (uv gab {0} zurück)'
+        'app.get' = '⬇ Nyshporka ({0})…'
+        'err.app' = '{0} konnte nicht installiert werden (uv gab {1} zurück)'
+        'app.ok' = '✓ Nyshporka'
+        'nocmd.1' = '✗ Paket installiert, aber der Befehl fehlt: {0}'
+        'nocmd.2' = '  bitte senden Sie die Ausgabe von `uv tool list` — das ist ein Fehler des Installers,'
+        'nocmd.3' = '  nicht Ihres Rechners'
+        'err.nocmd' = 'nysh nach der Installation nicht gefunden'
+        'info.fail' = '⚠ {0} konnte nicht geschrieben werden — Verknüpfungen müssen von Hand angelegt werden'
+        'err.init' = 'Arbeitsbereich konnte nicht angelegt werden (nysh gab {0} zurück)'
+        'eng.get' = '⬇ Leseengines (torch für Ihre Karte, ~2,5–4 GB — einige Minuten)…'
+        'eng.fail' = '⚠ Leseengines wurden nicht gebaut (nysh gab {0} zurück) — erneut: nysh htr install'
+        'models.get' = '⬇ Schriftmodelle…'
+        'models.fail' = '⚠ Schriftmodelle wurden nicht geladen (nysh gab {0} zurück) — erneut: nysh models get'
+        'eng.err' = '⚠ Leseengines wurden nicht bereitgestellt: {0}'
+        'eng.retry' = '  erneut: nysh htr install, danach nysh models get'
+        'eng.foreign' = 'ℹ Leseengines sind per NYSHPORKA_HTR_VENV festgelegt — ich fasse sie nicht an: {0}'
+        'eng.ok' = '✓ Leseengines und Schriftmodelle'
+        'cat.list' = '⚠ GitHub-Release-Liste konnte nicht gelesen werden — Netzwerk oder API-Limit'
+        'cat.none' = '⚠ kein Release catalog-* gefunden'
+        'cat.nosum' = '⚠ Release {0}: Datei ohne sha256-Prüfsumme — Download ohne Prüfung nicht erlaubt'
+        'cat.nourl' = '⚠ Release {0}: Download-Link nicht gefunden'
+        'cat.dl' = '⚠ Katalogpaket konnte nicht heruntergeladen werden ({0})'
+        'cat.sum' = '⚠ Prüfsumme des Katalogpakets ({0}) stimmt nicht — keine Installation'
+        'cat.ok' = '✓ Katalogpaket {0}: installiert (sha256 geprüft)'
+        'cat.refused' = '⚠ „nysh catalog install“ hat das Paket {0} abgelehnt'
+        'cat.err' = '⚠ Katalogpaket aus dem Release wurde nicht installiert: {0}'
+        'cat.skip' = 'ℹ Kataloge werden nicht installiert (-NoCatalog / NYSH_NO_CATALOG=1)'
+        'cat.missing' = '⚠ keine Kataloge in der Nähe — die Suche in den Archivkatalogen ist nicht verfügbar'
+        'cat.take' = '  holen: {0}'
+        'cat.next' = '  danach:  nysh catalog install --from <heruntergeladene zip>'
+        'desk.ok' = '✓ Desktop-Verknüpfung'
+        'trace.fail' = '⚠ {0} konnte nicht geschrieben werden — „nysh uninstall“ fragt dann nach den Pfaden'
+        'sum.title' = 'Auf diesem Rechner geändert:'
+        'sum.dir' = '  Ordner      {0}'
+        'sum.bin' = '  Befehl      {0}'
+        'sum.file' = '  Datei       {0}'
+        'sum.path' = '  PATH        Eintrag „{0}“ in den Umgebungsvariablen des Benutzers'
+        'sum.space' = '  Forschungsraum — der Ordner, den „nysh init“ eben genannt hat'
+        'sum.undo' = '  alles rückgängig machen: nysh uninstall'
+        'done' = 'Fertig.'
+        'reopen.1' = '  ⚠ Schließen Sie dieses Fenster und öffnen Sie ein neues — die Befehle unten funktionieren dort.'
+        'reopen.2' = '    In Fenstern, die vor der Installation geöffnet wurden, wird „nysh“ nicht gefunden.'
+        'reopen.3' = '    Wird es auch im neuen nicht gefunden, starten Sie den Computer neu.'
+        'next' = 'Weiter:'
+        'next.serve' = '  nysh serve            die App im Browser öffnen'
+        'next.look' = '  nysh look <Ordner>    ansehen, was das für Scans sind'
+        'next.htr' = '  nysh htr install      Leseengines bauen (torch für Ihre Karte)'
+        'next.models' = '  nysh models get       Schriftmodelle herunterladen'
+        'next.doctor' = '  nysh doctor           prüfen, was still kaputtgeht'
+        'trap.error' = 'Fehler: {0}'
+        'trap.line' = '   (Zeile {0} des Installers)'
+        'trap.tail' = 'Letzte Ausgabezeilen:'
+        'trap.log' = 'Vollständiges Protokoll: {0}'
+        'trap.title' = 'Nyshporka: Installation nicht abgeschlossen'
+        'brand.name' = 'Nyshporka'
+        'lnk.desc' = 'Lesen handschriftlicher Archivakten'
+        'err.448' = 'Windows vertraut dem Ordner nicht, in den uv Python installiert (os error 448: umgeleitetes AppData oder OneDrive). Installieren Sie Nyshporka neu, mit dem Interpreter-Ordner außerhalb des Profils: windows.ps1 -PythonDir D:\Nyshporka\python'
+    }
+    ru = @{
+        'brand.tag' = 'Читает рукописи. Приносит найденное.'
+        'hdr.dir' = '  папка: {0}'
+        'dry.uv.have' = 'uv                 уже есть: {0}'
+        'dry.uv.get' = 'uv                 будет скачан в {0}'
+        'dry.python' = 'Python 3.12        управляемый, в {0}; ни в PATH, ни в реестре его не будет'
+        'dry.app' = 'Нышпорка           {0}'
+        'dry.preset' = 'набор {0}'
+        'dry.app2' = '                   в изолированной среде инструмента uv'
+        'dry.cmd' = 'команда nysh       {0}'
+        'dry.trace' = 'след установщика   {0}'
+        'dry.space' = 'папка исследований папка, которую назовёт «nysh init»'
+        'dry.eng1' = 'движки чтения      nysh htr install — torch под видеокарту NVIDIA, если драйвер её'
+        'dry.eng2' = '                   показывает, иначе под процессор (~2.5–4 ГБ, в папке пространства)'
+        'dry.models' = 'модели письма      nysh models get (~215 МБ, sha256 сверяется)'
+        'dry.why.own' = 'свои, NYSHPORKA_HTR_VENV={0}'
+        'dry.eng.no' = 'движки чтения      не ставятся ({0})'
+        'dry.cat.no' = 'справочники        не ставятся (-NoCatalog / NYSH_NO_CATALOG=1)'
+        'dry.cat' = 'справочники        из последнего релиза catalog-* (сверка sha256), если рядом нет'
+        'dry.path.no' = 'PATH пользователя  не трогается (NYSH_NO_MODIFY_PATH=1)'
+        'dry.path' = 'PATH пользователя  одна запись «{0}», если папки там ещё нет'
+        'dry.done' = 'Ничего не сделано — это -DryRun.'
+        'admin.1' = '  ⚠ Запуск с правами администратора. Всё встанет в профиль пользователя'
+        'admin.3' = '    Если работать будет другой пользователь, ему команда nysh и ярлыки'
+        'admin.4' = '    не достанутся; устанавливайте из-под его учётной записи.'
+        'preflight' = 'Предпроверка: программы из профиля пользователя ({0}) на этом компьютере НЕ ЗАПУСКАЮТСЯ — похоже на политику AppLocker/SRP или правило ASR. Нышпорка ставится в профиль без прав администратора, поэтому здесь она работать не будет. Варианты: запустить установщик правой кнопкой мыши → «Запуск от имени администратора» (тогда всё встанет в профиль администратора) или попросить ИТ разрешить запуск из {0} и {1}.'
+        'uv.have' = '✓ uv уже есть: {0}'
+        'err.uv' = 'uv не установился в {0}'
+        'err.python' = 'не удалось установить Python 3.12 (uv вернул {0})'
+        'app.get' = '⬇ Нышпорка ({0})…'
+        'err.app' = 'не удалось установить {0} (uv вернул {1})'
+        'app.ok' = '✓ Нышпорка'
+        'nocmd.1' = '✗ пакет установлен, но команды нет: {0}'
+        'nocmd.2' = '  пришлите, пожалуйста, вывод `uv tool list` — это ошибка установщика,'
+        'nocmd.3' = '  а не вашего компьютера'
+        'err.nocmd' = 'nysh не найден после установки'
+        'info.fail' = '⚠ не удалось записать {0} — ярлыки придётся создать вручную'
+        'err.init' = 'не удалось создать рабочее пространство (nysh вернул {0})'
+        'eng.get' = '⬇ движки чтения (torch под вашу карту, ~2.5–4 ГБ — несколько минут)…'
+        'eng.fail' = '⚠ движки чтения не собрались (nysh вернул {0}) — повторить: nysh htr install'
+        'models.get' = '⬇ модели письма…'
+        'models.fail' = '⚠ модели письма не загрузились (nysh вернул {0}) — повторить: nysh models get'
+        'eng.err' = '⚠ движки чтения не доставлены: {0}'
+        'eng.retry' = '  повторить: nysh htr install, затем nysh models get'
+        'eng.foreign' = 'ℹ движки чтения заданы переменной NYSHPORKA_HTR_VENV — не трогаю: {0}'
+        'eng.ok' = '✓ движки чтения и модели письма'
+        'cat.list' = '⚠ не удалось прочитать список релизов GitHub — сеть или лимит API'
+        'cat.none' = '⚠ ни одного релиза catalog-* не найдено'
+        'cat.nosum' = '⚠ релиз {0}: файл без контрольной суммы sha256 — скачивать без сверки нельзя'
+        'cat.nourl' = '⚠ релиз {0}: не найдена ссылка для скачивания'
+        'cat.dl' = '⚠ не удалось скачать пакет справочников ({0})'
+        'cat.sum' = '⚠ контрольная сумма пакета справочников ({0}) не совпала — не устанавливаю'
+        'cat.ok' = '✓ пакет справочников {0}: установлен (sha256 сверен)'
+        'cat.refused' = '⚠ «nysh catalog install» отклонил пакет {0}'
+        'cat.err' = '⚠ пакет справочников из релиза не установлен: {0}'
+        'cat.skip' = 'ℹ справочники не ставятся (-NoCatalog / NYSH_NO_CATALOG=1)'
+        'cat.missing' = '⚠ справочников рядом нет — поиск по каталогам архивов будет недоступен'
+        'cat.take' = '  взять: {0}'
+        'cat.next' = '  далее:  nysh catalog install --from <скачанный zip>'
+        'desk.ok' = '✓ ярлык на рабочем столе'
+        'trace.fail' = '⚠ не удалось записать {0} — «nysh uninstall» будет спрашивать пути'
+        'sum.title' = 'Изменено на этом компьютере:'
+        'sum.dir' = '  папка       {0}'
+        'sum.bin' = '  команда     {0}'
+        'sum.file' = '  файл        {0}'
+        'sum.path' = '  PATH        запись «{0}» в переменных среды пользователя'
+        'sum.space' = '  папка исследований — папка, которую только что назвал «nysh init»'
+        'sum.undo' = '  отменить всё это: nysh uninstall'
+        'done' = 'Готово.'
+        'reopen.1' = '  ⚠ Закройте это окно и откройте новое — команды ниже работают там.'
+        'reopen.2' = '    В окнах, открытых до установки, «nysh» не найдётся.'
+        'reopen.3' = '    Если и в новом не найдётся — перезагрузите компьютер.'
+        'next' = 'Дальше:'
+        'next.serve' = '  nysh serve            открыть приложение в браузере'
+        'next.look' = '  nysh look <папка>     посмотреть, что за сканы'
+        'next.htr' = '  nysh htr install      собрать движки чтения (torch под вашу карту)'
+        'next.models' = '  nysh models get       скачать модели письма'
+        'next.doctor' = '  nysh doctor           проверить то, что ломается тихо'
+        'trap.error' = 'Ошибка: {0}'
+        'trap.line' = '   (строка {0} установщика)'
+        'trap.tail' = 'Последние строки вывода:'
+        'trap.log' = 'Полный журнал: {0}'
+        'trap.title' = 'Нышпорка: установка не завершилась'
+        'brand.name' = 'Нышпорка'
+        'lnk.desc' = 'Чтение рукописных архивных дел'
+        'err.448' = 'Windows не доверяет папке, куда uv ставит Python (os error 448: перенаправленный AppData или OneDrive). Установите Нышпорку заново с папкой интерпретаторов вне профиля: windows.ps1 -PythonDir D:\Nyshporka\python'
+    }
+}
+
+# Повідомлення поточною мовою; якщо ключа бракує — українською.
+function M {
+    param([Parameter(Mandatory)][string] $Key,
+          [Parameter(ValueFromRemainingArguments)] [object[]] $Rest)
+    $text = $Msg[$Lang][$Key]
+    if (-not $text) { $text = $Msg['uk'][$Key] }
+    if ($Rest) { $text -f $Rest } else { $text }
+}
 
 # Звідки брати пак довідників, якщо його немає поруч. Та сама адреса, що її
 # друкує `nysh catalog list` на порожньому каталозі (`catalog.store.RELEASES_URL`).
@@ -82,6 +721,7 @@ if (-not $PythonDir) { $PythonDir = Join-Path $Home_ 'python' }
 # Дослівно той самий текст, що `UNTRUSTED_MOUNT_HINT` у `setup/update.py`:
 # інсталятор і `nysh htr install` при 448 радять одне.
 $Untrusted448 = 'Windows не довіряє теці, куди uv ставить Python (os error 448: перенаправлений AppData чи OneDrive). Поставте Нишпорку наново з текою інтерпретаторів поза профілем: windows.ps1 -PythonDir D:\Nyshporka\python'
+if ($Lang -ne 'uk') { $Untrusted448 = M 'err.448' }
 
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
@@ -99,19 +739,19 @@ Remove-Item -LiteralPath $ErrorFile -Force -ErrorAction SilentlyContinue
 
 trap {
     $failure = $_
-    $lines = @('Помилка: ' + $failure.Exception.Message)
+    $lines = @((M 'trap.error' $failure.Exception.Message))
     if ($failure.InvocationInfo -and $failure.InvocationInfo.ScriptLineNumber) {
-        $lines += ('   (рядок ' + $failure.InvocationInfo.ScriptLineNumber + ' інсталятора)')
+        $lines += (M 'trap.line' $failure.InvocationInfo.ScriptLineNumber)
     }
     try { Stop-Transcript | Out-Null } catch {}
     # Справжня причина — те, що написав uv або nysh перед «не вдалося». Береться
     # з буфера `Invoke-Logged`; транскрипт тут не годиться — він не бачить
     # виводу exe в консоль, а його заголовок з'їв би весь хвіст.
     $tail = @($script:NativeTail | Where-Object { $_ -and $_.Trim() } | Select-Object -Last 15)
-    if ($tail.Count) { $lines += ''; $lines += 'Останні рядки виводу:'; $lines += $tail }
+    if ($tail.Count) { $lines += ''; $lines += (M 'trap.tail'); $lines += $tail }
     if ($script:PreflightNote) { $lines += ''; $lines += $script:PreflightNote }
     $lines += ''
-    $lines += ('Повний журнал: ' + $LogFile)
+    $lines += (M 'trap.log' $LogFile)
     $text = $lines -join [Environment]::NewLine
     Write-Host ''
     Write-Host $text -ForegroundColor Red
@@ -121,7 +761,7 @@ trap {
     if ($Wizard) {
         try {
             (New-Object -ComObject WScript.Shell).Popup(
-                $text, 0, 'Нишпорка: установлення не завершилось', 16) | Out-Null
+                $text, 0, (M 'trap.title'), 16) | Out-Null
         } catch {}
     }
     exit 1
@@ -234,46 +874,46 @@ $env:PYTHONIOENCODING = 'utf-8'
 # і це звіряє тест. Інсталятор — найперша поверхня, яку бачить людина, і
 # власна лапка тут означала б, що бренд розходиться з першого ж екрана.
 Say "  ● ● ● ●" DarkYellow
-Say "  ╭─ ◍ ─╮   Нишпорка" DarkYellow
-Say "  ╰─────╯   Читає рукопис. Приносить знайдене." DarkGray
+Say ("  ╭─ ◍ ─╮   " + (M 'brand.name')) DarkYellow
+Say ("  ╰─────╯   " + (M 'brand.tag')) DarkGray
 Say ""
-Say "  тека: $Home_" DarkGray
+Say (M 'hdr.dir' $Home_) DarkGray
 
 if ($DryRun) {
     $uvNow = (Get-Command uv -ErrorAction SilentlyContinue).Source
     $binGuess = if ($uvNow) { Get-NativeLine $uvNow tool dir --bin } else { $null }
     if (-not $binGuess) { $binGuess = Join-Path $env:USERPROFILE '.local\bin' }
     Say ""
-    if ($uvNow) { Say "uv                 уже є: $uvNow" }
-    else         { Say "uv                 буде завантажено в $(Join-Path $Home_ 'uv')" }
-    Say "Python 3.12        керований, у $PythonDir; ні в PATH, ні в реєстрі його не буде"
-    Say "Нишпорка           $(if ($Source) { $Source } else { "набір $Preset" })"
-    Say "                   в ізольованому середовищі інструмента uv"
-    Say "команда nysh       $(Join-Path $binGuess 'nysh.exe')"
-    Say "слід інсталятора   $(Join-Path $Home_ 'install-info.ini')"
+    if ($uvNow) { Say (M 'dry.uv.have' $uvNow) }
+    else         { Say (M 'dry.uv.get' (Join-Path $Home_ 'uv')) }
+    Say (M 'dry.python' $PythonDir)
+    Say (M 'dry.app' $(if ($Source) { $Source } else { M 'dry.preset' $Preset }))
+    Say (M 'dry.app2')
+    Say (M 'dry.cmd' (Join-Path $binGuess 'nysh.exe'))
+    Say (M 'dry.trace' (Join-Path $Home_ 'install-info.ini'))
     Say "                   $(Join-Path $Home_ 'install-trace.txt')"
-    Say "простір досліджень тека, яку назве «nysh init»"
+    Say (M 'dry.space')
     if ($WantEngines) {
-        Say "рушії читання      nysh htr install — torch під відеокарту NVIDIA, якщо драйвер її"
-        Say "                   показує, інакше під процесор (~2.5–4 ГБ, у теці простору)"
-        Say "моделі письма      nysh models get (~215 МБ, sha256 звіряється)"
+        Say (M 'dry.eng1')
+        Say (M 'dry.eng2')
+        Say (M 'dry.models')
     } else {
-        $why = if ($EnginesForeign) { "свої, NYSHPORKA_HTR_VENV=$env:NYSHPORKA_HTR_VENV" }
-               elseif ($NoEngines) { '-NoEngines' } else { "набір $Preset" }
-        Say "рушії читання      не ставляться ($why)"
+        $why = if ($EnginesForeign) { M 'dry.why.own' $env:NYSHPORKA_HTR_VENV }
+               elseif ($NoEngines) { '-NoEngines' } else { M 'dry.preset' $Preset }
+        Say (M 'dry.eng.no' $why)
     }
     if ($NoCatalog) {
-        Say "довідники          не ставляться (-NoCatalog / NYSH_NO_CATALOG=1)"
+        Say (M 'dry.cat.no')
     } else {
-        Say "довідники          з останнього релізу catalog-* (звірка sha256), якщо немає поруч"
+        Say (M 'dry.cat')
     }
     if ($env:NYSH_NO_MODIFY_PATH -eq '1') {
-        Say "PATH користувача   не чіпається (NYSH_NO_MODIFY_PATH=1)"
+        Say (M 'dry.path.no')
     } else {
-        Say "PATH користувача   один допис «$binGuess», якщо теки там ще немає"
+        Say (M 'dry.path' $binGuess)
     }
     Say ""
-    Say "Нічого не зроблено — це -DryRun." Cyan
+    Say (M 'dry.done') Cyan
     exit 0
 }
 
@@ -301,10 +941,10 @@ $elevated = ([Security.Principal.WindowsPrincipal]$identity).IsInRole(
     [Security.Principal.WindowsBuiltInRole]::Administrator)
 if ($elevated) {
     Say ""
-    Say "  ⚠ Запуск із правами адміністратора. Усе стане в профіль користувача" Yellow
+    Say (M 'admin.1') Yellow
     Say "    $($identity.Name) ($env:USERPROFILE)." Yellow
-    Say "    Якщо працювати буде інший користувач — йому команда nysh і ярлики" DarkGray
-    Say "    не дістануться; встановлюйте з-під його облікового запису." DarkGray
+    Say (M 'admin.3') DarkGray
+    Say (M 'admin.4') DarkGray
 }
 
 # Чи запускаються програми з профілю взагалі. Проба — підписаний системний exe,
@@ -321,14 +961,7 @@ if (Test-Path -LiteralPath $probeSrc) {
         Copy-Item -LiteralPath $probeSrc -Destination $probe -Force
         $seen = Get-NativeLine $probe /c echo nysh-probe-ok
         if ($seen -ne 'nysh-probe-ok') {
-            $script:PreflightNote = (
-                "Передперевірка: програми з профілю користувача ($Home_) на цій машині " +
-                "НЕ ЗАПУСКАЮТЬСЯ — схоже на політику AppLocker/SRP або правило ASR. " +
-                "Нишпорка ставиться в профіль без прав адміністратора, тож тут вона " +
-                "не працюватиме. Варіанти: запустити інсталятор правою кнопкою миші " +
-                "→ «Запустити від імені адміністратора» (тоді все стане в профіль " +
-                "адміністратора), або попросити ІТ дозволити запуск із $Home_ і " +
-                "$env:LOCALAPPDATA\uv.")
+            $script:PreflightNote = M 'preflight' $Home_ "$env:LOCALAPPDATA\uv"
             Say ""
             Say "  ⚠ $($script:PreflightNote)" Yellow
         }
@@ -349,7 +982,7 @@ $uv    = Join-Path $uvDir 'uv.exe'
 if (-not (Test-Path $uv)) {
     $existing = (Get-Command uv -ErrorAction SilentlyContinue).Source
     if ($existing) {
-        Say "✓ uv уже є: $existing" Green
+        Say (M 'uv.have' $existing) Green
         $uv = $existing
     } else {
         Say "⬇ uv…" DarkGray
@@ -369,7 +1002,7 @@ if (-not (Test-Path $uv)) {
         # Знайдено прогоном `install/unix.sh` у контейнері: установлення
         # проходило «успішно», а в новій оболонці команда не знаходилась.
         Remove-Item Env:UV_NO_MODIFY_PATH -ErrorAction SilentlyContinue
-        if (-not (Test-Path $uv)) { throw "uv не встановився у $uvDir" }
+        if (-not (Test-Path $uv)) { throw (M 'err.uv' $uvDir) }
         Trace 'dir' $uvDir
         Say "✓ uv" Green
     }
@@ -402,21 +1035,21 @@ $script:NativeTail.Clear()
 $rc = Invoke-Logged $uv python install 3.12
 if ($rc -ne 0) {
     if (($script:NativeTail -join "`n") -match 'os error 448') { throw $Untrusted448 }
-    throw "не вдалося встановити Python 3.12 (uv повернув $rc)"
+    throw (M 'err.python' $rc)
 }
 Say "✓ Python" Green
 
 # ── 3. застосунок ────────────────────────────────────────────────────────────
 # `uv tool install` кладе застосунок у власне ізольоване середовище й дає
 # консольну команду. Це саме те, що треба: жодних конфліктів із чужими пакетами.
-Say "⬇ Нишпорка ($Source)…" DarkGray
+Say (M 'app.get' $Source) DarkGray
 $script:NativeTail.Clear()
 $rc = Invoke-Logged $uv tool install --python 3.12 --force $Source
 if ($rc -ne 0) {
     if (($script:NativeTail -join "`n") -match 'os error 448') { throw $Untrusted448 }
-    throw "не вдалося встановити $Source (uv повернув $rc)"
+    throw (M 'err.app' $Source $rc)
 }
-Say "✓ Нишпорка" Green
+Say (M 'app.ok') Green
 
 # ── 3½. де команда й чи можна її набрати ─────────────────────────────────────
 # 🔴 PATH тут лагодиться ДВІЧІ, і це дві РІЗНІ речі.
@@ -460,10 +1093,10 @@ if (-not $nysh) { $nysh = Join-Path $binDir 'nysh.exe' }
 # застосунок не знайшовся там, де мав лежати.
 if (-not (Test-Path $nysh)) {
     Say ''
-    Say "✗ пакет установлено, але команди немає: $nysh" Red
-    Say '  надішліть, будь ласка, вивід `uv tool list` — це вада інсталятора,' DarkGray
-    Say '  а не вашої машини' DarkGray
-    throw 'nysh не знайдено після встановлення'
+    Say (M 'nocmd.1' $nysh) Red
+    Say (M 'nocmd.2') DarkGray
+    Say (M 'nocmd.3') DarkGray
+    throw (M 'err.nocmd')
 }
 Trace 'bin' $nysh
 
@@ -484,7 +1117,7 @@ try {
     @('[nyshporka]', "nysh=$nysh", "uv=$uv", "preset=$Preset", "python_dir=$PythonDir") |
         Set-Content -LiteralPath $info -Encoding Unicode
 } catch {
-    Say "⚠ не вдалося записати $info — ярлики доведеться створити вручну" Yellow
+    Say (M 'info.fail' $info) Yellow
 }
 Trace 'file' $info
 
@@ -498,7 +1131,7 @@ Say ""
 $rc = Invoke-Logged $nysh init --yes --preset $Preset
 # 🔴 Простір мусить постати. Без нього застосунок не має де жити, і мовчазний
 # провал тут дав би «встановлено» на порожньому місці.
-if ($rc -ne 0) { throw "не вдалося створити робочий простір (nysh повернув $rc)" }
+if ($rc -ne 0) { throw (M 'err.init' $rc) }
 
 # ── 4½. рушії читання й моделі письма ────────────────────────────────────────
 # 🔴 Доти інсталятор лишав їх людині рядком «Далі: nysh models get», а torch під
@@ -514,23 +1147,23 @@ function Install-Engines {
     $ok = $true
     try {
         Say ""
-        Say "⬇ рушії читання (torch під вашу карту, ~2.5–4 ГБ — кілька хвилин)…" DarkGray
+        Say (M 'eng.get') DarkGray
         $rc = Invoke-Logged $Nysh htr install
         if ($rc -ne 0) {
-            Say "⚠ рушії читання не зібрались (nysh повернув $rc) — повторити: nysh htr install" Yellow
+            Say (M 'eng.fail' $rc) Yellow
             $ok = $false
         }
         # Ваги — незалежно від рушіїв: вони спільні на машину й знадобляться,
         # щойно рушії доставлять.
-        Say "⬇ моделі письма…" DarkGray
+        Say (M 'models.get') DarkGray
         $rc = Invoke-Logged $Nysh models get
         if ($rc -ne 0) {
-            Say "⚠ моделі письма не завантажились (nysh повернув $rc) — повторити: nysh models get" Yellow
+            Say (M 'models.fail' $rc) Yellow
             $ok = $false
         }
     } catch {
-        Say "⚠ рушії читання не доставлено: $($_.Exception.Message)" Yellow
-        Say "  повторити: nysh htr install, потім nysh models get" DarkGray
+        Say (M 'eng.err' $_.Exception.Message) Yellow
+        Say (M 'eng.retry') DarkGray
         $ok = $false
     }
     return $ok
@@ -539,11 +1172,11 @@ function Install-Engines {
 $EnginesOk = $false
 if ($EnginesForeign) {
     Say ""
-    Say "ℹ рушії читання вказано змінною NYSHPORKA_HTR_VENV — не чіпаю: $env:NYSHPORKA_HTR_VENV" DarkGray
+    Say (M 'eng.foreign' $env:NYSHPORKA_HTR_VENV) DarkGray
 }
 if ($WantEngines) {
     $EnginesOk = Install-Engines -Nysh $nysh
-    if ($EnginesOk) { Say "✓ рушії читання й моделі письма" Green }
+    if ($EnginesOk) { Say (M 'eng.ok') Green }
 }
 
 # ⚠ А ось код виходу `doctor` навмисно НЕ перевіряється — рівно як `|| true` в
@@ -597,7 +1230,7 @@ function Install-CatalogFromRelease {
                 # Мережа впала не на першій сторінці — уже прочитане чесніше
                 # за повну відмову: найновіший `catalog-*` може бути серед нього.
                 if ($page -gt 1) { break }
-                Say "⚠ не вдалось прочитати перелік релізів GitHub — мережа чи ліміт API" Yellow
+                Say (M 'cat.list') Yellow
                 return $false
             }
             if ($batch.Count -eq 0) { break }     # порожня сторінка — кінець списку
@@ -614,20 +1247,20 @@ function Install-CatalogFromRelease {
             } |
             Sort-Object Tag -Descending | Select-Object -First 1
         if (-not $best) {
-            Say "⚠ жодного релізу catalog-* не знайдено" Yellow
+            Say (M 'cat.none') Yellow
             return $false
         }
         $tag = $best.Tag
         # `digest` — це `sha256:<64 hex>`; форма звіряється ДО завантаження,
         # щоб не тягнути мегабайти заради асета, який однаково не звірити.
         if (-not ("$($best.Asset.digest)" -match '^sha256:([0-9a-fA-F]{64})$')) {
-            Say "⚠ реліз ${tag}: асет без контрольної суми sha256 — качати без звірки не можна" Yellow
+            Say (M 'cat.nosum' $tag) Yellow
             return $false
         }
         $want = $Matches[1]
         $url = "$($best.Asset.browser_download_url)"
         if (-not $url) {
-            Say "⚠ реліз ${tag}: не знайдено посилання на завантаження" Yellow
+            Say (M 'cat.nourl' $tag) Yellow
             return $false
         }
 
@@ -636,7 +1269,7 @@ function Install-CatalogFromRelease {
         try {
             Invoke-WebRequest -Uri $url -OutFile $zip -TimeoutSec 120 -UseBasicParsing
         } catch {
-            Say "⚠ не вдалось завантажити пак довідників ($tag)" Yellow
+            Say (M 'cat.dl' $tag) Yellow
             return $false
         }
         # ⚠ .NET, а не `Get-FileHash`: 5.1, запущений із вікна PowerShell 7,
@@ -649,20 +1282,20 @@ function Install-CatalogFromRelease {
         # `-ne` у PowerShell байдужий до регістру: .NET дає ВЕЛИКІ літери,
         # GitHub — малі.
         if ($got -ne $want) {
-            Say "⚠ контрольна сума пака довідників ($tag) не збіглася — не встановлюю" Yellow
+            Say (M 'cat.sum' $tag) Yellow
             return $false
         }
         $pack = Join-Path $tmp 'pack'
         Expand-Archive -LiteralPath $zip -DestinationPath $pack -Force
         $rc = Invoke-Logged $Nysh catalog install --from $pack
         if ($rc -eq 0) {
-            Say "✓ пак довідників ${tag}: встановлено (sha256 звірено)" Green
+            Say (M 'cat.ok' $tag) Green
             return $true
         }
-        Say "⚠ «nysh catalog install» відмовив на паку $tag" Yellow
+        Say (M 'cat.refused' $tag) Yellow
         return $false
     } catch {
-        Say "⚠ пак довідників з релізу не поставлено: $($_.Exception.Message)" Yellow
+        Say (M 'cat.err' $_.Exception.Message) Yellow
         return $false
     } finally {
         Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue
@@ -679,7 +1312,7 @@ if ($seed) {
     $null = Invoke-Logged $nysh catalog install --from $tmp
     Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
 } elseif ($NoCatalog) {
-    Say "ℹ довідники не ставляться (-NoCatalog / NYSH_NO_CATALOG=1)" DarkGray
+    Say (M 'cat.skip') DarkGray
 } elseif (Install-CatalogFromRelease -Nysh $nysh) {
     # встановлено — рядок «✓» уже надрукувала сама функція
 } else {
@@ -688,9 +1321,9 @@ if ($seed) {
     # полагодили ваду), тож поруч із інсталятором його не буває НІКОЛИ, якщо
     # людина не зібрала комплект сама. Без адреси цей рядок читався як «щось
     # загубилось при встановленні», а `nysh find` мовчки лишався без каталогів.
-    Say "⚠ довідників поруч немає — пошук по каталогах архівів буде недоступний" Yellow
-    Say "  взяти: $CatalogUrl" DarkGray
-    Say "  далі:  nysh catalog install --from <завантажений zip>"
+    Say (M 'cat.missing') Yellow
+    Say (M 'cat.take' $CatalogUrl) DarkGray
+    Say (M 'cat.next')
 }
 
 # ── 6. ярлик ─────────────────────────────────────────────────────────────────
@@ -701,10 +1334,10 @@ if (-not $NoLauncher) {
     $s.TargetPath = $nysh
     $s.Arguments = 'serve'
     $s.WorkingDirectory = $Home_
-    $s.Description = 'Читання рукописних архівних справ'
+    $s.Description = M 'lnk.desc'
     $s.Save()
     Trace 'file' $lnk
-    Say "✓ ярлик на робочому столі" Green
+    Say (M 'desk.ok') Green
 }
 
 # ── 7. що змінилось на цій машині ────────────────────────────────────────────
@@ -729,26 +1362,26 @@ try {
     }
     (@($kept) + @($Trace)) | Set-Content -LiteralPath $traceFile -Encoding UTF8
 } catch {
-    Say "⚠ не вдалося записати $traceFile — «nysh uninstall» питатиме шляхи" Yellow
+    Say (M 'trace.fail' $traceFile) Yellow
 }
 
 Say ""
-Say "Змінено на цій машині:" Cyan
+Say (M 'sum.title') Cyan
 foreach ($line in $Trace) {
     $kind, $path = $line -split ' ', 2
     switch ($kind) {
-        'dir'  { Say "  тека        $path" DarkGray }
-        'bin'  { Say "  команда     $path" DarkGray }
-        'file' { Say "  файл        $path" DarkGray }
-        'path' { Say "  PATH        допис «$path» у змінні середовища користувача" DarkGray }
+        'dir'  { Say (M 'sum.dir' $path) DarkGray }
+        'bin'  { Say (M 'sum.bin' $path) DarkGray }
+        'file' { Say (M 'sum.file' $path) DarkGray }
+        'path' { Say (M 'sum.path' $path) DarkGray }
         default { Say "  $kind $path" DarkGray }
     }
 }
-Say "  простір досліджень — тека, яку щойно назвав «nysh init»" DarkGray
-Say "  зняти все це: nysh uninstall" DarkGray
+Say (M 'sum.space') DarkGray
+Say (M 'sum.undo') DarkGray
 
 Say ""
-Say "Готово." Cyan
+Say (M 'done') Cyan
 
 # 🔴 Підказка стоїть ПЕРЕД переліком команд і сказана однією фразою, без слова
 # «PATH». Відгук користувача 28.08.2026: «Побачив єдине знайоме слово
@@ -758,20 +1391,20 @@ Say "Готово." Cyan
 # варіант, а не як порада за замовчуванням.
 if ($pathWasMissing) {
     Say ""
-    Say "  ⚠ Закрийте це вікно й відкрийте нове — команди нижче працюють там." Yellow
-    Say "    У вікнах, відкритих до встановлення, «nysh» не знайдеться." DarkGray
-    Say "    Якщо й у новому не знайдеться — перезапустіть комп'ютер." DarkGray
+    Say (M 'reopen.1') Yellow
+    Say (M 'reopen.2') DarkGray
+    Say (M 'reopen.3') DarkGray
 }
 
 Say ""
-Say "Далі:" Cyan
-Say "  nysh serve            відкрити застосунок у браузері"
-Say "  nysh look <тека>      подивитись, що за скани"
+Say (M 'next') Cyan
+Say (M 'next.serve')
+Say (M 'next.look')
 if ($Preset -ne 'catalog' -and -not $EnginesOk -and -not $EnginesForeign) {
-    Say "  nysh htr install      зібрати рушії читання (torch під вашу карту)"
-    Say "  nysh models get       завантажити моделі письма"
+    Say (M 'next.htr')
+    Say (M 'next.models')
 }
-Say "  nysh doctor           перевірити те, що ламається тихо"
+Say (M 'next.doctor')
 
 # 🔴 Успіх кажемо ЯВНО. `powershell -File` коду виходу останньої рідної команди
 # назовні не віддає (перевірено на 5.1), тож нуль тут виходив би випадково — а

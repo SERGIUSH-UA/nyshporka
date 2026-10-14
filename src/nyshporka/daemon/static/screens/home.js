@@ -16,7 +16,7 @@
  * нулем там, де питання не ставили.
  */
 
-import { t, LANG } from '../core/strings.js';
+import { t, tOr, LANG } from '../core/strings.js';
 import { TOKEN, callOp, SEQ } from '../core/net.js';
 import { esc, el, setView, busy, failure, boxError, busyForm,
   renderWarnings, renderCoverage, curGen, alive, maskot } from '../core/view.js';
@@ -425,7 +425,7 @@ function readingSection(d) {
   if ((r.by_engine || []).length) {
     two.push(`<div><h4>${t('dash.reading.engines')}</h4>
       ${(r.by_engine).map((e) => `<div class="ch-bar">
-        <span class="ch-bar-l">${eng(e.code, true, LANG)}</span>
+        <span class="ch-bar-l">${eng(e.code, true, LANG, t(`engine.${e.code}.role`))}</span>
         <span class="ch-bar-t"><i style="width:${pct(e.n, r.runs)}%"></i></span>
         <span class="ch-bar-n">${num(e.n)}</span></div>`).join('')}</div>`);
   }
@@ -553,7 +553,7 @@ function spaceSection(d) {
   bits.push(`<span>${esc(preset)}</span>`);
   for (const id of s.active || []) {
     const sec_ = (SECTIONS.sections || []).find((x) => x.id === id);
-    if (sec_) bits.push(`<span>${esc(LANG === 'en' ? sec_.label_en : sec_.label)}</span>`);
+    if (sec_) bits.push(`<span>${esc(tOr(`section.${id}.label`, sec_.label))}</span>`);
   }
   if (jobs.queue && jobs.running) {
     bits.push(`<span class="flag">${t('dash.jobs.running')}: <b>${num(jobs.running)}</b></span>`);

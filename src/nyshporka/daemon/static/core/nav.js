@@ -1,5 +1,5 @@
 /** Секції, шапка, перехід між екранами й черга робіт. */
-import { t, LANG } from './strings.js';
+import { t, tOr } from './strings.js';
 import { callOp, FINAL_STATES } from './net.js';
 import { esc, el, setView, curGen, bumpGen, alive, maskot,
   splitWarnings, notesBlock, seedAttr } from './view.js';
@@ -117,7 +117,7 @@ function renderNav() {
 
   const sicons = (SECTIONS.icons && SECTIONS.icons.sections) || {};
   tabs.innerHTML = groups.map((g) => {
-    const label = esc(LANG === 'en' ? g.label_en || g.label : g.label);
+    const label = esc(tOr(`section.${g.id}.label`, g.label));
     return `<button data-act="group" data-arg="${esc(g.id)}"`
       + `${g.id === GROUP ? ' class="on"' : ''}>${icon(sicons[g.id])}${label}</button>`;
   }).join('');
@@ -173,11 +173,11 @@ async function show(screen) {
     CURRENT = screen;
     const sid = SECTIONS.screens[screen];
     const sec = SECTIONS.sections.find((s) => s.id === sid) || {};
-    const label = LANG === 'en' ? sec.label_en : sec.label;
+    const label = tOr(`section.${sid}.label`, sec.label);
     location.hash = screen;
     document.querySelectorAll('nav button').forEach((b) => b.classList.remove('on'));
     setView(`<div class="warn">${t('sect.off.msg')}: <b>${esc(label || sid)}</b>
-      <p class="muted">${esc(LANG === 'en' ? sec.why_en || '' : sec.why || '')}</p>
+      <p class="muted">${esc(tOr(`section.${sid}.why`, sec.why || ''))}</p>
       <button data-act="sections.toggle" data-arg="${esc(sid)}"
         data-back="${esc(screen)}">${t('sect.on')}</button>
       <button data-act="nav" data-arg="settings">⚙ ${t('sect.title')}</button></div>`);

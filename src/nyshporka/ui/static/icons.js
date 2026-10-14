@@ -96,11 +96,16 @@ export const ENGINES = {
 //   eng('pysar')                  → бейдж
 //   eng('diak', true)             → бейдж плюс ім'я
 //   eng('skryba', true, 'en')     → те саме англійською
-export function eng(id, withName = false, lang = 'uk') {
+//   eng('pysar', false, 'pl', 'cyrylica, główny głos') → роль, перекладена викликачем
+//
+// Кирилична літера — лише в кириличному оточенні (uk, ru); роль для мов, яких
+// тут немає, дає викликач зі свого словника.
+export function eng(id, withName = false, lang = 'uk', role = '') {
   const e = ENGINES[id];
   if (!e) return '';
-  const letter = lang === 'en' ? e.letter_en : e.letter;
-  const role = lang === 'en' ? e.role_en : e.role;
+  const cyr = lang === 'uk' || lang === 'ru';
+  const letter = cyr ? e.letter : e.letter_en;
+  role = role || (lang === 'uk' ? e.role : e.role_en);
   const badge = `<span class="engine" data-engine="${id}" data-shape="${e.shape}"`
     + ` title="${e.name} — ${role}" aria-label="${e.name}"><span>${letter}</span></span>`;
   return withName ? `<span class="engine-row">${badge}<b>${e.name}</b></span>` : badge;

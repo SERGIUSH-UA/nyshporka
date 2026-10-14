@@ -322,25 +322,113 @@ def test_frontend_javascript_parses() -> None:
     assert not bad, "фронт не розбирається:\n" + "\n".join(bad)
 
 
-# ── 7. переклад повний в обидва боки ─────────────────────────────────────────
-def test_translations_cover_every_key_in_both_languages() -> None:
-    """Ключ без перекладу показує сирий `case.edit` замість напису.
+# ── 7. переклад повний у кожній мові ─────────────────────────────────────────
+STRINGS_DIR = STATIC / "core" / "strings"
+
+
+def _langs() -> list[str]:
+    """Мови з переліку `LANGS` у strings.js — а не з теки й не з цього файла:
+    мова, що є в перемикачі без словника, і словник без мови в перемикачі —
+    обидва випадки мають падати тут."""
+    src = (STATIC / "core" / "strings.js").read_text(encoding="utf-8")
+    block = re.search(r"const LANGS = \[(.*?)\n\];", src, re.S)
+    assert block, "перелік LANGS у strings.js не знайдено"
+    return re.findall(r"\['(\w+)',", block.group(1))
+
+
+def _dicts() -> dict[str, dict[str, str]]:
+    """Словники всіх мов, розібрані node — значення там склеєні `+`."""
+    import json
+    import tempfile
+
+    if not shutil.which("node"):
+        pytest.skip("node не встановлено")
+    out: dict[str, dict[str, str]] = {}
+    with tempfile.TemporaryDirectory() as tmp:
+        for lang in _langs():
+            path = STRINGS_DIR / f"{lang}.js"
+            assert path.exists(), f"мова «{lang}» є в LANGS, а словника {path.name} немає"
+            twin = Path(tmp) / f"{lang}.mjs"
+            twin.write_bytes(path.read_bytes())
+            res = subprocess.run(
+                ["node", "--input-type=module", "-e",
+                 f"import d from {json.dumps(twin.as_uri())};"
+                 "process.stdout.write(JSON.stringify(d));"],
+                capture_output=True)
+            assert res.returncode == 0, res.stderr.decode("utf-8", "replace")[:500]
+            out[lang] = json.loads(res.stdout.decode("utf-8"))
+    return out
+
+
+def test_translations_cover_every_key_in_every_language() -> None:
+    """Ключ без перекладу показує сирий `case.edit` замість напису — або, з
+    фолбеком на українську, український рядок посеред польського екрана.
 
     Перевірка симетрична навмисне: зайвий ключ в одній мові — це або мертвий
-    напис, або забутий у другій.
+    напис, або забутий у решті.
     """
-    js = _js()
-    dicts: dict[str, set[str]] = {}
-    for lang in ("uk", "en"):
-        m = re.search(rf"\n    {lang}: \{{(.*?)\n  \}}", js, re.S) or \
-            re.search(rf"\n  {lang}: \{{(.*?)\n  \}},", js, re.S)
-        assert m, f"словник «{lang}» не знайдено"
-        dicts[lang] = set(re.findall(r"'([\w.]+)':", m.group(1)))
-    only = dicts["uk"] ^ dicts["en"]
-    assert not only, f"ключ є лише в одній мові: {sorted(only)}"
-    used = set(re.findall(r"\bt\('([\w.]+)'\)", js)) | set(
+    dicts = _dicts()
+    uk = set(dicts["uk"])
+    for lang, d in dicts.items():
+        assert not (uk - set(d)), f"{lang}: бракує {sorted(uk - set(d))[:20]}"
+        assert not (set(d) - uk), f"{lang}: немає в uk {sorted(set(d) - uk)[:20]}"
+        empty = [k for k, v in d.items() if not str(v).strip()]
+        assert not empty, f"{lang}: порожні {empty[:20]}"
+    used = set(re.findall(r"\bt\('([\w.]+)'\)", _js())) | set(
         re.findall(r'data-i18n="([\w.]+)"', _html()))
-    assert not (used - dicts["uk"]), f"ужито без перекладу: {sorted(used - dicts['uk'])}"
+    assert not (used - uk), f"ужито без перекладу: {sorted(used - uk)}"
+
+
+def test_translations_keep_placeholders_and_tags() -> None:
+    """`{n}` і теги переносяться в переклад без змін.
+
+    Загублене `{n}` не падає: `.replace('{n}', …)` просто нічого не знаходить,
+    і людина читає «знайдено у справах» без числа. Перекладене ім'я
+    підстановки (`{liczba}`) — те саме.
+    """
+    ph = re.compile(r"\{\w+\}")
+    # Лише справжні теги: «<that number>» у тексті — це не розмітка.
+    tag = re.compile(r"</?(a|b|i|em|strong|code|kbd|br|p|span|small)\b")
+    dicts = _dicts()
+    bad = []
+    for lang, d in dicts.items():
+        for k, src in dicts["uk"].items():
+            dst = d.get(k, "")
+            if sorted(ph.findall(src)) != sorted(ph.findall(dst)) \
+                    or sorted(tag.findall(src)) != sorted(tag.findall(dst)):
+                bad.append(f"{lang} {k}: {dst[:80]}")
+    assert not bad, "переклад загубив підстановку чи тег:\n" + "\n".join(bad[:30])
+
+
+def test_translations_have_no_ukrainian_left() -> None:
+    """Неперекладений рядок, скопійований з uk, проходить перевірку ключів.
+
+    Кирилиця в перекладі буває законною — приклад написання («Лищин» →
+    «Ліщин»), абревіатура архіву, літери дореформеної абетки, — і саме тому
+    мірило тут англійський рядок того самого ключа: кириличне слово, якого
+    немає в ньому, у латиничній мові — забутий переклад. Російська — кирилиця,
+    тож для неї ознака інша: слово з і/ї/є/ґ (як у приймачі порталу
+    `test_bez_ukrainskoho_na_movnykh_storinkakh`), якого немає в англійському.
+    """
+    cyr = re.compile(r"[а-яіїєґѣъѳА-ЯІЇЄҐ][\wʼ'’]*")
+    uk_only = re.compile(r"[іїєґ]")
+    dicts = _dicts()
+    en = dicts["en"]
+    bad = []
+    for lang, d in dicts.items():
+        if lang in ("uk", "en"):
+            continue
+        for k, v in d.items():
+            allowed = set(cyr.findall(en.get(k, "")))
+            # Окрема літера («перша „и“») і абревіатура архіву (ДАХмО, ЦДІАК)
+            # — законна кирилиця в будь-якій мові.
+            words = [w for w in cyr.findall(v) if w not in allowed and len(w) > 1
+                     and sum(ch.isupper() for ch in w) < 2]
+            if lang == "ru":
+                words = [w for w in words if uk_only.search(w)]
+            if words:
+                bad.append(f"{lang} {k}: {words[:5]} ← {v[:80]}")
+    assert not bad, "лишився український текст:\n" + "\n".join(bad[:30])
 
 
 def test_the_decode_denominator_is_read_from_the_right_field() -> None:

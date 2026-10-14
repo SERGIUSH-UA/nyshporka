@@ -180,7 +180,7 @@ async function viewShow(i, line = null) {
 function viewBar() {
   const p = VS.pages[VS.i] || {};
   const m = VS.meta || {};
-  const badge = m.engine_id ? eng(m.engine_id, false, LANG) : '';
+  const badge = m.engine_id ? eng(m.engine_id, false, LANG, t(`engine.${m.engine_id}.role`)) : '';
   const bits = [
     `<b>${VS.i + 1}</b>/${VS.pages.length}`,
     `<span class="mono">${esc(p.page || '')}</span>`,
@@ -398,7 +398,7 @@ function viewAltReset() {
   VS.alt = twin || null;
   box.innerHTML = twin
     ? `<details id="alt-box"><summary>${t('view.alt')} ${
-        eng(twin.engine_id, true, LANG)}</summary>
+        eng(twin.engine_id, true, LANG, t(`engine.${twin.engine_id}.role`))}</summary>
         <div id="alt-body"><p class="muted">${t('view.alt.open')}</p></div></details>`
     : '';
   const det = el('alt-box');

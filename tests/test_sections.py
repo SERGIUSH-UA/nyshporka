@@ -428,7 +428,10 @@ def test_install_surfaces_tell_people_to_reopen_the_terminal() -> None:
     """
     root = Path(__file__).resolve().parents[1]
     surfaces = {
-        "windows.ps1": (root / "install" / "windows.ps1").read_text(encoding="utf-8"),
+        # Тексти `windows.ps1` лежать у таблиці `$Msg` рядками PowerShell в
+        # одинарних лапках, де апостроф подвоєний.
+        "windows.ps1": (root / "install" / "windows.ps1").read_text(
+            encoding="utf-8").replace("''", "'"),
         "unix.sh": (root / "install" / "unix.sh").read_text(encoding="utf-8"),
         "README.md": (root / "README.md").read_text(encoding="utf-8"),
     }
@@ -441,7 +444,11 @@ def test_install_surfaces_tell_people_to_reopen_the_terminal() -> None:
         assert "відкрийте нов" in text.lower(), (
             f"{name}: не сказано найдешевшої дії — відкрити нове вікно")
 
-    for name in ("windows.ps1", "unix.sh"):
+    # У `windows.ps1` порядок виводу — порядок викликів `M`, а не рядків таблиці.
+    ps1 = surfaces["windows.ps1"]
+    assert ps1.index("Say (M 'reopen.1')") < ps1.index("Say (M 'next.serve')"), (
+        "windows.ps1: підказка про перезапуск стоїть ПІСЛЯ переліку команд")
+    for name in ("unix.sh",):
         text = surfaces[name]
         hint = text.lower().index("відкрийте нов")
         listing = text.index("nysh serve            відкрити застосунок")

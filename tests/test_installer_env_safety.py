@@ -998,6 +998,14 @@ $fn = $ast.FindAll({ param($n)
     $n.Name -eq 'Install-CatalogFromRelease' }, $true) | Select-Object -First 1
 if (-not $fn) { 'NO-FUNCTION'; exit 3 }
 . ([scriptblock]::Create($fn.Extent.Text))
+# Повідомлення — таблиця `$Msg` і `M` з того самого файла, українською.
+$Lang = 'uk'
+foreach ($n in $ast.FindAll({ param($n)
+    ($n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'M') -or
+    ($n -is [System.Management.Automation.Language.AssignmentStatementAst] -and
+     $n.Left.Extent.Text -eq '$Msg') }, $true)) {
+    . ([scriptblock]::Create($n.Extent.Text))
+}
 
 $CatalogApi = 'https://example.invalid/api/releases?per_page=100'
 function Say($t, $c = 'White') { Write-Host $t }
@@ -1194,7 +1202,8 @@ def test_ps1_catalog_is_wired_with_opt_out_before_the_advice() -> None:
     seed = text.index("if ($seed) {")
     no_cat = text.index("} elseif ($NoCatalog) {", seed)
     fetch = text.index("} elseif (Install-CatalogFromRelease -Nysh $nysh) {", no_cat)
-    advice = text.index("довідників поруч немає", fetch)
+    # Текст поради — у таблиці `$Msg`; порядок дає місце її виклику.
+    advice = text.index("Say (M 'cat.missing')", fetch)
     assert seed < no_cat < fetch < advice
 
 
@@ -1209,6 +1218,14 @@ $fn = $ast.FindAll({ param($n)
     $n.Name -eq 'Install-Engines' }, $true) | Select-Object -First 1
 if (-not $fn) { 'NO-FUNCTION'; exit 3 }
 . ([scriptblock]::Create($fn.Extent.Text))
+# Повідомлення — таблиця `$Msg` і `M` з того самого файла, українською.
+$Lang = 'uk'
+foreach ($n in $ast.FindAll({ param($n)
+    ($n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'M') -or
+    ($n -is [System.Management.Automation.Language.AssignmentStatementAst] -and
+     $n.Left.Extent.Text -eq '$Msg') }, $true)) {
+    . ([scriptblock]::Create($n.Extent.Text))
+}
 
 function Say($t, $c = 'White') { Write-Host $t }
 function Invoke-Logged {

@@ -53,7 +53,7 @@ function siftDraw() {
   // вид — а таблиця бейджів ключована ідентичністю, тож збігу не було ніколи
   // й бейдж не з'являвся жодного разу. `<use>` на неіснуючий символ мовчить,
   // тому вада виглядала як «тут просто нічого не показують».
-  const badge = h.engine_id ? eng(h.engine_id, true, LANG) : '';
+  const badge = h.engine_id ? eng(h.engine_id, true, LANG, t(`engine.${h.engine_id}.role`)) : '';
   const pos = t('sift.togo').replace('{i}', ST.sift.i + 1).replace('{n}', ST.sift.hits.length);
   // Збіг підсвічується в рядку, але не вирізається з нього: сусідні слова —
   // це роль і відмінок, тобто половина того, за чим упізнають запис.
