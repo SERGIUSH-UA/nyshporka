@@ -135,7 +135,7 @@ def ink_span(png: Path) -> tuple[int, int] | None:
         return None
     thr = paper - (paper - dark) / 2
     mask = g.point(lambda v: 255 if 13 <= v < thr else 0)
-    cols = list(mask.resize((w, 1), Image.BOX).getdata())
+    cols = list(mask.resize((w, 1), Image.Resampling.BOX).getdata())
     hit = [x for x, v in enumerate(cols) if v >= 255 * 0.04]
     if not hit:
         return None
