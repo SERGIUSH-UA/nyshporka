@@ -11,8 +11,11 @@
 """
 from __future__ import annotations
 
+import os
 import re
+import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -225,3 +228,179 @@ def test_wizard_asks_for_the_python_folder_and_passes_it_on() -> None:
     for lang in ("ukrainian", "english", "polish", "romanian", "french", "german", "russian"):
         for key in ("PyDirTitle", "PyDirSub", "PyDirDesc"):
             assert f"\n{lang}.{key}=" in iss, f"{lang}.{key}"
+
+
+# ── збій junction мінорної версії: інтерпретатор напряму ────────────────────
+# 🔴 15.10.2026: 448 повторилась і з текою `{app}\python` (AppData\Local) —
+# тека тут ні до чого. uv робить junction ПІСЛЯ того, як інтерпретатор
+# розпакований, тож його `python.exe` береться напряму.
+
+LINK_FAIL = ("error: Failed to create Python minor version link directory\n"
+             "  Caused by: Le chemin d'accès ne peut pas être parcouru (os error 448)\n")
+
+
+def _patch_dir(root: Path, name: str, *, exe: bool = True) -> Path:
+    d = root / name
+    d.mkdir(parents=True)
+    if exe:
+        (d / "python.exe").write_bytes(b"")
+    return d
+
+
+def test_link_step_is_recognised_by_both_phrasings() -> None:
+    assert U.link_step_failed(LINK_FAIL)
+    assert U.link_step_failed("error: Missing expected target directory for Python "
+                              "minor version link at C:\\x")
+    assert not U.link_step_failed("error: Failed to download https://… (os error 10054)")
+
+
+def test_extracted_python_takes_the_highest_real_patch(tmp_path: Path) -> None:
+    _patch_dir(tmp_path, "cpython-3.12.9-windows-x86_64-none")
+    best = _patch_dir(tmp_path, "cpython-3.12.15-windows-x86_64-none")
+    _patch_dir(tmp_path, "cpython-3.12.20+freethreaded-windows-x86_64-none")
+    _patch_dir(tmp_path, "cpython-3.12.30-windows-x86_64-none", exe=False)
+    _patch_dir(tmp_path, "cpython-3.12-windows-x86_64-none")  # недоробок junction
+    _patch_dir(tmp_path, "cpython-3.11.14-windows-x86_64-none")
+    assert U.extracted_python(tmp_path, "3.12") == best / "python.exe"
+    assert U.extracted_python(tmp_path, "3.13") is None
+    assert U.extracted_python(tmp_path / "немає", "3.12") is None
+
+
+def test_link_leftover_goes_but_nothing_with_content(tmp_path: Path) -> None:
+    empty = _patch_dir(tmp_path, "cpython-3.12-windows-x86_64-none", exe=False)
+    full = _patch_dir(tmp_path, "cpython-3.12-windows-aarch64-none")
+    U._drop_link_leftover(tmp_path, "3.12")
+    assert not empty.exists()
+    assert (full / "python.exe").is_file()
+
+
+def _fake_uv(monkeypatch: pytest.MonkeyPatch, rc: int, out: str, *, runs: bool = True) -> None:
+    def run(cmd, **kw):
+        if cmd[1:3] == ["python", "install"]:
+            return subprocess.CompletedProcess(cmd, rc, stdout="", stderr=out)
+        return subprocess.CompletedProcess(cmd, 0, stdout="3.12\n" if runs else "", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", run)
+
+
+def test_ensure_python_falls_back_to_the_extracted_interpreter(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(U.sys, "platform", "win32")
+    exe = _patch_dir(tmp_path, "cpython-3.12.15-windows-x86_64-none") / "python.exe"
+    _fake_uv(monkeypatch, 2, LINK_FAIL)
+    assert U.ensure_python("uv", "3.12", {"UV_PYTHON_INSTALL_DIR": str(tmp_path)}) == str(exe)
+
+
+def test_ensure_python_keeps_the_version_when_uv_succeeds(monkeypatch, tmp_path) -> None:
+    _fake_uv(monkeypatch, 0, "")
+    assert U.ensure_python("uv", "3.11", {"UV_PYTHON_INSTALL_DIR": str(tmp_path)}) == "3.11"
+
+
+def test_ensure_python_refuses_an_interpreter_that_does_not_run(monkeypatch, tmp_path) -> None:
+    """Розпакований, але не запускається (інша версія, обірвана розпаковка) —
+    тоді це справжня відмова з порадою, а не тихий перехід на зламаний Python."""
+    monkeypatch.setattr(U.sys, "platform", "win32")
+    _patch_dir(tmp_path, "cpython-3.12.15-windows-x86_64-none")
+    _fake_uv(monkeypatch, 2, LINK_FAIL, runs=False)
+    with pytest.raises(U.PythonInstallFailed) as exc:
+        U.ensure_python("uv", "3.12", {"UV_PYTHON_INSTALL_DIR": str(tmp_path)})
+    assert str(exc.value) == U.UNTRUSTED_MOUNT_HINT
+
+
+def test_engine_venv_is_built_on_the_interpreter_ensure_python_gave(info, monkeypatch,
+                                                                    tmp_path) -> None:
+    """`uv venv --python 3.11` сам качав би 3.11 і падав на тому самому junction."""
+    from nyshporka.htr import env as E
+
+    seen: list[list[str]] = []
+    given = r"C:\py\cpython-3.11.14-windows-x86_64-none\python.exe"
+    monkeypatch.setattr(E, "intel_mac", lambda: False)
+    monkeypatch.setattr(E, "_need_tool", lambda *a, **k: None)
+    monkeypatch.setattr(E, "_resolve_tool", lambda uv: uv)
+    monkeypatch.setattr(U, "ensure_python", lambda uv, v, env: given)
+    monkeypatch.setattr(E, "_run_watching_448", lambda cmd: seen.append(cmd))
+    monkeypatch.setattr(E, "inspect", lambda *a, **k: (_ for _ in ()).throw(StopIteration))
+    with pytest.raises(StopIteration):
+        E.setup(tmp_path / "venv", with_cuda=False)
+    assert seen and seen[0][1] == "venv"
+    assert seen[0][-2:] == ["--python", given]
+
+
+def test_installer_hands_the_extracted_interpreter_to_tool_install() -> None:
+    text = _ps1()
+    assert "function Resolve-ExtractedPython" in text
+    at = text.index("Invoke-Logged $uv python install 3.12")
+    assert text.index("Resolve-ExtractedPython $tail $PythonDir '3.12'", at) > at
+    assert "Invoke-Logged $uv tool install --python $PythonArg --force $Source" in text
+    for phrase in U.LINK_STEP_FAILURES:
+        assert phrase in text, "інсталятор і пакет упізнають той самий крок"
+
+
+# ── живий uv на Windows ─────────────────────────────────────────────────────
+# Справжню 448 на CI не змоделювати, але в uv це та сама гілка: файл на місці
+# junction (`cpython-3.12-windows-…-none`) дає ту саму відмову «Failed to
+# create Python minor version link directory» після розпаковки. Тест качає
+# Python (~21 МБ), тож іде лише на CI або з `NYSH_TEST_UV=1`.
+
+live_uv = pytest.mark.skipif(
+    sys.platform != "win32" or not shutil.which("uv")
+    or not (os.environ.get("CI") or os.environ.get("NYSH_TEST_UV")),
+    reason="живий uv на Windows: CI або NYSH_TEST_UV=1")
+
+
+def _trapped_folder(tmp_path: Path) -> tuple[Path, dict[str, str]]:
+    import platform
+
+    arch = {"AMD64": "x86_64", "ARM64": "aarch64"}.get(platform.machine(), platform.machine())
+    folder = tmp_path / "python"
+    folder.mkdir()
+    (folder / f"cpython-3.12-windows-{arch}-none").write_text("пастка", encoding="utf-8")
+    env = {k: v for k, v in os.environ.items()
+           if not k.startswith("UV_PYTHON") and k not in ("VIRTUAL_ENV", "UV_PROJECT_ENVIRONMENT")}
+    env.update(UV_PYTHON_INSTALL_DIR=str(folder), UV_PYTHON_INSTALL_BIN="0",
+               UV_PYTHON_INSTALL_REGISTRY="0", UV_NO_CONFIG="1")
+    return folder, env
+
+
+@live_uv
+@pytest.mark.timeout(900)
+def test_live_uv_link_failure_still_gives_a_working_venv(tmp_path, capsys) -> None:
+    uv = shutil.which("uv") or "uv"
+    folder, env = _trapped_folder(tmp_path)
+    python = U.ensure_python(uv, "3.12", env)
+    assert "Failed to create Python minor version link directory" in capsys.readouterr().err, \
+        "пастка не спрацювала — uv змінив крок junction, тест треба переглянути"
+    assert Path(python).parent.parent == folder and python.endswith("python.exe")
+    venv = tmp_path / "venv"
+    subprocess.run([uv, "venv", str(venv), "--python", python], env=env, check=True,
+                   cwd=tmp_path)
+    out = subprocess.run([str(venv / "Scripts" / "python.exe"), "-c",
+                          "import sqlite3, ssl, sys; print(sys.version_info[:2])"],
+                         capture_output=True, text=True, check=True).stdout
+    assert out.strip() == "(3, 12)"
+
+
+@live_uv
+@pytest.mark.timeout(900)
+def test_live_installer_function_finds_the_interpreter(tmp_path) -> None:
+    """Сама функція з windows.ps1 — у Windows PowerShell 5.1, як у майстра .exe."""
+    uv = shutil.which("uv") or "uv"
+    folder, env = _trapped_folder(tmp_path)
+    fn = re.search(r"^function Resolve-ExtractedPython.*?^}\r?$", _ps1(), re.S | re.M)
+    assert fn, "функція в windows.ps1"
+    script = tmp_path / "probe.ps1"
+    script.write_text(
+        # 'Continue': у 5.1 рядок stderr рідної команди під 'Stop' — термінальна помилка
+        "$ErrorActionPreference = 'Continue'\n"
+        "[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)\n"
+        + fn.group(0) + "\n"
+        f"$tail = (& '{uv}' python install 3.12 2>&1 | ForEach-Object {{ \"$_\" }}) -join \"`n\"\n"
+        "if ($LASTEXITCODE -eq 0) { throw 'пастка не спрацювала' }\n"
+        f"$exe = Resolve-ExtractedPython $tail '{folder}' '3.12'\n"
+        "if (-not $exe) { throw \"не знайшов: $tail\" }\n"
+        "Write-Output $exe\n", encoding="utf-8-sig")
+    r = subprocess.run(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass",
+                        "-File", str(script)], env=env, capture_output=True, text=True,
+                       encoding="utf-8", errors="replace", cwd=tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    exe = Path(r.stdout.strip().splitlines()[-1])
+    assert exe.parent.parent == folder and exe.is_file()

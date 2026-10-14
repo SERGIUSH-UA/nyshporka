@@ -92,6 +92,18 @@ jobs:
           spec=$(sed -n 's/^ *reference: *\[\(.*\)\].*/\1/p' src/nyshporka/htr/data/engines.yaml | tr -d '",')
           echo "torch для шару: $spec"
           case "$spec" in torch==*) ;; *) echo "reference в engines.yaml не прочитався: '$spec'"; exit 1;; esac
+          # 🔴 Еталонного torch може не бути в індексі варіанта: PyTorch 2.14
+          # не випускає cu128 (там стеля 2.11), і `uv pip install torch==2.14.0`
+          # валив збірку `:cuda128` 0.29.1. Тоді шару torch немає, і torch
+          # приїде з рушіями в межах kraken — як до окремого шару (0.29.0).
+          want=$(echo "$spec" | tr ' ' '\n' | sed -n 's/^torch==//p')
+          idx="https://download.pytorch.org/whl/${{ matrix.torch }}/torch/"
+          # Сторінка — змінною: `curl | grep -q` під pipefail дає curl (23) і хибний пропуск.
+          page=$(curl -fsS "$idx")
+          if ! grep -qE "torch-${want}(\+|%2B)${{ matrix.torch }}-" <<<"$page"; then
+            echo "::warning::torch $want немає в $idx — шар torch пропущено"
+            spec=""
+          fi
           DOCKER_BUILDKIT=1 docker build -f docker/Dockerfile \
             --build-arg NYSH_VERSION=${{ steps.ver.outputs.v }} \
             --build-arg TORCH=${{ matrix.torch }} \

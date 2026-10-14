@@ -17,6 +17,27 @@
 
 ## [Unreleased]
 
+### Виправлено
+
+- **os error 448 на Windows — інтерпретатор напряму, без junction.** 0.29.1
+  перенесла Python у `{app}\python`, але 448 повторилась і там (французька
+  Windows, 15.10.2026): справа не в теці, Windows не дає uv зробити junction
+  мінорної версії взагалі. uv робить його останнім кроком, коли інтерпретатор
+  вже розпакований, тож на відмові «Failed to create Python minor version link
+  directory» (і MSIX-варіанті «Missing expected target directory…») береться
+  `python.exe` точної версії, якщо він запускається, — і далі йде в
+  `--python`. Інсталятор: `Resolve-ExtractedPython` у `windows.ps1` →
+  `uv tool install --python <шлях>`. Пакет: `setup.update.ensure_python`, через
+  який тепер іде venv рушіїв (`nysh htr install` качав 3.11 тим самим
+  `uv venv` і падав на тому самому кроці). Приймач — живий uv на Windows CI:
+  файл на місці junction дає в uv ту саму гілку відмови
+  (`tests/test_python_dir_448.py`, `test_live_*`).
+
+- **Docker `:cuda128` збирається знову.** Еталонного `torch==2.14.0` немає в
+  індексі cu128 (PyTorch 2.14 випускає cu126/cu130; стеля cu128 — 2.11), і
+  окремий шар torch валив збірку 0.29.1. Тепер шар ставиться лише тоді, коли
+  версія є в індексі варіанта, інакше torch приїде з рушіями, як у 0.29.0.
+
 ## [0.29.1] — 2026-10-14
 
 ### Додано

@@ -844,6 +844,36 @@ function Invoke-Logged {
     } finally { $ErrorActionPreference = $prev }
 }
 
+# 🔴 `uv python install` падає на ОСТАННЬОМУ кроці — junction мінорної версії
+# (`cpython-3.12-…` → `cpython-3.12.15-…`), коли інтерпретатор уже розпакований.
+# 15.10.2026: os error 448 повторилась і в `{app}\python`, тобто тека тут ні до
+# чого — Windows не дає робити junction узагалі. Junction потрібен uv лише для
+# тихих патч-оновлень, тож беремо `python.exe` точної версії напряму, якщо він
+# є й запускається. `$null` — це справжня відмова (завантаження тощо).
+# Те саме робить пакет (`setup/update.py: ensure_python`) для venv рушіїв.
+function Resolve-ExtractedPython([string] $Tail, [string] $Dir, [string] $Version) {
+    if ($Tail -notmatch 'Failed to create Python minor version link directory|Missing expected target directory for Python minor version link') { return $null }
+    if (-not (Test-Path -LiteralPath $Dir -PathType Container)) { return $null }
+    $pat = '^cpython-' + [regex]::Escape($Version) + '\.(\d+)-windows-[^-]+-none$'
+    $best = Get-ChildItem -LiteralPath $Dir -Directory -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -match $pat -and (Test-Path -LiteralPath (Join-Path $_.FullName 'python.exe')) } |
+        Sort-Object { [int]([regex]::Match($_.Name, $pat).Groups[1].Value) } -Descending |
+        Select-Object -First 1
+    if (-not $best) { return $null }
+    $exe = Join-Path $best.FullName 'python.exe'
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try { $got = & $exe -c "import sys; print('%d.%d' % sys.version_info[:2])" 2>$null } catch { $got = $null }
+    finally { $ErrorActionPreference = $prev }
+    if ("$got".Trim() -ne $Version) { return $null }
+    # Недоробок junction — лише сам junction чи порожня тека: Directory.Delete
+    # без рекурсії не йде за junction і не знімає теку з вмістом.
+    Get-ChildItem -LiteralPath $Dir -Force -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -match ('^cpython-' + [regex]::Escape($Version) + '-windows-[^-]+-none$') } |
+        ForEach-Object { try { [IO.Directory]::Delete($_.FullName, $false) } catch {} }
+    return $exe
+}
+
 # Останній рядок stdout рідної команди; stderr і будь-яка відмова — у тишу.
 # Для запитань на кшталт «а куди ти кладеш команди»: відповідь або є, або
 # лишається порожньою, і викликач бере запасний варіант.
@@ -1033,9 +1063,16 @@ $env:UV_PYTHON_INSTALL_REGISTRY = '0'
 $env:UV_PYTHON_INSTALL_DIR = $PythonDir
 $script:NativeTail.Clear()
 $rc = Invoke-Logged $uv python install 3.12
+# Що передавати в `--python` далі: версію, або — після збою junction — шлях.
+$PythonArg = '3.12'
 if ($rc -ne 0) {
-    if (($script:NativeTail -join "`n") -match 'os error 448') { throw $Untrusted448 }
-    throw (M 'err.python' $rc)
+    $tail = $script:NativeTail -join "`n"
+    $exe = Resolve-ExtractedPython $tail $PythonDir '3.12'
+    if ($exe) {
+        Say "  python.exe → $exe" DarkGray
+        $PythonArg = $exe
+    } elseif ($tail -match 'os error 448') { throw $Untrusted448 }
+    else { throw (M 'err.python' $rc) }
 }
 Say "✓ Python" Green
 
@@ -1044,7 +1081,7 @@ Say "✓ Python" Green
 # консольну команду. Це саме те, що треба: жодних конфліктів із чужими пакетами.
 Say (M 'app.get' $Source) DarkGray
 $script:NativeTail.Clear()
-$rc = Invoke-Logged $uv tool install --python 3.12 --force $Source
+$rc = Invoke-Logged $uv tool install --python $PythonArg --force $Source
 if ($rc -ne 0) {
     if (($script:NativeTail -join "`n") -match 'os error 448') { throw $Untrusted448 }
     throw (M 'err.app' $Source $rc)

@@ -638,7 +638,17 @@ def setup(venv: Path, *, man: M.Manifest | None = None, with_cuda: bool = True,
         _create_conda_env(venv, man, _conda_tool())
     else:
         print(f"① створюю {venv.name} (python {man.python})…")
-        _run_watching_448([uv, "venv", str(venv), "--python", man.python])
+        # Інтерпретатор — окремим кроком: `uv venv` сам качає його й падає на
+        # junction мінорної версії (448), а `ensure_python` такий збій обходить.
+        from nyshporka.setup.update import UNTRUSTED_MOUNT_HINT, PythonInstallFailed, ensure_python
+
+        try:
+            python = ensure_python(uv, man.python, _uv_env())
+        except PythonInstallFailed as e:
+            if str(e) == UNTRUSTED_MOUNT_HINT:
+                raise UntrustedMount(str(e)) from None
+            raise
+        _run_watching_448([uv, "venv", str(venv), "--python", python])
 
     rep = inspect(venv, man)
     need = [*rep.missing, *rep.stale]

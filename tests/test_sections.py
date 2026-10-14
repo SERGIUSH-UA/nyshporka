@@ -351,7 +351,7 @@ def test_windows_installer_never_merges_native_stderr() -> None:
 
     # `Invoke-Logged` теж знімає преференцію на час виклику: він показує й
     # запам'ятовує вивід рідної команди для повідомлення про відмову.
-    helpers = {"Invoke-Muted", "Get-NativeLine", "Invoke-Logged"}
+    helpers = {"Invoke-Muted", "Get-NativeLine", "Invoke-Logged", "Resolve-ExtractedPython"}
     for name in helpers:
         assert f"function {name}" in text, (
             f"помічник {name} зник — перенаправлення нема куди сховати")

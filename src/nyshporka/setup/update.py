@@ -168,6 +168,106 @@ def untrusted_mount_hint(output: str) -> str:
     return UNTRUSTED_MOUNT_HINT if "os error 448" in (output or "") else ""
 
 
+#: Відмови останнього кроку `uv python install` — junction мінорної версії.
+#: 🔴 15.10.2026: 448 повторилась і в `{app}\python` (AppData\Local), тобто
+#: тека тут ні до чого — Windows не дає робити junction узагалі. Але uv робить
+#: його ПІСЛЯ того, як інтерпретатор розпакований і доведений до ладу
+#: (`uv-python-commands/src/install.rs`: `ensure_minor_version_link` — після
+#: циклу встановлення, відкату немає). Тож тека точної версії
+#: (`cpython-3.12.15-windows-x86_64-none`) ціла, і її `python.exe` годиться
+#: для `--python` — junction потрібен uv лише для тихих патч-оновлень.
+#: Друга фраза — той самий крок під MSIX-віртуалізацією (astral-sh/uv#19622).
+LINK_STEP_FAILURES = (
+    "Failed to create Python minor version link directory",
+    "Missing expected target directory for Python minor version link",
+)
+
+
+def link_step_failed(output: str) -> bool:
+    """Чи uv упав саме на junction мінорної версії, а не на завантаженні."""
+    return any(s in (output or "") for s in LINK_STEP_FAILURES)
+
+
+def extracted_python(folder: Path, version: str) -> Path | None:
+    """`python.exe` найвищого патча `version` (`3.12`) у теці інтерпретаторів uv.
+
+    Лише справжня тека точної версії: ім'я без патча — це і є той junction
+    (або його недоробок), а `+freethreaded` — інший інтерпретатор.
+    """
+    import re
+
+    pat = re.compile(rf"^cpython-{re.escape(version)}\.(\d+)-windows-[^-]+-none$")
+    best: tuple[int, Path] | None = None
+    for d in folder.iterdir() if folder.is_dir() else ():
+        m = pat.match(d.name)
+        exe = d / "python.exe"
+        if m and exe.is_file() and (best is None or int(m.group(1)) > best[0]):
+            best = (int(m.group(1)), exe)
+    return best[1] if best else None
+
+
+def _drop_link_leftover(folder: Path, version: str) -> None:
+    """Прибрати недоробок junction (`cpython-3.12-…`): лише junction чи порожню теку.
+
+    `os.rmdir` не йде за junction і не знімає теку з вмістом — чуже не зачепить.
+    """
+    from contextlib import suppress
+
+    for d in folder.glob(f"cpython-{version}-windows-*-none"):
+        with suppress(OSError):
+            os.rmdir(d)
+
+
+class PythonInstallFailed(RuntimeError):
+    """`uv python install` не дав інтерпретатора, яким можна користуватись."""
+
+
+def ensure_python(uv: str, version: str, env: dict[str, str]) -> str:
+    """Поставити керований Python `version` і повернути значення для `--python`.
+
+    Зазвичай це сама версія (`3.11`). Якщо uv упав на junction мінорної версії
+    (448 на Windows), а інтерпретатор уже розпакований і запускається, —
+    повний шлях до його `python.exe`: так `uv venv` / `uv tool install` не
+    качають його вдруге й не повторюють той самий junction.
+    """
+    import subprocess
+
+    r = subprocess.run([uv, "python", "install", version], env=env,
+                       capture_output=True, text=True, encoding="utf-8",
+                       errors="replace", check=False)
+    out = (r.stdout or "") + (r.stderr or "")
+    if out.strip():
+        sys.stderr.write(out if out.endswith("\n") else out + "\n")
+    if r.returncode == 0:
+        return version
+    if sys.platform == "win32" and link_step_failed(out):
+        folder = env.get("UV_PYTHON_INSTALL_DIR", "").strip()
+        if not folder:
+            d = subprocess.run([uv, "python", "dir"], env=env, capture_output=True,
+                               text=True, encoding="utf-8", errors="replace", check=False)
+            folder = (d.stdout or "").strip()
+        exe = extracted_python(Path(folder), version) if folder else None
+        if exe and _runs_as(exe, version):
+            _drop_link_leftover(Path(folder), version)
+            sys.stderr.write(f"Python {version}: uv не зміг зробити junction мінорної "
+                             f"версії, беру інтерпретатор напряму: {exe}\n")
+            return str(exe)
+    raise PythonInstallFailed(untrusted_mount_hint(out)
+                              or f"uv python install {version}: код {r.returncode}")
+
+
+def _runs_as(exe: Path, version: str) -> bool:
+    """Інтерпретатор запускається й справді тієї мінорної версії."""
+    import subprocess
+
+    try:
+        r = subprocess.run([str(exe), "-c", "import sys; print('%d.%d' % sys.version_info[:2])"],
+                           capture_output=True, text=True, timeout=120, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return r.returncode == 0 and r.stdout.strip() == version
+
+
 def uv_python_env() -> dict[str, str]:
     """Оточення для КОЖНОГО виклику uv Нишпоркою — та сама тека Python, що в інсталятора.
 
