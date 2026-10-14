@@ -396,7 +396,8 @@ def import_answers(name: str, *, tasks_dir: Path | None = None, keep_old: bool =
             p = reg.crop_path(spec, _pg, i)
             return G.ink_fraction(p) if p is not None else None
 
-        gate = G.gate_page(pg, cur, vlines, conf_all, ink_of=_ink)
+        gate = G.gate_page(pg, cur, vlines, conf_all, ink_of=_ink,
+                           crop_of=lambda i, _pg=pg: reg.crop_path(spec, _pg, i))
         rep.gates.append(gate)
         f.write_text("\n".join(cur) + "\n", encoding="utf-8")
         page_meta["conf"] = {str(k): v for k, v in sorted(conf_all.items())}
@@ -417,10 +418,15 @@ def import_answers(name: str, *, tasks_dir: Path | None = None, keep_old: bool =
         if g.marks_stripped:
             rep.warnings.append(f"{g.page}: маркери розбіжності зняті, рядки → low: "
                                 f"{', '.join(map(str, g.marks_stripped[:10]))}")
-        if g.demoted:
+        dense = {i for i, _ in g.dense}
+        babble = [i for i in g.demoted if i not in dense]
+        if babble:
             rep.warnings.append(f"{g.page}: понижено до low як белькіт/порожнє: "
-                                f"{', '.join(map(str, g.demoted[:10]))}"
-                                f"{' …' if len(g.demoted) > 10 else ''}")
+                                f"{', '.join(map(str, babble[:10]))}"
+                                f"{' …' if len(babble) > 10 else ''}")
+        if g.dense:
+            rep.warnings.append(f"{g.page}: понижено до low — мітка задовга для кропа: "
+                                + ", ".join(f"{i} (×{r:.0f})" for i, r in g.dense[:10]))
         for a, b, off in g.shift_blocks:
             rep.warnings.append(f"{g.page}: рядки {a}–{b} зсунуті на {off:+d} відносно "
                                 f"голосів — блок понижено до low, перевірити аркуш")
@@ -449,13 +455,22 @@ def suspects_of(name: str, ws: Workspace | None = None) -> list[dict[str, Any]]:
             continue
         vlines = [reg.draft_lines(spec, d, pg) or [] for d in voices]
         conf = reg.merge_conf(spec).get(pg, {})
+        dens = {}
+        for i, text in enumerate(merged):
+            png = reg.crop_path(spec, pg, i) if text.strip() else None
+            d = G.label_density(text, png) if png is not None else None
+            if d is not None:
+                dens[i] = d
+        ratios = G.density_ratios(dens)
         for i, text in enumerate(merged):
             if not text.strip() or conf.get(str(i)) == "low":
                 continue
             vs = [v[i] if i < len(v) else "" for v in vlines]
             sig = G.signals(text, vs, None)
             why = ""
-            if G.suspect(sig, text):
+            if ratios.get(i, 0) >= G.DENSITY_SUSPECT:
+                why = G.dense_why(ratios[i])
+            elif G.suspect(sig, text):
                 why = "голоси розходяться"
             elif G.grounded(text, vs) < G.GROUNDED_MIN and len(text) >= 6:
                 why = "не спирається на жоден голос"

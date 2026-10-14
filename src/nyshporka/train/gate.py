@@ -57,6 +57,20 @@ SHIFT_MIN_RUN = 6
 SHIFT_SPAN = 2
 
 
+#: Щільність мітки = символів на одну висоту рядка ширини чорнила. У однієї
+#: руки на сторінці вона стала, тож рядок, щільніший за медіану сторінки,
+#: несе в мітці більше, ніж видно на кропі: добудоване обрізане слово
+#: («Anastazya» при видимому «…tnaza»), два рядки в одному кропі, кроп,
+#: поставлений боком. Заміряно на корпусі Скриби PPv3 (5 001 рядок,
+#: 14.10.2026): від ×6 — лише отрута (41 кроп голландців боком, ×50–87);
+#: у смузі ×3–6 отрути 4 з 10, решта — щільне законне письмо, тож там
+#: лише показ людині.
+DENSITY_DEMOTE = 6.0
+DENSITY_SUSPECT = 3.0
+#: Медіана сторінки чесна лише від стількох рядків.
+DENSITY_PAGE_MIN = 8
+
+
 def norm_tok(tok: str) -> str:
     """ъ/ь геть, ѣ→е: рушій те саме коротке слово віддає щоразу з іншим хвостом."""
     return tok.lower().replace("ъ", "").replace("ь", "").replace("ѣ", "е")
@@ -77,17 +91,94 @@ def ink_fraction(png: Path) -> float:
     n = sum(inside)
     if n < 200:
         return 0.0
-    # 75-й процентиль «внутрішніх» значень — це папір
+    thr = _paper(inside, n) - 28
+    ink = sum(c for v, c in enumerate(inside, start=13) if v < thr)
+    return ink / n
+
+
+def _paper(inside: list[int], n: int) -> int:
+    """75-й процентиль «внутрішніх» значень гістограми — це папір."""
     acc = 0
-    paper = 255
     for v, c in enumerate(inside, start=13):
         acc += c
         if acc >= 0.75 * n:
-            paper = v
+            return v
+    return 255
+
+
+def ink_span(png: Path) -> tuple[int, int] | None:
+    """(ширина чорнила, висота кропа) у пікселях; `None` — чорнила нема.
+
+    Ширина — від першої до останньої колонки, де чорнило займає ≥4% висоти:
+    одиночні крапки й шум краю полігона її не розтягують. Поріг — посередині
+    між папером і найтемнішими 2% пікселів: фіксований відступ від паперу
+    на блідому письмі бачив лише кілька штрихів, і шість чистих рядків
+    корпусу Скриби вийшли «задовгими» (×6–20).
+    """
+    from PIL import Image
+
+    with Image.open(png) as im:
+        g = im.convert("L")
+    w, h = g.size
+    inside = g.histogram()[13:]
+    n = sum(inside)
+    if n < 200 or w < 2:
+        return None
+    paper = _paper(inside, n)
+    acc, dark = 0, paper
+    for v, c in enumerate(inside, start=13):
+        acc += c
+        if acc >= 0.02 * n:
+            dark = v
             break
-    thr = paper - 28
-    ink = sum(c for v, c in enumerate(inside, start=13) if v < thr)
-    return ink / n
+    if paper - dark < 20:
+        return None
+    thr = paper - (paper - dark) / 2
+    mask = g.point(lambda v: 255 if 13 <= v < thr else 0)
+    cols = list(mask.resize((w, 1), Image.BOX).getdata())
+    hit = [x for x, v in enumerate(cols) if v >= 255 * 0.04]
+    if not hit:
+        return None
+    return hit[-1] - hit[0] + 1, h
+
+
+def label_density(text: str, png: Path) -> float | None:
+    """Символів мітки на одну висоту ширини чорнила; `None` — міряти нема чого."""
+    n = len(text.strip())
+    span = ink_span(png) if n else None
+    if not span or span[0] < 5:
+        return None
+    return n / (span[0] / span[1])
+
+
+def density_ratios(dens: dict[Any, float], *, min_n: int = DENSITY_PAGE_MIN) -> dict[Any, float]:
+    """Щільність кожного рядка відносно медіани групи (сторінки, руки)."""
+    vals = sorted(dens.values())
+    if len(vals) < min_n:
+        return {}
+    mid = len(vals) // 2
+    med = vals[mid] if len(vals) % 2 else (vals[mid - 1] + vals[mid]) / 2
+    return {k: v / med for k, v in dens.items()} if med > 0 else {}
+
+
+def density_outliers(rows: list[tuple[Any, Any, str, Path]], *,
+                     floor: float = DENSITY_SUSPECT) -> dict[Any, float]:
+    """Рядки корпусу (ключ, група, мітка, кроп), де мітка щільніша за групу ≥ `floor`.
+
+    Для корпусу поза лабораторією (чужі датасети, старий реєстр): групу
+    задає той, хто збирає, — сторінка чи рука.
+    """
+    by: dict[Any, dict[Any, float]] = {}
+    for key, grp, text, png in rows:
+        d = label_density(text, png)
+        if d is not None:
+            by.setdefault(grp, {})[key] = d
+    out: dict[Any, float] = {}
+    for dens in by.values():
+        for k, r in density_ratios(dens).items():
+            if r >= floor:
+                out[k] = r
+    return out
 
 
 def signals(merged: str, voices: list[str], ink: float | None) -> list[str]:
@@ -189,19 +280,28 @@ class PageGate:
     marks_stripped: list[int] = field(default_factory=list)
     shift_blocks: list[tuple[int, int, int]] = field(default_factory=list)
     suspects: list[tuple[int, str]] = field(default_factory=list)   # (idx, чому)
+    dense: list[tuple[int, float]] = field(default_factory=list)    # (idx, ×медіани) → low
 
     def as_dict(self) -> dict[str, Any]:
         return {"page": self.page, "demoted": self.demoted,
+                "dense": [[i, round(r, 1)] for i, r in self.dense],
                 "marks_stripped": self.marks_stripped,
                 "shift_blocks": [list(b) for b in self.shift_blocks],
                 "suspects": [{"idx": i, "why": w} for i, w in self.suspects]}
 
 
+def dense_why(r: float) -> str:
+    return (f"мітка задовга для кропа (щільність ×{r:.1f} від сторінки): добудоване "
+            f"з-поза рамки слово, два рядки в кропі або кроп боком")
+
+
 def gate_page(page: str, merged: list[str], voices: list[list[str]],
-              conf: dict[int, str], *, ink_of: Any = None) -> PageGate:
+              conf: dict[int, str], *, ink_of: Any = None,
+              crop_of: Any = None) -> PageGate:
     """Прогнати ворота по сторінці злиття; ПРАВИТЬ `merged` і `conf` на місці.
 
-    `ink_of(idx)` — частка чорнила кропа або `None`, коли кропа немає.
+    `ink_of(idx)` — частка чорнила кропа або `None`, коли кропа немає;
+    `crop_of(idx)` — шлях до кропа (для щільності мітки) або `None`.
     """
     g = PageGate(page=page)
     for i, text in enumerate(merged):
@@ -229,6 +329,21 @@ def gate_page(page: str, merged: list[str], voices: list[list[str]],
         elif grounded(text, vs) < GROUNDED_MIN and len(text) >= 6:
             g.suspects.append((i, "злиття не спирається на жоден голос — можливий "
                                   "домисел (перевірити кроп)"))
+    if crop_of is not None:
+        dens = {}
+        for i, text in enumerate(merged):
+            png = crop_of(i) if text.strip() else None
+            d = label_density(text, png) if png is not None else None
+            if d is not None:
+                dens[i] = d
+        for i, r in sorted(density_ratios(dens).items()):
+            if r >= DENSITY_DEMOTE:
+                if conf.get(i) != "low":
+                    g.demoted.append(i)
+                    g.dense.append((i, r))
+                conf[i] = "low"
+            elif r >= DENSITY_SUSPECT and conf.get(i) != "low":
+                g.suspects.append((i, dense_why(r)))
     blocks = shifted_blocks(merged, voices)
     for a, b, off in blocks:
         g.shift_blocks.append((a, b, off))

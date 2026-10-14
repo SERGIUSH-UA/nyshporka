@@ -100,6 +100,42 @@ def test_gate_rules_on_text() -> None:
     assert G.grounded("Остапенко", ["Атаманенко", "Атаманенка"]) < G.GROUNDED_MIN
 
 
+def test_label_too_long_for_crop_is_demoted_or_shown(tmp_path: Path) -> None:
+    # 10 рядків однієї руки: кроп 400×40, чорнило на всю ширину, ~20 символів.
+    crops = []
+    for i in range(10):
+        p = tmp_path / f"line_{i:03d}.png"
+        _crop(p, ink=True)
+        crops.append(p)
+    base = "Николай Ивановъ сынъ"
+    merged = [base] * 10
+    merged[3] = (base + " ") * 6          # ×6+ — добудова / кроп боком → low
+    merged[7] = (base + " ") * 3 + "Ѳ"    # ×3–6 — лише показати людині
+    conf = {i: "high" for i in range(10)}
+    g = G.gate_page("0001", merged, [merged[:]], conf, crop_of=lambda i: crops[i])
+    assert [i for i, _ in g.dense] == [3] and conf[3] == "low" and 3 in g.demoted
+    assert conf[7] == "high" and any(i == 7 and "задовга" in w for i, w in g.suspects)
+    assert all(conf[i] == "high" for i in (0, 1, 2, 4, 5, 6, 8, 9))
+    # без кропів (старі виклики) — щільність не судить
+    conf2 = {i: "high" for i in range(10)}
+    G.gate_page("0001", list(merged), [merged[:]], conf2)
+    assert conf2[3] == "high"
+
+
+def test_density_outliers_groups_and_skips_small_groups(tmp_path: Path) -> None:
+    rows = []
+    for i in range(9):
+        p = tmp_path / f"a_{i}.png"
+        _crop(p, ink=True)
+        rows.append((f"a{i}", "A", "x" * 20 + ("x" * 140 if i == 0 else ""), p))
+    for i in range(3):                     # мала група — медіані не віримо
+        p = tmp_path / f"b_{i}.png"
+        _crop(p, ink=True)
+        rows.append((f"b{i}", "B", "x" * (20 if i else 200), p))
+    out = G.density_outliers(rows)
+    assert set(out) == {"a0"} and out["a0"] >= G.DENSITY_DEMOTE
+
+
 def test_shift_is_judged_by_blocks_not_by_page() -> None:
     def word(i: int, k: int) -> str:
         return "".join(chr(0x430 + (i * 7 + k * 5 + j * 3) % 32) for j in range(9))
