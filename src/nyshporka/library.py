@@ -550,10 +550,31 @@ def parse_case_path(rel: str) -> tuple[str, str, str | None, str] | None:
         # `case.register` щойно записав поруч, не питався зовсім — бо з імені
         # «все вийшло» (issue #19). Назвати теку точніше означало зламати ключ.
         # Теки без паспорта поводяться як досі.
+        if _sidecar_repo_unknown(rel):
+            # Паспорт прямо каже «архів невідомий» (`"archive": "?"`, шифра
+            # «? 101-1-5»). Вгадане з імені кореня слово тоді — вигаданий
+            # архів: вирізки з чужого диска діставали ключ на кшталт
+            # `ALIEN/101/1/5`, де ALIEN — ім'я теки, а не архіву.
+            return None
         side = _sidecar_case(rel)
         if side:
             return side
     return repo, fond, opys, spr
+
+
+def _sidecar_repo_unknown(rel: str) -> bool:
+    """Паспорт теки свідомо не називає архіву: `"archive": "?"` або шифра з «?»."""
+    f = ROOT / rel / "_source.json"
+    if not f.exists():
+        return False
+    try:
+        m = json.loads(f.read_text(encoding="utf-8"))
+    except Exception:
+        return False
+    if not isinstance(m, dict):
+        return False
+    return (str(m.get("archive") or "").strip() == "?"
+            or str(m.get("shifra") or "").strip().startswith("?"))
 
 
 @lru_cache(maxsize=4096)
@@ -970,8 +991,15 @@ def _frames_removed(d: Path, dirs: tuple[str, ...] = ()) -> bool:
     return False
 
 
-def _scan_disk_cases(limit: int = 4000) -> list[tuple[str, int, int]]:
+def _scan_disk_cases(limit: int | None = None) -> list[tuple[str, int, int]]:
     """Теки коренів справ (1-4 рівні) з зображеннями/PDF → [(шлях, images, pdfs)].
+
+    🔴 Стелі за замовчуванням немає. Доки тут стояло `limit=4000`, великий
+    простір мовчки обрізався на 4000 теках із 6800: обхід іде по рівнях, тож
+    під стелю потрапляли саме вкладені справи (`anrm/villages/<село>/<тека>`,
+    `<джерело>/<парафія>/<вирізка>`), — понад тисяча справ без жодної ознаки
+    випадала з бібліотеки, а `cases bind` відмовляв «справи немає» на
+    заведеній теці (15.10.2026).
 
     4-й рівень з'явився з `fsfiles_download.py harvest`: `anrm/villages/<село>/<тека>`
     — одна тека на справу, ім'я за плівкою й кадрами, шифра в `_source.json`.
@@ -1028,7 +1056,7 @@ def _scan_disk_cases(limit: int = 4000) -> list[tuple[str, int, int]]:
                 except ValueError:
                     path = str(d)
                 out.append((path.replace("\\", "/"), imgs, pdfs))
-            if len(out) >= limit:
+            if limit is not None and len(out) >= limit:
                 return out
     return out
 

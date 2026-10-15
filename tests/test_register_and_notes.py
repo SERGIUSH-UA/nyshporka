@@ -553,6 +553,33 @@ def test_passport_beats_a_root_name_that_is_not_an_archive(space: Path) -> None:
     assert L._mk_key(got[0], got[1], got[3], got[2]) == "DAHMO/315/1/8433"
 
 
+def test_passport_with_unknown_archive_gets_no_guessed_key(space: Path) -> None:
+    """🔴 Паспорт каже «архів невідомий» — ключа з імені кореня («ALIEN») немає."""
+    from nyshporka import library as L
+
+    d = _folder(space.parent, "alien_drive/zelenivka/1840 M Zelenivka 101-1-5")
+    (d / "_source.json").write_text(
+        json.dumps({"shifra": "? 101-1-5", "archive": "?", "fond": 101,
+                    "opis": 1, "sprava": "5"}), encoding="utf-8")
+    L._sidecar_case.cache_clear()
+    rel = "data/raw/alien_drive/zelenivka/1840 M Zelenivka 101-1-5"
+    assert L.parse_case_path(rel) is None
+
+
+def test_scan_has_no_silent_ceiling(space: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """🔴 Без явного `limit` обхід віддає всі теки — стеля 4000 мовчки різала бібліотеку."""
+    from nyshporka import library as L
+
+    for i in range(5):
+        _folder(space.parent, f"dahmo_315/spr-{i}")
+    monkeypatch.setattr(L, "_scan_roots", lambda: [space.parent])
+    ours = [r for r in L._scan_disk_cases() if "dahmo_315/" in r[0]]
+    assert len(ours) == 5
+    assert len(L._scan_disk_cases(limit=2)) == 2
+    import inspect
+    assert inspect.signature(L._scan_disk_cases).parameters["limit"].default is None
+
+
 def test_known_archive_slug_is_still_read_from_the_name(space: Path) -> None:
     from nyshporka import library as L
 
