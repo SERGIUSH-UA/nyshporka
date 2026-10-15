@@ -17,6 +17,8 @@
 
 ## [Unreleased]
 
+## [0.30.2] — 2026-10-15
+
 ### Додано
 
 - **`nysh skills hook` — запобіжник скілів для Claude Code.** Хук `PreToolUse`
