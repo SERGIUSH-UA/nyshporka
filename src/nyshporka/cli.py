@@ -3603,6 +3603,57 @@ def skills_install(
     console.print(f"  [muted]видно агентові {where}; перезапустіть сесію[/muted]")
 
 
+@skills_app.command("hook")
+def skills_hook(
+    install: bool = typer.Option(False, "--install", help="поставити запобіжник (Claude Code)"),
+    decline: bool = typer.Option(False, "--decline", help="записати, що людина відмовилась"),
+    remove: bool = typer.Option(False, "--remove", help="зняти запобіжник"),
+    user: bool = typer.Option(False, "--user",
+                              help="у ~/.claude/settings.json, для всіх проєктів"),
+    why: str = typer.Option("", "--why", help="слова людини — для --decline"),
+) -> None:
+    """Запобіжник: скіл Нишпорки вантажиться цілим, а не грепом.
+
+    Хук Claude Code відмовляє агентові, коли той грепає `SKILL.md`, читає його
+    шматком чи шукає по теці скілів, і каже завантажити скіл цілим. Ставиться
+    лише з дозволу людини: `--install` або `--decline --why "…"`. Обидва
+    рішення записуються в контрольний файл, з якого міграція агента бачить, що
+    питання закрито. Без прапорців — стан.
+    """
+    from nyshporka.skills import hook as H
+
+    if sum((install, decline, remove)) > 1:
+        console.print("[warn]![/warn] одне з --install, --decline, --remove")
+        raise typer.Exit(code=1)
+    settings = H.settings_path(user=user)
+    try:
+        if install:
+            H.install(user=user)
+            console.print(f"✓ запобіжник у {settings}")
+            console.print("  [muted]діє з наступного виклику інструмента; "
+                          "контрольний файл: " + str(H.control_path()) + "[/muted]")
+        elif decline:
+            if not why.strip():
+                console.print("[warn]![/warn] --decline потребує --why: слова людини, "
+                              "чому не ставимо")
+                raise typer.Exit(code=1)
+            path = H.record(settings, "declined", why.strip())
+            console.print(f"✓ записано відмову для {settings} → {path}")
+        elif remove:
+            H.remove(user=user)
+            H.record(settings, "declined", why.strip() or "знято командою --remove")
+            console.print(f"✓ запобіжник знято з {settings}")
+        else:
+            state, detail = H.verdict()
+            mark = "✓" if state == "ok" else "[warn]![/warn]"
+            console.print(f"{mark} {detail}")
+            problem = H.present(settings)
+            console.print(f"  [muted]{settings}: {problem or 'стоїть'}[/muted]")
+    except ValueError as exc:
+        console.print(f"[warn]![/warn] {exc}")
+        raise typer.Exit(code=1) from None
+
+
 #: 🔴 MCP-сервер прибрано в 0.19. Команда лишилась як вказівник: конфіг агента
 #: (`.mcp.json`, `claude mcp add`), прописаний раніше, і далі кличе
 #: `nysh mcp serve` — без неї агент бачив би «No such command» і не знав, куди

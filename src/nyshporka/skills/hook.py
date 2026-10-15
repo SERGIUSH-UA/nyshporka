@@ -1,0 +1,192 @@
+"""🛡 Поставити запобіжник скілів у конфіг агента — або записати, що людина відмовилась.
+
+Пакет у конфіг агента мовчки не пише (див. `skills.install`). Тому хук ставить
+лише явна команда `nysh skills hook --install`, і лише з дозволу людини. Що
+людина вирішила, записується в **контрольний файл** машини
+(`agent-hook.json` поруч зі станом користувача). Крок міграції `skill_guard`
+читає саме його: «поставлено» звіряється з живим конфігом, «відмовились»
+приймається як рішення. Якщо запису немає, крок лишається червоним, і агент
+мусить спитати.
+
+Хук — Claude Code (`.claude/settings.json`, `PreToolUse`). Для Codex його не
+ставимо: там лишаються короткі скіли й правило в інструкції агента.
+"""
+from __future__ import annotations
+
+import json
+import shutil
+import sys
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
+
+#: Ім'я копії запобіжника в теці хуків і мітка нашого запису в конфігу.
+SCRIPT = "nysh-skill-guard.py"
+#: Які виклики бачить запобіжник.
+MATCHER = "Bash|PowerShell|Grep|Read"
+#: Контрольний файл: рішення людини по кожному конфігу агента.
+CONTROL = "agent-hook.json"
+
+
+def settings_path(*, user: bool) -> Path:
+    base = Path.home() if user else Path.cwd()
+    return base / ".claude" / "settings.json"
+
+
+def control_path() -> Path:
+    from platformdirs import user_state_dir
+
+    return Path(user_state_dir("Nyshporka", appauthor=False)) / CONTROL
+
+
+def _command(script: Path) -> str:
+    # Інтерпретатор самого пакета: на машині людини іншого Python може не бути.
+    return f'"{Path(sys.executable).as_posix()}" "{script.as_posix()}"'
+
+
+def _load(settings: Path) -> dict[str, Any]:
+    if not settings.is_file():
+        return {}
+    try:
+        data = json.loads(settings.read_text(encoding="utf-8"))
+    except ValueError as exc:
+        # Чужий конфіг, який ми не розібрали, не переписуємо — людина
+        # втратила б усе, що там було.
+        raise ValueError(f"{settings} не розбирається як JSON ({exc}); "
+                         f"не чіпаю — виправте файл або поставте хук руками") from None
+    if not isinstance(data, dict):
+        raise ValueError(f"{settings}: верхній рівень не об'єкт; не чіпаю")
+    return data
+
+
+def _ours(entry: Any) -> bool:
+    return SCRIPT in json.dumps(entry, ensure_ascii=False)
+
+
+def _write(settings: Path, data: dict[str, Any]) -> None:
+    from nyshporka.utils.atomic import atomic_write_text
+
+    settings.parent.mkdir(parents=True, exist_ok=True)
+    atomic_write_text(settings, json.dumps(data, ensure_ascii=False, indent=2) + "\n",
+                      newline="\n")
+
+
+def present(settings: Path) -> str:
+    """Порожньо — хук стоїть і працюватиме; інакше — що з ним не так."""
+    try:
+        data = _load(settings)
+    except ValueError as exc:
+        return str(exc)
+    entries = [e for e in ((data.get("hooks") or {}).get("PreToolUse") or [])
+               if _ours(e)]
+    if not entries:
+        return f"у {settings} запобіжника немає"
+    script = settings.parent / "hooks" / SCRIPT
+    if not script.is_file():
+        return f"запис є, а файла {script} немає"
+    cmds = [str(h.get("command") or "") for e in entries for h in (e.get("hooks") or [])
+            if isinstance(h, dict)]
+    exe = next((c.split('"')[1] for c in cmds if c.startswith('"') and c.count('"') >= 2), "")
+    if exe and not Path(exe).is_file():
+        return f"інтерпретатора {exe} уже немає — `nysh skills hook --install` ще раз"
+    return ""
+
+
+def install(*, user: bool) -> Path:
+    """Скопіювати запобіжник і дописати його в конфіг, не чіпаючи чужого."""
+    settings = settings_path(user=user)
+    data = _load(settings)
+    script = settings.parent / "hooks" / SCRIPT
+    script.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(Path(__file__).with_name("guard.py"), script)
+
+    hooks = data.setdefault("hooks", {})
+    pre = [e for e in (hooks.get("PreToolUse") or []) if not _ours(e)]
+    pre.append({"matcher": MATCHER,
+                "hooks": [{"type": "command", "command": _command(script)}]})
+    hooks["PreToolUse"] = pre
+    _write(settings, data)
+    record(settings, "installed")
+    return settings
+
+
+def remove(*, user: bool) -> Path:
+    """Зняти наш запис і копію; чужі хуки лишаються."""
+    settings = settings_path(user=user)
+    data = _load(settings)
+    hooks = data.get("hooks") or {}
+    pre = [e for e in (hooks.get("PreToolUse") or []) if not _ours(e)]
+    if "PreToolUse" in hooks:
+        if pre:
+            hooks["PreToolUse"] = pre
+        else:
+            del hooks["PreToolUse"]
+        if not hooks:
+            data.pop("hooks", None)
+        _write(settings, data)
+    (settings.parent / "hooks" / SCRIPT).unlink(missing_ok=True)
+    return settings
+
+
+# ── контрольний файл ─────────────────────────────────────────────────────────
+@dataclass
+class Decision:
+    settings: str
+    decision: str          # installed · declined
+    why: str
+    at: str
+
+
+def decisions() -> list[Decision]:
+    try:
+        data = json.loads(control_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError, ImportError):
+        return []
+    rows = data.get("decisions") if isinstance(data, dict) else None
+    out = []
+    for key, d in (rows or {}).items():
+        if isinstance(d, dict) and d.get("decision") in ("installed", "declined"):
+            out.append(Decision(settings=key, decision=d["decision"],
+                                why=str(d.get("why") or ""), at=str(d.get("at") or "")))
+    return out
+
+
+def record(settings: Path, decision: str, why: str = "") -> Path:
+    """Записати рішення людини про цей конфіг агента."""
+    from nyshporka.utils.atomic import atomic_write_text
+
+    path = control_path()
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        data = {}
+    if not isinstance(data, dict):
+        data = {}
+    rows = data.setdefault("decisions", {})
+    rows[str(settings.resolve())] = {
+        "decision": decision, "why": why,
+        "at": datetime.now(UTC).isoformat(timespec="seconds")}
+    path.parent.mkdir(parents=True, exist_ok=True)
+    atomic_write_text(path, json.dumps(data, ensure_ascii=False, indent=1) + "\n",
+                      newline="\n")
+    return path
+
+
+def verdict() -> tuple[str, str]:
+    """Стан для міграції: (`ok` | `todo`, пояснення)."""
+    rows = decisions()
+    if not rows:
+        return ("todo", "рішення людини не записано: спитати й виконати "
+                        "`nysh skills hook --install` або "
+                        "`nysh skills hook --decline --why \"…\"`")
+    broken, fine = [], []
+    for d in rows:
+        if d.decision == "declined":
+            fine.append(f"відмовились ({d.why or 'без пояснення'})")
+            continue
+        problem = present(Path(d.settings))
+        (broken if problem else fine).append(problem or f"стоїть: {d.settings}")
+    if broken:
+        return ("todo", "; ".join(broken))
+    return ("ok", "; ".join(fine))

@@ -319,6 +319,18 @@ def _models_current(root: Path) -> CheckResult:
     return CheckResult("ok", "бойові ваги на місці")
 
 
+def _skill_guard(root: Path) -> CheckResult:
+    """Запобіжник скілів: поставлено й живе, або людина відмовилась (з 0.30.1).
+
+    Читає контрольний файл `nysh skills hook`, а не конфіг навмання: «не
+    стоїть» без запису означає «ще не питали», а не «не треба».
+    """
+    from nyshporka.skills import hook as H
+
+    state, detail = H.verdict()
+    return CheckResult(state, detail)
+
+
 CHECKS: dict[str, Callable[[Path], CheckResult]] = {
     "mcp_config": _mcp_config,
     "skills_current": _skills_current,
@@ -329,6 +341,7 @@ CHECKS: dict[str, Callable[[Path], CheckResult]] = {
     "keys_current": _keys_current,
     "engines_current": _engines_current,
     "models_current": _models_current,
+    "skill_guard": _skill_guard,
 }
 
 
