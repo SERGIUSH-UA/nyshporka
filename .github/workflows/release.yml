@@ -77,9 +77,32 @@ jobs:
       - name: нічого не забуто
         run: uv run python tools/release_check.py "${GITHUB_REF_NAME}" --ref "${GITHUB_SHA}"
 
+  # 🪟 Тести на Windows — теж ворота. Windows — основна платформа аудиторії, і
+  # саме тут живуть вади кодування (cp1251 / cp1252 у stdin і subprocess) та
+  # шляхів, яких Ubuntu не бачить. 0.30.2 вийшов, хоча CI на Windows для того
+  # самого коміту був червоний: запобіжник скілів на cp1251 мовчки пропускав
+  # усе, а реліз дивився лише на Ubuntu. Лише pytest: ruff, mypy й нотатки
+  # від платформи не залежать і вже перевірені в `checks`.
+  checks-windows:
+    name: ворота якості · Windows
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      # Без кешу — з тієї ж причини, що й у `checks`: тег, що їде на PyPI.
+      - uses: astral-sh/setup-uv@v10.1.0
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: встановити
+        run: uv sync --locked --group dev
+      - name: pytest
+        run: uv run pytest
+
   build:
     name: зібрати
-    needs: [private-data, checks]
+    needs: [private-data, checks, checks-windows]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
