@@ -424,8 +424,19 @@ def voice_of(run_dir: Path) -> Voice:
         meta = {}
     pages, lines, chars, prereform = _run_stats(run_dir)
     has_geo = has_geometry(run_dir)
-    return Voice(run=run_dir.name, engine=S.run_engine(meta),
-                 model=str(meta.get("model") or ""),
+    model, engine = str(meta.get("model") or ""), S.run_engine(meta)
+    # 🔴 Побічна тека голосу (`<прогін>-diak_v7`) пише в мету «основна+голос»
+    # (`pysar_cyr_v21.pt+diak_v7`): рядки нарізала основна модель, а текст —
+    # голос. `run_engine` бере першу частину, і Дяк-Літописець їхав у Супрягу
+    # Писарем: картка й ворота (`prereform_voice`) приписували його текст іншій
+    # моделі. Тека, чиє ім'я закінчується тегом після `+`, — це голос.
+    parts = [x.strip() for x in model.split("+") if x.strip()]
+    if len(parts) > 1 and run_dir.name.endswith(f"-{parts[-1]}"):
+        model = parts[-1]
+        eng = S.engine_of_model(model)
+        engine = eng.kind if eng is not None else engine
+    return Voice(run=run_dir.name, engine=engine,
+                 model=model,
                  script=str(meta.get("script") or ""),
                  pages=pages, lines=lines, chars=chars,
                  conf_mean=_conf_mean(meta), geometry=bool(has_geo),

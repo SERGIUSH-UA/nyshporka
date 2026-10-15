@@ -115,3 +115,22 @@ def test_holos_nese_chastku(run_dir: Path) -> None:
     v = bundle.voice_of(run_dir)
     assert v.prereform == pytest.approx(2 / 7)
     assert v.as_json()["prereform"] == pytest.approx(2 / 7, abs=1e-4)
+
+
+def test_pobichna_teka_tse_golos_a_ne_pysar(tmp_path: Path) -> None:
+    """Тека `<прогін>-diak_v7` з метою `pysar…+diak_v7` — це Дяк, не Писар."""
+    import json
+
+    d = tmp_path / "spr-1-diak_v7"
+    d.mkdir()
+    (d / "0001.txt").write_text("Петренко Иван\n", encoding="utf-8")
+    (d / "_htr_meta.json").write_text(json.dumps({"model": "pysar_cyr_v21.pt+diak_v7"}),
+                                      encoding="utf-8")
+    v = bundle.voice_of(d)
+    assert v.model == "diak_v7"
+    assert v.engine == "kraken"
+    main = tmp_path / "spr-1"
+    main.mkdir()
+    (main / "0001.txt").write_text("Петренко Иван\n", encoding="utf-8")
+    (main / "_htr_meta.json").write_text(json.dumps({"model": "pysar_cyr_v21.pt"}), encoding="utf-8")
+    assert bundle.voice_of(main).model == "pysar_cyr_v21.pt"
