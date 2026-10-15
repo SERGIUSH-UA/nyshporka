@@ -180,7 +180,8 @@ def verdict() -> tuple[str, str]:
         return ("todo", "рішення людини не записано: спитати й виконати "
                         "`nysh skills hook --install` або "
                         "`nysh skills hook --decline --why \"…\"`")
-    broken, fine = [], []
+    broken: list[str] = []
+    fine: list[str] = []
     for d in rows:
         if d.decision == "declined":
             fine.append(f"відмовились ({d.why or 'без пояснення'})")

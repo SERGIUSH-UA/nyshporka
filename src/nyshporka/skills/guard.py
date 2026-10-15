@@ -25,6 +25,7 @@ import os
 import re
 import sys
 from pathlib import Path
+from typing import Any
 
 LEDGER = ".nysh-skills.json"
 CARD = "SKILL.md"
@@ -71,7 +72,7 @@ def _ours(p: Path) -> bool:
     return False
 
 
-def decide(payload: dict) -> str | None:
+def decide(payload: dict[str, Any]) -> str | None:
     """Причина відмови або `None` — пропустити."""
     tool = str(payload.get("tool_name") or "")
     args = payload.get("tool_input") or {}
