@@ -106,7 +106,10 @@ def decide(payload: dict[str, Any]) -> str | None:
 
 def main() -> int:
     try:
-        payload = json.loads(sys.stdin.read() or "{}")
+        # Байтами й UTF-8: Claude Code шле UTF-8, а `sys.stdin` на Windows
+        # читає кодовою сторінкою системи (cp1251) — і шлях із кирилицею
+        # ставав кракозябрами, тобто запобіжник мовчки пропускав усе.
+        payload = json.loads(sys.stdin.buffer.read().decode("utf-8", "replace") or "{}")
         reason = decide(payload if isinstance(payload, dict) else {})
     except Exception:
         return 0

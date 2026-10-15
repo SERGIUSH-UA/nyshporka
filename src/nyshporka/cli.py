@@ -75,6 +75,13 @@ def _sync_skills() -> None:
         got = S.sync(__version__)
     except Exception:
         return          # скіли — зручність, а не умова роботи
+    try:
+        from nyshporka.skills import hook as H
+
+        for settings in H.refresh():
+            err_console.print(f"[muted]запобіжник скілів оновлено в {settings}[/muted]")
+    except Exception:
+        pass            # запобіжник — теж зручність
     for dest, tally in got:
         moved = tally.get("updated", 0) + tally.get("new", 0)
         kept = tally.get("kept", 0)

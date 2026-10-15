@@ -30,8 +30,19 @@ CONTROL = "agent-hook.json"
 
 
 def settings_path(*, user: bool) -> Path:
-    base = Path.home() if user else Path.cwd()
-    return base / ".claude" / "settings.json"
+    """Куди пишемо: `~/.claude/settings.json` або `settings.local.json` проєкту.
+
+    🔴 У проєкті — `settings.local.json`, а не `settings.json`: другий кладуть у
+    git, а наш запис несе абсолютні шляхи ЦІЄЇ машини (інтерпретатор, копія
+    запобіжника). У спільному файлі він ламав би хук кожному, хто клонував.
+    """
+    if user:
+        return Path.home() / ".claude" / "settings.json"
+    return Path.cwd() / ".claude" / "settings.local.json"
+
+
+#: Куди ставила 0.30.2 у проєкті — `remove` прибирає й звідти.
+LEGACY_PROJECT = Path(".claude") / "settings.json"
 
 
 def control_path() -> Path:
@@ -93,13 +104,17 @@ def present(settings: Path) -> str:
     return ""
 
 
-def install(*, user: bool) -> Path:
-    """Скопіювати запобіжник і дописати його в конфіг, не чіпаючи чужого."""
-    settings = settings_path(user=user)
+GUARD = Path(__file__).with_name("guard.py")
+#: Змінна, яку ставить наш Docker-образ (`daemon.app.in_container`).
+ENV_DOCKER = "NYSH_DOCKER_IMAGE"
+
+
+def _put(settings: Path) -> None:
+    """Покласти свіжу копію запобіжника й один наш запис у цей конфіг."""
     data = _load(settings)
     script = settings.parent / "hooks" / SCRIPT
     script.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(Path(__file__).with_name("guard.py"), script)
+    shutil.copyfile(GUARD, script)
 
     hooks = data.setdefault("hooks", {})
     pre = [e for e in (hooks.get("PreToolUse") or []) if not _ours(e)]
@@ -107,26 +122,91 @@ def install(*, user: bool) -> Path:
                 "hooks": [{"type": "command", "command": _command(script)}]})
     hooks["PreToolUse"] = pre
     _write(settings, data)
+
+
+def install(*, user: bool) -> Path:
+    """Скопіювати запобіжник і дописати його в конфіг, не чіпаючи чужого.
+
+    🔴 У контейнері — відмова. `nysh` там лише через обгортку, а агент живе на
+    основній системі: шляхи інтерпретатора й копії з контейнера в конфігу
+    основної системи не існують, і хук падав би на кожному виклику агента.
+    """
+    import os
+
+    if os.environ.get(ENV_DOCKER):
+        raise ValueError("Нишпорка в контейнері, а помічник — на основній системі: "
+                         "звідси хук поставити не можна. Відмову з поясненням "
+                         "запишіть `nysh skills hook --decline --why \"Docker\"`")
+    settings = settings_path(user=user)
+    _put(settings)
     record(settings, "installed")
     return settings
+
+
+def _strip(settings: Path) -> None:
+    if not settings.is_file():
+        return
+    data = _load(settings)
+    hooks = data.get("hooks") or {}
+    if not any(_ours(e) for e in (hooks.get("PreToolUse") or [])):
+        return
+    pre = [e for e in hooks["PreToolUse"] if not _ours(e)]
+    if pre:
+        hooks["PreToolUse"] = pre
+    else:
+        del hooks["PreToolUse"]
+    if not hooks:
+        data.pop("hooks", None)
+    _write(settings, data)
 
 
 def remove(*, user: bool) -> Path:
     """Зняти наш запис і копію; чужі хуки лишаються."""
     settings = settings_path(user=user)
-    data = _load(settings)
-    hooks = data.get("hooks") or {}
-    pre = [e for e in (hooks.get("PreToolUse") or []) if not _ours(e)]
-    if "PreToolUse" in hooks:
-        if pre:
-            hooks["PreToolUse"] = pre
-        else:
-            del hooks["PreToolUse"]
-        if not hooks:
-            data.pop("hooks", None)
-        _write(settings, data)
+    _strip(settings)
+    if not user:
+        _strip(Path.cwd() / LEGACY_PROJECT)
     (settings.parent / "hooks" / SCRIPT).unlink(missing_ok=True)
     return settings
+
+
+def refresh() -> list[Path]:
+    """Після оновлення пакета — свіжа копія запобіжника там, де його поставили.
+
+    Копія лежить у теці агента, і без цього кроку виправлення запобіжника до
+    людини не доходили б ніколи. Переписує й шлях інтерпретатора, якщо пакет
+    перевстановлено деінде. Чіпає лише конфіги з записом «installed», де наш
+    запис досі стоїть: знятий руками хук не повертаємо.
+    """
+    import os
+
+    from nyshporka.skills import ENV_NO_SYNC
+
+    done: list[Path] = []
+    if os.environ.get(ENV_NO_SYNC):
+        return done
+    for d in decisions():
+        if d.decision != "installed":
+            continue
+        settings = Path(d.settings)
+        script = settings.parent / "hooks" / SCRIPT
+        try:
+            if not script.is_file() or not settings.is_file():
+                continue
+            ours = [e for e in ((_load(settings).get("hooks") or {}).get("PreToolUse") or [])
+                    if _ours(e)]
+            if not ours:
+                continue
+            cmds = {str(h.get("command") or "") for e in ours for h in (e.get("hooks") or [])
+                    if isinstance(h, dict)}
+            stale = script.read_bytes() != GUARD.read_bytes()
+            moved = _command(script) not in cmds
+            if stale or moved:
+                _put(settings)
+                done.append(settings)
+        except (OSError, ValueError):
+            continue
+    return done
 
 
 # ── контрольний файл ─────────────────────────────────────────────────────────

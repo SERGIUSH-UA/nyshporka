@@ -77,13 +77,15 @@ def test_whole_reads_and_foreign_skills_pass(placed: Path, tmp_path: Path) -> No
 def test_guard_runs_as_a_script_and_never_breaks_on_junk(placed: Path) -> None:
     script = Path(G.__file__)
     card = placed / "read-case" / "SKILL.md"
-    out = subprocess.run([sys.executable, str(script)], capture_output=True, text=True,
-                         input=json.dumps(_bash(f"rg x {card}", placed)), timeout=60)
+    # Байти UTF-8, як шле Claude Code: `text=True` кодував би вхід кодовою
+    # сторінкою системи (cp1252 на Windows CI — кирилиці там немає).
+    out = subprocess.run([sys.executable, str(script)], capture_output=True,
+                         input=json.dumps(_bash(f"rg x {card}", placed)).encode(), timeout=60)
     assert out.returncode == 0
     assert json.loads(out.stdout)["hookSpecificOutput"]["permissionDecision"] == "deny"
-    junk = subprocess.run([sys.executable, str(script)], capture_output=True, text=True,
-                          input="не json", timeout=60)
-    assert junk.returncode == 0 and junk.stdout == "", "власна помилка — пропустити"
+    junk = subprocess.run([sys.executable, str(script)], capture_output=True,
+                          input="не json".encode(), timeout=60)
+    assert junk.returncode == 0 and junk.stdout == b"", "власна помилка — пропустити"
 
 
 @pytest.fixture
@@ -101,7 +103,10 @@ def test_no_decision_keeps_the_migration_step_red(machine: Path) -> None:
 
 
 def test_install_keeps_foreign_settings_and_turns_the_step_green(machine: Path) -> None:
-    settings = machine / ".claude" / "settings.json"
+    # У проєкті — settings.local.json: settings.json кладуть у git, а наш запис
+    # несе абсолютні шляхи цієї машини.
+    settings = machine / ".claude" / "settings.local.json"
+    assert H.settings_path(user=False) == settings
     settings.parent.mkdir()
     settings.write_text(json.dumps({"model": "x", "hooks": {"PreToolUse": [
         {"matcher": "Bash", "hooks": [{"type": "command", "command": "чуже"}]}]}}),
@@ -132,7 +137,7 @@ def test_a_declined_hook_closes_the_step_with_the_reason(machine: Path) -> None:
 
 
 def test_unreadable_settings_are_not_overwritten(machine: Path) -> None:
-    settings = machine / ".claude" / "settings.json"
+    settings = H.settings_path(user=False)
     settings.parent.mkdir()
     settings.write_text("{ зламане", encoding="utf-8")
     with pytest.raises(ValueError):
@@ -150,3 +155,57 @@ def test_cli_decline_needs_a_reason(machine: Path) -> None:
     res = runner.invoke(app, ["skills", "hook", "--decline", "--why", "не зараз"])
     assert res.exit_code == 0
     assert M.run_check("skill_guard", machine).state == "ok"
+
+
+def test_guard_reads_utf8_stdin_whatever_the_code_page(placed: Path) -> None:
+    """🔴 Claude Code шле UTF-8, а Windows читає stdin кодовою сторінкою системи.
+
+    На cp1251 шлях із кирилицею ставав кракозябрами, і запобіжник мовчки
+    пропускав греп скіла — саме в тих, у кого ім'я користувача кирилицею.
+    """
+    import os
+
+    home = placed.parent.parent
+    cyr = home.parent / "Олена"
+    home.rename(cyr)
+    card = (cyr / ".claude" / "skills" / "read-case" / "SKILL.md").as_posix()
+    payload = json.dumps(_bash(f"rg -n shard {card}", cyr), ensure_ascii=False).encode()
+    env = dict(os.environ, PYTHONIOENCODING="cp1251")
+    out = subprocess.run([sys.executable, str(Path(G.__file__))], input=payload,
+                         capture_output=True, env=env, timeout=60)
+    assert b"deny" in out.stdout
+
+
+def test_refresh_brings_a_stale_copy_up_to_date(machine: Path,
+                                                monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv(S.ENV_NO_SYNC, raising=False)
+    H.install(user=False)
+    script = machine / ".claude" / "hooks" / H.SCRIPT
+    script.write_text("# стара копія\n", encoding="utf-8")
+    assert H.refresh() == [H.settings_path(user=False)]
+    assert script.read_bytes() == H.GUARD.read_bytes()
+    assert H.refresh() == [], "свіжа копія — нічого не робимо"
+
+    H.remove(user=False)
+    script.parent.mkdir(parents=True, exist_ok=True)
+    script.write_text("# стара копія\n", encoding="utf-8")
+    assert H.refresh() == [], "знятий хук не повертаємо"
+
+
+def test_no_install_from_inside_the_container(machine: Path,
+                                              monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(H.ENV_DOCKER, "ghcr.io/sergiush-ua/nyshporka")
+    with pytest.raises(ValueError, match="контейнері"):
+        H.install(user=False)
+    assert not (machine / ".claude").exists()
+
+
+def test_remove_also_cleans_the_0_30_2_project_place(machine: Path) -> None:
+    legacy = machine / ".claude" / "settings.json"
+    legacy.parent.mkdir()
+    legacy.write_text(json.dumps({"hooks": {"PreToolUse": [
+        {"matcher": H.MATCHER, "hooks": [{"type": "command",
+                                          "command": f'"py" "x/{H.SCRIPT}"'}]}]},
+        "model": "x"}), encoding="utf-8")
+    H.remove(user=False)
+    assert json.loads(legacy.read_text(encoding="utf-8")) == {"model": "x"}
