@@ -20,7 +20,10 @@ def slow_build(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     from nyshporka.cases import db
 
     monkeypatch.setattr(db, "DB_PATH", tmp_path / "case_index.sqlite")
-    state: dict[str, Any] = {"n": 0, "running": 0, "max_running": 0, "dur": 0.6,
+    # 2 с, а не 0.6: на повільному раннері CI десять потоків інколи не
+    # встигали стартувати за першу збірку, і запізнілий запит законно давав
+    # третю (py3.11 · ubuntu, 15.10.2026).
+    state: dict[str, Any] = {"n": 0, "running": 0, "max_running": 0, "dur": 2.0,
                              "started": threading.Event()}
     lock = threading.Lock()
 
