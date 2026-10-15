@@ -67,7 +67,13 @@ META_NAME = "_htr_meta.json"
 #: «те саме поле означає інше» — це розбіжність, якої не видно ніде.
 #: Заморозиться число перед запуском пулу; доти піднімати його коштує рядок,
 #: а не розбір, чий `schema: 1` який.
-SCHEMA = 2
+#: 3 — сегмент справи, якої один пакет не вміщує (`case.segment`,
+#:     `share/segment.py`). Пишеться ЛИШЕ в сегменти: звичайний пакет лишається
+#:     на `SCHEMA_PLAIN`, і старі клієнти беруть його без оновлення, а сегмент
+#:     відкидають явно — інакше поклали б його як цілу справу.
+SCHEMA = 3
+#: Схема звичайного (несегментованого) пакета.
+SCHEMA_PLAIN = 2
 
 #: Що взагалі їде в пакет. Решта — ні, і це рішення, а не недогляд.
 PACKED_TEXT = "*.txt"
@@ -187,7 +193,7 @@ class Manifest:
     license: dict[str, str] = field(default_factory=dict)
     tool: str = ""
     created: str = ""
-    schema: int = SCHEMA
+    schema: int = SCHEMA_PLAIN
 
     # ── читання ──
     @property
@@ -247,7 +253,7 @@ class Manifest:
                    note=str(raw.get("note") or ""), links=_l("links"),
                    extra=_d("extra"), license=_d("license"),
                    tool=str(raw.get("tool") or ""),
-                   created=str(raw.get("created") or ""), schema=got or SCHEMA)
+                   created=str(raw.get("created") or ""), schema=got or SCHEMA_PLAIN)
 
 
 # ── збірка ───────────────────────────────────────────────────────────────────

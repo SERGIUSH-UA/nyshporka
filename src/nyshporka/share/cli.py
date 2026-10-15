@@ -150,6 +150,12 @@ def pack_cmd(
     scans: str | None = typer.Option(None, "--scans", help=_SCANS_HELP),
     skip_run: list[str] = typer.Option([], "--skip-run",
                                        help="прогін, який НЕ пакувати (можна кілька)"),
+    segments: bool = typer.Option(False, "--segments",
+                                  help="справа завелика для одного пакета (пул: до "
+                                       "20 000 файлів, 64 МБ): спакувати сегментами "
+                                       "одного внеску — за теками кадрів"),
+    segment_files: int = typer.Option(18_000, "--segment-files",
+                                      help="файлів тексту в сегменті (усі голоси)"),
     as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Зібрати пакет прочитаного для обміну.
@@ -167,11 +173,16 @@ def pack_cmd(
         "publisher": publisher, "contact": contact, "site": site, "note": note,
         "link": list(link), "extra": list(extra), "license": license_,
         "source_terms": source_terms, "archive_name": archive_name,
-        "skip_run": list(skip_run),
+        "skip_run": list(skip_run), "segments": segments,
+        "segment_files": segment_files,
         **_card_args(title, years, place, genre, frames, frames_unknown, scans)})
     if _answer(env, as_json):
         return
     d = env.data or {}
+    if segments:
+        _show_segments(d)
+        _notes(env)
+        return
     m = d.get("manifest") or {}
     dec = m.get("decode") or {}
     mcase = m.get("case") or {}
@@ -210,6 +221,25 @@ def pack_cmd(
                           "(nysh share card)[/dim]")
         console.print("\n[dim]віддати: nysh share publish <файл>[/dim]")
     _notes(env)
+
+
+def _show_segments(d: dict[str, Any]) -> None:
+    segs = d.get("segments") or []
+    console.print(f"справа: [bold]{_e(d.get('key') or d.get('scope'))}[/bold] · "
+                  f"частин {_e(d.get('parts'))} · сегментів {len(segs)} · кадрів "
+                  f"{_e(d.get('frames_total'))} ({_e(d.get('frames_source') or '—')})")
+    for s in d.get("skipped_runs") or []:
+        console.print(f"  [muted]не їде: {_e(s.get('run'))} — {_e(s.get('why'))}[/muted]")
+    for s in segs:
+        tail = (f"{_mb(s['bytes'])}" if s.get("bytes")
+                else f"{_mb(s.get('bytes_raw') or 0)} до стиску")
+        console.print(f"  {s.get('n'):>3}/{s.get('of')}  {_e(s.get('label'))} · "
+                      f"стор. {_e(s.get('pages'))} · файлів {_e(s.get('files'))} · {tail}")
+    if d.get("dry_run"):
+        console.print("[dim]нічого не записано (--dry-run)[/dim]")
+    else:
+        console.print(f"\nтека: [bold]{_e(d.get('dir'))}[/bold]")
+        console.print("[dim]віддати всі сегменти: nysh share publish <тека>[/dim]")
 
 
 @app.command("pack-print")
@@ -488,7 +518,8 @@ def suggest_cmd(
 
 @app.command("publish")
 def publish_cmd(
-    path: str = typer.Argument(..., help="зібраний пакет .nyshtext"),
+    path: str = typer.Argument(..., help="зібраний пакет .nyshtext або тека "
+                                         "сегментів (`pack --segments`)"),
     base: str = typer.Option("", "--base", help="інша адреса пулу"),
     replaces: int | None = typer.Option(
         None, "--replaces",
@@ -517,6 +548,14 @@ def publish_cmd(
         return
     d = env.data or {}
     vyhid = str(d.get("outcome") or "")
+    if vyhid == "segments":
+        for s in d.get("segments") or []:
+            console.print(f"  {_e(s.get('file'))}: "
+                          f"{_e(OUTCOME_TEXT.get(str(s.get('outcome')), s.get('outcome')))}"
+                          + (f" · внесок {_e(s['contribution'])}" if s.get("contribution") else ""))
+        console.print(f"віддано сегментів: [bold]{_e(d.get('count'))}[/bold]")
+        _notes(env)
+        return
     if d.get("geometry_attached"):
         console.print(f"текст уже в Супрязі — [bold]дозалито геометрію[/bold] "
                       f"до внеску {_e(d.get('contribution'))}")
@@ -824,6 +863,9 @@ def pull_cmd(
     repo: str = typer.Option("", "--repo", help="серія: архів («RGIA», «ДАХмО»)"),
     fond: str = typer.Option("", "--fond", help="серія: фонд; з --take — уся серія"),
     opys: str = typer.Option("", "--opys", help="серія: опис; порожньо — усі описи"),
+    segment: str = typer.Option("", "--segment",
+                                help="справа сегментами (картотека): лише сегмент, "
+                                     "що покриває ці літери, напр. «Дал»"),
     as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Знайти справу в каталозі пулу — і за потреби одразу прийняти.
@@ -838,7 +880,8 @@ def pull_cmd(
     _kliuch_abo_vkhid(as_json)
     env = O.call("share.pull", {"query": query, "base": base, "take": take,
                                 "vydannia": vydannia, "years": years, "force": force,
-                                "repo": repo, "fond": fond, "opys": opys})
+                                "repo": repo, "fond": fond, "opys": opys,
+                                "segment": segment})
     if _answer(env, as_json):
         return
     d = env.data or {}

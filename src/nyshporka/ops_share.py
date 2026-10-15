@@ -156,6 +156,14 @@ class SharePackArgs(_CardFields):
                                                      "його немає в довіднику Нишпорки")
     skip_run: list[str] = Field(default_factory=list,
                                 description="прогони, які НЕ пакувати")
+    segments: bool = Field(default=False,
+                           description="справа завелика для одного пакета: "
+                                       "спакувати сегментами одного внеску "
+                                       "(частини — теки кадрів, напр. алфавітні "
+                                       "підтеки картотеки)")
+    segment_files: int = Field(default=18_000, ge=500, le=19_000,
+                               description="скільки файлів тексту (усі голоси) "
+                                           "у сегменті; пул приймає до 20 000")
 
 
 @op("share.pack", summary="Спакувати прочитане у файл для обміну",
@@ -172,7 +180,7 @@ def share_pack(a: SharePackArgs) -> Envelope:
 
     from nyshporka.share import profile as P
     from nyshporka.share.card import CardError
-    from nyshporka.share.publish import PublishError, pack
+    from nyshporka.share.publish import PublishError, pack, pack_segments
 
     # 🔴 Профіль — джерело дефолтів, прапорці його перекривають. Доти
     # ліцензія стояла захардкодженою у двох місцях (тут і в CLI), і
@@ -184,6 +192,31 @@ def share_pack(a: SharePackArgs) -> Envelope:
         card_fields = _card(a)
     except (ArgError, CardError) as exc:
         return fail(str(exc))
+    if a.segments:
+        try:
+            got = pack_segments(
+                a.case, Path(a.out) if a.out else None, partial_why=a.partial,
+                dry_run=a.dry_run, hash_frames=a.hash_frames,
+                max_files=a.segment_files,
+                publisher=a.publisher or defaults["publisher"],
+                contact=_contact(a.contact, defaults["contact"]),
+                site=a.site or defaults["site"], note=a.note, links=links,
+                extra={**extra, **({"partial": a.partial} if a.partial else {})},
+                license_text=a.license or defaults["license"],
+                source_terms=a.source_terms or defaults["source_terms"],
+                archive_name=a.archive_name, skip_runs=list(a.skip_run),
+                card_fields=card_fields)
+        except PublishError as exc:
+            return fail(str(exc))
+        env = ok(got)
+        for why in got.get("pack_refusals") or []:
+            env.warn("pack_refusal", str(why))
+        for seg in got.get("segments") or []:
+            for w in seg.get("warnings") or []:
+                env.warn("gate", f"сегмент {seg.get('n')}: {w}")
+        if not a.dry_run:
+            env.suggest("share.publish", "віддати всю теку сегментів одним викликом")
+        return env
     try:
         got = pack(a.case, Path(a.out) if a.out else None, geometry=a.geometry,
                    hash_frames=a.hash_frames, partial_why=a.partial,
@@ -539,6 +572,8 @@ def share_publish(a: SharePublishArgs) -> Envelope:
         sys.stderr.write(tekst.encode(enc, "replace").decode(enc) + "\n")
         sys.stderr.flush()
 
+    if Path(a.path).is_dir():
+        return _publish_segments(Path(a.path), a, _khid)
     try:
         if a.replaces is not None and not a.why.strip():
             return fail("заміна без причини не приймається: додайте --why «чому»")
@@ -594,6 +629,41 @@ def share_publish(a: SharePublishArgs) -> Envelope:
         if isinstance(w, dict):
             env.warn(str(w.get("code") or "gate"), str(w.get("text") or ""))
     return env
+
+
+def _publish_segments(teka: Any, a: SharePublishArgs, say: Any) -> Envelope:
+    """Віддати теку сегментів (`share pack --segments`) — по одному, по черзі.
+
+    🔴 По черзі, а не разом: пул тримає не більше трьох відкритих заливок на
+    людину. Обрив посередині не страшний — повтор тієї самої теки пул упізнає
+    за хешем змісту, і віддані сегменти вдруге не поїдуть.
+    """
+    from nyshporka.share import bundle
+    from nyshporka.share.upload import UploadError, publish
+
+    if a.replaces is not None:
+        return fail("--replaces стосується одного внеску; сегмент замінюється "
+                    "новим пакуванням тієї самої справи")
+    paky = sorted(p for p in teka.glob("*" + bundle.SUFFIX)
+                  if not p.name.endswith(bundle.GEOM_SUFFIX))
+    if not paky:
+        return fail(f"у теці {teka} немає пакетів {bundle.SUFFIX}")
+    done: list[dict[str, Any]] = []
+    for i, p in enumerate(paky, 1):
+        say(f"сегмент {i}/{len(paky)}: {p.name}")
+        try:
+            got = publish(p, base=a.base, say=say)
+        except UploadError as exc:
+            env = fail(f"сегмент {i}/{len(paky)} ({p.name}): {exc}. Віддано до "
+                       f"нього: {len(done)}. Повторіть ту саму команду — віддане "
+                       f"вдруге не поїде")
+            env.data = {"segments": done, "failed": p.name, "status": exc.status,
+                        "klas": exc.klas, "rate_limited": exc.status == 429}
+            return env
+        done.append({"file": p.name, "outcome": got.get("outcome"),
+                     "contribution": got.get("contribution"),
+                     "text": got.get("text")})
+    return ok({"segments": done, "outcome": "segments", "count": len(done)})
 
 
 class SharePushArgs(BaseModel):
@@ -948,9 +1018,9 @@ def _after_import(env: Envelope, got: dict[str, Any]) -> Envelope:
         env.warn("alignment",
                  f"{(got['alignment'].get('text') or label)}: "
                  f"{got['alignment'].get('why') or ''}")
-    from nyshporka.share.bundle import SCHEMA
+    from nyshporka.share.bundle import SCHEMA_PLAIN
 
-    if int(got.get("schema") or SCHEMA) < SCHEMA:
+    if int(got.get("schema") or SCHEMA_PLAIN) < SCHEMA_PLAIN:
         env.warn("old_schema",
                  f"пакет старого формату (схема {got.get('schema')}): окремого "
                  f"geom-пакета до нього не буде")
@@ -1224,6 +1294,10 @@ class SharePullArgs(BaseModel):
     repo: str = Field(default="", description="архів серії (код чи назва): «RGIA», «ДАХмО»")
     fond: str = Field(default="", description="фонд серії; з --take — прийняти всю серію")
     opys: str = Field(default="", description="опис серії; порожньо — усі описи фонду")
+    segment: str = Field(default="",
+                         description="справа сегментами (картотека): узяти лише "
+                                     "сегмент, що покриває ці літери («Дал»); "
+                                     "порожньо — усі сегменти")
 
 
 #: Рядків каталогу на запит: стеля сервера.
@@ -1278,6 +1352,14 @@ def _seen_here(local: dict[str, dict[str, list[str]]], r: Any, *, replace: bool
                 have.setdefault(side, []).extend(runs)
     if have.get("own"):
         return "own", [*have.get("own", []), *have.get("taken", [])]
+    seg = str(getattr(r, "segment", "") or "")
+    if seg and have.get("taken"):
+        # 🔴 Взятий сегмент справи — не вся справа: решту сегментів брати далі.
+        from nyshporka.share import segment as SG
+
+        have["taken"] = [n for n in have["taken"] if SG.is_segment_run(n, seg)]
+        if not have["taken"]:
+            del have["taken"]
     if have.get("taken") and not replace:
         return "taken", list(have["taken"])
     if not have and (like := S.unkeyed_like(local, r.fond, r.opys, r.spr)):
@@ -1552,6 +1634,33 @@ def _single_seen_here(r: Any, *, replace: bool) -> str:
     return ""
 
 
+def _take_segments(env: Envelope, a: SharePullArgs, found: list[Any]) -> Envelope:
+    """Справа сегментами: узяти всі сегменти або ті, що покривають `--segment`.
+
+    🔴 Сегменти — частини ОДНІЄЇ справи, тож «кілька пакетів» тут не
+    двозначність, а норма. Своє прочитання й узяте раніше звіряє
+    `_take_many` — по кожному сегменту окремо.
+    """
+    from nyshporka.share import catalog as C
+    from nyshporka.share import segment as SG
+
+    best = sorted(C.best_per_case(found), key=lambda r: int(r.segment_n or 0))
+    of = max((int(r.segment_of or 0) for r in best), default=0)
+    if a.segment.strip():
+        best = SG.pick(best, a.segment)
+        if not best:
+            return fail(f"жоден сегмент справи не покриває «{a.segment}»")
+    elif of and len(best) < of:
+        env.warn("segments_missing",
+                 f"у пулі {len(best)} сегментів із {of} — справа віддана не вся")
+    data = env.data if env.data is not None else {}
+    data["imported"] = _take_many(
+        env, [(f"{r.shifra} · {r.segment_label or r.segment}", r) for r in best],
+        replace=a.force)
+    data["segments"] = len(best)
+    return env
+
+
 @op("share.pull", summary="Знайти справу в каталозі пулу",
     args=SharePullArgs, mutates=True, agent=False, section=SECTION, private=True)
 def share_pull(a: SharePullArgs) -> Envelope:
@@ -1609,6 +1718,9 @@ def share_pull(a: SharePullArgs) -> Envelope:
                               f"запит або візьміть серію: --repo --fond [--opys]")
     if not a.take:
         env.suggest("share.import", "прийняти знайдений пакет")
+    if (a.take and count <= len(found) and all(r.segment for r in found)
+            and len({C.case_of(r) for r in found}) == 1):
+        return _take_segments(env, a, found)
     if a.take:
         best = C.best_per_case(found)
         if len(best) != 1 or count > len(found):

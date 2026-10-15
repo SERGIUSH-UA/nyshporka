@@ -543,7 +543,7 @@ def _accept_seen(seen: Look, src: str, *, force: bool, replace: bool,
     # точній прив'язці (`accept_geometry`); у текстовому пакеті вона — ні.
     # Пакет схеми 1 ніс геометрію всередині, і для нього вона лишається.
     allowed = {bundle.META_NAME}
-    old_schema = seen.manifest.schema < bundle.SCHEMA and seen.alignment.can_crop
+    old_schema = seen.manifest.schema < bundle.SCHEMA_PLAIN and seen.alignment.can_crop
     key = _local_key(seen.manifest)
     case_dir = align.case_dir_for(key) if key else None
     content = str(seen.manifest.decode.get("content_sha256") or "")

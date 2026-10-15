@@ -47,7 +47,7 @@ def base_url(base: str = "") -> str:
 COLUMNS = ("shifra", "repo", "fond", "opys", "spr", "years", "places",
            "pages", "frames", "voices", "models", "bytes", "sha256",
            "license", "publisher", "contact", "url", "added", "geom_url",
-           "geom_sha256")
+           "geom_sha256", "segment", "segment_label", "segment_n", "segment_of")
 
 
 @dataclass
@@ -78,6 +78,13 @@ class Row:
     #: sha256 ПРИЙНЯТОГО пулом geom-файла. Порожньо — сервер його ще не
     #: віддає; тоді geom звірити нічим, і це відкритий ризик пулу.
     geom_sha256: str = ""
+    #: Сегмент справи, якої один пакет не вміщує (`share/segment.py`):
+    #: ключ, мітка («Бан… - Бар…»), номер і скільки всього. Порожньо — пакет
+    #: несе справу цілком.
+    segment: str = ""
+    segment_label: str = ""
+    segment_n: str = ""
+    segment_of: str = ""
 
     def as_tsv(self) -> str:
         return "\t".join(_clean(getattr(self, c, "")) for c in COLUMNS)
@@ -104,6 +111,7 @@ def row_for(manifest: Any, *, sha256: str = "", nbytes: int = 0,
         span = a if a == b else f"{a}–{b}"
     places = c.get("places") or []
     pub = manifest.publisher or {}
+    seg = c.get("segment") if isinstance(c.get("segment"), dict) else {}
     return Row(
         shifra=manifest.shifra, repo=str(c.get("repo") or ""),
         fond=str(c.get("fond") or ""), opys=str(c.get("opys") or ""),
@@ -115,7 +123,9 @@ def row_for(manifest: Any, *, sha256: str = "", nbytes: int = 0,
         license=str((manifest.license or {}).get("text") or ""),
         publisher=str(pub.get("handle") or ""),
         contact=str(pub.get("contact") or ""), url=url,
-        added=added or time.strftime("%Y-%m-%d"), geom_url=geom_url)
+        added=added or time.strftime("%Y-%m-%d"), geom_url=geom_url,
+        segment=str(seg.get("key") or ""), segment_label=str(seg.get("label") or ""),
+        segment_n=str(seg.get("n") or ""), segment_of=str(seg.get("of") or ""))
 
 
 def header() -> str:
@@ -558,17 +568,25 @@ def model_rank(row: Row) -> tuple[int, int]:
     return marks.count(2), marks.count(1)
 
 
+def case_of(r: Row) -> str:
+    """Ключ справи рядка — без сегмента."""
+    from nyshporka.share.pool import quad_key
+
+    return quad_key(r.repo, r.fond, r.opys, r.spr) or r.shifra
+
+
 def best_per_case(rows: list[Row]) -> list[Row]:
     """На справу — один пакет: найновіші бойові моделі, без них — попередні.
 
     Серед рівних за моделями лишається порядок каталогу (від найсвіжішого),
     тож стабільне сортування за спаданням рангу дає саме це правило.
-    """
-    from nyshporka.share.pool import quad_key
 
-    out: dict[str, Row] = {}
+    🔴 Справа сегментами — це кілька пакетів, і жоден не заступає іншого:
+    один на (справу, сегмент). Інакше `pull` брав би одну літеру картотеки.
+    """
+    out: dict[tuple[str, str], Row] = {}
     for r in sorted(rows, key=model_rank, reverse=True):
-        out.setdefault(quad_key(r.repo, r.fond, r.opys, r.spr) or r.shifra, r)
+        out.setdefault((case_of(r), r.segment), r)
     return list(out.values())
 
 

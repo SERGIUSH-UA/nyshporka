@@ -23,6 +23,7 @@ from nyshporka.share import (
     opys,
     opys_check,
 )
+from nyshporka.share import segment as SG
 from nyshporka.share.bundle import Manifest
 
 
@@ -168,11 +169,21 @@ def choose_voices(dirs: list[Path], key: str, *,
         pages = {p.name for p in d.glob(bundle.PACKED_TEXT)}
         keep.append((d, meta, pages))
 
+    # 🔴 Проба читає ТІ САМІ кадри, що й повніший прогін. Прогони різних тек
+    # кадрів (алфавітні підтеки картотеки) мають кожен своє `0001.txt…`, і за
+    # самими іменами менша літера виглядала б пробою більшої — і мовчки
+    # випадала б із пакета.
+    fkeys = [S.frames_dir_key(m.get("case_dir")) for _, m, _ in keep]
+
+    def _same_frames(i: int, j: int) -> bool:
+        return not (fkeys[i] and fkeys[j] and fkeys[i] != fkeys[j])
+
     out: list[Path] = []
     for i, (d, meta, pages) in enumerate(keep):
         model = str(meta.get("model") or "")
         wider = next((o for j, (o, m, p) in enumerate(keep)
                       if j != i and str(m.get("model") or "") == model and model
+                      and _same_frames(i, j)
                       and pages <= p and (len(p) > len(pages) or j < i)), None)
         if wider is not None and pages:
             skipped.append({"run": d.name,
@@ -681,18 +692,30 @@ def build_manifest(scope: str, *,
                    archive_name: str = "",
                    skip_runs: tuple[str, ...] | list[str] = (),
                    card_fields: dict[str, Any] | None = None,
+                   runs: tuple[list[Path], dict[str, Any]] | None = None,
+                   segment_frames: list[dict[str, Any]] | None = None,
                    ) -> tuple[Manifest, list[Path], list[dict[str, Any]], dict[str, Any]]:
     """Скласти заяву пакета. Файл ще не пишеться — спершу ворота.
 
     `card_fields` — поля картки поверх запам'ятованої (`share/card.py`):
     назва, роки, місця, жанр, які людина чи агент задали самі.
+
+    `runs` і `segment_frames` — пакет сегмента (`pack_segments`): прогони вже
+    відібрані й складені на стейджі, кадри — лише кадри сегмента. 🔴 Тоді
+    знаменник — ці кадри й більше нічого: число цілої справи з картки,
+    паспорта чи реєстру дало б сегментові покриття 4 % і відмову воріт. Число
+    справи їде окремо — `case.frames_total`.
     """
     from nyshporka.share import card as K
 
-    run_dirs, info = resolve_runs(scope, skip=skip_runs)
+    run_dirs, info = runs if runs is not None else resolve_runs(scope, skip=skip_runs)
     key = str(info.get("key") or "")
-    case_dir = align.case_dir_for(key) if key else None
-    frames = align.frames_of(case_dir, hash_frames=hash_frames) if case_dir else []
+    seg_mode = segment_frames is not None
+    case_dir = align.case_dir_for(key) if key and not seg_mode else None
+    if seg_mode:
+        frames = list(segment_frames or [])
+    else:
+        frames = align.frames_of(case_dir, hash_frames=hash_frames) if case_dir else []
     # Тека справи — паспорт — буває й без кадрів (прибрані після читання).
     # Кадри й відбиток — лише з `case_dir`; опис, посилання й знаменник — звідси.
     home = align.case_home_for(key) if key else None
@@ -741,9 +764,9 @@ def build_manifest(scope: str, *,
     lic = {"text": license_text, "images": "не входять"}
     if source_terms:
         lic["source_terms"] = source_terms
-    if not frames:
+    if not frames and not seg_mode:
         frames_block = _znamennyk_z_pasporta(frames_block, home)
-    if not frames_block.get("total") and key:
+    if not frames_block.get("total") and key and not seg_mode:
         # Паспорт мовчить, а бібліотека знає сторінки PDF — це й є кадри
         # справи, читаної з PDF. `listed` лишається нулем: зображень, до яких
         # прив'язувати текст, на диску немає.
@@ -756,7 +779,8 @@ def build_manifest(scope: str, *,
         # картці, доки архів не з'явиться в довіднику пакета.
         case["repo_name"] = archive_name.strip()[:120]
     row = opys.registry_row(str(case.get("shifra") or ""))
-    frames_block = _znamennyk(frames_block, row)
+    if not seg_mode:
+        frames_block = _znamennyk(frames_block, row)
     # Паспорт мовчить або тримає робочу нотатку — назву й роки дає реєстр
     # опису: він вичитаний з друкованого опису фонду, а не складений нами.
     library = next((str(r.get("title") or "") for r in info.get("rows") or []
@@ -794,7 +818,7 @@ def build_manifest(scope: str, *,
     if kartka:
         case = K.apply(case, kartka)
         nazva = str(case.get("title") or "")
-    if kartka.get("frames"):
+    if kartka.get("frames") and not seg_mode:
         # Число, назване людиною, — з каталогу чи опису, — сильніше за будь-який
         # здогад. Але не менше, ніж кадрів справді лежить: тоді воно хибне.
         n = int(kartka["frames"])
@@ -877,6 +901,19 @@ def _zbirna_teka(key: str, run_dirs: list[Path]) -> str:
     return f"збірна тека: {got.why}. {SP.fix(str(case_dir or names[0]))}"
 
 
+def _ponad_steliu(files: int, *, nbytes: int = 0) -> str:
+    """Чому пакет не прийме пул; порожньо — прийме."""
+    if files + SG._TOP_FILES > SG.POOL_MAX_MEMBERS:
+        return (f"у пакеті було б {files + SG._TOP_FILES} файлів, а пул приймає до "
+                f"{SG.POOL_MAX_MEMBERS}. Справа завелика для одного пакета — "
+                f"пакуйте сегментами: nysh share pack <справа> --segments")
+    if nbytes > SG.POOL_MAX_TEXT_BYTES:
+        return (f"пакет важить {nbytes >> 20} МБ, а пул приймає до "
+                f"{SG.POOL_MAX_TEXT_BYTES >> 20} МБ. Пакуйте сегментами: "
+                f"nysh share pack <справа> --segments")
+    return ""
+
+
 def pack(scope: str, dest: Path | None = None, *, geometry: bool = True,
          hash_frames: bool = False, partial_why: str = "",
          dry_run: bool = False, **meta: Any) -> dict[str, Any]:
@@ -946,6 +983,11 @@ def pack(scope: str, dest: Path | None = None, *, geometry: bool = True,
     zbirna = _zbirna_teka(details.get("key") or "", run_dirs)
     if zbirna:
         out.setdefault("pack_refusals", []).append(zbirna)
+    # 🔴 Стеля пулу — до запису, а не після заливки: пакет понад неї пул
+    # відкидав уже тоді, коли байти доїхали.
+    zavelykyi = _ponad_steliu(len(sketch["files"]))
+    if zavelykyi:
+        out.setdefault("pack_refusals", []).append(zavelykyi)
     if dry_run:
         out["files_list"] = [f["arc"] for f in sketch["files"]]
         if geometry and geom_sketch:
@@ -959,6 +1001,8 @@ def pack(scope: str, dest: Path | None = None, *, geometry: bool = True,
         raise PublishError(bez_znamennyka)
     if zbirna:
         raise PublishError(zbirna)
+    if zavelykyi:
+        raise PublishError(zavelykyi)
 
     if card_fields and remember and details["key"]:
         # Задане на пакуванні живе й далі: наступне пакування (автовіддача,
@@ -972,6 +1016,9 @@ def pack(scope: str, dest: Path | None = None, *, geometry: bool = True,
     if dest.is_dir():
         dest = dest / name
     wrote = bundle.write(dest, m, run_dirs, frames=frames)
+    if int(wrote["bytes"]) > SG.POOL_MAX_TEXT_BYTES:
+        Path(wrote["path"]).unlink(missing_ok=True)
+        raise PublishError(_ponad_steliu(0, nbytes=int(wrote["bytes"])))
     out.update(wrote)
 
     geom: dict[str, Any] | None = None
@@ -998,4 +1045,132 @@ def pack(scope: str, dest: Path | None = None, *, geometry: bool = True,
                    pages=m.pages, bytes=wrote["bytes"], sha256=wrote["sha256"],
                    path=wrote["path"], models=", ".join(m.models()),
                    geom_bytes=int(geom["bytes"]) if geom else 0)
+    return out
+
+
+#: Тека сегментів справи в outbox: `<справа>~segments/`. Публікується цілою
+#: (`nysh share publish <тека>`), тож у ній лежить лише чинний поділ.
+SEGMENTS_DIR_SUFFIX = "~segments"
+
+
+def pack_segments(scope: str, dest_dir: Path | None = None, *,
+                  partial_why: str = "", dry_run: bool = False,
+                  hash_frames: bool = False,
+                  max_files: int = SG.SEG_MAX_FILES,
+                  max_raw: int = SG.SEG_MAX_RAW,
+                  **meta: Any) -> dict[str, Any]:
+    """Спакувати справу сегментами — для тієї, якої один пакет не вміщує.
+
+    Кожен сегмент — повноцінний пакет зі своїми воротами, знаменником (його
+    кадри) і хешем змісту; спільне в них — шифра, `case.frames_total` і
+    `case.segment.set`. Пул зводить їх в одну книгу.
+
+    `dry_run` показує лише поділ: стейдж пів мільйона сторінок заради
+    перегляду не будується.
+
+    Геометрія в сегменти не їде: її прив'язка йде за іменами кадрів, а імена
+    в сегменті мають префікс частини.
+    """
+    import shutil
+
+    from nyshporka.core.workspace import workspace
+    from nyshporka.share import card as K
+
+    card_fields = meta.pop("card_fields", None) or {}
+    remember = bool(meta.pop("remember_card", True))
+    skip = meta.pop("skip_runs", ()) or ()
+    run_dirs, info = resolve_runs(scope, skip=skip)
+    key = str(info.get("key") or "")
+    parts = SG.parts_of(run_dirs)
+    segs = SG.plan(parts, max_files=max_files, max_raw=max_raw)
+    kartka = {**(K.get(key) if key else {}), **card_fields}
+    try:
+        z_kartky = int(kartka.get("frames") or 0)
+    except (TypeError, ValueError):
+        z_kartky = 0
+    na_dysku = SG.frames_on_disk(parts)
+    case_total = max(z_kartky, na_dysku)
+    out: dict[str, Any] = {
+        "scope": scope, "key": key, "parts": len(parts),
+        "runs": [d.name for d in run_dirs],
+        "skipped_runs": list(info.get("skipped_runs") or []),
+        "frames_total": case_total,
+        "frames_source": ("картка" if z_kartky >= na_dysku and z_kartky
+                          else "кадри на диску" if na_dysku else ""),
+        "segments": [s.as_json() for s in segs],
+    }
+    refusals: list[str] = []
+    zbirna = _zbirna_teka(key, run_dirs)
+    if zbirna:
+        refusals.append(zbirna)
+    frames_unknown = str(kartka.get("frames_unknown") or "").strip()
+    if not case_total and not frames_unknown:
+        refusals.append(
+            "кадрів справи не названо, і в теках частин кадрів немає: назвіть "
+            "число з опису (--frames N) або причину (--frames-unknown \"чому\")")
+    if refusals:
+        out["pack_refusals"] = refusals
+    if dry_run:
+        out["dry_run"] = True
+        return out
+    if refusals:
+        raise PublishError("\n".join(refusals))
+    if card_fields and remember and key:
+        out["card_saved"] = K.set_fields(key, card_fields)
+
+    set_key = SG.set_id(key or scope, segs)
+    stage_root = workspace().derived / "share-segments" / bundle.safe_name(key or scope)
+    target = Path(dest_dir) if dest_dir else None
+    written: list[Path] = []
+    rows: list[dict[str, Any]] = []
+    try:
+        for seg in segs:
+            staged = SG.stage(seg, stage_root / bundle.safe_name(seg.key))
+            frames = SG.frames_for(seg, hash_frames=hash_frames)
+            m, _, _, _ = build_manifest(scope, runs=(staged, info),
+                                        segment_frames=frames,
+                                        card_fields=card_fields, **meta)
+            m.case["frames_total"] = case_total
+            m.case["segment"] = SG.segment_block(seg, set_key)
+            m.schema = SG.SCHEMA_SEGMENT
+            verdict = gates.check(m, partial_why=partial_why)
+            if not verdict.passed:
+                raise PublishError(f"сегмент {seg.n}/{seg.of} «{seg.label}»: ворота "
+                                   f"не пропустили:\n" + gates.describe(verdict))
+            if target is None:
+                stem = bundle.suggest_name(m)[: -len(bundle.SUFFIX)]
+                target = journal.share_dir() / journal.OUTBOX / (stem + SEGMENTS_DIR_SUFFIX)
+            name = (bundle.suggest_name(m)[: -len(bundle.SUFFIX)]
+                    + f"~{seg.n:03d}of{seg.of:03d}" + bundle.SUFFIX)
+            wrote = bundle.write(target / name, m, staged, frames=frames)
+            if int(wrote["bytes"]) > SG.POOL_MAX_TEXT_BYTES:
+                Path(wrote["path"]).unlink(missing_ok=True)
+                raise PublishError(
+                    f"сегмент {seg.n}/{seg.of} «{seg.label}» важить "
+                    f"{int(wrote['bytes']) >> 20} МБ — більше за стелю пулу "
+                    f"{SG.POOL_MAX_TEXT_BYTES >> 20} МБ. Повторіть із меншим "
+                    f"--segment-files (зараз {max_files})")
+            written.append(Path(wrote["path"]))
+            journal.record(journal.PACKED, shifra=m.shifra, case_key=key,
+                           pages=m.pages, bytes=wrote["bytes"],
+                           sha256=wrote["sha256"], path=wrote["path"],
+                           models=", ".join(m.models()),
+                           segment=f"{seg.key} ({seg.n}/{seg.of})")
+            rows.append({**seg.as_json(), **wrote, "pages": m.pages,
+                         "frames": m.frames_total,
+                         "warnings": [w.get("text") for w in
+                                      verdict.as_json().get("warnings") or []]})
+    finally:
+        shutil.rmtree(stage_root, ignore_errors=True)
+    # 🔴 Пакети попереднього поділу з цієї теки — геть: публікується тека
+    # цілком, і старий сегмент поїхав би поруч із новими.
+    stale: list[str] = []
+    if target is not None and target.is_dir():
+        keep = {p.resolve() for p in written}
+        for f in target.glob("*" + bundle.SUFFIX):
+            if f.resolve() not in keep:
+                f.unlink()
+                stale.append(f.name)
+    out.update(segments=rows, dir=str(target) if target else "", set=set_key,
+               removed_stale=stale)
     return out
