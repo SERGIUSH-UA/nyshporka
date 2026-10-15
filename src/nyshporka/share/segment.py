@@ -28,6 +28,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
 from dataclasses import dataclass, field
 from functools import cached_property
@@ -137,8 +138,8 @@ class Piece:
 
     @property
     def label(self) -> str:
-        return (f"{self.part.label} ({self.n}/{self.of})" if self.n
-                else self.part.label)
+        base = clean_label(self.part.label)
+        return f"{base} ({self.n}/{self.of})" if self.n else base
 
 
 @dataclass
@@ -167,8 +168,7 @@ class Segment:
 
     @property
     def label(self) -> str:
-        a, b = self.pieces[0].label, self.pieces[-1].label
-        return a if a == b else f"{a} — {b}"
+        return _join(self.pieces[0].label, self.pieces[-1].label)
 
     @property
     def files(self) -> int:
@@ -404,29 +404,81 @@ def describe(m: bundle.Manifest) -> dict[str, Any] | None:
     return got if isinstance(got, dict) and got.get("key") else None
 
 
+#: Технічний префікс теки частини: `part-01__…`, `chastyna_3 …`, `частина-2__…`.
+_PART_PREFIX = re.compile(r"^(?:part|chast\w*|частина)[\s_-]*\d+(?:__|[\s_-]+)", re.I)
+#: Позначка шматка частини в кінці мітки: «(1/2)».
+_PIECE_MARK = re.compile(r"\s*\((\d+)/(\d+)\)\s*$")
+_RANGE = " - "
+
+
+def _ends(text: str) -> tuple[str, str]:
+    """«Аб… - Ак…» → («Аб…», «Ак…»); без дефіса — той самий кінець з обох боків."""
+    left, sep, right = text.partition(_RANGE)
+    return left.strip(), (right.strip() if sep else left.strip())
+
+
+def clean_label(raw: str) -> str:
+    """Мітка частини для людини: діапазон абетки без технічних імен тек.
+
+    Тека дослідника `part-01__Аб... - Ак...__Бем... - Берл...` (частина з
+    кількох пачок: перша «Аб…–Ак…», остання «Бем…–Берл…») стає «Аб… - Берл…».
+    Те, що не схоже на діапазон, лишається як було, лише без префікса частини.
+    Сира назва теки лишається в `dirs` маніфесту — для людини вона шум, а
+    для зіставлення з диском потрібна.
+    """
+    text = str(raw or "").strip()
+    mark = _PIECE_MARK.search(text)
+    suffix = f" ({mark.group(1)}/{mark.group(2)})" if mark else ""
+    if mark:
+        text = text[:mark.start()]
+    body = _PART_PREFIX.sub("", text).replace("...", "…").strip(" _")
+    batches = [b.strip(" _") for b in body.split(SEP) if b.strip(" _")]
+    if len(batches) >= 2:
+        body = f"{_ends(batches[0])[0]}{_RANGE}{_ends(batches[-1])[1]}"
+    return (body or str(raw or "").strip()) + suffix
+
+
+def _join(a: str, b: str) -> str:
+    """Мітка сегмента з міток першого й останнього шматків.
+
+    Цілі частини зводяться в один діапазон («Аб… - Ак…» + «Ал… - Ар…» →
+    «Аб… - Ар…»); шматок частини (з позначкою) лишається названим цілком.
+    """
+    if a == b:
+        return a
+    if _PIECE_MARK.search(a) or _PIECE_MARK.search(b):
+        return f"{a} — {b}"
+    return f"{_ends(a)[0]}{_RANGE}{_ends(b)[1]}"
+
+
 def _bound(label: str) -> str:
     """Початок мітки частини для порівняння за абеткою: «Бан… - Бар…» → «бан»."""
-    head = label.split(" — ")[0].split(" - ")[0]
+    head = clean_label(label.split(" — ")[0]).split(_RANGE)[0]
+    head = _PIECE_MARK.sub("", head)
     return head.replace("…", "").replace("...", "").strip().casefold()
 
 
 def pick(rows: list[Any], prefix: str) -> list[Any]:
     """Сегменти справи, що покривають прізвища на `prefix` (абетка картотеки).
 
-    Сегменти впорядковані за абеткою частин, тож прізвище лежить в ОСТАННЬОМУ
-    сегменті, чий початок не більший за нього. Мітки, що збігаються з запитом
-    підрядком, беруться теж — на випадок, коли частини названо не абеткою.
+    Сегменти впорядковані за абеткою частин, тож прізвище лежить у сегменті з
+    НАЙБІЛЬШИМ початком, не більшим за нього. Частина, поділена за сторінками
+    на шматки, має той самий початок у всіх шматках, а де саме в ній межа
+    абетки — невідомо (з тексту картки її не виміряти: рушій калічить першу
+    літеру прізвища), тож беруться всі шматки цієї частини. Мітки, що
+    збігаються з запитом підрядком, беруться теж — на випадок, коли частини
+    названо не абеткою.
     """
     want = prefix.strip().casefold()
     if not want:
         return list(rows)
     segs = sorted((r for r in rows if getattr(r, "segment", "")),
                   key=lambda r: int(getattr(r, "segment_n", 0) or 0))
-    out = [r for r in segs if want in str(getattr(r, "segment_label", "")).casefold()]
-    best = None
-    for r in segs:
-        if _bound(str(getattr(r, "segment_label", ""))) <= want:
-            best = r
-    if best is not None and best not in out:
-        out.append(best)
+    out = [r for r in segs if want in clean_label(
+        str(getattr(r, "segment_label", ""))).casefold()]
+    bounds = [(_bound(str(getattr(r, "segment_label", ""))), r) for r in segs]
+    under = [b for b, _ in bounds if b and b <= want]
+    if under:
+        best = max(under)
+        out.extend(r for b, r in bounds if b == best and r not in out)
     return out

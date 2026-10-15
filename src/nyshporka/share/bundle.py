@@ -160,6 +160,8 @@ class Voice:
     #: без геометрії, ніколи б її не віддав, навіть маючи на диску.
     geometry: bool = False
     content_sha256: str = ""
+    #: Частка дореформених слів (ѣ ѳ ѵ, кінцевий ъ) — `gates._gate_era`.
+    prereform: float | None = None
 
     def as_json(self) -> dict[str, Any]:
         out = {"run": self.run, "engine": self.engine, "model": self.model,
@@ -167,6 +169,8 @@ class Voice:
                "chars": self.chars, "geometry": self.geometry}
         if self.conf_mean is not None:
             out["conf_mean"] = round(self.conf_mean, 3)
+        if self.prereform is not None:
+            out["prereform"] = round(self.prereform, 4)
         if self.content_sha256:
             out["content_sha256"] = self.content_sha256
         return out
@@ -283,14 +287,20 @@ def clean_meta(meta: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
-def _run_stats(run_dir: Path) -> tuple[int, int, int]:
+def _run_stats(run_dir: Path) -> tuple[int, int, int, float | None]:
     """Сторінок, рядків, символів у теці прогону — рахуючи по ДИСКУ.
 
     🔴 Не з `meta.pages`. Мета каже, що прогін вважає зробленим, а пакет несе
     те, що справді лежить: розбіжність між цими числами і є найчастіший спосіб
     віддати неповний декод під виглядом повного.
+
+    Четверте — частка дореформених слів (`records.anketa.doreformenist`) по
+    всьому прогону, або None, коли кириличних слів немає.
     """
+    from nyshporka.records.anketa import doreformeni_slova
+
     pages = lines = chars = 0
+    old = words = 0
     for txt in sorted(run_dir.glob(PACKED_TEXT)):
         try:
             body = txt.read_text(encoding="utf-8", errors="replace")
@@ -300,7 +310,10 @@ def _run_stats(run_dir: Path) -> tuple[int, int, int]:
         rows = [r for r in body.splitlines() if r.strip()]
         lines += len(rows)
         chars += sum(len(r) for r in rows)
-    return pages, lines, chars
+        o, w = doreformeni_slova(body)
+        old += o
+        words += w
+    return pages, lines, chars, (old / words if words else None)
 
 
 def tally(pages: Mapping[str, Mapping[str, str]],
@@ -404,14 +417,14 @@ def voice_of(run_dir: Path) -> Voice:
         meta = {}
     if not isinstance(meta, dict):
         meta = {}
-    pages, lines, chars = _run_stats(run_dir)
+    pages, lines, chars, prereform = _run_stats(run_dir)
     has_geo = has_geometry(run_dir)
     return Voice(run=run_dir.name, engine=S.run_engine(meta),
                  model=str(meta.get("model") or ""),
                  script=str(meta.get("script") or ""),
                  pages=pages, lines=lines, chars=chars,
                  conf_mean=_conf_mean(meta), geometry=bool(has_geo),
-                 content_sha256=content_sha256(run_dir))
+                 content_sha256=content_sha256(run_dir), prereform=prereform)
 
 
 def _members(run_dir: Path, patterns: tuple[str, ...]) -> list[Path]:

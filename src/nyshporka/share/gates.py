@@ -97,7 +97,37 @@ def check(manifest: Manifest, *, partial_why: str = "") -> Verdict:
     _gate_identity(manifest, v)
     _gate_license(manifest, v)
     _gate_payload(manifest, v)
+    _gate_era(manifest, v)
     return v
+
+
+#: Рік реформи правопису: після нього ѣ, ѳ, ѵ і кінцевого ъ у тексті немає.
+ERA_REFORM = 1918
+#: Частка дореформених слів, з якої голос на документі ХХ ст. — підозрілий.
+#: Заміряно на картках 1949 року (8997 сторінок): Писар v19 — 19.1 %, Дяк v6 —
+#: 2.7 % (поодинокі «странахъ» там, де рушій бачить старий шрифт бланка).
+ERA_MAX_PREREFORM = 0.05
+
+
+def _gate_era(m: Manifest, v: Verdict) -> None:
+    """Голос, що пише дореформеним правописом у документі після 1918 року.
+
+    Не відмова: це ознака, що модель, навчена на метриках XIX ст., дописує
+    слова зі свого корпусу («Ольгопольскаго», «Ѳеономъ») туди, де їх немає.
+    Текст такого голосу ненадійний, і отримувач має знати це до пошуку.
+    """
+    years = [y for y in (m.case.get("years") or []) if isinstance(y, int)]
+    if not years or min(years) < ERA_REFORM:
+        return
+    for x in m.voices:
+        share = x.get("prereform")
+        if isinstance(share, (int, float)) and share > ERA_MAX_PREREFORM:
+            v.warn("prereform_voice",
+                   f"голос {x.get('model') or x.get('run')} пише дореформеним "
+                   f"правописом ({share:.0%} слів з ѣ/ѳ/ъ) у документі "
+                   f"{min(years)} р. — модель, найпевніше, вигадує зі свого "
+                   f"корпусу метрик. Перечитати іншим рушієм або не віддавати "
+                   f"цей голос")
 
 
 def _gate_denominator(m: Manifest, v: Verdict, *, partial_why: str) -> None:

@@ -1108,6 +1108,15 @@ def pack_segments(scope: str, dest_dir: Path | None = None, *,
         refusals.append(
             "кадрів справи не названо, і в теках частин кадрів немає: назвіть "
             "число з опису (--frames N) або причину (--frames-unknown \"чому\")")
+    # 🔴 Справа сегментами — це картотеки й збірки на сотні тисяч кадрів, і
+    # часто без номера справи (`@назва`). Без назви й років пул показує її як
+    # «Справа без назви в описі» з транслітом теки замість шифри — так 15.10.2026
+    # лягла перша картотека (Р-7641), і знайти її було нічим.
+    pasport = _case_block(info, align.case_home_for(key) if key else None)
+    if not (kartka.get("title") or pasport.get("title")):
+        refusals.append("у справи немає назви: --title \"назва з опису архіву\"")
+    if not (kartka.get("years") or pasport.get("years")):
+        refusals.append("у справи немає років: --years 1942-1945")
     if refusals:
         out["pack_refusals"] = refusals
     if dry_run:

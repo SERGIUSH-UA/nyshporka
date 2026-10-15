@@ -148,7 +148,27 @@ def _pakuvaty(monkeypatch: pytest.MonkeyPatch, runs: list[Path], out: Path,
               **kw: Any) -> dict[str, Any]:
     info = {"key": KEY, "shifra": SHIFRA, "kind": "case", "rows": []}
     monkeypatch.setattr(publish, "resolve_runs", lambda scope, skip=(): (runs, dict(info)))
+    kw["card_fields"] = {**OPYS, **(kw.get("card_fields") or {})}
+    kw.setdefault("remember_card", False)
     return publish.pack_segments(KEY, out, license_text="CC0-1.0", **kw)
+
+
+#: Назва й роки — без них пакування сегментами відмовляє.
+OPYS = {"title": "Облікові картки", "years": [1942, 1945]}
+
+
+def test_bez_nazvy_i_rokiv_vidmova(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """🔴 15.10.2026 перша картотека лягла в пул «Справою без назви в описі»."""
+    runs = _kartoteka(_prostir(tmp_path), LETTERS, pages=4)
+    info = {"key": KEY, "shifra": SHIFRA, "kind": "case", "rows": []}
+    monkeypatch.setattr(publish, "resolve_runs", lambda scope, skip=(): (runs, dict(info)))
+    got = publish.pack_segments(KEY, tmp_path / "out", license_text="CC0-1.0",
+                                dry_run=True, remember_card=False)
+    assert any("назви" in r for r in got["pack_refusals"])
+    assert any("років" in r for r in got["pack_refusals"])
+    with pytest.raises(publish.PublishError, match="назви"):
+        publish.pack_segments(KEY, tmp_path / "out", license_text="CC0-1.0",
+                              remember_card=False, card_fields={"years": [1942, 1945]})
 
 
 def test_pack_segments_paket_na_segment(tmp_path: Path,
@@ -239,6 +259,38 @@ def test_pick_za_abetkoiu() -> None:
     assert [r.segment for r in segment.pick(rows, "Дмитренко")] == ["c"]
     assert [r.segment for r in segment.pick(rows, "Гамалій")] == ["b"]
     assert [r.segment for r in segment.pick(rows, "Бело")] == ["a"]
+
+
+#: Мітки першої картотеки в пулі (15.10.2026) — як їх зібрав клієнт 0.30.0.
+SYRI = ["part-01__Аб... - Ак...__Бем... - Берл... (1/2)",
+        "part-01__Аб... - Ак...__Бем... - Берл... (2/2)",
+        "part-02__Берн... - Бид...__Буз... - Бур... (1/2)",
+        "part-02__Берн... - Бид...__Буз... - Бур... (2/2)",
+        "part-13__Мокс... - Мороз__Никл... - Них..."]
+
+
+def test_chysta_mitka() -> None:
+    assert segment.clean_label(SYRI[0]) == "Аб… - Берл… (1/2)"
+    assert segment.clean_label(SYRI[4]) == "Мокс… - Них…"
+    assert segment.clean_label("Бан… - Бар…") == "Бан… - Бар…"
+    assert segment.clean_label("Гам") == "Гам"
+
+
+def test_pick_bere_vsi_shmatky_chastyny() -> None:
+    """Де межа абетки всередині частини — невідомо, тож ідуть обидві половини."""
+    rows = [_row(f"s{i}", i, lab) for i, lab in enumerate(SYRI, 1)]
+    assert [r.segment for r in segment.pick(rows, "Абченко")] == ["s1", "s2"]
+    assert [r.segment for r in segment.pick(rows, "Бережной")] == ["s1", "s2"]
+    assert [r.segment for r in segment.pick(rows, "Бойко")] == ["s3", "s4"]
+    assert [r.segment for r in segment.pick(rows, "Новак")] == ["s5"]
+
+
+def test_mitka_sehmenta_iz_tsilykh_chastyn() -> None:
+    p1 = segment.Part(label="part-01__Аб... - Ак...", frames_dir=None)
+    p2 = segment.Part(label="part-02__Ал... - Ар...", frames_dir=None)
+    seg = segment.Segment([segment.Piece(p1), segment.Piece(p2)])
+    assert seg.label == "Аб… - Ар…"
+    assert seg.key == p1.slug, "ключ — з сирого імені теки, стабільний"
 
 
 def test_vziatyi_segment_ne_blokuie_susidnii() -> None:
