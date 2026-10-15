@@ -35,6 +35,15 @@ from nyshporka.cloud.base import CloudError
 #: Тека, у яку писали пізніше за стільки секунд тому, — ще качається.
 STILL_WRITING_SEC = 300
 
+#: 🔴 Те саме, коли повноту ДОВЕДЕНО: завантажувач записав, скільки кадрів
+#: віддало джерело (`_source.json` → `frames`, або повний сайдкар плівки), і
+#: стільки їх на диску, кожен із цілим кінцем файла. П'ять хвилин чекання тоді
+#: нічого не ловили — людина обходила їх `--allow-partial` руками (14 і
+#: 15.10.2026). Короткий проміжок лишається на кадр, який ще дописується.
+#: 🔴 Число з бібліотеки (`frames_expected`) доказом НЕ є: його рахують із того
+#: самого диска, тож на недокачаній теці воно збігається саме з собою.
+DONE_GAP_SEC = 30
+
 #: Медіана кадру понад стільки МБ — стискати перед дорогою.
 SHRINK_MEDIAN_MB = 3.0
 
@@ -80,6 +89,9 @@ class FramesReport:
     #: Скільки хвилин тому записано найсвіжіший кадр, якщо менше п'яти, —
     #: інакше `None`.
     still_writing_min: float | None = None
+    #: Скільки кадрів обіцяв завантажувач (паспорт чи сайдкар плівки); 0 — не
+    #: відомо. Збіг із `n` знімає п'ятихвилинне чекання (`DONE_GAP_SEC`).
+    declared: int = 0
     #: Кадри у форматі, якого читач на машині не бере (`.tif` і подібні).
     #: 🔴 Не дрібниця: локальне читання TIFF розуміє, а хмарний захід пакує
     #: лише JPEG і PNG — тож такий кадр мовчки випадає зі знаменника, і
@@ -103,6 +115,7 @@ class FramesReport:
                 "median_mb": self.median_mb, "bad": self.bad[:50],
                 "bad_count": len(self.bad),
                 "still_writing_min": self.still_writing_min,
+                "declared": self.declared,
                 "alien": self.alien[:50], "alien_count": len(self.alien),
                 "over_height": self.over_height, "heavy": self.heavy}
 
@@ -197,12 +210,33 @@ def check_frames(case_dir: Path | str, *, now: float | None = None) -> FramesRep
     total = sum(sizes) / 1e6
     median = statistics.median(sizes) / 1e6 if sizes else 0.0
     age = ((now if now is not None else time.time()) - newest) if newest else None
+    declared = _declared_frames(d, sidecar)
+    proven = bool(declared) and len(frames) >= declared and not bad
+    gap = DONE_GAP_SEC if proven else STILL_WRITING_SEC
     writing = (round(max(0.0, age) / 60, 1)
-               if age is not None and age < STILL_WRITING_SEC else None)
+               if age is not None and age < gap else None)
     return FramesReport(n=len(frames), total_mb=round(total, 1),
                         median_mb=round(median, 2), bad=bad,
                         still_writing_min=writing, alien=alien,
-                        over_height=over_height)
+                        over_height=over_height, declared=declared)
+
+
+def _declared_frames(d: Path, sidecar: dict[str, dict[str, Any]]) -> int:
+    """Скільки кадрів віддало джерело за словами завантажувача; 0 — не відомо.
+
+    Паспорт (`_source.json` → `frames`) пише завантажувач із каталогу джерела;
+    сайдкар плівки FamilySearch — по запису на кадр.
+    """
+    from nyshporka.utils.atomic import CorruptFileError, read_json
+
+    try:
+        raw = read_json(d / "_source.json", default={})
+    except (CorruptFileError, OSError):
+        raw = {}
+    n = raw.get("frames") if isinstance(raw, dict) else None
+    if isinstance(n, int) and not isinstance(n, bool) and n > 0:
+        return n
+    return len(sidecar)
 
 
 # ── стискання ────────────────────────────────────────────────────────────────

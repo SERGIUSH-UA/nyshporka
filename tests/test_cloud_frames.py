@@ -94,6 +94,30 @@ def test_a_folder_still_being_written_is_flagged(tmp_path: Path) -> None:
     assert settled.still_writing_min is None, "за десять хвилин тека вже стоїть"
 
 
+def test_a_proven_complete_folder_waits_only_the_short_gap(tmp_path: Path) -> None:
+    """🔴 Завантажувач записав, скільки кадрів дало джерело, і всі вони на диску —
+    п'ять хвилин чекання нічого не ловлять; лишається лише 30-секундний проміжок."""
+    _jpeg(tmp_path / "0001.jpg")
+    _jpeg(tmp_path / "0002.jpg", age_sec=60)
+    (tmp_path / "_source.json").write_text(json.dumps({"frames": 2}), encoding="utf-8")
+    got = F.check_frames(tmp_path)
+    assert got.declared == 2 and got.still_writing_min is None
+
+    _jpeg(tmp_path / "0002.jpg", age_sec=10)
+    fresh = F.check_frames(tmp_path)
+    assert fresh.still_writing_min is not None, "кадр 10 с тому — ще дописується"
+
+
+def test_a_declared_count_not_reached_keeps_the_long_wait(tmp_path: Path) -> None:
+    """Обіцяно більше, ніж лежить, — тека недокачана, повні п'ять хвилин."""
+    _jpeg(tmp_path / "0001.jpg")
+    _jpeg(tmp_path / "0002.jpg", age_sec=60)
+    (tmp_path / "_source.json").write_text(json.dumps({"frames": 240}), encoding="utf-8")
+    got = F.check_frames(tmp_path)
+    assert got.declared == 240
+    assert got.still_writing_min == pytest.approx(1.0, abs=0.2)
+
+
 def test_the_loader_sidecar_is_optional_but_believed(tmp_path: Path) -> None:
     """Сайдкар знає розмір кожного кадру: розбіжність — перезаписаний кадр,
     відсутній на диску — неповна тека. Без сайдкара перевірки просто немає."""
