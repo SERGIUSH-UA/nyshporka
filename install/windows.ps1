@@ -65,6 +65,13 @@ param(
     # проходити — os error 448 (14.10.2026, astral-sh/uv#19622, #19616). Якщо
     # 448 і в теці профілю — вказати теку поза ним: `-PythonDir D:\Nyshporka\python`.
     [string]$PythonDir = "",
+    # Простір дослідження, тобто тека, яку людина обрала в майстрі (`.exe`).
+    # 🔴 Задано — розкладка «одна тека» (з 0.32): `$Home_` = `<простір>\.program`,
+    # і туди ж лягають середовище застосунку, команда, кеш uv, довідники й ваги.
+    # Доти середовище й кеш uv мовчки йшли в профіль на C:, простір — у
+    # «Документи», і C: закінчився посеред встановлення (відеоурок, 16.10.2026).
+    # Порожньо — як досі: простір назве `nysh init`, uv — свої типові теки.
+    [string]$Workspace = "",
     # Запуск із майстра `.exe`: консоль зникає разом зі скриптом, тож помилку
     # треба показати вікном, яке переживе консоль.
     [switch]$Wizard,
@@ -101,6 +108,8 @@ $Msg = @{
         'dry.cmd' = 'команда nysh       {0}'
         'dry.trace' = 'слід інсталятора   {0}'
         'dry.space' = 'простір досліджень тека, яку назве «nysh init»'
+        'dry.space.at' = 'простір досліджень {0}'
+        'dry.one' = 'середовище, кеш uv, довідники й ваги — у {0}'
         'dry.eng1' = 'рушії читання      nysh htr install — torch під відеокарту NVIDIA, якщо драйвер її'
         'dry.eng2' = '                   показує, інакше під процесор (~2.5–4 ГБ, у теці простору)'
         'dry.models' = 'моделі письма      nysh models get (~215 МБ, sha256 звіряється)'
@@ -188,6 +197,8 @@ $Msg = @{
         'dry.cmd' = 'nysh command       {0}'
         'dry.trace' = 'installer trace    {0}'
         'dry.space' = 'research space     folder named by “nysh init”'
+        'dry.space.at' = 'research space     {0}'
+        'dry.one' = 'environment, uv cache, catalogs and weights in {0}'
         'dry.eng1' = 'reading engines    nysh htr install — torch for an NVIDIA graphics card if the driver'
         'dry.eng2' = '                   shows one, otherwise for the CPU (~2.5–4 GB, in the space folder)'
         'dry.models' = 'handwriting models nysh models get (~215 MB, sha256 verified)'
@@ -275,6 +286,8 @@ $Msg = @{
         'dry.cmd' = 'polecenie nysh     {0}'
         'dry.trace' = 'ślad instalatora   {0}'
         'dry.space' = 'przestrzeń badań   folder wskazany przez „nysh init”'
+        'dry.space.at' = 'przestrzeń badań   {0}'
+        'dry.one' = 'środowisko, pamięć podręczna uv, katalogi i wagi — w {0}'
         'dry.eng1' = 'silniki odczytu    nysh htr install — torch pod kartę NVIDIA, jeśli sterownik'
         'dry.eng2' = '                   ją widzi, w przeciwnym razie pod procesor (~2,5–4 GB, w folderze przestrzeni)'
         'dry.models' = 'modele pisma       nysh models get (~215 MB, sha256 sprawdzany)'
@@ -362,6 +375,8 @@ $Msg = @{
         'dry.cmd' = 'comanda nysh       {0}'
         'dry.trace' = 'urma instalării    {0}'
         'dry.space' = 'spațiu cercetare   folderul indicat de „nysh init”'
+        'dry.space.at' = 'spațiu cercetare   {0}'
+        'dry.one' = 'mediul, cache-ul uv, cataloagele și ponderile — în {0}'
         'dry.eng1' = 'motoare de citire  nysh htr install — torch pentru placa NVIDIA, dacă driverul'
         'dry.eng2' = '                   o vede, altfel pentru procesor (~2,5–4 GB, în folderul spațiului)'
         'dry.models' = 'modele de scris    nysh models get (~215 MB, sha256 verificat)'
@@ -449,6 +464,8 @@ $Msg = @{
         'dry.cmd' = 'commande nysh      {0}'
         'dry.trace' = 'trace installeur   {0}'
         'dry.space' = 'espace recherche   dossier indiqué par « nysh init »'
+        'dry.space.at' = 'espace recherche   {0}'
+        'dry.one' = 'environnement, cache uv, catalogues et poids — dans {0}'
         'dry.eng1' = 'moteurs de lecture nysh htr install — torch pour carte NVIDIA si le pilote'
         'dry.eng2' = '                   en signale une, sinon pour le processeur (~2,5–4 Go, dans l''espace)'
         'dry.models' = 'modèles d''écriture nysh models get (~215 Mo, sha256 vérifié)'
@@ -536,6 +553,8 @@ $Msg = @{
         'dry.cmd' = 'Befehl nysh        {0}'
         'dry.trace' = 'Installer-Spur     {0}'
         'dry.space' = 'Forschungsraum     Ordner, den „nysh init“ nennt'
+        'dry.space.at' = 'Forschungsraum     {0}'
+        'dry.one' = 'Umgebung, uv-Cache, Kataloge und Gewichte — in {0}'
         'dry.eng1' = 'Leseengines        nysh htr install — torch für NVIDIA-Grafikkarte, wenn der Treiber'
         'dry.eng2' = '                   eine meldet, sonst für den Prozessor (~2,5–4 GB, im Raum-Ordner)'
         'dry.models' = 'Schriftmodelle     nysh models get (~215 MB, sha256 wird geprüft)'
@@ -623,6 +642,8 @@ $Msg = @{
         'dry.cmd' = 'команда nysh       {0}'
         'dry.trace' = 'след установщика   {0}'
         'dry.space' = 'папка исследований папка, которую назовёт «nysh init»'
+        'dry.space.at' = 'папка исследований {0}'
+        'dry.one' = 'среда, кэш uv, справочники и веса — в {0}'
         'dry.eng1' = 'движки чтения      nysh htr install — torch под видеокарту NVIDIA, если драйвер её'
         'dry.eng2' = '                   показывает, иначе под процессор (~2.5–4 ГБ, в папке пространства)'
         'dry.models' = 'модели письма      nysh models get (~215 МБ, sha256 сверяется)'
@@ -718,6 +739,13 @@ $CatalogUrl = 'https://github.com/SERGIUSH-UA/nyshporka/releases'
 $CatalogApi = 'https://api.github.com/repos/SERGIUSH-UA/nyshporka/releases?per_page=100'
 if ($env:NYSH_NO_CATALOG -eq '1') { $NoCatalog = [switch]$true }
 if (-not $PythonDir) { $PythonDir = Join-Path $Home_ 'python' }
+$OneFolder = [bool]$Workspace
+if ($OneFolder) {
+    $ToolDir  = Join-Path $Home_ 'tools'
+    $BinDir   = Join-Path $Home_ 'bin'
+    $CacheDir = Join-Path $Home_ 'cache'
+    $DataDir  = Join-Path $Home_ 'data'
+}
 # Дослівно той самий текст, що `UNTRUSTED_MOUNT_HINT` у `setup/update.py`:
 # інсталятор і `nysh htr install` при 448 радять одне.
 $Untrusted448 = 'Windows не довіряє теці, куди uv ставить Python (os error 448: перенаправлений AppData чи OneDrive). Поставте Нишпорку наново з текою інтерпретаторів поза профілем: windows.ps1 -PythonDir D:\Nyshporka\python'
@@ -913,6 +941,7 @@ if ($DryRun) {
     $uvNow = (Get-Command uv -ErrorAction SilentlyContinue).Source
     $binGuess = if ($uvNow) { Get-NativeLine $uvNow tool dir --bin } else { $null }
     if (-not $binGuess) { $binGuess = Join-Path $env:USERPROFILE '.local\bin' }
+    if ($OneFolder) { $binGuess = $BinDir }
     Say ""
     if ($uvNow) { Say (M 'dry.uv.have' $uvNow) }
     else         { Say (M 'dry.uv.get' (Join-Path $Home_ 'uv')) }
@@ -922,7 +951,10 @@ if ($DryRun) {
     Say (M 'dry.cmd' (Join-Path $binGuess 'nysh.exe'))
     Say (M 'dry.trace' (Join-Path $Home_ 'install-info.ini'))
     Say "                   $(Join-Path $Home_ 'install-trace.txt')"
-    Say (M 'dry.space')
+    if ($OneFolder) {
+        Say (M 'dry.space.at' $Workspace)
+        Say (M 'dry.one' $Home_)
+    } else { Say (M 'dry.space') }
     if ($WantEngines) {
         Say (M 'dry.eng1')
         Say (M 'dry.eng2')
@@ -1061,6 +1093,16 @@ $env:UV_PYTHON_INSTALL_REGISTRY = '0'
 # ⚠ Гілка «uv уже є» могла взяти чужий uv будь-якої версії; змінна старша за
 # junction мінорної версії, який і дає 448, тож uv, що його робить, її знає.
 $env:UV_PYTHON_INSTALL_DIR = $PythonDir
+# 🔴 Розкладка «одна тека»: середовище застосунку, його команда й кеш uv (torch —
+# гігабайти) — під обраною текою, а не в профілі. Так само змінні процесу, і з
+# тієї самої причини; після встановлення Нишпорка бере їх з `install-info.ini`
+# (`setup.update.uv_python_env`), а теку даних — звідти ж (`core.appdirs`).
+if ($OneFolder) {
+    $env:UV_TOOL_DIR = $ToolDir
+    $env:UV_TOOL_BIN_DIR = $BinDir
+    $env:UV_CACHE_DIR = $CacheDir
+    $env:NYSHPORKA_DATA_DIR = $DataDir
+}
 $script:NativeTail.Clear()
 $rc = Invoke-Logged $uv python install 3.12
 # Що передавати в `--python` далі: версію, або — після збою junction — шлях.
@@ -1151,8 +1193,12 @@ Trace 'bin' $nysh
 # помилка запису не валить встановлення.
 $info = Join-Path $Home_ 'install-info.ini'
 try {
-    @('[nyshporka]', "nysh=$nysh", "uv=$uv", "preset=$Preset", "python_dir=$PythonDir") |
-        Set-Content -LiteralPath $info -Encoding Unicode
+    $lines = @('[nyshporka]', "nysh=$nysh", "uv=$uv", "preset=$Preset", "python_dir=$PythonDir")
+    if ($OneFolder) {
+        $lines += @("tool_dir=$ToolDir", "bin_dir=$BinDir", "cache_dir=$CacheDir",
+                    "data_dir=$DataDir", "workspace=$Workspace")
+    }
+    $lines | Set-Content -LiteralPath $info -Encoding Unicode
 } catch {
     Say (M 'info.fail' $info) Yellow
 }
@@ -1165,7 +1211,10 @@ Trace 'file' $info
 # узявся, — тобто мовчазного вибору тут немає.
 # ⚠ Не плутати з `$Home_` вище: то тека ВСТАНОВЛЕННЯ, а не простір.
 Say ""
-$rc = Invoke-Logged $nysh init --yes --preset $Preset
+# 🔴 Майстер передає теку, яку людина обрала, — тоді простір лягає саме туди,
+# а не в «Документи» на C:.
+if ($OneFolder) { $rc = Invoke-Logged $nysh init --yes --preset $Preset $Workspace }
+else            { $rc = Invoke-Logged $nysh init --yes --preset $Preset }
 # 🔴 Простір мусить постати. Без нього застосунок не має де жити, і мовчазний
 # провал тут дав би «встановлено» на порожньому місці.
 if ($rc -ne 0) { throw (M 'err.init' $rc) }
@@ -1370,7 +1419,8 @@ if (-not $NoLauncher) {
     $s = $sh.CreateShortcut($lnk)
     $s.TargetPath = $nysh
     $s.Arguments = 'serve'
-    $s.WorkingDirectory = $Home_
+    # Із простору: `nysh serve` знаходить його за маркером, а не вгадує.
+    $s.WorkingDirectory = $(if ($OneFolder) { $Workspace } else { $Home_ })
     $s.Description = M 'lnk.desc'
     $s.Save()
     Trace 'file' $lnk

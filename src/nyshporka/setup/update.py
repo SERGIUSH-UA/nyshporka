@@ -104,8 +104,35 @@ def _cmp_key(a: str, b: str) -> tuple[tuple[int, ...], tuple[int, ...]]:
     return ka + (0,) * (n - len(ka)), kb + (0,) * (n - len(kb))
 
 
+#: Ключі `install-info.ini` → змінні uv. Однією тичкою «теки Нишпорки» в
+#: `uv_python_env()`: кожен виклик uv після встановлення мусить класти туди ж,
+#: куди клав інсталятор.
+UV_DIR_KEYS = {"python_dir": "UV_PYTHON_INSTALL_DIR", "tool_dir": "UV_TOOL_DIR",
+               "bin_dir": "UV_TOOL_BIN_DIR", "cache_dir": "UV_CACHE_DIR"}
+
+
+def _home_from_prefix() -> Path | None:
+    """Тека програми, якщо пакет стоїть у розкладці «одна тека» (з 0.32).
+
+    Інсталятор кладе середовище в `<тека>/.program/tools/nyshporka`, тож
+    `sys.prefix.parents[1]` — і є тека програми зі своїм `install-info.ini`.
+    Так застосунок знаходить себе без жодної постійної змінної користувача.
+    """
+    try:
+        cand = Path(sys.prefix).resolve().parents[1]
+    except (IndexError, OSError):
+        return None
+    return cand if (cand / INSTALL_INFO).is_file() else None
+
+
 def install_home() -> Path:
     """Тека встановлення, яку заводить інсталятор."""
+    own = _home_from_prefix()
+    if own is not None:
+        # 🔴 Розкладка «одна тека»: людина обрала теку на D:, і програма лежить
+        # у ній. Без цього кроку читач шукав би слід лише в LOCALAPPDATA і
+        # `nysh update` ставив би нову версію назад на C: (відеоурок, 16.10.2026).
+        return own
     if sys.platform == "win32":
         base = Path(os.environ.get("LOCALAPPDATA")
                     or str(Path.home() / "AppData" / "Local"))
@@ -284,11 +311,18 @@ def uv_python_env() -> dict[str, str]:
     ⚠ Явна передача, а не постійна змінна користувача: та перенаправила б УСІ
     `uv python install` людини в теку Нишпорки, і `nysh uninstall` знісся б
     чужі інтерпретатори разом зі своїми.
+
+    🔴 Крім теки Python — теки середовища застосунку, його команди й кешу uv
+    (`tool_dir`, `bin_dir`, `cache_dir`, розкладка «одна тека»). Без них
+    інсталятор клав усе на обраний диск, а перше ж `nysh update` чи
+    `nysh htr install` (кеш torch — гігабайти) знову пішло б у профіль на C:.
     """
     env = {"UV_PYTHON_INSTALL_BIN": "0", "UV_PYTHON_INSTALL_REGISTRY": "0"}
-    folder = install_info().get("python_dir", "").strip()
-    if folder:
-        env["UV_PYTHON_INSTALL_DIR"] = folder
+    info = install_info()
+    for key, var in UV_DIR_KEYS.items():
+        folder = info.get(key, "").strip()
+        if folder:
+            env[var] = folder
     return env
 
 
@@ -502,16 +536,16 @@ def how_to_update(preset: str = "") -> str:
     from nyshporka.htr.view import shell_arg
 
     parts = command(preset)
-    folder = uv_python_env().get("UV_PYTHON_INSTALL_DIR", "") if parts[1:2] == ["tool"] else ""
+    # Рядок, який людина копіює, мусить нести ті самі теки, що й `nysh update`
+    # (`command_env`) — інакше повертається 448 або нова версія лягає на C:.
+    env = uv_python_env() if parts[1:2] == ["tool"] else {}
+    dirs = [(v, env[v]) for v in UV_DIR_KEYS.values() if env.get(v)]
     if sys.platform == "win32":
-        line = _powershell_line(parts)
-        if folder:
-            # Рядок, який людина копіює, мусить нести ту саму теку Python, що
-            # й `nysh update` (`command_env`) — інакше 448 повертається.
-            line = f"$env:UV_PYTHON_INSTALL_DIR={_ps_quote(folder)}; " + line
-        return line
+        pre = "".join(f"$env:{v}={_ps_quote(f)}; " for v, f in dirs)
+        return pre + _powershell_line(parts)
     line = " ".join(shell_arg(x) for x in parts)
-    return f"UV_PYTHON_INSTALL_DIR={shell_arg(folder)} {line}" if folder else line
+    pre = "".join(f"{v}={shell_arg(f)} " for v, f in dirs)
+    return pre + line
 
 
 def _ps_quote(x: str) -> str:

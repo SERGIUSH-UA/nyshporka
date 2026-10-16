@@ -175,13 +175,35 @@ def _disk() -> Check:
         free_gb = shutil.disk_usage(root).free / 2**30
     except OSError as exc:
         return Check("Місце на диску", "warn", str(exc))
+    # 🔴 Програма з рушіями й кешем uv (2.5–4 ГБ) може лежати на іншому диску,
+    # ніж простір: до 0.32 інсталятор клав її в профіль на C:, і саме C:
+    # закінчувався першим (відеоурок, 16.10.2026). Тому дивимось обидва диски й
+    # радимо переїзд, а не лише «звільніть місце».
+    where = f"вільно {free_gb:.0f} ГБ"
+    hint = ""
+    try:
+        from nyshporka.setup.update import install_home
+
+        home = install_home()
+        if home.exists() and home.anchor.lower() != root.anchor.lower():
+            home_gb = shutil.disk_usage(home).free / 2**30
+            where = (f"простір {root.anchor} — {free_gb:.0f} ГБ, "
+                     f"програма {home.anchor} — {home_gb:.1f} ГБ")
+            if home_gb < free_gb:
+                free_gb = home_gb
+            if home_gb < 30:
+                hint = (f"перенести все в одну теку на диск простору: "
+                        f"`nysh relocate {root}` (спершу --dry-run)")
+    except OSError:
+        pass
     if free_gb < 5:
-        return Check("Місце на диску", "fail", f"вільно {free_gb:.1f} ГБ",
-                     "одна справа архіву буває 10-30 ГБ")
+        return Check("Місце на диску", "fail", where,
+                     hint or "одна справа архіву буває 10-30 ГБ; перенести на інший "
+                             "диск — `nysh relocate <тека>`")
     if free_gb < 30:
-        return Check("Місце на диску", "warn", f"вільно {free_gb:.0f} ГБ",
-                     "на велику справу може не вистачити")
-    return Check("Місце на диску", "ok", f"вільно {free_gb:.0f} ГБ")
+        return Check("Місце на диску", "warn", where,
+                     hint or "на велику справу може не вистачити")
+    return Check("Місце на диску", "ok", where)
 
 
 def _torch() -> Check:

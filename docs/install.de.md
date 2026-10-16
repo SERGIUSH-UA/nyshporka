@@ -40,12 +40,18 @@ Schritt 3).
     2. Wenn Windows meldet **„Der Computer wurde durch Windows geschützt“** —
        „Weitere Informationen“ → „Trotzdem ausführen“. So begrüßt Windows
        jedes Programm, das bisher nur wenige heruntergeladen haben.
-    3. Bei der Frage «Що ставимо» (Was installieren wir) wählen Sie
-       **«Каталоги + читання рукопису й пошук у прочитаному»** (Kataloge +
-       Lesen von Handschrift und Suche im Gelesenen).
-    4. Lassen Sie am Ende das Häkchen «Запустити Нишпорку» (Nyshporka starten)
-       gesetzt — im Browser öffnet sich die Anwendung. Das ist Ihr Computer,
-       keine Website: Sie funktioniert auch ohne Internet.
+    3. Wählen Sie auf der Seite «Де жити Нишпорці» (Wo Nyshporka wohnen wird)
+       einen Ordner auf einem Laufwerk mit viel Platz (etwa 10 GB nötig),
+       zum Beispiel `D:\Genealogy\Nyshporka`. In diesem einen Ordner liegt
+       alles: das Programm, die Lese-Engines und Ihre Recherche.
+    4. Lassen Sie bei der Frage «Що ставимо» (Was installieren wir)
+       **«Усе (рекомендовано)»** (Alles, empfohlen) stehen. Das leichte Paket
+       enthält nur die Archivkataloge, ohne Lesen von Handschrift und ohne
+       Familiensuche.
+    5. Lassen Sie am Ende beide Häkchen gesetzt: «Запустити Нишпорку»
+       (Nyshporka starten) öffnet die Anwendung im Browser (das ist Ihr
+       Computer, keine Website: Sie funktioniert auch ohne Internet), das
+       zweite öffnet diese Anleitung beim nächsten Schritt.
 
 === "macOS und Linux"
 
@@ -57,7 +63,7 @@ Schritt 3).
 
     Wenn das Skript fertig ist, schließen Sie das Terminalfenster.
 
-## Schritt 3. Claude Desktop
+## Schritt 3. Claude Desktop { #pomichnyk }
 
 1. Laden Sie die Anwendung herunter:
    [Windows](https://claude.ai/api/desktop/win32/x64/setup/latest/redirect),
@@ -78,12 +84,12 @@ Schritt 3).
 Im Reiter Code, bevor Sie etwas schreiben:
 
 1. Wählen Sie **Local** — der Assistent arbeitet dann auf Ihrem Computer.
-2. **Select folder** → der Ordner `Документи\Нишпорка` (der Ordner
-   „Нишпорка“ unter „Dokumente“). Ihn hat das Installationsprogramm angelegt;
-   dort werden Scans, Gelesenes und Notizen liegen. Gibt es diesen Ordner
-   nicht, werden Ihre „Dokumente“ mit OneDrive synchronisiert, und Nyshporka
-   hat den Ordner daneben angelegt. Wo genau, zeigt die Anwendung:
-   **🐾 Огляд** (Übersicht) → «Перевірити цю машину» (Diesen Rechner prüfen).
+2. **Select folder** → der Ordner, den Sie im Installationsprogramm auf der
+   Seite «Де жити Нишпорці» (Wo Nyshporka wohnen wird) gewählt haben,
+   standardmäßig `Документи\Нишпорка` (der Ordner „Нишпорка“ unter
+   „Dokumente“). Dort werden Scans, Gelesenes und Notizen liegen. Falls Sie
+   vergessen haben, wo er ist: Der Pfad steht unten auf der Startseite der
+   Anwendung.
 3. Berechtigungsmodus — **Manual**: Der Assistent fragt vor jeder Aktion, und
    Sie sehen, was genau er tut.
 
@@ -93,7 +99,8 @@ Kopieren Sie den Text vollständig in das Eingabefeld und drücken Sie Enter:
 
 ```text
 Lies https://raw.githubusercontent.com/SERGIUSH-UA/nyshporka/main/AGENTS.md
-und erledige danach alles, damit Nyshporka auf diesem Computer bereit ist: Prüfe
+Sag mir zuerst kurz, was Nyshporka ist und was wir jetzt tun werden.
+Dann erledige gemäß der Anleitung alles, damit Nyshporka auf diesem Computer bereit ist: Prüfe
 den Rechner, installiere bei Bedarf die Lese-Engines und Modelle und lege die Skills für alle
 Projekte ab. Erkläre mir jeden Schritt in einfachen Worten.
 Wenn alles grün ist, frag mich, welchen Nachnamen ich suche und in welchen Schreibweisen.
@@ -183,7 +190,8 @@ powershell -ExecutionPolicy Bypass -File "$env:TEMP\nysh-install.ps1"
     | Paket | `-Preset catalog` | `NYSH_PRESET=catalog` | `/PRESET=catalog` |
     | Zusammensetzung des Pakets komplett | `-Source 'nyshporka[app,archives]'` | `NYSH_SOURCE=…` | — |
     | bestimmte Version | `-Version X.Y.Z` | über `NYSH_SOURCE` | in die Datei eingebaut |
-    | Installationsordner | `-Home_ D:\Nysh` | — | `/DIR=D:\Nysh` |
+    | ein Ordner für alles | `-Workspace D:\Genealogy\Nyshporka -Home_ D:\Genealogy\Nyshporka\.program` | — | `/WORKSPACE=D:\Genealogy\Nyshporka` |
+    | bestehende Installation verschieben | `nysh relocate D:\Genealogy\Nyshporka` | ebenso | ebenso |
     | ohne Rückfragen | — | — | `/VERYSILENT` |
     | ohne Paket der Nachschlagewerke | `-NoCatalog` | `NYSH_NO_CATALOG=1` | — |
     | Protokoll | — | — | `/LOG=setup.log` |

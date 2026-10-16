@@ -30,6 +30,12 @@
 .vitannia { display: flex; align-items: center; gap: 1.2rem; margin: 0 0 1.2rem; }
 .vitannia h2 { margin-bottom: .3rem; }
 .vitannia p { margin: 0; color: var(--fg-2); }
+/* Картка «підключіть помічника»: перша на порожньому просторі. Посилання
+   оформлене як кнопка, бо веде на дію, а не на довідку «колись почитати». */
+.agent-card { margin: 0 0 1.2rem; border-left: 3px solid var(--accent-fill); }
+.agent-card h3 { margin: 0 0 .4rem; }
+.agent-card p { margin: .3rem 0; }
+#view a.btn-solid { display: inline-block; text-decoration: none; }
 .dash-top { display: flex; align-items: flex-start; gap: 1rem; }
 .dash-top > div { flex: 1 1 auto; min-width: 0; }
 /* Порожній стан, що виглядає як крок, а не як поломка: картинка, текст, дія. */

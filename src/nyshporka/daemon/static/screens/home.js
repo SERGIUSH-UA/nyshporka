@@ -62,6 +62,34 @@ function sampleBlock(d) {
     <p><button data-act="sample.install">${t('check.sample.do')}</button></p>`;
 }
 
+/**
+ * Інструкція «як підключити помічника» мовою вікна. Сайт документації кладе
+ * українську в корінь, решту — у `/docs/<мова>/`; якір `pomichnyk` стоїть у
+ * кожному перекладі `install.md`.
+ */
+const agentDoc = () => `https://nyshporka.online/docs/${LANG === 'uk' ? '' : `${LANG}/`}install/#pomichnyk`;
+
+/**
+ * 🤝 Перша картка порожнього простору: працюють із помічником.
+ *
+ * 🔴 Консоль сама дослідження не веде — вона показує, що зроблено. Свіжа
+ * установка про це мовчала, і людина дивилась на три двері, не знаючи, що
+ * головне — підключити Claude чи Codex (відеоурок, 16.10.2026). Підключено —
+ * картка коротшає до нагадування, як до нього звертатись.
+ */
+function agentCard(d) {
+  const a = d.agent || {};
+  if (a.connected) {
+    return `<div class="dash-box agent-card"><p>🤝 ${t('home.agent.ready')}</p></div>`;
+  }
+  return `<div class="dash-box agent-card">
+    <h3>🤝 ${t('home.agent.title')}</h3>
+    <p>${t('home.agent.why')}</p>
+    <p><a class="btn-solid ok" href="${agentDoc()}" target="_blank" rel="noopener">${
+      t('home.agent.go')} →</a></p>
+  </div>`;
+}
+
 /** Три двері першого запуску. Розмітка одна на обидва стани екрана. */
 function doors() {
   return `<div class="cards">
@@ -98,6 +126,7 @@ SCREENS.home = async () => {
     // («ще нічого не поклали»), а не висновок про архів.
     setView(`<div class="vitannia">${maskot('vitaie', 140)}
         <div><h2>${t('home.title')}</h2><p>${t('home.hello')}</p></div></div>
+      ${agentCard(PULSE)}
       ${renderWarnings(env)}
       ${doors()}
       ${stepsBox(PULSE)}
@@ -155,6 +184,8 @@ function onboarding(d) {
   const se = d.search || {};
   const m = d.machine || {};
   const all = [
+    { on: true, ok: !!(d.agent || {}).connected, k: 'step.agent',
+      href: agentDoc() },
     { on: true, ok: m.ok ? m.ready : null, k: 'step.machine',
       act: 'home.demo', note: (m.bad || []).join(' · ') },
     { on: true, ok: (d.profile || {}).present, k: 'step.profile',
@@ -177,8 +208,10 @@ function onboarding(d) {
       <span class="step-t">${t(x.k)}<br>
         <span class="muted">${t(x.k + '.why')}</span></span>
       <span class="step-n muted">${esc(x.note)}</span>
-      <span>${x.ok ? '' : `<button data-act="${x.nav ? 'nav' : esc(x.act)}"${
-        x.nav ? ` data-arg="${esc(x.nav)}"` : ''}>${t('step.go')}</button>`}</span>
+      <span>${x.ok ? '' : x.href
+        ? `<a class="btn-solid sm" href="${esc(x.href)}" target="_blank" rel="noopener">${t('step.go')}</a>`
+        : `<button data-act="${x.nav ? 'nav' : esc(x.act)}"${
+          x.nav ? ` data-arg="${esc(x.nav)}"` : ''}>${t('step.go')}</button>`}</span>
     </div>`).join('')}</div>
   </div>`;
 }

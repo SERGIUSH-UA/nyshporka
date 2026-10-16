@@ -37,12 +37,17 @@ install. The assistant goes last (step 3 explains why).
     2. If Windows says **“Windows protected your PC”** — “More info” →
        “Run anyway”. This is how Windows greets every program that few people
        have downloaded yet.
-    3. When asked what to install («Що ставимо»), choose **«Каталоги + читання
-       рукопису й пошук у прочитаному»** (catalogues + manuscript reading and
-       search in the read text).
-    4. At the end, leave the «Запустити Нишпорку» (Launch Nyshporka) box ticked —
-       the app will open in your browser. This is your computer, not a website:
-       it works without the internet too.
+    3. On the page «Де жити Нишпорці» (Where Nyshporka will live) choose a folder
+       on a drive with plenty of space (about 10 GB needed), for example
+       `D:\Genealogy\Nyshporka`. This one folder will hold everything: the
+       program, the reading engines and your research.
+    4. At «Що ставимо» (What to install) keep **«Усе (рекомендовано)»**
+       (Everything, recommended). The light set is archive catalogues only,
+       without reading handwriting and without family search.
+    5. At the end keep both boxes ticked: «Запустити Нишпорку» (Launch
+       Nyshporka) opens the app in your browser (this is your computer, not a
+       website: it works without the internet too), and the second opens this
+       guide at the next step.
 
 === "macOS and Linux"
 
@@ -54,7 +59,7 @@ install. The assistant goes last (step 3 explains why).
 
     When the script has finished, close the terminal window.
 
-## Step 3. Claude Desktop
+## Step 3. Claude Desktop { #pomichnyk }
 
 1. Download the app:
    [Windows](https://claude.ai/api/desktop/win32/x64/setup/latest/redirect),
@@ -75,11 +80,11 @@ install. The assistant goes last (step 3 explains why).
 In the Code tab, before writing anything:
 
 1. Choose **Local** — the assistant will work on your computer.
-2. **Select folder** → the `Документи\Нишпорка` folder (Documents\Nyshporka).
-   The installer created it; your scans, read text and notes will live there.
-   If there is no such folder, your “Documents” are synced with OneDrive, and
-   Nyshporka has put the folder next to it. The app will show exactly where:
-   **🐾 Огляд** (Overview) → «Перевірити цю машину» (Check this machine).
+2. **Select folder** → the folder you chose in the installer on the page
+   «Де жити Нишпорці» (Where Nyshporka will live), by default
+   `Документи\Нишпорка` (Documents\Nyshporka). Your scans, read text and notes
+   will live there. If you forgot where it is, the path is written at the
+   bottom of the app's home page.
 3. Permission mode — **Manual**: the assistant will ask before every action,
    and you see exactly what it is doing.
 
@@ -89,7 +94,8 @@ Copy the whole text into the input box and press Enter:
 
 ```text
 Read https://raw.githubusercontent.com/SERGIUSH-UA/nyshporka/main/AGENTS.md
-and follow it to do everything needed so that Nyshporka is ready on this computer: check
+First briefly tell me what Nyshporka is and what we are going to do now.
+Then do everything per the instructions so that Nyshporka is ready on this computer: check
 the machine, install the reading engines and models if needed, and put the skills in place for all
 projects. Explain every step to me in plain words.
 When everything is green, ask me which surname I am looking for and in which spellings.
@@ -178,7 +184,8 @@ powershell -ExecutionPolicy Bypass -File "$env:TEMP\nysh-install.ps1"
     | preset | `-Preset catalog` | `NYSH_PRESET=catalog` | `/PRESET=catalog` |
     | the whole package contents | `-Source 'nyshporka[app,archives]'` | `NYSH_SOURCE=…` | — |
     | a specific version | `-Version X.Y.Z` | via `NYSH_SOURCE` | built into the file |
-    | installation folder | `-Home_ D:\Nysh` | — | `/DIR=D:\Nysh` |
+    | one folder for everything | `-Workspace D:\Genealogy\Nyshporka -Home_ D:\Genealogy\Nyshporka\.program` | — | `/WORKSPACE=D:\Genealogy\Nyshporka` |
+    | move an existing install | `nysh relocate D:\Genealogy\Nyshporka` | same | same |
     | no questions | — | — | `/VERYSILENT` |
     | without the reference pack | `-NoCatalog` | `NYSH_NO_CATALOG=1` | — |
     | log | — | — | `/LOG=setup.log` |

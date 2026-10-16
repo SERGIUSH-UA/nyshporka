@@ -133,7 +133,12 @@ def test_iss_uninstall_never_touches_the_research() -> None:
     сусідить із `user_data_dir`, і одна необережна `filesandordirs` змила б
     довідники з вагами.
     """
-    text = iss_text()
+    # ⚠ Дивимось лише на те, що ВИДАЛЯЄ: секцію `[UninstallDelete]` і код
+    # деінсталяції. Сторінка «Де жити Нишпорці» законно називає «Документи» як
+    # типову теку простору — це вибір місця, а не видалення.
+    full = iss_text()
+    text = (full[full.index("[UninstallDelete]"):full.index("[Code]")]
+            + full[full.index("procedure CurUninstallStepChanged"):])
     for trap in ("{userdocs}", "{localappdata}\\Nyshporka\"",
                  "filesandordirs; Name: \"{app}\""):
         assert trap not in text, (
@@ -358,3 +363,15 @@ def test_windows_ps1_says_nothing_in_ukrainian_directly() -> None:
     bad = [line.strip() for line in body.splitlines()
            if re.match(r"\s*(Say|throw|Write-Host)\b", line) and cyr.search(line)]
     assert not bad, "напис поза таблицею:\n" + "\n".join(bad)
+
+
+def test_iss_defaults_to_the_full_set_and_one_folder() -> None:
+    """🔴 Рішення дослідника 16.10.2026: типово ставиться ВСЕ, а легкий набір —
+    свідомий вибір; і все лягає в одну обрану теку, а не в профіль на C:."""
+    text = iss_text()
+    assert "PresetPage.SelectedValueIndex := PRESET_RESEARCHER" in text
+    assert "{param:preset|researcher}" in text
+    assert "Result := 'researcher';" in text
+    # обрана тека доходить до скрипта, а простір — це вона ж
+    assert "WorkspaceFlag()" in text and "' -Workspace \"'" in text
+    assert "AddBackslash(SpaceDir) + '.program'" in text

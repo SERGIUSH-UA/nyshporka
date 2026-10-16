@@ -87,6 +87,20 @@ def test_the_warning_does_not_invent_a_stranger(space):
     assert "написання" in text
 
 
+def test_a_profile_written_by_another_process_is_seen_without_restart(space):
+    """🔴 Агент пише файл руками (так велить `start-research`) чи
+    `nysh profile init` з термінала — а живий `nysh serve` уже відповів
+    «профілю немає». Доти кеш скидався лише в процесі-авторі, тож консоль
+    казала «рід не названо» до рестарту, про який ніщо не повідомляло.
+    `reset()` тут навмисно не кличеться: інший процес його не покличе.
+    """
+    assert _call("profile.show").data["present"] is False
+    (space / "config" / "research_profile.yaml").write_text(HAND, encoding="utf-8")
+    d = _call("profile.show").data
+    assert d["present"] is True and d["display"] == "Ярошинський"
+    assert _call("home.pulse").data["profile"]["display"] == "Ярошинський"
+
+
 # ── заведення ────────────────────────────────────────────────────────────────
 def test_creating_a_profile_gives_spellings_right_away(space):
     env = _call("profile.set", {"display": "Ліщинський",

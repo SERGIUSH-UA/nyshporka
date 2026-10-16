@@ -191,6 +191,7 @@ def home_pulse(a: PulseArgs) -> Envelope:
 
     migrate.nag(env, ws.root)
     data["profile"] = _pulse_profile(env)
+    data["agent"] = _pulse_agent(ws.root)
     # Перелік прогонів — один на зріз: його питають і читання, і пошук, а
     # кожне питання — це обхід кореня прогонів заради штампа кешу.
     runs = None
@@ -339,6 +340,22 @@ def _pulse_profile(_env: Envelope) -> dict[str, Any]:
             "paradigm": p.paradigm_id, "stems": p.stems,
             "roots": [r for r, _ in p.roots],
             "spellings": len(p.all_spellings())}
+
+
+def _pulse_agent(root: Path) -> dict[str, Any]:
+    """Чи підключено помічника — для першої картки й кроку чекліста.
+
+    🔴 Основний режим роботи — з помічником (Claude, Codex): консоль показує
+    зроблене, а веде дослідження він. Свіжа установка цього не казала ніде, і
+    людина дивилась на порожній екран, не знаючи, що далі (відеоурок,
+    16.10.2026). Ознака — скіли, покладені `nysh skills install`: у теці
+    користувача, у cwd сервера чи в корені простору.
+    """
+    from nyshporka import skills as S
+
+    got = S.installed(root)
+    return {"connected": bool(got), "where": [str(p) for p, _ in got],
+            "codex": S.codex_present()}
 
 
 #: Скільки секунд вірити попередній перевірці машини. Вона імпортує torch і

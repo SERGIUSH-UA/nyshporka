@@ -218,15 +218,18 @@ def test_roaming_scan_reads_appdata(monkeypatch, tmp_path: Path) -> None:
 # ── майстер .exe ────────────────────────────────────────────────────────────
 
 
-def test_wizard_asks_for_the_python_folder_and_passes_it_on() -> None:
-    """Користувач `.exe` із 448 не мав де вказати теку — лишалось запускати
-    windows.ps1 руками (рішення дослідника 14.10.2026: окреме поле)."""
+def test_wizard_puts_python_into_the_chosen_folder() -> None:
+    """Користувач `.exe` із 448 не мав де вказати теку. З 14.10.2026 для Python
+    була окрема сторінка. З 16.10.2026 (рішення дослідника: одна тека на все)
+    людина обирає ОДНУ теку на сторінці «Де жити Нишпорці», і Python лягає під
+    неї: `{app}\\python` = `<тека>\\.program\\python`, поза профілем і поза хмарою.
+    Окрема тека лишилась лише в тихому режимі: `/PYTHONDIR=`."""
     iss = (ROOT / "install" / "nyshporka.iss").read_text(encoding="utf-8-sig")
-    assert "CreateInputDirPage(PresetPage.ID" in iss
+    assert "CreateInputDirPage(wpLicense" in iss
     assert "PythonDirFlag() +" in iss and "' -PythonDir \"'" in iss
     assert "{param:pythondir|}" in iss, "тихий режим: /PYTHONDIR="
     for lang in ("ukrainian", "english", "polish", "romanian", "french", "german", "russian"):
-        for key in ("PyDirTitle", "PyDirSub", "PyDirDesc"):
+        for key in ("SpaceTitle", "SpaceSub", "SpaceDesc", "SpaceCloud"):
             assert f"\n{lang}.{key}=" in iss, f"{lang}.{key}"
 
 

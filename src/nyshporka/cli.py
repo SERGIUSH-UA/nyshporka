@@ -740,6 +740,84 @@ def init(
 
 
 @app.command()
+def relocate(
+    target: str = typer.Argument("", help="нова тека для всього, напр. D:/Genealogy/Нишпорка"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="лише показати план"),
+    finish: bool = typer.Option(False, "--finish",
+                                help="прибрати старе після переїзду (питає згоди)"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="не питати (лише з --finish)"),
+    preset: str = typer.Option("", "--preset", help="набір, якщо слід інсталятора втрачено"),
+) -> None:
+    """Перенести Нишпорку й дослідження в одну теку (напр. з C: на D:).
+
+    Простір копіюється зі звіркою кожного файла, програма ставиться наново в
+    `<тека>/.program`. Старе НЕ видаляється: це робить `nysh relocate --finish`
+    у новому вікні, і лише після вашого «так».
+    """
+    from nyshporka.setup import relocate as R
+
+    if finish:
+        try:
+            rec, items = R.leftovers()
+        except R.RelocateError as exc:
+            console.print(f"[err]{exc}[/err]")
+            raise typer.Exit(code=2) from None
+        if not items:
+            console.print("✅ на старому місці нічого не лишилось")
+            return
+        console.print("Новий простір звірено зі старим. На старому місці лишилось:")
+        for it in items:
+            size = f"  [muted]{R.human(it.size)}[/muted]" if it.size else ""
+            console.print(f"  • {it.what}{size}")
+        if not yes and not typer.confirm("Видалити це назавжди?", default=False):
+            console.print("[muted]нічого не видалено[/muted]")
+            raise typer.Exit(code=1)
+        R.finish(items, rec, echo=console.print)
+        console.print("✅ старе прибрано")
+        return
+
+    if not target:
+        console.print("[err]назвіть теку: `nysh relocate D:/Genealogy/Нишпорка`[/err]")
+        raise typer.Exit(code=2)
+    from nyshporka.core.workspace import WorkspaceError
+
+    try:
+        p = R.plan(target)
+    except WorkspaceError as exc:
+        console.print(f"[err]{exc}[/err]")
+        raise typer.Exit(code=2) from None
+    console.print(f"простір:   {p.workspace_from} → [bold]{p.workspace_to}[/bold]"
+                  + ("  [muted](лишається)[/muted]" if p.workspace_stays
+                     else f"  [muted]{R.human(p.workspace_bytes)}[/muted]"))
+    console.print(f"програма:  {p.home_from} → [bold]{p.home_to}[/bold]")
+    console.print(f"довідники: {p.data_from} → {p.data_to}  [muted]{R.human(p.data_bytes)}[/muted]")
+    if p.engines:
+        console.print("рушії:     зберуться наново в новому просторі (venv не переноситься)")
+    if p.free_bytes >= 0:
+        console.print(f"[muted]вільно на диску: {R.human(p.free_bytes)}, треба ≈ "
+                      f"{R.human(p.need_bytes)}[/muted]")
+    for problem in p.problems:
+        console.print(f"[err]✗ {problem}[/err]")
+    if p.problems:
+        raise typer.Exit(code=2)
+    if dry_run:
+        console.print("[muted]це --dry-run: нічого не зроблено[/muted]")
+        return
+    if not typer.confirm("Переїжджаємо? Старе лишиться до `--finish`", default=True):
+        raise typer.Exit(code=1)
+    try:
+        nysh = R.run(p, preset=preset, echo=console.print)
+    except R.RelocateError as exc:
+        console.print(f"[err]{exc}[/err]")
+        raise typer.Exit(code=1) from None
+    console.print(f"\n✅ переїхали: {p.workspace_to}")
+    console.print(f"нова команда: {nysh}")
+    console.print("[bold]Далі:[/bold] закрийте це вікно, відкрийте нове й запустіть "
+                  "`nysh relocate --finish` — воно ще раз звірить копію і спитає, "
+                  "чи прибрати старе.")
+
+
+@app.command()
 def update(
     check: bool = typer.Option(False, "--check",
                                help="лише подивитись, не ставити"),

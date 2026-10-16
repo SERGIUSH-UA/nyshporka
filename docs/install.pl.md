@@ -37,12 +37,17 @@ program odczytu rękopisów. Asystenta — na końcu (dlaczego — w kroku 3).
     2. Jeśli Windows pisze **„System Windows ochronił ten komputer”** —
        „Więcej informacji” → „Uruchom mimo to”. Tak Windows wita każdy program,
        który pobrało jeszcze niewiele osób.
-    3. Na pytanie «Що ставимо» (Co instalujemy) wybierz **«Каталоги + читання
-       рукопису й пошук у прочитаному»** (katalogi + odczyt rękopisu i
-       wyszukiwanie w odczytanym tekście).
-    4. Na końcu zostaw zaznaczone «Запустити Нишпорку» (Uruchom Nyshporkę) — w
-       przeglądarce otworzy się aplikacja. To Twój komputer, a nie strona
-       internetowa: działa też bez internetu.
+    3. Na stronie «Де жити Нишпорці» (Gdzie będzie mieszkać Nyshporka) wybierz
+       folder na dysku z dużą ilością miejsca (potrzeba około 10 GB), na
+       przykład `D:\Genealogy\Nyshporka`. W tym jednym folderze będzie
+       wszystko: program, silniki odczytu i Twoje badania.
+    4. Na pytaniu «Що ставимо» (Co instalujemy) zostaw **«Усе (рекомендовано)»**
+       (Wszystko, zalecane). Lekki zestaw to tylko katalogi archiwów, bez
+       odczytu rękopisów i bez wyszukiwania rodu.
+    5. Na końcu zostaw zaznaczone oba pola: «Запустити Нишпорку» (Uruchom
+       Nyshporkę) otworzy aplikację w przeglądarce (to Twój komputer, a nie
+       strona internetowa: działa też bez internetu), a drugie otworzy tę
+       instrukcję przy następnym kroku.
 
 === "macOS i Linux"
 
@@ -54,7 +59,7 @@ program odczytu rękopisów. Asystenta — na końcu (dlaczego — w kroku 3).
 
     Gdy skrypt skończy, zamknij okno terminala.
 
-## Krok 3. Claude Desktop
+## Krok 3. Claude Desktop { #pomichnyk }
 
 1. Pobierz aplikację:
    [Windows](https://claude.ai/api/desktop/win32/x64/setup/latest/redirect),
@@ -74,11 +79,11 @@ program odczytu rękopisów. Asystenta — na końcu (dlaczego — w kroku 3).
 W zakładce Code, zanim cokolwiek napiszesz:
 
 1. Wybierz **Local** — asystent będzie pracował na Twoim komputerze.
-2. **Select folder** → folder `Документи\Нишпорка` (Dokumenty\Nyshporka). Utworzył
-   go instalator; tam będą skany, odczytany tekst i notatki. Jeśli takiego
-   folderu nie ma, Twoje „Dokumenty” synchronizują się z OneDrive, a Nyshporka
-   położyła folder obok. Gdzie dokładnie — pokaże aplikacja: **🐾 Огляд**
-   (Przegląd) → «Перевірити цю машину» (Sprawdź ten komputer).
+2. **Select folder** → folder wybrany w instalatorze na stronie «Де жити
+   Нишпорці» (Gdzie będzie mieszkać Nyshporka), domyślnie `Документи\Нишпорка`
+   (Dokumenty\Nyshporka). Tam będą skany, odczytany tekst i notatki. Jeśli
+   zapomnisz, gdzie on jest, ścieżka jest zapisana na dole strony głównej
+   aplikacji.
 3. Tryb uprawnień — **Manual**: asystent będzie pytał przed każdym działaniem,
    a Ty widzisz, co dokładnie robi.
 
@@ -88,7 +93,8 @@ Skopiuj cały tekst do pola wpisywania i naciśnij Enter:
 
 ```text
 Przeczytaj https://raw.githubusercontent.com/SERGIUSH-UA/nyshporka/main/AGENTS.md
-i zrób według niego wszystko, żeby Nyshporka była gotowa na tym komputerze: sprawdź
+Najpierw krótko powiedz mi, czym jest Nyshporka i co teraz zrobimy.
+Potem zrób według instrukcji wszystko, żeby Nyshporka była gotowa na tym komputerze: sprawdź
 komputer, w razie potrzeby zainstaluj silniki odczytu i modele i umieść skille dla wszystkich
 projektów. Każdy krok tłumacz mi prostymi słowami.
 Gdy wszystko będzie zielone — zapytaj, jakiego nazwiska szukam i w jakich zapisach.
@@ -176,7 +182,8 @@ powershell -ExecutionPolicy Bypass -File "$env:TEMP\nysh-install.ps1"
     | zestaw | `-Preset catalog` | `NYSH_PRESET=catalog` | `/PRESET=catalog` |
     | cały skład pakietu | `-Source 'nyshporka[app,archives]'` | `NYSH_SOURCE=…` | — |
     | konkretna wersja | `-Version X.Y.Z` | przez `NYSH_SOURCE` | wbudowana w plik |
-    | folder instalacji | `-Home_ D:\Nysh` | — | `/DIR=D:\Nysh` |
+    | jeden folder na wszystko | `-Workspace D:\Genealogy\Nyshporka -Home_ D:\Genealogy\Nyshporka\.program` | — | `/WORKSPACE=D:\Genealogy\Nyshporka` |
+    | przenieść już zainstalowane | `nysh relocate D:\Genealogy\Nyshporka` | tak samo | tak samo |
     | bez pytań | — | — | `/VERYSILENT` |
     | bez pakietu informatorów | `-NoCatalog` | `NYSH_NO_CATALOG=1` | — |
     | dziennik | — | — | `/LOG=setup.log` |

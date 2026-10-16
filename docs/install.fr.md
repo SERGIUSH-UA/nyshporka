@@ -38,12 +38,18 @@ manuscrits ne s'installe pas. L'assistant en dernier (pourquoi — à l'étape 3
     2. Si Windows affiche **« Windows a protégé votre ordinateur »** —
        « Informations complémentaires » → « Exécuter quand même ». C'est ainsi
        que Windows accueille tout programme encore peu téléchargé.
-    3. À la question « Що ставимо » (Que faut-il installer), choisissez
-       **« Каталоги + читання рукопису й пошук у прочитаному »** (catalogues +
-       lecture des manuscrits et recherche dans le texte lu).
-    4. À la fin, laissez cochée la case « Запустити Нишпорку » (Lancer
-       Nyshporka) — l'application s'ouvrira dans le navigateur. C'est votre
-       ordinateur, pas un site : elle fonctionne aussi sans internet.
+    3. Sur la page « Де жити Нишпорці » (Où vivra Nyshporka), choisissez un
+       répertoire sur un disque avec beaucoup de place (environ 10 Go
+       nécessaires), par exemple `D:\Genealogy\Nyshporka`. Ce seul répertoire
+       contiendra tout : le programme, les moteurs de lecture et votre recherche.
+    4. À la question « Що ставимо » (Que faut-il installer), laissez
+       **« Усе (рекомендовано) »** (Tout, recommandé). Le jeu léger ne contient
+       que les catalogues d'archives, sans lecture des manuscrits ni recherche
+       de lignée.
+    5. À la fin, laissez les deux cases cochées : « Запустити Нишпорку » (Lancer
+       Nyshporka) ouvre l'application dans le navigateur (c'est votre
+       ordinateur, pas un site : elle fonctionne aussi sans internet), et la
+       seconde ouvre ce guide à l'étape suivante.
 
 === "macOS et Linux"
 
@@ -55,7 +61,7 @@ manuscrits ne s'installe pas. L'assistant en dernier (pourquoi — à l'étape 3
 
     Quand le script a terminé, fermez la fenêtre du terminal.
 
-## Étape 3. Claude Desktop
+## Étape 3. Claude Desktop { #pomichnyk }
 
 1. Téléchargez l'application :
    [Windows](https://claude.ai/api/desktop/win32/x64/setup/latest/redirect),
@@ -76,12 +82,11 @@ manuscrits ne s'installe pas. L'assistant en dernier (pourquoi — à l'étape 3
 Dans l'onglet Code, avant d'écrire quoi que ce soit :
 
 1. Choisissez **Local** — l'assistant travaillera sur votre ordinateur.
-2. **Select folder** → le répertoire `Документи\Нишпорка` (Documents\Nyshporka).
-   L'installateur l'a créé ; c'est là que vivront les scans, le texte lu et les
-   notes. Si ce répertoire n'existe pas, vos « Documents » sont synchronisés
-   avec OneDrive, et Nyshporka a placé le répertoire à côté. L'application
-   indiquera où exactement : **🐾 Огляд** (Aperçu) → « Перевірити цю машину »
-   (Vérifier cette machine).
+2. **Select folder** → le répertoire choisi dans l'installateur sur la page
+   « Де жити Нишпорці » (Où vivra Nyshporka), par défaut `Документи\Нишпорка`
+   (Documents\Nyshporka). C'est là que vivront les scans, le texte lu et les
+   notes. Si vous avez oublié où il se trouve, le chemin est écrit en bas de la
+   page d'accueil de l'application.
 3. Mode d'autorisation — **Manual** : l'assistant demandera avant chaque action,
    et vous voyez exactement ce qu'il fait.
 
@@ -91,7 +96,8 @@ Copiez le texte en entier dans le champ de saisie et appuyez sur Entrée :
 
 ```text
 Lis https://raw.githubusercontent.com/SERGIUSH-UA/nyshporka/main/AGENTS.md
-et fais tout ce qu'il indique pour que Nyshporka soit prête sur cet ordinateur : vérifie
+D'abord, dis-moi brièvement ce qu'est Nyshporka et ce que nous allons faire maintenant.
+Ensuite, fais tout selon les instructions pour que Nyshporka soit prête sur cet ordinateur : vérifie
 la machine, installe si besoin les moteurs de lecture et les modèles, et installe les skills pour tous
 les projets. Explique-moi chaque étape avec des mots simples.
 Quand tout est vert, demande-moi quel nom de famille je cherche et sous quelles graphies.
@@ -181,7 +187,8 @@ powershell -ExecutionPolicy Bypass -File "$env:TEMP\nysh-install.ps1"
     | ensemble | `-Preset catalog` | `NYSH_PRESET=catalog` | `/PRESET=catalog` |
     | composition complète du paquet | `-Source 'nyshporka[app,archives]'` | `NYSH_SOURCE=…` | — |
     | version précise | `-Version X.Y.Z` | via `NYSH_SOURCE` | intégrée au fichier |
-    | répertoire d'installation | `-Home_ D:\Nysh` | — | `/DIR=D:\Nysh` |
+    | un seul répertoire pour tout | `-Workspace D:\Genealogy\Nyshporka -Home_ D:\Genealogy\Nyshporka\.program` | — | `/WORKSPACE=D:\Genealogy\Nyshporka` |
+    | déplacer une installation existante | `nysh relocate D:\Genealogy\Nyshporka` | idem | idem |
     | sans questions | — | — | `/VERYSILENT` |
     | sans le paquet de références | `-NoCatalog` | `NYSH_NO_CATALOG=1` | — |
     | journal | — | — | `/LOG=setup.log` |

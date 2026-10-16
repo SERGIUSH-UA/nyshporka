@@ -87,10 +87,15 @@ def target_dir(kind: str) -> Path:
     Тобто саме правило «нуль мусить щось означати» забороняє класти довідники в
     кеш. Тека каталогу збігається з `catalog.store.catalog_dir()`.
     """
-    from platformdirs import user_cache_dir, user_data_dir
+    from nyshporka.core.appdirs import cache_dir, data_dir
 
-    base = user_data_dir if kind in _DATA_KINDS else user_cache_dir
-    return Path(base("Nyshporka", appauthor=False)) / kind
+    if kind == "catalog":
+        # Та сама тека, що читає `catalog_dir()`, з її змінною включно: інакше
+        # `NYSHPORKA_CATALOG` перенаправляв читача, а пак лягав деінде.
+        from nyshporka.catalog.store import catalog_dir
+
+        return catalog_dir()
+    return (data_dir() if kind in _DATA_KINDS else cache_dir()) / kind
 
 
 def path_of(pack: Pack) -> Path:

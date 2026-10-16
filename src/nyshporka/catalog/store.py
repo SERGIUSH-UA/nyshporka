@@ -85,9 +85,9 @@ def catalog_dir() -> Path:
     env = os.environ.get(ENV_CATALOG)
     if env:
         return Path(env)
-    from platformdirs import user_data_dir
+    from nyshporka.core.appdirs import data_dir
 
-    return Path(user_data_dir("Nyshporka", appauthor=False)) / DIR_NAME
+    return data_dir() / DIR_NAME
 
 
 def own_path() -> Path | None:

@@ -228,8 +228,30 @@ def config_path() -> Path:
 EMPTY: dict[str, Any] = {"defaults": {}, "profiles": {}, "fallback": ""}
 
 
-@lru_cache(maxsize=1)
+def _stamp() -> tuple[str, int, int]:
+    """Штамп файла профілю: шлях, mtime, розмір. Файла немає — `-1, -1`."""
+    path = config_path()
+    try:
+        st = path.stat()
+    except OSError:
+        return (str(path), -1, -1)
+    return (str(path), st.st_mtime_ns, st.st_size)
+
+
 def _raw() -> dict[str, Any]:
+    """Сирий конфіг; memo за штампом файла, як у `archives.pack.active`.
+
+    🔴 Було `@lru_cache(maxsize=1)` без ключа, а `reset()` кличе лише той
+    процес, що сам писав файл. Агент заводив профіль руками чи
+    `nysh profile init` з термінала — і живий `nysh serve` до рестарту казав
+    «рід не названо» (спіймано на записі відеоуроку, 16.10.2026). Штамп коштує
+    один `stat()` і протухає сам.
+    """
+    return _raw_for(_stamp())
+
+
+@lru_cache(maxsize=4)
+def _raw_for(stamp: tuple[str, int, int]) -> dict[str, Any]:
     """Сирий конфіг. Файла немає — порожній; файл побитий — `ProfileError`.
 
     🔴 Розбір загорнутий навмисно. Доти `yaml.safe_load` летів винятком нагору,
@@ -361,9 +383,13 @@ def resolve_in(raw: dict[str, Any], name: str | None = None) -> ResearchProfile:
     return prof
 
 
-@lru_cache(maxsize=1)
 def active() -> ResearchProfile:
-    """Профіль за замовчуванням для процесу."""
+    """Профіль за замовчуванням; перебудовується, щойно змінився файл."""
+    return _active_for(_stamp())
+
+
+@lru_cache(maxsize=4)
+def _active_for(stamp: tuple[str, int, int]) -> ResearchProfile:
     return resolve()
 
 
@@ -496,8 +522,8 @@ def forms_for_query(q: str, prof: ResearchProfile | None = None) -> tuple[list[s
 
 def reset() -> None:
     """Скинути кеші — для тестів і після правки конфігу."""
-    _raw.cache_clear()
-    active.cache_clear()
+    _raw_for.cache_clear()
+    _active_for.cache_clear()
 
 
 # ── правка профілю ───────────────────────────────────────────────────────────

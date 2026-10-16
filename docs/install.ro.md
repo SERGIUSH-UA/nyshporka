@@ -40,12 +40,17 @@ citire a manuscriselor. Asistentul — ultimul (de ce — la pasul 3).
     2. Dacă Windows afișează **„Windows v-a protejat PC-ul”** — „Mai multe
        informații” → „Executare oricum”. Așa întâmpină Windows orice program
        pe care încă puțini l-au descărcat.
-    3. La întrebarea «Що ставимо» (Ce instalăm) alegeți **«Каталоги + читання
-       рукопису й пошук у прочитаному»** (Cataloage + citirea manuscrisului și
-       căutarea în textul citit).
-    4. La final lăsați bifa «Запустити Нишпорку» (Porniți Nyshporka) — în
-       browser se va deschide aplicația. Este calculatorul dumneavoastră, nu
-       un site: funcționează și fără internet.
+    3. Pe pagina «Де жити Нишпорці» (Unde va locui Nyshporka) alegeți un director
+       pe un disc cu mult spațiu (sunt necesari circa 10 GB), de exemplu
+       `D:\Genealogy\Nyshporka`. În acest singur director va sta tot: programul,
+       motoarele de citire și cercetarea dumneavoastră.
+    4. La întrebarea «Що ставимо» (Ce instalăm) lăsați **«Усе (рекомендовано)»**
+       (Tot, recomandat). Setul ușor înseamnă doar cataloagele arhivelor, fără
+       citirea manuscriselor și fără căutarea neamului.
+    5. La final lăsați bifate ambele căsuțe: «Запустити Нишпорку» (Porniți
+       Nyshporka) deschide aplicația în browser (este calculatorul
+       dumneavoastră, nu un site: funcționează și fără internet), iar a doua
+       deschide acest ghid la pasul următor.
 
 === "macOS și Linux"
 
@@ -57,7 +62,7 @@ citire a manuscriselor. Asistentul — ultimul (de ce — la pasul 3).
 
     Când scriptul se termină, închideți fereastra terminalului.
 
-## Pasul 3. Claude Desktop
+## Pasul 3. Claude Desktop { #pomichnyk }
 
 1. Descărcați aplicația:
    [Windows](https://claude.ai/api/desktop/win32/x64/setup/latest/redirect),
@@ -78,12 +83,11 @@ citire a manuscriselor. Asistentul — ultimul (de ce — la pasul 3).
 În fila Code, înainte de a scrie ceva:
 
 1. Alegeți **Local** — asistentul va lucra pe calculatorul dumneavoastră.
-2. **Select folder** → directorul `Документи\Нишпорка` (Documente\Nyshporka).
-   L-a creat programul de instalare; acolo vor sta scanările, textul citit și
-   notițele. Dacă un asemenea director nu există, „Documentele”
-   dumneavoastră se sincronizează cu OneDrive, iar Nyshporka a pus directorul
-   alături. Unde anume — vă arată aplicația: **🐾 Огляд** (Prezentare) →
-   «Перевірити цю машину» (Verificați acest calculator).
+2. **Select folder** → directorul ales în programul de instalare, pe pagina
+   «Де жити Нишпорці» (Unde va locui Nyshporka), implicit `Документи\Нишпорка`
+   (Documente\Nyshporka). Acolo vor sta scanările, textul citit și notițele.
+   Dacă ați uitat unde este, calea este scrisă în partea de jos a paginii
+   principale a aplicației.
 3. Modul de permisiuni — **Manual**: asistentul va întreba înaintea fiecărei
    acțiuni, iar dumneavoastră vedeți ce face exact.
 
@@ -93,7 +97,8 @@ Copiați textul integral în câmpul de introducere și apăsați Enter:
 
 ```text
 Citește https://raw.githubusercontent.com/SERGIUSH-UA/nyshporka/main/AGENTS.md
-și fă după el tot ce trebuie ca Nyshporka să fie gata pe acest calculator: verifică
+Mai întâi spune-mi pe scurt ce este Nyshporka și ce vom face acum.
+Apoi fă după instrucțiune tot ce trebuie ca Nyshporka să fie gata pe acest calculator: verifică
 calculatorul, la nevoie instalează motoarele de citire și modelele și pune skill-urile pentru toate
 proiectele. Explică-mi fiecare pas în cuvinte simple.
 Când totul e verde — întreabă-mă ce nume de familie caut și în ce grafii.
@@ -184,7 +189,8 @@ powershell -ExecutionPolicy Bypass -File "$env:TEMP\nysh-install.ps1"
     | setul | `-Preset catalog` | `NYSH_PRESET=catalog` | `/PRESET=catalog` |
     | componența pachetului în întregime | `-Source 'nyshporka[app,archives]'` | `NYSH_SOURCE=…` | — |
     | o versiune anume | `-Version X.Y.Z` | prin `NYSH_SOURCE` | inclusă în fișier |
-    | directorul de instalare | `-Home_ D:\Nysh` | — | `/DIR=D:\Nysh` |
+    | un singur director pentru tot | `-Workspace D:\Genealogy\Nyshporka -Home_ D:\Genealogy\Nyshporka\.program` | — | `/WORKSPACE=D:\Genealogy\Nyshporka` |
+    | mutarea unei instalări existente | `nysh relocate D:\Genealogy\Nyshporka` | la fel | la fel |
     | fără întrebări | — | — | `/VERYSILENT` |
     | fără pachetul de ghiduri | `-NoCatalog` | `NYSH_NO_CATALOG=1` | — |
     | jurnal | — | — | `/LOG=setup.log` |

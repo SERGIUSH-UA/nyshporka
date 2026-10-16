@@ -137,7 +137,7 @@ def codex_present() -> bool:
     return Path(home).is_dir() if home else (Path.home() / ".codex").is_dir()
 
 
-def installed() -> list[tuple[Path, str]]:
+def installed(*extra: Path) -> list[tuple[Path, str]]:
     """Куди скіли вже клали і з якої версії — щоб `doctor` міг це показати.
 
     🔴 Оновлення пакета скіли НЕ ЧІПАЄ: вони копіюються разово й лежать у теці
@@ -147,9 +147,13 @@ def installed() -> list[tuple[Path, str]]:
 
     ⚠ Дивимось усі місця, куди кладе `nysh skills install`: проєкт і
     користувач, для кожного агента (`AGENT_DIRS`).
+
+    ⚠ `extra` — ще бази, напр. корінь простору: консоль стартує з теки
+    програми, а помічник відкриває теку простору, тож cwd сервера туди не дивиться.
     """
     out: list[tuple[Path, str]] = []
-    for base in (Path.cwd(), Path.home()):
+    bases = list(dict.fromkeys(p.resolve() for p in (Path.cwd(), Path.home(), *extra)))
+    for base in bases:
         for rel in AGENT_DIRS.values():
             dest = base / rel
             got = _ledger_version(dest)

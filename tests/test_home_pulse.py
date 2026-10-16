@@ -120,3 +120,33 @@ def test_eye_totals_skip_a_broken_file_until_it_is_fixed(space) -> None:
     _pages_file(space, "a", ["full", "partial"])
     got = PS.totals()
     assert (got["files"], got["pages"]) == (1, 2)
+
+
+# ── помічник ─────────────────────────────────────────────────────────────────
+def test_the_assistant_counts_as_connected_only_with_skills(space,
+                                                            monkeypatch: pytest.MonkeyPatch) -> None:
+    """🔴 Перша картка порожнього простору — «підключіть помічника».
+
+    Ознака — облік `nysh skills install`. Консоль стартує з теки програми, тож
+    скіли в КОРЕНІ ПРОСТОРУ (туди помічника відкривають) теж рахуються.
+    """
+    from nyshporka import ops as O
+    from nyshporka import skills as SK
+
+    home = space / "_home"
+    cwd = space / "_cwd"
+    home.mkdir()
+    cwd.mkdir()
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    monkeypatch.chdir(cwd)
+    monkeypatch.delenv("CODEX_HOME", raising=False)
+
+    a = O.call("home.pulse", {}).data["agent"]
+    assert a["connected"] is False and a["where"] == []
+
+    dest = space / SK.AGENT_DIRS["claude"]
+    dest.mkdir(parents=True)
+    (dest / SK.LEDGER).write_text('{"version": "0.0.1"}', encoding="utf-8")
+    a = O.call("home.pulse", {}).data["agent"]
+    assert a["connected"] is True
+    assert a["where"] == [str(dest.resolve())]
