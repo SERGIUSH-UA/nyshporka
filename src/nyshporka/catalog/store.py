@@ -168,6 +168,34 @@ def installed(domain: str = "") -> list[InstalledPack]:
     return [p for p in packs if not domain or p.domain == domain]
 
 
+#: З якого пака стоять каталоги — ім'я зрізу (`nyshporka-catalog-<дата>.zip`).
+ORIGIN = ".origin"
+
+
+def origin() -> str:
+    """Ім'я пака, з якого востаннє ставили каталоги. Немає паків — порожньо.
+
+    🔴 Інсталятор щоразу качав і перезаписував той самий пак (≈50 МБ) при
+    кожному оновленні `.exe`. Тепер він питає це ім'я і пропускає зріз, який
+    уже стоїть. Порожньо, якщо в теці немає жодного `.sqlite`: позначка без
+    паків не має права казати «усе на місці».
+    """
+    d = catalog_dir()
+    try:
+        if not any(d.glob("*.sqlite")):
+            return ""
+        return (d / ORIGIN).read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+
+
+def set_origin(name: str) -> None:
+    try:
+        (catalog_dir() / ORIGIN).write_text(name.strip() + "\n", encoding="utf-8")
+    except OSError:
+        pass  # позначка — зручність: без неї наступне оновлення просто поставить пак знову
+
+
 def invalidate() -> None:
     """Скинути memo дискавері — після встановлення/зняття пака й у тестах."""
     global _DISCO

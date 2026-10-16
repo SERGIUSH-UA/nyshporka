@@ -151,6 +151,7 @@ $Msg = @{
         'cat.dl' = '⚠ не вдалось завантажити пак довідників ({0})'
         'cat.sum' = '⚠ контрольна сума пака довідників ({0}) не збіглася — не встановлюю'
         'cat.ok' = '✓ пак довідників {0}: встановлено (sha256 звірено)'
+        'cat.same' = '✓ пак довідників {0}: уже стоїть, не качаю'
         'cat.refused' = '⚠ «nysh catalog install» відмовив на паку {0}'
         'cat.err' = '⚠ пак довідників з релізу не поставлено: {0}'
         'cat.skip' = 'ℹ довідники не ставляться (-NoCatalog / NYSH_NO_CATALOG=1)'
@@ -240,6 +241,7 @@ $Msg = @{
         'cat.dl' = '⚠ could not download the catalog pack ({0})'
         'cat.sum' = '⚠ checksum of the catalog pack ({0}) does not match — not installing'
         'cat.ok' = '✓ catalog pack {0}: installed (sha256 verified)'
+        'cat.same' = '✓ catalog pack {0}: already installed, not downloading'
         'cat.refused' = '⚠ “nysh catalog install” rejected pack {0}'
         'cat.err' = '⚠ catalog pack from the release was not installed: {0}'
         'cat.skip' = 'ℹ catalogs are not installed (-NoCatalog / NYSH_NO_CATALOG=1)'
@@ -329,6 +331,7 @@ $Msg = @{
         'cat.dl' = '⚠ nie udało się pobrać paczki katalogów ({0})'
         'cat.sum' = '⚠ suma kontrolna paczki katalogów ({0}) się nie zgadza — nie instaluję'
         'cat.ok' = '✓ paczka katalogów {0}: zainstalowana (sha256 sprawdzony)'
+        'cat.same' = '✓ paczka katalogów {0}: już zainstalowana, nie pobieram'
         'cat.refused' = '⚠ „nysh catalog install” odrzucił paczkę {0}'
         'cat.err' = '⚠ paczka katalogów z wydania nie została zainstalowana: {0}'
         'cat.skip' = 'ℹ katalogi nie są instalowane (-NoCatalog / NYSH_NO_CATALOG=1)'
@@ -418,6 +421,7 @@ $Msg = @{
         'cat.dl' = '⚠ nu s-a putut descărca pachetul de cataloage ({0})'
         'cat.sum' = '⚠ suma de control a pachetului de cataloage ({0}) nu corespunde — nu instalez'
         'cat.ok' = '✓ pachet de cataloage {0}: instalat (sha256 verificat)'
+        'cat.same' = '✓ pachet de cataloage {0}: deja instalat, nu descarc'
         'cat.refused' = '⚠ „nysh catalog install” a refuzat pachetul {0}'
         'cat.err' = '⚠ pachetul de cataloage din versiune nu a fost instalat: {0}'
         'cat.skip' = 'ℹ cataloagele nu se instalează (-NoCatalog / NYSH_NO_CATALOG=1)'
@@ -507,6 +511,7 @@ $Msg = @{
         'cat.dl' = '⚠ impossible de télécharger le pack de catalogues ({0})'
         'cat.sum' = '⚠ la somme de contrôle du pack de catalogues ({0}) ne correspond pas — pas d''installation'
         'cat.ok' = '✓ pack de catalogues {0} : installé (sha256 vérifié)'
+        'cat.same' = '✓ pack de catalogues {0} : déjà installé, pas de téléchargement'
         'cat.refused' = '⚠ « nysh catalog install » a refusé le pack {0}'
         'cat.err' = '⚠ le pack de catalogues de la version n''a pas été installé : {0}'
         'cat.skip' = 'ℹ catalogues non installés (-NoCatalog / NYSH_NO_CATALOG=1)'
@@ -596,6 +601,7 @@ $Msg = @{
         'cat.dl' = '⚠ Katalogpaket konnte nicht heruntergeladen werden ({0})'
         'cat.sum' = '⚠ Prüfsumme des Katalogpakets ({0}) stimmt nicht — keine Installation'
         'cat.ok' = '✓ Katalogpaket {0}: installiert (sha256 geprüft)'
+        'cat.same' = '✓ Katalogpaket {0}: bereits installiert, kein Download'
         'cat.refused' = '⚠ „nysh catalog install“ hat das Paket {0} abgelehnt'
         'cat.err' = '⚠ Katalogpaket aus dem Release wurde nicht installiert: {0}'
         'cat.skip' = 'ℹ Kataloge werden nicht installiert (-NoCatalog / NYSH_NO_CATALOG=1)'
@@ -685,6 +691,7 @@ $Msg = @{
         'cat.dl' = '⚠ не удалось скачать пакет справочников ({0})'
         'cat.sum' = '⚠ контрольная сумма пакета справочников ({0}) не совпала — не устанавливаю'
         'cat.ok' = '✓ пакет справочников {0}: установлен (sha256 сверен)'
+        'cat.same' = '✓ пакет справочников {0}: уже установлен, не скачиваю'
         'cat.refused' = '⚠ «nysh catalog install» отклонил пакет {0}'
         'cat.err' = '⚠ пакет справочников из релиза не установлен: {0}'
         'cat.skip' = 'ℹ справочники не ставятся (-NoCatalog / NYSH_NO_CATALOG=1)'
@@ -1337,6 +1344,19 @@ function Install-CatalogFromRelease {
             return $false
         }
         $tag = $best.Tag
+        # 🔴 Той самий зріз уже стоїть — не качаємо й не перезаписуємо: доти
+        # кожне оновлення тягнуло ті самі ~50 МБ наново.
+        $name = "$($best.Asset.name)"
+        # ⚠ Прямо, а не `Get-NativeLine`: функцію приймач бере з файла саму.
+        $have = ''
+        $prev = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        try { $have = "$(& $Nysh catalog origin | Select-Object -Last 1)".Trim() } catch {}
+        finally { $ErrorActionPreference = $prev }
+        if ($name -and $have -eq $name) {
+            Say (M 'cat.same' $tag) DarkGray
+            return $true
+        }
         # `digest` — це `sha256:<64 hex>`; форма звіряється ДО завантаження,
         # щоб не тягнути мегабайти заради асета, який однаково не звірити.
         if (-not ("$($best.Asset.digest)" -match '^sha256:([0-9a-fA-F]{64})$')) {
@@ -1373,7 +1393,7 @@ function Install-CatalogFromRelease {
         }
         $pack = Join-Path $tmp 'pack'
         Expand-Archive -LiteralPath $zip -DestinationPath $pack -Force
-        $rc = Invoke-Logged $Nysh catalog install --from $pack
+        $rc = Invoke-Logged $Nysh catalog install --from $pack --origin $name
         if ($rc -eq 0) {
             Say (M 'cat.ok' $tag) Green
             return $true
@@ -1392,10 +1412,13 @@ $seed = if ($PSScriptRoot) {
     Get-ChildItem -Path $PSScriptRoot -Filter 'nyshporka-catalog-*.zip' `
         -ErrorAction SilentlyContinue | Select-Object -First 1
 } else { $null }
-if ($seed) {
+if ($seed -and (Get-NativeLine $nysh catalog origin) -eq $seed.Name) {
+    # Пак у комплекті `.exe` — той самий, що вже стоїть: не розпаковуємо.
+    Say (M 'cat.same' $seed.Name) DarkGray
+} elseif ($seed) {
     $tmp = Join-Path $env:TEMP ('nysh-catalog-' + [guid]::NewGuid().ToString('N'))
     Expand-Archive -Path $seed.FullName -DestinationPath $tmp -Force
-    $null = Invoke-Logged $nysh catalog install --from $tmp
+    $null = Invoke-Logged $nysh catalog install --from $tmp --origin $seed.Name
     Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
 } elseif ($NoCatalog) {
     Say (M 'cat.skip') DarkGray

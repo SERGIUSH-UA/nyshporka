@@ -1035,6 +1035,8 @@ function Invoke-Logged {
     return 0
 }
 
+# `nysh catalog origin` — з якого пака стоять каталоги (порожньо — невідомо).
+function nysh { if ($args[0] -eq 'catalog' -and $args[1] -eq 'origin') { "$env:FAKE_ORIGIN" } }
 $r = Install-CatalogFromRelease -Nysh 'nysh'
 "RESULT:$(@($r).Count):$($r.GetType().Name):$r"
 """
@@ -1302,3 +1304,25 @@ def test_ps1_engines_are_wired_before_doctor_and_skip_catalog() -> None:
     call = text.index("$EnginesOk = Install-Engines -Nysh $nysh", init)
     doctor = text.index("$null = Invoke-Logged $nysh doctor", call)
     assert init < call < doctor
+
+
+def test_ps1_catalog_same_pack_is_not_downloaded_again(tmp_path: Path) -> None:
+    """🔴 Той самий зріз уже стоїть — ні завантаження, ні `catalog install`.
+    Доти кожне оновлення тягнуло ті самі ~50 МБ наново. Інший зріз — ставиться
+    і передає своє ім'я в `--origin`, щоб наступного разу його впізнати."""
+    data = _zip_bytes("catalog-2026-09-01")
+    (tmp_path / "same").mkdir()
+    (tmp_path / "other").mkdir()
+    page = [_gh_release("catalog-2026-09-01", asset="nyshporka-catalog-2026-09-01.zip",
+                        digest=_sha256_digest(data),
+                        url="https://example.invalid/dl/new.zip")]
+    same = _run_ps_catalog(tmp_path / "same", [page, []], {"new.zip": data},
+                           {"FAKE_ORIGIN": "nyshporka-catalog-2026-09-01.zip"})
+    assert same["result"] == "True", same["out"]
+    assert "dl/" not in same["net"] and "catalog install" not in same["nysh"], same
+
+    other = _run_ps_catalog(tmp_path / "other", [page, []], {"new.zip": data},
+                            {"FAKE_ORIGIN": "nyshporka-catalog-2026-01-01.zip"})
+    assert other["result"] == "True", other["out"]
+    assert "dl/new.zip" in other["net"]
+    assert "--origin nyshporka-catalog-2026-09-01.zip" in other["nysh"], other["nysh"]

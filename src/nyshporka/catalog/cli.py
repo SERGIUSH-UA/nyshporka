@@ -34,6 +34,12 @@ def cmd_where() -> None:
         typer.echo(f"власні дані: {own} ({state})")
 
 
+@app.command("origin")
+def cmd_origin() -> None:
+    """Надрукувати, з якого пака стоять каталоги (порожньо — невідомо)."""
+    typer.echo(store.origin())
+
+
 @app.command("list")
 def cmd_list(as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)")) -> None:
     """Що встановлено, якого зрізу й чи ціле."""
@@ -108,6 +114,8 @@ def cmd_install(
     src: Path = typer.Option(None, "--from", exists=True,
                              help="тека, .zip або .sqlite-пак (офлайн)"),
     domain: str = typer.Option("", "--domain", help="лише цього домену"),
+    origin: str = typer.Option("", "--origin",
+                               help="ім'я пака (zip-зрізу); той самий уже стоїть — пропустити"),
 ) -> None:
     """Покласти паки в каталог із теки чи файла.
 
@@ -120,6 +128,9 @@ def cmd_install(
         typer.echo("вкажіть --from <тека|файл>: завантаження з релізу ще не "
                    "складено, а брати пак без звірки не можна")
         raise typer.Exit(code=2)
+    if origin and not domain and store.origin() == origin.strip():
+        typer.echo(f"✓ каталоги вже з цього пака ({origin}) — не перезаписую")
+        return
     dst = store.catalog_dir()
     dst.mkdir(parents=True, exist_ok=True)
 
@@ -154,6 +165,8 @@ def cmd_install(
     if tmpdir is not None:
         tmpdir.cleanup()
     store.invalidate()
+    if origin and not domain and n:
+        store.set_origin(origin)
     typer.echo(f"поставлено паків: {n}")
 
 

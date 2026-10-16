@@ -389,3 +389,31 @@ def test_a_known_bound_stops_the_pack_from_calling_it_unknown(tmp_path) -> None:
     assert not got["1"][1], "відому межу названо невідомою"
     # А там, де межі справді немає, застереження лишається.
     assert got["2"][0] is None and "нижня" in got["2"][1]
+
+
+# ── той самий зріз не ставиться вдруге ───────────────────────────────────────
+def test_the_same_pack_is_not_reinstalled(catalog, tmp_path: Path) -> None:
+    """🔴 Кожне оновлення `.exe` качало й перезаписувало ті самі ~50 МБ.
+    Позначка `--origin` пропускає зріз, що вже стоїть, а інший — ставить."""
+    import shutil
+
+    from typer.testing import CliRunner
+
+    from nyshporka.catalog.cli import app as cat_app
+
+    src = tmp_path / "pack"
+    src.mkdir()
+    shutil.copy2(catalog / "geog-test-2026.08.sqlite", src / "geog-test-2026.08.sqlite")
+    run = CliRunner().invoke
+    first = run(cat_app, ["install", "--from", str(src), "--origin", "nyshporka-catalog-2026-08-17.zip"])
+    assert first.exit_code == 0 and "поставлено паків: 1" in first.output
+    assert S.origin() == "nyshporka-catalog-2026-08-17.zip"
+    again = run(cat_app, ["install", "--from", str(src), "--origin", "nyshporka-catalog-2026-08-17.zip"])
+    assert again.exit_code == 0 and "не перезаписую" in again.output
+    newer = run(cat_app, ["install", "--from", str(src), "--origin", "nyshporka-catalog-2026-10-01.zip"])
+    assert "поставлено паків: 1" in newer.output
+    assert S.origin() == "nyshporka-catalog-2026-10-01.zip"
+    # позначка без жодного пака не каже «усе на місці»
+    for f in catalog.glob("*.sqlite"):
+        f.unlink()
+    assert S.origin() == ""
