@@ -351,7 +351,7 @@ def places_for(rec: dict[str, Any], year: int) -> list[str]:
 
 
 def _ua_date(iso: str) -> str:
-    y, m, d = (iso.split("-") + ["", ""])[:3]
+    y, m, d = [*iso.split("-"), "", ""][:3]
     return f"{d}.{m}.{y}" if d and m else iso
 
 

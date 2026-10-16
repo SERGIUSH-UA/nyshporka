@@ -181,7 +181,7 @@ def test_the_card_rides_into_every_year_where_the_pool_shows_it(ws: Any, monkeyp
 
     seen: dict[str, Any] = {}
 
-    def fake(src, code, year, **kw):  # noqa: ANN001
+    def fake(src, code, year, **kw):
         seen.update(kw, year=year)
         return {"manifest": {}, "gates": {"passed": True}, "path": "x", "dry_run": True}
 
