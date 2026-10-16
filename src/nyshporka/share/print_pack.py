@@ -64,8 +64,15 @@ def pack_print(src: Path, code: str, year: int, *, title: str,
                publisher: str = "", contact: str = "", site: str = "",
                note: str = "", links: list[dict[str, str]] | None = None,
                license_text: str = "CC0-1.0", source_terms: str = "",
+               doc_type: str = "",
                dest: Path | None = None, dry_run: bool = False) -> dict[str, Any]:
-    """Зібрати пакет одного року видання з теки сторінок."""
+    """Зібрати пакет одного року видання з теки сторінок.
+
+    🔴 Пул показує на картці `case.place` (місце, заголовок сторінки, геодані),
+    `case.doc_type` (жанр) і посилання `links` з `role: scans` («Подивіться саму
+    книгу»). `extra.publication` і `refs` типу `url` він не читає зовсім — тож
+    місто й жанр ідуть сюди, а не лише в `publication`.
+    """
     try:
         key = vydannia.key(code, year)
     except ValueError as exc:
@@ -104,8 +111,15 @@ def pack_print(src: Path, code: str, year: int, *, title: str,
             "title": f"{title.strip()}, {year}",
             "years": [year, year],
         }
-        if places:
-            case["places"] = [p for p in places if p.strip()]
+        if publisher_place.strip():
+            case["place"] = publisher_place.strip()
+        if doc_type.strip():
+            case["doc_type"] = doc_type.strip()
+        clean = [p.strip() for p in (places or []) if p.strip()]
+        if publisher_place.strip() and publisher_place.strip() not in clean:
+            clean.insert(0, publisher_place.strip())
+        if clean:
+            case["places"] = clean
         refs = [{"source": "url", "ref": f"{code} {year} №{r['no']}", "url": r["source_url"]}
                 for r in rows if r.get("no") and r.get("source_url")]
         publication = {"code": code, "title": title.strip(), "year": year,

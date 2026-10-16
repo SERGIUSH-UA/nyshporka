@@ -323,6 +323,11 @@ class SharePackPrintArgs(BaseModel):
     link: list[str] = Field(default_factory=list, description="«підпис=адреса»")
     license: str = Field(default="", description="ліцензія; порожньо — з профілю")
     source_terms: str = Field(default="", description="умови джерела текстового шару")
+    doc_type: str = Field(default="", description="жанр картки: newspaper | gazette | "
+                                                  "directory (див. `nysh share card`)")
+    scans_url: str = Field(default="", description="де подивитись скани підшивки; "
+                                                   "пул показує це посилання як «саму книгу»")
+    scans_label: str = Field(default="", description="підпис посилання на скани")
 
 
 @op("share.pack_print", summary="Спакувати рік друкованого видання для обміну",
@@ -342,6 +347,13 @@ def share_pack_print(a: SharePackPrintArgs) -> Envelope:
         links = _links(a.link)
     except ArgError as exc:
         return fail(str(exc))
+    if a.scans_url.strip():
+        if not a.scans_url.strip().lower().startswith(("http://", "https://")):
+            return fail("посилання на скани — адреса http(s)")
+        # 🔴 Пул бере «саму книгу» лише з `links` із роллю `scans`: `refs`
+        # типу `url` він відкидає, і без цього скани на картці не видно.
+        links.insert(0, {"role": "scans", "url": a.scans_url.strip(),
+                         "label": a.scans_label.strip() or "скани підшивки"})
     issues: list[dict[str, Any]] = []
     if a.issues:
         try:
@@ -361,6 +373,7 @@ def share_pack_print(a: SharePackPrintArgs) -> Envelope:
                          site=defaults["site"], note=a.note, links=links,
                          license_text=a.license or defaults["license"],
                          source_terms=a.source_terms or defaults["source_terms"],
+                         doc_type=a.doc_type,
                          dest=Path(a.out) if a.out else None, dry_run=a.dry_run)
     except PublishError as exc:
         return fail(str(exc))

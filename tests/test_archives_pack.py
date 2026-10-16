@@ -47,7 +47,7 @@ LEGACY_RTYPE_LABEL = {
     "clergy_list": "клірові", "finding_aid": "опис фонду", "other": "інше",
     "metric": "метрична книга", "metric_partial": "метрика неповна",
     "marriage_search": "шлюбні обшуки",
-    "directory": "довідкові видання", "court": "судові справи",
+    "directory": "довідкові видання", "newspaper": "газети", "court": "судові справи",
     "estate": "станові справи", "visitation": "візитації", "inventory": "інвентарі",
     "census": "переписи", "service_record": "формулярні списки",
 }

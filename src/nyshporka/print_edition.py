@@ -272,6 +272,145 @@ def _write_record(data: dict[str, Any]) -> Path:
     return path
 
 
+# ── картка видання ──────────────────────────────────────────────────────────
+#: Без цих полів рік видання в пулі виглядає «Без назви / місце не назване /
+#: жанру нема», і генеалог не знає, звідки підшивка. Пакування їх вимагає.
+CARD_REQUIRED = ("title", "city", "doc_type", "holder")
+#: Решта полів картки: що ще бачить людина на картці в пулі.
+CARD_FIELDS = (*CARD_REQUIRED, "places", "organ", "frequency", "scans_url",
+               "scans_label", "source_terms", "note")
+_CARD_HINT = {
+    "title": "назва з шапки номера, без року: --title \"Колективізоване село\"",
+    "city": "місто видання: --city \"Пирятин\"",
+    "doc_type": "жанр: --doc-type newspaper (газета) | gazette (єпарх. відомості) | "
+                "directory (довідник)",
+    "holder": "де лежить підшивка, з якої скани: --holder \"НБУВ, фонд газет\" або "
+              "\"приватна колекція (ім'я)\"",
+}
+
+
+def set_card(code: str, **fields: Any) -> dict[str, Any]:
+    """Дописати картку видання; `None` — поле не чіпати, порожнє — стерти."""
+    code = code.upper()
+    if not vydannia.is_code(code):
+        raise ValueError(f"код видання «{code}» — лише латинка й цифри, від двох знаків")
+    data = load_record(code) or {"code": code, "issues": {}, "roots": []}
+    for key, value in fields.items():
+        if key not in CARD_FIELDS:
+            raise ValueError(f"невідоме поле картки: {key}")
+        if value is None:
+            continue
+        if key in ("places", "organ"):
+            clean = [" ".join(str(v).split()) for v in (value or [])]
+            data[key] = [v for v in clean if v]
+        else:
+            data[key] = " ".join(str(value).split())
+    if data.get("doc_type"):
+        from nyshporka.share.card import genres
+
+        known = genres()
+        if known and data["doc_type"] not in known:
+            raise ValueError(f"жанр «{data['doc_type']}» невідомий; є: "
+                             + ", ".join(f"{k} ({v})" for k, v in known.items()))
+    _write_record(data)
+    return data
+
+
+def card_gaps(rec: dict[str, Any]) -> list[str]:
+    """Чого бракує картці для пакування — з підказкою, як заповнити."""
+    return [f"{k}: {_CARD_HINT[k]}" for k in CARD_REQUIRED if not str(rec.get(k) or "").strip()]
+
+
+def _by_year(lines: list[str], year: int) -> tuple[list[str], list[str]]:
+    """Рядки картки для року: (з роками, що покривають рік; без років)."""
+    import re
+
+    dated: list[str] = []
+    plain: list[str] = []
+    for line in lines or []:
+        m = re.match(r"^\s*(\d{4})(?:\s*[-–]\s*(\d{4}))?\s*:\s*(.+)$", line)
+        if m is None:
+            plain.append(line.strip())
+        elif int(m.group(1)) <= year <= int(m.group(2) or m.group(1)):
+            dated.append(m.group(3).strip())
+    return dated, plain
+
+
+def organ_for(rec: dict[str, Any], year: int) -> str:
+    """Чий орган газета цього року. Рядок картки `organ` — «1932–1937: текст»,
+    «1938: текст» або просто текст (на всі роки)."""
+    dated, plain = _by_year(list(rec.get("organ") or []), year)
+    return (dated or plain or [""])[0]
+
+
+def places_for(rec: dict[str, Any], year: int) -> list[str]:
+    """Місця картки для року: «1932–1937: Харківська область» — лише в ті роки,
+    рядок без років — у всі (адміністративний поділ мінявся)."""
+    dated, plain = _by_year(list(rec.get("places") or []), year)
+    return plain + dated
+
+
+def _ua_date(iso: str) -> str:
+    y, m, d = (iso.split("-") + ["", ""])[:3]
+    return f"{d}.{m}.{y}" if d and m else iso
+
+
+def _n(count: int, one: str, few: str, many: str) -> str:
+    """Числівник з іменником: 1 номер, 4 номери, 208 номерів."""
+    tail = count % 100
+    if 11 <= tail <= 14:
+        word = many
+    elif count % 10 == 1:
+        word = one
+    elif 2 <= count % 10 <= 4:
+        word = few
+    else:
+        word = many
+    return f"{count} {word}"
+
+
+def _sentence(text: str) -> str:
+    text = text.strip()
+    if not text:
+        return ""
+    text = text[0].upper() + text[1:]
+    return text if text.endswith((".", "!", "?")) else text + "."
+
+
+def year_note(rec: dict[str, Any], year: int, rows: list[dict[str, Any]],
+              pages: int) -> str:
+    """Опис року для картки в пулі: сайт показує нотатку текстом, а перелік
+    номерів (`extra.publication.issues`) не показує ніде."""
+    out: list[str] = []
+    organ = organ_for(rec, year)
+    if organ:
+        out.append(_sentence(organ))
+    place = []
+    if rec.get("city"):
+        place.append(f"Місце видання — {rec['city']}")
+    if rec.get("frequency"):
+        place.append(f"виходила {rec['frequency']}")
+    if place:
+        out.append(_sentence("; ".join(place)))
+    regular = [r for r in rows if r.get("note") != "додаток"]
+    extra = len(rows) - len(regular)
+    span = ""
+    if regular:
+        a, b = regular[0], regular[-1]
+        span = (f"; перший — № {a.get('no') or '?'} від {_ua_date(str(a.get('date') or ''))}, "
+                f"останній — № {b.get('no') or '?'} від {_ua_date(str(b.get('date') or ''))}")
+    out.append(f"За {year} рік у пулі {_n(len(regular), 'номер', 'номери', 'номерів')}"
+               + (f" і {_n(extra, 'додаток', 'додатки', 'додатків')}" if extra else "")
+               + f", {_n(pages, 'сторінка', 'сторінки', 'сторінок')}{span}.")
+    if rec.get("holder"):
+        out.append(f"Підшивка: {rec['holder']}.")
+    out.append("Текст — PaddleOCR-VL 1.6, хмарний прогін Нишпорки; номери й дати взято "
+               "з назв тек сканів, а не з розпізнаного тексту.")
+    if rec.get("note"):
+        out.append(_sentence(str(rec["note"])))
+    return " ".join(out)
+
+
 @dataclass
 class Adopted:
     """Що `adopt` записав у видання з тек тексту."""

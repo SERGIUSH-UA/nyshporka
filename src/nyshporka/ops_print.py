@@ -128,6 +128,51 @@ def print_assemble(a: PrintAssembleArgs) -> Envelope:
     return env
 
 
+class PrintCardArgs(BaseModel):
+    vydannia: str = Field(description="код видання")
+    title: str | None = Field(default=None, description="назва з шапки, без року")
+    city: str | None = Field(default=None, description="місто видання")
+    doc_type: str | None = Field(default=None, description="newspaper | gazette | directory")
+    holder: str | None = Field(default=None, description="де лежить підшивка, з якої скани")
+    places: list[str] | None = Field(default=None, description="місця для пошуку: "
+                                                               "район, область по роках")
+    organ: list[str] | None = Field(default=None, description="чий орган: «1932–1937: Орган …»")
+    frequency: str | None = Field(default=None, description="як часто виходила")
+    scans_url: str | None = Field(default=None, description="посилання на скани підшивки")
+    scans_label: str | None = Field(default=None, description="підпис посилання на скани")
+    source_terms: str | None = Field(default=None, description="умови тримача сканів")
+    note: str | None = Field(default=None, description="ще речення до опису кожного року")
+
+
+@op("print.card", summary="Картка друкованого видання: що стоїть на картці в Супрязі",
+    args=PrintCardArgs, mutates=True, agent=False, section=SECTION,
+    next_hints=(("print.pack", "спакувати повні роки для Супряги"),))
+def print_card(a: PrintCardArgs) -> Envelope:
+    """Показати й дописати картку видання. Без аргументів — лише показати й назвати,
+    чого бракує для пакування."""
+    from nyshporka import print_edition as PE
+
+    code = a.vydannia.strip().upper()
+    fields = a.model_dump(exclude={"vydannia"})
+    try:
+        rec = (PE.set_card(code, **fields) if any(v is not None for v in fields.values())
+               else PE.load_record(code))
+    except ValueError as exc:
+        return fail(str(exc))
+    if not rec:
+        return fail(f"видання {code} не записано — `nysh cloud go --print` або "
+                    f"`nysh print adopt {code}`")
+    card = {k: rec.get(k) for k in PE.CARD_FIELDS if rec.get(k)}
+    gaps = PE.card_gaps(rec)
+    env = ok({"code": code, "card": card, "gaps": gaps})
+    for g in gaps:
+        env.warn("card_gap", g)
+    if not rec.get("scans_url"):
+        env.warn("no_scans_link", "посилання на скани немає — у пулі не буде «Подивіться "
+                                  "саму книгу» (--scans-url, якщо скани десь відкриті)")
+    return env
+
+
 class PrintPackArgs(BaseModel):
     vydannia: str = Field(description="код видання")
     year: int = Field(default=0, description="лише цей рік; 0 — усі повні")
@@ -139,7 +184,13 @@ class PrintPackArgs(BaseModel):
     args=PrintPackArgs, mutates=True, agent=False, section=SECTION,
     next_hints=(("print.publish", "віддати пакети в Супрягу"),))
 def print_pack(a: PrintPackArgs) -> Envelope:
-    """Кожен ПОВНИЙ рік — один пакет `VYD/<код>/<рік>` з переліком номерів."""
+    """Кожен ПОВНИЙ рік — один пакет `VYD/<код>/<рік>` з переліком номерів.
+
+    Картка (`nysh print card`) їде в кожен рік: місто й жанр — на картку в пулі,
+    місця — у пошук, посилання на скани — «Подивіться саму книгу», а опис року
+    (чий орган, скільки номерів, перший і останній, підшивка) — нотаткою.
+    """
+    import json
     from pathlib import Path
 
     from nyshporka import ops as O
@@ -149,6 +200,12 @@ def print_pack(a: PrintPackArgs) -> Envelope:
     rec = PE.load_record(code)
     if not rec:
         return fail(f"видання {code} не записано — спершу `nysh cloud go --print`")
+    gaps = PE.card_gaps(rec)
+    if gaps:
+        # 🔴 Без картки рік у пулі — «Без назви», без міста, жанру й підшивки, і
+        # виправляти це потім — по запиту модерації на кожен рік окремо.
+        return fail(f"картка видання {code} неповна — спершу `nysh print card {code} …`:\n"
+                    + "\n".join(f"  · {g}" for g in gaps))
     years = [y for y in PE.assemble(code) if not a.year or y.year == a.year]
     if not years:
         return fail(f"у видання {code} немає року {a.year}" if a.year
@@ -162,11 +219,21 @@ def print_pack(a: PrintPackArgs) -> Envelope:
             env.warn("year_incomplete", f"{y.key}: прочитано {y.read} з {y.pages} — "
                                         f"не пакую (сторінки зсунулись би в номерах)")
             continue
+        rows_path = y.run_dir / "issues.json"
+        try:
+            rows = json.loads(rows_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            rows = []
         got = O.call("share.pack_print", {
             "src": str(y.run_dir), "vydannia": code, "year": y.year,
-            "title": rec.get("title") or code, "ocr_by": PE.OCR_BY, "ocr_layer": "ocr",
-            "page_unit": "page", "publisher_place": rec.get("city") or "",
-            "issues": str(y.run_dir / "issues.json"),
+            "title": rec["title"], "ocr_by": PE.OCR_BY, "ocr_layer": "ocr",
+            "page_unit": "page", "publisher_place": rec["city"],
+            "place": PE.places_for(rec, y.year), "doc_type": rec["doc_type"],
+            "scans_url": str(rec.get("scans_url") or ""),
+            "scans_label": str(rec.get("scans_label") or ""),
+            "source_terms": str(rec.get("source_terms") or ""),
+            "note": PE.year_note(rec, y.year, rows, y.pages),
+            "issues": str(rows_path),
             "out": str(Path(a.out) / f"vyd_{code.lower()}_{y.year}.nyshtext") if a.out else "",
             "dry_run": a.dry_run})
         if not got.ok:

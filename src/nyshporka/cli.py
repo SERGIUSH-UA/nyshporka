@@ -1694,6 +1694,59 @@ def print_status_cmd(
     _notes(env)
 
 
+@print_app.command("card")
+def print_card_cmd(
+    vydannia: str = typer.Argument(..., help="код видання (KOLSELO_PYR)"),
+    title: str = typer.Option(None, "--title", help="назва з шапки номера, без року"),
+    city: str = typer.Option(None, "--city", help="місто видання"),
+    doc_type: str = typer.Option(None, "--doc-type",
+                                 help="newspaper (газета) | gazette (єпарх. відомості) | "
+                                      "directory (довідник)"),
+    holder: str = typer.Option(None, "--holder", help="де лежить підшивка, з якої скани"),
+    place: list[str] = typer.Option(None, "--place",
+                                    help="місце для пошуку (повторюється): район, область"),
+    organ: list[str] = typer.Option(None, "--organ",
+                                    help="чий орган, з роками: «1932–1937: Орган …» "
+                                         "(повторюється)"),
+    frequency: str = typer.Option(None, "--frequency", help="як часто виходила"),
+    scans_url: str = typer.Option(None, "--scans-url", help="де відкриті скани підшивки"),
+    scans_label: str = typer.Option(None, "--scans-label", help="підпис посилання на скани"),
+    source_terms: str = typer.Option(None, "--source-terms", help="умови тримача сканів"),
+    note: str = typer.Option(None, "--note", help="ще речення до опису кожного року"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
+) -> None:
+    """Картка друкованого видання — те, що стоїть на картці кожного року в Супрязі.
+
+    Без параметрів показує картку й називає, чого бракує. `nysh print pack` без
+    назви, міста, жанру й тримача підшивки не пакує.
+    """
+    from rich.markup import escape
+
+    from nyshporka import ops as O
+
+    args: dict[str, Any] = {"vydannia": vydannia}
+    for k, v in (("title", title), ("city", city), ("doc_type", doc_type),
+                 ("holder", holder), ("frequency", frequency), ("scans_url", scans_url),
+                 ("scans_label", scans_label), ("source_terms", source_terms),
+                 ("note", note)):
+        if v is not None:
+            args[k] = v
+    if place:
+        args["places"] = list(place)
+    if organ:
+        args["organ"] = list(organ)
+    env = O.call("print.card", args)
+    if _answer(env, as_json):
+        return
+    console.print(f"[bold]{escape(env.data['code'])}[/bold]")
+    for k, v in env.data["card"].items():
+        shown = "; ".join(v) if isinstance(v, list) else v
+        console.print(f"  {k}: {escape(str(shown))}")
+    if not env.data["gaps"]:
+        console.print("✅ картка повна — `nysh print pack` її візьме")
+    _notes(env)
+
+
 @print_app.command("adopt")
 def print_adopt_cmd(
     vydannia: str = typer.Argument(..., help="код видання латинкою (KOLSELO_PYR)"),

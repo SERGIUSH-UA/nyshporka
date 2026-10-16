@@ -140,3 +140,94 @@ def test_print_adopt_op_points_to_assemble(ws: Any) -> None:
     env = O.call("print.adopt", {"vydannia": "KOLSELO_PYR", "title": "КС"})
     assert env.ok and env.data["issues"] == 1
     assert any("наскрізних" in str(w) for w in env.warnings)
+
+
+# ── картка видання → картка в пулі ───────────────────────────────────────────
+def _adopted_year(ws: Any) -> None:
+    from nyshporka import print_edition as PE
+    from nyshporka.cloud import printed as PR
+
+    root = PR.out_root()
+    _read_issue(root, "kolselo_pyr_1938-01-01_1", 2)
+    _read_issue(root, "kolselo_pyr_1938-01-03_2", 2)
+    _read_issue(root, "kolselo_pyr_1938-01-03_dod-2", 1)
+    PE.adopt("KOLSELO_PYR")
+
+
+def test_pack_refuses_a_bare_card_and_names_what_to_fill(ws: Any) -> None:
+    from nyshporka import ops as O
+
+    _adopted_year(ws)
+    env = O.call("print.pack", {"vydannia": "KOLSELO_PYR", "dry_run": True})
+    assert not env.ok
+    for field in ("title", "city", "doc_type", "holder"):
+        assert field in env.error
+    assert "nysh print card KOLSELO_PYR" in env.error
+
+
+def test_the_card_rides_into_every_year_where_the_pool_shows_it(ws: Any, monkeypatch) -> None:
+    from nyshporka import ops as O
+    from nyshporka.share import print_pack as PP
+
+    _adopted_year(ws)
+    env = O.call("print.card", {
+        "vydannia": "KOLSELO_PYR", "title": "Колективізоване село", "city": "Пирятин",
+        "doc_type": "newspaper", "holder": "НБУВ, відділ газетних фондів",
+        "places": ["Пирятинський район", "Полтавська область"],
+        "organ": ["1932–1937: Орган Пирятинського РПК та РВК Харківської області",
+                  "1938–1940: Орган Пирятинського РК КП(б)У та РВК Полтавської області"],
+        "scans_url": "https://example.org/kolselo"})
+    assert env.ok and env.data["gaps"] == []
+
+    seen: dict[str, Any] = {}
+
+    def fake(src, code, year, **kw):  # noqa: ANN001
+        seen.update(kw, year=year)
+        return {"manifest": {}, "gates": {"passed": True}, "path": "x", "dry_run": True}
+
+    monkeypatch.setattr(PP, "pack_print", fake)
+    env = O.call("print.pack", {"vydannia": "KOLSELO_PYR", "dry_run": True})
+    assert env.ok, env.error
+    assert seen["publisher_place"] == "Пирятин" and seen["doc_type"] == "newspaper"
+    assert seen["places"] == ["Пирятинський район", "Полтавська область"]
+    assert seen["links"][0] == {"role": "scans", "url": "https://example.org/kolselo",
+                                "label": "скани підшивки"}
+    note = seen["note"]
+    assert note.startswith("Орган Пирятинського РК КП(б)У та РВК Полтавської області.")
+    assert "Місце видання — Пирятин." in note
+    assert "За 1938 рік у пулі 2 номери і 1 додаток, 5 сторінок" in note
+    assert "перший — № 1 від 01.01.1938, останній — № 2 від 03.01.1938" in note
+    assert "Підшивка: НБУВ, відділ газетних фондів." in note
+
+
+def test_pack_print_puts_place_and_genre_where_the_pool_reads_them(tmp_path: Path) -> None:
+    from nyshporka.share.print_pack import pack_print
+
+    src = tmp_path / "y"
+    src.mkdir()
+    (src / "0001.txt").write_text("Колективізоване село\n", encoding="utf-8")
+    got = pack_print(src, "KOLSELO_PYR", 1938, title="Колективізоване село",
+                     ocr_by="PaddleOCR-VL", publisher_place="Пирятин",
+                     places=["Полтавська область"], doc_type="newspaper", dry_run=True)
+    case = got["manifest"]["case"]
+    assert case["place"] == "Пирятин" and case["doc_type"] == "newspaper"
+    assert case["places"] == ["Пирятин", "Полтавська область"]
+
+
+def test_an_unknown_genre_is_refused(ws: Any) -> None:
+    from nyshporka import print_edition as PE
+
+    _adopted_year(ws)
+    with pytest.raises(ValueError, match="жанр"):
+        PE.set_card("KOLSELO_PYR", doc_type="газетка")
+
+
+def test_places_follow_the_years_of_the_administrative_division() -> None:
+    from nyshporka import print_edition as PE
+
+    rec = {"places": ["Пирятинський район", "1932–1937: Харківська область",
+                      "1937–1940: Полтавська область"]}
+    assert PE.places_for(rec, 1936) == ["Пирятинський район", "Харківська область"]
+    assert PE.places_for(rec, 1937) == ["Пирятинський район", "Харківська область",
+                                        "Полтавська область"]
+    assert PE.places_for(rec, 1940) == ["Пирятинський район", "Полтавська область"]

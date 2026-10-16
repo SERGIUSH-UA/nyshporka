@@ -313,6 +313,7 @@ def test_pack_refuses_an_incomplete_year(ws: Any, edition: Path) -> None:
     i3 = edition / "1936" / "3 (770) 1936-01-06"
     PE.record("KOLSELO_PYR", title="Колективізоване село", city="",
               issues=[(i3.name, i3, _read(PR.out_root(), i3.name, i3, skip="0001.jpg"))])
+    PE.set_card("KOLSELO_PYR", city="Пирятин", doc_type="newspaper", holder="тестова підшивка")
 
     env = O.call("print.pack", {"vydannia": "KOLSELO_PYR", "year": 1936, "dry_run": True})
 
