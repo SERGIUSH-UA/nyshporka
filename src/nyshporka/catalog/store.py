@@ -19,6 +19,7 @@
 """
 from __future__ import annotations
 
+import contextlib
 import os
 import sqlite3
 from dataclasses import dataclass
@@ -190,10 +191,9 @@ def origin() -> str:
 
 
 def set_origin(name: str) -> None:
-    try:
+    # Позначка — зручність: без неї наступне оновлення просто поставить пак знову.
+    with contextlib.suppress(OSError):
         (catalog_dir() / ORIGIN).write_text(name.strip() + "\n", encoding="utf-8")
-    except OSError:
-        pass  # позначка — зручність: без неї наступне оновлення просто поставить пак знову
 
 
 def invalidate() -> None:
