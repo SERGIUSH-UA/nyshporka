@@ -692,8 +692,19 @@ def extract_frames_for(seg: Segment, *, hash_frames: bool = False) -> list[dict[
     a, b = _as_int(e.get("frame_from")), _as_int(e.get("frame_to"))
     if not (film and a and b) or piece.part.frames_dir is None:
         return rows
-    order = {p.name: i for i, p in enumerate(align.frames_sorted(piece.part.frames_dir))}
     pref = piece.part.slug + SEP
+    if not rows and piece.stems is None:
+        # Вирізку читали з PDF: зображень у теці немає, а сторінки PDF і є
+        # кадри вирізки, у порядку читання (`htr.pdfpage`). Рядки — лише коли
+        # сторінок рівно стільки, скільки кадрів оголошено: інакше номер кадру
+        # плівки ліг би не на ту сторінку.
+        names = sorted({str(k) for run in piece.part.runs
+                        for k in (_meta(run).get("pages") or {})})
+        if len(names) == b - a + 1:
+            return [{"n": i, "name": pref + name, "film": film, "film_frame": a + i - 1}
+                    for i, name in enumerate(names, 1)]
+        return rows
+    order = {p.name: i for i, p in enumerate(align.frames_sorted(piece.part.frames_dir))}
     for row in rows:
         i = order.get(str(row.get("name") or "").removeprefix(pref))
         if i is not None and a + i <= b:

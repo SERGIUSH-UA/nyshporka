@@ -1346,6 +1346,12 @@ def pack_segments(scope: str, dest_dir: Path | None = None, *,
                     fp = fingerprint.fingerprint(part.frames_dir)
                     if fingerprint.checked(fp):
                         m.frames["fingerprint"] = fp
+                declared = int(ext.get("frames") or 0)
+                if declared and not int(m.frames.get("total") or 0) and seg.pieces[0].stems is None:
+                    # Зображень на диску немає (читали з PDF), а скільки кадрів у
+                    # вирізці, людина назвала діапазоном на плівці.
+                    m.frames = {**m.frames, "total": declared,
+                                "on_disk": int(m.frames.get("listed") or 0)}
             verdict = gates.check(m, partial_why=partial_why)
             if not verdict.passed:
                 raise PublishError(f"сегмент {seg.n}/{seg.of} «{seg.label}»: ворота "

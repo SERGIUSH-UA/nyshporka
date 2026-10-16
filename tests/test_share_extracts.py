@@ -395,3 +395,17 @@ def test_bez_kadriv_text_only(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setattr(align, "film_dirs", lambda film: [])
     taken = accept.accept(got["segments"][0]["path"])
     assert taken["alignment"]["label"] == "text-only"
+
+
+def test_vyrizka_z_pdf_bez_zobrazhen(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Читали з PDF: у теці лише паспорт, кадрів-зображень немає."""
+    root = _prostir(tmp_path)
+    runs = _selo(root, 1, *SELA[0])
+    d = root / "data" / "raw" / "anrm_134" / "257-Lipceni"
+    for f in d.glob("*.jpg"):
+        f.unlink()
+    got = _pakuvaty(monkeypatch, runs, tmp_path / "out")
+    m = bundle.read_manifest(Path(got["segments"][0]["path"]))
+    assert m.frames_total == 5, "знаменник вирізки — оголошений діапазон"
+    rows = bundle.read_frames(Path(got["segments"][0]["path"]))
+    assert [r["film_frame"] for r in rows] == [670, 671, 672, 673, 674]
