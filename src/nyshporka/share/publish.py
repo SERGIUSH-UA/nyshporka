@@ -901,6 +901,27 @@ def _zbirna_teka(key: str, run_dirs: list[Path]) -> str:
     return f"збірна тека: {got.why}. {SP.fix(str(case_dir or names[0]))}"
 
 
+def _rozkladena(run_dirs: list[Path]) -> str:
+    """Чому справу не можна спакувати одним пакетом; порожньо — можна.
+
+    🔴 Обернений до «збірної» випадок: ОДНА справа лежить у кількох теках кадрів
+    (завантажувач клав кожне село зведеної книги окремою текою), і реєстр бачить
+    їх під одним ключем. Звичайний пакет такого не вміє: кадри брались з однієї
+    теки, текст — з усіх, і 16.10.2026 у маніфест ішло «кадрів 0, рамок 7 з 15»
+    без жодної відмови. Частини картотеки — інший випадок, для них `--segments`.
+    """
+    from nyshporka import htr_store as S
+
+    teky = sorted({S.frames_dir_key(_meta_of(d).get("case_dir")) for d in run_dirs} - {""})
+    if len(teky) < 2:
+        return ""
+    names = ", ".join(Path(t).name for t in teky[:4]) + (" …" if len(teky) > 4 else "")
+    return (f"справу розкладено на {len(teky)} тек кадрів ({names}), а пакет бере "
+            f"кадри з однієї — у пул поїхав би текст без своїх кадрів. Зведіть кадри й "
+            f"прогони в одну теку справи (або, якщо це частини картотеки, пакуйте "
+            f"`--segments`)")
+
+
 def _ponad_steliu(files: int, *, nbytes: int = 0) -> str:
     """Чому пакет не прийме пул; порожньо — прийме."""
     if files + SG._TOP_FILES > SG.POOL_MAX_MEMBERS:
@@ -983,6 +1004,9 @@ def pack(scope: str, dest: Path | None = None, *, geometry: bool = True,
     zbirna = _zbirna_teka(details.get("key") or "", run_dirs)
     if zbirna:
         out.setdefault("pack_refusals", []).append(zbirna)
+    rozkladena = _rozkladena(run_dirs)
+    if rozkladena:
+        out.setdefault("pack_refusals", []).append(rozkladena)
     # 🔴 Стеля пулу — до запису, а не після заливки: пакет понад неї пул
     # відкидав уже тоді, коли байти доїхали.
     zavelykyi = _ponad_steliu(len(sketch["files"]))
@@ -1001,6 +1025,8 @@ def pack(scope: str, dest: Path | None = None, *, geometry: bool = True,
         raise PublishError(bez_znamennyka)
     if zbirna:
         raise PublishError(zbirna)
+    if rozkladena:
+        raise PublishError(rozkladena)
     if zavelykyi:
         raise PublishError(zavelykyi)
 

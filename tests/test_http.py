@@ -280,3 +280,61 @@ def test_get_na_429_chekaie_retry_after(naps: list[float]) -> None:
     client = _Client([_R(429), _Resp(200, text="ок")])
     assert f.get("/шлях", client=client).text == "ок"
     assert naps == [20 + H.RETRY_AFTER_PAD_S]
+
+
+class _Trickle:
+    """Відповідь, що віддає тіло по краплі: кожна порція «йде» 30 с годинника."""
+
+    def __init__(self, clock: list[float], n: int = 10) -> None:
+        self.status_code = 200
+        import httpx
+
+        self.headers = _Headers()
+        self.request = httpx.Request("GET", "https://приклад/0001.jpg")
+        self._clock = clock
+        self._n = n
+
+    def iter_bytes(self, chunk: int = 0) -> Any:
+        for _ in range(self._n):
+            self._clock[0] += 30.0
+            yield b"x" * 10
+
+
+class _Headers(dict):
+    def multi_items(self) -> list[tuple[str, str]]:
+        return list(self.items())
+
+
+class _TrickleClient:
+    def __init__(self, clock: list[float], n: int = 10) -> None:
+        self.clock, self.n, self.calls = clock, n, 0
+
+    @contextmanager
+    def stream(self, method: str, url: str) -> Any:
+        self.calls += 1
+        yield _Trickle(self.clock, self.n)
+
+
+def test_a_trickling_server_cannot_hold_one_request_forever(monkeypatch) -> None:
+    """🔴 Таймаут httpx міряє паузу між порціями, а не весь запит: кадр, що йшов
+    по краплі, тримав `nysh get fsfilm` 35 хв (15.10.2026). Зі стелею часу запит
+    обривається, повторюється, і після останньої спроби виходить `HttpError`."""
+    clock = [0.0]
+    monkeypatch.setattr(H.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(H.time, "sleep", lambda s: None)
+    f = H.Fetcher(delay=0.0, attempts=2)
+    client = _TrickleClient(clock)
+    with pytest.raises(H.HttpError):
+        f.get("https://приклад/0001.jpg", client=client, deadline_s=120.0)
+    assert client.calls == 2, "обірваний запит не повторено рівно attempts разів"
+    assert clock[0] <= 2 * 150.0, "спроба тривала довше за стелю часу"
+
+
+def test_without_a_deadline_a_slow_body_is_still_read_whole(monkeypatch) -> None:
+    """Стеля часу — лише там, де її просять: повільне, але живе джерело без неї
+    дочитується до кінця."""
+    clock = [0.0]
+    monkeypatch.setattr(H.time, "monotonic", lambda: clock[0])
+    f = H.Fetcher(delay=0.0)
+    r = f.get("https://приклад/0001.jpg", client=_TrickleClient(clock), max_bytes=1000)
+    assert r.content == b"x" * 100

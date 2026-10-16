@@ -84,6 +84,11 @@ MEDIA_PREFIX = "/media/mihailo"
 SOURCES_TTL = 24 * 3600
 #: тайм-аут єдиної спроби оновити СТАРИЙ перелік регіонів — див. `sources`
 STALE_REFRESH_S = 15.0
+#: Стеля одного кадру: розворот 4000×3000 у JPEG — 1–4 МБ; більше — не кадр.
+MAX_FRAME_BYTES = 64 * 1024 * 1024
+#: Стеля часу на одну спробу кадру. Типово кадр іде 1–10 с; сервер, що віддає
+#: його по краплі довше, тримав процес десятки хвилин (15.10.2026).
+FRAME_DEADLINE_S = 120.0
 
 #: «Л. 132-223», «Л. 457-…», «Л. 137».
 RANGE_RE = re.compile(r"Л\.\s*(\d+)\s*(?:[-–]\s*(\d+|…|\.\.\.)?)?")
@@ -608,8 +613,9 @@ class FilmMirrorSource:
                     res.skipped += 1
                 else:
                     try:
-                        blob = self.http.get(self.frame_url(slug, path, name),
-                                             client=c).content
+                        blob = self.http.get(self.frame_url(slug, path, name), client=c,
+                                             max_bytes=MAX_FRAME_BYTES,
+                                             deadline_s=FRAME_DEADLINE_S).content
                         # 🔴 Через `.part`: обрив посеред запису лишав кадр
                         # ненульового розміру, і перевірка «вже є» вище
                         # рахувала його завантаженим назавжди — недокачаний

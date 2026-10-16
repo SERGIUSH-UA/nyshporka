@@ -226,3 +226,32 @@ def test_pack_vidmovliaie_zbirnii_tetsi(space: Path) -> None:
     e = _teka(space, "spr-1000")
     R.describe(e, shifra="RGIA 592-25-1000")
     assert PUB._zbirna_teka("RGIA/592/1000", [_prohin(space, "r1000", e, "RGIA/592/1000")]) == ""
+
+
+def test_pack_vidmovliaie_spravi_rozkladenii_po_tekakh(space: Path) -> None:
+    """🔴 Одна справа в двох теках кадрів (кожне село зведеної книги — своєю текою):
+    16.10.2026 такий пакет ішов у пул як «кадрів 0, рамок 7 з 15» без відмови."""
+    from nyshporka.share import publish as PUB
+
+    a = _teka(space, "1000001_0001-0006")
+    R.describe(a, shifra="RGIA 592-25-2")
+    b = _teka(space, "1000001_0020-0026")
+    R.describe(b, shifra="RGIA 592-25-2")
+    ra = _prohin(space, "1000001_0001-0006", a, "RGIA/592/2")
+    rb = _prohin(space, "1000001_0020-0026", b, "RGIA/592/2")
+
+    why = PUB._rozkladena([ra, rb])
+    assert "розкладено на 2 теки" in why or "розкладено на 2 тек" in why
+    out = PUB.pack("RGIA/592/2", dry_run=True)
+    assert any("розкладено" in x for x in out.get("pack_refusals") or [])
+
+
+def test_holosy_odniiei_teky_ne_rozkladena_sprava(space: Path) -> None:
+    """Писар і Дяк читали ТІ САМІ кадри — це голоси однієї теки, а не розкладена справа."""
+    from nyshporka.share import publish as PUB
+
+    a = _teka(space, "spr-2000")
+    R.describe(a, shifra="RGIA 592-25-2000")
+    r1 = _prohin(space, "spr-2000", a, "RGIA/592/2000")
+    r2 = _prohin(space, "spr-2000-diak_v7", a, "RGIA/592/2000")
+    assert PUB._rozkladena([r1, r2]) == ""

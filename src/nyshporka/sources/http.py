@@ -241,31 +241,42 @@ class TooLarge(HttpError):
     """Відповідь більша за дозволену стелю — качання обірвано."""
 
 
-def _capped_get(c: Any, url: str, max_bytes: int) -> Any:
-    """GET, що читає тіло потоком і не бере більше `max_bytes`.
+def _capped_get(c: Any, url: str, max_bytes: int, deadline_s: float = 0.0) -> Any:
+    """GET, що читає тіло потоком і не бере більше `max_bytes` (0 — без стелі).
 
     Повертає звичайну відповідь httpx із уже прочитаним тілом, тож далі з нею
     працюють як завжди (`.content`, `.text`, `.json()`). Двійник без `stream`
     (тести) віддає тіло цілком — тоді стеля звіряється вже по ньому.
+
+    `deadline_s` — стеля часу на ВЕСЬ запит. 🔴 Таймаут httpx міряє паузу між
+    порціями байтів, а не запит цілком: сервер, що віддає кадр по краплі,
+    тримав одне з'єднання як завгодно довго, і кожна з шести спроб висіла так
+    само (`nysh get fsfilm` простояв 35 хв на одному кадрі, 15.10.2026).
+    Перевищення — `httpx.ReadTimeout`, тобто звичайний транспортний збій:
+    `_send` повторить запит, і кожна спроба обмежена тим самим часом.
     """
     import httpx
 
     if not hasattr(c, "stream"):
         r = c.get(url)
-        if len(getattr(r, "content", b"") or b"") > max_bytes:
+        if max_bytes and len(getattr(r, "content", b"") or b"") > max_bytes:
             raise TooLarge(f"{url}: більше {max_bytes} байт — відповідь відкинуто")
         return r
+    t0 = time.monotonic()
     with c.stream("GET", url) as r:
         declared = str(r.headers.get("content-length") or "")
-        if declared.isdigit() and int(declared) > max_bytes:
+        if max_bytes and declared.isdigit() and int(declared) > max_bytes:
             raise TooLarge(f"{url}: сервер заявляє {declared} байт — більше "
                            f"стелі {max_bytes}")
         got = 0
         chunks: list[bytes] = []
         for block in r.iter_bytes():
             got += len(block)
-            if got > max_bytes:
+            if max_bytes and got > max_bytes:
                 raise TooLarge(f"{url}: більше {max_bytes} байт — качання обірвано")
+            if deadline_s and time.monotonic() - t0 > deadline_s:
+                raise httpx.ReadTimeout(f"{url}: за {deadline_s:.0f} с взято лише {got} байт "
+                                        f"— сервер віддає по краплі, запит обірвано")
             chunks.append(block)
         # Тіло вже розпаковане (`iter_bytes` знімає gzip транспорту), тож
         # заголовки кодування й довжини в нову відповідь не переносяться:
@@ -329,7 +340,8 @@ class Fetcher:
         finally:
             c.close()
 
-    def get(self, url: str, client: Any = None, *, max_bytes: int = 0) -> Any:
+    def get(self, url: str, client: Any = None, *, max_bytes: int = 0,
+            deadline_s: float = 0.0) -> Any:
         """GET із відступом. `url` може бути відносним, якщо задано `base`.
 
         Тип відповіді навмисно `Any`, а не `httpx.Response`: клієнтом буває
@@ -341,12 +353,15 @@ class Fetcher:
         (дзеркало плівок), могла вести на гігабайти (аудит 29.09.2026). Зі
         стелею тіло читається потоком і обривається `TooLarge`, щойно її
         перейдено, — ще до того, як зайвий байт ліг у пам'ять.
+
+        `deadline_s` — стеля часу на одну спробу цілком (див. `_capped_get`):
+        таймаут клієнта міряє лише паузи між порціями байтів.
         """
         full = url if url.startswith("http") else f"{self.base}{url}"
         if client is not None:
-            return self._get_with(client, full, max_bytes)
+            return self._get_with(client, full, max_bytes, deadline_s)
         with self.client() as c:
-            return self._get_with(c, full, max_bytes)
+            return self._get_with(c, full, max_bytes, deadline_s)
 
     def post(self, url: str, *, data: dict[str, Any] | None = None,
              json_body: Any = None, client: Any = None) -> Any:
@@ -500,10 +515,10 @@ class Fetcher:
                         on_chunk(got)
         return got
 
-    def _get_with(self, c: Any, url: str, max_bytes: int = 0) -> Any:
-        if not max_bytes:
+    def _get_with(self, c: Any, url: str, max_bytes: int = 0, deadline_s: float = 0.0) -> Any:
+        if not max_bytes and not deadline_s:
             return self._send(url, lambda: c.get(url))
-        return self._send(url, lambda: _capped_get(c, url, max_bytes))
+        return self._send(url, lambda: _capped_get(c, url, max_bytes, deadline_s))
 
     def _send(self, url: str, call: Callable[[], Any]) -> Any:
         """Спроби, відступ і ввічливість — в одному місці на GET і POST."""
