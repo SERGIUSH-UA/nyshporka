@@ -33,6 +33,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
+
 def _skip_top() -> tuple[str, ...]:
     """Що в корені простору не копіюється: venv рушіїв (збирається наново) і замок.
 
@@ -295,7 +296,10 @@ def _retarget_shortcuts(nysh: Path, workdir: Path, echo: Callable[[str], None]) 
     """Ярлики «Нишпорка» на робочому столі й у «Пуску» — на нову команду."""
     if sys.platform != "win32":
         return
-    q = lambda x: str(x).replace("'", "''")  # noqa: E731 — лапки PowerShell
+    def q(x: object) -> str:
+        """Одинарні лапки PowerShell: апостроф подвоюється."""
+        return str(x).replace("'", "''")
+
     script = (
         "$sh = New-Object -ComObject WScript.Shell;"
         "$dirs = @([Environment]::GetFolderPath('Desktop'),"
@@ -482,7 +486,7 @@ def _rmtree(path: Path) -> None:
     """`rmtree`, що знімає й файли «лише для читання» (git, venv на Windows)."""
     import stat
 
-    def again(func, target, _exc):  # noqa: ANN001
+    def again(func: Callable[[str], object], target: str, _exc: object) -> None:
         os.chmod(target, stat.S_IWRITE)
         func(target)
 

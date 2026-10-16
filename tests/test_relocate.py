@@ -175,4 +175,4 @@ def test_finish_needs_the_record_of_the_move(tmp_path: Path) -> None:
 
     with pytest.raises(R.RelocateError, match="НОВОЮ програмою"):
         R.leftovers(tmp_path)
-    assert json  # noqa: B018 — імпорт для читача: запис — JSON
+    assert json
