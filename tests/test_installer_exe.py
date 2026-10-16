@@ -370,8 +370,11 @@ def test_iss_defaults_to_the_full_set_and_one_folder() -> None:
     свідомий вибір; і все лягає в одну обрану теку, а не в профіль на C:."""
     text = iss_text()
     assert "PresetPage.SelectedValueIndex := PRESET_RESEARCHER" in text
-    assert "{param:preset|researcher}" in text
     assert "Result := 'researcher';" in text
+    # 🔴 оновлення не перепитує набір: береться з попередньої установки,
+    # інакше типове «Усе» перевело б легкий набір на гігабайти рушіїв
+    assert "PrevPreset := Lowercase(GetIniString('nyshporka', 'preset'" in text
+    assert "((PageID = PresetPage.ID) and (PrevPreset <> ''))" in text
     # обрана тека доходить до скрипта, а простір — це вона ж
     assert "WorkspaceFlag()" in text and "' -Workspace \"'" in text
     assert "AddBackslash(SpaceDir) + '.program'" in text

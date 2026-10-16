@@ -351,6 +351,11 @@ var
   // Тека, де житиме все (простір дослідження). Порожньо — оновлення поверх
   // старої установки: простір уже є, і `windows.ps1` знайде його сам.
   SpaceDir: String;
+  // Набір попередньої установки. При оновленні НЕ перепитуємо: сторінка з
+  // типовим «Усе» перевела б людину з легким набором на 2.5–4 ГБ рушіїв, а з
+  // `lab` (у майстрі лише два пункти) — мовчки зняла б тренування. Змінити
+  // набір — `nysh sections`.
+  PrevPreset: String;
   ResolvedNysh: String;
 
 const
@@ -501,6 +506,10 @@ begin
     // Програма, перенесена `nysh relocate`, лишає в старому сліді
     // `relocated_to` — тоді ставимо туди, а не в стару теку.
     Prev := AddBackslash(WizardForm.PrevAppDir) + 'install-info.ini';
+    PrevPreset := Lowercase(GetIniString('nyshporka', 'preset', '', Prev));
+    if (PrevPreset <> 'catalog') and (PrevPreset <> 'amateur')
+       and (PrevPreset <> 'researcher') and (PrevPreset <> 'lab') then
+      PrevPreset := '';
     Moved := GetIniString('nyshporka', 'relocated_to', '', Prev);
     if Moved <> '' then
       Prev := AddBackslash(Moved) + 'install-info.ini';
@@ -521,7 +530,8 @@ end;
 
 function ShouldSkipPage(PageID: Integer): Boolean;
 begin
-  Result := (PageID = SpacePage.ID) and IsUpgrade();
+  Result := ((PageID = SpacePage.ID) and IsUpgrade()) or
+            ((PageID = PresetPage.ID) and (PrevPreset <> ''));
 end;
 
 function NextButtonClick(CurPageID: Integer): Boolean;
@@ -567,11 +577,14 @@ var
   Quiet: String;
 begin
   Result := 'researcher';
+  if PrevPreset <> '' then
+    Result := PrevPreset;
   if WizardSilent then
   begin
     // Тихий режим (агенти, димовий прогін у CI) сторінок не показує, тож набір
     // приходить параметром: `nyshporka-setup.exe /VERYSILENT /PRESET=catalog`.
-    Quiet := Lowercase(ExpandConstant('{param:preset|researcher}'));
+    // Без параметра — набір попередньої установки, а на свіжій — повний.
+    Quiet := Lowercase(ExpandConstant('{param:preset|' + Result + '}'));
     // 🔴 Звіряємо ТУТ. Невідоме ім'я інакше доїхало б до `nysh init` і впало на
     // останньому кроці — коли інтерпретатор і пакети вже завантажено, тобто
     // через хвилини чекання й уже без права на другу спробу задарма.
@@ -580,7 +593,7 @@ begin
       RaiseException(FmtMessage(CustomMessage('UnknownPreset'), [Quiet]));
     Result := Quiet;
   end
-  else if PresetPage.SelectedValueIndex = PRESET_CATALOG then
+  else if (PrevPreset = '') and (PresetPage.SelectedValueIndex = PRESET_CATALOG) then
     Result := 'catalog';
 end;
 
