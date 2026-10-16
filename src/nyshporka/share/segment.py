@@ -86,6 +86,9 @@ class Part:
     pages: dict[str, list[str]] = field(default_factory=dict)
     #: {прогін: модель}
     models: dict[str, str] = field(default_factory=dict)
+    #: Вирізка з плівки (`part_passport`): село, плівка, кадри на ній, аркуші.
+    #: `None` — частина не каже, де вона на плівці (алфавітна підтека).
+    extract: dict[str, Any] | None = None
 
     @property
     def slug(self) -> str:
@@ -162,12 +165,24 @@ class Segment:
 
     @property
     def key(self) -> str:
-        """Стабільний ключ: перший шматок. Не номер — номери зсуваються."""
+        """Стабільний ключ: перший шматок. Не номер — номери зсуваються.
+
+        Вирізка з плівки — за місцем на плівці (`extract_key`): воно не
+        залежить ні від назви теки, ні від сусідніх сіл.
+        """
         first = self.pieces[0]
-        return first.part.slug + (f"~{first.n}" if first.n else "")
+        head = extract_key(first.part.extract) or first.part.slug
+        return head + (f"~{first.n}" if first.n else "")
 
     @property
     def label(self) -> str:
+        first = self.pieces[0]
+        ext = first.part.extract or {}
+        if len(self.pieces) == 1 and ext.get("village"):
+            # Вирізка — за селом і аркушами, а не за іменем теки: так її
+            # шукатимуть у картці книги й у `share pull --segment`.
+            base = str(ext["village"]) + (f", арк. {ext['folios']}" if ext.get("folios") else "")
+            return f"{base} ({first.n}/{first.of})" if first.n else base
         return _join(self.pieces[0].label, self.pieces[-1].label)
 
     @property
@@ -316,12 +331,20 @@ def _link_or_copy(src: Path, dst: Path) -> None:
         shutil.copyfile(src, dst)
 
 
-def stage(seg: Segment, root: Path) -> list[Path]:
+#: Розширення файла рамок рядків сторінки (`bundle.PACKED_GEOMETRY`).
+GEOM_EXT = bundle.PACKED_GEOMETRY.removeprefix("*")
+
+
+def stage(seg: Segment, root: Path, *, geometry: bool = False) -> list[Path]:
     """Теки прогонів сегмента: одна на модель, сторінки з префіксом частини.
 
     Жорсткі посилання, де диск їх дає, — копіювати пів мільйона дрібних
     файлів заради пакування нема чого. Стара тека стейджу зноситься: вона
     відтворюється з прогонів цілком.
+
+    `geometry` — покласти поруч і рамки рядків (сегмент-вирізка): їх
+    прив'язка — ім'я кадру, а воно в сегменті з префіксом частини, тож
+    одержувач знімає префікс сам (`accept`).
     """
     root = Path(root)
     if root.exists():
@@ -352,6 +375,13 @@ def stage(seg: Segment, root: Path) -> list[Path]:
                     continue        # той самий аркуш двома прогонами моделі
                 _link_or_copy(run / name, dst)
                 stems.add(Path(name).stem)
+                if geometry:
+                    # Рамки рядків — під тим самим префіксом, що й текст: у
+                    # текстовий пакет вони не йдуть (`bundle.PACKED`), тож хеш
+                    # змісту від них не змінюється.
+                    geo = run / (Path(name).stem + GEOM_EXT)
+                    if geo.is_file():
+                        _link_or_copy(geo, d / f"{part.slug}{SEP}{geo.name}")
             m = metas[model]
             for img, row in src_pages.items():
                 if Path(str(img)).stem in stems:
@@ -391,11 +421,381 @@ def frames_on_disk(parts: list[Part]) -> int:
                if p.frames_dir is not None)
 
 
-def segment_block(seg: Segment, set_key: str) -> dict[str, Any]:
-    """Поле `case.segment` маніфесту."""
-    return {"set": set_key, "key": seg.key, "label": seg.label,
-            "n": seg.n, "of": seg.of,
-            "dirs": [p.label for p in seg.pieces]}
+def segment_block(seg: Segment, set_key: str, *,
+                  case_range: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    """Поле `case.segment` маніфесту.
+
+    Сегмент-вирізка несе ще `mode`, `extract` (де село на плівці) і
+    `case_range` (де на плівках вся справа) — з них пул складає перелік сіл і
+    покриття справи, а одержувач шукає свої кадри.
+    """
+    out: dict[str, Any] = {"set": set_key, "key": seg.key, "label": seg.label,
+                           "n": seg.n, "of": seg.of,
+                           "dirs": [p.label for p in seg.pieces]}
+    ext = seg.pieces[0].part.extract if len({id(p.part) for p in seg.pieces}) == 1 else None
+    if ext is not None:
+        out["mode"] = MODE_EXTRACT
+        out["extract"] = public_extract(ext)
+        out["case_range"] = case_range or None
+    return out
+
+
+# ── вирізки з плівки ────────────────────────────────────────────────────────
+#
+# 🔴 Плівка — не справа. На одній плівці FamilySearch лежить кілька справ, а
+# Супряга впорядкована за справами; одна справа буває й на двох плівках. Тому
+# село, вирізане з плівки окремим PDF, має ДВІ адреси: справу (шифра паспорта)
+# і місце на плівці (плівка + кадри від–до). Кадри рахуються так, як їх
+# нумерує переглядач FamilySearch, а не з 1 у теці вирізки.
+
+#: Схема пакета вирізки: сегмент із місцем на плівці й рамками рядків.
+#: Старий клієнт (схема 3) такий пакет відкидає явно — інакше поклав би рамки
+#: з префіксом частини на свої кадри навмання.
+SCHEMA_EXTRACT = 4
+
+MODE_ALPHA = "alpha"
+MODE_EXTRACT = "extract"
+
+#: Звідки поле вирізки: паспорт теки, команда людини, покажчик катаграфій.
+SRC_PASSPORT = "passport"
+SRC_USER = "cli"
+SRC_INDEX = "index"
+EXTRACT_SRC = (SRC_PASSPORT, SRC_USER, SRC_INDEX)
+
+#: Поле паспорта теки, куди `nysh share part` пише вирізку.
+PASSPORT_FIELD = "extract"
+
+#: Як покажчик катаграфій установив межі справи (`dossiers.csv` → `confidence`).
+#: Лише за цими межі справи на плівці вважаються встановленими; решта —
+#: оцінка, і вихід вирізки за неї — попередження, а не відмова.
+CERTAIN = frozenset({"exacte", "certain", "sur", "sûr"})
+
+_RANGE_RE = re.compile(r"^\s*(\d+)\s*[-–—]\s*(\d+)\s*$")
+
+
+def parse_range(raw: Any) -> tuple[int, int] | None:
+    """«670-709» → (670, 709); одне число — (n, n); нерозбірне — `None`."""
+    s = str(raw if raw is not None else "").strip()
+    m = _RANGE_RE.match(s)
+    if m:
+        a, b = int(m.group(1)), int(m.group(2))
+        return (a, b) if 0 < a <= b else None
+    if s.isdigit() and int(s) > 0:
+        return int(s), int(s)
+    return None
+
+
+def _as_int(v: Any) -> int:
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return 0
+
+
+def part_passport(frames_dir: Path | None) -> dict[str, Any] | None:
+    """Де ця тека на плівці — з її ВЛАСНОГО паспорта; не сказано — `None`.
+
+    Читає блок `extract`, який пише `nysh share part`, а без нього — пласкі
+    поля завантажувача: `fs_film`/`film`, `dgs`, `frames_range` (`nysh get
+    --frames`), `folios`, `village`. 🔴 Нічого не добудовує: число, якого
+    паспорт не має, лишається порожнім, а підказку покажчика пакувальник
+    лише показує (`index_hint`), у маніфест вона не йде.
+    """
+    if frames_dir is None:
+        return None
+    from nyshporka.cases.register import read_sidecar
+
+    side: dict[str, Any] = {}
+    for d in align._passport_dirs(Path(frames_dir)):
+        try:
+            got = read_sidecar(d)
+        except Exception:
+            got = {}
+        if got:
+            side = got
+            break
+    if not side:
+        return None
+    block = side.get(PASSPORT_FIELD)
+    block = dict(block) if isinstance(block, dict) else {}
+    src = dict(block.get("src") or {}) if isinstance(block.get("src"), dict) else {}
+    out: dict[str, Any] = {}
+
+    def put(name: str, value: Any, origin: str) -> None:
+        if value in (None, "", 0) or name in out:
+            return
+        out[name] = value
+        src.setdefault(name, origin)
+
+    for name in ("village", "fs_film", "dgs", "folios"):
+        put(name, str(block.get(name) or "").strip(), SRC_USER)
+    if block.get("frame_from") and block.get("frame_to"):
+        put("frame_from", _as_int(block.get("frame_from")), SRC_USER)
+        put("frame_to", _as_int(block.get("frame_to")), SRC_USER)
+    if block.get("crosses"):
+        out["crosses"] = str(block["crosses"])[:300]
+    put("fs_film", str(side.get("fs_film") or side.get("film") or "").strip(), SRC_PASSPORT)
+    put("dgs", str(side.get("dgs") or "").strip(), SRC_PASSPORT)
+    put("folios", str(side.get("folios") or "").strip(), SRC_PASSPORT)
+    put("village", str(side.get("village") or "").strip(), SRC_PASSPORT)
+    if "frame_from" not in out:
+        rng = parse_range(side.get("frames_range"))
+        if rng:
+            put("frame_from", rng[0], SRC_PASSPORT)
+            put("frame_to", rng[1], SRC_PASSPORT)
+    if not any(k in out for k in ("fs_film", "dgs", "frame_from", "folios")):
+        return None             # паспорт нічого не каже про місце на плівці
+    if out.get("frame_from") and out.get("frame_to"):
+        out["frames"] = int(out["frame_to"]) - int(out["frame_from"]) + 1
+    out["src"] = {k: v for k, v in src.items() if k in out and v in EXTRACT_SRC}
+    return out
+
+
+def public_extract(ext: dict[str, Any]) -> dict[str, Any]:
+    """Поля вирізки, що їдуть у маніфест — білим списком."""
+    keep = ("village", "fs_film", "dgs", "frame_from", "frame_to", "frames",
+            "folios", "crosses", "src")
+    return {k: ext[k] for k in keep if ext.get(k) not in (None, "", {})}
+
+
+def extract_key(ext: dict[str, Any] | None) -> str:
+    """Ключ сегмента-вирізки: плівка й кадри на ній; порожньо — немає місця."""
+    if not ext:
+        return ""
+    film = bundle.safe_name(str(ext.get("fs_film") or ext.get("dgs") or ""), default="")
+    a, b = _as_int(ext.get("frame_from")), _as_int(ext.get("frame_to"))
+    if not (film and a and b):
+        return ""
+    return f"x-{film}-{a:05d}-{b:05d}"
+
+
+def with_extracts(parts: list[Part]) -> list[Part]:
+    """Заповнити `Part.extract` з паспортів тек; повертає ті самі частини."""
+    for p in parts:
+        if p.extract is None:
+            p.extract = part_passport(p.frames_dir)
+    return parts
+
+
+def is_extract_case(parts: list[Part]) -> bool:
+    """Справа вирізками: кожна частина має свою теку кадрів і паспорт із місцем."""
+    return bool(parts) and all(p.frames_dir is not None and p.extract for p in parts)
+
+
+def _extract_order(p: Part) -> tuple[Any, ...]:
+    e = p.extract or {}
+    film = str(e.get("fs_film") or e.get("dgs") or "")
+    a = _as_int(e.get("frame_from"))
+    # Частина без кадрів на плівці — у кінець, за назвою.
+    return (0 if a else 1, film, a, p.label)
+
+
+def plan_extracts(parts: list[Part], *, max_files: int = SEG_MAX_FILES,
+                  max_raw: int = SEG_MAX_RAW) -> list[Segment]:
+    """Одна частина — один сегмент; порядок — за плівкою й кадром на ній.
+
+    🔴 Не жадібне зведення, як у `plan`: ключ сегмента мусить залежати лише
+    від свого села, інакше додане через тиждень село переписувало б сусідні
+    сегменти, і пул бачив би їх новими. `n`/`of` — лише порядок цього
+    пакування, а не обіцянка повноти: села дочитуються роками.
+    """
+    segs: list[Segment] = []
+    for part in sorted(parts, key=_extract_order):
+        for piece in _pieces(part, max_files, max_raw):
+            segs.append(Segment([piece]))
+    for i, s in enumerate(segs, 1):
+        s.n, s.of = i, len(segs)
+    return segs
+
+
+def set_id_extracts(shifra: str) -> str:
+    """Набір справи вирізками: один на справу, хоч би скільки сіл додалось потім."""
+    body = "\n".join([shifra, MODE_EXTRACT])
+    return hashlib.sha256(body.encode("utf-8")).hexdigest()[:16]
+
+
+def check_extracts(parts: list[Part],
+                   case_range: list[dict[str, Any]] | None) -> tuple[list[str], list[str]]:
+    """(відмови, попередження) для вирізок однієї справи.
+
+    Відмова:
+    * діапазон на плівці не відповідає числу кадрів у теці;
+    * дві вирізки перекриваються на тій самій плівці;
+    * вирізка виходить за межі справи на плівці або лежить на плівці, якої
+      справа не має, — коли межі встановлено певно (паспорт справи, людина,
+      покажчик з `CERTAIN`). Вирізка з `crosses` (людина пояснила) — пропуск.
+
+    Попередження: межі справи лише оцінено; діапазону на плівці не названо.
+    """
+    refusals: list[str] = []
+    warnings: list[str] = []
+    seen: list[tuple[str, int, int, str]] = []
+    for p in parts:
+        e = p.extract or {}
+        name = clean_label(p.label)
+        film = str(e.get("fs_film") or e.get("dgs") or "")
+        a, b = _as_int(e.get("frame_from")), _as_int(e.get("frame_to"))
+        if not (a and b):
+            warnings.append(f"«{name}»: не названо кадрів на плівці — отримувач не "
+                            f"знайде цих аркушів у своїй зйомці плівки "
+                            f"(nysh share part <тека> --frames-on-film A-B)")
+            continue
+        on_disk = len(align.frames_sorted(p.frames_dir)) if p.frames_dir else 0
+        if on_disk and on_disk != b - a + 1:
+            refusals.append(f"«{name}»: кадри {a}-{b} на плівці — це {b - a + 1}, а в "
+                            f"теці {on_disk}. Виправте діапазон: nysh share part "
+                            f"\"{p.frames_dir}\" --frames-on-film A-B")
+        for f2, a2, b2, n2 in seen:
+            if f2 == film and a <= b2 and a2 <= b:
+                refusals.append(f"«{name}» ({a}-{b}) і «{n2}» ({a2}-{b2}) перекриваються "
+                                f"на плівці {film}: той самий аркуш двома вирізками")
+        seen.append((film, a, b, name))
+        if e.get("crosses"):
+            warnings.append(f"«{name}»: виходить за межі справи — {e['crosses']}")
+            continue
+        if not case_range:
+            continue
+        mine = [r for r in case_range if str(r.get("fs_film") or "") == film]
+        certain = any(r.get("certain") for r in (mine or case_range))
+        where = "; ".join(f"плівка {r.get('fs_film')}, кадри {r.get('from')}-{r.get('to')}"
+                          for r in case_range)
+        if not mine:
+            why = (f"«{name}» лежить на плівці {film}, а справа — на: {where}. На "
+                   f"плівці кілька справ — це, мабуть, інша справа")
+        elif not any(_as_int(r.get("from")) <= a and b <= _as_int(r.get("to"))
+                     for r in mine):
+            why = (f"«{name}» (кадри {a}-{b}) виходить за межі справи на плівці "
+                   f"{film} ({where}) — частина вирізки належить сусідній справі")
+        else:
+            continue
+        hint = (" Поділіть вирізку по межі справи (nysh cases split) або поясніть: "
+                "nysh share part <тека> --cross-case \"чому\"")
+        if certain:
+            refusals.append(why + "." + hint)
+        else:
+            warnings.append(why + " (межі справи лише оцінено — звірте карткою "
+                                  "справи на плівці)")
+    return refusals, warnings
+
+
+def extract_frames_for(seg: Segment, *, hash_frames: bool = False) -> list[dict[str, Any]]:
+    """`frames_for` + номер кадру на плівці (`film`, `film_frame`) для кожного.
+
+    Номер — за позицією в теці від `frame_from`: так людина й оголосила
+    вирізку. Він і є місцем, за яким отримувач шукає свої кадри; але він
+    лише позиційний, і прив'язка за ним не буває `exact` (`align.grade_part`).
+    """
+    rows = frames_for(seg, hash_frames=hash_frames)
+    piece = seg.pieces[0]
+    e = piece.part.extract or {}
+    film = str(e.get("fs_film") or e.get("dgs") or "")
+    a, b = _as_int(e.get("frame_from")), _as_int(e.get("frame_to"))
+    if not (film and a and b) or piece.part.frames_dir is None:
+        return rows
+    order = {p.name: i for i, p in enumerate(align.frames_sorted(piece.part.frames_dir))}
+    pref = piece.part.slug + SEP
+    for row in rows:
+        i = order.get(str(row.get("name") or "").removeprefix(pref))
+        if i is not None and a + i <= b:
+            row["film"] = film
+            row["film_frame"] = a + i
+    return rows
+
+
+class PartError(ValueError):
+    """Вирізку не оголосити — з причиною для людини."""
+
+
+def declare(frames_dir: Path, *, film: str = "", dgs: str = "",
+            frames_on_film: str = "", folios: str = "", village: str = "",
+            cross_case: str = "", from_index: dict[str, str] | None = None,
+            clear: bool = False) -> dict[str, Any]:
+    """Записати в паспорт теки, де вона на плівці (`nysh share part`).
+
+    Пише блок `extract` у той самий паспорт, з якого його читає
+    `part_passport`, з позначкою, хто поле дав: `cli` — людина, `index` —
+    узято з покажчика на її явне прохання (`from_index`). Порожнє поле не
+    стирає записаного; «-» — стирає.
+
+    🔴 Паспорт мусить уже бути: тека без шифри — ще не справа, і вирізка в
+    неї ні до чого не прив'язана.
+    """
+    from nyshporka.cases.register import SIDECAR, read_sidecar
+
+    d = Path(frames_dir)
+    if not d.is_dir():
+        raise PartError(f"теки {d} немає")
+    home = next((x for x in align._passport_dirs(d) if (x / SIDECAR).is_file()), None)
+    side = read_sidecar(d)
+    if home is None or not side:
+        raise PartError(f"у теці {d} немає паспорта (`{SIDECAR}`) — спершу опишіть її "
+                        f"справою: nysh case \"{d}\" --shifra \"…\"")
+    out = dict(side)
+    block = dict(out.get(PASSPORT_FIELD) or {}) if isinstance(out.get(PASSPORT_FIELD), dict) else {}
+    if clear:
+        out.pop(PASSPORT_FIELD, None)
+        block = {}
+    src = dict(block.get("src") or {}) if isinstance(block.get("src"), dict) else {}
+
+    def put(name: str, value: str, origin: str) -> None:
+        v = " ".join(str(value or "").split())
+        if not v:
+            return
+        if v == "-":
+            block.pop(name, None)
+            src.pop(name, None)
+            return
+        block[name] = v
+        src[name] = origin
+
+    idx = from_index or {}
+    put("fs_film", idx.get("microfilm", ""), SRC_INDEX)
+    put("folios", idx.get("folios", ""), SRC_INDEX)
+    put("village", idx.get("village", ""), SRC_INDEX)
+    idx_rng = parse_range(idx.get("image_range"))
+    if idx_rng:
+        block["frame_from"], block["frame_to"] = idx_rng
+        src["frame_from"] = src["frame_to"] = SRC_INDEX
+    put("fs_film", film, SRC_USER)
+    put("dgs", dgs, SRC_USER)
+    put("folios", folios, SRC_USER)
+    put("village", village, SRC_USER)
+    put("crosses", cross_case, SRC_USER)
+    if frames_on_film.strip() == "-":
+        for k in ("frame_from", "frame_to"):
+            block.pop(k, None)
+            src.pop(k, None)
+    elif frames_on_film.strip():
+        rng = parse_range(frames_on_film)
+        if rng is None:
+            raise PartError(f"«{frames_on_film}» — не діапазон кадрів; чекаю «670-709»")
+        block["frame_from"], block["frame_to"] = rng
+        src["frame_from"] = src["frame_to"] = SRC_USER
+    if block.get("dgs") and not str(block["dgs"]).isdigit():
+        raise PartError(f"«{block['dgs']}» не номер групи зображень FamilySearch (DGS): "
+                        f"лише цифри. Номер мікрофільму — це --film")
+    if block:
+        import datetime as _dt
+
+        block["src"] = src
+        block["declared_at"] = _dt.date.today().isoformat()
+        out[PASSPORT_FIELD] = block
+    tmp = home / (SIDECAR + ".tmp")
+    tmp.write_text(json.dumps(out, ensure_ascii=False, indent=1), encoding="utf-8")
+    tmp.replace(home / SIDECAR)
+    got = part_passport(d) or {}
+    warn: list[str] = []
+    a, b = _as_int(got.get("frame_from")), _as_int(got.get("frame_to"))
+    on_disk = len(align.frames_sorted(d))
+    if a and b and on_disk and on_disk != b - a + 1:
+        warn.append(f"кадри {a}-{b} — це {b - a + 1}, а в теці {on_disk}: пакування "
+                    f"відмовить, доки число не зійдеться")
+    if not (a and b):
+        warn.append("кадрів на плівці не названо: --frames-on-film A-B")
+    if not (got.get("fs_film") or got.get("dgs")):
+        warn.append("плівки не названо: --film N")
+    return {"dir": str(d), "passport": str(home / SIDECAR), "extract": got,
+            "frames_on_disk": on_disk, "warnings": warn}
 
 
 def describe(m: bundle.Manifest) -> dict[str, Any] | None:

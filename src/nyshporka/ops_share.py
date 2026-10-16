@@ -164,6 +164,11 @@ class SharePackArgs(_CardFields):
     segment_files: int = Field(default=18_000, ge=500, le=19_000,
                                description="скільки файлів тексту (усі голоси) "
                                            "у сегменті; пул приймає до 20 000")
+    by_part: bool | None = Field(default=None,
+                                 description="сегментами-вирізками: тека = село, "
+                                             "вирізане з плівки (місце на плівці — "
+                                             "`share part`); порожньо — само, коли "
+                                             "кожна тека має паспорт із місцем")
 
 
 @op("share.pack", summary="Спакувати прочитане у файл для обміну",
@@ -197,7 +202,7 @@ def share_pack(a: SharePackArgs) -> Envelope:
             got = pack_segments(
                 a.case, Path(a.out) if a.out else None, partial_why=a.partial,
                 dry_run=a.dry_run, hash_frames=a.hash_frames,
-                max_files=a.segment_files,
+                max_files=a.segment_files, by_part=a.by_part, geometry=a.geometry,
                 publisher=a.publisher or defaults["publisher"],
                 contact=_contact(a.contact, defaults["contact"]),
                 site=a.site or defaults["site"], note=a.note, links=links,
@@ -211,6 +216,8 @@ def share_pack(a: SharePackArgs) -> Envelope:
         env = ok(got)
         for why in got.get("pack_refusals") or []:
             env.warn("pack_refusal", str(why))
+        for w in got.get("extract_warnings") or []:
+            env.warn("extract", str(w))
         for seg in got.get("segments") or []:
             for w in seg.get("warnings") or []:
                 env.warn("gate", f"сегмент {seg.get('n')}: {w}")
@@ -297,6 +304,68 @@ def share_card(a: ShareCardArgs) -> Envelope:
                  "бібліотеці, ні в реєстрі опису — без нього справа не спакується. "
                  "Назвіть його: --frames N (з каталогу чи опису); якщо взяти "
                  "нізвідки: --frames-unknown \"чому\"")
+    return env
+
+
+class SharePartArgs(BaseModel):
+    dir: str = Field(description="тека кадрів однієї вирізки (село з плівки)")
+    film: str = Field(default="", description="номер мікрофільму FamilySearch")
+    dgs: str = Field(default="", description="група зображень FamilySearch (DGS), якщо відома")
+    frames_on_film: str = Field(default="", description="кадри вирізки на плівці, як "
+                                                       "їх нумерує переглядач FS: «670-709»")
+    folios: str = Field(default="", description="аркуші справи: «35-55»")
+    village: str = Field(default="", description="село (назва як в описі)")
+    cross_case: str = Field(default="", description="вирізка виходить за межі справи "
+                                                   "на плівці — чому так і має бути")
+    from_index: bool = Field(default=False, description="узяти плівку, кадри й аркуші "
+                                                        "села з покажчика катаграфій "
+                                                        "(поля підписуються «за покажчиком»)")
+    clear: bool = Field(default=False, description="прибрати оголошену вирізку")
+
+
+@op("share.part", summary="Вирізка з плівки: де ця тека на плівці й у справі",
+    args=SharePartArgs, mutates=True, agent=False, section=SECTION, private=True,
+    next_hints=(("share.pack", "спакувати справу вирізками: --segments --by-part"),))
+def share_part(a: SharePartArgs) -> Envelope:
+    """Оголосити теку вирізкою: плівка, кадри на ній, аркуші, село.
+
+    Без полів — показати, що записано, і що каже про село покажчик
+    катаграфій (лише підказка: у паспорт вона йде з `--from-index`).
+    """
+    from pathlib import Path
+
+    from nyshporka.cases.register import read_sidecar
+    from nyshporka.share import segment as SG
+    from nyshporka.share.publish import index_hint
+
+    d = Path(a.dir).expanduser()
+    side = read_sidecar(d) if d.is_dir() else {}
+    village = a.village or str((SG.part_passport(d) or {}).get("village") or d.name)
+    hint = index_hint(str(side.get("shifra") or ""), village) if side else {}
+    if a.from_index and not hint:
+        return fail(f"покажчик катаграфій не знає села «{village}» у справі "
+                    f"{side.get('shifra') or '—'} (або знімка немає: nysh crawl catagrafii)")
+    wants = any((a.film, a.dgs, a.frames_on_film, a.folios, a.village, a.cross_case,
+                 a.from_index, a.clear))
+    from nyshporka.share import align
+
+    got: dict[str, Any]
+    try:
+        got = (SG.declare(d, film=a.film, dgs=a.dgs, frames_on_film=a.frames_on_film,
+                          folios=a.folios, village=a.village, cross_case=a.cross_case,
+                          from_index=hint if a.from_index else None, clear=a.clear)
+               if wants else {"dir": str(d), "extract": SG.part_passport(d) or {},
+                              "frames_on_disk": len(align.frames_sorted(d)),
+                              "warnings": []})
+    except SG.PartError as exc:
+        return fail(str(exc))
+    warnings = [str(w) for w in got.get("warnings") or []]
+    got["shifra"] = str(side.get("shifra") or "")
+    if hint:
+        got["index_hint"] = hint
+    env = ok(got)
+    for w in warnings:
+        env.warn("extract", w)
     return env
 
 

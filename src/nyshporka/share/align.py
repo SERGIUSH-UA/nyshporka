@@ -358,6 +358,150 @@ def grade(theirs: list[dict[str, Any]], case_dir: Path | None, *,
                      case_dir=str(case_dir), theirs=len(theirs), ours=len(ours))
 
 
+# ── вирізка з плівки ─────────────────────────────────────────────────────────
+#
+# Сегмент-вирізка (село, вирізане з плівки FamilySearch) несе кадри з
+# префіксом частини (`<село>__0001.jpg`) і номер кадру на плівці (`film`,
+# `film_frame`). У отримувача той самий кадр лежить як завгодно: у теці цієї
+# самої вирізки, у теці цілої плівки (де на ній кілька справ), у теці справи.
+
+def _film_of(side: dict[str, Any]) -> tuple[str, int]:
+    """(плівка, номер першого кадру теки на плівці) з паспорта; невідомо — ("", 0).
+
+    Тека, вирізана з плівки, каже свій початок блоком `extract`
+    (`nysh share part`) або `frames_range` (`nysh get --frames`); тека цілої
+    плівки — лише номер плівки, і тоді її перший кадр — перший кадр плівки.
+    """
+    raw = side.get("extract")
+    block: dict[str, Any] = raw if isinstance(raw, dict) else {}
+    film = str(block.get("fs_film") or side.get("fs_film") or side.get("film") or "").strip()
+    start = 0
+    try:
+        start = int(block.get("frame_from") or 0)
+    except (TypeError, ValueError):
+        start = 0
+    if not start:
+        rng = str(side.get("frames_range") or "").replace("–", "-")
+        head = rng.split("-", 1)[0].strip()
+        start = int(head) if head.isdigit() else 0
+    return film, (start or 1) if film else 0
+
+
+def film_dirs(film: str) -> list[Path]:
+    """Теки кадрів бібліотеки, чий паспорт називає цю плівку."""
+    from nyshporka.cases.register import read_sidecar
+
+    film = str(film or "").strip()
+    if not film:
+        return []
+    try:
+        from nyshporka.core.workspace import workspace
+        from nyshporka.library import load_library
+
+        root = workspace().root
+        rows = load_library()
+    except Exception:
+        return []
+    out: list[Path] = []
+    for row in rows:
+        for rel in [row.get("path"), *(row.get("extra_paths") or [])]:
+            if not rel:
+                continue
+            p = Path(rel)
+            p = p if p.is_absolute() else root / p
+            d = _frames_dir(p)
+            if d is None or d in out:
+                continue
+            if _film_of(read_sidecar(d))[0] == film:
+                out.append(d)
+    return out
+
+
+def grade_part(theirs: list[dict[str, Any]], *, prefix: str, film: str = "",
+               case_dir: Path | None = None, their_fp: dict[str, Any] | None = None,
+               hash_frames: bool = False) -> tuple[Alignment, dict[str, str]]:
+    """Прив'язати одну вирізку: (мітка, донорське ім'я кадру → місцеве).
+
+    Кандидати — тека справи цієї машини й теки бібліотеки з тією самою
+    плівкою. Для кожного по черзі:
+
+    1. id кадру FamilySearch, id у джерелі, sha256 — кожен кадр вирізки
+       знайдено рівно раз (тека цілої плівки може мати більше кадрів) →
+       `exact`, імена переводяться на місцеві;
+    2. відбиток зйомки при тій самій кількості кадрів → `exact`;
+    3. номер кадру на плівці проти початку теки на плівці → лише
+       `by-position`: нумерацію переглядача FS і теки на диску ніщо не
+       звіряє, і кроп за нею не ріжеться.
+
+    🔴 Імена повертаються й для `by-position`, але переводити на них сторінки
+    вирішує той, хто кличе, — і лише при `exact` (див. `page_names`).
+    """
+    orig: dict[str, str] = {}
+    rows: list[dict[str, Any]] = []
+    for r in theirs:
+        name = str(r.get("name") or "")
+        short = name[len(prefix):] if prefix and name.startswith(prefix) else name
+        orig[short] = name
+        rows.append({**r, "name": short})
+    cands: list[Path] = []
+    for c in ([case_dir] if case_dir is not None else []) + film_dirs(film):
+        if c not in cands:
+            cands.append(c)
+    fallback: tuple[Alignment, dict[str, str]] | None = None
+    for c in cands:
+        ours = frames_of(c, hash_frames=hash_frames)
+        if not ours:
+            continue
+        for fld, why in (("apid", "ідентифікатори кадрів FamilySearch"),
+                         ("src", "ідентифікатори кадрів у джерелі"),
+                         ("sha256", "хеші кадрів")):
+            a = {str(r[fld]): str(r["name"]) for r in rows if r.get(fld)}
+            b: dict[str, str] = {}
+            dup = False
+            for r in ours:
+                k = str(r.get(fld) or "")
+                if k:
+                    dup = dup or k in b
+                    b[k] = str(r["name"])
+            if a and not dup and len(a) == len(rows) and set(a) <= set(b):
+                return (Alignment(EXACT, f"збіглися {why} — усі {len(a)} кадрів вирізки "
+                                         f"знайдено в {c.name}",
+                                  case_dir=str(c), theirs=len(rows), ours=len(ours),
+                                  matched=len(a)),
+                        {orig[a[k]]: b[k] for k in a})
+        if their_fp and len(ours) == len(rows):
+            g = _fingerprint_grade(their_fp, c, len(rows), len(ours))
+            if g is not None and g.label == EXACT:
+                return g, {orig[r["name"]]: str(o["name"])
+                           for r, o in zip(rows, ours, strict=True)}
+        if fallback is None and film:
+            from nyshporka.cases.register import read_sidecar
+
+            their_film, start = _film_of(read_sidecar(c))
+            nums = [int(r.get("film_frame") or 0) for r in rows]
+            if their_film == film and start and all(nums):
+                idx = [n - start for n in nums]
+                if all(0 <= i < len(ours) for i in idx):
+                    fallback = (
+                        Alignment(BY_POSITION,
+                                  f"кадри {min(nums)}-{max(nums)} плівки {film} зіставлено "
+                                  f"з текою {c.name} за номером кадру — нумерацію "
+                                  f"переглядача FS і теки ніщо не звіряє, порядок на віру",
+                                  case_dir=str(c), theirs=len(rows), ours=len(ours),
+                                  matched=len(rows)),
+                        {orig[r["name"]]: str(ours[i]["name"]) for r, i in zip(rows, idx, strict=True)})
+    if fallback is not None:
+        return fallback
+    g = grade(rows, case_dir, hash_frames=hash_frames, their_fp=their_fp)
+    names = ({orig.get(a, a): b for a, b in page_names(rows, case_dir).items()}
+             if g.label == EXACT else {})
+    if g.label == EXACT and not names and case_dir is not None:
+        ours = frames_of(case_dir)
+        if len(ours) == len(rows):
+            names = {orig[r["name"]]: str(o["name"]) for r, o in zip(rows, ours, strict=True)}
+    return g, names
+
+
 #: Підтека кадрів у теці справи: так кладе їх `cases take` з ARCHIUM, поруч із
 #: `meta.json`. Перевірка лише верхнього рівня бачила тут «справу без кадрів».
 FRAMES_SUBDIR = "pages"

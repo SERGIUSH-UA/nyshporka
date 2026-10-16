@@ -175,7 +175,9 @@ def odna(item: Item, notes: bool = False) -> Row:
             return row
         d = spakovano.data or {}
         row["shifra"] = str(((d.get("manifest") or {}).get("case") or {}).get("shifra") or "")
-        row["path"] = str(d.get("path") or "")
+        # Справа сегментами (вирізки по селах, картотека) пакується в теку, і
+        # `share.publish` віддає її цілою, сегмент за сегментом.
+        row["path"] = str(d.get("path") or d.get("dir") or "")
         row["stage"] = PUBLISH
         viddano = _zalyty(row["path"], row)
         row["warnings"] += [w.as_dict() for w in viddano.warnings]
@@ -188,6 +190,14 @@ def odna(item: Item, notes: bool = False) -> Row:
                 row["next_attempt_at"] = v.get("next_attempt_at")
             return row
         vyhid = str(v.get("outcome") or "")
+        if vyhid == "segments":
+            segs = [x for x in v.get("segments") or [] if isinstance(x, dict)]
+            vyhody = {str(x.get("outcome") or "") for x in segs}
+            # Справа віддана, коли кожен сегмент або ліг, або вже був у пулі.
+            vyhid = (VZHE_Ye if segs and vyhody <= {VZHE_Ye} else
+                     VIDDANO if segs and vyhody <= {VIDDANO, VZHE_Ye} else
+                     next(iter(vyhody - {VIDDANO, VZHE_Ye}), ""))
+            row["segments"] = len(segs)
         row.update(outcome=vyhid, contribution=v.get("contribution"),
                    geometry_attached=bool(v.get("geometry_attached")),
                    complete_sec=_etap(v.get("etapy"), "complete"))

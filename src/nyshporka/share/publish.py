@@ -917,9 +917,11 @@ def _rozkladena(run_dirs: list[Path]) -> str:
         return ""
     names = ", ".join(Path(t).name for t in teky[:4]) + (" …" if len(teky) > 4 else "")
     return (f"справу розкладено на {len(teky)} тек кадрів ({names}), а пакет бере "
-            f"кадри з однієї — у пул поїхав би текст без своїх кадрів. Зведіть кадри й "
-            f"прогони в одну теку справи (або, якщо це частини картотеки, пакуйте "
-            f"`--segments`)")
+            f"кадри з однієї — у пул поїхав би текст без своїх кадрів. Якщо теки — "
+            f"вирізки з плівки (село за селом), назвіть місце кожної на плівці "
+            f"(`nysh share part <тека> --film N --frames-on-film A-B --folios …`) і "
+            f"пакуйте `--segments --by-part`; частини картотеки — `--segments`; "
+            f"інакше зведіть кадри й прогони в одну теку справи")
 
 
 def _ponad_steliu(files: int, *, nbytes: int = 0) -> str:
@@ -1079,11 +1081,112 @@ def pack(scope: str, dest: Path | None = None, *, geometry: bool = True,
 SEGMENTS_DIR_SUFFIX = "~segments"
 
 
+def _catagrafii() -> Any:
+    """Покажчик катаграфій простору — або `None`, коли знімка немає."""
+    try:
+        from nyshporka.core.workspace import workspace
+        from nyshporka.sources.catagrafii import CatagrafiiSource
+
+        src = CatagrafiiSource(workspace().root)
+        return src if src.catalog_source()[0] == "workspace" else None
+    except Exception:
+        return None
+
+
+def _dosar(shifra: str) -> str:
+    """Номер справи ANRM ф.134 оп.2 — лише цієї серії покажчик і знає."""
+    from nyshporka.cases.register import parse_shifra
+
+    try:
+        s = parse_shifra(shifra)
+    except Exception:
+        return ""
+    if (s.repo or "").upper() != "ANRM" or str(s.fond) != "134" or str(s.opys) not in ("2", ""):
+        return ""
+    return str(s.spr) if str(s.spr).isdigit() else ""
+
+
+def case_range(shifra: str, home: Path | None) -> list[dict[str, Any]]:
+    """Де справа лежить на плівках: [{fs_film, from, to, src, certain}].
+
+    🔴 Плівка — не справа: на одній плівці кілька справ. Межі беруться з
+    паспорта справи (`film_ranges`, записав дослідник), а без нього — з
+    покажчика катаграфій з позначкою `src: index` і певністю за його
+    `confidence`. Нічого не знайшлось — порожньо, і перевірка меж мовчить.
+    """
+    from nyshporka.cases.register import read_sidecar
+
+    side = read_sidecar(home) if home else {}
+    raw = side.get("film_ranges")
+    out: list[dict[str, Any]] = []
+    if isinstance(raw, list):
+        for r in raw:
+            if not isinstance(r, dict):
+                continue
+            rng = SG.parse_range(f"{r.get('from')}-{r.get('to')}") or SG.parse_range(r.get("frames"))
+            film = str(r.get("fs_film") or r.get("film") or "").strip()
+            if film and rng:
+                out.append({"fs_film": film, "from": rng[0], "to": rng[1],
+                            "src": SG.SRC_PASSPORT, "certain": True})
+    if out:
+        return out[:8]
+    dosar = _dosar(shifra)
+    src = _catagrafii() if dosar else None
+    if src is None:
+        return []
+    from nyshporka.sources.catagrafii import reels
+
+    d = src.dossiers().get(dosar) or {}
+    certain = str(d.get("confidence") or "").strip().lower() in SG.CERTAIN
+    for film, rng_s in reels(d.get("microfilm", ""), d.get("image_range", "")):
+        rng = SG.parse_range(rng_s)
+        if film and rng:
+            out.append({"fs_film": film, "from": rng[0], "to": rng[1],
+                        "src": SG.SRC_INDEX, "certain": certain,
+                        "how": str(d.get("confidence") or "")})
+    return out[:8]
+
+
+def index_hint(shifra: str, village: str) -> dict[str, Any]:
+    """Що покажчик катаграфій каже про село в цій справі — лише підказка.
+
+    🔴 У маніфест не йде: вирізку людина різала сама, і її кадри можуть не
+    збігатися з рядком покажчика (той рахує кадри в томі FS). Підставляти
+    їх мовчки — вигадувати дані; узяти можна лише явно (`share part
+    --from-index`), і тоді поле підписане `index`.
+    """
+    dosar = _dosar(shifra)
+    src = _catagrafii() if dosar and village.strip() else None
+    if src is None:
+        return {}
+    from nyshporka.sources.catagrafii import skeleton
+
+    want = skeleton(village)
+    if not want:
+        return {}
+    try:
+        lines = src._data()[1]
+    except Exception:
+        return {}
+    for r in lines:
+        if r.get("dosar", "").strip() != dosar:
+            continue
+        both = skeleton(f"{r.get('village', '')} {r.get('village_ru', '')}")
+        if want in both:
+            return {k: str(r.get(k) or "").strip() for k in
+                    ("village", "village_ru", "volume", "folios", "microfilm",
+                     "image_range", "confidence")
+                    if str(r.get(k) or "").strip()}
+    return {}
+
+
 def pack_segments(scope: str, dest_dir: Path | None = None, *,
                   partial_why: str = "", dry_run: bool = False,
                   hash_frames: bool = False,
                   max_files: int = SG.SEG_MAX_FILES,
                   max_raw: int = SG.SEG_MAX_RAW,
+                  by_part: bool | None = None,
+                  geometry: bool = True,
                   **meta: Any) -> dict[str, Any]:
     """Спакувати справу сегментами — для тієї, якої один пакет не вміщує.
 
@@ -1091,11 +1194,18 @@ def pack_segments(scope: str, dest_dir: Path | None = None, *,
     кадри) і хешем змісту; спільне в них — шифра, `case.frames_total` і
     `case.segment.set`. Пул зводить їх в одну книгу.
 
+    Два поділи:
+
+    * **за абеткою** (картотека): суміжні частини жадібно в сегменти під
+      стелі; геометрія не їде — її прив'язка йде за іменами кадрів, а імена
+      мають префікс частини;
+    * **вирізками з плівки** (`by_part`, або сам, коли кожна частина має
+      паспорт із місцем на плівці — `nysh share part`): село = сегмент зі
+      сталим ключем за плівкою й кадрами, набір один на справу, межі справи
+      на плівках звіряються, рамки рядків їдуть окремим пакетом поруч.
+
     `dry_run` показує лише поділ: стейдж пів мільйона сторінок заради
     перегляду не будується.
-
-    Геометрія в сегменти не їде: її прив'язка йде за іменами кадрів, а імена
-    в сегменті мають префікс частини.
     """
     import shutil
 
@@ -1107,38 +1217,81 @@ def pack_segments(scope: str, dest_dir: Path | None = None, *,
     skip = meta.pop("skip_runs", ()) or ()
     run_dirs, info = resolve_runs(scope, skip=skip)
     key = str(info.get("key") or "")
-    parts = SG.parts_of(run_dirs)
-    segs = SG.plan(parts, max_files=max_files, max_raw=max_raw)
+    parts = SG.with_extracts(SG.parts_of(run_dirs))
+    # Справа вирізками з плівки — коли кожна частина каже, де вона на плівці;
+    # `by_part=True` вимагає цього явно, `False` — пакує за абеткою як раніше.
+    extracts = SG.is_extract_case(parts) if by_part is None else bool(by_part)
+    segs = (SG.plan_extracts(parts, max_files=max_files, max_raw=max_raw) if extracts
+            else SG.plan(parts, max_files=max_files, max_raw=max_raw))
+    home = align.case_home_for(key) if key else None
+    pasport = _case_block(info, home)
     kartka = {**(K.get(key) if key else {}), **card_fields}
     try:
         z_kartky = int(kartka.get("frames") or 0)
     except (TypeError, ValueError):
         z_kartky = 0
-    na_dysku = SG.frames_on_disk(parts)
-    case_total = max(z_kartky, na_dysku)
+    refusals: list[str] = []
+    rng: list[dict[str, Any]] = []
+    if extracts:
+        # 🔴 Знаменник справи вирізками — НЕ сума кадрів на диску: тека тримає
+        # лише прочитані села, і їхня сума видала б уривок за всю справу.
+        # Число цілої справи — з картки, а без неї — з меж справи на плівках.
+        shifra = str(pasport.get("shifra") or info.get("shifra") or "")
+        rng = case_range(shifra, home)
+        z_mezh = sum(int(r["to"]) - int(r["from"]) + 1 for r in rng)
+        case_total = z_kartky or z_mezh
+        frames_source = ("картка" if z_kartky else
+                         ("покажчик катаграфій" if rng and rng[0]["src"] == SG.SRC_INDEX
+                          else "паспорт справи") if z_mezh else "")
+        bad, warn = SG.check_extracts(parts, rng)
+        refusals.extend(bad)
+        if by_part and not SG.is_extract_case(parts):
+            refusals.extend(
+                f"«{SG.clean_label(p.label)}»: частина не каже, де вона на плівці — "
+                f"nysh share part \"{p.frames_dir or p.label}\" --film … "
+                f"--frames-on-film A-B" for p in parts if not p.extract)
+    else:
+        na_dysku = SG.frames_on_disk(parts)
+        case_total = max(z_kartky, na_dysku)
+        frames_source = ("картка" if z_kartky >= na_dysku and z_kartky
+                         else "кадри на диску" if na_dysku else "")
+        warn = []
     out: dict[str, Any] = {
         "scope": scope, "key": key, "parts": len(parts),
+        "mode": SG.MODE_EXTRACT if extracts else SG.MODE_ALPHA,
         "runs": [d.name for d in run_dirs],
         "skipped_runs": list(info.get("skipped_runs") or []),
         "frames_total": case_total,
-        "frames_source": ("картка" if z_kartky >= na_dysku and z_kartky
-                          else "кадри на диску" if na_dysku else ""),
+        "frames_source": frames_source,
         "segments": [s.as_json() for s in segs],
     }
-    refusals: list[str] = []
+    if extracts:
+        out["case_range"] = rng
+        out["extract_warnings"] = warn
+        shifra = str(pasport.get("shifra") or info.get("shifra") or "")
+        hints = {}
+        for p in parts:
+            village = str((p.extract or {}).get("village") or SG.clean_label(p.label))
+            got = index_hint(shifra, village)
+            if got:
+                hints[p.label] = got
+        if hints:
+            out["index_hints"] = hints
     zbirna = _zbirna_teka(key, run_dirs)
     if zbirna:
         refusals.append(zbirna)
     frames_unknown = str(kartka.get("frames_unknown") or "").strip()
     if not case_total and not frames_unknown:
         refusals.append(
+            ("кадрів цілої справи не названо, а межі справи на плівках невідомі "
+             "(сума вирізок — не справа): назвіть число з опису чи каталогу "
+             "(--frames N) або причину (--frames-unknown \"чому\")") if extracts else
             "кадрів справи не названо, і в теках частин кадрів немає: назвіть "
             "число з опису (--frames N) або причину (--frames-unknown \"чому\")")
     # 🔴 Справа сегментами — це картотеки й збірки на сотні тисяч кадрів, і
     # часто без номера справи (`@назва`). Без назви й років пул показує її як
     # «Справа без назви в описі» з транслітом теки замість шифри — так 15.10.2026
     # лягла перша картотека (Р-7641), і знайти її було нічим.
-    pasport = _case_block(info, align.case_home_for(key) if key else None)
     if not (kartka.get("title") or pasport.get("title")):
         refusals.append("у справи немає назви: --title \"назва з опису архіву\"")
     if not (kartka.get("years") or pasport.get("years")):
@@ -1153,21 +1306,46 @@ def pack_segments(scope: str, dest_dir: Path | None = None, *,
     if card_fields and remember and key:
         out["card_saved"] = K.set_fields(key, card_fields)
 
-    set_key = SG.set_id(key or scope, segs)
+    set_key = (SG.set_id_extracts(key or scope) if extracts
+               else SG.set_id(key or scope, segs))
     stage_root = workspace().derived / "share-segments" / bundle.safe_name(key or scope)
     target = Path(dest_dir) if dest_dir else None
     written: list[Path] = []
     rows: list[dict[str, Any]] = []
     try:
         for seg in segs:
-            staged = SG.stage(seg, stage_root / bundle.safe_name(seg.key))
-            frames = SG.frames_for(seg, hash_frames=hash_frames)
+            staged = SG.stage(seg, stage_root / bundle.safe_name(seg.key),
+                              geometry=extracts and geometry)
+            frames = (SG.extract_frames_for(seg, hash_frames=hash_frames) if extracts
+                      else SG.frames_for(seg, hash_frames=hash_frames))
             m, _, _, _ = build_manifest(scope, runs=(staged, info),
                                         segment_frames=frames,
                                         card_fields=card_fields, **meta)
             m.case["frames_total"] = case_total
-            m.case["segment"] = SG.segment_block(seg, set_key)
-            m.schema = SG.SCHEMA_SEGMENT
+            m.case["segment"] = SG.segment_block(seg, set_key,
+                                                 case_range=rng if extracts else None)
+            m.schema = SG.SCHEMA_EXTRACT if extracts else SG.SCHEMA_SEGMENT
+            if extracts:
+                if frames_source:
+                    m.case["frames_total_src"] = frames_source
+                part = seg.pieces[0].part
+                # Джерело зйомки — плівка САМЕ ЦЬОГО села: справа на двох
+                # плівках інакше йшла б із посиланням на першу для всіх сіл.
+                own_refs = _refs_from_sidecar(part.frames_dir)
+                ext = part.extract or {}
+                film = str(ext.get("fs_film") or "")
+                # Плівку, названу людиною в `share part`, — у джерела зйомки;
+                # з покажчика — ні: `refs` склеюють зйомки, а здогад покажчика
+                # про чужу вирізку зйомкою не є.
+                if (film and (ext.get("src") or {}).get("fs_film") != SG.SRC_INDEX
+                        and not any(r.get("source") == "fs" for r in own_refs)):
+                    own_refs.append({"source": "fs", "ref": f"film:{film}"})
+                if own_refs:
+                    m.refs = own_refs
+                if part.frames_dir is not None:
+                    fp = fingerprint.fingerprint(part.frames_dir)
+                    if fingerprint.checked(fp):
+                        m.frames["fingerprint"] = fp
             verdict = gates.check(m, partial_why=partial_why)
             if not verdict.passed:
                 raise PublishError(f"сегмент {seg.n}/{seg.of} «{seg.label}»: ворота "
@@ -1175,8 +1353,11 @@ def pack_segments(scope: str, dest_dir: Path | None = None, *,
             if target is None:
                 stem = bundle.suggest_name(m)[: -len(bundle.SUFFIX)]
                 target = journal.share_dir() / journal.OUTBOX / (stem + SEGMENTS_DIR_SUFFIX)
-            name = (bundle.suggest_name(m)[: -len(bundle.SUFFIX)]
-                    + f"~{seg.n:03d}of{seg.of:03d}" + bundle.SUFFIX)
+            # Вирізка — за своїм ключем, а не номером: номер зсувається з
+            # кожним доданим селом, а ім'я файла мусить лишатись тим самим.
+            tail = (f"~{bundle.safe_name(seg.key)}" if extracts
+                    else f"~{seg.n:03d}of{seg.of:03d}")
+            name = bundle.suggest_name(m)[: -len(bundle.SUFFIX)] + tail + bundle.SUFFIX
             wrote = bundle.write(target / name, m, staged, frames=frames)
             if int(wrote["bytes"]) > SG.POOL_MAX_TEXT_BYTES:
                 Path(wrote["path"]).unlink(missing_ok=True)
@@ -1186,13 +1367,22 @@ def pack_segments(scope: str, dest_dir: Path | None = None, *,
                     f"{SG.POOL_MAX_TEXT_BYTES >> 20} МБ. Повторіть із меншим "
                     f"--segment-files (зараз {max_files})")
             written.append(Path(wrote["path"]))
+            geom: dict[str, Any] | None = None
+            geom_dirs = [d for d in staged if bundle.has_geometry(d)] if extracts else []
+            if geom_dirs:
+                geom = bundle.write(bundle.geom_path(Path(wrote["path"])), m, geom_dirs,
+                                    frames=frames, patterns=bundle.PACKED_GEOM)
+                written.append(Path(geom["path"]))
             journal.record(journal.PACKED, shifra=m.shifra, case_key=key,
                            pages=m.pages, bytes=wrote["bytes"],
                            sha256=wrote["sha256"], path=wrote["path"],
                            models=", ".join(m.models()),
-                           segment=f"{seg.key} ({seg.n}/{seg.of})")
+                           segment=f"{seg.key} ({seg.n}/{seg.of})",
+                           geom_bytes=int(geom["bytes"]) if geom else 0)
             rows.append({**seg.as_json(), **wrote, "pages": m.pages,
                          "frames": m.frames_total,
+                         **({"geom": geom} if geom else {}),
+                         **({"extract": m.case["segment"].get("extract")} if extracts else {}),
                          "warnings": [w.get("text") for w in
                                       verdict.as_json().get("warnings") or []]})
     finally:

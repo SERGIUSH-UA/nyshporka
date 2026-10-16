@@ -221,7 +221,8 @@ def test_zvychainyi_pack_vidmovliaie_ponad_steliu() -> None:
 
 def test_zvychainyi_paket_lyshaietsia_na_skhemi_2() -> None:
     assert bundle.Manifest().schema == bundle.SCHEMA_PLAIN == 2
-    assert bundle.SCHEMA == segment.SCHEMA_SEGMENT
+    assert segment.SCHEMA_SEGMENT == 3
+    assert bundle.SCHEMA == segment.SCHEMA_EXTRACT == 4
 
 
 # ── приймання й каталог ──────────────────────────────────────────────────────

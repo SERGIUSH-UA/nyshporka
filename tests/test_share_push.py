@@ -351,3 +351,28 @@ def test_zhurnal_pyshe_pid_zamkom(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     assert zamky == [workspace().derived / "share" / "journal.lock"]
     assert len(journal.read(journal.PACKED)) == 1
     assert not list((tmp_path / "share").glob("*.lock"))
+
+
+def test_sprava_segmentamy_viddaietsia_tekoiu(pul: Pul, monkeypatch: pytest.MonkeyPatch,
+                                               tmp_path: Path) -> None:
+    """Вирізки по селах пакуються в теку сегментів; пачка віддає її цілою."""
+    teka = tmp_path / "A_1_9~segments"
+    teka.mkdir()
+    for n in ("A~x-1-00001-00005.nyshtext", "A~x-1-00006-00009.nyshtext"):
+        (teka / n).write_bytes(b"x")
+
+    def pack_segments(scope: str, dest: Any = None, **kw: Any) -> dict[str, Any]:
+        pul.packed.append({"case": scope, **kw})
+        return {"dir": str(teka), "segments": [{"n": 1}, {"n": 2}], "mode": "extract"}
+
+    monkeypatch.setattr(PUB, "pack_segments", pack_segments)
+    items = tmp_path / "list.jsonl"
+    items.write_text('{"case": "A/1/9", "segments": true, "by_part": true}\n',
+                     encoding="utf-8")
+    env = _push(from_file=str(items))
+    assert env.ok, env.error
+    row = env.data["rows"][0]
+    assert row["ok"], row
+    assert row["segments"] == 2
+    assert len(pul.sent) == 2 and all("~segments" in s for s in pul.sent)
+    assert pul.packed[0]["by_part"] is True

@@ -22,7 +22,7 @@ from __future__ import annotations
 import os
 import shutil
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -60,6 +60,9 @@ class Look:
     #: Пакет щойно завантажено з адреси й він лежить у робочій теці, а не в
     #: сховищі доказів (`discard` прибирає його, `accept` переносить у доказ).
     downloaded: bool = False
+    #: Сегмент-вирізка: донорське ім'я кадру (з префіксом частини) → ім'я того
+    #: самого кадру тут (`align.grade_part`). Порожньо — не вирізка.
+    part_names: dict[str, str] = field(default_factory=dict)
 
     def as_json(self) -> dict[str, Any]:
         m = self.manifest
@@ -278,10 +281,37 @@ def _look_at(path: Path, *, hash_frames: bool, texts: bool, downloaded: bool) ->
     # Відбиток лежить у шапці кадрів маніфесту. Старий пакет його не має —
     # тоді прив'язка міряється як раніше, за іменами й кількістю.
     their_fp = manifest.frames.get("fingerprint")
-    grade = align.grade(frames, case_dir, hash_frames=hash_frames,
-                        their_fp=their_fp if isinstance(their_fp, dict) else None)
+    fp = their_fp if isinstance(their_fp, dict) else None
+    ext = extract_of(manifest)
+    if ext is not None:
+        # 🔴 Вирізка з плівки міряється сама, а не проти всієї справи: її
+        # кадри мають префікс села, а той самий кадр тут може лежати в теці
+        # цілої плівки, де поруч інші справи.
+        grade, names = align.grade_part(frames, prefix=ext["prefix"], film=ext["film"],
+                                        case_dir=case_dir, their_fp=fp,
+                                        hash_frames=hash_frames)
+        return Look(path=path, manifest=manifest, verdict=verdict, frames=frames,
+                    alignment=grade, inventory=inv, downloaded=downloaded,
+                    part_names=names)
+    grade = align.grade(frames, case_dir, hash_frames=hash_frames, their_fp=fp)
     return Look(path=path, manifest=manifest, verdict=verdict, frames=frames,
                 alignment=grade, inventory=inv, downloaded=downloaded)
+
+
+def extract_of(m: Manifest) -> dict[str, str] | None:
+    """Сегмент-вирізка: {prefix, film}; інакше `None`."""
+    from nyshporka.share import segment as SG
+
+    seg = (m.case or {}).get("segment")
+    if not isinstance(seg, dict) or seg.get("mode") != SG.MODE_EXTRACT:
+        return None
+    dirs = seg.get("dirs") if isinstance(seg.get("dirs"), list) else []
+    raw = seg.get("extract")
+    ext: dict[str, Any] = raw if isinstance(raw, dict) else {}
+    if not dirs:
+        return None
+    return {"prefix": bundle.safe_name(str(dirs[0]), default="part") + SG.SEP,
+            "film": str(ext.get("fs_film") or ext.get("dgs") or "")}
 
 
 def _voice_runs(m: Manifest) -> dict[str, str]:
@@ -554,6 +584,11 @@ def _accept_seen(seen: Look, src: str, *, force: bool, replace: bool,
     # на місцеві лише там, де тотожність кадрів доведена id джерела.
     names = (align.page_names(seen.frames, case_dir)
              if seen.alignment.label == align.EXACT else {})
+    if extract_of(seen.manifest) is not None:
+        # Вирізка: її тека кадрів тут — та, де знайшлись її кадри (може бути
+        # тека цілої плівки), а імена — лише доведені (`exact`).
+        case_dir = Path(seen.alignment.case_dir) if seen.alignment.case_dir else case_dir
+        names = dict(seen.part_names) if seen.alignment.label == align.EXACT else {}
     names = {a: b for a, b in names.items() if a != b}
 
     # 🔴 Розпакування, позначка й заміна — у тимчасовій сусідній теці, а на
@@ -826,6 +861,22 @@ def _page_src(m: Manifest, frames: list[dict[str, Any]],
     return out
 
 
+def _extract_mark(m: Manifest) -> dict[str, Any]:
+    seg = (m.case or {}).get("segment")
+    ext = seg.get("extract") if isinstance(seg, dict) else None
+    return dict(ext) if isinstance(ext, dict) else {}
+
+
+def _page_film(frames: list[dict[str, Any]], names: dict[str, str]) -> dict[str, int]:
+    """Стем сторінки (наш) → номер кадру на плівці; лише для вирізок."""
+    out: dict[str, int] = {}
+    for f in frames:
+        name, n = str(f.get("name") or ""), f.get("film_frame")
+        if name and isinstance(n, int) and n > 0:
+            out[Path(names.get(name, name)).stem] = n
+    return out
+
+
 #: Файли однієї сторінки прогону: текст і рамки рядків.
 _PAGE_SUFFIXES = (".txt", ".lines.json")
 
@@ -901,6 +952,11 @@ def _stamp_run(run_dir: Path, m: Manifest, src: Path, *, voice: dict[str, Any],
         # звіряти сторінку з оригіналом, хоч пакет це знав.
         "refs": [r for r in (m.refs or []) if isinstance(r, dict)],
         "page_src": _page_src(m, frames or [], names or {}),
+        # Вирізка з плівки: де вона на плівці й номер кадру плівки на кожну
+        # сторінку — щоб показати аркуш у переглядачі FS і тоді, коли кадри
+        # тут прив'язано лише за позицією.
+        "extract": _extract_mark(m),
+        "page_film": _page_film(frames or [], names or {}),
     }
     meta["shared"] = {k: v for k, v in mark.items() if v}
     write_json(path, meta)

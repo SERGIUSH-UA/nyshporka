@@ -156,6 +156,11 @@ def pack_cmd(
                                        "одного внеску — за теками кадрів"),
     segment_files: int = typer.Option(18_000, "--segment-files",
                                       help="файлів тексту в сегменті (усі голоси)"),
+    by_part: bool | None = typer.Option(None, "--by-part/--alpha",
+                                        help="з --segments: тека = вирізка з плівки "
+                                             "(село), сегмент на кожну, місце на "
+                                             "плівці з `nysh share part`; --alpha — "
+                                             "частини картотеки. Без прапорця — само"),
     as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Зібрати пакет прочитаного для обміну.
@@ -173,13 +178,13 @@ def pack_cmd(
         "publisher": publisher, "contact": contact, "site": site, "note": note,
         "link": list(link), "extra": list(extra), "license": license_,
         "source_terms": source_terms, "archive_name": archive_name,
-        "skip_run": list(skip_run), "segments": segments,
-        "segment_files": segment_files,
+        "skip_run": list(skip_run), "segments": segments or by_part is True,
+        "segment_files": segment_files, "by_part": by_part,
         **_card_args(title, years, place, genre, frames, frames_unknown, scans)})
     if _answer(env, as_json):
         return
     d = env.data or {}
-    if segments:
+    if segments or by_part is True:
         _show_segments(d)
         _notes(env)
         return
@@ -230,16 +235,92 @@ def _show_segments(d: dict[str, Any]) -> None:
                   f"{_e(d.get('frames_total'))} ({_e(d.get('frames_source') or '—')})")
     for s in d.get("skipped_runs") or []:
         console.print(f"  [muted]не їде: {_e(s.get('run'))} — {_e(s.get('why'))}[/muted]")
+    if d.get("mode") == "extract":
+        console.print("  поділ: [bold]вирізки з плівки[/bold] — сегмент на кожну теку")
+        for r in d.get("case_range") or []:
+            how = "" if r.get("certain") else " [warn](межі лише оцінено)[/warn]"
+            console.print(f"  справа на плівці {_e(r.get('fs_film'))}: кадри "
+                          f"{_e(r.get('from'))}-{_e(r.get('to'))} "
+                          f"[muted]({_e(r.get('src'))})[/muted]{how}")
+        if not d.get("case_range"):
+            console.print("  [muted]меж справи на плівках не знайдено — перевірки, чи "
+                          "вирізка не залазить у сусідню справу, не буде[/muted]")
     for s in segs:
         tail = (f"{_mb(s['bytes'])}" if s.get("bytes")
                 else f"{_mb(s.get('bytes_raw') or 0)} до стиску")
         console.print(f"  {s.get('n'):>3}/{s.get('of')}  {_e(s.get('label'))} · "
                       f"стор. {_e(s.get('pages'))} · файлів {_e(s.get('files'))} · {tail}")
+        x = s.get("extract") or {}
+        if x:
+            where = " · ".join(v for v in (
+                f"плівка {x.get('fs_film') or x.get('dgs')}" if x.get("fs_film") or x.get("dgs") else "",
+                f"кадри {x.get('frame_from')}-{x.get('frame_to')}" if x.get("frame_from") else "",
+                f"арк. {x.get('folios')}" if x.get("folios") else "") if v)
+            console.print(f"         [muted]{_e(where)}[/muted]")
+    for label, h in (d.get("index_hints") or {}).items():
+        console.print(f"  [muted]покажчик про «{_e(label)}»: " + _e(" · ".join(
+            f"{k} {v}" for k, v in h.items())) + " — лише підказка[/muted]")
     if d.get("dry_run"):
         console.print("[dim]нічого не записано (--dry-run)[/dim]")
     else:
         console.print(f"\nтека: [bold]{_e(d.get('dir'))}[/bold]")
         console.print("[dim]віддати всі сегменти: nysh share publish <тека>[/dim]")
+
+
+@app.command("part")
+def part_cmd(
+    folder: str = typer.Argument(..., help="тека кадрів однієї вирізки (село з плівки)"),
+    film: str = typer.Option("", "--film", help="номер мікрофільму FamilySearch"),
+    dgs: str = typer.Option("", "--dgs", help="група зображень FS (DGS), якщо відома"),
+    frames_on_film: str = typer.Option("", "--frames-on-film",
+                                       help="кадри вирізки на плівці (як у переглядачі "
+                                            "FS): 670-709; «-» — стерти"),
+    folios: str = typer.Option("", "--folios", help="аркуші справи: 35-55"),
+    village: str = typer.Option("", "--village", help="село, як в описі справи"),
+    cross_case: str = typer.Option("", "--cross-case",
+                                   help="вирізка виходить за межі справи на плівці — чому"),
+    from_index: bool = typer.Option(False, "--from-index",
+                                    help="узяти плівку, кадри й аркуші з покажчика "
+                                         "катаграфій (підписуються «за покажчиком»)"),
+    clear: bool = typer.Option(False, "--clear", help="прибрати оголошену вирізку"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
+) -> None:
+    """Вирізка з плівки: де ця тека на плівці FamilySearch і які аркуші справи.
+
+    🔴 На одній плівці лежить кілька справ, а одна справа буває на двох
+    плівках. Кадри — як їх нумерує переглядач FamilySearch, а не з 1 у теці.
+    Записане діє на пакування справи сегментами (`share pack --segments
+    --by-part`): село стає окремим сегментом зі сталим ключем.
+    """
+    from nyshporka import ops as O
+
+    env = O.call("share.part", {"dir": folder, "film": film, "dgs": dgs,
+                                "frames_on_film": frames_on_film, "folios": folios,
+                                "village": village, "cross_case": cross_case,
+                                "from_index": from_index, "clear": clear})
+    if _answer(env, as_json):
+        return
+    d = env.data or {}
+    x = d.get("extract") or {}
+    console.print(f"тека: [bold]{_e(d.get('dir'))}[/bold] · справа "
+                  f"{_e(d.get('shifra') or '—')} · кадрів у теці {_e(d.get('frames_on_disk'))}")
+    if x:
+        src = x.get("src") or {}
+        for k, label in (("village", "село"), ("fs_film", "плівка"), ("dgs", "DGS"),
+                         ("frame_from", "кадри на плівці"), ("folios", "аркуші"),
+                         ("crosses", "за межами справи")):
+            if not x.get(k):
+                continue
+            v = (f"{x['frame_from']}-{x.get('frame_to')}" if k == "frame_from" else x[k])
+            mark = " [muted](за покажчиком)[/muted]" if src.get(k) == "index" else ""
+            console.print(f"  {label}: {_e(v)}{mark}")
+    else:
+        console.print("  [muted]вирізку не оголошено[/muted]")
+    h = d.get("index_hint") or {}
+    if h:
+        console.print("  [muted]покажчик катаграфій: " + _e(" · ".join(
+            f"{k} {v}" for k, v in h.items())) + "[/muted]")
+    _notes(env)
 
 
 @app.command("pack-print")
