@@ -1694,6 +1694,32 @@ def print_status_cmd(
     _notes(env)
 
 
+@print_app.command("adopt")
+def print_adopt_cmd(
+    vydannia: str = typer.Argument(..., help="код видання латинкою (KOLSELO_PYR)"),
+    title: str = typer.Option("", "--title", help="назва видання"),
+    city: str = typer.Option("", "--city", help="місто видання"),
+    issues_root: str = typer.Option("", "--from", help="тека з теками номерів; "
+                                                       "типово derived/print/issues"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
+) -> None:
+    """Записати видання з уже прочитаних номерів, коли кадрів на цій машині немає.
+
+    Далі — `nysh print assemble`. Наскрізних номерів в іменах прогонів немає,
+    тож пропуски номерів не рахуються.
+    """
+    from nyshporka import ops as O
+
+    env = O.call("print.adopt", {"vydannia": vydannia, "title": title, "city": city,
+                                 "issues_root": issues_root})
+    if _answer(env, as_json):
+        return
+    d = env.data
+    console.print(f"✅ {vydannia.upper()}: {d['issues']} номерів, роки "
+                  f"{', '.join(map(str, d['years'])) or '—'} → {d['record']}")
+    _notes(env)
+
+
 @print_app.command("assemble")
 def print_assemble_cmd(
     vydannia: str = typer.Argument("", help="код видання; порожньо — усі"),

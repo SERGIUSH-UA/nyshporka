@@ -121,6 +121,31 @@ def parse_issue_name(name: str) -> IssueName | None:
                      date=date, year=year)
 
 
+_RUN_TAIL_RE = re.compile(
+    r"^(?P<date>(?P<year>\d{4})-(?P<m>\d{2})-(?P<d>\d{2}))(?:_(?P<tail>[^_]+))?$")
+
+
+def parse_run_name(code: str, run: str) -> IssueName | None:
+    """Ім'я прогону номера → `IssueName`; обернене до `<код>_<IssueName.ident>`.
+
+    `kolselo_pyr_1938-03-15_60`, `kolselo_pyr_1935-08-12_dod-111`,
+    `kolselo_pyr_1936-01-06`. Наскрізного номера в імені прогону немає — він
+    губиться ще при складанні плану, тож `no_total` порожній.
+    """
+    prefix = f"{code.lower()}_"
+    if not run.lower().startswith(prefix):
+        return None
+    m = _RUN_TAIL_RE.match(run[len(prefix):])
+    if m is None:
+        return None
+    if not (1 <= int(m.group("m")) <= 12 and 1 <= int(m.group("d")) <= 31):
+        return None
+    date, year, tail = m.group("date"), int(m.group("year")), m.group("tail") or ""
+    if tail == "dod" or tail.startswith("dod-"):
+        return IssueName(no=tail[4:], no_total="", date=date, year=year, supplement=True)
+    return IssueName(no=tail, no_total="", date=date, year=year)
+
+
 def is_issue_dir_name(name: str) -> bool:
     """Чи ім'я теки — номер друкованого видання (для бібліотеки й розгортання)."""
     return parse_issue_name(name) is not None

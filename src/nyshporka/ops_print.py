@@ -42,6 +42,48 @@ def print_status(a: PrintStatusArgs) -> Envelope:
     return env
 
 
+class PrintAdoptArgs(BaseModel):
+    vydannia: str = Field(description="код видання латинкою (KOLSELO_PYR)")
+    title: str = Field(default="", description="назва видання")
+    city: str = Field(default="", description="місто видання")
+    issues_root: str = Field(default="", description="де лежать теки номерів; "
+                                                     "порожньо — derived/print/issues")
+
+
+@op("print.adopt", summary="Записати видання з уже прочитаних номерів (кадри деінде)",
+    args=PrintAdoptArgs, mutates=True, agent=False, section=SECTION,
+    next_hints=(("print.assemble", "зібрати роки з прочитаних номерів"),))
+def print_adopt(a: PrintAdoptArgs) -> Envelope:
+    """Видання, номери якого прочитано, а кадрів на цій машині немає.
+
+    Звичайно видання записує `cloud go --print` із теки кадрів. Коли кадри лежать
+    у чужому сховищі, а тексти номерів уже вдома, запис робиться з тек тексту:
+    номер — за ім'ям прогону і `case_key` мети. Наскрізних номерів в імені прогону
+    немає, тож пропуски номерів (`missing_numbers`) тут не рахуються.
+    """
+    from pathlib import Path
+
+    from nyshporka import print_edition as PE
+
+    try:
+        got = PE.adopt(a.vydannia, title=a.title, city=a.city,
+                       issues_root=Path(a.issues_root) if a.issues_root else None)
+    except ValueError as exc:
+        return fail(str(exc))
+    env = ok({"record": str(got.path), "issues": got.issues, "years": got.years,
+              "skipped": got.skipped[:50]})
+    if not got.issues:
+        return env.warn("nothing_adopted",
+                        f"тек номерів {a.vydannia.lower()}_* з метою VYD/{a.vydannia.upper()}/… "
+                        "не знайдено")
+    env.warn("no_running_numbers", "наскрізних номерів в іменах прогонів немає — "
+                                   "пропуски номерів у роках не рахуються")
+    if got.skipped:
+        env.warn("skipped", f"не розібрано як номер видання: {len(got.skipped)} тек, "
+                            f"напр. {got.skipped[0]}")
+    return env
+
+
 class PrintAssembleArgs(BaseModel):
     vydannia: str = Field(default="", description="код видання; порожньо — усі")
     index: bool = Field(default=True, description="одразу покласти роки в текстовий стор")

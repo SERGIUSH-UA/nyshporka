@@ -259,13 +259,107 @@ def record(code: str, *, title: str, city: str,
         data["issues"][run] = {"case_dir": str(case_dir), "out_dir": str(out_dir)}
         roots.add(str(edition_root(Path(case_dir))))
     data["roots"] = sorted(roots)
+    return _write_record(data)
+
+
+def _write_record(data: dict[str, Any]) -> Path:
     data["updated"] = time.strftime("%Y-%m-%dT%H:%M:%S")
-    path = record_path(code)
+    path = record_path(str(data["code"]))
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
     os.replace(tmp, path)
     return path
+
+
+@dataclass
+class Adopted:
+    """Що `adopt` записав у видання з тек тексту."""
+
+    path: Path
+    issues: int
+    years: list[int]
+    skipped: list[str] = field(default_factory=list)
+
+
+def adopt(code: str, *, title: str = "", city: str = "",
+          issues_root: Path | None = None) -> Adopted:
+    """Записати видання з УЖЕ ПРОЧИТАНИХ номерів — без локальних кадрів.
+
+    Кадри газети лежать у чужому сховищі (партнер дав читати свій бакет), а
+    тексти номерів — у `derived/print/issues/<код>_<дата>_<номер>/`. Запис
+    видання робив лише `cloud go --print` із теки кадрів, тож без неї роки не
+    збирались зовсім (16.10.2026, 1 606 номерів «Колективізованого села»).
+    Номер ідентифікується за ім'ям прогону й `case_key` його мети
+    (`VYD/<КОД>/<рік>`); наскрізного номера в імені прогону немає.
+    """
+    code = code.upper()
+    if not vydannia.is_code(code):
+        raise ValueError(f"код видання «{code}» — лише латинка й цифри, від двох знаків")
+    root = issues_root or _issues_root()
+    data = load_record(code) or {"code": code, "issues": {}, "roots": []}
+    data["title"] = title or data.get("title") or ""
+    data["city"] = city or data.get("city") or ""
+    years: set[int] = set()
+    skipped: list[str] = []
+    added = 0
+    prefix = f"{code.lower()}_"
+    for d in sorted(root.glob(f"{prefix}*")) if root.is_dir() else []:
+        if not d.is_dir():
+            continue
+        name = VI.parse_run_name(code, d.name)
+        meta = _read_json(d / "_htr_meta.json")
+        key = str(meta.get("case_key") or "")
+        if name is None or not key.upper().startswith(f"VYD/{code}/"):
+            skipped.append(d.name)
+            continue
+        row = data["issues"].get(d.name) or {}
+        if row.get("case_dir") and Path(str(row["case_dir"])).is_dir():
+            continue                       # номер із локальними кадрами — не чіпаємо
+        data["issues"][d.name] = {"case_dir": "", "out_dir": str(d), "no": name.no,
+                                  "no_total": name.no_total, "date": name.date,
+                                  "supplement": name.supplement}
+        years.add(name.year)
+        added += 1
+    return Adopted(path=_write_record(data), issues=added, years=sorted(years),
+                   skipped=skipped)
+
+
+def _issues_root() -> Path:
+    from nyshporka.cloud import printed
+
+    return printed.out_root()
+
+
+def _read_json(path: Path) -> dict[str, Any]:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _issue_from_text(row: dict[str, Any]) -> VI.Issue | None:
+    """Номер без локальних кадрів — із теки його тексту.
+
+    Сторінки — ключі `pages` мети в тому порядку, у якому їх читав рушій (за
+    іменем кадру); лише їхні імена потрібні збиранню року (`stem` → txt). Якщо
+    `htr_case_summary.json` знає більше сторінок, ніж мета, нестача лишається
+    видимою: рік із нею не буде повним.
+    """
+    out = Path(str(row.get("out_dir") or ""))
+    date = str(row.get("date") or "")
+    if not out.is_dir() or len(date) < 4 or not date[:4].isdigit():
+        return None
+    meta = _read_json(out / "_htr_meta.json")
+    names = sorted(str(k) for k in (meta.get("pages") or {}))
+    if not names:
+        names = sorted(f"{p.stem}.jpg" for p in out.glob("*.txt"))
+    expected = int(_read_json(out / "htr_case_summary.json").get("n_pages_expected") or 0)
+    names += [f"__unread_{k:04d}.jpg" for k in range(len(names) + 1, expected + 1)]
+    return VI.Issue(no=str(row.get("no") or ""), no_total=str(row.get("no_total") or ""),
+                    date=date, year=int(date[:4]), path=out,
+                    pages=[out / n for n in names], supplement=bool(row.get("supplement")))
 
 
 def repoint(out_dirs: dict[str, str]) -> int:
@@ -326,16 +420,36 @@ class Year:
 
 def _edition_of(rec: dict[str, Any]) -> tuple[VI.Edition | None, dict[str, Path]]:
     """Дерево видання з диска й тека тексту кожного номера (за текою кадрів)."""
+    rows = list((rec.get("issues") or {}).values())
     by_dir = {_norm(v.get("case_dir") or ""): Path(str(v.get("out_dir") or ""))
-              for v in (rec.get("issues") or {}).values()}
+              for v in rows if v.get("case_dir")}
     eds = [VI.scan(Path(r)) for r in rec.get("roots") or [] if Path(r).is_dir()]
-    if not eds:
-        return None, by_dir
-    ed = eds[0]
+    ed: VI.Edition | None = eds[0] if eds else None
     for other in eds[1:]:
+        assert ed is not None
         ed.issues += other.issues
         ed.unparsed += other.unparsed
         ed.empty += other.empty
+    # Номери без локальних кадрів (`nysh print adopt`): текст є, кадри деінде.
+    # Локальна тека номера, якщо вона є, важить більше за запис із тексту.
+    have = {i.ident for i in ed.issues} if ed else set()
+    remote: list[VI.Issue] = []
+    for v in rows:
+        if v.get("case_dir") and Path(str(v["case_dir"])).is_dir():
+            continue
+        iss = _issue_from_text(v) if v.get("date") else None
+        if iss is None or iss.ident in have:
+            continue
+        have.add(iss.ident)
+        remote.append(iss)
+        by_dir[_norm(iss.path)] = iss.path
+    if remote:
+        if ed is None:
+            ed = VI.Edition(root=editions_dir() / str(rec.get("code") or ""),
+                            title=str(rec.get("title") or rec.get("code") or ""))
+        ed.issues += remote
+    if ed is None:
+        return None, by_dir
     ed.issues.sort(key=VI.issue_order)
     return ed, by_dir
 
