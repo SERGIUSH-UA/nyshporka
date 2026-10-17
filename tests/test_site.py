@@ -76,7 +76,12 @@ def test_the_living_are_absent_from_the_public_sources(space: Path) -> None:
     assert LIVING_NAME not in body
     assert "I9004" not in _text(docs)
     assert (docs / "persons" / "I9001.md").is_file()
-    assert "_приватна особа_" in (docs / "families" / "F9002.md").read_text(encoding="utf-8")
+    family = (docs / "families" / "F9002.md").read_text(encoding="utf-8")
+    assert '<span class="nysh-pc__name">приватна особа</span>' in family
+    # Відкриту версію можна шукати лише серед опублікованих.
+    index = (docs / "assets" / "search.json").read_text(encoding="utf-8")
+    assert "I9004" not in index and LIVING_NAME not in index
+    assert "I9001" in index
 
 
 def test_the_private_build_shows_the_living_by_decade(space: Path) -> None:

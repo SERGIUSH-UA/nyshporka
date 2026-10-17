@@ -1,31 +1,65 @@
 ---
-title: {{ title }}
+title: {{ title | tojson }}
+hide:
+  - navigation
+  - toc
 ---
 
-# {{ title }}
+<div class="nysh-home">
 
-{% if description %}{{ description }}
-
+<section class="nysh-home__hero">
+<h1 class="nysh-home__title">{{ title }}</h1>
+{% if description %}
+<p class="nysh-home__lead">{{ description }}</p>
 {% endif %}
-| | |
-|---|---|
-| [Особи](persons/index.md) | **{{ counts.persons }}** |
-| [Родини](families/index.md) | **{{ counts.families }}** |
-| [Місця](places/index.md) | **{{ counts.places }}** |
-| [Джерела](sources/index.md) | **{{ counts.sources }}** |
-| Фактів із цитатою | **{{ counts.facts_cited }}** з {{ counts.facts }} |
+<div class="nysh-search" data-index-url="assets/search.json" data-base="" data-tree="family-tree.html">
+<input type="search" class="nysh-search__input" placeholder="Знайти особу: ім'я, прізвище, рік…" aria-label="Пошук особи" autocomplete="off" spellcheck="false">
+<ul class="nysh-search__list" role="listbox" hidden></ul>
+</div>
+<p class="nysh-home__years">{{ year_min }} — {{ year_max }}</p>
+</section>
 
-Дерево — [тут](family-tree.md), граф зв'язків — [тут](family-graph.md), мапа місць —
-[тут](places-map.md).
+<section class="nysh-stats" aria-label="Обсяг">
+<a class="nysh-stat" href="persons/index.html"><span class="nysh-stat__n">{{ counts.persons }}</span><span class="nysh-stat__l">осіб</span></a>
+<a class="nysh-stat" href="families/index.html"><span class="nysh-stat__n">{{ counts.families }}</span><span class="nysh-stat__l">родин</span></a>
+<a class="nysh-stat" href="places/index.html"><span class="nysh-stat__n">{{ counts.places }}</span><span class="nysh-stat__l">місць</span></a>
+<a class="nysh-stat" href="sources/index.html"><span class="nysh-stat__n">{{ counts.sources }}</span><span class="nysh-stat__l">джерел</span></a>
+</section>
 
+<section class="nysh-tiles">
+<a class="nysh-tile nysh-tile--tree" href="family-tree.html">
+<span class="nysh-tile__title">Дерево</span>
+<span class="nysh-tile__text">Предки вгору, нащадки вниз від будь-якої особи. Торкніться картки, щоб перейти далі.</span>
+</a>
+<a class="nysh-tile nysh-tile--map" href="places-map.html">
+<span class="nysh-tile__title">Мапа місць</span>
+<span class="nysh-tile__text">{{ counts.places_with_coords }} місць на мапі: де народжувались, служили, жили.</span>
+</a>
+<a class="nysh-tile nysh-tile--persons" href="persons/index.html">
+<span class="nysh-tile__title">Усі особи</span>
+<span class="nysh-tile__text">Покажчик за прізвищем із фільтром.</span>
+</a>
+<a class="nysh-tile nysh-tile--graph" href="family-graph.html">
+<span class="nysh-tile__title">Граф зв'язків</span>
+<span class="nysh-tile__text">Увесь рід одним полотном: гілки, гіпотези, хто жив у вибраний рік.</span>
+</a>
+{% for item in nav_extra %}
+<a class="nysh-tile" href="{{ item.path | replace('.md', '.html') }}">
+<span class="nysh-tile__title">{{ item.title }}</span>
+</a>
+{% endfor %}
+</section>
+
+<section class="nysh-home__about">
+<p>Кожен факт веде до джерела, а джерело — до доказу там, де він є. Факти з цитатою: <strong>{{ counts.facts_cited }}</strong> з {{ counts.facts }}.</p>
 {% if public %}
-!!! info "Відкрита версія"
-    Живих і тих, хто пов'язаний із живими, тут немає: ні сторінок, ні імен у дереві, ні сканів.
+<p class="nysh-note">Відкрита версія: живих і близьких до живих тут немає — ні сторінок, ні імен у дереві, ні сканів.</p>
 {% else %}
-!!! warning "Приватна версія"
-    Живі особи показані з датами до десятиліття, без фото й нотаток. Для публікації збирайте
-    відкриту версію: `nysh site build --public`.
+<p class="nysh-note nysh-note--warn">Приватна версія: живі показані з датами до десятиліття, без фото й нотаток. Для публікації — <code>nysh site build --public</code>.</p>
 {% endif %}
+<p class="nysh-meta">Зібрано Нишпоркою {{ built }}.</p>
+</section>
 
-Кожен факт веде до джерела, а джерело — до доказу-вирізки там, де вона є. Зібрано з канону
-роду Нишпоркою {{ built }}.
+</div>
+
+<script type="module" src="assets/js/home.js"></script>

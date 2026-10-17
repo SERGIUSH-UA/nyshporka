@@ -102,6 +102,46 @@ def _years(persons: list[Any]) -> tuple[int, int]:
     return (min(years) if years else today - 100, max(max(years) if years else today, today))
 
 
+def install_assets(docs: Path) -> None:
+    """Стилі, скрипти й бібліотеки сайту → `<docs>/assets` (поверх наявного)."""
+    shutil.copytree(ASSETS, docs / "assets", dirs_exist_ok=True)
+
+
+def write_pages(docs: Path, cfg: CFG.SiteConfig, rendered: Any, shown: list[Any],
+                places: list[Any], *, public: bool, templates_dirs: list[Path] | None = None,
+                pages: tuple[str, ...] = PAGES) -> dict[str, int]:
+    """Оглядові сторінки (головна, дерево, граф, мапа) і `assets/stats.json`.
+
+    `rendered` — звіт `render.build`, `shown` — опубліковані особи. Повертає
+    лічильники сайту: їх же бере головна, рукописна в тому числі (через
+    `stats.json`)."""
+    facts = [f for p in shown for f in p.facts]
+    placed = [pl for pl in places if pl.coords is not None]
+    counts = {"persons": rendered.persons, "families": rendered.families,
+              "places": rendered.places, "sources": rendered.sources,
+              "places_with_coords": len(placed), "facts": len(facts),
+              "facts_cited": sum(1 for f in facts if f.citations)}
+    y_min, y_max = _years(shown)
+    (docs / "assets").mkdir(parents=True, exist_ok=True)
+    (docs / "assets" / "stats.json").write_text(
+        json.dumps({**counts, "year_min": y_min, "year_max": y_max}), encoding="utf-8")
+    env = environment(templates_dirs or [])
+    ctx = {
+        "title": cfg.title, "description": cfg.description, "public": public,
+        "counts": counts, "built": date.today().isoformat(),
+        "year_min": y_min, "year_max": y_max,
+        "place_groups_json": json.dumps(
+            [{"id": g.id, "label": g.label, "color": g.color, "match": g.match}
+             for g in cfg.place_groups], ensure_ascii=False),
+        "eras_json": json.dumps(cfg.eras, ensure_ascii=False),
+        "nav_extra": [*cfg.nav_before, *cfg.nav_after],
+    }
+    for page in pages:
+        (docs / page).write_text(env.get_template(f"pages/{page}.j2").render(**ctx),
+                                 encoding="utf-8")
+    return counts
+
+
 def build(root: Path, *, public: bool = False, out: Path | None = None,
           force: bool = False, html: bool = True) -> SiteReport:
     from nyshporka.canon import check as C
@@ -124,7 +164,7 @@ def build(root: Path, *, public: bool = False, out: Path | None = None,
     rep = SiteReport(out=out, public=public, warnings=checked.count("WARN"))
 
     # 1. Ресурси пакета.
-    shutil.copytree(ASSETS, docs / "assets", dirs_exist_ok=True)
+    install_assets(docs)
 
     # 2. Хто прихований (відкрита версія) — до рендеру, бо рендер їх пропускає.
     canon = checked.canon
@@ -155,26 +195,8 @@ def build(root: Path, *, public: bool = False, out: Path | None = None,
 
     # 4. Оглядові сторінки: головна, дерево, граф, мапа.
     shown = [p for p in persons if p.id not in hidden]
-    facts = [f for p in shown for f in p.facts]
-    placed = [pl for pl in canon.places.values() if pl.coords is not None]
-    rep.counts = {"persons": rendered.persons, "families": rendered.families,
-                  "places": rendered.places, "sources": rendered.sources,
-                  "places_with_coords": len(placed), "facts": len(facts),
-                  "facts_cited": sum(1 for f in facts if f.citations)}
-    y_min, y_max = _years(shown)
-    env = environment(templates_dirs)
-    ctx = {
-        "title": cfg.title, "description": cfg.description, "public": public,
-        "counts": rep.counts, "built": date.today().isoformat(),
-        "year_min": y_min, "year_max": y_max,
-        "place_groups_json": json.dumps(
-            [{"id": g.id, "label": g.label, "color": g.color, "match": g.match}
-             for g in cfg.place_groups], ensure_ascii=False),
-        "eras_json": json.dumps(cfg.eras, ensure_ascii=False),
-    }
-    for page in PAGES:
-        (docs / page).write_text(env.get_template(f"pages/{page}.j2").render(**ctx),
-                                 encoding="utf-8")
+    rep.counts = write_pages(docs, cfg, rendered, shown, list(canon.places.values()),
+                             public=public, templates_dirs=templates_dirs)
 
     # 5. Власні сторінки людини — поверх згенерованого.
     overlay = root / CFG.OVERLAY
@@ -232,4 +254,5 @@ def build(root: Path, *, public: bool = False, out: Path | None = None,
     return rep
 
 
-__all__ = ["TEMPLATES", "SiteError", "SiteReport", "build", "default_out", "mkdocs_available"]
+__all__ = ["PAGES", "TEMPLATES", "SiteError", "SiteReport", "build", "default_out",
+           "install_assets", "mkdocs_available", "write_pages"]

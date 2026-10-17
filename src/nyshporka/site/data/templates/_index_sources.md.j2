@@ -1,56 +1,29 @@
 ---
 title: Джерела
+hide:
+  - toc
 ---
 
-# Джерела ({{ sources | length }})
+# Джерела
 
-Усього **{{ sources | length }}** джерел у каноні. Перейти за типом або глянути «Найцитованіші» внизу.
-
-<div class="nysh-jumpbar" markdown>
-{% for g in groups -%}
-[{{ g.label }}](#src-{{ g.id }}){ .nysh-jumpchip } {% if not loop.last %}{% endif %}
-{%- endfor %}
+<div class="nysh-filter" data-filter-target=".nysh-plist">
+<input type="search" class="nysh-filter__input" placeholder="Фільтр за назвою, архівом…" aria-label="Фільтр джерел" autocomplete="off">
+<span class="nysh-filter__count">{{ sources | length }} джерел</span>
 </div>
 
-## 🏆 Найцитованіші (топ-10)
-
-<div class="nysh-cards" markdown>
-{% for s in top %}
-<div class="nysh-card" markdown>
-
-**[{{ s.title }}]({{ s.id }}.md)**
-
-<span class="nysh-card__place">{{ s.type_label }}{% if s.authority %} · {{ s.authority }}{% endif %}</span>
-<span class="nysh-card__dates">📚 {{ s.citations_count }} цитувань</span>
-<span class="nysh-card__id">`{{ s.id }}`</span>
-
-</div>
+<nav class="nysh-jumpbar" aria-label="За типом">
+{% for g in groups %}
+<a class="nysh-jumpchip" href="#src-{{ g.id }}">{{ g.label }} <small>{{ g.members | length }}</small></a>
 {% endfor %}
-</div>
-
----
+</nav>
 
 {% for g in groups %}
 
-## {{ g.label }} ({{ g.members | length }}) { #src-{{ g.id }} }
+## {{ g.label }} { #src-{{ g.id }} .nysh-plist__letter }
 
-<div class="nysh-cards" markdown>
+<div class="nysh-plist nysh-plist--wide" markdown>
 {% for s in g.members %}
-<div class="nysh-card{% if s.citations_count == 0 %} nysh-card--private{% endif %}" markdown>
-
-**[{{ s.title }}]({{ s.id }}.md)**{% if s.url %} 🔗{% endif %}
-
-{% if s.authority -%}
-<span class="nysh-card__place">{{ s.authority }}</span>
-{% endif -%}
-{% if s.citations_count -%}
-<span class="nysh-card__dates">📚 {{ s.citations_count }} {% if s.citations_count == 1 %}цитування{% else %}цитувань{% endif %}</span>
-{%- else -%}
-<span class="nysh-card__dates">— ще не цитоване</span>
-{%- endif %}
-<span class="nysh-card__id">`{{ s.id }}`</span>
-
-</div>
+[<span class="nysh-pc__name">{{ s.title }}</span><span class="nysh-pc__years">{% if s.authority %}{{ s.authority }} · {% endif %}{% if s.citations_count %}цитувань: {{ s.citations_count }}{% else %}ще не цитоване{% endif %}</span>]({{ s.id }}.md){ .nysh-pc .nysh-pc--src{% if not s.citations_count %} .is-muted{% endif %} }
 {% endfor %}
 </div>
 

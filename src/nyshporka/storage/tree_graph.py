@@ -1,10 +1,8 @@
-"""Tree-graph: окремий derived JSON для нової multi-pane візуалізації.
+"""Tree-graph: derived JSON для дерева роду на сайті.
 
-Доповнює стару `_build_graph` (force-directed): додає generation, photo,
-initials, родинні id-маси та об'єкт families[] для sugiyama-DAG layout-у
-у браузері (dagre).
-
-Старий `data/derived/graph.json` лишається — Phase 4 його прибере.
+Доповнює `_build_graph` (граф зв'язків): generation, photo, initials,
+родинні id-маси (батьки, діти, подружжя, брати й сестри) та families[],
+з яких браузер розкладає дерево навколо особи у фокусі.
 """
 
 from __future__ import annotations
@@ -35,9 +33,8 @@ def build_tree_graph(persons: list[Person], families: list[Family]) -> dict[str,
 
     by_id = {p.id: p for p in persons}
 
-    parents_of, children_of, spouses_of, parent_family_of, spouse_families_of = (
-        _build_relation_index(persons, families)
-    )
+    (parents_of, children_of, spouses_of, siblings_of, parent_family_of,
+     spouse_families_of) = _build_relation_index(persons, families)
 
     generations = _compute_generations(persons, parents_of)
     eras = _compute_eras(persons, lived_map)
@@ -77,6 +74,7 @@ def build_tree_graph(persons: list[Person], families: list[Family]) -> dict[str,
                 "parent_ids": sorted(parents_of.get(p.id, set())),
                 "child_ids": sorted(children_of.get(p.id, set())),
                 "spouse_ids": sorted(spouses_of.get(p.id, set())),
+                "sibling_ids": sorted(siblings_of.get(p.id, set())),
                 "parent_family_id": parent_family_of.get(p.id),
                 "spouse_family_ids": sorted(spouse_families_of.get(p.id, set())),
                 "is_root": not parents_of.get(p.id),
@@ -98,7 +96,7 @@ def build_tree_graph(persons: list[Person], families: list[Family]) -> dict[str,
             "person_count": len(persons),
             "family_count": len(families),
             "redacted": False,
-            "schema_version": 1,
+            "schema_version": 2,
         },
         "generations": gen_range,
         "nodes": nodes,
@@ -117,6 +115,7 @@ def _build_relation_index(
     dict[str, set[str]],  # parents_of
     dict[str, set[str]],  # children_of
     dict[str, set[str]],  # spouses_of
+    dict[str, set[str]],  # siblings_of
     dict[str, str | None],  # parent_family_of
     dict[str, set[str]],  # spouse_families_of
 ]:
@@ -143,11 +142,16 @@ def _build_relation_index(
 
     person_ids = {p.id for p in persons}
 
+    siblings_of: dict[str, set[str]] = {p.id: set() for p in persons}
+
     for fam in families:
-        parent_ids: list[str] = []
-        for pid in (fam.husband, fam.wife, fam.hypothetical_husband, fam.hypothetical_wife):
-            if pid and pid in person_ids and pid not in parent_ids:
-                parent_ids.append(pid)
+        # Сторона чоловіка й сторона дружини. Гіпотетичний чоловік — альтернатива
+        # підтвердженому, а не його подружжя: пари беруться лише навхрест.
+        husbands = [pid for pid in dict.fromkeys((fam.husband, fam.hypothetical_husband))
+                    if pid and pid in person_ids]
+        wives = [pid for pid in dict.fromkeys((fam.wife, fam.hypothetical_wife))
+                 if pid and pid in person_ids]
+        parent_ids = husbands + [w for w in wives if w not in husbands]
         child_ids: list[str] = []
         for cid in fam.children:
             if cid in person_ids:
@@ -158,14 +162,16 @@ def _build_relation_index(
 
         for c in child_ids:
             parents_of[c].update(parent_ids)
+            siblings_of[c].update(x for x in child_ids if x != c)
         for par in parent_ids:
             children_of[par].update(child_ids)
-        for a in parent_ids:
-            for b in parent_ids:
-                if a != b:
-                    spouses_of[a].add(b)
+        for h in husbands:
+            for w in wives:
+                if h != w:
+                    spouses_of[h].add(w)
+                    spouses_of[w].add(h)
 
-    return parents_of, children_of, spouses_of, parent_family_of, spouse_families_of
+    return parents_of, children_of, spouses_of, siblings_of, parent_family_of, spouse_families_of
 
 
 def _compute_generations(

@@ -1,42 +1,38 @@
 ---
-title: Граф родини
+title: Граф зв'язків
+hide:
+  - navigation
+  - toc
 ---
 
-# Граф родини
-
-Усі **{{ counts.persons }}** осіб канону як граф: вузол — особа, ребро — батьківський чи
-подружній зв'язок. Пунктир — гіпотеза, напівпрозоре ребро — слабка цитата
-(`speculative`), червоний бордюр — суперечливі дані (`disputed`).
-
-<div id="nysh-graph-controls">
-  <div class="control-row">
-    <label for="nysh-year-slider">Рік: <strong id="nysh-year-display">{{ year_max }}</strong></label>
-    <input type="range" id="nysh-year-slider" min="{{ year_min }}" max="{{ year_max }}" value="{{ year_max }}" step="1">
-  </div>
-  <div class="control-row">
-    <label><input type="checkbox" id="nysh-toggle-hypothesis" checked> Гіпотетичні зв'язки</label>
-    <label><input type="checkbox" id="nysh-toggle-private" checked> Приватні особи</label>
-    <label><input type="checkbox" id="nysh-toggle-candidates" checked> Кандидати</label>
-    <button type="button" id="nysh-reset-zoom">Скинути зум</button>
-  </div>
+<div id="nysh-graph" class="nysh-graph nysh-app" data-graph-url="assets/tree.json" data-index-url="assets/search.json"
+     data-year-min="{{ year_min }}" data-year-max="{{ year_max }}">
+<div class="nysh-graph__bar nysh-app__bar">
+<div class="nysh-search nysh-search--compact">
+<input type="search" class="nysh-search__input" placeholder="Знайти особу…" aria-label="Знайти особу на графі" autocomplete="off" spellcheck="false">
+<ul class="nysh-search__list" role="listbox" hidden></ul>
+</div>
+<label class="nysh-graph__year"><span>Жили в <b data-out="year">усі роки</b></span>
+<input type="range" min="{{ year_min }}" max="{{ year_max + 1 }}" value="{{ year_max + 1 }}" step="1" aria-label="Рік"></label>
+<label class="nysh-check"><input type="checkbox" data-opt="hyp" checked> гіпотези</label>
+</div>
+<div class="nysh-graph__body nysh-app__body">
+<div class="nysh-tree__canvas">
+<canvas class="nysh-graph__canvas" aria-label="Граф зв'язків роду"></canvas>
+<div class="nysh-tree__zoom">
+<button type="button" data-act="zoom+" aria-label="Наблизити">+</button>
+<button type="button" data-act="zoom-" aria-label="Віддалити">−</button>
+<button type="button" data-act="fit" aria-label="Показати все">⤢</button>
+</div>
+<div class="nysh-tree__status">Завантаження…</div>
+</div>
+<aside class="nysh-panel" data-state="closed" aria-live="polite">
+<button type="button" class="nysh-panel__grip" aria-label="Розгорнути або згорнути деталі"><span></span></button>
+<div class="nysh-panel__body"></div>
+</aside>
+</div>
+<p class="nysh-meta">Вузол — особа, колір — гілка (зв'язна частина роду), лінія — батьки й діти, пунктир — гіпотеза. Повзунок лишає тих, хто жив у вибраний рік.</p>
 </div>
 
-<svg id="nysh-family-graph" data-graph-url="assets/graph.json"></svg>
-
-<div id="nysh-event-track"></div>
-
-<div id="nysh-graph-legend">
-  <span class="legend-item"><svg width="34" height="6"><line x1="0" y1="3" x2="34" y2="3" stroke="currentColor" stroke-width="2"/></svg> підтверджено</span>
-  <span class="legend-item"><svg width="34" height="6"><line x1="0" y1="3" x2="34" y2="3" stroke="currentColor" stroke-width="2" stroke-dasharray="4 3"/></svg> гіпотеза</span>
-  <span class="legend-item"><span class="dot disputed"></span> суперечливо</span>
-  <span class="legend-item"><span class="dot speculative"></span> слабка цитата</span>
-</div>
-
-<div id="nysh-tooltip" class="nysh-tooltip" style="display:none"></div>
-
-## Як читати граф
-
-- **Колір вузла** — гілка: зв'язна частина графа, корінь якої — найстарша особа без батьків.
-- **Товщина ребра** — сила найслабшої цитати факту: `direct` товсте, `speculative` тонке.
-- **Розмір вузла** — кількість фактів особи.
-- **Слайдер року** лишає тих, хто жив у цей рік.
+<script src="assets/vendor/d3.min.js"></script>
+<script type="module" src="assets/js/family-graph.js"></script>

@@ -1,17 +1,27 @@
 ---
 title: Мапа місць
+hide:
+  - navigation
+  - toc
 ---
 
-# Мапа місць
+<link rel="stylesheet" href="assets/vendor/leaflet.css">
 
-**{{ counts.places_with_coords }}** з **{{ counts.places }}** місць канону мають координати й стоять на мапі.
-Натисни на маркер — побачиш, хто там згаданий, і перейдеш на сторінку місця.
+<div id="nysh-map" class="nysh-map nysh-app" data-geojson-url="assets/places.geojson"
+     data-groups="{{ place_groups_json | e }}" data-eras="{{ eras_json | e }}">
+<div class="nysh-map__bar nysh-app__bar">
+<div class="nysh-chips" data-role="groups" aria-label="Групи місць"></div>
+<div class="nysh-chips" data-role="eras" aria-label="Епоха"></div>
+</div>
+<div class="nysh-map__body nysh-app__body">
+<div class="nysh-map__canvas"></div>
+<aside class="nysh-panel nysh-map__list" data-state="peek">
+<button type="button" class="nysh-panel__grip" aria-label="Розгорнути або згорнути перелік"><span></span></button>
+<div class="nysh-panel__body"></div>
+</aside>
+</div>
+<p class="nysh-meta">На мапі {{ counts.places_with_coords }} з {{ counts.places }} місць канону{% if counts.places_with_coords < counts.places %}; решта без координат — у <a href="places/index.html">переліку місць</a>{% endif %}.</p>
+</div>
 
-<div id="nysh-places-map" data-geojson-url="assets/places.geojson"
-     data-groups="{{ place_groups_json | e }}" data-eras="{{ eras_json | e }}"></div>
-{% if counts.places_with_coords < counts.places %}
-
-!!! note "Не всі місця на мапі"
-    {{ counts.places - counts.places_with_coords }} місць без координат (`coords` у картці місця) — вони є в
-    [переліку місць](places/index.md), але на мапу не потрапляють.
-{% endif %}
+<script src="assets/vendor/leaflet.js"></script>
+<script type="module" src="assets/js/places-map.js"></script>

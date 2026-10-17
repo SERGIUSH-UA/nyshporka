@@ -1,0 +1,42 @@
+{#- Спільні шматки сторінок. Картка особи — markdown-посилання з attr_list:
+    MkDocs переписує `.md` → `.html` лише в markdown-посиланнях, не в сирому <a>. -#}
+{% macro pcard(c, base="../persons/") -%}
+{% set cls = ".nysh-pc .nysh-pc--" ~ (c.sex | lower) ~ (" .is-hyp" if c.hyp else "") ~ (" .is-private" if c.private else "") -%}
+{% if c.id -%}
+[<span class="nysh-pc__name">{{ c.name }}</span><span class="nysh-pc__years">{{ c.years or "роки невідомі" }}</span>]({{ base }}{{ c.id }}.md){ {{ cls }} }
+{%- else -%}
+<span class="nysh-pc nysh-pc--u is-private"><span class="nysh-pc__name">{{ c.name }}</span></span>
+{%- endif %}
+{%- endmacro %}
+
+{% macro kin_group(title, cards, base="../persons/") -%}
+{% if cards %}
+<div class="nysh-kin__group" markdown>
+<div class="nysh-kin__label">{{ title }}</div>
+<div class="nysh-kin__cards" markdown>
+{% for c in cards %}
+{{ pcard(c, base) }}
+{% endfor %}
+</div>
+</div>
+{% endif %}
+{%- endmacro %}
+
+{% macro gallery(documents) -%}
+{% set imgs = documents | selectattr('is_img') | list %}
+{% set pdfs = documents | selectattr('is_pdf') | list %}
+{% if imgs %}
+<div class="nysh-gallery" markdown>
+{% for d in imgs %}
+[![{{ d.caption }}]({{ d.url }}){ loading=lazy }]({{ d.url }}){ .nysh-gallery__item title="{{ d.caption }}" }
+{% endfor %}
+</div>
+{% endif %}
+{% if pdfs %}
+<div class="nysh-doclist" markdown>
+{% for d in pdfs %}
+- [{{ d.caption }}]({{ d.url }}){ .nysh-doclist__pdf }
+{% endfor %}
+</div>
+{% endif %}
+{%- endmacro %}

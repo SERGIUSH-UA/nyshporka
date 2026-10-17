@@ -12,10 +12,11 @@ theme:
   language: {{ language }}
   features:
     - navigation.tabs
-    - navigation.sections
     - navigation.indexes
     - navigation.top
+    - navigation.footer
     - search.suggest
+    - search.highlight
     - toc.follow
   palette:
     - media: "(prefers-color-scheme: light)"
@@ -23,16 +24,18 @@ theme:
       primary: custom
       accent: custom
       toggle:
-        icon: material/brightness-7
+        icon: material/weather-night
         name: Темна тема
     - media: "(prefers-color-scheme: dark)"
       scheme: slate
       primary: custom
       accent: custom
       toggle:
-        icon: material/brightness-4
+        icon: material/weather-sunny
         name: Світла тема
   font: false
+  icon:
+    logo: material/family-tree
 
 markdown_extensions:
   - admonition
@@ -54,43 +57,31 @@ hooks:
   - {{ hooks_path | tojson }}
 
 extra_css:
-  - https://unpkg.com/leaflet@1.9.4/dist/leaflet.css
   - assets/css/theme.css
-  - assets/css/paper-texture.css
-  - assets/css/places-map.css
-  - assets/css/family-graph.css
-  - assets/css/family-tree.css
-  - assets/css/mobile.css
+  - assets/css/tree.css
+  - assets/css/map.css
+  - assets/css/graph.css
 {% for css in extra_css %}
   - {{ css | tojson }}
 {% endfor %}
 
 extra_javascript:
-  - https://unpkg.com/leaflet@1.9.4/dist/leaflet.js
-  - assets/js/places-map.js
-  - https://d3js.org/d3.v7.min.js
-  - assets/js/family-graph.js
-  - https://unpkg.com/@dagrejs/graphlib@2.2.4/dist/graphlib.min.js
-  - https://unpkg.com/@dagrejs/dagre@1.1.4/dist/dagre.min.js
-  - path: assets/js/tree/index.js
-    type: module
+  - assets/js/site.js
 
 nav:
   - Головна: index.md
 {% for item in nav_before %}
   - {{ item.title | tojson }}: {{ item.path | tojson }}
 {% endfor %}
+  - Дерево: family-tree.md
   - Особи:
       - persons/index.md
-  - Родини:
-      - families/index.md
-  - Дерево: family-tree.md
-  - Граф: family-graph.md
+      - Родини: families/index.md
+      - Граф зв'язків: family-graph.md
   - Місця:
       - places/index.md
       - Мапа: places-map.md
-  - Джерела:
-      - sources/index.md
+  - Джерела: sources/index.md
 {% for item in nav_after %}
   - {{ item.title | tojson }}: {{ item.path | tojson }}
 {% endfor %}

@@ -1,57 +1,32 @@
 ---
 title: Родини
+hide:
+  - toc
 ---
 
-# Родини ({{ families | length }})
+# Родини
 
-Усього в каноні — **{{ families | length }}** родин. Кожна — це задокументований шлюб (або гіпотетичний — пара плюс мінімум одна дитина). Перейти за літерою прізвища пара-пивота (зазвичай чоловіка), або розгорнути «За поколіннями» внизу.
-
-<div class="nysh-jumpbar" markdown>
-{% for lt in letters -%}
-[{{ lt }}](#fam-{{ lt | lower | replace('—', 'other') }}){ .nysh-jumpchip } {% if not loop.last %}{% endif %}
-{%- endfor %}
+<div class="nysh-filter" data-filter-target=".nysh-plist">
+<input type="search" class="nysh-filter__input" placeholder="Фільтр за іменем подружжя…" aria-label="Фільтр родин" autocomplete="off">
+<span class="nysh-filter__count">{{ families | length }} родин</span>
 </div>
+
+<nav class="nysh-jumpbar" aria-label="За літерою">
+{% for lt in letters %}
+<a class="nysh-jumpchip" href="#fam-{{ lt | lower | replace('—', 'other') }}">{{ lt }}</a>
+{% endfor %}
+</nav>
 
 {% for lt in letters %}
 
-## {{ lt }} { #fam-{{ lt | lower | replace('—', 'other') }} }
+## {{ lt }} { #fam-{{ lt | lower | replace('—', 'other') }} .nysh-plist__letter }
 
-<div class="nysh-cards" markdown>
+<div class="nysh-plist" markdown>
 {% for f in grouped[lt] %}
-<div class="nysh-card{% if f.is_hypothetical %} nysh-card--private{% endif %}" markdown>
-
-**[{{ f.husband_name or f.hypothetical_husband_name or "_невідомий_" }}{% if f.husband_year or f.wife_year %}{% endif %}](.{{ "/" }}{{ f.id }}.md)**{% if f.husband_year %} <span class="nysh-card__dates">{{ f.husband_year }}</span>{% endif %}
-
-<span class="nysh-card__place">
-× {{ f.wife_name or f.hypothetical_wife_name or "_невідома_" }}{% if f.wife_year %} ({{ f.wife_year }}){% endif %}
-</span>
-{% if f.children_count or f.hypothetical_children_count -%}
-<span class="nysh-card__dates">
-{%- if f.children_count %}👶 {{ f.children_count }}{% endif -%}
-{%- if f.hypothetical_children_count %} + {{ f.hypothetical_children_count }} гіп.{% endif -%}
-</span>
-{%- endif %}
-<span class="nysh-card__id">`{{ f.id }}`</span>
-
-</div>
+{% set h = f.husband_name or f.hypothetical_husband_name or "невідомий" %}
+{% set w = f.wife_name or f.hypothetical_wife_name or "невідома" %}
+[<span class="nysh-pc__name">{{ h }} × {{ w }}</span><span class="nysh-pc__years">{% if f.pivot_year %}{{ f.pivot_year }} · {% endif %}{% if f.children_count %}дітей: {{ f.children_count }}{% else %}без дітей у каноні{% endif %}{% if f.hypothetical_children_count %} (+{{ f.hypothetical_children_count }} гіп.){% endif %}</span>]({{ f.id }}.md){ .nysh-pc .nysh-pc--fam{% if f.is_hypothetical %} .is-hyp{% endif %} }
 {% endfor %}
 </div>
 
-{% endfor %}
-
----
-
-## За поколіннями
-
-Хронологічний розріз — за роком народження найстаршого з подружжя.
-
-{% for gen in by_generation %}
-<details class="nysh-generation" markdown>
-<summary><strong>{{ gen.title }}</strong> — {{ gen.members | length }} родин</summary>
-
-{% for f in gen.members -%}
-- **[{{ f.husband_name or f.hypothetical_husband_name or "_невідомий_" }}]({{ f.id }}.md)**{% if f.husband_year %} ({{ f.husband_year }}){% endif %} × {{ f.wife_name or f.hypothetical_wife_name or "_невідома_" }}{% if f.wife_year %} ({{ f.wife_year }}){% endif %}{% if f.children_count or f.hypothetical_children_count %} · 👶 {{ f.children_count }}{% if f.hypothetical_children_count %}+{{ f.hypothetical_children_count }}гіп{% endif %}{% endif %} · `{{ f.id }}`
-{% endfor %}
-
-</details>
 {% endfor %}

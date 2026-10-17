@@ -1,0 +1,97 @@
+/* Дерево роду: панель інструментів, полотно SVG, картки. */
+
+.nysh-tree .nysh-search { flex: 1 1 14rem; min-width: 0; }
+.nysh-tree__tools { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; }
+.nysh-stepper {
+  display: inline-flex; align-items: center; height: 2.6rem; border: 1px solid var(--nysh-line);
+  border-radius: 999px; background: var(--nysh-surface); overflow: hidden;
+}
+.nysh-stepper button {
+  width: 2.4rem; height: 100%; border: 0; background: none; color: var(--nysh-ink);
+  font: 600 1rem var(--nysh-sans); cursor: pointer; touch-action: manipulation;
+}
+.nysh-stepper button:hover { background: var(--nysh-accent-soft); color: var(--nysh-accent); }
+.nysh-stepper > span { display: inline-flex; align-items: center; gap: 0.25rem; font: 600 0.78rem var(--nysh-sans); color: var(--nysh-ink); min-width: 2.2rem; justify-content: center; }
+.nysh-stepper__ico { font-size: 0.55rem; color: var(--nysh-muted); }
+.nysh-tool, .nysh-tree__zoom button {
+  height: 2.6rem; min-width: 2.6rem; padding: 0 0.9rem; border-radius: 999px; border: 1px solid var(--nysh-line);
+  background: var(--nysh-surface); color: var(--nysh-ink); font: 600 0.74rem var(--nysh-sans);
+  cursor: pointer; touch-action: manipulation;
+}
+.nysh-tool:hover, .nysh-tree__zoom button:hover { border-color: var(--nysh-accent); color: var(--nysh-accent); }
+
+.nysh-tree__canvas { position: relative; min-height: 0; min-width: 0; }
+.md-typeset .nysh-tree__svg, .md-typeset .nysh-graph__canvas, .nysh-tree__svg, .nysh-graph__canvas {
+  position: absolute; inset: 0; width: 100%; height: 100%; display: block;
+  touch-action: none; cursor: grab; user-select: none; -webkit-user-select: none;
+  background:
+    radial-gradient(circle at 1px 1px, var(--nysh-line) 1px, transparent 0) 0 0 / 22px 22px,
+    var(--nysh-bg);
+}
+.nysh-tree__svg:active, .nysh-graph__canvas:active { cursor: grabbing; }
+.nysh-tree__zoom {
+  position: absolute; right: 0.6rem; bottom: 0.6rem; display: flex; flex-direction: column; gap: 0.35rem; z-index: 1;
+}
+.nysh-tree__zoom button { padding: 0; width: 2.6rem; font-size: 1.1rem; box-shadow: var(--nysh-shadow); }
+@media (max-width: 599px) {
+  .nysh-tree .nysh-search { flex-basis: 100%; }
+  .nysh-tree__tools { flex-wrap: nowrap; width: 100%; }
+  .nysh-stepper { height: 2.5rem; }
+  .nysh-stepper button { width: 2.1rem; }
+  .nysh-stepper > span { min-width: 1.9rem; }
+  .nysh-tool { height: 2.5rem; padding: 0 0.7rem; flex: 1; }
+  .nysh-tool[data-act="fit"] { display: none; }
+  .nysh-tree__zoom button { width: 2.4rem; height: 2.4rem; min-width: 0; }
+}
+@media (max-width: 899px) {
+  /* Над згорнутою шторкою, щоб кнопки не ховались під нею. */
+  .nysh-tree__zoom { bottom: 10.5rem; }
+  .nysh-tree:has(.nysh-panel[data-state="closed"]) .nysh-tree__zoom,
+  .nysh-graph:has(.nysh-panel[data-state="closed"]) .nysh-tree__zoom { bottom: 0.6rem; }
+}
+
+/* Картки й лінії */
+.nysh-tree__svg .card { cursor: pointer; outline: none; }
+.nysh-tree__svg .card__bg {
+  fill: var(--nysh-surface); stroke: var(--nysh-line-2); stroke-width: 1;
+  filter: drop-shadow(0 1px 2px rgba(40, 25, 10, 0.08));
+  transition: stroke 0.15s, stroke-width 0.15s;
+}
+.nysh-tree__svg .card:hover .card__bg, .nysh-tree__svg .card:focus-visible .card__bg { stroke: var(--nysh-accent); }
+.nysh-tree__svg .card__sex { fill: var(--nysh-u); }
+.nysh-tree__svg .card--m .card__sex { fill: var(--nysh-m); }
+.nysh-tree__svg .card--f .card__sex { fill: var(--nysh-f); }
+.nysh-tree__svg .card__name { font: 600 13px var(--nysh-sans); fill: var(--nysh-ink); }
+.nysh-tree__svg .card__years { font: 500 11.5px var(--nysh-sans); fill: var(--nysh-muted); }
+.nysh-tree__svg .role-focus .card__bg { stroke: var(--nysh-accent); stroke-width: 2.5; fill: var(--nysh-surface); }
+.nysh-tree__svg .role-focus .card__name { fill: var(--nysh-accent); }
+.nysh-tree__svg .is-selected .card__bg { stroke: var(--nysh-accent); stroke-width: 2.5; }
+.nysh-tree__svg .is-hyp .card__bg { stroke: var(--nysh-hyp); stroke-dasharray: 5 4; fill: var(--nysh-surface); }
+.nysh-tree__svg .is-ref { opacity: 0.72; }
+.nysh-tree__svg .is-ref .card__bg { stroke-dasharray: 2 3; fill: var(--nysh-surface-2); }
+.nysh-tree__svg .is-anon .card__bg { fill: var(--nysh-surface-2); }
+.nysh-tree__svg .is-anon .card__name { fill: var(--nysh-muted); font-style: italic; font-weight: 500; }
+.nysh-tree__svg .card__up circle, .nysh-tree__svg .card__down rect { fill: var(--nysh-surface); stroke: var(--nysh-line-2); }
+.nysh-tree__svg .card__up text, .nysh-tree__svg .card__down text {
+  font: 600 8.5px var(--nysh-sans); fill: var(--nysh-ink-2); text-anchor: middle;
+}
+.nysh-tree__svg .card__down text { font-size: 10px; }
+.nysh-tree__svg .link { fill: none; stroke: var(--nysh-ink-2); stroke-width: 1.5; stroke-opacity: 0.55; stroke-linejoin: round; }
+.nysh-tree__svg .link--marriage { stroke: var(--nysh-accent); stroke-opacity: 0.6; stroke-width: 2; }
+.nysh-tree__svg .link.is-hyp { stroke: var(--nysh-hyp); stroke-dasharray: 5 4; stroke-opacity: 0.9; }
+
+.nysh-tree__legend {
+  display: flex; flex-wrap: wrap; gap: 0.3rem 1rem; font: 0.68rem var(--nysh-sans); color: var(--nysh-muted);
+}
+.nysh-tree__legend span { display: inline-flex; align-items: center; gap: 0.35rem; }
+.nysh-tree__legend .lg { width: 1.1rem; height: 0.7rem; border-radius: 3px; border: 1.5px solid var(--nysh-line-2); background: var(--nysh-surface); }
+.nysh-tree__legend .lg--m { border-left: 4px solid var(--nysh-m); }
+.nysh-tree__legend .lg--f { border-left: 4px solid var(--nysh-f); }
+.nysh-tree__legend .lg--hyp { border: 1.5px dashed var(--nysh-hyp); }
+.nysh-tree__legend .lg--ref { border: 1.5px dotted var(--nysh-line-2); background: var(--nysh-surface-2); }
+@media (max-width: 899px) {
+  .nysh-tree__legend span:last-child { display: none; }
+}
+@media (max-width: 599px) {
+  .nysh-tree__legend { display: none; }
+}

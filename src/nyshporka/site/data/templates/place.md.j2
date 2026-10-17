@@ -2,47 +2,52 @@
 title: {{ place.name }}
 ---
 
+<div class="nysh-hero nysh-hero--place" markdown>
+<div class="nysh-hero__text" markdown>
+
 # {{ place.name }}
 
-## Інфобокс
-
-| | |
-|---|---|
-| **ID** | `{{ place.id }}` |
-{% if place.coords -%}
-| **Координати** | {{ "%.4f, %.4f" | format(place.coords[0], place.coords[1]) }} |
-{% endif -%}
-{% if place.osm_id -%}
-| **OSM** | [{{ place.osm_id }}](https://www.openstreetmap.org/relation/{{ place.osm_id }}) |
-{% endif -%}
-{% if place.admin -%}
-| **Адмін** | {{ place.admin | join(" → ") }} |
+{% if place.admin %}
+<p class="nysh-hero__years">{{ place.admin | join(" · ") }}</p>
 {% endif %}
-
-{% if place.name_variants -%}
-## Варіанти назви
-
-{% for lang, name in place.name_variants.items() -%}
-- _{{ lang }}_: {{ name }}
+{% if place.name_variants %}
+<div class="nysh-hero__facts">
+{% for lang, name in place.name_variants.items() %}
+<span class="nysh-hero__fact">{{ name }} <span class="nysh-names__lang">{{ lang }}</span></span>
 {% endfor %}
-{%- endif %}
+</div>
+{% endif %}
+</div>
+<div class="nysh-hero__actions" markdown>
+{% if place.coords %}
+<a class="md-button md-button--primary" href="../places-map.html#{{ place.id }}">На мапі роду</a>
+[OpenStreetMap](https://www.openstreetmap.org/?mlat={{ "%.5f" | format(place.coords[0]) }}&mlon={{ "%.5f" | format(place.coords[1]) }}#map=12/{{ "%.5f" | format(place.coords[0]) }}/{{ "%.5f" | format(place.coords[1]) }}){ .md-button }
+{% elif place.osm_id %}
+[OpenStreetMap](https://www.openstreetmap.org/relation/{{ place.osm_id }}){ .md-button }
+{% endif %}
+</div>
+</div>
 
-{% if related_persons -%}
+{% if related_persons %}
 ## Згадані особи
 
-{% for entry in related_persons -%}
-- [{{ entry.name }}](../persons/{{ entry.id }}.md) — {{ entry.context }}
+<div class="nysh-plist" markdown>
+{% for entry in related_persons %}
+[<span class="nysh-pc__name">{{ entry.name }}</span><span class="nysh-pc__years">{{ entry.context }}</span>](../persons/{{ entry.id }}.md){ .nysh-pc }
 {% endfor %}
-{%- endif %}
+</div>
+{% endif %}
 
-{% if place.period_notes -%}
+{% if place.period_notes %}
 ## Періодизація
 
 {{ place.period_notes }}
-{%- endif %}
+{% endif %}
 
-{% if place.notes -%}
+{% if place.notes %}
 ## Нотатки
 
 {{ place.notes }}
-{%- endif %}
+{% endif %}
+
+<p class="nysh-meta">ID <code>{{ place.id }}</code>{% if place.coords %} · {{ "%.4f, %.4f" | format(place.coords[0], place.coords[1]) }}{% endif %}</p>

@@ -1,0 +1,11 @@
+/* Граф зв'язків. */
+
+.nysh-graph .nysh-search { flex: 1 1 14rem; min-width: 0; }
+.nysh-graph__year {
+  display: flex; align-items: center; gap: 0.6rem; flex: 1 1 16rem; min-height: 2.6rem;
+  padding: 0 0.9rem; border: 1px solid var(--nysh-line); border-radius: 999px; background: var(--nysh-surface);
+  font: 0.74rem var(--nysh-sans); color: var(--nysh-ink-2);
+}
+.nysh-graph__year span { white-space: nowrap; min-width: 7.5rem; }
+.nysh-graph__year b { color: var(--nysh-accent); }
+.nysh-graph__year input { flex: 1; accent-color: var(--nysh-accent); height: 2rem; touch-action: pan-x; }

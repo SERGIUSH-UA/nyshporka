@@ -1,0 +1,46 @@
+/* Мапа місць. */
+
+.nysh-map__bar { flex-direction: column; align-items: stretch; gap: 0.4rem; min-width: 0; }
+.nysh-chips {
+  display: flex; min-width: 0; max-width: 100%; gap: 0.35rem; overflow-x: auto; padding-bottom: 0.15rem; scrollbar-width: thin;
+  -webkit-overflow-scrolling: touch;
+}
+.nysh-chips:empty { display: none; }
+.nysh-chips .nysh-chip { flex: none; }
+.nysh-map__canvas { position: relative; min-height: 0; z-index: 0; background: var(--nysh-surface-2); }
+.nysh-map .leaflet-container { font: 0.75rem var(--nysh-sans); background: var(--nysh-surface-2); }
+.nysh-map .leaflet-popup-content-wrapper {
+  border-radius: 14px; background: var(--nysh-surface); color: var(--nysh-ink); box-shadow: var(--nysh-shadow);
+}
+.nysh-map .leaflet-popup-tip { background: var(--nysh-surface); }
+.nysh-map .leaflet-popup-content { margin: 0.8rem 1rem; }
+.nysh-map .leaflet-bar a { width: 2.2rem; height: 2.2rem; line-height: 2.2rem; }
+[data-md-color-scheme="slate"] .nysh-map .leaflet-tile-pane { filter: brightness(0.75) contrast(1.1) saturate(0.7); }
+.nysh-popup__title { display: block; font: 600 1rem var(--nysh-serif); color: var(--nysh-accent); }
+.nysh-popup__admin { color: var(--nysh-muted); font-size: 0.68rem; margin-bottom: 0.4rem; }
+.nysh-popup__persons { margin: 0; padding: 0; list-style: none; max-height: 14rem; overflow-y: auto; }
+.nysh-popup__persons li { padding: 0.2rem 0; border-top: 1px solid var(--nysh-line); }
+.nysh-popup__persons li span { color: var(--nysh-muted); }
+.nysh-popup p { margin: 0.4rem 0 0; }
+
+.nysh-placelist, .md-typeset ul.nysh-placelist, .md-typeset ul.nysh-popup__persons { list-style: none; margin: 0; padding: 0; }
+.md-typeset ul.nysh-placelist > li, .md-typeset ul.nysh-popup__persons > li { list-style: none; margin: 0; }
+.nysh-placelist button {
+  display: flex; align-items: center; gap: 0.55rem; width: 100%; min-height: 2.6rem; padding: 0.3rem 0.5rem;
+  border: 0; border-radius: 10px; background: none; color: var(--nysh-ink); font: 0.78rem var(--nysh-sans);
+  text-align: left; cursor: pointer;
+}
+.nysh-placelist button:hover, .nysh-placelist button.is-active { background: var(--nysh-accent-soft); }
+.nysh-placelist__name { flex: 1; font-weight: 600; }
+.nysh-placelist__n {
+  font-size: 0.68rem; color: var(--nysh-muted); background: var(--nysh-surface-2); border-radius: 999px; padding: 0.1rem 0.5rem;
+}
+.nysh-map .nysh-panel__head h2 { font-size: 1.05rem; }
+@media (min-width: 900px) {
+  .nysh-map .nysh-panel[data-state] { display: flex; }
+  .nysh-map .nysh-panel__grip { display: none; }
+}
+@media (max-width: 899px) {
+  /* Підпис Leaflet і кнопки — над згорнутим переліком. */
+  .nysh-map .leaflet-bottom { bottom: 9.5rem; }
+}

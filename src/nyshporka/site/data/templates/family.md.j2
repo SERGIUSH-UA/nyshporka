@@ -1,79 +1,83 @@
+{% from "_macros.j2" import pcard, kin_group, gallery %}
+{% set _h = card(family.husband) if family.husband else None %}
+{% set _w = card(family.wife) if family.wife else None %}
 ---
 title: Родина {{ family.id }}
 ---
 
-# Родина `{{ family.id }}`
+<div class="nysh-hero nysh-hero--family" markdown>
+<div class="nysh-hero__text" markdown>
 
-## Подружжя
+# {% if _h and _w %}{{ _h.name }} і {{ _w.name }}{% elif _h or _w %}Родина: {{ (_h or _w).name }}{% else %}Родина {{ family.id }}{% endif %}
 
-{% if family.husband -%}
-- **Чоловік:** [{{ person_names[family.husband] }}](../persons/{{ family.husband }}.md)
-{% endif -%}
-{% if family.wife -%}
-- **Дружина:** [{{ person_names[family.wife] }}](../persons/{{ family.wife }}.md)
-{% endif %}
+<p class="nysh-hero__years">Родина · {{ family.children | length }} {{ "дитина" if family.children | length == 1 else "дітей" }}</p>
+</div>
+</div>
 
-{% if family.children -%}
-## Діти
-
-{% for cid in family.children -%}
-- [{{ person_names[cid] }}](../persons/{{ cid }}.md) — `{{ cid }}`
+<div class="nysh-kin" markdown>
+{{ kin_group("Подружжя", [_h, _w] | select | list) }}
+{% if family.children %}
+<div class="nysh-kin__group" markdown>
+<div class="nysh-kin__label">Діти</div>
+<div class="nysh-kin__cards" markdown>
+{% for cid in family.children %}
+{{ pcard(card(cid)) }}
 {% endfor %}
-{%- endif %}
+</div>
+</div>
+{% endif %}
+</div>
 
-{% if family.hypothetical_husband or family.hypothetical_wife or family.hypothetical_children -%}
+{% if family.hypothetical_husband or family.hypothetical_wife or family.hypothetical_children %}
 ## Гіпотетичні члени
 
-!!! note "Не верифіковано джерелом"
-    Зв'язок виведено непрямо. Підтверджуючого документа з прямою згадкою ще нема.
+<p class="nysh-note">Не верифіковано джерелом: зв'язок виведено непрямо.</p>
 
-{% if family.hypothetical_husband -%}
-- **Гіп. чоловік:** [{{ person_names[family.hypothetical_husband] }}](../persons/{{ family.hypothetical_husband }}.md)
-{% endif -%}
-{% if family.hypothetical_wife -%}
-- **Гіп. дружина:** [{{ person_names[family.hypothetical_wife] }}](../persons/{{ family.hypothetical_wife }}.md)
-{% endif -%}
-{% for cid in family.hypothetical_children -%}
-- **Гіп. дитина:** [{{ person_names[cid] }}](../persons/{{ cid }}.md) — `{{ cid }}`
+<div class="nysh-kin nysh-kin--hyp" markdown>
+<div class="nysh-kin__group" markdown>
+<div class="nysh-kin__cards" markdown>
+{% for pid in [family.hypothetical_husband, family.hypothetical_wife] if pid %}
+{{ pcard(card(pid, True)) }}
 {% endfor %}
-{%- endif %}
+{% for cid in family.hypothetical_children %}
+{{ pcard(card(cid, True)) }}
+{% endfor %}
+</div>
+</div>
+</div>
+{% endif %}
 
-{% if family.facts -%}
+{% if family.facts %}
 ## Події
 
-{% for f in family.facts -%}
-- {{ fact_summary(f, place_names) }}
+<ol class="nysh-life">
+{% for f in family.facts %}
+<li class="nysh-life__item nysh-life__item--{{ f.type }}" markdown="1">
+<span class="nysh-life__date">{{ f.date | format_date if f.date else "без дати" }}</span>
+<span class="nysh-life__what" markdown="span">**{{ f.type | fact_label }}**{% if f.place_id and f.place_id in place_names %} · [{{ place_names[f.place_id] }}](../places/{{ f.place_id }}.md){% endif %}{{ cite_marks(f) }}</span>
+{% if f.value %}
+
+{{ f.value }}
+{% endif %}
+</li>
 {% endfor %}
-{%- endif %}
+</ol>
+{% endif %}
 
 {% if documents %}
 ## Документи
 
-{% for d in documents if d.is_img %}
-[![{{ d.caption }}]({{ d.url }})]({{ d.url }})
-*{{ d.caption }}*
-
-{% endfor %}
-{% set pdfs = documents | selectattr('is_pdf') | list %}
-{% if pdfs %}
-**Скани-першоджерела (PDF):**
-
-{% for d in pdfs %}
-- 📄 [{{ d.caption }}]({{ d.url }})
-{% endfor %}
-{% endif %}
+{{ gallery(documents) }}
 {% endif %}
 
-{% if family.aliases -%}
-**Альтернативні ID:** {{ family.aliases | join(", ") }}
-{%- endif %}
-
-{% if family.notes -%}
+{% if family.notes %}
 ## Нотатки
 
 {{ family.notes }}
-{%- endif %}
+{% endif %}
 
-{% for s in all_sources -%}
+<p class="nysh-meta">ID <code>{{ family.id }}</code>{% if family.aliases %} · інші ID: {{ family.aliases | join(", ") }}{% endif %}</p>
+
+{% for s in all_sources %}
 [^{{ s.id }}]: {{ s.title if s.withheld else "[" ~ s.title ~ "](../sources/" ~ s.id ~ ".md)" }}
 {% endfor %}

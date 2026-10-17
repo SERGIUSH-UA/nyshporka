@@ -1,71 +1,128 @@
+{% from "_macros.j2" import pcard, kin_group, gallery %}
 ---
 title: {{ person.primary_name }}
 private: {{ "true" if person.private else "false" }}
 ---
+{% set _birth = person.facts | selectattr("type", "in", ["birth", "baptism"]) | first | default(None) %}
+{% set _death = person.facts | selectattr("type", "in", ["death", "burial"]) | first | default(None) %}
+
+<div class="nysh-hero nysh-hero--{{ person.sex | lower }}" markdown>
+<div class="nysh-hero__text" markdown>
 
 # {{ person.primary_name }}
 
-{% if person.private -%}
+{% if me.years %}
+<p class="nysh-hero__years">{{ me.years }}</p>
+{% endif %}
+<div class="nysh-hero__facts" markdown>
+{% if _birth %}
+<div class="nysh-hero__fact" markdown="span">{{ "Нар." if _birth.type == "birth" else "Хрещ." }} {{ _birth.date | format_date(decade_only=person.private) }}{% if _birth.place_id and _birth.place_id in place_names %}, [{{ place_names[_birth.place_id] }}](../places/{{ _birth.place_id }}.md){% endif %}</div>
+{% endif %}
+{% if _death and not person.private %}
+<div class="nysh-hero__fact" markdown="span">{{ "Пом." if _death.type == "death" else "Похов." }} {{ _death.date | format_date }}{% if _death.place_id and _death.place_id in place_names %}, [{{ place_names[_death.place_id] }}](../places/{{ _death.place_id }}.md){% endif %}</div>
+{% endif %}
+</div>
+{% set _disputed = person.facts | selectattr("status", "equalto", "disputed") | list %}
+{% if person.private or kin.hyp_parents or kin.hyp_families or _disputed %}
+<div class="nysh-hero__badges">
+{% if person.private %}<span class="nysh-badge nysh-badge--private">приватна особа</span>{% endif %}
+{% if kin.hyp_parents or kin.hyp_families %}<span class="nysh-badge nysh-badge--hyp">є гіпотетичні зв'язки</span>{% endif %}
+{% if _disputed %}<span class="nysh-badge nysh-badge--disputed">є суперечливі факти</span>{% endif %}
+</div>
+{% endif %}
+</div>
+<div class="nysh-hero__actions" markdown>
+<a class="md-button md-button--primary" href="../family-tree.html#{{ person.id }}">Показати в дереві</a>
+</div>
+</div>
+
+{% if person.private %}
 !!! warning "Приватна особа"
-    Особа жива — точні дати й фото приховані. Канонічні дані зберігаються
-    локально у `data/canonical/persons/{{ person.id }}.md`.
-{%- endif %}
-
-## Інфобокс
-
-| | |
-|---|---|
-| **ID** | `{{ person.id }}` |
-| **Стать** | {{ {"M":"чоловіча", "F":"жіноча", "U":"невідома"}[person.sex] }} |
-{% set _birth = person.facts | selectattr("type", "equalto", "birth") | first | default(None) -%}
-{% if _birth -%}
-| **Народження** | {{ _birth.date | format_date(decade_only=person.private) }}{% if _birth.place_id %} · [{{ place_names[_birth.place_id] }}](../places/{{ _birth.place_id }}.md){% endif %} |
-{% endif -%}
-{% set _death = person.facts | selectattr("type", "equalto", "death") | first | default(None) -%}
-{% if _death and not person.private -%}
-| **Смерть** | {{ _death.date | format_date }}{% if _death.place_id %} · [{{ place_names[_death.place_id] }}](../places/{{ _death.place_id }}.md){% endif %} |
-{% endif -%}
-{% if person.aliases -%}
-| **Альтернативні ID** | {{ person.aliases | join(", ") }} |
+    Особа жива або близька до живих: дати показано до десятиліття, фото й нотатки приховано.
 {% endif %}
 
-## Імена
+{% if kin.parents or kin.siblings or kin.families %}
+## Родина
 
-{% for n in person.names -%}
-- {% if n.primary %}**{% endif %}{{ n.form }}{% if n.primary %}**{% endif %} _(lang: {{ n.lang }})_
+<div class="nysh-kin" markdown>
+{{ kin_group("Батьки", kin.parents) }}
+{% for fam in kin.families %}
+<div class="nysh-kin__group nysh-kin__group--marriage" markdown>
+<div class="nysh-kin__label" markdown="span">{% if fam.partner %}Шлюб{% else %}Діти{% endif %}{% if fam.year %} · {{ fam.year }}{% endif %} · [родина](../families/{{ fam.id }}.md)</div>
+<div class="nysh-kin__cards" markdown>
+{% if fam.partner %}
+{{ pcard(fam.partner) }}
+{% endif %}
+</div>
+{% if fam.children %}
+<div class="nysh-kin__sublabel">Діти</div>
+<div class="nysh-kin__cards nysh-kin__cards--kids" markdown>
+{% for c in fam.children %}
+{{ pcard(c) }}
 {% endfor %}
-
-## Факти
-
-{% for f in person.facts -%}
-- {{ fact_summary(f, place_names, decade_only=person.private) }}
+</div>
+{% endif %}
+</div>
 {% endfor %}
-
-{% if relations.confirmed.has_parents or relations.confirmed.has_siblings or relations.confirmed.has_spouses %}
-## Родинні зв'язки
-
-{{ "- **Батьки:** " ~ relations.confirmed.parents_md ~ (" _(родина " ~ relations.confirmed.parent_family_md ~ ")_" if relations.confirmed.parent_family_md else "") if relations.confirmed.has_parents else "" }}
-{{ "- **Брати/сестри:** " ~ relations.confirmed.siblings_md if relations.confirmed.has_siblings else "" }}
-{% for fam in relations.confirmed.spouses %}
-- **Подружжя:** {{ fam.partner_md }} _(родина {{ fam.family_md }})_
-{{ "    - **Діти:** " ~ fam.children_md if fam.has_children else "" }}
-{{ "    - **Можливі діти:** " ~ fam.hypothetical_children_md ~ " _(гіпотеза)_" if fam.has_hypothetical_children else "" }}
-{% endfor %}
+{{ kin_group("Брати й сестри", kin.siblings) }}
+</div>
 {% endif %}
 
-{% if relations.hypothetical.has_parents or relations.hypothetical.has_siblings or relations.hypothetical.has_spouses %}
+{% if kin.hyp_parents or kin.hyp_siblings or kin.hyp_families %}
 ## Гіпотетичні зв'язки
 
-!!! note "Не верифіковано джерелом"
-    Виведено з логіки, прізвища, хронології або суміжних згадок. Підтверджуючого
-    метричного запису або документа з прямою згадкою спорідненості ще нема.
+<p class="nysh-note">Не верифіковано джерелом: виведено з прізвища, хронології або суміжних згадок.</p>
 
-{{ "- **Гіп. батьки:** " ~ relations.hypothetical.parents_md ~ (" _(родина " ~ relations.hypothetical.parent_family_md ~ ")_" if relations.hypothetical.parent_family_md else "") if relations.hypothetical.has_parents else "" }}
-{{ "- **Гіп. брати/сестри:** " ~ relations.hypothetical.siblings_md if relations.hypothetical.has_siblings else "" }}
-{% for fam in relations.hypothetical.spouses %}
-- **Гіп. подружжя:** {{ fam.partner_md }} _(родина {{ fam.family_md }})_
-{{ "    - **Діти:** " ~ fam.children_md if fam.has_children else "" }}
+<div class="nysh-kin nysh-kin--hyp" markdown>
+{{ kin_group("Можливі батьки", kin.hyp_parents) }}
+{{ kin_group("Можливі брати й сестри", kin.hyp_siblings) }}
+{% for fam in kin.hyp_families %}
+<div class="nysh-kin__group nysh-kin__group--marriage" markdown>
+<div class="nysh-kin__label" markdown="span">Можливий шлюб · [родина](../families/{{ fam.id }}.md)</div>
+<div class="nysh-kin__cards" markdown>
+{% if fam.partner %}
+{{ pcard(fam.partner) }}
+{% endif %}
+{% for c in fam.children %}
+{{ pcard(c) }}
 {% endfor %}
+</div>
+</div>
+{% endfor %}
+</div>
+{% endif %}
+
+{% if life %}
+## Життя
+
+<ol class="nysh-life">
+{% for f in life %}
+<li class="nysh-life__item nysh-life__item--{{ f.type }}{% if f.status != 'confirmed' %} is-{{ f.status }}{% endif %}" markdown="1">
+<span class="nysh-life__date">{{ f.date | format_date(decade_only=person.private) if f.date else "без дати" }}</span>
+<span class="nysh-life__what" markdown="span">**{{ f.type | fact_label }}**{% if f.place_id and f.place_id in place_names %} · [{{ place_names[f.place_id] }}](../places/{{ f.place_id }}.md){% endif %}{{ cite_marks(f) }}</span>
+{% if f.value %}
+
+{{ f.value }}
+{% endif %}
+</li>
+{% endfor %}
+</ol>
+{% endif %}
+
+{% if person.names | length > 1 %}
+## Імена в джерелах
+
+<ul class="nysh-names">
+{% for n in person.names %}
+<li{% if n.primary %} class="is-primary"{% endif %}>{{ n.form }}{% if n.lang %} <span class="nysh-names__lang">{{ n.lang }}</span>{% endif %}</li>
+{% endfor %}
+</ul>
+{% endif %}
+
+{% if documents %}
+## Документи
+
+{{ gallery(documents) }}
 {% endif %}
 
 {% if media_lines %}
@@ -74,30 +131,14 @@ private: {{ "true" if person.private else "false" }}
 {{ media_lines | join('\n') }}
 {% endif %}
 
-{% if documents %}
-## Документи
-
-{% for d in documents if d.is_img %}
-[![{{ d.caption }}]({{ d.url }})]({{ d.url }})
-*{{ d.caption }}*
-
-{% endfor %}
-{% set pdfs = documents | selectattr('is_pdf') | list %}
-{% if pdfs %}
-**Скани-першоджерела (PDF):**
-
-{% for d in pdfs %}
-- 📄 [{{ d.caption }}]({{ d.url }})
-{% endfor %}
-{% endif %}
-{% endif %}
-
-{% if person.notes -%}
+{% if person.notes %}
 ## Нотатки
 
 {{ person.notes }}
-{%- endif %}
+{% endif %}
 
-{% for s in all_sources -%}
+<p class="nysh-meta">ID <code>{{ person.id }}</code>{% if person.aliases %} · інші ID: {{ person.aliases | join(", ") }}{% endif %}</p>
+
+{% for s in all_sources %}
 [^{{ s.id }}]: {{ s.title if s.withheld else "[" ~ s.title ~ "](../sources/" ~ s.id ~ ".md)" }}
 {% endfor %}

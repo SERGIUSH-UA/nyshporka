@@ -179,6 +179,8 @@ def build(
     # Persons.
     persons = [redact_person(p) for p in shown]
     families_by_id = {f.id: f for f in families}
+    raw_by_id = {p.id: p for p in persons_raw}
+    card = _card_factory(raw_by_id, hidden)
     person_tpl = env.get_template("person.md.j2")
     for p in persons:
         if public and _touches_hidden(p, families_by_id, hidden):
@@ -190,6 +192,9 @@ def build(
         out.write_text(
             person_tpl.render(
                 person=p,
+                me=card(p.id),
+                kin=_kin(p, families_by_id, card),
+                life=_life(p),
                 place_names=place_names,
                 all_sources=used,
                 relations=relations,
@@ -198,6 +203,10 @@ def build(
             ),
             encoding="utf-8",
         )
+    assets_dir = docs_dir / "assets"
+    assets_dir.mkdir(parents=True, exist_ok=True)
+    (assets_dir / "search.json").write_text(
+        json.dumps(_search_index(persons, place_names), ensure_ascii=False), encoding="utf-8")
 
     # Persons index — alphabet jump-bar + cards, групування за літерою прізвища.
     index_persons: list[dict[str, Any]] = []
@@ -219,6 +228,7 @@ def build(
             "birth_place_name": place_names.get(birth_pid) if birth_pid else None,
             "sex": p.sex,
             "private": p.private,
+            "years": _years_label(p),
         })
     # Сортуємо за letter (нормалізована кирилиця) → surname → given → birth_year.
     index_persons.sort(key=lambda d: (
@@ -263,6 +273,7 @@ def build(
         out.write_text(
             family_tpl.render(
                 family=f,
+                card=card,
                 person_names=person_names,
                 place_names=place_names,
                 all_sources=used,
@@ -286,7 +297,7 @@ def build(
     def _shown_name(pid: str | None) -> str | None:
         if not pid:
             return None
-        return "жива особа" if pid in hidden else person_names.get(pid)
+        return _HIDDEN_NAME if pid in hidden else person_names.get(pid)
 
     index_fams: list[dict[str, Any]] = []
     for f in families:
@@ -479,7 +490,6 @@ def build(
     )
 
     # Скопіювати places.geojson у docs/assets/, щоб Leaflet-мапа його бачила.
-    assets_dir = docs_dir / "assets"
     geojson_src = project_root / "data" / "derived" / "places.geojson"
     if geojson_src.exists():
         assets_dir.mkdir(parents=True, exist_ok=True)
@@ -522,6 +532,7 @@ def build(
     if tree_src.exists():
         assets_dir.mkdir(parents=True, exist_ok=True)
         raw_tree = json.loads(tree_src.read_text(encoding="utf-8"))
+        _site_photos(raw_tree, project_root, assets_dir, public)
         safe_tree = _redact_tree_graph(raw_tree, hidden)
         (assets_dir / "tree.json").write_text(
             json.dumps(safe_tree, ensure_ascii=False), encoding="utf-8"
@@ -930,6 +941,141 @@ def _person_relations(
     }
 
 
+#: Як сайт називає людину, якої на ньому немає.
+_HIDDEN_NAME = "приватна особа"
+
+
+def _years_label(p: Person) -> str:
+    """«1802–1871», «н. 1802», «† 1871»; приватному — десятиліття народження."""
+    b, d = _first_year(p, "birth") or _first_year(p, "baptism"), _first_year(p, "death")
+    if p.private:
+        return f"н. {int(b) // 10 * 10}-ті" if b else ""
+    if b and d:
+        return f"{b}–{d}"
+    if b:
+        return f"н. {b}"
+    return f"† {d}" if d else ""
+
+
+def _card_factory(raw_by_id: dict[str, Person],
+                  hidden: frozenset[str]) -> Callable[..., dict[str, Any]]:
+    """Картка особи для шаблонів: ім'я, роки, стать, чи є сторінка.
+
+    🔴 Прихований на відкритому сайті — «приватна особа» без ID і років: так
+    рядок картки не несе нічого, що чистка чи сторож мусили б вирізати."""
+    def card(pid: str | None, hyp: bool = False) -> dict[str, Any]:
+        p = raw_by_id.get(pid) if pid else None
+        if p is None or pid in hidden:
+            return {"id": None, "name": _HIDDEN_NAME, "years": "", "sex": "U",
+                    "private": True, "hyp": hyp}
+        return {"id": p.id, "name": p.primary_name, "years": _years_label(p), "sex": p.sex,
+                "private": p.private, "hyp": hyp}
+    return card
+
+
+def _kin(person: Person, families_by_id: dict[str, Family],
+         card: Callable[..., dict[str, Any]]) -> dict[str, Any]:
+    """Родина особи картками: батьки, брати й сестри, кожен шлюб із дітьми.
+
+    Підтверджене й гіпотетичне — окремо: гіпотетичний батько не стає поруч із
+    підтвердженим, а йде в блок «не верифіковано джерелом»."""
+
+    def birth_key(c: dict[str, Any]) -> tuple[int, str]:
+        m = re.search(r"\d{4}", c["years"])
+        return (int(m.group(0)) if m else 9999, c["name"])
+
+    def parents_of(fid: str | None, hyp_only: bool) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        fam = families_by_id.get(fid) if fid else None
+        if not fam:
+            return [], []
+        if hyp_only:
+            parents = [card(x, True) for x in (fam.husband, fam.wife,
+                                               fam.hypothetical_husband, fam.hypothetical_wife) if x]
+        else:
+            parents = [card(x) for x in (fam.husband, fam.wife) if x]
+        kids = [*fam.children, *(c for c in fam.hypothetical_children if c not in fam.children)]
+        siblings = [card(c, hyp_only or c in fam.hypothetical_children)
+                    for c in kids if c != person.id]
+        return parents, sorted(siblings, key=birth_key)
+
+    def marriages(fids: list[str], hyp: bool) -> list[dict[str, Any]]:
+        out = []
+        for fid in fids:
+            fam = families_by_id.get(fid)
+            if not fam:
+                continue
+            partner = next((x for x in (fam.husband, fam.wife) if x and x != person.id), None)
+            partner_hyp = hyp
+            if partner is None:
+                partner = next((x for x in (fam.hypothetical_husband, fam.hypothetical_wife)
+                                if x and x != person.id), None)
+                partner_hyp = partner is not None
+            children = [card(c, hyp) for c in fam.children]
+            children += [card(c, True) for c in fam.hypothetical_children if c not in fam.children]
+            marriage = next((f for f in fam.facts if f.type == "marriage"), None)
+            out.append({
+                "id": fid,
+                "partner": card(partner, partner_hyp) if partner else None,
+                "children": sorted(children, key=birth_key),
+                "year": marriage.date.value[:4] if marriage and marriage.date else "",
+            })
+        return out
+
+    parents, siblings = parents_of(person.parent_family, False)
+    hyp_parents, hyp_siblings = ([], []) if person.hypothetical_parent_family == person.parent_family \
+        else parents_of(person.hypothetical_parent_family, True)
+    return {
+        "parents": parents, "siblings": siblings,
+        "families": marriages(list(person.spouse_families), False),
+        "hyp_parents": hyp_parents, "hyp_siblings": hyp_siblings,
+        "hyp_families": marriages([f for f in person.hypothetical_spouse_families
+                                   if f not in person.spouse_families], True),
+    }
+
+
+def _life(p: Person) -> list[Fact]:
+    """Факти за часом: датовані за датою, без дати — у кінці в порядку картки."""
+    return sorted(p.facts, key=lambda f: (f.date is None, f.date.value if f.date else ""))
+
+
+def _search_index(persons: list[Person], place_names: dict[str, str]) -> list[dict[str, Any]]:
+    """Покажчик для пошуку осіб на сайті: лише ті, хто має сторінку.
+
+    Приватному (у приватній збірці) — десятиліття, як на його сторінці."""
+    out = []
+    for p in persons:
+        primary = p.primary_name
+        alt = sorted({n.form for n in p.names if n.form and n.form != primary})
+        place = _first_place_id(p, "birth") or _first_place_id(p, "baptism")
+        out.append({"id": p.id, "n": primary, "a": alt, "y": _years_label(p), "s": p.sex,
+                    "p": place_names.get(place, "") if place else ""})
+    return out
+
+
+def _site_photos(raw_tree: dict[str, Any], project_root: Path, assets_dir: Path,
+                 public: bool) -> None:
+    """Фото вузлів дерева, придатні для сайту.
+
+    Відкрита версія — без фото взагалі: родинні знімки й так не публікуються, а
+    підписані посилання MyHeritage протухають. Приватна — локальний файл
+    копіюється в `assets/photos/`, зовнішнє посилання лишається як є."""
+    for n in raw_tree.get("nodes", []):
+        url = n.get("photo_url")
+        keep: str | None = None
+        if url and not public:
+            if url.startswith(("http://", "https://")):
+                keep = url
+            else:
+                src = (project_root / url).resolve()
+                if src.is_file() and src.suffix.lower() in _DOC_IMG_EXT:
+                    dest = assets_dir / "photos" / f"{n['id']}{src.suffix.lower()}"
+                    dest.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(src, dest)
+                    keep = f"assets/photos/{dest.name}"
+        n["photo_url"] = keep
+        n["has_photo"] = keep is not None
+
+
 def _places_related(places: list[Place], persons: list[Person]) -> dict[str, list[dict[str, Any]]]:
     result: dict[str, list[dict[str, Any]]] = {pl.id: [] for pl in places}
     for p in persons:
@@ -978,7 +1124,7 @@ def _fact_context(fact_type: str) -> str:
 #: Що лишається у вузлі прихованої чи приватної особи: лише структура дерева.
 #: Білий перелік, а не чорний: нове поле вузла, додане колись у reindex, не
 #: витече само — його треба буде дозволити тут явно.
-_NODE_KEEP = {"id", "parent_ids", "child_ids", "spouse_ids", "parent_family_id",
+_NODE_KEEP = {"id", "parent_ids", "child_ids", "spouse_ids", "sibling_ids", "parent_family_id",
               "spouse_family_ids", "generation", "branch_id", "era_index", "is_root",
               "private", "ancestor_count", "descendant_count"}
 _PRIVATE_NAME = "(приватна особа)"

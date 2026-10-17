@@ -1,499 +1,202 @@
-// Force-directed граф родини з канону.
-// Підвантажує docs/assets/graph.json, рендерить через D3 v7 з фільтрами по
-// гіпотетичних, приватних і кандидатах + часовий слайдер.
+// Граф зв'язків: увесь рід одним полотном (canvas — сотні вузлів без гальм).
+// Покоління тягнуть вузли по вертикалі, тож граф читається згори вниз.
+// Тап по вузлу — особа й її найближчі; повзунок року лишає тих, хто тоді жив.
+import { createPanel, el } from './panel.js';
+import { attach } from './search.js';
+import { yearsLabel, isAnon } from './tree/render.js';
 
-(function () {
-  const svgEl = document.getElementById('nysh-family-graph');
-  if (!svgEl || typeof d3 === 'undefined') return;
+/* global d3 */
 
-  const publicUrl = svgEl.dataset.graphUrl || 'assets/graph.json';
-  // На localhost спершу пробуємо повну версію (приватні особи з повними іменами
-  // і точними роками); fallback на публічну редаговану.
-  const isLocal =
-    location.hostname === 'localhost' || location.hostname === '127.0.0.1';
-  const localUrl = publicUrl.replace(/graph\.json$/, 'graph.full.json');
+const root = document.getElementById('nysh-graph');
+const PALETTE = ['#b5523b', '#3b7bb5', '#5a9a4a', '#a0782c', '#7a55a8', '#2f9a95',
+  '#c0617f', '#6b7f2a', '#d08a3a', '#4a62a8', '#8a5a3a', '#3a8a6a'];
 
-  const yearSlider = document.getElementById('nysh-year-slider');
-  const yearDisplay = document.getElementById('nysh-year-display');
-  const toggleHypothesis = document.getElementById('nysh-toggle-hypothesis');
-  const togglePrivate = document.getElementById('nysh-toggle-private');
-  const toggleCandidates = document.getElementById('nysh-toggle-candidates');
-  const resetBtn = document.getElementById('nysh-reset-zoom');
-  const eventTrack = document.getElementById('nysh-event-track');
-  const tooltip = document.getElementById('nysh-tooltip');
+async function main() {
+  const canvas = root.querySelector('canvas');
+  const status = root.querySelector('.nysh-tree__status');
+  let data;
+  try {
+    const res = await fetch(root.dataset.graphUrl);
+    if (!res.ok) throw new Error(res.statusText);
+    data = await res.json();
+  } catch {
+    status.textContent = 'Не вдалося завантажити граф. Якщо сторінку відкрито як файл, запустіть nysh site serve.';
+    return;
+  }
+  status.hidden = true;
 
-  const CONFIDENCE_WIDTH = {
-    direct: 2.5,
-    indirect: 2,
-    circumstantial: 1.5,
-    speculative: 1,
-    negative: 1,
-  };
-  const CONFIDENCE_OPACITY = {
-    direct: 1.0,
-    indirect: 0.9,
-    circumstantial: 0.7,
-    speculative: 0.45,
-    negative: 0.3,
-  };
+  const nodes = data.nodes.map((n) => ({ ...n }));
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  const links = (data.links || [])
+    .filter((l) => byId.has(l.source) && byId.has(l.target))
+    .map((l) => ({ ...l }));
 
-  fetchGraph()
-    .then((data) => render(data))
-    .catch((e) => {
-      svgEl.outerHTML = `<p style="padding:1rem;color:#c62828">Помилка завантаження graph.json: ${e}</p>`;
-    });
+  // Колір — гілка; найбільші гілки беруть палітру першими, дрібні — сірі.
+  const sizes = new Map();
+  for (const n of nodes) sizes.set(n.branch_id, (sizes.get(n.branch_id) || 0) + 1);
+  const ranked = [...sizes.entries()].sort((a, b) => b[1] - a[1]).map((x) => x[0]);
+  const color = new Map(ranked.map((b, i) => [b, i < PALETTE.length && sizes.get(b) > 1 ? PALETTE[i] : '#9a9286']));
+  const neighbours = new Map(nodes.map((n) => [n.id, new Set()]));
+  for (const l of links) {
+    neighbours.get(l.source).add(l.target);
+    neighbours.get(l.target).add(l.source);
+  }
 
-  async function fetchGraph() {
-    // Cache-bust: на localhost mkdocs livereload оновлює HTML, але JSON-дані
-    // браузер кешує — без querystring побачимо стару версію після reindex.
-    const bust = isLocal ? `?t=${Date.now()}` : '';
-    const fetchOpts = isLocal ? { cache: 'no-store' } : {};
-    if (isLocal) {
-      try {
-        const r = await fetch(localUrl + bust, fetchOpts);
-        if (r.ok) {
-          document.body.dataset.nyshGraphMode = 'full';
-          return await r.json();
-        }
-      } catch (_) {
-        // ignore — впадемо на публічну версію
+  const sim = d3.forceSimulation(nodes)
+    .force('link', d3.forceLink(links).id((n) => n.id).distance((l) => (l.type === 'spouse' ? 16 : 34)).strength(0.9))
+    .force('charge', d3.forceManyBody().strength(-46).distanceMax(320))
+    .force('y', d3.forceY((n) => (n.generation ?? 4) * 70).strength((n) => (n.generation == null ? 0.02 : 0.25)))
+    .force('x', d3.forceX(0).strength(0.02))
+    .force('collide', d3.forceCollide(7))
+    .stop();
+  for (let i = 0; i < 360; i += 1) sim.tick();
+
+  const state = { year: null, hyp: true, selected: null, t: d3.zoomIdentity };
+  const ctx = canvas.getContext('2d');
+  const alive = (n) => state.year === null
+    || (n.lived_from != null && n.lived_from <= state.year && (n.lived_to ?? n.lived_from + 70) >= state.year);
+  const css = (name, d) => getComputedStyle(root).getPropertyValue(name).trim() || d;
+
+  function size() {
+    const r = canvas.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = Math.round(r.width * dpr);
+    canvas.height = Math.round(r.height * dpr);
+    return { w: r.width, h: r.height, dpr };
+  }
+  let dims = size();
+
+  function draw() {
+    const { w, h, dpr } = dims;
+    const t = state.t;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, w, h);
+    ctx.translate(t.x, t.y);
+    ctx.scale(t.k, t.k);
+    const sel = state.selected;
+    const near = sel ? neighbours.get(sel) : null;
+    const ink = css('--nysh-ink-2', '#6b5d4a');
+    for (const l of links) {
+      if (l.hypothetical && !state.hyp) continue;
+      const a = l.source;
+      const b = l.target;
+      const on = alive(a) && alive(b);
+      const hot = sel && (a.id === sel || b.id === sel);
+      ctx.globalAlpha = hot ? 0.95 : on ? (sel ? 0.18 : 0.5) : 0.06;
+      ctx.strokeStyle = hot ? css('--nysh-accent', '#8b2c20') : ink;
+      ctx.lineWidth = (hot ? 2 : l.type === 'spouse' ? 1.6 : 1) / Math.sqrt(t.k);
+      ctx.setLineDash(l.hypothetical ? [4 / t.k, 3 / t.k] : []);
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+      ctx.stroke();
+    }
+    ctx.setLineDash([]);
+    for (const n of nodes) {
+      const on = alive(n);
+      const hot = n.id === sel || (near && near.has(n.id));
+      ctx.globalAlpha = on ? (sel && !hot ? 0.35 : 1) : 0.1;
+      ctx.fillStyle = isAnon(n) ? '#b8b0a2' : color.get(n.branch_id);
+      ctx.beginPath();
+      ctx.arc(n.x, n.y, n.id === sel ? 7 : 4.5, 0, Math.PI * 2);
+      ctx.fill();
+      if (n.id === sel) {
+        ctx.lineWidth = 2 / t.k;
+        ctx.strokeStyle = css('--nysh-accent', '#8b2c20');
+        ctx.stroke();
       }
     }
-    document.body.dataset.nyshGraphMode = 'public';
-    const r = await fetch(publicUrl + bust, fetchOpts);
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    return await r.json();
-  }
-
-  function render(data) {
-    const nodes = data.nodes.map((d) => ({ ...d }));
-    const links = data.links.map((d) => ({ ...d }));
-    const events = data.events || [];
-
-    const branchIds = Array.from(new Set(nodes.map((n) => n.branch_id))).sort();
-    const palette = d3
-      .scaleOrdinal()
-      .domain(branchIds)
-      .range(d3.schemeTableau10.concat(d3.schemeSet3));
-
-    const width = svgEl.clientWidth || 900;
-    const height = 700;
-
-    const svg = d3
-      .select(svgEl)
-      .attr('viewBox', `0 0 ${width} ${height}`)
-      .attr('preserveAspectRatio', 'xMidYMid meet');
-
-    svg.selectAll('*').remove();
-
-    const g = svg.append('g');
-
-    const zoom = d3
-      .zoom()
-      .scaleExtent([0.2, 4])
-      .on('zoom', (ev) => g.attr('transform', ev.transform));
-    svg.call(zoom);
-
-    if (resetBtn) {
-      resetBtn.addEventListener('click', () => {
-        svg.transition().duration(400).call(zoom.transform, d3.zoomIdentity);
-      });
-    }
-
-    // Індекс родинних зв'язків: для кожного id — батьки, діти, подружжя, брати/сестри.
-    const rels = buildRelationships(nodes, links);
-
-    const linkLayer = g.append('g').attr('class', 'nysh-links');
-    const nodeLayer = g.append('g').attr('class', 'nysh-nodes');
-
-    const linkSel = linkLayer
-      .selectAll('line')
-      .data(links)
-      .join('line')
-      .attr('class', linkClass)
-      .attr('stroke', (d) => (d.type === 'spouse' ? '#c44' : '#888'))
-      .attr('stroke-width', (d) => CONFIDENCE_WIDTH[d.confidence] || 1.5)
-      .attr('stroke-opacity', (d) => CONFIDENCE_OPACITY[d.confidence] || 0.7)
-      .attr('stroke-dasharray', (d) =>
-        d.status === 'hypothesis' || d.type === 'candidate' ? '4 3' : null
-      );
-
-    const nodeSel = nodeLayer
-      .selectAll('circle')
-      .data(nodes)
-      .join('circle')
-      .attr('class', nodeClass)
-      .attr('r', (d) => 6 + Math.min(6, (d.fact_count || 0) * 0.5))
-      .attr('fill', (d) => palette(d.branch_id))
-      .attr('stroke', strokeFor)
-      .attr('stroke-width', (d) => (d.has_disputed ? 3 : 1.5))
-      .attr('stroke-dasharray', (d) =>
-        d.lived_certainty === 'inferred' ? '3 2' :
-        d.lived_certainty === 'approximate' && d.lived_method !== 'dates' ? '5 2' :
-        null
-      )
-      .attr('fill-opacity', (d) => {
-        const base = d.private ? 0.35 : (CONFIDENCE_OPACITY[d.min_confidence] || 0.85);
-        if (d.lived_certainty === 'inferred') return base * 0.6;
-        if (d.lived_certainty === 'unknown') return base * 0.5;
-        return base;
-      })
-      .style('cursor', 'pointer')
-      .call(drag())
-      .on('mouseover', (ev, d) => {
-        highlightRelations(d.id);
-        showTooltip(ev, d);
-      })
-      .on('mousemove', moveTooltip)
-      .on('mouseout', () => {
-        clearHighlight();
-        hideTooltip();
-      })
-      .on('click', (ev, d) => {
-        if (d.type === 'candidate') return;
-        window.location.href = `persons/${d.id}.html`;
-      });
-
-    function highlightRelations(focusId) {
-      const rel = rels[focusId] || { parents: new Set(), children: new Set(),
-                                     spouses: new Set(), siblings: new Set() };
-      const inFocus = (id) =>
-        id === focusId || rel.parents.has(id) || rel.children.has(id)
-        || rel.spouses.has(id) || rel.siblings.has(id);
-
-      nodeSel
-        .classed('dimmed', (n) => !inFocus(n.id))
-        .classed('focus', (n) => n.id === focusId)
-        .classed('rel-parent', (n) => rel.parents.has(n.id))
-        .classed('rel-child', (n) => rel.children.has(n.id))
-        .classed('rel-spouse', (n) => rel.spouses.has(n.id))
-        .classed('rel-sibling', (n) => rel.siblings.has(n.id));
-
-      linkSel.classed('dimmed', (l) => {
-        const sid = typeof l.source === 'object' ? l.source.id : l.source;
-        const tid = typeof l.target === 'object' ? l.target.id : l.target;
-        return !(sid === focusId || tid === focusId);
-      });
-    }
-
-    function clearHighlight() {
-      nodeSel
-        .classed('dimmed', false)
-        .classed('focus', false)
-        .classed('rel-parent', false)
-        .classed('rel-child', false)
-        .classed('rel-spouse', false)
-        .classed('rel-sibling', false);
-      linkSel.classed('dimmed', false);
-    }
-
-    const sim = d3
-      .forceSimulation(nodes)
-      .force(
-        'link',
-        d3
-          .forceLink(links)
-          .id((d) => d.id)
-          .distance((l) => (l.type === 'spouse' ? 50 : 80))
-          .strength((l) => (l.status === 'hypothesis' ? 0.3 : 0.7))
-      )
-      .force('charge', d3.forceManyBody().strength(-220))
-      .force('center', d3.forceCenter(width / 2, height / 2))
-      .force('collide', d3.forceCollide(18))
-      .on('tick', () => {
-        linkSel
-          .attr('x1', (d) => d.source.x)
-          .attr('y1', (d) => d.source.y)
-          .attr('x2', (d) => d.target.x)
-          .attr('y2', (d) => d.target.y);
-        nodeSel.attr('cx', (d) => d.x).attr('cy', (d) => d.y);
-      });
-
-    // Слайдер року.
-    if (yearSlider) {
-      yearSlider.addEventListener('input', () => {
-        const year = +yearSlider.value;
-        if (yearDisplay) yearDisplay.textContent = year;
-        applyYearFilter(year);
-      });
-    }
-
-    // Чекбокси.
-    if (toggleHypothesis) {
-      toggleHypothesis.addEventListener('change', applyVisibility);
-    }
-    if (togglePrivate) {
-      togglePrivate.addEventListener('change', applyVisibility);
-    }
-    if (toggleCandidates) {
-      toggleCandidates.addEventListener('change', applyVisibility);
-    }
-
-    function applyYearFilter(year) {
-      nodeSel.attr('display', (d) => isAliveAt(d, year) ? null : 'none');
-      linkSel.attr('display', (d) => {
-        const s = typeof d.source === 'object' ? d.source : nodes.find((n) => n.id === d.source);
-        const t = typeof d.target === 'object' ? d.target : nodes.find((n) => n.id === d.target);
-        return isAliveAt(s, year) && isAliveAt(t, year) ? null : 'none';
-      });
-    }
-
-    function applyVisibility() {
-      const showHyp = !toggleHypothesis || toggleHypothesis.checked;
-      const showPriv = !togglePrivate || togglePrivate.checked;
-      const showCand = !toggleCandidates || toggleCandidates.checked;
-      nodeSel.style('display', (d) => {
-        if (!showPriv && d.private) return 'none';
-        if (!showCand && d.type === 'candidate') return 'none';
-        return null;
-      });
-      linkSel.style('display', (d) => {
-        if (!showHyp && d.status === 'hypothesis') return 'none';
-        if (!showCand && d.type === 'candidate') return 'none';
-        return null;
-      });
-    }
-    applyVisibility();
-
-    renderEvents(events);
-
-    function renderEvents(evts) {
-      if (!eventTrack || !evts.length) return;
-      const minY = d3.min(evts, (e) => e.year);
-      const maxY = d3.max(evts, (e) => e.year);
-      const w = eventTrack.clientWidth || 800;
-      const margin = 20;
-      const x = d3.scaleLinear().domain([minY, maxY]).range([margin, w - margin]);
-
-      const trackSvg = d3
-        .select(eventTrack)
-        .selectAll('svg')
-        .data([null])
-        .join('svg')
-        .attr('width', '100%')
-        .attr('height', 60)
-        .attr('viewBox', `0 0 ${w} 60`);
-
-      trackSvg.selectAll('*').remove();
-
-      trackSvg
-        .append('line')
-        .attr('x1', margin)
-        .attr('x2', w - margin)
-        .attr('y1', 30)
-        .attr('y2', 30)
-        .attr('stroke', '#888')
-        .attr('stroke-width', 1);
-
-      const decades = d3.range(Math.ceil(minY / 10) * 10, maxY + 1, 20);
-      trackSvg
-        .selectAll('text.year')
-        .data(decades)
-        .join('text')
-        .attr('class', 'year')
-        .attr('x', (d) => x(d))
-        .attr('y', 50)
-        .attr('text-anchor', 'middle')
-        .attr('font-size', 10)
-        .attr('fill', 'currentColor')
-        .text((d) => d);
-
-      trackSvg
-        .selectAll('circle.event')
-        .data(evts)
-        .join('circle')
-        .attr('class', (e) => `event event-${e.fact_type}`)
-        .attr('cx', (e) => x(e.year))
-        .attr('cy', 30)
-        .attr('r', 5)
-        .attr('fill', (e) => eventColor(e.fact_type))
-        .attr('stroke', (e) => (e.status === 'disputed' ? 'red' : '#fff'))
-        .attr('stroke-width', 1.5)
-        .style('cursor', 'pointer')
-        .on('mouseover', (ev, e) => showTooltip(ev, { _event: true, ...e }))
-        .on('mousemove', moveTooltip)
-        .on('mouseout', hideTooltip)
-        .on('click', (ev, e) => {
-          if (e.person_id) window.location.href = `persons/${e.person_id}.html`;
-        });
-    }
-
-    function showTooltip(ev, d) {
-      if (!tooltip) return;
-      let html;
-      if (d._event) {
-        html = `<strong>${d.year}</strong><br>${escapeHtml(d.label)}`;
-      } else {
-        const certaintyLabel = {
-          exact: 'точні дати',
-          approximate: 'приблизно',
-          inferred: 'виведено',
-          unknown: 'без дат',
-        }[d.lived_certainty] || '';
-        let years;
-        if (d.lived_certainty === 'exact') {
-          years = `${d.birth || '?'} – ${d.death || ''}`.trim();
-        } else if (d.lived_from != null || d.lived_to != null) {
-          const f = d.lived_from != null ? d.lived_from : '?';
-          const t = d.lived_to != null ? d.lived_to : '?';
-          years = `~${f}–${t} <small>(${certaintyLabel})</small>`;
-        } else {
-          years = `<small>(${certaintyLabel})</small>`;
-        }
-        const flags = [];
-        if (d.has_disputed) flags.push('⚠ суперечливо');
-        if (d.private) flags.push('🔒 приватна');
-        if (d.type === 'candidate') flags.push('? кандидат');
-        const rel = rels[d.id] || {};
-        const relRows = [
-          formatRel('Батьки', rel.parents, '#48c'),
-          formatRel('Подружжя', rel.spouses, '#e88'),
-          formatRel('Діти', rel.children, '#0a8'),
-          formatRel('Брати/сестри', rel.siblings, '#fa3'),
-        ].filter(Boolean).join('');
-        html =
-          `<strong>${escapeHtml(d.name)}</strong> <code>${d.id}</code><br>` +
-          `<span>${years}</span><br>` +
-          `<small>гілка: ${d.branch_id} · фактів: ${d.fact_count || 0} · ${d.min_confidence || '—'}</small>` +
-          (flags.length ? `<br><small>${flags.join(' · ')}</small>` : '') +
-          (relRows ? `<div class="rel-list">${relRows}</div>` : '');
-      }
-      tooltip.innerHTML = html;
-      tooltip.style.display = 'block';
-      moveTooltip(ev);
-    }
-
-    function formatRel(label, ids, color) {
-      if (!ids || !ids.size) return '';
-      const names = Array.from(ids)
-        .map((id) => {
-          const n = nodes.find((x) => x.id === id);
-          return n ? `${escapeHtml(n.name)} <code>${id}</code>` : id;
-        })
-        .join(', ');
-      return `<div><span class="rel-dot" style="background:${color}"></span><b>${label}:</b> ${names}</div>`;
-    }
-    function moveTooltip(ev) {
-      if (!tooltip) return;
-      tooltip.style.left = ev.pageX + 12 + 'px';
-      tooltip.style.top = ev.pageY + 12 + 'px';
-    }
-    function hideTooltip() {
-      if (tooltip) tooltip.style.display = 'none';
-    }
-
-    function drag() {
-      return d3
-        .drag()
-        .on('start', (ev, d) => {
-          if (!ev.active) sim.alphaTarget(0.3).restart();
-          d.fx = d.x;
-          d.fy = d.y;
-        })
-        .on('drag', (ev, d) => {
-          d.fx = ev.x;
-          d.fy = ev.y;
-        })
-        .on('end', (ev, d) => {
-          if (!ev.active) sim.alphaTarget(0);
-        });
+    // Підписи: усі — коли наблизили, інакше лише вибрана особа й її найближчі.
+    ctx.globalAlpha = 1;
+    ctx.font = `${12 / t.k}px Inter, system-ui, sans-serif`;
+    ctx.fillStyle = css('--nysh-ink', '#2a211a');
+    ctx.strokeStyle = css('--nysh-bg', '#faf7f1');
+    ctx.lineWidth = 3 / t.k;
+    for (const n of nodes) {
+      const hot = n.id === sel || (near && near.has(n.id));
+      if (!(hot || (t.k > 1.6 && alive(n))) || isAnon(n)) continue;
+      const label = n.name;
+      ctx.strokeText(label, n.x + 8 / t.k, n.y + 4 / t.k);
+      ctx.fillText(label, n.x + 8 / t.k, n.y + 4 / t.k);
     }
   }
 
-  function buildRelationships(nodes, links) {
-    const rels = {};
-    const ensure = (id) => {
-      if (!rels[id]) {
-        rels[id] = {
-          parents: new Set(),
-          children: new Set(),
-          spouses: new Set(),
-          siblings: new Set(),
-        };
-      }
-      return rels[id];
-    };
-    nodes.forEach((n) => ensure(n.id));
-    // Групуємо parent-links по family_id, щоб обчислити сіблінгів і батьків.
-    const families = {};
-    links.forEach((l) => {
-      const sid = typeof l.source === 'object' ? l.source.id : l.source;
-      const tid = typeof l.target === 'object' ? l.target.id : l.target;
-      if (l.type === 'parent') {
-        ensure(sid).children.add(tid);
-        ensure(tid).parents.add(sid);
-        const fid = l.family_id || 'F?';
-        if (!families[fid]) families[fid] = { parents: new Set(), children: new Set() };
-        families[fid].parents.add(sid);
-        families[fid].children.add(tid);
-      } else if (l.type === 'spouse') {
-        ensure(sid).spouses.add(tid);
-        ensure(tid).spouses.add(sid);
-      }
-    });
-    // Сіблінги: усі діти однієї родини (крім самих себе).
-    Object.values(families).forEach((fam) => {
-      fam.children.forEach((c1) => {
-        fam.children.forEach((c2) => {
-          if (c1 !== c2) ensure(c1).siblings.add(c2);
-        });
-      });
-    });
-    return rels;
+  const zoom = d3.zoom().scaleExtent([0.1, 6]).on('zoom', (ev) => { state.t = ev.transform; draw(); });
+  const sel = d3.select(canvas).call(zoom).on('dblclick.zoom', null);
+
+  function fit(animate = true) {
+    const xs = nodes.map((n) => n.x);
+    const ys = nodes.map((n) => n.y);
+    const [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
+    const k = Math.min(2, 0.92 * Math.min(dims.w / (x1 - x0 + 40), dims.h / (y1 - y0 + 40)));
+    const t = d3.zoomIdentity.translate(dims.w / 2 - ((x0 + x1) / 2) * k, dims.h / 2 - ((y0 + y1) / 2) * k).scale(k);
+    (animate ? sel.transition().duration(400) : sel).call(zoom.transform, t);
   }
 
-  function isAliveAt(node, year) {
-    if (!node) return false;
-    const from = node.lived_from;
-    const to = node.lived_to;
-    // Особи без жодної дати і без датованих родичів — не показуємо у часовому фільтрі.
-    if (from == null && to == null) return false;
-    if (from != null && year < from) return false;
-    if (to != null && year > to) return false;
-    return true;
+  // ---- вибір ---------------------------------------------------------------------
+  const panel = createPanel(root.querySelector('.nysh-panel'), { onClose: () => { state.selected = null; draw(); } });
+  function select(id, center = false) {
+    state.selected = id;
+    const n = byId.get(id);
+    const anon = isAnon(n);
+    const rel = [...neighbours.get(id)].map((x) => byId.get(x));
+    panel.show([
+      el('header.nysh-panel__head', {}, el('h2', {}, anon ? 'Приватна особа' : n.name),
+        el('p.nysh-panel__years', {}, yearsLabel(n) || 'роки невідомі')),
+      el('div.nysh-panel__actions', {},
+        el('a.md-button.md-button--primary', { href: `family-tree.html#${id}` }, 'У дереві'),
+        anon ? null : el('a.md-button', { href: `persons/${id}.html` }, 'Сторінка особи')),
+      rel.length ? el('section.nysh-panel__group', {}, el('h3', {}, 'Пов\'язані напряму'),
+        el('div.nysh-panel__chips', {}, rel.map((r) => el('button.nysh-chip' + (isAnon(r) ? '.is-anon' : ''),
+          { type: 'button', onclick: () => select(r.id, true) },
+          el('span.nysh-chip__name', {}, isAnon(r) ? 'приватна особа' : r.name),
+          el('span.nysh-chip__years', {}, yearsLabel(r)))))) : null,
+    ]);
+    if (center) {
+      const k = Math.max(state.t.k, 1.4);
+      sel.transition().duration(400).call(zoom.transform,
+        d3.zoomIdentity.translate(dims.w / 2 - n.x * k, dims.h / 2 - n.y * k).scale(k));
+    }
+    draw();
   }
+  canvas.addEventListener('click', (ev) => {
+    const r = canvas.getBoundingClientRect();
+    const [x, y] = state.t.invert([ev.clientX - r.left, ev.clientY - r.top]);
+    let best = null;
+    for (const n of nodes) {
+      const d = Math.hypot(n.x - x, n.y - y);
+      if (d < 14 / state.t.k && (!best || d < best[0])) best = [d, n];
+    }
+    if (best) select(best[1].id);
+    else if (state.selected) panel.close();
+  });
 
-  function linkClass(d) {
-    const cls = ['nysh-link', `link-${d.type}`];
-    if (d.status === 'hypothesis') cls.push('hypothesis-link');
-    if (d.confidence === 'speculative') cls.push('speculative-link');
-    return cls.join(' ');
-  }
+  // ---- керування -------------------------------------------------------------------
+  attach(root.querySelector('.nysh-search'), { url: root.dataset.indexUrl, onPick: (e) => byId.has(e.id) && select(e.id, true) });
+  const range = root.querySelector('input[type="range"]');
+  const out = root.querySelector('[data-out="year"]');
+  const yMax = Number(root.dataset.yearMax);
+  range.addEventListener('input', () => {
+    const v = Number(range.value);
+    state.year = v > yMax ? null : v;
+    out.textContent = state.year === null ? 'усі роки' : `${state.year} р.`;
+    draw();
+  });
+  root.querySelector('[data-opt="hyp"]').addEventListener('change', (ev) => { state.hyp = ev.target.checked; draw(); });
+  root.querySelector('.nysh-tree__zoom').addEventListener('click', (ev) => {
+    const act = ev.target.closest('[data-act]')?.dataset.act;
+    if (act === 'zoom+') sel.transition().duration(200).call(zoom.scaleBy, 1.4);
+    if (act === 'zoom-') sel.transition().duration(200).call(zoom.scaleBy, 1 / 1.4);
+    if (act === 'fit') fit();
+  });
+  window.addEventListener('resize', () => { dims = size(); draw(); });
+  const mq = window.matchMedia('(prefers-color-scheme: dark)');
+  mq.addEventListener?.('change', draw);
+  new MutationObserver(draw).observe(document.body, { attributes: true, attributeFilter: ['data-md-color-scheme'] });
 
-  function nodeClass(d) {
-    const cls = ['nysh-node'];
-    if (d.private) cls.push('private-node');
-    if (d.has_disputed) cls.push('disputed-node');
-    if (d.type === 'candidate') cls.push('candidate-node');
-    return cls.join(' ');
-  }
+  fit(false);
+  const want = decodeURIComponent(window.location.hash.slice(1));
+  if (byId.has(want)) select(want, true);
+}
 
-  function strokeFor(d) {
-    if (d.has_disputed) return '#e44';
-    if (d.type === 'candidate') return '#999';
-    if (d.sex === 'F') return '#c97';
-    if (d.sex === 'M') return '#36c';
-    return '#777';
-  }
-
-  function eventColor(factType) {
-    return {
-      emigration: '#0a8',
-      military: '#c44',
-      education: '#48c',
-      occupation: '#a6c',
-      baptism: '#fa3',
-      death: '#666',
-      marriage: '#e88',
-    }[factType] || '#888';
-  }
-
-  function escapeHtml(s) {
-    if (!s) return '';
-    return String(s)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;');
-  }
-})();
+if (root) main();
