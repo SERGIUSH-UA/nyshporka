@@ -25,6 +25,30 @@
  "schema": 1,
  "packs": [
   {
+   "id": "pysar-cyr-v28",
+   "kind": "model",
+   "label": "Писар v28 — кирилиця",
+   "filename": "pysar_cyr_v28.pt",
+   "sha256": "b80b7e3363b9ce5488572887e9b430d34dff6533364d02c24e7ce2931d6f1755",
+   "size": 97017568,
+   "release": "weights-v3",
+   "script": "cyrillic",
+   "engine": "parseq",
+   "note": "канцелярія, метрики, сповідки, судові й поліцейські справи XVIII–XX ст.; дотреновано на ~10 тис. рядках важких рук"
+  },
+  {
+   "id": "diak-cyr-v10",
+   "kind": "model",
+   "label": "Дяк-Літописець v10 — кирилиця, другий голос",
+   "filename": "diak_cyr_v10.safetensors",
+   "sha256": "31cb91e3bf09a2a28464736296a0b96316a4838a6df6068fb8503cb9444c1452",
+   "size": 63781228,
+   "release": "weights-v3",
+   "script": "cyrillic",
+   "engine": "kraken",
+   "note": "PP-OCRv6: читає ті самі кропи, що й Писар, і помиляється інакше — витягує прізвища, яких Писар не бачить"
+  },
+  {
    "id": "pysar-cyr-v19",
    "kind": "model",
    "label": "Писар v19 — кирилиця",
@@ -34,7 +58,8 @@
    "release": "weights-v2",
    "script": "cyrillic",
    "engine": "parseq",
-   "note": "канцелярія, метрики, сповідки, списи душ XVIII-XIX ст."
+   "note": "канцелярія, метрики, сповідки, списи душ XVIII-XIX ст.",
+   "superseded": true
   },
   {
    "id": "diak-cyr-v6",
@@ -46,7 +71,8 @@
    "release": "weights-v2",
    "script": "cyrillic",
    "engine": "kraken",
-   "note": "PP-OCRv6: читає ті самі кропи, що й Писар, і помиляється інакше — витягує прізвища, яких Писар не бачить"
+   "note": "PP-OCRv6: читає ті самі кропи, що й Писар, і помиляється інакше — витягує прізвища, яких Писар не бачить",
+   "superseded": true
   },
   {
    "id": "skryba-pp-v3",

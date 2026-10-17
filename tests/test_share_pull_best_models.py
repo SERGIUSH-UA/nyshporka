@@ -24,14 +24,26 @@ NEW = "pysar_cyr_v19.pt, diak_cyr_v6.safetensors"
 OLD = "pysar_cyr_v17.pt, diak_cyr_v4.mlmodel"
 
 
+NEWEST = "pysar_cyr_v28.pt, diak_cyr_v10.safetensors"
+
+
 def test_rang_za_pokolinniam_z_pakiv_vag() -> None:
-    assert C.model_rank(_row("RGIA 1-1-1", "u", NEW)) == (2, 0)
-    assert C.model_rank(_row("RGIA 1-1-1", "u", OLD)) == (0, 2)
-    assert C.model_rank(_row("RGIA 1-1-1", "u", "pysar_cyr_v19.pt, diak_cyr_v4.mlmodel")) == (1, 1)
+    # покоління — з тегу релізу ваг: weights-v3 (v28/v10) > weights-v2 (v19/v6) > weights-v1 (v17/v4)
+    assert C.model_rank(_row("RGIA 1-1-1", "u", NEWEST)) == (2, 0, 0)
+    assert C.model_rank(_row("RGIA 1-1-1", "u", NEW)) == (0, 2, 0)
+    assert C.model_rank(_row("RGIA 1-1-1", "u", OLD)) == (0, 0, 2)
+    assert C.model_rank(_row("RGIA 1-1-1", "u", "pysar_cyr_v19.pt, diak_cyr_v4.mlmodel")) == (0, 1, 1)
     # власна модель поза переліком паків не важить нічого
-    assert C.model_rank(_row("RGIA 1-1-1", "u", "moia_model.pt")) == (0, 0)
+    assert C.model_rank(_row("RGIA 1-1-1", "u", "moia_model.pt")) == (0, 0, 0)
     # шлях і регістр не заважають упізнати модель
-    assert C.model_rank(_row("RGIA 1-1-1", "u", r"C:\m\PYSAR_CYR_V19.pt")) == (1, 0)
+    assert C.model_rank(_row("RGIA 1-1-1", "u", r"C:\m\PYSAR_CYR_V19.pt")) == (0, 1, 0)
+
+
+def test_dva_zaminenykh_pokolinnia_ne_rivni() -> None:
+    """10-17: з двома заміненими поколіннями (v17 → v19 → v28) прочитання v19 і v17
+    рахувались рівними — серія могла взяти з пулу старіше."""
+    assert C.model_rank(_row("RGIA 1-1-1", "u", NEW)) > C.model_rank(_row("RGIA 1-1-1", "u", OLD))
+    assert C.model_rank(_row("RGIA 1-1-1", "u", NEWEST)) > C.model_rank(_row("RGIA 1-1-1", "u", NEW))
 
 
 def test_najnovishi_boiovi_a_bez_nykh_poperedni() -> None:

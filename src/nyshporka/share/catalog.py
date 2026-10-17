@@ -548,24 +548,35 @@ def _model_stem(name: str) -> str:
     return Path(name.strip().replace("\\", "/")).stem.lower()
 
 
-def model_rank(row: Row) -> tuple[int, int]:
-    """(скільки бойових моделей, скільки попереднього покоління) у пакеті.
+def _pack_generation(release: str, superseded: bool) -> int:
+    """Покоління паку з тегу релізу ваг: `weights-v3` → 3. Без номера — чинний 2, замінений 1."""
+    m = re.search(r"(\d+)\s*$", release or "")
+    if m:
+        return int(m.group(1))
+    return 1 if superseded else 2
 
-    Покоління — з переліку паків ваг, що їде з пакетом: модель чинного паку
-    бойова, модель заміненого (`superseded`) — попередня. Не з `PRODUCTION.json`
-    людини: там лише те, що вона вже завантажила, і той, хто ще не зробив
-    `nysh models get`, брав би з пулу старіше прочитання за наявності нового.
-    Модель поза переліком (власна, стороння) не важить нічого.
+
+def model_rank(row: Row) -> tuple[int, ...]:
+    """Скільки моделей кожного покоління в пакеті — від найновішого до найстаршого.
+
+    Покоління — з переліку паків ваг, що їде з пакетом, за тегом релізу
+    (`weights-v3` новіший за `weights-v2`). 🔴 Не просто «чинний / замінений»:
+    коли замінених поколінь два (v17 → v19 → v28), прочитання v19 і v17 ставали
+    рівними, і серія могла взяти з пулу старіше (знайдено 2026-10-17 на релізі
+    weights-v3). Не з `PRODUCTION.json` людини: там лише те, що вона вже
+    завантажила. Модель поза переліком (власна, стороння) не важить нічого.
+    Кортеж однакової довжини для всіх рядків, тож порівнюється лексикографічно.
     """
     from nyshporka.setup import packs
 
     gen: dict[str, int] = {}
     for p in packs.catalog():
         if p.kind == "model":
-            gen[_model_stem(p.filename)] = 1 if p.superseded else 2
+            gen[_model_stem(p.filename)] = _pack_generation(p.release, p.superseded)
+    levels = sorted(set(gen.values()), reverse=True)
     have = {_model_stem(m) for m in (row.models or "").split(",") if m.strip()}
     marks = [gen.get(m, 0) for m in have]
-    return marks.count(2), marks.count(1)
+    return tuple(marks.count(g) for g in levels)
 
 
 def case_of(r: Row) -> str:
