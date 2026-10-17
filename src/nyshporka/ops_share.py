@@ -1078,8 +1078,11 @@ def _index_taken(env: Envelope, runs: list[str]) -> None:
     if not ST.exists():
         env.suggest("text.index", "зібрати текстовий стор, щоб пошук побачив прийняте")
         return
+    # 🔴 Без злиття сегментів FTS: серія з 71 справи дає ~140 прогонів, це
+    # понад `OPTIMIZE_MIN`, і після двох хвилин завантаження прийом десятки
+    # хвилин зливав увесь стор на 48 ГБ під write-lock (17.10.2026).
     try:
-        for _ in ST.ensure_all(runs):
+        for _ in ST.ensure_all(runs, optimize=False):
             pass
     except RuntimeError as exc:
         env.warn("index", f"прийняте не проіндексовано ({exc}) — "

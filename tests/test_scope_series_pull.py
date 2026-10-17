@@ -378,3 +378,23 @@ def test_local_reads_bere_kliuch_pryiniatoho_z_shyfry(
     key = S._canon_case_key("ДАХмО 315-1-7")
     assert key and got[key] == {"own": [], "taken": ["op-7"]}
     assert got[""] == {"own": ["own-8"], "taken": []}
+
+
+def test_pryiom_serii_ne_zlyvaie_vsoho_storu(monkeypatch: pytest.MonkeyPatch) -> None:
+    """🔴 Серія з 71 справи дає ~140 прогонів, це понад `OPTIMIZE_MIN`: прийом
+    після двох хвилин завантаження десятки хвилин зливав сегменти FTS усього
+    стору на 48 ГБ під write-lock (17.10.2026)."""
+    from nyshporka import ops_share
+    from nyshporka.core.envelope import ok
+    from nyshporka.search import store as ST
+
+    seen: list[dict[str, Any]] = []
+
+    def _ensure_all(runs: list[str], **kw: Any) -> Any:
+        seen.append(kw)
+        yield from runs
+
+    monkeypatch.setattr(ST, "exists", lambda: True)
+    monkeypatch.setattr(ST, "ensure_all", _ensure_all)
+    ops_share._index_taken(ok({}), [f"r{i}" for i in range(140)])
+    assert seen and seen[0].get("optimize") is False
