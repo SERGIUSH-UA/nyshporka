@@ -31,6 +31,13 @@ Blattnummer.
 im Archiv bestellen und ob Sie Gelesenes teilen. Der Assistent zeigt, er
 zieht keine Schlüsse an Ihrer Stelle.
 
+!!! tip "Videokurs"
+
+    [Eine Reihe kurzer Videolektionen](https://nyshporka.online/de/uroky) —
+    von der Installation bis zum ersten Fund und einem Stammbaum mit Belegen,
+    je 5–9 Minuten. Die Reihe wächst weiter. Die Lektionen sind auf
+    Ukrainisch, mit Untertiteln, die YouTube in Ihre Sprache übersetzt.
+
 !!! tip "Live ansehen"
 
     Nyshporka ist im Livestream

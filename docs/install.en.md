@@ -10,6 +10,15 @@ one ready-made request. It takes 30–40 minutes, most of it downloading.
     program** that talks just like the chat but carries out actions on the
     computer itself and asks permission before each one.
 
+!!! tip "The same on video"
+
+    Lessons 3–5 of the [video series](https://nyshporka.online/en/uroky) show
+    the installation on Windows step by step. The assistant in the video is
+    Codex (see “Other assistants” below); with Claude Desktop the order is the
+    same: Git, Nyshporka, the assistant, the working folder, the ready-made
+    request. The lessons are in Ukrainian, with subtitles YouTube can
+    translate into your language.
+
 ## What you need
 
 * Windows 10 or 11, macOS or Linux.

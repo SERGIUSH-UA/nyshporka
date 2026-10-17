@@ -29,6 +29,13 @@ wiersze wprost na skanie, z numerem karty.
 archiwum i czy dzielić się odczytanym tekstem. Asystent pokazuje, a nie
 wyciąga wniosków za Ciebie.
 
+!!! tip "Lekcje wideo"
+
+    [Seria krótkich lekcji wideo](https://nyshporka.online/pl/uroky) — od
+    instalacji do pierwszego odkrycia i drzewa z dowodami, po 5–9 minut. Seria
+    wciąż rośnie. Lekcje są po ukraińsku, z napisami, które YouTube
+    przetłumaczy na Twój język.
+
 !!! tip "Zobacz na żywo"
 
     Nyshporkę pokazano w działaniu podczas transmisji

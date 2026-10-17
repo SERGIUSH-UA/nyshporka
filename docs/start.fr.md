@@ -8,6 +8,15 @@ Nyshporka est installée, l'assistant est connecté ([sinon](install.md)). Ensui
 vous parlez à l'assistant en langage courant, et ce qui a été trouvé, vous le
 regardez vous-même.
 
+!!! tip "La même chose en vidéo"
+
+    À partir de la leçon 6, la [série
+    vidéo](https://nyshporka.online/fr/uroky) montre le travail en direct :
+    une première recherche, la recherche et la vérification des trouvailles
+    sur le scan, les preuves avec extraits et le site de la famille. Les
+    leçons sont en ukrainien, avec des sous-titres que YouTube traduit dans
+    votre langue.
+
 ## Ce qu'on peut demander
 
 Quelques exemples — formulez comme vous voulez :

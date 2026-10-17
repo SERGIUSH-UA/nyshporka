@@ -30,6 +30,12 @@ familie și vă aduce rândurile găsite direct pe scanare, cu numărul filei.
 ce să comandați la arhivă și dacă să împărtășiți ce s-a citit. Asistentul
 arată, nu trage concluzii în locul dumneavoastră.
 
+!!! tip "Lecții video"
+
+    [O serie de lecții video scurte](https://nyshporka.online/ro/uroky) — de
+    la instalare la prima descoperire și un arbore cu dovezi, câte 5–9 minute.
+    Seria continuă. Lecțiile sunt în ucraineană, cu subtitrări în română.
+
 !!! tip "Vedeți în direct"
 
     Nyshporka este arătată la lucru în transmisiunea

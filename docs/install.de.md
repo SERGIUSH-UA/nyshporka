@@ -12,6 +12,15 @@ größten Teil davon der Download.
     aber selbst Aktionen auf dem Computer ausführt und vor jeder um Erlaubnis
     bittet.
 
+!!! tip "Dasselbe als Video"
+
+    Die Lektionen 3–5 der [Videoreihe](https://nyshporka.online/de/uroky)
+    zeigen die Installation unter Windows Schritt für Schritt. Der Assistent
+    im Video ist Codex (siehe „Andere Assistenten“ unten); mit Claude Desktop
+    ist die Reihenfolge dieselbe: Git, Nyshporka, Assistent, Arbeitsordner,
+    fertige Anfrage. Die Lektionen sind auf Ukrainisch, mit Untertiteln, die
+    YouTube in Ihre Sprache übersetzt.
+
 ## Was Sie brauchen
 
 * Windows 10 oder 11, macOS oder Linux.

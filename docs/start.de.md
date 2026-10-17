@@ -8,6 +8,13 @@ Nyshporka ist installiert, der Assistent verbunden ([falls nicht](install.md)).
 Ab jetzt sprechen Sie mit dem Assistenten in ganz normaler Sprache, und das
 Gefundene sehen Sie sich selbst an.
 
+!!! tip "Dasselbe als Video"
+
+    Ab Lektion 6 zeigt die [Videoreihe](https://nyshporka.online/de/uroky) die
+    Arbeit live: eine erste Forschung, Suchen und Prüfen der Funde am Scan,
+    Belege mit Ausschnitten und die Familien-Website. Die Lektionen sind auf
+    Ukrainisch, mit Untertiteln, die YouTube in Ihre Sprache übersetzt.
+
 ## Worum Sie bitten können
 
 Ein paar Beispiele — formulieren Sie, wie Sie möchten:

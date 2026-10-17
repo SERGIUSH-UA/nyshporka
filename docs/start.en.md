@@ -8,6 +8,14 @@ Nyshporka is installed and the assistant is connected ([if not](install.md)). Fr
 here on you talk to the assistant in ordinary language, and look at what has been
 found yourself.
 
+!!! tip "The same on video"
+
+    From lesson 6 on, the [video series](https://nyshporka.online/en/uroky)
+    shows the work live: a first research, searching and checking finds
+    against the scan, evidence with clippings and a family website. The
+    lessons are in Ukrainian, with subtitles YouTube can translate into your
+    language.
+
 ## What you can ask for
 
 A few examples — phrase them however you like:

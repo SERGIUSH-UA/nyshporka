@@ -7,6 +7,13 @@
 Nyshporka jest zainstalowana, asystent podłączony ([jeśli nie](install.md)).
 Dalej rozmawiasz z asystentem zwykłym językiem, a znaleziska oglądasz samodzielnie.
 
+!!! tip "To samo na wideo"
+
+    Od szóstej lekcji [seria wideo](https://nyshporka.online/pl/uroky)
+    pokazuje pracę na żywo: pierwsze badanie, wyszukiwanie i sprawdzanie
+    znalezisk na skanie, dowody z wycinkami i stronę rodziny. Lekcje są po
+    ukraińsku, z napisami, które YouTube przetłumaczy na Twój język.
+
 ## O co można poprosić
 
 Kilka przykładów — formułuj, jak chcesz:

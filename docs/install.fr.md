@@ -11,6 +11,15 @@ téléchargement.
     **programme-assistant**, qui converse comme le chat, mais exécute lui-même
     les actions sur l'ordinateur et demande la permission avant chacune.
 
+!!! tip "La même chose en vidéo"
+
+    Les leçons 3 à 5 de la [série vidéo](https://nyshporka.online/fr/uroky)
+    montrent l'installation sous Windows pas à pas. L'assistant de la vidéo
+    est Codex (voir « Autres assistants » plus bas) ; avec Claude Desktop
+    l'ordre est le même : Git, Nyshporka, l'assistant, le dossier de travail,
+    la demande toute prête. Les leçons sont en ukrainien, avec des sous-titres
+    que YouTube traduit dans votre langue.
+
 ## Ce qu'il faut
 
 * Windows 10 ou 11, macOS ou Linux.

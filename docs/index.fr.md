@@ -30,6 +30,13 @@ les lignes trouvées directement sur le scan, avec le numéro du feuillet.
 qui décidez quoi commander aux archives et s'il faut partager ce qui a été lu.
 L'assistant montre ; il ne tire pas de conclusions à votre place.
 
+!!! tip "Leçons vidéo"
+
+    [Une série de courtes leçons vidéo](https://nyshporka.online/fr/uroky) —
+    de l'installation à la première trouvaille et à un arbre avec preuves, 5 à
+    9 minutes chacune. La série continue. Les leçons sont en ukrainien, avec
+    des sous-titres que YouTube traduit dans votre langue.
+
 !!! tip "Voir en direct"
 
     Nyshporka est montrée au travail dans le stream

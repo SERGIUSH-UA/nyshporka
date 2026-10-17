@@ -10,6 +10,14 @@ jedno gotowe zapytanie. Zajmuje 30–40 minut, większość czasu to pobieranie.
     który rozmawia tak samo jak czat, ale sam wykonuje działania na komputerze i
     pyta o zgodę przed każdym z nich.
 
+!!! tip "To samo na wideo"
+
+    Lekcje 3–5 [serii wideo](https://nyshporka.online/pl/uroky) pokazują
+    instalację w Windows krok po kroku. Asystentem na wideo jest Codex (zob.
+    „Inni asystenci” niżej); z Claude Desktop kolejność jest ta sama: Git,
+    Nyshporka, asystent, folder roboczy, gotowe polecenie. Lekcje są po
+    ukraińsku, z napisami, które YouTube przetłumaczy na Twój język.
+
 ## Czego potrzeba
 
 * Windows 10 lub 11, macOS albo Linux.

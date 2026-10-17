@@ -8,6 +8,13 @@ Nyshporka este instalată, asistentul este conectat ([dacă nu](install.md)).
 Mai departe vorbiți cu asistentul în limbaj obișnuit, iar ce s-a găsit
 verificați singuri.
 
+!!! tip "Același lucru pe video"
+
+    De la lecția a șasea, [seria video](https://nyshporka.online/ro/uroky)
+    arată lucrul pe viu: prima cercetare, căutarea și verificarea
+    descoperirilor pe scanare, dovezi cu decupaje și site-ul familiei.
+    Lecțiile sunt în ucraineană, cu subtitrări în română.
+
 ## Ce puteți cere
 
 Câteva exemple — formulați cum doriți:

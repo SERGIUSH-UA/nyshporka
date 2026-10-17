@@ -29,6 +29,13 @@ back the lines it has found right on the scan, with the folio number.
 what to order from the archive and whether to share what has been read. The
 assistant shows; it does not draw conclusions for you.
 
+!!! tip "Video lessons"
+
+    [A series of short video lessons](https://nyshporka.online/en/uroky) —
+    from installation to your first find and a family tree with evidence, 5–9
+    minutes each. New lessons keep coming. The lessons are in Ukrainian, with
+    subtitles YouTube can translate into your language.
+
 !!! tip "Watch it live"
 
     Nyshporka is shown at work in the stream

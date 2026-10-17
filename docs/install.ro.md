@@ -12,6 +12,14 @@ este descărcarea.
     execută singur acțiuni pe calculator și cere permisiunea înaintea
     fiecăreia.
 
+!!! tip "Același lucru pe video"
+
+    Lecțiile 3–5 din [seria video](https://nyshporka.online/ro/uroky) arată
+    instalarea pe Windows pas cu pas. Asistentul din video este Codex (vedeți
+    „Alți asistenți” mai jos); cu Claude Desktop ordinea este aceeași: Git,
+    Nyshporka, asistentul, dosarul de lucru, cererea gata scrisă. Lecțiile
+    sunt în ucraineană, cu subtitrări în română.
+
 ## Ce este necesar
 
 * Windows 10 sau 11, macOS ori Linux.
