@@ -524,6 +524,7 @@ screen_glyphs:
   search: "🔎"
   sift: "🔬"
   export: "📤"
+  site: "🌳"
   jobs: "⏳"
   sets: "🗃"
   label: "✍"
@@ -562,6 +563,7 @@ screen_icons:
   search: search
   sift: crop-check
   export: download
+  site: link
   jobs: clock
   sets: folder-open
   label: pencil-line

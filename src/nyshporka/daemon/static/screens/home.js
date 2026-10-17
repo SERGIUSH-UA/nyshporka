@@ -114,6 +114,38 @@ SCREENS.home = async () => {
   const env = await callOp('home.pulse', {});
   if (!alive(gen)) return;
   if (!env.ok) return failure(env);
+  paintHome(env);
+  // Без `await`: екран уже намальовано, і чекати на цей рядок нема чого.
+  machineLater(gen);
+  if (env.data && env.data.refreshing) freshLater(gen);
+};
+
+/**
+ * 🔁 Знімок → свіжий зріз. Консоль віддає останній відомий стан одразу, а
+ * свіжий рахує у фоні (`home.pulse`, `refreshing`): на великому просторі
+ * холодний зріз — 10 с. Перепитуємо, доки не прийде свіжий, і перемальовуємо
+ * на місці, без сірих смуг.
+ */
+async function freshLater(gen) {
+  for (let i = 0; i < 40; i += 1) {
+    await new Promise((r) => setTimeout(r, 1500));
+    if (!alive(gen)) return;
+    const env = await callOp('home.pulse', {});
+    if (!alive(gen) || !env.ok) return;
+    if (!(env.data && env.data.refreshing)) {
+      const machine = PULSE && PULSE.machine;
+      paintHome(env);
+      if (machine && !machine.pending) {
+        PULSE.machine = machine;
+        const box = el('dash-steps');
+        if (box) swapHtml(box, onboarding(PULSE));
+      }
+      return;
+    }
+  }
+}
+
+function paintHome(env) {
   PULSE = env.data;
   const ws = PULSE.workspace || {};
   const reg = PULSE.registry || {};
@@ -134,9 +166,7 @@ SCREENS.home = async () => {
   } else {
     setView(dashboard(env, PULSE));
   }
-  // Без `await`: екран уже намальовано, і чекати на цей рядок нема чого.
-  machineLater(gen);
-};
+}
 
 
 /**

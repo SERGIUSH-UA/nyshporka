@@ -1,5 +1,5 @@
 ---
-title: {{ place.name }}
+title: {{ place.name | q }}
 ---
 
 <div class="nysh-hero nysh-hero--place" markdown>
@@ -20,7 +20,7 @@ title: {{ place.name }}
 </div>
 <div class="nysh-hero__actions" markdown>
 {% if place.coords %}
-<a class="md-button md-button--primary" href="../places-map.html#{{ place.id }}">На мапі роду</a>
+<a class="md-button md-button--primary" href="../places-map.html#{{ place.id }}">{{ t("on.family.map") }}</a>
 [OpenStreetMap](https://www.openstreetmap.org/?mlat={{ "%.5f" | format(place.coords[0]) }}&mlon={{ "%.5f" | format(place.coords[1]) }}#map=12/{{ "%.5f" | format(place.coords[0]) }}/{{ "%.5f" | format(place.coords[1]) }}){ .md-button }
 {% elif place.osm_id %}
 [OpenStreetMap](https://www.openstreetmap.org/relation/{{ place.osm_id }}){ .md-button }
@@ -29,7 +29,7 @@ title: {{ place.name }}
 </div>
 
 {% if related_persons %}
-## Згадані особи
+## {{ t("h.mentioned") }} { #mentioned }
 
 <div class="nysh-plist" markdown>
 {% for entry in related_persons %}
@@ -39,13 +39,13 @@ title: {{ place.name }}
 {% endif %}
 
 {% if place.period_notes %}
-## Періодизація
+## {{ t("h.periods") }} { #periods }
 
 {{ place.period_notes }}
 {% endif %}
 
 {% if place.notes %}
-## Нотатки
+## {{ t("notes") }} { #notes }
 
 {{ place.notes }}
 {% endif %}

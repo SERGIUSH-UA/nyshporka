@@ -230,6 +230,7 @@ def relink_lasting(out_dir: Path, case_key: str = "") -> int:
 
 # ── довідники ────────────────────────────────────────────────────────────────
 _CASE_DIR_MEMO: dict[tuple[str, str], Path] = {}
+_ROOT_RESOLVED: dict[str, Path] = {}
 
 
 def _case_dir(name: str) -> Path | None:
@@ -240,7 +241,8 @@ def _case_dir(name: str) -> Path | None:
     4.9 с із 11 у корпусному пошуку з кешу (замір 08.09). Наявність теки
     перевіряється щоразу, лише розв'язання не повторюється.
     """
-    if not name or "/" in name or "\\" in name or name.startswith("."):
+    # 🔴 `:` — теж межа: `T:/root / "C:x"` дає шлях на іншому диску.
+    if not name or "/" in name or "\\" in name or ":" in name or name.startswith("."):
         return None
     key = (str(HTR_ROOT), name)
     d = _CASE_DIR_MEMO.get(key)
@@ -248,8 +250,15 @@ def _case_dir(name: str) -> Path | None:
         if d.is_dir():
             return d
         _CASE_DIR_MEMO.pop(key, None)
-    d = (HTR_ROOT / name).resolve()
-    if d.parent != HTR_ROOT.resolve() or not d.is_dir():
+    # 🔴 Розв'язується лише КОРІНЬ, один раз, а не кожен прогін: ім'я вище вже
+    # не має ні роздільників, ні диска, ні `..`, тож вийти з кореня воно не
+    # може. `resolve()` на кожне з 12 803 імен коштував 8.4 с холодного
+    # «Огляду» (замір 17.10.2026).
+    root = _ROOT_RESOLVED.get(str(HTR_ROOT))
+    if root is None:
+        root = _ROOT_RESOLVED[str(HTR_ROOT)] = HTR_ROOT.resolve()
+    d = root / name
+    if not d.is_dir():
         return None
     _CASE_DIR_MEMO[key] = d
     return d

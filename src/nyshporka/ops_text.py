@@ -617,9 +617,16 @@ def search_scopes(a: ScopesArgs) -> Envelope:
             title = _TITLE_SHIFRA.sub("", " ".join(str(r.get("title") or "").split()))
             # Значення — ключ справи: шифру з літерою чи з власною розміткою
             # («ДАВіО ф.474 оп.1 спр.84») резолвер не розбирає, а ключ — завжди.
+            y0, y1 = r.get("year_from"), r.get("year_to")
+            years = (f"{y0}–{y1}" if y0 and y1 and y0 != y1 else str(y0 or y1 or ""))
             cases.append({"value": str(r.get("key") or "").strip() or shifra,
                           "kind": "case", "cases": 1,
-                          "label": f"{shifra} — {title[:70]}" if title else shifra})
+                          "label": f"{shifra} — {title[:70]}" if title else shifra,
+                          # Для переліку справ на «Пошуку»: шифра, назва, роки й
+                          # скільки сторінок прочитано — окремими полями.
+                          "shifra": shifra, "title": title, "years": years,
+                          "pages": int(r.get("htr_pages_max") or 0),
+                          "place": str(r.get("settlement") or r.get("place_raw") or "")})
     items: list[dict[str, Any]] = (
         [{"value": f"{lab} {f}", "kind": "fond", "cases": n,
           "label": f"{lab} ф.{f}", "head": f}

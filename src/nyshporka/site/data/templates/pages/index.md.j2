@@ -1,5 +1,5 @@
 ---
-title: {{ title | tojson }}
+title: {{ title | q }}
 hide:
   - navigation
   - toc
@@ -13,35 +13,41 @@ hide:
 <p class="nysh-home__lead">{{ description }}</p>
 {% endif %}
 <div class="nysh-search" data-index-url="assets/search.json" data-base="" data-tree="family-tree.html">
-<input type="search" class="nysh-search__input" placeholder="Знайти особу: ім'я, прізвище, рік…" aria-label="Пошук особи" autocomplete="off" spellcheck="false">
+<input type="search" class="nysh-search__input" placeholder="{{ t('home.search') }}" aria-label="{{ t('home.search.aria') }}" autocomplete="off" spellcheck="false">
 <ul class="nysh-search__list" role="listbox" hidden></ul>
 </div>
 <p class="nysh-home__years">{{ year_min }} — {{ year_max }}</p>
 </section>
 
-<section class="nysh-stats" aria-label="Обсяг">
-<a class="nysh-stat" href="persons/index.html"><span class="nysh-stat__n">{{ counts.persons }}</span><span class="nysh-stat__l">осіб</span></a>
-<a class="nysh-stat" href="families/index.html"><span class="nysh-stat__n">{{ counts.families }}</span><span class="nysh-stat__l">родин</span></a>
-<a class="nysh-stat" href="places/index.html"><span class="nysh-stat__n">{{ counts.places }}</span><span class="nysh-stat__l">місць</span></a>
-<a class="nysh-stat" href="sources/index.html"><span class="nysh-stat__n">{{ counts.sources }}</span><span class="nysh-stat__l">джерел</span></a>
+<section class="nysh-stats">
+<a class="nysh-stat" href="persons/index.html"><span class="nysh-stat__n">{{ counts.persons }}</span><span class="nysh-stat__l">{{ t("home.persons") }}</span></a>
+<a class="nysh-stat" href="families/index.html"><span class="nysh-stat__n">{{ counts.families }}</span><span class="nysh-stat__l">{{ t("home.families") }}</span></a>
+<a class="nysh-stat" href="places/index.html"><span class="nysh-stat__n">{{ counts.places }}</span><span class="nysh-stat__l">{{ t("home.places") }}</span></a>
+<a class="nysh-stat" href="sources/index.html"><span class="nysh-stat__n">{{ counts.sources }}</span><span class="nysh-stat__l">{{ t("home.sources") }}</span></a>
 </section>
 
 <section class="nysh-tiles">
 <a class="nysh-tile nysh-tile--tree" href="family-tree.html">
-<span class="nysh-tile__title">Дерево</span>
-<span class="nysh-tile__text">Предки вгору, нащадки вниз від будь-якої особи. Торкніться картки, щоб перейти далі.</span>
+<span class="nysh-tile__title">{{ t("tile.tree") }}</span>
+<span class="nysh-tile__text">{{ t("tile.tree.text") }}</span>
 </a>
 <a class="nysh-tile nysh-tile--map" href="places-map.html">
-<span class="nysh-tile__title">Мапа місць</span>
-<span class="nysh-tile__text">{{ counts.places_with_coords }} місць на мапі: де народжувались, служили, жили.</span>
+<span class="nysh-tile__title">{{ t("tile.map") }}</span>
+<span class="nysh-tile__text">{{ t("tile.map.text", n=counts.places_with_coords) }}</span>
 </a>
 <a class="nysh-tile nysh-tile--persons" href="persons/index.html">
-<span class="nysh-tile__title">Усі особи</span>
-<span class="nysh-tile__text">Покажчик за прізвищем із фільтром.</span>
+<span class="nysh-tile__title">{{ t("tile.persons") }}</span>
+<span class="nysh-tile__text">{{ t("tile.persons.text") }}</span>
 </a>
+{% if counts.hypotheses %}
+<a class="nysh-tile nysh-tile--hyp" href="hypotheses/index.html">
+<span class="nysh-tile__title">{{ t("tile.hyp") }}</span>
+<span class="nysh-tile__text">{{ t("tile.hyp.text", n=counts.hypotheses) }}</span>
+</a>
+{% endif %}
 <a class="nysh-tile nysh-tile--graph" href="family-graph.html">
-<span class="nysh-tile__title">Граф зв'язків</span>
-<span class="nysh-tile__text">Увесь рід одним полотном: гілки, гіпотези, хто жив у вибраний рік.</span>
+<span class="nysh-tile__title">{{ t("tile.graph") }}</span>
+<span class="nysh-tile__text">{{ t("tile.graph.text") }}</span>
 </a>
 {% for item in nav_extra %}
 <a class="nysh-tile" href="{{ item.path | replace('.md', '.html') }}">
@@ -51,13 +57,13 @@ hide:
 </section>
 
 <section class="nysh-home__about">
-<p>Кожен факт веде до джерела, а джерело — до доказу там, де він є. Факти з цитатою: <strong>{{ counts.facts_cited }}</strong> з {{ counts.facts }}.</p>
+<p>{{ t("home.about", a=counts.facts_cited, b=counts.facts) }}</p>
 {% if public %}
-<p class="nysh-note">Відкрита версія: живих і близьких до живих тут немає — ні сторінок, ні імен у дереві, ні сканів.</p>
+<p class="nysh-note">{{ t("home.public") }}</p>
 {% else %}
-<p class="nysh-note nysh-note--warn">Приватна версія: живі показані з датами до десятиліття, без фото й нотаток. Для публікації — <code>nysh site build --public</code>.</p>
+<p class="nysh-note nysh-note--warn">{{ t("home.private") }}</p>
 {% endif %}
-<p class="nysh-meta">Зібрано Нишпоркою {{ built }}.</p>
+<p class="nysh-meta">{{ t("home.built", d=built) }}</p>
 </section>
 
 </div>

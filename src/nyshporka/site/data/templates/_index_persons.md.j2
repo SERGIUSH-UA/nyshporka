@@ -1,17 +1,17 @@
 ---
-title: Особи
+title: {{ t("nav.persons") | q }}
 hide:
   - toc
 ---
 
-# Особи
+# {{ t("nav.persons") }}
 
 <div class="nysh-filter" data-filter-target=".nysh-plist">
-<input type="search" class="nysh-filter__input" placeholder="Фільтр за іменем, роком, місцем…" aria-label="Фільтр осіб" autocomplete="off">
-<span class="nysh-filter__count">{{ persons | length }} осіб</span>
+<input type="search" class="nysh-filter__input" placeholder="{{ t('idx.persons.filter') }}" aria-label="{{ t('idx.persons.filter') }}" autocomplete="off">
+<span class="nysh-filter__count">{{ t("idx.persons.count", n=persons | length) }}</span>
 </div>
 
-<nav class="nysh-jumpbar" aria-label="За літерою">
+<nav class="nysh-jumpbar" aria-label="{{ t('by.letter') }}">
 {% for lt in letters %}
 <a class="nysh-jumpchip" href="#{{ lt | lower | replace('—', 'other') }}">{{ lt }}</a>
 {% endfor %}
@@ -23,7 +23,7 @@ hide:
 
 <div class="nysh-plist" markdown>
 {% for p in grouped[lt] %}
-[<span class="nysh-pc__name">{{ p.primary_name }}</span><span class="nysh-pc__years">{{ p.years or "роки невідомі" }}{% if p.birth_place_name %} · {{ p.birth_place_name }}{% endif %}</span>]({{ p.id }}.md){ .nysh-pc .nysh-pc--{{ p.sex | lower }}{% if p.private %} .is-private{% endif %} }
+[<span class="nysh-pc__name">{{ p.primary_name }}</span><span class="nysh-pc__years">{{ p.years or t("years.unknown") }}{% if p.birth_place_name %} · {{ p.birth_place_name }}{% endif %}</span>]({{ p.id }}.md){ .nysh-pc .nysh-pc--{{ p.sex | lower }}{% if p.private %} .is-private{% endif %} }
 {% endfor %}
 </div>
 

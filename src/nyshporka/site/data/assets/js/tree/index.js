@@ -4,6 +4,7 @@ import { indexData, layout, parentsOf, siblingsOf, familiesOf, rootOf } from './
 import { createView, yearsLabel, isAnon } from './render.js';
 import { createPanel, el } from '../panel.js';
 import { attach, loadIndex } from '../search.js';
+import { t } from '../strings.js';
 
 const app = document.getElementById('nysh-tree');
 
@@ -20,7 +21,7 @@ async function main() {
     if (!res.ok) throw new Error(res.statusText);
     data = await res.json();
   } catch (e) {
-    status.textContent = 'Не вдалося завантажити дерево. Якщо сторінку відкрито як файл, запустіть nysh site serve.';
+    status.textContent = t('tree.error');
     return;
   }
   const search = await loadIndex(app.dataset.indexUrl);
@@ -28,7 +29,7 @@ async function main() {
   const ix = indexData(data);
   const nodes = ix.nodes;
   if (!nodes.size) {
-    status.textContent = 'У дереві поки нікого немає.';
+    status.textContent = t('tree.empty');
     return;
   }
   status.hidden = true;
@@ -54,7 +55,8 @@ async function main() {
     return best ? best[1] : nodes.keys().next().value;
   };
   const fromHash = () => {
-    const id = decodeURIComponent(window.location.hash.slice(1));
+    let id = '';
+    try { id = decodeURIComponent(window.location.hash.slice(1)); } catch { id = ''; }
     return nodes.has(id) ? id : null;
   };
 
@@ -71,7 +73,7 @@ async function main() {
     state.selected = id;
     if (push && window.location.hash.slice(1) !== id) history.pushState({ id }, '', `#${id}`);
     const n = nodes.get(id);
-    document.title = `${isAnon(n) ? 'Дерево' : n.name} — дерево`;
+    document.title = isAnon(n) ? t('nav.tree') : t('tree.title', { name: n.name });
     render(animate);
     showDetails(id, false);
   }
@@ -87,8 +89,8 @@ async function main() {
     const n = nodes.get(p.id);
     const anon = isAnon(n);
     return el('button.nysh-chip' + (p.hyp ? '.is-hyp' : '') + (anon ? '.is-anon' : ''),
-      { type: 'button', title: p.hyp ? 'гіпотеза' : null, onclick: () => focusOn(p.id) },
-      el('span.nysh-chip__name', {}, anon ? 'приватна особа' : n.name),
+      { type: 'button', title: p.hyp ? t('hyp.word') : null, onclick: () => focusOn(p.id) },
+      el('span.nysh-chip__name', {}, anon ? t('private.person') : n.name),
       el('span.nysh-chip__years', {}, yearsLabel(n)));
   }
   function group(title, people) {
@@ -105,27 +107,29 @@ async function main() {
     const fams = familiesOf(ix, id);
     const card = state.result?.cards.find((c) => c.id === id && !c.ref);
     const kids = fams.flatMap((f) => f.children);
-    const sex = { M: 'чоловік', F: 'жінка' }[n.sex];
+    const sex = { M: t('tree.sex.m'), F: t('tree.sex.f') }[n.sex];
     const head = el('header.nysh-panel__head', {},
-      el('h2', {}, anon ? 'Приватна особа' : n.name),
-      el('p.nysh-panel__years', {}, [yearsLabel(n), entry?.p].filter(Boolean).join(' · ') || 'роки невідомі'));
+      el('h2', {}, anon ? t('private.title') : n.name),
+      el('p.nysh-panel__years', {}, [yearsLabel(n), entry?.p].filter(Boolean).join(' · ') || t('years.unknown')));
     const tags = el('p.nysh-panel__tags', {},
       sex ? el('span.nysh-badge', {}, sex) : null,
-      card?.hyp ? el('span.nysh-badge.nysh-badge--hyp', {}, "зв'язок — гіпотеза") : null,
-      n.has_disputed ? el('span.nysh-badge.nysh-badge--disputed', {}, 'є суперечливі факти') : null,
-      anon ? el('span.nysh-badge.nysh-badge--private', {}, 'дані приховано') : null);
+      card?.hyp ? el('span.nysh-badge.nysh-badge--hyp', {}, t('tree.link.hyp')) : null,
+      n.has_disputed ? el('span.nysh-badge.nysh-badge--disputed', {}, t('badge.disputed')) : null,
+      anon ? el('span.nysh-badge.nysh-badge--private', {}, t('tree.hidden')) : null);
     const actions = el('div.nysh-panel__actions', {},
-      id !== state.focus ? el('button.md-button.md-button--primary', { type: 'button', onclick: () => focusOn(id) }, 'Зробити центром') : null,
-      entry ? el('a.md-button' + (id === state.focus ? '.md-button--primary' : ''), { href: `persons/${id}.html` }, 'Сторінка особи') : null);
+      id !== state.focus ? el('button.md-button.md-button--primary', { type: 'button', onclick: () => focusOn(id) }, t('tree.center')) : null,
+      entry ? el('a.md-button' + (id === state.focus ? '.md-button--primary' : ''), { href: `persons/${id}.html` }, t('tree.page')) : null);
     const parents = par ? [par.father, par.mother].filter(Boolean) : [];
     const spouses = fams.map((f) => f.partner).filter(Boolean);
     panel.show([
       head, actions, tags,
-      group('Батьки', parents),
-      group(spouses.length > 1 ? 'Подружжя' : 'Чоловік / дружина', spouses),
-      group('Діти', kids),
-      group('Брати й сестри', siblingsOf(ix, id)),
-      el('p.nysh-meta', {}, `Відомих предків: ${n.ancestor_count || 0} · нащадків: ${n.descendant_count || 0}`),
+      group(t('kin.parents'), parents),
+      group(spouses.length > 1 ? t('tree.spouses') : t('tree.spouse'), spouses),
+      group(t('kin.children'), kids),
+      group(t('kin.siblings'), siblingsOf(ix, id)),
+      entry?.h ? el('p.nysh-panel__hyp', {}, el('a', { href: `persons/${id}.html#hypotheses` },
+        t('tree.open_hyp', { n: entry.h }))) : null,
+      el('p.nysh-meta', {}, t('tree.counts', { a: n.ancestor_count || 0, d: n.descendant_count || 0 })),
     ], { expand });
   }
 

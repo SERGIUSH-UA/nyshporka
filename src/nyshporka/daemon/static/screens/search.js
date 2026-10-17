@@ -30,10 +30,12 @@ import { attachCombobox } from '/ui/combobox.js';
  * самим полем, лише без каналів роду (вони про людей).
  */
 
-/** Підпис підказки «Де» → значення межі для `text.find`. */
-const SCOPE_VALUE = new Map();
+/** Значення межі для `text.find` → підпис для людини. */
+const SCOPE_LABEL = new Map();
 /** Недавні запити — зручність одного браузера, тож `localStorage`. */
 const RECENT_KEY = 'nysh.search.recent';
+/** Остання обрана межа — так само зручність браузера. */
+const SCOPE_KEY = 'nysh.search.scope';
 /** Поріг за замовчуванням — той самий, що в `text.find`. */
 const THRESH = 78;
 
@@ -51,16 +53,30 @@ function remember(q) {
   } catch { /* приватне вікно — без недавніх, і це не поламка */ }
 }
 
-/** Набране в «Де» → межа: підпис підказки, «уся бібліотека» або вільний текст. */
+/** Значення прихованого поля «Де» → межа для `text.find` («» — уся бібліотека). */
 function scopeValue(raw) {
-  const v = String(raw || '').trim();
-  if (!v || v === t('search.scope.all')) return '';
-  return SCOPE_VALUE.has(v) ? SCOPE_VALUE.get(v) : v;
+  return String(raw || '').trim();
+}
+
+function savedScope() {
+  try {
+    const got = JSON.parse(localStorage.getItem(SCOPE_KEY) || 'null');
+    return got && typeof got.value === 'string' ? got : null;
+  } catch { return null; }
+}
+
+function saveScope(value, label) {
+  try {
+    if (value) localStorage.setItem(SCOPE_KEY, JSON.stringify({ value, label }));
+    else localStorage.removeItem(SCOPE_KEY);
+  } catch { /* приватне вікно — без пам'яті вибору */ }
 }
 
 SCREENS.search = async () => {
   // Справа з бібліотеки («Шукати рід»): межа вже названа.
   const only = (ST.search || {}).case || '';
+  // Без справи з бібліотеки — остання межа, яку людина обирала тут.
+  const kept = only ? null : savedScope();
   // Прийшли з «Робіт» по завершений пошук — показати саме його.
   const fromJob = (ST.search || {}).job || '';
   ST.search = null;
@@ -71,8 +87,14 @@ SCREENS.search = async () => {
       <div class="row">
         ${fld(t('search.what'), `<input name="q" placeholder="${t('search.q')}"
           autocomplete="off" autofocus>`)}
-        ${fld(t('search.scope'), `<input name="case" placeholder="${t('search.scope.all')}"
-          value="${esc(only)}" autocomplete="off">`)}
+        ${fld(t('search.scope'), `<div class="scope-pick">
+          <input type="hidden" name="case" value="${esc(only || (kept && kept.value) || '')}">
+          <button type="button" class="scope-btn" data-act="search.pick"
+            aria-haspopup="listbox" aria-expanded="false"><span class="scope-btn__label"></span>
+            <span class="scope-btn__go">${ic('folder-open', 'ic-sm')}</span></button>
+          <button type="button" class="ctl-sm scope-clear" data-act="search.pick.clear"
+            title="${esc(t('search.pick.all'))}" aria-label="${esc(t('search.pick.all'))}" hidden>×</button>
+        </div>`)}
         ${fld(t('search.in'), `<select name="where">
           <option value="decode">${t('search.where.decode')}</option>
           <option value="pages">${t('search.where.pages')}</option>
@@ -88,10 +110,19 @@ SCREENS.search = async () => {
         </details>
       </div>
     </form>
+    <div id="scope-panel" class="scope-panel" hidden>
+      <div class="row">
+        <input name="scope-q" type="search" placeholder="${esc(t('search.pick.find'))}"
+          autocomplete="off" aria-label="${esc(t('search.pick.find'))}">
+        <button type="button" class="ctl-sm" data-act="search.pick.close">${t('search.pick.close')}</button>
+      </div>
+      <div class="scope-list" role="listbox"></div>
+    </div>
     <div id="prof-hint"></div>
     <div id="hits"><div class="search-idle">${maskot('lupa', 130)}</div></div>
     <div id="search-index"></div>`);
-  scopeHints();
+  if (kept) SCOPE_LABEL.set(kept.value, kept.label);
+  await showScope();
   // Спершу — свій пошук, що йде чи щойно скінчився: його запит у полі важливіший
   // за прізвище з профілю, яке підставляє `profileHint` у порожнє поле.
   if (fromJob) await ACTIONS['search.last'](null, { dataset: { job: fromJob } });
@@ -100,38 +131,90 @@ SCREENS.search = async () => {
   if (!only) await searchIndexState();
 };
 
+/** Поточна межа — підписом на кнопці «Де» і хрестиком «уся бібліотека». */
+async function showScope() {
+  const view = el('view');
+  const input = view && view.querySelector('input[name="case"]');
+  const label = view && view.querySelector('.scope-btn__label');
+  const clear = view && view.querySelector('.scope-clear');
+  if (!input || !label) return;
+  const v = input.value;
+  if (v && !SCOPE_LABEL.has(v)) {
+    // Справа з бібліотеки чи з роботи — підпис дістаємо з того самого переліку.
+    const env = await callOp('search.scopes', { q: v, limit: 5 });
+    const hit = ((env.ok && (env.data || {}).items) || []).find((x) => x.value === v);
+    if (hit) SCOPE_LABEL.set(v, hit.label);
+  }
+  label.textContent = v ? (SCOPE_LABEL.get(v) || v) : t('search.scope.all');
+  label.classList.toggle('muted', !v);
+  if (clear) clear.hidden = !v;
+}
+
+function setScope(value, label) {
+  const input = el('view') && el('view').querySelector('input[name="case"]');
+  if (!input) return;
+  input.value = value || '';
+  if (value && label) SCOPE_LABEL.set(value, label);
+  saveScope(value || '', label || '');
+  showScope();
+}
+
 /**
- * Підказки «Де»: фонди, описи й справи, у яких є прочитане.
+ * Перелік, з якого обирають межу: фонди й описи чипами, справи — рядками з
+ * шифрою, назвою, роками й тим, скільки прочитано.
+ *
+ * 🔴 Раніше межа ховалась у текстовому полі з підказками, і людина, яка не
+ * знала, що туди можна писати, ходила шукати справу через бібліотеку
+ * (запит дослідника 17.10.2026).
  *
  * ⚠ Дошук на сервері, а не перша сотня в пам'яті: справ тисячі, і фіксована
- * пачка мовчки ховала б ту, яку людина набирає.
+ * пачка мовчки ховала б ту, яку людина шукає.
  */
-function scopeHints() {
-  const input = el('view').querySelector('input[name="case"]');
-  if (!input || !input.addEventListener) return;
-  const load = async (q) => {
-    // Обраний пункт чи «уся бібліотека» — не запит: показати знову все.
-    const want = (!q || q === t('search.scope.all') || SCOPE_VALUE.has(q)) ? '' : q;
-    const env = await callOp('search.scopes', { q: want, limit: 40 });
-    const items = (env.ok && (env.data || {}).items) || [];
-    const labels = [t('search.scope.all')];
-    for (const x of items) {
-      const label = `${x.label}${x.kind === 'case' ? '' : ` · ${x.cases} ${t('search.scope.cases')}`}`;
-      SCOPE_VALUE.set(label, x.value);
-      labels.push(label);
-    }
-    return labels;
-  };
-  let box = null;
-  let timer = null;
-  load('').then((items) => { box = attachCombobox(input, { items, free: true }); });
-  input.addEventListener('input', () => {
-    clearTimeout(timer);
-    timer = setTimeout(async () => {
-      const items = await load(input.value || '');
-      if (box && box.setItems) box.setItems(items);
-    }, 250);
-  });
+async function fillScopes(q) {
+  const box = el('scope-panel') && el('scope-panel').querySelector('.scope-list');
+  if (!box) return;
+  // Перший виклик на холодній консолі чекає, поки `search.state` обійде стор, —
+  // без цього рядка панель стояла б порожня, ніби обирати нема з чого.
+  if (!box.innerHTML) box.innerHTML = `<p class="muted">${t('common.loading')}</p>`;
+  const env = await callOp('search.scopes', { q, limit: 200 });
+  if (!env.ok) { box.innerHTML = `<div class="warn err">${esc(env.error)}</div>`; return; }
+  const items = (env.data || {}).items || [];
+  const series = items.filter((x) => x.kind !== 'case');
+  const cases = items.filter((x) => x.kind === 'case');
+  for (const x of items) SCOPE_LABEL.set(x.value, x.label);
+  if (!items.length) { box.innerHTML = `<p class="muted">${esc(t('search.pick.none'))}</p>`; return; }
+  box.innerHTML = `
+    ${series.length ? `<h4>${t('search.pick.series')}</h4><div class="scope-chips">${series.map((x) =>
+    `<button type="button" class="chip" role="option" data-act="search.pick.set"
+        data-arg="${esc(x.value)}">${esc(x.label)} <span class="muted">${esc(x.cases)} ${
+  t('search.scope.cases')}</span></button>`).join('')}</div>` : ''}
+    ${cases.length ? `<h4>${t('search.pick.cases')}</h4><ul class="scope-cases">${cases.map((x) =>
+    `<li><button type="button" role="option" data-act="search.pick.set" data-arg="${esc(x.value)}">
+        <span class="mono">${esc(x.shifra || x.value)}</span>
+        <span class="scope-cases__title">${esc(x.title || '')}</span>
+        <span class="muted">${esc([x.years, x.place, x.pages ? `${x.pages} ${t('search.pick.pages')}` : '']
+    .filter(Boolean).join(' · '))}</span></button></li>`).join('')}</ul>` : ''}`;
+}
+
+function openScopes(open) {
+  const panel = el('scope-panel');
+  const btn = el('view') && el('view').querySelector('.scope-btn');
+  if (!panel) return;
+  panel.hidden = !open;
+  if (btn) btn.setAttribute('aria-expanded', String(open));
+  if (!open) return;
+  const q = panel.querySelector('input[name="scope-q"]');
+  if (q && !q.dataset.ready) {
+    q.dataset.ready = '1';
+    let timer = null;
+    q.addEventListener('input', () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => fillScopes(q.value.trim()), 250);
+    });
+    q.addEventListener('keydown', (ev) => { if (ev.key === 'Escape') openScopes(false); });
+  }
+  fillScopes(q ? q.value.trim() : '');
+  if (q) q.focus();
 }
 
 /**
@@ -264,7 +347,7 @@ async function resumeSweep() {
   if (!job) return;
   const cfg = job.cfg || {};
   setField('q', cfg.q || '');
-  if (cfg.case) setField('case', cfg.case);
+  if (cfg.case) { setField('case', cfg.case); showScope(); }
   if (!FINAL_STATES.includes(job.state)) {
     const env = await pollSweep(job.id);
     if (env) showFound(env, cfg.q || '', job.kind);
@@ -489,6 +572,16 @@ function ledgerBlock(d) {
 }
 
 Object.assign(ACTIONS, {
+  /** «Де»: відкрити перелік фондів, описів і справ, у яких є прочитане. */
+  'search.pick': () => openScopes(Boolean(el('scope-panel')) && el('scope-panel').hidden !== false),
+  'search.pick.close': () => openScopes(false),
+  'search.pick.set': (_ev, elm) => {
+    const v = elm.dataset.arg || '';
+    setScope(v, SCOPE_LABEL.get(v) || v);
+    openScopes(false);
+  },
+  'search.pick.clear': () => setScope('', ''),
+
   /**
    * Клік по написанню — підставити його в поле й шукати одразу: написань
    * буває тридцять, і перебирати їх мишею до поля й назад — тридцять зайвих
@@ -564,7 +657,7 @@ Object.assign(ACTIONS, {
     if (!job || !job.result) return boxError('hits', { ok: false, error: t('search.sweep.lost') });
     const cfg = job.cfg || {};
     setField('q', cfg.q || '');
-    if (cfg.case) setField('case', cfg.case);
+    if (cfg.case) { setField('case', cfg.case); showScope(); }
     return showFound({ ok: true, data: job.result, warnings: job.warnings || [] },
       cfg.q || '', job.kind);
   },

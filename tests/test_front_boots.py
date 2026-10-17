@@ -131,6 +131,11 @@ globalThis.fetch = async (url, opts) => {
     'case.frame': { width: 9, height: 9, bytes: 9, image: 'data:image/jpeg;base64,AA' },
     'catalog.sweep': { job_id: 'cs1' },
     'search.find': { job_id: 'sf1' },
+    'site.status': { canon_persons: 5, mkdocs: true,
+      private: { built: true, url: '/site/', path: 'C:/x/site/private/html',
+                 built_at: '2026-10-17T10:00:00+00:00', counts: { persons: 3, families: 1, hypotheses: 2 } },
+      public: { built: false, url: '/site-public/', path: 'C:/x/site/public/html' } },
+    'site.rebuild': { job_id: 'site1', state: 'queued' },
     'search.scopes': { items: [{ value: 'ДАВіО 904', label: 'ДАВіО ф.904', kind: 'fond', cases: 50 }],
                        total: 1, registry: true },
     'case.check': globalThis.__CASE_CHECK || { shifra: null, shifra_error: '', dir: null },
@@ -755,6 +760,21 @@ globalThis.__CASE_INFO = null;
   globalThis.__JOBS = [];
 }
 
+// ── «Сайт родини»: обидві версії, відкрити й перезібрати ──
+{
+  await SCREENS.site();
+  await new Promise((r) => setTimeout(r, 40));
+  const cards = document.getElementById('site-cards').innerHTML || '';
+  out.siteOpens = cards.includes('href="/site/"') && !cards.includes('href="/site-public/"');
+  out.siteRebuilds = (cards.match(/data-act="site.rebuild"/g) || []).length === 2
+    && cards.includes('data-arg="1"');
+  out.siteStale = cards.includes('У каноні 5 осіб, на сайті 3');
+  globalThis.__OPS = [];
+  await ACTIONS['site.rebuild'](null, { dataset: { arg: '1' }, disabled: false });
+  const call = globalThis.__OPS.find(([n]) => n === 'site.rebuild');
+  out.siteRebuildPublic = !!call && String(call[1]).includes('"public":true');
+}
+
 // ── «Пошук» — команда агента (`search.find` = `text.find`) з полями для людини ──
 {
   await SCREENS.search();
@@ -764,7 +784,7 @@ globalThis.__CASE_INFO = null;
     && form.includes('<span class="fld-l">Де</span>')
     && form.includes('name="thresh"');
   globalThis.__OPS = [];
-  globalThis.__FORM = { where: 'decode', q: 'Вишневецький', case: 'ДАВіО ф.904 · 50 справ', thresh: '78' };
+  globalThis.__FORM = { where: 'decode', q: 'Вишневецький', case: 'ДАВіО 904', thresh: '78' };
   globalThis.__JOBS = [{ id: 'sf1', kind: 'search.find', state: 'done', updated: nowS,
     cfg: { q: 'Вишневецький' }, warnings: [],
     result: { q: 'Вишневецький', total: 1, matches: { exact: 1 }, stems: ['a', 'b'],
@@ -786,6 +806,20 @@ globalThis.__CASE_INFO = null;
     && fh.includes('Межа: ДАВіО 904');
   out.findShowsFamily = fh.includes('Рід: Вишневецькі');
   out.findShowsAnchors = fh.includes('Імена роду поруч') && fh.includes('Іван Петрович');
+  // «Де» — перелік, а не поле, яке треба знати: відкрити, обрати, межа стала значенням.
+  await ACTIONS['search.pick']();
+  await new Promise((r) => setTimeout(r, 30));
+  const panel = document.getElementById('scope-panel');
+  const list = panel.querySelector('.scope-list').innerHTML || '';
+  out.scopePickerLists = list.includes('data-act="search.pick.set"') && list.includes('ДАВіО ф.904');
+  await ACTIONS['search.pick.set'](null, { dataset: { arg: 'ДАВіО 904' } });
+  await new Promise((r) => setTimeout(r, 30));
+  const view = document.getElementById('view');
+  out.scopePickerSets = view.querySelector('input[name="case"]').value === 'ДАВіО 904'
+    && view.querySelector('.scope-btn__label').textContent === 'ДАВіО ф.904';
+  await ACTIONS['search.pick.clear']();
+  await new Promise((r) => setTimeout(r, 30));
+  out.scopePickerClears = view.querySelector('input[name="case"]').value === '';
   globalThis.__FORM = null;
   globalThis.__JOBS = [];
 }
@@ -1171,6 +1205,23 @@ def test_console_search_is_the_agent_command_for_a_person(probe) -> None:
     assert probe.get("findShowsLedger"), "немає журналу «де й чим шукали»"
     assert probe.get("findShowsFamily"), "не сказано, чий рід і скількома написаннями"
     assert probe.get("findShowsAnchors"), "канал імен роду не показано"
+
+
+def test_family_site_is_built_and_opened_from_the_console(probe) -> None:
+    """Запит дослідника 17.10.2026: сайт родини — з консолі, без окремого
+    сервера в терміналі."""
+    assert probe.get("siteOpens"), "немає «Відкрити сайт» для зібраної версії"
+    assert probe.get("siteRebuilds"), "немає «Зібрати / Перезібрати» для обох версій"
+    assert probe.get("siteStale"), "не сказано, що сайт відстав від канону"
+    assert probe.get("siteRebuildPublic"), "кнопка відкритої версії збирає не її"
+
+
+def test_case_is_picked_from_a_list_not_typed(probe) -> None:
+    """🔴 Запит дослідника 17.10.2026: щоб шукати в одній справі, ходили через
+    бібліотеку — текстове поле «Де» з підказками ніхто не помічав."""
+    assert probe.get("scopePickerLists"), "перелік фондів і справ не показано"
+    assert probe.get("scopePickerSets"), "обрана справа не стала межею пошуку"
+    assert probe.get("scopePickerClears"), "межу не скинути на «усю бібліотеку»"
 
 
 def test_a_free_field_does_not_cover_the_form_with_an_empty_list(probe) -> None:

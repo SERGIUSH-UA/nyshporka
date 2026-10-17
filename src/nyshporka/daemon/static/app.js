@@ -54,6 +54,7 @@ import './screens/read.js';
 import './screens/runs.js';
 import './screens/queue.js';
 import './screens/export.js';
+import './screens/site.js';
 import './screens/sets.js';
 import './screens/label.js';
 import './screens/jobs.js';

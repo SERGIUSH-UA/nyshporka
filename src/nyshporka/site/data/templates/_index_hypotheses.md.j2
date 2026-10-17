@@ -1,0 +1,32 @@
+---
+title: {{ t("nav.hypotheses") | q }}
+hide:
+  - toc
+---
+
+# {{ t("nav.hypotheses") }}
+
+<p class="nysh-lead">{{ t("idx.hyp.lead") }}</p>
+
+<div class="nysh-filter" data-filter-target=".nysh-plist">
+<input type="search" class="nysh-filter__input" placeholder="{{ t('idx.hyp.filter') }}" aria-label="{{ t('idx.hyp.filter') }}" autocomplete="off">
+<span class="nysh-filter__count">{{ t("idx.hyp.count", n=hypotheses | length) }}</span>
+</div>
+
+<nav class="nysh-jumpbar" aria-label="{{ t('by.status') }}">
+{% for g in groups %}
+<a class="nysh-jumpchip" href="#hyp-{{ g.status }}">{{ g.label }} <small>{{ g.members | length }}</small></a>
+{% endfor %}
+</nav>
+
+{% for g in groups %}
+
+## {{ g.label }} { #hyp-{{ g.status }} .nysh-plist__letter }
+
+<div class="nysh-plist nysh-plist--wide" markdown>
+{% for h in g.members %}
+[<span class="nysh-pc__name">{{ h.claim | plain | truncate(220) }}</span><span class="nysh-pc__years">{{ h.id }}{% if h.hits %} · {{ t("idx.hyp.hits", n=h.hits | length) }}{% endif %} · {{ h.updated }}</span>]({{ h.id }}.md){ .nysh-pc .nysh-pc--hyp .is-{{ h.status }} }
+{% endfor %}
+</div>
+
+{% endfor %}

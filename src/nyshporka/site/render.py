@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import contextvars
 import json
 import re
 import shutil
@@ -20,11 +21,19 @@ from typing import Any
 
 from jinja2 import ChoiceLoader, Environment, FileSystemLoader, StrictUndefined
 
-from nyshporka.models import Fact, Family, MediaRef, Person, Place, Source
+from nyshporka.models import Fact, Family, Hypothesis, MediaRef, Person, Place, Source
+from nyshporka.site import i18n as I18N
 from nyshporka.site.config import GENERATIONS, SOURCE_TYPES, SiteConfig
+from nyshporka.site.filters import hypothesis_status
 from nyshporka.site.filters import register as register_filters
 from nyshporka.site.privacy import redact_person
-from nyshporka.storage.files import read_family, read_person, read_place, read_source
+from nyshporka.storage.files import (
+    read_entity,
+    read_family,
+    read_person,
+    read_place,
+    read_source,
+)
 
 #: Пакетні шаблони сторінок.
 TEMPLATES = Path(__file__).resolve().parent / "data" / "templates"
@@ -39,7 +48,17 @@ _LATIN_TO_CYR = {
 }
 
 
-def environment(templates_dirs: list[Path]) -> Environment:
+#: Мова збірки, що йде зараз. Ставить її `build` на час рендеру: так рядки
+#: допоміжних функцій (роки, «приватна особа», стани гіпотез) беруть ту саму
+#: мову, що й шаблони, без параметра в кожній із них.
+_LANG: contextvars.ContextVar[str] = contextvars.ContextVar("site_lang", default=I18N.DEFAULT)
+
+
+def _t(key: str, **kw: Any) -> str:
+    return I18N.t(_LANG.get(), key, **kw)
+
+
+def environment(templates_dirs: list[Path], lang: str | None = None) -> Environment:
     env = Environment(
         loader=ChoiceLoader([FileSystemLoader(str(d)) for d in [*templates_dirs, TEMPLATES]]),
         autoescape=False,
@@ -48,7 +67,7 @@ def environment(templates_dirs: list[Path]) -> Environment:
         lstrip_blocks=True,
         keep_trailing_newline=True,
     )
-    register_filters(env)
+    register_filters(env, lang or _LANG.get())
     return env
 
 
@@ -67,10 +86,34 @@ class RenderReport:
     families: int = 0
     places: int = 0
     sources: int = 0
+    hypotheses: int = 0
     withheld_sources: list[str] = field(default_factory=list)
 
 
 def build(
+    project_root: Path,
+    *,
+    docs_dir: Path,
+    cfg: SiteConfig | None = None,
+    templates_dirs: list[Path] | None = None,
+    hidden: set[str] | frozenset[str] = frozenset(),
+    drop_source_types: set[str] | frozenset[str] = frozenset(),
+    source_filter: Callable[[Source], bool] | None = None,
+    public: bool | None = None,
+    gallery: str = "refs",
+    lang: str = I18N.DEFAULT,
+) -> RenderReport:
+    """Сторінки канону мовою `lang` (оболонка; дані канону — як є)."""
+    token = _LANG.set(lang if lang in I18N.LANGS else I18N.DEFAULT)
+    try:
+        return _build(project_root, docs_dir=docs_dir, cfg=cfg, templates_dirs=templates_dirs,
+                      hidden=hidden, drop_source_types=drop_source_types,
+                      source_filter=source_filter, public=public, gallery=gallery)
+    finally:
+        _LANG.reset(token)
+
+
+def _build(
     project_root: Path,
     *,
     docs_dir: Path,
@@ -110,6 +153,20 @@ def build(
         (read_source(p) for p in (canonical / "sources").glob("*.md")),
         key=lambda x: x.id,
     )
+    hypotheses = sorted(
+        (read_entity(p, Hypothesis) for p in (canonical / "hypotheses").glob("*.md")),
+        key=lambda x: x.id,
+    )
+    if public:
+        # 🔴 Гіпотеза про прихованого не публікується цілком: її твердження й
+        # підстави описують саме його, і вирізати рядки означало б лишити
+        # сторінку без суті.
+        hypotheses = [h for h in hypotheses if not set(h.about) & hidden]
+    hyp_by_about: dict[str, list[Hypothesis]] = {}
+    for h in hypotheses:
+        for x in h.about:
+            hyp_by_about.setdefault(x, []).append(h)
+    hyp_ids = {h.id for h in hypotheses}
 
     place_names = {pl.id: pl.name for pl in places}
     # Імена осіб для перехресних посилань — берем primary з canonical (не редакт).
@@ -152,7 +209,7 @@ def build(
         place_names = {pl.id: pl.name for pl in places}
 
     # Очистити автогенеровані каталоги.
-    for sub in ("persons", "families", "places", "sources"):
+    for sub in ("persons", "families", "places", "sources", "hypotheses"):
         target = docs_dir / sub
         if target.exists():
             shutil.rmtree(target)
@@ -184,7 +241,7 @@ def build(
     person_tpl = env.get_template("person.md.j2")
     for p in persons:
         if public and _touches_hidden(p, families_by_id, hidden):
-            p = p.model_copy(update={"notes": _NOTES_WITHHELD})
+            p = p.model_copy(update={"notes": _notes_withheld()})
         used = _used_sources_for(p.facts, sources_by_id, published_sources)
         relations = _person_relations(p, families_by_id, person_names)
         media_lines = [_media_line(m) for m in p.media] if not p.private else []
@@ -195,6 +252,8 @@ def build(
                 me=card(p.id),
                 kin=_kin(p, families_by_id, card),
                 life=_life(p),
+                hypotheses=hyp_by_about.get(p.id, []),
+                hyp_ids=hyp_ids,
                 place_names=place_names,
                 all_sources=used,
                 relations=relations,
@@ -206,7 +265,8 @@ def build(
     assets_dir = docs_dir / "assets"
     assets_dir.mkdir(parents=True, exist_ok=True)
     (assets_dir / "search.json").write_text(
-        json.dumps(_search_index(persons, place_names), ensure_ascii=False), encoding="utf-8")
+        json.dumps(_search_index(persons, place_names, hyp_by_about), ensure_ascii=False),
+        encoding="utf-8")
 
     # Persons index — alphabet jump-bar + cards, групування за літерою прізвища.
     index_persons: list[dict[str, Any]] = []
@@ -267,13 +327,15 @@ def build(
     family_tpl = env.get_template("family.md.j2")
     for f in families:
         if public and _family_members(f) & hidden:
-            f = f.model_copy(update={"notes": _NOTES_WITHHELD})
+            f = f.model_copy(update={"notes": _notes_withheld()})
         used = _used_sources_for(f.facts, sources_by_id, published_sources)
         out = docs_dir / "families" / f"{f.id}.md"
         out.write_text(
             family_tpl.render(
                 family=f,
                 card=card,
+                hypotheses=hyp_by_about.get(f.id, []),
+                hyp_ids=hyp_ids,
                 person_names=person_names,
                 place_names=place_names,
                 all_sources=used,
@@ -297,7 +359,7 @@ def build(
     def _shown_name(pid: str | None) -> str | None:
         if not pid:
             return None
-        return _HIDDEN_NAME if pid in hidden else person_names.get(pid)
+        return _t("private.person") if pid in hidden else person_names.get(pid)
 
     index_fams: list[dict[str, Any]] = []
     for f in families:
@@ -379,7 +441,7 @@ def build(
 
     # Places index — cards з jump-bar за групою місць із налаштувань сайту.
     groups = cfg.ordered_groups()
-    REGION_LABELS = {g.id: g.label for g in groups}
+    REGION_LABELS = {g.id: (_t("group.other") if g.id == "other" else g.label) for g in groups}
     REGION_ORDER = [g.id for g in groups]
     index_places: list[dict[str, Any]] = []
     for pl in places:
@@ -429,7 +491,7 @@ def build(
     source_tpl = env.get_template("source.md.j2")
     for s in sources:
         if public and citing.get(s.id, set()) & hidden:
-            s = s.model_copy(update={"notes": _NOTES_WITHHELD})
+            s = s.model_copy(update={"notes": _notes_withheld()})
         out = docs_dir / "sources" / f"{s.id}.md"
         out.write_text(
             source_tpl.render(
@@ -444,7 +506,7 @@ def build(
         )
 
     # Sources index — cards з jump-bar за типом + кількість фактів-цитат.
-    SOURCE_TYPE_LABELS = dict(SOURCE_TYPES)
+    SOURCE_TYPE_LABELS = {k: _t(f"st.{k}") for k, _v in SOURCE_TYPES}
     SOURCE_TYPE_ORDER = [t for t, _ in SOURCE_TYPES]
     # Підрахунок цитувань: скільки фактів у persons вказують на конкретний source_id.
     citations_count: dict[str, int] = {}
@@ -488,6 +550,10 @@ def build(
         ),
         encoding="utf-8",
     )
+
+    # Гіпотези: що не доведено, на чому тримається, що розв'яже.
+    _render_hypotheses(env, docs_dir, hypotheses, card, families_by_id, place_names,
+                       sources_by_id, published_sources)
 
     # Скопіювати places.geojson у docs/assets/, щоб Leaflet-мапа його бачила.
     geojson_src = project_root / "data" / "derived" / "places.geojson"
@@ -561,6 +627,7 @@ def build(
         families=len(families),
         places=len(places),
         sources=len(sources),
+        hypotheses=len(hypotheses),
         withheld_sources=withheld,
     )
 
@@ -568,7 +635,8 @@ def build(
 # Нотатки на межі з живими описують їх прозою — ім'я, адреса,
 # вулиця й хата — без ID і часто у відмінку, тож ні заміна посилань, ні проби
 # імен їх не ловлять. На відкритому сайті такі нотатки не публікуються цілком.
-_NOTES_WITHHELD = "_Нотатки не публікуються у відкритій версії: у них ідеться про живих родичів._"
+def _notes_withheld() -> str:
+    return f"_{_t('notes.withheld')}_"
 
 
 def _touches_hidden(p: Person, families_by_id: dict[str, Family], hidden: frozenset[str]) -> bool:
@@ -603,7 +671,6 @@ def _citing_ids(persons: list[Person], families: list[Family]) -> dict[str, set[
     return out
 
 
-_WITHHELD_TITLE = "Джерело не публікується у відкритій версії"
 
 
 def _used_sources_for(
@@ -621,7 +688,7 @@ def _used_sources_for(
     out = []
     for sid in seen:
         if published is not None and sid not in published:
-            out.append({"id": sid, "title": _WITHHELD_TITLE, "withheld": True})
+            out.append({"id": sid, "title": _t('source.withheld'), "withheld": True})
         else:
             out.append({"id": sid, "title": sources_by_id[sid].title, "withheld": False})
     return out
@@ -941,20 +1008,16 @@ def _person_relations(
     }
 
 
-#: Як сайт називає людину, якої на ньому немає.
-_HIDDEN_NAME = "приватна особа"
-
-
 def _years_label(p: Person) -> str:
     """«1802–1871», «н. 1802», «† 1871»; приватному — десятиліття народження."""
     b, d = _first_year(p, "birth") or _first_year(p, "baptism"), _first_year(p, "death")
     if p.private:
-        return f"н. {int(b) // 10 * 10}-ті" if b else ""
+        return _t("years.decade", y=int(b) // 10 * 10) if b else ""
     if b and d:
         return f"{b}–{d}"
     if b:
-        return f"н. {b}"
-    return f"† {d}" if d else ""
+        return _t("years.born", y=b)
+    return _t("years.died", y=d) if d else ""
 
 
 def _card_factory(raw_by_id: dict[str, Person],
@@ -966,7 +1029,7 @@ def _card_factory(raw_by_id: dict[str, Person],
     def card(pid: str | None, hyp: bool = False) -> dict[str, Any]:
         p = raw_by_id.get(pid) if pid else None
         if p is None or pid in hidden:
-            return {"id": None, "name": _HIDDEN_NAME, "years": "", "sex": "U",
+            return {"id": None, "name": _t("private.person"), "years": "", "sex": "U",
                     "private": True, "hyp": hyp}
         return {"id": p.id, "name": p.primary_name, "years": _years_label(p), "sex": p.sex,
                 "private": p.private, "hyp": hyp}
@@ -994,7 +1057,7 @@ def _kin(person: Person, families_by_id: dict[str, Family],
         else:
             parents = [card(x) for x in (fam.husband, fam.wife) if x]
         kids = [*fam.children, *(c for c in fam.hypothetical_children if c not in fam.children)]
-        siblings = [card(c, hyp_only or c in fam.hypothetical_children)
+        siblings = [card(c, hyp_only or (c in fam.hypothetical_children and c not in fam.children))
                     for c in kids if c != person.id]
         return parents, sorted(siblings, key=birth_key)
 
@@ -1038,7 +1101,8 @@ def _life(p: Person) -> list[Fact]:
     return sorted(p.facts, key=lambda f: (f.date is None, f.date.value if f.date else ""))
 
 
-def _search_index(persons: list[Person], place_names: dict[str, str]) -> list[dict[str, Any]]:
+def _search_index(persons: list[Person], place_names: dict[str, str],
+                  hyp_by_about: dict[str, list[Hypothesis]] | None = None) -> list[dict[str, Any]]:
     """Покажчик для пошуку осіб на сайті: лише ті, хто має сторінку.
 
     Приватному (у приватній збірці) — десятиліття, як на його сторінці."""
@@ -1047,9 +1111,55 @@ def _search_index(persons: list[Person], place_names: dict[str, str]) -> list[di
         primary = p.primary_name
         alt = sorted({n.form for n in p.names if n.form and n.form != primary})
         place = _first_place_id(p, "birth") or _first_place_id(p, "baptism")
-        out.append({"id": p.id, "n": primary, "a": alt, "y": _years_label(p), "s": p.sex,
-                    "p": place_names.get(place, "") if place else ""})
+        entry: dict[str, Any] = {"id": p.id, "n": primary, "a": alt, "y": _years_label(p),
+                                 "s": p.sex, "p": place_names.get(place, "") if place else ""}
+        open_h = [h for h in (hyp_by_about or {}).get(p.id, []) if h.status != "closed"]
+        if open_h:
+            entry["h"] = len(open_h)
+        out.append(entry)
     return out
+
+
+def _render_hypotheses(env: Environment, docs_dir: Path, hypotheses: list[Hypothesis],
+                       card: Callable[..., dict[str, Any]], families_by_id: dict[str, Family],
+                       place_names: dict[str, str], sources_by_id: dict[str, Source],
+                       published: set[str]) -> None:
+    """Сторінка на кожну гіпотезу і покажчик за станом."""
+    out_dir = docs_dir / "hypotheses"
+    known = {h.id for h in hypotheses}
+    tpl = env.get_template("hypothesis.md.j2")
+
+    def family_name(fid: str) -> str:
+        f = families_by_id.get(fid)
+        names = [card(x)["name"] for x in (f.husband, f.wife) if x] if f else []
+        return " × ".join(names) or _t("family.of", id=fid)
+
+    for h in hypotheses:
+        about: dict[str, list[dict[str, Any]]] = {"persons": [], "families": [], "places": []}
+        for x in h.about:
+            if x in families_by_id:
+                about["families"].append({"id": x, "name": family_name(x)})
+            elif x in place_names:
+                about["places"].append({"id": x, "name": place_names[x]})
+            elif not x.startswith(("F", "PL")):
+                about["persons"].append(card(x))
+        used = []
+        for sid in dict.fromkeys(c.source_id for c in h.citations):
+            if sid in sources_by_id:
+                used.append({"id": sid, "withheld": sid not in published,
+                             "title": _t('source.withheld') if sid not in published
+                             else sources_by_id[sid].title})
+        (out_dir / f"{h.id}.md").write_text(
+            tpl.render(h=h, about=about, status_label=hypothesis_status(_LANG.get())[h.status],
+                       versus=[v for v in h.versus if v in known], all_sources=used),
+            encoding="utf-8")
+    groups = [{"status": st, "label": label,
+               "members": [h for h in hypotheses if h.status == st]}
+              for st, label in hypothesis_status(_LANG.get()).items()]
+    (out_dir / "index.md").write_text(
+        env.get_template("_index_hypotheses.md.j2").render(
+            hypotheses=hypotheses, groups=[g for g in groups if g["members"]]),
+        encoding="utf-8")
 
 
 def _site_photos(raw_tree: dict[str, Any], project_root: Path, assets_dir: Path,
@@ -1062,7 +1172,9 @@ def _site_photos(raw_tree: dict[str, Any], project_root: Path, assets_dir: Path,
     for n in raw_tree.get("nodes", []):
         url = n.get("photo_url")
         keep: str | None = None
-        if url and not public:
+        # Приватному дерево фото не покаже (`_anon`), тож і файла поруч бути
+        # не мусить: консоль віддала б його за прямою адресою.
+        if url and not public and not n.get("private"):
             if url.startswith(("http://", "https://")):
                 keep = url
             else:
@@ -1111,15 +1223,8 @@ def _sources_referenced(
 
 
 def _fact_context(fact_type: str) -> str:
-    return {
-        "birth": "народився",
-        "death": "помер",
-        "marriage": "одружився",
-        "burial": "похований",
-        "baptism": "охрещений",
-        "residence": "проживав",
-    }.get(fact_type, fact_type)
-
+    key = f"ctx.{fact_type}"
+    return _t(key) if key in I18N.S[I18N.DEFAULT] else fact_type
 
 #: Що лишається у вузлі прихованої чи приватної особи: лише структура дерева.
 #: Білий перелік, а не чорний: нове поле вузла, додане колись у reindex, не
@@ -1134,7 +1239,7 @@ def _anon(n: dict[str, Any], hidden: set[str] | frozenset[str]) -> dict[str, Any
     """Приватний у приватній версії — з десятиліттям; прихований — без жодного року."""
     out = {k: v for k, v in n.items() if k in _NODE_KEEP}
     keep_decade = n.get("id") not in hidden
-    out.update({"name": _PRIVATE_NAME, "initials": "?", "photo_url": None, "has_photo": False,
+    out.update({"name": _PRIVATE_NAME, "anon": True, "initials": "?", "photo_url": None, "has_photo": False,
                 "photo_stale_risk": False, "fact_count": 0,
                 "birth": n.get("birth_decade") if keep_decade else None,
                 "death": n.get("death_decade") if keep_decade else None})

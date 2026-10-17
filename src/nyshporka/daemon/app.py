@@ -600,6 +600,72 @@ def create_app(ws: Workspace | None = None, *, token: str = "",
         # віддаємо SVG — він один на всі розміри вкладки.
         return FileResponse(ASSETS / "favicon.svg", media_type="image/svg+xml")
 
+    # ── сайт роду ────────────────────────────────────────────────────────────
+    # 🔴 Сайт віддає сама консоль, а не окремий `nysh site serve` на іншому
+    # порту: друге вікно сервера людина з ярлика не тримає, а порт 8765 на
+    # машині дослідника вже бував зайнятим чужим сайтом — і вкладка
+    # показувала чужий рід (17.10.2026). Тут шлях один: тека збірки простору.
+    from fastapi.responses import RedirectResponse
+
+    from nyshporka.site.build import default_out as _site_out
+
+    def _site_missing(public: bool) -> HTMLResponse:
+        which = "відкрита" if public else "приватна"
+        body = (
+            "<!doctype html><meta charset=utf-8><title>Сайт роду ще не зібрано</title>"
+            "<meta name=viewport content='width=device-width,initial-scale=1'>"
+            "<body style='font:16px system-ui;max-width:34rem;margin:3rem auto;padding:0 1rem;"
+            "color:#2b2118;background:#f7f3ec'>"
+            f"<h1 style='font-size:1.4rem'>Сайт роду ще не зібрано</h1>"
+            f"<p>Тут буде {which} версія сайту, щойно її збере Нишпорка.</p>"
+            "<p><a href='/#site' style='color:#8b2c20;font-weight:600'>"
+            "Відкрити «Сайт родини» в Нишпорці → Зібрати</a></p></body>")
+        return HTMLResponse(body, status_code=404,
+                            headers={"Cache-Control": "no-cache, must-revalidate"})
+
+    def _site_file(public: bool, path: str) -> Any:
+        html = (_site_out(space.root, public) / "html").resolve()
+        if not (html / "index.html").is_file():
+            return _site_missing(public)
+        # 🔴 `..` у шляху не виводить за теку збірки: поруч лежать канон і
+        # сирці, де живі — з повними датами. Нульовий байт і подібне — теж 404,
+        # а не 500.
+        try:
+            target = (html / path).resolve() if path else html / "index.html"
+            target.relative_to(html)
+        except (ValueError, OSError):
+            raise HTTPException(status_code=404, detail="немає такої сторінки") from None
+        if target.is_dir():
+            # Без слеша відносні посилання сторінки вели б на рівень вище.
+            if path and not path.endswith("/"):
+                prefix = "/site-public/" if public else "/site/"
+                return RedirectResponse(f"{prefix}{path}/")
+            target = target / "index.html"
+        if not target.is_file():
+            page404 = html / "404.html"
+            if page404.is_file():
+                return FileResponse(page404, status_code=404)
+            raise HTTPException(status_code=404, detail="немає такої сторінки")
+        # Збірку перезбирають із консолі — старий HTML у кеші браузера показав
+        # би сайт до перезбирання.
+        return FileResponse(target, headers={"Cache-Control": "no-cache, must-revalidate"})
+
+    @app.get("/site", include_in_schema=False)
+    def site_root() -> RedirectResponse:
+        return RedirectResponse("/site/")
+
+    @app.get("/site/{path:path}", include_in_schema=False)
+    def site_page(path: str) -> Any:
+        return _site_file(False, path)
+
+    @app.get("/site-public", include_in_schema=False)
+    def site_public_root() -> RedirectResponse:
+        return RedirectResponse("/site-public/")
+
+    @app.get("/site-public/{path:path}", include_in_schema=False)
+    def site_public_page(path: str) -> Any:
+        return _site_file(True, path)
+
     # ── секції ───────────────────────────────────────────────────────────────
     def active_sections() -> frozenset[str]:
         """Ввімкнені секції зараз, а не на старті демона.
@@ -1116,8 +1182,12 @@ async def _read_body(receive: Any, limit: int) -> bytes | None:
 def serve(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT, *,
           open_browser: bool = True, confirmed: bool = False,
           rotate_key: bool = False, tls_cert: str | None = None,
-          tls_key: str | None = None, show_secret: bool = True) -> None:
+          tls_key: str | None = None, show_secret: bool = True, page: str = "") -> None:
     """Підняти застосунок і взяти замок простору.
+
+    `page` — з чого почати вкладку: `site/` відкриває сайт роду (ярлик «Сайт
+    родини»). Застосунок цього простору вже працює на тому самому порту —
+    вкладка відкривається в ньому, а другий сервер не стартує.
 
     🔴 Дефолт — петля, і лише вона. Це застосунок з архівом однієї людини:
     канонічні дані про живих родичів, скани, нотатки. Мережевий `host` — клас
@@ -1152,6 +1222,10 @@ def serve(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT, *,
 
     space = _workspace()
     socks: list[socket.socket] = []
+    # Жива консоль показує головну зі знімка й оновлює у фоні (`home.pulse`).
+    from nyshporka import ops_builtin as _ob
+
+    _ob.PULSE_SNAPSHOT = True
     try:
         with WorkspaceLock(space.root, port=port).acquire() as held:
             scheme = "https" if tls_cert else "http"
@@ -1169,10 +1243,10 @@ def serve(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT, *,
                     raise SystemExit(
                         f"🔴 не вдалося слухати {host}:{port}: {exc}. Адреси може не "
                         f"бути на цій машині, або порт уже зайнятий.") from None
-                url = f"{scheme}://127.0.0.1:{port}/"
+                url = f"{scheme}://127.0.0.1:{port}/{page.lstrip('/')}"
             else:
                 app = create_app(space)
-                url = f"http://{host}:{port}/"
+                url = f"http://{host}:{port}/{page.lstrip('/')}"
             # Старт застосунку — те саме перше враження, що й `nysh info`, тож
             # знак і лінія бренду тут ті самі. Далі вивід перехоплює uvicorn.
             from nyshporka import __version__, brand
@@ -1232,6 +1306,21 @@ def serve(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT, *,
             finally:
                 stop.set()
     except LockBusy as busy:
+        # 🔴 Другий клік по ярлику — не помилка: людина хоче вікно Нишпорки,
+        # а не повідомлення, що вона вже відкрита. Якщо на цьому порту
+        # відповідає застосунок, вкладка відкривається в ньому.
+        # Порт — власника замка, а не наш: консоль могли підняти з --port, і
+        # на нашому порту відповіла б інша Нишпорка, з чужим простором. Замок
+        # іншої машини (простір на синхронізованому диску) — не наш випадок.
+        holder = busy.holder
+        held_port = holder.port or port
+        here = holder.host in ("", socket.gethostname())
+        if open_browser and not network and here and _alive(held_port):
+            import webbrowser
+
+            webbrowser.open(f"http://127.0.0.1:{held_port}/{page.lstrip('/')}")
+            print(f"Нишпорка вже працює: http://127.0.0.1:{held_port}/ — відкрито вкладку.")
+            return
         raise SystemExit(
             f"🔴 простір {space.root} уже зайнятий: {busy}. "
             f"Двоє писарів на один простір — це затерті нотатки, тож не піднімаю."
@@ -1239,6 +1328,17 @@ def serve(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT, *,
     finally:
         for sock in socks:
             sock.close()
+
+
+def _alive(port: int) -> bool:
+    """Чи відповідає на петлі застосунок Нишпорки (а не будь-що інше на порту)."""
+    import urllib.request
+
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/health", timeout=2) as r:
+            return bool(r.status == 200)
+    except (OSError, ValueError):
+        return False
 
 
 def _print_network_banner(out: Any, host: str, port: int, *, scheme: str, pair_code: str,

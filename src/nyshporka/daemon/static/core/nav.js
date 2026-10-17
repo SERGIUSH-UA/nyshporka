@@ -27,7 +27,7 @@ let SECTIONS = { sections: [], screens: {}, op_screen: {}, presets: {},
 // «Розбір» перед «Оком»: «Дослідження» відкривалось на «Оці», тобто на обліку
 // переглянутого, а не на роботі з кандидатами (холодний прохід 07.10.2026).
 const NAV_ORDER = ['home', 'search', 'profile', 'sources', 'geog', 'fonds', 'library', 'frames',
-  'cases', 'read', 'queue', 'runs', 'view', 'sift', 'eye', 'export', 'sets', 'label', 'jobs'];
+  'cases', 'read', 'queue', 'runs', 'view', 'sift', 'eye', 'export', 'site', 'sets', 'label', 'jobs'];
 
 /**
  * Екрани-кроки без власної вкладки → вкладка, яку підсвічувати.
@@ -44,7 +44,7 @@ const NAV_LABEL = {
   home: 'nav.home', profile: 'nav.profile', sources: 'nav.sources', geog: 'nav.geog', fonds: 'nav.fonds',
   library: 'nav.library', frames: 'nav.frames', cases: 'nav.cases', newcase: 'nav.newcase', read: 'nav.read', runs: 'nav.runs', view: 'nav.view',
   eye: 'nav.eye', search: 'nav.search', sift: 'nav.sift', export: 'nav.export',
-  sets: 'nav.sets', label: 'nav.label', jobs: 'nav.jobs', queue: 'nav.queue',
+  sets: 'nav.sets', label: 'nav.label', jobs: 'nav.jobs', queue: 'nav.queue', site: 'nav.site',
 };
 
 /** Чи ввімкнена секція цього екрана. Невідомий екран не блокуємо. */

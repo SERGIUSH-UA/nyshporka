@@ -1,6 +1,7 @@
 // SVG дерева: картки, лінії, зум і переміщення (мишею й пальцями).
 // Увесь текст іде через .text() — імена з канону в розмітку не вставляються.
 import { CARD } from './layout.js';
+import { t } from '../strings.js';
 
 /* global d3 */
 
@@ -35,17 +36,17 @@ export function wrapName(name, maxW, font = NAME_FONT) {
 
 export function yearsLabel(n) {
   if (!n) return '';
-  const fix = (v) => (v && /s$/.test(v) ? `${v.slice(0, -1)}-ті` : v);
+  const fix = (v) => (v && /s$/.test(v) ? t('tree.decade', { y: v.slice(0, -1) }) : v);
   const b = fix(n.birth);
   const d = fix(n.death);
   if (b && d) return `${b} – ${d}`;
-  if (b) return `н. ${b}`;
-  if (d) return `† ${d}`;
+  if (b) return t('years.born', { y: b });
+  if (d) return t('years.died', { y: d });
   return '';
 }
 
 export function isAnon(n) {
-  return !n || n.name === '(приватна особа)';
+  return !n || Boolean(n.anon) || n.name === '(приватна особа)';
 }
 
 export function createView(svgEl, { onTap, onActivate }) {
@@ -123,13 +124,13 @@ export function createView(svgEl, { onTap, onActivate }) {
       g.attr('class', ['card', `card--${(n?.sex || 'u').toLowerCase()}`, `role-${c.role}`,
         c.hyp ? 'is-hyp' : '', c.ref ? 'is-ref' : '', anon ? 'is-anon' : '',
         c.id === selectedId ? 'is-selected' : ''].filter(Boolean).join(' '));
-      g.attr('aria-label', `${anon ? 'приватна особа' : n?.name || c.id}${c.ref ? ', вже є в дереві' : ''}`);
-      const lines = wrapName(anon ? 'приватна особа' : n?.name || c.id, CARD.w - PAD * 2);
+      g.attr('aria-label', `${anon ? t('private.person') : n?.name || c.id}${c.ref ? t('tree.ref.aria') : ''}`);
+      const lines = wrapName(anon ? t('private.person') : n?.name || c.id, CARD.w - PAD * 2);
       const name = g.select('.card__name');
       name.selectAll('tspan').data(lines).join('tspan')
         .attr('x', PAD).attr('dy', (_, i) => (i ? 15 : 0)).text((s) => s);
       name.attr('y', lines.length > 1 ? 20 : 26);
-      g.select('.card__years').text(c.ref ? '↻ вже є в дереві' : yearsLabel(n));
+      g.select('.card__years').text(c.ref ? t('tree.ref') : yearsLabel(n));
 
       const up = g.select('.card__up');
       up.selectAll('*').remove();

@@ -1,6 +1,8 @@
-// Дрібниці для всіх сторінок: фільтр покажчиків і перегляд доказів на весь екран.
+// Дрібниці для всіх сторінок: фільтр покажчиків, перегляд доказів на весь
+// екран і перемикач мов, що лишає на тій самій сторінці.
+import { t } from './strings.js';
+
 (function () {
-  'use strict';
 
   function norm(s) {
     return String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
@@ -33,7 +35,7 @@
           if (h && /^H[23]$/.test(h.tagName)) h.hidden = !any;
         });
         document.querySelectorAll('.nysh-jumpbar').forEach((j) => { j.hidden = words.length > 0; });
-        if (count) count.textContent = words.length ? `${shown} з ${total}` : total;
+        if (count) count.textContent = words.length ? t('filter.of', { a: shown, b: total }) : total;
       });
     });
   }
@@ -58,7 +60,7 @@
         open.href = a.getAttribute('href');
         open.target = '_blank';
         open.rel = 'noopener';
-        open.textContent = 'Відкрити файл';
+        open.textContent = t('file.open');
         cap.append(document.createTextNode(img.alt + ' · '), open);
         box.append(img, cap);
         const close = () => { box.remove(); document.removeEventListener('keydown', onKey); };
@@ -70,9 +72,31 @@
     });
   }
 
+  /**
+   * Перемикач мов Material веде на корінь іншої мови. Кожна мова — збірка тієї
+   * самої структури, тож шлях сторінки від кореня той самий: дописуємо його,
+   * і людина лишається на тій самій особі чи місці.
+   */
+  function initLanguages() {
+    const scope = window.__md_scope;
+    if (!scope) return;
+    document.querySelectorAll('a.md-select__link[hreflang]').forEach((a) => {
+      if (a.dataset.ready) return;
+      a.dataset.ready = '1';
+      a.addEventListener('click', (ev) => {
+        const here = window.location.href;
+        if (!here.startsWith(scope.href)) return;
+        const rel = here.slice(scope.href.length);
+        ev.preventDefault();
+        window.location.href = new URL(rel, new URL(a.getAttribute('href'), window.location.href)).href;
+      });
+    });
+  }
+
   function init() {
     initFilters();
     initLightbox();
+    initLanguages();
   }
 
   if (window.document$ && typeof window.document$.subscribe === 'function') {

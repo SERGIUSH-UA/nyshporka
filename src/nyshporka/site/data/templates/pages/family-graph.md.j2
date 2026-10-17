@@ -1,5 +1,5 @@
 ---
-title: Граф зв'язків
+title: {{ t("graph.title") | q }}
 hide:
   - navigation
   - toc
@@ -9,29 +9,29 @@ hide:
      data-year-min="{{ year_min }}" data-year-max="{{ year_max }}">
 <div class="nysh-graph__bar nysh-app__bar">
 <div class="nysh-search nysh-search--compact">
-<input type="search" class="nysh-search__input" placeholder="Знайти особу…" aria-label="Знайти особу на графі" autocomplete="off" spellcheck="false">
+<input type="search" class="nysh-search__input" placeholder="{{ t('tree.find') }}" aria-label="{{ t('graph.find.aria') }}" autocomplete="off" spellcheck="false">
 <ul class="nysh-search__list" role="listbox" hidden></ul>
 </div>
-<label class="nysh-graph__year"><span>Жили в <b data-out="year">усі роки</b></span>
-<input type="range" min="{{ year_min }}" max="{{ year_max + 1 }}" value="{{ year_max + 1 }}" step="1" aria-label="Рік"></label>
-<label class="nysh-check"><input type="checkbox" data-opt="hyp" checked> гіпотези</label>
+<label class="nysh-graph__year"><span>{{ t("graph.lived") }} <b data-out="year">{{ t("graph.all") }}</b></span>
+<input type="range" min="{{ year_min }}" max="{{ year_max + 1 }}" value="{{ year_max + 1 }}" step="1" aria-label="{{ t('graph.year.aria') }}"></label>
+<label class="nysh-check"><input type="checkbox" data-opt="hyp" checked> {{ t("graph.hyp") }}</label>
 </div>
 <div class="nysh-graph__body nysh-app__body">
 <div class="nysh-tree__canvas">
-<canvas class="nysh-graph__canvas" aria-label="Граф зв'язків роду"></canvas>
+<canvas class="nysh-graph__canvas" aria-label="{{ t('graph.aria') }}"></canvas>
 <div class="nysh-tree__zoom">
-<button type="button" data-act="zoom+" aria-label="Наблизити">+</button>
-<button type="button" data-act="zoom-" aria-label="Віддалити">−</button>
-<button type="button" data-act="fit" aria-label="Показати все">⤢</button>
+<button type="button" data-act="zoom+" aria-label="{{ t('tree.zoom.in') }}">+</button>
+<button type="button" data-act="zoom-" aria-label="{{ t('tree.zoom.out') }}">−</button>
+<button type="button" data-act="fit" aria-label="{{ t('tree.fit') }}">⤢</button>
 </div>
-<div class="nysh-tree__status">Завантаження…</div>
+<div class="nysh-tree__status">{{ t("loading") }}</div>
 </div>
 <aside class="nysh-panel" data-state="closed" aria-live="polite">
-<button type="button" class="nysh-panel__grip" aria-label="Розгорнути або згорнути деталі"><span></span></button>
+<button type="button" class="nysh-panel__grip" aria-label="{{ t('tree.details') }}"><span></span></button>
 <div class="nysh-panel__body"></div>
 </aside>
 </div>
-<p class="nysh-meta">Вузол — особа, колір — гілка (зв'язна частина роду), лінія — батьки й діти, пунктир — гіпотеза. Повзунок лишає тих, хто жив у вибраний рік.</p>
+<p class="nysh-meta">{{ t("graph.meta") }}</p>
 </div>
 
 <script src="assets/vendor/d3.min.js"></script>

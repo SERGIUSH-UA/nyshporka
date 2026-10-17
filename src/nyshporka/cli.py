@@ -3358,6 +3358,14 @@ def _stdin_is_tty() -> bool:
     return sys.stdin.isatty()
 
 
+#: `nysh serve --page`: коротке ім'я → шлях у застосунку.
+_PAGES = {"site": "site/", "site-public": "site-public/"}
+
+
+def _page_path(page: str) -> str:
+    return _PAGES.get(page.strip().lower(), "")
+
+
 def _stdout_is_tty() -> bool:
     """Чи вивід іде в термінал, а не в файл чи журнал служби."""
     return sys.stdout.isatty()
@@ -3385,6 +3393,8 @@ def serve(
         help="друге підтвердження без набору — для 0.0.0.0 / :: чи публічної адреси"),
     no_browser: bool = typer.Option(False, "--no-browser",
                                     help="не відкривати вкладку самому"),
+    page: str = typer.Option("", "--page",
+                             help="з чого почати вкладку: site — сайт роду (ярлик «Сайт родини»)"),
 ) -> None:
     """Підняти застосунок у браузері.
 
@@ -3428,7 +3438,11 @@ def serve(
             console.print("[err]--tls-cert, --tls-key, --rotate-key і --confirm-* діють "
                           "лише з мережевим --host[/err]")
             raise typer.Exit(code=1)
-        _serve(host=host, port=port, open_browser=not no_browser)
+        # Без --page виклик лишається таким самим, як був (його звіряють тести).
+        if _page_path(page):
+            _serve(host=host, port=port, open_browser=not no_browser, page=_page_path(page))
+        else:
+            _serve(host=host, port=port, open_browser=not no_browser)
         return
 
     try:

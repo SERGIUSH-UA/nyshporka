@@ -1,17 +1,17 @@
 ---
-title: Родини
+title: {{ t("nav.families") | q }}
 hide:
   - toc
 ---
 
-# Родини
+# {{ t("nav.families") }}
 
 <div class="nysh-filter" data-filter-target=".nysh-plist">
-<input type="search" class="nysh-filter__input" placeholder="Фільтр за іменем подружжя…" aria-label="Фільтр родин" autocomplete="off">
-<span class="nysh-filter__count">{{ families | length }} родин</span>
+<input type="search" class="nysh-filter__input" placeholder="{{ t('idx.families.filter') }}" aria-label="{{ t('idx.families.filter') }}" autocomplete="off">
+<span class="nysh-filter__count">{{ t("idx.families.count", n=families | length) }}</span>
 </div>
 
-<nav class="nysh-jumpbar" aria-label="За літерою">
+<nav class="nysh-jumpbar" aria-label="{{ t('by.letter') }}">
 {% for lt in letters %}
 <a class="nysh-jumpchip" href="#fam-{{ lt | lower | replace('—', 'other') }}">{{ lt }}</a>
 {% endfor %}
@@ -23,9 +23,9 @@ hide:
 
 <div class="nysh-plist" markdown>
 {% for f in grouped[lt] %}
-{% set h = f.husband_name or f.hypothetical_husband_name or "невідомий" %}
-{% set w = f.wife_name or f.hypothetical_wife_name or "невідома" %}
-[<span class="nysh-pc__name">{{ h }} × {{ w }}</span><span class="nysh-pc__years">{% if f.pivot_year %}{{ f.pivot_year }} · {% endif %}{% if f.children_count %}дітей: {{ f.children_count }}{% else %}без дітей у каноні{% endif %}{% if f.hypothetical_children_count %} (+{{ f.hypothetical_children_count }} гіп.){% endif %}</span>]({{ f.id }}.md){ .nysh-pc .nysh-pc--fam{% if f.is_hypothetical %} .is-hyp{% endif %} }
+{% set h = f.husband_name or f.hypothetical_husband_name or t("idx.unknown.m") %}
+{% set w = f.wife_name or f.hypothetical_wife_name or t("idx.unknown.f") %}
+[<span class="nysh-pc__name">{{ h }} × {{ w }}</span><span class="nysh-pc__years">{% if f.pivot_year %}{{ f.pivot_year }} · {% endif %}{% if f.children_count %}{{ t("idx.children", n=f.children_count) }}{% else %}{{ t("idx.no_children") }}{% endif %}{% if f.hypothetical_children_count %} (+{{ f.hypothetical_children_count }} {{ t("idx.hyp_short") }}){% endif %}</span>]({{ f.id }}.md){ .nysh-pc .nysh-pc--fam{% if f.is_hypothetical %} .is-hyp{% endif %} }
 {% endfor %}
 </div>
 

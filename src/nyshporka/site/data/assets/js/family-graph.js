@@ -3,6 +3,7 @@
 // Тап по вузлу — особа й її найближчі; повзунок року лишає тих, хто тоді жив.
 import { createPanel, el } from './panel.js';
 import { attach } from './search.js';
+import { t } from './strings.js';
 import { yearsLabel, isAnon } from './tree/render.js';
 
 /* global d3 */
@@ -20,7 +21,7 @@ async function main() {
     if (!res.ok) throw new Error(res.statusText);
     data = await res.json();
   } catch {
-    status.textContent = 'Не вдалося завантажити граф. Якщо сторінку відкрито як файл, запустіть nysh site serve.';
+    status.textContent = t('graph.error');
     return;
   }
   status.hidden = true;
@@ -141,15 +142,15 @@ async function main() {
     const anon = isAnon(n);
     const rel = [...neighbours.get(id)].map((x) => byId.get(x));
     panel.show([
-      el('header.nysh-panel__head', {}, el('h2', {}, anon ? 'Приватна особа' : n.name),
-        el('p.nysh-panel__years', {}, yearsLabel(n) || 'роки невідомі')),
+      el('header.nysh-panel__head', {}, el('h2', {}, anon ? t('private.title') : n.name),
+        el('p.nysh-panel__years', {}, yearsLabel(n) || t('years.unknown'))),
       el('div.nysh-panel__actions', {},
-        el('a.md-button.md-button--primary', { href: `family-tree.html#${id}` }, 'У дереві'),
-        anon ? null : el('a.md-button', { href: `persons/${id}.html` }, 'Сторінка особи')),
-      rel.length ? el('section.nysh-panel__group', {}, el('h3', {}, 'Пов\'язані напряму'),
+        el('a.md-button.md-button--primary', { href: `family-tree.html#${id}` }, t('graph.in.tree')),
+        anon ? null : el('a.md-button', { href: `persons/${id}.html` }, t('tree.page'))),
+      rel.length ? el('section.nysh-panel__group', {}, el('h3', {}, t('graph.near')),
         el('div.nysh-panel__chips', {}, rel.map((r) => el('button.nysh-chip' + (isAnon(r) ? '.is-anon' : ''),
           { type: 'button', onclick: () => select(r.id, true) },
-          el('span.nysh-chip__name', {}, isAnon(r) ? 'приватна особа' : r.name),
+          el('span.nysh-chip__name', {}, isAnon(r) ? t('private.person') : r.name),
           el('span.nysh-chip__years', {}, yearsLabel(r)))))) : null,
     ]);
     if (center) {
@@ -179,7 +180,7 @@ async function main() {
   range.addEventListener('input', () => {
     const v = Number(range.value);
     state.year = v > yMax ? null : v;
-    out.textContent = state.year === null ? 'усі роки' : `${state.year} р.`;
+    out.textContent = state.year === null ? t('graph.all') : t('graph.year', { y: state.year });
     draw();
   });
   root.querySelector('[data-opt="hyp"]').addEventListener('change', (ev) => { state.hyp = ev.target.checked; draw(); });
@@ -195,7 +196,8 @@ async function main() {
   new MutationObserver(draw).observe(document.body, { attributes: true, attributeFilter: ['data-md-color-scheme'] });
 
   fit(false);
-  const want = decodeURIComponent(window.location.hash.slice(1));
+  let want = '';
+  try { want = decodeURIComponent(window.location.hash.slice(1)); } catch { want = ''; }
   if (byId.has(want)) select(want, true);
 }
 

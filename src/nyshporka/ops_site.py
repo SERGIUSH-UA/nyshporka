@@ -64,3 +64,68 @@ def site_build(a: SiteBuildArgs) -> Envelope:
         env.warn("private_build", "приватна версія: живі тут є (з датами до десятиліття). "
                                   "Для публікації — nysh site build --public")
     return env
+
+
+#: Адреса збірки в консолі (`nysh serve`): приватна й відкрита версії.
+SITE_URL = {False: "/site/", True: "/site-public/"}
+
+
+class SiteStatusArgs(BaseModel):
+    pass
+
+
+@op("site.status", summary="Що зібрано з сайту роду: коли, скільки осіб, де відкрити",
+    args=SiteStatusArgs, mutates=False, agent=False, section="research")
+def site_status(_a: SiteStatusArgs) -> Envelope:
+    """Обидві версії сайту: чи є HTML, коли зібрано, лічильники й адреса в консолі.
+
+    Лічильники — з `assets/stats.json` самої збірки, тобто те, що реально на
+    сайті, а не те, що в каноні зараз: різниця й каже, що пора перезібрати.
+    """
+    import json
+    from datetime import UTC, datetime
+
+    from nyshporka.core.workspace import workspace
+    from nyshporka.site import build as B
+
+    root = workspace().root
+    canon = root / "data" / "canonical" / "persons"
+    in_canon = sum(1 for _ in canon.glob("*.md")) if canon.is_dir() else 0
+    out: dict[str, object] = {"canon_persons": in_canon, "mkdocs": B.mkdocs_available()}
+    for public in (False, True):
+        html = B.default_out(root, public) / "html"
+        index = html / "index.html"
+        info: dict[str, object] = {"built": index.is_file(), "url": SITE_URL[public],
+                                   "path": str(html)}
+        if index.is_file():
+            info["built_at"] = datetime.fromtimestamp(index.stat().st_mtime, UTC).isoformat(
+                timespec="seconds")
+            stats = html / "assets" / "stats.json"
+            try:
+                info["counts"] = json.loads(stats.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                info["counts"] = {}
+        out["public" if public else "private"] = info
+    return ok(out)
+
+
+class SiteRebuildArgs(BaseModel):
+    public: bool = Field(default=False, description="відкрита версія (зі сторожем витоків)")
+
+
+@op("site.rebuild", summary="Перезібрати сайт роду з консолі — роботою в черзі",
+    args=SiteRebuildArgs, mutates=True, long=True, agent=False, section="research")
+def site_rebuild(a: SiteRebuildArgs) -> Envelope:
+    """Та сама збірка, що `site.build`, але роботою: з поступом у «Роботах» і без
+    завислої вкладки — MkDocs на кількасот сторінок іде хвилини.
+
+    `force` тут немає навмисно: кнопка в консолі не перезаписує чужу теку.
+    """
+    from nyshporka.core.progress import report
+
+    report(0, 1, "збірка сайту")
+    env = site_build(SiteBuildArgs(public=a.public))
+    report(1, 1, "збірка сайту")
+    if env.ok:
+        env.data["url"] = SITE_URL[a.public]
+    return env

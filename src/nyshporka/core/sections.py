@@ -179,6 +179,8 @@ SCREENS: dict[str, str] = {
     "sift": "research",
     "eye": "research",
     "export": "research",
+    # Сайт родини збирається з канону — тієї самої секції, що веде канон.
+    "site": "research",
     # lab
     "sets": "lab",
     "label": "lab",
@@ -201,6 +203,9 @@ UNGATED_SCREENS: frozenset[str] = frozenset({"settings"})
 #: і командний рядок з агентом її друкують. Без цієї мапи браузер може лише
 #: показати ім'я операції — тобто сказати людині те, чого вона не натисне.
 OP_SCREEN: dict[str, str] = {
+    "site.build": "site",
+    "site.status": "site",
+    "site.rebuild": "site",
     # core
     "workspace.info": "home",
     "setup.check": "home",

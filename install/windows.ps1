@@ -184,6 +184,8 @@ $Msg = @{
         'trap.title' = 'Нишпорка: установлення не завершилось'
         'brand.name' = 'Нишпорка'
         'lnk.desc' = 'Читання рукописних архівних справ'
+        'lnk.site' = 'Сайт родини'
+        'lnk.site.desc' = 'Сайт роду з канону Нишпорки'
         'err.448' = 'Windows не довіряє теці, куди uv ставить Python (os error 448: перенаправлений AppData чи OneDrive). Поставте Нишпорку наново з текою інтерпретаторів поза профілем: windows.ps1 -PythonDir D:\Nyshporka\python'
     }
     en = @{
@@ -274,6 +276,8 @@ $Msg = @{
         'trap.title' = 'Nyshporka: installation did not finish'
         'brand.name' = 'Nyshporka'
         'lnk.desc' = 'Reading handwritten archival records'
+        'lnk.site' = 'Family site'
+        'lnk.site.desc' = 'The family site built from the Nyshporka canon'
         'err.448' = 'Windows does not trust the folder where uv puts Python (os error 448: redirected AppData or OneDrive). Reinstall Nyshporka with the interpreter folder outside the profile: windows.ps1 -PythonDir D:\Nyshporka\python'
     }
     pl = @{
@@ -364,6 +368,8 @@ $Msg = @{
         'trap.title' = 'Nyshporka: instalacja nie została ukończona'
         'brand.name' = 'Nyshporka'
         'lnk.desc' = 'Odczyt rękopiśmiennych dokumentów archiwalnych'
+        'lnk.site' = 'Strona rodziny'
+        'lnk.site.desc' = 'Strona rodu z kanonu Nyszporki'
         'err.448' = 'Windows nie ufa folderowi, w którym uv instaluje Pythona (os error 448: przekierowany AppData lub OneDrive). Zainstaluj Nyshporkę ponownie z folderem interpreterów poza profilem: windows.ps1 -PythonDir D:\Nyshporka\python'
     }
     ro = @{
@@ -454,6 +460,8 @@ $Msg = @{
         'trap.title' = 'Nyshporka: instalarea nu s-a încheiat'
         'brand.name' = 'Nyshporka'
         'lnk.desc' = 'Citirea dosarelor de arhivă scrise de mână'
+        'lnk.site' = 'Site-ul familiei'
+        'lnk.site.desc' = 'Site-ul neamului din canonul Nyshporka'
         'err.448' = 'Windows nu are încredere în folderul în care uv instalează Python (os error 448: AppData sau OneDrive redirecționat). Reinstalați Nyshporka cu folderul interpretoarelor în afara profilului: windows.ps1 -PythonDir D:\Nyshporka\python'
     }
     fr = @{
@@ -544,6 +552,8 @@ $Msg = @{
         'trap.title' = 'Nyshporka : l''installation ne s''est pas terminée'
         'brand.name' = 'Nyshporka'
         'lnk.desc' = 'Lecture de dossiers d''archives manuscrits'
+        'lnk.site' = 'Site de famille'
+        'lnk.site.desc' = 'Le site de famille tiré du canon Nyshporka'
         'err.448' = 'Windows ne fait pas confiance au dossier où uv installe Python (os error 448 : AppData ou OneDrive redirigé). Réinstallez Nyshporka avec le dossier des interpréteurs hors du profil : windows.ps1 -PythonDir D:\Nyshporka\python'
     }
     de = @{
@@ -634,6 +644,8 @@ $Msg = @{
         'trap.title' = 'Nyshporka: Installation nicht abgeschlossen'
         'brand.name' = 'Nyshporka'
         'lnk.desc' = 'Lesen handschriftlicher Archivakten'
+        'lnk.site' = 'Familienseite'
+        'lnk.site.desc' = 'Die Familienseite aus dem Nyshporka-Kanon'
         'err.448' = 'Windows vertraut dem Ordner nicht, in den uv Python installiert (os error 448: umgeleitetes AppData oder OneDrive). Installieren Sie Nyshporka neu, mit dem Interpreter-Ordner außerhalb des Profils: windows.ps1 -PythonDir D:\Nyshporka\python'
     }
     ru = @{
@@ -724,6 +736,8 @@ $Msg = @{
         'trap.title' = 'Нышпорка: установка не завершилась'
         'brand.name' = 'Нышпорка'
         'lnk.desc' = 'Чтение рукописных архивных дел'
+        'lnk.site' = 'Сайт семьи'
+        'lnk.site.desc' = 'Сайт рода из канона Нышпорки'
         'err.448' = 'Windows не доверяет папке, куда uv ставит Python (os error 448: перенаправленный AppData или OneDrive). Установите Нышпорку заново с папкой интерпретаторов вне профиля: windows.ps1 -PythonDir D:\Nyshporka\python'
     }
 }
@@ -1447,6 +1461,16 @@ if (-not $NoLauncher) {
     $s.Description = M 'lnk.desc'
     $s.Save()
     Trace 'file' $lnk
+    # Другий ярлик — одразу сайт роду: той самий застосунок, але вкладка
+    # відкривається на /site/. Уже запущена Нишпорка лише відкриває вкладку.
+    $site = Join-Path ([Environment]::GetFolderPath('Desktop')) ((M 'lnk.site') + '.lnk')
+    $s2 = $sh.CreateShortcut($site)
+    $s2.TargetPath = $nysh
+    $s2.Arguments = 'serve --page site'
+    $s2.WorkingDirectory = $s.WorkingDirectory
+    $s2.Description = M 'lnk.site.desc'
+    $s2.Save()
+    Trace 'file' $site
     Say (M 'desk.ok') Green
 }
 

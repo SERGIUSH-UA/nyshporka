@@ -1,17 +1,17 @@
 ---
-title: Джерела
+title: {{ t("nav.sources") | q }}
 hide:
   - toc
 ---
 
-# Джерела
+# {{ t("nav.sources") }}
 
 <div class="nysh-filter" data-filter-target=".nysh-plist">
-<input type="search" class="nysh-filter__input" placeholder="Фільтр за назвою, архівом…" aria-label="Фільтр джерел" autocomplete="off">
-<span class="nysh-filter__count">{{ sources | length }} джерел</span>
+<input type="search" class="nysh-filter__input" placeholder="{{ t('idx.sources.filter') }}" aria-label="{{ t('idx.sources.filter') }}" autocomplete="off">
+<span class="nysh-filter__count">{{ t("idx.sources.count", n=sources | length) }}</span>
 </div>
 
-<nav class="nysh-jumpbar" aria-label="За типом">
+<nav class="nysh-jumpbar" aria-label="{{ t('by.type') }}">
 {% for g in groups %}
 <a class="nysh-jumpchip" href="#src-{{ g.id }}">{{ g.label }} <small>{{ g.members | length }}</small></a>
 {% endfor %}
@@ -23,7 +23,7 @@ hide:
 
 <div class="nysh-plist nysh-plist--wide" markdown>
 {% for s in g.members %}
-[<span class="nysh-pc__name">{{ s.title }}</span><span class="nysh-pc__years">{% if s.authority %}{{ s.authority }} · {% endif %}{% if s.citations_count %}цитувань: {{ s.citations_count }}{% else %}ще не цитоване{% endif %}</span>]({{ s.id }}.md){ .nysh-pc .nysh-pc--src{% if not s.citations_count %} .is-muted{% endif %} }
+[<span class="nysh-pc__name">{{ s.title }}</span><span class="nysh-pc__years">{% if s.authority %}{{ s.authority }} · {% endif %}{% if s.citations_count %}{{ t("idx.cited", n=s.citations_count) }}{% else %}{{ t("idx.not_cited") }}{% endif %}</span>]({{ s.id }}.md){ .nysh-pc .nysh-pc--src{% if not s.citations_count %} .is-muted{% endif %} }
 {% endfor %}
 </div>
 

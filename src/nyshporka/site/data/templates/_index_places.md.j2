@@ -1,18 +1,18 @@
 ---
-title: Місця
+title: {{ t("nav.places") | q }}
 hide:
   - toc
 ---
 
-# Місця
+# {{ t("nav.places") }}
 
 <div class="nysh-filter" data-filter-target=".nysh-plist">
-<input type="search" class="nysh-filter__input" placeholder="Фільтр за назвою, повітом…" aria-label="Фільтр місць" autocomplete="off">
-<span class="nysh-filter__count">{{ places | length }} місць</span>
-<a class="md-button nysh-filter__action" href="../places-map.html">Мапа</a>
+<input type="search" class="nysh-filter__input" placeholder="{{ t('idx.places.filter') }}" aria-label="{{ t('idx.places.filter') }}" autocomplete="off">
+<span class="nysh-filter__count">{{ t("idx.places.count", n=places | length) }}</span>
+<a class="md-button nysh-filter__action" href="../places-map.html">{{ t("nav.map") }}</a>
 </div>
 
-<nav class="nysh-jumpbar" aria-label="За групою">
+<nav class="nysh-jumpbar" aria-label="{{ t('by.group') }}">
 {% for g in groups %}
 <a class="nysh-jumpchip" href="#region-{{ g.id }}">{{ g.label }}</a>
 {% endfor %}
@@ -24,7 +24,7 @@ hide:
 
 <div class="nysh-plist" markdown>
 {% for p in g.members %}
-[<span class="nysh-pc__name">{{ p.name }}</span><span class="nysh-pc__years">{{ p.admin | join(' · ') if p.admin else "адмінподіл невідомий" }}{% if p.persons_count %} · осіб: {{ p.persons_count }}{% endif %}</span>]({{ p.id }}.md){ .nysh-pc .nysh-pc--place{% if not p.has_coords %} .is-nocoords{% endif %} }
+[<span class="nysh-pc__name">{{ p.name }}</span><span class="nysh-pc__years">{{ p.admin | join(' · ') if p.admin else t("idx.admin.unknown") }}{% if p.persons_count %} · {{ t("idx.persons.n", n=p.persons_count) }}{% endif %}</span>]({{ p.id }}.md){ .nysh-pc .nysh-pc--place{% if not p.has_coords %} .is-nocoords{% endif %} }
 {% endfor %}
 </div>
 

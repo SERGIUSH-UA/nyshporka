@@ -131,6 +131,8 @@ Name: "russian"; MessagesFile: "compiler:Languages\Russian.isl"
 ; повідомлення самих мовних файлів Inno ({cm:CreateDesktopIcon} тощо).
 ; `%n` — новий рядок, `%1` — підстановка FmtMessage.
 ukrainian.AppComment=Читання рукописних архівних справ
+ukrainian.SiteName=Сайт родини
+ukrainian.SiteComment=Сайт роду з канону Нишпорки
 ukrainian.PresetTitle=Що ставимо
 ukrainian.PresetSub=Нишпорку ставлять дуже різні люди.
 ukrainian.PresetDesc=Змінити відповідь можна будь-коли командою «nysh sections» — перевстановлювати нічого не доведеться.
@@ -153,6 +155,8 @@ ukrainian.SpaceLow=На цьому диску вільно лише %1 ГБ, а 
 ukrainian.AgentDoc=Відкрити інструкцію: як підключити помічника (Claude чи Codex)
 ukrainian.FinishAgent=Далі — підключіть помічника: Claude або Codex. Він веде дослідження, а вікно Нишпорки показує, що зроблено.
 english.AppComment=Reading handwritten archival records
+english.SiteName=Family site
+english.SiteComment=The family site built from the Nyshporka canon
 english.PresetTitle=What to install
 english.PresetSub=Very different people install Nyshporka.
 english.PresetDesc=You can change the answer at any time with the “nysh sections” command — nothing needs to be reinstalled.
@@ -175,6 +179,8 @@ english.SpaceLow=Only %1 GB is free on this drive, and about 10 GB is needed. In
 english.AgentDoc=Open the guide: how to connect an assistant (Claude or Codex)
 english.FinishAgent=Next, connect an assistant: Claude or Codex. It does the research, and the Nyshporka window shows what has been done.
 polish.AppComment=Odczyt rękopiśmiennych dokumentów archiwalnych
+polish.SiteName=Strona rodziny
+polish.SiteComment=Strona rodu z kanonu Nyszporki
 polish.PresetTitle=Co instalujemy
 polish.PresetSub=Nyshporkę instalują bardzo różni ludzie.
 polish.PresetDesc=Odpowiedź można zmienić w każdej chwili poleceniem „nysh sections” — nic nie trzeba instalować od nowa.
@@ -197,6 +203,8 @@ polish.SpaceLow=Na tym dysku wolne jest tylko %1 GB, a potrzeba około 10 GB. In
 polish.AgentDoc=Otwórz instrukcję: jak podłączyć asystenta (Claude lub Codex)
 polish.FinishAgent=Dalej podłącz asystenta: Claude lub Codex. To on prowadzi badanie, a okno Nyshporki pokazuje, co zrobiono.
 romanian.AppComment=Citirea dosarelor de arhivă scrise de mână
+romanian.SiteName=Site-ul familiei
+romanian.SiteComment=Site-ul neamului din canonul Nyshporka
 romanian.PresetTitle=Ce instalăm
 romanian.PresetSub=Nyshporka este instalată de oameni foarte diferiți.
 romanian.PresetDesc=Răspunsul poate fi schimbat oricând cu comanda „nysh sections” — nu trebuie reinstalat nimic.
@@ -219,6 +227,8 @@ romanian.SpaceLow=Pe acest disc sunt libere doar %1 GB, iar sunt necesari circa 
 romanian.AgentDoc=Deschideți ghidul: cum se conectează asistentul (Claude sau Codex)
 romanian.FinishAgent=Apoi conectați un asistent: Claude sau Codex. El face cercetarea, iar fereastra Nyshporka arată ce s-a făcut.
 french.AppComment=Lecture de dossiers d'archives manuscrits
+french.SiteName=Site de famille
+french.SiteComment=Le site de famille tiré du canon Nyshporka
 french.PresetTitle=Que faut-il installer
 french.PresetSub=Nyshporka est installée par des personnes très différentes.
 french.PresetDesc=Vous pouvez changer cette réponse à tout moment avec la commande « nysh sections » — rien à réinstaller.
@@ -241,6 +251,8 @@ french.SpaceLow=Seuls %1 Go sont libres sur ce disque, il en faut environ 10. In
 french.AgentDoc=Ouvrir le guide : comment connecter un assistant (Claude ou Codex)
 french.FinishAgent=Ensuite, connectez un assistant : Claude ou Codex. Il mène la recherche, et la fenêtre de Nyshporka montre ce qui a été fait.
 german.AppComment=Lesen handschriftlicher Archivakten
+german.SiteName=Familienseite
+german.SiteComment=Die Familienseite aus dem Nyshporka-Kanon
 german.PresetTitle=Was wird installiert
 german.PresetSub=Nyshporka wird von sehr unterschiedlichen Menschen installiert.
 german.PresetDesc=Die Antwort lässt sich jederzeit mit dem Befehl „nysh sections“ ändern — neu installieren müssen Sie nichts.
@@ -264,6 +276,8 @@ german.AgentDoc=Anleitung öffnen: einen Assistenten verbinden (Claude oder Code
 german.FinishAgent=Als Nächstes verbinden Sie einen Assistenten: Claude oder Codex. Er führt die Forschung, und das Nyshporka-Fenster zeigt, was erledigt ist.
 #ifdef WITH_RU
 russian.AppComment=Чтение рукописных архивных дел
+russian.SiteName=Сайт семьи
+russian.SiteComment=Сайт рода из канона Нышпорки
 russian.PresetTitle=Что ставим
 russian.PresetSub=Нышпорку ставят очень разные люди.
 russian.PresetDesc=Изменить ответ можно в любой момент командой «nysh sections» — переустанавливать ничего не придётся.
@@ -315,6 +329,9 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 Name: "{group}\{#AppName}"; Filename: "{code:GetNyshExe}"; Parameters: "serve"; WorkingDir: "{code:GetWorkDir}"; IconFilename: "{app}\nyshporka.ico"; Comment: "{cm:AppComment}"
 Name: "{group}\{cm:UninstallProgram,{#AppName}}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#AppName}"; Filename: "{code:GetNyshExe}"; Parameters: "serve"; WorkingDir: "{code:GetWorkDir}"; IconFilename: "{app}\nyshporka.ico"; Tasks: desktopicon
+; Сайт роду — той самий застосунок, вкладка одразу на /site/ (`serve --page site`).
+Name: "{group}\{cm:SiteName}"; Filename: "{code:GetNyshExe}"; Parameters: "serve --page site"; WorkingDir: "{code:GetWorkDir}"; IconFilename: "{app}\nyshporka.ico"; Comment: "{cm:SiteComment}"
+Name: "{autodesktop}\{cm:SiteName}"; Filename: "{code:GetNyshExe}"; Parameters: "serve --page site"; WorkingDir: "{code:GetWorkDir}"; IconFilename: "{app}\nyshporka.ico"; Comment: "{cm:SiteComment}"; Tasks: desktopicon
 
 [Run]
 ; 🔴 `nowait` обов'язковий: `nysh serve` піднімає сервер і БЛОКУЄ потік до

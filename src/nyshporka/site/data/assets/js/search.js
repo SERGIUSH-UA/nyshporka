@@ -2,6 +2,7 @@
 // Запис покажчика: {id, n: ім'я, a: інші форми, y: роки, s: стать, p: місце народження}.
 
 const cache = new Map();
+import { t } from './strings.js';
 
 export function loadIndex(url) {
   if (!cache.has(url)) {
@@ -76,7 +77,7 @@ export function attach(root, { url, onPick, base = '' }) {
     if (!items.length) {
       const li = document.createElement('li');
       li.className = 'nysh-search__empty';
-      li.textContent = 'Нікого не знайдено';
+      li.textContent = t('search.none');
       list.append(li);
     }
     items.forEach((e, i) => {

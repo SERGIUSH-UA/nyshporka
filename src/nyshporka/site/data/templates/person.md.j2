@@ -1,6 +1,6 @@
-{% from "_macros.j2" import pcard, kin_group, gallery %}
+{% from "_macros.j2" import pcard, kin_group, gallery, hyp_list %}
 ---
-title: {{ person.primary_name }}
+title: {{ person.primary_name | q }}
 private: {{ "true" if person.private else "false" }}
 ---
 {% set _birth = person.facts | selectattr("type", "in", ["birth", "baptism"]) | first | default(None) %}
@@ -16,46 +16,48 @@ private: {{ "true" if person.private else "false" }}
 {% endif %}
 <div class="nysh-hero__facts" markdown>
 {% if _birth %}
-<div class="nysh-hero__fact" markdown="span">{{ "Нар." if _birth.type == "birth" else "Хрещ." }} {{ _birth.date | format_date(decade_only=person.private) }}{% if _birth.place_id and _birth.place_id in place_names %}, [{{ place_names[_birth.place_id] }}](../places/{{ _birth.place_id }}.md){% endif %}</div>
+<div class="nysh-hero__fact" markdown="span">{{ t("fact.born") if _birth.type == "birth" else t("fact.baptized") }} {{ _birth.date | format_date(decade_only=person.private) }}{% if _birth.place_id and _birth.place_id in place_names %}, [{{ place_names[_birth.place_id] }}](../places/{{ _birth.place_id }}.md){% endif %}</div>
 {% endif %}
 {% if _death and not person.private %}
-<div class="nysh-hero__fact" markdown="span">{{ "Пом." if _death.type == "death" else "Похов." }} {{ _death.date | format_date }}{% if _death.place_id and _death.place_id in place_names %}, [{{ place_names[_death.place_id] }}](../places/{{ _death.place_id }}.md){% endif %}</div>
+<div class="nysh-hero__fact" markdown="span">{{ t("fact.died") if _death.type == "death" else t("fact.buried") }} {{ _death.date | format_date }}{% if _death.place_id and _death.place_id in place_names %}, [{{ place_names[_death.place_id] }}](../places/{{ _death.place_id }}.md){% endif %}</div>
 {% endif %}
 </div>
 {% set _disputed = person.facts | selectattr("status", "equalto", "disputed") | list %}
-{% if person.private or kin.hyp_parents or kin.hyp_families or _disputed %}
+{% set _open_h = hypotheses | rejectattr("status", "equalto", "closed") | list %}
+{% if person.private or kin.hyp_parents or kin.hyp_families or _disputed or _open_h %}
 <div class="nysh-hero__badges">
-{% if person.private %}<span class="nysh-badge nysh-badge--private">приватна особа</span>{% endif %}
-{% if kin.hyp_parents or kin.hyp_families %}<span class="nysh-badge nysh-badge--hyp">є гіпотетичні зв'язки</span>{% endif %}
-{% if _disputed %}<span class="nysh-badge nysh-badge--disputed">є суперечливі факти</span>{% endif %}
+{% if person.private %}<span class="nysh-badge nysh-badge--private">{{ t("badge.private") }}</span>{% endif %}
+{% if kin.hyp_parents or kin.hyp_families %}<span class="nysh-badge nysh-badge--hyp">{{ t("badge.hyp_links") }}</span>{% endif %}
+{% if _disputed %}<span class="nysh-badge nysh-badge--disputed">{{ t("badge.disputed") }}</span>{% endif %}
+{% if _open_h %}<a class="nysh-badge nysh-badge--hyp" href="#hypotheses">{{ t("badge.open_hyp", n=_open_h | length) }}</a>{% endif %}
 </div>
 {% endif %}
 </div>
 <div class="nysh-hero__actions" markdown>
-<a class="md-button md-button--primary" href="../family-tree.html#{{ person.id }}">Показати в дереві</a>
+<a class="md-button md-button--primary" href="../family-tree.html#{{ person.id }}">{{ t("show.in.tree") }}</a>
 </div>
 </div>
 
 {% if person.private %}
-!!! warning "Приватна особа"
-    Особа жива або близька до живих: дати показано до десятиліття, фото й нотатки приховано.
+!!! warning {{ t("private.title") | q }}
+    {{ t("private.warning") }}
 {% endif %}
 
 {% if kin.parents or kin.siblings or kin.families %}
-## Родина
+## {{ t("h.family") }} { #family }
 
 <div class="nysh-kin" markdown>
-{{ kin_group("Батьки", kin.parents) }}
+{{ kin_group(t("kin.parents"), kin.parents) }}
 {% for fam in kin.families %}
 <div class="nysh-kin__group nysh-kin__group--marriage" markdown>
-<div class="nysh-kin__label" markdown="span">{% if fam.partner %}Шлюб{% else %}Діти{% endif %}{% if fam.year %} · {{ fam.year }}{% endif %} · [родина](../families/{{ fam.id }}.md)</div>
+<div class="nysh-kin__label" markdown="span">{% if fam.partner %}{{ t("kin.marriage") }}{% else %}{{ t("kin.children") }}{% endif %}{% if fam.year %} · {{ fam.year }}{% endif %} · [{{ t("family.link") }}](../families/{{ fam.id }}.md)</div>
 <div class="nysh-kin__cards" markdown>
 {% if fam.partner %}
 {{ pcard(fam.partner) }}
 {% endif %}
 </div>
 {% if fam.children %}
-<div class="nysh-kin__sublabel">Діти</div>
+<div class="nysh-kin__sublabel">{{ t("kin.children") }}</div>
 <div class="nysh-kin__cards nysh-kin__cards--kids" markdown>
 {% for c in fam.children %}
 {{ pcard(c) }}
@@ -64,21 +66,21 @@ private: {{ "true" if person.private else "false" }}
 {% endif %}
 </div>
 {% endfor %}
-{{ kin_group("Брати й сестри", kin.siblings) }}
+{{ kin_group(t("kin.siblings"), kin.siblings) }}
 </div>
 {% endif %}
 
 {% if kin.hyp_parents or kin.hyp_siblings or kin.hyp_families %}
-## Гіпотетичні зв'язки
+## {{ t("h.hyp_links") }} { #hypothetical }
 
-<p class="nysh-note">Не верифіковано джерелом: виведено з прізвища, хронології або суміжних згадок.</p>
+<p class="nysh-note">{{ t("hyp_links.why") }}</p>
 
 <div class="nysh-kin nysh-kin--hyp" markdown>
-{{ kin_group("Можливі батьки", kin.hyp_parents) }}
-{{ kin_group("Можливі брати й сестри", kin.hyp_siblings) }}
+{{ kin_group(t("kin.maybe_parents"), kin.hyp_parents) }}
+{{ kin_group(t("kin.maybe_siblings"), kin.hyp_siblings) }}
 {% for fam in kin.hyp_families %}
 <div class="nysh-kin__group nysh-kin__group--marriage" markdown>
-<div class="nysh-kin__label" markdown="span">Можливий шлюб · [родина](../families/{{ fam.id }}.md)</div>
+<div class="nysh-kin__label" markdown="span">{{ t("kin.maybe_marriage") }} · [{{ t("family.link") }}](../families/{{ fam.id }}.md)</div>
 <div class="nysh-kin__cards" markdown>
 {% if fam.partner %}
 {{ pcard(fam.partner) }}
@@ -92,14 +94,20 @@ private: {{ "true" if person.private else "false" }}
 </div>
 {% endif %}
 
+{% if hypotheses %}
+## {{ t("h.hypotheses") }} { #hypotheses }
+
+{{ hyp_list(hypotheses) }}
+{% endif %}
+
 {% if life %}
-## Життя
+## {{ t("h.life") }} { #life }
 
 <ol class="nysh-life">
 {% for f in life %}
 <li class="nysh-life__item nysh-life__item--{{ f.type }}{% if f.status != 'confirmed' %} is-{{ f.status }}{% endif %}" markdown="1">
-<span class="nysh-life__date">{{ f.date | format_date(decade_only=person.private) if f.date else "без дати" }}</span>
-<span class="nysh-life__what" markdown="span">**{{ f.type | fact_label }}**{% if f.place_id and f.place_id in place_names %} · [{{ place_names[f.place_id] }}](../places/{{ f.place_id }}.md){% endif %}{{ cite_marks(f) }}</span>
+<span class="nysh-life__date">{{ f.date | format_date(decade_only=person.private) if f.date else t("undated") }}</span>
+<span class="nysh-life__what" markdown="span">**{{ f.type | fact_label }}**{% if f.place_id and f.place_id in place_names %} · [{{ place_names[f.place_id] }}](../places/{{ f.place_id }}.md){% endif %}{{ cite_marks(f) }}{% if f.hypothesis and f.hypothesis in hyp_ids %} · [{{ t("hyp.word") }} {{ f.hypothesis }}](../hypotheses/{{ f.hypothesis }}.md){% elif f.status == "hypothesis" %} · <span class="nysh-life__flag is-hyp">{{ t("hyp.word") }}</span>{% endif %}{% if f.status == "disputed" %} · <span class="nysh-life__flag is-disputed">{{ t("disputed.word") }}</span>{% endif %}</span>
 {% if f.value %}
 
 {{ f.value }}
@@ -110,7 +118,7 @@ private: {{ "true" if person.private else "false" }}
 {% endif %}
 
 {% if person.names | length > 1 %}
-## Імена в джерелах
+## {{ t("h.names") }} { #names }
 
 <ul class="nysh-names">
 {% for n in person.names %}
@@ -120,24 +128,24 @@ private: {{ "true" if person.private else "false" }}
 {% endif %}
 
 {% if documents %}
-## Документи
+## {{ t("documents") }} { #documents }
 
 {{ gallery(documents) }}
 {% endif %}
 
 {% if media_lines %}
-## Медіа
+## {{ t("media") }} { #media }
 
 {{ media_lines | join('\n') }}
 {% endif %}
 
 {% if person.notes %}
-## Нотатки
+## {{ t("notes") }} { #notes }
 
 {{ person.notes }}
 {% endif %}
 
-<p class="nysh-meta">ID <code>{{ person.id }}</code>{% if person.aliases %} · інші ID: {{ person.aliases | join(", ") }}{% endif %}</p>
+<p class="nysh-meta">ID <code>{{ person.id }}</code>{% if person.aliases %} · {{ t("other.ids") }}: {{ person.aliases | join(", ") }}{% endif %}</p>
 
 {% for s in all_sources %}
 [^{{ s.id }}]: {{ s.title if s.withheld else "[" ~ s.title ~ "](../sources/" ~ s.id ~ ".md)" }}

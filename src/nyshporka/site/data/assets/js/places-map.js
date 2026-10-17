@@ -2,6 +2,7 @@
 // маркери. Перелік місць — праворуч на широкому екрані, шторкою на телефоні.
 // `places-map.html#PL9001` відкриває мапу на цьому місці.
 import { createPanel, el } from './panel.js';
+import { t } from './strings.js';
 
 /* global L */
 
@@ -23,7 +24,7 @@ async function main() {
     if (!res.ok) throw new Error(res.statusText);
     gj = await res.json();
   } catch {
-    canvas.append(el('p.nysh-tree__status', {}, 'Не вдалося завантажити мапу. Якщо сторінку відкрито як файл, запустіть nysh site serve.'));
+    canvas.append(el('p.nysh-tree__status', {}, t('map.error')));
     return;
   }
 
@@ -32,14 +33,14 @@ async function main() {
   const groups = parse(root.dataset.groups, []).map((g, i) => (
     !g.color || g.color.toLowerCase() === '#7f7f7f' ? { ...g, color: PALETTE[i % PALETTE.length] } : g));
   // Без груп у site.yml усі місця однієї барви — акцентної, а не «сірого іншого».
-  const other = { id: 'other', label: 'Інше', color: groups.length ? '#8a8a8a' : '#a8443a', match: [] };
+  const other = { id: 'other', label: t('group.other'), color: groups.length ? '#8a8a8a' : '#a8443a', match: [] };
   const groupOf = (props) => {
     const byId = groups.find((g) => g.id === props.region);
     if (byId) return byId;
     const admin = (props.admin || []).join(' ').toLowerCase();
     return groups.find((g) => (g.match || []).some((m) => m && admin.includes(m.toLowerCase()))) || other;
   };
-  const eras = [{ id: 'all', label: 'Усі роки' },
+  const eras = [{ id: 'all', label: t('map.all') },
     ...parse(root.dataset.eras, []).map((e, i) => ({ id: `e${i}`, label: e.label, from: e.from ?? -1e9, to: e.to ?? 1e9 }))];
 
   const places = (gj.features || [])
@@ -80,15 +81,16 @@ async function main() {
 
   function popup(pl) {
     const ps = visiblePersons(pl);
-    const kind = { birth: 'нар.', death: 'пом.', marriage: 'шлюб', baptism: 'хрещ.', burial: 'похов.', residence: 'жив' };
+    const kind = Object.fromEntries(['birth', 'death', 'marriage', 'baptism', 'burial', 'residence']
+      .map((k) => [k, t(`map.k.${k}`)]));
     const list = el('ul.nysh-popup__persons', {}, ps.slice(0, 14).map((p) => el('li', {},
-      p.private && !p.name ? 'приватна особа' : el('a', { href: `persons/${p.id}.html` }, p.name),
+      p.private && !p.name ? t('private.person') : el('a', { href: `persons/${p.id}.html` }, p.name),
       el('span', {}, ` ${kind[p.fact_type] || ''} ${p.fact_year ?? ''}`.trimEnd()))));
     return el('div.nysh-popup', {},
       el('a.nysh-popup__title', { href: `places/${pl.id}.html` }, pl.name),
       el('div.nysh-popup__admin', {}, pl.admin.slice(1, -1).join(' · ')),
-      ps.length ? list : el('p', {}, 'Згадок у вибраний період немає.'),
-      ps.length > 14 ? el('p.nysh-meta', {}, `і ще ${ps.length - 14} — на сторінці місця`) : null);
+      ps.length ? list : el('p', {}, t('map.none')),
+      ps.length > 14 ? el('p.nysh-meta', {}, t('map.more', { n: ps.length - 14 })) : null);
   }
 
   // ---- фільтри ---------------------------------------------------------------
@@ -121,7 +123,7 @@ async function main() {
   function list(visible) {
     const sorted = [...visible].sort((a, b) => visiblePersons(b).length - visiblePersons(a).length || a.name.localeCompare(b.name, 'uk'));
     panel.show([
-      el('header.nysh-panel__head', {}, el('h2', {}, `Місця: ${visible.length}`)),
+      el('header.nysh-panel__head', {}, el('h2', {}, t('map.places', { n: visible.length }))),
       el('ul.nysh-placelist', {}, sorted.map((pl) => el('li', {},
         el('button' + (pl.id === state.active ? '.is-active' : ''), { type: 'button', 'data-id': pl.id, onclick: () => go(pl) },
           el('i.nysh-chip__dot', { style: `--chip:${pl.group.color}` }),
@@ -170,7 +172,9 @@ async function main() {
   }
 
   apply(true);
-  const want = places.find((pl) => pl.id === decodeURIComponent(window.location.hash.slice(1)));
+  let hash = '';
+  try { hash = decodeURIComponent(window.location.hash.slice(1)); } catch { hash = ''; }
+  const want = places.find((pl) => pl.id === hash);
   if (want) setTimeout(() => go(want), 300);
   window.addEventListener('resize', () => map.invalidateSize());
 }

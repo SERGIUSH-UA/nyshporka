@@ -891,6 +891,15 @@ def test_serve_default_asks_nothing(serve_cli) -> None:
     assert calls == [{"host": "127.0.0.1", "port": 8788, "open_browser": False}]
 
 
+def test_serve_page_site_opens_the_family_site(serve_cli) -> None:
+    """Ярлик «Сайт родини» — той самий застосунок, вкладка одразу на сайті."""
+    run, calls, _ = serve_cli
+    got = run(["--page", "site"])
+    assert got.exit_code == 0, got.output
+    assert calls == [{"host": "127.0.0.1", "port": 8788, "open_browser": False,
+                      "page": "site/"}]
+
+
 def test_serve_network_without_terminal_or_flags_is_refused(serve_cli) -> None:
     run, calls, _ = serve_cli
     got = run(["--host", LAN])

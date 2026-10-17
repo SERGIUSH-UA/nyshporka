@@ -3,7 +3,7 @@
 {% macro pcard(c, base="../persons/") -%}
 {% set cls = ".nysh-pc .nysh-pc--" ~ (c.sex | lower) ~ (" .is-hyp" if c.hyp else "") ~ (" .is-private" if c.private else "") -%}
 {% if c.id -%}
-[<span class="nysh-pc__name">{{ c.name }}</span><span class="nysh-pc__years">{{ c.years or "роки невідомі" }}</span>]({{ base }}{{ c.id }}.md){ {{ cls }} }
+[<span class="nysh-pc__name">{{ c.name }}</span><span class="nysh-pc__years">{{ c.years or t("years.unknown") }}</span>]({{ base }}{{ c.id }}.md){ {{ cls }} }
 {%- else -%}
 <span class="nysh-pc nysh-pc--u is-private"><span class="nysh-pc__name">{{ c.name }}</span></span>
 {%- endif %}
@@ -36,6 +36,16 @@
 <div class="nysh-doclist" markdown>
 {% for d in pdfs %}
 - [{{ d.caption }}]({{ d.url }}){ .nysh-doclist__pdf }
+{% endfor %}
+</div>
+{% endif %}
+{%- endmacro %}
+
+{% macro hyp_list(hypotheses, base="../hypotheses/") -%}
+{% if hypotheses %}
+<div class="nysh-plist nysh-plist--wide" markdown>
+{% for h in hypotheses %}
+[<span class="nysh-pc__name">{{ h.claim | plain | truncate(200) }}</span><span class="nysh-pc__years">{{ hyp_status[h.status] }} · {{ h.id }}</span>]({{ base }}{{ h.id }}.md){ .nysh-pc .nysh-pc--hyp .is-{{ h.status }} }
 {% endfor %}
 </div>
 {% endif %}

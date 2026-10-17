@@ -281,3 +281,52 @@ def test_the_build_folder_is_ignored_by_git(space: Path) -> None:
 def test_public_without_html_is_refused(space: Path) -> None:
     env = O.call("site.build", {"public": True, "html": False})
     assert not env.ok and "сторож" in env.error
+
+
+def _hypotheses(root: Path) -> None:
+    from nyshporka.models import Hypothesis
+    _w(root, "hypotheses", Hypothesis(
+        id="H9001", claim="Петро [[I9003]] — син Івана [[I9001]].", status="open",
+        about=["I9003", "I9001", "F9001"], basis="Сусідство в сповідці.",
+        decides="Метрика народження 1880.", updated=date(2026, 1, 1)))
+    _w(root, "hypotheses", Hypothesis(
+        id="H9002", claim="Оксана [[I9004]] — онука Івана.", status="closed",
+        about=["I9004"], verdict="Дослідник: так.", reopen_if="Інша метрика.",
+        updated=date(2026, 1, 1)))
+
+
+def test_hypotheses_get_pages_and_show_on_persons(space: Path) -> None:
+    _hypotheses(space)
+    rep = B.build(space, html=False)
+    docs = rep.out / "docs"
+    page = (docs / "hypotheses" / "H9001.md").read_text(encoding="utf-8")
+    assert "Метрика народження 1880." in page and "Відкрита" in page
+    assert "H9001.md" in (docs / "hypotheses" / "index.md").read_text(encoding="utf-8")
+    person = (docs / "persons" / "I9003.md").read_text(encoding="utf-8")
+    assert "../hypotheses/H9001.md" in person
+    assert "../hypotheses/H9001.md" in (docs / "families" / "F9001.md").read_text(encoding="utf-8")
+    assert rep.counts["hypotheses"] == 2
+
+
+def test_public_build_drops_hypotheses_about_the_hidden(space: Path) -> None:
+    _hypotheses(space)
+    rep = B.build(space, public=True, html=False)
+    docs = rep.out / "docs"
+    assert (docs / "hypotheses" / "H9001.md").is_file()
+    assert not (docs / "hypotheses" / "H9002.md").exists()
+    assert "H9002" not in (docs / "hypotheses" / "index.md").read_text(encoding="utf-8")
+    assert rep.counts["hypotheses"] == 1
+
+
+def test_wikilink_to_a_person_is_labelled_with_the_name(tmp_path: Path) -> None:
+    from nyshporka.site import hooks as H
+    docs = tmp_path / "docs"
+    (docs / "persons").mkdir(parents=True)
+    (docs / "persons" / "I9001.md").write_text("# x\n", encoding="utf-8")
+    (docs / "assets").mkdir()
+    (docs / "assets" / "search.json").write_text(
+        '[{"id": "I9001", "n": "Іван Тестовий"}]', encoding="utf-8")
+    cfg = {"docs_dir": str(docs)}
+    H.on_files([], config=cfg)
+    out = H.on_page_markdown("Син [[I9001]], брат [[I9099]].", page=None, config=cfg, files=None)
+    assert out == "Син [[I9001|Іван Тестовий]], брат *I9099*."

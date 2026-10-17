@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Any
 
 from nyshporka.site import config as CFG
+from nyshporka.site import i18n as I18N
 from nyshporka.site import public as PUB
 from nyshporka.site.render import TEMPLATES, environment
 from nyshporka.site.render import build as render_build
@@ -57,6 +58,7 @@ class SiteReport:
     leaks: list[str] = field(default_factory=list)
     html: Path | None = None
     warnings: int = 0
+    languages: list[str] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, Any]:
         return {"out": str(self.out), "public": self.public, "counts": self.counts,
@@ -64,7 +66,7 @@ class SiteReport:
                 "dropped_lines": self.dropped_lines, "overlaid": self.overlaid,
                 "ambiguous": self.ambiguous, "leaks": self.leaks, "skipped": self.skipped,
                 "html": str(self.html) if self.html else None,
-                "canon_warnings": self.warnings}
+                "canon_warnings": self.warnings, "languages": self.languages}
 
 
 def mkdocs_available() -> bool:
@@ -85,8 +87,13 @@ def _prepare_out(out: Path, force: bool) -> Path:
     if out.exists() and any(out.iterdir()) and not (out / MARK).is_file() and not force:
         raise SiteError(f"{out} не порожня й не схожа на збірку сайту — інша тека або --force")
     docs = out / "docs"
-    if docs.exists():
-        shutil.rmtree(docs)
+    # Сирці кожної мови — свої (`docs`, `docs-en`, …): прибираються всі, бо
+    # мову могли прибрати з `site.yml`, а її старі сторінки лишились би.
+    for old in [docs, *out.glob("docs-*")]:
+        if old.is_dir():
+            shutil.rmtree(old)
+    for old in out.glob("mkdocs.*.yml"):
+        old.unlink()
     docs.mkdir(parents=True)
     (out / MARK).write_text("збірка nysh site build — вміст перезаписується\n", encoding="utf-8")
     # Приватна збірка несе повне дерево живих; у git-просторі `git add .` не має
@@ -102,14 +109,16 @@ def _years(persons: list[Any]) -> tuple[int, int]:
     return (min(years) if years else today - 100, max(max(years) if years else today, today))
 
 
-def install_assets(docs: Path) -> None:
-    """Стилі, скрипти й бібліотеки сайту → `<docs>/assets` (поверх наявного)."""
+def install_assets(docs: Path, lang: str = I18N.DEFAULT) -> None:
+    """Стилі, скрипти й бібліотеки сайту → `<docs>/assets` (поверх наявного),
+    і рядки скриптів мовою збірки (`assets/js/strings.js`)."""
     shutil.copytree(ASSETS, docs / "assets", dirs_exist_ok=True)
+    (docs / "assets" / "js" / "strings.js").write_text(I18N.js_module(lang), encoding="utf-8")
 
 
 def write_pages(docs: Path, cfg: CFG.SiteConfig, rendered: Any, shown: list[Any],
                 places: list[Any], *, public: bool, templates_dirs: list[Path] | None = None,
-                pages: tuple[str, ...] = PAGES) -> dict[str, int]:
+                pages: tuple[str, ...] = PAGES, lang: str = I18N.DEFAULT) -> dict[str, int]:
     """Оглядові сторінки (головна, дерево, граф, мапа) і `assets/stats.json`.
 
     `rendered` — звіт `render.build`, `shown` — опубліковані особи. Повертає
@@ -119,13 +128,14 @@ def write_pages(docs: Path, cfg: CFG.SiteConfig, rendered: Any, shown: list[Any]
     placed = [pl for pl in places if pl.coords is not None]
     counts = {"persons": rendered.persons, "families": rendered.families,
               "places": rendered.places, "sources": rendered.sources,
+              "hypotheses": rendered.hypotheses,
               "places_with_coords": len(placed), "facts": len(facts),
               "facts_cited": sum(1 for f in facts if f.citations)}
     y_min, y_max = _years(shown)
     (docs / "assets").mkdir(parents=True, exist_ok=True)
     (docs / "assets" / "stats.json").write_text(
         json.dumps({**counts, "year_min": y_min, "year_max": y_max}), encoding="utf-8")
-    env = environment(templates_dirs or [])
+    env = environment(templates_dirs or [], lang)
     ctx = {
         "title": cfg.title, "description": cfg.description, "public": public,
         "counts": counts, "built": date.today().isoformat(),
@@ -163,10 +173,7 @@ def build(root: Path, *, public: bool = False, out: Path | None = None,
     docs = _prepare_out(out, force)
     rep = SiteReport(out=out, public=public, warnings=checked.count("WARN"))
 
-    # 1. Ресурси пакета.
-    install_assets(docs)
-
-    # 2. Хто прихований (відкрита версія) — до рендеру, бо рендер їх пропускає.
+    # 1. Хто прихований (відкрита версія) — до рендеру, бо рендер їх пропускає.
     canon = checked.canon
     persons = sorted(canon.persons.values(), key=lambda p: p.id)
     families = sorted(canon.families.values(), key=lambda f: f.id)
@@ -182,76 +189,108 @@ def build(root: Path, *, public: bool = False, out: Path | None = None,
     # Назва джерела, що називає прихованого, — не публікується саме джерело:
     # інакше рядок-заголовок вирізало б і сторінка лишилась би без назви.
     title_guard = PUB.NameGuard({}, stems)
-
-    # 3. Сторінки канону.
     templates_dirs = [root / cfg.templates] if cfg.templates else []
-    rendered = render_build(
-        root, docs_dir=docs, cfg=cfg, templates_dirs=templates_dirs,
-        hidden=hidden, drop_source_types=set(cfg.drop_source_types) if public else set(),
-        source_filter=(lambda s: title_guard.hits(s.title)) if public else None,
-        public=public)
-    rep.hidden = len(hidden)
-    rep.withheld_sources = len(rendered.withheld_sources)
-
-    # 4. Оглядові сторінки: головна, дерево, граф, мапа.
     shown = [p for p in persons if p.id not in hidden]
-    rep.counts = write_pages(docs, cfg, rendered, shown, list(canon.places.values()),
-                             public=public, templates_dirs=templates_dirs)
 
-    # 5. Власні сторінки людини — поверх згенерованого.
-    overlay = root / CFG.OVERLAY
-    if overlay.is_dir():
-        for f in sorted(overlay.rglob("*")):
-            if f.is_file():
-                rel = f.relative_to(overlay)
-                # 🔴 У відкриту версію — лише сторінки: текст у них чиститься
-                # від прихованих, а PDF, фото чи таблицю перевірити нічим.
-                if public and f.suffix.lower() != ".md":
-                    rep.skipped.append(rel.as_posix())
-                    continue
-                (docs / rel).parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(f, docs / rel)
-                rep.overlaid.append(rel.as_posix())
+    # 2. Кожна мова — окрема збірка тієї самої структури: основна в корені
+    # `html`, решта в `html/<мова>`. Перемикач у шапці веде на ту саму сторінку.
+    langs = I18N.languages(cfg.languages, cfg.language)
+    rep.languages = langs
+    configs: list[Path] = []
+    withheld: set[str] = set()
+    for i, lang in enumerate(langs):
+        ldocs = docs if i == 0 else out / f"docs-{lang}"
+        ldocs.mkdir(parents=True, exist_ok=True)
+        install_assets(ldocs, lang)
+        rendered = render_build(
+            root, docs_dir=ldocs, cfg=cfg, templates_dirs=templates_dirs,
+            hidden=hidden, drop_source_types=set(cfg.drop_source_types) if public else set(),
+            source_filter=(lambda s: title_guard.hits(s.title)) if public else None,
+            public=public, lang=lang)
+        counts = write_pages(ldocs, cfg, rendered, shown, list(canon.places.values()),
+                             public=public, templates_dirs=templates_dirs, lang=lang)
+        if i == 0:
+            rep.hidden = len(hidden)
+            rep.withheld_sources = len(rendered.withheld_sources)
+            rep.counts = counts
+            withheld = set(rendered.withheld_sources)
 
-    # 6. Відкрита версія: прибрати прихованих із тексту й подій.
-    withheld = set(rendered.withheld_sources)
-    if public:
-        aliases: dict[str, str] = {}
-        for md in sorted(docs.rglob("*.md")):
-            text = md.read_text(encoding="utf-8")
-            new, n = PUB.scrub_markdown(text, hidden, withheld, guard, aliases)
-            if new != text:
-                md.write_text(new, encoding="utf-8")
-            rep.dropped_lines += n
-        for name in ("tree.json", "graph.json"):
-            rep.dropped_lines += PUB.scrub_events(docs / "assets" / name, hidden | withheld, guard)
-        for name in ("tree.full.json", "graph.full.json"):
-            (docs / "assets" / name).unlink(missing_ok=True)
+        # Власні сторінки людини — поверх згенерованого, у кожну мову як є.
+        overlay = root / CFG.OVERLAY
+        if overlay.is_dir():
+            for f in sorted(overlay.rglob("*")):
+                if f.is_file():
+                    rel = f.relative_to(overlay)
+                    # 🔴 У відкриту версію — лише сторінки: текст у них чиститься
+                    # від прихованих, а PDF, фото чи таблицю перевірити нічим.
+                    if public and f.suffix.lower() != ".md":
+                        if i == 0:
+                            rep.skipped.append(rel.as_posix())
+                        continue
+                    (ldocs / rel).parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(f, ldocs / rel)
+                    if i == 0:
+                        rep.overlaid.append(rel.as_posix())
 
-    # 7. Конфіг MkDocs.
-    tpl = environment([]).get_template("mkdocs.yml.j2")
-    (out / "mkdocs.yml").write_text(tpl.render(
-        title=cfg.title, description=cfg.description, language=cfg.language,
-        search_langs=cfg.search_langs, hooks_path=str(HOOKS),
-        extra_css=cfg.extra_css, nav_before=cfg.nav_before, nav_after=cfg.nav_after),
-        encoding="utf-8")
+        # Відкрита версія: прибрати прихованих із тексту й подій.
+        if public:
+            aliases: dict[str, str] = {}
+            for md in sorted(ldocs.rglob("*.md")):
+                text = md.read_text(encoding="utf-8")
+                new, n = PUB.scrub_markdown(text, hidden, withheld, guard, aliases)
+                if new != text:
+                    md.write_text(new, encoding="utf-8")
+                if i == 0:
+                    rep.dropped_lines += n
+            for name in ("tree.json", "graph.json"):
+                n = PUB.scrub_events(ldocs / "assets" / name, hidden | withheld, guard)
+                if i == 0:
+                    rep.dropped_lines += n
+            for name in ("tree.full.json", "graph.full.json"):
+                (ldocs / "assets" / name).unlink(missing_ok=True)
+
+        # Конфіг MkDocs цієї мови.
+        tpl = environment([], lang).get_template("mkdocs.yml.j2")
+        cfg_path = out / ("mkdocs.yml" if i == 0 else f"mkdocs.{lang}.yml")
+        cfg_path.write_text(tpl.render(
+            title=cfg.title, description=cfg.description, language=lang,
+            search_langs=cfg.search_langs, hooks_path=str(HOOKS),
+            extra_css=cfg.extra_css, nav_before=cfg.nav_before, nav_after=cfg.nav_after,
+            docs_dir=ldocs.name, site_dir="html" if i == 0 else f"html/{lang}",
+            alternate=_alternate(langs, lang)), encoding="utf-8")
+        configs.append(cfg_path)
     if not html:
         return rep
 
-    # 8. HTML і сторож.
+    # 3. HTML (основна мова першою: `--clean` у корені стер би решту) і сторож.
     site = out / "html"
-    run = subprocess.run([sys.executable, "-m", "mkdocs", "build", "--clean", "-q",
-                          "-f", str(out / "mkdocs.yml")],
-                         capture_output=True, text=True, encoding="utf-8", errors="replace")
-    if run.returncode != 0:
-        raise SiteError("mkdocs build не зібрав сайт:\n" + (run.stderr or run.stdout)[-2000:])
+    for cfg_path in configs:
+        run = subprocess.run([sys.executable, "-m", "mkdocs", "build", "--clean", "-q",
+                              "-f", str(cfg_path)],
+                             capture_output=True, text=True, encoding="utf-8", errors="replace")
+        if run.returncode != 0:
+            raise SiteError("mkdocs build не зібрав сайт:\n" + (run.stderr or run.stdout)[-2000:])
     rep.html = site
     if public:
+        # Сторож іде по ВСІХ мовах одразу: `html/<мова>` лежить усередині.
         rep.leaks = PUB.guard_site(site, hidden, withheld, guard)
         if rep.leaks:
             shutil.rmtree(site)
             rep.html = None
     return rep
+
+
+def _alternate(langs: list[str], current: str) -> list[dict[str, str]]:
+    """Посилання перемикача мов відносно кореня поточної збірки."""
+    main = langs[0]
+    out = []
+    for lang in langs:
+        if current == main:
+            link = "./" if lang == main else f"{lang}/"
+        else:
+            link = "./" if lang == current else ("../" if lang == main else f"../{lang}/")
+        out.append({"name": I18N.NAMES[lang], "link": link, "lang": lang})
+    return out
 
 
 __all__ = ["PAGES", "TEMPLATES", "SiteError", "SiteReport", "build", "default_out",

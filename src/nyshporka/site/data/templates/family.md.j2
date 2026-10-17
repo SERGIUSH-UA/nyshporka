@@ -1,24 +1,24 @@
-{% from "_macros.j2" import pcard, kin_group, gallery %}
+{% from "_macros.j2" import pcard, kin_group, gallery, hyp_list %}
 {% set _h = card(family.husband) if family.husband else None %}
 {% set _w = card(family.wife) if family.wife else None %}
 ---
-title: Родина {{ family.id }}
+title: {{ t("family.of", id=family.id) | q }}
 ---
 
 <div class="nysh-hero nysh-hero--family" markdown>
 <div class="nysh-hero__text" markdown>
 
-# {% if _h and _w %}{{ _h.name }} і {{ _w.name }}{% elif _h or _w %}Родина: {{ (_h or _w).name }}{% else %}Родина {{ family.id }}{% endif %}
+# {% if _h and _w %}{{ t("family.and", a=_h.name, b=_w.name) }}{% elif _h or _w %}{{ t("family.one", a=(_h or _w).name) }}{% else %}{{ t("family.of", id=family.id) }}{% endif %}
 
-<p class="nysh-hero__years">Родина · {{ family.children | length }} {{ "дитина" if family.children | length == 1 else "дітей" }}</p>
+<p class="nysh-hero__years">{{ t("family.children.one" if family.children | length == 1 else "family.children.many", n=family.children | length) }}</p>
 </div>
 </div>
 
 <div class="nysh-kin" markdown>
-{{ kin_group("Подружжя", [_h, _w] | select | list) }}
+{{ kin_group(t("kin.couple"), [_h, _w] | select | list) }}
 {% if family.children %}
 <div class="nysh-kin__group" markdown>
-<div class="nysh-kin__label">Діти</div>
+<div class="nysh-kin__label">{{ t("kin.children") }}</div>
 <div class="nysh-kin__cards" markdown>
 {% for cid in family.children %}
 {{ pcard(card(cid)) }}
@@ -29,9 +29,9 @@ title: Родина {{ family.id }}
 </div>
 
 {% if family.hypothetical_husband or family.hypothetical_wife or family.hypothetical_children %}
-## Гіпотетичні члени
+## {{ t("h.hyp_members") }} { #hypothetical }
 
-<p class="nysh-note">Не верифіковано джерелом: зв'язок виведено непрямо.</p>
+<p class="nysh-note">{{ t("hyp_members.why") }}</p>
 
 <div class="nysh-kin nysh-kin--hyp" markdown>
 <div class="nysh-kin__group" markdown>
@@ -47,14 +47,20 @@ title: Родина {{ family.id }}
 </div>
 {% endif %}
 
+{% if hypotheses %}
+## {{ t("h.hypotheses") }} { #hypotheses }
+
+{{ hyp_list(hypotheses) }}
+{% endif %}
+
 {% if family.facts %}
-## Події
+## {{ t("h.events") }} { #events }
 
 <ol class="nysh-life">
 {% for f in family.facts %}
 <li class="nysh-life__item nysh-life__item--{{ f.type }}" markdown="1">
-<span class="nysh-life__date">{{ f.date | format_date if f.date else "без дати" }}</span>
-<span class="nysh-life__what" markdown="span">**{{ f.type | fact_label }}**{% if f.place_id and f.place_id in place_names %} · [{{ place_names[f.place_id] }}](../places/{{ f.place_id }}.md){% endif %}{{ cite_marks(f) }}</span>
+<span class="nysh-life__date">{{ f.date | format_date if f.date else t("undated") }}</span>
+<span class="nysh-life__what" markdown="span">**{{ f.type | fact_label }}**{% if f.place_id and f.place_id in place_names %} · [{{ place_names[f.place_id] }}](../places/{{ f.place_id }}.md){% endif %}{{ cite_marks(f) }}{% if f.hypothesis and f.hypothesis in hyp_ids %} · [{{ t("hyp.word") }} {{ f.hypothesis }}](../hypotheses/{{ f.hypothesis }}.md){% endif %}</span>
 {% if f.value %}
 
 {{ f.value }}
@@ -65,18 +71,18 @@ title: Родина {{ family.id }}
 {% endif %}
 
 {% if documents %}
-## Документи
+## {{ t("documents") }} { #documents }
 
 {{ gallery(documents) }}
 {% endif %}
 
 {% if family.notes %}
-## Нотатки
+## {{ t("notes") }} { #notes }
 
 {{ family.notes }}
 {% endif %}
 
-<p class="nysh-meta">ID <code>{{ family.id }}</code>{% if family.aliases %} · інші ID: {{ family.aliases | join(", ") }}{% endif %}</p>
+<p class="nysh-meta">ID <code>{{ family.id }}</code>{% if family.aliases %} · {{ t("other.ids") }}: {{ family.aliases | join(", ") }}{% endif %}</p>
 
 {% for s in all_sources %}
 [^{{ s.id }}]: {{ s.title if s.withheld else "[" ~ s.title ~ "](../sources/" ~ s.id ~ ".md)" }}

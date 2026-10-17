@@ -702,3 +702,35 @@ details.more-filters > summary { cursor: pointer; color: var(--fg-3); font-size:
 /* ── Пошук: журнал «де й чим шукали» ───────────────────────────────────── */
 .search-ledger ul.search-channels { margin: .3rem 0 0; padding-left: 1.1rem; }
 .search-ledger ul.search-channels li { margin: .15rem 0; }
+
+/* «Де» на пошуку: кнопка вибору замість текстового поля, перелік — панеллю. */
+.scope-pick { display: flex; gap: .35rem; align-items: center; min-width: 0; }
+#view .scope-btn {
+  flex: 1; min-width: 0; display: flex; align-items: center; justify-content: space-between;
+  gap: .5rem; text-align: left; border-radius: var(--r-m); background: var(--s-2);
+}
+.scope-btn__label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#view .scope-clear { padding: .3rem .65rem; }
+.scope-panel {
+  margin: .4rem 0 1rem; padding: .8rem; border: 1px solid var(--line-2); border-radius: var(--r-m);
+  background: var(--s-2); max-height: min(60vh, 32rem); overflow-y: auto;
+}
+.scope-panel .row input[type=search] { flex: 1; min-width: 12rem; }
+.scope-panel h4 { margin: .8rem 0 .4rem; }
+.scope-chips { display: flex; flex-wrap: wrap; gap: .35rem; }
+.scope-cases { list-style: none; margin: 0; padding: 0; display: grid; gap: .3rem; }
+#view .scope-cases button {
+  width: 100%; display: grid; grid-template-columns: minmax(8rem, auto) 1fr; gap: .1rem .8rem;
+  text-align: left; border-radius: var(--r-m); background: var(--s-1, var(--s-3));
+}
+.scope-cases button .muted { grid-column: 2; font-size: .85em; }
+@media (max-width: 640px) {
+  #view .scope-cases button { grid-template-columns: 1fr; }
+  .scope-cases button .muted { grid-column: 1; }
+}
+
+/* «Сайт родини»: дві версії поруч, на телефоні — одна під одною. */
+.site-cards { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(min(100%, 20rem), 1fr)); }
+.site-card h3 { margin-top: 0; }
+.site-card .row { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
+.site-card .mono { word-break: break-all; }

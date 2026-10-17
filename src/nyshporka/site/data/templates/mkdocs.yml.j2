@@ -1,11 +1,11 @@
 # Згенеровано `nysh site build` — правки тут перетре наступна збірка.
-# Назву, пороги приватності, групи місць і власні сторінки задає
+# Назву, пороги приватності, групи місць, мови й власні сторінки задає
 # data/site/site.yml; власні сторінки лежать у data/site/overlay/.
 site_name: {{ title | tojson }}
 site_description: {{ description | tojson }}
 use_directory_urls: false
-docs_dir: docs
-site_dir: html
+docs_dir: {{ docs_dir | tojson }}
+site_dir: {{ site_dir | tojson }}
 
 theme:
   name: material
@@ -25,17 +25,27 @@ theme:
       accent: custom
       toggle:
         icon: material/weather-night
-        name: Темна тема
     - media: "(prefers-color-scheme: dark)"
       scheme: slate
       primary: custom
       accent: custom
       toggle:
         icon: material/weather-sunny
-        name: Світла тема
   font: false
   icon:
     logo: material/family-tree
+
+{% if alternate | length > 1 %}
+# Перемикач мов: кожна мова — окрема збірка тієї самої структури, тож
+# `assets/js/site.js` веде на ту саму сторінку іншою мовою.
+extra:
+  alternate:
+{% for alt in alternate %}
+    - name: {{ alt.name | tojson }}
+      link: {{ alt.link | tojson }}
+      lang: {{ alt.lang }}
+{% endfor %}
+{% endif %}
 
 markdown_extensions:
   - admonition
@@ -66,22 +76,24 @@ extra_css:
 {% endfor %}
 
 extra_javascript:
-  - assets/js/site.js
+  - path: assets/js/site.js
+    type: module
 
 nav:
-  - Головна: index.md
+  - {{ t("nav.home") | tojson }}: index.md
 {% for item in nav_before %}
   - {{ item.title | tojson }}: {{ item.path | tojson }}
 {% endfor %}
-  - Дерево: family-tree.md
-  - Особи:
+  - {{ t("nav.tree") | tojson }}: family-tree.md
+  - {{ t("nav.persons") | tojson }}:
       - persons/index.md
-      - Родини: families/index.md
-      - Граф зв'язків: family-graph.md
-  - Місця:
+      - {{ t("nav.families") | tojson }}: families/index.md
+      - {{ t("nav.hypotheses") | tojson }}: hypotheses/index.md
+      - {{ t("nav.graph") | tojson }}: family-graph.md
+  - {{ t("nav.places") | tojson }}:
       - places/index.md
-      - Мапа: places-map.md
-  - Джерела: sources/index.md
+      - {{ t("nav.map") | tojson }}: places-map.md
+  - {{ t("nav.sources") | tojson }}: sources/index.md
 {% for item in nav_after %}
   - {{ item.title | tojson }}: {{ item.path | tojson }}
 {% endfor %}

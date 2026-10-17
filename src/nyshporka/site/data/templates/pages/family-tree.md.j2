@@ -1,5 +1,5 @@
 ---
-title: Дерево
+title: {{ t("nav.tree") | q }}
 hide:
   - navigation
   - toc
@@ -8,44 +8,44 @@ hide:
 <div id="nysh-tree" class="nysh-tree nysh-app" data-tree-url="assets/tree.json" data-index-url="assets/search.json">
 <div class="nysh-tree__bar nysh-app__bar">
 <div class="nysh-search nysh-search--compact">
-<input type="search" class="nysh-search__input" placeholder="Знайти особу…" aria-label="Знайти особу в дереві" autocomplete="off" spellcheck="false">
+<input type="search" class="nysh-search__input" placeholder="{{ t('tree.find') }}" aria-label="{{ t('tree.find.aria') }}" autocomplete="off" spellcheck="false">
 <ul class="nysh-search__list" role="listbox" hidden></ul>
 </div>
-<div class="nysh-tree__tools" role="toolbar" aria-label="Дерево">
-<div class="nysh-stepper" title="Поколінь предків">
-<button type="button" data-act="up-" aria-label="Менше поколінь предків">−</button>
+<div class="nysh-tree__tools" role="toolbar" aria-label="{{ t('tree.toolbar') }}">
+<div class="nysh-stepper" title="{{ t('tree.up') }}">
+<button type="button" data-act="up-" aria-label="{{ t('tree.up.less') }}">−</button>
 <span><span class="nysh-stepper__ico" aria-hidden="true">▲</span><b data-out="up">3</b></span>
-<button type="button" data-act="up+" aria-label="Більше поколінь предків">+</button>
+<button type="button" data-act="up+" aria-label="{{ t('tree.up.more') }}">+</button>
 </div>
-<div class="nysh-stepper" title="Поколінь нащадків">
-<button type="button" data-act="down-" aria-label="Менше поколінь нащадків">−</button>
+<div class="nysh-stepper" title="{{ t('tree.down') }}">
+<button type="button" data-act="down-" aria-label="{{ t('tree.down.less') }}">−</button>
 <span><span class="nysh-stepper__ico" aria-hidden="true">▼</span><b data-out="down">2</b></span>
-<button type="button" data-act="down+" aria-label="Більше поколінь нащадків">+</button>
+<button type="button" data-act="down+" aria-label="{{ t('tree.down.more') }}">+</button>
 </div>
-<button type="button" class="nysh-tool" data-act="root" title="До найдавнішого предка">До кореня</button>
-<button type="button" class="nysh-tool" data-act="fit" title="Показати все" aria-label="Показати все">⤢</button>
+<button type="button" class="nysh-tool" data-act="root" title="{{ t('tree.root.title') }}">{{ t("tree.root") }}</button>
+<button type="button" class="nysh-tool" data-act="fit" title="{{ t('tree.fit') }}" aria-label="{{ t('tree.fit') }}">⤢</button>
 </div>
 </div>
 <div class="nysh-tree__body nysh-app__body">
 <div class="nysh-tree__canvas">
-<svg class="nysh-tree__svg" role="img" aria-label="Дерево роду"></svg>
+<svg class="nysh-tree__svg" role="img" aria-label="{{ t('tree.aria') }}"></svg>
 <div class="nysh-tree__zoom">
-<button type="button" data-act="zoom+" aria-label="Наблизити">+</button>
-<button type="button" data-act="zoom-" aria-label="Віддалити">−</button>
+<button type="button" data-act="zoom+" aria-label="{{ t('tree.zoom.in') }}">+</button>
+<button type="button" data-act="zoom-" aria-label="{{ t('tree.zoom.out') }}">−</button>
 </div>
-<div class="nysh-tree__status">Завантаження…</div>
+<div class="nysh-tree__status">{{ t("loading") }}</div>
 </div>
 <aside class="nysh-panel" data-state="closed" aria-live="polite">
-<button type="button" class="nysh-panel__grip" aria-label="Розгорнути або згорнути деталі"><span></span></button>
+<button type="button" class="nysh-panel__grip" aria-label="{{ t('tree.details') }}"><span></span></button>
 <div class="nysh-panel__body"></div>
 </aside>
 </div>
 <div class="nysh-tree__legend">
-<span><i class="lg lg--m"></i>чоловік</span>
-<span><i class="lg lg--f"></i>жінка</span>
-<span><i class="lg lg--hyp"></i>гіпотеза</span>
-<span><i class="lg lg--ref"></i>вже є в дереві</span>
-<span>Торкніться картки — деталі; ще раз — зробити центром.</span>
+<span><i class="lg lg--m"></i>{{ t("tree.legend.m") }}</span>
+<span><i class="lg lg--f"></i>{{ t("tree.legend.f") }}</span>
+<span><i class="lg lg--hyp"></i>{{ t("tree.legend.hyp") }}</span>
+<span><i class="lg lg--ref"></i>{{ t("tree.legend.ref") }}</span>
+<span>{{ t("tree.legend.hint") }}</span>
 </div>
 </div>
 

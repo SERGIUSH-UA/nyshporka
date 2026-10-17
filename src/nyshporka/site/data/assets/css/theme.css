@@ -266,9 +266,9 @@ body { background: var(--nysh-bg); }
 .md-typeset .nysh-life__item.is-hypothesis::before, .md-typeset .nysh-life__item.is-disputed::before { border-style: dashed !important; }
 .md-typeset .nysh-life__date { display: block; font: 600 0.72rem var(--nysh-sans); color: var(--nysh-muted); }
 .md-typeset .nysh-life__what { display: block; }
+.md-typeset .nysh-life__flag { font-size: 0.72rem; color: var(--nysh-hyp); }
+.md-typeset .nysh-life__flag.is-disputed { color: var(--nysh-accent); }
 .md-typeset .nysh-life__item > p { margin: 0.3rem 0 0; color: var(--nysh-ink-2); font-size: 0.78rem; }
-.md-typeset .nysh-life__item.is-hypothesis .nysh-life__what::after { content: ' · гіпотеза'; color: var(--nysh-hyp); font-size: 0.72rem; }
-.md-typeset .nysh-life__item.is-disputed .nysh-life__what::after { content: ' · суперечливо'; color: var(--nysh-accent); font-size: 0.72rem; }
 
 /* ───── Імена, документи ───── */
 .md-typeset ul.nysh-names { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 0.4rem; }
@@ -408,7 +408,7 @@ body { background: var(--nysh-bg); }
   .nysh-panel__grip::before { content: '×'; font: 1.3rem/1 var(--nysh-sans); color: var(--nysh-muted); }
   .nysh-panel__grip:hover { background: var(--nysh-surface-2); }
   .nysh-panel__body { padding: 1.2rem 1.2rem 1.4rem; }
-  .nysh-panel__head h2 { padding-right: 2rem; }
+  .nysh-panel__head h2, .md-typeset .nysh-panel__head h2 { padding-right: 2.2rem; }
 }
 
 /* ───── Головна ───── */
@@ -480,3 +480,31 @@ body { background: var(--nysh-bg); }
   .nysh-filter, .nysh-jumpbar, .nysh-hero__actions, .nysh-panel { display: none !important; }
   .md-typeset .nysh-hero { box-shadow: none; }
 }
+
+/* ───── Гіпотези ───── */
+.md-typeset .nysh-lead { font-family: var(--nysh-serif); font-size: 1.05rem; color: var(--nysh-ink-2); margin: 0 0 1rem; }
+.md-typeset .nysh-hero--hyp { border-top-color: var(--nysh-hyp); }
+.md-typeset .nysh-hero--closed { border-top-color: var(--nysh-ok); }
+.md-typeset .nysh-hero--hyp h1 { font-size: 1.45rem; line-height: 1.3; }
+@media (min-width: 45em) { .md-typeset .nysh-hero--hyp h1 { font-size: 1.75rem; } }
+.md-typeset .nysh-hero__kicker { margin: 0 0 0.6rem; font: 0.72rem var(--nysh-sans); color: var(--nysh-muted); }
+.nysh-badge--st-open { background: var(--nysh-hyp-soft); color: var(--nysh-hyp); }
+.nysh-badge--st-awaiting { background: var(--nysh-accent-soft); color: var(--nysh-accent); }
+.nysh-badge--st-closed { background: rgba(79, 127, 69, 0.12); color: var(--nysh-ok); }
+.md-typeset a.nysh-badge { text-decoration: none; }
+.md-typeset .nysh-pc--hyp { border-left-color: var(--nysh-hyp); }
+.md-typeset .nysh-pc--hyp.is-awaiting { border-left-color: var(--nysh-accent); }
+.md-typeset .nysh-pc--hyp.is-closed { border-left-color: var(--nysh-ok); }
+.md-typeset .nysh-pc--hyp.is-closed .nysh-pc__name { font-weight: 500; color: var(--nysh-ink-2); }
+.md-typeset a.nysh-pc--hyp:hover { border-left-color: var(--nysh-hyp); }
+.md-typeset .nysh-pc--hyp .nysh-pc__name { font-weight: 500; line-height: 1.4; }
+.md-typeset .nysh-hits { display: grid; gap: 0.5rem; }
+.md-typeset .nysh-hit {
+  display: flex; flex-direction: column; gap: 0.2rem; padding: 0.6rem 0.8rem; border-radius: 10px;
+  background: var(--nysh-surface); border: 1px solid var(--nysh-line); border-left: 4px solid var(--nysh-line-2);
+}
+.md-typeset .nysh-hit--strong { border-left-color: var(--nysh-accent); }
+.nysh-hit__reading { font: 600 0.88rem var(--nysh-serif); }
+.nysh-hit__where { font: 0.7rem var(--nysh-mono); color: var(--nysh-muted); word-break: break-all; }
+.md-typeset .nysh-tile--hyp { background: linear-gradient(135deg, var(--nysh-hyp-soft), var(--nysh-surface) 60%); }
+.md-typeset .nysh-panel__hyp, .nysh-panel__hyp { margin: 0.9rem 0 0; font: 600 0.75rem var(--nysh-sans); }

@@ -1,0 +1,89 @@
+{% from "_macros.j2" import kin_group %}
+---
+title: {{ t("hyp.title", id=h.id) | q }}
+---
+
+<div class="nysh-hero nysh-hero--hyp nysh-hero--{{ h.status }}" markdown>
+<div class="nysh-hero__text" markdown>
+
+<p class="nysh-hero__kicker"><span class="nysh-badge nysh-badge--st-{{ h.status }}">{{ status_label }}</span> {{ t("hyp.title", id=h.id) }} · {{ t("hyp.updated", d=h.updated) }}</p>
+
+# {{ h.claim | plain }}
+
+</div>
+</div>
+
+{% if h.status == "closed" and h.verdict %}
+!!! success {{ t("hyp.verdict") | q }}
+    {{ h.verdict | indent(4) }}
+{% if h.reopen_if %}
+
+    **{{ t("hyp.reopen") }}** {{ h.reopen_if | indent(4) }}
+{% endif %}
+{% endif %}
+
+{% if about.persons or about.families or about.places %}
+## {{ t("hyp.about") }} { #about }
+
+<div class="nysh-kin" markdown>
+{{ kin_group(t("hyp.persons"), about.persons) }}
+{% if about.families or about.places %}
+<div class="nysh-kin__group" markdown>
+<div class="nysh-kin__cards" markdown>
+{% for f in about.families %}
+[<span class="nysh-pc__name">{{ f.name }}</span><span class="nysh-pc__years">{{ t("family.link") }}</span>](../families/{{ f.id }}.md){ .nysh-pc .nysh-pc--fam }
+{% endfor %}
+{% for pl in about.places %}
+[<span class="nysh-pc__name">{{ pl.name }}</span><span class="nysh-pc__years">{{ t("place.word") }}</span>](../places/{{ pl.id }}.md){ .nysh-pc .nysh-pc--place }
+{% endfor %}
+</div>
+</div>
+{% endif %}
+</div>
+{% endif %}
+
+{% if h.basis %}
+## {{ t("hyp.basis") }} { #basis }
+
+{{ h.basis }}{% for s in all_sources %}[^{{ s.id }}]{% endfor %}
+
+{% endif %}
+{% if h.decides and h.status != "closed" %}
+## {{ t("hyp.decides") }} { #decides }
+
+{{ h.decides }}
+
+{% endif %}
+{% if h.hits %}
+## {{ t("hyp.hits") }} { #hits }
+
+<div class="nysh-hits">
+{% for hit in h.hits %}
+<div class="nysh-hit nysh-hit--{{ hit.strength }}">
+<span class="nysh-hit__reading">{{ hit.reading }}</span>
+<span class="nysh-hit__where">{{ hit.case }} · {{ t("hyp.frame", s=hit.scan) }}{% if hit.line %} · {{ t("hyp.line", n=hit.line) }}{% endif %}</span>
+<span class="nysh-hit__tags"><span class="nysh-badge">{{ t("hyp.strong") if hit.strength == "strong" else t("hyp.weak") }}</span>{% if hit.eye %}<span class="nysh-badge">{{ t("hyp.eye") }}</span>{% endif %}</span>
+</div>
+{% endfor %}
+</div>
+
+{% endif %}
+{% if versus %}
+## {{ t("hyp.versus") }} { #versus }
+
+{% for v in versus %}
+- [{{ v }}]({{ v }}.md)
+{% endfor %}
+
+{% endif %}
+{% if h.notes %}
+## {{ t("hyp.notes") }} { #notes }
+
+{{ h.notes }}
+
+{% endif %}
+<p class="nysh-meta"><a href="index.html">{{ t("hyp.all") }}</a></p>
+
+{% for s in all_sources %}
+[^{{ s.id }}]: {{ s.title if s.withheld else "[" ~ s.title ~ "](../sources/" ~ s.id ~ ".md)" }}
+{% endfor %}

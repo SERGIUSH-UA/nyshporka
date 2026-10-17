@@ -805,7 +805,14 @@ def stale_count(runs: list[str], conn: sqlite3.Connection | None = None) -> int:
     finally:
         if own:
             c.close()
-    return sum(1 for r in runs if not stamp_of(r) or known.get(r) != stamp_of(r))
+    # Штамп — один раз на прогін: це `stat` на теку й мету, а прогонів у
+    # простору буває 12 тис. (два виклики коштували 7 с на кожне «Огляду»).
+    stale = 0
+    for r in runs:
+        st = stamp_of(r)
+        if not st or known.get(r) != st:
+            stale += 1
+    return stale
 
 
 def stats() -> dict[str, Any]:

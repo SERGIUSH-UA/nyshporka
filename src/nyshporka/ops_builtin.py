@@ -166,7 +166,97 @@ def home_pulse(a: PulseArgs) -> Envelope:
     рахується й не приходить порожньою: нуль прочитаних сторінок у просторі, де
     читання вимкнено, — це не «нічого не прочитано», а «питання не стояло», і
     дашборд не має права видавати одне за інше.
+
+    🔴 Останній зріз — одразу, свіжий — у фоні. Холодний зріз великого
+    простору — це 82 тис. `stat` і 1 859 прочитаних файлів прогонів, 10 с
+    (замір 17.10.2026, простір із 12 803 прогонами), і стільки ж після кожного перезапуску
+    консолі. Тепер відповідь — останній знімок (з пам'яті, а після
+    перезапуску — з диска) з `refreshing: true`, і головна сама перепитує,
+    доки не прийде свіжий. Перший зріз на новій машині рахується чесно.
     """
+    import time
+
+    if not PULSE_SNAPSHOT:
+        return _pulse_compute(a)
+    key = a.model_dump_json()
+    now = time.monotonic()
+    hit = _PULSE_MEM.get(key)
+    if hit is None:
+        snap = _pulse_from_disk(key)
+        if snap is not None:
+            hit = _PULSE_MEM[key] = (now - _PULSE_TTL, snap)
+    if hit is not None:
+        at, env = hit
+        stale = now - at >= _PULSE_TTL
+        if stale:
+            _in_background("pulse", lambda: _pulse_now(a, key))
+        busy = stale or "pulse" in _REFRESHING
+        if isinstance(env.data, dict):
+            env.data["refreshing"] = busy
+        return env
+    return _pulse_now(a, key)
+
+
+#: Знімок головної вмикає лише жива консоль (`daemon.serve`): тестам і
+#: разовим викликам потрібен свіжий зріз щоразу.
+PULSE_SNAPSHOT = False
+#: Скільки секунд зріз головної вважається свіжим.
+_PULSE_TTL = 15.0
+_PULSE_MEM: dict[str, tuple[float, Envelope]] = {}
+
+
+def _pulse_file() -> Path:
+    from nyshporka.core.workspace import workspace
+
+    return workspace().root / "data" / "derived" / "home_pulse.json"
+
+
+def _pulse_from_disk(key: str) -> Envelope | None:
+    """Останній зріз із диска — тієї самої версії й з тими самими аргументами."""
+    import json
+
+    from nyshporka import __version__
+
+    try:
+        got = json.loads(_pulse_file().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(got, dict) or got.get("version") != __version__ or got.get("key") != key:
+        return None
+    raw = got.get("env") or {}
+    if not raw.get("ok") or not isinstance(raw.get("data"), dict):
+        return None
+    env = ok(raw["data"])
+    for w in raw.get("warnings") or []:
+        env.warn(str(w.get("code", "")), str(w.get("text", "")), str(w.get("level", "")))
+    for n in raw.get("next") or []:
+        env.suggest(str(n.get("op", "")), str(n.get("why", "")), str(n.get("level", "")),
+                    n.get("args"))
+    return env
+
+
+def _pulse_now(a: PulseArgs, key: str) -> Envelope:
+    """Порахувати зріз наново, покласти в пам'ять і на диск."""
+    import json
+    import time
+
+    from nyshporka import __version__
+
+    env = _pulse_compute(a)
+    if env.ok:
+        if isinstance(env.data, dict):
+            env.data["refreshing"] = False
+        _PULSE_MEM[key] = (time.monotonic(), env)
+        with contextlib.suppress(OSError, TypeError, ValueError):
+            f = _pulse_file()
+            f.parent.mkdir(parents=True, exist_ok=True)
+            f.write_text(json.dumps({"version": __version__, "key": key, "env": env.as_dict()},
+                                    ensure_ascii=False, default=str), encoding="utf-8")
+    return env
+
+
+def _pulse_compute(a: PulseArgs) -> Envelope:
+    """Сам зріз головної — без кешу (його кладе `_pulse_now`)."""
     from nyshporka.core import history, pulse
     from nyshporka.core.workspace import WorkspaceError, workspace
 
@@ -363,21 +453,92 @@ def _pulse_agent(root: Path) -> dict[str, Any]:
 #: змінюється вона від встановлення драйвера, не щохвилини.
 _MACHINE_TTL = 300.0
 _MACHINE: dict[str, Any] = {"at": 0.0, "data": None}
+#: Перевірка з диска старіша за це — не показується й рахується наново.
+_MACHINE_DISK_MAX = 7 * 24 * 3600.0
+_REFRESHING: set[str] = set()
+_REFRESH_LOCK = threading.Lock()
+
+
+def _in_background(key: str, fn: Any) -> None:
+    """Перерахувати у фоні, один раз на ключ: друга вкладка не запускає другого."""
+    with _REFRESH_LOCK:
+        if key in _REFRESHING:
+            return
+        _REFRESHING.add(key)
+
+    def run() -> None:
+        try:
+            fn()
+        except Exception:  # фон: наступне відкриття спробує знову
+            pass
+        finally:
+            with _REFRESH_LOCK:
+                _REFRESHING.discard(key)
+
+    threading.Thread(target=run, name=f"nysh-refresh-{key}", daemon=True).start()
+
+
+def _machine_file() -> Path:
+    from nyshporka.core.workspace import workspace
+
+    return workspace().root / "data" / "derived" / "home_machine.json"
 
 
 def _pulse_machine() -> dict[str, Any]:
     """Чи ця машина готова читати рукопис — коротко, для кроку чекліста.
 
-    ⚠ Кеш на процес, а не на запит. `doctor.run()` перевіряє наявність карти
-    (тобто імпортує torch), місце на диску й хмарну синхронізацію теки; на
-    холодному старті це секунди. Крок чекліста мусить бути дешевим, інакше він
-    коштуватиме рівно там, де його ніхто не просив.
+    🔴 Останнє відоме — одразу, свіже — у фоні. `doctor.run()` питає
+    інтерпретатор рушіїв десятком окремих процесів (~1 с кожен): на просторі
+    з рушіями це 14 с на кожне відкриття «Огляду» після старту консолі й
+    щоп'ять хвилин (замір 17.10.2026). Відповідь змінюється від встановлення
+    драйвера чи рушія, тож показати перевірку п'ятихвилинної давності й тихо
+    оновити — чесно, а чекати її — ні. Результат лягає й на диск: перезапуск
+    консолі теж не платить знову.
     """
     import time
 
     now = time.monotonic()
-    if _MACHINE["data"] is not None and now - _MACHINE["at"] < _MACHINE_TTL:
+    if _MACHINE["data"] is not None:
+        if now - _MACHINE["at"] < _MACHINE_TTL:
+            return cast("dict[str, Any]", _MACHINE["data"])
+        # Поза живою консоллю (CLI, тести) — як було: застаріле рахується наново.
+        if not PULSE_SNAPSHOT:
+            return _check_machine()
+        _in_background("machine", _check_machine)
         return cast("dict[str, Any]", _MACHINE["data"])
+    disk = _machine_from_disk() if PULSE_SNAPSHOT else None
+    if disk is not None:
+        _MACHINE.update(at=now - _MACHINE_TTL, data=disk)
+        _in_background("machine", _check_machine)
+        return disk
+    return _check_machine()
+
+
+def _machine_from_disk() -> dict[str, Any] | None:
+    import json
+    import time
+
+    from nyshporka import __version__
+
+    try:
+        got = json.loads(_machine_file().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if (not isinstance(got, dict) or got.get("version") != __version__
+            or time.time() - float(got.get("at") or 0) > _MACHINE_DISK_MAX):
+        return None
+    data = got.get("data")
+    return data if isinstance(data, dict) else None
+
+
+def _check_machine() -> dict[str, Any]:
+    """Сама перевірка машини — те, що кешують `_pulse_machine` і диск."""
+    import json
+    import time
+
+    from nyshporka import __version__
+
+    now = time.monotonic()
     try:
         from nyshporka.setup.doctor import run
 
@@ -396,6 +557,13 @@ def _pulse_machine() -> dict[str, Any]:
     out = {"ok": True, "level": worst, "ready": worst != "fail",
            "bad": [c.name for c in checks if c.level == "fail"]}
     _MACHINE.update(at=now, data=out)
+    if not PULSE_SNAPSHOT:
+        return out
+    with contextlib.suppress(OSError):
+        f = _machine_file()
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text(json.dumps({"version": __version__, "at": time.time(), "data": out},
+                                ensure_ascii=False), encoding="utf-8")
     return out
 
 
@@ -456,7 +624,40 @@ def _last_runs(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
              "updated": r.get("updated")} for r in last]
 
 
+#: Стан індексу для «Огляду»: останній порахований і коли.
+_SEARCH_PULSE: dict[str, Any] = {"at": 0.0, "data": None}
+#: Скільки секунд показувати порахований стан індексу без перерахунку у фоні.
+_SEARCH_PULSE_TTL = 60.0
+
+
 def _pulse_search(runs: list[str] | None = None) -> dict[str, Any]:
+    """Стан індексу для «Огляду»: останній відомий одразу, свіжий — у фоні.
+
+    🔴 Рахунок обходить штамп кожного прогону (12 тис. `stat` на великому
+    просторі — секунди), а показує одне число. Перелік прогонів, переданий
+    явно (`runs`), рахується одразу: так його питають тести й `search.state`.
+    """
+    import time
+
+    if runs is not None:
+        return _count_search(runs)
+    now = time.monotonic()
+    cached = _SEARCH_PULSE["data"]
+    if cached is not None:
+        if now - _SEARCH_PULSE["at"] >= _SEARCH_PULSE_TTL:
+            def refresh() -> None:
+                got = _count_search(None)
+                if got.get("ok"):
+                    _SEARCH_PULSE.update(at=time.monotonic(), data=got)
+            _in_background("search", refresh)
+        return cast("dict[str, Any]", cached)
+    got = _count_search(None)
+    if got.get("ok"):
+        _SEARCH_PULSE.update(at=now, data=got)
+    return got
+
+
+def _count_search(runs: list[str] | None = None) -> dict[str, Any]:
     """Індекс пошуку для «Огляду» — той самий, що на екрані «Пошук».
 
     🔴 Тут рахувався старий погонний індекс, а пошук іде текстовим стором:

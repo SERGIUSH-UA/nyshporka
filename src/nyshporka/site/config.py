@@ -17,6 +17,7 @@ display_order: [podillia] # порядок груп на сторінці; бе�
 eras:                     # фільтр мапи за роками подій
   - {label: "до 1860", to: 1860}
   - {label: "1860–1917", from: 1860, to: 1917}
+languages: [uk, en, pl]   # мови сайту з перемикачем; без поля — усі сім, основна — language
 nav_after:                # власні сторінки з data/site/overlay/
   - {title: Історії, path: stories/index.md}
 ```
@@ -77,6 +78,9 @@ class SiteConfig:
     title: str = "Родовід"
     description: str = ""
     language: str = "uk"
+    #: Мови сайту з перемикачем; None — усі сім (`site.i18n.LANGS`), основна —
+    #: `language`. Кожна мова — окрема збірка, тож великий рід збирається довше.
+    languages: list[str] | None = None
     search_langs: list[str] = field(default_factory=lambda: ["uk", "ru", "en"])
     born_after: int = 1920
     died_after: int = 2000

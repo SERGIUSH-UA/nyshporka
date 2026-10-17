@@ -1,6 +1,6 @@
 {% from "_macros.j2" import gallery %}
 ---
-title: {{ source.title }}
+title: {{ source.title | q }}
 ---
 
 <div class="nysh-hero nysh-hero--source" markdown>
@@ -9,7 +9,7 @@ title: {{ source.title }}
 # {{ source.title }}
 
 <div class="nysh-hero__facts">
-<span class="nysh-hero__fact">{{ source.type }}</span>
+<span class="nysh-hero__fact">{{ t("st." ~ source.type) if ("st." ~ source.type) != t("st." ~ source.type) else source.type }}</span>
 {% if source.authority %}
 <span class="nysh-hero__fact">{{ source.authority }}</span>
 {% endif %}
@@ -17,21 +17,21 @@ title: {{ source.title }}
 <span class="nysh-hero__fact"><code>{{ source.repository_ref }}</code></span>
 {% endif %}
 {% if source.fetched %}
-<span class="nysh-hero__fact">отримано {{ source.fetched }}</span>
+<span class="nysh-hero__fact">{{ t("fetched", d=source.fetched) }}</span>
 {% endif %}
 </div>
 </div>
 {% if source.url %}
 <div class="nysh-hero__actions" markdown>
-[Відкрити джерело]({{ source.url }}){ .md-button .md-button--primary }
+[{{ t("open.source") }}]({{ source.url }}){ .md-button .md-button--primary }
 </div>
 {% endif %}
 </div>
 
 {% if source.coverage %}
-## Покриття
+## {{ t("h.coverage") }} { #coverage }
 
-| Регіон | Парафія | Роки | Записи | Статус |
+| {{ t("cov.region") }} | {{ t("cov.parish") }} | {{ t("cov.years") }} | {{ t("cov.records") }} | {{ t("cov.status") }} |
 |---|---|---|---|---|
 {% for c in source.coverage %}
 | {{ region_names.get(c.region, c.region) }} | {{ c.parish or "—" }} | {{ c.year_from }}{% if c.year_to %}–{{ c.year_to }}{% endif %} | {% for rt in c.record_types %}{{ cov_rt_labels.get(rt, rt) }}{% if not loop.last %}, {% endif %}{% else %}—{% endfor %} | {{ cov_status_labels.get(c.status, c.status) }} |
@@ -39,7 +39,7 @@ title: {{ source.title }}
 {% endif %}
 
 {% if referenced_facts %}
-## Що на ньому тримається
+## {{ t("h.cited_by") }} { #cited-by }
 
 <div class="nysh-plist" markdown>
 {% for entry in referenced_facts %}
@@ -49,13 +49,13 @@ title: {{ source.title }}
 {% endif %}
 
 {% if documents %}
-## Доказ-вирізки
+## {{ t("h.crops") }} { #crops }
 
 {{ gallery(documents) }}
 {% endif %}
 
 {% if source.notes %}
-## Нотатки
+## {{ t("notes") }} { #notes }
 
 {{ source.notes }}
 {% endif %}
