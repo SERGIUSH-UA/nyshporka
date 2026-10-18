@@ -92,10 +92,12 @@ RUN test -n "$NYSH_VERSION" || (echo "потрібен --build-arg NYSH_VERSION"
 # не має права потрапити в застосунок). Колесо torch обирає `uv` за TORCH:
 # карти під час збірки немає, тож детект через `nvidia-smi` тут нічого не дав
 # би. Простір потрібен лише щоб команда знайшла себе; в образ він не йде.
+# `NYSH_CI=1` лише на цю команду: збірка образу не людина, і лічильник
+# завантажень ваг (`setup/packs.py`) не мусить рахувати її встановленням.
 RUN mkdir -p /tmp/ws && cd /tmp/ws \
  && NYSHPORKA_WORKSPACE=/tmp/ws nysh init /tmp/ws --yes --preset researcher \
  && UV_TORCH_BACKEND=${TORCH} NYSHPORKA_WORKSPACE=/tmp/ws nysh htr install --no-cuda \
- && NYSHPORKA_WORKSPACE=/tmp/ws nysh models get \
+ && NYSH_CI=1 NYSHPORKA_WORKSPACE=/tmp/ws nysh models get \
  && cd / && rm -rf /tmp/ws /srv/nysh \
  && if [ -n "$TORCH_SPEC" ]; then \
       want=$(echo "$TORCH_SPEC" | tr ' ' '\n' | sed -n 's/^torch==//p'); \
