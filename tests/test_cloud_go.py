@@ -13,6 +13,7 @@
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import shlex
 from pathlib import Path
@@ -53,6 +54,7 @@ class Box1(FakeSession):
         self.meta_pages = meta_pages
         self.cmds: list[str] = []
         self.spawn_cmds: list[str] = []
+        self.spawn_scripts: list[str] = []
         self.prepared = False
 
     def run(self, cmd: str, *, timeout=None, on_line=None) -> Completed:
@@ -72,6 +74,11 @@ class Box1(FakeSession):
 
     def spawn(self, cmd: str, *, log: str, pidfile: str) -> int:
         self.spawn_cmds.append(cmd)
+        # Текст скрипта — у мить запуску: після заходу робочу теку бокса
+        # прибрано (на Linux), і читати його потім нема звідки.
+        with contextlib.suppress(OSError, ValueError, IndexError):
+            self.spawn_scripts.append(
+                Path(shlex.split(cmd)[-1]).read_text(encoding="utf-8"))
         pid = super().spawn(cmd, log=log, pidfile=pidfile)
         batch = self.reads.pop(0) if self.reads else []
         if batch:
@@ -704,10 +711,7 @@ def test_another_seg_height_is_another_reading(space: Path, monkeypatch) -> None
     assert res.verdict == "ok", res.why
     assert backend.needs[0].pages == 3, "читається вся справа, не лише решта"
     assert not any("tar -xf seed.tar" in c for c in session.cmds),         "текст рідної висоти не має їхати на машину"
-    # Шлях скрипта — останній аргумент `sh <шлях>`; у лапках він лише там, де
-    # цього вимагає шелл (бекслеші Windows), тож розбирає його shlex.
-    script = Path(shlex.split(session.spawn_cmds[0])[-1]).read_text(encoding="utf-8")
-    assert "--seg-height 900" in script, "висота дійшла до раннера"
+    assert any("--seg-height 900" in sc for sc in session.spawn_scripts),         "висота дійшла до раннера"
 
 
 # ── кілька заходів одночасно ─────────────────────────────────────────────────
