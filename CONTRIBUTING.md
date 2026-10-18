@@ -113,6 +113,18 @@ uv run pytest
 Перевірити текст сторінки релізу до тегу:
 `python tools/release_notes.py <версія> --body`.
 
+## Лічильник завантажень моделей — не рахувати себе
+
+`nysh models get` повідомляє `nyshporka.online`, яку модель качає (`PRIVACY.md`).
+Машина розробника — не користувач, тож на ній постійно стоїть `NYSH_CI=1`, і
+звіт таку подію не рахує:
+
+- Windows: `[Environment]::SetEnvironmentVariable('NYSH_CI','1','User')` (діє
+  для нових процесів);
+- Linux / macOS: `export NYSH_CI=1` у `~/.profile`;
+- збірка, що сама качає ваги (`docker/Dockerfile`, workflow): `NYSH_CI=1` на сам
+  виклик `nysh models get`.
+
 ## Ліцензія
 
 Внесок приймається під [AGPL-3.0-or-later](LICENSE) — тією ж ліцензією, під
