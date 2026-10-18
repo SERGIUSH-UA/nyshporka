@@ -23,6 +23,7 @@
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import stat
@@ -500,10 +501,8 @@ def _korinni() -> tuple[list[str], list[str]]:
 
     ws = workspace()
     roots = [ws.root, ws.data, ws.raw]
-    try:
+    with contextlib.suppress(Exception):
         roots += list(ws.case_roots())
-    except Exception:
-        pass
     norm = [_norm(p) for p in roots]
     bounds = [_norm(ws.raw)] + [_norm(p) for p in roots[3:]]
     return norm, bounds
