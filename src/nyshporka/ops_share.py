@@ -759,6 +759,9 @@ class SharePushArgs(BaseModel):
                                              "у пул одночасно йдуть не більше трьох")
     notes: bool = Field(default=False, description="після заливки віддати й нотатник "
                                                    "справи (`note push`)")
+    wait: bool = Field(default=False, description="на стелі пулу (429) чекати, скільки "
+                                                  "просить пул, і віддавати далі, а не "
+                                                  "зупиняти пачку")
 
 
 def _push_from_file(path: str) -> list[dict[str, Any]]:
@@ -863,7 +866,10 @@ def share_push(a: SharePushArgs) -> Envelope:
         return fail("немає ключа Супряги. Увійдіть: `nysh share login` — або покладіть "
                     f"ключ у {ENV_NAME} (видається в кабінеті на nyshporka.online)")
 
-    got = B.viddaty(cherha, jobs=a.jobs, notes=a.notes, say=B.stderr)
+    if a.wait:
+        got = B.viddaty_dochekuiuchys(cherha, jobs=a.jobs, notes=a.notes, say=B.stderr)
+    else:
+        got = B.viddaty(cherha, jobs=a.jobs, notes=a.notes, say=B.stderr)
     env = ok(got)
     if got["summary"]["notes_failed"]:
         pohani = [r["case"] for r in got["rows"]
@@ -878,9 +884,12 @@ def share_push(a: SharePushArgs) -> Envelope:
     stop = got.get("rate_limited")
     if stop:
         koly = stop.get("next_attempt_at") or "пізніше"
+        # З `--wait` сюди доходить лише стеля без часу (старий пул) або довша за добу.
+        dali = ("" if a.wait or stop.get("retry_after") is None
+                else "; або з --wait — пачка дочекається сама")
         env.warn("rate_limited", f"стеля пулу: {stop.get('error')}. Не почато "
                                  f"{len(got['not_started'])} справ — повторити ту саму "
-                                 f"команду після {koly}", ALERT)
+                                 f"команду після {koly}{dali}", ALERT)
         env.suggest("share.push", f"решту після {koly}: уже віддане пул упізнає й не "
                                   f"заведе вдруге")
     if got["failed"]:

@@ -666,6 +666,9 @@ def push_cmd(
                                   "не більше трьох)"),
     notes: bool = typer.Option(False, "--notes",
                                help="після заливки віддати й нотатник справи (note push)"),
+    wait: bool = typer.Option(False, "--wait",
+                              help="на стелі пулу чекати, скільки просить пул (до доби), "
+                                   "і віддавати далі — для заливки сотень справ без нагляду"),
     as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Віддати пачку справ: кожну спакувати й залити, кілька одночасно.
@@ -679,7 +682,8 @@ def push_cmd(
 
     _kliuch_abo_vkhid(as_json)
     env = O.call("share.push", {"cases": list(cases or []), "ready": ready,
-                                "from_file": from_file, "jobs": jobs, "notes": notes})
+                                "from_file": from_file, "jobs": jobs, "notes": notes,
+                                "wait": wait})
     if _answer(env, as_json):
         return
     d = env.data or {}
@@ -706,6 +710,8 @@ def push_cmd(
         temp += f", {d['per_min']} справ/хв"
     if d.get("complete_sec_median") is not None:
         temp += f"; перевірка на сервері ~{d['complete_sec_median']} с на справу"
+    if d.get("waited_sec"):
+        temp += f"; чекали на стелю пулу {d['waited_sec'] / 60:.0f} хв"
     console.print(f"[dim]{temp}[/dim]")
     for r in d.get("rows") or []:
         if r.get("ok"):

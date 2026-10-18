@@ -170,6 +170,70 @@ def test_mynushchyi_429_perechikuietsia(pul: Pul, monkeypatch: pytest.MonkeyPatc
     assert d["summary"]["publish_retries"] == 2
 
 
+
+def test_korotkyi_retry_after_perechikuietsia_skilky_prosyt(
+        pul: Pul, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Пул каже «слот звільниться за 7 с» — пауза 7 с, а не крок `CHEKATY`."""
+    vidbyto: set[str] = set()
+    pauzy: list[float] = []
+
+    def _raz_429(path: Path, **kw: Any) -> dict[str, Any]:
+        if str(path) not in vidbyto:
+            vidbyto.add(str(path))
+            raise U.UploadError("Завершіть попередні заливання", status=429, retry_after=7)
+        return pul.publish(path)
+
+    monkeypatch.setattr(U, "publish", _raz_429)
+    monkeypatch.setattr(B.time, "sleep", pauzy.append)
+    assert _push(cases=["A/1/1"]).data["summary"]["viddano"] == 1
+    assert pauzy == [7.0]
+
+
+def test_wait_dochikuietsia_steli_i_viddaie_reshtu(pul: Pul) -> None:
+    """🔴 `--wait`: стеля пулу з часом — пачка спить стільки й віддає решту сама."""
+    from nyshporka.sources.http import RETRY_AFTER_PAD_S
+
+    pul.stelia_pislia = 1
+    pauzy: list[float] = []
+
+    def _son(sec: float) -> None:
+        pauzy.append(sec)
+        pul.stelia_pislia = None          # доба минула — норма звільнилась
+
+    items = [{"case": f"A/1/{i}"} for i in range(1, 4)]
+    got = B.viddaty_dochekuiuchys(items, jobs=1, sleep=_son)
+    assert pauzy == [3600 + RETRY_AFTER_PAD_S]
+    assert [r["case"] for r in got["rows"]] == [i["case"] for i in items]
+    assert got["summary"]["viddano"] == 3
+    assert not got["failed"] and not got["not_started"] and got["rate_limited"] is None
+    assert got["waited_sec"] == 3600 + RETRY_AFTER_PAD_S
+
+
+def test_wait_bez_chasu_vid_pulu_zupyniaie_pachku(
+        pul: Pul, monkeypatch: pytest.MonkeyPatch) -> None:
+    """429 без `Retry-After` (старий пул) — не вгадувати паузу, а зупинитись."""
+    def _stelia(path: Path, **kw: Any) -> dict[str, Any]:
+        raise U.UploadError("Денна норма внесків вичерпана", status=429)
+
+    monkeypatch.setattr(U, "publish", _stelia)
+    pauzy: list[float] = []
+    got = B.viddaty_dochekuiuchys([{"case": "A/1/1"}, {"case": "A/1/2"}], jobs=1,
+                                  sleep=pauzy.append)
+    assert pauzy == []
+    assert got["rate_limited"] is not None and got["not_started"] == ["A/1/2"]
+
+
+def test_push_wait_cherez_operatsiiu(pul: Pul, monkeypatch: pytest.MonkeyPatch) -> None:
+    pul.stelia_pislia = 1
+
+    def _son(sec: float) -> None:
+        pul.stelia_pislia = None
+
+    monkeypatch.setattr(B.time, "sleep", _son)
+    env = _push(cases=["A/1/1", "A/1/2"], wait=True)
+    assert env.data["summary"]["viddano"] == 2
+    assert "rate_limited" not in [w.code for w in env.warnings]
+
 def test_khid_drukuietsia_riadkom_na_spravu(pul: Pul) -> None:
     lines: list[str] = []
     B.viddaty([{"case": "A/1/1"}, {"case": "A/1/2"}], jobs=1, say=lines.append)

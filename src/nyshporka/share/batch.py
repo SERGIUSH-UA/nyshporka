@@ -44,6 +44,12 @@ PUBLISH_SLOTS = 3
 #: заливання сусіда закінчується за секунди; якщо 429 тримається довше — це
 #: справжня стеля (година, доба), і пачка зупиняється.
 CHEKATY: tuple[float, ...] = (5, 10, 20, 30, 30, 30, 30)
+#: Найкоротший `Retry-After`, який слот заливки перечікує сам, замість кроку
+#: `CHEKATY`. Довше — рішення пачки (`viddaty_dochekuiuchys`), а не воркера.
+CHEKATY_SAM = 60.0
+#: Найдовше, скільки `share push --wait` чекає на стелю пулу за раз. Денна норма
+#: ковзна, тож довше за добу (і запас на годинники) пул не просить.
+CHEKATY_NAIDOVSHE = 26 * 3600.0
 
 #: На якому кроці зупинилась справа.
 PACK = "pack"
@@ -123,6 +129,10 @@ def _zalyty(path: str, row: Row) -> Any:
             return viddano
         # Повтор безпечний: пул упізнає той самий зміст і не заведе другий внесок.
         row["retries"] = int(row.get("retries") or 0) + 1
+        # Пул сам сказав, коли звільниться слот, і це скоро — чекати саме стільки.
+        prosyt = (viddano.data or {}).get("retry_after")
+        if isinstance(prosyt, (int, float)) and prosyt <= CHEKATY_SAM:
+            pauza = max(pauza, float(prosyt))
         time.sleep(pauza)
     return viddano
 
@@ -318,6 +328,62 @@ def viddaty(items: list[Item], *, jobs: int = JOBS, notes: bool = False,
         "sec": sec,
         "per_min": round(len(done) / sec * 60, 1) if sec > 0 else None,
         "complete_sec_median": _mediana([r.get("complete_sec") for r in done]),
+    }
+
+
+def viddaty_dochekuiuchys(items: list[Item], *, jobs: int = JOBS, notes: bool = False,
+                          say: Callable[[str], None] | None = None,
+                          pool: Callable[[int], Executor] | None = None,
+                          sleep: Callable[[float], None] | None = None) -> dict[str, Any]:
+    """`viddaty`, яка на стелі пулу (429) чекає, скільки просить пул, і йде далі.
+
+    Для `share push --wait`: заливка сотень справ за ніч, коли нікому
+    перезапускати пачку щоранку. Знову йдуть справа, що вперлась у стелю, і ще
+    не початі; уже віддане не чіпається.
+
+    🔴 Чекає лише на число пулу (`retry_after`). 429 без нього — відповідь
+    старого сервера, і тут він зупиняє пачку так само, як `viddaty`: вгадувати
+    паузу означало б або стукати марно, або простояти ніч.
+    """
+    from nyshporka.sources.http import RETRY_AFTER_PAD_S
+
+    pochatok = time.monotonic()
+    got = viddaty(items, jobs=jobs, notes=notes, say=say, pool=pool)
+    po_spravi: dict[str, Row] = {r["case"]: r for r in got["rows"]}
+    chekano = 0.0
+    while True:
+        stop = got.get("rate_limited") or {}
+        prosyt = stop.get("retry_after")
+        if not isinstance(prosyt, (int, float)) or prosyt > CHEKATY_NAIDOVSHE:
+            break
+        vpersheni = {r["case"] for r in got["rows"] if r.get("rate_limited")}
+        znovu = set(got["not_started"]) | vpersheni
+        cherha = [it for it in items if str(it.get("case") or "") in znovu]
+        if not cherha:
+            break
+        if say is not None:
+            koly = time.strftime("%H:%M", time.localtime(time.time() + prosyt))
+            say(f"⏸ стеля пулу: чекаю до {koly} ({prosyt / 60:.0f} хв), "
+                f"лишилось {len(cherha)} справ")
+        pauza = float(prosyt) + RETRY_AFTER_PAD_S
+        (sleep or time.sleep)(pauza)
+        chekano += pauza
+        got = viddaty(cherha, jobs=jobs, notes=notes, say=say, pool=pool)
+        po_spravi.update({r["case"]: r for r in got["rows"]})
+
+    rows = [po_spravi[c] for c in (str(it.get("case") or "") for it in items) if c in po_spravi]
+    sec = round(time.monotonic() - pochatok, 1)
+    pratsiuvalo = sec - chekano
+    return {
+        **got,
+        "rows": rows,
+        "total": len(items),
+        "summary": pidsumok(rows),
+        "failed": [r["case"] for r in rows if not r.get("ok")],
+        "sec": sec,
+        "waited_sec": round(chekano, 1),
+        "per_min": round(len(rows) / pratsiuvalo * 60, 1) if pratsiuvalo > 0 else None,
+        "complete_sec_median": _mediana([r.get("complete_sec") for r in rows]),
     }
 
 

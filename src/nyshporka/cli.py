@@ -1970,6 +1970,11 @@ from nyshporka.share.cli import app as share_app  # noqa: E402
 app.add_typer(share_app, name="share")
 app.add_typer(queue_app, name="queue")
 
+# 💽 Місце на диску: що лишити, що прибрати, з яких справ зняти кадри.
+from nyshporka.disk.cli import app as disk_app  # noqa: E402
+
+app.add_typer(disk_app, name="disk")
+
 
 @cases_app.command("build")
 def cases_build(
