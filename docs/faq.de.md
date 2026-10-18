@@ -140,6 +140,8 @@ geht Nyshporka nur, wenn Sie darum gebeten haben: Suche in Katalogen,
 Herunterladen einer Akte, Installation von Modellen, Updates. Die
 vollständige Liste —
 [Datenschutzerklärung](https://github.com/SERGIUSH-UA/nyshporka/blob/main/PRIVACY.md).
+Gezählt werden nur Downloads der Modellgewichte: welches Modell und welche Version,
+Erstinstallation oder Update, Betriebssystem; die IP-Adresse wird nicht gespeichert.
 
 Gelesenes mit [Supriaha](share.md) teilen kann man nur nach der Anmeldung
 (`nysh share login`) und nur mit Ihrer Zustimmung: Weitergegeben werden der

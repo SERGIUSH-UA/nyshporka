@@ -28,6 +28,13 @@ if TYPE_CHECKING:
 #: дзеркала, і він переживе автора проєкту.
 BASE_URL = "https://github.com/SERGIUSH-UA/nyshporka/releases/download"
 
+#: Лічильник завантажень: записує подію й відповідає 302 на той самий ассет
+#: релізу. Код — `app/vahy.py` у репо nyshporka-online.
+#: 🔴 Лічильник ніколи не сміє зламати встановлення: недоступний домен, 5xx,
+#: таймаут чи дивна відповідь — і пак качається з `BASE_URL` напряму.
+COUNTER_URL = "https://nyshporka.online/w"
+COUNTER_TIMEOUT = 5.0
+
 MANIFEST_NAME = "packs.json"
 
 
@@ -55,6 +62,10 @@ class Pack:
     @property
     def url(self) -> str:
         return f"{BASE_URL}/{self.release}/{self.filename}"
+
+    @property
+    def counter_url(self) -> str:
+        return f"{COUNTER_URL}/{self.release}/{self.filename}"
 
 
 def manifest_path() -> Path:
@@ -161,6 +172,123 @@ def missing(kind: str = "", *, include_superseded: bool = False) -> list[Pack]:
 #: Запас над розміром пака з маніфесту: розмір там може бути округлений.
 PACK_SIZE_SLACK = 1 << 20
 
+#: Заголовки, які лічильник узагалі може отримати. 🔴 Жодного іншого: ні ID
+#: встановлення, ні хешу машини, ні шляхів, ні `NYSHPORKA_CONTACT`. Тест
+#: звіряє запит саме з цим переліком.
+COUNTER_HEADERS = frozenset({"User-Agent", "X-Nysh-Reason", "X-Nysh-From", "X-Nysh-CI"})
+
+
+def download_reason(pack: Pack, *, force: bool = False) -> tuple[str, str]:
+    """Чому качається пак: `(reason, from)`.
+
+    • repair — цей самий файл уже лежить, але не пройшов звірку, або `force`;
+    • update — лежить інша версія тієї ж моделі (той самий вид, письмо й
+      рушій), замінена теж; `from` — тег її релізу;
+    • install — нічого з цього.
+    Рахується ДО качання: після нього кожне встановлення виглядало б ремонтом.
+    """
+    if force or path_of(pack).exists():
+        return "repair", ""
+    olds = [p for p in catalog()
+            if p.id != pack.id and p.kind == pack.kind and p.script and p.engine
+            and p.script == pack.script and p.engine == pack.engine
+            and path_of(p).exists()]
+    if not olds:
+        return "install", ""
+    return "update", max(olds, key=lambda p: _release_rank(p.release)).release
+
+
+def _release_rank(tag: str) -> tuple[int, str]:
+    """`weights-v3` > `weights-v2`; тег без номера — найнижчий."""
+    import re
+
+    m = re.search(r"(\d+)$", tag)
+    return (int(m.group(1)) if m else -1, tag)
+
+
+def _os_name() -> str:
+    import sys
+
+    if sys.platform.startswith("win"):
+        return "windows"
+    if sys.platform == "darwin":
+        return "macos"
+    return "linux" if sys.platform.startswith("linux") else "other"
+
+
+def download_ua() -> str:
+    """UA для ваг: застосунок, ОС і версія Python — і більше нічого.
+
+    🔴 Не `app_ua()`: той додає `NYSHPORKA_CONTACT`, а лічильнику особа не
+    потрібна.
+    """
+    import sys
+
+    from nyshporka import __version__
+    from nyshporka.sources.http import HOMEPAGE
+
+    return (f"nyshporka/{__version__} (+{HOMEPAGE}) {_os_name()} "
+            f"py{sys.version_info.major}.{sys.version_info.minor}")
+
+
+def counter_headers(reason: str, frm: str = "") -> dict[str, str]:
+    import os
+
+    h = {"User-Agent": download_ua(), "X-Nysh-Reason": reason}
+    if reason == "update" and frm:
+        h["X-Nysh-From"] = frm
+    if os.environ.get("NYSH_CI") == "1":
+        h["X-Nysh-CI"] = "1"
+    return h
+
+
+def _count(pack: Pack, reason: str, frm: str) -> bool:
+    """Зарахувати завантаження. Повертає, чи лічильник відповів як слід.
+
+    Лічильник питаємо без переходу за редиректом і з коротким таймаутом: його
+    302 веде рівно на `pack.url`, тож байти все одно качаються з GitHub, а від
+    лічильника потрібна лише сама подія. Чужий `Location` не приймається
+    ніколи — зламаний чи підмінений домен не може підсунути інший хост.
+    🔴 Будь-яка біда лічильника тут ковтається: встановлення від неї не
+    залежить.
+    """
+    import httpx
+
+    from nyshporka.sources.http import offline
+
+    if offline():
+        return False
+    try:
+        r = httpx.get(pack.counter_url, headers=counter_headers(reason, frm),
+                      follow_redirects=False, timeout=COUNTER_TIMEOUT)
+    except (httpx.HTTPError, OSError):
+        return False
+    return r.status_code in (301, 302, 303, 307, 308) and r.headers.get("location") == pack.url
+
+
+def _stream_to(pack: Pack, url: str, tmp: Path,
+               on_progress: Callable[..., None] | None) -> None:
+    import httpx
+
+    got = 0
+    # 🔴 Розмір пака відомий з маніфесту — він і стеля (із запасом на
+    # округлення в маніфесті). Доти качання читало скільки дадуть, і підмінена
+    # чи зациклена відповідь заповнювала диск раніше, ніж звірка sha256
+    # встигала відмовити (аудит 29.09.2026).
+    cap = pack.size + PACK_SIZE_SLACK if pack.size else 0
+    with httpx.stream("GET", url, follow_redirects=True, timeout=120) as r:
+        r.raise_for_status()
+        with tmp.open("wb") as fh:
+            for chunk in r.iter_bytes():
+                got += len(chunk)
+                if cap and got > cap:
+                    raise RuntimeError(
+                        f"{pack.filename}: сервер віддає понад {cap} байт при "
+                        f"заявлених {pack.size} — це не той файл, качання обірвано")
+                fh.write(chunk)
+                if on_progress:
+                    on_progress(done=got, total=pack.size, unit="Б")
+
 
 def fetch(pack: Pack, *, on_progress: Callable[..., None] | None = None,
           force: bool = False) -> Path:
@@ -170,8 +298,6 @@ def fetch(pack: Pack, *, on_progress: Callable[..., None] | None = None,
     лишати напівфабрикату під бойовим іменем — саме він потім і виглядає як
     «модель зламана».
     """
-    import httpx
-
     dst = path_of(pack)
     if not force and verify(pack):
         return dst
@@ -182,28 +308,12 @@ def fetch(pack: Pack, *, on_progress: Callable[..., None] | None = None,
         raise RuntimeError(
             f"{pack.id}: у маніфесті немає sha256 — цей пак ще не входить у "
             f"складений реліз. Качати без звірки не буду.")
+    reason, frm = download_reason(pack, force=force)
+    _count(pack, reason, frm)
     dst.parent.mkdir(parents=True, exist_ok=True)
     tmp = dst.with_suffix(dst.suffix + ".part")
-    got = 0
-    # 🔴 Розмір пака відомий з маніфесту — він і стеля (із запасом на
-    # округлення в маніфесті). Доти качання читало скільки дадуть, і підмінена
-    # чи зациклена відповідь заповнювала диск раніше, ніж звірка sha256
-    # встигала відмовити (аудит 29.09.2026).
-    cap = pack.size + PACK_SIZE_SLACK if pack.size else 0
     try:
-        with httpx.stream("GET", pack.url, follow_redirects=True,
-                          timeout=120) as r:
-            r.raise_for_status()
-            with tmp.open("wb") as fh:
-                for chunk in r.iter_bytes():
-                    got += len(chunk)
-                    if cap and got > cap:
-                        raise RuntimeError(
-                            f"{pack.filename}: сервер віддає понад {cap} байт при "
-                            f"заявлених {pack.size} — це не той файл, качання обірвано")
-                    fh.write(chunk)
-                    if on_progress:
-                        on_progress(done=got, total=pack.size, unit="Б")
+        _stream_to(pack, pack.url, tmp, on_progress)
         digest = sha256_of(tmp)
         if digest != pack.sha256:
             raise RuntimeError(

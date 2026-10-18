@@ -124,6 +124,8 @@ what has been read and your notes stay in a folder on your disk. Nyshporka goes 
 only when you have asked it to: searching catalogues, downloading a file,
 installing models, updating. The full list is in the
 [privacy policy](https://github.com/SERGIUSH-UA/nyshporka/blob/main/PRIVACY.md).
+The only thing counted is model weight downloads: which model and version, first
+install or update, OS; the IP address is not stored.
 
 You can share what you have read in [Supriaha](share.md) only after signing in
 (`nysh share login`) and only with your consent: what is shared is the text the

@@ -132,6 +132,8 @@ textul citit și notițele stau într-un director de pe discul dumneavoastră. �
 rețea Nyshporka iese doar atunci când ați cerut: căutare în cataloage,
 descărcarea unui dosar, instalarea modelelor, actualizare. Lista completă —
 [politica de confidențialitate](https://github.com/SERGIUSH-UA/nyshporka/blob/main/PRIVACY.md).
+Se numără doar descărcările ponderilor modelelor: ce model și ce versiune, prima
+instalare sau actualizare, sistemul de operare; adresa IP nu se păstrează.
 
 Puteți împărtăși textul citit în [Supriaha](share.md) doar după conectare
 (`nysh share login`) și doar cu acordul dumneavoastră: se oferă textul citit

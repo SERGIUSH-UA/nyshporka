@@ -624,6 +624,162 @@ def test_pak_bilshyi_za_rozmir_z_manifestu_obryvaietsia(tmp_path, monkeypatch) -
     assert not list(tmp_path.iterdir())
 
 
+# ── лічильник завантажень ваг ────────────────────────────────────────────────
+
+_BODY = b"vahy modeli" * 50
+
+
+def _counted(tmp_path, monkeypatch, counter):
+    """Пак із каталогу в tmp, мережа «увімкнена», стрім віддає тіло, а
+    `counter(url, headers)` — відповідь лічильника або виняток."""
+    import hashlib
+    from contextlib import contextmanager
+
+    import httpx
+
+    monkeypatch.delenv("NYSHPORKA_NO_NETWORK", raising=False)
+    monkeypatch.delenv("NYSH_CI", raising=False)
+    monkeypatch.setattr(packs, "target_dir", lambda kind: tmp_path)
+    new = packs.Pack(id="pysar-cyr-v99", kind="model", filename="pysar_cyr_v99.pt",
+                     sha256=hashlib.sha256(_BODY).hexdigest(), size=len(_BODY),
+                     release="weights-v9", script="cyrillic", engine="parseq")
+    old = packs.Pack(id="pysar-cyr-v50", kind="model", filename="pysar_cyr_v50.pt",
+                     sha256="0" * 64, size=1, release="weights-v5",
+                     script="cyrillic", engine="parseq", superseded=True)
+    other = packs.Pack(id="diak-cyr-v50", kind="model", filename="diak_cyr_v50.pt",
+                       sha256="0" * 64, size=1, release="weights-v5",
+                       script="cyrillic", engine="kraken")
+    monkeypatch.setattr(packs, "catalog", lambda: [new, old, other])
+    log: dict[str, list] = {"get": [], "stream": []}
+
+    def _get(url, *, headers=None, follow_redirects=True, **_):
+        log["get"].append((url, dict(headers or {}), follow_redirects))
+        return counter(url, headers)
+
+    @contextmanager
+    def _stream(method, url, headers=None, **_):
+        log["stream"].append((url, dict(headers or {})))
+
+        class R:
+            @staticmethod
+            def raise_for_status() -> None:
+                pass
+
+            @staticmethod
+            def iter_bytes():
+                yield _BODY
+        yield R()
+
+    monkeypatch.setattr(httpx, "get", _get)
+    monkeypatch.setattr(httpx, "stream", _stream)
+    return new, old, other, log
+
+
+def _redirect(url, headers):
+    import httpx
+
+    rel, name = url.rsplit("/", 2)[-2:]
+    return httpx.Response(302, headers={"location": f"{packs.BASE_URL}/{rel}/{name}"})
+
+
+@pytest.mark.parametrize("fail", ["dns", "timeout", "503", "200", "chuzhyi"])
+def test_lichylnyk_nedostupnyi_vstanovlennia_ide(tmp_path, monkeypatch, fail) -> None:
+    """🔴 Лічильник ніколи не ламає встановлення: домен ліг, 5xx, таймаут,
+    дивна відповідь — пак качається з GitHub напряму й звіряється."""
+    import httpx
+
+    def counter(url, headers):
+        if fail == "dns":
+            raise httpx.ConnectError("getaddrinfo failed")
+        if fail == "timeout":
+            raise httpx.ReadTimeout("5 s")
+        if fail == "503":
+            return httpx.Response(503)
+        if fail == "200":
+            return httpx.Response(200, text="ok")
+        return httpx.Response(302, headers={"location": "https://evil.example/x.pt"})
+
+    new, _, _, log = _counted(tmp_path, monkeypatch, counter)
+    assert packs.fetch(new) == tmp_path / new.filename
+    assert packs.verify(new)
+    assert [u for u, _ in log["stream"]] == [new.url], "байти не з GitHub"
+
+
+def test_lichylnyk_pytaiut_bez_redyrektu_i_z_korotkym_taimautom(tmp_path, monkeypatch) -> None:
+    new, _, _, log = _counted(tmp_path, monkeypatch, _redirect)
+    packs.fetch(new)
+    url, _, follow = log["get"][0]
+    assert url == f"{packs.COUNTER_URL}/weights-v9/pysar_cyr_v99.pt"
+    assert follow is False
+    # байти — з GitHub і без жодного X-Nysh: подію чує лише лічильник
+    assert log["stream"] == [(new.url, {})]
+    assert packs.COUNTER_TIMEOUT <= 5
+
+
+def test_prychyna_install_update_repair(tmp_path, monkeypatch) -> None:
+    new, old, other, log = _counted(tmp_path, monkeypatch, _redirect)
+
+    def reason_of(*, keep: bool = False, force: bool = False):
+        log["get"].clear()
+        if not keep:
+            (tmp_path / new.filename).unlink(missing_ok=True)
+        packs.fetch(new, force=force)
+        return log["get"][0][1]
+
+    # інша модель того ж письма, але іншого рушія — не попередник
+    (tmp_path / other.filename).write_bytes(b"x")
+    h = reason_of()
+    assert h["X-Nysh-Reason"] == "install" and "X-Nysh-From" not in h
+
+    # лежить замінена версія тієї ж моделі → update, from = її реліз
+    (tmp_path / old.filename).write_bytes(b"x")
+    h = reason_of()
+    assert h["X-Nysh-Reason"] == "update" and h["X-Nysh-From"] == "weights-v5"
+
+    # той самий файл битий → repair
+    (tmp_path / new.filename).write_bytes(b"obirvano")
+    h = reason_of(keep=True)
+    assert h["X-Nysh-Reason"] == "repair" and "X-Nysh-From" not in h
+
+    # цілий, але force → repair
+    h = reason_of(keep=True, force=True)
+    assert h["X-Nysh-Reason"] == "repair"
+
+
+def test_lichylnyk_ne_chuie_nichoho_ponad_perelik(tmp_path, monkeypatch) -> None:
+    """🔴 Жодного ID встановлення, хешу машини, шляху чи контакту."""
+    import sys
+
+    monkeypatch.setenv("NYSHPORKA_CONTACT", "kontakt-doslidnyka")
+    new, old, _, log = _counted(tmp_path, monkeypatch, _redirect)
+    (tmp_path / old.filename).write_bytes(b"x")
+    monkeypatch.setenv("NYSH_CI", "1")
+    packs.fetch(new)
+    _, headers, _ = log["get"][0]
+    assert set(headers) <= packs.COUNTER_HEADERS
+    assert set(headers) == {"User-Agent", "X-Nysh-Reason", "X-Nysh-From", "X-Nysh-CI"}
+    assert headers["X-Nysh-CI"] == "1"
+    ua = headers["User-Agent"]
+    assert "kontakt-doslidnyka" not in ua
+    assert str(tmp_path) not in " ".join(headers.values())
+    assert ua.startswith("nyshporka/")
+    assert ua.endswith(f" py{sys.version_info.major}.{sys.version_info.minor}")
+    assert ua.split()[-2] in {"windows", "linux", "macos", "other"}
+
+
+def test_bez_ci_zaholovka_ci_nemaie(tmp_path, monkeypatch) -> None:
+    new, _, _, log = _counted(tmp_path, monkeypatch, _redirect)
+    packs.fetch(new)
+    assert set(log["get"][0][1]) == {"User-Agent", "X-Nysh-Reason"}
+
+
+def test_bez_merezhi_lichylnyk_movchyt(tmp_path, monkeypatch) -> None:
+    new, _, _, log = _counted(tmp_path, monkeypatch, _redirect)
+    monkeypatch.setenv("NYSHPORKA_NO_NETWORK", "1")
+    packs.fetch(new)
+    assert log["get"] == []
+
+
 # ── прискорення в Docker: порада про команду запуску ─────────────────────────
 
 def _docker(monkeypatch, image: str, card, err: str = "") -> object:

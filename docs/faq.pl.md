@@ -127,6 +127,8 @@ tekst i notatki leżą w folderze na Twoim dysku. Z siecią Nyshporka łączy si
 tylko wtedy, gdy o to poprosisz: wyszukiwanie w katalogach, pobieranie
 jednostki, instalacja modeli, aktualizacja. Pełna lista —
 [polityka prywatności](https://github.com/SERGIUSH-UA/nyshporka/blob/main/PRIVACY.md).
+Liczone są tylko pobrania wag modeli: który model i wersja, pierwsza instalacja
+czy aktualizacja, system; adres IP nie jest zapisywany.
 
 Podzielić się odczytanym tekstem w serwisie [Supriaha](share.md) można tylko po
 zalogowaniu (`nysh share login`) i tylko za Twoją zgodą: przekazywany jest

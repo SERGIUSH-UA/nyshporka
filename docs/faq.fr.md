@@ -139,6 +139,8 @@ sur votre disque. Nyshporka ne va sur le réseau que quand vous le lui demandez�
 recherche dans les catalogues, téléchargement d'un dossier, installation des
 modèles, mise à jour. La liste complète —
 [politique de confidentialité](https://github.com/SERGIUSH-UA/nyshporka/blob/main/PRIVACY.md).
+Seuls les téléchargements des poids de modèles sont comptés : quel modèle et quelle
+version, première installation ou mise à jour, système ; l'adresse IP n'est pas conservée.
 
 On ne peut partager ce qui a été lu dans [Supriaha](share.md) qu'après s'être
 connecté (`nysh share login`) et uniquement avec votre accord : ce qui part,
