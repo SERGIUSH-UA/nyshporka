@@ -704,11 +704,13 @@ def offload(case: str, *, restore: str, apply: bool = False) -> dict[str, Any]:
 def _zminenyi(f: Path) -> float:
     """Коли файл кадру востаннє з'явився чи змінився. Не лише mtime: розпаковка
     архіву й `copy2` відновлюють стару дату зміни, а новий файл однаково
-    дістає новий час створення (на Windows — `st_ctime`, з 3.12 ще й
-    `st_birthtime`)."""
+    дістає свіжий `st_ctime` — на Windows це час створення, на POSIX час
+    зміни метаданих (його оновлює й створення, й відновлення дати). Що
+    `st_ctime` на POSIX зсувається ще й від chmod чи перейменування, лише
+    лишає кадр на диску — помилка в безпечний бік."""
     st = f.stat()
-    return max(st.st_mtime, float(getattr(st, "st_birthtime", 0.0) or 0.0),
-               st.st_ctime if os.name == "nt" else 0.0)
+    return max(st.st_mtime, st.st_ctime,
+               float(getattr(st, "st_birthtime", 0.0) or 0.0))
 
 
 def _write_marker(d: Path, data: dict[str, Any]) -> None:

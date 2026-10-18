@@ -243,7 +243,9 @@ def svit(ws: W.Workspace, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
 def _prohin(s: dict[str, Any], d: Path, pages: tuple[str, ...], name: str = "run1",
             shared: bool = False, key: str = KEY, row_dir: Path | None = None,
             lines: int = 30, failed: tuple[str, ...] = ()) -> None:
-    at = time.time()
+    # Прочитано після появи кадрів. Не «щойно»: мітка часу ФС буває на частку
+    # секунди попереду `time.time()`, і тест плавав би (18.10.2026).
+    at = time.time() + 2
     s["runs"].append({"name": name, "case_dir": str(row_dir or d), "case_key": key,
                       "shared": shared})
     s["metas"][name] = {"case_dir": str(d), "case_key": key, "failed": list(failed),
@@ -345,8 +347,6 @@ def test_novyi_fail_zi_staroiu_datoiu_lyshaietsia(ws: W.Workspace, svit: dict[st
     f.unlink()
     _file(f, 120)
     os.utime(f, (stara, stara))
-    if os.name != "nt" and not hasattr(f.stat(), "st_birthtime"):
-        pytest.skip("часу створення файла ця ФС не дає")
     # прочитано після старої дати зміни, але до появи нового файла
     svit["metas"]["run1"]["pages"]["0002.jpg"]["at"] = stara + 1
     got = D.offload(str(d), restore="диск", apply=True)
@@ -400,7 +400,7 @@ def test_neprochytana_storinka_lyshaietsia(ws: W.Workspace, svit: dict[str, Any]
     d = _sprava(ws.root)
     _prohin(svit, d, VSI)
     if "at" in info:
-        info = {**info, "at": time.time()}   # прочитано після останньої зміни кадру
+        info = {**info, "at": time.time() + 2}   # прочитано після останньої зміни кадру
     svit["metas"]["run1"]["pages"]["0002.jpg"] = info
     D.offload(str(d), restore="диск", apply=True)
     assert (d / "0002.jpg").exists()
