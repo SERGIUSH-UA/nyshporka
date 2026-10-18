@@ -136,7 +136,7 @@ def test_run_key_takes_the_bind_over_the_meta(scope: Any) -> None:
 
 
 def test_text_index_writes_the_bound_key(scope: Any) -> None:
-    S, R = scope
+    _, R = scope
     from nyshporka.search import store as ST
 
     R.bind_run("проба-фонд-Р", KEY, "номер у теці застарів", force=True)
