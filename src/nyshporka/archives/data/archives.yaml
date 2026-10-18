@@ -272,6 +272,7 @@ repositories:
     country: UA
     codes:
       babynyar: "15"
+      commons: ДАКО
   DAKRO:
     label: ДАКрО
     name: Державний архів Кіровоградської області

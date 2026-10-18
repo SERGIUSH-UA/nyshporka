@@ -2169,6 +2169,80 @@ def cases_split_cmd(
     notes(env)
 
 
+@cases_app.command("cards")
+def cases_cards_cmd(
+    case_dir: str = typer.Argument(..., help="тека плівки: кадри кількох справ підряд"),
+    sheet_dir: str = typer.Option("", "--sheet", help="куди покласти листи карток на око"),
+    map_out: str = typer.Option("", "--map-out", help="куди записати чернетку карти"),
+    numbers: str = typer.Option(
+        "", "--numbers",
+        help="номери справ з карток у порядку плівки, через кому: «923,924,925»"),
+    prefix: str = typer.Option("", "--prefix",
+                               help="початок шифри до номерів: «ДАЧкО 931-1-»"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
+) -> None:
+    """Знайти на плівці картки-мішені й запропонувати межі справ.
+
+    Картки зйомки FamilySearch (початкова з шифрою, «END OF ITEM») видно за
+    тоном кадру. Шифру з листа читаєте ви, вписуєте в карту замість «?» —
+    і далі `nysh cases split <тека> --map <карта>`.
+    """
+    from rich.markup import escape as _e
+
+    from nyshporka import ops as O
+    from nyshporka.cli_emit import answer, notes
+
+    env = O.call("cases.cards", {"case_dir": case_dir, "sheet_dir": sheet_dir,
+                                 "map_out": map_out, "prefix": prefix,
+                                 "numbers": [n for n in numbers.split(",") if n.strip()]})
+    if answer(env, as_json):
+        return
+    d = env.data or {}
+    console.print(f"[bold]{_e(str(d.get('frames_dir')))}[/bold] — {d.get('frames')} кадрів · "
+                  f"груп карток {d.get('card_runs')} · справ {d.get('cases')}")
+    label = {"cards": "картки", "case": "справа", "leader": "ракорд"}
+    for s in d.get("segments") or []:
+        name = s["spr"] if s["kind"] == "case" else label.get(s["kind"], s["kind"])
+        console.print(f"  {_e(name):<18} кадри {s['from']}–{s['to']} "
+                      f"({s['frames']}): {_e(s['first'])} … {_e(s['last'])}")
+    for p in d.get("sheets") or []:
+        console.print(f"  [muted]лист: {_e(p)}[/muted]")
+    console.print(f"  [muted]карта: {_e(str(d.get('map')))}[/muted]")
+    notes(env)
+
+
+@cases_app.command("join")
+def cases_join_cmd(
+    dest: str = typer.Argument(..., help="тека справи, куди зібрати кадри"),
+    part: list[str] = typer.Option(
+        ..., "--part",
+        help="«<тека плівки>=<перший файл>..<останній файл>»; у порядку плівок, голова — першою"),
+    dry: bool = typer.Option(False, "--dry-run", help="лише показати, що ляже"),
+    copy: bool = typer.Option(False, "--copy",
+                              help="копіювати, якщо жорстке посилання не створюється"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
+) -> None:
+    """Зібрати справу, розірвану між плівками («CONTINUED ON ANOTHER ROLL»).
+
+    Кадри не копіюються: у теці справи — жорсткі посилання з іменами
+    `<плівка>_<кадр>`. Паспорт — далі `nysh case <тека>`.
+    """
+    from rich.markup import escape as _e
+
+    from nyshporka import ops as O
+    from nyshporka.cli_emit import answer, notes
+
+    env = O.call("cases.join", {"dest": dest, "parts": part, "dry_run": dry,
+                                "copy_frames": copy})
+    if answer(env, as_json):
+        return
+    d = env.data or {}
+    console.print(f"[bold]{_e(str(d.get('dest')))}[/bold] — {d.get('frames')} кадрів: "
+                  f"{_e(str(d.get('first')))} … {_e(str(d.get('last')))}"
+                  + (" · проба, нічого не змінено" if d.get("dry_run") else ""))
+    notes(env)
+
+
 @cases_app.command("chain")
 def cases_chain_cmd(
     show_all: bool = typer.Option(False, "--all",

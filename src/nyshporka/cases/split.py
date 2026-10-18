@@ -249,6 +249,9 @@ def plan(case_dir: str | Path, specs: list[tuple[str, str, str]]) -> Plan:
                 raise SplitError(f"кадр «{name}» потрапив у дві частини: "
                                  f"«{taken[name]}» і «{what}»")
             taken[name] = what
+        if what == "?":
+            raise SplitError(f"частина {first}..{last}: номер справи не заповнено («?») — "
+                             f"прочитайте шифру з картки на листі `nysh cases cards`")
         part = Part(spr=what if what != LEFTOVER else LEFTOVER, first=first, last=last,
                     names=mine, pos=(a + 1, b + 1))
         if not part.leftover:

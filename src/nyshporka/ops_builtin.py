@@ -3272,6 +3272,107 @@ def cases_split(a: CasesSplitArgs) -> Envelope:
     return env
 
 
+class CasesCardsArgs(BaseModel):
+    case_dir: str = Field(description="тека плівки: кадри кількох справ підряд")
+    sheet_dir: str = Field(default="", description="куди покласти листи карток на око; "
+                                                   "порожньо — тимчасова тека системи")
+    map_out: str = Field(default="", description="куди записати чернетку карти для "
+                                                 "cases.split; порожньо — поруч із листами")
+    numbers: list[str] = Field(
+        default_factory=list,
+        description="номери справ з карток у порядку плівки — тоді карта виходить "
+                    "заповненою, без «?»; кількість мусить збігтися зі справами")
+    prefix: str = Field(default="", description="початок шифри до номерів, напр. "
+                                                "«ДАЧкО 931-1-»; порожньо — номери як є")
+
+
+@op("cases.cards", summary="Знайти на плівці картки-мішені й запропонувати межі справ",
+    args=CasesCardsArgs, agent=False)
+def cases_cards(a: CasesCardsArgs) -> Envelope:
+    """Плівка FamilySearch несе кілька справ, і кожну обрамляють чорні картки
+    зйомки: початкова з шифрою й кінцева «END OF ITEM». Операція знаходить їх
+    за тоном кадру, ділить плівку на відтинки, складає листи карток на око й
+    чернетку карти, де номер кожної справи — «?».
+
+    🔴 Шифру з картки читає людина чи агент оком і вписує в карту замість «?»;
+    далі — `cases.split` з цією картою. Машина номера не вгадує.
+    """
+    import tempfile
+
+    from nyshporka.cases import cards as CRD
+
+    try:
+        film = CRD.scan(a.case_dir)
+        if a.numbers:
+            CRD.apply_numbers(film, [a.prefix + n.strip() for n in a.numbers])
+    except CRD.CardsError as exc:
+        return fail(str(exc))
+    sheets_at = Path(a.sheet_dir) if a.sheet_dir else (
+        Path(tempfile.gettempdir()) / "nyshporka" / "cards" / film.frames_dir.name)
+    sheets = CRD.sheet(film, sheets_at)
+    map_path = CRD.write_map(film, a.map_out or sheets_at / "map.json")
+    env = ok({**film.as_json(), "sheets": [str(p) for p in sheets],
+              "map": str(map_path)})
+    if film.loose:
+        env.warn("cards_loose",
+                 "картки на цій плівці сірі, не чорні (інша зйомка) — межі знайдено м'якшим "
+                 "порогом, тож темна обкладинка чи чорний аркуш теж могли стати межею: "
+                 "звірте кожну групу на листі")
+    gaps = CRD.numbering_gaps([t.name for t in film.tones])
+    if gaps:
+        env.warn("frames_missing",
+                 f"у нумерації кадрів пропущено {len(gaps)} (перший — {gaps[0]}): плівку "
+                 f"не докачано, і пропущеною може бути саме картка. Межі — після догону")
+    if not film.runs:
+        env.warn("no_cards", "карток-мішеней не знайдено: тека — одна справа або "
+                             "зйомка не FamilySearch; межі назвіть самі (cases.split)")
+    lone = film.lone_inside
+    if lone:
+        env.warn("lone_card",
+                 "одиночний темний кадр посеред плівки: " + ", ".join(s.names[0] for s in lone)
+                 + " — це або початкова картка без кінцевої, або чорний аркуш книги; "
+                   "подивіться на листі й, якщо це аркуш, злийте сусідні частини в карті")
+    if film.cases and not a.numbers:
+        env.warn("fill_numbers",
+                 f"у карті {len(film.cases)} справ із номером «?»: впишіть шифру з "
+                 f"початкової картки кожної (на листі — друга картка в парі), далі "
+                 f"nysh cases split <тека> --map {map_path}")
+    return env
+
+
+class CasesJoinArgs(BaseModel):
+    dest: str = Field(description="тека справи, куди зібрати кадри")
+    parts: list[str] = Field(description="частини в порядку плівок: «<тека плівки>=<перший "
+                                         "файл>..<останній файл>», голова — першою")
+    dry_run: bool = Field(default=False, description="лише показати, що ляже")
+    copy_frames: bool = Field(default=False, description="копіювати, якщо жорстке посилання "
+                                                         "не створюється (інший том)")
+
+
+@op("cases.join", summary="Зібрати справу, розірвану між плівками", args=CasesJoinArgs,
+    mutates=True, agent=False)
+def cases_join(a: CasesJoinArgs) -> Envelope:
+    """Справа на двох котушках («CONTINUED ON / FROM ANOTHER ROLL»): частини з
+    тек плівок лягають в одну теку справи жорсткими посиланнями з іменами
+    `<плівка>_<кадр>`. Паспорт — далі `nysh case <тека>`.
+    """
+    from nyshporka.cases import join as J
+
+    try:
+        pieces = [J.parse_piece(p) for p in a.parts]
+        if a.dry_run:
+            rows = J.plan(a.dest, pieces)
+            return ok({"dest": a.dest, "frames": len(rows), "dry_run": True,
+                       "first": rows[0]["dst"], "last": rows[-1]["dst"]})
+        got = J.join(a.dest, pieces, copy=a.copy_frames)
+    except J.JoinError as exc:
+        return fail(str(exc))
+    env = ok(got)
+    env.warn("passport", f"кадри зібрано; паспорт справи — nysh case {a.dest} --shifra … "
+                         f"--one-case, далі nysh cases build")
+    return env
+
+
 class CasesChainArgs(BaseModel):
     all: bool = Field(default=False,
                       description="показати й теки без обриву: не читані, "
