@@ -196,6 +196,7 @@ def _remove(p: Path) -> None:
         if p.exists():
             _unlink_file(p)
         return
+    _open_dir(p)
     with os.scandir(p) as it:
         dity = list(it)
     for e in dity:
@@ -207,6 +208,18 @@ def _remove(p: Path) -> None:
         else:
             _unlink_file(child)
     _rmdir(p)
+
+
+def _open_dir(p: Path) -> None:
+    """Тека під видалення — читати, писати й заходити власникові.
+
+    На POSIX вміст видаляють права ТЕКИ (запис і вхід), а не файлу: тека
+    `r--` перелічується, але жодного імені з неї не прибрати. На Windows
+    `chmod` знімає лише атрибут «тільки читання», і цей крок нешкідливий.
+    """
+    mode = p.stat().st_mode
+    if mode & stat.S_IRWXU != stat.S_IRWXU:
+        os.chmod(p, mode | stat.S_IRWXU)
 
 
 def _unlink_link(p: Path) -> None:
