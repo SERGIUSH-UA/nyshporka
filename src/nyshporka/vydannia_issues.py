@@ -162,6 +162,9 @@ class Issue:
     path: Path
     pages: list[Path] = field(default_factory=list)
     supplement: bool = False
+    #: Разова друкована книга (книга пам'яті, список виборців): номера й дати
+    #: випуску в неї немає, є лише рік видання. Ні того, ні іншого не вигадуємо.
+    book: bool = False
 
     @property
     def name(self) -> str:
@@ -169,10 +172,14 @@ class Issue:
 
     @property
     def ident(self) -> str:
+        if self.book:
+            return str(self.year)
         return IssueName(self.no, self.no_total, self.date, self.year, self.supplement).ident
 
     def row(self, first_page: int) -> dict[str, Any]:
         """Рядок `issues.json` (поля, які приймає `share/print_pack._issues`)."""
+        if self.book:
+            return {"first_page": first_page, "pages": len(self.pages), "note": "книга"}
         out: dict[str, Any] = {"no": self.no, "date": self.date,
                                "first_page": first_page, "pages": len(self.pages)}
         if self.no_total:
@@ -246,6 +253,12 @@ def frames_of(folder: Path) -> list[Path]:
     """Кадри теки в тому порядку, у якому їх читає рушій (за іменем)."""
     return sorted(p for p in folder.iterdir()
                   if p.is_file() and p.suffix.lower() in FRAME_EXT)
+
+
+def book_issue(folder: Path, year: int) -> Issue:
+    """Тека книги як єдиний «номер» року її видання."""
+    return Issue(no="", no_total="", date="", year=int(year), path=folder,
+                 pages=frames_of(folder), book=True)
 
 
 def _issue(folder: Path) -> Issue | None:

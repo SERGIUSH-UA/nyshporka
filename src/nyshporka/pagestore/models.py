@@ -285,6 +285,20 @@ class NoteLine(BaseModel):
     bbox: list[int] | None = None
 
 
+class NoteWord(BaseModel):
+    """Звірене оком ОДНЕ слово рядка; решта рядка — від рушія.
+
+    Людина здебільшого звіряє прізвище чи по батькові, а не весь рядок
+    (відгук 18.10.2026). `text` запису тоді — рядок рушія з цим словом на
+    місці слова `index`, і звірене в ньому лише воно.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    index: int = Field(ge=1, description="номер слова в рядку з 1")
+    text: str = Field(min_length=1)
+
+
 class NoteWas(BaseModel):
     """Що на цьому рядку прочитав рушій до звірки."""
 
@@ -334,6 +348,8 @@ class CaseNote(BaseModel):
     was: NoteWas | None = None
     confidence: Literal["high", "medium", "low"] | None = None
     uncertain: list[str] = Field(default_factory=list)
+    #: Звірене лише одне слово (`NoteWord`); порожньо — звірено весь рядок.
+    word: NoteWord | None = None
     # catalog-error
     field: CatalogField | None = None
     archive_says: str = ""

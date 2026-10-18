@@ -51,6 +51,7 @@ class Box1(FakeSession):
         self.cuda = cuda
         self.meta_pages = meta_pages
         self.cmds: list[str] = []
+        self.spawn_cmds: list[str] = []
         self.prepared = False
 
     def run(self, cmd: str, *, timeout=None, on_line=None) -> Completed:
@@ -69,6 +70,7 @@ class Box1(FakeSession):
         return super().run(cmd, timeout=timeout, on_line=on_line)
 
     def spawn(self, cmd: str, *, log: str, pidfile: str) -> int:
+        self.spawn_cmds.append(cmd)
         pid = super().spawn(cmd, log=log, pidfile=pidfile)
         batch = self.reads.pop(0) if self.reads else []
         if batch:
@@ -680,6 +682,29 @@ def test_what_is_already_read_travels_to_the_box(space: Path, monkeypatch) -> No
         "карантин, якого на машині вже немає, локально не переживає забір"
     st = ST.load(res.run_id)
     assert st is not None and st.pages_seeded == 2
+
+
+def test_another_seg_height_is_another_reading(space: Path, monkeypatch) -> None:
+    """Великий почерк перечитують з `--seg-height`: це не «вже прочитано», і
+    старий текст рідної висоти на машину не їде (відгук 18.10.2026)."""
+    from nyshporka.core.workspace import workspace
+
+    session = Box1(space / "box", [NAMES], meta_pages=True)
+    case, backend, _ = _wire(space, monkeypatch, session)
+    out = workspace().htr_reports / case.name
+    out.mkdir(parents=True)
+    for n in ("0000", "0001"):
+        (out / f"{n}.txt").write_text("шматки по 3–5 літер", encoding="utf-8")
+    (out / "_htr_meta.json").write_text(json.dumps({
+        "model": "model_v1.pt", "frames_total": 3,
+        "pages": {"0000.jpg": {}, "0001.jpg": {}}}), encoding="utf-8")
+
+    res = _go(case, seg_height=900)
+    assert res.verdict == "ok", res.why
+    assert backend.needs[0].pages == 3, "читається вся справа, не лише решта"
+    assert not any("tar -xf seed.tar" in c for c in session.cmds),         "текст рідної висоти не має їхати на машину"
+    script = Path(session.spawn_cmds[0].split("'")[1]).read_text(encoding="utf-8")
+    assert "--seg-height 900" in script, "висота дійшла до раннера"
 
 
 # ── кілька заходів одночасно ─────────────────────────────────────────────────

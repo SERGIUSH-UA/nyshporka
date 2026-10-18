@@ -303,7 +303,8 @@ def test_plan_points_at_original_frames_and_carries_bookkeeping(
     assert plan["cases"][0]["case_dir"] == str(case.resolve())
     hooks = plan["post_fetch"]
     assert [h["cmd"][1:] for h in hooks] == [["cases", "build"],
-                                             ["text", "index", "--case", case.name]]
+                                             ["text", "index", "--case", case.name],
+                                             ["cloud", "drop-frames", case.name]]
     assert all(Path(h["cmd"][0]).is_absolute() for h in hooks), \
         "відчеплений процес не має ні нашого PATH, ні нашої робочої теки"
 
@@ -1882,3 +1883,33 @@ def test_cloud_state_shows_how_the_supervisor_was_detached(
     got = CliRunner().invoke(C.app, ["state", res.run_id])
     assert got.exit_code == 0, got.output
     assert "відчеплено setsid" in got.output
+
+
+def test_seg_height_reaches_the_box(space: Path, monkeypatch, fake_gpurunner) -> None:
+    """`--seg-height` у `cloud go` (відгук 18.10.2026): без нього великий почерк
+    у хмарі різався на шматки по 3–5 літер, а `-p seg_height` губився."""
+    case, _ = _wire(space, monkeypatch)
+    _go(case, dry_run=True, seg_height=900)
+    assert "seg_height=900" in _plan_of(fake_gpurunner)["params"]
+
+
+def test_drop_frames_takes_only_our_own_copy(space: Path) -> None:
+    """Стиснута копія прочитаної справи йде геть (20 ГБ за кілька днів, відгук
+    18.10.2026), а чуже — тека без паспорта, шлях убік — лишається."""
+    from nyshporka.cloud import frames as F
+    from nyshporka.core.workspace import workspace
+
+    root = workspace().derived / "cloud" / "frames"
+    ours = root / "spr-234"
+    ours.mkdir(parents=True)
+    for n in ("0001", "0002"):
+        (ours / f"{n}.jpg").write_bytes(b"x")
+    (ours / F.CLAIM_FILE).write_text("E:/справа/spr-234", encoding="utf-8")
+    stranger = root / "spr-235"
+    stranger.mkdir()
+    (stranger / "0001.jpg").write_bytes(b"x")
+
+    assert F.drop_cache("spr-234") == 2
+    assert not ours.exists()
+    assert F.drop_cache("spr-235") == 0 and (stranger / "0001.jpg").exists()
+    assert F.drop_cache("../frames") == 0 and F.drop_cache("") == 0

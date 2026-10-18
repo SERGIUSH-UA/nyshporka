@@ -787,7 +787,9 @@ def _decorate(row: dict[str, Any], describe_case: Any) -> dict[str, Any]:
     row["title"] = (case or {}).get("title") or ""
     # Той самий ключ у канонічній формі — для звірки «чи не суперечать
     # ключі» без `resolve_case` на кожен прогін (`same_frames`, в'ювер).
-    row["case_canon"] = _canon_case_key(str(row.get("case_key") or "").strip())
+    row["case_canon"] = _stale_opys(
+        _canon_case_key(str(row.get("case_key") or "").strip()),
+        str((case or {}).get("key") or ""))
     # 🔴 Кадри справи — знаменник покриття, і їдуть вони поруч із
     # чисельником навмисно. Без них лишається саме число прочитаних
     # сторінок, а поділити його нема на що: покриття, пораховане від
@@ -795,6 +797,66 @@ def _decorate(row: dict[str, Any], describe_case: Any) -> dict[str, Any]:
     # все». Порожньо тут законне — опису справи може не бути.
     row["frames"] = int((case or {}).get("frames") or 0)
     return row
+
+
+def _stale_opys(meta_key: str, lib_key: str) -> str:
+    """Ключ мети, записаний до виправлення опису, — ключем справи з бібліотеки.
+
+    🔴 Мета прогону не переписується, а розбір опису змінювався: літерний опис
+    «5д» колись читався як «5». Після оновлення справа з'являлась у реєстрі як
+    `…/5d/…`, а її прогони з `…/5/…` у меті лишались нічиїми: «прочитаного
+    немає» у `share pack`, і кожен прогін доводилось прив'язувати руками
+    (відгук 18.10.2026). Тека прогону вказує на справу бібліотеки — і коли
+    ключі різняться ЛИШЕ описом, це та сама справа.
+
+    Інший фонд чи номер справи цим не перебивається: там тека й мета можуть
+    суперечити по-справжньому, і рішення — за людиною (`cases bind`).
+    """
+    from nyshporka.core import casekey
+
+    if not lib_key or meta_key == lib_key:
+        return meta_key
+    a, b = casekey.parse(meta_key), casekey.parse(lib_key)
+    if a is None or b is None:
+        return meta_key
+    same = (a.repo, a.fond, a.spr) == (b.repo, b.fond, b.spr) and a.opys != b.opys
+    return lib_key if same else meta_key
+
+
+def run_key(row: dict[str, Any], bound: dict[str, str | None] | None = None) -> str:
+    """Ключ справи рядка прогону — те саме рішення, що й реєстр справ.
+
+    Спершу ручна прив'язка (`cases bind`), потім канонічний ключ рядка. 🔴 Сирий
+    `case_key` мети тут не годиться: після `cases bind` реєстр і Супряга
+    показували справу правильно, а `share suggest` пропонував віддати
+    «справу без кадрів» зі старим ключем, і стор тексту після `--rebuild`
+    лишав той самий старий ключ (відгук 18.10.2026).
+    """
+    bound = _bound_runs() if bound is None else bound
+    name = row.get("name")
+    if name in bound:
+        return _canon_case_key(bound[name] or "")
+    if "case_canon" in row:
+        return str(row.get("case_canon") or "")
+    return _canon_case_key(str(row.get("case_key") or "").strip())
+
+
+def proven_key(row: dict[str, Any], bound: dict[str, str | None] | None = None) -> str:
+    """Ключ мети — або той, що ДОВЕДЕНО замість нього: прив'язкою людини чи текою.
+
+    На відміну від `run_key`, недоведений ключ лишається в тій формі, в якій
+    його записав прогін: з нею звіряються журнали віддачі й відмов, і
+    канонізувати кожен рядок означало б розійтися з ними.
+    """
+    bound = _bound_runs() if bound is None else bound
+    raw = str(row.get("case_key") or "").strip()
+    if row.get("name") in bound:
+        return run_key(row, bound)
+    canon = str(row.get("case_canon") or "")
+    # Тека прогону довела іншу справу (застарілий опис, `_stale_opys`).
+    if canon and raw and canon != _canon_case_key(raw):
+        return canon
+    return raw
 
 
 def _runs_cache_path() -> Path:
@@ -999,14 +1061,9 @@ def runs_for_scope(scope: str | Sequence[str]) -> dict[str, Any]:
     bound = _bound_runs()
 
     def key_of(r: dict[str, Any]) -> str:
-        name = r.get("name")
-        if name in bound:
-            return _canon_case_key(bound[name] or "")
         # Рядок переліку вже несе канонічний ключ; рахувати його вдруге на
         # кожен прогін простору — те, що коштувало 45 с на команду.
-        if "case_canon" in r:
-            return str(r.get("case_canon") or "")
-        return _canon_case_key((r.get("case_key") or "").strip())
+        return run_key(r, bound)
 
     by_name = [r for r in rows if r.get("name") == want]
     if by_name:

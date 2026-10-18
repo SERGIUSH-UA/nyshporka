@@ -138,6 +138,8 @@ def run_for(runs: dict[str, IssueRun], issue_dir: str | Path) -> IssueRun | None
 
 def _label(iss: VI.Issue) -> str:
     """Номер для людини: «3 (1936-01-06)», «додаток 111 (1935-08-12)»."""
+    if iss.book:
+        return f"книга ({iss.year})"
     head = (f"додаток {iss.no}".strip() if iss.supplement else iss.no) or "без номера"
     return f"{head} ({iss.date})"
 
@@ -242,11 +244,14 @@ def records() -> list[dict[str, Any]]:
 
 
 def record(code: str, *, title: str, city: str,
-           issues: list[tuple[str, Path, Path]]) -> Path:
+           issues: list[tuple[str, Path, Path]], book: int = 0) -> Path:
     """Дописати видання: `issues` — (ім'я прогону, тека номера, куди ляже текст).
 
     Запис дописується, а не перезаписується: видання часто женуть частинами
     (рік за роком), і попередні номери мусять лишитись у ньому.
+
+    `book` — рік видання разової книги: тоді `issues` — сама тека книги, а
+    дерева підшивки (`<Назва>/<РІК>/<номер>`) немає й шукати його нема де.
     """
     code = code.upper()
     if not vydannia.is_code(code):
@@ -254,10 +259,14 @@ def record(code: str, *, title: str, city: str,
     data = load_record(code) or {"code": code, "issues": {}, "roots": []}
     data["title"] = title or data.get("title") or ""
     data["city"] = city or data.get("city") or ""
+    if book:
+        data["kind"] = "book"
     roots = set(data.get("roots") or [])
     for run, case_dir, out_dir in issues:
-        data["issues"][run] = {"case_dir": str(case_dir), "out_dir": str(out_dir)}
-        roots.add(str(edition_root(Path(case_dir))))
+        data["issues"][run] = {"case_dir": str(case_dir), "out_dir": str(out_dir),
+                               **({"year": int(book)} if book else {})}
+        if not book:
+            roots.add(str(edition_root(Path(case_dir))))
     data["roots"] = sorted(roots)
     return _write_record(data)
 
@@ -283,7 +292,7 @@ _CARD_HINT = {
     "title": "назва з шапки номера, без року: --title \"Колективізоване село\"",
     "city": "місто видання: --city \"Пирятин\"",
     "doc_type": "жанр: --doc-type newspaper (газета) | gazette (єпарх. відомості) | "
-                "directory (довідник)",
+                "directory (довідник) | book (разова книга)",
     "holder": "де лежить підшивка, з якої скани: --holder \"НБУВ, фонд газет\" або "
               "\"приватна колекція (ім'я)\"",
 }
@@ -381,6 +390,8 @@ def year_note(rec: dict[str, Any], year: int, rows: list[dict[str, Any]],
               pages: int) -> str:
     """Опис року для картки в пулі: сайт показує нотатку текстом, а перелік
     номерів (`extra.publication.issues`) не показує ніде."""
+    if rec.get("kind") == "book":
+        return _book_note(rec, year, pages)
     out: list[str] = []
     organ = organ_for(rec, year)
     if organ:
@@ -406,6 +417,20 @@ def year_note(rec: dict[str, Any], year: int, rows: list[dict[str, Any]],
         out.append(f"Підшивка: {rec['holder']}.")
     out.append("Текст — PaddleOCR-VL 1.6, хмарний прогін Нишпорки; номери й дати взято "
                "з назв тек сканів, а не з розпізнаного тексту.")
+    if rec.get("note"):
+        out.append(_sentence(str(rec["note"])))
+    return " ".join(out)
+
+
+def _book_note(rec: dict[str, Any], year: int, pages: int) -> str:
+    """Опис книги: без «номерів» і дат випуску — у книги їх немає."""
+    out = [f"Друкована книга, {year} р."]
+    if rec.get("city"):
+        out.append(_sentence(f"Місце видання — {rec['city']}"))
+    out.append(f"У пулі {_n(pages, 'сторінка', 'сторінки', 'сторінок')}.")
+    if rec.get("holder"):
+        out.append(f"Примірник: {rec['holder']}.")
+    out.append("Текст — PaddleOCR-VL 1.6, хмарний прогін Нишпорки.")
     if rec.get("note"):
         out.append(_sentence(str(rec["note"])))
     return " ".join(out)
@@ -562,6 +587,14 @@ def _edition_of(rec: dict[str, Any]) -> tuple[VI.Edition | None, dict[str, Path]
     rows = list((rec.get("issues") or {}).values())
     by_dir = {_norm(v.get("case_dir") or ""): Path(str(v.get("out_dir") or ""))
               for v in rows if v.get("case_dir")}
+    if rec.get("kind") == "book":
+        books = [VI.book_issue(Path(str(v["case_dir"])), int(v["year"])) for v in rows
+                 if v.get("case_dir") and v.get("year") and Path(str(v["case_dir"])).is_dir()]
+        if not books:
+            return None, by_dir
+        return VI.Edition(root=books[0].path.parent,
+                          title=str(rec.get("title") or rec.get("code") or ""),
+                          issues=sorted(books, key=lambda i: i.year)), by_dir
     eds = [VI.scan(Path(r)) for r in rec.get("roots") or [] if Path(r).is_dir()]
     ed: VI.Edition | None = eds[0] if eds else None
     for other in eds[1:]:

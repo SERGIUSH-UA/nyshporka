@@ -37,7 +37,7 @@ WIRE_VERSION = 1
 #: Поля запису, що їдуть у пул. 🔴 Білий список: `author` (у нас там пишуть
 #: «сесія, пошук Пухтицький»), `share` і `origin` — домашні.
 WIRE_FIELDS = ("uid", "kind", "created", "reader", "model", "supersedes", "retracts",
-               "text", "page", "line", "was", "confidence", "uncertain",
+               "text", "page", "line", "was", "confidence", "uncertain", "word",
                "field", "archive_says", "actually", "other", "relation")
 
 #: Поля сторінки, що їдуть у пул. `comment` і `agent` — ніколи: там нотатки

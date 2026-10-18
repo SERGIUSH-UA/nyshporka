@@ -383,10 +383,14 @@ def post_fetch_hooks(run_names: Sequence[str] | str) -> list[dict[str, Any]]:
     except WorkspaceError:
         return []
     names = [run_names] if isinstance(run_names, str) else list(run_names)
+    # Стиснуті кадри прочитаних справ — останнім: облік спершу, а місце на
+    # диску потім (20 ГБ у `cloud/frames` за кілька днів, відгук 18.10.2026).
     return [{"cmd": [exe, "cases", "build"], "cwd": root, "timeout_sec": 3600},
             *({"cmd": [exe, "text", "index", "--case", name], "cwd": root,
                "timeout_sec": 3600}
-              for name in names)]
+              for name in names),
+            {"cmd": [exe, "cloud", "drop-frames", *names], "cwd": root,
+             "timeout_sec": 600}]
 
 
 def _rent_floor() -> float | None:

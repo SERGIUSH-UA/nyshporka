@@ -117,3 +117,72 @@ def test_shyfra_v_case_key_tezh_svoia(scope: Any, monkeypatch: pytest.MonkeyPatc
         assert "старий" in _names(S.runs_for_scope("ДАХмО R-100-1-7"))
     finally:
         S._canon_case_key.cache_clear()
+
+
+# ── той самий ключ і поза пошуком: стор тексту й `share suggest` ─────────────
+# Відгук 18.10.2026: після `cases bind` реєстр і Супряга показували справу
+# правильно, а `share suggest` пропонував «справу без кадрів» зі старим ключем
+# мети, і `text index --rebuild` писав у стор той самий старий ключ.
+
+STALE = "DAHMO/R-1000/1/7"   # номер, що прилип до фонду, — як 800-1-8а → 10800-1-8
+
+
+def test_run_key_takes_the_bind_over_the_meta(scope: Any) -> None:
+    S, R = scope
+    row = {"name": "проба-фонд-Р", "case_key": STALE, "case_dir": ""}
+    assert S.run_key(row) != KEY
+    R.bind_run("проба-фонд-Р", KEY, "номер у теці застарів", force=True)
+    assert S.run_key(row) == KEY
+
+
+def test_text_index_writes_the_bound_key(scope: Any) -> None:
+    S, R = scope
+    from nyshporka.search import store as ST
+
+    R.bind_run("проба-фонд-Р", KEY, "номер у теці застарів", force=True)
+    assert ST._run_key("проба-фонд-Р", {"case_key": STALE}) == KEY
+    # нерозв'язаний прогін лишає ключ мети як був
+    assert ST._run_key("нічий", {"case_key": STALE}) == STALE
+
+
+def test_share_suggest_offers_the_bound_key(scope: Any, monkeypatch) -> None:
+    S, R = scope
+    from nyshporka.share import publish as PB
+    from nyshporka.share import suggest as SG
+
+    rows = [{"name": "проба-фонд-Р", "case_key": STALE, "case_dir": "D:/gone/x",
+             "pages_done": 12}]
+    monkeypatch.setattr(S, "list_cases", lambda: [dict(r) for r in rows])
+    monkeypatch.setattr(SG, "vidmovleni", lambda: set())
+    monkeypatch.setattr(SG, "viddani", lambda: set())
+    monkeypatch.setattr(SG, "_u_puli", lambda k: None)
+    monkeypatch.setattr(SG, "_u_puli_poruch", lambda k, s: {})
+    monkeypatch.setattr(PB, "znamennyk_spravy",
+                        lambda k, s: {"total": 12 if k == KEY else 0, "unknown": ""})
+    R.bind_run("проба-фонд-Р", KEY, "номер у теці застарів", force=True)
+
+    got = SG.nepodileni()
+    assert [r["case_key"] for r in got] == [KEY]
+    assert got[0]["frames"] == 12, "справа з кадрами, а не «без кадрів»"
+
+
+def test_meta_key_stale_only_by_opys_takes_the_library_key() -> None:
+    """Літерний опис «5д» колись читався як «5»: тека — та сама справа."""
+    from nyshporka import htr_store as S
+
+    assert S._stale_opys("DADNO/6508/5/2", "DADNO/6508/5d/2") == "DADNO/6508/5d/2"
+    # інший фонд чи номер — рішення людини, не здогад
+    assert S._stale_opys("DAVIO/10800/1/8", "DAVIO/800/1/8a") == "DAVIO/10800/1/8"
+    assert S._stale_opys("DAVIO/109/1/42", "DAVIO/109/1/56") == "DAVIO/109/1/42"
+    assert S._stale_opys("DADNO/6508/5/2", "") == "DADNO/6508/5/2"
+
+
+def test_a_run_with_the_old_opys_belongs_to_its_case(scope: Any) -> None:
+    """Прогін справи «5д», записаний до виправлення опису, — при своїй справі:
+    без цього він лишався нічиїм і вимагав `cases bind` на кожен прогін."""
+    S, _ = scope
+    row = S._decorate({"name": "5d-2", "case_key": "DADNO/6508/5/2",
+                       "case_dir": "data/raw/dadno_6508/5d-2"},
+                      lambda p: {"key": "DADNO/6508/5d/2", "shifra": "ДАДнО Р-6508-5д-2"})
+    assert row["case_canon"] == "DADNO/6508/5d/2"
+    assert S.run_key(row) == "DADNO/6508/5d/2"

@@ -346,9 +346,11 @@ def pack_print_cmd(
     license_: str = typer.Option("", "--license", help="ліцензія; порожньо — з профілю"),
     source_terms: str = typer.Option("", "--source-terms",
                                      help="умови джерела текстового шару"),
+    doc_type: str = typer.Option("", "--doc-type",
+                                 help="жанр картки: newspaper | gazette | directory | book"),
     as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
-    """Спакувати рік друкованого видання (газета, довідник) як книгу пулу.
+    """Спакувати рік друкованого видання (газета, довідник, книга) як книгу пулу.
 
     Ключ у пулі — `VYD/<код>/<рік>`; віддається тим самим `nysh share publish`.
     """
@@ -360,7 +362,7 @@ def pack_print_cmd(
         "place": list(place), "publisher_place": publisher_place, "issues": issues,
         "out": out, "dry_run": dry_run, "publisher": publisher, "contact": contact,
         "note": note, "link": list(link), "license": license_,
-        "source_terms": source_terms})
+        "source_terms": source_terms, "doc_type": doc_type})
     if _answer(env, as_json):
         return
     d = env.data or {}

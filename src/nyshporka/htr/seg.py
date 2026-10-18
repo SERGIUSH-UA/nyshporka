@@ -106,8 +106,13 @@ def candidates(case_dir: Path, *, base_out: Path, derived: Path) -> list[Path]:
     return out
 
 
-def key_problem(files: Sequence[Path]) -> str:
-    """Чи знятий кеш із тими параметрами нарізки, з якими читатиме раннер."""
+def key_problem(files: Sequence[Path], *, seg_height: int = 0) -> str:
+    """Чи знятий кеш із тими параметрами нарізки, з якими читатиме раннер.
+
+    `seg_height` — висота, з якою читатиме раннер (0 — рідна): кеш іншої висоти
+    раннер не візьме й сегментує наново.
+    """
+    expected = {**EXPECTED_KEY, "seg_height": int(seg_height or 0)}
     base = [f for f in files if ".c400." in f.name] or list(files)
     for f in base[:3]:
         try:
@@ -115,7 +120,7 @@ def key_problem(files: Sequence[Path]) -> str:
                 key = json.load(fh).get("key") or {}
         except (OSError, ValueError):
             return f"{f.name} не читається"
-        wrong = {k: key.get(k) for k, v in EXPECTED_KEY.items() if key.get(k) != v}
+        wrong = {k: key.get(k) for k, v in expected.items() if key.get(k) != v}
         if key.get("kraken") not in EXPECTED_LINEAGE:
             wrong["kraken"] = key.get("kraken")
         if wrong:
@@ -184,7 +189,7 @@ def frames_of(case_dir: Path) -> list[Path]:
 
 def inspect(case_dir: Path, frames: Sequence[Path] | None = None, *,
             base_out: Path, derived: Path | None = None,
-            require_geometry: bool = False) -> SegCache:
+            require_geometry: bool = False, seg_height: int = 0) -> SegCache:
     """Найкраща придатна сегментація для цих кадрів — або чому її немає.
 
     `case_dir` — тека справи, за якою адресується локальний кеш; `frames` —
@@ -209,7 +214,7 @@ def inspect(case_dir: Path, frames: Sequence[Path] | None = None, *,
         return SegCache(None, n, 0, False,
                         "готової сегментації немає — сегментуватиметься наново")
     d, covered, files = best
-    if problem := key_problem(files):
+    if problem := key_problem(files, seg_height=seg_height):
         return SegCache(d, n, covered, False,
                         f"кеш знятий з іншими параметрами нарізки ({problem}) — не влучить")
     if problem := geometry_problem(frames, base_out, require=require_geometry):

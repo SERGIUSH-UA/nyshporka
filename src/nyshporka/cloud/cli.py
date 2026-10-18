@@ -932,6 +932,28 @@ def cmd_stop(
     console.print(f"✅ {st.run_id} закрито")
 
 
+@app.command("drop-frames")
+def cmd_drop_frames(
+    names: list[str] = typer.Argument(..., help="імена прогонів (теки в `cloud/frames`)"),
+) -> None:
+    """Прибрати стиснуті кадри прочитаних справ із `cloud/frames`.
+
+    Наглядач кличе це сам після повного забору. Руками — для старих заходів;
+    усе відтворюване разом (асети, тимчасове) — `nysh disk clean`.
+    """
+    from nyshporka.cloud import frames as F
+
+    total = 0
+    for name in names:
+        n = F.drop_cache(name)
+        total += n
+        if n:
+            console.print(f"🧹 {escape(name)}: прибрано {n} стиснутих кадрів",
+                          highlight=False)
+    if not total:
+        console.print("[muted]стиснутих копій цих справ немає[/muted]")
+
+
 def _print_batch(res: Any) -> None:
     """Партія поіменно: людина бачить, яка машина що везе й за скільки."""
     for q in res.queues:
@@ -1039,6 +1061,15 @@ def cmd_go(
         help="параметр роботи для машини, `ключ=значення` (напр. "
              "`shards=6`, `max_endpoints=600`). Наш обчислений параметр "
              "ваш перекриває"),
+    book: int = typer.Option(
+        0, "--book",
+        help="з `--print`: тека — разова друкована книга (книга пам'яті, список виборців), "
+             "значення — рік видання. Номерів і дат у книги немає; том — окремий код"),
+    seg_height: int = typer.Option(
+        0, "--seg-height",
+        help="висота сегментації (0 = рідна 1800). Великий почерк (довідки, бланки, "
+             "покажчики), який рідна висота ріже на шматки по 3–5 літер, — 900. "
+             "Інша висота — окреме читання: старе піде в `_prev_`"),
     pace: str = typer.Option(
         "", "--pace",
         help="`fast` (типово) — лише машина, що дає ціль темпу, інакше захід чекає "
@@ -1146,7 +1177,7 @@ def cmd_go(
                 boxes=boxes, datacenter_only=datacenter_only, pace=pace,
                 min_pph=min_pph, machine=machine,
                 accept_slow_delivery=accept_slow_delivery, on_event=on_event,
-                tick_sec=max(1.0, tick))
+                seg_height=seg_height, book=book, tick_sec=max(1.0, tick))
     if as_json:
         # `print`, а не rich: один рядок без переносів і розфарбування — його
         # розбирають `json.loads` від останнього рядка виводу.

@@ -393,7 +393,7 @@ class SharePackPrintArgs(BaseModel):
     license: str = Field(default="", description="ліцензія; порожньо — з профілю")
     source_terms: str = Field(default="", description="умови джерела текстового шару")
     doc_type: str = Field(default="", description="жанр картки: newspaper | gazette | "
-                                                  "directory (див. `nysh share card`)")
+                                                  "directory | book (див. `nysh share card`)")
     scans_url: str = Field(default="", description="де подивитись скани підшивки; "
                                                    "пул показує це посилання як «саму книгу»")
     scans_label: str = Field(default="", description="підпис посилання на скани")

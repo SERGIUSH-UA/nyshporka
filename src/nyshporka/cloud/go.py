@@ -508,6 +508,7 @@ def go(case: str | Sequence[str], *, backend: str = "vast",
        boxes: int = 1, datacenter_only: bool = False, pace: str = "",
        min_pph: float = 0.0, machine: int = 0, accept_slow_delivery: bool = False,
        vydannia: str = "", title: str = "", city: str = "",
+       seg_height: int = 0, book: int = 0,
        on_event: EventFn | None = None, tick_sec: float = 60.0) -> GoResult:
     """Прочитати справу (або кілька) на орендованій машині від початку до кінця.
 
@@ -524,17 +525,30 @@ def go(case: str | Sequence[str], *, backend: str = "vast",
     """
     cases = (case,) if isinstance(case, str) else tuple(case)
     res = GoResult(backend=backend, dry_run=dry_run)
+    if not seg_height:
+        # `-p seg_height=…` — та сама ручка: без неї тут план вважав би
+        # перечитування з іншою висотою «вже прочитаним» і віз би старий текст.
+        for p in params:
+            k, _, v = p.partition("=")
+            if k.strip() == "seg_height" and v.strip().isdigit():
+                seg_height = int(v.strip())
     if not cases:
         res.verdict, res.why = "refused", "не названо жодної справи"
         return res
     edition: dict[str, Any] | None = None
+    if book and script != "print":
+        res.verdict, res.why = "refused", ("`--book` — для друкованої книги, разом із "
+                                           "`--print`")
+        return res
     if script == "print":
         try:
             if case_key:
                 raise GoRefused("ключ номера газети — ключ видання `VYD/<код>/<рік>`, "
                                 "його дає `--vydannia`; приберіть `--case-key`")
-            cases, edition = _print_cases(cases, vydannia=vydannia, title=title, city=city,
-                                          dry_run=dry_run)
+            cases, edition = (_book_case(cases, vydannia=vydannia, title=title, city=city,
+                                         year=book) if book else
+                              _print_cases(cases, vydannia=vydannia, title=title,
+                                           city=city, dry_run=dry_run))
         except GoRefused as exc:
             res.verdict, res.why = exc.verdict, str(exc)
             return res
@@ -555,6 +569,7 @@ def go(case: str | Sequence[str], *, backend: str = "vast",
             allow_partial=allow_partial, rotate_landscape=rotate_landscape,
             thin=thin, transport=transport,
             max_usd_per_1000=max_usd_per_1000, params=tuple(params),
+            seg_height=seg_height,
             pack_dir=pack_dir, upload_jobs=upload_jobs,
             boxes=boxes, datacenter_only=datacenter_only, pace=pace,
             min_pph=min_pph, machine=machine,
@@ -721,6 +736,38 @@ def _print_cases(cases: tuple[str, ...], *, vydannia: str, title: str, city: str
     return tuple(got.cases), {"code": code, "title": title, "city": city, "runs": runs}
 
 
+def _book_case(cases: tuple[str, ...], *, vydannia: str, title: str, city: str,
+               year: int) -> tuple[tuple[str, ...], dict[str, Any]]:
+    """📕 Разова друкована книга: одна тека кадрів = рік її видання.
+
+    Книга пам'яті чи список виборців — не підшивка: номерів і дат випуску в
+    неї немає, і вигадувати їх, щоб вкласти книгу в дерево газети, не можна
+    (відгук 18.10.2026). Том — окремий код видання (`REABILIT_T1`).
+    """
+    from nyshporka import print_edition as PE
+    from nyshporka import vydannia as V
+    from nyshporka import vydannia_issues as VI
+
+    if len(cases) != 1:
+        raise GoRefused("книга — одна тека на захід; кожен том — окремий код "
+                        "видання (`--vydannia REABILIT_T1`)")
+    if not 1450 <= int(year) <= 2100:
+        raise GoRefused(f"`--book` — рік видання книги, а не {year}")
+    folder = Path(cases[0]).expanduser().resolve()
+    if not folder.is_dir() or not VI.frames_of(folder):
+        raise GoRefused(f"у «{cases[0]}» немає кадрів книги (jpg/png у самій теці)")
+    code = (vydannia or "").strip().upper()
+    if not code:
+        raise GoRefused(
+            f"назвіть код книги: `--vydannia {VI.suggest_code(title or folder.name, city)}`. "
+            f"Він іде в ключ `VYD/<код>/{year}` назавжди, тому його підтверджує людина.")
+    if not V.is_code(code):
+        raise GoRefused(f"код видання «{code}» — лише латинка, цифри й `_`, від двох знаків")
+    iss = VI.book_issue(folder, int(year))
+    return (str(folder),), {"code": code, "title": title or folder.name, "city": city,
+                            "runs": PE.issue_runs(code, [iss]), "book": int(year)}
+
+
 def _issue_run(edition: dict[str, Any] | None, case: str) -> Any:
     """`print_edition.IssueRun` номера заходу друку; None — це не друк."""
     if not edition:
@@ -735,7 +782,8 @@ def _prepare(res: GoResult, case: str, say: EventFn, owner: contextlib.ExitStack
              second_voice: bool, with_voices: tuple[str, ...],
              max_price: float | None, rerun: bool, allow_partial: bool,
              rotate_landscape: bool, dry_run: bool, thin: bool,
-             batch: bool, density: _Density | None = None, printed: Any = None
+             batch: bool, density: _Density | None = None, printed: Any = None,
+             seg_height: int = 0
              ) -> tuple[CV.Leg | None, ST.RunState | None]:
     """Підготувати ОДНУ справу заходу: від теки кадрів до готового до відправки.
 
@@ -841,7 +889,17 @@ def _prepare(res: GoResult, case: str, say: EventFn, owner: contextlib.ExitStack
         return None, live
 
     # 2. уже прочитано?
-    if not rerun:
+    # Висота сегментації — інше читання тією самою моделлю (великий почерк
+    # рідною висотою рветься на шматки по 3–5 літер): перечитування з
+    # `--seg-height` не «вже прочитано», старий текст на машину не їде, а при
+    # заборі він відкладається в `_prev_` (відгук 18.10.2026).
+    old_height = int(V.read_meta(plan.out_dir).get("seg_height") or 0)
+    same_reading = old_height == int(seg_height or 0)
+    if not same_reading and V.read_meta(plan.out_dir).get("model"):
+        say("plan", f"у {plan.out_dir.name} читання з висотою сегментації "
+                    f"{old_height or 'рідною'}, а зараз {seg_height or 'рідна'} — це "
+                    f"окреме читання: старе піде в `_prev_`, нове ляже начисто")
+    if not rerun and same_reading:
         done = already_read(plan.out_dir, model=plan.model.name, frames=plan.frames)
         if done:
             raise GoRefused(f"{done}. Перечитати — `--rerun`; спершу "
@@ -904,7 +962,8 @@ def _prepare(res: GoResult, case: str, say: EventFn, owner: contextlib.ExitStack
     # писати в теку з чужим читанням, і захід скінчився б на першій сторінці.
     before = V.verify(plan.out_dir, case_dir=ref.frames_dir)
     meta_model = Path(str(V.read_meta(plan.out_dir).get("model") or "")).name
-    seed = not rerun and before.got > 0 and meta_model == plan.model.name
+    seed = (not rerun and same_reading and before.got > 0
+            and meta_model == plan.model.name)
     # Множиною, а не сумою: відкладена сторінка зазвичай і без тексту, тож у
     # двох переліках вона та сама.
     left = len(set(before.missing) | set(before.quarantined)) if seed else None
@@ -960,7 +1019,8 @@ def _prepare(res: GoResult, case: str, say: EventFn, owner: contextlib.ExitStack
     # «нема з чим звірити» тут не «придатно», а рядки не з тих місць (рев'ю
     # 04.10.2026). Ті самі кадри — геометрія та сама за побудовою.
     cache = SEG.inspect(ref.frames_dir, SEG.frames_of(pack), base_out=seg_base,
-                        require_geometry=pack != ref.frames_dir)
+                        require_geometry=pack != ref.frames_dir,
+                        seg_height=seg_height)
     # Нова справа без жодного читання — звичайний стан, а не втрата: про неї
     # мовчимо. Говоримо, коли попереднє читання БУЛО або кеш знайшовся.
     # Друк сегментації kraken не має, тож і говорити про її ціну нема чого.
@@ -1066,6 +1126,7 @@ def _go(res: GoResult, cases: tuple[str, ...], say: EventFn,
         pace: str = "", min_pph: float = 0.0, machine: int = 0,
         accept_slow_delivery: bool = False,
         edition: dict[str, Any] | None = None,
+        seg_height: int = 0,
         pack_dir: str = "", upload_jobs: int = 0) -> None:
     from nyshporka.cloud import plan as PL
 
@@ -1141,7 +1202,7 @@ def _go(res: GoResult, cases: tuple[str, ...], say: EventFn,
                                  allow_partial=allow_partial,
                                  rotate_landscape=rotate_landscape,
                                  dry_run=dry_run, thin=thin, batch=len(cases) > 1,
-                                 density=density,
+                                 density=density, seg_height=seg_height,
                                  printed=_issue_run(edition, arg))
         except GoRefused as exc:
             if len(cases) == 1:
@@ -1231,7 +1292,8 @@ def _go(res: GoResult, cases: tuple[str, ...], say: EventFn,
         from nyshporka import print_edition as PE
 
         PE.record(edition["code"], title=edition["title"], city=edition["city"],
-                  issues=[(leg.name, leg.source, leg.plan.out_dir) for leg in convoy.legs])
+                  issues=[(leg.name, leg.source, leg.plan.out_dir) for leg in convoy.legs],
+                  book=int(edition.get("book") or 0))
     _fill_cases(res, convoy)
 
     # 4а. наглядацький шлях: далі захід веде відчеплений наглядач, а ми виходимо
@@ -1246,7 +1308,8 @@ def _go(res: GoResult, cases: tuple[str, ...], say: EventFn,
                               ("min_pages_per_hour", f"{min_pph:g}" if min_pph else ""),
                               ("machine_id", str(int(machine)) if machine else ""),
                               ("accept_slow_delivery",
-                               "true" if accept_slow_delivery else "")):
+                               "true" if accept_slow_delivery else ""),
+                              ("seg_height", str(int(seg_height)) if seg_height else "")):
             if setting and knob not in given:
                 params = (*params, f"{knob}={setting}")
 
@@ -1320,7 +1383,7 @@ def _go(res: GoResult, cases: tuple[str, ...], say: EventFn,
     # 5. оренда → середовище → заливка → пуск
     plan = replace(plan, budget_usd=round(high, 2), max_hours=hours)
     res.rented = True
-    st = RUN.start(plan, auto_prepare=True, seed=seed,
+    st = RUN.start(plan, auto_prepare=True, seed=seed, seg_height=seg_height,
                    on_line=lambda s: say("start", s))
     st.fork_low, st.fork_high = res.fork_low, res.fork_high
     ST.save(st)

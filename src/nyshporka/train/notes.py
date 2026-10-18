@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any
 
 from nyshporka.core.workspace import Workspace
+from nyshporka.pagestore.models import CaseNote
 from nyshporka.train import sets as S
 from nyshporka.utils.atomic import read_json, write_json
 
@@ -80,6 +81,38 @@ def _mark(reg: S.Registry, name: str, page: str, idx: int, text: str, by: str,
     return True
 
 
+#: Звірене слово коротше за це — не «складне»: «Иван», «сынъ», «его» рушій
+#: читає й так, а частковий рядок у трені вартий лише того слова, де він помилився.
+HARD_WORD_MIN = 5
+
+
+def hard_word(n: Any) -> bool:
+    """Чи варте звірене слово рядка трену: довге й рушій у ньому помилився."""
+    if n.word is None:
+        return True
+    word = n.word.text.strip()
+    if len(word) < HARD_WORD_MIN:
+        return False
+    engine = (n.was.text if n.was is not None else "").split()
+    i = n.word.index - 1
+    return not (0 <= i < len(engine) and engine[i] == word)
+
+
+def _pool_hard_word(r: dict[str, Any]) -> bool:
+    """`hard_word` для запису пулу: без `word` — звірено весь рядок."""
+    w = r.get("word")
+    if not isinstance(w, dict):
+        return True
+    try:
+        n = CaseNote.model_validate({"kind": "reading", "page": "x",
+                                     "text": str(r.get("text") or "x"), "word": w,
+                                     "was": r.get("was") if isinstance(r.get("was"), dict)
+                                     else None})
+    except Exception:
+        return False
+    return hard_word(n)
+
+
 # ── свої записи ──────────────────────────────────────────────────────────────
 def from_notes(case: str, *, ws: Workspace | None = None) -> dict[str, Any]:
     """Набір `notes-<справа>` зі своїх чинних звірених рядків справи.
@@ -97,6 +130,11 @@ def from_notes(case: str, *, ws: Workspace | None = None) -> dict[str, Any]:
     ref = PS.resolve_case(case)
     cf = PS.load_case(ref)
     reads = [n for n in NB.live(cf.notes, own=True) if n.kind == "reading"] if cf else []
+    # Звірене одне слово йде в трен лише складним (рішення дослідника
+    # 18.10.2026): решта рядка там від рушія, і легке слово додало б лише його
+    # власні помилки під виглядом звіреного.
+    easy = [n for n in reads if n.word is not None and not hard_word(n)]
+    reads = [n for n in reads if n not in easy]
     boxed = [n for n in reads if n.line is not None and n.line.bbox]
     ck = casekey.parse(ref.key)
     name = _safe(f"notes-{casekey.stem(ck) if ck else ref.key}")
@@ -110,6 +148,7 @@ def from_notes(case: str, *, ws: Workspace | None = None) -> dict[str, Any]:
     out: dict[str, Any] = {"case": ref.key, "shifra": ref.shifra, "set": name,
                            "readings": len(reads), "with_box": len(boxed), "cut": 0,
                            "marked": 0, "no_box": [n.uid for n in reads if n not in boxed],
+                           "word_easy": [n.uid for n in easy],
                            "no_frame": []}
     if not boxed and not reg.exists(name):
         return out
@@ -222,6 +261,10 @@ def from_pool(rows: list[dict[str, Any]], fetch: Any, *, dead: list[str] | None 
             if idx < 0 or not page or not S.safe_page(page):
                 out["failed"].append({"uid": r.get("uid"), "why": "без сторінки чи рядка"})
                 done.append(cid)            # такий рядок і повтор не виправить
+                continue
+            if not _pool_hard_word(r):
+                # Звірене одне легке слово — не мітка рядка (див. `hard_word`).
+                done.append(cid)
                 continue
             try:
                 raw = fetch(str(r["uid"]))

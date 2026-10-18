@@ -394,6 +394,12 @@ def _shape(entry: dict[str, Any], v: Verdict) -> None:
     if was is not None and not (isinstance(was, dict)
                                 and isinstance(was.get("text", ""), str)):
         bad("was", "{run, text}")
+    word = entry.get("word")
+    if word is not None and not (isinstance(word, dict)
+                                 and isinstance(word.get("index"), int) and word["index"] >= 1
+                                 and isinstance(word.get("text"), str)
+                                 and 0 < len(word["text"]) <= 200):
+        bad("word", "{index ≥ 1, text — одне слово}")
 
 
 def check_note(entry: dict[str, Any]) -> Verdict:

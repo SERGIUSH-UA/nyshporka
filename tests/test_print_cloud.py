@@ -335,3 +335,76 @@ def test_edition_follows_the_supervisor_out_dirs(ws: Any, edition: Path) -> None
     # номер 3 прочитано за текою наглядача; номер 4 у цьому тесті не читали
     assert y36.read == 2 and all(m.startswith("4 ") for m in y36.missing_pages)
 
+
+
+# ── разова книга (відгук 18.10.2026) ─────────────────────────────────────────
+@pytest.fixture
+def book(tmp_path: Path) -> Path:
+    """Книга — тека кадрів без номерів і дат: «Список избирателей…», 1912."""
+    return _issue(tmp_path, "", "Список избирателей 1912", 3)
+
+
+def test_a_book_runs_as_one_unit_of_its_year(book: Path) -> None:
+    from nyshporka import print_edition as PE
+    from nyshporka.cloud import go as GO
+
+    cases, ed = GO._book_case((str(book),), vydannia="izbir_ekat", title="",
+                              city="Катеринослав", year=1912)
+    run = PE.run_for(ed["runs"], cases[0])
+    assert (run.name, run.key) == ("izbir_ekat_1912", "VYD/IZBIR_EKAT/1912")
+    assert ed["book"] == 1912 and ed["title"] == "Список избирателей 1912"
+
+
+@pytest.mark.parametrize("cases, code, year, why", [
+    (2, "IZBIR", 1912, "одна тека"),
+    (1, "", 1912, "назвіть код"),
+    (1, "IZBIR", 12, "рік видання"),
+])
+def test_a_book_refuses_what_it_cannot_honestly_name(book: Path, cases: int, code: str,
+                                                     year: int, why: str) -> None:
+    from nyshporka.cloud import go as GO
+
+    with pytest.raises(GO.GoRefused, match=why):
+        GO._book_case(tuple([str(book)] * cases), vydannia=code, title="", city="",
+                      year=year)
+
+
+def test_book_without_print_is_refused(book: Path) -> None:
+    from nyshporka.cloud import go as GO
+
+    res = GO.go(str(book), book=1912, dry_run=True, backend="fake")
+    assert res.verdict == "refused" and "--print" in res.why
+
+
+def test_a_book_is_assembled_without_issue_numbers_or_dates(ws: Any, book: Path) -> None:
+    """🔴 Дати й номера в книги немає — і в зібраному році їх не з'являється."""
+    from nyshporka import print_edition as PE
+    from nyshporka.cloud import printed as PR
+
+    PE.record("IZBIR_EKAT", title="Список городских избирателей", city="Катеринослав",
+              issues=[("izbir_ekat_1912", book, _read(PR.out_root(), "izbir_ekat_1912", book))],
+              book=1912)
+
+    (y,) = PE.assemble("IZBIR_EKAT")
+    assert y.complete and (y.year, y.pages, y.issues) == (1912, 3, 1)
+    rows = json.loads((y.run_dir / "issues.json").read_text(encoding="utf-8"))
+    assert rows == [{"first_page": 1, "pages": 3, "note": "книга"}]
+    note = PE.year_note(PE.load_record("IZBIR_EKAT"), 1912, rows, 3)
+    assert "книга, 1912" in note and "номер" not in note and "від" not in note
+
+
+def test_a_book_packs_with_the_book_genre(ws: Any, book: Path) -> None:
+    from nyshporka import ops as O
+    from nyshporka import print_edition as PE
+    from nyshporka.cloud import printed as PR
+
+    PE.record("IZBIR_EKAT", title="Список городских избирателей", city="Катеринослав",
+              issues=[("izbir_ekat_1912", book, _read(PR.out_root(), "izbir_ekat_1912", book))],
+              book=1912)
+    PE.assemble("IZBIR_EKAT")
+    PE.set_card("IZBIR_EKAT", doc_type="book", holder="примірник ЦДІАК, бібліотека")
+
+    env = O.call("print.pack", {"vydannia": "IZBIR_EKAT", "year": 1912, "dry_run": True})
+
+    assert env.ok, env.error
+    assert env.data["skipped"] == [] and len(env.data["packs"]) == 1

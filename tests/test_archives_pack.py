@@ -50,6 +50,9 @@ LEGACY_RTYPE_LABEL = {
     "directory": "довідкові видання", "newspaper": "газети", "court": "судові справи",
     "estate": "станові справи", "visitation": "візитації", "inventory": "інвентарі",
     "census": "переписи", "service_record": "формулярні списки",
+    "repression": "справи репресованих", "filtration": "фільтраційні справи",
+    "protocol": "протоколи засідань", "personnel": "особові справи",
+    "book": "друковані книги",
 }
 
 

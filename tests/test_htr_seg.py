@@ -252,3 +252,21 @@ def test_a_shrunk_copy_with_matching_sidecars_is_seeded(tmp_path: Path) -> None:
 
     got = S.inspect(case, packed, base_out=out, derived=derived, require_geometry=True)
     assert got.usable, got.why
+
+
+def test_the_cache_must_match_the_requested_seg_height(tmp_path: Path) -> None:
+    """Перечитування великого почерку з `--seg-height 900` не засіває кеш рідної
+    висоти: раннер його не візьме, а кошторис обіцяв би економію."""
+    from nyshporka.htr.run import seg_cache_dir
+
+    case = tmp_path / "spr-234"
+    case.mkdir()
+    frames = [_frame(case / f"{i:04d}.jpg") for i in range(2)]
+    derived = tmp_path / "derived"
+    _cache(seg_cache_dir(case, derived), [f.stem for f in frames])
+
+    native = S.inspect(case, frames, base_out=tmp_path / "out", derived=derived)
+    tall = S.inspect(case, frames, base_out=tmp_path / "out", derived=derived,
+                     seg_height=900)
+    assert native.usable
+    assert not tall.usable and "seg_height" in tall.why

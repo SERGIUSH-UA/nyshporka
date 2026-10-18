@@ -125,11 +125,47 @@ def _written(ref: Any, report: Any, notes: list[Any]) -> Envelope:
     return env
 
 
+def with_word(engine: str, word: str, index: int = 0) -> tuple[str, dict[str, Any]]:
+    """Рядок рушія зі звіреним словом на місці слова `index` (з 1).
+
+    Без `index` — на місці найсхожішого слова. 🔴 Двозначність — відмова з
+    переліком слів, а не здогад: підставлене не туди слово стало б «звіреним»
+    рядком, якого ніхто не звіряв.
+    """
+    import difflib
+
+    words, word = engine.split(), word.strip()
+    if not words:
+        raise ValueError("рушій на цьому рядку нічого не прочитав — дайте весь "
+                         "рядок через `--text`")
+    listed = " · ".join(f"{i}:{w}" for i, w in enumerate(words, 1))
+    if index:
+        if not 1 <= index <= len(words):
+            raise ValueError(f"слова №{index} у рядку немає — слова рушія: {listed}")
+    else:
+        def score(w: str) -> float:
+            return difflib.SequenceMatcher(None, w.lower(), word.lower()).ratio()
+
+        ranked = sorted(range(len(words)), key=lambda i: -score(words[i]))
+        best = score(words[ranked[0]])
+        second = score(words[ranked[1]]) if len(ranked) > 1 else 0.0
+        if best < 0.5 or best - second < 0.1:
+            raise ValueError(f"не певно, яке слово рушія замінює «{word}» — вкажіть "
+                             f"`--word-index`. Слова рушія: {listed}")
+        index = ranked[0] + 1
+    words[index - 1] = word
+    return " ".join(words), {"index": index, "text": word}
+
+
 class NoteReadArgs(BaseModel):
     case: str = Field(description="справа у будь-якому форматі")
     page: str = Field(description="сторінка прогону: 0031, p0531")
     line: int = Field(description="номер рядка з 1, як у `text ctx`")
-    text: str = Field(description="звірене читання рядка, дослівно")
+    text: str = Field(default="", description="звірене читання рядка, дослівно")
+    word: str = Field(default="", description="звірене ОДНЕ слово рядка замість --text; "
+                                              "решта рядка — від рушія")
+    word_index: int = Field(default=0, description="номер слова з 1, яке замінює --word; "
+                                                   "0 — знайти найсхожіше")
     run: str = Field(default="", description="прогін; порожньо — перший прогін справи")
     confidence: str = Field(default="", description="high | medium | low")
     uncertain: str = Field(default="", description="кома-список непевних слів")
@@ -159,12 +195,21 @@ def note_read(a: NoteReadArgs) -> Envelope:
         ref = _ref(a.case)
     except ValueError as exc:
         return fail(str(exc))
+    if bool(a.text.strip()) == bool(a.word.strip()):
+        return fail("потрібне одне з двох: `--text` (звірено весь рядок) або "
+                    "`--word` (звірено одне слово, решта — від рушія)")
     got = NB.line_anchor(a.run or ref.key, a.page, a.line)
     if got.get("error"):
         return fail(got["error"])
+    text, word = a.text.strip(), None
+    if a.word.strip():
+        try:
+            text, word = with_word(got["text"], a.word, a.word_index)
+        except ValueError as exc:
+            return fail(str(exc))
     try:
         n = CaseNote.model_validate({
-            "kind": "reading", "page": got["page"], "text": a.text.strip(),
+            "kind": "reading", "page": got["page"], "text": text, "word": word,
             "line": {"run": got["run"], "line_no": a.line, "bbox": got["bbox"]},
             "was": {"run": got["run"], "text": got["text"]} if got["text"] else None,
             "confidence": a.confidence or None,

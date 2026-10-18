@@ -285,6 +285,12 @@ _COVERAGE_RECORD_TYPES = [
     {"id": "inventory", "label": "Інвентарі"},
     {"id": "census", "label": "Переписи"},
     {"id": "service_record", "label": "Формулярні списки"},
+    {"id": "repression", "label": "Справи репресованих"},
+    {"id": "filtration", "label": "Фільтраційні справи"},
+    {"id": "protocol", "label": "Протоколи засідань"},
+    {"id": "personnel", "label": "Особові справи"},
+    {"id": "newspaper", "label": "Газети"},
+    {"id": "book", "label": "Друковані книги"},
     {"id": "other", "label": "Інше"},
 ]
 

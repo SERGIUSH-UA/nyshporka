@@ -98,7 +98,13 @@ def read_cmd(
     case: str = typer.Argument(..., help="справа у будь-якому форматі"),
     page: str = typer.Argument(..., help="сторінка прогону: 0031, p0531"),
     line: int = typer.Option(..., "--line", help="номер рядка з 1, як у `text ctx`"),
-    text: str = typer.Option(..., "--text", help="звірене читання рядка, дослівно"),
+    text: str = typer.Option("", "--text", help="звірене читання рядка, дослівно"),
+    word: str = typer.Option("", "--word",
+                             help="звірене ОДНЕ слово (прізвище, по батькові) замість "
+                                  "--text; решта рядка — від рушія"),
+    word_index: int = typer.Option(0, "--word-index",
+                                   help="номер слова з 1, яке замінює --word; "
+                                        "0 — найсхожіше"),
     run: str = typer.Option("", "--run", help="прогін; порожньо — перший прогін справи"),
     confidence: str = typer.Option("", "--confidence", help="high | medium | low"),
     uncertain: str = typer.Option("", "--uncertain", help="кома-список непевних слів"),
@@ -117,6 +123,7 @@ def read_cmd(
 
     _done(O.call("note.read", {
         "case": case, "page": page, "line": line, "text": text, "run": run,
+        "word": word, "word_index": word_index,
         "confidence": confidence, "uncertain": uncertain, "share": share,
         "reader": reader, "model": model, "author": author,
         "supersedes": supersedes}), as_json)

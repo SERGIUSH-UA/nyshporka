@@ -329,6 +329,31 @@ def _purge_cache(dst_dir: Path) -> int:
     return n
 
 
+def drop_cache(name: str) -> int:
+    """Прибрати стиснуту копію справи `name` після повного забору. Повертає, скільки кадрів.
+
+    🔴 За кілька днів роботи ця тека виросла в користувачки до 20 ГБ і
+    заповнила диск C до нуля — і наступний захід упав на пакуванні (відгук
+    18.10.2026). Копія відтворювана (стискання детерміноване), а потрібна лише
+    до кінця заходу, тож наглядач кличе це гачком при вердикті `ok`.
+
+    Чіпається лише власна копія: тека прямо в `cloud/frames`, з паспортом
+    `_from.txt`, без лінків. Решта — нуль і жодної дії.
+    """
+    import shutil
+
+    from nyshporka.core.workspace import workspace
+
+    root = (workspace().derived / "cloud" / "frames").resolve()
+    d = root / name
+    if (not name or Path(name).name != name or not d.is_dir() or d.is_symlink()
+            or d.resolve().parent != root or not (d / CLAIM_FILE).is_file()):
+        return 0
+    n = _purge_cache(d)
+    shutil.rmtree(d, ignore_errors=True)
+    return n
+
+
 def _claim_dir(dst_dir: Path, src_dir: Path,
                files: list[Path] | None = None, *,
                on_line: Any = None) -> None:

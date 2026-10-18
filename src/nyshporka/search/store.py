@@ -576,6 +576,50 @@ def index_run_if_stale(conn: sqlite3.Connection, run: str, *, wait: float = 0.0,
     return _index(conn, run, only_stale=True, wait=wait, waiting=waiting)
 
 
+def _run_key(run: str, meta: dict[str, Any]) -> str:
+    """Ключ справи прогону для стору — рішення реєстру, а не сирий ключ мети.
+
+    🔴 Мета прогону незмінна, тож після `cases bind` у ній лишається старий
+    ключ (`DAVIO/10800/1/8` замість `DAVIO/800/1/8a`), і `text index --rebuild`
+    переписував його в стор знову (відгук 18.10.2026). Нерозв'язаний прогін
+    лишає ключ мети як був.
+    """
+    from nyshporka import htr_store as S
+
+    raw = (meta.get("case_key") or "").strip()
+    try:
+        row = _ROWS.get(run) or next(
+            (r for r in S.list_cases() if r.get("name") == run),
+            {"name": run, "case_key": raw})
+        return S.proven_key(row, _bound())
+    except Exception:
+        return raw
+
+
+_BOUND: tuple[Any, dict[str, str | None]] | None = None
+#: Рядки переліку прогонів на час одного проходу `ensure_all`.
+_ROWS: dict[str, dict[str, Any]] = {}
+
+
+def _bound() -> dict[str, str | None]:
+    """Прив'язки людини, перечитані лише коли змінився `overrides.json`.
+
+    Стор збирає тисячі прогонів поспіль, а прив'язок — одиниці.
+    """
+    global _BOUND
+    from nyshporka import htr_store as S
+    from nyshporka.cases.resolve import OVERRIDES_PATH
+
+    try:
+        st = OVERRIDES_PATH.stat()
+        sig: Any = (st.st_mtime_ns, st.st_size)
+    except OSError:
+        sig = None
+    if _BOUND is None or _BOUND[0] != sig:
+        _BOUND = (sig, S._bound_runs())
+    return _BOUND[1]
+
+
 def _index(conn: sqlite3.Connection, run: str, *, only_stale: bool, wait: float,
            waiting: Callable[[], None] | None) -> int | None:
     """Проіндексувати один прогін. Повертає число рядків.
@@ -615,7 +659,7 @@ def _index(conn: sqlite3.Connection, run: str, *, only_stale: bool, wait: float,
     conn.execute(
         "insert into runs(run, stamp, case_key, case_dir, model, script, engine_ids, "
         "indexed_at, rules, shared) values(?,?,?,?,?,?,?,?,?,?)",
-        (run, stamp, (meta.get("case_key") or "").strip(), meta.get("case_dir") or "",
+        (run, stamp, _run_key(run, meta), meta.get("case_dir") or "",
          meta.get("model") or "", meta.get("script") or "",
          json.dumps(S.run_engine_ids(meta)), time.strftime("%Y-%m-%dT%H:%M:%S"),
          rules_hash(), S.shared_of(meta)))
@@ -741,6 +785,14 @@ def ensure_all(runs: list[str], *, force: bool = False, reset_rules: bool = Fals
             todo.append(run)
         total = len(todo)
         gave_up = False
+        # Ключ справи кожного прогону береться з переліку (`_run_key`); перелік
+        # — один на весь прохід, а не обхід кореня прогонів на кожен прогін.
+        _ROWS.clear()
+        if todo:
+            from nyshporka import htr_store as S
+
+            with contextlib.suppress(Exception):
+                _ROWS.update({str(r.get("name")): r for r in S.list_cases()})
         for i, run in enumerate(todo, 1):
             if gave_up:
                 # Стор тримають довше за `INDEX_WAIT_SEC`: решту не чекаємо по
@@ -791,6 +843,7 @@ def ensure_all(runs: list[str], *, force: bool = False, reset_rules: bool = Fals
                 with contextlib.suppress(sqlite3.Error):
                     conn.rollback()
     finally:
+        _ROWS.clear()
         conn.close()
 
 

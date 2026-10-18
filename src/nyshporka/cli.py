@@ -1779,7 +1779,7 @@ def print_card_cmd(
     city: str = typer.Option(None, "--city", help="місто видання"),
     doc_type: str = typer.Option(None, "--doc-type",
                                  help="newspaper (газета) | gazette (єпарх. відомості) | "
-                                      "directory (довідник)"),
+                                      "directory (довідник) | book (разова книга)"),
     holder: str = typer.Option(None, "--holder", help="де лежить підшивка, з якої скани"),
     place: list[str] = typer.Option(None, "--place",
                                     help="місце для пошуку (повторюється): район, область"),
