@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import json
+import shlex
 from pathlib import Path
 from typing import Any
 
@@ -703,7 +704,9 @@ def test_another_seg_height_is_another_reading(space: Path, monkeypatch) -> None
     assert res.verdict == "ok", res.why
     assert backend.needs[0].pages == 3, "читається вся справа, не лише решта"
     assert not any("tar -xf seed.tar" in c for c in session.cmds),         "текст рідної висоти не має їхати на машину"
-    script = Path(session.spawn_cmds[0].split("'")[1]).read_text(encoding="utf-8")
+    # Шлях скрипта — останній аргумент `sh <шлях>`; у лапках він лише там, де
+    # цього вимагає шелл (бекслеші Windows), тож розбирає його shlex.
+    script = Path(shlex.split(session.spawn_cmds[0])[-1]).read_text(encoding="utf-8")
     assert "--seg-height 900" in script, "висота дійшла до раннера"
 
 
