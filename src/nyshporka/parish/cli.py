@@ -42,6 +42,29 @@ def _gazetteer_line(data: dict) -> None:  # type: ignore[type-arg]
                    "(`nysh catalog install`)")
 
 
+def _rk_block(data: dict) -> None:  # type: ignore[type-arg]
+    """РК-парафії зі складу сіл — або що пака немає."""
+    from nyshporka.geog.rkparish import dekanat_label, gubernia_uk
+
+    if not data.get("rk_installed"):
+        typer.echo("\n   РК-парафій (склад сіл) на машині немає — до якого костелу "
+                   "ходило село, не перевірено")
+        return
+    rows = data.get("rk_parishes") or []
+    typer.echo(f"\n⛪ РК-парафії (склад сіл за таблицями укладача): {len(rows)}")
+    for p in rows:
+        mark = "" if p.get("score") == 100 else f" · збіг {p.get('score')}"
+        typer.echo(f"  · {p.get('name')} — село «{p.get('village')}»{mark}")
+        typer.echo(f"    деканат {dekanat_label(p.get('dekanat') or '') or '—'} · "
+                   f"{gubernia_uk(p.get('gubernia') or '')} губ. · {p.get('url')}")
+        # усі книги, без обрізки: рядок короткий, а відсортовані вони за роком —
+        # обрізка з'їла б саме пізні роки
+        for b in p.get("books") or []:
+            what = b.get("shifra") or b.get("shifry") or f"[як у джерелі: {b.get('raw')}]"
+            typer.echo(f"    {b.get('years', ''):<12} {b.get('archive', ''):<8} "
+                       f"{what:<16} {b.get('types', '')}")
+
+
 @app.command("find")
 def cmd_find(
     village: str = typer.Argument(..., help="назва села або містечка"),
@@ -79,6 +102,7 @@ def cmd_find(
             alt = f" (вар. {c['name_v']})" if c.get("name_v") else ""
             typer.echo(f"  · {c['name']}{alt} · деканат {c.get('deanery') or '—'}"
                        f" · `nysh church card {c['ob_id']}`")
+    _rk_block(data)
     for title, rows in (data.get("books") or {}).items():
         typer.echo(f"\n📕 {str(title)[:70]} → {len(rows)} справ")
         _cases(rows, limit)

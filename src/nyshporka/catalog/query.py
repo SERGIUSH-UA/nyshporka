@@ -31,7 +31,8 @@ from nyshporka.catalog.store import (
 from nyshporka.core import casekey
 
 __all__ = ["Answer", "CatalogMissing", "Coverage", "church_card", "churches_near",
-           "confusers", "find_churches", "find_places", "link_churches_to_places",
+           "confusers", "find_churches", "find_places", "find_rk_parishes",
+           "link_churches_to_places",
            "locate", "locate_all", "locate_name", "place_card", "places_for_fond", "places_near",
            "siblings", "uezd_known"]
 
@@ -708,6 +709,89 @@ def find_churches(q: str, limit: int = 40, voivodeship: str = "",
     finally:
         close_all(packs)
     out = sorted(rows.values(), key=lambda d: (-d["score"], d["name"]))
+    return Answer(rows=out[:limit], coverage=cov)
+
+
+# ── ⛪ РК-парафії: до якого костелу ходило село ──────────────────────────────
+#
+# 🔑 Покажчик справ знає костел лише в самому містечку; село за 10 км лежить у
+# його книгах мовчки. Тут село → парафія → книги за роками з шифрами.
+#
+# Сіл ~6 тисяч назв (польських і українських), тож повний скан із `rapidfuzz`
+# коштує мілісекунди — та сама міра, що й для газетира: індекс не заробив би
+# нічого, а `LIMIT` без ранжування обрізав би кандидатів довільно.
+
+#: Поріг схожості згорнутих форм — той самий, що виміряний для латинки газетира.
+_RK_MIN = _LATIN_MIN
+
+
+def find_rk_parishes(q: str, also: list[str] | None = None, limit: int = 5
+                     ) -> Answer:
+    """РК-парафії, до складу яких входить село, — з книгами за роками.
+
+    `also` — інші написання (російська форма з газетира, історична назва).
+    Рядок несе, якою назвою села зійшлось (`village`, `village_lang`) і бал:
+    100 — та сама згорнута форма, нижче — фаззі.
+    """
+    from nyshporka.geog.rkparish import fold
+    from nyshporka.utils.translit import normalize_for_matching
+
+    packs = open_packs("rkparishes")
+    cov = coverage("rkparishes")
+    want: list[str] = []
+    for f in [q, *(also or [])]:
+        x = fold(normalize_for_matching(_norm(f))) if f and f.strip() else ""
+        if x and x not in want:
+            want.append(x)
+    best: dict[tuple[str, str], dict[str, Any]] = {}
+    try:
+        try:
+            from rapidfuzz import fuzz
+        except ImportError:
+            fuzz = None  # type: ignore[assignment]
+        for pack_id, con in packs:
+            for v in con.execute("SELECT slug, name, lang, forms FROM villages"):
+                score = 0
+                for form in (v["forms"] or "").split(" | "):
+                    if not form:
+                        continue
+                    for w in want:
+                        if form == w:
+                            s = 100
+                        elif fuzz is not None:
+                            s = int(fuzz.ratio(form, w))
+                        else:
+                            s = 0
+                        score = max(score, s)
+                if score < _RK_MIN:
+                    continue
+                key = (pack_id, v["slug"])
+                prev = best.get(key)
+                # за рівного балу — назва мовою запиту: людині, що питала
+                # «Богданівці», показувати «Bohdanowce» означає змушувати її
+                # саму звіряти, що це те саме село
+                same_lang = (v["lang"] == "pl") == _has_latin(q)
+                if (prev is None or prev["score"] < score
+                        or (prev["score"] == score and same_lang
+                            and prev["village_lang"] != v["lang"])):
+                    best[key] = {"slug": v["slug"], "village": v["name"],
+                                 "village_lang": v["lang"], "score": score}
+            for (pid, slug), hit in list(best.items()):
+                if pid != pack_id:
+                    continue
+                p = con.execute("SELECT * FROM parishes WHERE slug = ?",
+                                (slug,)).fetchone()
+                if p is None or p["overview"]:
+                    best.pop((pid, slug))
+                    continue
+                hit.update(_tag(dict(p), pack_id))
+                hit["books"] = [dict(b) for b in con.execute(
+                    "SELECT years, year_from, year_to, archive, shifra, shifry, "
+                    "types, raw FROM books WHERE slug = ? "
+                    "ORDER BY year_from IS NULL, year_from, year_to, rowid", (slug,))]
+    finally:
+        close_all(packs)
+    out = sorted(best.values(), key=lambda d: (-d["score"], d["name"]))
     return Answer(rows=out[:limit], coverage=cov)
 
 

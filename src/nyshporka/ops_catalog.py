@@ -1065,6 +1065,28 @@ def _szady(q: str) -> tuple[list[dict[str, Any]], bool]:
             for r in keep[:SZADY_SHOWN]], True
 
 
+#: Скільки РК-парафій показувати: село буває в складі двох сусідніх (перехід
+#: між парафіями, однойменні села), більше — уже шум фаззі.
+RK_SHOWN = 5
+
+
+def _rk(q: str, also: list[str]) -> tuple[list[dict[str, Any]], list[CoverageItem], bool]:
+    """РК-парафії, до складу яких входить село — і чи є сам пак.
+
+    🔑 Покажчик знає костел лише в містечку, де він стоїть; до якого костелу
+    ходило село, каже тільки склад парафії з таблиць укладача.
+    """
+    try:
+        from nyshporka.catalog.query import CatalogMissing, find_rk_parishes
+
+        ans = find_rk_parishes(q, also=also, limit=RK_SHOWN)
+    except CatalogMissing:
+        return [], [], False
+    except Exception:            # битий пак не валить пошук парафії
+        return [], [], False
+    return ans.rows, _coverage_of(ans), True
+
+
 def _place_forms(q: str, also: list[str]) -> tuple[list[str], list[str], list[str]]:
     """Форми назви для покажчика: правила, довідники, людина.
 
@@ -1127,10 +1149,16 @@ def parish_find(a: ParishFindArgs) -> Envelope:
     szady, szady_ok = _szady(a.q)
     if szady_ok:
         asked = [*asked, "churches"]
+    # латинські форми газетира (польська назва) тут якраз доречні: склад
+    # парафії записаний польською
+    rk, rk_cov, rk_ok = _rk(a.q, [*from_books, *a.also])
+    if rk_ok:
+        asked = [*asked, "rkparishes"]
     data: dict[str, Any] = {"forms": forms, "forms_from_gazetteer": from_books,
                             "gazetteers": asked,
                             "parishes": [_parish_row(p) for p in found.values()],
                             "szady": szady,
+                            "rk_parishes": rk, "rk_installed": rk_ok,
                             "books": {}}
     cut_books: dict[str, tuple[str, ...]] = {}
     if a.books:
@@ -1153,6 +1181,8 @@ def parish_find(a: ParishFindArgs) -> Envelope:
                  f"без років понад перші 50 не видно — звужувати тегом чи роками",
                  ALERT)
     env.covered_by(_duck_coverage())
+    if rk_cov:
+        env.covered_by(rk_cov)
     if not found:
         env.warn("nothing_found",
                  f"парафій під назвами {', '.join(forms)} у покажчику немає — "

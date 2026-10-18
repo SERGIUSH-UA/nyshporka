@@ -218,9 +218,45 @@ CREATE INDEX ix_md_top ON modern(top);
 CREATE INDEX ix_md_geo ON modern(lat, lng);
 """
 
+RKPARISHES = _PRAGMA + _COMMON + """
+-- ⛪ Римо-католицькі парафії ХІХ ст. зі складом сіл і книгами за роками —
+-- таблиці укладача (сторінка парафії: перелік сіл + «рік · архів · шифра ·
+-- хрещення/шлюби/поховання»). Це відповідь на питання, якого не знає жоден
+-- покажчик справ: **до якого костелу ходило село**. Покажчик бачить костел
+-- лише в самому містечку, а село за 10 км лежить у його книгах мовчки.
+--
+-- 🔴 Шифра — як у таблиці укладача, без перевірки проти опису. Рядок, де
+-- шифру не розпізнано, їде з `raw` як є: вигадана шифра гірша за порожню.
+CREATE TABLE parishes (
+    slug     TEXT PRIMARY KEY,   -- ключ сторінки укладача
+    name     TEXT NOT NULL,      -- назва парафії, як у джерелі
+    gubernia TEXT, dekanat TEXT,
+    url      TEXT,               -- сторінка парафії — посилатись на неї, не на копію
+    overview INTEGER DEFAULT 0,  -- огляд деканату, а не парафія
+    links    TEXT                -- інші посилання сторінки (Geneteka, теки копій), через « | »
+);
+CREATE TABLE villages (
+    slug  TEXT NOT NULL,         -- парафія
+    name  TEXT NOT NULL,         -- назва села, як у джерелі (без «с.», «м-ко»)
+    lang  TEXT,                  -- pl | uk
+    forms TEXT                   -- згорнуті ASCII-форми для пошуку, через « | »
+);
+CREATE INDEX ix_rkv_slug ON villages(slug);
+CREATE TABLE books (
+    slug      TEXT NOT NULL,
+    years     TEXT, year_from INTEGER, year_to INTEGER,
+    archive   TEXT,              -- код архіву, як у джерелі (DAChmO, DAWiO, CDIAK …)
+    shifra    TEXT,              -- фонд-опис-справа; порожньо — не розпізнано
+    shifry    TEXT,              -- кілька шифр рядка, через « | »
+    types     TEXT,              -- chrzty | śluby | pogrzeby, через « | »
+    raw       TEXT               -- рядок таблиці як є, через « | »
+);
+CREATE INDEX ix_rkb_slug ON books(slug);
+"""
+
 #: Домен → DDL. Ключ домену входить в ім'я пака: `geog-cdiak-2026.08.sqlite`.
 DDL: dict[str, str] = {"geog": GEOG, "opys": OPYS, "churches": CHURCHES,
-                       "places": PLACES}
+                       "places": PLACES, "rkparishes": RKPARISHES}
 
 
 def apply(con: sqlite3.Connection, domain: str) -> None:

@@ -286,6 +286,56 @@ def build_churches(dump_json: Path, out: Path, *, pack_id: str, taken: str,
     return {**res, "churches": n}
 
 
+# ── РК-парафії: склад сіл і книги за роками ──────────────────────────────────
+
+def build_rkparishes(parishes_json: Path, out: Path, *, pack_id: str, taken: str,
+                     source: str, note: str = "",
+                     verbose: bool = False) -> dict[str, Any]:
+    """Пак `rkparishes` з розбору таблиць парафій (`parishes.json`).
+
+    Форми назв сіл рахуються тут (`geog.rkparish.forms`), як `norm` у паку
+    церков: запит кирилицею зустрічається з польським записом без перебору
+    всіх правил на кожен запит.
+    """
+    import json
+
+    from nyshporka.geog.rkparish import records
+
+    con, tmp = _open_fresh(out, "rkparishes")
+    rows = json.loads(parishes_json.read_text(encoding="utf-8"))
+    if isinstance(rows, dict):
+        rows = rows.get("parishes") or []
+    pcols = ["slug", "name", "gubernia", "dekanat", "url", "overview", "links"]
+    vcols = ["slug", "name", "lang", "forms"]
+    bcols = ["slug", "years", "year_from", "year_to", "archive", "shifra",
+             "shifry", "types", "raw"]
+    n_p = n_v = n_b = 0
+    for parish, villages, books in records(rows):
+        con.execute(f"INSERT OR REPLACE INTO parishes ({','.join(pcols)}) "
+                    f"VALUES ({','.join('?' * len(pcols))})",
+                    [parish[c] for c in pcols])
+        con.executemany(f"INSERT INTO villages ({','.join(vcols)}) "
+                        f"VALUES ({','.join('?' * len(vcols))})",
+                        [[v[c] for c in vcols] for v in villages])
+        con.executemany(f"INSERT INTO books ({','.join(bcols)}) "
+                        f"VALUES ({','.join('?' * len(bcols))})",
+                        [[b[c] for c in bcols] for b in books])
+        n_p += 1
+        n_v += len(villages)
+        n_b += len(books)
+    coverage = [("gubernia", g, k, None, "")
+                for g, k in con.execute("SELECT gubernia, COUNT(*) FROM parishes "
+                                        "WHERE overview = 0 GROUP BY gubernia")]
+    res = finalize(con, tmp, out, domain="rkparishes", pack_id=pack_id, taken=taken,
+                   source=source, built_from=_digest([parishes_json]), rows=n_p,
+                   coverage=coverage,
+                   note=note or f"{n_p} РК-парафій · {n_v} назв сіл · {n_b} рядків книг")
+    if verbose:
+        print(f"✅ {out.name} — {n_p} парафій · {n_v} назв сіл · {n_b} книг · "
+              f"{res['size'] / 1e6:.1f} МБ")
+    return {**res, "parishes": n_p, "villages": n_v, "books": n_b}
+
+
 # ── сучасні поселення з координатами (Wikidata) ──────────────────────────────
 
 def build_places(dump_json: Path, out: Path, *, pack_id: str, taken: str,
