@@ -74,11 +74,12 @@ class Box1(FakeSession):
 
     def spawn(self, cmd: str, *, log: str, pidfile: str) -> int:
         self.spawn_cmds.append(cmd)
-        # Текст скрипта — у мить запуску: після заходу робочу теку бокса
-        # прибрано (на Linux), і читати його потім нема звідки.
+        # Текст скрипта — у мить запуску й через `_local`: віддалений шлях
+        # бокса лежить під коренем заглушки (на Windows абсолютний шлях із
+        # диском «перемагав» корінь, і тест проходив лише там).
         with contextlib.suppress(OSError, ValueError, IndexError):
             self.spawn_scripts.append(
-                Path(shlex.split(cmd)[-1]).read_text(encoding="utf-8"))
+                self._local(shlex.split(cmd)[-1]).read_text(encoding="utf-8"))
         pid = super().spawn(cmd, log=log, pidfile=pidfile)
         batch = self.reads.pop(0) if self.reads else []
         if batch:
