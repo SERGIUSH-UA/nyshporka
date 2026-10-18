@@ -89,7 +89,8 @@ def test_chastkova_metryka_bez_koda_metric() -> None:
     ("Формулярні списки священнослужителів", "service_record"),
     ("Подольские епархиальные ведомости, 1862", "gazette"),
     ("Архівно-кримінальна справа на Саєнка Ф. І., 1937", "repression"),
-    ("Уголовное дело по обвинению Саенко, протокол допроса", "repression"),
+    ("Архивно-уголовное дело по обвинению Саенко, протокол допроса", "repression"),
+    ("Справа НКВС на Саєнка, протокол допиту", "repression"),
     ("Фільтраційна справа Саєнко Марії, 1945–1946", "filtration"),
     ("Протоколи засідань Нікопольського райвиконкому, 1924", "protocol"),
     ("Особові справи вчителів, 1947", "personnel"),
@@ -482,3 +483,18 @@ def test_nazva_z_pasporta_metryka() -> None:
     assert opys.passport_title({"place": "м-ко Голованівськ"}, "birth") \
         == "Метрична книга (народження) · м-ко Голованівськ"
     assert opys.passport_title({}, "birth") == ""
+
+
+@pytest.mark.parametrize("title, code", [
+    # Дореволюційна кримінальна справа — судова, а не «справа репресованого».
+    ("Уголовное дело по обвинению крестьянина в краже, 1856", ""),
+    ("Справа судової палати: слідство про крадіжку, 1890", "court"),
+    # Метрика ЗАГС при виконкомі — народження, а не протокол.
+    ("Книга реєстрації народжень при сільському виконкомі, 1925", "birth"),
+])
+def test_radianski_zhanry_ne_berut_chuzhe(title: str, code: str) -> None:
+    from nyshporka.library import _infer_record_types
+
+    got = _infer_record_types(title)
+    assert "repression" not in got and "protocol" not in got
+    assert (got[0] if len(got) == 1 else "") == code, got

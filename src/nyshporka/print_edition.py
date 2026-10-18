@@ -257,6 +257,13 @@ def record(code: str, *, title: str, city: str,
     if not vydannia.is_code(code):
         raise ValueError(f"код видання «{code}» — лише латинка й цифри, від двох знаків")
     data = load_record(code) or {"code": code, "issues": {}, "roots": []}
+    # 🔴 Книга й підшивка під одним кодом не змішуються: збирач видання читає
+    # або дерево номерів, або теки книги, і друге мовчки випало б із видання.
+    was_book = data.get("kind") == "book"
+    if data.get("issues") and was_book != bool(book):
+        raise ValueError(
+            f"код «{code}» уже має {'книгу' if was_book else 'номери періодичного видання'}"
+            f" — {'книга' if book else 'номери газети'} під ним не ляже; дайте інший код")
     data["title"] = title or data.get("title") or ""
     data["city"] = city or data.get("city") or ""
     if book:

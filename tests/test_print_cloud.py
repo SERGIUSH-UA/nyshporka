@@ -408,3 +408,21 @@ def test_a_book_packs_with_the_book_genre(ws: Any, book: Path) -> None:
 
     assert env.ok, env.error
     assert env.data["skipped"] == [] and len(env.data["packs"]) == 1
+
+
+def test_a_book_and_issues_never_share_a_code(ws: Any, book: Path, edition: Path) -> None:
+    from nyshporka import print_edition as PE
+    from nyshporka.cloud import printed as PR
+
+    PE.record("IZBIR_EKAT", title="Список", city="",
+              issues=[("izbir_ekat_1912", book, _read(PR.out_root(), "izbir_ekat_1912", book))],
+              book=1912)
+    i3 = edition / "1936" / "3 (770) 1936-01-06"
+    with pytest.raises(ValueError, match="уже має книгу"):
+        PE.record("IZBIR_EKAT", title="", city="",
+                  issues=[(i3.name, i3, _read(PR.out_root(), i3.name, i3))])
+    PE.record("KOLSELO_PYR", title="Колективізоване село", city="",
+              issues=[(i3.name, i3, _read(PR.out_root(), i3.name, i3))])
+    with pytest.raises(ValueError, match="номери періодичного видання"):
+        PE.record("KOLSELO_PYR", title="", city="",
+                  issues=[("kolselo_pyr_1912", book, PR.out_root() / "x")], book=1912)
