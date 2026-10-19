@@ -536,6 +536,10 @@ def cmd_state(
             console.print("[muted]жодного заходу ще не було. Почати: "
                           "nysh cloud plan <тека> --host <машина>[/muted]")
             return
+        from nyshporka.core import projects as P
+
+        spent: dict[str, float] = {}
+        unknown: dict[str, int] = {}
         for s in rows:
             mark = "🔴" if s.needs_release else ("✅" if s.verdict == "ok" else "·")
             # 🔴 У відчепленого заходу наша фаза заморожена на хвилині, коли ми
@@ -544,9 +548,23 @@ def cmd_state(
             # наглядач, і питають його окремою командою на один захід.
             where = (f"веде наглядач {s.supervisor}" if s.supervisor
                      else s.human_phase())
+            who = P.tag_of(s.project) or "Майстерня"
             console.print(f"{mark} {s.run_id} · {where} · "
-                          f"{s.pages_done}/{s.frames_total}"
+                          f"{s.pages_done}/{s.frames_total} · {who}"
                           + (" · машина жива" if s.needs_release else ""))
+            # Відчеплений захід несе суму наглядача, а не ціну × години.
+            usd = s.box.get("spent_usd") if "spent_usd" in s.box else s.spent_usd()
+            if usd is None:
+                unknown[who] = unknown.get(who, 0) + 1
+            else:
+                spent[who] = spent.get(who, 0.0) + float(usd)
+        # Захід замовляє проєкт, а платить дослідник: підсумок — по проєктах.
+        # Ціна невідома — так і кажемо, а не додаємо нуль.
+        if spent or unknown:
+            console.print("[muted]витрати за проєктами: " + ", ".join(
+                f"{who} ${spent.get(who, 0.0):.2f}"
+                + (f" (+{unknown[who]} без ціни)" if unknown.get(who) else "")
+                for who in sorted({*spent, *unknown})) + "[/muted]")
         return
 
     st = _need_run(run_id)

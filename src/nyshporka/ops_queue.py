@@ -35,6 +35,7 @@ def _rows(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def _rows_now(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     from nyshporka.cloud.verify import texts_in
+    from nyshporka.core import projects as P
     from nyshporka.queue import stages as ST
     from nyshporka.queue import state as Q
 
@@ -48,6 +49,7 @@ def _rows_now(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "code": it.get("code") or "", "why": it.get("why") or "",
             "fix": it.get("fix") or "", "not_before": it.get("not_before") or "",
             "opts": it.get("opts") or {}, "added": it.get("added") or "",
+            "project": P.tag_of(it.get("project")),
         }
         if it.get("state") not in (Q.DONE, Q.DROPPED):
             # Зроблені й зняті з диска не перечитуються: їхній стан уже остаточний.
@@ -76,6 +78,8 @@ class QueueStatusArgs(BaseModel):
     all: bool = Field(default=False, description="разом зі зробленими й знятими")
     journal: int = Field(default=0, ge=0, le=200,
                          description="скільки останніх рядків журналу етапів віддати")
+    mine: bool = Field(default=False,
+                       description="лише справи, замовлені з цього проєкту")
 
 
 @op("queue.status", summary="Черга справ: що на якому етапі й що лишилось",
@@ -86,14 +90,17 @@ def queue_status(a: QueueStatusArgs) -> Envelope:
     Етап і число прочитаних сторінок беруться з диска в мить запиту, а не з
     файла черги: файл пам'ятає лише, що замовлено й чому справа стоїть.
     """
+    from nyshporka.core import projects as P
     from nyshporka.queue import state as Q
 
     try:
         q = Q.load()
     except Q.QueueError as exc:
         return fail(str(exc))
+    # Черга одна на Майстерню: «мої» — лише фільтр, а виконавець веде всі.
     items = [it for it in q["items"]
-             if a.all or it.get("state") not in (Q.DONE, Q.DROPPED)]
+             if (a.all or it.get("state") not in (Q.DONE, Q.DROPPED))
+             and (not a.mine or P.is_mine(it.get("project")))]
     rows = _rows(items)
     live = [r for r in rows if r["state"] in Q.LIVE]
     pages_left = sum(max(0, int(r.get("frames") or 0) - int(r.get("pages") or 0))

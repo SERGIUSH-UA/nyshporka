@@ -27,6 +27,7 @@ from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
 
+from nyshporka.core import projects as P
 from nyshporka.core.workspace import workspace
 from nyshporka.records import names as NAMES
 from nyshporka.search import rank as RANK
@@ -230,6 +231,32 @@ def relink_lasting(out_dir: Path, case_key: str = "") -> int:
         meta["case_dir_was"] = cur
         meta["case_dir"] = best
         meta["case_dir_note"] = "тимчасова тека прогону → тека справи з бібліотеки"
+        write_json(path, meta)
+        touched += 1
+    return touched
+
+
+def stamp_project(out_dir: Path, project: str | None = None) -> int:
+    """Записати в мету прогону (і його голосів), з якого проєкту його замовили.
+
+    Лише якщо позначки ще немає: дочитування чужого прогону не робить його своїм.
+    `project=None` — проєкт поточного простору. Повертає число переписаних мет.
+    """
+    from nyshporka.cloud.verify import META_NAME, voice_dirs
+    from nyshporka.core import projects as P
+    from nyshporka.utils.atomic import CorruptFileError, read_json, write_json
+
+    who = P.tag() if project is None else project
+    touched = 0
+    for d in (Path(out_dir), *voice_dirs(Path(out_dir))):
+        path = d / META_NAME
+        try:
+            meta = read_json(path, default=None)
+        except CorruptFileError:
+            continue
+        if not isinstance(meta, dict) or "project" in meta:
+            continue
+        meta["project"] = who
         write_json(path, meta)
         touched += 1
     return touched
@@ -765,6 +792,8 @@ def list_cases() -> list[dict[str, Any]]:
             # читається в рази інакше, а на процесорі — на порядок.
             "sec_median": _sec_median(meta),
             "updated": meta.get("updated") or "",
+            # Хто замовив прогін (`stamp_project`); без позначки — корінь старого типу.
+            "project": P.tag_of(meta.get("project")),
         }, describe_case))
         entries[name] = {"stamp": mstamp, "lib": stamp[3], "row": dict(out[-1])}
     gone = [n for n in entries if n not in seen]
@@ -876,7 +905,7 @@ def _runs_cache_path() -> Path:
 #: «порожньо» тут не косметична: саме нею позначається чужий прогін.
 #: 6 — `case_canon` у формі ключа з описом (0.22).
 #: 7 — `shared_shifra` і штамп бібліотеки на рядок, а не на файл (0.29).
-ROW_SCHEMA = 7
+ROW_SCHEMA = 8
 
 
 def _runs_cache_read(lib: str = "") -> dict[str, dict[str, Any]]:

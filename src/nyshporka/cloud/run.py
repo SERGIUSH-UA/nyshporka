@@ -678,10 +678,12 @@ def _start(plan: CloudPlan, *, workers: int = 0, seg_height: int = 0,
     from nyshporka.cloud import transfer as T
 
     say = on_line or (lambda _s: None)
+    from nyshporka.core import projects as P
+
     st = ST.load(plan.run_id) or ST.RunState(
         run_id=plan.run_id, case_dir=str(plan.case_dir), case_key=plan.case_key,
         out_dir=str(plan.out_dir), backend=plan.backend, target=plan.target,
-        frames_total=plan.frames)
+        frames_total=plan.frames, project=P.tag())
     st.frames_total = plan.frames
     st.source_dir = str(plan.source_dir) if plan.source_dir else ""
 

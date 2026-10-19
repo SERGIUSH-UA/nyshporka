@@ -93,6 +93,24 @@ def current_id(ws: W.Workspace) -> str | None:
     return None if ws.hub_only else ROOT_ID
 
 
+def tag(ws: W.Workspace | None = None) -> str:
+    """Позначка «хто замовив» для спільних записів Майстерні: прогонів, черги, джобів.
+
+    Ім'я проєкту, «.» для кореня старого типу, порожньо — з кореня чистої
+    Майстерні (міжпроєктний режим, замовник — сама Майстерня).
+    """
+    return current_id(ws or W.workspace()) or ""
+
+
+def tag_of(value: object) -> str:
+    """Позначка запису. Записи до хвилі проєктів її не мають — це корінь старого типу."""
+    return ROOT_ID if value is None else str(value)
+
+
+def is_mine(value: object, ws: W.Workspace | None = None) -> bool:
+    return tag_of(value) == tag(ws)
+
+
 def project_dir(hub: Path, pid: str) -> Path:
     if pid == ROOT_ID:
         if W._read_marker(hub / W.MARKER).get("hub_only"):

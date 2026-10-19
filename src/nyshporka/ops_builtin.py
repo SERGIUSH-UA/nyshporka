@@ -185,7 +185,11 @@ def home_pulse(a: PulseArgs) -> Envelope:
 
     if not PULSE_SNAPSHOT:
         return _pulse_compute(a)
-    key = a.model_dump_json()
+    from nyshporka.core import projects as P
+
+    # 🔴 Проєкт — у ключі: файл знімка лежить у Майстерні, а блок канону в ньому
+    # проєктний, і без цього два проєкти показували б пульс одне одного.
+    key = f"{P.tag()}|{a.model_dump_json()}"
     now = time.monotonic()
     hit = _PULSE_MEM.get(key)
     if hit is None:
@@ -2724,6 +2728,7 @@ class RunsArgs(BaseModel):
     case: str = Field(default="", description="ключ справи `repo/fond/spr`")
     engine: str = Field(default="", description="рушій: pysar | diak | skryba")
     orphan: bool = Field(default=False, description="лише прогони без справи")
+    mine: bool = Field(default=False, description="лише прогони, замовлені з цього проєкту")
     page: int = Field(default=0, ge=0, le=10_000)
     page_size: int = Field(default=0, ge=0, le=200,
                            description="розмір сторінки; 0 — усі прогони")
@@ -2752,6 +2757,10 @@ def runs_list(a: RunsArgs) -> Envelope:
         runs = [r for r in runs if r.get("case_key") == a.case]
     if a.engine:
         runs = [r for r in runs if a.engine in (r.get("engine_ids") or [])]
+    if a.mine:
+        from nyshporka.core import projects as P
+
+        runs = [r for r in runs if P.is_mine(r.get("project"))]
     if a.q:
         needle = a.q.casefold()
         runs = [r for r in runs if needle in " ".join(
@@ -4340,6 +4349,8 @@ class JobArgs(BaseModel):
     timeout_s: int = Field(default=30, ge=0, le=120,
                            description="скільки чекати зміни (для action=wait)")
     since: int = Field(default=0, description="курсор: віддати лише новіше за нього")
+    mine: bool = Field(default=False,
+                       description="лише роботи, поставлені з цього проєкту (для action=list)")
 
 
 @op("job.query", summary="Стан довгих робіт: перелік, очікування, скасування",
@@ -4362,7 +4373,10 @@ def job_query(a: JobArgs) -> Envelope:
         return fail("черга недоступна: застосунок не запущено. "
                     "Підніміть його командою `nysh serve`")
     if a.action == "list":
-        return ok({"jobs": [j.as_dict() for j in bus.jobs()], "seq": bus.seq})
+        from nyshporka.core import projects as P
+
+        return ok({"jobs": [j.as_dict() for j in bus.jobs()
+                            if not a.mine or P.is_mine(j.project)], "seq": bus.seq})
     if a.action in ("status", "cancel") and not a.job_id:
         return fail(f"для action={a.action} потрібен job_id")
     if a.action == "status":

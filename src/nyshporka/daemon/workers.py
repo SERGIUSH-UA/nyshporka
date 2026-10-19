@@ -729,6 +729,11 @@ async def _run_read_locked(bus: JobBus, job: JobRecord, plan: Any, case_key: str
     for tree in trees:
         if tree is not None:
             tree.close()
+    # Хто замовив прогін — той, з чийого проєкту поставлено завдання.
+    from nyshporka.htr_store import stamp_project
+
+    with contextlib.suppress(Exception):
+        stamp_project(plan.out_dir, job.project)
     # Остання подія могла не пройти тротлінг — дописуємо підсумок.
     await bus.update(job.id, progress=Progress(
         i=sum(s["i"] for s in st), n=sum(s["n"] for s in st),

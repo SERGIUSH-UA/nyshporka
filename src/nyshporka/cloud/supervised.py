@@ -25,6 +25,7 @@
 """
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import math
@@ -43,6 +44,7 @@ from typing import TYPE_CHECKING, Any
 
 from nyshporka.cloud import money as M
 from nyshporka.cloud import state as ST
+from nyshporka.core import projects as P
 
 if TYPE_CHECKING:  # pragma: no cover — лише для перевірки типів
     from collections.abc import Callable, Iterable, Sequence
@@ -144,7 +146,8 @@ def _env(session: str, exe: str) -> dict[str, str]:
         env["PATH"] = str(folder) + os.pathsep + os.environ.get("PATH", "")
     if not os.environ.get("GPURUNNER_REPO_DATA_DIR"):
         try:
-            data = workspace().data / "gpurunner"
+            # Реєстр машин — про машину, а не про рід: один на Майстерню.
+            data = workspace().hub_data / "gpurunner"
         except WorkspaceError:
             data = None
         if data is not None and data.is_dir():
@@ -1106,7 +1109,8 @@ def _remember(convoy: Convoy, res: GoResult, *, session: str,
             source_dir=str(plan.source_dir or ""),
             siblings=[i for i in ids if i != plan.run_id],
             fork_low=res.fork_low, fork_high=res.fork_high,
-            budget_usd=res.budget_usd, max_hours=res.max_hours, batch=batch)
+            budget_usd=res.budget_usd, max_hours=res.max_hours, batch=batch,
+            project=P.tag())
         st.note("detach", f"наглядач {session}"
                           + (f", разом із {len(ids) - 1} іншими справами"
                              if len(ids) > 1 else ""))
@@ -1232,6 +1236,12 @@ def absorb(st: ST.RunState, data: dict[str, Any]) -> ST.RunState:
     st.verdict = verdict if verdict in ST.VERDICTS else (
         "ok" if verdict == "ok" else "failed")
     st.phase = "done" if st.verdict in ("ok", "cancelled") else "failed"
+    # Прочитане приїхало з машини — підписуємо прогін тим, хто замовив захід.
+    if st.out_dir:
+        from nyshporka.htr_store import stamp_project
+
+        with contextlib.suppress(Exception):
+            stamp_project(Path(st.out_dir), P.tag_of(st.project))
     return ST.save(st)
 
 

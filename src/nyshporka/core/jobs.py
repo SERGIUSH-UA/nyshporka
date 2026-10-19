@@ -101,6 +101,9 @@ class JobRecord:
     next: list[dict[str, Any]] = field(default_factory=list)
     error: str = ""
     idempotency_key: str = ""
+    #: Хто замовив роботу: проєкт простору, з якого її поставлено
+    #: (`core.projects.tag`). `None` — запис до хвилі проєктів.
+    project: str | None = None
     created: float = field(default_factory=time.time)
     updated: float = field(default_factory=time.time)
     seq: int = 0
@@ -110,6 +113,16 @@ class JobRecord:
         d["state"] = str(self.state)
         d["progress"]["pct"] = self.progress.pct
         return d
+
+
+def _tag() -> str | None:
+    """Проєкт простору для запису роботи; простір не резолвиться — без позначки."""
+    from nyshporka.core import projects as P
+
+    try:
+        return P.tag()
+    except Exception:
+        return None
 
 
 class JobBus:
@@ -210,7 +223,8 @@ class JobBus:
                     raise ValueError(refuse)
 
             job = JobRecord(id=uuid.uuid4().hex[:12], kind=kind, title=title,
-                            cfg=dict(cfg or {}), idempotency_key=idempotency_key)
+                            cfg=dict(cfg or {}), idempotency_key=idempotency_key,
+                            project=_tag())
             self._jobs[job.id] = job
             if idempotency_key:
                 self._idem[idempotency_key] = (job.id, time.time())
@@ -383,6 +397,8 @@ class JobBus:
                     # як «готово» без нього.
                     warnings=list(raw.get("warnings") or []),
                     next=list(raw.get("next") or []),
+                    project=(None if raw.get("project") is None
+                             else str(raw["project"])),
                     created=float(raw.get("created") or time.time()),
                     updated=float(raw.get("updated") or time.time()))
                 self._jobs[job.id] = job

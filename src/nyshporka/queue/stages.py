@@ -534,9 +534,13 @@ def read_run(item: dict[str, Any], ctx: Ctx) -> Outcome:
             ctx.say(human)
 
     workers = int(opts.get("workers") or 1)
+    from nyshporka.core import projects as P
+
+    # Прогін підписаний тим, хто замовив справу в черзі, а не тим, хто веде чергу.
     got = S.read_case(plan, case_key=case_key(item, w), workers=workers,
                       device="cuda" if workers > 1 else "",
-                      on_event=_event, should_stop=ctx.should_stop)
+                      on_event=_event, should_stop=ctx.should_stop,
+                      project=P.tag_of(item.get("project")))
     if got.stopped:
         return Outcome(STOPPED, "stopped",
                        f"зупинено на прохання: прочитано {got.done} із {got.frames}")
