@@ -301,7 +301,7 @@ def test_imena_ne_zistavylys_vidmova_kazhe_tse(ws: W.Workspace, svit: dict[str, 
     """🔴 «Не зміг зіставити» не виглядає як «кадрів немає»."""
     d = _sprava(ws.root, ("000001.jpeg", "000002.jpeg"))
     _prohin(svit, d, ("0001.jpg", "0002.jpg"))
-    with pytest.raises(D.DiskError, match="жодне ім'я не зіставилось.*000001.jpeg.*0001.jpg"):
+    with pytest.raises(D.DiskError, match=r"жодне ім'я не зіставилось.*000001.jpeg.*0001.jpg"):
         D.offload(str(d), restore="диск", apply=True)
     assert len(list(d.glob("*.jpeg"))) == 2
 
