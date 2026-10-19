@@ -3585,7 +3585,32 @@ def pages_status(a: PagesStatusArgs) -> Envelope:
         env.suggest("pages.note",
                     f"{left} сторінок ще ніхто не заносив — переглянуте без "
                     f"запису наступна сесія перегляне заново")
+    _views_elsewhere(env, ref)
     return env
+
+
+def _views_elsewhere(env: Envelope, ref: Any) -> None:
+    """Чужі погляди на справу — лише скільки сторінок, з міткою проєкту.
+
+    🔴 Вміст не показується: коментар іншого проєкту — висновок під його ціль.
+    Що він є, агент мусить знати й сказати людині; відкрити — лише на її
+    прохання (`nysh --project …`, лише читання).
+    """
+    from nyshporka.pagestore import store
+
+    try:
+        found = store.views_elsewhere(ref)
+    except Exception:
+        return          # підсвітка — підказка, а не умова відповіді
+    if not found:
+        return
+    if isinstance(env.data, dict):
+        env.data["elsewhere"] = found
+    for f in found:
+        env.warn("elsewhere",
+                 f"ще в проєкті «{f['project']}» ({f['name']}): коментарі до "
+                 f"{f['pages']} сторінок цієї справи — не завантажено. Відкрити "
+                 f"лише на прохання людини: nysh --project {f['project']} pages show …")
 
 
 class PagesShowArgs(BaseModel):
@@ -3633,8 +3658,10 @@ def pages_show(a: PagesShowArgs) -> Envelope:
                 f"сторінку «{a.scan}» у {ref.shifra} не заносили. "
                 f"Занесені: {', '.join(known) or '—'}"
                 f"{'…' if len(cf.pages) > 10 else ''}")
-        return ok({"case": ref.key, "shifra": ref.shifra,
-                   "page": note.model_dump(mode="json")})
+        env = ok({"case": ref.key, "shifra": ref.shifra,
+                  "page": note.model_dump(mode="json")})
+        _views_elsewhere(env, ref)
+        return env
     if a.rid:
         found = [r for r in cf.records if r.rid == a.rid]
         if not found:
@@ -3652,6 +3679,7 @@ def pages_show(a: PagesShowArgs) -> Envelope:
                  f"{len(cf.pages)} сторінок і {len(cf.records)} записів одним "
                  f"шматком — для перегляду це забагато")
         env.suggest("export.case", "ті самі дані таблицею, колонками")
+    _views_elsewhere(env, ref)
     return env
 
 

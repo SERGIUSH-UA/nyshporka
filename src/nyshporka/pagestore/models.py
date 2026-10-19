@@ -411,3 +411,33 @@ class CaseFile(BaseModel):
             if note.scan != scan:
                 raise ValueError(f"ключ pages «{scan}» ≠ note.scan «{note.scan}»")
         return self
+
+
+#: Поля `PageNote`, що належать погляду проєкту, а не аркушу. Решта — факт:
+#: тип, прізвища, місця, роки, аркуш, повнота, метод, дата.
+VIEW_FIELDS = ("comment", "agent")
+
+
+class PageView(BaseModel):
+    """Погляд проєкту на одну сторінку: що про неї записано під його ціль."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    comment: str = ""
+    agent: str = ""
+    noted: _dt.date = Field(default_factory=_today)
+
+
+class ViewFile(BaseModel):
+    """Уміст `<проєкт>/data/views/<REPO>/<справа>.json` — погляд проєкту на справу.
+
+    🔴 Окремо від файла справи, бо файл справи спільний для всіх проєктів
+    Майстерні: «шукали Д…», «замовлення №3» одного проєкту — не факт аркуша
+    для іншого, і агент сусіднього проєкту не мусить їх читати.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    version: int = 1
+    key: str
+    pages: dict[str, PageView] = Field(default_factory=dict)

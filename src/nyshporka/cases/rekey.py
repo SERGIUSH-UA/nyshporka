@@ -570,8 +570,10 @@ def apply(pl: Plan | None = None) -> dict[str, Any]:
 
     # Похідні (бібліотека, реєстр) — теж в архів: після відкату вони мусять
     # бути старими, а не перебудованими під нові ключі.
+    views = _view_moves(pl, root, ws.pages)
     keep = [*pl.touched, *(_rel(root, p) for p in (ws.hub_marker, library_path(), index_path(),
-                                                     root / legacy.MOVES) if p.is_file())]
+                                                     root / legacy.MOVES) if p.is_file()),
+            *sorted({_rel(root, p) for _, s, d in views for p in (s, d) if p.is_file()})]
     with zipfile.ZipFile(backup, "w", zipfile.ZIP_DEFLATED) as z:
         for rel in keep:
             if (root / rel).is_file():
@@ -582,7 +584,8 @@ def apply(pl: Plan | None = None) -> dict[str, Any]:
     # про які відкат не знає, поруч зі старими з архіву.
     created = sorted({m.dst for m in pl.pages if not (root / m.dst).is_file()}
                      | {_rel(root, p) for p in (mv_path, library_path(), index_path())
-                        if not p.is_file() and p.is_relative_to(root)})
+                        if not p.is_file() and p.is_relative_to(root)}
+                     | {_rel(root, d) for _, _, d in views if not d.is_file()})
     journal: dict[str, Any] = {
         "stamp": stamp, "keys_before": pl.keys_before, "backup": _rel(root, backup),
         "kept": keep, "created": created, "plan": pl.as_dict(), "done": False}
@@ -590,6 +593,7 @@ def apply(pl: Plan | None = None) -> dict[str, Any]:
 
     try:
         overlap = _apply_pages(pl, root)
+        _apply_views(views)
         for _name, store, inner in _project_stores(root):
             _apply_dict(root, store, inner=inner)
         _apply_dict(root, ws.share / "cards.json")
@@ -617,7 +621,8 @@ def apply(pl: Plan | None = None) -> dict[str, Any]:
     db.build_index()
     after = _census(root, ws.pages)
     problems = verify(before, after, overlap)
-    written = sorted({m.dst for m in pl.pages} | set(pl.stores) | {_rel(root, mv_path)})
+    written = sorted({m.dst for m in pl.pages} | set(pl.stores) | {_rel(root, mv_path)}
+                     | {_rel(root, d) for _, _, d in views})
     journal.update(done=True, done_at=time.time(), census_before=before,
                    census_after=after, overlap=overlap, problems=problems,
                    written={rel: _sha(root / rel) for rel in written})
@@ -736,6 +741,52 @@ def _apply_pages(pl: Plan, root: Path) -> dict[str, int]:
         if dst != src:
             src.unlink()
     return overlap
+
+
+def _view_moves(pl: Plan, root: Path, pages_root: Path) -> list[tuple[str, Path, Path]]:
+    """Погляди проєктів на справи, що переїжджають: (новий ключ, звідки, куди).
+
+    🔴 Усіх проєктів, і архівних теж: файл погляду зветься так само, як файл
+    справи, і після переносу під старим іменем його ніхто б не прочитав —
+    коментарі проєкту зникли б з виду.
+    """
+    from nyshporka.core.projects import ROOT_ID, list_projects
+
+    out: list[tuple[str, Path, Path]] = []
+    for pr in list_projects(root, archived=True):
+        vroot = pr.root / "data" / "views"
+        if pr.id == ROOT_ID or not vroot.is_dir():
+            continue
+        for m in pl.pages:
+            try:
+                src = vroot / (root / m.src).relative_to(pages_root)
+                dst = vroot / (root / m.dst).relative_to(pages_root)
+            except ValueError:
+                continue
+            if src.is_file():
+                out.append((m.new_key, src, dst))
+    return out
+
+
+def _apply_views(moves: list[tuple[str, Path, Path]]) -> None:
+    from nyshporka.pagestore.models import PageView
+    from nyshporka.pagestore.store import _merge_view
+    from nyshporka.utils.atomic import atomic_write_text
+
+    for new_key, src, dst in moves:
+        d = _read(src)
+        d["key"] = new_key
+        if dst != src and dst.is_file():
+            pages = dict(_read(dst).get("pages") or {})
+            for scan, raw in (d.get("pages") or {}).items():
+                pages[scan] = raw if scan not in pages else _merge_view(
+                    PageView.model_validate(pages[scan]),
+                    PageView.model_validate(raw)).model_dump(mode="json")
+            d["pages"] = dict(sorted(pages.items()))
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        atomic_write_text(dst, json.dumps(d, ensure_ascii=False, indent=1) + "\n")
+        if dst != src:
+            src.unlink()
 
 
 def _merge_value(store: str, a: Any, b: Any) -> Any:

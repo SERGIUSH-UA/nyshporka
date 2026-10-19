@@ -189,8 +189,8 @@ class Workspace:
     @property
     def derived(self) -> Path: return self.hub_data / "derived"
 
-    #: Сховище сторінок. ⚠ Поки що цілком у Майстерні; розщеплення на факт
-    #: аркуша (Майстерня) і перегляд під ціль (проєкт) — хвиля 3.
+    #: Сховище сторінок — факт аркуша: тип, прізвища, місця, роки, повнота.
+    #: Коментар і хто дивився — погляд проєкту (`views`).
     @property
     def pages(self) -> Path: return self.hub_data / "pages"
 
@@ -236,6 +236,12 @@ class Workspace:
     #: Стан пошуку роду (`clan_hunt/state.json`).
     @property
     def clan_hunt(self) -> Path: return self.data / "clan_hunt"
+
+    #: Погляд проєкту на сторінки: коментар і хто дивився, під ціль цього
+    #: проєкту (`pagestore.store`). У корені старого типу погляд лежить
+    #: вбудованим у файлі `pages`, як до розщеплення.
+    @property
+    def views(self) -> Path: return self.data / "views"
 
     @property
     def reports(self) -> Path: return self.proot / "reports"

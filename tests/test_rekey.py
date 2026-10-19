@@ -642,6 +642,9 @@ def test_the_move_walks_the_journals_of_every_project(old_space: Path) -> None:
         "DAHMO/315/8433": {"verdict": "clan", "date": "2026-10-01"}}})
     _json(proj / "data/derived/search_log.json", {
         "CDIAK/224/49": [{"q": "Сидорук", "models": ["pysar"], "channels": []}]})
+    _json(proj / "data/views/DAHMO/315-8433.json", {"version": 1, "key": "DAHMO/315/8433",
+          "pages": {"0001.jpg": {"comment": "шукали Сидорука", "agent": "a",
+                                 "noted": "2026-10-01"}}})
 
     pl = RK.plan()
     assert "projects/alpha/data/spotter/case_verdicts.json" in pl.stores
@@ -650,5 +653,14 @@ def test_the_move_walks_the_journals_of_every_project(old_space: Path) -> None:
     assert list(_read(proj, "data/spotter/case_verdicts.json")["verdicts"]) == [
         "DAHMO/315/1/8433"]
     assert list(_read(proj, "data/derived/search_log.json")) == ["CDIAK/224/1/49"]
+    # погляд проєкту на сторінки переїхав під нове ім'я файла справи
+    assert not (proj / "data/views/DAHMO/315-8433.json").exists()
+    view = _read(proj, "data/views/DAHMO/315-1-8433.json")
+    assert view["key"] == "DAHMO/315/1/8433"
+    assert view["pages"]["0001.jpg"]["comment"] == "шукали Сидорука"
     # корінь (рід старого простору) перенесено як завжди
     assert list(_read(old_space, "data/derived/verdicts.json")) == ["DAHMO/315/1/8433"]
+    # відкат повертає погляд під старе ім'я, нового не лишає
+    RK.rollback()
+    assert (proj / "data/views/DAHMO/315-8433.json").is_file()
+    assert not (proj / "data/views/DAHMO/315-1-8433.json").exists()
