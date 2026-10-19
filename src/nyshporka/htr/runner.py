@@ -2255,13 +2255,26 @@ def workspace_root(*hints: Path) -> Path:
     кеш завжди 0%. Дізнатись про це можна лише за рахунком за нічний прогін.
 
     Фолбек — батько виходу; він гірший, але явний і надрукований.
+
+    Маркер проєкту (`[project]`) пропускається: кеш сегментації — Майстерні,
+    один на справу, хоч би з якого проєкту її читали.
     """
     for hint in hints:
         cur = Path(hint).resolve()
         for cand in (cur, *cur.parents):
-            if (cand / WORKSPACE_MARKER).is_file():
+            marker = cand / WORKSPACE_MARKER
+            if marker.is_file() and not _is_project_marker(marker):
                 return cand
     return Path(hints[0]).resolve().parent
+
+
+def _is_project_marker(marker: Path) -> bool:
+    """Чи це маркер проєкту в Майстерні (таблиця `[project]`), а не самого хаба."""
+    try:
+        text = marker.read_text(encoding="utf-8")
+    except OSError:
+        return False
+    return re.search(r"(?m)^\s*\[project\]\s*$", text) is not None
 
 
 def seg_cache_dir_for(case_dir: Path, root: Path) -> Path:

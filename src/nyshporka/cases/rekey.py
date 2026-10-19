@@ -230,7 +230,7 @@ def plan(*, entries: list[dict[str, Any]] | None = None) -> Plan:
     from nyshporka.core.workspace import workspace
 
     ws = workspace()
-    root = ws.root
+    root = ws.hub
     if entries is None:
         entries = [asdict(e) for e in _fresh_library()]
     moves, shared = legacy.moves_from_entries(entries, legacy.registry_set(root))
@@ -256,13 +256,13 @@ def plan(*, entries: list[dict[str, Any]] | None = None) -> Plan:
     _MOVES.clear()
     _MOVES.update(moves)
     _plan_pages(pl, ws.pages)
-    _plan_dict(pl, root / "data" / "spotter" / "case_verdicts.json", inner="verdicts")
-    _plan_dict(pl, root / "data" / "derived" / "verdicts.json")
-    _plan_dict(pl, root / "data" / "derived" / "search_log.json")
+    for _name, store, inner in _project_stores(root):
+        _plan_dict(pl, store, inner=inner)
     _plan_dict(pl, ws.share / "cards.json")
     _plan_overrides(pl, root / "data" / "cases" / "overrides.json")
     _plan_queue(pl, root / "data" / "queue" / "queue.json")
-    _plan_profiles(pl, ws.config / "records_profiles.yaml")
+    for prof in _project_profiles(root):
+        _plan_profiles(pl, prof)
     pl.unknown = sorted(str(e["key"]) for e in entries
                         if (ck := casekey.parse(e.get("key"))) is not None
                         and not ck.bundle and not ck.opys_known)
@@ -494,12 +494,39 @@ def _plan_profiles(pl: Plan, p: Path) -> None:
         pl.stuck.setdefault(_rel(pl.root, p), []).append(clash)
 
 
+def _project_stores(hub: Path) -> list[tuple[str, Path, str]]:
+    """Журнали проєктів, що тримають ключі справ: (назва, файл, внутрішній ключ).
+
+    🔴 Усіх проєктів Майстерні, а не лише активного, і архівних теж. Ключ
+    справи один на Майстерню; перенос, що пройшов би журнали лише свого
+    проєкту, лишив би вердикти й слід пошуку решти під ключами, яких після
+    переносу ніхто не читає.
+    """
+    from nyshporka.core.projects import list_projects
+
+    out: list[tuple[str, Path, str]] = []
+    for pr in list_projects(hub, archived=True):
+        out += [("case_verdicts", pr.root / "data" / "spotter" / "case_verdicts.json",
+                 "verdicts"),
+                ("line_verdicts", pr.root / "data" / "derived" / "verdicts.json", ""),
+                ("search_log", pr.root / "data" / "derived" / "search_log.json", "")]
+    return out
+
+
+def _project_profiles(hub: Path) -> list[Path]:
+    """Профілі вичитки записів усіх проєктів (`config/records_profiles.yaml`)."""
+    from nyshporka.core.projects import list_projects
+
+    return [pr.root / "config" / "records_profiles.yaml"
+            for pr in list_projects(hub, archived=True)]
+
+
 # ── перенос ──────────────────────────────────────────────────────────────────
 def _fresh_locks(pages_root: Path) -> list[str]:
     """Свіжі локи сховищ, які перенос переписує: хтось пише просто зараз."""
     from nyshporka.core.workspace import workspace
 
-    data = workspace().data
+    data = workspace().hub_data
     now = time.time()
     found = [*pages_root.glob("*/*.lock")] if pages_root.is_dir() else []
     for sub in ("derived", "spotter", "share", "cases", "queue"):
@@ -516,7 +543,7 @@ def apply(pl: Plan | None = None) -> dict[str, Any]:
     from nyshporka.library import library_path, write_library
 
     ws = W.workspace()
-    root = ws.root
+    root = ws.hub
     _refuse_busy(ws.pages)
     built = _fresh_library()
     entries = [asdict(e) for e in built]
@@ -543,7 +570,7 @@ def apply(pl: Plan | None = None) -> dict[str, Any]:
 
     # Похідні (бібліотека, реєстр) — теж в архів: після відкату вони мусять
     # бути старими, а не перебудованими під нові ключі.
-    keep = [*pl.touched, *(_rel(root, p) for p in (ws.marker, library_path(), index_path(),
+    keep = [*pl.touched, *(_rel(root, p) for p in (ws.hub_marker, library_path(), index_path(),
                                                      root / legacy.MOVES) if p.is_file())]
     with zipfile.ZipFile(backup, "w", zipfile.ZIP_DEFLATED) as z:
         for rel in keep:
@@ -563,13 +590,13 @@ def apply(pl: Plan | None = None) -> dict[str, Any]:
 
     try:
         overlap = _apply_pages(pl, root)
-        _apply_dict(root, root / "data" / "spotter" / "case_verdicts.json", inner="verdicts")
-        _apply_dict(root, root / "data" / "derived" / "verdicts.json")
-        _apply_dict(root, root / "data" / "derived" / "search_log.json")
+        for _name, store, inner in _project_stores(root):
+            _apply_dict(root, store, inner=inner)
         _apply_dict(root, ws.share / "cards.json")
         _apply_overrides(root / "data" / "cases" / "overrides.json")
         _apply_queue(root / "data" / "queue" / "queue.json")
-        _apply_profiles(ws.config / "records_profiles.yaml")
+        for prof in _project_profiles(root):
+            _apply_profiles(prof)
         legacy.record_moves(root, pl.moves, made=stamp)
         write_library(built)
         W.set_keys_version(casekey.KEYS_VERSION)
@@ -834,9 +861,7 @@ def _census(root: Path, pages_root: Path) -> dict[str, Any]:
             out["case_notes"] += len(d.get("notes") or [])
             out["legacy_page_keys"] += int(casekey.parse(d.get("key")) is None)
     for name, p, inner in (
-            ("case_verdicts", root / "data" / "spotter" / "case_verdicts.json", "verdicts"),
-            ("line_verdicts", root / "data" / "derived" / "verdicts.json", ""),
-            ("search_log", root / "data" / "derived" / "search_log.json", ""),
+            *_project_stores(root),
             ("bindings", root / "data" / "cases" / "overrides.json", "runs")):
         if not p.is_file():
             continue
@@ -844,10 +869,11 @@ def _census(root: Path, pages_root: Path) -> dict[str, Any]:
         d = d.get(inner) if inner else d
         if isinstance(d, dict):
             items = [k for k in d if not k.startswith("_")]
-            out[name] = len(items)
+            # Журнали кількох проєктів складаються: перепис — про весь облік.
+            out[name] = out.get(name, 0) + len(items)
             if name == "line_verdicts":
-                out["line_verdicts_items"] = sum(len(v) for v in d.values()
-                                                 if isinstance(v, dict))
+                out["line_verdicts_items"] = out.get("line_verdicts_items", 0) + sum(
+                    len(v) for v in d.values() if isinstance(v, dict))
     return out
 
 
@@ -898,7 +924,7 @@ def rollback(stamp: str | None = None, *, force: bool = False) -> dict[str, Any]
     from nyshporka.core import workspace as W
 
     ws = W.workspace()
-    root = ws.root
+    root = ws.hub
     base = root / REKEY_DIR
     homes = sorted(p for p in base.iterdir()
                    if p.is_dir() and (p / "journal.json").is_file()) if base.is_dir() else []

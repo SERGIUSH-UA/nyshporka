@@ -74,7 +74,10 @@ def fingerprint() -> tuple[Any, ...]:
         beat = pulse.seq()
     except Exception:
         beat = 0
-    return (_stat(library_path()), _stat(verdicts_path()), _stat(db.index_path()), beat)
+    # Шлях вердиктів — у відбитку: вони проєктні, і після перемикання проєкту
+    # той самий (mtime, розмір) чужого файла не мусить видавати себе за свіжий.
+    return (_stat(library_path()), str(verdicts_path()), _stat(verdicts_path()),
+            _stat(db.index_path()), beat)
 
 
 def layers_by_key() -> dict[str, dict[str, Any]]:

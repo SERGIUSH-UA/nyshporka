@@ -32,16 +32,15 @@ SRC = Path(__file__).resolve().parents[1] / "src" / "nyshporka"
 ALLOWED = {"core/workspace.py", "setup/relocate.py", "htr/bokovi.py", "htr/seg.py",
            "ui/__init__.py"}
 
-#: Склейки, що лишились після хвилі 1. Кожна — у функції, яка отримує корінь
-#: проєкту параметром, тож поки що правильна. Хабові серед них (докази в
-#: `canon/evidence.py`, `canon/check.py`, `site/render.py`; `overrides` і
-#: черга в `cases/rekey.py`; кеш сегментації в `htr/runner.py`) розводяться
-#: у хвилі 2, коли Майстерня й проєкт уперше стануть різними теками.
+#: Склейки, що лишились. Кожна — у функції, яка отримує корінь параметром і
+#: клеїть до нього шлях свого ж шару: проєктні (канон, сайт, база роду) — від
+#: кореня проєкту, хабові (`overrides` і черга в `cases/rekey.py`, кеш
+#: сегментації в `htr/runner.py`) — від кореня Майстерні, який туди й
+#: передається. Докази резолвляться через `canon/refs.py`.
 DEBT: dict[str, int] = {
-    "canon/check.py": 3,
-    "canon/evidence.py": 1,
+    "canon/check.py": 2,
     "canon/gedcom.py": 2,
-    "cases/rekey.py": 15,
+    "cases/rekey.py": 10,
     "htr/runner.py": 1,
     "matching/candidate.py": 2,
     "matching/review.py": 2,
@@ -51,7 +50,7 @@ DEBT: dict[str, int] = {
     "ops_site.py": 1,
     "site/build.py": 1,
     "site/public.py": 1,
-    "site/render.py": 8,
+    "site/render.py": 6,
     "storage/reindex.py": 3,
 }
 

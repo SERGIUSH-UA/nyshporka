@@ -57,6 +57,35 @@ console = brand.console()
 err_console = brand.err()
 
 
+def _sync_project() -> None:
+    """Оновити агентні файли проєкту (хук, інструкції) під нову версію пакета.
+
+    Тим самим принципом, що й скіли: файл, правлений людиною, лишається. Змінений
+    хук Codex треба схвалити знову (`/hooks`) — про це рядок, бо інакше хук
+    мовчки перестане спрацьовувати.
+    """
+    try:
+        from nyshporka import __version__
+        from nyshporka import project as T
+        from nyshporka.core.workspace import workspace
+
+        ws = workspace()
+        if ws.project is None or ws.readonly:
+            return
+        got = T.sync(ws.root, __version__)
+    except Exception:
+        return          # зручність, а не умова роботи
+    moved = [k for k, v in got.items() if v == "updated"]
+    kept = [k for k, v in got.items() if v == "kept"]
+    if moved:
+        err_console.print(f"[muted]файли проєкту оновлено: {', '.join(moved)}[/muted]")
+    if ".codex/hooks.json" in moved:
+        err_console.print("[warn]⚠ хук Codex змінився — у наступній сесії Codex "
+                          "схваліть його командою /hooks[/warn]")
+    if kept:
+        err_console.print(f"[muted]лишено правлених руками: {', '.join(kept)}[/muted]")
+
+
 def _sync_skills() -> None:
     """Перекласти скіли, якщо облік старший за пакет. Тихо, коли робити нічого.
 
@@ -125,7 +154,7 @@ def _nag_migration(sub: str) -> None:
         from nyshporka import __version__
         from nyshporka.core.workspace import workspace
 
-        todo = M.pending(workspace().root, __version__)
+        todo = M.pending(workspace().hub, __version__)
     except Exception:
         return
     if todo:
@@ -139,6 +168,10 @@ def _global_options(
     workspace: str = typer.Option(
         "", "--workspace", "-w", metavar="ТЕКА",
         help="простір для цього запуску (ставиться перед командою)"),
+    project: str = typer.Option(
+        "", "--project", metavar="ІМ'Я",
+        help="проєкт тієї самої Майстерні (з іншого проєкту — лише читання; "
+             "«.» — корінь простору старого типу)"),
 ) -> None:
     """Спільна опція всіх команд.
 
@@ -167,6 +200,22 @@ def _global_options(
         except WorkspaceError as exc:
             console.print(f"[err]{exc}[/err]")
             raise typer.Exit(code=2) from None
+    if project:
+        from nyshporka.core.projects import open_project
+        from nyshporka.core.workspace import WorkspaceError, use
+
+        try:
+            opened = use(open_project(project))
+        except WorkspaceError as exc:
+            console.print(f"[err]{exc}[/err]")
+            raise typer.Exit(code=2) from None
+        if opened.readonly:
+            # Вивід нижче — з ЧУЖОГО проєкту; без цього рядка його легко
+            # прийняти за свій, а саме цієї плутанини межа й запобігає.
+            err_console.print(f"[warn]👁 проєкт «{project}» ({opened.name}) — лише читання; "
+                              "усе нижче — його висновки, не цього проєкту[/warn]")
+    if sub not in _NO_SKILL_SYNC_FOR:
+        _sync_project()
     _nag_migration(sub)
 
 
@@ -313,7 +362,7 @@ def _sources_registry() -> Any:
     from nyshporka.sources import load
 
     try:
-        return load(workspace().root)
+        return load(workspace().hub)
     except WorkspaceError:
         return load(None)
 
@@ -681,6 +730,8 @@ def init(
     preset: str = typer.Option("", "--preset",
                                help="набір частин: catalog | amateur | researcher | lab"),
     yes: bool = typer.Option(False, "--yes", "-y", help="без питань (для інсталятора)"),
+    hub: bool = typer.Option(False, "--hub",
+                             help="Майстерня для кількох проєктів: роди — `nysh project new`"),
 ) -> None:
     """Створити робочий простір — теку, де житиме дослідження.
 
@@ -728,8 +779,12 @@ def init(
             console.print(f"[warn]є: {', '.join(sorted(S.PRESETS))}[/warn]")
             preset = typer.prompt("Набір", default=S.DEFAULT_PRESET)
 
-    root = wizard.create(p.root, name=name, preset=preset)
+    root = wizard.create(p.root, name=name, preset=preset, hub=hub)
     console.print(f"✅ готово: {root}")
+    if hub:
+        console.print("[muted]далі: `nysh project new <ім'я> --surname <Прізвище>` — "
+                      "перший проєкт роду[/muted]")
+        return
     if preset:
         console.print(f"[muted]частини: {preset} · змінити — `nysh sections`[/muted]")
     # ⚠ Профіль названо тут, а не лишено доктору: інакше єдиним місцем, де про
@@ -1737,7 +1792,7 @@ def review_cmd(
     from nyshporka.matching.review import review_loop
 
     _need("research")
-    review_loop(workspace().root, source=source or None, min_score=min_score,
+    review_loop(workspace().proot, source=source or None, min_score=min_score,
                 console=console)
 
 
@@ -3566,7 +3621,7 @@ def serve(
     from nyshporka.core.workspace import workspace as _workspace
 
     lines = D.exposure_warnings(addr, port, tls=tls_cert is not None,
-                                key_path=D.access_key_path(_workspace().root))
+                                key_path=D.access_key_path(_workspace().hub))
     # 🔴 Застереження друкується ЗАВЖДИ, навіть із прапорцями підтвердження, і
     # під службою дублюється в stderr: stdout там часто не йде нікуди.
     outs = [console] if _stdout_is_tty() else [console, brand.err()]
@@ -3733,6 +3788,101 @@ def sections_preset(name: str = typer.Argument(..., help="catalog | amateur | re
                     ) -> None:
     """Взяти готовий набір секцій."""
     _sections_call({"preset": name})
+
+
+project_app = typer.Typer(help="Проєкти Майстерні: роди й замовлення в projects/<ім'я>/.")
+app.add_typer(project_app, name="project")
+
+
+@project_app.command("new")
+def project_new_cmd(
+    name: str = typer.Argument(..., help="ім'я теки: малі латинські літери, цифри, дефіс"),
+    kind: str = typer.Option("family", "--kind", help="family — рід, order — замовлення"),
+    title: str = typer.Option("", "--title", help="назва для людини"),
+    surname: str = typer.Option("", "--surname", help="прізвище роду — одразу профіль"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
+) -> None:
+    """Завести проєкт: тека, маркер, профіль, інструкції й хук старту для агентів."""
+    from nyshporka import ops as O
+
+    env = O.call("project.new", {"name": name, "kind": kind, "title": title,
+                                 "surname": surname})
+    if _answer(env, as_json):
+        return
+    console.print(f"✅ проєкт «{name}»: {env.data['root']}")
+    for f in env.data["files"]:
+        console.print(f"   [muted]{f}[/muted]")
+    console.print("[muted]Codex: у першій сесії схваліть хук старту командою /hooks[/muted]")
+    _notes(env)
+
+
+@project_app.command("list")
+def project_list_cmd(as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
+                     ) -> None:
+    """Проєкти Майстерні."""
+    from nyshporka import ops as O
+
+    env = O.call("project.list")
+    if _answer(env, as_json):
+        return
+    console.print(f"Майстерня: [bold]{env.data['hub']}[/bold]")
+    for r in env.data["projects"]:
+        here = "▶" if r["here"] else " "
+        arch = " [muted](архів)[/muted]" if r["archived"] else ""
+        console.print(f" {here} [bold]{r['id']:<16}[/bold] {r['name']} · {r['kind']} · "
+                      f"осіб у каноні: {r['persons']}{arch}")
+    if not env.data["projects"]:
+        console.print("[muted]проєктів ще немає — nysh project new <ім'я>[/muted]")
+
+
+@project_app.command("status")
+def project_status_cmd(
+    agent: bool = typer.Option(False, "--agent",
+                               help="для хука старту сесії агента: простий текст"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
+) -> None:
+    """Де я: Майстерня, проєкт, рід, канон, відкрите, інші проєкти."""
+    from nyshporka import ops as O
+
+    env = O.call("project.status", {"agent": agent})
+    if agent and env.ok:
+        # Хук читає stdout як текст: без розмітки rich і завжди в UTF-8, бо
+        # консоль Windows під хуком може стояти на cp1251/cp866.
+        import contextlib
+
+        with contextlib.suppress(AttributeError, ValueError):
+            sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
+        print(env.data["text"])
+        return
+    if _answer(env, as_json):
+        return
+    console.print(env.data["text"], markup=False)
+
+
+@project_app.command("archive")
+def project_archive_cmd(name: str = typer.Argument(..., help="ім'я проєкту"),
+                        undo: bool = typer.Option(False, "--undo", help="повернути з архіву"),
+                        ) -> None:
+    """Сховати проєкт із переліку й підсвітки. Файли лишаються."""
+    from nyshporka import ops as O
+
+    env = O.call("project.archive", {"name": name, "undo": undo})
+    _answer(env)
+    console.print(("↩ повернуто: " if undo else "🗄 в архіві: ") + env.data["root"])
+
+
+@project_app.command("open")
+def project_open_cmd(name: str = typer.Argument(..., help="ім'я проєкту"),
+                     agent: str = typer.Option("", "--agent", help="claude | codex"),
+                     ) -> None:
+    """Новий термінал у теці проєкту — за потреби одразу з агентом."""
+    from nyshporka import ops as O
+
+    env = O.call("project.open", {"name": name, "agent": agent})
+    _answer(env)
+    if env.data.get("started"):
+        console.print(f"↗ відкрито: {env.data['root']}")
+    _notes(env)
 
 
 @app.command("op")

@@ -23,7 +23,7 @@ from nyshporka.core.ops import NoArgs, op
 def _root() -> Path:
     from nyshporka.core.workspace import workspace
 
-    return workspace().root
+    return workspace().proot
 
 
 class CheckArgs(BaseModel):

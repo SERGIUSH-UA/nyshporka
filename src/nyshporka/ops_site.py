@@ -34,7 +34,7 @@ def site_build(a: SiteBuildArgs) -> Envelope:
     from nyshporka.site import build as B
     from nyshporka.site.config import ConfigError
 
-    root = workspace().root
+    root = workspace().proot
     if a.public and not a.html:
         # Сирці відкритої версії без HTML сторож не перевіряє — і саме їх
         # потім збирають і викладають іншим інструментом.
@@ -88,7 +88,7 @@ def site_status(_a: SiteStatusArgs) -> Envelope:
     from nyshporka.core.workspace import workspace
     from nyshporka.site import build as B
 
-    root = workspace().root
+    root = workspace().proot
     canon = root / "data" / "canonical" / "persons"
     in_canon = sum(1 for _ in canon.glob("*.md")) if canon.is_dir() else 0
     out: dict[str, object] = {"canon_persons": in_canon, "mkdocs": B.mkdocs_available()}

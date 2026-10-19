@@ -748,7 +748,9 @@ def _load_citation_docs(
     docs/assets/citations/ під .gitignore (відтворювана копія з data/source/citations).
     `allowed` (відкрита збірка) — лише сторінки, що публікуються: файл, який цитують
     тільки приховані, не копіюється взагалі."""
-    citations_root = project_root / "data" / "source" / "citations"
+    from nyshporka.canon import refs
+
+    citations_root = refs.citations_dir(project_root)
     manifest_path = citations_root / "MANIFEST_citations.json"
     by_page: dict[str, list[dict[str, Any]]] = {}
     if not manifest_path.exists():
@@ -763,7 +765,8 @@ def _load_citation_docs(
         if not isinstance(rec, dict):
             continue
         path = rec.get("secured_to")
-        cited_by = rec.get("cited_by") or []
+        # Маніфест спільний на Майстерню — галерея бере лише картки свого проєкту.
+        cited_by = refs.own_cited(project_root, rec.get("cited_by") or [])
         if allowed is not None:
             cited_by = [
                 cb for cb in cited_by
@@ -771,7 +774,7 @@ def _load_citation_docs(
             ]
         if not path or not cited_by:
             continue
-        src = project_root / path
+        src = refs.resolve(project_root, path)
         if not src.exists():
             continue
         ext = src.suffix.lower()
@@ -836,12 +839,14 @@ def _public_citation_docs(project_root: Path, docs_dir: Path,
             continue
         for ref in evidence_refs(card.read_text(encoding="utf-8")):
             owners.setdefault(ref, set()).add(card.stem)
-    citations_root = project_root / "data" / "source" / "citations"
+    from nyshporka.canon import refs
+
+    citations_root = refs.citations_dir(project_root)
     by_page: dict[str, list[dict[str, Any]]] = {}
     for ref, who in sorted(owners.items()):
         if not who <= published:
             continue
-        src = project_root / ref
+        src = refs.resolve(project_root, ref)
         ext = src.suffix.lower()
         if not src.is_file() or not (ext == ".pdf" or ext in _DOC_IMG_EXT):
             continue

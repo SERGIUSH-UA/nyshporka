@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from nyshporka.canon import refs
 from nyshporka.canon.check import evidence_refs, manifest_path
 from nyshporka.utils.atomic import atomic_write_bytes, read_json, write_json
 
@@ -50,7 +51,8 @@ class Secured:
 
 
 def store_dir(root: Path) -> Path:
-    return root / "data" / "source" / "citations"
+    """Стор доказів — у Майстерні, навіть коли канон лежить у проєкті."""
+    return refs.citations_dir(root)
 
 
 def _to_grey_jpeg(src: Path) -> bytes:
@@ -90,7 +92,7 @@ def add(root: Path, src: Path, provenance: str, *, name: str = "",
     sha = hashlib.sha256(blob).hexdigest()
 
     dest = store_dir(root) / provenance / f"{stem}.jpg"
-    rel = dest.relative_to(root).as_posix()
+    rel = dest.relative_to(refs.hub_of(root)).as_posix()
     existed = False
     if dest.exists():
         have = hashlib.sha256(dest.read_bytes()).hexdigest()
@@ -141,7 +143,7 @@ def refresh_cited_by(root: Path, files: dict[str, Path]) -> dict[str, Any]:
     referenced: set[str] = set()
     added = 0
     for _eid, path in sorted(files.items()):
-        owner = path.name
+        owner = refs.owner(root, path.name)
         for ref in evidence_refs(path.read_text(encoding="utf-8")):
             key = by_target.get(ref) or (ref if ref in records else None)
             if key is None:
@@ -153,7 +155,12 @@ def refresh_cited_by(root: Path, files: dict[str, Path]) -> dict[str, Any]:
                 added += 1
     if added or normalised:
         write_json(man, records, indent=1)
-    unreferenced = sorted(k for k in records if k not in referenced)
+    # Чужі докази (на які посилаються лише картки інших проєктів) — не
+    # «без посилань»: цей проєкт їх просто не бачить.
+    unreferenced = sorted(
+        k for k in records if k not in referenced
+        and all(refs.owns(root, x) for x in (records[k].get("cited_by") or [])
+                if isinstance(x, str)))
     return {"records": len(records), "added": added, "normalised": normalised,
             "unreferenced": unreferenced}
 

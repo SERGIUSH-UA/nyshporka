@@ -104,12 +104,16 @@ def origin_phrase(origin: str) -> str:
 
 
 def create(root: str | Path | None = None, *, name: str = "",
-           preset: str = "") -> Path:
+           preset: str = "", hub: bool = False) -> Path:
     """Створити простір: тека, маркер, кістяк. Ідемпотентно.
 
     `preset` — які частини застосунку ввімкнути (`core.sections`). Порожній
     рядок означає «як досі»: у маркер нічого не пишеться, діє дефолт. Так
     простір, створений без питання про пресет, лишається повним.
+
+    `hub` — Майстерня без власного проєкту (`hub_only`): роди й замовлення
+    живуть у `projects/<ім'я>/` (`nysh project new`), а в корені — лише
+    спільний матеріал.
     """
     import tomllib  # noqa: F401  (перевірка, що stdlib має читач TOML)
 
@@ -122,7 +126,9 @@ def create(root: str | Path | None = None, *, name: str = "",
 
     target = plan(root).root
     target.mkdir(parents=True, exist_ok=True)
-    for sub in ("data/raw", "data/derived", "data/pages", "reports", "config"):
+    subs = ("data/raw", "data/derived", "data/pages", "reports", "projects") if hub else (
+        "data/raw", "data/derived", "data/pages", "reports", "config")
+    for sub in subs:
         (target / sub).mkdir(parents=True, exist_ok=True)
     marker = target / MARKER
     fresh = not marker.is_file()
@@ -142,7 +148,9 @@ def create(root: str | Path | None = None, *, name: str = "",
             "# Версія ключів справ: 2 — опис у ключі (`nysh cases rekey`).\n"
             "keys = 2\n"
             f'name = "{name or target.name}"\n'
-            f"{chosen}"
+            + ("# Майстерня без власного проєкту: роди — у projects/ (`nysh project new`).\n"
+               "hub_only = true\n" if hub else "")
+            + f"{chosen}"
             "\n"
             "# Скани, що лежать поза простором (зовнішній диск, мережева теку):\n"
             "# case_roots = [\"D:/архів\"]\n",

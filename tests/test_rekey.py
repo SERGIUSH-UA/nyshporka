@@ -627,3 +627,28 @@ def test_the_plan_names_what_it_joins_and_what_the_file_says(old_space: Path) ->
     got = _read(old_space, "data/spotter/case_verdicts.json")["verdicts"]["CDIAK/224/1/49"]
     assert got["verdict"] == "recheck"                                # пізніший
     assert [x["verdict"] for x in got["superseded"]] == ["no_clan"]   # і не зник
+
+
+def test_the_move_walks_the_journals_of_every_project(old_space: Path) -> None:
+    """Ключ справи один на Майстерню: вердикти й слід пошуку проєкту в
+    `projects/<ім'я>/` переносяться разом із коренем, а не лишаються під
+    ключами, яких після переносу ніхто не читає."""
+    from nyshporka.cases import rekey as RK
+
+    proj = old_space / "projects" / "alpha"
+    (proj).mkdir(parents=True)
+    (proj / "nyshporka.toml").write_text('[project]\nname = "alpha"\n', encoding="utf-8")
+    _json(proj / "data/spotter/case_verdicts.json", {"verdicts": {
+        "DAHMO/315/8433": {"verdict": "clan", "date": "2026-10-01"}}})
+    _json(proj / "data/derived/search_log.json", {
+        "CDIAK/224/49": [{"q": "Сидорук", "models": ["pysar"], "channels": []}]})
+
+    pl = RK.plan()
+    assert "projects/alpha/data/spotter/case_verdicts.json" in pl.stores
+    got = RK.apply()
+    assert got["problems"] == [], got
+    assert list(_read(proj, "data/spotter/case_verdicts.json")["verdicts"]) == [
+        "DAHMO/315/1/8433"]
+    assert list(_read(proj, "data/derived/search_log.json")) == ["CDIAK/224/1/49"]
+    # корінь (рід старого простору) перенесено як завжди
+    assert list(_read(old_space, "data/derived/verdicts.json")) == ["DAHMO/315/1/8433"]

@@ -29,7 +29,8 @@ import os
 import re
 import sys
 import tomllib
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from functools import lru_cache
 from pathlib import Path
@@ -52,6 +53,15 @@ _PACKAGE_ANCHOR = Path(__file__).resolve().parents[3]
 
 class WorkspaceError(RuntimeError):
     """Простір не знайдено або він непридатний."""
+
+
+class NoProjectError(WorkspaceError):
+    """Команда проєктного шару запущена з кореня Майстерні без проєкту."""
+
+
+#: Тека проєктів усередині Майстерні. Проєкт лежить лише тут — і саме тому
+#: перелік проєктів можна взяти з диска, без окремого реєстру.
+PROJECTS_DIR = "projects"
 
 
 # ── валідація кореня ─────────────────────────────────────────────────────────
@@ -137,9 +147,35 @@ class Workspace:
     #: Корінь Майстерні, якщо проєкт лежить окремо від неї. `None` — простір
     #: старого типу: Майстерня й проєкт в одному каталозі.
     hub_root: Path | None = None
+    #: Ім'я проєкту (тека в `projects/`). `None` — корінь Майстерні: або хаб
+    #: старого типу, де проєкт лежить у самому корені, або чистий хаб.
+    project: str | None = None
+    #: Майстерня без власного проєкту (`[workspace] hub_only = true`). Тоді в
+    #: корені хаба проєктного шару немає зовсім, і звертання до нього — помилка.
+    hub_only: bool = False
+    #: Чужий проєкт, відкритий з іншого (`--project`) — лише для читання.
+    readonly: bool = False
 
     @property
     def hub(self) -> Path: return self.hub_root or self.root
+
+    @property
+    def hub_marker(self) -> Path: return self.hub / MARKER
+
+    @property
+    def proot(self) -> Path:
+        """Корінь проєктного шару — або відмова в чистому хабі.
+
+        🔴 Межа механічна: без неї команда, запущена з кореня Майстерні,
+        тихо читала б (і писала б) `хаб/data/canonical` — канон, якого там
+        немає й не має бути, а знахідка падала б «нікому».
+        """
+        if self.hub_only and self.project is None:
+            raise NoProjectError(
+                "команда проєктного шару (канон, профіль, вердикти, журнал, звіти) "
+                "запущена з кореня Майстерні — вкажіть проєкт: "
+                "nysh --project <ім'я> … або запустіть її в теці проєкту")
+        return self.root
 
     # ── Майстерня: факти про справу й машину ─────────────────────────────────
     @property
@@ -183,7 +219,7 @@ class Workspace:
 
     # ── проєкт: рід чи замовлення ────────────────────────────────────────────
     @property
-    def data(self) -> Path: return self.root / "data"
+    def data(self) -> Path: return self.proot / "data"
 
     @property
     def canonical(self) -> Path: return self.data / "canonical"
@@ -202,10 +238,10 @@ class Workspace:
     def clan_hunt(self) -> Path: return self.data / "clan_hunt"
 
     @property
-    def reports(self) -> Path: return self.root / "reports"
+    def reports(self) -> Path: return self.proot / "reports"
 
     @property
-    def config(self) -> Path: return self.root / "config"
+    def config(self) -> Path: return self.proot / "config"
 
     @property
     def marker(self) -> Path: return self.root / MARKER
@@ -223,6 +259,10 @@ class Workspace:
         Читання дешеве (кілька рядків TOML) і ще й з memo за mtime.
         """
         live = _profile_on_disk(self.marker, _mtime(self.marker))
+        # Проєкт без власного профілю секцій живе з профілем Майстерні.
+        if (self.hub_root is not None and live is not None
+                and live[0] is None and live[1] is None and not live[2]):
+            live = _profile_on_disk(self.hub_marker, _mtime(self.hub_marker))
         if live is not None:
             return live
         return self.preset, self.listed_sections, self.sections_problem
@@ -260,12 +300,39 @@ class Workspace:
 
 
 # ── резолвер ─────────────────────────────────────────────────────────────────
-def _read_marker(path: Path) -> dict[str, Any]:
+def _read_toml(path: Path) -> dict[str, Any]:
     try:
         with path.open("rb") as fh:
-            return (tomllib.load(fh) or {}).get("workspace") or {}
+            return tomllib.load(fh) or {}
     except (OSError, tomllib.TOMLDecodeError):
         return {}
+
+
+def _read_marker(path: Path) -> dict[str, Any]:
+    return _read_toml(path).get("workspace") or {}
+
+
+def read_project_table(root: Path) -> dict[str, Any] | None:
+    """Таблиця `[project]` маркера теки — або `None`, якщо це не проєкт."""
+    got = _read_toml(root / MARKER).get("project")
+    return got if isinstance(got, dict) else None
+
+
+def _hub_above(project_root: Path) -> Path:
+    """Майстерня, у якій лежить проєкт.
+
+    🔴 Проєкт лежить лише в `<хаб>/projects/<ім'я>/`. Не «будь-який маркер
+    вище»: тоді проєкт, скопійований деінде, тихо пристав би до чужої
+    Майстерні, а перелік проєктів (обхід `projects/`) його б не бачив.
+    """
+    hub = project_root.parent.parent
+    if (project_root.parent.name != PROJECTS_DIR or not (hub / MARKER).is_file()
+            or read_project_table(hub) is not None):
+        raise WorkspaceError(
+            f"{project_root} — тека проєкту ([project] у {MARKER}), але вона не "
+            f"лежить у Майстерні: проєкт має бути в <хаб>/{PROJECTS_DIR}/<ім'я>/, "
+            f"а в корені хаба — його {MARKER} з таблицею [workspace]")
+    return hub
 
 
 def _env_case_roots() -> tuple[Path, ...] | None:
@@ -315,7 +382,28 @@ def _home_candidates() -> tuple[Path, ...]:
             home / "Документи" / DEFAULT_DIRNAME)
 
 
-def _build(root: Path, origin: str) -> Workspace:
+def _build(root: Path, origin: str, *, readonly: bool = False) -> Workspace:
+    """Простір із маркера теки.
+
+    Тека проєкту (`[project]` у маркері) бере Майстерню з маркера хаба над
+    собою: корені справ, стор тексту, версію ключів — усе, що про машину й
+    матеріал. Від проєкту — лише ім'я і, якщо заданий, профіль секцій.
+    """
+    ptab = read_project_table(root)
+    if ptab is None:
+        return _build_hub(root, origin)
+    hub = _hub_above(root)
+    base = _build_hub(hub, origin)
+    own = ptab if ("preset" in ptab or "sections" in ptab) else None
+    preset, listed, problem = ((base.preset, base.listed_sections, base.sections_problem)
+                               if own is None else _read_sections(own))
+    return replace(base, root=root, hub_root=hub, project=root.name,
+                   name=str(ptab.get("name") or root.name),
+                   preset=preset, listed_sections=listed, sections_problem=problem,
+                   readonly=readonly)
+
+
+def _build_hub(root: Path, origin: str) -> Workspace:
     cfg = _read_marker(root / MARKER)
     # Порядок джерел коренів: env перебиває маркер (ескейп-хетч на чужій машині),
     # маркер перебиває дефолт. Дефолт тут порожній: додаткові корені — це завжди
@@ -335,7 +423,8 @@ def _build(root: Path, origin: str) -> Workspace:
                      sections_problem=problem, keys=_keys_version(cfg),
                      marker_stamp=_stamp_of(root / MARKER),
                      text_store_dir=(root / str(cfg["text_store"])
-                                     if cfg.get("text_store") else None))
+                                     if cfg.get("text_store") else None),
+                     hub_only=bool(cfg.get("hub_only")))
 
 
 def _stamp_of(marker: Path) -> tuple[int, int] | None:
@@ -378,7 +467,9 @@ def _profile_on_disk(marker: Path, _stamp: float,
     """
     if not _stamp:
         return None
-    return _read_sections(_read_marker(marker))
+    full = _read_toml(marker)
+    table = full.get("project")
+    return _read_sections(table if isinstance(table, dict) else (full.get("workspace") or {}))
 
 
 def _read_sections(cfg: dict[str, Any]) -> tuple[str | None, tuple[str, ...] | None, str]:
@@ -585,7 +676,7 @@ def workspace() -> Workspace:
     return _override if _override is not None else _cached()
 
 
-def use(root: str | Path | Workspace) -> Workspace:
+def use(root: str | Path | Workspace, *, readonly: bool = False) -> Workspace:
     """Явно задати простір (CLI `--workspace`, майстер, тести).
 
     Викликати до імпорту доменних модулів: ті беруть корінь на рівні модуля,
@@ -598,8 +689,24 @@ def use(root: str | Path | Workspace) -> Workspace:
     """
     global _override
     _override = root if isinstance(root, Workspace) else _build(
-        validate_root(Path(root)), "explicit")
+        validate_root(Path(root)), "explicit", readonly=readonly)
     return _override
+
+
+@contextmanager
+def using(ws: Workspace) -> Iterator[Workspace]:
+    """Тимчасово стати в іншому просторі — і повернутись, навіть після помилки.
+
+    Для дій, що мусять записати в щойно заведений проєкт (профіль роду в
+    `project new`), не перемикаючи простір процесу назавжди.
+    """
+    global _override
+    prev = _override
+    _override = ws
+    try:
+        yield ws
+    finally:
+        _override = prev
 
 
 def add_case_root(path: str | Path) -> Path:
@@ -619,7 +726,7 @@ def add_case_root(path: str | Path) -> Path:
     if p == ws.raw or p in ws.case_roots():
         return p
 
-    marker = ws.marker
+    marker = ws.hub_marker
     text = marker.read_text(encoding="utf-8") if marker.is_file() else "[workspace]\n"
     roots = [str(x).replace("\\", "/") for x in ws.extra_case_roots]
     roots.append(str(p).replace("\\", "/"))
@@ -658,7 +765,7 @@ def remove_case_root(path: str | Path) -> bool:
     if len(kept) == len(ws.extra_case_roots):
         return False
 
-    marker = ws.marker
+    marker = ws.hub_marker
     text = marker.read_text(encoding="utf-8") if marker.is_file() else "[workspace]\n"
     listed = ", ".join(f'"{str(r).replace(chr(92), "/")}"' for r in kept)
     # Порожній перелік знімається рядком, а не лишається `[]`: маркер читає
@@ -674,7 +781,8 @@ def remove_case_root(path: str | Path) -> bool:
     return True
 
 
-def _marker_set(text: str, key: str, line: str | None) -> str:
+def _marker_set(text: str, key: str, line: str | None,
+                table: str = "workspace") -> str:
     """Вписати, замінити або зняти рядок `key = …` у тексті маркера.
 
     Той самий прийом, що й для `case_roots`: рядок може бути закоментованим
@@ -692,7 +800,7 @@ def _marker_set(text: str, key: str, line: str | None) -> str:
     # корені), і рядок, дописаний у хвіст, потрапляє в ЧУЖУ таблицю, де його
     # ніхто не читає: `nysh sections enable` рапортує успіх, а секція лишається
     # вимкненою. Спіймано на просторі з таблицею сусідніх проєктів у хвості маркера.
-    head = re.search(r"(?m)^\s*\[workspace\]\s*$", text)
+    head = re.search(rf"(?m)^\s*\[{re.escape(table)}\]\s*$", text)
     if head is None:
         return text.rstrip("\n") + "\n" + line + "\n"
     nxt = re.search(r"(?m)^\s*\[", text[head.end():])
@@ -717,18 +825,20 @@ def set_sections(active: Iterable[str]) -> frozenset[str]:
     resolved = S.resolve(explicit=list(active))
     ws = workspace()
     marker = ws.marker
-    text = marker.read_text(encoding="utf-8") if marker.is_file() else "[workspace]\n"
+    # Проєкт тримає свій профіль секцій у `[project]`, Майстерня — у `[workspace]`.
+    table = "project" if ws.project else "workspace"
+    text = marker.read_text(encoding="utf-8") if marker.is_file() else f"[{table}]\n"
 
     name = S.preset_of(resolved)
     if name is not None:
-        text = _marker_set(text, "preset", f'preset = "{name}"')
-        text = _marker_set(text, "sections", None)
+        text = _marker_set(text, "preset", f'preset = "{name}"', table)
+        text = _marker_set(text, "sections", None, table)
         listed: tuple[str, ...] | None = None
     else:
         listed = tuple(sorted(resolved))
         joined = ", ".join(f'"{s}"' for s in listed)
-        text = _marker_set(text, "sections", f"sections = [{joined}]")
-        text = _marker_set(text, "preset", None)
+        text = _marker_set(text, "sections", f"sections = [{joined}]", table)
+        text = _marker_set(text, "preset", None, table)
     _write_marker(marker, text)
 
     global _override
@@ -749,10 +859,10 @@ def keys_now() -> int:
     ws = workspace()
     if ws.marker_stamp is None:
         return ws.keys
-    now = _stamp_of(ws.marker)
+    now = _stamp_of(ws.hub_marker)
     if now is None or now == ws.marker_stamp:
         return ws.keys
-    return _marker_keys(str(ws.marker), *now)
+    return _marker_keys(str(ws.hub_marker), *now)
 
 
 @lru_cache(maxsize=4)
@@ -764,10 +874,10 @@ def refresh_keys() -> None:
     """Перечитати версію ключів з маркера (маркер щойно повернуто з архіву)."""
     global _override
     if _override is not None and _override.marker_stamp is not None:
-        _override = replace(_override, keys=_keys_version(_read_marker(_override.marker)),
-                            marker_stamp=_stamp_of(_override.marker))
+        _override = replace(_override, keys=_keys_version(_read_marker(_override.hub_marker)),
+                            marker_stamp=_stamp_of(_override.hub_marker))
     elif _override is not None:
-        _override = replace(_override, keys=_keys_version(_read_marker(_override.marker)))
+        _override = replace(_override, keys=_keys_version(_read_marker(_override.hub_marker)))
     _cached.cache_clear()
 
 
@@ -775,7 +885,7 @@ def set_keys_version(version: int) -> None:
     """Записати версію ключів справ у маркер простору (`cases.rekey`, майстер)."""
     global _override
     ws = workspace()
-    marker = ws.marker
+    marker = ws.hub_marker
     text = marker.read_text(encoding="utf-8") if marker.is_file() else "[workspace]\n"
     _write_marker(marker, _marker_set(text, "keys", f"keys = {int(version)}"))
     if _override is not None:
@@ -811,6 +921,16 @@ def root() -> Path:
     return workspace().root
 
 
+def mode_label(ws: Workspace) -> str:
+    """Де стоїть простір: у проєкті, у корені Майстерні чи в старому просторі."""
+    ro = " (лише читання)" if ws.readonly else ""
+    if ws.project is not None:
+        return f"проєкт «{ws.project}» у Майстерні {ws.hub}{ro}"
+    if ws.hub_only:
+        return "корінь Майстерні (проєкту немає)"
+    return "Майстерня й проєкт в одному корені"
+
+
 def describe() -> str:
     """Однорядковий опис для `doctor` і банерів."""
     try:
@@ -818,6 +938,6 @@ def describe() -> str:
     except WorkspaceError as exc:
         return f"простір не визначено ({exc.args[0].splitlines()[0]})"
     extra = ", ".join(str(p) for p in ws.case_roots()[1:]) or "—"
-    return (f"{ws.name or ws.root.name} · {ws.root} · джерело: {ws.origin} · "
+    return (f"{ws.name or ws.root.name} · {ws.root} · {mode_label(ws)} · джерело: {ws.origin} · "
             f"архівні корені: {extra} · python {sys.version_info.major}."
             f"{sys.version_info.minor}")

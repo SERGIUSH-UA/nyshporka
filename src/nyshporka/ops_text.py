@@ -204,6 +204,40 @@ def _warn_cuts(env: Envelope, layered: dict[str, Any]) -> None:
         env.warn("layer_cut", f"вибірку звужено — {line}")
 
 
+def _peek_elsewhere(env: Envelope, pattern: str, layers: list[str],
+                    ignore_case: bool) -> None:
+    """Чи є збіг у каноні чи нотатках ІНШИХ проєктів — лише лічильник.
+
+    🔴 Вміст не показується. Агент у проєкті має знати, що «в роді Б теж є
+    Сидоруки», і сказати про це людині, але Сидоруки іншого роду не мусять
+    потрапити в його контекст: він сплутав би одну родину з іншою. Відкрити —
+    `nysh --project Б …`, лише читання.
+    """
+    import re
+
+    from nyshporka.core import projects as P
+    from nyshporka.core.workspace import workspace
+
+    want = tuple(x for x in layers if x in P.PEEK_LAYERS)
+    if not want:
+        return
+    try:
+        rx = re.compile(pattern, re.IGNORECASE if ignore_case else 0)
+        found = P.peek(workspace(), rx, want)
+    except Exception:
+        return          # підсвітка — підказка, а не умова відповіді
+    if not found:
+        return
+    if isinstance(env.data, dict):
+        env.data["elsewhere"] = found
+    label = {"canon": "у каноні", "notes": "у нотатках"}
+    for f in found:
+        env.warn("elsewhere",
+                 f"ще в проєкті «{f['project']}» ({f['name']}): {f['count']} збігів "
+                 f"{label.get(str(f['layer']), f['layer'])} — не завантажено. "
+                 f"Відкрити лише на прохання людини: nysh --project {f['project']} …")
+
+
 class TextGrepArgs(BaseModel):
     pattern: str = Field(description="регекс Python; кирилиця як у тексті")
     case: CaseScope = Field(default="",
@@ -253,6 +287,7 @@ def text_grep(a: TextGrepArgs) -> Envelope:
                      "не знайшлось — файлів прочесано: " + ", ".join(
                          f"{k} {v['files']}" for k, v in layered["layers"].items()))
         _warn_cuts(env, layered)
+        _peek_elsewhere(env, a.pattern, layers, a.ignore_case)
         return env
     if not ST.exists():
         env = fail("текстового стору ще немає")
@@ -291,6 +326,7 @@ def text_grep(a: TextGrepArgs) -> Envelope:
     env = ok(data)
     if layered is not None:
         _warn_cuts(env, layered)
+        _peek_elsewhere(env, a.pattern, layers, a.ignore_case)
     if res["unindexed"]:
         env.warn("partial_store",
                  f"{res['unindexed']} прогонів поза стором: їхній текст ще не "

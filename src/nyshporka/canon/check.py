@@ -532,7 +532,9 @@ def _verdict_ready(c: Canon, r: Report) -> None:
 
 # ── докази ───────────────────────────────────────────────────────────────────
 def manifest_path(root: Path) -> Path:
-    return root / "data" / "source" / "citations" / "MANIFEST_citations.json"
+    from nyshporka.canon import refs as R
+
+    return R.citations_dir(root) / "MANIFEST_citations.json"
 
 
 def evidence_refs(text: str) -> set[str]:
@@ -546,23 +548,27 @@ def _resolves(root: Path, p: str) -> bool:
     🔴 Спершу диск, потім здогадки: `PPR_1925-1930.pdf` — справжній файл, хоч
     і схожий на діапазон сторінок.
     """
-    if (root / p).exists():
+    from nyshporka.canon import refs as R
+
+    if R.resolve(root, p).exists():
         return True
     # Ім'я з пробілами голий regex обрізав по першому пробілу. Приймаємо лише
     # єдиного кандидата з таким префіксом — кілька означають збіг, а не файл.
     parent, _, stem = p.rpartition("/")
-    folder = root / parent
+    folder = R.resolve(root, parent + "/")
     if stem and folder.is_dir() and len(list(folder.glob(stem + "*"))) == 1:
         return True
     if "," in p:
         parts = [x.strip() for x in p.split(",") if x.strip()]
         base = parts[0].rpartition("/")[0]
-        if all((root / (x if "/" in x else f"{base}/{x}")).exists() for x in parts):
+        if all(R.resolve(root, x if "/" in x else f"{base}/{x}").exists() for x in parts):
             return True
     return False
 
 
 def _evidence(c: Canon, r: Report, hash_evidence: bool) -> None:
+    from nyshporka.canon import refs as R
+
     root = c.root
     for eid, path in c.files.items():
         refs = evidence_refs(path.read_text(encoding="utf-8"))
@@ -595,7 +601,7 @@ def _evidence(c: Canon, r: Report, hash_evidence: bool) -> None:
         if not isinstance(rec, dict):
             continue
         target = rec.get("secured_to") or key
-        f = root / target
+        f = R.resolve(root, target)
         if not f.is_file():
             r.add("ERROR", "manifest_missing", target,
                   f"у маніфесті є, на диску немає (cited_by {rec.get('cited_by') or []})")

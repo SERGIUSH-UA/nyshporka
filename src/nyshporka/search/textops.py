@@ -1202,7 +1202,7 @@ VERDICTS_FILE = "verdicts.json"
 def _verdicts_path() -> Path:
     from nyshporka.core.workspace import workspace
 
-    return workspace().derived / VERDICTS_FILE
+    return workspace().project_derived / VERDICTS_FILE
 
 
 def verdicts_load(key: str) -> dict[str, dict[str, Any]]:

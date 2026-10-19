@@ -164,7 +164,7 @@ def plan(target: str | Path) -> Plan:
     from nyshporka.setup.wizard import _is_synced
 
     to = validate_root(Path(target))
-    ws = workspace().root
+    ws = workspace().hub
     home_to = to / ".program"
     p = Plan(workspace_from=ws, workspace_to=to, home_from=install_home(),
              home_to=home_to, data_from=data_dir(), data_to=home_to / "data")
@@ -433,7 +433,7 @@ def leftovers(home: Path | None = None) -> tuple[dict[str, str], list[Leftover]]
     out: list[Leftover] = []
     old_ws = Path(rec["workspace"]) if rec.get("workspace") else None
     if old_ws is not None and old_ws.is_dir():
-        new_ws = workspace().root
+        new_ws = workspace().hub
         if old_ws.resolve() == new_ws.resolve():
             raise RelocateError("активний простір — досі старий; спершу відкрийте новий")
         bad = diff(manifest(old_ws, SKIP_TOP), manifest(new_ws, SKIP_TOP))

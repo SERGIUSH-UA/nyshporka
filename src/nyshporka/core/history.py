@@ -370,9 +370,11 @@ def _canon_timeline() -> list[tuple[str, int]]:
         from nyshporka.core.workspace import workspace
 
         ws = workspace()
-    except Exception:
+        canonical = ws.canonical
+    except Exception:          # простору немає або це корінь Майстерні без проєкту
         return []
-    if not (ws.root / ".git").exists() or not ws.canonical.is_dir():
+    # Проєкт — підтека git-репо Майстерні; `git -C <проєкт>` бере шлях від себе.
+    if not any((p / ".git").exists() for p in (ws.root, ws.hub)) or not canonical.is_dir():
         return []
     try:
         res = subprocess.run(

@@ -368,7 +368,7 @@ async def _start_acquire(bus: JobBus, ws: Workspace,
     source_id = str(payload.get("source") or "")
     ref = str(payload.get("ref") or "")
     frames = _parse_frames(str(payload.get("frames") or ""))
-    src = load(ws.root).get(source_id)
+    src = load(ws.hub).get(source_id)
     if src is None:
         raise ValueError(f"немає джерела «{source_id}»")
 

@@ -227,7 +227,7 @@ def print_fetch_hooks() -> list[dict[str, Any]]:
     if not exe:
         return []
     try:
-        root = str(workspace().root)
+        root = str(workspace().hub)
     except WorkspaceError:
         return []
     return [{"cmd": [exe, "print", "assemble"], "cwd": root, "timeout_sec": 3600},
@@ -379,7 +379,7 @@ def post_fetch_hooks(run_names: Sequence[str] | str) -> list[dict[str, Any]]:
     if not exe:
         return []
     try:
-        root = str(workspace().root)
+        root = str(workspace().hub)
     except WorkspaceError:
         return []
     names = [run_names] if isinstance(run_names, str) else list(run_names)

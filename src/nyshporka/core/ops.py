@@ -104,6 +104,23 @@ def _section_refusal(op: Op) -> str | None:
             f"недоступна. Увімкнути: nysh sections enable {op.section}")
 
 
+def _readonly_refusal(op: Op) -> str | None:
+    """Відмова змінювати чужий проєкт, відкритий лише для читання (`--project`)."""
+    if not op.mutates:
+        return None
+    try:
+        from nyshporka.core.workspace import workspace
+
+        ws = workspace()
+    except Exception:
+        return None
+    if not ws.readonly:
+        return None
+    return (f"«{op.name}» змінює дані, а проєкт «{ws.project or ws.name}» відкрито з "
+            "іншого проєкту лише для читання. Записувати в нього — з його теки або "
+            "з кореня Майстерні")
+
+
 @dataclass
 class Registry:
     ops: dict[str, Op] = field(default_factory=dict)
@@ -152,7 +169,7 @@ class Registry:
 
         from nyshporka.core.envelope import fail
 
-        off = _section_refusal(op)
+        off = _section_refusal(op) or _readonly_refusal(op)
         if off is not None:
             return fail(off)
         try:

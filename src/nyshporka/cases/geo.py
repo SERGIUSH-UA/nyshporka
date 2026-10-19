@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import re
 from functools import lru_cache
+from pathlib import Path
 from typing import TypedDict
 
 from nyshporka.utils.translit import normalize_for_matching
@@ -279,8 +280,23 @@ def settlement_from_title(title: str) -> str:
     return next(iter(found)) if len(found) == 1 else ""
 
 
-@lru_cache(maxsize=1)
 def _canon_places() -> list[tuple[str, list[str]]]:
+    """Канонічні місця активного проєкту — кеш за текою, а не на процес.
+
+    🔴 Ключ — шлях. Кеш на процес віддавав би села попереднього проєкту після
+    перемикання (демон, тести): справа роду Б прив'язалась би до села роду А.
+    """
+    try:
+        from nyshporka.core.workspace import workspace
+
+        places_dir = workspace().canonical / "places"
+    except Exception:
+        return []
+    return _canon_places_in(str(places_dir))
+
+
+@lru_cache(maxsize=4)
+def _canon_places_in(places: str) -> list[tuple[str, list[str]]]:
     """[(PL-id, [нормалізовані форми назви])] з канонічних місць.
 
     🔴 Варіанти обов'язкові: канон зве село сучасним іменем («Городківка»), а справи
@@ -288,12 +304,11 @@ def _canon_places() -> list[tuple[str, list[str]]]:
     село роду не прив'язалось би до жодної справи.
     """
     try:
-        from nyshporka.core.workspace import workspace
         from nyshporka.storage.files import read_place
     except Exception:
         return []
     out: list[tuple[str, list[str]]] = []
-    places_dir = workspace().canonical / "places"
+    places_dir = Path(places)
     if not places_dir.is_dir():
         return out
     for md in sorted(places_dir.glob("PL*.md")):

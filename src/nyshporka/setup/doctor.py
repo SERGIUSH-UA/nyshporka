@@ -135,7 +135,7 @@ def _cloud_sync() -> Check:
     from nyshporka.core.workspace import WorkspaceError, workspace
 
     try:
-        root = workspace().root
+        root = workspace().hub
     except WorkspaceError:
         return Check("Хмарна синхронізація", "warn", "простір не визначено")
     marks = ("onedrive", "dropbox", "google drive", "яндекс", "icloud")
@@ -168,7 +168,7 @@ def _disk() -> Check:
     from nyshporka.core.workspace import WorkspaceError, workspace
 
     try:
-        root = workspace().root
+        root = workspace().hub
     except WorkspaceError:
         return Check("Місце на диску", "warn", "простір не визначено")
     try:
@@ -340,7 +340,7 @@ def engine_venv() -> Path:
     override = os.environ.get(ENV_ENGINE_VENV)
     if override:
         return Path(override)
-    return engine_venv_in(workspace().root)
+    return engine_venv_in(workspace().hub)
 
 
 def engine_venv_in(root: Path) -> Path:
@@ -479,7 +479,7 @@ def _has_material() -> bool:
     from nyshporka.core.workspace import WorkspaceError, workspace
 
     try:
-        root = workspace().root
+        root = workspace().hub
     except WorkspaceError:
         return False
     for rel in ("data/raw", "data/pages", "reports/htr"):
@@ -505,7 +505,7 @@ def _decode_visible() -> Check:
     from nyshporka.core.workspace import WorkspaceError, workspace
 
     try:
-        root = workspace().root
+        root = workspace().hub
     except WorkspaceError:
         return Check("Декоди видимі для grep", "warn", "простір не визначено")
     for base in (root, *root.parents):

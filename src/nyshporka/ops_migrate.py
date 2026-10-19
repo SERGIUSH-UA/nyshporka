@@ -20,7 +20,7 @@ from nyshporka.core.ops import NoArgs, op
 def _root() -> Path:
     from nyshporka.core.workspace import workspace
 
-    return workspace().root
+    return workspace().hub
 
 
 @op("migrate.status", summary="Які міграції агента ще не пройдено і що з кроками зараз",

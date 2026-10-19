@@ -132,7 +132,7 @@ def _workspace_root() -> Path | None:
     try:
         from nyshporka.core.workspace import workspace
 
-        return workspace().root.resolve()
+        return workspace().hub.resolve()
     except Exception:
         # ⚠ Простору може не бути взагалі (знімають після невдалого
         # встановлення). Це не привід відмовитись знімати пакет.

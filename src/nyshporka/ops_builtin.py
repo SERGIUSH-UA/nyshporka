@@ -29,6 +29,7 @@ if TYPE_CHECKING:
 @op("workspace.info", summary="Де лежить дослідження і що в ньому є")
 def workspace_info(_: NoArgs) -> Envelope:
     from nyshporka.core import lock
+    from nyshporka.core import workspace as W
     from nyshporka.core.workspace import WorkspaceError, workspace
 
     try:
@@ -41,15 +42,21 @@ def workspace_info(_: NoArgs) -> Envelope:
         "name": ws.name,
         "origin": ws.origin,
         "case_roots": [str(p) for p in ws.case_roots()],
-        "exists": {"data": ws.data.is_dir(), "reports": ws.reports.is_dir()},
+        "hub": str(ws.hub),
+        "project": ws.project,
+        "mode": W.mode_label(ws),
+        "readonly": ws.readonly,
+        "exists": {"data": ws.hub_data.is_dir(),
+                   "reports": (not (ws.hub_only and ws.project is None)
+                               and ws.reports.is_dir())},
         "locked_by": holder.as_dict() if holder else None,
     })
-    if not ws.data.is_dir():
+    if not ws.hub_data.is_dir():
         env.warn("empty_workspace",
                  "у просторі ще немає теки data — це новий простір")
     from nyshporka import migrate
 
-    migrate.nag(env, ws.root)
+    migrate.nag(env, ws.hub)
     return env
 
 
@@ -279,7 +286,7 @@ def _pulse_compute(a: PulseArgs) -> Envelope:
     data["canon"] = _pulse_canon(env)
     from nyshporka import migrate
 
-    migrate.nag(env, ws.root)
+    migrate.nag(env, ws.hub)
     data["profile"] = _pulse_profile(env)
     data["agent"] = _pulse_agent(ws.root)
     # Перелік прогонів — один на зріз: його питають і читання, і пошук, а

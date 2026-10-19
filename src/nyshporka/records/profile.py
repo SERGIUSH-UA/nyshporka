@@ -72,8 +72,18 @@ def workspace_config() -> Path | None:
         return None
 
 
-@lru_cache(maxsize=1)
 def _raw() -> dict[str, Any]:
+    """Профілі для активного простору — кеш за файлом профілів проєкту.
+
+    Ключ — шлях: інакше після перемикання проєкту лишались би профілі
+    попереднього.
+    """
+    own = workspace_config()
+    return _raw_for(str(own) if own is not None else None)
+
+
+@lru_cache(maxsize=4)
+def _raw_for(own_path: str | None) -> dict[str, Any]:
     """Пакетні типи джерел + профілі простору зверху.
 
     🔴 Злиття глибоке, а не заміна файлом: інакше дослідник, який завів ОДИН
@@ -81,9 +91,8 @@ def _raw() -> dict[str, Any]:
     defaults — і виявив би це не помилкою, а тихо іншою нарізкою.
     """
     merged = _read(PACKAGED)
-    own = workspace_config()
-    if own is not None:
-        merged = _deep_merge(merged, _read(own))
+    if own_path is not None:
+        merged = _deep_merge(merged, _read(Path(own_path)))
     merged.setdefault("defaults", {})
     merged.setdefault("profiles", {})
     merged.setdefault("cases", {})
@@ -93,7 +102,7 @@ def _raw() -> dict[str, Any]:
 
 def reload() -> None:
     """Забути прочитане — після правки файла профілів у просторі."""
-    _raw.cache_clear()
+    _raw_for.cache_clear()
 
 
 def available() -> list[dict[str, Any]]:

@@ -34,7 +34,7 @@ KEEP = 5
 def path() -> Path:
     from nyshporka.core.workspace import workspace
 
-    return workspace().derived / FILE
+    return workspace().project_derived / FILE
 
 
 def _read() -> dict[str, Any]:

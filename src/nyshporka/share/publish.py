@@ -1126,7 +1126,7 @@ def _catagrafii() -> Any:
         from nyshporka.core.workspace import workspace
         from nyshporka.sources.catagrafii import CatagrafiiSource
 
-        src = CatagrafiiSource(workspace().root)
+        src = CatagrafiiSource(workspace().hub)
         return src if src.catalog_source()[0] == "workspace" else None
     except Exception:
         return None
