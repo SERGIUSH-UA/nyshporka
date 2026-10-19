@@ -607,3 +607,20 @@ def test_register_is_silent_when_the_name_and_the_passport_agree(space: Path) ->
                                    "reindex": False})
     assert env.ok, env.error
     assert not any(w.code == "key_mismatch" for w in env.warnings)
+
+
+@pytest.mark.parametrize("text", ["ДАЧкО 931-_-40", "ДАЧкО ф.931 оп._ спр.40"])
+def test_unknown_opys_is_written_as_underscore(text: str) -> None:
+    """Опис невідомий — `_`, як у ключі справи, а не вигаданий номер.
+
+    17.10.2026: дві зйомки FS фонду ДАЧкО 931 несуть на картках ту саму
+    «О.1 Д.40» для різних книг; поки опис не звірено з описом фонду, шифру
+    не можна було записати взагалі — розбір вимагав цифру опису.
+    """
+    from nyshporka import library as L
+    from nyshporka.cases import register as R
+
+    s = R.parse_shifra(text)
+    assert (s.repo, s.fond, s.opys, s.spr) == ("DACHKO", "931", "_", "40")
+    assert s.as_text() == "ДАЧкО 931-_-40"
+    assert L._mk_key(s.repo, s.fond, s.spr, s.opys) == "DACHKO/931/_/40"

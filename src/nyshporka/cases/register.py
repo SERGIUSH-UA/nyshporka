@@ -52,7 +52,7 @@ _SHIFRA_RE = re.compile(
     # `library.parse_address`, через яку справу резолвить і сервер Супряги.
     rf"(?:(?!{L.FIELD_LABEL_WORD}\.?\s)(?P<repo>[A-Za-zА-Яа-яІЇЄҐіїєґ']+)\.?\s+)?"
     rf"(?:{L.FOND_LABEL})?(?P<fond>{L.FOND_TOKEN})\s*[-–/\s]\s*"
-    rf"(?:{L.OPYS_LABEL})?(?P<opys>{L.OPYS_TOKEN})\s*[-–/\s]\s*"
+    rf"(?:{L.OPYS_LABEL})?(?P<opys>{L.OPYS_TOKEN}|_)\s*[-–/\s]\s*"
     rf"(?:{L.SPR_LABEL})?(?P<spr>[\w@]+)",
     re.IGNORECASE)
 
@@ -175,7 +175,8 @@ def parse_shifra(text: str, *, repo_hint: str = "") -> Shifra:
     if not m:
         raise RegisterError(
             f"не розібрав шифру «{raw}». Приймаю: «ДАХмО 315-1-8433», "
-            f"«315-1-8433», «ф.315 оп.1 спр.8433», «Ф. 211 Оп. 3 Д. 140».")
+            f"«315-1-8433», «ф.315 оп.1 спр.8433», «Ф. 211 Оп. 3 Д. 140»; "
+            f"опис невідомий — «ДАЧкО 931-_-40».")
     word = (m.group("repo") or "").strip()
     repo = _repo_of_word(word) or _repo_of_word(repo_hint)
     if not repo:

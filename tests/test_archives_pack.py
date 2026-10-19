@@ -681,3 +681,41 @@ def test_an_unrecognisable_repositories_block_is_refused_not_duplicated(tmp_path
         P.add_repository("NEW", "NEW", "Новий", "PL")
     assert "руками" in str(e.value)
     assert "OLD" in P.active().repositories, "чужий запис усе одно постраждав"
+
+
+def test_builtin_pack_has_no_duplicate_keys() -> None:
+    """🔴 Повторний ключ у YAML не помилка, а тихе затирання.
+
+    17.10.2026: у DACHKO другий блок `codes:` (лише babynyar), що став під
+    коментар наступного розділу, затирав перший — і збирач `duck` відмовляв,
+    бо «невідомо, як архів підписаний у покажчику», хоча код у файлі стояв.
+    """
+    import collections
+
+    import yaml
+
+    from nyshporka.archives import pack as P
+
+    found: list[tuple[str, int]] = []
+
+    class Loader(yaml.SafeLoader):
+        pass
+
+    def mapping(loader: yaml.SafeLoader, node: yaml.MappingNode) -> dict:
+        keys = [loader.construct_object(k) for k, _ in node.value]
+        for key, n in collections.Counter(map(str, keys)).items():
+            if n > 1:
+                found.append((key, node.start_mark.line + 1))
+        return loader.construct_mapping(node)
+
+    Loader.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, mapping)
+    yaml.load(P.BUILTIN.read_text(encoding="utf-8"), Loader=Loader)
+    assert not found, f"повторні ключі (ключ, рядок мапінгу): {found}"
+
+
+def test_dachko_codes() -> None:
+    from nyshporka.archives import pack as P
+
+    pk = P.load()
+    assert pk.codes_for("DACHKO", "duck") == ("ДАЧкО",)
+    assert pk.codes_for("DACHKO", "babynyar") == ("39",)
