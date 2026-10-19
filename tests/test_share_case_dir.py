@@ -131,3 +131,46 @@ def test_teka_bez_kadriv_za_shliakhom_biblioteky(tmp_path: Path,
     assert align.case_home_for("AGAD/4/1/183") == d
     assert align.case_home_for("AGAD/4/2/183") is None, "чужий опис"
     assert _znamennyk_z_pasporta({"total": 0, "listed": 0}, d)["total"] == 514
+
+
+def test_znamennyk_zi_staroho_meta_frames_count(tmp_path: Path) -> None:
+    """Старий `meta.json` завантажувача зйомок: число кадрів у `frames_count`.
+
+    19.10.2026: 122 справи колекції Коваля, кадри яких знято після читання,
+    не пакувались із «кадрів не названо», хоча число лежало в паспорті."""
+    from nyshporka.share.publish import _znamennyk_z_pasporta
+
+    d = tmp_path / "230-1-104"
+    (d / "pages").mkdir(parents=True)
+    (d / "meta.json").write_text(json.dumps({"frames_count": 857}), encoding="utf-8")
+    assert _znamennyk_z_pasporta({"total": 0, "listed": 0}, d)["total"] == 857
+
+
+def test_znamennyk_z_pereliku_pages_staroho_meta(tmp_path: Path) -> None:
+    from nyshporka.share.publish import _znamennyk_z_pasporta
+
+    d = tmp_path / "230-1-77"
+    d.mkdir()
+    pages = [{"page": i, "file": f"0230-01-0077_{i:04d}.JPG"} for i in range(1, 78)]
+    (d / "meta.json").write_text(json.dumps({"pages": pages}), encoding="utf-8")
+    assert _znamennyk_z_pasporta({"total": 0, "listed": 0}, d)["total"] == 77
+
+
+def test_znamennyk_z_markera_offloaded(tmp_path: Path) -> None:
+    """Маркер `_offloaded.json` скриптів простору (кадри на копії) — теж знаменник."""
+    from nyshporka.share.publish import _znamennyk_z_pasporta
+
+    d = tmp_path / "230-1-81"
+    d.mkdir()
+    (d / "_offloaded.json").write_text(
+        json.dumps({"оригінали": {"кадрів": 732}}, ensure_ascii=False), encoding="utf-8")
+    assert _znamennyk_z_pasporta({"total": 0, "listed": 0}, d)["total"] == 732
+
+
+def test_bez_chysla_znamennyk_ne_vgaduietsia(tmp_path: Path) -> None:
+    from nyshporka.share.publish import _znamennyk_z_pasporta
+
+    d = tmp_path / "porozhnia"
+    d.mkdir()
+    (d / "_offloaded.json").write_text("{не json", encoding="utf-8")
+    assert _znamennyk_z_pasporta({"total": 0, "listed": 0}, d)["total"] == 0

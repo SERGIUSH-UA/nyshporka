@@ -597,6 +597,37 @@ def _ne_menshe_za_prochytane(frames_block: dict[str, Any],
     return frames_block
 
 
+def _kadriv_offloaded(teka: Path) -> int:
+    """Скільки кадрів мала справа за маркером `_offloaded.json` (кадри винесено на копію).
+
+    Маркер пишуть скрипти простору, а не `nysh disk offload` (той пише
+    `_frames_removed.json`), тож формат інший: `оригінали.кадрів` або `frames`.
+    Не прочитався — нуль: знаменника не вгадуємо.
+    """
+    import json
+
+    dirs = [teka, teka.parent] if teka.name == "pages" else [teka]
+    for d in dirs:
+        f = d / "_offloaded.json"
+        if not f.is_file():
+            continue
+        try:
+            got = json.loads(f.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return 0
+        if not isinstance(got, dict):
+            return 0
+        orig = got.get("оригінали") if isinstance(got.get("оригінали"), dict) else {}
+        for value in (orig.get("кадрів"), got.get("frames")):
+            try:
+                n = int(value or 0)
+            except (TypeError, ValueError):
+                continue
+            if n > 0:
+                return n
+    return 0
+
+
 def _znamennyk_z_pasporta(frames_block: dict[str, Any],
                           home: Path | None) -> dict[str, Any]:
     """Скільки кадрів мала справа, коли самих кадрів на диску вже немає.
@@ -628,8 +659,15 @@ def _znamennyk_z_pasporta(frames_block: dict[str, Any],
                 storinok_pdf += int((fl or {}).get("pagecount") or 0)
             except (TypeError, ValueError, AttributeError):
                 continue
-        for value in (removed.get("frames_was"), side.get("frames"),
-                      side.get("frames_got"), side.get("n_pages"), storinok_pdf):
+        # 🔴 Старий `meta.json` завантажувача зйомок (колекція Коваля, 19.10.2026):
+        # число кадрів — `frames_count`, перелік — `pages[]`. Без цього справа,
+        # чиї кадри знято після читання, пакувалась із «кадрів не названо».
+        pages = side.get("pages")
+        kadriv_meta = len(pages) if isinstance(pages, list) else 0
+        for value in (removed.get("frames_was"), _kadriv_offloaded(teka),
+                      side.get("frames"), side.get("frames_got"),
+                      side.get("frames_count"), kadriv_meta, side.get("n_pages"),
+                      storinok_pdf):
             try:
                 n = int(value or 0)
             except (TypeError, ValueError):
