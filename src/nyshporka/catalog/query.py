@@ -31,7 +31,8 @@ from nyshporka.catalog.store import (
 from nyshporka.core import casekey
 
 __all__ = ["Answer", "CatalogMissing", "Coverage", "church_card", "churches_near",
-           "confusers", "find_churches", "find_places", "find_rk_parishes",
+           "confusers", "find_churches", "find_court_persons", "find_court_places",
+           "find_places", "find_rk_parishes",
            "link_churches_to_places",
            "locate", "locate_all", "locate_name", "place_card", "places_for_fond", "places_near",
            "siblings", "uezd_known"]
@@ -768,7 +769,7 @@ def find_rk_parishes(q: str, also: list[str] | None = None, limit: int = 5
                 key = (pack_id, v["slug"])
                 prev = best.get(key)
                 # за рівного балу — назва мовою запиту: людині, що питала
-                # «Богданівці», показувати «Bohdanowce» означає змушувати її
+                # «Грабівці», показувати «Hrabowce» означає змушувати її
                 # саму звіряти, що це те саме село
                 same_lang = (v["lang"] == "pl") == _has_latin(q)
                 if (prev is None or prev["score"] < score
@@ -793,6 +794,114 @@ def find_rk_parishes(q: str, also: list[str] | None = None, limit: int = 5
         close_all(packs)
     out = sorted(best.values(), key=lambda d: (-d["score"], d["name"]))
     return Answer(rows=out[:limit], coverage=cov)
+
+
+# ── 📜 Гродські книги: особи й місця покажчиків ──────────────────────────────
+#
+# Гасел ~60 тисяч, тож повний скан із `rapidfuzz` коштує десятки мілісекунд —
+# та сама міра, що й для складу РК-парафій.
+
+#: Поріг схожості згорнутих основ — той самий виміряний поріг латинки
+#: газетира: Jarosiński ↔ Jaroszyński, Ярошинська ↔ Jaroszyński — вище порогу.
+_COURT_MIN = _LATIN_MIN
+
+
+def _court_rows(con: sqlite3.Connection, pack_id: str, table: str,
+                scored: list[tuple[int, int]]) -> list[dict[str, Any]]:
+    """Рядки з книгою й адресами актів — для відібраних `rowid` з балом."""
+    out = []
+    for score, rowid in scored:
+        r = con.execute(
+            f"SELECT t.rowid, t.*, b.kind AS book_kind, b.title AS book_title, "
+            f"b.years AS book_years, b.year_from, b.office, b.voivodeship, "
+            f"b.url AS book_url FROM {table} t LEFT JOIN books b ON b.sig = t.sig "
+            f"WHERE t.rowid = ?", (rowid,)).fetchone()
+        if r is None:
+            continue
+        row = _tag(dict(r), pack_id)
+        row["score"] = score
+        links = []
+        from nyshporka.sources.sks import split_acts
+
+        for akt in split_acts(row.get("acts") or ""):
+            a = con.execute("SELECT url FROM acts WHERE sig = ? AND akt = ?",
+                            (row["sig"], akt)).fetchone()
+            links.append({"akt": akt, "url": a["url"] if a else ""})
+        row["act_links"] = links
+        out.append(row)
+    return out
+
+
+def _court_find(table: str, want: list[str], limit: int,
+                given: list[str] | None = None) -> Answer:
+    packs = open_packs("courtbooks")
+    cov = coverage("courtbooks")
+    try:
+        try:
+            from rapidfuzz import fuzz
+        except ImportError:
+            fuzz = None  # type: ignore[assignment]
+        found: list[dict[str, Any]] = []
+        for pack_id, con in packs:
+            scored: list[tuple[int, int]] = []
+            sel = "rowid, forms" + (", given" if table == "persons" else "")
+            for r in con.execute(f"SELECT {sel} FROM {table}"):
+                score = 0
+                for form in (r["forms"] or "").split(" | "):
+                    if not form:
+                        continue
+                    for w in want:
+                        s = 100 if form == w else (int(fuzz.ratio(form, w)) if fuzz else 0)
+                        score = max(score, s)
+                if score < _COURT_MIN:
+                    continue
+                if given:
+                    # ім'я лише піднімає в ранжуванні, не відсіює: «Jan» ↔ «Іван»
+                    # згорткою не зводяться, а відсів сховав би саме їх
+                    names = (r["given"] or "").split(" | ")
+                    if fuzz and any(fuzz.ratio(g, n) >= _COURT_MIN for g in given for n in names):
+                        score += 10
+                scored.append((score, r["rowid"]))
+            scored.sort(key=lambda p: -p[0])
+            found += _court_rows(con, pack_id, table, scored[:limit * 3])
+    finally:
+        close_all(packs)
+    found.sort(key=lambda d: (-d["score"], d.get("year_from") or 9999, d["name"]))
+    return Answer(rows=found[:limit], coverage=cov)
+
+
+def find_court_persons(q: str, limit: int = 30) -> Answer:
+    """Особи покажчиків гродських книг. Запит — «Прізвище [Ім'я]», будь-якою мовою.
+
+    Перше слово — прізвище; збіг за згорнутою основою (`sources.sks.surname_key`),
+    100 — та сама основа, нижче — фаззі. Ім'я піднімає рядок у ранжуванні.
+    """
+    from nyshporka.sources.sks import _base, surname_key
+
+    words = (q or "").split()
+    if not words:
+        return Answer(rows=[], coverage=coverage("courtbooks"))
+    want = [surname_key(words[0])]
+    return _court_find("persons", want, limit, given=[_base(w) for w in words[1:]])
+
+
+def find_court_places(q: str, also: list[str] | None = None, limit: int = 30) -> Answer:
+    """Місця покажчиків гродських книг — за назвою села будь-якою мовою.
+
+    Згортання те саме, що в складі РК-парафій (`geog.rkparish.fold`), тож
+    «Грабівці», «Грабовцы» й «Hrabowce» сходяться в одну форму.
+    """
+    from nyshporka.geog.rkparish import fold
+    from nyshporka.utils.translit import normalize_for_matching
+
+    want: list[str] = []
+    for f in [q, *(also or [])]:
+        x = fold(normalize_for_matching(_norm(f))) if f and f.strip() else ""
+        if x and x not in want:
+            want.append(x)
+    if not want:
+        return Answer(rows=[], coverage=coverage("courtbooks"))
+    return _court_find("places", want, limit)
 
 
 def _haversine_km(lat1: float, lng1: float, lat2: float, lng2: float) -> float:

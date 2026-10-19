@@ -1087,6 +1087,24 @@ def _rk(q: str, also: list[str]) -> tuple[list[dict[str, Any]], list[CoverageIte
     return ans.rows, _coverage_of(ans), True
 
 
+#: Скільки згадок села в гродських книгах показувати: однойменні села різних
+#: повітів ідуть поруч, рішення — за описом місця, тож обрізати рано не можна.
+COURT_SHOWN = 12
+
+
+def _court(q: str, also: list[str]) -> tuple[list[dict[str, Any]], list[CoverageItem], bool]:
+    """Згадки села в покажчиках гродських книг XVII–XVIII ст. — і чи є сам пак."""
+    try:
+        from nyshporka.catalog.query import CatalogMissing, find_court_places
+
+        ans = find_court_places(q, also=also, limit=COURT_SHOWN)
+    except CatalogMissing:
+        return [], [], False
+    except Exception:            # битий пак не валить пошук парафії
+        return [], [], False
+    return ans.rows, _coverage_of(ans), True
+
+
 def _place_forms(q: str, also: list[str]) -> tuple[list[str], list[str], list[str]]:
     """Форми назви для покажчика: правила, довідники, людина.
 
@@ -1154,11 +1172,15 @@ def parish_find(a: ParishFindArgs) -> Envelope:
     rk, rk_cov, rk_ok = _rk(a.q, [*from_books, *a.also])
     if rk_ok:
         asked = [*asked, "rkparishes"]
+    court, court_cov, court_ok = _court(a.q, [*from_books, *a.also])
+    if court_ok:
+        asked = [*asked, "courtbooks"]
     data: dict[str, Any] = {"forms": forms, "forms_from_gazetteer": from_books,
                             "gazetteers": asked,
                             "parishes": [_parish_row(p) for p in found.values()],
                             "szady": szady,
                             "rk_parishes": rk, "rk_installed": rk_ok,
+                            "court_places": court, "court_installed": court_ok,
                             "books": {}}
     cut_books: dict[str, tuple[str, ...]] = {}
     if a.books:
@@ -1183,6 +1205,8 @@ def parish_find(a: ParishFindArgs) -> Envelope:
     env.covered_by(_duck_coverage())
     if rk_cov:
         env.covered_by(rk_cov)
+    if court_cov:
+        env.covered_by(court_cov)
     if not found:
         env.warn("nothing_found",
                  f"парафій під назвами {', '.join(forms)} у покажчику немає — "

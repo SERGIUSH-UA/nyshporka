@@ -254,9 +254,52 @@ CREATE TABLE books (
 CREATE INDEX ix_rkb_slug ON books(slug);
 """
 
+COURTBOOKS = _PRAGMA + _COMMON + """
+-- 📜 Покажчики осіб і місць гродських книг XVII–XVIII ст. («Staropolskie Księgi
+-- Sądowe» укладача): транскрибовані книги ЦДІАК і загублені книги KAC, від
+-- яких лишився друкований опис. Відповідь на «хто з роду стояв перед гродом і
+-- в якому акті» — з адресою акта на сторінці укладача.
+--
+-- 🔴 Це покажчик, а не звірений текст: транскрипції готовано з мовною
+-- моделлю, невпевнене — `[?]` у гаслі чи описі, як у джерелі.
+CREATE TABLE books (
+    sig         TEXT PRIMARY KEY,  -- «44-1-3» (ЦДІАК ф-оп-спр) або «KAC 5»
+    kind        TEXT NOT NULL,     -- transcribed | lost
+    title       TEXT, genre TEXT,
+    office      TEXT,              -- грод чи уряд, як у джерелі
+    voivodeship TEXT,
+    years       TEXT, year_from INTEGER, year_to INTEGER,
+    about       TEXT,
+    url         TEXT               -- сторінка книги в укладача
+);
+CREATE TABLE acts (
+    sig TEXT NOT NULL, akt TEXT NOT NULL,
+    url TEXT NOT NULL,             -- сторінка частини з якорем акта
+    PRIMARY KEY (sig, akt)
+);
+CREATE TABLE persons (
+    sig   TEXT NOT NULL,
+    name  TEXT NOT NULL,           -- гасло як у джерелі
+    descr TEXT,                    -- роль у документі
+    acts  TEXT,                    -- номери актів, як у джерелі («91, 92», «II/20»)
+    forms TEXT,                    -- згорнуті основи прізвища, через « | »
+    given TEXT                     -- згорнуті решта слів гасла (ім'я), через « | »
+);
+CREATE INDEX ix_cbp_sig ON persons(sig);
+CREATE TABLE places (
+    sig   TEXT NOT NULL,
+    name  TEXT NOT NULL,
+    descr TEXT,                    -- форми з рукопису й прив'язка (воєводство, повіт)
+    acts  TEXT,
+    forms TEXT
+);
+CREATE INDEX ix_cbl_sig ON places(sig);
+"""
+
 #: Домен → DDL. Ключ домену входить в ім'я пака: `geog-cdiak-2026.08.sqlite`.
 DDL: dict[str, str] = {"geog": GEOG, "opys": OPYS, "churches": CHURCHES,
-                       "places": PLACES, "rkparishes": RKPARISHES}
+                       "places": PLACES, "rkparishes": RKPARISHES,
+                       "courtbooks": COURTBOOKS}
 
 
 def apply(con: sqlite3.Connection, domain: str) -> None:

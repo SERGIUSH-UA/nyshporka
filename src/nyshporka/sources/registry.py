@@ -60,6 +60,7 @@ def _builtin(workspace: Path | None = None) -> list[Source]:
     from nyshporka.sources.martyrolog import MartyrologSource
     from nyshporka.sources.ridni import RidniSource
     from nyshporka.sources.skanoteka import SkanotekaSource
+    from nyshporka.sources.sks import SksPersonsSource, SksPlacesSource
     from nyshporka.sources.szukaj import SzukajSource
     from nyshporka.sources.volok import VolokSource
 
@@ -122,6 +123,11 @@ def _builtin(workspace: Path | None = None) -> list[Source]:
     # 1920–1950-х із шифрою архівно-слідчої справи. База ОСІБ, тож загальний
     # пошук по каталогах її не питає — лише `--source martyrolog`.
     out.append(cast("Source", MartyrologSource(workspace)))
+    # 📜 «Staropolskie Księgi Sądowe»: покажчики осіб і місць гродських книг
+    # XVII–XVIII ст. (ЦДІАК ф.44, ф.40 і загублені книги KAC) з адресою акта.
+    # Шукає по паку `courtbooks`; особи — лише `--source sks-osoby`.
+    out.append(cast("Source", SksPlacesSource(workspace)))
+    out.append(cast("Source", SksPersonsSource(workspace)))
     return out
 
 

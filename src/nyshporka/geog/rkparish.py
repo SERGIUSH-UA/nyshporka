@@ -23,7 +23,7 @@ from collections.abc import Iterable, Iterator
 from typing import Any
 
 #: Позначки типу поселення перед назвою в українському переліку
-#: («сс. Богданівці», «м-ко Деражня», «передм. м-ка …»). Знімаються з початку
+#: («сс. Грабівці», «м-ко Деражня», «передм. м-ка …»). Знімаються з початку
 #: повторно, бо стоять ланцюжком.
 _PREFIX = re.compile(
     r"^(?:\(?\s*(?:сс|cc|с|мм|м|м-ко|м-ка|мст|с-ще|прис|хут|кол|ст|слоб|з-ст|"
@@ -57,8 +57,8 @@ def fold(form: str) -> str:
     Застосовується однаково до назви з таблиці й до запиту людини, тож збіг
     не залежить від того, якою мовою село записали:
 
-        Bohdanowce → bohdanovce → bogdanovci
-        Богдановцы → bogdanovci
+        Hrabowce → hrabovce → grabovci
+        Грабовцы → grabovci
         Деражня → derazna;   Derażnia → deraznia → derazna
     """
     s = form.replace("ch", "h").replace("h", "g").replace("j", "i").replace("y", "i")

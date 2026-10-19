@@ -65,6 +65,33 @@ def _rk_block(data: dict) -> None:  # type: ignore[type-arg]
                        f"{what:<16} {b.get('types', '')}")
 
 
+def _court_block(data: dict) -> None:  # type: ignore[type-arg]
+    """Згадки села в гродських книгах XVII–XVIII ст. — або що пака немає."""
+    if not data.get("court_installed"):
+        typer.echo("\n   Покажчиків гродських книг (courtbooks) на машині немає — "
+                   "згадки села в XVII–XVIII ст. не перевірено")
+        return
+    rows = data.get("court_places") or []
+    typer.echo(f"\n📜 Гродські книги XVII–XVIII ст. (покажчик М. Коваля): {len(rows)}")
+    for r in rows:
+        mark = "" if r.get("score") == 100 else f" · збіг {r.get('score')}"
+        sig = r.get("sig") or ""
+        where = (f"ЦДІАК {sig}" if r.get("book_kind") != "lost"
+                 else f"{sig} (загублена, за описом)")
+        typer.echo(f"  · {r.get('name')}{mark} — {where} · {r.get('book_years') or ''}")
+        if r.get("descr"):
+            typer.echo(f"    {str(r['descr'])[:160]}")
+        links = r.get("act_links") or []
+        with_url = [x for x in links if x.get("url")]
+        if with_url:
+            for x in with_url[:6]:
+                typer.echo(f"    акт {x['akt']}: {x['url']}")
+            if len(with_url) > 6:
+                typer.echo(f"    … ще {len(with_url) - 6} актів")
+        else:
+            typer.echo(f"    акти {r.get('acts') or '—'} · {r.get('book_url') or ''}")
+
+
 @app.command("find")
 def cmd_find(
     village: str = typer.Argument(..., help="назва села або містечка"),
@@ -103,6 +130,7 @@ def cmd_find(
             typer.echo(f"  · {c['name']}{alt} · деканат {c.get('deanery') or '—'}"
                        f" · `nysh church card {c['ob_id']}`")
     _rk_block(data)
+    _court_block(data)
     for title, rows in (data.get("books") or {}).items():
         typer.echo(f"\n📕 {str(title)[:70]} → {len(rows)} справ")
         _cases(rows, limit)

@@ -336,6 +336,50 @@ def build_rkparishes(parishes_json: Path, out: Path, *, pack_id: str, taken: str
     return {**res, "parishes": n_p, "villages": n_v, "books": n_b}
 
 
+# ── гродські книги: покажчики осіб і місць ───────────────────────────────────
+
+def build_courtbooks(src_dir: Path, out: Path, *, pack_id: str, taken: str,
+                     source: str, note: str = "",
+                     verbose: bool = False) -> dict[str, Any]:
+    """Пак `courtbooks` з теки збирача (`books.json`, `acts.tsv`, `osoby.csv`,
+    `miejsca.csv`). Форми прізвищ і назв рахуються тут (`sources.sks`), як у
+    паку РК-парафій: запит кирилицею зустрічає польське гасло без перебору
+    правил на кожен запит.
+    """
+    from nyshporka.sources.sks import records
+
+    con, tmp = _open_fresh(out, "courtbooks")
+    cols = {"book": ("books", ["sig", "kind", "title", "genre", "office", "voivodeship",
+                               "years", "year_from", "year_to", "about", "url"]),
+            "act": ("acts", ["sig", "akt", "url"]),
+            "person": ("persons", ["sig", "name", "descr", "acts", "forms", "given"]),
+            "place": ("places", ["sig", "name", "descr", "acts", "forms"])}
+    n: dict[str, int] = dict.fromkeys(cols, 0)
+    for kind, row in records(src_dir):
+        table, cs = cols[kind]
+        verb = "INSERT OR REPLACE" if kind in ("book", "act") else "INSERT"
+        con.execute(f"{verb} INTO {table} ({','.join(cs)}) VALUES ({','.join('?' * len(cs))})",
+                    [row[c] for c in cs])
+        n[kind] += 1
+    coverage = [("book", sig, k, None, kind)
+                for sig, kind, k in con.execute(
+                    "SELECT b.sig, b.kind, COUNT(p.rowid) FROM books b "
+                    "LEFT JOIN persons p ON p.sig = b.sig GROUP BY b.sig ORDER BY b.rowid")]
+    res = finalize(con, tmp, out, domain="courtbooks", pack_id=pack_id, taken=taken,
+                   source=source,
+                   built_from=_digest([*sorted(src_dir.glob("*.csv")), src_dir / "books.json",
+                                       src_dir / "acts.tsv"]),
+                   rows=n["person"] + n["place"], coverage=coverage,
+                   note=note or (f"Marcin Kowal, genealogie-kresowe.pl — покажчик "
+                                 f"{n['person']} осіб · {n['place']} місць · {n['book']} книг; "
+                                 f"транскрипції з мовною моделлю, [?] — невпевнене"))
+    if verbose:
+        print(f"✅ {out.name} — {n['book']} книг · {n['act']} актів · {n['person']} осіб · "
+              f"{n['place']} місць · {res['size'] / 1e6:.1f} МБ")
+    return {**res, "books": n["book"], "acts": n["act"], "persons": n["person"],
+            "places": n["place"]}
+
+
 # ── сучасні поселення з координатами (Wikidata) ──────────────────────────────
 
 def build_places(dump_json: Path, out: Path, *, pack_id: str, taken: str,
