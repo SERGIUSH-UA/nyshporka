@@ -23,6 +23,7 @@
 from __future__ import annotations
 
 import os
+import sys
 import tempfile
 from pathlib import Path
 
@@ -177,6 +178,79 @@ def _boot_workspace_after_reset() -> None:
 def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line(
         "markers", "real_paths: не підміняти функції шляхів — тест перевіряє їх самі")
+    _hold_pack_lock(config)
+
+
+def pytest_unconfigure(config: pytest.Config) -> None:
+    stack = getattr(config, "_nysh_pack_lock", None)
+    if stack is not None:
+        stack.close()
+
+
+#: Скільки чекати чужий пак, перш ніж здатися (секунд); `NYSH_PACK_WAIT` перебиває.
+PACK_WAIT = 20 * 60
+
+
+def _span(sec: float) -> str:
+    return f"{sec:.0f} с" if sec < 120 else f"{sec / 60:.0f} хв"
+
+
+def _is_pack(config: pytest.Config) -> bool:
+    """Повний пак — без шляхів або з теками; файл чи вузол — точковий прогін."""
+    paths = [a for a in config.invocation_params.args if not a.startswith("-")]
+    return not any("::" in a or a.endswith(".py") for a in paths)
+
+
+def _hold_pack_lock(config: pytest.Config) -> None:
+    """🔴 Один повний пак на машину.
+
+    Два паки поруч (дві сесії, два worktree) ділять ядра й пам'ять: 19.10.2026
+    пак, що йде 2,5 хв, тягнувся 10 хв, а на вичерпаній пам'яті воркер xdist
+    падав («node down») і решта висіла. Другий пак чекає першого й каже, кого
+    саме. Замок — файловий замок ОС: вбитий процес звільняє його сам, завислого
+    замка не буває. Точкові прогони (файл, вузол) його не беруть — вони легкі.
+    `NYSH_PACK_LOCK=0` — вимкнути (CI, де пак і так один).
+    """
+    import contextlib
+    import json
+    import time
+    from datetime import datetime
+
+    if hasattr(config, "workerinput") or os.environ.get("NYSH_PACK_LOCK") == "0":
+        return
+    if not _is_pack(config):
+        return
+    from nyshporka.core.xrate import LockTimeout, _locked
+
+    lock = Path(tempfile.gettempdir()) / "nyshporka-test-pack.lock"
+    who = lock.with_suffix(".who.json")
+    stack = contextlib.ExitStack()
+    try:
+        stack.enter_context(_locked(lock, timeout=0))
+    except LockTimeout:
+        try:
+            held = json.loads(who.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            held = {}
+        wait = float(os.environ.get("NYSH_PACK_WAIT") or PACK_WAIT)
+        print(f"\n⏳ на машині вже йде пак тестів Нишпорки (pid {held.get('pid', '?')}, "
+              f"{held.get('cwd', '?')}, з {held.get('since', '?')}) — чекаю до "
+              f"{_span(wait)}, щоб не ділити з ним ядра й пам'ять", file=sys.stderr,
+              flush=True)
+        t0 = time.monotonic()
+        try:
+            stack.enter_context(_locked(lock, timeout=wait))
+        except LockTimeout:
+            pytest.exit(f"інший пак тестів Нишпорки тримає машину понад {_span(wait)} "
+                        f"(pid {held.get('pid', '?')}); дочекайтесь його або "
+                        f"NYSH_PACK_LOCK=0", returncode=3)
+        print(f"▶ чужий пак скінчився за {time.monotonic() - t0:.0f} с — починаю",
+              file=sys.stderr, flush=True)
+    with contextlib.suppress(OSError):
+        who.write_text(json.dumps({"pid": os.getpid(), "cwd": str(Path.cwd()),
+                                   "since": datetime.now().strftime("%H:%M")}),
+                       encoding="utf-8")
+    config._nysh_pack_lock = stack  # type: ignore[attr-defined]
 
 
 @pytest.fixture(autouse=True)
