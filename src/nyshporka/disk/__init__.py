@@ -631,6 +631,7 @@ def offload(case: str, *, restore: str, apply: bool = False) -> dict[str, Any]:
 
     Кадр видаляється, лише якщо його ім'я — серед прочитаних сторінок власного
     прогону цієї теки й цієї справи, і файл не змінювався після прочитання.
+    Ім'я звіряється й за основою, коли розширення різне (`_za_osnovoiu`).
     Решта лишається й називається у відповіді. Обходу перевірок немає свідомо.
     """
     restore = " ".join(str(restore or "").split())
@@ -648,11 +649,15 @@ def offload(case: str, *, restore: str, apply: bool = False) -> dict[str, Any]:
     prochytani, runs = _read_frames(d, key)
     if not runs:
         raise DiskError(f"{key}: жоден власний прогін цієї справи не читав саме теку {d}")
+    kadry = _frames(d)
+    za_osnovoiu = _za_osnovoiu(prochytani, kadry)
     znyaty: list[Path] = []
     zamineni: list[str] = []
     lyshaiutsia: list[str] = []
-    for f in _frames(d):
+    for f in kadry:
         at = prochytani.get(f.name)
+        if at is None:
+            at = za_osnovoiu.get(f.stem)
         if at is None:
             lyshaiutsia.append(f.name)
         elif _zminenyi(f) > at:
@@ -660,6 +665,11 @@ def offload(case: str, *, restore: str, apply: bool = False) -> dict[str, Any]:
         else:
             znyaty.append(f)
     if not znyaty:
+        if lyshaiutsia and prochytani and not zamineni:
+            raise DiskError(
+                f"{key}: у теці {d} кадрів {len(kadry)}, прочитаних сторінок "
+                f"{len(prochytani)}, але жодне ім'я не зіставилось (тека: "
+                f"{sorted(lyshaiutsia)[0]}, прогін: {sorted(prochytani)[0]})")
         raise DiskError(f"{key}: прочитаних кадрів, які можна зняти, у теці {d} немає")
     why = _miy_vnesok(key, len(znyaty))
     if why:
@@ -699,6 +709,25 @@ def offload(case: str, *, restore: str, apply: bool = False) -> dict[str, Any]:
         out["errors"].append({"path": str(d / OFFLOAD_MARKER), "error": str(exc)})
     out["frames"] = znyato
     return out
+
+
+def _za_osnovoiu(prochytani: dict[str, float], kadry: list[Path]) -> dict[str, float]:
+    """`{основа імені: коли прочитано}` для кадрів, чиє розширення в теці й у
+    меті прогону різне: стискання перед хмарою дає `.jpg`, а розпакований ZIP
+    лишає `.jpeg` (чи `.png`).
+
+    Лише однозначні основи: дві сторінки прогону чи два кадри теки з однією
+    основою (`0001.jpg` і `0001.png`) за основою не зіставляються — котрий
+    із двох прочитано, тут не видно. Час зміни кадру `offload` перевіряє
+    однаково."""
+    po_prohonu: dict[str, list[str]] = {}
+    for name in prochytani:
+        po_prohonu.setdefault(Path(name).stem, []).append(name)
+    po_tetsi: dict[str, int] = {}
+    for f in kadry:
+        po_tetsi[f.stem] = po_tetsi.get(f.stem, 0) + 1
+    return {stem: prochytani[names[0]] for stem, names in po_prohonu.items()
+            if len(names) == 1 and po_tetsi.get(stem) == 1}
 
 
 def _zminenyi(f: Path) -> float:

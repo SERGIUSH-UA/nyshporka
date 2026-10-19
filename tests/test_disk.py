@@ -280,6 +280,32 @@ def test_vse_prochytane_sprava_staie_zniatoiu(ws: W.Workspace, svit: dict[str, A
     assert _frames_removed(d), "бібліотека бачить справу як «знято», а не як зниклу"
 
 
+def test_jpeg_u_tetsi_jpg_u_prohoni_znimaietsia(ws: W.Workspace, svit: dict[str, Any]) -> None:
+    """Розпакований ZIP лишив `.jpeg`, стискання перед хмарою записало `.jpg`."""
+    d = _sprava(ws.root, ("0001.jpeg", "0002.jpeg", "0003.png"))
+    _prohin(svit, d, VSI)
+    got = D.offload(str(d), restore="диск", apply=True)
+    assert got["frames"] == 3 and not list(d.glob("000*"))
+
+
+def test_dvoznachna_osnova_lyshaietsia(ws: W.Workspace, svit: dict[str, Any]) -> None:
+    """Два кадри з однією основою: котрий прочитано, не видно — обидва лишаються."""
+    d = _sprava(ws.root, ("0001.jpeg", "0001.png", "0002.jpeg"))
+    _prohin(svit, d, ("0001.jpg", "0002.jpg"))
+    got = D.offload(str(d), restore="диск", apply=True)
+    assert sorted(p.name for p in d.glob("000*")) == ["0001.jpeg", "0001.png"]
+    assert got["unread_kept"] == ["0001.jpeg", "0001.png"]
+
+
+def test_imena_ne_zistavylys_vidmova_kazhe_tse(ws: W.Workspace, svit: dict[str, Any]) -> None:
+    """🔴 «Не зміг зіставити» не виглядає як «кадрів немає»."""
+    d = _sprava(ws.root, ("000001.jpeg", "000002.jpeg"))
+    _prohin(svit, d, ("0001.jpg", "0002.jpg"))
+    with pytest.raises(D.DiskError, match="жодне ім'я не зіставилось.*000001.jpeg.*0001.jpg"):
+        D.offload(str(d), restore="диск", apply=True)
+    assert len(list(d.glob("*.jpeg"))) == 2
+
+
 def test_vidnosnyi_shliakh_vid_korenia_prostoru(ws: W.Workspace, svit: dict[str, Any],
                                                 tmp_path: Path,
                                                 monkeypatch: pytest.MonkeyPatch) -> None:
