@@ -17,6 +17,19 @@
 
 ## [Unreleased]
 
+## [0.36.0] — 2026-10-19
+
+### Змінено
+- Відмова «пака немає / пак непридатний» радить те, що справді дає пак:
+  архів `nyshporka-catalog-<дата>.zip` з релізу `catalog-…` і
+  `nysh catalog install --from <zip>` (`catalog.store.install_hint`). Доти
+  вона радила `nysh catalog update` (такої команди немає) і
+  `nysh catalog install --domain …` без `--from`, що нічого не завантажує.
+- Каталог довідників (`catalog-2026-10-19`) нарешті везе паки церков ~1772 і
+  поселень Wikidata: опублікований із серпня каталог їх не мав, тож
+  `nysh church` і `nysh geog near` після інсталятора відмовляли. Міграція
+  агента має крок `catalog` з перевіркою `catalog_current`.
+
 ### Додано
 - **Покажчики гродських книг XVII–XVIII ст.** — новий домен паків
   `courtbooks` («Staropolskie Księgi Sądowe», Marcin Kowal,

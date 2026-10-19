@@ -81,6 +81,18 @@ class Coverage:
 RELEASES_URL = "https://github.com/SERGIUSH-UA/nyshporka/releases"
 
 
+def install_hint() -> str:
+    """Куди людина справді може піти по пак — одним рядком для будь-якої відмови.
+
+    🔴 Доти відмови радили `nysh catalog update` (такої команди немає) і
+    `nysh catalog install --domain …` без `--from` — а `install` нічого не
+    завантажує. Порада, виконана буквально, мала давати пак, а давала помилку.
+    """
+    return (f"свіжий каталог — архів `nyshporka-catalog-<дата>.zip` у релізі `catalog-…` "
+            f"на {RELEASES_URL} (або перевстановлення інсталятором), далі "
+            f"`nysh catalog install --from <zip>`")
+
+
 def catalog_dir() -> Path:
     """Тека каталогу. `user_data_dir`, а не `user_cache_dir` — див. `__init__`."""
     env = os.environ.get(ENV_CATALOG)
@@ -267,10 +279,10 @@ def require(domain: str) -> list[InstalledPack]:
         what = "; ".join(f"{p.pack_id}: {p.problem}" for p in broken)
         raise CatalogMissing(
             f"паки домену «{domain}» є, але непридатні ({what}). "
-            f"Полагодити: nysh catalog update")
+            f"Полагодити: {install_hint()}")
     raise CatalogMissing(
         f"у каталозі немає жодного пака домену «{domain}», тож шукати ніде. "
-        f"Поставити: nysh catalog install --domain {domain}")
+        f"Поставити: {install_hint()}")
 
 
 def open_packs(domain: str, *, with_own: bool = True

@@ -155,3 +155,30 @@ def test_without_pack_refuses_instead_of_zero(tmp_path: Path, monkeypatch: pytes
             SksPlacesSource().search("Hrabowce")
     finally:
         S.invalidate()
+
+
+def test_missing_pack_hint_is_an_action_that_exists(tmp_path: Path,
+                                                    monkeypatch: pytest.MonkeyPatch) -> None:
+    """🔴 Порада у відмові мусить давати пак, якщо виконати її буквально."""
+    from nyshporka.catalog import store as S
+
+    monkeypatch.setenv("NYSHPORKA_CATALOG", str(tmp_path))
+    S.invalidate()
+    try:
+        with pytest.raises(S.CatalogMissing) as exc:
+            S.require("courtbooks")
+    finally:
+        S.invalidate()
+    msg = str(exc.value)
+    assert "catalog install --from" in msg and S.RELEASES_URL in msg
+    assert "catalog update" not in msg and "--domain" not in msg
+
+
+def test_migration_check_names_missing_catalog_domains(catalog: Path) -> None:
+    """Каталог із самими гродськими книгами — міграція називає, чого бракує."""
+    from nyshporka.migrate import run_check
+
+    res = run_check("catalog_current", catalog)
+    assert res.state == "todo"
+    assert "churches" in res.detail and "courtbooks" not in res.detail.split("—")[0]
+    assert "catalog install --from" in res.detail

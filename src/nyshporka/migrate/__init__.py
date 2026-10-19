@@ -331,7 +331,24 @@ def _skill_guard(root: Path) -> CheckResult:
     return CheckResult(state, detail)
 
 
+#: Домени довідників, яких бракувало опублікованому каталогу до 0.36.0: без них
+#: `nysh church`, `geog near`, РК-парафії й гродські книги відмовляють.
+CATALOG_DOMAINS = ("churches", "places", "rkparishes", "courtbooks")
+
+
+def _catalog_current(root: Path) -> CheckResult:
+    """Чи стоять на машині всі паки довідників, які везе каталог (з 0.36.0)."""
+    from nyshporka.catalog import store as S
+
+    have = {p.domain for p in S.installed() if p.ok}
+    need = [d for d in CATALOG_DOMAINS if d not in have]
+    if need:
+        return CheckResult("todo", "бракує паків: " + ", ".join(need) + " — " + S.install_hint())
+    return CheckResult("ok", "довідники на місці: " + ", ".join(CATALOG_DOMAINS))
+
+
 CHECKS: dict[str, Callable[[Path], CheckResult]] = {
+    "catalog_current": _catalog_current,
     "mcp_config": _mcp_config,
     "skills_current": _skills_current,
     "canon_present": _canon_present,

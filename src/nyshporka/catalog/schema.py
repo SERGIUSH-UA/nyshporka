@@ -327,8 +327,10 @@ def check(con: sqlite3.Connection, domain: str) -> str:
     except (TypeError, ValueError):
         return f"версія схеми не число: {row[0]!r}"
     if got != SCHEMA_VERSION:
+        from nyshporka.catalog.store import install_hint
+
         return (f"пак схеми v{got}, а застосунок знає v{SCHEMA_VERSION} — "
-                f"оновіть каталог: nysh catalog update")
+                f"оновіть каталог: {install_hint()}")
     try:
         dom = con.execute("SELECT v FROM meta WHERE k='domain'").fetchone()
     except sqlite3.Error:
