@@ -8,8 +8,10 @@
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import re
+from contextvars import ContextVar
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -29,6 +31,44 @@ _TOKEN_RE = re.compile(r"[^\s.,;:()\[\]{}/\\|«»\"'’—–-]+")
 # path(str) → (mtime_ns, index-dict)
 _CACHE: dict[str, tuple[int, dict[str, Any]]] = {}
 
+#: Перелік файлів справ на один запит — див. `one_snapshot`.
+_SNAP: ContextVar[dict[str, Any] | None] = ContextVar("pagestore_snap", default=None)
+
+
+@contextlib.contextmanager
+def one_snapshot() -> Iterator[None]:
+    """Один перелік файлів сховища на весь запит.
+
+    🔴 Пошук по серії питає сховище для кожної справи окремо, і кожен раз
+    обходив усі файли справ і звіряв їхні ключі: на 20 справах ф.224 — 4,9 с
+    із 29 (замір 19.10.2026). У межах знімка мапа «ключ → файли» будується
+    один раз. ⚠ Лише для читання: те, що пише сховище, сюди не заходить.
+    """
+    if _SNAP.get() is not None:
+        yield
+        return
+    tok = _SNAP.set({})
+    try:
+        yield
+    finally:
+        _SNAP.reset(tok)
+
+
+def _files_by_key(root: Path, snap: dict[str, Any]) -> dict[str, list[Path]]:
+    got = snap.get("by_key")
+    if got is None:
+        got = {}
+        for p in _all_files(root):
+            idx = _index(p)
+            if idx:
+                got.setdefault(legacy_key.current_key(str(idx["key"] or "")), []).append(p)
+        snap["by_key"] = got
+    return got
+
+
+def _all_files(root: Path) -> list[Path]:
+    return [p for p in sorted(root.glob("*/*.json")) if not p.name.endswith(".tmp")]
+
 
 def _iter_files(case_key: str | None = None) -> Iterator[Path]:
     root = store.pages_root()
@@ -37,6 +77,10 @@ def _iter_files(case_key: str | None = None) -> Iterator[Path]:
     # Ключі — новою формою з обох боків: людина набирає й старий ключ, а файл
     # до переносу обліку тримає старий (`nysh cases rekey`).
     want = legacy_key.current_key(case_key) if case_key is not None else None
+    snap = _SNAP.get()
+    if want is not None and snap is not None:
+        yield from _files_by_key(root, snap).get(want, ())
+        return
     for p in sorted(root.glob("*/*.json")):
         if p.name.endswith(".tmp"):
             continue

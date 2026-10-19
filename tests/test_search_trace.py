@@ -142,3 +142,41 @@ def test_a_sweep_writes_under_the_lock_with_a_private_tmp(space, monkeypatch) ->
     _note("DAHMO/315/1", "Сікорський", ["pysar"])
     assert seen == [(f"{T.FILE}.{os.getpid()}.tmp", True)]
     assert not T.path().with_name(T.FILE + ".lock").exists()
+
+
+def test_batch_shows_notes_at_once_and_writes_once(space, monkeypatch) -> None:
+    """🔴 Захід по серії: запис справи видно в `of` того ж заходу, а файл
+    переписується один раз наприкінці, а не на кожну справу."""
+    from nyshporka.search import trace as T
+    from nyshporka.utils import atomic as A
+
+    writes: list[int] = []
+    real = A.write_json
+
+    def spy(*a, **kw):
+        writes.append(1)
+        return real(*a, **kw)
+
+    monkeypatch.setattr(A, "write_json", spy)
+    with T.batch():
+        _note("DAHMO/315/1", "Сікорський", ["pysar"])
+        _note("DAHMO/315/2", "Сікорський", ["pysar"])
+        assert [x["q"] for x in T.of("DAHMO/315/1")] == ["Сікорський"]
+        assert writes == []
+        assert not T.path().exists()
+    assert writes == [1]
+    assert [x["q"] for x in T.of("DAHMO/315/2")] == ["Сікорський"]
+
+
+def test_batch_keeps_a_record_written_meanwhile_by_another_session(space) -> None:
+    """Порція лягає поверх СВІЖОГО файла: чужий запис за час заходу не губиться."""
+    from nyshporka.search import trace as T
+
+    with T.batch():
+        _note("DAHMO/315/1", "Сікорський", ["pysar"])
+        T.of("DAHMO/315/1")
+        T.path().parent.mkdir(parents=True, exist_ok=True)
+        T.path().write_text('{"DAHMO/315/9": [{"q": "Іванів", "models": ["diak"], '
+                            '"channels": ["surname"]}]}', encoding="utf-8")
+    assert [x["q"] for x in T.of("DAHMO/315/9")] == ["Іванів"]
+    assert [x["q"] for x in T.of("DAHMO/315/1")] == ["Сікорський"]

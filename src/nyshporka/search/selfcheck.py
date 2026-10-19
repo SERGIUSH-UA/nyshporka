@@ -25,6 +25,8 @@ from __future__ import annotations
 
 import contextlib
 import re
+from collections.abc import Iterator
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -197,6 +199,53 @@ def _person(path: Any, read: Any) -> Any:
     return person
 
 
+#: Особи канону з прізвищем запиту на один захід — див. `one_snapshot`.
+_SNAP: ContextVar[dict[Any, Any] | None] = ContextVar("selfcheck_snap", default=None)
+
+
+@contextlib.contextmanager
+def one_snapshot() -> Iterator[None]:
+    """Один перебір канону на весь захід.
+
+    🔴 Пошук по серії кличе самоперевірку на кожну справу, і кожна перебирала
+    всі картки осіб і звіряла їхні прізвища з запитом: на 20 справах ф.224 —
+    1,5 с (замір 19.10.2026), на фонді з 1900 справ — хвилини. Особи з цим
+    прізвищем від справи не залежать, тож у межах знімка шукаються один раз.
+    """
+    if _SNAP.get() is not None:
+        yield
+        return
+    tok = _SNAP.set({})
+    try:
+        yield
+    finally:
+        _SNAP.reset(tok)
+
+
+def _persons_named(root: Any, want: str, thresh: int) -> list[Any]:
+    """Картки осіб, чиє прізвище схоже на запит, — у порядку файлів."""
+    from rapidfuzz import fuzz
+
+    from nyshporka.storage.files import read_person
+    from nyshporka.utils.translit import normalize_archival
+
+    snap = _SNAP.get()
+    key = ("persons", str(root), want, thresh)
+    if snap is not None and key in snap:
+        return list(snap[key])
+    got: list[Any] = []
+    for path in sorted((root / "persons").glob("*.md")):
+        person = _person(path, read_person)
+        if person is None:
+            continue
+        surnames = [str(getattr(nm, "surname", "") or "") for nm in person.names]
+        if any(s and fuzz.ratio(normalize_archival(s), want) >= thresh for s in surnames):
+            got.append(person)
+    if snap is not None:
+        snap[key] = got
+    return list(got)
+
+
 def canon_pages(q: str, ref: Any, thresh: int = 80) -> set[str]:
     """Аркуші справи, які канон цитує для осіб із цим прізвищем.
 
@@ -205,10 +254,8 @@ def canon_pages(q: str, ref: Any, thresh: int = 80) -> set[str]:
     (`d114_0034.jpg` — справа й скан у самому імені). Канону немає — порожньо.
     """
     try:
-        from rapidfuzz import fuzz
-
         from nyshporka.core.workspace import workspace
-        from nyshporka.storage.files import read_person, read_source
+        from nyshporka.storage.files import read_source
         from nyshporka.utils.translit import normalize_archival
     except Exception:
         return set()
@@ -218,27 +265,24 @@ def canon_pages(q: str, ref: Any, thresh: int = 80) -> set[str]:
     want = normalize_archival(q)
     case_dir = _norm_path(str(getattr(ref, "path", "") or ""))
     spr = str(getattr(ref, "spr", "") or "")
-    src_ok: dict[str, bool] = {}
+    snap = _SNAP.get()
+    src_ok: dict[tuple[str, str], bool] = ({} if snap is None
+                                           else snap.setdefault(("sources", str(root)), {}))
 
     def source_matches(sid: str) -> bool:
-        if sid not in src_ok:
+        k = (sid, case_dir)
+        if k not in src_ok:
             ok = False
             p = root / "sources" / f"{sid}.md"
             if p.is_file() and case_dir:
                 with contextlib.suppress(Exception):
                     src = read_source(p)
                     ok = bool(src.raw_path) and _norm_path(str(src.raw_path)) == case_dir
-            src_ok[sid] = ok
-        return src_ok[sid]
+            src_ok[k] = ok
+        return src_ok[k]
 
     out: set[str] = set()
-    for path in sorted((root / "persons").glob("*.md")):
-        person = _person(path, read_person)
-        if person is None:
-            continue
-        surnames = [str(getattr(nm, "surname", "") or "") for nm in person.names]
-        if not any(s and fuzz.ratio(normalize_archival(s), want) >= thresh for s in surnames):
-            continue
+    for person in _persons_named(root, want, thresh):
         for fact in person.facts:
             for c in fact.citations:
                 if source_matches(c.source_id):

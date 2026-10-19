@@ -798,11 +798,17 @@ def find(q: str, scope: str | Sequence[str] = "", *, thresh: int = 78, limit: in
     Кожна справа тепер отримує повний пошук і свій запис у журналі заходу.
     """
     from nyshporka import htr_store as S
+    from nyshporka.pagestore import query as PQ
+    from nyshporka.search import selfcheck as SC
+    from nyshporka.search import trace as TRACE
 
     # 🔴 Один перелік прогонів на весь захід. Серія розкладається на справи, і
     # кожна питала перелік знову: на фонді зі 109 справ — 524 обходи кореня
-    # прогонів, 46 с із 189 (замір 07.10.2026).
-    with S.one_listing():
+    # прогонів, 46 с із 189 (замір 07.10.2026). Те саме для сховища сторінок,
+    # канону самоперевірки й сліду: на ф.224 (1900 справ) обв'язка справи
+    # коштувала в 8 разів більше за сам пошук (замір 19.10.2026).
+    with (S.one_listing(), PQ.one_snapshot(), SC.one_snapshot(), TRACE.batch(),
+          ST.one_stamps()):
         if scope:
             sc = S.runs_for_scope(scope)
             if sc["kind"] == "cases":

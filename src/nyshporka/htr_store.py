@@ -45,9 +45,12 @@ def htr_root() -> Path:
 _TOKEN_RE = re.compile(r"[^\s.,;:()\[\]{}/\\|«»\"'’—–-]+")
 
 
+@functools.lru_cache(maxsize=1 << 16)
 def _norm(s: str) -> str:
     # спільна архівна нормалізація (translit.normalize_archival) — фолд
-    # історичних літер + Kraken-плутанин живе тепер там
+    # історичних літер + Kraken-плутанин живе тепер там. Кеш — бо розбір хітів
+    # нормалізує ті самі слова сусідніх сторінок тисячі разів (замір 19.10.2026:
+    # пів мільйона викликів на 40 справ).
     return normalize_archival(s)
 
 
@@ -604,6 +607,8 @@ def _library_stamp() -> str:
 
 #: Знімок переліку прогонів на один запит — див. `one_listing`.
 _LISTING: ContextVar[list[dict[str, Any]] | None] = ContextVar("htr_listing", default=None)
+#: Ключ справи → прогони, на той самий знімок — див. `_rows_of_key`.
+_KEYMAP: ContextVar[dict[str, Any] | None] = ContextVar("htr_keymap", default=None)
 
 
 @contextlib.contextmanager
@@ -623,10 +628,48 @@ def one_listing() -> Iterator[None]:
         yield
         return
     tok = _LISTING.set(list_cases())
+    ktok = _KEYMAP.set({})
     try:
         yield
     finally:
+        _KEYMAP.reset(ktok)
         _LISTING.reset(tok)
+
+
+def _bound_of_listing() -> dict[str, str | None]:
+    """Прив'язки прогонів — одне читання на знімок, як і сам перелік."""
+    snap = _KEYMAP.get()
+    if snap is None:
+        return _bound_runs()
+    bound: dict[str, str | None] | None = snap.get("bound")
+    if bound is None:
+        bound = snap["bound"] = _bound_runs()
+    return bound
+
+
+def _rows_of_key(rows: list[dict[str, Any]], bound: dict[str, str | None],
+                 key: str) -> list[dict[str, Any]]:
+    """Прогони справи `key` з переліку `rows`.
+
+    🔴 Пошук по серії кличе область кожної справи окремо, і кожна перебирала
+    весь перелік прогонів простору: на 20 справах ф.224 — 844 тис. викликів
+    `run_key`, 7 с із 29 (замір 19.10.2026), на фонді з 1900 справ — хвилини.
+    У межах знімка (`one_listing`) мапа будується один раз.
+    """
+    snap = _KEYMAP.get()
+    if snap is None:
+        return [r for r in rows if run_key(r, bound) == key]
+    if "rows" not in snap:
+        snap["rows"] = rows
+    elif snap["rows"] is not rows:
+        return [r for r in rows if run_key(r, bound) == key]
+    by_key = snap.get("map")
+    if by_key is None:
+        by_key = {}
+        for r in rows:
+            by_key.setdefault(run_key(r, bound), []).append(r)
+        snap["map"] = by_key
+    return list(by_key.get(key, ()))
 
 
 #: Стан прогону для людини: дочитано · читається зараз · не дочитано.
@@ -1065,7 +1108,7 @@ def runs_for_scope(scope: str | Sequence[str]) -> dict[str, Any]:
     if not want:
         return {"rows": rows, "kind": "all", "key": "", "shifra": ""}
 
-    bound = _bound_runs()
+    bound = _bound_of_listing()
 
     def key_of(r: dict[str, Any]) -> str:
         # Рядок переліку вже несе канонічний ключ; рахувати його вдруге на
@@ -1124,7 +1167,7 @@ def runs_for_scope(scope: str | Sequence[str]) -> dict[str, Any]:
             if info:
                 out["series"] = info
         return out
-    mine = [r for r in rows if key_of(r) == ref.key]
+    mine = _rows_of_key(rows, bound, ref.key)
     if not mine and ref.path:
         # Прогін, який не несе ключа в собі, ще може вказувати на ту саму теку.
         # Це не рідкість: ключ у меті з'явився пізніше за самі прогони.
@@ -2261,13 +2304,24 @@ def _resolve(hits: list[dict[str, Any]]) -> None:
     """
     cands_of: dict[tuple[str, str], dict[int, list[tuple[str, str]]]] = {}
     text_of: dict[tuple[str, str], list[str]] = {}
+    # Склейка рядка залежить лише від попередніх рядків, тож кандидатів сторінки
+    # досить рахувати до останнього рядка з хітом: решта сторінки — даремна
+    # робота (на серії ф.224 — половина часу всього `find`, замір 19.10.2026).
+    last: dict[tuple[str, str], int] = {}
+    for h in hits:
+        key = (h["name"], h["page"])
+        last[key] = max(last.get(key, 0), int(h["line_no"]))
     for h in hits:
         key = (h["name"], h["page"])
         if key not in cands_of:
             got = read_page_text(h["name"], h["page"]) or {}
             text_of[key] = list(got.get("lines") or [])
-            cands_of[key] = {ln: cands for ln, _raw, cands
-                             in page_candidates(text_of[key])}
+            page: dict[int, list[tuple[str, str]]] = {}
+            for ln, _raw, cands in page_candidates(text_of[key]):
+                page[ln] = cands
+                if ln >= last[key]:
+                    break
+            cands_of[key] = page
         want = h.pop("norm", "")
         cands = cands_of[key].get(h["line_no"]) or []
         h["matched"] = next((w for w, n in cands if n == want), want)

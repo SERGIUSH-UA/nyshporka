@@ -186,3 +186,32 @@ def test_a_run_with_the_old_opys_belongs_to_its_case(scope: Any) -> None:
                       lambda p: {"key": "DADNO/6508/5d/2", "shifra": "ДАДнО Р-6508-5д-2"})
     assert row["case_canon"] == "DADNO/6508/5d/2"
     assert S.run_key(row) == "DADNO/6508/5d/2"
+
+
+def test_one_listing_gives_the_same_scope_and_reads_the_listing_once(
+        scope: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """🔴 Серія питає область кожної справи окремо. У межах знімка мапа «ключ →
+    прогони» будується один раз (замір 19.10.2026: 844 тис. `run_key` на 20
+    справ), а відповідь мусить бути та сама, що й без знімка — разом із
+    прив'язкою людини."""
+    S, R = scope
+    R.bind_run("проба-фонд-Р", KEY, "теку перенесено", force=True)
+    plain = _names(S.runs_for_scope("ДАХмО R-100-1-7"))
+    # Справжній `list_cases` у межах знімка віддає той самий список.
+    listing = [dict(r) for r in RUNS]
+    monkeypatch.setattr(S, "list_cases", lambda: listing)
+    calls: list[str] = []
+    real = S.run_key
+
+    def spy(row: dict[str, Any], bound: Any = None) -> str:
+        calls.append(str(row.get("name")))
+        return real(row, bound)
+
+    monkeypatch.setattr(S, "run_key", spy)
+    with S.one_listing():
+        first = _names(S.runs_for_scope("ДАХмО R-100-1-7"))
+        n = len(calls)
+        again = _names(S.runs_for_scope("ДАХмО R-100-1-7"))
+    assert first == again == plain == {"свій", "проба-фонд-Р"}
+    assert n == len(RUNS)
+    assert len(calls) == n

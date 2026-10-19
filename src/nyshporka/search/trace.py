@@ -17,9 +17,12 @@
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import sys
 import time
+from collections.abc import Iterator
+from contextvars import ContextVar
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -29,6 +32,72 @@ FILE = "search_log.json"
 #: свіп іменами відповідають на різні питання, і затирати перший другим означає
 #: втратити половину відповіді.
 KEEP = 5
+
+
+#: Слід на один захід — див. `batch`.
+_BATCH: ContextVar[dict[str, Any] | None] = ContextVar("trace_batch", default=None)
+
+
+@contextlib.contextmanager
+def batch() -> Iterator[None]:
+    """Один захід — одне читання сліду й один запис наприкінці.
+
+    🔴 Пошук по серії пише слід кожної справи окремо, і кожен запис
+    перечитував і переписував увесь файл, а показ ще тричі читав його на
+    справу: на 20 справах ф.224 — 5,3 с із 29 (замір 19.10.2026), на фонді
+    з 1900 справ — квадрат від розміру файла. Тут файл читається раз, записи
+    одразу видно в `of` цього ж заходу, а на диск вони лягають однією
+    порцією під тим самим локом, поверх свіжого стану (чужі записи за цей час
+    не губляться).
+    """
+    if _BATCH.get() is not None:
+        yield
+        return
+    st: dict[str, Any] = {"data": None, "pending": []}
+    tok = _BATCH.set(st)
+    try:
+        yield
+    finally:
+        _BATCH.reset(tok)
+        if st["pending"]:
+            _flush(st["pending"])
+
+
+def _batch_data(st: dict[str, Any]) -> dict[str, Any]:
+    data: dict[str, Any] | None = st["data"]
+    if data is None:
+        data = st["data"] = _read()
+    return data
+
+
+def _apply(data: dict[str, Any], key: str, row: dict[str, Any]) -> None:
+    """Дописати рядок сліду справи: той самий запит тими самими моделями й
+    каналами рядків не множить, а оновлює їх."""
+    prev = [x for x in (data.get(key) or []) if isinstance(x, dict)]
+    # Канали — частина ключа: свіп прізвищем і свіп з якорями відповідають на
+    # різні питання, і другий не має затирати перший.
+    same = (row["q"], tuple(row["models"]), tuple(row["channels"]))
+    prev = [x for x in prev
+            if (x.get("q"), tuple(x.get("models") or []),
+                tuple(x.get("channels") or [])) != same]
+    data[key] = [row, *prev][:KEEP]
+
+
+def _flush(pending: list[tuple[str, dict[str, Any]]]) -> None:
+    from nyshporka.pagestore.store import _lock
+    from nyshporka.utils.atomic import write_json
+
+    p = path()
+    try:
+        with _lock(p):
+            data = _read_for_write(p)
+            if data is None:
+                return
+            for key, row in pending:
+                _apply(data, key, row)
+            write_json(p, data, indent=1, newline="\n")
+    except OSError:
+        pass  # слід — зручність, а не умова роботи (сюди ж — зайнятий лок)
 
 
 def path() -> Path:
@@ -104,8 +173,13 @@ def note(key: str, *, q: str, thresh: int, hits: int, pages: int,
     # Один ключ на справу: старий рядок з пам'яті агента — та сама справа.
     key = legacy_key.current_key(key) or key
     row = {"q": q, "thresh": thresh, "hits": hits, "pages": pages,
-           "models": sorted(set(models)), "channels": channels,
+           "models": sorted(set(models)), "channels": list(channels),
            "when": date.today().isoformat()}
+    st = _BATCH.get()
+    if st is not None:
+        _apply(_batch_data(st), key, row)
+        st["pending"].append((key, row))
+        return
     from nyshporka.pagestore.store import _lock
     from nyshporka.utils.atomic import write_json
 
@@ -118,15 +192,7 @@ def note(key: str, *, q: str, thresh: int, hits: int, pages: int,
             data = _read_for_write(p)
             if data is None:
                 return
-            prev = [x for x in (data.get(key) or []) if isinstance(x, dict)]
-            # Той самий запит тими самими моделями не множить рядків — він їх
-            # оновлює. Канали — частина ключа: свіп прізвищем і свіп з якорями
-            # відповідають на різні питання, і другий не має затирати перший.
-            same = (q, tuple(sorted(set(models))), tuple(channels))
-            prev = [x for x in prev
-                    if (x.get("q"), tuple(x.get("models") or []),
-                        tuple(x.get("channels") or [])) != same]
-            data[key] = [row, *prev][:KEEP]
+            _apply(data, key, row)
             write_json(p, data, indent=1, newline="\n")
     except OSError:
         pass  # слід — зручність, а не умова роботи (сюди ж — зайнятий лок)
@@ -136,8 +202,9 @@ def of(key: str) -> list[dict[str, Any]]:
     """Чим цю справу вже шукали, від найсвіжішого."""
     from nyshporka.core import legacy_key
 
-    got = legacy_key.get(_read(), key) or []
-    return [x for x in got if isinstance(x, dict)]
+    st = _BATCH.get()
+    got = legacy_key.get(_batch_data(st) if st is not None else _read(), key) or []
+    return [dict(x) for x in got if isinstance(x, dict)]
 
 
 def stale(key: str, models: list[str]) -> list[dict[str, Any]]:

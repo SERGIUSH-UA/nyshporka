@@ -76,6 +76,7 @@ import tokenize
 import zlib
 from bisect import bisect_right
 from collections.abc import Callable, Iterator
+from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -370,8 +371,38 @@ def stamp_of(run: str) -> str:
     return D.stamp_of(run)
 
 
+#: Штампи прогонів на один захід — див. `one_stamps`.
+_STAMPS: ContextVar[dict[str, Any] | None] = ContextVar("store_stamps", default=None)
+
+
+@contextlib.contextmanager
+def one_stamps() -> Iterator[None]:
+    """Одне читання штампів стору на захід, доки захід сам нічого не пише.
+
+    🔴 Пошук по серії питав усі штампи стору тричі на справу (свіп, знаменник,
+    свіжість) — 3 с на 40 справ (замір 19.10.2026). Будь-який запис у стор
+    (`_begin_write`) знімок скидає: прогін, доіндексований посеред заходу,
+    видно одразу.
+    """
+    if _STAMPS.get() is not None:
+        yield
+        return
+    tok = _STAMPS.set({})
+    try:
+        yield
+    finally:
+        _STAMPS.reset(tok)
+
+
 def stamps(conn: sqlite3.Connection) -> dict[str, str]:
-    return {r[0]: r[1] for r in conn.execute("select run, stamp from runs")}
+    snap = _STAMPS.get()
+    if snap is not None and "v" in snap:
+        return dict(snap["v"])
+    got = {r[0]: r[1] for r in conn.execute("select run, stamp from runs")}
+    if snap is not None:
+        snap["v"] = got
+        return dict(got)
+    return got
 
 
 def is_fresh(run: str, conn: sqlite3.Connection | None = None) -> bool:
@@ -545,6 +576,9 @@ def _begin_write(conn: sqlite3.Connection, *, wait: float,
     Замок, який чужа сесія тримає довше за `BUSY_TIMEOUT` (`optimize`,
     перебудова), чекається повторами до `wait` секунд.
     """
+    snap = _STAMPS.get()
+    if snap is not None:
+        snap.pop("v", None)
     deadline = time.monotonic() + wait
     while True:
         try:
