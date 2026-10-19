@@ -36,6 +36,7 @@ from nyshporka.cases.resolve import (
 )
 from nyshporka.cases.walk import IMG_EXT, frame_names
 from nyshporka.core import legacy_key as legacy
+from nyshporka.core import workspace as W
 from nyshporka.core.workspace import workspace
 from nyshporka.library import (
     _REPO_LABEL,
@@ -56,8 +57,41 @@ from nyshporka.library import (
 def htr_root() -> Path: return workspace().htr_reports
 def raw_dir() -> Path: return workspace().raw
 def pages_root() -> Path: return workspace().pages
-def clan_state() -> Path: return workspace().clan_hunt / "state.json"
-def derived_db() -> Path: return workspace().project_derived / "nyshporka.sqlite"
+def clan_state() -> Path: return _project_ws().clan_hunt / "state.json"
+def derived_db() -> Path: return _project_ws().project_derived / "nyshporka.sqlite"
+
+
+def _project_ws() -> W.Workspace:
+    """Простір, чиї висновки (пошук роду, вердикти, база роду) лягають у реєстр.
+
+    🔴 З кореня чистої Майстерні проєкту немає — і реєстр збирається без
+    проєктних колонок, а не падає. Саме звідти його збирає хмарний наглядач
+    після забору (`cloud.supervised.post_fetch_hooks`): падіння лишало б
+    реєстр із «декоду немає» про щойно прочитану справу. Зріз «прошукано»
+    під кожен проєкт — хвиля демона (`cases.list` H+P).
+    """
+    ws = workspace()
+    try:
+        _ = ws.proot
+    except W.NoProjectError:
+        return W.Workspace(root=ws.hub)        # у корені чистої Майстерні висновків немає
+    return ws
+
+
+def _private(paths: list[str | None]) -> bool:
+    """Чи позначена справа приватною хоч в одній зі своїх тек."""
+    from nyshporka.cases.privacy import passport_of
+
+    base = case_base()
+    return any(passport_of(Path(p) if Path(p).is_absolute() else base / p) is not None
+               for p in paths if p)
+
+
+def _verdicts() -> dict[str, Any]:
+    try:
+        return load_verdicts()
+    except W.NoProjectError:
+        return {}
 
 #: Які файли теки — кадри, і які з них ідуть у знаменник, вирішує
 #: `cases.walk` (`IMG_EXT`, `frame_names`): одне правило для обходу, прямого
@@ -1045,7 +1079,7 @@ def collect_rows(index: LibraryIndex | None = None, *,
             seen_row.pages_noted, seen_row.pages_full = noted, full
 
     # ── людські вердикти ────────────────────────────────────────────────────
-    for key, v in load_verdicts().items():
+    for key, v in _verdicts().items():
         verdict_row = rows.get(key)
         if verdict_row:
             verdict_row.verdict = str(v.get("verdict") or "")
@@ -1120,6 +1154,7 @@ def collect_rows(index: LibraryIndex | None = None, *,
             row.state = "partial"
         row.htr_stage = _htr_stage(row, frames_known)
         row.fuzzy_stage = _fuzzy_stage(row)
+        row.private = _private([row.path, *row.extra_paths])
 
     return sorted(rows.values(), key=lambda r: (r.repo_label or "", r.fond or "",
                                                 int(re.sub(r"\D", "", r.spr or "0") or 0))), orphans

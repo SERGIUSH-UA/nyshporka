@@ -24,6 +24,7 @@ Kaggle…), заливає вхід, стежить і забирає резул
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -132,9 +133,12 @@ def parse_handle(text: str) -> str:
 
 
 def _run(cmd: list[str], timeout: int = 900) -> subprocess.CompletedProcess[str]:
+    from nyshporka.core.appdirs import gpurunner_env
+
     try:
         return subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
-                              errors="replace", timeout=timeout)
+                              errors="replace", timeout=timeout,
+                              env={**os.environ, **gpurunner_env()})
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise ComputeError(f"gpurunner не відповів: {exc}") from None
 

@@ -24,6 +24,7 @@ from nyshporka.archives.pack import active as _pack_active
 from nyshporka.cases.walk import frame_names
 from nyshporka.core import casekey
 from nyshporka.core import legacy_key as legacy
+from nyshporka.core import workspace as W
 from nyshporka.core.workspace import workspace
 from nyshporka.library import (
     _REPO_LABEL,
@@ -38,7 +39,15 @@ from nyshporka.library import (
     parse_case_code,
     parse_source_id,
 )
-from nyshporka.pagestore.models import CaseFile, CaseNote, PageNote, Record
+from nyshporka.pagestore.models import (
+    VIEW_FIELDS,
+    CaseFile,
+    CaseNote,
+    PageNote,
+    PageView,
+    Record,
+    ViewFile,
+)
 from nyshporka.utils.atomic import atomic_write_text
 
 
@@ -361,8 +370,143 @@ def _legacy_path(ref: CaseRef) -> Path | None:
     return pages_root() / ref.repo / f"{name}.json"
 
 
+# ── погляд проєкту ───────────────────────────────────────────────────────────
+#: Де лежить погляд простору на сторінки (коментар, хто дивився):
+#: `inline` — у самому файлі справи (корінь старого типу, як до розщеплення);
+#: `file` — у `<проєкт>/data/views` (проєкт-підтека); `none` — ніде (корінь
+#: чистої Майстерні: проєкту немає, писати погляд нікуди).
+def view_mode() -> str:
+    ws = workspace()
+    if ws.project is not None:
+        return "file"
+    return "none" if ws.hub_only else "inline"
+
+
+def _stem(ref: CaseRef) -> str:
+    ck = casekey.parse(ref.key)
+    if ck is None:
+        raise ValueError(f"ключ справи «{ref.key}» не нової форми — облік під ним не пишеться")
+    return casekey.stem(ck)
+
+
+def view_path(ref: CaseRef, project_root: Path | None = None) -> Path:
+    """Файл погляду проєкту на справу; без `project_root` — поточного проєкту."""
+    ws = W.Workspace(root=project_root) if project_root is not None else workspace()
+    return ws.views / ref.repo / f"{_stem(ref)}.json"
+
+
+def _load_view(path: Path) -> ViewFile | None:
+    if not path.is_file():
+        return None
+    return ViewFile.model_validate_json(path.read_text(encoding="utf-8"))
+
+
+def _write_view(path: Path, vf: ViewFile) -> None:
+    vf.pages = dict(sorted(vf.pages.items()))
+    atomic_write_text(path, json.dumps(vf.model_dump(mode="json"),
+                                       ensure_ascii=False, indent=1) + "\n")
+
+
+def _fact(note: PageNote, keep: PageNote | None = None) -> PageNote:
+    """Лише факт аркуша; погляд — порожній або той, що вже лежав у файлі справи.
+
+    🔴 `keep` — вбудований погляд кореня старого типу. Проєкт-підтека, що
+    замінює сторінку (`replace`), не має права стерти чужий коментар.
+    """
+    return note.model_copy(update={f: getattr(keep, f) if keep else ""
+                                   for f in VIEW_FIELDS})
+
+
+def _view_of(note: PageNote) -> PageView | None:
+    if not any(getattr(note, f) for f in VIEW_FIELDS):
+        return None
+    return PageView(comment=note.comment, agent=note.agent, noted=note.noted)
+
+
+def _annotate_view(ref: CaseRef, notes: list[PageNote], replace: bool) -> None:
+    views = {n.scan: v for n in notes if (v := _view_of(n)) is not None}
+    if not views:
+        return
+    path = view_path(ref)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with _lock(path):
+        vf = _load_view(path) or ViewFile(key=ref.key)
+        vf.key = ref.key
+        for scan, v in views.items():
+            old = vf.pages.get(scan)
+            vf.pages[scan] = v if old is None or replace else _merge_view(old, v)
+        _write_view(path, vf)
+
+
+def _merge_view(old: PageView, new: PageView) -> PageView:
+    return PageView(comment=_join_comments(old.comment, new.comment),
+                    agent=new.agent or old.agent, noted=new.noted)
+
+
+def own_comment(case_file: Path, scan: str, inline: str) -> str:
+    """Коментар сторінки очима поточного проєкту — для тих, хто читає файли сирими.
+
+    `inline` — коментар із самого файла справи; у проєкті-підтеці він чужий
+    (корінь старого типу), і замість нього береться свій погляд.
+    """
+    if view_mode() != "file":
+        return inline
+    vf = _load_view(workspace().views / case_file.parent.name / case_file.name)
+    v = vf.pages.get(scan) if vf else None
+    return v.comment if v else ""
+
+
+def view_roots() -> list[tuple[str, Path]]:
+    """Усі проєкти Майстерні (з архівними): id і корінь — для переносу поглядів."""
+    from nyshporka.core import projects as P
+
+    return [(p.id, p.root) for p in P.list_projects(workspace().hub, archived=True)
+            if p.id != P.ROOT_ID]
+
+
+def views_elsewhere(ref: CaseRef) -> list[dict[str, Any]]:
+    """Чужі погляди на справу — лише скільки сторінок, без вмісту.
+
+    🔴 Вміст не повертається: коментар іншого проєкту («шукали Д…») — висновок
+    під його ціль, і агент цього проєкту не мусить його читати. Людина бачить
+    його в консолі з міткою проєкту; агент — лише що такий погляд є.
+    """
+    from nyshporka.core import projects as P
+
+    out: list[dict[str, Any]] = []
+    for pr in P.others(workspace()):
+        if pr.id == P.ROOT_ID:
+            cf = _load_hub(ref)
+            n = sum(1 for p in (cf.pages.values() if cf else [])
+                    if any(getattr(p, f) for f in VIEW_FIELDS))
+        else:
+            vf = _load_view(view_path(ref, pr.root))
+            n = len(vf.pages) if vf else 0
+        if n:
+            out.append({"project": pr.id, "name": pr.name, "pages": n})
+    return out
+
+
 # ── читання ──────────────────────────────────────────────────────────────────
 def load_case(ref: CaseRef) -> CaseFile | None:
+    """Справа очима поточного проєкту: факт аркуша + свій погляд.
+
+    У проєкті-підтеці коментар і `agent` беруться з його `views`; вбудований
+    погляд кореня старого типу тут чужий і не показується (`views_elsewhere`).
+    """
+    cf = _load_hub(ref)
+    if cf is None or view_mode() != "file":
+        return cf
+    vf = _load_view(view_path(ref))
+    for scan, note in cf.pages.items():
+        v = vf.pages.get(scan) if vf else None
+        cf.pages[scan] = note.model_copy(update={
+            "comment": v.comment if v else "", "agent": v.agent if v else ""})
+    return cf
+
+
+def _load_hub(ref: CaseRef) -> CaseFile | None:
+    """Файл справи як є — для запису й для «чужого» погляду кореня."""
     p = case_path(ref)
     if not p.is_file():
         # До переносу облік лежить під старим іменем — читаємо його, а не «порожньо».
@@ -516,27 +660,40 @@ def _merge_note(old: PageNote, new: PageNote) -> PageNote:
     for f in ("sheet", "agent"):
         if not getattr(new, f):
             setattr(merged, f, getattr(old, f))
-    # коментарі різних агентів не затирають одне одного (інцидент 00898,
-    # 2026-07-21: паралельна сесія стерла попередження про фальш-друга) —
-    # конкатенуємо відмінні ЦІЛИМИ. Зріз на 600 символах, що стояв тут,
-    # мовчки з'їдав хвіст нової нотатки й старий коментар цілком: нотатка
-    # суцільної вичитки розвороту має 1–5 тис. символів (інцидент 2026-09-13,
-    # 116 обрізаних записів у сховищі одного дослідника).
-    if not new.comment:
-        merged.comment = old.comment
-    elif old.comment and old.comment not in new.comment \
-            and new.comment not in old.comment:
-        merged.comment = f"{new.comment} ⟂ {old.comment}"
+    merged.comment = _join_comments(old.comment, new.comment)
     return merged
 
 
+def _join_comments(old: str, new: str) -> str:
+    """Коментарі різних агентів не затирають одне одного — відмінні ЦІЛИМИ.
+
+    Інцидент 00898 (2026-07-21): паралельна сесія стерла попередження про
+    фальш-друга. Зріз на 600 символах, що стояв тут, мовчки з'їдав хвіст нової
+    нотатки й старий коментар цілком: нотатка суцільної вичитки розвороту має
+    1–5 тис. символів (інцидент 2026-09-13, 116 обрізаних записів у сховищі
+    одного дослідника).
+    """
+    if not new:
+        return old
+    if old and old not in new and new not in old:
+        return f"{new} ⟂ {old}"
+    return new
+
+
 def annotate_pages(ref: CaseRef, notes: list[PageNote], replace: bool = False) -> MergeReport:
-    """Внести/домержити анотації сторінок. Пише атомарно під локом."""
+    """Внести/домержити анотації сторінок. Пише атомарно під локом.
+
+    Факт аркуша лягає у файл справи Майстерні, погляд (коментар, хто
+    дивився) — туди, де живе погляд простору (`view_mode`).
+    """
+    mode = view_mode()
+    if mode == "none" and any(n.comment for n in notes):
+        _ = workspace().proot       # коментар без проєкту: NoProjectError з порадою
     path = case_path(ref)
     path.parent.mkdir(parents=True, exist_ok=True)
     report = MergeReport(path=_rel(path))
     with _lock(path):
-        cf = load_case(ref) or _empty_case(ref)
+        cf = _load_hub(ref) or _empty_case(ref)
         # збагачення бібліотеки могло оновитись — освіжаємо, не чіпаючи дані
         cf.key = ref.key
         cf.shifra, cf.title = ref.shifra or cf.shifra, ref.title or cf.title
@@ -544,15 +701,18 @@ def annotate_pages(ref: CaseRef, notes: list[PageNote], replace: bool = False) -
         for note in notes:
             old = cf.pages.get(note.scan)
             if old is None:
-                cf.pages[note.scan] = note
+                cf.pages[note.scan] = note if mode == "inline" else _fact(note)
                 report.added.append(note.scan)
             elif replace:
-                cf.pages[note.scan] = note
+                cf.pages[note.scan] = note if mode == "inline" else _fact(note, old)
                 report.replaced.append(note.scan)
             else:
-                cf.pages[note.scan] = _merge_note(old, note)
+                new = note if mode == "inline" else _fact(note)
+                cf.pages[note.scan] = _merge_note(old, new)
                 report.merged.append(note.scan)
         _write(path, cf)
+    if mode == "file":
+        _annotate_view(ref, notes, replace)
     return report
 
 
@@ -562,7 +722,7 @@ def add_records(ref: CaseRef, records: list[Record], replace: bool = False) -> M
     path.parent.mkdir(parents=True, exist_ok=True)
     report = MergeReport(path=_rel(path))
     with _lock(path):
-        cf = load_case(ref) or _empty_case(ref)
+        cf = _load_hub(ref) or _empty_case(ref)
         if replace and cf.records:
             report.replaced = [r.rid for r in cf.records]
             cf.records = []
@@ -591,7 +751,7 @@ def add_notes(ref: CaseRef, notes: list[CaseNote]) -> MergeReport:
     path.parent.mkdir(parents=True, exist_ok=True)
     report = MergeReport(path=_rel(path))
     with _lock(path):
-        cf = load_case(ref) or _empty_case(ref)
+        cf = _load_hub(ref) or _empty_case(ref)
         have = {n.uid for n in cf.notes}
         known = have | {n.uid for n in notes}
         for n in notes:
@@ -625,9 +785,12 @@ def move_pages(src: CaseRef, dst: CaseRef, scans: list[str]) -> dict[str, int]:
     sp, dp = case_path(src), case_path(dst)
     if not want or not sp.is_file() or sp == dp:
         return {"pages": 0, "records": 0}
-    cf = load_case(src)
+    cf = _load_hub(src)
     if cf is None:
         return {"pages": 0, "records": 0}
+    # Погляди проєктів їдуть разом зі сторінками: інакше коментар лишився б при
+    # справі, де сторінки вже немає.
+    views = _move_views(src, dst, want)
     notes = [n for k, n in cf.pages.items() if k.casefold() in want]
     recs = [r for r in cf.records
             if r.scans and all(s.casefold() in want for s in r.scans)]
@@ -636,9 +799,10 @@ def move_pages(src: CaseRef, dst: CaseRef, scans: list[str]) -> dict[str, int]:
     stems = {Path(s).stem.casefold() for s in want}
     reads, kept = _notes_to_move(cf.notes, stems)
     if not notes and not recs and not reads:
-        return {"pages": 0, "records": 0, "notes": 0, "notes_kept": kept}
+        return {"pages": 0, "records": 0, "notes": 0, "notes_kept": kept,
+                "views": views}
     if notes:
-        annotate_pages(dst, notes)
+        _put_pages(dst, notes)
     if recs:
         add_records(dst, recs)
     moved: set[str] = set()
@@ -650,13 +814,62 @@ def move_pages(src: CaseRef, dst: CaseRef, scans: list[str]) -> dict[str, int]:
     rids = {r.rid for r in recs}
     uids = moved
     with _lock(sp):
-        cf = load_case(src) or cf
+        cf = _load_hub(src) or cf
         cf.pages = {k: n for k, n in cf.pages.items() if k.casefold() not in want}
         cf.records = [r for r in cf.records if r.rid not in rids]
         cf.notes = [n for n in cf.notes if n.uid not in uids]
         _write(sp, cf)
     return {"pages": len(notes), "records": len(recs), "notes": len(uids),
-            "notes_kept": kept}
+            "notes_kept": kept, "views": views}
+
+
+def _put_pages(ref: CaseRef, notes: list[PageNote]) -> None:
+    """Домержити сторінки у файл справи як є — з вбудованим поглядом кореня.
+
+    Для переносу між справами: `annotate_pages` у проєкті-підтеці відділив би
+    погляд і записав його як свій, а вбудований коментар — чужий.
+    """
+    path = case_path(ref)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with _lock(path):
+        cf = _load_hub(ref) or _empty_case(ref)
+        cf.key = ref.key
+        cf.shifra, cf.title = ref.shifra or cf.shifra, ref.title or cf.title
+        cf.path, cf.opys = ref.path or cf.path, ref.opys or cf.opys
+        for note in notes:
+            old = cf.pages.get(note.scan)
+            cf.pages[note.scan] = note if old is None else _merge_note(old, note)
+        _write(path, cf)
+
+
+def _move_views(src: CaseRef, dst: CaseRef, want: set[str]) -> int:
+    """Перенести погляди названих сторінок у всіх проєктах; скільки перенесено.
+
+    🔴 Спершу запис у нову справу, потім прибирання зі старої — як і сторінки.
+    """
+    moved = 0
+    for _pid, root in view_roots():
+        sp = view_path(src, root)
+        vf = _load_view(sp)
+        if vf is None:
+            continue
+        take = {k: v for k, v in vf.pages.items() if k.casefold() in want}
+        if not take:
+            continue
+        dp = view_path(dst, root)
+        dp.parent.mkdir(parents=True, exist_ok=True)
+        with _lock(dp):
+            dv = _load_view(dp) or ViewFile(key=dst.key)
+            for scan, v in take.items():
+                old = dv.pages.get(scan)
+                dv.pages[scan] = v if old is None else _merge_view(old, v)
+            _write_view(dp, dv)
+        with _lock(sp):
+            vf = _load_view(sp) or vf
+            vf.pages = {k: v for k, v in vf.pages.items() if k.casefold() not in want}
+            _write_view(sp, vf)
+        moved += len(take)
+    return moved
 
 
 def _notes_to_move(notes: list[CaseNote], stems: set[str]) -> tuple[list[CaseNote], int]:

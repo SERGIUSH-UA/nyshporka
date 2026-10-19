@@ -153,7 +153,12 @@ def create(hub: Path, pid: str, *, kind: str = "family", title: str = "",
         raise P.ProjectError(f"тека {root} уже є — проєкт не перезаписується")
     title = title or pid
     # json.dumps дає коректний рядок TOML і з лапками в назві.
+    # 🔒 Замовлення — чужий рід: нові справи в ньому приватні, доки автор не
+    # вирішить інакше (`nysh case <тека> --public`).
+    private = ("private_default = true   # нові справи — private (нікуди з машини)\n"
+               if kind == "order" else "")
     marker = (f'[project]\nname = {json.dumps(title, ensure_ascii=False)}\nkind = "{kind}"\n'
+              f"{private}"
               "# archived = true   — сховати з переліку (`nysh project archive`)\n"
               '# preset = "researcher"  — свій профіль секцій; без нього — як у Майстерні\n')
     _write(root / W.MARKER, marker)

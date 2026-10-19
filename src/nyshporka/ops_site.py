@@ -60,6 +60,11 @@ def site_build(a: SiteBuildArgs) -> Envelope:
     if rep.skipped:
         env.warn("overlay_skipped", f"у відкриту версію не пішли файли з overlay, крім сторінок "
                                     f".md ({len(rep.skipped)}): {', '.join(rep.skipped[:5])}")
+    if rep.private_sources:
+        env.warn("private", f"джерела приватних справ у відкриту версію не пішли — ні шифра, "
+                            f"ні кропи карток, що їх цитують ({len(rep.private_sources)}): "
+                            f"{', '.join(rep.private_sources[:5])}. Відкрити справу: "
+                            f"nysh case <тека> --public")
     if not a.public:
         env.warn("private_build", "приватна версія: живі тут є (з датами до десятиліття). "
                                   "Для публікації — nysh site build --public")

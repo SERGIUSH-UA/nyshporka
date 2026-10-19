@@ -1543,6 +1543,9 @@ def verdicts_import(path: str | Path, scope: str, *, q: str = "", agent: str = "
 #: прогонів: та тримає понад мільйон файлів, і обхід її коштує хвилини.
 LAYERS = ("canon", "opys", "notes", "pages")
 
+#: Рядок погляду у файлі справи (`indent=1` кладе кожне поле на свій рядок).
+VIEW_LINE = re.compile(r'^\s*"(comment|agent)"\s*:')
+
 #: Стеля обходу текстів OCR описів у `data/derived/*opys*`.
 #:
 #: 🔴 Стеля лишається — вона рятує від теки на десятки тисяч дрібних файлів.
@@ -1590,6 +1593,9 @@ def layer_files(layer: str) -> tuple[list[Path], list[str]]:
 
         if PS.pages_root().is_dir():
             out += sorted(PS.pages_root().glob("*/*.json"))
+        # Погляд проєкту-підтеки (коментарі під його ціль) лежить окремо.
+        if PS.view_mode() == "file" and ws.views.is_dir():
+            out += sorted(ws.views.glob("*/*.json"))
     elif layer == "notes":
         rep = ws.reports
         if rep.is_dir():
@@ -1650,8 +1656,13 @@ def grep_layers(pattern: str, layers: list[str], *, ignore_case: bool = True,
     per_layer: dict[str, dict[str, int]] = {}
     cuts: list[str] = []
     from nyshporka.core.workspace import workspace
+    from nyshporka.pagestore import store as PS
 
     root = workspace().root
+    # 🔴 У проєкті-підтеці вбудований коментар файла справи — погляд кореня
+    # старого типу, тобто чужий висновок: такі рядки не читаються, а лише
+    # рахуються в «ще в проєкті …» (`core.projects.peek`).
+    foreign_view = PS.view_mode() == "file"
     todo = list(layers) + (["dir"] if extra else [])
     for layer in todo:
         if layer == "dir":
@@ -1667,8 +1678,12 @@ def grep_layers(pattern: str, layers: list[str], *, ignore_case: bool = True,
                 continue
             n_files += 1
             lines = text.split("\n")
+            skip_view = (foreign_view and layer == "pages"
+                         and f.is_relative_to(PS.pages_root()))
             for i, ln in enumerate(lines, 1):
                 if not rx.search(ln):
+                    continue
+                if skip_view and VIEW_LINE.match(ln):
                     continue
                 n_hits += 1
                 if len(hits) >= limit:

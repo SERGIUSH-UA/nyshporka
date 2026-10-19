@@ -1466,6 +1466,9 @@ def case_cmd(
     adopt: bool = typer.Option(False, "--adopt",
                                help="взяти теку під облік, якщо вона лежить "
                                     "поза простором"),
+    private: bool | None = typer.Option(None, "--private/--public",
+                                 help="позначка «нікуди з машини»: Супряга й відкритий "
+                                      "сайт — лише рішенням автора; без прапорця — як є"),
 ) -> None:
     """Завести або виправити справу: сказати, що лежить у цій теці.
 
@@ -1487,7 +1490,7 @@ def case_cmd(
         "doc_type": doc_type, "place": place, "note": note, "film": film,
         "dgs": dgs, "one_case": one_case,
         "year_from": year_from or None, "year_to": year_to or None,
-        "adopt": adopt})
+        "adopt": adopt, "private": private})
     _answer(env)
     sc = env.data["sidecar"]
     # ⚠ Тека без шифри теж описана, і заголовок відповіді мусить це казати
@@ -2676,6 +2679,68 @@ def pages_show_cmd(
         return
     console.print_json(data=env.data)
     _notes(env)
+
+
+@pages_app.command("split")
+def pages_split_cmd(
+    to: str = typer.Option("", "--to", help="проєкт-підтека, що успадковує погляд кореня"),
+    do: bool = typer.Option(False, "--apply", help="перенести (з архівом для відкату)"),
+    back: bool = typer.Option(False, "--rollback", help="відкотити останній перенос"),
+    stamp: str = typer.Option("", "--stamp",
+                              help="який перенос відкотити (тека в data/cases/pages-split/)"),
+    force: bool = typer.Option(False, "--force",
+                               help="відкотити, хоч після переносу файли змінювались"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
+) -> None:
+    """Перенести коментарі сторінок із файлів справ у проєкт (`<проєкт>/data/views`).
+
+    До Майстерні з проєктами коментар і «хто дивився» лежали в самому файлі
+    справи. Тепер файл справи спільний для всіх проєктів, тож погляд кореня
+    переїжджає в проєкт, що його успадковує. Без `--apply` — лише план і
+    огляд. `--apply` — спершу архів (`data/cases/pages-split/<час>/backup.zip`),
+    потім перенос і перепис. `--rollback` повертає файли з архіву.
+
+    🔴 Переносити, коли інші сесії й застосунок зупинено.
+    """
+    import json
+
+    from nyshporka.core.workspace import WorkspaceError
+    from nyshporka.pagestore import split_views as SV
+
+    try:
+        if back:
+            got = SV.rollback(stamp or None, force=force)
+        elif do:
+            if not to:
+                console.print("[warn]--apply потребує --to <проєкт>[/warn]")
+                raise typer.Exit(1)
+            got = SV.apply(to)
+        else:
+            got = SV.plan(to or None)
+    except (SV.SplitError, WorkspaceError) as exc:
+        console.print(f"[warn]{exc}[/warn]")
+        raise typer.Exit(1) from None
+    if as_json:
+        console.print_json(json.dumps(got, ensure_ascii=False, default=str))
+        return
+    if back:
+        console.print(f"✅ відкочено перенос {got['stamp']}: повернуто файлів "
+                      f"{got['restored']}, прибрано створених {got['removed']}")
+    elif do:
+        if got.get("noop"):
+            console.print("Вбудованого погляду в файлах справ немає; переносити нічого.")
+            return
+        mark = "⚠" if got["problems"] else "✅"
+        console.print(f"{mark} перенесено погляд {got['moved']} сторінок із "
+                      f"{got['files']} файлів; архів — {got['backup']}")
+        for p in got["problems"]:
+            console.print(f"  [warn]{p}[/warn]")
+        if got["problems"]:
+            console.print(f"  [warn]відкат: nysh pages split --rollback --stamp "
+                          f"{got['stamp']}[/warn]")
+            raise typer.Exit(1)
+    else:
+        console.print(SV.report(got), end="")
 
 
 records_app = typer.Typer(help="Розібрані записи джерела: хто, коли, чиї.",

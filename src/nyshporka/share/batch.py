@@ -113,7 +113,7 @@ def _protsesy(jobs: int) -> Executor:
                                initargs=(workspace(), ctx.BoundedSemaphore(PUBLISH_SLOTS)))
 
 
-def _zalyty(path: str, row: Row) -> Any:
+def _zalyty(path: str, row: Row, private_ok: bool = False) -> Any:
     """`share.publish` у слоті заливки; на 429 — пауза й ще раз (`CHEKATY`).
 
     🔴 Покроковий хід заливки («заливаю текст…», «етапи: …») тут глушиться:
@@ -124,7 +124,7 @@ def _zalyty(path: str, row: Row) -> Any:
 
     for pauza in (*CHEKATY, None):
         with _SLOTY if _SLOTY is not None else contextlib.nullcontext(),                 contextlib.redirect_stderr(io.StringIO()):
-            viddano = O.call("share.publish", {"path": path})
+            viddano = O.call("share.publish", {"path": path, "private_ok": private_ok})
         if viddano.ok or not (viddano.data or {}).get("rate_limited") or pauza is None:
             return viddano
         # Повтор безпечний: пул упізнає той самий зміст і не заведе другий внесок.
@@ -144,7 +144,7 @@ def _etap(etapy: Any, name: str) -> float | None:
     return None
 
 
-def _notatnyk(case: str) -> str:
+def _notatnyk(case: str, private_ok: bool = False) -> str:
     """`note.push` справи: `ok`, `none` (сховища сторінок немає) або текст відмови.
 
     🔴 Справа без сховища сторінок — не збій нотатника: віддавати нема чого, і
@@ -158,7 +158,7 @@ def _notatnyk(case: str) -> str:
             return NOTES_NONE
     except Exception:
         pass  # шифру розбере сама операція й назве причину
-    env = O.call("note.push", {"case": case})
+    env = O.call("note.push", {"case": case, "private_ok": private_ok})
     return NOTES_OK if env.ok else (env.error or "note.push відмовив")
 
 
@@ -189,7 +189,8 @@ def odna(item: Item, notes: bool = False) -> Row:
         # `share.publish` віддає її цілою, сегмент за сегментом.
         row["path"] = str(d.get("path") or d.get("dir") or "")
         row["stage"] = PUBLISH
-        viddano = _zalyty(row["path"], row)
+        # Рішення автора про приватну справу, дане на пакування, діє й на заливку.
+        viddano = _zalyty(row["path"], row, bool(item.get("private_ok")))
         row["warnings"] += [w.as_dict() for w in viddano.warnings]
         v = viddano.data or {}
         if not viddano.ok:
@@ -217,7 +218,7 @@ def odna(item: Item, notes: bool = False) -> Row:
         if not row["ok"]:
             row["error"] = OUTCOME_TEXT.get(vyhid, vyhid or "пул не назвав, що сталося")
         elif notes:
-            row["notes"] = _notatnyk(row["case"])
+            row["notes"] = _notatnyk(row["case"], bool(item.get("private_ok")))
     except Exception as exc:  # одна справа не має валити воркер і решту пачки
         row["error"] = f"{type(exc).__name__}: {exc}"
     finally:

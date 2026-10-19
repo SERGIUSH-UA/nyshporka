@@ -29,7 +29,7 @@ def index_path() -> Path:
 _JSON_FIELDS = {"record_types", "extra_paths", "htr_runs", "fuzzy_runs",
                 "settlements", "uezds"}
 #: Поля-прапорці — у SQLite як 0/1.
-_BOOL_FIELDS = {"htr_pysar", "htr_diak", "htr_skryba", "fuzzy_swept", "curated"}
+_BOOL_FIELDS = {"htr_pysar", "htr_diak", "htr_skryba", "fuzzy_swept", "curated", "private"}
 
 _SCHEMA = """
 CREATE TABLE cases (
@@ -52,7 +52,7 @@ CREATE TABLE cases (
     fuzzy_reviewed INTEGER, fuzzy_swept INTEGER, fuzzy_runs TEXT,
     canon_source_id TEXT, canon_facts INTEGER, canon_persons INTEGER,
     canon_scans INTEGER, pages_noted INTEGER, pages_full INTEGER,
-    verdict TEXT, verdict_note TEXT, curated INTEGER, "group" TEXT, why TEXT,
+    verdict TEXT, verdict_note TEXT, curated INTEGER, private INTEGER, "group" TEXT, why TEXT,
     htr_stage TEXT, fuzzy_stage TEXT, htr_coverage REAL
 );
 CREATE INDEX idx_cases_repo ON cases(repo);
@@ -235,6 +235,7 @@ def _connect(db_path: Path | None = None) -> sqlite3.Connection:
 def _where(q: str = "", repo: str = "", state: str = "", htr: str = "",
            fuzzy: str = "", year: str = "", doc: str = "", verdict: str = "",
            curated: bool = False, kind: str = "", place_id: str = "",
+           private: bool = False,
            ) -> tuple[str, dict[str, object]]:
     """Умова SQL і її аргументи — спільні для видачі й для лічби.
 
@@ -273,6 +274,8 @@ def _where(q: str = "", repo: str = "", state: str = "", htr: str = "",
         args["verdict"] = verdict
     if curated:
         where.append("curated = 1")
+    if private:
+        where.append("private = 1")
     if place_id:
         where.append("place_id = :place_id")
         args["place_id"] = place_id
@@ -318,11 +321,12 @@ def query_rows(q: str = "", repo: str = "", state: str = "", htr: str = "",
                fuzzy: str = "", year: str = "", place: str = "", doc: str = "",
                verdict: str = "", curated: bool = False, kind: str = "",
                uezd: str = "", settlement: str = "", place_id: str = "",
+               private: bool = False,
                limit: int = 0, db_path: Path | None = None) -> list[dict[str, Any]]:
     """Рядки реєстру за фільтрами. Порожній фільтр не звужує вибірку."""
     cond, args = _where(q=q, repo=repo, state=state, htr=htr, fuzzy=fuzzy,
                         year=year, doc=doc, verdict=verdict, curated=curated,
-                        kind=kind, place_id=place_id)
+                        kind=kind, place_id=place_id, private=private)
     sql = "SELECT * FROM cases" + cond + _ORDER
     # LIMIT ставимо після гео-фільтра (він у Python), інакше «перші 60» відсіклись
     # би до фільтрації і половина повіту зникла б без сліду.

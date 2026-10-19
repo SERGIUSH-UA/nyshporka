@@ -137,6 +137,9 @@ class CaseRow:
     verdict: str = ""              # no_clan | clan_found | recheck
     verdict_note: str = ""
     curated: bool = False
+    #: 🔒 Паспорт позначає справу приватною (`cases.privacy`). Колонка — для
+    #: фільтра й показу; перевірки перед віддачею читають паспорт наживо.
+    private: bool = False
     group: str | None = None
     why: str | None = None
 

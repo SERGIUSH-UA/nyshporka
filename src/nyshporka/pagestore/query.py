@@ -247,7 +247,8 @@ def grep_surnames(q: str, thresh: int = 80, case_key: str | None = None,
                              "norm": norm,
                              "stem": by,
                              "stem_origin": origin.get(by, names.ORIGIN_QUERY),
-                             "comment": note.get("comment") or ""})
+                             "comment": store.own_comment(
+                                 path, scan, note.get("comment") or "")})
     ranked, rul = _rank(hits, rank_hits)
     return {"hits": _trim(hits, limit), "total": len(hits), "cases": scanned,
             "stems": stems, "stems_asked": _asked(origin),

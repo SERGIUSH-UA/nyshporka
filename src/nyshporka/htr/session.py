@@ -115,11 +115,13 @@ def read_case(plan: Any, *, case_key: str = "", workers: int = 1, device: str = 
               limit: int = 0, pages: str = "", shard: str = "", gpu_lock: str = "",
               gpu_sato: bool = True, seg_height: int = 0,
               on_event: EventFn | None = None,
-              should_stop: StopFn | None = None) -> ReadResult:
+              should_stop: StopFn | None = None,
+              project: str | None = None) -> ReadResult:
     """Запустити раннер(и) по справі й дочекатись кінця.
 
     `on_event(подія, рядок)` дістає кожен рядок виводу: подію прогресу або
-    людський текст. `should_stop()` питається раз на `STOP_POLL_SEC`; сказав
+    людський текст. `project` — хто замовив (запис черги); без нього —
+    проєкт поточного простору. `should_stop()` питається раз на `STOP_POLL_SEC`; сказав
     «так» — діти гасяться, а прочитане лишається на диску, і наступний запуск
     у ту саму теку його пропустить.
     """
@@ -188,10 +190,12 @@ def read_case(plan: Any, *, case_key: str = "", workers: int = 1, device: str = 
                 tree.close()
 
     # Читали з тимчасової теки — мета має вести на теку справи, а не в нікуди.
-    from nyshporka.htr_store import relink_lasting
+    from nyshporka.htr_store import relink_lasting, stamp_project
 
     with contextlib.suppress(Exception):
         relink_lasting(plan.out_dir, case_key)
+    with contextlib.suppress(Exception):
+        stamp_project(plan.out_dir, project)
 
     done = len(list(plan.out_dir.glob("*.txt")))
     # 🔴 «Усі кадри мають текст» дійсне лише для повного прогону. Частковий

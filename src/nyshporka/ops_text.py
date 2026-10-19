@@ -230,7 +230,8 @@ def _peek_elsewhere(env: Envelope, pattern: str, layers: list[str],
         return
     if isinstance(env.data, dict):
         env.data["elsewhere"] = found
-    label = {"canon": "у каноні", "notes": "у нотатках"}
+    label = {"canon": "у каноні", "notes": "у нотатках",
+             "pages": "у коментарях до сторінок"}
     for f in found:
         env.warn("elsewhere",
                  f"ще в проєкті «{f['project']}» ({f['name']}): {f['count']} збігів "

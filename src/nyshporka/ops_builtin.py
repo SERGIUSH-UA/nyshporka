@@ -185,7 +185,11 @@ def home_pulse(a: PulseArgs) -> Envelope:
 
     if not PULSE_SNAPSHOT:
         return _pulse_compute(a)
-    key = a.model_dump_json()
+    from nyshporka.core import projects as P
+
+    # 🔴 Проєкт — у ключі: файл знімка лежить у Майстерні, а блок канону в ньому
+    # проєктний, і без цього два проєкти показували б пульс одне одного.
+    key = f"{P.tag()}|{a.model_dump_json()}"
     now = time.monotonic()
     hit = _PULSE_MEM.get(key)
     if hit is None:
@@ -1734,6 +1738,8 @@ class CasesArgs(BaseModel):
     # працювала. Шар даних (`db.query_rows`) `kind` приймав від початку.
     kind: str = Field(default="",
                       description="case | bundle | unfiled (матеріал без шифри)")
+    private: bool = Field(default=False,
+                          description="лише справи з позначкою private у паспорті")
     limit: int = Field(default=60, ge=1, le=500,
                        description="скільки рядків віддати; `page_size` сильніший")
     page: int = Field(default=0, ge=0, le=10_000, description="сторінка видачі")
@@ -1761,7 +1767,7 @@ def cases_list(a: CasesArgs) -> Envelope:
     try:
         rows, total = db.query_page(page=a.page, page_size=size, q=a.q,
                                     repo=a.repo, htr=a.htr, year=a.year,
-                                    place=a.place, kind=a.kind)
+                                    place=a.place, kind=a.kind, private=a.private)
     except FileNotFoundError:
         # 🔴 «Реєстру ще немає» — це нормальний стан щойно створеного простору,
         # а не поламка. Відмова тут була першим, що бачив новачок, відкривши
@@ -2724,6 +2730,7 @@ class RunsArgs(BaseModel):
     case: str = Field(default="", description="ключ справи `repo/fond/spr`")
     engine: str = Field(default="", description="рушій: pysar | diak | skryba")
     orphan: bool = Field(default=False, description="лише прогони без справи")
+    mine: bool = Field(default=False, description="лише прогони, замовлені з цього проєкту")
     page: int = Field(default=0, ge=0, le=10_000)
     page_size: int = Field(default=0, ge=0, le=200,
                            description="розмір сторінки; 0 — усі прогони")
@@ -2752,6 +2759,10 @@ def runs_list(a: RunsArgs) -> Envelope:
         runs = [r for r in runs if r.get("case_key") == a.case]
     if a.engine:
         runs = [r for r in runs if a.engine in (r.get("engine_ids") or [])]
+    if a.mine:
+        from nyshporka.core import projects as P
+
+        runs = [r for r in runs if P.is_mine(r.get("project"))]
     if a.q:
         needle = a.q.casefold()
         runs = [r for r in runs if needle in " ".join(
@@ -2928,6 +2939,10 @@ class CaseRegisterArgs(BaseModel):
         default=False,
         description="тека — одна справа, хоч шифра чи ім'я схожі на діапазон "
                     "справ («…926-929»): зняти позначку збірної теки")
+    private: bool | None = Field(
+        default=None,
+        description="позначка «нікуди з машини»: true — поставити, false — зняти, "
+                    "порожньо — як є (у проєкті-замовленні нова справа приватна сама)")
     adopt: bool = Field(
         default=False,
         description="взяти теку під облік, якщо вона лежить поза простором: "
@@ -2959,10 +2974,14 @@ def case_register(a: CaseRegisterArgs) -> Envelope:
                        doc_type=a.doc_type, year_from=a.year_from,
                        year_to=a.year_to, place=a.place, note=a.note,
                        repo_hint=a.repo, film=a.film, dgs=a.dgs,
-                       one_case=a.one_case)
+                       one_case=a.one_case, private=a.private)
     except RegisterError as exc:
         return fail(str(exc))
     env = ok({"case_dir": a.case_dir, "sidecar": out})
+    if out.get("private"):
+        env.warn("private", "справа позначена private (нікуди з машини: Супряга, "
+                            "відкритий сайт — лише рішенням автора). Зняти: "
+                            "nysh case <тека> --public")
     from nyshporka.cases import span as SP
     from nyshporka.cases.register import case_path as _case_path
 
@@ -3585,7 +3604,32 @@ def pages_status(a: PagesStatusArgs) -> Envelope:
         env.suggest("pages.note",
                     f"{left} сторінок ще ніхто не заносив — переглянуте без "
                     f"запису наступна сесія перегляне заново")
+    _views_elsewhere(env, ref)
     return env
+
+
+def _views_elsewhere(env: Envelope, ref: Any) -> None:
+    """Чужі погляди на справу — лише скільки сторінок, з міткою проєкту.
+
+    🔴 Вміст не показується: коментар іншого проєкту — висновок під його ціль.
+    Що він є, агент мусить знати й сказати людині; відкрити — лише на її
+    прохання (`nysh --project …`, лише читання).
+    """
+    from nyshporka.pagestore import store
+
+    try:
+        found = store.views_elsewhere(ref)
+    except Exception:
+        return          # підсвітка — підказка, а не умова відповіді
+    if not found:
+        return
+    if isinstance(env.data, dict):
+        env.data["elsewhere"] = found
+    for f in found:
+        env.warn("elsewhere",
+                 f"ще в проєкті «{f['project']}» ({f['name']}): коментарі до "
+                 f"{f['pages']} сторінок цієї справи — не завантажено. Відкрити "
+                 f"лише на прохання людини: nysh --project {f['project']} pages show …")
 
 
 class PagesShowArgs(BaseModel):
@@ -3633,8 +3677,10 @@ def pages_show(a: PagesShowArgs) -> Envelope:
                 f"сторінку «{a.scan}» у {ref.shifra} не заносили. "
                 f"Занесені: {', '.join(known) or '—'}"
                 f"{'…' if len(cf.pages) > 10 else ''}")
-        return ok({"case": ref.key, "shifra": ref.shifra,
-                   "page": note.model_dump(mode="json")})
+        env = ok({"case": ref.key, "shifra": ref.shifra,
+                  "page": note.model_dump(mode="json")})
+        _views_elsewhere(env, ref)
+        return env
     if a.rid:
         found = [r for r in cf.records if r.rid == a.rid]
         if not found:
@@ -3652,6 +3698,7 @@ def pages_show(a: PagesShowArgs) -> Envelope:
                  f"{len(cf.pages)} сторінок і {len(cf.records)} записів одним "
                  f"шматком — для перегляду це забагато")
         env.suggest("export.case", "ті самі дані таблицею, колонками")
+    _views_elsewhere(env, ref)
     return env
 
 
@@ -4312,6 +4359,8 @@ class JobArgs(BaseModel):
     timeout_s: int = Field(default=30, ge=0, le=120,
                            description="скільки чекати зміни (для action=wait)")
     since: int = Field(default=0, description="курсор: віддати лише новіше за нього")
+    mine: bool = Field(default=False,
+                       description="лише роботи, поставлені з цього проєкту (для action=list)")
 
 
 @op("job.query", summary="Стан довгих робіт: перелік, очікування, скасування",
@@ -4334,7 +4383,10 @@ def job_query(a: JobArgs) -> Envelope:
         return fail("черга недоступна: застосунок не запущено. "
                     "Підніміть його командою `nysh serve`")
     if a.action == "list":
-        return ok({"jobs": [j.as_dict() for j in bus.jobs()], "seq": bus.seq})
+        from nyshporka.core import projects as P
+
+        return ok({"jobs": [j.as_dict() for j in bus.jobs()
+                            if not a.mine or P.is_mine(j.project)], "seq": bus.seq})
     if a.action in ("status", "cancel") and not a.job_id:
         return fail(f"для action={a.action} потрібен job_id")
     if a.action == "status":

@@ -69,9 +69,14 @@ class RunnerBusy(QueueError):
 
 
 def home() -> Path:
+    """Тека черги — у Майстерні: читає одна машина, хоч би хто замовив.
+
+    🔴 Доти черга лежала в проєкті, і два проєкти завели б два виконавці на
+    одну карту. Хто замовив справу, каже поле `project` запису.
+    """
     from nyshporka.core.workspace import workspace
 
-    return workspace().data / "queue"
+    return workspace().hub_data / "queue"
 
 
 def path() -> Path:
@@ -173,12 +178,13 @@ def stamp(text: str) -> float:
 
 
 def new_item(item_id: str, ref: dict[str, str], opts: dict[str, Any]) -> dict[str, Any]:
+    from nyshporka.core import projects as P
     from nyshporka.core.casekey import require_current
 
     # Нова справа черги несе ключ справи — до переносу обліку він ліг би поруч
     # зі старими. Хід уже доданих справ (демон) не стримується.
     require_current("справа в черзі")
-    return {"id": item_id, "ref": ref, "opts": opts, "added": now(),
+    return {"id": item_id, "project": P.tag(), "ref": ref, "opts": opts, "added": now(),
             "state": QUEUED, "stage": "", "code": "", "why": "", "fix": "",
             "attempts": {}, "not_before": "", "evidence": {}}
 

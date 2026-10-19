@@ -243,12 +243,13 @@ def _z_chekanniam(tekst: str, retry_after: float | None) -> str:
 
 def publish(path: Path, *, base: str = "", auth: str = "",
             say: Callable[[str], None] | None = None,
-            replaces: int | None = None, why: str = "") -> dict[str, Any]:
+            replaces: int | None = None, why: str = "",
+            private_ok: bool = False) -> dict[str, Any]:
     """Див. `_publish`; тут — хронометраж етапів у відповіді й у відмові."""
     etapy = _Etapy()
     try:
         got = _publish(path, base=base, auth=auth, say=say, etapy=etapy,
-                       replaces=replaces, why=why)
+                       replaces=replaces, why=why, private_ok=private_ok)
     except UploadError as exc:
         exc.etapy = etapy.rows
         raise
@@ -259,7 +260,8 @@ def publish(path: Path, *, base: str = "", auth: str = "",
 
 def _publish(path: Path, *, base: str, auth: str,
              say: Callable[[str], None] | None, etapy: _Etapy,
-             replaces: int | None = None, why: str = "") -> dict[str, Any]:
+             replaces: int | None = None, why: str = "",
+             private_ok: bool = False) -> dict[str, Any]:
     """Віддати зібраний пакет у пул.
 
     Повертає відповідь сервера. Повторний виклик із тим самим змістом
@@ -305,6 +307,15 @@ def _publish(path: Path, *, base: str, auth: str,
             manifest = bundle.read_manifest(path)
     except (OSError, ValueError, bundle.BundleError, EOFError) as exc:
         raise UploadError(f"не прочитати пакет {path.name}: {exc}") from exc
+    # 🔒 Остання лінія: пакет міг зібратись до того, як справу позначили private.
+    if not private_ok:
+        from nyshporka.cases import privacy
+
+        key = str((getattr(manifest, "case", None) or {}).get("key_local") or "")
+        passport = privacy.is_private(key) if key else None
+        if passport is not None:
+            raise UploadError(privacy.refusal(key, passport, "віддача в Супрягу"),
+                              klas="private")
 
     with etapy("register"):
         got = _request("POST", _adresa_reiestratsii(home, replaces, why),

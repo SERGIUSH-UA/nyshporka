@@ -74,6 +74,65 @@ def test_an_explicit_variable_beats_the_installer(program: Path, tmp_path: Path,
     assert target_dir("model") == tmp_path / "своє" / "Cache" / "model"
 
 
+@pytest.fixture
+def profile(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Профіль користувача, куди `platformdirs` кладе теку наглядача оренди."""
+    import platformdirs
+
+    root = tmp_path / "LOCALAPPDATA"
+    monkeypatch.setattr(platformdirs, "user_data_dir",
+                        lambda app, appauthor=None: str(root / app))
+    monkeypatch.delenv("GPURUNNER_DATA_DIR", raising=False)
+    return root
+
+
+def test_the_rent_supervisor_follows_the_chosen_folder(program: Path,
+                                                       profile: Path) -> None:
+    """🔴 19.10.2026: реєстр прогонів і чекпоінти боксів — 4.4 ГБ на C:."""
+    from nyshporka.cloud.supervised import _env
+    from nyshporka.core.appdirs import gpurunner_env
+
+    want = str(program / "data" / "gpurunner")
+    assert gpurunner_env() == {"GPURUNNER_DATA_DIR": want}
+    assert _env("s", sys.executable)["GPURUNNER_DATA_DIR"] == want
+
+
+def test_the_in_process_rent_plugin_sees_the_folder(program: Path, profile: Path,
+                                                    monkeypatch: pytest.MonkeyPatch) -> None:
+    import os
+
+    from nyshporka.cloud import registry
+
+    monkeypatch.setattr(os, "environ", dict(os.environ))
+    registry.load()
+    assert os.environ["GPURUNNER_DATA_DIR"] == str(program / "data" / "gpurunner")
+
+
+def test_a_live_supervisor_folder_in_the_profile_stays(program: Path,
+                                                       profile: Path) -> None:
+    """🔴 Переїзд осиротив би орендовані машини й історію витрат."""
+    from nyshporka.core.appdirs import gpurunner_env
+
+    (profile / "gpurunner").mkdir(parents=True)
+    assert gpurunner_env() == {}
+
+
+def test_the_rent_variable_beats_the_installer(program: Path, profile: Path,
+                                               monkeypatch: pytest.MonkeyPatch) -> None:
+    from nyshporka.core.appdirs import gpurunner_env
+
+    monkeypatch.setenv("GPURUNNER_DATA_DIR", "D:/своє")
+    assert gpurunner_env() == {}
+
+
+def test_without_a_chosen_folder_the_supervisor_is_left_alone(profile: Path,
+                                                              monkeypatch: pytest.MonkeyPatch) -> None:
+    from nyshporka.core import appdirs
+
+    monkeypatch.setattr(appdirs, "_chosen", lambda: None)
+    assert appdirs.gpurunner_env() == {}
+
+
 def test_an_old_install_keeps_its_old_places(tmp_path: Path,
                                              monkeypatch: pytest.MonkeyPatch) -> None:
     """Середовище без сліду поруч — стара розкладка: нічого не вигадуємо."""

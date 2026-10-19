@@ -84,7 +84,16 @@ def load() -> Registry:
     Плагін із тим самим `id` відкидається, а не заміщає вбудований: інакше
     сторонній пакет міг би мовчки підмінити SSH — шлях, яким людина працює зі
     своєю ж машиною.
+
+    Теку наглядача оренди виставляємо ДО завантаження плагінів: `gpuhire`
+    працює в цьому ж процесі й читає `GPURUNNER_DATA_DIR` з оточення.
     """
+    import os
+
+    from nyshporka.core.appdirs import gpurunner_env
+
+    for key, value in gpurunner_env().items():
+        os.environ.setdefault(key, value)
     reg = Registry()
     for backend in _builtin():
         reg.backends[backend.id] = backend

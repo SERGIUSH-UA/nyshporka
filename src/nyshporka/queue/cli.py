@@ -78,6 +78,7 @@ def status(
     ctx: typer.Context,
     all_: bool = typer.Option(False, "--all", help="разом зі зробленими й знятими"),
     journal: int = typer.Option(0, "--journal", help="останні N рядків журналу етапів"),
+    mine: bool = typer.Option(False, "--mine", help="лише справи, замовлені з цього проєкту"),
     as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Що в черзі, на якому етапі кожна справа й що лишилось."""
@@ -85,7 +86,7 @@ def status(
         return
     from nyshporka import ops as O
 
-    env = O.call("queue.status", {"all": all_, "journal": journal})
+    env = O.call("queue.status", {"all": all_, "journal": journal, "mine": mine})
     if _answer(env, as_json):
         return
     _show(env.data or {})

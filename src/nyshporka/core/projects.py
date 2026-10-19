@@ -93,6 +93,24 @@ def current_id(ws: W.Workspace) -> str | None:
     return None if ws.hub_only else ROOT_ID
 
 
+def tag(ws: W.Workspace | None = None) -> str:
+    """Позначка «хто замовив» для спільних записів Майстерні: прогонів, черги, джобів.
+
+    Ім'я проєкту, «.» для кореня старого типу, порожньо — з кореня чистої
+    Майстерні (міжпроєктний режим, замовник — сама Майстерня).
+    """
+    return current_id(ws or W.workspace()) or ""
+
+
+def tag_of(value: object) -> str:
+    """Позначка запису. Записи до хвилі проєктів її не мають — це корінь старого типу."""
+    return ROOT_ID if value is None else str(value)
+
+
+def is_mine(value: object, ws: W.Workspace | None = None) -> bool:
+    return tag_of(value) == tag(ws)
+
+
 def project_dir(hub: Path, pid: str) -> Path:
     if pid == ROOT_ID:
         if W._read_marker(hub / W.MARKER).get("hub_only"):
@@ -127,13 +145,22 @@ def others(ws: W.Workspace) -> list[Project]:
 
 
 # ── підсвітка чужого ─────────────────────────────────────────────────────────
-#: Шари проєкту, у яких шукає підсвітка: канон і нотатки. Решта шарів —
-#: Майстерня, вони й так спільні.
-PEEK_LAYERS = ("canon", "notes")
+#: Шари проєкту, у яких шукає підсвітка: канон, нотатки й погляд на сторінки
+#: (коментарі). Решта шарів — Майстерня, вони й так спільні.
+PEEK_LAYERS = ("canon", "notes", "pages")
+
+#: Рядок погляду у файлі справи чи погляду (`indent=1`: поле на рядок).
+_VIEW_LINE = re.compile(r'^\s*"(comment|agent)"\s*:')
 
 
-def _layer_files(root: Path, layer: str) -> Iterator[Path]:
-    if layer == "canon":
+def _layer_files(root: Path, layer: str, *, inline: bool = False) -> Iterator[Path]:
+    if layer == "pages":
+        # Погляд кореня старого типу (`inline`) вбудований у файли справ Майстерні.
+        ws = W.Workspace(root=root)
+        base = ws.pages if inline else ws.views
+        if base.is_dir():
+            yield from base.glob("*/*.json")
+    elif layer == "canon":
         base = W.Workspace(root=root).canonical
         if base.is_dir():
             yield from base.rglob("*.md")
@@ -158,12 +185,13 @@ def peek(ws: W.Workspace, regex: re.Pattern[str],
     for pr in others(ws):
         for layer in layers:
             count = 0
-            for f in _layer_files(pr.root, layer):
+            for f in _layer_files(pr.root, layer, inline=pr.id == ROOT_ID):
                 try:
                     text = f.read_text(encoding="utf-8", errors="replace")
                 except OSError:
                     continue
-                count += sum(1 for line in text.splitlines() if regex.search(line))
+                count += sum(1 for line in text.splitlines() if regex.search(line)
+                             and (layer != "pages" or _VIEW_LINE.match(line)))
             if count:
                 out.append({"project": pr.id, "name": pr.name, "layer": layer,
                             "count": count})
