@@ -721,6 +721,33 @@ def znamennyk_spravy(key: str, shifra: str = "") -> dict[str, Any]:
     return out
 
 
+def guard_private(key: str, private_ok: bool) -> None:
+    """Приватна справа в пакет не йде без рішення автора (`--private-ok`).
+
+    🔒 Пакет — вхід до віддачі в Супрягу: сам він лежить у вихідних, але все,
+    що з ним роблять далі, шле вміст справи з машини. Тож зупинка — тут, щоб
+    не будувати пакет, який не можна віддати.
+    """
+    if private_ok or not key:
+        return
+    from nyshporka.cases import privacy
+
+    passport = privacy.is_private(key)
+    if passport is not None:
+        raise PrivateCase(key, passport, privacy.refusal(key, passport, "пакет для Супряги"))
+
+
+class PrivateCase(PublishError):
+    """Справа позначена private, а рішення автора (`--private-ok`) не було."""
+
+    def __init__(self, key: str, passport: Path, message: str) -> None:
+        super().__init__(message)
+        self.key, self.passport = key, passport
+
+    def data(self) -> dict[str, Any]:
+        return {"refusal": "private", "case": self.key, "passport": str(self.passport)}
+
+
 def build_manifest(scope: str, *,
                    hash_frames: bool = False,
                    publisher: str = "", contact: str = "", site: str = "",
@@ -733,6 +760,7 @@ def build_manifest(scope: str, *,
                    card_fields: dict[str, Any] | None = None,
                    runs: tuple[list[Path], dict[str, Any]] | None = None,
                    segment_frames: list[dict[str, Any]] | None = None,
+                   private_ok: bool = False,
                    ) -> tuple[Manifest, list[Path], list[dict[str, Any]], dict[str, Any]]:
     """Скласти заяву пакета. Файл ще не пишеться — спершу ворота.
 
@@ -749,6 +777,7 @@ def build_manifest(scope: str, *,
 
     run_dirs, info = runs if runs is not None else resolve_runs(scope, skip=skip_runs)
     key = str(info.get("key") or "")
+    guard_private(key, private_ok)
     seg_mode = segment_frames is not None
     case_dir = align.case_dir_for(key) if key and not seg_mode else None
     if seg_mode:
@@ -1256,6 +1285,7 @@ def pack_segments(scope: str, dest_dir: Path | None = None, *,
     skip = meta.pop("skip_runs", ()) or ()
     run_dirs, info = resolve_runs(scope, skip=skip)
     key = str(info.get("key") or "")
+    guard_private(key, bool(meta.get("private_ok")))
     parts = SG.with_extracts(SG.parts_of(run_dirs))
     # Справа вирізками з плівки — коли кожна частина каже, де вона на плівці;
     # `by_part=True` вимагає цього явно, `False` — пакує за абеткою як раніше.

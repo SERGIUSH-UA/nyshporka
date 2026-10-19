@@ -33,9 +33,10 @@ LEFTOVER = "-"
 #: Поля мети прогону, що описують прогін цілком і для частини були б неправдою.
 _RUN_AGGREGATES = ("stages_total", "stages_pages", "geom_lost_pages", "missing",
                    "superseded")
-#: Походження кадрів, яке частина успадковує від старої теки.
+#: Походження кадрів, яке частина успадковує від старої теки. 🔒 `private` —
+#: теж: інакше частина приватної справи ставала б відкритою саме розбивкою.
 _PROVENANCE = ("fetched", "fetched_by", "fetched_from", "fetched_ref", "fetched_url",
-               "film", "dgs")
+               "film", "dgs", "private")
 _PAGE_FILES = (".txt", ".lines.json")
 
 

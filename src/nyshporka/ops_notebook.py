@@ -355,6 +355,9 @@ class NotePushArgs(BaseModel):
     pages: bool = Field(default=True, description="віддати й зведення переглянутих сторінок")
     dry_run: bool = Field(default=False, description="показати, що поїде, нічого не слати")
     base: str = Field(default="", description="інша домівка пулу")
+    private_ok: bool = Field(default=False,
+                             description="віддати й нотатник справи, позначеної private у "
+                                         "паспорті: рішення автора")
 
 
 @op("note.push", summary="Віддати загальне знання про справу в пул",
@@ -375,6 +378,15 @@ def note_push(a: NotePushArgs) -> Envelope:
         ref = _ref(a.case)
     except ValueError as exc:
         return fail(str(exc))
+    if not a.private_ok:
+        # 🔒 І для `dry_run` теж: проба мусить показати ту саму відмову, що й справжня.
+        from nyshporka.cases import privacy
+
+        passport = privacy.is_private(ref.key)
+        if passport is not None:
+            env = fail(privacy.refusal(ref.key, passport, "віддача нотатника в Супрягу"))
+            env.data = {"refusal": "private", "case": ref.key, "passport": str(passport)}
+            return env
     cf = store.load_case(ref)
     if cf is None:
         return fail(f"у сховищі сторінок справи {ref.shifra or ref.key} нічого немає")

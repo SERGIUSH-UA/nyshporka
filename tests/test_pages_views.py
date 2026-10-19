@@ -123,13 +123,18 @@ def test_text_grep_pages_in_project_skips_foreign_comment(tmp_path: Path) -> Non
     from nyshporka.search import textops as T
 
     hub = _hub(tmp_path)
+    W.use(W._build(hub, "test"))
+    S.annotate_pages(REF2, [_note("ROOT-SECRET", ["Іваненко"])])    # вбудований погляд кореня
     alpha, beta = _project(hub, "alpha"), _project(hub, "beta")
     W.use(W._build(alpha, "test"))
     S.annotate_pages(REF, [_note("ALPHA-SECRET")])
     assert T.grep_layers("ALPHA-SECRET", ["pages"])["total"] == 1    # свій погляд
     W.use(W._build(beta, "test"))
     assert T.grep_layers("ALPHA-SECRET", ["pages"])["total"] == 0
-    assert T.grep_layers("Сидорук", ["pages"])["total"] == 1         # факт — спільний
+    assert T.grep_layers("ROOT-SECRET", ["pages"])["total"] == 0
+    assert T.grep_layers("Іваненко", ["pages"])["total"] == 1        # факт — спільний
+    assert [f["project"] for f in P.peek(W.workspace(), re.compile("ROOT-SECRET"),
+                                         ("pages",))] == ["."]
     found = P.peek(W.workspace(), re.compile("ALPHA-SECRET"), ("pages",))
     assert found == [{"project": "alpha", "name": "Рід alpha", "layer": "pages", "count": 1}]
 

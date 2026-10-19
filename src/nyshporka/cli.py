@@ -1466,6 +1466,9 @@ def case_cmd(
     adopt: bool = typer.Option(False, "--adopt",
                                help="взяти теку під облік, якщо вона лежить "
                                     "поза простором"),
+    private: bool | None = typer.Option(None, "--private/--public",
+                                 help="позначка «нікуди з машини»: Супряга й відкритий "
+                                      "сайт — лише рішенням автора; без прапорця — як є"),
 ) -> None:
     """Завести або виправити справу: сказати, що лежить у цій теці.
 
@@ -1487,7 +1490,7 @@ def case_cmd(
         "doc_type": doc_type, "place": place, "note": note, "film": film,
         "dgs": dgs, "one_case": one_case,
         "year_from": year_from or None, "year_to": year_to or None,
-        "adopt": adopt})
+        "adopt": adopt, "private": private})
     _answer(env)
     sc = env.data["sidecar"]
     # ⚠ Тека без шифри теж описана, і заголовок відповіді мусить це казати

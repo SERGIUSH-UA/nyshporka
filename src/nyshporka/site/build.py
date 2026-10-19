@@ -51,6 +51,8 @@ class SiteReport:
     counts: dict[str, int] = field(default_factory=dict)
     hidden: int = 0
     withheld_sources: int = 0
+    #: 🔒 Джерела приватних справ, утримані відкритою версією, — поіменно.
+    private_sources: list[str] = field(default_factory=list)
     dropped_lines: int = 0
     overlaid: list[str] = field(default_factory=list)
     skipped: list[str] = field(default_factory=list)
@@ -63,10 +65,24 @@ class SiteReport:
     def as_dict(self) -> dict[str, Any]:
         return {"out": str(self.out), "public": self.public, "counts": self.counts,
                 "hidden": self.hidden, "withheld_sources": self.withheld_sources,
+                "private_sources": self.private_sources,
                 "dropped_lines": self.dropped_lines, "overlaid": self.overlaid,
                 "ambiguous": self.ambiguous, "leaks": self.leaks, "skipped": self.skipped,
                 "html": str(self.html) if self.html else None,
                 "canon_warnings": self.warnings, "languages": self.languages}
+
+
+def _private_source(source: Any) -> bool:
+    """Чи веде джерело канону на справу, позначену private у паспорті."""
+    from nyshporka.cases import privacy
+    from nyshporka.library import _mk_key, default_opys, parse_source_id
+
+    parsed = parse_source_id(str(getattr(source, "id", "") or ""))
+    if not parsed:
+        return False
+    repo, fond, opys, spr = parsed
+    key = _mk_key(repo, fond, spr, opys or default_opys(repo, fond))
+    return key is not None and privacy.is_private(key) is not None
 
 
 def mkdocs_available() -> bool:
@@ -206,12 +222,14 @@ def build(root: Path, *, public: bool = False, out: Path | None = None,
             root, docs_dir=ldocs, cfg=cfg, templates_dirs=templates_dirs,
             hidden=hidden, drop_source_types=set(cfg.drop_source_types) if public else set(),
             source_filter=(lambda s: title_guard.hits(s.title)) if public else None,
-            public=public, lang=lang)
+            public=public, lang=lang,
+            private_filter=_private_source if public else None)
         counts = write_pages(ldocs, cfg, rendered, shown, list(canon.places.values()),
                              public=public, templates_dirs=templates_dirs, lang=lang)
         if i == 0:
             rep.hidden = len(hidden)
             rep.withheld_sources = len(rendered.withheld_sources)
+            rep.private_sources = list(rendered.private_sources)
             rep.counts = counts
             withheld = set(rendered.withheld_sources)
 

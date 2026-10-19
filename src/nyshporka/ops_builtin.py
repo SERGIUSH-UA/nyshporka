@@ -1738,6 +1738,8 @@ class CasesArgs(BaseModel):
     # працювала. Шар даних (`db.query_rows`) `kind` приймав від початку.
     kind: str = Field(default="",
                       description="case | bundle | unfiled (матеріал без шифри)")
+    private: bool = Field(default=False,
+                          description="лише справи з позначкою private у паспорті")
     limit: int = Field(default=60, ge=1, le=500,
                        description="скільки рядків віддати; `page_size` сильніший")
     page: int = Field(default=0, ge=0, le=10_000, description="сторінка видачі")
@@ -1765,7 +1767,7 @@ def cases_list(a: CasesArgs) -> Envelope:
     try:
         rows, total = db.query_page(page=a.page, page_size=size, q=a.q,
                                     repo=a.repo, htr=a.htr, year=a.year,
-                                    place=a.place, kind=a.kind)
+                                    place=a.place, kind=a.kind, private=a.private)
     except FileNotFoundError:
         # 🔴 «Реєстру ще немає» — це нормальний стан щойно створеного простору,
         # а не поламка. Відмова тут була першим, що бачив новачок, відкривши
@@ -2937,6 +2939,10 @@ class CaseRegisterArgs(BaseModel):
         default=False,
         description="тека — одна справа, хоч шифра чи ім'я схожі на діапазон "
                     "справ («…926-929»): зняти позначку збірної теки")
+    private: bool | None = Field(
+        default=None,
+        description="позначка «нікуди з машини»: true — поставити, false — зняти, "
+                    "порожньо — як є (у проєкті-замовленні нова справа приватна сама)")
     adopt: bool = Field(
         default=False,
         description="взяти теку під облік, якщо вона лежить поза простором: "
@@ -2968,10 +2974,14 @@ def case_register(a: CaseRegisterArgs) -> Envelope:
                        doc_type=a.doc_type, year_from=a.year_from,
                        year_to=a.year_to, place=a.place, note=a.note,
                        repo_hint=a.repo, film=a.film, dgs=a.dgs,
-                       one_case=a.one_case)
+                       one_case=a.one_case, private=a.private)
     except RegisterError as exc:
         return fail(str(exc))
     env = ok({"case_dir": a.case_dir, "sidecar": out})
+    if out.get("private"):
+        env.warn("private", "справа позначена private (нікуди з машини: Супряга, "
+                            "відкритий сайт — лише рішенням автора). Зняти: "
+                            "nysh case <тека> --public")
     from nyshporka.cases import span as SP
     from nyshporka.cases.register import case_path as _case_path
 

@@ -366,7 +366,7 @@ def describe(case_dir: str | Path, *, shifra: str = "", title: str = "",
              doc_type: str = "", year_from: int | str | None = None,
              year_to: int | str | None = None, place: str = "", note: str = "",
              repo_hint: str = "", film: str = "", dgs: str = "",
-             one_case: bool = False) -> dict[str, Any]:
+             one_case: bool = False, private: bool | None = None) -> dict[str, Any]:
     """Записати або доповнити опис справи в її теці. Повертає готовий сайдкар.
 
     Порожнє поле не затирає наявне: правка одного заголовка не має стирати
@@ -384,6 +384,10 @@ def describe(case_dir: str | Path, *, shifra: str = "", title: str = "",
     — а в мить, коли шифра встановиться, усе це довелось би переносити. Тут же
     достатньо вписати шифру в цей самий паспорт: наступний `cases build`
     перекладе теку на нормальний ключ сам, і переносити нема чого.
+
+    `private` — позначка «нікуди з машини» (`cases.privacy`): `True` ставить,
+    `False` знімає, `None` лишає як є. Новий паспорт у проєкті з
+    `private_default = true` (замовлення) позначається сам.
     """
     d = case_path(case_dir)
     if not d.is_dir():
@@ -467,6 +471,14 @@ def describe(case_dir: str | Path, *, shifra: str = "", title: str = "",
     # означає не знати, чому назва саме така.
     out["desc_source"] = "hand" if not old else out.get("desc_source", "hand")
     out["edited_by_hand"] = True
+    from nyshporka.cases import privacy
+
+    if private is None and not old:
+        private = privacy.project_default() or None
+    if private:
+        out[privacy.FIELD] = True
+    elif private is False:
+        out.pop(privacy.FIELD, None)
 
     tmp = d / (SIDECAR + ".tmp")
     tmp.write_text(json.dumps(out, ensure_ascii=False, indent=1), encoding="utf-8")

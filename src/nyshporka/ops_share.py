@@ -23,6 +23,20 @@ SECTION = "htr"
 #: «Не вказувати» для поля профілю, яке інакше підставилось би само.
 NONE_MARK = "-"
 
+#: 🔒 Пояснення прапорця рішення автора — одне на всі операції віддачі.
+PRIVATE_OK = ("віддати й справу, позначену private у паспорті: рішення автора "
+              "(без нього приватна справа з машини не йде)")
+
+
+def _refused(exc: Exception) -> Envelope:
+    """Відмова пакування; для приватної справи — з машинним полем `refusal`."""
+    from nyshporka.share.publish import PrivateCase
+
+    env = fail(str(exc))
+    if isinstance(exc, PrivateCase):
+        env.data = exc.data()
+    return env
+
 
 class ArgError(ValueError):
     """Прапорець не розібрано — з названою причиною."""
@@ -169,6 +183,7 @@ class SharePackArgs(_CardFields):
                                              "вирізане з плівки (місце на плівці — "
                                              "`share part`); порожньо — само, коли "
                                              "кожна тека має паспорт із місцем")
+    private_ok: bool = Field(default=False, description=PRIVATE_OK)
 
 
 @op("share.pack", summary="Спакувати прочитане у файл для обміну",
@@ -210,9 +225,9 @@ def share_pack(a: SharePackArgs) -> Envelope:
                 license_text=a.license or defaults["license"],
                 source_terms=a.source_terms or defaults["source_terms"],
                 archive_name=a.archive_name, skip_runs=list(a.skip_run),
-                card_fields=card_fields)
+                card_fields=card_fields, private_ok=a.private_ok)
         except PublishError as exc:
-            return fail(str(exc))
+            return _refused(exc)
         env = ok(got)
         for why in got.get("pack_refusals") or []:
             env.warn("pack_refusal", str(why))
@@ -236,9 +251,9 @@ def share_pack(a: SharePackArgs) -> Envelope:
                    license_text=a.license or defaults["license"],
                    source_terms=a.source_terms or defaults["source_terms"],
                    archive_name=a.archive_name, skip_runs=list(a.skip_run),
-                   card_fields=card_fields)
+                   card_fields=card_fields, private_ok=a.private_ok)
     except PublishError as exc:
-        return fail(str(exc))
+        return _refused(exc)
     env = ok(got)
     gates = got.get("gates") or {}
     for w in gates.get("warnings") or []:
@@ -619,6 +634,7 @@ class SharePublishArgs(BaseModel):
     replaces: int | None = Field(default=None,
                                  description="номер власного внеску, який цей заступить")
     why: str = Field(default="", description="чому заміна — побачить модератор")
+    private_ok: bool = Field(default=False, description=PRIVATE_OK)
 
 
 @op("share.publish", summary="Віддати зібраний пакет у пул",
@@ -663,9 +679,12 @@ def share_publish(a: SharePublishArgs) -> Envelope:
             # Причина заміни їде в адресі запиту, а довгу адресу проксі ріже (414).
             return fail(f"причина заміни — до {MAX_WHY_ZAMINY} знаків; скоротіть --why")
         got = publish(Path(a.path), base=a.base, say=_khid,
-                      replaces=a.replaces, why=a.why.strip())
+                      replaces=a.replaces, why=a.why.strip(), private_ok=a.private_ok)
     except UploadError as exc:
         env = fail(str(exc))
+        if exc.klas == "private":
+            env.data = {"refusal": "private"}
+            return env
         # 🔴 Машинні поля відмови: стеля пулу (429) — «зачекати до», відмова
         # воріт (4xx) — «виправити пакет», обрив — «повторити». Сценарій черги
         # інакше розрізняв би їх за текстом або не розрізняв зовсім.
@@ -734,7 +753,7 @@ def _publish_segments(teka: Any, a: SharePublishArgs, say: Any) -> Envelope:
     for i, p in enumerate(paky, 1):
         say(f"сегмент {i}/{len(paky)}: {p.name}")
         try:
-            got = publish(p, base=a.base, say=say)
+            got = publish(p, base=a.base, say=say, private_ok=a.private_ok)
         except UploadError as exc:
             env = fail(f"сегмент {i}/{len(paky)} ({p.name}): {exc}. Віддано до "
                        f"нього: {len(done)}. Повторіть ту саму команду — віддане "
@@ -762,6 +781,7 @@ class SharePushArgs(BaseModel):
     wait: bool = Field(default=False, description="на стелі пулу (429) чекати, скільки "
                                                   "просить пул, і віддавати далі, а не "
                                                   "зупиняти пачку")
+    private_ok: bool = Field(default=False, description=PRIVATE_OK + "; на всю пачку")
 
 
 def _push_from_file(path: str) -> list[dict[str, Any]]:
@@ -796,6 +816,25 @@ def _push_from_file(path: str) -> list[dict[str, Any]]:
     return out
 
 
+def _private_in(items: list[dict[str, Any]]) -> list[str]:
+    """Справи пачки, позначені private, на які рішення автора не дано."""
+    from nyshporka.cases import privacy
+    from nyshporka.pagestore import store
+
+    out: list[str] = []
+    for item in items:
+        if item.get("private_ok"):
+            continue
+        case = str(item.get("case") or "")
+        try:
+            key = str(getattr(store.resolve_case(case), "key", "") or "")
+        except Exception:
+            continue                        # шифру розбере пакування й назве причину
+        if key and privacy.is_private(key) is not None:
+            out.append(case)
+    return out
+
+
 @op("share.push", summary="Віддати пачку справ: спакувати й залити кілька одночасно",
     args=SharePushArgs, mutates=True, agent=False, section=SECTION, private=True,
     next_hints=(("share.sync", "звірити з пулом, що справді там"),))
@@ -823,9 +862,11 @@ def share_push(a: SharePushArgs) -> Envelope:
             items += _push_from_file(a.from_file)
     except ArgError as exc:
         return fail(str(exc))
+    ready: set[str] = set()
     if a.ready:
-        items += [{"case": r["case_key"]} for r in S.nepodileni()
-                  if r.get("status") in S.READY_STATUSES]
+        ready = {str(r["case_key"]) for r in S.nepodileni()
+                 if r.get("status") in S.READY_STATUSES}
+        items += [{"case": c} for c in sorted(ready)]
     if not items:
         if a.ready and not (a.cases or a.from_file):
             return ok(B.viddaty([], jobs=1))
@@ -859,7 +900,25 @@ def share_push(a: SharePushArgs) -> Envelope:
         if key in seen:
             continue
         seen.add(key)
-        cherha.append(item)
+        cherha.append({**item, "private_ok": bool(item.get("private_ok") or a.private_ok)})
+
+    # 🔒 Приватні справи — теж до першої заливки, усім переліком: пачка, що
+    # зупинилась на сотій справі, лишилась би наполовину відданою.
+    private = _private_in(cherha)
+    # Готове з `--ready` відібрала Нишпорка, а не людина: приватне з нього
+    # випадає з попередженням — так само, як в автовіддачі.
+    skipped = [c for c in private if c in ready]
+    if skipped:
+        cherha = [it for it in cherha if it["case"] not in skipped]
+        private = [c for c in private if c not in ready]
+    if private:
+        env = fail(f"у пачці справи з позначкою private у паспорті: "
+                   f"{', '.join(private[:10])}{' …' if len(private) > 10 else ''}. "
+                   f"Без рішення автора вони з машини не йдуть: приберіть їх з "
+                   f"переліку або дайте --private-ok (на всю пачку чи "
+                   f"\"private_ok\": true у рядку файла)")
+        env.data = {"refusal": "private", "cases": private}
+        return env
 
     if not token():
         # Інакше кожна справа спакувалась би й упала на заливці тією самою відмовою.
@@ -871,6 +930,11 @@ def share_push(a: SharePushArgs) -> Envelope:
     else:
         got = B.viddaty(cherha, jobs=a.jobs, notes=a.notes, say=B.stderr)
     env = ok(got)
+    if skipped:
+        env.warn("private", f"пропущено готові справи з позначкою private: "
+                            f"{', '.join(skipped[:10])}{' …' if len(skipped) > 10 else ''}"
+                            f" — віддати рішенням автора: nysh share push <справа> "
+                            f"--private-ok")
     if got["summary"]["notes_failed"]:
         pohani = [r["case"] for r in got["rows"]
                   if r.get("notes") not in (None, B.NOTES_OK, B.NOTES_NONE)]
@@ -970,6 +1034,13 @@ def share_autoshare(a: ShareAutoshareArgs) -> Envelope:
         # читання закінчилось би помилкою пакування. Свідомо неповне
         # віддають руками, з поясненням у `--partial`.
         return ok({"skipped": "частковий прогін віддають руками"})
+    # 🔒 Автоматика приватного не віддає — і каже про це вголос, а не мовчки.
+    if _private_in([{"case": a.case}]):
+        env = ok({"skipped": "справа позначена private", "refusal": "private"})
+        env.warn("private", f"{a.case} позначена private у паспорті — автовіддача її "
+                            f"пропускає. Віддати рішенням автора: nysh share push "
+                            f"{a.case} --private-ok")
+        return env
 
     defaults = P.pack_defaults(prof)
     try:

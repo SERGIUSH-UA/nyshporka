@@ -88,6 +88,8 @@ class RenderReport:
     sources: int = 0
     hypotheses: int = 0
     withheld_sources: list[str] = field(default_factory=list)
+    #: 🔒 Джерела з приватних справ (паспорт `private`), утримані відкритою версією.
+    private_sources: list[str] = field(default_factory=list)
 
 
 def build(
@@ -102,13 +104,15 @@ def build(
     public: bool | None = None,
     gallery: str = "refs",
     lang: str = I18N.DEFAULT,
+    private_filter: Callable[[Source], bool] | None = None,
 ) -> RenderReport:
     """Сторінки канону мовою `lang` (оболонка; дані канону — як є)."""
     token = _LANG.set(lang if lang in I18N.LANGS else I18N.DEFAULT)
     try:
         return _build(project_root, docs_dir=docs_dir, cfg=cfg, templates_dirs=templates_dirs,
                       hidden=hidden, drop_source_types=drop_source_types,
-                      source_filter=source_filter, public=public, gallery=gallery)
+                      source_filter=source_filter, public=public, gallery=gallery,
+                      private_filter=private_filter)
     finally:
         _LANG.reset(token)
 
@@ -124,6 +128,7 @@ def _build(
     source_filter: Callable[[Source], bool] | None = None,
     public: bool | None = None,
     gallery: str = "refs",
+    private_filter: Callable[[Source], bool] | None = None,
 ) -> RenderReport:
     """`public` (або непорожній `hidden`) вмикає відкриту збірку (report/public.py): цих осіб на сайті немає
     зовсім — ні сторінки, ні рядка в індексах, ні імені у вузлі дерева, ні сканів.
@@ -176,6 +181,9 @@ def _build(
     # Відкрита збірка: хто й що взагалі потрапляє на сайт.
     shown = [p for p in persons_raw if p.id not in hidden]
     withheld: list[str] = []
+    private: list[str] = []
+    #: Картки, що цитують приватне джерело: їхні кропи на відкритий сайт не йдуть.
+    private_cards: set[str] = set()
     if public:
         families = [
             f for f in families
@@ -190,7 +198,13 @@ def _build(
         kept: list[Source] = []
         for s in sources:
             by = citing.get(s.id, set())
-            if (
+            # 🔒 Приватна справа («нікуди з машини») на відкритий сайт не йде:
+            # ні шифра, ні кроп. Приватний сайт показує все.
+            if private_filter is not None and private_filter(s):
+                private.append(s.id)
+                private_cards |= by
+                withheld.append(s.id)
+            elif (
                 s.type in drop_source_types
                 or (by and by <= hidden)
                 or (source_filter is not None and source_filter(s))
@@ -225,7 +239,8 @@ def _build(
         published = ({p.id for p in shown} | {f.id for f in families
                                               if not _family_members(f) & hidden}
                      | {pl.id for pl in places} | published_sources)
-        citation_docs = _public_citation_docs(project_root, docs_dir, published)
+        citation_docs = _public_citation_docs(project_root, docs_dir, published,
+                                              blocked=private_cards)
     elif gallery == "refs":
         everyone = ({p.id for p in persons_raw} | {f.id for f in families}
                     | {pl.id for pl in places} | published_sources)
@@ -629,6 +644,7 @@ def _build(
         sources=len(sources),
         hypotheses=len(hypotheses),
         withheld_sources=withheld,
+        private_sources=private,
     )
 
 
@@ -821,12 +837,17 @@ def _load_citation_docs(
 
 
 def _public_citation_docs(project_root: Path, docs_dir: Path,
-                          published: set[str]) -> dict[str, list[dict[str, Any]]]:
+                          published: set[str], *,
+                          blocked: set[str] | frozenset[str] = frozenset(),
+                          ) -> dict[str, list[dict[str, Any]]]:
     """Галерея відкритої версії: скан → сторінки, чиї КАРТКИ на нього посилаються.
 
     Скан публікується, лише якщо всі картки, що на нього посилаються,
     опубліковані. Одна прихована серед них — і скан лишається вдома: на ньому
     та сама людина, яку сторінка ховає.
+
+    🔒 `blocked` — картки, що цитують приватну справу. Кроп не каже, з якої він
+    справи, тож їхні скани лишаються вдома всі: грубо, але приватне не втече.
     """
     from nyshporka.canon.check import evidence_refs
 
@@ -844,7 +865,7 @@ def _public_citation_docs(project_root: Path, docs_dir: Path,
     citations_root = refs.citations_dir(project_root)
     by_page: dict[str, list[dict[str, Any]]] = {}
     for ref, who in sorted(owners.items()):
-        if not who <= published:
+        if not who <= published or who & blocked:
             continue
         src = refs.resolve(project_root, ref)
         ext = src.suffix.lower()

@@ -185,6 +185,9 @@ def push_cmd(
                                help="віддати й зведення переглянутих аркушів"),
     dry_run: bool = typer.Option(False, "--dry-run", help="показати, що поїде"),
     base: str = typer.Option("", "--base", help="інша домівка пулу"),
+    private_ok: bool = typer.Option(False, "--private-ok",
+                                    help="віддати й справу з позначкою private: "
+                                         "рішення автора"),
     as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Віддати загальне знання про справу в нотатник книги в Супрязі.
@@ -195,7 +198,7 @@ def push_cmd(
     from nyshporka import ops as O
 
     env = O.call("note.push", {"case": case, "pages": pages, "dry_run": dry_run,
-                               "base": base})
+                               "base": base, "private_ok": private_ok})
     if _answer(env, as_json):
         return
     d = env.data

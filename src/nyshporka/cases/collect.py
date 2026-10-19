@@ -78,6 +78,15 @@ def _project_ws() -> W.Workspace:
     return ws
 
 
+def _private(paths: list[str | None]) -> bool:
+    """Чи позначена справа приватною хоч в одній зі своїх тек."""
+    from nyshporka.cases.privacy import passport_of
+
+    base = case_base()
+    return any(passport_of(Path(p) if Path(p).is_absolute() else base / p) is not None
+               for p in paths if p)
+
+
 def _verdicts() -> dict[str, Any]:
     try:
         return load_verdicts()
@@ -1145,6 +1154,7 @@ def collect_rows(index: LibraryIndex | None = None, *,
             row.state = "partial"
         row.htr_stage = _htr_stage(row, frames_known)
         row.fuzzy_stage = _fuzzy_stage(row)
+        row.private = _private([row.path, *row.extra_paths])
 
     return sorted(rows.values(), key=lambda r: (r.repo_label or "", r.fond or "",
                                                 int(re.sub(r"\D", "", r.spr or "0") or 0))), orphans

@@ -751,10 +751,11 @@ def _view_moves(pl: Plan, root: Path, pages_root: Path) -> list[tuple[str, Path,
     коментарі проєкту зникли б з виду.
     """
     from nyshporka.core.projects import ROOT_ID, list_projects
+    from nyshporka.core.workspace import Workspace
 
     out: list[tuple[str, Path, Path]] = []
     for pr in list_projects(root, archived=True):
-        vroot = pr.root / "data" / "views"
+        vroot = Workspace(root=pr.root).views
         if pr.id == ROOT_ID or not vroot.is_dir():
             continue
         for m in pl.pages:

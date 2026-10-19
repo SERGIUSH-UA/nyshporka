@@ -110,6 +110,10 @@ def _card_args(title: str | None, years: str | None, place: list[str] | None,
     return out
 
 
+_PRIVATE_OK_HELP = ("віддати й справу з позначкою private у паспорті: рішення автора "
+                    "(без прапорця приватна справа з машини не йде)")
+
+
 @app.command("pack")
 def pack_cmd(
     case: str = typer.Argument(..., help="шифра справи або ім'я прогону"),
@@ -161,6 +165,7 @@ def pack_cmd(
                                              "(село), сегмент на кожну, місце на "
                                              "плівці з `nysh share part`; --alpha — "
                                              "частини картотеки. Без прапорця — само"),
+    private_ok: bool = typer.Option(False, "--private-ok", help=_PRIVATE_OK_HELP),
     as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Зібрати пакет прочитаного для обміну.
@@ -179,7 +184,7 @@ def pack_cmd(
         "link": list(link), "extra": list(extra), "license": license_,
         "source_terms": source_terms, "archive_name": archive_name,
         "skip_run": list(skip_run), "segments": segments or by_part is True,
-        "segment_files": segment_files, "by_part": by_part,
+        "segment_files": segment_files, "by_part": by_part, "private_ok": private_ok,
         **_card_args(title, years, place, genre, frames, frames_unknown, scans)})
     if _answer(env, as_json):
         return
@@ -608,6 +613,7 @@ def publish_cmd(
         None, "--replaces",
         help="номер СВОГО внеску в тій самій справі, який цей заступить"),
     why: str = typer.Option("", "--why", help="чому заміна (обов'язково з --replaces)"),
+    private_ok: bool = typer.Option(False, "--private-ok", help=_PRIVATE_OK_HELP),
     as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Віддати зібраний пакет у пул.
@@ -626,7 +632,8 @@ def publish_cmd(
 
     _kliuch_abo_vkhid(as_json)
     env = O.call("share.publish", {"path": path, "base": base,
-                                   "replaces": replaces, "why": why})
+                                   "replaces": replaces, "why": why,
+                                   "private_ok": private_ok})
     if _answer(env, as_json):
         return
     d = env.data or {}
@@ -671,6 +678,8 @@ def push_cmd(
     wait: bool = typer.Option(False, "--wait",
                               help="на стелі пулу чекати, скільки просить пул (до доби), "
                                    "і віддавати далі — для заливки сотень справ без нагляду"),
+    private_ok: bool = typer.Option(False, "--private-ok",
+                                    help=_PRIVATE_OK_HELP + "; на всю пачку"),
     as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Віддати пачку справ: кожну спакувати й залити, кілька одночасно.
@@ -685,7 +694,7 @@ def push_cmd(
     _kliuch_abo_vkhid(as_json)
     env = O.call("share.push", {"cases": list(cases or []), "ready": ready,
                                 "from_file": from_file, "jobs": jobs, "notes": notes,
-                                "wait": wait})
+                                "wait": wait, "private_ok": private_ok})
     if _answer(env, as_json):
         return
     d = env.data or {}

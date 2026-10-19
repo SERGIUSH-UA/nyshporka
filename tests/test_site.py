@@ -201,6 +201,40 @@ def test_a_scan_cited_by_a_hidden_card_stays_home_whatever_the_manifest_says(spa
     assert list(docs.rglob("petro_birth.jpg")), "скан опублікованого загубився"
 
 
+def test_private_case_stays_off_the_public_site_but_not_the_private(
+        space: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """🔒 Справа з `private` у паспорті: на відкритому сайті ні шифри, ні кропу."""
+    from nyshporka.cases import privacy
+
+    # Вигаданий архів із літерним фондом: ID справжнього канону сюди не можна.
+    sid = "S_TESTA_FR9001_D9"
+    _w(space, "sources", Source(id=sid, type="archive", title="Тест-архів Р-9001-9 сповідна"))
+    crop = _scan(space, "petro_confession.jpg", (330, 40))
+    _w(space, "persons", Person(
+        id="I9003", names=[NameVariant(form="Петро Тестовий", lang="uk", primary=True,
+                                       given="Петро", surname="Тестовий")],
+        sex="M", parent_family="F9001", spouse_families=["F9002"],
+        facts=[Fact(type="birth", date=GedDate(value="1880"), status="confirmed",
+                    citations=[Citation(source_id=sid, confidence="direct",
+                                        accessed=date(2026, 1, 1))])],
+        notes=f"Доказ: `{crop}`"))
+    asked: list[str] = []
+
+    def is_private(key: str) -> Path | None:
+        asked.append(key)
+        return space / "_source.json" if "/R-9001/" in key and key.endswith("/9") else None
+
+    monkeypatch.setattr(privacy, "is_private", is_private)
+    rep = B.build(space, public=True, html=False)
+    docs = rep.out / "docs"
+    assert rep.private_sources == [sid], asked
+    assert not list(docs.rglob("petro_confession.jpg")), "кроп приватної справи на сайті"
+    assert sid not in _text(docs) and "Тест-архів" not in _text(docs)
+    assert "Петро" in _text(docs), "сама особа лишається"
+    rep = B.build(space, public=False, html=False)
+    assert list((rep.out / "docs").rglob("petro_confession.jpg")), "приватний сайт — усе"
+
+
 def test_other_spellings_of_a_hidden_name_are_scrubbed(space: Path) -> None:
     overlay = space / CFG.OVERLAY
     overlay.mkdir(parents=True)
