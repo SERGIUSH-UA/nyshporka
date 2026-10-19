@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -42,7 +43,7 @@ MIEJSCA = ("sygnatura;haslo;opis;akty\n"
 
 
 @pytest.fixture
-def catalog(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def catalog(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
     cat = tmp_path / "catalog"
     cat.mkdir()
     monkeypatch.setenv("NYSHPORKA_CATALOG", str(cat))
@@ -82,6 +83,14 @@ def test_person_forms_take_variant_not_maiden_name() -> None:
     assert person_forms("Andrzej (nazwisko nieodczytane)")[0] == []
 
 
+def test_given_name_in_parentheses_is_not_a_surname() -> None:
+    """«Jabłoński Stanisław (Jan)» — у дужках ім'я: на «Ян» це не збіг 100."""
+    from nyshporka.sources.sks import person_forms, surname_key
+
+    assert person_forms("Jabłoński Stanisław (Jan)")[0] == [surname_key("Jabłoński")]
+    assert person_forms("Krzętowski (Krętowski) Jan")[0] == [surname_key("Krzętowski")]
+
+
 def test_person_found_in_cyrillic_with_act_links(catalog: Path) -> None:
     from nyshporka.catalog.query import find_court_persons
 
@@ -104,6 +113,7 @@ def test_given_name_ranks_but_does_not_filter(catalog: Path) -> None:
     rows = find_court_persons("Четвертинський Іван").rows
     assert rows[0]["sig"] == "KAC 7"          # Iwan ↔ Іван піднімає
     assert len(rows) == 2                     # Jan не відсіяно
+    assert all(r["score"] <= 100 for r in rows)   # ім'я — у порядку, не в балі
 
 
 def test_place_found_in_ukrainian_and_russian(catalog: Path) -> None:

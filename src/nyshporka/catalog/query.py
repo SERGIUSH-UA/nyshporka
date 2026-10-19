@@ -807,10 +807,10 @@ _COURT_MIN = _LATIN_MIN
 
 
 def _court_rows(con: sqlite3.Connection, pack_id: str, table: str,
-                scored: list[tuple[int, int]]) -> list[dict[str, Any]]:
+                scored: list[tuple[int, int, int]]) -> list[dict[str, Any]]:
     """Рядки з книгою й адресами актів — для відібраних `rowid` з балом."""
     out = []
-    for score, rowid in scored:
+    for score, bonus, rowid in scored:
         r = con.execute(
             f"SELECT t.rowid, t.*, b.kind AS book_kind, b.title AS book_title, "
             f"b.years AS book_years, b.year_from, b.office, b.voivodeship, "
@@ -820,6 +820,7 @@ def _court_rows(con: sqlite3.Connection, pack_id: str, table: str,
             continue
         row = _tag(dict(r), pack_id)
         row["score"] = score
+        row["given_match"] = bool(bonus)
         links = []
         from nyshporka.sources.sks import split_acts
 
@@ -843,7 +844,7 @@ def _court_find(table: str, want: list[str], limit: int,
             fuzz = None  # type: ignore[assignment]
         found: list[dict[str, Any]] = []
         for pack_id, con in packs:
-            scored: list[tuple[int, int]] = []
+            scored: list[tuple[int, int, int]] = []
             sel = "rowid, forms" + (", given" if table == "persons" else "")
             for r in con.execute(f"SELECT {sel} FROM {table}"):
                 score = 0
@@ -855,18 +856,20 @@ def _court_find(table: str, want: list[str], limit: int,
                         score = max(score, s)
                 if score < _COURT_MIN:
                     continue
+                bonus = 0
                 if given:
                     # ім'я лише піднімає в ранжуванні, не відсіює: «Jan» ↔ «Іван»
                     # згорткою не зводяться, а відсів сховав би саме їх
                     names = (r["given"] or "").split(" | ")
                     if fuzz and any(fuzz.ratio(g, n) >= _COURT_MIN for g in given for n in names):
-                        score += 10
-                scored.append((score, r["rowid"]))
-            scored.sort(key=lambda p: -p[0])
+                        bonus = 1
+                scored.append((score, bonus, r["rowid"]))
+            scored.sort(key=lambda p: (-p[1], -p[0]))
             found += _court_rows(con, pack_id, table, scored[:limit * 3])
     finally:
         close_all(packs)
-    found.sort(key=lambda d: (-d["score"], d.get("year_from") or 9999, d["name"]))
+    found.sort(key=lambda d: (-d["given_match"], -d["score"], d.get("year_from") or 9999,
+                              d["name"]))
     return Answer(rows=found[:limit], coverage=cov)
 
 

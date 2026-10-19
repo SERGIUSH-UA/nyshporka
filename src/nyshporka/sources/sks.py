@@ -72,6 +72,25 @@ def _clean(s: str) -> str:
     return " ".join(_UNSURE.sub("", str(s or "")).split())
 
 
+#: Закінчення, з якими однослівний варіант у дужках — прізвище, а не ім'я.
+_SURNAME_TAIL = re.compile(r"(?:ski|cki|dzki|ska|cka|dzka|icz|ycz|uk|czuk|enko|ko|ak|ek|ik)$",
+                           re.IGNORECASE)
+#: Схожість згорнутих основ, з якої варіант — те саме прізвище іншим написанням.
+_ALT_SAME = 60
+
+
+def _surname_like(alt: str, head: str) -> bool:
+    if _SURNAME_TAIL.search(alt):
+        return True
+    if not head:
+        return False
+    try:
+        from rapidfuzz import fuzz
+    except ImportError:
+        return False
+    return fuzz.ratio(surname_key(alt), surname_key(head)) >= _ALT_SAME
+
+
 def person_forms(haslo: str) -> tuple[list[str], list[str]]:
     """(форми прізвища, згорнуті слова імені) з гасла укладача.
 
@@ -80,6 +99,11 @@ def person_forms(haslo: str) -> tuple[list[str], list[str]]:
     й однослівні варіанти в дужках; дівоче прізвище в родовому відмінку
     («z Bębnowskich») не береться — воно інший рід, і склалося б зі збігу.
     Гасло без прізвища («Andrzej (nazwisko nieodczytane)») прізвища не має.
+
+    🪤 В однослівних дужках буває й ім'я («Jabłonowski Stanisław (Jan)»):
+    узяте за прізвище, воно давало збіг 100 на запит «Ян». Тому варіант —
+    прізвище, лише коли він схожий на головне («Krzętowski (Krętowski)») або
+    має прізвищеве закінчення («Czetwertynski (Kotwicz)»).
     """
     raw = _clean(haslo)
     if "nazwisko nieodczytane" in raw:
@@ -87,7 +111,7 @@ def person_forms(haslo: str) -> tuple[list[str], list[str]]:
     else:
         head = (_WORD.findall(_PAREN.sub(" ", raw)) or [""])[0]
     alts = [w for inner in _PAREN.findall(raw) for w in [inner.strip()]
-            if _WORD.fullmatch(w) and w[:1].isupper()]
+            if _WORD.fullmatch(w) and w[:1].isupper() and _surname_like(w, head)]
     forms: list[str] = []
     for w in [head, *alts]:
         k = surname_key(w) if w else ""
@@ -180,7 +204,7 @@ _PITFALLS = (
     "мовною моделлю, невпевнене позначено [?] — перед каноном звірити скан",
     "KAC — переклад друкованого опису XIX ст.; оригіналу книги немає, звіряти нема з чим",
     "однойменні села: опис місця несе воєводство й повіт — дивитись його, а не назву "
-    "(Miastkowce Любомирського ≠ Miastkówka)",
+    "(кілька Nowosiółek одного воєводства — різні села)",
     "без пака `courtbooks` відмовляє, а не дає нуль: `nysh catalog install`")
 
 
@@ -273,6 +297,7 @@ class SksPersonsSource(_SksBase):
                    "в транскрипції, могло не зійтися — перебрати написання",
         pitfalls=(*_PITFALLS,
                   "загальний `nysh find` цю базу не питає — лише `--source sks-osoby`",
+                  "перше слово запиту — прізвище: «Прізвище Ім'я», а не «Ім'я Прізвище»",
                   "дівоче прізвище в родовому відмінку («z Bębnowskich») не шукається "
                   "як прізвище — шукати вільним текстом у описах"),
         card="sks")

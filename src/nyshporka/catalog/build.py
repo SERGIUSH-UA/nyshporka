@@ -329,7 +329,8 @@ def build_rkparishes(parishes_json: Path, out: Path, *, pack_id: str, taken: str
     res = finalize(con, tmp, out, domain="rkparishes", pack_id=pack_id, taken=taken,
                    source=source, built_from=_digest([parishes_json]), rows=n_p,
                    coverage=coverage,
-                   note=note or f"{n_p} РК-парафій · {n_v} назв сіл · {n_b} рядків книг")
+                   note=note or (f"Marcin Kowal, genealogie-kresowe.pl — {n_p} РК-парафій · "
+                                 f"{n_v} назв сіл · {n_b} рядків книг"))
     if verbose:
         print(f"✅ {out.name} — {n_p} парафій · {n_v} назв сіл · {n_b} книг · "
               f"{res['size'] / 1e6:.1f} МБ")

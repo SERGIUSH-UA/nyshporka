@@ -46,6 +46,10 @@ def _rk_block(data: dict) -> None:  # type: ignore[type-arg]
     """РК-парафії зі складу сіл — або що пака немає."""
     from nyshporka.geog.rkparish import dekanat_label, gubernia_uk
 
+    if data.get("rk_installed") is None:
+        typer.echo("\n   Пак РК-парафій є, але не читається — до якого костелу ходило "
+                   "село, не перевірено (`nysh catalog verify`)")
+        return
     if not data.get("rk_installed"):
         typer.echo("\n   РК-парафій (склад сіл) на машині немає — до якого костелу "
                    "ходило село, не перевірено")
@@ -67,6 +71,10 @@ def _rk_block(data: dict) -> None:  # type: ignore[type-arg]
 
 def _court_block(data: dict) -> None:  # type: ignore[type-arg]
     """Згадки села в гродських книгах XVII–XVIII ст. — або що пака немає."""
+    if data.get("court_installed") is None:
+        typer.echo("\n   Пак гродських книг є, але не читається — згадки села в "
+                   "XVII–XVIII ст. не перевірено (`nysh catalog verify`)")
+        return
     if not data.get("court_installed"):
         typer.echo("\n   Покажчиків гродських книг (courtbooks) на машині немає — "
                    "згадки села в XVII–XVIII ст. не перевірено")

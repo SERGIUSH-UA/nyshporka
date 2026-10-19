@@ -1070,7 +1070,7 @@ def _szady(q: str) -> tuple[list[dict[str, Any]], bool]:
 RK_SHOWN = 5
 
 
-def _rk(q: str, also: list[str]) -> tuple[list[dict[str, Any]], list[CoverageItem], bool]:
+def _rk(q: str, also: list[str]) -> tuple[list[dict[str, Any]], list[CoverageItem], bool | None]:
     """РК-парафії, до складу яких входить село — і чи є сам пак.
 
     🔑 Покажчик знає костел лише в містечку, де він стоїть; до якого костелу
@@ -1082,8 +1082,8 @@ def _rk(q: str, also: list[str]) -> tuple[list[dict[str, Any]], list[CoverageIte
         ans = find_rk_parishes(q, also=also, limit=RK_SHOWN)
     except CatalogMissing:
         return [], [], False
-    except Exception:            # битий пак не валить пошук парафії
-        return [], [], False
+    except Exception:            # битий пак не валить пошук парафії, але й не «немає»
+        return [], [], None
     return ans.rows, _coverage_of(ans), True
 
 
@@ -1092,7 +1092,8 @@ def _rk(q: str, also: list[str]) -> tuple[list[dict[str, Any]], list[CoverageIte
 COURT_SHOWN = 12
 
 
-def _court(q: str, also: list[str]) -> tuple[list[dict[str, Any]], list[CoverageItem], bool]:
+def _court(q: str, also: list[str]
+           ) -> tuple[list[dict[str, Any]], list[CoverageItem], bool | None]:
     """Згадки села в покажчиках гродських книг XVII–XVIII ст. — і чи є сам пак."""
     try:
         from nyshporka.catalog.query import CatalogMissing, find_court_places
@@ -1100,8 +1101,8 @@ def _court(q: str, also: list[str]) -> tuple[list[dict[str, Any]], list[Coverage
         ans = find_court_places(q, also=also, limit=COURT_SHOWN)
     except CatalogMissing:
         return [], [], False
-    except Exception:            # битий пак не валить пошук парафії
-        return [], [], False
+    except Exception:            # битий пак не валить пошук парафії, але й не «немає»
+        return [], [], None
     return ans.rows, _coverage_of(ans), True
 
 

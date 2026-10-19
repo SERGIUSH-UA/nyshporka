@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -47,7 +48,7 @@ PARISHES: list[dict[str, Any]] = [
 
 
 @pytest.fixture
-def catalog(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def catalog(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
     cat = tmp_path / "catalog"
     cat.mkdir()
     monkeypatch.setenv("NYSHPORKA_CATALOG", str(cat))
