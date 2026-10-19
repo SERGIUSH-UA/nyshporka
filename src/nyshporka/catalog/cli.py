@@ -7,9 +7,6 @@
 from __future__ import annotations
 
 import json as _json
-import shutil
-import tempfile
-import zipfile
 from pathlib import Path
 
 import typer
@@ -112,62 +109,74 @@ def cmd_verify() -> None:
 @app.command("install")
 def cmd_install(
     src: Path = typer.Option(None, "--from", exists=True,
-                             help="тека, .zip або .sqlite-пак (офлайн)"),
+                             help="тека, .zip або .sqlite-пак (офлайн); без нього — свіжий реліз"),
     domain: str = typer.Option("", "--domain", help="лише цього домену"),
     origin: str = typer.Option("", "--origin",
                                help="ім'я пака (zip-зрізу); той самий уже стоїть — пропустити"),
 ) -> None:
-    """Покласти паки в каталог із теки чи файла.
+    """Покласти паки в каталог: з теки чи файла (`--from`) або з релізу `catalog-*`.
 
-    ⚠ Завантаження з релізу тут поки немає навмисно: маніфест іще не має
-    контрольних сум зібраного релізу, а качати без звірки не можна — обірваний
-    файл виглядав би як пак. Офлайн-шлях (`--from`) працює вже зараз, і саме ним
-    інсталятор кладе довідники в комплекті.
+    Без `--from` качає найновіший архів каталогу й ставить лише після звірки
+    sha256 і розміру з тими, що назвав GitHub (`catalog.remote`).
     """
+    from nyshporka.catalog import remote
+
     if src is None:
-        typer.echo("вкажіть --from <тека|файл>: завантаження з релізу ще не "
-                   "складено, а брати пак без звірки не можна")
-        raise typer.Exit(code=2)
+        if domain:
+            typer.echo("--domain діє лише з --from: реліз ставиться цілим архівом")
+            raise typer.Exit(code=2)
+        _update(apply=True, force=True)
+        return
     if origin and not domain and store.origin() == origin.strip():
         typer.echo(f"✓ каталоги вже з цього пака ({origin}) — не перезаписую")
         return
-    dst = store.catalog_dir()
-    dst.mkdir(parents=True, exist_ok=True)
-
-    # zip приймається нарівні з текою: саме так довідники їдуть з інсталятором,
-    # і змушувати людину розпаковувати вручну означало б зайвий крок там, де
-    # його легко зробити самим
-    tmpdir: tempfile.TemporaryDirectory[str] | None = None
-    if src.is_file() and src.suffix.lower() == ".zip":
-        tmpdir = tempfile.TemporaryDirectory(prefix="nysh-catalog-")
-        with zipfile.ZipFile(src) as zf:
-            zf.extractall(tmpdir.name)
-        src = Path(tmpdir.name)
-
-    files = ([src] if src.is_file() else
-             sorted(p for p in src.rglob("*.sqlite") if p.is_file()))
-    if not files:
-        typer.echo(f"у {src} немає жодного .sqlite")
+    done = remote.install_from(src, domain=domain, origin=origin)
+    if not done:
+        typer.echo(f"у {src} немає жодного .sqlite" + (f" домену {domain}" if domain else ""))
         raise typer.Exit(code=1)
-    n = 0
-    for f in files:
-        meta = store._read_meta(f)
-        if domain and meta.get("domain") != domain:
-            continue
-        target = dst / f.name
-        # через сусідній тимчасовий: обрив копіювання не має лишати
-        # напівфабрикату під бойовим іменем
-        tmp = target.with_name(target.name + ".part")
-        shutil.copy2(f, tmp)
-        tmp.replace(target)
-        n += 1
-        typer.echo(f"✅ {f.name} → {target}")
-    if tmpdir is not None:
-        tmpdir.cleanup()
-    store.invalidate()
-    if origin and not domain and n:
-        store.set_origin(origin)
-    typer.echo(f"поставлено паків: {n}")
+    for f in done:
+        typer.echo(f"✅ {f.name} → {f}")
+    typer.echo(f"поставлено паків: {len(done)}")
+
+
+def _update(*, apply: bool, force: bool = False) -> str:
+    """Свіжий каталог із релізу. → стан (`current`, `installed`, …).
+
+    `force` — поставити, навіть якщо позначка каже, що цей зріз уже стоїть.
+    """
+    from nyshporka.catalog import remote
+
+    rel = remote.latest()
+    if not rel.known:
+        typer.echo(f"каталог довідників: не перевірено — {rel.why}")
+        return "unknown"
+    if force:
+        store.set_origin("")
+    try:
+        res = remote.update(apply=apply, rel=rel)
+    except remote.CatalogFetchError as exc:
+        typer.echo(f"🔴 каталог довідників: {exc}")
+        raise typer.Exit(code=1) from None
+    if res.state == "current":
+        typer.echo(f"✓ каталог довідників свіжий ({rel.tag})")
+    elif res.state == "would-install":
+        typer.echo(f"каталог довідників: є новіший {rel.tag} ({rel.size / 1e6:.1f} МБ) — "
+                   f"поставить `nysh catalog update`")
+    else:
+        typer.echo(f"✅ каталог довідників {rel.tag}: поставлено паків {len(res.installed)}")
+    return res.state
+
+
+@app.command("update")
+def cmd_update(
+    check: bool = typer.Option(False, "--check", help="лише подивитись, не ставити"),
+) -> None:
+    """Поставити найновіший каталог довідників із релізу, якщо стоїть не він.
+
+    Той самий крок робить `nysh update` (вимкнути — `--no-catalog` чи
+    `NYSH_NO_CATALOG=1`).
+    """
+    _update(apply=not check)
 
 
 @app.command("remove")

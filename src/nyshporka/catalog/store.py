@@ -84,12 +84,12 @@ RELEASES_URL = "https://github.com/SERGIUSH-UA/nyshporka/releases"
 def install_hint() -> str:
     """Куди людина справді може піти по пак — одним рядком для будь-якої відмови.
 
-    🔴 Доти відмови радили `nysh catalog update` (такої команди немає) і
-    `nysh catalog install --domain …` без `--from` — а `install` нічого не
-    завантажує. Порада, виконана буквально, мала давати пак, а давала помилку.
+    🔴 Порада, виконана буквально, мусить давати пак. До 0.36.0 відмови радили
+    `nysh catalog update`, якої не було, і `install --domain` без `--from`, що
+    нічого не качав; з 0.36.1 `catalog update` качає й звіряє реліз сам.
     """
-    return (f"свіжий каталог — архів `nyshporka-catalog-<дата>.zip` у релізі `catalog-…` "
-            f"на {RELEASES_URL} (або перевстановлення інсталятором), далі "
+    return (f"`nysh catalog update` (свіжий каталог із релізу `catalog-…`); без мережі — "
+            f"архів `nyshporka-catalog-<дата>.zip` з {RELEASES_URL}, далі "
             f"`nysh catalog install --from <zip>`")
 
 

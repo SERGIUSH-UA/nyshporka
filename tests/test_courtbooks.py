@@ -170,8 +170,12 @@ def test_missing_pack_hint_is_an_action_that_exists(tmp_path: Path,
     finally:
         S.invalidate()
     msg = str(exc.value)
-    assert "catalog install --from" in msg and S.RELEASES_URL in msg
-    assert "catalog update" not in msg and "--domain" not in msg
+    assert "nysh catalog update" in msg and "catalog install --from" in msg
+    assert S.RELEASES_URL in msg and "--domain" not in msg
+    # порада веде на команду, яка є
+    from nyshporka.catalog.cli import app
+
+    assert "update" in {c.name for c in app.registered_commands}
 
 
 def test_migration_check_names_missing_catalog_domains(catalog: Path) -> None:

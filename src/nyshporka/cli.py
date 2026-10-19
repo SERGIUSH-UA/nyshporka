@@ -817,14 +817,42 @@ def relocate(
                   "чи прибрати старе.")
 
 
+def _catalog_step(*, check: bool, skip: bool) -> None:
+    """Каталог довідників у `nysh update`: свіжий реліз `catalog-*`, якщо стоїть не він.
+
+    🔴 Доти `nysh update` оновлював лише код, і новий домен пака не доходив до
+    тих, хто оновлювався командою: церкви ~1772 і поселення Wikidata (0.14.0)
+    до 19.10.2026 мав лише той, хто ставив інсталятором після їхньої появи —
+    тобто ніхто. Збій каталогу не зриває оновлення програми: старі паки
+    лишаються, причина друкується.
+    """
+    import os
+
+    if skip or os.environ.get("NYSH_NO_CATALOG", "").strip() in ("1", "true", "yes"):
+        console.print("[muted]каталог довідників: не чіпаю (--no-catalog / NYSH_NO_CATALOG)[/muted]")
+        return
+    from nyshporka.catalog.cli import _update
+
+    try:
+        _update(apply=not check)
+    except typer.Exit:
+        console.print("[warn]каталог довідників не оновився — старі паки лишаються; "
+                      "повторити: nysh catalog update[/warn]")
+
+
 @app.command()
 def update(
     check: bool = typer.Option(False, "--check",
                                help="лише подивитись, не ставити"),
     preset: str = typer.Option("", "--preset",
                                help="набір частин, якщо слід інсталятора втрачено"),
+    no_catalog: bool = typer.Option(False, "--no-catalog",
+                                    help="не чіпати каталог довідників (так само NYSH_NO_CATALOG=1)"),
 ) -> None:
     """Оновити застосунок: подивитись версію на pypi.org і поставити нову.
+
+    Каталог довідників (`catalog-*`) оновлюється тим самим кроком — і тоді,
+    коли нової версії програми немає: довідники виходять окремо від коду.
 
     ⚠ Установлення саме себе на ходу не робиться: `uv tool install --force`
     міняє те саме середовище, з якого зараз запущено `nysh`. Закрийте
@@ -843,6 +871,7 @@ def update(
 
     rel = U.latest()
     console.print(f"стоїть: [bold]{rel.installed}[/bold]")
+    _catalog_step(check=check, skip=no_catalog)
     if not rel.known:
         # 🔴 «Не питали» — окрема відповідь. Мовчазне «все свіже» тут було б
         # тим самим нулем без знаменника, лише про власну версію.
