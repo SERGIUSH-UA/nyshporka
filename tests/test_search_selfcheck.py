@@ -38,7 +38,7 @@ def _space(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *,
     # збиранні — тобто `PAGES_ROOT` заморожений на одній теці для всього
     # прогону. Без цієї підміни аркуші, занесені одним тестом, бачить наступний,
     # і знаменник recall накопичується через увесь файл.
-    monkeypatch.setattr(PS, "PAGES_ROOT", tmp_path / "data" / "pages")
+    monkeypatch.setattr(PS, "pages_root", lambda: tmp_path / "data" / "pages")
     PQ._CACHE.clear()
 
     d = tmp_path / "data" / "raw" / "dahmo_315" / "spr-8433"
@@ -65,8 +65,8 @@ def _space(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *,
 
     from nyshporka import htr_store as S
 
-    monkeypatch.setattr(S, "ROOT", tmp_path)
-    monkeypatch.setattr(S, "HTR_ROOT", tmp_path / "reports" / "htr")
+    monkeypatch.setattr(S, "case_base", lambda: tmp_path)
+    monkeypatch.setattr(S, "htr_root", lambda: tmp_path / "reports" / "htr")
     S._CACHE.clear()
     S._RUNS_CACHE = None
     return tmp_path

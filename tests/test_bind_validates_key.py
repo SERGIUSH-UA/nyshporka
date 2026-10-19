@@ -23,7 +23,7 @@ def R(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
     from nyshporka.cases import resolve as R
 
     real = R.LibraryIndex
-    monkeypatch.setattr(R, "OVERRIDES_PATH", tmp_path / "overrides.json")
+    monkeypatch.setattr(R, "overrides_path", lambda: tmp_path / "overrides.json")
     # Бібліотека тесту — одна справа; резолвер і `bind_run` будують індекс самі.
     monkeypatch.setattr(R, "LibraryIndex",
                         lambda rows=None: real(LIB if rows is None else rows))
@@ -35,11 +35,11 @@ def R(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
 
 
 def _stored(R: Any) -> dict[str, Any]:
-    return json.loads(Path(R.OVERRIDES_PATH).read_text(encoding="utf-8"))["runs"]
+    return json.loads(Path(R.overrides_path()).read_text(encoding="utf-8"))["runs"]
 
 
 def _write(R: Any, runs: dict[str, Any]) -> None:
-    Path(R.OVERRIDES_PATH).write_text(json.dumps({"runs": runs}, ensure_ascii=False),
+    Path(R.overrides_path()).write_text(json.dumps({"runs": runs}, ensure_ascii=False),
                                       encoding="utf-8")
     R.load_overrides.cache_clear()
     R._run_overrides.cache_clear()
@@ -90,7 +90,7 @@ def test_bind_refuses_garbage_and_leaves_the_file_alone(R: Any) -> None:
 def test_bind_refuses_a_case_missing_from_the_library(R: Any) -> None:
     with pytest.raises(ValueError, match="у бібліотеці немає"):
         R.bind_run("daho-run", "DAHO/31/141/140", "описка в номері")
-    assert not Path(R.OVERRIDES_PATH).exists()
+    assert not Path(R.overrides_path()).exists()
 
 
 def test_force_binds_a_case_not_yet_in_the_library(R: Any) -> None:

@@ -176,13 +176,13 @@ def test_all_counters_agree_on_a_mixed_folder(tmp_path: Path, monkeypatch) -> No
     scan = scan_dir(d, tmp_path, ("case",), 1)
     assert scan.n_frames == 3
 
-    monkeypatch.setattr(C, "ROOT", tmp_path)
+    monkeypatch.setattr(C, "case_base", lambda: tmp_path)
     monkeypatch.setattr(C, "_FRAMES_INDEX", {})
     assert C._count_frames_exact("case") == (3, True)
     monkeypatch.setattr(C, "_FRAMES_INDEX", C._frames_index([scan]))
     assert C._count_frames_exact("case") == (3, True)
 
-    monkeypatch.setattr(S, "ROOT", tmp_path)
+    monkeypatch.setattr(S, "case_base", lambda: tmp_path)
     assert S._disk_scans(SimpleNamespace(path="case")) == [
         "0001.jpg", "0002.jpg", "0003.jpg"]
 

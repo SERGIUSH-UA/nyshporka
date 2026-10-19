@@ -536,7 +536,7 @@ def test_binding_a_run_by_an_old_key_writes_the_new_one(
     from nyshporka.cases import rekey as RK
     from nyshporka.cases import resolve
 
-    monkeypatch.setattr(resolve, "OVERRIDES_PATH", old_space / "data/cases/overrides.json")
+    monkeypatch.setattr(resolve, "overrides_path", lambda: old_space / "data/cases/overrides.json")
     resolve.load_overrides.cache_clear()
     resolve._run_overrides.cache_clear()
     RK.apply()
@@ -570,15 +570,15 @@ def test_a_broken_store_is_named_not_traced(old_space: Path) -> None:
 def test_rollback_of_a_space_without_a_library_leaves_none(old_space: Path) -> None:
     """Бібліотеку й реєстр, яких до переносу не було, відкат прибирає."""
     from nyshporka.cases import rekey as RK
-    from nyshporka.cases.db import DB_PATH
-    from nyshporka.library import LIBRARY_PATH
+    from nyshporka.cases.db import index_path
+    from nyshporka.library import library_path
 
-    LIBRARY_PATH.unlink()
-    assert not DB_PATH.exists()
+    library_path().unlink()
+    assert not index_path().exists()
     RK.apply()
-    assert LIBRARY_PATH.is_file()
+    assert library_path().is_file()
     RK.rollback()
-    assert not LIBRARY_PATH.exists() and not DB_PATH.exists()
+    assert not library_path().exists() and not index_path().exists()
 
 
 def test_a_bundle_written_without_opys_follows_its_named_bundle(old_space: Path) -> None:

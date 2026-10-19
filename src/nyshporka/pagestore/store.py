@@ -41,8 +41,14 @@ from nyshporka.library import (
 from nyshporka.pagestore.models import CaseFile, CaseNote, PageNote, Record
 from nyshporka.utils.atomic import atomic_write_text
 
-ROOT = workspace().root
-PAGES_ROOT = workspace().pages
+
+def case_base() -> Path:
+    """Корінь, від якого лічаться відносні шляхи справ, — Майстерня."""
+    return workspace().hub
+
+
+def pages_root() -> Path:
+    return workspace().pages
 
 #: Формат файла справи. 2 — з нотатником (`notes`). Файл без нотаток пишеться
 #: як 1: його без змін читає й пакет, що нотатника ще не знає.
@@ -334,14 +340,14 @@ def case_path(ref: CaseRef) -> Path:
     ck = casekey.parse(ref.key)
     if ck is None:
         raise ValueError(f"ключ справи «{ref.key}» не нової форми — облік під ним не пишеться")
-    return PAGES_ROOT / ref.repo / f"{casekey.stem(ck)}.json"
+    return pages_root() / ref.repo / f"{casekey.stem(ck)}.json"
 
 
 def _legacy_path(ref: CaseRef) -> Path | None:
     """Файл, яким справа звалась до переносу обліку; лише поки простір не переїхав."""
     if casekey.keys_current():
         return None
-    reg = legacy.registry_set(ROOT)
+    reg = legacy.registry_set(case_base())
     old = legacy.legacy_key(ref.repo, ref.fond, ref.spr, ref.opys, reg)
     for k, new in legacy.moves().items():
         if new == ref.key:
@@ -352,7 +358,7 @@ def _legacy_path(ref: CaseRef) -> Path | None:
         return None
     _, fond, opys, spr = parsed
     name = f"{fond}-{opys}-{spr}" if opys else f"{fond}-{spr}"
-    return PAGES_ROOT / ref.repo / f"{name}.json"
+    return pages_root() / ref.repo / f"{name}.json"
 
 
 # ── читання ──────────────────────────────────────────────────────────────────
@@ -459,9 +465,9 @@ def _lock(path: Path, timeout: float = 5.0,
 
 
 def _rel(path: Path) -> str:
-    """Rel-шлях від кореня для звітів; абсолютний, якщо PAGES_ROOT винесено (тести)."""
+    """Rel-шлях від кореня для звітів; абсолютний, якщо pages_root() винесено (тести)."""
     try:
-        return str(path.relative_to(ROOT))
+        return str(path.relative_to(case_base()))
     except ValueError:
         return str(path)
 
@@ -696,7 +702,7 @@ def _notes_to_move(notes: list[CaseNote], stems: set[str]) -> tuple[list[CaseNot
 def _disk_scans(ref: CaseRef) -> list[str]:
     if not ref.path:
         return []
-    d = (ROOT / ref.path)
+    d = (case_base() / ref.path)
     if not d.is_dir():
         return []
     # Знаменник — за тим самим правилом, що в реєстрі й раннері (`frame_names`):
@@ -791,13 +797,13 @@ def totals() -> dict[str, Any]:
 
     out: dict[str, Any] = {"files": 0, "pages": 0, "full": 0,
                            "records": 0, "by_status": {}}
-    if not PAGES_ROOT.is_dir():
+    if not pages_root().is_dir():
         return out
     # Нова пам'ять на кожен виклик, а не правка спільної: два одночасні виклики
     # з потоків демона інакше прибирали б один в одного з-під рук; і файли,
     # яких більше немає, з неї випадають самі.
     memo: dict[str, tuple[tuple[int, int], dict[str, Any] | None]] = {}
-    for f in sorted(PAGES_ROOT.glob("*/*.json")):
+    for f in sorted(pages_root().glob("*/*.json")):
         try:
             st_ = f.stat()
         except OSError:

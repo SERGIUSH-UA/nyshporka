@@ -398,7 +398,7 @@ def film_dirs(film: str) -> list[Path]:
         from nyshporka.core.workspace import workspace
         from nyshporka.library import load_library
 
-        root = workspace().root
+        root = workspace().hub
         rows = load_library()
     except Exception:
         return []
@@ -633,7 +633,7 @@ def _library_home(key: str, want_opys: str) -> Path | None:
         from nyshporka.core.workspace import workspace
         from nyshporka.library import load_library
 
-        root = workspace().root
+        root = workspace().hub
         rows = load_library()
     except Exception:
         return None
@@ -697,7 +697,7 @@ def case_dir_for(case_key: str) -> Path | None:
         from nyshporka.library import load_library
     except Exception:
         return None
-    root = workspace().root
+    root = workspace().hub
     try:
         rows = load_library()
     except Exception:

@@ -48,7 +48,7 @@ def catalog_dir() -> Path:
 
 
 def index_path() -> Path:
-    return workspace().root / "data" / "derived" / "geog.sqlite"
+    return workspace().derived / "geog.sqlite"
 
 
 def _sources() -> tuple[Path, Path]:

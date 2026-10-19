@@ -28,8 +28,8 @@ def space(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
                                              encoding="utf-8")
     W.reset()
     W.use(W.Workspace(root=tmp_path, name="тест", origin="test"))
-    monkeypatch.setattr(S, "ROOT", tmp_path)
-    monkeypatch.setattr(S, "HTR_ROOT", tmp_path / "reports" / "htr")
+    monkeypatch.setattr(S, "case_base", lambda: tmp_path)
+    monkeypatch.setattr(S, "htr_root", lambda: tmp_path / "reports" / "htr")
     S._CACHE.clear()
     S._RUNS_CACHE = None
     yield tmp_path
@@ -39,7 +39,7 @@ def space(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 def _pages_file(root: Path, name: str, statuses: list[str], records: int = 0) -> Path:
     from nyshporka.pagestore import store as PS
 
-    f = PS.PAGES_ROOT / "R" / f"{name}.json"
+    f = PS.pages_root() / "R" / f"{name}.json"
     f.parent.mkdir(parents=True, exist_ok=True)
     f.write_text(json.dumps({
         "pages": {f"{i:04}.jpg": {"status": s} for i, s in enumerate(statuses)},

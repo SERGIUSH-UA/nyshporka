@@ -37,16 +37,15 @@ def space(tmp_path: Path, monkeypatch):
     from nyshporka.cases import db as DB
 
     for mod, attr, value in (
-        (L, "ROOT", tmp_path), (L, "RAW_DIR", tmp_path / "data" / "raw"),
-        (L, "LIBRARY_PATH", tmp_path / "data" / "derived" / "case_library.json"),
-        (L, "VERDICTS_PATH", tmp_path / "data" / "spotter" / "case_verdicts.json"),
-        (C, "ROOT", tmp_path), (C, "HTR_ROOT", tmp_path / "reports" / "htr"),
-        (C, "RAW_DIR", tmp_path / "data" / "raw"),
-        (C, "PAGES_ROOT", tmp_path / "data" / "pages"),
-        (C, "CLAN_STATE", tmp_path / "data" / "clan_hunt" / "state.json"),
-        (C, "DERIVED_DB", tmp_path / "data" / "derived" / "nyshporka.sqlite"),
-        (DB, "ROOT", tmp_path),
-        (DB, "DB_PATH", tmp_path / "data" / "derived" / "case_index.sqlite"),
+        (L, "case_base", lambda: tmp_path), (L, "raw_dir", lambda: tmp_path / "data" / "raw"),
+        (L, "library_path", lambda: tmp_path / "data" / "derived" / "case_library.json"),
+        (L, "verdicts_path", lambda: tmp_path / "data" / "spotter" / "case_verdicts.json"),
+        (C, "case_base", lambda: tmp_path), (C, "htr_root", lambda: tmp_path / "reports" / "htr"),
+        (C, "raw_dir", lambda: tmp_path / "data" / "raw"),
+        (C, "pages_root", lambda: tmp_path / "data" / "pages"),
+        (C, "clan_state", lambda: tmp_path / "data" / "clan_hunt" / "state.json"),
+        (C, "derived_db", lambda: tmp_path / "data" / "derived" / "nyshporka.sqlite"),
+        (DB, "index_path", lambda: tmp_path / "data" / "derived" / "case_index.sqlite"),
     ):
         monkeypatch.setattr(mod, attr, value)
 

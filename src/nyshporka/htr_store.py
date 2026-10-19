@@ -32,8 +32,15 @@ from nyshporka.records import names as NAMES
 from nyshporka.search import rank as RANK
 from nyshporka.utils.translit import normalize_archival
 
-ROOT = workspace().root
-HTR_ROOT = workspace().htr_reports
+
+def case_base() -> Path:
+    """Корінь, від якого лічаться відносні шляхи справ, — Майстерня."""
+    return workspace().hub
+
+
+def htr_root() -> Path:
+    """Тека прогонів читання (`reports/htr`) — Майстерня."""
+    return workspace().htr_reports
 
 _TOKEN_RE = re.compile(r"[^\s.,;:()\[\]{}/\\|«»\"'’—–-]+")
 
@@ -151,7 +158,7 @@ def under_raw(path: str | Path) -> Path | None:
     `data/raw/../../etc` вийде за межі й отримає None), але junction не розкриває.
     Фолбек на `resolve()` лишається для випадку, коли симлінком є сам корінь.
     """
-    p = Path(os.path.abspath(Path(path) if Path(path).is_absolute() else ROOT / path))
+    p = Path(os.path.abspath(Path(path) if Path(path).is_absolute() else case_base() / path))
     for base in _case_roots():
         for cand, root in ((p, base), (p.resolve(), base.resolve())):
             try:
@@ -244,7 +251,7 @@ def _case_dir(name: str) -> Path | None:
     # 🔴 `:` — теж межа: `T:/root / "C:x"` дає шлях на іншому диску.
     if not name or "/" in name or "\\" in name or ":" in name or name.startswith("."):
         return None
-    key = (str(HTR_ROOT), name)
+    key = (str(htr_root()), name)
     d = _CASE_DIR_MEMO.get(key)
     if d is not None:
         if d.is_dir():
@@ -254,9 +261,9 @@ def _case_dir(name: str) -> Path | None:
     # не має ні роздільників, ні диска, ні `..`, тож вийти з кореня воно не
     # може. `resolve()` на кожне з 12 803 імен коштував 8.4 с холодного
     # «Огляду» (замір 17.10.2026).
-    root = _ROOT_RESOLVED.get(str(HTR_ROOT))
+    root = _ROOT_RESOLVED.get(str(htr_root()))
     if root is None:
-        root = _ROOT_RESOLVED[str(HTR_ROOT)] = HTR_ROOT.resolve()
+        root = _ROOT_RESOLVED[str(htr_root())] = htr_root().resolve()
     d = root / name
     if not d.is_dir():
         return None
@@ -564,12 +571,12 @@ def _runs_stamp() -> tuple[int, int, int, str]:
     перезапуску (рецензія 08.09, третій раунд). Бібліотека — бо шифра й кадри
     в рядку переліку беруться з неї.
     """
-    if not HTR_ROOT.is_dir():
+    if not htr_root().is_dir():
         return (0, 0, 0, "")
     n = 0
     newest = 0
     newest_meta = 0
-    with os.scandir(HTR_ROOT) as it:
+    with os.scandir(htr_root()) as it:
         for e in it:
             if not e.is_dir():
                 continue
@@ -587,9 +594,9 @@ def _runs_stamp() -> tuple[int, int, int, str]:
 
 def _library_stamp() -> str:
     try:
-        from nyshporka.library import LIBRARY_PATH
+        from nyshporka.library import library_path
 
-        st = LIBRARY_PATH.stat()
+        st = library_path().stat()
         return f"{st.st_mtime_ns:x}-{st.st_size:x}"
     except Exception:
         return ""
@@ -672,7 +679,7 @@ def list_cases() -> list[dict[str, Any]]:
     entries = _runs_cache_read(stamp[3])
     changed = False
     out: list[dict[str, Any]] = []
-    if not HTR_ROOT.is_dir():
+    if not htr_root().is_dir():
         return out
     try:
         from nyshporka.library import describe_case
@@ -680,7 +687,7 @@ def list_cases() -> list[dict[str, Any]]:
         def describe_case(_p: str) -> dict[str, Any] | None:  # type: ignore[misc]
             return None
     seen: set[str] = set()
-    for meta_path in sorted(HTR_ROOT.glob("*/_htr_meta.json")):
+    for meta_path in sorted(htr_root().glob("*/_htr_meta.json")):
         name = meta_path.parent.name
         seen.add(name)
         try:
@@ -915,7 +922,7 @@ def runs_by_case_dir() -> dict[str, list[dict[str, Any]]]:
     global _RUNS_BY_DIR
 
     rows = list_cases()
-    root = str(ROOT)
+    root = str(case_base())
     memo = _RUNS_BY_DIR
     if memo is not None and memo[0] is rows and memo[1] == root:
         return memo[2]
@@ -924,7 +931,7 @@ def runs_by_case_dir() -> dict[str, list[dict[str, Any]]]:
         # abspath, не resolve: ключ мусить збігатися з тим, що дає `under_raw`,
         # інакше junction-справи (ф.196 на T:) не матчились би з пікером
         try:
-            key = str(Path(os.path.abspath(ROOT / (c.get("case_dir") or ""))))
+            key = str(Path(os.path.abspath(case_base() / (c.get("case_dir") or ""))))
         except OSError:
             continue
         out.setdefault(key, []).append(c)
@@ -945,7 +952,7 @@ def find_runs_for_case(case: str) -> list[dict[str, Any]]:
     if not case:
         return []
     case_dir = Path(os.path.abspath(
-        Path(case) if Path(case).is_absolute() else ROOT / case))
+        Path(case) if Path(case).is_absolute() else case_base() / case))
     return runs_by_case_dir().get(str(case_dir), [])
 
 
@@ -1177,7 +1184,7 @@ def _canon_stamp() -> tuple[str, str]:
 
     mv = ""
     with contextlib.suppress(Exception):
-        st = (ROOT / legacy_key.MOVES).stat()
+        st = (case_base() / legacy_key.MOVES).stat()
         mv = f"{st.st_mtime_ns:x}-{st.st_size:x}"
     return (_library_stamp(), mv)
 

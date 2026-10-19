@@ -116,7 +116,7 @@ def records_prep(a: PrepArgs) -> Envelope:
 
     case_dir = Path(ref.path)
     if not case_dir.is_absolute():
-        case_dir = workspace().root / case_dir
+        case_dir = workspace().hub / case_dir
     if not case_dir.is_dir():
         return fail(f"теки сканів немає на диску: {case_dir}")
 

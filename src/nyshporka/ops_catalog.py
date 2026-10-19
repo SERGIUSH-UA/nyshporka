@@ -737,8 +737,8 @@ def registry_merge(a: MergeArgs) -> Envelope:
         return fail(f"тека фонду «{fond_id}» не годиться: {exc}")
     try:
         res = merge_fond(
-            target, dest=ws.root / dest, out=ws.root / out,
-            library=ws.root / "data" / "derived" / "case_library.json",
+            target, dest=ws.hub / dest, out=ws.hub / out,
+            library=ws.derived / "case_library.json",
             dry_run=a.dry_run)
     except MergeError as exc:
         return fail(str(exc))
@@ -775,7 +775,7 @@ def registry_collect(a: CollectArgs) -> Envelope:
     except WorkspaceError as exc:
         return fail(str(exc))
 
-    reg = collect.load(ws.root)
+    reg = collect.load(ws.hub)
     c = reg.get(a.collector)
     if c is None:
         return fail(f"збирача «{a.collector}» немає — див. `nysh registry sources`")
@@ -786,7 +786,7 @@ def registry_collect(a: CollectArgs) -> Envelope:
         return fail(plan.why or f"{c.label}: збирати нічим")
 
     try:
-        dest = ws.root / registry_dir(target.fond_id)
+        dest = ws.hub / registry_dir(target.fond_id)
     except UnsafeName as exc:
         return fail(f"тека фонду «{target.fond_id}» не годиться: {exc}")
     kw: dict[str, Any] = {"refresh": a.refresh, "dry_run": a.dry_run}

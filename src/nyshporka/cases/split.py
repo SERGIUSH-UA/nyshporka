@@ -282,7 +282,7 @@ def plan(case_dir: str | Path, specs: list[tuple[str, str, str]]) -> Plan:
         if p.dir.resolve() in (d.resolve(), frames_dir.resolve()):
             raise SplitError(f"частина «{p.spr}» лягла б у ту саму теку, що розкладається")
 
-    root = workspace().root
+    root = workspace().hub
     out = Plan(case_dir=d, frames_dir=frames_dir, names=names, parts=parts,
                old_key=_old_key(d, meta), runs=[])
     by_dir = S.runs_by_case_dir()
@@ -290,7 +290,7 @@ def plan(case_dir: str | Path, specs: list[tuple[str, str, str]]) -> Plan:
              for r in by_dir.get(key) or []} - {""}
     allruns = set(mains)
     for name in sorted(mains):
-        allruns |= {v.name for v in voice_dirs(S.HTR_ROOT / name)}
+        allruns |= {v.name for v in voice_dirs(S.htr_root() / name)}
     out.runs = sorted(allruns)
     bases = sorted(n for n in allruns
                    if not any(n != o and n.startswith(o + "-") for o in allruns))
@@ -428,7 +428,7 @@ def split(case_dir: str | Path, specs: list[tuple[str, str, str]], *,
     from nyshporka.cases.register import case_path
     from nyshporka.core.workspace import workspace
 
-    root = workspace().root
+    root = workspace().hub
     here = case_path(case_dir)
     journal = here / JOURNAL
     old = _read_journal(journal)
@@ -561,8 +561,8 @@ def _split_run(pl: Plan, p: Part, run: str, root: Path) -> None:
     from nyshporka.cloud.verify import META_NAME, QUARANTINE_NAME
 
     assert p.dir is not None
-    src = S.HTR_ROOT / run
-    dst = S.HTR_ROOT / p.runs[run]
+    src = S.htr_root() / run
+    dst = S.htr_root() / p.runs[run]
     meta = _read_json(src / META_NAME)
     if not meta:
         return
@@ -623,7 +623,7 @@ def _mark_old(pl: Plan, root: Path) -> None:
     meta["split_at"] = _now()
     _write_json(side, meta)
     for run in pl.runs:
-        f = S.HTR_ROOT / run / META_NAME
+        f = S.htr_root() / run / META_NAME
         m = _read_json(f)
         if not m:
             continue
@@ -704,7 +704,7 @@ def undo(case_dir: str | Path) -> dict[str, Any]:
     from nyshporka.share import align
 
     d = case_path(case_dir)
-    root = workspace().root
+    root = workspace().hub
     journal = _read_journal(d / JOURNAL)
     if not journal:
         raise SplitError(f"розбивки в теці немає (файла {JOURNAL} не знайдено): {d}")
@@ -717,11 +717,11 @@ def undo(case_dir: str | Path) -> dict[str, Any]:
             continue
         pdir = root / str(part["dir"])
         for old, new in (part.get("runs") or {}).items():
-            run_dir = S.HTR_ROOT / str(new)
+            run_dir = S.htr_root() / str(new)
             if not run_dir.is_dir():
                 continue
             if _read_json(run_dir / META_NAME).get("split_from", {}).get("run") != old \
-                    or not _run_is_copy(run_dir, S.HTR_ROOT / str(old)):
+                    or not _run_is_copy(run_dir, S.htr_root() / str(old)):
                 kept.append(f"прогін {new}: змінено після розбивки — лишаю")
                 continue
             shutil.rmtree(run_dir)
@@ -752,7 +752,7 @@ def undo(case_dir: str | Path) -> dict[str, Any]:
     elif passport.is_file():
         _write_json(passport, meta)
     for run in journal.get("runs") or []:
-        f = S.HTR_ROOT / str(run) / META_NAME
+        f = S.htr_root() / str(run) / META_NAME
         m = _read_json(f)
         if m.pop("superseded", None) is not None:
             _write_json(f, m)

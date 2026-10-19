@@ -214,7 +214,7 @@ def library_list(a: LibraryArgs) -> Envelope:
     # «файл побитий» до «справ немає» — рівно того хибного нуля, від якого
     # написаний докстрінг модуля. Побита бібліотека при цьому виглядала б
     # гірше за відсутню: `built: true`, «0 справ», жодного натяку на причину.
-    if not L.LIBRARY_PATH.exists():
+    if not L.library_path().exists():
         env = ok({"cases": [], "shown": None, "total": None, "built": False})
         env.warn("no_library_yet",
                  "бібліотеку ще не збирали — це не означає, що справ немає")
@@ -222,13 +222,13 @@ def library_list(a: LibraryArgs) -> Envelope:
         env.suggest("cases.build", "зібрати зведення з канону й диска")
         return env
     try:
-        json.loads(L.LIBRARY_PATH.read_text(encoding="utf-8"))
+        json.loads(L.library_path().read_text(encoding="utf-8"))
     except Exception as exc:
         # 🔴 Побите зведення лишало екран БЕЗ жодної кнопки — на відміну від
         # стану «ще не збирали», де кнопка є. Тобто гірший із двох станів мав
         # менше виходів, ніж кращий.
         return fail(f"зведення справ не читається ({type(exc).__name__}: {exc}) — "
-                    f"файл {L.LIBRARY_PATH.name} побитий, його треба "
+                    f"файл {L.library_path().name} побитий, його треба "
                     f"перезібрати").suggest(
             "cases.build", "перезібрати зведення справ")
 

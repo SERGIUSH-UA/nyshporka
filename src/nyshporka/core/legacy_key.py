@@ -131,10 +131,10 @@ def record_moves(root: Path, new: dict[str, str], *, made: str) -> None:
 
 
 def _stamp(root: Path) -> tuple[Any, ...]:
-    from nyshporka.library import LIBRARY_PATH
+    from nyshporka.library import library_path
 
     st: list[tuple[str, int | None, int | None]] = []
-    for p in (root / MOVES, LIBRARY_PATH, root / REGISTRY):
+    for p in (root / MOVES, library_path(), root / REGISTRY):
         try:
             s = p.stat()
             st.append((str(p), s.st_mtime_ns, s.st_size))
@@ -153,7 +153,7 @@ def moves(root: Path | None = None) -> dict[str, str]:
         try:
             from nyshporka.core.workspace import workspace
 
-            root = workspace().root
+            root = workspace().hub
         except Exception:   # простору немає (сервер Супряги) — старих ключів теж
             return {}
     stamp = _stamp(root)

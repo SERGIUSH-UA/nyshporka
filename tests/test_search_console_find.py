@@ -40,7 +40,7 @@ def reg(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
                     (key, lab, f, o, sh, title, stage))
     con.commit()
     con.close()
-    monkeypatch.setattr(db, "DB_PATH", dbp)
+    monkeypatch.setattr(db, "index_path", lambda: dbp)
     return dbp
 
 
@@ -87,7 +87,7 @@ def test_scopes_filter_and_drop_the_repeated_shifra_from_titles(reg: Path) -> No
 
 
 def test_without_registry_scopes_say_so(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(db, "DB_PATH", tmp_path / "нема.sqlite")
+    monkeypatch.setattr(db, "index_path", lambda: tmp_path / "нема.sqlite")
     assert _scopes() == {"items": [], "registry": False}
 
 

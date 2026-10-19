@@ -608,10 +608,10 @@ def _bound() -> dict[str, str | None]:
     """
     global _BOUND
     from nyshporka import htr_store as S
-    from nyshporka.cases.resolve import OVERRIDES_PATH
+    from nyshporka.cases.resolve import overrides_path
 
     try:
-        st = OVERRIDES_PATH.stat()
+        st = overrides_path().stat()
         sig: Any = (st.st_mtime_ns, st.st_size)
     except OSError:
         sig = None

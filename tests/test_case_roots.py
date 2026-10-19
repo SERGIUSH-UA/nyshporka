@@ -176,22 +176,22 @@ def test_an_adopted_folder_shows_up_before_data_raw_exists(
     # показує на чужий простір — той, що існує. Без цієї підміни `_scan_roots`
     # віддає два корені, оголошена тека дістає індекс 1, і зламана перевірка
     # `if i` проходить: умова вади (raw ще немає) просто не відтворюється.
-    monkeypatch.setattr(L, "RAW_DIR", root / "data" / "raw")
+    monkeypatch.setattr(L, "raw_dir", lambda: root / "data" / "raw")
     # 🔴 `RAW_DIR` не єдина константа, обчислена на імпорті. Доки підмінялась
     # тільки вона, `build_library()` читав ЗІБРАНУ бібліотеку чужого простору
     # (`case_library.json` розробника) і віддавав його справи — тест падав у
     # повному прогоні й проходив окремо, тобто результат вирішував порядок
     # імпортів, а не код. Спіймано 2026-08-26.
-    monkeypatch.setattr(L, "ROOT", root)
-    monkeypatch.setattr(L, "SOURCES_DIR", root / "data" / "source" / "sources")
-    monkeypatch.setattr(L, "LIBRARY_PATH", root / "data" / "derived" / "case_library.json")
-    monkeypatch.setattr(L, "VERDICTS_PATH", root / "data" / "spotter" / "case_verdicts.json")
+    monkeypatch.setattr(L, "case_base", lambda: root)
+    monkeypatch.setattr(L, "sources_dir", lambda: root / "data" / "source" / "sources")
+    monkeypatch.setattr(L, "library_path", lambda: root / "data" / "derived" / "case_library.json")
+    monkeypatch.setattr(L, "verdicts_path", lambda: root / "data" / "spotter" / "case_verdicts.json")
     for fn in ("load_library", "_opys_merged", "_master_index",
                "_wikisource_meta", "_lookup_for"):
         got = getattr(L, fn, None)
         if got is not None and hasattr(got, "cache_clear"):
             got.cache_clear()
-    assert not L.RAW_DIR.exists(), "фікстура: raw не мусить існувати"
+    assert not L.raw_dir().exists(), "фікстура: raw не мусить існувати"
 
     from nyshporka import ops as O
 

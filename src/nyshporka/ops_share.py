@@ -1340,15 +1340,15 @@ def _row_path(raw: str) -> tuple[Path | None, str]:
     if not raw or raw.startswith(("\\\\", "//")) or "\0" in raw:
         return None, "мережевий або порожній шлях пакета не приймається"
     ws = workspace()
-    p = Path(raw) if Path(raw).is_absolute() else ws.root / raw
+    p = Path(raw) if Path(raw).is_absolute() else ws.hub / raw
     p = Path(os.path.abspath(p))
-    for base in (ws.root, *ws.case_roots()):
+    for base in (ws.hub, *ws.case_roots()):
         try:
             p.relative_to(Path(os.path.abspath(base)))
             return p, ""
         except ValueError:
             continue
-    return None, f"пакет має лежати в просторі ({ws.root}) або в корені справ"
+    return None, f"пакет має лежати в просторі ({ws.hub}) або в корені справ"
 
 
 @op("share.row", summary="Рядок каталогу для пулу",

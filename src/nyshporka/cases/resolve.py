@@ -16,17 +16,19 @@ junction, який `dejunction()` не покриває. Тобто
 """
 from __future__ import annotations
 
+import functools
 import re
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass, replace
-from functools import lru_cache
-from typing import Any
+from pathlib import Path
+from typing import Any, Generic, TypeVar
 
 from nyshporka.cases.model import RunLink
 from nyshporka.core import casekey
 from nyshporka.core import legacy_key as legacy
+from nyshporka.core.workspace import workspace
 from nyshporka.library import (
-    ROOT,
     _archium_parse,
     default_opys,
     dejunction,
@@ -35,7 +37,38 @@ from nyshporka.library import (
 )
 from nyshporka.utils.atomic import CorruptFileError, read_json, write_json
 
-OVERRIDES_PATH = ROOT / "data" / "cases" / "overrides.json"
+_T = TypeVar("_T")
+
+
+def overrides_path() -> Path:
+    """Ручні прив'язки прогонів до справ — Майстерня."""
+    return workspace().cases / "overrides.json"
+
+
+class _ByOverridesPath(Generic[_T]):
+    """Кеш на один результат, що протухає, коли міняється шлях до прив'язок.
+
+    🔴 Не `lru_cache(maxsize=1)`: той не знає, з якого простору читав. Після
+    перемикання простору (інший проєкт на Майстерні, наступний тест у тому
+    самому процесі) він віддавав би прив'язки попереднього — і реєстр мовчки
+    отримував би чужі збірки.
+    """
+
+    def __init__(self, fn: Callable[[], _T]) -> None:
+        self._fn = fn
+        self._key: str | None = None
+        self._value: _T | None = None
+        functools.update_wrapper(self, fn)
+
+    def __call__(self) -> _T:
+        key = str(overrides_path())
+        if self._key != key or self._value is None:
+            self._value = self._fn()
+            self._key = key
+        return self._value
+
+    def cache_clear(self) -> None:
+        self._key, self._value = None, None
 
 #: Суфікси похідних прогонів: другий голос, черга на око, рятувальний прохід,
 #: проба версії. Такий прогін описує той самий матеріал, що й базовий, тож
@@ -215,7 +248,7 @@ class LibraryIndex:
         return self._pick(keys, repo)
 
 
-@lru_cache(maxsize=1)
+@_ByOverridesPath
 def load_overrides() -> dict[str, Any]:
     """Ручні рішення реєстру (git). Найвищий пріоритет — це рішення людини.
 
@@ -231,13 +264,13 @@ def load_overrides() -> dict[str, Any]:
     у парі з `bind_run` («прочитати → додати ключ → записати») стирав усі
     попередні прив'язки й усі `bundles` на першому ж записі.
     """
-    data = read_json(OVERRIDES_PATH, default={})
+    data = read_json(overrides_path(), default={})
     if not isinstance(data, dict):
-        raise CorruptFileError(OVERRIDES_PATH, "у корені не об'єкт")
+        raise CorruptFileError(overrides_path(), "у корені не об'єкт")
     return dict(data)
 
 
-@lru_cache(maxsize=1)
+@_ByOverridesPath
 def _run_overrides() -> dict[str, dict[str, Any]]:
     """ім'я прогону → рішення (з обох секцій; `bundles.runs` розгортається)."""
     data = load_overrides()
@@ -398,11 +431,11 @@ def put_aside(paths: list[str], why: str = "", *, undo: bool = False) -> dict[st
         data["set_aside"] = aside
     else:
         data.pop("set_aside", None)
-    write_json(OVERRIDES_PATH, data, indent=1)
+    write_json(overrides_path(), data, indent=1)
     load_overrides.cache_clear()
     _run_overrides.cache_clear()
     return {"paths": [str(p).rstrip("/") for p in paths], "undo": undo,
-            "path": str(OVERRIDES_PATH)}
+            "path": str(overrides_path())}
 
 
 def bind_run(run: str, key: str, why: str = "", *, force: bool = False) -> dict[str, Any]:
@@ -454,14 +487,14 @@ def bind_run(run: str, key: str, why: str = "", *, force: bool = False) -> dict[
     runs = dict(data.get("runs") or {})
     runs[run] = {"key": key, **({"why": why} if why else {})}
     data["runs"] = runs
-    write_json(OVERRIDES_PATH, data, indent=1)
+    write_json(overrides_path(), data, indent=1)
     # 🔴 Кеші скидаємо обидва. `load_overrides` і `_run_overrides` кешовані
     # `lru_cache`, тож без цього правка підхопилась би лише після рестарту
     # процесу — а людина, яка щойно прив'язала прогін, одразу тисне «показати»
     # і бачить ту саму відмову. Виглядає це як «не спрацювало».
     load_overrides.cache_clear()
     _run_overrides.cache_clear()
-    return {"run": run, "key": key, "why": why, "path": str(OVERRIDES_PATH),
+    return {"run": run, "key": key, "why": why, "path": str(overrides_path()),
             "asked": asked, "normalized": asked != key, "in_library": in_library}
 
 

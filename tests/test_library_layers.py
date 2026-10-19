@@ -40,16 +40,15 @@ def space(tmp_path: Path, monkeypatch):
          "doc_type": "сповідні розписи"},
     ]}), encoding="utf-8")
 
-    monkeypatch.setattr(L, "LIBRARY_PATH", derived / "case_library.json")
-    monkeypatch.setattr(L, "VERDICTS_PATH", tmp_path / "verdicts.json")
-    # 🔴 Шлях реєстру теж, і це не формальність. `cases.db.DB_PATH` рахується
-    # при імпорті від того простору, який трапився першим, і далі не змінюється
-    # ніколи. Без цієї підміни тест читав би реєстр чужого простору — того, що
-    # лишився від попереднього тесту, — і «шарів немає» перетворювалось би на
-    # «шари є», причому лише в повній збірці й лише за певного порядку.
+    monkeypatch.setattr(L, "library_path", lambda: derived / "case_library.json")
+    monkeypatch.setattr(L, "verdicts_path", lambda: tmp_path / "verdicts.json")
+    # 🔴 Шлях реєстру теж: без цієї підміни тест читав би реєстр простору
+    # збирання — того, що лишився від попереднього тесту, — і «шарів немає»
+    # перетворювалось би на «шари є», причому лише в повній збірці й лише за
+    # певного порядку.
     from nyshporka.cases import db as DB
 
-    monkeypatch.setattr(DB, "DB_PATH", derived / "case_index.sqlite")
+    monkeypatch.setattr(DB, "index_path", lambda: derived / "case_index.sqlite")
     LY.reset()
     yield tmp_path
     LY.reset()
@@ -100,7 +99,7 @@ def test_the_unbuilt_library_is_not_an_empty_one(tmp_path: Path, monkeypatch) ->
     from nyshporka import library as L
     from nyshporka.cases import layers as LY
 
-    monkeypatch.setattr(L, "LIBRARY_PATH", tmp_path / "nema.json")
+    monkeypatch.setattr(L, "library_path", lambda: tmp_path / "nema.json")
     LY.reset()
     env = _call()
     assert env.data["shown"] is None, "нуль замість «невідомо»"

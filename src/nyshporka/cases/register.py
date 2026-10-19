@@ -224,7 +224,7 @@ def case_path(case_dir: str | Path) -> Path:
     if not p.is_absolute():
         from nyshporka.core.workspace import workspace
 
-        p = workspace().root / p
+        p = workspace().hub / p
     # 🔴 `abspath`, а не `resolve()`: той розкриває junction, і тека
     # `data/raw/bev_pdh/spr-1` ставала `D:\архів\…` — «поза простором», хоча
     # бібліотека її бачить (див. `library._junctions`).
@@ -280,7 +280,7 @@ def key_mismatch(case_dir: Path, sidecar: dict[str, Any]) -> str:
         return ""
     try:
         rel = Path(os.path.abspath(case_dir)).relative_to(
-            os.path.abspath(workspace().root)).as_posix()
+            os.path.abspath(workspace().hub)).as_posix()
     except ValueError:
         rel = Path(case_dir).as_posix()
     L._sidecar_case.cache_clear()       # паспорт щойно переписано
@@ -306,7 +306,7 @@ def _rel_to_root(case_dir: Path) -> str:
 
     try:
         return Path(os.path.abspath(case_dir)).relative_to(
-            os.path.abspath(workspace().root)).as_posix()
+            os.path.abspath(workspace().hub)).as_posix()
     except ValueError:
         return Path(case_dir).as_posix()
 

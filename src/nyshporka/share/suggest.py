@@ -173,7 +173,7 @@ def _zbirna(row: dict[str, Any], runs: list[str]) -> Any:
     rel = str(row.get("case_dir") or "")
     names = (str(row.get("case_key") or ""), *runs)
     if rel:
-        return SP.of_dir(workspace().root / rel, *names)
+        return SP.of_dir(workspace().hub / rel, *names)
     return SP.of_passport({}, *names)
 
 

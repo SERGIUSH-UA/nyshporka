@@ -70,8 +70,8 @@ def _space(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, extra: str = "") -> 
 
     from nyshporka import htr_store as S
 
-    monkeypatch.setattr(S, "ROOT", tmp_path)
-    monkeypatch.setattr(S, "HTR_ROOT", tmp_path / "reports" / "htr")
+    monkeypatch.setattr(S, "case_base", lambda: tmp_path)
+    monkeypatch.setattr(S, "htr_root", lambda: tmp_path / "reports" / "htr")
     S._CACHE.clear()
     S._RUNS_CACHE = None
     return tmp_path

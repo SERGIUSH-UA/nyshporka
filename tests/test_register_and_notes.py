@@ -55,11 +55,11 @@ def space(tmp_path: Path, monkeypatch):
     from nyshporka.pagestore import store as S
 
     for mod, attr, value in (
-        (L, "ROOT", tmp_path), (L, "RAW_DIR", tmp_path / "data" / "raw"),
-        (L, "LIBRARY_PATH", tmp_path / "data" / "derived" / "case_library.json"),
-        (L, "VERDICTS_PATH", tmp_path / "data" / "spotter" / "case_verdicts.json"),
-        (S, "ROOT", tmp_path), (S, "PAGES_ROOT", tmp_path / "data" / "pages"),
-        (DB, "DB_PATH", tmp_path / "data" / "derived" / "case_index.sqlite"),
+        (L, "case_base", lambda: tmp_path), (L, "raw_dir", lambda: tmp_path / "data" / "raw"),
+        (L, "library_path", lambda: tmp_path / "data" / "derived" / "case_library.json"),
+        (L, "verdicts_path", lambda: tmp_path / "data" / "spotter" / "case_verdicts.json"),
+        (S, "case_base", lambda: tmp_path), (S, "pages_root", lambda: tmp_path / "data" / "pages"),
+        (DB, "index_path", lambda: tmp_path / "data" / "derived" / "case_index.sqlite"),
     ):
         monkeypatch.setattr(mod, attr, value)
     L.load_library.cache_clear() if hasattr(L.load_library, "cache_clear") else None

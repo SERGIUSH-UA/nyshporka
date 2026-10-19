@@ -144,7 +144,7 @@ def test_a_letter_opys_reaches_the_catalogue(tmp_path, monkeypatch) -> None:
     case.mkdir()
     (case / "_source.json").write_text(
         json.dumps({"shifra": "РГАДА 210-6д-199"}, ensure_ascii=False), encoding="utf-8")
-    monkeypatch.setattr(L, "ROOT", tmp_path)
+    monkeypatch.setattr(L, "case_base", lambda: tmp_path)
     L._sidecar_case.cache_clear()
     try:
         got = L._sidecar_case("rgada_210")

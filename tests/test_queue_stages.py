@@ -184,7 +184,7 @@ def test_mapa_prohoniv_ne_perezhyvaie_novoho_prohonu(space: Path) -> None:
     from nyshporka import htr_store as S
 
     d = _sprava(space, n=2)
-    write_run(S.HTR_ROOT / "spr-8433", d)
+    write_run(S.htr_root() / "spr-8433", d)
     # Перший перелік у свіжому просторі може сам дописати бібліотеку, а вона —
     # частина штампа переліку; тож тотожність міряється з другого виклику.
     S.runs_by_case_dir()
@@ -192,7 +192,7 @@ def test_mapa_prohoniv_ne_perezhyvaie_novoho_prohonu(space: Path) -> None:
     assert S.runs_by_case_dir() is persha, "незмінний перелік будує мапу наново"
 
     d2 = frames(space, "dahmo_315/spr-8434", 2)
-    write_run(S.HTR_ROOT / "spr-8434", d2)
+    write_run(S.htr_root() / "spr-8434", d2)
     druha = S.runs_by_case_dir()
     assert any(r.get("name") == "spr-8434" for rs in druha.values() for r in rs), \
         "новий прогін не потрапив у мапу — вона пережила зміну переліку"

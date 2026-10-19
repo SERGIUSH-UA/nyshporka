@@ -64,7 +64,8 @@ def test_no_registry_no_opys_no_answer(tmp_path: Path) -> None:
 @pytest.fixture
 def probes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> list[Path]:
     """Реєстр R740 як бойовий, вибірка підмінена: кожна дає 50 + номер виклику."""
-    monkeypatch.setattr(CDB, "DB_PATH", _registry(tmp_path / "r.sqlite", R740))
+    reg = _registry(tmp_path / "r.sqlite", R740)
+    monkeypatch.setattr(CDB, "index_path", lambda: reg)
     class _Calls(list):
         values: list[float]
         kinds: list[tuple[int, object]]

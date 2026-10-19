@@ -184,7 +184,7 @@ def test_oblik_indeksuie_i_holosy(case, monkeypatch: pytest.MonkeyPatch) -> None
     from nyshporka.search import store as ST
 
     _d, out = case
-    monkeypatch.setattr(HS, "HTR_ROOT", out.parent)
+    monkeypatch.setattr(HS, "htr_root", lambda: out.parent)
     (out.parent / "skany-diak_v4").mkdir(parents=True)
     monkeypatch.setattr(db, "rebuild", lambda **kw: {})
 

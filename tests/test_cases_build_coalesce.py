@@ -19,7 +19,7 @@ def slow_build(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """Фальшива збірка: рахує виклики, кожна триває `dur` секунд."""
     from nyshporka.cases import db
 
-    monkeypatch.setattr(db, "DB_PATH", tmp_path / "case_index.sqlite")
+    monkeypatch.setattr(db, "index_path", lambda: tmp_path / "case_index.sqlite")
     # 2 с, а не 0.6: на повільному раннері CI десять потоків інколи не
     # встигали стартувати за першу збірку, і запізнілий запит законно давав
     # третю (py3.11 · ubuntu, 15.10.2026).

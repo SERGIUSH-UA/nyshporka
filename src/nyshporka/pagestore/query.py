@@ -31,7 +31,7 @@ _CACHE: dict[str, tuple[int, dict[str, Any]]] = {}
 
 
 def _iter_files(case_key: str | None = None) -> Iterator[Path]:
-    root = store.PAGES_ROOT
+    root = store.pages_root()
     if not root.is_dir():
         return
     # Ключі — новою формою з обох боків: людина набирає й старий ключ, а файл

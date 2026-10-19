@@ -16,7 +16,7 @@ def test_bundle_without_frames_counts_its_folders(tmp_path: Path,
     for name in ("2086525_0181-0189", "2102930_0309-0313", "2103331_0361-0368"):
         (bundle / name).mkdir(parents=True)
     (bundle / "_source.json").write_text("{}", encoding="utf-8")
-    monkeypatch.setattr(W, "workspace", lambda: SimpleNamespace(root=tmp_path))
+    monkeypatch.setattr(W, "workspace", lambda: SimpleNamespace(root=tmp_path, hub=tmp_path))
 
     rows = [
         {"kind": "bundle", "frames": 0, "path": "data/raw/plivky"},

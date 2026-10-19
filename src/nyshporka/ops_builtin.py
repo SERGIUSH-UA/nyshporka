@@ -208,7 +208,7 @@ _PULSE_MEM: dict[str, tuple[float, Envelope]] = {}
 def _pulse_file() -> Path:
     from nyshporka.core.workspace import workspace
 
-    return workspace().root / "data" / "derived" / "home_pulse.json"
+    return workspace().derived / "home_pulse.json"
 
 
 def _pulse_from_disk(key: str) -> Envelope | None:
@@ -481,7 +481,7 @@ def _in_background(key: str, fn: Any) -> None:
 def _machine_file() -> Path:
     from nyshporka.core.workspace import workspace
 
-    return workspace().root / "data" / "derived" / "home_machine.json"
+    return workspace().derived / "home_machine.json"
 
 
 def _pulse_machine() -> dict[str, Any]:
@@ -798,7 +798,7 @@ def _registry() -> Registry:
     from nyshporka.sources import load
 
     try:
-        root = workspace().root
+        root = workspace().hub
     except WorkspaceError:
         # Без простору мережеві джерела працюють обмежено (кешу немає), але
         # реєстр мусить збиратись: інакше `sources.list` мовчав би про них.
@@ -1808,7 +1808,7 @@ def _case_roots_rel() -> set[str]:
     out = {"data/raw"}
     try:
         for r in workspace().case_roots():
-            rel = os.path.relpath(r, L.ROOT).replace("\\", "/")
+            rel = os.path.relpath(r, L.case_base()).replace("\\", "/")
             if not rel.startswith(".."):
                 out.add(rel)
     except Exception:
@@ -1946,7 +1946,7 @@ def intake_aside(a: IntakeAsideArgs) -> Envelope:
         if p in _case_roots_rel():
             return fail(f"«{p}» — корінь справ; відкласти його цілком означало б "
                         f"сховати весь неописаний матеріал")
-        if not a.undo and not (L.ROOT / p).is_dir():
+        if not a.undo and not (L.case_base() / p).is_dir():
             return fail(f"теки «{p}» на диску немає")
         paths.append(p)
     if not paths:
@@ -1978,7 +1978,7 @@ def _bundle_subdirs(rows: list[dict[str, Any]]) -> None:
             continue
         if root is None:
             try:
-                root = workspace().root
+                root = workspace().hub
             except Exception:
                 return
         d = Path(str(r["path"]))
@@ -3256,7 +3256,7 @@ def cases_split(a: CasesSplitArgs) -> Envelope:
                  else SPL.load_map(a.map_file) if a.map_file else [])
         if a.dry_run:
             pl = SPL.plan(a.case_dir, specs)
-            env = ok({**pl.as_json(workspace().root), "dry_run": True})
+            env = ok({**pl.as_json(workspace().hub), "dry_run": True})
             for code, text in pl.warnings:
                 env.warn(code, text)
             return env

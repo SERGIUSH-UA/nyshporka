@@ -27,7 +27,7 @@ def ws(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Workspace:
     (tmp_path / "nyshporka.toml").write_text("[workspace]\nschema = 1\n", encoding="utf-8")
     db = sys.modules.get("nyshporka.cases.db")
     if db is not None:
-        monkeypatch.setattr(db, "DB_PATH", tmp_path / "data" / "derived" / "case_index.sqlite")
+        monkeypatch.setattr(db, "index_path", lambda: tmp_path / "data" / "derived" / "case_index.sqlite")
     space = Workspace(root=tmp_path, name="тест", origin="test")
     W.use(space)
     return space

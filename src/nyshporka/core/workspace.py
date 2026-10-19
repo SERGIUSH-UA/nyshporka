@@ -102,6 +102,13 @@ class Workspace:
 
     Похідні — властивості, а не поля: так вони не «застигають» у момент
     створення й лишаються правильними, якщо простір колись перемкнуть.
+
+    🔴 Два корені. `root` — проєкт (рід чи замовлення): канон, профіль, вердикти,
+    журнал пошуку, звіти. `hub` — Майстерня: кадри, прочитане, реєстр справ,
+    моделі — те, що однакове для будь-якого проєкту. Кожна властивість шляху
+    знає, чия вона, тож код, що просить `ws.raw`, не мусить знати про проєкти.
+    Поки `hub_root` не задано, обидва корені — той самий каталог (старий
+    простір працює як є).
     """
 
     root: Path
@@ -127,25 +134,41 @@ class Workspace:
     #: найбільший файл простору (десятки ГБ), і місце йому там, де швидкий диск,
     #: а не там, де лежить репозиторій. `None` — у `derived`, як завжди.
     text_store_dir: Path | None = None
-
-    # дані дослідження
-    @property
-    def data(self) -> Path: return self.root / "data"
-
-    @property
-    def raw(self) -> Path: return self.data / "raw"
+    #: Корінь Майстерні, якщо проєкт лежить окремо від неї. `None` — простір
+    #: старого типу: Майстерня й проєкт в одному каталозі.
+    hub_root: Path | None = None
 
     @property
-    def derived(self) -> Path: return self.data / "derived"
+    def hub(self) -> Path: return self.hub_root or self.root
+
+    # ── Майстерня: факти про справу й машину ─────────────────────────────────
+    @property
+    def hub_data(self) -> Path: return self.hub / "data"
 
     @property
-    def canonical(self) -> Path: return self.data / "canonical"
+    def raw(self) -> Path: return self.hub_data / "raw"
+
+    #: Похідне Майстерні: реєстр справ, бібліотека, газетир, кеші читання.
+    #: Похідне проєкту (база роду, граф, журнал пошуку) — `project_derived`.
+    @property
+    def derived(self) -> Path: return self.hub_data / "derived"
+
+    #: Сховище сторінок. ⚠ Поки що цілком у Майстерні; розщеплення на факт
+    #: аркуша (Майстерня) і перегляд під ціль (проєкт) — хвиля 3.
+    @property
+    def pages(self) -> Path: return self.hub_data / "pages"
 
     @property
-    def pages(self) -> Path: return self.data / "pages"
+    def spotter(self) -> Path: return self.hub_data / "spotter"
 
+    #: Ручні прив'язки прогонів до справ (`overrides.json`).
     @property
-    def spotter(self) -> Path: return self.data / "spotter"
+    def cases(self) -> Path: return self.hub_data / "cases"
+
+    #: Постійний стор доказів-кропів. Файл один на машину; цитата на нього
+    #: живе в каноні проєкту.
+    @property
+    def citations(self) -> Path: return self.hub_data / "source" / "citations"
 
     #: Обмін прочитаним: журнал походження і прийняті пакети.
     #:
@@ -153,13 +176,33 @@ class Workspace:
     #: він мусить пережити чистку похідного: інакше цитата провисне рівно тоді,
     #: коли кеш приберуть.
     @property
-    def share(self) -> Path: return self.data / "share"
+    def share(self) -> Path: return self.hub_data / "share"
+
+    @property
+    def htr_reports(self) -> Path: return self.hub / "reports" / "htr"
+
+    # ── проєкт: рід чи замовлення ────────────────────────────────────────────
+    @property
+    def data(self) -> Path: return self.root / "data"
+
+    @property
+    def canonical(self) -> Path: return self.data / "canonical"
+
+    #: Похідне проєкту: база роду (`nyshporka.sqlite`), граф, мапа місць,
+    #: журнал пошуку.
+    @property
+    def project_derived(self) -> Path: return self.data / "derived"
+
+    #: Кандидати на злиття з каноном (`matching`).
+    @property
+    def candidates(self) -> Path: return self.data / "candidates"
+
+    #: Стан пошуку роду (`clan_hunt/state.json`).
+    @property
+    def clan_hunt(self) -> Path: return self.data / "clan_hunt"
 
     @property
     def reports(self) -> Path: return self.root / "reports"
-
-    @property
-    def htr_reports(self) -> Path: return self.reports / "htr"
 
     @property
     def config(self) -> Path: return self.root / "config"

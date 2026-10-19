@@ -88,7 +88,7 @@ def test_an_unreadable_page_store_is_not_reported_as_nothing_noted(space, monkey
     from nyshporka.pagestore import store as S
 
     # ⚠ Корінь сховища береться на рівні модуля — простір фікстури його не зсуне.
-    monkeypatch.setattr(S, "PAGES_ROOT", space / "data" / "pages")
+    monkeypatch.setattr(S, "pages_root", lambda: space / "data" / "pages")
     pages = space / "data" / "pages" / "DAHMO"
     pages.mkdir(parents=True)
     (pages / "315-1-8433.json").write_text("{битий", encoding="utf-8")

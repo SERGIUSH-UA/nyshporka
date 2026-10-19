@@ -38,7 +38,7 @@ def biblioteka(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     ]
     import nyshporka.core.workspace as ws
     import nyshporka.library as lib
-    monkeypatch.setattr(ws, "workspace", lambda: SimpleNamespace(root=tmp_path))
+    monkeypatch.setattr(ws, "workspace", lambda: SimpleNamespace(root=tmp_path, hub=tmp_path))
     monkeypatch.setattr(lib, "load_library", lambda: rows)
     return tmp_path
 
@@ -78,7 +78,7 @@ def bez_kadriv(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     import nyshporka.library as lib
     raw = tmp_path / "data" / "raw"
     monkeypatch.setattr(ws, "workspace",
-                        lambda: SimpleNamespace(root=tmp_path, case_roots=lambda: [raw]))
+                        lambda: SimpleNamespace(root=tmp_path, hub=tmp_path, case_roots=lambda: [raw]))
     monkeypatch.setattr(lib, "load_library", lambda: [])
     return tmp_path
 
@@ -124,8 +124,7 @@ def test_teka_bez_kadriv_za_shliakhom_biblioteky(tmp_path: Path,
              "spr": "183", "path": "data/raw/agad_4/1-183", "frames": 0}]
     import nyshporka.core.workspace as ws
     import nyshporka.library as lib
-    monkeypatch.setattr(ws, "workspace", lambda: SimpleNamespace(
-        root=tmp_path, case_roots=lambda: [tmp_path / "data" / "raw"]))
+    monkeypatch.setattr(ws, "workspace", lambda: SimpleNamespace(root=tmp_path, hub=tmp_path, case_roots=lambda: [tmp_path / "data" / "raw"]))
     monkeypatch.setattr(lib, "load_library", lambda: rows)
 
     assert align.case_dir_for("AGAD/4/1/183") is None, "кадрів немає"

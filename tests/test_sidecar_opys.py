@@ -85,7 +85,7 @@ def test_unfiled_row_takes_opys_and_shifra_from_passport(lib, tmp_path: Path,
     """
     from nyshporka.cases import collect as C
 
-    monkeypatch.setattr(C, "ROOT", tmp_path)
+    monkeypatch.setattr(C, "case_base", lambda: tmp_path)
     case = tmp_path / "data" / "raw" / "dacho_1462" / "spr-11348"
     case.mkdir(parents=True)
     (case / "_source.json").write_text(json.dumps({

@@ -220,7 +220,7 @@ def svit(ws: W.Workspace, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     monkeypatch.setattr(store, "resolve_case", lambda v: store.CaseRef(
         key=KEY, repo="DAHMO", fond="315", spr="8433", opys="1"))
     monkeypatch.setattr(library, "load_library", lambda: s["lib"])
-    monkeypatch.setattr(library, "ROOT", ws.root)
+    monkeypatch.setattr(library, "case_base", lambda: ws.root)
     monkeypatch.setattr(S, "list_cases", lambda: s["runs"])
     monkeypatch.setattr(S, "load_meta", lambda name: s["metas"].get(name))
     monkeypatch.setattr(S, "_canon_case_key", lambda v: v)

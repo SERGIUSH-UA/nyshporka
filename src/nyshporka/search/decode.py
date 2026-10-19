@@ -57,7 +57,7 @@ SEP = " "
 def index_dir() -> Path:
     from nyshporka.core.workspace import workspace
 
-    return workspace().root / "data" / "derived" / "decode_index"
+    return workspace().derived / "decode_index"
 
 
 def stamp_of(run: str) -> str:

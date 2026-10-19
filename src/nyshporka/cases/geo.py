@@ -288,12 +288,12 @@ def _canon_places() -> list[tuple[str, list[str]]]:
     село роду не прив'язалось би до жодної справи.
     """
     try:
-        from nyshporka.library import ROOT
+        from nyshporka.core.workspace import workspace
         from nyshporka.storage.files import read_place
     except Exception:
         return []
     out: list[tuple[str, list[str]]] = []
-    places_dir = ROOT / "data" / "canonical" / "places"
+    places_dir = workspace().canonical / "places"
     if not places_dir.is_dir():
         return out
     for md in sorted(places_dir.glob("PL*.md")):

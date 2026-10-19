@@ -153,8 +153,8 @@ def _chysta_mashyna(root: Path, names: list[str]) -> Path:
 
     _prostir(root)
     case_dir = _kadry(root, names)
-    L.LIBRARY_PATH.parent.mkdir(parents=True, exist_ok=True)
-    L.LIBRARY_PATH.write_text(json.dumps({"cases": [{
+    L.library_path().parent.mkdir(parents=True, exist_ok=True)
+    L.library_path().write_text(json.dumps({"cases": [{
         "key": "DAHMO/315/8433", "repo": "DAHMO", "fond": "315", "opys": "1",
         "spr": "8433", "shifra": "ДАХмО 315-1-8433",
         "path": "data/raw/dahmo_315/spr-8433", "frames": len(names)}]},

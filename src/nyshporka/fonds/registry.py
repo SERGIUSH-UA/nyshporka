@@ -178,15 +178,14 @@ def _facets_stamp(fond_id: str, rows: list[dict[str, Any]]) -> tuple[Any, ...]:
 def _library_stamp() -> tuple[Any, ...]:
     """Штамп `case_library.json` — по ньому протухає кеш живого стану диска.
 
-    🔴 Шлях береться з `library.LIBRARY_PATH`, а не рахується наново з простору.
-    Різниця не теоретична: `LIBRARY_PATH` фіксується на імпорті модуля, і якщо
-    простір перемкнули пізніше (`workspace.use()`), обчислений тут шлях указував
-    би на інший файл, ніж той, який читає `load_library()`. Кеш тоді ніколи не
+    🔴 Шлях береться з `library.library_path()`, а не складається тут наново:
+    якби дві сторони рахували його кожна по-своєму, штамп міг би дивитись на
+    інший файл, ніж той, який читає `load_library()`. Кеш тоді ніколи не
     протухав би — і вкладка показувала б стан диска чужого простору, мовчки.
     """
     try:
-        from nyshporka.library import LIBRARY_PATH
-        return _stamp_or_none(LIBRARY_PATH)
+        from nyshporka.library import library_path
+        return _stamp_or_none(library_path())
     except Exception:
         # бібліотеки не дістати — кешувати нічого, кожен виклик рахує наново
         return ("<no-library>", -1, -1)

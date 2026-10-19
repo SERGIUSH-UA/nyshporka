@@ -49,7 +49,7 @@ def test_bez_reiestru_ne_nul_a_nevidomo(space: Path,
     from nyshporka.cases import db
 
     # Шлях реєстру заморожено на імпорті — ставимо туди, де його точно немає.
-    monkeypatch.setattr(db, "DB_PATH", space / "data" / "derived" / "case_index.sqlite")
+    monkeypatch.setattr(db, "index_path", lambda: space / "data" / "derived" / "case_index.sqlite")
     got = R.reach(3)
 
     assert got["cases"] is None and got["cases_unread"] is None

@@ -90,7 +90,7 @@ def case_dir_for(repo: str, fond: str, spr: str, letter: str, opys: str = "") ->
     from nyshporka.fonds import registry as F
     from nyshporka.library import _norm_spr, _sidecar_opys
 
-    base = workspace().root / "data" / "raw" / f"{F.REPO_SLUG.get(repo, repo.lower())}_{fond}"
+    base = workspace().raw / f"{F.REPO_SLUG.get(repo, repo.lower())}_{fond}"
     plain = base / f"spr-{spr}{letter}"
     if not opys:
         return plain

@@ -41,7 +41,7 @@ def ws(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Workspace:
     # фікстура падала б до першого рядка тесту.
     db = sys.modules.get("nyshporka.cases.db")
     if db is not None:
-        monkeypatch.setattr(db, "DB_PATH", tmp_path / "data" / "derived"
+        monkeypatch.setattr(db, "index_path", lambda: tmp_path / "data" / "derived"
                             / "case_index.sqlite")
     return Workspace(root=tmp_path, name="тест", origin="test")
 

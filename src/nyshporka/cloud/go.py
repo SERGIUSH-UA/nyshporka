@@ -1796,7 +1796,7 @@ def _bookkeeping(run_name: str) -> list[str]:
             from nyshporka.search import store as ST
 
             if ST.exists():
-                voices = [d.name for d in voice_dirs(S.HTR_ROOT / run_name)]
+                voices = [d.name for d in voice_dirs(S.htr_root() / run_name)]
                 if voices:
                     list(ST.ensure_all(voices))
     except Exception as exc:

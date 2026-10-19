@@ -29,12 +29,12 @@ def make_space(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     from nyshporka.pagestore import store as S
 
     for mod, attr, value in (
-        (lib, "ROOT", tmp_path), (lib, "RAW_DIR", tmp_path / "data" / "raw"),
-        (lib, "LIBRARY_PATH", tmp_path / "data" / "derived" / "case_library.json"),
-        (lib, "VERDICTS_PATH", tmp_path / "data" / "spotter" / "case_verdicts.json"),
-        (S, "ROOT", tmp_path), (S, "PAGES_ROOT", tmp_path / "data" / "pages"),
-        (DB, "DB_PATH", tmp_path / "data" / "derived" / "case_index.sqlite"),
-        (htr_store, "ROOT", tmp_path), (htr_store, "HTR_ROOT", tmp_path / "reports" / "htr"),
+        (lib, "case_base", lambda: tmp_path), (lib, "raw_dir", lambda: tmp_path / "data" / "raw"),
+        (lib, "library_path", lambda: tmp_path / "data" / "derived" / "case_library.json"),
+        (lib, "verdicts_path", lambda: tmp_path / "data" / "spotter" / "case_verdicts.json"),
+        (S, "case_base", lambda: tmp_path), (S, "pages_root", lambda: tmp_path / "data" / "pages"),
+        (DB, "index_path", lambda: tmp_path / "data" / "derived" / "case_index.sqlite"),
+        (htr_store, "case_base", lambda: tmp_path), (htr_store, "htr_root", lambda: tmp_path / "reports" / "htr"),
         (htr_store, "_RUNS_CACHE", None),
     ):
         monkeypatch.setattr(mod, attr, value)

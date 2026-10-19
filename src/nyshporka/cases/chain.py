@@ -136,7 +136,7 @@ def _rel(case_dir: Path) -> str:
 
     p = Path(os.path.abspath(case_dir))
     try:
-        return p.relative_to(os.path.abspath(L.ROOT)).as_posix()
+        return p.relative_to(os.path.abspath(L.case_base())).as_posix()
     except ValueError:
         return p.as_posix()
 
@@ -202,7 +202,7 @@ def judge(case_dir: Path, *, frames: int = 0,
                else "паспорта немає, а з імені теки шифру не зібрати")
         return mk(link=NO_PASSPORT, why=why, fix=f"{cmd}{note}")
 
-    lk = L.library_lookup() if L.LIBRARY_PATH.exists() else None
+    lk = L.library_lookup() if L.library_path().exists() else None
     hit = None
     if lk is not None:
         hit = lk.by_path.get(rel) or lk.find(*parsed)
@@ -275,9 +275,9 @@ def quick() -> list[Lanka] | None:
     out: list[Lanka] = []
     for r in rows:
         path = str(r.get("path") or "")
-        if not path or not (L.ROOT / path).is_dir():
+        if not path or not (L.case_base() / path).is_dir():
             continue
-        got = judge(L.ROOT / path, frames=int(r.get("frames") or 0))
+        got = judge(L.case_base() / path, frames=int(r.get("frames") or 0))
         if got.broken:
             out.append(got)
     return out + _orphans()
@@ -303,7 +303,7 @@ def walk() -> list[Lanka]:
     # вирізки, робочі копії) — не окремі справи.
     vzhe: list[str] = []
     for path, imgs, pdfs in L._scan_disk_cases(limit=10**6):
-        abs_dir = Path(path) if Path(path).is_absolute() else L.ROOT / path
+        abs_dir = Path(path) if Path(path).is_absolute() else L.case_base() / path
         rel = _rel(abs_dir)
         pid = any(rel.startswith(p + "/") for p in vzhe)
         got = judge(abs_dir, frames=imgs or pdfs, runs=runs)

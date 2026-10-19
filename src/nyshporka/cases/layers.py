@@ -66,7 +66,7 @@ def fingerprint() -> tuple[Any, ...]:
     означає показувати старе під виглядом свіжого — а цього не видно ніяк.
     """
     from nyshporka.cases import db
-    from nyshporka.library import LIBRARY_PATH, VERDICTS_PATH
+    from nyshporka.library import library_path, verdicts_path
 
     try:
         from nyshporka.core import pulse
@@ -74,7 +74,7 @@ def fingerprint() -> tuple[Any, ...]:
         beat = pulse.seq()
     except Exception:
         beat = 0
-    return (_stat(LIBRARY_PATH), _stat(VERDICTS_PATH), _stat(db.DB_PATH), beat)
+    return (_stat(library_path()), _stat(verdicts_path()), _stat(db.index_path()), beat)
 
 
 def layers_by_key() -> dict[str, dict[str, Any]]:

@@ -513,7 +513,7 @@ def apply(pl: Plan | None = None) -> dict[str, Any]:
     from dataclasses import asdict
 
     from nyshporka.core import workspace as W
-    from nyshporka.library import LIBRARY_PATH, write_library
+    from nyshporka.library import library_path, write_library
 
     ws = W.workspace()
     root = ws.root
@@ -539,11 +539,11 @@ def apply(pl: Plan | None = None) -> dict[str, Any]:
     home = _new_home(root)
     stamp = home.name
     backup = home / "backup.zip"
-    from nyshporka.cases.db import DB_PATH
+    from nyshporka.cases.db import index_path
 
     # Похідні (бібліотека, реєстр) — теж в архів: після відкату вони мусять
     # бути старими, а не перебудованими під нові ключі.
-    keep = [*pl.touched, *(_rel(root, p) for p in (ws.marker, LIBRARY_PATH, DB_PATH,
+    keep = [*pl.touched, *(_rel(root, p) for p in (ws.marker, library_path(), index_path(),
                                                      root / legacy.MOVES) if p.is_file())]
     with zipfile.ZipFile(backup, "w", zipfile.ZIP_DEFLATED) as z:
         for rel in keep:
@@ -554,7 +554,7 @@ def apply(pl: Plan | None = None) -> dict[str, Any]:
     # першого записаного файла: збій посередині інакше лишав би нові файли,
     # про які відкат не знає, поруч зі старими з архіву.
     created = sorted({m.dst for m in pl.pages if not (root / m.dst).is_file()}
-                     | {_rel(root, p) for p in (mv_path, LIBRARY_PATH, DB_PATH)
+                     | {_rel(root, p) for p in (mv_path, library_path(), index_path())
                         if not p.is_file() and p.is_relative_to(root)})
     journal: dict[str, Any] = {
         "stamp": stamp, "keys_before": pl.keys_before, "backup": _rel(root, backup),

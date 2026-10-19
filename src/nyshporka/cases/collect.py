@@ -36,13 +36,14 @@ from nyshporka.cases.resolve import (
 )
 from nyshporka.cases.walk import IMG_EXT, frame_names
 from nyshporka.core import legacy_key as legacy
+from nyshporka.core.workspace import workspace
 from nyshporka.library import (
     _REPO_LABEL,
-    ROOT,
     _mk_key,
     _norm_spr,
     _pdf_pages,
     _sidecar_opys,
+    case_base,
     default_opys,
     load_verdicts,
     parse_source_id,
@@ -50,11 +51,13 @@ from nyshporka.library import (
     split_into,
 )
 
-HTR_ROOT = ROOT / "reports" / "htr"
-RAW_DIR = ROOT / "data" / "raw"
-PAGES_ROOT = ROOT / "data" / "pages"
-CLAN_STATE = ROOT / "data" / "clan_hunt" / "state.json"
-DERIVED_DB = ROOT / "data" / "derived" / "nyshporka.sqlite"
+
+# Шляхи — функції від активного простору, не константи (див. `library`).
+def htr_root() -> Path: return workspace().htr_reports
+def raw_dir() -> Path: return workspace().raw
+def pages_root() -> Path: return workspace().pages
+def clan_state() -> Path: return workspace().clan_hunt / "state.json"
+def derived_db() -> Path: return workspace().project_derived / "nyshporka.sqlite"
 
 #: Які файли теки — кадри, і які з них ідуть у знаменник, вирішує
 #: `cases.walk` (`IMG_EXT`, `frame_names`): одне правило для обходу, прямого
@@ -135,7 +138,7 @@ def _note_unreadable(sink: list[Unreadable] | None, path: Any, why: object) -> N
     if sink is None:
         return
     try:
-        rel = str(os.path.relpath(path, ROOT)).replace("\\", "/")
+        rel = str(os.path.relpath(path, case_base())).replace("\\", "/")
     except ValueError:
         rel = str(path)
     reason = f"{type(why).__name__}: {why}" if isinstance(why, BaseException) else str(why)
@@ -149,9 +152,9 @@ def _iter_htr_runs(unreadable: list[Unreadable] | None = None,
     Нечитана мета йде в `unreadable`, а не в тишу: інакше прогін зникає, і
     справа стоїть у реєстрі «без декоду» (аудит 29.09.2026).
     """
-    if not HTR_ROOT.is_dir():
+    if not htr_root().is_dir():
         return
-    for meta_path in sorted(HTR_ROOT.glob("*/_htr_meta.json")):
+    for meta_path in sorted(htr_root().glob("*/_htr_meta.json")):
         try:
             meta = json.loads(meta_path.read_text(encoding="utf-8"))
         except Exception as exc:
@@ -187,9 +190,9 @@ def _raw_scans() -> list[Any]:
     """
     from nyshporka.cases.walk import walk_root
 
-    if not RAW_DIR.is_dir():
+    if not raw_dir().is_dir():
         return []
-    return list(walk_root(RAW_DIR, max_depth=4, skip_slugs=skip_slugs()))
+    return list(walk_root(raw_dir(), max_depth=4, skip_slugs=skip_slugs()))
 
 
 #: код архіву кирилицею → латинський код репозиторію (як у `fonds.registry`).
@@ -218,7 +221,7 @@ def _ordered_cases(index: LibraryIndex,
         # глибина 1 тут не бралась ніколи: `glob` починався з `*/*`
         if scan.depth < 2 or scan.path.name.startswith("_"):
             continue
-        rel = str(scan.path.relative_to(ROOT)).replace("\\", "/")
+        rel = str(scan.path.relative_to(case_base())).replace("\\", "/")
         if rel in seen or rel in index.by_path:
             continue
         if not scan.sidecar:
@@ -299,7 +302,7 @@ def _archived(paths: list[str | None]) -> str | None:
     for rel in paths:
         if not rel:
             continue
-        d = ROOT / rel
+        d = case_base() / rel
         if not d.is_dir():
             continue
         try:
@@ -346,7 +349,7 @@ def _frames_index(scans: list[Any]) -> dict[str, tuple[int, bool]]:
     out: dict[str, tuple[int, bool]] = {}
     for s in scans:
         try:
-            rel = str(s.path.relative_to(ROOT)).replace("\\", "/")
+            rel = str(s.path.relative_to(case_base())).replace("\\", "/")
         except ValueError:
             continue
         out[os.path.normcase(rel)] = _material_frames(s.n_frames, list(s.pdf_paths))
@@ -365,7 +368,7 @@ def _count_frames_exact(rel: str | None) -> tuple[int, bool]:
     hit = _FRAMES_INDEX.get(os.path.normcase(str(rel).replace("\\", "/")))
     if hit is not None:
         return hit
-    p = ROOT / rel
+    p = case_base() / rel
     if p.is_file():
         suf = p.suffix.lower()
         if suf == ".pdf":
@@ -443,7 +446,7 @@ def _unfiled_material(index: LibraryIndex, known: set[str],
     for scan in (_raw_scans() if scans is None else scans):
         if scan.path.name.startswith("_"):
             continue
-        rel = str(scan.path.relative_to(ROOT)).replace("\\", "/")
+        rel = str(scan.path.relative_to(case_base())).replace("\\", "/")
         if rel in known or rel in seen:
             continue
         if any(rel.startswith(k + "/") for k in known):
@@ -468,7 +471,7 @@ def _sidecar_near(rel: str) -> dict[str, Any]:
     діставали справу без назви — при тому, що поруч лежить повний опис
     («Метрична книга церкви Благовіщення … м-ка М'ястківка», 1752-1777).
     """
-    for base in (ROOT / rel, (ROOT / rel).parent):
+    for base in (case_base() / rel, (case_base() / rel).parent):
         for name in ("_source.json", "meta.json"):
             f = base / name
             if not f.is_file():
@@ -525,15 +528,15 @@ def _clan_runs(unreadable: list[Unreadable] | None = None) -> dict[str, dict[str
     читається — це вже не «пошуку не було», а «не знаю», і збірка мусить про
     це сказати (аудит 29.09.2026).
     """
-    if not CLAN_STATE.is_file():
+    if not clan_state().is_file():
         return {}
     try:
-        state = json.loads(CLAN_STATE.read_text(encoding="utf-8"))
+        state = json.loads(clan_state().read_text(encoding="utf-8"))
         runs = state.get("runs", {}) if isinstance(state, dict) else None
         if not isinstance(runs, dict):
             raise ValueError("немає словника `runs`")
     except Exception as exc:
-        _note_unreadable(unreadable, CLAN_STATE, exc)
+        _note_unreadable(unreadable, clan_state(), exc)
         return {}
     # Окремий битий запис не мусить гасити решту прогонів.
     out: dict[str, dict[str, Any]] = {}
@@ -541,7 +544,7 @@ def _clan_runs(unreadable: list[Unreadable] | None = None) -> dict[str, dict[str
         if isinstance(run, dict):
             out[name] = run
         else:
-            _note_unreadable(unreadable, CLAN_STATE, f"запис `{name}` не є об'єктом")
+            _note_unreadable(unreadable, clan_state(), f"запис `{name}` не є об'єктом")
     return out
 
 
@@ -553,9 +556,9 @@ def _pages_counts(unreadable: list[Unreadable] | None = None,
     бачило» там, де аркуші переглянуто (аудит 29.09.2026).
     """
     out: dict[str, tuple[int, int]] = {}
-    if not PAGES_ROOT.is_dir():
+    if not pages_root().is_dir():
         return out
-    for f in sorted(PAGES_ROOT.glob("*/*.json")):
+    for f in sorted(pages_root().glob("*/*.json")):
         try:
             data = json.loads(f.read_text(encoding="utf-8"))
         except Exception as exc:
@@ -596,10 +599,10 @@ def _canon_counts() -> dict[str, dict[str, Any]]:
     була б здогадом; це відома неповнота, а не забутий шар.
     """
     out: dict[str, dict[str, Any]] = {}
-    if not DERIVED_DB.is_file():
+    if not derived_db().is_file():
         return out
     try:
-        con = sqlite3.connect(f"file:{DERIVED_DB}?mode=ro", uri=True)
+        con = sqlite3.connect(f"file:{derived_db()}?mode=ro", uri=True)
     except sqlite3.Error:
         return out
     try:
@@ -834,7 +837,7 @@ def collect_rows(index: LibraryIndex | None = None, *,
         if rel in _NO_PATH:
             rel = ""
         frames = 0
-        d = ROOT / rel if rel else None
+        d = case_base() / rel if rel else None
         if d is not None and d.is_dir():
             frames = len(frame_names(p.name for p in d.iterdir() if p.is_file()))
         rows[key] = CaseRow(

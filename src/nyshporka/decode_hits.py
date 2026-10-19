@@ -36,7 +36,10 @@ from typing import Any
 from nyshporka.core.workspace import workspace
 from nyshporka.utils.atomic import CorruptFileError, read_json, write_json
 
-HITS_PATH = workspace().spotter / "decode_hits.json"
+
+def hits_path() -> Path:
+    """Хіти роду в декоді — результат пошуку під ціль проєкту."""
+    return workspace().data / "spotter" / "decode_hits.json"
 
 KINDS = {
     "clan": {"emoji": "🔥", "label": "рід"},
@@ -59,16 +62,16 @@ def load() -> dict[str, Any]:
     `data = load(); ...; save(data)`: читач, що на побитому JSON віддає порожньо,
     стирає їх усі першим же дотиком до кнопки.
     """
-    data = read_json(HITS_PATH, default={"version": 1, "cases": {}})
+    data = read_json(hits_path(), default={"version": 1, "cases": {}})
     if not isinstance(data, dict):
-        raise CorruptFileError(HITS_PATH, "у корені не об'єкт")
+        raise CorruptFileError(hits_path(), "у корені не об'єкт")
     data.setdefault("cases", {})
     return dict(data)
 
 
 def save(data: dict[str, Any]) -> Path:
     """Атомарно: обрив посеред запису лишав обрізаний JSON, тобто — див. `load`."""
-    return write_json(HITS_PATH, data)
+    return write_json(hits_path(), data)
 
 
 def cases() -> list[dict[str, Any]]:

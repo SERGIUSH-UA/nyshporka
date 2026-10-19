@@ -56,8 +56,8 @@ def space(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
     from nyshporka import htr_store as S
 
-    monkeypatch.setattr(S, "ROOT", tmp_path)
-    monkeypatch.setattr(S, "HTR_ROOT", tmp_path / "reports" / "htr")
+    monkeypatch.setattr(S, "case_base", lambda: tmp_path)
+    monkeypatch.setattr(S, "htr_root", lambda: tmp_path / "reports" / "htr")
     S._CACHE.clear()
     S._RUNS_CACHE = None
     from nyshporka.search import store as ST
@@ -1144,8 +1144,8 @@ def _pdf_case(root: Path, monkeypatch: pytest.MonkeyPatch, orient: int) -> str:
     from nyshporka.htr import view as V
     from nyshporka.search import store as ST
 
-    monkeypatch.setattr(S, "ROOT", root)
-    monkeypatch.setattr(S, "HTR_ROOT", root / "reports" / "htr")
+    monkeypatch.setattr(S, "case_base", lambda: root)
+    monkeypatch.setattr(S, "htr_root", lambda: root / "reports" / "htr")
     monkeypatch.setattr(S, "_case_roots", lambda: [root / "data" / "raw"])
     S._CACHE.clear()
     S._RUNS_CACHE = None

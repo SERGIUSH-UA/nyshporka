@@ -17,10 +17,13 @@ from typing import Any
 from nyshporka.cases.collect import collect_rows
 from nyshporka.cases.model import CaseRow
 from nyshporka.cases.resolve import LibraryIndex
-from nyshporka.library import ROOT
+from nyshporka.core.workspace import workspace
 from nyshporka.utils.atomic import replace_retrying
 
-DB_PATH = ROOT / "data" / "derived" / "case_index.sqlite"
+
+def index_path() -> Path:
+    """Реєстр справ — Майстерня."""
+    return workspace().derived / "case_index.sqlite"
 
 #: Поля, які зберігаються як JSON-текст (списки).
 _JSON_FIELDS = {"record_types", "extra_paths", "htr_runs", "fuzzy_runs",
@@ -93,7 +96,7 @@ def _pulse_seq() -> int:
 def build_index(db_path: Path | None = None,
                 index: LibraryIndex | None = None) -> dict[str, Any]:
     """Зібрати реєстр і перезаписати базу. Повертає підсумок для друку."""
-    path = Path(db_path or DB_PATH)
+    path = Path(db_path or index_path())
     path.parent.mkdir(parents=True, exist_ok=True)
     # 💓 Мітку пульсу знімаємо перед збором, а не після. Збірка триває секунди, і
     # удар, що стався в цей час, описує зміну, якої ми ще не прочитали. Записавши
@@ -220,7 +223,7 @@ def geo_hit(query: str, values: list[str]) -> bool:
 
 
 def _connect(db_path: Path | None = None) -> sqlite3.Connection:
-    path = Path(db_path or DB_PATH)
+    path = Path(db_path or index_path())
     if not path.is_file():
         raise FileNotFoundError(
             f"реєстру ще немає ({path.name}) — зберіть його: nysh cases build")
@@ -399,7 +402,7 @@ def mark_kind(paths: list[str], *, frm: str, to: str, why: str,
     ⚠ Префікс звіряється `substr`, а не `LIKE`: у іменах тек повно `_`, а для
     `LIKE` це будь-який символ — `book_olds/%` зачепив би й сусідню теку.
     """
-    path = Path(db_path or DB_PATH)
+    path = Path(db_path or index_path())
     if not path.is_file():
         return 0
     con = sqlite3.connect(path)
@@ -478,9 +481,10 @@ def staleness(db_path: Path | None = None, *, quick: bool = False) -> dict[str, 
     кількістю тек, бо новий прогін може бути старішим за файлом, ніж перебудова
     (розпакований архів зберігає час створення).
     """
-    path = Path(db_path or DB_PATH)
+    path = Path(db_path or index_path())
     if not path.is_file():
         return {"built": None, "stale": True, "reasons": ["реєстру ще немає"]}
+    ws = workspace()
     meta = index_meta(path)
     built_raw = meta.get("built") or ""
     try:
@@ -528,10 +532,10 @@ def staleness(db_path: Path | None = None, *, quick: bool = False) -> dict[str, 
 
     reasons: list[str] = [incomplete] if incomplete else []
     for label, target in (
-        ("каталог справ", ROOT / "data" / "derived" / "case_library.json"),
-        ("пошук роду", ROOT / "data" / "clan_hunt" / "state.json"),
-        ("канон", ROOT / "data" / "derived" / "nyshporka.sqlite"),
-        ("ручні прив'язки", ROOT / "data" / "cases" / "overrides.json"),
+        ("каталог справ", ws.derived / "case_library.json"),
+        ("пошук роду", ws.clan_hunt / "state.json"),
+        ("канон", ws.project_derived / "nyshporka.sqlite"),
+        ("ручні прив'язки", ws.cases / "overrides.json"),
     ):
         try:
             mtime = datetime.fromtimestamp(target.stat().st_mtime, tz=UTC)
@@ -540,7 +544,7 @@ def staleness(db_path: Path | None = None, *, quick: bool = False) -> dict[str, 
         if mtime > built:
             reasons.append(f"{label} змінено {mtime:%m-%d %H:%M}")
     newest_run, n_runs = None, 0
-    for meta_path in (ROOT / "reports" / "htr").glob("*/_htr_meta.json"):
+    for meta_path in ws.htr_reports.glob("*/_htr_meta.json"):
         n_runs += 1
         try:
             ts = datetime.fromtimestamp(meta_path.stat().st_mtime, tz=UTC)
@@ -562,7 +566,7 @@ def staleness(db_path: Path | None = None, *, quick: bool = False) -> dict[str, 
         con.close()
     if n_runs > known_runs:
         reasons.append(f"на диску {n_runs} прогонів, у реєстрі {known_runs}")
-    pages_dir = ROOT / "data" / "pages"
+    pages_dir = ws.pages
     newest_note = max((p.stat().st_mtime for p in pages_dir.glob("*/*.json")), default=0)
     if newest_note and datetime.fromtimestamp(newest_note, tz=UTC) > built:
         reasons.append("сховище сторінок оновлено")
@@ -699,7 +703,7 @@ BUILD_WAIT_SEC = 3600.0
 
 def _build_paths() -> tuple[Path, Path, Path]:
     """(замок збірки, замок лічильника, лічильник) — поруч із реєстром."""
-    base = Path(DB_PATH)
+    base = Path(index_path())
     return (base.with_name(base.name + ".build.lock"),
             base.with_name(base.name + ".queue.lock"),
             base.with_name(base.name + ".queue.json"))

@@ -53,24 +53,16 @@ os.environ["NYSHPORKA_NO_MIGRATION_NAG"] = "1"
 # 🔴🔴 Простір оголошується НА РІВНІ МОДУЛЯ, і це третє протікання — найгірше з
 # трьох, бо його не видно на машині розробника взагалі.
 #
-# Доменні модулі (`library`, `pagestore`, `cases.db`) беруть шляхи в мить
-# імпорту, а pytest імпортує ВСІ тестові файли на збиранні — тобто ще до першої
-# фікстури. Наслідки розходяться в два боки, і обидва мовчазні:
-#
-#   • там, де простір Є (машина розробника), модулі замерзають на ньому, і тест
-#     із тимчасовою текою бачить СПРАВЖНЮ бібліотеку — 54 справи замість однієї
-#     з фікстури, тобто зеленіє від чужих даних;
-#   • там, де простору НЕМА (CI, свіжий клон), збирання просто падає
-#     `WorkspaceError` — файл не запускається жодним тестом.
-#
-# Перше спіймано на `test_case_roots`, друге — на CI 2026-08-26, де через це не
-# зібрались два файли цілком. `conftest` імпортується ПЕРЕД тестовими модулями,
-# тож саме тут — єдине місце, де оголошення ще встигає подіяти; сама
-# `workspace.use()` цього й вимагає: «викликати до імпорту доменних модулів».
+# Тест, що не поставив собі простір, інакше отримав би той, який знайде
+# `resolve()`: на машині розробника — СПРАВЖНЄ дослідження (тест зеленіє від
+# чужих даних: 54 справи замість однієї з фікстури, `test_case_roots`), на CI —
+# `WorkspaceError`. Шляхи доменних модулів відтоді — функції від активного
+# простору (`tests/test_no_frozen_paths.py`), але простір за замовчуванням
+# потрібен і їм, і рядкам збирання, що звертаються до нього.
 #
 # ⚠ Тека одна на прогін і навмисно порожня: вона не для роботи тестів (кожен
-# бере свій `tmp_path`), а лише щоб заморожені константи вказували в НІКУДИ, а
-# не в чиєсь дослідження.
+# бере свій `tmp_path`), а лише щоб усе, що не перенаправили, вказувало в
+# НІКУДИ, а не в чиєсь дослідження.
 _MARKER_BODY = '[workspace]\nschema = 1\nname = "збирання"\n'
 _BOOT = Path(tempfile.mkdtemp(prefix="nysh-boot-"))
 (_BOOT / W.MARKER).write_text(_MARKER_BODY, encoding="utf-8")
@@ -182,27 +174,37 @@ def _boot_workspace_after_reset() -> None:
         W.use(W.Workspace(root=_BOOT, name="збирання", origin="test"))
 
 
+def pytest_configure(config: pytest.Config) -> None:
+    config.addinivalue_line(
+        "markers", "real_paths: не підміняти функції шляхів — тест перевіряє їх самі")
+
+
 @pytest.fixture(autouse=True)
-def _own_derived_files(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def _own_derived_files(monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+                       request: pytest.FixtureRequest) -> None:
     """Сховище сторінок і файли бібліотеки — свої в кожного тесту.
 
-    🔴 `pagestore.store.PAGES_ROOT` і шляхи `library` заморожуються на імпорті,
-    тобто на завантажувальному просторі вище, — одному на весь процес. Тест,
-    що писав туди й не перенаправив шлях сам, лишав слід, а наступний бачив
-    його як свій: `test_pagestore_cli` отримував «вже нотовано 3» після
+    Тест із міткою `real_paths` підміни не отримує: він перевіряє, куди
+    функції шляхів ведуть самі (`test_workspace_hub`).
+
+    🔴 Без цього всі тести ділили б завантажувальний простір вище — один на
+    весь процес. Тест, що писав туди й не перенаправив шлях сам, лишав слід, а
+    наступний бачив його як свій: `test_pagestore_cli` отримував «вже нотовано 3» після
     `test_text_ops`, а `test_share_accept` знаходив «свою» справу в бібліотеці,
     яку записав `test_pagestore_cli`. Послідовно це ховав порядок за абеткою;
     вилізло, щойно xdist роздав файли інакше (23.09.2026). Тест, якому потрібен
     свій шлях, і далі ставить його сам — поверх цього.
     """
+    if request.node.get_closest_marker("real_paths"):
+        return
     from nyshporka import library as L
     from nyshporka.pagestore import store as PS
 
-    monkeypatch.setattr(PS, "PAGES_ROOT", tmp_path / "data" / "pages")
+    monkeypatch.setattr(PS, "pages_root", lambda: tmp_path / "data" / "pages")
     derived = tmp_path / "data" / "derived"
-    monkeypatch.setattr(L, "LIBRARY_PATH", derived / "case_library.json")
-    monkeypatch.setattr(L, "VERDICTS_PATH", tmp_path / "data" / "spotter" / "case_verdicts.json")
-    monkeypatch.setattr(L, "SCAN_TARGETS_PATH", tmp_path / "data" / "spotter" / "scan_targets.json")
+    monkeypatch.setattr(L, "library_path", lambda: derived / "case_library.json")
+    monkeypatch.setattr(L, "verdicts_path", lambda: tmp_path / "data" / "spotter" / "case_verdicts.json")
+    monkeypatch.setattr(L, "scan_targets_path", lambda: tmp_path / "data" / "spotter" / "scan_targets.json")
     L._lookup_for.cache_clear()
     # Кеш сторінок PDF теж живе в похідних простору: без цього тест, що
     # перевіряє «файл не відкривався», міг би отримати число з кешу сусіда.

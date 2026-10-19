@@ -203,7 +203,7 @@ def cmd_show(fond_id: str = typer.Option(..., "--fond-id",
     from nyshporka.fonds.registry import registry_dir
 
     try:
-        d = workspace().root / registry_dir(fond_id)
+        d = workspace().hub / registry_dir(fond_id)
     except WorkspaceError as exc:
         console.print(f"[err]{exc}[/err]")
         raise typer.Exit(code=2) from None

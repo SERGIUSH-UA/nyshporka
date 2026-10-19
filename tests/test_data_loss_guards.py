@@ -80,7 +80,7 @@ def test_decode_hits_refuses_to_overwrite_corrupt_registry(space, tmp_path, monk
     hits = tmp_path / "decode_hits.json"
     hits.write_text('{"version": 1, "cases": {"DAVO/337/4": {"hits": [}}',
                     encoding="utf-8")
-    monkeypatch.setattr(DH, "HITS_PATH", hits)
+    monkeypatch.setattr(DH, "hits_path", lambda: hits)
 
     with pytest.raises(CorruptFileError):
         DH.load()
@@ -92,7 +92,7 @@ def test_decode_hits_refuses_to_overwrite_corrupt_registry(space, tmp_path, monk
 def test_decode_hits_roundtrip_keeps_human_verdict(space, tmp_path, monkeypatch):
     from nyshporka import decode_hits as DH
 
-    monkeypatch.setattr(DH, "HITS_PATH", tmp_path / "decode_hits.json")
+    monkeypatch.setattr(DH, "hits_path", lambda: tmp_path / "decode_hits.json")
     DH.add_case("DAVO/337/4", "data/raw/x", hits=[{"scan": "0030.JPG",
                                                    "kind": "clan"}])
     DH.set_verdict("DAVO/337/4", "0030.JPG", "refuted", note="Долинський")
@@ -112,7 +112,7 @@ def test_overrides_corrupt_file_is_not_wiped_by_bind(space, tmp_path, monkeypatc
     path = tmp_path / "overrides.json"
     path.write_text('{"runs": {"spov1846-parish56": {"key": "DAVO/904/24"},},'
                     ' "bundles": {}}', encoding="utf-8")
-    monkeypatch.setattr(R, "OVERRIDES_PATH", path)
+    monkeypatch.setattr(R, "overrides_path", lambda: path)
     R.load_overrides.cache_clear()
     R._run_overrides.cache_clear()
 

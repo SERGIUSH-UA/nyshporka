@@ -53,8 +53,8 @@ def run(tmp_path: Path, monkeypatch):
         "pages": {"0001.jpg": {"orient": 0, "lines": 3, "conf": 0.9}},
     }), encoding="utf-8")
 
-    monkeypatch.setattr(S, "ROOT", tmp_path)
-    monkeypatch.setattr(S, "HTR_ROOT", tmp_path / "reports" / "htr")
+    monkeypatch.setattr(S, "case_base", lambda: tmp_path)
+    monkeypatch.setattr(S, "htr_root", lambda: tmp_path / "reports" / "htr")
     monkeypatch.setattr(S, "_case_roots", lambda: [tmp_path / "data" / "raw"])
     return "прогін", "0001.jpg"
 
@@ -264,8 +264,8 @@ def pdf_run(tmp_path: Path, monkeypatch):
         "pages": {"0002.jpg": {"orient": 0, "lines": 1}},
     }), encoding="utf-8")
 
-    monkeypatch.setattr(S, "ROOT", tmp_path)
-    monkeypatch.setattr(S, "HTR_ROOT", tmp_path / "reports" / "htr")
+    monkeypatch.setattr(S, "case_base", lambda: tmp_path)
+    monkeypatch.setattr(S, "htr_root", lambda: tmp_path / "reports" / "htr")
     monkeypatch.setattr(S, "_case_roots", lambda: [tmp_path / "data" / "raw"])
     V._RENDER_CACHE.clear()
     return "pdf-прогін", "0002.jpg", case
@@ -373,8 +373,8 @@ def test_scan_is_found_through_the_registry_when_meta_path_is_foreign(
         "pages": {"0001.jpg": {"orient": 0, "lines": 1}},
     }), encoding="utf-8")
 
-    monkeypatch.setattr(S, "ROOT", tmp_path)
-    monkeypatch.setattr(S, "HTR_ROOT", tmp_path / "reports" / "htr")
+    monkeypatch.setattr(S, "case_base", lambda: tmp_path)
+    monkeypatch.setattr(S, "htr_root", lambda: tmp_path / "reports" / "htr")
     monkeypatch.setattr(S, "_case_roots", lambda: [tmp_path / "data" / "raw"])
 
     # Без реєстру скан не знаходиться — це і є та третина «нічиїх» прогонів.
@@ -410,8 +410,8 @@ def test_refusal_names_the_reason_and_the_repair(tmp_path: Path,
         "version": 1, "case_dir": "/tmp/htrcase/pages_dl_14",
         "pages": {"0001.jpg": {"orient": 0, "lines": 1}},
     }), encoding="utf-8")
-    monkeypatch.setattr(S, "ROOT", tmp_path)
-    monkeypatch.setattr(S, "HTR_ROOT", tmp_path / "reports" / "htr")
+    monkeypatch.setattr(S, "case_base", lambda: tmp_path)
+    monkeypatch.setattr(S, "htr_root", lambda: tmp_path / "reports" / "htr")
     monkeypatch.setattr(S, "_case_roots", lambda: [tmp_path / "data" / "raw"])
     monkeypatch.setattr(S, "_case_dirs_via_registry", lambda run: [])
 

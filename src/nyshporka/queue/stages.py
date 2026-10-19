@@ -311,7 +311,7 @@ def catalog_done(item: dict[str, Any], ctx: Ctx) -> bool:
         return False
     # Каталог міг зібратись, поки кадри ще качались: запис є, а кадрів у ньому
     # — скільки лежало тоді. Знаменник покриття з такого запису бреше.
-    if not L.LIBRARY_PATH.exists() or not lanka.key:
+    if not L.library_path().exists() or not lanka.key:
         return True
     entry = L.library_lookup().by_key.get(lanka.key)
     if entry is None or str(getattr(entry, "path", "") or "") != lanka.path:

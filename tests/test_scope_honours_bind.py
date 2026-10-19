@@ -41,7 +41,7 @@ def scope(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
     from nyshporka.cases import resolve as R
     from nyshporka.pagestore import store as PS
 
-    monkeypatch.setattr(R, "OVERRIDES_PATH", tmp_path / "overrides.json")
+    monkeypatch.setattr(R, "overrides_path", lambda: tmp_path / "overrides.json")
     R.load_overrides.cache_clear()
     R._run_overrides.cache_clear()
     monkeypatch.setattr(S, "list_cases", lambda: [dict(r) for r in RUNS])

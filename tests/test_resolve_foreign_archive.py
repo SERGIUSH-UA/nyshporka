@@ -27,8 +27,8 @@ def store(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
 
     from nyshporka.pagestore import store as S
 
-    monkeypatch.setattr(S, "ROOT", tmp_path)
-    monkeypatch.setattr(S, "PAGES_ROOT", tmp_path / "data" / "pages")
+    monkeypatch.setattr(S, "case_base", lambda: tmp_path)
+    monkeypatch.setattr(S, "pages_root", lambda: tmp_path / "data" / "pages")
     return S
 
 

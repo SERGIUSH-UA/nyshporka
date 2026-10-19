@@ -112,8 +112,8 @@ def space(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     from nyshporka import htr_store as S
     from nyshporka.search import store as ST
 
-    monkeypatch.setattr(S, "ROOT", tmp_path)
-    monkeypatch.setattr(S, "HTR_ROOT", tmp_path / "reports" / "htr")
+    monkeypatch.setattr(S, "case_base", lambda: tmp_path)
+    monkeypatch.setattr(S, "htr_root", lambda: tmp_path / "reports" / "htr")
     S._CACHE.clear()
     S._RUNS_CACHE = None
     list(ST.ensure_all(["метрика", "голий"]))

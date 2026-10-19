@@ -50,8 +50,8 @@ def space(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     from nyshporka import htr_store as S
     from nyshporka.records import names as N
 
-    monkeypatch.setattr(S, "ROOT", tmp_path)
-    monkeypatch.setattr(S, "HTR_ROOT", tmp_path / "reports" / "htr")
+    monkeypatch.setattr(S, "case_base", lambda: tmp_path)
+    monkeypatch.setattr(S, "htr_root", lambda: tmp_path / "reports" / "htr")
     S._CACHE.clear()
     S._RUNS_CACHE = None
     # ⚠ Кеш побутових пар живе на процес, а накладку читає з ПРОСТОРУ. Без

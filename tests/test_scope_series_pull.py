@@ -22,7 +22,7 @@ def space(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
     from nyshporka import htr_store as S
     from nyshporka.cases import resolve as R
 
-    monkeypatch.setattr(R, "OVERRIDES_PATH", tmp_path / "overrides.json")
+    monkeypatch.setattr(R, "overrides_path", lambda: tmp_path / "overrides.json")
     R.load_overrides.cache_clear()
     R._run_overrides.cache_clear()
     S._canon_case_key.cache_clear()
@@ -36,8 +36,8 @@ def space(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
 def _write_library(entries: list[dict[str, Any]]) -> None:
     from nyshporka import library as L
 
-    L.LIBRARY_PATH.parent.mkdir(parents=True, exist_ok=True)
-    L.LIBRARY_PATH.write_text(json.dumps({"cases": entries}, ensure_ascii=False),
+    L.library_path().parent.mkdir(parents=True, exist_ok=True)
+    L.library_path().write_text(json.dumps({"cases": entries}, ensure_ascii=False),
                               encoding="utf-8")
 
 

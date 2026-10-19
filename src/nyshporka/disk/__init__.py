@@ -338,7 +338,7 @@ def clean_plan(*, now: float | None = None) -> Plan:
     from nyshporka.core.workspace import workspace
 
     t = time.time() if now is None else now
-    root = workspace().root
+    root = workspace().hub
     plan = Plan()
     live = _live_runs()
     for it in _rebuildable():
@@ -513,7 +513,7 @@ def _korinni() -> tuple[list[str], list[str]]:
     from nyshporka.core.workspace import workspace
 
     ws = workspace()
-    roots = [ws.root, ws.data, ws.raw]
+    roots = [ws.root, ws.data, ws.hub, ws.hub_data, ws.raw]
     with contextlib.suppress(Exception):
         roots += list(ws.case_roots())
     norm = [_norm(p) for p in roots]
@@ -542,10 +542,10 @@ def _folder(case: str) -> tuple[str, Path]:
     * без паспорта — відмова: без нього справа зникає з реєстру.
     """
     from nyshporka.core.workspace import workspace
-    from nyshporka.library import ROOT, load_library
+    from nyshporka.library import case_base, load_library
     from nyshporka.pagestore import store
 
-    root = workspace().root
+    root = workspace().hub
     given = Path(case)
     shliakh = given if given.is_absolute() else root / given
     if shliakh.is_file():
@@ -566,7 +566,7 @@ def _folder(case: str) -> tuple[str, Path]:
         if len(teky) != 1:
             pokaz = "; ".join(teky[:5]) or "жодної"
             raise DiskError(f"{key}: тек кадрів {len(teky)} ({pokaz}) — назвіть теку шляхом")
-        d = Path(os.path.abspath(ROOT / teky[0]))
+        d = Path(os.path.abspath(case_base() / teky[0]))
     if not d.is_dir():
         raise DiskError(f"{key}: {d} — не тека кадрів (файл або немає на диску)")
     if _real(d) != _norm(d):

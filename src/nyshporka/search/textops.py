@@ -685,7 +685,7 @@ def whatis(scope: str) -> dict[str, Any]:
         from nyshporka.core.workspace import workspace
 
         p = Path(path)
-        p = p if p.is_absolute() else workspace().root / p
+        p = p if p.is_absolute() else workspace().hub / p
         side = p / "_source.json" if p.is_dir() else p.parent / "_source.json"
         with contextlib.suppress(OSError, ValueError):
             source = json.loads(side.read_text(encoding="utf-8"))
@@ -1582,8 +1582,8 @@ def layer_files(layer: str) -> tuple[list[Path], list[str]]:
         # звірені оком рядки, помилки опису, копії. Одна справа — один файл.
         from nyshporka.pagestore import store as PS
 
-        if PS.PAGES_ROOT.is_dir():
-            out += sorted(PS.PAGES_ROOT.glob("*/*.json"))
+        if PS.pages_root().is_dir():
+            out += sorted(PS.pages_root().glob("*/*.json"))
     elif layer == "notes":
         rep = ws.reports
         if rep.is_dir():

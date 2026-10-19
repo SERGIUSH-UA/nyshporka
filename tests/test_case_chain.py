@@ -41,11 +41,11 @@ def space(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
     C, L, R = chain, lib, register
     for mod, attr, value in (
-        (lib, "ROOT", tmp_path), (lib, "RAW_DIR", tmp_path / "data" / "raw"),
-        (lib, "LIBRARY_PATH", tmp_path / "data" / "derived" / "case_library.json"),
-        (lib, "VERDICTS_PATH", tmp_path / "data" / "spotter" / "case_verdicts.json"),
-        (S, "ROOT", tmp_path), (S, "PAGES_ROOT", tmp_path / "data" / "pages"),
-        (DB, "DB_PATH", tmp_path / "data" / "derived" / "case_index.sqlite"),
+        (lib, "case_base", lambda: tmp_path), (lib, "raw_dir", lambda: tmp_path / "data" / "raw"),
+        (lib, "library_path", lambda: tmp_path / "data" / "derived" / "case_library.json"),
+        (lib, "verdicts_path", lambda: tmp_path / "data" / "spotter" / "case_verdicts.json"),
+        (S, "case_base", lambda: tmp_path), (S, "pages_root", lambda: tmp_path / "data" / "pages"),
+        (DB, "index_path", lambda: tmp_path / "data" / "derived" / "case_index.sqlite"),
     ):
         monkeypatch.setattr(mod, attr, value)
     for fn in ("load_library", "_sidecar_case"):

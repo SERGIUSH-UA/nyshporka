@@ -208,7 +208,7 @@ def test_seriia_vydannia_ie_oblastiu_poshuku(space: Path, monkeypatch) -> None:
     from nyshporka import htr_store as S
     from nyshporka.share.accept import accept
 
-    monkeypatch.setattr(S, "HTR_ROOT", space / "reports" / "htr")
+    monkeypatch.setattr(S, "htr_root", lambda: space / "reports" / "htr")
     monkeypatch.setattr(S, "_RUNS_CACHE", None)
 
     assert vydannia.parse_series("VYD/PEV") == "PEV"

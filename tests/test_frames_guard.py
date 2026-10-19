@@ -32,7 +32,7 @@ def space(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
     from nyshporka import htr_store as S
 
-    monkeypatch.setattr(S, "ROOT", tmp_path)
+    monkeypatch.setattr(S, "case_base", lambda: tmp_path)
     d = tmp_path / "data" / "raw" / "dahmo_315" / "spr-8433"
     d.mkdir(parents=True)
     for n in range(3):

@@ -354,8 +354,8 @@ def test_sample_deploys_a_working_chain(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("NYSHPORKA_WORKSPACE", str(root))
     import nyshporka.htr_store as HS
 
-    monkeypatch.setattr(HS, "ROOT", root)
-    monkeypatch.setattr(HS, "HTR_ROOT", ws.htr_reports)
+    monkeypatch.setattr(HS, "case_base", lambda: root)
+    monkeypatch.setattr(HS, "htr_root", lambda: ws.htr_reports)
     monkeypatch.setattr(HS, "_case_roots", lambda: [ws.raw])
 
     # 1. пошук у декоді знаходить прізвище, заради якого справу й брали
@@ -411,8 +411,8 @@ def test_search_hit_carries_both_line_numbers(tmp_path: Path, monkeypatch) -> No
 
     import nyshporka.htr_store as HS
 
-    monkeypatch.setattr(HS, "ROOT", root)
-    monkeypatch.setattr(HS, "HTR_ROOT", ws.htr_reports)
+    monkeypatch.setattr(HS, "case_base", lambda: root)
+    monkeypatch.setattr(HS, "htr_root", lambda: ws.htr_reports)
     monkeypatch.setattr(HS, "_case_roots", lambda: [ws.raw])
 
     hit = next(h for h in HS.search("Долищинский", limit=10)["hits"]
@@ -448,8 +448,8 @@ def test_search_hit_carries_a_sliding_window(tmp_path: Path, monkeypatch) -> Non
 
     import nyshporka.htr_store as HS
 
-    monkeypatch.setattr(HS, "ROOT", root)
-    monkeypatch.setattr(HS, "HTR_ROOT", ws.htr_reports)
+    monkeypatch.setattr(HS, "case_base", lambda: root)
+    monkeypatch.setattr(HS, "htr_root", lambda: ws.htr_reports)
     monkeypatch.setattr(HS, "_case_roots", lambda: [ws.raw])
 
     plain = HS.search("Долищинский", limit=3)
@@ -486,8 +486,8 @@ def test_context_is_sliding_not_fixed(tmp_path: Path, monkeypatch) -> None:
 
     import nyshporka.htr_store as HS
 
-    monkeypatch.setattr(HS, "ROOT", root)
-    monkeypatch.setattr(HS, "HTR_ROOT", ws.htr_reports)
+    monkeypatch.setattr(HS, "case_base", lambda: root)
+    monkeypatch.setattr(HS, "htr_root", lambda: ws.htr_reports)
     monkeypatch.setattr(HS, "_case_roots", lambda: [ws.raw])
 
     win = HS.line_window("прогін", "0001.jpg", 4, side=1)
@@ -513,8 +513,8 @@ def test_second_voice_travels_with_the_hit(tmp_path: Path, monkeypatch) -> None:
 
     import nyshporka.htr_store as HS
 
-    monkeypatch.setattr(HS, "ROOT", root)
-    monkeypatch.setattr(HS, "HTR_ROOT", ws.htr_reports)
+    monkeypatch.setattr(HS, "case_base", lambda: root)
+    monkeypatch.setattr(HS, "htr_root", lambda: ws.htr_reports)
     monkeypatch.setattr(HS, "_case_roots", lambda: [ws.raw])
 
     assert HS.voice_pair(S.RUN_MAIN) == S.RUN_SIDE

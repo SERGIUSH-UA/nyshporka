@@ -43,16 +43,16 @@ def reg(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     row("A/1/@zbirka", "bundle", "data/raw/a", shifra="збірка")
     con.commit()
     con.close()
-    monkeypatch.setattr(db, "DB_PATH", dbp)
-    monkeypatch.setattr(L, "ROOT", root)
-    monkeypatch.setattr(R, "OVERRIDES_PATH", tmp_path / "overrides.json")
+    monkeypatch.setattr(db, "index_path", lambda: dbp)
+    monkeypatch.setattr(L, "case_base", lambda: root)
+    monkeypatch.setattr(R, "overrides_path", lambda: tmp_path / "overrides.json")
     R.load_overrides.cache_clear()
     yield root
     R.load_overrides.cache_clear()
 
 
 def _kinds() -> dict[str, str]:
-    con = sqlite3.connect(db.DB_PATH)
+    con = sqlite3.connect(db.index_path())
     try:
         return {p: k for p, k in con.execute("SELECT path, kind FROM cases WHERE key LIKE '@disk/%'")}
     finally:

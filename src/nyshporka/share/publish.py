@@ -309,7 +309,7 @@ def _teky_pasportu(case_dir: Path | None) -> list[Path]:
     try:
         from nyshporka.core.workspace import workspace
 
-        root: Path | None = workspace().root
+        root: Path | None = workspace().hub
     except Exception:
         root = None
     for rel in read_sidecar(Path(case_dir)).get("rendered_from") or []:

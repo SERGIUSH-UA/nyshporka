@@ -46,22 +46,44 @@ from nyshporka.models import Source
 from nyshporka.storage.files import read_source
 from nyshporka.utils.atomic import CorruptFileError, read_json, write_json
 
-_WS = workspace()
-ROOT = _WS.root
-SOURCES_DIR = _WS.canonical / "sources"
-RAW_DIR = _WS.raw
-LIBRARY_PATH = _WS.derived / "case_library.json"
-SCAN_TARGETS_PATH = _WS.spotter / "scan_targets.json"
+# 🔴 Шляхи — функції, а не константи модуля: константа застигла б на просторі,
+# що був активним у момент імпорту, і перемикання проєкту її б не зачепило.
+
+
+def case_base() -> Path:
+    """Корінь, від якого лічаться відносні шляхи справ (`data/raw/...`).
+
+    Це Майстерня: кадри однакові для будь-якого проєкту.
+    """
+    return workspace().hub
+
+
+def raw_dir() -> Path:
+    return workspace().raw
+
+
+def sources_dir() -> Path:
+    """Картки джерел канону (`S_*.md`) — проєкт."""
+    return workspace().canonical / "sources"
+
+
+def library_path() -> Path:
+    return workspace().derived / "case_library.json"
+
+
+def scan_targets_path() -> Path:
+    return workspace().spotter / "scan_targets.json"
+
 
 # fallback-джерела назв для фонду 315 (опис 1)
-_WIKISOURCE_META = RAW_DIR / "dahmo_315" / "wikisource_meta.json"
-_OPYS_MERGED = RAW_DIR / "dahmo_315" / "f315_opys_merged.tsv"
-_MASTER_INDEX = RAW_DIR / "dahmo_315" / "f315_MASTER_INDEX.tsv"
-_KLIROVI_INDEX = RAW_DIR / "dahmo_315" / "klirovi_index.tsv"
-_DAVO_F904_CATALOG = RAW_DIR / "davo" / "CATALOG_F904_OP24_OLHOPIL.md"
-_DAHMO_226_CATALOG = RAW_DIR / "dahmo_226" / "CATALOG.md"
+def _wikisource_meta_path() -> Path: return raw_dir() / "dahmo_315" / "wikisource_meta.json"
+def _opys_merged_path() -> Path: return raw_dir() / "dahmo_315" / "f315_opys_merged.tsv"
+def _master_index_path() -> Path: return raw_dir() / "dahmo_315" / "f315_MASTER_INDEX.tsv"
+def _klirovi_index_path() -> Path: return raw_dir() / "dahmo_315" / "klirovi_index.tsv"
+def _davo_f904_catalog_path() -> Path: return raw_dir() / "davo" / "CATALOG_F904_OP24_OLHOPIL.md"
+def _dahmo_226_catalog_path() -> Path: return raw_dir() / "dahmo_226" / "CATALOG.md"
 # каталог усього оцифрованого ДАХмО (9022 справи) — краулер archium.dahmo.gov.ua
-_ARCHIUM_CASES = RAW_DIR / "dahmo_archium" / "_crawl" / "cases.tsv"
+def _archium_cases_path() -> Path: return raw_dir() / "dahmo_archium" / "_crawl" / "cases.tsv"
 _ARCHIUM_SLUG = "dahmo_archium"
 
 # Скільки PDF у теці ще варто розкривати заради лічильника сторінок. Справа-PDF це
@@ -397,7 +419,7 @@ def _archium_cases() -> dict[str, dict[str, Any]]:
     """
     out: dict[str, dict[str, Any]] = {}
     try:
-        with _ARCHIUM_CASES.open(encoding="utf-8") as fh:
+        with _archium_cases_path().open(encoding="utf-8") as fh:
             for row in csv.DictReader(fh, delimiter="\t"):
                 fid = (row.get("file_id") or "").strip()
                 if fid:
@@ -567,7 +589,7 @@ def parse_case_path(rel: str) -> tuple[str, str, str | None, str] | None:
 
 def _sidecar_repo_unknown(rel: str) -> bool:
     """Паспорт теки свідомо не називає архіву: `"archive": "?"` або шифра з «?»."""
-    f = ROOT / rel / "_source.json"
+    f = case_base() / rel / "_source.json"
     if not f.exists():
         return False
     try:
@@ -585,7 +607,7 @@ def _sidecar_village(rel: str | None) -> str:
     """Село з `_source.json` теки-вирізки (`harvest` по покажчику плівки)."""
     if not rel:
         return ""
-    f = ROOT / rel / "_source.json"
+    f = case_base() / rel / "_source.json"
     if not f.is_file():
         return ""
     try:
@@ -601,7 +623,7 @@ def split_into(rel: str) -> list[str]:
     а нова тека тієї справи стала б її «другим ракурсом»: кадрів у справі —
     як у всій збірці, і вона вічно «прочитана частково».
     """
-    f = ROOT / rel / "_source.json"
+    f = case_base() / rel / "_source.json"
     if not f.is_file():
         return []
     try:
@@ -614,7 +636,7 @@ def split_into(rel: str) -> list[str]:
 @lru_cache(maxsize=4096)
 def _sidecar_case(rel: str) -> tuple[str, str, str | None, str] | None:
     """(repo, fond, opys, spr) з `_source.json`/`meta.json` теки — коли ім'я мовчить."""
-    d = ROOT / rel
+    d = case_base() / rel
     if not d.is_dir():
         return None
     for name in ("_source.json", "meta.json"):
@@ -941,7 +963,7 @@ def _scan_roots() -> list[Path]:
     справ». Тут вони нарешті використовуються за призначенням: зона лишається
     явним переліком, а не «будь-який абсолютний шлях».
     """
-    roots: list[Path] = [RAW_DIR]
+    roots: list[Path] = [raw_dir()]
     try:
         from nyshporka.core.workspace import workspace
 
@@ -949,7 +971,7 @@ def _scan_roots() -> list[Path]:
         # `data/raw` містить junction'и на архівний диск, і резолвінг прирівняв
         # би корінь до його цілі — тобто мовчки викинув би з обходу або сам
         # `data/raw`, або оголошений корінь.
-        known = {os.path.normcase(str(RAW_DIR))}
+        known = {os.path.normcase(str(raw_dir()))}
         for p in workspace().case_roots():
             key = os.path.normcase(str(p))
             if key not in known:
@@ -1010,7 +1032,7 @@ def _scan_disk_cases(limit: int | None = None) -> list[tuple[str, int, int]]:
     Шлях повертається відносним, доки тека лежить у просторі, — щоб простір
     можна було перенести на інший диск чи віддати колезі. Для теки за межами
     простору відносного шляху не існує, тож іде абсолютний; читачі складають
-    його як `ROOT / path`, а це на обох платформах віддає сам абсолютний шлях.
+    його як `case_base() / path`, а це на обох платформах віддає сам абсолютний шлях.
 
     ⏱ Обхід — `cases.walk`, один прохід замість чотирьох `glob`-патернів, кожен
     з яких обходив дерево згори наново. Порядок видачі там відтворено дослівно
@@ -1021,7 +1043,7 @@ def _scan_disk_cases(limit: int | None = None) -> list[tuple[str, int, int]]:
 
     out: list[tuple[str, int, int]] = []
     seen: set[Path] = set()
-    raw_key = os.path.normcase(str(RAW_DIR))
+    raw_key = os.path.normcase(str(raw_dir()))
     for base in _scan_roots():
         # 🔴 Оголошений корінь може бути сам текою справи: людина показує на
         # «D:/Метрики 1858», а не на теку, що їх містить. Обхід видає лише
@@ -1055,7 +1077,7 @@ def _scan_disk_cases(limit: int | None = None) -> list[tuple[str, int, int]]:
                 # рядок без жодної помилки. Це вже ставалось: «косметична»
                 # заміна коштувала 35 справ ф.196.
                 try:
-                    path = str(d.relative_to(ROOT))
+                    path = str(d.relative_to(case_base()))
                 except ValueError:
                     path = str(d)
                 out.append((path.replace("\\", "/"), imgs, pdfs))
@@ -1069,7 +1091,7 @@ def _scan_disk_cases(limit: int | None = None) -> list[tuple[str, int, int]]:
 @lru_cache(maxsize=1)
 def _wikisource_meta() -> dict[str, Any]:
     try:
-        return dict(json.loads(_WIKISOURCE_META.read_text(encoding="utf-8")))
+        return dict(json.loads(_wikisource_meta_path().read_text(encoding="utf-8")))
     except Exception:
         return {}
 
@@ -1079,7 +1101,7 @@ def _opys_merged() -> dict[tuple[str, str], dict[str, Any]]:
     """(opys, spr_norm) → row(dict). Опис фонду 315 з Вікіджерел/ukrfamily."""
     out: dict[tuple[str, str], dict[str, Any]] = {}
     try:
-        with _OPYS_MERGED.open(encoding="utf-8") as fh:
+        with _opys_merged_path().open(encoding="utf-8") as fh:
             for row in csv.DictReader(fh, delimiter="\t"):
                 op = (row.get("opys") or "").strip()
                 sp = _norm_spr(row.get("spr"))
@@ -1103,7 +1125,7 @@ def _master_index() -> dict[tuple[str, str], dict[str, Any]]:
     """
     out: dict[tuple[str, str], dict[str, Any]] = {}
     try:
-        with _MASTER_INDEX.open(encoding="utf-8") as fh:
+        with _master_index_path().open(encoding="utf-8") as fh:
             for row in csv.DictReader(fh, delimiter="\t"):
                 op = (row.get("opys") or "").strip()
                 sp = _norm_spr(row.get("spr"))
@@ -1119,7 +1141,7 @@ def _klirovi_index() -> dict[str, Any]:
     """spr → рядок klirovi_index.tsv (курований індекс клірових відомостей ф.315)."""
     out: dict[str, dict[str, Any]] = {}
     try:
-        with _KLIROVI_INDEX.open(encoding="utf-8") as fh:
+        with _klirovi_index_path().open(encoding="utf-8") as fh:
             for row in csv.DictReader(fh, delimiter="\t"):
                 sp = _norm_spr(row.get("spr"))
                 if sp:
@@ -1141,7 +1163,7 @@ def _davo_f904_catalog() -> dict[str, Any]:
     (М'ястківська Свято-Благовіщенська ц.). Рядки виду `| Н | 1876-1885 | спр.53 |`."""
     out: dict[str, dict[str, Any]] = {}
     try:
-        for line in _DAVO_F904_CATALOG.read_text(encoding="utf-8").splitlines():
+        for line in _davo_f904_catalog_path().read_text(encoding="utf-8").splitlines():
             m = _F904_ROW_RE.match(line.strip())
             if not m:
                 continue
@@ -1175,7 +1197,7 @@ def _dahmo_226_catalog() -> dict[str, Any]:
     out: dict[str, dict[str, Any]] = {}
     try:
         in_section = False
-        for line in _DAHMO_226_CATALOG.read_text(encoding="utf-8").splitlines():
+        for line in _dahmo_226_catalog_path().read_text(encoding="utf-8").splitlines():
             s = line.strip()
             if s.startswith("##"):
                 in_section = s.startswith("## Наявне в нас")
@@ -1291,7 +1313,7 @@ def _harvest_desc(m: dict[str, Any], single_case: bool = False) -> dict[str, Any
 
 def _fallback_name(rel_path: str, key_parts: tuple[Any, ...] | None) -> dict[str, Any]:
     """Назва теки без канону: _source.json → wikisource → opys_tsv → код."""
-    d = ROOT / rel_path
+    d = case_base() / rel_path
     stub: dict[str, Any] | None = None   # роки з сайдкара без назви, див. нижче
     # 1) сайдкар у теці — писаний руками, найточніший опис поза каноном.
     #    дві конвенції: `_source.json` (shifra/record_type/frames) і `meta.json`
@@ -1497,7 +1519,7 @@ def _sidecar_script(rel_path: str | None) -> tuple[str, list[str]]:
     """
     if not rel_path:
         return "", []
-    d = ROOT / rel_path
+    d = case_base() / rel_path
     if not d.is_dir():
         return "", []
     for name in ("_source.json", "meta.json"):
@@ -1701,7 +1723,7 @@ def _load_curated() -> dict[str, dict[str, Any]]:
     """rel-path → {group, why, tag, expected} з scan_targets.json (для позначки 🎖)."""
     out: dict[str, dict[str, Any]] = {}
     try:
-        data = json.loads(SCAN_TARGETS_PATH.read_text(encoding="utf-8"))
+        data = json.loads(scan_targets_path().read_text(encoding="utf-8"))
     except Exception:
         return out
     for t in data.get("targets", []):
@@ -1749,7 +1771,7 @@ def build_library() -> list[CaseEntry]:
         by_rfs.setdefault((e.repo or "", e.fond or "", e.spr or ""), []).append(e)
 
     # 1) канонічні джерела
-    for md in sorted(SOURCES_DIR.glob("S_*.md")):
+    for md in sorted(sources_dir().glob("S_*.md")):
         try:
             src = read_source(md)
         except Exception:
@@ -1779,7 +1801,7 @@ def build_library() -> list[CaseEntry]:
         raw = e.raw_path or ""
         if not raw.startswith("data/raw/"):
             continue
-        p = ROOT / raw
+        p = case_base() / raw
         if not p.exists():
             continue
         e.path = raw
@@ -1890,7 +1912,7 @@ def build_library() -> list[CaseEntry]:
     #     у data/source/archives тощо). Краще, ніж лишити справу зовсім без входу.
     for e in entries:
         if e.path is None and e.raw_path:
-            p = ROOT / e.raw_path
+            p = case_base() / e.raw_path
             if p.exists():
                 e.path = e.raw_path
                 e.tag = _tag_from_path(e.raw_path)
@@ -1944,7 +1966,7 @@ def _renamed(entries: list[CaseEntry]) -> dict[str, str]:
     не переїжджає — це вже інша книга.
     """
     try:
-        old = read_json(LIBRARY_PATH, default={})
+        old = read_json(library_path(), default={})
     except CorruptFileError:
         return {}
     prev: dict[str, str] = {}
@@ -1992,7 +2014,7 @@ def write_library(entries: list[CaseEntry]) -> Path:
     if _ck.keys_current():
         LAST_RENAMED.update(_renamed(entries))
         if LAST_RENAMED:
-            legacy_key.record_moves(ROOT, LAST_RENAMED,
+            legacy_key.record_moves(case_base(), LAST_RENAMED,
                                     made=datetime.now(UTC).isoformat(timespec="seconds"))
     payload = {
         "_comment": ("Бібліотека архівних справ (канон ∪ диск). Опис статичний — "
@@ -2003,13 +2025,16 @@ def write_library(entries: list[CaseEntry]) -> Path:
     }
     # tmp тепер із pid: спільний `.json.tmp` дві перебудови поспіль (кнопка в
     # консолі + `cases build` у терміналі) писали одночасно й перетирали одна одну.
-    return write_json(LIBRARY_PATH, payload, indent=1, trailing_nl=False)
+    return write_json(library_path(), payload, indent=1, trailing_nl=False)
 
 
 # ── читання / резолвер для пікера ─────────────────────────────────────────────
 
 # ── ручні вердикти по справах (USER-рішення оком) ────────────────────────────
-VERDICTS_PATH = ROOT / "data" / "spotter" / "case_verdicts.json"
+def verdicts_path() -> Path:
+    """Ручні вердикти по справах — рішення людини під ціль проєкту."""
+    return workspace().data / "spotter" / "case_verdicts.json"
+
 
 # `no_clan` — головний: USER сам переглянув справу (мала/швидка) і роду там немає.
 # Це рішення людини і воно не застаріває від зміни моделі — на відміну від скану.
@@ -2027,9 +2052,9 @@ def load_verdicts() -> dict[str, Any]:
     тут лежать рішення ока, які за коментарем вище не застарівають, а `set_verdict`
     пише поверх прочитаного — тож проковтнута помилка розбору стирала їх усі.
     """
-    data = read_json(VERDICTS_PATH, default={"verdicts": {}})
+    data = read_json(verdicts_path(), default={"verdicts": {}})
     if not isinstance(data, dict):
-        raise CorruptFileError(VERDICTS_PATH, "у корені не об'єкт")
+        raise CorruptFileError(verdicts_path(), "у корені не об'єкт")
     from nyshporka.core import legacy_key
 
     # До переносу обліку ключі тут старі; читачі питають новими.
@@ -2057,7 +2082,7 @@ def set_verdict(key: str, verdict: str | None, note: str = "",
                             "від зміни YOLO-моделі — на відміну від скану. Ключ = key "
                             "справи з case_library.json."),
                "verdicts": data}
-    write_json(VERDICTS_PATH, payload, indent=1, trailing_nl=False)
+    write_json(verdicts_path(), payload, indent=1, trailing_nl=False)
     return dict(data.get(key, {}))
 
 
@@ -2068,7 +2093,7 @@ def load_library() -> list[dict[str, Any]]:
     доти одна зайва кома робила бібліотеку «порожньою» без жодної ознаки, і
     далі кожен резолв справи чесно відповідав «на диску знайдено: жодного».
     """
-    data = read_json(LIBRARY_PATH, default={})
+    data = read_json(library_path(), default={})
     cases = data.get("cases") if isinstance(data, dict) else None
     if not isinstance(cases, list):
         return []
@@ -2156,11 +2181,11 @@ def library_lookup(loader: Any = None) -> LibraryLookup:
     """
     load = loader or load_library
     try:
-        st = LIBRARY_PATH.stat()
+        st = library_path().stat()
         stamp = (st.st_mtime_ns, st.st_size)
     except OSError:
         stamp = (-1, -1)
-    return _lookup_for(load, str(LIBRARY_PATH), *stamp)
+    return _lookup_for(load, str(library_path()), *stamp)
 
 
 @lru_cache(maxsize=4)
@@ -2182,17 +2207,17 @@ def _junctions() -> list[tuple[str, str]]:
     всередині нього (`data/raw/dahmo_archium/olhopilska_f794`).
     """
     out: list[tuple[str, str]] = []
-    if not RAW_DIR.exists():
+    if not raw_dir().exists():
         return out
     for depth in ("*", "*/*"):
-        for d in RAW_DIR.glob(depth):
+        for d in raw_dir().glob(depth):
             if not d.is_dir():
                 continue
             try:
                 real = d.resolve()
-                real.relative_to(ROOT)
+                real.relative_to(case_base())
             except ValueError:  # фізично поза репо → junction/symlink
-                rel = str(d.relative_to(ROOT)).replace("\\", "/")
+                rel = str(d.relative_to(case_base())).replace("\\", "/")
                 out.append((str(real).replace("\\", "/").rstrip("/").lower(), rel))
             except OSError:
                 continue
@@ -2218,7 +2243,7 @@ def describe_case(path: str) -> dict[str, Any] | None:
 
     Кеш скидається коли case_library.json перезаписано (`library_lookup`).
     """
-    if not path or not LIBRARY_PATH.exists():
+    if not path or not library_path().exists():
         return None
     lk = library_lookup()
     by_path = lk.by_path
@@ -2226,7 +2251,7 @@ def describe_case(path: str) -> dict[str, Any] | None:
     # абсолютний шлях → rel від кореня, якщо можливо
     if rel not in by_path:
         try:
-            rel_root = str(Path(path).resolve().relative_to(ROOT)).replace("\\", "/").rstrip("/")
+            rel_root = str(Path(path).resolve().relative_to(case_base())).replace("\\", "/").rstrip("/")
             if rel_root in by_path:
                 rel = rel_root
         except (ValueError, OSError):
