@@ -617,7 +617,8 @@ def _kadriv_offloaded(teka: Path) -> int:
             return 0
         if not isinstance(got, dict):
             return 0
-        orig = got.get("оригінали") if isinstance(got.get("оригінали"), dict) else {}
+        syri = got.get("оригінали")
+        orig = syri if isinstance(syri, dict) else {}
         for value in (orig.get("кадрів"), got.get("frames")):
             try:
                 n = int(value or 0)
