@@ -86,12 +86,18 @@ def test_allow_is_pointwise_not_blanket():
 
 
 def _rules_stamp() -> str:
-    """Відбиток усіх правил і винятків: змінене правило не знайде старого кешу."""
+    """Відбиток правил, винятків і самого сканера: змінене правило чи логіка
+    звірки (`scan_text`, `_allowed`, ліміт розміру) не знайде старого кешу —
+    інакше блоб, «чистий» під старою логікою, лишився б чистим і під новою
+    (рецензія 20.10.2026)."""
     import hashlib
+    import inspect
     import json
 
     rules = [(r.id, r.pattern.pattern, r.pattern.flags) for r in scan.RULES]
-    return hashlib.sha1(json.dumps([rules, list(scan.ALLOW)]).encode()).hexdigest()[:16]
+    code = [inspect.getsource(scan.scan_text), inspect.getsource(scan._allowed),
+            str(scan.MAX_BYTES)]
+    return hashlib.sha1(json.dumps([rules, list(scan.ALLOW), code]).encode()).hexdigest()[:16]
 
 
 def _scan_remembering_clean(items, pytestconfig: pytest.Config) -> list:

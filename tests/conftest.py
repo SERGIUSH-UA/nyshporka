@@ -196,9 +196,21 @@ def _span(sec: float) -> str:
 
 
 def _is_pack(config: pytest.Config) -> bool:
-    """Повний пак — без шляхів або з теками; файл чи вузол — точковий прогін."""
-    paths = [a for a in config.invocation_params.args if not a.startswith("-")]
-    return not any("::" in a or a.endswith(".py") for a in paths)
+    """Повний пак — теки без звуження; файл, вузол, `-k` чи `--lf` — точковий прогін.
+
+    🔴 Позиційні аргументи — вже розібрані (`config.args`), а не сирий рядок:
+    значення опцій (`--deselect x.py::t`, `--ignore x.py`) сирий розбір брав за
+    шляхи й лишав повний пак без замка (рецензія 20.10.2026).
+    """
+    if getattr(config.option, "keyword", "") or getattr(config.option, "lf", False):
+        return False
+    return not any("::" in a or a.endswith(".py") for a in config.args)
+
+
+def _pack_lock_path() -> Path:
+    """Файл замка пака; `NYSH_PACK_LOCK_FILE` — свій (тести самого замка)."""
+    own = os.environ.get("NYSH_PACK_LOCK_FILE")
+    return Path(own) if own else Path(tempfile.gettempdir()) / "nyshporka-test-pack.lock"
 
 
 def _hold_pack_lock(config: pytest.Config) -> None:
@@ -222,7 +234,7 @@ def _hold_pack_lock(config: pytest.Config) -> None:
         return
     from nyshporka.core.xrate import LockTimeout, _locked
 
-    lock = Path(tempfile.gettempdir()) / "nyshporka-test-pack.lock"
+    lock = _pack_lock_path()
     who = lock.with_suffix(".who.json")
     stack = contextlib.ExitStack()
     try:

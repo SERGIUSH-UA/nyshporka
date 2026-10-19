@@ -22,6 +22,7 @@ from __future__ import annotations
 import io
 import json
 import shutil
+import threading
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
@@ -305,24 +306,36 @@ def _mkdocs(cfg_path: Path) -> None:
 
     from mkdocs.commands.build import build as mk_build
     from mkdocs.config import load_config
-    from mkdocs.exceptions import MkDocsException
 
-    log = logging.getLogger("mkdocs")
-    level = log.level
-    # `-q` командного рядка: попередження MkDocs не мають сипатись у вивід nysh.
-    log.setLevel(logging.ERROR)
-    errors = io.StringIO()
-    handler = logging.StreamHandler(errors)
-    handler.setLevel(logging.ERROR)
-    log.addHandler(handler)
-    try:
-        mk_build(load_config(str(cfg_path)), dirty=False)
-    except (MkDocsException, OSError, ValueError) as exc:
-        raise SiteError(f"mkdocs build не зібрав сайт:\n{exc}\n{errors.getvalue()[-2000:]}"
-                        ) from exc
-    finally:
-        log.removeHandler(handler)
-        log.setLevel(level)
+    # 🔴 Під замком: логер `mkdocs` — глобальний стан процесу, а `site.rebuild`
+    # іде в черзі демона поза головним потоком. Дві збірки поруч інакше
+    # запам'ятали б «старий» рівень одна одної, і логер лишився б на ERROR
+    # назавжди (рецензія 20.10.2026).
+    with _MKDOCS_LOCK:
+        log = logging.getLogger("mkdocs")
+        level, propagate = log.level, log.propagate
+        # `-q` командного рядка: попередження MkDocs не мають сипатись у вивід
+        # nysh, а помилки — у лог демона; вони йдуть лише в текст відмови.
+        log.setLevel(logging.ERROR)
+        log.propagate = False
+        errors = io.StringIO()
+        handler = logging.StreamHandler(errors)
+        handler.setLevel(logging.ERROR)
+        log.addHandler(handler)
+        try:
+            mk_build(load_config(str(cfg_path)), dirty=False)
+        except Exception as exc:
+            # Будь-яка відмова — як колись ненульовий код підпроцесу: конверт із
+            # причиною, а не трейсбек плагіна посеред команди.
+            raise SiteError(f"mkdocs build не зібрав сайт:\n{type(exc).__name__}: {exc}\n"
+                            f"{errors.getvalue()[-2000:]}") from exc
+        finally:
+            log.removeHandler(handler)
+            log.setLevel(level)
+            log.propagate = propagate
+
+
+_MKDOCS_LOCK = threading.Lock()
 
 
 def _alternate(langs: list[str], current: str) -> list[dict[str, str]]:
