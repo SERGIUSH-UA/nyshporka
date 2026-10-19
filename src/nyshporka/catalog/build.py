@@ -390,7 +390,13 @@ def build_places(dump_json: Path, out: Path, *, pack_id: str, taken: str,
 
     Джерело — `places.json`, знятий збирачем дослідницького репозиторію
     (перелік записів із полями qid, name_*, aliases, kind, admin, top,
-    country, lat, lng).
+    country, lat, lng). Необов'язкові: `name_ro` — румунська назва (молдовські
+    й бессарабські села пишуть саме нею: «Mingir»), `aliases_extra` — другі
+    назви з інших довідників (GeoNames: «Doluchioi» → Багате), через `|`.
+
+    🔴 Схема пака не змінюється: румунська й другі назви їдуть у `aliases`,
+    `norm_alias` і `translit`. Нова колонка підняла б версію схеми, а
+    `schema.check` старих клієнтів відкинув би такий пак цілком.
     """
     import json
 
@@ -402,20 +408,37 @@ def build_places(dump_json: Path, out: Path, *, pack_id: str, taken: str,
             "admin", "top", "country", "lat", "lng", "norm_uk", "norm_ru",
             "norm_alias", "translit"]
     n = 0
+    z_dodatkovymy = 0
     batch: list[tuple[Any, ...]] = []
     for r in rows:
         if r.get("lat") is None or not (r.get("name_uk") or r.get("name_ru")):
             continue
         uk, ru = r.get("name_uk") or "", r.get("name_ru") or ""
-        aliases = [a.strip() for a in (r.get("aliases") or "").split("|") if a.strip()]
-        norm_alias = " | ".join(dict.fromkeys(
-            x for x in (_norm_name(a) for a in aliases) if x))
+        ro, en = r.get("name_ro") or "", r.get("name_en") or ""
+        extra = [a.strip() for a in (r.get("aliases_extra") or "").split("|") if a.strip()]
+        z_dodatkovymy += bool(extra)
+        aliases = list(dict.fromkeys(
+            a for a in ([a.strip() for a in (r.get("aliases") or "").split("|")]
+                        + ([ro] if ro else []) + extra)
+            if a and a not in (uk, ru)))
+        norm_alias = dict.fromkeys(x for x in (_norm_name(a) for a in aliases) if x)
+        # «Дзиґівка» в Wikidata, «Дзигівка» в архівному описі. Варіант без «ґ»
+        # іде в псевдоніми, а не в `norm_name`: норми записані в паки газетира
+        # й церков, і зміна нормалізатора розвела б старі паки з новими клієнтами.
+        for forma in (uk, *aliases):
+            if "ґ" in forma.lower():
+                bez = _norm_name(forma.replace("ґ", "г").replace("Ґ", "Г"))
+                if bez:
+                    norm_alias.setdefault(bez, None)
+        norm_alias.pop(_norm_name(uk), None)
+        norm_alias.pop(_norm_name(ru), None)
         batch.append((
-            r["qid"], uk, ru, r.get("name_pl") or "", r.get("name_en") or "",
+            r["qid"], uk, ru, r.get("name_pl") or "", en,
             " | ".join(aliases), r.get("kind") or "", r.get("admin") or "",
             r.get("top") or "", r.get("country") or "", float(r["lat"]),
-            float(r["lng"]), _norm_name(uk), _norm_name(ru), norm_alias,
-            _translit(uk, ru, r.get("name_pl") or "")))
+            float(r["lng"]), _norm_name(uk), _norm_name(ru), " | ".join(norm_alias),
+            # англійська — лише в латинку: назви FamilySearch пишуть нею
+            _translit(uk, ru, r.get("name_pl") or "", ro, en)))
         n += 1
         if len(batch) >= 5000:
             con.executemany(f"INSERT OR REPLACE INTO modern ({','.join(cols)}) "
@@ -429,7 +452,9 @@ def build_places(dump_json: Path, out: Path, *, pack_id: str, taken: str,
                                         "GROUP BY top ORDER BY COUNT(*) DESC")]
     res = finalize(con, tmp, out, domain="places", pack_id=pack_id, taken=taken,
                    source=source, built_from=_digest([dump_json]), rows=n,
-                   coverage=coverage, note=f"{n} поселень із координатами (Wikidata)")
+                   coverage=coverage,
+                   note=f"{n} поселень із координатами (Wikidata)"
+                   + (f"; другі назви GeoNames — у {z_dodatkovymy}" if z_dodatkovymy else ""))
     if verbose:
         print(f"✅ {out.name} — {n} поселень · {res['size'] / 1e6:.1f} МБ")
     return {**res, "places": n}
