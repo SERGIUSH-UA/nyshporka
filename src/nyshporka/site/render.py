@@ -19,7 +19,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from jinja2 import ChoiceLoader, Environment, FileSystemLoader, StrictUndefined
+from jinja2 import BytecodeCache, ChoiceLoader, Environment, FileSystemLoader, StrictUndefined
+from jinja2.bccache import Bucket
 
 from nyshporka.models import Fact, Family, Hypothesis, MediaRef, Person, Place, Source
 from nyshporka.site import i18n as I18N
@@ -58,9 +59,35 @@ def _t(key: str, **kw: Any) -> str:
     return I18N.t(_LANG.get(), key, **kw)
 
 
+class _MemoryBytecode(BytecodeCache):
+    """Скомпільовані шаблони — спільні для всіх оточень процесу.
+
+    🔴 Оточення створюється на кожну мову й кожен виклик, а свій кеш шаблонів
+    Jinja тримає в оточенні: сайт сімома мовами компілював ті самі шаблони
+    14 разів за збірку — 5,7 с із 7,7 (замір 19.10.2026). Байткод від мови не
+    залежить (фільтри мови беруться з оточення під час рендеру), а за
+    контрольною сумою джерела Jinja сама бачить правлений шаблон.
+    """
+
+    def __init__(self) -> None:
+        self._store: dict[str, bytes] = {}
+
+    def load_bytecode(self, bucket: Bucket) -> None:
+        code = self._store.get(bucket.key)
+        if code is not None:
+            bucket.bytecode_from_string(code)
+
+    def dump_bytecode(self, bucket: Bucket) -> None:
+        self._store[bucket.key] = bucket.bytecode_to_string()
+
+
+_BYTECODE = _MemoryBytecode()
+
+
 def environment(templates_dirs: list[Path], lang: str | None = None) -> Environment:
     env = Environment(
         loader=ChoiceLoader([FileSystemLoader(str(d)) for d in [*templates_dirs, TEMPLATES]]),
+        bytecode_cache=_BYTECODE,
         autoescape=False,
         undefined=StrictUndefined,
         trim_blocks=True,

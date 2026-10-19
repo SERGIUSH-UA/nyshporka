@@ -159,6 +159,21 @@ def test_public_html_passes_the_guard(space: Path) -> None:
     assert LIVING_NAME not in _text(html, "*.html")
 
 
+@pytest.mark.skipif(not B.mkdocs_available(), reason="MkDocs не встановлено (extra site)")
+def test_a_failed_mkdocs_build_is_a_site_error(space: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """MkDocs збирає сайт у процесі nysh: його відмова — зрозуміла `SiteError`
+    з причиною, а не голий виняток посеред команди."""
+    import mkdocs.config as MC
+    from mkdocs.exceptions import ConfigurationError
+
+    def broken(*_a: object, **_k: object) -> None:
+        raise ConfigurationError("зламаний конфіг")
+
+    monkeypatch.setattr(MC, "load_config", broken)
+    with pytest.raises(B.SiteError, match=r"mkdocs build не зібрав сайт:\n.*зламаний конфіг"):
+        B.build(space, public=True)
+
+
 # ── відкрита версія: витоки, знайдені рецензією ─────────────────────────────
 def _scan(space: Path, name: str, size: tuple[int, int] = (300, 40)) -> str:
     from PIL import Image

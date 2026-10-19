@@ -23,6 +23,7 @@ import os
 import re
 import subprocess
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -393,6 +394,18 @@ def iter_history() -> list[Item]:
     переписати опубліковану історію. Один об'єкт може лежати під кількома
     іменами — беремо перше, бо виняток звіряється зі шляхом.
     """
+    return [(name, text, f"{name} @{sha[:8]}") for name, sha, text in iter_history_blobs()]
+
+
+def iter_history_blobs(skip: Callable[[str, str], bool] | None = None
+                       ) -> list[tuple[str, str, str]]:
+    """(шлях, sha блоба, вміст) усіх версій; `skip(шлях, sha)` → True — не читати.
+
+    🔴 Блоб незмінний за своїм sha, тож уже перевірений під тими самими
+    правилами блоб читати вдруге нема чого: читання всіх версій з усіх гілок
+    коштувало ~7 с на кожен прогін тестів (замір 19.10.2026), хоча нових
+    блобів між прогонами — одиниці.
+    """
     names: dict[str, str] = {}
     for line in _git("rev-list", "--objects", "--all").splitlines():
         sha, _, name = line.partition(" ")
@@ -408,9 +421,11 @@ def iter_history() -> list[Item]:
         parts = line.split()
         if len(parts) == 3 and parts[1] == "blob" and int(parts[2]) <= MAX_BYTES:
             small.append(parts[0])
+    if skip is not None:
+        small = [sha for sha in small if not skip(names[sha], sha)]
     # Шлях для звірки — чистий; коміт-об'єкт іде лише в підпис. Змішавши їх, ми
     # зробили б винятки недієвими саме тут (див. `scan_text`).
-    return [(names[sha], blob.decode("utf-8", errors="replace"), f"{names[sha]} @{sha[:8]}")
+    return [(names[sha], sha, blob.decode("utf-8", errors="replace"))
             for sha, blob in _batch_read(small).items()]
 
 

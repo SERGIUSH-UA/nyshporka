@@ -32,7 +32,8 @@ def test_stopped_is_false_without_a_scope_and_follows_the_event() -> None:
 
 # ── фонова робота: пошук спиняється, решта чесно каже «не можна» ─────────────
 
-async def _run(tmp_path, monkeypatch, op_name: str) -> tuple[JobBus, Any, list[str]]:
+async def _run(tmp_path, monkeypatch, op_name: str, *, run_for: float = 10.0
+               ) -> tuple[JobBus, Any, list[str]]:
     import nyshporka.ops as O
     from nyshporka.daemon import workers as W
 
@@ -40,7 +41,7 @@ async def _run(tmp_path, monkeypatch, op_name: str) -> tuple[JobBus, Any, list[s
 
     def body(name: str, payload: dict[str, Any]) -> Any:
         # Тіло, що питає про зупинку, як `store.sweep`, — але не довше 10 с.
-        end = time.monotonic() + 10
+        end = time.monotonic() + run_for
         while time.monotonic() < end:
             P.report(1, 2, "блоки корпусу")
             if P.stopped():
@@ -72,7 +73,9 @@ async def test_search_sweep_really_stops(tmp_path, monkeypatch) -> None:
 
 
 async def test_other_generic_ops_say_they_cannot_be_interrupted(tmp_path, monkeypatch) -> None:
-    _bus, job, seen = await _run(tmp_path, monkeypatch, "registry.merge")
+    # Секунда — у п'ять разів довше за «стоп» (0,2 с): цього досить, щоб
+    # доробитись ПІСЛЯ скасування; десять секунд лише гаяли пак.
+    _bus, job, seen = await _run(tmp_path, monkeypatch, "registry.merge", run_for=1.0)
     assert seen == ["ran-out"], "операцію без кооперативної зупинки перервано"
     # Доробилась до кінця — і про це підсумкова примітка, що заміняє тимчасове
     # «перервати не можна» (`FINISHED_AFTER_CANCEL`).

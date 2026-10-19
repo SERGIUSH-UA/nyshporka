@@ -107,7 +107,11 @@ def _alive_state(pid: int, started: float) -> bool | None:
         return None                       # без psutil судити нема чим
     try:
         p = psutil.Process(pid)
-        if not p.is_running() or p.status() == psutil.STATUS_ZOMBIE:
+        # Зомбі буває лише на POSIX. На Windows `status()` перебирає потоки
+        # процесу (11 мс на виклик) і повертає хіба «працює»/«призупинено», тож
+        # там він лише гальмував реєстр живих прогонів під замком (замір
+        # 19.10.2026: 2 с із 2,5 на 300 операцій реєстру).
+        if not p.is_running() or (os.name != "nt" and p.status() == psutil.STATUS_ZOMBIE):
             return False
         return bool(abs(float(p.create_time()) - started) < 2.0)
     except psutil.NoSuchProcess:

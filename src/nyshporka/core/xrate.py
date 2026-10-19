@@ -166,7 +166,11 @@ def _locked(path: Path, timeout: float = 300.0) -> Iterator[None]:
                 if time.monotonic() > deadline:
                     raise LockTimeout(f"{path} зайнято понад {timeout:.0f} с") from None
                 time.sleep(delay)
-                delay = min(delay * 1.6, 0.25)
+                # Стеля — 50 мс, не чверть секунди: замок тримають мілісекунди,
+                # і з довгою паузою три шарди здебільшого спали при вільному
+                # замку (тест паралельних шардів — 27 с, замір 19.10.2026).
+                # Спроба — один системний виклик, частіше питати нічого не коштує.
+                delay = min(delay * 1.6, 0.05)
         try:
             yield
         finally:

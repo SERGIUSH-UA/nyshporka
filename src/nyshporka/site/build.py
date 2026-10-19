@@ -19,10 +19,9 @@
 """
 from __future__ import annotations
 
+import io
 import json
 import shutil
-import subprocess
-import sys
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
@@ -265,11 +264,7 @@ def build(root: Path, *, public: bool = False, out: Path | None = None,
     # 3. HTML (основна мова першою: `--clean` у корені стер би решту) і сторож.
     site = out / "html"
     for cfg_path in configs:
-        run = subprocess.run([sys.executable, "-m", "mkdocs", "build", "--clean", "-q",
-                              "-f", str(cfg_path)],
-                             capture_output=True, text=True, encoding="utf-8", errors="replace")
-        if run.returncode != 0:
-            raise SiteError("mkdocs build не зібрав сайт:\n" + (run.stderr or run.stdout)[-2000:])
+        _mkdocs(cfg_path)
     rep.html = site
     if public:
         # Сторож іде по ВСІХ мовах одразу: `html/<мова>` лежить усередині.
@@ -278,6 +273,38 @@ def build(root: Path, *, public: bool = False, out: Path | None = None,
             shutil.rmtree(site)
             rep.html = None
     return rep
+
+
+def _mkdocs(cfg_path: Path) -> None:
+    """`mkdocs build --clean -q` однієї мови — у цьому ж процесі.
+
+    🔴 Не підпроцес: кожен заново вантажив Python, MkDocs і Material, і сайт
+    сімома мовами збирався 14,5 с проти 5,6 с у процесі (замір 19.10.2026).
+    Повторна збірка в тому самому процесі — звичайний режим MkDocs: так
+    перезбирає `mkdocs serve`.
+    """
+    import logging
+
+    from mkdocs.commands.build import build as mk_build
+    from mkdocs.config import load_config
+    from mkdocs.exceptions import MkDocsException
+
+    log = logging.getLogger("mkdocs")
+    level = log.level
+    # `-q` командного рядка: попередження MkDocs не мають сипатись у вивід nysh.
+    log.setLevel(logging.ERROR)
+    errors = io.StringIO()
+    handler = logging.StreamHandler(errors)
+    handler.setLevel(logging.ERROR)
+    log.addHandler(handler)
+    try:
+        mk_build(load_config(str(cfg_path)), dirty=False)
+    except (MkDocsException, OSError, ValueError) as exc:
+        raise SiteError(f"mkdocs build не зібрав сайт:\n{exc}\n{errors.getvalue()[-2000:]}"
+                        ) from exc
+    finally:
+        log.removeHandler(handler)
+        log.setLevel(level)
 
 
 def _alternate(langs: list[str], current: str) -> list[dict[str, str]]:

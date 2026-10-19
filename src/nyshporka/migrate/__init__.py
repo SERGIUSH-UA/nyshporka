@@ -362,6 +362,24 @@ CHECKS: dict[str, Callable[[Path], CheckResult]] = {
 }
 
 
+def check_runner(root: Path) -> Callable[[str], CheckResult]:
+    """Перевірки кроків на один показ: кожна — раз, хоч би скільки кроків її називали.
+
+    🔴 Ту саму перевірку (`stale_scan`) називають кроки трьох десятків
+    міграцій, і кожен крок заново читав усі міграції й сканував ті самі
+    тексти: `migrate --done` у порожньому просторі — 11,7 с (замір 19.10.2026).
+    Простір за час одного показу не міняється, тож і відповідь та сама.
+    """
+    seen: dict[str, CheckResult] = {}
+
+    def run(name: str) -> CheckResult:
+        if name not in seen:
+            seen[name] = run_check(name, root)
+        return seen[name]
+
+    return run
+
+
 def run_check(name: str, root: Path) -> CheckResult:
     fn = CHECKS.get(name)
     if fn is None:

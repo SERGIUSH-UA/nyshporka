@@ -85,6 +85,15 @@ def test_allow_is_pointwise_not_blanket():
     assert not scan._allowed("src/nyshporka/cli.py", "clan-surname")
 
 
+def _rules_stamp() -> str:
+    """Відбиток усіх правил і винятків: змінене правило не знайде старого кешу."""
+    import hashlib
+    import json
+
+    rules = [(r.id, r.pattern.pattern, r.pattern.flags) for r in scan.RULES]
+    return hashlib.sha1(json.dumps([rules, list(scan.ALLOW)]).encode()).hexdigest()[:16]
+
+
 def _scan_remembering_clean(items, pytestconfig: pytest.Config) -> list:
     """`scan_text` по всіх `items`, але вже чисті (шлях, вміст) не переглядаються.
 
@@ -95,12 +104,9 @@ def _scan_remembering_clean(items, pytestconfig: pytest.Config) -> list:
     не знайде старого кешу й перегляне все. Без `cacheprovider` — повний прохід.
     """
     import hashlib
-    import json
 
     cache = getattr(pytestconfig, "cache", None)
-    rules = [(r.id, r.pattern.pattern, r.pattern.flags) for r in scan.RULES]
-    stamp = hashlib.sha1(json.dumps([rules, list(scan.ALLOW)]).encode()).hexdigest()[:16]
-    slot = f"scan_private/clean/{stamp}"
+    slot = f"scan_private/clean/{_rules_stamp()}"
     clean = set(cache.get(slot, [])) if cache is not None else set()
     findings, seen_clean = [], set()
     for rel, text, where in items:
@@ -160,9 +166,27 @@ def test_this_repository_history_is_clean(pytestconfig):
     єдиним місцем, де провал спливав, був джоб CI — тобто вже після push, коли
     дешевого виправлення не лишається.
     """
-    findings = _scan_remembering_clean(scan.iter_history(), pytestconfig)
+    findings = _scan_history_remembering_clean(pytestconfig)
     assert not findings, "\n".join(
         f"{f.path}:{f.line_no} [{f.rule.id}] {f.excerpt}" for f in findings[:20])
+
+
+def _scan_history_remembering_clean(pytestconfig: pytest.Config) -> list:
+    """Те саме, що `_scan_remembering_clean`, але чистий блоб упізнається за
+    (шлях, sha) і з git узагалі не читається: блоб за своїм sha незмінний.
+    Читання всіх версій з усіх гілок коштувало ~7 с на кожен прогін."""
+    cache = getattr(pytestconfig, "cache", None)
+    slot = f"scan_private/clean_blobs/{_rules_stamp()}"
+    clean = set(cache.get(slot, [])) if cache is not None else set()
+    findings, seen_clean = [], set()
+    for name, sha, text in scan.iter_history_blobs(skip=lambda n, s: f"{n}\0{s}" in clean):
+        got = scan.scan_text(name, text, f"{name} @{sha[:8]}")
+        findings += got
+        if not got:
+            seen_clean.add(f"{name}\0{sha}")
+    if cache is not None:
+        cache.set(slot, sorted(seen_clean | clean))
+    return findings
 
 
 def test_history_mode_still_applies_the_allowlist():
@@ -191,3 +215,31 @@ def test_every_rule_has_a_sample_in_this_file():
                "contact-email", "abs-path-win", "abs-path-nix",
                "private-repo", "aws-presigned", "bearer", "private-host"}
     assert {r.id for r in scan.RULES} == covered
+
+
+def test_a_dirty_blob_is_reported_on_every_run_not_only_the_first(tmp_path, monkeypatch):
+    """🔴 Кеш пам'ятає лише ЧИСТІ блоби: блоб зі знахідкою читається й червонить
+    щоразу, а не лише на холодному кеші."""
+
+    class Cache(dict):
+        def get(self, key, default):
+            return super().get(key, default)
+
+        def set(self, key, value):
+            self[key] = value
+
+    class Config:
+        cache = Cache()
+
+    secret = 'ROOT = Path("E:/Projects/MeGen")'
+    (tmp_path / "clean.md").write_text("нічого приватного\n", encoding="utf-8")
+    (tmp_path / "leak.md").write_text(secret + "\n", encoding="utf-8")
+    git = ["git", "-c", "user.name=t", "-c", "user.email=t@t"]
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    subprocess.run([*git, "add", "."], cwd=tmp_path, check=True)
+    subprocess.run([*git, "commit", "-q", "-m", "x"], cwd=tmp_path, check=True)
+    monkeypatch.setattr(scan, "ROOT", tmp_path)
+    first = _scan_history_remembering_clean(Config())
+    second = _scan_history_remembering_clean(Config())
+    assert [f.path for f in first] == [f.path for f in second] != []
+    assert any(k.startswith("clean.md\0") for v in Config.cache.values() for k in v)

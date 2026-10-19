@@ -62,11 +62,15 @@ class Answer:
         return "; ".join(c.human() for c in self.coverage) or "ніде"
 
 
-def _tag(row: dict[str, Any], pack_id: str) -> dict[str, Any]:
-    """Позначити рядок джерелом. Без цього він — твердження без автора."""
+def _tag(row: dict[str, Any], pack_id: str,
+         archive: tuple[str, str] | None = None) -> dict[str, Any]:
+    """Позначити рядок джерелом. Без цього він — твердження без автора.
+
+    `archive` — уже знайдений `pack_archive(pack_id)`, коли рядків паку тисячі.
+    """
     row["origin"] = "own" if pack_id == "own" else "catalog"
     row["pack_id"] = pack_id
-    repo, label = pack_archive(pack_id)
+    repo, label = archive if archive is not None else pack_archive(pack_id)
     if repo and not row.get("repo"):
         row["repo"] = repo
     if label:
@@ -1189,10 +1193,13 @@ def _modern_index() -> dict[str, list[dict[str, Any]]]:
     packs = open_packs("places")
     try:
         for pack_id, con in packs:
+            # Архів паку — раз на пак: на кожен із десятків тисяч рядків він
+            # перевіряв штамп паку архівів, 7 с на індекс (замір 19.10.2026).
+            archive = pack_archive(pack_id)
             for r in con.execute("SELECT qid, name_uk, name_ru, kind, admin, top, "
                                  "country, lat, lng, norm_uk, norm_ru, norm_alias "
                                  "FROM modern"):
-                d = _tag(dict(r), pack_id)
+                d = _tag(dict(r), pack_id, archive)
                 keys = {d["norm_uk"], d["norm_ru"],
                         *(a for a in (d["norm_alias"] or "").split(" | ") if a)}
                 for k in keys:

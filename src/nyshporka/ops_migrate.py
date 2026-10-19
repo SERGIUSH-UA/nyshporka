@@ -31,11 +31,12 @@ def migrate_status(_a: NoArgs) -> Envelope:
 
     root = _root()
     todo = M.pending(root, __version__)
+    check = M.check_runner(root)
     out = []
     for m in todo:
         steps = []
         for s in m.steps:
-            res = M.run_check(s.check, root) if s.check else M.CheckResult("n/a")
+            res = check(s.check) if s.check else M.CheckResult("n/a")
             steps.append({"id": s.id, "do": s.do, "human": s.human, **res.as_dict()})
         out.append({"version": m.version, "title": m.title, "steps": steps})
     env = ok({"package": __version__, "pending": out,
@@ -97,8 +98,9 @@ def migrate_done(a: DoneArgs) -> Envelope:
             return fail(f"міграції {a.version} серед непройдених немає")
     added = M.mark_done(root, [m.version for m in todo])
     env = ok({"marked": added})
+    check = M.check_runner(root)
     open_steps = [f"{m.version}/{s.id}" for m in todo for s in m.steps
-                  if s.check and M.run_check(s.check, root).state == "todo"]
+                  if s.check and check(s.check).state == "todo"]
     if open_steps:
         env.warn("steps_open", f"позначено, але кроки ще не зелені: {', '.join(open_steps)} — "
                                f"якщо пропущено свідомо з людиною, це нормально")
