@@ -12,6 +12,7 @@ from pathlib import Path
 import typer
 
 from nyshporka.catalog import store
+from nyshporka.core.routes import route
 
 app = typer.Typer(help="Довідники: газетир, реєстри описів фондів.",
                   no_args_is_help=True)
@@ -22,6 +23,7 @@ def _fmt_size(n: int) -> str:
 
 
 @app.command("where")
+@route("catalog where", tier="rare")
 def cmd_where() -> None:
     """Надрукувати теку каталогу (для підтримки й для перенесення)."""
     typer.echo(str(store.catalog_dir()))
@@ -32,12 +34,15 @@ def cmd_where() -> None:
 
 
 @app.command("origin")
+@route("catalog origin", tier="rare")
 def cmd_origin() -> None:
     """Надрукувати, з якого пака стоять каталоги (порожньо — невідомо)."""
     typer.echo(store.origin())
 
 
 @app.command("list")
+@route("catalog list",
+       when="які довідники каталогу встановлено і якого вони зрізу")
 def cmd_list(as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)")) -> None:
     """Що встановлено, якого зрізу й чи ціле."""
     packs = store.installed()
@@ -72,6 +77,7 @@ def cmd_list(as_json: bool = typer.Option(False, "--json", help="машинни�
 
 
 @app.command("verify")
+@route("catalog verify", tier="rare")
 def cmd_verify() -> None:
     """Перечитати всі паки — приймач проти тихого псування.
 
@@ -107,6 +113,7 @@ def cmd_verify() -> None:
 
 
 @app.command("install")
+@route("catalog install", tier="rare", mutates=True)
 def cmd_install(
     src: Path = typer.Option(None, "--from", exists=True,
                              help="тека, .zip або .sqlite-пак (офлайн); без нього — свіжий реліз"),
@@ -168,6 +175,8 @@ def _update(*, apply: bool, force: bool = False) -> str:
 
 
 @app.command("update")
+@route("catalog update", mutates=True,
+       when="поставити найновіший каталог довідників")
 def cmd_update(
     check: bool = typer.Option(False, "--check", help="лише подивитись, не ставити"),
 ) -> None:
@@ -180,6 +189,7 @@ def cmd_update(
 
 
 @app.command("remove")
+@route("catalog remove", tier="rare", mutates=True)
 def cmd_remove(pack_id: str = typer.Argument(..., help="id пака зі `list`")) -> None:
     """Зняти пак із каталогу."""
     for p in store.installed():

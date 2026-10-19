@@ -32,7 +32,9 @@ class CheckArgs(BaseModel):
 
 
 @op("canon.check", summary="Чи цілий канон: схема, зв'язки, хронологія, докази",
-    args=CheckArgs, mutates=False, agent=False, gui=False, section="research")
+    args=CheckArgs, mutates=False, gui=False, section="research",
+    tier="core", scope="project", skill="keep-canon",
+    when="перевірити канон після правки картки: схема, зв'язки, докази")
 def canon_check(a: CheckArgs) -> Envelope:
     """Перевірка всього канону після правки.
 
@@ -62,8 +64,10 @@ def canon_check(a: CheckArgs) -> Envelope:
 
 
 @op("canon.index", summary="Перебудувати базу роду з карток канону",
-    mutates=True, agent=False, gui=False, section="research",
-    next_hints=(("cases.build", "реєстр справ читає базу роду"),))
+    mutates=True, gui=False, section="research",
+    next_hints=(("cases.build", "реєстр справ читає базу роду"),),
+    scope="project", skill="keep-canon",
+    when="перебудувати базу роду після правки карток канону")
 def canon_index(_a: NoArgs) -> Envelope:
     """Картки `data/canonical/**` → `data/derived/nyshporka.sqlite` і JSON для дерева.
 
@@ -100,7 +104,9 @@ class NewIdArgs(BaseModel):
 
 
 @op("canon.new_id", summary="Наступний вільний ID для нової картки",
-    args=NewIdArgs, mutates=False, agent=False, gui=False, section="research")
+    args=NewIdArgs, mutates=False, gui=False, section="research",
+    scope="project", skill="keep-canon",
+    when="новий ID для картки особи, події чи гіпотези")
 def canon_new_id(a: NewIdArgs) -> Envelope:
     """Максимум + 1; дірки не займаються — зниклий ID міг лишитись у нотатках.
 
@@ -118,7 +124,9 @@ class NextArgs(BaseModel):
 
 
 @op("canon.next", summary="Що людині вирішити першим: відкриті гіпотези роду за вагою",
-    args=NextArgs, mutates=False, agent=False, gui=False, section="research")
+    args=NextArgs, mutates=False, gui=False, section="research",
+    tier="core", scope="project", skill="keep-canon",
+    when="що по роду відкрите й чекає рішення людини")
 def canon_next(a: NextArgs) -> Envelope:
     """Ранжування з карток `data/canonical/hypotheses`, а не з нотаток.
 
@@ -152,8 +160,10 @@ class ImportArgs(BaseModel):
 
 
 @op("canon.import", summary="Засіяти порожній канон із GEDCOM (злиття немає)",
-    args=ImportArgs, mutates=True, agent=False, gui=False, section="research",
-    next_hints=(("canon.check", "подивитись, що дерево принесло з собою"),))
+    args=ImportArgs, mutates=True, gui=False, section="research",
+    next_hints=(("canon.check", "подивитись, що дерево принесло з собою"),),
+    scope="project", skill="keep-canon",
+    when="засіяти порожній канон роду з GEDCOM")
 def canon_import(a: ImportArgs) -> Envelope:
     """Одноразове засівання: особи, родини, місця й одне джерело — сам файл.
 
@@ -187,7 +197,9 @@ class EvidenceAddArgs(BaseModel):
 
 
 @op("evidence.add", summary="Покласти доказ-кроп у постійний стор (сірий JPEG ≤ 2 МБ)",
-    args=EvidenceAddArgs, mutates=True, agent=False, gui=False, section="research")
+    args=EvidenceAddArgs, mutates=True, gui=False, section="research",
+    tier="core", scope="mixed", skill="keep-canon",
+    when="покласти доказ-кроп у стор перед внесенням факту в канон")
 def evidence_add(a: EvidenceAddArgs) -> Envelope:
     """Доказ у стор ДО факту в каноні — шлях з відповіді йде в `media[]` і цитату."""
     from nyshporka.canon import evidence as E

@@ -83,7 +83,9 @@ class QueueStatusArgs(BaseModel):
 
 
 @op("queue.status", summary="Черга справ: що на якому етапі й що лишилось",
-    args=QueueStatusArgs, agent=False, section=SECTION)
+    args=QueueStatusArgs, section=SECTION,
+    skill="read-case",
+    when="черга прогонів: що на якому етапі й що лишилось")
 def queue_status(a: QueueStatusArgs) -> Envelope:
     """Справи черги зі станом, етапом, причиною зупинки й командою «що далі».
 
@@ -213,7 +215,9 @@ def _pool_note(key: str) -> dict[str, Any]:
 
 
 @op("queue.add", summary="Поставити справи в чергу",
-    args=QueueAddArgs, mutates=True, agent=False, section=SECTION)
+    args=QueueAddArgs, mutates=True, section=SECTION,
+    skill="read-case",
+    when="поставити кілька справ у чергу на прогін")
 def queue_add(a: QueueAddArgs) -> Envelope:
     """Справа з реєстру опису (черга сама візьме кадри) або тека, що вже на диску.
 
@@ -272,7 +276,9 @@ class QueueRefArgs(BaseModel):
 
 
 @op("queue.retry", summary="Повернути в чергу справу, що стала",
-    args=QueueRefArgs, mutates=True, agent=False, section=SECTION)
+    args=QueueRefArgs, mutates=True, section=SECTION,
+    skill="read-case",
+    when="справа в черзі стала — повернути на прогін")
 def queue_retry(a: QueueRefArgs) -> Envelope:
     """Справи «чекає вас», «відмова» й «повторить сама» — знову в чергу, спроби з нуля."""
     from nyshporka.queue import state as Q
@@ -307,7 +313,9 @@ class QueueSetArgs(BaseModel):
 
 
 @op("queue.set", summary="Рішення по справі черги: пул, уривок, письмо, віддача",
-    args=QueueSetArgs, mutates=True, agent=False, section=SECTION)
+    args=QueueSetArgs, mutates=True, section=SECTION,
+    skill="read-case",
+    when="рішення по справі в черзі: пул, уривок, письмо, віддача")
 def queue_set(a: QueueSetArgs) -> Envelope:
     """Записати рішення людини по справі; справа, що стала, повертається в чергу."""
     from nyshporka.queue import stages as ST
@@ -350,7 +358,9 @@ class QueueDropArgs(BaseModel):
 
 
 @op("queue.drop", summary="Зняти справу з черги",
-    args=QueueDropArgs, mutates=True, agent=False, section=SECTION)
+    args=QueueDropArgs, mutates=True, section=SECTION,
+    skill="read-case",
+    when="зняти справу з черги прогонів")
 def queue_drop(a: QueueDropArgs) -> Envelope:
     """Зняти справу з черги. З диска нічого не видаляється: кадри й прочитане лишаються."""
     from nyshporka.queue import state as Q
@@ -376,7 +386,9 @@ class QueueStopArgs(BaseModel):
 
 
 @op("queue.stop", summary="Зупинити чергу: після поточної справи або зараз",
-    args=QueueStopArgs, mutates=True, agent=False, section=SECTION)
+    args=QueueStopArgs, mutates=True, section=SECTION,
+    skill="read-case",
+    when="зупинити чергу прогонів")
 def queue_stop(a: QueueStopArgs) -> Envelope:
     """Поставити прапор зупинки. Виконавець бачить його між справами, а `now` —
     раз на дві секунди посеред читання."""
@@ -401,7 +413,9 @@ class QueueStartArgs(BaseModel):
 
 
 @op("queue.start", summary="Запустити виконавця черги у фоні",
-    args=QueueStartArgs, mutates=True, agent=False, section=SECTION)
+    args=QueueStartArgs, mutates=True, section=SECTION,
+    skill="read-case",
+    when="запустити чергу прогонів у фоні")
 def queue_start(a: QueueStartArgs) -> Envelope:
     """Підняти `nysh queue run` відчепленим процесом: він переживає і термінал, і
     застосунок. Вивід — у `data/queue/run.log`. Без фону — `nysh queue run`."""

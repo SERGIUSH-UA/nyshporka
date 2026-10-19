@@ -10,6 +10,7 @@ from typing import Any
 
 import typer
 
+from nyshporka.core.routes import route
 from nyshporka.geog.gazetteer import (
     build_index,
     confusers,
@@ -36,6 +37,7 @@ def _warn() -> None:
 
 
 @app.command("build")
+@route("geog build", tier="rare", mutates=True)
 def cmd_build() -> None:
     """Зібрати `data/derived/geog.sqlite` з каталогу ЦДІАК."""
     n = build_index(verbose=True)
@@ -43,6 +45,7 @@ def cmd_build() -> None:
 
 
 @app.command("find")
+@route("geog find", op="geog.find")
 def cmd_find(
     q: str = typer.Argument("", help="назва села (укр або рос; фаззі)"),
     uezd: str = typer.Option("", "--uezd", help="повіт/губернія"),
@@ -69,6 +72,7 @@ def cmd_find(
 
 
 @app.command("card")
+@route("geog card", op="geog.card")
 def cmd_card(
     card: str = typer.Argument(..., help="ідентифікатор картки (miak_003.xml) "
                                          "або назва села"),

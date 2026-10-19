@@ -34,9 +34,11 @@ def test_registry_is_not_empty():
     assert O.all_ops(), "жодної операції не зареєстровано"
 
 
-#: Стартовий перелік агента — карта входу, а не повна поверхня. Далі модель
-#: перестає дочитувати перелік і починає вгадувати.
-START_LIMIT = 18
+#: Стартовий перелік агента — ядро карти в хуку старту (`core.routemap`), а не
+#: повна поверхня. Далі модель перестає дочитувати перелік і починає вгадувати.
+#: 30 — ядро, затверджене дослідником 20.10.2026 (хвиля К): 25 оп + друковані
+#: команди поза реєстром; решту агент знаходить `nysh ops find`.
+START_LIMIT = 30
 
 
 def test_the_starting_list_stays_readable():
@@ -176,7 +178,7 @@ def test_ops_listing_carries_every_schema():
     Сорок викликів на розвідку коштують дорожче за саму роботу, і той, хто
     рахує ходи, просто не робитиме розвідки.
     """
-    res = runner.invoke(app, ["ops", "--json"])
+    res = runner.invoke(app, ["ops", "--json", "--all"])
     assert res.exit_code == 0
     payload = json.loads(res.stdout)
     got = {o["name"]: o for o in payload["ops"]}

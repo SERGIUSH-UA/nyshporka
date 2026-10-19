@@ -24,7 +24,9 @@ def _root() -> Path:
 
 
 @op("migrate.status", summary="Які міграції агента ще не пройдено і що з кроками зараз",
-    mutates=False, agent=False, gui=False, section="core")
+    mutates=False, gui=False, section="core",
+    tier="core", scope="project", skill="migrate",
+    when="пакет оновився — що змінилось для агента і які кроки зробити")
 def migrate_status(_a: NoArgs) -> Envelope:
     from nyshporka import __version__
     from nyshporka import migrate as M
@@ -55,7 +57,9 @@ class ScanArgs(BaseModel):
 
 
 @op("migrate.scan", summary="Знайти застарілі тези в пам'яті й нотатках агента",
-    args=ScanArgs, mutates=False, agent=False, gui=False, section="core")
+    args=ScanArgs, mutates=False, gui=False, section="core",
+    scope="project", skill="migrate",
+    when="застарілі тези в пам'яті й нотатках агента після оновлення")
 def migrate_scan(a: ScanArgs) -> Envelope:
     """Кожен рядок — файл, номер рядка, теза і що правда тепер.
 
@@ -85,7 +89,9 @@ class DoneArgs(BaseModel):
 
 
 @op("migrate.done", summary="Позначити міграцію агента пройденою в цьому просторі",
-    args=DoneArgs, mutates=True, agent=False, gui=False, section="core")
+    args=DoneArgs, mutates=True, gui=False, section="core",
+    scope="project", skill="migrate",
+    when="позначити міграцію агента пройденою")
 def migrate_done(a: DoneArgs) -> Envelope:
     from nyshporka import __version__
     from nyshporka import migrate as M

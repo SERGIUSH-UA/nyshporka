@@ -17,10 +17,13 @@
 за домовленістю, а за побудовою — і те, що лишилось поза цим (напр. вибір теки
 нативним діалогом), перевіряє `test_triptych_parity`.
 
-🔴 `agent=True` — стартовий перелік агента (`nysh ops --agent`): з чого
-починати дослідження. До 0.19 це були tool'и MCP-сервера; сервер прибрано, а
-перелік лишився короткою картою входу, бо повний реєстр — понад сотня
-операцій. `agent=False` нічого не забороняє: `nysh op <ім'я>` дістає будь-яку.
+🔴 `tier=` — рівень для агента. `core` — ядро: карта «ситуація → команда» в
+хуку старту (`core.routemap`) і стартовий перелік `nysh ops --agent`.
+`situational` — те, що агент знаходить запитом `nysh ops find`, тому `when=`
+(коли брати, мовою ситуації) для нього обов'язкове. `rare` — службове, людське,
+лабораторне. Рівень нічого не забороняє: `nysh op <ім'я>` дістає будь-яку.
+Причина саме такого поділу: повний реєстр — під дві сотні дій, і агент, якому
+дали все, не відрізняє важливого (хвиля К багатопроєктності).
 
 🔴 `section=` — до якої частини застосунку належить дія (`core.sections`).
 Вимкнена в профілі секція відмовляє тут, у `call()`, а не в HTTP-шарі: це
@@ -31,11 +34,16 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel
 
 from nyshporka.core.envelope import Envelope
+
+Tier = Literal["core", "situational", "rare"]
+Scope = Literal["hub", "project", "mixed"]
+TIERS: tuple[str, ...] = ("core", "situational", "rare")
+SCOPES: tuple[str, ...] = ("hub", "project", "mixed")
 
 
 class NoArgs(BaseModel):
@@ -48,8 +56,6 @@ class Op:
     fn: Callable[[Any], Envelope]
     summary: str
     args: type[BaseModel] = NoArgs
-    #: Чи входить у стартовий перелік агента (`nysh ops --agent`). Див. докстрінг.
-    agent: bool = True
     #: Чи показувати в браузері взагалі (незалежно від секцій).
     gui: bool = True
     #: Частина застосунку, яку вимикають профілем. Дефолт `core` — незнімна.
@@ -69,6 +75,20 @@ class Op:
     private: bool = False
     #: Підказки, що робити далі. Пари дій конвеєра легко забути наполовину.
     next_hints: tuple[tuple[str, str], ...] = ()
+    #: Рівень для агента: `core` — карта в хуку старту, `situational` —
+    #: знаходиться `nysh ops find`, `rare` — службове, людське, лабораторне.
+    tier: Tier = "situational"
+    #: Коли брати — мовою ситуації, не назвою дії. По ньому шукає `ops find`.
+    when: str = ""
+    #: Скіл, що веде цю дію (ім'я теки скіла пакета), або порожньо.
+    skill: str = ""
+    #: Чий шар: Майстерня, проєкт чи обидва (дизайн багатопроєктності, розд. 7).
+    scope: Scope = "hub"
+
+    @property
+    def agent(self) -> bool:
+        """Стартовий перелік (`nysh ops --agent`) — це ядро."""
+        return self.tier == "core"
 
     @property
     def cli_path(self) -> tuple[str, ...]:
@@ -104,9 +124,13 @@ def _section_refusal(op: Op) -> str | None:
             f"недоступна. Увімкнути: nysh sections enable {op.section}")
 
 
-def _readonly_refusal(op: Op) -> str | None:
-    """Відмова змінювати чужий проєкт, відкритий лише для читання (`--project`)."""
-    if not op.mutates:
+def readonly_refusal(name: str, mutates: bool) -> str | None:
+    """Відмова змінювати чужий проєкт, відкритий лише для читання (`--project`).
+
+    Спільна для оп реєстру і для команд поза ним (`core.routes`): інакше
+    друкована команда, що пише напряму, обходила б межу, яку тримає `call()`.
+    """
+    if not mutates:
         return None
     try:
         from nyshporka.core.workspace import workspace
@@ -116,9 +140,13 @@ def _readonly_refusal(op: Op) -> str | None:
         return None
     if not ws.readonly:
         return None
-    return (f"«{op.name}» змінює дані, а проєкт «{ws.project or ws.name}» відкрито з "
+    return (f"«{name}» змінює дані, а проєкт «{ws.project or ws.name}» відкрито з "
             "іншого проєкту лише для читання. Записувати в нього — з його теки або "
             "з кореня Майстерні")
+
+
+def _readonly_refusal(op: Op) -> str | None:
+    return readonly_refusal(op.name, op.mutates)
 
 
 @dataclass
@@ -220,9 +248,11 @@ _OpFn = Callable[[Any], Envelope]
 
 
 def op(name: str, *, summary: str, args: type[BaseModel] = NoArgs,
-       agent: bool = True, gui: bool = True, section: str = "core",
+       gui: bool = True, section: str = "core",
        mutates: bool = False, long: bool = False, private: bool = False,
-       next_hints: tuple[tuple[str, str], ...] = ()) -> Callable[[_OpFn], _OpFn]:
+       next_hints: tuple[tuple[str, str], ...] = (),
+       tier: Tier = "situational", when: str = "", skill: str = "",
+       scope: Scope = "hub") -> Callable[[_OpFn], _OpFn]:
     """Оголосити операцію.
 
     🔴 `section` перевіряється при оголошенні, а не при виклику. Помилка друку
@@ -235,11 +265,16 @@ def op(name: str, *, summary: str, args: type[BaseModel] = NoArgs,
         raise ValueError(
             f"операція «{name}»: невідома секція «{section}». "
             f"Є: {', '.join(sorted(S.ids()))}")
+    if tier not in TIERS:
+        raise ValueError(f"операція «{name}»: рівень «{tier}», є {', '.join(TIERS)}")
+    if scope not in SCOPES:
+        raise ValueError(f"операція «{name}»: шар «{scope}», є {', '.join(SCOPES)}")
 
     def deco(fn: Callable[[Any], Envelope]) -> Callable[[Any], Envelope]:
-        REGISTRY.add(Op(name=name, fn=fn, summary=summary, args=args, agent=agent,
-                        gui=gui, section=section, mutates=mutates, long=long,
-                        private=private, next_hints=next_hints))
+        REGISTRY.add(Op(name=name, fn=fn, summary=summary, args=args, gui=gui,
+                        section=section, mutates=mutates, long=long,
+                        private=private, next_hints=next_hints, tier=tier,
+                        when=when, skill=skill, scope=scope))
         return fn
 
     return deco

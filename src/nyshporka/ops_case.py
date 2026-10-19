@@ -35,7 +35,8 @@ class CaseFrameArgs(BaseModel):
 # судять; суцільне гортання аркушів моделі не додає нічого, зате з'їдає слот у
 # переліку, який вона мусить дочитувати цілком при кожному виклику.
 @op("case.frames", summary="Аркуші справи: що взагалі можна погортати",
-    args=CaseFramesArgs, section="material", agent=False)
+    args=CaseFramesArgs, section="material",
+    when="які аркуші справи взагалі можна погортати")
 def case_frames(a: CaseFramesArgs) -> Envelope:
     """Перелік аркушів справи — кадрами або сторінками PDF.
 
@@ -70,7 +71,8 @@ def case_frames(a: CaseFramesArgs) -> Envelope:
 
 
 @op("case.frame", summary="Подивитись на аркуш справи", args=CaseFrameArgs,
-    section="material", agent=False)
+    section="material",
+    when="подивитись на аркуш справи за номером кадру")
 def case_frame(a: CaseFrameArgs) -> Envelope:
     """Один аркуш у вигляді, придатному для перегляду.
 

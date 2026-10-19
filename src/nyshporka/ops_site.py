@@ -23,7 +23,9 @@ class SiteBuildArgs(BaseModel):
 
 
 @op("site.build", summary="Зібрати сайт роду з канону (приватний або відкритий)",
-    args=SiteBuildArgs, mutates=True, agent=False, gui=False, section="research")
+    args=SiteBuildArgs, mutates=True, gui=False, section="research",
+    scope="project", skill="build-site",
+    when="зібрати сайт роду з канону")
 def site_build(a: SiteBuildArgs) -> Envelope:
     """Канон → сирці MkDocs → HTML; у відкритій версії — сторож по готовому сайту.
 
@@ -80,7 +82,9 @@ class SiteStatusArgs(BaseModel):
 
 
 @op("site.status", summary="Що зібрано з сайту роду: коли, скільки осіб, де відкрити",
-    args=SiteStatusArgs, mutates=False, agent=False, section="research")
+    args=SiteStatusArgs, mutates=False, section="research",
+    scope="project", skill="build-site",
+    when="що зібрано з сайту роду: коли, скільки осіб")
 def site_status(_a: SiteStatusArgs) -> Envelope:
     """Обидві версії сайту: чи є HTML, коли зібрано, лічильники й адреса в консолі.
 
@@ -119,7 +123,8 @@ class SiteRebuildArgs(BaseModel):
 
 
 @op("site.rebuild", summary="Перезібрати сайт роду з консолі — роботою в черзі",
-    args=SiteRebuildArgs, mutates=True, long=True, agent=False, section="research")
+    args=SiteRebuildArgs, mutates=True, long=True, section="research",
+    tier="rare", scope="project", skill="build-site")
 def site_rebuild(a: SiteRebuildArgs) -> Envelope:
     """Та сама збірка, що `site.build`, але роботою: з поступом у «Роботах» і без
     завислої вкладки — MkDocs на кількасот сторінок іде хвилини.

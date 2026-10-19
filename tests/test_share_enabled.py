@@ -38,13 +38,20 @@ def test_no_dev_flag_left() -> None:
     assert "NYSHPORKA_SUPRIAHA\"" not in src and "DEV_FLAG" not in src
 
 
-def test_ops_open_to_the_app_not_to_the_agent() -> None:
-    """Застосунок бачить операції обміну; агент — ні (стеля MCP, див. ops_share)."""
+def test_ops_open_to_the_app_and_core_ones_to_the_agent() -> None:
+    """Застосунок бачить усі операції обміну; у ядрі агента — лише чотири.
+
+    Колись обмін тримали поза переліком агента через стелю tool'ів MCP; MCP
+    прибрано в 0.19, а взяти справу з Супряги й віддати прочитане — одні з
+    найчастіших дій агента (інвентар транскриптів хвилі К). Ядро затвердив
+    дослідник 20.10.2026; решту обміну агент знаходить `nysh ops find`.
+    """
     found = [o for o in ops.REGISTRY.all() if o.name.startswith("share.")]
     assert found, "операції обміну зникли з реєстру"
     for o in found:
         assert o.gui, f"{o.name}: gui=False"
-        assert not o.agent, f"{o.name}: agent=True"
+    assert {o.name for o in found if o.agent} == {
+        "share.pack", "share.push", "share.pull", "share.card"}
 
 
 def test_ops_with_key_or_journal_are_private() -> None:

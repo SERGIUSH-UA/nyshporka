@@ -114,8 +114,10 @@ def test_every_op_has_at_least_one_entrance() -> None:
     """
     ops = _ops()
     js, cli = _called_from_js(), _called_from_cli()
+    # Агентові дія доступна, якщо її знаходить `nysh ops find` (ядро й
+    # ситуативне мають `when`); рідкісне — службове, лише команда чи екран.
     orphans = [n for n, o in ops.items()
-               if not getattr(o, "agent", False)
+               if getattr(o, "tier", "rare") == "rare"
                and n not in js and n not in cli and n not in REACHABLE_OTHERWISE]
     assert not orphans, (
         "до цих операцій не дійти ні агентом, ні командою, ні екраном: "

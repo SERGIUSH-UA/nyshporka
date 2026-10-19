@@ -5,8 +5,10 @@
 
 🔴 `project.status --agent` — точка доставки контексту агентові: його кличе
 хук старту сесії в теці проєкту. Бюджет хука ~10 тис. знаків ділиться між
-станом проєкту, пам'яттю Майстерні й (хвиля К) картою команд, тож стан
-проєкту стислий з самого початку: ≤ 2 тис. знаків.
+станом проєкту (≤ 2 тис.), картою ядра команд (≤ 3 тис., `core.routemap`) і
+пам'яттю Майстерні, що бере залишок. `--no-memory` — для кореня старого типу,
+де Майстерня й проєкт в одному корені: там Claude Code вантажить `MEMORY.md`
+сам, і друге друкування лише з'їло б контекст.
 """
 from __future__ import annotations
 
@@ -23,6 +25,8 @@ from nyshporka.core.ops import NoArgs, op
 #: Межі виводу для агента (знаків).
 AGENT_BUDGET = 10_000
 STATE_BUDGET = 2_000
+#: Карта ядра команд (`core.routemap`); пам'ять Майстерні бере залишок.
+MAP_BUDGET = 3_000
 
 
 class ProjectNewArgs(BaseModel):
@@ -33,7 +37,8 @@ class ProjectNewArgs(BaseModel):
 
 
 @op("project.new", summary="Завести проєкт у Майстерні (рід чи замовлення) з шаблону",
-    args=ProjectNewArgs, mutates=True, agent=False)
+    args=ProjectNewArgs, mutates=True,
+    when="завести новий проєкт у Майстерні: рід чи замовлення")
 def project_new(a: ProjectNewArgs) -> Envelope:
     from nyshporka import project as T
     from nyshporka.core import projects as P
@@ -64,7 +69,8 @@ def project_new(a: ProjectNewArgs) -> Envelope:
     return env
 
 
-@op("project.list", summary="Проєкти Майстерні: вид, канон, профіль, архівні", agent=False)
+@op("project.list", summary="Проєкти Майстерні: вид, канон, профіль, архівні",
+    when="які проєкти є в Майстерні")
 def project_list(_: NoArgs) -> Envelope:
     from nyshporka.core import projects as P
     from nyshporka.core import workspace as W
@@ -81,11 +87,17 @@ def project_list(_: NoArgs) -> Envelope:
 
 class ProjectStatusArgs(BaseModel):
     agent: bool = Field(default=False,
-                        description="для хука старту сесії: стисло + індекс пам'яті Майстерні")
+                        description="для хука старту сесії: стисло + карта команд + "
+                                    "індекс пам'яті Майстерні")
+    no_memory: bool = Field(default=False,
+                            description="без індексу пам'яті: корінь, де агент і так "
+                                        "вантажить її сам")
 
 
 @op("project.status", summary="Де я: Майстерня, проєкт, рід, канон, відкрите, інші проєкти",
-    args=ProjectStatusArgs, agent=False)
+    args=ProjectStatusArgs,
+    scope="mixed",
+    when="де я: Майстерня, проєкт, рід, що відкрите")
 def project_status(a: ProjectStatusArgs) -> Envelope:
     from nyshporka.core import workspace as W
 
@@ -93,7 +105,10 @@ def project_status(a: ProjectStatusArgs) -> Envelope:
     state = _state(ws)
     text = _state_text(state)[:STATE_BUDGET]
     if a.agent:
-        mem = _hub_memory(ws.hub)
+        from nyshporka.core import routemap as M
+
+        text += "\n\n" + M.agent_map(MAP_BUDGET)
+        mem = "" if a.no_memory else _hub_memory(ws.hub)
         if mem:
             room = AGENT_BUDGET - len(text) - 80
             body = mem if len(mem) <= room else (
@@ -112,7 +127,8 @@ class ProjectArchiveArgs(ProjectNameArgs):
 
 
 @op("project.archive", summary="Сховати проєкт із переліку й підсвітки (файли лишаються)",
-    args=ProjectArchiveArgs, mutates=True, agent=False)
+    args=ProjectArchiveArgs, mutates=True,
+    tier="rare")
 def project_archive(a: ProjectArchiveArgs) -> Envelope:
     from nyshporka import project as T
     from nyshporka.core import projects as P
@@ -134,7 +150,8 @@ class ProjectOpenArgs(ProjectNameArgs):
 
 
 @op("project.open", summary="Новий термінал у теці проєкту (за потреби — з агентом)",
-    args=ProjectOpenArgs, agent=False, gui=False)
+    args=ProjectOpenArgs, gui=False,
+    when="відкрити термінал чи агента в теці іншого проєкту")
 def project_open(a: ProjectOpenArgs) -> Envelope:
     """🔴 Перемкнути проєкт посеред сесії агента не можна: інструкції й пам'ять
     вантажаться на старті. Тому «перейти в проєкт» = нова сесія в його теці."""

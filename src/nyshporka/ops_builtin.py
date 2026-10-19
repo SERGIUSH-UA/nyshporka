@@ -26,7 +26,9 @@ if TYPE_CHECKING:
 
 
 # ── простір ──────────────────────────────────────────────────────────────────
-@op("workspace.info", summary="Де лежить дослідження і що в ньому є")
+@op("workspace.info", summary="Де лежить дослідження і що в ньому є",
+    scope="mixed",
+    when="де лежить дослідження і що в ньому є")
 def workspace_info(_: NoArgs) -> Envelope:
     from nyshporka.core import lock
     from nyshporka.core import workspace as W
@@ -68,7 +70,8 @@ class RootArgs(BaseModel):
 # `agent=False`: оголошення кореня розширює зону, у якій застосунок читає диск.
 # Це рішення людини про власний архів, а не крок конвеєра; агент може порадити,
 # але не зробити.
-@op("roots.list", summary="Де застосунок шукає справи", agent=False, private=True)
+@op("roots.list", summary="Де застосунок шукає справи", private=True,
+    when="де застосунок шукає справи")
 def roots_list(_: NoArgs) -> Envelope:
     """Перелік місць, звідки беруться справи, — з оголошеного, а не з наявного.
 
@@ -96,7 +99,8 @@ def roots_list(_: NoArgs) -> Envelope:
 
 
 @op("roots.add", summary="Оголосити теку зі сканами поза простором",
-    args=RootArgs, agent=False, mutates=True)
+    args=RootArgs, mutates=True,
+    when="скани лежать поза простором — оголосити їхню теку")
 def roots_add(a: RootArgs) -> Envelope:
     """Обхід бачитиме теку там, ДЕ вона лежить. Файли не переносяться.
 
@@ -119,7 +123,8 @@ def roots_add(a: RootArgs) -> Envelope:
 
 
 @op("roots.remove", summary="Зняти оголошений корінь; файли лишаються",
-    args=RootArgs, agent=False, mutates=True)
+    args=RootArgs, mutates=True,
+    tier="rare")
 def roots_remove(a: RootArgs) -> Envelope:
     """Зникає лише видимість. Скани лишаються на місці — жодного файлу не чіпаємо.
 
@@ -159,7 +164,9 @@ class PulseArgs(BaseModel):
 # дочитати до кінця, і додавав би привід звітувати зведенням замість знаменника.
 @op("home.pulse", summary="Стан дослідження одним зрізом: реєстр, канон, "
                           "читання, пошук, історія",
-    args=PulseArgs, agent=False)
+    args=PulseArgs,
+    scope="mixed",
+    when="стан дослідження одним зрізом: реєстр, канон, читання, пошук")
 def home_pulse(a: PulseArgs) -> Envelope:
     """Усе, що показує головна, — одним викликом.
 
@@ -334,7 +341,7 @@ _MACHINE_GATE = threading.Lock()
 
 
 @op("home.machine", summary="Чи ця машина готова читати рукопис — крок чекліста головної",
-    agent=False)
+    tier="rare")
 def home_machine(_: NoArgs) -> Envelope:
     """Крок «Машина читає рукопис» — окремо від зрізу `home.pulse`.
 
@@ -879,7 +886,9 @@ def _catalog_basis(src: Any) -> dict[str, Any]:
     return out
 
 
-@op("sources.list", summary="Звідки можна брати матеріал", section="material")
+@op("sources.list", summary="Звідки можна брати матеріал", section="material",
+    skill="start-research",
+    when="звідки можна брати матеріал і що доводить нуль у джерелі")
 def sources_list(_: NoArgs) -> Envelope:
     from nyshporka.sources.base import about_of
 
@@ -932,7 +941,9 @@ class LookArgs(BaseModel):
 
 
 @op("material.look", summary="Що це за матеріал: скільки кадрів, одна справа чи багато",
-    args=LookArgs, private=True)
+    args=LookArgs, private=True,
+    skill="take-delivery",
+    when="що це за матеріал у теці: скільки кадрів, одна справа чи багато")
 def material_look(a: LookArgs) -> Envelope:
     from nyshporka.sources.local import LocalSource, inspect
 
@@ -1170,7 +1181,9 @@ def _mtime_day(path: Any) -> str:
 
 
 @op("catalog.search", summary="Де взагалі є щось про моє село",
-    args=CatalogSearchArgs, mutates=False, section="material")
+    args=CatalogSearchArgs, mutates=False, section="material",
+    tier="core", skill="start-research",
+    when="чи є справа, фонд, опис онлайн і де лежать кадри")
 def catalog_search(a: CatalogSearchArgs) -> Envelope:
     """Пошук по каталогах джерел.
 
@@ -1390,7 +1403,8 @@ def _ask_sources(srcs: list[Any], q: str,
 # `agent=False`, як у `search.sweep`: черга живе в процесі застосунку, а агент
 # має той самий пошук синхронно — `catalog.search`.
 @op("catalog.sweep", summary="Де взагалі є щось про моє село — робота в черзі",
-    args=CatalogSearchArgs, mutates=False, long=True, agent=False, section="material")
+    args=CatalogSearchArgs, mutates=False, long=True, section="material",
+    tier="rare")
 def catalog_sweep(a: CatalogSearchArgs) -> Envelope:
     """Той самий пошук по каталогах, але роботою з поступом по джерелах.
 
@@ -1416,7 +1430,9 @@ class _CrawlStopped(Exception):
 
 
 @op("catalog.crawl", summary="Зібрати каталог джерела — робота в черзі",
-    args=CrawlArgs, mutates=True, long=True, agent=False, section="material")
+    args=CrawlArgs, mutates=True, long=True, section="material",
+    skill="start-research",
+    when="зібрати каталог справ джерела, по якому потім шукає nysh find")
 def catalog_crawl(a: CrawlArgs) -> Envelope:
     """Зібрати каталог обходом сайту — те саме, що `nysh crawl`, але кнопкою.
 
@@ -1589,7 +1605,9 @@ class FondCardArgs(BaseModel):
 # фонду належить до тієї ж родини, що `fond.list` і `registry.*`, — усі вони
 # живуть у застосунку й командному рядку, а не в переліку агента.
 @op("catalog.fond", summary="Що це за фонд і чи варто збирати його реєстр",
-    args=FondCardArgs, mutates=False, agent=False, section="material")
+    args=FondCardArgs, mutates=False, section="material",
+    skill="keep-fond",
+    when="що це за фонд і чи варто збирати його реєстр опису")
 def catalog_fond(a: FondCardArgs) -> Envelope:
     """Картка фонду з зовнішнього покажчика плюс наш власний стан по ньому.
 
@@ -1684,7 +1702,9 @@ class BrowseArgs(BaseModel):
 # `private=True`: з джерелом `local` `ref` — будь-яка тека диска, і відповідь
 # розкриває її вміст.
 @op("catalog.browse", summary="Що лежить у фонді, описі, теці", args=BrowseArgs,
-    mutates=False, section="material", private=True)
+    mutates=False, section="material", private=True,
+    skill="start-research",
+    when="погортати фонд, опис, теку дзеркала архіву")
 def catalog_browse(a: BrowseArgs) -> Envelope:
     from nyshporka.sources.base import SourceError
 
@@ -1705,7 +1725,9 @@ class ManifestArgs(BaseModel):
 
 # `private=True`: як `catalog.browse` — з `local` читає будь-яку теку.
 @op("catalog.manifest", summary="Що саме принесе завантаження — ДО того, як почалось",
-    args=ManifestArgs, mutates=False, section="material", private=True)
+    args=ManifestArgs, mutates=False, section="material", private=True,
+    skill="start-research",
+    when="що саме принесе завантаження — до того, як воно почалось")
 def catalog_manifest(a: ManifestArgs) -> Envelope:
     from nyshporka.sources.base import SourceError
 
@@ -1748,7 +1770,9 @@ class CasesArgs(BaseModel):
 
 
 @op("cases.list", summary="Мої справи: що є, що прочитано, що прошукано",
-    args=CasesArgs, mutates=False)
+    args=CasesArgs, mutates=False,
+    tier="core", scope="mixed",
+    when="що вже є в реєстрі справ: прочитано, прошукано, стан")
 def cases_list(a: CasesArgs) -> Envelope:
     """Реєстр справ із застереженням про свіжість.
 
@@ -1855,7 +1879,9 @@ def _intake_label(group: str, roots: set[str]) -> str:
 
 
 @op("intake.list", summary="Нові теки: матеріал на диску без шифри — групами",
-    mutates=False, agent=False)
+    mutates=False,
+    skill="take-delivery",
+    when="нові теки на диску без шифри — що розібрати")
 def intake_list(_: NoArgs) -> Envelope:
     """Що на диску ще не стало справою — згруповано за батьківською текою.
 
@@ -1935,7 +1961,9 @@ class IntakeAsideArgs(BaseModel):
 
 
 @op("intake.aside", summary="Відкласти теку як «не справа» — або повернути до нових тек",
-    args=IntakeAsideArgs, mutates=True, agent=False)
+    args=IntakeAsideArgs, mutates=True,
+    skill="take-delivery",
+    when="тека — не справа: відкласти з переліку нових тек")
 def intake_aside(a: IntakeAsideArgs) -> Envelope:
     """Рішення дослідника: ця тека — не архівна справа й опису не чекає.
 
@@ -2009,7 +2037,8 @@ def _bundle_subdirs(rows: list[dict[str, Any]]) -> None:
 
 # ── пошук по прочитаному ─────────────────────────────────────────────────────
 @op("search.state", summary="Чи зібрано індекс прочитаного",
-    mutates=False, agent=False, section="core")
+    mutates=False, section="core",
+    tier="rare")
 def search_state(_: NoArgs) -> Envelope:
     """Знаменник екрана пошуку — до запиту, а не після.
 
@@ -2045,7 +2074,8 @@ class IndexArgs(BaseModel):
 
 
 @op("search.index", summary="Зібрати індекс прочитаного — щоб пошук був швидким",
-    args=IndexArgs, mutates=True, long=True, agent=False, section="core")
+    args=IndexArgs, mutates=True, long=True, section="core",
+    tier="rare")
 def search_index(a: IndexArgs) -> Envelope:
     """Індекс декоду: один раз довго, далі щоразу швидко.
 
@@ -2388,7 +2418,9 @@ def _search_every_area(a: SearchArgs) -> Envelope:
 
 
 @op("search.run", summary="Знайти прізвище в тому, що вже прочитано",
-    args=SearchArgs, mutates=False, section="core")
+    args=SearchArgs, mutates=False, section="core",
+    scope="mixed", skill="find-surname",
+    when="знайти прізвище в прочитаному простим пошуком")
 def search_run(a: SearchArgs) -> Envelope:
     """Знайти прізвище в прочитаному, виписаному чи розібраному — див. `_search_run`.
 
@@ -2675,7 +2707,9 @@ class PageArgs(BaseModel):
 
 
 @op("page.text", summary="Що прочитано на сторінці й де саме лежить кожен рядок",
-    args=PageArgs, mutates=False, section="htr")
+    args=PageArgs, mutates=False, section="htr",
+    skill="read-case",
+    when="що прочитано на сторінці і де лежить кожен рядок")
 def page_text(a: PageArgs) -> Envelope:
     from nyshporka import htr_store as S
 
@@ -2737,7 +2771,9 @@ class RunsArgs(BaseModel):
 
 
 @op("runs.list", summary="Прогони читання: що вже прочитано і чим",
-    args=RunsArgs, mutates=False, section="htr", agent=False)
+    args=RunsArgs, mutates=False, section="htr",
+    skill="read-case",
+    when="чи був уже прогін справи: які прогони є і якими моделями")
 def runs_list(a: RunsArgs) -> Envelope:
     """Перелік прочитаного — для вибору в гортачі.
 
@@ -2810,7 +2846,8 @@ class LinesArgs(BaseModel):
 # читає текст, а не дивиться на пікселі; tool, який віддає координати, лише
 # росте в переліку.
 @op("page.lines", summary="Рамки рядків сторінки — щоб клікати по знімку",
-    args=LinesArgs, mutates=False, section="htr", agent=False)
+    args=LinesArgs, mutates=False, section="htr",
+    tier="rare")
 def page_lines(a: LinesArgs) -> Envelope:
     """Геометрія рядків у координатах того самого зображення, що показують.
 
@@ -2840,7 +2877,8 @@ def page_lines(a: LinesArgs) -> Envelope:
 
 
 @op("page.view", summary="Подивитись на рядок чи сторінку оком", args=ViewArgs,
-    mutates=False, section="htr")
+    mutates=False, section="htr",
+    when="подивитись на рядок чи сторінку оком")
 def page_view(a: ViewArgs) -> Envelope:
     """🔴 Центральна операція звірки: виявити ≠ перевірити.
 
@@ -2953,7 +2991,9 @@ class CaseRegisterArgs(BaseModel):
 
 
 @op("case.register", summary="Завести або виправити справу: шифра, назва, роки",
-    args=CaseRegisterArgs, mutates=True)
+    args=CaseRegisterArgs, mutates=True,
+    tier="core", skill="start-research",
+    when="завести справу: паспорт для теки з кадрами (шифра, назва, роки)")
 def case_register(a: CaseRegisterArgs) -> Envelope:
     """Зробити теку зі сканами справою.
 
@@ -3063,7 +3103,8 @@ def case_register(a: CaseRegisterArgs) -> Envelope:
 # мережу, а `PRIVACY.md` обіцяє «фонової активності в мережі немає» — обіцянка
 # дорожча за зручність. Тому перевірка робиться рівно тоді, коли її попросили
 # кнопкою чи командою.
-@op("update.check", summary="Чи є новіша версія застосунку", agent=False)
+@op("update.check", summary="Чи є новіша версія застосунку",
+    when="чи є новіша версія Нишпорки")
 def update_check(_: NoArgs) -> Envelope:
     """⬆️ Що стоїть, що є на pypi.org і чим оновитись.
 
@@ -3101,7 +3142,8 @@ def update_check(_: NoArgs) -> Envelope:
 
 # `agent=False` — це питання про машину, а не про дослідження: агентові
 # середовище описує `htr.env`, а решту він бачить у відмовах операцій.
-@op("setup.check", summary="Чи готова ця машина читати рукопис", agent=False)
+@op("setup.check", summary="Чи готова ця машина читати рукопис",
+    when="чи готова ця машина читати рукопис")
 def setup_check(_: NoArgs) -> Envelope:
     """🔴 Найважливіше питання аматора — і до нього не було входу з екрана.
 
@@ -3163,7 +3205,8 @@ class SampleArgs(BaseModel):
 # щойно поставила застосунок і хоче побачити, що він робить. Агент застосунку не
 # ставить, а місце в переліку tool'ів коштує — там стеля читабельності.
 @op("sample.install", summary="Розгорнути зразкову справу в просторі",
-    args=SampleArgs, agent=False, mutates=True)
+    args=SampleArgs, mutates=True,
+    tier="rare")
 def sample_install(a: SampleArgs) -> Envelope:
     """📖 Три аркуші справжньої архівної справи з готовим декодом.
 
@@ -3208,7 +3251,9 @@ class BindArgs(BaseModel):
 # декод під правильною шифрою, з якого потім цитують знахідки. Побачити нічиї
 # прогони агент може (`cases.list`, `cases orphans`); вирішувати — ні.
 @op("cases.bind", summary="Прив'язати прогін до справи руками",
-    args=BindArgs, agent=False, mutates=True)
+    args=BindArgs, mutates=True,
+    skill="read-case",
+    when="прив'язати прогін до справи руками, коли реєстр їх не зв'язав")
 def cases_bind(a: BindArgs) -> Envelope:
     """🔗 Ремонт «нічиїх» прогонів — той, що досі вимагав текстового редактора.
 
@@ -3261,7 +3306,9 @@ class CasesSplitArgs(BaseModel):
 
 
 @op("cases.split", summary="Розкласти збірну теку на справи",
-    args=CasesSplitArgs, mutates=True, agent=False)
+    args=CasesSplitArgs, mutates=True,
+    skill="take-delivery",
+    when="збірна тека чи плівка з кількома справами — розкласти на справи")
 def cases_split(a: CasesSplitArgs) -> Envelope:
     """Зробити з теки, де кадри кількох справ, кілька справ — кожну зі своєю
     текою, паспортом, прогонами й нотатками.
@@ -3313,7 +3360,9 @@ class CasesCardsArgs(BaseModel):
 
 
 @op("cases.cards", summary="Знайти на плівці картки-мішені й запропонувати межі справ",
-    args=CasesCardsArgs, agent=False)
+    args=CasesCardsArgs,
+    skill="take-delivery",
+    when="плівка з кількома справами: знайти картки-мішені й межі справ")
 def cases_cards(a: CasesCardsArgs) -> Envelope:
     """Плівка FamilySearch несе кілька справ, і кожну обрамляють чорні картки
     зйомки: початкова з шифрою й кінцева «END OF ITEM». Операція знаходить їх
@@ -3376,7 +3425,9 @@ class CasesJoinArgs(BaseModel):
 
 
 @op("cases.join", summary="Зібрати справу, розірвану між плівками", args=CasesJoinArgs,
-    mutates=True, agent=False)
+    mutates=True,
+    skill="take-delivery",
+    when="справа розірвана між плівками — зібрати в одну")
 def cases_join(a: CasesJoinArgs) -> Envelope:
     """Справа на двох котушках («CONTINUED ON / FROM ANOTHER ROLL»): частини з
     тек плівок лягають в одну теку справи жорсткими посиланнями з іменами
@@ -3412,7 +3463,8 @@ class CasesChainArgs(BaseModel):
 # `agent=False`: стартовий перелік агента має стелю, а сюди він приходить за
 # порадою — з `nysh get`, з доктора чи зі скіла — і кличе `nysh cases chain`.
 @op("cases.chain", summary="Де обірвано ланцюг «скани → паспорт → каталог → прогін»",
-    args=CasesChainArgs, mutates=False, agent=False)
+    args=CasesChainArgs, mutates=False,
+    when="де обірвано ланцюг «скани → паспорт → каталог → прогін»")
 def cases_chain(a: CasesChainArgs) -> Envelope:
     """Для кожної теки зі сканами — ланка, на якій вона стоїть, і команда.
 
@@ -3452,7 +3504,9 @@ class CasesBuildArgs(BaseModel):
 # `agent=False`: агент дізнається про застарілий зріз із поля `stale` в конверті
 # й має пораду в ньому ж; окремий tool на це з'їдав би місце в переліку.
 @op("cases.build", summary="Перезібрати реєстр справ", args=CasesBuildArgs,
-    mutates=True, long=True, agent=False)
+    mutates=True, long=True,
+    tier="core",
+    when="оновити реєстр справ після будь-якої дії зі справою")
 def cases_build(a: CasesBuildArgs) -> Envelope:
     """🔴 Кнопка, на яку посилались тексти, якої не було.
 
@@ -3484,7 +3538,9 @@ class CaseCheckArgs(BaseModel):
 # `agent=False`, `private=True` — з тієї самої причини, що в `case.show`: це
 # підживлення форми, а `case_dir` береться як є.
 @op("case.check", summary="Як прочиталась шифра і де лежить тека — до збереження",
-    args=CaseCheckArgs, agent=False, private=True)
+    args=CaseCheckArgs, private=True,
+    skill="start-research",
+    when="як прочиталась шифра і куди ляже тека — до збереження паспорта")
 def case_check(a: CaseCheckArgs) -> Envelope:
     """Розібрати шифру й теку, нічого не записуючи.
 
@@ -3526,7 +3582,9 @@ def case_check(a: CaseCheckArgs) -> Envelope:
 # `private=True`: `case_dir` береться як є, тож без токена це читання опису з
 # будь-якої теки диска.
 @op("case.show", summary="Поточний опис теки — щоб правити, а не передруковувати",
-    args=CaseShowArgs, agent=False, private=True)
+    args=CaseShowArgs, private=True,
+    skill="start-research",
+    when="поточний паспорт теки — щоб виправити справу, а не передруковувати")
 def case_show(a: CaseShowArgs) -> Envelope:
     """🔴 Правити наосліп — не правка.
 
@@ -3571,7 +3629,9 @@ class PagesStatusArgs(BaseModel):
 
 
 @op("pages.status", summary="Що в цій справі вже дивились оком, а що ні",
-    args=PagesStatusArgs, mutates=False, section="research")
+    args=PagesStatusArgs, mutates=False, section="research",
+    tier="core", scope="mixed", skill="keep-records",
+    when="перед відкриттям кадру — чи вже дивились цю сторінку")
 def pages_status(a: PagesStatusArgs) -> Envelope:
     """🔴 Гейт перед переглядом, а не звіт після.
 
@@ -3645,7 +3705,9 @@ class PagesShowArgs(BaseModel):
 # показати запис цілком — із провенансом (`agent`, `noted`), якого пласка
 # виписка не несе, і з підсумками книги (`tally`), які вона виключає.
 @op("pages.show", summary="Показати занесене про справу як воно лежить у сховищі",
-    args=PagesShowArgs, mutates=False, agent=False, section="research")
+    args=PagesShowArgs, mutates=False, section="research",
+    scope="mixed", skill="keep-records",
+    when="що занесено про справу в сховище сторінок")
 def pages_show(a: PagesShowArgs) -> Envelope:
     """Сховище справи сирим виглядом: уся справа, одна сторінка або один запис."""
     from nyshporka.pagestore import store
@@ -3730,7 +3792,9 @@ class PageNoteArgs(BaseModel):
 
 
 @op("pages.note", summary="Занести переглянуту сторінку в облік", args=PageNoteArgs,
-    mutates=True, section="research")
+    mutates=True, section="research",
+    tier="core", scope="mixed", skill="keep-records",
+    when="записати переглянуту сторінку, навіть пустишку")
 def pages_note(a: PageNoteArgs) -> Envelope:
     """🔴 без винятків: кожен скан, який реально відкривали, заноситься.
 
@@ -3786,7 +3850,9 @@ class PageNoteBatchArgs(BaseModel):
 # `pages.note`, а масовий шлях скіли ведуть командним рядком
 # (`nysh pages note-batch`), як і `records add`.
 @op("pages.note_batch", summary="Занести переглянуті сторінки пачкою",
-    args=PageNoteBatchArgs, mutates=True, agent=False, section="research")
+    args=PageNoteBatchArgs, mutates=True, section="research",
+    scope="mixed", skill="keep-records",
+    when="записати переглянуті сторінки пачкою")
 def pages_note_batch(a: PageNoteBatchArgs) -> Envelope:
     """Головний масовий шлях: аркуші заносять десятками за один перегляд.
 
@@ -3882,7 +3948,9 @@ class RecordsAddArgs(BaseModel):
 
 
 @op("records.add", summary="Занести розібрані записи джерела", args=RecordsAddArgs,
-    mutates=True, section="research")
+    mutates=True, section="research",
+    skill="keep-records",
+    when="занести розібрані записи джерела з ролями")
 def records_add(a: RecordsAddArgs) -> Envelope:
     """Хто/коли/батьки/восприємники — структурою, а не прозою.
 
@@ -3985,7 +4053,8 @@ def _empty_export_note(env: Envelope, shifra: str, what: str,
 
 
 @op("export.case", summary="Викласти прочитане зі справи таблицею", args=ExportArgs,
-    mutates=False, section="research")
+    mutates=False, section="research",
+    when="прочитане зі справи таблицею — для людини чи Excel")
 def export_case(a: ExportArgs) -> Envelope:
     """Прочитане зі справи — у плаский вигляд, придатний до таблиці.
 
@@ -4037,7 +4106,8 @@ class ExportWriteArgs(BaseModel):
 # і з `mutates=False` демон не вимагав токена — чужа вкладка могла затерти
 # будь-який файл користувача CSV-вмістом.
 @op("export.write", summary="Записати таблицю справи файлом (XLSX/CSV/TSV)",
-    args=ExportWriteArgs, mutates=True, agent=False, section="research")
+    args=ExportWriteArgs, mutates=True, section="research",
+    when="записати таблицю справи файлом XLSX, CSV чи TSV")
 def export_write(a: ExportWriteArgs) -> Envelope:
     """Виписка зі справи файлом — щоб віднести її в Ексель чи чужу програму.
 
@@ -4123,7 +4193,9 @@ class CaseInfoArgs(BaseModel):
 # `agent=False`: це картка для ока перед довгою роботою. Агент не витрачає ніч
 # карти й не звіряє письмо по перших сторінках — йому вистачає `read.plan`.
 @op("htr.case_info", summary="Що це за справа й чим її читати — ДО прогону",
-    args=CaseInfoArgs, mutates=False, agent=False, section="htr")
+    args=CaseInfoArgs, mutates=False, section="htr",
+    skill="read-case",
+    when="що це за справа й якою моделлю її читати — до прогону")
 def htr_case_info(a: CaseInfoArgs) -> Envelope:
     """Опис справи, письмо з причиною, покриття рушіями й розриви.
 
@@ -4223,7 +4295,9 @@ class ReadArgs(BaseModel):
 # `private=True`: `case_dir` і `out_dir` — будь-які шляхи; відповідь каже, чи тека
 # існує і скільки в ній кадрів.
 @op("read.plan", summary="Чим і як читатимемо цю справу — ДО запуску",
-    args=ReadArgs, mutates=False, agent=False, section="htr", private=True)
+    args=ReadArgs, mutates=False, section="htr", private=True,
+    skill="read-case",
+    when="чим і як читатимемо справу — план прогону до запуску")
 def read_plan(a: ReadArgs) -> Envelope:
     """Скільки кадрів, яке письмо, яка модель, куди ляже текст.
 
@@ -4313,7 +4387,9 @@ def _plan_existing(env: Envelope, p: Any) -> None:
 
 
 @op("read.start", summary="Прочитати справу рукописним рушієм", args=ReadArgs,
-    mutates=True, long=True, section="htr")
+    mutates=True, long=True, section="htr",
+    tier="core", skill="read-case",
+    when="прогін справи рушієм на цій машині (до ~500 сторінок)")
 def read_start(a: ReadArgs) -> Envelope:
     """Ставить читання в чергу; саму роботу веде застосунок.
 
@@ -4335,7 +4411,9 @@ def read_start(a: ReadArgs) -> Envelope:
 
 
 @op("acquire.start", summary="Завантажити справу або плівку", args=AcquireArgs,
-    mutates=True, long=True, section="material")
+    mutates=True, long=True, section="material",
+    tier="core", skill="start-research",
+    when="завантажити кадри справи чи плівки з архіву або FamilySearch")
 def acquire_start(a: AcquireArgs) -> Envelope:
     """Ставить у чергу; сама робота йде у застосунку.
 
@@ -4364,7 +4442,8 @@ class JobArgs(BaseModel):
 
 
 @op("job.query", summary="Стан довгих робіт: перелік, очікування, скасування",
-    args=JobArgs, mutates=False)
+    args=JobArgs, mutates=False,
+    when="стан довгих робіт застосунку: перелік, очікування, скасування")
 def job_query(a: JobArgs) -> Envelope:
     """Стан завдань — рівно там, де є черга, тобто в піднятому застосунку.
 
@@ -4486,7 +4565,8 @@ def _raw_text() -> str:
 
 # `agent=False` — це конфіг дослідження, а не дія. Читається файлом.
 @op("profile.show", summary="Чий рід шукаємо: форми, корені, парадигма",
-    agent=False)
+    scope="project",
+    when="чий рід шукаємо: форми, корені, парадигма")
 def profile_show(_: NoArgs) -> Envelope:
     """Профіль або чесна відповідь, що його ще немає.
 
@@ -4594,7 +4674,9 @@ class ProfileSetArgs(BaseModel):
 # записано в скілі окремим 🛑. Агентові лишається командний рядок, де той самий
 # запис іде через цю саму операцію.
 @op("profile.set", summary="Назвати рід: прізвище, парадигма, основи",
-    args=ProfileSetArgs, mutates=True, agent=False)
+    args=ProfileSetArgs, mutates=True,
+    scope="project", skill="start-research",
+    when="назвати рід: прізвище, форми, основи для пошуку")
 def profile_set(a: ProfileSetArgs) -> Envelope:
     """Завести профіль або оновити поля, які показує форма.
 
@@ -4637,7 +4719,8 @@ class ProfileSourceArgs(BaseModel):
 
 
 @op("profile.source", summary="Конфіг роду як текст: прочитати або записати",
-    args=ProfileSourceArgs, mutates=True, agent=False)
+    args=ProfileSourceArgs, mutates=True,
+    tier="rare", scope="project")
 def profile_source(a: ProfileSourceArgs) -> Envelope:
     """Сирий YAML — для полів, яких форма не знає.
 
@@ -4675,7 +4758,9 @@ class FondArgs(BaseModel):
 # з паку архівів. У переліку tool'ів вона з'їдала б місце, яке модель мусить
 # дочитати до кінця.
 @op("archive.fond", summary="Що відомо про фонд: губернія, опис за замовчуванням",
-    args=FondArgs, agent=False, section="material")
+    args=FondArgs, section="material",
+    skill="keep-fond",
+    when="що відомо про фонд: губернія, опис за замовчуванням, ключ справи")
 def archive_fond(a: FondArgs) -> Envelope:
     from nyshporka.archives import active
     from nyshporka.library import default_opys
@@ -4706,8 +4791,10 @@ class ArchiveAddArgs(BaseModel):
 # про фонд; окремим tool'ом він з'їдав би місце в переліку, який модель мусить
 # дочитати до кінця. А от екранові він потрібен: без нього форма заведення
 # справи вимагає значення зі списку, якого ніде не показано.
-@op("archives.list", summary="Які архіви застосунок знає", agent=False,
-    section="material")
+@op("archives.list", summary="Які архіви застосунок знає",
+    section="material",
+    skill="start-research",
+    when="які архіви знає застосунок і що в кожному можна взяти")
 def archives_list(_: NoArgs) -> Envelope:
     """Склад паку архівів — для селекта у формі й для довідки.
 
@@ -4749,7 +4836,8 @@ def _overlay_or_empty() -> str:
 
 
 @op("archive.add", summary="Додати архів, якого застосунок ще не знає",
-    args=ArchiveAddArgs, mutates=True, agent=False, section="material")
+    args=ArchiveAddArgs, mutates=True, section="material",
+    tier="rare")
 def archive_add(a: ArchiveAddArgs) -> Envelope:
     """Дописати архів у накладку простору.
 
@@ -4785,8 +4873,9 @@ class EnvArgs(BaseModel):
 # місце в переліку, який модель мусить дочитати до кінця.
 # `private`: `venv` із запиту стає шляхом до інтерпретатора, який ЗАПУСКАЄТЬСЯ
 # для проби — таке без токена чужій вкладці давати не можна.
-@op("htr.env", summary="Чи готове середовище рушіїв читання", args=EnvArgs,
-    agent=False, private=True, section="htr")
+@op("htr.env", summary="Чи готове середовище рушіїв читання", args=EnvArgs, private=True, section="htr",
+    skill="read-case",
+    when="чи готове середовище рушіїв читання на цій машині")
 def htr_env(a: EnvArgs) -> Envelope:
     from nyshporka.core.workspace import WorkspaceError
     from nyshporka.htr import env as E
@@ -4871,7 +4960,9 @@ def _sections_payload() -> dict[str, Any]:
                       "sections": dict(b.section_icons)}}
 
 
-@op("sections.show", summary="Які частини застосунку ввімкнено", agent=False)
+@op("sections.show", summary="Які частини застосунку ввімкнено",
+    scope="project",
+    when="які частини застосунку ввімкнено")
 def sections_show(_: NoArgs) -> Envelope:
     from nyshporka.core.workspace import WorkspaceError, workspace
 
@@ -4889,7 +4980,9 @@ def sections_show(_: NoArgs) -> Envelope:
 
 
 @op("sections.set", summary="Увімкнути або вимкнути частини застосунку",
-    args=SectionsSetArgs, mutates=True, agent=False)
+    args=SectionsSetArgs, mutates=True,
+    scope="project",
+    when="увімкнути чи вимкнути частини застосунку")
 def sections_set(a: SectionsSetArgs) -> Envelope:
     from nyshporka.core import sections as S
     from nyshporka.core.workspace import WorkspaceError, set_sections, workspace

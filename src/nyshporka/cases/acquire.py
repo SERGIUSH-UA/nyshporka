@@ -103,9 +103,21 @@ def patch_meta(case_dir: Path, patch: dict[str, Any]) -> Path:
     # 🔴 Побитий паспорт — виняток, а не `{}`: інакше наступний запис затирав
     # би нотатки людини, які в обрізаному файлі ще читаються очима. Запис —
     # атомарний, щоб Ctrl+C посеред нього такого файла й не лишав.
+    fresh = not path.is_file() and not (case_dir / "_source.json").is_file()
     got = read_json(path, default={})
     meta: dict[str, Any] = dict(got) if isinstance(got, dict) else {}
     meta.update(patch)
+    # 🔒 Новий паспорт у проєкті-замовленні — приватний одразу, як і в
+    # `case register`: справу клієнта завантажувач створює частіше, ніж людина
+    # реєструє руками, і позначка лише в одному вході не діяла б.
+    if fresh and "private" not in patch:
+        from nyshporka.cases import privacy
+
+        try:
+            if privacy.project_default():
+                meta[privacy.FIELD] = True
+        except Exception:
+            pass  # простір не резолвиться — проєкту немає, то й позначки
     case_dir.mkdir(parents=True, exist_ok=True)
     write_json(path, meta)
     return path

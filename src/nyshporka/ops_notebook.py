@@ -57,7 +57,9 @@ class NoteAddArgs(BaseModel):
 
 
 @op("note.add", summary="Дописати запис у нотатник справи", args=NoteAddArgs,
-    mutates=True, agent=False, section=SECTION)
+    mutates=True, section=SECTION,
+    tier="core", skill="case-notebook",
+    when="звірене читання, опис справи, помилка опису архіву — у нотатник справи")
 def note_add(a: NoteAddArgs) -> Envelope:
     """Опис справи, помилка опису архіву, копія деінде або особисте.
 
@@ -177,7 +179,9 @@ class NoteReadArgs(BaseModel):
 
 
 @op("note.read", summary="Записати звірене оком читання рядка", args=NoteReadArgs,
-    mutates=True, agent=False, section=SECTION)
+    mutates=True, section=SECTION,
+    skill="case-notebook",
+    when="записати звірене оком читання рядка")
 def note_read(a: NoteReadArgs) -> Envelope:
     """Читання рядка з прив'язкою до прогону, рамки й того, що прочитав рушій.
 
@@ -238,7 +242,9 @@ class NoteListArgs(BaseModel):
 
 
 @op("note.list", summary="Нотатник справи: чинні записи, хто й коли",
-    args=NoteListArgs, mutates=False, agent=False, section=SECTION)
+    args=NoteListArgs, mutates=False, section=SECTION,
+    skill="case-notebook",
+    when="нотатник справи: чинні записи, хто й коли")
 def note_list(a: NoteListArgs) -> Envelope:
     """Згортка журналу: замінене й відкликане не показується без `history`."""
     from nyshporka.pagestore import notebook as NB
@@ -275,7 +281,9 @@ class NoteShareArgs(BaseModel):
 
 
 @op("note.share", summary="Позначити записи до віддачі в пул або повернути додому",
-    args=NoteShareArgs, mutates=True, agent=False, section=SECTION)
+    args=NoteShareArgs, mutates=True, section=SECTION,
+    skill="case-notebook",
+    when="позначити записи нотатника до віддачі в Супрягу")
 def note_share(a: NoteShareArgs) -> Envelope:
     """Позначка — новий запис журналу, що замінює старий тим самим змістом.
 
@@ -292,7 +300,9 @@ class NoteRetractArgs(BaseModel):
 
 
 @op("note.retract", summary="Відкликати записи нотатника", args=NoteRetractArgs,
-    mutates=True, agent=False, section=SECTION)
+    mutates=True, section=SECTION,
+    skill="case-notebook",
+    when="відкликати помилковий запис нотатника справи")
 def note_retract(a: NoteRetractArgs) -> Envelope:
     """Відкликання — запис журналу; віддане пул прибере після `note.push`."""
     from nyshporka.pagestore.models import CaseNote
@@ -361,7 +371,9 @@ class NotePushArgs(BaseModel):
 
 
 @op("note.push", summary="Віддати загальне знання про справу в пул",
-    args=NotePushArgs, mutates=True, agent=False, section=SECTION, private=True)
+    args=NotePushArgs, mutates=True, section=SECTION, private=True,
+    skill="case-notebook",
+    when="віддати нотатник справи в Супрягу")
 def note_push(a: NotePushArgs) -> Envelope:
     """Позначені записи + зведення переглянутих сторінок → нотатник книги в пулі.
 
@@ -527,7 +539,9 @@ class NotePullArgs(BaseModel):
 
 
 @op("note.pull", summary="Забрати чужі записи нотатника справи з пулу",
-    args=NotePullArgs, mutates=True, agent=False, section=SECTION, private=True)
+    args=NotePullArgs, mutates=True, section=SECTION, private=True,
+    skill="case-notebook",
+    when="забрати чужі записи нотатника справи з Супряги")
 def note_pull(a: NotePullArgs) -> Envelope:
     """Чужі записи лягають у нотатник із позначкою `origin` — лише для читання.
 
@@ -633,7 +647,8 @@ class NoteImportEyeArgs(BaseModel):
 
 
 @op("note.import_eye", summary="Перенести вільні теки звірки оком у нотатник",
-    args=NoteImportEyeArgs, mutates=True, agent=False, section=SECTION)
+    args=NoteImportEyeArgs, mutates=True, section=SECTION,
+    tier="rare", skill="case-notebook")
 def note_import_eye(a: NoteImportEyeArgs) -> Envelope:
     """`[рядок N] …` → `reading`; примітки → особистий `note`. Нічого не віддається.
 

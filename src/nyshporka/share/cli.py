@@ -18,6 +18,7 @@ from nyshporka import brand
 from nyshporka.cli_emit import answer as _answer
 from nyshporka.cli_emit import notes as _notes
 from nyshporka.cli_emit import untrusted
+from nyshporka.core.routes import route
 
 app = typer.Typer(help="Обмін прочитаним (Супряга): спакувати свій декод, прийняти чужий.",
                   no_args_is_help=True)
@@ -813,6 +814,8 @@ def _login(*, base_site: str, open_browser: bool) -> None:
 
 
 @app.command("login")
+@route("share login", skill="share-case", mutates=True,
+       when="увійти в Супрягу: ключ на цю машину")
 def login_cmd(
     site: str = typer.Option("", "--site", help="інша адреса сайту Супряги"),
     no_browser: bool = typer.Option(False, "--no-browser",
@@ -827,6 +830,7 @@ def login_cmd(
 
 
 @app.command("logout")
+@route("share logout", tier="rare", skill="share-case", mutates=True)
 def logout_cmd() -> None:
     """Прибрати ключ Супряги з цієї машини."""
     from nyshporka.share import login as L

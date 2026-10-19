@@ -14,6 +14,7 @@ from rich.table import Table
 from nyshporka import brand
 from nyshporka import ops as O
 from nyshporka.cli_emit import answer, notes
+from nyshporka.core.routes import route
 
 app = typer.Typer(help="Реєстр опису: скласти перелік справ фонду.",
                   no_args_is_help=True)
@@ -23,6 +24,7 @@ console = brand.console()
 
 
 @app.command("sources")
+@route("registry sources", op="registry.collectors")
 def cmd_sources() -> None:
     """Які збирачі є і що кожен уміє."""
     env = O.call("registry.collectors", {})
@@ -196,6 +198,8 @@ def cmd_merge(
 
 
 @app.command("show")
+@route("registry show", skill="keep-fond",
+       when="що вже зібрано в реєстрі опису фонду")
 def cmd_show(fond_id: str = typer.Option(..., "--fond-id",
                                          help="тека фонду: cdiak_224")) -> None:
     """Що вже зібрано в цьому фонді: файли, рядки, дати."""
@@ -224,6 +228,7 @@ def cmd_show(fond_id: str = typer.Option(..., "--fond-id",
 
 
 @app.command("rate")
+@route("registry rate", tier="rare", skill="keep-fond")
 def cmd_rate(
     key: str = typer.Option("duck-inspector", "--key", help="ключ черги запитів"),
     max_events: int = typer.Option(5, "--max", help="скільки запитів дозволено у вікні"),
