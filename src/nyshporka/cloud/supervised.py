@@ -131,10 +131,14 @@ def _env(session: str, exe: str) -> dict[str, str]:
     через PATH. `GPURUNNER_REPO_DATA_DIR` — лише якщо простір справді тримає
     реєстр машин: без адреси наглядач заведе порожній реєстр у профілі
     користувача й піде орендувати машини, які цей простір уже забракував.
+    `GPURUNNER_DATA_DIR` — у теку даних, обрану в інсталяторі
+    (`appdirs.gpurunner_data_dir`), а не на C:.
     """
+    from nyshporka.core.appdirs import gpurunner_env
     from nyshporka.core.workspace import WorkspaceError, workspace
 
-    env = {"PYTHONIOENCODING": "utf-8", "GPURUNNER_OWNER": session}
+    env = {"PYTHONIOENCODING": "utf-8", "GPURUNNER_OWNER": session,
+           **gpurunner_env()}
     folder = Path(exe).parent
     if folder.is_dir():
         env["PATH"] = str(folder) + os.pathsep + os.environ.get("PATH", "")
