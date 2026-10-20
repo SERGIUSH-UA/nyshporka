@@ -147,6 +147,9 @@ class TextIndexArgs(BaseModel):
     accept_rules: bool = Field(default=False,
                                description="прийняти чинний відбиток правил без перебудови "
                                            "(правила не мінялись)")
+    fast: bool = Field(default=False,
+                       description="зібрати або догнати швидкий індекс Tantivy (nyshporka[fast]); "
+                                   "наявний індекс доганяється й без прапорця")
 
 
 @op("text.index", summary="Зібрати текстовий стор — один раз довго, далі швидко",
@@ -177,7 +180,16 @@ def text_index(a: TextIndexArgs) -> Envelope:
         runs = [c["name"] for c in S.list_cases()]
     built = sum(1 for _ in ST.ensure_all(runs, force=a.rebuild, reset_rules=not a.case))
     st = ST.stats()
-    env = ok({"built": built, "asked": len(runs), **st})
+    fast = _fast_sync(a.fast)
+    if isinstance(fast, Envelope):
+        return fast
+    env = ok({"built": built, "asked": len(runs), **st, "fast": fast})
+    if fast and fast.get("busy"):
+        env.warn("fast_busy", "швидкий індекс зараз доганяє інша сесія — цього разу "
+                              "не доганявся; неохоплені прогони пошук бере свіпом")
+    if fast and fast.get("error"):
+        env.warn("fast_failed", f"швидкий індекс не догнано ({fast['error']}); пошук "
+                                f"неохоплені прогони бере свіпом")
     if st.get("rules_stale"):
         env.warn("rules_stale", RULES_STALE_MSG)
     if ST.LOCKED_SKIPPED:
@@ -191,6 +203,31 @@ def text_index(a: TextIndexArgs) -> Envelope:
                  f"{st['stale']} прогонів лишились поза стором — найчастіше це "
                  f"теки без жодного `.txt`")
     return env
+
+
+def _fast_sync(wanted: bool) -> dict[str, Any] | Envelope | None:
+    """Догнати швидкий індекс: на прохання (`--fast`) або коли він уже є.
+
+    🔴 Наявний індекс доганяється завжди, а не лише з прапорцем: індекс, що
+    відстав від стору, пошук не бреше (неохоплені прогони йдуть свіпом), але
+    повільнішає непомітно — людина вже не пам'ятає, що колись ставила `--fast`.
+    """
+    from nyshporka.search import fastidx as FX
+    from nyshporka.search import store as ST
+
+    if not wanted and not FX.exists():
+        return None
+    if not FX.available():
+        return fail("швидкий індекс потребує пакета tantivy: pip install nyshporka[fast]")
+    conn = ST.connect()
+    try:
+        return FX.sync(conn)
+    except Exception as exc:  # стор зібрано; індекс лише прискорює
+        # Збій індексу не губить зробленого стором: результат `text index` іде
+        # далі, а про індекс — попередження (рецензія 20.10.2026).
+        return {"error": f"{type(exc).__name__}: {exc}", "busy": False}
+    finally:
+        conn.close()
 
 
 def _warn_cuts(env: Envelope, layered: dict[str, Any]) -> None:

@@ -71,6 +71,7 @@ import json
 import os
 import re
 import sqlite3
+import sys
 import time
 import tokenize
 import zlib
@@ -1703,7 +1704,8 @@ PHASE_PAGES = "сторінки корпусу"
 def sweep(stems: list[str], runs: list[str], *, thresh: int = 78,
           build_budget: int = 0,
           progress: Callable[[int, int, str], None] | None = None,
-          cancel: Callable[[], bool] | None = None) -> dict[str, Any]:
+          cancel: Callable[[], bool] | None = None,
+          fast: bool | None = None) -> dict[str, Any]:
     """Прочесати прогони через стор. Та сама відповідь, що `decode.sweep`.
 
     🔴 Або всі, або жоден — як і в gzip-індексу: якщо застарілих прогонів
@@ -1776,6 +1778,32 @@ def sweep(stems: list[str], runs: list[str], *, thresh: int = 78,
         rows: list[SweepRow] = []
         for body in cached.values():
             rows.extend(_unpack(body))
+        # ⚡ Передфільтр Tantivy (`search.fastidx`) для прогонів, які індекс несе
+        # під свіжим штампом; решта — триграмами, як завжди.
+        fast_runs: list[int] = []
+        if todo and _fast_wanted(fast):
+            from nyshporka.search import fastidx as FX
+
+            # Запит до індексу — 12–50 с незалежно від області; свіп малої
+            # області дешевший. Індекс береться, коли область велика, коли
+            # відповідь для цих стемів уже порахована, або коли його просили явно.
+            if fast or FX.known(stems) or _pages_of_runs(conn, todo) >= FAST_MIN_PAGES:
+                fast_runs = FX.covered(conn, todo)
+        if fast_runs:
+            try:
+                got_fast = _sweep_fast_cached(conn, stems, fast_runs, thresh, key,
+                                              whole=len(fast_runs) == _runs_total(conn))
+            except Exception as exc:  # індекс лише прискорює
+                # Зіпсований чи зайнятий індекс не валить пошук: ті самі прогони
+                # іде прочесати точний шлях, триграми (рецензія 20.10.2026).
+                print(f"⚠ швидкий індекс недоступний ({type(exc).__name__}: {exc}) — "
+                      f"шукаю свіпом", file=sys.stderr)
+                fast_runs = []
+            else:
+                for lst in got_fast.values():
+                    rows.extend(lst)
+                fast_set = set(fast_runs)
+                todo = [rid for rid in todo if rid not in fast_set]
         blocks = _blocks_by_pages(conn, todo)
         cancelled = False
         workers = sweep_workers(len(blocks))
@@ -1804,6 +1832,18 @@ def sweep(stems: list[str], runs: list[str], *, thresh: int = 78,
             for lst in got.values():
                 rows.extend(lst)
             _sweep_put(conn, key, got)
+        if fast_runs and not rows and not cancelled:
+            # 🔴 Нуль не друкується на передфільтрі: швидкий канал губить частину
+            # смуги 90–94, тож «немає» по області підтверджує свіп триграмами.
+            for block in _blocks_by_pages(conn, fast_runs):
+                got = _sweep_block(conn, stems, block, thresh, cancel=cancel)
+                if got is None:
+                    cancelled = True
+                    break
+                for lst in got.values():
+                    rows.extend(lst)
+                _sweep_put(conn, key, got)
+            fast_runs = []
         pages = _pages_for(conn, {r[0] for r in rows}, set(run_ids))
         for pid, no, norm, score, stem in rows:
             got_page = pages.get(pid)
@@ -1813,9 +1853,102 @@ def sweep(stems: list[str], runs: list[str], *, thresh: int = 78,
                          "line_index": no - 1, "norm": norm, "stem": stem, "score": score})
         return {"hits": hits, "scanned": len(ready), "runs": len(runs),
                 "unindexed": missing, "backend": "store", "cached": len(cached),
-                "computed": len(todo), "cancelled": cancelled, "rules_stale": rstale}
+                "computed": len(todo), "cancelled": cancelled, "rules_stale": rstale,
+                "fast_runs": len(fast_runs)}
     finally:
         conn.close()
+
+
+#: Змінна оточення: `0` — не брати передфільтр Tantivy, навіть якщо індекс є.
+FAST_ENV = "NYSH_FAST"
+#: Від скількох сторінок в області передфільтр Tantivy дешевший за свіп: свіп
+#: корпусу (3 млн стор.) — ~4,6 хв трьома воркерами, запит до індексу — 12–50 с
+#: плюс дооцінка рядків (заміри 20.10.2026).
+FAST_MIN_PAGES = 200_000
+
+
+def _pages_of_runs(conn: sqlite3.Connection, run_ids: list[int]) -> int:
+    total = 0
+    for i in range(0, len(run_ids), 500):
+        chunk = run_ids[i:i + 500]
+        marks = ",".join("?" * len(chunk))
+        total += int(conn.execute(f"select coalesce(sum(pages), 0) from runs where id in ({marks})",
+                                  chunk).fetchone()[0])
+    return total
+
+
+def _fast_wanted(fast: bool | None) -> bool:
+    if fast is not None:
+        return fast
+    if os.environ.get(FAST_ENV, "").strip() == "0":
+        return False
+    from nyshporka.search import fastidx as FX
+
+    return FX.exists()
+
+
+def _runs_total(conn: sqlite3.Connection) -> int:
+    return int(conn.execute("select count(*) from runs").fetchone()[0])
+
+
+def _sweep_fast_cached(conn: sqlite3.Connection, stems: list[str], run_ids: list[int],
+                       thresh: int, key: str, *, whole: bool) -> dict[int, list[SweepRow]]:
+    """Прогони через Tantivy, з кешем під окремим ключем: його відповідь не та
+    сама, що в триграм, і змішувати їх в одному рядку кешу не можна."""
+    from nyshporka.search import fastidx as FX
+
+    fkey = f"{key}{FAST_KEY_SUFFIX}:s{FX.SCHEMA}q{FX.QUERY_VERSION}"
+    out: dict[int, list[SweepRow]] = {}
+    with contextlib.suppress(sqlite3.OperationalError):
+        for i in range(0, len(run_ids), 500):
+            chunk = run_ids[i:i + 500]
+            marks = ",".join("?" * len(chunk))
+            for rid, body in conn.execute(
+                    f"select run_id, body from sweeps where key=? and run_id in ({marks})",
+                    [fkey, *chunk]):
+                out[int(rid)] = _unpack(body)
+    todo = [rid for rid in run_ids if rid not in out]
+    if todo:
+        got = _sweep_fast(conn, stems, todo, thresh, whole=whole and not out)
+        _sweep_put(conn, fkey, got)
+        out.update(got)
+    return out
+
+
+#: Ключ кешу відповідей швидкого каналу — поруч із ключем свіпу.
+FAST_KEY_SUFFIX = ":fast"
+
+
+def _sweep_fast(conn: sqlite3.Connection, stems: list[str], run_ids: list[int],
+                thresh: int, *, whole: bool = False) -> dict[int, list[SweepRow]]:
+    """Рядки-кандидати з Tantivy → той самий `_match_unique` лише по них.
+    `whole` — прогони покривають увесь стор, фільтр за ними зайвий."""
+    from nyshporka.search import fastidx as FX
+
+    wanted: dict[int, set[int]] = {}
+    for pid, no in FX.candidates(stems, None if whole else run_ids):
+        wanted.setdefault(pid, set()).add(no)
+    pages = _pages_for(conn, set(wanted), set(run_ids))
+    pids = [p for p in sorted(wanted) if p in pages]
+    out: dict[int, list[SweepRow]] = {rid: [] for rid in run_ids}
+    for c0 in range(0, len(pids), 20000):
+        norms: list[str] = []
+        starts: list[int] = []
+        owner: list[tuple[int, int]] = []
+        chunk = {p: wanted[p] for p in pids[c0:c0 + 20000]}
+        for pid, no, ns in _cands_batch(conn, chunk):
+            starts.append(len(norms))
+            owner.append((pid, no))
+            norms.extend(ns)
+        by_line: dict[tuple[int, int], tuple[float, int, int]] = {}
+        for j, (sc, si) in _match_unique(norms, stems, thresh).items():
+            k = owner[bisect_right(starts, j) - 1]
+            cur = by_line.get(k)
+            if cur is None or sc > cur[0]:
+                by_line[k] = (sc, j, si)
+        for (pid, no), (sc, j, si) in by_line.items():
+            out[pages[pid][0]].append((pid, no, norms[j], round(sc), stems[si]))
+    return out
 
 
 # ── регекс по сирому тексту ──────────────────────────────────────────────────

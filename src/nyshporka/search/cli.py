@@ -80,6 +80,8 @@ def index_cmd(
     rebuild: bool = typer.Option(False, "--rebuild", help="перебудувати й свіже"),
     accept_rules: bool = typer.Option(False, "--accept-rules",
                                       help="прийняти чинний відбиток правил без перебудови"),
+    fast: bool = typer.Option(False, "--fast",
+                              help="зібрати або догнати швидкий індекс Tantivy (nyshporka[fast])"),
     as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Догнати стор по прогонах. Перша збірка корпусу — десятки хвилин, далі
@@ -87,12 +89,16 @@ def index_cmd(
     from nyshporka import ops as O
 
     env = O.call("text.index", {"case": _scope(case), "rebuild": rebuild,
-                                "accept_rules": accept_rules})
+                                "accept_rules": accept_rules, "fast": fast})
     if _answer(env, as_json):
         return
     d = env.data
     console.print(f"пройдено прогонів {d['asked']}, у сторі свіжих {d['indexed']} із "
                   f"{d['runs']} · сторінок {d['pages']} · {_mb(d['bytes'])}")
+    fx = d.get("fast")
+    if fx and not fx.get("busy") and not fx.get("error"):
+        console.print(f"⚡ швидкий індекс: додано прогонів {fx['added']}, прибрано "
+                      f"{fx['removed']}, рядків {fx['lines']}")
     _notes(env)
 
 

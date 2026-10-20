@@ -1,0 +1,341 @@
+"""⚡ Швидкий передфільтр пошуку роду — індекс Tantivy поверх стору тексту.
+
+Стор (`search.store`) шукає кандидатів FTS-триграмами блоками по 60 тис.
+сторінок; на корпусі це хвилини на прізвище. Індекс тут знаходить РЯДКИ, де
+може стояти прізвище, за секунди: нечіткий пошук по словнику кандидатів
+(автомат Левенштейна над FST). Вердикт і далі виносить той самий
+`store._match_unique` з тим самим порогом — індекс лише звужує, ЩО оцінювати.
+
+🔴 Документ — рядок, і в нього три поля, бо прізвище в шумному декоді сидить у
+слові по-різному (заміри 20.10.2026 на 10 тис. сторінок ф.224, еталон — повна
+оцінка всіх різних слів вибірки):
+
+* `c` — кандидати рядка (слова, пари, трійки, склейки переносу). Ловить
+  прізвище НА ПОЧАТКУ слова; стем без 1–3 перших літер — коли рушій зіпсував
+  сам початок.
+* `x` — ті самі кандидати ЗАДОМ НАПЕРЕД. Ловить прізвище В КІНЦІ склейки
+  (`grigoriimakiimelnikk`) і слово зі скаліченим початком (`blescinskii`), бо
+  префіксний автомат бачить лише початок терма.
+* `y` — хвости довгих сирих слів рядка: прізвище ПОСЕРЕДИНІ зліпленого слова
+  (`inanasamelnikami`).
+
+Документ-сторінка губив менше лише тому, що дооцінював усю сторінку — у 9–42
+рази більше слів (на корпусі «Мельник» — 13 хв); документ-рядок без `x`/`y` губив
+склейки й скалічені початки. Три поля разом: з балом ≥90 нуль утрат на трьох
+прізвищах із чотирьох (на четвертому — склейки, чия згадка знайдена в сусідньому
+рядку), у смузі 85–89 утрат утричі менше, ніж у сторінки.
+
+🔴 Похідне від стору, не від прогонів: індекс доганяє стор за штампами
+прогонів (`sync`), а прогін, якого в індексі ще немає чи який змінився, пошук
+бере старим шляхом. Індекс можна видалити будь-коли.
+
+⚠ Необов'язковий: без пакета `tantivy` (`nyshporka[fast]`) усе працює як
+раніше, свіпом стору.
+"""
+from __future__ import annotations
+
+import contextlib
+import json
+import shutil
+import sqlite3
+import zlib
+from collections.abc import Callable, Iterator
+from pathlib import Path
+from typing import Any
+
+#: Тека індексу поруч зі стором.
+DIR = "fastidx"
+#: Які прогони індекс уже несе і під яким штампом стору.
+STATE = "runs.json"
+#: Версія схеми індексу; інша — індекс збирається наново.
+SCHEMA = 2
+#: Хвости сирих слів від такої довжини — для прізвища посередині зліпленого слова.
+SFX_MIN = 10
+#: Хвіст коротший за стільки літер не індексується: він збігається з усім.
+SFX_TAIL = 6
+#: Від якої довжини стема запит бере ще й його початок (`SHORT_HEAD` літер, ±1):
+#: для скорочених форм роду, до яких від повного стему понад дві правки.
+SHORT_FROM = 9
+SHORT_HEAD = 5
+#: Пам'ять письменника індексу; Tantivy ділить її між потоками.
+WRITER_HEAP = 400_000_000
+WRITER_THREADS = 2
+#: Скільки рядків між комітами під час збірки: обрив не губить зроблене.
+COMMIT_EVERY = 2_000_000
+
+
+def available() -> bool:
+    try:
+        import tantivy  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
+def path() -> Path:
+    from nyshporka.search import store as ST
+
+    return ST.path().parent / DIR
+
+
+def exists() -> bool:
+    return available() and bool(state())
+
+
+def _schema() -> Any:
+    import tantivy
+
+    sb = tantivy.SchemaBuilder()
+    sb.add_integer_field("pid", stored=False, indexed=True, fast=True)
+    sb.add_integer_field("ln", stored=False, indexed=False, fast=True)
+    sb.add_integer_field("run", stored=False, indexed=True, fast=True)
+    sb.add_text_field("c", stored=False, tokenizer_name="default", index_option="basic")
+    sb.add_text_field("x", stored=False, tokenizer_name="default", index_option="basic")
+    sb.add_text_field("y", stored=False, tokenizer_name="default", index_option="basic")
+    return sb.build()
+
+
+def _open(create: bool) -> Any:
+    import tantivy
+
+    d = path()
+    if create:
+        d.mkdir(parents=True, exist_ok=True)
+    return tantivy.Index(_schema(), path=str(d), reuse=True)
+
+
+def _read_state() -> dict[str, Any]:
+    try:
+        raw = json.loads((path() / STATE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return raw if isinstance(raw, dict) else {}
+
+
+def state() -> dict[int, str]:
+    """run_id → штамп стору, під яким прогін лежить в індексі. Інша схема — порожньо."""
+    raw = _read_state()
+    if raw.get("schema") != SCHEMA:
+        return {}
+    runs = raw.get("runs") or {}
+    return {int(k): str(v) for k, v in runs.items()}
+
+
+def _save_state(st: dict[int, str]) -> None:
+    from nyshporka.utils.atomic import write_json
+
+    write_json(path() / STATE, {"schema": SCHEMA,
+                                "runs": {str(k): v for k, v in sorted(st.items())}}, indent=0)
+
+
+def _suffixes(raw: str) -> str:
+    from nyshporka import htr_store as S
+
+    out: list[str] = []
+    for tok in S._TOKEN_RE.findall(raw):
+        n = S._norm(tok)
+        if len(n) >= SFX_MIN:
+            out.extend(n[k:] for k in range(2, len(n) - SFX_TAIL + 1))
+    return " ".join(out)
+
+
+def _docs(pid: int, run_id: int, cands: bytes, raw: bytes | None) -> Iterator[Any]:
+    """Документи рядків сторінки: кандидати, вони ж задом наперед, хвости сирих слів."""
+    import tantivy
+
+    raws = zlib.decompress(raw).decode("utf-8").split("\n") if raw is not None else []
+    for line in zlib.decompress(cands).decode("utf-8").split("\n"):
+        no_s, _sep, rest = line.partition("\t")
+        if not rest:
+            continue
+        no = int(no_s)
+        toks = rest.split(" ")
+        src = raws[no - 1] if 0 < no <= len(raws) else ""
+        yield tantivy.Document(pid=int(pid), ln=no, run=int(run_id), c=rest,
+                               x=" ".join(t[::-1] for t in toks), y=_suffixes(src))
+
+
+def _store_stamps(conn: sqlite3.Connection) -> dict[int, str]:
+    """run_id → штамп стору РАЗОМ із відбитком правил склейки.
+
+    🔴 Стор перебудовує прогін і за зміною правил (`rules`), не міняючи штампа
+    мети; без правил у ключі індекс лишав би під «свіжим» штампом старих
+    кандидатів (рецензія 20.10.2026).
+    """
+    return {int(r[0]): f"{r[1]}|{r[2] or ''}"
+            for r in conn.execute("select id, stamp, rules from runs")}
+
+
+def covered(conn: sqlite3.Connection, run_ids: list[int]) -> list[int]:
+    """Прогони, які індекс несе під тим самим штампом, що й стор."""
+    if not available():
+        return []
+    st = state()
+    if not st:
+        return []
+    now = _store_stamps(conn)
+    return [rid for rid in run_ids if rid in st and st[rid] == now.get(rid)]
+
+
+def sync(conn: sqlite3.Connection, *,
+         progress: Callable[[int, int, str], None] | None = None) -> dict[str, Any]:
+    """Догнати індекс до стору: нові й змінені прогони — заново, зниклі — геть.
+
+    Письменник у Tantivy один на індекс; якщо його тримає інший процес, догін
+    пропускається (`busy`) — пошук тоді бере неохоплені прогони старим шляхом.
+    Індекс іншої схеми стирається й збирається з нуля.
+    """
+    # Стирається лише індекс, який СКАЗАВ, що він іншої схеми (є `runs.json`).
+    # Тека без стану — це, найпевніше, перша збірка в іншому процесі, яка ще не
+    # дійшла до коміту: стерти її означало б вирвати теку з-під живого
+    # письменника (рецензія 20.10.2026). Тут вирішує замок письменника нижче.
+    if (path() / STATE).is_file() and _read_state().get("schema") != SCHEMA:
+        shutil.rmtree(path())
+    index = _open(create=True)
+    st = state()
+    now = _store_stamps(conn)
+    gone = [rid for rid in st if rid not in now]
+    todo = [rid for rid, stamp in now.items() if st.get(rid) != stamp]
+    if not gone and not todo:
+        return {"added": 0, "removed": 0, "lines": 0, "busy": False}
+    try:
+        w = index.writer(WRITER_HEAP, WRITER_THREADS)
+    except ValueError:
+        return {"added": 0, "removed": 0, "lines": 0, "busy": True}
+    lines = since = 0
+    try:
+        for rid in [*gone, *todo]:
+            w.delete_documents_by_term("run", rid)
+        for i, rid in enumerate(todo, 1):
+            if progress:
+                progress(i, len(todo), "індекс Tantivy")
+            for pid, cands, raw in conn.execute(
+                    "select id, cands, raw from pages where run_id=? and cands is not null",
+                    (rid,)):
+                for doc in _docs(pid, rid, cands, raw):
+                    w.add_document(doc)
+                    lines += 1
+                    since += 1
+            st[rid] = now[rid]
+            if since >= COMMIT_EVERY:
+                w.commit()
+                _save_state(st)
+                since = 0
+        for rid in gone:
+            st.pop(rid, None)
+        w.commit()
+        w.wait_merging_threads()
+    except BaseException:
+        with contextlib.suppress(Exception):
+            w.rollback()
+        raise
+    _save_state(st)
+    return {"added": len(todo), "removed": len(gone), "lines": lines, "busy": False}
+
+
+def query_terms(stems: list[str]) -> list[tuple[str, str, int]]:
+    """(поле, терм, правок) по трьох полях; повтори прибрано, і більш нічого.
+
+    🔴 Терми НЕ згортаються за префіксом. Здавалося б, коли стем A — початок
+    стему B, префіксний автомат A покриває все, що B; на моделі «якийсь початок
+    слова в межах d» це доводилось, але префіксний режим Tantivy вужчий за
+    модель: рецензія 20.10.2026 знайшла на живому індексі слова, які B бере,
+    а A — ні (тест `test_the_prefix_mode_of_tantivy_is_narrower_than_the_model`). Згортання
+    скорочувало запит роду вдвічі ціною тихих утрат, тож його прибрано.
+    """
+    raw: list[tuple[str, str, int]] = []
+    for s in stems:
+        far = 2 if len(s) >= 8 else 1
+        raw.append(("c", s, 2))
+        raw.append(("x", s[::-1], far))
+        raw.append(("y", s, far))
+        for k in (1, 2, 3):
+            if len(s) - k >= 6:
+                # Скалічений початок: у `c` — стем без перших літер, у `x` той
+                # самий стем задом наперед (хвіст терма обрізано, і префіксний
+                # збіг не вимагає зіпсованих літер).
+                raw.append(("c", s[k:], 1))
+                raw.append(("x", s[k:][::-1], 1))
+        if len(s) >= SHORT_FROM:
+            # 🔴 Скорочена й скалічена форма прізвища — справжні згадки роду з
+            # голдсету дослідника (бал 80), коротші за стем на 4–5 літер, тож
+            # двох правок до повного стему не вистачає. Спільний у них лише
+            # початок; бал і далі виносить `_match_unique`, тож зайві кандидати
+            # у видачу не йдуть.
+            raw.append(("c", s[:SHORT_HEAD], 1))
+    return list(dict.fromkeys(raw))
+
+
+#: Скільки відповідей індексу тримати в пам'яті процесу.
+ANSWERS_KEEP = 3
+#: Версія запиту (`query_terms`): входить у ключ кешу відповідей швидкого каналу в
+#: сторі, тож зміна схеми запиту не лишає старих відповідей.
+QUERY_VERSION = 2
+
+#: Відповіді індексу на процес: (стеми, штамп стану) → прогін → [(pid, рядок)].
+_ANSWERS: dict[tuple[str, tuple[str, ...], int], dict[int, list[tuple[int, int]]]] = {}
+
+
+def by_run(stems: list[str]) -> dict[int, list[tuple[int, int]]]:
+    """Рядки-кандидати всього корпусу, розкладені за прогонами. Один запит на процес.
+
+    🔴 Запит до індексу коштує однаково — що на справу, що на корпус: автомат
+    іде по ВСЬОМУ словнику, а фільтр за прогоном накладається після (заміри
+    20.10.2026: 12–50 с на прізвище). Пошук по серії кличе свіп на кожну справу,
+    і 150 справ серії означали 150 повних проходів — пів години на те, що свіп
+    робить за три хвилини. Тому відповідь рахується раз на прізвище й кешується
+    до наступної зміни індексу, а справа бере з неї свої рядки.
+    """
+    import tantivy
+
+    # Без стану відповіді немає — і це помилка, а не порожня відповідь: тихі нулі
+    # лягли б у кеш швидкого каналу як «тут нічого» (рецензія 20.10.2026).
+    stamp = (path() / STATE).stat().st_mtime_ns
+    key = (str(path()), tuple(stems), stamp)
+    got = _ANSWERS.get(key)
+    if got is not None:
+        return got
+    index = _open(create=False)
+    index.reload()
+    schema = index.schema
+    clauses = [(tantivy.Occur.Should, tantivy.Query.fuzzy_term_query(
+        schema, field, term, distance=d, transposition_cost_one=True, prefix=True))
+        for field, term, d in query_terms(stems)]
+    out: dict[int, list[tuple[int, int]]] = {}
+    if clauses:
+        q = tantivy.Query.boolean_query(clauses)
+        searcher = index.searcher()
+        n = searcher.search(q, limit=1, count=True).count or 0
+        if n:
+            hits = [addr for _k, addr in searcher.search(q, limit=n, order_by_field="pid").hits]
+            for p, ln, rid in zip(searcher.fast_field_values("pid", hits),
+                                  searcher.fast_field_values("ln", hits),
+                                  searcher.fast_field_values("run", hits), strict=True):
+                if p is not None and ln is not None and rid is not None:
+                    out.setdefault(int(rid), []).append((int(p), int(ln)))
+    # Відповідь поширеного прізвища — мільйони пар; тримаємо лише останні кілька.
+    while len(_ANSWERS) >= ANSWERS_KEEP:
+        _ANSWERS.pop(next(iter(_ANSWERS)))
+    _ANSWERS[key] = out
+    return out
+
+
+def known(stems: list[str]) -> bool:
+    """Чи відповідь на ці стеми вже порахована в цьому процесі."""
+    try:
+        stamp = (path() / STATE).stat().st_mtime_ns
+    except OSError:
+        return False
+    return (str(path()), tuple(stems), stamp) in _ANSWERS
+
+
+def candidates(stems: list[str], run_ids: list[int] | None = None
+               ) -> list[tuple[int, int]]:
+    """(pid стору, номер рядка) рядків, де може стояти прізвище. `run_ids` — лише в цих прогонах."""
+    got = by_run(stems)
+    want = got.keys() if run_ids is None else run_ids
+    return sorted({x for rid in want for x in got.get(rid, ())})
+
+
+__all__ = ["SCHEMA", "available", "by_run", "candidates", "covered", "exists", "known",
+           "path", "query_terms", "state", "sync"]

@@ -2307,7 +2307,9 @@ def search(q: str, name: str | None = None, thresh: int = 78,
             # Скільки прогонів узято з кешу свіпів стору, скільки пораховано
             # зараз; чи кандидати стору зроблені чинними правилами.
             "cache": {"runs": int(got.get("cached") or 0),
-                      "computed": int(got.get("computed") or 0)} if backend == "store" else None,
+                      "computed": int(got.get("computed") or 0),
+                      # Скільки прогонів звузив передфільтр Tantivy (`search.fastidx`).
+                      "fast": int(got.get("fast_runs") or 0)} if backend == "store" else None,
             "rules_stale": bool(got.get("rules_stale")),
             # Які написання профілю не пішли в стор і чому — див. `whole_stems`.
             "stems_dropped": dropped,
