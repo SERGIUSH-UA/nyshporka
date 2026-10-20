@@ -77,14 +77,38 @@ def _hub_skill_overrides(hub: Path) -> dict[str, Any]:
     return val if isinstance(val, dict) else {}
 
 
-def hub_hooks_dropped(hub: Path) -> list[str]:
-    """Події хуків хаба, яких у сесії проєкту не буде (лише для попередження)."""
+def _hub_hooks(hub: Path) -> dict[str, Any]:
     try:
         got = json.loads((hub / ".claude" / "settings.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return []
+        return {}
     hooks = got.get("hooks") if isinstance(got, dict) else None
-    return sorted(hooks) if isinstance(hooks, dict) else []
+    return hooks if isinstance(hooks, dict) else {}
+
+
+def _rebase(node: Any, up: str) -> Any:
+    """`$CLAUDE_PROJECT_DIR` хаба → той самий шлях із теки проєкту."""
+    if isinstance(node, str):
+        return node.replace("$CLAUDE_PROJECT_DIR", f"$CLAUDE_PROJECT_DIR/{up}")
+    if isinstance(node, list):
+        return [_rebase(x, up) for x in node]
+    if isinstance(node, dict):
+        return {k: _rebase(v, up) for k, v in node.items()}
+    return node
+
+
+def hub_hooks_for(hub: Path, root: Path) -> dict[str, Any]:
+    """Хуки Майстерні для сесії проєкту — крім старту, який у проєкту свій.
+
+    Claude Code читає налаштування лише з теки старту, тож хук хаба (сторож
+    команд, заборона грепу скілів) у проєкті без цього просто не діяв би.
+    Шлях `$CLAUDE_PROJECT_DIR/…` переписується на хабовий: скрипти хуків
+    лежать у Майстерні.
+    """
+    import os
+
+    up = Path(os.path.relpath(hub, root)).as_posix()
+    return {ev: _rebase(v, up) for ev, v in _hub_hooks(hub).items() if ev != "SessionStart"}
 
 
 def render(hub: Path, root: Path, pid: str, *, kind: str, title: str) -> dict[str, str]:
@@ -95,7 +119,7 @@ def render(hub: Path, root: Path, pid: str, *, kind: str, title: str) -> dict[st
     hook = {"type": "command", "command": f"{nysh_command()} {STATUS_CMD}"}
     claude: dict[str, Any] = {
         "autoMemoryDirectory": memory_dir(root).as_posix(),
-        "hooks": {"SessionStart": [{"hooks": [hook]}]},
+        "hooks": {"SessionStart": [{"hooks": [hook]}], **hub_hooks_for(hub, root)},
     }
     overrides = _hub_skill_overrides(hub)
     if overrides:
@@ -173,12 +197,12 @@ def create(hub: Path, pid: str, *, kind: str = "family", title: str = "",
         {"version": version or __version__, "files": {k: _sha(v) for k, v in files.items()}},
         ensure_ascii=False, indent=1))
     warnings: list[str] = []
-    dropped = hub_hooks_dropped(hub)
-    if dropped:
+    carried = sorted(hub_hooks_for(hub, root))
+    if carried:
         warnings.append(
-            "хуки з .claude/settings.json Майстерні (" + ", ".join(dropped) + ") у сесії "
-            "проєкту не діють: Claude Code читає налаштування лише з теки старту. "
-            "Потрібні — допишіть у .claude/settings.json проєкту")
+            "хуки Майстерні (" + ", ".join(carried) + ") перенесено в "
+            ".claude/settings.json проєкту: Claude Code читає налаштування лише з теки "
+            "старту, а скрипти хуків лишаються в Майстерні")
     written = [W.MARKER, "notes/agent-memory.md", *files]
     hub_cfg = W._read_marker(hub / W.MARKER)
     if hub_cfg.get("hub_only"):

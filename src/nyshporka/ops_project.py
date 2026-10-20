@@ -65,6 +65,10 @@ def project_new(a: ProjectNewArgs) -> Envelope:
                                 f"nysh --project {a.name} profile init {a.surname}")
     for w in made.warnings:
         env.warn("hub_hooks", w)
+    if not W._read_marker(hub / W.MARKER).get("hub_only") and             any((W.Workspace(root=hub).canonical / "persons").glob("*.md")):
+        env.warn("legacy_root", "рід, що лежить у корені Майстерні, лишився там: щоб він "
+                                "став проєктом поруч із новим — nysh project adopt <ім'я> "
+                                "(спершу план, тоді --apply)")
     env.suggest("project.open", f"відкрити агента в проєкті: nysh project open {a.name}")
     return env
 
@@ -147,8 +151,8 @@ def project_archive(a: ProjectArchiveArgs) -> Envelope:
 
 class ProjectAdoptArgs(ProjectNameArgs):
     apply: bool = Field(default=False, description="виконати переїзд (без цього — лише план)")
-    archive: str = Field(default="", description="тека для zip-архіву, поза Майстернею "
-                                                 "(обов'язкова з apply)")
+    archive: str = Field(default="", description="тека для zip-архіву поза Майстернею; "
+                                                 "порожньо — тека-сусідка <хаб>-adopt")
     rollback: bool = Field(default=False, description="повернути останній переїзд")
     stamp: str = Field(default="", description="мітка переїзду для відкату")
 
@@ -158,7 +162,8 @@ class ProjectAdoptArgs(ProjectNameArgs):
     when="перетворити простір, де рід лежить у корені, на Майстерню з проєктом роду")
 def project_adopt(a: ProjectAdoptArgs) -> Envelope:
     """🔴 Без `apply` нічого не змінює. Архів — поза Майстернею, з sha256 і
-    перевіркою розпакуванням, до першого переносу."""
+    звіркою кожного члена, до першого переносу. План відмовляє, коли в шляхах
+    переїзду хтось пише просто зараз."""
     from pathlib import Path
 
     from nyshporka.core import workspace as W
@@ -168,13 +173,11 @@ def project_adopt(a: ProjectAdoptArgs) -> Envelope:
     try:
         if a.rollback:
             return ok(A.rollback(hub, a.stamp or None))
-        pl = A.plan(hub, a.name)
+        archive = Path(a.archive) if a.archive else None
         if not a.apply:
-            env = ok({**pl.as_dict(), "report": A.report(pl)})
-            return env
-        if not a.archive:
-            return fail("переїзд без архіву не починаю: --archive <тека поза Майстернею>")
-        return ok(A.apply(hub, a.name, archive=Path(a.archive)))
+            pl = A.plan(hub, a.name, archive=archive)
+            return ok({**pl.as_dict(), "report": A.report(pl)})
+        return ok(A.apply(hub, a.name, archive=archive))
     except (A.AdoptError, W.WorkspaceError) as exc:
         return fail(str(exc))
 

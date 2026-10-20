@@ -12,8 +12,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import shutil
 import subprocess
+import time
 import zipfile
 from datetime import date
 from pathlib import Path
@@ -72,6 +74,23 @@ def _clean() -> object:
     W.reset()
 
 
+def _age(root: Path, seconds: float = 3600) -> None:
+    """Файли «записано годину тому»: інакше ворота свіжих записів спрацюють на фікстурі."""
+    old = time.time() - seconds
+    for f in root.rglob("*"):
+        if f.is_file() and ".git" not in f.parts:
+            os.utime(f, (old, old))
+
+
+@pytest.fixture(autouse=True)
+def _home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Своя «домашня» тека: копія пам'яті агента не має лягти в справжню."""
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    return home
+
+
 @pytest.fixture
 def legacy(tmp_path: Path) -> Path:
     """Корінь старого типу: канон, профіль, вердикти, коментар сторінки, прогін, git."""
@@ -108,6 +127,7 @@ def legacy(tmp_path: Path) -> Path:
     _git(hub, "config", "user.name", "t")
     _git(hub, "add", "-A")
     _git(hub, "commit", "-qm", "base")
+    _age(hub)
     return hub
 
 
@@ -120,10 +140,18 @@ def test_plan_names_what_moves_and_what_would_dangle(legacy: Path) -> None:
     assert pl.problems == []
     assert pl.views["with_view"] == 1 and pl.views["marks"] == {"портал": 1}
 
-    # Без `extra` лист, на який посилається картка, лишився б у корені.
+    # Без `extra` тека з листом, на який посилається картка, їде сама.
     (legacy / W.MARKER).write_text('[workspace]\nname = "Тест"\nkeys = 2\n', encoding="utf-8")
+    _age(legacy)
     pl = A.plan(legacy, "rid")
-    assert any("data/source/letters/l1.txt" in p for p in pl.problems)
+    assert "data/source/letters" in {m.path for m in pl.moves} and pl.problems == []
+
+    # Лишена свідомо (`stay`) — посилання провисло б, і план про це каже.
+    (legacy / W.MARKER).write_text('[workspace]\nname = "Тест"\nkeys = 2\n'
+                                   '[adopt]\nstay = ["data/source/letters"]\n', encoding="utf-8")
+    _age(legacy)
+    pl = A.plan(legacy, "rid")
+    assert any("data/source/letters/l1.txt" in p and "stay" in p for p in pl.problems)
 
 
 def test_plan_refuses_uncommitted_work(legacy: Path) -> None:
@@ -140,12 +168,21 @@ def test_archive_must_live_outside_the_hub(legacy: Path) -> None:
 
 def test_apply_moves_everything_and_rollback_restores_bytes(legacy: Path,
                                                             tmp_path: Path) -> None:
+    from nyshporka import project as PR
     from nyshporka.canon import hook as H
     from nyshporka.canon.check import check
 
+    hub_mem = PR.memory_dir(legacy)
+    hub_mem.mkdir(parents=True)
+    (hub_mem / "MEMORY.md").write_text("- [Рід](rid.md)\n", encoding="utf-8")
     before = _tree(legacy)
     got = A.apply(legacy, "rid", archive=tmp_path / "arch")
     rid = legacy / "projects" / "rid"
+
+    # Пам'ять агента — копія в проєкт; у хабі лишилась.
+    assert (PR.memory_dir(rid) / "MEMORY.md").read_text(encoding="utf-8").startswith("- [Рід]")
+    assert (hub_mem / "MEMORY.md").is_file()
+    assert got["after"] and got["memory"] == str(PR.memory_dir(rid))
 
     # Архів: усе, що поїхало, з переліком sha256.
     with zipfile.ZipFile(got["archive"]["zip"]) as z:
@@ -191,6 +228,7 @@ def test_apply_moves_everything_and_rollback_restores_bytes(legacy: Path,
     W.reset()
     assert _tree(legacy) == before
     assert not (legacy / "projects").exists()
+    assert not PR.memory_dir(rid).exists() and (hub_mem / "MEMORY.md").is_file()
 
 
 def test_legacy_tag_without_move_stays_root(tmp_path: Path) -> None:
@@ -239,15 +277,131 @@ def test_project_pack_overlays_the_hub_pack(tmp_path: Path) -> None:
 
 def test_archive_that_does_not_verify_stops_before_any_move(
         legacy: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Архів, що не звірився розпакуванням, — не копія: переїзд не починається."""
-    real = A._sha
-
-    def lying(p: Path) -> str:
-        return real(p) if legacy in p.parents else "0" * 64   # розпаковане «інше»
-
-    monkeypatch.setattr(A, "_sha", lying)
+    """Архів, що не звірився, — не копія: переїзд не починається."""
+    monkeypatch.setattr(A, "_sha_member", lambda z, name: "0" * 64)   # в архіві «інше»
     with pytest.raises(A.AdoptError, match="не звірився"):
         A.apply(legacy, "rid", archive=tmp_path / "arch")
     assert (legacy / "data" / "canonical" / "persons" / "I9001.md").is_file()
     assert not (legacy / "projects").exists()
     assert "hub_only" not in W._read_marker(legacy / W.MARKER)
+
+
+# ── міграція без переліку руками ─────────────────────────────────────────────
+def _commit(root: Path) -> None:
+    _git(root, "add", "-A")
+    _git(root, "commit", "-qm", "ще")
+    _age(root)
+
+
+def test_reports_and_site_move_by_schema_htr_and_stay_remain(legacy: Path) -> None:
+    """`reports/*` (крім `htr`) і сайт MkDocs їдуть самі; `stay` лишає своє, і всередині теки."""
+    for rel in ("reports/research/a.md", "reports/research/chuzhe/b.md", "reports/htr/run/x.txt",
+                "reports/delivery/z.md", "reports/llm_bench.json", "docs/index.md",
+                "mkdocs.yml", "mkdocs.public.yml"):
+        (legacy / rel).parent.mkdir(parents=True, exist_ok=True)
+        (legacy / rel).write_text("x", encoding="utf-8")
+    with (legacy / W.MARKER).open("a", encoding="utf-8") as fh:
+        fh.write('stay = ["reports/delivery", "reports/llm_*", "reports/research/chuzhe"]\n')
+    _commit(legacy)
+    moved = {m.path for m in A.plan(legacy, "rid").moves}
+    assert {"reports/research/a.md", "docs", "mkdocs.yml", "mkdocs.public.yml"} <= moved
+    assert not any(m.startswith(("reports/htr", "reports/delivery", "reports/llm_",
+                                 "reports/research/chuzhe")) for m in moved)
+    assert "reports/research" not in moved, "тека з лишеним усередині їде поелементно"
+
+
+def test_stay_inside_a_moving_dir_survives_apply_and_rollback(legacy: Path,
+                                                               tmp_path: Path) -> None:
+    for rel in ("reports/research/a.md", "reports/research/chuzhe/b.md"):
+        (legacy / rel).parent.mkdir(parents=True, exist_ok=True)
+        (legacy / rel).write_text("x", encoding="utf-8")
+    with (legacy / W.MARKER).open("a", encoding="utf-8") as fh:
+        fh.write('stay = ["reports/research/chuzhe"]\n')
+    _commit(legacy)
+    before = _tree(legacy)
+    A.apply(legacy, "rid", archive=tmp_path / "arch")
+    rid = legacy / "projects" / "rid"
+    assert (rid / "reports" / "research" / "a.md").is_file()
+    assert (legacy / "reports" / "research" / "chuzhe" / "b.md").is_file()
+    assert not (rid / "reports" / "research" / "chuzhe").exists()
+    W.reset()
+    W.use(W._build(legacy, "test"))
+    A.rollback(legacy)
+    W.reset()
+    assert _tree(legacy) == before
+
+
+def test_someone_writing_right_now_stops_the_plan(legacy: Path) -> None:
+    """Свіжий файл у шляхах переїзду — інша сесія пише; переносити з-під неї не можна."""
+    f = legacy / "data" / "clan_hunt" / "state.json"
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text("{}", encoding="utf-8")
+    _git(legacy, "add", "-A")
+    _git(legacy, "commit", "-qm", "стан")          # закомічено, але щойно записано
+    probs = A.plan(legacy, "rid").problems
+    assert any("пишуть просто зараз" in p and "data/clan_hunt/state.json" in p for p in probs)
+    _age(legacy)
+    assert A.plan(legacy, "rid").problems == []
+
+
+def test_archive_defaults_next_to_the_hub(legacy: Path) -> None:
+    got = A.apply(legacy, "rid")
+    zpath = Path(got["archive"]["zip"])
+    assert zpath.parent == legacy.parent / "hub-adopt" and zpath.is_file()
+    with zipfile.ZipFile(zpath) as z:
+        assert "data/canonical/persons/I9001.md" in z.namelist()
+
+
+def test_no_room_for_the_archive_stops_before_anything(legacy: Path, tmp_path: Path,
+                                                       monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(A, "_free", lambda p: 10)
+    probs = A.plan(legacy, "rid", archive=tmp_path / "arch").problems
+    assert any("для архіву треба" in p and "--archive" in p for p in probs)
+    with pytest.raises(A.AdoptError, match="для архіву треба"):
+        A.apply(legacy, "rid", archive=tmp_path / "arch")
+    assert not (legacy / "projects").exists()
+    assert not (tmp_path / "arch").exists()
+
+
+def test_existing_project_memory_is_not_overwritten(legacy: Path) -> None:
+    from nyshporka import project as PR
+
+    mem = PR.memory_dir(legacy / "projects" / "rid")
+    mem.mkdir(parents=True)
+    (mem / "x.md").write_text("чуже", encoding="utf-8")
+    assert any("пам'ять агента" in p for p in A.plan(legacy, "rid").problems)
+
+
+def test_hub_hooks_follow_into_the_project(tmp_path: Path) -> None:
+    """Сторож команд Майстерні діє і в сесії проєкту — скриптом із хаба."""
+    from nyshporka import project as PR
+
+    hub = tmp_path / "hub"
+    hub.mkdir()
+    (hub / W.MARKER).write_text('[workspace]\nname = "М"\nhub_only = true\n', encoding="utf-8")
+    (hub / ".claude").mkdir()
+    guard = {"type": "command", "command": 'bash "$CLAUDE_PROJECT_DIR/.claude/hooks/g.sh"'}
+    (hub / ".claude" / "settings.json").write_text(json.dumps({"hooks": {
+        "SessionStart": [{"hooks": [{"type": "command", "command": "хабовий старт"}]}],
+        "PreToolUse": [{"matcher": "Bash", "hooks": [guard]}]}}), encoding="utf-8")
+    made = PR.create(hub, "rid")
+    st = json.loads((made.root / ".claude" / "settings.json").read_text(encoding="utf-8"))
+    cmd = st["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+    assert cmd == 'bash "$CLAUDE_PROJECT_DIR/../../.claude/hooks/g.sh"'
+    start = st["hooks"]["SessionStart"][0]["hooks"][0]["command"]
+    assert start.endswith("project status --agent"), "старт у проєкту свій"
+    assert any("PreToolUse" in w for w in made.warnings)
+
+
+def test_legacy_root_check_asks_only_when_a_second_project_exists(legacy: Path) -> None:
+    from nyshporka import migrate as M
+
+    assert M.CHECKS["legacy_root"](legacy).state == "n/a"
+    (legacy / "projects" / "druzhyna").mkdir(parents=True)
+    (legacy / "projects" / "druzhyna" / W.MARKER).write_text(
+        '[project]\nname = "Рід дружини"\nkind = "family"\n', encoding="utf-8")
+    got = M.CHECKS["legacy_root"](legacy)
+    assert got.state == "todo" and "project adopt" in got.detail and "druzhyna" in got.detail
+    A.apply(legacy, "rid")
+    W.reset()
+    assert M.CHECKS["legacy_root"](legacy).state == "n/a"

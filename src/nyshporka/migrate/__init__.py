@@ -245,6 +245,25 @@ def _hypotheses_linked(root: Path) -> CheckResult:
     return CheckResult("ok", f"гіпотез: {len(rep.canon.hypotheses)}, спірні факти прив'язані")
 
 
+def _legacy_root(root: Path) -> CheckResult:
+    """Рід у корені Майстерні (простір старого типу) — чи час переїжджати."""
+    from nyshporka.core import projects as P
+    from nyshporka.core import workspace as W
+
+    cfg = W._read_marker(root / W.MARKER)
+    if W.read_project_table(root) is not None or cfg.get("hub_only"):
+        return CheckResult("n/a", "простір уже нового типу")
+    persons = W.Workspace(root=root).canonical / "persons"
+    if not persons.is_dir() or not any(persons.glob("*.md")):
+        return CheckResult("n/a", "канону в корені немає — переїжджати нічому")
+    others = [p.id for p in P.list_projects(root) if p.id != "."]
+    if others:
+        return CheckResult("todo", f"рід у корені, а поруч уже проєкти ({', '.join(others)}): "
+                                   "nysh project adopt <ім'я> — план людині, тоді --apply")
+    return CheckResult("n/a", "один рід у корені — переїзд лише на прохання людини "
+                              "завести другий (nysh project adopt <ім'я>)")
+
+
 def _hook_installed(root: Path) -> CheckResult:
     import subprocess
 
@@ -347,6 +366,7 @@ def _catalog_current(root: Path) -> CheckResult:
 
 
 CHECKS: dict[str, Callable[[Path], CheckResult]] = {
+    "legacy_root": _legacy_root,
     "catalog_current": _catalog_current,
     "mcp_config": _mcp_config,
     "skills_current": _skills_current,

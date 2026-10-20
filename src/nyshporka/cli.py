@@ -4043,7 +4043,8 @@ def project_archive_cmd(name: str = typer.Argument(..., help="ім'я проєк
 def project_adopt_cmd(name: str = typer.Argument(..., help="ім'я майбутнього проєкту роду"),
                       apply: bool = typer.Option(False, "--apply", help="виконати переїзд"),
                       archive: str = typer.Option("", "--archive",
-                                                  help="тека для zip-архіву поза Майстернею"),
+                                                  help="тека для zip-архіву поза Майстернею "
+                                                       "(типово — <хаб>-adopt поруч)"),
                       rollback: bool = typer.Option(False, "--rollback",
                                                     help="повернути останній переїзд"),
                       stamp: str = typer.Option("", "--stamp", help="мітка переїзду для відкату"),
@@ -4065,6 +4066,8 @@ def project_adopt_cmd(name: str = typer.Argument(..., help="ім'я майбут
     else:
         console.print(f"🧳 рід переїхав у {d['project']} (журнал {d['stamp']}, "
                       f"архів {d['archive']['zip']})", markup=False)
+        for n, line in enumerate(d.get("after") or [], 1):
+            console.print(f"  далі {n}. {line}", markup=False)
     _notes(env)
 
 
