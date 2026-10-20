@@ -220,6 +220,36 @@ def test_find_puts_the_right_command_in_top_three(tmp_path: Path, query: str,
     assert want in top, f"{query!r} → {top}"
 
 
+def _skill(root: Path, name: str, desc: str) -> None:
+    d = root / ".claude" / "skills" / name
+    d.mkdir(parents=True)
+    (d / "SKILL.md").write_text(f'---\nname: {name}\ndescription: "{desc}"\n---\n\nтіло\n',
+                                encoding="utf-8")
+
+
+def test_find_skills_names_the_procedure_and_skips_switched_off_twin(tmp_path: Path) -> None:
+    """Ситуацію, яку веде процедура, знаходить скіл; вимкнений двійник — ні."""
+    home, proj = tmp_path / "home", tmp_path / "proj"
+    _skill(proj, "dig", "Куди копати далі: що ще спробувати, нуль — що далі")
+    _skill(home, "where-to-dig", "Куди копати далі: що ще спробувати, нуль — що далі")
+    _skill(home, "share-case", "Віддати прочитану справу в Супрягу")
+    (proj / ".claude" / "settings.json").write_text(
+        '{"skillOverrides": {"where-to-dig": "off"}}', encoding="utf-8")
+    got = [n for n, _ in M.find_skills("куди ще копати", project=proj, home=home)]
+    assert got == ["dig"]
+    assert not M.find_skills("кроп рядка", project=proj, home=home)
+
+
+def test_find_skills_needs_half_the_words(tmp_path: Path) -> None:
+    """Одне спільне слово («справа») скіла не робить доречним."""
+    home, proj = tmp_path / "home", tmp_path / "proj"
+    _skill(home, "share-case", "Віддати прочитану справу в Супрягу")
+    proj.mkdir()
+    assert not M.find_skills("справу прогнати рушієм вдома", project=proj, home=home)
+    assert [n for n, _ in M.find_skills("віддати справу в Супрягу",
+                                        project=proj, home=home)] == ["share-case"]
+
+
 def test_find_matches_word_forms() -> None:
     """«прогону» / «прогін» / «прогони» — один префікс."""
     assert M._stems("прогону") == M._stems("прогони") == ["прого"]

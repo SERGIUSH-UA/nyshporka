@@ -3852,7 +3852,7 @@ def ops_list(ctx: typer.Context,
 
 @ops_app.command("find")
 @route("ops find", tier="core",
-       when="не знаєш, якою командою це зробити — знайти за ситуацією")
+       when="не знаєш, якою командою чи скілом це зробити — знайти за ситуацією")
 def ops_find(words: list[str] = typer.Argument(..., help="що треба зробити, своїми словами"),
              limit: int = typer.Option(8, "--limit", help="скільки показати"),
              show_all: bool = typer.Option(False, "--all",
@@ -3862,18 +3862,26 @@ def ops_find(words: list[str] = typer.Argument(..., help="що треба зро
     """Яка команда під цю ситуацію — пошук по «коли брати», підпису й докстрінгу."""
     from nyshporka.core import routemap as M
 
-    hits = M.find(" ".join(words), limit=limit, show_all=show_all)
+    query = " ".join(words)
+    hits = M.find(query, limit=limit, show_all=show_all)
+    skills = M.find_skills(query)
     if as_json:
         console.print_json(data={"v": 1, "hits": [{**e.card(), "score": s}
-                                                  for e, s in hits]})
+                                                  for e, s in hits],
+                                 "skills": [{"name": n, "score": s} for n, s in skills]})
         return
-    if not hits:
+    # Скіл — першим: збіг опису означає, що ситуацію веде процедура, і
+    # окрема команда з переліку нижче — лише один її крок.
+    for name, _ in skills:
+        typer.echo(f"▶ скіл {name} — завантажити цілим, перш ніж діяти")
+    if not hits and not skills:
         typer.echo("нічого не знайшлось; перелік усього — nysh ops")
         return
     for e, _ in hits:
         mark = "✎" if e.mutates else " "
         typer.echo(f"{mark} {e.cli:<26} {e.when or e.summary}")
-    typer.echo("аргументи: <команда> --help або nysh op <ім'я> --describe")
+    if hits:
+        typer.echo("аргументи: <команда> --help або nysh op <ім'я> --describe")
 
 
 # ── секції ───────────────────────────────────────────────────────────────────

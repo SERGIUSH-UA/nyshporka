@@ -887,7 +887,7 @@ def _catalog_basis(src: Any) -> dict[str, Any]:
 
 
 @op("sources.list", summary="Звідки можна брати матеріал", section="material",
-    skill="start-research",
+    skill="where-to-dig",
     when="звідки можна брати матеріал і що доводить нуль у джерелі")
 def sources_list(_: NoArgs) -> Envelope:
     from nyshporka.sources.base import about_of

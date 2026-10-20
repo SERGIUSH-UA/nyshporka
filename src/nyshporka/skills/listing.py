@@ -156,26 +156,14 @@ def _plugin_skill_dirs(home: Path, enabled: dict[str, Any]) -> list[tuple[str, P
     return out
 
 
-def measure(home: Path | None = None, project: Path | None = None) -> Listing:
-    """Перелік скілів, які бачитиме агент у цьому проєкті, і скільки він важить."""
-    from nyshporka import skills as S
+def _walk(home: Path, project: Path,
+          st: dict[str, Any]) -> list[tuple[str, Path, str, dict[str, Any], str]]:
+    """Скіли так, як їх бачить Claude Code: (де, тека, ім'я, шапка, режим).
 
-    home = home or Path.home()
-    project = project or Path.cwd()
-    st = _settings(home, project)
+    Проєктний перекриває однойменний користувацький; режим — з
+    `skillOverrides` (на скіли плагінів не діє).
+    """
     overrides = {str(k): str(v) for k, v in st["skillOverrides"].items()}
-    ours = {s.name for s in S.available()}
-    lst = Listing()
-    with contextlib.suppress(TypeError, ValueError):
-        lst.fraction = float(st.get("skillListingBudgetFraction") or FRACTION)
-    with contextlib.suppress(TypeError, ValueError):
-        lst.max_desc = int(st.get("skillListingMaxDescChars") or MAX_DESC)
-    raw = os.environ.get("SLASH_COMMAND_TOOL_CHAR_BUDGET") or str(
-        st["env"].get("SLASH_COMMAND_TOOL_CHAR_BUDGET") or "")
-    if raw.strip().isdigit():
-        lst.fixed_budget = int(raw)
-
-    seen: set[str] = set()
     found: list[tuple[str, Path, bool]] = []          # (де, тека, чи діють overrides)
     for where, root in (("project", project / ".claude" / "skills"),
                         ("user", home / ".claude" / "skills")):
@@ -188,6 +176,8 @@ def measure(home: Path | None = None, project: Path | None = None) -> Listing:
             found += [("synced", d, True) for d in _skill_dirs(acc)]
     found += [(f"plugin:{p}", d, False)
               for p, d in _plugin_skill_dirs(home, st.get("enabledPlugins") or {})]
+    seen: set[str] = set()
+    out = []
     for where, d, overridable in found:
         meta = _front(d / "SKILL.md")
         name = str(meta.get("name") or d.name)
@@ -197,6 +187,46 @@ def measure(home: Path | None = None, project: Path | None = None) -> Listing:
         mode = "on"
         if overridable:
             mode = overrides.get(name) or overrides.get(d.name) or "on"
+        out.append((where, d, name, meta, mode))
+    return out
+
+
+def loadable(home: Path | None = None,
+             project: Path | None = None) -> list[tuple[str, str]]:
+    """Скіли проєкту й користувача, які агент тут може завантажити: (ім'я, опис).
+
+    Для `nysh ops find`: ситуацію, яку веде процедура, а не одна команда
+    («куди ще копати»), знаходить скіл. Вимкнений у проєкті двійник сюди не
+    потрапляє — інакше пошук радив би саме той скіл, який проєкт свідомо
+    прибрав.
+    """
+    home = home or Path.home()
+    project = project or Path.cwd()
+    st = _settings(home, project)
+    return [(name, " ".join(str(meta.get(k) or "") for k in ("description", "when_to_use")))
+            for where, _d, name, meta, mode in _walk(home, project, st)
+            if where in ("project", "user") and mode not in ("off", "user-invocable-only")]
+
+
+def measure(home: Path | None = None, project: Path | None = None) -> Listing:
+    """Перелік скілів, які бачитиме агент у цьому проєкті, і скільки він важить."""
+    from nyshporka import skills as S
+
+    home = home or Path.home()
+    project = project or Path.cwd()
+    st = _settings(home, project)
+    ours = {s.name for s in S.available()}
+    lst = Listing()
+    with contextlib.suppress(TypeError, ValueError):
+        lst.fraction = float(st.get("skillListingBudgetFraction") or FRACTION)
+    with contextlib.suppress(TypeError, ValueError):
+        lst.max_desc = int(st.get("skillListingMaxDescChars") or MAX_DESC)
+    raw = os.environ.get("SLASH_COMMAND_TOOL_CHAR_BUDGET") or str(
+        st["env"].get("SLASH_COMMAND_TOOL_CHAR_BUDGET") or "")
+    if raw.strip().isdigit():
+        lst.fixed_budget = int(raw)
+
+    for where, d, name, meta, mode in _walk(home, project, st):
         if mode in ("off", "user-invocable-only"):
             lst.hidden.append(name)
             continue

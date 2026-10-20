@@ -21,6 +21,7 @@ from __future__ import annotations
 import inspect
 import re
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 #: Частка бюджету хука старту (`project status --agent`) під карту.
@@ -185,4 +186,44 @@ def find(query: str, *, limit: int = 8, show_all: bool = False) -> list[tuple[En
         if score:
             scored.append((e, score))
     scored.sort(key=lambda p: (-p[1], _TIER_RANK.get(p[0].tier, 3), p[0].name))
+    return scored[:limit]
+
+
+def _project_dir() -> Path | None:
+    try:
+        from nyshporka.core import workspace as W
+
+        return W.workspace().root
+    except Exception:
+        return None
+
+
+def find_skills(query: str, *, limit: int = 2, project: Path | None = None,
+                home: Path | None = None) -> list[tuple[str, int]]:
+    """Скіли, чий опис збігся із запитом, — ситуації, які веде процедура.
+
+    «Куди ще копати» чи «прийняти куплену зйомку» — не одна команда, а
+    порядок кроків, і жодна дія тут не влучить. Опис скіла саме для того й
+    перелічує фрази людини. Половина слів запиту мусить збігтися: одне
+    спільне «справа» скіла не робить доречним.
+    """
+    from nyshporka.skills import listing as SL
+
+    qs = [q for q in dict.fromkeys(_stems(query)) if len(q) >= 3]
+    if not qs:
+        return []
+    pool = [(name, set(_stems(desc + " " + name.replace("-", " "))))
+            for name, desc in SL.loadable(home=home, project=project or _project_dir())]
+    # Те саме приглушення, що в `find`: «скільки» стоїть у половині описів.
+    common = {q for q in qs if sum(_match(q, h) for _, h in pool) > max(2, len(pool) / 5)}
+    qs = [q for q in qs if q not in common]
+    if not qs:
+        return []
+    need = max(1, (len(qs) + 1) // 2)
+    scored = []
+    for name, hay in pool:
+        score = sum(_match(q, hay) for q in qs)
+        if score >= need:
+            scored.append((name, score))
+    scored.sort(key=lambda p: (-p[1], p[0]))
     return scored[:limit]
