@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import re
+from pathlib import Path
 from typing import Any
 
 from nyshporka.utils.translit import normalize_archival
@@ -194,17 +195,31 @@ _FOLK_BUILTIN: dict[str, tuple[str, ...]] = {
 #: Ім'я файлу накладки в конфігу простору. Формат — `васса: [анна]`.
 WORKSPACE_FOLK = "folk_names.yaml"
 
-_folk_pairs: dict[str, tuple[str, ...]] | None = None
+#: Пари за накладкою: (шлях, mtime) → пари. Ключ — файл, а не процес: демон
+#: один на Майстерню, і накладка проєкту А не мусить діяти в проєкті Б.
+_folk_pairs: dict[tuple[str, int], dict[str, tuple[str, ...]]] = {}
 
 
-def _folk_overlay() -> dict[str, Any]:
-    """Пари з простору. Простору чи файла немає — порожньо, і це не помилка."""
+def _folk_path() -> Path | None:
     try:
         from nyshporka.core.workspace import workspace
-        path = workspace().config / WORKSPACE_FOLK
+        return workspace().config / WORKSPACE_FOLK
     except Exception:  # простір ще не визначено — це не привід падати
-        return {}
-    if not path.is_file():
+        return None
+
+
+def _folk_key(path: Path | None) -> tuple[str, int]:
+    if path is None:
+        return ("", 0)
+    try:
+        return (str(path), path.stat().st_mtime_ns)
+    except OSError:
+        return (str(path), 0)
+
+
+def _folk_overlay(path: Path | None) -> dict[str, Any]:
+    """Пари з простору. Простору чи файла немає — порожньо, і це не помилка."""
+    if path is None or not path.is_file():
         return {}
     try:
         import yaml
@@ -221,11 +236,12 @@ def folk_pairs(*, refresh: bool = False) -> dict[str, tuple[str, ...]]:
     Анну, а «Анна» Вассу ні, і людина діставала б різні відповіді на те саме
     питання залежно від того, з якого документа почала.
     """
-    global _folk_pairs
-    if _folk_pairs is not None and not refresh:
-        return _folk_pairs
+    path = _folk_path()
+    key_ = _folk_key(path)
+    if key_ in _folk_pairs and not refresh:
+        return _folk_pairs[key_]
     raw: dict[str, list[str]] = {k: list(v) for k, v in _FOLK_BUILTIN.items()}
-    for key, val in (_folk_overlay() or {}).items():
+    for key, val in (_folk_overlay(path) or {}).items():
         vals = [val] if isinstance(val, str) else list(val or [])
         raw.setdefault(str(key), []).extend(str(v) for v in vals)
     sym: dict[str, set[str]] = {}
@@ -237,8 +253,9 @@ def folk_pairs(*, refresh: bool = False) -> dict[str, tuple[str, ...]]:
                 continue
             sym.setdefault(nk, set()).add(nv)
             sym.setdefault(nv, set()).add(nk)
-    _folk_pairs = {k: tuple(sorted(v)) for k, v in sym.items()}
-    return _folk_pairs
+    pairs = {k: tuple(sorted(v)) for k, v in sym.items()}
+    _folk_pairs[key_] = pairs
+    return pairs
 
 
 def expand_folk(value: str | None) -> list[str]:

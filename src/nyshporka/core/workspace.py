@@ -31,6 +31,7 @@ import sys
 import tomllib
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field, replace
 from functools import lru_cache
 from pathlib import Path
@@ -677,9 +678,49 @@ def _cached() -> Workspace:
 _override: Workspace | None = None
 
 
+class Slot:
+    """Комірка простору для одного контексту (запит демона, `using`).
+
+    Комірка, а не сам простір: правка маркера посеред запиту (`set_sections`)
+    оновлює простір там, звідки його взято, — і демон, що тримає комірку
+    проєкту, бачить нове на наступному запиті без перебудови.
+    """
+
+    __slots__ = ("ws",)
+
+    def __init__(self, ws: Workspace) -> None:
+        self.ws = ws
+
+
+#: Простір поточного контексту. 🔴 Демон один на Майстерню й обслуговує кілька
+#: проєктів водночас, тож глобал процесу (`_override`) для нього не годиться:
+#: два паралельні запити до різних проєктів переписували б його один одному.
+#: `asyncio.to_thread` і `create_task` копіюють контекст; голий `Thread` — ні.
+_CURRENT: ContextVar[Slot | None] = ContextVar("nysh_workspace", default=None)
+
+
 def workspace() -> Workspace:
-    """Активний простір. Резолвиться один раз за процес."""
+    """Активний простір: контексту (запит демона), інакше процесу."""
+    slot = _CURRENT.get()
+    if slot is not None:
+        return slot.ws
     return _override if _override is not None else _cached()
+
+
+def _explicit() -> Workspace | None:
+    """Простір, заданий явно (контекстом чи `use`), а не резолвом із диска."""
+    slot = _CURRENT.get()
+    return slot.ws if slot is not None else _override
+
+
+def _replace_current(new: Workspace) -> None:
+    """Записати оновлений простір туди, звідки його взято: у комірку контексту чи в процес."""
+    global _override
+    slot = _CURRENT.get()
+    if slot is not None:
+        slot.ws = new
+    else:
+        _override = new
 
 
 def use(root: str | Path | Workspace, *, readonly: bool = False) -> Workspace:
@@ -700,19 +741,19 @@ def use(root: str | Path | Workspace, *, readonly: bool = False) -> Workspace:
 
 
 @contextmanager
-def using(ws: Workspace) -> Iterator[Workspace]:
+def using(ws: Workspace | Slot) -> Iterator[Workspace]:
     """Тимчасово стати в іншому просторі — і повернутись, навіть після помилки.
 
     Для дій, що мусять записати в щойно заведений проєкт (профіль роду в
-    `project new`), не перемикаючи простір процесу назавжди.
+    `project new`), і для запиту демона до свого проєкту. Діє лише в поточному
+    контексті: сусідній запит чи потік простору не бачить.
     """
-    global _override
-    prev = _override
-    _override = ws
+    slot = ws if isinstance(ws, Slot) else Slot(ws)
+    token = _CURRENT.set(slot)
     try:
-        yield ws
+        yield slot.ws
     finally:
-        _override = prev
+        _CURRENT.reset(token)
 
 
 def add_case_root(path: str | Path) -> Path:
@@ -746,8 +787,7 @@ def add_case_root(path: str | Path) -> Path:
         text = text.rstrip("\n") + "\n" + line + "\n"
     _write_marker(marker, text)
 
-    global _override
-    _override = replace(ws, extra_case_roots=(*ws.extra_case_roots, p))
+    _replace_current(replace(ws, extra_case_roots=(*ws.extra_case_roots, p)))
     _cached.cache_clear()
     return p
 
@@ -781,8 +821,7 @@ def remove_case_root(path: str | Path) -> bool:
                        f"case_roots = [{listed}]" if kept else None)
     _write_marker(marker, text)
 
-    global _override
-    _override = replace(ws, extra_case_roots=tuple(kept))
+    _replace_current(replace(ws, extra_case_roots=tuple(kept)))
     _cached.cache_clear()
     return True
 
@@ -847,8 +886,7 @@ def set_sections(active: Iterable[str]) -> frozenset[str]:
         text = _marker_set(text, "preset", None, table)
     _write_marker(marker, text)
 
-    global _override
-    _override = replace(ws, preset=name, listed_sections=listed, sections_problem="")
+    _replace_current(replace(ws, preset=name, listed_sections=listed, sections_problem=""))
     _cached.cache_clear()
     return resolved
 
@@ -878,26 +916,26 @@ def _marker_keys(path: str, mtime_ns: int, size: int) -> int:
 
 def refresh_keys() -> None:
     """Перечитати версію ключів з маркера (маркер щойно повернуто з архіву)."""
-    global _override
-    if _override is not None and _override.marker_stamp is not None:
-        _override = replace(_override, keys=_keys_version(_read_marker(_override.hub_marker)),
-                            marker_stamp=_stamp_of(_override.hub_marker))
-    elif _override is not None:
-        _override = replace(_override, keys=_keys_version(_read_marker(_override.hub_marker)))
+    cur = _explicit()
+    if cur is not None and cur.marker_stamp is not None:
+        _replace_current(replace(cur, keys=_keys_version(_read_marker(cur.hub_marker)),
+                                 marker_stamp=_stamp_of(cur.hub_marker)))
+    elif cur is not None:
+        _replace_current(replace(cur, keys=_keys_version(_read_marker(cur.hub_marker))))
     _cached.cache_clear()
 
 
 def set_keys_version(version: int) -> None:
     """Записати версію ключів справ у маркер простору (`cases.rekey`, майстер)."""
-    global _override
     ws = workspace()
     marker = ws.hub_marker
     text = marker.read_text(encoding="utf-8") if marker.is_file() else "[workspace]\n"
     _write_marker(marker, _marker_set(text, "keys", f"keys = {int(version)}"))
-    if _override is not None:
-        _override = replace(_override, keys=int(version),
-                            marker_stamp=(_stamp_of(marker) if _override.marker_stamp
-                                          is not None else None))
+    cur = _explicit()
+    if cur is not None:
+        _replace_current(replace(cur, keys=int(version),
+                                 marker_stamp=(_stamp_of(marker) if cur.marker_stamp
+                                               is not None else None)))
     _cached.cache_clear()
 
 

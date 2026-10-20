@@ -3,11 +3,26 @@ import { t } from './strings.js';
 
 // ── транспорт ────────────────────────────────────────────────────────────────
 const TOKEN = document.body.dataset.token || '';
+/**
+ * Проєкт вкладки — з адреси (`?p=<id>`). 🔴 Демон один на Майстерню, і без
+ * цього заголовка кожен запит ішов би в проєкт запуску демона: вкладка з
+ * іншим родом записувала б нотатки й розділи туди. Адреса, а не cookie: дві
+ * вкладки можуть бути відкриті на двох різних проєктах.
+ */
+const PROJECT = new URLSearchParams(location.search).get('p') || '';
+
+/** `fetch` до демона з проєктом вкладки. Усі запити консолі йдуть через нього. */
+function apiFetch(url, init = {}) {
+  if (!PROJECT) return fetch(url, init);
+  const headers = new Headers(init.headers || {});
+  headers.set('X-Nysh-Project', PROJECT);
+  return fetch(url, { ...init, headers });
+}
 /** Фінальні стани завдання — дзеркало `JobState.final` у `core/jobs.py`. */
 const FINAL_STATES = ['done', 'error', 'cancelled'];
 
 async function callOp(name, args) {
-  const res = await fetch(`/api/op/${encodeURIComponent(name)}`, {
+  const res = await apiFetch(`/api/op/${encodeURIComponent(name)}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Nysh-Token': TOKEN },
     body: JSON.stringify(args || {}),
@@ -51,4 +66,4 @@ function normErr(env, status) {
  */
 const SEQ = { search: 0, geog: 0, fond: 0, casecheck: 0 };
 
-export { TOKEN, FINAL_STATES, callOp, normErr, SEQ };
+export { TOKEN, PROJECT, FINAL_STATES, apiFetch, callOp, normErr, SEQ };

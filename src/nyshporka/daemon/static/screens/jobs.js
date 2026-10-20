@@ -1,7 +1,7 @@
 /** ⏳ Черга робіт. */
 
 import { t, LANG } from '../core/strings.js';
-import { TOKEN, callOp, SEQ } from '../core/net.js';
+import { TOKEN, callOp, SEQ, apiFetch } from '../core/net.js';
 import { esc, el, setView, busy, failure, boxError, busyForm,
   renderWarnings, renderCoverage, curGen, alive } from '../core/view.js';
 import { SCREENS, ACTIONS } from '../core/registry.js';
@@ -34,7 +34,7 @@ Object.assign(ACTIONS, {
   'jobs.case': (_ev, elm) => goto('read', { case_dir: elm.dataset.arg }),
 
   'jobs.forget': async () => {
-    const res = await fetch('/api/jobs/forget',
+    const res = await apiFetch('/api/jobs/forget',
       { method: 'POST', headers: { 'X-Nysh-Token': TOKEN } });
     if (!res.ok) {
       const box = el('jobs');
@@ -51,7 +51,7 @@ Object.assign(ACTIONS, {
     // на невідомій роботі; доти обидві відмови були нечутні: список
     // перемальовувався, робота лишалась «running», кнопка на місці — і людина
     // тиснула її знову й знову, поки прогін тримав карту.
-    const res = await fetch(`/api/jobs/${encodeURIComponent(elm.dataset.job)}/cancel`,
+    const res = await apiFetch(`/api/jobs/${encodeURIComponent(elm.dataset.job)}/cancel`,
       { method: 'POST', headers: { 'X-Nysh-Token': TOKEN } });
     if (!res.ok) {
       const env = await res.json().catch(() => ({}));

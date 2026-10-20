@@ -149,6 +149,27 @@ def _readonly_refusal(op: Op) -> str | None:
     return readonly_refusal(op.name, op.mutates)
 
 
+def _scope_refusal(op: Op) -> str | None:
+    """Проєктна оп у чистій Майстерні без проєкту — зрозуміла відмова до тіла.
+
+    Без цього тіло падало `NoProjectError` десь у глибині, і людина в консолі
+    бачила виняток про шлях замість «оберіть проєкт».
+    """
+    if op.scope != "project":
+        return None
+    try:
+        from nyshporka.core.workspace import workspace
+
+        ws = workspace()
+    except Exception:
+        return None
+    if not ws.hub_only or ws.project is not None:
+        return None
+    return (f"«{op.name}» працює з даними проєкту, а відкрито саму Майстерню. "
+            "Оберіть проєкт: у консолі — перемикачем угорі, у терміналі — "
+            "`--project <ім'я>` або з теки проєкту")
+
+
 @dataclass
 class Registry:
     ops: dict[str, Op] = field(default_factory=dict)
@@ -197,7 +218,7 @@ class Registry:
 
         from nyshporka.core.envelope import fail
 
-        off = _section_refusal(op) or _readonly_refusal(op)
+        off = _section_refusal(op) or _scope_refusal(op) or _readonly_refusal(op)
         if off is not None:
             return fail(off)
         try:

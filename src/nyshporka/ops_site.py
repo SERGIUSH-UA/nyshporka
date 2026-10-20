@@ -77,6 +77,20 @@ def site_build(a: SiteBuildArgs) -> Envelope:
 SITE_URL = {False: "/site/", True: "/site-public/"}
 
 
+def site_url(public: bool) -> str:
+    """Адреса сайту поточного проєкту в консолі.
+
+    Демон один на Майстерню, тож сайт проєкту-підтеки — під префіксом
+    `/p/<id>/`: відносні посилання сторінок сайту заголовка проєкту не несуть.
+    """
+    from urllib.parse import quote
+
+    from nyshporka.core.workspace import workspace
+
+    project = workspace().project
+    return (f"/p/{quote(project)}" if project else "") + SITE_URL[public]
+
+
 class SiteStatusArgs(BaseModel):
     pass
 
@@ -104,7 +118,7 @@ def site_status(_a: SiteStatusArgs) -> Envelope:
     for public in (False, True):
         html = B.default_out(root, public) / "html"
         index = html / "index.html"
-        info: dict[str, object] = {"built": index.is_file(), "url": SITE_URL[public],
+        info: dict[str, object] = {"built": index.is_file(), "url": site_url(public),
                                    "path": str(html)}
         if index.is_file():
             info["built_at"] = datetime.fromtimestamp(index.stat().st_mtime, UTC).isoformat(
@@ -137,5 +151,5 @@ def site_rebuild(a: SiteRebuildArgs) -> Envelope:
     env = site_build(SiteBuildArgs(public=a.public))
     report(1, 1, "збірка сайту")
     if env.ok:
-        env.data["url"] = SITE_URL[a.public]
+        env.data["url"] = site_url(a.public)
     return env

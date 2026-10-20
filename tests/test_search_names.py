@@ -54,11 +54,11 @@ def space(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(S, "htr_root", lambda: tmp_path / "reports" / "htr")
     S._CACHE.clear()
     S._RUNS_CACHE = None
-    # ⚠ Кеш побутових пар живе на процес, а накладку читає з ПРОСТОРУ. Без
-    # скидання порядок тестів вирішував би, що саме бачить довідник.
-    N._folk_pairs = None
+    # ⚠ Кеш побутових пар ключований файлом накладки, а tmp_path буває
+    # однаковим між прогонами — чистимо, щоб тест не залежав від порядку.
+    N._folk_pairs.clear()
     yield tmp_path
-    N._folk_pairs = None
+    N._folk_pairs.clear()
     W.reset()
 
 
@@ -179,7 +179,7 @@ def test_a_space_can_add_its_own_pairs(tmp_path: Path,
         # вбудоване не зникає від того, що з'явилась накладка
         assert "anna" in pairs.get("vassa", ())
     finally:
-        N._folk_pairs = None
+        N._folk_pairs.clear()
         W.reset()
 
 

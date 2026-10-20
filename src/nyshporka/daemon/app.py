@@ -463,6 +463,7 @@ def create_app(ws: Workspace | None = None, *, token: str = "",
 
     from nyshporka import ops as O
     from nyshporka import ui
+    from nyshporka.core import projects as _P
     from nyshporka.core.jobs import JobBus
     from nyshporka.core.workspace import use as _use
     from nyshporka.core.workspace import workspace as _workspace
@@ -482,7 +483,12 @@ def create_app(ws: Workspace | None = None, *, token: str = "",
     set_bus(bus)
 
     app = FastAPI(title="Нишпорка", docs_url=None, redoc_url=None)
-    app.state.workspace = space
+    # Демон один на Майстерню: проєкт приходить у кожному запиті, а `space` —
+    # лише проєкт запуску, типовий для запиту без проєкту. Шар — першим, тобто
+    # найглибшим: ворота допуску й перевірка імені стоять перед ним.
+    spaces = Spaces(space)
+    app.state.spaces = spaces
+    app.add_middleware(_ProjectScope, spaces=spaces)
     app.state.token = tok
     app.state.bus = bus
     # Код сполучення — одноразовий і короткий: посилання з ним лягає в
@@ -624,7 +630,7 @@ def create_app(ws: Workspace | None = None, *, token: str = "",
                             headers={"Cache-Control": "no-cache, must-revalidate"})
 
     def _site_file(public: bool, path: str) -> Any:
-        html = (_site_out(space.root, public) / "html").resolve()
+        html = (_site_out(_workspace().root, public) / "html").resolve()
         if not (html / "index.html").is_file():
             return _site_missing(public)
         # 🔴 `..` у шляху не виводить за теку збірки: поруч лежать канон і
@@ -639,7 +645,7 @@ def create_app(ws: Workspace | None = None, *, token: str = "",
             # Без слеша відносні посилання сторінки вели б на рівень вище.
             if path and not path.endswith("/"):
                 prefix = "/site-public/" if public else "/site/"
-                return RedirectResponse(f"{prefix}{path}/")
+                return RedirectResponse(f"{_URL_PREFIX.get()}{prefix}{path}/")
             target = target / "index.html"
         if not target.is_file():
             page404 = html / "404.html"
@@ -652,7 +658,7 @@ def create_app(ws: Workspace | None = None, *, token: str = "",
 
     @app.get("/site", include_in_schema=False)
     def site_root() -> RedirectResponse:
-        return RedirectResponse("/site/")
+        return RedirectResponse(f"{_URL_PREFIX.get()}/site/")
 
     @app.get("/site/{path:path}", include_in_schema=False)
     def site_page(path: str) -> Any:
@@ -660,7 +666,7 @@ def create_app(ws: Workspace | None = None, *, token: str = "",
 
     @app.get("/site-public", include_in_schema=False)
     def site_public_root() -> RedirectResponse:
-        return RedirectResponse("/site-public/")
+        return RedirectResponse(f"{_URL_PREFIX.get()}/site-public/")
 
     @app.get("/site-public/{path:path}", include_in_schema=False)
     def site_public_page(path: str) -> Any:
@@ -697,7 +703,8 @@ def create_app(ws: Workspace | None = None, *, token: str = "",
         """
         return {"ops": [{"name": o.name, "summary": o.summary,
                          "mutates": o.mutates, "long": o.long, "gui": o.gui,
-                         "section": o.section, "schema": o.schema()}
+                         "section": o.section, "scope": o.scope,
+                         "schema": o.schema()}
                         for o in O.for_sections(active_sections())]}
 
     @app.post("/api/op/{name}")
@@ -753,7 +760,8 @@ def create_app(ws: Workspace | None = None, *, token: str = "",
             # прилітали як «Internal Server Error»: екран показував «Не вийшло»
             # без жодного слова про те, що саме, хоч слово було написане.
             try:
-                job = await workers.start(bus, space, name, payload or {})
+                # Простір — проєкту запиту, а не запуску демона.
+                job = await workers.start(bus, _workspace(), name, payload or {})
             except Exception as exc:
                 text = str(exc) or type(exc).__name__
                 return JSONResponse({"ok": False, "v": 1, "error": text,
@@ -826,8 +834,22 @@ def create_app(ws: Workspace | None = None, *, token: str = "",
     # ── службове ─────────────────────────────────────────────────────────────
     @app.get("/api/health")
     def health() -> dict[str, Any]:
-        return {"ok": True, "workspace": str(space.root), "name": space.name,
+        cur = _workspace()
+        return {"ok": True, "workspace": str(cur.root), "name": cur.name,
+                "hub": str(spaces.hub), "project": _P.current_id(cur),
                 "jobs": len(bus.jobs())}
+
+    @app.get("/api/projects")
+    def projects() -> dict[str, Any]:
+        """Проєкти Майстерні для перемикача й поточний проєкт запиту.
+
+        `hub_only` — у Майстерні є стан «без проєкту» (`HUB_ID`), і перемикач
+        показує його окремим пунктом.
+        """
+        cur = _workspace()
+        return {"projects": spaces.listing(), "current": _P.current_id(cur),
+                "default": spaces.default, "hub_only": cur.hub_only,
+                "hub_id": HUB_ID}
 
     # Останнім, тобто найзовнішнім: заголовки мусять лягти й на відмови воріт
     # допуску та перевірки імені, а не лише на відповіді маршрутів.
@@ -844,6 +866,149 @@ NO_FRAMING_HEADERS: tuple[tuple[bytes, bytes], ...] = (
     (b"x-frame-options", b"DENY"),
     (b"content-security-policy", b"frame-ancestors 'none'"),
 )
+
+
+#: Заголовок, яким вкладка консолі каже, у якому проєкті вона працює.
+PROJECT_HEADER = "X-Nysh-Project"
+#: Префікс адреси з проєктом: `/p/<id>/site/…` — сайт роду саме цього проєкту.
+#: Посилання всередині сайту відносні, заголовка вони не несуть.
+PROJECT_PREFIX = "/p/"
+#: Префікс поточного запиту (`/p/<id>` або порожньо) — для переадресацій сайту.
+_URL_PREFIX: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "nysh_url_prefix", default="")
+#: «Без проєкту» — сама Майстерня (чистий хаб). Ім'ям проєкту бути не може:
+#: підкреслення в іменах проєктів заборонене (`projects.check_name`).
+HUB_ID = "_hub"
+
+
+class Spaces:
+    """Простори проєктів одного демона: один на Майстерню, проєкт — із запиту.
+
+    🔴 Людина в консолі пише в будь-який проєкт своєї Майстерні (розд. 6.5
+    дизайну), тож простори тут не лише для читання — на відміну від
+    `nysh --project`, яким сусідній проєкт відкриває агент.
+
+    Простір проєкту тримається коміркою (`W.Slot`): правка маркера посеред
+    запиту (`sections.set`) оновлює саме її. Маркер, змінений ззовні (інший
+    термінал, правка хабового маркера з іншого проєкту), помічається за
+    штампом, і простір перебудовується з диска.
+    """
+
+    def __init__(self, launch: Workspace) -> None:
+        import threading
+
+        from nyshporka.core import projects as P
+        from nyshporka.core import workspace as W
+
+        self.launch = launch
+        self.hub = launch.hub
+        #: Проєкт запуску — типовий для запиту без проєкту. `None` — чистий хаб.
+        self.default = P.current_id(launch)
+        self._lock = threading.Lock()
+        self._slots: dict[str, tuple[Any, W.Slot]] = {
+            self.default or "": (self._stamp(launch), W.Slot(launch))}
+
+    @staticmethod
+    def _stamp(ws: Workspace) -> tuple[Any, Any]:
+        from nyshporka.core import workspace as W
+
+        return (W._stamp_of(ws.marker), W._stamp_of(ws.hub_marker))
+
+    def slot(self, pid: str | None) -> Any:
+        """Комірка простору проєкту `pid`; `None` — проєкт запуску.
+
+        Невідомий проєкт — `ProjectError` (демон віддає 404).
+        """
+        from dataclasses import replace
+
+        from nyshporka.core import projects as P
+        from nyshporka.core import workspace as W
+
+        key = (self.default or "") if pid is None else pid
+        if key == HUB_ID:
+            key = ""
+        with self._lock:
+            held = self._slots.get(key)
+            if held is not None:
+                stamp, slot = held
+                # Простір, зібраний у коді (тести, майстер), маркера не має —
+                # перебудовувати його з диска означало б підмінити.
+                if slot.ws.marker_stamp is None or stamp == self._stamp(slot.ws):
+                    return slot
+                ws = replace(W._build(slot.ws.root, slot.ws.origin), readonly=False)
+            else:
+                root = self.hub if key == "" else P.project_dir(self.hub, key)
+                ws = replace(W._build(root, self.launch.origin), readonly=False)
+            slot = W.Slot(ws)
+            self._slots[key] = (self._stamp(ws), slot)
+            return slot
+
+    def listing(self) -> list[dict[str, Any]]:
+        from nyshporka.core import projects as P
+
+        return [{"id": p.id, "name": p.name, "kind": p.kind}
+                for p in P.list_projects(self.hub)]
+
+
+def _project_of(scope: dict[str, Any]) -> tuple[str | None, str]:
+    """Проєкт запиту і префікс адреси: `/p/<id>/…`, заголовок або `?p=`.
+
+    Префікс зрізається з `path`, тож маршрути про нього не знають.
+    """
+    from urllib.parse import parse_qs, unquote
+
+    path = scope.get("path") or ""
+    if path.startswith(PROJECT_PREFIX):
+        rest = path[len(PROJECT_PREFIX):]
+        pid, _, tail = rest.partition("/")
+        if pid:
+            scope["path"] = "/" + tail
+            scope["raw_path"] = scope["path"].encode("utf-8")
+            return unquote(pid), PROJECT_PREFIX + pid
+    want = PROJECT_HEADER.lower().encode("latin-1")
+    for k, v in scope.get("headers") or []:
+        if k.lower() == want and v:
+            return unquote(v.decode("latin-1")), ""
+    qs = parse_qs((scope.get("query_string") or b"").decode("latin-1"))
+    got = (qs.get("p") or [""])[0]
+    return (got or None), ""
+
+
+class _ProjectScope:
+    """Чисте ASGI-middleware: простір проєкту запиту — на весь запит.
+
+    🔴 Не `@app.middleware("http")`: простір мусить стояти й під довгими
+    відповідями, і під задачами, які запит ставить у чергу (`create_task`
+    копіює контекст саме в момент постановки).
+    """
+
+    def __init__(self, app: Any, spaces: Spaces) -> None:
+        self.app = app
+        self.spaces = spaces
+
+    async def __call__(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
+        if scope.get("type") != "http":
+            await self.app(scope, receive, send)
+            return
+        from nyshporka.core import workspace as W
+        from nyshporka.core.projects import ProjectError
+
+        pid, prefix = _project_of(scope)
+        try:
+            slot = self.spaces.slot(pid)
+        except (ProjectError, ValueError) as exc:
+            body = json.dumps({"ok": False, "v": 1, "data": {}, "warnings": [],
+                               "error": str(exc)}, ensure_ascii=False).encode("utf-8")
+            await send({"type": "http.response.start", "status": 404,
+                        "headers": [(b"content-type", b"application/json; charset=utf-8")]})
+            await send({"type": "http.response.body", "body": body})
+            return
+        token = _URL_PREFIX.set(prefix)
+        try:
+            with W.using(slot):
+                await self.app(scope, receive, send)
+        finally:
+            _URL_PREFIX.reset(token)
 
 
 class _NoFraming:
@@ -1221,19 +1386,24 @@ def serve(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT, *,
     from nyshporka.core.workspace import workspace as _workspace
 
     space = _workspace()
+    # 🔴 Демон один на Майстерню: замок і ключ доступу — від хаба, а не від
+    # проєкту, з якого запустили. Інакше два проєкти піднімали два демони на
+    # різних портах, і обидва писали той самий хабовий журнал робіт.
+    hub = space.hub
+    page = _start_page(space, page)
     socks: list[socket.socket] = []
     # Жива консоль показує головну зі знімка й оновлює у фоні (`home.pulse`).
     from nyshporka import ops_builtin as _ob
 
     _ob.PULSE_SNAPSHOT = True
     try:
-        with WorkspaceLock(space.root, port=port).acquire() as held:
+        with WorkspaceLock(hub, port=port).acquire() as held:
             scheme = "https" if tls_cert else "http"
             if network:
                 # Ключ — лише під замком: ротація з-під живого демона лишила б
                 # його зі старим ключем, а людину — з неробочим посиланням.
                 try:
-                    key, key_path = load_access_key(space.root, rotate=rotate_key)
+                    key, key_path = load_access_key(hub, rotate=rotate_key)
                 except AccessKeyError as exc:
                     raise SystemExit(f"🔴 {exc}") from None
                 app = create_app(space, host=host, access_key=key, tls=bool(tls_cert))
@@ -1254,7 +1424,7 @@ def serve(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT, *,
             out = brand.console()
             out.print(brand.banner(__version__))
             out.print(f"  [accent]{url}[/accent]")
-            out.print(f"  [muted]простір: {space.root}[/muted]")
+            out.print(f"  [muted]простір: {hub}[/muted]")
             if network:
                 _print_network_banner(out, host, port, scheme=scheme,
                                       pair_code=app.state.pair_code, key_path=key_path,
@@ -1322,12 +1492,30 @@ def serve(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT, *,
             print(f"Нишпорка вже працює: http://127.0.0.1:{held_port}/ — відкрито вкладку.")
             return
         raise SystemExit(
-            f"🔴 простір {space.root} уже зайнятий: {busy}. "
+            f"🔴 простір {hub} уже зайнятий: {busy}. "
             f"Двоє писарів на один простір — це затерті нотатки, тож не піднімаю."
         ) from None
     finally:
         for sock in socks:
             sock.close()
+
+
+def _start_page(space: Workspace, page: str) -> str:
+    """Вкладка запуску з проєктом: `?p=<id>`, сайт — `/p/<id>/site/`.
+
+    Корінь старого типу (`hub == root`) — без проєкту в адресі: консоль
+    виглядає так само, як до Майстерні.
+    """
+    from urllib.parse import quote
+
+    page = page.lstrip("/")
+    if space.project is None:
+        return page
+    pid = quote(space.project)
+    if page.startswith(("site/", "site-public/")) or page in ("site", "site-public"):
+        return f"p/{pid}/{page}"
+    sep = "&" if "?" in page else "?"
+    return f"{page}{sep}p={pid}"
 
 
 def _alive(port: int) -> bool:

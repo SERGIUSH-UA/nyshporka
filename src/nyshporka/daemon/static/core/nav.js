@@ -1,6 +1,6 @@
 /** Секції, шапка, перехід між екранами й черга робіт. */
 import { t, tOr } from './strings.js';
-import { callOp, FINAL_STATES } from './net.js';
+import { callOp, FINAL_STATES, apiFetch } from './net.js';
 import { esc, el, setView, curGen, bumpGen, alive, maskot,
   splitWarnings, notesBlock, seedAttr } from './view.js';
 import { SCREENS, OP_SCREEN } from './registry.js';
@@ -57,7 +57,7 @@ function screenOn(screen) {
 
 async function loadSections() {
   try {
-    const res = await fetch('/api/sections');
+    const res = await apiFetch('/api/sections');
     const env = await res.json();
     // 🔴 доповнюємо дефолт, а не заміщаємо його. Пряме присвоєння вірить, що
     // відповідь має рівно ту форму, якої ми чекаємо, — і коли в ній бракує
@@ -337,7 +337,7 @@ function jobResult(j) {
 const ZERO_IS_NOISE = ['kept', 'skipped', 'errors', 'failed', 'short'];
 
 async function refreshJobs() {
-  const res = await fetch(`/api/jobs?since=${cursor}`);
+  const res = await apiFetch(`/api/jobs?since=${cursor}`);
   // Відмова (допуск протух) — не журнал: без перевірки в курсор лягав `undefined`.
   if (!res.ok) return;
   const data = await res.json();
@@ -367,9 +367,13 @@ async function refreshJobs() {
   const liveJobs = jobs.filter(isLive);
   const done = jobs.filter((j) => !isLive(j))
     .sort((a, b) => (b.updated || 0) - (a.updated || 0));
+  // Черга одна на Майстерню: коли в ній роботи кількох проєктів, кожна
+  // підписана своїм, інакше чуже читання виглядає як своє.
+  const many = new Set(jobs.map((j) => j.project ?? '.')).size > 1;
+  const whose = (j) => (many ? ` <span class="muted">· ${esc(j.project || '—')}</span>` : '');
   const cards = liveJobs.map((j) => `
     <div class="job">
-      <b>${esc(j.title || j.kind)}</b> <span class="muted">${esc(jobState(j.state))}</span>
+      <b>${esc(j.title || j.kind)}</b>${whose(j)} <span class="muted">${esc(jobState(j.state))}</span>
       ${jobProgress(j)}
       ${j.error ? `<div class="warn err">${esc(j.error)}</div>` : ''}
       ${jobNotes(j)}
@@ -457,7 +461,7 @@ function doneBlock(done) {
 async function watchJobs() {
   for (;;) {
     try {
-      const res = await fetch(`/api/jobs/wait?since=${cursor}&timeout_s=25`);
+      const res = await apiFetch(`/api/jobs/wait?since=${cursor}&timeout_s=25`);
       // 🔴 Відмова з JSON-тілом виняток не кидає, а пауза стоїть лише в `catch`:
       // без цього рядка пристрій без допуску молотив сервер запитами без упину.
       if (!res.ok) throw new Error(`HTTP ${res.status}`);

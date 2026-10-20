@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import contextlib
+import contextvars
 import threading
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
@@ -206,9 +207,10 @@ def home_pulse(a: PulseArgs) -> Envelope:
     if hit is not None:
         at, env = hit
         stale = now - at >= _PULSE_TTL
+        bg = f"pulse|{P.tag()}"
         if stale:
-            _in_background("pulse", lambda: _pulse_now(a, key))
-        busy = stale or "pulse" in _REFRESHING
+            _in_background(bg, lambda: _pulse_now(a, key))
+        busy = stale or bg in _REFRESHING
         if isinstance(env.data, dict):
             env.data["refreshing"] = busy
         return env
@@ -493,7 +495,10 @@ def _in_background(key: str, fn: Any) -> None:
             with _REFRESH_LOCK:
                 _REFRESHING.discard(key)
 
-    threading.Thread(target=run, name=f"nysh-refresh-{key}", daemon=True).start()
+    # Контекст — з собою: фон рахує пульс того проєкту, з якого прийшов запит.
+    ctx = contextvars.copy_context()
+    threading.Thread(target=ctx.run, args=(run,), name=f"nysh-refresh-{key}",
+                     daemon=True).start()
 
 
 def _machine_file() -> Path:
