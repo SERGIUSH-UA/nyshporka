@@ -24,6 +24,8 @@ import contextlib
 import json
 import os
 import re
+from collections.abc import Iterator
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
@@ -293,17 +295,39 @@ class ArchivesPack:
         Потрібне тим, хто будує власний розпізнавач із паку, а не питає по
         одному слову: інакше перелік написань доводилось би тримати копією.
         """
-        # ⚠ Без кешу навмисно: `ArchivesPack` — frozen-датаклас із полями-
-        # словниками, тож він нехешований, і `lru_cache` по `self` тут упав би
-        # у рантаймі. Словник малий (десятки архівів), а будується він двічі за
-        # процес — на побудову похідних словників у `library` й `register`.
-        out: dict[str, str] = {}
-        for code, r in self.repositories.items():
-            for word in (code, r.label, *r.aliases):
-                key = _norm_word(word)
-                if key:
-                    out.setdefault(key, code)
-        return out
+        # 🔴 Пам'ять на сам пак, а не `lru_cache`: frozen-датаклас із полями-
+        # словниками нехешований. Без пам'яті словник будувався на КОЖЕН розбір
+        # шифри — 39 тис. разів за один перелік прогонів, 44 с із 111 (замір
+        # 20.10.2026). Пак незмінний, а новий пак (інший штамп файлів) — інший
+        # об'єкт, тож свіжість від цього не страждає. Віддається копія:
+        # викликачі будують із неї свої словники й можуть її міняти.
+        got = _WORD_INDEX.get(id(self))
+        if got is None or got[0] is not self:
+            out: dict[str, str] = {}
+            for code, r in self.repositories.items():
+                for word in (code, r.label, *r.aliases):
+                    key = _norm_word(word)
+                    if key:
+                        out.setdefault(key, code)
+            if len(_WORD_INDEX) > 8:
+                _WORD_INDEX.clear()
+            got = _WORD_INDEX[id(self)] = (self, out)
+        return dict(got[1])
+
+    def canon_word_index(self) -> dict[str, str]:
+        """Кожне написання архіву → його КАНОНІЧНИЙ код (`canon_repo`).
+
+        Один словник на пак для всіх, хто розбирає шифру (`library`,
+        `cases.register`, сховище сторінок): кожен будував його сам на кожен
+        виклик, і перелік прогонів платив за це десятки секунд (20.10.2026).
+        """
+        got = _CANON_INDEX.get(id(self))
+        if got is None or got[0] is not self:
+            out = {w: self.canon_repo(c) for w, c in self.word_index().items()}
+            if len(_CANON_INDEX) > 8:
+                _CANON_INDEX.clear()
+            got = _CANON_INDEX[id(self)] = (self, out)
+        return dict(got[1])
 
     def default_opys(self, repo: str | None, fond: str | None) -> str | None:
         """Опис, який мають скановані теки фонду, коли їхнє ім'я його не несе."""
@@ -501,7 +525,34 @@ def active() -> ArchivesPack:
     це виглядало як відповідь. Лікувалось лише рестартом, про який ніщо не
     повідомляло. Штамп коштує один `stat()` на джерело й протухає сам.
     """
+    pk = _PINNED.get()
+    if pk is not None:
+        return pk
     return _active_for(_pack_stamp())
+
+
+#: Пак, закріплений на час одного проходу (`pinned`).
+_PINNED: ContextVar[ArchivesPack | None] = ContextVar("archives_pack_pinned", default=None)
+#: id пака → (пак, словник написань); пак тримається, щоб id не перейшов до іншого.
+_WORD_INDEX: dict[int, tuple[ArchivesPack, dict[str, str]]] = {}
+_CANON_INDEX: dict[int, tuple[ArchivesPack, dict[str, str]]] = {}
+
+
+@contextlib.contextmanager
+def pinned() -> Iterator[ArchivesPack]:
+    """Один пак на весь прохід: `active()` усередині не перевіряє файли щоразу.
+
+    🔴 Перелік прогонів розбирає шифру кожного з 15 тис. прогонів, і кожен
+    розбір питав `active()` — 58 тис. разів, тобто стільки ж `stat()` накладок
+    і резолвів простору: 15 с із 111 (замір 20.10.2026). Прохід триває секунди,
+    і пак, змінений посеред нього, однаково підхопиться наступним.
+    """
+    pk = active()
+    tok = _PINNED.set(pk)
+    try:
+        yield pk
+    finally:
+        _PINNED.reset(tok)
 
 
 def reset() -> None:

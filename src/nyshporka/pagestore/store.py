@@ -78,7 +78,7 @@ _SHIFRA_RE = re.compile(r"^(?:(\S+)\s+)?(\d+)\s*[-–]\s*(\d+)\s*[-–]\s*(\w+)$
 #: архів» одразу після «✅ додано».
 def _label2repo() -> dict[str, str]:
     pk = _pack_active()
-    return {w: pk.canon_repo(c) for w, c in pk.word_index().items()}
+    return pk.canon_word_index()
 
 #: 🔴 Правило СЛОВАМИ, приклад — ілюстрацією. Доти тут стояли самі приклади, з
 #: яких правило треба було вивести, порівнявши два з них між собою: «архів

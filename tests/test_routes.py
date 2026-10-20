@@ -103,7 +103,7 @@ PROJECT = {"text.sheet", "text.verdicts", "library.verdict",
            "profile.set", "profile.show", "profile.source",
            "sections.set", "sections.show",
            "migrate.done", "migrate.scan", "migrate.status"}
-MIXED = {"cases.list", "text.grep", "text.whatis", "text.coverage", "text.find",
+MIXED = {"cases.list", "text.grep", "text.whatis", "text.coverage", "text.find", "text.near",
          "search.run", "search.find", "pages.note", "pages.note_batch", "pages.show",
          "pages.status", "evidence.add", "home.pulse", "workspace.info", "project.status"}
 

@@ -733,6 +733,14 @@ def mark_run_states(rows: list[dict[str, Any]]) -> None:
 
 def list_cases() -> list[dict[str, Any]]:
     """Прогони з reports/htr/* — для списку в'ювера. Назва справи — з бібліотеки."""
+    from nyshporka.archives import pack as _PK
+
+    # Один пак на весь перелік: див. `archives.pack.pinned`.
+    with _PK.pinned():
+        return _list_cases()
+
+
+def _list_cases() -> list[dict[str, Any]]:
     global _RUNS_CACHE
 
     snap = _LISTING.get()

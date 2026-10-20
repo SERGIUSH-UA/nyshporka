@@ -142,7 +142,14 @@ def _repo_alias() -> dict[str, str]:
     давній код, на цей шлях не впливала взагалі.
     """
     pk = _pack_active()
-    return {w.upper(): pk.canon_repo(c) for w, c in pk.word_index().items()}
+    global _ALIAS_MEMO
+    if _ALIAS_MEMO is None or _ALIAS_MEMO[0] is not pk:
+        _ALIAS_MEMO = (pk, {w.upper(): c for w, c in pk.canon_word_index().items()})
+    return _ALIAS_MEMO[1]
+
+
+#: (пак, словник) — `_repo_alias` перебудовується лише з новим паком.
+_ALIAS_MEMO: tuple[Any, dict[str, str]] | None = None
 
 
 def _canon_repo(code: str | None) -> str:
@@ -2230,12 +2237,34 @@ def dejunction(path: str) -> str | None:
     """Фізичний шлях крізь junction → rel-шлях у репо (None якщо не з наших тек)."""
     p = str(path).replace("\\", "/").rstrip("/")
     low = p.lower()
-    for target, rel in _junctions():
-        if low == target:
-            return rel
-        if low.startswith(target + "/"):
-            return rel + p[len(target):]
+    # Префікси шляху від найдовшого — словником, а не перебором усіх junction:
+    # перелік прогонів питав це 11 тис. разів, і перебір коштував 9 с (замір
+    # 20.10.2026). Найдовший збіг виграє, як і в сортуванні `_junctions`.
+    jmap = _junction_map()
+    if not jmap:
+        return None
+    cut = len(low)
+    while cut > 0:
+        rel = jmap.get(low[:cut])
+        if rel is not None:
+            return rel + p[cut:]
+        cut = low.rfind("/", 0, cut)
     return None
+
+
+def _junction_map() -> dict[str, str]:
+    """Ціль → rel; перебудовується разом із переліком `_junctions`."""
+    global _JMAP
+    js = _junctions()
+    if _JMAP is None or _JMAP[0] is not js:
+        out: dict[str, str] = {}
+        for target, rel in js:
+            out.setdefault(target, rel)
+        _JMAP = (js, out)
+    return _JMAP[1]
+
+
+_JMAP: tuple[list[tuple[str, str]], dict[str, str]] | None = None
 
 
 def describe_case(path: str) -> dict[str, Any] | None:

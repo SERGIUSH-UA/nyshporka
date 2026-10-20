@@ -71,7 +71,7 @@ def _repo_words() -> dict[str, str]:
     from nyshporka.archives.pack import active
 
     pk = active()
-    return {w: pk.canon_repo(c) for w, c in pk.word_index().items()}
+    return pk.canon_word_index()
 
 
 def _repo_of_word(word: str) -> str:
