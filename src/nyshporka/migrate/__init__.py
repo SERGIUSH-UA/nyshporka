@@ -250,12 +250,11 @@ def _hook_installed(root: Path) -> CheckResult:
 
     from nyshporka.canon.hook import hooks_dir
 
-    if not (root / ".git").exists():
-        return CheckResult("n/a", "простір не є git-репозиторієм")
+    # Проєкт-підтека своєї `.git` не має — питаємо git, а не теку.
     try:
         hook = hooks_dir(root) / "pre-commit"
     except (subprocess.CalledProcessError, FileNotFoundError):
-        return CheckResult("n/a", "git недоступний")
+        return CheckResult("n/a", "простір не є git-репозиторієм або git недоступний")
     try:
         text = hook.read_text(encoding="utf-8", errors="replace")
     except OSError:

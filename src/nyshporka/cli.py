@@ -3204,7 +3204,8 @@ def canon_precommit_cmd() -> None:
     from nyshporka.canon import hook as H
     from nyshporka.core.workspace import workspace
 
-    raise typer.Exit(code=H.main(workspace().root))
+    # Корінь git — Майстерня; хук сам обходить канон кожного проєкту.
+    raise typer.Exit(code=H.main(workspace().hub))
 
 
 @canon_app.command("import")
@@ -4036,6 +4037,35 @@ def project_archive_cmd(name: str = typer.Argument(..., help="ім'я проєк
     env = O.call("project.archive", {"name": name, "undo": undo})
     _answer(env)
     console.print(("↩ повернуто: " if undo else "🗄 в архіві: ") + env.data["root"])
+
+
+@project_app.command("adopt")
+def project_adopt_cmd(name: str = typer.Argument(..., help="ім'я майбутнього проєкту роду"),
+                      apply: bool = typer.Option(False, "--apply", help="виконати переїзд"),
+                      archive: str = typer.Option("", "--archive",
+                                                  help="тека для zip-архіву поза Майстернею"),
+                      rollback: bool = typer.Option(False, "--rollback",
+                                                    help="повернути останній переїзд"),
+                      stamp: str = typer.Option("", "--stamp", help="мітка переїзду для відкату"),
+                      ) -> None:
+    """Перетворити корінь старого типу на Майстерню з проєктом роду.
+
+    Без --apply — лише план: що їде, скільки, що заважає.
+    """
+    from nyshporka import ops as O
+
+    env = O.call("project.adopt", {"name": name, "apply": apply, "archive": archive,
+                                   "rollback": rollback, "stamp": stamp})
+    _answer(env)
+    d = env.data
+    if "report" in d:
+        console.print(d["report"], markup=False)
+    elif rollback:
+        console.print(f"↩ переїзд {d['stamp']} повернуто: {', '.join(d['restored']) or '—'}")
+    else:
+        console.print(f"🧳 рід переїхав у {d['project']} (журнал {d['stamp']}, "
+                      f"архів {d['archive']['zip']})", markup=False)
+    _notes(env)
 
 
 @project_app.command("open")

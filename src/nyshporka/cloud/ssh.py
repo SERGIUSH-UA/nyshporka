@@ -151,7 +151,7 @@ def parse_target(target: str) -> Host | None:
 def hosts_path() -> Path:
     from nyshporka.core.workspace import workspace
 
-    return workspace().config / HOSTS_FILE
+    return workspace().hub_config / HOSTS_FILE
 
 
 def load_hosts() -> list[Host]:

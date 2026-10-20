@@ -56,6 +56,52 @@ def hooks_dir(root: Path) -> Path:
     return hooks if hooks.is_absolute() else root / hooks
 
 
+def canon_roots(root: Path) -> list[tuple[Path, str]]:
+    """Проєкти репозиторію і префікс їхнього канону відносно кореня git.
+
+    🔴 Канон живе в кожному проєкті (`projects/<ім'я>/data/canonical/`), а не
+    лише в корені. Хук, що дивився тільки на `data/canonical/` кореня, після
+    переїзду роду в підтеку мовчки перестав би перевіряти картки — коміт
+    проходив би, і зламане посилання ніхто б не побачив.
+    """
+    from nyshporka.core import projects as P
+
+    out: list[tuple[Path, str]] = []
+    for pr in P.list_projects(root, archived=True):
+        try:
+            rel = pr.root.resolve().relative_to(root.resolve()).as_posix()
+        except ValueError:
+            continue
+        prefix = CANONICAL if rel in ("", ".") else f"{rel}/{CANONICAL}"
+        out.append((pr.root, prefix))
+    return out
+
+
+def _check_project(proj: Path, prefix: str, root: Path) -> list[str]:
+    cards = {Path(n).stem for n in staged(root, prefix) if n.endswith(".md")}
+    # Видалена картка сама помилки не дає — її дають ті, хто на неї посилається.
+    gone = {Path(n).stem for n in staged(root, prefix, "D") if n.endswith(".md")}
+    if not (cards or gone):
+        return []
+    from nyshporka.canon.check import check
+    from nyshporka.core import workspace as W
+
+    lead = prefix[: -len(CANONICAL)]
+    out: list[str] = []
+    # Простором самого проєкту: докази він бере з Майстерні, картки — свої.
+    with W.using(W._build(proj, "explicit")):
+        rep = check(proj)
+    for issue in rep.issues:
+        if issue.severity != "ERROR":
+            continue
+        owner = Path(issue.where).stem if "/" in issue.where else issue.where
+        if owner in cards or any(re.search(rf"(?<!\w){re.escape(g)}(?!\w)", issue.text)
+                                 for g in gone):
+            where = f"{lead.rstrip('/')} · {issue.where}" if lead else issue.where
+            out.append(f"{where}: {issue.text}")
+    return out
+
+
 def problems(root: Path) -> list[str]:
     out: list[str] = []
     for name in staged(root, CITATIONS):
@@ -65,20 +111,8 @@ def problems(root: Path) -> list[str]:
         if size > MAX_BYTES:
             out.append(f"{size / 1048576:5.1f} МБ  {name} — це аркуш, а не вирізка рядка "
                        f"(nysh evidence add кладе сірий JPEG до 2 МБ)")
-    cards = {Path(n).stem for n in staged(root, CANONICAL) if n.endswith(".md")}
-    # Видалена картка сама помилки не дає — її дають ті, хто на неї посилається.
-    gone = {Path(n).stem for n in staged(root, CANONICAL, "D") if n.endswith(".md")}
-    if cards or gone:
-        from nyshporka.canon.check import check
-
-        rep = check(root)
-        for issue in rep.issues:
-            if issue.severity != "ERROR":
-                continue
-            owner = Path(issue.where).stem if "/" in issue.where else issue.where
-            if owner in cards or any(re.search(rf"(?<!\w){re.escape(g)}(?!\w)", issue.text)
-                                     for g in gone):
-                out.append(f"{issue.where}: {issue.text}")
+    for proj, prefix in canon_roots(root):
+        out += _check_project(proj, prefix, root)
     return out
 
 

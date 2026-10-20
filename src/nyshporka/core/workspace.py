@@ -218,6 +218,13 @@ class Workspace:
     @property
     def htr_reports(self) -> Path: return self.hub / "reports" / "htr"
 
+    #: Налаштування машини й людини, а не роду: хости хмари, профіль у Супрязі,
+    #: власний пак архівів, рецепти трену. 🔴 Від хаба, а не від проєкту: у
+    #: чистій Майстерні `config` проєкту немає, і хмара чи обмін падали б
+    #: `NoProjectError` там, де роду взагалі не стосуються.
+    @property
+    def hub_config(self) -> Path: return self.hub / "config"
+
     # ── проєкт: рід чи замовлення ────────────────────────────────────────────
     @property
     def data(self) -> Path: return self.proot / "data"

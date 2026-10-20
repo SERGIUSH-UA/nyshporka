@@ -57,8 +57,19 @@ LEGACY_RTYPE_LABEL = {
 
 
 @pytest.fixture(scope="module")
-def pk() -> P.ArchivesPack:
-    return P.load()
+def pk(tmp_path_factory: pytest.TempPathFactory) -> P.ArchivesPack:
+    """Вбудований пак — у порожньому просторі.
+
+    🔴 Модульна фікстура біжить раніше за функційні, тож після `W.reset()`
+    сусіднього тесту простір резолвився з диска — в останній використаний, тобто
+    живий простір людини з її накладкою `archives.yaml`. Тест порівнював тоді
+    чужу накладку з вбудованим, і результат залежав від порядку файлів.
+    """
+    from nyshporka.core import workspace as W
+
+    root = tmp_path_factory.mktemp("pack-space")
+    with W.using(W.Workspace(root=root, name="пак", origin="test")):
+        return P.load()
 
 
 # ── дослівні тотожності ──────────────────────────────────────────────────────

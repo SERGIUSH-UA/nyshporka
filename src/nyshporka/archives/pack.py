@@ -20,6 +20,7 @@ YAML на мову програмування.
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
@@ -389,10 +390,16 @@ def _overlay_paths() -> list[Path]:
         out.append(Path(env))
     try:
         from nyshporka.core.workspace import workspace
-        out.append(workspace().config / WORKSPACE_PACK)
+        ws = workspace()
+        # Пак Майстерні — спільний для всіх проєктів; проєкт може мати свій
+        # поверх нього (найявніший — першим).
+        with contextlib.suppress(Exception):  # чиста Майстерня: проєктного шару немає
+            out.append(ws.config / WORKSPACE_PACK)
+        out.append(ws.hub_config / WORKSPACE_PACK)
     except Exception:  # простір ще не визначено — це не привід падати
         pass
-    return [p for p in out if p.is_file()]
+    # Корінь старого типу: шар проєкту й Майстерні — той самий файл.
+    return [p for p in dict.fromkeys(out) if p.is_file()]
 
 
 def _build(raw: dict[str, Any], sources: tuple[Path, ...]) -> ArchivesPack:
@@ -510,7 +517,7 @@ def overlay_path() -> Path:
     """Файл накладки простору. Може не існувати — це нормальний стан."""
     from nyshporka.core.workspace import workspace
 
-    return workspace().config / WORKSPACE_PACK
+    return workspace().hub_config / WORKSPACE_PACK
 
 
 def add_repository(code: str, label: str, name: str = "",

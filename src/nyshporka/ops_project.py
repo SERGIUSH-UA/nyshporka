@@ -145,6 +145,40 @@ def project_archive(a: ProjectArchiveArgs) -> Envelope:
     return ok({"name": a.name, "archived": not a.undo, "root": str(root)})
 
 
+class ProjectAdoptArgs(ProjectNameArgs):
+    apply: bool = Field(default=False, description="виконати переїзд (без цього — лише план)")
+    archive: str = Field(default="", description="тека для zip-архіву, поза Майстернею "
+                                                 "(обов'язкова з apply)")
+    rollback: bool = Field(default=False, description="повернути останній переїзд")
+    stamp: str = Field(default="", description="мітка переїзду для відкату")
+
+
+@op("project.adopt", summary="Корінь старого типу → Майстерня + проєкт: план, переїзд, відкат",
+    args=ProjectAdoptArgs, mutates=True, gui=False, tier="rare",
+    when="перетворити простір, де рід лежить у корені, на Майстерню з проєктом роду")
+def project_adopt(a: ProjectAdoptArgs) -> Envelope:
+    """🔴 Без `apply` нічого не змінює. Архів — поза Майстернею, з sha256 і
+    перевіркою розпакуванням, до першого переносу."""
+    from pathlib import Path
+
+    from nyshporka.core import workspace as W
+    from nyshporka.project import adopt as A
+
+    hub = W.workspace().hub
+    try:
+        if a.rollback:
+            return ok(A.rollback(hub, a.stamp or None))
+        pl = A.plan(hub, a.name)
+        if not a.apply:
+            env = ok({**pl.as_dict(), "report": A.report(pl)})
+            return env
+        if not a.archive:
+            return fail("переїзд без архіву не починаю: --archive <тека поза Майстернею>")
+        return ok(A.apply(hub, a.name, archive=Path(a.archive)))
+    except (A.AdoptError, W.WorkspaceError) as exc:
+        return fail(str(exc))
+
+
 class ProjectOpenArgs(ProjectNameArgs):
     agent: str = Field(default="", description="claude | codex — одразу запустити агента")
 

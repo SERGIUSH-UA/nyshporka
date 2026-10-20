@@ -161,7 +161,7 @@ def default_out_dir() -> Path:
     from nyshporka.core.workspace import WorkspaceError, workspace
 
     try:
-        return workspace().data / "cache" / "tiles"
+        return workspace().hub_data / "cache" / "tiles"
     except WorkspaceError:
         # Без простору (виклик із чужого коду чи тесту) лишається temp — але це
         # запасний шлях, а не місце, куди складають роботу.

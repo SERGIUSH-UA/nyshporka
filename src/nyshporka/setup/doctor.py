@@ -117,7 +117,7 @@ def _workspace() -> Check:
         return Check("Робочий простір", "fail", str(exc).splitlines()[0],
                      "nysh init")
     bits = [str(ws.root), f"джерело: {ws.origin}"]
-    if not ws.data.is_dir():
+    if not ws.hub_data.is_dir():
         return Check("Робочий простір", "warn", " · ".join(bits) + " — ще порожній",
                      "покладіть скани й запустіть `nysh look <тека>`",
                      op="material.look")
