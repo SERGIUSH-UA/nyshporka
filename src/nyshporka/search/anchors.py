@@ -363,7 +363,10 @@ def _pool_hits(fuzz: Any, cands: list[str], pool: tuple[str, ...], thr: float) -
         from rapidfuzz.process import cdist
     except ImportError:
         return {c for c in cands if _best(fuzz, c, pool) >= thr}
-    m = cdist(cands, list(pool), scorer=fuzz.ratio, dtype=np.float32, workers=-1)
+    # Поріг — у самому rapidfuzz: нижче нього бал однаково не вирішує, а
+    # порівняння з порогом там іде по дробовому балу, як і в `_best`.
+    m = cdist(cands, list(pool), scorer=fuzz.ratio, dtype=np.float32, workers=-1,
+              score_cutoff=thr)
     lc = np.fromiter((len(c) for c in cands), dtype=np.int32, count=len(cands))
     lp = np.fromiter((len(p) for p in pool), dtype=np.int32, count=len(pool))
     # той самий відсів за довжиною, що в `_best`: різниця понад 4 літери — не пара

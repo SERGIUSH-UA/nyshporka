@@ -153,8 +153,11 @@ def terms(prof: Any, q: str = "", y1: int | None = None, y2: int | None = None,
 
 # ── збіг токена з ознакою ────────────────────────────────────────────────────
 def _forms(raw: str) -> tuple[str, str, str]:
-    n = normalize_archival(raw)
-    return n, norm_given(n), norm_patronymic(n)
+    """Ті самі три форми, що й у каналу якорів, — з його пам'яті (`anchors._tok`):
+    обидва канали нормалізують ті самі токени справи, і другий платив удруге."""
+    from nyshporka.search import anchors as A
+
+    return A._tok(raw)
 
 
 def _surname_score(fuzz: Any, tok: str, key: str) -> float:
