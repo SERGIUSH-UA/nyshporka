@@ -346,6 +346,12 @@ ignore_missing_imports = true
 module = ["paramiko.*", "boto3.*", "botocore.*", "keyring.*"]
 ignore_missing_imports = true
 
+# Швидкий передфільтр: `tantivy` — extra `fast`, у CI не ставиться, бо
+# `fastidx.available()` без нього просто вимикає швидкий канал.
+[[tool.mypy.overrides]]
+module = ["tantivy.*"]
+ignore_missing_imports = true
+
 # 🛡 `curl_cffi` живе в extra `cfshield` і в dev-оточенні не стоїть: це бінарне
 # колесо libcurl-impersonate, потрібне рівно одному майданчику. Код навколо
 # нього написаний так, що його відсутність — робочий стан, а не поломка.

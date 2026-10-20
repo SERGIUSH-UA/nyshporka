@@ -14,6 +14,12 @@
 version: 1
 
 # ── архіви ───────────────────────────────────────────────────────────────────
+# `sites.web` — головна сторінка архіву, куди людину посилають по скани й
+# замовлення. Парсера за ним немає: рушії (`archium`, `irbis`) шукаються за
+# своїм ім'ям, тож `web` їм не заважає. Адреси звірено 20.10.2026 з Вікіданими
+# (P856) і заголовком самої сторінки. Частина `*.archives.gov.ua` поза Україною
+# віддає «Access Denied»; їх звірено документами, які пошуковики знайшли на
+# цьому домені, або знімком у Wayback Machine.
 repositories:
   DAHMO:
     label: ДАХмО
@@ -61,6 +67,9 @@ repositories:
     label: ДАВіО
     name: Державний архів Вінницької області
     country: UA
+    sites:
+      web:
+        url: https://davio.gov.ua
     codes:
       duck: ДАВіО
       # ⚠ Два написання навмисно: на Commons файли того самого архіву лежать і
@@ -90,6 +99,9 @@ repositories:
     label: ДАЧвО
     name: Державний архів Чернівецької області
     country: UA
+    sites:
+      web:
+        url: https://cv.archives.gov.ua
     codes:
       babynyar: "42"
 
@@ -97,6 +109,9 @@ repositories:
     label: ДАОО
     name: Державний архів Одеської області
     country: UA
+    sites:
+      web:
+        url: https://archive.od.gov.ua
     codes:
       babynyar: "44"
 
@@ -104,6 +119,9 @@ repositories:
     label: ANRM
     name: Arhiva Naţională a Republicii Moldova
     country: MD
+    sites:
+      web:
+        url: https://arhiva.gov.md
     # Кирилицею архів набирають і «АНРМ», і «НАМ» — обидва написання трапляються
     # в наших же нотатках, і обидва мусять вести в один код.
     aliases: [АНРМ, НАМ]
@@ -111,6 +129,9 @@ repositories:
     label: BNRM
     name: Biblioteca Naţională a Republicii Moldova
     country: MD
+    sites:
+      web:
+        url: https://www.bnrm.md
   AGAD:
     label: AGAD
     # Шифра Метрики Коронної: zespół 4, seria 1 (Księgi Wpisów), справа — номер
@@ -118,6 +139,9 @@ repositories:
     # agadd2.home.net.pl/metrykalia (джерело зйомки `agad:mk:<книга>`).
     name: Archiwum Główne Akt Dawnych w Warszawie
     country: PL
+    sites:
+      web:
+        url: https://agad.gov.pl
     aliases: [АГАД, Головний архів давніх актів]
   # Державні архіви Польщі — книги в Супрязі вже є (Красноставські гродські
   # з Любліна, метрики Павлосюва з Перемишля), а без запису тут сайт показував
@@ -126,10 +150,16 @@ repositories:
     label: APL
     name: Archiwum Państwowe w Lublinie
     country: PL
+    sites:
+      web:
+        url: https://lublin.ap.gov.pl
   APPRZ:
     label: APPrz
     name: Archiwum Państwowe w Przemyślu
     country: PL
+    sites:
+      web:
+        url: https://przemysl.ap.gov.pl
   IRNBUV:
     label: ІРНБУВ
     name: Інститут рукопису Національної бібліотеки України імені В. І. Вернадського
@@ -148,6 +178,9 @@ repositories:
     label: ДАЖО
     name: Державний архів Житомирської області
     country: UA
+    sites:
+      web:
+        url: https://zhytomyr.archives.gov.ua
     codes:
       babynyar: "38"
       duck: ДАЖО
@@ -157,6 +190,9 @@ repositories:
     label: ДАЧО
     name: Державний архів Чернігівської області
     country: UA
+    sites:
+      web:
+        url: https://cn.archives.gov.ua
     # 🔴 Канонічне скорочення цього архіву — «ДАЧгО» (так він стоїть у переліку
     # архівів України), але код і мітка тут уже несуть «ДАЧО»: під ним лежать
     # ключі сховища сторінок. Перейменування коштувало б міграції всіх ключів
@@ -234,6 +270,9 @@ repositories:
     label: ДАВоО
     name: Державний архів Волинської області
     country: UA
+    sites:
+      web:
+        url: https://volyn.archives.gov.ua
     # 🔴 Найдорожчий запис у цьому блоці, і саме тому він тут не останній.
     # «ДАВО» без уточнювальної літери в наших даних уже означає ВІННИЦЬКУ
     # (`DAVIO`, під ним лежить увесь матеріал ф.904 і ф.792). Волинська справа,
@@ -243,25 +282,34 @@ repositories:
     codes:
       babynyar: "46"
 
-  DADNO: {label: ДАДнО, name: Державний архів Дніпропетровської області, country: UA}
+  DADNO: {label: ДАДнО, name: Державний архів Дніпропетровської області, country: UA, sites: {web: {url: https://dp.archives.gov.ua}}}
   DADOO:
     label: ДАДоО
     name: Державний архів Донецької області
     country: UA
+    sites:
+      web:
+        url: https://dn.archives.gov.ua
     codes:
       babynyar: "41"
-  DAZKO: {label: ДАЗкО, name: Державний архів Закарпатської області, country: UA}
-  DAZPO: {label: ДАЗпО, name: Державний архів Запорізької області, country: UA}
+  DAZKO: {label: ДАЗкО, name: Державний архів Закарпатської області, country: UA, sites: {web: {url: https://dazo.gov.ua}}}
+  DAZPO: {label: ДАЗпО, name: Державний архів Запорізької області, country: UA, sites: {web: {url: https://archivzp.gov.ua}}}
   DAIFO:
     label: ДАІФО
     name: Державний архів Івано-Франківської області
     country: UA
+    sites:
+      web:
+        url: https://if.archives.gov.ua
     codes:
       babynyar: "26"
   DAK:
     label: ДАК
     name: Державний архів міста Києва
     country: UA
+    sites:
+      web:
+        url: https://archive.kyivcity.gov.ua
     codes:
       babynyar: "16"
       duck: ДАК
@@ -270,6 +318,9 @@ repositories:
     label: ДАКО
     name: Державний архів Київської області
     country: UA
+    sites:
+      web:
+        url: https://dako.gov.ua
     codes:
       babynyar: "15"
       commons: ДАКО
@@ -277,37 +328,52 @@ repositories:
     label: ДАКрО
     name: Державний архів Кіровоградської області
     country: UA
+    sites:
+      web:
+        url: https://dakiro.kr-admin.gov.ua
     codes:
       babynyar: "45"
-  DALO: {label: ДАЛО, name: Державний архів Львівської області, country: UA}
-  DALUO: {label: ДАЛуО, name: Державний архів Луганської області, country: UA}
+  DALO: {label: ДАЛО, name: Державний архів Львівської області, country: UA, sites: {web: {url: https://archivelviv.gov.ua}}}
+  DALUO: {label: ДАЛуО, name: Державний архів Луганської області, country: UA, sites: {web: {url: https://lg.archives.gov.ua}}}
   DAMO:
     label: ДАМО
     name: Державний архів Миколаївської області
     country: UA
+    sites:
+      web:
+        url: https://archive.mk.ua
     codes:
       babynyar: "36"
-  DAPO: {label: ДАПО, name: Державний архів Полтавської області, country: UA}
-  DARO: {label: ДАРО, name: Державний архів Рівненської області, country: UA}
+  DAPO: {label: ДАПО, name: Державний архів Полтавської області, country: UA, sites: {web: {url: https://poltava.archives.gov.ua}}}
+  DARO: {label: ДАРО, name: Державний архів Рівненської області, country: UA, sites: {web: {url: https://rv.archives.gov.ua}}}
   DAS: {label: ДАС, name: Державний архів міста Севастополя, country: UA}
   DASO:
     label: ДАСО
     name: Державний архів Сумської області
     country: UA
+    sites:
+      web:
+        url: https://daso.archives.gov.ua
     codes:
       babynyar: "33"
-  DATO: {label: ДАТО, name: Державний архів Тернопільської області, country: UA}
+  DATO: {label: ДАТО, name: Державний архів Тернопільської області, country: UA, sites: {web: {url: https://archives.te.gov.ua}}}
   DAHO:
     label: ДАХО
     name: Державний архів Харківської області
     country: UA
+    sites:
+      web:
+        url: https://archives.kh.gov.ua
     codes:
       babynyar: "40"
-  DAHEO: {label: ДАХеО, name: Державний архів Херсонської області, country: UA}
+  DAHEO: {label: ДАХеО, name: Державний архів Херсонської області, country: UA, sites: {web: {url: https://kherson.archives.gov.ua}}}
   DACHKO:
     label: ДАЧкО
     name: Державний архів Черкаської області
     country: UA
+    sites:
+      web:
+        url: https://ck.archives.gov.ua
     codes:
       babynyar: "39"
       duck: ДАЧкО
@@ -317,17 +383,23 @@ repositories:
       старим поділом) — саме через нього архів і знадобився першим.
 
   # ── центральні ──────────────────────────────────────────────────────────────
-  CDIAL: {label: ЦДІАЛ, name: "Центральний державний історичний архів України, м. Львів", country: UA}
+  CDIAL: {label: ЦДІАЛ, name: "Центральний державний історичний архів України, м. Львів", country: UA, sites: {web: {url: https://tsdial.archives.gov.ua}}}
   CDAVO:
     label: ЦДАВО
     name: Центральний державний архів вищих органів влади та управління України
     country: UA
+    sites:
+      web:
+        url: https://tsdavo.gov.ua
     codes:
       babynyar: "17"
   CDAHOU:
     label: ЦДАГОУ
     name: Центральний державний архів громадських об'єднань та україніки
     country: UA
+    sites:
+      web:
+        url: https://tsdahou.archives.gov.ua
     codes:
       babynyar: "20"
 
@@ -336,6 +408,9 @@ repositories:
     label: ДАСУ
     name: Державна архівна служба України
     country: UA
+    sites:
+      web:
+        url: https://archives.gov.ua
     # ⚠ Не архів у звичному сенсі, а сама служба: власних фондів у неї два, і
     # на «Бабиному Яру» вони стоять окремим архівом. Код заведено, щоб ці справи
     # мали куди лягти — інакше вони пішли б у «архів невідомий».
