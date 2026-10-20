@@ -1931,11 +1931,17 @@ def _sweep_fast(conn: sqlite3.Connection, stems: list[str], run_ids: list[int],
     """
     from nyshporka.search import fastidx as FX
 
+    # Прогін кожного рядка індекс віддає сам (поле `run`): звірка сторінок зі
+    # стором (`_pages_for`) на мільйоні кандидатів коштувала 121 с — більше за
+    # усю дооцінку (замір 20.10.2026).
+    got = FX.by_run(stems)
+    run_of: dict[int, int] = {}
     wanted: dict[int, set[int]] = {}
-    for pid, no in FX.candidates(stems, None if whole else run_ids):
-        wanted.setdefault(pid, set()).add(no)
-    pages = _pages_for(conn, set(wanted), set(run_ids))
-    pids = [p for p in sorted(wanted) if p in pages]
+    for rid in (got.keys() if whole else run_ids):
+        for pid, no in got.get(rid, ()):
+            run_of[pid] = rid
+            wanted.setdefault(pid, set()).add(no)
+    pids = sorted(wanted)
     chunks = [{p: sorted(wanted[p]) for p in pids[i:i + FAST_CHUNK_PAGES]}
               for i in range(0, len(pids), FAST_CHUNK_PAGES)]
     workers = sweep_workers(len(chunks)) if len(pids) >= FAST_PARALLEL_PAGES else 1
@@ -1954,7 +1960,7 @@ def _sweep_fast(conn: sqlite3.Connection, stems: list[str], run_ids: list[int],
     out: dict[int, list[SweepRow]] = {rid: [] for rid in run_ids}
     for part in parts:
         for pid, no, norm, sc, stem in part:
-            out[pages[pid][0]].append((pid, no, norm, sc, stem))
+            out.setdefault(run_of[pid], []).append((pid, no, norm, sc, stem))
     return out
 
 

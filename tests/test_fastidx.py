@@ -88,7 +88,7 @@ def test_a_zero_is_confirmed_by_the_trigram_sweep(space: Path,
     from nyshporka.search import store as ST
 
     _build()
-    monkeypatch.setattr(FX, "candidates", lambda *_a, **_k: [])
+    monkeypatch.setattr(FX, "by_run", lambda *_a, **_k: {})
     stem = S._norm("Вербищинскій")
     res = ST.sweep([stem], ["проба", "чужий"], fast=True)
     assert _lines(res), "нуль передфільтра пройшов без свіпу триграмами"
