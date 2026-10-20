@@ -135,3 +135,21 @@ def test_near_lines_window_and_unknown_pages(space: Path) -> None:
     assert got[0][0] == 1 and got[1][0] == 1
     assert 2 not in got
     assert 1 not in ST.near_lines([stem], spots, window=1)
+
+
+def test_one_pair_is_counted_once_across_the_line_break_glue(space: Path) -> None:
+    from nyshporka.search import textops as T
+
+    res = T.near("Вербищинскій", "Вербівцахъ", "проба", window=1, limit=100)
+    on_0006 = [h for h in res["hits"] if str(h["page"]).startswith("0006")]
+    assert len(on_0006) == 1 and on_0006[0]["line_no"] == 1
+    assert res["total"] == len(res["hits"])
+
+
+def test_a_missing_first_word_is_not_reported_as_a_missing_pair(space: Path) -> None:
+    from nyshporka import ops as O
+
+    env = O.call("text.near", {"q": "Шевчуковскій", "other": "Иванъ", "case": "проба"})
+    msg = " ".join(w.text for w in env.warnings)
+    assert "не знайдено" in msg and "не шукали" in msg
+    assert "пари не знайшлось" not in msg

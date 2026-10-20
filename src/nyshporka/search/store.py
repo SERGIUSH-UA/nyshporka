@@ -179,7 +179,10 @@ def connect(*, readonly: bool = False, migrate: bool = False,
     conn = sqlite3.connect(p, timeout=BUSY_TIMEOUT, check_same_thread=not any_thread)
     conn.execute("pragma journal_mode=wal")
     conn.execute("pragma synchronous=normal")
-    conn.execute("pragma cache_size=-100000")
+    # Потік-читач бере кожну сторінку один раз, і кеш йому ні до чого, а
+    # 100 МБ на кожне з восьми з'єднань у кожному воркері свіпу — це гігабайти
+    # (рецензія 20.10.2026).
+    conn.execute(f"pragma cache_size={-8000 if any_thread else -100000}")
     if not readonly:
         _ensure_schema(conn, migrate=migrate)
     else:

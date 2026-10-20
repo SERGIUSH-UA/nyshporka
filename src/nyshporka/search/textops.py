@@ -1229,6 +1229,18 @@ def near(q: str, other: str, scope: str | Sequence[str] = "", *, window: int = 1
                                     "score": score}})
     found.sort(key=lambda h: (-(h["score"] + h["near"]["score"]), h["name"],
                               str(h["page"]), h["line_no"]))
+    # Одна пара — один раз. Слово в кінці рядка склейка переносу знаходить і на
+    # наступному рядку, і те саме друге слово ставало парою двічі: число
+    # «знайдено» росло на рівному місці (рецензія 20.10.2026). Лишається
+    # сильніша, на рівних — верхній рядок, тобто саме слово, а не склейка.
+    seen: set[tuple[str, str, int]] = set()
+    uniq: list[dict[str, Any]] = []
+    for h in found:
+        k = (str(h["name"]), str(h["page"]), int(h["near"]["line_no"]))
+        if k not in seen:
+            seen.add(k)
+            uniq.append(h)
+    found = uniq
     shown = found[:limit]
     S._resolve(shown)
     S._resolve([h["near"] for h in shown])

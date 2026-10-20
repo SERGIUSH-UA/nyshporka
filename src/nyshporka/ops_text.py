@@ -694,7 +694,13 @@ def text_near(a: TextNearArgs) -> Envelope:
         env.warn("short_stems",
                  f"короткі стеми другого слова {', '.join(short)}: `partial_ratio` знаходить "
                  f"їх усередині довших слів — пари за ними судити з осторогою")
-    if not res["hits"]:
+    if res["stopped"]:
+        return env
+    if not res["first_total"]:
+        env.warn("zero_with_denominator",
+                 f"«{res['q']}» не знайдено — «{res['other']}» поруч з ним не шукали; "
+                 f"прочесано прогонів {res['runs']}, сторінок {res['pages']}")
+    elif not res["hits"]:
         env.warn("zero_with_denominator",
                  f"пари не знайшлось — «{res['q']}» знайдено на {res['first_total']} рядках "
                  f"({res['first_pages']} стор.), «{res['other']}» поруч (±{res['window']}) "
