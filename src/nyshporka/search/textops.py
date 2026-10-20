@@ -1158,6 +1158,104 @@ def _find_one(q: str, scope: str = "", *, thresh: int = 78, limit: int = 40,
             "notebook": notebook, "selfcheck": selfcheck, "ledger": ledger}
 
 
+#: Розгорнутий стем коротший за це в пошук пари не йде (`near`).
+SHORT_NEAR = 4
+
+
+def near(q: str, other: str, scope: str | Sequence[str] = "", *, window: int = 1,
+         thresh: int = 78, limit: int = 40) -> dict[str, Any]:
+    """Два слова поруч: ім'я + прізвище, прізвище + село, ім'я + по батькові,
+    два прізвища одного запису.
+
+    Перше слово шукається по всій області тим самим свіпом, що й прізвище
+    (зі швидким індексом на корпусі), друге — лише на рядках ±`window` довкола
+    кожного його місця (`store.near_lines`). Котре з двох шукати по області,
+    вирішує довжина: довше слово рідше трапляється, тож іде першим, а ім'я чи
+    коротке село — другим.
+
+    🔴 Обидва слова розгортаються так само, як у пошуку прізвища: гніздо імен,
+    написання роду з профілю. «Явдоха» поруч із прізвищем ловить «Євдокію».
+
+    ⚠ Слово в кінці рядка стор склеює з початком наступного (перенос часто
+    без дефіса), тож перше слово буває знайдене й на наступному рядку. Вікно
+    рахується від кожного рядка, де воно знайдене, — тобто для слова в кінці
+    рядка вниз воно на рядок ширше.
+    """
+    from nyshporka import htr_store as S
+    from nyshporka.core import progress as P
+    from nyshporka.records import names as NAMES
+    from nyshporka.search import decode as D
+
+    if not ST.exists():
+        return {"error": "текстового стору ще немає: nysh text index"}
+    qa = S.query_stems(q)
+    qb = S.query_stems(other)
+    for got in (qa, qb):
+        if got.get("error"):
+            return {"error": str(got["error"])}
+    first, second = (q, other), (qa, qb)
+    if max(map(len, qb["asked"])) > max(map(len, qa["asked"])):
+        first, second = (other, q), (qb, qa)
+
+    short: list[str] = []
+
+    def whole(qs: dict[str, Any]) -> list[str]:
+        stems, _dropped = ST.whole_stems(
+            qs["stems"], keep=[s for s in qs["stems"]
+                               if qs["origin"].get(s) != NAMES.ORIGIN_PROFILE])
+        # 🔴 Короткий двійник із гнізда імен («jan» від «Іван») `partial_ratio`
+        # знаходить усередині будь-якого слова — «Стефанъ» поруч із прізвищем
+        # ставав парою «Іван + прізвище». Набране людиною лишається.
+        cut = [s for s in stems if len(s) < SHORT_NEAR and s not in qs["asked"]]
+        short.extend(cut)
+        return [s for s in stems if s not in cut]
+
+    stems_a, stems_b = whole(second[0]), whole(second[1])
+    sc = S.runs_for_scope(scope or "")
+    rows = sc["rows"]
+    names = [r["name"] for r in rows]
+    budget = len(names) if sc["kind"] != "all" else D.INLINE_BUILD
+    got = ST.sweep(stems_a, names, thresh=thresh, build_budget=budget,
+                   progress=P.report, cancel=P.stopped)
+    hits_a = got["hits"]
+    pairs = ST.near_lines(stems_b, [(h["name"], h["page"], h["line_no"], h["norm"])
+                                    for h in hits_a], window=window, thresh=thresh,
+                           first=stems_a)
+    found: list[dict[str, Any]] = []
+    for i, (no, norm, score, stem) in pairs.items():
+        h = dict(hits_a[i])
+        found.append({**h, "near": {"name": h["name"], "page": h["page"], "line_no": no,
+                                    "line_index": no - 1, "norm": norm, "stem": stem,
+                                    "score": score}})
+    found.sort(key=lambda h: (-(h["score"] + h["near"]["score"]), h["name"],
+                              str(h["page"]), h["line_no"]))
+    shown = found[:limit]
+    S._resolve(shown)
+    S._resolve([h["near"] for h in shown])
+    by_run = {r["name"]: r for r in rows}
+    for h in shown:
+        row = by_run.get(h["name"]) or {}
+        h["case_key"] = (row.get("case_key") or "").strip()
+        h["shifra"] = row.get("shifra") or ""
+        h["stem_origin"] = second[0]["origin"].get(str(h.get("stem") or ""),
+                                                   NAMES.ORIGIN_QUERY)
+        h["near"]["stem_origin"] = second[1]["origin"].get(str(h["near"].get("stem") or ""),
+                                                           NAMES.ORIGIN_QUERY)
+    return {"q": first[0], "other": first[1], "window": window, "thresh": thresh,
+            "hits": shown, "total": len(found),
+            "pages_hit": len({(h["name"], h["page"]) for h in found}),
+            "stems": stems_a, "stems_other": stems_b, "stems_short_dropped": short,
+            "first_total": len(hits_a),
+            "first_pages": len({(h["name"], h["page"]) for h in hits_a}),
+            "scope": sc["kind"], "case_key": sc["key"], "shifra": sc.get("shifra") or "",
+            "pages": S.unique_pages(rows), "runs": len(rows),
+            "unindexed": int(got.get("unindexed") or 0),
+            "fast_runs": int(got.get("fast_runs") or 0),
+            "fast_error": got.get("fast_error") or "",
+            "rules_stale": bool(got.get("rules_stale")),
+            "stopped": bool(got.get("cancelled"))}
+
+
 def _notebook_find(key: str, stems: list[str], *, thresh: int) -> dict[str, Any]:
     """Звірені оком читання справи, у яких є шукане, — свої й з пулу.
 

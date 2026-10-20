@@ -2039,6 +2039,48 @@ def page_candidates_full(lines: list[str]
             yield ln_no, raw, cands
 
 
+def query_stems(q: str, *, given: bool = True, folk: bool = False, profile: bool = True,
+                family: str = "") -> dict[str, Any]:
+    """Стеми запиту, як їх шукає `search`: набране, гніздо імен, написання роду.
+
+    Повертає `stems`, `origin` (стем → звідки), `asked` (набране), `whose`
+    (чиє написання підмішано), `fam` (профіль роду або None) — або `error`.
+    """
+    stems = [_norm(w) for w in _TOKEN_RE.findall(q) if len(w) >= 3]
+    stems = [s for s in stems if len(s) >= 3]
+    if not stems:
+        return {"error": "закороткий запит"}
+    # 🔴 Набране людиною лишається окремим числом. Знаменник «шукали ось цим»
+    # після розширення перестає збігатися з тим, що набрали, і без обох чисел
+    # нуль читається не про те: «не знайшлось по п'яти написаннях» і «не
+    # знайшлось по одному» — різні відповіді.
+    asked = list(stems)
+    origin: dict[str, str] = dict.fromkeys(stems, NAMES.ORIGIN_QUERY)
+    if given or folk:
+        stems, origin = NAMES.expand_stems(stems, given=given, folk=folk)
+    # 🔴 Написання прізвища з профілю простору. Профіль знає 10-13 форм, людина
+    # набирає одну; доти жодна з решти в пошук не потрапляла. Два з семи
+    # реальних спотворень декоду переходять поріг ЛИШЕ завдяки їм.
+    whose = ""
+    fam = None
+    from nyshporka.core import profile as PROF
+
+    if family:
+        try:
+            fam = PROF.resolve(family)
+        except PROF.ProfileError as exc:
+            return {"error": str(exc)}
+    elif profile:
+        with contextlib.suppress(Exception):
+            fam = PROF.family_for_query(q)
+    if profile or family:
+        forms, whose = PROF.forms_for_query(q, prof=fam if family else None)
+        if forms:
+            stems, origin = NAMES.add_stems(stems, origin, forms,
+                                            NAMES.ORIGIN_PROFILE)
+    return {"stems": stems, "origin": origin, "asked": asked, "whose": whose, "fam": fam}
+
+
 def search(q: str, name: str | None = None, thresh: int = 78,
            limit: int = 200, context: int = 0, *,
            given: bool = True, folk: bool = False,
@@ -2071,38 +2113,11 @@ def search(q: str, name: str | None = None, thresh: int = 78,
     Інакше на справі з тисячею збігів кожен пошук читав би тисячу сторінок
     заради вікон, які ніхто не побачить.
     """
-    stems = [_norm(w) for w in _TOKEN_RE.findall(q) if len(w) >= 3]
-    stems = [s for s in stems if len(s) >= 3]
-    if not stems:
-        return {"hits": [], "cases": 0, "error": "закороткий запит"}
-    # 🔴 Набране людиною лишається окремим числом. Знаменник «шукали ось цим»
-    # після розширення перестає збігатися з тим, що набрали, і без обох чисел
-    # нуль читається не про те: «не знайшлось по п'яти написаннях» і «не
-    # знайшлось по одному» — різні відповіді.
-    asked = list(stems)
-    origin: dict[str, str] = dict.fromkeys(stems, NAMES.ORIGIN_QUERY)
-    if given or folk:
-        stems, origin = NAMES.expand_stems(stems, given=given, folk=folk)
-    # 🔴 Написання прізвища з профілю простору. Профіль знає 10-13 форм, людина
-    # набирає одну; доти жодна з решти в пошук не потрапляла. Два з семи
-    # реальних спотворень декоду переходять поріг ЛИШЕ завдяки їм.
-    whose = ""
-    fam = None
-    from nyshporka.core import profile as PROF
-
-    if family:
-        try:
-            fam = PROF.resolve(family)
-        except PROF.ProfileError as exc:
-            return {"hits": [], "cases": 0, "error": str(exc)}
-    elif profile:
-        with contextlib.suppress(Exception):
-            fam = PROF.family_for_query(q)
-    if profile or family:
-        forms, whose = PROF.forms_for_query(q, prof=fam if family else None)
-        if forms:
-            stems, origin = NAMES.add_stems(stems, origin, forms,
-                                            NAMES.ORIGIN_PROFILE)
+    qs = query_stems(q, given=given, folk=folk, profile=profile, family=family)
+    if qs.get("error"):
+        return {"hits": [], "cases": 0, "error": qs["error"]}
+    stems, origin, asked = qs["stems"], qs["origin"], qs["asked"]
+    whose, fam = qs["whose"], qs["fam"]
     from nyshporka.core import progress as P
     from nyshporka.search import decode as D
 

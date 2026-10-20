@@ -639,6 +639,68 @@ def text_find(a: TextFindArgs) -> Envelope:
     return env
 
 
+class TextNearArgs(BaseModel):
+    q: str = Field(description="перше слово: прізвище, ім'я, село")
+    other: str = Field(description="друге слово, яке має стояти поруч")
+    case: CaseScope = Field(default="",
+                            description="справа, шифра, серія, перелік справ або прогін; "
+                                        "порожньо — усе прочитане")
+    window: int = Field(default=1, ge=0, le=6,
+                        description="на скільки рядків друге слово може відстояти від "
+                                    "першого: 0 — той самий рядок, 1 — ще й сусідні "
+                                    "(перенос), більше — сусідні рядки запису")
+    thresh: int = Field(default=78, ge=50, le=100)
+    limit: int = Field(default=40, ge=1, le=5000)
+
+
+@op("text.near", summary="Два слова поруч: ім'я + прізвище, прізвище + село, два прізвища",
+    args=TextNearArgs, mutates=False, section=SECTION,
+    tier="situational", scope="mixed", skill="find-surname",
+    when="шукати пару: ім'я з прізвищем, прізвище з селом, ім'я з по батькові")
+def text_near(a: TextNearArgs) -> Envelope:
+    """Довше слово шукається по всій області (на корпусі — швидким індексом),
+    коротше — лише на рядках біля нього. Обидва — тими самими написаннями, що
+    й у пошуку прізвища (гніздо імен, форми роду).
+
+    🔴 Нуль — зі знаменником: скільки місць першого слова знайдено й на скількох
+    сторінках, бо «пари немає» при сотні місць першого слова і при нулі — різні
+    відповіді.
+    """
+    from nyshporka.search import textops as T
+
+    try:
+        res = T.near(a.q, a.other, a.case, window=a.window, thresh=a.thresh, limit=a.limit)
+    except ValueError as exc:
+        return fail(str(exc))
+    if res.get("error"):
+        env = fail(str(res["error"]))
+        if "стору" in str(res["error"]):
+            env.suggest("text.index", "зібрати стор по прочитаному")
+        return env
+    env = ok(res)
+    if res["stopped"]:
+        env.warn("search_stopped", "пошук спинено: прочесано не все, нуль нічого не доводить",
+                 level=ALERT)
+    if res["unindexed"]:
+        env.warn("partial_store", f"{res['unindexed']} прогонів поза стором")
+        env.suggest("text.index", "догнати стор")
+    if res["rules_stale"]:
+        env.warn("rules_stale", RULES_STALE_MSG)
+    if res["fast_error"]:
+        env.warn("fast_failed", f"швидкий індекс недоступний ({res['fast_error']}) — "
+                                f"перше слово шукано свіпом")
+    short = [s for s in res["stems_other"] if len(s) < 5]
+    if short:
+        env.warn("short_stems",
+                 f"короткі стеми другого слова {', '.join(short)}: `partial_ratio` знаходить "
+                 f"їх усередині довших слів — пари за ними судити з осторогою")
+    if not res["hits"]:
+        env.warn("zero_with_denominator",
+                 f"пари не знайшлось — «{res['q']}» знайдено на {res['first_total']} рядках "
+                 f"({res['first_pages']} стор.), «{res['other']}» поруч (±{res['window']}) "
+                 f"не стоїть на жодному; прочесано прогонів {res['runs']}, сторінок "
+                 f"{res['pages']}")
+    return env
 
 
 # 🔴 Консоль шукає ТІЄЮ САМОЮ командою, що й агент (дослідник 07.10.2026:

@@ -402,6 +402,44 @@ def print_records(hits: list[dict[str, Any]], *, series: bool = False) -> None:
 
 
 # ── етап 3: find ─────────────────────────────────────────────────────────────
+@app.command("near")
+def near_cmd(
+    q: str = typer.Argument(..., help="перше слово: прізвище, ім'я, село"),
+    other: str = typer.Argument(..., help="друге слово, яке має стояти поруч"),
+    case: list[str] = typer.Option([], "--case",
+                                   help="справа, шифра або прогін; можна кілька разів або серію; "
+                                        "порожньо — усе"),
+    window: int = typer.Option(1, "--window",
+                               help="рядків між словами: 0 — той самий рядок, 1 — ще й сусідні"),
+    thresh: int = typer.Option(78, "--thresh", help="поріг схожості 50-100"),
+    limit: int = typer.Option(40, "--limit", help="скільки показати"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
+) -> None:
+    """Два слова поруч: ім'я + прізвище, прізвище + село, ім'я + по батькові."""
+    from nyshporka import ops as O
+
+    env = O.call("text.near", {"q": q, "other": other, "case": _scope(case), "window": window,
+                               "thresh": thresh, "limit": limit})
+    if _answer(env, as_json):
+        return
+    d = env.data
+    for h in d.get("hits") or []:
+        n = h["near"]
+        head = f"{h.get('name')} · {h.get('page')} · рядок {h.get('line_no')}"
+        if h.get("shifra") or h.get("case_key"):
+            head = f"{h.get('shifra') or h['case_key']} · {head}"
+        console.print(f"[bold]{h.get('score')}+{n.get('score')}[/bold]  {head} · "
+                      f"[warn]{h.get('matched')}[/warn] … [warn]{n.get('matched')}[/warn]")
+        console.print(f"    [warn]»[/warn] {h.get('line')}")
+        if n.get("line_no") != h.get("line_no"):
+            console.print(f"    [muted]{n.get('line_no')}:[/muted] {n.get('line')}")
+    console.print("")
+    console.print(f"[bold]знаменник:[/bold] «{d['q']}» — {d['first_total']} рядків на "
+                  f"{d['first_pages']} стор.; пар з «{d['other']}» (±{d['window']}) — "
+                  f"{d['total']} на {d['pages_hit']} стор. · прогонів {d['runs']} · "
+                  f"сторінок {d['pages']}")
+
+
 @app.command("find")
 def find_cmd(
     q: str = typer.Argument(..., help="прізвище або слово"),

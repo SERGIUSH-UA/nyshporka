@@ -1435,17 +1435,32 @@ def _cands_batch(conn: sqlite3.Connection, wanted: dict[int, set[int]], *,
     """Кандидати потрібних рядків для всіх сторінок."""
     for part in _blob_chunks(conn, sorted(wanted), progress=progress, cancel=cancel):
         for pid, text in part:
-            nos = wanted[pid]
-            for line in text.split("\n"):
-                no_s, _sep, rest = line.partition("\t")
-                if not rest:
-                    continue
-                try:
-                    no = int(no_s)
-                except ValueError:
-                    continue
-                if no in nos:
-                    yield pid, no, rest.split(" ")
+            for no, rest in _lines_of(text, wanted[pid]):
+                yield pid, no, rest.split(" ")
+
+
+def _lines_of(text: str, nos: set[int]) -> Iterator[tuple[int, str]]:
+    """Рядки блоба з потрібними номерами, за зростанням номера.
+
+    🔴 Пошуком «⏎номер⇥» у C, а не розбором усієї сторінки в Python: потрібних
+    рядків — 2–3 % (пачка з 20 тис. сторінок — 40 тис. рядків із 1.2–2.6 млн),
+    і розбір решти був найдорожчою частиною дооцінки, щойно диск перестав нею
+    бути (замір 20.10.2026). Блоб пише `_page_blob`: рядок на номер, номери
+    зростають, слова через пробіл.
+    """
+    for no in sorted(nos):
+        head = f"{no}\t"
+        if text.startswith(head):
+            start = len(head)
+        else:
+            at = text.find(f"\n{head}")
+            if at < 0:
+                continue
+            start = at + 1 + len(head)
+        end = text.find("\n", start)
+        rest = text[start:] if end < 0 else text[start:end]
+        if rest:
+            yield no, rest
 
 
 def _match_unique(norms: list[str], stems: list[str], thresh: int
@@ -1556,18 +1571,8 @@ def _cands_of(conn: sqlite3.Connection, pid: int, nos: set[int]
     row = conn.execute("select cands from pages where id=?", (pid,)).fetchone()
     if not row or row[0] is None:
         return []
-    out: list[tuple[int, list[str]]] = []
-    for line in zlib.decompress(row[0]).decode("utf-8").split("\n"):
-        no_s, _sep, rest = line.partition("\t")
-        if not rest:
-            continue
-        try:
-            no = int(no_s)
-        except ValueError:
-            continue
-        if no in nos:
-            out.append((no, rest.split(" ")))
-    return out
+    return [(no, rest.split(" "))
+            for no, rest in _lines_of(zlib.decompress(row[0]).decode("utf-8"), nos)]
 
 
 # ── кеш свіпів по прогонах ───────────────────────────────────────────────────
@@ -2117,6 +2122,84 @@ def _fast_job(stems: list[str], chunk: dict[int, list[int]], thresh: int) -> lis
         return _rerank_lines(conn, stems, chunk, thresh)
     finally:
         conn.close()
+
+
+# ── друге слово поруч із першим ──────────────────────────────────────────────
+#: Місце першого слова: прогін, сторінка, рядок (з одиниці), слово-кандидат.
+Spot = tuple[str, int | str, int, str]
+
+
+def near_lines(stems: list[str], spots: list[Spot], *, window: int = 1,
+               thresh: int = 78, first: list[str] | None = None,
+               ) -> dict[int, tuple[int, str, int, str]]:
+    """Друге слово у вікні ±`window` рядків довкола кожного місця першого.
+
+    Повертає індекс місця → (рядок, слово, бал, стем) найкращого збігу; на
+    рівних балах — ближчий рядок. Бал виносить той самий `_match_unique`, що й
+    прізвищний свіп, тож поріг і правило довжини ті самі.
+
+    🔴 Друге слово судиться лише на рядках біля першого, а не по всій області:
+    ім'я чи село на корпусі стоїть на мільйонах рядків, і окремий свіп по ньому
+    коштував би більше, ніж перший. Перетин після двох свіпів дав би ту саму
+    відповідь за в рази більшу ціну.
+
+    🔴 Кандидат, схожий на перше слово (`first` — його стеми) не менше, ніж на
+    друге, другим не зараховується: це саме перше слово або склейка з ним.
+    Без цього «Іван» знаходився б усередині «Іваненко» на тому самому місці.
+    Правило «не міститься в першому» тут не годиться: кандидати стору — це й
+    пари слів, і перше слово часто знайдене парою «Иванъ Вербищинскій», яка
+    містить справжнє ім'я поруч.
+    """
+    if not spots or not stems:
+        return {}
+    conn = connect(readonly=True)
+    try:
+        run_ids = _run_ids(conn, sorted({str(s[0]) for s in spots}))
+        pid_of: dict[tuple[str, str], int] = {}
+        for run, rid in run_ids.items():
+            for pid, page in conn.execute("select id, page from pages where run_id=?", (rid,)):
+                pid_of[(run, str(page))] = int(pid)
+        wanted: dict[int, set[int]] = {}
+        at: list[int | None] = []
+        for run, page, no, _w in spots:
+            pid = pid_of.get((str(run), str(page)))
+            at.append(pid)
+            if pid is not None:
+                wanted.setdefault(pid, set()).update(range(max(0, no - window), no + window + 1))
+        norms: list[str] = []
+        owner: list[tuple[int, int]] = []
+        for pid, no, ns in _cands_batch(conn, wanted):
+            norms.extend(ns)
+            owner.extend([(pid, no)] * len(ns))
+    finally:
+        conn.close()
+    by_line: dict[tuple[int, int], list[tuple[int, str, int]]] = {}
+    for j, (sc, si) in _match_unique(norms, stems, thresh).items():
+        by_line.setdefault(owner[j], []).append((round(sc), norms[j], si))
+    as_first: dict[str, int] = {}
+    if first:
+        words = sorted({w for hits in by_line.values() for _sc, w, _si in hits})
+        as_first = {words[j]: round(sc)
+                    for j, (sc, _si) in _match_unique(words, first, thresh).items()}
+    out: dict[int, tuple[int, str, int, str]] = {}
+    for i, (_run, _page, no, word) in enumerate(spots):
+        pid = at[i]
+        if pid is None:
+            continue
+        best: tuple[tuple[int, int, int], int, str, int] | None = None
+        for dist in range(window + 1):
+            for line in (no,) if dist == 0 else (no - dist, no + dist):
+                for sc, w, si in by_line.get((pid, line), ()):
+                    if w == word or as_first.get(w, 0) >= sc:
+                        continue
+                    # на рівних — ближчий рядок, далі найкоротший кандидат:
+                    # саме слово, а не пара з ним («Иванъ», не «родился Иванъ»)
+                    key = (sc, -dist, -len(w))
+                    if best is None or key > best[0]:
+                        best = (key, line, w, si)
+        if best is not None:
+            out[i] = (best[1], best[2], best[0][0], stems[best[3]])
+    return out
 
 
 # ── регекс по сирому тексту ──────────────────────────────────────────────────

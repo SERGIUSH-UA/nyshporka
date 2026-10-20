@@ -100,6 +100,30 @@ def test_an_open_transaction_reads_on_its_own_connection(store: Path,
     assert pid not in got and len(got) == 6
 
 
+def test_lines_of_finds_what_a_full_parse_finds() -> None:
+    """Пошук рядка за номером дає те саме, що розбір усього блоба, як було."""
+    import random
+
+    from nyshporka.search import store as ST
+
+    def full(text: str, nos: set[int]) -> list[tuple[int, str]]:
+        out = []
+        for line in text.split("\n"):
+            no_s, _sep, rest = line.partition("\t")
+            if rest and int(no_s) in nos:
+                out.append((int(no_s), rest))
+        return out
+
+    rnd = random.Random(5)
+    for _ in range(300):
+        nos_all = sorted(rnd.sample(range(1, 400), rnd.randint(1, 40)))
+        text = "\n".join(f"{no}\t" + " ".join(
+            rnd.choice(["ivan", "1", "12", "verbiscinskii", "x"]) for _ in range(rnd.randint(1, 5)))
+            for no in nos_all)
+        want = set(rnd.sample(range(0, 420), rnd.randint(0, 30))) | set(nos_all[:1] + nos_all[-1:])
+        assert list(ST._lines_of(text, want)) == full(text, want)
+
+
 def test_stop_ends_the_read_and_closes_the_readers(store: Path,
                                                    monkeypatch: pytest.MonkeyPatch) -> None:
     from nyshporka.search import store as ST
