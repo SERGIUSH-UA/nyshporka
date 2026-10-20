@@ -158,7 +158,8 @@ create table if not exists sweeps(
 """
 
 
-def connect(*, readonly: bool = False, migrate: bool = False) -> sqlite3.Connection:
+def connect(*, readonly: bool = False, migrate: bool = False,
+            any_thread: bool = False) -> sqlite3.Connection:
     """З'єднання зі стором. Схема створюється при першому відкритті.
 
     🔴 WAL, бо стор читають під час індексації: пошук з іншої вкладки або
@@ -168,12 +169,14 @@ def connect(*, readonly: bool = False, migrate: bool = False) -> sqlite3.Connect
     будь-який читач, що відкривав стор на запис (`is_fresh` з каналу якорів),
     після оновлення пакета мовчки дропав 6.5 ГБ (рецензія 08.09). Тепер
     невідповідність — помилка з підказкою, а не дія.
+
+    `any_thread` — з'єднання відкриває потік-читач, а закриває викликач.
     """
     p = path()
     if readonly and not p.is_file():
         raise FileNotFoundError(str(p))
     p.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(p, timeout=BUSY_TIMEOUT)
+    conn = sqlite3.connect(p, timeout=BUSY_TIMEOUT, check_same_thread=not any_thread)
     conn.execute("pragma journal_mode=wal")
     conn.execute("pragma synchronous=normal")
     conn.execute("pragma cache_size=-100000")
@@ -1345,25 +1348,95 @@ def _scope_blocks(conn: sqlite3.Connection, run_ids: list[int]) -> list[tuple[in
     return [(a << LINE_BITS, ((b + 1) << LINE_BITS) - 1) for a, b in out]
 
 
+#: Скільки з'єднань читають блоби сторінок одночасно. Сторінки-кандидати
+#: розкидані по всьому стору, і кожна — окреме випадкове читання з диска: один
+#: потік стоїть у черзі глибини 1 й чекає ~0.2 мс на сторінку. Вісім потоків
+#: читають ту саму пачку з 20 тис. сторінок за 0.45 с замість 4.2 с, далі
+#: виграшу майже немає (16 — 0.35 с; замір 20.10.2026, NVMe, холодний кеш).
+READ_THREADS = 8
+#: Сторінок в одному запиті потоку-читача.
+READ_CHUNK = 250
+#: Від скількох сторінок читати потоками: старт з'єднань — мілісекунди.
+READ_PARALLEL_FROM = 2 * READ_CHUNK
+
+
+def _blobs_of(conn: sqlite3.Connection, chunk: list[int]) -> list[tuple[int, str]]:
+    marks = ",".join("?" * len(chunk))
+    return [(int(pid), zlib.decompress(blob).decode("utf-8"))
+            for pid, blob in conn.execute(
+                f"select id, cands from pages where id in ({marks})", chunk)
+            if blob is not None]
+
+
+def _blob_chunks(conn: sqlite3.Connection, pids: list[int], *,
+                 progress: Callable[[int, int, str], None] | None,
+                 cancel: Callable[[], bool] | None,
+                 ) -> Iterator[list[tuple[int, str]]]:
+    """Розпаковані блоби пачками, у порядку `pids`.
+
+    🔴 Дооцінку швидкого каналу й свіп тримало не зіставлення, а диск: на
+    пачці з 20 тис. сторінок читання блобів займало 4–8 с, бал — 1–2 с (замір
+    20.10.2026). Тому велика вибірка читається кількома з'єднаннями в потоках:
+    sqlite і zlib відпускають GIL, а розбір рядків лишається у викликача.
+
+    ⚠ Потоки беруть СВОЇ з'єднання, тож бачать лише закомічене. Тому вони
+    вмикаються, тільки коли викликач не тримає відкритої транзакції.
+    """
+    if len(pids) < READ_PARALLEL_FROM or conn.in_transaction:
+        for i in range(0, len(pids), 500):
+            if cancel and cancel():
+                return
+            if progress:
+                progress(i, len(pids), "")
+            yield _blobs_of(conn, pids[i:i + 500])
+        return
+    import threading
+    from collections import deque
+    from concurrent.futures import Future, ThreadPoolExecutor
+
+    local = threading.local()
+    opened: list[sqlite3.Connection] = []
+    lock = threading.Lock()
+
+    def job(chunk: list[int]) -> list[tuple[int, str]]:
+        c = getattr(local, "conn", None)
+        if c is None:
+            c = local.conn = connect(readonly=True, any_thread=True)
+            with lock:
+                opened.append(c)
+        return _blobs_of(c, chunk)
+
+    chunks = [pids[i:i + READ_CHUNK] for i in range(0, len(pids), READ_CHUNK)]
+    ex = ThreadPoolExecutor(max_workers=READ_THREADS)
+    # Вікно наперед, а не всі пачки разом: розпаковані сторінки в кілька разів
+    # більші за потрібні рядки, і повна вибірка лягала б у пам'ять цілком.
+    ahead: deque[Future[list[tuple[int, str]]]] = deque()
+    try:
+        nxt = 0
+        for i in range(len(chunks)):
+            while nxt < len(chunks) and len(ahead) < 2 * READ_THREADS:
+                ahead.append(ex.submit(job, chunks[nxt]))
+                nxt += 1
+            if cancel and cancel():
+                return
+            if progress:
+                progress(i * READ_CHUNK, len(pids), "")
+            yield ahead.popleft().result()
+    finally:
+        ex.shutdown(wait=True, cancel_futures=True)
+        for c in opened:
+            c.close()
+
+
 def _cands_batch(conn: sqlite3.Connection, wanted: dict[int, set[int]], *,
                  progress: Callable[[int, int, str], None] | None = None,
                  cancel: Callable[[], bool] | None = None,
                  ) -> Iterator[tuple[int, int, list[str]]]:
-    """Кандидати потрібних рядків для всіх сторінок — блоби пачками по 500."""
-    pids = sorted(wanted)
-    for i in range(0, len(pids), 500):
-        if cancel and cancel():
-            return
-        if progress:
-            progress(i, len(pids), "")
-        chunk = pids[i:i + 500]
-        marks = ",".join("?" * len(chunk))
-        for pid, blob in conn.execute(
-                f"select id, cands from pages where id in ({marks})", chunk):
-            if blob is None:
-                continue
-            nos = wanted[int(pid)]
-            for line in zlib.decompress(blob).decode("utf-8").split("\n"):
+    """Кандидати потрібних рядків для всіх сторінок."""
+    for part in _blob_chunks(conn, sorted(wanted), progress=progress, cancel=cancel):
+        for pid, text in part:
+            nos = wanted[pid]
+            for line in text.split("\n"):
                 no_s, _sep, rest = line.partition("\t")
                 if not rest:
                     continue
@@ -1372,7 +1445,7 @@ def _cands_batch(conn: sqlite3.Connection, wanted: dict[int, set[int]], *,
                 except ValueError:
                     continue
                 if no in nos:
-                    yield int(pid), no, rest.split(" ")
+                    yield pid, no, rest.split(" ")
 
 
 def _match_unique(norms: list[str], stems: list[str], thresh: int
