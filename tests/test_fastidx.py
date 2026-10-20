@@ -284,3 +284,41 @@ def test_no_state_is_an_error_not_an_empty_answer(space: Path) -> None:
 
     with pytest.raises(OSError):
         FX.by_run(["verbiscinskii"])
+
+
+def test_parallel_rerank_gives_the_same_rows(space: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Дооцінка воркерами — ті самі рядки й бали, що в одному процесі."""
+    from nyshporka import htr_store as S
+    from nyshporka.search import store as ST
+
+    _build()
+    stem = S._norm("Вербищинскій")
+    conn = ST.connect(readonly=True)
+    try:
+        ids = [r for (r,) in conn.execute("select id from runs")]
+        one = ST._sweep_fast(conn, [stem], ids, 78)
+        monkeypatch.setattr(ST, "FAST_PARALLEL_PAGES", 1)
+        monkeypatch.setattr(ST, "FAST_CHUNK_PAGES", 1)
+        monkeypatch.setenv("NYSH_SWEEP_WORKERS", "2")
+        many = ST._sweep_fast(conn, [stem], ids, 78)
+    finally:
+        conn.close()
+    assert any(one.values()), "перевірка беззмістовна: нічого не знайшлось"
+    assert {k: sorted(v) for k, v in one.items()} == {k: sorted(v) for k, v in many.items()}
+
+
+def test_threaded_query_gives_the_same_candidates(space: Path,
+                                                  monkeypatch: pytest.MonkeyPatch) -> None:
+    """Терми частинами в потоках — та сама множина рядків, що одним запитом."""
+    from nyshporka import htr_store as S
+    from nyshporka.search import fastidx as FX
+
+    _build()
+    stems = [S._norm("Вербищинскій"), S._norm("Шевчук")]
+    monkeypatch.setattr(FX, "QUERY_THREADS", 1)
+    FX._ANSWERS.clear()
+    one = FX.candidates(stems)
+    monkeypatch.setattr(FX, "QUERY_THREADS", 4)
+    FX._ANSWERS.clear()
+    many = FX.candidates(stems)
+    assert one and one == many

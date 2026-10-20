@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import os
 import shutil
 import sqlite3
 import zlib
@@ -266,6 +267,8 @@ def query_terms(stems: list[str]) -> list[tuple[str, str, int]]:
     return list(dict.fromkeys(raw))
 
 
+#: Скільки потоків ділять терми запиту (див. `by_run`).
+QUERY_THREADS = min(8, os.cpu_count() or 1)
 #: Скільки відповідей індексу тримати в пам'яті процесу.
 ANSWERS_KEEP = 3
 #: Версія запиту (`query_terms`): входить у ключ кешу відповідей швидкого каналу в
@@ -286,7 +289,6 @@ def by_run(stems: list[str]) -> dict[int, list[tuple[int, int]]]:
     робить за три хвилини. Тому відповідь рахується раз на прізвище й кешується
     до наступної зміни індексу, а справа бере з неї свої рядки.
     """
-    import tantivy
 
     # Без стану відповіді немає — і це помилка, а не порожня відповідь: тихі нулі
     # лягли б у кеш швидкого каналу як «тут нічого» (рецензія 20.10.2026).
@@ -297,27 +299,50 @@ def by_run(stems: list[str]) -> dict[int, list[tuple[int, int]]]:
         return got
     index = _open(create=False)
     index.reload()
-    schema = index.schema
-    clauses = [(tantivy.Occur.Should, tantivy.Query.fuzzy_term_query(
-        schema, field, term, distance=d, transposition_cost_one=True, prefix=True))
-        for field, term, d in query_terms(stems)]
+    terms = query_terms(stems)
+    # 🔴 Частинами в потоках: запит до індексу однопотоковий, а терми
+    # незалежні. Рід із двома сотнями термів — 186 с одним запитом і 18 с вісьмома
+    # потоками, та сама множина рядків (замір 20.10.2026).
+    k = max(1, min(QUERY_THREADS, len(terms)))
+    parts = [terms[i::k] for i in range(k)]
+    if k == 1:
+        found = [_query_part(index, parts[0])] if terms else []
+    else:
+        from concurrent.futures import ThreadPoolExecutor
+
+        with ThreadPoolExecutor(max_workers=k) as ex:
+            found = list(ex.map(lambda part: _query_part(index, part), parts))
+    seen: set[tuple[int, int]] = set()
     out: dict[int, list[tuple[int, int]]] = {}
-    if clauses:
-        q = tantivy.Query.boolean_query(clauses)
-        searcher = index.searcher()
-        n = searcher.search(q, limit=1, count=True).count or 0
-        if n:
-            hits = [addr for _k, addr in searcher.search(q, limit=n, order_by_field="pid").hits]
-            for p, ln, rid in zip(searcher.fast_field_values("pid", hits),
-                                  searcher.fast_field_values("ln", hits),
-                                  searcher.fast_field_values("run", hits), strict=True):
-                if p is not None and ln is not None and rid is not None:
-                    out.setdefault(int(rid), []).append((int(p), int(ln)))
+    for part in found:
+        for p, ln, rid in part:
+            if (p, ln) not in seen:
+                seen.add((p, ln))
+                out.setdefault(rid, []).append((p, ln))
     # Відповідь поширеного прізвища — мільйони пар; тримаємо лише останні кілька.
     while len(_ANSWERS) >= ANSWERS_KEEP:
         _ANSWERS.pop(next(iter(_ANSWERS)))
     _ANSWERS[key] = out
     return out
+
+
+def _query_part(index: Any, terms: list[tuple[str, str, int]]) -> list[tuple[int, int, int]]:
+    """(pid, рядок, прогін) документів, де збігся хоч один із термів."""
+    import tantivy
+
+    schema = index.schema
+    q = tantivy.Query.boolean_query([(tantivy.Occur.Should, tantivy.Query.fuzzy_term_query(
+        schema, field, term, distance=d, transposition_cost_one=True, prefix=True))
+        for field, term, d in terms])
+    searcher = index.searcher()
+    n = searcher.search(q, limit=1, count=True).count or 0
+    if not n:
+        return []
+    hits = [addr for _k, addr in searcher.search(q, limit=n, order_by_field="pid").hits]
+    return [(int(p), int(ln), int(rid)) for p, ln, rid in zip(
+        searcher.fast_field_values("pid", hits), searcher.fast_field_values("ln", hits),
+        searcher.fast_field_values("run", hits), strict=True)
+        if p is not None and ln is not None and rid is not None]
 
 
 def known(stems: list[str]) -> bool:

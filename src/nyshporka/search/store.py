@@ -1922,7 +1922,13 @@ FAST_KEY_SUFFIX = ":fast"
 def _sweep_fast(conn: sqlite3.Connection, stems: list[str], run_ids: list[int],
                 thresh: int, *, whole: bool = False) -> dict[int, list[SweepRow]]:
     """Рядки-кандидати з Tantivy → той самий `_match_unique` лише по них.
-    `whole` — прогони покривають увесь стор, фільтр за ними зайвий."""
+    `whole` — прогони покривають увесь стор, фільтр за ними зайвий.
+
+    🔴 Дооцінка поширеного прізвища — мільйони рядків, і в одному процесі вона
+    програвала свіпу, який іде трьома воркерами («Мельник» на корпусі: 6 хв
+    дооцінки проти 4 хв усього свіпу, замір 20.10.2026). Тому від
+    `FAST_PARALLEL_PAGES` сторінок вона йде тими самими воркерами, що й свіп.
+    """
     from nyshporka.search import fastidx as FX
 
     wanted: dict[int, set[int]] = {}
@@ -1930,25 +1936,61 @@ def _sweep_fast(conn: sqlite3.Connection, stems: list[str], run_ids: list[int],
         wanted.setdefault(pid, set()).add(no)
     pages = _pages_for(conn, set(wanted), set(run_ids))
     pids = [p for p in sorted(wanted) if p in pages]
+    chunks = [{p: sorted(wanted[p]) for p in pids[i:i + FAST_CHUNK_PAGES]}
+              for i in range(0, len(pids), FAST_CHUNK_PAGES)]
+    workers = sweep_workers(len(chunks)) if len(pids) >= FAST_PARALLEL_PAGES else 1
+    if workers > 1:
+        import multiprocessing as mp
+        from concurrent.futures import ProcessPoolExecutor
+
+        from nyshporka.core.workspace import workspace
+
+        with ProcessPoolExecutor(max_workers=workers, mp_context=mp.get_context("spawn"),
+                                 initializer=_block_init, initargs=(workspace(),)) as ex:
+            parts = list(ex.map(_fast_job, [stems] * len(chunks), chunks,
+                                [thresh] * len(chunks)))
+    else:
+        parts = [_rerank_lines(conn, stems, ch, thresh) for ch in chunks]
     out: dict[int, list[SweepRow]] = {rid: [] for rid in run_ids}
-    for c0 in range(0, len(pids), 20000):
-        norms: list[str] = []
-        starts: list[int] = []
-        owner: list[tuple[int, int]] = []
-        chunk = {p: wanted[p] for p in pids[c0:c0 + 20000]}
-        for pid, no, ns in _cands_batch(conn, chunk):
-            starts.append(len(norms))
-            owner.append((pid, no))
-            norms.extend(ns)
-        by_line: dict[tuple[int, int], tuple[float, int, int]] = {}
-        for j, (sc, si) in _match_unique(norms, stems, thresh).items():
-            k = owner[bisect_right(starts, j) - 1]
-            cur = by_line.get(k)
-            if cur is None or sc > cur[0]:
-                by_line[k] = (sc, j, si)
-        for (pid, no), (sc, j, si) in by_line.items():
-            out[pages[pid][0]].append((pid, no, norms[j], round(sc), stems[si]))
+    for part in parts:
+        for pid, no, norm, sc, stem in part:
+            out[pages[pid][0]].append((pid, no, norm, sc, stem))
     return out
+
+
+#: Сторінок-кандидатів на одну пачку дооцінки.
+FAST_CHUNK_PAGES = 20_000
+#: Від скількох сторінок-кандидатів дооцінка йде воркерами: старт процесу —
+#: секунди, і для малої видачі він дорожчий за саму роботу.
+FAST_PARALLEL_PAGES = 40_000
+
+
+def _rerank_lines(conn: sqlite3.Connection, stems: list[str], chunk: dict[int, list[int]],
+                  thresh: int) -> list[SweepRow]:
+    """(pid, рядок, слово, бал, стем) для рядків пачки з балом не нижче порога."""
+    norms: list[str] = []
+    starts: list[int] = []
+    owner: list[tuple[int, int]] = []
+    for pid, no, ns in _cands_batch(conn, {p: set(v) for p, v in chunk.items()}):
+        starts.append(len(norms))
+        owner.append((pid, no))
+        norms.extend(ns)
+    by_line: dict[tuple[int, int], tuple[float, int, int]] = {}
+    for j, (sc, si) in _match_unique(norms, stems, thresh).items():
+        k = owner[bisect_right(starts, j) - 1]
+        cur = by_line.get(k)
+        if cur is None or sc > cur[0]:
+            by_line[k] = (sc, j, si)
+    return [(pid, no, norms[j], round(sc), stems[si])
+            for (pid, no), (sc, j, si) in by_line.items()]
+
+
+def _fast_job(stems: list[str], chunk: dict[int, list[int]], thresh: int) -> list[SweepRow]:
+    conn = connect(readonly=True)
+    try:
+        return _rerank_lines(conn, stems, chunk, thresh)
+    finally:
+        conn.close()
 
 
 # ── регекс по сирому тексту ──────────────────────────────────────────────────
