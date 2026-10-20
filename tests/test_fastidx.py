@@ -288,22 +288,34 @@ def test_no_state_is_an_error_not_an_empty_answer(space: Path) -> None:
 
 def test_parallel_rerank_gives_the_same_rows(space: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Дооцінка воркерами — ті самі рядки й бали, що в одному процесі."""
+    import concurrent.futures as CF
+
     from nyshporka import htr_store as S
     from nyshporka.search import store as ST
 
     _build()
-    stem = S._norm("Вербищинскій")
+    stems = [S._norm("Вербищинскій"), S._norm("Шевчук")]
+    pools: list[int] = []
+    real = CF.ProcessPoolExecutor
+
+    class Spy(real):  # type: ignore[misc, valid-type]
+        def __init__(self, *a, **kw):
+            pools.append(kw.get("max_workers") or 0)
+            super().__init__(*a, **kw)
+
     conn = ST.connect(readonly=True)
     try:
         ids = [r for (r,) in conn.execute("select id from runs")]
-        one = ST._sweep_fast(conn, [stem], ids, 78)
+        one = ST._sweep_fast(conn, stems, ids, 78)
         monkeypatch.setattr(ST, "FAST_PARALLEL_PAGES", 1)
         monkeypatch.setattr(ST, "FAST_CHUNK_PAGES", 1)
         monkeypatch.setenv("NYSH_SWEEP_WORKERS", "2")
-        many = ST._sweep_fast(conn, [stem], ids, 78)
+        monkeypatch.setattr(CF, "ProcessPoolExecutor", Spy)
+        many = ST._sweep_fast(conn, stems, ids, 78)
     finally:
         conn.close()
-    assert any(one.values()), "перевірка беззмістовна: нічого не знайшлось"
+    assert pools == [2], "воркери не стартували — тест міряв би послідовний шлях"
+    assert sum(len(v) for v in one.values()) >= 2, "перевірка беззмістовна: замало знайденого"
     assert {k: sorted(v) for k, v in one.items()} == {k: sorted(v) for k, v in many.items()}
 
 
@@ -322,3 +334,44 @@ def test_threaded_query_gives_the_same_candidates(space: Path,
     FX._ANSWERS.clear()
     many = FX.candidates(stems)
     assert one and one == many
+
+
+def test_a_stop_caches_nothing(space: Path) -> None:
+    """«Стоп» посеред швидкого каналу: пошук каже, що спинений, і обірвана
+    відповідь не лягає в кеш як повна (рецензія 20.10.2026)."""
+    from nyshporka import htr_store as S
+    from nyshporka.search import store as ST
+
+    _build()
+    stem = S._norm("Вербищинскій")
+    res = ST.sweep([stem], ["проба", "чужий"], fast=True, cancel=lambda: True)
+    assert res["cancelled"] is True
+    conn = ST.connect(readonly=True)
+    try:
+        assert conn.execute("select count(*) from sweeps where key like ?",
+                            ("%" + ST.FAST_KEY_SUFFIX + "%",)).fetchone()[0] == 0
+    finally:
+        conn.close()
+
+
+def test_a_fast_zero_is_confirmed_even_beside_cached_hits(space: Path,
+                                                          monkeypatch: pytest.MonkeyPatch) -> None:
+    """🔴 Хіти з кешу свіпу по ІНШОМУ прогону області не підтверджують нуля
+    швидкого каналу: ці прогони однаково проходить свіп (рецензія 20.10.2026)."""
+    from nyshporka import htr_store as S
+    from nyshporka.search import fastidx as FX
+    from nyshporka.search import store as ST
+
+    d = space / "reports" / "htr" / "чужий"
+    (d / "0002.txt").write_text("свідокъ Шевчукъ\n", encoding="utf-8")
+    meta = json.loads((d / "_htr_meta.json").read_text(encoding="utf-8"))
+    meta["pages"]["0002.jpg"] = {"lines": 1}
+    (d / "_htr_meta.json").write_text(json.dumps(meta), encoding="utf-8")
+    S._CACHE.clear()
+    S._RUNS_CACHE = None
+    _build()
+    stem = S._norm("Шевчук")
+    assert ST.sweep([stem], ["чужий"], fast=False)["hits"], "кеш свіпу не наповнився"
+    monkeypatch.setattr(FX, "by_run", lambda *_a, **_k: {})
+    res = ST.sweep([stem], ["проба", "чужий"], fast=True)
+    assert {h["name"] for h in res["hits"]} == {"проба", "чужий"}

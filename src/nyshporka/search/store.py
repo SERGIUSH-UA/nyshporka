@@ -1699,6 +1699,7 @@ def _sweep_put(conn: sqlite3.Connection, key: str, got: dict[int, list[SweepRow]
 PHASE_INDEX = "індекс нових прогонів"
 PHASE_SWEEP = "блоки корпусу"
 PHASE_PAGES = "сторінки корпусу"
+PHASE_FAST = "швидкий індекс: рядки-кандидати"
 
 
 def sweep(stems: list[str], runs: list[str], *, thresh: int = 78,
@@ -1781,6 +1782,9 @@ def sweep(stems: list[str], runs: list[str], *, thresh: int = 78,
         # ⚡ Передфільтр Tantivy (`search.fastidx`) для прогонів, які індекс несе
         # під свіжим штампом; решта — триграмами, як завжди.
         fast_runs: list[int] = []
+        fast_rows = 0
+        fast_error = ""
+        cancelled = False
         if todo and _fast_wanted(fast):
             from nyshporka.search import fastidx as FX
 
@@ -1792,20 +1796,26 @@ def sweep(stems: list[str], runs: list[str], *, thresh: int = 78,
         if fast_runs:
             try:
                 got_fast = _sweep_fast_cached(conn, stems, fast_runs, thresh, key,
-                                              whole=len(fast_runs) == _runs_total(conn))
+                                              whole=len(fast_runs) == _runs_total(conn),
+                                              progress=progress, cancel=cancel)
+            except _FastCancelled:
+                cancelled = True
+                fast_runs = []
+                todo = []
             except Exception as exc:  # індекс лише прискорює
                 # Зіпсований чи зайнятий індекс не валить пошук: ті самі прогони
                 # іде прочесати точний шлях, триграми (рецензія 20.10.2026).
-                print(f"⚠ швидкий індекс недоступний ({type(exc).__name__}: {exc}) — "
-                      f"шукаю свіпом", file=sys.stderr)
+                fast_error = f"{type(exc).__name__}: {exc}"
+                print(f"⚠ швидкий індекс недоступний ({fast_error}) — шукаю свіпом",
+                      file=sys.stderr)
                 fast_runs = []
             else:
                 for lst in got_fast.values():
                     rows.extend(lst)
+                    fast_rows += len(lst)
                 fast_set = set(fast_runs)
                 todo = [rid for rid in todo if rid not in fast_set]
         blocks = _blocks_by_pages(conn, todo)
-        cancelled = False
         workers = sweep_workers(len(blocks))
         if workers > 1:
             outs, cancelled = _sweep_parallel(conn, stems, blocks, thresh, key, workers,
@@ -1832,9 +1842,14 @@ def sweep(stems: list[str], runs: list[str], *, thresh: int = 78,
             for lst in got.values():
                 rows.extend(lst)
             _sweep_put(conn, key, got)
-        if fast_runs and not rows and not cancelled:
+        if fast_runs and not fast_rows and not cancelled:
             # 🔴 Нуль не друкується на передфільтрі: швидкий канал губить частину
             # смуги 90–94, тож «немає» по області підтверджує свіп триграмами.
+            # Рахуються рядки САМЕ швидкої частини: хіти з кешу свіпу по інших
+            # прогонах тієї ж області нуля швидкого каналу не підтверджують
+            # (рецензія 20.10.2026). Одиниця — область, як усюди в пакеті: пошук
+            # по серії питає справу за справою, і нуль справи підтверджує свіп
+            # цієї справи; поштучно по прогонах корпусу це був би повний свіп.
             for block in _blocks_by_pages(conn, fast_runs):
                 got = _sweep_block(conn, stems, block, thresh, cancel=cancel)
                 if got is None:
@@ -1854,7 +1869,7 @@ def sweep(stems: list[str], runs: list[str], *, thresh: int = 78,
         return {"hits": hits, "scanned": len(ready), "runs": len(runs),
                 "unindexed": missing, "backend": "store", "cached": len(cached),
                 "computed": len(todo), "cancelled": cancelled, "rules_stale": rstale,
-                "fast_runs": len(fast_runs)}
+                "fast_runs": len(fast_runs), "fast_error": fast_error}
     finally:
         conn.close()
 
@@ -1891,8 +1906,15 @@ def _runs_total(conn: sqlite3.Connection) -> int:
     return int(conn.execute("select count(*) from runs").fetchone()[0])
 
 
+class _FastCancelled(Exception):
+    """Людина спинила пошук посеред швидкого каналу: нічого не кешувати."""
+
+
 def _sweep_fast_cached(conn: sqlite3.Connection, stems: list[str], run_ids: list[int],
-                       thresh: int, key: str, *, whole: bool) -> dict[int, list[SweepRow]]:
+                       thresh: int, key: str, *, whole: bool,
+                       progress: Callable[[int, int, str], None] | None = None,
+                       cancel: Callable[[], bool] | None = None,
+                       ) -> dict[int, list[SweepRow]]:
     """Прогони через Tantivy, з кешем під окремим ключем: його відповідь не та
     сама, що в триграм, і змішувати їх в одному рядку кешу не можна."""
     from nyshporka.search import fastidx as FX
@@ -1909,7 +1931,8 @@ def _sweep_fast_cached(conn: sqlite3.Connection, stems: list[str], run_ids: list
                 out[int(rid)] = _unpack(body)
     todo = [rid for rid in run_ids if rid not in out]
     if todo:
-        got = _sweep_fast(conn, stems, todo, thresh, whole=whole and not out)
+        got = _sweep_fast(conn, stems, todo, thresh, whole=whole and not out,
+                          progress=progress, cancel=cancel)
         _sweep_put(conn, fkey, got)
         out.update(got)
     return out
@@ -1920,7 +1943,9 @@ FAST_KEY_SUFFIX = ":fast"
 
 
 def _sweep_fast(conn: sqlite3.Connection, stems: list[str], run_ids: list[int],
-                thresh: int, *, whole: bool = False) -> dict[int, list[SweepRow]]:
+                thresh: int, *, whole: bool = False,
+                progress: Callable[[int, int, str], None] | None = None,
+                cancel: Callable[[], bool] | None = None) -> dict[int, list[SweepRow]]:
     """Рядки-кандидати з Tantivy → той самий `_match_unique` лише по них.
     `whole` — прогони покривають увесь стор, фільтр за ними зайвий.
 
@@ -1934,7 +1959,11 @@ def _sweep_fast(conn: sqlite3.Connection, stems: list[str], run_ids: list[int],
     # Прогін кожного рядка індекс віддає сам (поле `run`): звірка сторінок зі
     # стором (`_pages_for`) на мільйоні кандидатів коштувала 121 с — більше за
     # усю дооцінку (замір 20.10.2026).
+    if progress:
+        progress(0, 1, PHASE_FAST)
     got = FX.by_run(stems)
+    if cancel and cancel():
+        raise _FastCancelled
     run_of: dict[int, int] = {}
     wanted: dict[int, set[int]] = {}
     for rid in (got.keys() if whole else run_ids):
@@ -1947,16 +1976,34 @@ def _sweep_fast(conn: sqlite3.Connection, stems: list[str], run_ids: list[int],
     workers = sweep_workers(len(chunks)) if len(pids) >= FAST_PARALLEL_PAGES else 1
     if workers > 1:
         import multiprocessing as mp
-        from concurrent.futures import ProcessPoolExecutor
+        from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
 
         from nyshporka.core.workspace import workspace
 
-        with ProcessPoolExecutor(max_workers=workers, mp_context=mp.get_context("spawn"),
-                                 initializer=_block_init, initargs=(workspace(),)) as ex:
-            parts = list(ex.map(_fast_job, [stems] * len(chunks), chunks,
-                                [thresh] * len(chunks)))
+        parts: list[list[SweepRow]] = []
+        ex = ProcessPoolExecutor(max_workers=workers, mp_context=mp.get_context("spawn"),
+                                 initializer=_block_init, initargs=(workspace(),))
+        try:
+            pending = {ex.submit(_fast_job, stems, ch, thresh) for ch in chunks}
+            while pending:
+                # Таймаут лише заради `cancel`: пачка йде секунди, і «стоп» не
+                # мусить чекати кінця всієї дооцінки (рецензія 20.10.2026).
+                if cancel and cancel():
+                    raise _FastCancelled
+                done, pending = wait(pending, timeout=1.0, return_when=FIRST_COMPLETED)
+                parts.extend(f.result() for f in done)
+                if progress:
+                    progress(len(parts), len(chunks), PHASE_FAST)
+        finally:
+            ex.shutdown(wait=True, cancel_futures=True)
     else:
-        parts = [_rerank_lines(conn, stems, ch, thresh) for ch in chunks]
+        parts = []
+        for i, ch in enumerate(chunks, 1):
+            if cancel and cancel():
+                raise _FastCancelled
+            parts.append(_rerank_lines(conn, stems, ch, thresh))
+            if progress:
+                progress(i, len(chunks), PHASE_FAST)
     out: dict[int, list[SweepRow]] = {rid: [] for rid in run_ids}
     for part in parts:
         for pid, no, norm, sc, stem in part:
