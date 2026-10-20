@@ -1163,7 +1163,7 @@ SHORT_NEAR = 4
 
 
 def near(q: str, other: str, scope: str | Sequence[str] = "", *, window: int = 1,
-         thresh: int = 78, limit: int = 40) -> dict[str, Any]:
+         thresh: int = 78, limit: int = 40, follow: bool = False) -> dict[str, Any]:
     """Два слова поруч: ім'я + прізвище, прізвище + село, ім'я + по батькові,
     два прізвища одного запису.
 
@@ -1180,6 +1180,10 @@ def near(q: str, other: str, scope: str | Sequence[str] = "", *, window: int = 1
     без дефіса), тож перше слово буває знайдене й на наступному рядку. Вікно
     рахується від кожного рядка, де воно знайдене, — тобто для слова в кінці
     рядка вниз воно на рядок ширше.
+
+    `follow` — друге слово ОДРАЗУ після першого в тому самому рядку, у тому
+    порядку, як набрано (`store.follow_lines`): ім'я + по батькові, ім'я +
+    прізвище. Вікно тоді — той самий рядок.
     """
     from nyshporka import htr_store as S
     from nyshporka.core import progress as P
@@ -1194,8 +1198,11 @@ def near(q: str, other: str, scope: str | Sequence[str] = "", *, window: int = 1
         if got.get("error"):
             return {"error": str(got["error"])}
     first, second = (q, other), (qa, qb)
-    if max(map(len, qb["asked"])) > max(map(len, qa["asked"])):
+    swapped = max(map(len, qb["asked"])) > max(map(len, qa["asked"]))
+    if swapped:
         first, second = (other, q), (qb, qa)
+    if follow:
+        window = 0
 
     short: list[str] = []
 
@@ -1218,9 +1225,25 @@ def near(q: str, other: str, scope: str | Sequence[str] = "", *, window: int = 1
     got = ST.sweep(stems_a, names, thresh=thresh, build_budget=budget,
                    progress=P.report, cancel=P.stopped)
     hits_a = got["hits"]
-    pairs = ST.near_lines(stems_b, [(h["name"], h["page"], h["line_no"], h["norm"])
-                                    for h in hits_a], window=window, thresh=thresh,
-                           first=stems_a)
+    spots = [(h["name"], h["page"], h["line_no"], h["norm"]) for h in hits_a]
+    # 🔴 У `follow` відбір без правила «схоже на перше — не друге»: інакше
+    # «Петро» поруч із довшим «Петрович» (шукається першим) випадав ще до суду
+    # сусідства, а сусідство й так розводить два різні токени (рецензія 20.10.2026).
+    pairs = ST.near_lines(stems_b, spots, window=window, thresh=thresh,
+                          first=None if follow else stems_a)
+    if follow:
+        # Рядки, де друге слово є взагалі, — і лише на них порядок по сирому
+        # тексту: сирий рядок дорожчий за кандидатів, а пар у рази менше, ніж
+        # місць першого слова.
+        idx = sorted(pairs)
+        left, right = (stems_b, stems_a) if swapped else (stems_a, stems_b)
+        pairs = {}
+        for j, (lw, rw) in ST.follow_lines(left, right, [spots[i] for i in idx],
+                                           thresh=thresh).items():
+            mine, theirs = (rw, lw) if swapped else (lw, rw)
+            hits_a[idx[j]] = {**hits_a[idx[j]], "norm": mine[0], "score": mine[1],
+                              "stem": mine[2]}
+            pairs[idx[j]] = (hits_a[idx[j]]["line_no"], theirs[0], theirs[1], theirs[2])
     found: list[dict[str, Any]] = []
     for i, (no, norm, score, stem) in pairs.items():
         h = dict(hits_a[i])
@@ -1254,6 +1277,7 @@ def near(q: str, other: str, scope: str | Sequence[str] = "", *, window: int = 1
         h["near"]["stem_origin"] = second[1]["origin"].get(str(h["near"].get("stem") or ""),
                                                            NAMES.ORIGIN_QUERY)
     return {"q": first[0], "other": first[1], "window": window, "thresh": thresh,
+            "follow": follow,
             "hits": shown, "total": len(found),
             "pages_hit": len({(h["name"], h["page"]) for h in found}),
             "stems": stems_a, "stems_other": stems_b, "stems_short_dropped": short,

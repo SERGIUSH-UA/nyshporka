@@ -67,6 +67,7 @@ import functools
 import hashlib
 import inspect
 import io
+import itertools
 import json
 import os
 import re
@@ -1887,8 +1888,11 @@ def sweep(stems: list[str], runs: list[str], *, thresh: int = 78,
                 # Зіпсований чи зайнятий індекс не валить пошук: ті самі прогони
                 # іде прочесати точний шлях, триграми (рецензія 20.10.2026).
                 fast_error = f"{type(exc).__name__}: {exc}"
-                print(f"⚠ швидкий індекс недоступний ({fast_error}) — шукаю свіпом",
-                      file=sys.stderr)
+                from nyshporka.search import fastidx as FX
+
+                why = ("заширокий для швидкого індексу" if isinstance(exc, FX.TooBroad)
+                       else "швидкий індекс недоступний")
+                print(f"⚠ {why} ({exc}) — шукаю свіпом", file=sys.stderr)
                 fast_runs = []
             else:
                 for lst in got_fast.values():
@@ -2157,16 +2161,9 @@ def near_lines(stems: list[str], spots: list[Spot], *, window: int = 1,
         return {}
     conn = connect(readonly=True)
     try:
-        run_ids = _run_ids(conn, sorted({str(s[0]) for s in spots}))
-        pid_of: dict[tuple[str, str], int] = {}
-        for run, rid in run_ids.items():
-            for pid, page in conn.execute("select id, page from pages where run_id=?", (rid,)):
-                pid_of[(run, str(page))] = int(pid)
+        at = _spot_pids(conn, spots)
         wanted: dict[int, set[int]] = {}
-        at: list[int | None] = []
-        for run, page, no, _w in spots:
-            pid = pid_of.get((str(run), str(page)))
-            at.append(pid)
+        for (_run, _page, no, _w), pid in zip(spots, at, strict=True):
             if pid is not None:
                 wanted.setdefault(pid, set()).update(range(max(0, no - window), no + window + 1))
         norms: list[str] = []
@@ -2202,6 +2199,90 @@ def near_lines(stems: list[str], spots: list[Spot], *, window: int = 1,
                         best = (key, line, w, si)
         if best is not None:
             out[i] = (best[1], best[2], best[0][0], stems[best[3]])
+    return out
+
+
+def _spot_pids(conn: sqlite3.Connection, spots: list[Spot]) -> list[int | None]:
+    """pid сторінки кожного місця (None — сторінки в сторі немає)."""
+    run_ids = _run_ids(conn, sorted({str(s[0]) for s in spots}))
+    pid_of: dict[tuple[str, str], int] = {}
+    for run, rid in run_ids.items():
+        for pid, page in conn.execute("select id, page from pages where run_id=?", (rid,)):
+            pid_of[(run, str(page))] = int(pid)
+    return [pid_of.get((str(run), str(page))) for run, page, _no, _w in spots]
+
+
+#: Пара слів одного рядка: (слово, бал, стем) лівого й (слово, бал, стем) правого.
+Follow = tuple[tuple[str, int, str], tuple[str, int, str]]
+
+
+def follow_lines(left: list[str], right: list[str], spots: list[Spot], *,
+                 thresh: int = 78) -> dict[int, Follow]:
+    """Праве слово ОДРАЗУ після лівого в тому самому рядку: ім'я + по батькові.
+
+    Повертає індекс місця → найсильніша така пара в рядку місця. Слова — норми
+    токенів сирого рядка, бал — той самий `_match_unique`, що в свіпі.
+
+    🔴 Порядок і сусідство судяться по сирому рядку, а не по кандидатах стору:
+    кандидати — це ще й пари та склейки слів, записані без роздільника, тож із
+    них не видно, котре слово стоїть за котрим. Через це `near` на корпусі давав
+    «Кирила Осипова» (по батькові навпаки) і двох різних людей сусідніх рядків
+    на рівних із «Іосифъ Кириловъ» — 97 тис. пар, верхні 300 усі з балом 100
+    (20.10.2026).
+
+    ⚠ Правила `near_lines` «схоже на перше — не друге» тут немає й не треба:
+    ліве й праве — різні токени рядка, тож саме перше слово другим стати не
+    може, а «Петръ Петровъ» (ім'я й по батькові одного кореня) — справжня пара.
+    Тому й відбір рядків для цього режиму (`textops.near`) іде без нього.
+
+    ⚠ Межа — рядок: пара, розірвана переносом («…Іосифъ» / «Кириловъ…»), тут
+    не знаходиться; її ловить звичайний `near` з вікном 1.
+    """
+    if not spots or not left or not right:
+        return {}
+    conn = connect(readonly=True)
+    try:
+        at = _spot_pids(conn, spots)
+        nos: dict[int, set[int]] = {}
+        for (_run, _page, no, _w), pid in zip(spots, at, strict=True):
+            if pid is not None:
+                nos.setdefault(pid, set()).add(no)
+        line_of: dict[tuple[int, int], str] = {}
+        for pid, want in nos.items():
+            lines = _raw_lines(conn, pid)
+            for no in want:
+                if 0 < no <= len(lines):
+                    line_of[(pid, no)] = lines[no - 1]
+    finally:
+        conn.close()
+    from nyshporka import htr_store as S
+
+    # Сусіди — лише через пробіл: кома, крапка чи риска між словами — це вже
+    # перелік чи межа речення («Іосифъ, Кириловъ» — двоє людей), а не ім'я з
+    # по батькові.
+    adj: list[list[tuple[str, str]]] = []
+    for (_run, _page, no, _w), pid in zip(spots, at, strict=True):
+        line = line_of.get((pid, no), "") if pid is not None else ""
+        ms = list(S._TOKEN_RE.finditer(line))
+        adj.append([(_norm(m.group()), _norm(n.group())) for m, n in itertools.pairwise(ms)
+                    if line[m.end():n.start()].isspace()])
+    words = sorted({w for ps in adj for pair in ps for w in pair if w})
+    as_left = {words[j]: (round(sc), si)
+               for j, (sc, si) in _match_unique(words, left, thresh).items()}
+    as_right = {words[j]: (round(sc), si)
+                for j, (sc, si) in _match_unique(words, right, thresh).items()}
+    out: dict[int, Follow] = {}
+    for i, ps in enumerate(adj):
+        best: tuple[int, Follow] | None = None
+        for a, b in ps:
+            la, rb = as_left.get(a), as_right.get(b)
+            if la is None or rb is None:
+                continue
+            got = ((a, la[0], left[la[1]]), (b, rb[0], right[rb[1]]))
+            if best is None or la[0] + rb[0] > best[0]:
+                best = (la[0] + rb[0], got)
+        if best is not None:
+            out[i] = best[1]
     return out
 
 

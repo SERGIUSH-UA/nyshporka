@@ -651,6 +651,9 @@ class TextNearArgs(BaseModel):
                                     "(перенос), більше — сусідні рядки запису")
     thresh: int = Field(default=78, ge=50, le=100)
     limit: int = Field(default=40, ge=1, le=5000)
+    follow: bool = Field(default=False,
+                         description="друге слово одразу після першого в тому самому рядку, "
+                                     "у набраному порядку: ім'я + по батькові, ім'я + прізвище")
 
 
 @op("text.near", summary="Два слова поруч: ім'я + прізвище, прізвище + село, два прізвища",
@@ -669,7 +672,8 @@ def text_near(a: TextNearArgs) -> Envelope:
     from nyshporka.search import textops as T
 
     try:
-        res = T.near(a.q, a.other, a.case, window=a.window, thresh=a.thresh, limit=a.limit)
+        res = T.near(a.q, a.other, a.case, window=a.window, thresh=a.thresh, limit=a.limit,
+                     follow=a.follow)
     except ValueError as exc:
         return fail(str(exc))
     if res.get("error"):
@@ -687,8 +691,9 @@ def text_near(a: TextNearArgs) -> Envelope:
     if res["rules_stale"]:
         env.warn("rules_stale", RULES_STALE_MSG)
     if res["fast_error"]:
-        env.warn("fast_failed", f"швидкий індекс недоступний ({res['fast_error']}) — "
-                                f"перше слово шукано свіпом")
+        why = ("запит заширокий для швидкого індексу" if "TooBroad" in res["fast_error"]
+               else "швидкий індекс недоступний")
+        env.warn("fast_failed", f"{why} ({res['fast_error']}) — перше слово шукано свіпом")
     short = [s for s in res["stems_other"] if len(s) < 5]
     if short:
         env.warn("short_stems",
@@ -701,9 +706,11 @@ def text_near(a: TextNearArgs) -> Envelope:
                  f"«{res['q']}» не знайдено — «{res['other']}» поруч з ним не шукали; "
                  f"прочесано прогонів {res['runs']}, сторінок {res['pages']}")
     elif not res["hits"]:
+        where = ("сусіднім словом у набраному порядку" if res["follow"]
+                 else f"поруч (±{res['window']})")
         env.warn("zero_with_denominator",
                  f"пари не знайшлось — «{res['q']}» знайдено на {res['first_total']} рядках "
-                 f"({res['first_pages']} стор.), «{res['other']}» поруч (±{res['window']}) "
+                 f"({res['first_pages']} стор.), «{res['other']}» {where} "
                  f"не стоїть на жодному; прочесано прогонів {res['runs']}, сторінок "
                  f"{res['pages']}")
     return env

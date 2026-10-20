@@ -413,13 +413,16 @@ def near_cmd(
                                help="рядків між словами: 0 — той самий рядок, 1 — ще й сусідні"),
     thresh: int = typer.Option(78, "--thresh", help="поріг схожості 50-100"),
     limit: int = typer.Option(40, "--limit", help="скільки показати"),
+    follow: bool = typer.Option(False, "--follow",
+                                help="друге слово одразу після першого, у набраному порядку: "
+                                     "ім'я + по батькові («Іосиф» «Кирил»)"),
     as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Два слова поруч: ім'я + прізвище, прізвище + село, ім'я + по батькові."""
     from nyshporka import ops as O
 
     env = O.call("text.near", {"q": q, "other": other, "case": _scope(case), "window": window,
-                               "thresh": thresh, "limit": limit})
+                               "thresh": thresh, "limit": limit, "follow": follow})
     if _answer(env, as_json):
         return
     d = env.data
@@ -434,8 +437,9 @@ def near_cmd(
         if n.get("line_no") != h.get("line_no"):
             console.print(f"    [muted]{n.get('line_no')}:[/muted] {n.get('line')}")
     console.print("")
+    rel = "сусіднім словом" if d.get("follow") else f"±{d['window']}"
     console.print(f"[bold]знаменник:[/bold] «{d['q']}» — {d['first_total']} рядків на "
-                  f"{d['first_pages']} стор.; пар з «{d['other']}» (±{d['window']}) — "
+                  f"{d['first_pages']} стор.; пар з «{d['other']}» ({rel}) — "
                   f"{d['total']} на {d['pages_hit']} стор. · прогонів {d['runs']} · "
                   f"сторінок {d['pages']}")
 

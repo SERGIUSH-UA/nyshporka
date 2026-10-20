@@ -24,8 +24,37 @@ PAGES = {
 }
 
 
+#: Ім'я + по батькові: пара лише тоді, коли друге слово стоїть одразу за першим.
+FOLLOW = {
+    "0001": "крестьянинъ Іосифъ Кириловъ Вербищинскій\n",
+    # по батькові навпаки — це Кирило Осипович
+    "0002": "Кирила Осипова жена Марія\n",
+    # «Кирилъ» у сусідньому рядку — інша людина
+    "0003": "Іосифъ Петровъ\nсвидѣтель Кирилъ Шевчукъ\n",
+    # той самий рядок, але між ними слова
+    "0004": "Іосифъ Вербищинскій и Кирилъ\n",
+    # «Осип» із гнізда імені «Іосиф»
+    "0005": "Осипъ Кириловъ сынъ\n",
+    # ім'я й по батькові одного кореня
+    "0006": "Петръ Петровъ Вербищинскій\n",
+    "0007": "сынъ Іосифа Кирилова\n",
+    # кома між словами — перелік двох людей, не ім'я з по батькові
+    "0008": "Іосифъ, Кириловъ и Марія\n",
+    "0009": "крестьянинъ Петро Петровичъ\n",
+}
+
+
 @pytest.fixture
 def space(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    yield from _space(tmp_path, monkeypatch, PAGES)
+
+
+@pytest.fixture
+def follow_space(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    yield from _space(tmp_path, monkeypatch, FOLLOW)
+
+
+def _space(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, pages: dict[str, str]):
     from nyshporka.core import workspace as W
 
     (tmp_path / "nyshporka.toml").write_text("[workspace]\nschema = 1\n", encoding="utf-8")
@@ -33,11 +62,11 @@ def space(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     W.use(W.Workspace(root=tmp_path, name="тест", origin="test"))
     d = tmp_path / "reports" / "htr" / "проба"
     d.mkdir(parents=True)
-    for stem, text in PAGES.items():
+    for stem, text in pages.items():
         (d / f"{stem}.txt").write_text(text, encoding="utf-8")
     (d / "_htr_meta.json").write_text(json.dumps({
         "model": "pysar_cyr_v17.pt", "script": "cyrillic",
-        "pages": {f"{s}.jpg": {"lines": 4} for s in PAGES}}), encoding="utf-8")
+        "pages": {f"{s}.jpg": {"lines": 4} for s in pages}}), encoding="utf-8")
     from nyshporka import htr_store as S
     from nyshporka.search import store as ST
 
@@ -50,11 +79,12 @@ def space(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     yield tmp_path
     W.reset()
 
-def _pairs(q: str, other: str, window: int = 1) -> dict[str, tuple[int, int, str, str]]:
+def _pairs(q: str, other: str, window: int = 1, *, follow: bool = False
+           ) -> dict[str, tuple[int, int, str, str]]:
     """Сторінка → (рядок першого, рядок другого, слово першого, слово другого)."""
     from nyshporka.search import textops as T
 
-    res = T.near(q, other, "проба", window=window, limit=100)
+    res = T.near(q, other, "проба", window=window, limit=100, follow=follow)
     assert not res.get("error"), res
     return {str(h["page"]).split(".")[0]: (h["line_no"], h["near"]["line_no"], h["matched"],
                                           h["near"]["matched"]) for h in res["hits"]}
@@ -153,3 +183,38 @@ def test_a_missing_first_word_is_not_reported_as_a_missing_pair(space: Path) -> 
     msg = " ".join(w.text for w in env.warnings)
     assert "не знайдено" in msg and "не шукали" in msg
     assert "пари не знайшлось" not in msg
+
+
+def test_follow_takes_only_the_word_right_after_the_first(follow_space: Path) -> None:
+    loose = _pairs("Іосиф", "Кирил", window=1)
+    # без режиму пара — будь-де поруч: перевірка не беззмістовна
+    assert {"0002", "0003", "0004", "0008"} <= set(loose)
+    got = _pairs("Іосиф", "Кирил", follow=True)
+    assert set(got) == {"0001", "0005", "0007"}
+    assert got["0001"] == (1, 1, "Іосифъ", "Кириловъ")
+    assert got["0005"][2:] == ("Осипъ", "Кириловъ")
+
+
+def test_follow_keeps_the_typed_order_when_the_search_swaps_words(follow_space: Path) -> None:
+    """Довше слово шукається першим, але порядок пари — як набрано."""
+    assert set(_pairs("Іосиф", "Кирилов", follow=True)) == {"0001", "0005", "0007"}
+    # «Осипов» довше за «Кирил» — шукається першим, а пара однаково «Кирила Осипова»
+    got = _pairs("Кирил", "Осипов", follow=True)
+    assert set(got) == {"0002"}
+    # хіт — слово, яке шукалось першим (`q` відповіді), поруч — друге
+    assert got["0002"][2:] == ("Осипова", "Кирила")
+
+
+def test_follow_takes_a_name_and_patronymic_of_one_root(follow_space: Path) -> None:
+    assert set(_pairs("Петръ", "Петровъ", follow=True)) == {"0006", "0009"}
+    # «Петрович» довший — шукається першим, «Петро» судиться поруч
+    assert set(_pairs("Петро", "Петрович", follow=True)) == {"0006", "0009"}
+
+
+def test_follow_zero_names_its_denominator(follow_space: Path) -> None:
+    from nyshporka import ops as O
+
+    env = O.call("text.near", {"q": "Іосиф", "other": "Шевчукъ", "case": "проба",
+                               "follow": True})
+    msg = " ".join(w.text for w in env.warnings)
+    assert "пари не знайшлось" in msg and "сусіднім словом" in msg

@@ -278,6 +278,47 @@ def test_a_broken_index_falls_back_to_the_sweep(space: Path,
     assert _lines(res) and res["fast_runs"] == 0
 
 
+def test_a_too_broad_query_goes_by_the_sweep_before_collecting(
+        space: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """🔴 Короткий стем бере п'яту частину корпусу, і збір відповіді валив процес
+    відмовою пам'яті в Rust (20.10.2026). Ширший за межу запит не збирається —
+    ті самі рядки дає свіп, а серія не перераховує його на кожній справі."""
+    from nyshporka import htr_store as S
+    from nyshporka.search import fastidx as FX
+    from nyshporka.search import store as ST
+
+    _build()
+    stem = S._norm("Вербищинскій")
+    slow = ST.sweep([stem], ["проба", "чужий"], fast=False)
+    conn = ST.connect()
+    try:
+        # Кеш свіпу віддав би відповідь, не питаючи індексу.
+        conn.execute("delete from sweeps")
+        conn.commit()
+    finally:
+        conn.close()
+    FX._ANSWERS.clear()
+    FX._BROAD.clear()
+    monkeypatch.setattr(FX, "MAX_HITS", 0)
+    collected: list[int] = []
+    real_collect = FX._collect_part
+    monkeypatch.setattr(FX, "_collect_part",
+                        lambda *a: collected.append(1) or real_collect(*a))
+    with pytest.raises(FX.TooBroad):
+        FX.by_run([stem])
+    assert not collected, "відповідь збиралась, хоч запит ширший за межу"
+    counted: list[int] = []
+    real_count = FX._count_part
+    monkeypatch.setattr(FX, "_count_part", lambda *a: counted.append(1) or real_count(*a))
+    with pytest.raises(FX.TooBroad):
+        FX.by_run([stem])
+    assert not counted, "заширокий запит перераховано вдруге"
+    res = ST.sweep([stem], ["проба", "чужий"], fast=True)
+    assert _lines(slow), "перевірка беззмістовна: свіп нічого не знайшов"
+    assert _lines(res) == _lines(slow) and res["fast_runs"] == 0
+    FX._BROAD.clear()
+
+
 def test_no_state_is_an_error_not_an_empty_answer(space: Path) -> None:
     """Порожня відповідь без стану лягла б у кеш як «тут нічого» — тож помилка."""
     from nyshporka.search import fastidx as FX

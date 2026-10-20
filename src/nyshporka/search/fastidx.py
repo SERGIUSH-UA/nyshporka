@@ -269,6 +269,17 @@ def query_terms(stems: list[str]) -> list[tuple[str, str, int]]:
 
 #: Скільки потоків ділять терми запиту (див. `by_run`).
 QUERY_THREADS = min(8, os.cpu_count() or 1)
+#: Скільки рядків індексу запит може зібрати; ширший іде свіпом (див. `by_run`).
+#: Межа — сума по частинах (рядок, що збігся термами двох частин, рахується двічі).
+#: Замір 20.10.2026 (сума по частинах запиту, корпус 227 млн рядків): Шевченко 1,1 млн,
+#: Мельник 2,8, Коваль 13,1; Іосиф із гніздом (там «Осип») — понад 50, Іван — 279.
+MAX_HITS = 16_000_000
+
+
+class TooBroad(RuntimeError):
+    """Запит бере забагато рядків індексу — передфільтр тут не звужує."""
+
+
 #: Скільки відповідей індексу тримати в пам'яті процесу.
 ANSWERS_KEEP = 3
 #: Версія запиту (`query_terms`): входить у ключ кешу відповідей швидкого каналу в
@@ -277,6 +288,8 @@ QUERY_VERSION = 2
 
 #: Відповіді індексу на процес: (стеми, штамп стану) → прогін → [(pid, рядок)].
 _ANSWERS: dict[tuple[str, tuple[str, ...], int], dict[int, list[tuple[int, int]]]] = {}
+#: Запити, заширокі для індексу (той самий ключ) → чому.
+_BROAD: dict[tuple[str, tuple[str, ...], int], str] = {}
 
 
 def by_run(stems: list[str]) -> dict[int, list[tuple[int, int]]]:
@@ -297,6 +310,9 @@ def by_run(stems: list[str]) -> dict[int, list[tuple[int, int]]]:
     got = _ANSWERS.get(key)
     if got is not None:
         return got
+    if key in _BROAD:
+        # Пошук по серії кличе індекс на кожну справу — не перераховувати.
+        raise TooBroad(_BROAD[key])
     index = _open(create=False)
     index.reload()
     terms = query_terms(stems)
@@ -304,14 +320,23 @@ def by_run(stems: list[str]) -> dict[int, list[tuple[int, int]]]:
     # незалежні. Рід із двома сотнями термів — 186 с одним запитом і 18 с вісьмома
     # потоками, та сама множина рядків (замір 20.10.2026).
     k = max(1, min(QUERY_THREADS, len(terms)))
-    parts = [terms[i::k] for i in range(k)]
-    if k == 1:
-        found = [_query_part(index, parts[0])] if terms else []
-    else:
-        from concurrent.futures import ThreadPoolExecutor
+    parts = [terms[i::k] for i in range(k)] if terms else []
+    from concurrent.futures import ThreadPoolExecutor
 
-        with ThreadPoolExecutor(max_workers=k) as ex:
-            found = list(ex.map(lambda part: _query_part(index, part), parts))
+    with ThreadPoolExecutor(max_workers=k) as ex:
+        counted = list(ex.map(lambda part: _count_part(index, part), parts))
+        total = sum(n for _s, _q, n in counted)
+        # 🔴 Спершу рахунок, потім збір. Короткий стем («Осип» у гнізді «Іосифа»)
+        # бере п'яту частину корпусу — 50 млн рядків (з гніздом «Іосифа» сума частин
+        # 78 млн із 227), і Tantivy, збираючи їх,
+        # просив 2,3 ГБ одним шматком: відмова пам'яті в Rust не ловиться, процес
+        # падав без відповіді (20.10.2026). Такому запиту передфільтр однаково не
+        # допомагає, тож він іде свіпом триграмами (`store.sweep` ловить помилку).
+        if total > MAX_HITS:
+            _BROAD[key] = (f"запит бере {total:_} рядків індексу, межа {MAX_HITS:_}"
+                           .replace("_", " "))
+            raise TooBroad(_BROAD[key])
+        found = list(ex.map(lambda c: _collect_part(*c), counted))
     seen: set[tuple[int, int]] = set()
     out: dict[int, list[tuple[int, int]]] = {}
     for part in found:
@@ -326,8 +351,8 @@ def by_run(stems: list[str]) -> dict[int, list[tuple[int, int]]]:
     return out
 
 
-def _query_part(index: Any, terms: list[tuple[str, str, int]]) -> list[tuple[int, int, int]]:
-    """(pid, рядок, прогін) документів, де збігся хоч один із термів."""
+def _count_part(index: Any, terms: list[tuple[str, str, int]]) -> tuple[Any, Any, int]:
+    """(searcher, запит, скільки документів він бере) для частини термів."""
     import tantivy
 
     schema = index.schema
@@ -335,7 +360,11 @@ def _query_part(index: Any, terms: list[tuple[str, str, int]]) -> list[tuple[int
         schema, field, term, distance=d, transposition_cost_one=True, prefix=True))
         for field, term, d in terms])
     searcher = index.searcher()
-    n = searcher.search(q, limit=1, count=True).count or 0
+    return searcher, q, searcher.search(q, limit=1, count=True).count or 0
+
+
+def _collect_part(searcher: Any, q: Any, n: int) -> list[tuple[int, int, int]]:
+    """(pid, рядок, прогін) документів, де збігся хоч один із термів."""
     if not n:
         return []
     hits = [addr for _k, addr in searcher.search(q, limit=n, order_by_field="pid").hits]
@@ -362,5 +391,5 @@ def candidates(stems: list[str], run_ids: list[int] | None = None
     return sorted({x for rid in want for x in got.get(rid, ())})
 
 
-__all__ = ["SCHEMA", "available", "by_run", "candidates", "covered", "exists", "known",
+__all__ = ["SCHEMA", "TooBroad", "available", "by_run", "candidates", "covered", "exists", "known",
            "path", "query_terms", "state", "sync"]
