@@ -42,7 +42,9 @@ class TextStateArgs(BaseModel):
 
 
 @op("text.state", summary="Скільки прочитаного лежить у текстовому сторі",
-    args=TextStateArgs, mutates=False, agent=False, section=SECTION)
+    args=TextStateArgs, mutates=False, section=SECTION,
+    skill="find-surname",
+    when="скільки прочитаного в сторі пошуку і що ще не внесено")
 def text_state(a: TextStateArgs) -> Envelope:
     """Знаменник стору — до запиту, а не після.
 
@@ -153,7 +155,9 @@ class TextIndexArgs(BaseModel):
 
 
 @op("text.index", summary="Зібрати текстовий стор — один раз довго, далі швидко",
-    args=TextIndexArgs, mutates=True, long=True, agent=False, section=SECTION)
+    args=TextIndexArgs, mutates=True, long=True, section=SECTION,
+    tier="core", skill="read-case",
+    when="після нового прогону — внести прочитане в стор пошуку")
 def text_index(a: TextIndexArgs) -> Envelope:
     """Індексація читає дерево прогонів ОДИН раз. Далі кожен запит до тексту —
     запит до одного файлу.
@@ -290,7 +294,9 @@ class TextGrepArgs(BaseModel):
 
 
 @op("text.grep", summary="Регекс по сирому тексту прочитаного — замість rg по теці прогонів",
-    args=TextGrepArgs, mutates=False, agent=False, section=SECTION)
+    args=TextGrepArgs, mutates=False, section=SECTION,
+    tier="core", scope="mixed", skill="find-surname",
+    when="регекс по прочитаному; --where all — чи ми це вже знаємо")
 def text_grep(a: TextGrepArgs) -> Envelope:
     """🔴 Нуль завжди зі знаменником: скільки прогонів і сторінок прочесано,
     скільки прогонів поза стором, і чи звужувався корпус літералами регексу.
@@ -398,7 +404,9 @@ class TextCtxArgs(BaseModel):
 
 
 @op("text.ctx", summary="Контекст рядка: сторінка, усі голоси, сусіди за геометрією, роки, око",
-    args=TextCtxArgs, mutates=False, agent=False, section=SECTION)
+    args=TextCtxArgs, mutates=False, section=SECTION,
+    tier="core", skill="find-surname",
+    when="контекст рядка: голоси моделей і сусіди за колонкою")
 def text_ctx(a: TextCtxArgs) -> Envelope:
     from nyshporka.search import textops as T
 
@@ -433,7 +441,9 @@ class TextCropArgs(BaseModel):
 # `private=True`: `out` пише файл туди, куди скаже клієнт, — без токена це робила
 # б будь-яка сторінка, що дістанеться демона.
 @op("text.crop", summary="Кроп рядка з кадру за рамкою рушія — з поворотом і масштабом",
-    args=TextCropArgs, mutates=False, agent=False, section=SECTION, private=True)
+    args=TextCropArgs, mutates=False, section=SECTION, private=True,
+    tier="core", skill="find-surname",
+    when="кроп рядка — показати людині чи звірити оком")
 def text_crop(a: TextCropArgs) -> Envelope:
     from nyshporka.search import textops as T
 
@@ -465,7 +475,9 @@ class TextVoicesArgs(BaseModel):
 
 
 @op("text.voices", summary="Два голоси рядок до рядка: де зійшлись, де ні",
-    args=TextVoicesArgs, mutates=False, agent=False, section=SECTION)
+    args=TextVoicesArgs, mutates=False, section=SECTION,
+    skill="find-surname",
+    when="два голоси моделей рядок до рядка: де розійшлись")
 def text_voices(a: TextVoicesArgs) -> Envelope:
     from nyshporka.search import textops as T
 
@@ -492,7 +504,9 @@ class TextCoverageArgs(BaseModel):
 
 
 @op("text.coverage", summary="Кадри → прочитано → у сторі → чим шукали → скільки бачило око",
-    args=TextCoverageArgs, mutates=False, agent=False, section=SECTION)
+    args=TextCoverageArgs, mutates=False, section=SECTION,
+    scope="mixed", skill="find-surname",
+    when="що не дивились: кадри → прочитано → прошукано → оком")
 def text_coverage(a: TextCoverageArgs) -> Envelope:
     from nyshporka.search import textops as T
 
@@ -511,7 +525,9 @@ class TextWhatisArgs(BaseModel):
 
 
 @op("text.whatis", summary="Картка справи: реєстр, паспорт, прогони, слід пошуку, око, слова",
-    args=TextWhatisArgs, mutates=False, agent=False, section=SECTION)
+    args=TextWhatisArgs, mutates=False, section=SECTION,
+    tier="core", scope="mixed", skill="find-surname",
+    when="картка справи: що прочитано, якими моделями, що шукали")
 def text_whatis(a: TextWhatisArgs) -> Envelope:
     from nyshporka.search import textops as T
 
@@ -540,7 +556,9 @@ class TextFindArgs(BaseModel):
 # `section="core"`: це й пошук консолі (`search.find`), а він в основі — див.
 # `core.sections.SCREENS`.
 @op("text.find", summary="Знайти рід усіма каналами разом — зі знаменником і журналом заходу",
-    args=TextFindArgs, mutates=False, agent=False, section="core")
+    args=TextFindArgs, mutates=False, section="core",
+    tier="core", scope="mixed", skill="find-surname",
+    when="знайти рід чи прізвище в справі всіма каналами, зі знаменником")
 def text_find(a: TextFindArgs) -> Envelope:
     """🔴 Нуль тут не друкується без журналу: скільки кадрів, скільки прочитано,
     скільки в сторі, якими голосами, які канали ганяли й що бачить око.
@@ -630,7 +648,8 @@ def text_find(a: TextFindArgs) -> Envelope:
 # людина на той самий запит діставала біднішу відповідь, ніж агент.
 # Окрема операція лише тому, що довга: це `text.find` роботою в черзі.
 @op("search.find", summary="Знайти в прочитаному — та сама команда, що `text.find`, роботою в черзі",
-    args=TextFindArgs, mutates=False, long=True, agent=False, section="core")
+    args=TextFindArgs, mutates=False, long=True, section="core",
+    tier="rare", scope="mixed", skill="find-surname")
 def search_find(a: TextFindArgs) -> Envelope:
     return text_find(a)
 
@@ -654,7 +673,8 @@ class ScopesArgs(BaseModel):
 
 
 @op("search.scopes", summary="Де шукати: фонди, описи й справи, у яких є прочитане",
-    args=ScopesArgs, mutates=False, agent=False, section="core")
+    args=ScopesArgs, mutates=False, section="core",
+    tier="rare")
 def search_scopes(a: ScopesArgs) -> Envelope:
     """Підказки поля «Де» — лише з того, у чому справді є прочитане.
 
@@ -750,7 +770,9 @@ class TextSheetArgs(BaseModel):
 
 # `private=True`: як `text.crop` — `out` пише файл за шляхом від клієнта.
 @op("text.sheet", summary="HTML-гортач кандидатів із кропами й полем вердикту для людини",
-    args=TextSheetArgs, mutates=False, agent=False, section=SECTION, private=True)
+    args=TextSheetArgs, mutates=False, section=SECTION, private=True,
+    tier="core", scope="project", skill="find-surname",
+    when="гортач кандидатів із кропами для вердикту людини")
 def text_sheet(a: TextSheetArgs) -> Envelope:
     from nyshporka.search import textops as T
 
@@ -788,7 +810,9 @@ class TextVerdictsArgs(BaseModel):
 
 
 @op("text.verdicts", summary="Занести вердикти гортача у сховище сторінок",
-    args=TextVerdictsArgs, mutates=True, agent=False, section=SECTION)
+    args=TextVerdictsArgs, mutates=True, section=SECTION,
+    scope="project", skill="find-surname",
+    when="занести вердикти людини з гортача в облік сторінок")
 def text_verdicts(a: TextVerdictsArgs) -> Envelope:
     from nyshporka.search import textops as T
 

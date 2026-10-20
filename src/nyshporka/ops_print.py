@@ -24,8 +24,9 @@ class PrintStatusArgs(BaseModel):
 # Операції друку — не в стартовому переліку агента (стеля 18): агент кличе їх
 # через `nysh print …` / `nysh op`, а не першим кроком у новій розмові.
 @op("print.status", summary="Друковані видання: роки, номери, прочитане, пропуски",
-    args=PrintStatusArgs, agent=False, section=SECTION,
-    next_hints=(("print.assemble", "зібрати роки з прочитаних номерів"),))
+    args=PrintStatusArgs, section=SECTION,
+    next_hints=(("print.assemble", "зібрати роки з прочитаних номерів"),),
+    when="друковані видання: роки, номери, прочитане, пропуски")
 def print_status(a: PrintStatusArgs) -> Envelope:
     """Що записано про видання й скільки з нього прочитано — нічого не пише."""
     from nyshporka import print_edition as PE
@@ -51,8 +52,9 @@ class PrintAdoptArgs(BaseModel):
 
 
 @op("print.adopt", summary="Записати видання з уже прочитаних номерів (кадри деінде)",
-    args=PrintAdoptArgs, mutates=True, agent=False, section=SECTION,
-    next_hints=(("print.assemble", "зібрати роки з прочитаних номерів"),))
+    args=PrintAdoptArgs, mutates=True, section=SECTION,
+    next_hints=(("print.assemble", "зібрати роки з прочитаних номерів"),),
+    when="друковане видання з уже прочитаних номерів, кадри деінде")
 def print_adopt(a: PrintAdoptArgs) -> Envelope:
     """Видання, номери якого прочитано, а кадрів на цій машині немає.
 
@@ -90,8 +92,9 @@ class PrintAssembleArgs(BaseModel):
 
 
 @op("print.assemble", summary="Зібрати роки видання з прочитаних номерів",
-    args=PrintAssembleArgs, mutates=True, agent=False, section=SECTION,
-    next_hints=(("print.pack", "спакувати повні роки для Супряги"),))
+    args=PrintAssembleArgs, mutates=True, section=SECTION,
+    next_hints=(("print.pack", "спакувати повні роки для Супряги"),),
+    when="зібрати роки газети чи видання з прочитаних номерів")
 def print_assemble(a: PrintAssembleArgs) -> Envelope:
     """Роки `VYD/<код>/<рік>` із номерів — і одразу в пошук.
 
@@ -145,8 +148,10 @@ class PrintCardArgs(BaseModel):
 
 
 @op("print.card", summary="Картка друкованого видання: що стоїть на картці в Супрязі",
-    args=PrintCardArgs, mutates=True, agent=False, section=SECTION,
-    next_hints=(("print.pack", "спакувати повні роки для Супряги"),))
+    args=PrintCardArgs, mutates=True, section=SECTION,
+    next_hints=(("print.pack", "спакувати повні роки для Супряги"),),
+    skill="share-case",
+    when="картка друкованого видання для Супряги")
 def print_card(a: PrintCardArgs) -> Envelope:
     """Показати й дописати картку видання. Без аргументів — лише показати й назвати,
     чого бракує для пакування."""
@@ -181,8 +186,10 @@ class PrintPackArgs(BaseModel):
 
 
 @op("print.pack", summary="Спакувати повні роки видання для Супряги",
-    args=PrintPackArgs, mutates=True, agent=False, section=SECTION,
-    next_hints=(("print.publish", "віддати пакети в Супрягу"),))
+    args=PrintPackArgs, mutates=True, section=SECTION,
+    next_hints=(("print.publish", "віддати пакети в Супрягу"),),
+    skill="share-case",
+    when="спакувати повні роки друкованого видання для Супряги")
 def print_pack(a: PrintPackArgs) -> Envelope:
     """Кожен ПОВНИЙ рік — один пакет `VYD/<код>/<рік>` з переліком номерів.
 
@@ -252,7 +259,9 @@ class PrintPublishArgs(BaseModel):
 
 # 🔴 `agent=False`, як і `share.publish`: віддати в пул — рішення людини.
 @op("print.publish", summary="Віддати повні роки видання в Супрягу",
-    args=PrintPublishArgs, mutates=True, agent=False, section=SECTION)
+    args=PrintPublishArgs, mutates=True, section=SECTION,
+    skill="share-case",
+    when="віддати роки друкованого видання в Супрягу")
 def print_publish(a: PrintPublishArgs) -> Envelope:
     """Спакувати повні роки й віддати кожен у пул."""
     from nyshporka import ops as O

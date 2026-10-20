@@ -278,7 +278,7 @@ def test_agent_surface_did_not_grow(space: Path) -> None:
     agent = {o.name for o in O.for_agent()}
     assert "sections.show" not in agent
     assert "sections.set" not in agent
-    assert len(agent) <= 18, f"перелік виріс до {len(agent)}"
+    assert len(agent) <= 30, f"перелік виріс до {len(agent)}"
 
 
 def test_installers_point_where_the_catalogue_actually_lives() -> None:

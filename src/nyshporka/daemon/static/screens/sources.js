@@ -1,7 +1,7 @@
 /** 🔎 Каталоги: де взагалі є документи — поза цим комп'ютером. */
 
 import { t } from '../core/strings.js';
-import { callOp, FINAL_STATES } from '../core/net.js';
+import { callOp, FINAL_STATES, apiFetch } from '../core/net.js';
 import { esc, safeHref, el, setView, busy, failure, boxError, busyForm,
   renderWarnings, renderCoverage, curGen, alive } from '../core/view.js';
 import { SCREENS, ACTIONS } from '../core/registry.js';
@@ -58,7 +58,7 @@ SCREENS.sources = async () => {
 /** Роботи цього екрана: пошуки по каталогах і обходи — свіжі, за півдоби. */
 async function recentJobs() {
   try {
-    const res = await fetch('/api/jobs');
+    const res = await apiFetch('/api/jobs');
     if (!res.ok) return [];
     const now = Date.now() / 1000;
     return ((await res.json()).jobs || [])
@@ -71,7 +71,7 @@ async function recentJobs() {
 /** Робота за id — будь-якої давнини, бо з «Робіт» приходять і по старі. */
 async function jobById(id) {
   try {
-    const res = await fetch('/api/jobs');
+    const res = await apiFetch('/api/jobs');
     return res.ok ? ((await res.json()).jobs || []).find((j) => j.id === id) : null;
   } catch { return null; }
 }
@@ -139,7 +139,7 @@ function showSweep(job) {
 async function pollFind(id) {
   let grace = 5;
   for (;;) {
-    const res = await fetch('/api/jobs');
+    const res = await apiFetch('/api/jobs');
     const data = await res.json().catch(() => ({}));
     const job = (data.jobs || []).find((x) => x.id === id);
     if (!job) return { ok: false, error: t('sources.lost') };

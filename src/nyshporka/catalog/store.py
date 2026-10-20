@@ -115,7 +115,7 @@ def own_path() -> Path | None:
     try:
         from nyshporka.core.workspace import workspace
 
-        return workspace().data / "catalog" / "own.sqlite"
+        return workspace().hub_data / "catalog" / "own.sqlite"
     except Exception:
         return None
 

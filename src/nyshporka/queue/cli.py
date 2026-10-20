@@ -9,6 +9,7 @@ from rich.markup import escape as _e
 from nyshporka import brand
 from nyshporka.cli_emit import answer as _answer
 from nyshporka.cli_emit import notes as _notes
+from nyshporka.core.routes import route
 
 app = typer.Typer(help="Черга справ: кадри → паспорт → каталог → пул → читання → "
                        "облік → віддача, з продовженням після зупинки",
@@ -157,6 +158,8 @@ def add(
 
 
 @app.command("run")
+@route("queue run", skill="read-case", mutates=True,
+       when="вести чергу прогонів у цьому вікні")
 def run(
     stop_after_case: bool = typer.Option(False, "--stop-after-case",
                                          help="провести одну справу й вийти"),

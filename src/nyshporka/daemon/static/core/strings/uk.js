@@ -1013,4 +1013,6 @@ export default {
     'engine.diak.role': 'кирилиця, другий голос',
     'engine.skryba.role': 'латинка',
     'lang.choose': 'Мова',
+    'project.choose': 'Проєкт',
+    'project.hub': 'Майстерня — без проєкту',
 };

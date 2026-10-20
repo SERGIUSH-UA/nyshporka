@@ -7,7 +7,7 @@
  */
 
 import { t } from './strings.js';
-import { callOp, FINAL_STATES } from './net.js';
+import { callOp, FINAL_STATES, apiFetch } from './net.js';
 import { el, esc } from './view.js';
 import { ACTIONS } from './registry.js';
 import { ic } from '/ui/icons.js';
@@ -55,7 +55,7 @@ async function waitDialog(args) {
   if (!started.ok) return { state: 'error', error: started.error };
   const id = (started.data || {}).job_id || '';
   for (;;) {
-    const res = await fetch('/api/jobs');
+    const res = await apiFetch('/api/jobs');
     const data = await res.json().catch(() => ({}));
     const job = (data.jobs || []).find((x) => x.id === id);
     if (!job) return { state: 'error', error: t('pick.lost') };

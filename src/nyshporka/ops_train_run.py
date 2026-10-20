@@ -51,7 +51,9 @@ class PlanArgs(BaseModel):
 
 
 @op("train.plan", summary="Що піде в корпус за рецептом: джерела, кратності, частки, алфавіт",
-    args=PlanArgs, agent=False, section=SECTION)
+    args=PlanArgs, section=SECTION,
+    skill="train-model",
+    when="що піде в корпус трену за рецептом")
 def train_plan(a: PlanArgs) -> Envelope:
     """Сухий прогін збірки — рівно те, що побачить `train.build`.
 
@@ -90,7 +92,9 @@ class BuildArgs(BaseModel):
 
 
 @op("train.build", summary="Зібрати корпус: кропи, маніфести, corpus.json, tgz",
-    args=BuildArgs, mutates=True, long=True, agent=False, section=SECTION)
+    args=BuildArgs, mutates=True, long=True, section=SECTION,
+    skill="train-model",
+    when="зібрати корпус для трену моделі")
 def train_build(a: BuildArgs) -> Envelope:
     """Один артефакт на всі шляхи обчислень — `<корпус>.tgz`."""
     from nyshporka.train import corpus as C
@@ -130,7 +134,9 @@ class StartArgs(BaseModel):
 
 
 @op("train.start", summary="Запустити трен за корпусом: план завжди, старт — з підтвердженням",
-    args=StartArgs, mutates=True, long=True, agent=False, section=SECTION)
+    args=StartArgs, mutates=True, long=True, section=SECTION,
+    skill="train-model",
+    when="запустити трен моделі за корпусом")
 def train_start(a: StartArgs) -> Envelope:
     """План (години, ціна, карта, команда) і — за `yes` — запуск.
 
@@ -216,7 +222,9 @@ def _run_state(run: str) -> Any:
 
 
 @op("train.status", summary="Пульс прогону: жива карта, епоха, чекпойнти, підсумок",
-    args=RunArgs, agent=False, section=SECTION)
+    args=RunArgs, section=SECTION,
+    skill="train-model",
+    when="пульс трену: епоха, чекпойнти, підсумок")
 def train_status(a: RunArgs) -> Envelope:
     """Стан із ДИСКА (лог, ваги епох, summary), а не з пам'яті того, хто запускав."""
     from nyshporka.train import compute as CP
@@ -245,7 +253,9 @@ def train_status(a: RunArgs) -> Envelope:
 
 
 @op("train.fetch", summary="Забрати ваги з машини, де йшов трен",
-    args=RunArgs, mutates=True, long=True, agent=False, section=SECTION)
+    args=RunArgs, mutates=True, long=True, section=SECTION,
+    skill="train-model",
+    when="забрати ваги з машини, де йшов трен")
 def train_fetch(a: RunArgs) -> Envelope:
     from nyshporka.train import compute as CP
     from nyshporka.train import state as ST
@@ -267,7 +277,9 @@ def train_fetch(a: RunArgs) -> Envelope:
 
 
 @op("train.stop", summary="Зупинити прогін (локальний процес або оренду)",
-    args=RunArgs, mutates=True, agent=False, section=SECTION)
+    args=RunArgs, mutates=True, section=SECTION,
+    skill="train-model",
+    when="зупинити трен (локальний чи на оренді)")
 def train_stop(a: RunArgs) -> Envelope:
     from nyshporka.train import compute as CP
     from nyshporka.train import state as ST
@@ -296,7 +308,9 @@ class EvalArgs(BaseModel):
 
 
 @op("train.eval", summary="Обрати епоху по holdout: recall назв і CER усіх чекпойнтів одним прогоном",
-    args=EvalArgs, long=True, agent=False, section=SECTION)
+    args=EvalArgs, long=True, section=SECTION,
+    skill="train-model",
+    when="обрати епоху трену по holdout")
 def train_eval(a: EvalArgs) -> Envelope:
     from nyshporka.train import select as SEL
     from nyshporka.train import state as ST
@@ -326,7 +340,9 @@ class PromoteArgs(BaseModel):
 
 
 @op("train.promote", summary="Зробити чекпойнт бойовою моделлю: копія, картка, PRODUCTION.json",
-    args=PromoteArgs, mutates=True, agent=False, section=SECTION)
+    args=PromoteArgs, mutates=True, section=SECTION,
+    skill="train-model",
+    when="зробити чекпойнт бойовою моделлю")
 def train_promote(a: PromoteArgs) -> Envelope:
     from nyshporka.train import promote as P
 

@@ -22,6 +22,7 @@ from nyshporka.cli_emit import notes as _notes
 # час запуску консолі це не впливає — а довідка `--paradigm` мусить
 # збиратись із реєстру ще до розбору аргументів.
 from nyshporka.core import morph
+from nyshporka.core.routes import route
 
 # 🔴 Обов'язковий параметр, чиї значення видно лише з помилки валідації, —
 # те саме глухе місце, що й порада на неіснуючу команду: людина набирає
@@ -303,6 +304,7 @@ def info() -> None:
 
 
 @app.command()
+@route("sources", op="sources.list")
 def sources(as_json: bool = typer.Option(False, "--json",
                                          help="машинний вивід: увесь конверт")) -> None:
     """Звідки брати матеріал: що вміє кожне джерело, де його межі й що доводить нуль."""
@@ -338,6 +340,7 @@ def sources(as_json: bool = typer.Option(False, "--json",
 
 
 @app.command()
+@route("look", op="material.look")
 def look(path: str = typer.Argument(..., help="тека зі сканами, PDF або тека з PDF")) -> None:
     """Що це за матеріал: скільки кадрів, чи це одна справа, чи багато."""
     from nyshporka.sources.local import LocalSource, inspect
@@ -402,6 +405,7 @@ def _print_address(addr: Any) -> None:
 
 
 @app.command()
+@route("find", op="catalog.search")
 def find(q: str = typer.Argument(..., help="село, прізвище, слово із заголовка "
                                            "або шифра справи"),
          source: str = typer.Option("", "--source", help=(
@@ -480,6 +484,7 @@ def find(q: str = typer.Argument(..., help="село, прізвище, слов
 
 
 @app.command()
+@route("browse", op="catalog.browse")
 def browse(source: str = typer.Argument(..., help="id джерела (`nysh sources`)"),
            ref: str = typer.Argument("", help="вузол; порожньо = верхній рівень")) -> None:
     """Що лежить у фонді, описі, теці дзеркала."""
@@ -501,6 +506,7 @@ def browse(source: str = typer.Argument(..., help="id джерела (`nysh sour
 
 
 @app.command()
+@route("get", op="acquire.start", mutates=True)
 def get(source: str = typer.Argument(..., help="id джерела"),
         ref: str = typer.Argument(..., help="адреса справи чи плівки"),
         out: Path = typer.Option(..., "--out", help="куди складати кадри"),
@@ -659,6 +665,7 @@ def get(source: str = typer.Argument(..., help="id джерела"),
 
 
 @app.command()
+@route("crawl", op="catalog.crawl", mutates=True)
 def crawl(source: str = typer.Argument("archium", help="id джерела"),
           groups: str = typer.Option("", "--groups",
                                      help="групи фондів через кому; порожньо = давні акти"),
@@ -724,6 +731,7 @@ def crawl(source: str = typer.Argument("archium", help="id джерела"),
 
 
 @app.command()
+@route("init", tier="rare", mutates=True)
 def init(
     path: str = typer.Argument("", help="куди покласти простір; порожньо — запропоную"),
     name: str = typer.Option("", "--name", help="як зветься дослідження"),
@@ -795,6 +803,7 @@ def init(
 
 
 @app.command()
+@route("relocate", tier="rare", mutates=True)
 def relocate(
     target: str = typer.Argument("", help="нова тека для всього, напр. D:/Genealogy/Нишпорка"),
     dry_run: bool = typer.Option(False, "--dry-run", help="лише показати план"),
@@ -896,6 +905,8 @@ def _catalog_step(*, check: bool, skip: bool) -> None:
 
 
 @app.command()
+@route("update", mutates=True,
+       when="оновити Нишпорку до нової версії")
 def update(
     check: bool = typer.Option(False, "--check",
                                help="лише подивитись, не ставити"),
@@ -1000,6 +1011,7 @@ def update(
 
 
 @app.command()
+@route("uninstall", tier="rare", mutates=True)
 def uninstall(
     yes: bool = typer.Option(False, "--yes", "-y",
                              help="зняти; без нього — лише показати"),
@@ -1058,6 +1070,8 @@ def uninstall(
 
 
 @app.command()
+@route("doctor", tier="core",
+       when="щось не працює; після встановлення чи оновлення")
 def doctor(
     as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
@@ -1085,6 +1099,7 @@ def doctor(
 
 
 @app.command()
+@route("sample", op="sample.install", mutates=True)
 def sample(
     force: bool = typer.Option(False, "--force",
                                help="перезаписати вже розгорнуті файли"),
@@ -1229,6 +1244,7 @@ def _supriaha_lookup(case_key: str, frames: int) -> None:
 
 
 @app.command()
+@route("read", op="read.start", mutates=True)
 def read(
     case_dir: str = typer.Argument(..., help="пласка тека зі сканами справи"),
     out: str = typer.Option("", "--out", help="куди класти текст"),
@@ -1445,6 +1461,7 @@ def read(
 
 
 @app.command("case")
+@route("case", op="case.register")
 def case_cmd(
     case_dir: str = typer.Argument(
         ..., help="ШЛЯХ до теки зі сканами (не шифра — вона йде в --shifra)"),
@@ -1514,6 +1531,7 @@ def case_cmd(
 
 
 @app.command("archive")
+@route("archive", op="archive.fond")
 def archive_cmd(
     repo: str = typer.Argument(..., help="код архіву: DAHMO, CDIAK, ANRM…"),
     fond: str = typer.Argument(..., help="номер фонду"),
@@ -1556,6 +1574,7 @@ def profile_root(ctx: typer.Context) -> None:
 
 
 @profile_app.command("init")
+@route("profile init", op="profile.set")
 def profile_init(
     display: str = typer.Argument(..., help="прізвище, як воно пишеться: Сікорський"),
     name: str = typer.Option("", "--name", help="ключ профілю; типово — з прізвища"),
@@ -1626,6 +1645,7 @@ profile_app.command("show")(profile_cmd)
 
 
 @app.command("search")
+@route("search", op="search.run")
 def search_cmd(
     q: str = typer.Argument(..., help="прізвище або слово"),
     case: str = typer.Option(
@@ -1776,6 +1796,8 @@ def search_cmd(
 
 
 @app.command("review")
+@route("review", mutates=True,
+       when="перебрати кандидатів із зовнішніх джерел — рішення за людиною")
 def review_cmd(
     source: str = typer.Option("", "--source", help="лише з цього джерела"),
     min_score: float = typer.Option(0.0, "--min-score",
@@ -2064,6 +2086,7 @@ app.add_typer(disk_app, name="disk")
 
 
 @cases_app.command("build")
+@route("cases build", op="cases.build", mutates=True)
 def cases_build(
     rescan: bool = typer.Option(True, "--rescan/--no-rescan",
                                 help="перечитати ще й диск (нові теки)"),
@@ -2104,6 +2127,7 @@ def cases_build(
 
 
 @cases_app.command("rekey")
+@route("cases rekey", tier="rare", mutates=True)
 def cmd_rekey(
     do: bool = typer.Option(False, "--apply", help="перенести (з архівом для відкату)"),
     back: bool = typer.Option(False, "--rollback", help="відкотити останній перенос"),
@@ -2430,6 +2454,7 @@ app.add_typer(roots_app, name="roots")
 
 
 @roots_app.command("list")
+@route("roots list", op="roots.list")
 def roots_list_cmd() -> None:
     """Де застосунок шукає справи — і що з цього оголошено руками."""
     from nyshporka.core.workspace import WorkspaceError, workspace
@@ -2453,6 +2478,7 @@ def roots_list_cmd() -> None:
 
 
 @roots_app.command("add")
+@route("roots add", op="roots.add", mutates=True)
 def roots_add_cmd(
     path: str = typer.Argument(..., help="тека зі сканами: справа або контейнер справ"),
 ) -> None:
@@ -2478,6 +2504,7 @@ def roots_add_cmd(
 
 
 @roots_app.command("remove")
+@route("roots remove", op="roots.remove", mutates=True)
 def roots_remove_cmd(
     path: str = typer.Argument(..., help="оголошений корінь — як у `nysh roots list`"),
 ) -> None:
@@ -2612,6 +2639,7 @@ def pages_note_batch_cmd(
 
 
 @pages_app.command("grep")
+@route("pages grep", op="search.run", primary=False)
 def pages_grep_cmd(
     q: str = typer.Argument(..., help="прізвище або назва місця"),
     where: str = typer.Option("pages", "--where", help="pages | records | decode"),
@@ -2682,6 +2710,7 @@ def pages_show_cmd(
 
 
 @pages_app.command("split")
+@route("pages split", tier="rare", scope="mixed", mutates=True)
 def pages_split_cmd(
     to: str = typer.Option("", "--to", help="проєкт-підтека, що успадковує погляд кореня"),
     do: bool = typer.Option(False, "--apply", help="перенести (з архівом для відкату)"),
@@ -2783,6 +2812,8 @@ def records_add_cmd(
 
 
 @records_app.command("grep")
+@route("records grep", skill="keep-records",
+       when="знайти прізвище серед розібраних записів за роллю й типом акту")
 def records_grep_cmd(
     q: str = typer.Argument(..., help="прізвище або назва місця"),
     case: str = typer.Option("", "--case", help="лише в цій справі"),
@@ -2813,6 +2844,7 @@ def records_grep_cmd(
 
 
 @records_app.command("show")
+@route("records show", op="pages.show", primary=False)
 def records_show_cmd(
     case: str = typer.Argument(..., help="справа у будь-якому форматі"),
     rid: str = typer.Argument(..., help="id запису — з `records grep`"),
@@ -3146,6 +3178,7 @@ def canon_next_cmd(
 
 
 @canon_app.command("hook")
+@route("canon hook", tier="rare", scope="project", skill="keep-canon", mutates=True)
 def canon_hook_cmd(
     install: bool = typer.Option(False, "--install", help="поставити git pre-commit у простір"),
 ) -> None:
@@ -3165,12 +3198,14 @@ def canon_hook_cmd(
 
 
 @canon_app.command("precommit", hidden=True)
+@route("canon precommit", tier="rare", scope="project", skill="keep-canon")
 def canon_precommit_cmd() -> None:
     """Те, що кличе git pre-commit (див. `nysh canon hook`)."""
     from nyshporka.canon import hook as H
     from nyshporka.core.workspace import workspace
 
-    raise typer.Exit(code=H.main(workspace().root))
+    # Корінь git — Майстерня; хук сам обходить канон кожного проєкту.
+    raise typer.Exit(code=H.main(workspace().hub))
 
 
 @canon_app.command("import")
@@ -3210,6 +3245,7 @@ def canon_import_cmd(
 
 
 @app.command("migrate")
+@route("migrate", op="migrate.status")
 def migrate_cmd(
     paths: list[str] = typer.Argument(None, help="з --scan: теки чи файли для перевірки"),
     show: str = typer.Option("", "--show", help="надрукувати міграцію цієї версії"),
@@ -3317,6 +3353,7 @@ def site_build_cmd(
 
 
 @site_app.command("serve")
+@route("site serve", op="site.build", primary=False)
 def site_serve_cmd(
     public: bool = typer.Option(False, "--public", help="відкрита версія"),
     port: int = typer.Option(8765, "--port", help="порт на 127.0.0.1"),
@@ -3452,6 +3489,8 @@ def htr_env_cmd(as_json: bool = typer.Option(False, "--json", help="машинн
 
 
 @htr_app.command("install")
+@route("htr install", skill="read-case", mutates=True,
+       when="поставити рушії читання на цю машину")
 def htr_install(
     no_cuda: bool = typer.Option(False, "--no-cuda", help="не чіпати torch"),
     cuda: str = typer.Option("", "--cuda", metavar="ТЕГ",
@@ -3506,6 +3545,8 @@ app.add_typer(models_app, name="models")
 
 
 @models_app.command("list")
+@route("models list", skill="read-case",
+       when="які моделі читання є, чого бракує, що зіпсоване")
 def models_list() -> None:
     """Що є, чого немає, що зіпсоване."""
     from nyshporka.setup import packs
@@ -3534,6 +3575,8 @@ def models_list() -> None:
 
 
 @models_app.command("get")
+@route("models get", skill="read-case", mutates=True,
+       when="завантажити ваги моделей читання")
 def models_get(
     which: str = typer.Argument("", help="id пака; порожньо — усі, яких бракує"),
 ) -> None:
@@ -3750,6 +3793,7 @@ def _op_card(op: Any, *, with_doc: bool = False) -> dict[str, Any]:
     card: dict[str, Any] = {
         "name": op.name, "summary": op.summary, "section": op.section,
         "mutates": op.mutates, "long": op.long, "agent": op.agent,
+        "tier": op.tier, "when": op.when, "skill": op.skill, "scope": op.scope,
         "schema": op.schema(),
     }
     if with_doc:
@@ -3762,16 +3806,37 @@ def _op_card(op: Any, *, with_doc: bool = False) -> dict[str, Any]:
     return card
 
 
-@app.command("ops")
-def ops_list(agent_only: bool = typer.Option(False, "--agent",
-                                             help="лише те, що бачить агент"),
+ops_app = typer.Typer(help="Перелік дій — те саме, що доступне агентові й браузеру.",
+                      invoke_without_command=True)
+app.add_typer(ops_app, name="ops")
+
+
+@ops_app.callback()
+def ops_list(ctx: typer.Context,
+             agent_only: bool = typer.Option(False, "--agent",
+                                             help="лише ядро — з чого починає агент"),
              as_json: bool = typer.Option(False, "--json",
                                           help="машинний перелік зі схемами аргументів"),
+             as_map: bool = typer.Option(False, "--map",
+                                         help="карта ядра, як її бачить агент у хуку старту"),
+             show_all: bool = typer.Option(False, "--all",
+                                           help="разом із вимкненими секціями"),
              ) -> None:
-    """Перелік операцій — те саме, що доступне агентові й браузеру."""
-    from nyshporka import ops as O
+    """Перелік операцій — те саме, що доступне агентові й браузеру.
 
-    picked = O.for_agent() if agent_only else O.all_ops()
+    Без `--all` — лише те, що в цьому просторі виконається: вимкнена секція
+    відмовила б у `call()`, тож показувати її означало б кликати на відмову.
+    """
+    if ctx.invoked_subcommand is not None:
+        return
+    from nyshporka import ops as O
+    from nyshporka.core import routemap as M
+
+    if as_map:
+        typer.echo(M.agent_map())
+        return
+    names = {e.name for e in M.visible(M.entries(), show_all=show_all)}
+    picked = [o for o in (O.for_agent() if agent_only else O.all_ops()) if o.name in names]
     if as_json:
         console.print_json(data={"v": 1, "ops": [_op_card(o) for o in picked]})
         return
@@ -3780,11 +3845,44 @@ def ops_list(agent_only: bool = typer.Option(False, "--agent",
                          "🤖" if op.agent else " "))
         console.print(f"  {marks} [bold]{op.name:<18}[/bold] [muted]{op.section:<9}[/muted] "
                       f"{op.summary}")
-    if not as_json:
-        console.print("\n[muted]✎ пише на диск · ⏳ довга (див. `nysh op <ім'я> --describe`) "
-                      "· 🤖 доступна агентом[/muted]")
-        console.print("[muted]аргументи: nysh op <ім'я> --describe · "
-                      "усе разом: nysh ops --json[/muted]")
+    console.print("\n[muted]✎ пише на диск · ⏳ довга (див. `nysh op <ім'я> --describe`) "
+                  "· 🤖 ядро агента[/muted]")
+    console.print("[muted]під ситуацію: nysh ops find <що треба> · аргументи: "
+                  "nysh op <ім'я> --describe · усе разом: nysh ops --json[/muted]")
+
+
+@ops_app.command("find")
+@route("ops find", tier="core",
+       when="не знаєш, якою командою чи скілом це зробити — знайти за ситуацією")
+def ops_find(words: list[str] = typer.Argument(..., help="що треба зробити, своїми словами"),
+             limit: int = typer.Option(8, "--limit", help="скільки показати"),
+             show_all: bool = typer.Option(False, "--all",
+                                           help="разом із вимкненими секціями"),
+             as_json: bool = typer.Option(False, "--json", help="машинний вивід"),
+             ) -> None:
+    """Яка команда під цю ситуацію — пошук по «коли брати», підпису й докстрінгу."""
+    from nyshporka.core import routemap as M
+
+    query = " ".join(words)
+    hits = M.find(query, limit=limit, show_all=show_all)
+    skills = M.find_skills(query)
+    if as_json:
+        console.print_json(data={"v": 1, "hits": [{**e.card(), "score": s}
+                                                  for e, s in hits],
+                                 "skills": [{"name": n, "score": s} for n, s in skills]})
+        return
+    # Скіл — першим: збіг опису означає, що ситуацію веде процедура, і
+    # окрема команда з переліку нижче — лише один її крок.
+    for name, _ in skills:
+        typer.echo(f"▶ скіл {name} — завантажити цілим, перш ніж діяти")
+    if not hits and not skills:
+        typer.echo("нічого не знайшлось; перелік усього — nysh ops")
+        return
+    for e, _ in hits:
+        mark = "✎" if e.mutates else " "
+        typer.echo(f"{mark} {e.cli:<26} {e.when or e.summary}")
+    if hits:
+        typer.echo("аргументи: <команда> --help або nysh op <ім'я> --describe")
 
 
 # ── секції ───────────────────────────────────────────────────────────────────
@@ -3837,18 +3935,21 @@ def sections_root(ctx: typer.Context) -> None:
 
 
 @sections_app.command("enable")
+@route("sections enable", op="sections.set", mutates=True)
 def sections_enable(section: str = typer.Argument(..., help="id секції")) -> None:
     """Увімкнути секцію."""
     _sections_call({"enable": [section]})
 
 
 @sections_app.command("disable")
+@route("sections disable", op="sections.set", primary=False, mutates=True)
 def sections_disable(section: str = typer.Argument(..., help="id секції")) -> None:
     """Вимкнути секцію."""
     _sections_call({"disable": [section]})
 
 
 @sections_app.command("preset")
+@route("sections preset", op="sections.set", primary=False, mutates=True)
 def sections_preset(name: str = typer.Argument(..., help="catalog | amateur | researcher | lab"),
                     ) -> None:
     """Взяти готовий набір секцій."""
@@ -3904,12 +4005,14 @@ def project_list_cmd(as_json: bool = typer.Option(False, "--json", help="маш�
 def project_status_cmd(
     agent: bool = typer.Option(False, "--agent",
                                help="для хука старту сесії агента: простий текст"),
+    no_memory: bool = typer.Option(False, "--no-memory",
+                                   help="без індексу пам'яті (агент вантажить її сам)"),
     as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Де я: Майстерня, проєкт, рід, канон, відкрите, інші проєкти."""
     from nyshporka import ops as O
 
-    env = O.call("project.status", {"agent": agent})
+    env = O.call("project.status", {"agent": agent, "no_memory": no_memory})
     if agent and env.ok:
         # Хук читає stdout як текст: без розмітки rich і завжди в UTF-8, бо
         # консоль Windows під хуком може стояти на cp1251/cp866.
@@ -3934,6 +4037,35 @@ def project_archive_cmd(name: str = typer.Argument(..., help="ім'я проєк
     env = O.call("project.archive", {"name": name, "undo": undo})
     _answer(env)
     console.print(("↩ повернуто: " if undo else "🗄 в архіві: ") + env.data["root"])
+
+
+@project_app.command("adopt")
+def project_adopt_cmd(name: str = typer.Argument(..., help="ім'я майбутнього проєкту роду"),
+                      apply: bool = typer.Option(False, "--apply", help="виконати переїзд"),
+                      archive: str = typer.Option("", "--archive",
+                                                  help="тека для zip-архіву поза Майстернею"),
+                      rollback: bool = typer.Option(False, "--rollback",
+                                                    help="повернути останній переїзд"),
+                      stamp: str = typer.Option("", "--stamp", help="мітка переїзду для відкату"),
+                      ) -> None:
+    """Перетворити корінь старого типу на Майстерню з проєктом роду.
+
+    Без --apply — лише план: що їде, скільки, що заважає.
+    """
+    from nyshporka import ops as O
+
+    env = O.call("project.adopt", {"name": name, "apply": apply, "archive": archive,
+                                   "rollback": rollback, "stamp": stamp})
+    _answer(env)
+    d = env.data
+    if "report" in d:
+        console.print(d["report"], markup=False)
+    elif rollback:
+        console.print(f"↩ переїзд {d['stamp']} повернуто: {', '.join(d['restored']) or '—'}")
+    else:
+        console.print(f"🧳 рід переїхав у {d['project']} (журнал {d['stamp']}, "
+                      f"архів {d['archive']['zip']})", markup=False)
+    _notes(env)
 
 
 @project_app.command("open")
@@ -4009,6 +4141,7 @@ app.add_typer(skills_app, name="skills")
 
 
 @skills_app.command("list")
+@route("skills list", tier="rare")
 def skills_list() -> None:
     """Які скіли несе пакет."""
     from nyshporka import skills as S
@@ -4026,6 +4159,8 @@ def skills_list() -> None:
 
 
 @skills_app.command("install")
+@route("skills install", mutates=True,
+       when="покласти скіли туди, де їх бачить агент")
 def skills_install(
     target: str = typer.Option("", "--target",
                                help="одна довільна тека (замість тек агентів)"),
@@ -4105,6 +4240,7 @@ def skills_install(
 
 
 @skills_app.command("hook")
+@route("skills hook", tier="rare", mutates=True)
 def skills_hook(
     install: bool = typer.Option(False, "--install", help="поставити запобіжник (Claude Code)"),
     decline: bool = typer.Option(False, "--decline", help="записати, що людина відмовилась"),

@@ -19,9 +19,10 @@ class DiskReportArgs(BaseModel):
 
 @op("disk.report", summary="Місце простору: що лишити, що відтворюване, з яких справ "
                            "можна зняти кадри",
-    args=DiskReportArgs, agent=False,
+    args=DiskReportArgs,
     next_hints=(("disk.clean", "прибрати відтворюване"),
-                ("disk.offload", "зняти кадри прочитаної й відданої справи")))
+                ("disk.offload", "зняти кадри прочитаної й відданої справи")),
+    when="місце на диску: скільки зайнято, що відтворюване, що можна зняти")
 def disk_report(a: DiskReportArgs) -> Envelope:
     from nyshporka import disk as D
 
@@ -42,7 +43,8 @@ class DiskCleanArgs(BaseModel):
 
 @op("disk.clean", summary="Прибрати відтворюване: стиснуті кадри й асети хмари, "
                           "тимчасове, власні пакети outbox",
-    args=DiskCleanArgs, mutates=True, agent=False)
+    args=DiskCleanArgs, mutates=True,
+    when="бракує місця — прибрати відтворюване: стиснуті кадри, тимчасове")
 def disk_clean(a: DiskCleanArgs) -> Envelope:
     from nyshporka import disk as D
 
@@ -66,7 +68,8 @@ class DiskOffloadArgs(BaseModel):
 
 @op("disk.offload", summary="Зняти з диска прочитані кадри справи: паспорт і адреса "
                             "копії лишаються",
-    args=DiskOffloadArgs, mutates=True, agent=False)
+    args=DiskOffloadArgs, mutates=True,
+    when="зняти з диска кадри прочитаної справи; паспорт і адреса копії лишаються")
 def disk_offload(a: DiskOffloadArgs) -> Envelope:
     from nyshporka import disk as D
 

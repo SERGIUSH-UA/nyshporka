@@ -1,7 +1,7 @@
 /** 🖋 Читання справи рушієм. */
 
 import { t } from '../core/strings.js';
-import { callOp, FINAL_STATES, TOKEN } from '../core/net.js';
+import { callOp, FINAL_STATES, TOKEN, apiFetch } from '../core/net.js';
 import { esc, el, setView, boxError, busyForm,
   renderWarnings, curGen, alive } from '../core/view.js';
 import { SCREENS, ACTIONS } from '../core/registry.js';
@@ -133,7 +133,7 @@ async function readNow() {
   if (!box) return;
   let jobs = [];
   try {
-    const res = await fetch('/api/jobs');
+    const res = await apiFetch('/api/jobs');
     if (res.ok) jobs = (await res.json()).jobs || [];
   } catch { /* без переліку робіт картка лишається як була */ }
   const mine = new Set([normPath(RD.case_dir), normPath((RD.card || {}).case_dir)]);
@@ -466,12 +466,12 @@ Object.assign(ACTIONS, {
    * налаштуваннями — письмо, другий рушій, латинка третім голосом.
    */
   'read.change': async (_ev, elm) => {
-    const res = await fetch('/api/jobs');
+    const res = await apiFetch('/api/jobs');
     const job = res.ok
       ? ((await res.json()).jobs || []).find((j) => j.id === elm.dataset.job) : null;
     const cfg = (job || {}).cfg || {};
     const voices = (cfg.voices || []).map(engineOf);
-    await fetch(`/api/jobs/${encodeURIComponent(elm.dataset.job)}/cancel`,
+    await apiFetch(`/api/jobs/${encodeURIComponent(elm.dataset.job)}/cancel`,
       { method: 'POST', headers: { 'X-Nysh-Token': TOKEN } });
     RD = { ...RD, script: cfg.script || RD.script,
       prev: { second: voices.includes('diak'),

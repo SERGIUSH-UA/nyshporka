@@ -1007,4 +1007,6 @@ export default {
     'engine.diak.role': 'Cyrillic, second voice',
     'engine.skryba.role': 'Latin script',
     'lang.choose': 'Language',
+    'project.choose': 'Project',
+    'project.hub': 'Workshop — no project',
 };

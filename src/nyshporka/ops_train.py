@@ -35,7 +35,9 @@ class SetsArgs(BaseModel):
 
 
 @op("train.sets", summary="Набори для розмітки й трену: сторінки, кропи, мітки, злиття",
-    args=SetsArgs, agent=False, section=SECTION)
+    args=SetsArgs, section=SECTION,
+    skill="label-lines",
+    when="набори для розмітки й трену: сторінки, кропи, мітки")
 def train_sets(a: SetsArgs) -> Envelope:
     """Що є на машині і в якому стані — зі знаменниками, а не самозвітом.
 
@@ -78,7 +80,9 @@ def train_sets(a: SetsArgs) -> Envelope:
 
 # ── доктор лабораторії ───────────────────────────────────────────────────────
 @op("train.doctor", summary="Що на цій машині є для розмітки й трену",
-    args=NoArgs, agent=False, section=SECTION)
+    args=NoArgs, section=SECTION,
+    skill="train-model",
+    when="що на цій машині є для розмітки й трену")
 def train_doctor(_: NoArgs) -> Envelope:
     """Середовище рушіїв, карта, шляхи обчислень, набори — одним поглядом.
 
@@ -159,7 +163,9 @@ class CutArgs(BaseModel):
 
 
 @op("train.cut", summary="Нарізати кропи рядків із прогону в набір для розмітки",
-    args=CutArgs, mutates=True, long=True, agent=False, section=SECTION)
+    args=CutArgs, mutates=True, long=True, section=SECTION,
+    skill="label-lines",
+    when="нарізати кропи рядків із прогону в набір для розмітки")
 def train_cut(a: CutArgs) -> Envelope:
     """Набір із прогону: кропи = рядки прогону, текст прогону = перший голос.
 
@@ -198,7 +204,9 @@ class VoicesArgs(BaseModel):
 
 
 @op("train.voices", summary="Додати голос рушія до набору: з сусіднього прогону або інфером",
-    args=VoicesArgs, mutates=True, long=True, agent=False, section=SECTION)
+    args=VoicesArgs, mutates=True, long=True, section=SECTION,
+    skill="label-lines",
+    when="додати голос рушія до набору розмітки")
 def train_voices(a: VoicesArgs) -> Envelope:
     """Другий голос — умова і для черги розмітки, і для злиття арбітрами.
 
@@ -237,7 +245,9 @@ class GlossaryArgs(BaseModel):
 
 
 @op("train.glossary", summary="Словник справи: власні назви для арбітрів, звірені оком",
-    args=GlossaryArgs, mutates=True, agent=False, section=SECTION)
+    args=GlossaryArgs, mutates=True, section=SECTION,
+    skill="label-lines",
+    when="словник власних назв справи для арбітрів")
 def train_glossary(a: GlossaryArgs) -> Envelope:
     """Причт, село, установа — те, що рушій калічить у кожному рядку по-новому.
 
@@ -283,7 +293,9 @@ class HintArgs(BaseModel):
 
 
 @op("train.hint", summary="Стороннє прочитання сторінки — контекст арбітрам, не мітка",
-    args=HintArgs, mutates=True, agent=False, section=SECTION)
+    args=HintArgs, mutates=True, section=SECTION,
+    skill="label-lines",
+    when="стороннє прочитання сторінки — контекст арбітрам")
 def train_hint(a: HintArgs) -> Envelope:
     """Людина вже прочитала сторінку (форум, власник документа) — арбітр це бачить.
 
@@ -357,7 +369,9 @@ class ExportArgs(BaseModel):
 
 
 @op("train.export", summary="Завдання арбітрам: голоси по сторінках + аркуші з рамками",
-    args=ExportArgs, mutates=True, long=True, agent=False, section=SECTION)
+    args=ExportArgs, mutates=True, long=True, section=SECTION,
+    skill="label-lines",
+    when="завдання арбітрам: голоси по сторінках і аркуші з рамками")
 def train_export(a: ExportArgs) -> Envelope:
     """Файли-завдання для агентів-арбітрів — по межах сторінок, з аркушами.
 
@@ -392,7 +406,9 @@ class ImportArgs(BaseModel):
 
 
 @op("train.import", summary="Забрати відповіді арбітрів у злиття і прогнати ворота",
-    args=ImportArgs, mutates=True, agent=False, section=SECTION)
+    args=ImportArgs, mutates=True, section=SECTION,
+    skill="label-lines",
+    when="забрати відповіді арбітрів у злиття і прогнати ворота")
 def train_import(a: ImportArgs) -> Envelope:
     """Відповіді → `drafts/merge/`, і одразу ворота: маркери, белькіт, зсув.
 
@@ -432,7 +448,9 @@ class GatesArgs(BaseModel):
 
 
 @op("train.gates", summary="Ворота злиття окремо: підозрілі рядки, якір ручних міток",
-    args=GatesArgs, agent=False, section=SECTION)
+    args=GatesArgs, section=SECTION,
+    skill="label-lines",
+    when="ворота злиття: підозрілі рядки, якір ручних міток")
 def train_gates(a: GatesArgs) -> Envelope:
     """Те, що ворота не понижують самі, а лише показують.
 
@@ -474,7 +492,9 @@ class SheetsArgs(BaseModel):
 
 
 @op("train.sheets", summary="Аркуші сторінок із пронумерованими рамками рядків",
-    args=SheetsArgs, mutates=True, long=True, agent=False, section=SECTION)
+    args=SheetsArgs, mutates=True, long=True, section=SECTION,
+    skill="label-lines",
+    when="аркуші сторінок із пронумерованими рамками рядків")
 def train_sheets(a: SheetsArgs) -> Envelope:
     """Аркуш для арбітра окремо від експорту — для дозаходу чи очного проходу."""
     from nyshporka.train import sets as S
@@ -514,7 +534,9 @@ class ViewArgs(BaseModel):
 
 # `private=True`: `out` пише файл за шляхом від клієнта.
 @op("train.view", summary="Показати кропи набору: смужка, зум, контекст на сторінці",
-    args=ViewArgs, agent=False, section=SECTION, private=True)
+    args=ViewArgs, section=SECTION, private=True,
+    skill="label-lines",
+    when="показати кропи набору для розмітки: смужка, зум, контекст")
 def train_view(a: ViewArgs) -> Envelope:
     """Картинка для ока — арбітра чи людини. У конверті — data URL і примітка."""
     from nyshporka.train import sets as S
@@ -561,7 +583,8 @@ class QueueArgs(BaseModel):
 
 
 @op("train.queue", summary="Черга рядків на розмітку — за розбіжністю голосів",
-    args=QueueArgs, agent=False, section=SECTION)
+    args=QueueArgs, section=SECTION,
+    tier="rare", skill="label-lines")
 def train_queue(a: QueueArgs) -> Envelope:
     """Що показати людині першим: рядки, де голоси розійшлись, блоками з різних сторінок.
 
@@ -603,7 +626,8 @@ class PacksArgs(BaseModel):
 
 
 @op("train.packs", summary="Пакети розмітки: людські назви черг і їхні набори",
-    args=PacksArgs, agent=False, section=SECTION)
+    args=PacksArgs, section=SECTION,
+    tier="rare", skill="label-lines")
 def train_packs(a: PacksArgs) -> Envelope:
     """Що показати людині у виборі черги. Порожньо — пакетів у просторі немає, екран показує набори."""
     packs = _registry().packs()
@@ -617,7 +641,8 @@ class LineArgs(BaseModel):
 
 
 @op("train.line", summary="Один рядок для розмітки: кроп, голоси, сусіди, збережене",
-    args=LineArgs, agent=False, section=SECTION)
+    args=LineArgs, section=SECTION,
+    tier="rare", skill="label-lines")
 def train_line(a: LineArgs) -> Envelope:
     """Кроп як data URL плюс усе, що людині треба бачити поруч із ним."""
     from nyshporka.train import sets as S
@@ -635,7 +660,8 @@ class PageArgs(BaseModel):
 
 
 @op("train.page", summary="Сторінка набору з рамками рядків — звідки ця смужка",
-    args=PageArgs, agent=False, section=SECTION)
+    args=PageArgs, section=SECTION,
+    tier="rare", skill="label-lines")
 def train_page(a: PageArgs) -> Envelope:
     """Зменшений скан із рамками з мети нарізки; на зумі — 3600 px."""
     from nyshporka.train import sets as S
@@ -660,7 +686,8 @@ class SaveArgs(BaseModel):
 
 
 @op("train.save", summary="Записати ручну мітку рядка",
-    args=SaveArgs, mutates=True, agent=False, section=SECTION)
+    args=SaveArgs, mutates=True, section=SECTION,
+    tier="rare", skill="label-lines")
 def train_save(a: SaveArgs) -> Envelope:
     """Append-only: історія правок зберігається, останній запис виграє.
 
@@ -682,7 +709,9 @@ class StatsArgs(BaseModel):
 
 
 @op("train.stats", summary="Поступ розмітки набору: зроблено, темп, CER голосу проти людини",
-    args=StatsArgs, agent=False, section=SECTION)
+    args=StatsArgs, section=SECTION,
+    skill="label-lines",
+    when="поступ розмітки набору: зроблено, темп, CER")
 def train_stats(a: StatsArgs) -> Envelope:
     """Знаменники розмітки, і вимірювач: наскільки кожен голос і злиття помиляються.
 
@@ -715,7 +744,8 @@ class SuggestArgs(BaseModel):
 
 
 @op("train.suggest", summary="Автодоповнення з уже введених міток",
-    args=SuggestArgs, agent=False, section=SECTION)
+    args=SuggestArgs, section=SECTION,
+    tier="rare", skill="label-lines")
 def train_suggest(a: SuggestArgs) -> Envelope:
     """У метриці рядки повторюються: формула набирається один раз."""
     from nyshporka.train import sets as S
@@ -732,7 +762,9 @@ class FromNotesArgs(BaseModel):
 
 
 @op("train.from_notes", summary="Набір із звірених оком рядків нотатника справи",
-    args=FromNotesArgs, mutates=True, agent=False, section=SECTION)
+    args=FromNotesArgs, mutates=True, section=SECTION,
+    skill="label-lines",
+    when="набір для розмітки зі звірених оком рядків нотатника")
 def train_from_notes(a: FromNotesArgs) -> Envelope:
     """Свої записи `reading` справи → набір `notes-<справа>` (кроп ↔ звірене).
 
@@ -766,8 +798,10 @@ class FromPoolArgs(BaseModel):
 
 
 @op("train.from_pool", summary="Набори з рядків, поширених іншими в Супрягу (власник)",
-    args=FromPoolArgs, mutates=True, long=True, agent=False, section=SECTION,
-    private=True)
+    args=FromPoolArgs, mutates=True, long=True, section=SECTION,
+    private=True,
+    skill="label-lines",
+    when="набори з рядків, поширених іншими в Супрягу")
 def train_from_pool(a: FromPoolArgs) -> Envelope:
     """Звірені рядки з кропами з пулу → набори `pool-<книга>`. Лише власнику.
 

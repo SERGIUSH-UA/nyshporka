@@ -29,7 +29,8 @@ class PickCanArgs(BaseModel):
 # `private=True`: відповідь називає теки на диску людини — розкладку її архіву.
 # Це читання, але не публічне.
 @op("pick.can", summary="Чи вміє ця машина відкрити системне вікно вибору",
-    args=PickCanArgs, agent=False, private=True)
+    args=PickCanArgs, private=True,
+    tier="rare")
 def pick_can(a: PickCanArgs) -> Envelope:
     """Спитати до того, як показати кнопку.
 
@@ -70,7 +71,8 @@ class PickBrowseArgs(BaseModel):
 
 
 @op("pick.browse", summary="Гортач тек: що лежить у цій теці",
-    args=PickBrowseArgs, agent=False, private=True)
+    args=PickBrowseArgs, private=True,
+    tier="rare")
 def pick_browse(a: PickBrowseArgs) -> Envelope:
     """Вміст однієї теки — імена, лічильники й шлях назад.
 
@@ -168,7 +170,8 @@ class PickAskArgs(BaseModel):
 # операція виконується на циклі подій демона, а системне вікно чекає людину:
 # доки вона не відповість, не працює ні черга, ні інші вкладки, ні статика.
 @op("pick.ask", summary="Відкрити системне вікно вибору — робота в черзі",
-    args=PickAskArgs, agent=False, private=True, long=True)
+    args=PickAskArgs, private=True, long=True,
+    tier="rare")
 def pick_ask(a: PickAskArgs) -> Envelope:
     """Показати системне вікно й дочекатись відповіді.
 
@@ -207,7 +210,8 @@ class PickMkdirArgs(BaseModel):
 
 
 @op("pick.mkdir", summary="Створити теку, не виходячи з вибору шляху",
-    args=PickMkdirArgs, agent=False, private=True, mutates=True)
+    args=PickMkdirArgs, private=True, mutates=True,
+    tier="rare")
 def pick_mkdir(a: PickMkdirArgs) -> Envelope:
     """Нова тека там, куди зараз дивиться гортач.
 

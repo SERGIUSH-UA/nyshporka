@@ -44,7 +44,7 @@ def _ws(ws: Workspace | None) -> Workspace:
 
 def train_root(ws: Workspace | None = None) -> Path:
     """Незамінне: `data/train`."""
-    return _ws(ws).data / "train"
+    return _ws(ws).hub_data / "train"
 
 
 def sets_root(ws: Workspace | None = None) -> Path:
@@ -70,7 +70,7 @@ def runs_root(ws: Workspace | None = None) -> Path:
 
 def config_root(ws: Workspace | None = None) -> Path:
     """Рецепти й джерела: `config/train`."""
-    return _ws(ws).config / "train"
+    return _ws(ws).hub_config / "train"
 
 
 def models_root(ws: Workspace | None = None) -> Path:

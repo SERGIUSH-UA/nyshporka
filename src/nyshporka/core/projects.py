@@ -15,6 +15,7 @@ from __future__ import annotations
 import re
 from collections.abc import Iterator
 from dataclasses import dataclass, replace
+from functools import lru_cache
 from pathlib import Path
 
 from nyshporka.core import workspace as W
@@ -102,9 +103,38 @@ def tag(ws: W.Workspace | None = None) -> str:
     return current_id(ws or W.workspace()) or ""
 
 
+@lru_cache(maxsize=8)
+def _legacy_for(marker: str, _stamp: tuple[int, int] | None) -> str:
+    return str(W._read_marker(Path(marker)).get("legacy_project") or "")
+
+
+def legacy_project(hub: Path) -> str:
+    """Проєкт, у який переїхав корінь старого типу (`[workspace] legacy_project`).
+
+    Порожньо — переїзду не було. Записи з позначкою «.» (прогони, черга,
+    роботи, хмара) належать тоді цьому проєкту: переписувати тисячі файлів
+    заради нової позначки — ризик більший за користь.
+    """
+    marker = hub / W.MARKER
+    return _legacy_for(str(marker), W._stamp_of(marker))
+
+
+def _legacy_here() -> str:
+    try:
+        return legacy_project(W.workspace().hub)
+    except Exception:  # простору немає — старих записів теж нема до кого вести
+        return ""
+
+
 def tag_of(value: object) -> str:
-    """Позначка запису. Записи до хвилі проєктів її не мають — це корінь старого типу."""
-    return ROOT_ID if value is None else str(value)
+    """Позначка запису. Записи до хвилі проєктів її не мають — це корінь старого типу.
+
+    Після переїзду кореня (`legacy_project`) «.» читається як ім'я проєкту.
+    """
+    got = ROOT_ID if value is None else str(value)
+    if got == ROOT_ID:
+        return _legacy_here() or ROOT_ID
+    return got
 
 
 def is_mine(value: object, ws: W.Workspace | None = None) -> bool:
@@ -112,6 +142,8 @@ def is_mine(value: object, ws: W.Workspace | None = None) -> bool:
 
 
 def project_dir(hub: Path, pid: str) -> Path:
+    if pid == ROOT_ID and legacy_project(hub):
+        pid = legacy_project(hub)
     if pid == ROOT_ID:
         if W._read_marker(hub / W.MARKER).get("hub_only"):
             raise ProjectError("у цій Майстерні корінь не є проєктом (hub_only)")

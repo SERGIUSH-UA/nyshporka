@@ -24,6 +24,7 @@
 import { initTheme, cycleTheme } from '/ui/theme.js';
 import { LANG, LANGS, ENABLED, setLang, t } from './core/strings.js';
 import { esc, el, setView, curGen, alive } from './core/view.js';
+import { PROJECT, apiFetch } from './core/net.js';
 import { ACTIONS, KEYS, SCREENS, PAGERS, screenOfOp } from './core/registry.js';
 import { ST } from './core/state.js';
 import { SECTIONS, loadSections, renderNav, groupScreens, show, goto,
@@ -110,7 +111,40 @@ Object.assign(ACTIONS, {
     setLang(elm.value);
     location.reload();
   },
+
+  /** Проєкт: нова адреса вкладки (`?p=`), а не стан сторінки — інакше вже
+      завантажені екрани лишились би з даними попереднього проєкту. */
+  'project.set': (_ev, elm) => {
+    if (elm.value === PROJECT) return;
+    const q = new URLSearchParams(location.search);
+    if (elm.value) q.set('p', elm.value); else q.delete('p');
+    location.search = q.toString();
+  },
 });
+
+// Перемикач проєктів Майстерні. Один проєкт — перемикача немає: консоль
+// виглядає так само, як до Майстерні.
+async function fillProjects() {
+  const sel = el('proj-sel');
+  if (!sel) return;
+  let got;
+  try {
+    const res = await apiFetch('/api/projects');
+    if (!res.ok) return;
+    got = await res.json();
+  } catch { return; }
+  // Старий демон маршруту не знає — перемикача просто немає, сторінка живе.
+  if (!Array.isArray(got?.projects)) return;
+  const items = got.projects.map((p) => [p.id, p.name]);
+  if (got.hub_only) items.unshift([got.hub_id, t('project.hub')]);
+  if (items.length < 2) return;
+  const cur = got.current ?? got.hub_id;
+  sel.title = t('project.choose');
+  sel.setAttribute('aria-label', t('project.choose'));
+  sel.innerHTML = items.map(([id, name]) =>
+    `<option value="${esc(id)}"${id === cur ? ' selected' : ''}>${esc(name)}</option>`).join('');
+  sel.hidden = false;
+}
 
 // Перемикач мов. Перелік — із strings.js, а не з розмітки: там же лежать
 // словники, і мова без словника в перемикач не потрапить.
@@ -255,6 +289,7 @@ async function boot() {
   // того, як сторінка намальована.
   initTheme();
   fillLangs();
+  fillProjects();
   // Спершу довідка про секції, і лише потім екран: інакше перший показ ішов би
   // з порожнім переліком, тобто пускав би на екран, якого в цьому просторі немає.
   await loadSections();

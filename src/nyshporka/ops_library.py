@@ -197,7 +197,8 @@ def _matches(row: dict[str, Any], a: LibraryArgs) -> bool:
 # прочитає його як доведений факт і туди більше не гляне. Тому дія лишається
 # рівно там, де сидить той, хто дивився очима.
 @op("library.list", summary="Бібліотека: які справи є на руках і що з ними вирішено",
-    args=LibraryArgs, section="material", agent=False)
+    args=LibraryArgs, section="material",
+    when="бібліотека: які справи на руках і що з ними вирішено")
 def library_list(a: LibraryArgs) -> Envelope:
     """Зведення справ із шарами роботи й людськими вердиктами.
 
@@ -292,7 +293,9 @@ class VerdictArgs(BaseModel):
 
 
 @op("library.verdict", summary="Позначити справу вердиктом людини",
-    args=VerdictArgs, section="material", mutates=True, agent=False)
+    args=VerdictArgs, section="material", mutates=True,
+    scope="project",
+    when="позначити справу вердиктом людини («не цікаво» для цієї цілі)")
 def library_verdict(a: VerdictArgs) -> Envelope:
     """Рішення ока по справі.
 

@@ -32,6 +32,7 @@ from nyshporka import brand
 from nyshporka.cloud.base import Box, CloudError
 from nyshporka.cloud.plan import CloudPlan
 from nyshporka.cloud.state import RunState
+from nyshporka.core.routes import route
 
 app = typer.Typer(help="Прогін справи на іншій машині.", no_args_is_help=True)
 hosts_app = typer.Typer(help="Машини, на яких можна читати.", no_args_is_help=True)
@@ -102,6 +103,7 @@ def _need_run(run_id: str) -> RunState:
 
 # ── машини ───────────────────────────────────────────────────────────────────
 @hosts_app.command("list")
+@route("cloud hosts list", tier="rare", skill="run-case-remote")
 def hosts_list(as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)")) -> None:
     """Які машини записані й які бекенди доступні."""
     from nyshporka.cloud import registry as REG
@@ -146,6 +148,7 @@ def hosts_list(as_json: bool = typer.Option(False, "--json", help="машинн�
 
 
 @hosts_app.command("add")
+@route("cloud hosts add", tier="rare", skill="run-case-remote", mutates=True)
 def hosts_add(
     name: str = typer.Argument(..., help="коротке ім'я машини"),
     target: str = typer.Argument(..., help="user@host[:порт]"),
@@ -177,6 +180,7 @@ def hosts_add(
 
 
 @hosts_app.command("rm")
+@route("cloud hosts rm", tier="rare", skill="run-case-remote", mutates=True)
 def hosts_rm(name: str = typer.Argument(..., help="коротке ім'я машини")) -> None:
     """Прибрати машину з переліку."""
     from nyshporka.cloud.ssh import load_hosts, save_hosts
@@ -191,6 +195,7 @@ def hosts_rm(name: str = typer.Argument(..., help="коротке ім'я маш
 
 
 @hosts_app.command("storage")
+@route("cloud hosts storage", tier="rare", skill="run-case-remote", mutates=True)
 def hosts_storage(
     bucket: str = typer.Argument("", help="назва сегмента; порожньо — показати"),
     endpoint: str = typer.Option("", "--endpoint", help="адреса S3-сумісного API"),
@@ -290,6 +295,8 @@ def _print_money(p: CloudPlan, est: object) -> None:
 
 
 @app.command("plan")
+@route("cloud plan", skill="run-case-remote",
+       when="що поїде на машину й скільки коштуватиме — без оренди")
 def cmd_plan(
     case_dir: str = typer.Argument(..., help="тека зі сканами (пласка)"),
     host: str = typer.Option("", "--host", "-h", help="машина: ім'я або user@host"),
@@ -385,6 +392,7 @@ def cmd_plan(
 
 # ── машина ───────────────────────────────────────────────────────────────────
 @app.command("prepare")
+@route("cloud prepare", tier="rare", skill="run-case-remote", mutates=True)
 def cmd_prepare(
     host: str = typer.Argument(..., help="машина: ім'я або user@host"),
     backend: str = typer.Option("ssh", "--backend", "-b",
@@ -438,6 +446,8 @@ def _workdir_of(box: Box) -> str:
 
 # ── захід ────────────────────────────────────────────────────────────────────
 @app.command("start")
+@route("cloud start", skill="run-case-remote", mutates=True,
+       when="почати хмарний захід на вже записаній машині")
 def cmd_start(
     case_dir: str = typer.Argument(..., help="тека зі сканами (пласка)"),
     host: str = typer.Option("", "--host", "-h", help="машина: ім'я або user@host"),
@@ -512,6 +522,8 @@ def cmd_start(
 
 
 @app.command("state")
+@route("cloud state", tier="core", skill="run-case-remote",
+       when="що крутиться в хмарі, скільки витрачено, чи забрано результат")
 def cmd_state(
     run_id: str = typer.Argument("", help="ім'я заходу; порожньо — незавершений"),
     as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
@@ -859,6 +871,8 @@ def _stop_batch(batch_id: str, *, force: bool) -> None:
 
 
 @app.command("fetch")
+@route("cloud fetch", skill="run-case-remote", mutates=True,
+       when="забрати результат хмарного прогону; повтор докачує")
 def cmd_fetch(run_id: str = typer.Argument(
         "", help="ім'я заходу; порожньо — незавершений")) -> None:
     """Забрати результат. Повторний виклик безпечний і докачує."""
@@ -876,6 +890,8 @@ def cmd_fetch(run_id: str = typer.Argument(
 
 
 @app.command("verify")
+@route("cloud verify", skill="run-case-remote",
+       when="скільки сторінок хмарного прогону справді прочитано")
 def cmd_verify(
     run_id: str = typer.Argument("", help="ім'я заходу; порожньо — незавершений"),
     as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
@@ -920,6 +936,8 @@ def cmd_verify(
 
 
 @app.command("stop")
+@route("cloud stop", skill="run-case-remote", mutates=True,
+       when="зупинити хмарний прогін: погасити оренду, відпустити машину")
 def cmd_stop(
     run_id: str = typer.Argument("", help="ім'я заходу; порожньо — незавершений"),
     force: bool = typer.Option(False, "--force",
@@ -951,6 +969,8 @@ def cmd_stop(
 
 
 @app.command("drop-frames")
+@route("cloud drop-frames", skill="run-case-remote", mutates=True,
+       when="прибрати стиснуті кадри прочитаних справ із хмарної теки")
 def cmd_drop_frames(
     names: list[str] = typer.Argument(..., help="імена прогонів (теки в `cloud/frames`)"),
 ) -> None:
@@ -996,6 +1016,8 @@ def _print_batch(res: Any) -> None:
 
 # ── захід однією командою ────────────────────────────────────────────────────
 @app.command("go")
+@route("cloud go", tier="core", skill="run-case-remote", mutates=True,
+       when="хмарний прогін: велика справа (понад ~500 сторінок) на орендованій карті")
 def cmd_go(
     case: list[str] = typer.Argument(
         ..., help="справа або кілька: теки кадрів чи шифри з бібліотеки. Кілька "
@@ -1275,6 +1297,8 @@ def _rent_backend(name: str) -> object:
 
 
 @rent_app.command("status")
+@route("cloud rent status", skill="run-case-remote",
+       when="що зараз тарифікується на акаунті оренди, баланс")
 def rent_status(
     backend: str = typer.Option("vast", "--backend", "-b", help="бекенд оренди"),
     as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
@@ -1456,6 +1480,7 @@ ENV_RENT_KEY = "NYSHPORKA_RENT_KEY"
 
 
 @rent_app.command("login")
+@route("cloud rent login", tier="rare", skill="run-case-remote", mutates=True)
 def rent_login(
     backend: str = typer.Option("vast", "--backend", "-b", help="бекенд оренди"),
     key: str = typer.Option(
@@ -1510,6 +1535,7 @@ def rent_login(
 
 
 @rent_app.command("storage")
+@route("cloud rent storage", tier="rare", skill="run-case-remote", mutates=True)
 def rent_storage(
     backend: str = typer.Option("vast", "--backend", "-b", help="бекенд оренди"),
     account: str = typer.Option(
@@ -1598,6 +1624,8 @@ def rent_storage(
 
 
 @rent_app.command("ceiling")
+@route("cloud rent ceiling", skill="run-case-remote", mutates=True,
+       when="стеля автозапуску хмарного прогону без людини")
 def rent_ceiling(
     usd: float | None = typer.Argument(
         None, help="нова стеля, $; порожньо — показати чинну"),

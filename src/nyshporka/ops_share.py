@@ -187,8 +187,10 @@ class SharePackArgs(_CardFields):
 
 
 @op("share.pack", summary="Спакувати прочитане у файл для обміну",
-    args=SharePackArgs, mutates=True, agent=False, section=SECTION,
-    next_hints=(("share.publish", "віддати пакет у пул"),))
+    args=SharePackArgs, mutates=True, section=SECTION,
+    next_hints=(("share.publish", "віддати пакет у пул"),),
+    tier="core", skill="share-case",
+    when="віддати прочитану справу в Супрягу: спакувати")
 def share_pack(a: SharePackArgs) -> Envelope:
     """Зібрати пакет справи.
 
@@ -276,8 +278,10 @@ class ShareCardArgs(_CardFields):
 
 
 @op("share.card", summary="Картка справи для пулу: назва, роки, місця, жанр",
-    args=ShareCardArgs, mutates=True, agent=False, section=SECTION, private=True,
-    next_hints=(("share.pack", "спакувати справу з цією карткою"),))
+    args=ShareCardArgs, mutates=True, section=SECTION, private=True,
+    next_hints=(("share.pack", "спакувати справу з цією карткою"),),
+    tier="core", skill="share-case",
+    when="картка справи в Супрязі: подивитись, виправити")
 def share_card(a: ShareCardArgs) -> Envelope:
     """Задати або подивитись картку, яку пакувальник покладе в маніфест.
 
@@ -339,8 +343,10 @@ class SharePartArgs(BaseModel):
 
 
 @op("share.part", summary="Вирізка з плівки: де ця тека на плівці й у справі",
-    args=SharePartArgs, mutates=True, agent=False, section=SECTION, private=True,
-    next_hints=(("share.pack", "спакувати справу вирізками: --segments --by-part"),))
+    args=SharePartArgs, mutates=True, section=SECTION, private=True,
+    next_hints=(("share.pack", "спакувати справу вирізками: --segments --by-part"),),
+    skill="share-case",
+    when="вирізка з плівки: де тека на плівці й у справі")
 def share_part(a: SharePartArgs) -> Envelope:
     """Оголосити теку вирізкою: плівка, кадри на ній, аркуші, село.
 
@@ -415,8 +421,10 @@ class SharePackPrintArgs(BaseModel):
 
 
 @op("share.pack_print", summary="Спакувати рік друкованого видання для обміну",
-    args=SharePackPrintArgs, mutates=True, agent=False, section=SECTION,
-    next_hints=(("share.publish", "віддати пакет у пул"),))
+    args=SharePackPrintArgs, mutates=True, section=SECTION,
+    next_hints=(("share.publish", "віддати пакет у пул"),),
+    skill="share-case",
+    when="спакувати рік друкованого видання для Супряги")
 def share_pack_print(a: SharePackPrintArgs) -> Envelope:
     """Рік газети чи довідника як книга пулу з ключем `VYD/<код>/<рік>`."""
     import json
@@ -487,8 +495,10 @@ class ShareSetupArgs(BaseModel):
 
 
 @op("share.setup", summary="Профіль Супряги: хто ви й на що згодні",
-    args=ShareSetupArgs, mutates=True, agent=False, section=SECTION,
-    private=True)
+    args=ShareSetupArgs, mutates=True, section=SECTION,
+    private=True,
+    skill="share-case",
+    when="профіль Супряги: хто ви й на що згодні")
 def share_setup(a: ShareSetupArgs) -> Envelope:
     """Заповнити профіль один раз, щоб більше не питали.
 
@@ -543,8 +553,10 @@ class ShareSuggestArgs(_CardFields):
 
 
 @op("share.suggest", summary="Що прочитано, але ще не віддано",
-    args=ShareSuggestArgs, mutates=True, agent=False, section=SECTION,
-    private=True, next_hints=(("share.publish", "віддати зібраний пакет"),))
+    args=ShareSuggestArgs, mutates=True, section=SECTION,
+    private=True, next_hints=(("share.publish", "віддати зібраний пакет"),),
+    skill="share-case",
+    when="що прочитано, але ще не віддано в Супрягу")
 def share_suggest(a: ShareSuggestArgs) -> Envelope:
     """Перелік неподіленого; з `take`/`all` — пакування, зі `skip` — відмова.
 
@@ -638,8 +650,10 @@ class SharePublishArgs(BaseModel):
 
 
 @op("share.publish", summary="Віддати зібраний пакет у пул",
-    args=SharePublishArgs, mutates=True, agent=False, section=SECTION,
-    private=True, next_hints=(("share.pull", "перевірити, що пакет знайшовся"),))
+    args=SharePublishArgs, mutates=True, section=SECTION,
+    private=True, next_hints=(("share.pull", "перевірити, що пакет знайшовся"),),
+    skill="share-case",
+    when="залити зібраний пакет у Супрягу")
 def share_publish(a: SharePublishArgs) -> Envelope:
     """Реєстрація → байти в сховище → підтвердження.
 
@@ -836,8 +850,10 @@ def _private_in(items: list[dict[str, Any]]) -> list[str]:
 
 
 @op("share.push", summary="Віддати пачку справ: спакувати й залити кілька одночасно",
-    args=SharePushArgs, mutates=True, agent=False, section=SECTION, private=True,
-    next_hints=(("share.sync", "звірити з пулом, що справді там"),))
+    args=SharePushArgs, mutates=True, section=SECTION, private=True,
+    next_hints=(("share.sync", "звірити з пулом, що справді там"),),
+    tier="core", skill="share-case",
+    when="віддати в Супрягу пачку справ разом: спакувати й залити")
 def share_push(a: SharePushArgs) -> Envelope:
     """`share.pack` → `share.publish` для кожної справи, `jobs` справ одночасно.
 
@@ -972,8 +988,10 @@ class ShareWithdrawArgs(BaseModel):
 
 
 @op("share.withdraw", summary="Забрати власний внесок із Супряги",
-    args=ShareWithdrawArgs, mutates=True, agent=False, section=SECTION, private=True,
-    next_hints=(("share.publish", "залити справу під правильною шифрою"),))
+    args=ShareWithdrawArgs, mutates=True, section=SECTION, private=True,
+    next_hints=(("share.publish", "залити справу під правильною шифрою"),),
+    skill="share-case",
+    when="забрати свій внесок із Супряги")
 def share_withdraw(a: ShareWithdrawArgs) -> Envelope:
     """Відкликати свій внесок: залили не ту справу, шифра хибна, віддавати не можна.
 
@@ -1005,8 +1023,9 @@ class ShareAutoshareArgs(BaseModel):
 
 
 @op("share.autoshare", summary="Віддати щойно прочитане, якщо так налаштовано",
-    args=ShareAutoshareArgs, mutates=True, agent=False, section=SECTION,
-    private=True)
+    args=ShareAutoshareArgs, mutates=True, section=SECTION,
+    private=True,
+    tier="rare", skill="share-case")
 def share_autoshare(a: ShareAutoshareArgs) -> Envelope:
     """Режим згоди `zavzhdy`: спакувати й віддати одразу після прогону.
 
@@ -1082,8 +1101,10 @@ class ShareLookArgs(BaseModel):
 
 
 @op("share.inspect", summary="Подивитись чужий пакет, не розпаковуючи",
-    args=ShareLookArgs, mutates=False, agent=False, section=SECTION, private=True,
-    next_hints=(("share.import", "прийняти цей пакет"),))
+    args=ShareLookArgs, mutates=False, section=SECTION, private=True,
+    next_hints=(("share.import", "прийняти цей пакет"),),
+    skill="pull-case",
+    when="подивитись чужий пакет, не розпаковуючи")
 def share_inspect(a: ShareLookArgs) -> Envelope:
     """Заява пакета, ворота й ступінь прив'язки до наявних кадрів.
 
@@ -1124,7 +1145,9 @@ class ShareImportArgs(BaseModel):
 
 
 @op("share.import", summary="Прийняти чужий пакет прочитаного",
-    args=ShareImportArgs, mutates=True, agent=False, section=SECTION, private=True)
+    args=ShareImportArgs, mutates=True, section=SECTION, private=True,
+    skill="pull-case",
+    when="прийняти чужий пакет прочитаного файлом")
 def share_import(a: ShareImportArgs) -> Envelope:
     """Розкласти прогони пакета й підписати їх як чужі.
 
@@ -1207,8 +1230,9 @@ class ShareGeometryArgs(BaseModel):
 
 
 @op("share.geometry", summary="Докласти геометрію рядків до прийнятого тексту",
-    args=ShareGeometryArgs, mutates=True, agent=False, section=SECTION, private=True,
-    next_hints=(("text.find", "перевірити, що кроп тепер ріже рядок"),))
+    args=ShareGeometryArgs, mutates=True, section=SECTION, private=True,
+    next_hints=(("text.find", "перевірити, що кроп тепер ріже рядок"),),
+    tier="rare", skill="share-case")
 def share_geometry(a: ShareGeometryArgs) -> Envelope:
     """Другий об'єкт того самого внеску: рамки рядків на аркушах.
 
@@ -1243,7 +1267,9 @@ class ShareListArgs(BaseModel):
 
 
 @op("share.list", summary="Що спаковано й що прийнято",
-    args=ShareListArgs, mutates=False, agent=False, section=SECTION, private=True)
+    args=ShareListArgs, mutates=False, section=SECTION, private=True,
+    skill="share-case",
+    when="що спаковано й що прийнято з Супряги")
 def share_list(a: ShareListArgs) -> Envelope:
     from nyshporka.share import journal
 
@@ -1267,7 +1293,9 @@ class ShareStatsArgs(BaseModel):
 
 
 @op("share.stats", summary="Хто що коли: обмін цієї машини й пулу",
-    args=ShareStatsArgs, mutates=False, agent=False, section=SECTION, private=True)
+    args=ShareStatsArgs, mutates=False, section=SECTION, private=True,
+    skill="share-case",
+    when="хто що віддав і взяв у Супрязі")
 def share_stats(a: ShareStatsArgs) -> Envelope:
     """Своє — з журналу, пул — з каталогу.
 
@@ -1300,7 +1328,9 @@ class ShareSyncArgs(BaseModel):
 
 
 @op("share.sync", summary="Зняти зріз пулу для колонки «пул» у реєстрі опису",
-    args=ShareSyncArgs, mutates=True, agent=False, section=SECTION, private=True)
+    args=ShareSyncArgs, mutates=True, section=SECTION, private=True,
+    skill="share-case",
+    when="зріз Супряги для колонки «пул» у реєстрі опису")
 def share_sync(a: ShareSyncArgs) -> Envelope:
     """Єдине, що кладе зріз пулу на диск, і єдиний запит заради колонки «пул».
 
@@ -1423,7 +1453,8 @@ def _row_path(raw: str) -> tuple[Path | None, str]:
 
 
 @op("share.row", summary="Рядок каталогу для пулу",
-    args=ShareRowArgs, mutates=False, agent=False, section=SECTION, private=True)
+    args=ShareRowArgs, mutates=False, section=SECTION, private=True,
+    tier="rare", skill="share-case")
 def share_row(a: ShareRowArgs) -> Envelope:
     """Готовий рядок TSV — для свого дзеркала чи офлайн-копії каталогу."""
     from nyshporka.share import bundle
@@ -1827,7 +1858,9 @@ def _take_segments(env: Envelope, a: SharePullArgs, found: list[Any]) -> Envelop
 
 
 @op("share.pull", summary="Знайти справу в каталозі пулу",
-    args=SharePullArgs, mutates=True, agent=False, section=SECTION, private=True)
+    args=SharePullArgs, mutates=True, section=SECTION, private=True,
+    tier="core", skill="pull-case",
+    when="взяти прочитану справу з Супряги замість прогону")
 def share_pull(a: SharePullArgs) -> Envelope:
     """Пошук по каталогу; з `take` — приймання, якщо збіг рівно один.
 

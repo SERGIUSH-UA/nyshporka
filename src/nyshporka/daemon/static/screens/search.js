@@ -1,7 +1,7 @@
 /** 🔎 Пошук у прочитаному. */
 
 import { t, LANG } from '../core/strings.js';
-import { callOp, SEQ, FINAL_STATES } from '../core/net.js';
+import { callOp, SEQ, FINAL_STATES, apiFetch } from '../core/net.js';
 import { esc, el, setView, boxError, busyForm, fld,
   renderWarnings, maskot } from '../core/view.js';
 import { SCREENS, ACTIONS } from '../core/registry.js';
@@ -322,7 +322,7 @@ const SEARCH_JOBS = ['search.find', 'search.sweep'];
 /** Останній пошук по прочитаному за півдоби — або нічого. */
 async function lastSweep() {
   try {
-    const res = await fetch('/api/jobs');
+    const res = await apiFetch('/api/jobs');
     if (!res.ok) return null;
     const now = Date.now() / 1000;
     return ((await res.json()).jobs || [])
@@ -378,7 +378,7 @@ function showFound(env, q, kind) {
 async function pollSweep(id) {
   let grace = 5;
   for (;;) {
-    const res = await fetch('/api/jobs');
+    const res = await apiFetch('/api/jobs');
     const data = await res.json().catch(() => ({}));
     const job = (data.jobs || []).find((x) => x.id === id);
     if (!job) return { ok: false, error: t('search.sweep.lost') };
@@ -651,7 +651,7 @@ Object.assign(ACTIONS, {
 
   /** Показати завершений пошук — з «Пошуку» чи з «Робіт». */
   'search.last': async (_ev, elm) => {
-    const res = await fetch('/api/jobs');
+    const res = await apiFetch('/api/jobs');
     const job = res.ok
       ? ((await res.json()).jobs || []).find((j) => j.id === elm.dataset.job) : null;
     if (!job || !job.result) return boxError('hits', { ok: false, error: t('search.sweep.lost') });

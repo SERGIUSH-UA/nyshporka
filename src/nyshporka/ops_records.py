@@ -87,7 +87,9 @@ class PrepArgs(BaseModel):
 
 
 @op("records.prep", summary="Нарізати розворот на тайли, які модель справді читає",
-    args=PrepArgs, mutates=False, agent=False, section="research")
+    args=PrepArgs, mutates=False, section="research",
+    skill="keep-records",
+    when="нарізати розворот на тайли для вичитки моделлю")
 def records_prep(a: PrepArgs) -> Envelope:
     """Скан → смуги, у яких скоропис лишається читабельним.
 
@@ -178,7 +180,9 @@ class IngestArgs(BaseModel):
 
 
 @op("records.ingest", summary="Прийняти вивід вичитки: сторінки й акти разом",
-    args=IngestArgs, mutates=True, agent=False, section="research")
+    args=IngestArgs, mutates=True, section="research",
+    skill="keep-records",
+    when="прийняти вивід вичитки: сторінки й акти разом")
 def records_ingest(a: IngestArgs) -> Envelope:
     """Чужий JSON → сховище, з валідацією поштучно.
 
@@ -270,7 +274,9 @@ class AuditArgs(BaseModel):
 
 
 @op("records.audit", summary="Чексуми книги: діри в нумерації й розбіжність із підсумком",
-    args=AuditArgs, mutates=False, agent=False, section="research")
+    args=AuditArgs, mutates=False, section="research",
+    skill="keep-records",
+    when="діри в нумерації книги й розбіжність із підсумком")
 def records_audit(a: AuditArgs) -> Envelope:
     """🔴 Єдиний доказ повноти, який не є самозвітом того, хто читав.
 
@@ -320,7 +326,9 @@ class MergeArgs(BaseModel):
 
 
 @op("records.merge", summary="Звести дві незалежні вичитки: збіг у сховище, спір у чергу",
-    args=MergeArgs, mutates=True, agent=False, section="research")
+    args=MergeArgs, mutates=True, section="research",
+    skill="keep-records",
+    when="звести дві незалежні вичитки: збіг у сховище, спір у чергу")
 def records_merge(a: MergeArgs) -> Envelope:
     """🔴 Один прохід джерелом істини не є, і це виміряно.
 

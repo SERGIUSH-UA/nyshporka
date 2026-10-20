@@ -73,6 +73,9 @@
     перетворювався на стіну без ієрархії.
   -->
   <nav id="nav" class="tabs"></nav>
+  <!-- Проєкт вкладки (`?p=`). Показується, лише коли в Майстерні їх більше
+       одного; наповнює `app.js` з `/api/projects`. -->
+  <select class="lang" id="proj-sel" data-act="project.set" hidden></select>
   <select class="lang" id="lang-sel" data-act="lang.set"></select>
   <button class="lang" data-act="nav" data-arg="settings" title="Налаштування">⚙</button>
   <!--

@@ -118,7 +118,9 @@ class GeogFindArgs(BaseModel):
 
 
 @op("geog.find", summary="Де взагалі є метрики цього села — по всіх фондах архіву",
-    args=GeogFindArgs, mutates=False, agent=False, section="material")
+    args=GeogFindArgs, mutates=False, section="material",
+    skill="find-parish",
+    when="де є метрики цього села — по всіх фондах архіву")
 def geog_find(a: GeogFindArgs) -> Envelope:
     """Пошук поселення в довідниках.
 
@@ -174,7 +176,9 @@ def _place_word(place: dict[str, Any]) -> str:
 
 
 @op("geog.card", summary="Картка поселення: церква, усі справи, що з них у нас є",
-    args=GeogCardArgs, mutates=False, agent=False, section="material")
+    args=GeogCardArgs, mutates=False, section="material",
+    skill="find-parish",
+    when="картка села: церква, усі справи про нього, що з них у нас")
 def geog_card(a: GeogCardArgs) -> Envelope:
     from nyshporka.catalog.query import (
         CatalogMissing,
@@ -238,7 +242,9 @@ class GeogNearArgs(BaseModel):
 
 
 @op("geog.near", summary="Сусідні села газетира в колі — одразу з числом справ",
-    args=GeogNearArgs, mutates=False, agent=False, section="material")
+    args=GeogNearArgs, mutates=False, section="material",
+    skill="find-parish",
+    when="сусідні села в колі — одразу з числом справ")
 def geog_near(a: GeogNearArgs) -> Envelope:
     """Коло по газетиру: які поселення з книгами в архіві лежать поруч.
 
@@ -301,7 +307,8 @@ def geog_near(a: GeogNearArgs) -> Envelope:
 
 # ── 🗂 стан довідників ───────────────────────────────────────────────────────
 @op("catalog.packs", summary="Які довідники встановлено і якого вони зрізу",
-    mutates=False, agent=False, section="material")
+    mutates=False, section="material",
+    tier="rare")
 def catalog_packs(_: NoArgs) -> Envelope:
     """Стан каталогу — щоб «нічого не знайдено» можна було пояснити.
 
@@ -355,7 +362,9 @@ class FondRowsArgs(BaseModel):
 
 
 @op("fond.list", summary="Які фонди описано: скільки справ, скільки вже в нас",
-    mutates=False, agent=False, section="material")
+    mutates=False, section="material",
+    skill="keep-fond",
+    when="які фонди описано і скільки їхніх справ уже в нас")
 def fond_list(_: NoArgs) -> Envelope:
     from nyshporka.fonds import registry as R
 
@@ -397,7 +406,9 @@ def fond_list(_: NoArgs) -> Envelope:
 
 
 @op("fond.rows", summary="Справи фонду за описом: що існує, що вже завантажено",
-    args=FondRowsArgs, mutates=False, agent=False, section="material")
+    args=FondRowsArgs, mutates=False, section="material",
+    skill="keep-fond",
+    when="справи фонду за описом: що існує, що вже завантажено")
 def fond_rows(a: FondRowsArgs) -> Envelope:
     from nyshporka.fonds import registry as R
 
@@ -539,7 +550,9 @@ class FondCaseArgs(BaseModel):
 
 
 @op("fond.case", summary="Картка справи з реєстру опису: усе, що про неї відомо",
-    args=FondCaseArgs, mutates=False, agent=False, section="material")
+    args=FondCaseArgs, mutates=False, section="material",
+    skill="keep-fond",
+    when="картка справи з реєстру опису: усе, що про неї відомо")
 def fond_case(a: FondCaseArgs) -> Envelope:
     """Повний розбір одного рядка опису.
 
@@ -587,7 +600,9 @@ class FondTakeArgs(BaseModel):
 
 
 @op("fond.take", summary="Узяти справу з опису: завантажити й зареєструвати",
-    args=FondTakeArgs, mutates=True, long=True, agent=False, section="material")
+    args=FondTakeArgs, mutates=True, long=True, section="material",
+    skill="keep-fond",
+    when="узяти справу з реєстру опису: завантажити й зареєструвати")
 def fond_take(a: FondTakeArgs) -> Envelope:
     """Від рядка опису до теки на диску — одним кроком.
 
@@ -660,7 +675,9 @@ def _target(repo_raw: str, fond: str, opys: str = "") -> Any:
 
 
 @op("registry.collectors", summary="Які збирачі реєстру опису є і що кожен уміє",
-    mutates=False, agent=False, section="material")
+    mutates=False, section="material",
+    skill="keep-fond",
+    when="які збирачі реєстру опису є і що кожен уміє")
 def registry_collectors(_: NoArgs) -> Envelope:
     """Перелік збирачів.
 
@@ -683,7 +700,9 @@ def registry_collectors(_: NoArgs) -> Envelope:
 
 
 @op("registry.plan", summary="Скільки коштуватиме збирання й чого для нього бракує",
-    args=CollectArgs, mutates=False, agent=False, section="material")
+    args=CollectArgs, mutates=False, section="material",
+    skill="keep-fond",
+    when="скільки коштуватиме зібрати реєстр опису і чого бракує")
 def registry_plan(a: CollectArgs) -> Envelope:
     """Що принесе збирання — до того, як воно почалось.
 
@@ -708,7 +727,9 @@ class MergeArgs(BaseModel):
 
 @op("registry.merge",
     summary="Звести джерела опису в реєстр фонду, чергу розбіжностей і покриття",
-    args=MergeArgs, mutates=True, long=True, agent=False, section="material")
+    args=MergeArgs, mutates=True, long=True, section="material",
+    skill="keep-fond",
+    when="звести джерела опису в реєстр фонду й чергу розбіжностей")
 def registry_merge(a: MergeArgs) -> Envelope:
     """Останній крок конвеєра реєстру: з багатьох джерел — один реєстр.
 
@@ -755,7 +776,9 @@ def registry_merge(a: MergeArgs) -> Envelope:
 
 
 @op("registry.collect", summary="Зібрати перелік справ фонду в registry/*.tsv",
-    args=CollectArgs, mutates=True, long=True, agent=False, section="material")
+    args=CollectArgs, mutates=True, long=True, section="material",
+    skill="keep-fond",
+    when="зібрати перелік справ фонду з одного джерела")
 def registry_collect(a: CollectArgs) -> Envelope:
     """Скласти те, що досі можна було лише прочитати.
 
@@ -854,7 +877,9 @@ class BuildArgs(BaseModel):
 
 @op("registry.build",
     summary="Зібрати опис фонду всіма доступними джерелами і звести в реєстр",
-    args=BuildArgs, mutates=True, long=True, agent=False, section="material")
+    args=BuildArgs, mutates=True, long=True, section="material",
+    skill="keep-fond",
+    when="зібрати реєстр опису фонду всіма доступними джерелами")
 def registry_build(a: BuildArgs) -> Envelope:
     """Одна дія замість вибору джерела.
 
@@ -1134,7 +1159,9 @@ def _place_forms(q: str, also: list[str]) -> tuple[list[str], list[str], list[st
 
 
 @op("parish.find", summary="Чиї парафії в цьому селі — і які книги кожної з них",
-    args=ParishFindArgs, mutates=False, agent=False, section="material")
+    args=ParishFindArgs, mutates=False, section="material",
+    tier="core", skill="find-parish",
+    when="які парафії й метрики має село, у яких книгах")
 def parish_find(a: ParishFindArgs) -> Envelope:
     """Парафії села всіма конфесіями, і за потреби — книги кожної.
 
@@ -1236,7 +1263,9 @@ class ParishInCaseArgs(BaseModel):
 
 
 @op("parish.in_case", summary="Які села всередині цієї книги — до того, як її читати",
-    args=ParishInCaseArgs, mutates=False, agent=False, section="material")
+    args=ParishInCaseArgs, mutates=False, section="material",
+    skill="find-parish",
+    when="які села всередині книги — до того, як її читати")
 def parish_in_case(a: ParishInCaseArgs) -> Envelope:
     """Перелік парафій зведеної книги — один запит замість прогону рушієм.
 
@@ -1301,7 +1330,9 @@ class ParishNearArgs(BaseModel):
 
 
 @op("parish.near", summary="Що є по сусідніх селах — коло одразу справами",
-    args=ParishNearArgs, mutates=False, agent=False, section="material")
+    args=ParishNearArgs, mutates=False, section="material",
+    skill="find-parish",
+    when="що є по сусідніх селах — коло одразу справами")
 def parish_near(a: ParishNearArgs) -> Envelope:
     """Справи в колі навколо точки, зі свідомим ставленням до стелі.
 
@@ -1356,7 +1387,9 @@ class ParishMentionsArgs(BaseModel):
 
 
 @op("parish.mentions", summary="Справи, де село згадане в анотації, а не в назві",
-    args=ParishMentionsArgs, mutates=False, agent=False, section="material")
+    args=ParishMentionsArgs, mutates=False, section="material",
+    skill="find-parish",
+    when="справи, де село згадане лише в анотації, а не в назві")
 def parish_mentions(a: ParishMentionsArgs) -> Envelope:
     """Світські фонди: суд, поліція, адміністрація.
 
@@ -1454,7 +1487,9 @@ class ChurchFindArgs(BaseModel):
 
 
 @op("church.find", summary="Чи була в селі церква ~1772, чия — і де тепер її книги",
-    args=ChurchFindArgs, mutates=False, agent=False, section="material")
+    args=ChurchFindArgs, mutates=False, section="material",
+    skill="find-parish",
+    when="чи була в селі церква ~1772, чия, і де тепер її метричні книги")
 def church_find(a: ChurchFindArgs) -> Envelope:
     """Церкви бази Шади за назвою села + поселення газетира з тією ж назвою.
 
@@ -1527,7 +1562,9 @@ class ChurchCardArgs(BaseModel):
 
 
 @op("church.card", summary="Картка церкви ~1772: присвята, патрон, сусіди, книги села",
-    args=ChurchCardArgs, mutates=False, agent=False, section="material")
+    args=ChurchCardArgs, mutates=False, section="material",
+    skill="find-parish",
+    when="картка церкви ~1772: присвята, патрон, сусіди, книги села")
 def church_card(a: ChurchCardArgs) -> Envelope:
     from nyshporka.catalog.query import CatalogMissing
     from nyshporka.catalog.query import church_card as _card
@@ -1563,7 +1600,9 @@ class ChurchNearArgs(BaseModel):
 
 
 @op("church.near", summary="Коло церков ~1772 навколо села — з книгами кожного сусіда",
-    args=ChurchNearArgs, mutates=False, agent=False, section="material")
+    args=ChurchNearArgs, mutates=False, section="material",
+    skill="find-parish",
+    when="церкви ~1772 навколо села — з книгами кожного сусіда")
 def church_near(a: ChurchNearArgs) -> Envelope:
     """Сусідні парафії того ж часу, і де книги кожної.
 

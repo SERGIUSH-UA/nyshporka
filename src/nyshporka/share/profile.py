@@ -101,7 +101,7 @@ class Profile:
 def config_path() -> Any:
     from nyshporka.core.workspace import workspace
 
-    return workspace().config / CONFIG_NAME
+    return workspace().hub_config / CONFIG_NAME
 
 
 def load() -> Profile:

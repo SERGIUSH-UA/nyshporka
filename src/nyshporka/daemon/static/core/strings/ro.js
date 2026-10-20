@@ -1077,4 +1077,6 @@ export default {
     'engine.diak.role': 'chirilică, a doua voce',
     'engine.skryba.role': 'latin',
     'lang.choose': 'Limba',
+    'project.choose': 'Proiect',
+    'project.hub': 'Atelier — fără proiect',
 };
