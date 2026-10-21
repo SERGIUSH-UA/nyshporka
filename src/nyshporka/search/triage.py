@@ -160,8 +160,13 @@ def _find_token(toks: list[tuple[str, bool]], matched: str) -> int:
 
 
 def _empty(matched: str) -> bool:
-    letters = re.sub(r"[^\w]|\d|_", "", matched or "")
-    return len(letters) <= 3
+    """Токен закороткий для прізвища — у НОРМІ, тією ж мірою, що й короткий запит.
+
+    🔴 Сирі літери тут брехали: «Щук» — три літери, а в нормі «scuk» — чотири,
+    тож коротким запитом він не вважався, а порожнім токеном — так, і точний
+    збіг із запитом ішов у «закрито» (рецензія 22.10.2026).
+    """
+    return len(_norm(re.sub(r"[^\w]|\d|_", "", matched or ""))) <= 3
 
 
 def _kin_list(toks: list[tuple[str, bool]], i: int) -> str:
@@ -263,7 +268,11 @@ def classify(card: dict[str, Any], known: Known, stems: list[str]) -> tuple[str,
     # Коротке прізвище запиту («Рак», «Бут») саме дає короткий токен; тоді
     # порожнім вважається лише токен без жодної літери.
     short_q = any(0 < len(_norm(x)) <= 3 for x in stems[:1])
-    if _empty(matched) and (not short_q or not re.search(r"[^\W\d_]", matched)):
+    # Сам запит (у нормі) не закривається ніколи: закривати можна лише те, що
+    # не є прізвищем.
+    is_query = bool(matched) and _norm(matched) in {_norm(x) for x in stems}
+    if (_empty(matched) and not is_query
+            and (not short_q or not re.search(r"[^\W\d_]", matched))):
         return CLOSED, f"порожній токен «{matched}»"
     before = [str(x) for x in (card.get("before") or [])][-2:]
     after = [str(x) for x in (card.get("after") or [])][:2]

@@ -109,13 +109,29 @@ def space(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
 
 def test_bulk_stamps_and_counts_match_per_run(space: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    runs = ["проба-а", "проба-б", "проба-в", "немає-такого"]
+    runs = ["проба-а", "проба-б", "проба-в", "немає-такого", "ПРОБА-А"]
     one = ST.stamps_for(runs)
     assert one == {r: ST.stamp_of(r) for r in runs}
-    stale_one = ST.stale_count(runs)
+    stale_one = ST.stale_count(runs[:4])
     monkeypatch.setattr(ST, "BULK_RUNS", 1)
     assert ST.stamps_for(runs) == one
-    assert ST.stale_count(runs) == stale_one == 2     # «в» не зібрано, «немає» немає
+    assert ST.stamps_for(runs)["ПРОБА-А"] == one["проба-а"] != ""
+    assert ST.stale_count(runs[:4]) == stale_one == 2  # «в» не зібрано, «немає» немає
     meta = space / "reports" / "htr" / "проба-а" / "_htr_meta.json"
     meta.write_text(meta.read_text(encoding="utf-8") + " ", encoding="utf-8")
-    assert ST.stale_count(runs) == 3                  # дописана мета — несвіжий і гуртом
+    assert ST.stale_count(runs[:4]) == 3              # дописана мета — несвіжий і гуртом
+
+
+def test_bulk_stamp_ignores_case_of_the_run_folder(space: Path,
+                                                   monkeypatch: pytest.MonkeyPatch) -> None:
+    """Тека з великими літерами, запит малими — той самий прогін, як у `stamp_of` на Windows."""
+    import os
+
+    d = space / "reports" / "htr" / "Проба-Верх"
+    d.mkdir()
+    (d / "_htr_meta.json").write_text("{}", encoding="utf-8")
+    want = ST.stamp_of("проба-верх")
+    if os.path.normcase("A") != os.path.normcase("a"):
+        assert want, "на Windows `stamp_of` знаходить теку без регістру"
+    monkeypatch.setattr(ST, "BULK_RUNS", 1)
+    assert ST.stamps_for(["проба-верх"]) == {"проба-верх": want}

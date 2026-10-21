@@ -250,3 +250,19 @@ def test_lines_without_word_end_are_not_glued() -> None:
 def test_short_query_surname_is_not_an_empty_token() -> None:
     c = card("Петръ Бут", "Бут")
     assert TR.classify(c, NONE, ["Бут"]) is None
+
+
+def test_query_itself_is_never_closed_as_empty_token() -> None:
+    """«Щеб» — три літери, у нормі чотири: коротким запитом не вважався, а порожнім
+    токеном — так, і точний збіг із запитом ішов у «закрито» (рецензія 22.10.2026)."""
+    c = card("Петръ Щеб", "Щеб")
+    assert TR.classify(c, NONE, ["Щеб"]) is None
+    assert TR.classify(c, NONE, [TR._norm("Щеб")]) is None
+
+
+def test_short_second_stem_of_the_query_is_not_closed() -> None:
+    """Короткий запит другим стемом («Бут» після довгого написання) — сам запит, не «закрито»."""
+    c = card("Петръ Бут", "Бут")
+    assert TR.classify(c, NONE, ["Ковальчинскій", "Бут"]) is None
+    assert TR.classify(card("щинскій Ков", "Ков"), NONE, ["Ковальчинскій", "Бут"]) == (
+        TR.CLOSED, "порожній токен «Ков»")
