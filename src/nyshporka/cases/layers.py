@@ -66,7 +66,7 @@ def fingerprint() -> tuple[Any, ...]:
     означає показувати старе під виглядом свіжого — а цього не видно ніяк.
     """
     from nyshporka.cases import db
-    from nyshporka.library import library_path, verdicts_path
+    from nyshporka.library import library_path, verdicts_path_here
 
     try:
         from nyshporka.core import pulse
@@ -76,7 +76,8 @@ def fingerprint() -> tuple[Any, ...]:
         beat = 0
     # Шлях вердиктів — у відбитку: вони проєктні, і після перемикання проєкту
     # той самий (mtime, розмір) чужого файла не мусить видавати себе за свіжий.
-    return (_stat(library_path()), str(verdicts_path()), _stat(verdicts_path()),
+    vp = verdicts_path_here()
+    return (_stat(library_path()), str(vp or ""), _stat(vp) if vp else (-1, -1),
             _stat(db.index_path()), beat)
 
 

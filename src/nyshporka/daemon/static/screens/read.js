@@ -12,6 +12,7 @@ import { ic, eng } from '/ui/icons.js';
 import { attachCombobox } from '/ui/combobox.js';
 import { pathField } from '../core/paths.js';
 import { openCloudGo } from './cloud.js';
+import { loadProjects, projectsNow, currentPid, projectChip } from '../core/projects.js';
 
 /** Тека, для якої показана картка. Живе між входами: справа не міняється. */
 let RD = { case_dir: '', script: '', card: null };
@@ -32,6 +33,8 @@ let NOW_UNSUB = [];
  */
 SCREENS.read = async () => {
   const gen = curGen();
+  // «Для кого» малюється з переліку проєктів.
+  await loadProjects();
   // 🔴 Тека приходить із бібліотеки, а не з пам'яті людини. Набирати шлях
   // руками — найдешевший спосіб прочитати не ту теку й дізнатись про це через
   // годину.
@@ -263,6 +266,45 @@ function addVoiceButtons(c) {
     ${t('read.addvoice')}: ${esc(names[g.engine] || g.engine)}</button>`).join(' ')}</div>`;
 }
 
+/** Значення «Майстерня, без проєкту» у полі «Для кого» (порожнє значення — інше). */
+const FOR_HUB = '__hub';
+
+/**
+ * «Для кого» — підпис прогону: хто замовив. Лише в проєкті; шукати в
+ * прочитаному однаково зможуть усі проєкти, тож це не замок.
+ */
+export function forField() {
+  const mine = currentPid();
+  const all = (projectsNow() || {}).projects || [];
+  if (!mine) return '';
+  const cur = RD.forProject ?? mine;
+  const opt = (v, label) => `<option value="${esc(v)}"${v === cur ? ' selected' : ''}>${esc(label)}</option>`;
+  return `<div class="row"><label class="fld"><span class="fld-l">${t('read.for')}</span>
+      <select id="rd-for" name="for_project" data-act="read.for">
+        ${all.map((p) => opt(p.id, `${p.glyph ? `${p.glyph} ` : ''}${p.name || p.id}`)).join('')}
+        ${opt(FOR_HUB, t('read.for.hub'))}
+      </select></label>
+      <span class="muted">${t('read.for.why')}</span></div>`;
+}
+
+/**
+ * Аргумент `for_project` з вибору: свій проєкт — без поля (сервер підпише сам),
+ * Майстерня — порожньо, інший проєкт — його ім'я.
+ */
+export function forArg() {
+  const mine = currentPid();
+  const v = RD.forProject ?? mine;
+  if (!mine || v === mine) return {};
+  return { for_project: v === FOR_HUB ? '' : v };
+}
+
+/** Рядок плану «Для кого» — чип проєкту або «Майстерня». */
+function forRow() {
+  const a = forArg();
+  if (!('for_project' in a)) return '';
+  return `<tr><td>${t('read.for')}</td><td>${projectChip(a.for_project, { hubLabel: t('read.for.hub') })}</td></tr>`;
+}
+
 /** Форма запуску: просте зверху, важелі під розкриттям. */
 function readForm(c) {
   const engines = (c.engines || []).map((e) => e.label).filter(Boolean);
@@ -282,6 +324,7 @@ function readForm(c) {
         ${alsoLatin ? 'checked' : ''}> ${t('read.also.latin')}</label>
       <span class="muted">${t('read.also.why')}</span>
     </div>`}
+    ${forField()}
     <details><summary>${t('read.expert')}</summary>
       <div class="row">
         <label class="lbl-mini">${t('read.limit')}
@@ -347,6 +390,7 @@ async function showPlan() {
   ? `<tr><td>${t('read.voice')}</td><td>${p.voices.map(modelLabel).join(' + ')}</td></tr>`
   : ''}
       <tr><td>→</td><td class="mono">${esc(p.out_dir)}</td></tr>
+      ${forRow()}
       ${(RD.extra || []).length ? `<tr><td>${t('read.voice')}</td><td>
         ${RD.extra.map(modelLabel).join(' + ')}
         <span class="muted">— ${t('read.extra.why')}</span></td></tr>` : ''}
@@ -375,8 +419,11 @@ Object.assign(ACTIONS, {
   'read.cloud': () => {
     const c = RD.card || {};
     const sc = RD.script || (c.script_trust === 'fixed' ? c.script : '');
-    return openCloudGo(c.case_dir || RD.case_dir, ['latin', 'cyrillic'].includes(sc) ? sc : '');
+    return openCloudGo(c.case_dir || RD.case_dir, ['latin', 'cyrillic'].includes(sc) ? sc : '',
+      forArg());
   },
+  /** «Для кого» запам'ятовується до кінця роботи з цією справою. */
+  'read.for': (_ev, elm) => { RD = { ...RD, forProject: elm.value }; },
   'read.pick': (ev) => {
     ev.preventDefault();
     RD = { case_dir: String(new FormData(ev.target).get('case_dir') || ''),
@@ -412,6 +459,7 @@ Object.assign(ACTIONS, {
         // побачила, що вказала, і не отримала цього.
         out_dir: String(fd.get('out_dir') || ''),
         model: String(fd.get('model') || ''),
+        ...forArg(),
       } };
     const split = splitVoices(RD.card || {}, RD.args);
     RD.args = split.args;
@@ -461,7 +509,7 @@ Object.assign(ACTIONS, {
     // (`readNow`), а план запуску прибирається: він уже виконується.
     for (const model of RD.extra || []) {
       // eslint-disable-next-line no-await-in-loop
-      await callOp('read.start', { case_dir: RD.case_dir, model, second_voice: false });
+      await callOp('read.start', { case_dir: RD.case_dir, model, second_voice: false, ...forArg() });
     }
     RD.extra = [];
     RD.prev = null;

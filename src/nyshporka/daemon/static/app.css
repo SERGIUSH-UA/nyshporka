@@ -945,3 +945,23 @@ details.ov-ws > summary { cursor: pointer; font-weight: 600; padding: .6rem 0; c
 .ov-kpis > div.ov-kpi.ov-info { border-left-color: var(--info-2); }
 .dash-box > .row > h3 { margin: 0; }
 .fld > input[type=color] { width: 100%; min-height: 2.4rem; padding: 2px; }
+
+/* Чип проєкту (7г): чий запис чи знахідка — кружок кольору зі знаком і назва. */
+.pj-chip { display: inline-flex; align-items: center; gap: .35rem; flex: none;
+  padding: .1rem .55rem .1rem .15rem; border-radius: 999px; border: 1px solid var(--line-2);
+  background: var(--s-2); color: var(--fg-2); font-size: .85rem; line-height: 1.6;
+  vertical-align: middle; white-space: nowrap; width: max-content; max-width: 100%;
+  align-self: flex-start; justify-self: start; }
+.pj-chip .pj-badge { width: 1.3rem; height: 1.3rem; font-size: .72rem; }
+button.pj-chip { cursor: pointer; font: inherit; font-size: .85rem; }
+button.pj-chip:hover { border-color: var(--accent); color: var(--fg); }
+.pj-chip.pj-hub { padding-left: .55rem; color: var(--fg-3); }
+.pj-chips { display: inline-flex; flex-wrap: wrap; gap: .3rem; align-items: center; }
+.in-canon { display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; margin-top: .3rem;
+  font-size: .88rem; color: var(--fg-2); }
+.pj-spent { display: inline-flex; gap: .3rem; align-items: center; margin-right: .6rem; }
+.pj-compact { gap: .15rem; }
+.pj-mini { display: inline-flex; }
+.pj-mini .pj-badge { width: 1.4rem; height: 1.4rem; font-size: .75rem; }
+.pj-more { color: var(--fg-3); font-size: .82rem; margin-left: .15rem; }
+#proj-menu button .pj-badge { width: 1.5rem; height: 1.5rem; font-size: .78rem; margin-right: .55rem; }

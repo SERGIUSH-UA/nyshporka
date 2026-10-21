@@ -176,3 +176,71 @@ def test_registry_builds_from_a_pure_hub(tmp_path: Path) -> None:
     W.use(W._build(hub, "test"))
     db.build_index()
     assert db.index_path().is_file()
+
+
+def test_cloud_go_signs_for_whom_it_was_ordered(tmp_path: Path,
+                                                monkeypatch: pytest.MonkeyPatch) -> None:
+    """Захід хмари бере підпис «для кого»; оренди немає — `go` підмінено."""
+    from nyshporka import ops as O
+    from nyshporka.cloud import go as GO
+
+    hub = _hub(tmp_path, hub_only=True)
+    alpha = _project(hub, "alpha")
+    _project(hub, "beta")
+    W.use(W._build(alpha, "test"))
+    seen: list[str] = []
+
+    class _Res:
+        verdict, why, launch = "dry_run", "", ""
+
+        def as_dict(self) -> dict[str, object]:
+            return {"verdict": self.verdict}
+
+    def fake_go(*_a: object, **_kw: object) -> _Res:
+        seen.append(P.tag())
+        return _Res()
+
+    monkeypatch.setattr(GO, "go", fake_go)
+    assert O.call("cloud.go", {"case": ["x"]}).ok
+    assert O.call("cloud.go", {"case": ["x"], "for_project": "beta"}).ok
+    assert O.call("cloud.go", {"case": ["x"], "for_project": ""}).ok
+    assert seen == ["alpha", "beta", ""]
+    env = O.call("cloud.go", {"case": ["x"], "for_project": "nobody"})
+    assert not env.ok and "nobody" in env.error and len(seen) == 3
+
+
+def test_library_takes_sources_of_every_project_from_anywhere(tmp_path: Path) -> None:
+    """Бібліотека — шар Майстерні: джерела всіх канонів, звідки її не збирай.
+
+    З кореня чистої Майстерні збірка падала «вкажіть проєкт» (картки джерел
+    читались лише з поточного проєкту).
+    """
+    from nyshporka import library as L
+    from nyshporka.models import Source
+    from nyshporka.storage.files import write_entity
+
+    hub = _hub(tmp_path, hub_only=True)
+    for pid, sid in (("alpha", "S_XYZ_F1_D2"), ("beta", "S_XYZ_F1_D3")):
+        path = _project(hub, pid) / "data" / "canonical" / "sources" / f"{sid}.md"
+        path.parent.mkdir(parents=True)
+        write_entity(path, Source(id=sid, type="book", title=f"Книга {pid}"))
+    for where in (hub, hub / W.PROJECTS_DIR / "alpha"):
+        W.reset()
+        W.use(W._build(where, "test"))
+        titles = sorted(e.title for e in L.build_library())
+        assert titles == ["Книга alpha", "Книга beta"], where
+
+
+def test_library_opens_from_a_pure_hub_without_verdicts(tmp_path: Path) -> None:
+    """Вердикт — під ціль проєкту; у корені Майстерні бібліотека без них, не відмова."""
+    from nyshporka import library as L
+    from nyshporka.cases import layers as LY
+
+    hub = _hub(tmp_path, hub_only=True)
+    _project(hub, "alpha")
+    W.use(W._build(hub, "test"))
+    assert L.load_verdicts() == {}
+    assert LY.fingerprint()[1] == ""
+    W.reset()
+    W.use(W._build(hub / W.PROJECTS_DIR / "alpha", "test"))
+    assert LY.fingerprint()[1].endswith("case_verdicts.json")

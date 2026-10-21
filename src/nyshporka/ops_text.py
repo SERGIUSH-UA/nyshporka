@@ -553,6 +553,50 @@ class TextFindArgs(BaseModel):
                                     "Порожньо — рід, написанням якого є запит")
 
 
+def _mark_in_canon(res: dict[str, Any]) -> None:
+    """Позначити рядки видачі, вирізані кропом у канон якогось проєкту.
+
+    🔴 Збіг — точний, за походженням кропу (справа, скан, рядок), а не за
+    прізвищем: Іван Сидорук є в кожному селі, і збіг за іменем підсвічував би
+    чужих людей як «уже в каноні». Кроп без походження (внесений до хвилі 7г
+    чи без `--from`) не позначається — і підсумок `in_canon_known` каже, зі
+    скількох кропів позначка взагалі могла взятись (знаменник).
+
+    Агентові — лише позначка проєкту й ID картки, без вмісту картки: людина
+    тримає в голові, що це інша родина, агент — ні (див. `projects.peek`).
+    """
+    from nyshporka.canon import evidence as E
+    from nyshporka.core import projects as P
+    from nyshporka.core import workspace as W
+
+    try:
+        ws = W.workspace()
+        spots = E.origins(ws.citations / "MANIFEST_citations.json")
+        names = {P.tag_of(p.id): p.name for p in P.list_projects(ws.hub)}
+    except Exception:  # позначка — зручність показу, видача без неї правдива
+        return
+    res["in_canon_known"] = len(spots)
+    if not spots:
+        return
+    base = str(res.get("case_key") or "")
+
+    def mark(items: list[dict[str, Any]]) -> None:
+        for h in items:
+            try:
+                spot = (str(h.get("case_key") or base), E.page_id(h.get("page")),
+                        int(h.get("line_no") or 0))
+            except (TypeError, ValueError):
+                continue
+            got = spots.get(spot)
+            if got:
+                h["in_canon"] = [{"project": P.tag_of(pid), "name": names.get(P.tag_of(pid), pid),
+                                  "card": card} for pid, card in got]
+
+    mark(res.get("hits") or [])
+    mark((res.get("anchor") or {}).get("hits") or [])
+    mark((res.get("record") or {}).get("hits") or [])
+
+
 # `section="core"`: це й пошук консолі (`search.find`), а він в основі — див.
 # `core.sections.SCREENS`.
 @op("text.find", summary="Знайти рід усіма каналами разом — зі знаменником і журналом заходу",
@@ -581,6 +625,7 @@ def text_find(a: TextFindArgs) -> Envelope:
         return fail(str(exc))
     if res.get("error"):
         return fail(str(res["error"]))
+    _mark_in_canon(res)
     env = ok(res)
     if res.get("stopped"):
         env.warn("search_stopped",

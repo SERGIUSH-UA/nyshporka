@@ -3552,6 +3552,9 @@ def evidence_add_cmd(
     name: str = typer.Option("", "--name", help="ім'я в сторі; типово — як у файлу"),
     overwrite: bool = typer.Option(False, "--overwrite",
                                    help="замінити наявний доказ з іншим вмістом"),
+    origin: str = typer.Option("", "--from",
+                               help="звідки кроп: <справа>:<скан>:<рядок> — тоді Пошук "
+                                    "позначає цей рядок як «уже в каноні»"),
     as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Покласти доказ у `data/source/citations/<походження>/` сірим JPEG.
@@ -3560,8 +3563,17 @@ def evidence_add_cmd(
     """
     from nyshporka import ops as O
 
-    env = O.call("evidence.add", {"file": file, "provenance": provenance,
-                                  "name": name, "overwrite": overwrite})
+    args: dict[str, object] = {"file": file, "provenance": provenance,
+                               "name": name, "overwrite": overwrite}
+    if origin:
+        case, _, rest = origin.rpartition(":")
+        case, _, page = case.rpartition(":")
+        if not (case and page and rest.isdigit()):
+            console.print("[red]--from: очікую <справа>:<скан>:<рядок>, напр. "
+                          "TEST/1/1/5:0012:7[/red]")
+            raise typer.Exit(2)
+        args.update(origin_case=case, origin_page=page, origin_line=int(rest))
+    env = O.call("evidence.add", args)
     if _answer(env, as_json):
         return
     d = env.data

@@ -6,6 +6,7 @@ import { esc, el, setView, setViewTarget, curGen, bumpGen, alive, maskot,
 import { openModal, closeModal, modalOpen, modalTitle } from './modal.js';
 import { SCREENS, OP_SCREEN } from './registry.js';
 import { ST } from './state.js';
+import { projectChip } from './projects.js';
 import { ic } from '/ui/icons.js';
 
 /** Скільки робіт зараз іде — щоб значок у шапці не залежав від розділу. */
@@ -507,7 +508,7 @@ async function refreshJobs() {
   // Черга одна на Майстерню: коли в ній роботи кількох проєктів, кожна
   // підписана своїм, інакше чуже читання виглядає як своє.
   const many = new Set(jobs.map((j) => j.project ?? '.')).size > 1;
-  const whose = (j) => (many ? ` <span class="muted">· ${esc(j.project || '—')}</span>` : '');
+  const whose = (j) => (many ? ` ${projectChip(j.project || '', { hubLabel: t('pj.hub') })}` : '');
   const cards = liveJobs.map((j) => `
     <div class="job">
       <b>${esc(j.title || j.kind)}</b>${whose(j)} <span class="muted">${esc(jobState(j.state))}</span>

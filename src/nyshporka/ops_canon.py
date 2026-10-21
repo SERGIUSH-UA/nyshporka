@@ -362,6 +362,9 @@ class EvidenceAddArgs(BaseModel):
     provenance: str = Field(description="походження: архів чи зібрання, латиницею («dahmo», «oral»)")
     name: str = Field(default="", description="ім'я файлу в сторі; порожньо — як у вихідного")
     overwrite: bool = Field(default=False, description="замінити наявний доказ з іншим вмістом")
+    origin_case: str = Field(default="", description="з якої справи вирізано рядок (ключ справи)")
+    origin_page: str = Field(default="", description="скан, з якого вирізано рядок")
+    origin_line: int | None = Field(default=None, ge=1, description="рядок (з одиниці)")
 
 
 @op("evidence.add", summary="Покласти доказ-кроп у постійний стор (сірий JPEG ≤ 2 МБ)",
@@ -372,9 +375,17 @@ def evidence_add(a: EvidenceAddArgs) -> Envelope:
     """Доказ у стор ДО факту в каноні — шлях з відповіді йде в `media[]` і цитату."""
     from nyshporka.canon import evidence as E
 
+    # Походження — лише повне: справа без скану чи рядка нічого не позначить
+    # у Пошуку, а виглядала б як позначка.
+    parts = (a.origin_case.strip(), a.origin_page.strip(), a.origin_line)
+    if any(parts) and not all(parts):
+        return fail("походження кропу — разом справа, скан і рядок "
+                    "(`--from <справа>:<скан>:<рядок>`)")
+    origin = ({"case": parts[0], "page": parts[1], "line": parts[2]}
+              if all(parts) else None)
     try:
         got = E.add(_root(), Path(a.file).expanduser(), a.provenance,
-                    name=a.name, overwrite=a.overwrite)
+                    name=a.name, overwrite=a.overwrite, origin=origin)
     except E.EvidenceError as exc:
         return fail(str(exc))
     env = ok(got.as_dict())

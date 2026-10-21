@@ -7,6 +7,7 @@ import { esc, el, setView, busy, failure, boxError,
 import { SCREENS, ACTIONS } from '../core/registry.js';
 import { ic } from '/ui/icons.js';
 import { swapHtml } from '/ui/dom.js';
+import { loadProjects, projectCount, projectChip } from '../core/projects.js';
 
 /**
  * 🔴 Чергу веде ОКРЕМИЙ процес (`nysh queue run`), а не застосунок: він
@@ -88,7 +89,9 @@ function queueRow(row, pulse) {
     ? `<div class="muted">${t('queue.again')} ${esc(row.not_before.slice(11, 16))}</div>`
     : '';
   return `<tr>
-    <td><b>${esc(row.id)}</b><div>${queueStages(row)}</div>${why}${fix}${again}</td>
+    <td><b>${esc(row.id)}</b>${projectCount() > 1
+    ? ` ${projectChip(row.project || '', { hubLabel: t('pj.hub') })}` : ''}<div>${
+  queueStages(row)}</div>${why}${fix}${again}</td>
     <td>${esc(state)}</td>
     <td class="num">${size} ${bar}</td>
     <td class="acts">${queueDecisions(row)}</td></tr>`;
@@ -177,6 +180,8 @@ async function queuePoll(gen) {
 SCREENS.queue = async () => {
   const gen = curGen();
   busy();
+  // Черга одна на Майстерню: з кількома проєктами кожна справа з чипом замовника.
+  await loadProjects();
   await queueLoad(true);
   if (!alive(gen)) return;
   // Без await: `show()` чекає на екран, а цикл живе, доки екран відкритий.

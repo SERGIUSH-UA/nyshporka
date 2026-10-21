@@ -50,6 +50,15 @@ SCREENS.canon = async () => {
       </div>
       <div id="cn-list"><p class="muted">${t('common.loading')}</p></div>
     </div>`);
+  // Прийшли з позначки «уже в каноні» іншого проєкту (`?card=`): одразу
+  // картка. Параметр знімається — інакше вона відкривалась би на кожному вході.
+  const q = new URLSearchParams(location.search);
+  const card = q.get('card');
+  if (card) {
+    q.delete('card');
+    history.replaceState(null, '', `${location.pathname}?${q.toString()}${location.hash}`);
+    openCard(card);
+  }
   await cardsList();
 };
 

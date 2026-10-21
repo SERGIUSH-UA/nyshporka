@@ -25,6 +25,7 @@ import { ST } from '../core/state.js';
 import { ic, eng } from '/ui/icons.js';
 import { swapHtml } from '/ui/dom.js';
 import { pager, step } from '/ui/pager.js';
+import { loadProjects, projectCount, projectChip } from '../core/projects.js';
 
 /** Фільтр переліку. Живе між входами на екран, як і в бібліотеці. */
 let RUNS = { q: '', engine: '', state: '', page: 0 };
@@ -44,6 +45,8 @@ let _runsSeq = 0;
 SCREENS.runs = async () => {
   const gen = curGen();
   busy();
+  // Прогони спільні: з кількома проєктами — чип того, хто замовив.
+  await loadProjects();
   await runsLoad(true);
   if (!alive(gen)) return;
 };
@@ -218,7 +221,8 @@ function runsRow(r) {
     ? `<span class="warn-inline" title="${esc(t('runs.failed'))}">✗${r.failed}</span>`
     : '';
   return `<tr>
-    <td>${state}</td>
+    <td>${state}${projectCount() > 1
+    ? ` ${projectChip(r.project || '', { hubLabel: t('pj.hub') })}` : ''}</td>
     <td>${badges}</td>
     <td class="mono">${esc(r.model || '')}</td>
     <td class="num">${esc(r.pages_done || 0)}${n ? ` / ${esc(n)}` : ''} ${fail}</td>

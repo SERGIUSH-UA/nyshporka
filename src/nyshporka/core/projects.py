@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, replace
 from functools import lru_cache
 from pathlib import Path
@@ -38,6 +40,11 @@ GLYPH_MAX = 2
 
 class ProjectError(W.WorkspaceError):
     """Проєкту немає або ім'я непридатне."""
+
+
+#: «Для кого» на час одного запуску (читання, хмара): підпис замовника, що
+#: відрізняється від проєкту простору. `None` — не задано, діє простір.
+_ORDERED_FOR: ContextVar[str | None] = ContextVar("nysh_ordered_for", default=None)
 
 
 @dataclass(frozen=True)
@@ -129,7 +136,45 @@ def tag(ws: W.Workspace | None = None) -> str:
     Ім'я проєкту, «.» для кореня старого типу, порожньо — з кореня чистої
     Майстерні (міжпроєктний режим, замовник — сама Майстерня).
     """
+    if ws is None and (who := _ORDERED_FOR.get()) is not None:
+        return who
     return current_id(ws or W.workspace()) or ""
+
+
+def ordered_for_id(value: str | None, ws: W.Workspace | None = None) -> str | None:
+    """Перевірене «для кого»: `None` — проєкт простору, `""` — сама Майстерня.
+
+    Лише проєкт, що є в цій Майстерні: підпис прогону іменем, якого немає,
+    зробив би прогін нічиїм — фільтр «моє» не знайшов би його ніде.
+    """
+    if value is None:
+        return None
+    value = value.strip()
+    if not value:
+        return ""
+    ws = ws or W.workspace()
+    known = {tag_of(p.id) for p in list_projects(ws.hub)}
+    if value not in known:
+        raise ProjectError(f"«для кого»: проєкту «{value}» у цій Майстерні немає. "
+                           f"Є: {', '.join(sorted(known)) or 'жодного'}")
+    return value
+
+
+@contextmanager
+def ordered_for(value: str | None) -> Iterator[None]:
+    """Підписувати спільні записи цього запуску (робота, прогін, захід хмари)
+    іменем `value`, а не проєктом простору. `None` — нічого не міняти.
+
+    Підпис — хто замовив, а не замок: шукати в прочитаному зможуть усі проєкти.
+    """
+    if value is None:
+        yield
+        return
+    token = _ORDERED_FOR.set(value)
+    try:
+        yield
+    finally:
+        _ORDERED_FOR.reset(token)
 
 
 @lru_cache(maxsize=8)
@@ -203,6 +248,26 @@ def others(ws: W.Workspace) -> list[Project]:
     """Інші (неархівні) проєкти тієї самої Майстерні."""
     here = current_id(ws)
     return [p for p in list_projects(ws.hub) if p.id != here]
+
+
+def searched_by(ws: W.Workspace) -> dict[str, dict[str, str]]:
+    """Ключ справи → {проєкт: дата останнього свіпу} по всіх проєктах Майстерні.
+
+    Справи спільні, а «прошукано» — проєктне: той самий рукопис для одного
+    роду вичесано, для іншого ні. Тому зріз бере слід КОЖНОГО проєкту, а не
+    лише поточного, — інакше в Майстерні не видно, хто що шукав, а в проєкті
+    не видно, що сусідній рід цю книгу вже пройшов. Лише читання: N файлів
+    сліду, без обходу тек.
+    """
+    from nyshporka.search import trace
+
+    out: dict[str, dict[str, str]] = {}
+    for pr in list_projects(ws.hub):
+        pid = tag_of(pr.id)
+        for key, when in trace.searched(W.Workspace(root=pr.root)).items():
+            got = out.setdefault(key, {})
+            got[pid] = max(got.get(pid, ""), when)
+    return out
 
 
 # ── підсвітка чужого ─────────────────────────────────────────────────────────

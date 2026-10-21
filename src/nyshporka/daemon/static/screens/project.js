@@ -7,16 +7,18 @@ import { SCREENS, ACTIONS } from '../core/registry.js';
 import { goto, jobDone, jobChip } from '../core/nav.js';
 import { openModal, closeModal } from '../core/modal.js';
 import { unwiki } from '../core/bits.js';
+import { projectBadge as badge, projectColor } from '../core/projects.js';
 
 /**
  * Перейти в проєкт: нова адреса вкладки (`?p=`), а не стан сторінки — інакше
  * вже завантажені екрани лишились би з даними попереднього проєкту.
  * `back` — екран, на який людина йшла, коли її спитали «який проєкт».
  */
-export function openProject(id, back = '') {
+export function openProject(id, back = '', extra = {}) {
   if (id === PROJECT && !back) return;
   const q = new URLSearchParams(location.search);
   if (id) q.set('p', id); else q.delete('p');
+  for (const [k, v] of Object.entries(extra)) q.set(k, v);
   location.href = `${location.pathname}?${q.toString()}${back ? `#${back}` : ''}`;
 }
 
@@ -43,13 +45,6 @@ SCREENS.newproject = async () => {
     </form>`);
 };
 
-/** Кружок проєкту: знак (або перша літера) на кольорі проєкту. */
-function badge(p) {
-  const color = /^#[0-9a-fA-F]{6}$/.test(p.color || '') ? p.color : '';
-  const mark = p.glyph || String(p.name || p.id || '?').trim().charAt(0).toUpperCase();
-  return `<span class="pj-badge"${color ? ` style="--pj:${esc(color)}"` : ''}>${esc(mark)}</span>`;
-}
-
 /**
  * Картки проєктів для Огляду Майстерні.
  *
@@ -65,7 +60,7 @@ export async function projectCards() {
   const cards = list.map((p) => {
     const h = p.hypotheses || {};
     const open = (h.open || 0) + (h.awaiting || 0);
-    const color = /^#[0-9a-fA-F]{6}$/.test(p.color || '') ? ` style="--pj:${esc(p.color)}"` : '';
+    const color = projectColor(p) ? ` style="--pj:${esc(p.color)}"` : '';
     return `<button class="pj-card" data-act="project.go" data-arg="${esc(p.id)}"${color}>
       <span class="pj-top">${badge(p)}<span><b>${esc(p.name || p.id)}</b>
         <small>${esc(t(`np.kind.${p.kind === 'order' ? 'order' : 'family'}`))}</small></span></span>
@@ -266,6 +261,9 @@ Object.assign(ACTIONS, {
     if (job.state === 'done') goto('home');
   },
   'project.go': (_ev, elm) => openProject(elm.dataset.arg, elm.dataset.back || ''),
+  // Картка іншого проєкту (з позначки «уже в каноні» в Пошуку).
+  'project.card': (_ev, elm) => openProject(elm.dataset.arg, 'canon',
+    { card: elm.dataset.card || '' }),
 
   'project.create': async (ev) => {
     ev.preventDefault();

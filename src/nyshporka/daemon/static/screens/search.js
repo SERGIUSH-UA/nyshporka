@@ -9,6 +9,7 @@ import { show, onJob, jobChip } from '../core/nav.js';
 import { ST } from '../core/state.js';
 import { ic, eng } from '/ui/icons.js';
 import { attachCombobox } from '/ui/combobox.js';
+import { loadProjects, currentPid, projectChip } from '../core/projects.js';
 
 /**
  * 🔎 Пошук — ТА САМА команда, що в агента (`text.find`), але з поправкою на
@@ -73,6 +74,8 @@ function saveScope(value, label) {
 }
 
 SCREENS.search = async () => {
+  // Чипи «уже в каноні проєкту X» малюються з переліку проєктів.
+  await loadProjects();
   // Справа з бібліотеки («Шукати рід»): межа вже названа.
   const only = (ST.search || {}).case || '';
   // Без справи з бібліотеки — остання межа, яку людина обирала тут.
@@ -455,7 +458,7 @@ function hitTable(hits, where) {
       <td class="mono">${esc(h.shifra || h.case_key || h.case || '')}</td>
       <td class="mono">${esc(whereCol)}</td>
       <td>${esc(String(ctx).slice(0, 120))}${h.note
-    ? `<br><span class="muted">${esc(h.note)}</span>` : ''}</td>
+    ? `<br><span class="muted">${esc(h.note)}</span>` : ''}${inCanon(h)}</td>
       <td class="num">${esc(h.score ?? '')}${h.match
     ? `<br><span class="tag" title="${esc(t(`search.match.${h.match}.why`))}">${
       esc(t(`search.match.${h.match}`))}</span>` : ''}</td>
@@ -472,6 +475,40 @@ function hitTable(hits, where) {
       </td>
     </tr>`;
   }).join('')}</tbody></table>`;
+}
+
+/**
+ * «Цей рядок уже в каноні проєкту X» — під рядком видачі.
+ *
+ * Людина бачить знахідку з іншого проєкту повністю, з позначкою й переходом
+ * туди (розд. 6.5 дизайну): свій проєкт відкриває картку тут, чужий —
+ * перемикає вкладку на той проєкт і відкриває картку там.
+ */
+export function inCanon(h) {
+  const got = h.in_canon || [];
+  if (!got.length) return '';
+  const mine = currentPid();
+  return got.map((c) => {
+    const own = Boolean(mine) && c.project === mine;
+    const label = (own ? t('search.incanon.own') : t('search.incanon'))
+      .replace('{p}', c.name || c.project);
+    const btn = own
+      ? `<button class="ctl-sm" data-act="canon.card" data-arg="${esc(c.card)}">${esc(c.card)}</button>`
+      : `<button class="ctl-sm" data-act="project.card" data-arg="${esc(c.project)}"
+          data-card="${esc(c.card)}">${esc(c.card)} →</button>`;
+    return `<div class="in-canon">${projectChip(c.project)}<span>${esc(label)}</span>${btn}</div>`;
+  }).join('');
+}
+
+/**
+ * Знаменник позначки: зі скількох кропів канону вона могла взятись. Кроп без
+ * записаного рядка (старий, або покладений без `--from`) не позначає нічого —
+ * і «жодної позначки» не має читатись як «у каноні цього немає».
+ */
+export function inCanonNote(d) {
+  if (d.in_canon_known === undefined || d.in_canon_known === null) return '';
+  return `<p class="muted small">${esc(t('search.incanon.known')
+    .replace('{n}', Number(d.in_canon_known).toLocaleString(LANG)))}</p>`;
 }
 
 /** Хіти лишаються під рукою: розбір відкривається з них, а не переповторює пошук. */
@@ -530,6 +567,7 @@ function renderFind(env, q) {
       <p class="muted">${esc(t('search.anchor.why'))}</p>${hitTable(anchor.hits, 'decode')}` : ''}
     ${recHits.length ? `<h3>${t('search.ch.record')}</h3>
       <p class="muted">${esc(t('search.record.why'))}</p>${hitTable(recHits, 'decode')}` : ''}
+    ${inCanonNote(d)}
     ${ledgerBlock(d)}`;
 }
 

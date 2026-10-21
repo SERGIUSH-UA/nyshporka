@@ -23,11 +23,14 @@ import { ST } from '../core/state.js';
 import { ic, eng } from '/ui/icons.js';
 import { swapHtml, skelRows } from '/ui/dom.js';
 import { pager, step } from '/ui/pager.js';
+import { loadProjects, currentPid, projectInfo, projectChips } from '../core/projects.js';
 
 /** Діючий фільтр. Живе між входами на екран: повернувшись, людина бачить своє. */
 let LIB = {
   q: '', key: '', repo: '', record_type: '', uezd: '', htr: '', fuzzy: '',
   status: '', verdict: '', curated: false, on_disk: null, page: 0,
+  // «Прошукано для роду цього проєкту»: '' · 'here' · 'todo' (прочитані, ще не).
+  searched: '',
 };
 
 /**
@@ -74,12 +77,14 @@ SCREENS.library = async () => {
 async function libLoad(full = false) {
   const seq = ++_libSeq;
   const gen = curGen();
+  await loadProjects();
   const env = await callOp('library.list', {
     q: LIB.q, key: LIB.key, repo: LIB.repo, record_type: LIB.record_type,
     uezd: LIB.uezd,
     htr: LIB.htr, fuzzy: LIB.fuzzy, status: LIB.status, verdict: LIB.verdict,
     curated: LIB.curated, page: LIB.page,
     ...(LIB.on_disk === null ? {} : { on_disk: LIB.on_disk }),
+    ...libSearchedArgs(),
   });
   if (seq !== _libSeq) return;          // нас уже обігнав свіжіший запит
   if (!alive(gen)) return;              // з бібліотеки вже пішли
@@ -136,14 +141,15 @@ async function libLoad(full = false) {
     </details>
     <div id="lib-warn">${libKeyChip()}${renderWarnings(env)}</div>
     <p class="muted" id="lib-count">${libCount(d)}</p>
-    <table><thead><tr>
+    <div class="tbl-wide"><table><thead><tr>
       <th>${t('lib.col.shifra')}</th><th>${t('lib.col.title')}</th>
       <th class="num">${t('lib.col.years')}</th><th>${t('lib.col.place')}</th>
       <th class="num">${t('common.frames')}</th>
       <th title="${esc(t('lib.col.work.why'))}">${t('lib.col.work')}</th>
+      <th title="${esc(t('lib.col.srch.why'))}">${esc(libSearchedHead())}</th>
       <th>${t('lib.col.verdict')}</th><th></th></tr></thead>
     <tbody id="lib-rows">${rows.map((r) => libRow(r, layers)).join('')
-      || skelRows(6, 8)}</tbody></table>
+      || skelRows(6, 9)}</tbody></table></div>
     <div id="lib-pager">${pager(d)}</div>`);
   _libFacets = true;
 }
@@ -157,7 +163,7 @@ async function libLoad(full = false) {
  */
 function libMoreActive() {
   return Boolean(LIB.htr || LIB.fuzzy || LIB.status || LIB.verdict
-    || LIB.curated || LIB.on_disk);
+    || LIB.curated || LIB.on_disk || LIB.searched);
 }
 
 /**
@@ -257,7 +263,63 @@ function libStageSelects(d) {
       ${_opt('none', t('lib.verdict.none'), LIB.verdict)}
       ${Object.keys(kinds).map((k) =>
         _opt(k, t(`lib.verdict.${k}`), LIB.verdict)).join('')}
+    </select>
+    ${libSearchedSelect()}`;
+}
+
+/** Ім'я проєкту вкладки для підписів «для «X»». */
+function _pname() {
+  const p = projectInfo(currentPid());
+  return p ? (p.name || p.id) : currentPid();
+}
+
+/**
+ * Фільтр «прошукано для роду» — лише в проєкті: у Майстерні роду немає, і
+ * сервер на нього відмовляє (`library.list searched`).
+ */
+function libSearchedSelect() {
+  if (!currentPid()) return '';
+  const p = _pname();
+  return `<select id="lib-searched" data-act="lib.filter" title="${esc(t('lib.col.srch.why'))}">
+      ${_opt('', t('lib.srch.all'), LIB.searched)}
+      ${_opt('todo', t('lib.srch.todo').replace('{p}', p), LIB.searched)}
+      ${_opt('here', t('lib.srch.here').replace('{p}', p), LIB.searched)}
     </select>`;
+}
+
+/**
+ * «Прочитані, не прошукані» — це два фільтри: прошукане й хоч якийсь декод.
+ * Без другого в «непрошукане» потрапляло б і те, у чому шукати ще нічого.
+ */
+function libSearchedArgs() {
+  if (!LIB.searched || !currentPid()) return {};
+  if (LIB.searched === 'here') return { searched: 'here' };
+  return { searched: 'not_here', ...(LIB.htr ? {} : { htr: 'any' }) };
+}
+
+function libSearchedHead() {
+  return currentPid() ? t('lib.col.srch.here').replace('{p}', _pname()) : t('lib.col.srch.all');
+}
+
+/**
+ * Колонка «прошукано»: у проєкті — чи шукав цей рід (і хто ще), у Майстерні —
+ * які проєкти шукали.
+ *
+ * 🔴 «Ні» — лише для прочитаної справи. У непрочитаній шукати нема в чому, і
+ * жовте «ні» там читалось би як недогляд, а не як «спершу прочитати».
+ */
+function libSearched(r) {
+  const by = r.searched_by || {};
+  const mine = currentPid();
+  const others = Object.keys(by).filter((p) => p !== mine);
+  const chips = projectChips(others);
+  if (!mine) return chips || '<span class="dim">—</span>';
+  const read = (r.htr_stage || 'none') !== 'none';
+  const day = String(by[mine] || '').slice(0, 10);
+  const here = by[mine]
+    ? `<span class="pill ok" title="${esc(day)}">${esc(t('lib.srch.yes'))}</span>`
+    : (read ? `<span class="pill warn">${esc(t('lib.srch.no'))}</span>` : '<span class="dim">—</span>');
+  return chips ? `${here} <span class="dim">${esc(t('lib.srch.also'))}</span> ${chips}` : here;
 }
 
 /** 🔴 Знаменник поруч із видачею: скільки показано, з чого й із чого всього. */
@@ -343,6 +405,7 @@ function libRow(r, layers) {
     : `<span class="dim" title="${esc(t('lib.noframes'))}">${
       r.state === 'archived' ? t('lib.offloaded') : '—'}</span>`}</td>
     <td class="work">${libWork(r, layers)}</td>
+    <td>${libSearched(r)}</td>
     <td>${v}</td>
     <td class="acts">
       ${r.path ? `<button class="ctl-sm" data-act="lib.frames" data-arg="${esc(r.path)}"
@@ -374,7 +437,7 @@ function libMore(r) {
   const btn = (act, arg, label) => `<button class="ctl-sm" data-act="${act}"
     data-arg="${esc(arg)}">${label}</button>`;
   const years = [r.year_from, r.year_to].filter(Boolean).join('–');
-  return `<tr class="lib-more"><td colspan="8">
+  return `<tr class="lib-more"><td colspan="9">
     <p><b>${esc(r.title || r.shifra || r.key || '')}</b>
       ${years ? `<span class="muted"> · ${esc(years)}</span>` : ''}
       ${r.place ? `<span class="muted"> · ${esc(r.place)}</span>` : ''}</p>
@@ -447,6 +510,7 @@ Object.assign(ACTIONS, {
       verdict: val('lib-verdict'),
       curated: !!(el('lib-curated') || {}).checked,
       on_disk: (el('lib-disk') || {}).checked ? true : null,
+      searched: val('lib-searched'),
       // 🔴 Будь-яка зміна фільтра повертає на першу сторінку: лишившись на
       // сьомій, людина побачила б порожньо й вирішила, що нічого не знайшлось.
       page: 0,

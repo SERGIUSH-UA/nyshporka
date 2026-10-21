@@ -82,3 +82,75 @@ def test_read_means_any_stage_but_none(tmp_path: Path,
     todo = O.call("cases.list", {"htr": "read", "searched": "not_here", "limit": 1}).data
     assert todo["total"] == 2 and len(todo["cases"]) == 1
 
+
+
+def _project(hub: Path, pid: str) -> Path:
+    root = hub / W.PROJECTS_DIR / pid
+    root.mkdir(parents=True)
+    (root / W.MARKER).write_text(f'[project]\nname = "Рід {pid}"\nkind = "family"\n',
+                                 encoding="utf-8")
+    return root
+
+
+def _swept(root: Path, key: str) -> None:
+    """Свіп від імені проєкту `root`: слід пишеться в його власний файл."""
+    W.reset()
+    W.use(W._build(root, "test"))
+    trace.note(key, q="Сидорук", thresh=80, hits=0, pages=10,
+               models=["m1"], channels=["fuzzy"])
+
+
+def test_searched_by_shows_every_project(tmp_path: Path,
+                                         monkeypatch: pytest.MonkeyPatch) -> None:
+    """Справи спільні, «прошукано» — проєктне: зріз бачить слід кожного роду."""
+    hub = _hub(tmp_path, monkeypatch, hub_only=True)
+    syd, kov = _project(hub, "sydoruk"), _project(hub, "kovalchuk")
+    _swept(syd, "TEST/1/1/1")
+    _swept(kov, "TEST/1/1/1")
+    _swept(kov, "TEST/1/1/2")
+
+    W.reset()
+    W.use(W._build(hub, "test"))
+    by = {r["key"]: r["searched_by"] for r in O.call("cases.list", {}).data["cases"]}
+    assert sorted(by["TEST/1/1/1"]) == ["kovalchuk", "sydoruk"]
+    assert list(by["TEST/1/1/2"]) == ["kovalchuk"] and by["TEST/1/1/3"] == {}
+
+    W.reset()
+    W.use(W._build(syd, "test"))
+    rows = {r["key"]: r for r in O.call("cases.list", {}).data["cases"]}
+    assert rows["TEST/1/1/2"]["searched_here"] is None
+    assert list(rows["TEST/1/1/2"]["searched_by"]) == ["kovalchuk"]
+
+
+def test_library_carries_searched_by_and_filters(tmp_path: Path,
+                                                 monkeypatch: pytest.MonkeyPatch) -> None:
+    from nyshporka import library as L
+    from nyshporka.cases import layers as LY
+
+    hub = _hub(tmp_path, monkeypatch, hub_only=True)
+    syd, kov = _project(hub, "sydoruk"), _project(hub, "kovalchuk")
+    _swept(syd, "TEST/1/1/1")
+    _swept(kov, "TEST/1/1/2")
+    lib = tmp_path / "lib.json"
+    lib.write_text("[]", encoding="utf-8")
+    monkeypatch.setattr(L, "library_path", lambda: lib)
+    monkeypatch.setattr(LY, "has_layers", lambda: False)
+    monkeypatch.setattr(LY, "entries", lambda: [
+        {"key": k, "htr_stage": "pysar", "verdict": ""}
+        for k in ("TEST/1/1/1", "TEST/1/1/2", "TEST/1/1/3")])
+
+    W.reset()
+    W.use(W._build(syd, "test"))
+    d = O.call("library.list", {}).data
+    by = {r["key"]: r["searched_by"] for r in d["cases"]}
+    assert list(by["TEST/1/1/1"]) == ["sydoruk"] and list(by["TEST/1/1/2"]) == ["kovalchuk"]
+    todo = O.call("library.list", {"searched": "not_here"}).data
+    assert [r["key"] for r in todo["cases"]] == ["TEST/1/1/2", "TEST/1/1/3"]
+    assert todo["total"] == 2
+    here = O.call("library.list", {"searched": "here"}).data
+    assert [r["key"] for r in here["cases"]] == ["TEST/1/1/1"]
+
+    W.reset()
+    W.use(W._build(hub, "test"))
+    env = O.call("library.list", {"searched": "not_here"})
+    assert not env.ok and "оберіть проєкт" in env.error

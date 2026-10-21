@@ -11,8 +11,9 @@ git-сторі їх сотні, а читач однаково шукає на �
 
 Стор: `data/source/citations/<походження>/`, маніфест —
 `data/source/citations/MANIFEST_citations.json` (запис: `secured_to`, `sha256`,
-`cited_by`, `size`). `cited_by` руками не ведуть: його дописує індекс канону
-з посилань у картках.
+`cited_by`, `size`, `origin`). `cited_by` руками не ведуть: його дописує індекс
+канону з посилань у картках. `origin` — з якого рядка вирізано кроп (справа,
+скан, рядок): по ньому Пошук позначає рядок, що вже лежить у каноні проєкту.
 """
 from __future__ import annotations
 
@@ -69,11 +70,14 @@ def _to_grey_jpeg(src: Path) -> bytes:
 
 
 def add(root: Path, src: Path, provenance: str, *, name: str = "",
-        overwrite: bool = False) -> Secured:
+        overwrite: bool = False, origin: dict[str, Any] | None = None) -> Secured:
     """Покласти зображення в стор доказів сірим JPEG і записати в маніфест.
 
     Той самий вміст під тим самим іменем — не помилка: повертається наявний
     запис (`existed=True`), тож повторний виклик безпечний.
+
+    `origin` — `{case, page, line}` рядка, з якого вирізано кроп. Повторний
+    виклик без нього наявного не стирає: походження не застаріває.
     """
     if not _PROVENANCE.match(provenance):
         raise EvidenceError(
@@ -110,6 +114,8 @@ def add(root: Path, src: Path, provenance: str, *, name: str = "",
     key = next((k for k, v in records.items() if (v.get("secured_to") or k) == rel), rel)
     rec = records.get(key, {})
     rec.update({"secured_to": rel, "sha256": sha, "size": len(blob)})
+    if origin:
+        rec["origin"] = origin
     rec.setdefault("cited_by", [])
     records[key] = rec
     write_json(man, records, indent=1)
@@ -163,6 +169,38 @@ def refresh_cited_by(root: Path, files: dict[str, Path]) -> dict[str, Any]:
                 if isinstance(x, str)))
     return {"records": len(records), "added": added, "normalised": normalised,
             "unreferenced": unreferenced}
+
+
+def page_id(page: object) -> str:
+    """Скан без розширення й регістру: «0005.JPG» і «0005» — той самий аркуш."""
+    return re.sub(r"\.[A-Za-z0-9]{2,4}$", "", str(page or "").strip()).casefold()
+
+
+def origins(man: Path) -> dict[tuple[str, str, int], list[tuple[str, str]]]:
+    """(справа, скан, рядок) → [(проєкт, картка)] для кропів із походженням.
+
+    Береться лише запис, на який уже посилається картка (`cited_by`): кроп у
+    сторі без картки — ще не канон. Корінь старого типу пише `cited_by` без
+    префікса — його проєкт тут «.» (позначку читає `projects.tag_of`).
+    """
+    records: dict[str, Any] = read_json(man, default={}) or {}
+    out: dict[tuple[str, str, int], list[tuple[str, str]]] = {}
+    for rec in records.values():
+        org = rec.get("origin") if isinstance(rec, dict) else None
+        if not isinstance(org, dict):
+            continue
+        try:
+            spot = (str(org.get("case") or ""), page_id(org.get("page")), int(org.get("line") or 0))
+        except (TypeError, ValueError):
+            continue
+        if not spot[0] or not spot[1] or spot[2] < 1:
+            continue
+        for who in rec.get("cited_by") or []:
+            if not isinstance(who, str) or not who:
+                continue
+            pid, _, card = who.rpartition(":")
+            out.setdefault(spot, []).append((pid or ".", card.removesuffix(".md")))
+    return out
 
 
 def _owner_name(ref: str) -> str:

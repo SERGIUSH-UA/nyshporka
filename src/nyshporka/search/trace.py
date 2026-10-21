@@ -108,19 +108,20 @@ def _write(p: Path, data: dict[str, Any]) -> None:
     write_json(p, data, indent=None, newline="\n")
 
 
-def path() -> Path:
+def path(ws: Any = None) -> Path:
+    """Файл сліду проєкту `ws` (типово — поточного простору)."""
     from nyshporka.core.workspace import workspace
 
-    return workspace().project_derived / FILE
+    return (ws or workspace()).project_derived / FILE
 
 
-def _read() -> dict[str, Any]:
+def _read(ws: Any = None) -> dict[str, Any]:
     """Для ПОКАЗУ: побитий чи зайнятий файл — порожньо, пошук не падає.
 
     ⚠ Писати поверх цього не можна: див. `_read_for_write`.
     """
     try:
-        got = json.loads(path().read_text(encoding="utf-8"))
+        got = json.loads(path(ws).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
     return got if isinstance(got, dict) else {}
@@ -205,12 +206,12 @@ def note(key: str, *, q: str, thresh: int, hits: int, pages: int,
         pass  # слід — зручність, а не умова роботи (сюди ж — зайнятий лок)
 
 
-def searched() -> dict[str, str]:
-    """Усі справи, які цей проєкт уже шукав: ключ → дата останнього свіпу."""
+def searched(ws: Any = None) -> dict[str, str]:
+    """Усі справи, які проєкт `ws` (типово — цей) уже шукав: ключ → дата свіпу."""
     from nyshporka.core import legacy_key
 
     out: dict[str, str] = {}
-    for key, rows in _read().items():
+    for key, rows in _read(ws).items():
         if not isinstance(rows, list) or not rows or not isinstance(rows[0], dict):
             continue
         k = legacy_key.current_key(key) or key

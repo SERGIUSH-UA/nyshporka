@@ -322,3 +322,37 @@ async def test_the_plan_is_counted_off_the_event_loop(bus, tmp_path, monkeypatch
     monkeypatch.setattr(W, "_run_read", no_run)
     await W._start_read(bus, None, {"case_dir": "x", "case_key": "904-24-4"})
     assert where == [False], "план рахувався просто в циклі подій"
+
+
+@pytest.mark.asyncio
+async def test_reading_is_signed_for_whom_it_was_ordered(bus, fake_read, tmp_path):
+    """«Для кого» — підпис роботи (а з нею й мети прогону), не проєкт простору.
+
+    Проєкти вигадані; хибне ім'я — відмова до черги, а не нічий прогін.
+    """
+    from nyshporka.core import projects as P
+    from nyshporka.core import workspace as WS
+
+    hub = tmp_path / "hub"
+    hub.mkdir()
+    (hub / WS.MARKER).write_text('[workspace]\nname = "М"\nkeys = 2\nhub_only = true\n',
+                                 encoding="utf-8")
+    for pid in ("sydoruk", "kovalchuk"):
+        root = hub / WS.PROJECTS_DIR / pid
+        root.mkdir(parents=True)
+        (root / WS.MARKER).write_text(f'[project]\nname = "Рід {pid}"\n', encoding="utf-8")
+    WS.reset()
+    ws = WS._build(hub / WS.PROJECTS_DIR / "sydoruk", "test")
+    WS.use(ws)
+    try:
+        base = {"case_dir": "x", "case_key": "904-24-4"}
+        mine = await W._start_read(bus, ws, {**base, "pages": "1-2"})
+        hub_job = await W._start_read(bus, ws, {**base, "pages": "3-4", "for_project": ""})
+        other = await W._start_read(bus, ws, {**base, "pages": "5-6",
+                                              "for_project": "kovalchuk"})
+        assert (mine.project, hub_job.project, other.project) == ("sydoruk", "", "kovalchuk")
+        with pytest.raises(P.ProjectError, match="nobody"):
+            await W._start_read(bus, ws, {**base, "pages": "7-8", "for_project": "nobody"})
+        assert P.tag() == "sydoruk", "підпис запуску не мав лишитись у просторі"
+    finally:
+        WS.reset()

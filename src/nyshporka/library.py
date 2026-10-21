@@ -67,6 +67,25 @@ def sources_dir() -> Path:
     return workspace().canonical / "sources"
 
 
+def source_cards() -> list[Path]:
+    """Картки джерел (`S_*.md`) УСІХ проєктів Майстерні.
+
+    🔴 Бібліотека — шар Майстерні, а джерела — у канонах проєктів. Читаючи лише
+    поточний проєкт, збірка давала різну бібліотеку залежно від того, звідки
+    її запустили (з роду А зникали справи, описані лише в каноні роду Б), а з
+    кореня чистої Майстерні падала «вкажіть проєкт» — тобто `nysh cases build`
+    там не працював зовсім.
+    """
+    from nyshporka.core import projects as P
+    from nyshporka.core import workspace as W
+
+    ws = workspace()
+    out: list[Path] = []
+    for pr in P.list_projects(ws.hub):
+        out += sorted((W.Workspace(root=pr.root).canonical / "sources").glob("S_*.md"))
+    return out
+
+
 def library_path() -> Path:
     return workspace().derived / "case_library.json"
 
@@ -1778,7 +1797,7 @@ def build_library() -> list[CaseEntry]:
         by_rfs.setdefault((e.repo or "", e.fond or "", e.spr or ""), []).append(e)
 
     # 1) канонічні джерела
-    for md in sorted(sources_dir().glob("S_*.md")):
+    for md in source_cards():
         try:
             src = read_source(md)
         except Exception:
@@ -2043,6 +2062,21 @@ def verdicts_path() -> Path:
     return workspace().data / "spotter" / "case_verdicts.json"
 
 
+def verdicts_path_here() -> Path | None:
+    """Файл вердиктів проєкту або `None` у корені чистої Майстерні.
+
+    Вердикт («роду немає») — рішення під ціль проєкту, у Майстерні цілі
+    немає. Бібліотека там показує справи без вердиктів, а не відмову: доти
+    вона з кореня не відкривалась зовсім.
+    """
+    from nyshporka.core.workspace import NoProjectError
+
+    try:
+        return verdicts_path()
+    except NoProjectError:
+        return None
+
+
 # `no_clan` — головний: USER сам переглянув справу (мала/швидка) і роду там немає.
 # Це рішення людини і воно не застаріває від зміни моделі — на відміну від скану.
 VERDICT_KINDS = {
@@ -2059,9 +2093,12 @@ def load_verdicts() -> dict[str, Any]:
     тут лежать рішення ока, які за коментарем вище не застарівають, а `set_verdict`
     пише поверх прочитаного — тож проковтнута помилка розбору стирала їх усі.
     """
-    data = read_json(verdicts_path(), default={"verdicts": {}})
+    path = verdicts_path_here()
+    if path is None:
+        return {}
+    data = read_json(path, default={"verdicts": {}})
     if not isinstance(data, dict):
-        raise CorruptFileError(verdicts_path(), "у корені не об'єкт")
+        raise CorruptFileError(path, "у корені не об'єкт")
     from nyshporka.core import legacy_key
 
     # До переносу обліку ключі тут старі; читачі питають новими.

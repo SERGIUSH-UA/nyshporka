@@ -528,6 +528,12 @@ async def _start_read(bus: JobBus, ws: Workspace,
             seg_height=max(0, int(payload.get("seg_height") or 0)))
         return plan, case_key, cmds, notes
 
+    from nyshporka.core import projects as P
+
+    # «Для кого» перевіряється до плану: хибне ім'я — відмова одразу, а не
+    # прогін на годину з підписом, якого не знайде жоден фільтр.
+    raw_for = payload.get("for_project")
+    who = P.ordered_for_id(None if raw_for is None else str(raw_for), ws)
     plan, case_key, cmds, notes = await asyncio.to_thread(_prepare)
 
     title = f"{plan.case_dir.name}: {plan.frames} кадрів, {plan.model.name}"
@@ -535,7 +541,21 @@ async def _start_read(bus: JobBus, ws: Workspace,
         title += f" + {len(plan.voices)} голоси"
     if len(cmds) > 1:
         title += f" · {len(cmds)} процеси"
-    job, created = await bus.enqueue(
+    with P.ordered_for(who):
+        job, created = await _enqueue_read(bus, plan, case_key, cmds, notes, title,
+                                           limit=limit, pages=pages)
+    if created:
+        _keep(asyncio.create_task(
+            _run_read(bus, job, plan, case_key, cmds,
+                      partial=bool(limit or pages))))
+    return job
+
+
+async def _enqueue_read(bus: JobBus, plan: Any, case_key: str, cmds: list[list[str]],
+                        notes: list[str], title: str, *, limit: int,
+                        pages: str) -> tuple[JobRecord, bool]:
+    """Запис читання в черзі; підпис замовника (`job.project`) — з `ordered_for`."""
+    return await bus.enqueue(
         "read",
         title=title,
         cfg={**plan.as_dict(), "case_key": case_key, "workers": len(cmds),
@@ -552,11 +572,6 @@ async def _start_read(bus: JobBus, ws: Workspace,
         # гейтом карти, тож вони йдуть по одному.
         idempotency_key=_read_key(plan, limit=limit, pages=pages),
     )
-    if created:
-        _keep(asyncio.create_task(
-            _run_read(bus, job, plan, case_key, cmds,
-                      partial=bool(limit or pages))))
-    return job
 
 
 def _read_key(plan: Any, *, limit: int, pages: str) -> str:

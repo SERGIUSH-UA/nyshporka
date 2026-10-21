@@ -60,6 +60,9 @@ class LibraryArgs(BaseModel):
     verdict: Literal["", "any", "none", "no_clan", "clan_found", "recheck"] = Field(
         default="", description="фільтр за людським вердиктом; "
                                 "`any` — будь-який, `none` — вердикту немає")
+    searched: Literal["", "here", "not_here"] = Field(
+        default="", description="прошукано для роду поточного проєкту (`here`) "
+                                "чи ще ні (`not_here`); лише в проєкті")
     curated: bool = Field(default=False, description="лише відібрані дослідником")
     on_disk: bool | None = Field(
         default=None, description="лише ті, що є на диску (або лише яких немає)")
@@ -233,8 +236,26 @@ def library_list(a: LibraryArgs) -> Envelope:
                     f"перезібрати").suggest(
             "cases.build", "перезібрати зведення справ")
 
+    from nyshporka.core import projects as P
+    from nyshporka.core import workspace as W
+
+    ws = W.workspace()
+    here = P.current_id(ws)
+    # Слід пошуку — проєктний: у чистій Майстерні роду немає, і фільтр
+    # «прошукано тут» відповідав би про нікого (як і в `cases.list`).
+    if a.searched and here is None:
+        return fail("«прошукано тут» — про рід проєкту: оберіть проєкт "
+                    "(nysh --project <ім'я> або тека проєкту)")
+    try:
+        by = P.searched_by(ws)
+    except Exception:  # зріз для показу, а не умова видачі
+        by = {}
+    mine = P.tag_of(here) if here is not None else None
     all_rows = [_row(c, LY.LAYER_FIELDS) for c in LY.entries()]
-    hit = [r for r in all_rows if _matches(r, a)]
+    for r in all_rows:
+        r["searched_by"] = by.get(str(r.get("key") or ""), {})
+    hit = [r for r in all_rows if _matches(r, a)
+           and (not a.searched or (mine in r["searched_by"]) == (a.searched == "here"))]
     total = len(hit)
     start = a.page * a.page_size
     shown = hit[start:start + a.page_size]

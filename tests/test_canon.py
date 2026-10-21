@@ -446,3 +446,51 @@ def test_precommit_blocks_a_staged_disputed_fact_without_hypothesis(family: Path
     _write(family, "persons", _disputed())
     git("add", "-A")
     assert any("disputed" in p for p in H.problems(family))
+
+
+def test_evidence_origin_is_kept_and_indexed(space: Path) -> None:
+    """Походження кропу (справа, скан, рядок) — у маніфест; повтор без нього не стирає."""
+    src = _png(space / "o.png")
+    got = E.add(space, src, "test", name="o",
+                origin={"case": "TEST/1/1/5", "page": "0012", "line": 7})
+    E.add(space, src, "test", name="o")
+    man = E.manifest_path(space)
+    data = json.loads(man.read_text(encoding="utf-8"))
+    assert data[got.path]["origin"] == {"case": "TEST/1/1/5", "page": "0012", "line": 7}
+    # Без картки кроп ще не канон — у покажчику його немає.
+    assert E.origins(man) == {}
+    data[got.path]["cited_by"] = ["I9001.md", "kovalchuk:I9002.md"]
+    man.write_text(json.dumps(data), encoding="utf-8")
+    assert E.origins(man) == {("TEST/1/1/5", "0012", 7): [(".", "I9001"), ("kovalchuk", "I9002")]}
+
+
+def test_evidence_op_wants_the_whole_origin(space: Path) -> None:
+    src = _png(space / "p.png")
+    env = O.call("evidence.add", {"file": str(src), "provenance": "test",
+                                  "origin_case": "TEST/1/1/5", "origin_line": 3})
+    assert not env.ok and "справа, скан і рядок" in env.error
+    env = O.call("evidence.add", {"file": str(src), "provenance": "test", "name": "p",
+                                  "origin_case": "TEST/1/1/5", "origin_page": "0003.jpg",
+                                  "origin_line": 3})
+    assert env.ok, env.error
+
+
+def test_search_hit_cut_into_canon_is_marked(space: Path) -> None:
+    """Рядок видачі, з якого вирізано кроп картки, позначено проєктом і карткою."""
+    from nyshporka import ops_text as OT
+
+    got = E.add(space, _png(space / "m.png"), "test", name="m",
+                origin={"case": "TEST/1/1/5", "page": "0012", "line": 7})
+    man = E.manifest_path(space)
+    data = json.loads(man.read_text(encoding="utf-8"))
+    data[got.path]["cited_by"] = ["kovalchuk:I9002.md"]
+    man.write_text(json.dumps(data), encoding="utf-8")
+    res = {"case_key": "TEST/1/1/5",
+           "hits": [{"page": "0012.JPG", "line_no": 7}, {"page": "0012.jpg", "line_no": 8},
+                    {"case_key": "TEST/1/1/6", "page": "0012", "line_no": 7}],
+           "anchor": {"hits": []}, "record": {"hits": []}}
+    OT._mark_in_canon(res)
+    assert res["in_canon_known"] == 1
+    assert res["hits"][0]["in_canon"] == [{"project": "kovalchuk", "name": "kovalchuk",
+                                           "card": "I9002"}]
+    assert "in_canon" not in res["hits"][1] and "in_canon" not in res["hits"][2]

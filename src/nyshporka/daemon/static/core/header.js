@@ -13,6 +13,7 @@ import { show, liveJobs, jobChip, jobDone } from './nav.js';
 import { openModal, closeModal, confirmAct } from './modal.js';
 import { renderWarnings } from './view.js';
 import { schemaFormHtml, schemaValues } from './schemaform.js';
+import { loadProjects, projectColor, projectChip, projectBadge } from './projects.js';
 
 /** Відкрите меню шапки — щоб клік повз нього закривав його. */
 let OPEN_MENU = null;
@@ -42,11 +43,7 @@ let PROJECTS = null;
 async function fillProject() {
   const box = el('proj-box');
   if (!box) return;
-  try {
-    const res = await apiFetch('/api/projects');
-    if (!res.ok) return;
-    PROJECTS = await res.json();
-  } catch { return; }
+  PROJECTS = await loadProjects();
   if (!Array.isArray(PROJECTS?.projects)) return;
   const many = PROJECTS.projects.length + (PROJECTS.hub_only ? 1 : 0);
   if (many < 2 && !PROJECTS.hub_only) return;
@@ -59,10 +56,11 @@ async function fillProject() {
   box.classList.toggle('in-hub', !mine);
   // Колір проєкту — на крапці перемикача й смузі шапки: у чужому роді людина
   // має це бачити ще до першого кліку.
-  const color = mine && /^#[0-9a-fA-F]{6}$/.test(mine.color || '') ? mine.color : '';
-  if (document.documentElement && document.documentElement.style) {
-    if (color) document.documentElement.style.setProperty('--proj-color', color);
-    else if (document.documentElement.style.removeProperty) document.documentElement.style.removeProperty('--proj-color');
+  const color = mine ? projectColor(mine) : '';
+  const st = document.documentElement && document.documentElement.style;
+  if (st && st.setProperty) {
+    if (color) st.setProperty('--proj-color', color);
+    else if (st.removeProperty) st.removeProperty('--proj-color');
   }
   box.hidden = false;
 }
@@ -70,11 +68,12 @@ async function fillProject() {
 function projectMenu() {
   const p = PROJECTS || { projects: [] };
   const cur = p.current ?? p.hub_id;
-  const row = (id, name, sub) => `<button type="button" data-act="project.go" data-arg="${esc(id)}"${
-    id === cur ? ' aria-current="true"' : ''}><span>${esc(name)}<small>${esc(sub)}</small></span></button>`;
+  // Кружок кольору зі знаком — щоб і серед десятка проєктів свій знаходився оком.
+  const row = (id, name, sub, badge = '') => `<button type="button" data-act="project.go" data-arg="${esc(id)}"${
+    id === cur ? ' aria-current="true"' : ''}>${badge}<span>${esc(name)}<small>${esc(sub)}</small></span></button>`;
   return (p.hub_only ? row(p.hub_id, t('project.hub'), t('project.hub.why')) + '<div class="sep"></div>' : '')
     + p.projects.map((x) => row(x.id, x.name || x.id,
-      t(`np.kind.${x.kind === 'order' ? 'order' : 'family'}`))).join('')
+      t(`np.kind.${x.kind === 'order' ? 'order' : 'family'}`), projectBadge(x))).join('')
     + (p.hub_only ? `<div class="sep"></div><button type="button" data-act="nav" data-arg="newproject"><span>${
       t('stage.act.newproject')}</span></button>` : '');
 }
@@ -83,7 +82,7 @@ function projectMenu() {
 function jobsMenu() {
   const jobs = liveJobs();
   const rows = jobs.map((j) => `<div class="hm-row"><b>${esc(j.title || j.kind)}</b>
-      ${j.project ? `<small>${esc(j.project)}</small>` : ''} ${jobChip(j)}</div>`).join('');
+      ${j.project ? projectChip(j.project) : ''} ${jobChip(j)}</div>`).join('');
   return `${rows || `<p class="muted">${t('jobs.none')}</p>`}<div class="sep"></div>
     <button type="button" data-act="nav" data-arg="jobs"><span>${t('jobs.all')}</span></button>`;
 }

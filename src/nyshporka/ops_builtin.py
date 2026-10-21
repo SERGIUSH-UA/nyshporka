@@ -1840,6 +1840,9 @@ def cases_list(a: CasesArgs) -> Envelope:
     if here is not None:
         for r in rows:
             r["searched_here"] = here.get(r.get("key") or "")
+    by = _searched_by()
+    for r in rows:
+        r["searched_by"] = by.get(r.get("key") or "", {})
     try:
         counts = db.kind_counts()
     except Exception:
@@ -1868,6 +1871,17 @@ def _searched_here() -> dict[str, str] | None:
     if P.current_id(W.workspace()) is None:
         return None
     return trace.searched()
+
+
+def _searched_by() -> dict[str, dict[str, str]]:
+    """Ключ → {проєкт: дата свіпу} по всіх проєктах; без простору — порожньо."""
+    from nyshporka.core import projects as P
+    from nyshporka.core import workspace as W
+
+    try:
+        return P.searched_by(W.workspace())
+    except Exception:  # слід — зріз для показу, а не умова видачі
+        return {}
 
 
 #: Чим підписано рядок теки без шифри, коли паспорт про неї мовчить.
@@ -4313,6 +4327,9 @@ class ReadArgs(BaseModel):
                     "або ім'я ваг; лише для кириличного прогону. Мішане письмо "
                     "так закривається одним проходом, а не двома прогонами")
     case_key: str = Field(default="", description="шифра справи у мету прогону")
+    for_project: str | None = Field(
+        default=None, description="для кого прогін (підпис у меті): ім'я проєкту, "
+                                  "порожньо — сама Майстерня; без поля — поточний проєкт")
     # ── важелі для досвідчених ───────────────────────────────────────────────
     # 🔴 Прокинуто рівно ті, у яких є зміряне правило користування. Ручка без
     # такого правила — пастка: її крутять навмання, а ціна помилки тут ніч

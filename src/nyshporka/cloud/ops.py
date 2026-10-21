@@ -81,6 +81,9 @@ class GoArgs(BaseModel):
     model: str = Field(default="", description="перечитати іншою моделлю (ім'я ваг)")
     rerun: bool = Field(default=False, description="справу вже прочитано цією моделлю — "
                                                    "перечитати")
+    for_project: str | None = Field(
+        default=None, description="для кого захід (підпис запису й прогону): ім'я "
+                                  "проєкту, порожньо — сама Майстерня; без поля — поточний")
 
 
 @op("cloud.go", summary="Хмарний прогін: спершу кошторис і рішення, тоді оренда",
@@ -94,9 +97,16 @@ def cloud_go(a: GoArgs) -> Envelope:
     def on_event(kind: str, text: str, **_data: object) -> None:
         progress.report(0, 0, text)
 
-    res = GO.go(a.case, backend=a.backend, budget=a.budget, max_hours=a.max_hours,
-                max_price=a.max_price, confirm=a.confirm, dry_run=not a.run,
-                script=a.script, model=a.model, rerun=a.rerun, on_event=on_event)
+    from nyshporka.core import projects as P
+
+    try:
+        who = P.ordered_for_id(a.for_project)
+    except P.ProjectError as exc:
+        return fail(str(exc))
+    with P.ordered_for(who):
+        res = GO.go(a.case, backend=a.backend, budget=a.budget, max_hours=a.max_hours,
+                    max_price=a.max_price, confirm=a.confirm, dry_run=not a.run,
+                    script=a.script, model=a.model, rerun=a.rerun, on_event=on_event)
     data = res.as_dict()
     if res.verdict in ("dry_run", "ok", "detached"):
         env = ok(data)

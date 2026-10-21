@@ -95,8 +95,11 @@ Object.assign(ACTIONS, {
     }
     // Ім'я — з ключа справи, скану й рядка: «0005_l4» з кропу однакове для
     // будь-якої справи, і другий такий доказ упирався б у «вже є».
+    // Походження — справа, скан і рядок, з яких вирізано кроп: по ньому Пошук
+    // позначатиме цей рядок як «уже в каноні».
     const got = await callOp('evidence.add', { file: c.out, provenance: f('provenance'),
-      name: evidenceName(f('case'), c.page || f('page'), line) });
+      name: evidenceName(f('case'), c.page || f('page'), line),
+      origin_case: f('case'), origin_page: c.page || f('page'), origin_line: line });
     done();
     if (!got.ok) { boxError('ev-box', got); return; }
     const path = (got.data || {}).path || '';

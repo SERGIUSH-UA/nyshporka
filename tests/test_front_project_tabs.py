@@ -357,8 +357,10 @@ def test_evidence_crops_secures_and_hands_a_task_to_the_agent(probe) -> None:
     assert names == ["text.crop", "evidence.add"], names
     crop, add = (json.loads(b) for _, b in probe["evOps"])
     assert crop == {"case": "TEST/1/1/1", "page": "0005", "line": 4}
+    # Походження кропу — щоб Пошук позначав цей рядок «уже в каноні».
     assert add == {"file": "C:/t/crops/0005_l4.png", "provenance": "test",
-                   "name": "TEST-1-1-1_0005_l4"}
+                   "name": "TEST-1-1-1_0005_l4", "origin_case": "TEST/1/1/1",
+                   "origin_page": "0005.jpg", "origin_line": 4}
     box = probe["evBox"]
     assert "data/citations/test/0005_l4.jpg" in box and "I9001" in box and "народження" in box
     assert "nysh canon check" in box
