@@ -12,6 +12,7 @@ from __future__ import annotations
 import importlib.util
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -159,6 +160,7 @@ def test_git_ignored_files_are_not_scanned_in_the_worktree(tmp_path, monkeypatch
     assert scan.scan_text("draft.md", secret)
 
 
+@pytest.mark.timeout(900)
 def test_this_repository_history_is_clean(pytestconfig):
     """🔴 Історія — не копія робочого дерева, і чистого дерева недостатньо.
 
@@ -180,19 +182,34 @@ def test_this_repository_history_is_clean(pytestconfig):
 def _scan_history_remembering_clean(pytestconfig: pytest.Config) -> list:
     """Те саме, що `_scan_remembering_clean`, але чистий блоб упізнається за
     (шлях, sha) і з git узагалі не читається: блоб за своїм sha незмінний.
-    Читання всіх версій з усіх гілок коштувало ~7 с на кожен прогін."""
+    Читання всіх версій з усіх гілок коштувало ~7 с на кожен прогін.
+
+    🔴 Прогрес пишеться в кеш і ПО ДОРОЗІ, а не лише наприкінці. Холодний
+    прохід (нові правила, свіжий worktree, чужі гілки) під навантаженням паку
+    триває хвилини. Коли його вбивав тайм-аут, кеш не писався ніколи, і кожен
+    наступний пак знову стартував з холоду. pytest-timeout на Windows гасить
+    воркер xdist цілком, тож пак 21.10.2026 тричі лягав на 99 % каскадом
+    «node down»."""
     cache = getattr(pytestconfig, "cache", None)
     slot = f"scan_private/clean_blobs/{_rules_stamp()}"
     clean = set(cache.get(slot, [])) if cache is not None else set()
     findings, seen_clean = [], set()
+    saved_at = time.monotonic()
     for name, sha, text in scan.iter_history_blobs(skip=lambda n, s: f"{n}\0{s}" in clean):
         got = scan.scan_text(name, text, f"{name} @{sha[:8]}")
         findings += got
         if not got:
             seen_clean.add(f"{name}\0{sha}")
+        if cache is not None and time.monotonic() - saved_at > SAVE_EVERY_SEC:
+            cache.set(slot, sorted(seen_clean | clean))
+            saved_at = time.monotonic()
     if cache is not None:
         cache.set(slot, sorted(seen_clean | clean))
     return findings
+
+
+#: Як часто холодний прохід історії скидає прогрес у кеш.
+SAVE_EVERY_SEC = 20.0
 
 
 def test_history_mode_still_applies_the_allowlist():
