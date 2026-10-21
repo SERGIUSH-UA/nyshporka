@@ -1508,7 +1508,8 @@ def test_one_action_screens_open_in_a_window_over_the_screen(probe) -> None:
 
 
 def test_ask_palette_shows_screen_and_terminal_actions(probe) -> None:
-    """Дія без екрана не зникає з видачі — вона з командою терміналу (хибний нуль)."""
+    """Дія без екрана не зникає з видачі: команда терміналу плюс форма зі схеми (7в)."""
     hits = probe["askHits"]
     assert 'data-act="ask.go" data-arg="newcase"' in hits
-    assert "nysh cloud stop" in hits and "у терміналі" in hits
+    assert "nysh cloud stop" in hits
+    assert 'data-act="ask.form" data-arg="cloud.stop"' in hits

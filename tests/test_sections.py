@@ -81,7 +81,7 @@ def test_every_tab_screen_belongs_to_one_work_stage() -> None:
 
     staged = [scr for st in S.STAGES for scr in st.screens]
     assert len(staged) == len(set(staged)), "екран стоїть у двох етапах"
-    no_tab = {"newcase", "newproject"}
+    no_tab = {"newcase", "newproject", "sprofile"}
     assert set(staged) == set(S.SCREENS) - no_tab, (
         f"поза етапами: {sorted(set(S.SCREENS) - no_tab - set(staged))}; "
         f"невідомі: {sorted(set(staged) - set(S.SCREENS))}")

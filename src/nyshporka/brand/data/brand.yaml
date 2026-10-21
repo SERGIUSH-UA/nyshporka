@@ -529,6 +529,15 @@ screen_glyphs:
   jobs: "⏳"
   sets: "🗃"
   label: "✍"
+  canon: "📖"
+  hyp: "❓"
+  research: "📝"
+  history: "🕓"
+  cloud: "☁"
+  give: "📤"
+  pull: "📥"
+  cards: "🗂"
+  sprofile: "🤝"
 
 # ── значки спрайта: те саме, що гліфи, але лінією ────────────────────────────
 # 🔴 Емодзі й значок несуть ОДНЕ й те саме, і живуть поруч навмисно. Емодзі
@@ -569,6 +578,15 @@ screen_icons:
   jobs: clock
   sets: folder-open
   label: pencil-line
+  canon: book-open
+  hyp: help-circle
+  research: note
+  history: undo
+  cloud: upload
+  give: upload
+  pull: download
+  cards: tag
+  sprofile: hand
 
 # ── геометрія знака ──────────────────────────────────────────────────────────
 # 🔴 Лапка описана ДАНИМИ, а не намальована у файлі. Причина конкретна: поруч із

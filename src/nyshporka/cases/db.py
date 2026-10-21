@@ -264,7 +264,10 @@ def _where(q: str = "", repo: str = "", state: str = "", htr: str = "",
     if state:
         where.append("state = :state")
         args["state"] = state
-    if htr:
+    if htr == "read":
+        # Прочитано хоч частково — будь-яка стадія, крім «none».
+        where.append("coalesce(htr_stage, 'none') != 'none'")
+    elif htr:
         where.append("htr_stage = :htr")
         args["htr"] = htr
     if fuzzy:

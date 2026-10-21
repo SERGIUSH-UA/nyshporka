@@ -963,8 +963,8 @@ class Spaces:
     def listing(self) -> list[dict[str, Any]]:
         from nyshporka.core import projects as P
 
-        return [{"id": p.id, "name": p.name, "kind": p.kind}
-                for p in P.list_projects(self.hub)]
+        return [{"id": p.id, "name": p.name, "kind": p.kind, "color": p.color,
+                 "glyph": p.glyph} for p in P.list_projects(self.hub)]
 
 
 def _project_of(scope: dict[str, Any]) -> tuple[str | None, str]:

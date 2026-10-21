@@ -61,6 +61,13 @@ import './screens/label.js';
 import './screens/jobs.js';
 import './screens/settings.js';
 import './screens/project.js';
+import './screens/canon.js';
+import './screens/hyp.js';
+import './screens/research.js';
+import './screens/history.js';
+import './screens/cloud.js';
+import './screens/share.js';
+import './screens/evidence.js';
 
 Object.assign(ACTIONS, {
   nav: (_ev, elm) => show(elm.dataset.arg),

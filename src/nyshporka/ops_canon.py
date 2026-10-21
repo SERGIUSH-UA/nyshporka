@@ -32,7 +32,7 @@ class CheckArgs(BaseModel):
 
 
 @op("canon.check", summary="Чи цілий канон: схема, зв'язки, хронологія, докази",
-    args=CheckArgs, mutates=False, gui=False, section="research",
+    args=CheckArgs, mutates=False, section="research",
     tier="core", scope="project", skill="keep-canon",
     when="перевірити канон після правки картки: схема, зв'язки, докази")
 def canon_check(a: CheckArgs) -> Envelope:
@@ -238,7 +238,7 @@ class CardArgs(BaseModel):
 
 
 @op("canon.card", summary="Одна картка канону: поля, докази, гіпотези, що її стосуються",
-    args=CardArgs, section="research", tier="situational", scope="project", skill="keep-canon",
+    args=CardArgs, section="research", tier="rare", scope="project", skill="keep-canon",
     when="подивитись картку канону з доказами й зауваженнями перевірки")
 def canon_card(a: CardArgs) -> Envelope:
     from nyshporka.canon.check import check
@@ -295,7 +295,7 @@ def canon_hyps(a: HypsArgs) -> Envelope:
 
 
 @op("canon.hyp", summary="Одна гіпотеза: хіти з командою кропу, факти, що на неї чекають",
-    args=CardArgs, section="research", tier="situational", scope="project", skill="keep-canon",
+    args=CardArgs, section="research", tier="rare", scope="project", skill="keep-canon",
     when="розібрати одну гіпотезу: хіти з кропами й факти, що від неї залежать")
 def canon_hyp(a: CardArgs) -> Envelope:
     from nyshporka.canon.next import rank
@@ -365,7 +365,7 @@ class EvidenceAddArgs(BaseModel):
 
 
 @op("evidence.add", summary="Покласти доказ-кроп у постійний стор (сірий JPEG ≤ 2 МБ)",
-    args=EvidenceAddArgs, mutates=True, gui=False, section="research",
+    args=EvidenceAddArgs, mutates=True, section="research",
     tier="core", scope="mixed", skill="keep-canon",
     when="покласти доказ-кроп у стор перед внесенням факту в канон")
 def evidence_add(a: EvidenceAddArgs) -> Envelope:

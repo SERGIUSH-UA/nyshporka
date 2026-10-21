@@ -183,6 +183,17 @@ SCREENS: dict[str, str] = {
     "export": "research",
     # Сайт родини збирається з канону — тієї самої секції, що веде канон.
     "site": "research",
+    # Закладки роду на Огляді проєкту (хвиля 7в).
+    "canon": "research",
+    "hyp": "research",
+    "research": "research",
+    "history": "research",
+    "cloud": "htr",
+    # Супряга: окремої секції немає, обмін - частина основи.
+    "give": "core",
+    "pull": "core",
+    "cards": "core",
+    "sprofile": "core",
     # lab
     "sets": "lab",
     "label": "lab",
@@ -219,17 +230,20 @@ class Stage:
 #: Огляд проєкту несе тематичні закладки роду (профіль, сайт); у Майстерні без
 #: проєкту вони випадають (`PROJECT_SCREENS`).
 STAGES: tuple[Stage, ...] = (
-    Stage("overview", "Огляд", "Overview", ("home", "profile", "site", "jobs")),
+    Stage("overview", "Огляд", "Overview",
+          ("home", "canon", "hyp", "research", "profile", "site", "history", "jobs")),
     Stage("material", "Матеріал", "Material",
           ("sources", "geog", "fonds", "library", "cases", "frames")),
-    Stage("reading", "Читання", "Reading", ("read", "queue", "runs", "view", "export")),
+    Stage("reading", "Читання", "Reading", ("read", "queue", "runs", "cloud", "view", "export")),
     Stage("search", "Пошук", "Search", ("search", "sift", "eye")),
+    Stage("share", "Супряга", "Commons", ("give", "pull", "cards")),
     Stage("lab", "Лабораторія", "Lab", ("sets", "label")),
 )
 
 #: Екрани, що належать проєкту: у Майстерні без проєкту їх немає у вкладках, а
 #: перехід на них показує вибір проєкту замість відмови операції.
-PROJECT_SCREENS: frozenset[str] = frozenset({"profile", "site", "sift"})
+PROJECT_SCREENS: frozenset[str] = frozenset(
+    {"profile", "site", "sift", "canon", "hyp", "research", "history"})
 
 #: Головна дія етапу — кнопкою праворуч у рядку його екранів.
 #: 🔴 «Завести справу» стояла кроком «Нових тек», і людина її не знаходила
@@ -267,8 +281,38 @@ OP_SCREEN: dict[str, str] = {
     "project.new": "newproject",
     "project.list": "home",
     "project.style": "home",
-    # Огляд проєкту стоїть на «що вирішити» (екрани канону — у 7в).
-    "canon.next": "project",
+    # Огляд проєкту стоїть на «що вирішити».
+    "canon.next": "home",
+    # Закладки роду. Канон лише читається й перевіряється: картки веде агент
+    # файлами, консоль кладе доказ у стор і дає доручення.
+    "canon.check": "canon",
+    "canon.cards": "canon",
+    "canon.card": "canon",
+    "evidence.add": "canon",
+    "canon.hyps": "hyp",
+    "canon.hyp": "hyp",
+    "reports.list": "research",
+    "reports.read": "research",
+    "history.log": "history",
+    "history.diff": "history",
+    "history.save": "history",
+    "history.restore": "history",
+    "history.auto": "history",
+    "cloud.state": "cloud",
+    "cloud.go": "cloud",
+    "cloud.stop": "cloud",
+    "cloud.fetch": "cloud",
+    "share.suggest": "give",
+    "share.push": "give",
+    "share.pack": "give",
+    "share.pull": "pull",
+    "share.import": "pull",
+    "share.inspect": "pull",
+    "share.list": "cards",
+    "share.card": "cards",
+    "share.withdraw": "cards",
+    "share.setup": "sprofile",
+    "share.stats": "sprofile",
     "setup.check": "home",
     "sample.install": "home",
     "profile.show": "profile",

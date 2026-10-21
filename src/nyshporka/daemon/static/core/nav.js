@@ -28,8 +28,9 @@ let SECTIONS = { sections: [], screens: {}, op_screen: {}, presets: {},
 // 🔴 «Пошук» — одразу після «Огляду»: заради нього застосунок і ставлять. І
 // «Розбір» перед «Оком»: «Дослідження» відкривалось на «Оці», тобто на обліку
 // переглянутого, а не на роботі з кандидатами (холодний прохід 07.10.2026).
-const NAV_ORDER = ['home', 'search', 'profile', 'sources', 'geog', 'fonds', 'library', 'frames',
-  'cases', 'read', 'queue', 'runs', 'view', 'sift', 'eye', 'export', 'site', 'sets', 'label', 'jobs'];
+const NAV_ORDER = ['home', 'search', 'canon', 'hyp', 'research', 'profile', 'sources', 'geog', 'fonds',
+  'library', 'frames', 'cases', 'read', 'queue', 'runs', 'cloud', 'view', 'sift', 'eye', 'export', 'site',
+  'history', 'give', 'pull', 'cards', 'sets', 'label', 'jobs'];
 
 /**
  * Екрани-кроки без власної вкладки → вкладка, яку підсвічувати.
@@ -39,7 +40,7 @@ const NAV_ORDER = ['home', 'search', 'profile', 'sources', 'geog', 'fonds', 'lib
  * дії. Тепер опис відкривається з «Нових тек» («Описати»), з бібліотеки й з
  * «Огляду», а вкладка лишилась одна.
  */
-const STEP_OF = { newcase: 'cases', newproject: 'home' };
+const STEP_OF = { newcase: 'cases', newproject: 'home', sprofile: 'give' };
 
 /**
  * Екрани, що відкриваються вікном поверх поточного, а не сторінкою.
@@ -48,7 +49,7 @@ const STEP_OF = { newcase: 'cases', newproject: 'home' };
  * дії. Модуль екрана той самий; його `setView` малює в тіло вікна
  * (`view.setViewTarget`), а екран під вікном лишається, де був.
  */
-const MODAL_SCREENS = ['newcase', 'newproject', 'settings'];
+const MODAL_SCREENS = ['newcase', 'newproject', 'settings', 'sprofile'];
 
 /** Ключ i18n для кнопки екрана. Підпис «Завести справу» вже є в словнику. */
 const NAV_LABEL = {
@@ -56,7 +57,9 @@ const NAV_LABEL = {
   library: 'nav.library', frames: 'nav.frames', cases: 'nav.cases', newcase: 'nav.newcase', read: 'nav.read', runs: 'nav.runs', view: 'nav.view',
   eye: 'nav.eye', search: 'nav.search', sift: 'nav.sift', export: 'nav.export',
   sets: 'nav.sets', label: 'nav.label', jobs: 'nav.jobs', queue: 'nav.queue', site: 'nav.site',
-  newproject: 'nav.newproject',
+  newproject: 'nav.newproject', canon: 'nav.canon', hyp: 'nav.hyp', research: 'nav.research',
+  history: 'nav.history', cloud: 'nav.cloud', give: 'nav.give', pull: 'nav.pull', cards: 'nav.cards',
+  sprofile: 'nav.sprofile',
 };
 
 /** Чи ввімкнена секція цього екрана. Невідомий екран не блокуємо. */
@@ -341,6 +344,20 @@ export function onJob(jobId, cb) {
     if (cur.length) JOB_WATCH.set(jobId, cur);
     else JOB_WATCH.delete(jobId);
   };
+}
+
+/**
+ * Дочекатись кінця роботи: Promise з останнім записом (`done`, `error`,
+ * `cancelled`). Для вікон, де наступний крок залежить від результату
+ * довгої операції (кошторис хмари перед орендою).
+ */
+export function jobDone(jobId, onTick = null) {
+  return new Promise((resolve) => {
+    const off = onJob(jobId, (j) => {
+      if (onTick) onTick(j);
+      if (FINAL_STATES.includes(j.state)) { off(); resolve(j); }
+    });
+  });
 }
 
 /** Компактний стан роботи — рядком, для місця, звідки її запустили. */

@@ -11,6 +11,7 @@ import { ST } from '../core/state.js';
 import { ic, eng } from '/ui/icons.js';
 import { attachCombobox } from '/ui/combobox.js';
 import { pathField } from '../core/paths.js';
+import { openCloudGo } from './cloud.js';
 
 /** Тека, для якої показана картка. Живе між входами: справа не міняється. */
 let RD = { case_dir: '', script: '', card: null };
@@ -108,6 +109,8 @@ async function readCard() {
       <tr><td>${t('read.done')}</td><td>${coverCell(c)}</td></tr>
     </tbody></table>
     ${renderWarnings(env)}
+    <p class="row"><button data-act="read.cloud" title="${esc(t('read.cloud.why'))}">${t('read.cloud')}</button>
+      <span class="muted">${t('read.cloud.why')}</span></p>
     <div id="read-now"></div>
     <div id="read-form">${readForm(c)}</div>`;
   await readNow();
@@ -366,6 +369,8 @@ function modelLabel(path) {
 }
 
 Object.assign(ACTIONS, {
+  /** Велика справа — у хмару: вікно з кошторисом, оренда лише після «так». */
+  'read.cloud': () => openCloudGo((RD.card || {}).case_dir || RD.case_dir),
   'read.pick': (ev) => {
     ev.preventDefault();
     RD = { case_dir: String(new FormData(ev.target).get('case_dir') || ''),

@@ -362,6 +362,11 @@ def test_project_color_glyph_and_variants(tmp_path: Path) -> None:
     assert env.ok, env.error
     rows = {r["id"]: r for r in O.call("project.list").data["projects"]}
     assert (rows["rid-s"]["color"], rows["rid-s"]["glyph"]) == ("#8a5a2b", "С")
+    # Огляд проєкту в консолі бере колір і знак зі статусу проєкту.
+    W.use(W._build(hub / "projects/rid-s", "test"))
+    stat = O.call("project.status").data
+    assert (stat["color"], stat["glyph"]) == ("#8a5a2b", "С")
+    W.use(W._build(hub, "test"))
     prof = yaml.safe_load((hub / "projects/rid-s/config/research_profile.yaml")
                           .read_text(encoding="utf-8"))
     one = next(iter(prof["profiles"].values()))

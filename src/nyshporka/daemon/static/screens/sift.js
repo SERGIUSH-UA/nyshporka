@@ -13,6 +13,7 @@ import { swapHtml, skelRows, skelCards } from '/ui/dom.js';
 import { attachCombobox } from '/ui/combobox.js';
 import { lightbox } from '/ui/lightbox.js';
 import { loadPageFull, readerLabels } from '../core/pageload.js';
+import { openEvidence } from './evidence.js';
 
 
 
@@ -81,6 +82,7 @@ function siftDraw() {
         ${ic('expand', 'ic-sm')} ${t('view.page')}</button>
       <button data-act="sift.view">${ic('eye', 'ic-sm')} ${t('sift.view')}</button>
       <button data-act="sift.note">${ic('pencil-line', 'ic-sm')} ${t('sift.note')}</button>
+      <button data-act="sift.canon" title="${esc(t('sift.canon.why'))}">${t('sift.canon')}</button>
     </div>
     <p class="dim">${t('sift.keys')}</p>`);
 }
@@ -183,6 +185,17 @@ Object.assign(ACTIONS, {
     const h = ST.sift.hits[ST.sift.i] || {};
     ST.view = { run: h.name, page: h.page, line: h.line_index };
     return show('view');
+  },
+
+  /**
+   * Наш → у канон: вікно доказу з цим рядком. Кроп ляже в стор, а факт у
+   * картку внесе агент за дорученням (консоль канон не править).
+   */
+  'sift.canon': () => {
+    const h = ST.sift.hits[ST.sift.i] || {};
+    if (!h.name) return null;
+    return openEvidence({ case: h.case_key || h.shifra || h.name, page: h.page,
+      line: Number.isInteger(h.line_index) ? h.line_index + 1 : '', text: h.line || '' });
   },
 
   /** В облік — зі справою й сканом уже підставленими. */

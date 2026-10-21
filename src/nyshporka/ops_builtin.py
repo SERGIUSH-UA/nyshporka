@@ -1757,7 +1757,8 @@ def catalog_manifest(a: ManifestArgs) -> Envelope:
 class CasesArgs(BaseModel):
     q: str = Field(default="", description="підрядок: шифра, назва, місце")
     repo: str = ""
-    htr: str = Field(default="", description="none | partial | pysar | diak | both")
+    htr: str = Field(default="", description="none | partial | pysar | diak | both; "
+                                             "read — прочитано хоч частково")
     year: str = Field(default="", description="рік або діапазон «1840-1860»")
     place: str = ""
     # ⚠ Прокинуто, бо `cases stats` радить `nysh cases list --kind unfiled` —

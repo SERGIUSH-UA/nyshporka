@@ -1,0 +1,167 @@
+/**
+ * ☁ Хмара: орендовані карти — що крутиться, скільки коштує, що забрати.
+ *
+ * 🔴 Гроші витрачає лише другий крок. «У хмару» спершу кличе `cloud.go` без
+ * `run` — сухий прогін: план, кошторис вилкою, рішення про автозапуск, без
+ * оренди. Лише після підтвердження людини йде `run: true`, а понад стелю
+ * автозапуску ще й `confirm: true` — дозвіл людини, не агента. Окремої кнопки,
+ * що одразу орендує, немає.
+ *
+ * `cloud.go` — довга операція, тож і сухий прогін іде роботою в черзі:
+ * вікно чекає на її результат (`jobDone`), а не на відповідь запиту.
+ */
+
+import { t } from '../core/strings.js';
+import { callOp } from '../core/net.js';
+import { esc, el, setView, busy, failure, boxError, renderWarnings, curGen, alive } from '../core/view.js';
+import { SCREENS, ACTIONS } from '../core/registry.js';
+import { show, jobDone, jobChip } from '../core/nav.js';
+import { openModal, confirmAct } from '../core/modal.js';
+import { kv, pill, dayOf } from '../core/bits.js';
+
+const FINAL = ['done', 'failed'];
+const money = (v) => (v === null || v === undefined ? '—' : `$${Number(v).toFixed(2)}`);
+
+/** Заходи з останньої відповіді: дія «Зупинити» бере опис звідси. */
+let RUNS = [];
+
+SCREENS.cloud = async () => {
+  const gen = curGen();
+  busy(5);
+  const env = await callOp('cloud.state', { limit: 20 });
+  if (!alive(gen)) return;
+  if (!env.ok) return failure(env);
+  const d = env.data || {};
+  RUNS = d.runs || [];
+  const live = RUNS.filter((r) => !FINAL.includes(r.phase));
+  const past = RUNS.filter((r) => FINAL.includes(r.phase));
+  const spent = RUNS.reduce((s, r) => s + Number(r.spent_usd || 0), 0);
+  const unreleased = RUNS.filter((r) => r.needs_release).length;
+  const tile = (label, value) => `<div class="dash-box"><span class="muted">${esc(label)}</span>
+    <b class="num big">${esc(value)}</b></div>`;
+  setView(`<h2>${t('cloud.title')}</h2>
+    <p class="muted">${t('cloud.why')}</p>
+    ${renderWarnings(env)}
+    <div class="dash-two">${tile(t('cloud.spent'), money(spent))}${tile(t('cloud.live'), d.live || 0)}${
+  tile(t('cloud.unreleased'), unreleased)}</div>
+    <div class="dash-box"><h3>${t('cloud.now')}</h3>
+      ${live.length ? live.map(runRow).join('') : `<p class="muted">${t('cloud.none.live')}</p>`}</div>
+    <div class="dash-box"><h3>${t('cloud.past')}</h3>
+      ${past.length ? past.map(runRow).join('') : `<p class="muted">${t('cloud.none.past')}</p>`}</div>`);
+};
+
+function runRow(r) {
+  const done = FINAL.includes(r.phase);
+  const frames = r.frames_total ? ` · ${r.pages_done || 0} / ${r.frames_total}` : '';
+  return `<div class="lrow">
+    <div><b class="mono">${esc(r.case_key || r.run_id)}</b>
+      <small class="muted">${esc(r.phase_human || r.phase)}${frames} · ${money(r.spent_usd)}
+        · ${esc(dayOf(r.started))}${r.project ? ` · ${esc(r.project)}` : ''}</small>
+      ${r.needs_release ? pill('err', t('cloud.release')) : ''}</div>
+    <button class="ctl-sm" data-act="cloud.more" data-arg="${esc(r.run_id)}">${t('cloud.more')}</button>
+    ${!done ? `<button class="danger" data-act="cloud.stop" data-arg="${esc(r.run_id)}">${t('cloud.stop')}</button>`
+    : r.phase === 'failed' ? `<button data-act="cloud.fetch" data-arg="${esc(r.run_id)}">${t('cloud.fetch')}</button>` : ''}
+    <span id="cloud-job-${esc(r.run_id)}"></span></div>`;
+}
+
+async function runMore(id) {
+  openModal({ title: id, body: `<p class="muted">${t('common.loading')}</p>` });
+  const env = await callOp('cloud.state', { run_id: id });
+  if (!el('dlg-body')) return;
+  if (!env.ok) { boxError('dlg-body', env); return; }
+  const r = ((env.data || {}).runs || [])[0] || {};
+  const inc = (r.incidents || []).map((x) => `<li>${esc(x.text || x.kind || JSON.stringify(x))}</li>`).join('');
+  el('dlg-body').innerHTML = `${kv([[t('cloud.case'), esc(r.case_key || '')],
+    [t('cloud.phase'), esc(r.phase_human || r.phase || '')], [t('cloud.backend'), esc(r.backend || '')],
+    [t('cloud.frames'), esc(`${r.pages_done || 0} / ${r.frames_total || 0}`)],
+    [t('cloud.spent'), money(r.spent_usd)], [t('cloud.hours'), esc(r.rent_hours || 0)],
+    [t('cloud.why.stop'), esc(r.why || '')]])}
+    ${inc ? `<h4>${t('cloud.incidents')}</h4><ul>${inc}</ul>` : ''}
+    <div class="row dlg-acts"><button class="ghost" data-act="modal.close">${t('modal.close')}</button></div>`;
+}
+
+// ── «У хмару»: кошторис → підтвердження → оренда ─────────────────────────────
+/**
+ * Вікно хмарного прогону справи. Викликає екран «Читання» з ключем чи текою.
+ * Повертає Promise, що закінчується разом із вікном — для тесту.
+ */
+export async function openCloudGo(caseRef) {
+  openModal({ title: t('cloud.go.title'), body: `<p class="muted">${t('cloud.go.plan')}</p>
+    <div id="cloud-go-box"></div>` });
+  const dry = await callOp('cloud.go', { case: [caseRef] });
+  if (!dry.ok) { boxError('cloud-go-box', dry); return; }
+  const job = await jobDone((dry.data || {}).job_id, (j) => {
+    const b = el('cloud-go-box');
+    if (b) b.innerHTML = jobChip(j);
+  });
+  const box = el('cloud-go-box');
+  if (!box) return;
+  if (job.state !== 'done' || !job.result) {
+    box.innerHTML = `<p class="warn">${esc(job.error || t('job.failed'))}</p>`;
+    return;
+  }
+  const g = job.result;
+  const est = g.estimate || {};
+  const fork = (g.fork_usd || []).filter((x) => x !== null && x !== undefined);
+  box.innerHTML = `${kv([[t('cloud.case'), esc(g.case_key || caseRef)],
+    [t('cloud.frames'), esc(g.pages_total || est.frames || '')],
+    [t('cloud.price'), esc(fork.length ? fork.map(money).join(' – ') : '—')],
+    [t('cloud.hours'), esc(est.hours || g.max_hours || '')],
+    [t('cloud.decision'), esc(t(`cloud.launch.${g.launch || 'ok'}`))]])}
+    ${(g.notes || []).length ? `<ul>${g.notes.map((n) => `<li>${esc(n)}</li>`).join('')}</ul>` : ''}
+    <div class="row dlg-acts">
+      ${g.launch === 'no_credit' ? '' : `<button class="primary" data-act="cloud.run">${t('cloud.run')}</button>`}
+      <button class="ghost" data-act="modal.close">${t('modal.no')}</button></div>`;
+  GO = { caseRef, launch: g.launch || 'ok', fork };
+}
+
+/** Кошторис, на який людина дивилась, — другий крок іде рівно з ним. */
+let GO = null;
+
+/** Другий крок: підтвердження називає ціну, і лише тоді — `run: true`. */
+async function runCloud() {
+  if (!GO || GO.launch === 'no_credit') return;
+  const { caseRef, launch, fork } = GO;
+  const yes = await confirmAct({ title: t('cloud.run.title'),
+    text: launch === 'needs_confirm' ? t('cloud.run.over') : t('cloud.run.why'),
+    rows: [[t('cloud.case'), caseRef], [t('cloud.price'), fork.length ? fork.map(money).join(' – ') : '—']],
+    okLabel: t('cloud.run'), danger: launch === 'needs_confirm' });
+  if (!yes) return;
+  GO = null;
+  const env = await callOp('cloud.go', { case: [caseRef], run: true, confirm: launch === 'needs_confirm' });
+  if (!env.ok) { openModal({ title: t('cloud.go.title'), body: `<p class="warn">${esc(env.error || '')}</p>` }); return; }
+  await show('cloud');
+}
+
+Object.assign(ACTIONS, {
+  'cloud.more': (_ev, elm) => runMore(elm.dataset.arg),
+  'cloud.run': () => runCloud(),
+  /** 🔴 Зупинка — після підтвердження: прочитане до цієї миті лишається, оренда гасне. */
+  'cloud.stop': async (_ev, elm) => {
+    const id = elm.dataset.arg;
+    const r = RUNS.find((x) => x.run_id === id) || {};
+    const yes = await confirmAct({ title: t('cloud.stop.title'), text: t('cloud.stop.why'),
+      rows: [[t('cloud.case'), r.case_key || id], [t('cloud.spent'), money(r.spent_usd)]],
+      okLabel: t('cloud.stop'), danger: true });
+    if (!yes) return;
+    const env = await callOp('cloud.stop', { run_id: id });
+    if (!env.ok) { openModal({ title: t('cloud.stop'), body: `<p class="warn">${esc(env.error || '')}</p>` }); return; }
+    if ((env.warnings || []).length) {
+      openModal({ title: t('cloud.stop'), body: renderWarnings(env) });
+      return;
+    }
+    await show('cloud');
+  },
+  'cloud.fetch': async (_ev, elm) => {
+    const id = elm.dataset.arg;
+    const env = await callOp('cloud.fetch', { run_id: id });
+    const box = el(`cloud-job-${id}`);
+    if (!env.ok) { if (box) box.innerHTML = `<span class="warn-inline">${esc(env.error || '')}</span>`; return; }
+    const job = await jobDone((env.data || {}).job_id, (j) => {
+      const b = el(`cloud-job-${id}`);
+      if (b) b.innerHTML = jobChip(j);
+    });
+    const b2 = el(`cloud-job-${id}`);
+    if (b2) b2.innerHTML = jobChip(job);
+  },
+});

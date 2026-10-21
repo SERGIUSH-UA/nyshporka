@@ -744,7 +744,7 @@ header select.lang { margin-left: 0; }
 .ctx-btn { display: flex; align-items: center; gap: .5rem; background: var(--s-3);
   border: 1px solid var(--line-3); border-radius: var(--r-s); padding: 3px 10px;
   cursor: pointer; color: var(--fg); margin-left: .6rem; max-width: 16rem; }
-.ctx-btn .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent-fill); flex: none; }
+.ctx-btn .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--proj-color, var(--accent-fill)); flex: none; }
 .hmenu.in-hub .ctx-btn .dot { background: var(--fg-4); }
 .ctx-t { display: grid; line-height: 1.15; text-align: left; min-width: 0; }
 .ctx-t small { font-size: .68rem; color: var(--fg-3); text-transform: uppercase; letter-spacing: .05em; }
@@ -818,3 +818,35 @@ dl.kv dd { margin: 0; }
 .pcard-new { border-top-color: var(--line-3); }
 .pcard-t { display: flex; justify-content: space-between; gap: .5rem; align-items: baseline; }
 .pcard button { justify-self: start; }
+
+/* ── 📚 Закладки роду й Супряга (хвиля 7в) ─────────────────────────────── */
+/* Колір проєкту — смугою під шапкою: у чужому роді це видно до першого кліку. */
+header { border-bottom: 3px solid var(--proj-color, transparent); }
+/* Пари «підпис → значення» у картці, гіпотезі, кошторисі. */
+.kv { display: grid; grid-template-columns: minmax(8rem, max-content) 1fr; gap: .25rem .9rem; margin: .5rem 0; }
+.kv dt { color: var(--fg-3); }
+.kv dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+/* Плашка стану: тон — значення, а не прикраса. */
+.pill { display: inline-block; font-size: .78rem; padding: 0 .45rem; border-radius: 999px;
+  border: 1px solid var(--line); color: var(--fg-3); white-space: nowrap; }
+.pill.ok { border-color: var(--ok-line); color: var(--ok); background: var(--ok-bg); }
+.pill.err { border-color: var(--err-line); color: var(--err); background: var(--err-bg); }
+.pill.warn { border-color: var(--warn); color: var(--warn-fg); }
+.pill.info { border-color: var(--info-line); color: var(--info); background: var(--info-bg); }
+/* Рядок переліку: зміст ліворуч, дії праворуч. */
+.lrow { display: flex; gap: .6rem; align-items: center; padding: .45rem 0; border-bottom: 1px solid var(--line); }
+.lrow:last-child { border-bottom: 0; }
+.lrow > div:first-child { flex: 1 1 auto; min-width: 0; display: grid; gap: .1rem; }
+.lrow small { overflow-wrap: anywhere; }
+.num.big { display: block; font-size: 1.4rem; font-weight: 600; }
+/* «Що змінилось»: було — закреслене тихо, стало — видно. */
+.tbl-diff { width: 100%; }
+.diff-d { color: var(--err-2); }
+.diff-a { color: var(--ok); }
+pre.diff { white-space: pre-wrap; max-height: 50vh; overflow: auto; }
+/* Звіт у вікні — проза з обмеженою шириною рядка. */
+.md { max-width: 62rem; }
+.md pre.md-tbl { margin: 0; white-space: pre; overflow-x: auto; }
+.proj-head .steps { display: flex; flex-wrap: wrap; gap: .5rem; margin: .5rem 0 .8rem; }
+.proj-head .step { display: grid; padding: .4rem .7rem; border: 1px solid var(--line); border-radius: var(--r-m); }
+#ev-task { width: 100%; font-family: var(--mono, monospace); }

@@ -9,8 +9,10 @@ import { t } from './strings.js';
 import { callOp, apiFetch } from './net.js';
 import { esc, el } from './view.js';
 import { ACTIONS, OP_SCREEN } from './registry.js';
-import { show, liveJobs, jobChip } from './nav.js';
-import { openModal, closeModal } from './modal.js';
+import { show, liveJobs, jobChip, jobDone } from './nav.js';
+import { openModal, closeModal, confirmAct } from './modal.js';
+import { renderWarnings } from './view.js';
+import { schemaFormHtml, schemaValues } from './schemaform.js';
 
 /** Відкрите меню шапки — щоб клік повз нього закривав його. */
 let OPEN_MENU = null;
@@ -53,8 +55,15 @@ async function fillProject() {
   const kind = el('proj-k');
   const name = el('proj-v');
   if (kind) kind.textContent = mine ? t(`np.kind.${mine.kind === 'order' ? 'order' : 'family'}`) : t('project.hub.kind');
-  if (name) name.textContent = mine ? (mine.name || mine.id) : t('project.hub.none');
+  if (name) name.textContent = mine ? `${mine.glyph ? `${mine.glyph} ` : ''}${mine.name || mine.id}` : t('project.hub.none');
   box.classList.toggle('in-hub', !mine);
+  // Колір проєкту — на крапці перемикача й смузі шапки: у чужому роді людина
+  // має це бачити ще до першого кліку.
+  const color = mine && /^#[0-9a-fA-F]{6}$/.test(mine.color || '') ? mine.color : '';
+  if (document.documentElement && document.documentElement.style) {
+    if (color) document.documentElement.style.setProperty('--proj-color', color);
+    else if (document.documentElement.style.removeProperty) document.documentElement.style.removeProperty('--proj-color');
+  }
   box.hidden = false;
 }
 
@@ -113,6 +122,11 @@ function meMenu() {
       <small>${esc(t('me.stats').replace('{p}', m.packed || 0).replace('{i}', m.taken || 0))}</small>
       ${m.consent ? `<small>${esc(m.consent)}</small>` : ''}</div>
     <div class="sep"></div>
+    <button type="button" data-act="nav" data-arg="give"><span>${t('nav.give')}</span></button>
+    <button type="button" data-act="nav" data-arg="pull"><span>${t('nav.pull')}</span></button>
+    <button type="button" data-act="nav" data-arg="cards"><span>${t('nav.cards')}</span></button>
+    <button type="button" data-act="nav" data-arg="sprofile"><span>${t('nav.sprofile')}</span></button>
+    <div class="sep"></div>
     <a class="hm-link" href="https://nyshporka.online/" target="_blank" rel="noopener">${t('me.portal')}</a>
     <button type="button" data-act="nav" data-arg="settings"><span>${t('sect.title')}</span></button>`;
 }
@@ -157,8 +171,74 @@ async function askFind() {
     return `<div class="ask-hit"><div><b>${esc(h.when || h.summary)}</b>
         <small class="mono">nysh ${esc(h.cli)}</small></div>
       ${scr ? `<button type="button" data-act="ask.go" data-arg="${esc(scr)}">${t('ask.open')}</button>`
-    : `<span class="muted">${t('ask.cli')}</span>`}</div>`;
+    : `<button type="button" data-act="ask.form" data-arg="${esc(h.name)}">${t('ask.form')}</button>`}</div>`;
   }).join('') : `<p class="muted">${t('ask.none')}</p>`;
+}
+
+// ── «Усі дії»: форма зі схеми ───────────────────────────────────────────────
+/** Каталог `/api/ops` — один запит на вкладку. */
+let OPS = null;
+
+async function opsCatalog() {
+  if (OPS) return OPS;
+  try {
+    const res = await apiFetch('/api/ops');
+    if (res.ok) OPS = ((await res.json()).ops || []);
+  } catch { /* без каталогу форма скаже, що схеми немає */ }
+  return OPS || [];
+}
+
+/** Дія, яку форма зараз показує. */
+let FORM_OP = null;
+
+/**
+ * Форма дії без екрана. Дії, якої консоль не показує (не `gui` чи вимкнена
+ * секція), — лише команда терміналу: форма не обіцяє того, що сервер відмовить.
+ */
+async function openForm(name) {
+  const op = (await opsCatalog()).find((o) => o.name === name);
+  FORM_OP = op || null;
+  if (!op) {
+    openModal({ title: name, body: `<p class="muted">${t('ask.cli')}</p>
+      <p class="mono">nysh op ${esc(name)} --help</p>` });
+    return;
+  }
+  openModal({ title: op.when || op.summary || name, body: `<p class="muted mono">${esc(name)}</p>
+    <form data-act="ask.run" id="ask-form">${schemaFormHtml(op.schema)}
+      <div class="row dlg-acts"><button type="submit" class="${op.mutates ? 'danger' : 'primary'}">${t('ask.run')}</button>
+        <button type="button" class="ghost" data-act="modal.close">${t('modal.no')}</button></div>
+    </form><div id="ask-out"></div>` });
+}
+
+/** Виконати дію з форми: `mutates` — після підтвердження, `long` — роботою. */
+async function runForm(ev) {
+  const op = FORM_OP;
+  if (!op) return;
+  const form = ev.target;
+  const fd = new FormData(ev.target);
+  const args = schemaValues(op.schema, (n) => fd.get(n),
+    (n) => { const b = form.querySelector(`[name="${n}"]`); return !!(b && b.checked); });
+  if (op.mutates) {
+    const yes = await confirmAct({ title: op.when || op.summary || op.name, text: t('ask.run.why'),
+      rows: Object.entries(args).map(([k, v]) => [k, Array.isArray(v) ? v.join(', ') : String(v)]),
+      okLabel: t('ask.run'), danger: true });
+    if (!yes) return;
+    openModal({ title: op.name, body: '<div id="ask-out"></div>' });
+  }
+  const out = () => el('ask-out');
+  if (out()) out().innerHTML = `<p class="muted">${t('common.loading')}</p>`;
+  // Ім'я дії — змінною: ця форма не є входом жодної окремої дії.
+  let env = await callOp(op.name, args);
+  if (env.ok && op.long && (env.data || {}).job_id) {
+    const job = await jobDone(env.data.job_id, (j) => { if (out()) out().innerHTML = jobChip(j); });
+    env = job.state === 'done' ? { ok: true, data: job.result, warnings: job.warnings || [] }
+      : { ok: false, error: job.error || t('job.failed') };
+  }
+  if (!out()) return;
+  out().innerHTML = env.ok
+    ? `<p class="ok-line">${t('ask.done')}</p>${renderWarnings(env)}
+      <details><summary>${t('ask.data')}</summary><pre>${esc(JSON.stringify(env.data, null, 2))}</pre></details>`
+    : `<p class="warn">${esc(env.error || t('common.error'))}</p>${renderWarnings(env)}`;
 }
 
 // ── дії ──────────────────────────────────────────────────────────────────────
@@ -180,6 +260,8 @@ Object.assign(ACTIONS, {
   'ask.open': () => { closeMenus(); openAsk(); },
   'ask.find': () => askFind(),
   'ask.go': (_ev, elm) => { closeModal(); show(elm.dataset.arg); },
+  'ask.form': (_ev, elm) => openForm(elm.dataset.arg),
+  'ask.run': (ev) => { ev.preventDefault(); return runForm(ev); },
   'modal.close': () => closeModal(false),
   'modal.ok': () => closeModal(true),
 });

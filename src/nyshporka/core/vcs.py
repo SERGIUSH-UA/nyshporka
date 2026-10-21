@@ -278,10 +278,19 @@ def log(ws: W.Workspace, path: Path | None = None,
     for chunk in raw.split("\x1e")[1:]:
         head, _, body = chunk.partition("\n")
         rev, day, subj = [*head.split("\t", 2), "", ""][:3]
-        files = [f for f in body.splitlines() if f.strip()]
+        # Від кореня проєкту, як шлях у `history.diff`/`restore`: корінь git
+        # (Майстерня) і корінь проєкту (`projects/<ім'я>`) — різні теки.
+        files = [_from_proot(ws, top, f) for f in body.splitlines() if f.strip()]
         out.append({"rev": rev, "date": day, "subject": subj,
                     "files": files[:LOG_FILES], "more": max(0, len(files) - LOG_FILES)})
     return out
+
+
+def _from_proot(ws: W.Workspace, top: Path, rel: str) -> str:
+    try:
+        return (top / rel).resolve().relative_to(ws.proot.resolve()).as_posix()
+    except ValueError:
+        return rel
 
 
 def restore(ws: W.Workspace, path: Path, rev: str) -> str | None:

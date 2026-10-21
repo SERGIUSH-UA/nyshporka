@@ -177,7 +177,7 @@ class ProjectStyleArgs(ProjectNameArgs):
 
 
 @op("project.style", summary="Колір і знак проєкту в консолі",
-    args=ProjectStyleArgs, mutates=True, tier="situational",
+    args=ProjectStyleArgs, mutates=True, tier="rare",
     when="змінити колір чи знак проєкту в перемикачі консолі")
 def project_style(a: ProjectStyleArgs) -> Envelope:
     from nyshporka import project as T
@@ -309,7 +309,7 @@ class ReportReadArgs(BaseModel):
 
 
 @op("reports.read", summary="Текст одного звіту дослідження",
-    args=ReportReadArgs, section="research", tier="situational", scope="project",
+    args=ReportReadArgs, section="research", tier="rare", scope="project",
     when="прочитати звіт дослідження з переліку reports.list")
 def reports_read(a: ReportReadArgs) -> Envelope:
     from nyshporka.core import workspace as W
@@ -372,6 +372,8 @@ def _state(ws: Any) -> dict[str, Any]:
         return out
     tab = W.read_project_table(ws.root) or {}
     out["kind"] = str(tab.get("kind") or "family")
+    out["color"] = str(tab.get("color") or "")
+    out["glyph"] = str(tab.get("glyph") or "")
     out["persons"] = _count_persons(ws.root)
     try:
         from nyshporka.core import profile as PROF

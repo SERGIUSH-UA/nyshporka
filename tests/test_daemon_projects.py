@@ -187,11 +187,17 @@ def test_unknown_project_is_404(two: tuple[Path, Path, Path]) -> None:
 
 
 def test_projects_listing(two: tuple[Path, Path, Path]) -> None:
-    _h, alpha, _beta = two
+    _h, alpha, beta = two
+    # Колір і знак — для перемикача в шапці консолі.
+    marker = beta / W.MARKER
+    marker.write_text(marker.read_text(encoding="utf-8")
+                      + 'color = "#112233"\nglyph = "Б"\n', encoding="utf-8")
     with _client(alpha) as c:
         got = c.get("/api/projects", headers={D.PROJECT_HEADER: "beta"}).json()
     assert [p["id"] for p in got["projects"]] == [".", "alpha", "beta"]
     assert (got["current"], got["default"]) == ("beta", "alpha")
+    b = next(p for p in got["projects"] if p["id"] == "beta")
+    assert (b["color"], b["glyph"]) == ("#112233", "Б")
 
 
 def test_project_op_in_pure_hub_asks_to_choose(tmp_path: Path) -> None:

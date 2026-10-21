@@ -56,6 +56,25 @@ def test_log_of_the_whole_project_names_changed_files(space: Path) -> None:
     assert one[0]["subject"] == "ім'я" and "files" not in one[0]
 
 
+def test_log_files_are_from_the_project_root_not_the_git_root(space: Path) -> None:
+    """🔴 Корінь git — Майстерня, корінь проєкту — `projects/<ім'я>`.
+
+    Консоль бере файл із журналу й передає його в `history.diff`/`restore`, а
+    ті читають шлях від кореня проєкту. Шлях від кореня git там не знайшовся б.
+    """
+    assert O.call("project.new", {"name": "sydoruk"}).ok
+    proj = space / "projects" / "sydoruk"
+    W.use(W._build(proj, "test"))
+    _source(proj)
+    _card(proj, "I9001", "Іван Сидорук")
+    rev = O.call("history.save", {"message": "проєкт"}).data["rev"]
+    rows = O.call("history.log", {}).data["rows"]
+    assert rows[0]["files"] and all(not f.startswith("projects/") for f in rows[0]["files"])
+    assert CARD in rows[0]["files"]
+    d = O.call("history.diff", {"path": CARD, "rev": rev})
+    assert d.ok and d.data["added"]
+
+
 def test_diff_of_a_card_shows_fields_not_yaml(space: Path) -> None:
     _edit(space, "sex: M", "sex: F")
     rev = O.call("history.save", {"message": "стать"}).data["rev"]

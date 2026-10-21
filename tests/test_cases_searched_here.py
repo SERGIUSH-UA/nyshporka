@@ -64,3 +64,15 @@ def test_pure_hub_has_no_project_trace(tmp_path: Path,
     assert d["total"] == 3 and all("searched_here" not in r for r in d["cases"])
     env = O.call("cases.list", {"searched": "not_here"})
     assert not env.ok and "оберіть проєкт" in env.error
+
+
+def test_read_means_any_stage_but_none(tmp_path: Path,
+                                       monkeypatch: pytest.MonkeyPatch) -> None:
+    """`htr=read` — «прочитано хоч частково»: так Огляд проєкту рахує непрошукане."""
+    _hub(tmp_path, monkeypatch, hub_only=False)
+    trace.note("TEST/1/1/1", q="Сидорук", thresh=80, hits=0, pages=10,
+               models=["m1"], channels=["fuzzy"])
+    read = O.call("cases.list", {"htr": "read"}).data
+    assert sorted(r["key"] for r in read["cases"]) == ["TEST/1/1/1", "TEST/1/1/2"]
+    todo = O.call("cases.list", {"htr": "read", "searched": "not_here", "limit": 1}).data
+    assert todo["total"] == 1
