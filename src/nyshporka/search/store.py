@@ -1255,6 +1255,20 @@ def _run_ids(conn: sqlite3.Connection, runs: list[str], *, fresh_only: bool = Fa
     справа зі старим текстом у сторі — це прочесане «вчорашнє», і воно не
     може зараховуватись як покрите (рецензія 08.09)."""
     out: dict[str, int] = {}
+    if len(runs) >= BULK_RUNS:
+        # Велика область — одним запитом і одним переліком кореня, а не
+        # запитом і трьома `stat` на прогін (1,2 с на корпусний `grep`).
+        from nyshporka.search import decode as D
+
+        rows = {str(r): (int(i), str(s)) for r, i, s in
+                conn.execute("select run, id, stamp from runs")}
+        fresh = D.stamps_of(runs) if fresh_only else {}
+        for run in runs:
+            got = rows.get(run)
+            if got is None or (fresh_only and got[1] != fresh.get(run, "")):
+                continue
+            out[run] = got[0]
+        return out
     for run in runs:
         row = conn.execute("select id, stamp from runs where run=?", (run,)).fetchone()
         if not row:
@@ -1263,6 +1277,11 @@ def _run_ids(conn: sqlite3.Connection, runs: list[str], *, fresh_only: bool = Fa
             continue
         out[run] = int(row[0])
     return out
+
+
+#: З якої кількості прогонів `_run_ids` бере всі рядки й штампи гуртом:
+#: перелік кореня коштує ~0,2 с, три `stat` прогону — ~0,07 мс.
+BULK_RUNS = 200
 
 
 def _pages_for(conn: sqlite3.Connection, pids: set[int], run_ids: set[int]
@@ -1302,13 +1321,47 @@ def _literal_core(lit: str) -> str:
     return core
 
 
-def _pages_of(conn: sqlite3.Connection, run_ids: list[int]) -> dict[int, tuple[int, str]]:
-    """pid → (run_id, page) для прогонів області."""
-    out: dict[int, tuple[int, str]] = {}
+def _page_texts(conn: sqlite3.Connection, pids: list[int], run_ids: set[int]
+                ) -> Iterator[tuple[int, str, bytes | None]]:
+    """(run_id, page, стиснений текст) названих сторінок області — за зростанням id.
+
+    🔴 Одне читання рядка `pages` на сторінку. Доти `grep` брав спершу назву
+    (`_pages_for`), а потім текст (`_raw_lines`) — два випадкові звертання до
+    таблиці на 3,4 млн рядків, і на широкому літералі саме вони, а не регекс,
+    коштували дві третини часу (замір 21.10.2026).
+    """
+    for i in range(0, len(pids), 500):
+        chunk = pids[i:i + 500]
+        marks = ",".join("?" * len(chunk))
+        rows = conn.execute(
+            f"select id, run_id, page, raw from pages where id in ({marks})", chunk).fetchall()
+        rows.sort(key=lambda r: int(r[0]))
+        for _pid, rid, page, raw in rows:
+            if int(rid) in run_ids:
+                yield int(rid), str(page), raw
+
+
+def _run_texts(conn: sqlite3.Connection, run_ids: list[int]
+               ) -> Iterator[tuple[int, str, bytes | None]]:
+    """Те саме для ВСІХ сторінок прогонів області — повний прохід без передфільтра.
+
+    Уся база — одним послідовним проходом по таблиці; менша область — номери
+    сторінок за індексом прогону, далі тим самим порядком, що й `_page_texts`.
+    """
+    want = set(run_ids)
+    if not want:
+        return
+    if len(want) >= _runs_total(conn):
+        for _pid, rid, page, raw in conn.execute(
+                "select id, run_id, page, raw from pages order by id"):
+            if int(rid) in want:
+                yield int(rid), str(page), raw
+        return
+    pids: list[int] = []
     for rid in run_ids:
-        for pid, page in conn.execute("select id, page from pages where run_id=?", (rid,)):
-            out[int(pid)] = (rid, page)
-    return out
+        pids.extend(int(p) for (p,) in conn.execute(
+            "select id from pages where run_id=?", (rid,)))
+    yield from _page_texts(conn, sorted(set(pids)), want)
 
 
 #: Стільки прогонів ще варто обмежувати діапазонами rowid у запиті FTS.
@@ -2415,6 +2468,167 @@ def literals_of(pattern: str) -> list[str] | None:
     return out
 
 
+#: Група з самих літер «(Ков|Кав)» / «(?:ов|ев|)» і клас із самих літер
+#: «[оа]», без квантифікатора після, не екрановані.
+_ALT_GROUP = re.compile(r"(?<!\\)\((?:\?:)?([^\W\d_]*(?:\|[^\W\d_]*)+)\)(?![?*+{])")
+_LETTER_CLASS = re.compile(r"(?<!\\)\[([^\W\d_]{2,})\](?![?*+{])")
+#: Стеля варіантів: далі передфільтр із сотні фраз дорожчий за виграш.
+VARIANTS_MAX = 32
+
+
+def _variants(pattern: str) -> list[str]:
+    """Регекс → варіанти, у яких малі групи й класи з літер розгорнуто.
+
+    🔴 Лише для ПЕРЕДФІЛЬТРА: кожен збіг регексу проходить рівно одну гілку
+    групи без квантифікатора (чи одну літеру класу), тож містить літерал
+    принаймні одного варіанта — звуження без втрат. Сам регекс по рядках
+    іде як є. Без цього «(Ков|Кав)альчинск» давав передфільтр «альчинск»: на
+    корпусі гілки прізвища так читали вдесятеро більше сторінок (замір 21.10.2026).
+
+    ⚠ Розгортаються лише групи без вкладених дужок і без метасимволів; решту
+    `literals_of` стирає, як і раніше. Більше `VARIANTS_MAX` — не розгортати.
+    """
+    out = [pattern]
+    while True:
+        nxt: list[str] = []
+        grew = False
+        for p in out:
+            m = _ALT_GROUP.search(p) or _LETTER_CLASS.search(p)
+            if m is None:
+                nxt.append(p)
+                continue
+            body = m.group(1)
+            alts = body.split("|") if m.re is _ALT_GROUP else list(dict.fromkeys(body))
+            nxt.extend(p[:m.start()] + a + p[m.end():] for a in alts)
+            grew = True
+        if not grew:
+            return out
+        nxt = list(dict.fromkeys(nxt))
+        if len(nxt) > VARIANTS_MAX:
+            return out
+        out = nxt
+
+
+def _prefilter_phrases(pattern: str) -> list[str] | None:
+    """Нормалізовані фрази передфільтра — по одній на варіант гілки, або None.
+
+    Кожен варіант мусить дати фразу ≥ 3 нормалізованих літер, інакше
+    передфільтр не звужує без втрат (див. `grep`).
+    """
+    if _VERBOSE_FLAG.search(pattern):
+        return None
+    phrases: list[str] = []
+    for var in _variants(pattern):
+        lits = literals_of(var)
+        if not lits:
+            return None
+        for lit in lits:
+            n = _norm(_literal_core(lit))
+            if len(n) < 3:
+                return None
+            phrases.append(n)
+    return list(dict.fromkeys(phrases))
+
+
+#: Скільки нормалізованих літер фрази йде в FTS — див. `_cheap_window`.
+PHRASE_WINDOW = 6
+#: Частоти трійок за вибіркою стору — одна на процес.
+_TRIGRAMS: dict[str, Any] = {}
+
+
+def _trigram_freq(conn: sqlite3.Connection) -> dict[str, int]:
+    """Частота трійок літер у нормалізованих словах — за вибіркою рядків стору.
+
+    Лише для вибору вікна фрази, тож точність не потрібна: «kov» і «nsk»
+    трапляються в мільйонах рядків, «stk» і «dol» — у десятки разів рідше, і
+    вибірка в кілька тисяч рядків це розрізняє.
+    """
+    got = _TRIGRAMS.get(str(path()))
+    if got is not None:
+        return dict(got)
+    top = int(conn.execute("select max(id) from pages").fetchone()[0] or 0)
+    # 🔴 Вибірка коштує 0,3–0,7 с, а кожен `nysh text grep` — новий процес:
+    # пошук по справі за 0,05 с ставав 0,3 с. Частоти мови від нових справ
+    # майже не рухаються, тож файл живе, доки стор не виріс удвічі.
+    cache = Path(f"{path()}.trigrams.json")
+    try:
+        saved = json.loads(cache.read_text(encoding="utf-8"))
+        if int(saved["top"]) > 0 and top <= 2 * int(saved["top"]):
+            _TRIGRAMS[str(path())] = dict(saved["freq"])
+            return dict(saved["freq"])
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
+    freq: dict[str, int] = {}
+    step = max(1, top // 400)
+    for pid in range(1, int(top) + 1, step):
+        lo, hi = pid << LINE_BITS, ((pid + 1) << LINE_BITS) - 1
+        for (toks,) in conn.execute(
+                "select toks from lines where id between ? and ?", (lo, hi)):
+            for tk in str(toks or "").split(" "):
+                if len(tk) < 3:
+                    continue
+                n = _norm(tk)
+                for i in range(len(n) - 2):
+                    freq[n[i:i + 3]] = freq.get(n[i:i + 3], 0) + 1
+    _TRIGRAMS[str(path())] = dict(freq)
+    if top:
+        try:
+            from nyshporka.utils.atomic import write_json
+
+            write_json(cache, {"top": top, "freq": freq}, indent=None)
+        except OSError:
+            pass                    # кеш — зручність: наступний процес порахує знову
+    return dict(freq)
+
+
+def _cheap_window(phrase: str, freq: dict[str, int]) -> str:
+    """Найдешевша частина нормалізованої фрази на `PHRASE_WINDOW` літер.
+
+    🔴 FTS5 платить за фразу сумою довжин списків її трійок, а не числом
+    збігів: на корпусі п'ять літер — 0,9 с, ті самі сім (з частою трійкою
+    «kov», 8 млн рядків) — 6,5 с; у межах однієї справи фраза на десять літер —
+    1,6 с при нулі збігів (замір 21.10.2026). Рідкісні трійки водночас і дешеві, і
+    вибіркові, тож вікно з найменшою сумою частот звужує майже так само.
+    Частина нормалізованої фрази — підрядок нормалізованого рядка, тож
+    звуження лишається без втрат.
+    """
+    if len(phrase) <= PHRASE_WINDOW:
+        return phrase
+    best, at = -1, 0
+    for i in range(len(phrase) - PHRASE_WINDOW + 1):
+        w = phrase[i:i + PHRASE_WINDOW]
+        cost = sum(freq.get(w[j:j + 3], 0) for j in range(PHRASE_WINDOW - 2))
+        if best < 0 or cost < best:
+            best, at = cost, i
+    return phrase[at:at + PHRASE_WINDOW]
+
+
+def _prefilter(conn: sqlite3.Connection, pattern: str
+               ) -> tuple[list[str], list[str]] | None:
+    """(фрази для FTS, цілі фрази) передфільтра, або None.
+
+    Цілі фрази — по одній на варіант розгорнутої групи; у FTS іде найдешевша
+    частина кожної (`_cheap_window`). Частоти трійок потрібні лише тоді, коли
+    якась фраза довша за вікно.
+    """
+    full = _prefilter_phrases(pattern)
+    if not full:
+        return None
+    freq = _trigram_freq(conn) if any(len(n) > PHRASE_WINDOW for n in full) else {}
+    return list(dict.fromkeys(_cheap_window(n, freq) for n in full)), full
+
+
+def _line_gate_safe(pattern: str) -> bool:
+    """Чи можна відсіяти сторінку одним пошуком по всьому її тексту.
+
+    Збіг у рядку лишається збігом у тексті сторінки (з `re.MULTILINE`), крім
+    конструкцій, що бачать за межу рядка інакше: абсолютні якорі (`\\A`,
+    `\\Z`), заперечні перевірки (`(?!`, `(?<!` — за межею рядка тепер стоїть
+    `\\n`, а не порожнеча) і вимкнення прапорів (`(?-`).
+    """
+    return not any(t in pattern for t in ("\\A", "\\Z", "(?!", "(?<!", "(?-"))
+
+
 def grep(pattern: str, runs: list[str], *, ignore_case: bool = True,
          limit: int = 200, context: int = 0) -> dict[str, Any]:
     """Регекс по сирому тексту прогонів — те, що робив `rg --no-ignore`, але
@@ -2429,37 +2643,42 @@ def grep(pattern: str, runs: list[str], *, ignore_case: bool = True,
         rx = re.compile(pattern, flags)
     except re.error as exc:
         return {"hits": [], "error": f"регекс не розбирається: {exc}"}
+    # Відсів сторінки одним пошуком по її тексту — див. `_line_gate_safe`.
+    gate = (re.compile(pattern, flags | re.MULTILINE) if _line_gate_safe(pattern)
+            else None)
     conn = connect(readonly=True)
     try:
         ids = _run_ids(conn, runs, fresh_only=True)
         by_id = {v: k for k, v in ids.items()}
         lits = literals_of(pattern)
-        pids: set[int]
-        phrases: list[str] = []
-        for lit in lits or []:
-            n = _norm(_literal_core(lit))
-            if len(n) >= 3:
-                phrases.append(f'"{n}"')
-        # 🔴 Кожна гілка мусить дати фразу. «ськ» після нормалізації — «sk»,
-        # дві літери; доти така гілка мовчки випадала з OR, а порожній вираз
-        # давав нуль сторінок із позначкою «звужено» (рецензія 08.09).
-        if lits and len(phrases) == len(lits):
-            expr = " OR ".join(phrases)
+        # 🔴 Кожна гілка (і кожен варіант розгорнутої групи) мусить дати фразу.
+        # «ськ» після нормалізації — «sk», дві літери; доти така гілка мовчки
+        # випадала з OR, а порожній вираз давав нуль сторінок із позначкою
+        # «звужено» (рецензія 08.09).
+        chosen = _prefilter(conn, pattern) if lits else None
+        phrases = chosen[1] if chosen else None
+        run_set = set(ids.values())
+        if chosen:
+            expr = " OR ".join(f'"{n}"' for n in chosen[0])
             raw_pids = {rid >> LINE_BITS for (rid,) in _fts_rows(conn, expr, list(ids.values()))}
-            pages = _pages_for(conn, raw_pids, set(ids.values()))
-            pids = set(pages)
+            source = _page_texts(conn, sorted(raw_pids), run_set)
             prefiltered = True
+            n_pages = _pages_of_runs(conn, list(ids.values()))
         else:
-            pages = _pages_of(conn, list(ids.values()))
-            pids = set(pages)
+            source = _run_texts(conn, list(ids.values()))
             prefiltered = False
+            n_pages = 0
         hits: list[dict[str, Any]] = []
         total = 0
         scanned_pages = 0
-        for pid in sorted(pids):
-            raw = _raw_lines(conn, pid)
+        for rid_, page, blob in source:
             scanned_pages += 1
-            rid_, page = pages[pid]
+            if blob is None:
+                continue
+            text = zlib.decompress(blob).decode("utf-8")
+            if gate is not None and not gate.search(text):
+                continue
+            raw = text.split("\n")
             for i, ln in enumerate(raw, 1):
                 if not rx.search(ln):
                     continue
@@ -2472,11 +2691,16 @@ def grep(pattern: str, runs: list[str], *, ignore_case: bool = True,
                     h["before"] = raw[max(0, i - 1 - context):i - 1]
                     h["after"] = raw[i:i + context]
                 hits.append(h)
-        n_pages = (len(pages) if not prefiltered
-                   else int(conn.execute(
-                       f"select coalesce(sum(pages),0) from runs where id in "
-                       f"({','.join('?' * len(ids))})", list(ids.values())).fetchone()[0])
-                   if ids else 0)
+        literal_pages: int | None = None
+        if not prefiltered:
+            n_pages = scanned_pages
+        elif not total:
+            # Нуль регексу: скільки сторінок мають ЦІЛИЙ літерал у нормі (а не
+            # лише вікно передфільтра) — це й каже «орфографія, а не слово».
+            full = " OR ".join(f'"{n}"' for n in phrases or [])
+            literal_pages = len(_pages_for(
+                conn, {rid >> LINE_BITS for (rid,) in _fts_rows(conn, full, list(ids.values()))},
+                run_set))
         return {"hits": hits, "total": total, "runs": len(ids),
                 "runs_asked": len(runs), "unindexed": len(runs) - len(ids),
                 "pages": n_pages, "pages_scanned": scanned_pages,
@@ -2484,7 +2708,9 @@ def grep(pattern: str, runs: list[str], *, ignore_case: bool = True,
                 # Скільки сторінок мали літерал У НОРМІ: нуль регексу при
                 # непорожньому передфільтрі означає орфографію («ь»/«ъ»), а
                 # не відсутність слова — і про це треба сказати.
-                "literal_pages": len(pids) if prefiltered else None}
+                # ⚠ Рахується лише на нулі: з хітами його ніхто не читає, а
+                # повна фраза в FTS — найдорожча частина `grep`.
+                "literal_pages": literal_pages}
     finally:
         conn.close()
 
