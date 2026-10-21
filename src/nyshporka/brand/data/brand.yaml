@@ -516,6 +516,7 @@ screen_glyphs:
   frames: "🖼"
   cases: "📥"
   newcase: "➕"
+  newproject: "📁"
   read: "🖋"
   runs: "📜"
   queue: "🚦"
@@ -555,6 +556,7 @@ screen_icons:
   frames: image
   cases: drawers
   newcase: plus
+  newproject: plus
   read: quill
   runs: list
   queue: skip
