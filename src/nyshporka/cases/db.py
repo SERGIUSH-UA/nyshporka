@@ -9,8 +9,6 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
-import threading
-import time
 from dataclasses import asdict, fields
 from datetime import UTC, datetime, timedelta, timezone  # noqa: F401  (timezone — у staleness)
 from pathlib import Path
@@ -105,6 +103,7 @@ def build_index(db_path: Path | None = None,
     # мітку «після», ми оголосили б реєстр свіжим саме тоді, коли він уже ні —
     # помилка в небезпечному напрямку. «До» дає щонайбільше зайву перезбірку.
     pulse_at_start = _pulse_seq()
+    sources_at_start = _sources_snapshot()
     # 🔴 Нечитані файли шарів збираються й віддаються вгору (аудит 29.09.2026):
     # збірка на них не падає, але реєстр без них неповний, і мовчати про це
     # означало б видати неповний зріз за відповідь.
@@ -151,6 +150,9 @@ def build_index(db_path: Path | None = None,
             # Нечитані файли — у мету, щоб про неповний зріз казав не лише
             # вивід збірки, а й кожне читання реєстру (`staleness`).
             ("unreadable", json.dumps(unreadable, ensure_ascii=False)),
+            # Скільки тек прогонів бачила збірка: перевірка свіжості порівнює
+            # з цим числом, а не з кількістю прив'язаних прогонів (див. там).
+            ("htr_dirs", str(sources_at_start["htr_dirs"])),
         ])
         con.commit()
     except BaseException:
@@ -475,39 +477,66 @@ def orphan_runs(db_path: Path | None = None) -> list[dict[str, Any]]:
         con.close()
 
 
-#: Повна перевірка свіжості — один розрахунок на кілька одночасних запитів.
-#: Ключ — файл реєстру; значення — (коли розрахунок закінчився, результат).
-_STALE_LOCKS: dict[str, threading.Lock] = {}
-_STALE_LAST: dict[str, tuple[float, dict[str, Any]]] = {}
-_STALE_GUARD = threading.Lock()
+def _newest_dir(root: Path) -> tuple[int, float]:
+    """Скільки підтек і найновіша дата зміни серед них — одним переліком теки.
+
+    🔴 Дата теки, а не файлів у ній: прогін і облік сторінок пишуть атомарно
+    (тимчасовий файл + заміна), тож кожен запис міняє дату самої теки. На
+    Windows дата підтеки приходить разом із переліком (`DirEntry.stat` без
+    окремого звернення до диска) — 16 тис. прогонів коштують один перелік, а
+    не 16 тис. читань `_htr_meta.json` (50 с холодного старту, 22.10.2026).
+    """
+    n, newest = 0, 0.0
+    try:
+        with os.scandir(root) as it:
+            for e in it:
+                if e.name.startswith(".") or not e.is_dir(follow_symlinks=False):
+                    continue
+                n += 1
+                try:
+                    newest = max(newest, e.stat(follow_symlinks=False).st_mtime)
+                except OSError:
+                    continue
+    except OSError:
+        return 0, 0.0
+    return n, newest
+
+
+def _newest_note(pages: Path) -> float:
+    """Найновіший файл обліку сторінок (`<архів>/<справа>.json`).
+
+    Тут — дата самих файлів, а не тек: облік пишуть і скрипти простору, не
+    лише сховище з його атомарною заміною. Тек архівів — десятки, і дата файла
+    приходить разом із переліком, тож це теж перелік, а не обхід.
+    """
+    newest = 0.0
+    try:
+        with os.scandir(pages) as repos:
+            for r in repos:
+                if not r.is_dir(follow_symlinks=False):
+                    continue
+                try:
+                    with os.scandir(r.path) as it:
+                        for e in it:
+                            if e.name.endswith(".json"):
+                                try:
+                                    newest = max(newest, e.stat(follow_symlinks=False).st_mtime)
+                                except OSError:
+                                    continue
+                except OSError:
+                    continue
+    except OSError:
+        return 0.0
+    return newest
+
+
+def _sources_snapshot() -> dict[str, Any]:
+    ws = workspace()
+    n, newest = _newest_dir(ws.htr_reports)
+    return {"htr_dirs": n, "htr_newest": newest, "pages_newest": _newest_note(ws.pages)}
 
 
 def staleness(db_path: Path | None = None, *, quick: bool = False) -> dict[str, Any]:
-    """Свіжість реєстру; повну перевірку одночасні запити рахують один раз.
-
-    🔴 Повна перевірка — тисячі обходів тек (10 с на живому просторі,
-    22.10.2026), а Огляд проєкту шле два `cases.list` разом. Хто прийшов, поки
-    інший рахує, чекає й бере його результат: той закінчився вже після його
-    приходу. Вікно, у якому зміна файла може в нього не потрапити, — сам час
-    розрахунку, і лише для запиту, що прийшов посеред нього. Готові результати
-    з минулого не повторюються: наступний запит рахує заново.
-    """
-    if quick:
-        return _staleness(db_path, quick=True)
-    key = str(Path(db_path or index_path()))
-    came = time.perf_counter()
-    with _STALE_GUARD:
-        lock = _STALE_LOCKS.setdefault(key, threading.Lock())
-    with lock:
-        last = _STALE_LAST.get(key)
-        if last is not None and last[0] > came:
-            return dict(last[1])
-        got = _staleness(db_path)
-        _STALE_LAST[key] = (time.perf_counter(), got)
-        return dict(got)
-
-
-def _staleness(db_path: Path | None = None, *, quick: bool = False) -> dict[str, Any]:
     """Чи відстав реєстр від своїх джерел — і від яких саме.
 
     ⏱ `quick=True` — дешевий шар на 💓 пульсі (`core.pulse`): якщо мітка простору
@@ -581,44 +610,34 @@ def _staleness(db_path: Path | None = None, *, quick: bool = False) -> dict[str,
     built = built + timedelta(seconds=1)
 
     reasons: list[str] = [incomplete] if incomplete else []
-    for label, target in (
-        ("каталог справ", ws.derived / "case_library.json"),
-        ("пошук роду", ws.clan_hunt / "state.json"),
-        ("канон", ws.project_derived / "nyshporka.sqlite"),
-        ("ручні прив'язки", ws.cases / "overrides.json"),
-    ):
+    targets = [("каталог справ", ws.derived / "case_library.json"),
+               ("ручні прив'язки", ws.cases / "overrides.json")]
+    # Пошук роду й канон — шар проєкту: у чистій Майстерні їх немає, і
+    # перевірка не має права падати «вкажіть проєкт» (так падав `cases.list`
+    # з кореня Майстерні, 22.10.2026).
+    if ws.project is not None or not ws.hub_only:
+        targets += [("пошук роду", ws.clan_hunt / "state.json"),
+                    ("канон", ws.project_derived / "nyshporka.sqlite")]
+    for label, target in targets:
         try:
             mtime = datetime.fromtimestamp(target.stat().st_mtime, tz=UTC)
         except OSError:
             continue
         if mtime > built:
             reasons.append(f"{label} змінено {mtime:%m-%d %H:%M}")
-    newest_run, n_runs = None, 0
-    for meta_path in ws.htr_reports.glob("*/_htr_meta.json"):
-        n_runs += 1
-        try:
-            ts = datetime.fromtimestamp(meta_path.stat().st_mtime, tz=UTC)
-        except OSError:
-            continue
-        if newest_run is None or ts > newest_run:
-            newest_run = ts
-    if newest_run and newest_run > built:
-        reasons.append(f"є прогін, оновлений {newest_run:%m-%d %H:%M}")
-    known_runs = 0
-    con = _connect(path)
-    try:
-        known_runs = con.execute(
-            "SELECT coalesce(sum(json_array_length(htr_runs)), 0) FROM cases").fetchone()[0]
-        known_runs += con.execute("SELECT count(*) FROM orphan_runs").fetchone()[0]
-    except sqlite3.Error:
-        pass
-    finally:
-        con.close()
-    if n_runs > known_runs:
-        reasons.append(f"на диску {n_runs} прогонів, у реєстрі {known_runs}")
-    pages_dir = ws.pages
-    newest_note = max((p.stat().st_mtime for p in pages_dir.glob("*/*.json")), default=0)
-    if newest_note and datetime.fromtimestamp(newest_note, tz=UTC) > built:
+    snap = _sources_snapshot()
+    if snap["htr_newest"] and datetime.fromtimestamp(snap["htr_newest"], tz=UTC) > built:
+        reasons.append(f"є прогін, оновлений "
+                       f"{datetime.fromtimestamp(snap['htr_newest'], tz=UTC):%m-%d %H:%M}")
+    # 🔴 Порівнюємо з числом тек, яке бачила САМА збірка, а не з кількістю
+    # прив'язаних прогонів. Частину тек збірка свідомо не бере (порожні,
+    # перервані, службові), і «на диску 15922, у реєстрі 15884» висіло навіть
+    # одразу після збірки — ворота, що завжди червоні, перестають читати
+    # (дослідник, 22.10.2026). Старий реєстр без мітки — лише дата.
+    seen = meta.get("htr_dirs")
+    if seen not in (None, "") and snap["htr_dirs"] > int(seen):
+        reasons.append(f"нових тек прогонів: {snap['htr_dirs'] - int(seen)}")
+    if snap["pages_newest"] and datetime.fromtimestamp(snap["pages_newest"], tz=UTC) > built:
         reasons.append("сховище сторінок оновлено")
     return {"built": built_raw, "stale": bool(reasons), "unknown": False,
             "reasons": reasons}

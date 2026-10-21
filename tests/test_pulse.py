@@ -154,3 +154,74 @@ def test_build_records_the_mark_taken_before_collecting(space, monkeypatch):
     assert quick["stale"] is True, (
         "удар під час збірки загубився — мітку зняли після збору"
     )
+
+
+# ── повна перевірка: знімок тек, а не обхід файлів ───────────────────────────
+
+def _later(path: Path, sec: float = 5.0) -> None:
+    import os
+    import time
+
+    t = time.time() + sec
+    os.utime(path, (t, t))
+
+
+def test_unbound_run_dirs_do_not_keep_the_registry_stale(space):
+    """🔴 Тека, яку збірка свідомо не взяла, не робить реєстр «застарілим» назавжди.
+
+    Доти перевірка порівнювала теки на диску з прив'язаними прогонами, і
+    «на диску N, у реєстрі N−38» висіло одразу після збірки (22.10.2026).
+    """
+    from nyshporka.cases import db as _DB
+    from nyshporka.core import workspace as W
+
+    runs = W.workspace().htr_reports
+    for name in ("порожній", "службова"):
+        (runs / name).mkdir(parents=True)
+    _DB.build_index(db_path=space / "idx.sqlite")
+    full = _DB.staleness(space / "idx.sqlite")
+    assert full["stale"] is False, full["reasons"]
+
+
+def test_new_run_dir_after_build_makes_it_stale(space):
+    from nyshporka.cases import db as _DB
+    from nyshporka.core import workspace as W
+
+    runs = W.workspace().htr_reports
+    (runs / "a").mkdir(parents=True)
+    _DB.build_index(db_path=space / "idx.sqlite")
+    (runs / "b").mkdir()
+    for d in (runs / "a", runs / "b"):
+        _later(d, -60)
+    full = _DB.staleness(space / "idx.sqlite")
+    assert full["stale"] and any("нових тек прогонів: 1" in r for r in full["reasons"])
+
+
+def test_rewritten_run_meta_makes_it_stale(space):
+    """Прогін дописав `_htr_meta.json` атомарно — дата теки зрушила."""
+    from nyshporka.cases import db as _DB
+    from nyshporka.core import workspace as W
+
+    run = W.workspace().htr_reports / "a"
+    run.mkdir(parents=True)
+    _DB.build_index(db_path=space / "idx.sqlite")
+    _later(run)
+    full = _DB.staleness(space / "idx.sqlite")
+    assert full["stale"] and any("є прогін, оновлений" in r for r in full["reasons"])
+
+
+def test_page_note_written_in_place_makes_it_stale(space):
+    """Облік, переписаний скриптом без заміни (дата теки та сама), теж видно."""
+    from nyshporka.cases import db as _DB
+    from nyshporka.core import workspace as W
+
+    note = W.workspace().pages / "TEST" / "1-1-1.json"
+    note.parent.mkdir(parents=True)
+    note.write_text("{}", encoding="utf-8")
+    _later(note, -60)
+    _later(note.parent, -60)
+    _DB.build_index(db_path=space / "idx.sqlite")
+    assert _DB.staleness(space / "idx.sqlite")["stale"] is False
+    _later(note)
+    full = _DB.staleness(space / "idx.sqlite")
+    assert full["stale"] and "сховище сторінок оновлено" in full["reasons"]

@@ -203,8 +203,7 @@ async function openForm(name) {
       <p class="mono">nysh op ${esc(name)} --help</p>` });
     return;
   }
-  openModal({ title: op.when || op.summary || name, body: `<p class="muted mono">${esc(name)}</p>
-    <form data-act="ask.run" id="ask-form">${schemaFormHtml(op.schema)}
+  openModal({ title: op.when || op.summary || name, body: `<form data-act="ask.run" id="ask-form">${schemaFormHtml(op.schema)}
       <div class="row dlg-acts"><button type="submit" class="${op.mutates ? 'danger' : 'primary'}">${t('ask.run')}</button>
         <button type="button" class="ghost" data-act="modal.close">${t('modal.no')}</button></div>
     </form><div id="ask-out"></div>` });

@@ -1242,7 +1242,7 @@ export default {
     'cloud.unreleased': 'Mașini neeliberate',
     'cloud.now': 'Acum',
     'cloud.past': 'Recent',
-    'cloud.none.live': 'Acum nu rulează nimic în cloud.',
+    'cloud.none.live': 'Nu rulează nimic.',
     'cloud.none.past': 'Încă nu au existat rulări în cloud.',
     'cloud.release': 'chiria curge',
     'cloud.more': 'Jurnal',
@@ -1425,4 +1425,8 @@ export default {
     'canon.sev.INFO': 'notă',
     'rs.k.research': 'cercetare',
     'rs.k.village': 'sat',
+    'stale.line': 'Registrul a rămas în urmă',
+    'stale.refresh': 'Actualizează',
+    'canon.items': 'înregistrări: {n}',
+    'ov.hist.last': 'ultima modificare',
 };

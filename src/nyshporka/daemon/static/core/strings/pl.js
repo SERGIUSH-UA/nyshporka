@@ -1242,7 +1242,7 @@ export default {
     'cloud.unreleased': 'Niezwolnione maszyny',
     'cloud.now': 'Teraz',
     'cloud.past': 'Ostatnio',
-    'cloud.none.live': 'W chmurze nic teraz nie działa.',
+    'cloud.none.live': 'Nic nie działa.',
     'cloud.none.past': 'Nie było jeszcze przebiegów w chmurze.',
     'cloud.release': 'najem trwa',
     'cloud.more': 'Dziennik',
@@ -1425,4 +1425,8 @@ export default {
     'canon.sev.INFO': 'uwaga',
     'rs.k.research': 'badania',
     'rs.k.village': 'wieś',
+    'stale.line': 'Rejestr jest nieaktualny',
+    'stale.refresh': 'Odśwież',
+    'canon.items': 'wpisów: {n}',
+    'ov.hist.last': 'ostatnia zmiana',
 };

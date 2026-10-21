@@ -14,8 +14,8 @@ import { callOp } from '../core/net.js';
 import { esc, el, setView, busy, failure, boxError, renderWarnings, curGen, alive } from '../core/view.js';
 import { SCREENS, ACTIONS } from '../core/registry.js';
 import { goto } from '../core/nav.js';
-import { openModal, modalSeq } from '../core/modal.js';
-import { kv, pill, toast, unwiki } from '../core/bits.js';
+import { openModal, modalSeq, modalTitle } from '../core/modal.js';
+import { kv, pill, toast, unwiki, fieldLabel, fieldValue } from '../core/bits.js';
 import { openEvidence } from './evidence.js';
 
 const KINDS = ['persons', 'families', 'places', 'sources', 'hypotheses'];
@@ -63,7 +63,7 @@ function checkBox(env) {
   const issues = (d.issues || []).filter((i) => i.severity !== 'INFO').slice(0, 5)
     .map((i) => `<li><span class="mono">${esc(i.where)}</span> ${esc(i.text)}</li>`).join('');
   return `<div class="row"><h3>${t('canon.check')}</h3>${pill(tone, head)}</div>
-    <p class="muted num">${esc(t('canon.counts')
+    <p class="muted">${esc(t('canon.counts')
     .replace('{p}', n.persons || 0).replace('{f}', n.families || 0)
     .replace('{pl}', n.places || 0).replace('{s}', n.sources || 0))}</p>
     ${issues ? `<ul>${issues}</ul>` : ''}
@@ -99,13 +99,6 @@ async function cardsList() {
   el('cn-list').innerHTML = rows ? rows + more : `<p class="muted">${t('canon.none')}</p>`;
 }
 
-/** Значення поля картки людською мовою: стать, так/ні, дата-об'єкт, перелік. */
-function value(k, v) {
-  if (k === 'sex') return tOr(`canon.sex.${v}`, String(v));
-  if (typeof v === 'boolean') return v ? t('canon.yes') : t('canon.no');
-  return plain(v);
-}
-
 /** Значення поля картки як текст: дата-об'єкт, перелік, рядок. */
 function plain(v) {
   if (v === null || v === undefined) return '';
@@ -132,9 +125,10 @@ async function openCard(id) {
   if (!env.ok) { boxError('dlg-body', env); return; }
   const d = env.data || {};
   const c = d.card || {};
+  modalTitle(`${unwiki(d.title || id)} · ${id}`);
   const skip = new Set(['id', 'facts', 'citations', 'names', 'media', 'notes', 'hits']);
   const fields = Object.entries(c).filter(([k, v]) => !skip.has(k) && (typeof v === 'boolean' || plain(v)))
-    .map(([k, v]) => [tOr(`canon.f.${k}`, k), esc(value(k, v))]);
+    .map(([k, v]) => [fieldLabel(k), esc(fieldValue(k, v))]);
   const facts = (c.facts || []).map((f) => `<li><b>${esc(tOr(`canon.ft.${f.type}`, f.type))}</b>
       ${f.date ? ` · ${esc(plain(f.date))}` : ''}${f.place_id ? ` · ${esc(f.place_id)}` : ''}
       ${f.value ? ` · ${esc(f.value)}` : ''} ${pill(f.status === 'confirmed' ? 'ok' : f.status === 'disputed' ? 'warn' : 'neutral',

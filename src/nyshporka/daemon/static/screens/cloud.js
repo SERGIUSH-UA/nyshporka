@@ -37,15 +37,15 @@ SCREENS.cloud = async () => {
   const past = RUNS.filter((r) => FINAL.includes(r.phase));
   const spent = RUNS.reduce((s, r) => s + Number(r.spent_usd || 0), 0);
   const unreleased = RUNS.filter((r) => r.needs_release).length;
-  const tile = (label, value) => `<div class="dash-box"><span class="muted">${esc(label)}</span>
-    <b class="num big">${esc(value)}</b></div>`;
+  const tile = (label, value, tone = '') => `<div class="ov-kpi${tone ? ` ${tone}` : ''}"><span class="ov-kpi-l">${
+    esc(label)}</span><span class="ov-kpi-v"><b class="num">${esc(value)}</b></span></div>`;
   setView(`<h2>${t('cloud.title')}</h2>
     <p class="muted">${t('cloud.why')}</p>
     ${renderWarnings(env)}
-    <div class="dash-two">${tile(t('cloud.spent.last').replace('{n}', RUNS.length), money(spent))}${
-  tile(t('cloud.live'), d.live || 0)}${
+    <div class="ov-kpis k3">${RUNS.length ? tile(t('cloud.spent.last').replace('{n}', RUNS.length), money(spent)) : ''}${
+  tile(t('cloud.live'), d.live || 0, d.live ? 'ov-info' : '')}${
   // Тривога, а не показник: нуль тут нічого не каже, ненульове — оренда тече.
-  unreleased ? tile(t('cloud.unreleased'), unreleased) : ''}</div>
+  unreleased ? tile(t('cloud.unreleased'), unreleased, 'ov-warn') : ''}</div>
     <div class="dash-box"><h3>${t('cloud.now')}</h3>
       ${live.length ? live.map(runRow).join('') : `<p class="muted">${t('cloud.none.live')}</p>`}</div>
     <div class="dash-box"><h3>${t('cloud.past')}</h3>

@@ -933,3 +933,15 @@ details.ov-ws > summary { cursor: pointer; font-weight: 600; padding: .6rem 0; c
   #nav { overflow-x: auto; scrollbar-width: none; max-width: 100%; }
   #nav::-webkit-scrollbar { display: none; }
 }
+/* Реєстр відстав — один тихий рядок, без тла попередження. */
+.stale-line { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; margin: .3rem 0 .8rem;
+  font-size: .85rem; color: var(--fg-3); }
+#view .stale-line button { padding: .15rem .7rem; font-size: .82rem; }
+.ov-kpis.k3 { grid-template-columns: repeat(auto-fill, minmax(12rem, 1fr)); }
+.ov-kpis > div.ov-kpi { display: grid; gap: .25rem; padding: .8rem 1rem; border-radius: var(--r-m);
+  border: 1px solid var(--line-2); border-left: 4px solid var(--line-3); background: var(--s-3); box-shadow: var(--sh-1); }
+.ov-kpis > div.ov-kpi.ov-ok { border-left-color: var(--ok); }
+.ov-kpis > div.ov-kpi.ov-warn { border-left-color: var(--warn); }
+.ov-kpis > div.ov-kpi.ov-info { border-left-color: var(--info-2); }
+.dash-box > .row > h3 { margin: 0; }
+.fld > input[type=color] { width: 100%; min-height: 2.4rem; padding: 2px; }

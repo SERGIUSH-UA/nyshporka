@@ -54,7 +54,9 @@ export function schemaFormHtml(schema) {
         <option value="true"${def === true ? ' selected' : ''}>✓</option>
         <option value="false"${def === false ? ' selected' : ''}>✗</option></select>`;
     } else if (kind === 'bool') {
-      control = `<input type="checkbox" id="${id}" name="${esc(name)}"${def ? ' checked' : ''}>`;
+      // Галочка — поруч із підписом, а не окремим рядком під ним.
+      return `<label class="chk" for="${id}" title="${esc(name)}"><input type="checkbox" id="${id}"
+        name="${esc(name)}"${def ? ' checked' : ''}> ${label}</label>`;
     } else if (kind === 'enum') {
       const opts = Array.isArray(p.enum) ? p.enum : [p.const];
       control = `<select id="${id}" name="${esc(name)}">${required ? '' : '<option value=""></option>'}${
@@ -68,8 +70,10 @@ export function schemaFormHtml(schema) {
       const v = kind === 'list' ? (Array.isArray(def) ? def.join(', ') : '') : (def === undefined || def === null ? '' : def);
       control = `<input id="${id}" name="${esc(name)}" value="${esc(v)}"${required ? ' required' : ''}>`;
     }
-    return `<label class="fld" for="${id}"><span class="fld-l">${label}${required ? ' *' : ''}</span>${control}
-      <small class="muted mono">${esc(name)}</small></label>`;
+    // Ім'я аргументу — у підказці при наведенні: людині досить підпису, а
+    // для того, хто перекладає дію в термінал, воно лишається під рукою.
+    return `<label class="fld" for="${id}" title="${esc(name)}"><span class="fld-l">${label}${
+      required ? ' *' : ''}</span>${control}</label>`;
   }).join('');
 }
 

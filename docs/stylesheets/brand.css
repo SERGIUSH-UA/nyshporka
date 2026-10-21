@@ -166,6 +166,7 @@
   --muted: #4B5B55;
   --warn-bg: #F7E6C6;
   --warn-fg: #85560F;
+  --pj: #0F3D3A;
 }
 
 [data-md-color-scheme="slate"] {
@@ -332,4 +333,5 @@
   --muted: #B3AA97;
   --warn-bg: #2B2E21;
   --warn-fg: #EDBB6D;
+  --pj: #E3A64B;
 }

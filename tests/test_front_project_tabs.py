@@ -210,6 +210,9 @@ await tick(); ACTIONS['modal.close'](); await p;
 out.longAfterNo = (globalThis.__OPS || []).map(([n]) => n);
 out.longConfirm = document.getElementById('dlg-title').textContent;
 
+const VW = await import('./core/view.js');
+out.staleLine = VW.renderWarnings({ stale: { is: true, reasons: ['нових тек прогонів: 2'] }, warnings: [] });
+
 const SF = await import('./core/schemaform.js');
 const schema = { properties: {
   case: { type: 'string', description: 'справа' },
@@ -313,7 +316,9 @@ def test_history_log_diff_and_restore_only_after_yes(probe) -> None:
     assert "abc1234" in probe["histLog"] and "I9001.md" in probe["histLog"]
     assert 'data-act="hist.auto"' in probe["histAuto"]
     d = probe["diff"]
-    assert "sex" in d and 'class="diff-d">M<' in d and 'class="diff-a">F<' in d
+    # Підписи й значення людською мовою, а не `sex M → F`.
+    assert "Стать" in d and 'class="diff-d">чоловіча<' in d and 'class="diff-a">жіноча<' in d
+    assert ">sex<" not in d
     assert "примітки змінено" in d
     assert probe["restoreAfterNo"] == 0, "повернення пішло без підтвердження"
     body = json.loads(probe["restoreBody"][0])
@@ -374,6 +379,13 @@ def test_schema_form_builds_fields_and_typed_values(probe) -> None:
 def test_give_lists_unshared_cases(probe) -> None:
     g = probe["give"]
     assert "TEST 1-1-1" in g and "готова" in g and 'id="give-go"' in g
+
+
+def test_stale_registry_is_a_quiet_line_with_a_button(probe) -> None:
+    """Реєстр відстав — тихий рядок із кнопкою, а не жовтий банер «на кожен пчих»."""
+    h = probe["staleLine"]
+    assert 'class="stale-line"' in h and 'data-act="cases.build"' in h
+    assert "нових тек прогонів: 2" in h and 'class="warn' not in h
 
 
 def test_long_action_from_the_form_asks_first(probe) -> None:

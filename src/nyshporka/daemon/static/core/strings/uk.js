@@ -1178,7 +1178,7 @@ export default {
     'cloud.unreleased': 'Машин не відпущено',
     'cloud.now': 'Зараз',
     'cloud.past': 'Нещодавно',
-    'cloud.none.live': 'Зараз у хмарі нічого не крутиться.',
+    'cloud.none.live': 'Нічого не крутиться.',
     'cloud.none.past': 'Хмарних прогонів ще не було.',
     'cloud.release': 'оренда тече',
     'cloud.more': 'Журнал',
@@ -1361,4 +1361,8 @@ export default {
     'canon.sev.INFO': 'примітка',
     'rs.k.research': 'дослідження',
     'rs.k.village': 'село',
+    'stale.line': 'Реєстр відстав',
+    'stale.refresh': 'Оновити',
+    'canon.items': 'записів: {n}',
+    'ov.hist.last': 'остання зміна',
 };

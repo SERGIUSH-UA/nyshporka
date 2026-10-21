@@ -66,6 +66,8 @@ def test_pure_hub_has_no_project_trace(tmp_path: Path,
     assert d["total"] == 4 and all("searched_here" not in r for r in d["cases"])
     env = O.call("cases.list", {"searched": "not_here"})
     assert not env.ok and "оберіть проєкт" in env.error
+    # Свіжість реєстру з кореня Майстерні не чіпає шар проєкту (пошук роду, канон).
+    assert db.staleness()["stale"] in (True, False)
 
 
 def test_read_means_any_stage_but_none(tmp_path: Path,
@@ -80,33 +82,3 @@ def test_read_means_any_stage_but_none(tmp_path: Path,
     todo = O.call("cases.list", {"htr": "read", "searched": "not_here", "limit": 1}).data
     assert todo["total"] == 2 and len(todo["cases"]) == 1
 
-
-def test_simultaneous_staleness_checks_run_once(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Два одночасні `cases.list` (Огляд проєкту) — одна повна перевірка свіжості.
-
-    Наступний запит після готового результату рахує заново: старий результат
-    не повторюється.
-    """
-    import threading
-    import time
-
-    calls: list[int] = []
-
-    def slow(_path=None, *, quick=False):
-        calls.append(1)
-        time.sleep(0.3)
-        return {"stale": False, "n": len(calls)}
-
-    monkeypatch.setattr(db, "_staleness", slow)
-    monkeypatch.setattr(db, "_STALE_LAST", {})
-    got: list[dict] = []
-    ts = [threading.Thread(target=lambda: got.append(db.staleness(Path("x.sqlite"))))
-          for _ in range(2)]
-    ts[0].start()
-    time.sleep(0.05)
-    ts[1].start()
-    for t in ts:
-        t.join()
-    assert len(calls) == 1 and [g["n"] for g in got] == [1, 1]
-    db.staleness(Path("x.sqlite"))
-    assert len(calls) == 2

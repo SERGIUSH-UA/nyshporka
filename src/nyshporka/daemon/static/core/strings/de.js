@@ -1242,7 +1242,7 @@ export default {
     'cloud.unreleased': 'Nicht freigegebene Maschinen',
     'cloud.now': 'Jetzt',
     'cloud.past': 'Kürzlich',
-    'cloud.none.live': 'In der Cloud läuft gerade nichts.',
+    'cloud.none.live': 'Nichts läuft.',
     'cloud.none.past': 'Noch keine Cloud-Läufe.',
     'cloud.release': 'Miete läuft',
     'cloud.more': 'Protokoll',
@@ -1425,4 +1425,8 @@ export default {
     'canon.sev.INFO': 'Notiz',
     'rs.k.research': 'Recherche',
     'rs.k.village': 'Dorf',
+    'stale.line': 'Register ist veraltet',
+    'stale.refresh': 'Aktualisieren',
+    'canon.items': 'Einträge: {n}',
+    'ov.hist.last': 'letzte Änderung',
 };

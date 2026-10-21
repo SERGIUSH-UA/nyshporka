@@ -1242,7 +1242,7 @@ export default {
     'cloud.unreleased': 'Машин не отпущено',
     'cloud.now': 'Сейчас',
     'cloud.past': 'Недавно',
-    'cloud.none.live': 'Сейчас в облаке ничего не крутится.',
+    'cloud.none.live': 'Ничего не крутится.',
     'cloud.none.past': 'Облачных прогонов еще не было.',
     'cloud.release': 'аренда идет',
     'cloud.more': 'Журнал',
@@ -1425,4 +1425,8 @@ export default {
     'canon.sev.INFO': 'примечание',
     'rs.k.research': 'исследование',
     'rs.k.village': 'село',
+    'stale.line': 'Реестр отстал',
+    'stale.refresh': 'Обновить',
+    'canon.items': 'записей: {n}',
+    'ov.hist.last': 'последнее изменение',
 };

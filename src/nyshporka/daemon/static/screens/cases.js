@@ -6,7 +6,7 @@ import { esc, el, setView, busy, failure, boxError, busyForm, fld,
   renderWarnings, renderCoverage, curGen, alive } from '../core/view.js';
 import { SCREENS, ACTIONS } from '../core/registry.js';
 import { SECTIONS, NAV_LABEL, show, renderNav, goto,
-  refreshJobs, onJob, jobChip } from '../core/nav.js';
+  refreshJobs, onJob, jobChip, currentScreen } from '../core/nav.js';
 import { ST } from '../core/state.js';
 import { ic, eng } from '/ui/icons.js';
 import { swapHtml, skelRows, skelCards } from '/ui/dom.js';
@@ -351,7 +351,8 @@ Object.assign(ACTIONS, {
     const chip = el('cases-job');
     onJob(id, (j) => {
       if (chip) chip.innerHTML = jobChip(j);
-      if (j.state === 'done') show('cases');
+      // Лишаємось там, де натиснули (Огляд, Бібліотека), — і перемальовуємо.
+      if (j.state === 'done') show(currentScreen() || 'cases');
     });
     return undefined;
   },

@@ -15,7 +15,7 @@ import { esc, el, setView, busy, failure, boxError, curGen, alive } from '../cor
 import { SCREENS, ACTIONS } from '../core/registry.js';
 import { openModal, confirmAct, modalSeq } from '../core/modal.js';
 import { ST } from '../core/state.js';
-import { pill, toast } from '../core/bits.js';
+import { pill, toast, fieldLabel, fieldValue } from '../core/bits.js';
 
 /** Файл, журнал якого показано (з картки канону), — або весь проєкт. */
 let PATH = '';
@@ -93,8 +93,9 @@ async function openDiff(i, file = '') {
 /** Тіло різниці: поля картки або рядки тексту з позначкою обрізки. */
 export function diffBody(d) {
   if (d.kind === 'fields') {
-    const rows = (d.fields || []).map((f) => `<tr><td class="mono">${esc(f.field)}</td>
-      <td class="diff-d">${esc(show(f.before))}</td><td class="diff-a">${esc(show(f.after))}</td></tr>`).join('');
+    const rows = (d.fields || []).map((f) => `<tr><td>${esc(fieldLabel(f.field))}</td>
+      <td class="diff-d">${esc(fieldValue(f.field, f.before))}</td><td class="diff-a">${
+  esc(fieldValue(f.field, f.after))}</td></tr>`).join('');
     return `${rows ? `<table class="tbl-diff"><thead><tr><th>${t('hist.field')}</th><th>${t('hist.before')}</th>
       <th>${t('hist.after')}</th></tr></thead><tbody>${rows}</tbody></table>` : `<p class="muted">${t('hist.nofields')}</p>`}
       ${d.notes_changed ? `<p>${pill('info', t('hist.notes'))}</p>` : ''}`;
@@ -103,11 +104,6 @@ export function diffBody(d) {
     const cls = l.startsWith('+') ? 'diff-a' : l.startsWith('-') ? 'diff-d' : '';
     return cls ? `<span class="${cls}">${esc(l)}</span>` : esc(l);
   }).join('\n')}</pre>${d.cut ? `<p class="muted">${t('hist.cut')}</p>` : ''}`;
-}
-
-function show(v) {
-  if (v === null || v === undefined) return '—';
-  return typeof v === 'object' ? JSON.stringify(v) : String(v);
 }
 
 Object.assign(ACTIONS, {

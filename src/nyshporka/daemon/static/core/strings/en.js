@@ -1172,7 +1172,7 @@ export default {
     'cloud.unreleased': 'Machines not released',
     'cloud.now': 'Now',
     'cloud.past': 'Recently',
-    'cloud.none.live': 'Nothing is running in the cloud now.',
+    'cloud.none.live': 'Nothing is running.',
     'cloud.none.past': 'No cloud runs yet.',
     'cloud.release': 'rent is running',
     'cloud.more': 'Log',
@@ -1355,4 +1355,8 @@ export default {
     'canon.sev.INFO': 'note',
     'rs.k.research': 'research',
     'rs.k.village': 'village',
+    'stale.line': 'Registry is behind',
+    'stale.refresh': 'Refresh',
+    'canon.items': 'entries: {n}',
+    'ov.hist.last': 'last change',
 };

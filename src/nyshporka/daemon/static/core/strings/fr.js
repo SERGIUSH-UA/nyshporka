@@ -1242,7 +1242,7 @@ export default {
     'cloud.unreleased': 'Machines non libérées',
     'cloud.now': 'Maintenant',
     'cloud.past': 'Récemment',
-    'cloud.none.live': 'Rien ne tourne dans le cloud.',
+    'cloud.none.live': 'Rien ne tourne.',
     'cloud.none.past': 'Pas encore de passage dans le cloud.',
     'cloud.release': 'location en cours',
     'cloud.more': 'Journal',
@@ -1425,4 +1425,8 @@ export default {
     'canon.sev.INFO': 'note',
     'rs.k.research': 'recherche',
     'rs.k.village': 'village',
+    'stale.line': 'Le registre est en retard',
+    'stale.refresh': 'Actualiser',
+    'canon.items': 'entrées : {n}',
+    'ov.hist.last': 'dernier changement',
 };

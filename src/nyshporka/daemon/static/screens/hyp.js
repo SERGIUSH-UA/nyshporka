@@ -31,8 +31,9 @@ SCREENS.hyp = async () => {
   if (!env.ok) return failure(env);
   const d = env.data || {};
   const c = d.counts || {};
-  const tile = (k) => `<div class="dash-box"><span class="muted">${t(`hyp.st.${k}`)}</span>
-    <b class="num big">${esc(c[k] || 0)}</b></div>`;
+  const tone = { open: 'ov-info', awaiting: 'ov-warn', closed: 'ov-ok' };
+  const tile = (k) => `<div class="ov-kpi${c[k] ? ` ${tone[k]}` : ''}"><span class="ov-kpi-l">${t(`hyp.st.${k}`)}</span>
+    <span class="ov-kpi-v"><b class="num">${esc(c[k] || 0)}</b></span></div>`;
   const rows = (d.rows || []).map((h) => `<div class="lrow">
       <div><b>${esc(unwiki(h.claim))}</b>
         <small class="muted"><span class="mono">${esc(h.id)}</span>${
@@ -42,7 +43,7 @@ SCREENS.hyp = async () => {
       <button data-act="hyp.open" data-arg="${esc(h.id)}">${t('canon.open')}</button></div>`).join('');
   setView(`<h2>${t('hyp.title')}</h2>
     <p class="muted">${t('hyp.why')}</p>
-    <div class="dash-two">${tile('open')}${tile('awaiting')}${tile('closed')}</div>
+    <div class="ov-kpis k3">${tile('open')}${tile('awaiting')}${tile('closed')}</div>
     <div class="dash-box">${rows || `<p class="muted">${t('hyp.none')}</p>`}</div>`);
   const seed = ST.hyp;
   ST.hyp = null;

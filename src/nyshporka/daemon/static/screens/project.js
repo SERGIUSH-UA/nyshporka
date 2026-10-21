@@ -181,7 +181,7 @@ export async function fillProject(stillHere = () => true) {
       const rows = (hl.ok && (hl.data || {}).rows) || [];
       const last = rows[0];
       setKpi('ov-k-hist', last ? `<b>${esc(last.date)}</b>` : '—',
-        esc(last ? last.subject : (hl.ok ? t('hist.empty') : t('ov.hist.none'))));
+        esc(last ? `${t('ov.hist.last')}: ${last.subject}` : (hl.ok ? t('hist.empty') : t('ov.hist.none'))));
       const reps = ((rl.ok && (rl.data || {}).rows) || []).slice(0, 3);
       const items = [
         ...rows.map((r) => `<div class="ov-feed"><span class="muted mono">${esc(r.date)}</span><span>${
@@ -206,6 +206,9 @@ async function fillMaterial(stillHere = () => true) {
   if (read === null || read === undefined) {
     // Реєстру немає — це «ще не зібрано», а не нуль справ.
     setKpi('ov-k-mat', '—', esc(t('ov.mat.noreg')));
+    // Без реєстру людині треба в Бібліотеку (там «перезібрати»), а не в Пошук.
+    const card = el('ov-k-mat');
+    if (card) card.dataset.arg = 'library';
     if (mat && all.ok) {
       mat.hidden = false;
       mat.innerHTML = `<p>${t('lib.unbuilt')}</p><p><button data-act="phead.build">${t('cases.build')}</button>
@@ -259,7 +262,8 @@ Object.assign(ACTIONS, {
     const box = el('ov-mat');
     if (!env.ok) { if (box) box.innerHTML = `<div class="warn err">${humanError(env.error)}</div>`; return; }
     const job = await jobDone((env.data || {}).job_id, (j) => { const b = el('ov-mat-note'); if (b) b.innerHTML = jobChip(j); });
-    if (job.state === 'done') fillMaterial();
+    // Перемальовуємо весь Огляд: застарілий рядок «Стану Майстерні» теж зникає.
+    if (job.state === 'done') goto('home');
   },
   'project.go': (_ev, elm) => openProject(elm.dataset.arg, elm.dataset.back || ''),
 

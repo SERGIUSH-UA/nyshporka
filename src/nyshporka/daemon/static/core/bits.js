@@ -6,6 +6,7 @@
  * тест у Node, і кожен екран, без циклу імпортів.
  */
 import { esc } from './view.js';
+import { t, tOr } from './strings.js';
 
 /** `<dl class="kv">` з пар; порожні значення випадають. */
 export function kv(rows) {
@@ -75,6 +76,29 @@ export function mdLite(src) {
  */
 export function unwiki(text) {
   return String(text || '').replace(/\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, (_m, id, label) => label || id);
+}
+
+/** Підпис поля картки канону людською мовою; невідоме — як є. */
+export const fieldLabel = (k) => tOr(`canon.f.${k}`, k);
+
+/**
+ * Значення поля картки як текст: стать, так/ні, дата-об'єкт, перелік,
+ * вкладені записи (факти, цитати) — коротко, без JSON.
+ */
+export function fieldValue(k, v) {
+  if (v === null || v === undefined || v === '') return '—';
+  if (k === 'sex') return tOr(`canon.sex.${v}`, String(v));
+  if (typeof v === 'boolean') return v ? t('canon.yes') : t('canon.no');
+  if (Array.isArray(v)) {
+    if (!v.length) return '—';
+    if (v.every((x) => x && typeof x === 'object')) return t('canon.items').replace('{n}', v.length);
+    return v.map((x) => fieldValue('', x)).join(', ');
+  }
+  if (typeof v === 'object') {
+    for (const key of ['raw', 'text', 'form', 'value', 'name']) if (v[key]) return String(v[key]);
+    return t('canon.items').replace('{n}', Object.keys(v).length);
+  }
+  return String(v);
 }
 
 /** Дата з секунд епохи — коротко, мовою вікна. */

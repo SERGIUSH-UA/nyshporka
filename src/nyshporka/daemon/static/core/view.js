@@ -85,8 +85,12 @@ function renderWarnings(env) {
     // 🔴 Виправлення поруч із застереженням, а не в підказці «наберіть у
     // терміналі». Той, хто працює формами, інакше лишається із застереженням
     // і без способу його зняти — тобто змушений вірити застарілому зрізу.
-    bits.push(`<div class="warn stale">⚠ ${esc(env.stale.reasons.join('; '))}
-      <button data-act="cases.build">${t('cases.build')}</button></div>`);
+    // Тихим рядком, а не жовтим банером: реєстр відстає після кожного
+    // прогону й кожного занесеного аркуша, і банер, що стоїть «на кожен
+    // пчих», перестають читати (дослідник, 22.10.2026). Причина й кнопка —
+    // на місці; агент і термінал і далі отримують це в конверті.
+    bits.push(`<div class="stale-line">🕓 ${esc(t('stale.line'))}: ${esc(env.stale.reasons.join('; '))}
+      <button class="ctl-sm" data-act="cases.build">${t('stale.refresh')}</button></div>`);
   }
   const { alerts, notes } = splitWarnings(env.warnings);
   for (const a of alerts) bits.push(`<div class="warn">⚠ ${esc(a)}</div>`);
