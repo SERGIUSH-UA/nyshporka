@@ -246,6 +246,30 @@ def test_sheet_renders_cards_with_crops_and_verdict_fields(case_space: Path) -> 
     assert 'value="hit" selected' not in html_doc
 
 
+def test_sheet_folds_a_page_already_in_the_page_store(case_space: Path) -> None:
+    """Аркуш, уже занесений оком із цим прізвищем, іде в «уже відоме» згорнутим
+    і без кропу; `triage=False` повертає старий вигляд — усі картки підряд."""
+    from nyshporka.pagestore import store as PS
+    from nyshporka.pagestore.models import PageNote
+    from nyshporka.search import textops as T
+
+    ref = PS.resolve_case("DAHMO/315/8433")
+    PS.annotate_pages(ref, [PageNote(scan="0004.jpg", page_type="mixed",
+                                     surnames=["Ковальскій"], comment="бачили оком")])
+    out = case_space / "sheet.html"
+    got = T.sheet("Ковальскій", "DAHMO/315/8433", limit=10, crops=5, out=out)
+    assert not got.get("error"), got
+    assert got["triage"]["known"] == got["cards"] >= 1 and got["crops"] == 0
+    html_doc = out.read_text(encoding="utf-8")
+    assert '<details class="grp"><summary>уже відоме' in html_doc
+    assert "аркуш уже у сховищі сторінок" in html_doc
+
+    plain = T.sheet("Ковальскій", "DAHMO/315/8433", limit=10, crops=5, out=out,
+                    triage=False)
+    assert plain["triage"] == {} and plain["crops"] >= 1
+    assert "<details" not in out.read_text(encoding="utf-8")
+
+
 def test_sheet_cards_link_to_their_whole_page_in_the_app(case_space: Path) -> None:
     """🔴 Кроп не показує, чий це запис, — лише цілий аркуш. Скан у файл не
     вбудовується (сорок карток по ~1 МБ), тож картка веде в `nysh serve` на ту

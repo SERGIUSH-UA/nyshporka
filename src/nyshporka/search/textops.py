@@ -1436,15 +1436,21 @@ SERVE_PORT = 8788
 
 
 def sheet(q: str, scope: str, *, thresh: int = 78, limit: int = 60, crops: int = 40,
-          out: str | Path | None = None, serve_port: int = SERVE_PORT) -> dict[str, Any]:
+          out: str | Path | None = None, serve_port: int = SERVE_PORT,
+          triage: bool = True) -> dict[str, Any]:
     """HTML-гортач: кандидати з контекстом, другим голосом і кропом, поле вердикту.
 
     🔴 Вердикт виносить людина. Гортач не має кнопки «закрити все»: кожен рядок
     отримує свій вибір, а «наш рід» не проставляється за замовчуванням.
     Колонка вердикту експортується в JSON, який `verdicts_import` заносить у
     сховище сторінок — щоб наступна сесія не передивлялась той самий аркуш.
+
+    `triage` (див. `search.triage`) розкладає картки на «на вердикт», «слабке»,
+    «уже відоме» й «закрито: не прізвище» ДО кропу: кроп отримують лише перші
+    два, а відоме й закрите лежать згорнутими з причиною й тим самим полем
+    вердикту — людина бачить, що й чому відсіяно, і може не погодитись.
     """
-    got = find(q, scope, thresh=thresh, limit=limit, context=1)
+    got = find(q, scope, thresh=thresh, limit=limit, context=2 if triage else 1)
     if got.get("error"):
         return {"error": str(got["error"])}
     key = str(got.get("case_key") or "")
@@ -1455,15 +1461,9 @@ def sheet(q: str, scope: str, *, thresh: int = 78, limit: int = 60, crops: int =
     known_stem = {_verdict_stem_key(k): v for k, v in known.items()}
     hits = list(got.get("hits") or [])
     cards: list[dict[str, Any]] = []
-    n_crops = 0
-    by_registry: set[str] = set()
     for h in hits:
         run, page, no = str(h["name"]), str(h["page"]), int(h["line_no"])
         ck = f"{run}|{page}|{no}"
-        img = ""
-        if n_crops < crops:
-            img = _crop_b64(run, page, no, seen=by_registry)
-            n_crops += bool(img)
         prev = known.get(ck) or known_stem.get(_verdict_stem_key(ck)) or {}
         cards.append({"key": ck, "run": run, "page": page, "line": no,
                       "score": h.get("score"), "matched": h.get("matched"),
@@ -1471,11 +1471,29 @@ def sheet(q: str, scope: str, *, thresh: int = 78, limit: int = 60, crops: int =
                       "before": (h.get("context") or {}).get("before") or [],
                       "after": (h.get("context") or {}).get("after") or [],
                       "alt": (h.get("alt") or {}).get("line") or "",
-                      "rank_why": h.get("rank_why") or "", "img": img,
-                      "scan_link": _scan_link(run, page),
+                      "rank_why": h.get("rank_why") or "", "img": "",
+                      "scan_link": _scan_link(run, page), "triage": None,
                       "verdict": prev.get("verdict") or "", "note": prev.get("note") or ""})
+    counts: dict[str, int] = {}
+    if triage and cards:
+        from nyshporka.search import triage as TR
+
+        stems = list(dict.fromkeys([q] + [str(c["stem"]) for c in cards if c.get("stem")]))
+        counts = TR.triage(cards, q, key, stems)
+        order = {None: 0, TR.WEAK: 1, TR.KNOWN: 2, TR.CLOSED: 3}
+        cards.sort(key=lambda c: order[(c["triage"] or {}).get("code")])
+    n_crops = 0
+    by_registry: set[str] = set()
+    for c in cards:
+        if n_crops >= crops:
+            break
+        if (c["triage"] or {}).get("code") in ("known", "closed"):
+            continue
+        c["img"] = _crop_b64(c["run"], c["page"], c["line"], seen=by_registry)
+        n_crops += bool(c["img"])
     led = got["ledger"]
-    html_doc = _render_sheet(q, got, cards, led, serve_port=serve_port)
+    html_doc = _render_sheet(q, got, cards, led, serve_port=serve_port,
+                             triaged=bool(triage and cards))
     if out is None:
         from nyshporka.core.workspace import workspace
 
@@ -1487,7 +1505,7 @@ def sheet(q: str, scope: str, *, thresh: int = 78, limit: int = 60, crops: int =
     dst.write_text(html_doc, encoding="utf-8")
     return {"out": str(dst), "cards": len(cards), "crops": n_crops, "case_key": key,
             "total": got.get("total"), "known_verdicts": len(known), "ledger": led,
-            "frames_by_registry": sorted(by_registry)}
+            "frames_by_registry": sorted(by_registry), "triage": counts}
 
 
 def _page_link(run: str, page: str, line_no: int, port: int) -> str:
@@ -1506,16 +1524,24 @@ def _page_link(run: str, page: str, line_no: int, port: int) -> str:
 
 
 def _render_sheet(q: str, got: dict[str, Any], cards: list[dict[str, Any]],
-                  led: dict[str, Any], *, serve_port: int = SERVE_PORT) -> str:
+                  led: dict[str, Any], *, serve_port: int = SERVE_PORT,
+                  triaged: bool = False) -> str:
     dl = _esc(re.sub(r"[^\w.-]+", "_", str(got.get("case_key") or "case")))
     opts = "".join(f'<option value="{v}">{_esc(VERDICT_LABEL[v])}</option>' for v in VERDICTS)
-    parts: list[str] = []
+    groups: dict[str | None, list[str]] = {}
     for c in cards:
+        tri = c.get("triage") or {}
+        code = tri.get("code")
+        parts = groups.setdefault(code, [])
+        reason = (f'<div class="tri tri-{_esc(code)}">відсів: {_esc(tri.get("why"))}</div>'
+                  if code else "")
         ctx_b = "".join(f'<div class="ctx">↑ {_esc(x)}</div>' for x in c["before"])
         ctx_a = "".join(f'<div class="ctx">↓ {_esc(x)}</div>' for x in c["after"])
         alt = f'<div class="alt">2-й голос: {_esc(c["alt"])}</div>' if c["alt"] else ""
         img = (f'<img src="data:image/jpeg;base64,{c["img"]}" alt="кроп">' if c["img"]
-               else '<div class="noimg">кропу немає (кадр не знайдено або без геометрії)</div>')
+               else '<div class="noimg">кроп не робився: розділ згорнуто відсівом</div>'
+               if code in ("known", "closed") else
+               '<div class="noimg">кропу немає (кадр не знайдено, без геометрії або понад --crops)</div>')
         why = f' <span class="why">↓ {_esc(c["rank_why"])}</span>' if c["rank_why"] else ""
         full = (f'<a class="full" href="{_esc(_page_link(c["run"], c["page"], c["line"], serve_port))}"'
                 f' target="nysh">сторінка цілком ↗</a>')
@@ -1529,13 +1555,24 @@ def _render_sheet(q: str, got: dict[str, Any], cards: list[dict[str, Any]],
  data-page="{_esc(c["page"])}" data-line="{c["line"]}">
 <header><b>{_esc(c["score"])}</b> · {_esc(c["run"])} · {_esc(c["page"])} · рядок {c["line"]}
  · <span class="m">{_esc(c["matched"])}</span>{why}</header>
-{ctx_b}<div class="line">» {_esc(c["text"])}</div>{ctx_a}{alt}
+{reason}{ctx_b}<div class="line">» {_esc(c["text"])}</div>{ctx_a}{alt}
 {img}
 {full}
 <div class="verdict"><label>вердикт <select><option value="">—</option>{sel}</select></label>
 <label>прізвище як у джерелі <input class="surname" placeholder="лише для «наш рід» / «уже в каноні»"></label>
 <label>примітка <input class="note" value="{_esc(c["note"])}"></label></div>
 </section>''')
+    from nyshporka.search.triage import LABEL
+
+    body = "".join(groups.get(None) or [])
+    if groups.get("weak"):
+        body += (f'<h2>{_esc(LABEL["weak"])} · {len(groups["weak"])}</h2>'
+                 + "".join(groups["weak"]))
+    for code in ("known", "closed"):
+        if groups.get(code):
+            body += (f'<details class="grp"><summary>{_esc(LABEL[code])} · '
+                     f'{len(groups[code])} — розгорнути, щоб перевірити відсів</summary>'
+                     + "".join(groups[code]) + "</details>")
     chans = " · ".join(f"{ch['id']} {'✓' if ch['ran'] else '✗'}" for ch in led.get("channels") or [])
     head = (f"кадрів {led.get('frames') if led.get('frames') is not None else '?'} · "
             f"прочитано {led.get('decoded') if led.get('decoded') is not None else '?'} · "
@@ -1557,15 +1594,20 @@ img{{max-width:100%;border:1px solid #ccc;margin:8px 0;display:block}}
 .bar{{position:sticky;top:0;background:#f6f4ef;padding:8px 0;border-bottom:1px solid #ccc;margin-bottom:12px}}
 button{{font-size:15px;padding:6px 12px}} textarea{{width:100%;height:160px;margin-top:8px}}
 .card.done{{border-color:#8b8}} .card.done header{{color:#585}}
+h2{{font-size:17px;margin:18px 0 8px}} .tri{{color:#7a5a00;font-size:14px;margin:2px 0}}
+details.grp{{margin:18px 0}} details.grp summary{{cursor:pointer;font-weight:600;padding:6px 0}}
 </style></head><body>
 <h1>«{_esc(q)}» · {_esc(got.get("shifra") or got.get("case_key") or got.get("scope"))}</h1>
-<div class="sub">{_esc(head)} · показано {len(cards)} із {_esc(got.get("total"))}</div>
+<div class="sub">{_esc(head)} · показано {len(cards)} із {_esc(got.get("total"))}{_esc(
+    "" if not triaged else
+    f" · на вердикт {len(groups.get(None) or [])}, слабких {len(groups.get('weak') or [])}, "
+    f"відомих {len(groups.get('known') or [])}, закрито {len(groups.get('closed') or [])}")}</div>
 <div class="bar"><button onclick="collect()">Зібрати вердикти → JSON</button>
  <span id="cnt"></span>
  <div><small>Далі: <code>nysh text verdicts &lt;файл.json&gt; --case &lt;справа&gt;</code> — занесе в сховище сторінок.</small></div>
  <div><small>«Сторінка цілком» відкривається в застосунку: потрібен запущений <code>nysh serve</code> (порт {serve_port}).</small></div>
 <textarea id="out" placeholder="тут з'явиться JSON"></textarea></div>
-{"".join(parts)}
+{body}
 <script>
 function collect(){{
   const rows=[];
