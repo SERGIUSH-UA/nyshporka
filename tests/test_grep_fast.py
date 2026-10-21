@@ -220,7 +220,9 @@ def test_page_gate_never_drops_a_line_match() -> None:
             if any(re.search(p, ln) for ln in lines):
                 assert re.search(p, text, re.MULTILINE), (p, lines)
     for p, lines in ((r"\AД", ["а", "Д"]), (r"(?<!\s)Д", ["а ", "Д"]),
-                     (r"а(?!\s)", ["а", " "])):
+                     (r"а(?!\s)", ["а", " "]), (r"x(?>\s*)$", ["x  ", "foo"]),
+                     (r"x\s*+$", ["x  ", "foo"]), (r"x\s++$", ["x  ", "foo"]),
+                     (r"x\s{1,3}+$", ["x  ", "foo"])):
         assert not ST._line_gate_safe(p)
         assert any(re.search(p, ln) for ln in lines)
         assert not re.search(p, "\n".join(lines), re.MULTILINE)
@@ -330,3 +332,9 @@ def test_grep_in_processes_answers_like_before(space: Path,
             got = ST.grep(pattern, runs, limit=limit, context=1)
             assert {k: v for k, v in got.items() if k not in _NARROWS} == \
                 {k: v for k, v in want.items() if k not in _NARROWS}, (pattern, limit)
+
+
+def test_gate_still_on_for_escaped_plus() -> None:
+    """Екранований «+» (буквальний плюс) — не посесивний квантифікатор."""
+    assert ST._line_gate_safe(r"a\++b")
+    assert ST._line_gate_safe(r"Ков\w+скій")

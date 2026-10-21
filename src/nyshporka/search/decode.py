@@ -114,7 +114,12 @@ def stamps_of(runs: list[str]) -> dict[str, str]:
     """
     from nyshporka import htr_store as S
 
-    want = {r for r in runs if r and not r.startswith(".")}
+    # Без регістру, як файлова система Windows і `_case_dir`: «ABC» — та сама
+    # тека, що «abc» (рецензія 22.10.2026).
+    want: dict[str, list[str]] = {}
+    for r in runs:
+        if r and not r.startswith("."):
+            want.setdefault(os.path.normcase(r), []).append(r)
     out = dict.fromkeys(runs, "")
     if not want:
         return out
@@ -127,15 +132,18 @@ def stamps_of(runs: list[str]) -> dict[str, str]:
         return out
     with it:
         for e in it:
-            if e.name not in want:
+            names = want.get(os.path.normcase(e.name))
+            if not names:
                 continue
             try:
                 if not e.is_dir():
                     continue
                 m = os.stat(os.path.join(e.path, "_htr_meta.json"))
                 if stat.S_ISREG(m.st_mode):
-                    out[e.name] = (f"{m.st_mtime_ns:x}-{m.st_size:x}-"
-                                   f"{os.stat(e.path).st_mtime_ns:x}")
+                    st = (f"{m.st_mtime_ns:x}-{m.st_size:x}-"
+                          f"{os.stat(e.path).st_mtime_ns:x}")
+                    for r in names:
+                        out[r] = st
             except OSError:
                 continue
     return out

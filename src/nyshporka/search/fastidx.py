@@ -367,9 +367,13 @@ def by_run(stems: list[str]) -> dict[int, list[tuple[int, int]]]:
         # допомагає, тож він іде свіпом триграмами (`store.sweep` ловить помилку).
         limit = max_hits()
         if total > limit:
-            _BROAD[key] = (f"запит бере {total:_} рядків індексу, межа {limit:_}"
-                           .replace("_", " "))
-            raise TooBroad(_BROAD[key])
+            why = f"запит бере {total:_} рядків індексу, межа {limit:_}".replace("_", " ")
+            # Кешується лише відмова за стелею: межу нижче стелі дала вільна
+            # пам'ять ЦЬОГО моменту, і за хвилину той самий запит уже пройде
+            # (рецензія 22.10.2026).
+            if total > MAX_HITS:
+                _BROAD[key] = why
+            raise TooBroad(why)
         found = list(ex.map(lambda c: _collect_part(*c), counted))
     seen: set[tuple[int, int]] = set()
     out: dict[int, list[tuple[int, int]]] = {}

@@ -449,6 +449,11 @@ def test_free_memory_lowers_the_hit_limit(space: Path, monkeypatch: pytest.Monke
         FX.by_run([stem])
     res = ST.sweep([stem], ["проба", "чужий"], fast=True)
     assert _lines(slow) and _lines(res) == _lines(slow) and res["fast_runs"] == 0
+    # відмову дала пам'ять цього моменту — у кеш вона не лягає
+    assert not FX._BROAD
+    monkeypatch.setattr(psutil, "virtual_memory",
+                        lambda: SimpleNamespace(available=10 ** 12))
+    assert FX.by_run([stem])
     FX._BROAD.clear()
 
 
