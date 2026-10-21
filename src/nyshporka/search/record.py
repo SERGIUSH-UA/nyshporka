@@ -525,7 +525,7 @@ def scan(rows: list[dict[str, Any]], ts: Terms, *, limit: int = 40) -> dict[str,
                 key = _frame_key(str(page))
                 pg = pages.setdefault(key, Page(page=str(page)))
                 raw = ST._raw_lines(conn, int(pid))
-                boxes = {ln.no: ln.box for ln in ST._page_lines(conn, int(pid))}
+                boxes = ST._page_boxes(conn, int(pid))
                 had_geo = False
                 for no, text in enumerate(raw, 1):
                     box = boxes.get(no)

@@ -185,6 +185,9 @@ def test_successor_joins_a_surname_split_across_columns(space: Path) -> None:
     pid = ST._page_id(conn, "проба", "0004.jpg")
     assert pid is not None
     page_lines = ST._page_lines(conn, pid)
+    # легкий запит рамок (канал запису) — ті самі рамки, що й у повних рядках
+    assert ST._page_boxes(conn, pid) == {ln.no: ln.box for ln in page_lines if ln.box}
+    assert len(ST._page_boxes(conn, pid)) == len(boxes)
     conn.close()
     assert ST.successors(page_lines).get(3) == 11
     stem = S._norm("Ковальскій")

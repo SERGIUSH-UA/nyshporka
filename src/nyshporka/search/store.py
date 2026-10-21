@@ -1079,6 +1079,17 @@ def _page_lines(conn: sqlite3.Connection, pid: int) -> list[Line]:
     return out
 
 
+def _page_boxes(conn: sqlite3.Connection, pid: int) -> dict[int, tuple[int, int, int, int]]:
+    """Рамки рядків сторінки: {номер рядка: рамка} — те саме, що `_page_lines`
+    дає в `box`, але без блоба кандидатів, який каналу запису не потрібен
+    (0,7 с на справу в 1228 сторінок, замір 21.10.2026)."""
+    lo, hi = pid << LINE_BITS, ((pid + 1) << LINE_BITS) - 1
+    return {rid - lo: (int(x0), int(y0), int(x1), int(y1))
+            for rid, x0, y0, x1, y1 in conn.execute(
+                "select id,x0,y0,x1,y1 from lines where id between ? and ? "
+                "and x0 is not null", (lo, hi))}
+
+
 # ── склейка за колонкою ──────────────────────────────────────────────────────
 #: Частка ширини сторінки, більша за яку прогалина між лівими краями рядків
 #: означає нову колонку.
