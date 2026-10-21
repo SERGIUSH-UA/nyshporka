@@ -126,6 +126,11 @@ def frames_dir_key(case_dir: str | Path | None) -> str:
     return str(p).replace("\\", "/").lower()
 
 
+def _tail(case_dir: str | Path) -> str:
+    """Останній сегмент шляху без регістру й кінцевих скісних."""
+    return str(case_dir).replace("\\", "/").rstrip("/").rsplit("/", 1)[-1].lower()
+
+
 def same_frames(a_dir: str | Path | None, a_canon: str,
                 b_dir: str | Path | None, b_canon: str) -> bool:
     """Чи читали два прогони ті самі кадри: спільна тека кадрів і ключі справи,
@@ -134,7 +139,16 @@ def same_frames(a_dir: str | Path | None, a_canon: str,
     Тека доводить спільні кадри, ключ стереже від теки, перевикористаної під
     іншу справу (стейджинг). Порожній ключ з одного боку — не суперечність:
     прогін буває нічийним.
+
+    ⚡ Спершу — ім'я теки. `frames_dir_key` повертає `abspath` теки, тож рівні
+    ключі без рівного останнього сегмента неможливі, а сам ключ коштує
+    `resolve()` по кожному кореню справ (junction на Windows). `scope_runs`
+    звіряє прогін з УСІМ стором на кожен кроп: без цього гортач на 40 кропів
+    стояв хвилини в `stat` (замір 21.10.2026).
     """
+    if not a_dir or not b_dir or (
+            _tail(a_dir) != _tail(b_dir)):
+        return False
     fa = frames_dir_key(a_dir)
     if not fa or fa != frames_dir_key(b_dir):
         return False

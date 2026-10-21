@@ -583,6 +583,8 @@ def sheet_cmd(
     out: str = typer.Option("", "--out", help="куди покласти HTML"),
     serve_port: int = typer.Option(8788, "--serve-port",
                                    help="порт `nysh serve` для «сторінка цілком»"),
+    no_triage: bool = typer.Option(False, "--no-triage",
+                                   help="без відсіву: усі картки підряд, кроп за рангом"),
     as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """HTML-гортач: кандидати з контекстом, другим голосом, кропом і полем вердикту.
@@ -593,13 +595,19 @@ def sheet_cmd(
     from nyshporka import ops as O
 
     env = O.call("text.sheet", {"q": q, "case": case, "thresh": thresh, "limit": limit,
-                                "crops": crops, "out": out, "serve_port": serve_port})
+                                "crops": crops, "out": out, "serve_port": serve_port,
+                                "triage": not no_triage})
     if _answer(env, as_json):
         return
     d = env.data
     console.print(f"[bold]{d['out']}[/bold]")
     console.print(f"[muted]карток {d['cards']} із {d.get('total')} · кропів {d['crops']} · "
                   f"уже з вердиктом {d.get('known_verdicts', 0)}[/muted]")
+    tri = d.get("triage") or {}
+    if any(tri.values()):
+        console.print(f"[muted]відсів: слабких {tri.get('weak', 0)} · відомих "
+                      f"{tri.get('known', 0)} · закрито як не прізвище {tri.get('closed', 0)} "
+                      f"(згорнуто в гортачі з причиною)[/muted]")
     _notes(env)
 
 
