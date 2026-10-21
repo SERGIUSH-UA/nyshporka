@@ -904,4 +904,7 @@ def text_verdicts(a: TextVerdictsArgs) -> Envelope:
     for b in res.get("bad") or []:
         env.warn("bad_row", f"рядок пропущено: {b}")
     env.suggest("cases.build", "перебудувати реєстр: облік ока змінився")
+    from nyshporka.core import vcs as V
+
+    V.autosave_env(env, f"Вердикти гортача: {a.case or a.path}")
     return env

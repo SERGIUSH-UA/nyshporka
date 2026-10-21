@@ -148,11 +148,9 @@ def _restage(hub: Path, home: Path, files: list[str], src: str, dst: str) -> Non
 
 
 def _is_repo(hub: Path) -> bool:
-    try:
-        top = _git(hub, "rev-parse", "--show-toplevel").strip()
-    except (AdoptError, FileNotFoundError):
-        return False
-    return bool(top) and Path(top).resolve() == hub.resolve()
+    from nyshporka.core import vcs as V
+
+    return V.is_repo(hub)
 
 
 def _walk(p: Path) -> list[Path]:

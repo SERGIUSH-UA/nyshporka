@@ -264,6 +264,22 @@ def _legacy_root(root: Path) -> CheckResult:
                               "завести другий (nysh project adopt <ім'я>)")
 
 
+def _git_ready(root: Path) -> CheckResult:
+    """Чи веде простір історію в git (канон можна повернути, хук канону діє)."""
+    from nyshporka.core import vcs as V
+    from nyshporka.core import workspace as W
+
+    hub = W._hub_above(root) if W.read_project_table(root) is not None else root
+    if not V.git_available():
+        return CheckResult("n/a", "git не встановлено — історії канону немає; поставте git "
+                                  "(як радить інструкція порталу) і `nysh history setup`")
+    if V.repo_top(hub) is None:
+        return CheckResult("todo", "git є, а простір не в репозиторії — `nysh history setup` "
+                                   "заведе локальну історію (без GitHub)")
+    auto = "автозбереження так" if V.auto_enabled(hub) else "коміти ведете ви"
+    return CheckResult("ok", f"простір у git · {auto}")
+
+
 def _hook_installed(root: Path) -> CheckResult:
     import subprocess
 
@@ -372,6 +388,7 @@ CHECKS: dict[str, Callable[[Path], CheckResult]] = {
     "skills_current": _skills_current,
     "canon_present": _canon_present,
     "hook_installed": _hook_installed,
+    "git_ready": _git_ready,
     "hypotheses_linked": _hypotheses_linked,
     "stale_scan": _stale_scan,
     "keys_current": _keys_current,

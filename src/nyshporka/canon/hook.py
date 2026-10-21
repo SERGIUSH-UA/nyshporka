@@ -28,12 +28,25 @@ MARKERS = ("nyshporka canon precommit", "pre_commit_citations")
 HOOK = """#!/bin/sh
 # встановлено: nysh canon hook --install
 root="$(git rev-parse --show-toplevel)"
-py="$root/.venv/Scripts/python.exe"
+py="{interpreter}"
+[ -x "$py" ] || py="$root/.venv/Scripts/python.exe"
 [ -x "$py" ] || py="$root/.venv/bin/python"
 [ -x "$py" ] || py=python
 # Нагадування про міграцію агента в коміті — шум, а не допомога.
 NYSHPORKA_NO_MIGRATION_NAG=1 exec "$py" -m nyshporka canon precommit
 """
+
+
+def hook_script() -> str:
+    """Скрипт хука з інтерпретатором, що його ставить.
+
+    🔴 За звичайної установки (`uv tool install`, інсталятор) у просторі немає
+    `.venv`, і хук падав на системний `python`, який Нишпорки не імпортує:
+    коміт або відмовляв без пояснення, або перевірка канону не робилась
+    зовсім. Тека хуків своя на кожній машині (`.git/hooks` не версіонується),
+    тож повний шлях тут безпечний.
+    """
+    return HOOK.replace("{interpreter}", Path(sys.executable).as_posix())
 
 
 class HookError(RuntimeError):
@@ -127,7 +140,7 @@ def install(root: Path) -> Path:
             raise HookError(f"{target} уже є й не наш — допишіть у нього рядок "
                             f"`python -m nyshporka canon precommit` руками")
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(HOOK, encoding="utf-8", newline="\n")
+    target.write_text(hook_script(), encoding="utf-8", newline="\n")
     return target
 
 

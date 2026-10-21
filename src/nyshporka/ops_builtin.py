@@ -3838,6 +3838,9 @@ def pages_note(a: PageNoteArgs) -> Envelope:
         env.warn("not_eye_verified",
                  "метод каже, що читали декод, а не зображення — така гілка "
                  "успадковує чужі помилки; у коментарі варто позначити «оком не звірено»")
+    from nyshporka.core import vcs as V
+
+    V.autosave_env(env, f"Облік сторінок: {ref.key}, {note.scan}")
     return env
 
 

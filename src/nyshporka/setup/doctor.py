@@ -530,6 +530,27 @@ def _decode_visible() -> Check:
     return Check("Декоди видимі для grep", "ok", "простір поза git-репозиторієм")
 
 
+def _history() -> Check:
+    """Історія простору: чи є git і чи веде простір у ньому історію канону."""
+    from nyshporka.core import vcs as V
+    from nyshporka.core.workspace import WorkspaceError, workspace
+
+    name = "Історія канону (git)"
+    if not V.git_available():
+        return Check(name, "warn", "git не встановлено — зіпсовану картку нічим повернути",
+                     "поставити git (git-scm.com) і виконати `nysh history setup`")
+    try:
+        hub = workspace().hub
+    except WorkspaceError:
+        return Check(name, "ok", "git є; простору ще немає")
+    top = V.repo_top(hub)
+    if top is None:
+        return Check(name, "warn", "git є, а простір не в репозиторії",
+                     "`nysh history setup` — локальна історія без GitHub")
+    auto = "автозбереження так" if V.auto_enabled(hub) else "коміти ведете ви"
+    return Check(name, "ok", f"репозиторій {top.name} · {auto}")
+
+
 def _case_keys() -> Check:
     """Ключі справ: простір переїхав на опис у ключі, і в яких справ опис невідомий.
 
@@ -887,8 +908,8 @@ def _queue() -> Check:
 
 
 CHECKS = (_version, _skills, _skill_listing, _python, _workspace, _cloud_sync, _disk, _profile,
-          _library, _cloud_pdfs, _chain, _queue, _decode_visible, _case_keys, _torch, _engines,
-          _models, _rent)
+          _library, _cloud_pdfs, _chain, _queue, _decode_visible, _history, _case_keys, _torch,
+          _engines, _models, _rent)
 
 #: Перевірки, які мають сенс лише при ввімкненій секції. 🔴 Не косметика:
 #: «⚠ рушії не встановлені» на машині того, хто прийшов подивитись каталог

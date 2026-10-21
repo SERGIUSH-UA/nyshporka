@@ -58,8 +58,15 @@ def canon_check(a: CheckArgs) -> Envelope:
         env.warn("canon_errors",
                  f"{rep.count('ERROR')} помилок у каноні — індекс і сайт будуть "
                  f"брехати, доки їх не виправлено")
-    elif not a.hash:
-        env.suggest("canon.index", "канон цілий — перебудувати базу роду")
+    else:
+        # Зелений канон — точка, до якої варто вміти повернутись: агент кличе
+        # перевірку після кожної правки (скіл keep-canon), тож окремого кроку
+        # «зберегти» йому не треба. Лише там, де історію завела Нишпорка.
+        from nyshporka.core import vcs as V
+
+        V.autosave_env(env, "Канон перевірено — зелений стан збережено")
+        if not a.hash:
+            env.suggest("canon.index", "канон цілий — перебудувати базу роду")
     return env
 
 
@@ -95,6 +102,9 @@ def canon_index(_a: NoArgs) -> Envelope:
         env.warn("evidence_unreferenced",
                  f"{len(cited['unreferenced'])} доказів у маніфесті вже не цитує жодна "
                  f"картка — лишити, процитувати чи прибрати вирішує людина")
+    from nyshporka.core import vcs as V
+
+    V.autosave_env(env, f"Канон проіндексовано: {rep.persons} осіб, {rep.facts} фактів")
     return env
 
 

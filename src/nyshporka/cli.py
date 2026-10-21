@@ -730,6 +730,31 @@ def crawl(source: str = typer.Argument("archium", help="id джерела"),
                       f"перечитає лише їх[/warn]")
 
 
+def _init_history(root: Path, *, skip: bool = False) -> None:
+    """Історія нового простору — локальний git, якщо він є на машині.
+
+    Збій тут не зриває `init`: простір уже заведено, а історію можна завести
+    пізніше (`nysh history setup`). Немає git — порада замість помилки.
+    `--no-history` (чи `NYSHPORKA_NO_HISTORY=1`) — для того, хто веде git сам.
+    """
+    import os
+
+    from nyshporka.core import vcs as V
+
+    if skip or os.environ.get(V.NO_HISTORY_ENV):
+        return
+    try:
+        rep = V.ensure_repo(root)
+    except V.VcsError as exc:
+        console.print(f"[warn]⚠ історію не заведено: {exc} — `nysh history setup`[/warn]")
+        return
+    if rep.created:
+        console.print(f"[muted]історія: локальний git (коміт {rep.commit}), канон "
+                      "зберігається сам — `nysh history log <картка>`[/muted]")
+    for n in rep.notes:
+        console.print(f"[warn]⚠ {n}[/warn]")
+
+
 @app.command()
 @route("init", tier="rare", mutates=True)
 def init(
@@ -738,6 +763,8 @@ def init(
     preset: str = typer.Option("", "--preset",
                                help="набір частин: catalog | amateur | researcher | lab"),
     yes: bool = typer.Option(False, "--yes", "-y", help="без питань (для інсталятора)"),
+    no_history: bool = typer.Option(False, "--no-history",
+                                    help="не заводити локальний git (ведете історію самі)"),
     hub: bool = typer.Option(False, "--hub",
                              help="Майстерня для кількох проєктів: роди — `nysh project new`"),
 ) -> None:
@@ -789,6 +816,7 @@ def init(
 
     root = wizard.create(p.root, name=name, preset=preset, hub=hub)
     console.print(f"✅ готово: {root}")
+    _init_history(root, skip=no_history)
     if hub:
         console.print("[muted]далі: `nysh project new <ім'я> --surname <Прізвище>` — "
                       "перший проєкт роду[/muted]")
@@ -3206,6 +3234,118 @@ def canon_precommit_cmd() -> None:
 
     # Корінь git — Майстерня; хук сам обходить канон кожного проєкту.
     raise typer.Exit(code=H.main(workspace().hub))
+
+
+history_app = typer.Typer(
+    help="Історія простору: локальний git, який Нишпорка заводить і веде сама.",
+    no_args_is_help=True)
+app.add_typer(history_app, name="history")
+
+
+@history_app.command("setup")
+@route("history setup", tier="rare", mutates=True,
+       when="у просторі ще немає git — завести локальну історію канону й обліку")
+def history_setup_cmd() -> None:
+    """Завести локальний git простору: .gitignore, хук канону, перший коміт.
+
+    Наявний репозиторій не чіпає (лише ставить хук канону). Без git — порада,
+    як його поставити.
+    """
+    from nyshporka.core import vcs as V
+    from nyshporka.core.workspace import workspace
+
+    rep = V.ensure_repo(workspace().hub)
+    if rep.created:
+        console.print(f"✅ історію заведено: {rep.root} (коміт {rep.commit}"
+                      + (", .gitignore з шаблону" if rep.gitignore else "") + ")",
+                      markup=False)
+    elif rep.git and not rep.inside:
+        console.print(f"✅ простір уже в git — нічого не змінено ({rep.root})", markup=False)
+    if rep.hook:
+        console.print(f"   хук канону: {rep.hook}", markup=False)
+    console.print("   автозбереження: " + ("так" if rep.auto else
+                  "ні — коміти ведете ви (наявний репозиторій)"), markup=False)
+    for n in rep.notes:
+        console.print(f"[warn]![/warn] {n}")
+    if not rep.git:
+        raise typer.Exit(code=1)
+
+
+@history_app.command("auto")
+@route("history auto", tier="rare", mutates=True,
+       when="людина веде git сама — вимкнути (чи ввімкнути) автозбереження канону")
+def history_auto_cmd(
+    state: str = typer.Argument(..., help="on | off"),
+) -> None:
+    """Автозбереження канону й обліку: ввімкнути чи вимкнути."""
+    from nyshporka.core import vcs as V
+    from nyshporka.core.workspace import workspace
+
+    if state not in ("on", "off"):
+        console.print("[err]on або off[/err]")
+        raise typer.Exit(code=2)
+    hub = workspace().hub
+    V.set_auto(hub, state == "on")
+    console.print("автозбереження: " + ("так" if V.auto_enabled(hub) else "ні — коміти ведете ви"))
+
+
+@history_app.command("save")
+@route("history save", tier="situational", mutates=True, scope="project",
+       when="зберегти стан канону й обліку сторінок окремим комітом зі своїм поясненням")
+def history_save_cmd(
+    message: str = typer.Option("Збережено вручну", "-m", "--message", help="пояснення коміту"),
+) -> None:
+    """Коміт проєктного шару: канон, профілі, погляд, облік сторінок."""
+    from nyshporka.core import vcs as V
+    from nyshporka.core.workspace import workspace
+
+    try:
+        rev = V.save(workspace(), message)
+    except V.VcsError as exc:
+        console.print(f"[err]{exc}[/err]")
+        raise typer.Exit(code=1) from exc
+    console.print(f"✅ збережено: {rev}" if rev else "змін немає — зберігати нічого")
+
+
+@history_app.command("log")
+@route("history log", tier="situational", scope="project",
+       when="хто й коли міняв картку чи файл — перед відкатом")
+def history_log_cmd(
+    path: Path = typer.Argument(..., help="файл чи тека (картка канону, справа сховища)"),
+    limit: int = typer.Option(20, "-n", help="скільки записів"),
+) -> None:
+    """Історія файла: мітка, дата, пояснення коміту."""
+    from nyshporka.core import vcs as V
+    from nyshporka.core.workspace import workspace
+
+    try:
+        rows = V.log(workspace(), path, limit)
+    except (V.VcsError, ValueError) as exc:
+        console.print(f"[err]{exc}[/err]")
+        raise typer.Exit(code=1) from exc
+    for r in rows:
+        console.print(f"{r['rev']}  {r['date']}  {r['subject']}", markup=False)
+    if not rows:
+        console.print("[muted]історії немає — файл ще не зберігався[/muted]")
+
+
+@history_app.command("restore")
+@route("history restore", tier="situational", mutates=True, scope="project",
+       when="агент зіпсував картку чи файл — повернути стан із історії")
+def history_restore_cmd(
+    path: Path = typer.Argument(..., help="файл чи тека"),
+    to: str = typer.Option(..., "--to", help="мітка коміту з `nysh history log`"),
+) -> None:
+    """Повернути файл до стану коміту — і зберегти повернення новим комітом."""
+    from nyshporka.core import vcs as V
+    from nyshporka.core.workspace import workspace
+
+    try:
+        rev = V.restore(workspace(), path, to)
+    except (V.VcsError, ValueError) as exc:
+        console.print(f"[err]{exc}[/err]")
+        raise typer.Exit(code=1) from exc
+    console.print(f"↩ повернуто до {to}" + (f", збережено {rev}" if rev else " (уже був такий)"))
 
 
 @canon_app.command("import")

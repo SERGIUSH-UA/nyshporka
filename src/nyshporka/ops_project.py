@@ -65,6 +65,16 @@ def project_new(a: ProjectNewArgs) -> Envelope:
                                 f"nysh --project {a.name} profile init {a.surname}")
     for w in made.warnings:
         env.warn("hub_hooks", w)
+    from nyshporka.core import vcs as V
+
+    if V.auto_enabled(hub) and V.git_available():
+        try:
+            # Разом із теку проєкту — інструкції, які `create` поклав у корінь
+            # Майстерні (`../../CLAUDE.md`, коли їх там ще не було).
+            extra = [(made.root / f).resolve() for f in made.files if f.startswith("..")]
+            V.save(W.workspace(), f"Проєкт «{a.name}» заведено", paths=[made.root, *extra])
+        except V.VcsError as exc:
+            env.warn("history", f"історію не збережено: {exc}")
     if not W._read_marker(hub / W.MARKER).get("hub_only") and             any((W.Workspace(root=hub).canonical / "persons").glob("*.md")):
         env.warn("legacy_root", "рід, що лежить у корені Майстерні, лишився там: щоб він "
                                 "став проєктом поруч із новим — nysh project adopt <ім'я> "
