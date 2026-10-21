@@ -307,7 +307,8 @@ def stats(runs: list[str] | None = None) -> dict[str, Any]:
                     have[e.name] = e.stat().st_size
     except OSError:
         pass
-    fresh = sum(1 for r in runs if (st := stamp_of(r)) and _index_name(r, st) in have)
+    stamps = stamps_of(runs) if len(runs) >= 200 else {r: stamp_of(r) for r in runs}
+    fresh = sum(1 for r in runs if (st := stamps[r]) and _index_name(r, st) in have)
     return {"runs": len(runs), "indexed": fresh, "stale": len(runs) - fresh,
             "bytes": sum(have.values()), "dir": str(d)}
 

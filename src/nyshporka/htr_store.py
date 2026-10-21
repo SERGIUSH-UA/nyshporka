@@ -2181,8 +2181,10 @@ def search(q: str, name: str | None = None, thresh: int = 78,
     if ST.exists():
         try:
             st_stale = ST.stale_count(names)
-            gz_stale = sum(1 for n in names if not D.is_fresh(n))
-            if st_stale <= budget or st_stale <= gz_stale:
+            # gzip-індекс питається лише тоді, коли стор сам відстає: на корпусі
+            # це два `stat` на кожен із 16 тис. прогонів — ~2 с перед кожним
+            # пошуком, щоб порівняти з нулем (замір 22.10.2026).
+            if st_stale <= budget or st_stale <= sum(1 for n in names if not D.is_fresh(n)):
                 backend = "store"
         except RuntimeError as exc:
             # Стор чужої схеми: не зносити, не падати — gzip і сказати вголос.
