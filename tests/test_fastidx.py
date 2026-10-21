@@ -416,3 +416,48 @@ def test_a_fast_zero_is_confirmed_even_beside_cached_hits(space: Path,
     monkeypatch.setattr(FX, "by_run", lambda *_a, **_k: {})
     res = ST.sweep([stem], ["проба", "чужий"], fast=True)
     assert {h["name"] for h in res["hits"]} == {"проба", "чужий"}
+
+
+def test_free_memory_lowers_the_hit_limit(space: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Слабка машина: межу збігів знижує вільна пам'ять, і запит іде свіпом — ті самі рядки."""
+    from types import SimpleNamespace
+
+    import psutil
+
+    from nyshporka import htr_store as S
+    from nyshporka.search import fastidx as FX
+    from nyshporka.search import store as ST
+
+    _build()
+    stem = S._norm("Вербищинскій")
+    slow = ST.sweep([stem], ["проба", "чужий"], fast=False)
+    monkeypatch.setattr(psutil, "virtual_memory",
+                        lambda: SimpleNamespace(available=10 ** 12))
+    assert FX.max_hits() == FX.MAX_HITS                  # багато пам'яті — стеля
+    monkeypatch.setattr(psutil, "virtual_memory",
+                        lambda: SimpleNamespace(available=FX.HIT_BYTES))
+    assert FX.max_hits() == 0                            # пам'яті ні на що
+    conn = ST.connect()
+    try:
+        conn.execute("delete from sweeps")
+        conn.commit()
+    finally:
+        conn.close()
+    FX._ANSWERS.clear()
+    FX._BROAD.clear()
+    with pytest.raises(FX.TooBroad):
+        FX.by_run([stem])
+    res = ST.sweep([stem], ["проба", "чужий"], fast=True)
+    assert _lines(slow) and _lines(res) == _lines(slow) and res["fast_runs"] == 0
+    FX._BROAD.clear()
+
+
+def test_answer_pairs_are_sorted_within_each_run(space: Path) -> None:
+    """Збір іде без порядку поля (пам'ять) — порядок пар наводить `by_run`."""
+    from nyshporka import htr_store as S
+    from nyshporka.search import fastidx as FX
+
+    _build()
+    FX._ANSWERS.clear()
+    got = FX.by_run([S._norm("Вербищинскій"), S._norm("Шевчук")])
+    assert got and all(pairs == sorted(pairs) for pairs in got.values())

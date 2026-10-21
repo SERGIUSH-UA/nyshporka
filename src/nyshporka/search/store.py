@@ -1487,14 +1487,17 @@ def _blob_chunks(conn: sqlite3.Connection, pids: list[int], *,
         return _blobs_of(c, chunk)
 
     chunks = [pids[i:i + READ_CHUNK] for i in range(0, len(pids), READ_CHUNK)]
-    ex = ThreadPoolExecutor(max_workers=READ_THREADS)
+    from nyshporka.htr.runner import usable_cores
+
+    threads = max(1, min(READ_THREADS, usable_cores()))
+    ex = ThreadPoolExecutor(max_workers=threads)
     # Вікно наперед, а не всі пачки разом: розпаковані сторінки в кілька разів
     # більші за потрібні рядки, і повна вибірка лягала б у пам'ять цілком.
     ahead: deque[Future[list[tuple[int, str]]]] = deque()
     try:
         nxt = 0
         for i in range(len(chunks)):
-            while nxt < len(chunks) and len(ahead) < 2 * READ_THREADS:
+            while nxt < len(chunks) and len(ahead) < 2 * threads:
                 ahead.append(ex.submit(job, chunks[nxt]))
                 nxt += 1
             if cancel and cancel():

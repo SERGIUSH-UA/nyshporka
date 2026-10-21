@@ -273,7 +273,40 @@ QUERY_THREADS = min(8, os.cpu_count() or 1)
 #: Межа — сума по частинах (рядок, що збігся термами двох частин, рахується двічі).
 #: Замір 20.10.2026 (сума по частинах запиту, корпус 227 млн рядків): Шевченко 1,1 млн,
 #: Мельник 2,8, Коваль 13,1; Іосиф із гніздом (там «Осип») — понад 50, Іван — 279.
+#: Це СТЕЛЯ: на слабшій машині межу знижує вільна пам'ять (`max_hits`).
 MAX_HITS = 16_000_000
+#: Пам'ять на один збіг під час збору, байти: ~230 тимчасово в Tantivy і ~300 у
+#: готовій відповіді (пари за прогонами); пік на 3,9 млн збігів — 0,9 ГБ
+#: (замір 22.10.2026), тут із запасом.
+HIT_BYTES = 400
+#: Яку частку вільної пам'яті можна віддати під збір.
+HIT_MEM_SHARE = 0.5
+
+
+def max_hits() -> int:
+    """Скільки збігів цей процес може зібрати, не ризикуючи пам'яттю машини.
+
+    🔴 Нишпорка йде на різне залізо: 16 млн збігів — це ~6 ГБ, і на ноутбуці з
+    8 ГБ процес упав би без виводу (відмова пам'яті в Rust не ловиться). Ширший
+    за межу запит іде свіпом — повільніше, але без падіння.
+    """
+    try:
+        import psutil
+
+        free = psutil.virtual_memory().available
+    except Exception:
+        return MAX_HITS
+    return min(MAX_HITS, int(free * HIT_MEM_SHARE / HIT_BYTES))
+
+
+def _query_threads() -> int:
+    """Потоки на частини термів: доступні ядра (з квотою контейнера), до 8."""
+    try:
+        from nyshporka.htr.runner import usable_cores
+
+        return max(1, min(QUERY_THREADS, usable_cores()))
+    except Exception:
+        return QUERY_THREADS
 
 
 class TooBroad(RuntimeError):
@@ -319,7 +352,7 @@ def by_run(stems: list[str]) -> dict[int, list[tuple[int, int]]]:
     # 🔴 Частинами в потоках: запит до індексу однопотоковий, а терми
     # незалежні. Рід із двома сотнями термів — 186 с одним запитом і 18 с вісьмома
     # потоками, та сама множина рядків (замір 20.10.2026).
-    k = max(1, min(QUERY_THREADS, len(terms)))
+    k = max(1, min(_query_threads(), len(terms)))
     parts = [terms[i::k] for i in range(k)] if terms else []
     from concurrent.futures import ThreadPoolExecutor
 
@@ -332,8 +365,9 @@ def by_run(stems: list[str]) -> dict[int, list[tuple[int, int]]]:
         # просив 2,3 ГБ одним шматком: відмова пам'яті в Rust не ловиться, процес
         # падав без відповіді (20.10.2026). Такому запиту передфільтр однаково не
         # допомагає, тож він іде свіпом триграмами (`store.sweep` ловить помилку).
-        if total > MAX_HITS:
-            _BROAD[key] = (f"запит бере {total:_} рядків індексу, межа {MAX_HITS:_}"
+        limit = max_hits()
+        if total > limit:
+            _BROAD[key] = (f"запит бере {total:_} рядків індексу, межа {limit:_}"
                            .replace("_", " "))
             raise TooBroad(_BROAD[key])
         found = list(ex.map(lambda c: _collect_part(*c), counted))
@@ -344,6 +378,8 @@ def by_run(stems: list[str]) -> dict[int, list[tuple[int, int]]]:
             if (p, ln) not in seen:
                 seen.add((p, ln))
                 out.setdefault(rid, []).append((p, ln))
+    for pairs in out.values():
+        pairs.sort()
     # Відповідь поширеного прізвища — мільйони пар; тримаємо лише останні кілька.
     while len(_ANSWERS) >= ANSWERS_KEEP:
         _ANSWERS.pop(next(iter(_ANSWERS)))
@@ -367,7 +403,11 @@ def _collect_part(searcher: Any, q: Any, n: int) -> list[tuple[int, int, int]]:
     """(pid, рядок, прогін) документів, де збігся хоч один із термів."""
     if not n:
         return []
-    hits = [addr for _k, addr in searcher.search(q, limit=n, order_by_field="pid").hits]
+    # 🔴 Без `order_by_field`: збір у порядку поля бере в Tantivy ~2,5 КБ
+    # тимчасової пам'яті на збіг, без нього — ~0,23 КБ (замір 22.10.2026). Рід
+    # із профілем — 3,9 млн збігів, і вісім частин разом давали пік 4,9 ГБ у
+    # головному процесі. Порядок наводить `by_run` уже на готових парах.
+    hits = [addr for _k, addr in searcher.search(q, limit=n).hits]
     return [(int(p), int(ln), int(rid)) for p, ln, rid in zip(
         searcher.fast_field_values("pid", hits), searcher.fast_field_values("ln", hits),
         searcher.fast_field_values("run", hits), strict=True)
