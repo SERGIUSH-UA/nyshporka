@@ -51,6 +51,8 @@ MANIFEST_NAME = "manifest.json"
 FRAMES_NAME = "frames.jsonl"
 README_NAME = "README.md"
 RUNS_SUB = "runs"
+#: Рівень gzip пакета — див. `write`.
+GZ_LEVEL = 6
 META_NAME = "_htr_meta.json"
 
 #: Версія формату. Читач старшої версії відмовляє явно, а не розбирає наосліп.
@@ -498,7 +500,11 @@ def write(dest: Path, manifest: Manifest, run_dirs: list[Path], *,
     dest.parent.mkdir(parents=True, exist_ok=True)
     tmp = dest.with_name(dest.name + ".part")
     body = json.dumps(manifest.as_json(), ensure_ascii=False, indent=2)
-    with tarfile.open(tmp, "w:gz") as tar:
+    # 🔴 Рівень 6, а не типовий для tarfile 9: на геометрії справи (24 МБ сирого)
+    # 9 жме 6 с, 6 — 1,7 с, а пакет більший на 1 % (замір 21.10.2026). Стиснення
+    # було найдовшим кроком пакування, тож пачка в Супрягу впиралась саме в нього.
+    # Пул упізнає повтор за хешем змісту, а не байтами пакета — рівень на це не впливає.
+    with tarfile.open(tmp, "w:gz", compresslevel=GZ_LEVEL) as tar:
         _add_bytes(tar, MANIFEST_NAME, body.encode("utf-8"))
         _add_bytes(tar, README_NAME, readme(manifest).encode("utf-8"))
         if frames:
