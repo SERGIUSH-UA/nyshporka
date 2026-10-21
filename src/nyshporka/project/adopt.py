@@ -33,6 +33,7 @@ import fnmatch
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import time
@@ -209,8 +210,6 @@ def _site_paths(hub: Path) -> list[str]:
 
 def _source_refs(hub: Path) -> set[str]:
     """Посилання карток на `data/source/…` (крім стору доказів), як у тексті."""
-    import re
-
     canon = W.Workspace(root=hub).canonical
     if not canon.is_dir():
         return set()
@@ -540,6 +539,80 @@ def _untracked(hub: Path, root: Path) -> list[str]:
     return [x[3:] for x in out.split("\0") if x.startswith("?? ")]
 
 
+IGNORE_HEAD = ("# Перенесено з .gitignore Майстерні (`nysh project adopt`): шаблон зі «/»\n"
+               "# git прив'язує до теки свого .gitignore, тож у проєкті він мусить бути тут.\n")
+
+
+def _inside(pattern: str, moved: list[str]) -> bool:
+    """Чи шаблон кореня вказує всередину перенесеного шляху (за буквальним префіксом)."""
+    body = pattern.lstrip("/")
+    if "/" not in body.rstrip("/") or body.startswith("**"):
+        return False                   # без скісної — діє на будь-якій глибині й так
+    lit = re.split(r"[*?\[]", body, maxsplit=1)[0].rstrip("/")
+    return any(lit == m or lit.startswith(m + "/") for m in moved)
+
+
+def _carry_ignores(hub: Path, root: Path, made: set[str] | frozenset[str] = frozenset(),
+                   moved: list[str] | None = None) -> list[str]:
+    """Шаблони `.gitignore` Майстерні, що ховали перенесені файли, — у `.gitignore` проєкту.
+
+    Шаблон зі скісною всередині (`docs/persons/`, `data/source/archives/`) git
+    прив'язує до теки, де лежить `.gitignore`. Після переїзду він уже не
+    ховає ті самі файли в `projects/<ім'я>/`, і гігабайти сканів чи збірки
+    сайту виринають у `git status` як нові. Для кожного такого файла береться
+    шаблон, що ховав його на старому місці, — і переноситься як є, разом із
+    винятками `!…`, що стоять одразу за ним.
+
+    Файли шаблону проєкту (`made`, від кореня проєкту) не переїжджали, тож
+    шаблонів для них не шукаємо: інакше `.claude/*` Майстерні сховав би
+    `.claude/settings.json` самого проєкту.
+
+    Крім того, переносяться шаблони, що вказують усередину перенесених шляхів
+    (`moved`), навіть коли файлів під ними ще немає: збірка сайту створить
+    `docs/assets/js/strings.js` уже в проєкті.
+    """
+    rel = root.relative_to(hub).as_posix()
+    olds = [x[len(rel) + 1:] for x in _untracked(hub, root)
+            if x.startswith(rel + "/") and x[len(rel) + 1:] not in made]
+    gi_hub = hub / ".gitignore"
+    if not gi_hub.is_file():
+        return []
+    lines = gi_hub.read_text(encoding="utf-8", errors="replace").splitlines()
+    found: dict[tuple[int, str], None] = {}
+    for n, raw in enumerate(lines, 1):
+        pat = raw.strip()
+        if pat and not pat.startswith(("#", "!")) and moved and _inside(pat, moved):
+            found[(n, pat)] = None
+    fields: list[str] = []
+    if olds:
+        out = subprocess.run(["git", "check-ignore", "-v", "-z", "--no-index", "--stdin"],
+                             cwd=hub, input=("\0".join(olds) + "\0").encode("utf-8"),
+                             capture_output=True)
+        fields = out.stdout.decode("utf-8", errors="replace").split("\0")
+    for i in range(0, len(fields) - 3, 4):
+        source, line, pattern = fields[i], fields[i + 1], fields[i + 2]
+        if source == ".gitignore" and pattern and not pattern.startswith("!"):
+            found[(int(line or 0), pattern)] = None
+    if not found:
+        return []
+    pats: list[str] = []
+    for n, pat in sorted(found):
+        pats.append(pat)
+        for nxt in lines[n:]:                     # винятки за шаблоном
+            if not nxt.strip() or nxt.lstrip().startswith("#"):
+                continue
+            if not nxt.startswith("!"):
+                break
+            pats.append(nxt)
+    pats = list(dict.fromkeys(pats))
+    if pats:
+        gi = root / ".gitignore"
+        have = gi.read_text(encoding="utf-8") if gi.is_file() else ""
+        gi.write_text(have + ("\n" if have and not have.endswith("\n") else "")
+                      + IGNORE_HEAD + "".join(f"{x}\n" for x in pats), encoding="utf-8")
+    return pats
+
+
 def _foreign_views(home: Path) -> int:
     """Справи, чий погляд схожий на чужу ціль (портал, замовлення, запит).
 
@@ -666,6 +739,14 @@ def apply(hub: Path, pid: str, *, archive: Path | None = None) -> dict[str, Any]
             _journal(home, journal)
         if repo:
             _restage(hub, home, files, "", root.relative_to(hub).as_posix())
+        if repo:
+            here = root.resolve()
+            made = {Path(x).resolve().relative_to(here).as_posix()
+                    for x in journal.get("created") or [] if Path(x).resolve().is_relative_to(here)}
+            ignores = _carry_ignores(hub, root, made, moving)
+            if ignores and (root / ".gitignore").is_file():
+                journal.setdefault("created", []).append(str(root / ".gitignore"))
+            step("ignores", ignores=ignores)
         step("moved", untracked=_untracked(hub, root) if repo else [])
         step("cited_by", cited_by=_rewrite_cited_by(hub, pid))
         step("memory", memory=_copy_memory(hub, root))

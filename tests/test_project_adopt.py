@@ -412,7 +412,8 @@ def test_ignored_file_on_the_way_does_not_break_git(legacy: Path, tmp_path: Path
 
     Так упав перший переїзд живого кореня: `git add -A -- <шлях>` на файл, що
     ніколи не був в індексі, після переносу — фатальна «pathspec не знайдено».
-    Шаблон, прив'язаний до кореня, у теці проєкту вже не діє — команда це каже.
+    Шаблон, прив'язаний до кореня, у теці проєкту вже не діє — його переносить
+    `.gitignore` проєкту.
     """
     (legacy / ".gitignore").write_text("/data/derived/search_log.json\n", encoding="utf-8")
     (legacy / "data" / "derived" / "search_log.json").write_text("{}", encoding="utf-8")
@@ -421,7 +422,9 @@ def test_ignored_file_on_the_way_does_not_break_git(legacy: Path, tmp_path: Path
     got = A.apply(legacy, "rid", archive=tmp_path / "arch")
     rid = legacy / "projects" / "rid"
     assert (rid / "data" / "derived" / "search_log.json").is_file()
-    assert "projects/rid/data/derived/search_log.json" in got["untracked"]
+    # Шаблон, що ховав файл у корені, переїхав у .gitignore проєкту — файл знову схований.
+    assert "projects/rid/data/derived/search_log.json" not in got["untracked"]
+    assert "/data/derived/search_log.json" in (rid / ".gitignore").read_text(encoding="utf-8")
     staged = _git(legacy, "diff", "--cached", "--name-only")
     assert "projects/rid/data/canonical/persons/I9001.md" in staged
     W.reset()
@@ -497,3 +500,46 @@ def test_tracked_file_under_an_ignore_pattern_moves_and_stays_tracked(legacy: Pa
     assert _tree(legacy) == before
     assert _git(legacy, "ls-files") == head
     assert _git(legacy, "diff", "--cached", "--name-only").strip() == ""
+
+
+def test_carried_ignores_keep_their_exceptions_and_spare_the_template(legacy: Path,
+                                                                     tmp_path: Path) -> None:
+    """`.claude/*` Майстерні не ховає налаштувань проєкту; винятки `!…` їдуть разом із шаблоном."""
+    (legacy / ".gitignore").write_text(
+        ".claude/*\n!.claude/skills/\nreports/**/*.png\n!reports/**/keep.png\n"
+        "reports/research/build.js\nreports/htr/scratch/\n",
+        encoding="utf-8")
+    shot = legacy / "reports" / "research" / "a.png"
+    shot.parent.mkdir(parents=True, exist_ok=True)
+    shot.write_bytes(b"png")
+    _commit(legacy)
+    A.apply(legacy, "rid", archive=tmp_path / "arch")
+    rid = legacy / "projects" / "rid"
+    gi = (rid / ".gitignore").read_text(encoding="utf-8")
+    assert "reports/**/*.png" in gi and "!reports/**/keep.png" in gi
+    assert ".claude/*" not in gi, "шаблон проєкту не переїжджав — його шаблонів не беремо"
+    # Файла ще немає, але шаблон вказує всередину того, що переїхало, — їде теж.
+    assert "reports/research/build.js" in gi
+    assert "reports/htr/scratch/" not in gi, "htr лишається в Майстерні"
+    assert _git(legacy, "check-ignore", "-q", "projects/rid/reports/research/a.png") == ""
+    status = _git(legacy, "status", "--porcelain", "--untracked-files=all", "--", "projects/rid")
+    assert "projects/rid/.claude/settings.json" in status
+
+
+def test_workspace_without_git_moves_and_rolls_back(legacy: Path, tmp_path: Path) -> None:
+    """Простір без git: переїзд і відкат ті самі, страховка — архів і журнал."""
+    shutil.rmtree(legacy / ".git", onerror=lambda f, p, e: (os.chmod(p, 0o700), f(p)))
+    _age(legacy)
+    assert A.plan(legacy, "rid").problems == []
+    before = _tree(legacy)
+    got = A.apply(legacy, "rid", archive=tmp_path / "arch")
+    rid = legacy / "projects" / "rid"
+    assert (rid / "data" / "canonical" / "persons" / "I9001.md").is_file()
+    assert Path(got["archive"]["zip"]).is_file() and got["untracked"] == []
+    assert not (rid / ".gitignore").exists(), "без git шаблонів не переносимо"
+    W.reset()
+    W.use(W._build(legacy, "test"))
+    A.rollback(legacy)
+    W.reset()
+    assert _tree(legacy) == before
+    assert not (legacy / "projects").exists()
