@@ -1772,6 +1772,9 @@ class CasesArgs(BaseModel):
     page: int = Field(default=0, ge=0, le=10_000, description="сторінка видачі")
     page_size: int = Field(default=0, ge=0, le=200,
                            description="розмір сторінки; 0 — узяти `limit`")
+    searched: Literal["", "here", "not_here"] = Field(
+        default="", description="here — лише прошукані цим проєктом, not_here — ще ні "
+                                "(разом з htr: прочитані, але не прошукані тут)")
 
 
 @op("cases.list", summary="Мої справи: що є, що прочитано, що прошукано",
@@ -1793,10 +1796,19 @@ def cases_list(a: CasesArgs) -> Envelope:
     # як уся відповідь — обрізаний список без знаменника нічим не кращий за
     # нуль без нього.
     size = a.page_size or a.limit
+    # Слід пошуку — проєктний: «прошукано» означає «шукали ЦЕЙ рід». У чистій
+    # Майстерні роду немає, і фільтр без нього відповідав би про нікого.
+    here = _searched_here()
+    if a.searched and here is None:
+        return fail("«прошукано тут» — про рід проєкту: оберіть проєкт "
+                    "(nysh --project <ім'я> або тека проєкту)")
+    keys = sorted(here) if here is not None and a.searched else None
     try:
         rows, total = db.query_page(page=a.page, page_size=size, q=a.q,
                                     repo=a.repo, htr=a.htr, year=a.year,
-                                    place=a.place, kind=a.kind, private=a.private)
+                                    place=a.place, kind=a.kind, private=a.private,
+                                    keys_in=keys if a.searched == "here" else None,
+                                    keys_out=keys if a.searched == "not_here" else None)
     except FileNotFoundError:
         # 🔴 «Реєстру ще немає» — це нормальний стан щойно створеного простору,
         # а не поламка. Відмова тут була першим, що бачив новачок, відкривши
@@ -1817,6 +1829,9 @@ def cases_list(a: CasesArgs) -> Envelope:
                     ).suggest("cases.build", "зібрати реєстр справ")
     pages = (total + size - 1) // size if size else 0
     _bundle_subdirs(rows)
+    if here is not None:
+        for r in rows:
+            r["searched_here"] = here.get(r.get("key") or "")
     try:
         counts = db.kind_counts()
     except Exception:
@@ -1834,6 +1849,17 @@ def cases_list(a: CasesArgs) -> Envelope:
     if st.get("stale"):
         env.stale_because(st.get("reasons") or [], fix="nysh cases build")
     return env
+
+
+def _searched_here() -> dict[str, str] | None:
+    """Ключ → дата останнього свіпу цього проєкту; `None` — проєкту немає."""
+    from nyshporka.core import projects as P
+    from nyshporka.core import workspace as W
+    from nyshporka.search import trace
+
+    if P.current_id(W.workspace()) is None:
+        return None
+    return trace.searched()
 
 
 #: Чим підписано рядок теки без шифри, коли паспорт про неї мовчить.

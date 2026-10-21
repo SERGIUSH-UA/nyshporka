@@ -19,10 +19,13 @@
 """
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
 from dataclasses import dataclass, field
+from datetime import date
 from pathlib import Path
+from typing import Any
 
 from nyshporka.core import workspace as W
 
@@ -226,28 +229,123 @@ def autosave(message: str) -> str | None:
     return None
 
 
-def log(ws: W.Workspace, path: Path, limit: int = 20) -> list[dict[str, str]]:
+#: Мітка коміту: лише шістнадцяткова. Рядок на кшталт `--output=…` git прочитав
+#: би як ключ — а мітка приходить і з браузера.
+_REV = re.compile(r"[0-9a-fA-F]{4,40}")
+#: Скільки рядків сирого diff віддавати (не картка канону).
+DIFF_LINES = 400
+#: Скільки змінених файлів показувати при коміті журналу всього шару.
+LOG_FILES = 12
+
+
+def _top(ws: W.Workspace) -> Path:
     top = repo_top(ws.hub)
     if top is None:
         raise VcsError("простір не в git — `nysh history setup`")
-    rel = path.resolve().relative_to(top).as_posix()
-    raw = _git(top, "log", f"-n{limit}", "--follow", "--date=short",
-               "--format=%h%x09%ad%x09%s", "--", rel)
+    return top
+
+
+def check_rev(rev: str) -> str:
+    if not _REV.fullmatch(rev or ""):
+        raise ValueError(f"мітка коміту «{rev}» — лише шістнадцяткова, з `history log`")
+    return rev
+
+
+def log(ws: W.Workspace, path: Path | None = None,
+        limit: int = 20) -> list[dict[str, Any]]:
+    """Журнал файла чи теки; без шляху — усього проєктного шару зі зміненими файлами."""
+    top = _top(ws)
+    if path is not None:
+        rel = path.resolve().relative_to(top).as_posix()
+        raw = _git(top, "log", f"-n{limit}", "--follow", "--date=short",
+                   "--format=%h%x09%ad%x09%s", "--", rel)
+        out: list[dict[str, Any]] = []
+        for line in raw.splitlines():
+            rev, day, subj = [*line.split("\t", 2), "", ""][:3]
+            out.append({"rev": rev, "date": day, "subject": subj})
+        return out
+    rels = []
+    for p in _layer(ws):
+        try:
+            rels.append(p.resolve().relative_to(top).as_posix())
+        except ValueError:
+            continue
+    if not rels:
+        return []
+    raw = _git(top, "log", f"-n{limit}", "--date=short", "--name-only",
+               "--format=%x1e%h%x09%ad%x09%s", "--", *rels)
     out = []
-    for line in raw.splitlines():
-        rev, day, subj = [*line.split("\t", 2), "", ""][:3]
-        out.append({"rev": rev, "date": day, "subject": subj})
+    for chunk in raw.split("\x1e")[1:]:
+        head, _, body = chunk.partition("\n")
+        rev, day, subj = [*head.split("\t", 2), "", ""][:3]
+        files = [f for f in body.splitlines() if f.strip()]
+        out.append({"rev": rev, "date": day, "subject": subj,
+                    "files": files[:LOG_FILES], "more": max(0, len(files) - LOG_FILES)})
     return out
 
 
 def restore(ws: W.Workspace, path: Path, rev: str) -> str | None:
     """Повернути файл чи теку до стану `rev` — і зберегти це як новий коміт."""
-    top = repo_top(ws.hub)
-    if top is None:
-        raise VcsError("простір не в git — `nysh history setup`")
+    top = _top(ws)
     rel = path.resolve().relative_to(top).as_posix()
-    _git(top, "checkout", rev, "--", rel)
+    _git(top, "checkout", check_rev(rev), "--", rel)
     return save(ws, f"Повернуто {rel} до {rev}", paths=[path])
+
+
+def _show(top: Path, spec: str) -> str | None:
+    """Вміст файла в коміті; `None` — у цьому коміті файла не було."""
+    try:
+        return _git(top, "show", spec)
+    except VcsError:
+        return None
+
+
+def _plain(v: Any) -> Any:
+    """Значення frontmatter у JSON: дати — рядком, решта як є."""
+    if isinstance(v, dict):
+        return {str(k): _plain(x) for k, x in v.items()}
+    if isinstance(v, list | tuple):
+        return [_plain(x) for x in v]
+    if isinstance(v, date):
+        return v.isoformat()
+    return v
+
+
+def diff(ws: W.Workspace, path: Path, rev: str) -> dict[str, Any]:
+    """Що коміт `rev` змінив у файлі.
+
+    Картка канону (`.md` з frontmatter) — по полях «було → стало» і чи мінявся
+    текст під ним: людині, що вирішує, чи повертати, сирий diff YAML нічого не
+    каже. Решта файлів — звичайним diff, обрізаним до `DIFF_LINES` рядків.
+    """
+    import difflib
+
+    top = _top(ws)
+    rel = path.resolve().relative_to(top).as_posix()
+    check_rev(rev)
+    after = _show(top, f"{rev}:{rel}")
+    before = _show(top, f"{rev}^:{rel}")
+    out: dict[str, Any] = {"path": rel, "rev": rev, "added": before is None,
+                           "removed": after is None}
+    if rel.endswith(".md"):
+        import frontmatter
+
+        a = frontmatter.loads(before or "")
+        b = frontmatter.loads(after or "")
+        if a.metadata or b.metadata:
+            fields = []
+            for k in sorted({*a.metadata, *b.metadata}):
+                was, now = _plain(a.metadata.get(k)), _plain(b.metadata.get(k))
+                if was != now:
+                    fields.append({"field": k, "before": was, "after": now})
+            out.update(kind="fields", fields=fields,
+                       notes_changed=a.content.strip() != b.content.strip())
+            return out
+    lines = list(difflib.unified_diff((before or "").splitlines(),
+                                      (after or "").splitlines(),
+                                      f"{rev}^", rev, lineterm="", n=2))
+    out.update(kind="text", lines=lines[:DIFF_LINES], cut=len(lines) > DIFF_LINES)
+    return out
 
 
 def autosave_env(env: object, message: str) -> None:

@@ -73,32 +73,16 @@ def _size(nbytes: int) -> str:
 
 
 def _need_run(run_id: str) -> RunState:
-    """Захід за іменем, або єдиний незавершений.
+    """Захід за іменем, або єдиний незавершений (`control.need_run`)."""
+    from nyshporka.cloud import control as CTL
 
-    🔴 Коли незавершених кілька — відмова з переліком, а не «візьму перший».
-    Мовчазний вибір тут означав би забрати результат одного заходу й погасити
-    машину іншого.
-    """
-    from nyshporka.cloud import state as ST
-
-    if run_id:
-        st = ST.load(run_id)
-        if st is None:
-            raise typer.BadParameter(f"немає заходу «{run_id}»")
-        return st
-    alive = ST.live()
-    if not alive:
-        recent = ST.all_runs()
-        if not recent:
-            console.print("[err]жодного заходу ще не було[/err]")
-            raise typer.Exit(code=1)
-        return recent[0]
-    if len(alive) > 1:
-        names = ", ".join(s.run_id for s in alive)
-        console.print(f"[err]незавершених заходів кілька: {names}. "
-                      f"Назвіть потрібний явно[/err]")
-        raise typer.Exit(code=2)
-    return alive[0]
+    try:
+        return CTL.need_run(run_id)
+    except CTL.NoRun as exc:
+        if run_id:
+            raise typer.BadParameter(str(exc)) from None
+        console.print(f"[err]{escape(str(exc))}[/err]")
+        raise typer.Exit(code=exc.code) from None
 
 
 # ── машини ───────────────────────────────────────────────────────────────────
@@ -522,7 +506,7 @@ def cmd_start(
 
 
 @app.command("state")
-@route("cloud state", tier="core", skill="run-case-remote",
+@route("cloud state", op="cloud.state", tier="core", skill="run-case-remote",
        when="що крутиться в хмарі, скільки витрачено, чи забрано результат")
 def cmd_state(
     run_id: str = typer.Argument("", help="ім'я заходу; порожньо — незавершений"),
@@ -766,44 +750,16 @@ def _num(value: object) -> float | None:
 
 
 def _detached_only(st: RunState, what: str) -> None:
-    """Відмовити командам, які в відчепленому заході нічого не означають.
+    """Відмовити командам, які в відчепленому заході нічого не означають."""
+    from nyshporka.cloud import control as CTL
 
-    🔴 Не косметика. `verify` без наглядача записав би вирок `incomplete` живому
-    заходу — а вирок ставить фазу `failed`, після чого ні перелік живих, ні
-    пошук чужого заходу його вже не бачать, і наступний `go` спокійно бере
-    ДРУГУ машину під ту саму справу. `fetch` так само: забирати нема звідки,
-    бо машини в нашому записі немає.
-    """
-    if not st.supervisor:
+    why = CTL.detached_refusal(st, what)
+    if why is None:
         return
-    console.print(
-        f"[err]{escape(what)} тут нічого не дасть: захід веде наглядач "
-        f"{st.supervisor}, і машина в нього, а не в нас. Забір, звірку й "
-        f"гасіння він робить сам.[/err]")
+    console.print(f"[err]{escape(why)}[/err]")
     console.print(f"[muted]як справи: nysh cloud state {st.run_id} · "
                   f"згорнути: nysh cloud stop {st.run_id}[/muted]")
     raise typer.Exit(code=2)
-
-
-def _close_if_silent(st: RunState) -> None:
-    """Закрити запис, наглядач якого так і не озвався, — після `--force`.
-
-    🔴 Запис невдалого старту лишається відкритим, щоб наступний `go` не взяв
-    другої машини. Але якщо наглядача насправді не було, питати про стан
-    нікого, і без цього виходу справа трималась би ним вічно. `--force` — це
-    рішення людини, якій щойно сказано перевірити `rent status`; поки наглядач
-    відповідає, запис закриє його власний підсумок, а не ми.
-    """
-    from nyshporka.cloud import supervised as SUP
-
-    try:
-        silent = not SUP.state_of(st)
-    except SUP.SupervisorMissing:
-        return
-    if silent and st.phase not in ("done", "failed"):
-        st.note("closed_by_human", f"наглядач {st.supervisor} мовчить; "
-                                   f"запис закрито `stop --force`")
-        st.enter("failed", why="закрито людиною: наглядач мовчав")
 
 
 def _stop_detached(st: RunState, *, force: bool, quiet_siblings: bool = False) -> None:
@@ -814,7 +770,7 @@ def _stop_detached(st: RunState, *, force: bool, quiet_siblings: bool = False) -
     оренду. Убити його — означає лишити машину горіти без нікого, хто її
     погасить: гасити її нам нічим, бо в нашому записі її немає.
     """
-    from nyshporka.cloud import supervised as SUP
+    from nyshporka.cloud import control as CTL
 
     if st.siblings and not quiet_siblings:
         # 🔴 Наглядач і машина в партії одні на всіх. Не сказавши цього, ми
@@ -824,9 +780,7 @@ def _stop_detached(st: RunState, *, force: bool, quiet_siblings: bool = False) -
                       f"{escape(', '.join(st.siblings))}. Наглядач один на всю "
                       f"чергу, тож згортається ВЕСЬ захід[/warn]",
                       highlight=False)
-    res = SUP.stop(st, force=force)
-    if force:
-        _close_if_silent(st)
+    res = CTL.stop(st, force=force)
     if res.ok and not res.killed:
         console.print(f"✅ {st.run_id}: наглядач {st.supervisor} згортає захід "
                       f"— забере прочитане, звірить і погасить машину сам")
@@ -871,7 +825,7 @@ def _stop_batch(batch_id: str, *, force: bool) -> None:
 
 
 @app.command("fetch")
-@route("cloud fetch", skill="run-case-remote", mutates=True,
+@route("cloud fetch", op="cloud.fetch", skill="run-case-remote", mutates=True,
        when="забрати результат хмарного прогону; повтор докачує")
 def cmd_fetch(run_id: str = typer.Argument(
         "", help="ім'я заходу; порожньо — незавершений")) -> None:
@@ -936,7 +890,7 @@ def cmd_verify(
 
 
 @app.command("stop")
-@route("cloud stop", skill="run-case-remote", mutates=True,
+@route("cloud stop", op="cloud.stop", skill="run-case-remote", mutates=True,
        when="зупинити хмарний прогін: погасити оренду, відпустити машину")
 def cmd_stop(
     run_id: str = typer.Argument("", help="ім'я заходу; порожньо — незавершений"),
@@ -950,7 +904,7 @@ def cmd_stop(
     🔴 Відмовляє, поки роботу не звірено. Забрати й погасити виглядає як одна
     дія, але між ними лежить єдина точка, у якій ще можна врятувати роботу.
     """
-    from nyshporka.cloud import run as RUN
+    from nyshporka.cloud import control as CTL
 
     if batch:
         _stop_batch(batch, force=force)
@@ -961,7 +915,7 @@ def cmd_stop(
         _stop_detached(st, force=force)
         return
     try:
-        RUN.release(st, force=force, on_line=_say)
+        CTL.stop(st, force=force, on_line=_say)
     except CloudError as exc:
         console.print(f"[err]{exc}[/err]")
         raise typer.Exit(code=2) from None
@@ -1016,7 +970,7 @@ def _print_batch(res: Any) -> None:
 
 # ── захід однією командою ────────────────────────────────────────────────────
 @app.command("go")
-@route("cloud go", tier="core", skill="run-case-remote", mutates=True,
+@route("cloud go", op="cloud.go", tier="core", skill="run-case-remote", mutates=True,
        when="хмарний прогін: велика справа (понад ~500 сторінок) на орендованій карті")
 def cmd_go(
     case: list[str] = typer.Argument(

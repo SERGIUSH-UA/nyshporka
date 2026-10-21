@@ -346,3 +346,36 @@ def test_archive_hides_from_list_and_peek(tmp_path: Path) -> None:
     assert P._from_dir(hub / "projects" / "alpha").archived  # type: ignore[union-attr]
     assert O.call("project.archive", {"name": "alpha", "undo": True}).ok
     assert [p.id for p in P.list_projects(hub)] == [".", "alpha"]
+
+
+def test_project_color_glyph_and_variants(tmp_path: Path) -> None:
+    """Колір і знак — у маркері проєкту; варіанти прізвища — одразу в профіль."""
+    import yaml
+
+    from nyshporka import ops as O
+
+    hub = _hub(tmp_path, hub_only=True)
+    W.use(W._build(hub, "test"))
+    env = O.call("project.new", {"name": "rid-s", "surname": "Сидорук",
+                                 "variants": ["Sydoruk", " "], "color": "#8a5a2b",
+                                 "glyph": "С"})
+    assert env.ok, env.error
+    rows = {r["id"]: r for r in O.call("project.list").data["projects"]}
+    assert (rows["rid-s"]["color"], rows["rid-s"]["glyph"]) == ("#8a5a2b", "С")
+    prof = yaml.safe_load((hub / "projects/rid-s/config/research_profile.yaml")
+                          .read_text(encoding="utf-8"))
+    one = next(iter(prof["profiles"].values()))
+    assert one["surname"]["substrings"] == ["Sydoruk"]
+    for bad in ({"color": "red"}, {"glyph": "Сидорук"}):
+        got = O.call("project.new", {"name": "rid-x", **bad})
+        assert not got.ok and not (hub / "projects/rid-x").exists(), bad
+    st = O.call("project.style", {"name": "rid-s", "color": "", "glyph": "🌳"})
+    assert st.ok and (st.data["color"], st.data["glyph"]) == ("", "🌳")
+    assert "color" not in (hub / "projects/rid-s/nyshporka.toml").read_text(encoding="utf-8")
+
+
+def test_a_broken_color_in_the_marker_does_not_break_the_list(tmp_path: Path) -> None:
+    hub = _hub(tmp_path, hub_only=True)
+    _project(hub, "rid-a", 'color = "червоний"\nglyph = "ааа"\n')
+    pr = P.list_projects(hub)[0]
+    assert (pr.id, pr.color, pr.glyph) == ("rid-a", "", "")

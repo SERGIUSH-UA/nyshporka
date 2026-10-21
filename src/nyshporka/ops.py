@@ -15,6 +15,7 @@ from nyshporka import ops_canon as _canon  # noqa: F401  (те саме: реє�
 from nyshporka import ops_case as _case  # noqa: F401  (те саме: реєстрація)
 from nyshporka import ops_catalog as _catalog  # noqa: F401  (те саме: реєстрація)
 from nyshporka import ops_disk as _disk  # noqa: F401  (те саме: реєстрація)
+from nyshporka import ops_history as _history  # noqa: F401  (те саме: реєстрація)
 from nyshporka import ops_library as _library  # noqa: F401  (те саме: реєстрація)
 from nyshporka import ops_migrate as _migrate  # noqa: F401  (те саме: реєстрація)
 from nyshporka import ops_notebook as _notebook  # noqa: F401  (те саме: реєстрація)
@@ -28,6 +29,7 @@ from nyshporka import ops_site as _site  # noqa: F401  (те саме: реєс�
 from nyshporka import ops_text as _text  # noqa: F401  (те саме: реєстрація)
 from nyshporka import ops_train as _train  # noqa: F401  (те саме: реєстрація)
 from nyshporka import ops_train_run as _train_run  # noqa: F401  (те саме: реєстрація)
+from nyshporka.cloud import ops as _cloud  # noqa: F401  (те саме: реєстрація)
 from nyshporka.core.envelope import Envelope
 from nyshporka.core.ops import REGISTRY, Op, Registry
 

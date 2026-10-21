@@ -235,7 +235,8 @@ def _connect(db_path: Path | None = None) -> sqlite3.Connection:
 def _where(q: str = "", repo: str = "", state: str = "", htr: str = "",
            fuzzy: str = "", year: str = "", doc: str = "", verdict: str = "",
            curated: bool = False, kind: str = "", place_id: str = "",
-           private: bool = False,
+           private: bool = False, keys_in: list[str] | None = None,
+           keys_out: list[str] | None = None,
            ) -> tuple[str, dict[str, object]]:
     """Умова SQL і її аргументи — спільні для видачі й для лічби.
 
@@ -276,6 +277,14 @@ def _where(q: str = "", repo: str = "", state: str = "", htr: str = "",
         where.append("curated = 1")
     if private:
         where.append("private = 1")
+    # Множина ключів — одним параметром через `json_each`: слід пошуку проєкту
+    # буває на тисячі справ, а перелік `?` уперся б у ліміт параметрів SQLite.
+    if keys_in is not None:
+        where.append("key IN (SELECT value FROM json_each(:keys_in))")
+        args["keys_in"] = json.dumps(list(keys_in), ensure_ascii=False)
+    if keys_out is not None:
+        where.append("key NOT IN (SELECT value FROM json_each(:keys_out))")
+        args["keys_out"] = json.dumps(list(keys_out), ensure_ascii=False)
     if place_id:
         where.append("place_id = :place_id")
         args["place_id"] = place_id

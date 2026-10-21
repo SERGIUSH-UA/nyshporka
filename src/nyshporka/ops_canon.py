@@ -12,7 +12,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -134,7 +134,7 @@ class NextArgs(BaseModel):
 
 
 @op("canon.next", summary="Що людині вирішити першим: відкриті гіпотези роду за вагою",
-    args=NextArgs, mutates=False, gui=False, section="research",
+    args=NextArgs, mutates=False, section="research",
     tier="core", scope="project", skill="keep-canon",
     when="що по роду відкрите й чекає рішення людини")
 def canon_next(a: NextArgs) -> Envelope:
@@ -154,6 +154,164 @@ def canon_next(a: NextArgs) -> Envelope:
         env.warn("no_hypotheses", "карток гіпотез ще немає: відкрите по роду ніде не "
                                   "записано. Як завести — скіл keep-canon, розділ «Гіпотеза»")
     return env
+
+
+# ── читання канону для консолі ───────────────────────────────────────────────
+# Екрани «Канон» і «Гіпотези» лише показують: картку правлять файлом, і
+# консоль не має тут жодної кнопки «змінити поле».
+
+#: Кошик канону за видом картки (як теки `data/canonical/<вид>`).
+CARD_KINDS = ("persons", "families", "places", "sources", "hypotheses")
+
+
+def _title(canon: Any, kind: str, ent: Any) -> str:
+    if kind == "persons":
+        return str(ent.primary_name)
+    if kind == "families":
+        def who(pid: str | None) -> str:
+            p = canon.persons.get(pid) if pid else None
+            return str(p.primary_name) if p is not None else (pid or "?")
+        return f"{who(ent.husband)} × {who(ent.wife)}"
+    if kind == "places":
+        return str(ent.name)
+    if kind == "sources":
+        return str(ent.title)
+    return str(ent.claim)
+
+
+def _haystack(kind: str, ent: Any, title: str) -> str:
+    extra: list[str] = []
+    if kind == "persons":
+        extra = [n.form for n in ent.names] + list(ent.aliases)
+    elif kind == "places":
+        extra = list(ent.name_variants.values())
+    return " ".join([ent.id, title, *extra]).casefold()
+
+
+def _citations(ent: Any) -> int:
+    own = len(getattr(ent, "citations", None) or [])
+    return own + sum(len(f.citations) for f in getattr(ent, "facts", None) or [])
+
+
+def _loaded() -> tuple[Path, Any] | Envelope:
+    from nyshporka.canon.check import load
+    from nyshporka.core import workspace as W
+
+    root = _root()
+    if not W.workspace().canonical.is_dir():
+        return fail("канону в проєкті немає (data/canonical)")
+    return root, load(root)
+
+
+class CardsArgs(BaseModel):
+    kind: Literal["", "persons", "families", "places", "sources", "hypotheses"] = Field(
+        default="", description="вид карток; порожньо — усі")
+    q: str = Field(default="", description="підрядок ID, імені, назви чи варіанта")
+    limit: int = Field(default=200, ge=1, le=5000, description="скільки рядків")
+
+
+@op("canon.cards", summary="Картки канону списком: особи, родини, місця, джерела, гіпотези",
+    args=CardsArgs, section="research", tier="situational", scope="project",
+    skill="keep-canon", when="перелік карток канону — знайти особу чи родину за іменем")
+def canon_cards(a: CardsArgs) -> Envelope:
+    got = _loaded()
+    if isinstance(got, Envelope):
+        return got
+    root, canon = got
+    q = a.q.strip().casefold()
+    rows: list[dict[str, Any]] = []
+    for kind in ([a.kind] if a.kind else CARD_KINDS):
+        for eid, ent in sorted(getattr(canon, kind).items()):
+            title = _title(canon, kind, ent)
+            if q and q not in _haystack(kind, ent, title):
+                continue
+            rows.append({"id": eid, "kind": kind, "title": title,
+                         "private": bool(getattr(ent, "private", False)),
+                         "facts": len(getattr(ent, "facts", None) or []),
+                         "citations": _citations(ent),
+                         "file": canon.files[eid].relative_to(root).as_posix()})
+    return ok({"counts": canon.counts(), "found": len(rows), "rows": rows[:a.limit]})
+
+
+class CardArgs(BaseModel):
+    id: str = Field(description="ID картки: I…, F…, PL…, S_…, H…")
+
+
+@op("canon.card", summary="Одна картка канону: поля, докази, гіпотези, що її стосуються",
+    args=CardArgs, section="research", tier="situational", scope="project", skill="keep-canon",
+    when="подивитись картку канону з доказами й зауваженнями перевірки")
+def canon_card(a: CardArgs) -> Envelope:
+    from nyshporka.canon.check import check
+    from nyshporka.core import workspace as W
+
+    root = _root()
+    if not W.workspace().canonical.is_dir():
+        return fail("канону в проєкті немає (data/canonical)")
+    rep = check(root)
+    canon = rep.canon
+    kind = next((k for k in CARD_KINDS if a.id in getattr(canon, k)), "")
+    if not kind:
+        return fail(f"картки «{a.id}» у каноні немає")
+    ent = getattr(canon, kind)[a.id]
+    rel = canon.files[a.id].relative_to(root).as_posix()
+    issues = [i.as_dict() for i in rep.issues
+              if i.where == rel or i.where.split(":")[0] == a.id or a.id in i.where.split()]
+    hyps = [{"id": hid, "claim": h.claim, "status": h.status}
+            for hid, h in sorted(canon.hypotheses.items()) if a.id in h.about]
+    card = ent.model_dump(mode="json", exclude={"notes"})
+    return ok({"id": a.id, "kind": kind, "title": _title(canon, kind, ent),
+               "private": bool(getattr(ent, "private", False)), "file": rel,
+               "card": card, "notes": getattr(ent, "notes", "") or "",
+               "issues": issues, "hypotheses": hyps})
+
+
+class HypsArgs(BaseModel):
+    status: Literal["", "open", "awaiting", "closed"] = Field(
+        default="", description="лише цей стан; порожньо — усі, закриті в кінці")
+
+
+@op("canon.hyps", summary="Гіпотези роду: лічильники і список у порядку рішень",
+    args=HypsArgs, section="research", tier="situational", scope="project",
+    skill="keep-canon", when="усі гіпотези роду зі станом — не лише три найважливіші")
+def canon_hyps(a: HypsArgs) -> Envelope:
+    from nyshporka.canon.next import rank
+
+    got = _loaded()
+    if isinstance(got, Envelope):
+        return got
+    _, canon = got
+    counts = {s: sum(1 for h in canon.hypotheses.values() if h.status == s)
+              for s in ("open", "awaiting", "closed")}
+    rows = []
+    for d in rank(canon, closed=True):
+        if a.status and d.status != a.status:
+            continue
+        h = canon.hypotheses[d.id]
+        rows.append({"id": d.id, "claim": d.claim, "status": d.status,
+                     "decides": d.decides, "weight": d.weight, "hits": len(d.hits),
+                     "strong": any(x["strength"] == "strong" for x in d.hits),
+                     "updated": h.updated.isoformat()})
+    return ok({"counts": counts, "rows": rows})
+
+
+@op("canon.hyp", summary="Одна гіпотеза: хіти з командою кропу, факти, що на неї чекають",
+    args=CardArgs, section="research", tier="situational", scope="project", skill="keep-canon",
+    when="розібрати одну гіпотезу: хіти з кропами й факти, що від неї залежать")
+def canon_hyp(a: CardArgs) -> Envelope:
+    from nyshporka.canon.next import rank
+
+    got = _loaded()
+    if isinstance(got, Envelope):
+        return got
+    root, canon = got
+    h = canon.hypotheses.get(a.id)
+    if h is None:
+        return fail(f"гіпотези «{a.id}» у каноні немає")
+    d = next(x for x in rank(canon, closed=True) if x.id == a.id)
+    return ok({"id": a.id, "file": canon.files[a.id].relative_to(root).as_posix(),
+               "card": h.model_dump(mode="json", exclude={"notes", "hits"}),
+               "notes": h.notes or "", "weight": d.weight, "hits": d.hits,
+               "facts": d.facts, "versus": d.versus})
 
 
 class ImportArgs(BaseModel):

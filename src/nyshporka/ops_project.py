@@ -34,6 +34,11 @@ class ProjectNewArgs(BaseModel):
     kind: str = Field(default="family", description="family — рід, order — замовлення клієнта")
     title: str = Field(default="", description="назва для людини; порожньо — як ім'я")
     surname: str = Field(default="", description="прізвище роду — одразу завести профіль")
+    variants: list[str] = Field(default_factory=list,
+                                description="інші написання прізвища — у профіль "
+                                            "як куски, за якими воно впізнається")
+    color: str = Field(default="", description="колір проєкту в консолі: #rrggbb")
+    glyph: str = Field(default="", description="знак проєкту: буква чи емодзі")
 
 
 @op("project.new", summary="Завести проєкт у Майстерні (рід чи замовлення) з шаблону",
@@ -46,9 +51,13 @@ def project_new(a: ProjectNewArgs) -> Envelope:
 
     hub = W.workspace().hub
     try:
+        P.check_color(a.color)
+        P.check_glyph(a.glyph)
         made = T.create(hub, a.name, kind=a.kind, title=a.title)
     except P.ProjectError as exc:
         return fail(str(exc))
+    if a.color or a.glyph:
+        T.set_style(made.root, color=a.color, glyph=a.glyph)
     data: dict[str, Any] = {"root": str(made.root), "files": made.files, "profile": None}
     env = ok(data)
     if a.surname:
@@ -57,7 +66,9 @@ def project_new(a: ProjectNewArgs) -> Envelope:
         # Профіль — тією самою операцією, що й `nysh profile init`, але в
         # теці щойно заведеного проєкту, а не там, звідки викликали.
         with W.using(W._build(made.root, "explicit")):
-            got = REGISTRY.call("profile.set", {"display": a.surname})
+            got = REGISTRY.call("profile.set", {
+                "display": a.surname,
+                "substrings": [v.strip() for v in a.variants if v.strip()]})
         if got.ok:
             data["profile"] = got.data
         else:                              # проєкт заведено; профіль — окремим кроком
@@ -95,6 +106,7 @@ def project_list(_: NoArgs) -> Envelope:
     for pr in P.list_projects(ws.hub, archived=True):
         rows.append({"id": pr.id, "name": pr.name, "kind": pr.kind,
                      "archived": pr.archived, "here": pr.id == here,
+                     "color": pr.color, "glyph": pr.glyph,
                      "persons": _count_persons(pr.root), "root": str(pr.root)})
     return ok({"hub": str(ws.hub), "here": here, "projects": rows})
 
@@ -157,6 +169,34 @@ def project_archive(a: ProjectArchiveArgs) -> Envelope:
         return fail(str(exc))
     T.set_archived(root, not a.undo)
     return ok({"name": a.name, "archived": not a.undo, "root": str(root)})
+
+
+class ProjectStyleArgs(ProjectNameArgs):
+    color: str | None = Field(default=None, description="#rrggbb; порожньо — зняти")
+    glyph: str | None = Field(default=None, description="буква чи емодзі; порожньо — зняти")
+
+
+@op("project.style", summary="Колір і знак проєкту в консолі",
+    args=ProjectStyleArgs, mutates=True, tier="situational",
+    when="змінити колір чи знак проєкту в перемикачі консолі")
+def project_style(a: ProjectStyleArgs) -> Envelope:
+    from nyshporka import project as T
+    from nyshporka.core import projects as P
+    from nyshporka.core import workspace as W
+
+    hub = W.workspace().hub
+    if a.name == P.ROOT_ID:
+        return fail("корінь старого типу не має маркера проєкту — колір лише в підтеки")
+    try:
+        root = P.project_dir(hub, a.name)
+        P.check_color(a.color or "")
+        P.check_glyph(a.glyph or "")
+    except P.ProjectError as exc:
+        return fail(str(exc))
+    T.set_style(root, color=a.color, glyph=a.glyph)
+    pr = P._from_dir(root)
+    return ok({"name": a.name, "color": pr.color if pr else "",
+               "glyph": pr.glyph if pr else ""})
 
 
 class ProjectAdoptArgs(ProjectNameArgs):
@@ -222,6 +262,80 @@ def project_open(a: ProjectOpenArgs) -> Envelope:
 
 
 # ── допоміжне ────────────────────────────────────────────────────────────────
+# ── звіти досліджень ─────────────────────────────────────────────────────────
+#: Більший звіт консоль не відкриває: це вже не нотатка, а вивантаження.
+REPORT_MAX_BYTES = 1_000_000
+#: Скільки рядків від початку шукати заголовок `# `.
+TITLE_LINES = 40
+
+
+def _report_title(path: Path) -> str:
+    try:
+        with path.open(encoding="utf-8", errors="replace") as fh:
+            lines = [fh.readline() for _ in range(TITLE_LINES)]
+    except OSError:
+        return path.stem
+    for line in lines:
+        if line.startswith("# "):
+            return line[2:].strip()
+    return path.stem
+
+
+@op("reports.list", summary="Звіти досліджень проєкту: назва, тека, коли змінено",
+    section="research", tier="situational", scope="project",
+    when="які звіти досліджень є в проєкті — перелік із назвами")
+def reports_list(_: NoArgs) -> Envelope:
+    from nyshporka.core import workspace as W
+    from nyshporka.search.textops import layer_files
+
+    rep = W.workspace().reports
+    files, _cuts = layer_files("notes")
+    rows: list[dict[str, Any]] = []
+    for f in files:
+        try:
+            st = f.stat()
+        except OSError:
+            continue
+        rel = f.relative_to(rep)
+        rows.append({"path": rel.as_posix(), "title": _report_title(f),
+                     "kind": rel.parts[0] if len(rel.parts) > 1 else "",
+                     "mtime": st.st_mtime, "size": st.st_size})
+    rows.sort(key=lambda r: r["mtime"], reverse=True)
+    return ok({"root": str(rep), "rows": rows})
+
+
+class ReportReadArgs(BaseModel):
+    path: str = Field(description="звіт від теки reports/ проєкту, як у reports.list")
+
+
+@op("reports.read", summary="Текст одного звіту дослідження",
+    args=ReportReadArgs, section="research", tier="situational", scope="project",
+    when="прочитати звіт дослідження з переліку reports.list")
+def reports_read(a: ReportReadArgs) -> Envelope:
+    from nyshporka.core import workspace as W
+
+    rep = W.workspace().reports.resolve()
+    raw = Path(a.path)
+    if raw.is_absolute():
+        return fail("шлях — від теки reports/ проєкту, не абсолютний")
+    path = (rep / raw).resolve()
+    # 🔴 Шлях приходить із браузера: `../` вивів би за межі проєкту, а `htr/`
+    # — у мільйон файлів прочитаного, яких ця операція не обслуговує.
+    try:
+        rel = path.relative_to(rep)
+    except ValueError:
+        return fail("шлях виходить за межі теки reports/ проєкту")
+    if not rel.parts or rel.parts[0] == "htr" or path.suffix != ".md":
+        return fail("звіт — це файл .md у reports/ поза htr/")
+    if not path.is_file():
+        return fail(f"звіту «{rel.as_posix()}» немає")
+    size = path.stat().st_size
+    if size > REPORT_MAX_BYTES:
+        return fail(f"звіт завеликий для консолі ({size // 1000} КБ): {path}")
+    return ok({"path": rel.as_posix(), "title": _report_title(path),
+               "text": path.read_text(encoding="utf-8", errors="replace")})
+
+
 def _terminal_cmd(root: Path, agent: str) -> list[str] | None:
     import shutil
 

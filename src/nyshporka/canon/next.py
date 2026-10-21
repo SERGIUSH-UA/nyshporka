@@ -43,14 +43,15 @@ def _crop_cmd(case: str, scan: str, line: int | None) -> str:
     return f'nysh text crop "{case}" {scan} {line}'
 
 
-def rank(canon: Canon) -> list[Decision]:
+def rank(canon: Canon, *, closed: bool = False) -> list[Decision]:
+    """Відкриті за порядком рішення; `closed` — закриті теж, у кінці за ID."""
     linked: dict[str, list[str]] = {}
     for owner, f in _facts(canon):
         if f.hypothesis:
             linked.setdefault(f.hypothesis, []).append(f"{owner}:{f.type}")
     out: list[Decision] = []
     for hid, h in canon.hypotheses.items():
-        if h.status == "closed":
+        if h.status == "closed" and not closed:
             continue
         hits = sorted(h.hits, key=lambda x: (x.strength != "strong", not x.eye))
         out.append(Decision(
@@ -61,6 +62,7 @@ def rank(canon: Canon) -> list[Decision]:
                    "strength": x.strength, "eye": x.eye,
                    "crop": _crop_cmd(x.case, x.scan, x.line)} for x in hits]))
     out.sort(key=lambda d: (
+        d.status == "closed",
         d.status != "awaiting",
         not any(x["strength"] == "strong" for x in d.hits),
         -d.weight,

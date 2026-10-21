@@ -18,6 +18,22 @@
 ## [Unreleased]
 
 ### Додано
+- **Операції для екранів проєкту** (хвиля 7б), лише читання — канон і далі
+  правиться файлами: `canon.cards`, `canon.card`, `canon.hyps`, `canon.hyp`,
+  `reports.list`, `reports.read`. `canon.next` тепер видно й у консолі.
+- **Історія як операції**: `history.log` (без файла — увесь проєкт зі
+  зміненими файлами), `history.save`, `history.restore`, `history.auto` і нова
+  `history.diff` — що коміт змінив у картці, по полях «було → стало».
+  Командний рядок: `nysh history diff <файл> --rev <мітка>`, `nysh history log`
+  без файла.
+- **Хмара як операції**: `cloud.state`, `cloud.go`, `cloud.stop`,
+  `cloud.fetch` — ті самі дії, що `nysh cloud …`. `cloud.go` без `run=true` —
+  лише сухий прогін із кошторисом і рішенням; у `--json` заходу з'явилось поле
+  `launch` (`ok` | `needs_confirm` | `no_credit`).
+- `cases.list` з `searched: here|not_here` і поле `searched_here` у рядку: які
+  справи цей проєкт уже шукав. Фільтр — у запиті, тож знаменник чесний.
+- Колір і знак проєкту (`color`, `glyph` у `[project]`): `project.new` приймає
+  їх і варіанти прізвища (`variants` → профіль роду), `project.style` змінює.
 - **Консоль за етапами роботи** (хвиля 7а). Верхній ярус — Огляд · Матеріал ·
   Читання · Пошук · Лабораторія (`core.sections.STAGES` у `/api/sections`), з
   головною дією етапу в рядку екранів («＋ Завести справу», «＋ Новий проєкт»).

@@ -30,6 +30,11 @@ _NAME = re.compile(r"^[a-z0-9][a-z0-9-]{0,47}$")
 
 KINDS = ("family", "order")
 
+#: Колір проєкту в консолі (`[project] color`): лише `#rrggbb`.
+_COLOR = re.compile(r"^#[0-9a-fA-F]{6}$")
+#: Знак проєкту (`[project] glyph`): буква чи емодзі, не слово.
+GLYPH_MAX = 2
+
 
 class ProjectError(W.WorkspaceError):
     """Проєкту немає або ім'я непридатне."""
@@ -42,6 +47,20 @@ class Project:
     name: str
     kind: str
     archived: bool = False
+    color: str = ""
+    glyph: str = ""
+
+
+def check_color(color: str) -> str:
+    if color and not _COLOR.match(color):
+        raise ProjectError(f"колір «{color}» — лише #rrggbb (напр. #8a5a2b)")
+    return color
+
+
+def check_glyph(glyph: str) -> str:
+    if len(glyph.strip()) > GLYPH_MAX or glyph != glyph.strip():
+        raise ProjectError(f"знак «{glyph}» — одна буква чи емодзі, до {GLYPH_MAX} символів")
+    return glyph
 
 
 def check_name(name: str) -> str:
@@ -61,8 +80,18 @@ def _from_dir(path: Path) -> Project | None:
     if tab is None:
         return None
     kind = str(tab.get("kind") or "family")
+    # Вигляд — не дані: зіпсоване значення руками в маркері не валить перелік.
+    color, glyph = str(tab.get("color") or ""), str(tab.get("glyph") or "")
+    try:
+        check_color(color)
+    except ProjectError:
+        color = ""
+    try:
+        check_glyph(glyph)
+    except ProjectError:
+        glyph = ""
     return Project(id=path.name, root=path, name=str(tab.get("name") or path.name),
-                   kind=kind, archived=bool(tab.get("archived")))
+                   kind=kind, archived=bool(tab.get("archived")), color=color, glyph=glyph)
 
 
 def list_projects(hub: Path, *, archived: bool = False) -> list[Project]:

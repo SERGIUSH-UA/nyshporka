@@ -205,6 +205,20 @@ def note(key: str, *, q: str, thresh: int, hits: int, pages: int,
         pass  # слід — зручність, а не умова роботи (сюди ж — зайнятий лок)
 
 
+def searched() -> dict[str, str]:
+    """Усі справи, які цей проєкт уже шукав: ключ → дата останнього свіпу."""
+    from nyshporka.core import legacy_key
+
+    out: dict[str, str] = {}
+    for key, rows in _read().items():
+        if not isinstance(rows, list) or not rows or not isinstance(rows[0], dict):
+            continue
+        k = legacy_key.current_key(key) or key
+        when = str(rows[0].get("when") or "")
+        out[k] = max(out.get(k, ""), when)
+    return out
+
+
 def of(key: str) -> list[dict[str, Any]]:
     """Чим цю справу вже шукали, від найсвіжішого."""
     from nyshporka.core import legacy_key

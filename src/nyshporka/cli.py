@@ -3272,79 +3272,98 @@ def history_setup_cmd() -> None:
 
 
 @history_app.command("auto")
-@route("history auto", tier="rare", mutates=True,
-       when="людина веде git сама — вимкнути (чи ввімкнути) автозбереження канону")
 def history_auto_cmd(
     state: str = typer.Argument(..., help="on | off"),
 ) -> None:
     """Автозбереження канону й обліку: ввімкнути чи вимкнути."""
-    from nyshporka.core import vcs as V
-    from nyshporka.core.workspace import workspace
+    from nyshporka import ops as O
 
     if state not in ("on", "off"):
         console.print("[err]on або off[/err]")
         raise typer.Exit(code=2)
-    hub = workspace().hub
-    V.set_auto(hub, state == "on")
-    console.print("автозбереження: " + ("так" if V.auto_enabled(hub) else "ні — коміти ведете ви"))
+    env = O.call("history.auto", {"on": state == "on"})
+    _answer(env)
+    console.print("автозбереження: " + ("так" if env.data["auto"] else "ні — коміти ведете ви"))
 
 
 @history_app.command("save")
-@route("history save", tier="situational", mutates=True, scope="project",
-       when="зберегти стан канону й обліку сторінок окремим комітом зі своїм поясненням")
 def history_save_cmd(
     message: str = typer.Option("Збережено вручну", "-m", "--message", help="пояснення коміту"),
 ) -> None:
     """Коміт проєктного шару: канон, профілі, погляд, облік сторінок."""
-    from nyshporka.core import vcs as V
-    from nyshporka.core.workspace import workspace
+    from nyshporka import ops as O
 
-    try:
-        rev = V.save(workspace(), message)
-    except V.VcsError as exc:
-        console.print(f"[err]{exc}[/err]")
-        raise typer.Exit(code=1) from exc
+    env = O.call("history.save", {"message": message})
+    _answer(env)
+    rev = env.data["rev"]
     console.print(f"✅ збережено: {rev}" if rev else "змін немає — зберігати нічого")
 
 
 @history_app.command("log")
-@route("history log", tier="situational", scope="project",
-       when="хто й коли міняв картку чи файл — перед відкатом")
 def history_log_cmd(
-    path: Path = typer.Argument(..., help="файл чи тека (картка канону, справа сховища)"),
+    path: Path | None = typer.Argument(
+        None, help="файл чи тека (картка канону, справа сховища); порожньо — увесь проєкт"),
     limit: int = typer.Option(20, "-n", help="скільки записів"),
 ) -> None:
-    """Історія файла: мітка, дата, пояснення коміту."""
-    from nyshporka.core import vcs as V
-    from nyshporka.core.workspace import workspace
+    """Історія файла чи всього проєкту: мітка, дата, пояснення коміту."""
+    from nyshporka import ops as O
 
-    try:
-        rows = V.log(workspace(), path, limit)
-    except (V.VcsError, ValueError) as exc:
-        console.print(f"[err]{exc}[/err]")
-        raise typer.Exit(code=1) from exc
+    env = O.call("history.log", {"path": str(path.resolve()) if path else "",
+                                 "limit": limit})
+    _answer(env)
+    rows = env.data["rows"]
     for r in rows:
         console.print(f"{r['rev']}  {r['date']}  {r['subject']}", markup=False)
+        files = r.get("files") or []
+        if files:
+            more = f" … ще {r['more']}" if r.get("more") else ""
+            console.print("    " + ", ".join(files) + more, markup=False, style="dim")
     if not rows:
         console.print("[muted]історії немає — файл ще не зберігався[/muted]")
 
 
+@history_app.command("diff")
+def history_diff_cmd(
+    path: Path = typer.Argument(..., help="файл (картка канону чи інший)"),
+    rev: str = typer.Option(..., "--rev", help="мітка коміту з `nysh history log`"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
+) -> None:
+    """Що коміт змінив у файлі: поля картки «було → стало», для решти — diff."""
+    from nyshporka import ops as O
+
+    env = O.call("history.diff", {"path": str(path.resolve()), "rev": rev})
+    if _answer(env, as_json):
+        return
+    d = env.data
+    if d["added"]:
+        console.print("файл з'явився в цьому коміті")
+    if d["removed"]:
+        console.print("файл прибрано в цьому коміті")
+    if d["kind"] == "fields":
+        for f in d["fields"]:
+            console.print(f"{f['field']}: {f['before']!r} → {f['after']!r}", markup=False)
+        if d["notes_changed"]:
+            console.print("текст під полями змінено")
+        if not d["fields"] and not d["notes_changed"]:
+            console.print("[muted]у файлі нічого не змінено[/muted]")
+        return
+    for line in d["lines"]:
+        console.print(line, markup=False, highlight=False)
+    if d["cut"]:
+        console.print("[muted]… diff обрізано[/muted]")
+
+
 @history_app.command("restore")
-@route("history restore", tier="situational", mutates=True, scope="project",
-       when="агент зіпсував картку чи файл — повернути стан із історії")
 def history_restore_cmd(
     path: Path = typer.Argument(..., help="файл чи тека"),
     to: str = typer.Option(..., "--to", help="мітка коміту з `nysh history log`"),
 ) -> None:
     """Повернути файл до стану коміту — і зберегти повернення новим комітом."""
-    from nyshporka.core import vcs as V
-    from nyshporka.core.workspace import workspace
+    from nyshporka import ops as O
 
-    try:
-        rev = V.restore(workspace(), path, to)
-    except (V.VcsError, ValueError) as exc:
-        console.print(f"[err]{exc}[/err]")
-        raise typer.Exit(code=1) from exc
+    env = O.call("history.restore", {"path": str(path.resolve()), "rev": to})
+    _answer(env)
+    rev = env.data["rev"]
     console.print(f"↩ повернуто до {to}" + (f", збережено {rev}" if rev else " (уже був такий)"))
 
 

@@ -101,7 +101,11 @@ PROJECT = {"text.sheet", "text.verdicts", "library.verdict",
            "canon.check", "canon.import", "canon.index", "canon.new_id", "canon.next",
            "site.build", "site.rebuild", "site.status",
            "profile.set", "profile.show", "profile.source",
-           "migrate.done", "migrate.scan", "migrate.status"}
+           "migrate.done", "migrate.scan", "migrate.status",
+           # Екрани проєкту (хвиля 7б): канон, гіпотези, звіти, історія.
+           "canon.cards", "canon.card", "canon.hyps", "canon.hyp",
+           "reports.list", "reports.read",
+           "history.log", "history.save", "history.restore", "history.diff"}
 MIXED = {"cases.list", "text.grep", "text.whatis", "text.coverage", "text.find", "text.near",
          "search.run", "search.find", "pages.note", "pages.note_batch", "pages.show",
          "pages.status", "evidence.add", "home.pulse", "workspace.info", "project.status",

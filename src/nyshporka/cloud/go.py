@@ -145,6 +145,10 @@ class GoResult:
     max_hours: float | None = None
     estimate: dict[str, Any] = field(default_factory=dict)
     decision: str = ""
+    #: Рід рішення про запуск: `ok` — можна без людини, `needs_confirm` — понад
+    #: стелю автозапуску, `no_credit` — бракує балансу. Порожньо — до рішення
+    #: не дійшли. Консоль за ним вирішує, чи питати дозволу перед орендою.
+    launch: str = ""
     #: `None` — машини не брали; `False` — брали й НЕ погасили.
     released: bool | None = None
     #: Чи дійшов цей виклик до оренди (або підхопив уже орендовану машину).
@@ -184,7 +188,7 @@ class GoResult:
                 "fork_usd": [self.fork_low, self.fork_high],
                 "budget_usd": self.budget_usd, "max_hours": self.max_hours,
                 "estimate": dict(self.estimate), "decision": self.decision,
-                "rented": self.rented, "released": self.released,
+                "launch": self.launch, "rented": self.rented, "released": self.released,
                 "adopted": self.adopted,
                 "dry_run": self.dry_run, "notes": list(self.notes),
                 "cases": [c.as_dict() for c in self.cases],
@@ -1368,7 +1372,7 @@ def _go(res: GoResult, cases: tuple[str, ...], say: EventFn,
     ceiling = M.autostart_ceiling()
     decision = M.decide_launch(high, est.balance_usd if est is not None else None,
                                ceiling, confirm)
-    res.decision = decision.why
+    res.decision, res.launch = decision.why, decision.kind
     fork = (f"${res.fork_low:.2f}–${res.fork_high:.2f}"
             if res.fork_high is not None else "вилки немає (кошторис невідомий)")
     say("money", f"вилка {fork} · бюджет заходу ${high:.2f} · стеля часу "

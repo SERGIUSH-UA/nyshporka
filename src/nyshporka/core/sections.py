@@ -266,6 +266,9 @@ OP_SCREEN: dict[str, str] = {
     # Проєкти Майстерні: новий — вікном, перелік — картками на Огляді.
     "project.new": "newproject",
     "project.list": "home",
+    "project.style": "home",
+    # Огляд проєкту стоїть на «що вирішити» (екрани канону — у 7в).
+    "canon.next": "project",
     "setup.check": "home",
     "sample.install": "home",
     "profile.show": "profile",
