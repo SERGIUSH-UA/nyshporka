@@ -103,14 +103,53 @@ class Plan:
 
 # ── допоміжне ────────────────────────────────────────────────────────────────
 def _git(hub: Path, *args: str, check: bool = True) -> str:
-    out = subprocess.run(["git", *args], cwd=hub, capture_output=True, check=check)
+    out = subprocess.run(["git", *args], cwd=hub, capture_output=True)
+    if check and out.returncode != 0:
+        err = out.stderr.decode("utf-8", errors="replace").strip()
+        raise AdoptError(f"git {args[0] if args else ''} (код {out.returncode}): "
+                         f"{err[:600] or 'без пояснення'}")
     return out.stdout.decode("utf-8", errors="replace")
+
+
+TRACKED_LIST = "tracked.txt"
+
+
+def _tracked_files(hub: Path, paths: list[str]) -> list[str]:
+    """Файли, які git відстежує в цих шляхах, — точний перелік, без шаблонів."""
+    if not paths:
+        return []
+    out = _git(hub, "--literal-pathspecs", "ls-files", "-z", "--", *paths)
+    return [x for x in out.split("\0") if x]
+
+
+def _restage(hub: Path, home: Path, files: list[str], src: str, dst: str) -> None:
+    """Перенести в індексі рівно ці файли: зі `src/<файл>` на `dst/<файл>`.
+
+    Не `git add -A -- <тека>`: відстежуваний файл під шаблоном `.gitignore`
+    (`data/site/site.yml` під `site/`) git на новому місці відкидає, а шлях,
+    якого в індексі не було, — фатальна «pathspec не знайдено». Точний перелік
+    з примусом (`-f`) лишає відстеженим рівно те, що було відстежене, і не
+    додає ігнорованого, якого в git не було.
+    """
+    if not files:
+        return
+    def pre(base: str, f: str) -> str:
+        return f"{base}/{f}" if base else f
+
+    lst = home / "pathspec.txt"
+    lst.write_bytes("\0".join(pre(src, f) for f in files).encode("utf-8"))
+    _git(hub, "--literal-pathspecs", "rm", "-r", "-q", "--cached", "--ignore-unmatch",
+         f"--pathspec-from-file={lst}", "--pathspec-file-nul")
+    lst.write_bytes("\0".join(pre(dst, f) for f in files).encode("utf-8"))
+    _git(hub, "--literal-pathspecs", "add", "-f", f"--pathspec-from-file={lst}",
+         "--pathspec-file-nul")
+    lst.unlink()
 
 
 def _is_repo(hub: Path) -> bool:
     try:
         top = _git(hub, "rev-parse", "--show-toplevel").strip()
-    except (subprocess.CalledProcessError, FileNotFoundError):
+    except (AdoptError, FileNotFoundError):
         return False
     return bool(top) and Path(top).resolve() == hub.resolve()
 
@@ -585,11 +624,8 @@ def apply(hub: Path, pid: str, *, archive: Path | None = None) -> dict[str, Any]
     base = W._build(hub, "explicit")
     _refuse_busy(base.pages)
     moving = [m.path for m in pl.moves]
-    # Лише те, що git відстежує: шлях, якого в індексі ніколи не було (файл під
-    # `.gitignore`), `git add -A -- <шлях>` після переносу зустрічає фатальною
-    # помилкою «pathspec не знайдено» — і не стейджить нічого.
-    tracked = [m.path for m in pl.moves if m.tracked]
     repo = _is_repo(hub)
+    files = _tracked_files(hub, [m.path for m in pl.moves if m.tracked]) if repo else []
 
     home = _new_home(hub)
     shutil.copy2(hub / W.MARKER, home / "marker.toml")
@@ -598,7 +634,8 @@ def apply(hub: Path, pid: str, *, archive: Path | None = None) -> dict[str, Any]
         shutil.copy2(man, home / "manifest.json")
     journal: dict[str, Any] = {"stamp": home.name, "pid": pid, "started": time.time(),
                                "steps": [], "moved": [], "repo": repo,
-                               "tracked": tracked}
+                               "tracked_files": len(files)}
+    (home / TRACKED_LIST).write_bytes("\0".join(files).encode("utf-8"))
     _journal(home, journal)
 
     def step(name: str, **extra: Any) -> None:
@@ -627,9 +664,8 @@ def apply(hub: Path, pid: str, *, archive: Path | None = None) -> dict[str, Any]
             os.replace(hub / rel, dst)
             journal["moved"].append(rel)
             _journal(home, journal)
-        if repo and tracked:
-            proj_rel = root.relative_to(hub).as_posix()
-            _git(hub, "add", "-A", "--", *tracked, *[f"{proj_rel}/{r}" for r in tracked])
+        if repo:
+            _restage(hub, home, files, "", root.relative_to(hub).as_posix())
         step("moved", untracked=_untracked(hub, root) if repo else [])
         step("cited_by", cited_by=_rewrite_cited_by(hub, pid))
         step("memory", memory=_copy_memory(hub, root))
@@ -688,10 +724,9 @@ def rollback(hub: Path, stamp: str | None = None) -> dict[str, Any]:
         if src.exists() and not (hub / rel).exists():
             (hub / rel).parent.mkdir(parents=True, exist_ok=True)
             os.replace(src, hub / rel)
-    back = [r for r in moved if r in set(journal.get("tracked") or moved)]
-    if journal.get("repo") and back:
-        proj_rel = root.relative_to(hub).as_posix()
-        _git(hub, "add", "-A", "--", *back, *[f"{proj_rel}/{r}" for r in back])
+    if journal.get("repo") and moved and (home / TRACKED_LIST).is_file():
+        files = [x for x in (home / TRACKED_LIST).read_text(encoding="utf-8").split("\0") if x]
+        _restage(hub, home, files, root.relative_to(hub).as_posix(), "")
     if "split" in steps and journal.get("split_stamp"):
         with W.using(W._build(hub, "explicit")):
             SV.rollback(journal["split_stamp"], force=True)

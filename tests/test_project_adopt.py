@@ -468,3 +468,32 @@ def test_retry_after_failure_reuses_the_verified_archive(legacy: Path, tmp_path:
     got = A.apply(legacy, "rid", archive=tmp_path / "arch")
     assert not got["archive"].get("reused")
     assert len(list((tmp_path / "arch").glob("adopt-*.zip"))) == 2
+
+
+def test_tracked_file_under_an_ignore_pattern_moves_and_stays_tracked(legacy: Path,
+                                                                    tmp_path: Path) -> None:
+    """Відстежений файл під шаблоном `.gitignore` переїжджає відстеженим — і назад.
+
+    Другий переїзд живого кореня: `data/site/site.yml` під шаблоном `site/` (для
+    збірки сайту в корені). `git add -- <тека>` на новому місці git відкидав, і
+    переїзд падав, а відкат спотикався об той самий шлях.
+    """
+    (legacy / ".gitignore").write_text("site/\n", encoding="utf-8")
+    yml = legacy / "data" / "site" / "site.yml"
+    yml.parent.mkdir(parents=True, exist_ok=True)
+    yml.write_text("title: Рід\n", encoding="utf-8")
+    _git(legacy, "add", "-f", "data/site/site.yml", ".gitignore")
+    _git(legacy, "commit", "-qm", "сайт")
+    _age(legacy)
+    head = _git(legacy, "ls-files")
+    before = _tree(legacy)
+    A.apply(legacy, "rid", archive=tmp_path / "arch")
+    tracked = _git(legacy, "ls-files").split()
+    assert "projects/rid/data/site/site.yml" in tracked and "data/site/site.yml" not in tracked
+    W.reset()
+    W.use(W._build(legacy, "test"))
+    A.rollback(legacy)
+    W.reset()
+    assert _tree(legacy) == before
+    assert _git(legacy, "ls-files") == head
+    assert _git(legacy, "diff", "--cached", "--name-only").strip() == ""
