@@ -393,6 +393,51 @@ def _sha_member(z: zipfile.ZipFile, name: str) -> str:
     return h.hexdigest()
 
 
+#: Уже стиснене (скани, PDF, архіви): deflate тут лише палить час — на корені з
+#: гігабайтами сканів саме він з'їдав більшість хвилин архівування.
+_STORED = frozenset({".jpg", ".jpeg", ".png", ".webp", ".gif", ".tif", ".tiff", ".pdf",
+                     ".zip", ".gz", ".rar", ".7z", ".mp4", ".mp3", ".docx", ".xlsx"})
+
+
+def _verified_mark(zpath: Path) -> Path:
+    return zpath.with_name(zpath.name + ".ok")
+
+
+def _journaled(hub: Path) -> set[str]:
+    """Архіви, звірку яких засвідчив журнал переїзду (крок `archive` — після звірки)."""
+    out: set[str] = set()
+    for jp in (hub / ADOPT_DIR).glob("*/journal.json"):
+        try:
+            j = json.loads(jp.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if "archive" in (j.get("steps") or []) and (j.get("archive") or {}).get("zip"):
+            out.add(str(Path(j["archive"]["zip"]).resolve()))
+    return out
+
+
+def _reusable(hub: Path, dest: Path, sums: dict[str, str]) -> Path | None:
+    """Звірений архів попередньої спроби з тим самим переліком sha256.
+
+    Переїзд, що впав після архіву (і відкотився), не мусить пакувати ті самі
+    гігабайти вдруге: якщо кожен файл досі той самий, архів — та сама копія.
+    Береться лише звірений архів — з позначкою `<zip>.ok` або записаний у
+    журналі як пройдений крок; недописаний чи незвірений zip не має жодного.
+    """
+    seen = _journaled(hub)
+    for zpath in sorted(dest.glob("adopt-*.zip"), reverse=True):
+        if not _verified_mark(zpath).is_file() and str(zpath.resolve()) not in seen:
+            continue
+        try:
+            with zipfile.ZipFile(zpath) as z:
+                old = json.loads(z.read("_sha256.json").decode("utf-8"))
+        except (OSError, KeyError, ValueError, zipfile.BadZipFile):
+            continue
+        if old == sums:
+            return zpath
+    return None
+
+
 def _archive(hub: Path, moving: list[str], dest: Path) -> dict[str, Any]:
     """Zip того, що їде, з переліком sha256 — і звірка кожного члена архіву.
 
@@ -400,18 +445,25 @@ def _archive(hub: Path, moving: list[str], dest: Path) -> dict[str, Any]:
     обсяг, а не два. На корені з гігабайтами сканів друге не влазило.
     """
     dest.mkdir(parents=True, exist_ok=True)
-    name = f"adopt-{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}.zip"
-    zpath = dest / name
     files = [f for rel in [*moving, W.MARKER] for f in _walk(hub / rel)]
     sums = {f.relative_to(hub).as_posix(): _sha(f) for f in files}
+    old = _reusable(hub, dest, sums)
+    if old is not None:
+        return {"zip": str(old), "files": len(sums), "bytes": old.stat().st_size,
+                "reused": True}
+    name = f"adopt-{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}.zip"
+    zpath = dest / name
     with zipfile.ZipFile(zpath, "w", zipfile.ZIP_DEFLATED, allowZip64=True) as z:
         for f in files:
-            z.write(f, f.relative_to(hub).as_posix())
+            how = zipfile.ZIP_STORED if f.suffix.lower() in _STORED else zipfile.ZIP_DEFLATED
+            z.write(f, f.relative_to(hub).as_posix(), compress_type=how)
         z.writestr("_sha256.json", json.dumps(sums, ensure_ascii=False, indent=1))
     with zipfile.ZipFile(zpath) as z:
         bad = [rel for rel, sha in sums.items() if _sha_member(z, rel) != sha]
     if bad:
         raise AdoptError(f"архів {zpath} не звірився ({len(bad)} файлів: {', '.join(bad[:3])})")
+    _verified_mark(zpath).write_text(datetime.now(UTC).isoformat(timespec="seconds"),
+                                     encoding="utf-8")
     return {"zip": str(zpath), "files": len(sums),
             "bytes": zpath.stat().st_size}
 
@@ -435,6 +487,18 @@ def _rewrite_cited_by(hub: Path, pid: str) -> int:
     if changed:
         write_json(man, records, indent=1)
     return changed
+
+
+def _untracked(hub: Path, root: Path) -> list[str]:
+    """Файли, що в теці проєкту стали невідстеженими.
+
+    Шаблон `.gitignore` Майстерні, прив'язаний до кореня (`/data/derived/`),
+    у підтеці проєкту не діє: файл, який досі ігнорувався, після переїзду
+    з'являється в `git status`. Команда їх називає — вирішує людина.
+    """
+    rel = root.relative_to(hub).as_posix()
+    out = _git(hub, "status", "--porcelain", "-z", "--untracked-files=all", "--", rel)
+    return [x[3:] for x in out.split("\0") if x.startswith("?? ")]
 
 
 def _foreign_views(home: Path) -> int:
@@ -521,6 +585,10 @@ def apply(hub: Path, pid: str, *, archive: Path | None = None) -> dict[str, Any]
     base = W._build(hub, "explicit")
     _refuse_busy(base.pages)
     moving = [m.path for m in pl.moves]
+    # Лише те, що git відстежує: шлях, якого в індексі ніколи не було (файл під
+    # `.gitignore`), `git add -A -- <шлях>` після переносу зустрічає фатальною
+    # помилкою «pathspec не знайдено» — і не стейджить нічого.
+    tracked = [m.path for m in pl.moves if m.tracked]
     repo = _is_repo(hub)
 
     home = _new_home(hub)
@@ -529,7 +597,8 @@ def apply(hub: Path, pid: str, *, archive: Path | None = None) -> dict[str, Any]
     if man.is_file():
         shutil.copy2(man, home / "manifest.json")
     journal: dict[str, Any] = {"stamp": home.name, "pid": pid, "started": time.time(),
-                               "steps": [], "moved": [], "repo": repo}
+                               "steps": [], "moved": [], "repo": repo,
+                               "tracked": tracked}
     _journal(home, journal)
 
     def step(name: str, **extra: Any) -> None:
@@ -558,10 +627,10 @@ def apply(hub: Path, pid: str, *, archive: Path | None = None) -> dict[str, Any]
             os.replace(hub / rel, dst)
             journal["moved"].append(rel)
             _journal(home, journal)
-        if repo:
+        if repo and tracked:
             proj_rel = root.relative_to(hub).as_posix()
-            _git(hub, "add", "-A", "--", *moving, *[f"{proj_rel}/{r}" for r in moving])
-        step("moved")
+            _git(hub, "add", "-A", "--", *tracked, *[f"{proj_rel}/{r}" for r in tracked])
+        step("moved", untracked=_untracked(hub, root) if repo else [])
         step("cited_by", cited_by=_rewrite_cited_by(hub, pid))
         step("memory", memory=_copy_memory(hub, root))
         _set_hub_marker(hub, pid)
@@ -582,6 +651,7 @@ def apply(hub: Path, pid: str, *, archive: Path | None = None) -> dict[str, Any]
     return {"stamp": home.name, "project": str(root), "moved": moving,
             "archive": journal["archive"], "split": journal.get("split_stamp"),
             "cited_by": journal.get("cited_by", 0), "memory": journal.get("memory", ""),
+            "untracked": journal.get("untracked", []),
             "after": list(AFTER)}
 
 
@@ -618,10 +688,10 @@ def rollback(hub: Path, stamp: str | None = None) -> dict[str, Any]:
         if src.exists() and not (hub / rel).exists():
             (hub / rel).parent.mkdir(parents=True, exist_ok=True)
             os.replace(src, hub / rel)
-    if journal.get("repo") and moved:
+    back = [r for r in moved if r in set(journal.get("tracked") or moved)]
+    if journal.get("repo") and back:
         proj_rel = root.relative_to(hub).as_posix()
-        _git(hub, "add", "-A", "--", *moved, *[f"{proj_rel}/{r}" for r in moved],
-             check=False)
+        _git(hub, "add", "-A", "--", *back, *[f"{proj_rel}/{r}" for r in back])
     if "split" in steps and journal.get("split_stamp"):
         with W.using(W._build(hub, "explicit")):
             SV.rollback(journal["split_stamp"], force=True)

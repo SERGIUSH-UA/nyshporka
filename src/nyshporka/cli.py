@@ -4068,6 +4068,12 @@ def project_adopt_cmd(name: str = typer.Argument(..., help="ім'я майбут
                       f"архів {d['archive']['zip']})", markup=False)
         for n, line in enumerate(d.get("after") or [], 1):
             console.print(f"  далі {n}. {line}", markup=False)
+        loose = d.get("untracked") or []
+        if loose:
+            console.print(f"  ⚠ у теці проєкту невідстежених файлів: {len(loose)} "
+                          f"({', '.join(loose[:3])}…) — шаблон .gitignore Майстерні, "
+                          "прив'язаний до кореня, тут не діє: додати в .gitignore або закомітити",
+                          markup=False)
     _notes(env)
 
 

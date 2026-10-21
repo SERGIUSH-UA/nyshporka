@@ -405,3 +405,66 @@ def test_legacy_root_check_asks_only_when_a_second_project_exists(legacy: Path) 
     A.apply(legacy, "rid")
     W.reset()
     assert M.CHECKS["legacy_root"](legacy).state == "n/a"
+
+
+def test_ignored_file_on_the_way_does_not_break_git(legacy: Path, tmp_path: Path) -> None:
+    """Шлях, якого git ніколи не бачив (`.gitignore`), не валить `git add` переїзду.
+
+    Так упав перший переїзд живого кореня: `git add -A -- <шлях>` на файл, що
+    ніколи не був в індексі, після переносу — фатальна «pathspec не знайдено».
+    Шаблон, прив'язаний до кореня, у теці проєкту вже не діє — команда це каже.
+    """
+    (legacy / ".gitignore").write_text("/data/derived/search_log.json\n", encoding="utf-8")
+    (legacy / "data" / "derived" / "search_log.json").write_text("{}", encoding="utf-8")
+    _commit(legacy)
+    before = _tree(legacy)
+    got = A.apply(legacy, "rid", archive=tmp_path / "arch")
+    rid = legacy / "projects" / "rid"
+    assert (rid / "data" / "derived" / "search_log.json").is_file()
+    assert "projects/rid/data/derived/search_log.json" in got["untracked"]
+    staged = _git(legacy, "diff", "--cached", "--name-only")
+    assert "projects/rid/data/canonical/persons/I9001.md" in staged
+    W.reset()
+    W.use(W._build(legacy, "test"))
+    A.rollback(legacy)
+    W.reset()
+    assert _tree(legacy) == before
+    assert _git(legacy, "diff", "--cached", "--name-only").strip() == "", "індекс чистий після відкату"
+
+
+def test_retry_after_failure_reuses_the_verified_archive(legacy: Path, tmp_path: Path,
+                                                         monkeypatch: pytest.MonkeyPatch) -> None:
+    """Повтор після збою не пакує ті самі гігабайти вдруге — якщо файли ті самі."""
+    from nyshporka import project as PR
+
+    real = PR.create
+
+    def boom(*a: object, **k: object) -> object:
+        raise RuntimeError("впало після архіву")
+
+    monkeypatch.setattr(PR, "create", boom)
+    with pytest.raises(A.AdoptError, match="впало після архіву"):
+        A.apply(legacy, "rid", archive=tmp_path / "arch")
+    first = sorted((tmp_path / "arch").glob("adopt-*.zip"))
+    assert len(first) == 1
+
+    monkeypatch.setattr(PR, "create", real)
+    W.reset()
+    W.use(W._build(legacy, "test"))
+    got = A.apply(legacy, "rid", archive=tmp_path / "arch")
+    assert got["archive"]["reused"] is True and got["archive"]["zip"] == str(first[0])
+    assert sorted((tmp_path / "arch").glob("adopt-*.zip")) == first
+
+    # Змінився хоч один файл — архів уже інша копія, пакується новий.
+    W.reset()
+    W.use(W._build(legacy, "test"))
+    A.rollback(legacy)
+    W.reset()
+    W.use(W._build(legacy, "test"))
+    card = legacy / "data" / "canonical" / "persons" / "I9001.md"
+    card.write_text(card.read_text(encoding="utf-8") + "\n", encoding="utf-8")
+    _commit(legacy)
+    time.sleep(1.1)                      # нове ім'я архіву — за секундами
+    got = A.apply(legacy, "rid", archive=tmp_path / "arch")
+    assert not got["archive"].get("reused")
+    assert len(list((tmp_path / "arch").glob("adopt-*.zip"))) == 2
