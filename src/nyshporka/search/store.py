@@ -77,7 +77,7 @@ import time
 import tokenize
 import zlib
 from bisect import bisect_right
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
@@ -1789,10 +1789,14 @@ def _sweep_block(conn: sqlite3.Connection, stems: list[str], run_ids: list[int],
 SWEEP_WORKERS: int | None = None
 #: Змінна оточення, що перебиває і залізо, і `SWEEP_WORKERS`; `1` — по одному.
 SWEEP_WORKERS_ENV = "NYSH_SWEEP_WORKERS"
-#: Пам'ять одного воркера, ГБ. Блок свіпу триграмами (60 тис. сторінок) — до 1,5
-#: (замір 13.10.2026); пачка дооцінки швидкого каналу (20 тис. сторінок) — пік
-#: 0,61 приватної пам'яті (замір 22.10.2026), тут із запасом.
-BLOCK_WORKER_GB = 1.5
+#: Пам'ять одного воркера, ГБ. Пачка дооцінки швидкого каналу (20 тис. сторінок)
+#: — пік 0,61 приватної пам'яті (замір 22.10.2026), тут із запасом.
+#: 🔴 Блок свіпу триграмами — НЕ 1,5 ГБ, як записали 13.10: корпусний свіп роду
+#: (23 написання, без швидкого індексу) тримав у трьох воркерах 2,5 / 5,1 / 7,7 ГБ
+#: приватної пам'яті, і система зняла процеси через брак пам'яті, не дочекавшись
+#: піку (22.10.2026). 8 — нижня межа поміряного, а не стеля; цей шлях вмикається,
+#: коли швидкий індекс відмовив запиту як заширокому.
+BLOCK_WORKER_GB = 8.0
 FAST_WORKER_GB = 0.75
 #: Яку частку ВІЛЬНОЇ пам'яті можна віддати воркерам. 11.10.2026 система вбила
 #: три важкі процеси, що стояли поруч із WSL і редактором, — половина лишає
@@ -2714,39 +2718,26 @@ def grep(pattern: str, runs: list[str], *, ignore_case: bool = True,
         chosen = _prefilter(conn, pattern) if lits else None
         phrases = chosen[1] if chosen else None
         run_set = set(ids.values())
+        pids: list[int] | None = None
         if chosen:
             expr = " OR ".join(f'"{n}"' for n in chosen[0])
-            raw_pids = {rid >> LINE_BITS for (rid,) in _fts_rows(conn, expr, list(ids.values()))}
-            source = _page_texts(conn, sorted(raw_pids), run_set)
+            pids = sorted({rid >> LINE_BITS
+                           for (rid,) in _fts_rows(conn, expr, list(ids.values()))})
             prefiltered = True
             n_pages = _pages_of_runs(conn, list(ids.values()))
         else:
-            source = _run_texts(conn, list(ids.values()))
             prefiltered = False
             n_pages = 0
-        hits: list[dict[str, Any]] = []
-        total = 0
-        scanned_pages = 0
-        for rid_, page, blob in source:
-            scanned_pages += 1
-            if blob is None:
-                continue
-            text = zlib.decompress(blob).decode("utf-8")
-            if gate is not None and not gate.search(text):
-                continue
-            raw = text.split("\n")
-            for i, ln in enumerate(raw, 1):
-                if not rx.search(ln):
-                    continue
-                total += 1
-                if len(hits) >= limit:
-                    continue
-                h: dict[str, Any] = {"name": by_id[rid_], "page": page, "line_no": i,
-                                     "line_index": i - 1, "line": ln}
-                if context:
-                    h["before"] = raw[max(0, i - 1 - context):i - 1]
-                    h["after"] = raw[i:i + context]
-                hits.append(h)
+            if _pages_of_runs(conn, list(ids.values())) >= GREP_PARALLEL_PAGES:
+                pids = _scope_pids(conn, list(ids.values()))
+        if pids is not None and len(pids) >= GREP_PARALLEL_PAGES:
+            found, total, scanned_pages = _grep_parallel(pattern, flags, pids, run_set,
+                                                         limit, context)
+        else:
+            source = (_page_texts(conn, pids, run_set) if pids is not None
+                      else _run_texts(conn, list(ids.values())))
+            found, total, scanned_pages = _grep_scan(source, rx, gate, limit, context)
+        hits = [{"name": by_id[h.pop("run_id")], **h} for h in found]
         literal_pages: int | None = None
         if not prefiltered:
             n_pages = scanned_pages
@@ -2769,6 +2760,105 @@ def grep(pattern: str, runs: list[str], *, ignore_case: bool = True,
                 "literal_pages": literal_pages}
     finally:
         conn.close()
+
+
+#: Від скількох сторінок `grep` іде процесами (старт процесу — секунди).
+GREP_PARALLEL_PAGES = 30_000
+#: Сторінок на одну пачку процесу.
+GREP_CHUNK_PAGES = 20_000
+#: Пам'ять процесу `grep`, ГБ: сторінки йдуть потоком, у пам'яті — лише хіти пачки.
+GREP_WORKER_GB = 0.3
+
+
+def _grep_scan(source: Iterable[tuple[int, str, bytes | None]], rx: re.Pattern[str],
+               gate: re.Pattern[str] | None, limit: int, context: int,
+               ) -> tuple[list[dict[str, Any]], int, int]:
+    """(перші `limit` хітів із `run_id`, усього збігів, прочесано сторінок)."""
+    hits: list[dict[str, Any]] = []
+    total = 0
+    scanned = 0
+    for rid_, page, blob in source:
+        scanned += 1
+        if blob is None:
+            continue
+        text = zlib.decompress(blob).decode("utf-8")
+        if gate is not None and not gate.search(text):
+            continue
+        raw = text.split("\n")
+        for i, ln in enumerate(raw, 1):
+            if not rx.search(ln):
+                continue
+            total += 1
+            if len(hits) >= limit:
+                continue
+            h: dict[str, Any] = {"run_id": rid_, "page": page, "line_no": i,
+                                 "line_index": i - 1, "line": ln}
+            if context:
+                h["before"] = raw[max(0, i - 1 - context):i - 1]
+                h["after"] = raw[i:i + context]
+            hits.append(h)
+    return hits, total, scanned
+
+
+def _scope_pids(conn: sqlite3.Connection, run_ids: list[int]) -> list[int]:
+    """Номери всіх сторінок області за зростанням."""
+    if len(set(run_ids)) >= _runs_total(conn):
+        return [int(p) for (p,) in conn.execute("select id from pages order by id")]
+    out: list[int] = []
+    for rid in run_ids:
+        out.extend(int(p) for (p,) in conn.execute("select id from pages where run_id=?", (rid,)))
+    return sorted(set(out))
+
+
+def _grep_job(pattern: str, flags: int, pids: list[int], run_set: set[int], limit: int,
+              context: int) -> tuple[list[dict[str, Any]], int, int]:
+    rx = re.compile(pattern, flags)
+    gate = re.compile(pattern, flags | re.MULTILINE) if _line_gate_safe(pattern) else None
+    conn = connect(readonly=True)
+    try:
+        return _grep_scan(_page_texts(conn, pids, run_set), rx, gate, limit, context)
+    finally:
+        conn.close()
+
+
+def _grep_parallel(pattern: str, flags: int, pids: list[int], run_set: set[int],
+                   limit: int, context: int) -> tuple[list[dict[str, Any]], int, int]:
+    """Той самий прохід пачками в процесах — від заліза (`sweep_workers`).
+
+    🔴 Пачки — відрізки сторінок за зростанням номера, і складаються вони в
+    тому ж порядку, тож перші `limit` хітів ті самі, що в одному процесі: пачці
+    досить віддати свої перші `limit`. Регекс без літерала — це кожна сторінка
+    області, і в одному процесі такий прохід по корпусу йшов хвилини.
+    """
+    chunks = [pids[i:i + GREP_CHUNK_PAGES] for i in range(0, len(pids), GREP_CHUNK_PAGES)]
+    workers = sweep_workers(len(chunks), worker_gb=GREP_WORKER_GB)
+    hits: list[dict[str, Any]] = []
+    total = scanned = 0
+    ex: Any = None
+    if workers <= 1:
+        parts: Iterable[tuple[list[dict[str, Any]], int, int]] = (
+            _grep_job(pattern, flags, ch, run_set, limit, context) for ch in chunks)
+    else:
+        import multiprocessing as mp
+        from concurrent.futures import ProcessPoolExecutor
+
+        from nyshporka.core.workspace import workspace
+
+        ex = ProcessPoolExecutor(max_workers=workers, mp_context=mp.get_context("spawn"),
+                                 initializer=_block_init, initargs=(workspace(),))
+        n = len(chunks)
+        parts = ex.map(_grep_job, [pattern] * n, [flags] * n, chunks, [run_set] * n,
+                       [limit] * n, [context] * n)
+    try:
+        for got, t, sc in parts:
+            total += t
+            scanned += sc
+            hits.extend(got[:max(0, limit - len(hits))])
+    finally:
+        if ex is not None:
+            ex.shutdown(wait=True, cancel_futures=True)
+    return hits, total, scanned
+
 
 
 def runs_named(conn: sqlite3.Connection) -> list[str]:

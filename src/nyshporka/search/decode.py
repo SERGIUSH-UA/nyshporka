@@ -102,11 +102,15 @@ def stamp_of(run: str) -> str:
 def stamps_of(runs: list[str]) -> dict[str, str]:
     """`stamp_of` для багатьох прогонів одним переліком кореня.
 
-    🔴 Той самий штамп до байта (звірено на 16 188 прогонах, 21.10.2026), але
-    час теки береться з переліку кореня: на Windows `scandir` віддає його
-    разом з іменем, без окремого `stat`. Лишається один `stat` мети на прогін
-    замість трьох (`is_dir` у `_case_dir`, мета, тека): 1,16 с → 0,22 с на
-    кожен `grep` по корпусу.
+    Перелік кореня замінює `_case_dir` (його `is_dir` і розв'язання шляху):
+    лишаються два `stat` на прогін — мета й тека — замість трьох.
+
+    🔴 Час ТЕКИ — лише окремим `os.stat`, не з переліку. `DirEntry.stat()` на
+    Windows бере відомості із запису в батьківській теці, а NTFS оновлює їх
+    із запізненням: на щойно зміненій теці перелік показав старий час, `os.stat`
+    — новий (пак 22.10.2026). Штамп із переліку розходився б із тим, що пише
+    індексація (`stamp_of`), і прогін, який саме читається, виглядав би
+    застарілим на кожному пошуку.
     """
     from nyshporka import htr_store as S
 
@@ -131,7 +135,7 @@ def stamps_of(runs: list[str]) -> dict[str, str]:
                 m = os.stat(os.path.join(e.path, "_htr_meta.json"))
                 if stat.S_ISREG(m.st_mode):
                     out[e.name] = (f"{m.st_mtime_ns:x}-{m.st_size:x}-"
-                                   f"{e.stat().st_mtime_ns:x}")
+                                   f"{os.stat(e.path).st_mtime_ns:x}")
             except OSError:
                 continue
     return out
