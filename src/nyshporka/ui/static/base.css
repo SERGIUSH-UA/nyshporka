@@ -178,8 +178,11 @@ main { flex: 1 1 auto; overflow: auto; }
 :where(select), :where(textarea) {
   background: var(--s-3); color: var(--fg);
   border: 1px solid var(--line-3); border-radius: var(--r-s);
-  padding: 7px 10px;
-  font: inherit; font-size: 13px; line-height: 1.35;   /* контролі не успадковують шрифт */
+  padding: 8px 11px;
+  /* Кегль тексту сторінки, а не дрібніший: 13 px у полі поруч із 15 px тексту
+     читався блідим і дрібним (дослідник, 22.10.2026). Щільні тулбари мають
+     власні класи (.inp-mini, .ctl-sm) і цього не відчувають. */
+  font: inherit; font-size: var(--font-size); line-height: 1.4;
   transition: border-color var(--dur-1) var(--ease),
               background-color var(--dur-1) var(--ease);
 }
@@ -191,7 +194,7 @@ main { flex: 1 1 auto; overflow: auto; }
   box-shadow: 0 0 0 3px var(--accent-bg); }
 :where(input, select, textarea):disabled {
   opacity: .5; cursor: not-allowed; background: var(--s-2); }
-:where(input, textarea)::placeholder { color: var(--fg-5); opacity: 1; }  /* Firefox сам ставить .54 */
+:where(input, textarea)::placeholder { color: var(--fg-4); opacity: 1; }  /* Firefox сам ставить .54 */
 /* 🔴 :user-invalid, а НЕ :invalid — інакше поле червоніє ще до того, як у
    нього щось ввели. Реально спрацьовує на роках із min/max. */
 :where(input:user-invalid, textarea:user-invalid) {

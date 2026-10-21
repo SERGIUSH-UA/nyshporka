@@ -300,3 +300,28 @@ def test_every_console_request_carries_the_project() -> None:
         for n, line in enumerate(p.read_text(encoding="utf-8").splitlines(), 1)
         if bare.search(line) and not line.lstrip().startswith(("//", "*"))]
     assert offenders == []
+
+
+def test_hub_overview_does_not_fail_on_project_canon(tmp_path: Path) -> None:
+    """🔴 Огляд Майстерні без проєкту не падає «вкажіть проєкт», коли в проєкті є канон.
+
+    Зріз головної рахував канон шару проєкту, і в чистій Майстерні це давало
+    відмову всього Огляду (знайдено на живому просторі 22.10.2026). Канон тут —
+    `None`, решта зрізу на місці.
+    """
+    from nyshporka import ops as O
+
+    hub = _hub(tmp_path, hub_only=True)
+    proj = _project(hub, "alpha")
+    hyp = proj / "data" / "canonical" / "hypotheses"
+    hyp.mkdir(parents=True)
+    (hyp / "H9001.md").write_text("---\nid: H9001\nstatus: awaiting\n---\n", encoding="utf-8")
+    (hyp / "H9002.md").write_text("---\nid: H9002\nstatus: 'open'\n---\n", encoding="utf-8")
+    W.use(W._build(hub, "test"))
+    env = O.call("home.pulse", {"backfill": False})
+    assert env.ok, env.error
+    assert env.data["canon"] is None and env.data["project"] is None
+    rows = {r["id"]: r for r in O.call("project.list").data["projects"]}
+    assert rows["alpha"]["hypotheses"] == {"open": 1, "awaiting": 1, "closed": 0}
+    W.use(W._build(proj, "test"))
+    assert O.call("home.pulse", {"backfill": False}).data["project"] == "alpha"

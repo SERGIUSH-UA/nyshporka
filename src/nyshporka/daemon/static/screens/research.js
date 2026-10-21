@@ -6,11 +6,11 @@
  * рушіями (`reports/htr`) сюди не входить: це не звіти, а мільйон рядків.
  */
 
-import { t, LANG } from '../core/strings.js';
+import { t, tOr, LANG } from '../core/strings.js';
 import { callOp } from '../core/net.js';
 import { esc, el, setView, busy, failure, boxError, curGen, alive } from '../core/view.js';
 import { SCREENS, ACTIONS } from '../core/registry.js';
-import { openModal } from '../core/modal.js';
+import { openModal, modalSeq } from '../core/modal.js';
 import { mdLite, dayOf } from '../core/bits.js';
 
 /** Перелік з останньої відповіді — фільтр у браузері, без запиту на кожну літеру. */
@@ -33,12 +33,15 @@ SCREENS.research = async () => {
           placeholder="${esc(t('rs.find.ph'))}"></label>
       <label class="fld"><span class="fld-l">${t('rs.kind')}</span>
         <select id="rs-kind" data-act="rs.find"><option value="">${t('canon.kind.all')}</option>
-          ${kinds.map((k) => `<option value="${esc(k)}"${RS.kind === k ? ' selected' : ''}>${esc(k)}</option>`).join('')}
+          ${kinds.map((k) => `<option value="${esc(k)}"${RS.kind === k ? ' selected' : ''}>${esc(kindLabel(k))}</option>`).join('')}
         </select></label>
     </div>
     <div class="dash-box" id="rs-list"></div>`);
   drawList();
 };
+
+/** Вид звіту — перша тека в `reports/`; знайомі назви — словами, решта як є. */
+const kindLabel = (k) => tOr(`rs.k.${k}`, k);
 
 /** Рядки під поточний фільтр: назва, шлях і вид — без урахування регістру. */
 export function filterReports(rows, q, kind) {
@@ -54,15 +57,16 @@ function drawList() {
   box.innerHTML = rows.length ? rows.map((r) => `<div class="lrow">
       <div><b>${esc(r.title)}</b>
         <small class="muted mono">${esc(r.path)}</small>
-        <small class="muted">${r.kind ? `<span class="tag">${esc(r.kind)}</span> ` : ''}${esc(dayOf(r.mtime, LANG))}</small></div>
+        <small class="muted">${r.kind ? `<span class="tag">${esc(kindLabel(r.kind))}</span> ` : ''}${esc(dayOf(r.mtime, LANG))}</small></div>
       <button data-act="rs.read" data-arg="${esc(r.path)}">${t('rs.read')}</button></div>`).join('')
     : `<p class="muted">${ROWS.length ? t('rs.nomatch') : t('rs.none')}</p>`;
 }
 
 async function readReport(path) {
   openModal({ title: path, body: `<p class="muted">${t('common.loading')}</p>` });
+  const seq = modalSeq();
   const env = await callOp('reports.read', { path });
-  if (!el('dlg-body')) return;
+  if (seq !== modalSeq()) return;
   if (!env.ok) { boxError('dlg-body', env); return; }
   const d = env.data || {};
   el('dlg-body').innerHTML = `<div class="md">${mdLite(d.text)}</div>

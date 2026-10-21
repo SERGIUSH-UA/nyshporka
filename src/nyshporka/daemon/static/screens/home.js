@@ -17,7 +17,7 @@
  */
 
 import { t, tOr, LANG } from '../core/strings.js';
-import { TOKEN, callOp, SEQ } from '../core/net.js';
+import { TOKEN, PROJECT, callOp, SEQ } from '../core/net.js';
 import { esc, el, setView, busy, failure, boxError, busyForm,
   renderWarnings, renderCoverage, curGen, alive, maskot } from '../core/view.js';
 import { SCREENS, ACTIONS, screenOfOp } from '../core/registry.js';
@@ -29,7 +29,7 @@ import { swapHtml, skelRows, skelCards } from '/ui/dom.js';
 import { attachCombobox } from '/ui/combobox.js';
 import { spark, bars as rawBars, meter, steps, histogram, num } from '/ui/chart.js';
 import { runState } from './runs.js';
-import { projectCards, projectHead } from './project.js';
+import { projectCards, projectShell, fillProject } from './project.js';
 
 
 /**
@@ -111,13 +111,17 @@ function doors() {
 
 SCREENS.home = async () => {
   const gen = curGen();
-  busy(6);
+  // Проєкт, відкритий перемикачем (`?p=`), — каркас роду одразу, ще до зрізу.
+  if (PROJECT) projectFrame(gen);
+  else busy(6);
   const env = await callOp('home.pulse', {});
   if (!alive(gen)) return;
-  if (!env.ok) return failure(env);
-  paintHome(env);
+  if (!env.ok) {
+    if (el('ov-ws-body')) { boxError('ov-ws-body', env); return; }
+    return failure(env);
+  }
+  paintHome(env, gen);
   hubCards(gen);
-  headLater(gen);
   // Без `await`: екран уже намальовано, і чекати на цей рядок нема чого.
   machineLater(gen);
   if (env.data && env.data.refreshing) freshLater(gen);
@@ -137,9 +141,8 @@ async function freshLater(gen) {
     if (!alive(gen) || !env.ok) return;
     if (!(env.data && env.data.refreshing)) {
       const machine = PULSE && PULSE.machine;
-      paintHome(env);
+      paintHome(env, gen);
       hubCards(gen);
-      headLater(gen);
       if (machine && !machine.pending) {
         PULSE.machine = machine;
         const box = el('dash-steps');
@@ -150,18 +153,22 @@ async function freshLater(gen) {
   }
 }
 
+/** Чи цей Огляд — про проєкт: відкритий перемикачем або простір у теці проєкту. */
+const inProject = () => !!PROJECT || !!(PULSE && PULSE.project);
+
 /**
- * Проєкт: його верх над пульсом — кроки, «що вирішити», непрошукане за родом.
+ * Огляд проєкту: зверху рід (показники, «що вирішити», що нового), під ним
+ * згорнутий «Стан Майстерні» — той самий дашборд, що й без проєкту.
  *
- * 🔴 Окремим запитом після дашборда: `canon.next` читає всі картки канону, і
- * чекати на нього весь Огляд не повинен.
+ * 🔴 Дашборд Майстерні тут другорядний: людина відкрила рід, а реєстр, читання
+ * й диск — спільне для всіх проєктів. Розгорнутим він топив верх роду в
+ * десятку однакових коробок (дослідник, 22.10.2026: «усе зливається»).
  */
-async function headLater(gen) {
-  if (SECTIONS.hub_only) return;
-  const html = await projectHead();
-  const view = el('view');
-  if (!alive(gen) || !html || !view || el('proj-head')) return;
-  view.insertAdjacentHTML('afterbegin', `<div id="proj-head">${html}</div>`);
+function projectFrame(gen) {
+  setView(`${projectShell()}
+    <details class="ov-ws" id="ov-ws"><summary>${t('ov.ws')}</summary>
+      <div id="ov-ws-body"><span class="skel-cell"></span></div></details>`);
+  fillProject(() => alive(gen));
 }
 
 /**
@@ -178,8 +185,14 @@ async function hubCards(gen) {
   view.insertAdjacentHTML('afterbegin', `<div id="hub-cards">${html}</div>`);
 }
 
-function paintHome(env) {
+function paintHome(env, gen = curGen()) {
   PULSE = env.data;
+  if (inProject() && !el('ov-head')) projectFrame(gen);
+  const put = (html) => {
+    const body = inProject() ? el('ov-ws-body') : null;
+    if (body) swapHtml(body, html);
+    else setView(html);
+  };
   const ws = PULSE.workspace || {};
   const reg = PULSE.registry || {};
 
@@ -189,7 +202,7 @@ function paintHome(env) {
   if (empty) {
     // Порожній простір — перша зустріч, тож маскот вітає. Це стан ПРОЦЕСУ
     // («ще нічого не поклали»), а не висновок про архів.
-    setView(`<div class="vitannia">${maskot('vitaie', 140)}
+    put(`<div class="vitannia">${maskot('vitaie', 140)}
         <div><h2>${t('home.title')}</h2><p>${t('home.hello')}</p></div></div>
       ${agentCard(PULSE)}
       ${renderWarnings(env)}
@@ -197,7 +210,7 @@ function paintHome(env) {
       ${stepsBox(PULSE)}
       <p class="muted mono">${esc(ws.root || '')}</p>`);
   } else {
-    setView(dashboard(env, PULSE));
+    put(dashboard(env, PULSE));
   }
 }
 
@@ -251,7 +264,8 @@ function onboarding(d) {
       href: agentDoc() },
     { on: true, ok: m.ok ? m.ready : null, k: 'step.machine',
       act: 'home.demo', note: (m.bad || []).join(' · ') },
-    { on: true, ok: (d.profile || {}).present, k: 'step.profile',
+    // Чий рід шукаємо — питання проєкту; у чистій Майстерні кроку немає.
+    { on: !SECTIONS.hub_only, ok: (d.profile || {}).present, k: 'step.profile',
       nav: 'profile', note: (d.profile || {}).display || '' },
     { on: true, ok: !!(reg.cases || reg.unfiled), k: 'step.material',
       nav: 'newcase', note: reg.built ? `${num(reg.cases || 0)}` : '' },
@@ -283,22 +297,25 @@ function onboarding(d) {
 // ── дашборд ──────────────────────────────────────────────────────────────────
 function dashboard(env, d) {
   const ws = d.workspace || {};
-  return `<div class="dash-top"><div><h2>${t('dash.title')}</h2>
-    ${headline(d, ws)}</div>${maskot('lupa', 92)}</div>
+  // У проєкті канон — уже вгорі (показники роду), а двері першого запуску в
+  // наповненій Майстерні з проєктами лише подовжують сторінку.
+  const proj = inProject();
+  return `<div class="dash-top"><div>${proj ? '' : `<h2>${t('dash.title')}</h2>`}
+    ${headline(d, ws)}</div>${proj ? '' : maskot('lupa', 92)}</div>
     ${renderWarnings(env)}
     ${stepsBox(d)}
     ${tiles(d)}
     ${progressSection(d)}
-    ${canonSection(d)}
+    ${proj || !d.canon ? '' : canonSection(d)}
     ${readingSection(d)}
     ${materialSection(d)}
     ${searchSection(d)}
     ${timeSection(d)}
     ${spaceSection(d)}
-    <div class="dash-sec">
+    ${proj || SECTIONS.hub_only ? '' : `<div class="dash-sec">
       <h3>${t('dash.doors')}</h3>
       ${doors()}
-    </div>`;
+    </div>`}`;
 }
 
 /**

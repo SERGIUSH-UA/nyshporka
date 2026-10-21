@@ -12,6 +12,7 @@
 """
 from __future__ import annotations
 
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -107,7 +108,8 @@ def project_list(_: NoArgs) -> Envelope:
         rows.append({"id": pr.id, "name": pr.name, "kind": pr.kind,
                      "archived": pr.archived, "here": pr.id == here,
                      "color": pr.color, "glyph": pr.glyph,
-                     "persons": _count_persons(pr.root), "root": str(pr.root)})
+                     "persons": _count_persons(pr.root),
+                     "hypotheses": _count_hypotheses(pr.root), "root": str(pr.root)})
     return ok({"hub": str(ws.hub), "here": here, "projects": rows})
 
 
@@ -357,6 +359,23 @@ def _count_persons(root: Path) -> int:
 
     d = Workspace(root=root).canonical / "persons"
     return sum(1 for _ in d.glob("*.md")) if d.is_dir() else 0
+
+
+_STATUS = re.compile(r"^status:\s*['\"]?(open|awaiting|closed)", re.M)
+
+
+def _count_hypotheses(root: Path) -> dict[str, int]:
+    """Стани гіпотез із шапок карток — без повного читання канону (картка проєкту)."""
+    from nyshporka.core.workspace import Workspace
+
+    out = {"open": 0, "awaiting": 0, "closed": 0}
+    d = Workspace(root=root).canonical / "hypotheses"
+    for f in d.glob("*.md") if d.is_dir() else ():
+        head = f.read_text(encoding="utf-8", errors="replace")[:2000]
+        m = _STATUS.search(head)
+        if m:
+            out[m.group(1)] += 1
+    return out
 
 
 def _state(ws: Any) -> dict[str, Any]:

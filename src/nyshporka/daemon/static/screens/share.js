@@ -12,9 +12,8 @@ import { t, tOr } from '../core/strings.js';
 import { callOp } from '../core/net.js';
 import { esc, el, setView, busy, failure, boxError, busyForm, renderWarnings, curGen, alive, fld } from '../core/view.js';
 import { SCREENS, ACTIONS } from '../core/registry.js';
-import { jobDone, jobChip } from '../core/nav.js';
-import { openModal, confirmAct, closeModal } from '../core/modal.js';
-import { kv, pill } from '../core/bits.js';
+import { openModal, confirmAct, closeModal, modalSeq } from '../core/modal.js';
+import { kv, pill, toast } from '../core/bits.js';
 
 /** Стан справи з `share.suggest` (рядок пакета) → ключ підпису. */
 const STATUS = { 'готова': 'ready', 'у пулі без рамок': 'noboxes', 'неповна': 'partial',
@@ -107,8 +106,9 @@ SCREENS.cards = async () => {
 
 async function openCard(key) {
   openModal({ title: key, body: `<p class="muted">${t('common.loading')}</p>` });
+  const seq = modalSeq();
   const env = await callOp('share.card', { case: key });
-  if (!el('dlg-body')) return;
+  if (seq !== modalSeq()) return;
   if (!env.ok) { boxError('dlg-body', env); return; }
   const c = (env.data || {}).card || {};
   const rows = Object.entries(c).filter(([, v]) => v !== '' && v !== null && v !== undefined)
@@ -148,16 +148,24 @@ Object.assign(ACTIONS, {
     const yes = await confirmAct({ title: t('give.confirm').replace('{n}', rows.length), text: t('give.confirm.why'),
       rows: [[t('give.case'), rows.map((r) => r.shifra || r.case_key).join(', ')]], okLabel: t('give.do') });
     if (!yes) return;
+    // 🔴 `share.push` — не робота в черзі: відповідь приходить, коли пачка
+    // залита. Тому кнопка заблокована на весь час (повторний клік залив би
+    // ту саму пачку вдруге), а результат читається з самої відповіді.
+    const btn = el('give-go');
+    if (btn) btn.disabled = true;
+    const box0 = el('give-box');
+    if (box0) box0.innerHTML = `<p class="muted">${t('give.going')}</p>`;
     const env = await callOp('share.push', { cases: rows.map((r) => r.case_key) });
+    if (btn) btn.disabled = false;
     if (!env.ok) { boxError('give-box', env); return; }
-    const job = await jobDone((env.data || {}).job_id, (j) => {
-      const b = el('give-box');
-      if (b) b.innerHTML = jobChip(j);
-    });
+    const d = env.data || {};
+    const failed = d.failed || [];
+    const given = (d.rows || []).filter((r) => r.ok).length;
     const box = el('give-box');
     if (!box) return;
-    if (job.state !== 'done') { box.innerHTML = `<p class="warn">${esc(job.error || t('job.failed'))}</p>`; return; }
-    box.innerHTML = `${jobChip(job)} ${renderWarnings({ warnings: job.warnings || [] })}`;
+    box.innerHTML = `<p class="${failed.length ? 'warn-inline' : 'ok-line'}">${esc(t('give.done')
+      .replace('{n}', given).replace('{f}', failed.length))}</p>${renderWarnings(env)}`;
+    toast(t('give.done').replace('{n}', given).replace('{f}', failed.length));
   },
   'pull.find': async (ev) => {
     ev.preventDefault();
@@ -179,7 +187,13 @@ Object.assign(ACTIONS, {
     if (box) box.innerHTML = `<p class="muted">${t('pull.taking')}</p>`;
     const env = await callOp('share.pull', { query: r.shifra, take: true });
     if (!env.ok) { boxError('pull-box', env); return; }
-    if (el('pull-box')) el('pull-box').innerHTML = `<p class="ok-line">${t('pull.taken')}</p>${renderWarnings(env)}`;
+    // «Взято» — лише коли справді щось прийнято: нечіткий запит (кілька справ
+    // під шифрою) повертає `ok` з попередженням, але без `imported`.
+    const took = !!((env.data || {}).imported);
+    if (el('pull-box')) {
+      el('pull-box').innerHTML = `${took ? `<p class="ok-line">${t('pull.taken')}</p>`
+        : `<p class="warn-inline">${t('pull.nottaken')}</p>`}${renderWarnings(env)}`;
+    }
   },
   'cards.open': (_ev, elm) => openCard(elm.dataset.arg),
   'sprofile.save': async (ev) => {

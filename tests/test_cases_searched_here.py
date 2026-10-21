@@ -18,6 +18,8 @@ from nyshporka.search import trace
 
 ROWS = [CaseRow(key="TEST/1/1/1", repo="TEST", fond="1", opys="1", spr="1",
                 htr_stage="pysar"),
+        CaseRow(key="TEST/1/1/4", repo="TEST", fond="1", opys="1", spr="4",
+                htr_stage="partial"),
         CaseRow(key="TEST/1/1/2", repo="TEST", fond="1", opys="1", spr="2",
                 htr_stage="pysar"),
         CaseRow(key="TEST/1/1/3", repo="TEST", fond="1", opys="1", spr="3")]
@@ -61,7 +63,7 @@ def test_pure_hub_has_no_project_trace(tmp_path: Path,
                                        monkeypatch: pytest.MonkeyPatch) -> None:
     _hub(tmp_path, monkeypatch, hub_only=True)
     d = O.call("cases.list", {}).data
-    assert d["total"] == 3 and all("searched_here" not in r for r in d["cases"])
+    assert d["total"] == 4 and all("searched_here" not in r for r in d["cases"])
     env = O.call("cases.list", {"searched": "not_here"})
     assert not env.ok and "оберіть проєкт" in env.error
 
@@ -73,6 +75,38 @@ def test_read_means_any_stage_but_none(tmp_path: Path,
     trace.note("TEST/1/1/1", q="Сидорук", thresh=80, hits=0, pages=10,
                models=["m1"], channels=["fuzzy"])
     read = O.call("cases.list", {"htr": "read"}).data
-    assert sorted(r["key"] for r in read["cases"]) == ["TEST/1/1/1", "TEST/1/1/2"]
+    assert sorted(r["key"] for r in read["cases"]) == ["TEST/1/1/1", "TEST/1/1/2", "TEST/1/1/4"]
+    # Дві залишкові при ліміті 1: `total` рахується до ліміту, а не по показаному.
     todo = O.call("cases.list", {"htr": "read", "searched": "not_here", "limit": 1}).data
-    assert todo["total"] == 1
+    assert todo["total"] == 2 and len(todo["cases"]) == 1
+
+
+def test_simultaneous_staleness_checks_run_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Два одночасні `cases.list` (Огляд проєкту) — одна повна перевірка свіжості.
+
+    Наступний запит після готового результату рахує заново: старий результат
+    не повторюється.
+    """
+    import threading
+    import time
+
+    calls: list[int] = []
+
+    def slow(_path=None, *, quick=False):
+        calls.append(1)
+        time.sleep(0.3)
+        return {"stale": False, "n": len(calls)}
+
+    monkeypatch.setattr(db, "_staleness", slow)
+    monkeypatch.setattr(db, "_STALE_LAST", {})
+    got: list[dict] = []
+    ts = [threading.Thread(target=lambda: got.append(db.staleness(Path("x.sqlite"))))
+          for _ in range(2)]
+    ts[0].start()
+    time.sleep(0.05)
+    ts[1].start()
+    for t in ts:
+        t.join()
+    assert len(calls) == 1 and [g["n"] for g in got] == [1, 1]
+    db.staleness(Path("x.sqlite"))
+    assert len(calls) == 2

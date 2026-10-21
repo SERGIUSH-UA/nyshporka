@@ -13,10 +13,10 @@
 
 import { t } from '../core/strings.js';
 import { callOp } from '../core/net.js';
-import { esc, el, setView, busy, failure, boxError, renderWarnings, curGen, alive } from '../core/view.js';
+import { esc, el, setView, busy, failure, boxError, renderWarnings, curGen, alive, humanError } from '../core/view.js';
 import { SCREENS, ACTIONS } from '../core/registry.js';
 import { show, jobDone, jobChip } from '../core/nav.js';
-import { openModal, confirmAct } from '../core/modal.js';
+import { openModal, confirmAct, modalSeq } from '../core/modal.js';
 import { kv, pill, dayOf } from '../core/bits.js';
 
 const FINAL = ['done', 'failed'];
@@ -42,8 +42,10 @@ SCREENS.cloud = async () => {
   setView(`<h2>${t('cloud.title')}</h2>
     <p class="muted">${t('cloud.why')}</p>
     ${renderWarnings(env)}
-    <div class="dash-two">${tile(t('cloud.spent'), money(spent))}${tile(t('cloud.live'), d.live || 0)}${
-  tile(t('cloud.unreleased'), unreleased)}</div>
+    <div class="dash-two">${tile(t('cloud.spent.last').replace('{n}', RUNS.length), money(spent))}${
+  tile(t('cloud.live'), d.live || 0)}${
+  // Тривога, а не показник: нуль тут нічого не каже, ненульове — оренда тече.
+  unreleased ? tile(t('cloud.unreleased'), unreleased) : ''}</div>
     <div class="dash-box"><h3>${t('cloud.now')}</h3>
       ${live.length ? live.map(runRow).join('') : `<p class="muted">${t('cloud.none.live')}</p>`}</div>
     <div class="dash-box"><h3>${t('cloud.past')}</h3>
@@ -66,8 +68,9 @@ function runRow(r) {
 
 async function runMore(id) {
   openModal({ title: id, body: `<p class="muted">${t('common.loading')}</p>` });
+  const seq = modalSeq();
   const env = await callOp('cloud.state', { run_id: id });
-  if (!el('dlg-body')) return;
+  if (seq !== modalSeq()) return;
   if (!env.ok) { boxError('dlg-body', env); return; }
   const r = ((env.data || {}).runs || [])[0] || {};
   const inc = (r.incidents || []).map((x) => `<li>${esc(x.text || x.kind || JSON.stringify(x))}</li>`).join('');
@@ -85,19 +88,27 @@ async function runMore(id) {
  * Вікно хмарного прогону справи. Викликає екран «Читання» з ключем чи текою.
  * Повертає Promise, що закінчується разом із вікном — для тесту.
  */
-export async function openCloudGo(caseRef) {
-  openModal({ title: t('cloud.go.title'), body: `<p class="muted">${t('cloud.go.plan')}</p>
+export async function openCloudGo(caseRef, script = '') {
+  GO = null;
+  openModal({ title: t('cloud.go.title'), body: `<p class="muted" id="cloud-go-plan">${t('cloud.go.plan')}</p>
     <div id="cloud-go-box"></div>` });
-  const dry = await callOp('cloud.go', { case: [caseRef] });
+  // 🔴 Кошторис належить вікну, яке його просило: відповідь, що прийшла після
+  // закриття (чи вже до іншої справи), не має права стати `GO`.
+  const seq = modalSeq();
+  const mine = () => seq === modalSeq();
+  const dry = await callOp('cloud.go', { case: [caseRef], script });
+  if (!mine()) return;
   if (!dry.ok) { boxError('cloud-go-box', dry); return; }
   const job = await jobDone((dry.data || {}).job_id, (j) => {
     const b = el('cloud-go-box');
-    if (b) b.innerHTML = jobChip(j);
+    if (b && mine()) b.innerHTML = jobChip(j);
   });
   const box = el('cloud-go-box');
-  if (!box) return;
+  if (!box || !mine()) return;
+  const plan = el('cloud-go-plan');
+  if (plan) plan.textContent = '';
   if (job.state !== 'done' || !job.result) {
-    box.innerHTML = `<p class="warn">${esc(job.error || t('job.failed'))}</p>`;
+    box.innerHTML = `<div class="warn err">${humanError(job.error || t('job.failed'))}</div>`;
     return;
   }
   const g = job.result;
@@ -107,30 +118,53 @@ export async function openCloudGo(caseRef) {
     [t('cloud.frames'), esc(g.pages_total || est.frames || '')],
     [t('cloud.price'), esc(fork.length ? fork.map(money).join(' – ') : '—')],
     [t('cloud.hours'), esc(est.hours || g.max_hours || '')],
-    [t('cloud.decision'), esc(t(`cloud.launch.${g.launch || 'ok'}`))]])}
+    [t('cloud.decision'), esc(LAUNCHES.includes(g.launch) ? t(`cloud.launch.${g.launch}`) : t('cloud.launch.unknown'))]])}
     ${(g.notes || []).length ? `<ul>${g.notes.map((n) => `<li>${esc(n)}</li>`).join('')}</ul>` : ''}
     <div class="row dlg-acts">
-      ${g.launch === 'no_credit' ? '' : `<button class="primary" data-act="cloud.run">${t('cloud.run')}</button>`}
+      ${canRun(g.launch) ? `<button class="primary" data-act="cloud.run">${t('cloud.run')}</button>` : ''}
       <button class="ghost" data-act="modal.close">${t('modal.no')}</button></div>`;
-  GO = { caseRef, launch: g.launch || 'ok', fork };
+  // Без відомого рішення сервера кнопки запуску немає: вигадане «можна» тут
+  // показало б людині рішення, якого ніхто не ухвалював.
+  GO = canRun(g.launch) ? { caseRef, script, launch: g.launch, fork } : null;
 }
+
+const LAUNCHES = ['ok', 'needs_confirm', 'no_credit'];
+const canRun = (launch) => launch === 'ok' || launch === 'needs_confirm';
 
 /** Кошторис, на який людина дивилась, — другий крок іде рівно з ним. */
 let GO = null;
 
 /** Другий крок: підтвердження називає ціну, і лише тоді — `run: true`. */
 async function runCloud() {
-  if (!GO || GO.launch === 'no_credit') return;
-  const { caseRef, launch, fork } = GO;
+  if (!GO || !canRun(GO.launch)) return;
+  const { caseRef, script, launch, fork } = GO;
   const yes = await confirmAct({ title: t('cloud.run.title'),
     text: launch === 'needs_confirm' ? t('cloud.run.over') : t('cloud.run.why'),
     rows: [[t('cloud.case'), caseRef], [t('cloud.price'), fork.length ? fork.map(money).join(' – ') : '—']],
     okLabel: t('cloud.run'), danger: launch === 'needs_confirm' });
   if (!yes) return;
   GO = null;
-  const env = await callOp('cloud.go', { case: [caseRef], run: true, confirm: launch === 'needs_confirm' });
-  if (!env.ok) { openModal({ title: t('cloud.go.title'), body: `<p class="warn">${esc(env.error || '')}</p>` }); return; }
-  await show('cloud');
+  openModal({ title: t('cloud.go.title'), body: `<div id="cloud-go-box"><p class="muted">${t('cloud.run.going')}</p></div>` });
+  const seq = modalSeq();
+  const env = await callOp('cloud.go', { case: [caseRef], run: true, confirm: launch === 'needs_confirm', script });
+  if (!env.ok) { boxError('cloud-go-box', env); return; }
+  // 🔴 Відповідь «поставлено в чергу» — ще не запуск: відмова чи збій
+  // наглядача приходять уже з роботи. Тож вікно чекає на неї й показує
+  // вердикт, а не перекидає людину на перелік, де нового заходу ще немає.
+  const job = await jobDone((env.data || {}).job_id, (j) => {
+    const b = el('cloud-go-box');
+    if (b && seq === modalSeq()) b.innerHTML = jobChip(j);
+  });
+  if (seq !== modalSeq()) return;
+  const box = el('cloud-go-box');
+  if (!box) return;
+  const g = job.result || {};
+  box.innerHTML = job.state === 'done'
+    ? `<p class="ok-line">${esc(t('cloud.run.started'))}</p>
+       ${kv([[t('cloud.case'), esc(g.case_key || caseRef)], [t('cloud.decision'), esc(g.verdict || '')],
+    [t('cloud.why.stop'), esc(g.why || '')]])}
+       <div class="row dlg-acts"><button class="primary" data-act="nav" data-arg="cloud">${t('nav.cloud')}</button></div>`
+    : `<div class="warn err">${humanError(job.error || t('job.failed'))}</div>`;
 }
 
 Object.assign(ACTIONS, {

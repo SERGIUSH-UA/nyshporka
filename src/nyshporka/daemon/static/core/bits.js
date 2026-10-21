@@ -69,6 +69,14 @@ export function mdLite(src) {
   return out.join('\n');
 }
 
+/**
+ * Твердження без вікі-дужок: картки пишуть `[[I9001]]` як посилання для
+ * сайту роду, а в консолі дужки — шум посеред речення.
+ */
+export function unwiki(text) {
+  return String(text || '').replace(/\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, (_m, id, label) => label || id);
+}
+
 /** Дата з секунд епохи — коротко, мовою вікна. */
 export function dayOf(sec, lang = 'uk') {
   if (!sec) return '';
@@ -77,6 +85,21 @@ export function dayOf(sec, lang = 'uk') {
   } catch {
     return '';
   }
+}
+
+/**
+ * Короткий відгук після дії («Збережено», «Нічого не змінилось»). Дія без
+ * видимого результату читається як кнопка, що не працює.
+ */
+export function toast(text, ms = 2600) {
+  const n = document.createElement('div');
+  n.className = 'toast';
+  n.setAttribute('role', 'status');
+  n.textContent = String(text || '');
+  document.body.appendChild(n);
+  setTimeout(() => n.classList.add('hide'), ms);
+  setTimeout(() => n.remove(), ms + 600);
+  return n;
 }
 
 /** Скопіювати текст у буфер; `false` — браузер не дав (стара вкладка, http). */

@@ -289,6 +289,8 @@ def _pulse_compute(a: PulseArgs) -> Envelope:
     data: dict[str, Any] = {
         "workspace": {"root": str(ws.root), "name": ws.name,
                       "origin": ws.origin},
+        # Огляд проєкту малюється інакше, ніж Огляд Майстерні.
+        "project": ws.project,
         "sections": {"active": sorted(on), "preset": ws.preset or ""},
         "pulse": pulse.snapshot(),
     }
@@ -296,11 +298,16 @@ def _pulse_compute(a: PulseArgs) -> Envelope:
 
     registry = _pulse_registry(env)
     data["registry"] = registry
-    data["canon"] = _pulse_canon(env)
+    # 🔴 Канон і профіль — шар проєкту. У чистій Майстерні їх немає: блок
+    # мовчить (`None`), а не валить увесь Огляд відмовою «вкажіть проєкт» і не
+    # показує стару базу роду, що лишилась у корені з часів до Майстерні
+    # (обидва — на живому просторі 22.10.2026).
+    pure_hub = ws.hub_only and ws.project is None
+    data["canon"] = None if pure_hub else _pulse_canon(env)
     from nyshporka import migrate
 
     migrate.nag(env, ws.hub)
-    data["profile"] = _pulse_profile(env)
+    data["profile"] = None if pure_hub else _pulse_profile(env)
     data["agent"] = _pulse_agent(ws.root)
     # Перелік прогонів — один на зріз: його питають і читання, і пошук, а
     # кожне питання — це обхід кореня прогонів заради штампа кешу.

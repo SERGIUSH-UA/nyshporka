@@ -3,17 +3,19 @@
  *
  * 🔴 Консоль канон показує й перевіряє, але не править: картки веде агент або
  * людина у файлі (рішення дослідника, хвиля 6). Тож тут немає жодної кнопки
- * «змінити поле». Єдина дія, що пише, — доказ у стор (`evidence.js`), і та
- * закінчується дорученням агентові, а не правкою картки.
+ * «змінити поле». Картку тут не пише ніщо: доказ іде в стор (`evidence.js`) і
+ * закінчується дорученням агентові. Два записи все ж є, і обидва — в історію,
+ * не в картку: зелена перевірка сама зберігає стан (автозбереження з 5г), а
+ * «Повернути» на екрані «Історія» відновлює файл попередньою версією.
  */
 
-import { t } from '../core/strings.js';
+import { t, tOr } from '../core/strings.js';
 import { callOp } from '../core/net.js';
 import { esc, el, setView, busy, failure, boxError, renderWarnings, curGen, alive } from '../core/view.js';
 import { SCREENS, ACTIONS } from '../core/registry.js';
 import { goto } from '../core/nav.js';
-import { openModal } from '../core/modal.js';
-import { kv, pill } from '../core/bits.js';
+import { openModal, modalSeq } from '../core/modal.js';
+import { kv, pill, toast, unwiki } from '../core/bits.js';
 import { openEvidence } from './evidence.js';
 
 const KINDS = ['persons', 'families', 'places', 'sources', 'hypotheses'];
@@ -73,7 +75,7 @@ function checkBox(env) {
 function nextBox(env) {
   if (!env.ok) return `<h3>${t('canon.next')}</h3><p class="muted">${esc(env.error || '')}</p>`;
   const rows = ((env.data || {}).next || []).map((d) => `<div class="lrow">
-      <div><b>${esc(d.claim)}</b><small class="muted">${esc(d.id)} · ${esc(d.decides || '')}</small></div>
+      <div><b>${esc(unwiki(d.claim))}</b><small class="muted">${esc(d.id)} · ${esc(unwiki(d.decides || ''))}</small></div>
       <button data-act="canon.hyp" data-arg="${esc(d.id)}">${t('canon.open')}</button></div>`).join('');
   return `<h3>${t('canon.next')}</h3>${rows || `<p class="muted">${t('canon.next.none')}</p>`}`;
 }
@@ -87,7 +89,7 @@ async function cardsList() {
   if (!env.ok) { boxError('cn-list', env); return; }
   const d = env.data || {};
   const rows = (d.rows || []).map((r) => `<div class="lrow">
-      <div><b>${esc(r.title)}</b>
+      <div><b>${esc(unwiki(r.title))}</b>
         <small class="muted"><span class="mono">${esc(r.id)}</span> · ${esc(t(`canon.kind.${r.kind}`))}
         ${r.private ? ` · ${esc(t('canon.private'))}` : ''}</small></div>
       ${pill(r.citations ? 'ok' : 'neutral', t('canon.cites').replace('{n}', r.citations))}
@@ -97,7 +99,14 @@ async function cardsList() {
   el('cn-list').innerHTML = rows ? rows + more : `<p class="muted">${t('canon.none')}</p>`;
 }
 
-/** Значення поля картки людською мовою: дата-об'єкт, перелік, рядок. */
+/** Значення поля картки людською мовою: стать, так/ні, дата-об'єкт, перелік. */
+function value(k, v) {
+  if (k === 'sex') return tOr(`canon.sex.${v}`, String(v));
+  if (typeof v === 'boolean') return v ? t('canon.yes') : t('canon.no');
+  return plain(v);
+}
+
+/** Значення поля картки як текст: дата-об'єкт, перелік, рядок. */
 function plain(v) {
   if (v === null || v === undefined) return '';
   if (Array.isArray(v)) return v.map(plain).filter(Boolean).join(', ');
@@ -117,24 +126,27 @@ function citeRow(c, where = '') {
 /** Картка у вікні: поля, факти з доказами, зауваження перевірки, гіпотези. */
 async function openCard(id) {
   const box = openModal({ title: id, body: `<p class="muted">${t('common.loading')}</p>` });
+  const seq = modalSeq();
   const env = await callOp('canon.card', { id });
-  if (!box || !el('dlg-body')) return;
+  if (!box || seq !== modalSeq()) return;
   if (!env.ok) { boxError('dlg-body', env); return; }
   const d = env.data || {};
   const c = d.card || {};
   const skip = new Set(['id', 'facts', 'citations', 'names', 'media', 'notes', 'hits']);
-  const fields = Object.entries(c).filter(([k, v]) => !skip.has(k) && plain(v))
-    .map(([k, v]) => [k, esc(plain(v))]);
-  const facts = (c.facts || []).map((f) => `<li><b>${esc(f.type)}</b>
+  const fields = Object.entries(c).filter(([k, v]) => !skip.has(k) && (typeof v === 'boolean' || plain(v)))
+    .map(([k, v]) => [tOr(`canon.f.${k}`, k), esc(value(k, v))]);
+  const facts = (c.facts || []).map((f) => `<li><b>${esc(tOr(`canon.ft.${f.type}`, f.type))}</b>
       ${f.date ? ` · ${esc(plain(f.date))}` : ''}${f.place_id ? ` · ${esc(f.place_id)}` : ''}
-      ${f.value ? ` · ${esc(f.value)}` : ''} ${pill(f.status === 'confirmed' ? 'ok' : 'neutral', f.status || '')}
+      ${f.value ? ` · ${esc(f.value)}` : ''} ${pill(f.status === 'confirmed' ? 'ok' : f.status === 'disputed' ? 'warn' : 'neutral',
+    tOr(`canon.fs.${f.status}`, f.status || ''))}
       ${f.hypothesis ? ` <span class="mono">${esc(f.hypothesis)}</span>` : ''}</li>`).join('');
   const cites = [...(c.citations || []).map((x) => citeRow(x)),
-    ...(c.facts || []).flatMap((f) => (f.citations || []).map((x) => citeRow(x, f.type)))].join('');
-  const issues = (d.issues || []).map((i) => `<li>${pill(i.severity === 'ERROR' ? 'err' : 'warn', i.severity)}
+    ...(c.facts || []).flatMap((f) => (f.citations || []).map((x) => citeRow(x, tOr(`canon.ft.${f.type}`, f.type))))].join('');
+  const issues = (d.issues || []).map((i) => `<li>${pill(i.severity === 'ERROR' ? 'err' : i.severity === 'WARN' ? 'warn' : 'neutral',
+    tOr(`canon.sev.${i.severity}`, i.severity))}
       ${esc(i.text)}</li>`).join('');
   const hyps = (d.hypotheses || []).map((h) => `<li><button class="ctl-sm" data-act="canon.hyp"
-      data-arg="${esc(h.id)}">${esc(h.id)}</button> ${esc(h.claim)} ${pill('info', h.status)}</li>`).join('');
+      data-arg="${esc(h.id)}">${esc(h.id)}</button> ${esc(unwiki(h.claim))} ${pill('info', tOr(`hyp.st.${h.status}`, h.status))}</li>`).join('');
   el('dlg-body').innerHTML = `<p><b>${esc(d.title || id)}</b>
       <small class="muted"> · ${esc(t(`canon.kind.${d.kind}`))}${d.private ? ` · ${esc(t('canon.private'))}` : ''}</small></p>
     ${kv(fields)}
@@ -163,6 +175,8 @@ Object.assign(ACTIONS, {
     if (!el('cn-check')) return;
     if (!env.ok) { boxError('cn-check', env); return; }
     el('cn-check').innerHTML = checkBox(env);
+    const n = (env.data || {}).errors || 0;
+    toast(n ? t('canon.check.errors').replace('{n}', n) : t('canon.checked'));
   },
   'canon.card': (_ev, elm) => openCard(elm.dataset.arg),
   'canon.hyp': (_ev, elm) => goto('hyp', { id: elm.dataset.arg }),

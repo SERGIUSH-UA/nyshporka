@@ -75,6 +75,32 @@ def test_log_files_are_from_the_project_root_not_the_git_root(space: Path) -> No
     assert d.ok and d.data["added"]
 
 
+def test_log_file_outside_the_project_is_absolute_and_diffable(space: Path) -> None:
+    """Облік сторінок і реєстр лежать у Майстерні, поза `projects/<ім'я>`.
+
+    Шлях від кореня git для них не годився б: `history.diff` читає шлях від
+    кореня проєкту. Тож поза проєктом журнал віддає абсолютний.
+    """
+    assert O.call("project.new", {"name": "sydoruk"}).ok
+    proj = space / "projects" / "sydoruk"
+    W.use(W._build(proj, "test"))
+    shared = space / "data" / "pages" / "TEST" / "1-1-1.json"
+    shared.parent.mkdir(parents=True, exist_ok=True)
+    shared.write_text('{"pages": {}}', encoding="utf-8")
+    V.save(W.workspace(), "облік", paths=[shared])
+    rows = V.log(W.workspace(), shared, 1)
+    assert rows
+    whole = O.call("history.log", {}).data["rows"]
+    files = [f for r in whole for f in r["files"]]
+    hit = [f for f in files if f.endswith("TEST/1-1-1.json")]
+    assert hit, f"облік сторінок Майстерні не потрапив у журнал проєкту: {files}"
+    assert Path(hit[0]).is_absolute() and Path(hit[0]).resolve() == shared.resolve()
+    d = O.call("history.diff", {"path": hit[0], "rev": whole[0]["rev"]})
+    assert d.ok and d.data["kind"] == "text"
+    assert V._from_proot(W.workspace(), space, "data/pages/TEST/1-1-1.json") == shared.resolve().as_posix()
+    assert V._from_proot(W.workspace(), space, "projects/sydoruk/x.md") == "x.md"
+
+
 def test_diff_of_a_card_shows_fields_not_yaml(space: Path) -> None:
     _edit(space, "sex: M", "sex: F")
     rev = O.call("history.save", {"message": "стать"}).data["rev"]

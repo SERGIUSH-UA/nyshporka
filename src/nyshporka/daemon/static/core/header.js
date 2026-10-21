@@ -169,7 +169,7 @@ async function askFind() {
   box.innerHTML = hits.length ? hits.map((h) => {
     const scr = h.screen || OP_SCREEN[h.name] || '';
     return `<div class="ask-hit"><div><b>${esc(h.when || h.summary)}</b>
-        <small class="mono">nysh ${esc(h.cli)}</small></div>
+        <small class="mono">nysh ${esc(String(h.cli || '').replace(/^nysh\s+/, ''))}</small></div>
       ${scr ? `<button type="button" data-act="ask.go" data-arg="${esc(scr)}">${t('ask.open')}</button>`
     : `<button type="button" data-act="ask.form" data-arg="${esc(h.name)}">${t('ask.form')}</button>`}</div>`;
   }).join('') : `<p class="muted">${t('ask.none')}</p>`;
@@ -218,7 +218,9 @@ async function runForm(ev) {
   const fd = new FormData(ev.target);
   const args = schemaValues(op.schema, (n) => fd.get(n),
     (n) => { const b = form.querySelector(`[name="${n}"]`); return !!(b && b.checked); });
-  if (op.mutates) {
+  // 🔴 І довга дія теж: постановка в чергу — уже зміна стану (зайнятий
+  // процесор, карта, журнал робіт), як і вважає сервер (`require_token`).
+  if (op.mutates || op.long) {
     const yes = await confirmAct({ title: op.when || op.summary || op.name, text: t('ask.run.why'),
       rows: Object.entries(args).map(([k, v]) => [k, Array.isArray(v) ? v.join(', ') : String(v)]),
       okLabel: t('ask.run'), danger: true });

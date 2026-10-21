@@ -109,8 +109,8 @@ async function readCard() {
       <tr><td>${t('read.done')}</td><td>${coverCell(c)}</td></tr>
     </tbody></table>
     ${renderWarnings(env)}
-    <p class="row"><button data-act="read.cloud" title="${esc(t('read.cloud.why'))}">${t('read.cloud')}</button>
-      <span class="muted">${t('read.cloud.why')}</span></p>
+    ${c.frames ? `<p class="row"><button data-act="read.cloud" title="${esc(t('read.cloud.why'))}">${
+  t('read.cloud')}</button><span class="muted">${t('read.cloud.why')}</span></p>` : ''}
     <div id="read-now"></div>
     <div id="read-form">${readForm(c)}</div>`;
   await readNow();
@@ -370,7 +370,13 @@ function modelLabel(path) {
 
 Object.assign(ACTIONS, {
   /** Велика справа — у хмару: вікно з кошторисом, оренда лише після «так». */
-  'read.cloud': () => openCloudGo((RD.card || {}).case_dir || RD.case_dir),
+  // Письмо — те, що людина вибрала тут: інакше кошторис відмовляв «вкажіть
+  // письмо», хоч його щойно вказали.
+  'read.cloud': () => {
+    const c = RD.card || {};
+    const sc = RD.script || (c.script_trust === 'fixed' ? c.script : '');
+    return openCloudGo(c.case_dir || RD.case_dir, ['latin', 'cyrillic'].includes(sc) ? sc : '');
+  },
   'read.pick': (ev) => {
     ev.preventDefault();
     RD = { case_dir: String(new FormData(ev.target).get('case_dir') || ''),

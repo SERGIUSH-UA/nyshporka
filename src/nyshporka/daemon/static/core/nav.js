@@ -59,7 +59,7 @@ const NAV_LABEL = {
   sets: 'nav.sets', label: 'nav.label', jobs: 'nav.jobs', queue: 'nav.queue', site: 'nav.site',
   newproject: 'nav.newproject', canon: 'nav.canon', hyp: 'nav.hyp', research: 'nav.research',
   history: 'nav.history', cloud: 'nav.cloud', give: 'nav.give', pull: 'nav.pull', cards: 'nav.cards',
-  sprofile: 'nav.sprofile',
+  sprofile: 'nav.sprofile', settings: 'nav.settings',
 };
 
 /** Чи ввімкнена секція цього екрана. Невідомий екран не блокуємо. */
@@ -352,11 +352,23 @@ export function onJob(jobId, cb) {
  * довгої операції (кошторис хмари перед орендою).
  */
 export function jobDone(jobId, onTick = null) {
+  // Без номера роботи чекати нема на що: інакше Promise висів би вічно.
+  if (!jobId) return Promise.resolve({ state: 'error', error: t('job.failed') });
   return new Promise((resolve) => {
-    const off = onJob(jobId, (j) => {
-      if (onTick) onTick(j);
-      if (FINAL_STATES.includes(j.state)) { off(); resolve(j); }
-    });
+    let done = false;
+    const finish = (j) => {
+      if (done) return;
+      if (onTick) { try { onTick(j); } catch { /* показ стану не спиняє очікування */ } }
+      if (FINAL_STATES.includes(j.state)) { done = true; off(); resolve(j); }
+    };
+    const off = onJob(jobId, finish);
+    // 🔴 Швидка робота (сухий кошторис хмари) може скінчитись раніше, ніж
+    // підписались: довге очікування черги віддає лише зміни після курсора,
+    // і запису вдруге не буде. Тож один раз питаємо перелік робіт самі.
+    apiFetch('/api/jobs').then((r) => (r.ok ? r.json() : null)).then((got) => {
+      const j = ((got && got.jobs) || []).find((x) => x.id === jobId);
+      if (j) finish(j);
+    }).catch(() => { /* перелік не прийшов — чекаємо на спостерігача черги */ });
   });
 }
 

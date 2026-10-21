@@ -189,11 +189,12 @@ SCREENS: dict[str, str] = {
     "research": "research",
     "history": "research",
     "cloud": "htr",
-    # Супряга: окремої секції немає, обмін - частина основи.
-    "give": "core",
-    "pull": "core",
-    "cards": "core",
-    "sprofile": "core",
+    # Супряга: її операції (`share.*`) живуть у секції читання — вкладки теж,
+    # інакше без читання вкладка вела б у відмову «секція вимкнена».
+    "give": "htr",
+    "pull": "htr",
+    "cards": "htr",
+    "sprofile": "htr",
     # lab
     "sets": "lab",
     "label": "lab",

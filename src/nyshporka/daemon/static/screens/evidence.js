@@ -13,7 +13,7 @@
 
 import { t } from '../core/strings.js';
 import { callOp } from '../core/net.js';
-import { esc, el, boxError, busyForm, fld } from '../core/view.js';
+import { esc, el, boxError, busyForm, fld, renderWarnings } from '../core/view.js';
 import { ACTIONS } from '../core/registry.js';
 import { openModal } from '../core/modal.js';
 import { copyText } from '../core/bits.js';
@@ -47,7 +47,7 @@ export function openEvidence(seed = {}) {
         <div class="row">
           ${fld(t('ev.card'), `<input name="card" value="${v('card')}" placeholder="I…, F…" required>`)}
           ${fld(t('ev.prov'), `<input name="provenance" value="${esc(provenanceOf(EV.case))}"
-            pattern="[a-z][a-z0-9_-]*" required>`)}
+            pattern="[a-z][a-z0-9_\\-]*" required>`)}
         </div>
         <div class="row">${fld(t('ev.what'), `<input name="what" placeholder="${esc(t('ev.what.ph'))}" required>`)}</div>
         <div class="row dlg-acts"><button type="submit" class="primary">${t('ev.secure')}</button>
@@ -65,6 +65,12 @@ export function agentTask({ card, what, path, case: c, page, line, quote }) {
     .replace('{quote}', quote || '');
 }
 
+/** Ім'я доказу в сторі: справа, скан і рядок — латиницею й цифрами. */
+export function evidenceName(caseKey, page, line) {
+  const stem = String(page || '').replace(/\.[a-z0-9]+$/i, '');
+  return `${caseKey}_${stem}_l${line}`.replace(/[^A-Za-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '');
+}
+
 Object.assign(ACTIONS, {
   'ev.secure': async (ev) => {
     ev.preventDefault();
@@ -75,7 +81,22 @@ Object.assign(ACTIONS, {
     const crop = await callOp('text.crop', { case: f('case'), page: f('page'), line });
     if (!crop.ok) { done(); boxError('ev-box', crop); return; }
     const c = crop.data || {};
-    const got = await callOp('evidence.add', { file: c.out, provenance: f('provenance') });
+    // 🔴 Кадр узято не з прогону, а з теки справи за реєстром: збіг імені файла
+    // ще не збіг аркуша. Доказ іде в постійний стор, тож спершу око — галочка.
+    const risky = (crop.warnings || []).filter((w) => w.code === 'frame_by_registry');
+    if (risky.length && !form.get('seen')) {
+      done();
+      const box = el('ev-box');
+      if (box) {
+        box.innerHTML = `${renderWarnings({ warnings: risky })}
+          <label class="chk"><input type="checkbox" name="seen" value="1"> ${t('ev.seen')}</label>`;
+      }
+      return;
+    }
+    // Ім'я — з ключа справи, скану й рядка: «0005_l4» з кропу однакове для
+    // будь-якої справи, і другий такий доказ упирався б у «вже є».
+    const got = await callOp('evidence.add', { file: c.out, provenance: f('provenance'),
+      name: evidenceName(f('case'), c.page || f('page'), line) });
     done();
     if (!got.ok) { boxError('ev-box', got); return; }
     const path = (got.data || {}).path || '';

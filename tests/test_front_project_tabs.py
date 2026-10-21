@@ -62,9 +62,13 @@ const DATA = {
   'cloud.go': { job_id: 'cg1', state: 'queued' },
   'share.suggest': { rows: [{ case_key: 'TEST/1/1/1', shifra: 'TEST 1-1-1', title: 'Сповідка', pages: 9,
     frames: 9, status: 'готова' }], count: 1, total: 1 },
+  'project.list': { projects: [{ id: 'sydoruk', name: 'Рід Сидоруків', kind: 'family', persons: 2,
+    color: '#aa3300', glyph: 'С', hypotheses: { open: 1, awaiting: 1, closed: 0 } }] },
   'project.status': { project: 'sydoruk', name: 'Рід Сидоруків', kind: 'family', surname: 'Сидорук',
     persons: 2, hypotheses: { open: 1, awaiting: 0, closed: 0 }, color: '#aa3300', glyph: 'С' },
   'cases.list': { cases: [], shown: 0, total: 3, registry: true },
+  'share.push': { rows: [{ case: 'TEST/1/1/1', ok: true }], failed: [], summary: {}, total: 1 },
+  'history.save': { rev: null, saved: false },
 };
 let JOB = null;
 let wake = null;
@@ -75,7 +79,17 @@ globalThis.fetch = async (url, opts) => {
     return new Promise((r) => { wake = () => { const jobs = [JOB]; JOB = null; wake = null;
       r({ ok: true, status: 200, json: async () => ({ seq: 9, jobs }) }); }; });
   }
+  if (u.endsWith('/api/ops')) {
+    return { ok: true, status: 200, json: async () => ({ ops: [
+      { name: 'test.long', summary: 'довга', when: 'довга дія', mutates: false, long: true,
+        schema: { properties: {} } }] }) };
+  }
   const name = u.split('/api/op/')[1] || '';
+  if (name === 'text.crop' && globalThis.__CROP_FAIL) {
+    (globalThis.__OPS ||= []).push([name, (opts || {}).body || '']);
+    return { ok: true, status: 200, json: async () => ({ ok: false, v: 1, warnings: [],
+      error: 'text.crop: FileNotFoundError: T:/x/text_store.sqlite' }) };
+  }
   if (name && Object.hasOwn(DATA, name)) {
     (globalThis.__OPS ||= []).push([name, (opts || {}).body || '']);
     const data = name === 'cloud.go' && globalThis.__GO_FAIL ? null : DATA[name];
@@ -108,9 +122,16 @@ await ACTIONS['hyp.open'](null, el('H9001'));
 await tick();
 out.hypDlg = dlg();
 out.hypCrop = document.getElementById('hyp-crop-0').innerHTML || '';
+out.siftBtn = document.getElementById('hyp-sift').textContent;
 ACTIONS['hyp.sift']();
 await tick();
 out.siftHits = ST.sift.hits;
+globalThis.__CROP_FAIL = true;
+await ACTIONS['hyp.open'](null, el('H9001'));
+await tick();
+globalThis.__CROP_FAIL = false;
+out.siftNone = [document.getElementById('hyp-sift').textContent, document.getElementById('hyp-sift').disabled];
+out.cropHuman = document.getElementById('hyp-crop-0').innerHTML || '';
 
 const R = await import('./screens/research.js');
 out.filtered = R.filterReports(DATA['reports.list'].rows, 'двори', '').map((r) => r.path);
@@ -131,6 +152,8 @@ out.restoreAfterNo = sent('history.restore').length;
 p = ACTIONS['hist.restore'](null, el('0', { dataset: { file: 'data/canonical/persons/I9001.md' } }));
 await tick(); ACTIONS['modal.ok'](); await p;
 out.restoreBody = sent('history.restore');
+await ACTIONS['hist.save']();
+out.toasts = document.body.children.map((c) => c.textContent);
 
 await SCREENS.cloud();
 out.cloud = view();
@@ -147,8 +170,11 @@ p = ACTIONS['cloud.run']();
 await tick(); ACTIONS['modal.close'](); await p;
 out.afterNo = sent('cloud.go');
 p = ACTIONS['cloud.run']();
-await tick(); ACTIONS['modal.ok'](); await p;
+await tick(); ACTIONS['modal.ok'](); await tick();
+finish({ verdict: 'detached', case_key: 'TEST/1/1/1', why: '' });
+await p;
 out.afterYes = sent('cloud.go');
+out.runBox = document.getElementById('cloud-go-box').innerHTML || '';
 globalThis.__OPS = [];
 p = C.openCloudGo('TEST/1/1/2');
 await tick();
@@ -157,6 +183,14 @@ await p;
 out.noCreditDlg = document.getElementById('cloud-go-box').innerHTML || '';
 await ACTIONS['cloud.run']();
 out.noCreditSent = sent('cloud.go');
+globalThis.__OPS = [];
+p = C.openCloudGo('TEST/1/1/3');
+await tick();
+finish({ verdict: 'dry_run', case_key: 'TEST/1/1/3', fork_usd: [], estimate: {}, notes: [] });
+await p;
+out.noLaunchDlg = document.getElementById('cloud-go-box').innerHTML || '';
+const NAV = await import('./core/nav.js');
+out.emptyJob = await NAV.jobDone(undefined);
 
 const E = await import('./screens/evidence.js');
 out.prov = [E.provenanceOf('TEST/1/1/1'), E.provenanceOf('прогін-тест')];
@@ -169,6 +203,13 @@ globalThis.__FORM = null;
 out.evOps = (globalThis.__OPS || []).map(([n, b]) => [n, b]);
 out.evBox = document.getElementById('ev-box').innerHTML || '';
 
+await ACTIONS['ask.form'](null, el('test.long'));
+globalThis.__OPS = [];
+p = ACTIONS['ask.run']({ preventDefault() {}, target: document.createElement('form') });
+await tick(); ACTIONS['modal.close'](); await p;
+out.longAfterNo = (globalThis.__OPS || []).map(([n]) => n);
+out.longConfirm = document.getElementById('dlg-title').textContent;
+
 const SF = await import('./core/schemaform.js');
 const schema = { properties: {
   case: { type: 'string', description: 'справа' },
@@ -177,19 +218,36 @@ const schema = { properties: {
   kind: { enum: ['', 'persons', 'places'], default: '' },
   ids: { type: 'array', items: { type: 'string' } },
   budget: { anyOf: [{ type: 'number' }, { type: 'null' }], default: null },
+  on: { anyOf: [{ type: 'boolean' }, { type: 'null' }], default: null },
+  pages: { type: 'array', items: { type: 'integer' } },
 }, required: ['case'] };
 out.formHtml = SF.schemaFormHtml(schema);
-const vals = { case: 'TEST/1/1/1', n: '5', kind: 'places', ids: 'a, b', budget: '' };
+const vals = { case: 'TEST/1/1/1', n: '5', kind: 'places', ids: 'a, b', budget: '', on: 'false', pages: '3, 7' };
 out.formVals = SF.schemaValues(schema, (k) => vals[k] ?? '', (k) => k === 'force');
 out.formEmpty = SF.schemaValues(schema, () => '', () => false);
 
 await SCREENS.give();
 out.give = view();
+const qsa = document.querySelectorAll;
+document.querySelectorAll = (sel) => (String(sel).includes('give.pick') ? [{ checked: true, dataset: { arg: '0' } }] : []);
+globalThis.__OPS = [];
+p = ACTIONS['give.go']();
+await tick(); ACTIONS['modal.ok'](); await p;
+document.querySelectorAll = qsa;
+out.pushSent = sent('share.push');
+out.giveBox = document.getElementById('give-box').innerHTML || '';
 
 const PJ = await import('./screens/project.js');
 globalThis.__OPS = [];
-out.head = await PJ.projectHead();
+out.shell = PJ.projectShell();
+await PJ.fillProject();
+const kv = (id) => [document.getElementById(id).querySelector('.ov-kpi-v').innerHTML,
+  document.getElementById(id).querySelector('.ov-kpi-s').innerHTML, document.getElementById(id).className];
+out.kpi = { canon: kv('ov-k-canon'), hyp: kv('ov-k-hyp'), mat: kv('ov-k-mat'), hist: kv('ov-k-hist') };
+out.decide = document.getElementById('ov-decide').innerHTML || '';
+out.feed = document.getElementById('ov-new').innerHTML || '';
 out.headCases = sent('cases.list');
+out.cards = await PJ.projectCards();
 console.log('@@' + JSON.stringify(out));
 process.exit(0);
 """
@@ -266,16 +324,25 @@ def test_cloud_rents_only_after_the_second_yes(probe) -> None:
     """🔴 Перший виклик — сухий прогін; оренда — лише після «так», з `confirm` понад стелю."""
     assert "TEST/1/1/1" in probe["cloud"] and 'data-act="cloud.stop"' in probe["cloud"]
     first = [json.loads(b) for b in probe["dryFirst"]]
-    assert first == [{"case": ["TEST/1/1/1"]}], "перший виклик мусить бути без run"
+    assert first == [{"case": ["TEST/1/1/1"], "script": ""}], "перший виклик мусить бути без run"
     assert "понад стелю" in probe["goDlg"] and 'data-act="cloud.run"' in probe["goDlg"]
     assert not any(json.loads(b).get("run") for b in probe["afterNo"]), "орендовано після «ні»"
     runs = [json.loads(b) for b in probe["afterYes"] if json.loads(b).get("run")]
-    assert runs == [{"case": ["TEST/1/1/1"], "run": True, "confirm": True}]
+    assert runs == [{"case": ["TEST/1/1/1"], "run": True, "confirm": True, "script": ""}]
+    # Відповідь «у черзі» — ще не запуск: вікно показує вердикт роботи.
+    assert "Захід запущено" in probe["runBox"] and "detached" in probe["runBox"]
 
 
 def test_cloud_without_credit_offers_no_launch(probe) -> None:
     assert 'data-act="cloud.run"' not in probe["noCreditDlg"]
     assert not any(json.loads(b).get("run") for b in probe["noCreditSent"])
+    # Без рішення сервера — ні кнопки, ні вигаданого «можна».
+    assert 'data-act="cloud.run"' not in probe["noLaunchDlg"]
+    assert "не назвав рішення" in probe["noLaunchDlg"]
+
+
+def test_job_wait_without_an_id_does_not_hang(probe) -> None:
+    assert probe["emptyJob"]["state"] == "error"
 
 
 def test_evidence_crops_secures_and_hands_a_task_to_the_agent(probe) -> None:
@@ -285,7 +352,8 @@ def test_evidence_crops_secures_and_hands_a_task_to_the_agent(probe) -> None:
     assert names == ["text.crop", "evidence.add"], names
     crop, add = (json.loads(b) for _, b in probe["evOps"])
     assert crop == {"case": "TEST/1/1/1", "page": "0005", "line": 4}
-    assert add == {"file": "C:/t/crops/0005_l4.png", "provenance": "test"}
+    assert add == {"file": "C:/t/crops/0005_l4.png", "provenance": "test",
+                   "name": "TEST-1-1-1_0005_l4"}
     box = probe["evBox"]
     assert "data/citations/test/0005_l4.jpg" in box and "I9001" in box and "народження" in box
     assert "nysh canon check" in box
@@ -296,7 +364,9 @@ def test_schema_form_builds_fields_and_typed_values(probe) -> None:
     assert 'name="case"' in h and 'type="number"' in h and 'min="1"' in h
     assert 'type="checkbox"' in h and "<select" in h and 'value="places"' in h
     assert probe["formVals"] == {"case": "TEST/1/1/1", "n": 5, "force": True,
-                                 "kind": "places", "ids": ["a", "b"]}
+                                 "kind": "places", "ids": ["a", "b"], "on": False,
+                                 "pages": [3, 7]}
+    assert 'value="false"' in h, "bool | None мусить мати стан «ні», не лише галочку"
     # 🔴 Порожнє необов'язкове не шлеться: інакше перебило б дефолт операції.
     assert probe["formEmpty"] == {"case": ""}
 
@@ -306,8 +376,45 @@ def test_give_lists_unshared_cases(probe) -> None:
     assert "TEST 1-1-1" in g and "готова" in g and 'id="give-go"' in g
 
 
-def test_project_head_shows_decisions_and_unsearched(probe) -> None:
-    h = probe["head"]
-    assert "Рід Сидоруків" in h and "Іван — син Петра" in h
-    assert "не прошукано: 3" in h
-    assert json.loads(probe["headCases"][0]) == {"htr": "read", "searched": "not_here", "limit": 1}
+def test_long_action_from_the_form_asks_first(probe) -> None:
+    """🔴 Довга дія — теж зміна стану: без «так» вона не йде в чергу."""
+    assert "test.long" not in probe["longAfterNo"], "довга дія пішла без підтвердження"
+
+
+def test_give_reads_the_answer_without_a_job(probe) -> None:
+    """🔴 `share.push` відповідає одразу — екран показує результат, а не чекає роботу."""
+    assert [json.loads(b) for b in probe["pushSent"]] == [{"cases": ["TEST/1/1/1"]}]
+    assert "Віддано: 1" in probe["giveBox"]
+
+
+def test_hypothesis_without_a_run_explains_instead_of_silence(probe) -> None:
+    assert probe["siftBtn"] == "На звірку"
+    text, disabled = probe["siftNone"]
+    assert disabled and "Прочитаного рядка ще немає" in text
+    assert "Прочитаного для цієї справи ще немає" in probe["cropHuman"]
+    assert "FileNotFoundError" not in probe["cropHuman"].split("<details")[0]
+
+
+def test_actions_say_what_happened(probe) -> None:
+    assert "Повернуто" in probe["toasts"] and "Змін немає — зберігати нічого" in probe["toasts"]
+
+
+def test_project_overview_kpis_and_feed(probe) -> None:
+    k = probe["kpi"]
+    assert "2" in k["canon"][0] and "ok" in k["canon"][2]
+    assert "1" in k["hyp"][0]
+    # Матеріал: «не прошукано з N прочитаних», а не голий нуль.
+    assert "3" in k["mat"][0] and "прочитаних" in k["mat"][1]
+    assert "2026-10-20" in k["hist"][0]
+    assert "Іван — син Петра" in probe["decide"]
+    assert "Канон перевірено" in probe["feed"] and "Двори роду" in probe["feed"]
+    sent = [json.loads(b) for b in probe["headCases"]]
+    assert {"htr": "read", "searched": "not_here", "limit": 1} in sent
+    assert {"htr": "read", "limit": 1} in sent
+    assert 'id="ov-k-mat"' in probe["shell"] and "skel-cell" in probe["shell"]
+
+
+def test_project_cards_stand_out_with_counts(probe) -> None:
+    c = probe["cards"]
+    assert 'class="pj-card"' in c and "--pj:#aa3300" in c
+    assert "Рід Сидоруків" in c and ">2<" in c.split("pj-stats")[1]

@@ -205,8 +205,31 @@ function failure(env) {
   // ⚠ Саме `renderWarnings`, і без окремого `renderNext`: перший уже
   // завершується другим (див. його кінець). Дві виклики поспіль малювали б
   // кнопку «→ далі» ДВІЧІ на кожній відмові, що несе пораду.
-  setView(`<div class="warn err">${t('common.error')}: ${esc(env.error || '?')}</div>`
+  setView(`<div class="warn err">${t('common.error')}: ${humanError(env.error)}</div>`
     + renderWarnings(env));
+}
+
+/**
+ * Відмова людською мовою: відомі випадки — реченням зі словника, а сирий
+ * текст (виняток, шлях, прапорці терміналу) — згорнутим під ним.
+ *
+ * 🔴 «text.crop: FileNotFoundError: T:\…	ext_store.sqlite» людина не
+ * розшифрує, а саме так відмовляє кроп справи без прочитаного. Слова
+ * причини лишаються доступні — для агента й для звіту про ваду.
+ */
+const KNOWN_ERRORS = [
+  [/text_store\.sqlite|no such table|прочитаного .* немає/i, 'err.no_text'],
+  [/FileNotFoundError|No such file/i, 'err.no_file'],
+  [/Extra inputs are not permitted|validation error/i, 'err.schema'],
+  [/^refused:|вкажіть письмо/i, 'err.cloud_refused'],
+];
+
+function humanError(raw) {
+  const text = String(raw || '?');
+  const hit = KNOWN_ERRORS.find(([re]) => re.test(text));
+  if (!hit) return esc(text);
+  return `${esc(t(hit[1]))}<details class="raw"><summary>${esc(t('err.details'))}</summary>`
+    + `<pre>${esc(text)}</pre></details>`;
 }
 
 /**
@@ -227,7 +250,7 @@ function boxError(id, env) {
   // далі» не показувалась ЖОДНОГО разу: `next` малюється лише в успішній
   // гілці. Тобто система знала наступний крок і мовчала саме там, де людина
   // стоїть перед стіною.
-  box.innerHTML = `<div class="warn err">${esc(env.error || '?')}</div>`
+  box.innerHTML = `<div class="warn err">${humanError(env.error)}</div>`
     + renderWarnings(env);
   return undefined;
 }
@@ -278,4 +301,4 @@ function fld(label, control, cls = '') {
 
 export { esc, safeHref, el, renderWarnings, renderCoverage, setView, setViewTarget, busy, fld,
   splitWarnings, notesBlock, hasAlerts, seedAttr,
-  failure, boxError, busyForm, alive, maskot, MASKOT };
+  failure, boxError, busyForm, alive, maskot, MASKOT, humanError };

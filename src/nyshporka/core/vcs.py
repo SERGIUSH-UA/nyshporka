@@ -287,10 +287,17 @@ def log(ws: W.Workspace, path: Path | None = None,
 
 
 def _from_proot(ws: W.Workspace, top: Path, rel: str) -> str:
+    """Шлях для `history.diff`/`restore`: від кореня проєкту, а поза ним — абсолютний.
+
+    Шар історії ширший за проєкт: облік сторінок і реєстр лежать у Майстерні
+    (`<хаб>/data/…`). Шлях від кореня git для них не годився б — операції
+    читають його від кореня проєкту.
+    """
+    full = (top / rel).resolve()
     try:
-        return (top / rel).resolve().relative_to(ws.proot.resolve()).as_posix()
-    except ValueError:
-        return rel
+        return full.relative_to(ws.proot.resolve()).as_posix()
+    except (ValueError, W.NoProjectError):
+        return full.as_posix()
 
 
 def restore(ws: W.Workspace, path: Path, rev: str) -> str | None:
@@ -298,7 +305,7 @@ def restore(ws: W.Workspace, path: Path, rev: str) -> str | None:
     top = _top(ws)
     rel = path.resolve().relative_to(top).as_posix()
     _git(top, "checkout", check_rev(rev), "--", rel)
-    return save(ws, f"Повернуто {rel} до {rev}", paths=[path])
+    return save(ws, f"Повернуто {path.name} до {rev}", paths=[path])
 
 
 def _show(top: Path, spec: str) -> str | None:

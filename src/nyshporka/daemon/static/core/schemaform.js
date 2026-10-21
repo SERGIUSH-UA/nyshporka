@@ -48,7 +48,12 @@ export function schemaFormHtml(schema) {
     const id = `sf-${esc(name)}`;
     const def = p.default;
     let control;
-    if (kind === 'bool') {
+    if (kind === 'bool' && p.nullable) {
+      // `bool | None`: «не чіпати» — окремий стан, галочка його не вміщає.
+      control = `<select id="${id}" name="${esc(name)}"><option value="">—</option>
+        <option value="true"${def === true ? ' selected' : ''}>✓</option>
+        <option value="false"${def === false ? ' selected' : ''}>✗</option></select>`;
+    } else if (kind === 'bool') {
       control = `<input type="checkbox" id="${id}" name="${esc(name)}"${def ? ' checked' : ''}>`;
     } else if (kind === 'enum') {
       const opts = Array.isArray(p.enum) ? p.enum : [p.const];
@@ -75,6 +80,11 @@ export function schemaFormHtml(schema) {
 export function schemaValues(schema, get, checked) {
   const out = {};
   for (const { name, kind, p, required } of schemaFields(schema)) {
+    if (kind === 'bool' && p.nullable) {
+      const raw = String(get(name) ?? '');
+      if (raw === 'true' || raw === 'false') out[name] = raw === 'true';
+      continue;
+    }
     if (kind === 'bool') {
       const v = !!checked(name);
       if (v !== !!p.default || required) out[name] = v;
@@ -86,7 +96,11 @@ export function schemaValues(schema, get, checked) {
       continue;
     }
     if (kind === 'num') out[name] = Number(raw);
-    else if (kind === 'list') out[name] = raw.split(',').map((s) => s.trim()).filter(Boolean);
+    else if (kind === 'list') {
+      const items = raw.split(',').map((s) => s.trim()).filter(Boolean);
+      const num = p.items && (p.items.type === 'integer' || p.items.type === 'number');
+      out[name] = num ? items.map(Number) : items;
+    }
     else out[name] = raw;
   }
   return out;

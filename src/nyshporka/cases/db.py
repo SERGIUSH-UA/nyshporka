@@ -9,6 +9,8 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import threading
+import time
 from dataclasses import asdict, fields
 from datetime import UTC, datetime, timedelta, timezone  # noqa: F401  (timezone — у staleness)
 from pathlib import Path
@@ -473,7 +475,39 @@ def orphan_runs(db_path: Path | None = None) -> list[dict[str, Any]]:
         con.close()
 
 
+#: Повна перевірка свіжості — один розрахунок на кілька одночасних запитів.
+#: Ключ — файл реєстру; значення — (коли розрахунок закінчився, результат).
+_STALE_LOCKS: dict[str, threading.Lock] = {}
+_STALE_LAST: dict[str, tuple[float, dict[str, Any]]] = {}
+_STALE_GUARD = threading.Lock()
+
+
 def staleness(db_path: Path | None = None, *, quick: bool = False) -> dict[str, Any]:
+    """Свіжість реєстру; повну перевірку одночасні запити рахують один раз.
+
+    🔴 Повна перевірка — тисячі обходів тек (10 с на живому просторі,
+    22.10.2026), а Огляд проєкту шле два `cases.list` разом. Хто прийшов, поки
+    інший рахує, чекає й бере його результат: той закінчився вже після його
+    приходу. Вікно, у якому зміна файла може в нього не потрапити, — сам час
+    розрахунку, і лише для запиту, що прийшов посеред нього. Готові результати
+    з минулого не повторюються: наступний запит рахує заново.
+    """
+    if quick:
+        return _staleness(db_path, quick=True)
+    key = str(Path(db_path or index_path()))
+    came = time.perf_counter()
+    with _STALE_GUARD:
+        lock = _STALE_LOCKS.setdefault(key, threading.Lock())
+    with lock:
+        last = _STALE_LAST.get(key)
+        if last is not None and last[0] > came:
+            return dict(last[1])
+        got = _staleness(db_path)
+        _STALE_LAST[key] = (time.perf_counter(), got)
+        return dict(got)
+
+
+def _staleness(db_path: Path | None = None, *, quick: bool = False) -> dict[str, Any]:
     """Чи відстав реєстр від своїх джерел — і від яких саме.
 
     ⏱ `quick=True` — дешевий шар на 💓 пульсі (`core.pulse`): якщо мітка простору

@@ -11,11 +11,11 @@
 
 import { t } from '../core/strings.js';
 import { callOp } from '../core/net.js';
-import { esc, el, setView, busy, failure, boxError, renderWarnings, curGen, alive } from '../core/view.js';
+import { esc, el, setView, busy, failure, boxError, curGen, alive } from '../core/view.js';
 import { SCREENS, ACTIONS } from '../core/registry.js';
-import { openModal, confirmAct } from '../core/modal.js';
+import { openModal, confirmAct, modalSeq } from '../core/modal.js';
 import { ST } from '../core/state.js';
-import { pill } from '../core/bits.js';
+import { pill, toast } from '../core/bits.js';
 
 /** Файл, журнал якого показано (з картки канону), — або весь проєкт. */
 let PATH = '';
@@ -26,7 +26,8 @@ SCREENS.history = async () => {
   const gen = curGen();
   const seed = ST.history;
   ST.history = null;
-  if (seed && seed.path !== undefined) PATH = seed.path || '';
+  // Вкладка без посіву — увесь проєкт: фільтр картки не переживає виходу.
+  PATH = seed && seed.path ? seed.path : '';
   busy(5);
   const auto = await callOp('history.auto', {});
   if (!alive(gen)) return;
@@ -47,7 +48,7 @@ function autoBox(d) {
   if (!d.git) return `<p class="warn">${t('hist.nogit')}</p>`;
   if (!d.repo) return `<p class="warn">${t('hist.norepo')}</p><p class="mono">nysh history setup</p>`;
   if (d.own) return `<p>${pill('neutral', t('hist.own'))} ${t('hist.own.why')}</p>`;
-  return `<label class="row"><input type="checkbox" data-act="hist.auto"${d.auto ? ' checked' : ''}>
+  return `<label class="chk"><input type="checkbox" data-act="hist.auto"${d.auto ? ' checked' : ''}>
     <b>${t('hist.auto')}</b></label><p class="muted">${t('hist.auto.why')}</p>`;
 }
 
@@ -75,8 +76,9 @@ async function openDiff(i, file = '') {
   const files = r.files || (PATH ? [PATH] : []);
   const path = file || files[0];
   openModal({ title: `${r.rev} · ${r.date}`, body: `<p class="muted">${t('common.loading')}</p>` });
+  const seq = modalSeq();
   const env = await callOp('history.diff', { path, rev: r.rev });
-  if (!el('dlg-body')) return;
+  if (seq !== modalSeq()) return;
   const pick = files.length > 1 ? `<label class="fld"><span class="fld-l">${t('hist.file')}</span>
       <select data-act="hist.pick" data-arg="${i}">${files.map((f) => `<option${f === path ? ' selected' : ''}>${
   esc(f)}</option>`).join('')}</select></label>` : `<p class="mono">${esc(path)}</p>`;
@@ -109,16 +111,21 @@ function show(v) {
 }
 
 Object.assign(ACTIONS, {
-  'hist.all': () => { PATH = ''; return SCREENS.history(); },
+  'hist.all': () => { ST.history = null; return SCREENS.history(); },
   'hist.save': async () => {
     const env = await callOp('history.save', { message: t('hist.save.msg') });
     if (!env.ok) { boxError('hist-log', env); return; }
+    toast((env.data || {}).saved ? t('hist.saved') : t('hist.nochange'));
     await drawLog();
   },
   'hist.auto': async (_ev, elm) => {
     const env = await callOp('history.auto', { on: !!elm.checked });
     const box = el('hist-auto');
-    if (box) box.innerHTML = env.ok ? autoBox(env.data || {}) : renderWarnings(env) + esc(env.error || '');
+    if (!box) return;
+    if (env.ok) { box.innerHTML = autoBox(env.data || {}); toast(env.data.auto ? t('hist.auto.on') : t('hist.auto.off')); return; }
+    // Відмова не забирає перемикач: людина бачить причину й може спробувати ще.
+    elm.checked = !elm.checked;
+    box.insertAdjacentHTML('beforeend', `<div class="warn err">${esc(env.error || '')}</div>`);
   },
   'hist.diff': (_ev, elm) => openDiff(Number(elm.dataset.arg)),
   'hist.pick': (_ev, elm) => openDiff(Number(elm.dataset.arg), elm.value),
@@ -136,6 +143,8 @@ Object.assign(ACTIONS, {
     if (!yes) return;
     const env = await callOp('history.restore', { path, rev: r.rev });
     if (!env.ok) { boxError('hist-log', env); return; }
+    // Без нового коміту файл уже був таким — сказати це, а не мовчати.
+    toast((env.data || {}).rev ? t('hist.restored') : t('hist.same'));
     await drawLog();
   },
 });

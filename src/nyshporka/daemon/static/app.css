@@ -123,7 +123,7 @@ h2 { margin: 0 0 1rem; font-size: 1.45rem; }
 .row .fld input, .row .fld select, .row .fld .pf { flex: 0 0 auto; width: 100%; min-width: 0; }
 /* Поле шляху всередині підпису — знову рядок «поле + кнопка». */
 .row .fld .pf > input { flex: 1 1 auto; width: auto; }
-.fld-l { font-size: .8rem; color: var(--fg-3); }
+.fld-l { font-size: .85rem; color: var(--fg-2); font-weight: 500; }
 .row .fld-btn { align-self: flex-end; }
 .fld-hint { margin: -.6rem 0 1rem; font-size: .87rem; }
 
@@ -190,19 +190,25 @@ pre {
    спільному шарі перефарбувало б і консольні кнопки, які цього не просили. */
 /* Пігулки, як кнопки порталу: другорядна — на тлі контролу з тонкою рамкою,
    головна — заливкою акценту. */
-#view button, .job button {
+#view button, .job button, #dlg button {
   padding: .45rem 1rem; font: inherit; font-weight: 500; cursor: pointer;
   color: var(--fg); background: var(--s-3);
   border: 1px solid var(--line-2); border-radius: var(--r-pill);
 }
-#view button:hover, .job button:hover { border-color: var(--line-3); }
+#view button:hover, .job button:hover, #dlg button:hover { border-color: var(--line-3); }
 /* Головна дія екрана — заливкою: у ряду з п'яти кнопок мусить бути видно, яка
    з них та сама, по яку прийшли. */
 #view button[type=submit] {
   background: var(--accent-fill); color: var(--accent-ink);
   border-color: transparent; font-weight: 600;
 }
-#view button:disabled { opacity: .45; cursor: not-allowed; }
+#view button:disabled, #dlg button:disabled { opacity: .45; cursor: not-allowed; }
+/* Вікно стоїть поза `#view`, тож без цього його кнопки малювались системним
+   віджетом (профіль Супряги, доказ, форма зі схеми — прохід оком 21.10). */
+#dlg button[type=submit], #dlg button.primary {
+  background: var(--accent-fill); color: var(--accent-ink); border-color: transparent; font-weight: 600; }
+#dlg button.danger { color: var(--err); border-color: var(--err); background: none; }
+#dlg button.ghost { background: none; }
 /* Картка першого запуску — не кнопка в цьому сенсі: вона й так ціла панель. */
 /* Плитки дашборда — теж `<button>`, але панель, а не кнопка: пігулка їм не
    личить. */
@@ -827,7 +833,10 @@ header { border-bottom: 3px solid var(--proj-color, transparent); }
 .kv dt { color: var(--fg-3); }
 .kv dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
 /* Плашка стану: тон — значення, а не прикраса. */
-.pill { display: inline-block; font-size: .78rem; padding: 0 .45rem; border-radius: 999px;
+/* `inline-flex` і `flex: none`: у рядку-флексі плашка інакше розтягувалась у
+   круг, а текст вилазив за нього (Канон, «без помилок»). */
+.pill { display: inline-flex; align-items: center; flex: none; align-self: center;
+  font-size: .78rem; line-height: 1.5; padding: 0 .5rem; border-radius: 999px;
   border: 1px solid var(--line); color: var(--fg-3); white-space: nowrap; }
 .pill.ok { border-color: var(--ok-line); color: var(--ok); background: var(--ok-bg); }
 .pill.err { border-color: var(--err-line); color: var(--err); background: var(--err-bg); }
@@ -847,6 +856,80 @@ pre.diff { white-space: pre-wrap; max-height: 50vh; overflow: auto; }
 /* Звіт у вікні — проза з обмеженою шириною рядка. */
 .md { max-width: 62rem; }
 .md pre.md-tbl { margin: 0; white-space: pre; overflow-x: auto; }
-.proj-head .steps { display: flex; flex-wrap: wrap; gap: .5rem; margin: .5rem 0 .8rem; }
-.proj-head .step { display: grid; padding: .4rem .7rem; border: 1px solid var(--line); border-radius: var(--r-m); }
 #ev-task { width: 100%; font-family: var(--mono, monospace); }
+
+/* ── 7в-фікс: форми у вікнах і новий Огляд ─────────────────────────────── */
+/* Поле поза `.row` — теж «підпис над полем»: у вікнах підписи злипались із
+   полями в один рядок (профіль Супряги, форма зі схеми). */
+.fld { display: flex; flex-direction: column; gap: .2rem; margin: 0 0 .7rem; min-width: 0; }
+.fld > input:not([type=checkbox]):not([type=color]), .fld > select { width: 100%; }
+.fld > small { font-size: .75rem; }
+.chk { display: inline-flex; align-items: center; gap: .45rem; margin: .2rem 0 .6rem; cursor: pointer; }
+.chk input { margin: 0; }
+details.raw { margin-top: .3rem; font-size: .8rem; }
+details.raw pre { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--fg-3); }
+
+/* Картки проєктів Майстерні: окремий, піднятий предмет зі смугою кольору. */
+.hub-projects h2 { margin: .2rem 0 .7rem; }
+.pj-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr)); gap: 1rem; margin-bottom: 1.6rem; }
+#view .pj-card { display: grid; gap: .7rem; align-content: start; text-align: left;
+  padding: 1rem 1.1rem; border-radius: var(--r-l); border: 1px solid var(--line-2);
+  border-top: 4px solid var(--pj); background: var(--s-3); box-shadow: var(--sh-1); color: inherit; }
+#view .pj-card:hover { box-shadow: var(--sh-2); border-color: var(--line-3); border-top-color: var(--pj); }
+#view .pj-new { border-style: dashed; border-top-width: 1px; box-shadow: none; background: transparent; }
+.pj-top { display: flex; gap: .7rem; align-items: center; }
+.pj-top b { display: block; font-size: 1.05rem; }
+.pj-top small { color: var(--fg-3); }
+.pj-badge { display: inline-grid; place-items: center; flex: none;
+  width: 2.3rem; height: 2.3rem; border-radius: 50%; background: var(--pj); color: var(--white);
+  font-weight: 700; font-size: 1.05rem; }
+.pj-stats { display: flex; gap: 1.2rem; color: var(--fg-3); font-size: .9rem; }
+.pj-stats b { color: var(--fg); font-size: 1.15rem; margin-right: .15rem; }
+.pj-stats .pj-warn b { color: var(--warn-fg); }
+.pj-go { color: var(--accent); font-weight: 600; font-size: .9rem; }
+
+/* Огляд проєкту: шапка роду, чотири показники, дві колонки. */
+.ov-title { display: flex; gap: .9rem; align-items: center; margin: .3rem 0 1rem; }
+.ov-title h2 { margin: 0; }
+.ov-title .pj-badge { width: 2.8rem; height: 2.8rem; font-size: 1.3rem; }
+.ov-title .ov-style { margin-left: auto; }
+.ov-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .8rem; margin-bottom: 1rem; }
+#view .ov-kpi { display: grid; gap: .25rem; align-content: start; height: 100%; text-align: left; padding: .8rem 1rem; color: inherit;
+  border-radius: var(--r-m); border: 1px solid var(--line-2); border-left: 4px solid var(--line-3);
+  background: var(--s-3); box-shadow: var(--sh-1); }
+#view .ov-kpi.ov-ok { border-left-color: var(--ok); }
+#view .ov-kpi.ov-warn { border-left-color: var(--warn); }
+#view .ov-kpi.ov-info { border-left-color: var(--info-2); }
+.ov-kpi-l { font-size: .8rem; color: var(--fg-3); text-transform: uppercase; letter-spacing: .04em; }
+.ov-kpi-v { font-size: 1.5rem; line-height: 1.2; }
+.ov-kpi-v b { font-weight: 650; }
+.ov-kpi-s { font-size: .85rem; color: var(--fg-3); overflow: hidden; text-overflow: ellipsis;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.ov-cols { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .9rem; margin-bottom: 1rem; }
+.ov-cols h3 { margin: 0 0 .6rem; }
+#view .ov-row { display: flex; gap: .6rem; align-items: flex-start; width: 100%; text-align: left;
+  padding: .55rem .4rem; border: 0; border-bottom: 1px solid var(--line); border-radius: 0;
+  background: none; color: inherit; }
+#view .ov-row:hover { background: var(--s-2); }
+.ov-row > span:last-child { display: grid; gap: .15rem; min-width: 0; }
+.ov-feed { display: flex; gap: .7rem; padding: .35rem 0; border-bottom: 1px solid var(--line); font-size: .92rem; }
+#view .ov-link { width: 100%; text-align: left; border: 0; border-bottom: 1px solid var(--line);
+  border-radius: 0; background: none; padding: .35rem 0; color: inherit; font-weight: 400; }
+details.ov-ws { margin-top: .6rem; }
+details.ov-ws > summary { cursor: pointer; font-weight: 600; padding: .6rem 0; color: var(--fg-2); }
+@media (max-width: 760px) {
+  .ov-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ov-cols { grid-template-columns: 1fr; }
+  .ov-title { flex-wrap: wrap; }
+}
+/* Етапи й «Що зробити?» — в один рядок: на 1400 px значок ставав над підписом,
+   а «Що зробити?» ламалось на два рядки (прохід оком 22.10). */
+#nav button { display: inline-flex; align-items: center; gap: .3rem; white-space: nowrap; }
+.ask { white-space: nowrap; flex: 0 1 auto; }
+.ov-wait { font-size: .95rem; }
+.ov-row .pill { align-self: flex-start; margin-top: .2rem; }
+/* На телефоні етапи гортаються вбік, а не обрізаються («Супряга» ставала «С»). */
+@media (max-width: 760px) {
+  #nav { overflow-x: auto; scrollbar-width: none; max-width: 100%; }
+  #nav::-webkit-scrollbar { display: none; }
+}

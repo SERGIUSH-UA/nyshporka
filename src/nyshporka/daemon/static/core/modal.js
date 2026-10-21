@@ -21,6 +21,16 @@ import { esc, el } from './view.js';
 /** Хто чекає на закриття поточного вікна (повертає вибір підтвердження). */
 let ON_CLOSE = null;
 
+/**
+ * Номер відкриття вікна. Вікно, що чекає відповіді (картка, «що змінилось»),
+ * запам'ятовує його й малює лише якщо воно досі те саме: інакше запізніла
+ * відповідь лягла б у вікно, відкрите після, — і могла б затерти кнопки
+ * підтвердження. Вузол `dlg-body` у розмітці постійний, тож перевірка
+ * «вузол ще є» тут нічого не ловить.
+ */
+let SEQ = 0;
+export const modalSeq = () => SEQ;
+
 function dlg() { return el('dlg'); }
 
 /** Відкрити вікно з готовою розміткою. Повертає вузол тіла. */
@@ -28,6 +38,7 @@ export function openModal({ title = '', body = '', narrow = false, onClose = nul
   const d = dlg();
   if (!d) return null;
   settle(undefined);
+  SEQ += 1;
   const head = el('dlg-title');
   if (head) head.textContent = title;
   const box = el('dlg-body');
