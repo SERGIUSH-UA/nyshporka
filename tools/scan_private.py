@@ -397,9 +397,33 @@ def iter_history() -> list[Item]:
     return [(name, text, f"{name} @{sha[:8]}") for name, sha, text in iter_history_blobs()]
 
 
-def iter_history_blobs(skip: Callable[[str, str], bool] | None = None
-                       ) -> list[tuple[str, str, str]]:
+def history_tips() -> list[str]:
+    """Вершини, з яких видно всю історію: усі посилання й HEAD.
+
+    Беруться ДО обходу: коміт, що з'явився під час перевірки, у перелік не
+    потрапить і буде перевірений наступного разу, а не позначений чистим наосліп.
+    """
+    tips = _git("rev-parse", "--all", "HEAD").split()
+    return sorted(set(tips))
+
+
+def known_commits(shas: list[str]) -> list[str]:
+    """Ті з `shas`, що ще є в репозиторії (гілку могли видалити, а `gc` — зібрати)."""
+    if not shas:
+        return []
+    head = _git_bytes("cat-file", "--batch-check",
+                      stdin=("\n".join(shas) + "\n").encode()).decode(errors="replace")
+    return [parts[0] for parts in (line.split() for line in head.splitlines())
+            if len(parts) == 3 and parts[1] in ("commit", "tag")]
+
+
+def iter_history_blobs(skip: Callable[[str, str], bool] | None = None,
+                       since: list[str] | None = None) -> list[tuple[str, str, str]]:
     """(шлях, sha блоба, вміст) усіх версій; `skip(шлях, sha)` → True — не читати.
+
+    `since` — вершини, історію до яких уже перевірено: блоби, видимі з них, не
+    беруться зовсім (`rev-list --all --not <since>`). Коміт незмінний, а з ним і
+    все, що з нього видно, тож між прогонами лишається лише нове.
 
     🔴 Блоб незмінний за своїм sha, тож уже перевірений під тими самими
     правилами блоб читати вдруге нема чого: читання всіх версій з усіх гілок
@@ -407,7 +431,9 @@ def iter_history_blobs(skip: Callable[[str, str], bool] | None = None
     блобів між прогонами — одиниці.
     """
     names: dict[str, str] = {}
-    for line in _git("rev-list", "--objects", "--all").splitlines():
+    known = known_commits(since or [])
+    revs = ["--all", *(["--not", *known] if known else [])]
+    for line in _git("rev-list", "--objects", *revs).splitlines():
         sha, _, name = line.partition(" ")
         if not name or Path(name).suffix.lower() not in TEXT_SUFFIXES:
             continue

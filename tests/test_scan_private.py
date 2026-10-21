@@ -180,31 +180,47 @@ def test_this_repository_history_is_clean(pytestconfig):
 
 
 def _scan_history_remembering_clean(pytestconfig: pytest.Config) -> list:
-    """Те саме, що `_scan_remembering_clean`, але чистий блоб упізнається за
-    (шлях, sha) і з git узагалі не читається: блоб за своїм sha незмінний.
-    Читання всіх версій з усіх гілок коштувало ~7 с на кожен прогін.
+    """Те саме, що `_scan_remembering_clean`, але перевіряється лише НОВЕ.
 
-    🔴 Прогрес пишеться в кеш і ПО ДОРОЗІ, а не лише наприкінці. Холодний
-    прохід (нові правила, свіжий worktree, чужі гілки) під навантаженням паку
-    триває хвилини. Коли його вбивав тайм-аут, кеш не писався ніколи, і кожен
-    наступний пак знову стартував з холоду. pytest-timeout на Windows гасить
-    воркер xdist цілком, тож пак 21.10.2026 тричі лягав на 99 % каскадом
-    «node down»."""
+    Коміт незмінний, тож історія, видима з уже перевірених вершин, чистою й
+    лишається. Кеш тримає ці вершини (кілька sha на гілку), і наступний прохід
+    бере лише блоби, яких із них не видно (`since`). Нових між прогонами —
+    одиниці, тож прохід триває секунди, а не дві хвилини.
+
+    Перелік чистих блобів живе лише під час холодного проходу (нові правила,
+    свіжий клон): прогрес пишеться в кеш ПО ДОРОЗІ, бо прохід під навантаженням
+    паку триває хвилини, а тайм-аут, що його вбивав, не давав кешу записатись
+    ніколи — і кожен наступний пак знову стартував з холоду (pytest-timeout на
+    Windows гасить воркер xdist цілком; пак 21.10.2026 тричі лягав на 99 %
+    каскадом «node down»). Щойно прохід завершився чистим, вершини стають
+    кешем, а перелік блобів стирається.
+
+    Вершини пишуться лише після чистого проходу: блоб зі знахідкою інакше
+    сховався б за вершиною й більше не перевірявся б."""
     cache = getattr(pytestconfig, "cache", None)
-    slot = f"scan_private/clean_blobs/{_rules_stamp()}"
-    clean = set(cache.get(slot, [])) if cache is not None else set()
+    stamp = _rules_stamp()
+    tips_slot = f"scan_private/clean_tips/{stamp}"
+    blobs_slot = f"scan_private/clean_blobs/{stamp}"
+    since = cache.get(tips_slot, []) if cache is not None else []
+    clean = set(cache.get(blobs_slot, [])) if cache is not None else set()
+    tips = scan.history_tips()
     findings, seen_clean = [], set()
     saved_at = time.monotonic()
-    for name, sha, text in scan.iter_history_blobs(skip=lambda n, s: f"{n}\0{s}" in clean):
+    for name, sha, text in scan.iter_history_blobs(
+            skip=lambda n, s: f"{n}\0{s}" in clean, since=since):
         got = scan.scan_text(name, text, f"{name} @{sha[:8]}")
         findings += got
         if not got:
             seen_clean.add(f"{name}\0{sha}")
         if cache is not None and time.monotonic() - saved_at > SAVE_EVERY_SEC:
-            cache.set(slot, sorted(seen_clean | clean))
+            cache.set(blobs_slot, sorted(seen_clean | clean))
             saved_at = time.monotonic()
     if cache is not None:
-        cache.set(slot, sorted(seen_clean | clean))
+        if findings:
+            cache.set(blobs_slot, sorted(seen_clean | clean))
+        else:
+            cache.set(tips_slot, tips)
+            cache.set(blobs_slot, [])
     return findings
 
 
@@ -266,3 +282,51 @@ def test_a_dirty_blob_is_reported_on_every_run_not_only_the_first(tmp_path, monk
     second = _scan_history_remembering_clean(Config())
     assert [f.path for f in first] == [f.path for f in second] != []
     assert any(k.startswith("clean.md\0") for v in Config.cache.values() for k in v)
+
+
+def test_clean_history_is_remembered_by_tips_and_only_new_commits_are_read(
+        tmp_path, monkeypatch):
+    """Після чистого проходу в кеші — вершини гілок, а не перелік блобів, і
+    наступний прохід читає лише те, чого з них не видно. Витік у новому коміті
+    при цьому ловиться."""
+
+    class Cache(dict):
+        def get(self, key, default):
+            return super().get(key, default)
+
+        def set(self, key, value):
+            self[key] = value
+
+    class Config:
+        cache = Cache()
+
+    git = ["git", "-c", "user.name=t", "-c", "user.email=t@t"]
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    (tmp_path / "a.md").write_text("нічого приватного\n", encoding="utf-8")
+    subprocess.run([*git, "add", "."], cwd=tmp_path, check=True)
+    subprocess.run([*git, "commit", "-q", "-m", "a"], cwd=tmp_path, check=True)
+    monkeypatch.setattr(scan, "ROOT", tmp_path)
+
+    assert _scan_history_remembering_clean(Config()) == []
+    tips = [v for k, v in Config.cache.items() if k.startswith("scan_private/clean_tips/")]
+    blobs = [v for k, v in Config.cache.items() if k.startswith("scan_private/clean_blobs/")]
+    assert tips and tips[0] and blobs == [[]], "чиста історія — це вершини, не блоби"
+
+    read: list[str] = []
+    real = scan.iter_history_blobs
+
+    def spy(**kw):
+        got = real(**kw)
+        read.extend(n for n, _s, _t in got)
+        return got
+
+    monkeypatch.setattr(scan, "iter_history_blobs", spy)
+    (tmp_path / "b.md").write_text('ROOT = Path("E:/Projects/MeGen")\n', encoding="utf-8")
+    subprocess.run([*git, "add", "."], cwd=tmp_path, check=True)
+    subprocess.run([*git, "commit", "-q", "-m", "b"], cwd=tmp_path, check=True)
+
+    found = _scan_history_remembering_clean(Config())
+    assert read == ["b.md"], "перевірене раніше вдруге не читається"
+    assert {f.path.split(" @")[0] for f in found} == {"b.md"}
+    again = _scan_history_remembering_clean(Config())
+    assert {f.path.split(" @")[0] for f in again} == {"b.md"}, "вершина з витоком чистою не стає"
