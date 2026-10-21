@@ -173,7 +173,17 @@ function renderCoverage(env) {
  * найпомітніше на довгих таблицях, де око вже стоїть на потрібному рядку.
  * `keepScroll: false` тут навмисно: зміна екрана мусить починатись згори.
  */
-function setView(html) { swapHtml(el('view'), html, { keepScroll: false }); }
+function setView(html) { swapHtml(el(VIEW_ID), html, { keepScroll: false }); }
+
+/**
+ * Куди малює `setView`: екран (`view`) чи тіло вікна (`dlg-body`).
+ *
+ * Екран, відкритий у вікні (опис справи, новий проєкт, налаштування), лишається
+ * тим самим модулем, що й був: він кличе `setView`, а вміст лягає у вікно.
+ * Другої копії форми під вікно немає — дві розходилися б тихо.
+ */
+let VIEW_ID = 'view';
+const setViewTarget = (id) => { VIEW_ID = id || 'view'; };
 
 /**
  * Стан завантаження.
@@ -266,6 +276,6 @@ function fld(label, control, cls = '') {
   return `<label class="fld${cls ? ` ${cls}` : ''}"><span class="fld-l">${esc(label)}</span>${control}</label>`;
 }
 
-export { esc, safeHref, el, renderWarnings, renderCoverage, setView, busy, fld,
+export { esc, safeHref, el, renderWarnings, renderCoverage, setView, setViewTarget, busy, fld,
   splitWarnings, notesBlock, hasAlerts, seedAttr,
   failure, boxError, busyForm, alive, maskot, MASKOT };

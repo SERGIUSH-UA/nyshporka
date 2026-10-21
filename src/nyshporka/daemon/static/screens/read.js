@@ -5,6 +5,7 @@ import { callOp, FINAL_STATES, TOKEN, apiFetch } from '../core/net.js';
 import { esc, el, setView, boxError, busyForm,
   renderWarnings, curGen, alive } from '../core/view.js';
 import { SCREENS, ACTIONS } from '../core/registry.js';
+import { confirmAct } from '../core/modal.js';
 import { show, goto, onJob, jobProgress } from '../core/nav.js';
 import { ST } from '../core/state.js';
 import { ic, eng } from '/ui/icons.js';
@@ -424,8 +425,11 @@ Object.assign(ACTIONS, {
     if (c.script === 'unknown' || (c.script === 'mixed' && !bothScripts)) {
       const why = c.script === 'mixed' ? t('read.confirm.mixed')
         : t('read.confirm.unknown');
-      // eslint-disable-next-line no-alert
-      if (!confirm(why)) return undefined;
+      // Вікно, а не нативний `confirm`: той блокує всю сторінку й не
+      // показується у вбудованих переглядачах (там повертає «ні» мовчки).
+      const yes = await confirmAct({ title: t('read.confirm.title'), text: why,
+        okLabel: t('read.confirm.go'), danger: true });
+      if (!yes) return undefined;
     }
     // Відгук одразу: запуск рахує план ще раз, і без цього рядка кнопка
     // виглядала так, ніби натискання нікуди не дійшло.

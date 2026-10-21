@@ -70,6 +70,26 @@ def test_every_screen_belongs_to_a_declared_section() -> None:
     assert set(S.SCREENS.values()) <= S.ids()
 
 
+def test_every_tab_screen_belongs_to_one_work_stage() -> None:
+    """🔴 Верхній ярус консолі — етапи роботи (`STAGES`), секції лишились вимикачами.
+
+    Екран поза етапом не має вкладки взагалі: він є у файлі й зникає з
+    консолі — тиша, яка читається як «функцію прибрали». Кроки-вікна
+    (`newcase`, `newproject`) і налаштування вкладок не мають за задумом.
+    """
+    from nyshporka.core import sections as S
+
+    staged = [scr for st in S.STAGES for scr in st.screens]
+    assert len(staged) == len(set(staged)), "екран стоїть у двох етапах"
+    no_tab = {"newcase", "newproject"}
+    assert set(staged) == set(S.SCREENS) - no_tab, (
+        f"поза етапами: {sorted(set(S.SCREENS) - no_tab - set(staged))}; "
+        f"невідомі: {sorted(set(staged) - set(S.SCREENS))}")
+    assert set(staged) >= S.PROJECT_SCREENS
+    assert set(S.STAGE_ACTION.values()) <= set(S.SCREENS)
+    assert S.stage_of("newcase") == "material" and S.stage_of("search") == "search"
+
+
 def test_every_op_declares_a_known_section() -> None:
     from nyshporka import ops as O
     from nyshporka.core import sections as S
@@ -245,6 +265,13 @@ def test_http_hides_disabled_ops_and_lists_sections(space: Path) -> None:
     # Лабораторія має операції (`ops_train`), тож у навігацію потрапляє; те,
     # що вона при цьому НЕ активна в профілі «core+material», — окреме поле.
     assert by_id["lab"]["visible"] and not by_id["lab"]["active"]
+    # Етапи консолі й стан «Майстерня без проєкту» — у тій самій довідці.
+    assert [st["id"] for st in data["stages"]][:2] == ["overview", "material"]
+    assert data["stage_action"]["material"] == "newcase"
+    assert data["hub_only"] is False
+    # «Що зробити?» — те саме, що `nysh ops find`, плюс екран дії.
+    hits = client.get("/api/ops/find", params={"q": "завести справу шифра"}).json()["hits"]
+    assert any(h["name"] == "case.register" and h["screen"] == "newcase" for h in hits), hits
 
 
 def test_installer_extras_match_the_sections() -> None:

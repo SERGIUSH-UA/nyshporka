@@ -29,6 +29,7 @@ import { swapHtml, skelRows, skelCards } from '/ui/dom.js';
 import { attachCombobox } from '/ui/combobox.js';
 import { spark, bars as rawBars, meter, steps, histogram, num } from '/ui/chart.js';
 import { runState } from './runs.js';
+import { projectCards } from './project.js';
 
 
 /**
@@ -115,6 +116,7 @@ SCREENS.home = async () => {
   if (!alive(gen)) return;
   if (!env.ok) return failure(env);
   paintHome(env);
+  hubCards(gen);
   // Без `await`: екран уже намальовано, і чекати на цей рядок нема чого.
   machineLater(gen);
   if (env.data && env.data.refreshing) freshLater(gen);
@@ -135,6 +137,7 @@ async function freshLater(gen) {
     if (!(env.data && env.data.refreshing)) {
       const machine = PULSE && PULSE.machine;
       paintHome(env);
+      hubCards(gen);
       if (machine && !machine.pending) {
         PULSE.machine = machine;
         const box = el('dash-steps');
@@ -143,6 +146,20 @@ async function freshLater(gen) {
       return;
     }
   }
+}
+
+/**
+ * Майстерня без проєкту: картки проєктів над пульсом.
+ *
+ * 🔴 Замість відмови «Оберіть проєкт» людина бачить, які роди тут ведуться, і
+ * заходить у потрібний одним кліком (макет хвилі 6).
+ */
+async function hubCards(gen) {
+  if (!SECTIONS.hub_only) return;
+  const html = await projectCards();
+  const view = el('view');
+  if (!alive(gen) || !html || !view || el('hub-cards')) return;
+  view.insertAdjacentHTML('afterbegin', `<div id="hub-cards">${html}</div>`);
 }
 
 function paintHome(env) {

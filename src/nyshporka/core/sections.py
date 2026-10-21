@@ -148,6 +148,8 @@ SCREENS: dict[str, str] = {
     "home": "core",
     "cases": "core",
     "newcase": "core",
+    # Новий проєкт — вікно з Огляду Майстерні (`STAGE_ACTION`), не вкладка.
+    "newproject": "core",
     "jobs": "core",
     # 🔴 «Рід» у `core`, а не в «Дослідженні»: він вирішує, як працює пошук,
     # і замкнути його всередині секції, яку вимикають, означало б «увімкни
@@ -193,6 +195,59 @@ SCREENS: dict[str, str] = {
 #: увімкнути назад — і виглядало б це як поламаний застосунок, а не як вибір.
 UNGATED_SCREENS: frozenset[str] = frozenset({"settings"})
 
+
+@dataclass(frozen=True)
+class Stage:
+    """Етап роботи — верхній ярус навігації консолі.
+
+    🔴 Ярус іде за роботою (знайти → прочитати → шукати → поділитися), а не за
+    секціями-сховищами. Секції лишаються тим, чим були: вимикачами частин
+    застосунку. Екран вимкненої секції просто випадає з етапу, а етап без
+    жодного екрана не показується (макет хвилі 6, апрув дослідника 21.10.2026).
+    """
+
+    id: str
+    label_uk: str
+    label_en: str
+    screens: tuple[str, ...]
+
+    def label(self, lang: str = "uk") -> str:
+        return self.label_en if lang == "en" else self.label_uk
+
+
+#: Етапи в порядку роботи; екрани всередині — у порядку вкладок.
+#: Огляд проєкту несе тематичні закладки роду (профіль, сайт); у Майстерні без
+#: проєкту вони випадають (`PROJECT_SCREENS`).
+STAGES: tuple[Stage, ...] = (
+    Stage("overview", "Огляд", "Overview", ("home", "profile", "site", "jobs")),
+    Stage("material", "Матеріал", "Material",
+          ("sources", "geog", "fonds", "library", "cases", "frames")),
+    Stage("reading", "Читання", "Reading", ("read", "queue", "runs", "view", "export")),
+    Stage("search", "Пошук", "Search", ("search", "sift", "eye")),
+    Stage("lab", "Лабораторія", "Lab", ("sets", "label")),
+)
+
+#: Екрани, що належать проєкту: у Майстерні без проєкту їх немає у вкладках, а
+#: перехід на них показує вибір проєкту замість відмови операції.
+PROJECT_SCREENS: frozenset[str] = frozenset({"profile", "site", "sift"})
+
+#: Головна дія етапу — кнопкою праворуч у рядку його екранів.
+#: 🔴 «Завести справу» стояла кроком «Нових тек», і людина її не знаходила
+#: (чат Нишпорки, 19.10.2026); у шапці вона виявилась зайвою (дослідник,
+#: 21.10.2026). Місце — етап, де з'являється матеріал.
+STAGE_ACTION: dict[str, str] = {"material": "newcase", "overview": "newproject"}
+
+
+def stage_of(screen: str) -> str | None:
+    """Етап екрана; екран-крок (`newcase`) — етап того, хто його відкриває."""
+    for st in STAGES:
+        if screen in st.screens:
+            return st.id
+    for sid, scr in STAGE_ACTION.items():
+        if scr == screen:
+            return sid
+    return None
+
 #: Операція → екран, на якому людина її бачить.
 #:
 #: 🔴 Потрібна саме як дані, а не як угода про імена: `catalog.search` живе на
@@ -208,6 +263,9 @@ OP_SCREEN: dict[str, str] = {
     "site.rebuild": "site",
     # core
     "workspace.info": "home",
+    # Проєкти Майстерні: новий — вікном, перелік — картками на Огляді.
+    "project.new": "newproject",
+    "project.list": "home",
     "setup.check": "home",
     "sample.install": "home",
     "profile.show": "profile",

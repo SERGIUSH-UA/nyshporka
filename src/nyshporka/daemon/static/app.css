@@ -734,3 +734,87 @@ details.more-filters > summary { cursor: pointer; color: var(--fg-3); font-size:
 .site-card h3 { margin-top: 0; }
 .site-card .row { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
 .site-card .mono { word-break: break-all; }
+
+/* ── Шапка хвилі 7: проєкт, «Що зробити?», «Працює», профіль Супряги ───────
+   Макет хвилі 6 (апрув дослідника 21.10.2026). У шапці лише те, що потрібне з
+   будь-якого екрана; дія етапу стоїть у рядку його екранів (`.stage-act`). */
+header .ask { margin-left: auto; }
+header select.lang { margin-left: 0; }
+.hmenu { position: relative; flex: none; }
+.ctx-btn { display: flex; align-items: center; gap: .5rem; background: var(--s-3);
+  border: 1px solid var(--line-3); border-radius: var(--r-s); padding: 3px 10px;
+  cursor: pointer; color: var(--fg); margin-left: .6rem; max-width: 16rem; }
+.ctx-btn .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent-fill); flex: none; }
+.hmenu.in-hub .ctx-btn .dot { background: var(--fg-4); }
+.ctx-t { display: grid; line-height: 1.15; text-align: left; min-width: 0; }
+.ctx-t small { font-size: .68rem; color: var(--fg-3); text-transform: uppercase; letter-spacing: .05em; }
+.ctx-t b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.caret { color: var(--fg-5); }
+.hmenu-pop { position: absolute; top: calc(100% + 4px); left: 0; z-index: 30; min-width: 15rem;
+  max-width: min(22rem, 90vw); background: var(--s-2); border: 1px solid var(--line-2);
+  border-radius: var(--r-m); padding: 6px; box-shadow: 0 10px 28px rgb(0 0 0 / .35); }
+.hmenu-pop.right { left: auto; right: 0; }
+.hmenu-pop > button, .hmenu-pop .hm-link { display: flex; width: 100%; text-align: left; background: none;
+  border: 0; padding: 7px 9px; border-radius: var(--r-s); cursor: pointer; color: var(--fg);
+  text-decoration: none; }
+.hmenu-pop > button:hover, .hmenu-pop .hm-link:hover, .hmenu-pop > button[aria-current="true"] { background: var(--s-4); }
+.hmenu-pop small { display: block; color: var(--fg-3); font-size: .78rem; }
+.hmenu-pop .sep { height: 1px; background: var(--line); margin: 5px 0; }
+.hm-row, .hm-head { padding: 6px 9px; display: grid; gap: 2px; }
+.ask { display: flex; align-items: center; gap: .45rem; background: var(--s-3); border: 1px solid var(--line-2);
+  border-radius: var(--r-s); padding: 4px 10px; color: var(--fg-3); cursor: text; min-width: 0; }
+.ask:hover { border-color: var(--line-3); color: var(--fg-2); }
+.ask kbd { font-family: var(--font-mono); font-size: .7rem; border: 1px solid var(--line-3);
+  border-radius: 4px; padding: 0 5px; color: var(--fg-5); }
+.chip { display: flex; align-items: center; gap: .45rem; background: none; border: 1px solid var(--line-2);
+  border-radius: var(--r-pill); padding: 3px 11px 3px 5px; cursor: pointer; color: var(--fg-2); white-space: nowrap; }
+.chip:hover { border-color: var(--line-3); color: var(--fg); }
+#jobs-chip { padding-left: 10px; }
+.pulse { width: 8px; height: 8px; border-radius: 50%; background: var(--warn);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn) 25%, transparent); }
+.avatar { width: 26px; height: 26px; border-radius: 50%; background: var(--accent-fill); color: var(--accent-ink);
+  display: grid; place-items: center; font-size: .72rem; font-weight: 700; flex: none; }
+.me-t { max-width: 9rem; overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 760px) {
+  .me-t, .ask kbd, .ask span[data-i18n] { display: none; }
+  .chip { padding-right: 5px; }
+  .ctx-btn { margin-left: 0; }
+}
+
+/* Головна дія етапу — праворуч у рядку екранів. */
+.subtabs .stage-act { margin-left: auto; display: flex; align-items: center; padding-left: 1rem; }
+.subtabs .stage-act button { border-bottom: 0; padding: 4px 12px; }
+
+button.primary { background: var(--accent-fill); color: var(--accent-ink); border-color: var(--accent-fill); font-weight: 600; }
+button.ghost { background: none; }
+button.danger { color: var(--err); border-color: var(--err); background: none; }
+
+/* ── 🪟 Вікно поверх екрана (`core/modal.js`) ─────────────────────────────── */
+dialog.modal { border: 1px solid var(--line-2); border-radius: var(--r-l); background: var(--bg); color: var(--fg);
+  padding: 0; width: min(52rem, calc(100vw - 2rem)); max-height: min(88vh, 60rem);
+  box-shadow: 0 20px 60px rgb(0 0 0 / .5); }
+dialog.modal.narrow { width: min(32rem, calc(100vw - 2rem)); }
+dialog.modal::backdrop { background: rgb(8 12 11 / .6); }
+.dlg-head { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; justify-content: space-between;
+  gap: .6rem; background: var(--s-0); border-bottom: 1px solid var(--line); padding: .6rem 1rem; }
+.dlg-body { padding: 1rem; }
+.dlg-body h2:first-child { display: none; }   /* заголовок екрана вже стоїть у шапці вікна */
+.dlg-acts { gap: .5rem; margin-top: .8rem; }
+dl.kv { display: grid; grid-template-columns: auto 1fr; gap: .25rem 1rem; margin: .4rem 0; }
+dl.kv dt { color: var(--fg-3); }
+dl.kv dd { margin: 0; }
+
+/* «Що зробити?» */
+.ask-q { width: 100%; font-size: 1.05rem; padding: .55rem .8rem; }
+.ask-hits { margin-top: .6rem; display: grid; }
+.ask-hit { display: flex; gap: .8rem; justify-content: space-between; align-items: center;
+  padding: .55rem 0; border-bottom: 1px solid var(--line); }
+.ask-hit small { display: block; color: var(--fg-3); }
+
+/* Картки проєктів (Огляд Майстерні, вибір проєкту). */
+.pcards { display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: .8rem; margin: .6rem 0 1.2rem; }
+.pcard { display: grid; gap: .45rem; align-content: start; padding: .9rem; background: var(--s-2);
+  border: 1px solid var(--line-2); border-top: 3px solid var(--accent-fill); border-radius: var(--r-m); }
+.pcard-new { border-top-color: var(--line-3); }
+.pcard-t { display: flex; justify-content: space-between; gap: .5rem; align-items: baseline; }
+.pcard button { justify-self: start; }

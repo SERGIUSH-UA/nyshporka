@@ -704,8 +704,25 @@ def create_app(ws: Workspace | None = None, *, token: str = "",
         return {"ops": [{"name": o.name, "summary": o.summary,
                          "mutates": o.mutates, "long": o.long, "gui": o.gui,
                          "section": o.section, "scope": o.scope,
+                         "tier": o.tier, "when": o.when, "skill": o.skill,
                          "schema": o.schema()}
                         for o in O.for_sections(active_sections())]}
+
+    @app.get("/api/ops/find")
+    def find_ops(q: str = "", limit: int = 8) -> dict[str, Any]:
+        """«Що зробити?» у шапці консолі — те саме, що `nysh ops find`.
+
+        Відповідь та сама, що в агента (`core.routemap.find`), плюс екран, де
+        дію роблять у вікні (`core.sections.OP_SCREEN`). Дія без екрана
+        повертається з рядком для терміналу: людина бачить, що вона є, і як її
+        викликати, а не «нічого не знайшлось».
+        """
+        from nyshporka.core import routemap as M
+        from nyshporka.core import sections as S
+
+        hits = M.find(q, limit=max(1, min(limit, 20))) if q.strip() else []
+        return {"q": q, "hits": [{**e.card(), "score": s, "screen": S.OP_SCREEN.get(e.name, "")}
+                                 for e, s in hits]}
 
     @app.post("/api/op/{name}")
     async def call_op(name: str, payload: dict[str, Any] | None = Body(default=None),

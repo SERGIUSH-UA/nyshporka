@@ -334,6 +334,12 @@ globalThis.fetch = async (url, opts) => {
     return { ok: true, status: 200,
       json: async () => ({ seq: 1, jobs: globalThis.__JOBS || [] }) };
   }
+  // «Що зробити?» у шапці: дія з екраном і дія лише для терміналу.
+  if (String(url).includes('/api/ops/find')) {
+    return { ok: true, status: 200, json: async () => ({ q: 'x', hits: [
+      { name: 'cloud.stop', cli: 'cloud stop', when: 'зупинити оренду', summary: '', screen: '' },
+      { name: 'case.register', cli: 'case', when: 'завести справу', summary: '', screen: 'newcase' }] }) };
+  }
   if (String(url).endsWith('/api/sections')) {
     return { ok: true, status: 200, json: async () => ({ ok: true, v: 1,
       data: { sections: [], screens: {}, presets: {}, icons: {} } }) };
@@ -865,6 +871,39 @@ globalThis.__CASE_INFO = null;
   qIn.value = 'Ярошинський';
   qIn.fire('input', {});
   out.formsHiddenForOthers = shownForFamily && hint.hidden === true;
+}
+
+// ── хвиля 7а: етапи, головна дія етапу, вибір проєкту, вікна, «Що зробити?» ──
+{
+  const nav = await import('./core/nav.js');
+  const stages = [
+    { id: 'overview', label: 'Огляд', screens: ['home', 'profile', 'site', 'jobs'] },
+    { id: 'material', label: 'Матеріал', screens: ['sources', 'library', 'cases'] },
+  ];
+  nav.setSections({ stages, project_screens: ['profile', 'site'],
+    stage_action: { material: 'newcase', overview: 'newproject' }, hub_only: false });
+  await nav.show('library');
+  out.stageTabs = document.getElementById('nav').innerHTML || '';
+  out.stageScreens = document.getElementById('subnav').innerHTML || '';
+  // Майстерня без проєкту: закладок роду немає, екран роду — вибір проєкту.
+  nav.setSections({ hub_only: true });
+  await nav.show('home');
+  out.hubSubnav = document.getElementById('subnav').innerHTML || '';
+  await nav.show('profile');
+  out.hubProfileView = document.getElementById('view').innerHTML || '';
+  // Вікно: екран малює в тіло вікна, а екран під ним лишається.
+  nav.setSections({ hub_only: false });
+  await nav.show('library');
+  const under = document.getElementById('view').innerHTML;
+  await nav.show('newproject');
+  out.modalBody = document.getElementById('dlg-body').innerHTML || '';
+  out.modalKeptScreen = document.getElementById('view').innerHTML === under;
+  // «Що зробити?»: дія з екраном веде туди, дія без екрана — з командою терміналу.
+  await ACTIONS['ask.open']();
+  document.getElementById('ask-q').value = 'зупинити';
+  await ACTIONS['ask.find']();
+  await new Promise((r) => setTimeout(r, 20));
+  out.askHits = document.getElementById('ask-hits').innerHTML || '';
 }
 
 console.log('@@' + JSON.stringify(out));
@@ -1441,3 +1480,35 @@ def test_every_launch_goes_through_the_plan_and_says_what_it_reads(probe) -> Non
     рушія; читання на «Роботах» веде на картку справи."""
     for key in ("addVoiceShowsPlan", "olderModelNamed", "latinNoSecondVoice", "jobsReadToCase"):
         assert probe.get(key) is True, key
+
+
+def test_top_tier_is_work_stages_with_the_stage_action(probe) -> None:
+    """🔴 Верхній ярус — етапи роботи, а не секції-сховища (макет хвилі 6).
+
+    «Завести справу» — головна дія етапу «Матеріал», праворуч у рядку його
+    екранів: у шапці вона виявилась зайвою, а кроком «Нових тек» її не знаходили.
+    """
+    assert 'data-arg="material"' in probe["stageTabs"]
+    assert 'data-arg="overview"' in probe["stageTabs"]
+    assert 'class="stage-act"' in probe["stageScreens"]
+    assert 'data-arg="newcase"' in probe["stageScreens"]
+
+
+def test_hub_without_project_offers_projects_instead_of_a_refusal(probe) -> None:
+    """У Майстерні без проєкту закладок роду немає, а екран роду — вибір проєкту."""
+    assert 'data-arg="profile"' not in probe["hubSubnav"]
+    assert 'data-arg="newproject"' in probe["hubSubnav"], "«＋ Новий проєкт» — дія Огляду Майстерні"
+    assert "Цей екран — про рід" in probe["hubProfileView"]
+
+
+def test_one_action_screens_open_in_a_window_over_the_screen(probe) -> None:
+    """🔴 Вікно поверх екрана: форма — у вікні, екран під ним не перемальовано."""
+    assert 'data-act="project.create"' in probe["modalBody"]
+    assert probe["modalKeptScreen"], "екран під вікном перемалювався — людина втратила, звідки прийшла"
+
+
+def test_ask_palette_shows_screen_and_terminal_actions(probe) -> None:
+    """Дія без екрана не зникає з видачі — вона з командою терміналу (хибний нуль)."""
+    hits = probe["askHits"]
+    assert 'data-act="ask.go" data-arg="newcase"' in hits
+    assert "nysh cloud stop" in hits and "у терміналі" in hits

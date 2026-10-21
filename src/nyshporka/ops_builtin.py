@@ -4951,7 +4951,16 @@ def _sections_payload() -> dict[str, Any]:
     from nyshporka.brand import active as _brand
 
     b = _brand()
+    ws = workspace()
     return {"sections": rows, "preset": S.preset_of(active),
+            # Верхній ярус консолі — етапи роботи (`core.sections.STAGES`).
+            "stages": [{"id": st.id, "label": st.label(), "label_en": st.label_en,
+                        "screens": list(st.screens)} for st in S.STAGES],
+            "project_screens": sorted(S.PROJECT_SCREENS),
+            "stage_action": dict(S.STAGE_ACTION),
+            # Майстерня без проєкту: проєктних вкладок немає, а перехід на
+            # проєктний екран пропонує вибрати проєкт.
+            "hub_only": bool(ws.hub_only and ws.project is None),
             "presets": {n: sorted(s) for n, s in S.PRESETS.items()},
             "screens": dict(S.SCREENS),
             # Куди вести з поради «→ далі: <операція>». Конверт називає
@@ -4968,8 +4977,11 @@ def _sections_payload() -> dict[str, Any]:
                       "sections": dict(b.section_icons)}}
 
 
+# 🔴 `mixed`, а не `project`: у Майстерні без проєкту консоль теж будує шапку з
+# цієї довідки, і відмова «оберіть проєкт» лишала її взагалі без навігації (смок
+# хвилі 7а). Без проєкту діє набір Майстерні, у проєкті — свій.
 @op("sections.show", summary="Які частини застосунку ввімкнено",
-    scope="project",
+    scope="mixed",
     when="які частини застосунку ввімкнено")
 def sections_show(_: NoArgs) -> Envelope:
     from nyshporka.core.workspace import WorkspaceError, workspace
@@ -4989,7 +5001,7 @@ def sections_show(_: NoArgs) -> Envelope:
 
 @op("sections.set", summary="Увімкнути або вимкнути частини застосунку",
     args=SectionsSetArgs, mutates=True,
-    scope="project",
+    scope="mixed",
     when="увімкнути чи вимкнути частини застосунку")
 def sections_set(a: SectionsSetArgs) -> Envelope:
     from nyshporka.core import sections as S

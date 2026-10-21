@@ -63,6 +63,18 @@
     <img class="logo-img" src="/ui/img/logo.webp" alt="Нишпорка" width="132" height="42">
   </a>
   <!--
+    🔴 Проєкт вкладки видно завжди, а не в закритому списку: людина мусить
+    бачити, в якому роді працює, ще до першого кліку (макет хвилі 6). Кнопка
+    з'являється лише в Майстерні (`core/header.js`); у просторі старого типу
+    шапка та сама, що й була.
+  -->
+  <div class="hmenu proj" id="proj-box" hidden>
+    <button type="button" class="ctx-btn" data-act="menu.toggle" data-arg="proj-menu"
+      aria-haspopup="true" aria-expanded="false"><span class="dot"></span>
+      <span class="ctx-t"><small id="proj-k"></small><b id="proj-v"></b></span><span class="caret">▾</span></button>
+    <div class="hmenu-pop" id="proj-menu" hidden></div>
+  </div>
+  <!--
     🔴 Кнопки СТАВИТЬ JS із `/api/sections`, а не розмітка. Причина не в
     зручності: частину застосунку вимикають профілем простору, і другий,
     зашитий тут перелік розходився б із дозволеним тихо — виглядало б це як
@@ -73,9 +85,23 @@
     перетворювався на стіну без ієрархії.
   -->
   <nav id="nav" class="tabs"></nav>
-  <!-- Проєкт вкладки (`?p=`). Показується, лише коли в Майстерні їх більше
-       одного; наповнює `app.js` з `/api/projects`. -->
-  <select class="lang" id="proj-sel" data-act="project.set" hidden></select>
+  <!-- «Що зробити?» — консольний `nysh ops find`; клавіша `/`. -->
+  <button type="button" class="ask" data-act="ask.open"><span class="ask-ic">⌕</span>
+    <span data-i18n="ask.ph">Що зробити?</span><kbd>/</kbd></button>
+  <!-- «Працює N» — що зараз іде; ховається, коли нічого. -->
+  <div class="hmenu">
+    <button type="button" class="chip" id="jobs-chip" data-act="menu.toggle" data-arg="jobs-menu"
+      aria-haspopup="true" aria-expanded="false" hidden><span class="pulse"></span>
+      <span data-i18n="jobs.chip">Працює</span> <b id="jobs-n">0</b></button>
+    <div class="hmenu-pop right" id="jobs-menu" hidden></div>
+  </div>
+  <!-- Профіль Супряги: хто ви в спільноті й скільки віддано. -->
+  <div class="hmenu">
+    <button type="button" class="chip" id="me-chip" data-act="menu.toggle" data-arg="me-menu"
+      aria-haspopup="true" aria-expanded="false" hidden><span class="avatar" id="me-av">·</span>
+      <span class="me-t" id="me-t"></span></button>
+    <div class="hmenu-pop right" id="me-menu" hidden></div>
+  </div>
   <select class="lang" id="lang-sel" data-act="lang.set"></select>
   <button class="lang" data-act="nav" data-arg="settings" title="Налаштування">⚙</button>
   <!--
@@ -86,6 +112,15 @@
   <button class="thm" id="theme-btn" data-act="theme.cycle"></button>
 </header>
 <nav id="subnav" class="subtabs"></nav>
+<!--
+  🪟 Вікно поверх екрана (`core/modal.js`). 🔴 Стоїть ПЕРЕД `<main>`: екрани шукають
+  свої вузли за `id`, і екран у вікні мусить знаходитись першим, а не той, що під ним.
+-->
+<dialog class="modal" id="dlg" aria-labelledby="dlg-title">
+  <div class="dlg-head"><b id="dlg-title"></b>
+    <button type="button" class="ghost" data-act="modal.close" aria-label="✕">✕</button></div>
+  <div class="dlg-body" id="dlg-body"></div>
+</dialog>
 <main id="view"></main>
 </div>
 <script type="module" src="/static/app.js"></script>
