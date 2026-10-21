@@ -379,6 +379,21 @@ def stamp_of(run: str) -> str:
     return D.stamp_of(run)
 
 
+def stamps_for(runs: list[str]) -> dict[str, str]:
+    """`stamp_of` для багатьох прогонів: від `BULK_RUNS` — одним переліком кореня.
+
+    🔴 Свіп по корпусу питав штамп кожного з 16 тис. прогонів по три `stat`,
+    і не раз: свіжість, знаменник, ще раз після доіндексації — ~5 с послідовно
+    перед кожним корпусним пошуком (замір 22.10.2026). Штамп той самий до байта
+    (`decode.stamps_of`).
+    """
+    from nyshporka.search import decode as D
+
+    if len(runs) >= BULK_RUNS:
+        return D.stamps_of(runs)
+    return {r: stamp_of(r) for r in runs}
+
+
 #: Штампи прогонів на один захід — див. `one_stamps`.
 _STAMPS: ContextVar[dict[str, Any] | None] = ContextVar("store_stamps", default=None)
 
@@ -902,12 +917,8 @@ def stale_count(runs: list[str], conn: sqlite3.Connection | None = None) -> int:
             c.close()
     # Штамп — один раз на прогін: це `stat` на теку й мету, а прогонів у
     # простору буває 12 тис. (два виклики коштували 7 с на кожне «Огляду»).
-    stale = 0
-    for r in runs:
-        st = stamp_of(r)
-        if not st or known.get(r) != st:
-            stale += 1
-    return stale
+    st = stamps_for(runs)
+    return sum(1 for r in runs if not st[r] or known.get(r) != st[r])
 
 
 def stats() -> dict[str, Any]:
@@ -925,7 +936,8 @@ def stats() -> dict[str, Any]:
     conn = connect(readonly=True)
     try:
         known = stamps(conn)
-        fresh = sum(1 for r in runs if known.get(r) and known[r] == stamp_of(r))
+        st = stamps_for(runs)
+        fresh = sum(1 for r in runs if known.get(r) and known[r] == st[r])
         row = conn.execute("select coalesce(sum(pages),0), coalesce(sum(lines),0), "
                            "coalesce(sum(geo),0) from runs").fetchone()
         rstale = rules_stale(conn)
@@ -1769,23 +1781,63 @@ def _sweep_block(conn: sqlite3.Connection, stems: list[str], run_ids: list[int],
     return out
 
 
-#: Скільки процесів чешуть блоки корпусу одночасно. Блок — це розбір блобів
-#: кандидатів у Python (GIL), тож паралелять процеси, не потоки. Один блок бере
-#: до 1.5 ГБ пам'яті (замір 13.10.2026, 60 тис. сторінок): три — 4.5 ГБ, і це
-#: стеля за замовчуванням, бо 11.10 три важкі процеси поруч уже вбила система.
-#: Свіп по корпусу з 41 блока йшов 8–17 хв в один процес.
-SWEEP_WORKERS = 3
-#: Змінна оточення, що перебиває `SWEEP_WORKERS`; `1` — по одному, як раніше.
+#: Скільки процесів чешуть корпус одночасно; `None` — від заліза (`sweep_workers`).
+#: Блок — розбір блобів кандидатів у Python (GIL), тож паралелять процеси, не потоки.
+SWEEP_WORKERS: int | None = None
+#: Змінна оточення, що перебиває і залізо, і `SWEEP_WORKERS`; `1` — по одному.
 SWEEP_WORKERS_ENV = "NYSH_SWEEP_WORKERS"
+#: Пам'ять одного воркера, ГБ. Блок свіпу триграмами (60 тис. сторінок) — до 1,5
+#: (замір 13.10.2026); пачка дооцінки швидкого каналу (20 тис. сторінок) — пік
+#: 0,61 приватної пам'яті (замір 22.10.2026), тут із запасом.
+BLOCK_WORKER_GB = 1.5
+FAST_WORKER_GB = 0.75
+#: Яку частку ВІЛЬНОЇ пам'яті можна віддати воркерам. 11.10.2026 система вбила
+#: три важкі процеси, що стояли поруч із WSL і редактором, — половина лишає
+#: запас на те, що запуститься поруч під час свіпу.
+MEM_SHARE = 0.5
 
 
-def sweep_workers(n_blocks: int) -> int:
+def sweep_workers(n_blocks: int, *, worker_gb: float = BLOCK_WORKER_GB) -> int:
+    """Скільки процесів дати свіпу: від заліза, а не сталою.
+
+    🔴 Нишпорка йде на різне залізо: стала «3» на ноутбуці з 8 ГБ — це 4,5 ГБ
+    воркерам понад сам процес пошуку, а на машині з 12 ядрами й 32 ГБ вона
+    лишає половину ядер без роботи (корпус: 3 процеси — 79 с, 6 — 62–67 с, замір
+    22.10.2026). Тому: фізичні ядра, половина вільної пам'яті на пам'ять
+    воркера, не більше пачок. Змінна оточення чи
+    `SWEEP_WORKERS` перебивають розрахунок.
+    """
     raw = os.environ.get(SWEEP_WORKERS_ENV, "").strip()
-    try:
-        n = int(raw) if raw else SWEEP_WORKERS
-    except ValueError:
-        n = SWEEP_WORKERS
+    n: int | None = None
+    if raw:
+        try:
+            n = int(raw)
+        except ValueError:
+            n = None
+    if n is None:
+        n = SWEEP_WORKERS if SWEEP_WORKERS is not None else _hardware_workers(worker_gb)
     return max(1, min(n, n_blocks))
+
+
+def _hardware_workers(worker_gb: float) -> int:
+    from nyshporka.htr.runner import usable_cores
+
+    by_cores = usable_cores()
+    try:
+        import psutil
+
+        # Фізичні ядра, а не логічні: бал rapidfuzz у кожному воркері й так бере
+        # кілька потоків, і понад фізичні ядра процеси лише ділять ті самі. На
+        # 6 фізичних / 12 логічних: 6 процесів — 67 с, 11 — 64 с за вдвічі
+        # більшої пам'яті (замір 22.10.2026).
+        physical = psutil.cpu_count(logical=False)
+        if physical:
+            by_cores = min(by_cores, int(physical))
+        free_gb = psutil.virtual_memory().available / 2 ** 30
+    except Exception:
+        return max(1, min(by_cores, 2))     # пам'ять невідома — обережно
+    by_mem = int(free_gb * MEM_SHARE / max(worker_gb, 0.1))
+    return max(1, min(by_cores, by_mem))
 
 
 def _block_init(ws: Any) -> None:
@@ -1897,7 +1949,7 @@ def sweep(stems: list[str], runs: list[str], *, thresh: int = 78,
     conn = connect()
     try:
         known = stamps(conn)
-        st = {r: stamp_of(r) for r in runs}
+        st = stamps_for(runs)
         stale = [r for r in runs if st[r] and known.get(r) != st[r]]
         if 0 < len(stale) <= max(0, build_budget):
             for i, r in enumerate(stale, 1):
@@ -1922,7 +1974,7 @@ def sweep(stems: list[str], runs: list[str], *, thresh: int = 78,
                     with contextlib.suppress(sqlite3.Error):
                         conn.rollback()
             known = stamps(conn)
-            st = {r: stamp_of(r) for r in runs}
+            st = stamps_for(runs)
         ready = [r for r in runs if st[r] and known.get(r) == st[r]]
         missing = len(runs) - len(ready)
         ids = _run_ids(conn, ready)
@@ -2145,7 +2197,8 @@ def _sweep_fast(conn: sqlite3.Connection, stems: list[str], run_ids: list[int],
     pids = sorted(wanted)
     chunks = [{p: sorted(wanted[p]) for p in pids[i:i + FAST_CHUNK_PAGES]}
               for i in range(0, len(pids), FAST_CHUNK_PAGES)]
-    workers = sweep_workers(len(chunks)) if len(pids) >= FAST_PARALLEL_PAGES else 1
+    workers = (sweep_workers(len(chunks), worker_gb=FAST_WORKER_GB)
+               if len(pids) >= FAST_PARALLEL_PAGES else 1)
     if workers > 1:
         import multiprocessing as mp
         from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
