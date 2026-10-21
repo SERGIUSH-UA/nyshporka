@@ -35,7 +35,9 @@ from __future__ import annotations
 
 import math
 import re
+from bisect import bisect_left, bisect_right
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -407,15 +409,19 @@ def _bands(pg: Page, weigh: Weigh) -> list[tuple[float, list[Mark], bool]]:
         return out
     hs = sorted(pg.heights)
     span = BAND * max(hs[len(hs) // 2], 1)
-    placed = [(run, y, n) for run, y, n in pg.lines if y is not None]
-    left = sorted(boxed, key=lambda m: _top(m))
+    # ⚡ Перебір лишається квадратичним за ознаками (порядок `left` вирішує
+    # нічию в `_best_set`), але без викликів функцій на кожну пару і без
+    # перебору всіх рядків сторінки на кожну ознаку: межі ознак — раз, слова
+    # вікна — бісекцією по префіксних сумах голосу. Канал запису з'їдав 4.8 с
+    # із 21 на справі в 1053 стор., 1.1 млн викликів `_mid` (профіль 21.10.2026).
+    words_in = _window_words([(run, y, n) for run, y, n in pg.lines if y is not None])
+    left = sorted(((_top(m), _mid(m), m) for m in boxed), key=lambda x: x[0])
     while left:
         best: tuple[float, list[Mark]] = (0.0, [])
-        for a in left:
-            lo, hi = _top(a) - span * 0.15, _top(a) + span
-            inside = [m for m in left if lo <= _mid(m) <= hi]
-            n = _words([ln for ln in placed if lo <= (ln[1] or 0.0) <= hi])
-            got = _best_set(inside, weigh, n)
+        for top, _m, _a in left:
+            lo, hi = top - span * 0.15, top + span
+            inside = [m for _t, mid, m in left if lo <= mid <= hi]
+            got = _best_set(inside, weigh, words_in(lo, hi))
             if got[0] > best[0]:
                 best = got
         if best[0] <= 0:
@@ -423,8 +429,28 @@ def _bands(pg: Page, weigh: Weigh) -> list[tuple[float, list[Mark], bool]]:
         out.append((best[0], best[1], True))
         y_lo = min(_top(m) for m in best[1])
         y_hi = max(_bottom(m) for m in best[1])
-        left = [m for m in left if not (y_lo <= _mid(m) <= y_hi)]
+        left = [x for x in left if not (y_lo <= x[1] <= y_hi)]
     return out
+
+
+def _window_words(placed: list[tuple[str, float, int]]) -> Callable[[float, float], float]:
+    """`_words` рядків із серединою в [lo, hi] — без перебору всіх рядків."""
+    by_run: dict[str, tuple[list[float], list[int]]] = {}
+    for run, y, n in sorted(placed, key=lambda t: (t[0], t[1])):
+        ys, pref = by_run.setdefault(run, ([], [0]))
+        ys.append(y)
+        pref.append(pref[-1] + n)
+
+    def words_in(lo: float, hi: float) -> float:
+        total = runs = 0
+        for ys, pref in by_run.values():
+            i, j = bisect_left(ys, lo), bisect_right(ys, hi)
+            if j > i:
+                total += pref[j] - pref[i]
+                runs += 1
+        return total / max(runs, 1)
+
+    return words_in
 
 
 def _one_term_per_token(marks: list[Mark], weigh: Weigh) -> list[Mark]:
@@ -499,7 +525,7 @@ def scan(rows: list[dict[str, Any]], ts: Terms, *, limit: int = 40) -> dict[str,
                 key = _frame_key(str(page))
                 pg = pages.setdefault(key, Page(page=str(page)))
                 raw = ST._raw_lines(conn, int(pid))
-                boxes = {ln.no: ln.box for ln in ST._page_lines(conn, int(pid))}
+                boxes = ST._page_boxes(conn, int(pid))
                 had_geo = False
                 for no, text in enumerate(raw, 1):
                     box = boxes.get(no)

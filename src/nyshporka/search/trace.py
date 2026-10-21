@@ -85,7 +85,6 @@ def _apply(data: dict[str, Any], key: str, row: dict[str, Any]) -> None:
 
 def _flush(pending: list[tuple[str, dict[str, Any]]]) -> None:
     from nyshporka.pagestore.store import _lock
-    from nyshporka.utils.atomic import write_json
 
     p = path()
     try:
@@ -95,9 +94,18 @@ def _flush(pending: list[tuple[str, dict[str, Any]]]) -> None:
                 return
             for key, row in pending:
                 _apply(data, key, row)
-            write_json(p, data, indent=1, newline="\n")
+            _write(p, data)
     except OSError:
         pass  # слід — зручність, а не умова роботи (сюди ж — зайнятий лок)
+
+
+def _write(p: Path, data: dict[str, Any]) -> None:
+    """Слід — без відступу: з `indent` модуль `json` пише пітонячим енкодером,
+    і файл на 2,8 МБ коштував 1,1 с на КОЖЕН пошук (замір 21.10.2026). Слід
+    читає машина; людині його показує `nysh text whatis`."""
+    from nyshporka.utils.atomic import write_json
+
+    write_json(p, data, indent=None, newline="\n")
 
 
 def path() -> Path:
@@ -181,7 +189,6 @@ def note(key: str, *, q: str, thresh: int, hits: int, pages: int,
         st["pending"].append((key, row))
         return
     from nyshporka.pagestore.store import _lock
-    from nyshporka.utils.atomic import write_json
 
     p = path()
     # Лок на все «прочитати → дописати → замінити» (аудит 29.09.2026): два
@@ -193,7 +200,7 @@ def note(key: str, *, q: str, thresh: int, hits: int, pages: int,
             if data is None:
                 return
             _apply(data, key, row)
-            write_json(p, data, indent=1, newline="\n")
+            _write(p, data)
     except OSError:
         pass  # слід — зручність, а не умова роботи (сюди ж — зайнятий лок)
 

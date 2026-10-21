@@ -1079,6 +1079,17 @@ def _page_lines(conn: sqlite3.Connection, pid: int) -> list[Line]:
     return out
 
 
+def _page_boxes(conn: sqlite3.Connection, pid: int) -> dict[int, tuple[int, int, int, int]]:
+    """Рамки рядків сторінки: {номер рядка: рамка} — те саме, що `_page_lines`
+    дає в `box`, але без блоба кандидатів, який каналу запису не потрібен
+    (0,7 с на справу в 1228 сторінок, замір 21.10.2026)."""
+    lo, hi = pid << LINE_BITS, ((pid + 1) << LINE_BITS) - 1
+    return {rid - lo: (int(x0), int(y0), int(x1), int(y1))
+            for rid, x0, y0, x1, y1 in conn.execute(
+                "select id,x0,y0,x1,y1 from lines where id between ? and ? "
+                "and x0 is not null", (lo, hi))}
+
+
 # ── склейка за колонкою ──────────────────────────────────────────────────────
 #: Частка ширини сторінки, більша за яку прогалина між лівими краями рядків
 #: означає нову колонку.
@@ -1543,29 +1554,52 @@ def _match_cdist(order: list[str], stems: list[str], thresh: int
     if stems:
         cutoff = max(0, int(min(float(_partial_bound(len(s), np.int32(lmax), thresh))
                                 for s in stems)))
+    # ⚡ Один гуртовий прохід. Сам `ratio` дешевий; дорогі тут перетворення
+    # пів мільйона рядків на кожен виклик `cdist` і маски numpy на кожен стем
+    # (замір 21.10.2026 на пачці 0.53 млн слів × 22 стеми: другий прохід
+    # 0.19 с, маски 0.29 с із 0.73). `score_hint`, `score_cutoff` і понад два
+    # потоки на цей прохід не впливають.
     r = cdist(stems, order, scorer=fuzz.ratio, score_cutoff=cutoff,
               dtype=np.uint8, workers=-1)
-    # ⚠ Хіт за `ratio` — окремим проходом із порогом у самому rapidfuzz: поріг
-    # там порівнюється з дробовим балом, а uint8 округлює 77.8 до 78, і без
-    # цього проходу межові кандидати проходили б усупереч `decode._matches`.
-    r_hit = cdist(stems, order, scorer=fuzz.ratio, score_cutoff=thresh,
-                  dtype=np.uint8, workers=-1)
+    span = np.arange(lmax + 1, dtype=np.int32)
+    gates: dict[int, Any] = {}
     for si, stem in enumerate(stems):
-        need = max(4, int(len(stem) * 0.6))
-        floor = max(need, len(stem))
+        size = len(stem)
+        need = max(4, int(size * 0.6))
+        floor = max(need, size)
+        gate = gates.get(size)
+        if gate is None:
+            # Межа `partial` залежить лише від довжин стема й слова: таблиця на
+            # довжину стема, закороткому слову — недосяжна (256).
+            b = _partial_bound(size, span, thresh)
+            gate = gates[size] = np.where(span >= floor, np.clip(b, 0, 255),
+                                          256).astype(np.int16)[lens]
         row = r[si]
-        sc = np.where((r_hit[si] >= thresh) & (lens >= need), r_hit[si], 0).astype(np.int32)
-        idx = np.flatnonzero((lens >= floor) & (row >= _partial_bound(len(stem), lens, thresh)))
+        hit: dict[int, int] = {}
+        # ⚠ Хіт за `ratio` — із порогом у самому rapidfuzz: там поріг
+        # порівнюється з дробовим балом, а uint8 округлює 77.8 до 78. Тож
+        # округлений бал ≥ порога лише відбирає кандидатів (дробовий ≥ порога
+        # завжди округлюється не нижче), а точний бал рахується на них.
+        cand = np.flatnonzero(row >= thresh)
+        if len(cand):
+            cand = cand[lens[cand] >= need]
+        if len(cand):
+            exact = cdist([stem], [order[int(j)] for j in cand], scorer=fuzz.ratio,
+                          score_cutoff=thresh, dtype=np.uint8, workers=-1)[0]
+            for j, v in zip(cand.tolist(), exact.tolist(), strict=True):
+                if v >= thresh:
+                    hit[j] = v
+        idx = np.flatnonzero(row >= gate)
         if len(idx):
             pr = cdist([stem], [order[int(j)] for j in idx], scorer=fuzz.partial_ratio,
                        score_cutoff=thresh, dtype=np.uint8, workers=-1)[0]
-            sub_sc = np.where(pr >= thresh, pr, 0).astype(np.int32)
-            sc[idx] = np.maximum(sc[idx], sub_sc)
-        for j in np.flatnonzero(sc):
-            v = float(sc[j])
-            cur = best.get(int(j))
+            for j, v in zip(idx.tolist(), pr.tolist(), strict=True):
+                if v >= thresh and v > hit.get(j, 0):
+                    hit[j] = v
+        for j, v in hit.items():
+            cur = best.get(j)
             if cur is None or v > cur[0]:
-                best[int(j)] = (v, si)
+                best[j] = (float(v), si)
     return best
 
 

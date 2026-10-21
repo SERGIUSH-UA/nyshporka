@@ -31,6 +31,9 @@ _TOKEN_RE = re.compile(r"[^\s.,;:()\[\]{}/\\|«»\"'’—–-]+")
 # path(str) → (mtime_ns, index-dict)
 _CACHE: dict[str, tuple[int, dict[str, Any]]] = {}
 
+# path(str) → (mtime_ns, ключ справи) — див. `_key_of`
+_KEYS: dict[str, tuple[int, str]] = {}
+
 #: Перелік файлів справ на один запит — див. `one_snapshot`.
 _SNAP: ContextVar[dict[str, Any] | None] = ContextVar("pagestore_snap", default=None)
 
@@ -59,11 +62,38 @@ def _files_by_key(root: Path, snap: dict[str, Any]) -> dict[str, list[Path]]:
     if got is None:
         got = {}
         for p in _all_files(root):
-            idx = _index(p)
-            if idx:
-                got.setdefault(legacy_key.current_key(str(idx["key"] or "")), []).append(p)
+            key = _key_of(p)
+            if key is not None:
+                got.setdefault(legacy_key.current_key(key), []).append(p)
         snap["by_key"] = got
     return got
+
+
+def _key_of(path: Path) -> str | None:
+    """Лише ключ справи з файлу — без індексу прізвищ.
+
+    🔴 Мапа «ключ → файли» читає ВСІ файли сховища, а пошук по справі потім
+    індексує один-два з них. Повний `_index` нормалізував кожне прізвище кожної
+    справи: на 2038 файлах — 0,97 с проти 0,45 с самого розбору JSON (замір
+    21.10.2026), і ця різниця платилась у кожному `text find`.
+    """
+    try:
+        mtime = path.stat().st_mtime_ns
+    except OSError:
+        return None
+    hit = _CACHE.get(str(path))
+    if hit and hit[0] == mtime:
+        return str(hit[1]["key"] or "")
+    seen = _KEYS.get(str(path))
+    if seen and seen[0] == mtime:
+        return seen[1]
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    key = str((data.get("key") if isinstance(data, dict) else "") or "")
+    _KEYS[str(path)] = (mtime, key)
+    return key
 
 
 def _all_files(root: Path) -> list[Path]:
@@ -85,8 +115,8 @@ def _iter_files(case_key: str | None = None) -> Iterator[Path]:
         if p.name.endswith(".tmp"):
             continue
         if want is not None:
-            idx = _index(p)
-            if idx and legacy_key.current_key(str(idx["key"] or "")) == want:
+            key = _key_of(p)
+            if key is not None and legacy_key.current_key(key) == want:
                 yield p
         else:
             yield p

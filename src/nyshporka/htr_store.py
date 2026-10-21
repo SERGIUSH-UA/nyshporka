@@ -765,14 +765,9 @@ def _list_cases() -> list[dict[str, Any]]:
         def describe_case(_p: str) -> dict[str, Any] | None:  # type: ignore[misc]
             return None
     seen: set[str] = set()
-    for meta_path in sorted(htr_root().glob("*/_htr_meta.json")):
-        name = meta_path.parent.name
+    for name, ms in _meta_stats():
         seen.add(name)
-        try:
-            ms = meta_path.stat()
-            mstamp = f"{ms.st_mtime_ns:x}-{ms.st_size:x}"
-        except OSError:
-            continue
+        mstamp = f"{ms.st_mtime_ns:x}-{ms.st_size:x}"
         hit = entries.get(name)
         if hit and hit.get("stamp") == mstamp and isinstance(hit.get("row"), dict):
             row = hit["row"]
@@ -854,6 +849,29 @@ def _list_cases() -> list[dict[str, Any]]:
     _RUNS_CACHE = (stamp, out)
     if changed or gone:
         _runs_cache_write(entries, stamp[3])
+    return out
+
+
+def _meta_stats() -> list[tuple[str, os.stat_result]]:
+    """(ім'я прогону, stat його `_htr_meta.json`) — у порядку імен.
+
+    ⚡ Не `glob("*/_htr_meta.json")`: `pathlib` для такого шаблону читає ВЕСЬ
+    вміст кожної теки прогону — тисячі `.txt` у кожній з ~19 тис. тек, — і
+    перелік у новому процесі стояв 6–7 с у `glob` (профіль `text find`
+    21.10.2026: 7.6 с із 21). Тут — один обхід кореня й один `stat` на теку,
+    як у `_runs_stamp`.
+    """
+    out: list[tuple[str, os.stat_result]] = []
+    root = htr_root()
+    # Порядок — як у `sorted(Path)`, що на Windows порівнює без регістру: від
+    # нього залежить порядок прогонів з однаковим `updated` у видачі.
+    with os.scandir(root) as it:
+        dirs = sorted((e.name for e in it if e.is_dir()), key=os.path.normcase)
+    for name in dirs:
+        try:
+            out.append((name, os.stat(os.path.join(root, name, "_htr_meta.json"))))
+        except OSError:
+            continue
     return out
 
 

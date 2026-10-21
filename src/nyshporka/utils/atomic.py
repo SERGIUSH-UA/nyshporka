@@ -97,7 +97,7 @@ def atomic_write_bytes(path: Path | str, blob: bytes) -> Path:
     return path
 
 
-def write_json(path: Path | str, data: Any, *, indent: int = 2,
+def write_json(path: Path | str, data: Any, *, indent: int | None = 2,
                trailing_nl: bool = True, newline: str | None = None) -> Path:
     """JSON атомарно, кирилицею як є (`ensure_ascii=False`).
 
