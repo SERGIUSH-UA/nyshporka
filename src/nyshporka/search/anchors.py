@@ -166,10 +166,14 @@ def _from_canon(prof: Any = None) -> list[Person]:
             return []
         subs = _surname_substrings(prof)
         out: list[Person] = []
+        from nyshporka.search.selfcheck import _person
+
         for path in sorted(root.glob("*.md")):
-            try:
-                person = read_person(path)
-            except Exception:
+            # ⚡ Той самий кеш карток, що в самоперевірці (за часом зміни й
+            # розміром): пошук по справі розбирав YAML усього канону тричі —
+            # двічі тут і раз у самоперевірці, 2.3 с із 21 (профіль 21.10.2026).
+            person = _person(path, read_person)
+            if person is None:
                 continue
             form = ""
             for nm in person.names:
