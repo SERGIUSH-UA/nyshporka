@@ -48,10 +48,26 @@ def _gone(pid: int, within: float = 10.0) -> bool:
     return False
 
 
-def _cleanup(*pids: int) -> None:
+def _hold(*pids: int) -> list[psutil.Process]:
+    """Процеси тесту, прив'язані ЗАРАЗ — разом із часом створення.
+
+    🔴 Прибирати треба саме їх, а не номери: на Windows номер процесу, що вже
+    помер, за мить дістається іншому, і `psutil.Process(pid).kill()` у кінці
+    тесту вбивав би того, хто його отримав, — зокрема воркер pytest-xdist
+    (пак падав «node down» під кінець, по одному й каскадом). `kill()`
+    прив'язаного об'єкта перевіряє час створення й чужого не чіпає.
+    """
+    out = []
     for pid in pids:
         with contextlib.suppress(psutil.Error):
-            psutil.Process(pid).kill()
+            out.append(psutil.Process(pid))
+    return out
+
+
+def _cleanup(held: list[psutil.Process]) -> None:
+    for proc in held:
+        with contextlib.suppress(psutil.Error):
+            proc.kill()
 
 
 # ── Job Object ───────────────────────────────────────────────────────────────
@@ -64,12 +80,13 @@ def test_kill_takes_children_born_after_contain() -> None:
     tree = contain(proc.pid)
     assert tree is not None
     kid = int(proc.stdout.readline())  # type: ignore[union-attr]
+    held = _hold(proc.pid, kid)
     try:
         tree.kill()
         assert _gone(proc.pid) and _gone(kid), "робочий процес пережив зупинку"
     finally:
         tree.close()
-        _cleanup(proc.pid, kid)
+        _cleanup(held)
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Job Object є лише на Windows")
@@ -80,11 +97,12 @@ def test_closing_the_handle_leaves_no_orphans() -> None:
     tree = contain(proc.pid)
     assert tree is not None
     kid = int(proc.stdout.readline())  # type: ignore[union-attr]
+    held = _hold(proc.pid, kid)
     try:
         tree.close()
         assert _gone(proc.pid) and _gone(kid)
     finally:
-        _cleanup(proc.pid, kid)
+        _cleanup(held)
 
 
 def test_contain_refuses_itself_and_nonsense() -> None:
@@ -126,6 +144,7 @@ async def test_stop_reading_kills_the_worker_and_frees_the_channel(
     bus = JobBus(tmp_path / "jobs.json")
     job, _ = await bus.enqueue("read", title="справа")
     proc, kid = await _supervisor()
+    held = _hold(proc.pid, kid)
     trees = [contain(proc.pid) if with_job else None]
     pumps = [asyncio.create_task(_drain(proc))]
     try:
@@ -140,7 +159,7 @@ async def test_stop_reading_kills_the_worker_and_frees_the_channel(
         for t in trees:
             if t is not None:
                 t.close()
-        _cleanup(proc.pid, kid)
+        _cleanup(held)
 
 
 async def test_a_survivor_is_named_not_hidden(tmp_path, monkeypatch) -> None:
@@ -151,6 +170,7 @@ async def test_a_survivor_is_named_not_hidden(tmp_path, monkeypatch) -> None:
     bus = JobBus(tmp_path / "jobs.json")
     job, _ = await bus.enqueue("read", title="справа")
     proc, kid = await _supervisor()
+    held = _hold(proc.pid, kid)
     monkeypatch.setattr(S, "kill_tree", lambda pid, grace=5.0: [kid])
     monkeypatch.setattr("nyshporka.daemon.workers.STOP_DRAIN_SEC", 0.5)
     try:
@@ -158,4 +178,4 @@ async def test_a_survivor_is_named_not_hidden(tmp_path, monkeypatch) -> None:
         err = bus.get(job.id).error or ""
         assert str(kid) in err and "диспетчері задач" in err
     finally:
-        _cleanup(proc.pid, kid)
+        _cleanup(held)
