@@ -35,17 +35,27 @@ def test_strong_machine_gets_more_workers_than_weak(machine) -> None:
     weak = ST.sweep_workers(100, worker_gb=ST.FAST_WORKER_GB)
     assert strong == 6                  # фізичні ядра, не логічні
     assert weak == 2                    # 3 ГБ · 0,5 / 0,75 — пам'ять тісніша за ядра
-    assert ST.sweep_workers(100) == 1   # блок 1,5 ГБ на тій самій слабкій машині
+    assert ST.sweep_workers(100) == 1   # блок свіпу триграмами на тій самій машині
 
 
 def test_memory_limits_before_cores(machine) -> None:
-    machine.update(cores=32, physical=16, free_gb=6.0)
-    assert ST.sweep_workers(100) == int(6.0 * ST.MEM_SHARE / ST.BLOCK_WORKER_GB)
+    machine.update(cores=32, physical=16, free_gb=64.0)
+    assert ST.sweep_workers(100) == int(64.0 * ST.MEM_SHARE / ST.BLOCK_WORKER_GB) < 16
+
+
+def test_trigram_block_on_this_kind_of_machine_gets_one_worker(machine) -> None:
+    """32 ГБ, ~19 вільних: блок свіпу триграмами бере 2,5–7,7 ГБ і більше — один процес.
+
+    Саме тут 22.10.2026 шість процесів за старою цифрою (1,5 ГБ) поклали б систему.
+    """
+    machine.update(cores=12, physical=6, free_gb=19.0)
+    assert ST.sweep_workers(100) == 1
+    assert ST.sweep_workers(100, worker_gb=ST.FAST_WORKER_GB) == 6
 
 
 def test_never_more_than_blocks_and_never_zero(machine) -> None:
     machine.update(cores=12, physical=6, free_gb=20.0)
-    assert ST.sweep_workers(2) == 2
+    assert ST.sweep_workers(2, worker_gb=ST.FAST_WORKER_GB) == 2
     machine.update(cores=1, physical=1, free_gb=0.2)
     assert ST.sweep_workers(100) == 1
 

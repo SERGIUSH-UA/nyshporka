@@ -300,3 +300,33 @@ def test_trigram_freq_cached_beside_store_until_it_doubles(space: Path) -> None:
     finally:
         ST._TRIGRAMS.clear()
         conn.close()
+
+
+@pytest.mark.parametrize("pattern", PATTERNS)
+def test_chunked_grep_answers_like_before(space: Path, pattern: str,
+                                          monkeypatch: pytest.MonkeyPatch) -> None:
+    """Пачками (тут — в одному процесі) — та сама видача й той самий порядок."""
+    monkeypatch.setattr(ST, "GREP_PARALLEL_PAGES", 1)
+    monkeypatch.setattr(ST, "GREP_CHUNK_PAGES", 2)
+    monkeypatch.setenv(ST.SWEEP_WORKERS_ENV, "1")
+    runs = [*PAGES, "немає-такого"]
+    for limit, context in ((200, 1), (2, 0)):
+        want = _reference(pattern, runs, limit=limit, context=context)
+        got = ST.grep(pattern, runs, limit=limit, context=context)
+        assert {k: v for k, v in got.items() if k not in _NARROWS} == \
+            {k: v for k, v in want.items() if k not in _NARROWS}, pattern
+
+
+def test_grep_in_processes_answers_like_before(space: Path,
+                                               monkeypatch: pytest.MonkeyPatch) -> None:
+    """Справжні процеси: складання пачок у порядку сторінок, `limit` через межу пачок."""
+    monkeypatch.setattr(ST, "GREP_PARALLEL_PAGES", 1)
+    monkeypatch.setattr(ST, "GREP_CHUNK_PAGES", 1)
+    monkeypatch.setenv(ST.SWEEP_WORKERS_ENV, "2")
+    runs = list(PAGES)
+    for pattern in ("Ковальчинск", r"\d{2,4}", "(Ков|Кав)альчинск"):
+        for limit in (200, 2):
+            want = _reference(pattern, runs, limit=limit, context=1)
+            got = ST.grep(pattern, runs, limit=limit, context=1)
+            assert {k: v for k, v in got.items() if k not in _NARROWS} == \
+                {k: v for k, v in want.items() if k not in _NARROWS}, (pattern, limit)
