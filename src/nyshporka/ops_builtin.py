@@ -5007,11 +5007,15 @@ def _sections_payload() -> dict[str, Any]:
     b = _brand()
     ws = workspace()
     return {"sections": rows, "preset": S.preset_of(active),
-            # Верхній ярус консолі — етапи роботи (`core.sections.STAGES`).
-            "stages": [{"id": st.id, "label": st.label(), "label_en": st.label_en,
-                        "screens": list(st.screens)} for st in S.STAGES],
+            # Бічне меню консолі — блоки й групи (`core.sections.NAV_GROUPS`).
+            "nav": [{"id": g.id, "label": g.label(), "label_en": g.label_en,
+                     "block": g.block, "fold": g.fold, "screens": list(g.screens)}
+                    for g in S.NAV_GROUPS],
+            "blocks": list(S.BLOCKS),
+            # Шар даних екрана — мітка «де я» в заголовку сторінки.
+            "layers": dict(S.LAYERS),
             "project_screens": sorted(S.PROJECT_SCREENS),
-            "stage_action": dict(S.STAGE_ACTION),
+            "screen_action": dict(S.SCREEN_ACTION),
             # Майстерня без проєкту: проєктних вкладок немає, а перехід на
             # проєктний екран пропонує вибрати проєкт.
             "hub_only": bool(ws.hub_only and ws.project is None),

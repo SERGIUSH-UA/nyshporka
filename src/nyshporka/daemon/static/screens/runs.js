@@ -108,7 +108,7 @@ async function runsLoad(full = false) {
   const opt = (v, label, cur) =>
     `<option value="${esc(v)}"${v === cur ? ' selected' : ''}>${esc(label)}</option>`;
 
-  setView(`<h2>${t('runs.title')}</h2>
+  setView(`
     <p class="muted">${t('runs.why')}</p>
     <div class="row">
       <input id="runs-q" type="search" placeholder="${esc(t('runs.q'))}"

@@ -30,7 +30,7 @@ SCREENS.canon = async () => {
     callOp('canon.check', {}), callOp('canon.next', { limit: 3 })]);
   if (!alive(gen)) return;
   if (!chk.ok) return failure(chk);
-  setView(`<h2>${t('canon.title')}</h2>
+  setView(`
     <p class="muted">${t('canon.why')}</p>
     <div class="dash-two">
       <div class="dash-box" id="cn-check">${checkBox(chk)}</div>

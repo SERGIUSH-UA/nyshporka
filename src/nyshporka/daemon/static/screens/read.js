@@ -42,7 +42,6 @@ SCREENS.read = async () => {
   if (seed) RD = { case_dir: seed, script: '', card: null };
   ST.read = null;
   setView(`
-    <h2>${t('nav.read')}</h2>
     <p class="muted">${t('read.why')}</p>
     <form class="row" data-act="read.pick">
       ${pathField({ name: 'case_dir', mode: 'dir', purpose: 'read.case_dir',

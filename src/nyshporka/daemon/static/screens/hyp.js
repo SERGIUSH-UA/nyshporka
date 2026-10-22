@@ -41,7 +41,7 @@ SCREENS.hyp = async () => {
         <span>${pill(TONE[h.status] || 'neutral', t(`hyp.st.${h.status}`))}${
   h.hits ? ` ${pill(h.strong ? 'warn' : 'neutral', t('hyp.hits').replace('{n}', h.hits))}` : ''}</span></div>
       <button data-act="hyp.open" data-arg="${esc(h.id)}">${t('canon.open')}</button></div>`).join('');
-  setView(`<h2>${t('hyp.title')}</h2>
+  setView(`
     <p class="muted">${t('hyp.why')}</p>
     <div class="ov-kpis k3">${tile('open')}${tile('awaiting')}${tile('closed')}</div>
     <div class="dash-box">${rows || `<p class="muted">${t('hyp.none')}</p>`}</div>`);

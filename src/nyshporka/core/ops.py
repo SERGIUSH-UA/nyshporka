@@ -147,8 +147,11 @@ def readonly_refusal(name: str, mutates: bool) -> str | None:
 
 def _only_shows(args: Any) -> bool:
     """Змінна оп, покликана в режимі «лише показати», — даних не міняє."""
+    # `run=False` у `cloud.go` — кошторис без оренди: після нього реєстр
+    # «відставав», хоча в просторі нічого не мінялось (22.10.2026).
     return (getattr(args, "show", False) is True
-            or getattr(args, "dry_run", False) is True)
+            or getattr(args, "dry_run", False) is True
+            or getattr(args, "run", None) is False)
 
 
 def _readonly_refusal(op: Op) -> str | None:

@@ -121,6 +121,15 @@ def test_show_mode_of_a_mutating_op_does_not_beat(space):
     assert P.seq() != before, "запис профілю мусить бити пульс"
 
 
+def test_cloud_estimate_without_rent_does_not_beat() -> None:
+    """Кошторис хмари (`cloud.go` без `run`) нічого в просторі не міняє."""
+    from nyshporka.cloud.ops import GoArgs
+    from nyshporka.core.ops import _only_shows
+
+    assert _only_shows(GoArgs(case=["TEST/1/1/1"]))
+    assert not _only_shows(GoArgs(case=["TEST/1/1/1"], run=True))
+
+
 def test_quick_never_claims_fresh(space):
     """🔴 Найважливіший тест файла: збіг мітки не дає `stale=False` як факт.
 

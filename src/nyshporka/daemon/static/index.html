@@ -51,6 +51,9 @@
 {{SPRITE}}
 <div id="app">
 <header>
+  <!-- ☰ — бічне меню на вузькому екрані (`side.toggle`); на широкому кнопки немає. -->
+  <button type="button" class="side-btn" data-act="side.toggle" aria-controls="side"
+    data-i18n-title="side.menu">☰</button>
   <!--
     🦦 Логотип порталу: маскот і назва. Файл лежить у пакеті (`/ui/img`), тож
     в архіві без інтернету він на місці. Пульсує, поки в черзі є робота
@@ -70,21 +73,10 @@
   -->
   <div class="hmenu proj" id="proj-box" hidden>
     <button type="button" class="ctx-btn" data-act="menu.toggle" data-arg="proj-menu"
-      aria-haspopup="true" aria-expanded="false"><span class="dot"></span>
+      aria-haspopup="true" aria-expanded="false"><span class="ctx-badge" id="proj-badge"></span>
       <span class="ctx-t"><small id="proj-k"></small><b id="proj-v"></b></span><span class="caret">▾</span></button>
     <div class="hmenu-pop" id="proj-menu" hidden></div>
   </div>
-  <!--
-    🔴 Кнопки СТАВИТЬ JS із `/api/sections`, а не розмітка. Причина не в
-    зручності: частину застосунку вимикають профілем простору, і другий,
-    зашитий тут перелік розходився б із дозволеним тихо — виглядало б це як
-    кнопка, що веде в порожнечу, або як зникла без пояснення.
-
-    Два яруси: `.tabs` — розділи (секції), `.subtabs` — екрани активного
-    розділу. Одним рядом їх було дванадцять, і на вузькому екрані ряд
-    перетворювався на стіну без ієрархії.
-  -->
-  <nav id="nav" class="tabs"></nav>
   <!-- «Що зробити?» — консольний `nysh ops find`; клавіша `/`. -->
   <button type="button" class="ask" data-act="ask.open"><span class="ask-ic">⌕</span>
     <span data-i18n="ask.ph">Що зробити?</span><kbd>/</kbd></button>
@@ -102,16 +94,28 @@
       <span class="me-t" id="me-t"></span></button>
     <div class="hmenu-pop right" id="me-menu" hidden></div>
   </div>
-  <select class="lang" id="lang-sel" data-act="lang.set"></select>
-  <button class="lang" data-act="nav" data-arg="settings" title="Налаштування">⚙</button>
   <!--
-    Перемикач теми. Значок показує ПОТОЧНИЙ режим, а не той, у який перемкне:
-    інакше стан «за системою» нічим показати, і кнопка перестає бути
-    індикатором. Наповнення ставить `theme.js`.
+    ⚙ — мова, тема й налаштування в одному меню: у верхній панелі лише те, що
+    потрібне з будь-якого екрана (правила інтерфейсу, 22.10.2026).
   -->
-  <button class="thm" id="theme-btn" data-act="theme.cycle"></button>
+  <div class="hmenu">
+    <button type="button" class="gear" data-act="menu.toggle" data-arg="set-menu"
+      aria-haspopup="true" aria-expanded="false" data-i18n-title="nav.settings">⚙</button>
+    <div class="hmenu-pop right" id="set-menu" hidden>
+      <label class="hm-row"><small data-i18n="set.lang">Мова</small>
+        <select class="lang" id="lang-sel" data-act="lang.set"></select></label>
+      <!--
+        Перемикач теми. Значок показує ПОТОЧНИЙ режим, а не той, у який перемкне:
+        інакше стан «за системою» нічим показати, і кнопка перестає бути
+        індикатором. Наповнення ставить `theme.js`.
+      -->
+      <div class="hm-row hm-line"><small data-i18n="set.theme">Тема</small>
+        <button class="thm" id="theme-btn" data-act="theme.cycle"></button></div>
+      <div class="sep"></div>
+      <button type="button" data-act="nav" data-arg="settings"><span data-i18n="nav.settings">Налаштування</span></button>
+    </div>
+  </div>
 </header>
-<nav id="subnav" class="subtabs"></nav>
 <!--
   🪟 Вікно поверх екрана (`core/modal.js`). 🔴 Стоїть ПЕРЕД `<main>`: екрани шукають
   свої вузли за `id`, і екран у вікні мусить знаходитись першим, а не той, що під ним.
@@ -121,7 +125,18 @@
     <button type="button" class="ghost" data-act="modal.close" aria-label="✕">✕</button></div>
   <div class="dlg-body" id="dlg-body"></div>
 </dialog>
-<main id="view"></main>
+<div id="shell">
+  <!--
+    🔴 Пункти меню СТАВИТЬ JS із `/api/sections`, а не розмітка: частину
+    застосунку вимикають профілем простору, і другий, зашитий тут перелік
+    розходився б із дозволеним тихо — кнопкою, що веде в порожнечу.
+    Блоки — за тим, де живуть дані: рід, Майстерня, спільне, сервіс.
+  -->
+  <aside id="side" class="side"></aside>
+  <div class="side-shade" data-act="side.toggle"></div>
+  <!-- Заголовок сторінки (`nav.renderHead`) — поза `#view`: екран його не перемальовує. -->
+  <main><div id="phead" class="phead"></div><div id="view"></div></main>
+</div>
 </div>
 <script type="module" src="/static/app.js"></script>
 </body>

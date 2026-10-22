@@ -32,7 +32,7 @@ SCREENS.history = async () => {
   const auto = await callOp('history.auto', {});
   if (!alive(gen)) return;
   if (!auto.ok) return failure(auto);
-  setView(`<h2>${t('hist.title')}</h2>
+  setView(`
     <p class="muted">${t('hist.why')}</p>
     <div class="dash-box" id="hist-auto">${autoBox(auto.data || {})}</div>
     <div class="dash-box">

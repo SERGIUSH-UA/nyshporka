@@ -792,9 +792,6 @@ header select.lang { margin-left: 0; }
   .ctx-btn { margin-left: 0; }
 }
 
-/* Головна дія етапу — праворуч у рядку екранів. */
-.subtabs .stage-act { margin-left: auto; display: flex; align-items: center; padding-left: 1rem; }
-.subtabs .stage-act button { border-bottom: 0; padding: 4px 12px; }
 
 button.primary { background: var(--accent-fill); color: var(--accent-ink); border-color: var(--accent-fill); font-weight: 600; }
 button.ghost { background: none; }
@@ -927,17 +924,9 @@ details.ov-ws > summary { cursor: pointer; font-weight: 600; padding: .6rem 0; c
   .ov-cols { grid-template-columns: 1fr; }
   .ov-title { flex-wrap: wrap; }
 }
-/* Етапи й «Що зробити?» — в один рядок: на 1400 px значок ставав над підписом,
-   а «Що зробити?» ламалось на два рядки (прохід оком 22.10). */
-#nav button { display: inline-flex; align-items: center; gap: .3rem; white-space: nowrap; }
 .ask { white-space: nowrap; flex: 0 1 auto; }
 .ov-wait { font-size: .95rem; }
 .ov-row .pill { align-self: flex-start; margin-top: .2rem; }
-/* На телефоні етапи гортаються вбік, а не обрізаються («Супряга» ставала «С»). */
-@media (max-width: 760px) {
-  #nav { overflow-x: auto; scrollbar-width: none; max-width: 100%; }
-  #nav::-webkit-scrollbar { display: none; }
-}
 /* Реєстр відстав — один тихий рядок, без тла попередження. */
 .stale-line { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; margin: .3rem 0 .8rem;
   font-size: .85rem; color: var(--fg-3); }
@@ -970,3 +959,77 @@ button.pj-chip:hover { border-color: var(--accent); color: var(--fg); }
 .pj-mini .pj-badge { width: 1.4rem; height: 1.4rem; font-size: .75rem; }
 .pj-more { color: var(--fg-3); font-size: .82rem; margin-left: .15rem; }
 #proj-menu button .pj-badge { width: 1.5rem; height: 1.5rem; font-size: .78rem; margin-right: .55rem; }
+
+/* ══ Каркас: бічне меню, заголовок сторінки, контекст (правила інтерфейсу,
+   22.10.2026). Меню ділиться за тим, де живуть дані: рід · Майстерня ·
+   спільне · сервіс. Колір роду — лише акцент поруч із назвою. ══════════ */
+#shell { flex: 1 1 auto; display: flex; min-height: 0; }
+#shell > main { flex: 1 1 auto; min-width: 0; overflow: auto; }
+.side { flex: 0 0 15.5rem; overflow-y: auto; background: var(--s-1);
+  border-right: 1px solid var(--line); padding: .9rem .55rem 2rem; box-sizing: border-box; }
+.side .sb { margin-bottom: 1.1rem; }
+.side h4 { margin: .1rem .6rem .35rem; font: 600 .68rem/1.3 var(--font-text);
+  text-transform: uppercase; letter-spacing: .07em; color: var(--fg-4); }
+/* Блок роду підписано його назвою — це головна відповідь на «де я». */
+.side .sb-own h4 { font-size: .9rem; text-transform: none; letter-spacing: 0; color: var(--fg);
+  border-left: 3px solid var(--proj-color, var(--accent-fill)); padding-left: .5rem; margin-left: .45rem; }
+.side button { display: flex; align-items: center; gap: .5rem; width: 100%; text-align: left;
+  background: none; border: 0; border-radius: var(--r-s); padding: 6px 10px; margin: 1px 0;
+  color: var(--fg-2); cursor: pointer; font-size: 14px; }
+.side button:hover { background: var(--s-3); color: var(--fg); }
+.side button.on { background: color-mix(in srgb, var(--accent) 15%, transparent); color: var(--fg); font-weight: 600; }
+.side .sg-h { display: flex; align-items: center; }
+.side .sg-h > button:first-child { color: var(--fg-3); font-weight: 600; }
+.side .sg.cur > .sg-h > button:first-child { color: var(--fg); }
+.side .sg-fold { width: auto; flex: none; color: var(--fg-4); padding: 6px 9px; }
+.side .sg-fold .caret { display: inline-block; transition: transform var(--dur-1) var(--ease); }
+.side .sg-fold[aria-expanded="false"] .caret { transform: rotate(-90deg); }
+.side .sg-i { padding-left: .55rem; }
+.side #jobcount { margin-left: auto; }
+.side-shade { display: none; }
+.side-btn { display: none; background: none; border: 0; font-size: 1.3rem; color: var(--fg-2);
+  cursor: pointer; padding: 2px 6px; }
+
+/* Заголовок сторінки: крихти → назва → шар → дія. */
+.phead { margin: 0 0 1rem; }
+.phead:empty { display: none; }
+.crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem; font-size: .8rem; color: var(--fg-4); }
+.crumbs button { background: none; border: 0; padding: 0; color: var(--fg-3); cursor: pointer; font-size: inherit; }
+.crumbs button:hover { color: var(--accent); text-decoration: underline; }
+.crumbs i { font-style: normal; color: var(--fg-5); }
+.ph-row { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem .8rem; margin-top: .2rem; }
+.ph-row h1 { font-family: var(--font-serif); font-size: 1.75rem; font-weight: 600; line-height: 1.2; margin: 0; }
+.ph-acts { margin-left: auto; }
+/* Мітка шару: чиї це дані. Словами; рамка лише підтримує. */
+.tag { display: inline-flex; align-items: center; flex: none; font-size: .75rem; line-height: 1.5;
+  padding: 0 .55rem; border-radius: var(--r-pill); border: 1px solid var(--line-2); color: var(--fg-3);
+  white-space: nowrap; cursor: help; }
+.tag.layer-own { border-color: var(--proj-color, var(--accent-fill)); color: var(--fg-2); }
+.tag.layer-mixed { border-style: dashed; }
+.tag.layer-service { color: var(--fg-4); }
+
+/* Контекст у верхній панелі: кружок роду + вид + назва словами. */
+.ctx-btn { padding: 4px 12px 4px 6px; max-width: 20rem; }
+.ctx-t b { font-size: 15px; }
+.ctx-badge .pj-badge { width: 1.8rem; height: 1.8rem; font-size: .85rem; }
+.pj-hub { background: var(--s-4); color: var(--fg-3); }
+.gear { background: none; border: 0; font-size: 1.15rem; color: var(--fg-3); cursor: pointer; padding: 2px 6px; }
+.gear:hover { color: var(--fg); }
+.hmenu-pop .lang { margin: 0; font-size: .9rem; width: 100%; }
+.hm-line { display: flex; align-items: center; justify-content: space-between; }
+.hm-line .thm { margin-left: 0; }
+
+/* Вузький екран: меню висувне (☰), контекст — окремим рядком на всю ширину. */
+@media (max-width: 960px) {
+  .side-btn { display: inline-flex; }
+  .side { position: fixed; top: 0; bottom: 0; left: 0; z-index: 40; width: min(18rem, 86vw);
+    transform: translateX(-100%); transition: transform var(--dur-2) var(--ease); box-shadow: var(--sh-3); }
+  body.side-open .side { transform: none; }
+  body.side-open .side-shade { display: block; position: fixed; inset: 0; z-index: 35;
+    background: color-mix(in srgb, var(--bg) 65%, transparent); }
+}
+@media (max-width: 700px) {
+  #proj-box { order: 5; flex-basis: 100%; }
+  #proj-box .ctx-btn { max-width: none; width: 100%; }
+  .ph-row h1 { font-size: 1.4rem; }
+}

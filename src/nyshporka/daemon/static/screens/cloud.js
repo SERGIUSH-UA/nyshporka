@@ -40,7 +40,7 @@ SCREENS.cloud = async () => {
   const unreleased = RUNS.filter((r) => r.needs_release).length;
   const tile = (label, value, tone = '') => `<div class="ov-kpi${tone ? ` ${tone}` : ''}"><span class="ov-kpi-l">${
     esc(label)}</span><span class="ov-kpi-v"><b class="num">${esc(value)}</b></span></div>`;
-  setView(`<h2>${t('cloud.title')}</h2>
+  setView(`
     <p class="muted">${t('cloud.why')}</p>
     ${renderWarnings(env)}
     <div class="ov-kpis k3">${RUNS.length ? tile(t('cloud.spent.last').replace('{n}', RUNS.length), money(spent)) : ''}${

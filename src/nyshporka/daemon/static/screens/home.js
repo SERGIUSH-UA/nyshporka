@@ -300,7 +300,7 @@ function dashboard(env, d) {
   // У проєкті канон — уже вгорі (показники роду), а двері першого запуску в
   // наповненій Майстерні з проєктами лише подовжують сторінку.
   const proj = inProject();
-  return `<div class="dash-top"><div>${proj ? '' : `<h2>${t('dash.title')}</h2>`}
+  return `<div class="dash-top"><div>
     ${headline(d, ws)}</div>${proj ? '' : maskot('lupa', 92)}</div>
     ${renderWarnings(env)}
     ${stepsBox(d)}

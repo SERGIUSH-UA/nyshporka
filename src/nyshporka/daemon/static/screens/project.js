@@ -4,10 +4,10 @@ import { t } from '../core/strings.js';
 import { PROJECT, callOp } from '../core/net.js';
 import { esc, el, setView, boxError, busyForm, fld, humanError } from '../core/view.js';
 import { SCREENS, ACTIONS } from '../core/registry.js';
-import { goto, jobDone, jobChip } from '../core/nav.js';
+import { goto, jobDone, jobChip, currentScreen, SECTIONS } from '../core/nav.js';
 import { openModal, closeModal } from '../core/modal.js';
 import { unwiki } from '../core/bits.js';
-import { projectBadge as badge, projectColor } from '../core/projects.js';
+import { projectBadge as badge, projectColor, projectsNow, currentPid } from '../core/projects.js';
 
 /**
  * Перейти в проєкт: нова адреса вкладки (`?p=`), а не стан сторінки — інакше
@@ -20,6 +20,19 @@ export function openProject(id, back = '', extra = {}) {
   if (id) q.set('p', id); else q.delete('p');
   for (const [k, v] of Object.entries(extra)) q.set(k, v);
   location.href = `${location.pathname}?${q.toString()}${back ? `#${back}` : ''}`;
+}
+
+/**
+ * Екран, на якому лишитись після зміни контексту: «Бібліотека» в роді X →
+ * «Бібліотека» в роді Y. Екран роду при переході в саму Майстерню веде на її
+ * Огляд — роду там немає, а вибір проєкту замість Майстерні був би не тим,
+ * чого людина просила.
+ */
+function keepScreen(toHub) {
+  const here = currentScreen();
+  if (!here) return '';
+  if (toHub && (SECTIONS.project_screens || []).includes(here)) return 'home';
+  return here;
 }
 
 SCREENS.newproject = async () => {
@@ -111,7 +124,7 @@ function setKpi(id, value, sub, tone = '') {
 export function projectShell() {
   return `<section class="ov" id="ov-head">
     <div class="ov-title"><span id="ov-badge"></span>
-      <div><h2 id="ov-name">${esc(PROJECT || '')}</h2><span class="muted" id="ov-sub"></span></div>
+      <span class="muted" id="ov-sub"></span>
       <button class="ghost ctl-sm ov-style" data-act="phead.style">${t('phead.style')}</button></div>
     <div class="ov-kpis">
       ${kpi('ov-k-canon', t('nav.canon'), 'canon')}
@@ -140,8 +153,6 @@ export async function fillProject(stillHere = () => true) {
       if (!stillHere() || !st.ok || !(st.data || {}).project) return;
       const d = st.data;
       HEAD = d;
-      const n = el('ov-name');
-      if (n) n.textContent = d.name || d.project;
       const sub = el('ov-sub');
       if (sub) {
         sub.textContent = `${t(`np.kind.${d.kind === 'order' ? 'order' : 'family'}`)}${
@@ -260,7 +271,13 @@ Object.assign(ACTIONS, {
     // Перемальовуємо весь Огляд: застарілий рядок «Стану Майстерні» теж зникає.
     if (job.state === 'done') goto('home');
   },
-  'project.go': (_ev, elm) => openProject(elm.dataset.arg, elm.dataset.back || ''),
+  'project.go': (_ev, elm) => {
+    const id = elm.dataset.arg;
+    const hub = (projectsNow() || {}).hub_id || '_hub';
+    // Той самий контекст — нікуди не йдемо: перезавантаження стерло б набране.
+    if ((id === hub && !currentPid()) || (id && id === currentPid())) return undefined;
+    return openProject(id, elm.dataset.back || keepScreen(id === hub));
+  },
   // Картка іншого проєкту (з позначки «уже в каноні» в Пошуку).
   'project.card': (_ev, elm) => openProject(elm.dataset.arg, 'canon',
     { card: elm.dataset.card || '' }),

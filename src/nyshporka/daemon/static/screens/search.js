@@ -84,7 +84,6 @@ SCREENS.search = async () => {
   const fromJob = (ST.search || {}).job || '';
   ST.search = null;
   setView(`
-    <h2>${t('nav.search')}</h2>
     <p class="muted">${t('search.why')}</p>
     <form data-act="search.run" id="search-form">
       <div class="row">

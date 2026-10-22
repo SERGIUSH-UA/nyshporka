@@ -25,7 +25,7 @@ SCREENS.research = async () => {
   if (!env.ok) return failure(env);
   ROWS = (env.data || {}).rows || [];
   const kinds = [...new Set(ROWS.map((r) => r.kind).filter(Boolean))].sort();
-  setView(`<h2>${t('rs.title')}</h2>
+  setView(`
     <p class="muted">${t('rs.why')}</p>
     <div class="row">
       <label class="fld"><span class="fld-l">${t('rs.find')}</span>

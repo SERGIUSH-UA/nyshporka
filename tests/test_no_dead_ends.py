@@ -377,7 +377,7 @@ def test_translations_cover_every_key_in_every_language() -> None:
         empty = [k for k, v in d.items() if not str(v).strip()]
         assert not empty, f"{lang}: порожні {empty[:20]}"
     used = set(re.findall(r"\bt\('([\w.]+)'\)", _js())) | set(
-        re.findall(r'data-i18n="([\w.]+)"', _html()))
+        re.findall(r'data-i18n(?:-title)?="([\w.]+)"', _html()))
     assert not (used - uk), f"ужито без перекладу: {sorted(used - uk)}"
 
 

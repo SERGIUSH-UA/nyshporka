@@ -54,7 +54,6 @@ SCREENS.fonds = async () => {
     ? { ...env, warnings: (env.warnings || []).filter((w) => w.code !== 'no_registries') }
     : env;
   setView(`
-    <h2>${t('nav.fonds')}</h2>
     ${empty ? `<p class="muted">${t('fonds.why')}</p>` : ''}
     ${renderWarnings(notes)}
     ${empty ? fondNone() : fondHead(fonds)}

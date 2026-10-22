@@ -29,7 +29,6 @@ const PAGE_TYPES = ['birth', 'marriage', 'death', 'confession', 'revision',
 SCREENS.eye = async () => {
   const e = ST.eye || {};
   setView(`
-    <h2>${t('nav.eye')}</h2>
     <p class="muted">${t('eye.rule')}</p>
     <form class="row" data-act="eye.check">
       <input name="case" placeholder="${t('eye.case')}: ДАХмО 315-1-8433"

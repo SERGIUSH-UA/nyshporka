@@ -49,7 +49,7 @@ function card(kind, info, canon, can = true) {
 }
 
 SCREENS.site = async () => {
-  setView(`<h2>${t('nav.site')}</h2>
+  setView(`
     <p class="muted">${t('site.why')}</p>
     <div id="site-cards"><p class="muted">${t('common.loading')}</p></div>`);
   const env = await callOp('site.status', {});

@@ -156,7 +156,7 @@ async function queueLoad(full = false) {
     if (box && !typing) swapHtml(box, queueBody(env));
     return;
   }
-  setView(`<h2>${t('queue.title')}</h2>
+  setView(`
     <p class="muted">${t('queue.why')}</p>
     <form class="row" data-act="queue.add">
       <input name="refs" required placeholder="${esc(t('queue.add.ph'))}">

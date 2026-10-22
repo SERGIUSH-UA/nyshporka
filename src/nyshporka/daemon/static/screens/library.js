@@ -111,7 +111,7 @@ async function libLoad(full = false) {
     return;
   }
 
-  const head = `<h2>${t('lib.title')}</h2>
+  const head = `
     <p class="muted">${t('lib.why')}</p>`;
 
   if (!d.built) {
