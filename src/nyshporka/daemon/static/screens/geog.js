@@ -70,7 +70,7 @@ SCREENS.geog = async () => {
 function renderPlaces(places) {
   return `<table><tbody>${(places || []).map((p) => `<tr>
     <td class="num">${esc(p.score)}</td>
-    <td><b>${esc(p.village_uk)}</b>${p.region === 'mismatch' ? ` <span class="warn">⚠ ${t('church.mismatch')}</span>` : ''}${p.region === 'far' ? ` <span class="warn">⚠ ${esc(p.km)} ${t('church.km')}</span>` : ''}${p.km != null && p.region !== 'far' ? ` <span class="muted">${esc(p.km)} ${t('church.km')}</span>` : ''}</td>
+    <td><b>${esc(p.village_uk)}</b>${p.region === 'mismatch' ? ` <span class="warn">${ic('alert', 'ic-sm')} ${t('church.mismatch')}</span>` : ''}${p.region === 'far' ? ` <span class="warn">${ic('alert', 'ic-sm')} ${esc(p.km)} ${t('church.km')}</span>` : ''}${p.km != null && p.region !== 'far' ? ` <span class="muted">${esc(p.km)} ${t('church.km')}</span>` : ''}</td>
     <td class="muted">${esc(p.uezd_gub || '')}</td>
     <td class="num">${p.n_cases || 0}</td>
     <td><button data-act="geog.card" data-arg="${esc(p.card)}">${t('view.open')}</button></td>
@@ -89,7 +89,7 @@ function renderChurches(env, rows, withKm) {
       <td>${esc(c.voivodeship_uk || c.voivodeship || '')}<br><span class="muted">${esc(c.deanery || '')}</span></td>
       <td>${esc(c.title_uk || c.title || '')}</td>
       <td>${(c.places || []).map((p) => `<button class="ctl-sm" data-act="geog.card" data-arg="${esc(p.card)}"
-          title="${esc(p.uezd_gub || '')}">${p.region === 'mismatch' ? '⚠ ' : ''}${esc(p.village_uk)} · ${p.n_cases || 0}</button>`).join(' ')}</td>
+          title="${esc(p.uezd_gub || '')}">${p.region === 'mismatch' ? ic('alert', 'ic-o ic-sm') + ' ' : ''}${esc(p.village_uk)} · ${p.n_cases || 0}</button>`).join(' ')}</td>
       <td class="acts">
         <button class="ctl-sm" data-act="church.card" data-arg="${esc(c.ob_id)}">${t('view.open')}</button>
         <button class="ctl-sm" data-act="church.near" data-arg="${esc(c.ob_id)}">${t('church.near')}</button>
@@ -176,7 +176,7 @@ Object.assign(ACTIONS, {
     const rows = env.data.places || [];
     setView(`
       <h2>${t('geog.near.title')}</h2>
-      <p class="muted">📍 ${esc(c.how || '')} · ${c.km} ${t('church.km')} · ${rows.length} · ${t('geog.cases')}: <b>${env.data.n_cases || 0}</b></p>
+      <p class="muted">${ic('map', 'ic-sm')} ${esc(c.how || '')} · ${c.km} ${t('church.km')} · ${rows.length} · ${t('geog.cases')}: <b>${env.data.n_cases || 0}</b></p>
       ${renderWarnings(env)}
       <table><tbody>${rows.map((p) => `<tr>
         <td class="num">${esc(p.km)} ${t('church.km')}${p.how === 'ambiguous' ? ' ?' : ''}</td>
@@ -194,7 +194,7 @@ Object.assign(ACTIONS, {
     if (!env.ok) { el('churchhits').innerHTML = `<div class="warn err">${esc(env.error)}</div>`; return; }
     const c = env.data.center || {};
     el('churchhits').innerHTML = `
-      <p>📍 ${esc(c.how || '')} · ${c.km} ${t('church.km')}</p>
+      <p>${ic('map', 'ic-sm')} ${esc(c.how || '')} · ${c.km} ${t('church.km')}</p>
       ${renderChurches(env, env.data.churches || [], true)}`;
   },
 
@@ -245,8 +245,8 @@ Object.assign(ACTIONS, {
         ${pl.archive_label ? ` · ${t('geog.archive')}: <b>${esc(pl.archive_label)}</b>` : ''}
       </p>
       ${renderWarnings(env)}
-      ${pl.location && pl.location.lat != null ? `<p class="muted">📍 ${Number(pl.location.lat).toFixed(4)}, ${Number(pl.location.lng).toFixed(4)}
-        <span class="mono">${esc(pl.location.qid)}</span>${pl.location.how === 'ambiguous' ? ` ⚠ ${t('geog.loc.ambiguous')}` : ''}
+      ${pl.location && pl.location.lat != null ? `<p class="muted">${ic('map', 'ic-sm')} ${Number(pl.location.lat).toFixed(4)}, ${Number(pl.location.lng).toFixed(4)}
+        <span class="mono">${esc(pl.location.qid)}</span>${pl.location.how === 'ambiguous' ? ` ${ic('alert', 'ic-sm')} ${t('geog.loc.ambiguous')}` : ''}
         <button class="ctl-sm" data-act="geog.near" data-arg="${esc(pl.card)}">${t('geog.near')}</button>
         <button class="ctl-sm" data-act="church.near" data-arg="${esc(`${pl.location.lat},${pl.location.lng}`)}">${t('geog.near.churches')}</button></p>` : ''}
       <p><b>${cases.length}</b> ${t('geog.cases')}, ${t('geog.ondisk')} <b>${pl.n_on_disk || 0}</b></p>

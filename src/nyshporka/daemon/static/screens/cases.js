@@ -404,7 +404,7 @@ Object.assign(ACTIONS, {
     if (sel) sel.innerHTML = repoOptions(env.data.code);
     if (hits) {
       hits.innerHTML = `${renderWarnings(env)}
-        <div class="warn">✅ ${esc(env.data.label)} — ${t('case.repo.added')}</div>`;
+        <div class="warn">${ic('check-circle', 'ic-sm')} ${esc(env.data.label)} — ${t('case.repo.added')}</div>`;
     }
   },
 
@@ -427,6 +427,6 @@ Object.assign(ACTIONS, {
     }
     const sc = env.data.sidecar;
     el('hits').innerHTML = `${renderWarnings(env)}
-      <div class="warn">✅ <b>${esc(sc.shifra)}</b> — ${esc(sc.title || 'без назви')}</div>`;
+      <div class="warn">${ic('check-circle', 'ic-sm')} <b>${esc(sc.shifra)}</b> — ${esc(sc.title || 'без назви')}</div>`;
   },
 });

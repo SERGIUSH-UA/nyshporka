@@ -16,47 +16,26 @@
 // жодної помилки в консолі — `<use>` на неіснуючий id мовчить. Що всі назви
 // звідси є у спрайті, доводить приймач.
 
-// ── Тон закріплений за ЗНАЧКОМ, а не за місцем ───────────────────────────────
-// Кошик червоний і в банку, і в синтетиці, і в модалці; папка жовта скрізь.
-// Саме сталість робить колір ДРУГОЮ ознакою впізнавання поряд із формою — око
-// ловить «щось червоне праворуч» ще до того, як прочитає підпис. Тон,
-// прив'язаний до місця (усі значки вкладки — одного кольору), цього не дає:
-// всередині вкладки значки знову зливаються.
+// ── 🖋 Один колір — чорнило ──────────────────────────────────────────────────
+// Значок бере колір тексту поруч (`currentColor`), як рядок, написаний тим самим
+// пером. Власний тон мають лише сенси, однакові скрізь: зелене «так» (додати,
+// зберегти, запустити), червоне «ні» (видалити, різати, зупинити), медове
+// «увага» і лапка знака. Доти тон був за кожним значком — шістнадцять кольорів, бузковий,
+// лаймовий, рожевий, — і консоль виглядала як чужий сервіс, а не як Нишпорка
+// (рішення дослідника 23.10.2026). Нового тону сюди не додавати: колір, що
+// означає «цей значок», а не «так/ні», повертає ту саму веселку.
 // Кольори — `--ic-*` у tokens.css, класи `.ic-t-*` — у base.css.
 export const TONES = {
-  // розділи й підвкладки
-  search: 'gold', 'archive-box': 'sand', drawers: 'indigo', chip: 'teal',
-  scan: 'lime', 'crop-check': 'sky', quill: 'violet', 'pencil-line': 'pink',
-  books: 'amber', column: 'sand', eye: 'cyan', letters: 'gold',
-  twins: 'blue', flask: 'mint', curve: 'orange', bars: 'sky',
-  // ствердне / деструктивне — семантика, однакова скрізь
   plus: 'green', check: 'green', 'check-circle': 'green', play: 'green',
-  x: 'red', 'x-circle': 'red', trash: 'red', broom: 'red', scissors: 'red',
-  'slash-page': 'red', 'chart-down': 'red', stop: 'red',
-  // робота з даними
-  folder: 'amber', 'folder-open': 'amber', 'book-open': 'amber', note: 'amber',
-  clock: 'amber', scale: 'amber', target: 'orange', refresh: 'sky', list: 'blue',
-  download: 'blue', upload: 'blue', mail: 'blue', disk: 'teal', anchor: 'teal',
-  link: 'cyan', focus: 'cyan', zone: 'cyan', swap: 'cyan', radar: 'cyan',
-  // ручна праця й образи
-  'pen-nib': 'violet', image: 'violet', film: 'violet', wand: 'violet',
-  sparkles: 'violet', ab: 'violet', mic: 'pink', palette: 'pink', hook: 'pink',
-  // відзнаки та стани
-  info: 'sky', ruler: 'slate', gauge: 'orange',
-  bolt: 'gold', medal: 'gold', alert: 'gold', pause: 'gold', skip: 'gold',
-  paw: 'gold', tag: 'mint', flag: 'mint', new: 'mint',
-  // службове — навмисно тихе, щоб не сперечалося зі змістовними значками
-  printer: 'slate', hand: 'slate', grid4: 'slate', rect: 'slate', page: 'slate',
-  scroll: 'slate', 'help-circle': 'slate', undo: 'slate', expand: 'slate',
-  settings: 'slate', menu: 'slate', 'chevron-up': 'slate', 'arrow-up': 'slate',
-  'arrow-left': 'slate', 'arrow-right': 'slate',
+  x: 'red', 'x-circle': 'red', trash: 'red', scissors: 'red', stop: 'red',
+  paw: 'gold', alert: 'gold',
 };
 
-export const tone = (name) => TONES[name] || 'slate';
+export const tone = (name) => TONES[name] || '';
 
 export function ic(name, cls = '') {
   const plain = cls.includes('ic-plain');
-  const t = plain ? '' : ' ic-t-' + tone(name);
+  const t = plain || !tone(name) ? '' : ' ic-t-' + tone(name);
   const extra = cls ? ' ' + cls : '';
   return `<svg class="ic${t}${extra}" aria-hidden="true"><use href="#i-${name}"/></svg>`;
 }

@@ -1,5 +1,6 @@
 /** 📁 Проєкти Майстерні: новий проєкт (вікно), перехід у проєкт, картки на Огляді. */
 
+import { ic } from '/ui/icons.js';
 import { t } from '../core/strings.js';
 import { PROJECT, callOp } from '../core/net.js';
 import { esc, el, setView, boxError, busyForm, fld, humanError } from '../core/view.js';
@@ -199,7 +200,7 @@ export async function fillProject(stillHere = () => true) {
         ...rows.map((r) => `<div class="ov-feed"><span class="muted mono">${esc(r.date)}</span><span>${
           esc(r.subject)}</span></div>`),
         ...reps.map((r) => `<button class="ov-feed ov-link" data-act="rs.read" data-arg="${esc(r.path)}">
-          <span class="muted">📝</span><span>${esc(r.title)}</span></button>`)];
+          <span class="muted">${ic('note', 'ic-o ic-sm')}</span><span>${esc(r.title)}</span></button>`)];
       box.innerHTML = items.length ? items.join('') : `<p class="muted">${t('ov.new.none')}</p>`;
     }),
   ];

@@ -99,10 +99,10 @@ function stemGaps(d) {
   // 1918 року вона орфографія САМОГО ДЖЕРЕЛА, тобто без неї покриття не
   // «неповне», а нульове; у спільному списку це читалось як дрібниця.
   const prereform = miss.includes('ru_prereform')
-    ? `<p class="warn">⚠ ${t('prof.gaps.prereform')}</p>` : '';
+    ? `<p class="warn">${ic('alert', 'ic-sm')} ${t('prof.gaps.prereform')}</p>` : '';
   const rest = miss.filter((o) => o !== 'ru_prereform');
   const others = rest.length
-    ? `<p class="muted">⚠ ${t('prof.gaps')}: <span class="mono">${
+    ? `<p class="muted">${ic('alert', 'ic-sm')} ${t('prof.gaps')}: <span class="mono">${
       rest.map(esc).join(' · ')}</span></p>` : '';
   return prereform + others;
 }
@@ -129,7 +129,7 @@ function form(d) {
       </div>
       <p class="muted">${t('prof.paradigm.why')}</p>
       <h4>${t('prof.stems')}</h4>
-      <p class="muted">🔴 ${t('prof.stems.why')}</p>
+      <p class="muted">${ic('alert', 'ic-sm')} ${t('prof.stems.why')}</p>
       <div class="row">
         ${(d.orthographies || []).map((o) => `<label class="lbl-mini">${
           t('orth.' + o)}<input class="inp-mini" name="stem_${esc(o)}"

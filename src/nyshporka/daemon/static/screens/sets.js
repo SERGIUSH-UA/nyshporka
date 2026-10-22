@@ -117,7 +117,7 @@ async function setsList() {
       : `<span class="warn-inline">${t('sets.nocrops')}</span>`;
     return `<tr>
       <td><b>${esc(s.name)}</b>${s.title ? `<div class="muted">${esc(s.title)}</div>` : ''}</td>
-      <td>${s.role === 'holdout' ? '🎯 ' + t('sets.role.holdout') : t('sets.role.train')}</td>
+      <td>${s.role === 'holdout' ? ic('target', 'ic-sm') + ' ' + t('sets.role.holdout') : t('sets.role.train')}</td>
       <td class="num">${crops}</td>
       <td class="num">${s.n_marked} <span class="muted">(ok ${st.ok || 0})</span></td>
       <td class="num">${merge}</td>

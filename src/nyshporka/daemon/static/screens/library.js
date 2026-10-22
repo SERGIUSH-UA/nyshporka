@@ -598,7 +598,7 @@ Object.assign(ACTIONS, {
     // Панель підтвердження — лише на тривогу: примітка не варта того, щоб
     // зупиняти людину посеред переліку.
     if (box && hasAlerts(env)) {
-      box.innerHTML = `<div class="warn">✅ ${esc(elm.dataset.arg)}</div>`
+      box.innerHTML = `<div class="warn">${ic('check-circle', 'ic-sm')} ${esc(elm.dataset.arg)}</div>`
         + renderWarnings(env)
         + `<p><button data-act="nav" data-arg="library">${t('lib.cancel')}</button></p>`;
       return undefined;

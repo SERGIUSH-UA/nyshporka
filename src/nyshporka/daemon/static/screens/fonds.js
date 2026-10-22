@@ -462,7 +462,7 @@ function diskCell(r) {
   // 🔴 Розходження порядково: число у зведенні каже «17 справ», але не каже,
   // котрим саме не вірити.
   const bad = r.disk_mismatch
-    ? ` <span class="mism" title="${t('fonds.disk.mismatch')}">⚠</span>` : '';
+    ? ` <span class="mism" title="${t('fonds.disk.mismatch')}">${ic('alert', 'ic-o ic-sm')}</span>` : '';
   return `<span title="${esc(r.on_disk || r.state || '')}">${mark}</span>${frames}${bad}`;
 }
 
@@ -490,10 +490,10 @@ function shifraCell(r) {
   const bits = [`<span class="mono">${esc(r.shifra)}</span>`];
   if (r.num_src === 'interp') {
     const page = r.src_page ? ` ${t('fonds.num.page')} ${esc(r.src_page)}` : '';
-    bits.push(`<span title="${t('fonds.num.interp')}${page}">🔴</span>`);
+    bits.push(`<span title="${t('fonds.num.interp')}${page}">${ic('alert', 'ic-o ic-sm')}</span>`);
   }
   if (r.page_quality === 'lo') {
-    bits.push(`<span title="${t('fonds.num.lo')}">⚠</span>`);
+    bits.push(`<span title="${t('fonds.num.lo')}">${ic('alert', 'ic-o ic-sm')}</span>`);
   }
   return bits.join(' ');
 }

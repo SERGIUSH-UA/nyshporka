@@ -76,7 +76,7 @@ function siftDraw() {
     <div id="sift-crop"><p class="muted">${t('sift.crop.load')}…</p></div>
     <p class="mono">${lit}</p>
     <div id="sift-ctx"></div>
-    <p class="muted">${t('sift.stem')}</p>
+    <p class="muted">${ic('alert', 'ic-sm')} ${t('sift.stem')}</p>
     <div class="row">
       <button data-act="sift.full" title="${esc(t('view.page.why'))}">
         ${ic('expand', 'ic-sm')} ${t('view.page')}</button>

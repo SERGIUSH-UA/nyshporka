@@ -189,9 +189,9 @@ function runsGroup(runs) {
  * під «◐», значком поступу, — і спинений годину тому виглядав як той, що йде.
  */
 export function runState(r) {
-  if (runDone(r)) return `<span class="run-state">✅ ${t('runs.st.done')}</span>`;
+  if (runDone(r)) return `<span class="run-state">${ic('check-circle', 'ic-sm')} ${t('runs.st.done')}</span>`;
   if (r.state === 'reading') return `<span class="run-state">▶ ${t('runs.st.reading')}</span>`;
-  return `<span class="run-state" title="${esc(t('runs.st.going.why'))}">⏸ ${t('runs.st.going')}</span>`;
+  return `<span class="run-state" title="${esc(t('runs.st.going.why'))}">${ic('pause', 'ic-sm')} ${t('runs.st.going')}</span>`;
 }
 
 function runDone(r) {
@@ -278,10 +278,10 @@ function runsGap(g) {
   }
   const scripts = new Set(g.runs.map((r) => r.script).filter(Boolean));
   if (ids.size >= 2) {
-    return `<p class="dim">🤝 ${t('runs.gap.covered')}</p>`;
+    return `<p class="dim">${ic('stitch', 'ic-sm')} ${t('runs.gap.covered')}</p>`;
   }
   if (scripts.has('cyrillic') && ids.size === 1 && ids.has('pysar')) {
-    return `<p class="dim">🤝 ${t('runs.gap.second')}</p>`;
+    return `<p class="dim">${ic('stitch', 'ic-sm')} ${t('runs.gap.second')}</p>`;
   }
   return '';
 }
@@ -401,7 +401,7 @@ Object.assign(ACTIONS, {
       why: ((el(`${pre}-why-${i}`) || {}).value || '').trim(),
     });
     if (!env.ok) return say(`<div class="warn err">${esc(env.error)}</div>`);
-    say(`${renderWarnings(env)}<div class="warn">✅ ${esc(elm.dataset.arg)} → ${
+    say(`${renderWarnings(env)}<div class="warn">${ic('check-circle', 'ic-sm')} ${esc(elm.dataset.arg)} → ${
       esc(key)} — ${t('runs.bind.done')}</div>`);
     // 🔴 Прив'язка змінює реєстр, і доки він не перезібраний, вона нікуди не
     // видна — сама операція каже про це полем `stale`. Робимо це за людину:

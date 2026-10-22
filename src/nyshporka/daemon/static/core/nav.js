@@ -335,7 +335,7 @@ async function show(screen) {
       <p class="muted">${esc(tOr(`section.${sid}.why`, sec.why || ''))}</p>
       <button data-act="sections.toggle" data-arg="${esc(sid)}"
         data-back="${esc(screen)}">${t('sect.on')}</button>
-      <button data-act="nav" data-arg="settings">⚙ ${t('sect.title')}</button></div>`);
+      <button data-act="nav" data-arg="settings">${ic('settings', 'ic-sm')} ${t('sect.title')}</button></div>`);
     return;
   }
   // Вікно — поверх поточного екрана: ні покоління, ні адреса, ні шапка не
@@ -526,7 +526,7 @@ function jobState(state) {
 function jobNotes(j) {
   // Тривоги — плашкою, решта — згорнутими примітками (`view.splitWarnings`).
   const { alerts, notes: quiet } = splitWarnings(j.warnings);
-  const notes = alerts.map((a) => `<div class="warn">⚠ ${esc(a)}</div>`);
+  const notes = alerts.map((a) => `<div class="warn">${ic('alert', 'ic-sm')} ${esc(a)}</div>`);
   // 🔴 І кнопка, а не лише текст. Довга робота часто не остання в ланцюжку
   // («зібране лягло окремим файлом; звести джерела в реєстр»), і поки поради
   // йшли самим текстом із командою терміналу, вони називали наступний крок

@@ -53,14 +53,9 @@ html, body { margin: 0; height: 100%; font: var(--font-size)/var(--line-height) 
 /* Тон значка (мапа значок→тон — у `core/icons.js`, там же й пояснення).
    Задається `color`, а не `stroke`: так тон лишається ЗВИЧАЙНИМ успадкуванням
    і будь-яке правило нижче може його перебити одним рядком. */
-.ic-t-gold   { color: var(--ic-gold); }    .ic-t-amber  { color: var(--ic-amber); }
-.ic-t-orange { color: var(--ic-orange); }  .ic-t-red    { color: var(--ic-red); }
-.ic-t-pink   { color: var(--ic-pink); }    .ic-t-violet { color: var(--ic-violet); }
-.ic-t-indigo { color: var(--ic-indigo); }  .ic-t-blue   { color: var(--ic-blue); }
-.ic-t-sky    { color: var(--ic-sky); }     .ic-t-cyan   { color: var(--ic-cyan); }
-.ic-t-teal   { color: var(--ic-teal); }    .ic-t-green  { color: var(--ic-green); }
-.ic-t-mint   { color: var(--ic-mint); }    .ic-t-lime   { color: var(--ic-lime); }
-.ic-t-sand   { color: var(--ic-sand); }    .ic-t-slate  { color: var(--ic-slate); }
+.ic-t-gold  { color: var(--ic-gold); }
+.ic-t-green { color: var(--ic-green); }
+.ic-t-red   { color: var(--ic-red); }
 
 /* ── 🖋 бейдж рушія: колір + ФОРМА + ЛІТЕРА ───────────────────────────────
    Три ознаки навмисно, і кожна працює сама. Вивід читають у логах, на

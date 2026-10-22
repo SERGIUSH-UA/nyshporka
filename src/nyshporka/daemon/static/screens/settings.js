@@ -105,7 +105,7 @@ async function renderRoots() {
   const env = await callOp('roots.list', {});
   if (!env.ok) return boxError('roots', env);
   const rows = (env.data.roots || []).map((r) => `<tr>
-    <td>${r.kind === 'space' ? '🏠' : '⚓'}</td>
+    <td>${r.kind === 'space' ? ic('house', 'ic-o ic-sm') : ic('anchor', 'ic-o ic-sm')}</td>
     <td class="mono">${esc(r.path)}${r.gone
       ? ` <span class="warn-inline">${t('roots.gone')}</span>` : ''}</td>
     <td>${r.kind === 'space'
@@ -117,7 +117,7 @@ async function renderRoots() {
     <p class="muted">${t('roots.why')}</p>
     ${renderWarnings(env)}
     <table><tbody>${rows}</tbody></table>
-    <p><button data-act="roots.pick">📂 ${t('roots.add')}</button>
+    <p><button data-act="roots.pick">${ic('folder-open', 'ic-sm')} ${t('roots.add')}</button>
       <span class="muted">${t('roots.keep')}</span></p>
     <div id="roots-hits"></div>`;
 }
@@ -134,7 +134,7 @@ Object.assign(ACTIONS, {
     // в одне означало б показати спокій там, де його ніхто не перевіряв.
     const head = !d.known
       ? `<div class="warn">${esc(d.installed)} · ${t('ver.unknown')}</div>`
-      : `<div class="warn">${d.newer ? '⬆' : '✅'} ${esc(d.installed)} → ${esc(d.latest)}</div>`;
+      : `<div class="warn">${d.newer ? ic('arrow-up', 'ic-sm') : ic('check-circle', 'ic-sm')} ${esc(d.installed)} → ${esc(d.latest)}</div>`;
     box.innerHTML = head + renderWarnings(env)
       + (d.newer ? `<p class="muted">${t('ver.how')}</p><code>${esc(d.how)}</code>` : '');
   },

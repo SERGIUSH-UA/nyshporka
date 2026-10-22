@@ -53,7 +53,7 @@
 <header>
   <!-- ☰ — бічне меню на вузькому екрані (`side.toggle`); на широкому кнопки немає. -->
   <button type="button" class="side-btn" data-act="side.toggle" aria-controls="side"
-    aria-expanded="false" data-i18n-title="side.menu">☰</button>
+    aria-expanded="false" data-i18n-title="side.menu"><svg class="ic ic-o" aria-hidden="true"><use href="#i-menu"/></svg></button>
   <!--
     🦦 Логотип порталу: маскот і назва. Файл лежить у пакеті (`/ui/img`), тож
     в архіві без інтернету він на місці. Пульсує, поки в черзі є робота
@@ -100,7 +100,7 @@
   -->
   <div class="hmenu">
     <button type="button" class="gear" data-act="menu.toggle" data-arg="set-menu"
-      aria-haspopup="true" aria-expanded="false" data-i18n-title="nav.settings">⚙</button>
+      aria-haspopup="true" aria-expanded="false" data-i18n-title="nav.settings"><svg class="ic ic-o" aria-hidden="true"><use href="#i-settings"/></svg></button>
     <div class="hmenu-pop right" id="set-menu" hidden>
       <label class="hm-row"><small data-i18n="set.lang">Мова</small>
         <select class="lang" id="lang-sel" data-act="lang.set"></select></label>

@@ -87,7 +87,7 @@ Object.assign(ACTIONS, {
     const env = await callOp('pages.note', { ...ST.eye, ...fd });
     const box = el('noted');
     if (!env.ok) { box.innerHTML = `<div class="warn err">${esc(env.error)}</div>`; return; }
-    box.innerHTML = `<div class="warn">✅ ${esc(fd.scan)} ${t('eye.noted')}</div>`
+    box.innerHTML = `<div class="warn">${ic('check-circle', 'ic-sm')} ${esc(fd.scan)} ${t('eye.noted')}</div>`
       + renderWarnings(env);
     // 🔴 Скидаємо ЛИШЕ те, що змінюється від аркуша до аркуша.
     //

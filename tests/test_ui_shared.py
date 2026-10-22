@@ -55,6 +55,54 @@ def test_every_toned_icon_exists_in_the_sprite() -> None:
     assert named  # словник узагалі розібрався
 
 
+
+def test_icon_tones_are_meanings_not_decoration() -> None:
+    """🖋 Тон значка — лише «так / ні / увага» і лапка знака.
+
+    До 23.10.2026 кожен значок мав власний колір, шістнадцять на консоль, і вона
+    виглядала як чужий сервіс. Новий тон «для краси» повертає ту веселку тихо:
+    нічого не падає, просто ще один значок стає бузковим.
+    """
+    tones = set(re.findall(r"[\s{,]'?[\w-]+'?: '(\w+)',", ICONS_JS.split("export const TONES", 1)[1]
+                                                            .split("};", 1)[0]))
+    assert tones, "мапу тонів не розібрано — змінилась форма запису?"
+    assert tones <= {"green", "red", "gold"}, f"тон поза сенсами так/ні/увага: {sorted(tones)}"
+
+
+def test_sprite_is_baked_from_the_source() -> None:
+    """🔴 `icons.svg` запечено з `icons.src.svg`, і він не відстає від джерела.
+
+    Малюнки правляться в джерелі, а тремтіння пера запікає `tools/ink_icons.mjs`.
+    Правка джерела без перезапікання не видна ніде, крім цього приймача: сторінка
+    показує старий значок, і він виглядає цілком справним.
+    """
+    import hashlib
+
+    src = (ui.ROOT / "data" / "icons.src.svg").read_bytes().decode("utf-8").replace("\r\n", "\n")
+    stamp = re.search(r"source-sha256: ([0-9a-f]{64})", SPRITE)
+    assert stamp, "у спрайті немає штампа джерела — його правили руками?"
+    assert stamp.group(1) == hashlib.sha256(src.encode("utf-8")).hexdigest(), (
+        "icons.src.svg змінено, а icons.svg не перезапечено: node tools/ink_icons.mjs <rough.cjs.js>")
+    assert set(re.findall(r'<symbol id="i-([\w-]+)"', src)) == SYMBOLS
+
+
+
+def test_no_emoji_stand_in_for_icons() -> None:
+    """🖋 Значок у консолі — зі спрайта, а не емодзі.
+
+    Емодзі мають власну палітру й власну манеру: 📂, ✅ чи 🤝 серед значків пером
+    виглядають наклейками з чужого набору, а на зеленій кнопці лишаються
+    різнобарвною плямою. До 23.10.2026 їх було понад тридцять — у розмітці екранів
+    і в рядках перекладу. Коментарі не рахуються.
+    """
+    emoji = re.compile("[\U0001F300-\U0001FAFF✅❌⚠⏩-⏺]")
+    code = re.sub(r"/\*.*?\*/", "", front_js(), flags=re.S)
+    found = sorted({m.group(0) for line in code.splitlines()
+                    if not line.lstrip().startswith(("//", "*"))
+                    for m in emoji.finditer(line.split(" // ")[0])})
+    assert not found, f"емодзі замість значків спрайта: {found}"
+
+
 def test_navigation_icons_exist_in_the_sprite() -> None:
     """Знаки екранів і розділів із `brand.yaml` мусять існувати.
 

@@ -225,7 +225,7 @@ function open(opts, fs, resolve) {
         return `<button type="button" class="pp-place is-${esc(r.kind)}${
           r.gone ? ' is-gone' : ''}" data-do="place" data-i="${k}"
           title="${esc(r.path)}${r.gone ? ' — зараз недоступна' : ''}"
-          >${esc(r.label)}${r.gone ? ' ⚠' : ''}</button>`;
+          >${esc(r.label)}${r.gone ? ' ' + ic('alert', 'ic-o ic-sm') : ''}</button>`;
       }).join('');
     }).join('');
   }
@@ -242,7 +242,7 @@ function open(opts, fs, resolve) {
         chosen.has(e.path) ? ' is-picked' : ''}"
         role="option" id="${id}-o${i}" aria-selected="${i === active}"
         data-do="row" data-i="${i}" title="${esc(e.why || e.path)}">
-        ${mark}<span class="pp-ico">${dir ? '📁' : '📄'}</span>
+        ${mark}<span class="pp-ico">${dir ? ic('folder', 'ic-o ic-sm') : ic('page', 'ic-o ic-sm')}</span>
         <span class="pp-name-t">${esc(e.name)}</span>
         ${e.note ? `<span class="pp-badge">${esc(e.note)}</span>` : ''}
         <span class="pp-meta">${esc(meta(e))}</span>
@@ -303,7 +303,7 @@ function open(opts, fs, resolve) {
   function outside() {
     if (!cur || !cur.adopt || !cur.adopt.length) return '';
     const first = cur.adopt[0];
-    return `<div class="pp-outside">⚓ <b>${esc(L.outside)}</b> — ${esc(L.outsideWhy)}
+    return `<div class="pp-outside">${ic('anchor', 'ic-sm')} <b>${esc(L.outside)}</b> — ${esc(L.outsideWhy)}
       <span class="mono">${esc(first.path)}</span>${
       first.cases ? ` (${first.cases})` : ''}</div>`;
   }

@@ -564,6 +564,11 @@ screen_glyphs:
 #
 # ⚠ Ім'я мусить існувати у спрайті: помилка друку дає ПОРОЖНЄ місце без жодної
 # помилки в консолі — `<use>` на неіснуючий id мовчить. Звіряє приймач.
+#
+# 🖋 З 23.10.2026 значки — речі дослідника, а не техніка: канон — сургучна
+# печатка, профіль роду — родове дерево, джерела — будівля архіву, газетир —
+# складена мапа, розбір кандидатів — сито, черга — лоток вхідних паперів,
+# проєкти — герб роду, стан — компас. Малюнки — `ui/data/icons.src.svg`.
 section_icons:
   core: paw
   material: archive-box
@@ -573,38 +578,38 @@ section_icons:
 
 screen_icons:
   home: paw
-  profile: target
-  sources: radar
-  geog: zone
-  fonds: archive-box
+  profile: tree
+  sources: archive
+  geog: map
+  fonds: drawers
   library: books
   frames: image
-  cases: drawers
+  cases: folder-open
   newcase: plus
   newproject: plus
-  read: quill
-  runs: list
-  queue: skip
-  view: page
+  read: inkwell
+  runs: ledger
+  queue: tray
+  view: book-open
   eye: eye
   search: search
-  sift: crop-check
-  export: download
-  site: link
+  sift: sieve
+  export: envelope
+  site: house
   jobs: clock
-  sets: folder-open
+  sets: cards
   label: pencil-line
-  canon: book-open
-  hyp: help-circle
-  research: note
-  history: undo
-  cloud: upload
-  give: upload
-  pull: download
+  canon: seal
+  hyp: scale
+  research: notebook
+  history: scroll
+  cloud: cloud
+  give: stitch
+  pull: parcel
   cards: tag
   sprofile: hand
-  projects: folder
-  status: gauge
+  projects: shield
+  status: compass
   settings: settings
 
 # ── геометрія знака ──────────────────────────────────────────────────────────

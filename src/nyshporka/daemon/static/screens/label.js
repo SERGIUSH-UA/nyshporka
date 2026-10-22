@@ -223,7 +223,7 @@ async function showLine() {
     <div class="lb-bottom">
       <button data-act="label.save" class="lb-do">${t('label.save')}</button>
       <button data-act="label.unsure" class="lb-do">${t('label.unsure')}</button>
-      <button data-act="label.skip" class="lb-do">${t('label.skip')}</button>
+      <button data-act="label.skip" class="lb-do">${ic('skip', 'ic-sm')} ${t('label.skip')}</button>
       <button data-act="label.back" class="lb-do">${t('label.back')}</button>
       <button data-act="label.take" title="Ctrl+Enter">${t('label.take')}</button>
       <button data-act="label.panel" aria-pressed="${LB.panel}">${t('label.panel')}</button>

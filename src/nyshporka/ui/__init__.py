@@ -15,7 +15,7 @@
     static/icons.js     `ic()` — значок у своєму тоні; `eng()` — бейдж рушія
     static/combobox.js  випадний список замість нестилізовного <datalist>
     static/stage.js     спільне ядро canvas-переглядачів: зум, панорама, малювання
-    data/icons.svg      спрайт значків
+    data/icons.svg      спрайт значків (згенеровано з icons.src.svg, tools/ink_icons.mjs)
 
 🔴 Спрайт віддається функцією, а не файлом зі `static/`, і це не забаганка:
 `<use href>` до зовнішнього SVG забороняє успадкування `currentColor` у Chrome —

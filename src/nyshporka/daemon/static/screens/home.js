@@ -60,7 +60,7 @@ let METRIC = 'htr_pages';
  */
 function sampleBlock(d) {
   if (!d.sample_available) return `<p class="muted">${t('check.nosample')}</p>`;
-  if (d.sample_case) return `<p class="muted">✅ ${t('check.sample.ready')}</p>`;
+  if (d.sample_case) return `<p class="muted">${ic('check-circle', 'ic-sm')} ${t('check.sample.ready')}</p>`;
   return `<p class="muted">${t('check.sample.hint')}</p>
     <p><button data-act="sample.install">${t('check.sample.do')}</button></p>`;
 }
@@ -83,10 +83,10 @@ const agentDoc = () => `https://nyshporka.online/docs/${LANG === 'uk' ? '' : `${
 function agentCard(d) {
   const a = d.agent || {};
   if (a.connected) {
-    return `<div class="dash-box agent-card"><p>🤝 ${t('home.agent.ready')}</p></div>`;
+    return `<div class="dash-box agent-card"><p>${ic('paw', 'ic-sm')} ${t('home.agent.ready')}</p></div>`;
   }
   return `<div class="dash-box agent-card">
-    <h3>🤝 ${t('home.agent.title')}</h3>
+    <h3>${ic('paw', 'ic-sm')} ${t('home.agent.title')}</h3>
     <p>${t('home.agent.why')}</p>
     <p><a class="btn primary" href="${agentDoc()}" target="_blank" rel="noopener">${
       t('home.agent.go')} →</a></p>
@@ -97,11 +97,11 @@ function agentCard(d) {
 function doors() {
   return `<div class="cards">
     <button class="card" data-act="home.scans">
-      <span class="card-title">📁 ${t('home.have_scans')}</span>
+      <span class="card-title">${ic('folder', 'ic-sm')} ${t('home.have_scans')}</span>
       <span class="card-hint">${t('home.have_scans.hint')}</span>
     </button>
     <button class="card" data-act="nav" data-arg="sources">
-      <span class="card-title">🔎 ${t('home.where')}</span>
+      <span class="card-title">${ic('search', 'ic-sm')} ${t('home.where')}</span>
       <span class="card-hint">${t('home.where.hint')}</span>
     </button>
     <button class="card" data-act="home.demo">
@@ -350,7 +350,7 @@ function onboarding(d) {
     <h3>${ic('check-circle', 'ic-sm')} ${t('step.title')}
       <span class="aside">${done} ${t('dash.of')} ${all.length}</span></h3>
     <div class="dash-box">${all.map((x) => `<div class="step${x.ok ? ' on' : ''}">
-      <span class="step-m">${x.ok ? '✅' : '⚠'}</span>
+      <span class="step-m">${x.ok ? ic('check-circle', 'ic-o ic-sm') : ic('alert', 'ic-o ic-sm')}</span>
       <span class="step-t">${t(x.k)}<br>
         <span class="muted">${t(x.k + '.why')}</span></span>
       <span class="step-n muted">${esc(x.note)}</span>
@@ -835,7 +835,7 @@ Object.assign(ACTIONS, {
     const env = await callOp('setup.check', {});
     if (!env.ok) { if (box) box.innerHTML = `<div class="warn err">${esc(env.error || '')}</div>`; return; }
     const rows = (env.data.checks || []).map((c) => {
-      const mark = { ok: '✅', warn: '⚠', fail: '🔴' }[c.level] || '•';
+      const mark = { ok: ic('check-circle', 'ic-o ic-sm'), warn: ic('alert', 'ic-o ic-sm'), fail: ic('x-circle', 'ic-o ic-sm') }[c.level] || '•';
       // 🔴 Колонка «чим це ставиться» була суцільним терміналом: дев'ять
       // рядків `<code>` і жодної кнопки — під написом, який обіцяв протилежне.
       // Людина, що ставила застосунок майстром, командного рядка не має в полі
@@ -854,8 +854,8 @@ Object.assign(ACTIONS, {
     // нема звідки (прохід консолі 22.10.2026).
     const html = `
       <p class="muted">${t('check.why')}</p>
-      ${env.data.ready ? `<div class="warn">✅ ${t('check.ready')}</div>`
-        : `<div class="warn">${t('check.notready')}</div>`}
+      ${env.data.ready ? `<div class="warn">${ic('check-circle', 'ic-sm')} ${t('check.ready')}</div>`
+        : `<div class="warn">${ic('alert', 'ic-sm')} ${t('check.notready')}</div>`}
       ${renderWarnings({ ...env, warnings: (env.warnings || []).filter((w) => w.code !== 'not_ready') })}
       <table class="check-tbl"><tbody>${rows}</tbody></table>
       ${sampleBlock(env.data)}`;
@@ -882,7 +882,7 @@ Object.assign(ACTIONS, {
         ? `<div class="warn err">${esc(env.error || '?')}</div>`
         : (!d.known
           ? `<div class="warn">${esc(d.installed)}${renderWarnings(env)}</div>`
-          : `<div class="warn">${d.newer ? '⬆' : '✅'} ${esc(d.installed)} → ${
+          : `<div class="warn">${d.newer ? ic('arrow-up', 'ic-sm') : ic('check-circle', 'ic-sm')} ${esc(d.installed)} → ${
               esc(d.latest)}${renderWarnings(env)}${
               d.newer ? `<br><code>${esc(d.how)}</code>` : ''}</div>`);
       // ⚠ Заміна, а не дописування: `insertAdjacentHTML` лишав по банеру на
@@ -915,7 +915,7 @@ Object.assign(ACTIONS, {
     // за хвилину опиниться: піде в «Мої справи», побачить нуль при розгорнутій
     // справі й вирішить, що зразок не розгорнувся. Викидати попередження саме
     // тут означало дати справдитись рівно тому, про що попереджали.
-    setView(`<h2>📖 ${t('check.sample.title')}</h2>
+    setView(`<h2>${ic('book-open')} ${t('check.sample.title')}</h2>
       <p>${esc(d.shifra)} — ${d.frames.length}/${d.frames_total}</p>
       <p class="muted">${esc(d.case_dir)}</p>
       ${renderWarnings(env)}

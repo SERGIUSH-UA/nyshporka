@@ -326,7 +326,7 @@ export default {
     'check.title': 'Is this machine ready to read handwriting',
     'check.why': 'Run this before you commit scans and start a long job.',
     'check.ready': 'Everything is in place — you can read.',
-    'check.notready': '⚠ Reading will not start yet. Below: what is missing and what installs it.',
+    'check.notready': 'Reading will not start yet. Below: what is missing and what installs it.',
     'check.fix': 'Fix',
     'ver.title': 'Application version',
     'ver.why': 'The check goes online (pypi.org) and happens only on this button — the application never reaches out on its own.',
@@ -339,7 +339,7 @@ export default {
     'check.sample.hint': 'Three leaves of case DAHMO 315-1-159 (1821-1822) ship with the app, machine-decoded already. Reading them anew takes model weights, which are not published yet — but the viewer, decode search and the case registry work on them right away.',
     'check.sample.ready': 'The sample case is already in your workspace — it shows up in the registry and in the viewer.',
     'check.sample.next': 'Next: open the viewer and click a line — you will see where the text came from.',
-    'case.dirhint': 'Press 📂 to pick a folder. You can also paste the path from your file manager address bar — both work.',
+    'case.dirhint': 'Press the folder button to pick a folder. You can also paste the path from your file manager address bar — both work.',
     // 📂 path picking
     'pick.open': 'pick a folder or file',
     'pick.title.dir': 'Choose a folder',
@@ -565,7 +565,7 @@ export default {
     'sift.view': 'Open in the viewer',
     'sift.rule': 'The machine offered a candidate — read the crop '
       + 'yourself: a high score is not proof, and a mismatch is not a refutation.',
-    'sift.stem': '⚠ Do not reject on the stem: the engine mangles the middle of a '
+    'sift.stem': 'Do not reject on the stem: the engine mangles the middle of a '
       + 'word, so the surname you want comes out of it unrecognisable.',
     'view.run.none': 'no such run',
     'view.run.empty': 'Nothing has been read yet — there is nothing to leaf through.',
@@ -699,7 +699,7 @@ export default {
     'case.name': 'Case title', 'case.type': 'Document type',
     'case.years': 'Years', 'case.place': 'Place', 'case.save': 'Save',
     'case.note': 'Note',
-    'case.dir.ph': 'folder path or 📂',
+    'case.dir.ph': 'folder path',
     'case.name.ph': 'as in the archive inventory: «Metric book of the church…»',
     'case.type.ph': 'metric, confession, census…',
     'case.place.ph': 'village, district, province',
@@ -771,10 +771,10 @@ export default {
     'view.nothing': 'open a run first — there is nothing to show yet',
     'view.notext': 'the page text is empty',
     'view.noboxes': 'this run wrote no line boxes — the scan cannot be clicked',
-    'view.confab': '⚠️ Suspected fabrication: the engine may have written a '
+    'view.confab': 'Suspected fabrication: the engine may have written a '
       + 'plausible text instead of what stands on the sheet. Confidence does '
       + 'not drop — check it against the scan.',
-    'view.gaploop': '⚠️ the run of this page broke off or looped — the text may '
+    'view.gaploop': 'the run of this page broke off or looped — the text may '
       + 'be incomplete',
     'view.alt': 'second voice:',
     'view.alt.open': 'expand to compare the reading of two engines',
@@ -894,8 +894,8 @@ export default {
     'jobs.st.cancelled': 'cancelled',
     'jobs.result': 'result',
     'fonds.plan.collector': 'collector',
-    'fonds.plan.ready': '✅ ready to collect',
-    'fonds.plan.notready': '⚠ cannot collect yet',
+    'fonds.plan.ready': 'ready to collect',
+    'fonds.plan.notready': 'cannot collect yet',
     'fonds.plan.opys': 'inventories',
     'fonds.plan.requests': 'requests to the site',
     'fonds.plan.eta': 'about',
@@ -966,7 +966,7 @@ export default {
     'label.start': 'Start',
     'label.queue': 'queued', 'label.done': 'labelled', 'label.of': 'of',
     'label.empty': 'No lines left in this mode.',
-    'label.save': '✓ Next', 'label.unsure': '? Unsure', 'label.skip': '⏭ Skip',
+    'label.save': '✓ Next', 'label.unsure': '? Unsure', 'label.skip': 'Skip',
     'label.back': '← Back', 'label.take': 'Take draft',
     'label.panel': 'Page', 'label.zoomin': 'Bigger', 'label.zoomout': 'Smaller',
     'label.kind': 'Kind', 'label.kind.hand': 'hand', 'label.kind.print': 'print',

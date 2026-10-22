@@ -1,4 +1,5 @@
 /** Розмітка екрана: підміна вмісту, застереження, покриття, покоління. */
+import { ic } from '/ui/icons.js';
 import { t } from './strings.js';
 import { screenOfOp } from './registry.js';
 import { swapHtml, skelRows } from '/ui/dom.js';
@@ -89,11 +90,11 @@ function renderWarnings(env) {
     // прогону й кожного занесеного аркуша, і банер, що стоїть «на кожен
     // пчих», перестають читати (дослідник, 22.10.2026). Причина й кнопка —
     // на місці; агент і термінал і далі отримують це в конверті.
-    bits.push(`<div class="stale-line">🕓 ${esc(t('stale.line'))}: ${esc(env.stale.reasons.join('; '))}
+    bits.push(`<div class="stale-line">${ic('clock', 'ic-sm')} ${esc(t('stale.line'))}: ${esc(env.stale.reasons.join('; '))}
       <button class="ctl-sm" data-act="cases.build">${t('stale.refresh')}</button></div>`);
   }
   const { alerts, notes } = splitWarnings(env.warnings);
-  for (const a of alerts) bits.push(`<div class="warn">⚠ ${esc(a)}</div>`);
+  for (const a of alerts) bits.push(`<div class="warn">${ic('alert', 'ic-sm')} ${esc(a)}</div>`);
   const next = renderNext(env);
   return bits.join('') + next.rows
     + notesBlock([...notes.map(esc), ...next.notes]);
@@ -166,7 +167,7 @@ function renderCoverage(env) {
     const scope = c.scope ? ` — ${esc(c.scope)}` : '';
     return `${esc(c.source)}${taken}${scope}`;
   });
-  return `<p class="muted cov">🔎 ${t('cov.searched')}: ${bits.join('; ')}</p>`;
+  return `<p class="muted cov">${ic('search', 'ic-sm')} ${t('cov.searched')}: ${bits.join('; ')}</p>`;
 }
 
 /**

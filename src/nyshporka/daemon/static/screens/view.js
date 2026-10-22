@@ -194,8 +194,8 @@ function viewBar() {
   // прикрашають його. Конфабуляція означає, що текст може бути вигаданим при
   // нормальній упевненості; фантомні рядки — що їх узагалі не було в чорнилі.
   const warns = [];
-  if (p.suspect_confab) warns.push(`<div class="warn err">${t('view.confab')}</div>`);
-  if (p.gap_loop) warns.push(`<div class="warn">${t('view.gaploop')}</div>`);
+  if (p.suspect_confab) warns.push(`<div class="warn err">${ic('alert', 'ic-sm')} ${t('view.confab')}</div>`);
+  if (p.gap_loop) warns.push(`<div class="warn">${ic('alert', 'ic-sm')} ${t('view.gaploop')}</div>`);
   if (!VS.geo.has && VS.lines.length) {
     warns.push(`<p class="dim">${t('view.noboxes')}</p>`);
   }

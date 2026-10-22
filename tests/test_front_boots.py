@@ -628,7 +628,7 @@ const wenv = { warnings: [
   next: [{ op: 'migrate.status', why: 'ПОРАДА_АГЕНТОВІ', level: 'agent' },
     { op: 'nema.takoi', why: 'КОМАНДА_ТЕРМІНАЛУ' }] };
 const wh = V.renderWarnings(wenv);
-out.warnAlertPlaque = /class="warn">⚠ ТРИВОГА/.test(wh);
+out.warnAlertPlaque = /class="warn"><svg class="ic[^"]*"[^>]*><use href="#i-alert"\/><\/svg> ТРИВОГА/.test(wh);
 out.warnNoteFolded = /<details class="notes">[\s\S]*ПРИМІТКА/.test(wh)
   && !/class="warn">⚠ ПРИМІТКА/.test(wh);
 out.warnAgentHidden = !wh.includes('АГЕНТОВІ') && !wh.includes('ПОРАДА_АГЕНТОВІ');
