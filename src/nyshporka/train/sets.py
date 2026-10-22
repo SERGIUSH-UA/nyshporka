@@ -27,6 +27,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import threading
 from dataclasses import dataclass, field
@@ -295,13 +296,17 @@ class Registry:
         root = self.crops_of(spec)
         if not root.is_dir():
             return {}
+        # `os.scandir`, а не `Path.iterdir`: на 824 наборах це 210 тис. імен, і
+        # об'єкт шляху на кожне коштував екрану «Набори» секунди (22.10.2026).
         out: dict[str, int] = {}
-        for d in sorted(root.iterdir()):
-            if not d.is_dir() or d.name.startswith("_"):
-                continue
-            n = sum(1 for p in d.iterdir() if _CROP_RE.match(p.name))
+        with os.scandir(root) as it:
+            pages = sorted((e.name, e.path) for e in it
+                           if not e.name.startswith("_") and e.is_dir())
+        for name, path in pages:
+            with os.scandir(path) as files:
+                n = sum(1 for f in files if _CROP_RE.match(f.name))
             if n:
-                out[d.name] = n
+                out[name] = n
         return out
 
     def crop_path(self, spec: SetSpec, page: str, idx: int) -> Path | None:

@@ -128,13 +128,19 @@ def _stamp(p: Path) -> tuple[Any, ...]:
 #: скидати руками не треба — за зразком `fonds.registry._CACHE`.
 _FOND_CACHE: dict[tuple[str, str], tuple[tuple[Any, ...], dict[tuple[str, str, str], PoolCell]]] = {}
 _META_CACHE: tuple[tuple[Any, ...], dict[str, Any] | None] | None = None
+#: memo: штамп зрізу → {ключ книги: рядок зрізу}. Зріз — ~10 тис. рядків, 40 мс.
+_KEY_CACHE: tuple[tuple[Any, ...], dict[str, dict[str, Any]]] | None = None
+#: memo синонімів коду архіву: код → (реєстр архівів, на якому рахували, синоніми).
+_SYN_CACHE: dict[str, tuple[Any, list[str]]] = {}
 
 
 def invalidate() -> None:
     """Забути memo. Потрібно тестам і після `sync` у тому самому процесі."""
-    global _META_CACHE
+    global _META_CACHE, _KEY_CACHE
     _FOND_CACHE.clear()
     _META_CACHE = None
+    _KEY_CACHE = None
+    _SYN_CACHE.clear()
 
 
 # ── читання ───────────────────────────────────────────────────────────────────
@@ -199,7 +205,7 @@ def stale() -> bool:
     return age is not None and age > STARYI_DNIV
 
 
-def _cell(row: sqlite3.Row, handle: str) -> PoolCell:
+def _cell(row: sqlite3.Row | dict[str, Any], handle: str) -> PoolCell:
     pubs = tuple(json.loads(row["publishers"] or "[]"))
     # 🔴 Відповідь пулу, якщо вона є: він знає власника за ключем. Збіг
     # псевдоніма з публічним підписом — лише запасний шлях: підпис буває
@@ -236,11 +242,27 @@ def _select(con: sqlite3.Connection) -> str:
             "FROM pool LEFT JOIN pool_extra e ON e.key = pool.key")
 
 
-def _handle() -> str:
-    try:
-        from nyshporka.share.profile import load
+#: memo імені в профілі: (штамп файла профілю, ім'я).
+_HANDLE: dict[str, tuple[tuple[Any, ...], str]] = {}
 
-        return str(load().handle or "").strip()
+
+def _handle() -> str:
+    """Ім'я людини з профілю — «чи це моя книга».
+
+    🔴 Перечитується лише тоді, коли змінився файл профілю: `by_key` кличуть на
+    кожну справу переліку «Віддати», і розбір YAML профілю 4800 разів коштував
+    10 с (22.10.2026).
+    """
+    try:
+        from nyshporka.share.profile import config_path, load
+
+        stamp = _stamp(Path(config_path()))
+        hit = _HANDLE.get("me")
+        if hit is not None and hit[0] == stamp:
+            return hit[1]
+        got = str(load().handle or "").strip()
+        _HANDLE["me"] = (stamp, got)
+        return got
     except Exception:
         return ""
 
@@ -291,26 +313,46 @@ def by_fond(repo: str, fond: str) -> dict[tuple[str, str, str], PoolCell] | None
     return out
 
 
+def _rows_by_key() -> dict[str, dict[str, Any]] | None:
+    """Увесь зріз за ключем книги; перечитується, лише коли змінився файл зрізу.
+
+    🔴 `by_key` кличуть на кожну справу переліку «Віддати» (5 тис. разів), і
+    з'єднання з запитом на кожен виклик коштувало секунди. Зріз невеликий
+    (~10 тис. книг), тож дешевше прочитати його раз.
+    """
+    global _KEY_CACHE
+    stamp = _stamp(snapshot_path())
+    if _KEY_CACHE is not None and _KEY_CACHE[0] == stamp:
+        return _KEY_CACHE[1]
+    con = _connect()
+    if con is None:
+        return None
+    try:
+        rows = {str(r["key"]): dict(r) for r in con.execute(_select(con)).fetchall()}
+    except sqlite3.Error:
+        return None
+    finally:
+        con.close()
+    _KEY_CACHE = (stamp, rows)
+    return rows
+
+
 def by_key(key: str) -> PoolCell | None:
     """Одна книга за канонічним ключем. `None` — немає зрізу або немає книги.
 
     Код архіву в ключі пробується з усіма синонімами (`DAVO` = `DAVIO`).
     Чи питали пул про цей фонд узагалі, каже `covers`, а не ця функція.
     """
-    con = _connect()
-    if con is None or meta() is None:
+    if meta() is None:
+        return None
+    rows = _rows_by_key()
+    if rows is None:
         return None
     head, _, tail = (key or "").partition("/")
-    try:
-        for kod in synonyms(head):
-            row = con.execute(
-                _select(con) + " WHERE pool.key = ?", (f"{kod}/{tail}",)).fetchone()
-            if row:
-                return _cell(row, _handle())
-    except sqlite3.Error:
-        return None
-    finally:
-        con.close()
+    for kod in synonyms(head):
+        row = rows.get(f"{kod}/{tail}")
+        if row:
+            return _cell(row, _handle())
     return None
 
 
@@ -348,13 +390,18 @@ def synonyms(repo: str) -> list[str]:
         repos = active().repositories
     except Exception:
         return out
+    hit = _SYN_CACHE.get(code)
+    if hit is not None and hit[0] is repos:
+        return list(hit[1])
     same = str(getattr(repos.get(code), "same_as", "") or "").upper()
     for c, r in repos.items():
         other = str(getattr(r, "same_as", "") or "").upper()
         if c.upper() != code and (other == code or c.upper() == same
                                   or (same and other == same)):
             out.append(c.upper())
-    return list(dict.fromkeys(out))
+    got = list(dict.fromkeys(out))
+    _SYN_CACHE[code] = (repos, got)
+    return list(got)
 
 
 def state_of(cell: PoolCell | None) -> str:

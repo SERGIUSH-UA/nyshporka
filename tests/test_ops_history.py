@@ -157,3 +157,25 @@ def test_outside_git_is_an_answer_not_a_crash(tmp_path: Path) -> None:
     W.use(W._build(root, "test"))
     env = O.call("history.log", {})
     assert not env.ok and "history setup" in env.error
+
+
+def test_big_commit_converts_only_the_shown_files(space: Path,
+                                                  monkeypatch: pytest.MonkeyPatch) -> None:
+    """Коміт обліку зачіпає тисячі файлів, а показуються перші `LOG_FILES`.
+
+    🔴 Шлях кожного файла коміту резолвився на диску, і Історія роду чекала
+    3 с на файли, яких не показує (22.10.2026). Решта — лише числом `more`.
+    """
+    for i in range(V.LOG_FILES + 7):
+        _card(space, f"I9{100 + i}", f"Особа {i}")
+    assert O.call("history.save", {"message": "багато"}).data["saved"]
+    calls: list[str] = []
+    real = V._from_proot
+
+    def counted(ws, top, rel):  # type: ignore[no-untyped-def]
+        calls.append(rel)
+        return real(ws, top, rel)
+    monkeypatch.setattr(V, "_from_proot", counted)
+    row = O.call("history.log", {"limit": 1}).data["rows"][0]
+    assert len(row["files"]) == V.LOG_FILES and row["more"] == 7
+    assert len(calls) == V.LOG_FILES

@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -522,11 +523,32 @@ def _key_parts(key: str) -> tuple[str, str, str, str] | None:
     return (old[0], old[1], old[2] or "", old[3]) if old else None
 
 
-def _row_matches(row: dict[str, Any], key: str) -> bool:
-    """Рядок бібліотеки — саме ця справа (старий ключ — через карту переїзду)."""
+def _rows_of(rows: Iterable[dict[str, Any]], key: str) -> list[dict[str, Any]]:
+    """Рядки бібліотеки саме цієї справи (старий ключ — через карту переїзду).
+
+    🔴 Ключ перекладається ОДИН раз, а не на кожен рядок: переклад звіряє
+    карту переїзду з диском, і «Віддати» на бібліотеці з тисяч справ робило
+    3,7 млн перекладів і 2,5 млн `stat` — понад 80 с без жодного слова
+    (22.10.2026).
+    """
     from nyshporka.core import legacy_key
 
-    return str(row.get("key") or "") == legacy_key.current_key(key)
+    want = legacy_key.current_key(key)
+    if isinstance(rows, tuple):
+        # Записи кешованого індексу бібліотеки (`library_lookup().entries`):
+        # той самий кортеж, доки файл не змінився, — розкладка за ключем раз.
+        global _BY_KEY
+        if _BY_KEY is None or _BY_KEY[0] is not rows:
+            idx: dict[str, list[dict[str, Any]]] = {}
+            for row in rows:
+                idx.setdefault(str(row.get("key") or ""), []).append(row)
+            _BY_KEY = (rows, idx)
+        return list(_BY_KEY[1].get(want, ()))
+    return [row for row in rows if str(row.get("key") or "") == want]
+
+
+#: memo: (кортеж записів бібліотеки, ключ → записи).
+_BY_KEY: tuple[tuple[dict[str, Any], ...], dict[str, list[dict[str, Any]]]] | None = None
 
 
 def _frames_dir(p: Path) -> Path | None:
@@ -631,15 +653,13 @@ def _library_home(key: str, want_opys: str) -> Path | None:
 
     try:
         from nyshporka.core.workspace import workspace
-        from nyshporka.library import load_library
+        from nyshporka.library import library_lookup
 
         root = workspace().hub
-        rows = load_library()
+        rows = library_lookup().entries
     except Exception:
         return None
-    for row in rows:
-        if not _row_matches(row, key):
-            continue
+    for row in _rows_of(rows, key):
         have = _norm_spr(str(row.get("opys") or ""))
         if want_opys and have and have != want_opys:
             continue
@@ -667,15 +687,13 @@ def library_frames(case_key: str) -> int:
     if not key:
         return 0
     try:
-        from nyshporka.library import load_library
+        from nyshporka.library import library_lookup
 
-        rows = load_library()
+        rows = library_lookup().entries
     except Exception:
         return 0
     best = 0
-    for row in rows:
-        if not _row_matches(row, key):
-            continue
+    for row in _rows_of(rows, key):
         try:
             best = max(best, int(row.get("frames") or 0))
         except (TypeError, ValueError):
@@ -694,17 +712,15 @@ def case_dir_for(case_key: str) -> Path | None:
         return None
     try:
         from nyshporka.core.workspace import workspace
-        from nyshporka.library import load_library
+        from nyshporka.library import library_lookup
     except Exception:
         return None
     root = workspace().hub
     try:
-        rows = load_library()
+        rows = library_lookup().entries
     except Exception:
         return None
-    for row in rows:
-        if not _row_matches(row, key):
-            continue
+    for row in _rows_of(rows, key):
         for rel in [row.get("path"), *(row.get("extra_paths") or [])]:
             if not rel:
                 continue

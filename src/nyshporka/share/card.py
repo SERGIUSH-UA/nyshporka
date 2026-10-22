@@ -80,13 +80,40 @@ def _load_all() -> dict[str, dict[str, Any]]:
     return {str(k): v for k, v in raw.items() if isinstance(v, dict)}
 
 
+#: memo для читання: (штамп файла карток, усі картки). Пише лише `_load_all`.
+_READ: tuple[tuple[Any, ...], dict[str, dict[str, Any]]] | None = None
+
+
+def _read_all() -> dict[str, dict[str, Any]]:
+    """Картки лише на читання; перечитуються, коли змінився файл.
+
+    🔴 `get` кличуть на кожну справу переліку «Віддати», і файл карток
+    розбирався 250 разів за прохід (22.10.2026). Запис іде через `_load_all`,
+    тож спільний словник тут ніхто не змінює.
+    """
+    global _READ
+    path = cards_path()
+    try:
+        st = path.stat()
+        stamp: tuple[Any, ...] = (str(path), st.st_mtime_ns, st.st_size)
+    except OSError:
+        stamp = (str(path), -1, -1)
+    if _READ is not None and _READ[0] == stamp:
+        return _READ[1]
+    got = _load_all()
+    _READ = (stamp, got)
+    return got
+
+
 def get(case_key: str) -> dict[str, Any]:
     """Картка справи — або порожньо, якщо її не задавали."""
     if not case_key:
         return {}
+    import copy
+
     from nyshporka.core import legacy_key
 
-    return dict(legacy_key.get(_load_all(), case_key) or {})
+    return copy.deepcopy(dict(legacy_key.get(_read_all(), case_key) or {}))
 
 
 def genres() -> dict[str, str]:

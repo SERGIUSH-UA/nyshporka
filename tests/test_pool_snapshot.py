@@ -276,3 +276,83 @@ def test_chastkovyi_zriz_ne_hubyt_pokryttia_reshty(prostir: Path,
 
     assert stara is not None and (stara.frames, stara.coverage) == (520, 0.05)
     assert pool.by_key("DAHMO/230/1/24").coverage == 1.0
+
+
+def test_imia_z_profilu_chytaietsia_raz(tmp_path: Path,
+                                        monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ім'я з профілю перечитується лише тоді, коли змінився файл профілю.
+
+    🔴 `by_key` питає «чи це моя книга» на кожну справу переліку «Віддати»:
+    розбір YAML профілю 4800 разів коштував 10 с (22.10.2026).
+    """
+    import os
+
+    from nyshporka.share import profile as P
+
+    cfg = tmp_path / "share.yaml"
+    cfg.write_text("handle: ia\n", encoding="utf-8")
+    os.utime(cfg, (1_000_000, 1_000_000))
+    monkeypatch.setattr(P, "config_path", lambda: cfg)
+    reads: list[int] = []
+    real = P.load
+
+    def load() -> P.Profile:
+        reads.append(1)
+        return real()
+    monkeypatch.setattr(P, "load", load)
+    pool._HANDLE.clear()
+    assert [pool._handle() for _ in range(3)] == ["ia", "ia", "ia"]
+    assert len(reads) == 1
+    cfg.write_text("handle: vona\n", encoding="utf-8")
+    assert pool._handle() == "vona" and len(reads) == 2
+
+
+def test_kartka_chytaietsia_z_pamiati_doky_fail_toi_samyi(tmp_path: Path,
+                                                         monkeypatch: pytest.MonkeyPatch) -> None:
+    """Картки справ розбираються раз, доки файл не змінився; правка видна одразу."""
+    import json
+    import os
+
+    from nyshporka.share import card as K
+
+    f = tmp_path / "cards.json"
+    f.write_text(json.dumps({"TEST/1/2/3": {"title": "Метрична книга", "years": [1850]}}),
+                 encoding="utf-8")
+    os.utime(f, (1_000_000, 1_000_000))
+    monkeypatch.setattr(K, "cards_path", lambda: f)
+    reads: list[int] = []
+    real = K._load_all
+
+    def load_all() -> dict:  # type: ignore[type-arg]
+        reads.append(1)
+        return real()
+    monkeypatch.setattr(K, "_load_all", load_all)
+    monkeypatch.setattr(K, "_READ", None)
+    for _ in range(3):
+        got = K.get("TEST/1/2/3")
+        got["title"] = "зіпсовано"
+        got["years"].append(1999)
+    assert K.get("TEST/1/2/3") == {"title": "Метрична книга", "years": [1850]},         "зміна відданої картки не псує спільну пам'ять"
+    assert len(reads) == 1
+    f.write_text(json.dumps({"TEST/1/2/3": {"title": "Сповідна відомість"}}), encoding="utf-8")
+    assert K.get("TEST/1/2/3")["title"] == "Сповідна відомість" and len(reads) == 2
+
+
+def test_novyi_zriz_vydno_bez_invalidate(prostir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Зріз, знятий іншим процесом (`nysh share sync` поруч із консоллю), видно одразу.
+
+    Консоль тримає зріз у пам'яті за ключем книги; скинути її пам'ять інший
+    процес не може, тож оновлення мусить іти від штампа файла.
+    """
+    import os
+
+    _zriz([{"key": "DAHMO/315/1/6940", "repo": "DAHMO", "fond": "315", "opys": "1",
+            "spr": "6940"}])
+    assert pool.by_key("DAHMO/315/1/6940") is not None
+    pool.snapshot_path().unlink()
+    monkeypatch.setattr(pool, "invalidate", lambda: None)
+    _zriz([{"key": "DAHMO/315/1/7000", "repo": "DAHMO", "fond": "315", "opys": "1",
+            "spr": "7000"}])
+    os.utime(pool.snapshot_path(), (2_000_000, 2_000_000))
+    assert pool.by_key("DAHMO/315/1/7000") is not None
+    assert pool.by_key("DAHMO/315/1/6940") is None

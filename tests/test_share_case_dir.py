@@ -174,3 +174,33 @@ def test_bez_chysla_znamennyk_ne_vgaduietsia(tmp_path: Path) -> None:
     d.mkdir()
     (d / "_offloaded.json").write_text("{не json", encoding="utf-8")
     assert _znamennyk_z_pasporta({"total": 0, "listed": 0}, d)["total"] == 0
+
+
+def test_key_is_translated_once_per_library_scan(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ключ справи перекладається раз на прохід бібліотеки, а не на кожен рядок.
+
+    🔴 Переклад звіряє карту переїзду з диском. Поки він стояв усередині
+    циклу, «Віддати» на бібліотеці з тисяч справ робило 3,7 млн перекладів і
+    рахувало перелік понад 80 с (22.10.2026).
+    """
+    from nyshporka.core import legacy_key
+
+    calls: list[str] = []
+
+    def current_key(k: str, **_kw: object) -> str:
+        calls.append(k)
+        return k
+    monkeypatch.setattr(legacy_key, "current_key", current_key)
+    rows = [{"key": f"TEST/1/2/{i}"} for i in range(500)]
+    assert align._rows_of(rows, "TEST/1/2/7") == [{"key": "TEST/1/2/7"}]
+    assert calls == ["TEST/1/2/7"]
+
+
+def test_library_index_rows_are_found_by_key_and_keep_duplicates() -> None:
+    """Кортеж записів бібліотеки розкладається за ключем; дублі ключа не губляться."""
+    rows = ({"key": "TEST/1/2/7", "path": "a"}, {"key": "TEST/1/2/8", "path": "b"},
+            {"key": "TEST/1/2/7", "path": "c"})
+    assert [r["path"] for r in align._rows_of(rows, "TEST/1/2/7")] == ["a", "c"]
+    other = ({"key": "TEST/1/2/7", "path": "z"},)
+    assert [r["path"] for r in align._rows_of(other, "TEST/1/2/7")] == ["z"], \
+        "новий кортеж (бібліотеку перебудовано) — нова розкладка"

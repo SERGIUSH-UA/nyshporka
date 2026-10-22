@@ -265,14 +265,17 @@ def _norm_legacy(r: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+#: Поля рядка merged-реєстру, які беруться з файла (`spr` і `shifra` складаються).
+_MERGED_FIELDS = tuple(k for k in FIELDS if k not in ("spr", "shifra"))
+
+
 def _norm_merged(r: dict[str, Any]) -> dict[str, Any]:
+    # Один `get` на поле: на 100 тис. рядків реєстрів перевірка `k in r` плюс
+    # повторні звертання коштували першому відкриттю «Описів фондів» секунди.
     out: dict[str, Any] = {}
-    for k in FIELDS:
-        if k in ("spr", "shifra"):
-            continue
-        out[k] = r.get(k) if k in r else None
-        if isinstance(out[k], str):
-            out[k] = out[k].strip()
+    for k in _MERGED_FIELDS:
+        v = r.get(k)
+        out[k] = v.strip() if isinstance(v, str) else v
     out["commons_flag"] = bool(out.get("commons_url"))
     # ⚠ Тут стояло `out["fs_film"] = ""` — залишок часів, коли merged-схема поля
     # не мала. Після міграції майстер-індексу FS у реєстр воно затирало живі
@@ -430,11 +433,12 @@ def _live_maps(repo: str, fond: str
     paths: dict[tuple[str, str, str], str] = {}
     frames: dict[tuple[str, str, str], int] = {}
     try:
-        from nyshporka.library import load_library
-        data = load_library()
+        # Кешований індекс бібліотеки: `load_library` розбирав той самий JSON
+        # на кожен із 38 фондів першого відкриття «Описів фондів» (3,4 с).
+        from nyshporka.library import library_lookup
+        cases = library_lookup().entries
     except Exception:
         return paths, frames
-    cases = data.get("cases", []) if isinstance(data, dict) else data
     for c in cases:
         if str(c.get("fond") or "") != str(fond):
             continue

@@ -280,9 +280,12 @@ def log(ws: W.Workspace, path: Path | None = None,
         rev, day, subj = [*head.split("\t", 2), "", ""][:3]
         # Від кореня проєкту, як шлях у `history.diff`/`restore`: корінь git
         # (Майстерня) і корінь проєкту (`projects/<ім'я>`) — різні теки.
-        files = [_from_proot(ws, top, f) for f in body.splitlines() if f.strip()]
+        # 🔴 Перетворюються лише показані шляхи: коміт обліку зачіпає тисячі
+        # файлів, і `resolve()` кожного коштував Історії 3 с (22.10.2026).
+        names = [f for f in body.splitlines() if f.strip()]
+        files = [_from_proot(ws, top, f) for f in names[:LOG_FILES]]
         out.append({"rev": rev, "date": day, "subject": subj,
-                    "files": files[:LOG_FILES], "more": max(0, len(files) - LOG_FILES)})
+                    "files": files, "more": max(0, len(names) - LOG_FILES)})
     return out
 
 

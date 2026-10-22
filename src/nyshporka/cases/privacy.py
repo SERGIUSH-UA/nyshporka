@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 #: Поле паспорта. Справжнє лише значення `true`: інше — не приватна.
 FIELD = "private"
@@ -37,18 +38,16 @@ def project_default() -> bool:
 def _dirs_of(key: str) -> list[Path]:
     """Усі теки справи: з бібліотеки (і зайві), і теку паспорта без кадрів."""
     from nyshporka.core.workspace import workspace
-    from nyshporka.library import load_library
+    from nyshporka.library import library_lookup
     from nyshporka.share import align
 
     out: list[Path] = []
     root = workspace().hub
     try:
-        rows = load_library()
+        rows: tuple[dict[str, Any], ...] = library_lookup().entries
     except Exception:
-        rows = []
-    for row in rows:
-        if not align._row_matches(row, key):
-            continue
+        rows = ()
+    for row in align._rows_of(rows, key):
         for rel in [row.get("path"), *(row.get("extra_paths") or [])]:
             if rel:
                 p = Path(rel)
