@@ -1995,3 +1995,24 @@ def test_drop_frames_takes_only_our_own_copy(space: Path) -> None:
     assert not ours.exists()
     assert F.drop_cache("spr-235") == 0 and (stranger / "0001.jpg").exists()
     assert F.drop_cache("../frames") == 0 and F.drop_cache("") == 0
+
+
+def test_foreign_supervisor_program_does_not_inherit_our_python_home(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    """🔴 `PYTHONHOME` нашого лаунчера ламає програму наглядача з іншого середовища.
+
+    Вона падала на `import re` («SRE module mismatch»), а відповідь читалась як
+    «наглядач мовчить» — і жоден запис відчепленого заходу не закривався
+    (22.10.2026). Свій інтерпретатор (`-m gpurunner`) оточення бере як є.
+    """
+    from nyshporka.cloud import supervised as S
+
+    monkeypatch.setenv("PYTHONHOME", "C:/other/python")
+    monkeypatch.setenv("PYTHONPATH", "C:/other/src")
+    foreign = S._child_env(["C:/gpurunner/.venv/Scripts/gpurunner.exe", "htr"], {"X": "1"})
+    assert "PYTHONHOME" not in foreign and "PYTHONPATH" not in foreign
+    assert foreign["X"] == "1"
+    own = S._child_env([sys.executable, "-m", "gpurunner"], {})
+    assert own["PYTHONHOME"] == "C:/other/python"
+    named = S._child_env(["C:/gpurunner.exe"], {"PYTHONPATH": "C:/mine"})
+    assert named["PYTHONPATH"] == "C:/mine", "явно передане викликачем лишається"

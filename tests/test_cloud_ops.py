@@ -109,3 +109,59 @@ def test_stop_reports_a_killed_supervisor_as_a_live_machine(space: Path,  # noqa
     env = O.call("cloud.stop", {"run_id": "k", "force": True})
     assert env.ok and any(w.code == "machine_alive" and "42" in w.text
                           for w in env.warnings)
+
+
+# ── відчеплені заходи: перелік питає наглядачів ──────────────────────────────
+_DONE = {"phase": "finished", "verdict": "ok", "human_action_required": False,
+         "why": "2 справ прогнано повністю за $0.02", "budget": {"spent_usd": 0.02}}
+
+
+def _ask(monkeypatch: pytest.MonkeyPatch, answer: Any) -> list[str]:
+    from nyshporka.cloud import supervised as SUP
+
+    asked: list[str] = []
+
+    def fake(session: str, *, timeout: float | None = None) -> dict[str, Any]:
+        asked.append(session)
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+    monkeypatch.setattr(SUP, "state_of_session", fake)
+    return asked
+
+
+def test_state_closes_detached_runs_the_supervisor_finished(space: Path,  # noqa: F811
+                                                            monkeypatch) -> None:
+    """🔴 Перелік закриває записи, чий наглядач уже доповів підсумок.
+
+    Доти записи закривались лише запитом одного заходу чи повторним запуском
+    справи, і 4336 завершених заходів стояли «читає» (22.10.2026).
+    """
+    for rid in ("a", "b"):
+        _run(rid, phase="running", supervisor="htr-q-1", siblings=["a", "b"])
+    asked = _ask(monkeypatch, _DONE)
+    d = O.call("cloud.state", {}).data
+    assert asked == ["htr-q-1"], "сесію питають раз на всі її справи"
+    assert d["live"] == 0 and d["settled"] == 2
+    assert {ST.load(r).phase for r in ("a", "b")} == {"done"}
+    assert not ST.load("a").needs_release
+
+
+def test_silent_supervisor_keeps_the_run_open(space: Path, monkeypatch) -> None:  # noqa: F811
+    """Мовчання наглядача — не «завершено»: машина може працювати."""
+    _run("a", phase="running", supervisor="htr-q-1")
+    _ask(monkeypatch, {})
+    d = O.call("cloud.state", {}).data
+    assert d["live"] == 1 and ST.load("a").phase == "running"
+
+
+def test_without_a_supervisor_program_the_list_says_so(space: Path,  # noqa: F811
+                                                       monkeypatch) -> None:
+    """Спитати нічим (у середовищі немає пакета оренди) — попередження, не тиша."""
+    from nyshporka.cloud import supervised as SUP
+
+    _run("a", phase="running", supervisor="htr-q-1")
+    _ask(monkeypatch, SUP.SupervisorMissing("наглядача немає"))
+    env = O.call("cloud.state", {})
+    assert env.data["live"] == 1
+    assert any(w["code"] == "supervisor_unreachable" for w in env.as_dict()["warnings"])

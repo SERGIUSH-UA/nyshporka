@@ -155,9 +155,37 @@ def _env(session: str, exe: str) -> dict[str, str]:
     return env
 
 
+#: Змінні, якими наш інтерпретатор прив'язує дочірній Python до СВОЄЇ бібліотеки.
+_OWN_PYTHON_ENV = ("PYTHONHOME", "PYTHONPATH", "UV_INTERNAL__PYTHONHOME")
+
+
+def _child_env(cmd: list[str], env: dict[str, str]) -> dict[str, str]:
+    """Оточення дочірньої програми.
+
+    🔴 Лаунчер середовища, зібраного uv, виставляє `PYTHONHOME` на свій
+    інтерпретатор. Програма наглядача з ІНШОГО середовища (`NYSH_GPURUNNER`)
+    успадковувала його й падала на `import re` («SRE module mismatch») — а
+    Нишпорка читала порожню відповідь як «наглядач мовчить». Через це жоден
+    запис відчепленого заходу не закривався з `nysh`, запущеного з чужого середовища
+    (22.10.2026: 4336 записів «читає»). Свій інтерпретатор (`-m gpurunner`)
+    оточення отримує як є.
+    """
+    full = {**os.environ, **env}
+    exe = cmd[0] if cmd else ""
+    try:
+        own = bool(exe) and Path(exe).resolve() == Path(sys.executable).resolve()
+    except OSError:
+        own = False
+    if not own:
+        for k in _OWN_PYTHON_ENV:
+            if k not in env:
+                full.pop(k, None)
+    return full
+
+
 def _run(cmd: list[str], *, env: dict[str, str], capture: bool = False,
          timeout: float | None = None) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(cmd, env={**os.environ, **env}, text=True,
+    return subprocess.run(cmd, env=_child_env(cmd, env), text=True,
                           encoding="utf-8", errors="replace",
                           capture_output=capture, check=False, timeout=timeout)
 
@@ -1322,6 +1350,44 @@ def absorb(st: ST.RunState, data: dict[str, Any]) -> ST.RunState:
         with contextlib.suppress(Exception):
             stamp_project(Path(st.out_dir), P.tag_of(st.project))
     return ST.save(st)
+
+
+def settle_open(runs: Iterable[ST.RunState], *,
+                timeout: float = 20.0) -> dict[str, Any]:
+    """Закрити записи відчеплених заходів, чиї наглядачі вже доповіли підсумок.
+
+    🔴 Запис заходу — знімок хвилини відчеплення, і сам себе він не оновить.
+    Закривали його лише `cloud state <захід>` та повторний запуск тієї самої
+    справи, а перелік (`cloud state`, екран «Хмара») наглядачів не питав. Тож
+    кожен захід, результат якого забрали іншим шляхом, лишався «читає» назавжди:
+    22.10.2026 таких було 4336 із 4685, найстаріші з 21.09, хоча всі 478
+    наглядачів давно доповіли «прогнано повністю».
+
+    Питається кожна сесія один раз, на всі її справи. Наглядач, що мовчить або
+    не відповів за `timeout`, лишає запис відкритим: мовчання — не «завершено»
+    (див. `find_live`). Записи в `runs` оновлюються на місці.
+    """
+    open_ = [s for s in runs if s.supervisor and s.phase not in ("done", "failed")]
+    by_session: dict[str, list[ST.RunState]] = {}
+    for s in open_:
+        by_session.setdefault(s.supervisor, []).append(s)
+    asked = settled = 0
+    unreachable = ""
+    for session, recs in by_session.items():
+        try:
+            data = state_of_session(session, timeout=timeout)
+        except SupervisorMissing as exc:
+            unreachable = str(exc)
+            break
+        except Exception:  # таймаут, зіпсований вивід — запис лишається відкритим
+            continue
+        asked += 1
+        if data and finished(data):
+            for st in recs:
+                absorb(st, data)
+                settled += 1
+    return {"open": len(open_), "sessions": len(by_session), "asked": asked,
+            "settled": settled, "unreachable": unreachable}
 
 
 def state_of(st: ST.RunState) -> dict[str, Any]:

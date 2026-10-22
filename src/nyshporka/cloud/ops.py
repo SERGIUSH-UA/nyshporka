@@ -51,13 +51,24 @@ def cloud_state(a: StateArgs) -> Envelope:
             return fail(f"немає заходу «{a.run_id}»")
         is_live = any(s.run_id == st.run_id for s in ST.live())
         return ok({"runs": [_row(st, now)], "live": int(is_live)})
+    from nyshporka.cloud import supervised as SUP
+
     runs = ST.all_runs()
-    alive = {s.run_id for s in ST.live()}
+    settle = SUP.settle_open(runs)
+    # Живі — з того самого переліку: другий `live()` перечитував з диска всі
+    # тисячі заходів удруге, і екран «Хмара» чекав на це 1,5 с (22.10.2026).
+    alive = {s.run_id for s in runs if ST.is_live(s)}
     # Живі — завжди, навіть старі: машина, що горить, не може випасти за межу.
     shown = [s for s in runs if s.run_id in alive]
     shown += [s for s in runs if s.run_id not in alive][:max(0, a.limit - len(shown))]
     env = ok({"runs": [_row(s, now) for s in shown], "live": len(alive),
-              "total": len(runs)})
+              "total": len(runs), "settled": settle["settled"]})
+    still = settle["open"] - settle["settled"]
+    if settle["unreachable"] and still:
+        env.warn("supervisor_unreachable",
+                 f"{still} відчеплених заходів записано як «читає», але наглядача "
+                 f"спитати нічим, тож стан може бути застарілим: "
+                 f"{settle['unreachable']}")
     if any(s.needs_release for s in shown):
         env.warn("needs_release", "є машина, яку ще не відпущено: оренда тече — "
                                   "nysh cloud stop або nysh cloud rent status")

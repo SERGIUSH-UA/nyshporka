@@ -348,10 +348,14 @@ def all_runs() -> list[RunState]:
     return sorted(out, key=lambda s: s.updated, reverse=True)
 
 
+def is_live(s: RunState) -> bool:
+    """Захід ще щось тримає: незавершений або з незвільненою машиною."""
+    return s.phase not in ("done", "failed") or s.needs_release
+
+
 def live() -> list[RunState]:
     """Заходи, які ще щось тримають: незавершені або з незвільненою машиною."""
-    return [s for s in all_runs()
-            if s.phase not in ("done", "failed") or s.needs_release]
+    return [s for s in all_runs() if is_live(s)]
 
 
 def remove(run_id: str) -> bool:
