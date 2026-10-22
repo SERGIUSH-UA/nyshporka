@@ -236,3 +236,16 @@ def test_blind_spots_reach_the_build(space, monkeypatch) -> None:
 
     said = {w.code: w.text for w in env.warnings}
     assert "blind_opys_absent" in said and "999" in said["blind_opys_absent"], said
+
+
+@pytest.mark.parametrize("args", [{"repo": "", "fond": ""}, {"repo": "ДАХмО", "fond": " "}])
+def test_empty_repo_or_fond_is_refused_before_any_collector(space, monkeypatch, args) -> None:
+    """Порожня форма «Зібрати опис» завершувалась «готово» з усіма збирачами
+    в «пропущено» і без жодного слова на екрані (прохід консолі 22.10.2026)."""
+    a = _Збирач("альфа", ready=True, rows=100)
+    _stub(monkeypatch, a)
+
+    env = O.call("registry.build", args)
+
+    assert not env.ok and "архів і фонд" in env.error
+    assert a.collected == 0

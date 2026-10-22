@@ -225,7 +225,9 @@ def launch(convoy: Convoy, res: GoResult, say: Callable[..., None], *,
                 if p.est.balance_usd is not None]
     decision = M.decide_launch(total, min(balances) if balances else None,
                                M.autostart_ceiling(), confirm)
-    res.decision = decision.why
+    # `launch` — рішення словом для консолі: без нього вікно «У хмару»
+    # писало «сервер не назвав рішення» й не давало запустити (22.10.2026).
+    res.decision, res.launch = decision.why, decision.kind
     for k, ((conv, _p, _s), share, h) in enumerate(zip(prepared, shares, hours,
                                                       strict=True), 1):
         res.queues.append({"queue": k, "session": "", "cases": [leg.name for leg in conv.legs],

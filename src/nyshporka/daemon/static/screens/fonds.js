@@ -173,8 +173,8 @@ function collectBlock(empty) {
   return `<details class="collect"${collectOpen(empty)}><summary>${t('fonds.collect')}</summary>
     <p class="muted">${t('fonds.collect.why')}</p>
     <form class="row" data-act="fond.collect">
-      <input name="repo" id="fd-repo" placeholder="${t('fonds.collect.repo')}" size="8">
-      <input name="fond" id="fd-fond" placeholder="${t('fonds.collect.fond')}" size="6">
+      <input name="repo" id="fd-repo" placeholder="${t('fonds.collect.repo')}" size="8" required>
+      <input name="fond" id="fd-fond" placeholder="${t('fonds.collect.fond')}" size="6" required>
       <input name="opys" placeholder="${t('fonds.collect.opys')}" size="6">
       <input name="fond_id" placeholder="${t('fonds.collect.fondid')}" size="10"
         title="${t('fonds.collect.fondid.why')}">

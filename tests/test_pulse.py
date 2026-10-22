@@ -106,6 +106,21 @@ def test_quick_staleness_says_stale_when_pulse_moved(space):
     assert quick["reasons"]
 
 
+def test_show_mode_of_a_mutating_op_does_not_beat(space):
+    """Шапка консолі кличе `share.setup --show` на кожному відкритті сторінки.
+
+    Удар за показ робив реєстр «застарілим» одразу після «Оновити», і смуга
+    поверталась щоразу (прохід консолі 22.10.2026). Справжній запис — б'є.
+    """
+    from nyshporka import ops as O
+
+    before = P.seq()
+    assert O.call("share.setup", {"show": True}).ok
+    assert P.seq() == before, "показ профілю оголосив реєстр застарілим"
+    assert O.call("share.setup", {"handle": "Тест"}).ok
+    assert P.seq() != before, "запис профілю мусить бити пульс"
+
+
 def test_quick_never_claims_fresh(space):
     """🔴 Найважливіший тест файла: збіг мітки не дає `stale=False` як факт.
 

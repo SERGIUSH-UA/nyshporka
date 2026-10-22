@@ -902,6 +902,10 @@ def registry_build(a: BuildArgs) -> Envelope:
     from nyshporka.core import progress
     from nyshporka.fonds import collect as C
 
+    if not (a.repo.strip() and a.fond.strip()):
+        # Порожні поля проходили всі збирачі «пропущено» й завершувались
+        # «готово» з порожнім реєстром (прохід консолі 22.10.2026).
+        return fail("назвіть архів і фонд — без них опису нема чого збирати")
     reg = C.load()
     all_collectors = list(reg.all())
     if not all_collectors:

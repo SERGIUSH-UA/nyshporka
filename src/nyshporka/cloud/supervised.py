@@ -574,7 +574,9 @@ def launch(convoy: Convoy, res: GoResult, say: Callable[..., None], *,
 
     ceiling = M.autostart_ceiling()
     decision = M.decide_launch(high, p.est.balance_usd, ceiling, confirm)
-    res.decision = decision.why
+    # `launch` — рішення словом для консолі: без нього вікно «У хмару»
+    # писало «сервер не назвав рішення» й не давало запустити (22.10.2026).
+    res.decision, res.launch = decision.why, decision.kind
     fork = (f"${res.fork_low:.2f}–${res.fork_high:.2f}"
             if res.fork_high is not None else "вилки немає (кошторис невідомий)")
     say("money", f"вилка {fork} · бюджет заходу ${high:.2f} · стеля часу "

@@ -233,6 +233,10 @@ function openScopes(open) {
 async function profileHint() {
   const box = el('prof-hint');
   if (!box) return;
+  // Профіль роду — проєктний: у самій Майстерні його немає, і запит лише
+  // давав відмову в консолі браузера на кожному відкритті Пошуку.
+  const pj = await loadProjects();
+  if (pj && pj.hub_only && !currentPid()) return;
   const env = await callOp('profile.show', {});
   if (!env.ok) return;
   const d = env.data || {};

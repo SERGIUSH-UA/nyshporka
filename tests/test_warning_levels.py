@@ -51,6 +51,25 @@ def test_a_real_failure_is_an_alert(monkeypatch: pytest.MonkeyPatch) -> None:
     assert got and got[0].level == ALERT
 
 
+def test_missing_engines_are_not_ready(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Рушіїв немає — жовтий пункт, але «можна читати» тут неправда.
+
+    Перевірка машини казала «Усе на місці», а план читання тієї ж машини
+    відмовляв «середовище рушіїв не готове» (прохід консолі 22.10.2026).
+    """
+    from nyshporka.core.ops import NoArgs
+    from nyshporka.ops_builtin import setup_check
+    from nyshporka.setup import doctor, sample
+
+    monkeypatch.setattr(doctor, "run", lambda: [
+        doctor.Check(name="п0", level="warn", detail=""),
+        doctor.Check(name=doctor.ENGINES, level="warn", detail="немає інтерпретатора")])
+    monkeypatch.setattr(sample, "installed", lambda _ws: True)
+    env = setup_check(NoArgs())
+    assert env.data["ready"] is False
+    assert [w for w in env.warnings if w.code == "not_ready"]
+
+
 def test_migration_nag_is_for_the_agent_only(tmp_path: Path,
                                               monkeypatch: pytest.MonkeyPatch) -> None:
     from nyshporka import migrate as M

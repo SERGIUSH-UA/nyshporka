@@ -9,13 +9,20 @@ const TOKEN = document.body.dataset.token || '';
  * іншим родом записувала б нотатки й розділи туди. Адреса, а не cookie: дві
  * вкладки можуть бути відкриті на двох різних проєктах.
  */
-const PROJECT = new URLSearchParams(location.search).get('p') || '';
+const ASKED = new URLSearchParams(location.search).get('p') || '';
+/**
+ * `?p=_hub` (`HUB_ID` у `daemon/app.py`) — сама Майстерня: заголовок іде як є,
+ * бо демон міг стартувати з теки проєкту, а для екранів це «без проєкту».
+ * Доти Огляд з перемикача «Майстерня» вважав `_hub` проєктом і кликав
+ * проєктні операції — чотири відмови на кожне відкриття (22.10.2026).
+ */
+const PROJECT = ASKED === '_hub' ? '' : ASKED;
 
 /** `fetch` до демона з проєктом вкладки. Усі запити консолі йдуть через нього. */
 function apiFetch(url, init = {}) {
-  if (!PROJECT) return fetch(url, init);
+  if (!ASKED) return fetch(url, init);
   const headers = new Headers(init.headers || {});
-  headers.set('X-Nysh-Project', PROJECT);
+  headers.set('X-Nysh-Project', ASKED);
   return fetch(url, { ...init, headers });
 }
 /** Фінальні стани завдання — дзеркало `JobState.final` у `core/jobs.py`. */

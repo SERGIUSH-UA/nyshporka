@@ -1313,3 +1313,13 @@ def test_grep_reaches_the_page_store_and_the_notebook(case_space: Path) -> None:
     got = T.grep_layers("Ковальскій", ["pages"])
     assert got["layers"]["pages"]["hits"] >= 1
     assert got["hits"][0]["file"].startswith("data/pages/DAHMO/")
+
+
+def test_crop_without_a_text_store_says_so_in_words(bare_space) -> None:
+    """Вікно гіпотези показувало сирий `FileNotFoundError` зі шляхом до sqlite."""
+    from nyshporka import ops as O
+
+    env = O.call("text.crop", {"case": "TEST/1/1/1", "page": "4", "line": 3})
+
+    assert not env.ok
+    assert "прочитаного" in env.error and "FileNotFoundError" not in env.error

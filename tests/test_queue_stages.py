@@ -892,3 +892,24 @@ def test_interpolovana_shyfra_chekaie_oka(space: Path, chytach: Chytach,
     _run()
 
     assert dzherelo.calls == 1 and _one()["state"] == Q.DONE
+
+
+def test_kliuch_z_biblioteky_bere_teku_z_dysku(space: Path) -> None:
+    """Консоль ставить у чергу ключ рядка Бібліотеки, а не шлях теки.
+
+    Тека з кадрами лежить не там, де її шукав би реєстр опису, і опису
+    немає — черга відкидала справу «не справа з реєстру опису» (22.10.2026).
+    """
+    from nyshporka import ops as O
+
+    d = frames(space, "smoke/knyha_0", 3)
+    REG.describe(d, shifra=SHIFRA)
+    from nyshporka import library as L
+
+    L.write_library(L.build_library())
+
+    env = O.call("queue.add", {"refs": [FULL]})
+
+    row = env.data["rows"][0]
+    assert env.data["added"] == 1, row.get("why")
+    assert row["kind"] == "dir" and (space / row["case_dir"]).resolve() == d.resolve()

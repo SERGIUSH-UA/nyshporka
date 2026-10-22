@@ -836,6 +836,13 @@ def _prepare(res: GoResult, case: str, say: EventFn, owner: contextlib.ExitStack
     try:
         owner.enter_context(ST.owned(plan.run_id))
     except ST.OwnerBusy as exc:
+        import os
+
+        if dry_run and exc.pid == os.getpid():
+            # Той самий застосунок ще рахує кошторис цієї справи: людина
+            # закрила вікно «У хмару» й одразу відкрила нове (22.10.2026).
+            raise Busy("кошторис цієї справи ще рахується з попереднього вікна — "
+                       "зачекайте кілька секунд і відкрийте ще раз") from None
         raise Busy(
             f"{exc} — другий наглядач забрав би його результат і погасив би його "
             f"машину. Стан: `nysh cloud state {exc.run_id}`.") from None

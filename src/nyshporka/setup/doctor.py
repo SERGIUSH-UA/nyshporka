@@ -371,6 +371,10 @@ def _engine_report() -> EnvReport | None:
         return None
 
 
+#: ім'я перевірки рушіїв: без них читання на цій машині не запуститься
+ENGINES = "Рушії читання"
+
+
 def _engines() -> Check:
     """Середовище рушіїв — окремий інтерпретатор.
 
@@ -379,7 +383,7 @@ def _engines() -> Check:
     """
     rep = _engine_report()
     if rep is None:
-        return Check("Рушії читання", "warn", "простір не визначено")
+        return Check(ENGINES, "warn", "простір не визначено")
     if not rep.ok:
         from nyshporka.htr import env as henv
 
@@ -405,11 +409,11 @@ def _engines() -> Check:
             # Intel Mac: PyPI без колес torch, тож команда збирає інакше — і
             # людині варто знати, звідки візьметься інтерпретатор і чому.
             hint += " · Intel Mac: python і torch беруться з conda-forge (micromamba приїде сам)"
-        return Check("Рушії читання", "warn", why, hint)
+        return Check(ENGINES, "warn", why, hint)
     bits = [f"kraken {rep.kraken}" if rep.kraken else "",
             f"torch {rep.torch}" if rep.torch else "",
             "CUDA" if rep.cuda else "CPU"]
-    return Check("Рушії читання", "ok", " · ".join(b for b in bits if b))
+    return Check(ENGINES, "ok", " · ".join(b for b in bits if b))
 
 
 def _models() -> Check:

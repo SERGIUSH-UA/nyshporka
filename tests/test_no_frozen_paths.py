@@ -46,7 +46,7 @@ DEBT: dict[str, int] = {
     "matching/review.py": 2,
     "migrate/__init__.py": 2,
     "models/region.py": 1,
-    "ops_canon.py": 5,
+    "ops_canon.py": 4,
     "ops_site.py": 1,
     "site/build.py": 1,
     "site/public.py": 1,

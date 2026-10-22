@@ -463,17 +463,23 @@ function libMore(r) {
  * машина не має права не пустити її рішення, — але мовчки це не проходить.
  */
 function libVerdictForm(key) {
+  // Форма відкривається з наявним рішенням: порожня форма й «Зберегти» мовчки
+  // знімали вердикт, який людина ставила раніше (прохід консолі 22.10.2026).
+  const r = LIB_ROWS.get(key) || {};
+  const opt = (v, label) => `<option value="${v}"${(r.verdict || '') === v ? ' selected' : ''}>${esc(label)}</option>`;
   setView(`<h2>${esc(key)}</h2>
     <div class="row"><select id="lv-kind">
-      <option value="">${esc(t('lib.verdict.clear'))}</option>
-      <option value="no_clan">${esc(t('lib.verdict.no_clan'))}</option>
-      <option value="clan_found">${esc(t('lib.verdict.clan_found'))}</option>
-      <option value="recheck">${esc(t('lib.verdict.recheck'))}</option>
+      ${opt('', t('lib.verdict.clear'))}
+      ${opt('no_clan', t('lib.verdict.no_clan'))}
+      ${opt('clan_found', t('lib.verdict.clan_found'))}
+      ${opt('recheck', t('lib.verdict.recheck'))}
     </select></div>
     <div class="row"><input id="lv-pages" type="number" min="0"
+      value="${r.verdict_pages ? esc(String(r.verdict_pages)) : ''}"
       placeholder="${esc(t('lib.pages'))}"></div>
     <p class="muted">${t('lib.pages.why')}</p>
-    <div class="row"><input id="lv-note" placeholder="${esc(t('lib.note'))}"></div>
+    <div class="row"><input id="lv-note" value="${esc(r.verdict_note || '')}"
+      placeholder="${esc(t('lib.note'))}"></div>
     <button data-act="lib.verdict.save" data-arg="${esc(key)}">${t('lib.save')}</button>
     <button data-act="nav" data-arg="library">${t('lib.cancel')}</button>`);
 }

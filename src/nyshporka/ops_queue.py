@@ -168,6 +168,15 @@ def _resolve(ref: str) -> tuple[str, dict[str, str], dict[str, Any]]:
     if not raw:
         raise QueueError("порожня назва справи")
     d = case_path(raw)
+    if not d.is_dir():
+        # Ключ справи з Бібліотеки («CDIAK/127/1015/475»), чиї кадри вже на
+        # диску: черга бере їх з теки, а не шукає справу в реєстрі опису (з
+        # консолі таку справу черга відкидала, 22.10.2026).
+        from nyshporka.library import library_lookup
+
+        row = library_lookup().by_key.get(raw) or {}
+        if row.get("path") and case_path(str(row["path"])).is_dir():
+            d = case_path(str(row["path"]))
     if d.is_dir():
         zbirna = SP.of_dir(d)
         if zbirna is not None:

@@ -452,6 +452,11 @@ def text_crop(a: TextCropArgs) -> Envelope:
                      wide=a.wide, pad=a.pad, scale=a.scale, out=a.out or None)
     except ValueError as exc:
         return fail(str(exc))
+    except FileNotFoundError:
+        # Стору тексту ще немає: людина бачила сирий виняток зі шляхом до
+        # sqlite у вікні гіпотези (прохід консолі 22.10.2026).
+        return fail("прочитаного в просторі ще немає — кропу нема з чого "
+                    "різати. Після прогону: nysh text index --case <справа>")
     if res.get("error"):
         return fail(str(res["error"]))
     env = ok(res)

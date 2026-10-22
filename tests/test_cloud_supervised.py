@@ -334,8 +334,34 @@ def test_dry_run_never_reaches_the_supervisor(
 
     assert res.verdict == "dry_run" and res.exit_code == 0
     assert res.fork_low == 0.40, "вилка порахована з кошторису наглядача"
+    # Рішення словом: без нього вікно «У хмару» не давало запустити (22.10.2026).
+    assert res.launch == "ok"
     assert not [c for c in fake_gpurunner.called("htr", "supervise")
                 if "--detach" in c], "сухий прогін не орендує"
+
+
+def test_second_estimate_from_the_same_app_says_wait(
+        space: Path, monkeypatch, fake_gpurunner) -> None:
+    """Вікно «У хмару» закрили посеред кошторису й одразу відкрили нове.
+
+    Перший кошторис ще тримає замок справи в тому самому процесі: відмова
+    мусить казати «зачекайте», а не «веде інший процес (pid застосунку)»
+    (прохід консолі 22.10.2026).
+    """
+    import os
+
+    case, _ = _wire(space, monkeypatch)
+
+    @contextlib.contextmanager
+    def busy(run_id: str):
+        raise ST.OwnerBusy(run_id, os.getpid())
+        yield
+
+    monkeypatch.setattr(ST, "owned", busy)
+    res = _go(case, dry_run=True)
+
+    assert "ще рахується" in res.why, res.why
+    assert "інший процес" not in res.why
 
 
 def test_above_ceiling_waits_for_a_human(
@@ -472,8 +498,9 @@ def test_batch_hands_pack_options_to_every_queue_plan(
         space: Path, monkeypatch, fake_gpurunner) -> None:
     case, _ = _wire(space, monkeypatch)
     other = _second_case(space, "справа-2")
-    _go([str(case), str(other)], boxes=2, dry_run=True, pack_dir="E:/pack",
-        upload_jobs=1)
+    res = _go([str(case), str(other)], boxes=2, dry_run=True, pack_dir="E:/pack",
+              upload_jobs=1)
+    assert res.launch in {"ok", "needs_confirm"}, "партія теж називає рішення словом"
     plans = fake_gpurunner.called("htr", "plan")
     assert plans
     assert all(c[c.index("--pack-dir") + 1] == "E:/pack" for c in plans)

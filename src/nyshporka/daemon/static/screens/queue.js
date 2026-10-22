@@ -192,7 +192,11 @@ SCREENS.queue = async () => {
 async function queueAfter(env) {
   const box = el('queue-msg');
   if (!env.ok) return boxError('queue-msg', env);
-  if (box) box.innerHTML = renderWarnings(env);
+  // Справу, яку черга не взяла, видно одразу, а не в згорнутих примітках:
+  // інакше «Додати» виглядала кнопкою, що нічого не робить (22.10.2026).
+  const refused = ((env.data || {}).rows || []).filter((r) => !r.id && r.why)
+    .map((r) => `<div class="warn err">${esc(r.why)}</div>`).join('');
+  if (box) box.innerHTML = refused || renderWarnings(env);
   await queueLoad(false);
   return undefined;
 }

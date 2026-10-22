@@ -3209,7 +3209,7 @@ def setup_check(_: NoArgs) -> Envelope:
     from nyshporka.core.ops import REGISTRY
     from nyshporka.core.workspace import workspace
     from nyshporka.setup import sample as S
-    from nyshporka.setup.doctor import run
+    from nyshporka.setup.doctor import ENGINES, run
 
     # 🔴 Кнопка віддається лише тоді, коли операція справді зареєстрована.
     # Обіцяна в перевірці, але відсутня дія — це та сама порада, якої не
@@ -3218,6 +3218,7 @@ def setup_check(_: NoArgs) -> Envelope:
     checks = [{"name": c.name, "level": c.level, "detail": c.detail,
                "fix": c.fix, "op": c.op if c.op in known else ""}
               for c in run()]
+    engines_missing = any(c["name"] == ENGINES and c["level"] != "ok" for c in checks)
     worst = ("fail" if any(c["level"] == "fail" for c in checks)
              else "warn" if any(c["level"] == "warn" for c in checks) else "ok")
     # 🔴 Названо окремим полем, бо це не поламка машини: зразок або вже
@@ -3230,13 +3231,15 @@ def setup_check(_: NoArgs) -> Envelope:
         has_sample = False          # простору ще немає — питання передчасне
     env = ok({"checks": checks, "level": worst,
               # Готова — коли нічого не зламано; жовте видно в переліку нижче.
-              "ready": worst != "fail",
+              # Крім рушіїв: без них «можна читати» брехало — план читання
+              # відмовляв «середовище рушіїв не готове» (22.10.2026).
+              "ready": worst != "fail" and not engines_missing,
               "sample_case": has_sample,
               "sample_available": S.sample_dir() is not None})
     # 🔴 Лише справжня поламка. Доти будь-який жовтий пункт («про новішу
     # версію не питали») давав «читання не запуститься» — на машині, яка
     # щойно читала справу.
-    if worst == "fail":
+    if worst == "fail" or engines_missing:
         env.warn("not_ready",
                  "читання рукопису на цій машині поки не запуститься — нижче "
                  "написано, чого бракує і чим це ставиться", ALERT)

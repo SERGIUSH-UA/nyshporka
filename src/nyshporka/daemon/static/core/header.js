@@ -28,6 +28,22 @@ function closeMenus() {
   OPEN_MENU = null;
 }
 
+/**
+ * Меню в межах екрана. На телефоні шапка переноситься, і меню, прив'язане до
+ * правого краю чипа, виходило за лівий край: підписи різались (22.10.2026).
+ */
+function fitMenu(m) {
+  if (!m.getBoundingClientRect || !m.style) return;
+  m.style.transform = '';
+  const r = m.getBoundingClientRect();
+  const gap = 8;
+  const room = (window.innerWidth || 0) - gap;
+  let dx = 0;
+  if (r.left < gap) dx = gap - r.left;
+  else if (room > 0 && r.right > room) dx = Math.max(gap - r.left, room - r.right);
+  if (dx) m.style.transform = `translateX(${Math.round(dx)}px)`;
+}
+
 // ── проєкт ───────────────────────────────────────────────────────────────────
 /** Майстерня, проєкти й поточний — з `/api/projects` (той самий, що й до хвилі 7). */
 let PROJECTS = null;
@@ -254,6 +270,7 @@ Object.assign(ACTIONS, {
     if (!m) return;
     m.innerHTML = id === 'proj-menu' ? projectMenu() : id === 'jobs-menu' ? jobsMenu() : meMenu();
     m.hidden = false;
+    fitMenu(m);
     elm.setAttribute('aria-expanded', 'true');
     OPEN_MENU = id;
   },

@@ -145,6 +145,12 @@ def readonly_refusal(name: str, mutates: bool) -> str | None:
             "з кореня Майстерні")
 
 
+def _only_shows(args: Any) -> bool:
+    """Змінна оп, покликана в режимі «лише показати», — даних не міняє."""
+    return (getattr(args, "show", False) is True
+            or getattr(args, "dry_run", False) is True)
+
+
 def _readonly_refusal(op: Op) -> str | None:
     return readonly_refusal(op.name, op.mutates)
 
@@ -244,7 +250,11 @@ class Registry:
         # операції про неї не знав. Умисно після виклику й лише на успіху:
         # операція, що впала, нічого не змінила, і бити за неї означало б
         # оголошувати реєстр застарілим без причини.
-        if op.mutates and getattr(env, "ok", True):
+        #
+        # Режим «лише показати» (`show`, `dry_run`) нічого не пише, тож і не б'є:
+        # шапка консолі читає `share.setup --show` на кожному відкритті сторінки,
+        # і реєстр звідси «відставав» одразу після «Оновити» (22.10.2026).
+        if op.mutates and getattr(env, "ok", True) and not _only_shows(args):
             try:
                 from nyshporka.core import pulse
 

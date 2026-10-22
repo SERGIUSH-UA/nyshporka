@@ -75,6 +75,15 @@ def test_hyp_gives_hits_with_a_crop_command(family: Path) -> None:  # noqa: F811
 
 
 def test_without_canon_the_answer_says_so(space: Path) -> None:  # noqa: F811
-    for name in ("canon.cards", "canon.hyps"):
+    """Щойно заведений проєкт: порожній стан із поясненням, а не відмова.
+
+    Відмова малювала на екранах «Канон», «Гіпотези» й на Огляді червоне «Не
+    вийшло» там, де нічого не зламано (прохід консолі 22.10.2026).
+    """
+    for name in ("canon.cards", "canon.hyps", "canon.next"):
         env = O.call(name, {})
-        assert not env.ok and "data/canonical" in env.error
+        assert env.ok, f"{name}: {env.error}"
+        assert any(w.code == "no_canon" and "data/canonical" in w.text
+                   for w in env.warnings), name
+    assert O.call("canon.cards", {}).data["rows"] == []
+    assert O.call("canon.next", {}).data["next"] == []

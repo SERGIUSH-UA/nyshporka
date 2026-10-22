@@ -146,11 +146,11 @@ def canon_next(a: NextArgs) -> Envelope:
     from nyshporka.canon.next import next_decisions
 
     root = _root()
-    if not (root / "data" / "canonical").is_dir():
-        return fail("канону в просторі немає (data/canonical)")
     got = next_decisions(root, a.limit)
     env = ok(got)
-    if not (got["open"] or got["awaiting"] or got["closed"]):
+    if _no_canon(env):
+        pass
+    elif not (got["open"] or got["awaiting"] or got["closed"]):
         env.warn("no_hypotheses", "карток гіпотез ще немає: відкрите по роду ніде не "
                                   "записано. Як завести — скіл keep-canon, розділ «Гіпотеза»")
     return env
@@ -193,13 +193,26 @@ def _citations(ent: Any) -> int:
     return own + sum(len(f.citations) for f in getattr(ent, "facts", None) or [])
 
 
-def _loaded() -> tuple[Path, Any] | Envelope:
-    from nyshporka.canon.check import load
+def _no_canon(env: Envelope) -> bool:
+    """Проєкт без канону — порожній стан із поясненням, а не відмова.
+
+    Щойно заведений проєкт канону ще не має, і екрани «Канон», «Гіпотези» й
+    Огляд показували на ньому червоне «Не вийшло» (прохід консолі 22.10.2026).
+    """
     from nyshporka.core import workspace as W
 
+    if W.workspace().canonical.is_dir():
+        return False
+    env.warn("no_canon", "канону в проєкті ще немає: теки data/canonical не існує. "
+                         "Засіяти можна з GEDCOM (`nysh canon import`) або першою "
+                         "карткою особи за скілом keep-canon")
+    return True
+
+
+def _loaded() -> tuple[Path, Any]:
+    from nyshporka.canon.check import load
+
     root = _root()
-    if not W.workspace().canonical.is_dir():
-        return fail("канону в проєкті немає (data/canonical)")
     return root, load(root)
 
 
@@ -214,10 +227,7 @@ class CardsArgs(BaseModel):
     args=CardsArgs, section="research", tier="situational", scope="project",
     skill="keep-canon", when="перелік карток канону — знайти особу чи родину за іменем")
 def canon_cards(a: CardsArgs) -> Envelope:
-    got = _loaded()
-    if isinstance(got, Envelope):
-        return got
-    root, canon = got
+    root, canon = _loaded()
     q = a.q.strip().casefold()
     rows: list[dict[str, Any]] = []
     for kind in ([a.kind] if a.kind else CARD_KINDS):
@@ -230,7 +240,9 @@ def canon_cards(a: CardsArgs) -> Envelope:
                          "facts": len(getattr(ent, "facts", None) or []),
                          "citations": _citations(ent),
                          "file": canon.files[eid].relative_to(root).as_posix()})
-    return ok({"counts": canon.counts(), "found": len(rows), "rows": rows[:a.limit]})
+    env = ok({"counts": canon.counts(), "found": len(rows), "rows": rows[:a.limit]})
+    _no_canon(env)
+    return env
 
 
 class CardArgs(BaseModel):
@@ -276,10 +288,7 @@ class HypsArgs(BaseModel):
 def canon_hyps(a: HypsArgs) -> Envelope:
     from nyshporka.canon.next import rank
 
-    got = _loaded()
-    if isinstance(got, Envelope):
-        return got
-    _, canon = got
+    _, canon = _loaded()
     counts = {s: sum(1 for h in canon.hypotheses.values() if h.status == s)
               for s in ("open", "awaiting", "closed")}
     rows = []
@@ -291,7 +300,9 @@ def canon_hyps(a: HypsArgs) -> Envelope:
                      "decides": d.decides, "weight": d.weight, "hits": len(d.hits),
                      "strong": any(x["strength"] == "strong" for x in d.hits),
                      "updated": h.updated.isoformat()})
-    return ok({"counts": counts, "rows": rows})
+    env = ok({"counts": counts, "rows": rows})
+    _no_canon(env)
+    return env
 
 
 @op("canon.hyp", summary="Одна гіпотеза: хіти з командою кропу, факти, що на неї чекають",
@@ -300,10 +311,7 @@ def canon_hyps(a: HypsArgs) -> Envelope:
 def canon_hyp(a: CardArgs) -> Envelope:
     from nyshporka.canon.next import rank
 
-    got = _loaded()
-    if isinstance(got, Envelope):
-        return got
-    root, canon = got
+    root, canon = _loaded()
     h = canon.hypotheses.get(a.id)
     if h is None:
         return fail(f"гіпотези «{a.id}» у каноні немає")
