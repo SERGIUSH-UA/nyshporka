@@ -687,8 +687,15 @@ details.jobs-done > summary { cursor: pointer; color: var(--fg-3); }
 .caps { display: inline-flex; gap: .35rem; white-space: nowrap; }
 
 /* Другий ряд фільтрів — під розкриттям; вибраний фільтр відкриває його сам. */
-details.more-filters { margin: .3rem 0 .6rem; }
-details.more-filters > summary { cursor: pointer; color: var(--fg-3); font-size: .9rem; }
+details.more-filters { margin: .3rem 0 .6rem; border: 0; background: none; padding: 0; }
+/* «Ще фільтри», «Точніше» — та сама пігулка, що й кнопка родини. */
+details.more-filters > summary { cursor: pointer; color: var(--fg-2); font-size: .88rem; display: inline-flex;
+  align-items: center; gap: .3rem; padding: .3rem .9rem; list-style: none; background: var(--s-3);
+  border: 1px solid var(--line-2); border-radius: var(--r-pill); }
+details.more-filters > summary::-webkit-details-marker { display: none; }
+details.more-filters > summary::before { content: "▸"; color: var(--fg-4); transition: transform var(--dur-1) var(--ease); }
+details.more-filters[open] > summary::before { transform: rotate(90deg); }
+details.more-filters[open] > summary { margin-bottom: .6rem; }
 
 /* Посилання — кольором теми, без підкреслення; підкреслення при наведенні.
    Доти в консолі для них не було правила, і посилання на плівки FS стояли
@@ -915,7 +922,11 @@ details.raw pre { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--f
   background: none; color: inherit; }
 #view .ov-row:hover { background: var(--s-2); }
 .ov-row > span:last-child { display: grid; gap: .15rem; min-width: 0; }
-.ov-feed { display: flex; gap: .7rem; padding: .35rem 0; border-bottom: 1px solid var(--line); font-size: .92rem; }
+/* Дата — однією колонкою й без переносу, назва — поруч: рядки стоять рівно
+   (дата «2026-10-21» ламалась на два рядки й зсувала назву). */
+.ov-feed { display: grid; grid-template-columns: 6.4rem minmax(0, 1fr); gap: .7rem; align-items: baseline;
+  padding: .4rem 0; border-bottom: 1px solid var(--line); font-size: .92rem; }
+.ov-feed > span:first-child { white-space: nowrap; }
 #view .ov-link { width: 100%; text-align: left; border: 0; border-bottom: 1px solid var(--line);
   border-radius: 0; background: none; padding: .35rem 0; color: inherit; font-weight: 400; }
 @media (max-width: 760px) {
@@ -1084,3 +1095,45 @@ details.pj-arch > summary { cursor: pointer; color: var(--fg-3); padding: .4rem 
   #dlg table.check-tbl tr { padding: .4rem 0; border-bottom: 1px solid var(--line); }
   #dlg table.check-tbl td { border: 0; padding: .1rem 0; }
 }
+
+/* ── Шліфування (порція 1, 22.10.2026) ─────────────────────────────────── */
+/* Коробки й ряди коробок не злипаються: між сусідніми — той самий проміжок,
+   що й усередині сітки (Канон: «Перевірка / Що вирішити» над переліком карток). */
+:is(.dash-box, .dash-two, .ov-cols, .ov-kpis, .tools, .tiles) + :is(.dash-box, .dash-two, .ov-cols) { margin-top: .9rem; }
+/* …але не всередині сітки: там проміжок дає сама сітка. */
+:is(.dash-two, .ov-cols) > :is(.dash-box, .dash-two, .ov-cols) { margin-top: 0; }
+/* Дія в рядку переліку — за вмістом, в один рядок («Що змінилось» в Історії). */
+.lrow > button { flex: none; white-space: nowrap; }
+/* Довге поле пошуку в ряду форми росте, а не обрізає підказку (Газетир). */
+.row > input.grow { flex: 1 1 24rem; }
+
+/* Чекбокс і перемикач — свої, у тонах консолі: рамка лінії, заливка акцентом,
+   галочка кольором напису на заливці. Системний квадратик випадав зі стилю. */
+:where(#view, #dlg, .hmenu-pop) :is(input[type=checkbox], input[type=radio]) {
+  appearance: none; -webkit-appearance: none; flex: none; margin: 0; width: 1.05rem; height: 1.05rem;
+  display: inline-grid; place-content: center; vertical-align: -.2em; cursor: pointer;
+  background: var(--s-1); border: 1.5px solid var(--line-4); border-radius: 5px;
+  transition: background-color var(--dur-1) var(--ease), border-color var(--dur-1) var(--ease); }
+:where(#view, #dlg, .hmenu-pop) input[type=radio] { border-radius: 50%; }
+:where(#view, #dlg, .hmenu-pop) :is(input[type=checkbox], input[type=radio])::before {
+  content: ""; width: .58rem; height: .58rem; transform: scale(0); background: var(--accent-ink);
+  transition: transform var(--dur-1) var(--ease); }
+:where(#view, #dlg, .hmenu-pop) input[type=checkbox]::before {
+  clip-path: polygon(14% 44%, 0 65%, 50% 100%, 100% 16%, 80% 0, 43% 62%); }
+:where(#view, #dlg, .hmenu-pop) input[type=radio]::before { border-radius: 50%; width: .45rem; height: .45rem; }
+:where(#view, #dlg, .hmenu-pop) :is(input[type=checkbox], input[type=radio]):checked {
+  background: var(--accent-fill); border-color: var(--accent-fill); }
+:where(#view, #dlg, .hmenu-pop) :is(input[type=checkbox], input[type=radio]):checked::before { transform: scale(1); }
+:where(#view, #dlg, .hmenu-pop) :is(input[type=checkbox], input[type=radio]):hover:not(:disabled) { border-color: var(--accent); }
+:where(#view, #dlg, .hmenu-pop) :is(input[type=checkbox], input[type=radio]):disabled { opacity: .45; cursor: not-allowed; }
+
+/* Меню Супряги: шапка з аватаркою, пояснення, пункти зі значком і підписом. */
+.hmenu-pop .hm-me { display: flex; gap: .6rem; align-items: center; padding: .5rem .6rem .3rem; }
+.hmenu-pop .hm-me > span:last-child { display: grid; gap: .1rem; }
+.hmenu-pop .hm-why { margin: .2rem .6rem .5rem; font-size: .8rem; color: var(--fg-3); line-height: 1.4; }
+.hmenu-pop > button.hm-item { display: grid; grid-template-columns: 1.3rem minmax(0, 1fr); gap: .6rem; align-items: start; }
+.hmenu-pop > button.hm-item .ic { margin-top: .2rem; color: var(--accent); }
+.hmenu-pop > button.hm-item > span { display: grid; gap: .1rem; }
+.hmenu-pop > button.hm-item small { white-space: normal; }
+.hmenu-pop .hm-link { gap: .6rem; align-items: center; color: var(--fg-2); }
+#me-menu { min-width: 19rem; }

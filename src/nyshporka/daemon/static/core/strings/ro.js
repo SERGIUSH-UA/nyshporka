@@ -1498,4 +1498,12 @@ export default {
     'load.site': 'Verific site-ul familiei…',
     'load.check': 'Verific mașina, până la un minut…',
     'lib.verdict.pick': '— alegeți decizia —',
+    'me.pool.why': 'Comunitatea este o colecție comună de dosare citite pe nyshporka.online: împărtășiți ce ați citit și luați ce au citit alți cercetători.',
+    'me.give': 'Dă în Comunitate',
+    'me.give.why': 'ce ați citit — pentru alți cercetători',
+    'me.take': 'Ia din Comunitate',
+    'me.take.why': 'ce au citit alții — în locul propriei rulări',
+    'me.cards.why': 'ce ați dat și cum arată în colecție',
+    'me.profile.why': 'numele în comunitate, contactul și acordul de partajare',
+    'me.consent': 'Partajare: {c}',
 };

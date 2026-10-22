@@ -1428,4 +1428,12 @@ export default {
     'load.site': 'Checking the family site…',
     'load.check': 'Checking the machine, up to a minute…',
     'lib.verdict.pick': '— choose a decision —',
+    'me.pool.why': 'The Commons is a shared pool of read cases on nyshporka.online: you share what you have read and take what other researchers have read.',
+    'me.give': 'Share to the Commons',
+    'me.give.why': 'what you have read, for other researchers',
+    'me.take': 'Take from the Commons',
+    'me.take.why': 'what others have read, instead of your own run',
+    'me.cards.why': 'what you have shared and how it looks in the pool',
+    'me.profile.why': 'your name in the community, contact and sharing consent',
+    'me.consent': 'Sharing: {c}',
 };

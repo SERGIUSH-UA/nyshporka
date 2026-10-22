@@ -1498,4 +1498,12 @@ export default {
     'load.site': 'Vérification du site de la famille…',
     'load.check': 'Vérification de la machine, jusqu’à une minute…',
     'lib.verdict.pick': '— choisissez une décision —',
+    'me.pool.why': 'Les Communs sont un fonds partagé de dossiers lus sur nyshporka.online : vous partagez ce que vous avez lu et prenez ce que d’autres chercheurs ont lu.',
+    'me.give': 'Partager aux Communs',
+    'me.give.why': 'ce que vous avez lu, pour d’autres chercheurs',
+    'me.take': 'Prendre aux Communs',
+    'me.take.why': 'ce que d’autres ont lu, au lieu de votre propre lecture',
+    'me.cards.why': 'ce que vous avez partagé et son aspect dans le fonds',
+    'me.profile.why': 'votre nom dans la communauté, contact et accord de partage',
+    'me.consent': 'Partage : {c}',
 };

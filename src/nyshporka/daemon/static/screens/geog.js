@@ -40,7 +40,7 @@ SCREENS.geog = async () => {
     <p class="muted">${t('geog.why')}</p>
     ${ok.length ? '' : `<div class="warn">${t('catalog.none')}</div>`}
     <form class="row" data-act="geog.find">
-      <input name="q" placeholder="${t('geog.q')}" autofocus>
+      <input name="q" class="grow" placeholder="${t('geog.q')}" autofocus>
       <select name="section">
         <option value="">${t('geog.section.all')}</option>
         <option value="church">${t('geog.section.church')}</option>

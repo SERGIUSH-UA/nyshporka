@@ -1498,4 +1498,12 @@ export default {
     'load.site': 'Prüfe die Familienseite…',
     'load.check': 'Prüfe den Rechner, bis zu einer Minute…',
     'lib.verdict.pick': '— Entscheidung wählen —',
+    'me.pool.why': 'Die Allmende ist ein gemeinsamer Pool gelesener Akten auf nyshporka.online: Sie teilen Ihr Gelesenes und nehmen, was andere Forschende gelesen haben.',
+    'me.give': 'In die Allmende geben',
+    'me.give.why': 'Ihr Gelesenes für andere Forschende',
+    'me.take': 'Aus der Allmende nehmen',
+    'me.take.why': 'von anderen Gelesenes statt eigenem Lauf',
+    'me.cards.why': 'was Sie geteilt haben und wie es im Pool aussieht',
+    'me.profile.why': 'Ihr Name in der Gemeinschaft, Kontakt und Freigabe-Zustimmung',
+    'me.consent': 'Weitergabe: {c}',
 };

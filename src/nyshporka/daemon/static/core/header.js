@@ -10,6 +10,7 @@ import { callOp, apiFetch } from './net.js';
 import { esc, el } from './view.js';
 import { ACTIONS, OP_SCREEN } from './registry.js';
 import { show, liveJobs, jobChip, jobDone } from './nav.js';
+import { ic } from '/ui/icons.js';
 import { openModal, closeModal, confirmAct } from './modal.js';
 import { renderWarnings } from './view.js';
 import { schemaFormHtml, schemaValues } from './schemaform.js';
@@ -135,19 +136,29 @@ function initials(handle) {
   return parts.slice(0, 2).map((w) => w[0].toUpperCase()).join('');
 }
 
+/**
+ * Меню Супряги: хто ви в спільноті й що з нею робити — з поясненням.
+ *
+ * 🔴 «Віддати» й «Взяти» без слова «Супряга» читались як дії над чимось
+ * своїм, і було незрозуміло, що це спільний пул (дослідник, 22.10.2026).
+ * Тому шапка меню каже, що таке Супряга, а кожен пункт — що він робить.
+ */
 function meMenu() {
   const m = ME || {};
-  return `<div class="hm-head"><b>${esc(m.handle || t('me.anon'))}</b>
-      <small>${esc(t('me.stats').replace('{p}', m.packed || 0).replace('{i}', m.taken || 0))}</small>
-      ${m.consent ? `<small>${esc(m.consent)}</small>` : ''}</div>
+  const item = (screen, icon, title, why) => `<button type="button" class="hm-item" data-act="nav"
+      data-arg="${screen}">${ic(icon, 'ic-o')}<span><b>${esc(t(title))}</b><small>${esc(t(why))}</small></span></button>`;
+  return `<div class="hm-head hm-me"><span class="avatar">${esc(initials(m.handle))}</span>
+      <span><b>${esc(m.handle || t('me.anon'))}</b>
+      <small>${esc(t('me.stats').replace('{p}', m.packed || 0).replace('{i}', m.taken || 0))}</small></span></div>
+    <p class="hm-why">${esc(t('me.pool.why'))}</p>
+    ${item('give', 'upload', 'me.give', 'me.give.why')}
+    ${item('pull', 'download', 'me.take', 'me.take.why')}
+    ${item('cards', 'tag', 'nav.cards', 'me.cards.why')}
     <div class="sep"></div>
-    <button type="button" data-act="nav" data-arg="give"><span>${t('nav.give')}</span></button>
-    <button type="button" data-act="nav" data-arg="pull"><span>${t('nav.pull')}</span></button>
-    <button type="button" data-act="nav" data-arg="cards"><span>${t('nav.cards')}</span></button>
-    <button type="button" data-act="nav" data-arg="sprofile"><span>${t('nav.sprofile')}</span></button>
-    <div class="sep"></div>
-    <a class="hm-link" href="https://nyshporka.online/" target="_blank" rel="noopener">${t('me.portal')}</a>
-    <button type="button" data-act="nav" data-arg="settings"><span>${t('sect.title')}</span></button>`;
+    ${item('sprofile', 'hand', 'nav.sprofile', 'me.profile.why')}
+    ${m.consent ? `<p class="hm-why">${esc(t('me.consent').replace('{c}', m.consent))}</p>` : ''}
+    <a class="hm-link" href="https://nyshporka.online/" target="_blank" rel="noopener">${ic('link', 'ic-o')}<span>${
+      t('me.portal')} ↗</span></a>`;
 }
 
 // ── «Що зробити?» ────────────────────────────────────────────────────────────

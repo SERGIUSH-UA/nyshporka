@@ -1498,4 +1498,12 @@ export default {
     'load.site': 'Sprawdzam stronę rodziny…',
     'load.check': 'Sprawdzam maszynę, do minuty…',
     'lib.verdict.pick': '— wybierz decyzję —',
+    'me.pool.why': 'Wspólnota to wspólna pula odczytanych spraw na nyshporka.online: dzielisz się odczytanym i bierzesz odczytane przez innych badaczy.',
+    'me.give': 'Oddaj do Wspólnoty',
+    'me.give.why': 'twoje odczytane — dla innych badaczy',
+    'me.take': 'Weź ze Wspólnoty',
+    'me.take.why': 'odczytane przez innych — zamiast własnego przebiegu',
+    'me.cards.why': 'co oddałeś i jak to wygląda w puli',
+    'me.profile.why': 'twoje imię we wspólnocie, kontakt i zgoda na udostępnianie',
+    'me.consent': 'Udostępnianie: {c}',
 };
