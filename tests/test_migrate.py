@@ -131,6 +131,49 @@ def test_scan_finds_a_stale_thesis_but_not_a_quoted_one(tmp_path: Path) -> None:
     assert all(h.now for h in hits)
 
 
+def test_scan_does_not_flag_unrelated_lines(tmp_path: Path) -> None:
+    """🔴 20.10.2026 «застарілі тези у рядках, що до них не стосуються»: корінь
+    ловився всередині чужого слова, а умови `(?=.*A)(?=.*B)` складались із
+    різних речень одного довгого рядка. Рядки — справжні, з пам'яті агента."""
+    note = tmp_path / "memory" / "note.md"
+    note.parent.mkdir()
+    clean = [
+        "Плюс `_reap_stale()`: шарди помирають слідом за консоллю (їхній stdout — "
+        "її pipe), але з затримкою ~15 с. Тому гард ставить паузу лише раз.",
+        "- Висновок: FP давити лише ДАНИМИ (hard-neg class1 → ретрейн), рев'ю = "
+        "чистий YOLO + око в консолі.",
+        "«вирізки Коваля зливай» — 31 справа Сміли, Умані, Звенигородки й Лисянки "
+        "в пулі (сегменти-вирізки, кожна під своєю шифрою).",
+        "Крім теки ф.230 (`1TNYT…`): `FONDY/0230/0230-02/` — Коваль виклав для нас 230-2-85.",
+        "- **НЕ приймати номер книги за парафію без читання посвяти.** У М'ястковці "
+        "1802 (спр.6809) було ДВІ церкви.",
+        "Вручну качати vc_redist не треба.",
+    ]
+    stale = [
+        "Консоль говорить лише двома мовами, uk/en.",
+        "Ключ справи — DAHMO/315/8433.",
+        "Резолвер справи не приймає шифру з позначками ф. 315 оп. 1 спр. 8433.",
+    ]
+    note.write_text("\n".join(clean + stale) + "\n", encoding="utf-8")
+    hits = M.scan([tmp_path / "memory"], M.load_all())
+    got = {(h.line, h.stale) for h in hits}
+    assert not [g for g in got if g[0] <= len(clean)], sorted(got)
+    n = len(clean)
+    assert {(n + 1, "console-two-languages"), (n + 2, "key-without-opys"),
+            (n + 3, "shifra-field-labels")} <= got, sorted(got)
+
+
+def test_a_root_inside_another_word_is_not_a_thesis() -> None:
+    import re
+
+    rule = re.compile(r"руш\w*[^.\n]{0,20}(?:ламає|падає)", re.IGNORECASE)
+    assert M._claims("Рушій ламає рядки.", rule)
+    assert not M._claims("Це порушити ламає все.", rule)
+    look = M._compile_stale(r"^(?=.*руш\w*)(?=.*ламає).+")
+    assert look.search("Рушій ламає рядки.")
+    assert not look.search("Це порушити ламає все.")
+
+
 def test_default_scan_reads_only_this_projects_memory(space: Path) -> None:
     import re
 

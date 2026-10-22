@@ -345,3 +345,18 @@ def test_a_second_folder_with_a_passport_gives_the_case_its_opys(space: Path) ->
     assert [e.key for e in got] == ["CDIAK/2/1/43"], [e.key for e in got]
     assert got[0].path == copy.relative_to(space).as_posix()
     assert got[0].shifra == "ЦДІАК 2-1-43"
+
+
+@pytest.mark.parametrize("arg", ["ДАДнО R-1234-15-20", "ДАДнО Р-1234-15-20",
+                                 "ДАДнО Р-1234 оп.15 спр.20", "DADNO/R-1234/15/20"])
+def test_cloud_go_finds_the_case_by_a_human_shifra(space: Path, arg: str) -> None:
+    """20.10.2026: `cloud go "ДАДнО R-1234-15-20"` відмовляв «ні справи з такою
+    шифрою», хоча `cases list` її знав: `go` розумів лише ключ."""
+    from nyshporka.cloud import go
+
+    d = _folder(space, "довідки_15_20")
+    R.describe(d, shifra="ДАДнО Р-1234-15-20", title="Довідки")
+    _rebuild()
+    ref = go.resolve_case(arg)
+    assert ref.key == "DADNO/R-1234/15/20"
+    assert ref.frames_dir == d

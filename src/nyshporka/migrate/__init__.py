@@ -79,6 +79,22 @@ def version_key(v: str) -> tuple[int, ...]:
     return tuple(parts)
 
 
+#: Умова «з початку слова» всередині кожної умови рядка `(?=.*…)`.
+_WORD_START_IN_LOOKAHEAD = r"(?=.*(?<!\w)"
+
+
+def _compile_stale(pattern: str) -> re.Pattern[str]:
+    r"""Шаблон тези: кожна умова `(?=.*…)` ловить лише з початку слова.
+
+    🔴 Шаблони пишуться коренями (`руш\w*`, `образ\w*`, `пул\w*`), і без межі
+    корінь ловився всередині чужого слова: «порушити», «зображення»,
+    «популярний» (лист 20.10.2026 — «застарілі тези» в рядках, що до них не
+    стосуються). Межу головного збігу перевіряє `scan`; умови рядка
+    перевірити ззовні не можна, тож межа дописується в них тут.
+    """
+    return re.compile(pattern.replace("(?=.*", _WORD_START_IN_LOOKAHEAD), re.IGNORECASE)
+
+
 def load_all() -> list[Migration]:
     out: list[Migration] = []
     for path in sorted(DATA.glob("*.md")):
@@ -88,7 +104,7 @@ def load_all() -> list[Migration]:
             version=str(meta["version"]),
             title=str(meta.get("title") or ""),
             body=post.content.strip(),
-            stale=[Stale(id=s["id"], pattern=re.compile(s["pattern"], re.IGNORECASE),
+            stale=[Stale(id=s["id"], pattern=_compile_stale(s["pattern"]),
                          now=s["now"]) for s in meta.get("stale") or []],
             steps=[Step(id=s["id"], do=s["do"], check=s.get("check", ""),
                         human=bool(s.get("human"))) for s in meta.get("steps") or []],
@@ -486,7 +502,38 @@ def scan(paths: Iterable[Path], migrations: Iterable[Migration]) -> list[Hit]:
             continue
         for no, line in enumerate(text.splitlines(), 1):
             for version, rule in rules:
-                if any(not _quoted(line, m.start()) for m in rule.pattern.finditer(line)):
+                if any(_claims(sentence, rule.pattern) for sentence in _sentences(line)):
                     hits.append(Hit(path=str(f), line=no, stale=rule.id,
                                     text=line.strip()[:200], now=rule.now, version=version))
     return hits
+
+
+#: Кінець речення: розділовий знак і пробіл; між ними може стояти закриття
+#: виділення чи лапки («…посвяти.** У…»). Крапка без пробілу («ф.315»,
+#: `text_store.sqlite`) речення не кінчає.
+_SENTENCE_END = re.compile(r"(?<=[.!?;])[*_»”\")\]]*\s+")
+
+
+def _sentences(line: str) -> list[str]:
+    """Рядок → речення. Теза — речення, а не рядок.
+
+    🔴 Рядок пам'яті буває абзацом на пів екрана, і правило «у рядку є і A, і
+    B» (`^(?=.*A)(?=.*B)`) спрацьовувало на A з першого речення й B з
+    п'ятого, які між собою не пов'язані.
+    """
+    return [s for s in _SENTENCE_END.split(line) if s.strip()]
+
+
+def _wordish(ch: str) -> bool:
+    return ch.isalnum() or ch == "_"
+
+
+def _claims(sentence: str, pattern: re.Pattern[str]) -> bool:
+    """Чи речення стверджує тезу: збіг з початку слова й не в лапках."""
+    for m in pattern.finditer(sentence):
+        start = m.start()
+        if start and _wordish(sentence[start - 1]) and _wordish(sentence[start]):
+            continue
+        if not _quoted(sentence, start):
+            return True
+    return False

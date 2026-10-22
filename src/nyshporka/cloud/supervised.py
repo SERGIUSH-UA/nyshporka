@@ -148,11 +148,11 @@ def _env(session: str, exe: str) -> dict[str, str]:
     return env
 
 
-def _run(cmd: list[str], *, env: dict[str, str],
-         capture: bool = False) -> subprocess.CompletedProcess[str]:
+def _run(cmd: list[str], *, env: dict[str, str], capture: bool = False,
+         timeout: float | None = None) -> subprocess.CompletedProcess[str]:
     return subprocess.run(cmd, env={**os.environ, **env}, text=True,
                           encoding="utf-8", errors="replace",
-                          capture_output=capture, check=False)
+                          capture_output=capture, check=False, timeout=timeout)
 
 
 # ── ассети ──────────────────────────────────────────────────────────────────
@@ -800,7 +800,7 @@ def prepare(convoy: Convoy, res: GoResult, say: Callable[..., None], *,
     # 4. передполіт: живі посилання й доступне сховище — ДО оренди. План для
     # кошторису його не проходить за побудовою: посилання ведуть у порожнечу.
     if staged:
-        _preflight(gr, plan_path, env)
+        _preflight(gr, plan_path, env, say)
 
     # 5. кошторис — у того самого наглядача, який потім спиниться на бюджеті
     dry = _run([*gr, "htr", "supervise", "--plan", str(plan_path),
@@ -830,7 +830,13 @@ def prepare(convoy: Convoy, res: GoResult, say: Callable[..., None], *,
     if est.quota:
         raise GoRefused(est.human(), verdict="search_quota")
     if est.empty:
-        raise GoRefused(est.human(), verdict="market_empty")
+        hint = ""
+        if printing and not plan.max_price_usd_h:
+            # 🖨 Друк уже пробує й домашні хости; лишається стеля ціни картки,
+            # яку знімає лише явне число людини (рішення дослідника 22.10.2026).
+            hint = (" Друк шукав і в датацентрах, і серед домашніх хостів. Підняти "
+                    "стелю ціни картки: `--max-price 0.6` (за замовчуванням $0.365/год).")
+        raise GoRefused(est.human() + hint, verdict="market_empty")
     delivery = payload.get("delivery")
     if isinstance(delivery, dict) and delivery.get("bytes"):
         res.estimate["delivery"] = delivery
@@ -887,12 +893,79 @@ def _check_engine(plan_path: Path) -> None:
             "Оновіть: `nysh update` (пакет оренди `gpuhire` ≥ 0.6.1) і повторіть.")
 
 
-def _preflight(gr: Sequence[str], plan_path: Path, env: dict[str, str]) -> None:
+#: Куди стукати, щоб дізнатись, чи є в машини мережа взагалі (TCP, без HTTP).
+NET_PROBE = ("1.1.1.1", 443)
+#: Скільки чекати, поки мережа повернеться, перед повтором кроку, с.
+NET_WAIT_SEC = 600.0
+NET_POLL_SEC = 15.0
+#: Спроб кроку доставки разом із першою.
+STAGE_ATTEMPTS = 3
+
+
+def _net_up(timeout: float = 5.0) -> bool:
+    """Чи є в цієї машини вихід у мережу. Лише TCP-з'єднання, без даних."""
+    import socket
+
+    try:
+        with socket.create_connection(NET_PROBE, timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
+def _wait_net(say: Callable[..., None]) -> bool:
+    """Дочекатись мережі (до `NET_WAIT_SEC`). True — є; False — не повернулась."""
+    if _net_up():
+        return True
+    say("plan", f"мережі немає — чекаю до {int(NET_WAIT_SEC // 60)} хв, поки повернеться; "
+                f"оренди ще не було")
+    deadline = time.monotonic() + NET_WAIT_SEC
+    while time.monotonic() < deadline:
+        time.sleep(NET_POLL_SEC)
+        if _net_up():
+            say("plan", "мережа є — повторюю")
+            return True
+    return False
+
+
+def _with_net_retry(step: Callable[[], bool], what: str,
+                    say: Callable[..., None]) -> bool:
+    """Крок доставки, що ходить у мережу, — з повтором на обрив.
+
+    🔴 20.10.2026: ноутбук вийшов з мережі, і друга черга партії не стартувала
+    з «план заходу не доставився», хоча повтор тієї самої команди все
+    дочитав. Повтор безпечний: план перебудовується, а залите раніше вдруге
+    не їде (`already_in_bucket`). Причину збою з виводу складача не вгадуємо —
+    питаємо саму мережу: її немає — чекаємо й повторюємо; є — ще одна спроба
+    на короткий обрив, а далі справжня відмова відмовляє, як і була.
+    Там, де мережу заборонено (`NYSHPORKA_NO_NETWORK`), — одна спроба.
+    """
+    from nyshporka.sources.http import offline
+
+    attempts = 1 if offline() else STAGE_ATTEMPTS
+    for attempt in range(1, attempts + 1):
+        if step():
+            return True
+        if attempt == attempts:
+            break
+        if not _wait_net(say):
+            say("plan", f"мережа не повернулась за {int(NET_WAIT_SEC // 60)} хв")
+            return False
+        say("plan", f"{what}: спроба {attempt + 1} з {STAGE_ATTEMPTS}")
+    return False
+
+
+def _preflight(gr: Sequence[str], plan_path: Path, env: dict[str, str],
+               say: Callable[..., None] | None = None) -> None:
     from nyshporka.cloud.go import GoRefused
 
-    if _run([*gr, "htr", "preflight", str(plan_path)], env=env).returncode:
+    def step() -> bool:
+        return not _run([*gr, "htr", "preflight", str(plan_path)], env=env).returncode
+
+    if not _with_net_retry(step, "передполіт", say or (lambda *_: None)):
         raise GoRefused("передполіт не пройшов (посилання або сховище) — "
-                        "див. вивід вище; оренди не було")
+                        "див. вивід вище; оренди не було. Якщо зникала мережа — "
+                        "повторіть ту саму команду: залите вдруге не їде")
 
 
 def stage(p: Prepared, convoy: Convoy, say: Callable[..., None]) -> Prepared:
@@ -909,13 +982,17 @@ def stage(p: Prepared, convoy: Convoy, say: Callable[..., None]) -> Prepared:
         return p
     say("plan", f"заливаємо кадри ({convoy.total_mb / 1000:.1f} ГБ) і ассети в "
                 f"сховище наглядача; залите раніше вдруге не їде")
-    p.plan_path.unlink(missing_ok=True)
-    if _run(list(p.plan_cmd), env=p.env).returncode or not p.plan_path.is_file():
+    def deliver() -> bool:
+        p.plan_path.unlink(missing_ok=True)
+        return not _run(list(p.plan_cmd), env=p.env).returncode and p.plan_path.is_file()
+
+    if not _with_net_retry(deliver, "доставка плану", say):
         raise GoRefused(f"план заходу не доставився — див. вивід вище; тека "
-                        f"{p.plan_path.parent}; оренди не було")
+                        f"{p.plan_path.parent}; оренди не було. Якщо зникала мережа — "
+                        f"повторіть ту саму команду: залите вдруге не їде")
     _check_engine(p.plan_path)
     _patch_plan(p.plan_path, convoy)
-    _preflight(p.gr, p.plan_path, p.env)
+    _preflight(p.gr, p.plan_path, p.env, say)
     return replace(p, staged=True)
 
 
@@ -1247,13 +1324,17 @@ def state_of(st: ST.RunState) -> dict[str, Any]:
     return state_of_session(st.supervisor)
 
 
-def state_of_session(session: str) -> dict[str, Any]:
+def state_of_session(session: str, *, timeout: float | None = None) -> dict[str, Any]:
     """Стан наглядача за ІМЕНЕМ сесії — незалежно від того, куди тепер вказує
-    запис справи (див. `batch.queue_states`)."""
+    запис справи (див. `batch.queue_states`).
+
+    `timeout` — для того, хто питає багатьох (`rent status`): вичерпаний дає
+    `subprocess.TimeoutExpired`, і викликач кладе захід у «спитати не вдалось».
+    """
     gr = gpurunner_cmd()
     done = _run([*gr, "htr", "state", "--session", session, "--json"],
                 env=_env(session, gr[0] if len(gr) == 1 else sys.executable),
-                capture=True)
+                capture=True, timeout=timeout)
     return _json_out(done.stdout or "")
 
 

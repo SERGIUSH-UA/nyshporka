@@ -902,6 +902,61 @@ def test_rent_status_admits_it_could_not_ask_who_owns_the_machine(
     assert res.run_id in got.output, "названо, ЯКИЙ захід лишився невідомим"
 
 
+def test_rent_status_does_not_ask_supervisors_when_nothing_strange_burns(
+        space: Path, monkeypatch, fake_gpurunner) -> None:
+    """🔴 20.10.2026 `rent status` «висів без виводу»: він питав наглядача про
+    КОЖЕН незакритий захід простору (тисячі після 130 тис. сторінок, ~1 с на
+    процес). Коли не горить нічого невпізнаного, питати нікого не треба."""
+    from typer.testing import CliRunner
+
+    from nyshporka.cloud import cli as C
+    from nyshporka.cloud import registry as REG
+
+    case, backend = _wire(space, monkeypatch)
+    backend.id = "vast"
+    monkeypatch.setattr(REG, "load", lambda: REG.Registry(backends={"vast": backend}))
+    _go(case)
+    backend.status_data["burning"] = []
+    asked: list[str] = []
+    monkeypatch.setattr(SUP, "state_of_session",
+                        lambda s, **kw: asked.append(s) or {})
+
+    got = CliRunner().invoke(C.app, ["rent", "status"])
+    assert "тарифікується: нічого" in got.output, got.output
+    assert asked == []
+
+
+def test_rent_status_survives_a_supervisor_that_never_answers(
+        space: Path, monkeypatch, fake_gpurunner) -> None:
+    """Наглядач, що не відповідає, — «спитати не вдалось», а не зависла команда."""
+    import subprocess
+
+    from typer.testing import CliRunner
+
+    from nyshporka.cloud import cli as C
+    from nyshporka.cloud import registry as REG
+
+    case, backend = _wire(space, monkeypatch)
+    backend.id = "vast"
+    monkeypatch.setattr(REG, "load", lambda: REG.Registry(backends={"vast": backend}))
+    res = _go(case)
+    backend.status_data["burning"] = [{"instance_id": "777", "dph_total": 0.16,
+                                       "label": "htr_case", "gpu_name": "V100",
+                                       "status": "running"}]
+    seen: list[float] = []
+
+    def hangs(session: str, *, timeout: float | None = None) -> dict[str, Any]:
+        seen.append(float(timeout or 0))
+        raise subprocess.TimeoutExpired(["gpurunner"], timeout or 0)
+
+    monkeypatch.setattr(SUP, "state_of_session", hangs)
+    got = CliRunner().invoke(C.app, ["rent", "status"])
+    assert seen and all(0 < t <= C.ASK_ONE_SUPERVISOR_SEC for t in seen), seen
+    assert "чиї машини — неповно" in got.output, got.output
+    assert res.run_id in got.output
+    assert got.exit_code == 3
+
+
 # ── параметри роботи, які їдуть на машину ────────────────────────────────────
 def test_the_script_of_the_plan_always_reaches_the_box(space: Path, monkeypatch,
                                                        fake_gpurunner) -> None:

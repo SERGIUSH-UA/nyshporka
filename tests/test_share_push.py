@@ -440,3 +440,30 @@ def test_sprava_segmentamy_viddaietsia_tekoiu(pul: Pul, monkeypatch: pytest.Monk
     assert row["segments"] == 2
     assert len(pul.sent) == 2 and all("~segments" in s for s in pul.sent)
     assert pul.packed[0]["by_part"] is True
+
+
+def test_replace_own_dokhodyt_do_zalyvky_ale_ne_do_pakuvannia(
+        pul: Pul, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Перечитане пачкою заступає свої внески, а не стає поруч (лист 20.10.2026)."""
+    kw_zalyvky: list[dict[str, Any]] = []
+    staryi = pul.publish
+
+    def publish(path: Path, **kw: Any) -> dict[str, Any]:
+        kw_zalyvky.append(kw)
+        return staryi(path, **kw)
+
+    monkeypatch.setattr(U, "publish", publish)
+    assert not _push(cases=["A/1/1"], replace_own=True).ok, "без причини"
+    env = _push(cases=["A/1/1", "A/1/2"], replace_own=True, why="перечитано v28")
+    assert env.ok, env.error
+    assert all(k["replace_own"] and k["why"] == "перечитано v28" for k in kw_zalyvky)
+    assert not [p for p in pul.packed if B.REPLACE_WHY in p], "у пакування не їде"
+
+
+def test_bez_replace_own_zalyvka_bez_zaminy(pul: Pul, monkeypatch: pytest.MonkeyPatch) -> None:
+    kw_zalyvky: list[dict[str, Any]] = []
+    staryi = pul.publish
+    monkeypatch.setattr(U, "publish",
+                        lambda path, **kw: kw_zalyvky.append(kw) or staryi(path, **kw))
+    assert _push(cases=["A/1/1"]).ok
+    assert kw_zalyvky and not kw_zalyvky[0].get("replace_own")

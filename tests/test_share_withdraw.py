@@ -181,3 +181,72 @@ def test_sync_chuzhyi_sait_ne_nomer_vnesku(pool: list[dict[str, Any]],
 
     monkeypatch.setattr(upload, "_request", _ne)
     assert O.call("share.sync", {}).ok
+
+
+# ── номер свого внеску (лист 20.10.2026) ─────────────────────────────────────
+
+def test_zamina_svoho_bez_nomera_ide_parametrom() -> None:
+    url = upload._adresa_reiestratsii("https://x/v1", None, "перечитано", True)
+    assert url.startswith("https://x/v1/contributions?replace_own=true&why=")
+
+
+def test_replace_own_bez_prychyny_i_z_nomerom_ne_ide(pool: list[dict[str, Any]]) -> None:
+    assert not O.call("share.publish", {"path": "x.nyshtext", "replace_own": True}).ok
+    env = O.call("share.publish", {"path": "x.nyshtext", "replace_own": True,
+                                   "replaces": 7, "why": "так"})
+    assert not env.ok and "не разом" in env.error
+
+
+def test_moi_vnesky_z_pulu_z_nomeramy_i_dubliamy(pool: list[dict[str, Any]],
+                                               monkeypatch: pytest.MonkeyPatch) -> None:
+    """Людина віддала перечитане новими внесками, бо номера старого не мала де взяти."""
+    storinky = {
+        "": {"items": [{"id": 30, "state": "chynnyi", "book": "dadno-r-1234-15-20",
+                        "shifra": "ДАДнО Р-1234-15-20", "pages": 40},
+                       {"id": 21, "state": "zamineno", "replaced_by": 22, "book": "b",
+                        "shifra": "ДАХмО 315-1-1", "pages": 3}],
+             "next_before": 21},
+        "?before=21": {"items": [{"id": 12, "state": "chynnyi", "book": "dadno-r-1234-15-20",
+                                  "shifra": "ДАДнО Р-1234-15-20", "pages": 38}],
+                       "next_before": None},
+    }
+
+    def fake(method: str, url: str, *, body: Any = None, auth: str = "") -> dict[str, Any]:
+        assert method == "GET" and auth == "t0k"
+        return storinky[url.split("/contributions/mine", 1)[1]]
+
+    monkeypatch.setattr(upload, "_request", fake)
+    env = O.call("share.list", {"what": "mine"})
+    assert env.ok and env.data["source"] == "pool"
+    rows = {r["id"]: r for r in env.data["rows"]}
+    assert set(rows) == {30, 21, 12}, "усі сторінки пулу"
+    assert rows[12]["duplicate_of"] == 30 and "duplicate_of" not in rows[30]
+    assert "duplicate_of" not in rows[21], "замінений — не дубль"
+    assert any(w.code == "duplicates" and "withdraw" in w.text for w in env.warnings)
+
+
+def test_moi_vnesky_bez_pulu_kazhut_shcho_tse_zhurnal(pool: list[dict[str, Any]],
+                                                    monkeypatch: pytest.MonkeyPatch) -> None:
+    journal.record(journal.PACKED, shifra="ДАХмО 315-1-8433", pages=4)
+
+    def _ne(*a: Any, **k: Any) -> dict[str, Any]:
+        raise upload.UploadError("обрив")
+
+    monkeypatch.setattr(upload, "_request", _ne)
+    env = O.call("share.list", {"what": "mine"})
+    assert env.ok and env.data["source"] == "journal" and env.data["count"] == 1
+    assert any(w.code == "pool_unreachable" for w in env.warnings)
+
+
+def test_viddanyi_vnesok_zapysano_v_zhurnal_z_nomerom(pool: list[dict[str, Any]],
+                                                     monkeypatch: pytest.MonkeyPatch,
+                                                     tmp_path: Path) -> None:
+    monkeypatch.setattr(upload, "_publish", lambda path, **kw: {
+        "contribution": 31, "outcome": "viddano", "book": "dadno-r-1234-15-20",
+        "shifra": "ДАДнО Р-1234-15-20", "replaces": 12})
+    upload.publish(tmp_path / "x.nyshtext")
+    (row,) = journal.read(journal.PUBLISHED)
+    assert row["contribution"] == 31 and row["replaces"] == 12
+    assert row["shifra"] == "ДАДнО Р-1234-15-20"
+    assert not [r for r in journal.read() if r.get("event") in journal.EXCHANGE], \
+        "заливка не рахується вдруге поруч із pack"
