@@ -104,8 +104,12 @@ _GATE_OPEN = frozenset({
     "/ui/img/logo.webp", "/ui/img/maskot-kliuch.webp",
     "/ui/img/favicon-32.png", "/ui/img/apple-touch-icon.png",
 })
-#: Шрифти — префіксом: файлів вісім, і всі вони публічні (OFL).
-_GATE_OPEN_PREFIXES = ("/brand/", "/ui/fonts/")
+#: Шрифти — префіксом: файлів вісім, і всі вони публічні (OFL). Словники
+#: перекладу — теж: `core/strings.js` імпортує їх, і без них сторінка допуску не
+#: запускалась — кнопка лише перезавантажувала форму, ключ не приймався ніде
+#: (телефон через Tailscale, 22.10.2026). Перелік звіряє
+#: `test_access_page_loads_every_module_it_imports`.
+_GATE_OPEN_PREFIXES = ("/brand/", "/ui/fonts/", "/static/core/strings/")
 
 #: Чи поточний запит прийшов мережевим з'єднанням. Ставлять ворота допуску;
 #: читають перевірка імені й `call_op`. Контекстна змінна, а не параметр

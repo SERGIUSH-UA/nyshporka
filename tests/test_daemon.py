@@ -414,6 +414,36 @@ def test_network_device_without_access_sees_only_the_gate(ws: Workspace) -> None
     assert lan.get("/ui/img/maskot-lupa.webp").status_code == 401
 
 
+def test_access_page_loads_every_module_it_imports(ws: Workspace) -> None:
+    """🔴 Сторінка допуску — модуль, і кожен її імпорт мусить пройти ворота.
+
+    `core/strings.js` розклали на словники `core/strings/*.js`, а ворота
+    відкривали лише сам `strings.js`: модулі падали з 401, сторінка не
+    запускалась, і кнопка лише перезавантажувала форму — ключ не приймався
+    ніде (телефон через Tailscale, 22.10.2026). Тут — увесь граф імпортів.
+    """
+    import re as _re
+
+    from nyshporka.daemon import app as A
+
+    static = Path(A.__file__).parent / "static"
+    lan = _lan(_lan_app(ws))
+    seen: set[Path] = set()
+    todo = [static / "access.js"]
+    while todo:
+        f = todo.pop().resolve()
+        if f in seen:
+            continue
+        seen.add(f)
+        url = "/static/" + f.relative_to(static.resolve()).as_posix()
+        assert lan.get(url).status_code == 200, f"ворота не пускають {url}"
+        for imp in _re.findall(r"""from\s+['"](\.[^'"]+)['"]|import\s+['"](\.[^'"]+)['"]""",
+                               f.read_text(encoding="utf-8")):
+            rel = imp[0] or imp[1]
+            todo.append((f.parent / rel).resolve())
+    assert len(seen) > 2, "граф імпортів сторінки допуску не прочитався"
+
+
 def test_websocket_from_a_network_device_is_closed(ws: Workspace) -> None:
     """Ворота стоять і перед websocket: `@app.middleware("http")` його пропускав би."""
     from starlette.testclient import WebSocketDenialResponse
